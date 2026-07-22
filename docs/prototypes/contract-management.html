@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>机构合同管理系统 · 静态视觉稿</title>
+    <link rel="stylesheet" href="../src/modules/platform/shared/styles/main.css" />
+    <link rel="stylesheet" href="../src/modules/contract_management/styles/contract-management.css" />
+    <style>
+      /* 该文件仅用于静态视觉验收；可运行交互位于 src/modules/contract_management。 */
+      .prototype-only { pointer-events: none; }
+      @media (max-width: 820px) { .prototype-static-sidebar { transform: none; } .prototype-static-main { margin-left: 270px; } }
+    </style>
+  </head>
+  <body>
+    <div class="contract-app prototype-only">
+      <aside class="contract-sidebar prototype-static-sidebar">
+        <div class="contract-brand">
+          <span class="contract-brand-mark"><svg viewBox="0 0 24 24" fill="none"><path d="M7.5 7.2 12 4.6l4.5 2.6v5.2L12 15l-4.5-2.6V7.2Z M7.5 12.4v4.4l4.5 2.6 4.5-2.6v-4.4M12 15v4.4" stroke="currentColor" stroke-width="1.8" /></svg></span>
+          <span><strong>机构合同管理</strong><small>CONTRACT HUB</small></span>
+        </div>
+        <nav class="contract-nav" aria-label="合同管理静态导航">
+          <section><p>业务中心</p><button class="active"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 4h7v7H4V4Zm9 0h7v7h-7V4ZM4 13h7v7H4v-7Zm9 0h7v7h-7v-7Z" /></svg><span>工作台</span></button><button><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 12a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9Zm0 2c-4.2 0-8 2.1-8 4.7V21h16v-2.3C20 16.1 16.2 14 12 14Z" /></svg><span>客户查询</span></button><button><svg viewBox="0 0 24 24" fill="currentColor"><path d="M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm0 3v2h14V7H5Zm3 5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5Z" /></svg><span>合同台账</span></button><button><svg viewBox="0 0 24 24" fill="currentColor"><path d="m9.2 16.6-4-4 1.4-1.4 2.6 2.6 8.2-8.2L18.8 7l-9.6 9.6Z" /></svg><span>合同模板</span></button></section>
+          <section><p>流程协同</p><button><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 1 3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4Zm-2 16-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8Z" /></svg><span>审批中心</span><i>3</i></button><button><svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 3h7v5H4V3Zm9 0h7v5h-7V3ZM9 10h6v4h5v7h-7v-5H11v5H4v-7h5v-4Z" /></svg><span>审批规则</span></button><button><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 4 5.5V11c0 5 3.4 9.6 8 11 4.6-1.4 8-6 8-11V5.5L12 2Z" /></svg><span>签署台账</span></button></section>
+          <section><p>数据分析</p><button><svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 4h7v7H4V4Zm9 0h7v7h-7V4ZM4 13h7v7H4v-7Zm9 0h7v7h-7v-7Z" /></svg><span>统计报表</span></button></section>
+          <section><p>平台能力</p><button><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 1 3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4Z" /></svg><span>审计日志</span><em>平台</em></button><button><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z" /></svg><span>系统设置</span><em>平台</em></button></section>
+        </nav>
+        <div class="contract-sidebar-user"><span class="contract-avatar">张</span><span><strong>张伟</strong><small>销售总监</small></span></div>
+      </aside>
+
+      <main class="contract-main prototype-static-main">
+        <header class="contract-topbar">
+          <div class="contract-breadcrumb"><span>合同管理系统</span><svg viewBox="0 0 24 24" fill="currentColor"><path d="m9 18 6-6-6-6-1.4 1.4 4.6 4.6-4.6 4.6L9 18Z" /></svg><strong>工作台</strong></div>
+          <label class="contract-global-search"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M10.8 4a6.8 6.8 0 1 0 4.3 12.1l4.4 4.4 1.4-1.4-4.4-4.4A6.8 6.8 0 0 0 10.8 4Zm0 2a4.8 4.8 0 1 1 0 9.6 4.8 4.8 0 0 1 0-9.6Z" /></svg><input placeholder="搜索合同 / 客户…" /></label>
+          <div class="contract-topbar-actions"><button class="contract-icon-button"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 22a2.3 2.3 0 0 0 2.2-1.7H9.8A2.3 2.3 0 0 0 12 22Zm7-5-1.8-2.1V10a5.3 5.3 0 0 0-10.4 0v4.9L5 17v1h14v-1Z" /></svg><i></i></button><span class="contract-topbar-avatar">张</span></div>
+        </header>
+        <section class="contract-content">
+          <header class="contract-page-head"><div><h1>工作台</h1><p>合同全生命周期概览与重点事项提醒</p></div><div class="contract-page-actions"><button class="contract-button primary">＋ 新建合同</button></div></header>
+          <section class="contract-welcome"><div><span>2026 年 7 月 22 日 · 星期三</span><h2>早上好，张伟</h2><p>今日有 <b>3 项审批</b>待处理，<b>2 份合同</b>等待签署。</p></div><button>查看我的待办 <svg viewBox="0 0 24 24" fill="currentColor"><path d="m9 18 6-6-6-6-1.4 1.4 4.6 4.6-4.6 4.6L9 18Z" /></svg></button></section>
+          <section class="contract-stat-grid">
+            <article class="blue"><span class="contract-stat-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M5 4h14v16H5z" /></svg></span><p>合同总额</p><strong>¥ 3,842<small>万</small></strong><em class="up">↑ 8.4% 较上月</em></article>
+            <article class="purple"><span class="contract-stat-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="m9.2 16.6-4-4 1.4-1.4 2.6 2.6 8.2-8.2L18.8 7l-9.6 9.6Z" /></svg></span><p>生效合同</p><strong>128<small>份</small></strong><em class="up">↑ 12 份 本月</em></article>
+            <article class="orange"><span class="contract-stat-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 1 3 5v6c0 5.5 3.8 10.7 9 12 5.2-1.3 9-6.5 9-12V5z" /></svg></span><p>待我审批</p><strong>3<small>项</small></strong><em>最早剩余 18 小时</em></article>
+            <article class="green"><span class="contract-stat-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 4 5.5V11c0 5 3.4 9.6 8 11 4.6-1.4 8-6 8-11V5.5Z" /></svg></span><p>本月回款</p><strong>¥ 286<small>万</small></strong><em class="up">达成率 76%</em></article>
+          </section>
+          <section class="contract-dashboard-grid">
+            <article class="contract-card contract-trend-card"><header><div><h3>合同金额趋势</h3><p>近 7 个月签约金额（万元）</p></div><span>2026 年</span></header><div class="contract-chart-y"><span>600</span><span>400</span><span>200</span><span>0</span></div><div class="contract-line-chart"><i></i><svg viewBox="0 0 700 240" preserveAspectRatio="none"><defs><linearGradient id="prototype-area" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2563eb" stop-opacity=".24"/><stop offset="1" stop-color="#2563eb" stop-opacity="0"/></linearGradient></defs><path fill="url(#prototype-area)" d="M12 170 L125 194 L238 120 L350 140 L462 84 L575 104 L688 48 L688 226 L12 226 Z"/><path class="line" d="M12 170 L125 194 L238 120 L350 140 L462 84 L575 104 L688 48"/><g><circle cx="12" cy="170" r="4"/><circle cx="125" cy="194" r="4"/><circle cx="238" cy="120" r="4"/><circle cx="350" cy="140" r="4"/><circle cx="462" cy="84" r="4"/><circle cx="575" cy="104" r="4"/><circle cx="688" cy="48" r="4"/></g></svg><div class="contract-chart-x"><span>1月</span><span>2月</span><span>3月</span><span>4月</span><span>5月</span><span>6月</span><span>7月</span></div></div></article>
+            <article class="contract-card contract-type-card"><header><div><h3>合同类型分布</h3><p>按当前有效合同统计</p></div></header><div class="contract-donut"><div><strong>128</strong><span>合同总数</span></div></div><ul><li><i class="blue"></i><span>标准服务</span><b>38%</b></li><li><i class="purple"></i><span>定制开发</span><b>25%</b></li><li><i class="green"></i><span>咨询服务</span><b>19%</b></li><li><i class="orange"></i><span>其他类型</span><b>18%</b></li></ul></article>
+            <article class="contract-card contract-todo-card"><header><div><h3>我的待办</h3><p>需要您关注的合同事项</p></div><button>查看全部</button></header><button><span class="contract-todo-icon">审</span><span><strong>云平台年度运维服务合同</strong><small>李明 · ¥ 86.0 万 · 技术总监审批</small></span><em>剩余 18 小时</em></button><button><span class="contract-todo-icon">审</span><span><strong>数据中心机柜租赁合同</strong><small>王芳 · ¥ 42.0 万 · 销售总监审批</small></span><em>剩余 31 小时</em></button><button><span class="contract-todo-icon">变</span><span><strong>ERP 系统实施与技术服务合同</strong><small>赵强 · ¥ 126.0 万 · 状态变更</small></span><em>剩余 46 小时</em></button></article>
+            <article class="contract-card contract-risk-card"><header><div><h3>关键提醒</h3><p>未来 30 天内需关注</p></div></header><div><span class="danger">7</span><p><strong>即将到期</strong><small>3 份合同需本周确认续签</small></p></div><div><span class="warning">5</span><p><strong>待回款节点</strong><small>应收金额共计 ¥ 192 万</small></p></div><div><span class="info">2</span><p><strong>签署逾期</strong><small>请联系对方经办人确认</small></p></div></article>
+          </section>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

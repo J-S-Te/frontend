@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import LoginView from '@/modules/platform/auth/views/LoginView.vue'
 import PlatformConsoleView from '@/modules/platform/views/PlatformConsoleView.vue'
 import SubsystemPortalView from '@/modules/platform/views/SubsystemPortalView.vue'
+import ContractManagementView from '@/modules/contract_management/views/ContractManagementView.vue'
 
 const settingsSections = new Set([
   'base',
@@ -52,6 +53,12 @@ const router = createRouter({
       name: 'audit',
       component: PlatformConsoleView,
       meta: { title: '审计日志' },
+    },
+    {
+      path: '/contract-management/:section?',
+      name: 'contract-management',
+      component: ContractManagementView,
+      meta: { title: '机构合同管理系统' },
     },
     {
       path: '/:pathMatch(.*)*',

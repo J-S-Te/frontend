@@ -6,7 +6,7 @@
 
 ## 当前状态
 
-当前仅保留模块目录和说明文件，尚未实现具体业务页面。后续由合同管理开发人员按照基础平台前端规范接入。
+已实现合同管理前端模块，入口路由为 `/contract-management/dashboard`。当前页面使用前端示例数据展示工作台、客户查询、合同台账、合同模板、审批中心、审批规则、签署台账及统计报表；审计日志和系统设置复用基础能力平台已有页面。
 
 ## 推荐结构
 
@@ -14,8 +14,8 @@
 contract_management/
 ├── api/          # 合同管理后端接口封装
 ├── components/   # 模块内部复用组件
-├── views/        # 路由级业务页面
-├── styles/       # 模块专属样式
+├── views/        # 路由级业务页面（当前入口 ContractManagementView.vue）
+├── styles/       # 模块专属样式（contract-management.css）
 ├── utils/        # 模块工具函数
 └── README.md
 ```
@@ -28,3 +28,4 @@ contract_management/
 - 新增路由时统一注册到 `src/router/index.js`，避免在组件中直接判断浏览器路径。
 - 通用组件优先复用 `src/modules/platform/shared/`，避免重复实现基础能力。
 - 业务操作应由后端执行权限校验并记录审计事件，前端权限控制仅用于界面展示。
+- `frontend/prototypes/contract-management.html` 仅作为静态视觉参考，不承载业务实现。
