@@ -9,9 +9,9 @@ import {
   listAuditRetentionTasks,
   replayAuditDeadLetter,
   replayAuditDeadLetters,
-} from '@/api/auditOperations'
-import ConsoleIcon from '@/components/ConsoleIcon.vue'
-import '@/styles/audit-operations.css'
+} from '@/modules/platform/audit/api/auditOperations'
+import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
+import '@/modules/platform/audit/styles/audit-operations.css'
 
 const emit = defineEmits(['toast'])
 const activePanel = ref('receipts')

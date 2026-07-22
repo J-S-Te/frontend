@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
-import ConsoleIcon from '@/components/ConsoleIcon.vue'
+import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import {
   FileTaskError,
   cancelAsyncJob,
@@ -11,8 +11,8 @@ import {
   rerunAsyncJob,
   retryAsyncJob,
   uploadLocalFile,
-} from '@/api/fileTasks'
-import '@/styles/file-task-operations.css'
+} from '@/modules/platform/files/api/fileTasks'
+import '@/modules/platform/files/styles/file-task-operations.css'
 
 const emit = defineEmits(['toast'])
 

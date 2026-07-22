@@ -1,7 +1,7 @@
 <script setup>
 import { computed, reactive, ref } from 'vue'
-import ConsoleIcon from '@/components/ConsoleIcon.vue'
-import '@/styles/iam-settings.css'
+import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
+import '@/modules/platform/iam/styles/iam-settings.css'
 
 const emit = defineEmits(['toast'])
 

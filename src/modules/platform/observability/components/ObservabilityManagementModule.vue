@@ -9,8 +9,8 @@ import {
   listRuntimeLogs,
   listTraceSpans,
   updateAlertRule,
-} from '@/api/observability'
-import '@/styles/observability-management.css'
+} from '@/modules/platform/observability/api/observability'
+import '@/modules/platform/observability/styles/observability-management.css'
 
 const emit = defineEmits(['toast'])
 

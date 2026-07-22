@@ -1,12 +1,12 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-import { createDingTalkQrSession, loginWithPassword, verifyMfaLogin } from '@/api/auth'
+import { createDingTalkQrSession, loginWithPassword, verifyMfaLogin } from '@/modules/platform/auth/api/auth'
 import {
   isDingTalkFrameRenderMode,
   mountDingTalkFrameLogin,
   normalizeDingTalkQrSDKConfig,
-} from '@/utils/dingtalkQr'
-import { resolveSameOriginRedirect, resolveServerApprovedRedirect } from '@/utils/navigation'
+} from '@/modules/platform/auth/utils/dingtalkQr'
+import { resolveSameOriginRedirect, resolveServerApprovedRedirect } from '@/modules/platform/auth/utils/navigation'
 
 const STORAGE_KEY = 'basic-platform.remembered-account'
 const LOGIN_SUCCESS_URL = import.meta.env.VITE_LOGIN_SUCCESS_URL || '/'

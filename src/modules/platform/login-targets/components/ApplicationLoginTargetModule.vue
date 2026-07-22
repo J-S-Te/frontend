@@ -1,13 +1,13 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
-import ConsoleIcon from '@/components/ConsoleIcon.vue'
+import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import {
   ApplicationLoginTargetError,
   createApplicationLoginTarget,
   listApplicationLoginTargets,
   updateApplicationLoginTarget,
-} from '@/api/loginTargets'
-import '@/styles/application-login-target.css'
+} from '@/modules/platform/login-targets/api/loginTargets'
+import '@/modules/platform/login-targets/styles/application-login-target.css'
 
 const props = defineProps({
   applicationId: { type: String, default: '' },

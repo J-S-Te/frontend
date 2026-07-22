@@ -1,7 +1,7 @@
 <script setup>
 import { computed } from 'vue'
-import LoginView from './views/LoginView.vue'
-import PlatformConsoleView from './views/PlatformConsoleView.vue'
+import LoginView from '@/modules/platform/auth/views/LoginView.vue'
+import PlatformConsoleView from '@/modules/platform/views/PlatformConsoleView.vue'
 
 const currentPath = computed(() => window.location.pathname.toLowerCase())
 const isLoginPage = computed(

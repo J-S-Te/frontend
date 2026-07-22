@@ -1,14 +1,14 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import ConsoleIcon from '@/components/ConsoleIcon.vue'
-import IamSettingsModule from '@/components/IamSettingsModule.vue'
-import SecurityObservabilityModule from '@/components/SecurityObservabilityModule.vue'
-import ApplicationLoginTargetModule from '@/components/ApplicationLoginTargetModule.vue'
-import NotificationCenterModule from '@/components/NotificationCenterModule.vue'
-import ObservabilityManagementModule from '@/components/ObservabilityManagementModule.vue'
-import AuditOperationsModule from '@/components/AuditOperationsModule.vue'
-import FileTaskOperationsModule from '@/components/FileTaskOperationsModule.vue'
-import '@/styles/console.css'
+import AuditOperationsModule from '@/modules/platform/audit/components/AuditOperationsModule.vue'
+import FileTaskOperationsModule from '@/modules/platform/files/components/FileTaskOperationsModule.vue'
+import IamSettingsModule from '@/modules/platform/iam/components/IamSettingsModule.vue'
+import ApplicationLoginTargetModule from '@/modules/platform/login-targets/components/ApplicationLoginTargetModule.vue'
+import NotificationCenterModule from '@/modules/platform/notifications/components/NotificationCenterModule.vue'
+import ObservabilityManagementModule from '@/modules/platform/observability/components/ObservabilityManagementModule.vue'
+import SecurityObservabilityModule from '@/modules/platform/security/components/SecurityObservabilityModule.vue'
+import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
+import '@/modules/platform/styles/console.css'
 
 const initialSettings = {
   organizationName: '基础能力平台',

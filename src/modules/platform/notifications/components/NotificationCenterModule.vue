@@ -1,7 +1,7 @@
 <script setup>
 import { onMounted, ref } from 'vue'
-import { getNotification, getUnreadCount, listInbox, markAllNotificationsRead, markNotificationRead } from '@/api/notifications'
-import '@/styles/notification-center.css'
+import { getNotification, getUnreadCount, listInbox, markAllNotificationsRead, markNotificationRead } from '@/modules/platform/notifications/api/notifications'
+import '@/modules/platform/notifications/styles/notification-center.css'
 const emit = defineEmits(['toast']); const items = ref([]); const unreadCount = ref(0); const loading = ref(false); const detail = ref(null); const error = ref('')
 async function refresh() { loading.value = true; error.value = ''; try { const [inbox, unread] = await Promise.all([listInbox(), getUnreadCount()]); items.value = inbox.items || []; unreadCount.value = unread.unread_count || 0 } catch (e) { error.value = e.message } finally { loading.value = false } }
 async function open(item) { try { detail.value = await getNotification(item.delivery_id); if (!detail.value.read_at) { detail.value = await markNotificationRead(item.delivery_id); unreadCount.value = Math.max(0, unreadCount.value - 1); const current = items.value.find((value) => value.delivery_id === item.delivery_id); if (current) current.read_at = detail.value.read_at } } catch (e) { emit('toast', e.message) } }
