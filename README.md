@@ -5,7 +5,7 @@
 ## 本地运行
 
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
@@ -42,8 +42,7 @@ Content-Type: application/json
 
 可复制 `.env.example` 为 `.env.local` 修改 API 地址和登录成功跳转地址。
 
-原始静态页面已备份到 `prototype/login.reference.html`。
-
+原始静态页面已归档到 `docs/prototypes/`。
 
 ## 当前页面范围
 
