@@ -124,6 +124,77 @@ export async function verifyMfaLogin({ code, preAuthenticationCredential = '' })
 }
 
 /**
+ * 读取当前浏览器会话对应的已认证主体。
+ *
+ * 服务端从 HttpOnly 会话 Cookie 中验证 JWT 和已持久化的会话状态；前端只消费
+ * `/auth/me` 返回的最小身份信息，不在浏览器存储中保存令牌。
+ */
+export async function getCurrentPrincipal() {
+  let response
+
+  try {
+    response = await fetch(`${API_BASE_URL}/auth/me`, {
+      method: 'GET',
+      credentials: 'include',
+      headers: {
+        Accept: 'application/json',
+      },
+    })
+  } catch {
+    throw new AuthError('无法读取当前登录用户信息，请确认后端服务已启动。', {
+      code: 'NETWORK_ERROR',
+    })
+  }
+
+  const body = await readResponseBody(response)
+
+  if (!response.ok) {
+    throw new AuthError(body.message || body.msg || '当前登录状态已失效，请重新登录。', {
+      status: response.status,
+      code: body.code,
+      traceId: body.trace_id || body.traceId,
+    })
+  }
+
+  return body.data
+}
+
+/**
+ * 退出当前应用系统。
+ *
+ * 后端撤销服务端会话并写入过期的 HttpOnly Cookie；前端不直接删除或处理 JWT。
+ */
+export async function logoutCurrentSession() {
+  let response
+
+  try {
+    response = await fetch(`${API_BASE_URL}/auth/logout`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        Accept: 'application/json',
+      },
+    })
+  } catch {
+    throw new AuthError('无法连接退出登录服务，请稍后重试。', {
+      code: 'NETWORK_ERROR',
+    })
+  }
+
+  const body = await readResponseBody(response)
+
+  if (!response.ok) {
+    throw new AuthError(body.message || body.msg || '退出登录失败，请稍后重试。', {
+      status: response.status,
+      code: body.code,
+      traceId: body.trace_id || body.traceId,
+    })
+  }
+
+  return body.data
+}
+
+/**
  * 创建钉钉扫码登录会话。
  *
  * 后端仅返回短期扫码会话和官方 DTFrameLogin SDK 所需的浏览器安全配置；

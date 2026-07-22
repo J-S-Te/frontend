@@ -1,5 +1,6 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import AuditOperationsModule from '@/modules/platform/audit/components/AuditOperationsModule.vue'
 import FileTaskOperationsModule from '@/modules/platform/files/components/FileTaskOperationsModule.vue'
 import IamSettingsModule from '@/modules/platform/iam/components/IamSettingsModule.vue'
@@ -15,9 +16,10 @@ const initialSettings = {
   organizationAlias: '基础平台',
 }
 
+const route = useRoute()
+const router = useRouter()
 const settings = reactive({ ...initialSettings })
-const currentView = ref(resolveView(window.location.pathname))
-const activeSettingsTab = ref('iam')
+const currentView = computed(() => (route.name === 'audit' ? 'audit' : 'settings'))
 const loginTargetBoundary = reactive({ applicationId: '', environmentId: '', applicationName: '', environmentName: '' })
 const mobileMenuOpen = ref(false)
 const toastMessage = ref('')
@@ -44,6 +46,24 @@ const settingsTabs = [
   { key: 'files', label: '文件与任务' },
   { key: 'dict', label: '字典管理' },
 ]
+
+const settingsSectionKeys = new Set(settingsTabs.map((tab) => tab.key))
+const lastSettingsSection = ref('iam')
+const activeSettingsTab = computed({
+  get() {
+    const section = typeof route.params.section === 'string' ? route.params.section : ''
+    return settingsSectionKeys.has(section) ? section : lastSettingsSection.value
+  },
+  set(section) {
+    if (!settingsSectionKeys.has(section)) {
+      return
+    }
+    lastSettingsSection.value = section
+    if (route.name !== 'settings' || section !== route.params.section) {
+      router.push({ name: 'settings', params: { section } })
+    }
+  },
+})
 
 const auditRecords = reactive([
   { id: 'evt_01J0A3KQ9ZP8R2N7AE01', time: '2026-07-16 10:18:42', operator: '审计专员', type: '登录', application: '基础能力平台', environment: 'production', object: '统一认证服务', resource: 'account', action: 'login', method: 'POST', path: '/api/v1/auth/login', ip: '10.12.39.18', statusCode: 423, result: '拒绝', risk: '高', userAgent: 'Chrome 140 / macOS', detail: '登录失败达到锁定阈值，账号已锁定 15 分钟。', changeSummary: 'login_failure_records +1；account.locked_until 更新。' },
@@ -95,18 +115,15 @@ const viewMeta = computed(() => {
   return { title: '系统设置', crumb: '系统设置', description: 'SYS-001 · 平台级参数、通知与安全策略集中配置' }
 })
 
-function resolveView(pathname) {
-  return pathname.toLowerCase().startsWith('/audit') ? 'audit' : 'settings'
-}
-
 function navigate(view) {
-  const targetPath = view === 'audit' ? '/audit' : '/'
-  if (window.location.pathname !== targetPath) {
-    window.history.pushState({}, '', targetPath)
+  const target = view === 'audit'
+    ? { name: 'audit' }
+    : { name: 'settings', params: { section: activeSettingsTab.value } }
+
+  if (route.name !== target.name) {
+    router.push(target)
   }
-  currentView.value = view
   mobileMenuOpen.value = false
-  window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
 function showToast(message) {
@@ -208,11 +225,7 @@ function exportAuditRecords() {
 }
 
 function logout() {
-  window.location.assign('/login.html')
-}
-
-function handlePopState() {
-  currentView.value = resolveView(window.location.pathname)
+  router.push({ name: 'login' })
 }
 
 watch([auditKeyword, auditType, auditRisk, auditApplication, auditEnvironment, auditResult, auditTimeRange], () => {
@@ -220,17 +233,17 @@ watch([auditKeyword, auditType, auditRisk, auditApplication, auditEnvironment, a
   selectedAuditIds.value = []
 })
 
+watch(() => route.params.section, (section) => {
+  if (route.name === 'settings' && typeof section === 'string' && settingsSectionKeys.has(section)) {
+    lastSettingsSection.value = section
+  }
+}, { immediate: true })
+
 watch([currentView, activeSettingsTab], () => {
   document.title = `${viewMeta.value.title} · 基础能力平台`
-})
-
-onMounted(() => {
-  document.title = `${viewMeta.value.title} · 基础能力平台`
-  window.addEventListener('popstate', handlePopState)
-})
+}, { immediate: true })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('popstate', handlePopState)
   if (toastTimer) {
     window.clearTimeout(toastTimer)
   }
