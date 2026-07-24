@@ -76,6 +76,11 @@ function openEditEditor(target) {
   editorOpen.value = true
 }
 
+// 后端 loginTargetResponse 使用 login_target_id 作为主键；这里集中取一次以免模板里散落。
+function targetID(target) {
+  return target?.login_target_id || target?.id || ''
+}
+
 function closeEditor() {
   if (submitting.value) return
   editorOpen.value = false
@@ -139,7 +144,7 @@ async function submitEditor() {
       await updateApplicationLoginTarget({
         applicationId: props.applicationId,
         environmentId: props.environmentId,
-        loginTargetId: editingTarget.value.id,
+        loginTargetId: targetID(editingTarget.value),
         name: form.name.trim(),
         targetUri: form.targetUri.trim(),
         status: form.status,
@@ -245,7 +250,7 @@ watch(
               <tr v-else-if="!targets.length">
                 <td colspan="6" class="login-target-module__state">当前应用环境尚未登记登录目标。</td>
               </tr>
-              <tr v-for="target in targets" :key="target.id">
+              <tr v-for="target in targets" :key="targetID(target)">
                 <td><code>{{ target.target_code }}</code></td>
                 <td>{{ target.name }}</td>
                 <td class="login-target-module__uri"><code>{{ target.target_uri }}</code></td>
