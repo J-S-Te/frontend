@@ -1,4 +1,4 @@
-import { AuthError, getCurrentPrincipal, logoutCurrentSession } from '@/modules/platform/auth/api/auth'
+import { AuthError, logoutCurrentSession, recordSessionActivity } from '@/modules/platform/auth/api/auth'
 
 const SESSION_EVENT = 'platform-auth:session-ended'
 const SESSION_CHANNEL = 'basic-platform-auth'
@@ -23,8 +23,8 @@ function notifySessionEnded(reason = 'logout') {
 
 /**
  * Coordinates browser-side inactivity feedback for every route in this SPA. Server-side session
- * revocation remains authoritative: this helper merely provides immediate user feedback and sends
- * periodic authenticated activity touches while the user is actively interacting.
+ * revocation remains authoritative: this helper provides immediate user feedback and sends a
+ * throttled activity signal only after real user interaction, never after background API traffic.
  */
 export function createSessionLifecycle({ onSessionEnded, onSessionError } = {}) {
   let idleTimer = 0
@@ -73,7 +73,7 @@ export function createSessionLifecycle({ onSessionEnded, onSessionError } = {}) 
     if (stopped || Date.now() - lastServerTouchAt < SERVER_TOUCH_INTERVAL_MS) return
     lastServerTouchAt = Date.now()
     try {
-      const principal = await getCurrentPrincipal()
+      const principal = await recordSessionActivity()
       timeoutSeconds = normalizeTimeout(principal?.idle_timeout_seconds)
     } catch (error) {
       if (error instanceof AuthError && error.status === 401) {

@@ -703,7 +703,7 @@ async function saveEditor() {
         scopeId,
         expiresAt: resolveExpiresAt(form.expires_at),
       })
-      successMessage = '角色绑定已写入 MySQL。组织和岗位主体的实际授权仍需后端权限计算支持。'
+      successMessage = '角色绑定已保存；用户、账号、组织和岗位主体会按任职关系、授权范围与有效期参与实际权限计算。'
       await loadBindings()
     } else if (kind === 'external-identity') {
       if (!form.user_id || !form.provider_code || !String(form.external_subject || '').trim()) {

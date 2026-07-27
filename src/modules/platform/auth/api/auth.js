@@ -116,6 +116,42 @@ export async function getCurrentPrincipal() {
 }
 
 /**
+ * 上报一次由用户直接触发的浏览器活动。
+ *
+ * 该端点仅在点击、按键、滚动或触摸后被会话生命周期模块调用；常规接口请求、
+ * 自动刷新和轮询都不会调用它，因此不会错误地延长无操作退出时间。
+ */
+export async function recordSessionActivity() {
+  let response
+
+  try {
+    response = await fetch(`${API_BASE_URL}/auth/activity`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        Accept: 'application/json',
+      },
+    })
+  } catch {
+    throw new AuthError('无法记录用户活动，请确认后端服务已启动。', {
+      code: 'NETWORK_ERROR',
+    })
+  }
+
+  const body = await readResponseBody(response)
+
+  if (!response.ok) {
+    throw new AuthError(body.message || body.msg || '当前登录状态已失效，请重新登录。', {
+      status: response.status,
+      code: body.code,
+      traceId: body.request_id || body.trace_id || body.traceId,
+    })
+  }
+
+  return body.data
+}
+
+/**
  * 退出所有应用系统。
  *
  * 后端会撤销当前账号在租户下的全部服务端会话并写入过期的 HttpOnly Cookie；
