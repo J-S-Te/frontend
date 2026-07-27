@@ -10,6 +10,8 @@ import {
   createUser,
   listUserExternalIdentities,
   listUsers,
+  resetAccountPassword,
+  updateAccountStatus,
   unbindUserExternalIdentity,
 } from './iam.js'
 
@@ -66,6 +68,7 @@ test('createLocalAccount calls the account endpoint with the backend field names
     userId: 'user-1',
     accountName: 'zhangsan',
     initialPassword: 'Temporary-Password-1',
+    validUntil: '2026-07-28T09:30:00.000Z',
   })
 
   assert.equal(requested.url, '/api/v1/accounts')
@@ -73,6 +76,7 @@ test('createLocalAccount calls the account endpoint with the backend field names
     user_id: 'user-1',
     account_name: 'zhangsan',
     initial_password: 'Temporary-Password-1',
+    valid_until: '2026-07-28T09:30:00.000Z',
   })
 })
 
@@ -194,4 +198,38 @@ test('external identity APIs use the documented user-scoped routes and optimisti
   assert.equal(requests[2].url, '/api/v1/users/user%20%2F%201/external-identities/binding%20%2F%201')
   assert.equal(requests[2].options.method, 'DELETE')
   assert.deepEqual(JSON.parse(requests[2].options.body), { version: 3 })
+})
+
+
+test('resetAccountPassword posts the optimistic-lock version and returns the one-time temporary password', async () => {
+  let requested
+  globalThis.fetch = async (url, options) => {
+    requested = { url, options }
+    return jsonResponse({ data: { account_id: 'account-1', temporary_password: 'OneTime-Password-1' } })
+  }
+
+  const result = await resetAccountPassword({ accountId: 'account / 1', version: 7 })
+
+  assert.deepEqual(result, { account_id: 'account-1', temporary_password: 'OneTime-Password-1' })
+  assert.equal(requested.url, '/api/v1/accounts/account%20%2F%201/password/reset')
+  assert.equal(requested.options.method, 'POST')
+  assert.equal(requested.options.credentials, 'include')
+  assert.deepEqual(JSON.parse(requested.options.body), { version: 7 })
+})
+
+
+test('updateAccountStatus sends the target status with the optimistic-lock version', async () => {
+  let requested
+  globalThis.fetch = async (url, options) => {
+    requested = { url, options }
+    return jsonResponse({ data: { account_id: 'account-1', status: 'DISABLED', version: 8 } })
+  }
+
+  const result = await updateAccountStatus({ accountId: 'account / 1', status: 'DISABLED', version: 7 })
+
+  assert.deepEqual(result, { account_id: 'account-1', status: 'DISABLED', version: 8 })
+  assert.equal(requested.url, '/api/v1/accounts/account%20%2F%201')
+  assert.equal(requested.options.method, 'PATCH')
+  assert.equal(requested.options.credentials, 'include')
+  assert.deepEqual(JSON.parse(requested.options.body), { status: 'DISABLED', version: 7 })
 })

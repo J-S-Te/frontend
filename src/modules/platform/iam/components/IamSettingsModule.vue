@@ -77,6 +77,7 @@ const temporaryPassword = ref(null)
 const userDeletionDialog = ref(null)
 const resettingPassword = ref(false)
 const deletingUser = ref(false)
+const updatingAccountId = ref('')
 
 const panels = [
   { key: 'users', label: '用户', icon: 'user', description: '自然人主体、任职状态与跨系统统一用户标识' },
@@ -96,7 +97,7 @@ const panel = computed(() => panels.find((item) => item.key === activePanel.valu
 
 const metrics = computed(() => [
   { label: '有效用户', value: pagination.users.total, note: '服务端分页总数 /api/v1/users', icon: 'user', tone: 'blue' },
-  { label: '正常账号', value: pagination.accounts.total, note: '服务端分页总数 /api/v1/accounts', icon: 'account', tone: 'violet' },
+  { label: '登录账号', value: pagination.accounts.total, note: '服务端分页总数（含停用账号）/api/v1/accounts', icon: 'account', tone: 'violet' },
   { label: '有效组织', value: pagination.organizations.total, note: '服务端分页总数 /api/v1/org-units', icon: 'organization', tone: 'green' },
   { label: '任职关系', value: pagination.memberships.total, note: '服务端分页总数 /api/v1/memberships', icon: 'link', tone: 'orange' },
 ])
@@ -189,7 +190,7 @@ async function loadUsers(page = pagination.users.page) {
 }
 
 async function loadAccounts(page = pagination.accounts.page) {
-  const data = await safeCall('accounts', () => listAccounts({ page, pageSize, keyword: filters.account, status: 'ACTIVE' }))
+  const data = await safeCall('accounts', () => listAccounts({ page, pageSize, keyword: filters.account }))
   if (data) updatePage('accounts', data, accounts)
 }
 
@@ -286,15 +287,27 @@ watch(selectedExternalIdentityUserId, () => {
   if (activePanel.value === 'external-identities') loadExternalIdentities()
 })
 
+function isAccountStatusManageable(status) {
+  return ['ACTIVE', 'DISABLED'].includes(String(status || '').toUpperCase())
+}
+
 async function toggleAccountStatus(account) {
-  if (!account || !account.account_id) return
-  const next = (account.status || '').toUpperCase() === 'ACTIVE' ? 'DISABLED' : 'ACTIVE'
+  if (!account?.account_id || !isAccountStatusManageable(account.status) || updatingAccountId.value) return
+  const version = Number(account.version)
+  if (!Number.isInteger(version) || version < 1) {
+    emitToast('账号版本信息无效，请刷新列表后重试。')
+    return
+  }
+  const next = String(account.status).toUpperCase() === 'ACTIVE' ? 'DISABLED' : 'ACTIVE'
+  updatingAccountId.value = account.account_id
   try {
-    const updated = await updateAccountStatus({ accountId: account.account_id, status: next, version: account.version || 0 })
+    const updated = await updateAccountStatus({ accountId: account.account_id, status: next, version })
     Object.assign(account, updated)
-    emitToast(`账号状态已切换为 ${displayStatus(next)}。`)
+    emitToast(`账号已${next === 'ACTIVE' ? '启用' : '停用'}。`)
   } catch (error) {
     emitToast(error.message || '账号状态更新失败。')
+  } finally {
+    updatingAccountId.value = ''
   }
 }
 
@@ -403,12 +416,13 @@ async function confirmUserDeletion() {
 const editor = ref(null) // { kind, label }
 const form = reactive({})
 const saving = ref(false)
+const initialPasswordVisible = ref(false)
 const resources = ref([])
 
 const editorTemplates = {
   user: () => ({ display_name: '', email: '', mobile: '', status: 'ACTIVE' }),
   'user-batch': () => ({ rows: '', status: 'ACTIVE' }),
-  account: () => ({ account_name: '', user_id: '', initial_password: '' }),
+  account: () => ({ account_name: '', user_id: '', initial_password: '', validity_mode: 'TEMPORARY', valid_until: defaultAccountValidUntil() }),
   organization: () => ({ name: '', parent_id: '', sort_order: 0 }),
   position: () => ({ org_unit_id: '', name: '' }),
   membership: () => ({ user_id: '', org_unit_id: '', position_id: '', membership_type: 'PRIMARY', validity_mode: 'LONG_TERM', effective_from: '', effective_to: '' }),
@@ -455,6 +469,7 @@ function openEditor(kind) {
     return
   }
   Object.keys(form).forEach((key) => delete form[key])
+  initialPasswordVisible.value = false
   Object.assign(form, editorTemplates[kind]())
   editor.value = { kind, label: editorLabels[kind] }
 
@@ -488,6 +503,7 @@ function openEditorForActivePanel() {
 
 function closeEditor() {
   editor.value = null
+  initialPasswordVisible.value = false
   saving.value = false
 }
 
@@ -501,6 +517,12 @@ async function removeExternalIdentity(binding) {
   } catch (error) {
     emitToast(error instanceof IamError ? error.message : (error?.message || '解绑外部身份失败。'))
   }
+}
+
+function defaultAccountValidUntil() {
+  const date = new Date(Date.now() + 24 * 60 * 60 * 1000)
+  const localOffset = date.getTimezoneOffset() * 60 * 1000
+  return new Date(date.getTime() - localOffset).toISOString().slice(0, 16)
 }
 
 function resolveExpiresAt(value) {
@@ -604,10 +626,15 @@ async function saveEditor() {
     } else if (kind === 'account') {
       const accountInput = validateLocalAccountInput(form.account_name, form.initial_password)
       if (!form.user_id) throw new IamError('请选择关联用户；当前接口只创建个人本地账号。')
+      const validUntil = form.validity_mode === 'PERMANENT' ? null : resolveExpiresAt(form.valid_until)
+      if (form.validity_mode !== 'PERMANENT' && (!validUntil || new Date(validUntil).getTime() <= Date.now())) {
+        throw new IamError('临时账号的有效截止时间必须晚于当前时间。')
+      }
       result = await createLocalAccount({
         userId: form.user_id,
         accountName: accountInput.accountName,
         initialPassword: accountInput.password,
+        validUntil,
       })
       successMessage = `账号 ${result?.account_name || form.account_name} 已写入 MySQL。`
       await loadAccounts()
@@ -769,10 +796,10 @@ onMounted(async () => {
 
         <section v-else-if="activePanel === 'accounts'" class="iam-table-section">
           <div class="iam-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="filters.account" type="search" placeholder="账号 / 用户 ID / 状态" /></label><span>{{ filteredAccounts.length }} / 共 {{ pagination.accounts.total }} 个账号</span></div>
-          <div class="console-table-card"><div class="console-table-scroll"><table class="console-data-table iam-data-table"><thead><tr><th>账号</th><th>关联用户</th><th>账号类型 / 认证方式</th><th>状态</th><th>更新时间</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
-            <tr v-if="loading.accounts"><td class="console-empty" colspan="6">正在读取账号…</td></tr>
-            <tr v-else-if="!filteredAccounts.length"><td class="console-empty" colspan="6">暂无账号记录。</td></tr>
-            <tr v-for="item in filteredAccounts" :key="item.account_id"><td><strong>{{ item.account_name }}</strong><span class="console-entity-meta console-mono">{{ item.account_id }}</span></td><td class="console-mono">{{ item.user_id || '—' }}</td><td>{{ displayLoginAccountType(item) }}</td><td><span class="console-badge" :class="(item.status || '').toUpperCase() === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(item.status) }}</span></td><td class="console-mono">{{ formatDateTime(item.updated_at) }}</td><td class="console-actions-cell"><button class="console-text-button" type="button" @click="openDetail('account', item)">详情</button></td></tr>
+          <div class="console-table-card"><div class="console-table-scroll"><table class="console-data-table iam-data-table"><thead><tr><th>账号</th><th>关联用户</th><th>账号类型 / 认证方式</th><th>有效期</th><th>状态</th><th>更新时间</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
+            <tr v-if="loading.accounts"><td class="console-empty" colspan="7">正在读取账号…</td></tr>
+            <tr v-else-if="!filteredAccounts.length"><td class="console-empty" colspan="7">暂无账号记录。</td></tr>
+            <tr v-for="item in filteredAccounts" :key="item.account_id"><td><strong>{{ item.account_name }}</strong><span class="console-entity-meta console-mono">{{ item.account_id }}</span></td><td class="console-mono">{{ item.user_id || '—' }}</td><td>{{ displayLoginAccountType(item) }}</td><td>{{ item.valid_until ? formatDateTime(item.valid_until) : '永久' }}</td><td><span class="console-badge" :class="(item.status || '').toUpperCase() === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(item.status) }}</span></td><td class="console-mono">{{ formatDateTime(item.updated_at) }}</td><td class="console-actions-cell"><button class="console-text-button" type="button" @click="openDetail('account', item)">详情</button><button v-if="isAccountStatusManageable(item.status)" class="console-text-button" :class="{ danger: (item.status || '').toUpperCase() === 'ACTIVE' }" type="button" :disabled="updatingAccountId === item.account_id" @click="toggleAccountStatus(item)">{{ updatingAccountId === item.account_id ? '处理中…' : ((item.status || '').toUpperCase() === 'ACTIVE' ? '停用' : '启用') }}</button><button class="console-text-button danger" type="button" @click="openPasswordResetForAccount(item)">重置密码</button></td></tr>
           </tbody></table></div></div>
         </section>
 
@@ -917,7 +944,9 @@ onMounted(async () => {
               </select>
             </label>
             <label><span>账号类型</span><input value="个人账号 / 本地密码" disabled /><small class="iam-field-help">当前新增接口创建个人本地账号，使用账号名和密码登录。</small></label>
-            <label><span>初始密码 *</span><input v-model="form.initial_password" required minlength="12" maxlength="128" type="password" autocomplete="new-password" placeholder="请妥善记录，将仅返回一次" /><small class="iam-field-help">12–128 个字符，不含空白，并同时包含大写字母、小写字母、数字和特殊字符。</small></label>
+            <label><span>初始密码 *</span><div class="iam-password-field"><input id="initial-password" v-model="form.initial_password" required minlength="12" maxlength="128" :type="initialPasswordVisible ? 'text' : 'password'" autocomplete="new-password" placeholder="请妥善记录，将仅返回一次" /><button class="iam-password-toggle" type="button" :aria-label="initialPasswordVisible ? '隐藏初始密码' : '显示初始密码'" :title="initialPasswordVisible ? '隐藏密码' : '显示密码'" @click="initialPasswordVisible = !initialPasswordVisible"><svg v-if="!initialPasswordVisible" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5c-5 0-9.3 3-11 7 1.7 4 6 7 11 7s9.3-3 11-7c-1.7-4-6-7-11-7Zm0 12c-3.8 0-7.2-2-8.8-5C4.8 9 8.2 7 12 7s7.2 2 8.8 5c-1.6 3-5 5-8.8 5Zm0-8a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm0 4a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z" /></svg><svg v-else viewBox="0 0 24 24" aria-hidden="true"><path d="m3.3 2-1.4 1.4 3 3A12.7 12.7 0 0 0 1 12c1.7 4 6 7 11 7 1.8 0 3.5-.4 5-1l3.6 3.6 1.4-1.4L3.3 2ZM12 17c-3.8 0-7.2-2-8.8-5 .8-1.5 1.9-2.7 3.2-3.5l2.1 2.1A3.5 3.5 0 0 0 13.4 15l2 2c-1 .3-2.2.5-3.4.5V17Zm-1.6-4.5 2.1 2.1a1.6 1.6 0 0 1-2.1-2.1ZM12 7c3.8 0 7.2 2 8.8 5a9.5 9.5 0 0 1-2.1 2.8l1.4 1.4A12 12 0 0 0 23 12c-1.7-4-7-7-11-7-.8 0-1.6.1-2.4.2l1.7 1.7.7.1Zm.9 2.1 3 3a4 4 0 0 0-3-3Z" /></svg></button></div><small class="iam-field-help">12–128 个字符，不含空白，并同时包含大写字母、小写字母、数字和特殊字符。</small></label>
+            <label><span>有效时间 *</span><select v-model="form.validity_mode"><option value="TEMPORARY">临时</option><option value="PERMANENT">永久</option></select><small class="iam-field-help">临时账号默认有效 1 天；到期后将不能继续登录。</small></label>
+            <label v-if="form.validity_mode === 'TEMPORARY'"><span>有效截止时间 *</span><input v-model="form.valid_until" type="datetime-local" required /><small class="iam-field-help">可自定义选择截止日期和时间，必须晚于当前时间。</small></label>
           </template>
           <template v-else-if="editor.kind === 'organization'">
             <label><span>组织名称 *</span><input v-model="form.name" required /></label>

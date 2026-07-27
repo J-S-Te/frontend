@@ -607,3 +607,9 @@
     opacity: 1;
   }
 }
+
+/* 动态子系统目录状态与卡片补充信息。 */
+.subsystem-portal__catalog-status { margin: 0 0 18px; color: rgba(219, 234, 254, .78); text-align: center; font-size: 14px; }
+.subsystem-portal__catalog-status.is-error { color: #fecaca; }
+.subsystem-card__description { display: -webkit-box; overflow: hidden; min-height: 38px; margin-top: 8px; color: rgba(219, 234, 254, .72); font-size: 12px; line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.subsystem-card__environment { align-self: center; margin-top: 10px; padding: 3px 9px; border: 1px solid rgba(147, 197, 253, .24); border-radius: 999px; background: rgba(30, 64, 175, .22); color: #bfdbfe; font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; text-transform: uppercase; }

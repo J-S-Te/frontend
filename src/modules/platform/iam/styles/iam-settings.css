@@ -67,3 +67,11 @@
   font-size: 0.8rem;
   line-height: 1.55;
 }
+
+/* The password is hidden by default; the control only changes the local input type and never persists the plaintext. */
+.iam-password-field { position: relative; width: 100%; }
+.iam-editor-form .iam-password-field input { padding-right: 42px; }
+.iam-password-toggle { position: absolute; top: 50%; right: 5px; display: grid; width: 30px; height: 30px; padding: 0; place-items: center; color: #64748b; border: 0; border-radius: 5px; background: transparent; cursor: pointer; transform: translateY(-50%); }
+.iam-password-toggle:hover { color: #2563eb; background: #eff6ff; }
+.iam-password-toggle:focus-visible { outline: 3px solid rgba(37, 99, 235, .2); outline-offset: 1px; }
+.iam-password-toggle svg { width: 18px; height: 18px; fill: currentColor; }

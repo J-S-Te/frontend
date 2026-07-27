@@ -29,6 +29,7 @@ test('登录账号详情可格式化账号类型、认证方式和状态', () =>
     { label: '认证方式', value: '本地密码' },
     { label: '状态', value: '启用' },
     { label: '最近登录', value: '—' },
+    { label: '有效期', value: '永久' },
     { label: '版本', value: 2 },
   ])
 })

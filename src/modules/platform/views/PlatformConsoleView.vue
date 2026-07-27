@@ -10,11 +10,9 @@ import LoginSecurityModule from '@/modules/platform/security/components/LoginSec
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import {
   ApplicationRegistryError,
-  createApplication,
-  createEnvironment,
   listApplications,
   listEnvironments,
-  updateEnvironment,
+  onboardSubsystem,
 } from '@/modules/platform/applications/api/applications'
 import {
   AuditEventsError,
@@ -51,9 +49,11 @@ const subsystemEditor = reactive({
   baseURL: typeof window === 'undefined' ? '' : window.location.origin,
   upstreamURL: '',
   pathPrefix: '',
+  clientType: 'confidential',
 })
 const subsystemSaving = ref(false)
 const subsystemError = ref('')
+const subsystemOnboardingResult = ref(null)
 const loginTargetEnvironments = ref([])
 const mobileMenuOpen = ref(false)
 const isLoggingOut = ref(false)
@@ -303,11 +303,6 @@ watch(() => loginTargetBoundary.environmentId, (value) => {
   loginTargetBoundary.pathPrefix = env?.path_prefix || ''
 })
 
-function optionalEditorValue(value) {
-  const normalized = String(value || '').trim()
-  return normalized || null
-}
-
 function validateSubsystemEditor() {
   const code = subsystemEditor.code.trim().toLowerCase()
   const name = subsystemEditor.name.trim()
@@ -315,13 +310,14 @@ function validateSubsystemEditor() {
   const upstreamURL = subsystemEditor.upstreamURL.trim().replace(/\/+$/, '')
   const pathPrefix = subsystemEditor.pathPrefix.trim().replace(/\/+$/, '')
 
-  if (!code || !name || !baseURL || !upstreamURL || !pathPrefix) {
-    throw new ApplicationRegistryError('子系统编码、名称、门户 BaseURL、内部 UpstreamURL 和路径前缀均不能为空。', { code: 'VALIDATION_ERROR' })
+  if (!code || !name || !baseURL || !upstreamURL) {
+    throw new ApplicationRegistryError('子系统编码、名称、门户 BaseURL 和内部 UpstreamURL 均不能为空。', { code: 'VALIDATION_ERROR' })
   }
   if (!/^[a-z][a-z0-9._-]{0,63}$/.test(code)) {
     throw new ApplicationRegistryError('子系统编码需为 1-64 位，并以小写字母开头；其余可使用小写字母、数字、点、下划线或连字符。', { code: 'VALIDATION_ERROR' })
   }
-  if (!/^\/[A-Za-z0-9._~!+/\-]*$/.test(pathPrefix) || pathPrefix === '/' || pathPrefix.includes('//') || pathPrefix.split('/').some((segment) => segment === '.' || segment === '..')) {
+  const resolvedPathPrefix = pathPrefix || `/${code}`
+  if (!/^\/[A-Za-z0-9._~!+/\-]*$/.test(resolvedPathPrefix) || resolvedPathPrefix === '/' || resolvedPathPrefix.includes('//') || resolvedPathPrefix.split('/').some((segment) => segment === '.' || segment === '..')) {
     throw new ApplicationRegistryError('路径前缀必须是类似 /business-app 的门户绝对路径，只能使用字母、数字、/、点、下划线、~、!、+、-，且不能包含重复斜杠或点路径段。', { code: 'VALIDATION_ERROR' })
   }
   const upstreamMatch = upstreamURL.match(/^https?:\/\/(?:\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9._~-]+)(?::([0-9]{1,5}))?(?:\/[A-Za-z0-9._~!%+/@-]*)?$/)
@@ -339,86 +335,57 @@ function validateSubsystemEditor() {
       throw new ApplicationRegistryError(`${label} 仅支持无账号、查询参数和片段的 http/https URL。`, { code: 'VALIDATION_ERROR' })
     }
   }
-  return { code, name, baseURL, upstreamURL, pathPrefix }
+  return { code, name, baseURL, upstreamURL, pathPrefix: resolvedPathPrefix }
 }
 
 async function saveSubsystemConnection() {
   if (subsystemSaving.value) return
   subsystemSaving.value = true
   subsystemError.value = ''
+  subsystemOnboardingResult.value = null
   try {
     const normalized = validateSubsystemEditor()
-    const matchedApplications = await listApplications({
-      page: 1,
-      pageSize: 100,
-      status: '',
-      keyword: normalized.code,
-    })
-    let application = (matchedApplications.items || []).find((item) => item.code === normalized.code)
-    if (!application) {
-      application = await createApplication({
-        code: normalized.code,
-        name: normalized.name,
-        applicationType: 'web',
-        description: `门户路径接入：${normalized.pathPrefix}`,
-        status: 'ACTIVE',
-      })
-    }
-
-    const environmentPage = await listEnvironments({
-      applicationId: application.application_id,
-      page: 1,
-      pageSize: 100,
-      status: '',
-    })
-    const existingEnvironment = (environmentPage.items || []).find((item) => item.environment === subsystemEditor.environment)
-    const environmentPayload = {
-      applicationId: application.application_id,
-      baseUrl: normalized.baseURL,
+    const result = await onboardSubsystem({
+      applicationCode: normalized.code,
+      applicationName: normalized.name,
+      description: `门户路径接入：${normalized.pathPrefix}`,
+      environment: subsystemEditor.environment,
+      publicBaseUrl: normalized.baseURL,
       upstreamUrl: normalized.upstreamURL,
       pathPrefix: normalized.pathPrefix,
-      status: 'ACTIVE',
-    }
-    const environment = existingEnvironment
-      ? await updateEnvironment({
-          ...environmentPayload,
-          environmentId: existingEnvironment.environment_id,
-          issuerAlias: optionalEditorValue(existingEnvironment.issuer_alias),
-          metadata: existingEnvironment.metadata || {},
-          version: existingEnvironment.version,
-        })
-      : await createEnvironment({
-          ...environmentPayload,
-          environment: subsystemEditor.environment,
-        })
-
+      clientType: subsystemEditor.clientType,
+    })
+    subsystemOnboardingResult.value = result
     await loadApplications()
-    loginTargetBoundary.applicationId = application.application_id
-    await loadLoginTargetEnvironments(application.application_id)
-    loginTargetBoundary.environmentId = environment.environment_id
-    showToast(existingEnvironment ? '子系统接入配置已更新；网关同步后生效。' : '子系统及环境已登记；网关同步后生效。')
+    loginTargetBoundary.applicationId = result.application?.application_id || ''
+    await loadLoginTargetEnvironments(loginTargetBoundary.applicationId)
+    loginTargetBoundary.environmentId = result.environment?.environment_id || ''
+    showToast('子系统接入配置已创建。请立即保存一次性密钥，并按页面提示配置网关。')
   } catch (error) {
-    subsystemError.value = error instanceof ApplicationRegistryError ? error.message : '保存子系统接入配置失败。'
+    subsystemError.value = error instanceof ApplicationRegistryError ? error.message : '创建子系统接入配置失败。'
   } finally {
     subsystemSaving.value = false
   }
 }
 
-function loadSelectedSubsystemConnection() {
-  const app = applications.value.find((item) => item.application_id === loginTargetBoundary.applicationId)
-  const env = loginTargetEnvironments.value.find((item) => item.environment_id === loginTargetBoundary.environmentId)
-  if (!app || !env) {
-    subsystemError.value = '请先选择需要编辑的应用和环境。'
-    return
+async function copySubsystemIntegrationValue(value, successMessage) {
+  if (!value) return
+  try {
+    await navigator.clipboard.writeText(value)
+    showToast(successMessage)
+  } catch {
+    showToast('浏览器未允许自动复制，请手动选择并复制。')
   }
-  subsystemEditor.code = app.code || ''
-  subsystemEditor.name = app.name || app.code || ''
-  subsystemEditor.environment = env.environment || 'prod'
-  subsystemEditor.baseURL = env.base_url || (typeof window === 'undefined' ? '' : window.location.origin)
-  subsystemEditor.upstreamURL = env.upstream_url || ''
-  subsystemEditor.pathPrefix = env.path_prefix || ''
-  subsystemError.value = ''
 }
+
+function copySubsystemEnvironmentFile() {
+  return copySubsystemIntegrationValue(subsystemOnboardingResult.value?.integration?.environment_file, '子系统环境变量已复制。')
+}
+
+function copySubsystemGatewayCommand() {
+  return copySubsystemIntegrationValue(subsystemOnboardingResult.value?.integration?.gateway_command, '网关配置命令已复制。')
+}
+
 
 async function loadAuditEvents() {
   if (currentView.value !== 'audit') return
@@ -732,21 +699,38 @@ onBeforeUnmount(() => {
           <div v-else-if="activeSettingsTab === 'login-targets'" class="settings-module-stack">
             <form class="console-card settings-card" @submit.prevent="saveSubsystemConnection">
               <div class="console-card-body">
-                <h2>子系统接入</h2>
-                <p class="console-card-hint">只登记门户公开地址、内部上游和路径前缀。登录目标后续只需填写 <code>/dashboard</code> 这类子系统内相对路径。</p>
+                <h2>子系统一键接入</h2>
+                <p class="console-card-hint">一次创建应用、环境、门户首页登录目标和 OAuth 客户端。子系统端口只作为内部上游使用，对外统一通过门户路径访问。</p>
                 <p v-if="subsystemError" class="login-target-module__error" role="alert">{{ subsystemError }}</p>
                 <div class="console-form-grid">
-                  <label class="console-form-item"><span>子系统编码</span><input v-model="subsystemEditor.code" autocomplete="off" placeholder="business-app" /><small>稳定编码；已有同编码应用时更新指定环境。</small></label>
+                  <label class="console-form-item"><span>子系统编码</span><input v-model="subsystemEditor.code" autocomplete="off" placeholder="business-app" /><small>稳定且唯一，例如 <code>business-app</code>。</small></label>
                   <label class="console-form-item"><span>子系统名称</span><input v-model="subsystemEditor.name" autocomplete="off" placeholder="业务应用" /></label>
                   <label class="console-form-item"><span>环境</span><select v-model="subsystemEditor.environment"><option value="dev">dev</option><option value="test">test</option><option value="staging">staging</option><option value="prod">prod</option></select></label>
-                  <label class="console-form-item"><span>门户公开 BaseURL</span><input v-model="subsystemEditor.baseURL" autocomplete="url" placeholder="http://portal-ip" /><small>浏览器实际访问的统一入口；默认使用当前门户 Origin。</small></label>
-                  <label class="console-form-item"><span>内部 UpstreamURL</span><input v-model="subsystemEditor.upstreamURL" autocomplete="url" placeholder="http://10.0.0.8:8081" /><small>仅供门户网关访问，不会出现在登录跳转地址中。</small></label>
-                  <label class="console-form-item"><span>门户路径前缀</span><input v-model="subsystemEditor.pathPrefix" autocomplete="off" placeholder="/business-app" /><small>必须独占且不能为 <code>/</code>。</small></label>
+                  <label class="console-form-item"><span>OAuth 客户端类型</span><select v-model="subsystemEditor.clientType"><option value="confidential">后端服务（推荐，有密钥）</option><option value="public">纯前端 SPA（无密钥）</option></select><small>有后端的子系统应选择“后端服务”。</small></label>
+                  <label class="console-form-item"><span>门户公开 BaseURL</span><input v-model="subsystemEditor.baseURL" autocomplete="url" placeholder="https://portal.example.com" /><small>用户在浏览器中访问的统一入口；生产环境建议使用 HTTPS。</small></label>
+                  <label class="console-form-item"><span>内部 UpstreamURL</span><input v-model="subsystemEditor.upstreamURL" autocomplete="url" placeholder="http://10.0.0.8:8081" /><small>只供门户网关访问，不需要对公网开放。</small></label>
+                  <label class="console-form-item"><span>门户路径前缀</span><input v-model="subsystemEditor.pathPrefix" autocomplete="off" placeholder="留空时自动使用 /business-app" /><small>留空时根据子系统编码生成；必须独占且不能为 <code>/</code>。</small></label>
                 </div>
                 <div class="console-form-actions">
-                  <button class="console-button primary" type="submit" :disabled="subsystemSaving"><ConsoleIcon name="save" />{{ subsystemSaving ? '保存中…' : '保存接入配置' }}</button>
-                  <button class="console-button ghost" type="button" :disabled="subsystemSaving" @click="loadSelectedSubsystemConnection">载入当前环境</button>
+                  <button class="console-button primary" type="submit" :disabled="subsystemSaving"><ConsoleIcon name="save" />{{ subsystemSaving ? '创建中…' : '一键创建接入配置' }}</button>
                 </div>
+                <section v-if="subsystemOnboardingResult" class="subsystem-onboarding-result" aria-live="polite">
+                  <h3>接入配置已创建</h3>
+                  <p>客户端密钥只在本次响应中返回。请立即复制并通过安全渠道交给子系统开发人员。</p>
+                  <dl class="subsystem-onboarding-summary">
+                    <div><dt>门户公开地址</dt><dd>{{ subsystemOnboardingResult.integration.public_url }}</dd></div>
+                    <div><dt>OIDC Issuer</dt><dd>{{ subsystemOnboardingResult.integration.issuer }}</dd></div>
+                    <div><dt>Client ID</dt><dd>{{ subsystemOnboardingResult.integration.client_id }}</dd></div>
+                    <div><dt>Redirect URI</dt><dd>{{ subsystemOnboardingResult.integration.redirect_uri }}</dd></div>
+                    <div v-if="subsystemOnboardingResult.integration.client_secret" class="is-sensitive"><dt>一次性 Client Secret</dt><dd>{{ subsystemOnboardingResult.integration.client_secret }}</dd></div>
+                  </dl>
+                  <h4>子系统环境变量</h4>
+                  <pre class="subsystem-onboarding-code">{{ subsystemOnboardingResult.integration.environment_file }}</pre>
+                  <button class="console-button ghost" type="button" @click="copySubsystemEnvironmentFile">复制环境变量</button>
+                  <h4>门户网关配置命令</h4>
+                  <pre class="subsystem-onboarding-code">{{ subsystemOnboardingResult.integration.gateway_command }}</pre>
+                  <button class="console-button ghost" type="button" @click="copySubsystemGatewayCommand">复制网关命令</button>
+                </section>
               </div>
             </form>
 

@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { AuthError, getCurrentPrincipal, logoutCurrentSession } from '@/modules/platform/auth/api/auth'
+import { ApplicationRegistryError, listPortalApplications } from '@/modules/platform/applications/api/applications'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import '@/modules/platform/styles/subsystem-portal.css'
 
@@ -14,6 +15,10 @@ const isPrincipalLoading = ref(true)
 const isLoggingOut = ref(false)
 const userMenuOpen = ref(false)
 const principalLoadFailed = ref(false)
+const registeredSubsystems = ref([])
+const subsystemCatalogLoading = ref(true)
+const subsystemCatalogError = ref('')
+const portalEnvironment = String(import.meta.env?.VITE_PORTAL_ENVIRONMENT || '').trim().toLowerCase()
 
 const userDisplayName = computed(() => {
   const principal = currentPrincipal.value
@@ -47,21 +52,28 @@ const roleNames = computed(() => {
   return roles.map((role) => role.name || role.code || role.id).filter(Boolean).join('、') || '未分配角色'
 })
 
-// 子系统名称和待办数量沿用“子系统门户_升级版.html”。
-// 基础能力平台使用当前已实现的系统设置路由；其余子系统尚未在项目中登记跳转地址。
-const subsystems = [
+// 基础能力平台是门户自身能力；其他卡片来自当前租户的 ACTIVE 应用目录。
+const subsystems = computed(() => [
   {
     key: 'basic-platform',
     name: '基础能力平台',
+    description: '统一身份、应用接入与平台管理',
     icon: 'settings',
     allowed: true,
     route: { name: 'settings', params: { section: 'iam' } },
   },
-  { key: 'customer-opportunity', name: '客户与商机管理', todo: 8, icon: 'user', allowed: true },
-  { key: 'project-service', name: '项目与服务管理', todo: 3, icon: 'save', allowed: true },
-  { key: 'report', name: '报告管理系统', icon: 'dashboard', allowed: true },
-  { key: 'invoice-settlement', name: '开票与结算系统', todo: 2, icon: 'account', allowed: true },
-]
+  ...registeredSubsystems.value
+    .filter((item) => item.code !== 'platform' && item.code !== 'basic-platform')
+    .map((item) => ({
+      key: `registered-${item.application_id}-${item.environment_id}`,
+      name: item.name || item.code,
+      description: item.description || `${item.environment} 环境`,
+      environment: item.environment,
+      icon: 'dashboard',
+      allowed: true,
+      publicURL: item.public_url,
+    })),
+])
 
 let toastTimer = 0
 let animationFrame = 0
@@ -74,6 +86,22 @@ function showToast(message, type = 'enter') {
   toastTimer = window.setTimeout(() => {
     toast.value.visible = false
   }, 2200)
+}
+
+async function loadPortalCatalog() {
+  subsystemCatalogLoading.value = true
+  subsystemCatalogError.value = ''
+  try {
+    const data = await listPortalApplications({ environment: portalEnvironment })
+    registeredSubsystems.value = Array.isArray(data) ? data : []
+  } catch (error) {
+    registeredSubsystems.value = []
+    subsystemCatalogError.value = error instanceof ApplicationRegistryError
+      ? error.message
+      : '无法加载已接入的子系统。'
+  } finally {
+    subsystemCatalogLoading.value = false
+  }
 }
 
 async function loadCurrentPrincipal() {
@@ -141,15 +169,19 @@ function openSubsystem(subsystem) {
     return
   }
 
-  if (subsystem.route) {
-    // 使用当前 Vue Router 的解析结果打开新标签页，确保部署在子路径时仍能得到正确的完整地址。
-    const target = router.resolve(subsystem.route)
-    window.open(target.href, '_blank', 'noopener')
+  if (subsystem.publicURL) {
+    window.open(subsystem.publicURL, '_blank', 'noopener,noreferrer')
     return
   }
 
-  // 原始 HTML 仅展示进入提示，未登记其他子系统地址；此处保持该行为，避免构造不存在的路由。
-  showToast(`正在进入「${subsystem.name}」…`)
+  if (subsystem.route) {
+    // 使用当前 Vue Router 的解析结果打开新标签页，确保部署在子路径时仍能得到正确的完整地址。
+    const target = router.resolve(subsystem.route)
+    window.open(target.href, '_blank', 'noopener,noreferrer')
+    return
+  }
+
+  showToast(`「${subsystem.name}」尚未配置公开访问地址`, 'deny')
 }
 
 function handleCardPointerMove(event) {
@@ -261,6 +293,7 @@ function startParticleBackground() {
 onMounted(() => {
   startParticleBackground()
   loadCurrentPrincipal()
+  loadPortalCatalog()
   document.addEventListener('click', closeUserMenuWhenClickOutside)
   document.addEventListener('keydown', closeUserMenuOnEscape)
 })
@@ -350,6 +383,10 @@ onBeforeUnmount(() => {
         <p>请选择需要访问的业务子系统</p>
       </div>
 
+      <p v-if="subsystemCatalogLoading" class="subsystem-portal__catalog-status">正在加载已接入的子系统…</p>
+      <p v-else-if="subsystemCatalogError" class="subsystem-portal__catalog-status is-error" role="alert">{{ subsystemCatalogError }}</p>
+      <p v-else-if="registeredSubsystems.length === 0" class="subsystem-portal__catalog-status">当前租户暂未登记其他子系统，可先进入基础能力平台完成接入。</p>
+
       <div class="subsystem-portal__cards" aria-label="子系统列表">
         <button
           v-for="(subsystem, index) in subsystems"
@@ -365,6 +402,8 @@ onBeforeUnmount(() => {
           <span v-if="subsystem.todo" class="subsystem-card__todo">待办 {{ subsystem.todo }}</span>
           <span class="subsystem-card__icon"><ConsoleIcon :name="subsystem.icon" /></span>
           <span class="subsystem-card__name">{{ subsystem.name }}</span>
+          <span v-if="subsystem.description" class="subsystem-card__description">{{ subsystem.description }}</span>
+          <span v-if="subsystem.environment" class="subsystem-card__environment">{{ subsystem.environment }}</span>
           <span class="subsystem-card__action">进入系统 <ConsoleIcon name="chevron" /></span>
         </button>
       </div>
