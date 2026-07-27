@@ -1,3 +1,5 @@
+import { broadcastSessionEnded } from '@/modules/platform/auth/utils/sessionLifecycle'
+
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '/api/v1').replace(/\/$/, '')
 
 export class AuthError extends Error {
@@ -28,7 +30,6 @@ async function readResponseBody(response) {
  * 1. 前端不持久化 access token/refresh token；
  * 2. 浏览器通过 HttpOnly + Secure + SameSite Cookie 接收会话；
  * 3. 所有后续请求均携带 credentials: 'include'；
- * 4. 若服务端要求 MFA，预认证凭据只由调用方在当前页面内存中短暂持有。
  */
 export async function loginWithPassword({
   account,
@@ -68,7 +69,7 @@ export async function loginWithPassword({
     throw new AuthError(body.message || body.msg || '账号或密码错误，请重新输入。', {
       status: response.status,
       code: body.code,
-      traceId: body.trace_id || body.traceId,
+      traceId: body.request_id || body.trace_id || body.traceId,
     })
   }
 
@@ -76,51 +77,6 @@ export async function loginWithPassword({
     body,
     status: response.status,
   }
-}
-
-/**
- * 完成登录前置 MFA 验证。
- *
- * 钉钉回调由服务端写入 HttpOnly 的 MFA 预认证 Cookie，浏览器只提交动态验证码或
- * 恢复码；本地密码登录返回的一次性预认证凭据仅在当前页面内存中短暂持有并随本次
- * 验证请求提交，绝不写入 Cookie 以外的浏览器存储、日志或埋点。
- */
-export async function verifyMfaLogin({ code, preAuthenticationCredential = '' }) {
-  let response
-
-  const requestBody = { code }
-  const normalizedCredential = String(preAuthenticationCredential || '').trim()
-  if (normalizedCredential) {
-    requestBody.pre_authentication_credential = normalizedCredential
-  }
-
-  try {
-    response = await fetch(`${API_BASE_URL}/auth/login/mfa:verify`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
-      body: JSON.stringify(requestBody),
-    })
-  } catch {
-    throw new AuthError('无法连接 MFA 验证服务，请稍后重试。', {
-      code: 'NETWORK_ERROR',
-    })
-  }
-
-  const body = await readResponseBody(response)
-
-  if (!response.ok) {
-    throw new AuthError(body.message || body.msg || '动态验证码或恢复码错误，请重新输入。', {
-      status: response.status,
-      code: body.code,
-      traceId: body.trace_id || body.traceId,
-    })
-  }
-
-  return body
 }
 
 /**
@@ -152,7 +108,7 @@ export async function getCurrentPrincipal() {
     throw new AuthError(body.message || body.msg || '当前登录状态已失效，请重新登录。', {
       status: response.status,
       code: body.code,
-      traceId: body.trace_id || body.traceId,
+      traceId: body.request_id || body.trace_id || body.traceId,
     })
   }
 
@@ -160,9 +116,10 @@ export async function getCurrentPrincipal() {
 }
 
 /**
- * 退出当前应用系统。
+ * 退出所有应用系统。
  *
- * 后端撤销服务端会话并写入过期的 HttpOnly Cookie；前端不直接删除或处理 JWT。
+ * 后端会撤销当前账号在租户下的全部服务端会话并写入过期的 HttpOnly Cookie；
+ * 同源应用标签页会立即收到退出通知，跨域子系统会在下一次请求时被服务端拒绝。
  */
 export async function logoutCurrentSession() {
   let response
@@ -184,13 +141,21 @@ export async function logoutCurrentSession() {
   const body = await readResponseBody(response)
 
   if (!response.ok) {
+    // 会话已经在服务端失效时，用户的退出意图仍应完成：通知同源应用页立即返回
+    // 登录界面，而不把用户滞留在受保护页面。
+    if (response.status === 401) {
+      broadcastSessionEnded('manual-logout')
+      return null
+    }
+
     throw new AuthError(body.message || body.msg || '退出登录失败，请稍后重试。', {
       status: response.status,
       code: body.code,
-      traceId: body.trace_id || body.traceId,
+      traceId: body.request_id || body.trace_id || body.traceId,
     })
   }
 
+  broadcastSessionEnded('manual-logout')
   return body.data
 }
 
@@ -235,7 +200,7 @@ export async function createDingTalkQrSession({ tenantId, providerCode, returnTo
     throw new AuthError(body.message || body.msg || '钉钉二维码初始化失败，请稍后重试。', {
       status: response.status,
       code: body.code,
-      traceId: body.trace_id || body.traceId,
+      traceId: body.request_id || body.trace_id || body.traceId,
     })
   }
 

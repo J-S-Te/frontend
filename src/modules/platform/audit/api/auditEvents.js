@@ -22,12 +22,12 @@ async function request(path, options = {}) {
   try {
     response = await fetch(`${API_BASE_URL}${path}`, {
       credentials: 'include',
+      ...options,
       headers: {
         Accept: 'application/json',
         ...(options.body ? { 'Content-Type': 'application/json' } : {}),
         ...(options.headers || {}),
       },
-      ...options,
     })
   } catch {
     throw new AuditEventsError('无法连接审计事件服务，请确认后端服务已启动。', { code: 'NETWORK_ERROR' })
@@ -37,7 +37,7 @@ async function request(path, options = {}) {
     throw new AuditEventsError(body.message || '审计事件查询失败。', {
       status: response.status,
       code: body.code,
-      traceId: body.trace_id || body.traceId,
+      traceId: body.request_id || body.trace_id || body.traceId,
     })
   }
   return body.data
@@ -68,6 +68,7 @@ export async function listAuditEvents({
   applicationCode = '',
   environmentCode = '',
   action = '',
+  actionCategory = '',
   result = '',
   riskLevel = '',
   occurredFrom = '',
@@ -79,6 +80,7 @@ export async function listAuditEvents({
     application_code: applicationCode,
     environment_code: environmentCode,
     action,
+    action_category: actionCategory,
     result,
     risk_level: riskLevel,
     occurred_from: occurredFrom,
@@ -98,7 +100,7 @@ export function getAuditEvent(eventId) {
   return request(`/audit/events/${encodeURIComponent(eventId)}`).then(mapAuditEvent)
 }
 
-export function createAuditExportJob({ keyword = '', applicationCode = '', environmentCode = '', action = '', result = '', riskLevel = '', occurredFrom = '', occurredTo = '' } = {}) {
+export function createAuditExportJob({ keyword = '', applicationCode = '', environmentCode = '', action = '', actionCategory = '', result = '', riskLevel = '', occurredFrom = '', occurredTo = '' } = {}) {
   return request('/audit/export-jobs', {
     method: 'POST',
     body: JSON.stringify({
@@ -106,6 +108,7 @@ export function createAuditExportJob({ keyword = '', applicationCode = '', envir
       application_code: applicationCode,
       environment_code: environmentCode,
       action,
+      action_category: actionCategory,
       result,
       risk_level: riskLevel,
       occurred_from: occurredFrom,
@@ -167,6 +170,8 @@ function resultLabel(value) {
   switch (String(value || '').toUpperCase()) {
     case 'SUCCESS':
       return '成功'
+    case 'FAILURE':
+      return '失败'
     case 'DENIED':
       return '拒绝'
     case 'ERROR':
@@ -189,4 +194,31 @@ function riskLabel(value) {
     default:
       return value || '—'
   }
+}
+
+
+/** 下载已完成的审计导出文件；服务端会再次校验当前会话与任务归属。 */
+export async function downloadAuditExportJob(jobId) {
+  let response
+  try {
+    response = await fetch(`${API_BASE_URL}/audit/export-jobs/${encodeURIComponent(jobId)}/download`, {
+      credentials: 'include',
+      headers: { Accept: 'application/octet-stream, application/json' },
+    })
+  } catch {
+    throw new AuditEventsError('无法连接审计导出下载服务，请稍后重试。', { code: 'NETWORK_ERROR' })
+  }
+  const contentType = response.headers.get('content-type') || ''
+  if (!response.ok) {
+    const body = contentType.includes('application/json') ? await response.json().catch(() => ({})) : {}
+    throw new AuditEventsError(body.message || '审计导出下载失败。', {
+      status: response.status,
+      code: body.code,
+      traceId: body.request_id || body.trace_id || body.traceId,
+    })
+  }
+  const disposition = response.headers.get('content-disposition') || ''
+  const matched = disposition.match(/filename\*?=(?:UTF-8''|\")?([^;\"]+)/i)
+  const filename = matched ? decodeURIComponent(matched[1].replace(/\"/g, '').trim()) : ''
+  return { blob: await response.blob(), filename }
 }

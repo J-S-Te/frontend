@@ -22,12 +22,12 @@ async function request(path, options = {}) {
   try {
     response = await fetch(`${API_BASE_URL}${path}`, {
       credentials: 'include',
+      ...options,
       headers: {
         Accept: 'application/json',
         ...(options.body ? { 'Content-Type': 'application/json' } : {}),
         ...(options.headers || {}),
       },
-      ...options,
     })
   } catch {
     throw new PlatformSettingsError('无法连接平台设置服务，请确认后端服务已启动。', { code: 'NETWORK_ERROR' })
@@ -37,7 +37,7 @@ async function request(path, options = {}) {
     throw new PlatformSettingsError(body.message || '平台设置请求失败。', {
       status: response.status,
       code: body.code,
-      traceId: body.trace_id || body.traceId,
+      traceId: body.request_id || body.trace_id || body.traceId,
     })
   }
   return body.data

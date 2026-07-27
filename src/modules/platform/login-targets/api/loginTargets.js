@@ -29,12 +29,12 @@ async function request(path, options = {}) {
   try {
     response = await fetch(`${API_BASE_URL}${path}`, {
       credentials: 'include',
+      ...options,
       headers: {
         Accept: 'application/json',
         ...(options.body ? { 'Content-Type': 'application/json' } : {}),
         ...(options.headers || {}),
       },
-      ...options,
     })
   } catch {
     throw new ApplicationLoginTargetError('无法连接统一登录目标服务，请确认后端服务已启动。', {
@@ -47,7 +47,7 @@ async function request(path, options = {}) {
     throw new ApplicationLoginTargetError(body.message || '统一登录目标请求失败。', {
       status: response.status,
       code: body.code,
-      traceId: body.trace_id || body.traceId,
+      traceId: body.request_id || body.trace_id || body.traceId,
     })
   }
 

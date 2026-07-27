@@ -1,359 +1,136 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import {
+  detailRows,
+  detailTitle,
+  displayLoginAccountType,
+  displayMembershipType,
+  displayMembershipValidity,
+  displayStatus,
+  formatDateTime,
+} from '@/modules/platform/iam/utils/iamPresentation'
+import {
+  IamError,
+  createLocalAccount,
+  createMembership,
+  createOrgUnit,
+  createPosition,
+  createUser,
+  createUsersBatch,
+  deleteUser,
   listAccounts,
+  listMemberships,
   listOrgUnits,
+  listPositions,
+  listUsers,
+  listIdentityProviders,
+  listUserExternalIdentities,
+  bindUserExternalIdentity,
+  unbindUserExternalIdentity,
+  resetAccountPassword,
+  updateAccountStatus,
+} from '@/modules/platform/iam/api/iam'
+import {
+  AuthorizationError,
+  createPermission,
+  createRole,
+  createRoleBinding,
   listPermissions,
+  listResources,
   listRoleBindings,
   listRoles,
-  listUsers,
-} from '@/modules/platform/iam/api/iam.js'
+  updateRole,
+} from '@/modules/platform/iam/api/authorization'
 import '@/modules/platform/iam/styles/iam-settings.css'
 
 const emit = defineEmits(['toast'])
 
 const activePanel = ref('users')
 const detail = ref(null)
-const editor = ref(null)
-const loading = ref(false)
+const loading = reactive({ users: false, accounts: false, organizations: false, positions: false, memberships: false, roles: false, permissions: false, bindings: false, externalIdentities: false })
 const errorMessage = ref('')
-const lastLoadedAt = ref('')
-
-const filters = reactive({
-  user: '',
-  account: '',
-  organization: '',
-  role: '',
-  binding: '',
-  permission: '',
+const pageSize = 50
+const pagination = reactive({
+  users: { page: 1, pageSize, total: 0 },
+  accounts: { page: 1, pageSize, total: 0 },
+  organizations: { page: 1, pageSize, total: 0, serverPagingSupported: true },
+  positions: { page: 1, pageSize, total: 0, serverPagingSupported: true },
+  memberships: { page: 1, pageSize, total: 0 },
+  roles: { page: 1, pageSize, total: 0 },
+  bindings: { page: 1, pageSize, total: 0 },
+  permissions: { page: 1, pageSize, total: 0 },
 })
-const form = reactive({})
-
-// ---- 数据容器（API 拉取）----
 const users = ref([])
 const accounts = ref([])
 const organizations = ref([])
+const memberships = ref([])
+const positions = ref([])
 const roles = ref([])
-const bindings = ref([])
 const permissions = ref([])
-const userById = computed(() => new Map(users.value.map((item) => [item.user_id, item])))
-const orgById = computed(() => new Map(organizations.value.map((item) => [item.org_unit_id, item])))
+const bindings = ref([])
+const identityProviders = ref([])
+const externalIdentities = ref([])
+const selectedExternalIdentityUserId = ref('')
+const passwordResetDialog = ref(null)
+const temporaryPassword = ref(null)
+const userDeletionDialog = ref(null)
+const resettingPassword = ref(false)
+const deletingUser = ref(false)
 
 const panels = [
   { key: 'users', label: '用户', icon: 'user', description: '自然人主体、任职状态与跨系统统一用户标识' },
   { key: 'accounts', label: '登录账号', icon: 'account', description: '账号状态、认证来源与外部身份绑定' },
-  { key: 'organizations', label: '组织与任职', icon: 'organization', description: '组织单元、主组织、兼岗和历史任职关系' },
+  { key: 'organizations', label: '组织单元', icon: 'organization', description: '组织单元层级、编码与排序' },
+  { key: 'positions', label: '岗位', icon: 'organization', description: '组织内岗位定义，是任职关系和岗位授权的基础' },
+  { key: 'memberships', label: '任职关系', icon: 'link', description: 'Membership 任职关系：主组织、兼岗、历史任职' },
+  { key: 'external-identities', label: '外部身份', icon: 'account', description: '为用户绑定、查看和解绑第三方身份提供商' },
   { key: 'roles', label: '角色', icon: 'role', description: '平台角色、应用角色、自定义角色与权限集合' },
   { key: 'bindings', label: '角色绑定', icon: 'link', description: '主体、应用范围、数据范围和有效期授权' },
   { key: 'permissions', label: '权限注册', icon: 'shield', description: '以 application:resource:action 统一登记原子权限' },
 ]
 
-// ---- 拉取所有面板数据 ----
-async function loadAll() {
-  loading.value = true
-  errorMessage.value = ''
-  try {
-    // 并行拉取，单独 try/catch 保证部分失败时其它仍可显示
-    const settled = await Promise.allSettled([
-      listUsers({ page: 1, page_size: 200 }),
-      listAccounts({ page: 1, page_size: 200 }),
-      listOrgUnits({ page: 1, page_size: 200 }),
-      listRoles({ page: 1, page_size: 200 }),
-      listRoleBindings({ page: 1, page_size: 200 }),
-      listPermissions({ page: 1, page_size: 200 }),
-    ])
-    const [u, a, o, r, b, p] = settled
-    if (u.status === 'fulfilled') users.value = u.value
-    if (a.status === 'fulfilled') accounts.value = a.value
-    if (o.status === 'fulfilled') organizations.value = o.value
-    if (r.status === 'fulfilled') roles.value = r.value
-    if (b.status === 'fulfilled') bindings.value = b.value
-    if (p.status === 'fulfilled') permissions.value = p.value
-    const failed = settled.filter((s) => s.status === 'rejected')
-    if (failed.length) {
-      errorMessage.value = failed
-        .map((s) => s.reason?.message || '加载失败')
-        .join('；')
-    }
-    lastLoadedAt.value = new Date().toLocaleString('zh-CN')
-    if (!failed.length) emitToast('身份与授权数据已从 MySQL 加载完成。')
-  } catch (err) {
-    errorMessage.value = err?.message || '加载失败'
-    emitToast(`加载失败：${errorMessage.value}`)
-  } finally {
-    loading.value = false
-  }
-}
-
-onMounted(() => {
-  loadAll()
-})
-
-// ---- 派生展示（把后端原始字段映射为 UI 期望的形状） ----
-function userView(user) {
-  const org = orgById.value.get(user.primary_org_id)
-  const accountNames = accounts.value
-    .filter((acc) => acc.user_id === user.user_id)
-    .map((acc) => acc.account_name)
-  const userBindings = bindings.value.filter(
-    (b) => b.subject_type === 'USER' && b.subject_id === user.user_id && b.status === 'ACTIVE',
-  )
-  const roleNames = userBindings
-    .map((b) => roles.value.find((r) => r.role_id === b.role_id)?.name)
-    .filter(Boolean)
-  return {
-    id: user.user_id,
-    displayName: user.display_name,
-    legalName: user.display_name,
-    employeeNo: user.employee_no || '—',
-    primaryOrg: org?.name || '—',
-    membershipCount: 1,
-    employmentStatus: user.status === 'ACTIVE' ? 'ACTIVE' : 'TERMINATED',
-    status: user.status,
-    accountCount: accountNames.length,
-    accounts: accountNames,
-    roles: roleNames,
-    lastActiveAt: user.updated_at
-      ? new Date(user.updated_at).toLocaleString('zh-CN', { hour12: false })
-      : '—',
-    memberships: org
-      ? [
-          {
-            organization: org.name,
-            type: 'PRIMARY',
-            position: user.display_name,
-            startedAt: '—',
-            endedAt: '—',
-            status: 'ACTIVE',
-          },
-        ]
-      : [],
-    _raw: user,
-  }
-}
-
-function accountView(account) {
-  const user = userById.value.get(account.user_id)
-  return {
-    id: account.account_id,
-    username: account.account_name,
-    user: user?.display_name || '—',
-    userId: account.user_id || '',
-    accountType: account.account_type || 'HUMAN',
-    authSource: account.auth_source || 'LOCAL',
-    status: account.status,
-    lockedUntil: account.status === 'LOCKED' ? '锁定中' : '—',
-    lastLoginAt: account.last_login_at
-      ? new Date(account.last_login_at).toLocaleString('zh-CN', { hour12: false })
-      : '—',
-    identities: [],
-    _raw: account,
-  }
-}
-
-function orgView(org) {
-  const parent = org.parent_id ? orgById.value.get(org.parent_id) : null
-  return {
-    id: org.org_unit_id,
-    level: org.depth ? org.depth - 1 : 0,
-    code: org.code,
-    name: org.name,
-    type: org.org_type || 'DEPARTMENT',
-    parent: parent?.name || '—',
-    manager: '—',
-    status: org.status,
-    memberCount: 0,
-    _raw: org,
-  }
-}
-
-function roleView(role) {
-  const rolePermissions = permissions.value
-    .filter((p) => p.code?.startsWith(role.code?.split(':')[0] + ':') || false)
-    .slice(0, 5)
-    .map((p) => p.code)
-  return {
-    id: role.role_id,
-    code: role.code,
-    name: role.name,
-    type: role.role_type || 'CUSTOM',
-    application: '基础能力平台',
-    memberCount: bindings.value.filter(
-      (b) => b.role_id === role.role_id && b.status === 'ACTIVE',
-    ).length,
-    permissionCount: rolePermissions.length,
-    status: role.status,
-    defaultScope: 'all',
-    permissions: rolePermissions,
-    _raw: role,
-  }
-}
-
-function bindingView(binding) {
-  const role = roles.value.find((r) => r.role_id === binding.role_id)
-  let subject = '—'
-  if (binding.subject_type === 'USER') {
-    subject = userById.value.get(binding.subject_id)?.display_name || '—'
-  } else if (binding.subject_type === 'ORG_UNIT') {
-    subject = orgById.value.get(binding.subject_id)?.name || '—'
-  } else if (binding.subject_type === 'SERVICE_ACCOUNT') {
-    subject =
-      accounts.value.find((a) => a.account_id === binding.subject_id)?.account_name || '—'
-  }
-  const validFrom = binding.valid_from
-    ? new Date(binding.valid_from).toLocaleDateString('zh-CN')
-    : '—'
-  const validUntil = binding.valid_until
-    ? new Date(binding.valid_until).toLocaleDateString('zh-CN')
-    : '长期有效'
-  return {
-    id: binding.binding_id,
-    subjectType: binding.subject_type,
-    subject,
-    role: role?.name || '—',
-    application: '基础能力平台',
-    scope: (binding.scope_type || 'TENANT').toLowerCase(),
-    status: binding.status,
-    effective: `${validFrom} 至 ${validUntil}`,
-    _raw: binding,
-  }
-}
-
-function permissionView(perm) {
-  return {
-    id: perm.permission_id,
-    code: perm.code,
-    name: perm.name,
-    application: '基础能力平台',
-    resource: perm.code?.split(':')[1] || '',
-    action: perm.code?.split(':')[2] || '',
-    risk: (perm.risk_level || 'LOW').toUpperCase(),
-    status: perm.status,
-    description: '由后端 API 返回的权限注册记录。',
-    _raw: perm,
-  }
-}
+const filters = reactive({ user: '', account: '', organization: '', position: '', membership: '', role: '', binding: '', permission: '' })
 
 const panel = computed(() => panels.find((item) => item.key === activePanel.value) || panels[0])
+
 const metrics = computed(() => [
-  {
-    label: '有效用户',
-    value: users.value.filter((item) => item.status === 'ACTIVE').length,
-    note: '自然人 User',
-    icon: 'user',
-    tone: 'blue',
-  },
-  {
-    label: '正常账号',
-    value: accounts.value.filter((item) => item.status === 'ACTIVE').length,
-    note: 'Account 登录主体',
-    icon: 'account',
-    tone: 'violet',
-  },
-  {
-    label: '有效角色绑定',
-    value: bindings.value.filter((item) => item.status === 'ACTIVE').length,
-    note: 'RoleBinding',
-    icon: 'link',
-    tone: 'green',
-  },
-  {
-    label: '高风险权限',
-    value: permissions.value.filter((item) => (item.risk_level || '').toUpperCase() === 'HIGH').length,
-    note: '需审计与失败关闭',
-    icon: 'shield',
-    tone: 'orange',
-  },
+  { label: '有效用户', value: pagination.users.total, note: '服务端分页总数 /api/v1/users', icon: 'user', tone: 'blue' },
+  { label: '正常账号', value: pagination.accounts.total, note: '服务端分页总数 /api/v1/accounts', icon: 'account', tone: 'violet' },
+  { label: '有效组织', value: pagination.organizations.total, note: '服务端分页总数 /api/v1/org-units', icon: 'organization', tone: 'green' },
+  { label: '任职关系', value: pagination.memberships.total, note: '服务端分页总数 /api/v1/memberships', icon: 'link', tone: 'orange' },
 ])
 
-const userRows = computed(() => users.value.map(userView))
-const accountRows = computed(() => accounts.value.map(accountView))
-const orgRows = computed(() => organizations.value.map(orgView))
-const roleRows = computed(() => roles.value.map(roleView))
-const bindingRows = computed(() => bindings.value.map(bindingView))
-const permissionRows = computed(() => permissions.value.map(permissionView))
-
-const filteredUsers = computed(() =>
-  includesFilter(userRows.value, filters.user, ['displayName', 'employeeNo', 'primaryOrg', 'accounts', 'roles']),
-)
-const filteredAccounts = computed(() =>
-  includesFilter(accountRows.value, filters.account, ['username', 'user', 'accountType', 'authSource', 'status']),
-)
-const filteredOrganizations = computed(() =>
-  includesFilter(orgRows.value, filters.organization, ['name', 'code', 'parent', 'manager']),
-)
-const filteredRoles = computed(() =>
-  includesFilter(roleRows.value, filters.role, ['name', 'code', 'application', 'permissions']),
-)
-const filteredBindings = computed(() =>
-  includesFilter(bindingRows.value, filters.binding, ['subject', 'subjectType', 'role', 'application', 'scope']),
-)
-const filteredPermissions = computed(() =>
-  includesFilter(permissionRows.value, filters.permission, ['name', 'code', 'application', 'resource', 'action']),
-)
-
 function includesFilter(items, filter, fields) {
-  const keyword = filter.trim().toLowerCase()
+  const keyword = String(filter || '').trim().toLowerCase()
   if (!keyword) return items
-  return items.filter((item) =>
-    fields
-      .flatMap((field) => (Array.isArray(item[field]) ? item[field] : [item[field]]))
-      .join(' ')
-      .toLowerCase()
-      .includes(keyword),
-  )
+  return items.filter((item) => fields
+    .map((field) => {
+      const value = field.split('.').reduce((acc, key) => (acc == null ? acc : acc[key]), item)
+      return Array.isArray(value) ? value.join(' ') : value
+    })
+    .join(' ')
+    .toLowerCase()
+    .includes(keyword))
 }
 
-function displayStatus(status) {
-  return (
-    {
-      ACTIVE: '启用',
-      DISABLED: '停用',
-      LOCKED: '已锁定',
-      EXPIRED: '已失效',
-      BOUND: '已绑定',
-      HISTORICAL: '历史任职',
-    }[status] || status
-  )
-}
+const filteredUsers = computed(() => includesFilter(users.value, filters.user, ['display_name', 'employee_no', 'email', 'status']))
+const filteredAccounts = computed(() => includesFilter(accounts.value, filters.account, ['account_name', 'user_id', 'status']))
+const filteredOrganizations = computed(() => includesFilter(organizations.value, filters.organization, ['code', 'name']))
+const filteredPositions = computed(() => includesFilter(positions.value, filters.position, ['code', 'name', 'org_unit.name']))
+const filteredMemberships = computed(() => includesFilter(memberships.value, filters.membership, ['user.name', 'org_unit.name', 'position.name', 'membership_type']))
+const filteredRoles = computed(() => includesFilter(roles.value, filters.role, ['code', 'name']))
+const filteredBindings = computed(() => includesFilter(bindings.value, filters.binding, ['role.name', 'role.code', 'subject.name', 'subject.code', 'subject_type', 'scope_type']))
+const filteredPermissions = computed(() => includesFilter(permissions.value, filters.permission, ['code', 'name']))
 
-function displayRoleType(type) {
-  return (
-    { PLATFORM: '平台角色', APPLICATION: '应用角色', CUSTOM: '自定义角色' }[type] || type
-  )
-}
+const selectedPasswordResetAccount = computed(() => {
+  const dialog = passwordResetDialog.value
+  if (!dialog) return null
+  return dialog.accounts.find((account) => account.account_id === dialog.accountId) || null
+})
 
-function displaySubjectType(type) {
-  return (
-    {
-      USER: '用户',
-      ORG_UNIT: '组织',
-      POSITION: '岗位',
-      GROUP: '用户组',
-      SERVICE_ACCOUNT: '服务账号',
-    }[type] || type
-  )
-}
-
-function displayScope(scope) {
-  return (
-    {
-      all: '全部数据',
-      self: '仅本人',
-      org: '所属组织',
-      org_tree: '所属组织及下级',
-      custom_org: '指定组织',
-      participant: '参与人相关',
-      tenant: '租户',
-    }[scope] || scope
-  )
-}
-
-function displayEmployment(status) {
-  return (
-    { ACTIVE: '在职', ON_LEAVE: '请假中', TERMINATED: '已离职' }[status] || status
-  )
+function accountsForUser(userId) {
+  return accounts.value.filter((account) => account.user_id === userId)
 }
 
 function emitToast(message) {
@@ -374,66 +151,587 @@ function closeDetail() {
 }
 
 function resetFilters() {
-  Object.keys(filters).forEach((key) => {
-    filters[key] = ''
-  })
-  emitToast('已清空当前前端筛选条件。')
+  Object.keys(filters).forEach((key) => { filters[key] = '' })
+  emitToast('已清空筛选条件。')
 }
 
-// 新增/编辑流程仅在前端模拟（后端无对应写接口时保留占位）
+function asId(value) {
+  if (!value) return '—'
+  if (typeof value === 'string') return value
+  if (typeof value === 'object' && value.id) return value.id
+  return String(value)
+}
+
+async function safeCall(kind, fn) {
+  loading[kind] = true
+  errorMessage.value = ''
+  try {
+    return await fn()
+  } catch (error) {
+    errorMessage.value = error instanceof IamError || error instanceof AuthorizationError ? error.message : `${kind} 加载失败。`
+    return null
+  } finally {
+    loading[kind] = false
+  }
+}
+
+function updatePage(key, data, items, { verifyPageSize = false } = {}) {
+  pagination[key].page = data.page || 1
+  pagination[key].pageSize = data.pageSize || pageSize
+  pagination[key].total = data.total || 0
+  if (verifyPageSize) pagination[key].serverPagingSupported = pagination[key].pageSize === pageSize
+  items.value = data.items
+}
+
+async function loadUsers(page = pagination.users.page) {
+  const data = await safeCall('users', () => listUsers({ page, pageSize, keyword: filters.user, status: 'ACTIVE' }))
+  if (data) updatePage('users', data, users)
+}
+
+async function loadAccounts(page = pagination.accounts.page) {
+  const data = await safeCall('accounts', () => listAccounts({ page, pageSize, keyword: filters.account, status: 'ACTIVE' }))
+  if (data) updatePage('accounts', data, accounts)
+}
+
+async function loadOrganizations(page = pagination.organizations.page) {
+  const data = await safeCall('organizations', () => listOrgUnits({ page, pageSize, keyword: filters.organization, status: 'ACTIVE' }))
+  if (data) updatePage('organizations', data, organizations, { verifyPageSize: true })
+}
+
+async function loadPositions(page = pagination.positions.page) {
+  const data = await safeCall('positions', () => listPositions({ page, pageSize, keyword: filters.position, status: 'ACTIVE' }))
+  if (data) updatePage('positions', data, positions, { verifyPageSize: true })
+}
+
+async function loadMemberships(page = pagination.memberships.page) {
+  const data = await safeCall('memberships', () => listMemberships({ page, pageSize, keyword: filters.membership, status: 'ACTIVE' }))
+  if (data) updatePage('memberships', data, memberships)
+}
+
+async function loadRoles(page = pagination.roles.page) {
+  const data = await safeCall('roles', () => listRoles({ page, pageSize, keyword: filters.role, status: 'ACTIVE' }))
+  if (data) updatePage('roles', data, roles)
+}
+
+async function loadPermissions(page = pagination.permissions.page) {
+  const data = await safeCall('permissions', () => listPermissions({ page, pageSize, keyword: filters.permission, status: 'ACTIVE' }))
+  if (data) updatePage('permissions', data, permissions)
+}
+
+async function loadBindings(page = pagination.bindings.page) {
+  const data = await safeCall('bindings', () => listRoleBindings({ page, pageSize, keyword: filters.binding, status: 'ACTIVE' }))
+  if (data) updatePage('bindings', data, bindings)
+}
+
+async function loadIdentityProviders() {
+  const data = await safeCall('externalIdentities', () => listIdentityProviders({ page: 1, pageSize: 100 }))
+  if (data) identityProviders.value = data.items.filter((item) => (item.status || '').toUpperCase() === 'ACTIVE')
+}
+
+async function loadExternalIdentities() {
+  if (!selectedExternalIdentityUserId.value) {
+    externalIdentities.value = []
+    return
+  }
+  const data = await safeCall('externalIdentities', () => listUserExternalIdentities(selectedExternalIdentityUserId.value))
+  if (data) externalIdentities.value = data
+}
+
+async function reloadActive() {
+  switch (activePanel.value) {
+    case 'users': await loadUsers(); break
+    case 'accounts': await loadAccounts(); break
+    case 'organizations': await loadOrganizations(); break
+    case 'positions': await loadPositions(); break
+    case 'memberships': await loadMemberships(); break
+    case 'roles': await loadRoles(); break
+    case 'bindings': await loadBindings(); break
+    case 'permissions': await loadPermissions(); break
+    case 'external-identities': await Promise.all([loadUsers(), loadIdentityProviders(), loadExternalIdentities()]); break
+    default: break
+  }
+}
+
+function pageTotal(key) {
+  return Math.max(1, Math.ceil(pagination[key].total / pagination[key].pageSize))
+}
+
+function goToPage(key, page) {
+  const next = Math.min(Math.max(1, page), pageTotal(key))
+  if (next === pagination[key].page) return
+  pagination[key].page = next
+  reloadActive()
+}
+
+const activePagination = computed(() => pagination[activePanel.value] || null)
+const activeServerPagingUnavailable = computed(() => activePagination.value?.serverPagingSupported === false)
+const activeLoading = computed(() => loading[activePanel.value === 'external-identities' ? 'externalIdentities' : activePanel.value])
+
+watch(activePanel, () => {
+  detail.value = null
+  reloadActive()
+})
+
+let filterTimer
+watch(filters, () => {
+  clearTimeout(filterTimer)
+  filterTimer = setTimeout(() => {
+    const key = activePanel.value
+    if (pagination[key]) pagination[key].page = 1
+    reloadActive()
+  }, 250)
+}, { deep: true })
+
+watch(selectedExternalIdentityUserId, () => {
+  if (activePanel.value === 'external-identities') loadExternalIdentities()
+})
+
+async function toggleAccountStatus(account) {
+  if (!account || !account.account_id) return
+  const next = (account.status || '').toUpperCase() === 'ACTIVE' ? 'DISABLED' : 'ACTIVE'
+  try {
+    const updated = await updateAccountStatus({ accountId: account.account_id, status: next, version: account.version || 0 })
+    Object.assign(account, updated)
+    emitToast(`账号状态已切换为 ${displayStatus(next)}。`)
+  } catch (error) {
+    emitToast(error.message || '账号状态更新失败。')
+  }
+}
+
+// Password reset is keyed by account_id. When started from a user row, the matching account is
+// resolved by its user_id so that a password is never reset for an unrelated login account.
+function openPasswordResetForAccount(account) {
+  if (!account?.account_id) {
+    emitToast('未找到可重置密码的登录账号。')
+    return
+  }
+  passwordResetDialog.value = { accountId: account.account_id, accounts: [account], userName: '' }
+}
+
+function openPasswordResetForUser(user) {
+  const linkedAccounts = accountsForUser(user?.user_id)
+  if (!linkedAccounts.length) {
+    emitToast('该用户没有可管理的登录账号，无法重置密码。')
+    return
+  }
+  passwordResetDialog.value = {
+    accountId: linkedAccounts[0].account_id,
+    accounts: linkedAccounts,
+    userName: user.display_name || user.user_id,
+  }
+}
+
+function closePasswordResetDialog() {
+  if (resettingPassword.value) return
+  passwordResetDialog.value = null
+}
+
+async function confirmPasswordReset() {
+  const account = selectedPasswordResetAccount.value
+  if (!account?.account_id || resettingPassword.value) return
+
+  resettingPassword.value = true
+  try {
+    const result = await resetAccountPassword({ accountId: account.account_id, version: account.version || 0 })
+    if (!result?.temporary_password) {
+      throw new IamError('后端未返回一次性临时密码，无法安全完成密码重置。')
+    }
+    passwordResetDialog.value = null
+    temporaryPassword.value = {
+      accountId: result.account_id || account.account_id,
+      accountName: account.account_name || account.account_id,
+      value: result.temporary_password,
+    }
+    await loadAccounts()
+    emitToast('密码已重置，请立即复制临时密码并通过安全渠道交付。')
+  } catch (error) {
+    emitToast(error instanceof IamError ? error.message : (error?.message || '密码重置失败。'))
+  } finally {
+    resettingPassword.value = false
+  }
+}
+
+async function copyTemporaryPassword() {
+  const value = temporaryPassword.value?.value
+  if (!value) return
+  try {
+    await navigator.clipboard.writeText(value)
+    emitToast('临时密码已复制，请立即通过安全渠道交付。')
+  } catch {
+    emitToast('浏览器未允许复制，请手动复制临时密码。')
+  }
+}
+
+// Closing this dialog clears the plaintext from browser memory. The password cannot be viewed
+// again from this page; an administrator must initiate another reset if it was not copied.
+function closeTemporaryPassword() {
+  temporaryPassword.value = null
+}
+
+function openUserDeletionDialog(user) {
+  if (!user?.user_id) {
+    emitToast('未找到要删除的用户。')
+    return
+  }
+  userDeletionDialog.value = user
+}
+
+function closeUserDeletionDialog() {
+  if (deletingUser.value) return
+  userDeletionDialog.value = null
+}
+
+async function confirmUserDeletion() {
+  const user = userDeletionDialog.value
+  if (!user?.user_id || deletingUser.value) return
+
+  deletingUser.value = true
+  try {
+    await deleteUser({ userId: user.user_id, version: user.version || 0 })
+    userDeletionDialog.value = null
+    if (detail.value?.kind === 'user' && detail.value.item?.user_id === user.user_id) closeDetail()
+    await Promise.all([loadUsers(), loadAccounts()])
+    emitToast(`用户 ${user.display_name || user.user_id} 已删除。`)
+  } catch (error) {
+    emitToast(error instanceof IamError ? error.message : (error?.message || '删除用户失败。'))
+  } finally {
+    deletingUser.value = false
+  }
+}
+
+// ---- 新增（对接真实 API）----
+const editor = ref(null) // { kind, label }
+const form = reactive({})
+const saving = ref(false)
+const resources = ref([])
+
+const editorTemplates = {
+  user: () => ({ display_name: '', email: '', mobile: '', status: 'ACTIVE' }),
+  'user-batch': () => ({ rows: '', status: 'ACTIVE' }),
+  account: () => ({ account_name: '', user_id: '', initial_password: '' }),
+  organization: () => ({ name: '', parent_id: '', sort_order: 0 }),
+  position: () => ({ org_unit_id: '', name: '' }),
+  membership: () => ({ user_id: '', org_unit_id: '', position_id: '', membership_type: 'PRIMARY', validity_mode: 'LONG_TERM', effective_from: '', effective_to: '' }),
+  role: () => ({ role_id: '', code: '', name: '', description: '', permission_ids: [], status: 'ACTIVE', version: 0 }),
+  binding: () => ({ role_id: '', subject_type: 'USER', subject_id: '', scope_type: 'TENANT', scope_id: '', expires_at: '' }),
+  'external-identity': () => ({ user_id: selectedExternalIdentityUserId.value || '', provider_code: '', external_subject: '' }),
+  permission: () => ({ resource_id: '', code: '', name: '', action: '' }),
+}
+
+const panelToKind = {
+  users: 'user',
+  accounts: 'account',
+  organizations: 'organization',
+  positions: 'position',
+  memberships: 'membership',
+  'external-identities': 'external-identity',
+  roles: 'role',
+  bindings: 'binding',
+  permissions: 'permission',
+}
+
+const editorLabels = {
+  user: '用户',
+  'user-batch': '批量用户',
+  account: '登录账号',
+  organization: '组织单元',
+  position: '岗位',
+  membership: '任职关系',
+  role: '角色',
+  binding: '角色绑定',
+  'external-identity': '外部身份绑定',
+  permission: '权限注册',
+}
+
+function loadResources() {
+  return safeCall('permissions', () => listResources({ page: 1, pageSize: 100, status: 'ACTIVE' })).then((data) => {
+    if (data) resources.value = data.items
+  })
+}
+
 function openEditor(kind) {
-  editor.value = { kind }
-  const templates = {
-    user: { displayName: '', employeeNo: '', primaryOrg: '平台运营部', employmentStatus: 'ACTIVE' },
-    account: { username: '', user: '', accountType: 'HUMAN', authSource: 'LOCAL', status: 'ACTIVE' },
-    organization: { code: '', name: '', type: 'DEPARTMENT', parent: '基础能力平台', manager: '' },
-    role: { code: '', name: '', type: 'CUSTOM', application: '基础能力平台', defaultScope: 'self' },
-    binding: { subjectType: 'USER', subject: '', role: '', application: '基础能力平台', scope: 'self', effective: '立即生效 至 长期有效' },
-    permission: { code: '', name: '', application: '基础能力平台', resource: '', action: '', risk: 'MEDIUM' },
-    identity: { provider: 'DINGTALK', subject: '' },
+  if (!editorTemplates[kind]) {
+    emitToast(`暂不支持新增 ${editorLabels[kind] || kind}。`)
+    return
   }
   Object.keys(form).forEach((key) => delete form[key])
-  Object.assign(form, templates[kind] || {})
+  Object.assign(form, editorTemplates[kind]())
+  editor.value = { kind, label: editorLabels[kind] }
+
+  if (['account', 'membership', 'binding', 'external-identity'].includes(kind) && !users.value.length) loadUsers()
+  if (['position', 'membership', 'binding'].includes(kind) && !organizations.value.length) loadOrganizations()
+  if (['membership', 'binding'].includes(kind) && !positions.value.length) loadPositions()
+  if (kind === 'binding' && !accounts.value.length) loadAccounts()
+  if (kind === 'binding' && !roles.value.length) loadRoles()
+  if (kind === 'binding' && !resources.value.length) loadResources()
+  if (kind === 'role' && !permissions.value.length) loadPermissions()
+  if (kind === 'permission' && !resources.value.length) loadResources()
+  if (kind === 'external-identity' && !identityProviders.value.length) loadIdentityProviders()
+}
+
+function openRoleEditor(role) {
+  openEditor('role')
+  const roleId = role.role_id || role.id
+  form.role_id = roleId
+  form.code = role.code || ''
+  form.name = role.name || ''
+  form.description = role.description || ''
+  form.status = role.status || 'ACTIVE'
+  form.version = Number(role.version || 0)
+  form.permission_ids = (role.permissions || []).map((item) => item.id || item.permission_id).filter(Boolean)
+}
+
+function openEditorForActivePanel() {
+  const kind = panelToKind[activePanel.value]
+  if (kind) openEditor(kind)
 }
 
 function closeEditor() {
   editor.value = null
+  saving.value = false
 }
 
-function saveEditor() {
-  if (!editor.value) return
-  const labels = { user: '用户', account: '账号', organization: '组织', role: '角色', binding: '绑定', permission: '权限', identity: '外部身份' }
-  emitToast(`新增${labels[editor.value.kind]}需要调用后端写接口；当前种子数据已通过 SQL 写入 MySQL，可通过刷新按钮重新加载验证。`)
-  closeEditor()
+async function removeExternalIdentity(binding) {
+  const userId = selectedExternalIdentityUserId.value
+  if (!userId || !binding?.binding_id) return
+  try {
+    await unbindUserExternalIdentity({ userId, bindingId: binding.binding_id, version: binding.version || 0 })
+    await loadExternalIdentities()
+    emitToast('外部身份已解绑。')
+  } catch (error) {
+    emitToast(error instanceof IamError ? error.message : (error?.message || '解绑外部身份失败。'))
+  }
 }
 
-function toggleStatus(kind, item) {
-  emitToast('状态变更需要调用后端写接口；当前仅显示从 MySQL 加载的数据。')
+function resolveExpiresAt(value) {
+  if (!value) return null
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date.toISOString()
 }
+
+function optionalText(value) {
+  const normalized = String(value ?? '').trim()
+  return normalized || null
+}
+
+function validateUserInput({ displayName, email, mobile, status }, rowLabel = '') {
+  const prefix = rowLabel ? `${rowLabel}：` : ''
+  const normalizedName = String(displayName ?? '').trim()
+  if (!normalizedName) throw new IamError(`${prefix}请填写用户姓名。`)
+  if (Array.from(normalizedName).length > 100) throw new IamError(`${prefix}用户姓名不能超过 100 个字符。`)
+
+  const normalizedEmail = optionalText(email)
+  if (normalizedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+    throw new IamError(`${prefix}邮箱格式不正确。`)
+  }
+
+  const normalizedMobile = optionalText(mobile)
+  if (normalizedMobile) {
+    if (Array.from(normalizedMobile).length > 32) throw new IamError(`${prefix}手机号不能超过 32 个字符。`)
+    const compactMobile = normalizedMobile.replace(/[\s-]/g, '')
+    if (!/^\+?\d+$/.test(compactMobile)) throw new IamError(`${prefix}手机号只能包含数字、空格、连字符或开头的加号。`)
+  }
+
+  return {
+    displayName: normalizedName,
+    email: normalizedEmail,
+    mobile: normalizedMobile,
+    status: status || 'ACTIVE',
+  }
+}
+
+function parseBatchUserRows(value, status) {
+  const rows = String(value ?? '')
+    .split(/\r?\n/)
+    .map((row) => row.trim())
+    .filter(Boolean)
+  if (!rows.length) throw new IamError('请至少填写一行用户数据。')
+  if (rows.length > 100) throw new IamError('一次最多批量创建 100 位用户。')
+
+  return rows.map((row, index) => {
+    const columns = row.split(/[,，]/).map((column) => column.trim())
+    if (columns.length > 3) throw new IamError(`第 ${index + 1} 行：字段过多，请使用“姓名,邮箱,手机号”格式。`)
+    return validateUserInput({
+      displayName: columns[0],
+      email: columns[1],
+      mobile: columns[2],
+      status,
+    }, `第 ${index + 1} 行`)
+  })
+}
+
+function validateLocalAccountInput(accountName, password) {
+  const normalizedAccountName = String(accountName ?? '').trim()
+  const accountLength = Array.from(normalizedAccountName).length
+  if (accountLength < 3 || accountLength > 64) throw new IamError('账号名长度必须为 3–64 个字符。')
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(normalizedAccountName)) {
+    throw new IamError('账号名必须以字母或数字开头，且只能包含字母、数字、点、下划线和连字符。')
+  }
+
+  const normalizedPassword = String(password ?? '')
+  const passwordLength = Array.from(normalizedPassword).length
+  if (passwordLength < 12 || passwordLength > 128) throw new IamError('初始密码长度必须为 12–128 个字符。')
+  if (/\s/.test(normalizedPassword)) throw new IamError('初始密码不能包含空白字符。')
+  if (!/[A-Z]/.test(normalizedPassword) || !/[a-z]/.test(normalizedPassword) || !/\d/.test(normalizedPassword) || !/[^A-Za-z0-9]/.test(normalizedPassword)) {
+    throw new IamError('初始密码必须同时包含大写字母、小写字母、数字和特殊字符。')
+  }
+  return { accountName: normalizedAccountName, password: normalizedPassword }
+}
+
+async function saveEditor() {
+  if (!editor.value || saving.value) return
+  const { kind } = editor.value
+  saving.value = true
+  try {
+    let result
+    let successMessage
+    if (kind === 'user') {
+      const userInput = validateUserInput({
+        displayName: form.display_name,
+        email: form.email,
+        mobile: form.mobile,
+        status: form.status,
+      })
+      result = await createUser(userInput)
+      successMessage = `用户 ${result?.display_name || form.display_name} 已创建，员工编号已自动生成并绑定普通用户角色。`
+      await Promise.all([loadUsers(), loadBindings(), loadRoles()])
+    } else if (kind === 'user-batch') {
+      const items = parseBatchUserRows(form.rows, form.status)
+      result = await createUsersBatch(items)
+      const createdCount = Array.isArray(result?.items) ? result.items.length : items.length
+      successMessage = `已批量创建 ${createdCount} 位用户，并自动生成员工编号、绑定普通用户角色。`
+      await Promise.all([loadUsers(), loadBindings(), loadRoles()])
+    } else if (kind === 'account') {
+      const accountInput = validateLocalAccountInput(form.account_name, form.initial_password)
+      if (!form.user_id) throw new IamError('请选择关联用户；当前接口只创建个人本地账号。')
+      result = await createLocalAccount({
+        userId: form.user_id,
+        accountName: accountInput.accountName,
+        initialPassword: accountInput.password,
+      })
+      successMessage = `账号 ${result?.account_name || form.account_name} 已写入 MySQL。`
+      await loadAccounts()
+    } else if (kind === 'organization') {
+      if (!form.name) throw new IamError('请填写组织名称。')
+      result = await createOrgUnit({
+        parentId: form.parent_id || null,
+        name: String(form.name).trim(),
+        sortOrder: Number(form.sort_order) || 0,
+      })
+      successMessage = `组织 ${result?.name || form.name} 已创建，编码 ${result?.code || '已由系统生成'}。`
+      await loadOrganizations()
+    } else if (kind === 'position') {
+      if (!form.org_unit_id || !form.name) throw new IamError('请选择组织并填写岗位名称。')
+      result = await createPosition({
+        orgUnitId: form.org_unit_id,
+        name: String(form.name).trim(),
+      })
+      successMessage = `岗位 ${result?.name || form.name} 已创建，编码 ${result?.code || '已由系统生成'}。`
+      await loadPositions()
+    } else if (kind === 'membership') {
+      if (!form.user_id || !form.org_unit_id || !form.position_id) throw new IamError('请选择用户、组织和岗位。')
+      const shortTerm = form.validity_mode === 'SHORT_TERM'
+      if (shortTerm && (!form.effective_from || !form.effective_to)) {
+        throw new IamError('短期任职必须同时填写生效日期和失效日期。')
+      }
+      if (shortTerm && form.effective_from > form.effective_to) {
+        throw new IamError('生效日期不能晚于失效日期。')
+      }
+      result = await createMembership({
+        userId: form.user_id,
+        orgUnitId: form.org_unit_id,
+        positionId: form.position_id,
+        membershipType: form.membership_type || 'PRIMARY',
+        effectiveFrom: shortTerm ? form.effective_from : null,
+        effectiveTo: shortTerm ? form.effective_to : null,
+      })
+      successMessage = `任职关系 ${result?.membership_id || ''} 已创建（${shortTerm ? '短期' : '长期'}生效）。`
+      await loadMemberships()
+    } else if (kind === 'role') {
+      if (!form.name) throw new IamError('请填写角色名称。')
+      const permissionIds = [...new Set((form.permission_ids || []).filter(Boolean))]
+      if (!permissionIds.length) throw new IamError('请至少为角色选择一项权限，避免创建无权限角色。')
+      const payload = {
+        name: String(form.name).trim(),
+        description: form.description || '',
+        permissionIds,
+      }
+      if (form.role_id) {
+        result = await updateRole({ ...payload, roleId: form.role_id, status: form.status || 'ACTIVE', version: Number(form.version || 0) })
+        successMessage = `角色 ${result?.name || form.name} 与权限已更新。`
+      } else {
+        result = await createRole(payload)
+        successMessage = `角色 ${result?.name || form.name} 已创建，编码 ${result?.code || '已由系统生成'}，并关联 ${permissionIds.length} 项权限。`
+      }
+      await Promise.all([loadRoles(), loadBindings()])
+    } else if (kind === 'binding') {
+      if (!form.role_id || !form.subject_id) throw new IamError('请选择角色和授权主体。')
+      const scopeId = form.scope_type === 'TENANT' ? null : form.scope_id
+      if (form.scope_type !== 'TENANT' && !scopeId) throw new IamError('非租户范围必须选择范围对象。')
+      result = await createRoleBinding({
+        roleId: form.role_id,
+        subjectType: form.subject_type,
+        subjectId: form.subject_id,
+        scopeType: form.scope_type,
+        scopeId,
+        expiresAt: resolveExpiresAt(form.expires_at),
+      })
+      successMessage = '角色绑定已写入 MySQL。组织和岗位主体的实际授权仍需后端权限计算支持。'
+      await loadBindings()
+    } else if (kind === 'external-identity') {
+      if (!form.user_id || !form.provider_code || !String(form.external_subject || '').trim()) {
+        throw new IamError('请选择用户、身份提供商并填写外部主体标识。')
+      }
+      result = await bindUserExternalIdentity({
+        userId: form.user_id,
+        providerCode: form.provider_code,
+        externalSubject: String(form.external_subject).trim(),
+      })
+      selectedExternalIdentityUserId.value = form.user_id
+      await loadExternalIdentities()
+      successMessage = `外部身份绑定 ${result.binding_id || ''} 已写入 MySQL。`
+    } else if (kind === 'permission') {
+      if (!form.resource_id || !form.code || !form.name || !form.action) {
+        throw new IamError('请选择资源并填写权限编码、名称和动作。')
+      }
+      result = await createPermission({
+        resourceId: form.resource_id,
+        code: String(form.code).trim(),
+        name: String(form.name).trim(),
+        action: String(form.action).trim(),
+      })
+      successMessage = `权限 ${result?.code || form.code} 已写入 MySQL。`
+      await Promise.all([loadPermissions(), loadRoles()])
+    } else {
+      throw new IamError('未实现的编辑类型。')
+    }
+    emitToast(successMessage)
+    closeEditor()
+  } catch (error) {
+    emitToast(error instanceof IamError || error instanceof AuthorizationError ? error.message : (error?.message || '保存失败。'))
+  } finally {
+    saving.value = false
+  }
+}
+
+onMounted(async () => {
+  await Promise.all([loadUsers(), loadAccounts(), loadOrganizations(), loadPositions(), loadMemberships(), loadRoles(), loadPermissions(), loadBindings()])
+  if (!selectedExternalIdentityUserId.value && users.value[0]) {
+    selectedExternalIdentityUserId.value = users.value[0].user_id
+  }
+})
 </script>
 
 <template>
   <section class="iam-settings" aria-label="身份、组织与授权设置">
-    <header class="iam-toolbar">
-      <div>
-        <h2 class="iam-toolbar-title">身份、组织与授权</h2>
-        <p class="iam-toolbar-sub">数据来自基础能力平台 MySQL，最近加载：{{ lastLoadedAt || '尚未加载' }}</p>
-      </div>
-      <div class="iam-toolbar-actions">
-        <button class="console-button ghost small" type="button" :disabled="loading" @click="loadAll">
-          <ConsoleIcon name="reset" />{{ loading ? '加载中…' : '刷新数据' }}
-        </button>
-      </div>
-    </header>
-
-    <p v-if="errorMessage" class="iam-error">部分数据加载失败：{{ errorMessage }}</p>
-
     <div class="iam-summary-grid">
       <article v-for="metric in metrics" :key="metric.label" class="iam-summary-card" :class="metric.tone">
         <span class="iam-summary-icon"><ConsoleIcon :name="metric.icon" /></span>
         <div><small>{{ metric.label }}</small><strong>{{ metric.value }}</strong><p>{{ metric.note }}</p></div>
       </article>
     </div>
+
+    <p v-if="errorMessage" class="login-target-module__error" role="alert">{{ errorMessage }}</p>
 
     <div class="iam-workspace">
       <aside class="iam-panel-nav" aria-label="身份与授权功能导航">
@@ -454,333 +752,230 @@ function toggleStatus(kind, item) {
           <div><h3>{{ panel.label }}</h3><p>{{ panel.description }}</p></div>
           <div class="iam-panel-actions">
             <button class="console-button ghost small" type="button" @click="resetFilters"><ConsoleIcon name="reset" />清空筛选</button>
-            <button
-              class="console-button primary"
-              type="button"
-              :disabled="loading"
-              @click="openEditor(activePanel === 'users' ? 'user' : activePanel === 'accounts' ? 'account' : activePanel === 'organizations' ? 'organization' : activePanel === 'roles' ? 'role' : activePanel === 'bindings' ? 'binding' : 'permission')"
-            >
-              新增{{ activePanel === 'users' ? '用户' : activePanel === 'accounts' ? '账号' : activePanel === 'organizations' ? '组织' : activePanel === 'roles' ? '角色' : activePanel === 'bindings' ? '绑定' : '权限' }}
-            </button>
+            <button class="console-button ghost small" type="button" :disabled="activeLoading" @click="reloadActive"><ConsoleIcon name="refresh" />刷新</button>
+            <button v-if="activePanel === 'users'" class="console-button ghost small" type="button" @click="openEditor('user-batch')"><ConsoleIcon name="plus" />批量新增用户</button>
+            <button class="console-button primary small" type="button" :disabled="!panelToKind[activePanel]" @click="openEditorForActivePanel"><ConsoleIcon name="plus" />新增{{ editorLabels[panelToKind[activePanel]] || '' }}</button>
           </div>
         </header>
 
         <section v-if="activePanel === 'users'" class="iam-table-section">
-          <div class="iam-filter-row">
-            <label class="console-search-field"><ConsoleIcon name="search" /><input v-model="filters.user" type="search" placeholder="姓名 / 工号 / 组织 / 账号 / 角色" /></label>
-            <span>展示 {{ filteredUsers.length }} / {{ userRows.length }} 位用户</span>
-          </div>
-          <div class="console-table-card">
-            <div class="console-table-scroll">
-              <table class="console-data-table iam-data-table">
-                <thead><tr><th>用户</th><th>主组织与任职</th><th>登录账号</th><th>角色</th><th>状态</th><th>最近活动</th><th class="console-actions-cell">操作</th></tr></thead>
-                <tbody>
-                  <tr v-if="loading && !userRows.length"><td class="console-empty" colspan="7">正在加载…</td></tr>
-                  <tr v-else-if="!filteredUsers.length"><td class="console-empty" colspan="7">没有匹配的用户。</td></tr>
-                  <tr v-for="item in filteredUsers" :key="item.id">
-                    <td><strong class="console-entity-name">{{ item.displayName }}</strong><span class="console-entity-meta console-mono">{{ item.employeeNo }}</span></td>
-                    <td><strong>{{ item.primaryOrg }}</strong><span class="console-entity-meta">{{ item.membershipCount }} 条任职 · {{ displayEmployment(item.employmentStatus) }}</span></td>
-                    <td>
-                      <span v-for="account in item.accounts" :key="account" class="iam-inline-code">{{ account }}</span>
-                      <span v-if="!item.accounts.length" class="console-entity-meta">暂无登录账号</span>
-                    </td>
-                    <td>
-                      <span v-for="role in item.roles" :key="role" class="console-role-chip">{{ role }}</span>
-                      <span v-if="!item.roles.length" class="console-entity-meta">暂无角色</span>
-                    </td>
-                    <td><span class="console-badge" :class="item.status === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(item.status) }}</span></td>
-                    <td class="console-mono">{{ item.lastActiveAt }}</td>
-                    <td class="console-actions-cell">
-                      <button class="console-text-button" type="button" @click="openDetail('user', item)">详情</button>
-                      <button class="console-text-button" type="button" @click="toggleStatus('user', item)">{{ item.status === 'ACTIVE' ? '停用' : '启用' }}</button>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-          <p class="iam-footnote"><ConsoleIcon name="info" />用户离职或停用后保留历史用户、合同、审批与审计引用，不执行物理删除。</p>
+          <div class="iam-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="filters.user" type="search" placeholder="姓名 / 工号 / 邮箱 / 状态" /></label><span>{{ filteredUsers.length }} / 共 {{ pagination.users.total }} 位用户</span></div>
+          <div class="console-table-card"><div class="console-table-scroll"><table class="console-data-table iam-data-table"><thead><tr><th>用户</th><th>工号</th><th>邮箱</th><th>状态</th><th>更新时间</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
+            <tr v-if="loading.users"><td class="console-empty" colspan="6">正在读取用户…</td></tr>
+            <tr v-else-if="!filteredUsers.length"><td class="console-empty" colspan="6">暂无用户记录。</td></tr>
+            <tr v-for="item in filteredUsers" :key="item.user_id"><td><strong class="console-entity-name">{{ item.display_name }}</strong><span class="console-entity-meta console-mono">{{ item.user_id }}</span></td><td class="console-mono">{{ item.employee_no || '—' }}</td><td>{{ item.email || '—' }}</td><td><span class="console-badge" :class="(item.status || '').toUpperCase() === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(item.status) }}</span></td><td class="console-mono">{{ formatDateTime(item.updated_at) }}</td><td class="console-actions-cell"><button class="console-text-button" type="button" @click="openDetail('user', item)">详情</button><button class="console-text-button danger" type="button" @click="openUserDeletionDialog(item)">删除</button></td></tr>
+          </tbody></table></div></div>
         </section>
 
         <section v-else-if="activePanel === 'accounts'" class="iam-table-section">
-          <div class="iam-filter-row">
-            <label class="console-search-field"><ConsoleIcon name="search" /><input v-model="filters.account" type="search" placeholder="账号 / 用户 / 认证来源 / 状态" /></label>
-            <span>展示 {{ filteredAccounts.length }} / {{ accountRows.length }} 个账号</span>
-          </div>
-          <div class="console-table-card">
-            <div class="console-table-scroll">
-              <table class="console-data-table iam-data-table">
-                <thead><tr><th>登录账号</th><th>关联用户</th><th>账号类型</th><th>认证来源</th><th>外部身份</th><th>状态</th><th>最近登录</th><th class="console-actions-cell">操作</th></tr></thead>
-                <tbody>
-                  <tr v-if="loading && !accountRows.length"><td class="console-empty" colspan="8">正在加载…</td></tr>
-                  <tr v-else-if="!filteredAccounts.length"><td class="console-empty" colspan="8">没有匹配的登录账号。</td></tr>
-                  <tr v-for="item in filteredAccounts" :key="item.id">
-                    <td><strong class="console-mono">{{ item.username }}</strong><span class="console-entity-meta">{{ item.id }}</span></td>
-                    <td>{{ item.user }}</td>
-                    <td><span class="iam-type-tag">{{ item.accountType === 'SERVICE' ? '服务账号' : '人类账号' }}</span></td>
-                    <td><span class="iam-source-tag">{{ item.authSource }}</span></td>
-                    <td><span class="iam-identity-cell"><b>—</b><small>外部身份由 IAM 管理；当前种子未注入绑定</small></span></td>
-                    <td><span class="console-badge" :class="item.status === 'ACTIVE' ? 'status-active' : item.status === 'LOCKED' ? 'iam-status-locked' : 'status-disabled'">{{ displayStatus(item.status) }}</span></td>
-                    <td class="console-mono">{{ item.lastLoginAt }}</td>
-                    <td class="console-actions-cell">
-                      <button class="console-text-button" type="button" @click="openDetail('account', item)">详情</button>
-                      <button class="console-text-button" type="button" @click="toggleStatus('account', item)">{{ item.status === 'LOCKED' ? '解锁' : item.status === 'ACTIVE' ? '停用' : '启用' }}</button>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-          <p class="iam-footnote"><ConsoleIcon name="info" />外部身份由 IAM 管理；仅展示脱敏 subject，业务模块不持久化钉钉 unionid、企业微信身份等外部主键。</p>
+          <div class="iam-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="filters.account" type="search" placeholder="账号 / 用户 ID / 状态" /></label><span>{{ filteredAccounts.length }} / 共 {{ pagination.accounts.total }} 个账号</span></div>
+          <div class="console-table-card"><div class="console-table-scroll"><table class="console-data-table iam-data-table"><thead><tr><th>账号</th><th>关联用户</th><th>账号类型 / 认证方式</th><th>状态</th><th>更新时间</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
+            <tr v-if="loading.accounts"><td class="console-empty" colspan="6">正在读取账号…</td></tr>
+            <tr v-else-if="!filteredAccounts.length"><td class="console-empty" colspan="6">暂无账号记录。</td></tr>
+            <tr v-for="item in filteredAccounts" :key="item.account_id"><td><strong>{{ item.account_name }}</strong><span class="console-entity-meta console-mono">{{ item.account_id }}</span></td><td class="console-mono">{{ item.user_id || '—' }}</td><td>{{ displayLoginAccountType(item) }}</td><td><span class="console-badge" :class="(item.status || '').toUpperCase() === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(item.status) }}</span></td><td class="console-mono">{{ formatDateTime(item.updated_at) }}</td><td class="console-actions-cell"><button class="console-text-button" type="button" @click="openDetail('account', item)">详情</button></td></tr>
+          </tbody></table></div></div>
         </section>
 
         <section v-else-if="activePanel === 'organizations'" class="iam-table-section">
-          <div class="iam-filter-row">
-            <label class="console-search-field"><ConsoleIcon name="search" /><input v-model="filters.organization" type="search" placeholder="组织名称 / 编码 / 上级组织 / 负责人" /></label>
-            <span>共 {{ filteredOrganizations.length }} 个组织单元</span>
-          </div>
-          <div class="console-table-card">
-            <div class="console-table-scroll">
-              <table class="console-data-table iam-data-table">
-                <thead><tr><th>组织结构</th><th>组织编码</th><th>类型</th><th>负责人</th><th>成员数</th><th>状态</th><th class="console-actions-cell">操作</th></tr></thead>
-                <tbody>
-                  <tr v-if="loading && !orgRows.length"><td class="console-empty" colspan="7">正在加载…</td></tr>
-                  <tr v-for="item in filteredOrganizations" :key="item.id">
-                    <td>
-                      <span class="iam-tree-name" :style="{ paddingLeft: `${item.level * 24}px` }"><i v-if="item.level" />{{ item.name }}</span>
-                      <span class="console-entity-meta" :style="{ paddingLeft: `${item.level * 24}px` }">上级：{{ item.parent }}</span>
-                    </td>
-                    <td class="console-mono">{{ item.code }}</td>
-                    <td>{{ item.type === 'COMPANY' ? '主体' : item.type === 'TEAM' ? '团队' : '部门' }}</td>
-                    <td>{{ item.manager }}</td>
-                    <td>{{ item.memberCount }}</td>
-                    <td><span class="console-badge status-active">启用</span></td>
-                    <td class="console-actions-cell">
-                      <button class="console-text-button" type="button" @click="openDetail('organization', item)">详情</button>
-                      <button class="console-text-button" type="button" @click="emitToast('任职关系将通过 Membership 表维护，支持主组织、兼岗和历史任职。')">任职</button>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-          <p class="iam-footnote"><ConsoleIcon name="info" />主组织是用户快照；真实组织关系以 Membership 为准，因此可表达兼岗、跨部门与历史任职。</p>
+          <div class="iam-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="filters.organization" type="search" placeholder="组织编码 / 名称" /></label><span>{{ filteredOrganizations.length }} / 共 {{ pagination.organizations.total }} 个组织</span></div>
+          <p v-if="pagination.organizations.serverPagingSupported === false && pagination.organizations.total > pagination.organizations.pageSize" class="iam-server-limit-note">当前后端尚未按 page / page_size 分页组织列表；为避免只在首批数据中翻页，已隐藏分页操作。请先完成后端分页改造。</p>
+          <div class="console-table-card"><div class="console-table-scroll"><table class="console-data-table iam-data-table"><thead><tr><th>组织单元</th><th>上级组织 ID</th><th>排序</th><th>状态</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
+            <tr v-if="loading.organizations"><td class="console-empty" colspan="5">正在读取组织…</td></tr>
+            <tr v-else-if="!filteredOrganizations.length"><td class="console-empty" colspan="5">暂无组织记录。</td></tr>
+            <tr v-for="item in filteredOrganizations" :key="item.org_unit_id"><td><strong>{{ item.name }}</strong><span class="console-entity-meta console-mono">{{ item.code }} · {{ item.org_unit_id }}</span></td><td class="console-mono">{{ item.parent_id || '—' }}</td><td>{{ item.sort_order ?? 0 }}</td><td><span class="console-badge" :class="(item.status || '').toUpperCase() === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(item.status) }}</span></td><td class="console-actions-cell"><button class="console-text-button" type="button" @click="openDetail('organization', item)">详情</button></td></tr>
+          </tbody></table></div></div>
+        </section>
+
+        <section v-else-if="activePanel === 'positions'" class="iam-table-section">
+          <div class="iam-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="filters.position" type="search" placeholder="岗位编码 / 名称 / 组织 ID" /></label><span>{{ filteredPositions.length }} / 共 {{ pagination.positions.total }} 个岗位</span></div>
+          <p v-if="pagination.positions.serverPagingSupported === false && pagination.positions.total > pagination.positions.pageSize" class="iam-server-limit-note">当前后端尚未按 page / page_size 分页岗位列表；为避免只在首批数据中翻页，已隐藏分页操作。请先完成后端分页改造。</p>
+          <div class="console-table-card"><div class="console-table-scroll"><table class="console-data-table iam-data-table"><thead><tr><th>岗位</th><th>所属组织 ID</th><th>状态</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
+            <tr v-if="loading.positions"><td class="console-empty" colspan="4">正在读取岗位…</td></tr>
+            <tr v-else-if="!filteredPositions.length"><td class="console-empty" colspan="4">暂无岗位记录。</td></tr>
+            <tr v-for="item in filteredPositions" :key="item.position_id || item.id"><td><strong>{{ item.name }}</strong><span class="console-entity-meta console-mono">{{ item.code }} · {{ item.position_id || item.id }}</span></td><td class="console-mono">{{ item.org_unit_id || '—' }}</td><td><span class="console-badge" :class="(item.status || '').toUpperCase() === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(item.status) }}</span></td><td class="console-actions-cell"><button class="console-text-button" type="button" @click="openDetail('position', item)">详情</button></td></tr>
+          </tbody></table></div></div>
+        </section>
+
+        <section v-else-if="activePanel === 'memberships'" class="iam-table-section">
+          <div class="iam-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="filters.membership" type="search" placeholder="用户 / 组织 / 岗位" /></label><span>{{ filteredMemberships.length }} / 共 {{ pagination.memberships.total }} 条任职关系</span></div>
+          <div class="console-table-card"><div class="console-table-scroll"><table class="console-data-table iam-data-table"><thead><tr><th>用户</th><th>组织</th><th>岗位</th><th>任职类型</th><th>有效期</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
+            <tr v-if="loading.memberships"><td class="console-empty" colspan="6">正在读取任职关系…</td></tr>
+            <tr v-else-if="!filteredMemberships.length"><td class="console-empty" colspan="6">暂无任职关系。</td></tr>
+            <tr v-for="item in filteredMemberships" :key="item.membership_id || item.id"><td>{{ item.user?.name || item.user?.display_name || item.user_id || '—' }}</td><td>{{ item.org_unit?.name || item.org_unit_id || '—' }}</td><td>{{ item.position?.name || item.position_id || '—' }}</td><td>{{ displayMembershipType(item.membership_type) }}</td><td>{{ displayMembershipValidity(item) }}</td><td class="console-actions-cell"><button class="console-text-button" type="button" @click="openDetail('membership', item)">详情</button></td></tr>
+          </tbody></table></div></div>
+        </section>
+
+        <section v-else-if="activePanel === 'external-identities'" class="iam-table-section">
+          <div class="iam-filter-row"><label><span>用户</span><select v-model="selectedExternalIdentityUserId"><option value="">请选择用户</option><option v-for="item in users" :key="item.user_id" :value="item.user_id">{{ item.display_name }} · {{ item.user_id }}</option></select></label><span>{{ selectedExternalIdentityUserId ? `${externalIdentities.length} 条绑定` : '选择用户后查看绑定' }}</span></div>
+          <p class="iam-form-alert"><ConsoleIcon name="info" />为保护外部身份隐私，列表不会回显外部主体标识。</p>
+          <div class="console-table-card"><div class="console-table-scroll"><table class="console-data-table iam-data-table"><thead><tr><th>绑定 ID</th><th>身份提供商</th><th>状态</th><th>绑定时间</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
+            <tr v-if="loading.externalIdentities"><td class="console-empty" colspan="5">正在读取外部身份…</td></tr>
+            <tr v-else-if="!selectedExternalIdentityUserId"><td class="console-empty" colspan="5">请选择用户。</td></tr>
+            <tr v-else-if="!externalIdentities.length"><td class="console-empty" colspan="5">该用户暂无外部身份绑定。</td></tr>
+            <tr v-for="item in externalIdentities" :key="item.binding_id"><td class="console-mono">{{ item.binding_id }}</td><td class="console-mono">{{ item.provider_id }}</td><td><span class="console-badge" :class="(item.status || '').toUpperCase() === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(item.status) }}</span></td><td class="console-mono">{{ formatDateTime(item.bound_at) }}</td><td class="console-actions-cell"><button class="console-text-button danger" type="button" @click="removeExternalIdentity(item)">解绑</button></td></tr>
+          </tbody></table></div></div>
         </section>
 
         <section v-else-if="activePanel === 'roles'" class="iam-table-section">
-          <div class="iam-filter-row">
-            <label class="console-search-field"><ConsoleIcon name="search" /><input v-model="filters.role" type="search" placeholder="角色名称 / 编码 / 应用 / 权限" /></label>
-            <span>展示 {{ filteredRoles.length }} / {{ roleRows.length }} 个角色</span>
-          </div>
-          <div class="console-table-card">
-            <div class="console-table-scroll">
-              <table class="console-data-table iam-data-table">
-                <thead><tr><th>角色</th><th>角色类型</th><th>应用范围</th><th>默认数据范围</th><th>权限</th><th>已绑定主体</th><th>状态</th><th class="console-actions-cell">操作</th></tr></thead>
-                <tbody>
-                  <tr v-if="loading && !roleRows.length"><td class="console-empty" colspan="8">正在加载…</td></tr>
-                  <tr v-else-if="!filteredRoles.length"><td class="console-empty" colspan="8">没有匹配的角色。</td></tr>
-                  <tr v-for="item in filteredRoles" :key="item.id">
-                    <td><strong class="console-entity-name">{{ item.name }}</strong><span class="console-entity-meta console-mono">{{ item.code }}</span></td>
-                    <td><span class="console-role-type" :class="`role-${displayRoleType(item.type)}`">{{ displayRoleType(item.type) }}</span></td>
-                    <td>{{ item.application }}</td>
-                    <td>{{ displayScope(item.defaultScope) }}</td>
-                    <td>
-                      <span class="iam-permission-count">{{ item.permissionCount }} 项</span>
-                      <span class="console-entity-meta">{{ item.permissions.slice(0, 2).join(' · ') }}{{ item.permissions.length > 2 ? ' …' : '' }}</span>
-                    </td>
-                    <td>{{ item.memberCount }}</td>
-                    <td><span class="console-badge" :class="item.status === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(item.status) }}</span></td>
-                    <td class="console-actions-cell">
-                      <button class="console-text-button" type="button" @click="openDetail('role', item)">授权详情</button>
-                      <button class="console-text-button" type="button" @click="toggleStatus('role', item)">{{ item.status === 'ACTIVE' ? '停用' : '启用' }}</button>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-          <p class="iam-footnote"><ConsoleIcon name="info" />角色表达权限集合；对某一具体主体的应用范围、数据范围和有效期，应配置在角色绑定中。</p>
+          <div class="iam-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="filters.role" type="search" placeholder="角色编码 / 名称" /></label><span>{{ filteredRoles.length }} / 共 {{ pagination.roles.total }} 个角色</span></div>
+          <div class="console-table-card"><div class="console-table-scroll"><table class="console-data-table iam-data-table"><thead><tr><th>角色</th><th>权限数</th><th>状态</th><th>更新时间</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
+            <tr v-if="loading.roles"><td class="console-empty" colspan="5">正在读取角色…</td></tr>
+            <tr v-else-if="!filteredRoles.length"><td class="console-empty" colspan="5">暂无角色记录。</td></tr>
+            <tr v-for="item in filteredRoles" :key="item.role_id || item.id"><td><strong class="console-entity-name">{{ item.name }}</strong><span class="console-entity-meta console-mono">{{ item.code || item.role_id || item.id }}</span></td><td>{{ item.permissions?.length || 0 }}</td><td><span class="console-badge" :class="(item.status || '').toUpperCase() === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(item.status) }}</span></td><td class="console-mono">{{ formatDateTime(item.updated_at) }}</td><td class="console-actions-cell"><button class="console-text-button" type="button" @click="openDetail('role', item)">详情</button><button class="console-text-button" type="button" @click="openRoleEditor(item)">编辑权限</button></td></tr>
+          </tbody></table></div></div>
         </section>
 
         <section v-else-if="activePanel === 'bindings'" class="iam-table-section">
-          <div class="iam-filter-row">
-            <label class="console-search-field"><ConsoleIcon name="search" /><input v-model="filters.binding" type="search" placeholder="主体 / 角色 / 应用 / 数据范围" /></label>
-            <span>展示 {{ filteredBindings.length }} / {{ bindingRows.length }} 条绑定</span>
-          </div>
-          <div class="console-table-card">
-            <div class="console-table-scroll">
-              <table class="console-data-table iam-data-table">
-                <thead><tr><th>授权主体</th><th>角色</th><th>应用范围</th><th>数据范围</th><th>有效期</th><th>状态</th><th class="console-actions-cell">操作</th></tr></thead>
-                <tbody>
-                  <tr v-if="loading && !bindingRows.length"><td class="console-empty" colspan="7">正在加载…</td></tr>
-                  <tr v-else-if="!filteredBindings.length"><td class="console-empty" colspan="7">没有匹配的角色绑定。</td></tr>
-                  <tr v-for="item in filteredBindings" :key="item.id">
-                    <td><strong>{{ item.subject }}</strong><span class="console-entity-meta">{{ displaySubjectType(item.subjectType) }}</span></td>
-                    <td>{{ item.role }}</td>
-                    <td>{{ item.application }}</td>
-                    <td><span class="iam-scope-tag">{{ displayScope(item.scope) }}</span></td>
-                    <td class="console-mono">{{ item.effective }}</td>
-                    <td><span class="console-badge" :class="item.status === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(item.status) }}</span></td>
-                    <td class="console-actions-cell">
-                      <button class="console-text-button" type="button" @click="openDetail('binding', item)">详情</button>
-                      <button class="console-text-button" type="button" @click="toggleStatus('binding', item)">{{ item.status === 'ACTIVE' ? '停用' : '启用' }}</button>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-          <p class="iam-footnote"><ConsoleIcon name="info" />支持用户、组织、岗位、用户组、服务账号等主体类型；授权检查需综合范围、有效期与数据策略决策。</p>
+          <div class="iam-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="filters.binding" type="search" placeholder="角色 / 主体 / 范围" /></label><span>{{ filteredBindings.length }} / 共 {{ pagination.bindings.total }} 条角色绑定</span></div>
+          <div class="console-table-card"><div class="console-table-scroll"><table class="console-data-table iam-data-table"><thead><tr><th>角色</th><th>授权主体</th><th>数据范围</th><th>状态</th><th>到期时间</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
+            <tr v-if="loading.bindings"><td class="console-empty" colspan="6">正在读取角色绑定…</td></tr>
+            <tr v-else-if="!filteredBindings.length"><td class="console-empty" colspan="6">暂无角色绑定。</td></tr>
+            <tr v-for="item in filteredBindings" :key="item.binding_id || item.id"><td><strong>{{ item.role?.name || '—' }}</strong><span class="console-entity-meta console-mono">{{ item.role?.code || item.role?.id || '—' }}</span></td><td><strong>{{ item.subject?.name || item.subject_type }}</strong><span class="console-entity-meta console-mono">{{ item.subject_type }} · {{ item.subject?.id || item.subject?.code || '—' }}</span></td><td class="console-mono">{{ item.scope_type }}{{ item.scope_id ? ` · ${item.scope_id}` : '' }}</td><td><span class="console-badge" :class="(item.status || '').toUpperCase() === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(item.status) }}</span></td><td class="console-mono">{{ formatDateTime(item.expires_at) }}</td><td class="console-actions-cell"><button class="console-text-button" type="button" @click="openDetail('binding', item)">详情</button></td></tr>
+          </tbody></table></div></div>
         </section>
 
         <section v-else class="iam-table-section">
-          <div class="iam-filter-row">
-            <label class="console-search-field"><ConsoleIcon name="search" /><input v-model="filters.permission" type="search" placeholder="权限编码 / 名称 / 应用 / 资源 / 动作" /></label>
-            <span>展示 {{ filteredPermissions.length }} / {{ permissionRows.length }} 项权限</span>
-          </div>
-          <div class="console-table-card">
-            <div class="console-table-scroll">
-              <table class="console-data-table iam-data-table">
-                <thead><tr><th>权限编码</th><th>权限名称</th><th>应用</th><th>资源 / 动作</th><th>风险等级</th><th>状态</th><th class="console-actions-cell">操作</th></tr></thead>
-                <tbody>
-                  <tr v-if="loading && !permissionRows.length"><td class="console-empty" colspan="7">正在加载…</td></tr>
-                  <tr v-else-if="!filteredPermissions.length"><td class="console-empty" colspan="7">没有匹配的权限。</td></tr>
-                  <tr v-for="item in filteredPermissions" :key="item.id">
-                    <td><code class="iam-permission-code">{{ item.code }}</code></td>
-                    <td><strong>{{ item.name }}</strong><span class="console-entity-meta">{{ item.description }}</span></td>
-                    <td>{{ item.application }}</td>
-                    <td><span class="iam-inline-code">{{ item.resource }}</span><span class="iam-arrow">/</span><span class="iam-inline-code">{{ item.action }}</span></td>
-                    <td><span class="iam-risk" :class="item.risk.toLowerCase()">{{ item.risk === 'HIGH' ? '高' : item.risk === 'MEDIUM' ? '中' : '低' }}</span></td>
-                    <td><span class="console-badge status-active">启用</span></td>
-                    <td class="console-actions-cell"><button class="console-text-button" type="button" @click="openDetail('permission', item)">详情</button></td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-          <p class="iam-footnote"><ConsoleIcon name="info" />权限表示业务原子能力，不以 URL 作为权限编码；多个 API 可映射到同一权限。</p>
+          <div class="iam-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="filters.permission" type="search" placeholder="权限编码 / 名称" /></label><span>{{ filteredPermissions.length }} / 共 {{ pagination.permissions.total }} 项权限</span></div>
+          <div class="console-table-card"><div class="console-table-scroll"><table class="console-data-table iam-data-table"><thead><tr><th>权限编码</th><th>权限名称</th><th>状态</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
+            <tr v-if="loading.permissions"><td class="console-empty" colspan="4">正在读取权限…</td></tr>
+            <tr v-else-if="!filteredPermissions.length"><td class="console-empty" colspan="4">暂无权限记录。</td></tr>
+            <tr v-for="item in filteredPermissions" :key="item.permission_id || item.id"><td><code class="iam-permission-code">{{ item.code }}</code></td><td><strong>{{ item.name }}</strong></td><td><span class="console-badge" :class="(item.status || '').toUpperCase() === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(item.status) }}</span></td><td class="console-actions-cell"><button class="console-text-button" type="button" @click="openDetail('permission', item)">详情</button></td></tr>
+          </tbody></table></div></div>
         </section>
+
+        <nav v-if="activePagination && activePagination.total > activePagination.pageSize && !activeServerPagingUnavailable" class="iam-pagination" aria-label="列表分页">
+          <button class="console-button ghost small" type="button" :disabled="activePagination.page <= 1" @click="goToPage(activePanel, activePagination.page - 1)">上一页</button>
+          <span>第 {{ activePagination.page }} / {{ pageTotal(activePanel) }} 页，共 {{ activePagination.total }} 条</span>
+          <button class="console-button ghost small" type="button" :disabled="activePagination.page >= pageTotal(activePanel)" @click="goToPage(activePanel, activePagination.page + 1)">下一页</button>
+        </nav>
       </section>
     </div>
 
     <div v-if="detail" class="iam-modal-backdrop" role="presentation" @click.self="closeDetail">
       <section class="iam-modal" role="dialog" aria-modal="true" aria-label="身份授权详情">
-        <header>
-          <div>
-            <p>{{ detail.kind === 'user' ? '用户与任职' : detail.kind === 'account' ? '登录账号与外部身份' : detail.kind === 'organization' ? '组织单元' : detail.kind === 'role' ? '角色与权限' : detail.kind === 'binding' ? '角色绑定' : '权限注册' }}</p>
-            <h3>{{ detail.kind === 'user' ? detail.item.displayName : detail.kind === 'account' ? detail.item.username : detail.kind === 'organization' ? detail.item.name : detail.kind === 'role' ? detail.item.name : detail.kind === 'binding' ? detail.item.subject : detail.item.name }}</h3>
-          </div>
-          <button class="console-modal-close" type="button" aria-label="关闭详情" @click="closeDetail"><ConsoleIcon name="close" /></button>
-        </header>
-
-        <template v-if="detail.kind === 'user'">
-          <div class="iam-detail-grid">
-            <div><span>统一用户 ID</span><strong class="console-mono">{{ detail.item.id }}</strong></div>
-            <div><span>员工编号</span><strong>{{ detail.item.employeeNo }}</strong></div>
-            <div><span>主组织快照</span><strong>{{ detail.item.primaryOrg }}</strong></div>
-            <div><span>任职状态</span><strong>{{ displayEmployment(detail.item.employmentStatus) }}</strong></div>
-            <div><span>用户状态</span><strong>{{ displayStatus(detail.item.status) }}</strong></div>
-            <div><span>关联账号</span><strong>{{ detail.item.accountCount }} 个</strong></div>
-          </div>
-          <section class="iam-detail-section">
-            <h4>角色摘要</h4>
-            <span v-for="role in detail.item.roles" :key="role" class="console-role-chip large">{{ role }}</span>
-            <span v-if="!detail.item.roles.length" class="console-entity-meta">暂未分配角色</span>
-          </section>
-        </template>
-
-        <template v-else-if="detail.kind === 'account'">
-          <div class="iam-detail-grid">
-            <div><span>账号 ID</span><strong class="console-mono">{{ detail.item.id }}</strong></div>
-            <div><span>关联用户</span><strong>{{ detail.item.user }}</strong></div>
-            <div><span>账号类型</span><strong>{{ detail.item.accountType === 'SERVICE' ? '服务账号' : '人类账号' }}</strong></div>
-            <div><span>认证来源</span><strong>{{ detail.item.authSource }}</strong></div>
-            <div><span>账号状态</span><strong>{{ displayStatus(detail.item.status) }}</strong></div>
-            <div><span>最近登录</span><strong class="console-mono">{{ detail.item.lastLoginAt }}</strong></div>
-          </div>
-          <section class="iam-detail-section">
-            <h4>ExternalIdentity 外部身份</h4>
-            <p>当前账号未绑定外部身份。</p>
-          </section>
-        </template>
-
-        <template v-else-if="detail.kind === 'organization'">
-          <div class="iam-detail-grid">
-            <div><span>组织 ID</span><strong class="console-mono">{{ detail.item.id }}</strong></div>
-            <div><span>组织编码</span><strong class="console-mono">{{ detail.item.code }}</strong></div>
-            <div><span>组织类型</span><strong>{{ detail.item.type }}</strong></div>
-            <div><span>上级组织</span><strong>{{ detail.item.parent }}</strong></div>
-            <div><span>负责人</span><strong>{{ detail.item.manager }}</strong></div>
-            <div><span>状态</span><strong>{{ displayStatus(detail.item.status) }}</strong></div>
-          </div>
-          <section class="iam-detail-section">
-            <h4>组织关系说明</h4>
-            <p>组织单元只描述结构；用户任职关系通过 Membership 表维护，从而支持主组织、兼岗和历史任职。</p>
-          </section>
-        </template>
-
-        <template v-else-if="detail.kind === 'role'">
-          <div class="iam-detail-grid">
-            <div><span>角色编码</span><strong class="console-mono">{{ detail.item.code }}</strong></div>
-            <div><span>角色类型</span><strong>{{ displayRoleType(detail.item.type) }}</strong></div>
-            <div><span>应用范围</span><strong>{{ detail.item.application }}</strong></div>
-            <div><span>默认数据范围</span><strong>{{ displayScope(detail.item.defaultScope) }}</strong></div>
-            <div><span>已绑定主体</span><strong>{{ detail.item.memberCount }} 个</strong></div>
-            <div><span>状态</span><strong>{{ displayStatus(detail.item.status) }}</strong></div>
-          </div>
-          <section class="iam-detail-section">
-            <h4>权限清单</h4>
-            <p>角色维护的是权限集合，最终数据范围需由 RoleBinding 和 DataPolicy 合并决定。</p>
-            <code v-for="permission in detail.item.permissions" :key="permission" class="iam-permission-code">{{ permission }}</code>
-          </section>
-        </template>
-
-        <template v-else-if="detail.kind === 'binding'">
-          <div class="iam-detail-grid">
-            <div><span>绑定 ID</span><strong class="console-mono">{{ detail.item.id }}</strong></div>
-            <div><span>主体类型</span><strong>{{ displaySubjectType(detail.item.subjectType) }}</strong></div>
-            <div><span>授权主体</span><strong>{{ detail.item.subject }}</strong></div>
-            <div><span>角色</span><strong>{{ detail.item.role }}</strong></div>
-            <div><span>应用范围</span><strong>{{ detail.item.application }}</strong></div>
-            <div><span>数据范围</span><strong>{{ displayScope(detail.item.scope) }}</strong></div>
-            <div><span>有效期</span><strong>{{ detail.item.effective }}</strong></div>
-            <div><span>状态</span><strong>{{ displayStatus(detail.item.status) }}</strong></div>
-          </div>
-        </template>
-
-        <template v-else>
-          <div class="iam-detail-grid">
-            <div><span>权限编码</span><strong class="console-mono">{{ detail.item.code }}</strong></div>
-            <div><span>权限名称</span><strong>{{ detail.item.name }}</strong></div>
-            <div><span>所属应用</span><strong>{{ detail.item.application }}</strong></div>
-            <div><span>资源 / 动作</span><strong>{{ detail.item.resource }} / {{ detail.item.action }}</strong></div>
-            <div><span>风险等级</span><strong>{{ detail.item.risk }}</strong></div>
-            <div><span>状态</span><strong>{{ displayStatus(detail.item.status) }}</strong></div>
-          </div>
-          <section class="iam-detail-section">
-            <h4>权限定义</h4>
-            <p>{{ detail.item.description }}</p>
-          </section>
-        </template>
+        <header><div><p>详情</p><h3>{{ detailTitle(detail) }}</h3></div><button class="console-modal-close" type="button" aria-label="关闭详情" @click="closeDetail"><ConsoleIcon name="close" /></button></header>
+        <div class="iam-detail-grid">
+          <template v-for="row in detailRows(detail)" :key="row.label">
+            <div><span>{{ row.label }}</span><strong>{{ row.value }}</strong></div>
+          </template>
+        </div>
         <footer><button class="console-button ghost" type="button" @click="closeDetail">关闭</button></footer>
+      </section>
+    </div>
+
+    <div v-if="passwordResetDialog" class="iam-modal-backdrop" role="presentation" @click.self="closePasswordResetDialog">
+      <section class="iam-modal iam-confirm-modal" role="dialog" aria-modal="true" aria-label="确认重置密码">
+        <header><div><p>敏感操作</p><h3>确认重置密码</h3></div><button class="console-modal-close" type="button" aria-label="关闭密码重置确认" :disabled="resettingPassword" @click="closePasswordResetDialog"><ConsoleIcon name="close" /></button></header>
+        <div class="iam-confirm-body">
+          <p>系统将为下列登录账号生成新的临时密码。旧密码将立即失效，临时密码只会在下一步显示一次。</p>
+          <label v-if="passwordResetDialog.accounts.length > 1"><span>关联登录账号</span><select v-model="passwordResetDialog.accountId"><option v-for="account in passwordResetDialog.accounts" :key="account.account_id" :value="account.account_id">{{ account.account_name || account.account_id }}（{{ account.account_id }}）</option></select></label>
+          <dl v-if="selectedPasswordResetAccount" class="iam-confirm-summary"><div><dt>登录账号</dt><dd>{{ selectedPasswordResetAccount.account_name || selectedPasswordResetAccount.account_id }}</dd></div><div><dt>账号 ID</dt><dd class="console-mono">{{ selectedPasswordResetAccount.account_id }}</dd></div><div v-if="passwordResetDialog.userName"><dt>关联用户</dt><dd>{{ passwordResetDialog.userName }}</dd></div></dl>
+        </div>
+        <footer><button class="console-button ghost" type="button" :disabled="resettingPassword" @click="closePasswordResetDialog">取消</button><button class="console-button primary" type="button" :disabled="!selectedPasswordResetAccount || resettingPassword" @click="confirmPasswordReset">{{ resettingPassword ? '正在重置…' : '确认重置' }}</button></footer>
+      </section>
+    </div>
+
+    <div v-if="temporaryPassword" class="iam-modal-backdrop" role="presentation" @click.self="closeTemporaryPassword">
+      <section class="iam-modal iam-temporary-password-modal" role="dialog" aria-modal="true" aria-label="一次性临时密码">
+        <header><div><p>请立即保存</p><h3>一次性临时密码</h3></div><button class="console-modal-close" type="button" aria-label="关闭临时密码" @click="closeTemporaryPassword"><ConsoleIcon name="close" /></button></header>
+        <div class="iam-confirm-body"><p>账号 <strong>{{ temporaryPassword.accountName }}</strong> 的密码已重置。关闭此窗口后，临时密码将从当前页面清除；如未保存，只能再次重置。</p><code class="iam-one-time-password">{{ temporaryPassword.value }}</code><p class="iam-one-time-warning">请仅通过受控的安全渠道交付给用户，不要粘贴到工单、聊天记录或日志中。</p></div>
+        <footer><button class="console-button ghost" type="button" @click="closeTemporaryPassword">我已保存</button><button class="console-button primary" type="button" @click="copyTemporaryPassword">复制临时密码</button></footer>
+      </section>
+    </div>
+
+    <div v-if="userDeletionDialog" class="iam-modal-backdrop" role="presentation" @click.self="closeUserDeletionDialog">
+      <section class="iam-modal iam-confirm-modal" role="dialog" aria-modal="true" aria-label="确认删除用户">
+        <header><div><p>危险操作</p><h3>确认删除用户</h3></div><button class="console-modal-close" type="button" aria-label="关闭删除用户确认" :disabled="deletingUser" @click="closeUserDeletionDialog"><ConsoleIcon name="close" /></button></header>
+        <div class="iam-confirm-body"><p>确认删除用户 <strong>{{ userDeletionDialog.display_name || userDeletionDialog.user_id }}</strong> 吗？该操作不可恢复。若存在关联数据，系统将按后端规则处理或返回明确错误。</p><dl class="iam-confirm-summary"><div><dt>用户 ID</dt><dd class="console-mono">{{ userDeletionDialog.user_id }}</dd></div><div><dt>当前版本</dt><dd>{{ userDeletionDialog.version ?? 0 }}</dd></div></dl></div>
+        <footer><button class="console-button ghost" type="button" :disabled="deletingUser" @click="closeUserDeletionDialog">取消</button><button class="console-button iam-danger-button" type="button" :disabled="deletingUser" @click="confirmUserDeletion">{{ deletingUser ? '正在删除…' : '确认删除' }}</button></footer>
       </section>
     </div>
 
     <div v-if="editor" class="iam-modal-backdrop" role="presentation" @click.self="closeEditor">
       <section class="iam-modal iam-editor-modal" role="dialog" aria-modal="true" aria-label="新增身份授权配置">
-        <header>
-          <div>
-            <p>前端模拟表单</p>
-            <h3>新增{{ { user: '用户', account: '登录账号', organization: '组织单元', role: '角色', binding: '角色绑定', permission: '权限注册', identity: '外部身份绑定' }[editor.kind] }}</h3>
-          </div>
-          <button class="console-modal-close" type="button" aria-label="关闭表单" @click="closeEditor"><ConsoleIcon name="close" /></button>
-        </header>
+        <header><div><p>{{ editor.kind === 'role' && form.role_id ? '编辑' : '新增' }}</p><h3>{{ editor.kind === 'role' && form.role_id ? '编辑' : '新增' }} {{ editor.label }}</h3></div><button class="console-modal-close" type="button" aria-label="关闭表单" :disabled="saving" @click="closeEditor"><ConsoleIcon name="close" /></button></header>
         <form class="iam-editor-form" @submit.prevent="saveEditor">
-          <label><span>名称（占位）</span><input v-model="form.displayName || form.name || form.username" /></label>
-          <p class="iam-form-alert"><ConsoleIcon name="info" />此表单仅模拟前端交互；正式写入需要后端实现 create / update 接口；当前阶段已通过 SQL 注入测试数据，刷新按钮可重新加载。</p>
+          <template v-if="editor.kind === 'user'">
+            <p class="iam-form-alert"><ConsoleIcon name="info" />员工编号由后端自动生成；创建成功后自动绑定“普通用户”角色。</p>
+            <label><span>展示姓名 *</span><input v-model="form.display_name" required maxlength="100" placeholder="例如：张三" /></label>
+            <label><span>邮箱</span><input v-model="form.email" type="email" placeholder="例如：zhang.san@example.com" /></label>
+            <label><span>手机</span><input v-model="form.mobile" maxlength="32" placeholder="例如：13800000000" /></label>
+            <label><span>状态</span><select v-model="form.status"><option value="ACTIVE">启用</option><option value="DISABLED">停用</option></select></label>
+          </template>
+          <template v-else-if="editor.kind === 'user-batch'">
+            <p class="iam-form-alert"><ConsoleIcon name="info" />每行一位用户，格式为“姓名,邮箱,手机号”；邮箱和手机号可留空，一次最多 100 位。整批数据在一个事务中创建，任一行失败会全部回滚。</p>
+            <label class="full"><span>用户数据 *</span><textarea v-model="form.rows" required rows="10" placeholder="张三,zhang.san@example.com,13800000000&#10;李四,,13900000000&#10;王五"></textarea></label>
+            <label><span>统一状态</span><select v-model="form.status"><option value="ACTIVE">启用</option><option value="DISABLED">停用</option></select></label>
+            <p class="iam-field-help full">员工编号由后端逐条自动生成，每位用户都会自动绑定“普通用户”角色。</p>
+          </template>
+          <template v-else-if="editor.kind === 'account'">
+            <label><span>账号 *</span><input v-model="form.account_name" required minlength="3" maxlength="64" placeholder="例如：zhang.san" /><small class="iam-field-help">3–64 个字符，以字母或数字开头，仅可使用字母、数字、点、下划线和连字符。</small></label>
+            <label><span>关联用户 *</span>
+              <select v-model="form.user_id" required>
+                <option value="">请选择用户</option>
+                <option v-for="item in users" :key="item.user_id" :value="item.user_id">{{ item.display_name }}（{{ item.employee_no || item.user_id }}）</option>
+              </select>
+            </label>
+            <label><span>账号类型</span><input value="个人账号 / 本地密码" disabled /><small class="iam-field-help">当前新增接口创建个人本地账号，使用账号名和密码登录。</small></label>
+            <label><span>初始密码 *</span><input v-model="form.initial_password" required minlength="12" maxlength="128" type="password" autocomplete="new-password" placeholder="请妥善记录，将仅返回一次" /><small class="iam-field-help">12–128 个字符，不含空白，并同时包含大写字母、小写字母、数字和特殊字符。</small></label>
+          </template>
+          <template v-else-if="editor.kind === 'organization'">
+            <label><span>组织名称 *</span><input v-model="form.name" required /></label>
+            <label><span>组织编码</span><input value="提交后由系统自动生成" disabled /><small class="iam-field-help">编码由后端统一生成，创建后可在组织列表和详情中查看。</small></label>
+            <label><span>上级组织（留空为根）</span><select v-model="form.parent_id"><option value="">无（根组织）</option><option v-for="item in organizations" :key="item.org_unit_id" :value="item.org_unit_id">{{ item.name }} · {{ item.code }} · {{ item.org_unit_id }}</option></select></label>
+            <label><span>排序</span><input v-model.number="form.sort_order" type="number" /></label>
+          </template>
+          <template v-else-if="editor.kind === 'position'">
+            <label><span>所属组织 *</span><select v-model="form.org_unit_id" required><option value="">请选择组织</option><option v-for="item in organizations" :key="item.org_unit_id" :value="item.org_unit_id">{{ item.name }} · {{ item.code }} · {{ item.org_unit_id }}</option></select></label>
+            <label><span>岗位编码</span><input value="提交后由系统自动生成" disabled /><small class="iam-field-help">编码由后端统一生成，格式为 POS-&lt;ULID&gt;，创建后可在岗位列表和详情中查看。</small></label>
+            <label><span>岗位名称 *</span><input v-model="form.name" required placeholder="例如：研发经理" /></label>
+          </template>
+          <template v-else-if="editor.kind === 'membership'">
+            <label><span>用户 *</span><select v-model="form.user_id" required><option value="">请选择用户</option><option v-for="item in users" :key="item.user_id" :value="item.user_id">{{ item.display_name }} · {{ item.employee_no || item.user_id }}</option></select></label>
+            <label><span>组织 *</span><select v-model="form.org_unit_id" required><option value="">请选择组织</option><option v-for="item in organizations" :key="item.org_unit_id" :value="item.org_unit_id">{{ item.name }} · {{ item.code }} · {{ item.org_unit_id }}</option></select></label>
+            <label><span>岗位 *</span><select v-model="form.position_id" required><option value="">请选择岗位</option><option v-for="item in positions" :key="item.position_id || item.id" :value="item.position_id || item.id">{{ item.name }} · {{ item.code }} · {{ item.position_id || item.id }}</option></select></label>
+            <label><span>任职类型 *</span><select v-model="form.membership_type"><option value="PRIMARY">主组织</option><option value="SECONDARY">次组织 / 兼岗</option></select></label>
+            <label><span>生效方式 *</span><select v-model="form.validity_mode"><option value="LONG_TERM">长期生效</option><option value="SHORT_TERM">短期生效</option></select><small class="iam-field-help">长期任职不设置日期；短期任职必须填写完整起止日期。</small></label>
+            <label v-if="form.validity_mode === 'SHORT_TERM'"><span>生效日期 *</span><input v-model="form.effective_from" required type="date" /></label>
+            <label v-if="form.validity_mode === 'SHORT_TERM'"><span>失效日期 *</span><input v-model="form.effective_to" required type="date" /></label>
+          </template>
+          <template v-else-if="editor.kind === 'role'">
+            <label><span>角色名称 *</span><input v-model="form.name" required /></label>
+            <label><span>角色编码</span><input :value="form.role_id ? form.code : '提交后由系统自动生成'" disabled /><small class="iam-field-help">自定义角色编码由后端生成，格式为 ROLE-&lt;ULID&gt;，创建后不可修改。</small></label>
+            <label v-if="form.role_id"><span>状态</span><select v-model="form.status"><option value="ACTIVE">启用</option><option value="DISABLED">停用</option></select></label>
+            <label class="full"><span>权限 *</span><select v-model="form.permission_ids" required multiple size="8"><option v-for="item in permissions" :key="item.permission_id || item.id" :value="item.permission_id || item.id">{{ item.name }} · {{ item.code }}</option></select><small class="iam-field-help">按住 Ctrl / ⌘ 可多选。创建和编辑都必须至少选择一项权限。</small></label>
+            <label class="full"><span>描述</span><textarea v-model="form.description" rows="2" placeholder="可选"></textarea></label>
+          </template>
+          <template v-else-if="editor.kind === 'binding'">
+            <label><span>角色 *</span><select v-model="form.role_id" required><option value="">请选择角色</option><option v-for="item in roles" :key="item.role_id || item.id" :value="item.role_id || item.id">{{ item.name }} · {{ item.code }} · {{ item.role_id || item.id }}</option></select></label>
+            <label><span>主体类型 *</span><select v-model="form.subject_type" @change="form.subject_id = ''"><option value="USER">用户</option><option value="ACCOUNT">账号</option><option value="ORG_UNIT">组织</option><option value="POSITION">岗位</option></select></label>
+            <label><span>授权主体 *</span>
+              <select v-if="form.subject_type === 'USER'" v-model="form.subject_id" required><option value="">请选择用户</option><option v-for="item in users" :key="item.user_id" :value="item.user_id">{{ item.display_name }} · {{ item.user_id }}</option></select>
+              <select v-else-if="form.subject_type === 'ACCOUNT'" v-model="form.subject_id" required><option value="">请选择账号</option><option v-for="item in accounts" :key="item.account_id" :value="item.account_id">{{ item.account_name }} · {{ item.account_id }}</option></select>
+              <select v-else-if="form.subject_type === 'ORG_UNIT'" v-model="form.subject_id" required><option value="">请选择组织</option><option v-for="item in organizations" :key="item.org_unit_id" :value="item.org_unit_id">{{ item.name }} · {{ item.code }} · {{ item.org_unit_id }}</option></select>
+              <select v-else v-model="form.subject_id" required><option value="">请选择岗位</option><option v-for="item in positions" :key="item.position_id || item.id" :value="item.position_id || item.id">{{ item.name }} · {{ item.code }} · {{ item.position_id || item.id }}</option></select>
+            </label>
+            <label><span>数据范围 *</span><select v-model="form.scope_type" @change="form.scope_id = ''"><option value="TENANT">租户级（无需范围 ID）</option><option value="ORG_UNIT">组织范围</option><option value="RESOURCE">资源范围</option></select></label>
+            <label v-if="form.scope_type === 'ORG_UNIT'"><span>范围组织 *</span><select v-model="form.scope_id" required><option value="">请选择组织</option><option v-for="item in organizations" :key="item.org_unit_id" :value="item.org_unit_id">{{ item.name }} · {{ item.code }} · {{ item.org_unit_id }}</option></select></label>
+            <label v-else-if="form.scope_type === 'RESOURCE'"><span>范围资源 *</span><select v-model="form.scope_id" required><option value="">请选择资源</option><option v-for="item in resources" :key="item.resource_id || item.id" :value="item.resource_id || item.id">{{ item.name }} · {{ item.code }} · {{ item.resource_id || item.id }}</option></select></label>
+            <label><span>过期时间（可选）</span><input v-model="form.expires_at" type="datetime-local" /></label>
+            <p class="iam-field-help full">组织、岗位主体的绑定已可创建；是否参与实际鉴权取决于后端有效任职关系计算。</p>
+          </template>
+          <template v-else-if="editor.kind === 'external-identity'">
+            <label><span>用户 *</span><select v-model="form.user_id" required><option value="">请选择用户</option><option v-for="item in users" :key="item.user_id" :value="item.user_id">{{ item.display_name }} · {{ item.user_id }}</option></select></label>
+            <label><span>身份提供商 *</span><select v-model="form.provider_code" required><option value="">请选择提供商</option><option v-for="item in identityProviders" :key="item.provider_id || item.code" :value="item.code">{{ item.display_name || item.code }} · {{ item.code }}</option></select></label>
+            <label class="full"><span>外部主体标识 *</span><input v-model="form.external_subject" required autocomplete="off" placeholder="例如：IdP 中的 subject / immutable ID" /><small class="iam-field-help">该值只在提交时发送给后端，不会在本页面回显。</small></label>
+          </template>
+          <template v-else-if="editor.kind === 'permission'">
+            <label><span>资源 *</span><select v-model="form.resource_id" required><option value="">请选择资源</option><option v-for="item in resources" :key="item.resource_id || item.id" :value="item.resource_id || item.id">{{ item.name }} · {{ item.code }} · {{ item.resource_id || item.id }}</option></select></label>
+            <label><span>权限编码 *</span><input v-model="form.code" required placeholder="application:resource:action" /></label>
+            <label><span>权限名称 *</span><input v-model="form.name" required /></label>
+            <label><span>动作 *</span><input v-model="form.action" required placeholder="例如：read / approve" /></label>
+          </template>
+          <p class="iam-form-alert"><ConsoleIcon name="info" />提交后由 Go API 写入 MySQL，并生成审计事件。</p>
           <footer>
-            <button class="console-button ghost" type="button" @click="closeEditor">取消</button>
-            <button class="console-button primary" type="submit"><ConsoleIcon name="save" />保存（占位）</button>
+            <button class="console-button ghost" type="button" :disabled="saving" @click="closeEditor">取消</button>
+            <button class="console-button primary" type="submit" :disabled="saving"><ConsoleIcon name="save" />{{ saving ? '保存中…' : '保存' }}</button>
           </footer>
         </form>
       </section>

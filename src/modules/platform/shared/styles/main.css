@@ -586,64 +586,6 @@ button {
   text-align: center;
 }
 
-.mfa-panel {
-  min-height: 458px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  padding-top: 12px;
-}
-
-.mfa-heading {
-  max-width: 330px;
-  margin: 0 auto 28px;
-  text-align: center;
-}
-
-.mfa-heading .login-kicker {
-  display: block;
-  margin-bottom: 10px;
-}
-
-.mfa-heading h3 {
-  margin: 0;
-  color: var(--text);
-  font-size: 22px;
-  letter-spacing: -0.03em;
-}
-
-.mfa-heading p {
-  margin: 10px 0 0;
-  color: var(--text-secondary);
-  font-size: 12px;
-  line-height: 1.65;
-}
-
-.mfa-form {
-  width: 100%;
-  max-width: 356px;
-  margin: 0 auto;
-}
-
-.mfa-back {
-  display: block;
-  width: fit-content;
-  margin: 14px auto 0;
-  color: var(--text-secondary);
-  background: transparent;
-  cursor: pointer;
-  font-size: 12px;
-}
-
-.mfa-back:hover:not(:disabled) {
-  color: var(--primary);
-}
-
-.mfa-back:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-
 .qrcode-panel {
   min-height: 458px;
   text-align: center;

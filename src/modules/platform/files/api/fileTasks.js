@@ -26,7 +26,7 @@ function makeError(body, response, fallback) {
   return new FileTaskError(body.message || body.msg || fallback, {
     status: response.status,
     code: body.code,
-    traceId: body.trace_id || body.traceId,
+    traceId: body.request_id || body.trace_id || body.traceId,
   })
 }
 
@@ -35,12 +35,12 @@ async function request(path, options = {}) {
   try {
     response = await fetch(`${API_BASE_URL}${path}`, {
       credentials: 'include',
+      ...options,
       headers: {
         Accept: 'application/json',
         ...(options.body && !(options.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
         ...(options.headers || {}),
       },
-      ...options,
     })
   } catch {
     throw new FileTaskError('无法连接文件与异步任务服务，请确认后端服务已启动。', { code: 'NETWORK_ERROR' })
@@ -64,7 +64,7 @@ export function uploadLocalFile({ applicationId, file, classification = 'INTERNA
 export async function downloadLocalFile(fileId) {
   let response
   try {
-    response = await fetch(`${API_BASE_URL}/files/${encodeURIComponent(fileId)}/download`, {
+    response = await fetch(`${API_BASE_URL}/files/${encodeURIComponent(fileId)}/content`, {
       credentials: 'include',
       headers: { Accept: 'application/octet-stream, application/json' },
     })
@@ -112,7 +112,7 @@ export function cancelAsyncJob(jobId) { return request(`/async-jobs/${encodeURIC
 export function retryAsyncJob(jobId) { return request(`/async-jobs/${encodeURIComponent(jobId)}/retry`, { method: 'POST' }) }
 export function rerunAsyncJob(jobId) { return request(`/async-jobs/${encodeURIComponent(jobId)}/rerun`, { method: 'POST' }) }
 
-/** Triggers one bounded unbound-file cleanup pass; this action must be permission and MFA protected server-side. */
+/** Triggers one bounded unbound-file cleanup pass; this action must be permission protected server-side. */
 export function cleanupExpiredFiles({ before, maxFiles }) {
   return request('/files/cleanup', { method: 'POST', body: JSON.stringify({ before, max_files: maxFiles }) })
 }

@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-import { createDingTalkQrSession, loginWithPassword, verifyMfaLogin } from '@/modules/platform/auth/api/auth'
+import { createDingTalkQrSession, loginWithPassword } from '@/modules/platform/auth/api/auth'
 import {
   isDingTalkFrameRenderMode,
   mountDingTalkFrameLogin,
@@ -27,13 +27,6 @@ const qrError = ref('')
 const qrSession = ref(null)
 const qrSeconds = ref(0)
 const qrContainer = ref(null)
-const mfaRequired = ref(false)
-const mfaCode = ref('')
-const mfaError = ref('')
-const mfaSubmitting = ref(false)
-const mfaReturnTo = ref('')
-const mfaLoginSource = ref('')
-let mfaPreAuthenticationCredential = ''
 let qrTimer = null
 let qrRequestController = null
 let qrRequestVersion = 0
@@ -150,20 +143,6 @@ async function submitLogin() {
       localStorage.removeItem(STORAGE_KEY)
     }
 
-    if (response.status === 202 || data?.mfa_required === true) {
-      const preAuthenticationCredential =
-        typeof data?.pre_authentication_credential === 'string' ? data.pre_authentication_credential.trim() : ''
-
-      // 此凭据只保存在当前组件闭包中，用于下一次 MFA 请求；不进入响应式状态或浏览器存储。
-      enterMfa({
-        returnTo: data?.redirect_url || getLoginReturnTo(),
-        source: 'password',
-        preAuthenticationCredential,
-      })
-      password.value = ''
-      return
-    }
-
     formSuccess.value = result?.message || result?.msg || '登录成功，正在进入平台…'
 
     const redirectUrl =
@@ -249,7 +228,7 @@ function resetQrSession() {
 }
 
 async function ensureDingTalkQrSession() {
-  if (mfaRequired.value || activeTab.value !== 'qrcode' || qrIsReady.value || qrStatus.value === 'loading') {
+  if (activeTab.value !== 'qrcode' || qrIsReady.value || qrStatus.value === 'loading') {
     return
   }
 
@@ -290,7 +269,7 @@ function handleDingTalkQrFailure(sessionID, error) {
 }
 
 async function requestDingTalkQrSession() {
-  if (mfaRequired.value || activeTab.value !== 'qrcode') {
+  if (activeTab.value !== 'qrcode') {
     return
   }
 
@@ -320,7 +299,7 @@ async function requestDingTalkQrSession() {
       },
       { signal: requestController.signal },
     )
-    if (requestVersion !== qrRequestVersion || mfaRequired.value || activeTab.value !== 'qrcode') {
+    if (requestVersion !== qrRequestVersion || activeTab.value !== 'qrcode') {
       return
     }
 
@@ -360,8 +339,7 @@ async function requestDingTalkQrSession() {
         requestVersion === qrRequestVersion &&
         qrSession.value?.sessionId === sessionId &&
         qrStatus.value === 'ready' &&
-        activeTab.value === 'qrcode' &&
-        !mfaRequired.value,
+        activeTab.value === 'qrcode',
     })
   } catch (error) {
     if (error?.name === 'AbortError' || requestVersion !== qrRequestVersion) {
@@ -396,90 +374,8 @@ function getDingTalkFailureMessage(errorCode) {
   }
 }
 
-function enterMfa({ returnTo, source, preAuthenticationCredential = '' }) {
-  const normalizedCredential =
-    typeof preAuthenticationCredential === 'string' ? preAuthenticationCredential.trim() : ''
-
-  if (source !== 'password' && source !== 'dingtalk') {
-    throw new Error('不支持的 MFA 登录来源。')
-  }
-  if (source === 'password' && (normalizedCredential.length < 32 || normalizedCredential.length > 512)) {
-    throw new Error('登录服务未返回有效的 MFA 验证信息，请重新登录。')
-  }
-
-  abortQrSessionRequest()
-  resetQrSession()
-  qrStatus.value = 'idle'
-  qrError.value = ''
-  mfaReturnTo.value = source === 'password'
-    ? resolveServerApprovedRedirect(returnTo)
-    : resolveSameOriginRedirect(returnTo)
-  mfaLoginSource.value = source
-  mfaPreAuthenticationCredential = normalizedCredential
-  mfaCode.value = ''
-  mfaError.value = ''
-  mfaRequired.value = true
-}
-
-function clearMfaLoginState() {
-  mfaPreAuthenticationCredential = ''
-  mfaLoginSource.value = ''
-  mfaCode.value = ''
-  mfaError.value = ''
-  mfaReturnTo.value = ''
-}
-
-function validateMfaCode() {
-  const code = mfaCode.value.trim()
-
-  if (!code) {
-    return '请输入动态验证码或恢复码。'
-  }
-  if (code.length > 64) {
-    return '动态验证码或恢复码长度不能超过 64 个字符。'
-  }
-
-  return ''
-}
-
-async function submitMfaLogin() {
-  mfaError.value = validateMfaCode()
-  if (mfaError.value || mfaSubmitting.value) {
-    return
-  }
-
-  mfaSubmitting.value = true
-  try {
-    const result = await verifyMfaLogin({
-      code: mfaCode.value.trim(),
-      preAuthenticationCredential: mfaPreAuthenticationCredential,
-    })
-    const data = result?.data || result
-    const redirectUrl = mfaReturnTo.value || (typeof data?.redirect_url === 'string' ? data.redirect_url : '')
-    const allowApprovedCrossOrigin = mfaLoginSource.value === 'password'
-
-    // 登录完成后立即清除仅存在于页面内存中的本地密码 MFA 预认证凭据。
-    mfaPreAuthenticationCredential = ''
-    mfaLoginSource.value = ''
-    redirectTopLevel(redirectUrl || getLoginReturnTo(), allowApprovedCrossOrigin)
-  } catch (error) {
-    const traceText = error.traceId ? `（追踪号：${error.traceId}）` : ''
-    mfaError.value = `${error.message || 'MFA 验证失败，请重新输入。'}${traceText}`
-  } finally {
-    mfaCode.value = ''
-    mfaSubmitting.value = false
-  }
-}
-
-function returnToLoginChoices() {
-  clearMfaLoginState()
-  mfaRequired.value = false
-  activeTab.value = 'password'
-}
-
 function clearDingTalkCallbackParameters() {
   const currentURL = new URL(window.location.href)
-  currentURL.searchParams.delete('dingtalk_mfa')
   currentURL.searchParams.delete('dingtalk_error')
   currentURL.searchParams.delete('return_to')
   window.history.replaceState(window.history.state, '', `${currentURL.pathname}${currentURL.search}${currentURL.hash}`)
@@ -488,25 +384,17 @@ function clearDingTalkCallbackParameters() {
 function consumeDingTalkCallbackResult() {
   const parameters = new URLSearchParams(window.location.search)
   const dingtalkError = parameters.get('dingtalk_error')
-  const requiresMfa = parameters.get('dingtalk_mfa')
-  const returnTo = parameters.get('return_to')
 
-  if (!dingtalkError && requiresMfa !== '1') {
+  if (!dingtalkError) {
     return
   }
 
   abortQrSessionRequest()
   resetQrSession()
   clearDingTalkCallbackParameters()
-
-  if (dingtalkError) {
-    activeTab.value = 'qrcode'
-    qrStatus.value = dingtalkError === 'AUTH_DINGTALK_QR_SESSION_INVALID' ? 'expired' : 'error'
-    qrError.value = getDingTalkFailureMessage(dingtalkError)
-    return
-  }
-
-  enterMfa({ returnTo, source: 'dingtalk' })
+  activeTab.value = 'qrcode'
+  qrStatus.value = dingtalkError === 'AUTH_DINGTALK_QR_SESSION_INVALID' ? 'expired' : 'error'
+  qrError.value = getDingTalkFailureMessage(dingtalkError)
 }
 
 onMounted(() => {
@@ -517,7 +405,6 @@ onBeforeUnmount(() => {
   abortQrSessionRequest()
   stopQrCountdown()
   resetQrSession()
-  clearMfaLoginState()
 })
 </script>
 
@@ -592,67 +479,6 @@ onBeforeUnmount(() => {
           <p>请验证您的身份以继续访问平台</p>
         </header>
 
-        <section v-if="mfaRequired" class="mfa-panel" aria-labelledby="mfa-heading">
-          <div class="mfa-heading">
-            <span class="login-kicker">SECURITY CHECK</span>
-            <h3 id="mfa-heading">完成安全验证</h3>
-            <p>
-              {{
-                mfaLoginSource === 'dingtalk'
-                  ? '钉钉身份已确认，请输入动态验证码或恢复码以继续登录。'
-                  : '账号密码已验证，请输入动态验证码或恢复码以继续登录。'
-              }}
-            </p>
-          </div>
-
-          <form class="mfa-form" novalidate @submit.prevent="submitMfaLogin">
-            <div class="field-group">
-              <label for="mfa-code">动态验证码或恢复码</label>
-              <div class="input-wrap">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 4.5 5.4v5.1c0 4.7 3.2 9 7.5 10.2 4.3-1.2 7.5-5.5 7.5-10.2V5.4L12 2Zm0 2.2 5.5 2.5v3.8c0 3.5-2.2 6.8-5.5 8-3.3-1.2-5.5-4.5-5.5-8V6.7L12 4.2Zm-1 4v5.6h2V8.2h-2Zm0 7.3v2h2v-2h-2Z" /></svg>
-                <input
-                  id="mfa-code"
-                  v-model.trim="mfaCode"
-                  type="text"
-                  name="mfa-code"
-                  inputmode="numeric"
-                  autocomplete="one-time-code"
-                  maxlength="64"
-                  placeholder="输入 6 位动态码或恢复码"
-                  :disabled="mfaSubmitting"
-                />
-              </div>
-            </div>
-
-            <p v-if="mfaError" class="form-message error" role="alert">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16Zm-1-5h2v2h-2v-2Zm0-8h2v6h-2V7Z" /></svg>
-              <span>{{ mfaError }}</span>
-            </p>
-
-            <button class="login-button" type="submit" :disabled="mfaSubmitting">
-              <span v-if="mfaSubmitting" class="button-spinner" aria-hidden="true"></span>
-              <span>{{ mfaSubmitting ? '正在验证…' : '完成验证' }}</span>
-              <svg v-if="!mfaSubmitting" viewBox="0 0 24 24" aria-hidden="true"><path d="m13 5-1.4 1.4 4.6 4.6H4v2h12.2l-4.6 4.6L13 19l7-7-7-7Z" /></svg>
-            </button>
-
-            <button class="mfa-back" type="button" :disabled="mfaSubmitting" @click="returnToLoginChoices">
-              返回其他登录方式
-            </button>
-
-            <div class="security-tip">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 4.5 5.4v5.1c0 4.7 3.2 9 7.5 10.2 4.3-1.2 7.5-5.5 7.5-10.2V5.4L12 2Zm0 2.2 5.5 2.5v3.8c0 3.5-2.2 6.8-5.5 8-3.3-1.2-5.5-4.5-5.5-8V6.7L12 4.2Zm-1 4v5.6h2V8.2h-2Zm0 7.3v2h2v-2h-2Z" /></svg>
-              <span>
-                {{
-                  mfaLoginSource === 'password'
-                    ? '本次 MFA 预认证凭据仅保存在当前页面内存，完成或离开页面后即清除'
-                    : 'MFA 预认证凭据仅由安全 Cookie 管理，不会暴露给前端'
-                }}
-              </span>
-            </div>
-          </form>
-        </section>
-
-        <template v-else>
         <div class="login-tabs" role="tablist" aria-label="登录方式">
           <button
             id="password-tab"
@@ -847,7 +673,6 @@ onBeforeUnmount(() => {
           </button>
           <p class="qr-note">扫码授权仅用于完成本次平台登录；授权完成后会在当前窗口进入平台。</p>
         </section>
-        </template>
       </div>
 
       <footer class="form-footer">

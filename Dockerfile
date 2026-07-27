@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1
-
 # Vite 在构建时写入 API 基础路径，因此通过构建参数固定为同源反向代理地址。
 FROM node:22-alpine AS builder
 
@@ -21,6 +19,8 @@ RUN npm run build
 FROM nginx:1.27-alpine
 
 COPY nginx/default.conf /etc/nginx/conf.d/default.conf
+RUN mkdir -p /etc/nginx/portal-apps.d
+COPY nginx/portal-apps-locations.conf /etc/nginx/portal-apps.d/managed.conf
 COPY --from=builder /app/dist /usr/share/nginx/html
 
 EXPOSE 80

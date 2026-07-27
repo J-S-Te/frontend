@@ -4,9 +4,8 @@ import vue from '@vitejs/plugin-vue'
 
 // 前后端联调说明：
 //   1. 本地启动后端（cd ../platform/backend && go run ./cmd/api）监听 8080。
-//   2. 前端 vite dev server 监听 5173，把 /api/v1/* 反代到后端 8080。
-//   3. 如果 VITE_API_PROXY_TARGET 指定了其他地址（例如 http://10.0.0.5:8080），会使用该值。
-//   4. 如果需要指向已部署的环境，把 VITE_API_BASE_URL 改成绝对 URL（必须带 https/http 协议），
+//   2. 前端 vite dev server 监听 5173，把基础平台 /api/v1/* 反代到后端 8080。
+//   3. 如果需要指向已部署的环境，把 API_BASE_URL 改成绝对 URL（必须带 https/http 协议），
 //      此时浏览器会直接走跨域请求，需后端 CORS 放行；本地联调时不要设置。
 const DEFAULT_API_PROXY_TARGET = 'http://127.0.0.1:8080'
 const PROXIED_PATHS = ['/api', '/authorize', '/oauth2', '/.well-known']
@@ -22,11 +21,8 @@ function apiProxy(target) {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const proxyTarget = env.VITE_API_PROXY_TARGET || DEFAULT_API_PROXY_TARGET
-  const apiBaseURL = env.VITE_API_BASE_URL || '/api/v1'
 
-  const proxy = Object.fromEntries(
-    PROXIED_PATHS.map((path) => [path, apiProxy(proxyTarget)]),
-  )
+  const proxy = Object.fromEntries(PROXIED_PATHS.map((path) => [path, apiProxy(proxyTarget)]))
 
   return {
     plugins: [vue()],

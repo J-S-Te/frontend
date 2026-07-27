@@ -1,20 +1,34 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import AuditOperationsModule from '@/modules/platform/audit/components/AuditOperationsModule.vue'
+import { AuthError, logoutCurrentSession } from '@/modules/platform/auth/api/auth'
 import FileTaskOperationsModule from '@/modules/platform/files/components/FileTaskOperationsModule.vue'
 import IamSettingsModule from '@/modules/platform/iam/components/IamSettingsModule.vue'
 import ApplicationLoginTargetModule from '@/modules/platform/login-targets/components/ApplicationLoginTargetModule.vue'
 import NotificationCenterModule from '@/modules/platform/notifications/components/NotificationCenterModule.vue'
-import ObservabilityManagementModule from '@/modules/platform/observability/components/ObservabilityManagementModule.vue'
-import SecurityObservabilityModule from '@/modules/platform/security/components/SecurityObservabilityModule.vue'
+import LoginSecurityModule from '@/modules/platform/security/components/LoginSecurityModule.vue'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
-import { listApplications, listEnvironments } from '@/modules/platform/applications/api/applications'
+import {
+  ApplicationRegistryError,
+  createApplication,
+  createEnvironment,
+  listApplications,
+  listEnvironments,
+  updateEnvironment,
+} from '@/modules/platform/applications/api/applications'
 import {
   AuditEventsError,
   listAuditEvents,
   createAuditExportJob,
 } from '@/modules/platform/audit/api/auditEvents'
+import {
+  auditActionCode,
+  auditActionLabel,
+  auditHttpStatusLabel,
+  auditResultLabel,
+  auditResultMeta,
+  auditResultTone,
+} from '@/modules/platform/audit/utils/auditPresentation'
 import {
   PlatformSettingsError,
   getPlatformSettings,
@@ -29,9 +43,20 @@ const settingsLoading = ref(false)
 const settingsError = ref('')
 const settingsSaving = ref(false)
 const currentView = computed(() => (route.name === 'audit' ? 'audit' : 'settings'))
-const loginTargetBoundary = reactive({ applicationId: '', environmentId: '', applicationName: '', environmentName: '', baseURL: '', pathPrefix: '' })
+const loginTargetBoundary = reactive({ applicationId: '', environmentId: '', applicationName: '', environmentName: '', baseURL: '', upstreamURL: '', pathPrefix: '' })
+const subsystemEditor = reactive({
+  code: '',
+  name: '',
+  environment: 'prod',
+  baseURL: typeof window === 'undefined' ? '' : window.location.origin,
+  upstreamURL: '',
+  pathPrefix: '',
+})
+const subsystemSaving = ref(false)
+const subsystemError = ref('')
 const loginTargetEnvironments = ref([])
 const mobileMenuOpen = ref(false)
+const isLoggingOut = ref(false)
 const toastMessage = ref('')
 const auditKeyword = ref('')
 const auditType = ref('')
@@ -59,7 +84,6 @@ const settingsTabs = [
   { key: 'login-targets', label: '统一登录目标' },
   { key: 'notify', label: '通知中心' },
   { key: 'security', label: '安全设置' },
-  { key: 'observability', label: '可观测性' },
   { key: 'files', label: '文件与任务' },
   { key: 'dict', label: '字典管理' },
 ]
@@ -85,7 +109,14 @@ const activeSettingsTab = computed({
 // 前后端 result / risk 枚举到中文标签的映射，与后端 audit/application 层枚举保持一致。
 const RESULT_LABELS = { SUCCESS: '成功', DENIED: '拒绝', ERROR: '异常', PARTIAL: '部分成功' }
 const RISK_LABELS = { HIGH: '高', MEDIUM: '中', LOW: '低' }
-const AUDIT_TYPE_OPTIONS = ['登录', '新增', '修改', '导出', '状态变更']
+// 下拉框展示中文标签，提交给后端的是稳定的机器可读分类值，不能把中文标签当作 action 精确值查询。
+const AUDIT_TYPE_OPTIONS = [
+  { label: '登录', value: 'LOGIN' },
+  { label: '新增', value: 'CREATE' },
+  { label: '修改', value: 'UPDATE' },
+  { label: '导出', value: 'EXPORT' },
+  { label: '状态变更', value: 'STATUS_CHANGE' },
+]
 const AUDIT_RESULT_OPTIONS = Object.values(RESULT_LABELS)
 const AUDIT_RISK_OPTIONS = Object.values(RISK_LABELS)
 
@@ -114,10 +145,9 @@ function formatAuditTime(value) {
 const filteredAuditRecords = computed(() => auditRecords.value)
 
 const auditTotalPages = computed(() => Math.max(1, Math.ceil(auditTotal.value / auditPageSize)))
-const pagedAuditRecords = computed(() => {
-  const startIndex = (auditPage.value - 1) * auditPageSize
-  return filteredAuditRecords.value.slice(startIndex, startIndex + auditPageSize)
-})
+// 审计接口已经按 page/page_size 返回当前页数据，前端不能再次按照全局页码切片，
+// 否则从第二页开始会把后端返回的当前页记录全部过滤掉。
+const pagedAuditRecords = computed(() => filteredAuditRecords.value)
 const allPageAuditSelected = computed(() => pagedAuditRecords.value.length > 0 && pagedAuditRecords.value.every((record) => selectedAuditIds.value.includes(record.id)))
 
 const viewMeta = computed(() => {
@@ -128,10 +158,7 @@ const viewMeta = computed(() => {
     return { title: '系统设置', crumb: '系统设置', description: 'SYS-002 ~ SYS-004 · 身份、组织、角色与权限集中配置' }
   }
   if (activeSettingsTab.value === 'security') {
-    return { title: '系统设置', crumb: '系统设置', description: 'AUD-002 · 登录安全与风险策略集中配置' }
-  }
-  if (activeSettingsTab.value === 'observability') {
-    return { title: '系统设置', crumb: '系统设置', description: 'OBS-001 · 运行日志、Trace、Metric 与告警规则运营' }
+    return { title: '系统设置', crumb: '系统设置', description: '登录策略、账户锁定与会话超时集中配置' }
   }
   return { title: '系统设置', crumb: '系统设置', description: 'SYS-001 · 平台级参数、通知与安全策略集中配置' }
 })
@@ -201,7 +228,7 @@ function resetSettings() {
 
 async function loadApplications() {
   try {
-    const data = await listApplications({ page: 1, pageSize: 200, status: 'ACTIVE' })
+    const data = await listApplications({ page: 1, pageSize: 100, status: 'ACTIVE' })
     applications.value = data.items || []
   } catch (error) {
     applications.value = []
@@ -233,7 +260,10 @@ async function loadLoginTargetEnvironments(applicationID) {
   if (!applicationID) {
     loginTargetEnvironments.value = []
     loginTargetBoundary.environmentId = ''
+    loginTargetBoundary.applicationName = ''
+    loginTargetBoundary.environmentName = ''
     loginTargetBoundary.baseURL = ''
+    loginTargetBoundary.upstreamURL = ''
     loginTargetBoundary.pathPrefix = ''
     return
   }
@@ -242,7 +272,9 @@ async function loadLoginTargetEnvironments(applicationID) {
     loginTargetEnvironments.value = data.items || []
     if (!loginTargetEnvironments.value.some((env) => env.environment_id === loginTargetBoundary.environmentId)) {
       loginTargetBoundary.environmentId = ''
+      loginTargetBoundary.environmentName = ''
       loginTargetBoundary.baseURL = ''
+      loginTargetBoundary.upstreamURL = ''
       loginTargetBoundary.pathPrefix = ''
     }
   } catch (error) {
@@ -251,19 +283,142 @@ async function loadLoginTargetEnvironments(applicationID) {
 }
 
 watch(() => loginTargetBoundary.applicationId, (value) => {
+  const app = applications.value.find((item) => item.application_id === value)
+  loginTargetBoundary.applicationName = app?.name || app?.code || ''
   loadLoginTargetEnvironments(value)
 })
 
 watch(() => loginTargetBoundary.environmentId, (value) => {
   if (!value) {
+    loginTargetBoundary.environmentName = ''
     loginTargetBoundary.baseURL = ''
+    loginTargetBoundary.upstreamURL = ''
     loginTargetBoundary.pathPrefix = ''
     return
   }
   const env = loginTargetEnvironments.value.find((item) => item.environment_id === value)
+  loginTargetBoundary.environmentName = env?.environment || ''
   loginTargetBoundary.baseURL = env?.base_url || ''
+  loginTargetBoundary.upstreamURL = env?.upstream_url || ''
   loginTargetBoundary.pathPrefix = env?.path_prefix || ''
 })
+
+function optionalEditorValue(value) {
+  const normalized = String(value || '').trim()
+  return normalized || null
+}
+
+function validateSubsystemEditor() {
+  const code = subsystemEditor.code.trim().toLowerCase()
+  const name = subsystemEditor.name.trim()
+  const baseURL = subsystemEditor.baseURL.trim().replace(/\/+$/, '')
+  const upstreamURL = subsystemEditor.upstreamURL.trim().replace(/\/+$/, '')
+  const pathPrefix = subsystemEditor.pathPrefix.trim().replace(/\/+$/, '')
+
+  if (!code || !name || !baseURL || !upstreamURL || !pathPrefix) {
+    throw new ApplicationRegistryError('子系统编码、名称、门户 BaseURL、内部 UpstreamURL 和路径前缀均不能为空。', { code: 'VALIDATION_ERROR' })
+  }
+  if (!/^[a-z][a-z0-9._-]{0,63}$/.test(code)) {
+    throw new ApplicationRegistryError('子系统编码需为 1-64 位，并以小写字母开头；其余可使用小写字母、数字、点、下划线或连字符。', { code: 'VALIDATION_ERROR' })
+  }
+  if (!/^\/[A-Za-z0-9._~!+/\-]*$/.test(pathPrefix) || pathPrefix === '/' || pathPrefix.includes('//') || pathPrefix.split('/').some((segment) => segment === '.' || segment === '..')) {
+    throw new ApplicationRegistryError('路径前缀必须是类似 /business-app 的门户绝对路径，只能使用字母、数字、/、点、下划线、~、!、+、-，且不能包含重复斜杠或点路径段。', { code: 'VALIDATION_ERROR' })
+  }
+  const upstreamMatch = upstreamURL.match(/^https?:\/\/(?:\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9._~-]+)(?::([0-9]{1,5}))?(?:\/[A-Za-z0-9._~!%+/@-]*)?$/)
+  if (!upstreamMatch || (upstreamMatch[1] && (Number(upstreamMatch[1]) < 1 || Number(upstreamMatch[1]) > 65535))) {
+    throw new ApplicationRegistryError('内部 UpstreamURL 必须是可安全写入网关配置的 http/https 地址，例如 http://10.0.0.8:8081。', { code: 'VALIDATION_ERROR' })
+  }
+  for (const [label, value] of [['门户 BaseURL', baseURL], ['内部 UpstreamURL', upstreamURL]]) {
+    let parsed
+    try {
+      parsed = new URL(value)
+    } catch {
+      throw new ApplicationRegistryError(`${label} 不是有效 URL。`, { code: 'VALIDATION_ERROR' })
+    }
+    if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash) {
+      throw new ApplicationRegistryError(`${label} 仅支持无账号、查询参数和片段的 http/https URL。`, { code: 'VALIDATION_ERROR' })
+    }
+  }
+  return { code, name, baseURL, upstreamURL, pathPrefix }
+}
+
+async function saveSubsystemConnection() {
+  if (subsystemSaving.value) return
+  subsystemSaving.value = true
+  subsystemError.value = ''
+  try {
+    const normalized = validateSubsystemEditor()
+    const matchedApplications = await listApplications({
+      page: 1,
+      pageSize: 100,
+      status: '',
+      keyword: normalized.code,
+    })
+    let application = (matchedApplications.items || []).find((item) => item.code === normalized.code)
+    if (!application) {
+      application = await createApplication({
+        code: normalized.code,
+        name: normalized.name,
+        applicationType: 'web',
+        description: `门户路径接入：${normalized.pathPrefix}`,
+        status: 'ACTIVE',
+      })
+    }
+
+    const environmentPage = await listEnvironments({
+      applicationId: application.application_id,
+      page: 1,
+      pageSize: 100,
+      status: '',
+    })
+    const existingEnvironment = (environmentPage.items || []).find((item) => item.environment === subsystemEditor.environment)
+    const environmentPayload = {
+      applicationId: application.application_id,
+      baseUrl: normalized.baseURL,
+      upstreamUrl: normalized.upstreamURL,
+      pathPrefix: normalized.pathPrefix,
+      status: 'ACTIVE',
+    }
+    const environment = existingEnvironment
+      ? await updateEnvironment({
+          ...environmentPayload,
+          environmentId: existingEnvironment.environment_id,
+          issuerAlias: optionalEditorValue(existingEnvironment.issuer_alias),
+          metadata: existingEnvironment.metadata || {},
+          version: existingEnvironment.version,
+        })
+      : await createEnvironment({
+          ...environmentPayload,
+          environment: subsystemEditor.environment,
+        })
+
+    await loadApplications()
+    loginTargetBoundary.applicationId = application.application_id
+    await loadLoginTargetEnvironments(application.application_id)
+    loginTargetBoundary.environmentId = environment.environment_id
+    showToast(existingEnvironment ? '子系统接入配置已更新；网关同步后生效。' : '子系统及环境已登记；网关同步后生效。')
+  } catch (error) {
+    subsystemError.value = error instanceof ApplicationRegistryError ? error.message : '保存子系统接入配置失败。'
+  } finally {
+    subsystemSaving.value = false
+  }
+}
+
+function loadSelectedSubsystemConnection() {
+  const app = applications.value.find((item) => item.application_id === loginTargetBoundary.applicationId)
+  const env = loginTargetEnvironments.value.find((item) => item.environment_id === loginTargetBoundary.environmentId)
+  if (!app || !env) {
+    subsystemError.value = '请先选择需要编辑的应用和环境。'
+    return
+  }
+  subsystemEditor.code = app.code || ''
+  subsystemEditor.name = app.name || app.code || ''
+  subsystemEditor.environment = env.environment || 'prod'
+  subsystemEditor.baseURL = env.base_url || (typeof window === 'undefined' ? '' : window.location.origin)
+  subsystemEditor.upstreamURL = env.upstream_url || ''
+  subsystemEditor.pathPrefix = env.path_prefix || ''
+  subsystemError.value = ''
+}
 
 async function loadAuditEvents() {
   if (currentView.value !== 'audit') return
@@ -277,7 +432,7 @@ async function loadAuditEvents() {
       keyword: auditKeyword.value.trim(),
       applicationCode: auditApplication.value,
       environmentCode: auditEnvironment.value,
-      action: auditType.value,
+      actionCategory: auditType.value,
       result: auditResultValue(auditResult.value),
       riskLevel: auditRiskValue(auditRisk.value),
       occurredFrom: bounds.from,
@@ -356,14 +511,14 @@ async function exportAuditRecords() {
       keyword: auditKeyword.value.trim(),
       applicationCode: auditApplication.value,
       environmentCode: auditEnvironment.value,
-      action: auditType.value,
+      actionCategory: auditType.value,
       result: auditResultValue(auditResult.value),
       riskLevel: auditRiskValue(auditRisk.value),
       occurredFrom: bounds.from,
       occurredTo: bounds.to,
     })
     const status = job?.status || '已接收'
-    showToast(`导出任务已提交（${status}），稍后到“审计运营”下载。`)
+    showToast(`导出任务已提交（${status}），请稍后在“文件与任务”中查看结果。`)
   } catch (error) {
     showToast(error.message || '提交导出任务失败。')
   } finally {
@@ -371,8 +526,23 @@ async function exportAuditRecords() {
   }
 }
 
-function logout() {
-  router.push({ name: 'login' })
+async function logout() {
+  if (isLoggingOut.value) return
+
+  isLoggingOut.value = true
+  try {
+    await logoutCurrentSession()
+    await router.replace({ name: 'login', query: { reason: 'session-ended' } })
+  } catch (error) {
+    // 服务端已失效的会话同样需要落到登录页，避免页面停留在受保护区域。
+    if (error instanceof AuthError && error.status === 401) {
+      await router.replace({ name: 'login', query: { reason: 'session-ended' } })
+      return
+    }
+    showToast(error.message || '退出登录失败，请稍后重试。')
+  } finally {
+    isLoggingOut.value = false
+  }
 }
 
 watch(currentView, (view) => {
@@ -459,7 +629,7 @@ onBeforeUnmount(() => {
       <div class="console-sidebar-user">
         <span class="console-avatar">管</span>
         <span class="console-user-copy"><strong>平台管理员</strong><small>系统管理员</small></span>
-        <button class="console-logout" type="button" aria-label="退出登录" @click="logout"><ConsoleIcon name="logout" /></button>
+        <button class="console-logout" type="button" :disabled="isLoggingOut" aria-label="退出应用系统" @click="logout"><ConsoleIcon name="logout" /></button>
       </div>
     </aside>
 
@@ -491,7 +661,7 @@ onBeforeUnmount(() => {
             </label>
             <label class="console-select-field"><select v-model="auditApplication" aria-label="应用"><option value="">全部应用</option><option v-for="app in applications" :key="app.application_id" :value="app.code">{{ app.name || app.code }}</option></select></label>
             <label class="console-select-field"><select v-model="auditEnvironment" :disabled="!auditApplication" aria-label="环境"><option value="">全部环境</option><option v-for="env in environments" :key="env.environment_id" :value="env.environment_code || env.environment">{{ env.environment_code || env.environment }}</option></select></label>
-            <label class="console-select-field"><select v-model="auditType" aria-label="操作类型"><option value="">全部操作</option><option v-for="option in AUDIT_TYPE_OPTIONS" :key="option" :value="option">{{ option }}</option></select></label>
+            <label class="console-select-field"><select v-model="auditType" aria-label="操作类型"><option value="">全部操作</option><option v-for="option in AUDIT_TYPE_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
             <label class="console-select-field"><select v-model="auditRisk" aria-label="风险等级"><option value="">全部风险</option><option v-for="option in AUDIT_RISK_OPTIONS" :key="option" :value="option">{{ option }}</option></select></label>
             <label class="console-select-field"><select v-model="auditResult" aria-label="操作结果"><option value="">全部结果</option><option v-for="option in AUDIT_RESULT_OPTIONS" :key="option" :value="option">{{ option }}</option></select></label>
             <label class="console-select-field"><select v-model="auditTimeRange" aria-label="时间范围"><option value="24h">最近 24 小时</option><option value="7d">最近 7 天</option><option value="30d">最近 30 天</option></select></label>
@@ -521,23 +691,21 @@ onBeforeUnmount(() => {
                     <td class="audit-check-cell"><input v-model="selectedAuditIds" type="checkbox" :value="record.id" :aria-label="`选择 ${record.id}`" /></td>
                     <td class="console-mono" data-label="发生时间">{{ formatAuditTime(record.time) }}</td>
                     <td data-label="操作人"><strong class="console-entity-name">{{ record.operator || '—' }}</strong></td>
-                    <td data-label="操作"><span class="console-badge" :class="`type-${record.type}`">{{ record.type || record.action || '—' }}</span><span class="console-entity-meta">{{ record.action }}</span></td>
+                    <td data-label="操作"><span class="console-badge audit-action-badge" :class="`type-${auditActionLabel(record)}`">{{ auditActionLabel(record) }}</span><span v-if="auditActionCode(record)" class="console-entity-meta console-mono">{{ auditActionCode(record) }}</span></td>
                     <td data-label="应用 / 环境"><strong>{{ record.application || '—' }}</strong><span class="console-entity-meta">{{ record.environment || '—' }}</span></td>
                     <td data-label="资源对象"><strong>{{ record.object || record.resource || '—' }}</strong><span class="console-entity-meta">{{ record.resource }}</span></td>
                     <td data-label="方法 / 路径"><span class="audit-method">{{ record.method || '—' }}</span><span class="console-entity-meta console-mono">{{ record.path || '—' }}</span></td>
                     <td class="console-mono" data-label="客户端 IP">{{ record.ip || '—' }}</td>
-                    <td data-label="状态"><span class="console-badge" :class="record.result === 'SUCCESS' ? 'status-active' : 'audit-result-denied'">{{ record.statusCode || '—' }} · {{ record.resultLabel || record.result || '—' }}</span></td>
+                    <td data-label="状态"><span class="console-badge audit-result-badge" :class="auditResultTone(record.result)">{{ auditResultLabel(record) }}</span><span v-if="auditHttpStatusLabel(record.statusCode)" class="console-entity-meta audit-status-code">{{ auditHttpStatusLabel(record.statusCode) }}</span></td>
                     <td data-label="风险"><span class="console-badge" :class="`risk-${record.risk}`">{{ record.riskLabel || record.risk || '—' }}</span></td>
                     <td class="console-actions-cell" data-label="操作"><button class="console-text-button" type="button" @click="openAuditDetail(record)">详情</button><button class="console-text-button danger" type="button" @click="deleteAuditRecords([record.id])">归档</button></td>
                   </tr>
-                  <tr v-if="!pagedAuditRecords.length"><td class="console-empty" colspan="12">未找到符合筛选条件的审计事件。</td></tr>
                 </tbody>
               </table>
             </div>
             <footer class="console-table-footer audit-table-footer"><span>第 {{ auditPage }} / {{ auditTotalPages }} 页 · 共 {{ auditTotal }} 条 · 审计事件保留与清理请走受控保留任务</span><div class="audit-pagination"><button class="console-text-button" type="button" :disabled="auditPage === 1 || auditLoading" @click="changeAuditPage(auditPage - 1)">上一页</button><span class="console-page-token">{{ auditPage }} / {{ auditTotalPages }}</span><button class="console-text-button" type="button" :disabled="auditPage === auditTotalPages || auditLoading" @click="changeAuditPage(auditPage + 1)">下一页</button></div></footer>
           </div>
 
-          <AuditOperationsModule @toast="showToast" />
         </section>
 
         <section v-else class="settings-view" aria-label="系统设置">
@@ -548,13 +716,12 @@ onBeforeUnmount(() => {
           <div v-if="activeSettingsTab === 'base'" class="console-card settings-card">
             <div class="console-card-body">
               <h2>平台基础信息</h2>
-              <p class="console-card-hint">用于定义基础能力平台的展示名称与平台标识。</p>
+              <p class="console-card-hint">用于定义基础能力平台的展示名称。</p>
               <p v-if="settingsLoading" class="console-card-hint">正在读取平台设置…</p>
               <p v-else-if="settingsError" class="login-target-module__error" role="alert">{{ settingsError }}</p>
               <div class="console-form-grid">
                 <label class="console-form-item"><span>平台名称</span><input v-model="settings.organizationName" :disabled="settingsLoading" /></label>
                 <label class="console-form-item"><span>平台简称</span><input v-model="settings.organizationAlias" :disabled="settingsLoading" /></label>
-                <div class="console-form-item"><span>平台标识</span><div class="console-logo-preview"><b>{{ (settings.organizationName || '基').slice(0, 1) }}</b><small>默认文字标识，后续可接入本地文件上传。</small></div></div>
               </div>
               <div class="console-form-actions"><button class="console-button primary" type="button" :disabled="settingsSaving" @click="saveSettings"><ConsoleIcon name="save" />{{ settingsSaving ? '保存中…' : '保存设置' }}</button><button class="console-button ghost" type="button" :disabled="settingsLoading" @click="resetSettings">重新读取</button></div>
             </div>
@@ -563,22 +730,46 @@ onBeforeUnmount(() => {
           <IamSettingsModule v-else-if="activeSettingsTab === 'iam'" @toast="showToast" />
 
           <div v-else-if="activeSettingsTab === 'login-targets'" class="settings-module-stack">
-            <div class="console-card settings-card"><div class="console-card-body"><h2>管理边界</h2><p class="console-card-hint">登录目标严格归属于一个应用环境；目标地址必须为 https 绝对地址或相对路径（以 <code>/</code> 开头），且与 OAuth redirect_uri 分离。</p>
-              <div class="console-form-grid">
-                <label class="console-form-item"><span>应用</span><select v-model="loginTargetBoundary.applicationId" :disabled="!applications.length"><option value="">请选择应用</option><option v-for="app in applications" :key="app.application_id" :value="app.application_id">{{ app.name || app.code }}（{{ app.code }}）</option></select></label>
-                <label class="console-form-item"><span>环境</span><select v-model="loginTargetBoundary.environmentId" :disabled="!loginTargetBoundary.applicationId || !loginTargetEnvironments.length"><option value="">请选择环境</option><option v-for="env in loginTargetEnvironments" :key="env.environment_id" :value="env.environment_id">{{ env.environment }}</option></select></label>
-                <div class="console-form-item"><span>应用 / 环境路径前缀</span><strong class="console-mono">{{ loginTargetBoundary.pathPrefix || '—' }}</strong><small>由后台 UpstreamURL / PathPrefix 决定；非空表示门户会按此路径反代到子系。</small></div>
-                <div class="console-form-item"><span>应用基础地址</span><strong class="console-mono">{{ loginTargetBoundary.baseURL || '—' }}</strong><small>子系对外的 BaseURL；相对路径 TargetURI 会在此地址上拼接。</small></div>
+            <form class="console-card settings-card" @submit.prevent="saveSubsystemConnection">
+              <div class="console-card-body">
+                <h2>子系统接入</h2>
+                <p class="console-card-hint">只登记门户公开地址、内部上游和路径前缀。登录目标后续只需填写 <code>/dashboard</code> 这类子系统内相对路径。</p>
+                <p v-if="subsystemError" class="login-target-module__error" role="alert">{{ subsystemError }}</p>
+                <div class="console-form-grid">
+                  <label class="console-form-item"><span>子系统编码</span><input v-model="subsystemEditor.code" autocomplete="off" placeholder="business-app" /><small>稳定编码；已有同编码应用时更新指定环境。</small></label>
+                  <label class="console-form-item"><span>子系统名称</span><input v-model="subsystemEditor.name" autocomplete="off" placeholder="业务应用" /></label>
+                  <label class="console-form-item"><span>环境</span><select v-model="subsystemEditor.environment"><option value="dev">dev</option><option value="test">test</option><option value="staging">staging</option><option value="prod">prod</option></select></label>
+                  <label class="console-form-item"><span>门户公开 BaseURL</span><input v-model="subsystemEditor.baseURL" autocomplete="url" placeholder="http://portal-ip" /><small>浏览器实际访问的统一入口；默认使用当前门户 Origin。</small></label>
+                  <label class="console-form-item"><span>内部 UpstreamURL</span><input v-model="subsystemEditor.upstreamURL" autocomplete="url" placeholder="http://10.0.0.8:8081" /><small>仅供门户网关访问，不会出现在登录跳转地址中。</small></label>
+                  <label class="console-form-item"><span>门户路径前缀</span><input v-model="subsystemEditor.pathPrefix" autocomplete="off" placeholder="/business-app" /><small>必须独占且不能为 <code>/</code>。</small></label>
+                </div>
+                <div class="console-form-actions">
+                  <button class="console-button primary" type="submit" :disabled="subsystemSaving"><ConsoleIcon name="save" />{{ subsystemSaving ? '保存中…' : '保存接入配置' }}</button>
+                  <button class="console-button ghost" type="button" :disabled="subsystemSaving" @click="loadSelectedSubsystemConnection">载入当前环境</button>
+                </div>
               </div>
-            </div></div>
+            </form>
+
+            <div class="console-card settings-card">
+              <div class="console-card-body">
+                <h2>登录目标管理边界</h2>
+                <p class="console-card-hint">登录目标严格归属于一个应用环境；目标地址必须为 https 绝对地址或相对路径（以 <code>/</code> 开头），且与 OAuth redirect_uri 分离。</p>
+                <div class="console-form-grid">
+                  <label class="console-form-item"><span>应用</span><select v-model="loginTargetBoundary.applicationId" :disabled="!applications.length"><option value="">请选择应用</option><option v-for="app in applications" :key="app.application_id" :value="app.application_id">{{ app.name || app.code }}（{{ app.code }}）</option></select></label>
+                  <label class="console-form-item"><span>环境</span><select v-model="loginTargetBoundary.environmentId" :disabled="!loginTargetBoundary.applicationId || !loginTargetEnvironments.length"><option value="">请选择环境</option><option v-for="env in loginTargetEnvironments" :key="env.environment_id" :value="env.environment_id">{{ env.environment }}</option></select></label>
+                  <div class="console-form-item"><span>门户路径前缀</span><strong class="console-mono">{{ loginTargetBoundary.pathPrefix || '—' }}</strong><small>网关按此前缀把请求转发到内部上游。</small></div>
+                  <div class="console-form-item"><span>门户公开 BaseURL</span><strong class="console-mono">{{ loginTargetBoundary.baseURL || '—' }}</strong><small>相对 TargetURI 最终按 BaseURL + PathPrefix + TargetURI 拼接。</small></div>
+                  <div class="console-form-item full"><span>内部 UpstreamURL</span><strong class="console-mono">{{ loginTargetBoundary.upstreamURL || '—' }}</strong><small>只用于反向代理，不作为浏览器跳转地址。</small></div>
+                </div>
+              </div>
+            </div>
             <ApplicationLoginTargetModule :application-id="loginTargetBoundary.applicationId" :environment-id="loginTargetBoundary.environmentId" :application-name="loginTargetBoundary.applicationName" :environment-name="loginTargetBoundary.environmentName" @toast="showToast" />
           </div>
 
           <NotificationCenterModule v-else-if="activeSettingsTab === 'notify'" @toast="showToast" />
 
-          <SecurityObservabilityModule v-else-if="activeSettingsTab === 'security'" @toast="showToast" />
+          <LoginSecurityModule v-else-if="activeSettingsTab === 'security'" @toast="showToast" />
 
-          <ObservabilityManagementModule v-else-if="activeSettingsTab === 'observability'" @toast="showToast" />
 
           <FileTaskOperationsModule v-else-if="activeSettingsTab === 'files'" @toast="showToast" />
 
@@ -600,7 +791,7 @@ onBeforeUnmount(() => {
           <div><span>发生时间</span><strong>{{ formatAuditTime(auditDetail.time) }}</strong></div>
           <div><span>操作人</span><strong>{{ auditDetail.operator || '—' }}</strong></div>
           <div><span>应用 / 环境</span><strong>{{ auditDetail.application || '—' }} / {{ auditDetail.environment || '—' }}</strong></div>
-          <div><span>操作结果</span><strong>{{ auditDetail.statusCode || '—' }} · {{ auditDetail.resultLabel || auditDetail.result || '—' }} · {{ auditDetail.riskLabel || auditDetail.risk || '—' }}风险</strong></div>
+          <div><span>操作结果</span><strong class="audit-detail-result-wrap"><span class="console-badge audit-result-badge" :class="auditResultTone(auditDetail.result)">{{ auditResultLabel(auditDetail) }}</span><small v-if="auditResultMeta(auditDetail)">{{ auditResultMeta(auditDetail) }}</small></strong></div>
           <div><span>HTTP 请求</span><strong>{{ auditDetail.method || '—' }} {{ auditDetail.path || '—' }}</strong></div>
           <div><span>客户端</span><strong>{{ auditDetail.ip || '—' }}</strong></div>
         </div>

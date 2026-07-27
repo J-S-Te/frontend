@@ -61,7 +61,9 @@ async function download() {
   try {
     const { blob, filename } = await downloadLocalFile(fileId)
     const objectUrl = URL.createObjectURL(blob); const link = document.createElement('a')
-    link.href = objectUrl; link.download = filename || fileId; link.click(); URL.revokeObjectURL(objectUrl)
+    link.href = objectUrl; link.download = filename || fileId; link.style.display = 'none'
+    document.body.append(link); link.click(); link.remove()
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0)
   } catch (error) { errorMessage.value = normalizeError(error, '文件下载失败。') } finally { downloading.value = false }
 }
 
@@ -110,7 +112,7 @@ onMounted(loadJobs)
     <header class="filetask-module__header"><div><span class="filetask-module__eyebrow">LOCAL FILES · MYSQL JOBS</span><h2 id="filetask-heading">文件与异步任务</h2><p>文件仅写入平台本地目录，元数据和任务状态持久化在 MySQL；不使用对象存储或 Redis。</p></div><button class="console-button ghost" type="button" :disabled="loading" @click="loadJobs"><ConsoleIcon name="reset" /> 刷新任务</button></header>
     <p v-if="errorMessage" class="filetask-module__error">{{ errorMessage }}</p>
     <div class="filetask-module__grid">
-      <article class="filetask-card"><header><ConsoleIcon name="export" /><div><h3>安全上传</h3><p>限制服务端白名单类型、最大大小与原子落盘。</p></div></header><label><span>所属应用 ID</span><input v-model="uploadForm.applicationId" autocomplete="off" placeholder="例如 contract-management" /></label><label><span>密级</span><select v-model="uploadForm.classification"><option value="INTERNAL">内部</option><option value="CONFIDENTIAL">机密</option><option value="RESTRICTED">受限</option></select></label><label><span>选择文件</span><input ref="uploadInput" type="file" accept=".pdf,.jpg,.jpeg,.png,.txt,.csv,application/pdf,image/jpeg,image/png,text/plain,text/csv" @change="onFileSelected" /></label><div class="filetask-card__actions"><button class="console-button primary" type="button" :disabled="uploading" @click="upload">{{ uploading ? '上传中…' : '上传文件' }}</button></div></article>
+      <article class="filetask-card"><header><ConsoleIcon name="export" /><div><h3>安全上传</h3><p>限制服务端白名单类型、最大大小与原子落盘。</p></div></header><label><span>所属应用 ID</span><input v-model="uploadForm.applicationId" autocomplete="off" placeholder="例如 application-id" /></label><label><span>密级</span><select v-model="uploadForm.classification"><option value="INTERNAL">内部</option><option value="CONFIDENTIAL">机密</option><option value="RESTRICTED">受限</option></select></label><label><span>选择文件</span><input ref="uploadInput" type="file" accept=".pdf,.jpg,.jpeg,.png,.txt,.csv,application/pdf,image/jpeg,image/png,text/plain,text/csv" @change="onFileSelected" /></label><div class="filetask-card__actions"><button class="console-button primary" type="button" :disabled="uploading" @click="upload">{{ uploading ? '上传中…' : '上传文件' }}</button></div></article>
       <article class="filetask-card"><header><ConsoleIcon name="export" /><div><h3>授权下载</h3><p>服务端同时校验租户、文件状态和文件所有者/下载权限。</p></div></header><label><span>文件 ID</span><input v-model="downloadId" autocomplete="off" placeholder="上传成功后自动填入" /></label><div class="filetask-card__actions"><button class="console-button ghost" type="button" :disabled="downloading || !downloadId.trim()" @click="download">{{ downloading ? '下载中…' : '下载文件' }}</button></div></article>
       <article class="filetask-card filetask-card--cleanup"><header><ConsoleIcon name="shield" /><div><h3>受控清理</h3><p>仅清理无有效绑定且早于策略截止时间的文件；应由具备高风险操作授权的管理员执行。</p></div></header><label><span>截止时间（本地输入，提交 UTC）</span><input v-model="cleanupForm.before" type="datetime-local" /></label><label><span>本次最多处理</span><input v-model.number="cleanupForm.maxFiles" type="number" min="1" max="500" /></label><div class="filetask-card__actions"><button class="console-button danger" type="button" @click="cleanup">执行清理</button></div></article>
     </div>

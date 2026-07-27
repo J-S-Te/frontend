@@ -285,16 +285,16 @@ watch(
 
         <label>
           <span>目标编码</span>
-          <input v-model="form.targetCode" :disabled="Boolean(editingTarget)" maxlength="64" autocomplete="off" required placeholder="例如 contract-home" />
+          <input v-model="form.targetCode" :disabled="Boolean(editingTarget)" maxlength="64" autocomplete="off" required placeholder="例如 business-home" />
           <small>创建后不可修改；登录请求只可携带编码，不能提交目标 URL。</small>
         </label>
         <label>
           <span>名称</span>
-          <input v-model="form.name" maxlength="128" autocomplete="off" required placeholder="例如 合同管理首页" />
+          <input v-model="form.name" maxlength="128" autocomplete="off" required placeholder="例如 业务应用首页" />
         </label>
         <label>
           <span>批准跳转地址</span>
-          <input v-model="form.targetUri" type="url" maxlength="2048" autocomplete="off" required placeholder="https://contract.example.com/workbench" />
+          <input v-model="form.targetUri" type="url" maxlength="2048" autocomplete="off" required placeholder="https://app.example.com/workbench" />
           <small>必须为精确的 http/https 绝对地址。不要填写 OAuth redirect_uri。</small>
         </label>
         <label>
