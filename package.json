@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
-    "test": "node --test src/modules/platform/auth/utils/*.test.mjs src/modules/platform/applications/api/*.test.mjs src/modules/platform/iam/api/*.test.mjs src/modules/platform/iam/utils/*.test.mjs src/modules/platform/audit/utils/*.test.mjs",
+    "test": "node --test src/modules/platform/auth/utils/*.test.mjs src/modules/platform/applications/api/*.test.mjs src/modules/platform/iam/api/*.test.mjs src/modules/platform/iam/utils/*.test.mjs src/modules/platform/audit/utils/*.test.mjs src/modules/platform/dictionaries/api/*.test.mjs",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0"
   },

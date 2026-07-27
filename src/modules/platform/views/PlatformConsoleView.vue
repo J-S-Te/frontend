@@ -7,6 +7,7 @@ import IamSettingsModule from '@/modules/platform/iam/components/IamSettingsModu
 import ApplicationLoginTargetModule from '@/modules/platform/login-targets/components/ApplicationLoginTargetModule.vue'
 import NotificationCenterModule from '@/modules/platform/notifications/components/NotificationCenterModule.vue'
 import LoginSecurityModule from '@/modules/platform/security/components/LoginSecurityModule.vue'
+import DictionaryManagementModule from '@/modules/platform/dictionaries/components/DictionaryManagementModule.vue'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import {
   ApplicationRegistryError,
@@ -33,6 +34,7 @@ import {
   updatePlatformSettings,
 } from '@/modules/platform/settings/api/platformSettings'
 import '@/modules/platform/styles/console.css'
+import '@/modules/platform/styles/settings-showcase.css'
 
 const route = useRoute()
 const router = useRouter()
@@ -79,13 +81,41 @@ const environments = ref([])
 let toastTimer = null
 
 const settingsTabs = [
-  { key: 'base', label: '基础设置' },
-  { key: 'iam', label: '用户与角色' },
-  { key: 'login-targets', label: '统一登录目标' },
-  { key: 'notify', label: '通知中心' },
-  { key: 'security', label: '安全设置' },
-  { key: 'files', label: '文件与任务' },
-  { key: 'dict', label: '字典管理' },
+  {
+    key: 'base', label: '平台基础信息', icon: 'settings', tone: 'blue',
+    description: '维护平台名称与基础展示信息。',
+    capabilities: ['平台名称', '平台简称'],
+  },
+  {
+    key: 'iam', label: '身份、组织与授权', icon: 'organization', tone: 'violet',
+    description: '集中管理身份目录、组织架构与访问权限。',
+    capabilities: ['新增组织单元', '新增岗位', '新增任职关系', '新增外部身份绑定', '新增角色', '新增角色绑定', '新增权限注册'],
+  },
+  {
+    key: 'login-targets', label: '统一登录目标', icon: 'link', tone: 'cyan',
+    description: '接入子系统并配置统一门户登录入口。',
+    capabilities: ['子系统接入', '登录跳转', 'OAuth 客户端'],
+  },
+  {
+    key: 'notify', label: '通知中心', icon: 'bell', tone: 'orange',
+    description: '查看平台消息，并维护通知模板与投递记录。',
+    capabilities: ['站内通知', '通知模板', '投递记录'],
+  },
+  {
+    key: 'security', label: '安全设置', icon: 'shield', tone: 'red',
+    description: '配置登录安全、会话超时和全局退出策略。',
+    capabilities: ['登录安全', '会话策略', '超时退出'],
+  },
+  {
+    key: 'files', label: '文件与任务', icon: 'audit', tone: 'green',
+    description: '管理审计导出、文件处理和异步任务结果。',
+    capabilities: ['审计导出', '文件任务', '结果下载'],
+  },
+  {
+    key: 'dict', label: '字典管理', icon: 'dashboard', tone: 'slate',
+    description: '维护审计、风险和通知等平台统一枚举。',
+    capabilities: ['审计类型', '风险等级', '通知事件'],
+  },
 ]
 
 const settingsSectionKeys = new Set(settingsTabs.map((tab) => tab.key))
@@ -105,6 +135,10 @@ const activeSettingsTab = computed({
     }
   },
 })
+
+const activeSettingsMeta = computed(() => (
+  settingsTabs.find((tab) => tab.key === activeSettingsTab.value) || settingsTabs[0]
+))
 
 // 前后端 result / risk 枚举到中文标签的映射，与后端 audit/application 层枚举保持一致。
 const RESULT_LABELS = { SUCCESS: '成功', DENIED: '拒绝', ERROR: '异常', PARTIAL: '部分成功' }
@@ -676,8 +710,40 @@ onBeforeUnmount(() => {
         </section>
 
         <section v-else class="settings-view" aria-label="系统设置">
-          <div class="console-tabs" role="tablist" aria-label="系统设置分类">
-            <button v-for="tab in settingsTabs" :key="tab.key" class="console-tab" :class="{ active: activeSettingsTab === tab.key }" type="button" role="tab" :aria-selected="activeSettingsTab === tab.key" @click="activeSettingsTab = tab.key">{{ tab.label }}</button>
+          <header class="settings-showcase-head">
+            <div>
+              <span class="settings-showcase-kicker"><ConsoleIcon name="settings" />平台配置中心</span>
+              <h2>系统设置</h2>
+              <p>集中维护平台基础资料、身份组织、统一登录、安全策略与运行支撑能力。</p>
+            </div>
+          </header>
+
+          <nav class="settings-tab-bar" role="tablist" aria-label="系统设置分类">
+            <button
+              v-for="tab in settingsTabs"
+              :key="tab.key"
+              class="settings-tab"
+              :class="{ active: activeSettingsTab === tab.key }"
+              type="button"
+              role="tab"
+              :aria-selected="activeSettingsTab === tab.key"
+              :title="tab.description"
+              @click="activeSettingsTab = tab.key"
+            >
+              <ConsoleIcon :name="tab.icon" />
+              <span>{{ tab.label }}</span>
+            </button>
+          </nav>
+
+          <div class="settings-active-summary" :class="activeSettingsMeta.tone">
+            <span class="settings-active-summary-icon"><ConsoleIcon :name="activeSettingsMeta.icon" /></span>
+            <div class="settings-active-summary-copy">
+              <strong>{{ activeSettingsMeta.label }}</strong>
+              <p>{{ activeSettingsMeta.description }}</p>
+            </div>
+            <div class="settings-active-capabilities" aria-label="当前模块功能">
+              <span v-for="capability in activeSettingsMeta.capabilities" :key="capability">{{ capability }}</span>
+            </div>
           </div>
 
           <div v-if="activeSettingsTab === 'base'" class="console-card settings-card">
@@ -757,13 +823,7 @@ onBeforeUnmount(() => {
 
           <FileTaskOperationsModule v-else-if="activeSettingsTab === 'files'" @toast="showToast" />
 
-          <div v-else class="console-card settings-card"><div class="console-card-body"><h2>字典管理</h2><p class="console-card-hint">本期保留字典管理入口，字典项维护接口后续由平台配置模块接入。</p>
-            <div class="console-setting-list">
-              <div class="console-setting-row"><div><strong>审计操作类型</strong><p>登录、查看、新增、修改、删除、导出、状态变更。</p></div><button class="console-button ghost small" type="button" @click="showToast('字典维护功能待配置模块接口接入。')">管理</button></div>
-              <div class="console-setting-row"><div><strong>风险等级</strong><p>高、中、低；用于审计事件风险分级展示。</p></div><button class="console-button ghost small" type="button" @click="showToast('字典维护功能待配置模块接口接入。')">管理</button></div>
-              <div class="console-setting-row"><div><strong>通知事件类型</strong><p>安全告警、策略变更、审计导出、系统异常。</p></div><button class="console-button ghost small" type="button" @click="showToast('字典维护功能待配置模块接口接入。')">管理</button></div>
-            </div>
-          </div></div>
+          <DictionaryManagementModule v-else-if="activeSettingsTab === 'dict'" @toast="showToast" />
         </section>
       </section>
     </main>
