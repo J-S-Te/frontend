@@ -766,7 +766,7 @@ onBeforeUnmount(() => {
             <form class="console-card settings-card" @submit.prevent="saveSubsystemConnection">
               <div class="console-card-body">
                 <h2>子系统一键接入</h2>
-                <p class="console-card-hint">一次创建应用、环境、门户首页登录目标和 OAuth 客户端。子系统端口只作为内部上游使用，对外统一通过门户路径访问。</p>
+                <p class="console-card-hint">一次创建应用、环境、门户首页登录目标和 OAuth 客户端。前端代码目录不会自动完成接入；保存成功后，子系统门户才会从后端应用目录生成对应卡片。子系统端口只作为内部上游使用，对外统一通过门户路径访问。</p>
                 <p v-if="subsystemError" class="login-target-module__error" role="alert">{{ subsystemError }}</p>
                 <div class="console-form-grid">
                   <label class="console-form-item"><span>子系统编码</span><input v-model="subsystemEditor.code" autocomplete="off" placeholder="business-app" /><small>稳定且唯一，例如 <code>business-app</code>。</small></label>
@@ -782,7 +782,7 @@ onBeforeUnmount(() => {
                 </div>
                 <section v-if="subsystemOnboardingResult" class="subsystem-onboarding-result" aria-live="polite">
                   <h3>接入配置已创建</h3>
-                  <p>客户端密钥只在本次响应中返回。请立即复制并通过安全渠道交给子系统开发人员。</p>
+                  <p>应用已经登记到基础能力平台；刷新子系统门户后会显示对应卡片。客户端密钥只在本次响应中返回，请立即复制并通过安全渠道交给子系统开发人员。</p>
                   <dl class="subsystem-onboarding-summary">
                     <div><dt>门户公开地址</dt><dd>{{ subsystemOnboardingResult.integration.public_url }}</dd></div>
                     <div><dt>OIDC Issuer</dt><dd>{{ subsystemOnboardingResult.integration.issuer }}</dd></div>

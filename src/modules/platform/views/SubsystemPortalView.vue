@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { AuthError, getCurrentPrincipal, logoutCurrentSession } from '@/modules/platform/auth/api/auth'
 import { ApplicationRegistryError, listPortalApplications } from '@/modules/platform/applications/api/applications'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
+import { buildPortalSubsystems } from '@/modules/moduleRegistry.js'
 import '@/modules/platform/styles/subsystem-portal.css'
 
 const router = useRouter()
@@ -52,28 +53,9 @@ const roleNames = computed(() => {
   return roles.map((role) => role.name || role.code || role.id).filter(Boolean).join('、') || '未分配角色'
 })
 
-// 基础能力平台是门户自身能力；其他卡片来自当前租户的 ACTIVE 应用目录。
-const subsystems = computed(() => [
-  {
-    key: 'basic-platform',
-    name: '基础能力平台',
-    description: '统一身份、应用接入与平台管理',
-    icon: 'settings',
-    allowed: true,
-    route: { name: 'settings', params: { section: 'iam' } },
-  },
-  ...registeredSubsystems.value
-    .filter((item) => item.code !== 'platform' && item.code !== 'basic-platform')
-    .map((item) => ({
-      key: `registered-${item.application_id}-${item.environment_id}`,
-      name: item.name || item.code,
-      description: item.description || `${item.environment} 环境`,
-      environment: item.environment,
-      icon: 'dashboard',
-      allowed: true,
-      publicURL: item.public_url,
-    })),
-])
+// 代码模块和运行时接入是两层概念：除内置平台外，门户卡片必须来自
+// 当前租户的后端应用目录，不能因为 src/modules 下存在目录就自动开放访问。
+const subsystems = computed(() => buildPortalSubsystems(registeredSubsystems.value))
 
 let toastTimer = 0
 let animationFrame = 0
@@ -385,7 +367,7 @@ onBeforeUnmount(() => {
 
       <p v-if="subsystemCatalogLoading" class="subsystem-portal__catalog-status">正在加载已接入的子系统…</p>
       <p v-else-if="subsystemCatalogError" class="subsystem-portal__catalog-status is-error" role="alert">{{ subsystemCatalogError }}</p>
-      <p v-else-if="registeredSubsystems.length === 0" class="subsystem-portal__catalog-status">当前租户暂未登记其他子系统，可先进入基础能力平台完成接入。</p>
+      <p v-else-if="registeredSubsystems.length === 0" class="subsystem-portal__catalog-status">当前租户暂未接入其他子系统。请进入基础能力平台，在“统一登录目标”中完成子系统一键接入。</p>
 
       <div class="subsystem-portal__cards" aria-label="子系统列表">
         <button

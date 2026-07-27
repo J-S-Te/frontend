@@ -1,0 +1,61 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { buildPortalSubsystems, findFrontendModule } from './moduleRegistry.js'
+
+test('基础能力平台是唯一无需后端登记的内置门户卡片', () => {
+  const cards = buildPortalSubsystems([])
+  assert.equal(cards.length, 1)
+  assert.equal(cards[0].code, 'basic-platform')
+  assert.equal(cards[0].source, 'built-in')
+  assert.deepEqual(cards[0].route, { name: 'settings', params: { section: 'iam' } })
+})
+
+test('项目管理目录不会在未完成基础能力平台登记时自动生成卡片', () => {
+  assert.equal(findFrontendModule('project_management')?.name, '项目管理系统')
+  assert.equal(buildPortalSubsystems([]).some((card) => card.code === 'project_management'), false)
+})
+
+test('已登记应用使用后端地址，并可由本地模块清单补充展示信息', () => {
+  const cards = buildPortalSubsystems([{
+    application_id: 'app-1',
+    environment_id: 'env-1',
+    code: 'project-management',
+    environment: 'prod',
+    public_url: 'https://portal.example.com/project-management',
+  }])
+
+  assert.equal(cards.length, 2)
+  assert.equal(cards[1].name, '项目管理系统')
+  assert.equal(cards[1].description, '项目立项、计划、协作、进度、风险与归档管理')
+  assert.equal(cards[1].publicURL, 'https://portal.example.com/project-management')
+  assert.equal(cards[1].source, 'application-registry')
+})
+
+test('后端返回的应用名称和描述优先于本地默认文案', () => {
+  const cards = buildPortalSubsystems([{
+    application_id: 'app-2',
+    environment_id: 'env-2',
+    code: 'external-system',
+    name: '外部业务系统',
+    description: '由基础能力平台完成接入',
+    environment: 'test',
+    public_url: 'https://portal.example.com/external-system',
+  }])
+
+  assert.equal(cards[1].name, '外部业务系统')
+  assert.equal(cards[1].description, '由基础能力平台完成接入')
+  assert.equal(cards[1].icon, 'dashboard')
+})
+
+test('后端重复返回基础平台登记时不会生成第二张平台卡片', () => {
+  const cards = buildPortalSubsystems([{
+    application_id: 'platform-app',
+    environment_id: 'platform-env',
+    code: 'platform',
+    name: '基础能力平台',
+    public_url: 'https://portal.example.com/platform',
+  }])
+
+  assert.equal(cards.length, 1)
+  assert.equal(cards[0].code, 'basic-platform')
+})
