@@ -1,18 +1,19 @@
-// 合同管理 API 客户端
-// 平台后端 base URL 来自 VITE_API_BASE_URL
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '/api/v1').replace(/\/$/, '')
+// 合同管理 API 客户端。
+// 合同后端使用独立同源前缀，避免与基础平台的 /api/v1 接口发生路由冲突。
+const API_BASE_URL = (import.meta.env.VITE_CONTRACT_API_BASE_URL || '/contract-api/api/v1').replace(/\/$/, '')
 
-// 合同管理后端的端口在 :8082，前端通过 nginx 反代
-// 假设 nginx 把 /api/v1/contracts/* 转发到 platform 后端（认证），其他路径转发到 contract-management
-// 这里走 nginx 路径（/api/v1/contracts, /api/v1/approval-rules 等），由 nginx 路由
+async function readBody(response) {
+  const contentType = response.headers.get('content-type') || ''
+  return contentType.includes('application/json') ? response.json() : response.text()
+}
+
 async function request(path, options = {}) {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     credentials: 'include',
     headers: { Accept: 'application/json', ...(options.headers || {}) },
     ...options,
   })
-  const contentType = response.headers.get('content-type') || ''
-  const body = contentType.includes('application/json') ? await response.json() : await response.text()
+  const body = await readBody(response)
   if (!response.ok) {
     const error = new Error(body?.message || `HTTP ${response.status}`)
     error.status = response.status
@@ -20,6 +21,33 @@ async function request(path, options = {}) {
     throw error
   }
   return body?.data ?? body
+}
+
+/**
+ * 确保浏览器已经建立合同系统自己的 OIDC 本地会话。
+ *
+ * 基础平台会话与合同系统会话相互独立；当合同 API 返回 401 时，通过
+ * 同源 /contract/auth/login 发起授权码 + PKCE 流程。回调成功后合同后端
+ * 会写入 HttpOnly Cookie 并重新回到 /contract/。
+ */
+export async function ensureContractSession() {
+  const response = await fetch(`${API_BASE_URL}/contracts?limit=1`, {
+    method: 'GET',
+    credentials: 'include',
+    headers: { Accept: 'application/json' },
+  })
+  if (response.status === 401) {
+    window.location.assign('/contract/auth/login')
+    return false
+  }
+  if (!response.ok) {
+    const body = await readBody(response)
+    const error = new Error(body?.message || '合同系统会话检查失败。')
+    error.status = response.status
+    error.code = body?.code
+    throw error
+  }
+  return true
 }
 
 export async function listContracts(params = {}) {
@@ -43,6 +71,6 @@ export async function getApproval(approvalId) {
 }
 
 export async function listApprovalRules() {
-  const data = await request(`/approval-rules`)
+  const data = await request('/approval-rules')
   return Array.isArray(data) ? data : []
 }

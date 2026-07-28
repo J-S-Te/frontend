@@ -97,11 +97,11 @@ test('updateEnvironment carries the optimistic-lock version and gateway fields',
 })
 
 
-test('onboardSubsystem creates the complete integration aggregate in one request', async () => {
+test('onboardSubsystem requests automatic deployment and returns only safe onboarding metadata', async () => {
   let requested
   globalThis.fetch = async (url, options) => {
     requested = { url, options }
-    return jsonResponse({ data: { integration: { client_id: 'business-app-prod-web' } } }, { status: 201 })
+    return jsonResponse({ data: { automation: { status: 'completed', public_url: 'https://portal.example.com/business-app/' } } }, { status: 201 })
   }
 
   const result = await onboardSubsystem({
@@ -112,7 +112,9 @@ test('onboardSubsystem creates the complete integration aggregate in one request
     pathPrefix: '/business-app',
   })
 
-  assert.equal(result.integration.client_id, 'business-app-prod-web')
+  assert.equal(result.automation.status, 'completed')
+  assert.equal(result.automation.public_url, 'https://portal.example.com/business-app/')
+  assert.equal('integration' in result, false)
   assert.equal(requested.url, '/api/v1/subsystem-onboarding')
   assert.equal(requested.options.method, 'POST')
   assert.deepEqual(JSON.parse(requested.options.body), {

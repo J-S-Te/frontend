@@ -1,5 +1,6 @@
 import platformModule from './platform/module.js'
 import projectManagementModule from './project_management/module.js'
+import contractManagementModule from './contract_management/module.js'
 
 /**
  * 前端模块清单。
@@ -11,6 +12,7 @@ import projectManagementModule from './project_management/module.js'
 export const frontendModules = Object.freeze([
   platformModule,
   projectManagementModule,
+  contractManagementModule,
 ])
 
 function normalizeCode(value) {
@@ -50,14 +52,38 @@ export function buildPortalSubsystems(registeredApplications = []) {
       source: 'built-in',
     }))
 
-  const registeredModules = (Array.isArray(registeredApplications) ? registeredApplications : [])
-    .filter((application) => {
-      const moduleDefinition = findFrontendModule(application?.code)
-      return !moduleDefinition?.builtIn
-    })
+  const registeredApplicationsByIdentity = new Map()
+
+  for (const application of Array.isArray(registeredApplications) ? registeredApplications : []) {
+    const moduleDefinition = findFrontendModule(application?.code)
+    if (moduleDefinition?.builtIn) continue
+
+    const code = normalizeCode(application?.code)
+    const canonicalCode = normalizeCode(moduleDefinition?.code) || code
+    const applicationID = String(application?.application_id || '').trim()
+
+    // 同一个前端模块可能同时以连字符编码和历史下划线别名登记；同一个
+    // application_id 也可能返回多个环境。门户按“逻辑子系统”展示，因此
+    // 这两类情况都只能生成一张卡片，避免用户看到重复登录目标。
+    const identity = moduleDefinition
+      ? `frontend-module:${canonicalCode}`
+      : `application:${applicationID || code || application?.name || 'unknown'}`
+    const existing = registeredApplicationsByIdentity.get(identity)
+
+    // 优先保留与模块主编码完全一致的登记。历史别名只作为兼容项，不应
+    // 覆盖新接入配置；同等优先级保持后端返回顺序稳定。
+    const isCanonicalRegistration = Boolean(moduleDefinition) && code === canonicalCode
+    const existingCode = normalizeCode(existing?.code)
+    const existingIsCanonical = Boolean(moduleDefinition) && existingCode === canonicalCode
+    if (!existing || (isCanonicalRegistration && !existingIsCanonical)) {
+      registeredApplicationsByIdentity.set(identity, application)
+    }
+  }
+
+  const registeredModules = Array.from(registeredApplicationsByIdentity.values())
     .map((application) => {
       const moduleDefinition = findFrontendModule(application?.code)
-      const code = normalizeCode(application?.code)
+      const code = normalizeCode(moduleDefinition?.code) || normalizeCode(application?.code)
       const applicationID = application?.application_id || code || 'application'
       const environmentID = application?.environment_id || application?.environment || 'environment'
       return {

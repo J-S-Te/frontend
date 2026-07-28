@@ -40,6 +40,8 @@ import {
   listResources,
   listRoleBindings,
   listRoles,
+  previewEffectiveAccess,
+  previewRoleBindingImpact,
   updateRole,
 } from '@/modules/platform/iam/api/authorization'
 import '@/modules/platform/iam/styles/iam-settings.css'
@@ -78,6 +80,10 @@ const userDeletionDialog = ref(null)
 const resettingPassword = ref(false)
 const deletingUser = ref(false)
 const updatingAccountId = ref('')
+const effectiveAccessPreview = ref(null)
+const loadingEffectiveAccess = ref(false)
+const bindingImpactPreview = ref(null)
+const loadingBindingImpact = ref(false)
 
 const panels = [
   { key: 'users', label: '用户', icon: 'user', description: '自然人主体、任职状态与跨系统统一用户标识' },
@@ -144,11 +150,41 @@ function selectPanel(key) {
 }
 
 function openDetail(kind, item) {
+  effectiveAccessPreview.value = null
   detail.value = { kind, item }
 }
 
 function closeDetail() {
   detail.value = null
+  effectiveAccessPreview.value = null
+}
+
+function sourceLabel(source) {
+  const subject = source?.subject?.name || source?.subject?.code || source?.subject?.id || '未知主体'
+  const type = { USER: '用户', ACCOUNT: '账号', ORG_UNIT: '组织', POSITION: '岗位' }[source?.subject_type] || source?.subject_type || '主体'
+  return `${type}：${subject}`
+}
+
+function sourceScopeLabel(source) {
+  if (source?.scope_type === 'TENANT') return '租户级'
+  const type = source?.scope_type === 'ORG_UNIT' ? '组织范围' : source?.scope_type === 'RESOURCE' ? '资源范围' : source?.scope_type || '范围'
+  return `${type}${source?.scope_id ? `：${source.scope_id}` : ''}`
+}
+
+async function loadEffectiveAccessPreview() {
+  const account = detail.value?.kind === 'account' ? detail.value.item : null
+  if (!account?.account_id || !account?.user_id || loadingEffectiveAccess.value) {
+    if (account && !account.user_id) emitToast('该登录账号未关联用户，无法计算实际权限。')
+    return
+  }
+  loadingEffectiveAccess.value = true
+  try {
+    effectiveAccessPreview.value = await previewEffectiveAccess({ userId: account.user_id, accountId: account.account_id })
+  } catch (error) {
+    emitToast(error instanceof AuthorizationError ? error.message : (error?.message || '读取实际权限预览失败。'))
+  } finally {
+    loadingEffectiveAccess.value = false
+  }
 }
 
 function resetFilters() {
@@ -419,6 +455,10 @@ const saving = ref(false)
 const initialPasswordVisible = ref(false)
 const resources = ref([])
 
+watch(() => [form.role_id, form.subject_type, form.subject_id, form.scope_type, form.scope_id, form.expires_at], () => {
+  if (editor.value?.kind === 'binding') bindingImpactPreview.value = null
+})
+
 const editorTemplates = {
   user: () => ({ display_name: '', email: '', mobile: '', status: 'ACTIVE' }),
   'user-batch': () => ({ rows: '', status: 'ACTIVE' }),
@@ -470,6 +510,8 @@ function openEditor(kind) {
   }
   Object.keys(form).forEach((key) => delete form[key])
   initialPasswordVisible.value = false
+  bindingImpactPreview.value = null
+  loadingBindingImpact.value = false
   Object.assign(form, editorTemplates[kind]())
   editor.value = { kind, label: editorLabels[kind] }
 
@@ -504,6 +546,8 @@ function openEditorForActivePanel() {
 function closeEditor() {
   editor.value = null
   initialPasswordVisible.value = false
+  bindingImpactPreview.value = null
+  loadingBindingImpact.value = false
   saving.value = false
 }
 
@@ -580,6 +624,33 @@ function parseBatchUserRows(value, status) {
       status,
     }, `第 ${index + 1} 行`)
   })
+}
+
+function roleBindingInput() {
+  if (!form.role_id || !form.subject_id) throw new IamError('请选择角色和授权主体。')
+  const scopeId = form.scope_type === 'TENANT' ? null : form.scope_id
+  if (form.scope_type !== 'TENANT' && !scopeId) throw new IamError('非租户范围必须选择范围对象。')
+  return {
+    roleId: form.role_id,
+    subjectType: form.subject_type,
+    subjectId: form.subject_id,
+    scopeType: form.scope_type,
+    scopeId,
+    expiresAt: resolveExpiresAt(form.expires_at),
+  }
+}
+
+async function loadRoleBindingImpactPreview() {
+  if (loadingBindingImpact.value) return
+  try {
+    const payload = roleBindingInput()
+    loadingBindingImpact.value = true
+    bindingImpactPreview.value = await previewRoleBindingImpact(payload)
+  } catch (error) {
+    emitToast(error instanceof IamError || error instanceof AuthorizationError ? error.message : (error?.message || '计算授权影响失败。'))
+  } finally {
+    loadingBindingImpact.value = false
+  }
 }
 
 function validateLocalAccountInput(accountName, password) {
@@ -692,17 +763,7 @@ async function saveEditor() {
       }
       await Promise.all([loadRoles(), loadBindings()])
     } else if (kind === 'binding') {
-      if (!form.role_id || !form.subject_id) throw new IamError('请选择角色和授权主体。')
-      const scopeId = form.scope_type === 'TENANT' ? null : form.scope_id
-      if (form.scope_type !== 'TENANT' && !scopeId) throw new IamError('非租户范围必须选择范围对象。')
-      result = await createRoleBinding({
-        roleId: form.role_id,
-        subjectType: form.subject_type,
-        subjectId: form.subject_id,
-        scopeType: form.scope_type,
-        scopeId,
-        expiresAt: resolveExpiresAt(form.expires_at),
-      })
+      result = await createRoleBinding(roleBindingInput())
       successMessage = '角色绑定已保存；用户、账号、组织和岗位主体会按任职关系、授权范围与有效期参与实际权限计算。'
       await loadBindings()
     } else if (kind === 'external-identity') {
@@ -891,6 +952,22 @@ onMounted(async () => {
             <div><span>{{ row.label }}</span><strong>{{ row.value }}</strong></div>
           </template>
         </div>
+        <section v-if="detail.kind === 'account'" class="iam-detail-section iam-access-preview">
+          <div class="iam-detail-section-head">
+            <div><h4>实际权限预览</h4><p>由后端按当前账号、用户直授、组织/岗位有效任职关系和角色绑定有效期实时计算。</p></div>
+            <button class="console-button ghost small" type="button" :disabled="loadingEffectiveAccess" @click="loadEffectiveAccessPreview"><ConsoleIcon name="shield" />{{ loadingEffectiveAccess ? '计算中…' : effectiveAccessPreview ? '刷新预览' : '查看实际权限' }}</button>
+          </div>
+          <p v-if="!effectiveAccessPreview" class="iam-empty-inline">尚未读取。点击“查看实际权限”可查看该账号当前生效的角色、权限及授权来源。</p>
+          <template v-else>
+            <div class="iam-access-summary"><span :class="effectiveAccessPreview.login_eligible ? 'is-eligible' : 'is-ineligible'">{{ effectiveAccessPreview.login_eligible ? '账号当前可登录' : '账号当前不可登录' }}</span><span>策略版本 {{ effectiveAccessPreview.policy_version }}</span><span>{{ effectiveAccessPreview.roles?.length || 0 }} 个生效角色</span><span>{{ effectiveAccessPreview.permissions?.length || 0 }} 项生效权限</span></div>
+            <p class="iam-access-note">权限范围会一并展示；具体资源是否允许仍由后端在请求时结合资源/组织上下文判定。</p>
+            <div class="iam-preview-columns">
+              <div><h5>生效角色</h5><p v-if="!effectiveAccessPreview.roles?.length" class="iam-empty-inline">当前没有生效角色。</p><ul v-else class="iam-provenance-list"><li v-for="role in effectiveAccessPreview.roles" :key="role.role.id"><strong>{{ role.role.name }}</strong><code>{{ role.role.code || role.role.id }}</code><small v-for="source in role.sources" :key="source.binding_id">{{ sourceLabel(source) }} · {{ sourceScopeLabel(source) }}</small></li></ul></div>
+              <div><h5>生效权限</h5><p v-if="!effectiveAccessPreview.permissions?.length" class="iam-empty-inline">当前没有生效权限。</p><ul v-else class="iam-provenance-list"><li v-for="permission in effectiveAccessPreview.permissions" :key="permission.permission.permission_id"><strong>{{ permission.permission.name }}</strong><code>{{ permission.permission.code }}</code><small v-for="source in permission.sources" :key="source.binding_id">{{ sourceLabel(source) }} · {{ sourceScopeLabel(source) }}</small></li></ul></div>
+            </div>
+            <div class="iam-external-identity-note"><strong>外部身份</strong><span v-if="effectiveAccessPreview.external_identity_providers?.length">已绑定：{{ effectiveAccessPreview.external_identity_providers.map((item) => item.name || item.code).join('、') }}</span><span v-else>未绑定外部身份。</span><small>{{ effectiveAccessPreview.external_identity_note }}</small></div>
+          </template>
+        </section>
         <footer><button class="console-button ghost" type="button" @click="closeDetail">关闭</button></footer>
       </section>
     </div>
@@ -999,7 +1076,12 @@ onMounted(async () => {
             <label v-if="form.scope_type === 'ORG_UNIT'"><span>范围组织 *</span><select v-model="form.scope_id" required><option value="">请选择组织</option><option v-for="item in organizations" :key="item.org_unit_id" :value="item.org_unit_id">{{ item.name }} · {{ item.code }} · {{ item.org_unit_id }}</option></select></label>
             <label v-else-if="form.scope_type === 'RESOURCE'"><span>范围资源 *</span><select v-model="form.scope_id" required><option value="">请选择资源</option><option v-for="item in resources" :key="item.resource_id || item.id" :value="item.resource_id || item.id">{{ item.name }} · {{ item.code }} · {{ item.resource_id || item.id }}</option></select></label>
             <label><span>过期时间（可选）</span><input v-model="form.expires_at" type="datetime-local" /></label>
-            <p class="iam-field-help full">组织、岗位主体的绑定已可创建；是否参与实际鉴权取决于后端有效任职关系计算。</p>
+            <div class="iam-impact-preview full">
+              <div class="iam-impact-preview-head"><div><strong>授权影响分析</strong><p>保存前计算该绑定当前会影响的有效用户，并列出本次角色携带的权限。</p></div><button class="console-button ghost small" type="button" :disabled="loadingBindingImpact" @click="loadRoleBindingImpactPreview">{{ loadingBindingImpact ? '计算中…' : '预览影响范围' }}</button></div>
+              <p v-if="!bindingImpactPreview" class="iam-field-help">组织和岗位绑定会按当前有效任职关系参与后端实际鉴权；修改任一授权字段后请重新预览。</p>
+              <template v-else><div class="iam-impact-metrics"><span>当前影响 <b>{{ bindingImpactPreview.total_affected_users }}</b> 位有效用户</span><span>角色权限 {{ bindingImpactPreview.permissions?.length || 0 }} 项</span><span v-if="bindingImpactPreview.expires_at">有效至 {{ formatDateTime(bindingImpactPreview.expires_at) }}</span></div><p class="iam-impact-permissions">权限：{{ bindingImpactPreview.permissions?.map((item) => item.code || item.name).join('、') || '该角色暂无可用权限' }}</p><p class="iam-impact-users">用户样本：{{ bindingImpactPreview.users?.map((item) => item.name || item.id).join('、') || '当前没有有效用户受到影响' }}<template v-if="bindingImpactPreview.truncated">（仅展示前 100 位）</template></p></template>
+            </div>
+            <p class="iam-field-help full">预览只读，不会创建角色绑定；保存后由后端重新按实时状态执行鉴权。</p>
           </template>
           <template v-else-if="editor.kind === 'external-identity'">
             <label><span>用户 *</span><select v-model="form.user_id" required><option value="">请选择用户</option><option v-for="item in users" :key="item.user_id" :value="item.user_id">{{ item.display_name }} · {{ item.user_id }}</option></select></label>
