@@ -56,7 +56,7 @@ test('deleteApplicationRegistration sends the stable code confirmation and optim
 
   const result = await deleteApplicationRegistration({
     applicationId: 'app/duplicate',
-    confirmationCode: 'contract-management',
+    confirmationCode: 'contract_management',
     version: 3,
   })
 
@@ -65,7 +65,7 @@ test('deleteApplicationRegistration sends the stable code confirmation and optim
   assert.equal(requested.options.method, 'DELETE')
   assert.equal(requested.options.credentials, 'include')
   assert.deepEqual(JSON.parse(requested.options.body), {
-    confirmation_code: 'contract-management',
+    confirmation_code: 'contract_management',
     version: 3,
   })
 })

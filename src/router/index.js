@@ -59,8 +59,7 @@ const router = createRouter({
     },
     {
       path: '/contract_management/:section?',
-      alias: '/contract/:section?',
-      name: 'contract-management',
+      name: 'contract_management',
       component: ContractManagementView,
       meta: { title: '合同管理系统', requiresAuth: true, requiresContractSession: true },
     },
@@ -120,7 +119,7 @@ router.beforeEach(async (to) => {
         const firstAllowedSection = contractSections.find((section) => canAccessContractSection(session, section))
         if (!firstAllowedSection) return { name: 'login' }
         return {
-          name: 'contract-management',
+          name: 'contract_management',
           params: { section: firstAllowedSection },
           query: { ...to.query, denied: requestedSection },
           replace: true,

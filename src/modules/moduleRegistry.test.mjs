@@ -60,30 +60,20 @@ test('后端重复返回基础平台登记时不会生成第二张平台卡片',
   assert.equal(cards[0].code, 'basic-platform')
 })
 
-test('合同管理系统的新编码和历史别名同时登记时只显示主编码卡片', () => {
-  const cards = buildPortalSubsystems([
-    {
-      application_id: 'legacy-contract-app',
-      environment_id: 'legacy-dev',
-      code: 'contract-management',
-      name: '合同管理系统',
-      environment: 'dev',
-      public_url: 'http://localhost:8081/contract/',
-    },
-    {
-      application_id: 'contract-app',
-      environment_id: 'contract-prod',
-      code: 'contract_management',
-      name: '合同管理系统',
-      environment: 'prod',
-      public_url: 'http://localhost:8081/contract_management/',
-    },
-  ])
+test('合同管理系统使用统一编码和统一前端路由', () => {
+  const cards = buildPortalSubsystems([{
+    application_id: 'contract-app',
+    environment_id: 'contract-prod',
+    code: 'contract_management',
+    name: '合同管理系统',
+    environment: 'prod',
+    public_url: 'http://localhost:8081/contract_management/',
+  }])
 
   assert.equal(cards.length, 2)
   assert.equal(cards[1].code, 'contract_management')
   assert.equal(cards[1].environment, 'prod')
-  assert.deepEqual(cards[1].route, { name: 'contract-management', params: { section: 'dashboard' } })
+  assert.deepEqual(cards[1].route, { name: 'contract_management', params: { section: 'dashboard' } })
   assert.equal(cards[1].publicURL, '')
 })
 

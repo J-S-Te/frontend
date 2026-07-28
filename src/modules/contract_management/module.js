@@ -6,10 +6,9 @@
  */
 export default Object.freeze({
   code: 'contract_management',
-  aliases: ['contract-management'],
   name: '合同管理系统',
   description: '合同台账、审批、签署、归档与统计分析',
   icon: 'account',
   builtIn: false,
-  route: Object.freeze({ name: 'contract-management', params: Object.freeze({ section: 'dashboard' }) }),
+  route: Object.freeze({ name: 'contract_management', params: Object.freeze({ section: 'dashboard' }) }),
 })

@@ -5,7 +5,7 @@ import { buildLoginTargetApplicationOptions } from './applicationBoundary.js'
 test('登录目标管理边界保留所有同名应用登记并使用唯一 ID 区分', () => {
   const options = buildLoginTargetApplicationOptions([
     { application_id: '01KYCOLDAPPLICATION0001', code: 'contract_management', name: '合同管理系统' },
-    { application_id: '01KYCNEWAPPLICATION0002', code: 'contract-management', name: '合同管理系统' },
+    { application_id: '01KYCNEWAPPLICATION0002', code: 'contract_management_prod', name: '合同管理系统生产环境' },
   ])
 
   assert.equal(options.length, 2)
@@ -16,19 +16,19 @@ test('登录目标管理边界保留所有同名应用登记并使用唯一 ID �
   assert.ok(options.every((option) => option.hasSameName))
   assert.ok(options.every((option) => option.label.includes('ID ')))
   assert.ok(options.some((option) => option.label.includes('contract_management')))
-  assert.ok(options.some((option) => option.label.includes('contract-management')))
+  assert.ok(options.some((option) => option.label.includes('contract_management_prod')))
 })
 
 test('不同名称的应用保持简洁标签且过滤缺少 application_id 的无效记录', () => {
   const options = buildLoginTargetApplicationOptions([
     { application_id: 'app-platform', code: 'platform', name: '基础能力平台' },
-    { application_id: 'app-contract', code: 'contract-management', name: '合同管理系统' },
+    { application_id: 'app-contract', code: 'contract_management', name: '合同管理系统' },
     { code: 'invalid', name: '无边界记录' },
   ])
 
   assert.equal(options.length, 2)
   assert.equal(options.find((option) => option.applicationID === 'app-platform').label, '基础能力平台（platform）')
-  assert.equal(options.find((option) => option.applicationID === 'app-contract').label, '合同管理系统（contract-management）')
+  assert.equal(options.find((option) => option.applicationID === 'app-contract').label, '合同管理系统（contract_management）')
   assert.ok(options.every((option) => !option.hasSameName))
 })
 

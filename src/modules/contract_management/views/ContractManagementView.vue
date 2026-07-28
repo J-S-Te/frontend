@@ -131,7 +131,7 @@ function navigate(section) {
     showToast('当前角色无权访问该功能。')
     return
   }
-  router.push({ name: 'contract-management', params: { section } })
+  router.push({ name: 'contract_management', params: { section } })
   mobileMenuOpen.value = false
 }
 
