@@ -265,16 +265,3 @@
   .audit-data-table .console-actions-cell { gap: 3px; padding: 9px 0 2px; }
   .audit-data-table .console-text-button + .console-text-button { margin-left: 2px; }
 }
-
-/* 子系统一键接入结果：突出一次性密钥与可复制配置，长地址允许安全换行。 */
-.subsystem-onboarding-result { margin-top: 20px; padding: 18px; border: 1px solid #bfdbfe; border-radius: 12px; background: #eff6ff; }
-.subsystem-onboarding-result h3 { margin: 0 0 6px; color: #1d4ed8; font-size: 16px; }
-.subsystem-onboarding-result h4 { margin: 18px 0 8px; color: #334155; font-size: 13px; }
-.subsystem-onboarding-result > p { margin: 0 0 14px; color: #475569; font-size: 13px; }
-.subsystem-onboarding-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 0; }
-.subsystem-onboarding-summary > div { min-width: 0; padding: 10px 12px; border: 1px solid #dbeafe; border-radius: 9px; background: #fff; }
-.subsystem-onboarding-summary > div.is-sensitive { grid-column: 1 / -1; border-color: #fed7aa; background: #fff7ed; }
-.subsystem-onboarding-summary dt { margin-bottom: 4px; color: #64748b; font-size: 11px; }
-.subsystem-onboarding-summary dd { margin: 0; color: #0f172a; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; overflow-wrap: anywhere; }
-.subsystem-onboarding-code { overflow: auto; max-height: 220px; margin: 0 0 10px; padding: 12px; border-radius: 9px; background: #0f172a; color: #e2e8f0; font: 12px/1.65 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
-@media (max-width: 760px) { .subsystem-onboarding-summary { grid-template-columns: 1fr; } .subsystem-onboarding-summary > div.is-sensitive { grid-column: auto; } }

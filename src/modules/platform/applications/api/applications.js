@@ -119,35 +119,3 @@ export function updateEnvironment({ applicationId, environmentId, baseUrl = null
     }),
   })
 }
-
-
-/** 一次创建应用、环境、门户登录目标和 OAuth 客户端。 */
-export function onboardSubsystem({
-  applicationCode,
-  applicationName,
-  description = null,
-  environment = 'prod',
-  publicBaseUrl,
-  upstreamUrl,
-  pathPrefix = '',
-  clientType = 'confidential',
-} = {}) {
-  return request('/subsystem-onboarding', {
-    method: 'POST',
-    body: JSON.stringify({
-      application_code: applicationCode,
-      application_name: applicationName,
-      description,
-      environment,
-      public_base_url: publicBaseUrl,
-      upstream_url: upstreamUrl,
-      path_prefix: pathPrefix,
-      client_type: clientType,
-    }),
-  })
-}
-
-/** 查询当前登录租户下可显示在子系统门户中的 ACTIVE 应用。 */
-export function listPortalApplications({ environment = '' } = {}) {
-  return request(`/portal/applications${pageQuery({ environment })}`)
-}
