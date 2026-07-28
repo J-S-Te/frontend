@@ -73,7 +73,6 @@ export function detailRows(detail) {
     rows.push({ label: '认证方式', value: displayAuthSource(item.auth_source || 'LOCAL') })
     rows.push({ label: '状态', value: displayStatus(item.status) })
     rows.push({ label: '最近登录', value: formatDateTime(item.last_login_at) })
-    rows.push({ label: '有效期', value: item.valid_until ? formatDateTime(item.valid_until) : '永久' })
     rows.push({ label: '版本', value: item.version ?? 0 })
   } else if (kind === 'organization') {
     rows.push({ label: '组织 ID', value: item.org_unit_id || item.id })

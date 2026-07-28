@@ -127,10 +127,10 @@ export function listAccounts({ page = 1, pageSize = 50, keyword = '', status = '
   return request(`/accounts${pageQuery({ page, page_size: pageSize, keyword, 'filter[status]': status })}`).then(normalize)
 }
 
-export function createLocalAccount({ userId, accountName, initialPassword, validUntil = null }) {
+export function createLocalAccount({ userId, accountName, initialPassword }) {
   return request('/accounts', {
     method: 'POST',
-    body: JSON.stringify({ user_id: userId, account_name: accountName, initial_password: initialPassword, valid_until: validUntil }),
+    body: JSON.stringify({ user_id: userId, account_name: accountName, initial_password: initialPassword }),
   })
 }
 

@@ -140,8 +140,7 @@ export function updateEnvironment({ applicationId, environmentId, baseUrl = null
   })
 }
 
-
-/** 一次创建应用、环境、门户登录目标和 OAuth 客户端。 */
+/** 一次完成应用登记、环境配置、登录目标、OAuth 客户端和自动部署。 */
 export function onboardSubsystem({
   applicationCode,
   applicationName,
