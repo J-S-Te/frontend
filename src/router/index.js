@@ -5,6 +5,9 @@ import SubsystemPortalView from '@/modules/platform/views/SubsystemPortalView.vu
 import ContractManagementView from '@/modules/contract_management/views/ContractManagementView.vue'
 import { getCurrentPrincipal } from '@/modules/platform/auth/api/auth'
 import { ensureContractSession } from '@/modules/contract_management/api/contract'
+import { canAccessContractSection } from '@/modules/shared/authz/sys004'
+
+const contractSections = ['dashboard', 'customers', 'contracts', 'templates', 'approvals', 'rules', 'signing', 'reports']
 
 const settingsSections = new Set([
   'base',
@@ -56,7 +59,8 @@ const router = createRouter({
       meta: { title: '审计日志', requiresAuth: true },
     },
     {
-      path: '/contract/:section?',
+      path: '/contract_management/:section?',
+      alias: '/contract/:section?',
       name: 'contract-management',
       component: ContractManagementView,
       meta: { title: '合同管理系统', requiresAuth: true, requiresContractSession: true },
@@ -87,14 +91,36 @@ router.beforeEach(async (to) => {
     return true
   }
 
+  if (to.meta.requiresContractSession) {
+    try {
+      // 合同系统使用自己的 OIDC 会话。这里不能先调用基础平台 /api/v1/auth/me，
+      // 否则合同 Cookie 有效但基础平台 Cookie 过期时会被错误送回基础平台登录页。
+      const session = await ensureContractSession()
+      if (!session) return false
+
+      const requestedSection = typeof to.params.section === 'string' ? to.params.section : 'dashboard'
+      if (!canAccessContractSection(session, requestedSection)) {
+        const firstAllowedSection = contractSections.find((section) => canAccessContractSection(session, section))
+        if (!firstAllowedSection) return { name: 'login' }
+        return {
+          name: 'contract-management',
+          params: { section: firstAllowedSection },
+          query: { ...to.query, denied: requestedSection },
+          replace: true,
+        }
+      }
+      return true
+    } catch {
+      // 401 已由 ensureContractSession 发起 OIDC 跳转；网络或服务错误时停留在当前页，
+      // 不要把合同后端故障误判成基础平台未登录。
+      return false
+    }
+  }
+
   try {
     // `/auth/me` 使用 HttpOnly Cookie，由后端同时校验 JWT 和服务端会话状态。
     // 任意校验失败（401、网络错误或其他异常）都按未登录处理，不能 fail-open。
     await getCurrentPrincipal()
-    if (to.meta.requiresContractSession) {
-      const ready = await ensureContractSession()
-      if (!ready) return false
-    }
     return true
   } catch {
     return { name: 'login' }

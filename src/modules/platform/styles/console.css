@@ -65,6 +65,8 @@
 .console-button.secondary { color: var(--secondary); border-color: var(--border); background: #fff; }
 .console-button.secondary:hover { color: var(--p); border-color: #93c5fd; }
 .console-button.ghost:hover { color: var(--p); background: var(--p-bg); }
+.console-button.danger { color: #fff; border-color: #dc2626; background: #dc2626; }
+.console-button.danger:hover:not(:disabled) { border-color: #b91c1c; background: #b91c1c; box-shadow: 0 3px 9px rgba(220,38,38,.18); }
 .console-button.small { min-height: 32px; padding: 6px 10px; font-size: 12px; }
 
 .audit-readonly-note { display: flex; align-items: center; gap: 8px; padding: 10px 12px; margin-bottom: 16px; color: #1d4ed8; font-size: 12px; border: 1px solid #bfdbfe; border-radius: 8px; background: var(--p-bg); }
@@ -153,7 +155,27 @@
 .console-detail-section p { margin: 6px 0 9px; color: var(--muted); font-size: 12px; line-height: 1.6; }
 .console-permission-code { display: inline-block; margin: 0 6px 7px 0; padding: 5px 7px; overflow-wrap: anywhere; color: #1e3a8a; font-family: ui-monospace,SFMono-Regular,Menlo,monospace; font-size: 11px; border-radius: 5px; background: #eff6ff; }
 .console-detail-modal > footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; padding: 16px 24px; border-top: 1px solid #e2e8f0; }
+.application-boundary-actions { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 16px; margin-top: 18px; border: 1px solid #fecaca; border-radius: 9px; background: #fffafa; }
+.application-boundary-actions > div { min-width: 0; }
+.application-boundary-actions strong { display: block; color: #991b1b; font-size: 13px; }
+.application-boundary-actions small { display: block; margin-top: 5px; color: #7f1d1d; font-size: 12px; line-height: 1.55; }
+.console-modal-eyebrow.danger { color: #dc2626; }
+.application-delete-modal { width: min(620px,100%); }
+.application-delete-body { padding: 20px 24px 0; }
+.application-delete-warning { padding: 12px 14px; margin: 0; color: #991b1b; font-size: 12px; line-height: 1.65; border: 1px solid #fecaca; border-radius: 8px; background: #fef2f2; }
+.application-delete-summary { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin-top: 16px; }
+.application-delete-summary > div { min-width: 0; padding: 11px 12px; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; }
+.application-delete-summary > div:last-child { grid-column: 1 / -1; }
+.application-delete-summary span { display: block; margin-bottom: 4px; color: var(--muted); font-size: 11px; }
+.application-delete-summary strong { display: block; overflow-wrap: anywhere; color: var(--text); font-size: 13px; font-weight: 600; }
+.application-delete-field { display: block; margin-top: 18px; }
+.application-delete-field > span { display: block; margin-bottom: 7px; color: var(--secondary); font-size: 12px; }
+.application-delete-field > span strong { color: #dc2626; font-family: ui-monospace,SFMono-Regular,Menlo,monospace; }
+.application-delete-field input { width: 100%; min-height: 40px; padding: 9px 11px; color: var(--text); border: 1px solid #cbd5e1; border-radius: 8px; outline: none; background: #fff; }
+.application-delete-field input:focus { border-color: #f87171; box-shadow: 0 0 0 3px rgba(248,113,113,.13); }
+.application-delete-error { margin: 10px 0 0; color: #dc2626; font-size: 12px; }
 @media (max-width: 620px) { .console-iam-head { align-items: stretch; flex-direction: column; }.console-iam-head .console-button { align-self: flex-start; }.console-sub-tabs { margin-top: 16px; }.console-sub-tab { flex: 1; padding: 7px 12px; }.console-iam-filter .console-search-field { flex-basis: 100%; }.console-detail-modal { max-height: calc(100vh - 24px); }.console-detail-modal > header { padding: 18px 18px 15px; }.console-detail-grid { grid-template-columns: 1fr; margin: 18px 18px 0; }.console-detail-grid > div, .console-detail-grid > div:nth-child(odd) { border-right: 0; }.console-detail-grid > div:nth-last-child(-n+2) { border-bottom: 1px solid #e2e8f0; }.console-detail-grid > div:last-child { border-bottom: 0; }.console-detail-section { margin: 18px 18px 0; }.console-detail-modal > footer { padding: 15px 18px; }.console-detail-modal > footer .console-button { flex: 1; }.console-role-chip { max-width: 130px; } }
+@media (max-width: 620px) { .application-boundary-actions { align-items: stretch; flex-direction: column; }.application-boundary-actions .console-button { width: 100%; }.application-delete-body { padding: 18px 18px 0; }.application-delete-summary { grid-template-columns: 1fr; }.application-delete-summary > div:last-child { grid-column: auto; } }
 
 /* AUD-001 审计中心：跨系统事件、变更摘要与链路追溯 */
 .audit-readonly-note code { padding: 1px 4px; color: #1e40af; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; border-radius: 3px; background: #eff6ff; }

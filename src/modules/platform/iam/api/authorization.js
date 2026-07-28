@@ -147,3 +147,17 @@ export function createPermission({ resourceId, code, name, action }) {
     body: JSON.stringify({ resource_id: resourceId, code, name, action }),
   })
 }
+
+export function getContractApplicationAccess(userId) {
+  return request(`/users/${encodeURIComponent(userId)}/applications/contract_management/access`)
+}
+
+export function updateContractApplicationAccess(userId, { roleCode, customPermissions = [] }) {
+  return request(`/users/${encodeURIComponent(userId)}/applications/contract_management/access`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      role_code: roleCode,
+      custom_permissions: customPermissions,
+    }),
+  })
+}

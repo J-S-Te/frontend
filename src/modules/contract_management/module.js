@@ -5,8 +5,8 @@
  * 接口返回；仅存在前端代码不会绕过子系统登记和 OIDC 客户端配置。
  */
 export default Object.freeze({
-  code: 'contract-management',
-  aliases: ['contract_management'],
+  code: 'contract_management',
+  aliases: ['contract-management'],
   name: '合同管理系统',
   description: '合同台账、审批、签署、归档与统计分析',
   icon: 'account',

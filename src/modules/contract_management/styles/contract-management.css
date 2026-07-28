@@ -151,3 +151,4 @@
 @media (max-width: 420px){.contract-stat-grid{grid-template-columns:1fr}.contract-type-card ul{grid-template-columns:1fr 1fr}.contract-topbar-avatar{display:none}.contract-notification-panel{right:10px}.contract-approval-list article>footer .contract-button{flex:1}}
 
 @media (prefers-reduced-motion: reduce){.contract-app *{scroll-behavior:auto!important;transition-duration:.01ms!important}}
+.contract-session-error { padding: 10px 12px; margin: 0 0 16px; color: #b91c1c; font-size: 12px; border: 1px solid #fecaca; border-radius: 8px; background: #fef2f2; }

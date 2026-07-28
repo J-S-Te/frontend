@@ -33,24 +33,23 @@ import {
 } from '@/modules/platform/iam/api/iam'
 import {
   AuthorizationError,
-  createPermission,
-  createRole,
-  createRoleBinding,
-  listPermissions,
-  listResources,
-  listRoleBindings,
-  listRoles,
-  previewEffectiveAccess,
-  previewRoleBindingImpact,
-  updateRole,
+  getContractApplicationAccess,
+  updateContractApplicationAccess,
 } from '@/modules/platform/iam/api/authorization'
+import {
+  CONTRACT_CUSTOM_PERMISSION_DEFINITIONS,
+  CONTRACT_ROLE_DEFINITIONS,
+  contractPermissionName,
+  contractRole,
+  effectiveContractPermissions,
+} from '@/modules/shared/authz/sys004'
 import '@/modules/platform/iam/styles/iam-settings.css'
 
 const emit = defineEmits(['toast'])
 
 const activePanel = ref('users')
 const detail = ref(null)
-const loading = reactive({ users: false, accounts: false, organizations: false, positions: false, memberships: false, roles: false, permissions: false, bindings: false, externalIdentities: false })
+const loading = reactive({ users: false, accounts: false, organizations: false, positions: false, memberships: false, externalIdentities: false })
 const errorMessage = ref('')
 const pageSize = 50
 const pagination = reactive({
@@ -59,18 +58,12 @@ const pagination = reactive({
   organizations: { page: 1, pageSize, total: 0, serverPagingSupported: true },
   positions: { page: 1, pageSize, total: 0, serverPagingSupported: true },
   memberships: { page: 1, pageSize, total: 0 },
-  roles: { page: 1, pageSize, total: 0 },
-  bindings: { page: 1, pageSize, total: 0 },
-  permissions: { page: 1, pageSize, total: 0 },
 })
 const users = ref([])
 const accounts = ref([])
 const organizations = ref([])
 const memberships = ref([])
 const positions = ref([])
-const roles = ref([])
-const permissions = ref([])
-const bindings = ref([])
 const identityProviders = ref([])
 const externalIdentities = ref([])
 const selectedExternalIdentityUserId = ref('')
@@ -80,10 +73,17 @@ const userDeletionDialog = ref(null)
 const resettingPassword = ref(false)
 const deletingUser = ref(false)
 const updatingAccountId = ref('')
-const effectiveAccessPreview = ref(null)
-const loadingEffectiveAccess = ref(false)
-const bindingImpactPreview = ref(null)
-const loadingBindingImpact = ref(false)
+const contractAccess = ref(null)
+const contractAccessLoading = ref(false)
+const contractAccessSaving = ref(false)
+const contractAccessError = ref('')
+const contractAccessDraft = reactive({ role_code: '', custom_permissions: [] })
+
+const selectedContractRole = computed(() => contractRole(contractAccessDraft.role_code))
+const contractRolePermissions = computed(() => selectedContractRole.value?.permissions || [])
+const contractEffectivePermissions = computed(() => effectiveContractPermissions(contractAccessDraft.role_code, contractAccessDraft.custom_permissions))
+const contractCustomPermissionOptions = CONTRACT_CUSTOM_PERMISSION_DEFINITIONS
+const contractRoleOptions = CONTRACT_ROLE_DEFINITIONS
 
 const panels = [
   { key: 'users', label: '用户', icon: 'user', description: '自然人主体、任职状态与跨系统统一用户标识' },
@@ -92,12 +92,9 @@ const panels = [
   { key: 'positions', label: '岗位', icon: 'organization', description: '组织内岗位定义，是任职关系和岗位授权的基础' },
   { key: 'memberships', label: '任职关系', icon: 'link', description: 'Membership 任职关系：主组织、兼岗、历史任职' },
   { key: 'external-identities', label: '外部身份', icon: 'account', description: '为用户绑定、查看和解绑第三方身份提供商' },
-  { key: 'roles', label: '角色', icon: 'role', description: '平台角色、应用角色、自定义角色与权限集合' },
-  { key: 'bindings', label: '角色绑定', icon: 'link', description: '主体、应用范围、数据范围和有效期授权' },
-  { key: 'permissions', label: '权限注册', icon: 'shield', description: '以 application:resource:action 统一登记原子权限' },
 ]
 
-const filters = reactive({ user: '', account: '', organization: '', position: '', membership: '', role: '', binding: '', permission: '' })
+const filters = reactive({ user: '', account: '', organization: '', position: '', membership: '' })
 
 const panel = computed(() => panels.find((item) => item.key === activePanel.value) || panels[0])
 
@@ -126,9 +123,6 @@ const filteredAccounts = computed(() => includesFilter(accounts.value, filters.a
 const filteredOrganizations = computed(() => includesFilter(organizations.value, filters.organization, ['code', 'name']))
 const filteredPositions = computed(() => includesFilter(positions.value, filters.position, ['code', 'name', 'org_unit.name']))
 const filteredMemberships = computed(() => includesFilter(memberships.value, filters.membership, ['user.name', 'org_unit.name', 'position.name', 'membership_type']))
-const filteredRoles = computed(() => includesFilter(roles.value, filters.role, ['code', 'name']))
-const filteredBindings = computed(() => includesFilter(bindings.value, filters.binding, ['role.name', 'role.code', 'subject.name', 'subject.code', 'subject_type', 'scope_type']))
-const filteredPermissions = computed(() => includesFilter(permissions.value, filters.permission, ['code', 'name']))
 
 const selectedPasswordResetAccount = computed(() => {
   const dialog = passwordResetDialog.value
@@ -149,43 +143,70 @@ function selectPanel(key) {
   detail.value = null
 }
 
-function openDetail(kind, item) {
-  effectiveAccessPreview.value = null
+async function openDetail(kind, item) {
+  contractAccess.value = null
+  contractAccessError.value = ''
+  contractAccessDraft.role_code = ''
+  contractAccessDraft.custom_permissions = []
   detail.value = { kind, item }
+  if (kind === 'user') await loadContractAccess(item.user_id)
 }
 
 function closeDetail() {
   detail.value = null
-  effectiveAccessPreview.value = null
+  contractAccess.value = null
+  contractAccessError.value = ''
 }
 
-function sourceLabel(source) {
-  const subject = source?.subject?.name || source?.subject?.code || source?.subject?.id || '未知主体'
-  const type = { USER: '用户', ACCOUNT: '账号', ORG_UNIT: '组织', POSITION: '岗位' }[source?.subject_type] || source?.subject_type || '主体'
-  return `${type}：${subject}`
+function applyContractAccess(access) {
+  contractAccess.value = access
+  contractAccessDraft.role_code = access?.role?.code || ''
+  contractAccessDraft.custom_permissions = Array.isArray(access?.custom_permissions) ? [...access.custom_permissions] : []
 }
 
-function sourceScopeLabel(source) {
-  if (source?.scope_type === 'TENANT') return '租户级'
-  const type = source?.scope_type === 'ORG_UNIT' ? '组织范围' : source?.scope_type === 'RESOURCE' ? '资源范围' : source?.scope_type || '范围'
-  return `${type}${source?.scope_id ? `：${source.scope_id}` : ''}`
+async function loadContractAccess(userId) {
+  if (!userId || contractAccessLoading.value) return
+  contractAccessLoading.value = true
+  contractAccessError.value = ''
+  try {
+    applyContractAccess(await getContractApplicationAccess(userId))
+  } catch (error) {
+    if (error instanceof AuthorizationError && error.status === 404) {
+      applyContractAccess(null)
+      return
+    }
+    contractAccessError.value = error instanceof AuthorizationError ? error.message : (error?.message || '读取合同系统权限失败。')
+  } finally {
+    contractAccessLoading.value = false
+  }
 }
 
-async function loadEffectiveAccessPreview() {
-  const account = detail.value?.kind === 'account' ? detail.value.item : null
-  if (!account?.account_id || !account?.user_id || loadingEffectiveAccess.value) {
-    if (account && !account.user_id) emitToast('该登录账号未关联用户，无法计算实际权限。')
+async function saveContractAccess() {
+  const userId = detail.value?.kind === 'user' ? detail.value.item?.user_id : ''
+  if (!userId || contractAccessSaving.value) return
+  if (!contractAccessDraft.role_code) {
+    contractAccessError.value = '请选择一个合同系统预置角色。'
     return
   }
-  loadingEffectiveAccess.value = true
+  contractAccessSaving.value = true
+  contractAccessError.value = ''
   try {
-    effectiveAccessPreview.value = await previewEffectiveAccess({ userId: account.user_id, accountId: account.account_id })
+    const access = await updateContractApplicationAccess(userId, {
+      roleCode: contractAccessDraft.role_code,
+      customPermissions: contractAccessDraft.role_code === 'admin' ? [] : contractAccessDraft.custom_permissions,
+    })
+    applyContractAccess(access)
+    emitToast('合同系统角色与附加权限已保存。权限将在用户重新登录或会话续签后生效。')
   } catch (error) {
-    emitToast(error instanceof AuthorizationError ? error.message : (error?.message || '读取实际权限预览失败。'))
+    contractAccessError.value = error instanceof AuthorizationError ? error.message : (error?.message || '保存合同系统权限失败。')
   } finally {
-    loadingEffectiveAccess.value = false
+    contractAccessSaving.value = false
   }
 }
+
+watch(() => contractAccessDraft.role_code, (roleCode) => {
+  if (roleCode === 'admin') contractAccessDraft.custom_permissions = []
+})
 
 function resetFilters() {
   Object.keys(filters).forEach((key) => { filters[key] = '' })
@@ -245,20 +266,8 @@ async function loadMemberships(page = pagination.memberships.page) {
   if (data) updatePage('memberships', data, memberships)
 }
 
-async function loadRoles(page = pagination.roles.page) {
-  const data = await safeCall('roles', () => listRoles({ page, pageSize, keyword: filters.role, status: 'ACTIVE' }))
-  if (data) updatePage('roles', data, roles)
-}
 
-async function loadPermissions(page = pagination.permissions.page) {
-  const data = await safeCall('permissions', () => listPermissions({ page, pageSize, keyword: filters.permission, status: 'ACTIVE' }))
-  if (data) updatePage('permissions', data, permissions)
-}
 
-async function loadBindings(page = pagination.bindings.page) {
-  const data = await safeCall('bindings', () => listRoleBindings({ page, pageSize, keyword: filters.binding, status: 'ACTIVE' }))
-  if (data) updatePage('bindings', data, bindings)
-}
 
 async function loadIdentityProviders() {
   const data = await safeCall('externalIdentities', () => listIdentityProviders({ page: 1, pageSize: 100 }))
@@ -281,9 +290,6 @@ async function reloadActive() {
     case 'organizations': await loadOrganizations(); break
     case 'positions': await loadPositions(); break
     case 'memberships': await loadMemberships(); break
-    case 'roles': await loadRoles(); break
-    case 'bindings': await loadBindings(); break
-    case 'permissions': await loadPermissions(); break
     case 'external-identities': await Promise.all([loadUsers(), loadIdentityProviders(), loadExternalIdentities()]); break
     default: break
   }
@@ -453,11 +459,6 @@ const editor = ref(null) // { kind, label }
 const form = reactive({})
 const saving = ref(false)
 const initialPasswordVisible = ref(false)
-const resources = ref([])
-
-watch(() => [form.role_id, form.subject_type, form.subject_id, form.scope_type, form.scope_id, form.expires_at], () => {
-  if (editor.value?.kind === 'binding') bindingImpactPreview.value = null
-})
 
 const editorTemplates = {
   user: () => ({ display_name: '', email: '', mobile: '', status: 'ACTIVE' }),
@@ -466,10 +467,7 @@ const editorTemplates = {
   organization: () => ({ name: '', parent_id: '', sort_order: 0 }),
   position: () => ({ org_unit_id: '', name: '' }),
   membership: () => ({ user_id: '', org_unit_id: '', position_id: '', membership_type: 'PRIMARY', validity_mode: 'LONG_TERM', effective_from: '', effective_to: '' }),
-  role: () => ({ role_id: '', code: '', name: '', description: '', permission_ids: [], status: 'ACTIVE', version: 0 }),
-  binding: () => ({ role_id: '', subject_type: 'USER', subject_id: '', scope_type: 'TENANT', scope_id: '', expires_at: '' }),
   'external-identity': () => ({ user_id: selectedExternalIdentityUserId.value || '', provider_code: '', external_subject: '' }),
-  permission: () => ({ resource_id: '', code: '', name: '', action: '' }),
 }
 
 const panelToKind = {
@@ -479,9 +477,6 @@ const panelToKind = {
   positions: 'position',
   memberships: 'membership',
   'external-identities': 'external-identity',
-  roles: 'role',
-  bindings: 'binding',
-  permissions: 'permission',
 }
 
 const editorLabels = {
@@ -491,16 +486,7 @@ const editorLabels = {
   organization: '组织单元',
   position: '岗位',
   membership: '任职关系',
-  role: '角色',
-  binding: '角色绑定',
   'external-identity': '外部身份绑定',
-  permission: '权限注册',
-}
-
-function loadResources() {
-  return safeCall('permissions', () => listResources({ page: 1, pageSize: 100, status: 'ACTIVE' })).then((data) => {
-    if (data) resources.value = data.items
-  })
 }
 
 function openEditor(kind) {
@@ -510,32 +496,13 @@ function openEditor(kind) {
   }
   Object.keys(form).forEach((key) => delete form[key])
   initialPasswordVisible.value = false
-  bindingImpactPreview.value = null
-  loadingBindingImpact.value = false
   Object.assign(form, editorTemplates[kind]())
   editor.value = { kind, label: editorLabels[kind] }
 
-  if (['account', 'membership', 'binding', 'external-identity'].includes(kind) && !users.value.length) loadUsers()
-  if (['position', 'membership', 'binding'].includes(kind) && !organizations.value.length) loadOrganizations()
-  if (['membership', 'binding'].includes(kind) && !positions.value.length) loadPositions()
-  if (kind === 'binding' && !accounts.value.length) loadAccounts()
-  if (kind === 'binding' && !roles.value.length) loadRoles()
-  if (kind === 'binding' && !resources.value.length) loadResources()
-  if (kind === 'role' && !permissions.value.length) loadPermissions()
-  if (kind === 'permission' && !resources.value.length) loadResources()
+  if (['account', 'membership', 'external-identity'].includes(kind) && !users.value.length) loadUsers()
+  if (['position', 'membership'].includes(kind) && !organizations.value.length) loadOrganizations()
+  if (kind === 'membership' && !positions.value.length) loadPositions()
   if (kind === 'external-identity' && !identityProviders.value.length) loadIdentityProviders()
-}
-
-function openRoleEditor(role) {
-  openEditor('role')
-  const roleId = role.role_id || role.id
-  form.role_id = roleId
-  form.code = role.code || ''
-  form.name = role.name || ''
-  form.description = role.description || ''
-  form.status = role.status || 'ACTIVE'
-  form.version = Number(role.version || 0)
-  form.permission_ids = (role.permissions || []).map((item) => item.id || item.permission_id).filter(Boolean)
 }
 
 function openEditorForActivePanel() {
@@ -546,8 +513,6 @@ function openEditorForActivePanel() {
 function closeEditor() {
   editor.value = null
   initialPasswordVisible.value = false
-  bindingImpactPreview.value = null
-  loadingBindingImpact.value = false
   saving.value = false
 }
 
@@ -626,33 +591,6 @@ function parseBatchUserRows(value, status) {
   })
 }
 
-function roleBindingInput() {
-  if (!form.role_id || !form.subject_id) throw new IamError('请选择角色和授权主体。')
-  const scopeId = form.scope_type === 'TENANT' ? null : form.scope_id
-  if (form.scope_type !== 'TENANT' && !scopeId) throw new IamError('非租户范围必须选择范围对象。')
-  return {
-    roleId: form.role_id,
-    subjectType: form.subject_type,
-    subjectId: form.subject_id,
-    scopeType: form.scope_type,
-    scopeId,
-    expiresAt: resolveExpiresAt(form.expires_at),
-  }
-}
-
-async function loadRoleBindingImpactPreview() {
-  if (loadingBindingImpact.value) return
-  try {
-    const payload = roleBindingInput()
-    loadingBindingImpact.value = true
-    bindingImpactPreview.value = await previewRoleBindingImpact(payload)
-  } catch (error) {
-    emitToast(error instanceof IamError || error instanceof AuthorizationError ? error.message : (error?.message || '计算授权影响失败。'))
-  } finally {
-    loadingBindingImpact.value = false
-  }
-}
-
 function validateLocalAccountInput(accountName, password) {
   const normalizedAccountName = String(accountName ?? '').trim()
   const accountLength = Array.from(normalizedAccountName).length
@@ -687,13 +625,13 @@ async function saveEditor() {
       })
       result = await createUser(userInput)
       successMessage = `用户 ${result?.display_name || form.display_name} 已创建，员工编号已自动生成并绑定普通用户角色。`
-      await Promise.all([loadUsers(), loadBindings(), loadRoles()])
+      await loadUsers()
     } else if (kind === 'user-batch') {
       const items = parseBatchUserRows(form.rows, form.status)
       result = await createUsersBatch(items)
       const createdCount = Array.isArray(result?.items) ? result.items.length : items.length
       successMessage = `已批量创建 ${createdCount} 位用户，并自动生成员工编号、绑定普通用户角色。`
-      await Promise.all([loadUsers(), loadBindings(), loadRoles()])
+      await loadUsers()
     } else if (kind === 'account') {
       const accountInput = validateLocalAccountInput(form.account_name, form.initial_password)
       if (!form.user_id) throw new IamError('请选择关联用户；当前接口只创建个人本地账号。')
@@ -745,27 +683,6 @@ async function saveEditor() {
       })
       successMessage = `任职关系 ${result?.membership_id || ''} 已创建（${shortTerm ? '短期' : '长期'}生效）。`
       await loadMemberships()
-    } else if (kind === 'role') {
-      if (!form.name) throw new IamError('请填写角色名称。')
-      const permissionIds = [...new Set((form.permission_ids || []).filter(Boolean))]
-      if (!permissionIds.length) throw new IamError('请至少为角色选择一项权限，避免创建无权限角色。')
-      const payload = {
-        name: String(form.name).trim(),
-        description: form.description || '',
-        permissionIds,
-      }
-      if (form.role_id) {
-        result = await updateRole({ ...payload, roleId: form.role_id, status: form.status || 'ACTIVE', version: Number(form.version || 0) })
-        successMessage = `角色 ${result?.name || form.name} 与权限已更新。`
-      } else {
-        result = await createRole(payload)
-        successMessage = `角色 ${result?.name || form.name} 已创建，编码 ${result?.code || '已由系统生成'}，并关联 ${permissionIds.length} 项权限。`
-      }
-      await Promise.all([loadRoles(), loadBindings()])
-    } else if (kind === 'binding') {
-      result = await createRoleBinding(roleBindingInput())
-      successMessage = '角色绑定已保存；用户、账号、组织和岗位主体会按任职关系、授权范围与有效期参与实际权限计算。'
-      await loadBindings()
     } else if (kind === 'external-identity') {
       if (!form.user_id || !form.provider_code || !String(form.external_subject || '').trim()) {
         throw new IamError('请选择用户、身份提供商并填写外部主体标识。')
@@ -778,18 +695,6 @@ async function saveEditor() {
       selectedExternalIdentityUserId.value = form.user_id
       await loadExternalIdentities()
       successMessage = `外部身份绑定 ${result.binding_id || ''} 已写入 MySQL。`
-    } else if (kind === 'permission') {
-      if (!form.resource_id || !form.code || !form.name || !form.action) {
-        throw new IamError('请选择资源并填写权限编码、名称和动作。')
-      }
-      result = await createPermission({
-        resourceId: form.resource_id,
-        code: String(form.code).trim(),
-        name: String(form.name).trim(),
-        action: String(form.action).trim(),
-      })
-      successMessage = `权限 ${result?.code || form.code} 已写入 MySQL。`
-      await Promise.all([loadPermissions(), loadRoles()])
     } else {
       throw new IamError('未实现的编辑类型。')
     }
@@ -803,7 +708,7 @@ async function saveEditor() {
 }
 
 onMounted(async () => {
-  await Promise.all([loadUsers(), loadAccounts(), loadOrganizations(), loadPositions(), loadMemberships(), loadRoles(), loadPermissions(), loadBindings()])
+  await Promise.all([loadUsers(), loadAccounts(), loadOrganizations(), loadPositions(), loadMemberships()])
   if (!selectedExternalIdentityUserId.value && users.value[0]) {
     selectedExternalIdentityUserId.value = users.value[0].user_id
   }
@@ -856,11 +761,6 @@ onMounted(async () => {
         </section>
 
         <section v-else-if="activePanel === 'accounts'" class="iam-table-section iam-accounts-panel">
-          <div class="iam-account-context">
-            <span class="iam-account-context-icon"><ConsoleIcon name="account" /></span>
-            <div class="iam-account-context-copy"><strong>统一管理每一个登录入口</strong><p>本地账号默认以临时方式创建，并由服务端统一校验密码、状态与有效期。</p></div>
-            <div class="iam-account-context-points" aria-label="账号管理能力"><span>密码安全</span><span>状态控制</span><span>到期失效</span></div>
-          </div>
           <div class="iam-filter-row iam-account-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="filters.account" type="search" placeholder="搜索账号、用户 ID 或状态" /></label><span>{{ filteredAccounts.length }} / 共 {{ pagination.accounts.total }} 个账号</span></div>
           <div class="console-table-card iam-account-table-card"><div class="console-table-scroll"><table class="console-data-table iam-data-table"><thead><tr><th>登录账号</th><th>关联用户</th><th>认证方式</th><th>有效时间</th><th>状态</th><th>更新时间</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
             <tr v-if="loading.accounts"><td class="console-empty" colspan="7">正在读取登录账号…</td></tr>
@@ -909,33 +809,6 @@ onMounted(async () => {
           </tbody></table></div></div>
         </section>
 
-        <section v-else-if="activePanel === 'roles'" class="iam-table-section">
-          <div class="iam-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="filters.role" type="search" placeholder="角色编码 / 名称" /></label><span>{{ filteredRoles.length }} / 共 {{ pagination.roles.total }} 个角色</span></div>
-          <div class="console-table-card"><div class="console-table-scroll"><table class="console-data-table iam-data-table"><thead><tr><th>角色</th><th>权限数</th><th>状态</th><th>更新时间</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
-            <tr v-if="loading.roles"><td class="console-empty" colspan="5">正在读取角色…</td></tr>
-            <tr v-else-if="!filteredRoles.length"><td class="console-empty" colspan="5">暂无角色记录。</td></tr>
-            <tr v-for="item in filteredRoles" :key="item.role_id || item.id"><td><strong class="console-entity-name">{{ item.name }}</strong><span class="console-entity-meta console-mono">{{ item.code || item.role_id || item.id }}</span></td><td>{{ item.permissions?.length || 0 }}</td><td><span class="console-badge" :class="(item.status || '').toUpperCase() === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(item.status) }}</span></td><td class="console-mono">{{ formatDateTime(item.updated_at) }}</td><td class="console-actions-cell"><button class="console-text-button" type="button" @click="openDetail('role', item)">详情</button><button class="console-text-button" type="button" @click="openRoleEditor(item)">编辑权限</button></td></tr>
-          </tbody></table></div></div>
-        </section>
-
-        <section v-else-if="activePanel === 'bindings'" class="iam-table-section">
-          <div class="iam-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="filters.binding" type="search" placeholder="角色 / 主体 / 范围" /></label><span>{{ filteredBindings.length }} / 共 {{ pagination.bindings.total }} 条角色绑定</span></div>
-          <div class="console-table-card"><div class="console-table-scroll"><table class="console-data-table iam-data-table"><thead><tr><th>角色</th><th>授权主体</th><th>数据范围</th><th>状态</th><th>到期时间</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
-            <tr v-if="loading.bindings"><td class="console-empty" colspan="6">正在读取角色绑定…</td></tr>
-            <tr v-else-if="!filteredBindings.length"><td class="console-empty" colspan="6">暂无角色绑定。</td></tr>
-            <tr v-for="item in filteredBindings" :key="item.binding_id || item.id"><td><strong>{{ item.role?.name || '—' }}</strong><span class="console-entity-meta console-mono">{{ item.role?.code || item.role?.id || '—' }}</span></td><td><strong>{{ item.subject?.name || item.subject_type }}</strong><span class="console-entity-meta console-mono">{{ item.subject_type }} · {{ item.subject?.id || item.subject?.code || '—' }}</span></td><td class="console-mono">{{ item.scope_type }}{{ item.scope_id ? ` · ${item.scope_id}` : '' }}</td><td><span class="console-badge" :class="(item.status || '').toUpperCase() === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(item.status) }}</span></td><td class="console-mono">{{ formatDateTime(item.expires_at) }}</td><td class="console-actions-cell"><button class="console-text-button" type="button" @click="openDetail('binding', item)">详情</button></td></tr>
-          </tbody></table></div></div>
-        </section>
-
-        <section v-else class="iam-table-section">
-          <div class="iam-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="filters.permission" type="search" placeholder="权限编码 / 名称" /></label><span>{{ filteredPermissions.length }} / 共 {{ pagination.permissions.total }} 项权限</span></div>
-          <div class="console-table-card"><div class="console-table-scroll"><table class="console-data-table iam-data-table"><thead><tr><th>权限编码</th><th>权限名称</th><th>状态</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
-            <tr v-if="loading.permissions"><td class="console-empty" colspan="4">正在读取权限…</td></tr>
-            <tr v-else-if="!filteredPermissions.length"><td class="console-empty" colspan="4">暂无权限记录。</td></tr>
-            <tr v-for="item in filteredPermissions" :key="item.permission_id || item.id"><td><code class="iam-permission-code">{{ item.code }}</code></td><td><strong>{{ item.name }}</strong></td><td><span class="console-badge" :class="(item.status || '').toUpperCase() === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(item.status) }}</span></td><td class="console-actions-cell"><button class="console-text-button" type="button" @click="openDetail('permission', item)">详情</button></td></tr>
-          </tbody></table></div></div>
-        </section>
-
         <nav v-if="activePagination && activePagination.total > activePagination.pageSize && !activeServerPagingUnavailable" class="iam-pagination" aria-label="列表分页">
           <button class="console-button ghost small" type="button" :disabled="activePagination.page <= 1" @click="goToPage(activePanel, activePagination.page - 1)">上一页</button>
           <span>第 {{ activePagination.page }} / {{ pageTotal(activePanel) }} 页，共 {{ activePagination.total }} 条</span>
@@ -952,23 +825,28 @@ onMounted(async () => {
             <div><span>{{ row.label }}</span><strong>{{ row.value }}</strong></div>
           </template>
         </div>
-        <section v-if="detail.kind === 'account'" class="iam-detail-section iam-access-preview">
+        <section v-if="detail.kind === 'user'" class="iam-detail-section iam-contract-access">
           <div class="iam-detail-section-head">
-            <div><h4>实际权限预览</h4><p>由后端按当前账号、用户直授、组织/岗位有效任职关系和角色绑定有效期实时计算。</p></div>
-            <button class="console-button ghost small" type="button" :disabled="loadingEffectiveAccess" @click="loadEffectiveAccessPreview"><ConsoleIcon name="shield" />{{ loadingEffectiveAccess ? '计算中…' : effectiveAccessPreview ? '刷新预览' : '查看实际权限' }}</button>
+            <div><h4>合同系统权限</h4><p>每个用户只绑定一个预置角色；最终权限为角色默认权限与附加权限的并集。</p></div>
+            <span v-if="contractAccess" class="iam-contract-revision">策略版本 {{ contractAccess.authz_revision }}</span>
           </div>
-          <p v-if="!effectiveAccessPreview" class="iam-empty-inline">尚未读取。点击“查看实际权限”可查看该账号当前生效的角色、权限及授权来源。</p>
+          <p v-if="contractAccessLoading" class="iam-empty-inline">正在读取合同系统权限…</p>
           <template v-else>
-            <div class="iam-access-summary"><span :class="effectiveAccessPreview.login_eligible ? 'is-eligible' : 'is-ineligible'">{{ effectiveAccessPreview.login_eligible ? '账号当前可登录' : '账号当前不可登录' }}</span><span>策略版本 {{ effectiveAccessPreview.policy_version }}</span><span>{{ effectiveAccessPreview.roles?.length || 0 }} 个生效角色</span><span>{{ effectiveAccessPreview.permissions?.length || 0 }} 项生效权限</span></div>
-            <p class="iam-access-note">权限范围会一并展示；具体资源是否允许仍由后端在请求时结合资源/组织上下文判定。</p>
-            <div class="iam-preview-columns">
-              <div><h5>生效角色</h5><p v-if="!effectiveAccessPreview.roles?.length" class="iam-empty-inline">当前没有生效角色。</p><ul v-else class="iam-provenance-list"><li v-for="role in effectiveAccessPreview.roles" :key="role.role.id"><strong>{{ role.role.name }}</strong><code>{{ role.role.code || role.role.id }}</code><small v-for="source in role.sources" :key="source.binding_id">{{ sourceLabel(source) }} · {{ sourceScopeLabel(source) }}</small></li></ul></div>
-              <div><h5>生效权限</h5><p v-if="!effectiveAccessPreview.permissions?.length" class="iam-empty-inline">当前没有生效权限。</p><ul v-else class="iam-provenance-list"><li v-for="permission in effectiveAccessPreview.permissions" :key="permission.permission.permission_id"><strong>{{ permission.permission.name }}</strong><code>{{ permission.permission.code }}</code><small v-for="source in permission.sources" :key="source.binding_id">{{ sourceLabel(source) }} · {{ sourceScopeLabel(source) }}</small></li></ul></div>
+            <p v-if="contractAccessError" class="login-target-module__error" role="alert">{{ contractAccessError }}</p>
+            <div class="iam-contract-access-form">
+              <label><span>预置角色 *</span><select v-model="contractAccessDraft.role_code"><option value="">请选择角色</option><option v-for="role in contractRoleOptions" :key="role.code" :value="role.code">{{ role.name }} · {{ role.code }}</option></select></label>
+              <p class="iam-field-help">角色由 SYS-004 固化，普通管理界面不能新增、修改或删除角色。</p>
+              <div class="iam-contract-permission-block"><strong>角色默认权限</strong><p v-if="!contractRolePermissions.length" class="iam-empty-inline">选择角色后显示默认权限。</p><div v-else class="iam-contract-permission-tags"><span v-for="permission in contractRolePermissions" :key="permission"><b>{{ contractPermissionName(permission) }}</b><code>{{ permission }}</code></span></div></div>
+              <fieldset :disabled="!contractAccessDraft.role_code || contractAccessDraft.role_code === 'admin' || contractAccessSaving">
+                <legend>附加权限（只增加，不抵消默认权限）</legend>
+                <p v-if="contractAccessDraft.role_code === 'admin'" class="iam-field-help">超级管理员通过 all 获得全部权限，不配置附加权限。</p>
+                <div v-else class="iam-contract-permission-checks"><label v-for="permission in contractCustomPermissionOptions" :key="permission.code"><input v-model="contractAccessDraft.custom_permissions" type="checkbox" :value="permission.code" /><span><b>{{ permission.name }}</b><code>{{ permission.code }}</code></span></label></div>
+              </fieldset>
+              <div class="iam-contract-permission-block effective"><strong>最终有效权限预览</strong><div class="iam-contract-permission-tags"><span v-for="permission in contractEffectivePermissions" :key="permission"><b>{{ contractPermissionName(permission) }}</b><code>{{ permission }}</code></span></div><p class="iam-field-help">服务端保存时会重新计算，前端不会提交 effective_permissions。</p></div>
             </div>
-            <div class="iam-external-identity-note"><strong>外部身份</strong><span v-if="effectiveAccessPreview.external_identity_providers?.length">已绑定：{{ effectiveAccessPreview.external_identity_providers.map((item) => item.name || item.code).join('、') }}</span><span v-else>未绑定外部身份。</span><small>{{ effectiveAccessPreview.external_identity_note }}</small></div>
           </template>
         </section>
-        <footer><button class="console-button ghost" type="button" @click="closeDetail">关闭</button></footer>
+        <footer><button class="console-button ghost" type="button" :disabled="contractAccessSaving" @click="closeDetail">关闭</button><button v-if="detail.kind === 'user'" class="console-button primary" type="button" :disabled="contractAccessLoading || contractAccessSaving" @click="saveContractAccess"><ConsoleIcon name="save" />{{ contractAccessSaving ? '保存中…' : '保存合同权限' }}</button></footer>
       </section>
     </div>
 
@@ -1002,7 +880,7 @@ onMounted(async () => {
 
     <div v-if="editor" class="iam-modal-backdrop" role="presentation" @click.self="closeEditor">
       <section class="iam-modal iam-editor-modal" role="dialog" aria-modal="true" aria-label="新增身份授权配置">
-        <header><div><p>{{ editor.kind === 'role' && form.role_id ? '编辑' : '新增' }}</p><h3>{{ editor.kind === 'role' && form.role_id ? '编辑' : '新增' }} {{ editor.label }}</h3></div><button class="console-modal-close" type="button" aria-label="关闭表单" :disabled="saving" @click="closeEditor"><ConsoleIcon name="close" /></button></header>
+        <header><div><p>新增</p><h3>新增 {{ editor.label }}</h3></div><button class="console-modal-close" type="button" aria-label="关闭表单" :disabled="saving" @click="closeEditor"><ConsoleIcon name="close" /></button></header>
         <form class="iam-editor-form" @submit.prevent="saveEditor">
           <template v-if="editor.kind === 'user'">
             <p class="iam-form-alert"><ConsoleIcon name="info" />员工编号由后端自动生成；创建成功后自动绑定“普通用户”角色。</p>
@@ -1056,43 +934,10 @@ onMounted(async () => {
             <label v-if="form.validity_mode === 'SHORT_TERM'"><span>生效日期 *</span><input v-model="form.effective_from" required type="date" /></label>
             <label v-if="form.validity_mode === 'SHORT_TERM'"><span>失效日期 *</span><input v-model="form.effective_to" required type="date" /></label>
           </template>
-          <template v-else-if="editor.kind === 'role'">
-            <label><span>角色名称 *</span><input v-model="form.name" required /></label>
-            <label><span>角色编码</span><input :value="form.role_id ? form.code : '提交后由系统自动生成'" disabled /><small class="iam-field-help">自定义角色编码由后端生成，格式为 ROLE-&lt;ULID&gt;，创建后不可修改。</small></label>
-            <label v-if="form.role_id"><span>状态</span><select v-model="form.status"><option value="ACTIVE">启用</option><option value="DISABLED">停用</option></select></label>
-            <label class="full"><span>权限 *</span><select v-model="form.permission_ids" required multiple size="8"><option v-for="item in permissions" :key="item.permission_id || item.id" :value="item.permission_id || item.id">{{ item.name }} · {{ item.code }}</option></select><small class="iam-field-help">按住 Ctrl / ⌘ 可多选。创建和编辑都必须至少选择一项权限。</small></label>
-            <label class="full"><span>描述</span><textarea v-model="form.description" rows="2" placeholder="可选"></textarea></label>
-          </template>
-          <template v-else-if="editor.kind === 'binding'">
-            <label><span>角色 *</span><select v-model="form.role_id" required><option value="">请选择角色</option><option v-for="item in roles" :key="item.role_id || item.id" :value="item.role_id || item.id">{{ item.name }} · {{ item.code }} · {{ item.role_id || item.id }}</option></select></label>
-            <label><span>主体类型 *</span><select v-model="form.subject_type" @change="form.subject_id = ''"><option value="USER">用户</option><option value="ACCOUNT">账号</option><option value="ORG_UNIT">组织</option><option value="POSITION">岗位</option></select></label>
-            <label><span>授权主体 *</span>
-              <select v-if="form.subject_type === 'USER'" v-model="form.subject_id" required><option value="">请选择用户</option><option v-for="item in users" :key="item.user_id" :value="item.user_id">{{ item.display_name }} · {{ item.user_id }}</option></select>
-              <select v-else-if="form.subject_type === 'ACCOUNT'" v-model="form.subject_id" required><option value="">请选择账号</option><option v-for="item in accounts" :key="item.account_id" :value="item.account_id">{{ item.account_name }} · {{ item.account_id }}</option></select>
-              <select v-else-if="form.subject_type === 'ORG_UNIT'" v-model="form.subject_id" required><option value="">请选择组织</option><option v-for="item in organizations" :key="item.org_unit_id" :value="item.org_unit_id">{{ item.name }} · {{ item.code }} · {{ item.org_unit_id }}</option></select>
-              <select v-else v-model="form.subject_id" required><option value="">请选择岗位</option><option v-for="item in positions" :key="item.position_id || item.id" :value="item.position_id || item.id">{{ item.name }} · {{ item.code }} · {{ item.position_id || item.id }}</option></select>
-            </label>
-            <label><span>数据范围 *</span><select v-model="form.scope_type" @change="form.scope_id = ''"><option value="TENANT">租户级（无需范围 ID）</option><option value="ORG_UNIT">组织范围</option><option value="RESOURCE">资源范围</option></select></label>
-            <label v-if="form.scope_type === 'ORG_UNIT'"><span>范围组织 *</span><select v-model="form.scope_id" required><option value="">请选择组织</option><option v-for="item in organizations" :key="item.org_unit_id" :value="item.org_unit_id">{{ item.name }} · {{ item.code }} · {{ item.org_unit_id }}</option></select></label>
-            <label v-else-if="form.scope_type === 'RESOURCE'"><span>范围资源 *</span><select v-model="form.scope_id" required><option value="">请选择资源</option><option v-for="item in resources" :key="item.resource_id || item.id" :value="item.resource_id || item.id">{{ item.name }} · {{ item.code }} · {{ item.resource_id || item.id }}</option></select></label>
-            <label><span>过期时间（可选）</span><input v-model="form.expires_at" type="datetime-local" /></label>
-            <div class="iam-impact-preview full">
-              <div class="iam-impact-preview-head"><div><strong>授权影响分析</strong><p>保存前计算该绑定当前会影响的有效用户，并列出本次角色携带的权限。</p></div><button class="console-button ghost small" type="button" :disabled="loadingBindingImpact" @click="loadRoleBindingImpactPreview">{{ loadingBindingImpact ? '计算中…' : '预览影响范围' }}</button></div>
-              <p v-if="!bindingImpactPreview" class="iam-field-help">组织和岗位绑定会按当前有效任职关系参与后端实际鉴权；修改任一授权字段后请重新预览。</p>
-              <template v-else><div class="iam-impact-metrics"><span>当前影响 <b>{{ bindingImpactPreview.total_affected_users }}</b> 位有效用户</span><span>角色权限 {{ bindingImpactPreview.permissions?.length || 0 }} 项</span><span v-if="bindingImpactPreview.expires_at">有效至 {{ formatDateTime(bindingImpactPreview.expires_at) }}</span></div><p class="iam-impact-permissions">权限：{{ bindingImpactPreview.permissions?.map((item) => item.code || item.name).join('、') || '该角色暂无可用权限' }}</p><p class="iam-impact-users">用户样本：{{ bindingImpactPreview.users?.map((item) => item.name || item.id).join('、') || '当前没有有效用户受到影响' }}<template v-if="bindingImpactPreview.truncated">（仅展示前 100 位）</template></p></template>
-            </div>
-            <p class="iam-field-help full">预览只读，不会创建角色绑定；保存后由后端重新按实时状态执行鉴权。</p>
-          </template>
           <template v-else-if="editor.kind === 'external-identity'">
             <label><span>用户 *</span><select v-model="form.user_id" required><option value="">请选择用户</option><option v-for="item in users" :key="item.user_id" :value="item.user_id">{{ item.display_name }} · {{ item.user_id }}</option></select></label>
             <label><span>身份提供商 *</span><select v-model="form.provider_code" required><option value="">请选择提供商</option><option v-for="item in identityProviders" :key="item.provider_id || item.code" :value="item.code">{{ item.display_name || item.code }} · {{ item.code }}</option></select></label>
             <label class="full"><span>外部主体标识 *</span><input v-model="form.external_subject" required autocomplete="off" placeholder="例如：IdP 中的 subject / immutable ID" /><small class="iam-field-help">该值只在提交时发送给后端，不会在本页面回显。</small></label>
-          </template>
-          <template v-else-if="editor.kind === 'permission'">
-            <label><span>资源 *</span><select v-model="form.resource_id" required><option value="">请选择资源</option><option v-for="item in resources" :key="item.resource_id || item.id" :value="item.resource_id || item.id">{{ item.name }} · {{ item.code }} · {{ item.resource_id || item.id }}</option></select></label>
-            <label><span>权限编码 *</span><input v-model="form.code" required placeholder="application:resource:action" /></label>
-            <label><span>权限名称 *</span><input v-model="form.name" required /></label>
-            <label><span>动作 *</span><input v-model="form.action" required placeholder="例如：read / approve" /></label>
           </template>
           <p class="iam-form-alert"><ConsoleIcon name="info" />提交后由 Go API 写入 MySQL，并生成审计事件。</p>
           <footer>

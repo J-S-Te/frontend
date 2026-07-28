@@ -78,6 +78,26 @@ export function createApplication({ code, name, applicationType = 'web', descrip
   })
 }
 
+/**
+ * 删除一个应用登记。后端实际将应用退役为 RETIRED，以保留环境、OAuth 客户端、
+ * 登录目标及审计历史；confirmationCode 必须与稳定应用编码完全一致。
+ */
+export function deleteApplicationRegistration({ applicationId, version, confirmationCode } = {}) {
+  const normalizedApplicationId = String(applicationId || '').trim()
+  const normalizedConfirmationCode = String(confirmationCode || '').trim()
+  const normalizedVersion = Number(version)
+  if (!normalizedApplicationId || !normalizedConfirmationCode || !Number.isInteger(normalizedVersion) || normalizedVersion < 1) {
+    throw new ApplicationRegistryError('applicationId、version 和 confirmationCode 均不能为空。', { code: 'VALIDATION_ERROR' })
+  }
+  return request(`/applications/${encodeURIComponent(normalizedApplicationId)}`, {
+    method: 'DELETE',
+    body: JSON.stringify({
+      confirmation_code: normalizedConfirmationCode,
+      version: normalizedVersion,
+    }),
+  })
+}
+
 /** 列出指定应用下的部署环境（默认只取 ACTIVE）。 */
 export function listEnvironments({ applicationId, page = 1, pageSize = 50, status = 'ACTIVE' } = {}) {
   if (!applicationId) {

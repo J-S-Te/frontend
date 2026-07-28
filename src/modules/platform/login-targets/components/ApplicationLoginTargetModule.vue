@@ -193,7 +193,7 @@ watch(
       <div>
         <span class="login-target-module__eyebrow">APPLICATION ACCESS</span>
         <h2 id="login-target-heading">{{ heading }}</h2>
-        <p>仅登记登录成功后允许跳转的业务地址；它与 OAuth 回调地址完全独立。</p>
+        <p>同一应用环境可登记多个业务入口；每个入口使用唯一目标编码，并与 OAuth 回调地址完全分离。</p>
       </div>
       <button class="console-button primary" type="button" :disabled="!hasBoundary" @click="openCreateEditor">
         <ConsoleIcon name="plus" /> 新建登录目标
@@ -211,7 +211,7 @@ watch(
     <template v-else>
       <div class="login-target-module__guardrail">
         <ConsoleIcon name="shield" />
-        <span>登录时仅按 <code>application_id + environment_id + target_code</code> 精确解析 ACTIVE 目标；未命中、禁用或校验失败时不得跳转。</span>
+        <span>当前边界可维护多个登录目标。登录时仅按 <code>application_id + environment_id + target_code</code> 精确解析 ACTIVE 目标；未命中、禁用或校验失败时不得跳转。</span>
       </div>
 
       <div class="login-target-module__toolbar">

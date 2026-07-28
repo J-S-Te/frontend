@@ -8,7 +8,14 @@ import vue from '@vitejs/plugin-vue'
 //   3. 如果需要指向已部署的环境，把 API_BASE_URL 改成绝对 URL（必须带 https/http 协议），
 //      此时浏览器会直接走跨域请求，需后端 CORS 放行；本地联调时不要设置。
 const DEFAULT_API_PROXY_TARGET = 'http://127.0.0.1:8080'
+const DEFAULT_CONTRACT_API_PROXY_TARGET = 'http://127.0.0.1:8081'
 const PROXIED_PATHS = ['/api', '/authorize', '/oauth2', '/.well-known']
+const CONTRACT_BACKEND_PATHS = [
+  '/contract_management/api',
+  '/contract_management/auth',
+  '/contract_management/logged-out',
+  '/contract_management/healthz',
+]
 
 function apiProxy(target) {
   return {
@@ -21,8 +28,15 @@ function apiProxy(target) {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const proxyTarget = env.VITE_API_PROXY_TARGET || DEFAULT_API_PROXY_TARGET
+  const contractProxyTarget = env.VITE_CONTRACT_API_PROXY_TARGET || DEFAULT_CONTRACT_API_PROXY_TARGET
 
   const proxy = Object.fromEntries(PROXIED_PATHS.map((path) => [path, apiProxy(proxyTarget)]))
+  for (const path of CONTRACT_BACKEND_PATHS) {
+    proxy[path] = {
+      ...apiProxy(contractProxyTarget),
+      rewrite: (requestPath) => requestPath.replace(/^\/contract_management/, ''),
+    }
+  }
 
   return {
     plugins: [vue()],

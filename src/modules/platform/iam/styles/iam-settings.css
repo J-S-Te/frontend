@@ -78,14 +78,6 @@
 
 /* Login account workspace: stronger hierarchy for account state, authentication and validity. */
 .iam-accounts-panel { padding-top: 18px; }
-.iam-account-context { display: flex; align-items: center; gap: 13px; padding: 15px 16px; margin-bottom: 15px; border: 1px solid #dbeafe; border-radius: 10px; background: linear-gradient(100deg, #f8fbff 0%, #fff 72%); }
-.iam-account-context-icon { display: grid; width: 40px; height: 40px; flex: 0 0 auto; place-items: center; color: #1d4ed8; border-radius: 10px; background: #dbeafe; }
-.iam-account-context-icon svg { width: 20px; height: 20px; }
-.iam-account-context-copy { min-width: 0; }
-.iam-account-context-copy strong { display: block; color: #172554; font-size: 13px; }
-.iam-account-context-copy p { margin: 4px 0 0; color: #64748b; font-size: 11px; line-height: 1.6; }
-.iam-account-context-points { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin-left: auto; }
-.iam-account-context-points span { padding: 4px 7px; color: #1d4ed8; font-size: 10px; font-weight: 600; border: 1px solid #bfdbfe; border-radius: 999px; background: #eff6ff; }
 .iam-account-table-card { border-color: #dbe4f0; }
 .iam-account-identity { display: flex; align-items: center; gap: 9px; min-width: 180px; }
 .iam-account-identity > span:last-child { display: grid; min-width: 0; gap: 3px; }
@@ -124,14 +116,11 @@
 .iam-account-expiry-field input { border-color: #fcd34d; background: #fff; }
 
 @media (max-width: 760px) {
-  .iam-account-context { align-items: flex-start; flex-wrap: wrap; }
-  .iam-account-context-points { width: 100%; justify-content: flex-start; margin-left: 49px; }
   .iam-account-editor-intro { grid-template-columns: 36px minmax(0, 1fr); }
   .iam-account-editor-intro > small { display: none; }
 }
 @media (max-width: 460px) {
   .iam-validity-options { grid-template-columns: 1fr; }
-  .iam-account-context-points { margin-left: 0; }
 }
 
 /* Authorization explanation surfaces stay inside existing details/forms rather than adding another navigation layer. */
@@ -162,3 +151,26 @@
 .iam-impact-metrics b { font-size: 12px; }
 .iam-impact-permissions, .iam-impact-users { margin: 9px 0 0; color: #475569; font-size: 10px; font-weight: 400; line-height: 1.6; overflow-wrap: anywhere; }
 @media (max-width: 760px) { .iam-preview-columns { grid-template-columns: 1fr; }.iam-impact-preview-head { align-items: stretch; flex-direction: column; }.iam-impact-preview-head .console-button { width: fit-content; } }
+
+/* SYS-004 contract access is edited as part of the user detail task, not as a generic RBAC panel. */
+.iam-contract-access { padding: 16px; border: 1px solid #dbeafe; border-radius: 10px; background: #f8fbff; }
+.iam-contract-revision { flex: 0 0 auto; padding: 4px 8px; color: #1d4ed8; font-size: 10px; font-weight: 700; border-radius: 999px; background: #dbeafe; }
+.iam-contract-access-form { display: grid; gap: 14px; }
+.iam-contract-access-form > label { display: grid; gap: 7px; color: #334155; font-size: 12px; font-weight: 600; }
+.iam-contract-access-form select { min-height: 38px; padding: 0 10px; color: #0f172a; border: 1px solid #cbd5e1; border-radius: 7px; background: #fff; }
+.iam-contract-access-form fieldset { min-width: 0; padding: 12px; border: 1px solid #dbe3ee; border-radius: 8px; background: #fff; }
+.iam-contract-access-form fieldset:disabled { opacity: .68; }
+.iam-contract-access-form legend { padding: 0 6px; color: #334155; font-size: 12px; font-weight: 700; }
+.iam-contract-permission-block { display: grid; gap: 8px; padding: 12px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; }
+.iam-contract-permission-block.effective { border-color: #bbf7d0; background: #f0fdf4; }
+.iam-contract-permission-block > strong { color: #0f172a; font-size: 12px; }
+.iam-contract-permission-tags { display: flex; flex-wrap: wrap; gap: 7px; }
+.iam-contract-permission-tags span { display: grid; gap: 2px; padding: 6px 8px; color: #334155; border: 1px solid #dbe3ee; border-radius: 7px; background: #fff; }
+.iam-contract-permission-tags b { font-size: 11px; }
+.iam-contract-permission-tags code, .iam-contract-permission-checks code { color: #64748b; font-size: 9px; }
+.iam-contract-permission-checks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.iam-contract-permission-checks label { display: flex; align-items: flex-start; gap: 8px; padding: 8px; cursor: pointer; border: 1px solid #e2e8f0; border-radius: 7px; background: #f8fafc; }
+.iam-contract-permission-checks input { width: 15px; height: 15px; flex: 0 0 auto; margin-top: 2px; }
+.iam-contract-permission-checks span { display: grid; gap: 2px; min-width: 0; }
+.iam-contract-permission-checks b { color: #334155; font-size: 11px; }
+@media (max-width: 760px) { .iam-contract-permission-checks { grid-template-columns: 1fr; } }

@@ -3,6 +3,7 @@ import { afterEach, test } from 'node:test'
 import {
   createApplication,
   createEnvironment,
+  deleteApplicationRegistration,
   listPortalApplications,
   onboardSubsystem,
   updateEnvironment,
@@ -43,6 +44,29 @@ test('createApplication persists through the registry API with session credentia
     application_type: 'web',
     description: null,
     status: 'ACTIVE',
+  })
+})
+
+test('deleteApplicationRegistration sends the stable code confirmation and optimistic-lock version', async () => {
+  let requested
+  globalThis.fetch = async (url, options) => {
+    requested = { url, options }
+    return jsonResponse({ data: { application_id: 'app/duplicate', status: 'RETIRED', version: 4 } })
+  }
+
+  const result = await deleteApplicationRegistration({
+    applicationId: 'app/duplicate',
+    confirmationCode: 'contract-management',
+    version: 3,
+  })
+
+  assert.equal(result.status, 'RETIRED')
+  assert.equal(requested.url, '/api/v1/applications/app%2Fduplicate')
+  assert.equal(requested.options.method, 'DELETE')
+  assert.equal(requested.options.credentials, 'include')
+  assert.deepEqual(JSON.parse(requested.options.body), {
+    confirmation_code: 'contract-management',
+    version: 3,
   })
 })
 

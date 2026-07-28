@@ -123,3 +123,33 @@ test('updateRole preserves the backend-managed role code while updating the role
     version: 4,
   })
 })
+
+test('contract application access uses the task-oriented user endpoint', async () => {
+  const requests = []
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url, options })
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: () => 'application/json' },
+      json: async () => ({ data: { role: { code: 'sales', name: '销售人员' }, custom_permissions: [] } }),
+      text: async () => '',
+    }
+  }
+
+  const { getContractApplicationAccess, updateContractApplicationAccess } = await import('./authorization.js')
+  await getContractApplicationAccess('user / 1')
+  await updateContractApplicationAccess('user / 1', {
+    roleCode: 'sales',
+    customPermissions: ['contract_template.manage'],
+  })
+
+  assert.equal(requests[0].url, '/api/v1/users/user%20%2F%201/applications/contract_management/access')
+  assert.equal(requests[0].options.method, undefined)
+  assert.equal(requests[1].url, '/api/v1/users/user%20%2F%201/applications/contract_management/access')
+  assert.equal(requests[1].options.method, 'PUT')
+  assert.deepEqual(JSON.parse(requests[1].options.body), {
+    role_code: 'sales',
+    custom_permissions: ['contract_template.manage'],
+  })
+})

@@ -64,26 +64,27 @@ test('合同管理系统的新编码和历史别名同时登记时只显示主�
   const cards = buildPortalSubsystems([
     {
       application_id: 'legacy-contract-app',
-      environment_id: 'legacy-prod',
-      code: 'contract_management',
-      name: '合同管理系统',
-      environment: 'prod',
-      public_url: 'http://localhost:8081/contract_management/',
-    },
-    {
-      application_id: 'contract-app',
-      environment_id: 'contract-dev',
+      environment_id: 'legacy-dev',
       code: 'contract-management',
       name: '合同管理系统',
       environment: 'dev',
       public_url: 'http://localhost:8081/contract/',
     },
+    {
+      application_id: 'contract-app',
+      environment_id: 'contract-prod',
+      code: 'contract_management',
+      name: '合同管理系统',
+      environment: 'prod',
+      public_url: 'http://localhost:8081/contract_management/',
+    },
   ])
 
   assert.equal(cards.length, 2)
-  assert.equal(cards[1].code, 'contract-management')
-  assert.equal(cards[1].environment, 'dev')
-  assert.equal(cards[1].publicURL, 'http://localhost:8081/contract/')
+  assert.equal(cards[1].code, 'contract_management')
+  assert.equal(cards[1].environment, 'prod')
+  assert.deepEqual(cards[1].route, { name: 'contract-management', params: { section: 'dashboard' } })
+  assert.equal(cards[1].publicURL, '')
 })
 
 test('同一个外部应用返回多个环境时只显示一个逻辑子系统入口', () => {

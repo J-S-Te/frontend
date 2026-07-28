@@ -94,7 +94,10 @@ export function buildPortalSubsystems(registeredApplications = []) {
         environment: application?.environment || '',
         icon: moduleDefinition?.icon || 'dashboard',
         allowed: true,
-        publicURL: application?.public_url || '',
+        // 已随统一前端构建的模块直接使用 Vue Router；只有没有本地模块的
+        // 独立子系统才使用后端登记的 public_url。
+        route: moduleDefinition?.route,
+        publicURL: moduleDefinition?.route ? '' : (application?.public_url || ''),
         source: 'application-registry',
       }
     })
