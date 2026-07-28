@@ -5,7 +5,7 @@ import { buildLoginTargetApplicationOptions } from './applicationBoundary.js'
 test('登录目标管理边界保留所有同名应用登记并使用唯一 ID 区分', () => {
   const options = buildLoginTargetApplicationOptions([
     { application_id: '01KYCOLDAPPLICATION0001', code: 'contract_management', name: '合同管理系统' },
-    { application_id: '01KYCNEWAPPLICATION0002', code: 'contract_management_prod', name: '合同管理系统生产环境' },
+    { application_id: '01KYCNEWAPPLICATION0002', code: 'contract_management_prod', name: '合同管理系统' },
   ])
 
   assert.equal(options.length, 2)
