@@ -59,3 +59,51 @@ test('后端重复返回基础平台登记时不会生成第二张平台卡片',
   assert.equal(cards.length, 1)
   assert.equal(cards[0].code, 'basic-platform')
 })
+
+test('合同管理系统的新编码和历史别名同时登记时只显示主编码卡片', () => {
+  const cards = buildPortalSubsystems([
+    {
+      application_id: 'legacy-contract-app',
+      environment_id: 'legacy-prod',
+      code: 'contract_management',
+      name: '合同管理系统',
+      environment: 'prod',
+      public_url: 'http://localhost:8081/contract_management/',
+    },
+    {
+      application_id: 'contract-app',
+      environment_id: 'contract-dev',
+      code: 'contract-management',
+      name: '合同管理系统',
+      environment: 'dev',
+      public_url: 'http://localhost:8081/contract/',
+    },
+  ])
+
+  assert.equal(cards.length, 2)
+  assert.equal(cards[1].code, 'contract-management')
+  assert.equal(cards[1].environment, 'dev')
+  assert.equal(cards[1].publicURL, 'http://localhost:8081/contract/')
+})
+
+test('同一个外部应用返回多个环境时只显示一个逻辑子系统入口', () => {
+  const cards = buildPortalSubsystems([
+    {
+      application_id: 'external-app',
+      environment_id: 'external-dev',
+      code: 'external-system',
+      environment: 'dev',
+      public_url: 'https://dev.example.com/',
+    },
+    {
+      application_id: 'external-app',
+      environment_id: 'external-prod',
+      code: 'external-system',
+      environment: 'prod',
+      public_url: 'https://example.com/',
+    },
+  ])
+
+  assert.equal(cards.length, 2)
+  assert.equal(cards[1].publicURL, 'https://dev.example.com/')
+})

@@ -2,7 +2,9 @@ import { createRouter, createWebHistory } from 'vue-router'
 import LoginView from '@/modules/platform/auth/views/LoginView.vue'
 import PlatformConsoleView from '@/modules/platform/views/PlatformConsoleView.vue'
 import SubsystemPortalView from '@/modules/platform/views/SubsystemPortalView.vue'
+import ContractManagementView from '@/modules/contract_management/views/ContractManagementView.vue'
 import { getCurrentPrincipal } from '@/modules/platform/auth/api/auth'
+import { ensureContractSession } from '@/modules/contract_management/api/contract'
 
 const settingsSections = new Set([
   'base',
@@ -54,6 +56,12 @@ const router = createRouter({
       meta: { title: '审计日志', requiresAuth: true },
     },
     {
+      path: '/contract/:section?',
+      name: 'contract-management',
+      component: ContractManagementView,
+      meta: { title: '合同管理系统', requiresAuth: true, requiresContractSession: true },
+    },
+    {
       path: '/:pathMatch(.*)*',
       redirect: { name: 'portal' },
     },
@@ -83,6 +91,10 @@ router.beforeEach(async (to) => {
     // `/auth/me` 使用 HttpOnly Cookie，由后端同时校验 JWT 和服务端会话状态。
     // 任意校验失败（401、网络错误或其他异常）都按未登录处理，不能 fail-open。
     await getCurrentPrincipal()
+    if (to.meta.requiresContractSession) {
+      const ready = await ensureContractSession()
+      if (!ready) return false
+    }
     return true
   } catch {
     return { name: 'login' }

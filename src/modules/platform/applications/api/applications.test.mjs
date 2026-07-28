@@ -93,3 +93,50 @@ test('updateEnvironment carries the optimistic-lock version and gateway fields',
   assert.equal(JSON.parse(requested.options.body).version, 7)
   assert.equal(JSON.parse(requested.options.body).upstream_url, 'http://[fd00::8]:8081')
 })
+
+
+test('onboardSubsystem requests automatic deployment and returns only safe onboarding metadata', async () => {
+  let requested
+  globalThis.fetch = async (url, options) => {
+    requested = { url, options }
+    return jsonResponse({ data: { automation: { status: 'completed', public_url: 'https://portal.example.com/business-app/' } } }, { status: 201 })
+  }
+
+  const result = await onboardSubsystem({
+    applicationCode: 'business-app',
+    applicationName: '业务应用',
+    publicBaseUrl: 'https://portal.example.com',
+    upstreamUrl: 'http://10.0.0.8:8081',
+    pathPrefix: '/business-app',
+  })
+
+  assert.equal(result.automation.status, 'completed')
+  assert.equal(result.automation.public_url, 'https://portal.example.com/business-app/')
+  assert.equal('integration' in result, false)
+  assert.equal(requested.url, '/api/v1/subsystem-onboarding')
+  assert.equal(requested.options.method, 'POST')
+  assert.deepEqual(JSON.parse(requested.options.body), {
+    application_code: 'business-app',
+    application_name: '业务应用',
+    description: null,
+    environment: 'prod',
+    public_base_url: 'https://portal.example.com',
+    upstream_url: 'http://10.0.0.8:8081',
+    path_prefix: '/business-app',
+    client_type: 'confidential',
+  })
+})
+
+test('listPortalApplications uses the authenticated tenant catalog endpoint', async () => {
+  let requested
+  globalThis.fetch = async (url, options) => {
+    requested = { url, options }
+    return jsonResponse({ data: [{ code: 'business-app', public_url: 'https://portal.example.com/business-app/' }] })
+  }
+
+  const result = await listPortalApplications({ environment: 'prod' })
+
+  assert.equal(requested.url, '/api/v1/portal/applications?environment=prod')
+  assert.equal(requested.options.credentials, 'include')
+  assert.equal(result[0].code, 'business-app')
+})

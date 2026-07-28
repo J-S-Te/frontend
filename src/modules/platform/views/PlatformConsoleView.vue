@@ -55,7 +55,6 @@ const subsystemEditor = reactive({
 })
 const subsystemSaving = ref(false)
 const subsystemError = ref('')
-const subsystemOnboardingResult = ref(null)
 const loginTargetEnvironments = ref([])
 const mobileMenuOpen = ref(false)
 const isLoggingOut = ref(false)
@@ -376,7 +375,6 @@ async function saveSubsystemConnection() {
   if (subsystemSaving.value) return
   subsystemSaving.value = true
   subsystemError.value = ''
-  subsystemOnboardingResult.value = null
   try {
     const normalized = validateSubsystemEditor()
     const result = await onboardSubsystem({
@@ -389,35 +387,16 @@ async function saveSubsystemConnection() {
       pathPrefix: normalized.pathPrefix,
       clientType: subsystemEditor.clientType,
     })
-    subsystemOnboardingResult.value = result
     await loadApplications()
     loginTargetBoundary.applicationId = result.application?.application_id || ''
     await loadLoginTargetEnvironments(loginTargetBoundary.applicationId)
     loginTargetBoundary.environmentId = result.environment?.environment_id || ''
-    showToast('子系统接入配置已创建。请立即保存一次性密钥，并按页面提示配置网关。')
+    showToast('子系统配置已自动写入并完成部署，刷新门户即可访问。')
   } catch (error) {
-    subsystemError.value = error instanceof ApplicationRegistryError ? error.message : '创建子系统接入配置失败。'
+    subsystemError.value = error instanceof ApplicationRegistryError ? error.message : '自动接入并部署子系统失败。'
   } finally {
     subsystemSaving.value = false
   }
-}
-
-async function copySubsystemIntegrationValue(value, successMessage) {
-  if (!value) return
-  try {
-    await navigator.clipboard.writeText(value)
-    showToast(successMessage)
-  } catch {
-    showToast('浏览器未允许自动复制，请手动选择并复制。')
-  }
-}
-
-function copySubsystemEnvironmentFile() {
-  return copySubsystemIntegrationValue(subsystemOnboardingResult.value?.integration?.environment_file, '子系统环境变量已复制。')
-}
-
-function copySubsystemGatewayCommand() {
-  return copySubsystemIntegrationValue(subsystemOnboardingResult.value?.integration?.gateway_command, '网关配置命令已复制。')
 }
 
 
@@ -766,7 +745,7 @@ onBeforeUnmount(() => {
             <form class="console-card settings-card" @submit.prevent="saveSubsystemConnection">
               <div class="console-card-body">
                 <h2>子系统一键接入</h2>
-                <p class="console-card-hint">一次创建应用、环境、门户首页登录目标和 OAuth 客户端。前端代码目录不会自动完成接入；保存成功后，子系统门户才会从后端应用目录生成对应卡片。子系统端口只作为内部上游使用，对外统一通过门户路径访问。</p>
+                <p class="console-card-hint">一次完成应用登记、OAuth 配置写入、子系统容器构建启动和门户网关更新。接入过程中不会在页面展示或复制客户端密钥；子系统端口仅作为内部上游使用，对外统一通过门户路径访问。</p>
                 <p v-if="subsystemError" class="login-target-module__error" role="alert">{{ subsystemError }}</p>
                 <div class="console-form-grid">
                   <label class="console-form-item"><span>子系统编码</span><input v-model="subsystemEditor.code" autocomplete="off" placeholder="business-app" /><small>稳定且唯一，例如 <code>business-app</code>。</small></label>
@@ -778,25 +757,8 @@ onBeforeUnmount(() => {
                   <label class="console-form-item"><span>门户路径前缀</span><input v-model="subsystemEditor.pathPrefix" autocomplete="off" placeholder="留空时自动使用 /business-app" /><small>留空时根据子系统编码生成；必须独占且不能为 <code>/</code>。</small></label>
                 </div>
                 <div class="console-form-actions">
-                  <button class="console-button primary" type="submit" :disabled="subsystemSaving"><ConsoleIcon name="save" />{{ subsystemSaving ? '创建中…' : '一键创建接入配置' }}</button>
+                  <button class="console-button primary" type="submit" :disabled="subsystemSaving"><ConsoleIcon name="save" />{{ subsystemSaving ? '自动部署中…' : '一键接入并部署' }}</button>
                 </div>
-                <section v-if="subsystemOnboardingResult" class="subsystem-onboarding-result" aria-live="polite">
-                  <h3>接入配置已创建</h3>
-                  <p>应用已经登记到基础能力平台；刷新子系统门户后会显示对应卡片。客户端密钥只在本次响应中返回，请立即复制并通过安全渠道交给子系统开发人员。</p>
-                  <dl class="subsystem-onboarding-summary">
-                    <div><dt>门户公开地址</dt><dd>{{ subsystemOnboardingResult.integration.public_url }}</dd></div>
-                    <div><dt>OIDC Issuer</dt><dd>{{ subsystemOnboardingResult.integration.issuer }}</dd></div>
-                    <div><dt>Client ID</dt><dd>{{ subsystemOnboardingResult.integration.client_id }}</dd></div>
-                    <div><dt>Redirect URI</dt><dd>{{ subsystemOnboardingResult.integration.redirect_uri }}</dd></div>
-                    <div v-if="subsystemOnboardingResult.integration.client_secret" class="is-sensitive"><dt>一次性 Client Secret</dt><dd>{{ subsystemOnboardingResult.integration.client_secret }}</dd></div>
-                  </dl>
-                  <h4>子系统环境变量</h4>
-                  <pre class="subsystem-onboarding-code">{{ subsystemOnboardingResult.integration.environment_file }}</pre>
-                  <button class="console-button ghost" type="button" @click="copySubsystemEnvironmentFile">复制环境变量</button>
-                  <h4>门户网关配置命令</h4>
-                  <pre class="subsystem-onboarding-code">{{ subsystemOnboardingResult.integration.gateway_command }}</pre>
-                  <button class="console-button ghost" type="button" @click="copySubsystemGatewayCommand">复制网关命令</button>
-                </section>
               </div>
             </form>
 
