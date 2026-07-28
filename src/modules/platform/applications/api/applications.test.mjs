@@ -3,6 +3,8 @@ import { afterEach, test } from 'node:test'
 import {
   createApplication,
   createEnvironment,
+  listPortalApplications,
+  onboardSubsystem,
   updateEnvironment,
 } from './applications.js'
 
