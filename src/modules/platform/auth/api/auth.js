@@ -37,6 +37,7 @@ export async function loginWithPassword({
   applicationId = '',
   environmentId = '',
   loginTargetCode = '',
+  replaceExistingSession = false,
 }) {
   let response
 
@@ -55,6 +56,7 @@ export async function loginWithPassword({
         ...(applicationId ? { application_id: applicationId } : {}),
         ...(environmentId ? { environment_id: environmentId } : {}),
         ...(loginTargetCode ? { login_target_code: loginTargetCode } : {}),
+        ...(replaceExistingSession ? { replace_existing_session: true } : {}),
       }),
     })
   } catch (error) {

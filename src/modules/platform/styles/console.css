@@ -155,27 +155,6 @@
 .console-detail-section p { margin: 6px 0 9px; color: var(--muted); font-size: 12px; line-height: 1.6; }
 .console-permission-code { display: inline-block; margin: 0 6px 7px 0; padding: 5px 7px; overflow-wrap: anywhere; color: #1e3a8a; font-family: ui-monospace,SFMono-Regular,Menlo,monospace; font-size: 11px; border-radius: 5px; background: #eff6ff; }
 .console-detail-modal > footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; padding: 16px 24px; border-top: 1px solid #e2e8f0; }
-.application-boundary-actions { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 16px; margin-top: 18px; border: 1px solid #fecaca; border-radius: 9px; background: #fffafa; }
-.application-boundary-actions > div { min-width: 0; }
-.application-boundary-actions strong { display: block; color: #991b1b; font-size: 13px; }
-.application-boundary-actions small { display: block; margin-top: 5px; color: #7f1d1d; font-size: 12px; line-height: 1.55; }
-.console-modal-eyebrow.danger { color: #dc2626; }
-.application-delete-modal { width: min(620px,100%); }
-.application-delete-body { padding: 20px 24px 0; }
-.application-delete-warning { padding: 12px 14px; margin: 0; color: #991b1b; font-size: 12px; line-height: 1.65; border: 1px solid #fecaca; border-radius: 8px; background: #fef2f2; }
-.application-delete-summary { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin-top: 16px; }
-.application-delete-summary > div { min-width: 0; padding: 11px 12px; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; }
-.application-delete-summary > div:last-child { grid-column: 1 / -1; }
-.application-delete-summary span { display: block; margin-bottom: 4px; color: var(--muted); font-size: 11px; }
-.application-delete-summary strong { display: block; overflow-wrap: anywhere; color: var(--text); font-size: 13px; font-weight: 600; }
-.application-delete-field { display: block; margin-top: 18px; }
-.application-delete-field > span { display: block; margin-bottom: 7px; color: var(--secondary); font-size: 12px; }
-.application-delete-field > span strong { color: #dc2626; font-family: ui-monospace,SFMono-Regular,Menlo,monospace; }
-.application-delete-field input { width: 100%; min-height: 40px; padding: 9px 11px; color: var(--text); border: 1px solid #cbd5e1; border-radius: 8px; outline: none; background: #fff; }
-.application-delete-field input:focus { border-color: #f87171; box-shadow: 0 0 0 3px rgba(248,113,113,.13); }
-.application-delete-error { margin: 10px 0 0; color: #dc2626; font-size: 12px; }
-@media (max-width: 620px) { .console-iam-head { align-items: stretch; flex-direction: column; }.console-iam-head .console-button { align-self: flex-start; }.console-sub-tabs { margin-top: 16px; }.console-sub-tab { flex: 1; padding: 7px 12px; }.console-iam-filter .console-search-field { flex-basis: 100%; }.console-detail-modal { max-height: calc(100vh - 24px); }.console-detail-modal > header { padding: 18px 18px 15px; }.console-detail-grid { grid-template-columns: 1fr; margin: 18px 18px 0; }.console-detail-grid > div, .console-detail-grid > div:nth-child(odd) { border-right: 0; }.console-detail-grid > div:nth-last-child(-n+2) { border-bottom: 1px solid #e2e8f0; }.console-detail-grid > div:last-child { border-bottom: 0; }.console-detail-section { margin: 18px 18px 0; }.console-detail-modal > footer { padding: 15px 18px; }.console-detail-modal > footer .console-button { flex: 1; }.console-role-chip { max-width: 130px; } }
-@media (max-width: 620px) { .application-boundary-actions { align-items: stretch; flex-direction: column; }.application-boundary-actions .console-button { width: 100%; }.application-delete-body { padding: 18px 18px 0; }.application-delete-summary { grid-template-columns: 1fr; }.application-delete-summary > div:last-child { grid-column: auto; } }
 
 /* AUD-001 审计中心：跨系统事件、变更摘要与链路追溯 */
 .audit-readonly-note code { padding: 1px 4px; color: #1e40af; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; border-radius: 3px; background: #eff6ff; }
@@ -287,16 +266,3 @@
   .audit-data-table .console-actions-cell { gap: 3px; padding: 9px 0 2px; }
   .audit-data-table .console-text-button + .console-text-button { margin-left: 2px; }
 }
-
-/* 子系统一键接入结果：突出一次性密钥与可复制配置，长地址允许安全换行。 */
-.subsystem-onboarding-result { margin-top: 20px; padding: 18px; border: 1px solid #bfdbfe; border-radius: 12px; background: #eff6ff; }
-.subsystem-onboarding-result h3 { margin: 0 0 6px; color: #1d4ed8; font-size: 16px; }
-.subsystem-onboarding-result h4 { margin: 18px 0 8px; color: #334155; font-size: 13px; }
-.subsystem-onboarding-result > p { margin: 0 0 14px; color: #475569; font-size: 13px; }
-.subsystem-onboarding-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 0; }
-.subsystem-onboarding-summary > div { min-width: 0; padding: 10px 12px; border: 1px solid #dbeafe; border-radius: 9px; background: #fff; }
-.subsystem-onboarding-summary > div.is-sensitive { grid-column: 1 / -1; border-color: #fed7aa; background: #fff7ed; }
-.subsystem-onboarding-summary dt { margin-bottom: 4px; color: #64748b; font-size: 11px; }
-.subsystem-onboarding-summary dd { margin: 0; color: #0f172a; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; overflow-wrap: anywhere; }
-.subsystem-onboarding-code { overflow: auto; max-height: 220px; margin: 0 0 10px; padding: 12px; border-radius: 9px; background: #0f172a; color: #e2e8f0; font: 12px/1.65 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
-@media (max-width: 760px) { .subsystem-onboarding-summary { grid-template-columns: 1fr; } .subsystem-onboarding-summary > div.is-sensitive { grid-column: auto; } }

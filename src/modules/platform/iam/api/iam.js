@@ -112,7 +112,8 @@ export function updateUser({ userId, displayName, employeeNo = '', email = '', m
   })
 }
 
-// deleteUser logically deletes a user. The version field prevents overwriting a newer record.
+// deleteUser performs a business deletion. The backend disables and hides associated login accounts
+// and memberships, and revokes active sessions atomically. The version field prevents stale writes.
 export function deleteUser({ userId, version }) {
   return request(`/users/${encodeURIComponent(userId)}`, {
     method: 'DELETE',

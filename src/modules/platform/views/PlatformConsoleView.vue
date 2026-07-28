@@ -4,18 +4,13 @@ import { useRoute, useRouter } from 'vue-router'
 import { AuthError, logoutCurrentSession } from '@/modules/platform/auth/api/auth'
 import FileTaskOperationsModule from '@/modules/platform/files/components/FileTaskOperationsModule.vue'
 import IamSettingsModule from '@/modules/platform/iam/components/IamSettingsModule.vue'
-import ApplicationLoginTargetModule from '@/modules/platform/login-targets/components/ApplicationLoginTargetModule.vue'
-import { buildLoginTargetApplicationOptions } from '@/modules/platform/login-targets/utils/applicationBoundary'
 import NotificationCenterModule from '@/modules/platform/notifications/components/NotificationCenterModule.vue'
 import LoginSecurityModule from '@/modules/platform/security/components/LoginSecurityModule.vue'
 import DictionaryManagementModule from '@/modules/platform/dictionaries/components/DictionaryManagementModule.vue'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import {
-  ApplicationRegistryError,
-  deleteApplicationRegistration,
   listApplications,
   listEnvironments,
-  onboardSubsystem,
 } from '@/modules/platform/applications/api/applications'
 import {
   AuditEventsError,
@@ -45,29 +40,6 @@ const settingsLoading = ref(false)
 const settingsError = ref('')
 const settingsSaving = ref(false)
 const currentView = computed(() => (route.name === 'audit' ? 'audit' : 'settings'))
-const loginTargetBoundary = reactive({ applicationId: '', applicationCode: '', environmentId: '', applicationName: '', environmentName: '', baseURL: '', upstreamURL: '', pathPrefix: '' })
-const applicationDeleteDialog = reactive({
-  open: false,
-  applicationId: '',
-  applicationCode: '',
-  applicationName: '',
-  version: 0,
-  confirmationCode: '',
-  submitting: false,
-  error: '',
-})
-const subsystemEditor = reactive({
-  code: '',
-  name: '',
-  environment: 'prod',
-  baseURL: typeof window === 'undefined' ? '' : window.location.origin,
-  upstreamURL: '',
-  pathPrefix: '',
-  clientType: 'confidential',
-})
-const subsystemSaving = ref(false)
-const subsystemError = ref('')
-const loginTargetEnvironments = ref([])
 const mobileMenuOpen = ref(false)
 const isLoggingOut = ref(false)
 const toastMessage = ref('')
@@ -101,11 +73,6 @@ const settingsTabs = [
     key: 'iam', label: '身份、组织与授权', icon: 'organization', tone: 'violet',
     description: '集中管理身份目录、组织架构与访问权限。',
     capabilities: ['新增组织单元', '新增岗位', '新增任职关系', '新增外部身份绑定', '新增角色', '新增角色绑定', '新增权限注册'],
-  },
-  {
-    key: 'login-targets', label: '统一登录目标', icon: 'link', tone: 'cyan',
-    description: '接入子系统并配置统一门户登录入口。',
-    capabilities: ['子系统接入', '登录跳转', 'OAuth 客户端'],
   },
   {
     key: 'notify', label: '通知中心', icon: 'bell', tone: 'orange',
@@ -189,11 +156,6 @@ function formatAuditTime(value) {
 
 const filteredAuditRecords = computed(() => auditRecords.value)
 
-const loginTargetApplicationOptions = computed(() => buildLoginTargetApplicationOptions(applications.value))
-const duplicateLoginTargetApplicationCount = computed(() => loginTargetApplicationOptions.value.filter((option) => option.hasSameName).length)
-const selectedLoginTargetApplication = computed(() => applications.value.find((item) => item.application_id === loginTargetBoundary.applicationId) || null)
-const canDeleteSelectedApplication = computed(() => Boolean(selectedLoginTargetApplication.value && selectedLoginTargetApplication.value.code !== 'platform'))
-const isApplicationDeleteConfirmed = computed(() => applicationDeleteDialog.confirmationCode === applicationDeleteDialog.applicationCode)
 const auditTotalPages = computed(() => Math.max(1, Math.ceil(auditTotal.value / auditPageSize)))
 // 审计接口已经按 page/page_size 返回当前页数据，前端不能再次按照全局页码切片，
 // 否则从第二页开始会把后端返回的当前页记录全部过滤掉。
@@ -305,184 +267,6 @@ async function loadEnvironments(applicationCode) {
     environments.value = []
   }
 }
-
-async function loadLoginTargetEnvironments(applicationID) {
-  if (!applicationID) {
-    loginTargetEnvironments.value = []
-    loginTargetBoundary.environmentId = ''
-    loginTargetBoundary.applicationName = ''
-    loginTargetBoundary.applicationCode = ''
-    loginTargetBoundary.environmentName = ''
-    loginTargetBoundary.baseURL = ''
-    loginTargetBoundary.upstreamURL = ''
-    loginTargetBoundary.pathPrefix = ''
-    return
-  }
-  try {
-    const data = await listEnvironments({ applicationId: applicationID, page: 1, pageSize: 50, status: 'ACTIVE' })
-    loginTargetEnvironments.value = data.items || []
-    if (!loginTargetEnvironments.value.some((env) => env.environment_id === loginTargetBoundary.environmentId)) {
-      loginTargetBoundary.environmentId = ''
-      loginTargetBoundary.environmentName = ''
-      loginTargetBoundary.baseURL = ''
-      loginTargetBoundary.upstreamURL = ''
-      loginTargetBoundary.pathPrefix = ''
-    }
-  } catch (error) {
-    loginTargetEnvironments.value = []
-  }
-}
-
-watch(() => loginTargetBoundary.applicationId, (value) => {
-  const app = applications.value.find((item) => item.application_id === value)
-  loginTargetBoundary.applicationName = app?.name || app?.code || ''
-  loginTargetBoundary.applicationCode = app?.code || ''
-  loadLoginTargetEnvironments(value)
-})
-
-watch(() => loginTargetBoundary.environmentId, (value) => {
-  if (!value) {
-    loginTargetBoundary.environmentName = ''
-    loginTargetBoundary.baseURL = ''
-    loginTargetBoundary.upstreamURL = ''
-    loginTargetBoundary.pathPrefix = ''
-    return
-  }
-  const env = loginTargetEnvironments.value.find((item) => item.environment_id === value)
-  loginTargetBoundary.environmentName = env?.environment || ''
-  loginTargetBoundary.baseURL = env?.base_url || ''
-  loginTargetBoundary.upstreamURL = env?.upstream_url || ''
-  loginTargetBoundary.pathPrefix = env?.path_prefix || ''
-})
-
-function resetApplicationDeleteDialog() {
-  Object.assign(applicationDeleteDialog, {
-    open: false,
-    applicationId: '',
-    applicationCode: '',
-    applicationName: '',
-    version: 0,
-    confirmationCode: '',
-    submitting: false,
-    error: '',
-  })
-}
-
-function openApplicationDeleteDialog() {
-  const selected = selectedLoginTargetApplication.value
-  if (!selected || selected.code === 'platform') return
-  Object.assign(applicationDeleteDialog, {
-    open: true,
-    applicationId: selected.application_id,
-    applicationCode: selected.code,
-    applicationName: selected.name || selected.code,
-    version: selected.version,
-    confirmationCode: '',
-    submitting: false,
-    error: '',
-  })
-}
-
-function closeApplicationDeleteDialog() {
-  if (applicationDeleteDialog.submitting) return
-  resetApplicationDeleteDialog()
-}
-
-async function confirmApplicationDelete() {
-  if (applicationDeleteDialog.submitting) return
-  if (!isApplicationDeleteConfirmed.value) {
-    applicationDeleteDialog.error = `请输入应用编码 ${applicationDeleteDialog.applicationCode} 进行确认。`
-    return
-  }
-
-  applicationDeleteDialog.submitting = true
-  applicationDeleteDialog.error = ''
-  const removedName = applicationDeleteDialog.applicationName
-  const removedCode = applicationDeleteDialog.applicationCode
-  try {
-    await deleteApplicationRegistration({
-      applicationId: applicationDeleteDialog.applicationId,
-      confirmationCode: applicationDeleteDialog.confirmationCode,
-      version: applicationDeleteDialog.version,
-    })
-    loginTargetBoundary.applicationId = ''
-    loginTargetBoundary.environmentId = ''
-    loginTargetEnvironments.value = []
-    resetApplicationDeleteDialog()
-    await loadApplications()
-    showToast(`${removedName}（${removedCode}）已从活动应用中移除，历史配置已保留。`)
-  } catch (error) {
-    applicationDeleteDialog.error = error?.status === 409
-      ? '应用已被其他管理员更新，或该应用不允许删除，请刷新后重试。'
-      : error instanceof ApplicationRegistryError ? error.message : '删除应用登记失败。'
-  } finally {
-    applicationDeleteDialog.submitting = false
-  }
-}
-
-function validateSubsystemEditor() {
-  const code = subsystemEditor.code.trim().toLowerCase()
-  const name = subsystemEditor.name.trim()
-  const baseURL = subsystemEditor.baseURL.trim().replace(/\/+$/, '')
-  const upstreamURL = subsystemEditor.upstreamURL.trim().replace(/\/+$/, '')
-  const pathPrefix = subsystemEditor.pathPrefix.trim().replace(/\/+$/, '')
-
-  if (!code || !name || !baseURL || !upstreamURL) {
-    throw new ApplicationRegistryError('子系统编码、名称、门户 BaseURL 和内部 UpstreamURL 均不能为空。', { code: 'VALIDATION_ERROR' })
-  }
-  if (!/^[a-z][a-z0-9._-]{0,63}$/.test(code)) {
-    throw new ApplicationRegistryError('子系统编码需为 1-64 位，并以小写字母开头；其余可使用小写字母、数字、点、下划线或连字符。', { code: 'VALIDATION_ERROR' })
-  }
-  const resolvedPathPrefix = pathPrefix || `/${code}`
-  if (!/^\/[A-Za-z0-9._~!+/\-]*$/.test(resolvedPathPrefix) || resolvedPathPrefix === '/' || resolvedPathPrefix.includes('//') || resolvedPathPrefix.split('/').some((segment) => segment === '.' || segment === '..')) {
-    throw new ApplicationRegistryError('路径前缀必须是类似 /business-app 的门户绝对路径，只能使用字母、数字、/、点、下划线、~、!、+、-，且不能包含重复斜杠或点路径段。', { code: 'VALIDATION_ERROR' })
-  }
-  const upstreamMatch = upstreamURL.match(/^https?:\/\/(?:\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9._~-]+)(?::([0-9]{1,5}))?(?:\/[A-Za-z0-9._~!%+/@-]*)?$/)
-  if (!upstreamMatch || (upstreamMatch[1] && (Number(upstreamMatch[1]) < 1 || Number(upstreamMatch[1]) > 65535))) {
-    throw new ApplicationRegistryError('内部 UpstreamURL 必须是可安全写入网关配置的 http/https 地址，例如 http://10.0.0.8:8081。', { code: 'VALIDATION_ERROR' })
-  }
-  for (const [label, value] of [['门户 BaseURL', baseURL], ['内部 UpstreamURL', upstreamURL]]) {
-    let parsed
-    try {
-      parsed = new URL(value)
-    } catch {
-      throw new ApplicationRegistryError(`${label} 不是有效 URL。`, { code: 'VALIDATION_ERROR' })
-    }
-    if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash) {
-      throw new ApplicationRegistryError(`${label} 仅支持无账号、查询参数和片段的 http/https URL。`, { code: 'VALIDATION_ERROR' })
-    }
-  }
-  return { code, name, baseURL, upstreamURL, pathPrefix: resolvedPathPrefix }
-}
-
-async function saveSubsystemConnection() {
-  if (subsystemSaving.value) return
-  subsystemSaving.value = true
-  subsystemError.value = ''
-  try {
-    const normalized = validateSubsystemEditor()
-    const result = await onboardSubsystem({
-      applicationCode: normalized.code,
-      applicationName: normalized.name,
-      description: `门户路径接入：${normalized.pathPrefix}`,
-      environment: subsystemEditor.environment,
-      publicBaseUrl: normalized.baseURL,
-      upstreamUrl: normalized.upstreamURL,
-      pathPrefix: normalized.pathPrefix,
-      clientType: subsystemEditor.clientType,
-    })
-    await loadApplications()
-    loginTargetBoundary.applicationId = result.application?.application_id || ''
-    await loadLoginTargetEnvironments(loginTargetBoundary.applicationId)
-    loginTargetBoundary.environmentId = result.environment?.environment_id || ''
-    showToast('子系统配置已自动写入并完成部署，刷新门户即可访问。')
-  } catch (error) {
-    subsystemError.value = error instanceof ApplicationRegistryError ? error.message : '自动接入并部署子系统失败。'
-  } finally {
-    subsystemSaving.value = false
-  }
-}
-
 
 async function loadAuditEvents() {
   if (currentView.value !== 'audit') return
@@ -640,9 +424,6 @@ watch([currentView, activeSettingsTab], () => {
 watch(activeSettingsTab, (tab) => {
   if (tab === 'base' && !settings.organizationName && !settingsLoading.value) {
     loadPlatformSettings()
-  }
-  if (tab === 'login-targets' && !applications.value.length) {
-    loadApplications()
   }
 }, { immediate: true })
 
@@ -825,54 +606,6 @@ onBeforeUnmount(() => {
 
           <IamSettingsModule v-else-if="activeSettingsTab === 'iam'" @toast="showToast" />
 
-          <div v-else-if="activeSettingsTab === 'login-targets'" class="settings-module-stack">
-            <form class="console-card settings-card" @submit.prevent="saveSubsystemConnection">
-              <div class="console-card-body">
-                <h2>子系统一键接入</h2>
-                <p class="console-card-hint">一次完成应用登记、OAuth 配置写入、子系统容器构建启动和门户网关更新。接入过程中不会在页面展示或复制客户端密钥；子系统端口仅作为内部上游使用，对外统一通过门户路径访问。</p>
-                <p v-if="subsystemError" class="login-target-module__error" role="alert">{{ subsystemError }}</p>
-                <div class="console-form-grid">
-                  <label class="console-form-item"><span>子系统编码</span><input v-model="subsystemEditor.code" autocomplete="off" placeholder="business-app" /><small>稳定且唯一，例如 <code>business-app</code>。</small></label>
-                  <label class="console-form-item"><span>子系统名称</span><input v-model="subsystemEditor.name" autocomplete="off" placeholder="业务应用" /></label>
-                  <label class="console-form-item"><span>环境</span><select v-model="subsystemEditor.environment"><option value="dev">dev</option><option value="test">test</option><option value="staging">staging</option><option value="prod">prod</option></select></label>
-                  <label class="console-form-item"><span>OAuth 客户端类型</span><select v-model="subsystemEditor.clientType"><option value="confidential">后端服务（推荐，有密钥）</option><option value="public">纯前端 SPA（无密钥）</option></select><small>有后端的子系统应选择“后端服务”。</small></label>
-                  <label class="console-form-item"><span>门户公开 BaseURL</span><input v-model="subsystemEditor.baseURL" autocomplete="url" placeholder="https://portal.example.com" /><small>用户在浏览器中访问的统一入口；生产环境建议使用 HTTPS。</small></label>
-                  <label class="console-form-item"><span>内部 UpstreamURL</span><input v-model="subsystemEditor.upstreamURL" autocomplete="url" placeholder="http://10.0.0.8:8081" /><small>只供门户网关访问，不需要对公网开放。</small></label>
-                  <label class="console-form-item"><span>门户路径前缀</span><input v-model="subsystemEditor.pathPrefix" autocomplete="off" placeholder="留空时自动使用 /business-app" /><small>留空时根据子系统编码生成；必须独占且不能为 <code>/</code>。</small></label>
-                </div>
-                <div class="console-form-actions">
-                  <button class="console-button primary" type="submit" :disabled="subsystemSaving"><ConsoleIcon name="save" />{{ subsystemSaving ? '自动部署中…' : '一键接入并部署' }}</button>
-                </div>
-              </div>
-            </form>
-
-            <div class="console-card settings-card">
-              <div class="console-card-body">
-                <h2>登录目标管理边界</h2>
-                <p class="console-card-hint">同一应用环境可以登记多个登录目标，并通过不同的目标编码精确区分。管理边界以 <code>application_id + environment_id</code> 为准；同名应用登记不会被合并，避免隐藏真实配置。</p>
-                <p v-if="duplicateLoginTargetApplicationCount" class="console-card-hint">当前存在 {{ duplicateLoginTargetApplicationCount }} 条同名应用登记，应用选项已附带编码和唯一 ID，请确认后再维护目标。</p>
-                <div class="console-form-grid">
-                  <label class="console-form-item"><span>应用</span><select v-model="loginTargetBoundary.applicationId" :disabled="!loginTargetApplicationOptions.length"><option value="">请选择应用</option><option v-for="option in loginTargetApplicationOptions" :key="option.applicationID" :value="option.applicationID">{{ option.label }}</option></select><small>这里保留全部真实应用登记；门户卡片去重不会影响管理入口。</small></label>
-                  <label class="console-form-item"><span>环境</span><select v-model="loginTargetBoundary.environmentId" :disabled="!loginTargetBoundary.applicationId || !loginTargetEnvironments.length"><option value="">请选择环境</option><option v-for="env in loginTargetEnvironments" :key="env.environment_id" :value="env.environment_id">{{ env.environment }}</option></select></label>
-                  <div class="console-form-item full"><span>应用唯一边界</span><strong class="console-mono">{{ loginTargetBoundary.applicationCode || '—' }}<template v-if="loginTargetBoundary.applicationId"> / {{ loginTargetBoundary.applicationId }}</template></strong><small>名称可以相同，但应用 ID 唯一；所有读写操作都使用该 ID。</small></div>
-                  <div class="console-form-item"><span>门户路径前缀</span><strong class="console-mono">{{ loginTargetBoundary.pathPrefix || '—' }}</strong><small>网关按此前缀把请求转发到内部上游。</small></div>
-                  <div class="console-form-item"><span>门户公开 BaseURL</span><strong class="console-mono">{{ loginTargetBoundary.baseURL || '—' }}</strong><small>相对 TargetURI 最终按 BaseURL + PathPrefix + TargetURI 拼接。</small></div>
-                  <div class="console-form-item full"><span>内部 UpstreamURL</span><strong class="console-mono">{{ loginTargetBoundary.upstreamURL || '—' }}</strong><small>只用于反向代理，不作为浏览器跳转地址。</small></div>
-                </div>
-                <div class="application-boundary-actions">
-                  <div>
-                    <strong>删除应用登记</strong>
-                    <small v-if="!selectedLoginTargetApplication">请先选择需要处理的应用。</small>
-                    <small v-else-if="selectedLoginTargetApplication.code === 'platform'">基础能力平台是内置应用，不允许删除。</small>
-                    <small v-else>删除后该应用会从活动列表和门户中移除；环境、OAuth 客户端、登录目标和审计历史不会物理删除。</small>
-                  </div>
-                  <button class="console-button danger" type="button" :disabled="!canDeleteSelectedApplication" @click="openApplicationDeleteDialog">删除当前应用</button>
-                </div>
-              </div>
-            </div>
-            <ApplicationLoginTargetModule :application-id="loginTargetBoundary.applicationId" :environment-id="loginTargetBoundary.environmentId" :application-name="loginTargetBoundary.applicationName" :environment-name="loginTargetBoundary.environmentName" @toast="showToast" />
-          </div>
-
           <NotificationCenterModule v-else-if="activeSettingsTab === 'notify'" @toast="showToast" />
 
           <LoginSecurityModule v-else-if="activeSettingsTab === 'security'" @toast="showToast" />
@@ -884,32 +617,6 @@ onBeforeUnmount(() => {
         </section>
       </section>
     </main>
-
-    <div v-if="applicationDeleteDialog.open" class="console-modal-backdrop" role="presentation" @click.self="closeApplicationDeleteDialog">
-      <section class="console-detail-modal application-delete-modal" role="dialog" aria-modal="true" aria-label="删除应用登记">
-        <header>
-          <div><p class="console-modal-eyebrow danger">APPLICATION RETIREMENT</p><h2>删除应用登记</h2></div>
-          <button class="console-modal-close" type="button" aria-label="关闭删除应用登记弹窗" :disabled="applicationDeleteDialog.submitting" @click="closeApplicationDeleteDialog"><ConsoleIcon name="close" /></button>
-        </header>
-        <div class="application-delete-body">
-          <p class="application-delete-warning">此操作会将应用登记标记为“已退役”，不会物理删除关联配置和历史记录。退役后，该应用不再出现在活动应用列表和子系统门户中。</p>
-          <div class="application-delete-summary">
-            <div><span>应用名称</span><strong>{{ applicationDeleteDialog.applicationName }}</strong></div>
-            <div><span>应用编码</span><strong class="console-mono">{{ applicationDeleteDialog.applicationCode }}</strong></div>
-            <div><span>应用 ID</span><strong class="console-mono">{{ applicationDeleteDialog.applicationId }}</strong></div>
-          </div>
-          <label class="application-delete-field">
-            <span>请输入应用编码 <strong>{{ applicationDeleteDialog.applicationCode }}</strong> 确认</span>
-            <input v-model.trim="applicationDeleteDialog.confirmationCode" autocomplete="off" :disabled="applicationDeleteDialog.submitting" placeholder="输入完整应用编码" @keyup.enter="confirmApplicationDelete" />
-          </label>
-          <p v-if="applicationDeleteDialog.error" class="application-delete-error">{{ applicationDeleteDialog.error }}</p>
-        </div>
-        <footer>
-          <button class="console-button ghost" type="button" :disabled="applicationDeleteDialog.submitting" @click="closeApplicationDeleteDialog">取消</button>
-          <button class="console-button danger" type="button" :disabled="!isApplicationDeleteConfirmed || applicationDeleteDialog.submitting" @click="confirmApplicationDelete">{{ applicationDeleteDialog.submitting ? '删除中…' : '确认删除' }}</button>
-        </footer>
-      </section>
-    </div>
 
     <div v-if="auditDetail" class="console-modal-backdrop" role="presentation" @click.self="closeAuditDetail">
       <section class="console-detail-modal audit-detail-modal" role="dialog" aria-modal="true" aria-label="审计事件详情">

@@ -11,6 +11,11 @@ import {
   formatDateTime,
 } from '@/modules/platform/iam/utils/iamPresentation'
 import {
+  defaultMembershipOrganizationId,
+  membershipOrganizationOptions,
+  positionOrgUnitId,
+} from '@/modules/platform/iam/utils/iamMembershipOptions'
+import {
   IamError,
   createLocalAccount,
   createMembership,
@@ -100,7 +105,7 @@ const panel = computed(() => panels.find((item) => item.key === activePanel.valu
 
 const metrics = computed(() => [
   { label: '有效用户', value: pagination.users.total, note: '服务端分页总数 /api/v1/users', icon: 'user', tone: 'blue' },
-  { label: '登录账号', value: pagination.accounts.total, note: '服务端分页总数（含停用账号）/api/v1/accounts', icon: 'account', tone: 'violet' },
+  { label: '登录账号', value: pagination.accounts.total, note: '服务端分页总数（含未删除用户的停用账号）/api/v1/accounts', icon: 'account', tone: 'violet' },
   { label: '有效组织', value: pagination.organizations.total, note: '服务端分页总数 /api/v1/org-units', icon: 'organization', tone: 'green' },
   { label: '任职关系', value: pagination.memberships.total, note: '服务端分页总数 /api/v1/memberships', icon: 'link', tone: 'orange' },
 ])
@@ -121,8 +126,20 @@ function includesFilter(items, filter, fields) {
 const filteredUsers = computed(() => includesFilter(users.value, filters.user, ['display_name', 'employee_no', 'email', 'status']))
 const filteredAccounts = computed(() => includesFilter(accounts.value, filters.account, ['account_name', 'user_id', 'status']))
 const filteredOrganizations = computed(() => includesFilter(organizations.value, filters.organization, ['code', 'name']))
-const filteredPositions = computed(() => includesFilter(positions.value, filters.position, ['code', 'name', 'org_unit.name']))
+const filteredPositions = computed(() => includesFilter(
+  positions.value.map((item) => ({ ...item, organization_name: positionOrganizationName(item) })),
+  filters.position,
+  ['code', 'name', 'organization_name'],
+))
 const filteredMemberships = computed(() => includesFilter(memberships.value, filters.membership, ['user.name', 'org_unit.name', 'position.name', 'membership_type']))
+
+// 岗位列表仅展示名称和所属组织；岗位编码与内部主键仅用于筛选、接口调用和 Vue 行标识。
+function positionOrganizationName(position) {
+  if (position?.org_unit?.name) return position.org_unit.name
+  const organizationId = positionOrgUnitId(position)
+  if (!organizationId) return '—'
+  return organizations.value.find((item) => (item.org_unit_id || item.id) === organizationId)?.name || '—'
+}
 
 const selectedPasswordResetAccount = computed(() => {
   const dialog = passwordResetDialog.value
@@ -445,8 +462,8 @@ async function confirmUserDeletion() {
     await deleteUser({ userId: user.user_id, version: user.version || 0 })
     userDeletionDialog.value = null
     if (detail.value?.kind === 'user' && detail.value.item?.user_id === user.user_id) closeDetail()
-    await Promise.all([loadUsers(), loadAccounts()])
-    emitToast(`用户 ${user.display_name || user.user_id} 已删除。`)
+    await Promise.all([loadUsers(), loadAccounts(), loadMemberships()])
+    emitToast(`用户 ${user.display_name || user.user_id} 已删除，关联登录账号和任职关系已同步删除。`)
   } catch (error) {
     emitToast(error instanceof IamError ? error.message : (error?.message || '删除用户失败。'))
   } finally {
@@ -459,6 +476,29 @@ const editor = ref(null) // { kind, label }
 const form = reactive({})
 const saving = ref(false)
 const initialPasswordVisible = ref(false)
+
+// 后端要求岗位必须归属当前选择的组织。仅暴露该组织下的岗位，避免提交
+// 三个 ID 都存在、但岗位和组织并不匹配的组合（该组合会被 API 拒绝）。
+const membershipOrganizations = computed(() => membershipOrganizationOptions(organizations.value, positions.value))
+
+const membershipPositions = computed(() => {
+  const orgUnitId = form.org_unit_id
+  if (!orgUnitId) return []
+  return positions.value.filter((item) => positionOrgUnitId(item) === orgUnitId)
+})
+
+function selectDefaultMembershipOrganization() {
+  if (editor.value?.kind !== 'membership' || form.org_unit_id) return
+  form.org_unit_id = defaultMembershipOrganizationId(organizations.value, positions.value)
+}
+
+watch(() => form.org_unit_id, (orgUnitId) => {
+  if (editor.value?.kind !== 'membership') return
+  const selectedPositionExists = membershipPositions.value.some(
+    (item) => (item.position_id || item.id) === form.position_id,
+  )
+  if (!orgUnitId || !selectedPositionExists) form.position_id = ''
+})
 
 const editorTemplates = {
   user: () => ({ display_name: '', email: '', mobile: '', status: 'ACTIVE' }),
@@ -500,8 +540,14 @@ function openEditor(kind) {
   editor.value = { kind, label: editorLabels[kind] }
 
   if (['account', 'membership', 'external-identity'].includes(kind) && !users.value.length) loadUsers()
-  if (['position', 'membership'].includes(kind) && !organizations.value.length) loadOrganizations()
-  if (kind === 'membership' && !positions.value.length) loadPositions()
+  if (kind === 'position' && !organizations.value.length) loadOrganizations()
+  if (kind === 'membership') {
+    const referenceLoads = []
+    if (!organizations.value.length) referenceLoads.push(loadOrganizations())
+    if (!positions.value.length) referenceLoads.push(loadPositions())
+    selectDefaultMembershipOrganization()
+    if (referenceLoads.length) Promise.all(referenceLoads).then(selectDefaultMembershipOrganization)
+  }
   if (kind === 'external-identity' && !identityProviders.value.length) loadIdentityProviders()
 }
 
@@ -666,6 +712,10 @@ async function saveEditor() {
       await loadPositions()
     } else if (kind === 'membership') {
       if (!form.user_id || !form.org_unit_id || !form.position_id) throw new IamError('请选择用户、组织和岗位。')
+      const positionMatchesOrganization = membershipPositions.value.some(
+        (item) => (item.position_id || item.id) === form.position_id,
+      )
+      if (!positionMatchesOrganization) throw new IamError('请选择当前组织下的岗位。')
       const shortTerm = form.validity_mode === 'SHORT_TERM'
       if (shortTerm && (!form.effective_from || !form.effective_to)) {
         throw new IamError('短期任职必须同时填写生效日期和失效日期。')
@@ -701,7 +751,11 @@ async function saveEditor() {
     emitToast(successMessage)
     closeEditor()
   } catch (error) {
-    emitToast(error instanceof IamError || error instanceof AuthorizationError ? error.message : (error?.message || '保存失败。'))
+    if (kind === 'membership' && error instanceof IamError && error.status === 404) {
+      emitToast('所选用户、组织或岗位已失效，或者岗位不属于所选组织。请刷新数据后重新选择。')
+    } else {
+      emitToast(error instanceof IamError || error instanceof AuthorizationError ? error.message : (error?.message || '保存失败。'))
+    }
   } finally {
     saving.value = false
   }
@@ -780,12 +834,12 @@ onMounted(async () => {
         </section>
 
         <section v-else-if="activePanel === 'positions'" class="iam-table-section">
-          <div class="iam-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="filters.position" type="search" placeholder="岗位编码 / 名称 / 组织 ID" /></label><span>{{ filteredPositions.length }} / 共 {{ pagination.positions.total }} 个岗位</span></div>
+          <div class="iam-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="filters.position" type="search" placeholder="岗位编码 / 名称 / 所属组织" /></label><span>{{ filteredPositions.length }} / 共 {{ pagination.positions.total }} 个岗位</span></div>
           <p v-if="pagination.positions.serverPagingSupported === false && pagination.positions.total > pagination.positions.pageSize" class="iam-server-limit-note">当前后端尚未按 page / page_size 分页岗位列表；为避免只在首批数据中翻页，已隐藏分页操作。请先完成后端分页改造。</p>
-          <div class="console-table-card"><div class="console-table-scroll"><table class="console-data-table iam-data-table"><thead><tr><th>岗位</th><th>所属组织 ID</th><th>状态</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
+          <div class="console-table-card"><div class="console-table-scroll"><table class="console-data-table iam-data-table"><thead><tr><th>岗位</th><th>所属组织</th><th>状态</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
             <tr v-if="loading.positions"><td class="console-empty" colspan="4">正在读取岗位…</td></tr>
             <tr v-else-if="!filteredPositions.length"><td class="console-empty" colspan="4">暂无岗位记录。</td></tr>
-            <tr v-for="item in filteredPositions" :key="item.position_id || item.id"><td><strong>{{ item.name }}</strong><span class="console-entity-meta console-mono">{{ item.code }} · {{ item.position_id || item.id }}</span></td><td class="console-mono">{{ item.org_unit_id || '—' }}</td><td><span class="console-badge" :class="(item.status || '').toUpperCase() === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(item.status) }}</span></td><td class="console-actions-cell"><button class="console-text-button" type="button" @click="openDetail('position', item)">详情</button></td></tr>
+            <tr v-for="item in filteredPositions" :key="item.position_id || item.id"><td><strong>{{ item.name }}</strong></td><td>{{ item.organization_name }}</td><td><span class="console-badge" :class="(item.status || '').toUpperCase() === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(item.status) }}</span></td><td class="console-actions-cell"><button class="console-text-button" type="button" @click="openDetail('position', item)">详情</button></td></tr>
           </tbody></table></div></div>
         </section>
 
@@ -873,7 +927,7 @@ onMounted(async () => {
     <div v-if="userDeletionDialog" class="iam-modal-backdrop" role="presentation" @click.self="closeUserDeletionDialog">
       <section class="iam-modal iam-confirm-modal" role="dialog" aria-modal="true" aria-label="确认删除用户">
         <header><div><p>危险操作</p><h3>确认删除用户</h3></div><button class="console-modal-close" type="button" aria-label="关闭删除用户确认" :disabled="deletingUser" @click="closeUserDeletionDialog"><ConsoleIcon name="close" /></button></header>
-        <div class="iam-confirm-body"><p>确认删除用户 <strong>{{ userDeletionDialog.display_name || userDeletionDialog.user_id }}</strong> 吗？该操作不可恢复。若存在关联数据，系统将按后端规则处理或返回明确错误。</p><dl class="iam-confirm-summary"><div><dt>用户 ID</dt><dd class="console-mono">{{ userDeletionDialog.user_id }}</dd></div><div><dt>当前版本</dt><dd>{{ userDeletionDialog.version ?? 0 }}</dd></div></dl></div>
+        <div class="iam-confirm-body"><p>确认删除用户 <strong>{{ userDeletionDialog.display_name || userDeletionDialog.user_id }}</strong> 吗？该操作不可恢复；关联登录账号和任职关系将同步删除，当前登录会话也会立即失效。</p><dl class="iam-confirm-summary"><div><dt>用户 ID</dt><dd class="console-mono">{{ userDeletionDialog.user_id }}</dd></div><div><dt>当前版本</dt><dd>{{ userDeletionDialog.version ?? 0 }}</dd></div></dl></div>
         <footer><button class="console-button ghost" type="button" :disabled="deletingUser" @click="closeUserDeletionDialog">取消</button><button class="console-button iam-danger-button" type="button" :disabled="deletingUser" @click="confirmUserDeletion">{{ deletingUser ? '正在删除…' : '确认删除' }}</button></footer>
       </section>
     </div>
@@ -921,14 +975,14 @@ onMounted(async () => {
             <label><span>排序</span><input v-model.number="form.sort_order" type="number" /></label>
           </template>
           <template v-else-if="editor.kind === 'position'">
-            <label><span>所属组织 *</span><select v-model="form.org_unit_id" required><option value="">请选择组织</option><option v-for="item in organizations" :key="item.org_unit_id" :value="item.org_unit_id">{{ item.name }} · {{ item.code }} · {{ item.org_unit_id }}</option></select></label>
+            <label><span>所属组织 *</span><select v-model="form.org_unit_id" required><option value="">请选择组织</option><option v-for="item in organizations" :key="item.org_unit_id" :value="item.org_unit_id">{{ item.name }} · {{ item.code }}</option></select></label>
             <label><span>岗位编码</span><input value="提交后由系统自动生成" disabled /><small class="iam-field-help">编码由后端统一生成，格式为 POS-&lt;ULID&gt;，创建后可在岗位列表和详情中查看。</small></label>
             <label><span>岗位名称 *</span><input v-model="form.name" required placeholder="例如：研发经理" /></label>
           </template>
           <template v-else-if="editor.kind === 'membership'">
             <label><span>用户 *</span><select v-model="form.user_id" required><option value="">请选择用户</option><option v-for="item in users" :key="item.user_id" :value="item.user_id">{{ item.display_name }} · {{ item.employee_no || item.user_id }}</option></select></label>
-            <label><span>组织 *</span><select v-model="form.org_unit_id" required><option value="">请选择组织</option><option v-for="item in organizations" :key="item.org_unit_id" :value="item.org_unit_id">{{ item.name }} · {{ item.code }} · {{ item.org_unit_id }}</option></select></label>
-            <label><span>岗位 *</span><select v-model="form.position_id" required><option value="">请选择岗位</option><option v-for="item in positions" :key="item.position_id || item.id" :value="item.position_id || item.id">{{ item.name }} · {{ item.code }} · {{ item.position_id || item.id }}</option></select></label>
+            <label><span>组织 *</span><select v-model="form.org_unit_id" required><option value="">请选择组织</option><option v-for="item in membershipOrganizations" :key="item.org_unit_id || item.id" :value="item.org_unit_id || item.id">{{ item.name }} · {{ item.position_count }} 个岗位</option></select><small class="iam-field-help">系统会默认选择一个已有岗位的组织；切换组织后只能选择该组织下的岗位。</small></label>
+            <label><span>岗位 *</span><select v-model="form.position_id" :disabled="!form.org_unit_id || !membershipPositions.length" required><option value="">{{ !form.org_unit_id ? '请先选择组织' : (membershipPositions.length ? '请选择岗位' : '当前组织暂无岗位') }}</option><option v-for="item in membershipPositions" :key="item.position_id || item.id" :value="item.position_id || item.id">{{ item.name }}</option></select><small v-if="form.org_unit_id && !membershipPositions.length" class="iam-field-help">当前组织下暂无可用岗位，请先在“岗位”页面为该组织新增岗位。</small></label>
             <label><span>任职类型 *</span><select v-model="form.membership_type"><option value="PRIMARY">主组织</option><option value="SECONDARY">次组织 / 兼岗</option></select></label>
             <label><span>生效方式 *</span><select v-model="form.validity_mode"><option value="LONG_TERM">长期生效</option><option value="SHORT_TERM">短期生效</option></select><small class="iam-field-help">长期任职不设置日期；短期任职必须填写完整起止日期。</small></label>
             <label v-if="form.validity_mode === 'SHORT_TERM'"><span>生效日期 *</span><input v-model="form.effective_from" required type="date" /></label>

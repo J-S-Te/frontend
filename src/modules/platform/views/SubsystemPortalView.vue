@@ -367,7 +367,7 @@ onBeforeUnmount(() => {
 
       <p v-if="subsystemCatalogLoading" class="subsystem-portal__catalog-status">正在加载已接入的子系统…</p>
       <p v-else-if="subsystemCatalogError" class="subsystem-portal__catalog-status is-error" role="alert">{{ subsystemCatalogError }}</p>
-      <p v-else-if="registeredSubsystems.length === 0" class="subsystem-portal__catalog-status">当前租户暂未接入其他子系统。请进入基础能力平台，在“统一登录目标”中完成子系统一键接入。</p>
+      <p v-else-if="registeredSubsystems.length === 0" class="subsystem-portal__catalog-status">当前租户暂未接入其他子系统。请由运维人员执行子系统接入脚本完成配置。</p>
 
       <div class="subsystem-portal__cards" aria-label="子系统列表">
         <button

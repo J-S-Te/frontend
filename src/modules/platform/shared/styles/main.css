@@ -507,6 +507,43 @@ button {
   background: #ecfdf5;
 }
 
+.session-takeover {
+  margin: -6px 0 15px;
+  padding: 12px;
+  border: 1px solid #fdba74;
+  border-radius: 9px;
+  background: #fff7ed;
+}
+
+.session-takeover p {
+  margin: 0 0 10px;
+  color: #9a3412;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.session-takeover button {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid #ea580c;
+  border-radius: 7px;
+  color: #c2410c;
+  background: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.session-takeover button:hover:not(:disabled) {
+  color: #fff;
+  background: #ea580c;
+}
+
+.session-takeover button:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
 .login-button {
   width: 100%;
   height: 46px;

@@ -12,7 +12,6 @@ const contractSections = ['dashboard', 'customers', 'contracts', 'templates', 'a
 const settingsSections = new Set([
   'base',
   'iam',
-  'login-targets',
   'notify',
   'security',
   'files',
@@ -83,6 +82,24 @@ router.beforeEach(async (to) => {
         params: { section },
         query: to.query,
         hash: to.hash,
+      }
+    }
+  }
+
+  if (to.name === 'login') {
+    const hasLoginTarget =
+      typeof to.query.application_id === 'string' &&
+      typeof to.query.environment_id === 'string' &&
+      typeof to.query.login_target_code === 'string'
+
+    if (!hasLoginTarget) {
+      try {
+        // 用户仅关闭页面时，HttpOnly Cookie 可能仍然有效。直接恢复已有会话，
+        // 避免再次提交口令而误报“其他终端已登录”。
+        await getCurrentPrincipal()
+        return { name: 'portal', replace: true }
+      } catch {
+        // 没有可恢复会话时继续显示登录页。
       }
     }
   }

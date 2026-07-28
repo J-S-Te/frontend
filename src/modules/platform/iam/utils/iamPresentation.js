@@ -83,11 +83,9 @@ export function detailRows(detail) {
     rows.push({ label: '状态', value: item.status || '—' })
     rows.push({ label: '父级 ID', value: item.parent_id || '—' })
   } else if (kind === 'position') {
-    rows.push({ label: '岗位 ID', value: item.position_id || item.id })
     rows.push({ label: '编码', value: item.code || '—' })
     rows.push({ label: '名称', value: item.name || '—' })
-    rows.push({ label: '组织 ID', value: item.org_unit_id || item.org_unit?.id || '—' })
-    rows.push({ label: '组织', value: item.org_unit?.name || '—' })
+    rows.push({ label: '所属组织', value: item.organization_name || item.org_unit?.name || '—' })
     rows.push({ label: '状态', value: item.status || '—' })
   } else if (kind === 'membership') {
     rows.push({ label: '任职关系 ID', value: item.membership_id || item.id })

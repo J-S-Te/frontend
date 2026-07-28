@@ -21,6 +21,7 @@ const passwordVisible = ref(false)
 const submitting = ref(false)
 const formError = ref('')
 const formSuccess = ref('')
+const concurrentSessionDetected = ref(false)
 const tenantId = ref(new URLSearchParams(window.location.search).get('tenant_id') || '')
 const qrStatus = ref('idle')
 const qrError = ref('')
@@ -76,6 +77,7 @@ function switchTab(tab) {
   activeTab.value = tab
   formError.value = ''
   formSuccess.value = ''
+  concurrentSessionDetected.value = false
 
   if (tab === 'qrcode') {
     void ensureDingTalkQrSession()
@@ -118,7 +120,7 @@ function validateForm() {
   return ''
 }
 
-async function submitLogin() {
+async function performPasswordLogin(replaceExistingSession = false) {
   formError.value = validateForm()
   formSuccess.value = ''
 
@@ -127,11 +129,13 @@ async function submitLogin() {
   }
 
   submitting.value = true
+  concurrentSessionDetected.value = false
 
   try {
     const response = await loginWithPassword({
       account: account.value.trim(),
       password: password.value,
+      replaceExistingSession,
       ...getLoginTargetSelection(),
     })
     const result = response.body
@@ -143,7 +147,9 @@ async function submitLogin() {
       localStorage.removeItem(STORAGE_KEY)
     }
 
-    formSuccess.value = result?.message || result?.msg || '登录成功，正在进入平台…'
+    formSuccess.value = replaceExistingSession
+      ? '原会话已退出，正在进入平台…'
+      : result?.message || result?.msg || '登录成功，正在进入平台…'
 
     const redirectUrl =
       data?.redirect_url ||
@@ -154,10 +160,19 @@ async function submitLogin() {
     window.setTimeout(() => redirectTopLevel(redirectUrl, true), 450)
   } catch (error) {
     const traceText = error.traceId ? `（追踪号：${error.traceId}）` : ''
+    concurrentSessionDetected.value = error.code === 'AUTH_CONCURRENT_SESSION'
     formError.value = `${error.message || '登录失败，请稍后重试。'}${traceText}`
   } finally {
     submitting.value = false
   }
+}
+
+function submitLogin() {
+  return performPasswordLogin(false)
+}
+
+function takeOverExistingSession() {
+  return performPasswordLogin(true)
 }
 
 function showAccountHelp() {
@@ -575,6 +590,13 @@ onBeforeUnmount(() => {
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16Zm-2-3.6-3.7-3.7 1.4-1.4 2.3 2.3 6.3-6.3 1.4 1.4-7.7 7.7Z" /></svg>
             <span>{{ formSuccess }}</span>
           </p>
+
+          <div v-if="concurrentSessionDetected" class="session-takeover" role="group" aria-label="原会话处理">
+            <p>关闭页面不会可靠地通知服务器退出。确认接管后，原终端会话将立即失效。</p>
+            <button type="button" :disabled="submitting" @click="takeOverExistingSession">
+              退出原会话并登录
+            </button>
+          </div>
 
           <button class="login-button" type="submit" :disabled="submitting">
             <span v-if="submitting" class="button-spinner" aria-hidden="true"></span>
