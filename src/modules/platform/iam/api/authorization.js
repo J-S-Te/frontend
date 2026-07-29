@@ -127,6 +127,41 @@ export function createPermission({ resourceId, code, name, action }) {
   })
 }
 
+/**
+ * 查询应用的权限目录。目录由应用自己维护，平台只负责校验并展示。
+ */
+export function getApplicationAuthorizationCatalog(applicationId) {
+  return request(`/applications/${encodeURIComponent(applicationId)}/authorization-catalog`)
+}
+
+/**
+ * 查询用户在指定应用下的完整有效授权。
+ */
+export function getApplicationAccess(userId, applicationCode) {
+  return request(`/users/${encodeURIComponent(userId)}/applications/${encodeURIComponent(applicationCode)}/access`)
+}
+
+/**
+ * 用完整角色集合替换用户在应用下的角色绑定。
+ * roles 中的每一项使用后端通用授权接口约定的 role_code、scope_type 和有效期字段。
+ */
+export function updateApplicationAccess(userId, applicationCode, { roles = [] } = {}) {
+  return request(`/users/${encodeURIComponent(userId)}/applications/${encodeURIComponent(applicationCode)}/access`, {
+    method: 'PUT',
+    body: JSON.stringify({ roles }),
+  })
+}
+
+/**
+ * 撤销用户在指定应用下的全部访问授权。
+ */
+export function deleteApplicationAccess(userId, applicationCode) {
+  return request(`/users/${encodeURIComponent(userId)}/applications/${encodeURIComponent(applicationCode)}/access`, {
+    method: 'DELETE',
+  })
+}
+
+// 合同管理系统旧接口保留给旧版本调用方；新的平台界面优先使用通用接口。
 export function getContractApplicationAccess(userId) {
   return request(`/users/${encodeURIComponent(userId)}/applications/contract_management/access`)
 }

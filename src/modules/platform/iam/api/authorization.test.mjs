@@ -99,3 +99,46 @@ test('contract application access uses the task-oriented user endpoint', async (
     custom_permissions: ['contract_template.manage'],
   })
 })
+
+test('generic application access APIs use application-scoped endpoints', async () => {
+  const requests = []
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url, options })
+    return {
+      ok: true,
+      status: options?.method === 'DELETE' ? 204 : 200,
+      headers: { get: () => 'application/json' },
+      json: async () => ({ data: { application_code: 'contract_management', roles: [{ code: 'sales' }], effective_permissions: ['contract.read'] } }),
+      text: async () => '',
+    }
+  }
+
+  const {
+    deleteApplicationAccess,
+    getApplicationAccess,
+    getApplicationAuthorizationCatalog,
+    updateApplicationAccess,
+  } = await import('./authorization.js')
+
+  await getApplicationAuthorizationCatalog('application / 1')
+  await getApplicationAccess('user / 1', 'contract_management')
+  await updateApplicationAccess('user / 1', 'contract_management', {
+    roles: [
+      { role_code: 'sales', scope_type: 'APPLICATION', environment_code: null, valid_from: null, valid_until: null },
+      { role_code: 'audit_admin', scope_type: 'APPLICATION', environment_code: null, valid_from: null, valid_until: null },
+    ],
+  })
+  await deleteApplicationAccess('user / 1', 'contract_management')
+
+  assert.equal(requests[0].url, '/api/v1/applications/application%20%2F%201/authorization-catalog')
+  assert.equal(requests[1].url, '/api/v1/users/user%20%2F%201/applications/contract_management/access')
+  assert.equal(requests[1].options.method, undefined)
+  assert.equal(requests[2].options.method, 'PUT')
+  assert.deepEqual(JSON.parse(requests[2].options.body), {
+    roles: [
+      { role_code: 'sales', scope_type: 'APPLICATION', environment_code: null, valid_from: null, valid_until: null },
+      { role_code: 'audit_admin', scope_type: 'APPLICATION', environment_code: null, valid_from: null, valid_until: null },
+    ],
+  })
+  assert.equal(requests[3].options.method, 'DELETE')
+})

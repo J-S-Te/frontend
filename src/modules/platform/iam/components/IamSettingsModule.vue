@@ -34,18 +34,16 @@ import {
   updateAccountStatus,
   updateOrgUnit,
 } from '@/modules/platform/iam/api/iam'
+import { listApplications, listEnvironments } from '@/modules/platform/applications/api/applications'
 import {
   AuthorizationError,
+  deleteApplicationAccess,
+  getApplicationAccess,
+  getApplicationAuthorizationCatalog,
   getContractApplicationAccess,
+  updateApplicationAccess,
   updateContractApplicationAccess,
 } from '@/modules/platform/iam/api/authorization'
-import {
-  CONTRACT_CUSTOM_PERMISSION_DEFINITIONS,
-  CONTRACT_ROLE_DEFINITIONS,
-  contractPermissionName,
-  contractRole,
-  effectiveContractPermissions,
-} from '@/modules/shared/authz/sys004'
 import '@/modules/platform/iam/styles/iam-settings.css'
 
 const emit = defineEmits(['toast'])
@@ -73,17 +71,39 @@ const userDeletionDialog = ref(null)
 const resettingPassword = ref(false)
 const deletingUser = ref(false)
 const updatingAccountId = ref('')
-const contractAccess = ref(null)
-const contractAccessLoading = ref(false)
-const contractAccessSaving = ref(false)
-const contractAccessError = ref('')
-const contractAccessDraft = reactive({ role_code: '', custom_permissions: [] })
+const applications = ref([])
+const applicationsLoading = ref(false)
+const authorizationCatalog = ref(null)
+const authorizationCatalogLoading = ref(false)
+const applicationAccess = ref(null)
+const applicationAccessLoading = ref(false)
+const applicationAccessSaving = ref(false)
+const applicationAccessRevoking = ref(false)
+const applicationAccessError = ref('')
+const selectedApplicationCode = ref('')
+const applicationEnvironments = ref([])
+const applicationEnvironmentsLoading = ref(false)
+const authorizationUsingLegacyEndpoint = ref(false)
+const authorizationDraft = reactive({
+  role_codes: [],
+  scope_type: 'APPLICATION',
+  environment_code: '',
+  validity_mode: 'PERMANENT',
+  valid_from: '',
+  valid_until: '',
+})
 
-const selectedContractRole = computed(() => contractRole(contractAccessDraft.role_code))
-const contractRolePermissions = computed(() => selectedContractRole.value?.permissions || [])
-const contractEffectivePermissions = computed(() => effectiveContractPermissions(contractAccessDraft.role_code, contractAccessDraft.custom_permissions))
-const contractCustomPermissionOptions = CONTRACT_CUSTOM_PERMISSION_DEFINITIONS
-const contractRoleOptions = CONTRACT_ROLE_DEFINITIONS
+const selectedApplication = computed(() => applications.value.find((item) => item.code === selectedApplicationCode.value) || null)
+const authorizationRoleOptions = computed(() => Array.isArray(authorizationCatalog.value?.roles) ? authorizationCatalog.value.roles : [])
+const selectedAuthorizationRoles = computed(() => authorizationRoleOptions.value.filter((role) => authorizationDraft.role_codes.includes(role.code)))
+const authorizationEffectivePermissions = computed(() => {
+  const rolePermissions = selectedAuthorizationRoles.value.flatMap((role) => rolePermissionsFor(role))
+  const attachedPermissions = applicationAccess.value?.custom_permissions
+    || applicationAccess.value?.additional_permissions
+    || applicationAccess.value?.user_permissions
+    || []
+  return uniqueValues([...rolePermissions, ...attachedPermissions].map((item) => permissionCode(item)))
+})
 
 const panels = [
   { key: 'users', label: '用户', icon: 'user', description: '自然人主体、任职状态与跨系统统一用户标识' },
@@ -154,70 +174,301 @@ function selectPanel(key) {
   detail.value = null
 }
 
+function uniqueValues(values) {
+  return [...new Set(values.filter((value) => String(value || '').trim()).map((value) => String(value).trim()))].sort()
+}
+
+function permissionCode(permission) {
+  if (typeof permission === 'string') return permission
+  return permission?.code || permission?.permission_code || ''
+}
+
+function permissionName(permission) {
+  if (typeof permission === 'string') {
+    const catalogPermission = authorizationCatalog.value?.permissions?.find((item) => item.code === permission)
+    return catalogPermission?.name || permission
+  }
+  return permission?.name || permission?.code || permission?.permission_code || '未命名权限'
+}
+
+function rolePermissionsFor(role) {
+  const permissions = role?.permissions || role?.permission_codes || role?.permissionCodes || []
+  return Array.isArray(permissions) ? permissions : []
+}
+
+function rolePermissionCodes(role) {
+  return uniqueValues(rolePermissionsFor(role).map((permission) => permissionCode(permission)))
+}
+
+function applicationDisplayName(application) {
+  return application?.name || application?.display_name || application?.code || '未命名应用'
+}
+
+function catalogVersion(catalog) {
+  return catalog?.catalog_version || catalog?.version || catalog?.metadata?.catalog_version || '—'
+}
+
+function resetApplicationAuthorizationState() {
+  authorizationCatalog.value = null
+  applicationAccess.value = null
+  applicationAccessError.value = ''
+  selectedApplicationCode.value = ''
+  applicationEnvironments.value = []
+  applicationEnvironmentsLoading.value = false
+  authorizationDraft.role_codes = []
+  authorizationDraft.scope_type = 'APPLICATION'
+  authorizationDraft.environment_code = ''
+  authorizationDraft.validity_mode = 'PERMANENT'
+  authorizationDraft.valid_from = ''
+  authorizationDraft.valid_until = ''
+  authorizationUsingLegacyEndpoint.value = false
+}
+
+function toDateTimeLocal(value) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const pad = (number) => String(number).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+function toRFC3339(value) {
+  if (!value) return null
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date.toISOString()
+}
+
+function normalizeScopeType(value) {
+  return String(value || '').toUpperCase() === 'ENVIRONMENT' ? 'ENVIRONMENT' : 'APPLICATION'
+}
+
+function roleAuthorizationSignature(role) {
+  return [
+    normalizeScopeType(role?.scope_type),
+    String(role?.environment_code || ''),
+    String(role?.valid_from || ''),
+    String(role?.valid_until || ''),
+  ].join('|')
+}
+
+const authorizationHasMixedRoleSettings = computed(() => {
+  const roles = Array.isArray(applicationAccess.value?.roles) ? applicationAccess.value.roles : []
+  return new Set(roles.map(roleAuthorizationSignature)).size > 1
+})
+
+const authorizationEnvironmentOptions = computed(() => applicationEnvironments.value
+  .map((environment) => ({
+    code: environment.environment_code || environment.environment || environment.code || '',
+    name: environment.name || environment.display_name || environment.environment_code || environment.environment || environment.code || '未命名环境',
+  }))
+  .filter((environment) => environment.code))
+
+function applyAuthorizationSettings(roles) {
+  const firstRole = roles.find((role) => role && typeof role === 'object')
+  const scopeType = normalizeScopeType(firstRole?.scope_type)
+  authorizationDraft.scope_type = scopeType
+  authorizationDraft.environment_code = scopeType === 'ENVIRONMENT' ? String(firstRole?.environment_code || '') : ''
+  authorizationDraft.valid_from = toDateTimeLocal(firstRole?.valid_from)
+  authorizationDraft.valid_until = toDateTimeLocal(firstRole?.valid_until)
+  authorizationDraft.validity_mode = firstRole?.valid_from || firstRole?.valid_until ? 'RANGE' : 'PERMANENT'
+}
+
+
 async function openDetail(kind, item) {
-  contractAccess.value = null
-  contractAccessError.value = ''
-  contractAccessDraft.role_code = ''
-  contractAccessDraft.custom_permissions = []
+  resetApplicationAuthorizationState()
   detail.value = { kind, item }
-  if (kind === 'user') await loadContractAccess(item.user_id)
+  if (kind === 'user') await loadApplicationsForUser(item.user_id)
 }
 
 function closeDetail() {
   detail.value = null
-  contractAccess.value = null
-  contractAccessError.value = ''
+  resetApplicationAuthorizationState()
 }
 
-function applyContractAccess(access) {
-  contractAccess.value = access
-  contractAccessDraft.role_code = access?.role?.code || ''
-  contractAccessDraft.custom_permissions = Array.isArray(access?.custom_permissions) ? [...access.custom_permissions] : []
+function applyApplicationAccess(access) {
+  applicationAccess.value = access || null
+  const roles = Array.isArray(access?.roles)
+    ? access.roles
+    : (access?.role ? [access.role] : [])
+  authorizationDraft.role_codes = uniqueValues(roles.map((role) => typeof role === 'string' ? role : role?.code || role?.role_code))
+  applyAuthorizationSettings(roles)
 }
 
-async function loadContractAccess(userId) {
-  if (!userId || contractAccessLoading.value) return
-  contractAccessLoading.value = true
-  contractAccessError.value = ''
+function applyLegacyApplicationAccess(access) {
+  authorizationUsingLegacyEndpoint.value = true
+  applyApplicationAccess(access)
+}
+
+async function loadApplicationsForUser(userId) {
+  if (!userId || applicationsLoading.value) return
+  applicationsLoading.value = true
+  applicationAccessError.value = ''
   try {
-    applyContractAccess(await getContractApplicationAccess(userId))
+    const data = await listApplications({ page: 1, pageSize: 100, status: 'ACTIVE' })
+    applications.value = Array.isArray(data) ? data : (data?.items || [])
+    const preferredCode = selectedApplicationCode.value && applications.value.some((item) => item.code === selectedApplicationCode.value)
+      ? selectedApplicationCode.value
+      : applications.value[0]?.code || ''
+    selectedApplicationCode.value = preferredCode
+    if (preferredCode) await loadApplicationAuthorization(userId, preferredCode)
   } catch (error) {
-    if (error instanceof AuthorizationError && error.status === 404) {
-      applyContractAccess(null)
-      return
-    }
-    contractAccessError.value = error instanceof AuthorizationError ? error.message : (error?.message || '读取合同系统权限失败。')
+    applications.value = []
+    applicationAccessError.value = error?.message || '读取应用列表失败。'
   } finally {
-    contractAccessLoading.value = false
+    applicationsLoading.value = false
   }
 }
 
-async function saveContractAccess() {
+async function loadApplicationAuthorization(userId, applicationCode = selectedApplicationCode.value) {
+  if (!userId || !applicationCode || applicationAccessLoading.value) return
+  const application = applications.value.find((item) => item.code === applicationCode)
+  if (!application) return
+  selectedApplicationCode.value = applicationCode
+  authorizationCatalog.value = null
+  applicationAccess.value = null
+  authorizationDraft.role_codes = []
+  authorizationDraft.scope_type = 'APPLICATION'
+  authorizationDraft.environment_code = ''
+  authorizationDraft.validity_mode = 'PERMANENT'
+  authorizationDraft.valid_from = ''
+  authorizationDraft.valid_until = ''
+  applicationEnvironments.value = []
+  authorizationUsingLegacyEndpoint.value = false
+  applicationAccessError.value = ''
+  authorizationCatalogLoading.value = true
+  applicationAccessLoading.value = true
+  try {
+    applicationEnvironmentsLoading.value = true
+    try {
+      const environmentData = await listEnvironments({ applicationId: application.application_id || application.id, page: 1, pageSize: 100, status: 'ACTIVE' })
+      applicationEnvironments.value = Array.isArray(environmentData) ? environmentData : (environmentData?.items || [])
+    } catch (error) {
+      applicationEnvironments.value = []
+      applicationAccessError.value = error?.message || '读取应用环境失败。'
+    } finally {
+      applicationEnvironmentsLoading.value = false
+    }
+
+    try {
+      authorizationCatalog.value = await getApplicationAuthorizationCatalog(application.application_id || application.id)
+    } catch (error) {
+      applicationAccessError.value = error instanceof AuthorizationError ? error.message : (error?.message || '读取应用角色目录失败。')
+    } finally {
+      authorizationCatalogLoading.value = false
+    }
+
+    try {
+      applyApplicationAccess(await getApplicationAccess(userId, applicationCode))
+    } catch (error) {
+      if (error instanceof AuthorizationError && error.status === 404 && applicationCode === 'contract_management') {
+        applyLegacyApplicationAccess(await getContractApplicationAccess(userId))
+      } else if (error instanceof AuthorizationError && error.status === 404) {
+        applyApplicationAccess(null)
+      } else {
+        throw error
+      }
+    }
+  } catch (error) {
+    applicationAccessError.value = error instanceof AuthorizationError ? error.message : (error?.message || '读取应用访问授权失败。')
+  } finally {
+    authorizationCatalogLoading.value = false
+    applicationAccessLoading.value = false
+  }
+}
+
+function onAuthorizationScopeChange() {
+  if (authorizationDraft.scope_type === 'APPLICATION') authorizationDraft.environment_code = ''
+  if (authorizationDraft.scope_type === 'ENVIRONMENT' && !authorizationDraft.environment_code) {
+    authorizationDraft.environment_code = authorizationEnvironmentOptions.value[0]?.code || ''
+  }
+}
+
+function onAuthorizationValidityChange() {
+  if (authorizationDraft.validity_mode === 'PERMANENT') {
+    authorizationDraft.valid_from = ''
+    authorizationDraft.valid_until = ''
+  }
+}
+
+function applicationAccessPayload() {
+  const scopeType = authorizationDraft.scope_type === 'ENVIRONMENT' ? 'ENVIRONMENT' : 'APPLICATION'
+  const environmentCode = scopeType === 'ENVIRONMENT' ? String(authorizationDraft.environment_code || '').trim() : null
+  const validFrom = authorizationDraft.validity_mode === 'RANGE' ? toRFC3339(authorizationDraft.valid_from) : null
+  const validUntil = authorizationDraft.validity_mode === 'RANGE' ? toRFC3339(authorizationDraft.valid_until) : null
+  return {
+    roles: authorizationDraft.role_codes.map((roleCode) => ({
+      role_code: roleCode,
+      scope_type: scopeType,
+      environment_code: environmentCode,
+      valid_from: validFrom,
+      valid_until: validUntil,
+    })),
+  }
+}
+
+async function saveApplicationAccess() {
   const userId = detail.value?.kind === 'user' ? detail.value.item?.user_id : ''
-  if (!userId || contractAccessSaving.value) return
-  if (!contractAccessDraft.role_code) {
-    contractAccessError.value = '请选择一个合同系统预置角色。'
+  const applicationCode = selectedApplicationCode.value
+  if (!userId || !applicationCode || applicationAccessSaving.value) return
+  if (authorizationDraft.scope_type === 'ENVIRONMENT' && !authorizationDraft.environment_code) {
+    applicationAccessError.value = '选择环境级授权时必须指定一个有效环境。'
     return
   }
-  contractAccessSaving.value = true
-  contractAccessError.value = ''
+  if (authorizationDraft.validity_mode === 'RANGE' && authorizationDraft.valid_from && authorizationDraft.valid_until && new Date(authorizationDraft.valid_until) <= new Date(authorizationDraft.valid_from)) {
+    applicationAccessError.value = '失效时间必须晚于生效时间。'
+    return
+  }
+  if (authorizationUsingLegacyEndpoint.value) {
+    if (authorizationDraft.role_codes.length !== 1) {
+      applicationAccessError.value = '当前后端仍使用合同系统兼容接口，只支持单角色保存；请先升级通用授权接口。'
+      return
+    }
+    applicationAccessSaving.value = true
+    applicationAccessError.value = ''
+    try {
+      const access = await updateContractApplicationAccess(userId, {
+        roleCode: authorizationDraft.role_codes[0],
+        customPermissions: [],
+      })
+      applyLegacyApplicationAccess(access)
+      emitToast('应用角色已保存。权限将在用户重新登录或会话续签后生效。')
+    } catch (error) {
+      applicationAccessError.value = error instanceof AuthorizationError ? error.message : (error?.message || '保存应用访问授权失败。')
+    } finally {
+      applicationAccessSaving.value = false
+    }
+    return
+  }
+  applicationAccessSaving.value = true
+  applicationAccessError.value = ''
   try {
-    const access = await updateContractApplicationAccess(userId, {
-      roleCode: contractAccessDraft.role_code,
-      customPermissions: contractAccessDraft.role_code === 'admin' ? [] : contractAccessDraft.custom_permissions,
-    })
-    applyContractAccess(access)
-    emitToast('合同系统角色与附加权限已保存。权限将在用户重新登录或会话续签后生效。')
+    const access = await updateApplicationAccess(userId, applicationCode, applicationAccessPayload())
+    applyApplicationAccess(access)
+    emitToast('应用角色集合已保存。权限将在用户重新登录或会话续签后生效。')
   } catch (error) {
-    contractAccessError.value = error instanceof AuthorizationError ? error.message : (error?.message || '保存合同系统权限失败。')
+    applicationAccessError.value = error instanceof AuthorizationError ? error.message : (error?.message || '保存应用访问授权失败。')
   } finally {
-    contractAccessSaving.value = false
+    applicationAccessSaving.value = false
   }
 }
 
-watch(() => contractAccessDraft.role_code, (roleCode) => {
-  if (roleCode === 'admin') contractAccessDraft.custom_permissions = []
-})
+async function revokeApplicationAccess() {
+  const userId = detail.value?.kind === 'user' ? detail.value.item?.user_id : ''
+  const applicationCode = selectedApplicationCode.value
+  if (!userId || !applicationCode || applicationAccessRevoking.value) return
+  if (!window.confirm(`确认撤销用户“${detail.value.item?.display_name || userId}”的“${applicationDisplayName(selectedApplication.value)}”访问权限吗？`)) return
+  applicationAccessRevoking.value = true
+  applicationAccessError.value = ''
+  try {
+    await deleteApplicationAccess(userId, applicationCode)
+    applyApplicationAccess(null)
+    emitToast('应用访问已撤销。用户将不再获得该应用的门户入口。')
+  } catch (error) {
+    applicationAccessError.value = error instanceof AuthorizationError ? error.message : (error?.message || '撤销应用访问失败。')
+  } finally {
+    applicationAccessRevoking.value = false
+  }
+}
 
 function resetFilters() {
   Object.keys(filters).forEach((key) => { filters[key] = '' })
@@ -863,28 +1114,40 @@ onMounted(async () => {
             <div><span>{{ row.label }}</span><strong>{{ row.value }}</strong></div>
           </template>
         </div>
-        <section v-if="detail.kind === 'user'" class="iam-detail-section iam-contract-access">
+        <section v-if="detail.kind === 'user'" class="iam-detail-section iam-application-access">
           <div class="iam-detail-section-head">
-            <div><h4>合同管理系统访问授权</h4><p>平台角色不自动继承业务系统权限。必须在这里为用户显式选择合同系统角色，保存后该用户才会看到门户卡片并完成 OIDC 登录。</p></div>
-            <span v-if="contractAccess" class="iam-contract-revision">策略版本 {{ contractAccess.authz_revision }}</span>
+            <div><h4>应用访问授权</h4><p>平台角色与业务应用角色彼此隔离。选择应用后，平台从该应用提交的角色目录中加载角色；保存时会完整替换用户在当前应用中的角色集合。</p></div>
+            <div class="iam-application-access-badges"><span v-if="selectedApplication" class="iam-application-badge">{{ applicationDisplayName(selectedApplication) }} · {{ selectedApplication.code }}</span><span v-if="authorizationCatalog" class="iam-application-badge">目录版本 {{ catalogVersion(authorizationCatalog) }}</span></div>
           </div>
-          <p v-if="contractAccessLoading" class="iam-empty-inline">正在读取合同系统权限…</p>
+          <p v-if="applicationsLoading" class="iam-empty-inline">正在读取应用列表…</p>
+          <template v-else-if="!applications.length">
+            <p class="iam-empty-inline">当前没有可授权的应用。</p>
+          </template>
           <template v-else>
-            <p v-if="contractAccessError" class="login-target-module__error" role="alert">{{ contractAccessError }}</p>
-            <div class="iam-contract-access-form">
-              <label><span>预置角色 *</span><select v-model="contractAccessDraft.role_code"><option value="">请选择角色</option><option v-for="role in contractRoleOptions" :key="role.code" :value="role.code">{{ role.name }} · {{ role.code }}</option></select></label>
-              <p class="iam-field-help">未选择并保存角色时，合同系统将拒绝该用户登录；角色由 SYS-004 固化，普通管理界面不能新增、修改或删除。</p>
-              <div class="iam-contract-permission-block"><strong>角色默认权限</strong><p v-if="!contractRolePermissions.length" class="iam-empty-inline">选择角色后显示默认权限。</p><div v-else class="iam-contract-permission-tags"><span v-for="permission in contractRolePermissions" :key="permission"><b>{{ contractPermissionName(permission) }}</b><code>{{ permission }}</code></span></div></div>
-              <fieldset :disabled="!contractAccessDraft.role_code || contractAccessDraft.role_code === 'admin' || contractAccessSaving">
-                <legend>附加权限（只增加，不抵消默认权限）</legend>
-                <p v-if="contractAccessDraft.role_code === 'admin'" class="iam-field-help">超级管理员通过 all 获得全部权限，不配置附加权限。</p>
-                <div v-else class="iam-contract-permission-checks"><label v-for="permission in contractCustomPermissionOptions" :key="permission.code"><input v-model="contractAccessDraft.custom_permissions" type="checkbox" :value="permission.code" /><span><b>{{ permission.name }}</b><code>{{ permission.code }}</code></span></label></div>
-              </fieldset>
-              <div class="iam-contract-permission-block effective"><strong>最终有效权限预览</strong><div class="iam-contract-permission-tags"><span v-for="permission in contractEffectivePermissions" :key="permission"><b>{{ contractPermissionName(permission) }}</b><code>{{ permission }}</code></span></div><p class="iam-field-help">服务端保存时会重新计算，前端不会提交 effective_permissions。</p></div>
+            <p v-if="applicationAccessError" class="login-target-module__error" role="alert">{{ applicationAccessError }}</p>
+            <div class="iam-application-access-form">
+              <label><span>应用 *</span><select v-model="selectedApplicationCode" :disabled="applicationAccessLoading || applicationAccessSaving || applicationAccessRevoking" @change="loadApplicationAuthorization(detail.item.user_id, selectedApplicationCode)"><option v-for="application in applications" :key="application.application_id || application.id || application.code" :value="application.code">{{ applicationDisplayName(application) }} · {{ application.code }}</option></select></label>
+              <div class="iam-application-meta"><span>应用归属：<strong>{{ selectedApplication?.name || selectedApplication?.display_name || '—' }}</strong></span><span>应用编码：<code>{{ selectedApplication?.code || '—' }}</code></span><span>目录版本：<strong>{{ catalogVersion(authorizationCatalog) }}</strong></span><span v-if="authorizationUsingLegacyEndpoint" class="is-legacy">合同旧接口兼容模式</span></div>
+              <div class="iam-application-scope-grid">
+                <label><span>授权范围 *</span><select v-model="authorizationDraft.scope_type" :disabled="authorizationUsingLegacyEndpoint || applicationAccessLoading || applicationAccessSaving || applicationAccessRevoking" @change="onAuthorizationScopeChange"><option value="APPLICATION">整个应用</option><option value="ENVIRONMENT" :disabled="!authorizationEnvironmentOptions.length">指定环境</option></select></label>
+                <label v-if="authorizationDraft.scope_type === 'ENVIRONMENT'"><span>环境 *</span><select v-model="authorizationDraft.environment_code" :disabled="authorizationUsingLegacyEndpoint || applicationEnvironmentsLoading || applicationAccessSaving || applicationAccessRevoking"><option value="">请选择环境</option><option v-for="environment in authorizationEnvironmentOptions" :key="environment.code" :value="environment.code">{{ environment.name }} · {{ environment.code }}</option></select><small v-if="applicationEnvironmentsLoading">正在读取环境…</small></label>
+                <label><span>有效期 *</span><select v-model="authorizationDraft.validity_mode" :disabled="authorizationUsingLegacyEndpoint || applicationAccessSaving || applicationAccessRevoking" @change="onAuthorizationValidityChange"><option value="PERMANENT">长期有效</option><option value="RANGE">指定有效期</option></select></label>
+              </div>
+              <div v-if="authorizationDraft.validity_mode === 'RANGE'" class="iam-application-validity-grid"><label><span>生效时间</span><input v-model="authorizationDraft.valid_from" type="datetime-local" :disabled="authorizationUsingLegacyEndpoint || applicationAccessSaving || applicationAccessRevoking" /></label><label><span>失效时间</span><input v-model="authorizationDraft.valid_until" type="datetime-local" :disabled="authorizationUsingLegacyEndpoint || applicationAccessSaving || applicationAccessRevoking" /></label></div>
+              <p v-if="authorizationHasMixedRoleSettings" class="iam-field-help iam-application-scope-warning">当前用户的角色存在不同授权范围或有效期；本次保存会按上方设置统一替换所选角色集合。</p>
+              <p v-if="authorizationCatalogLoading || applicationAccessLoading" class="iam-empty-inline">正在读取应用角色与当前授权…</p>
+              <template v-else>
+                <div v-if="!authorizationRoleOptions.length" class="iam-application-empty-catalog"><strong>暂无可分配角色目录</strong><p>该应用尚未同步角色目录，平台不会猜测或内置业务角色。请由应用负责人同步授权目录后再分配角色。</p></div>
+                <fieldset v-else class="iam-application-role-fieldset" :disabled="applicationAccessSaving || applicationAccessRevoking">
+                  <legend>应用角色（可多选）</legend>
+                  <div class="iam-application-role-list"><label v-for="role in authorizationRoleOptions" :key="role.role_id || role.id || role.code" class="iam-application-role-option" :class="{ selected: authorizationDraft.role_codes.includes(role.code) }"><input v-model="authorizationDraft.role_codes" type="checkbox" :value="role.code" /><span class="iam-application-role-copy"><strong>{{ role.name || role.display_name || role.code }}</strong><code>{{ role.code }}</code><small v-if="role.description">{{ role.description }}</small><small>{{ rolePermissionCodes(role).length }} 项权限</small></span></label></div>
+                </fieldset>
+                <div class="iam-application-permission-block effective"><div class="iam-application-permission-head"><strong>有效权限预览</strong><span>{{ authorizationEffectivePermissions.length }} 项</span></div><p v-if="!authorizationEffectivePermissions.length" class="iam-empty-inline">当前未选择角色，保存后该用户不会获得此应用的访问授权。</p><div v-else class="iam-application-permission-tags"><span v-for="permission in authorizationEffectivePermissions" :key="permission"><b>{{ permissionName(permission) }}</b><code>{{ permission }}</code></span></div><p class="iam-field-help">权限由所选角色的权限并集组成；平台前端只提交角色编码、授权范围和有效期，不提交前端计算的有效权限。</p></div>
+              </template>
             </div>
           </template>
         </section>
-        <footer><button class="console-button ghost" type="button" :disabled="contractAccessSaving" @click="closeDetail">关闭</button><button v-if="detail.kind === 'user'" class="console-button primary" type="button" :disabled="contractAccessLoading || contractAccessSaving" @click="saveContractAccess"><ConsoleIcon name="save" />{{ contractAccessSaving ? '保存中…' : '保存合同权限' }}</button></footer>
+        <footer><button class="console-button ghost" type="button" :disabled="applicationAccessSaving || applicationAccessRevoking" @click="closeDetail">关闭</button><button v-if="detail.kind === 'user' && selectedApplicationCode && applicationAccess" class="console-button danger" type="button" :disabled="applicationAccessSaving || applicationAccessRevoking" @click="revokeApplicationAccess">{{ applicationAccessRevoking ? '撤销中…' : '撤销应用访问' }}</button><button v-if="detail.kind === 'user' && selectedApplicationCode" class="console-button primary" type="button" :disabled="applicationsLoading || authorizationCatalogLoading || applicationAccessLoading || applicationAccessSaving || applicationAccessRevoking || !authorizationRoleOptions.length" @click="saveApplicationAccess"><ConsoleIcon name="save" />{{ applicationAccessSaving ? '保存中…' : '保存角色集合' }}</button></footer>
       </section>
     </div>
 

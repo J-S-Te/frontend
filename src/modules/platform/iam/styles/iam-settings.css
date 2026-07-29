@@ -149,25 +149,55 @@
 .iam-impact-permissions, .iam-impact-users { margin: 9px 0 0; color: #475569; font-size: 10px; font-weight: 400; line-height: 1.6; overflow-wrap: anywhere; }
 @media (max-width: 760px) { .iam-preview-columns { grid-template-columns: 1fr; }.iam-impact-preview-head { align-items: stretch; flex-direction: column; }.iam-impact-preview-head .console-button { width: fit-content; } }
 
-/* SYS-004 contract access is edited as part of the user detail task, not as a generic RBAC panel. */
-.iam-contract-access { padding: 16px; border: 1px solid #dbeafe; border-radius: 10px; background: #f8fbff; }
-.iam-contract-revision { flex: 0 0 auto; padding: 4px 8px; color: #1d4ed8; font-size: 10px; font-weight: 700; border-radius: 999px; background: #dbeafe; }
-.iam-contract-access-form { display: grid; gap: 14px; }
-.iam-contract-access-form > label { display: grid; gap: 7px; color: #334155; font-size: 12px; font-weight: 600; }
-.iam-contract-access-form select { min-height: 38px; padding: 0 10px; color: #0f172a; border: 1px solid #cbd5e1; border-radius: 7px; background: #fff; }
-.iam-contract-access-form fieldset { min-width: 0; padding: 12px; border: 1px solid #dbe3ee; border-radius: 8px; background: #fff; }
-.iam-contract-access-form fieldset:disabled { opacity: .68; }
-.iam-contract-access-form legend { padding: 0 6px; color: #334155; font-size: 12px; font-weight: 700; }
-.iam-contract-permission-block { display: grid; gap: 8px; padding: 12px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; }
-.iam-contract-permission-block.effective { border-color: #bbf7d0; background: #f0fdf4; }
-.iam-contract-permission-block > strong { color: #0f172a; font-size: 12px; }
-.iam-contract-permission-tags { display: flex; flex-wrap: wrap; gap: 7px; }
-.iam-contract-permission-tags span { display: grid; gap: 2px; padding: 6px 8px; color: #334155; border: 1px solid #dbe3ee; border-radius: 7px; background: #fff; }
-.iam-contract-permission-tags b { font-size: 11px; }
-.iam-contract-permission-tags code, .iam-contract-permission-checks code { color: #64748b; font-size: 9px; }
-.iam-contract-permission-checks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
-.iam-contract-permission-checks label { display: flex; align-items: flex-start; gap: 8px; padding: 8px; cursor: pointer; border: 1px solid #e2e8f0; border-radius: 7px; background: #f8fafc; }
-.iam-contract-permission-checks input { width: 15px; height: 15px; flex: 0 0 auto; margin-top: 2px; }
-.iam-contract-permission-checks span { display: grid; gap: 2px; min-width: 0; }
-.iam-contract-permission-checks b { color: #334155; font-size: 11px; }
-@media (max-width: 760px) { .iam-contract-permission-checks { grid-template-columns: 1fr; } }
+/* Generic application authorization in the user detail dialog. */
+.iam-application-access { padding: 16px; border: 1px solid #dbeafe; border-radius: 10px; background: #f8fbff; }
+.iam-application-access-badges { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+.iam-application-badge { flex: 0 0 auto; padding: 4px 8px; color: #1d4ed8; font-size: 10px; font-weight: 700; border-radius: 999px; background: #dbeafe; }
+.iam-application-access-form { display: grid; gap: 14px; }
+.iam-application-access-form > label { display: grid; gap: 7px; color: #334155; font-size: 12px; font-weight: 600; }
+.iam-application-access-form select { min-height: 38px; padding: 0 10px; color: #0f172a; border: 1px solid #cbd5e1; border-radius: 7px; background: #fff; }
+.iam-application-meta { display: flex; flex-wrap: wrap; gap: 7px; }
+.iam-application-meta span { padding: 5px 8px; color: #475569; font-size: 10px; border: 1px solid #dbe3ee; border-radius: 7px; background: #fff; }
+.iam-application-meta strong { color: #0f172a; }
+.iam-application-meta .is-legacy { color: #92400e; border-color: #fde68a; background: #fffbeb; }
+.iam-application-role-fieldset { min-width: 0; padding: 12px; border: 1px solid #dbe3ee; border-radius: 8px; background: #fff; }
+.iam-application-role-fieldset:disabled { opacity: .68; }
+.iam-application-role-fieldset legend { padding: 0 6px; color: #334155; font-size: 12px; font-weight: 700; }
+.iam-application-role-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.iam-application-role-option { display: flex; align-items: flex-start; gap: 9px; min-width: 0; padding: 10px; cursor: pointer; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; transition: border-color .16s ease, background .16s ease, box-shadow .16s ease; }
+.iam-application-role-option:hover, .iam-application-role-option.selected { border-color: #93c5fd; background: #eff6ff; box-shadow: 0 0 0 2px rgba(59, 130, 246, .08); }
+.iam-application-role-option input { width: 15px; height: 15px; flex: 0 0 auto; margin-top: 2px; }
+.iam-application-role-copy { display: grid; gap: 3px; min-width: 0; }
+.iam-application-role-copy strong { color: #334155; font-size: 11px; }
+.iam-application-role-copy code { width: fit-content; color: #64748b; font-size: 9px; }
+.iam-application-role-copy small { color: #64748b; font-size: 10px; line-height: 1.4; overflow-wrap: anywhere; }
+.iam-application-empty-catalog { padding: 13px; color: #475569; border: 1px dashed #cbd5e1; border-radius: 8px; background: #fff; }
+.iam-application-empty-catalog strong { color: #334155; font-size: 12px; }
+.iam-application-empty-catalog p { margin: 5px 0 0; font-size: 11px; line-height: 1.55; }
+.iam-application-permission-block { display: grid; gap: 8px; padding: 12px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; }
+.iam-application-permission-block.effective { border-color: #bbf7d0; background: #f0fdf4; }
+.iam-application-permission-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.iam-application-permission-head strong { color: #0f172a; font-size: 12px; }
+.iam-application-permission-head span { padding: 3px 7px; color: #047857; font-size: 10px; font-weight: 700; border-radius: 999px; background: #dcfce7; }
+.iam-application-permission-tags { display: flex; flex-wrap: wrap; gap: 7px; }
+.iam-application-permission-tags span { display: grid; gap: 2px; padding: 6px 8px; color: #334155; border: 1px solid #bbf7d0; border-radius: 7px; background: #fff; }
+.iam-application-permission-tags b { font-size: 11px; }
+.iam-application-permission-tags code { color: #64748b; font-size: 9px; }
+.console-button.danger { color: #b91c1c; border-color: #fecaca; background: #fff; }
+.console-button.danger:hover:not(:disabled) { color: #991b1b; border-color: #fca5a5; background: #fef2f2; }
+@media (max-width: 760px) {
+  .iam-application-access-badges { justify-content: flex-start; }
+  .iam-application-role-list { grid-template-columns: 1fr; }
+}
+
+.iam-application-scope-grid,
+.iam-application-validity-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.iam-application-scope-grid > label,
+.iam-application-validity-grid > label { display: grid; gap: 7px; color: #334155; font-size: 12px; font-weight: 600; }
+.iam-application-scope-grid select,
+.iam-application-validity-grid input,
+.iam-application-validity-grid select { min-height: 38px; padding: 0 10px; color: #0f172a; border: 1px solid #cbd5e1; border-radius: 7px; background: #fff; }
+.iam-application-scope-grid small,
+.iam-application-validity-grid small { color: #64748b; font-size: 10px; font-weight: 400; }
+.iam-application-scope-warning { margin: 0; padding: 8px 10px; color: #92400e; border: 1px solid #fde68a; border-radius: 7px; background: #fffbeb; }
+@media (max-width: 760px) { .iam-application-scope-grid, .iam-application-validity-grid { grid-template-columns: 1fr; } }
