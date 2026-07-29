@@ -80,6 +80,13 @@ export async function listContracts(params = {}) {
   return Array.isArray(data) ? data : []
 }
 
+export async function createContract(payload) {
+  return request('/contracts', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
 export async function getContract(contractId) {
   return request(`/contracts/${contractId}`)
 }
@@ -92,6 +99,13 @@ export async function listApprovalTasks(params = {}) {
 
 export async function getApproval(approvalId) {
   return request(`/approvals/${approvalId}`)
+}
+
+export async function commandApproval(approvalId, action, payload = {}) {
+  return request(`/approvals/${approvalId}/${action}`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
 }
 
 export async function listApprovalRules() {
