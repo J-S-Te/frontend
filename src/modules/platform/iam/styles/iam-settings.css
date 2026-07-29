@@ -139,9 +139,6 @@
 .iam-provenance-list strong { color: #0f172a; font-size: 11px; }
 .iam-provenance-list code { overflow: hidden; color: #2563eb; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .iam-provenance-list small { color: #64748b; font-size: 10px; line-height: 1.45; }
-.iam-external-identity-note { display: grid; gap: 4px; margin-top: 12px; padding: 10px 11px; color: #475569; font-size: 11px; border: 1px solid #dbeafe; border-radius: 7px; background: #f8fbff; }
-.iam-external-identity-note strong { color: #1e3a8a; }
-.iam-external-identity-note small { color: #64748b; line-height: 1.5; }
 .iam-impact-preview { grid-column: 1 / -1; padding: 11px; border: 1px solid #dbeafe; border-radius: 8px; background: #f8fbff; }
 .iam-impact-preview-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .iam-impact-preview-head strong { color: #1e3a8a; font-size: 12px; }

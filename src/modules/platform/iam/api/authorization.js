@@ -120,27 +120,6 @@ export function createRoleBinding({ roleId, subjectType, subjectId, scopeType, s
   })
 }
 
-// previewEffectiveAccess returns backend-calculated active roles and permissions for one
-// account. The UI only displays the explanation; it never makes its own authorization decision.
-export function previewEffectiveAccess({ userId, accountId }) {
-  return request(`/authorization/effective-access${pageQuery({ user_id: userId, account_id: accountId })}`)
-}
-
-// previewRoleBindingImpact calculates recipients before a proposed binding is persisted.
-export function previewRoleBindingImpact({ roleId, subjectType, subjectId, scopeType, scopeId = null, expiresAt = null }) {
-  return request('/authorization/role-binding-impact', {
-    method: 'POST',
-    body: JSON.stringify({
-      role_id: roleId,
-      subject_type: subjectType,
-      subject_id: subjectId,
-      scope_type: scopeType,
-      scope_id: scopeId,
-      expires_at: expiresAt,
-    }),
-  })
-}
-
 export function createPermission({ resourceId, code, name, action }) {
   return request('/permissions', {
     method: 'POST',

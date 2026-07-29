@@ -127,10 +127,10 @@ export function listAccounts({ page = 1, pageSize = 50, keyword = '', status = '
   return request(`/accounts${pageQuery({ page, page_size: pageSize, keyword, 'filter[status]': status })}`).then(normalize)
 }
 
-export function createLocalAccount({ userId, accountName, initialPassword }) {
+export function createLocalAccount({ userId, accountName, initialPassword, validUntil = null }) {
   return request('/accounts', {
     method: 'POST',
-    body: JSON.stringify({ user_id: userId, account_name: accountName, initial_password: initialPassword }),
+    body: JSON.stringify({ user_id: userId, account_name: accountName, initial_password: initialPassword, valid_until: validUntil }),
   })
 }
 
@@ -159,6 +159,20 @@ export function createOrgUnit({ parentId = null, name, sortOrder = 0 }) {
   return request('/org-units', {
     method: 'POST',
     body: JSON.stringify({ parent_id: parentId, name, sort_order: sortOrder }),
+  })
+}
+
+export function updateOrgUnit({ orgUnitId, parentId = null, name, sortOrder = 0, version }) {
+  return request(`/org-units/${encodeURIComponent(orgUnitId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ parent_id: parentId, name, sort_order: sortOrder, version }),
+  })
+}
+
+export function deleteOrgUnit({ orgUnitId, version }) {
+  return request(`/org-units/${encodeURIComponent(orgUnitId)}`, {
+    method: 'DELETE',
+    body: JSON.stringify({ version }),
   })
 }
 
@@ -199,32 +213,5 @@ export function updateMembershipStatus({ membershipId, status, version }) {
   return request(`/memberships/${encodeURIComponent(membershipId)}`, {
     method: 'PATCH',
     body: JSON.stringify({ status, version }),
-  })
-}
-
-// --- External identities ---
-
-export function listIdentityProviders({ page = 1, pageSize = 100 } = {}) {
-  return request(`/identity-providers${pageQuery({ page, page_size: pageSize })}`).then(normalize)
-}
-
-export function listUserExternalIdentities(userId) {
-  return request(`/users/${encodeURIComponent(userId)}/external-identities`).then((value) => {
-    if (Array.isArray(value)) return value
-    return Array.isArray(value?.items) ? value.items : []
-  })
-}
-
-export function bindUserExternalIdentity({ userId, providerCode, externalSubject }) {
-  return request(`/users/${encodeURIComponent(userId)}/external-identities`, {
-    method: 'POST',
-    body: JSON.stringify({ provider_code: providerCode, external_subject: externalSubject }),
-  })
-}
-
-export function unbindUserExternalIdentity({ userId, bindingId, version }) {
-  return request(`/users/${encodeURIComponent(userId)}/external-identities/${encodeURIComponent(bindingId)}`, {
-    method: 'DELETE',
-    body: JSON.stringify({ version }),
   })
 }

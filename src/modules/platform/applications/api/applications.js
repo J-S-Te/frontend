@@ -150,6 +150,7 @@ export function onboardSubsystem({
   upstreamUrl,
   pathPrefix = '',
   clientType = 'confidential',
+  initialAdminUserId = '',
 } = {}) {
   return request('/subsystem-onboarding', {
     method: 'POST',
@@ -162,11 +163,14 @@ export function onboardSubsystem({
       upstream_url: upstreamUrl,
       path_prefix: pathPrefix,
       client_type: clientType,
+      ...(String(initialAdminUserId || '').trim()
+        ? { initial_admin_user_id: String(initialAdminUserId).trim() }
+        : {}),
     }),
   })
 }
 
-/** 查询当前登录租户下可显示在子系统门户中的 ACTIVE 应用。 */
+/** 查询当前登录用户已获得应用角色、可显示在子系统门户中的 ACTIVE 应用。 */
 export function listPortalApplications({ environment = '' } = {}) {
   return request(`/portal/applications${pageQuery({ environment })}`)
 }

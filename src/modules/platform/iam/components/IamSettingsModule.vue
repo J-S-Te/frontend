@@ -20,6 +20,7 @@ import {
   createLocalAccount,
   createMembership,
   createOrgUnit,
+  deleteOrgUnit,
   createPosition,
   createUser,
   createUsersBatch,
@@ -29,12 +30,9 @@ import {
   listOrgUnits,
   listPositions,
   listUsers,
-  listIdentityProviders,
-  listUserExternalIdentities,
-  bindUserExternalIdentity,
-  unbindUserExternalIdentity,
   resetAccountPassword,
   updateAccountStatus,
+  updateOrgUnit,
 } from '@/modules/platform/iam/api/iam'
 import {
   AuthorizationError,
@@ -54,7 +52,7 @@ const emit = defineEmits(['toast'])
 
 const activePanel = ref('users')
 const detail = ref(null)
-const loading = reactive({ users: false, accounts: false, organizations: false, positions: false, memberships: false, externalIdentities: false })
+const loading = reactive({ users: false, accounts: false, organizations: false, positions: false, memberships: false })
 const errorMessage = ref('')
 const pageSize = 50
 const pagination = reactive({
@@ -69,9 +67,6 @@ const accounts = ref([])
 const organizations = ref([])
 const memberships = ref([])
 const positions = ref([])
-const identityProviders = ref([])
-const externalIdentities = ref([])
-const selectedExternalIdentityUserId = ref('')
 const passwordResetDialog = ref(null)
 const temporaryPassword = ref(null)
 const userDeletionDialog = ref(null)
@@ -92,11 +87,10 @@ const contractRoleOptions = CONTRACT_ROLE_DEFINITIONS
 
 const panels = [
   { key: 'users', label: '用户', icon: 'user', description: '自然人主体、任职状态与跨系统统一用户标识' },
-  { key: 'accounts', label: '登录账号', icon: 'account', description: '账号状态、认证来源与外部身份绑定' },
+  { key: 'accounts', label: '登录账号', icon: 'account', description: '账号状态、密码与有效期统一管理' },
   { key: 'organizations', label: '组织单元', icon: 'organization', description: '组织单元层级、编码与排序' },
   { key: 'positions', label: '岗位', icon: 'organization', description: '组织内岗位定义，是任职关系和岗位授权的基础' },
   { key: 'memberships', label: '任职关系', icon: 'link', description: 'Membership 任职关系：主组织、兼岗、历史任职' },
-  { key: 'external-identities', label: '外部身份', icon: 'account', description: '为用户绑定、查看和解绑第三方身份提供商' },
 ]
 
 const filters = reactive({ user: '', account: '', organization: '', position: '', membership: '' })
@@ -285,21 +279,6 @@ async function loadMemberships(page = pagination.memberships.page) {
 
 
 
-
-async function loadIdentityProviders() {
-  const data = await safeCall('externalIdentities', () => listIdentityProviders({ page: 1, pageSize: 100 }))
-  if (data) identityProviders.value = data.items.filter((item) => (item.status || '').toUpperCase() === 'ACTIVE')
-}
-
-async function loadExternalIdentities() {
-  if (!selectedExternalIdentityUserId.value) {
-    externalIdentities.value = []
-    return
-  }
-  const data = await safeCall('externalIdentities', () => listUserExternalIdentities(selectedExternalIdentityUserId.value))
-  if (data) externalIdentities.value = data
-}
-
 async function reloadActive() {
   switch (activePanel.value) {
     case 'users': await loadUsers(); break
@@ -307,7 +286,6 @@ async function reloadActive() {
     case 'organizations': await loadOrganizations(); break
     case 'positions': await loadPositions(); break
     case 'memberships': await loadMemberships(); break
-    case 'external-identities': await Promise.all([loadUsers(), loadIdentityProviders(), loadExternalIdentities()]); break
     default: break
   }
 }
@@ -325,7 +303,7 @@ function goToPage(key, page) {
 
 const activePagination = computed(() => pagination[activePanel.value] || null)
 const activeServerPagingUnavailable = computed(() => activePagination.value?.serverPagingSupported === false)
-const activeLoading = computed(() => loading[activePanel.value === 'external-identities' ? 'externalIdentities' : activePanel.value])
+const activeLoading = computed(() => loading[activePanel.value])
 
 watch(activePanel, () => {
   detail.value = null
@@ -342,9 +320,6 @@ watch(filters, () => {
   }, 250)
 }, { deep: true })
 
-watch(selectedExternalIdentityUserId, () => {
-  if (activePanel.value === 'external-identities') loadExternalIdentities()
-})
 
 function isAccountStatusManageable(status) {
   return ['ACTIVE', 'DISABLED'].includes(String(status || '').toUpperCase())
@@ -471,6 +446,35 @@ async function confirmUserDeletion() {
   }
 }
 
+async function openOrganizationEditor(organization) {
+  if (!organization?.org_unit_id) return
+  openEditor('organization')
+  Object.assign(form, {
+    name: organization.name || '',
+    parent_id: organization.parent_id || '',
+    sort_order: Number(organization.sort_order || 0),
+  })
+  editor.value = { kind: 'organization', label: '组织单元', mode: 'edit', orgUnitId: organization.org_unit_id, version: organization.version }
+}
+
+async function removeOrganization(organization) {
+  if (!organization?.org_unit_id) return
+  const version = Number(organization.version)
+  if (!Number.isInteger(version) || version < 1) {
+    emitToast('组织版本信息无效，请刷新列表后重试。')
+    return
+  }
+  if (!window.confirm(`确认删除组织“${organization.name}”吗？其岗位和任职关系将一并停用。`)) return
+  try {
+    await deleteOrgUnit({ orgUnitId: organization.org_unit_id, version })
+    if (detail.value?.kind === 'organization' && detail.value.item?.org_unit_id === organization.org_unit_id) closeDetail()
+    await Promise.all([loadOrganizations(), loadPositions(), loadMemberships()])
+    emitToast(`组织 ${organization.name} 已删除，相关岗位和任职关系已停用。`)
+  } catch (error) {
+    emitToast(error instanceof IamError ? error.message : (error?.message || '删除组织失败。'))
+  }
+}
+
 // ---- 新增（对接真实 API）----
 const editor = ref(null) // { kind, label }
 const form = reactive({})
@@ -501,13 +505,12 @@ watch(() => form.org_unit_id, (orgUnitId) => {
 })
 
 const editorTemplates = {
-  user: () => ({ display_name: '', email: '', mobile: '', status: 'ACTIVE' }),
+  user: () => ({ display_name: '', email: '', mobile: '', status: 'ACTIVE', account_name: '', initial_password: '', validity_mode: 'TEMPORARY', valid_until: defaultAccountValidUntil() }),
   'user-batch': () => ({ rows: '', status: 'ACTIVE' }),
   account: () => ({ account_name: '', user_id: '', initial_password: '', validity_mode: 'TEMPORARY', valid_until: defaultAccountValidUntil() }),
-  organization: () => ({ name: '', parent_id: '', sort_order: 0 }),
+  organization: () => ({ name: '', parent_id: '', sort_order: 0, status: 'ACTIVE' }),
   position: () => ({ org_unit_id: '', name: '' }),
   membership: () => ({ user_id: '', org_unit_id: '', position_id: '', membership_type: 'PRIMARY', validity_mode: 'LONG_TERM', effective_from: '', effective_to: '' }),
-  'external-identity': () => ({ user_id: selectedExternalIdentityUserId.value || '', provider_code: '', external_subject: '' }),
 }
 
 const panelToKind = {
@@ -516,7 +519,6 @@ const panelToKind = {
   organizations: 'organization',
   positions: 'position',
   memberships: 'membership',
-  'external-identities': 'external-identity',
 }
 
 const editorLabels = {
@@ -526,7 +528,6 @@ const editorLabels = {
   organization: '组织单元',
   position: '岗位',
   membership: '任职关系',
-  'external-identity': '外部身份绑定',
 }
 
 function openEditor(kind) {
@@ -539,7 +540,7 @@ function openEditor(kind) {
   Object.assign(form, editorTemplates[kind]())
   editor.value = { kind, label: editorLabels[kind] }
 
-  if (['account', 'membership', 'external-identity'].includes(kind) && !users.value.length) loadUsers()
+  if (['account', 'membership'].includes(kind) && !users.value.length) loadUsers()
   if (kind === 'position' && !organizations.value.length) loadOrganizations()
   if (kind === 'membership') {
     const referenceLoads = []
@@ -548,7 +549,6 @@ function openEditor(kind) {
     selectDefaultMembershipOrganization()
     if (referenceLoads.length) Promise.all(referenceLoads).then(selectDefaultMembershipOrganization)
   }
-  if (kind === 'external-identity' && !identityProviders.value.length) loadIdentityProviders()
 }
 
 function openEditorForActivePanel() {
@@ -560,18 +560,6 @@ function closeEditor() {
   editor.value = null
   initialPasswordVisible.value = false
   saving.value = false
-}
-
-async function removeExternalIdentity(binding) {
-  const userId = selectedExternalIdentityUserId.value
-  if (!userId || !binding?.binding_id) return
-  try {
-    await unbindUserExternalIdentity({ userId, bindingId: binding.binding_id, version: binding.version || 0 })
-    await loadExternalIdentities()
-    emitToast('外部身份已解绑。')
-  } catch (error) {
-    emitToast(error instanceof IamError ? error.message : (error?.message || '解绑外部身份失败。'))
-  }
 }
 
 function defaultAccountValidUntil() {
@@ -669,9 +657,25 @@ async function saveEditor() {
         mobile: form.mobile,
         status: form.status,
       })
+      const accountInput = validateLocalAccountInput(form.account_name, form.initial_password)
+      const validUntil = form.validity_mode === 'PERMANENT' ? null : resolveExpiresAt(form.valid_until)
+      if (form.validity_mode !== 'PERMANENT' && (!validUntil || new Date(validUntil).getTime() <= Date.now())) {
+        throw new IamError('临时账号的有效截止时间必须晚于当前时间。')
+      }
       result = await createUser(userInput)
-      successMessage = `用户 ${result?.display_name || form.display_name} 已创建，员工编号已自动生成并绑定普通用户角色。`
-      await loadUsers()
+      try {
+        await createLocalAccount({
+          userId: result?.user_id || result?.id,
+          accountName: accountInput.accountName,
+          initialPassword: accountInput.password,
+          validUntil,
+        })
+      } catch (accountError) {
+        await Promise.all([loadUsers(), loadAccounts()])
+        throw new IamError(`用户已创建，但登录账号创建失败：${accountError?.message || '请在“登录账号”页面补建账号。'}`, { status: accountError?.status, code: accountError?.code })
+      }
+      successMessage = `用户 ${result?.display_name || form.display_name} 与登录账号 ${accountInput.accountName} 已创建。`
+      await Promise.all([loadUsers(), loadAccounts()])
     } else if (kind === 'user-batch') {
       const items = parseBatchUserRows(form.rows, form.status)
       result = await createUsersBatch(items)
@@ -695,13 +699,19 @@ async function saveEditor() {
       await loadAccounts()
     } else if (kind === 'organization') {
       if (!form.name) throw new IamError('请填写组织名称。')
-      result = await createOrgUnit({
+      const payload = {
         parentId: form.parent_id || null,
         name: String(form.name).trim(),
         sortOrder: Number(form.sort_order) || 0,
-      })
-      successMessage = `组织 ${result?.name || form.name} 已创建，编码 ${result?.code || '已由系统生成'}。`
-      await loadOrganizations()
+      }
+      if (editor.value.mode === 'edit') {
+        result = await updateOrgUnit({ ...payload, orgUnitId: editor.value.orgUnitId, version: editor.value.version })
+        successMessage = `组织 ${result?.name || form.name} 已更新。`
+      } else {
+        result = await createOrgUnit(payload)
+        successMessage = `组织 ${result?.name || form.name} 已创建，编码 ${result?.code || '已由系统生成'}。`
+      }
+      await Promise.all([loadOrganizations(), loadPositions(), loadMemberships()])
     } else if (kind === 'position') {
       if (!form.org_unit_id || !form.name) throw new IamError('请选择组织并填写岗位名称。')
       result = await createPosition({
@@ -733,18 +743,6 @@ async function saveEditor() {
       })
       successMessage = `任职关系 ${result?.membership_id || ''} 已创建（${shortTerm ? '短期' : '长期'}生效）。`
       await loadMemberships()
-    } else if (kind === 'external-identity') {
-      if (!form.user_id || !form.provider_code || !String(form.external_subject || '').trim()) {
-        throw new IamError('请选择用户、身份提供商并填写外部主体标识。')
-      }
-      result = await bindUserExternalIdentity({
-        userId: form.user_id,
-        providerCode: form.provider_code,
-        externalSubject: String(form.external_subject).trim(),
-      })
-      selectedExternalIdentityUserId.value = form.user_id
-      await loadExternalIdentities()
-      successMessage = `外部身份绑定 ${result.binding_id || ''} 已写入 MySQL。`
     } else {
       throw new IamError('未实现的编辑类型。')
     }
@@ -763,9 +761,6 @@ async function saveEditor() {
 
 onMounted(async () => {
   await Promise.all([loadUsers(), loadAccounts(), loadOrganizations(), loadPositions(), loadMemberships()])
-  if (!selectedExternalIdentityUserId.value && users.value[0]) {
-    selectedExternalIdentityUserId.value = users.value[0].user_id
-  }
 })
 </script>
 
@@ -829,7 +824,7 @@ onMounted(async () => {
           <div class="console-table-card"><div class="console-table-scroll"><table class="console-data-table iam-data-table"><thead><tr><th>组织单元</th><th>上级组织 ID</th><th>排序</th><th>状态</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
             <tr v-if="loading.organizations"><td class="console-empty" colspan="5">正在读取组织…</td></tr>
             <tr v-else-if="!filteredOrganizations.length"><td class="console-empty" colspan="5">暂无组织记录。</td></tr>
-            <tr v-for="item in filteredOrganizations" :key="item.org_unit_id"><td><strong>{{ item.name }}</strong><span class="console-entity-meta console-mono">{{ item.code }} · {{ item.org_unit_id }}</span></td><td class="console-mono">{{ item.parent_id || '—' }}</td><td>{{ item.sort_order ?? 0 }}</td><td><span class="console-badge" :class="(item.status || '').toUpperCase() === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(item.status) }}</span></td><td class="console-actions-cell"><button class="console-text-button" type="button" @click="openDetail('organization', item)">详情</button></td></tr>
+            <tr v-for="item in filteredOrganizations" :key="item.org_unit_id"><td><strong>{{ item.name }}</strong><span class="console-entity-meta console-mono">{{ item.code }} · {{ item.org_unit_id }}</span></td><td class="console-mono">{{ item.parent_id || '—' }}</td><td>{{ item.sort_order ?? 0 }}</td><td><span class="console-badge" :class="(item.status || '').toUpperCase() === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(item.status) }}</span></td><td class="console-actions-cell"><button class="console-text-button" type="button" @click="openDetail('organization', item)">详情</button><button class="console-text-button" type="button" @click="openOrganizationEditor(item)">编辑</button><button class="console-text-button danger" type="button" @click="removeOrganization(item)">删除</button></td></tr>
           </tbody></table></div></div>
         </section>
 
@@ -852,17 +847,6 @@ onMounted(async () => {
           </tbody></table></div></div>
         </section>
 
-        <section v-else-if="activePanel === 'external-identities'" class="iam-table-section">
-          <div class="iam-filter-row"><label><span>用户</span><select v-model="selectedExternalIdentityUserId"><option value="">请选择用户</option><option v-for="item in users" :key="item.user_id" :value="item.user_id">{{ item.display_name }} · {{ item.user_id }}</option></select></label><span>{{ selectedExternalIdentityUserId ? `${externalIdentities.length} 条绑定` : '选择用户后查看绑定' }}</span></div>
-          <p class="iam-form-alert"><ConsoleIcon name="info" />为保护外部身份隐私，列表不会回显外部主体标识。</p>
-          <div class="console-table-card"><div class="console-table-scroll"><table class="console-data-table iam-data-table"><thead><tr><th>绑定 ID</th><th>身份提供商</th><th>状态</th><th>绑定时间</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
-            <tr v-if="loading.externalIdentities"><td class="console-empty" colspan="5">正在读取外部身份…</td></tr>
-            <tr v-else-if="!selectedExternalIdentityUserId"><td class="console-empty" colspan="5">请选择用户。</td></tr>
-            <tr v-else-if="!externalIdentities.length"><td class="console-empty" colspan="5">该用户暂无外部身份绑定。</td></tr>
-            <tr v-for="item in externalIdentities" :key="item.binding_id"><td class="console-mono">{{ item.binding_id }}</td><td class="console-mono">{{ item.provider_id }}</td><td><span class="console-badge" :class="(item.status || '').toUpperCase() === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(item.status) }}</span></td><td class="console-mono">{{ formatDateTime(item.bound_at) }}</td><td class="console-actions-cell"><button class="console-text-button danger" type="button" @click="removeExternalIdentity(item)">解绑</button></td></tr>
-          </tbody></table></div></div>
-        </section>
-
         <nav v-if="activePagination && activePagination.total > activePagination.pageSize && !activeServerPagingUnavailable" class="iam-pagination" aria-label="列表分页">
           <button class="console-button ghost small" type="button" :disabled="activePagination.page <= 1" @click="goToPage(activePanel, activePagination.page - 1)">上一页</button>
           <span>第 {{ activePagination.page }} / {{ pageTotal(activePanel) }} 页，共 {{ activePagination.total }} 条</span>
@@ -881,7 +865,7 @@ onMounted(async () => {
         </div>
         <section v-if="detail.kind === 'user'" class="iam-detail-section iam-contract-access">
           <div class="iam-detail-section-head">
-            <div><h4>合同系统权限</h4><p>每个用户只绑定一个预置角色；最终权限为角色默认权限与附加权限的并集。</p></div>
+            <div><h4>合同管理系统访问授权</h4><p>平台角色不自动继承业务系统权限。必须在这里为用户显式选择合同系统角色，保存后该用户才会看到门户卡片并完成 OIDC 登录。</p></div>
             <span v-if="contractAccess" class="iam-contract-revision">策略版本 {{ contractAccess.authz_revision }}</span>
           </div>
           <p v-if="contractAccessLoading" class="iam-empty-inline">正在读取合同系统权限…</p>
@@ -889,7 +873,7 @@ onMounted(async () => {
             <p v-if="contractAccessError" class="login-target-module__error" role="alert">{{ contractAccessError }}</p>
             <div class="iam-contract-access-form">
               <label><span>预置角色 *</span><select v-model="contractAccessDraft.role_code"><option value="">请选择角色</option><option v-for="role in contractRoleOptions" :key="role.code" :value="role.code">{{ role.name }} · {{ role.code }}</option></select></label>
-              <p class="iam-field-help">角色由 SYS-004 固化，普通管理界面不能新增、修改或删除角色。</p>
+              <p class="iam-field-help">未选择并保存角色时，合同系统将拒绝该用户登录；角色由 SYS-004 固化，普通管理界面不能新增、修改或删除。</p>
               <div class="iam-contract-permission-block"><strong>角色默认权限</strong><p v-if="!contractRolePermissions.length" class="iam-empty-inline">选择角色后显示默认权限。</p><div v-else class="iam-contract-permission-tags"><span v-for="permission in contractRolePermissions" :key="permission"><b>{{ contractPermissionName(permission) }}</b><code>{{ permission }}</code></span></div></div>
               <fieldset :disabled="!contractAccessDraft.role_code || contractAccessDraft.role_code === 'admin' || contractAccessSaving">
                 <legend>附加权限（只增加，不抵消默认权限）</legend>
@@ -934,17 +918,21 @@ onMounted(async () => {
 
     <div v-if="editor" class="iam-modal-backdrop" role="presentation" @click.self="closeEditor">
       <section class="iam-modal iam-editor-modal" role="dialog" aria-modal="true" aria-label="新增身份授权配置">
-        <header><div><p>新增</p><h3>新增 {{ editor.label }}</h3></div><button class="console-modal-close" type="button" aria-label="关闭表单" :disabled="saving" @click="closeEditor"><ConsoleIcon name="close" /></button></header>
+        <header><div><p>{{ editor.mode === 'edit' ? '编辑' : '新增' }}</p><h3>{{ editor.mode === 'edit' ? '编辑' : '新增' }} {{ editor.label }}</h3></div><button class="console-modal-close" type="button" aria-label="关闭表单" :disabled="saving" @click="closeEditor"><ConsoleIcon name="close" /></button></header>
         <form class="iam-editor-form" @submit.prevent="saveEditor">
           <template v-if="editor.kind === 'user'">
-            <p class="iam-form-alert"><ConsoleIcon name="info" />员工编号由后端自动生成；创建成功后自动绑定“普通用户”角色。</p>
+            <p class="iam-form-alert"><ConsoleIcon name="info" />员工编号由后端自动生成；本次会同时创建该用户的本地登录账号。</p>
             <label><span>展示姓名 *</span><input v-model="form.display_name" required maxlength="100" placeholder="例如：张三" /></label>
             <label><span>邮箱</span><input v-model="form.email" type="email" placeholder="例如：zhang.san@example.com" /></label>
             <label><span>手机</span><input v-model="form.mobile" maxlength="32" placeholder="例如：13800000000" /></label>
             <label><span>状态</span><select v-model="form.status"><option value="ACTIVE">启用</option><option value="DISABLED">停用</option></select></label>
+            <label><span>登录账号 *</span><input v-model="form.account_name" required minlength="3" maxlength="64" placeholder="例如：zhang.san" /><small class="iam-field-help">账号必须唯一，以字母或数字开头。</small></label>
+            <label><span>初始密码 *</span><div class="iam-password-field"><input v-model="form.initial_password" :type="initialPasswordVisible ? 'text' : 'password'" required minlength="12" maxlength="128" autocomplete="new-password" /><button type="button" :aria-label="initialPasswordVisible ? '隐藏密码' : '显示密码'" @click="initialPasswordVisible = !initialPasswordVisible"><ConsoleIcon :name="initialPasswordVisible ? 'eye-off' : 'eye'" /></button></div></label>
+            <label><span>账号有效期 *</span><select v-model="form.validity_mode"><option value="TEMPORARY">临时（默认 1 天）</option><option value="PERMANENT">永久</option></select></label>
+            <label v-if="form.validity_mode !== 'PERMANENT'"><span>有效截止时间 *</span><input v-model="form.valid_until" required type="datetime-local" /></label>
           </template>
           <template v-else-if="editor.kind === 'user-batch'">
-            <p class="iam-form-alert"><ConsoleIcon name="info" />每行一位用户，格式为“姓名,邮箱,手机号”；邮箱和手机号可留空，一次最多 100 位。整批数据在一个事务中创建，任一行失败会全部回滚。</p>
+            <p class="iam-form-alert"><ConsoleIcon name="info" />每行一位用户，格式为“姓名,邮箱,手机号”；邮箱和手机号可留空，一次最多 100 位。批量创建仅建立用户档案；登录账号请在“登录账号”中按需创建。</p>
             <label class="full"><span>用户数据 *</span><textarea v-model="form.rows" required rows="10" placeholder="张三,zhang.san@example.com,13800000000&#10;李四,,13900000000&#10;王五"></textarea></label>
             <label><span>统一状态</span><select v-model="form.status"><option value="ACTIVE">启用</option><option value="DISABLED">停用</option></select></label>
             <p class="iam-field-help full">员工编号由后端逐条自动生成，每位用户都会自动绑定“普通用户”角色。</p>
@@ -987,11 +975,6 @@ onMounted(async () => {
             <label><span>生效方式 *</span><select v-model="form.validity_mode"><option value="LONG_TERM">长期生效</option><option value="SHORT_TERM">短期生效</option></select><small class="iam-field-help">长期任职不设置日期；短期任职必须填写完整起止日期。</small></label>
             <label v-if="form.validity_mode === 'SHORT_TERM'"><span>生效日期 *</span><input v-model="form.effective_from" required type="date" /></label>
             <label v-if="form.validity_mode === 'SHORT_TERM'"><span>失效日期 *</span><input v-model="form.effective_to" required type="date" /></label>
-          </template>
-          <template v-else-if="editor.kind === 'external-identity'">
-            <label><span>用户 *</span><select v-model="form.user_id" required><option value="">请选择用户</option><option v-for="item in users" :key="item.user_id" :value="item.user_id">{{ item.display_name }} · {{ item.user_id }}</option></select></label>
-            <label><span>身份提供商 *</span><select v-model="form.provider_code" required><option value="">请选择提供商</option><option v-for="item in identityProviders" :key="item.provider_id || item.code" :value="item.code">{{ item.display_name || item.code }} · {{ item.code }}</option></select></label>
-            <label class="full"><span>外部主体标识 *</span><input v-model="form.external_subject" required autocomplete="off" placeholder="例如：IdP 中的 subject / immutable ID" /><small class="iam-field-help">该值只在提交时发送给后端，不会在本页面回显。</small></label>
           </template>
           <p class="iam-form-alert"><ConsoleIcon name="info" />提交后由 Go API 写入 MySQL，并生成审计事件。</p>
           <footer>

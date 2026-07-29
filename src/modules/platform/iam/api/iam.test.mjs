@@ -2,15 +2,14 @@ import assert from 'node:assert/strict'
 import { afterEach, test } from 'node:test'
 import {
   IamError,
-  bindUserExternalIdentity,
   createLocalAccount,
   createOrgUnit,
+  deleteOrgUnit,
+  updateOrgUnit,
   createPosition,
   createMembership,
   createUser,
-  listUserExternalIdentities,
   listUsers,
-  unbindUserExternalIdentity,
 } from './iam.js'
 
 const originalFetch = globalThis.fetch
@@ -66,6 +65,7 @@ test('createLocalAccount calls the account endpoint with the backend field names
     userId: 'user-1',
     accountName: 'zhangsan',
     initialPassword: 'Temporary-Password-1',
+    validUntil: '2026-08-01T00:00:00.000Z',
   })
 
   assert.equal(requested.url, '/api/v1/accounts')
@@ -73,6 +73,7 @@ test('createLocalAccount calls the account endpoint with the backend field names
     user_id: 'user-1',
     account_name: 'zhangsan',
     initial_password: 'Temporary-Password-1',
+    valid_until: '2026-08-01T00:00:00.000Z',
   })
 })
 
@@ -96,6 +97,35 @@ test('createOrgUnit leaves organization code generation to the backend', async (
     sort_order: 100,
   })
   assert.equal(result.code, 'ORG-01KTEST')
+})
+
+test('updateOrgUnit and deleteOrgUnit use versioned organization API contracts', async () => {
+  const requests = []
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url, options })
+    return jsonResponse({ data: { org_unit_id: 'org-1', name: '研发中心', version: 2 } })
+  }
+
+  await updateOrgUnit({
+    orgUnitId: 'org-1',
+    parentId: 'parent-2',
+    name: '研发中心',
+    sortOrder: 200,
+    version: 1,
+  })
+  await deleteOrgUnit({ orgUnitId: 'org-1', version: 2 })
+
+  assert.equal(requests[0].url, '/api/v1/org-units/org-1')
+  assert.equal(requests[0].options.method, 'PATCH')
+  assert.deepEqual(JSON.parse(requests[0].options.body), {
+    parent_id: 'parent-2',
+    name: '研发中心',
+    sort_order: 200,
+    version: 1,
+  })
+  assert.equal(requests[1].url, '/api/v1/org-units/org-1')
+  assert.equal(requests[1].options.method, 'DELETE')
+  assert.deepEqual(JSON.parse(requests[1].options.body), { version: 2 })
 })
 
 
@@ -172,26 +202,4 @@ test('IAM API converts malformed JSON error bodies into a stable IamError', asyn
     listUsers(),
     (error) => error instanceof IamError && error.status === 502 && error.message === 'IAM 请求失败。',
   )
-})
-
-
-test('external identity APIs use the documented user-scoped routes and optimistic version on unbind', async () => {
-  const requests = []
-  globalThis.fetch = async (url, options = {}) => {
-    requests.push({ url, options })
-    if (options.method === 'DELETE') return jsonResponse({ data: { binding_id: 'binding-1' } })
-    if (options.method === 'POST') return jsonResponse({ data: { binding_id: 'binding-1' } })
-    return jsonResponse({ data: [{ binding_id: 'binding-1', provider_id: 'provider-1', status: 'ACTIVE', version: 3 }] })
-  }
-
-  const bindings = await listUserExternalIdentities('user / 1')
-  await bindUserExternalIdentity({ userId: 'user / 1', providerCode: 'oidc', externalSubject: 'subject-1' })
-  await unbindUserExternalIdentity({ userId: 'user / 1', bindingId: 'binding / 1', version: 3 })
-
-  assert.deepEqual(bindings, [{ binding_id: 'binding-1', provider_id: 'provider-1', status: 'ACTIVE', version: 3 }])
-  assert.equal(requests[0].url, '/api/v1/users/user%20%2F%201/external-identities')
-  assert.deepEqual(JSON.parse(requests[1].options.body), { provider_code: 'oidc', external_subject: 'subject-1' })
-  assert.equal(requests[2].url, '/api/v1/users/user%20%2F%201/external-identities/binding%20%2F%201')
-  assert.equal(requests[2].options.method, 'DELETE')
-  assert.deepEqual(JSON.parse(requests[2].options.body), { version: 3 })
 })

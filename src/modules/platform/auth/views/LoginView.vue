@@ -1,19 +1,10 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-import { createDingTalkQrSession, loginWithPassword } from '@/modules/platform/auth/api/auth'
-import {
-  isDingTalkFrameRenderMode,
-  mountDingTalkFrameLogin,
-  normalizeDingTalkQrSDKConfig,
-} from '@/modules/platform/auth/utils/dingtalkQr'
+import { ref } from 'vue'
+import { loginWithPassword } from '@/modules/platform/auth/api/auth'
 import { resolveSameOriginRedirect, resolveServerApprovedRedirect } from '@/modules/platform/auth/utils/navigation'
 
 const STORAGE_KEY = 'basic-platform.remembered-account'
 const LOGIN_SUCCESS_URL = import.meta.env.VITE_LOGIN_SUCCESS_URL || '/'
-const DINGTALK_PROVIDER_CODE = import.meta.env.VITE_DINGTALK_PROVIDER_CODE || 'DINGTALK_QR'
-const DINGTALK_QR_CONTAINER_ID = 'dingtalk-qr-frame-login'
-
-const activeTab = ref('password')
 const account = ref(localStorage.getItem(STORAGE_KEY) || '')
 const password = ref('')
 const rememberAccount = ref(Boolean(account.value))
@@ -22,24 +13,8 @@ const submitting = ref(false)
 const formError = ref('')
 const formSuccess = ref('')
 const concurrentSessionDetected = ref(false)
-const tenantId = ref(new URLSearchParams(window.location.search).get('tenant_id') || '')
-const qrStatus = ref('idle')
-const qrError = ref('')
-const qrSession = ref(null)
-const qrSeconds = ref(0)
-const qrContainer = ref(null)
-let qrTimer = null
-let qrRequestController = null
-let qrRequestVersion = 0
 
 const currentYear = new Date().getFullYear()
-const countdown = computed(() => {
-  const minutes = String(Math.floor(qrSeconds.value / 60)).padStart(2, '0')
-  const seconds = String(qrSeconds.value % 60).padStart(2, '0')
-  return `${minutes}:${seconds}`
-})
-const qrIsReady = computed(() => qrStatus.value === 'ready' && Boolean(qrSession.value))
-const qrIsExpired = computed(() => qrStatus.value === 'expired')
 
 function getLoginReturnTo() {
   const oidcReturnTo = new URLSearchParams(window.location.search).get('return_to')
@@ -71,35 +46,6 @@ function redirectTopLevel(candidate, allowApprovedCrossOrigin = false) {
     // 嵌入宿主无权导航顶层窗口时，仍只在当前同源页面完成受控跳转。
     window.location.assign(redirectUrl)
   }
-}
-
-function switchTab(tab) {
-  activeTab.value = tab
-  formError.value = ''
-  formSuccess.value = ''
-  concurrentSessionDetected.value = false
-
-  if (tab === 'qrcode') {
-    void ensureDingTalkQrSession()
-    return
-  }
-
-  abortQrSessionRequest()
-  resetQrSession()
-  qrStatus.value = 'idle'
-  qrError.value = ''
-}
-
-function handleTenantIdInput() {
-  if (!qrSession.value && qrStatus.value === 'idle') {
-    qrError.value = ''
-    return
-  }
-
-  abortQrSessionRequest()
-  resetQrSession()
-  qrStatus.value = 'idle'
-  qrError.value = ''
 }
 
 function validateForm() {
@@ -180,247 +126,6 @@ function showAccountHelp() {
   formError.value = '请联系平台管理员重置密码；重置操作将记录到安全审计日志。'
 }
 
-function validateTenantId() {
-  const normalizedTenantId = tenantId.value.trim()
-
-  if (!normalizedTenantId) {
-    return '请输入租户 ID 后再获取钉钉二维码。'
-  }
-
-  if (normalizedTenantId.length > 128) {
-    return '租户 ID 长度不能超过 128 个字符。'
-  }
-
-  return ''
-}
-
-function abortQrSessionRequest() {
-  qrRequestVersion += 1
-
-  if (qrRequestController) {
-    qrRequestController.abort()
-    qrRequestController = null
-  }
-}
-
-function stopQrCountdown() {
-  if (qrTimer) {
-    window.clearInterval(qrTimer)
-    qrTimer = null
-  }
-}
-
-function startQrCountdown(sessionID, expiresAt) {
-  stopQrCountdown()
-
-  const expiresAtMs = Date.parse(expiresAt)
-  const updateCountdown = () => {
-    if (qrSession.value?.sessionId !== sessionID || qrStatus.value !== 'ready') {
-      stopQrCountdown()
-      return
-    }
-
-    const secondsRemaining = Math.max(0, Math.ceil((expiresAtMs - Date.now()) / 1000))
-    qrSeconds.value = secondsRemaining
-
-    if (secondsRemaining === 0) {
-      resetQrSession()
-      qrStatus.value = 'expired'
-    }
-  }
-
-  updateCountdown()
-  if (qrStatus.value === 'ready') {
-    qrTimer = window.setInterval(updateCountdown, 1000)
-  }
-}
-
-function resetQrSession() {
-  stopQrCountdown()
-  qrContainer.value?.replaceChildren()
-  qrSession.value = null
-  qrSeconds.value = 0
-}
-
-async function ensureDingTalkQrSession() {
-  if (activeTab.value !== 'qrcode' || qrIsReady.value || qrStatus.value === 'loading') {
-    return
-  }
-
-  await requestDingTalkQrSession()
-}
-
-function handleDingTalkQrSuccess(sessionID, callbackURL) {
-  if (qrSession.value?.sessionId !== sessionID || qrStatus.value !== 'ready') {
-    return
-  }
-
-  qrStatus.value = 'completing'
-  abortQrSessionRequest()
-  resetQrSession()
-
-  // callbackURL 已由 SDK 适配器校验为后端登记的 redirect_uri，授权码仅随本次顶层跳转发送。
-  if (window.top === window) {
-    window.location.assign(callbackURL)
-    return
-  }
-
-  try {
-    window.top.location.assign(callbackURL)
-  } catch {
-    window.location.assign(callbackURL)
-  }
-}
-
-function handleDingTalkQrFailure(sessionID, error) {
-  if (qrSession.value?.sessionId !== sessionID || qrStatus.value === 'completing') {
-    return
-  }
-
-  abortQrSessionRequest()
-  resetQrSession()
-  qrStatus.value = 'error'
-  qrError.value = error instanceof Error && error.message ? error.message : '钉钉二维码初始化失败，请稍后重试。'
-}
-
-async function requestDingTalkQrSession() {
-  if (activeTab.value !== 'qrcode') {
-    return
-  }
-
-  const tenantError = validateTenantId()
-  if (tenantError) {
-    resetQrSession()
-    qrStatus.value = 'idle'
-    qrError.value = tenantError
-    return
-  }
-
-  abortQrSessionRequest()
-  resetQrSession()
-  qrStatus.value = 'loading'
-  qrError.value = ''
-  const requestVersion = qrRequestVersion + 1
-  qrRequestVersion = requestVersion
-  const requestController = new AbortController()
-  qrRequestController = requestController
-
-  try {
-    const result = await createDingTalkQrSession(
-      {
-        tenantId: tenantId.value.trim(),
-        providerCode: DINGTALK_PROVIDER_CODE,
-        returnTo: getLoginReturnTo(),
-      },
-      { signal: requestController.signal },
-    )
-    if (requestVersion !== qrRequestVersion || activeTab.value !== 'qrcode') {
-      return
-    }
-
-    const data = result?.data || result
-    const sessionId = typeof data?.session_id === 'string' ? data.session_id.trim() : ''
-    const expiresAt = typeof data?.expires_at === 'string' ? data.expires_at : ''
-    const renderMode = typeof data?.render_mode === 'string' ? data.render_mode : ''
-    const expiresAtMs = Date.parse(expiresAt)
-    const sdkConfig = normalizeDingTalkQrSDKConfig(data?.sdk_config)
-
-    if (!sessionId || !Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
-      throw new Error('扫码服务返回的数据不完整或已失效。')
-    }
-    if (!isDingTalkFrameRenderMode(renderMode)) {
-      throw new Error('扫码服务返回的呈现方式不受支持。')
-    }
-
-    qrSession.value = {
-      sessionId,
-      expiresAt,
-      sdkConfig,
-    }
-    qrStatus.value = 'ready'
-    startQrCountdown(sessionId, expiresAt)
-    await nextTick()
-
-    if (requestVersion !== qrRequestVersion || qrSession.value?.sessionId !== sessionId || qrStatus.value !== 'ready') {
-      return
-    }
-
-    await mountDingTalkFrameLogin({
-      containerID: DINGTALK_QR_CONTAINER_ID,
-      sdkConfig,
-      onSuccess: (callbackURL) => handleDingTalkQrSuccess(sessionId, callbackURL),
-      onError: (error) => handleDingTalkQrFailure(sessionId, error),
-      isActive: () =>
-        requestVersion === qrRequestVersion &&
-        qrSession.value?.sessionId === sessionId &&
-        qrStatus.value === 'ready' &&
-        activeTab.value === 'qrcode',
-    })
-  } catch (error) {
-    if (error?.name === 'AbortError' || requestVersion !== qrRequestVersion) {
-      return
-    }
-
-    resetQrSession()
-    qrStatus.value = 'error'
-    qrError.value = error.message || '钉钉二维码初始化失败，请稍后重试。'
-  } finally {
-    if (qrRequestController === requestController) {
-      qrRequestController = null
-    }
-  }
-}
-
-function refreshQrCode() {
-  void requestDingTalkQrSession()
-}
-
-function getDingTalkFailureMessage(errorCode) {
-  switch (errorCode) {
-    case 'AUTH_DINGTALK_QR_SESSION_INVALID':
-      return '二维码已失效或已使用，请重新获取后扫码。'
-    case 'AUTH_DINGTALK_EXTERNAL_IDENTITY_NOT_BOUND':
-      return '当前钉钉账号尚未绑定平台账号，请联系管理员。'
-    case 'AUTH_DINGTALK_PROVIDER_DISABLED':
-    case 'AUTH_DINGTALK_PROVIDER_NOT_AVAILABLE':
-      return '钉钉扫码登录暂不可用，请稍后重试。'
-    default:
-      return '无法完成钉钉登录，请重新获取二维码后重试。'
-  }
-}
-
-function clearDingTalkCallbackParameters() {
-  const currentURL = new URL(window.location.href)
-  currentURL.searchParams.delete('dingtalk_error')
-  currentURL.searchParams.delete('return_to')
-  window.history.replaceState(window.history.state, '', `${currentURL.pathname}${currentURL.search}${currentURL.hash}`)
-}
-
-function consumeDingTalkCallbackResult() {
-  const parameters = new URLSearchParams(window.location.search)
-  const dingtalkError = parameters.get('dingtalk_error')
-
-  if (!dingtalkError) {
-    return
-  }
-
-  abortQrSessionRequest()
-  resetQrSession()
-  clearDingTalkCallbackParameters()
-  activeTab.value = 'qrcode'
-  qrStatus.value = dingtalkError === 'AUTH_DINGTALK_QR_SESSION_INVALID' ? 'expired' : 'error'
-  qrError.value = getDingTalkFailureMessage(dingtalkError)
-}
-
-onMounted(() => {
-  consumeDingTalkCallbackResult()
-})
-
-onBeforeUnmount(() => {
-  abortQrSessionRequest()
-  stopQrCountdown()
-  resetQrSession()
-})
 </script>
 
 <template>
@@ -493,40 +198,8 @@ onBeforeUnmount(() => {
           <h2>欢迎回来</h2>
           <p>请验证您的身份以继续访问平台</p>
         </header>
-
-        <div class="login-tabs" role="tablist" aria-label="登录方式">
-          <button
-            id="password-tab"
-            class="login-tab"
-            :class="{ active: activeTab === 'password' }"
-            type="button"
-            role="tab"
-            :aria-selected="activeTab === 'password'"
-            aria-controls="password-panel"
-            @click="switchTab('password')"
-          >
-            账号密码
-          </button>
-          <button
-            id="qrcode-tab"
-            class="login-tab"
-            :class="{ active: activeTab === 'qrcode' }"
-            type="button"
-            role="tab"
-            :aria-selected="activeTab === 'qrcode'"
-            aria-controls="qrcode-panel"
-            @click="switchTab('qrcode')"
-          >
-            钉钉扫码
-          </button>
-        </div>
-
         <form
-          v-show="activeTab === 'password'"
-          id="password-panel"
           class="password-panel"
-          role="tabpanel"
-          aria-labelledby="password-tab"
           novalidate
           @submit.prevent="submitLogin"
         >
@@ -611,90 +284,6 @@ onBeforeUnmount(() => {
 
           <p class="contact-line">首次使用或无法登录？请联系平台管理员</p>
         </form>
-
-        <section
-          v-show="activeTab === 'qrcode'"
-          id="qrcode-panel"
-          class="qrcode-panel"
-          role="tabpanel"
-          aria-labelledby="qrcode-tab"
-        >
-          <div class="qr-heading">
-            <h3>使用钉钉扫码登录</h3>
-            <p>确认租户后，请在钉钉 App 中完成身份确认</p>
-          </div>
-
-          <div class="qr-tenant-field">
-            <label for="dingtalk-tenant-id">租户 ID</label>
-            <input
-              id="dingtalk-tenant-id"
-              v-model.trim="tenantId"
-              type="text"
-              maxlength="128"
-              autocomplete="organization"
-              placeholder="请输入管理员提供的租户 ID"
-              :disabled="qrStatus === 'loading' || qrStatus === 'completing'"
-              @input="handleTenantIdInput"
-              @blur="ensureDingTalkQrSession"
-              @keydown.enter.prevent="refreshQrCode"
-            />
-            <p>仅允许管理员已预先绑定的平台账号完成扫码登录。</p>
-          </div>
-
-          <div
-            class="qr-shell"
-            :class="{
-              loading: qrStatus === 'loading',
-              expired: qrIsExpired,
-              error: qrStatus === 'error',
-            }"
-          >
-            <div v-if="qrStatus === 'loading'" class="qr-state" role="status">
-              <span class="qr-spinner" aria-hidden="true"></span>
-              <strong>正在初始化二维码…</strong>
-              <span>请稍候</span>
-            </div>
-            <div
-              v-else-if="qrIsReady"
-              :id="DINGTALK_QR_CONTAINER_ID"
-              :key="qrSession.sessionId"
-              ref="qrContainer"
-              class="qr-frame"
-              aria-label="钉钉扫码登录二维码"
-            ></div>
-            <div v-else-if="qrIsExpired" class="qr-state">
-              <strong>二维码已失效</strong>
-              <span>请重新获取后扫码</span>
-              <button type="button" @click="refreshQrCode">立即刷新</button>
-            </div>
-            <div v-else-if="qrStatus === 'error'" class="qr-state qr-state-error" role="alert">
-              <strong>二维码初始化失败</strong>
-              <span>请检查租户信息或稍后重试</span>
-              <button type="button" @click="refreshQrCode">重新获取</button>
-            </div>
-            <div v-else class="qr-state">
-              <strong>等待获取二维码</strong>
-              <span>输入租户 ID 后获取</span>
-            </div>
-          </div>
-
-          <p v-if="qrIsReady" class="qr-status"><i></i>请使用钉钉扫码 · {{ countdown }}</p>
-          <p v-else-if="qrStatus === 'loading'" class="qr-status"><i></i>正在生成安全扫码会话</p>
-          <p v-else-if="qrStatus === 'completing'" class="qr-status"><i></i>登录已确认，正在进入平台…</p>
-          <p v-else class="qr-status"><i></i>二维码有效期由认证服务控制</p>
-          <p v-if="qrError" class="qr-inline-error" role="alert">{{ qrError }}</p>
-
-          <button
-            class="qr-refresh"
-            type="button"
-            :disabled="qrStatus === 'loading' || qrStatus === 'completing'"
-            @click="refreshQrCode"
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.7 6.3A8 8 0 0 0 4.3 9H2l3 3 3-3H6.3a6 6 0 1 1-.1 6.8l-1.7 1A8 8 0 1 0 17.7 6.3Z" /></svg>
-            {{ qrIsReady ? '刷新二维码' : '获取二维码' }}
-          </button>
-          <p class="qr-note">扫码授权仅用于完成本次平台登录；授权完成后会在当前窗口进入平台。</p>
-        </section>
       </div>
 
       <footer class="form-footer">

@@ -72,7 +72,7 @@ const settingsTabs = [
   {
     key: 'iam', label: '身份、组织与授权', icon: 'organization', tone: 'violet',
     description: '集中管理身份目录、组织架构与访问权限。',
-    capabilities: ['新增组织单元', '新增岗位', '新增任职关系', '新增外部身份绑定', '新增角色', '新增角色绑定', '新增权限注册'],
+    capabilities: ['新增组织单元', '新增岗位', '新增任职关系', '新增角色', '新增角色绑定', '新增权限注册'],
   },
   {
     key: 'notify', label: '通知中心', icon: 'bell', tone: 'orange',
