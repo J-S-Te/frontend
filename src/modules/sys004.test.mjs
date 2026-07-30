@@ -8,9 +8,11 @@ import {
   hasContractPermission,
 } from './shared/authz/sys004.js'
 
-test('SYS-004 frontend catalog contains six roles and eighteen permissions', () => {
+test('SYS-004 frontend catalog contains six roles and twenty permissions', () => {
   assert.equal(CONTRACT_ROLE_DEFINITIONS.length, 6)
-  assert.equal(CONTRACT_PERMISSION_DEFINITIONS.length, 18)
+  assert.equal(CONTRACT_PERMISSION_DEFINITIONS.length, 20)
+  assert.equal(CONTRACT_PERMISSION_DEFINITIONS.some(({ code }) => code === 'approval.manage'), true)
+  assert.equal(CONTRACT_PERMISSION_DEFINITIONS.some(({ code }) => code === 'approval_rule.manage'), true)
 })
 
 test('effective permissions are the sorted union of role and custom permissions', () => {
@@ -31,11 +33,13 @@ test('all is a wildcard and director routes remain constrained', () => {
   assert.equal(hasContractPermission({ permissions: ['all'] }, 'approval.process'), true)
   const director = { role: { code: 'sales_director' }, permissions: ['dashboard', 'contract.read', 'contract_template.manage'] }
   assert.equal(canAccessContractSection(director, 'contracts'), true)
+  assert.equal(canAccessContractSection(director, 'rules'), true)
   assert.equal(canAccessContractSection(director, 'templates'), false)
   assert.equal(canAccessContractSection(director, 'signing'), false)
 })
 
-test('sales cannot enter approval center even when a custom approval permission is present', () => {
-  const sales = { role: { code: 'sales' }, permissions: ['dashboard', 'approval.view', 'approval.process'] }
-  assert.equal(canAccessContractSection(sales, 'approvals'), false)
+test('sales can track initiated approvals but cannot configure rules', () => {
+  const sales = { role: { code: 'sales' }, permissions: ['dashboard', 'contract.create'] }
+  assert.equal(canAccessContractSection(sales, 'approvals'), true)
+  assert.equal(canAccessContractSection(sales, 'rules'), false)
 })

@@ -87,6 +87,13 @@ export async function createContract(payload) {
   })
 }
 
+export async function submitContract(contractId, payload = {}) {
+  return request(`/contracts/${contractId}/submit-approval`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
 export async function getContract(contractId) {
   return request(`/contracts/${contractId}`)
 }
@@ -94,6 +101,12 @@ export async function getContract(contractId) {
 export async function listApprovalTasks(params = {}) {
   const search = new URLSearchParams(params).toString()
   const data = await request(`/approvals/tasks${search ? `?${search}` : ''}`)
+  return Array.isArray(data) ? data : []
+}
+
+export async function listApprovals(params = {}) {
+  const search = new URLSearchParams(params).toString()
+  const data = await request(`/approvals${search ? `?${search}` : ''}`)
   return Array.isArray(data) ? data : []
 }
 
@@ -111,4 +124,24 @@ export async function commandApproval(approvalId, action, payload = {}) {
 export async function listApprovalRules() {
   const data = await request('/approval-rules')
   return Array.isArray(data) ? data : []
+}
+
+export async function createApprovalRule(payload) {
+  return request('/approval-rules', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function updateApprovalRule(ruleId, payload) {
+  return request(`/approval-rules/${ruleId}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function deleteApprovalRule(ruleId, version) {
+  return request(`/approval-rules/${ruleId}?version=${encodeURIComponent(version)}`, {
+    method: 'DELETE',
+  })
 }

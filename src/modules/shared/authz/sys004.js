@@ -1,7 +1,7 @@
 export const CONTRACT_APPLICATION_CODE = 'contract_management'
 
 export const CONTRACT_ROLE_DEFINITIONS = Object.freeze([
-  { code: 'admin', name: '超级管理员', permissions: ['all'] },
+  { code: 'admin', name: '超级管理员', permissions: ['contract.read', 'contract.create', 'contract.edit', 'approval.view', 'approval.process', 'approval.manage', 'approval_rule.manage'] },
   { code: 'sales_director', name: '销售总监', permissions: ['dashboard', 'contract.read', 'customer.read', 'approval.view', 'approval.process'] },
   { code: 'tech_director', name: '技术总监', permissions: ['dashboard', 'contract.read', 'customer.read', 'approval.view', 'approval.process'] },
   { code: 'finance_director', name: '财务总监', permissions: ['dashboard', 'contract.read', 'customer.read', 'approval.view', 'approval.process'] },
@@ -25,6 +25,8 @@ export const CONTRACT_PERMISSION_DEFINITIONS = Object.freeze([
   ['contract_template.manage', '管理合同模板'],
   ['approval.view', '查看审批'],
   ['approval.process', '处理审批'],
+  ['approval.manage', '管理审批'],
+  ['approval_rule.manage', '管理审批规则'],
   ['user.manage', '管理用户'],
   ['audit.view', '查看审计日志'],
   ['audit.read', '审计只读'],
@@ -60,8 +62,8 @@ export const CONTRACT_SECTION_PERMISSIONS = Object.freeze({
   customers: ['customer.read'],
   contracts: ['contract.read'],
   templates: ['contract_template.read', 'contract_template.manage'],
-  approvals: ['approval.view'],
-  rules: ['all'],
+  approvals: ['approval.view', 'approval.process', 'contract.create'],
+  rules: ['approval.view', 'approval_rule.manage'],
   signing: ['contract.read'],
   reports: ['dashboard'],
 })
@@ -69,9 +71,9 @@ export const CONTRACT_SECTION_PERMISSIONS = Object.freeze({
 export function canAccessContractSection(session, section) {
   const roleCode = session?.role?.code
   if (['sales_director', 'tech_director', 'finance_director'].includes(roleCode)) {
-    return ['dashboard', 'customers', 'contracts', 'approvals', 'reports'].includes(section)
+    return ['dashboard', 'customers', 'contracts', 'approvals', 'rules', 'reports'].includes(section)
   }
-  if (roleCode === 'sales' && ['approvals', 'rules'].includes(section)) return false
+  if (roleCode === 'sales' && section === 'rules') return false
 
   const required = CONTRACT_SECTION_PERMISSIONS[section]
   if (!required) return false
