@@ -3,6 +3,8 @@ import { afterEach, test } from 'node:test'
 import {
   IamError,
   createLocalAccount,
+  createEmployee,
+  onboardEmployee,
   createOrgUnit,
   deleteOrgUnit,
   updateOrgUnit,
@@ -52,6 +54,68 @@ test('createUser persists through the IAM API instead of mutating local-only row
     mobile: '13800000000',
     status: 'ACTIVE',
   })
+})
+
+test('createEmployee sends the atomic employee contract to POST /employees', async () => {
+  let requested
+  globalThis.fetch = async (url, options) => {
+    requested = { url, options }
+    return jsonResponse({ data: { user: { user_id: 'user-1' }, account: { account_id: 'account-1' }, membership: { membership_id: 'membership-1' } } })
+  }
+
+  const payload = {
+    user: { display_name: '张三', email: null, mobile: null, status: 'ACTIVE' },
+    account: { account_name: 'zhangsan', initial_password: 'Temporary-Password-1', valid_until: null },
+    membership: { org_unit_id: 'org-1', position_id: 'position-1', membership_type: 'PRIMARY', effective_from: null, effective_to: null, inherit_authorization: true },
+  }
+  await createEmployee(payload)
+
+  assert.equal(requested.url, '/api/v1/employees')
+  assert.equal(requested.options.method, 'POST')
+  assert.deepEqual(JSON.parse(requested.options.body), payload)
+})
+
+test('onboardEmployee uses the legacy sequence only when POST /employees is unavailable', async () => {
+  const requests = []
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url, options })
+    if (url === '/api/v1/employees') {
+      return jsonResponse({ message: 'not found' }, { ok: false, status: 404 })
+    }
+    if (url === '/api/v1/users') return jsonResponse({ data: { user_id: 'user-1', display_name: '张三' } })
+    if (url === '/api/v1/accounts') return jsonResponse({ data: { account_id: 'account-1' } })
+    if (url === '/api/v1/memberships') return jsonResponse({ data: { membership_id: 'membership-1' } })
+    throw new Error(`unexpected URL: ${url}`)
+  }
+
+  const result = await onboardEmployee({
+    user: { display_name: '张三', email: null, mobile: null, status: 'ACTIVE' },
+    account: { account_name: 'zhangsan', initial_password: 'Temporary-Password-1', valid_until: null },
+    membership: { org_unit_id: 'org-1', position_id: 'position-1', membership_type: 'PRIMARY', effective_from: null, effective_to: null, inherit_authorization: true },
+  })
+
+  assert.equal(result.onboarding_mode, 'COMPATIBILITY')
+  assert.deepEqual(requests.map((item) => item.url), [
+    '/api/v1/employees',
+    '/api/v1/users',
+    '/api/v1/accounts',
+    '/api/v1/memberships',
+  ])
+  assert.equal(requests.filter((item) => item.url === '/api/v1/accounts').length, 1)
+})
+
+test('onboardEmployee does not fall back after a non-capability atomic error', async () => {
+  const requests = []
+  globalThis.fetch = async (url, options) => {
+    requests.push(url)
+    return jsonResponse({ message: 'account name already exists' }, { ok: false, status: 409 })
+  }
+
+  await assert.rejects(
+    onboardEmployee({ user: { display_name: '张三', email: null, mobile: null, status: 'ACTIVE' } }),
+    (error) => error instanceof IamError && error.status === 409,
+  )
+  assert.deepEqual(requests, ['/api/v1/employees'])
 })
 
 test('createLocalAccount calls the account endpoint with the backend field names', async () => {
@@ -178,6 +242,7 @@ test('createMembership represents long-term and short-term validity with the doc
     membership_type: 'PRIMARY',
     effective_from: null,
     effective_to: null,
+    inherit_authorization: true,
   })
   assert.deepEqual(JSON.parse(requests[1].options.body), {
     user_id: 'user-1',
@@ -186,6 +251,7 @@ test('createMembership represents long-term and short-term validity with the doc
     membership_type: 'SECONDARY',
     effective_from: '2026-08-01',
     effective_to: '2026-08-31',
+    inherit_authorization: true,
   })
 })
 

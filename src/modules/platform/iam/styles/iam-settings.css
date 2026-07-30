@@ -153,6 +153,7 @@
 .iam-application-access { padding: 16px; border: 1px solid #dbeafe; border-radius: 10px; background: #f8fbff; }
 .iam-application-access-badges { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
 .iam-application-badge { flex: 0 0 auto; padding: 4px 8px; color: #1d4ed8; font-size: 10px; font-weight: 700; border-radius: 999px; background: #dbeafe; }
+.iam-application-badge.is-warning { color: #92400e; background: #fef3c7; }
 .iam-application-access-form { display: grid; gap: 14px; }
 .iam-application-access-form > label { display: grid; gap: 7px; color: #334155; font-size: 12px; font-weight: 600; }
 .iam-application-access-form select { min-height: 38px; padding: 0 10px; color: #0f172a; border: 1px solid #cbd5e1; border-radius: 7px; background: #fff; }
@@ -171,9 +172,13 @@
 .iam-application-role-copy strong { color: #334155; font-size: 11px; }
 .iam-application-role-copy code { width: fit-content; color: #64748b; font-size: 9px; }
 .iam-application-role-copy small { color: #64748b; font-size: 10px; line-height: 1.4; overflow-wrap: anywhere; }
+.iam-application-role-copy .iam-application-role-status { color: #047857; font-weight: 700; }
+.iam-application-role-copy .iam-application-role-summary { color: #475569; }
 .iam-application-empty-catalog { padding: 13px; color: #475569; border: 1px dashed #cbd5e1; border-radius: 8px; background: #fff; }
 .iam-application-empty-catalog strong { color: #334155; font-size: 12px; }
 .iam-application-empty-catalog p { margin: 5px 0 0; font-size: 11px; line-height: 1.55; }
+.iam-application-catalog-warning { margin: 0; padding: 9px 10px; color: #92400e; font-size: 11px; line-height: 1.55; border: 1px solid #fde68a; border-radius: 8px; background: #fffbeb; }
+.iam-contract-compatibility-note { padding: 8px 10px; color: #7c2d12; border: 1px solid #fed7aa; border-radius: 7px; background: #fff7ed; }
 .iam-application-permission-block { display: grid; gap: 8px; padding: 12px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; }
 .iam-application-permission-block.effective { border-color: #bbf7d0; background: #f0fdf4; }
 .iam-application-permission-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
@@ -201,3 +206,74 @@
 .iam-application-validity-grid small { color: #64748b; font-size: 10px; font-weight: 400; }
 .iam-application-scope-warning { margin: 0; padding: 8px 10px; color: #92400e; border: 1px solid #fde68a; border-radius: 7px; background: #fffbeb; }
 @media (max-width: 760px) { .iam-application-scope-grid, .iam-application-validity-grid { grid-template-columns: 1fr; } }
+
+/* Position authorization templates: keep application-role mappings explicit and scannable. */
+.iam-position-authorization { display: grid; gap: 14px; }
+.iam-template-editor, .iam-authorization-preview { padding: 16px; border: 1px solid #dbeafe; border-radius: 10px; background: #f8fbff; }
+.iam-template-editor h4, .iam-authorization-preview h4 { margin: 0 0 12px; color: #0f172a; font-size: 13px; }
+.iam-template-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.iam-template-grid > label, .iam-template-role-row > select, .iam-template-role-row > input { min-width: 0; }
+.iam-template-grid > label { display: grid; gap: 6px; color: #334155; font-size: 12px; font-weight: 600; }
+.iam-template-grid input, .iam-template-role-row select, .iam-template-role-row input, .iam-template-position-select { min-height: 38px; padding: 0 10px; color: #0f172a; border: 1px solid #cbd5e1; border-radius: 7px; background: #fff; }
+.iam-template-grid .full { grid-column: 1 / -1; }
+.iam-template-roles { display: grid; gap: 8px; margin-top: 12px; }
+.iam-template-role-row { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(140px, 1fr) minmax(110px, .7fr) minmax(0, .8fr) auto; gap: 8px; align-items: center; }
+.iam-template-role-row > input:only-of-type { grid-column: auto; }
+.iam-template-editor > footer, .iam-authorization-preview > footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.iam-template-assignment-list { display: grid; gap: 8px; }
+.iam-template-assignment { display: flex; align-items: flex-start; gap: 9px; padding: 10px; cursor: pointer; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; }
+.iam-template-assignment:has(input:checked) { border-color: #93c5fd; background: #eff6ff; }
+.iam-template-assignment input { width: 15px; height: 15px; flex: 0 0 auto; margin-top: 2px; }
+.iam-template-assignment span { display: grid; gap: 3px; min-width: 0; }
+.iam-template-assignment strong { color: #0f172a; font-size: 12px; }
+.iam-template-assignment small, .iam-template-assignment em { color: #64748b; font-size: 10px; font-style: normal; line-height: 1.5; overflow-wrap: anywhere; }
+.iam-authorization-preview ul { display: grid; gap: 7px; margin: 10px 0 0; padding: 0; list-style: none; }
+.iam-authorization-preview li { padding: 8px 10px; color: #334155; font-size: 12px; border: 1px solid #dbeafe; border-radius: 7px; background: #fff; }
+.iam-authorization-preview li small { margin-left: 6px; color: #64748b; font-size: 10px; }
+@media (max-width: 900px) { .iam-template-role-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 620px) { .iam-template-grid, .iam-template-role-row { grid-template-columns: 1fr; } .iam-template-editor > footer { justify-content: stretch; } .iam-template-editor > footer .console-button { flex: 1; } }
+
+/* Authorization layers: templates are the standard path; direct grants remain controlled exceptions. */
+.iam-standard-authorization-badge { display: inline-flex; align-items: center; margin-left: 6px; padding: 2px 6px; color: #047857; font-size: 10px; font-weight: 700; line-height: 1.3; border: 1px solid #a7f3d0; border-radius: 999px; background: #ecfdf5; vertical-align: middle; }
+.iam-standard-authorization-card { border-color: #bbf7d0; background: linear-gradient(135deg, #f0fdf4, #fff); }
+.iam-authorization-layer { display: grid; gap: 7px; padding: 12px; color: #334155; border: 1px solid #bfdbfe; border-radius: 8px; background: #eff6ff; }
+.iam-authorization-layer-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.iam-authorization-layer-head strong { color: #1e3a8a; font-size: 12px; }
+.iam-authorization-layer-head span { padding: 3px 7px; color: #1d4ed8; font-size: 10px; font-weight: 700; border: 1px solid #bfdbfe; border-radius: 999px; background: #fff; }
+.iam-authorization-layer p { margin: 0; font-size: 11px; line-height: 1.55; }
+.iam-authorization-layer-risk { padding: 7px 8px; color: #92400e; border: 1px solid #fde68a; border-radius: 6px; background: #fffbeb; }
+.iam-authorization-layer.is-org_unit { border-color: #fcd34d; background: #fffbeb; }
+.iam-authorization-layer.is-org_unit .iam-authorization-layer-head strong { color: #92400e; }
+.iam-authorization-layer.is-org_unit .iam-authorization-layer-head span { color: #92400e; border-color: #fde68a; }
+.iam-authorization-layer-duplicate { padding: 8px; color: #b45309; border: 1px solid #fdba74; border-radius: 6px; background: #fff7ed; }
+.iam-authorization-layer-readonly { color: #475569; }
+@media (max-width: 620px) { .iam-authorization-layer-head { align-items: flex-start; flex-direction: column; } }
+
+/* Employee onboarding keeps the common employee case in one flow while leaving the individual
+ * user/account/membership panels available for repair and advanced administration. */
+.iam-employee-onboarding-modal { width: min(820px, 100%); }
+.iam-employee-onboarding-form { gap: 14px; }
+.iam-onboarding-steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; padding: 0; margin: 0; list-style: none; }
+.iam-onboarding-steps li { display: flex; align-items: center; gap: 7px; min-width: 0; padding: 8px 9px; color: #94a3b8; font-size: 11px; font-weight: 600; border: 1px solid #e2e8f0; border-radius: 7px; background: #f8fafc; }
+.iam-onboarding-steps li.active { color: #1d4ed8; border-color: #bfdbfe; background: #eff6ff; }
+.iam-onboarding-steps b, .iam-onboarding-step { display: inline-grid; width: 20px; height: 20px; flex: 0 0 20px; place-items: center; color: #fff; font-size: 11px; border-radius: 999px; background: #94a3b8; }
+.iam-onboarding-steps li.active b, .iam-onboarding-step { background: #2563eb; }
+.iam-onboarding-section { display: grid; gap: 13px; padding: 15px; border: 1px solid #e2e8f0; border-radius: 9px; background: #fff; }
+.iam-onboarding-section.muted { background: #f8fafc; }
+.iam-onboarding-section.muted .iam-onboarding-section-head > div, .iam-onboarding-section.muted .iam-onboarding-step { opacity: .62; }
+.iam-onboarding-section-head { display: flex; align-items: flex-start; gap: 9px; }
+.iam-onboarding-section-head > div { min-width: 0; flex: 1; }
+.iam-onboarding-section-head h4 { margin: 0; color: #0f172a; font-size: 13px; }
+.iam-onboarding-section-head p { margin: 3px 0 0; color: #64748b; font-size: 11px; font-weight: 400; line-height: 1.55; }
+.iam-onboarding-toggle { display: inline-flex !important; grid-auto-flow: column; align-items: center; gap: 6px; width: max-content; padding: 5px 7px; color: #334155 !important; font-size: 11px !important; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; }
+.iam-onboarding-toggle input { width: 14px !important; min-height: auto !important; margin: 0; }
+.iam-onboarding-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px; }
+.iam-onboarding-grid label { display: grid; gap: 7px; color: #334155; font-size: 12px; font-weight: 600; }
+.iam-onboarding-grid label.full { grid-column: 1 / -1; }
+.iam-onboarding-role-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.iam-onboarding-role-list > div { display: grid; gap: 3px; padding: 10px; border: 1px solid #bfdbfe; border-radius: 7px; background: #f8fbff; }
+.iam-onboarding-role-list strong { color: #1e3a8a; font-size: 11px; }
+.iam-onboarding-role-list span { color: #0f172a; font-size: 12px; font-weight: 600; }
+.iam-onboarding-role-list small { color: #64748b; font-size: 10px; }
+.iam-onboarding-preview .iam-field-help { margin-top: -3px; }
+@media (max-width: 760px) { .iam-onboarding-steps, .iam-onboarding-grid, .iam-onboarding-role-list { grid-template-columns: 1fr; }.iam-onboarding-section { padding: 13px; }.iam-onboarding-section-head { flex-wrap: wrap; }.iam-onboarding-toggle { margin-left: 29px; } }

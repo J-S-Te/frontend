@@ -70,36 +70,6 @@ test('updateRole preserves the backend-managed role code while updating the role
   })
 })
 
-test('contract application access uses the task-oriented user endpoint', async () => {
-  const requests = []
-  globalThis.fetch = async (url, options) => {
-    requests.push({ url, options })
-    return {
-      ok: true,
-      status: 200,
-      headers: { get: () => 'application/json' },
-      json: async () => ({ data: { role: { code: 'sales', name: '销售人员' }, custom_permissions: [] } }),
-      text: async () => '',
-    }
-  }
-
-  const { getContractApplicationAccess, updateContractApplicationAccess } = await import('./authorization.js')
-  await getContractApplicationAccess('user / 1')
-  await updateContractApplicationAccess('user / 1', {
-    roleCode: 'sales',
-    customPermissions: ['contract_template.manage'],
-  })
-
-  assert.equal(requests[0].url, '/api/v1/users/user%20%2F%201/applications/contract_management/access')
-  assert.equal(requests[0].options.method, undefined)
-  assert.equal(requests[1].url, '/api/v1/users/user%20%2F%201/applications/contract_management/access')
-  assert.equal(requests[1].options.method, 'PUT')
-  assert.deepEqual(JSON.parse(requests[1].options.body), {
-    role_code: 'sales',
-    custom_permissions: ['contract_template.manage'],
-  })
-})
-
 test('generic application access APIs use application-scoped endpoints', async () => {
   const requests = []
   globalThis.fetch = async (url, options) => {
@@ -141,4 +111,105 @@ test('generic application access APIs use application-scoped endpoints', async (
     ],
   })
   assert.equal(requests[3].options.method, 'DELETE')
+})
+
+test('normalizeApplicationAccess separates direct and inherited user roles without losing effective roles', async () => {
+  const { normalizeApplicationAccess } = await import('./authorization.js')
+  const access = normalizeApplicationAccess({
+    application_code: 'contract_management',
+    roles: [
+      { code: 'sales', source_type: 'USER', source_id: 'user-1', direct: true },
+      { code: 'sales_director', source_type: 'ORG_UNIT', source_id: 'org-1', source_name: '销售中心', direct: false },
+      { code: 'audit_admin', source_type: 'POSITION', source_id: 'position-1', source_name: '审计岗', direct: false },
+    ],
+  })
+
+  assert.deepEqual(access.direct_roles.map((role) => role.code), ['sales'])
+  assert.deepEqual(access.inherited_roles.map((role) => role.code), ['sales_director', 'audit_admin'])
+  assert.equal(access.roles.length, 3)
+})
+
+test('normalizeApplicationAccess trusts explicit role groups and reconstructs effective roles when roles is absent', async () => {
+  const { normalizeApplicationAccess } = await import('./authorization.js')
+  const access = normalizeApplicationAccess({
+    direct_roles: [{ code: 'sales', source_type: 'USER', direct: true }],
+    inherited_roles: [{ code: 'tech_director', source_type: 'POSITION', source_name: '技术总监', direct: false }],
+  })
+
+  assert.deepEqual(access.roles.map((role) => role.code), ['sales', 'tech_director'])
+  assert.deepEqual(access.direct_roles.map((role) => role.code), ['sales'])
+  assert.deepEqual(access.inherited_roles.map((role) => role.code), ['tech_director'])
+})
+
+test('normalizeApplicationAccess keeps source-less legacy roles editable as direct user roles', async () => {
+  const { normalizeApplicationAccess } = await import('./authorization.js')
+  const access = normalizeApplicationAccess({ roles: [{ code: 'sales' }, { code: 'audit_admin' }] })
+
+  assert.deepEqual(access.direct_roles.map((role) => role.code), ['sales', 'audit_admin'])
+  assert.deepEqual(access.inherited_roles, [])
+})
+
+test('subject application access APIs use the generic subject endpoint and only submit the supplied direct roles', async () => {
+  const requests = []
+  globalThis.fetch = async (url, options = {}) => {
+    requests.push({ url, options })
+    return {
+      ok: true,
+      status: options.method === 'DELETE' ? 204 : 200,
+      headers: { get: () => options.method === 'DELETE' ? '' : 'application/json' },
+      json: async () => ({
+        data: {
+          roles: [{ code: 'sales_director', source_type: 'ORG_UNIT', source_id: 'org / 1', direct: true }],
+        },
+      }),
+      text: async () => '',
+    }
+  }
+
+  const {
+    deleteSubjectApplicationAccess,
+    getSubjectApplicationAccess,
+    updateSubjectApplicationAccess,
+  } = await import('./authorization.js')
+
+  const access = await getSubjectApplicationAccess('ORG_UNIT', 'org / 1', 'contract management')
+  await updateSubjectApplicationAccess('POSITION', 'position / 1', 'contract management', {
+    roles: [{ role_code: 'sales', scope_type: 'APPLICATION', environment_code: null, valid_from: null, valid_until: null }],
+  })
+  await deleteSubjectApplicationAccess('POSITION', 'position / 1', 'contract management')
+
+  assert.equal(requests[0].url, '/api/v1/authorization-subjects/ORG_UNIT/org%20%2F%201/applications/contract%20management/access')
+  assert.deepEqual(access.direct_roles.map((role) => role.code), ['sales_director'])
+  assert.deepEqual(access.inherited_roles, [])
+  assert.equal(requests[1].url, '/api/v1/authorization-subjects/POSITION/position%20%2F%201/applications/contract%20management/access')
+  assert.equal(requests[1].options.method, 'PUT')
+  assert.deepEqual(JSON.parse(requests[1].options.body), {
+    roles: [{ role_code: 'sales', scope_type: 'APPLICATION', environment_code: null, valid_from: null, valid_until: null }],
+  })
+  assert.equal(requests[2].options.method, 'DELETE')
+})
+
+test('generic application access never serializes custom business permissions', async () => {
+  let requestBody
+  globalThis.fetch = async (_url, options = {}) => {
+    requestBody = JSON.parse(options.body)
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: () => 'application/json' },
+      json: async () => ({ data: { roles: [] } }),
+      text: async () => '',
+    }
+  }
+
+  const { updateApplicationAccess } = await import('./authorization.js')
+  await updateApplicationAccess('user-1', 'contract_management', {
+    roles: [{ role_code: 'sales', scope_type: 'APPLICATION' }],
+    custom_permissions: ['contract.delete'],
+    additional_permissions: ['all'],
+  })
+
+  assert.deepEqual(requestBody, {
+    roles: [{ role_code: 'sales', scope_type: 'APPLICATION' }],
+  })
 })

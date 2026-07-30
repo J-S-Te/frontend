@@ -1,6 +1,9 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
+import PositionAuthorizationTemplates from '@/modules/platform/iam/components/PositionAuthorizationTemplates.vue'
+import EmployeeOnboardingModal from '@/modules/platform/iam/components/EmployeeOnboardingModal.vue'
+import AuthorizationEntryGuidance from '@/modules/platform/iam/components/AuthorizationEntryGuidance.vue'
 import {
   detailRows,
   detailTitle,
@@ -38,19 +41,33 @@ import { listApplications, listEnvironments } from '@/modules/platform/applicati
 import {
   AuthorizationError,
   deleteApplicationAccess,
+  deleteSubjectApplicationAccess,
   getApplicationAccess,
   getApplicationAuthorizationCatalog,
-  getContractApplicationAccess,
+  getSubjectApplicationAccess,
   updateApplicationAccess,
-  updateContractApplicationAccess,
+  updateSubjectApplicationAccess,
 } from '@/modules/platform/iam/api/authorization'
+import {
+  assignableActiveCatalogRoles,
+  catalogLastSyncedAt as readCatalogLastSyncedAt,
+  catalogRolePermissions,
+  catalogRoles,
+  catalogSyncText as authorizationCatalogSyncText,
+  catalogVersion,
+  isAssignableActiveCatalogRole,
+  isCatalogSynchronized,
+} from '@/modules/platform/iam/utils/applicationAuthorizationCatalog'
+import { authorizationEntryLayer } from '@/modules/platform/iam/utils/authorizationEntryLayer'
 import '@/modules/platform/iam/styles/iam-settings.css'
 
 const emit = defineEmits(['toast'])
 
 const activePanel = ref('users')
+const positionAuthorizationTemplates = ref(null)
+const employeeOnboardingVisible = ref(false)
 const detail = ref(null)
-const loading = reactive({ users: false, accounts: false, organizations: false, positions: false, memberships: false })
+const loading = reactive({ users: false, accounts: false, organizations: false, positions: false, memberships: false, positionAuthorizationTemplates: false })
 const errorMessage = ref('')
 const pageSize = 50
 const pagination = reactive({
@@ -83,7 +100,25 @@ const applicationAccessError = ref('')
 const selectedApplicationCode = ref('')
 const applicationEnvironments = ref([])
 const applicationEnvironmentsLoading = ref(false)
-const authorizationUsingLegacyEndpoint = ref(false)
+const authorizationSubjectType = computed(() => {
+  if (detail.value?.kind === 'user') return 'USER'
+  if (detail.value?.kind === 'organization') return 'ORG_UNIT'
+  if (detail.value?.kind === 'position') return 'POSITION'
+  return ''
+})
+const authorizationSubjectId = computed(() => {
+  if (authorizationSubjectType.value === 'USER') return detail.value?.item?.user_id || ''
+  if (authorizationSubjectType.value === 'ORG_UNIT') return detail.value?.item?.org_unit_id || detail.value?.item?.id || ''
+  if (authorizationSubjectType.value === 'POSITION') return detail.value?.item?.position_id || detail.value?.item?.id || ''
+  return ''
+})
+const supportsApplicationAuthorization = computed(() => Boolean(authorizationSubjectType.value && authorizationSubjectId.value))
+const isUserAuthorizationSubject = computed(() => authorizationSubjectType.value === 'USER')
+const authorizationSubjectLabel = computed(() => {
+  if (authorizationSubjectType.value === 'ORG_UNIT') return '组织单元'
+  if (authorizationSubjectType.value === 'POSITION') return '岗位'
+  return '用户'
+})
 const authorizationDraft = reactive({
   role_codes: [],
   scope_type: 'APPLICATION',
@@ -94,15 +129,42 @@ const authorizationDraft = reactive({
 })
 
 const selectedApplication = computed(() => applications.value.find((item) => item.code === selectedApplicationCode.value) || null)
-const authorizationRoleOptions = computed(() => Array.isArray(authorizationCatalog.value?.roles) ? authorizationCatalog.value.roles : [])
+const authorizationCatalogRoles = computed(() => catalogRoles(authorizationCatalog.value))
+const hasSynchronizedAuthorizationCatalog = computed(() => isCatalogSynchronized(authorizationCatalog.value))
+const authorizationRoleOptions = computed(() => hasSynchronizedAuthorizationCatalog.value ? assignableActiveCatalogRoles(authorizationCatalog.value) : [])
+const catalogRoleTotal = computed(() => authorizationCatalogRoles.value.length)
+const catalogInactiveOrRestrictedRoleCount = computed(() => Math.max(catalogRoleTotal.value - authorizationRoleOptions.value.length, 0))
+const catalogSyncText = computed(() => authorizationCatalogSyncText(authorizationCatalog.value))
+const catalogLastSyncedAt = computed(() => readCatalogLastSyncedAt(authorizationCatalog.value))
+const applicationDirectRoles = computed(() => Array.isArray(applicationAccess.value?.direct_roles) ? applicationAccess.value.direct_roles : [])
+const unavailableDirectRoles = computed(() => applicationDirectRoles.value.filter((role) => {
+  const catalogRole = applicationRoleCatalogEntry(role)
+  return !catalogRole || !isAssignableActiveCatalogRole(catalogRole)
+}))
+const applicationInheritedRoles = computed(() => Array.isArray(applicationAccess.value?.inherited_roles) ? applicationAccess.value.inherited_roles : [])
+const applicationEffectiveRoles = computed(() => Array.isArray(applicationAccess.value?.roles) ? applicationAccess.value.roles : [])
+const applicationAuthorizationState = computed(() => {
+  const state = String(applicationAccess.value?.authorization_state || '').trim().toUpperCase()
+  if (state) return state
+  return applicationEffectiveRoles.value.length ? 'GRANTED' : 'UNAUTHORIZED'
+})
+const applicationAuthorizationConflicts = computed(() => uniqueValues(applicationAccess.value?.conflicts || []))
+const hasApplicationAuthorizationConflict = computed(() => applicationAuthorizationState.value === 'CONFLICT')
+const hasDirectApplicationAccess = computed(() => applicationDirectRoles.value.length > 0)
+const hasEffectiveApplicationAccess = computed(() => applicationAuthorizationState.value === 'GRANTED' && applicationEffectiveRoles.value.length > 0)
 const selectedAuthorizationRoles = computed(() => authorizationRoleOptions.value.filter((role) => authorizationDraft.role_codes.includes(role.code)))
+const authorizationEntryLayerInfo = computed(() => authorizationEntryLayer(authorizationSubjectType.value))
 const authorizationEffectivePermissions = computed(() => {
-  const rolePermissions = selectedAuthorizationRoles.value.flatMap((role) => rolePermissionsFor(role))
-  const attachedPermissions = applicationAccess.value?.custom_permissions
-    || applicationAccess.value?.additional_permissions
-    || applicationAccess.value?.user_permissions
-    || []
-  return uniqueValues([...rolePermissions, ...attachedPermissions].map((item) => permissionCode(item)))
+  if (hasApplicationAuthorizationConflict.value) return []
+  const roleCodes = uniqueValues([
+    ...authorizationDraft.role_codes,
+    ...applicationInheritedRoles.value.map((role) => roleCode(role)),
+  ])
+  const effectiveRoles = authorizationRoleOptions.value.filter((role) => roleCodes.includes(role.code))
+  const rolePermissions = effectiveRoles.flatMap((role) => rolePermissionsFor(role))
+  // 子系统权限目录是只读镜像。基础平台只预览目录声明的角色默认权限，
+  // 不接受或叠加任何用户自定义业务权限；最终业务鉴权仍由子系统执行。
+  return uniqueValues(rolePermissions.map((item) => permissionCode(item)))
 })
 
 const panels = [
@@ -111,6 +173,7 @@ const panels = [
   { key: 'organizations', label: '组织单元', icon: 'organization', description: '组织单元层级、编码与排序' },
   { key: 'positions', label: '岗位', icon: 'organization', description: '组织内岗位定义，是任职关系和岗位授权的基础' },
   { key: 'memberships', label: '任职关系', icon: 'link', description: 'Membership 任职关系：主组织、兼岗、历史任职' },
+  { key: 'positionAuthorizationTemplates', label: '岗位授权模板', icon: 'shield', description: '标准授权入口：岗位映射到各应用实际角色，由有效任职关系动态继承' },
 ]
 
 const filters = reactive({ user: '', account: '', organization: '', position: '', membership: '' })
@@ -178,6 +241,10 @@ function uniqueValues(values) {
   return [...new Set(values.filter((value) => String(value || '').trim()).map((value) => String(value).trim()))].sort()
 }
 
+function roleCode(role) {
+  return typeof role === 'string' ? role : role?.code || role?.role_code || ''
+}
+
 function permissionCode(permission) {
   if (typeof permission === 'string') return permission
   return permission?.code || permission?.permission_code || ''
@@ -192,20 +259,60 @@ function permissionName(permission) {
 }
 
 function rolePermissionsFor(role) {
-  const permissions = role?.permissions || role?.permission_codes || role?.permissionCodes || []
-  return Array.isArray(permissions) ? permissions : []
+  return catalogRolePermissions(role)
 }
 
 function rolePermissionCodes(role) {
   return uniqueValues(rolePermissionsFor(role).map((permission) => permissionCode(permission)))
 }
 
-function applicationDisplayName(application) {
-  return application?.name || application?.display_name || application?.code || '未命名应用'
+
+
+function roleDefaultPermissionSummary(role) {
+  const permissions = rolePermissionCodes(role)
+  if (!permissions.length) return '子系统未声明默认权限'
+  const labels = permissions.slice(0, 3).map((permission) => permissionName(permission))
+  return permissions.length > labels.length ? `${labels.join('、')} 等 ${permissions.length} 项` : labels.join('、')
 }
 
-function catalogVersion(catalog) {
-  return catalog?.catalog_version || catalog?.version || catalog?.metadata?.catalog_version || '—'
+function applicationRoleCatalogEntry(role) {
+  const code = roleCode(role)
+  return authorizationCatalogRoles.value.find((item) => roleCode(item) === code) || null
+}
+
+function applicationRoleName(role) {
+  const catalogRole = applicationRoleCatalogEntry(role)
+  return role?.name || role?.display_name || catalogRole?.name || catalogRole?.display_name || roleCode(role) || '未命名角色'
+}
+
+function authorizationSourceTypeName(role) {
+  const type = String(role?.source_type || '').toUpperCase()
+  if (type === 'ORG_UNIT') return '组织单元'
+  if (type === 'POSITION') return '岗位'
+  if (type === 'USER') return '用户直接授权'
+  return type || '未知来源'
+}
+
+function authorizationSourceName(role) {
+  return role?.source_name || role?.source_id || '—'
+}
+
+function authorizationScopeText(role) {
+  if (normalizeScopeType(role?.scope_type) === 'ENVIRONMENT') {
+    return `指定环境：${role?.environment_code || '未指定'}`
+  }
+  return '整个应用'
+}
+
+function authorizationValidityText(role) {
+  if (!role?.valid_from && !role?.valid_until) return '长期有效'
+  const start = role?.valid_from ? formatDateTime(role.valid_from) : '立即生效'
+  const end = role?.valid_until ? formatDateTime(role.valid_until) : '长期有效'
+  return `${start} 至 ${end}`
+}
+
+function applicationDisplayName(application) {
+  return application?.name || application?.display_name || application?.code || '未命名应用'
 }
 
 function resetApplicationAuthorizationState() {
@@ -221,7 +328,6 @@ function resetApplicationAuthorizationState() {
   authorizationDraft.validity_mode = 'PERMANENT'
   authorizationDraft.valid_from = ''
   authorizationDraft.valid_until = ''
-  authorizationUsingLegacyEndpoint.value = false
 }
 
 function toDateTimeLocal(value) {
@@ -251,10 +357,7 @@ function roleAuthorizationSignature(role) {
   ].join('|')
 }
 
-const authorizationHasMixedRoleSettings = computed(() => {
-  const roles = Array.isArray(applicationAccess.value?.roles) ? applicationAccess.value.roles : []
-  return new Set(roles.map(roleAuthorizationSignature)).size > 1
-})
+const authorizationHasMixedRoleSettings = computed(() => new Set(applicationDirectRoles.value.map(roleAuthorizationSignature)).size > 1)
 
 const authorizationEnvironmentOptions = computed(() => applicationEnvironments.value
   .map((environment) => ({
@@ -277,7 +380,7 @@ function applyAuthorizationSettings(roles) {
 async function openDetail(kind, item) {
   resetApplicationAuthorizationState()
   detail.value = { kind, item }
-  if (kind === 'user') await loadApplicationsForUser(item.user_id)
+  if (['user', 'organization', 'position'].includes(kind)) await loadApplicationsForSubject()
 }
 
 function closeDetail() {
@@ -287,20 +390,16 @@ function closeDetail() {
 
 function applyApplicationAccess(access) {
   applicationAccess.value = access || null
-  const roles = Array.isArray(access?.roles)
-    ? access.roles
-    : (access?.role ? [access.role] : [])
-  authorizationDraft.role_codes = uniqueValues(roles.map((role) => typeof role === 'string' ? role : role?.code || role?.role_code))
-  applyAuthorizationSettings(roles)
+  const directRoles = Array.isArray(access?.direct_roles) ? access.direct_roles : []
+  const selectableRoleCodes = new Set(authorizationRoleOptions.value.map((role) => roleCode(role)))
+  // 禁止把已停用、不可分配或已从目录移除的角色带回可编辑草稿。
+  authorizationDraft.role_codes = uniqueValues(directRoles.map((role) => roleCode(role)).filter((code) => selectableRoleCodes.has(code)))
+  applyAuthorizationSettings(directRoles)
 }
 
-function applyLegacyApplicationAccess(access) {
-  authorizationUsingLegacyEndpoint.value = true
-  applyApplicationAccess(access)
-}
 
-async function loadApplicationsForUser(userId) {
-  if (!userId || applicationsLoading.value) return
+async function loadApplicationsForSubject() {
+  if (!authorizationSubjectId.value || applicationsLoading.value) return
   applicationsLoading.value = true
   applicationAccessError.value = ''
   try {
@@ -310,7 +409,7 @@ async function loadApplicationsForUser(userId) {
       ? selectedApplicationCode.value
       : applications.value[0]?.code || ''
     selectedApplicationCode.value = preferredCode
-    if (preferredCode) await loadApplicationAuthorization(userId, preferredCode)
+    if (preferredCode) await loadApplicationAuthorization(preferredCode)
   } catch (error) {
     applications.value = []
     applicationAccessError.value = error?.message || '读取应用列表失败。'
@@ -319,8 +418,10 @@ async function loadApplicationsForUser(userId) {
   }
 }
 
-async function loadApplicationAuthorization(userId, applicationCode = selectedApplicationCode.value) {
-  if (!userId || !applicationCode || applicationAccessLoading.value) return
+async function loadApplicationAuthorization(applicationCode = selectedApplicationCode.value) {
+  const subjectId = authorizationSubjectId.value
+  const subjectType = authorizationSubjectType.value
+  if (!subjectId || !subjectType || !applicationCode || applicationAccessLoading.value) return
   const application = applications.value.find((item) => item.code === applicationCode)
   if (!application) return
   selectedApplicationCode.value = applicationCode
@@ -333,7 +434,6 @@ async function loadApplicationAuthorization(userId, applicationCode = selectedAp
   authorizationDraft.valid_from = ''
   authorizationDraft.valid_until = ''
   applicationEnvironments.value = []
-  authorizationUsingLegacyEndpoint.value = false
   applicationAccessError.value = ''
   authorizationCatalogLoading.value = true
   applicationAccessLoading.value = true
@@ -358,11 +458,12 @@ async function loadApplicationAuthorization(userId, applicationCode = selectedAp
     }
 
     try {
-      applyApplicationAccess(await getApplicationAccess(userId, applicationCode))
+      const access = subjectType === 'USER'
+        ? await getApplicationAccess(subjectId, applicationCode)
+        : await getSubjectApplicationAccess(subjectType, subjectId, applicationCode)
+      applyApplicationAccess(access)
     } catch (error) {
-      if (error instanceof AuthorizationError && error.status === 404 && applicationCode === 'contract_management') {
-        applyLegacyApplicationAccess(await getContractApplicationAccess(userId))
-      } else if (error instanceof AuthorizationError && error.status === 404) {
+      if (error instanceof AuthorizationError && error.status === 404) {
         applyApplicationAccess(null)
       } else {
         throw error
@@ -391,6 +492,8 @@ function onAuthorizationValidityChange() {
 }
 
 function applicationAccessPayload() {
+  const selectableRoleCodes = new Set(authorizationRoleOptions.value.map((role) => roleCode(role)))
+  authorizationDraft.role_codes = authorizationDraft.role_codes.filter((code) => selectableRoleCodes.has(code))
   const scopeType = authorizationDraft.scope_type === 'ENVIRONMENT' ? 'ENVIRONMENT' : 'APPLICATION'
   const environmentCode = scopeType === 'ENVIRONMENT' ? String(authorizationDraft.environment_code || '').trim() : null
   const validFrom = authorizationDraft.validity_mode === 'RANGE' ? toRFC3339(authorizationDraft.valid_from) : null
@@ -407,9 +510,14 @@ function applicationAccessPayload() {
 }
 
 async function saveApplicationAccess() {
-  const userId = detail.value?.kind === 'user' ? detail.value.item?.user_id : ''
+  const subjectId = authorizationSubjectId.value
+  const subjectType = authorizationSubjectType.value
   const applicationCode = selectedApplicationCode.value
-  if (!userId || !applicationCode || applicationAccessSaving.value) return
+  if (!subjectId || !subjectType || !applicationCode || applicationAccessSaving.value) return
+  if (!authorizationRoleOptions.value.length) {
+    applicationAccessError.value = '该应用目录中没有可分配的 ACTIVE 角色，无法保存授权。'
+    return
+  }
   if (authorizationDraft.scope_type === 'ENVIRONMENT' && !authorizationDraft.environment_code) {
     applicationAccessError.value = '选择环境级授权时必须指定一个有效环境。'
     return
@@ -418,33 +526,14 @@ async function saveApplicationAccess() {
     applicationAccessError.value = '失效时间必须晚于生效时间。'
     return
   }
-  if (authorizationUsingLegacyEndpoint.value) {
-    if (authorizationDraft.role_codes.length !== 1) {
-      applicationAccessError.value = '当前后端仍使用合同系统兼容接口，只支持单角色保存；请先升级通用授权接口。'
-      return
-    }
-    applicationAccessSaving.value = true
-    applicationAccessError.value = ''
-    try {
-      const access = await updateContractApplicationAccess(userId, {
-        roleCode: authorizationDraft.role_codes[0],
-        customPermissions: [],
-      })
-      applyLegacyApplicationAccess(access)
-      emitToast('应用角色已保存。权限将在用户重新登录或会话续签后生效。')
-    } catch (error) {
-      applicationAccessError.value = error instanceof AuthorizationError ? error.message : (error?.message || '保存应用访问授权失败。')
-    } finally {
-      applicationAccessSaving.value = false
-    }
-    return
-  }
   applicationAccessSaving.value = true
   applicationAccessError.value = ''
   try {
-    const access = await updateApplicationAccess(userId, applicationCode, applicationAccessPayload())
+    const access = subjectType === 'USER'
+      ? await updateApplicationAccess(subjectId, applicationCode, applicationAccessPayload())
+      : await updateSubjectApplicationAccess(subjectType, subjectId, applicationCode, applicationAccessPayload())
     applyApplicationAccess(access)
-    emitToast('应用角色集合已保存。权限将在用户重新登录或会话续签后生效。')
+    emitToast(`${authorizationEntryLayerInfo.value.title}已保存。${subjectType === 'USER' ? '基础平台会在下一次请求立即按最新权限校验；已打开页面会自动刷新授权状态。' : '相关用户会按最新授权重新计算继承角色。'}`)
   } catch (error) {
     applicationAccessError.value = error instanceof AuthorizationError ? error.message : (error?.message || '保存应用访问授权失败。')
   } finally {
@@ -453,16 +542,22 @@ async function saveApplicationAccess() {
 }
 
 async function revokeApplicationAccess() {
-  const userId = detail.value?.kind === 'user' ? detail.value.item?.user_id : ''
+  const subjectId = authorizationSubjectId.value
+  const subjectType = authorizationSubjectType.value
   const applicationCode = selectedApplicationCode.value
-  if (!userId || !applicationCode || applicationAccessRevoking.value) return
-  if (!window.confirm(`确认撤销用户“${detail.value.item?.display_name || userId}”的“${applicationDisplayName(selectedApplication.value)}”访问权限吗？`)) return
+  if (!subjectId || !subjectType || !applicationCode || applicationAccessRevoking.value) return
+  const subjectName = detail.value?.item?.display_name || detail.value?.item?.name || subjectId
+  const inheritedNote = isUserAuthorizationSubject.value && applicationInheritedRoles.value.length
+    ? '撤销后，组织或岗位继承的标准授权仍然有效，不会被删除。'
+    : `撤销后，将删除该${authorizationSubjectLabel.value}在当前应用下的例外角色绑定。`
+  if (!window.confirm(`确认撤销${authorizationSubjectLabel.value}“${subjectName}”的“${applicationDisplayName(selectedApplication.value)}”例外授权吗？\n${inheritedNote}`)) return
   applicationAccessRevoking.value = true
   applicationAccessError.value = ''
   try {
-    await deleteApplicationAccess(userId, applicationCode)
-    applyApplicationAccess(null)
-    emitToast('应用访问已撤销。用户将不再获得该应用的门户入口。')
+    if (subjectType === 'USER') await deleteApplicationAccess(subjectId, applicationCode)
+    else await deleteSubjectApplicationAccess(subjectType, subjectId, applicationCode)
+    await loadApplicationAuthorization(applicationCode)
+    emitToast(isUserAuthorizationSubject.value && applicationInheritedRoles.value.length ? '个人例外授权已撤销；组织或岗位继承的标准授权仍然有效。' : `${authorizationEntryLayerInfo.value.title}已撤销。`)
   } catch (error) {
     applicationAccessError.value = error instanceof AuthorizationError ? error.message : (error?.message || '撤销应用访问失败。')
   } finally {
@@ -537,6 +632,7 @@ async function reloadActive() {
     case 'organizations': await loadOrganizations(); break
     case 'positions': await loadPositions(); break
     case 'memberships': await loadMemberships(); break
+    case 'positionAuthorizationTemplates': await positionAuthorizationTemplates.value?.reload(); break
     default: break
   }
 }
@@ -761,7 +857,7 @@ const editorTemplates = {
   account: () => ({ account_name: '', user_id: '', initial_password: '', validity_mode: 'TEMPORARY', valid_until: defaultAccountValidUntil() }),
   organization: () => ({ name: '', parent_id: '', sort_order: 0, status: 'ACTIVE' }),
   position: () => ({ org_unit_id: '', name: '' }),
-  membership: () => ({ user_id: '', org_unit_id: '', position_id: '', membership_type: 'PRIMARY', validity_mode: 'LONG_TERM', effective_from: '', effective_to: '' }),
+  membership: () => ({ user_id: '', org_unit_id: '', position_id: '', membership_type: 'PRIMARY', validity_mode: 'LONG_TERM', effective_from: '', effective_to: '', inherit_authorization: true }),
 }
 
 const panelToKind = {
@@ -805,6 +901,18 @@ function openEditor(kind) {
 function openEditorForActivePanel() {
   const kind = panelToKind[activePanel.value]
   if (kind) openEditor(kind)
+}
+
+function openEmployeeOnboarding() {
+  employeeOnboardingVisible.value = true
+  const referenceLoads = []
+  if (!organizations.value.length) referenceLoads.push(loadOrganizations())
+  if (!positions.value.length) referenceLoads.push(loadPositions())
+  if (referenceLoads.length) Promise.all(referenceLoads).catch(() => {})
+}
+
+async function refreshAfterEmployeeOnboarding() {
+  await Promise.all([loadUsers(), loadAccounts(), loadMemberships()])
 }
 
 function closeEditor() {
@@ -991,6 +1099,7 @@ async function saveEditor() {
         membershipType: form.membership_type || 'PRIMARY',
         effectiveFrom: shortTerm ? form.effective_from : null,
         effectiveTo: shortTerm ? form.effective_to : null,
+        inheritAuthorization: form.inherit_authorization !== false,
       })
       successMessage = `任职关系 ${result?.membership_id || ''} 已创建（${shortTerm ? '短期' : '长期'}生效）。`
       await loadMemberships()
@@ -1047,7 +1156,8 @@ onMounted(async () => {
             <button class="console-button ghost small" type="button" @click="resetFilters"><ConsoleIcon name="reset" />清空筛选</button>
             <button class="console-button ghost small" type="button" :disabled="activeLoading" @click="reloadActive"><ConsoleIcon name="refresh" />刷新</button>
             <button v-if="activePanel === 'users'" class="console-button ghost small" type="button" @click="openEditor('user-batch')"><ConsoleIcon name="plus" />批量新增用户</button>
-            <button class="console-button primary small" type="button" :disabled="!panelToKind[activePanel]" @click="openEditorForActivePanel"><ConsoleIcon name="plus" />新增{{ editorLabels[panelToKind[activePanel]] || '' }}</button>
+            <button v-if="activePanel === 'users'" class="console-button primary small" type="button" @click="openEmployeeOnboarding"><ConsoleIcon name="plus" />新增员工</button>
+            <button v-else class="console-button primary small" type="button" :disabled="!panelToKind[activePanel]" @click="openEditorForActivePanel"><ConsoleIcon name="plus" />新增{{ editorLabels[panelToKind[activePanel]] || '' }}</button>
           </div>
         </header>
 
@@ -1089,12 +1199,14 @@ onMounted(async () => {
           </tbody></table></div></div>
         </section>
 
+        <PositionAuthorizationTemplates v-else-if="activePanel === 'positionAuthorizationTemplates'" ref="positionAuthorizationTemplates" @toast="emitToast" />
+
         <section v-else-if="activePanel === 'memberships'" class="iam-table-section">
           <div class="iam-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="filters.membership" type="search" placeholder="用户 / 组织 / 岗位" /></label><span>{{ filteredMemberships.length }} / 共 {{ pagination.memberships.total }} 条任职关系</span></div>
-          <div class="console-table-card"><div class="console-table-scroll"><table class="console-data-table iam-data-table"><thead><tr><th>用户</th><th>组织</th><th>岗位</th><th>任职类型</th><th>有效期</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
-            <tr v-if="loading.memberships"><td class="console-empty" colspan="6">正在读取任职关系…</td></tr>
-            <tr v-else-if="!filteredMemberships.length"><td class="console-empty" colspan="6">暂无任职关系。</td></tr>
-            <tr v-for="item in filteredMemberships" :key="item.membership_id || item.id"><td>{{ item.user?.name || item.user?.display_name || item.user_id || '—' }}</td><td>{{ item.org_unit?.name || item.org_unit_id || '—' }}</td><td>{{ item.position?.name || item.position_id || '—' }}</td><td>{{ displayMembershipType(item.membership_type) }}</td><td>{{ displayMembershipValidity(item) }}</td><td class="console-actions-cell"><button class="console-text-button" type="button" @click="openDetail('membership', item)">详情</button></td></tr>
+          <div class="console-table-card"><div class="console-table-scroll"><table class="console-data-table iam-data-table"><thead><tr><th>用户</th><th>组织</th><th>岗位</th><th>任职类型</th><th>岗位授权</th><th>有效期</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
+            <tr v-if="loading.memberships"><td class="console-empty" colspan="7">正在读取任职关系…</td></tr>
+            <tr v-else-if="!filteredMemberships.length"><td class="console-empty" colspan="7">暂无任职关系。</td></tr>
+            <tr v-for="item in filteredMemberships" :key="item.membership_id || item.id"><td>{{ item.user?.name || item.user?.display_name || item.user_id || '—' }}</td><td>{{ item.org_unit?.name || item.org_unit_id || '—' }}</td><td>{{ item.position?.name || item.position_id || '—' }}</td><td>{{ displayMembershipType(item.membership_type) }}</td><td><span class="console-badge" :class="item.inherit_authorization === false ? 'status-disabled' : 'status-active'">{{ item.inherit_authorization === false ? '不继承' : '继承' }}</span></td><td>{{ displayMembershipValidity(item) }}</td><td class="console-actions-cell"><button class="console-text-button" type="button" @click="openDetail('membership', item)">详情</button></td></tr>
           </tbody></table></div></div>
         </section>
 
@@ -1114,10 +1226,19 @@ onMounted(async () => {
             <div><span>{{ row.label }}</span><strong>{{ row.value }}</strong></div>
           </template>
         </div>
-        <section v-if="detail.kind === 'user'" class="iam-detail-section iam-application-access">
+        <section v-if="supportsApplicationAuthorization" class="iam-detail-section iam-application-access">
           <div class="iam-detail-section-head">
-            <div><h4>应用访问授权</h4><p>平台角色与业务应用角色彼此隔离。选择应用后，平台从该应用提交的角色目录中加载角色；保存时会完整替换用户在当前应用中的角色集合。</p></div>
-            <div class="iam-application-access-badges"><span v-if="selectedApplication" class="iam-application-badge">{{ applicationDisplayName(selectedApplication) }} · {{ selectedApplication.code }}</span><span v-if="authorizationCatalog" class="iam-application-badge">目录版本 {{ catalogVersion(authorizationCatalog) }}</span></div>
+            <div>
+              <h4>{{ authorizationEntryLayerInfo.title }}</h4>
+              <p>此处只处理标准岗位授权之外的补充角色。应用角色目录、默认权限和角色权限关系均由子系统维护并只读同步到基础平台。</p>
+            </div>
+            <div class="iam-application-access-badges">
+              <span v-if="selectedApplication" class="iam-application-badge">{{ applicationDisplayName(selectedApplication) }} · {{ selectedApplication.code }}</span>
+              <span v-if="authorizationCatalog" class="iam-application-badge">目录版本 {{ catalogVersion(authorizationCatalog) }}</span>
+              <span v-if="authorizationCatalog" class="iam-application-badge" :class="{ 'is-warning': ['已过期', '同步失败', '状态未知'].includes(catalogSyncText) }">同步状态 {{ catalogSyncText }}</span>
+              <span v-if="hasApplicationAuthorizationConflict" class="iam-application-badge is-conflict">授权冲突 · {{ applicationAuthorizationConflicts.length }} 个不同角色</span>
+              <span v-else-if="hasEffectiveApplicationAccess" class="iam-application-badge">有效访问 · {{ applicationEffectiveRoles.length }} 个角色来源</span>
+            </div>
           </div>
           <p v-if="applicationsLoading" class="iam-empty-inline">正在读取应用列表…</p>
           <template v-else-if="!applications.length">
@@ -1125,29 +1246,60 @@ onMounted(async () => {
           </template>
           <template v-else>
             <p v-if="applicationAccessError" class="login-target-module__error" role="alert">{{ applicationAccessError }}</p>
+            <div v-if="hasApplicationAuthorizationConflict" class="login-target-module__error" role="alert">
+              当前应用存在多个不同角色（{{ applicationAuthorizationConflicts.join('、') || '角色来源冲突' }}）。系统已拒绝门户入口、OIDC 授权和权限并集；请删除冲突的用户、组织或岗位直接绑定，仅保留一个有效角色。
+            </div>
             <div class="iam-application-access-form">
-              <label><span>应用 *</span><select v-model="selectedApplicationCode" :disabled="applicationAccessLoading || applicationAccessSaving || applicationAccessRevoking" @change="loadApplicationAuthorization(detail.item.user_id, selectedApplicationCode)"><option v-for="application in applications" :key="application.application_id || application.id || application.code" :value="application.code">{{ applicationDisplayName(application) }} · {{ application.code }}</option></select></label>
-              <div class="iam-application-meta"><span>应用归属：<strong>{{ selectedApplication?.name || selectedApplication?.display_name || '—' }}</strong></span><span>应用编码：<code>{{ selectedApplication?.code || '—' }}</code></span><span>目录版本：<strong>{{ catalogVersion(authorizationCatalog) }}</strong></span><span v-if="authorizationUsingLegacyEndpoint" class="is-legacy">合同旧接口兼容模式</span></div>
-              <div class="iam-application-scope-grid">
-                <label><span>授权范围 *</span><select v-model="authorizationDraft.scope_type" :disabled="authorizationUsingLegacyEndpoint || applicationAccessLoading || applicationAccessSaving || applicationAccessRevoking" @change="onAuthorizationScopeChange"><option value="APPLICATION">整个应用</option><option value="ENVIRONMENT" :disabled="!authorizationEnvironmentOptions.length">指定环境</option></select></label>
-                <label v-if="authorizationDraft.scope_type === 'ENVIRONMENT'"><span>环境 *</span><select v-model="authorizationDraft.environment_code" :disabled="authorizationUsingLegacyEndpoint || applicationEnvironmentsLoading || applicationAccessSaving || applicationAccessRevoking"><option value="">请选择环境</option><option v-for="environment in authorizationEnvironmentOptions" :key="environment.code" :value="environment.code">{{ environment.name }} · {{ environment.code }}</option></select><small v-if="applicationEnvironmentsLoading">正在读取环境…</small></label>
-                <label><span>有效期 *</span><select v-model="authorizationDraft.validity_mode" :disabled="authorizationUsingLegacyEndpoint || applicationAccessSaving || applicationAccessRevoking" @change="onAuthorizationValidityChange"><option value="PERMANENT">长期有效</option><option value="RANGE">指定有效期</option></select></label>
+              <AuthorizationEntryGuidance
+                :subject-type="authorizationSubjectType"
+                :selected-role-codes="authorizationDraft.role_codes"
+                :inherited-roles="applicationInheritedRoles"
+                :role-name="applicationRoleName"
+              />
+              <label><span>应用 *</span><select v-model="selectedApplicationCode" :disabled="applicationAccessLoading || applicationAccessSaving || applicationAccessRevoking" @change="loadApplicationAuthorization(selectedApplicationCode)"><option v-for="application in applications" :key="application.application_id || application.id || application.code" :value="application.code">{{ applicationDisplayName(application) }} · {{ application.code }}</option></select></label>
+              <div class="iam-application-meta"><span>授权主体：<strong>{{ authorizationSubjectLabel }}</strong></span><span>应用编码：<code>{{ selectedApplication?.code || '—' }}</code></span><span>目录版本：<strong>{{ catalogVersion(authorizationCatalog) }}</strong></span><span>目录同步：<strong>{{ catalogSyncText }}</strong></span><span>可分配角色：<strong>{{ authorizationRoleOptions.length }} / {{ catalogRoleTotal }}</strong></span><span v-if="catalogLastSyncedAt">最近同步：<strong>{{ formatDateTime(catalogLastSyncedAt) }}</strong></span></div>
+              <p v-if="authorizationCatalog && !hasSynchronizedAuthorizationCatalog" class="iam-empty-inline">角色目录当前为“{{ catalogSyncText }}”，为避免使用过期或不完整的应用角色，暂不允许新增或修改授权；请等待子系统重新同步目录。</p>
+            <div class="iam-application-scope-grid">
+                <label><span>例外授权范围 *</span><select v-model="authorizationDraft.scope_type" :disabled="applicationAccessLoading || applicationAccessSaving || applicationAccessRevoking" @change="onAuthorizationScopeChange"><option value="APPLICATION">整个应用</option><option value="ENVIRONMENT" :disabled="!authorizationEnvironmentOptions.length">指定环境</option></select></label>
+                <label v-if="authorizationDraft.scope_type === 'ENVIRONMENT'"><span>环境 *</span><select v-model="authorizationDraft.environment_code" :disabled="applicationEnvironmentsLoading || applicationAccessSaving || applicationAccessRevoking"><option value="">请选择环境</option><option v-for="environment in authorizationEnvironmentOptions" :key="environment.code" :value="environment.code">{{ environment.name }} · {{ environment.code }}</option></select><small v-if="applicationEnvironmentsLoading">正在读取环境…</small></label>
+                <label><span>例外授权有效期 *</span><select v-model="authorizationDraft.validity_mode" :disabled="applicationAccessSaving || applicationAccessRevoking" @change="onAuthorizationValidityChange"><option value="PERMANENT">长期有效</option><option value="RANGE">指定有效期</option></select></label>
               </div>
-              <div v-if="authorizationDraft.validity_mode === 'RANGE'" class="iam-application-validity-grid"><label><span>生效时间</span><input v-model="authorizationDraft.valid_from" type="datetime-local" :disabled="authorizationUsingLegacyEndpoint || applicationAccessSaving || applicationAccessRevoking" /></label><label><span>失效时间</span><input v-model="authorizationDraft.valid_until" type="datetime-local" :disabled="authorizationUsingLegacyEndpoint || applicationAccessSaving || applicationAccessRevoking" /></label></div>
-              <p v-if="authorizationHasMixedRoleSettings" class="iam-field-help iam-application-scope-warning">当前用户的角色存在不同授权范围或有效期；本次保存会按上方设置统一替换所选角色集合。</p>
+              <div v-if="authorizationDraft.validity_mode === 'RANGE'" class="iam-application-validity-grid"><label><span>生效时间</span><input v-model="authorizationDraft.valid_from" type="datetime-local" :disabled="applicationAccessSaving || applicationAccessRevoking" /></label><label><span>失效时间</span><input v-model="authorizationDraft.valid_until" type="datetime-local" :disabled="applicationAccessSaving || applicationAccessRevoking" /></label></div>
+              <p v-if="authorizationHasMixedRoleSettings" class="iam-field-help iam-application-scope-warning">当前{{ authorizationSubjectLabel }}的例外角色存在不同授权范围或有效期；本次保存会按上方设置统一替换例外角色集合。</p>
               <p v-if="authorizationCatalogLoading || applicationAccessLoading" class="iam-empty-inline">正在读取应用角色与当前授权…</p>
               <template v-else>
-                <div v-if="!authorizationRoleOptions.length" class="iam-application-empty-catalog"><strong>暂无可分配角色目录</strong><p>该应用尚未同步角色目录，平台不会猜测或内置业务角色。请由应用负责人同步授权目录后再分配角色。</p></div>
+                <div v-if="!authorizationRoleOptions.length" class="iam-application-empty-catalog"><strong>{{ authorizationCatalog ? '目录中暂无可分配的 ACTIVE 角色' : '暂无可分配角色目录' }}</strong><p>{{ authorizationCatalog ? '当前角色目录仅包含停用、不可分配或已弃用角色。请由子系统维护角色目录后再进行授权。' : '该应用尚未同步角色目录，平台不会猜测、内置或编辑子系统业务角色与权限。请由应用负责人同步授权目录后再分配角色。' }}</p></div>
                 <fieldset v-else class="iam-application-role-fieldset" :disabled="applicationAccessSaving || applicationAccessRevoking">
-                  <legend>应用角色（可多选）</legend>
-                  <div class="iam-application-role-list"><label v-for="role in authorizationRoleOptions" :key="role.role_id || role.id || role.code" class="iam-application-role-option" :class="{ selected: authorizationDraft.role_codes.includes(role.code) }"><input v-model="authorizationDraft.role_codes" type="checkbox" :value="role.code" /><span class="iam-application-role-copy"><strong>{{ role.name || role.display_name || role.code }}</strong><code>{{ role.code }}</code><small v-if="role.description">{{ role.description }}</small><small>{{ rolePermissionCodes(role).length }} 项权限</small></span></label></div>
+                  <legend>例外角色（只可选择目录 ACTIVE 角色）</legend>
+                  <p class="iam-field-help">角色和默认权限来自子系统角色目录，只读展示。基础平台仅保存“主体 / 应用 / 角色 / 范围 / 有效期”，不会提交其他子系统的自定义业务权限。</p>
+                  <p v-if="catalogInactiveOrRestrictedRoleCount" class="iam-field-help">目录中另有 {{ catalogInactiveOrRestrictedRoleCount }} 个停用或不可分配角色，已从可选项中排除。</p>
+                  <p v-if="!authorizationDraft.role_codes.length" class="iam-empty-inline">{{ authorizationEntryLayerInfo.empty }}</p>
+                  <div class="iam-application-role-list"><label v-for="role in authorizationRoleOptions" :key="role.role_id || role.id || role.code" class="iam-application-role-option" :class="{ selected: authorizationDraft.role_codes.includes(role.code) }"><input v-model="authorizationDraft.role_codes" type="checkbox" :value="role.code" /><span class="iam-application-role-copy"><strong>{{ role.name || role.display_name || role.code }}</strong><code>{{ role.code }}</code><small v-if="role.description">{{ role.description }}</small><small class="iam-application-role-status">ACTIVE · {{ rolePermissionCodes(role).length }} 项默认权限</small><small class="iam-application-role-summary">来源：{{ authorizationEntryLayerInfo.title }} · 默认能力（子系统只读）：{{ roleDefaultPermissionSummary(role) }}</small></span></label></div>
                 </fieldset>
-                <div class="iam-application-permission-block effective"><div class="iam-application-permission-head"><strong>有效权限预览</strong><span>{{ authorizationEffectivePermissions.length }} 项</span></div><p v-if="!authorizationEffectivePermissions.length" class="iam-empty-inline">当前未选择角色，保存后该用户不会获得此应用的访问授权。</p><div v-else class="iam-application-permission-tags"><span v-for="permission in authorizationEffectivePermissions" :key="permission"><b>{{ permissionName(permission) }}</b><code>{{ permission }}</code></span></div><p class="iam-field-help">权限由所选角色的权限并集组成；平台前端只提交角色编码、授权范围和有效期，不提交前端计算的有效权限。</p></div>
+                <p v-if="unavailableDirectRoles.length" class="iam-application-catalog-warning">当前已有 {{ unavailableDirectRoles.map((role) => applicationRoleName(role)).join('、') }} 等例外角色不再处于 ACTIVE 可分配目录中，已不进入可编辑选择。保存新的例外角色集合会撤销这些过期或不可分配的例外授权。</p>
+
+                <div v-if="isUserAuthorizationSubject" class="iam-application-permission-block">
+                  <div class="iam-application-permission-head"><strong>标准继承授权（只读）</strong><span>{{ applicationInheritedRoles.length }} 个角色</span></div>
+                  <p v-if="!applicationInheritedRoles.length" class="iam-empty-inline">当前没有来自组织单元或岗位的继承角色。</p>
+                  <div v-else class="iam-application-role-list">
+                    <div v-for="(role, index) in applicationInheritedRoles" :key="`${roleCode(role)}-${role.source_type || 'source'}-${role.source_id || index}`" class="iam-application-role-option selected">
+                      <span class="iam-application-role-copy">
+                        <strong>{{ applicationRoleName(role) }}</strong><code>{{ roleCode(role) }}</code>
+                        <small>来源：{{ authorizationSourceTypeName(role) }} · {{ authorizationSourceName(role) }}</small>
+                        <small>范围：{{ authorizationScopeText(role) }}</small>
+                        <small>有效期：{{ authorizationValidityText(role) }}</small>
+                      </span>
+                    </div>
+                  </div>
+                  <p class="iam-field-help">继承角色由组织单元或岗位产生；标准岗位角色应在“岗位授权模板”中维护。保存或撤销个人例外授权不会删除这些标准授权。</p>
+                </div>
+
+                <div class="iam-application-permission-block effective"><div class="iam-application-permission-head"><strong>角色默认权限摘要（只读）</strong><span>{{ authorizationEffectivePermissions.length }} 项</span></div><p v-if="hasApplicationAuthorizationConflict" class="iam-empty-inline">角色存在冲突，服务端不会计算或签发权限并集。请先处理冲突来源。</p><p v-else-if="!authorizationEffectivePermissions.length" class="iam-empty-inline">当前直接角色与继承角色没有可展示的默认权限；请由子系统同步完整角色目录。最终业务鉴权仍由子系统执行。</p><div v-else class="iam-application-permission-tags"><span v-for="permission in authorizationEffectivePermissions" :key="permission"><b>{{ permissionName(permission) }}</b><code>{{ permission }}</code></span></div><p class="iam-field-help">该摘要只来自子系统已同步角色的默认权限，供授权预览与影响分析使用。基础平台不提供新增、删除或覆盖其他子系统业务权限的入口；保存时只提交上方勾选的例外角色。</p></div>
               </template>
             </div>
           </template>
         </section>
-        <footer><button class="console-button ghost" type="button" :disabled="applicationAccessSaving || applicationAccessRevoking" @click="closeDetail">关闭</button><button v-if="detail.kind === 'user' && selectedApplicationCode && applicationAccess" class="console-button danger" type="button" :disabled="applicationAccessSaving || applicationAccessRevoking" @click="revokeApplicationAccess">{{ applicationAccessRevoking ? '撤销中…' : '撤销应用访问' }}</button><button v-if="detail.kind === 'user' && selectedApplicationCode" class="console-button primary" type="button" :disabled="applicationsLoading || authorizationCatalogLoading || applicationAccessLoading || applicationAccessSaving || applicationAccessRevoking || !authorizationRoleOptions.length" @click="saveApplicationAccess"><ConsoleIcon name="save" />{{ applicationAccessSaving ? '保存中…' : '保存角色集合' }}</button></footer>
+        <footer><button class="console-button ghost" type="button" :disabled="applicationAccessSaving || applicationAccessRevoking" @click="closeDetail">关闭</button><button v-if="supportsApplicationAuthorization && selectedApplicationCode && hasDirectApplicationAccess" class="console-button danger" type="button" :disabled="applicationAccessSaving || applicationAccessRevoking" @click="revokeApplicationAccess">{{ applicationAccessRevoking ? '撤销中…' : '撤销例外授权' }}</button><button v-if="supportsApplicationAuthorization && selectedApplicationCode" class="console-button primary" type="button" :disabled="applicationsLoading || authorizationCatalogLoading || applicationAccessLoading || applicationAccessSaving || applicationAccessRevoking || !authorizationRoleOptions.length" @click="saveApplicationAccess"><ConsoleIcon name="save" />{{ applicationAccessSaving ? '保存中…' : '保存例外角色' }}</button></footer>
       </section>
     </div>
 
@@ -1178,6 +1330,15 @@ onMounted(async () => {
         <footer><button class="console-button ghost" type="button" :disabled="deletingUser" @click="closeUserDeletionDialog">取消</button><button class="console-button iam-danger-button" type="button" :disabled="deletingUser" @click="confirmUserDeletion">{{ deletingUser ? '正在删除…' : '确认删除' }}</button></footer>
       </section>
     </div>
+
+    <EmployeeOnboardingModal
+      v-if="employeeOnboardingVisible"
+      :organizations="organizations"
+      :positions="positions"
+      @close="employeeOnboardingVisible = false"
+      @completed="refreshAfterEmployeeOnboarding"
+      @toast="emitToast"
+    />
 
     <div v-if="editor" class="iam-modal-backdrop" role="presentation" @click.self="closeEditor">
       <section class="iam-modal iam-editor-modal" role="dialog" aria-modal="true" aria-label="新增身份授权配置">
@@ -1238,6 +1399,7 @@ onMounted(async () => {
             <label><span>生效方式 *</span><select v-model="form.validity_mode"><option value="LONG_TERM">长期生效</option><option value="SHORT_TERM">短期生效</option></select><small class="iam-field-help">长期任职不设置日期；短期任职必须填写完整起止日期。</small></label>
             <label v-if="form.validity_mode === 'SHORT_TERM'"><span>生效日期 *</span><input v-model="form.effective_from" required type="date" /></label>
             <label v-if="form.validity_mode === 'SHORT_TERM'"><span>失效日期 *</span><input v-model="form.effective_to" required type="date" /></label>
+            <label class="full iam-checkbox-field"><input v-model="form.inherit_authorization" type="checkbox" /><span>参与岗位授权继承</span><small class="iam-field-help">这是标准授权开关：开启后，该任职会动态继承岗位授权模板映射的应用角色；关闭不会影响个人、岗位或组织的例外授权。</small></label>
           </template>
           <p class="iam-form-alert"><ConsoleIcon name="info" />提交后由 Go API 写入 MySQL，并生成审计事件。</p>
           <footer>

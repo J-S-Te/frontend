@@ -134,11 +134,65 @@ export function getApplicationAuthorizationCatalog(applicationId) {
   return request(`/applications/${encodeURIComponent(applicationId)}/authorization-catalog`)
 }
 
+function roleSourceType(role) {
+  return String(role?.source_type || role?.subject_type || '').trim().toUpperCase()
+}
+
+function roleHasSourceMetadata(role) {
+  return Boolean(role && typeof role === 'object' && (
+    Object.prototype.hasOwnProperty.call(role, 'direct')
+    || Object.prototype.hasOwnProperty.call(role, 'source_type')
+    || Object.prototype.hasOwnProperty.call(role, 'subject_type')
+  ))
+}
+
+function isDirectApplicationRole(role, directSourceType = 'USER') {
+  if (!role || typeof role !== 'object') return true
+  if (role.direct === true) return true
+  return roleSourceType(role) === String(directSourceType || 'USER').trim().toUpperCase()
+}
+
+/**
+ * 统一新旧后端的应用授权响应。
+ *
+ * 新后端直接返回 direct_roles / inherited_roles；旧后端缺少这两个字段时，
+ * 优先根据 direct/source_type 判断来源。若整份旧数据完全没有来源字段，
+ * 则维持历史行为，将 roles 全部视为用户直接授权。
+ */
+export function normalizeApplicationAccess(value, directSourceType = 'USER') {
+  if (!value || typeof value !== 'object') return null
+
+  const fallbackRoles = value.role ? [value.role] : []
+  let roles = Array.isArray(value.roles) ? value.roles : fallbackRoles
+  const hasDirectRoles = Array.isArray(value.direct_roles)
+  const hasInheritedRoles = Array.isArray(value.inherited_roles)
+  const hasSourceMetadata = roles.some(roleHasSourceMetadata)
+
+  const directRoles = hasDirectRoles
+    ? value.direct_roles
+    : (hasSourceMetadata ? roles.filter((role) => isDirectApplicationRole(role, directSourceType)) : roles)
+  const inheritedRoles = hasInheritedRoles
+    ? value.inherited_roles
+    : (hasSourceMetadata ? roles.filter((role) => !isDirectApplicationRole(role, directSourceType)) : [])
+
+  if (!roles.length && (directRoles.length || inheritedRoles.length)) {
+    roles = [...directRoles, ...inheritedRoles]
+  }
+
+  return {
+    ...value,
+    roles,
+    direct_roles: directRoles,
+    inherited_roles: inheritedRoles,
+  }
+}
+
 /**
  * 查询用户在指定应用下的完整有效授权。
  */
 export function getApplicationAccess(userId, applicationCode) {
   return request(`/users/${encodeURIComponent(userId)}/applications/${encodeURIComponent(applicationCode)}/access`)
+    .then(normalizeApplicationAccess)
 }
 
 /**
@@ -149,7 +203,7 @@ export function updateApplicationAccess(userId, applicationCode, { roles = [] } 
   return request(`/users/${encodeURIComponent(userId)}/applications/${encodeURIComponent(applicationCode)}/access`, {
     method: 'PUT',
     body: JSON.stringify({ roles }),
-  })
+  }).then(normalizeApplicationAccess)
 }
 
 /**
@@ -161,17 +215,27 @@ export function deleteApplicationAccess(userId, applicationCode) {
   })
 }
 
-// 合同管理系统旧接口保留给旧版本调用方；新的平台界面优先使用通用接口。
-export function getContractApplicationAccess(userId) {
-  return request(`/users/${encodeURIComponent(userId)}/applications/contract_management/access`)
+function subjectApplicationAccessPath(subjectType, subjectId, applicationCode) {
+  return `/authorization-subjects/${encodeURIComponent(subjectType)}/${encodeURIComponent(subjectId)}/applications/${encodeURIComponent(applicationCode)}/access`
 }
 
-export function updateContractApplicationAccess(userId, { roleCode, customPermissions = [] }) {
-  return request(`/users/${encodeURIComponent(userId)}/applications/contract_management/access`, {
+/** 查询组织单元或岗位主体在应用下的角色绑定。 */
+export function getSubjectApplicationAccess(subjectType, subjectId, applicationCode) {
+  return request(subjectApplicationAccessPath(subjectType, subjectId, applicationCode))
+    .then((value) => normalizeApplicationAccess(value, subjectType))
+}
+
+/** 用完整角色集合替换组织单元或岗位主体在应用下的直接角色绑定。 */
+export function updateSubjectApplicationAccess(subjectType, subjectId, applicationCode, { roles = [] } = {}) {
+  return request(subjectApplicationAccessPath(subjectType, subjectId, applicationCode), {
     method: 'PUT',
-    body: JSON.stringify({
-      role_code: roleCode,
-      custom_permissions: customPermissions,
-    }),
+    body: JSON.stringify({ roles }),
+  }).then((value) => normalizeApplicationAccess(value, subjectType))
+}
+
+/** 撤销组织单元或岗位主体在应用下的全部直接角色绑定。 */
+export function deleteSubjectApplicationAccess(subjectType, subjectId, applicationCode) {
+  return request(subjectApplicationAccessPath(subjectType, subjectId, applicationCode), {
+    method: 'DELETE',
   })
 }

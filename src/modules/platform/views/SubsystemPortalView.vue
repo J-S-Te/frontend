@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { AuthError, getCurrentPrincipal, logoutCurrentSession } from '@/modules/platform/auth/api/auth'
+import { AUTHORIZATION_REFRESHED_EVENT } from '@/modules/platform/auth/utils/authorizationRefresh'
 import { ApplicationRegistryError, listPortalApplications } from '@/modules/platform/applications/api/applications'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import { buildPortalSubsystems } from '@/modules/moduleRegistry.js'
@@ -83,6 +84,21 @@ async function loadPortalCatalog() {
       : '无法加载已接入的子系统。'
   } finally {
     subsystemCatalogLoading.value = false
+  }
+}
+
+function onAuthorizationRefreshed(event) {
+  const principal = event?.detail?.principal
+  if (principal && typeof principal === 'object') {
+    currentPrincipal.value = principal
+    isPrincipalLoading.value = false
+    principalLoadFailed.value = false
+  }
+  // 应用入口也属于授权结果。即使基础平台角色没有变化，子系统角色调整后
+  // 服务端目录仍可能不同，因此每次授权检查都重新读取门户目录。
+  void loadPortalCatalog()
+  if (event?.detail?.changed) {
+    showToast('角色或权限已更新，已按最新授权刷新可访问应用。', 'enter')
   }
 }
 
@@ -269,6 +285,7 @@ function startParticleBackground() {
 
   resizeCanvas()
   window.addEventListener('resize', resizeCanvas)
+  window.addEventListener(AUTHORIZATION_REFRESHED_EVENT, onAuthorizationRefreshed)
   draw()
 }
 
@@ -288,6 +305,7 @@ onBeforeUnmount(() => {
   if (resizeCanvas) {
     window.removeEventListener('resize', resizeCanvas)
   }
+  window.removeEventListener(AUTHORIZATION_REFRESHED_EVENT, onAuthorizationRefreshed)
 })
 </script>
 

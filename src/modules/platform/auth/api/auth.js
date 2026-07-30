@@ -94,8 +94,11 @@ export async function getCurrentPrincipal() {
     response = await fetch(`${API_BASE_URL}/auth/me`, {
       method: 'GET',
       credentials: 'include',
+      // 认证主体和权限集合必须始终从服务端重新读取，不能复用浏览器或代理缓存。
+      cache: 'no-store',
       headers: {
         Accept: 'application/json',
+        'Cache-Control': 'no-cache',
       },
     })
   } catch {
