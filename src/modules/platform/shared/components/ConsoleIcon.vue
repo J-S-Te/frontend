@@ -7,8 +7,9 @@ const props = defineProps({
 
 const icons = {
   logo: [
-    'M7.5 7.2 12 4.6l4.5 2.6v5.2L12 15l-4.5-2.6V7.2Z',
-    'M7.5 12.4v4.4l4.5 2.6 4.5-2.6v-4.4M12 15v4.4',
+    'M12 3.2 19 6v5.2c0 4.4-2.7 7.6-7 9.6-4.3-2-7-5.2-7-9.6V6l7-2.8Z',
+    'M12 7a2.1 2.1 0 1 1 0 4.2A2.1 2.1 0 0 1 12 7Z',
+    'M8.6 15.5c.7-1.9 1.9-2.8 3.4-2.8s2.7.9 3.4 2.8',
   ],
   settings: ['M19.1 13c.1-.3.1-.7.1-1s0-.7-.1-1l2-1.6-1.9-3.3-2.4 1a7.4 7.4 0 0 0-1.7-1l-.3-2.6H11l-.4 2.6c-.6.2-1.1.6-1.6 1l-2.4-1-2 3.3 2.1 1.6a6 6 0 0 0 0 2l-2 1.6 1.9 3.3 2.4-1c.5.4 1 .8 1.7 1l.3 2.6h3.8l.4-2.6c.6-.2 1.1-.6 1.6-1l2.4 1 2-3.3-2.1-1.6ZM13 16a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-2a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z'],
   dashboard: ['M4 4h7v7H4V4Zm9 0h7v7h-7V4ZM4 13h7v7H4v-7Zm9 0h7v7h-7v-7Z'],
@@ -39,6 +40,6 @@ const isOutline = computed(() => outlineIcons.has(props.name))
 
 <template>
   <svg viewBox="0 0 24 24" :fill="isOutline ? 'none' : 'currentColor'" aria-hidden="true">
-    <path v-for="path in paths" :key="path" :d="path" :stroke="isOutline ? 'currentColor' : 'none'" :stroke-width="isOutline ? '1.8' : '0'" />
+    <path v-for="path in paths" :key="path" :d="path" :stroke="isOutline ? 'currentColor' : 'none'" :stroke-width="isOutline ? '1.7' : '0'" :stroke-linecap="isOutline ? 'round' : undefined" :stroke-linejoin="isOutline ? 'round' : undefined" />
   </svg>
 </template>

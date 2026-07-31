@@ -5,6 +5,23 @@ const API_BASE_URL = (import.meta.env.VITE_CONTRACT_API_BASE_URL || `${CONTRACT_
 
 let currentSession = null
 let sessionRequest = null
+let loginRedirectStarted = false
+
+export class ContractAuthError extends Error {
+  constructor(message = '合同系统登录状态已失效。', options = {}) {
+    super(message, options)
+    this.name = 'ContractAuthError'
+    this.status = 401
+    this.code = 'CONTRACT_UNAUTHENTICATED'
+  }
+}
+
+function startContractLogin() {
+  if (loginRedirectStarted) return
+  loginRedirectStarted = true
+  clearContractSessionCache()
+  window.location.replace(`${CONTRACT_PUBLIC_PATH_PREFIX}/auth/login`)
+}
 
 async function readBody(response) {
   const contentType = response.headers.get('content-type') || ''
@@ -23,6 +40,12 @@ async function request(path, options = {}) {
   })
   const body = await readBody(response)
   if (!response.ok) {
+    if (response.status === 401) {
+      // 会话可能在页面停留期间过期或因平台权限变化被后端撤销。任意合同 API
+      // 返回 401 都统一进入 OIDC，不允许每个并发请求各显示一条“登录状态无效”。
+      startContractLogin()
+      throw new ContractAuthError()
+    }
     const error = new Error(body?.message || `HTTP ${response.status}`)
     error.status = response.status
     error.code = body?.code
@@ -66,8 +89,7 @@ export async function ensureContractSession() {
     return await getContractSession({ force: true })
   } catch (error) {
     if (error?.status === 401) {
-      clearContractSessionCache()
-      window.location.assign(`${CONTRACT_PUBLIC_PATH_PREFIX}/auth/login`)
+      startContractLogin()
       return null
     }
     throw error

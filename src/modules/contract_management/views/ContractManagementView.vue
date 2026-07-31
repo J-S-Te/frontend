@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import {
   commandApproval,
+  ContractAuthError,
   createApprovalRule,
   createContract,
   deleteApprovalRule,
@@ -289,6 +290,12 @@ async function loadBusinessData() {
   }
   const results = await Promise.allSettled(requests)
   const failures = results.filter((result) => result.status === 'rejected')
+  // API 客户端已在第一次 401 时发起单次 OIDC 跳转。页面不再把多个并发 401
+  // 拼成重复的“登录状态无效”提示，避免跳转前出现误导性错误横幅。
+  if (failures.some((result) => result.reason instanceof ContractAuthError || result.reason?.status === 401)) {
+    businessDataLoading.value = false
+    return
+  }
   if (failures.length) {
     businessDataError.value = failures.map((result) => result.reason?.message || '业务数据加载失败').join('；')
   }
@@ -502,6 +509,7 @@ onMounted(async () => {
     session.value = await getContractSession()
     await loadBusinessData()
   } catch (error) {
+    if (error instanceof ContractAuthError || error?.status === 401) return
     sessionError.value = error?.message || '读取合同系统登录状态失败。'
   }
 })

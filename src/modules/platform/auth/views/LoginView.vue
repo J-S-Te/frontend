@@ -138,8 +138,9 @@ function showAccountHelp() {
       <header class="brand-logo">
         <span class="brand-logo-mark" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none">
-            <path d="M7.5 7.2 12 4.6l4.5 2.6v5.2L12 15l-4.5-2.6V7.2Z" stroke="currentColor" stroke-width="1.8" />
-            <path d="M7.5 12.4v4.4l4.5 2.6 4.5-2.6v-4.4M12 15v4.4" stroke="currentColor" stroke-width="1.8" />
+            <path d="M12 3.2 19 6v5.2c0 4.4-2.7 7.6-7 9.6-4.3-2-7-5.2-7-9.6V6l7-2.8Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" />
+            <circle cx="12" cy="9.1" r="2.1" stroke="currentColor" stroke-width="1.7" />
+            <path d="M8.6 15.5c.7-1.9 1.9-2.8 3.4-2.8s2.7.9 3.4 2.8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
           </svg>
         </span>
         <span>
