@@ -1,5 +1,7 @@
 // 合同管理 API 客户端。
 // 合同后端使用独立同源前缀，避免与基础平台的 /api/v1 接口发生路由冲突。
+import { getCurrentPrincipal } from '@/modules/platform/auth/api/auth'
+
 const CONTRACT_PUBLIC_PATH_PREFIX = (import.meta.env.VITE_CONTRACT_PUBLIC_PATH_PREFIX || '/contract_management').replace(/\/$/, '')
 const API_BASE_URL = (import.meta.env.VITE_CONTRACT_API_BASE_URL || `${CONTRACT_PUBLIC_PATH_PREFIX}/api/v1`).replace(/\/$/, '')
 
@@ -78,6 +80,20 @@ export function clearContractSessionCache() {
   sessionRequest = null
 }
 
+async function clearContractLocalSession() {
+  clearContractSessionCache()
+  try {
+    await fetch(`${CONTRACT_PUBLIC_PATH_PREFIX}/auth/local-logout`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { Accept: 'application/json' },
+    })
+  } catch {
+    // The subsequent OIDC callback overwrites the stale cookie even if local cleanup is
+    // temporarily unavailable.
+  }
+}
+
 /**
  * 确保浏览器已经建立合同系统自己的 OIDC 本地会话。
  *
@@ -87,7 +103,23 @@ export function clearContractSessionCache() {
  */
 export async function ensureContractSession() {
   try {
-    return await getContractSession({ force: true })
+    const contractSession = await getContractSession({ force: true })
+    try {
+      const platformPrincipal = await getCurrentPrincipal()
+      const platformUserID = String(platformPrincipal?.user?.id || '')
+      const platformTenantID = String(platformPrincipal?.tenant?.id || '')
+      const userChanged = platformUserID && platformUserID !== String(contractSession?.user_id || '')
+      const tenantChanged = platformTenantID && platformTenantID !== String(contractSession?.tenant_id || '')
+      if (userChanged || tenantChanged) {
+        await clearContractLocalSession()
+        startContractLogin()
+        return null
+      }
+    } catch {
+      // A contract session remains independently valid when the platform browser cookie has
+      // expired or the platform API is temporarily unavailable.
+    }
+    return contractSession
   } catch (error) {
     if (error?.status === 401) {
       startContractLogin()
@@ -122,6 +154,13 @@ export async function uploadContractTemplate({ name, file }) {
   return request('/contract-templates', {
     method: 'POST',
     body: form,
+  })
+}
+
+export async function previewContractTemplate(templateId, values) {
+  return request(`/contract-templates/${encodeURIComponent(templateId)}/preview`, {
+    method: 'POST',
+    body: JSON.stringify({ values }),
   })
 }
 

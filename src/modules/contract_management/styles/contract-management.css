@@ -176,9 +176,23 @@
 .contract-rule-editor-list.nodes > div { grid-template-columns: .8fr 1.2fr 1fr 1fr 30px; }
 .contract-rule-editor-list button { width: 30px; height: 34px; color: var(--cm-red); cursor: pointer; border-radius: 7px; background: var(--cm-red-soft); }
 .contract-rule-editor-list button:disabled { color: var(--cm-placeholder); cursor: not-allowed; background: #f1f5f9; }
+.contract-create-modal { width: min(960px,100%); }
+.contract-form-wide { grid-column: 1/-1; }
+.contract-generated-form { margin-top: 18px; padding: 16px; border: 1px solid #dbeafe; border-radius: 10px; background: #f8fbff; }
+.contract-generated-form .contract-section-title > div h3 { margin: 0; font-size: 12px; }
+.contract-generated-form .contract-section-title > div p { margin: 4px 0 0; color: var(--cm-muted); font-size: 9px; }
+.contract-template-field-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin-top: 14px; }
+.contract-template-field-grid label { display: flex; min-width: 0; flex-direction: column; gap: 6px; }
+.contract-template-field-grid label span { color: var(--cm-secondary); font-size: 10px; font-weight: 600; }
+.contract-template-field-grid input { width: 100%; height: 36px; padding: 0 10px; color: var(--cm-text); font-size: 11px; outline: 0; border: 1px solid var(--cm-border); border-radius: 7px; background: #fff; }
+.contract-template-field-grid input:focus { border-color: #93c5fd; box-shadow: 0 0 0 3px rgba(37,99,235,.07); }
+.contract-document-preview { margin-top: 18px; padding: 16px 20px; border: 1px solid var(--cm-border); border-radius: 10px; background: #fff; box-shadow: inset 0 0 0 7px #f8fafc; }
+.contract-document-preview > div:last-child { max-height: 420px; overflow: auto; padding: 12px; }
+.contract-document-preview .docx-preview p { margin: 7px 0; color: var(--cm-secondary); font-size: 11px; line-height: 1.75; }
 @media (max-width: 640px) {
   .contract-rule-actions { width: 100%; margin-left: 50px; }
   .contract-advanced-actions { grid-template-columns: 1fr 1fr; }
   .contract-advanced-actions label,.contract-advanced-actions label:nth-of-type(2) { grid-column: 1/-1; }
   .contract-rule-editor-list > div,.contract-rule-editor-list.nodes > div { grid-template-columns: 1fr; padding: 10px; border: 1px solid var(--cm-border); border-radius: 8px; }
+  .contract-template-field-grid { grid-template-columns: 1fr; }
 }

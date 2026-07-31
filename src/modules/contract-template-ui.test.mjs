@@ -15,3 +15,11 @@ test('contract template page loads the real API and opens the upload dialog', ()
   assert.match(source, /@click="openTemplateUpload"/)
   assert.match(source, /@submit\.prevent="submitTemplateUpload"/)
 })
+
+test('sales contract creation renders and submits template-generated fields', () => {
+  assert.match(source, /v-model="newContract\.template_id" @change="selectContractTemplate"/)
+  assert.match(source, /v-for="field in selectedContractTemplate\.fields \|\| \[\]"/)
+  assert.match(source, /v-model="newContract\.template_values\[field\.name\]"/)
+  assert.match(source, /previewContractTemplate\(selectedContractTemplate\.value\.id, newContract\.value\.template_values\)/)
+  assert.match(source, /payload\.template_values = \{ \.\.\.newContract\.value\.template_values \}/)
+})

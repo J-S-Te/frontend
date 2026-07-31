@@ -132,8 +132,8 @@ router.beforeEach(async (to) => {
 
   if (to.meta.requiresContractSession) {
     try {
-      // 合同系统使用自己的 OIDC 会话。这里不能先调用基础平台 /api/v1/auth/me，
-      // 否则合同 Cookie 有效但基础平台 Cookie 过期时会被错误送回基础平台登录页。
+      // 合同系统使用自己的 OIDC 会话。ensureContractSession 会在基础平台会话仍然
+      // 可读时校验两边用户是否一致；平台 Cookie 过期不会使独立合同会话失效。
       const session = await ensureContractSession()
       if (!session) return false
 

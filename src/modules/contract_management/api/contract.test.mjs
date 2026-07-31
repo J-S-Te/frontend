@@ -15,8 +15,21 @@ test('contract session cache is cleared before reauthentication', () => {
   assert.match(source, /function startContractLogin\(\)[\s\S]*clearContractSessionCache\(\)/)
 })
 
+test('contract session is replaced when the platform browser switches users', () => {
+  assert.match(source, /const platformUserID = String\(platformPrincipal\?\.user\?\.id \|\| ''\)/)
+  assert.match(source, /platformUserID !== String\(contractSession\?\.user_id \|\| ''\)/)
+  assert.match(source, /await clearContractLocalSession\(\)[\s\S]*startContractLogin\(\)/)
+  assert.match(source, /\/auth\/local-logout/)
+})
+
 test('contract template upload preserves browser multipart boundary', () => {
   assert.match(source, /options\.body instanceof FormData/)
   assert.match(source, /!hasFormDataBody \? \{ 'Content-Type': 'application\/json' \}/)
   assert.match(source, /request\('\/contract-templates',[\s\S]*method: 'POST',[\s\S]*body: form/)
+})
+
+test('contract template preview submits the generated field values', () => {
+  assert.match(source, /previewContractTemplate\(templateId, values\)/)
+  assert.match(source, /`\/contract-templates\/\$\{encodeURIComponent\(templateId\)\}\/preview`/)
+  assert.match(source, /body: JSON\.stringify\(\{ values \}\)/)
 })
