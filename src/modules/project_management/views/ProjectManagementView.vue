@@ -1,7 +1,16 @@
 <script setup>
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
+import {
+  confirmServiceItems as confirmServiceItemsRequest,
+  createProject,
+  createRule,
+  listProjects,
+  listRules,
+  listServiceItems,
+  setRuleEnabled,
+} from '@/modules/project_management/api/projectManagement'
 import '@/modules/project_management/styles/project-management.css'
 
 const route = useRoute()
@@ -71,16 +80,13 @@ const drawerProject = ref(null)
 const createOpen = ref(false)
 const notificationOpen = ref(false)
 const toastMessage = ref('')
+const loading = ref(true)
+const loadError = ref('')
+const saving = ref(false)
+const createForm = ref({ name: '', customer: '', contract: '', scope: '', trigger: '', manager: '王晓飞', notes: '' })
 let toastTimer = 0
 
-const projects = ref([
-  { id: 'PJ-2026-0826', customer: '某省政务云', contract: 'HT-2026-0411', services: 22, category: '等保测评 / 商用密码', team: '测评一组', manager: '张磊', health: '正常', status: '待分配', progress: 36, due: '2026-08-15' },
-  { id: 'PJ-2026-0823', customer: '某银行股份', contract: 'HT-2026-0408', services: 14, category: '等保测评', team: '测评一组', manager: '张磊', health: '正常', status: '实施中', progress: 68, due: '2026-07-22' },
-  { id: 'PJ-2026-0817', customer: '某证券交易所', contract: 'HT-2026-0402', services: 9, category: '等保测评 / 渗透测试', team: '测评二组', manager: '李娜', health: '风险', status: '异常处理中', progress: 55, due: '超期 3 天' },
-  { id: 'PJ-2026-0825', customer: '某三甲医院', contract: 'HT-2026-0410', services: 7, category: '渗透测试 / 应急响应', team: '渗透测试组', manager: '王明', health: '关注', status: '报告编制', progress: 82, due: '2026-07-25' },
-  { id: 'PJ-2026-0831', customer: '某航空公司', contract: 'HT-2026-0414', services: 12, category: '源代码审计 / 软件测试', team: '测评二组', manager: '李娜', health: '正常', status: '待实施', progress: 24, due: '2026-08-30' },
-  { id: 'PJ-2026-0833', customer: '某市公积金', contract: 'HT-2026-0415', services: 8, category: '等保测评', team: '未分配', manager: '—', health: '待确认', status: '待拆解确认', progress: 8, due: '—' },
-])
+const projects = ref([])
 
 const filteredProjects = computed(() => {
   const query = keyword.value.trim().toLowerCase()
@@ -96,12 +102,7 @@ const riskRows = [
   { level: '中', project: 'PJ-2026-0823 · 某银行股份', issue: '特殊方法复核待处理', owner: '张磊', deadline: '07-19' },
 ]
 
-const serviceItems = ref([
-  { id: 'SI-0833-01', batch: '第一批次', site: '总部数据中心', category: '等保测评（三级）', requirement: '核心业务系统 8 套', system: 'ISO 27001', special: '否', status: '待确认', selected: true },
-  { id: 'SI-0833-02', batch: '第一批次', site: '总部数据中心', category: '商用密码应用安全性评估', requirement: '密码应用方案与密评', system: '—', special: '否', status: '待确认', selected: true },
-  { id: 'SI-0833-03', batch: '第一批次', site: '灾备中心', category: '渗透测试', requirement: '互联网暴露面黑盒测试', system: 'ISO 27001', special: '是', status: '待复核', selected: true },
-  { id: 'SI-0833-04', batch: '第二批次', site: '办公区', category: '等保测评（二级）', requirement: '办公内网与终端安全', system: '—', special: '否', status: '待确认', selected: true },
-])
+const serviceItems = ref([])
 
 const kanbanColumns = computed(() => [
   { key: '待分配', count: 26, color: 'slate', cards: projects.value.filter((p) => ['待分配', '待拆解确认'].includes(p.status)) },
@@ -125,12 +126,23 @@ const operationRows = computed(() => ({
   reports: projects.value.slice(1, 5).map((p, i) => ({ name: `${p.id} · ${p.customer}`, detail: `${p.services} 个服务项报告`, owner: p.manager, state: ['编制中', '待复核', '客户确认', '待编制'][i], progress: [68, 86, 92, 20][i], due: p.due })),
 }[activeSection.value] || []))
 
-const rules = ref([
-  { id: 1, name: '按批次 + 检测类别拆解', scope: '等保测评、商用密码', trigger: '合同生效', enabled: true, updated: '2026-07-16 14:20' },
-  { id: 2, name: '特殊方法独立成项', scope: '全部检测类别', trigger: '服务清单含特殊方法', enabled: true, updated: '2026-07-12 09:42' },
-  { id: 3, name: '跨地域实施冲突预警', scope: '项目经理、实施工程师', trigger: '排期重叠且跨城市', enabled: true, updated: '2026-07-08 17:10' },
-  { id: 4, name: '资质临期强提醒', scope: '人员资质', trigger: '有效期不足 90 天', enabled: false, updated: '2026-06-28 11:05' },
-])
+const rules = ref([])
+const visibleRules = computed(() => rules.value.filter((rule) => rule.kind === activeSection.value))
+
+async function loadWorkspace() {
+  loading.value = true
+  loadError.value = ''
+  try {
+    const [projectRows, itemRows, ruleRows] = await Promise.all([listProjects(), listServiceItems(), listRules()])
+    projects.value = projectRows
+    serviceItems.value = itemRows.map((item) => ({ ...item, selected: ['待确认', '待复核'].includes(item.status) }))
+    rules.value = ruleRows
+  } catch (error) {
+    loadError.value = error?.message || '项目管理数据加载失败'
+  } finally {
+    loading.value = false
+  }
+}
 
 function navigate(section) {
   router.push({ name: 'project_management', params: { section } })
@@ -147,9 +159,56 @@ function openProject(project) { drawerProject.value = project }
 function toggleRow(id) {
   selectedRows.value = selectedRows.value.includes(id) ? selectedRows.value.filter((item) => item !== id) : [...selectedRows.value, id]
 }
-function confirmDecomposition() {
-  serviceItems.value = serviceItems.value.map((item) => ({ ...item, status: item.selected ? '待分配' : item.status }))
-  showToast('已确认 4 个服务项，任务已进入分配队列')
+async function confirmDecomposition() {
+  const ids = serviceItems.value.filter((item) => item.selected).map((item) => item.id)
+  if (!ids.length) { showToast('请至少选择一个服务项'); return }
+  saving.value = true
+  try {
+    const changed = await confirmServiceItemsRequest(ids)
+    const byID = new Map(changed.map((item) => [item.id, item]))
+    serviceItems.value = serviceItems.value.map((item) => byID.has(item.id) ? { ...byID.get(item.id), selected: false } : item)
+    showToast(`已确认 ${ids.length} 个服务项，任务已进入分配队列`)
+  } catch (error) { showToast(error?.message || '确认失败') }
+  finally { saving.value = false }
+}
+
+async function toggleRule(rule) {
+  const next = !rule.enabled
+  try {
+    const updated = await setRuleEnabled(rule.id, next)
+    Object.assign(rule, updated)
+    showToast(next ? '规则已启用' : '规则已停用')
+  } catch (error) { showToast(error?.message || '规则更新失败') }
+}
+
+async function saveCreate() {
+  saving.value = true
+  try {
+    if (activeSection.value === 'projects') {
+      const created = await createProject({
+        name: createForm.value.name,
+        customer: createForm.value.customer,
+        contract: createForm.value.contract,
+        manager: createForm.value.manager,
+        category: createForm.value.notes,
+      })
+      projects.value = [created, ...projects.value]
+      showToast(`项目 ${created.id} 已创建`)
+    } else {
+      const created = await createRule({
+        kind: activeSection.value,
+        name: createForm.value.name,
+        scope: createForm.value.scope,
+        trigger: createForm.value.trigger || createForm.value.notes,
+        enabled: true,
+      })
+      rules.value = [...rules.value, created]
+      showToast('配置规则已创建')
+    }
+    createOpen.value = false
+    createForm.value = { name: '', customer: '', contract: '', scope: '', trigger: '', manager: '王晓飞', notes: '' }
+  } catch (error) { showToast(error?.message || '保存失败') }
+  finally { saving.value = false }
 }
 function exportProjects() {
   const rows = filteredProjects.value.map((p) => [p.id, p.customer, p.contract, p.category, p.team, p.manager, p.status, p.due])
@@ -164,6 +223,7 @@ function exportProjects() {
   showToast(`已导出 ${rows.length} 条项目记录`)
 }
 
+onMounted(loadWorkspace)
 onBeforeUnmount(() => window.clearTimeout(toastTimer))
 </script>
 
@@ -208,11 +268,15 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
         <section class="pm-page-head">
           <div><p class="pm-eyebrow">PROJECT OPERATIONS</p><h1>{{ currentMeta[0] }}</h1><p>{{ currentMeta[1] }} · 数据更新于 2026-07-31 13:00</p></div>
           <div class="pm-actions">
-            <button class="pm-button" @click="showToast('数据已刷新')"><ConsoleIcon name="reset" />刷新</button>
+            <button class="pm-button" :disabled="loading" @click="loadWorkspace"><ConsoleIcon name="reset" />{{ loading ? '加载中' : '刷新' }}</button>
             <button v-if="activeSection === 'projects'" class="pm-button" @click="exportProjects"><ConsoleIcon name="export" />导出</button>
             <button v-if="['projects', 'split-rules', 'warning-rules', 'automations'].includes(activeSection)" class="pm-button primary" @click="createOpen = true">＋ 新建{{ activeSection === 'projects' ? '项目' : '规则' }}</button>
-            <button v-if="activeSection === 'decomposition'" class="pm-button primary" @click="confirmDecomposition">确认拆解</button>
+            <button v-if="activeSection === 'decomposition'" class="pm-button primary" :disabled="saving" @click="confirmDecomposition">{{ saving ? '提交中…' : '确认拆解' }}</button>
           </div>
+        </section>
+
+        <section v-if="loadError" class="pm-empty">
+          <ConsoleIcon name="info" /><b>后端数据加载失败</b><span>{{ loadError }}</span><button class="pm-button" @click="loadWorkspace">重新加载</button>
         </section>
 
         <template v-if="activeSection === 'dashboard'">
@@ -245,7 +309,7 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
         </template>
 
         <template v-else-if="activeSection === 'projects'">
-          <section class="pm-summary-strip"><button><b>86</b><span>全部项目</span></button><button><b>7</b><span>待拆解确认</span></button><button><b>28</b><span>在途项目</span></button><button><b>12</b><span>本月完成</span></button><button class="danger"><b>3</b><span>风险项目</span></button></section>
+          <section class="pm-summary-strip"><button><b>{{ projects.length }}</b><span>全部项目</span></button><button><b>{{ projects.filter((p) => p.status === '待拆解确认').length }}</b><span>待拆解确认</span></button><button><b>{{ projects.filter((p) => p.status !== '已完成').length }}</b><span>在途项目</span></button><button><b>{{ projects.filter((p) => p.status === '已完成').length }}</b><span>已完成</span></button><button class="danger"><b>{{ projects.filter((p) => p.health === '风险').length }}</b><span>风险项目</span></button></section>
           <section class="pm-filters"><label><ConsoleIcon name="search" /><input v-model="keyword" placeholder="搜索项目编号 / 客户 / 合同 / 项目经理" /></label><select v-model="statusFilter"><option value="">全部状态</option><option>待拆解确认</option><option>待分配</option><option>待实施</option><option>实施中</option><option>报告编制</option><option>异常处理中</option></select><button class="pm-button ghost" @click="keyword = ''; statusFilter = ''">重置</button><span>{{ filteredProjects.length }} 条结果</span></section>
           <section class="pm-table-panel">
             <div class="pm-table-scroll"><table class="pm-table"><thead><tr><th></th><th>项目 / 客户</th><th>合同编号</th><th>服务项</th><th>检测类别</th><th>团队 / 项目经理</th><th>健康度</th><th>状态</th><th>交付进度</th><th>计划完成</th><th></th></tr></thead><tbody>
@@ -267,7 +331,7 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
         </template>
 
         <template v-else-if="['split-rules', 'warning-rules', 'automations', 'permissions'].includes(activeSection)">
-          <section class="pm-config-layout"><aside class="pm-config-note"><span><ConsoleIcon name="info" /></span><h2>配置说明</h2><p>{{ currentMeta[1] }}。变更将在保存后对新任务生效，已有项目不自动追溯。</p><ul><li>配置修改需业务管理员权限</li><li>关键规则变更会记录审计日志</li><li>关闭规则前请确认影响范围</li></ul></aside><article class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>配置名称</th><th>适用范围</th><th>触发条件</th><th>状态</th><th>最后更新</th><th></th></tr></thead><tbody><tr v-for="rule in rules" :key="rule.id"><td><b>{{ rule.name }}</b></td><td>{{ rule.scope }}</td><td>{{ rule.trigger }}</td><td><button class="pm-switch" :class="{ on: rule.enabled }" :aria-label="`${rule.enabled ? '停用' : '启用'} ${rule.name}`" @click="rule.enabled = !rule.enabled; showToast(rule.enabled ? '规则已启用' : '规则已停用')"><i></i></button></td><td>{{ rule.updated }}</td><td><button class="pm-link" @click="showToast(`正在编辑：${rule.name}`)">编辑</button></td></tr></tbody></table></div></article></section>
+          <section class="pm-config-layout"><aside class="pm-config-note"><span><ConsoleIcon name="info" /></span><h2>配置说明</h2><p>{{ currentMeta[1] }}。变更将在保存后对新任务生效，已有项目不自动追溯。</p><ul><li>配置修改需业务管理员权限</li><li>关键规则变更会记录审计日志</li><li>关闭规则前请确认影响范围</li></ul></aside><article class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>配置名称</th><th>适用范围</th><th>触发条件</th><th>状态</th><th>最后更新</th><th></th></tr></thead><tbody><tr v-for="rule in visibleRules" :key="rule.id"><td><b>{{ rule.name }}</b></td><td>{{ rule.scope }}</td><td>{{ rule.trigger }}</td><td><button class="pm-switch" :class="{ on: rule.enabled }" :aria-label="`${rule.enabled ? '停用' : '启用'} ${rule.name}`" @click="toggleRule(rule)"><i></i></button></td><td>{{ rule.updated }}</td><td><button class="pm-link" @click="showToast(`正在编辑：${rule.name}`)">编辑</button></td></tr></tbody></table></div><div v-if="!visibleRules.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无配置规则</b><span>点击“新建规则”添加当前类型的配置。</span></div></article></section>
         </template>
 
         <template v-else>
@@ -280,7 +344,7 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
 
     <div v-if="drawerProject" class="pm-overlay" @click.self="drawerProject = null"><aside class="pm-drawer"><header><div><span>项目详情</span><h2>{{ drawerProject.id }}</h2></div><button class="pm-icon-button" aria-label="关闭" @click="drawerProject = null"><ConsoleIcon name="close" /></button></header><div class="pm-drawer-body"><section class="pm-drawer-hero"><span class="pm-badge" :class="drawerProject.health">{{ drawerProject.health }}</span><h3>{{ drawerProject.customer }}</h3><p>{{ drawerProject.category }}</p><div class="pm-progress"><i :style="{ width: `${drawerProject.progress}%` }"></i></div><b>{{ drawerProject.progress }}% 已完成</b></section><dl><div><dt>合同编号</dt><dd>{{ drawerProject.contract || '—' }}</dd></div><div><dt>服务项数量</dt><dd>{{ drawerProject.services || '—' }}</dd></div><div><dt>负责团队</dt><dd>{{ drawerProject.team || '—' }}</dd></div><div><dt>项目经理</dt><dd>{{ drawerProject.manager || '—' }}</dd></div><div><dt>当前状态</dt><dd>{{ drawerProject.status || '已完成' }}</dd></div><div><dt>计划完成</dt><dd>{{ drawerProject.due }}</dd></div></dl><section class="pm-timeline"><h3>最近动态</h3><div><i></i><b>项目状态更新</b><p>服务项进度同步至 {{ drawerProject.progress }}%</p><time>今天 11:32</time></div><div><i></i><b>实施记录已提交</b><p>现场取证资料已上传并完成校验</p><time>昨天 17:20</time></div><div><i></i><b>任务完成指派</b><p>负责人已确认实施计划</p><time>07-16 09:45</time></div></section></div><footer><button class="pm-button" @click="drawerProject = null">关闭</button><button class="pm-button primary" @click="showToast('已进入项目工作区')">进入项目工作区</button></footer></aside></div>
 
-    <div v-if="createOpen" class="pm-overlay" @click.self="createOpen = false"><form class="pm-dialog" @submit.prevent="createOpen = false; showToast('已保存为草稿')"><header><div><span>CREATE</span><h2>{{ activeSection === 'projects' ? '新建项目' : '新建配置规则' }}</h2></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="createOpen = false"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>名称 <em>*</em></span><input required :placeholder="activeSection === 'projects' ? '请输入项目名称' : '请输入规则名称'" /></label><label><span>{{ activeSection === 'projects' ? '客户 / 合同' : '适用范围' }} <em>*</em></span><input required placeholder="请输入关键信息" /></label><label><span>负责人</span><select><option>王晓飞</option><option>张磊</option><option>李娜</option></select></label><label><span>备注</span><textarea rows="4" placeholder="补充说明（选填）"></textarea></label></div><footer><button type="button" class="pm-button" @click="createOpen = false">取消</button><button class="pm-button primary">保存草稿</button></footer></form></div>
+    <div v-if="createOpen" class="pm-overlay" @click.self="createOpen = false"><form class="pm-dialog" @submit.prevent="saveCreate"><header><div><span>CREATE</span><h2>{{ activeSection === 'projects' ? '新建项目' : '新建配置规则' }}</h2></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="createOpen = false"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>名称 <em>*</em></span><input v-model.trim="createForm.name" required :placeholder="activeSection === 'projects' ? '请输入项目名称' : '请输入规则名称'" /></label><template v-if="activeSection === 'projects'"><label><span>客户 <em>*</em></span><input v-model.trim="createForm.customer" required placeholder="请输入客户名称" /></label><label><span>合同编号 <em>*</em></span><input v-model.trim="createForm.contract" required placeholder="例如 HT-2026-0416" /></label><label><span>负责人</span><select v-model="createForm.manager"><option>王晓飞</option><option>张磊</option><option>李娜</option></select></label></template><template v-else><label><span>适用范围 <em>*</em></span><input v-model.trim="createForm.scope" required placeholder="请输入适用范围" /></label><label><span>触发条件</span><input v-model.trim="createForm.trigger" placeholder="请输入触发条件" /></label></template><label><span>备注</span><textarea v-model.trim="createForm.notes" rows="4" placeholder="补充说明（选填）"></textarea></label></div><footer><button type="button" class="pm-button" @click="createOpen = false">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : '保存' }}</button></footer></form></div>
     <Transition name="pm-toast"><div v-if="toastMessage" class="pm-toast"><span>✓</span>{{ toastMessage }}</div></Transition>
   </div>
 </template>

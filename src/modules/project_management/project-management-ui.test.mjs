@@ -20,4 +20,7 @@ test('项目管理页面覆盖原型的五个业务域与核心交互', () => {
   assert.match(source, /function exportProjects\(\)/)
   assert.match(source, /class="pm-kanban"/)
   assert.match(source, /class="pm-drawer"/)
+  assert.match(source, /onMounted\(loadWorkspace\)/)
+  assert.match(source, /await confirmServiceItemsRequest\(ids\)/)
+  assert.match(source, /await setRuleEnabled\(rule\.id, next\)/)
 })

@@ -9,6 +9,7 @@ import vue from '@vitejs/plugin-vue'
 //      此时浏览器会直接走跨域请求，需后端 CORS 放行；本地联调时不要设置。
 const DEFAULT_API_PROXY_TARGET = 'http://127.0.0.1:8080'
 const DEFAULT_CONTRACT_API_PROXY_TARGET = 'http://127.0.0.1:8081'
+const DEFAULT_PROJECT_API_PROXY_TARGET = 'http://127.0.0.1:8082'
 const PROXIED_PATHS = ['/api', '/authorize', '/oauth2', '/.well-known']
 const CONTRACT_BACKEND_PATHS = [
   '/contract_management/api',
@@ -16,6 +17,7 @@ const CONTRACT_BACKEND_PATHS = [
   '/contract_management/logged-out',
   '/contract_management/healthz',
 ]
+const PROJECT_BACKEND_PATHS = ['/project_management/api', '/project_management/healthz']
 
 function apiProxy(target) {
   return {
@@ -29,12 +31,19 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const proxyTarget = env.VITE_API_PROXY_TARGET || DEFAULT_API_PROXY_TARGET
   const contractProxyTarget = env.VITE_CONTRACT_API_PROXY_TARGET || DEFAULT_CONTRACT_API_PROXY_TARGET
+  const projectProxyTarget = env.VITE_PROJECT_API_PROXY_TARGET || DEFAULT_PROJECT_API_PROXY_TARGET
 
   const proxy = Object.fromEntries(PROXIED_PATHS.map((path) => [path, apiProxy(proxyTarget)]))
   for (const path of CONTRACT_BACKEND_PATHS) {
     proxy[path] = {
       ...apiProxy(contractProxyTarget),
       rewrite: (requestPath) => requestPath.replace(/^\/contract_management/, ''),
+    }
+  }
+  for (const path of PROJECT_BACKEND_PATHS) {
+    proxy[path] = {
+      ...apiProxy(projectProxyTarget),
+      rewrite: (requestPath) => requestPath.replace(/^\/project_management/, ''),
     }
   }
 
