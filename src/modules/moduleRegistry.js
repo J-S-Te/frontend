@@ -1,5 +1,4 @@
 import platformModule from './platform/module.js'
-import projectManagementModule from './project_management/module.js'
 import contractManagementModule from './contract_management/module.js'
 
 /**
@@ -11,7 +10,6 @@ import contractManagementModule from './contract_management/module.js'
  */
 export const frontendModules = Object.freeze([
   platformModule,
-  projectManagementModule,
   contractManagementModule,
 ])
 

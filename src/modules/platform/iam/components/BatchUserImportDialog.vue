@@ -2,10 +2,17 @@
 import { computed, reactive, ref } from 'vue'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import { IamError, createUsersBatch } from '@/modules/platform/iam/api/iam'
+import { parseApplicationRoles } from '@/modules/platform/iam/utils/batchUserImport'
 
 // 上限与后端 POST /users/batch 的硬性约束保持一致：超过会一次性整体失败。
 const BATCH_LIMIT = 100
 const ACCEPTED_STATUSES = new Set(['ACTIVE', 'DISABLED'])
+const STATUS_ALIASES = new Map([
+  ['启用', 'ACTIVE'],
+  ['停用', 'DISABLED'],
+  ['ACTIVE', 'ACTIVE'],
+  ['DISABLED', 'DISABLED'],
+])
 
 const props = defineProps({
   organizations: { type: Array, default: () => [] },
@@ -168,6 +175,9 @@ const HEADER_ALIASES = {
   phone: 'mobile',
   status: 'status',
   '状态': 'status',
+  application_roles: 'application_roles',
+  '应用角色': 'application_roles',
+  roles: 'application_roles',
 }
 
 function normalizeHeader(value) {
@@ -194,10 +204,10 @@ function rebuildRows() {
   // 表头检测：第一行若任意 cell 命中 HEADER_ALIASES，则视为表头。
   const firstRow = records[0]
   const hasHeader = firstRow.some((cell) => normalizeHeader(cell) in HEADER_ALIASES)
-  let columnMap = { display_name: 0, email: 1, mobile: 2, status: 3 }
+  let columnMap = { display_name: 0, email: 1, mobile: 2, status: 3, application_roles: 4 }
   let dataStart = 0
   if (hasHeader) {
-    columnMap = { display_name: -1, email: -1, mobile: -1, status: -1 }
+    columnMap = { display_name: -1, email: -1, mobile: -1, status: -1, application_roles: -1 }
     firstRow.forEach((cell, idx) => {
       const key = normalizeHeader(cell)
       if (key in columnMap) columnMap[key] = idx
@@ -231,8 +241,11 @@ function makeRow(cells, columnMap, lineNo) {
   const displayName = pickColumn(cells, columnMap.display_name)
   const email = pickColumn(cells, columnMap.email)
   const mobile = pickColumn(cells, columnMap.mobile)
-  const rawStatus = pickColumn(cells, columnMap.status).toUpperCase()
-  const status = rawStatus || 'ACTIVE'
+  const rawStatus = pickColumn(cells, columnMap.status)
+  const normalizedStatus = rawStatus.toUpperCase()
+  const status = STATUS_ALIASES.get(rawStatus) || STATUS_ALIASES.get(normalizedStatus) || 'ACTIVE'
+  const rawApplicationRoles = pickColumn(cells, columnMap.application_roles)
+  const applicationRoles = []
 
   const errors = []
   if (!displayName) errors.push('姓名必填')
@@ -245,10 +258,19 @@ function makeRow(cells, columnMap, lineNo) {
     else if (!/^\+?\d+$/.test(mobile.replace(/[\s-]/g, ''))) errors.push('手机号只能包含数字 / 空格 / 连字符 / 开头的加号')
   }
 
-  if (rawStatus && !ACCEPTED_STATUSES.has(rawStatus)) errors.push('状态只能为 ACTIVE / DISABLED')
+  if (rawStatus && !STATUS_ALIASES.has(rawStatus) && !ACCEPTED_STATUSES.has(normalizedStatus)) {
+    errors.push('状态只能填写“启用”或“停用”')
+  }
+
+  if (rawApplicationRoles) {
+    const parsedRoles = parseApplicationRoles(rawApplicationRoles)
+    applicationRoles.push(...parsedRoles.roles)
+    errors.push(...parsedRoles.errors)
+  }
 
   // 标记字段过多的行（不抛错，避免打断预览）
-  const overflow = cells.length > 4
+  const expectedColumns = Math.max(...Object.values(columnMap).filter((value) => value >= 0), 3) + 1
+  const overflow = cells.length > expectedColumns
   if (overflow) errors.push(`字段过多（${cells.length} 列）`)
 
   return {
@@ -258,6 +280,8 @@ function makeRow(cells, columnMap, lineNo) {
     email,
     mobile,
     status,
+    rawApplicationRoles,
+    applicationRoles,
     valid: errors.length === 0,
     errors,
     selected: errors.length === 0, // 默认勾选合法行
@@ -265,6 +289,7 @@ function makeRow(cells, columnMap, lineNo) {
     submitMessage: '',
   }
 }
+
 
 // ---- 选中控制 ----
 function toggleAll(value) {
@@ -281,7 +306,7 @@ function selectValidOnly() {
 const selectedValidRows = computed(() => rows.filter((row) => row.selected && row.valid))
 
 // ---- 样例 CSV ----
-const SAMPLE_CSV = 'display_name,email,mobile,status\n张三,zhang.san@example.com,13800000000,ACTIVE\n李四,,13900000000,ACTIVE\n王五,wang.wu@example.com,,\n赵六,zhao.liu@example.com,13500000000,DISABLED\n'
+const SAMPLE_CSV = '姓名,邮箱,手机号,状态,应用角色\n张三,zhang.san@example.com,13800000000,启用,合同管理系统：销售人员\n李四,,13900000000,启用,合同管理系统：销售总监\n王五,wang.wu@example.com,,启用,\n赵六,zhao.liu@example.com,13500000000,停用,合同管理系统：审计管理员\n'
 
 function downloadSample() {
   // 加上 UTF-8 BOM，方便 Excel 直接打开不乱码。
@@ -289,7 +314,7 @@ function downloadSample() {
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = 'users-template.csv'
+  link.download = '用户批量导入模板.csv'
   document.body.appendChild(link)
   link.click()
   document.body.removeChild(link)
@@ -316,6 +341,7 @@ async function submit() {
       email: row.email || null,
       mobile: row.mobile || null,
       status: row.status || 'ACTIVE',
+      applicationRoles: row.applicationRoles,
     }))
     const result = await createUsersBatch(payload)
     const created = Array.isArray(result?.items) ? result.items : []
@@ -390,9 +416,13 @@ function formatFileSize(bytes) {
   <div class="iam-modal-backdrop" role="presentation" @click.self="onBackdropClick" @keydown="onKeydown">
     <section class="iam-modal iam-batch-import-modal" role="dialog" aria-modal="true" aria-label="批量导入用户">
       <header>
-        <div>
-          <p>批量导入</p>
-          <h3>从 CSV 导入用户</h3>
+        <div class="iam-batch-import-heading">
+          <span class="iam-batch-import-heading-icon"><ConsoleIcon name="user" /></span>
+          <div>
+            <p>用户目录 · 批量创建</p>
+            <h3>从 CSV 导入用户</h3>
+            <small>上传文件后先校验数据，确认无误再写入用户目录</small>
+          </div>
         </div>
         <button class="console-modal-close" type="button" aria-label="关闭批量导入" :disabled="submitting" @click="close">
           <ConsoleIcon name="close" />
@@ -407,9 +437,9 @@ function formatFileSize(bytes) {
 
       <!-- 步骤 1：上传 CSV -->
       <div v-if="step === 1" class="iam-batch-import-body">
-        <p class="iam-form-alert">
+        <p class="iam-form-alert iam-batch-import-guide">
           <ConsoleIcon name="info" />
-          支持列：<code>display_name</code>（姓名，必填）·<code>email</code>（邮箱，可选）·<code>mobile</code>（手机，可选）·<code>status</code>（<code>ACTIVE</code> / <code>DISABLED</code>，默认 <code>ACTIVE</code>）。单次最多 {{ BATCH_LIMIT }} 行，文件大小不超过 5 MB。
+          <span>表头使用“姓名、邮箱、手机号、状态、应用角色”。状态填写“启用”或“停用”；应用角色填写“应用名称：角色名称”，多个角色用“|”分隔。单次最多 {{ BATCH_LIMIT }} 行。</span>
         </p>
 
         <div
@@ -425,9 +455,10 @@ function formatFileSize(bytes) {
           @dragleave="onDragLeave"
           @drop="onDrop"
         >
-          <ConsoleIcon name="download" />
-          <strong>将 CSV 文件拖到此处，或点击选择</strong>
-          <small>仅支持 <code>.csv</code>（UTF-8），解析失败的单行不会阻断其他行</small>
+          <span class="iam-batch-import-upload-icon"><ConsoleIcon name="download" /></span>
+          <strong>拖拽 CSV 文件到此处</strong>
+          <small>或者 <b>点击选择文件</b> · 仅支持 UTF-8 编码的 <code>.csv</code></small>
+          <em>解析失败的行会单独标记，不影响其他有效数据</em>
         </div>
 
         <input
@@ -441,9 +472,9 @@ function formatFileSize(bytes) {
         <div v-if="parseError" class="iam-batch-import-error" role="alert">{{ parseError }}</div>
 
         <div class="iam-batch-import-sample">
-          <div>
-            <strong>样例 CSV</strong>
-            <p>第一行是表头，姓名列必填，其他列可留空。状态留空时按 <code>ACTIVE</code> 处理。</p>
+          <div class="iam-batch-import-sample-copy">
+            <span class="iam-batch-import-sample-title"><ConsoleIcon name="info" /><strong>文件格式示例</strong></span>
+            <p>姓名必填，其他列可留空。应用和角色均填写页面中看到的中文名称，无需记忆英文编码；名称必须已同步到基础平台且不能重名。</p>
             <pre><code>{{ SAMPLE_CSV }}</code></pre>
           </div>
           <button class="console-button ghost small" type="button" @click="downloadSample">
@@ -455,9 +486,12 @@ function formatFileSize(bytes) {
       <!-- 步骤 2：预览 / 校验 -->
       <div v-else-if="step === 2" class="iam-batch-import-body">
         <div class="iam-batch-import-summary">
-          <div>
+          <div class="iam-batch-import-file">
+            <span><ConsoleIcon name="download" /></span>
+            <div>
             <strong>{{ fileName }}</strong>
             <small>{{ formatFileSize(fileSize) }} · 共 {{ stats.total }} 行</small>
+            </div>
           </div>
           <div class="iam-batch-import-stats">
             <span class="stat valid"><b>{{ stats.valid }}</b><small>合法</small></span>
@@ -470,7 +504,7 @@ function formatFileSize(bytes) {
           <div class="iam-batch-import-toolbar-left">
             <button class="console-button ghost small" type="button" :disabled="!rows.length" @click="selectAll">全选</button>
             <button class="console-button ghost small" type="button" :disabled="!rows.length" @click="invertSelection">反选</button>
-            <button class="console-button ghost small" type="button" :disabled="!rows.length" @click="selectValidOnly">只看合法行</button>
+            <button class="console-button ghost small" type="button" :disabled="!rows.length" @click="selectValidOnly">仅选合法行</button>
           </div>
           <div class="iam-batch-import-toolbar-right">
             <label class="iam-batch-import-filter">
@@ -508,12 +542,13 @@ function formatFileSize(bytes) {
                 <th>邮箱</th>
                 <th>手机</th>
                 <th>状态</th>
+                <th>应用角色</th>
                 <th class="col-status">校验</th>
               </tr>
             </thead>
             <tbody>
               <tr v-if="!visibleRows.length">
-                <td colspan="7" class="empty">当前筛选下没有数据行。</td>
+                <td colspan="8" class="empty">当前筛选下没有数据行。</td>
               </tr>
               <tr
                 v-for="row in visibleRows"
@@ -532,7 +567,8 @@ function formatFileSize(bytes) {
                 <td>{{ row.displayName || '—' }}</td>
                 <td>{{ row.email || '—' }}</td>
                 <td>{{ row.mobile || '—' }}</td>
-                <td>{{ row.status }}</td>
+                <td>{{ row.status === 'ACTIVE' ? '启用' : '停用' }}</td>
+                <td><code>{{ row.rawApplicationRoles || '—' }}</code></td>
                 <td class="col-status">
                   <span v-if="row.submitStatus === 'success'" class="badge ok">
                     <ConsoleIcon name="save" />已创建
@@ -557,13 +593,17 @@ function formatFileSize(bytes) {
       <!-- 步骤 3：结果 -->
       <div v-else class="iam-batch-import-body">
         <div v-if="submitResult" class="iam-batch-import-result">
+          <span class="iam-batch-import-result-icon success"><ConsoleIcon name="save" /></span>
+          <h4>用户导入完成</h4>
           <p class="iam-form-alert success">
             <ConsoleIcon name="save" />
-            成功导入 <b>{{ submitResult.createdCount }}</b> / {{ submitResult.requestedCount }} 位用户，员工编号与“普通用户”角色由后端自动生成。
+            成功导入 <b>{{ submitResult.createdCount }}</b> / {{ submitResult.requestedCount }} 位用户。员工编号与基础平台“普通用户”角色由后端自动生成，CSV 中的应用角色已绑定并更新授权版本。
           </p>
           <p class="iam-field-help">导入后可在“用户”列表刷新查看，也可在“登录账号”中按需补建本地账号。</p>
         </div>
         <div v-else class="iam-batch-import-result">
+          <span class="iam-batch-import-result-icon danger"><ConsoleIcon name="info" /></span>
+          <h4>没有可展示的导入结果</h4>
           <p class="iam-form-alert danger">
             <ConsoleIcon name="info" />本次未提交任何数据。
           </p>
@@ -598,68 +638,141 @@ function formatFileSize(bytes) {
 
 <style scoped>
 .iam-batch-import-modal {
-  width: min(960px, 100%);
-  max-height: min(880px, calc(100vh - 40px));
+  width: min(1040px, 100%);
+  max-height: min(900px, calc(100vh - 40px));
+  overflow: hidden;
+  border-color: #dce5f1;
+  background: #fff;
+}
+
+.iam-batch-import-modal > header {
+  align-items: center;
+  padding: 24px 28px;
+  background: linear-gradient(135deg, #fff 0%, #f8fbff 72%, #eef5ff 100%);
+}
+
+.iam-batch-import-heading {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.iam-batch-import-heading-icon {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  place-items: center;
+  color: #fff;
+  border-radius: 12px;
+  background: linear-gradient(145deg, var(--brand-3, #3b82f6), var(--brand-1, #1e40af));
+  box-shadow: 0 10px 24px rgba(37, 99, 235, .22);
+}
+
+.iam-batch-import-heading-icon svg { width: 22px; height: 22px; }
+.iam-batch-import-heading h3 { margin-top: 4px !important; }
+.iam-batch-import-heading small {
+  display: block;
+  margin-top: 5px;
+  color: var(--ink-3, #475569);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .iam-batch-import-steps {
   list-style: none;
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: center;
-  gap: var(--s-3, 12px);
+  gap: 0;
   margin: 0;
-  padding: 18px 28px 4px;
-  color: var(--ink-3, #6b7280);
+  padding: 20px 28px 18px;
+  color: var(--ink-4, #94a3b8);
   font-size: 12.5px;
+  border-bottom: 1px solid var(--line-2, #eef0f4);
+  background: #fff;
 }
 .iam-batch-import-steps li {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
   font-weight: 600;
 }
+.iam-batch-import-steps li:not(:last-child)::after {
+  content: '';
+  height: 1px;
+  flex: 1;
+  margin: 0 14px 0 6px;
+  background: var(--line-1, #e6e9ef);
+}
+.iam-batch-import-steps li.done:not(:last-child)::after { background: #93b4f8; }
 .iam-batch-import-steps li b {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
   border-radius: 999px;
-  background: var(--surface-2, #f3f4f6);
-  color: var(--ink-3, #6b7280);
+  border: 1px solid var(--line-1, #e6e9ef);
+  background: var(--bg-soft, #fafbfd);
+  color: var(--ink-4, #94a3b8);
   font-size: 12px;
   font-weight: 700;
 }
 .iam-batch-import-steps li.active b {
   background: var(--brand-1, #2563eb);
+  border-color: var(--brand-1, #2563eb);
   color: #fff;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, .1);
 }
 .iam-batch-import-steps li.done b {
-  background: var(--brand-1, #2563eb);
-  color: #fff;
-  opacity: 0.65;
+  color: var(--brand-1, #1e40af);
+  border-color: #bfdbfe;
+  background: var(--brand-soft, #eff6ff);
 }
 .iam-batch-import-steps li.active { color: var(--ink-1, #111827); }
 
 .iam-batch-import-body {
-  padding: 18px 28px 4px;
+  min-height: 0;
+  max-height: calc(100vh - 275px);
+  padding: 24px 28px 6px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
+  overflow: auto;
+}
+
+.iam-batch-import-guide {
+  align-items: center;
+  padding: 12px 14px;
+  color: #3f5574;
+  border-color: #dbe7f7;
+  background: #f6f9fe;
+}
+
+.iam-batch-import-guide code { white-space: nowrap; }
+
+.iam-batch-import-guide > svg {
+  width: 18px;
+  height: 18px;
 }
 
 .iam-batch-import-dropzone {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: 36px 24px;
-  border: 1.5px dashed var(--line-2, #e5e7eb);
-  border-radius: 12px;
-  background: var(--surface-2, #fafbff);
+  justify-content: center;
+  gap: 9px;
+  min-height: 210px;
+  padding: 34px 24px;
+  border: 1.5px dashed #b9cce7;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #fbfdff 0%, #f5f8fd 100%);
   color: var(--ink-2, #374151);
   cursor: pointer;
-  transition: border-color 160ms, background 160ms;
+  transition: border-color 160ms, background 160ms, box-shadow 160ms, transform 160ms;
 }
 .iam-batch-import-dropzone:hover,
 .iam-batch-import-dropzone:focus,
@@ -667,76 +780,116 @@ function formatFileSize(bytes) {
   border-color: var(--brand-1, #2563eb);
   background: var(--brand-soft, #eef4ff);
   outline: none;
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, .08), 0 10px 30px rgba(37, 99, 235, .07);
+  transform: translateY(-1px);
 }
-.iam-batch-import-dropzone svg { width: 28px; height: 28px; color: var(--brand-1, #2563eb); }
-.iam-batch-import-dropzone strong { font-size: 14px; }
-.iam-batch-import-dropzone small { color: var(--ink-3, #6b7280); font-size: 12px; }
+.iam-batch-import-upload-icon {
+  display: grid;
+  width: 52px;
+  height: 52px;
+  margin-bottom: 4px;
+  place-items: center;
+  color: var(--brand-2, #2563eb);
+  border: 1px solid #d5e3fb;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 8px 22px rgba(37, 99, 235, .12);
+}
+.iam-batch-import-upload-icon svg { width: 25px; height: 25px; }
+.iam-batch-import-dropzone strong { color: var(--ink-1, #0a0f1c); font-size: 15px; }
+.iam-batch-import-dropzone small { color: var(--ink-3, #475569); font-size: 12.5px; }
+.iam-batch-import-dropzone small b { color: var(--brand-2, #2563eb); font-weight: 600; }
+.iam-batch-import-dropzone em { color: var(--ink-4, #94a3b8); font-size: 11.5px; font-style: normal; }
 .iam-batch-import-dropzone code {
-  background: var(--surface, #fff);
-  border: 1px solid var(--line-2, #e5e7eb);
+  background: #fff;
+  border: 1px solid #dce5f1;
   border-radius: 4px;
   padding: 0 4px;
   font-size: 11.5px;
 }
 
 .iam-batch-import-error {
-  background: #fef2f2;
+  background: var(--danger-soft, #fef2f2);
   border: 1px solid #fecaca;
   color: #b91c1c;
-  padding: 10px 12px;
-  border-radius: 8px;
+  padding: 12px 14px;
+  border-radius: 10px;
   font-size: 13px;
 }
 
 .iam-batch-import-sample {
   display: flex;
-  gap: 16px;
+  gap: 20px;
   align-items: flex-start;
-  padding: 12px 14px;
-  background: var(--surface-2, #fafbff);
-  border: 1px solid var(--line-2, #e5e7eb);
-  border-radius: 10px;
+  padding: 16px 18px;
+  background: var(--bg-soft, #fafbfd);
+  border: 1px solid var(--line-1, #e6e9ef);
+  border-radius: 12px;
 }
-.iam-batch-import-sample > div { flex: 1; }
-.iam-batch-import-sample strong { font-size: 13px; }
-.iam-batch-import-sample p { margin: 4px 0 8px; color: var(--ink-3, #6b7280); font-size: 12px; }
+.iam-batch-import-sample-copy { min-width: 0; flex: 1; }
+.iam-batch-import-sample-title { display: flex; align-items: center; gap: 7px; }
+.iam-batch-import-sample-title svg { width: 16px; height: 16px; color: var(--brand-2, #2563eb); }
+.iam-batch-import-sample strong { color: var(--ink-1, #0a0f1c); font-size: 13px; }
+.iam-batch-import-sample p { margin: 6px 0 10px; color: var(--ink-3, #475569); font-size: 12px; }
 .iam-batch-import-sample pre {
   margin: 0;
-  background: var(--surface, #fff);
-  border: 1px solid var(--line-2, #e5e7eb);
-  border-radius: 6px;
-  padding: 8px 10px;
-  font-size: 12px;
+  background: #101827;
+  border: 1px solid #26344a;
+  border-radius: 8px;
+  padding: 11px 13px;
+  font-size: 11.5px;
   overflow-x: auto;
-  color: var(--ink-2, #374151);
-  line-height: 1.55;
+  color: #d7e5f7;
+  line-height: 1.65;
 }
 
 .iam-batch-import-summary {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 10px 14px;
-  background: var(--surface-2, #fafbff);
-  border: 1px solid var(--line-2, #e5e7eb);
-  border-radius: 10px;
+  gap: 18px;
+  padding: 14px 16px;
+  background: linear-gradient(135deg, #fbfdff, #f5f8fd);
+  border: 1px solid var(--line-1, #e6e9ef);
+  border-radius: 12px;
 }
-.iam-batch-import-summary strong { font-size: 13px; }
+.iam-batch-import-file { display: flex; align-items: center; gap: 11px; min-width: 0; }
+.iam-batch-import-file > span {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--brand-2, #2563eb);
+  border: 1px solid #d7e4f7;
+  border-radius: 9px;
+  background: #fff;
+}
+.iam-batch-import-file > span svg { width: 18px; height: 18px; }
+.iam-batch-import-file > div { min-width: 0; }
+.iam-batch-import-file strong {
+  display: block;
+  max-width: 390px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.iam-batch-import-summary strong { color: var(--ink-1, #0a0f1c); font-size: 13px; }
 .iam-batch-import-summary small { display: block; color: var(--ink-3, #6b7280); font-size: 12px; margin-top: 2px; }
-.iam-batch-import-stats { display: flex; gap: 14px; }
+.iam-batch-import-stats { display: flex; gap: 8px; }
 .iam-batch-import-stats .stat {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  min-width: 56px;
-  padding: 4px 8px;
-  border-radius: 8px;
-  background: var(--surface, #fff);
-  border: 1px solid var(--line-2, #e5e7eb);
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: baseline;
+  gap: 3px 6px;
+  min-width: 72px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: #fff;
+  border: 1px solid var(--line-1, #e6e9ef);
 }
-.iam-batch-import-stats .stat b { font-size: 18px; line-height: 1; }
-.iam-batch-import-stats .stat small { font-size: 11px; color: var(--ink-3, #6b7280); }
+.iam-batch-import-stats .stat b { font-size: 17px; line-height: 1; }
+.iam-batch-import-stats .stat small { margin: 0; font-size: 11px; color: var(--ink-3, #6b7280); }
 .iam-batch-import-stats .stat.valid b { color: #15803d; }
 .iam-batch-import-stats .stat.invalid b { color: #b91c1c; }
 .iam-batch-import-stats .stat.selected b { color: var(--brand-1, #2563eb); }
@@ -747,6 +900,7 @@ function formatFileSize(bytes) {
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
+  padding: 2px 0;
 }
 .iam-batch-import-toolbar-left,
 .iam-batch-import-toolbar-right {
@@ -764,17 +918,25 @@ function formatFileSize(bytes) {
 }
 .iam-batch-import-filter select {
   font-size: 12.5px;
-  padding: 4px 8px;
-  border: 1px solid var(--line-2, #e5e7eb);
-  border-radius: 6px;
-  background: var(--surface, #fff);
+  min-height: 32px;
+  padding: 4px 30px 4px 9px;
+  color: var(--ink-2, #1e293b);
+  border: 1px solid var(--line-1, #e6e9ef);
+  border-radius: 8px;
+  background: #fff;
+}
+.iam-batch-import-filter select:focus {
+  border-color: var(--brand-2, #2563eb);
+  outline: 0;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, .1);
 }
 
 .iam-batch-import-table-wrap {
-  border: 1px solid var(--line-2, #e5e7eb);
-  border-radius: 10px;
+  border: 1px solid var(--line-1, #e6e9ef);
+  border-radius: 12px;
   overflow: auto;
   max-height: min(480px, calc(100vh - 360px));
+  box-shadow: 0 4px 16px rgba(15, 23, 42, .035);
 }
 .iam-batch-import-table {
   width: 100%;
@@ -784,24 +946,27 @@ function formatFileSize(bytes) {
 .iam-batch-import-table thead th {
   position: sticky;
   top: 0;
-  background: var(--surface-2, #fafbff);
+  z-index: 1;
+  background: #f5f8fc;
   text-align: left;
   font-weight: 600;
   color: var(--ink-2, #374151);
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--line-2, #e5e7eb);
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--line-1, #e6e9ef);
   white-space: nowrap;
 }
 .iam-batch-import-table tbody td {
-  padding: 7px 10px;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--line-2, #e5e7eb);
   color: var(--ink-2, #374151);
   vertical-align: middle;
 }
+.iam-batch-import-table tbody tr { transition: background 140ms; }
+.iam-batch-import-table tbody tr:hover:not(.invalid):not(.failed) { background: #f8fbff; }
 .iam-batch-import-table tbody tr:last-child td { border-bottom: 0; }
-.iam-batch-import-table tbody tr.invalid { background: #fef2f2; }
+.iam-batch-import-table tbody tr.invalid { background: #fff8f8; }
 .iam-batch-import-table tbody tr.success { background: #f0fdf4; }
-.iam-batch-import-table tbody tr.failed { background: #fef2f2; }
+.iam-batch-import-table tbody tr.failed { background: #fff8f8; }
 .iam-batch-import-table tbody td.empty { text-align: center; color: var(--ink-3, #6b7280); padding: 18px; }
 .iam-batch-import-table .col-check { width: 36px; text-align: center; }
 .iam-batch-import-table .col-line { width: 50px; color: var(--ink-3, #6b7280); }
@@ -812,7 +977,7 @@ function formatFileSize(bytes) {
   gap: 4px;
   font-size: 11.5px;
   font-weight: 600;
-  padding: 2px 8px;
+  padding: 4px 8px;
   border-radius: 999px;
 }
 .iam-batch-import-table .badge svg { width: 12px; height: 12px; }
@@ -820,7 +985,28 @@ function formatFileSize(bytes) {
 .iam-batch-import-table .badge.bad { background: #fee2e2; color: #b91c1c; }
 .iam-batch-import-table .badge small { font-weight: 500; opacity: 0.85; margin-left: 2px; }
 
-.iam-batch-import-result { display: flex; flex-direction: column; gap: 8px; }
+.iam-batch-import-result {
+  display: flex;
+  min-height: 300px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 30px;
+  text-align: center;
+}
+.iam-batch-import-result-icon {
+  display: grid;
+  width: 58px;
+  height: 58px;
+  place-items: center;
+  border-radius: 50%;
+}
+.iam-batch-import-result-icon svg { width: 28px; height: 28px; }
+.iam-batch-import-result-icon.success { color: var(--ok-1, #047857); background: var(--ok-soft, #ecfdf5); }
+.iam-batch-import-result-icon.danger { color: var(--danger-1, #b91c1c); background: var(--danger-soft, #fef2f2); }
+.iam-batch-import-result h4 { margin: 2px 0 6px; color: var(--ink-1, #0a0f1c); font-size: 18px; }
+.iam-batch-import-result .iam-form-alert { width: min(620px, 100%); justify-content: center; }
 .iam-batch-import-result .iam-form-alert.success {
   background: #f0fdf4;
   border-color: #bbf7d0;
@@ -832,11 +1018,38 @@ function formatFileSize(bytes) {
   color: #b91c1c;
 }
 
-@media (max-width: 640px) {
+.iam-batch-import-modal > footer {
+  position: sticky;
+  bottom: 0;
+  margin-top: 18px;
+  background: rgba(255, 255, 255, .96);
+  backdrop-filter: blur(8px);
+}
+
+@media (max-width: 760px) {
   .iam-batch-import-modal { width: 100%; }
-  .iam-batch-import-body { padding: 16px 18px 4px; }
-  .iam-batch-import-steps { padding: 14px 18px 0; }
+  .iam-batch-import-modal > header { padding: 20px; }
+  .iam-batch-import-heading-icon { display: none; }
+  .iam-batch-import-body { padding: 18px 20px 4px; }
+  .iam-batch-import-steps { padding: 16px 20px; }
+  .iam-batch-import-steps li { gap: 6px; }
+  .iam-batch-import-steps li:not(:last-child)::after { margin-inline: 6px; }
+  .iam-batch-import-steps li span { font-size: 11.5px; }
+  .iam-batch-import-dropzone { min-height: 180px; padding: 28px 16px; }
+  .iam-batch-import-sample { flex-direction: column; }
   .iam-batch-import-summary { flex-direction: column; align-items: flex-start; }
+  .iam-batch-import-stats { width: 100%; }
+  .iam-batch-import-stats .stat { flex: 1; }
   .iam-batch-import-table .col-status { width: auto; }
+  .iam-batch-import-modal > footer { flex-wrap: wrap; padding-inline: 20px; }
+}
+
+@media (max-width: 480px) {
+  .iam-batch-import-steps li:not(:last-child)::after { display: none; }
+  .iam-batch-import-steps { gap: 8px; }
+  .iam-batch-import-steps li { justify-content: center; }
+  .iam-batch-import-steps li span { display: none; }
+  .iam-batch-import-toolbar-left,
+  .iam-batch-import-toolbar-right { width: 100%; }
 }
 </style>
