@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import {
@@ -86,6 +86,8 @@ const templateUploading = ref(false)
 const templateUploadForm = ref({ name: '', file: null })
 const templatePreviewHTML = ref('')
 const templatePreviewing = ref(false)
+const templatePreviewError = ref('')
+const templatePreviewRef = ref(null)
 const ruleSaving = ref(false)
 const editingRuleId = ref('')
 const newContract = ref({
@@ -377,6 +379,7 @@ async function submitTemplateUpload() {
 
 function openNewContract() {
   templatePreviewHTML.value = ''
+  templatePreviewError.value = ''
   createDialogOpen.value = true
 }
 
@@ -387,20 +390,34 @@ function selectContractTemplate() {
   }
   newContract.value.template_values = values
   templatePreviewHTML.value = ''
+  templatePreviewError.value = ''
 }
 
 async function previewNewContract() {
   if (!selectedContractTemplate.value) {
-    showToast('请先选择合同模板。')
+    templatePreviewError.value = '请先选择合同模板。'
     return
   }
+  const missingField = (selectedContractTemplate.value.fields || []).find((field) => !String(newContract.value.template_values[field.name] ?? '').trim() && !field.default)
+  if (missingField) {
+    templatePreviewError.value = `请先填写“${missingField.label}”。`
+    return
+  }
+  templatePreviewError.value = ''
+  templatePreviewHTML.value = ''
   templatePreviewing.value = true
   try {
     const result = await previewContractTemplate(selectedContractTemplate.value.id, newContract.value.template_values)
     templatePreviewHTML.value = result?.html || ''
-    if (!templatePreviewHTML.value) showToast('模板没有可预览的正文内容。')
+    if (!templatePreviewHTML.value) {
+      templatePreviewError.value = '模板没有可预览的正文内容。'
+      return
+    }
+    await nextTick()
+    templatePreviewRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   } catch (error) {
-    showToast(error?.message || '生成合同预览失败')
+    templatePreviewError.value = error?.message || '生成合同预览失败'
+    showToast(templatePreviewError.value)
   } finally {
     templatePreviewing.value = false
   }
@@ -759,11 +776,12 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
             <label class="contract-form-wide"><span>合同模板</span><select v-model="newContract.template_id" @change="selectContractTemplate"><option value="">不使用模板，手工填写正文</option><option v-for="item in contractTemplates" :key="item.id" :value="item.id">{{ item.name }}（{{ item.fields?.length || 0 }} 个字段）</option></select></label>
           </div>
           <div v-if="selectedContractTemplate" class="contract-generated-form">
-            <div class="contract-section-title"><div><h3>填写模板字段</h3><p>{{ selectedContractTemplate.original_filename }}</p></div><button class="contract-button secondary small" type="button" :disabled="templatePreviewing" @click="previewNewContract">{{ templatePreviewing ? '正在生成…' : '预览合同' }}</button></div>
+            <div class="contract-section-title"><div><h3>填写模板字段</h3><p>{{ selectedContractTemplate.original_filename }}</p></div><button class="contract-button secondary small" type="button" :disabled="templatePreviewing" @click="previewNewContract">{{ templatePreviewing ? '正在生成预览…' : '预览合同' }}</button></div>
             <div class="contract-template-field-grid"><label v-for="field in selectedContractTemplate.fields || []" :key="field.name"><span>{{ field.label }}</span><input v-model="newContract.template_values[field.name]" required :placeholder="field.default ? `默认：${field.default}` : `请输入${field.label}`" /></label></div>
+            <p v-if="templatePreviewError" class="contract-template-preview-error" role="alert">{{ templatePreviewError }}</p>
           </div>
           <label v-else class="contract-comment-label"><span>合同内容</span><textarea v-model="newContract.content" required placeholder="请输入合同内容"></textarea></label>
-          <div v-if="templatePreviewHTML" class="contract-document-preview"><div class="contract-section-title"><h3>合同预览</h3><button class="contract-text-button" type="button" @click="templatePreviewHTML = ''">收起</button></div><div v-html="templatePreviewHTML"></div></div>
+          <div v-if="templatePreviewHTML" ref="templatePreviewRef" class="contract-document-preview"><div class="contract-section-title"><h3>合同预览</h3><button class="contract-text-button" type="button" @click="templatePreviewHTML = ''">收起</button></div><div v-html="templatePreviewHTML"></div></div>
         </section>
         <footer><button class="contract-button secondary" type="button" @click="createDialogOpen = false">取消</button><button class="contract-button primary" type="submit"><ConsoleIcon name="save" />生成并保存合同</button></footer>
       </form>
