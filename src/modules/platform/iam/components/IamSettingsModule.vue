@@ -66,6 +66,11 @@ import {
   hasPermission,
   useCurrentPrincipal,
 } from '@/modules/platform/auth/utils/principal'
+import {
+  IAM_PERMISSIONS,
+  iamPanelPermissions,
+  iamPanelReadPermission,
+} from '@/modules/platform/iam/utils/iamPermissions'
 import '@/modules/platform/iam/styles/iam-settings.css'
 
 const emit = defineEmits(['toast'])
@@ -74,24 +79,7 @@ const emit = defineEmits(['toast'])
 // 路由级守卫已在 router/index.js 完成认证；这里只用于按权限隐藏高危按钮。
 // 真正的禁用/拒绝仍由后端执行，UI 隐藏只是体验优化。
 const { refreshPrincipal } = useCurrentPrincipal()
-// IAM 各能力所需的权限码。必须与后端 authz_permission.code 完全一致
-// （platform:<resource>:<action>）。后端 000011_seed_platform_defaults.sql
-// 已经预置了全部 platform:* 权限码；super-admin 角色被授予所有 ACTIVE 权限。
-// 如果后端 permission_codes 非空但不含本表中的码，按钮会被 v-if 隐藏——这是
-// 预期行为，让无权限用户看不到自己点不动的入口。
-const IAM_PERMISSIONS = {
-  userRead: 'platform:user:read',
-  userWrite: 'platform:user:create',           // 新增/批量新增用户
-  userDelete: 'platform:user:delete',         // 删除用户
-  accountWrite: 'platform:account:update',    // 启停账号
-  accountResetPassword: 'platform:account:update', // 重置密码也归到 account:update
-  organizationWrite: 'platform:organization:update', // 编辑组织
-  organizationDelete: 'platform:organization:delete',
-  positionWrite: 'platform:position:create',  // 新增岗位
-  positionDelete: 'platform:position:delete',
-  membershipWrite: 'platform:membership:create', // 新增任职关系
-  authorizationWrite: 'platform:role-binding:update', // 岗位授权模板 + 例外授权
-}
+// IAM 权限码和面板 OR 集合统一维护在 iamPermissions.js；这里仅消费真实权限。
 
 const activePanel = ref('users')
 const positionAuthorizationTemplates = ref(null)
@@ -264,17 +252,20 @@ const authorizationRolesToRevoke = computed(() => {
   return authorizationDraft.role_codes.filter((code) => !selectableRoleCodes.has(code))
 })
 
-// 6 个 panel 的单一数据源：每个 panel 仍保留自身 key / label / icon / description / permission，
-// 旧逻辑（panel / visiblePanels / selectPanel / panelToKind / panelCreatePermission）一律继续读它。
-// 新增 groupKey 字段决定它在侧边 nav 哪个阶段下展示。panels[0] 仅作为 activePanel 找不到时的兜底。
+// 每个 panel 使用自身资源的 read/create/update/delete OR 集合决定是否显示，
+// 不再把 user:read 当成整个 IAM 的共同入口。readPermission 只控制列表读取和刷新。
 const panels = [
-  { key: 'organizations', groupKey: 'foundation', label: '组织单元', icon: 'organization', description: '组织单元层级、编码与排序', permission: 'userRead' },
-  { key: 'positions', groupKey: 'foundation', label: '岗位', icon: 'organization', description: '组织内岗位定义，是任职关系和岗位授权的基础', permission: 'userRead' },
-  { key: 'users', groupKey: 'people', label: '用户', icon: 'user', description: '自然人主体、任职状态与跨系统统一用户标识', permission: 'userRead' },
-  { key: 'accounts', groupKey: 'people', label: '登录账号', icon: 'account', description: '账号状态、密码与有效期统一管理', permission: 'userRead' },
-  { key: 'memberships', groupKey: 'people', label: '任职关系', icon: 'link', description: 'Membership 任职关系：主组织、兼岗、历史任职', permission: 'userRead' },
-  { key: 'positionAuthorizationTemplates', groupKey: 'authorization', label: '岗位授权模板', icon: 'shield', description: '标准授权入口：岗位映射到各应用实际角色，由有效任职关系动态继承', permission: 'authorizationWrite' },
-]
+  { key: 'organizations', groupKey: 'foundation', label: '组织单元', icon: 'organization', description: '组织单元层级、编码与排序' },
+  { key: 'positions', groupKey: 'foundation', label: '岗位', icon: 'organization', description: '组织内岗位定义，是任职关系和岗位授权的基础' },
+  { key: 'users', groupKey: 'people', label: '用户', icon: 'user', description: '自然人主体、任职状态与跨系统统一用户标识' },
+  { key: 'accounts', groupKey: 'people', label: '登录账号', icon: 'account', description: '账号状态、密码与有效期统一管理' },
+  { key: 'memberships', groupKey: 'people', label: '任职关系', icon: 'link', description: 'Membership 任职关系：主组织、兼岗、历史任职' },
+  { key: 'positionAuthorizationTemplates', groupKey: 'authorization', label: '岗位授权模板', icon: 'shield', description: '标准授权入口：岗位映射到各应用实际角色，由有效任职关系动态继承' },
+].map((item) => ({
+  ...item,
+  permissions: iamPanelPermissions(item.key),
+  readPermission: iamPanelReadPermission(item.key),
+}))
 
 // 3 个工作流阶段。运维的典型路径：先建基础数据（组织 / 岗位）→ 录入人员（用户 / 账号 / 任职）→
 // 配置授权（岗位授权模板）。阶段顺序就是用户使用顺序，不允许随意调整。
@@ -289,10 +280,17 @@ const panelGroups = [
 // key 必须与 `pagination` 的 key 一一对应，`load*` 会按当前 panel 读取对应字段。
 const panelFilters = reactive({ users: '', accounts: '', organizations: '', positions: '', memberships: '' })
 
-const panel = computed(() => panels.find((item) => item.key === activePanel.value) || panels[0])
+function canAccessPanel(item) {
+  return Boolean(item) && hasAnyPermission(item.permissions)
+}
 
-// 按权限过滤侧边栏。fail-open 策略：principal 未加载或权限为空时全部可见。
-const visiblePanels = computed(() => panels.filter((item) => !item.permission || hasPermission(IAM_PERMISSIONS[item.permission])))
+function canReadPanel(item) {
+  return Boolean(item?.readPermission) && hasPermission(item.readPermission)
+}
+
+const visiblePanels = computed(() => panels.filter(canAccessPanel))
+const panel = computed(() => visiblePanels.value.find((item) => item.key === activePanel.value) || visiblePanels.value[0] || panels[0])
+const canReadActivePanel = computed(() => canReadPanel(panels.find((item) => item.key === activePanel.value)))
 
 const activePanelItemsCount = computed(() => {
   if (activePanel.value === 'users') return filteredUsers.value.length
@@ -304,12 +302,12 @@ const activePanelItemsCount = computed(() => {
 })
 
 // 侧边 nav 直接消费的分组视图：保留阶段标题、阶段完成度、按权限隐藏子 panel。
-// 任何阶段下没有可见 panel（例如没有 authorizationWrite）就直接整组隐藏。
+// 任何阶段下没有可见 panel（例如没有任何 role-binding 权限）就直接整组隐藏。
 const visiblePanelGroups = computed(() => panelGroups
   .map((group) => {
     const groupPanels = group.panels
       .map((key) => panels.find((item) => item.key === key))
-      .filter((item) => item && (!item.permission || hasPermission(IAM_PERMISSIONS[item.permission])))
+      .filter((item) => item && canAccessPanel(item))
     return { ...group, panels: groupPanels }
   })
   .filter((group) => group.panels.length > 0))
@@ -963,6 +961,7 @@ function updatePage(key, data, items, { verifyPageSize = false } = {}) {
 }
 
 async function loadUsers(page = pagination.users.page) {
+  if (!canReadPanel(panels.find((item) => item.key === 'users'))) return
   const seq = ++requestSeq.users
   const data = await safeCall('users', () => listUsers({ page, pageSize, keyword: panelFilters.users, status: 'ACTIVE' }))
   if (seq !== requestSeq.users) return
@@ -970,6 +969,7 @@ async function loadUsers(page = pagination.users.page) {
 }
 
 async function loadAccounts(page = pagination.accounts.page) {
+  if (!canReadPanel(panels.find((item) => item.key === 'accounts'))) return
   const seq = ++requestSeq.accounts
   const data = await safeCall('accounts', () => listAccounts({ page, pageSize, keyword: panelFilters.accounts }))
   if (seq !== requestSeq.accounts) return
@@ -977,6 +977,7 @@ async function loadAccounts(page = pagination.accounts.page) {
 }
 
 async function loadOrganizations(page = pagination.organizations.page) {
+  if (!canReadPanel(panels.find((item) => item.key === 'organizations'))) return
   const seq = ++requestSeq.organizations
   const data = await safeCall('organizations', () => listOrgUnits({ page, pageSize, keyword: panelFilters.organizations, status: 'ACTIVE' }))
   if (seq !== requestSeq.organizations) return
@@ -984,6 +985,7 @@ async function loadOrganizations(page = pagination.organizations.page) {
 }
 
 async function loadPositions(page = pagination.positions.page) {
+  if (!canReadPanel(panels.find((item) => item.key === 'positions'))) return
   const seq = ++requestSeq.positions
   const data = await safeCall('positions', () => listPositions({ page, pageSize, keyword: panelFilters.positions, status: 'ACTIVE' }))
   if (seq !== requestSeq.positions) return
@@ -991,6 +993,7 @@ async function loadPositions(page = pagination.positions.page) {
 }
 
 async function loadMemberships(page = pagination.memberships.page) {
+  if (!canReadPanel(panels.find((item) => item.key === 'memberships'))) return
   const seq = ++requestSeq.memberships
   const data = await safeCall('memberships', () => listMemberships({ page, pageSize, keyword: panelFilters.memberships, status: 'ACTIVE' }))
   if (seq !== requestSeq.memberships) return
@@ -1000,6 +1003,8 @@ async function loadMemberships(page = pagination.memberships.page) {
 
 
 async function reloadActive() {
+  const active = panels.find((item) => item.key === activePanel.value)
+  if (!canReadPanel(active)) return
   switch (activePanel.value) {
     case 'users': await loadUsers(); break
     case 'accounts': await loadAccounts(); break
@@ -1029,6 +1034,12 @@ const activeServerPagingUnavailable = computed(() => activePagination.value?.ser
 const activeLoading = computed(() => loading[activePanel.value])
 
 let filterTimer
+
+watch(visiblePanels, (items) => {
+  if (items.length && !items.some((item) => item.key === activePanel.value)) {
+    activePanel.value = items[0].key
+  }
+}, { immediate: true })
 
 // 切换 panel 时同步清理挂起的筛选防抖和上次未完成的列表请求，
 // 避免“上一个 panel 的筛选触发的 load” 在新 panel 落地后把列表覆盖。
@@ -1310,11 +1321,11 @@ const panelToKind = {
 
 // 各 panel 的“新增”所需权限。模板里直接调用，避免在多处分散布尔表达式。
 function panelCreatePermission(panelKey) {
-  if (panelKey === 'users') return IAM_PERMISSIONS.userWrite
-  if (panelKey === 'accounts') return IAM_PERMISSIONS.accountWrite
-  if (panelKey === 'organizations') return IAM_PERMISSIONS.organizationWrite
-  if (panelKey === 'positions') return IAM_PERMISSIONS.positionWrite
-  if (panelKey === 'memberships') return IAM_PERMISSIONS.membershipWrite
+  if (panelKey === 'users') return IAM_PERMISSIONS.userCreate
+  if (panelKey === 'accounts') return IAM_PERMISSIONS.accountCreate
+  if (panelKey === 'organizations') return IAM_PERMISSIONS.organizationCreate
+  if (panelKey === 'positions') return IAM_PERMISSIONS.positionCreate
+  if (panelKey === 'memberships') return IAM_PERMISSIONS.membershipCreate
   return ''
 }
 
@@ -1586,10 +1597,21 @@ onMounted(async () => {
   if (typeof window !== 'undefined') {
     window.addEventListener('keydown', onGlobalKeydown)
   }
-  // 拉取当前 principal（包含 permission_codes），用于按权限隐藏高危按钮。
-  // 失败不影响主流程：fail-open 时所有按钮仍可见，由后端兜底。
-  refreshPrincipal().catch(() => {})
-  await Promise.all([loadUsers(), loadAccounts(), loadOrganizations(), loadPositions(), loadMemberships()])
+  // 先获取 permission_codes，再只加载当前账号具有对应 read 权限的目录，
+  // 避免角色绑定管理员因为缺少 user:read 等无关权限产生一组 403。
+  await refreshPrincipal().catch(() => null)
+  const loaders = {
+    users: loadUsers,
+    accounts: loadAccounts,
+    organizations: loadOrganizations,
+    positions: loadPositions,
+    memberships: loadMemberships,
+  }
+  await Promise.all(visiblePanels.value
+    .filter(canReadPanel)
+    .map((item) => loaders[item.key])
+    .filter(Boolean)
+    .map((loader) => loader()))
 })
 onBeforeUnmount(() => {
   if (typeof window !== 'undefined') {
@@ -1608,6 +1630,7 @@ onBeforeUnmount(() => {
     </div>
 
     <p v-if="errorMessage" class="login-target-module__error" role="alert">{{ errorMessage }}</p>
+    <p v-if="!canReadActivePanel" class="iam-field-help" role="status">当前账号可以进入此面板，但没有对应的读取权限；列表与刷新已禁用，管理按钮仍按各自 create/update/delete 权限显示。</p>
 
     <div class="iam-workspace">
       <aside class="iam-panel-nav" aria-label="身份与授权功能导航">
@@ -1643,11 +1666,11 @@ onBeforeUnmount(() => {
           <div><h3>{{ panel.label }}</h3><p>{{ panel.description }}</p></div>
           <div class="iam-panel-actions">
             <button class="console-button ghost small" type="button" @click="resetFilters"><ConsoleIcon name="reset" />清空筛选</button>
-            <button class="console-button ghost small" type="button" :disabled="activeLoading" @click="reloadActive"><ConsoleIcon name="refresh" />刷新</button>
-            <button v-if="['users', 'accounts', 'organizations', 'positions', 'memberships'].includes(activePanel)" class="console-button ghost small" type="button" :disabled="!activePanelItemsCount" @click="exportActivePanelCsv" title="导出当前筛选结果为 CSV"><ConsoleIcon name="download" />导出 CSV</button>
-            <button v-if="activePanel === 'users' && hasPermission(IAM_PERMISSIONS.userWrite)" class="console-button primary small" type="button" @click="openEditor('user')"><ConsoleIcon name="plus" />新增用户</button>
-            <button v-if="activePanel === 'users' && hasPermission(IAM_PERMISSIONS.userWrite)" class="console-button ghost small" type="button" @click="openEditor('user-batch')"><ConsoleIcon name="plus" />批量新增用户</button>
-            <button v-if="activePanel === 'users' && hasPermission(IAM_PERMISSIONS.userWrite)" class="console-button ghost small" type="button" @click="batchImportVisible = true"><ConsoleIcon name="download" />批量导入</button>
+            <button class="console-button ghost small" type="button" :disabled="activeLoading || !canReadActivePanel" @click="reloadActive"><ConsoleIcon name="refresh" />刷新</button>
+            <button v-if="canReadActivePanel && ['users', 'accounts', 'organizations', 'positions', 'memberships'].includes(activePanel)" class="console-button ghost small" type="button" :disabled="!activePanelItemsCount" @click="exportActivePanelCsv" title="导出当前筛选结果为 CSV"><ConsoleIcon name="download" />导出 CSV</button>
+            <button v-if="activePanel === 'users' && hasPermission(IAM_PERMISSIONS.userCreate)" class="console-button primary small" type="button" @click="openEditor('user')"><ConsoleIcon name="plus" />新增用户</button>
+            <button v-if="activePanel === 'users' && hasPermission(IAM_PERMISSIONS.userCreate)" class="console-button ghost small" type="button" @click="openEditor('user-batch')"><ConsoleIcon name="plus" />批量新增用户</button>
+            <button v-if="activePanel === 'users' && hasPermission(IAM_PERMISSIONS.userCreate)" class="console-button ghost small" type="button" @click="batchImportVisible = true"><ConsoleIcon name="download" />批量导入</button>
             <button v-else-if="panelToKind[activePanel] && hasPermission(panelCreatePermission(activePanel))" class="console-button primary small" type="button" :disabled="!panelToKind[activePanel]" @click="openEditorForActivePanel"><ConsoleIcon name="plus" />新增{{ editorLabels[panelToKind[activePanel]] || '' }}</button>
           </div>
         </header>
@@ -1670,7 +1693,7 @@ onBeforeUnmount(() => {
             <thead><tr><th>登录账号</th><th>关联用户</th><th>认证方式</th><th>有效时间</th><th>状态</th><th>更新时间</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
             <tr v-if="loading.accounts"><td class="console-empty" data-empty="true" colspan="7">正在读取登录账号…</td></tr>
             <tr v-else-if="!filteredAccounts.length"><td class="console-empty" colspan="7">暂无登录账号记录。可点击右上角“新增登录账号”创建。</td></tr>
-            <tr v-for="item in filteredAccounts" :key="item.account_id"><td data-label="登录账号"><div class="iam-account-identity"><span class="iam-account-avatar">{{ (item.account_name || '?').slice(0, 1).toUpperCase() }}</span><span><strong>{{ item.account_name }}</strong></span></div></td><td data-label="关联用户"><span class="iam-linked-user" :title="item.user_id || ''"><ConsoleIcon name="user" />{{ item.user?.display_name || item.user?.name || '—' }}</span></td><td data-label="认证方式"><div class="iam-auth-tags"><span class="iam-type-tag">{{ displayLoginAccountType(item).split(' / ')[0] }}</span><span class="iam-source-tag">{{ displayLoginAccountType(item).split(' / ')[1] }}</span></div></td><td data-label="有效时间"><div class="iam-validity"><span class="iam-validity-chip" :class="item.valid_until ? 'is-temporary' : 'is-permanent'">{{ item.valid_until ? '临时账号' : '永久账号' }}</span><small>{{ item.valid_until ? formatDateTime(item.valid_until) : '长期有效' }}</small></div></td><td data-label="状态"><span class="console-badge" :class="(item.status || '').toUpperCase() === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(item.status) }}</span></td><td data-label="更新时间" class="console-mono iam-account-updated">{{ formatDateTime(item.updated_at) }}</td><td data-label="操作" class="console-actions-cell iam-account-actions"><button class="console-text-button" type="button" @click="openDetail('account', item)">详情</button><button v-if="isAccountStatusManageable(item.status) && hasPermission(IAM_PERMISSIONS.accountWrite)" class="console-text-button" :class="{ danger: (item.status || '').toUpperCase() === 'ACTIVE' }" type="button" :disabled="updatingAccountId === item.account_id" @click="toggleAccountStatus(item)">{{ updatingAccountId === item.account_id ? '处理中…' : ((item.status || '').toUpperCase() === 'ACTIVE' ? '停用' : '启用') }}</button><button v-if="hasPermission(IAM_PERMISSIONS.accountResetPassword)" class="console-text-button danger" type="button" @click="openPasswordResetForAccount(item)">重置密码</button></td></tr>
+            <tr v-for="item in filteredAccounts" :key="item.account_id"><td data-label="登录账号"><div class="iam-account-identity"><span class="iam-account-avatar">{{ (item.account_name || '?').slice(0, 1).toUpperCase() }}</span><span><strong>{{ item.account_name }}</strong></span></div></td><td data-label="关联用户"><span class="iam-linked-user" :title="item.user_id || ''"><ConsoleIcon name="user" />{{ item.user?.display_name || item.user?.name || '—' }}</span></td><td data-label="认证方式"><div class="iam-auth-tags"><span class="iam-type-tag">{{ displayLoginAccountType(item).split(' / ')[0] }}</span><span class="iam-source-tag">{{ displayLoginAccountType(item).split(' / ')[1] }}</span></div></td><td data-label="有效时间"><div class="iam-validity"><span class="iam-validity-chip" :class="item.valid_until ? 'is-temporary' : 'is-permanent'">{{ item.valid_until ? '临时账号' : '永久账号' }}</span><small>{{ item.valid_until ? formatDateTime(item.valid_until) : '长期有效' }}</small></div></td><td data-label="状态"><span class="console-badge" :class="(item.status || '').toUpperCase() === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(item.status) }}</span></td><td data-label="更新时间" class="console-mono iam-account-updated">{{ formatDateTime(item.updated_at) }}</td><td data-label="操作" class="console-actions-cell iam-account-actions"><button class="console-text-button" type="button" @click="openDetail('account', item)">详情</button><button v-if="isAccountStatusManageable(item.status) && hasPermission(IAM_PERMISSIONS.accountUpdate)" class="console-text-button" :class="{ danger: (item.status || '').toUpperCase() === 'ACTIVE' }" type="button" :disabled="updatingAccountId === item.account_id" @click="toggleAccountStatus(item)">{{ updatingAccountId === item.account_id ? '处理中…' : ((item.status || '').toUpperCase() === 'ACTIVE' ? '停用' : '启用') }}</button><button v-if="hasPermission(IAM_PERMISSIONS.accountPasswordReset)" class="console-text-button danger" type="button" @click="openPasswordResetForAccount(item)">重置密码</button></td></tr>
           </tbody></table></div></div>
         </section>
 
@@ -1682,7 +1705,7 @@ onBeforeUnmount(() => {
             <thead><tr><th>组织单元</th><th>上级组织 ID</th><th>排序</th><th>状态</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
             <tr v-if="loading.organizations"><td class="console-empty" colspan="5">正在读取组织…</td></tr>
             <tr v-else-if="!filteredOrganizations.length"><td class="console-empty" colspan="5">暂无组织记录。</td></tr>
-            <tr v-for="item in filteredOrganizations" :key="item.org_unit_id"><td data-label="组织单元"><strong>{{ item.name }}</strong><span class="console-entity-meta console-mono">{{ item.code }} · <button class="console-id-button" type="button" :title="`复制 ${item.org_unit_id}`" @click="copyText(item.org_unit_id, { success: '组织 ID 已复制' })">{{ item.org_unit_id }}</button></span></td><td data-label="上级组织 ID" class="console-mono">{{ item.parent_id || '—' }}</td><td data-label="排序">{{ item.sort_order ?? 0 }}</td><td data-label="状态"><span class="console-badge" :class="(item.status || '').toUpperCase() === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(item.status) }}</span></td><td data-label="操作" class="console-actions-cell"><button class="console-text-button" type="button" @click="openDetail('organization', item)">详情</button><button v-if="hasPermission(IAM_PERMISSIONS.organizationWrite)" class="console-text-button" type="button" @click="openOrganizationEditor(item)">编辑</button><button v-if="hasPermission(IAM_PERMISSIONS.organizationDelete)" class="console-text-button danger" type="button" :disabled="deletingOrganizationId === item.org_unit_id" @click="removeOrganization(item)">{{ deletingOrganizationId === item.org_unit_id ? '删除中…' : '删除' }}</button></td></tr>
+            <tr v-for="item in filteredOrganizations" :key="item.org_unit_id"><td data-label="组织单元"><strong>{{ item.name }}</strong><span class="console-entity-meta console-mono">{{ item.code }} · <button class="console-id-button" type="button" :title="`复制 ${item.org_unit_id}`" @click="copyText(item.org_unit_id, { success: '组织 ID 已复制' })">{{ item.org_unit_id }}</button></span></td><td data-label="上级组织 ID" class="console-mono">{{ item.parent_id || '—' }}</td><td data-label="排序">{{ item.sort_order ?? 0 }}</td><td data-label="状态"><span class="console-badge" :class="(item.status || '').toUpperCase() === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(item.status) }}</span></td><td data-label="操作" class="console-actions-cell"><button class="console-text-button" type="button" @click="openDetail('organization', item)">详情</button><button v-if="hasPermission(IAM_PERMISSIONS.organizationUpdate)" class="console-text-button" type="button" @click="openOrganizationEditor(item)">编辑</button><button v-if="hasPermission(IAM_PERMISSIONS.organizationDelete)" class="console-text-button danger" type="button" :disabled="deletingOrganizationId === item.org_unit_id" @click="removeOrganization(item)">{{ deletingOrganizationId === item.org_unit_id ? '删除中…' : '删除' }}</button></td></tr>
           </tbody></table></div></div>
         </section>
 
@@ -1698,7 +1721,7 @@ onBeforeUnmount(() => {
           </tbody></table></div></div>
         </section>
 
-        <PositionAuthorizationTemplates v-else-if="activePanel === 'positionAuthorizationTemplates' && hasPermission(IAM_PERMISSIONS.authorizationWrite)" ref="positionAuthorizationTemplates" @toast="emitToast" />
+        <PositionAuthorizationTemplates v-else-if="activePanel === 'positionAuthorizationTemplates'" ref="positionAuthorizationTemplates" @toast="emitToast" />
 
         <section v-else-if="activePanel === 'memberships'" class="iam-table-section">
           <div class="iam-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="panelFilters.memberships" type="search" placeholder="用户 / 组织 / 岗位" /></label><span>{{ filteredMemberships.length }} / 共 {{ pagination.memberships.total }} 条任职关系</span></div>
@@ -1856,7 +1879,7 @@ onBeforeUnmount(() => {
             </div>
           </template>
         </section>
-        <footer><button class="console-button ghost" type="button" :disabled="applicationAccessSaving || applicationAccessRevoking" @click="closeDetail">关闭</button><button v-if="supportsApplicationAuthorization && selectedApplicationCode && hasDirectApplicationAccess && hasPermission(IAM_PERMISSIONS.authorizationWrite)" class="console-button danger" type="button" :disabled="applicationAccessSaving || applicationAccessRevoking" @click="revokeApplicationAccess">{{ applicationAccessRevoking ? '撤销中…' : '撤销例外授权' }}</button><button v-if="supportsApplicationAuthorization && selectedApplicationCode && hasPermission(IAM_PERMISSIONS.authorizationWrite)" class="console-button primary" type="button" :disabled="applicationsLoading || authorizationCatalogLoading || applicationAccessLoading || applicationAccessSaving || applicationAccessRevoking || !authorizationRoleOptions.length" @click="saveApplicationAccess"><ConsoleIcon name="save" />{{ applicationAccessSaving ? '保存中…' : '保存例外角色' }}</button></footer>
+        <footer><button class="console-button ghost" type="button" :disabled="applicationAccessSaving || applicationAccessRevoking" @click="closeDetail">关闭</button><button v-if="supportsApplicationAuthorization && selectedApplicationCode && hasDirectApplicationAccess && hasPermission(IAM_PERMISSIONS.roleBindingUpdate)" class="console-button danger" type="button" :disabled="applicationAccessSaving || applicationAccessRevoking" @click="revokeApplicationAccess">{{ applicationAccessRevoking ? '撤销中…' : '撤销例外授权' }}</button><button v-if="supportsApplicationAuthorization && selectedApplicationCode && hasPermission(IAM_PERMISSIONS.roleBindingUpdate)" class="console-button primary" type="button" :disabled="applicationsLoading || authorizationCatalogLoading || applicationAccessLoading || applicationAccessSaving || applicationAccessRevoking || !authorizationRoleOptions.length" @click="saveApplicationAccess"><ConsoleIcon name="save" />{{ applicationAccessSaving ? '保存中…' : '保存例外角色' }}</button></footer>
       </section>
     </div>
 

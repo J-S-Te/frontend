@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import {
   DictionaryError,
@@ -10,6 +10,8 @@ import {
   updateDictionary,
   updateDictionaryItem,
 } from '@/modules/platform/dictionaries/api/dictionaries'
+import { hasPermission } from '@/modules/platform/auth/utils/principal'
+import { DICTIONARY_PERMISSIONS } from '@/modules/platform/dictionaries/utils/dictionaryPermissions'
 import '@/modules/platform/dictionaries/styles/dictionary-management.css'
 
 const emit = defineEmits(['toast'])
@@ -45,6 +47,12 @@ const itemSubmitting = ref(false)
 const itemFormError = ref('')
 const itemForm = reactive(emptyItemForm())
 
+const canReadDictionaries = computed(() => hasPermission(DICTIONARY_PERMISSIONS.dictionaryRead))
+const canCreateDictionary = computed(() => hasPermission(DICTIONARY_PERMISSIONS.dictionaryCreate))
+const canUpdateDictionary = computed(() => hasPermission(DICTIONARY_PERMISSIONS.dictionaryUpdate))
+const canReadItems = computed(() => hasPermission(DICTIONARY_PERMISSIONS.itemRead))
+const canCreateItem = computed(() => hasPermission(DICTIONARY_PERMISSIONS.itemCreate))
+const canUpdateItem = computed(() => hasPermission(DICTIONARY_PERMISSIONS.itemUpdate))
 const selectedDictionary = computed(() => dictionaries.value.find((entry) => dictionaryID(entry) === selectedDictionaryId.value) || null)
 const dictionaryTotalPages = computed(() => Math.max(1, Math.ceil(dictionaryTotal.value / dictionaryPageSize)))
 const itemTotalPages = computed(() => Math.max(1, Math.ceil(itemTotal.value / itemPageSize)))
@@ -95,6 +103,13 @@ function showToast(message) {
 }
 
 async function loadDictionaries({ preserveSelection = true } = {}) {
+  if (!canReadDictionaries.value) {
+    dictionaries.value = []
+    dictionaryTotal.value = 0
+    selectedDictionaryId.value = ''
+    dictionaryError.value = ''
+    return
+  }
   dictionaryLoading.value = true
   dictionaryError.value = ''
   const previousSelection = preserveSelection ? selectedDictionaryId.value : ''
@@ -128,9 +143,10 @@ async function loadDictionaries({ preserveSelection = true } = {}) {
 }
 
 async function loadItems() {
-  if (!selectedDictionaryId.value) {
+  if (!selectedDictionaryId.value || !canReadItems.value) {
     items.value = []
     itemTotal.value = 0
+    itemError.value = ''
     return
   }
 
@@ -203,6 +219,7 @@ function setItemPage(nextPage) {
 }
 
 function openCreateDictionary() {
+  if (!canCreateDictionary.value) return
   editingDictionary.value = null
   dictionaryFormError.value = ''
   Object.assign(dictionaryForm, emptyDictionaryForm())
@@ -210,6 +227,7 @@ function openCreateDictionary() {
 }
 
 function openEditDictionary(dictionary) {
+  if (!canUpdateDictionary.value) return
   editingDictionary.value = dictionary
   dictionaryFormError.value = ''
   Object.assign(dictionaryForm, {
@@ -232,6 +250,7 @@ function closeDictionaryEditor() {
 
 async function submitDictionary() {
   if (dictionarySubmitting.value) return
+  if (editingDictionary.value ? !canUpdateDictionary.value : !canCreateDictionary.value) return
   dictionarySubmitting.value = true
   dictionaryFormError.value = ''
   try {
@@ -257,7 +276,7 @@ async function submitDictionary() {
     const savedID = dictionaryID(saved) || dictionaryID(editingDictionary.value)
     dictionaryEditorOpen.value = false
     editingDictionary.value = null
-    await loadDictionaries()
+    if (canReadDictionaries.value) await loadDictionaries()
     if (savedID && dictionaries.value.some((entry) => dictionaryID(entry) === savedID)) selectedDictionaryId.value = savedID
     showToast(`字典已${dictionaryForm.version ? '更新' : '创建'}。`)
     Object.assign(dictionaryForm, emptyDictionaryForm())
@@ -269,7 +288,7 @@ async function submitDictionary() {
 }
 
 function openCreateItem() {
-  if (!selectedDictionary.value) return
+  if (!selectedDictionary.value || !canCreateItem.value) return
   editingItem.value = null
   itemFormError.value = ''
   Object.assign(itemForm, emptyItemForm())
@@ -277,6 +296,7 @@ function openCreateItem() {
 }
 
 function openEditItem(item) {
+  if (!canUpdateItem.value) return
   editingItem.value = item
   itemFormError.value = ''
   Object.assign(itemForm, {
@@ -300,6 +320,7 @@ function closeItemEditor() {
 
 async function submitItem() {
   if (!selectedDictionary.value || itemSubmitting.value) return
+  if (editingItem.value ? !canUpdateItem.value : !canCreateItem.value) return
   itemSubmitting.value = true
   itemFormError.value = ''
   try {
@@ -328,7 +349,10 @@ async function submitItem() {
     const action = itemForm.version ? '更新' : '创建'
     itemEditorOpen.value = false
     editingItem.value = null
-    await Promise.all([loadItems(), loadDictionaries()])
+    await Promise.all([
+      canReadItems.value ? loadItems() : Promise.resolve(),
+      canReadDictionaries.value ? loadDictionaries() : Promise.resolve(),
+    ])
     showToast(`字典项已${action}。`)
     Object.assign(itemForm, emptyItemForm())
   } catch (error) {
@@ -345,114 +369,123 @@ watch(selectedDictionaryId, () => {
   loadItems()
 })
 
-onMounted(() => loadDictionaries())
+// Principal is populated asynchronously after route entry. React to that grant instead of
+// permanently rendering an empty catalog when the component mounted before /auth/me returned.
+watch(canReadDictionaries, (granted, previouslyGranted) => {
+  if (granted && !previouslyGranted) {
+    loadDictionaries()
+    return
+  }
+  if (!granted) {
+    dictionaries.value = []
+    dictionaryTotal.value = 0
+    selectedDictionaryId.value = ''
+  }
+}, { immediate: true })
 </script>
 
 <template>
-  <section class="dictionary-module">
-    <header class="dictionary-module__head">
-      <div>
-        <span class="dictionary-module__eyebrow"><ConsoleIcon name="dashboard" />BUSINESS DICTIONARY</span>
-        <h2>字典管理</h2>
-        <p>集中维护稳定编码、中文名称和可选值。业务代码保存 value，界面展示 label；历史值应优先停用而不是删除。</p>
+  <section class="dictionary-module" aria-labelledby="dictionary-heading">
+    <div class="so-summary-grid" aria-label="字典统计">
+      <article class="so-summary-card blue"><span><ConsoleIcon name="dashboard" /></span><div><small>字典总数</small><strong>{{ dictionaryTotal }}</strong><p>当前租户的业务字典</p></div></article>
+      <article class="so-summary-card violet"><span><ConsoleIcon name="info" /></span><div><small>当前页启用</small><strong>{{ activeDictionaryCount }}</strong><p>本页已启用字典</p></div></article>
+      <article class="so-summary-card orange"><span><ConsoleIcon name="settings" /></span><div><small>当前字典项</small><strong>{{ itemTotal }}</strong><p>{{ selectedDictionary?.name || '尚未选择字典' }}</p></div></article>
+      <article class="so-summary-card green"><span><ConsoleIcon name="shield" /></span><div><small>当前页启用项</small><strong>{{ activeItemCount }}</strong><p>历史值建议停用而非删除</p></div></article>
+    </div>
+
+    <section class="so-content">
+      <header class="so-panel-head dictionary-panel-head">
+        <div><h2 id="dictionary-heading">字典管理</h2><p>集中维护稳定编码、中文名称和可选值；业务保存 value，界面展示 label。</p></div>
+        <button v-if="canCreateDictionary" class="console-button primary" type="button" @click="openCreateDictionary"><ConsoleIcon name="info" />新建字典</button>
+      </header>
+
+      <div class="dictionary-workspace">
+        <aside class="so-card dictionary-catalog" aria-label="字典目录">
+          <header class="dictionary-section-head"><div><h3>字典目录</h3><p>选择字典后维护对应选项</p></div><span class="so-status">{{ dictionaryTotal }} 个</span></header>
+          <div v-if="canReadDictionaries" class="console-filter-bar dictionary-catalog__toolbar">
+            <label class="console-search-field"><ConsoleIcon name="search" /><input v-model="dictionaryKeyword" type="search" maxlength="100" placeholder="编码 / 名称 / 描述" @keyup.enter="applyDictionaryFilter" /></label>
+            <label class="console-select-field"><select v-model="dictionaryStatus" aria-label="字典状态" @change="applyDictionaryFilter"><option value="">全部状态</option><option value="ACTIVE">启用</option><option value="DISABLED">停用</option></select></label>
+            <button class="console-button ghost small" type="button" :disabled="dictionaryLoading" @click="applyDictionaryFilter">查询</button>
+            <button class="console-button ghost small" type="button" :disabled="dictionaryLoading" @click="resetDictionaryFilter"><ConsoleIcon name="reset" />重置</button>
+          </div>
+
+          <p v-if="dictionaryError" class="dictionary-module__error" role="alert">{{ dictionaryError }}</p>
+          <div class="dictionary-catalog__list">
+            <div v-if="dictionaryLoading" class="dictionary-module__empty">正在读取业务字典…</div>
+            <div v-else-if="!canReadDictionaries" class="dictionary-module__empty"><ConsoleIcon name="shield" /><strong>没有字典读取权限</strong><span v-if="canCreateDictionary">你仍可新建字典。</span><span v-else>请联系平台管理员授予字典读取权限。</span></div>
+            <div v-else-if="!dictionaries.length" class="dictionary-module__empty"><ConsoleIcon name="info" /><strong>暂无业务字典</strong><span v-if="canCreateDictionary">点击“新建字典”开始维护统一选项。</span><span v-else>当前租户尚未配置业务字典。</span></div>
+            <button v-for="dictionary in dictionaries" v-else :key="dictionaryID(dictionary)" class="dictionary-card" :class="{ active: selectedDictionaryId === dictionaryID(dictionary) }" type="button" @click="selectDictionary(dictionary)">
+              <span class="dictionary-card__top"><code>{{ dictionary.code }}</code><span class="console-badge" :class="dictionary.status === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ dictionary.status === 'ACTIVE' ? '启用' : '停用' }}</span></span>
+              <strong>{{ dictionary.name }}</strong>
+              <small>{{ dictionary.description || '暂无说明' }}</small>
+              <span class="dictionary-card__meta"><b>{{ dictionary.item_count || 0 }} 项</b><time>{{ formatDate(dictionary.updated_at) }}</time></span>
+            </button>
+          </div>
+          <footer v-if="canReadDictionaries" class="console-table-footer dictionary-pagination"><span>共 {{ dictionaryTotal }} 个</span><div><button class="console-button ghost small" type="button" :disabled="dictionaryPage <= 1 || dictionaryLoading" @click="setDictionaryPage(dictionaryPage - 1)">上一页</button><b>{{ dictionaryPage }} / {{ dictionaryTotalPages }}</b><button class="console-button ghost small" type="button" :disabled="dictionaryPage >= dictionaryTotalPages || dictionaryLoading" @click="setDictionaryPage(dictionaryPage + 1)">下一页</button></div></footer>
+        </aside>
+
+        <article class="so-card dictionary-items-panel">
+          <template v-if="selectedDictionary">
+            <header class="dictionary-items-panel__head">
+              <div><span>当前字典</span><h3>{{ selectedDictionary.name }}</h3><p><code>{{ selectedDictionary.code }}</code> · {{ selectedDictionary.description || '暂无说明' }}</p></div>
+              <div class="dictionary-header-actions"><button v-if="canUpdateDictionary" class="console-button ghost" type="button" @click="openEditDictionary(selectedDictionary)">编辑字典</button><button v-if="canCreateItem" class="console-button primary" type="button" @click="openCreateItem">新增字典项</button></div>
+            </header>
+
+            <div v-if="canReadItems" class="console-filter-bar dictionary-items-toolbar">
+              <label class="console-search-field"><ConsoleIcon name="search" /><input v-model="itemKeyword" type="search" maxlength="100" placeholder="项编码 / 名称 / 值" @keyup.enter="applyItemFilter" /></label>
+              <label class="console-select-field"><select v-model="itemStatus" aria-label="字典项状态" @change="applyItemFilter"><option value="">全部状态</option><option value="ACTIVE">启用</option><option value="DISABLED">停用</option></select></label>
+              <button class="console-button ghost small" type="button" :disabled="itemLoading" @click="applyItemFilter">查询</button>
+              <button class="console-button ghost small" type="button" :disabled="itemLoading" @click="resetItemFilter"><ConsoleIcon name="reset" />重置</button>
+            </div>
+
+            <p v-if="itemError" class="dictionary-module__error" role="alert">{{ itemError }}</p>
+            <div v-if="canReadItems" class="console-table-scroll dictionary-table-wrap">
+              <table class="console-data-table dictionary-items-table">
+                <thead><tr><th>显示名称</th><th>项编码</th><th>实际值</th><th>排序</th><th>状态</th><th>更新时间</th><th class="console-actions-cell">操作</th></tr></thead>
+                <tbody>
+                  <tr v-if="itemLoading"><td colspan="7" class="console-empty">正在读取字典项…</td></tr>
+                  <tr v-else-if="!items.length"><td colspan="7" class="console-empty">当前字典暂无符合条件的字典项。</td></tr>
+                  <tr v-for="item in items" v-else :key="itemID(item)">
+                    <td><strong class="console-entity-name">{{ item.label }}</strong></td><td class="console-mono">{{ item.code }}</td><td class="console-mono">{{ item.value }}</td><td>{{ item.sort_order }}</td>
+                    <td><span class="console-badge" :class="item.status === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ item.status === 'ACTIVE' ? '启用' : '停用' }}</span></td>
+                    <td>{{ formatDate(item.updated_at) }}</td><td class="console-actions-cell"><button v-if="canUpdateItem" class="console-text-button" type="button" @click="openEditItem(item)">编辑</button><span v-else>—</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <footer v-if="canReadItems" class="console-table-footer dictionary-pagination"><span>共 {{ itemTotal }} 项</span><div><button class="console-button ghost small" type="button" :disabled="itemPage <= 1 || itemLoading" @click="setItemPage(itemPage - 1)">上一页</button><b>{{ itemPage }} / {{ itemTotalPages }}</b><button class="console-button ghost small" type="button" :disabled="itemPage >= itemTotalPages || itemLoading" @click="setItemPage(itemPage + 1)">下一页</button></div></footer>
+            <div v-else class="dictionary-items-panel__placeholder"><ConsoleIcon name="shield" /><h3>没有字典项读取权限</h3><p v-if="canCreateItem">你仍可向当前字典新增选项。</p><p v-else>请联系平台管理员授予字典项读取权限。</p></div>
+          </template>
+          <div v-else class="dictionary-items-panel__placeholder"><ConsoleIcon name="dashboard" /><h3>请选择一个字典</h3><p>选择左侧字典后，可以维护其字典项、排序和启停状态。</p></div>
+        </article>
       </div>
-      <button class="console-button primary" type="button" @click="openCreateDictionary"><ConsoleIcon name="info" /> 新建字典</button>
-    </header>
+    </section>
 
-    <div class="dictionary-module__summary" aria-label="字典统计">
-      <div><span>当前页字典</span><strong>{{ dictionaries.length }}</strong><small>其中 {{ activeDictionaryCount }} 个启用</small></div>
-      <div><span>所选字典项</span><strong>{{ itemTotal }}</strong><small>当前页 {{ activeItemCount }} 个启用</small></div>
-      <div><span>数据边界</span><strong>租户级</strong><small>不同租户数据相互隔离</small></div>
-    </div>
-
-    <div class="dictionary-module__layout">
-      <aside class="dictionary-catalog">
-        <div class="dictionary-catalog__toolbar">
-          <label class="dictionary-search"><ConsoleIcon name="search" /><input v-model="dictionaryKeyword" type="search" maxlength="100" placeholder="编码 / 名称 / 描述" @keyup.enter="applyDictionaryFilter" /></label>
-          <select v-model="dictionaryStatus" aria-label="字典状态" @change="applyDictionaryFilter">
-            <option value="">全部状态</option>
-            <option value="ACTIVE">启用</option>
-            <option value="DISABLED">停用</option>
-          </select>
-          <button class="dictionary-icon-button" type="button" aria-label="查询字典" :disabled="dictionaryLoading" @click="applyDictionaryFilter"><ConsoleIcon name="search" /></button>
-          <button class="dictionary-icon-button" type="button" aria-label="清空字典筛选" :disabled="dictionaryLoading" @click="resetDictionaryFilter"><ConsoleIcon name="reset" /></button>
+    <div v-if="dictionaryEditorOpen" class="console-modal-backdrop" role="presentation" @click.self="closeDictionaryEditor">
+      <form class="console-detail-modal dictionary-dialog" role="dialog" aria-modal="true" :aria-label="editingDictionary ? '编辑字典' : '新建字典'" @submit.prevent="submitDictionary">
+        <header><div><p class="console-modal-eyebrow">字典定义</p><h2>{{ editingDictionary ? '编辑字典' : '新建字典' }}</h2></div><button class="console-modal-close" type="button" aria-label="关闭" @click="closeDictionaryEditor"><ConsoleIcon name="close" /></button></header>
+        <div class="console-form-grid dictionary-dialog__body">
+          <label class="console-form-item"><span>字典编码 *</span><input v-model="dictionaryForm.code" required maxlength="64" pattern="[A-Za-z0-9_.-]+" autocomplete="off" placeholder="例如 AUDIT_ACTION_TYPE" /><small>仅允许字母、数字、下划线、点和短横线。</small></label>
+          <label class="console-form-item"><span>字典名称 *</span><input v-model="dictionaryForm.name" required maxlength="100" autocomplete="off" placeholder="例如 审计操作类型" /></label>
+          <label class="console-form-item full"><span>说明</span><textarea v-model="dictionaryForm.description" maxlength="500" rows="3" placeholder="说明这个字典由哪些业务模块使用"></textarea><small>{{ dictionaryForm.description.length }} / 500</small></label>
+          <label class="console-form-item full"><span>状态 *</span><select v-model="dictionaryForm.status"><option value="ACTIVE">启用</option><option value="DISABLED">停用</option></select><small>停用后，按编码查询可选项的业务接口将返回空列表。</small></label>
         </div>
-
-        <p v-if="dictionaryError" class="dictionary-module__error" role="alert">{{ dictionaryError }}</p>
-        <div class="dictionary-catalog__list">
-          <div v-if="dictionaryLoading" class="dictionary-module__empty">正在读取业务字典…</div>
-          <div v-else-if="!dictionaries.length" class="dictionary-module__empty"><ConsoleIcon name="info" /><strong>暂无业务字典</strong><span>点击“新建字典”开始维护统一选项。</span></div>
-          <button v-for="dictionary in dictionaries" v-else :key="dictionaryID(dictionary)" class="dictionary-card" :class="{ active: selectedDictionaryId === dictionaryID(dictionary) }" type="button" @click="selectDictionary(dictionary)">
-            <span class="dictionary-card__top"><code>{{ dictionary.code }}</code><em :class="`is-${String(dictionary.status || '').toLowerCase()}`">{{ dictionary.status === 'ACTIVE' ? '启用' : '停用' }}</em></span>
-            <strong>{{ dictionary.name }}</strong>
-            <small>{{ dictionary.description || '暂无说明' }}</small>
-            <span class="dictionary-card__meta"><b>{{ dictionary.item_count || 0 }} 项</b><time>{{ formatDate(dictionary.updated_at) }}</time></span>
-          </button>
-        </div>
-        <footer class="dictionary-pagination">
-          <span>共 {{ dictionaryTotal }} 个</span>
-          <div><button type="button" :disabled="dictionaryPage <= 1 || dictionaryLoading" @click="setDictionaryPage(dictionaryPage - 1)">上一页</button><b>{{ dictionaryPage }} / {{ dictionaryTotalPages }}</b><button type="button" :disabled="dictionaryPage >= dictionaryTotalPages || dictionaryLoading" @click="setDictionaryPage(dictionaryPage + 1)">下一页</button></div>
-        </footer>
-      </aside>
-
-      <main class="dictionary-items-panel">
-        <template v-if="selectedDictionary">
-          <header class="dictionary-items-panel__head">
-            <div><span>当前字典</span><h3>{{ selectedDictionary.name }}</h3><p><code>{{ selectedDictionary.code }}</code> · {{ selectedDictionary.description || '暂无说明' }}</p></div>
-            <div><button class="console-button ghost" type="button" @click="openEditDictionary(selectedDictionary)">编辑字典</button><button class="console-button primary" type="button" @click="openCreateItem">新增字典项</button></div>
-          </header>
-
-          <div class="dictionary-items-toolbar">
-            <label class="dictionary-search"><ConsoleIcon name="search" /><input v-model="itemKeyword" type="search" maxlength="100" placeholder="项编码 / 名称 / 值" @keyup.enter="applyItemFilter" /></label>
-            <select v-model="itemStatus" aria-label="字典项状态" @change="applyItemFilter"><option value="">全部状态</option><option value="ACTIVE">启用</option><option value="DISABLED">停用</option></select>
-            <button class="console-button ghost small" type="button" :disabled="itemLoading" @click="applyItemFilter">查询</button>
-            <button class="console-button ghost small" type="button" :disabled="itemLoading" @click="resetItemFilter"><ConsoleIcon name="reset" /> 重置</button>
-          </div>
-
-          <p v-if="itemError" class="dictionary-module__error" role="alert">{{ itemError }}</p>
-          <div class="dictionary-table-wrap">
-            <table class="dictionary-table">
-              <thead><tr><th>显示名称</th><th>项编码</th><th>实际值</th><th>排序</th><th>状态</th><th>更新时间</th><th>操作</th></tr></thead>
-              <tbody>
-                <tr v-if="itemLoading"><td colspan="7" class="dictionary-table__state">正在读取字典项…</td></tr>
-                <tr v-else-if="!items.length"><td colspan="7" class="dictionary-table__state">当前字典暂无符合条件的字典项。</td></tr>
-                <tr v-for="item in items" v-else :key="itemID(item)">
-                  <td><strong>{{ item.label }}</strong></td><td><code>{{ item.code }}</code></td><td><code>{{ item.value }}</code></td><td>{{ item.sort_order }}</td>
-                  <td><span class="dictionary-status" :class="`is-${String(item.status || '').toLowerCase()}`">{{ item.status === 'ACTIVE' ? '启用' : '停用' }}</span></td>
-                  <td>{{ formatDate(item.updated_at) }}</td><td><button class="dictionary-text-button" type="button" @click="openEditItem(item)">编辑</button></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <footer class="dictionary-pagination is-items"><span>共 {{ itemTotal }} 项</span><div><button type="button" :disabled="itemPage <= 1 || itemLoading" @click="setItemPage(itemPage - 1)">上一页</button><b>{{ itemPage }} / {{ itemTotalPages }}</b><button type="button" :disabled="itemPage >= itemTotalPages || itemLoading" @click="setItemPage(itemPage + 1)">下一页</button></div></footer>
-        </template>
-        <div v-else class="dictionary-items-panel__placeholder"><ConsoleIcon name="dashboard" /><h3>请选择一个字典</h3><p>选择左侧字典后，可以维护其字典项、排序和启停状态。</p></div>
-      </main>
-    </div>
-
-    <div v-if="dictionaryEditorOpen" class="dictionary-dialog-backdrop" @click.self="closeDictionaryEditor">
-      <form class="dictionary-dialog" @submit.prevent="submitDictionary">
-        <header><div><span>DICTIONARY DEFINITION</span><h3>{{ editingDictionary ? '编辑字典' : '新建字典' }}</h3></div><button type="button" aria-label="关闭" @click="closeDictionaryEditor"><ConsoleIcon name="close" /></button></header>
-        <label><span>字典编码 *</span><input v-model="dictionaryForm.code" required maxlength="64" pattern="[A-Za-z0-9_.-]+" autocomplete="off" placeholder="例如 AUDIT_ACTION_TYPE" /><small>1–64 位，只允许字母、数字、下划线、点和短横线；业务代码会通过它查询字典项。</small></label>
-        <label><span>字典名称 *</span><input v-model="dictionaryForm.name" required maxlength="100" autocomplete="off" placeholder="例如 审计操作类型" /></label>
-        <label><span>说明</span><textarea v-model="dictionaryForm.description" maxlength="500" rows="3" placeholder="说明这个字典由哪些业务模块使用"></textarea><small>{{ dictionaryForm.description.length }} / 500</small></label>
-        <label><span>状态 *</span><select v-model="dictionaryForm.status"><option value="ACTIVE">启用</option><option value="DISABLED">停用</option></select><small>停用后，按编码查询可选项的业务接口将返回空列表。</small></label>
-        <p v-if="dictionaryFormError" class="dictionary-module__error" role="alert">{{ dictionaryFormError }}</p>
+        <p v-if="dictionaryFormError" class="dictionary-module__error dictionary-dialog__error" role="alert">{{ dictionaryFormError }}</p>
         <footer><button class="console-button ghost" type="button" :disabled="dictionarySubmitting" @click="closeDictionaryEditor">取消</button><button class="console-button primary" type="submit" :disabled="dictionarySubmitting"><ConsoleIcon name="save" />{{ dictionarySubmitting ? '保存中…' : '保存' }}</button></footer>
       </form>
     </div>
 
-    <div v-if="itemEditorOpen" class="dictionary-dialog-backdrop" @click.self="closeItemEditor">
-      <form class="dictionary-dialog" @submit.prevent="submitItem">
-        <header><div><span>DICTIONARY ITEM</span><h3>{{ editingItem ? '编辑字典项' : '新增字典项' }}</h3><p>{{ selectedDictionary?.name }}</p></div><button type="button" aria-label="关闭" @click="closeItemEditor"><ConsoleIcon name="close" /></button></header>
-        <div class="dictionary-dialog__grid">
-          <label><span>字典项编码 *</span><input v-model="itemForm.code" required maxlength="64" pattern="[A-Za-z0-9_.-]+" autocomplete="off" placeholder="例如 LOGIN" /></label>
-          <label><span>显示名称 *</span><input v-model="itemForm.label" required maxlength="100" autocomplete="off" placeholder="例如 登录" /></label>
-          <label><span>实际值 *</span><input v-model="itemForm.value" required maxlength="255" autocomplete="off" placeholder="例如 LOGIN" /><small>业务接口和数据库实际保存的值。</small></label>
-          <label><span>排序</span><input v-model.number="itemForm.sortOrder" type="number" min="0" step="1" /><small>数值越小越靠前。</small></label>
-          <label><span>状态 *</span><select v-model="itemForm.status"><option value="ACTIVE">启用</option><option value="DISABLED">停用</option></select></label>
+    <div v-if="itemEditorOpen" class="console-modal-backdrop" role="presentation" @click.self="closeItemEditor">
+      <form class="console-detail-modal dictionary-dialog" role="dialog" aria-modal="true" :aria-label="editingItem ? '编辑字典项' : '新增字典项'" @submit.prevent="submitItem">
+        <header><div><p class="console-modal-eyebrow">字典项 · {{ selectedDictionary?.name }}</p><h2>{{ editingItem ? '编辑字典项' : '新增字典项' }}</h2></div><button class="console-modal-close" type="button" aria-label="关闭" @click="closeItemEditor"><ConsoleIcon name="close" /></button></header>
+        <div class="console-form-grid dictionary-dialog__body">
+          <label class="console-form-item"><span>字典项编码 *</span><input v-model="itemForm.code" required maxlength="64" pattern="[A-Za-z0-9_.-]+" autocomplete="off" placeholder="例如 LOGIN" /></label>
+          <label class="console-form-item"><span>显示名称 *</span><input v-model="itemForm.label" required maxlength="100" autocomplete="off" placeholder="例如 登录" /></label>
+          <label class="console-form-item"><span>实际值 *</span><input v-model="itemForm.value" required maxlength="255" autocomplete="off" placeholder="例如 LOGIN" /><small>业务接口和数据库实际保存的值。</small></label>
+          <label class="console-form-item"><span>排序</span><input v-model.number="itemForm.sortOrder" type="number" min="0" step="1" /><small>数值越小越靠前。</small></label>
+          <label class="console-form-item full"><span>状态 *</span><select v-model="itemForm.status"><option value="ACTIVE">启用</option><option value="DISABLED">停用</option></select></label>
         </div>
-        <p v-if="itemFormError" class="dictionary-module__error" role="alert">{{ itemFormError }}</p>
+        <p v-if="itemFormError" class="dictionary-module__error dictionary-dialog__error" role="alert">{{ itemFormError }}</p>
         <footer><button class="console-button ghost" type="button" :disabled="itemSubmitting" @click="closeItemEditor">取消</button><button class="console-button primary" type="submit" :disabled="itemSubmitting"><ConsoleIcon name="save" />{{ itemSubmitting ? '保存中…' : '保存' }}</button></footer>
       </form>
     </div>

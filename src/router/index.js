@@ -9,6 +9,8 @@ import { ensureContractSession } from '@/modules/contract_management/api/contrac
 import { canAccessContractSection } from '@/modules/shared/authz/sys004'
 import { dispatchAuthorizationRefreshed } from '@/modules/platform/auth/utils/authorizationRefresh'
 import { hasAnyPermission as principalHasAnyPermission } from '@/modules/platform/auth/utils/permissions'
+import { DICTIONARY_ENTRY_PERMISSIONS } from '@/modules/platform/dictionaries/utils/dictionaryPermissions'
+import { IAM_ENTRY_PERMISSIONS } from '@/modules/platform/iam/utils/iamPermissions'
 
 const contractSections = ['dashboard', 'customers', 'contracts', 'templates', 'approvals', 'rules', 'signing', 'reports']
 
@@ -17,7 +19,6 @@ const settingsSections = new Set([
   'iam',
   'notify',
   'security',
-  'files',
   'dict',
 ])
 
@@ -55,11 +56,10 @@ const router = createRouter({
       meta: {
         title: '系统设置',
         requiresAuth: true,
-        // 路由级 OR 权限：用户管理 (user:read) 或 审计 (audit:view) 任一即可进入设置区。
-        // 进入后具体 tab 由各 section 的 component-level v-if 精细化控制；
-        // 例如纯审计员没有 user:read 也能进设置区，但 6 个 tab 全部 v-if 隐藏。
-        // 真正的禁用/拒绝仍由后端 403 执行，UI 隐藏只是体验优化。
-        permission: ['platform:user:read', 'platform:audit:view'],
+        // 路由级 OR 权限：IAM、字典或审计任一实际权限均可进入设置区。
+        // 进入后由 PlatformConsoleView 和各模块继续按真实权限细分 Tab、数据与按钮。
+        // 后端 403 仍是最终安全边界，前端只负责避免无关的 user:read 门槛。
+        permission: [...IAM_ENTRY_PERMISSIONS, ...DICTIONARY_ENTRY_PERMISSIONS, 'platform:audit:view'],
       },
     },
     {

@@ -2,7 +2,6 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { AuthError, logoutCurrentSession } from '@/modules/platform/auth/api/auth'
-import FileTaskOperationsModule from '@/modules/platform/files/components/FileTaskOperationsModule.vue'
 import IamSettingsModule from '@/modules/platform/iam/components/IamSettingsModule.vue'
 import EmployeeOnboardingModal from '@/modules/platform/iam/components/EmployeeOnboardingModal.vue'
 import NotificationCenterModule from '@/modules/platform/notifications/components/NotificationCenterModule.vue'
@@ -37,13 +36,10 @@ import {
   hasPermission,
   useCurrentPrincipal,
 } from '@/modules/platform/auth/utils/principal'
+import { DICTIONARY_ENTRY_PERMISSIONS } from '@/modules/platform/dictionaries/utils/dictionaryPermissions'
+import { IAM_ENTRY_PERMISSIONS, IAM_PERMISSIONS } from '@/modules/platform/iam/utils/iamPermissions'
 import '@/modules/platform/styles/console.css'
 import '@/modules/platform/styles/settings-showcase.css'
-
-// IAM 权限码必须与后端 authz_permission.code 完全一致；与 IamSettingsModule 同步维护。
-const IAM_PERMISSIONS = {
-  userWrite: 'platform:user:create',
-}
 
 const route = useRoute()
 const router = useRouter()
@@ -83,57 +79,56 @@ const onboardingPositions = ref([])
 
 const { refreshPrincipal } = useCurrentPrincipal()
 
-// 侧边栏：当前账号对系统管理两个入口都没有权限时给一个轻提示，避免空导航栏
-// 让用户误以为"页面没加载完"。路由级守卫已确保直接进入会跳到 /forbidden。
-const hasAnySettingsOrAuditPermission = computed(() =>
-  hasAnyPermission(['platform:user:read', 'platform:audit:view']),
-)
+const SETTINGS_NAV_PERMISSIONS = Object.freeze([
+  ...IAM_ENTRY_PERMISSIONS,
+  ...DICTIONARY_ENTRY_PERMISSIONS,
+  'platform:audit:view',
+])
+
+// 侧边栏：IAM、字典任一实际权限或审计权限都可显示系统管理入口，
+// 不再把 platform:user:read 当成所有设置模块的共同前置权限。
+const hasAnySettingsOrAuditPermission = computed(() => hasAnyPermission(SETTINGS_NAV_PERMISSIONS))
+const canOpenSettings = computed(() => hasAnyPermission(SETTINGS_NAV_PERMISSIONS))
 
 const settingsTabs = [
   {
     key: 'base', label: '平台基础信息', icon: 'settings', tone: 'blue',
     description: '维护平台名称与基础展示信息。',
     capabilities: ['平台名称', '平台简称'],
-    // 通知/安全/文件/字典/平台基础设置目前没有专门 read 权限码，
-    // 全部挂在 platform:user:read 下面；后续如果补了专用码再细分。
-    permission: 'platform:user:read',
+    // 该模块暂未提供独立 read 权限码，暂沿用 user:read；
+    // 这不会再影响 IAM Tab 的独立权限判断。
+    permissions: [IAM_PERMISSIONS.userRead],
   },
   {
     key: 'iam', label: '身份、组织与授权', icon: 'organization', tone: 'violet',
     description: '集中管理身份目录、组织架构与访问权限。',
     capabilities: ['新增组织单元', '新增岗位', '新增任职关系', '新增角色', '新增角色绑定', '新增权限注册'],
-    permission: 'platform:user:read',
+    permissions: IAM_ENTRY_PERMISSIONS,
   },
   {
     key: 'notify', label: '通知中心', icon: 'bell', tone: 'orange',
     description: '查看平台消息，并维护通知模板与投递记录。',
     capabilities: ['站内通知', '通知模板', '投递记录'],
-    permission: 'platform:user:read',
+    permissions: [IAM_PERMISSIONS.userRead],
   },
   {
     key: 'security', label: '安全设置', icon: 'shield', tone: 'red',
     description: '配置登录安全、会话超时和全局退出策略。',
     capabilities: ['登录安全', '会话策略', '超时退出'],
-    permission: 'platform:user:read',
-  },
-  {
-    key: 'files', label: '文件与任务', icon: 'audit', tone: 'green',
-    description: '管理审计导出、文件处理和异步任务结果。',
-    capabilities: ['审计导出', '文件任务', '结果下载'],
-    permission: 'platform:user:read',
+    permissions: [IAM_PERMISSIONS.userRead],
   },
   {
     key: 'dict', label: '字典管理', icon: 'dashboard', tone: 'slate',
-    description: '维护审计、风险和通知等平台统一枚举。',
-    capabilities: ['审计类型', '风险等级', '通知事件'],
-    permission: 'platform:user:read',
+    description: '维护各业务模块共用的稳定编码、展示名称和可选值。',
+    capabilities: ['字典定义', '字典项', '启停与排序'],
+    permissions: DICTIONARY_ENTRY_PERMISSIONS,
   },
 ]
 
 const settingsSectionKeys = new Set(settingsTabs.map((tab) => tab.key))
 // 当前账号对各 tab 都有权限的可见集合 + "一个都看不到"的判断。
 // 没有权限的 tab 不会渲染按钮，且 lastSettingsSection 不会落到无权限 tab 上。
-const visibleSettingsTabs = computed(() => settingsTabs.filter((tab) => hasPermission(tab.permission)))
+const visibleSettingsTabs = computed(() => settingsTabs.filter((tab) => hasAnyPermission(tab.permissions)))
 const hasNoVisibleSettingsTab = computed(() => visibleSettingsTabs.value.length === 0)
 const lastSettingsSection = ref('iam')
 const activeSettingsTab = computed({
@@ -554,7 +549,7 @@ onBeforeUnmount(() => {
       <nav class="console-nav" aria-label="平台导航">
         <p class="console-nav-label">系统管理</p>
         <button
-          v-if="hasAnyPermission(['platform:user:read', 'platform:audit:view'])"
+          v-if="canOpenSettings"
           class="console-nav-item"
           :class="{ active: currentView === 'settings' }"
           type="button"
@@ -597,7 +592,7 @@ onBeforeUnmount(() => {
         <div class="console-crumb"><span>基础能力平台</span><ConsoleIcon name="chevron" /><strong>{{ viewMeta.crumb }}</strong></div>
         <div class="console-topbar-actions">
           <button
-            v-if="hasPermission(IAM_PERMISSIONS.userWrite)"
+            v-if="hasPermission(IAM_PERMISSIONS.userCreate)"
             class="console-button primary small"
             type="button"
             @click="openEmployeeOnboarding"
@@ -702,7 +697,7 @@ onBeforeUnmount(() => {
           <div v-else class="settings-empty" role="status">
             <span class="settings-empty-icon" aria-hidden="true"><ConsoleIcon name="shield" /></span>
             <h3>当前账号没有可访问的设置模块</h3>
-            <p>请联系平台管理员授予 <code>platform:user:read</code> 等权限以查看身份组织与平台配置。</p>
+            <p>请联系平台管理员授予对应模块的读取或管理权限；IAM 不要求额外授予 <code>platform:user:read</code>。</p>
           </div>
 
           <div v-if="!hasNoVisibleSettingsTab && activeSettingsMeta" class="settings-active-summary" :class="activeSettingsMeta.tone">
@@ -736,8 +731,6 @@ onBeforeUnmount(() => {
 
           <LoginSecurityModule v-else-if="activeSettingsTab === 'security'" @toast="showToast" />
 
-
-          <FileTaskOperationsModule v-else-if="activeSettingsTab === 'files'" @toast="showToast" />
 
           <DictionaryManagementModule v-else-if="activeSettingsTab === 'dict'" @toast="showToast" />
         </section>
