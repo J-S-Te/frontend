@@ -3,6 +3,7 @@ import test from 'node:test'
 import {
   CONTRACT_PERMISSION_DEFINITIONS,
   CONTRACT_ROLE_DEFINITIONS,
+  CONTRACT_SECTION_PERMISSIONS,
   canAccessContractSection,
   effectiveContractPermissions,
   hasContractPermission,
@@ -42,4 +43,11 @@ test('sales can track initiated approvals but cannot configure rules', () => {
   const sales = { role: { code: 'sales' }, permissions: ['dashboard', 'contract.create'] }
   assert.equal(canAccessContractSection(sales, 'approvals'), true)
   assert.equal(canAccessContractSection(sales, 'rules'), false)
+})
+
+test('contract admin can access every contract module section', () => {
+  const admin = { role: { code: 'admin' }, permissions: ['contract.read'] }
+  for (const section of Object.keys(CONTRACT_SECTION_PERMISSIONS)) {
+    assert.equal(canAccessContractSection(admin, section), true, section)
+  }
 })

@@ -70,6 +70,9 @@ export const CONTRACT_SECTION_PERMISSIONS = Object.freeze({
 
 export function canAccessContractSection(session, section) {
   const roleCode = session?.role?.code
+  if (roleCode === 'admin') {
+    return Object.hasOwn(CONTRACT_SECTION_PERMISSIONS, section)
+  }
   if (['sales_director', 'tech_director', 'finance_director'].includes(roleCode)) {
     return ['dashboard', 'customers', 'contracts', 'approvals', 'rules', 'reports'].includes(section)
   }
