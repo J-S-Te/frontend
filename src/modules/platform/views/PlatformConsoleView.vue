@@ -33,6 +33,7 @@ import {
   updatePlatformSettings,
 } from '@/modules/platform/settings/api/platformSettings'
 import {
+  hasAnyPermission,
   hasPermission,
   useCurrentPrincipal,
 } from '@/modules/platform/auth/utils/principal'
@@ -82,48 +83,74 @@ const onboardingPositions = ref([])
 
 const { refreshPrincipal } = useCurrentPrincipal()
 
+// 侧边栏：当前账号对系统管理两个入口都没有权限时给一个轻提示，避免空导航栏
+// 让用户误以为"页面没加载完"。路由级守卫已确保直接进入会跳到 /forbidden。
+const hasAnySettingsOrAuditPermission = computed(() =>
+  hasAnyPermission(['platform:user:read', 'platform:audit:view']),
+)
+
 const settingsTabs = [
   {
     key: 'base', label: '平台基础信息', icon: 'settings', tone: 'blue',
     description: '维护平台名称与基础展示信息。',
     capabilities: ['平台名称', '平台简称'],
+    // 通知/安全/文件/字典/平台基础设置目前没有专门 read 权限码，
+    // 全部挂在 platform:user:read 下面；后续如果补了专用码再细分。
+    permission: 'platform:user:read',
   },
   {
     key: 'iam', label: '身份、组织与授权', icon: 'organization', tone: 'violet',
     description: '集中管理身份目录、组织架构与访问权限。',
     capabilities: ['新增组织单元', '新增岗位', '新增任职关系', '新增角色', '新增角色绑定', '新增权限注册'],
+    permission: 'platform:user:read',
   },
   {
     key: 'notify', label: '通知中心', icon: 'bell', tone: 'orange',
     description: '查看平台消息，并维护通知模板与投递记录。',
     capabilities: ['站内通知', '通知模板', '投递记录'],
+    permission: 'platform:user:read',
   },
   {
     key: 'security', label: '安全设置', icon: 'shield', tone: 'red',
     description: '配置登录安全、会话超时和全局退出策略。',
     capabilities: ['登录安全', '会话策略', '超时退出'],
+    permission: 'platform:user:read',
   },
   {
     key: 'files', label: '文件与任务', icon: 'audit', tone: 'green',
     description: '管理审计导出、文件处理和异步任务结果。',
     capabilities: ['审计导出', '文件任务', '结果下载'],
+    permission: 'platform:user:read',
   },
   {
     key: 'dict', label: '字典管理', icon: 'dashboard', tone: 'slate',
     description: '维护审计、风险和通知等平台统一枚举。',
     capabilities: ['审计类型', '风险等级', '通知事件'],
+    permission: 'platform:user:read',
   },
 ]
 
 const settingsSectionKeys = new Set(settingsTabs.map((tab) => tab.key))
+// 当前账号对各 tab 都有权限的可见集合 + "一个都看不到"的判断。
+// 没有权限的 tab 不会渲染按钮，且 lastSettingsSection 不会落到无权限 tab 上。
+const visibleSettingsTabs = computed(() => settingsTabs.filter((tab) => hasPermission(tab.permission)))
+const hasNoVisibleSettingsTab = computed(() => visibleSettingsTabs.value.length === 0)
 const lastSettingsSection = ref('iam')
 const activeSettingsTab = computed({
   get() {
     const section = typeof route.params.section === 'string' ? route.params.section : ''
-    return settingsSectionKeys.has(section) ? section : lastSettingsSection.value
+    if (settingsSectionKeys.has(section) && visibleSettingsTabs.value.some((tab) => tab.key === section)) {
+      return section
+    }
+    // 兜底：当前 section 没权限时落回第一个可见 tab，没有可见 tab 时回 'iam' 占位（由 v-if 拦截渲染）。
+    return visibleSettingsTabs.value[0]?.key || lastSettingsSection.value
   },
   set(section) {
     if (!settingsSectionKeys.has(section)) {
+      return
+    }
+    if (!visibleSettingsTabs.value.some((tab) => tab.key === section)) {
+      // 切到没权限的 tab 时直接拒绝，更不能写 lastSettingsSection。
       return
     }
     lastSettingsSection.value = section
@@ -133,9 +160,12 @@ const activeSettingsTab = computed({
   },
 })
 
-const activeSettingsMeta = computed(() => (
-  settingsTabs.find((tab) => tab.key === activeSettingsTab.value) || settingsTabs[0]
-))
+const activeSettingsMeta = computed(() => {
+  const found = settingsTabs.find((tab) => tab.key === activeSettingsTab.value)
+  if (found) return found
+  // 兜底：可见 tab 里第一个；完全没有可见 tab 时返回 null（template v-if 拦截）。
+  return visibleSettingsTabs.value[0] || null
+})
 
 // 前后端 result / risk 枚举到中文标签的映射，与后端 audit/application 层枚举保持一致。
 const RESULT_LABELS = { SUCCESS: '成功', DENIED: '拒绝', ERROR: '异常', PARTIAL: '部分成功' }
@@ -523,15 +553,30 @@ onBeforeUnmount(() => {
 
       <nav class="console-nav" aria-label="平台导航">
         <p class="console-nav-label">系统管理</p>
-        <button class="console-nav-item" :class="{ active: currentView === 'settings' }" type="button" @click="navigate('settings')">
+        <button
+          v-if="hasAnyPermission(['platform:user:read', 'platform:audit:view'])"
+          class="console-nav-item"
+          :class="{ active: currentView === 'settings' }"
+          type="button"
+          @click="navigate('settings')"
+        >
           <ConsoleIcon name="settings" />
           <span>系统设置</span>
         </button>
-        <button class="console-nav-item" :class="{ active: currentView === 'audit' }" type="button" @click="navigate('audit')">
+        <button
+          v-if="hasPermission('platform:audit:view')"
+          class="console-nav-item"
+          :class="{ active: currentView === 'audit' }"
+          type="button"
+          @click="navigate('audit')"
+        >
           <ConsoleIcon name="audit" />
           <span>审计日志</span>
           <span class="console-nav-note">只读</span>
         </button>
+        <p v-if="!hasAnySettingsOrAuditPermission" class="console-nav-empty">
+          当前账号未配置系统管理模块的访问权限。
+        </p>
       </nav>
 
       <div class="console-sidebar-note">
@@ -638,9 +683,9 @@ onBeforeUnmount(() => {
             </div>
           </header>
 
-          <nav class="settings-tab-bar" role="tablist" aria-label="系统设置分类">
+          <nav v-if="!hasNoVisibleSettingsTab" class="settings-tab-bar" role="tablist" aria-label="系统设置分类">
             <button
-              v-for="tab in settingsTabs"
+              v-for="tab in visibleSettingsTabs"
               :key="tab.key"
               class="settings-tab"
               :class="{ active: activeSettingsTab === tab.key }"
@@ -654,8 +699,13 @@ onBeforeUnmount(() => {
               <span>{{ tab.label }}</span>
             </button>
           </nav>
+          <div v-else class="settings-empty" role="status">
+            <span class="settings-empty-icon" aria-hidden="true"><ConsoleIcon name="shield" /></span>
+            <h3>当前账号没有可访问的设置模块</h3>
+            <p>请联系平台管理员授予 <code>platform:user:read</code> 等权限以查看身份组织与平台配置。</p>
+          </div>
 
-          <div class="settings-active-summary" :class="activeSettingsMeta.tone">
+          <div v-if="!hasNoVisibleSettingsTab && activeSettingsMeta" class="settings-active-summary" :class="activeSettingsMeta.tone">
             <span class="settings-active-summary-icon"><ConsoleIcon :name="activeSettingsMeta.icon" /></span>
             <div class="settings-active-summary-copy">
               <strong>{{ activeSettingsMeta.label }}</strong>

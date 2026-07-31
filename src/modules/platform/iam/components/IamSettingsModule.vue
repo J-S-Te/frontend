@@ -625,10 +625,14 @@ async function loadApplicationsForSubject() {
   applicationAccessError.value = ''
   try {
     const data = await listApplications({ page: 1, pageSize: 100, status: 'ACTIVE' })
-    applications.value = Array.isArray(data) ? data : (data?.items || [])
-    const preferredCode = selectedApplicationCode.value && applications.value.some((item) => item.code === selectedApplicationCode.value)
+    const allApps = Array.isArray(data) ? data : (data?.items || [])
+    // 个人例外授权只对已经接入基础平台（存在 environment 记录）的应用开放。
+    // 未接入的子系统登记没有可授权的入口，列出来只会让用户误解为可操作。
+    const onboarded = await filterOnboardedApplications(allApps)
+    applications.value = onboarded
+    const preferredCode = selectedApplicationCode.value && onboarded.some((item) => item.code === selectedApplicationCode.value)
       ? selectedApplicationCode.value
-      : applications.value[0]?.code || ''
+      : onboarded[0]?.code || ''
     selectedApplicationCode.value = preferredCode
     if (preferredCode) await loadApplicationAuthorization(preferredCode)
   } catch (error) {
@@ -637,6 +641,23 @@ async function loadApplicationsForSubject() {
   } finally {
     applicationsLoading.value = false
   }
+}
+
+async function filterOnboardedApplications(apps) {
+  if (!Array.isArray(apps) || apps.length === 0) return []
+  const probes = await Promise.all(apps.map(async (app) => {
+    const id = app.application_id || app.id
+    if (!id) return null
+    try {
+      const envData = await listEnvironments({ applicationId: id, pageSize: 1, status: 'ACTIVE' })
+      const count = Array.isArray(envData?.items) ? envData.items.length
+        : (typeof envData?.total === 'number' ? envData.total : 0)
+      return count > 0 ? app : null
+    } catch (_error) {
+      return app // 探测失败时保留原项，避免静默把可用应用也隐藏
+    }
+  }))
+  return probes.filter((item) => item !== null)
 }
 
 async function loadApplicationAuthorization(applicationCode = selectedApplicationCode.value) {
