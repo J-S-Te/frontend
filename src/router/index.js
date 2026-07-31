@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import LoginView from '@/modules/platform/auth/views/LoginView.vue'
+import ForbiddenView from '@/modules/platform/auth/views/ForbiddenView.vue'
 import PlatformConsoleView from '@/modules/platform/views/PlatformConsoleView.vue'
 import SubsystemPortalView from '@/modules/platform/views/SubsystemPortalView.vue'
 import ContractManagementView from '@/modules/contract_management/views/ContractManagementView.vue'
@@ -7,6 +8,9 @@ import { getCurrentPrincipal } from '@/modules/platform/auth/api/auth'
 import { ensureContractSession } from '@/modules/contract_management/api/contract'
 import { canAccessContractSection } from '@/modules/shared/authz/sys004'
 import { dispatchAuthorizationRefreshed } from '@/modules/platform/auth/utils/authorizationRefresh'
+import { hasAnyPermission as principalHasAnyPermission } from '@/modules/platform/auth/utils/permissions'
+import { DICTIONARY_ENTRY_PERMISSIONS } from '@/modules/platform/dictionaries/utils/dictionaryPermissions'
+import { IAM_ENTRY_PERMISSIONS } from '@/modules/platform/iam/utils/iamPermissions'
 
 const contractSections = ['dashboard', 'customers', 'contracts', 'templates', 'approvals', 'rules', 'signing', 'reports']
 
@@ -15,7 +19,6 @@ const settingsSections = new Set([
   'iam',
   'notify',
   'security',
-  'files',
   'dict',
 ])
 
@@ -50,13 +53,32 @@ const router = createRouter({
       path: '/settings/:section?',
       name: 'settings',
       component: PlatformConsoleView,
-      meta: { title: '系统设置', requiresAuth: true },
+      meta: {
+        title: '系统设置',
+        requiresAuth: true,
+        // 路由级 OR 权限：IAM、字典或审计任一实际权限均可进入设置区。
+        // 进入后由 PlatformConsoleView 和各模块继续按真实权限细分 Tab、数据与按钮。
+        // 后端 403 仍是最终安全边界，前端只负责避免无关的 user:read 门槛。
+        permission: [...IAM_ENTRY_PERMISSIONS, ...DICTIONARY_ENTRY_PERMISSIONS, 'platform:audit:view'],
+      },
     },
     {
       path: '/audit',
       name: 'audit',
       component: PlatformConsoleView,
-      meta: { title: '审计日志', requiresAuth: true },
+      meta: {
+        title: '审计日志',
+        requiresAuth: true,
+        // 注意：真实权限码是 platform:audit:view，不是 audit-log:read。
+        // 后端 migrations/000011_seed_platform_defaults.sql 用的是 audit:view。
+        permission: 'platform:audit:view',
+      },
+    },
+    {
+      path: '/forbidden',
+      name: 'forbidden',
+      component: ForbiddenView,
+      meta: { title: '无权访问' },
     },
     {
       path: '/contract_management/:section?',
@@ -144,9 +166,16 @@ router.beforeEach(async (to) => {
     } catch {
       // 派发失败不影响导航本身。
     }
-    // 路由级权限不再做硬拦截：基础能力平台是身份提供方，登录即可进入；
-    // 各 section 的危险按钮由组件级 v-if="hasPermission(...)" 控制。
-    // 后端 403/401 仍是真正权威。
+    // 路由级权限硬拦截：路由 meta.permission 命中 / 不命中决定能否访问。
+    // 基础能力平台是身份提供方，登录即可进入，但进入之后具体到某个 section / 业务模块
+    // 是否可见由该路由声明的 permission 决定。后端 403/401 仍是真正安全边界。
+    const required = to?.meta?.permission
+    if (required) {
+      const codes = Array.isArray(required) ? required : [required]
+      if (!principalHasAnyPermission(principal, codes)) {
+        return { name: 'forbidden', query: { from: to.fullPath } }
+      }
+    }
     return true
   } catch {
     return { name: 'login' }

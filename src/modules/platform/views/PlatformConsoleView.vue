@@ -2,7 +2,6 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { AuthError, logoutCurrentSession } from '@/modules/platform/auth/api/auth'
-import FileTaskOperationsModule from '@/modules/platform/files/components/FileTaskOperationsModule.vue'
 import IamSettingsModule from '@/modules/platform/iam/components/IamSettingsModule.vue'
 import EmployeeOnboardingModal from '@/modules/platform/iam/components/EmployeeOnboardingModal.vue'
 import NotificationCenterModule from '@/modules/platform/notifications/components/NotificationCenterModule.vue'
@@ -33,16 +32,14 @@ import {
   updatePlatformSettings,
 } from '@/modules/platform/settings/api/platformSettings'
 import {
+  hasAnyPermission,
   hasPermission,
   useCurrentPrincipal,
 } from '@/modules/platform/auth/utils/principal'
+import { DICTIONARY_ENTRY_PERMISSIONS } from '@/modules/platform/dictionaries/utils/dictionaryPermissions'
+import { IAM_ENTRY_PERMISSIONS, IAM_PERMISSIONS } from '@/modules/platform/iam/utils/iamPermissions'
 import '@/modules/platform/styles/console.css'
 import '@/modules/platform/styles/settings-showcase.css'
-
-// IAM 权限码必须与后端 authz_permission.code 完全一致；与 IamSettingsModule 同步维护。
-const IAM_PERMISSIONS = {
-  userWrite: 'platform:user:create',
-}
 
 const route = useRoute()
 const router = useRouter()
@@ -82,48 +79,73 @@ const onboardingPositions = ref([])
 
 const { refreshPrincipal } = useCurrentPrincipal()
 
+const SETTINGS_NAV_PERMISSIONS = Object.freeze([
+  ...IAM_ENTRY_PERMISSIONS,
+  ...DICTIONARY_ENTRY_PERMISSIONS,
+  'platform:audit:view',
+])
+
+// 侧边栏：IAM、字典任一实际权限或审计权限都可显示系统管理入口，
+// 不再把 platform:user:read 当成所有设置模块的共同前置权限。
+const hasAnySettingsOrAuditPermission = computed(() => hasAnyPermission(SETTINGS_NAV_PERMISSIONS))
+const canOpenSettings = computed(() => hasAnyPermission(SETTINGS_NAV_PERMISSIONS))
+
 const settingsTabs = [
   {
     key: 'base', label: '平台基础信息', icon: 'settings', tone: 'blue',
     description: '维护平台名称与基础展示信息。',
     capabilities: ['平台名称', '平台简称'],
+    // 该模块暂未提供独立 read 权限码，暂沿用 user:read；
+    // 这不会再影响 IAM Tab 的独立权限判断。
+    permissions: [IAM_PERMISSIONS.userRead],
   },
   {
     key: 'iam', label: '身份、组织与授权', icon: 'organization', tone: 'violet',
     description: '集中管理身份目录、组织架构与访问权限。',
     capabilities: ['新增组织单元', '新增岗位', '新增任职关系', '新增角色', '新增角色绑定', '新增权限注册'],
+    permissions: IAM_ENTRY_PERMISSIONS,
   },
   {
     key: 'notify', label: '通知中心', icon: 'bell', tone: 'orange',
     description: '查看平台消息，并维护通知模板与投递记录。',
     capabilities: ['站内通知', '通知模板', '投递记录'],
+    permissions: [IAM_PERMISSIONS.userRead],
   },
   {
     key: 'security', label: '安全设置', icon: 'shield', tone: 'red',
     description: '配置登录安全、会话超时和全局退出策略。',
     capabilities: ['登录安全', '会话策略', '超时退出'],
-  },
-  {
-    key: 'files', label: '文件与任务', icon: 'audit', tone: 'green',
-    description: '管理审计导出、文件处理和异步任务结果。',
-    capabilities: ['审计导出', '文件任务', '结果下载'],
+    permissions: [IAM_PERMISSIONS.userRead],
   },
   {
     key: 'dict', label: '字典管理', icon: 'dashboard', tone: 'slate',
-    description: '维护审计、风险和通知等平台统一枚举。',
-    capabilities: ['审计类型', '风险等级', '通知事件'],
+    description: '维护各业务模块共用的稳定编码、展示名称和可选值。',
+    capabilities: ['字典定义', '字典项', '启停与排序'],
+    permissions: DICTIONARY_ENTRY_PERMISSIONS,
   },
 ]
 
 const settingsSectionKeys = new Set(settingsTabs.map((tab) => tab.key))
+// 当前账号对各 tab 都有权限的可见集合 + "一个都看不到"的判断。
+// 没有权限的 tab 不会渲染按钮，且 lastSettingsSection 不会落到无权限 tab 上。
+const visibleSettingsTabs = computed(() => settingsTabs.filter((tab) => hasAnyPermission(tab.permissions)))
+const hasNoVisibleSettingsTab = computed(() => visibleSettingsTabs.value.length === 0)
 const lastSettingsSection = ref('iam')
 const activeSettingsTab = computed({
   get() {
     const section = typeof route.params.section === 'string' ? route.params.section : ''
-    return settingsSectionKeys.has(section) ? section : lastSettingsSection.value
+    if (settingsSectionKeys.has(section) && visibleSettingsTabs.value.some((tab) => tab.key === section)) {
+      return section
+    }
+    // 兜底：当前 section 没权限时落回第一个可见 tab，没有可见 tab 时回 'iam' 占位（由 v-if 拦截渲染）。
+    return visibleSettingsTabs.value[0]?.key || lastSettingsSection.value
   },
   set(section) {
     if (!settingsSectionKeys.has(section)) {
+      return
+    }
+    if (!visibleSettingsTabs.value.some((tab) => tab.key === section)) {
+      // 切到没权限的 tab 时直接拒绝，更不能写 lastSettingsSection。
       return
     }
     lastSettingsSection.value = section
@@ -133,9 +155,12 @@ const activeSettingsTab = computed({
   },
 })
 
-const activeSettingsMeta = computed(() => (
-  settingsTabs.find((tab) => tab.key === activeSettingsTab.value) || settingsTabs[0]
-))
+const activeSettingsMeta = computed(() => {
+  const found = settingsTabs.find((tab) => tab.key === activeSettingsTab.value)
+  if (found) return found
+  // 兜底：可见 tab 里第一个；完全没有可见 tab 时返回 null（template v-if 拦截）。
+  return visibleSettingsTabs.value[0] || null
+})
 
 // 前后端 result / risk 枚举到中文标签的映射，与后端 audit/application 层枚举保持一致。
 const RESULT_LABELS = { SUCCESS: '成功', DENIED: '拒绝', ERROR: '异常', PARTIAL: '部分成功' }
@@ -523,15 +548,30 @@ onBeforeUnmount(() => {
 
       <nav class="console-nav" aria-label="平台导航">
         <p class="console-nav-label">系统管理</p>
-        <button class="console-nav-item" :class="{ active: currentView === 'settings' }" type="button" @click="navigate('settings')">
+        <button
+          v-if="canOpenSettings"
+          class="console-nav-item"
+          :class="{ active: currentView === 'settings' }"
+          type="button"
+          @click="navigate('settings')"
+        >
           <ConsoleIcon name="settings" />
           <span>系统设置</span>
         </button>
-        <button class="console-nav-item" :class="{ active: currentView === 'audit' }" type="button" @click="navigate('audit')">
+        <button
+          v-if="hasPermission('platform:audit:view')"
+          class="console-nav-item"
+          :class="{ active: currentView === 'audit' }"
+          type="button"
+          @click="navigate('audit')"
+        >
           <ConsoleIcon name="audit" />
           <span>审计日志</span>
           <span class="console-nav-note">只读</span>
         </button>
+        <p v-if="!hasAnySettingsOrAuditPermission" class="console-nav-empty">
+          当前账号未配置系统管理模块的访问权限。
+        </p>
       </nav>
 
       <div class="console-sidebar-note">
@@ -552,7 +592,7 @@ onBeforeUnmount(() => {
         <div class="console-crumb"><span>基础能力平台</span><ConsoleIcon name="chevron" /><strong>{{ viewMeta.crumb }}</strong></div>
         <div class="console-topbar-actions">
           <button
-            v-if="hasPermission(IAM_PERMISSIONS.userWrite)"
+            v-if="hasPermission(IAM_PERMISSIONS.userCreate)"
             class="console-button primary small"
             type="button"
             @click="openEmployeeOnboarding"
@@ -638,9 +678,9 @@ onBeforeUnmount(() => {
             </div>
           </header>
 
-          <nav class="settings-tab-bar" role="tablist" aria-label="系统设置分类">
+          <nav v-if="!hasNoVisibleSettingsTab" class="settings-tab-bar" role="tablist" aria-label="系统设置分类">
             <button
-              v-for="tab in settingsTabs"
+              v-for="tab in visibleSettingsTabs"
               :key="tab.key"
               class="settings-tab"
               :class="{ active: activeSettingsTab === tab.key }"
@@ -654,8 +694,13 @@ onBeforeUnmount(() => {
               <span>{{ tab.label }}</span>
             </button>
           </nav>
+          <div v-else class="settings-empty" role="status">
+            <span class="settings-empty-icon" aria-hidden="true"><ConsoleIcon name="shield" /></span>
+            <h3>当前账号没有可访问的设置模块</h3>
+            <p>请联系平台管理员授予对应模块的读取或管理权限；IAM 不要求额外授予 <code>platform:user:read</code>。</p>
+          </div>
 
-          <div class="settings-active-summary" :class="activeSettingsMeta.tone">
+          <div v-if="!hasNoVisibleSettingsTab && activeSettingsMeta" class="settings-active-summary" :class="activeSettingsMeta.tone">
             <span class="settings-active-summary-icon"><ConsoleIcon :name="activeSettingsMeta.icon" /></span>
             <div class="settings-active-summary-copy">
               <strong>{{ activeSettingsMeta.label }}</strong>
@@ -686,8 +731,6 @@ onBeforeUnmount(() => {
 
           <LoginSecurityModule v-else-if="activeSettingsTab === 'security'" @toast="showToast" />
 
-
-          <FileTaskOperationsModule v-else-if="activeSettingsTab === 'files'" @toast="showToast" />
 
           <DictionaryManagementModule v-else-if="activeSettingsTab === 'dict'" @toast="showToast" />
         </section>

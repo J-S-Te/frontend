@@ -9,6 +9,8 @@ import {
   isCatalogSynchronized,
 } from '@/modules/platform/iam/utils/applicationAuthorizationCatalog'
 import { positionAuthorizationTargetCatalog } from '@/modules/platform/iam/utils/positionAuthorizationCatalog'
+import { hasPermission } from '@/modules/platform/auth/utils/principal'
+import { IAM_PERMISSIONS } from '@/modules/platform/iam/utils/iamPermissions'
 import {
   createPositionAuthorizationTemplate,
   deletePositionAuthorizationTemplate,
@@ -21,6 +23,8 @@ import {
 } from '@/modules/platform/iam/api/positionAuthorization'
 
 const emit = defineEmits(['toast'])
+const canReadAuthorization = computed(() => hasPermission(IAM_PERMISSIONS.roleBindingRead))
+const canManageAuthorization = computed(() => hasPermission(IAM_PERMISSIONS.roleBindingUpdate))
 const loading = ref(false)
 const saving = ref(false)
 const templates = ref([])
@@ -73,6 +77,7 @@ function templateRoles(template) { return items(template?.roles) }
 const activeTemplates = computed(() => templates.value.filter((template) => String(template?.status || '').toUpperCase() === 'ACTIVE'))
 
 async function load() {
+  if (!canReadAuthorization.value) return
   loading.value = true
   try {
     // The task-specific target endpoint returns stable platform role IDs together with the
@@ -113,6 +118,7 @@ async function load() {
 }
 
 async function loadAssignments() {
+  if (!canReadAuthorization.value) return
   if (!selectedPositionId.value) {
     assignedTemplateIds.value = []
     preview.value = null
@@ -135,6 +141,7 @@ function removeRole(index) { if (form.value.roles.length > 1) form.value.roles.s
 function onApplicationChange(row) { row.role_id = '' }
 
 async function createTemplate() {
+	if (!canManageAuthorization.value) return
   const name = String(form.value.name || '').trim()
   const roles = form.value.roles.filter((row) => row.application_id && row.role_id).map((row) => ({ ...row, scope_type: row.scope_type || 'TENANT', scope_id: row.scope_type === 'ENVIRONMENT' ? String(row.scope_id || '').trim() : '' }))
   if (!name || !roles.length) {
@@ -153,6 +160,7 @@ async function createTemplate() {
 }
 
 async function saveAssignments() {
+	if (!canManageAuthorization.value) return
   if (!selectedPositionId.value) return
   saving.value = true
   try {
@@ -195,6 +203,7 @@ async function loadEditorPreview() {
 }
 
 async function deleteTemplate(template) {
+	if (!canManageAuthorization.value) return
   openConfirm({
     title: '确认删除岗位授权模板',
     description: `确认删除岗位授权模板“${template.name}”吗？\n\n删除后：\n1. 该模板不再出现在岗位映射列表；\n2. 该模板生成的岗位角色授权将被撤销；\n3. 用户、岗位或组织的手工授权不会被删除；\n4. 授权和审计历史仍会保留。`,
@@ -242,12 +251,14 @@ function scrollToPositionPreview() {
 
 watch(selectedPositionId, loadAssignments)
 defineExpose({ reload: load })
-onMounted(load)
+onMounted(() => {
+  if (canReadAuthorization.value) load()
+})
 </script>
 
 <template>
   <section class="iam-table-section iam-position-authorization">
-    <div class="console-table-card iam-template-editor">
+    <div v-if="canManageAuthorization" class="console-table-card iam-template-editor">
       <header class="iam-template-card-head">
         <div class="iam-template-card-title">
           <span class="iam-template-card-icon"><ConsoleIcon name="shield" /></span>
@@ -337,6 +348,8 @@ onMounted(load)
       <div class="iam-panel-actions"><button class="console-button ghost small" type="button" @click="addRole"><ConsoleIcon name="plus" />增加角色</button><button class="console-text-button" type="button" :disabled="!selectedPositionId" @click="scrollToPositionPreview">预览影响</button><button class="console-button primary small" type="button" :disabled="saving" @click="createTemplate"><ConsoleIcon name="save" />创建模板</button></div>
     </div>
 
+    <p v-if="canReadAuthorization && !canManageAuthorization" class="iam-field-help" role="status">当前为只读模式：可以查看模板、岗位映射和授权预览，但不能创建、修改或删除模板。</p>
+
     <div class="console-table-card iam-standard-authorization-card">
       <header class="iam-template-mapping-head">
         <div class="iam-template-card-title">
@@ -355,7 +368,7 @@ onMounted(load)
               <option v-for="position in positions" :key="positionId(position)" :value="positionId(position)">{{ positionName(position) }}</option>
             </select>
           </label>
-          <button class="console-button primary small" type="button" :disabled="saving || !selectedPositionId" @click="saveAssignments"><ConsoleIcon name="save" />保存岗位映射</button>
+          <button v-if="canManageAuthorization" class="console-button primary small" type="button" :disabled="saving || !selectedPositionId" @click="saveAssignments"><ConsoleIcon name="save" />保存岗位映射</button>
         </div>
       </header>
       <p v-if="selectedPosition" class="iam-field-help">{{ positionName(selectedPosition) }} 的有效任职关系会动态继承下列标准模板；任职勾选“参与岗位授权继承”后才会生效。个人、岗位和组织的例外授权不会被模板覆盖或删除。</p>
@@ -363,8 +376,8 @@ onMounted(load)
       <div v-else-if="!activeTemplates.length" class="console-empty">暂无可用授权模板，请先创建模板。</div>
       <div v-else class="iam-template-assignment-list">
         <div v-for="template in activeTemplates" :key="templateId(template)" class="iam-template-assignment-row">
-          <label class="iam-template-assignment"><input v-model="assignedTemplateIds" type="checkbox" :value="templateId(template)" /><span><strong>{{ template.name }}</strong><small>{{ template.code }} · {{ template.affected_users || 0 }} 位受影响用户</small><em>{{ templateRoles(template).map((role) => `${role.application_name || role.application_code} / ${role.role_name || role.role_code}`).join('；') || '未配置角色' }}</em></span></label>
-          <button class="console-text-button danger iam-template-delete" type="button" :disabled="saving" @click="deleteTemplate(template)">删除模板</button>
+          <label class="iam-template-assignment"><input v-model="assignedTemplateIds" type="checkbox" :value="templateId(template)" :disabled="!canManageAuthorization" /><span><strong>{{ template.name }}</strong><small>{{ template.code }} · {{ template.affected_users || 0 }} 位受影响用户</small><em>{{ templateRoles(template).map((role) => `${role.application_name || role.application_code} / ${role.role_name || role.role_code}`).join('；') || '未配置角色' }}</em></span></label>
+          <button v-if="canManageAuthorization" class="console-text-button danger iam-template-delete" type="button" :disabled="saving" @click="deleteTemplate(template)">删除模板</button>
         </div>
       </div>
     </div>
@@ -372,7 +385,7 @@ onMounted(load)
     <div v-if="preview" ref="positionPreviewRef" class="console-table-card iam-authorization-preview"><h4>授权预览与影响分析</h4><p v-if="preview.conflicts?.length" class="login-target-module__error">{{ preview.conflicts.join('；') }}</p><p v-else class="iam-field-help">以下为该岗位模板产生的角色；用户同时有多个有效任职时，实际权限是全部有效来源的并集。</p><ul><li v-for="role in preview.roles || []" :key="`${role.template_id}-${role.role_id}`"><strong>{{ role.application_name || role.application_code }}</strong> / {{ role.role_name || role.role_code }} <small>来源：{{ role.template_name }}</small></li><li v-if="!(preview.roles || []).length">当前岗位没有从模板获得有效应用角色。</li></ul></div>
 
     <!-- 通用确认弹窗（替代 window.confirm） -->
-    <div v-if="confirmDialog" class="iam-modal-backdrop" role="presentation" @click.self="closeConfirm">
+    <div v-if="confirmDialog && canManageAuthorization" class="iam-modal-backdrop" role="presentation" @click.self="closeConfirm">
       <section class="iam-modal iam-confirm-modal" role="dialog" aria-modal="true" :aria-label="confirmDialog.title">
         <header><div><p>{{ confirmDialog.danger ? '危险操作' : '请确认' }}</p><h3>{{ confirmDialog.title }}</h3></div><button class="console-modal-close" type="button" :aria-label="`关闭${confirmDialog.title}`" :disabled="confirmDialog.busy" @click="closeConfirm"><ConsoleIcon name="close" /></button></header>
         <div class="iam-confirm-body"><p style="white-space: pre-line;">{{ confirmDialog.description }}</p></div>

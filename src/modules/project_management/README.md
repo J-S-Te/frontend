@@ -29,6 +29,7 @@ project_management/
 - 不在前端保存用户密码、访问令牌或其他敏感凭据。
 - 后端接口统一通过模块内 `api/` 目录封装，并携带平台会话 Cookie。
 - 新增路由时统一使用 Vue Router 注册，避免在组件中直接判断浏览器路径。
-- 模块代码提交后仍须由运维人员执行 `bash platform/scripts/subsystem-onboarding.sh` 完成应用、环境、登录目标和 OAuth 客户端登记；前端不提供配置入口，仅存在本目录不会自动显示门户卡片。
+- 仅在目标应用环境**首次接入**时，由运维人员在 `platform/` 执行 `bash scripts/subsystem.sh onboard` 完成应用、环境、登录目标和 OAuth 客户端登记；`subsystem-onboarding.sh` 是兼容壳。后续模块代码、镜像或功能发布不需要重复接入，也不得为了发布执行 offboard。仅存在本目录不会自动显示门户卡片。
+- 子系统 OIDC、子路径、会话、授权目录、HTTP LAN 联调和验收要求见 `platform/docs/subsystem-onboarding.md`。
 - 通用组件优先复用 `src/modules/platform/shared/`，避免重复实现基础能力。
 - 业务操作应由后端执行权限校验并记录审计事件，前端权限控制仅用于界面展示。
