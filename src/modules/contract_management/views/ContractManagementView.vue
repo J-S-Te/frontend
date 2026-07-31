@@ -13,9 +13,11 @@ import {
   listApprovals,
   listApprovalRules,
   listApprovalTasks,
+  listContractTemplates,
   listContracts,
   submitContract,
   updateApprovalRule,
+  uploadContractTemplate,
 } from '@/modules/contract_management/api/contract'
 import {
   CONTRACT_ROLE_DEFINITIONS,
@@ -66,6 +68,7 @@ const contracts = ref([])
 const approvals = ref([])
 const initiatedApprovals = ref([])
 const rules = ref([])
+const contractTemplates = ref([])
 const businessDataError = ref('')
 const businessDataLoading = ref(false)
 const approvalComment = ref('')
@@ -77,6 +80,9 @@ const approvalTargetNode = ref('')
 const termsIdentical = ref(false)
 const submittingContract = ref(false)
 const ruleDialogOpen = ref(false)
+const templateUploadDialogOpen = ref(false)
+const templateUploading = ref(false)
+const templateUploadForm = ref({ name: '', file: null })
 const ruleSaving = ref(false)
 const editingRuleId = ref('')
 const newContract = ref({
@@ -139,6 +145,10 @@ const currentRoleLabel = computed(() => {
 const currentUserInitial = computed(() => currentUserLabel.value.slice(0, 1).toUpperCase())
 const userDirectory = computed(() => Array.isArray(session.value?.user_directory) ? session.value.user_directory : [])
 const can = (permission) => hasContractPermission(session.value, permission)
+const isAdmin = computed(() => {
+  const roleCodes = Array.isArray(session.value?.roles) ? session.value.roles : []
+  return roleCodes.includes('admin') || session.value?.role?.code === 'admin'
+})
 
 const keyword = ref('')
 const statusFilter = ref('')
@@ -304,6 +314,9 @@ async function loadBusinessData() {
   if (can('approval.view') || can('approval_rule.manage')) {
     requests.push(listApprovalRules().then((items) => { rules.value = items }))
   }
+  if (can('contract.create') || isAdmin.value) {
+    requests.push(listContractTemplates().then((items) => { contractTemplates.value = items }))
+  }
   const results = await Promise.allSettled(requests)
   const failures = results.filter((result) => result.status === 'rejected')
   // API 客户端已在第一次 401 时发起单次 OIDC 跳转。页面不再把多个并发 401
@@ -316,6 +329,44 @@ async function loadBusinessData() {
     businessDataError.value = failures.map((result) => result.reason?.message || '业务数据加载失败').join('；')
   }
   businessDataLoading.value = false
+}
+
+function selectTemplateFile(event) {
+  templateUploadForm.value.file = event.target.files?.[0] || null
+}
+
+function openTemplateUpload() {
+  if (!isAdmin.value) {
+    showToast('只有超级管理员可以上传合同模板。')
+    return
+  }
+  templateUploadForm.value = { name: '', file: null }
+  templateUploadDialogOpen.value = true
+}
+
+async function submitTemplateUpload() {
+  if (!isAdmin.value) {
+    showToast('只有超级管理员可以上传合同模板。')
+    return
+  }
+  if (!templateUploadForm.value.file) {
+    showToast('请选择 DOCX 模板文件。')
+    return
+  }
+  templateUploading.value = true
+  try {
+    await uploadContractTemplate({
+      name: templateUploadForm.value.name.trim(),
+      file: templateUploadForm.value.file,
+    })
+    contractTemplates.value = await listContractTemplates()
+    templateUploadDialogOpen.value = false
+    showToast('合同模板上传成功')
+  } catch (error) {
+    showToast(error?.message || '上传合同模板失败')
+  } finally {
+    templateUploading.value = false
+  }
 }
 
 async function submitNewContract() {
@@ -582,6 +633,7 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
           <div class="contract-page-actions">
             <button v-if="['contracts', 'reports'].includes(activeSection)" class="contract-button secondary" type="button" @click="exportContracts"><ConsoleIcon name="export" />导出</button>
             <button v-if="activeSection === 'rules' && can('approval_rule.manage')" class="contract-button primary" type="button" @click="openNewRule">＋ 新增规则</button>
+            <button v-if="activeSection === 'templates' && isAdmin" class="contract-button primary" type="button" @click="openTemplateUpload">＋ 上传模板</button>
             <button v-if="['dashboard', 'contracts'].includes(activeSection) && can('contract.create')" class="contract-button primary" type="button" @click="createDialogOpen = true">＋ 新建合同</button>
           </div>
         </header>
@@ -606,7 +658,13 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
         </template>
 
         <template v-else-if="activeSection === 'templates'">
-          <div class="contract-card contract-empty-state"><ConsoleIcon name="save" /><h3>暂无合同模板</h3><p>合同后端尚未提供模板接口。</p></div>
+          <section v-if="contractTemplates.length" class="contract-template-grid">
+            <article v-for="(item, index) in contractTemplates" :key="item.id">
+              <div class="contract-template-cover" :class="['', 'purple', 'green', 'orange'][index % 4]"><span><ConsoleIcon name="save" /></span><i>DOCX</i></div>
+              <div class="contract-template-copy"><span class="contract-badge success"><i></i>可用</span><h3>{{ item.name }}</h3><p>{{ item.original_filename }}</p><div><span>{{ item.fields?.length || 0 }} 个填写字段</span><span>{{ formatDate(item.created_at) }}</span></div></div>
+            </article>
+          </section>
+          <div v-else class="contract-card contract-empty-state"><ConsoleIcon name="save" /><h3>暂无合同模板</h3><p>{{ isAdmin ? '点击右上角“上传模板”添加第一个 DOCX 模板。' : '超级管理员尚未上传合同模板。' }}</p></div>
         </template>
 
         <template v-else-if="activeSection === 'approvals'">
@@ -641,6 +699,8 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
     <div v-if="ruleDialogOpen" class="contract-modal-mask" @click.self="ruleDialogOpen = false"><form class="contract-detail-modal contract-rule-modal" @submit.prevent="saveRule"><header><div><span class="contract-badge info">规则引擎</span><h2>{{ editingRuleId ? '编辑审批规则' : '新增审批规则' }}</h2><p>按优先级从高到低匹配，命中第一条规则后固化到审批实例。</p></div><button type="button" aria-label="关闭" @click="ruleDialogOpen = false"><ConsoleIcon name="close" /></button></header><section><div class="contract-form-grid"><label><span>规则名称</span><input v-model="ruleForm.name" required placeholder="例如：标准服务简化审批" /></label><label><span>优先级</span><input v-model.number="ruleForm.priority" required type="number" /></label><label><span>条件关系</span><select v-model="ruleForm.logical"><option value="and">全部满足（AND）</option><option value="or">任一满足（OR）</option></select></label><label class="contract-check-label"><input v-model="ruleForm.enabled" type="checkbox" /><span>保存后立即启用</span></label></div></section><section><div class="contract-section-title"><h3>触发条件</h3><button class="contract-text-button" type="button" @click="addRuleCondition">＋ 添加条件</button></div><div class="contract-rule-editor-list"><div v-for="(condition, index) in ruleForm.conditions" :key="index"><select v-model="condition.field" @change="condition.operator = conditionOperators(condition.field)[0].value; condition.value = conditionField(condition.field).kind === 'boolean' ? true : ''"><option v-for="field in ruleFieldOptions" :key="field.value" :value="field.value">{{ field.label }}</option></select><select v-model="condition.operator"><option v-for="operator in conditionOperators(condition.field)" :key="operator.value" :value="operator.value">{{ operator.label }}</option></select><select v-if="conditionField(condition.field).kind === 'boolean'" v-model="condition.value"><option :value="true">是</option><option :value="false">否</option></select><input v-else v-model="condition.value" required :type="conditionField(condition.field).kind === 'number' ? 'number' : 'text'" :placeholder="condition.operator === 'in' ? '多个值用逗号分隔' : '条件值'" /><button type="button" aria-label="删除条件" :disabled="ruleForm.conditions.length === 1" @click="ruleForm.conditions.splice(index, 1)">×</button></div></div></section><section><div class="contract-section-title"><h3>审批节点</h3><button class="contract-text-button" type="button" @click="addRuleNode">＋ 添加节点</button></div><div class="contract-rule-editor-list nodes"><div v-for="(node, index) in ruleForm.nodes" :key="index"><input v-model="node.id" required placeholder="节点 ID" /><input v-model="node.name" required placeholder="节点名称" /><select v-model="node.role_code" required><option value="">请选择审批角色</option><option v-if="node.role_code && !contractRole(node.role_code)" :value="node.role_code">未识别角色</option><option v-for="role in CONTRACT_ROLE_DEFINITIONS" :key="role.code" :value="role.code">{{ role.name }}</option></select><select v-model="node.countersign" disabled><option value="any">或签（任一）</option></select><button type="button" aria-label="删除节点" :disabled="ruleForm.nodes.length === 1" @click="ruleForm.nodes.splice(index, 1)">×</button></div></div></section><footer><button class="contract-button secondary" type="button" @click="ruleDialogOpen = false">取消</button><button class="contract-button primary" type="submit" :disabled="ruleSaving">{{ ruleSaving ? '正在保存…' : '保存规则' }}</button></footer></form></div>
 
     <div v-if="createDialogOpen" class="contract-modal-mask" @click.self="createDialogOpen = false"><form class="contract-detail-modal contract-create-modal" @submit.prevent="submitNewContract"><header><div><span class="contract-badge info">合同草稿</span><h2>新建合同</h2><p>数据将提交至合同 API</p></div><button type="button" aria-label="关闭" @click="createDialogOpen = false"><ConsoleIcon name="close" /></button></header><section><div class="contract-form-grid"><label><span>合同编号</span><input v-model="newContract.contract_number" required placeholder="请输入合同编号" /></label><label><span>合同名称</span><input v-model="newContract.title" required placeholder="请输入合同名称" /></label><label><span>合同类型</span><input v-model="newContract.contract_type" required placeholder="请输入合同类型" /></label><label><span>服务类型</span><input v-model="newContract.service_type" required placeholder="请输入服务类型" /></label><label><span>合同金额</span><input v-model="newContract.amount" required type="number" min="0" step="0.01" placeholder="0.00" /></label><label><span>币种</span><input v-model="newContract.currency" required /></label><label><span>负责人</span><input :value="currentUserLabel" readonly /></label><label><span>到期日期</span><input v-model="newContract.end_date" type="date" /></label></div><label class="contract-comment-label"><span>合同内容</span><textarea v-model="newContract.content" required placeholder="请输入合同内容"></textarea></label></section><footer><button class="contract-button secondary" type="button" @click="createDialogOpen = false">取消</button><button class="contract-button primary" type="submit"><ConsoleIcon name="save" />保存草稿</button></footer></form></div>
+
+    <div v-if="templateUploadDialogOpen" class="contract-modal-mask" @click.self="templateUploadDialogOpen = false"><form class="contract-detail-modal contract-template-upload-modal" @submit.prevent="submitTemplateUpload"><header><div><span class="contract-badge info">超级管理员</span><h2>上传合同模板</h2><p>上传不超过 10MB 的 DOCX，模板中使用 <code v-pre>{{field_name:字段名称}}</code> 标记填写项。</p></div><button type="button" aria-label="关闭" @click="templateUploadDialogOpen = false"><ConsoleIcon name="close" /></button></header><section><div class="contract-form-grid"><label><span>模板名称</span><input v-model="templateUploadForm.name" required maxlength="160" placeholder="例如：标准服务合同" /></label><label><span>DOCX 文件</span><input required type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" @change="selectTemplateFile" /></label></div></section><footer><button class="contract-button secondary" type="button" :disabled="templateUploading" @click="templateUploadDialogOpen = false">取消</button><button class="contract-button primary" type="submit" :disabled="templateUploading">{{ templateUploading ? '正在上传…' : '上传模板' }}</button></footer></form></div>
 
     <Transition name="contract-toast"><div v-if="toast" class="contract-toast"><ConsoleIcon name="save" />{{ toast }}</div></Transition>
   </div>

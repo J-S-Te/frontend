@@ -14,3 +14,9 @@ test('contract API starts one shared OIDC redirect for any 401 response', () => 
 test('contract session cache is cleared before reauthentication', () => {
   assert.match(source, /function startContractLogin\(\)[\s\S]*clearContractSessionCache\(\)/)
 })
+
+test('contract template upload preserves browser multipart boundary', () => {
+  assert.match(source, /options\.body instanceof FormData/)
+  assert.match(source, /!hasFormDataBody \? \{ 'Content-Type': 'application\/json' \}/)
+  assert.match(source, /request\('\/contract-templates',[\s\S]*method: 'POST',[\s\S]*body: form/)
+})

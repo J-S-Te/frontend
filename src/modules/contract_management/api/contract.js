@@ -29,12 +29,13 @@ async function readBody(response) {
 }
 
 async function request(path, options = {}) {
+  const hasFormDataBody = typeof FormData !== 'undefined' && options.body instanceof FormData
   const response = await fetch(`${API_BASE_URL}${path}`, {
     credentials: 'include',
     ...options,
     headers: {
       Accept: 'application/json',
-      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(options.body && !hasFormDataBody ? { 'Content-Type': 'application/json' } : {}),
       ...(options.headers || {}),
     },
   })
@@ -106,6 +107,21 @@ export async function createContract(payload) {
   return request('/contracts', {
     method: 'POST',
     body: JSON.stringify(payload),
+  })
+}
+
+export async function listContractTemplates() {
+  const data = await request('/contract-templates')
+  return Array.isArray(data) ? data : []
+}
+
+export async function uploadContractTemplate({ name, file }) {
+  const form = new FormData()
+  form.append('name', name)
+  form.append('file', file)
+  return request('/contract-templates', {
+    method: 'POST',
+    body: form,
   })
 }
 
