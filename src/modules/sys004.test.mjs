@@ -5,6 +5,7 @@ import {
   CONTRACT_ROLE_DEFINITIONS,
   CONTRACT_SECTION_PERMISSIONS,
   canAccessContractSection,
+  contractRole,
   effectiveContractPermissions,
   hasContractPermission,
 } from './shared/authz/sys004.js'
@@ -14,6 +15,15 @@ test('SYS-004 frontend catalog contains six roles and twenty permissions', () =>
   assert.equal(CONTRACT_PERMISSION_DEFINITIONS.length, 20)
   assert.equal(CONTRACT_PERMISSION_DEFINITIONS.some(({ code }) => code === 'approval.manage'), true)
   assert.equal(CONTRACT_PERMISSION_DEFINITIONS.some(({ code }) => code === 'approval_rule.manage'), true)
+})
+
+test('contract role codes have Chinese display names', () => {
+  assert.equal(contractRole('admin')?.name, '超级管理员')
+  assert.equal(contractRole('sales_director')?.name, '销售总监')
+  assert.equal(contractRole('tech_director')?.name, '技术总监')
+  assert.equal(contractRole('finance_director')?.name, '财务总监')
+  assert.equal(contractRole('sales')?.name, '销售人员')
+  assert.equal(contractRole('audit_admin')?.name, '审计管理员')
 })
 
 test('effective permissions are the sorted union of role and custom permissions', () => {
