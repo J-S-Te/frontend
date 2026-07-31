@@ -7,6 +7,7 @@ import ContractManagementView from '@/modules/contract_management/views/Contract
 import ProjectManagementView from '@/modules/project_management/views/ProjectManagementView.vue'
 import { getCurrentPrincipal } from '@/modules/platform/auth/api/auth'
 import { ensureContractSession } from '@/modules/contract_management/api/contract'
+import { ensureProjectSession } from '@/modules/project_management/api/projectManagement'
 import { canAccessContractSection } from '@/modules/shared/authz/sys004'
 import { dispatchAuthorizationRefreshed } from '@/modules/platform/auth/utils/authorizationRefresh'
 import { hasAnyPermission as principalHasAnyPermission } from '@/modules/platform/auth/utils/permissions'
@@ -92,7 +93,7 @@ const router = createRouter({
       alias: '/project-management/:section?',
       name: 'project_management',
       component: ProjectManagementView,
-      meta: { title: '项目管理系统', requiresAuth: true },
+      meta: { title: '项目管理系统', requiresAuth: true, requiresProjectSession: true },
     },
     {
       path: '/:pathMatch(.*)*',
@@ -160,6 +161,20 @@ router.beforeEach(async (to) => {
     } catch {
       // 401 已由 ensureContractSession 发起 OIDC 跳转；网络或服务错误时停留在当前页，
       // 不要把合同后端故障误判成基础平台未登录。
+      return false
+    }
+  }
+
+  if (to.meta.requiresProjectSession) {
+    try {
+      const session = await ensureProjectSession()
+      if (!session) return false
+      if (!(session.permissions || []).includes('project.read')) {
+        return { name: 'forbidden', query: { from: to.fullPath } }
+      }
+      return true
+    } catch {
+      // 401 会启动项目系统 OIDC；其他后端故障不应退化为平台登录失败。
       return false
     }
   }

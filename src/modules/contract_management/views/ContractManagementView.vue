@@ -70,6 +70,7 @@ const navGroupDefinitions = [
 const contracts = ref([])
 const approvals = ref([])
 const initiatedApprovals = ref([])
+const approvalTab = ref('tasks')
 const rules = ref([])
 const contractTemplates = ref([])
 const businessDataError = ref('')
@@ -784,10 +785,13 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
         </template>
 
         <template v-else-if="activeSection === 'approvals'">
-          <div class="contract-tabs"><button class="active" type="button">活动待办 <i>{{ approvals.length }}</i></button><button type="button">我发起的 {{ initiatedApprovals.length }}</button><button type="button" @click="loadBusinessData">刷新</button></div>
-          <section class="contract-approval-list"><article v-for="approval in approvals" :key="approval.id"><header><span class="contract-badge warning"><i></i>{{ approval.status }}</span><small>{{ approval.id }}</small></header><div><span class="contract-approval-icon"><ConsoleIcon name="audit" /></span><section><div><span class="contract-badge neutral">{{ approval.type }}</span><h3>合同 {{ approval.contractId }}</h3></div><p>任务创建于 {{ approval.submittedAt }}</p></section></div><footer><span><i></i>当前节点：{{ approval.step }}</span><button v-if="can('approval.process')" class="contract-button primary small" type="button" @click="openApproval(approval)">查看并处理</button></footer></article><div v-if="!approvals.length" class="contract-card contract-empty-state"><ConsoleIcon name="save" /><h3>当前没有活动待办</h3><p>提交合同审批并完成当前审批人配置后，待办会显示在这里。</p></div></section>
-          <h2 class="contract-subsection-title">我发起的审批</h2>
-          <section class="contract-approval-list"><article v-for="approval in initiatedApprovals" :key="approval.id"><header><span class="contract-badge" :class="approval.status === 'running' ? 'info' : approval.status === 'approved' ? 'success' : approval.status === 'rejected' ? 'danger' : 'neutral'"><i></i>{{ approval.status }}</span><small>{{ approval.id }}</small></header><div><span class="contract-approval-icon"><ConsoleIcon name="audit" /></span><section><div><span class="contract-badge neutral">{{ approval.type }}</span><h3>合同 {{ approval.contractId }}</h3></div><p>发起于 {{ approval.submittedAt }}</p></section></div><footer><span><i></i>流程位置：{{ approval.step }}</span><button class="contract-button secondary small" type="button" @click="openApproval(approval)">查看进度</button></footer></article><div v-if="!initiatedApprovals.length" class="contract-card contract-empty-state"><ConsoleIcon name="save" /><h3>尚未发起审批</h3><p>在合同台账打开草稿并点击“提交审批”。</p></div></section>
+          <div class="contract-tabs" role="tablist" aria-label="审批列表">
+            <button :class="{ active: approvalTab === 'tasks' }" type="button" role="tab" :aria-selected="approvalTab === 'tasks'" @click="approvalTab = 'tasks'">活动待办 <i>{{ approvals.length }}</i></button>
+            <button :class="{ active: approvalTab === 'initiated' }" type="button" role="tab" :aria-selected="approvalTab === 'initiated'" @click="approvalTab = 'initiated'">我发起的 {{ initiatedApprovals.length }}</button>
+            <button type="button" @click="loadBusinessData">刷新</button>
+          </div>
+          <section v-if="approvalTab === 'tasks'" class="contract-approval-list" role="tabpanel"><article v-for="approval in approvals" :key="approval.id"><header><span class="contract-badge warning"><i></i>{{ approval.status }}</span><small>{{ approval.id }}</small></header><div><span class="contract-approval-icon"><ConsoleIcon name="audit" /></span><section><div><span class="contract-badge neutral">{{ approval.type }}</span><h3>合同 {{ approval.contractId }}</h3></div><p>任务创建于 {{ approval.submittedAt }}</p></section></div><footer><span><i></i>当前节点：{{ approval.step }}</span><button v-if="can('approval.process')" class="contract-button primary small" type="button" @click="openApproval(approval)">查看并处理</button></footer></article><div v-if="!approvals.length" class="contract-card contract-empty-state"><ConsoleIcon name="save" /><h3>当前没有活动待办</h3><p>提交合同审批并完成当前审批人配置后，待办会显示在这里。</p></div></section>
+          <section v-else class="contract-approval-list" role="tabpanel"><article v-for="approval in initiatedApprovals" :key="approval.id"><header><span class="contract-badge" :class="approval.status === 'running' ? 'info' : approval.status === 'approved' ? 'success' : approval.status === 'rejected' ? 'danger' : 'neutral'"><i></i>{{ approval.status }}</span><small>{{ approval.id }}</small></header><div><span class="contract-approval-icon"><ConsoleIcon name="audit" /></span><section><div><span class="contract-badge neutral">{{ approval.type }}</span><h3>合同 {{ approval.contractId }}</h3></div><p>发起于 {{ approval.submittedAt }}</p></section></div><footer><span><i></i>流程位置：{{ approval.step }}</span><button class="contract-button secondary small" type="button" @click="openApproval(approval)">查看进度</button></footer></article><div v-if="!initiatedApprovals.length" class="contract-card contract-empty-state"><ConsoleIcon name="save" /><h3>尚未发起审批</h3><p>在合同台账打开草稿并点击“提交审批”。</p></div></section>
         </template>
 
         <template v-else-if="activeSection === 'rules'">

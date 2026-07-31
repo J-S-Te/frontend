@@ -17,7 +17,7 @@ const CONTRACT_BACKEND_PATHS = [
   '/contract_management/logged-out',
   '/contract_management/healthz',
 ]
-const PROJECT_BACKEND_PATHS = ['/project_management/api', '/project_management/healthz']
+const PROJECT_BACKEND_PATHS = ['/project_management/api', '/project_management/auth', '/project_management/healthz']
 
 function apiProxy(target) {
   return {
