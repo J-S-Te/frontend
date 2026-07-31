@@ -4,6 +4,7 @@ import ForbiddenView from '@/modules/platform/auth/views/ForbiddenView.vue'
 import PlatformConsoleView from '@/modules/platform/views/PlatformConsoleView.vue'
 import SubsystemPortalView from '@/modules/platform/views/SubsystemPortalView.vue'
 import ContractManagementView from '@/modules/contract_management/views/ContractManagementView.vue'
+import ProjectManagementView from '@/modules/project_management/views/ProjectManagementView.vue'
 import { getCurrentPrincipal } from '@/modules/platform/auth/api/auth'
 import { ensureContractSession } from '@/modules/contract_management/api/contract'
 import { canAccessContractSection } from '@/modules/shared/authz/sys004'
@@ -85,6 +86,13 @@ const router = createRouter({
       name: 'contract_management',
       component: ContractManagementView,
       meta: { title: '合同管理系统', requiresAuth: true, requiresContractSession: true },
+    },
+    {
+      path: '/project_management/:section?',
+      alias: '/project-management/:section?',
+      name: 'project_management',
+      component: ProjectManagementView,
+      meta: { title: '项目管理系统', requiresAuth: true },
     },
     {
       path: '/:pathMatch(.*)*',

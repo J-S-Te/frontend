@@ -38,3 +38,8 @@ test('saved contracts expose their formatted document preview', () => {
   assert.match(source, /previewContractDocument\(contractId\)/)
   assert.match(source, /`\/contracts\/\$\{encodeURIComponent\(contractId\)\}\/preview`/)
 })
+
+test('approval participants can request the formatted contract preview', () => {
+  assert.match(source, /previewApprovalContract\(approvalId\)/)
+  assert.match(source, /`\/approvals\/\$\{encodeURIComponent\(approvalId\)\}\/contract-preview`/)
+})

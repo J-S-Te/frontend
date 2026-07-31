@@ -15,7 +15,7 @@
 
 ## 两类登记不能混淆
 
-1. **前端模块登记**：在 `src/modules/moduleRegistry.js` 引入模块的 `module.js`，只负责图标、默认名称、默认说明和本地路由等构建期信息。
+1. **前端模块登记**：在 `src/modules/registry/moduleRegistry.js` 引入模块的 `module.js`，只负责图标、默认名称、默认说明和本地路由等构建期信息。
 2. **业务子系统接入**：运维人员在 `platform/` 目录执行官方入口 `bash scripts/subsystem.sh onboard`，由后端原子创建应用、环境、门户登录目标和 OAuth 客户端；`subsystem-onboarding.sh` 仅为兼容壳，前端不提供该配置入口。
 
 除基础能力平台自身外，子系统门户只显示 `GET /api/v1/portal/applications` 返回的已接入应用。仅创建目录或添加 `module.js` 不会自动生成可访问卡片，也不会绕过租户、应用状态和接入配置校验。

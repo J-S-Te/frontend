@@ -195,6 +195,10 @@ export async function getApproval(approvalId) {
   return request(`/approvals/${approvalId}`)
 }
 
+export async function previewApprovalContract(approvalId) {
+  return request(`/approvals/${encodeURIComponent(approvalId)}/contract-preview`)
+}
+
 export async function commandApproval(approvalId, action, payload = {}) {
   return request(`/approvals/${approvalId}/${action}`, {
     method: 'POST',
