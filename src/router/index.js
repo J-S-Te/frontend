@@ -6,6 +6,7 @@ import ContractManagementView from '@/modules/contract_management/views/Contract
 import { getCurrentPrincipal } from '@/modules/platform/auth/api/auth'
 import { ensureContractSession } from '@/modules/contract_management/api/contract'
 import { canAccessContractSection } from '@/modules/shared/authz/sys004'
+import { dispatchAuthorizationRefreshed } from '@/modules/platform/auth/utils/authorizationRefresh'
 
 const contractSections = ['dashboard', 'customers', 'contracts', 'templates', 'approvals', 'rules', 'signing', 'reports']
 
@@ -136,7 +137,16 @@ router.beforeEach(async (to) => {
   try {
     // `/auth/me` 使用 HttpOnly Cookie，由后端同时校验 JWT 和服务端会话状态。
     // 任意校验失败（401、网络错误或其他异常）都按未登录处理，不能 fail-open。
-    await getCurrentPrincipal()
+    const principal = await getCurrentPrincipal()
+    // 同步到全局缓存，让按钮级守卫和后续导航都能读到同一份主体。
+    try {
+      dispatchAuthorizationRefreshed(principal, { changed: true })
+    } catch {
+      // 派发失败不影响导航本身。
+    }
+    // 路由级权限不再做硬拦截：基础能力平台是身份提供方，登录即可进入；
+    // 各 section 的危险按钮由组件级 v-if="hasPermission(...)" 控制。
+    // 后端 403/401 仍是真正权威。
     return true
   } catch {
     return { name: 'login' }

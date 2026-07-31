@@ -9,6 +9,7 @@ import {
   deleteOrgUnit,
   updateOrgUnit,
   createPosition,
+  deletePosition,
   createMembership,
   createUser,
   listUsers,
@@ -268,4 +269,19 @@ test('IAM API converts malformed JSON error bodies into a stable IamError', asyn
     listUsers(),
     (error) => error instanceof IamError && error.status === 502 && error.message === 'IAM 请求失败。',
   )
+})
+
+
+test('deletePosition uses the versioned logical-delete API contract', async () => {
+  let requested
+  globalThis.fetch = async (url, options) => {
+    requested = { url, options }
+    return jsonResponse({ data: {} })
+  }
+
+  await deletePosition({ positionId: 'position / 1', version: 4 })
+
+  assert.equal(requested.url, '/api/v1/positions/position%20%2F%201')
+  assert.equal(requested.options.method, 'DELETE')
+  assert.deepEqual(JSON.parse(requested.options.body), { version: 4 })
 })

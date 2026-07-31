@@ -1,6 +1,48 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { positionTemplateRoleChoices } from './positionAuthorizationCatalog.js'
+import {
+  positionAuthorizationTargetCatalog,
+  positionTemplateRoleChoices,
+} from './positionAuthorizationCatalog.js'
+
+test('position target catalog treats platform-native roles as ready without an external catalog request', () => {
+  const catalog = positionAuthorizationTargetCatalog({
+    application_id: 'platform-app',
+    application_code: 'platform',
+    roles: [
+      {
+        role_id: 'platform-security-admin',
+        role_code: 'platform-security-admin',
+        role_name: '平台安全管理员',
+        role_type: 'PLATFORM',
+      },
+    ],
+  })
+
+  assert.equal(catalog.catalog_version, 'built-in')
+  assert.equal(catalog.sync_status, 'SYNCED')
+  assert.deepEqual(catalog.roles, [{
+    role_id: 'platform-security-admin',
+    role_code: 'platform-security-admin',
+    role_name: '平台安全管理员',
+    role_type: 'PLATFORM',
+    status: 'ACTIVE',
+    assignable: true,
+  }])
+})
+
+test('position target catalog keeps an explicit subsystem catalog failure state', () => {
+  const catalog = positionAuthorizationTargetCatalog({
+    application_id: 'contract-app',
+    application_code: 'contract_management',
+    catalog_version: '2026.07',
+    catalog_sync_status: 'FAILED',
+    roles: [{ role_id: 'sales-role', role_code: 'sales', status: 'ACTIVE' }],
+  })
+
+  assert.equal(catalog.catalog_version, '2026.07')
+  assert.equal(catalog.sync_status, 'FAILED')
+})
 
 test('position template role selector intersects platform role IDs with ACTIVE assignable application catalog roles', () => {
   const choices = positionTemplateRoleChoices([

@@ -71,6 +71,16 @@ function normalize(value) {
   }
 }
 
+// ============================================================================
+// 以下 API（resources / permissions / roles / role-bindings 的 CRUD）目前没有
+// 前端 UI 入口——基础平台的角色/权限管理走"子系统目录只读同步 + 用户/组织/岗位
+// 例外授权"路线，不在平台侧提供平台自营角色的创建编辑。
+//
+// 这些导出保留是为了：
+// 1) 兼容早期 seed 脚本与运维 CLI；
+// 2) 后端后续若开放平台侧角色管理，可在不破坏模块结构的情况下挂回 UI。
+// 新增 UI 时请同步去掉本注释，并恢复 `/* unused */` 行的调用。
+// ============================================================================
 export function listResources({ page = 1, pageSize = 100, keyword = '', status = '' } = {}) {
   return request(`/resources${pageQuery({ page, page_size: pageSize, keyword, 'filter[status]': status })}`).then(normalize)
 }

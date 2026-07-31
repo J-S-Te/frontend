@@ -266,3 +266,100 @@
   .audit-data-table .console-actions-cell { gap: 3px; padding: 9px 0 2px; }
   .audit-data-table .console-text-button + .console-text-button { margin-left: 2px; }
 }
+
+/* =========================================================================
+   Wizard modal（员工入职等 5 步流程）
+   - 继承 .console-detail-modal 视觉，仅放大宽度
+   - stepper / section / status / tag / prereq 都是为这个 modal 服务
+   ========================================================================= */
+.console-wizard-modal { width: min(880px, 100%); max-height: min(820px, calc(100vh - 40px)); }
+.console-wizard-body { padding: 22px 28px 24px; }
+.console-wizard-body .settings-active-summary { margin-bottom: 18px; }
+
+.console-stepper { display: flex; align-items: center; gap: 0; padding: 0; margin: 0 0 22px; list-style: none; }
+.console-stepper-step { display: flex; flex: 1; align-items: center; gap: 9px; min-width: 0; color: var(--muted); font-size: 12px; font-weight: 500; }
+.console-stepper-step:not(:last-child)::after { content: ''; flex: 1; min-width: 18px; height: 1px; margin: 0 4px; background: var(--border); }
+.console-stepper-circle { display: grid; width: 26px; height: 26px; flex: 0 0 auto; place-items: center; color: var(--muted); font-size: 11px; font-weight: 700; border: 1px solid var(--border); border-radius: 50%; background: #fff; transition: all .2s; }
+.console-stepper-circle svg { width: 12px; height: 12px; }
+.console-stepper-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.console-stepper-step.done { color: var(--secondary); }
+.console-stepper-step.done .console-stepper-circle { color: #fff; background: var(--p); border-color: var(--p); }
+.console-stepper-step.active { color: var(--text); font-weight: 600; }
+.console-stepper-step.active .console-stepper-circle { color: #fff; background: var(--p); border-color: var(--p); box-shadow: 0 0 0 4px rgba(37,99,235,.12); }
+.console-stepper-step[role='button'] { cursor: pointer; }
+.console-stepper-step[role='button']:hover .console-stepper-label { color: var(--p); }
+@media (max-width: 760px) {
+  .console-stepper { flex-wrap: wrap; gap: 8px; }
+  .console-stepper-step:not(:last-child)::after { display: none; }
+  .console-stepper-step { flex: 1 1 calc(50% - 8px); }
+}
+
+.console-wizard-section { padding: 16px 18px 18px; margin-bottom: 14px; border: 1px solid var(--border); border-left: 3px solid var(--border); border-radius: 8px; background: #fff; transition: border-color .2s, border-left-color .2s; }
+.console-wizard-section.active { border-left-color: var(--p); }
+.console-wizard-section.muted { background: #f8fafc; opacity: .92; }
+.console-wizard-section-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
+.console-wizard-section-head > div { flex: 1; min-width: 0; }
+.console-wizard-section-head h3 { margin: 0; color: var(--text); font-size: 14px; font-weight: 600; }
+.console-wizard-section-head p { margin: 4px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.console-wizard-section-icon { display: grid; width: 36px; height: 36px; flex: 0 0 auto; place-items: center; color: var(--p); border-radius: 8px; background: var(--p-bg); }
+.console-wizard-section-icon svg { width: 18px; height: 18px; }
+.console-wizard-toggle { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 6px; margin-left: auto; color: var(--secondary); font-size: 12px; font-weight: 500; cursor: pointer; }
+.console-wizard-toggle input { accent-color: var(--p); }
+.console-wizard-empty { margin: 0; padding: 12px 14px; color: var(--muted); font-size: 12px; line-height: 1.6; border: 1px dashed var(--border); border-radius: 7px; background: #f8fafc; }
+.console-wizard-empty.error { color: #b91c1c; border-color: #fecaca; background: #fef7f7; }
+.console-wizard-role-list { display: grid; gap: 8px; }
+.console-wizard-role-list > div { display: grid; gap: 2px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 7px; background: #fff; }
+.console-wizard-role-list strong { color: var(--text); font-size: 13px; font-weight: 600; }
+.console-wizard-role-list span { color: var(--secondary); font-size: 12px; }
+.console-wizard-role-list small { color: var(--muted); font-size: 11px; }
+.console-wizard-field-help { margin: 2px 0 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+.console-wizard-checkbox { display: flex; align-items: flex-start; gap: 8px; padding: 6px 0 2px; color: var(--secondary); font-size: 13px; cursor: pointer; }
+.console-wizard-checkbox input { margin-top: 3px; accent-color: var(--p); }
+.console-wizard-checkbox > div { display: grid; gap: 3px; }
+.console-wizard-checkbox small { color: var(--muted); font-size: 11px; line-height: 1.55; }
+.console-password-field { position: relative; width: 100%; }
+.console-password-field input { padding-right: 42px; }
+.console-password-toggle { position: absolute; top: 50%; right: 5px; display: grid; width: 30px; height: 30px; padding: 0; place-items: center; color: var(--muted); border: 0; border-radius: 6px; background: transparent; cursor: pointer; transform: translateY(-50%); }
+.console-password-toggle:hover { color: var(--p); background: var(--p-bg); }
+.console-password-toggle svg { width: 16px; height: 16px; }
+
+.console-status-dot { display: inline-grid; width: 28px; height: 28px; flex: 0 0 auto; place-items: center; border-radius: 50%; }
+.console-status-dot--ok { color: var(--green); background: var(--green-bg); border: 1px solid #a7f3d0; }
+.console-status-dot--error { color: #dc2626; background: #fef2f2; border: 1px solid #fecaca; }
+.console-status-dot--pending { color: var(--muted); background: #f1f5f9; border: 1px solid var(--border); }
+.console-status-dot svg { width: 14px; height: 14px; }
+
+.console-tag { display: inline-flex; align-items: center; padding: 3px 9px; font-size: 11px; font-weight: 500; border-radius: 999px; }
+.console-tag--ok { color: var(--green); background: var(--green-bg); }
+.console-tag--error { color: #b91c1c; background: #fef2f2; }
+.console-tag--pending { color: var(--muted); background: #f1f5f9; }
+
+.console-prereq-card { padding: 16px 18px; }
+.console-prereq-card[data-ready='true'] { border-color: #a7f3d0; }
+.console-prereq-card[data-ready='false'] { border-color: #fecaca; }
+.console-prereq-card-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.console-prereq-card-head > div { flex: 1; min-width: 0; }
+.console-prereq-card-head h4 { margin: 0; color: var(--text); font-size: 14px; font-weight: 600; }
+.console-prereq-card-head p { margin: 3px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.console-prereq-count { display: inline-flex; min-width: 32px; justify-content: center; padding: 3px 10px; font-size: 13px; font-weight: 700; color: var(--p); border-radius: 999px; background: var(--p-bg); }
+.console-prereq-card[data-ready='false'] .console-prereq-count { color: #b91c1c; background: #fef2f2; }
+.console-prereq-card-foot { display: flex; justify-content: flex-end; margin-bottom: 8px; }
+.console-prereq-form { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 7px; background: #f8fafc; }
+.console-prereq-form label { display: grid; gap: 4px; color: var(--secondary); font-size: 12px; font-weight: 500; }
+.console-prereq-form input,
+.console-prereq-form select { width: 100%; padding: 7px 9px; color: var(--text); border: 1px solid var(--border); border-radius: 6px; outline: 0; background: #fff; transition: border-color .15s, box-shadow .15s; }
+.console-prereq-form input:focus,
+.console-prereq-form select:focus { border-color: var(--p); box-shadow: 0 0 0 3px rgba(37,99,235,.1); }
+.console-prereq-form small { color: var(--muted); font-size: 11px; line-height: 1.5; }
+.console-prereq-layout { display: grid; gap: 14px; }
+.console-prereq-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.console-prereq-actions { display: flex; gap: 10px; justify-content: flex-end; align-items: center; }
+.console-prereq-error { margin: 0; padding: 10px 12px; color: #b91c1c; font-size: 12px; line-height: 1.55; border: 1px solid #fecaca; border-left: 3px solid #dc2626; border-radius: 7px; background: #fef7f7; }
+@media (max-width: 760px) {
+  .console-wizard-modal { width: 100%; }
+  .console-wizard-body { padding: 18px 18px 20px; }
+  .console-wizard-section { padding: 14px 14px 16px; }
+  .console-wizard-section-head { flex-wrap: wrap; }
+  .console-wizard-toggle { margin-left: 0; }
+  .console-prereq-grid { grid-template-columns: 1fr; }
+}

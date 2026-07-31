@@ -62,10 +62,13 @@ export function updatePositionAuthorizationTemplate(templateId, payload = {}) {
   return request(`/position-authorization-templates/${encodeURIComponent(templateId)}`, { method: 'PATCH', body: JSON.stringify(updatePayload) })
 }
 
-export function disablePositionAuthorizationTemplate(templateId, version) {
+export function deletePositionAuthorizationTemplate(templateId, version) {
   const search = new URLSearchParams({ version: String(version) })
   return request(`/position-authorization-templates/${encodeURIComponent(templateId)}?${search.toString()}`, { method: 'DELETE' })
 }
+
+// 兼容已有调用方：后端采用逻辑删除以保留授权与审计历史。
+export const disablePositionAuthorizationTemplate = deletePositionAuthorizationTemplate
 
 export function listPositionAuthorizationTemplateAssignments(positionId) {
   return request(`/positions/${encodeURIComponent(positionId)}/authorization-templates`)

@@ -7,6 +7,8 @@ export class IamError extends Error {
     this.status = options.status || 0
     this.code = options.code || ''
     this.traceId = options.traceId || ''
+    // 保留原始错误对象，便于上层排查网络层、JSON 解析等非 HTTP 失败。
+    this.cause = options.cause || null
   }
 }
 
@@ -35,8 +37,8 @@ async function request(path, options = {}) {
         ...(options.headers || {}),
       },
     })
-  } catch {
-    throw new IamError('无法连接 IAM 服务，请确认后端服务已启动。', { code: 'NETWORK_ERROR' })
+  } catch (error) {
+    throw new IamError('无法连接 IAM 服务，请确认后端服务已启动。', { code: 'NETWORK_ERROR', cause: error })
   }
   const body = await readBody(response)
   if (!response.ok) {
@@ -278,6 +280,13 @@ export function createPosition({ orgUnitId, name }) {
   return request('/positions', {
     method: 'POST',
     body: JSON.stringify({ org_unit_id: orgUnitId, name }),
+  })
+}
+
+export function deletePosition({ positionId, version }) {
+  return request(`/positions/${encodeURIComponent(positionId)}`, {
+    method: 'DELETE',
+    body: JSON.stringify({ version }),
   })
 }
 
