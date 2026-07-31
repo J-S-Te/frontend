@@ -2,7 +2,7 @@
 import { computed, reactive, ref } from 'vue'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import { IamError, createUsersBatch } from '@/modules/platform/iam/api/iam'
-import { parseApplicationRoles } from '@/modules/platform/iam/utils/batchUserImport'
+import { parseApplicationRoles } from '@/modules/platform/iam/utils/batchUserImport.js'
 
 // 上限与后端 POST /users/batch 的硬性约束保持一致：超过会一次性整体失败。
 const BATCH_LIMIT = 100
