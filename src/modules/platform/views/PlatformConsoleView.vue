@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { AuthError, logoutCurrentSession } from '@/modules/platform/auth/api/auth'
 import FileTaskOperationsModule from '@/modules/platform/files/components/FileTaskOperationsModule.vue'
 import IamSettingsModule from '@/modules/platform/iam/components/IamSettingsModule.vue'
+import EmployeeOnboardingModal from '@/modules/platform/iam/components/EmployeeOnboardingModal.vue'
 import NotificationCenterModule from '@/modules/platform/notifications/components/NotificationCenterModule.vue'
 import LoginSecurityModule from '@/modules/platform/security/components/LoginSecurityModule.vue'
 import DictionaryManagementModule from '@/modules/platform/dictionaries/components/DictionaryManagementModule.vue'
@@ -12,6 +13,7 @@ import {
   listApplications,
   listEnvironments,
 } from '@/modules/platform/applications/api/applications'
+import { listOrgUnits, listPositions } from '@/modules/platform/iam/api/iam'
 import {
   AuditEventsError,
   listAuditEvents,
@@ -30,8 +32,17 @@ import {
   getPlatformSettings,
   updatePlatformSettings,
 } from '@/modules/platform/settings/api/platformSettings'
+import {
+  hasPermission,
+  useCurrentPrincipal,
+} from '@/modules/platform/auth/utils/principal'
 import '@/modules/platform/styles/console.css'
 import '@/modules/platform/styles/settings-showcase.css'
+
+// IAM 权限码必须与后端 authz_permission.code 完全一致；与 IamSettingsModule 同步维护。
+const IAM_PERMISSIONS = {
+  userWrite: 'platform:user:create',
+}
 
 const route = useRoute()
 const router = useRouter()
@@ -62,6 +73,14 @@ const auditExporting = ref(false)
 const applications = ref([])
 const environments = ref([])
 let toastTimer = null
+
+// 顶栏「新增员工」入口：modal 自身需要 organizations / positions / applications。
+// 这里独立维护一份预加载缓存，与 audit 面板的 applications 共享同一份响应（避免重复请求）。
+const showEmployeeOnboarding = ref(false)
+const onboardingOrganizations = ref([])
+const onboardingPositions = ref([])
+
+const { refreshPrincipal } = useCurrentPrincipal()
 
 const settingsTabs = [
   {
@@ -268,6 +287,50 @@ async function loadEnvironments(applicationCode) {
   }
 }
 
+// 顶栏「新增员工」入口的预加载逻辑：先并发拉取组织 / 岗位 / 应用，缓存到本地。
+// 失败时仍允许打开 modal —— modal 自己的前置检查会处理缺失项的快速补齐。
+async function loadOnboardingReferences() {
+  const tasks = []
+  if (!onboardingOrganizations.value.length) {
+    tasks.push(
+      listOrgUnits({ page: 1, pageSize: 100, status: 'ACTIVE' })
+        .then((data) => { onboardingOrganizations.value = data.items || [] })
+        .catch((error) => { console.error('loadOnboardingReferences: listOrgUnits failed', error) }),
+    )
+  }
+  if (!onboardingPositions.value.length) {
+    tasks.push(
+      listPositions({ page: 1, pageSize: 100, status: 'ACTIVE' })
+        .then((data) => { onboardingPositions.value = data.items || [] })
+        .catch((error) => { console.error('loadOnboardingReferences: listPositions failed', error) }),
+    )
+  }
+  if (!applications.value.length) {
+    tasks.push(loadApplications())
+  }
+  if (tasks.length) await Promise.all(tasks)
+}
+
+async function openEmployeeOnboarding() {
+  // 先触发预加载再开 modal —— 前置检查组件依赖这些 prop 的实时长度。
+  await loadOnboardingReferences()
+  showEmployeeOnboarding.value = true
+}
+
+function closeEmployeeOnboarding() {
+  showEmployeeOnboarding.value = false
+}
+
+async function refreshOnboardingReferences() {
+  // 前置检查"快速补齐"成功后会被 modal 回调，重新拉一次确保 wizard 表单拿到最新值。
+  await loadOnboardingReferences()
+}
+
+function handleEmployeeOnboardingCompleted() {
+  // 新增员工成功后刷新缓存，让下一次打开 modal 时看到刚建好的组织 / 岗位。
+  loadOnboardingReferences().catch(() => {})
+}
+
 async function loadAuditEvents() {
   if (currentView.value !== 'audit') return
   auditLoading.value = true
@@ -430,6 +493,11 @@ watch(activeSettingsTab, (tab) => {
 onMounted(() => {
   loadApplications()
   loadPlatformSettings()
+  // 拉取 principal 以让顶栏「新增员工」按钮的权限判断立即生效；
+  // 失败时按钮仍可见（fail-open），由后端在创建时拒绝越权请求。
+  refreshPrincipal().catch(() => {})
+  // 后台预热组织 / 岗位缓存，避免用户点开 modal 时出现空表单。
+  loadOnboardingReferences().catch(() => {})
 })
 
 onBeforeUnmount(() => {
@@ -483,6 +551,14 @@ onBeforeUnmount(() => {
         <button class="console-menu-button" type="button" aria-label="打开导航菜单" @click="mobileMenuOpen = true"><ConsoleIcon name="menu" /></button>
         <div class="console-crumb"><span>基础能力平台</span><ConsoleIcon name="chevron" /><strong>{{ viewMeta.crumb }}</strong></div>
         <div class="console-topbar-actions">
+          <button
+            v-if="hasPermission(IAM_PERMISSIONS.userWrite)"
+            class="console-button primary small"
+            type="button"
+            @click="openEmployeeOnboarding"
+          >
+            <ConsoleIcon name="user" />新增员工
+          </button>
           <button class="console-icon-button" type="button" aria-label="通知" @click="showToast('暂无新的平台通知。')"><ConsoleIcon name="bell" /><i></i></button>
           <span class="console-topbar-avatar">管</span>
         </div>
@@ -634,6 +710,18 @@ onBeforeUnmount(() => {
         <footer><button class="console-button ghost" type="button" @click="closeAuditDetail">关闭</button></footer>
       </section>
     </div>
+
+    <EmployeeOnboardingModal
+      v-if="showEmployeeOnboarding"
+      :organizations="onboardingOrganizations"
+      :positions="onboardingPositions"
+      :applications="applications"
+      :on-before-open="() => loadOnboardingReferences()"
+      @close="closeEmployeeOnboarding"
+      @completed="handleEmployeeOnboardingCompleted"
+      @refresh-prerequisites="refreshOnboardingReferences"
+      @toast="showToast"
+    />
 
     <button v-if="mobileMenuOpen" class="console-menu-mask" type="button" aria-label="关闭导航遮罩" @click="mobileMenuOpen = false"></button>
     <div v-if="toastMessage" class="console-toast" role="status"><ConsoleIcon name="info" /><span>{{ toastMessage }}</span></div>

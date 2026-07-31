@@ -1,8 +1,8 @@
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import PositionAuthorizationTemplates from '@/modules/platform/iam/components/PositionAuthorizationTemplates.vue'
-import EmployeeOnboardingModal from '@/modules/platform/iam/components/EmployeeOnboardingModal.vue'
+import BatchUserImportDialog from '@/modules/platform/iam/components/BatchUserImportDialog.vue'
 import AuthorizationEntryGuidance from '@/modules/platform/iam/components/AuthorizationEntryGuidance.vue'
 import {
   detailRows,
@@ -25,6 +25,7 @@ import {
   createOrgUnit,
   deleteOrgUnit,
   createPosition,
+  deletePosition,
   createUser,
   createUsersBatch,
   deleteUser,
@@ -59,13 +60,42 @@ import {
   isCatalogSynchronized,
 } from '@/modules/platform/iam/utils/applicationAuthorizationCatalog'
 import { authorizationEntryLayer } from '@/modules/platform/iam/utils/authorizationEntryLayer'
+import { previewPositionAuthorization } from '@/modules/platform/iam/api/positionAuthorization'
+import {
+  hasAnyPermission,
+  hasPermission,
+  useCurrentPrincipal,
+} from '@/modules/platform/auth/utils/principal'
 import '@/modules/platform/iam/styles/iam-settings.css'
 
 const emit = defineEmits(['toast'])
 
+// 当前登录用户的权限集合（来自 /auth/me 的 permission_codes 字段）。
+// 路由级守卫已在 router/index.js 完成认证；这里只用于按权限隐藏高危按钮。
+// 真正的禁用/拒绝仍由后端执行，UI 隐藏只是体验优化。
+const { refreshPrincipal } = useCurrentPrincipal()
+// IAM 各能力所需的权限码。必须与后端 authz_permission.code 完全一致
+// （platform:<resource>:<action>）。后端 000011_seed_platform_defaults.sql
+// 已经预置了全部 platform:* 权限码；super-admin 角色被授予所有 ACTIVE 权限。
+// 如果后端 permission_codes 非空但不含本表中的码，按钮会被 v-if 隐藏——这是
+// 预期行为，让无权限用户看不到自己点不动的入口。
+const IAM_PERMISSIONS = {
+  userRead: 'platform:user:read',
+  userWrite: 'platform:user:create',           // 新增/批量新增用户
+  userDelete: 'platform:user:delete',         // 删除用户
+  accountWrite: 'platform:account:update',    // 启停账号
+  accountResetPassword: 'platform:account:update', // 重置密码也归到 account:update
+  organizationWrite: 'platform:organization:update', // 编辑组织
+  organizationDelete: 'platform:organization:delete',
+  positionWrite: 'platform:position:create',  // 新增岗位
+  positionDelete: 'platform:position:delete',
+  membershipWrite: 'platform:membership:create', // 新增任职关系
+  authorizationWrite: 'platform:role-binding:update', // 岗位授权模板 + 例外授权
+}
+
 const activePanel = ref('users')
 const positionAuthorizationTemplates = ref(null)
-const employeeOnboardingVisible = ref(false)
+const batchImportVisible = ref(false)
 const detail = ref(null)
 const loading = reactive({ users: false, accounts: false, organizations: false, positions: false, memberships: false, positionAuthorizationTemplates: false })
 const errorMessage = ref('')
@@ -77,6 +107,9 @@ const pagination = reactive({
   positions: { page: 1, pageSize, total: 0, serverPagingSupported: true },
   memberships: { page: 1, pageSize, total: 0 },
 })
+// 每次切换 panel / 翻页 / 重设筛选都会触发新的 load。上一次未完成的响应在返回时
+// 必须被丢弃，否则会把旧页的 items / page 覆盖当前页，造成列表错位与 total 不一致。
+const requestSeq = reactive({ users: 0, accounts: 0, organizations: 0, positions: 0, memberships: 0 })
 const users = ref([])
 const accounts = ref([])
 const organizations = ref([])
@@ -87,7 +120,19 @@ const temporaryPassword = ref(null)
 const userDeletionDialog = ref(null)
 const resettingPassword = ref(false)
 const deletingUser = ref(false)
+const deletingPositionId = ref('')
+const deletingOrganizationId = ref('')
 const updatingAccountId = ref('')
+// 通用危险操作确认弹窗。所有 window.confirm 都应改为走这里，避免在 WebView / 某些
+// PWA 容器中 confirm 静默失败导致危险操作被误判为取消。
+const confirmDialog = ref(null) // { title, description, confirmText, cancelText, danger, busy, onConfirm }
+function openConfirm({ title, description, confirmText = '确认', cancelText = '取消', danger = false, onConfirm }) {
+  confirmDialog.value = { title, description, confirmText, cancelText, danger, busy: false, onConfirm }
+}
+function closeConfirm() {
+  if (confirmDialog.value?.busy) return
+  confirmDialog.value = null
+}
 const applications = ref([])
 const applicationsLoading = ref(false)
 const authorizationCatalog = ref(null)
@@ -100,6 +145,11 @@ const applicationAccessError = ref('')
 const selectedApplicationCode = ref('')
 const applicationEnvironments = ref([])
 const applicationEnvironmentsLoading = ref(false)
+// 用户详情弹窗内的"有效授权总览"卡片：在 modal 打开时一次性拉取，不阻塞其它加载。
+// 接口尚未支持按 user_id 预览时降级为"暂不可用"提示，不影响个人例外授权写入。
+const userAuthorizationPreview = ref(null)
+const userAuthorizationPreviewLoading = ref(false)
+const userAuthorizationPreviewUnavailable = ref(false)
 const authorizationSubjectType = computed(() => {
   if (detail.value?.kind === 'user') return 'USER'
   if (detail.value?.kind === 'organization') return 'ORG_UNIT'
@@ -152,6 +202,47 @@ const applicationAuthorizationConflicts = computed(() => uniqueValues(applicatio
 const hasApplicationAuthorizationConflict = computed(() => applicationAuthorizationState.value === 'CONFLICT')
 const hasDirectApplicationAccess = computed(() => applicationDirectRoles.value.length > 0)
 const hasEffectiveApplicationAccess = computed(() => applicationAuthorizationState.value === 'GRANTED' && applicationEffectiveRoles.value.length > 0)
+// 用户详情弹窗「有效授权总览」派生数据。
+// roles 项至少包含 { source_type, source_id, source_name, application_code, application_name, role_code, role_name }。
+const userAuthorizationPreviewRoles = computed(() => Array.isArray(userAuthorizationPreview.value?.roles) ? userAuthorizationPreview.value.roles : [])
+const userAuthorizationPreviewConflicts = computed(() => {
+  const raw = userAuthorizationPreview.value?.conflicts
+  if (Array.isArray(raw)) return raw.filter((item) => item !== null && item !== undefined && String(item).trim() !== '')
+  return []
+})
+// 按来源类型分组（USER 直接 / ORG_UNIT 继承 / POSITION 继承）。未知来源归入 OTHER。
+const userAuthorizationPreviewBySource = computed(() => {
+  const groups = { USER: [], ORG_UNIT: [], POSITION: [], OTHER: [] }
+  for (const role of userAuthorizationPreviewRoles.value) {
+    const type = String(role?.source_type || '').toUpperCase()
+    if (type === 'USER' || type === 'ORG_UNIT' || type === 'POSITION') groups[type].push(role)
+    else groups.OTHER.push(role)
+  }
+  return groups
+})
+// 合并去重：按 application_code + role_code 去重。冲突时只保留首条，供"最终生效"概览使用。
+const userAuthorizationPreviewMerged = computed(() => {
+  const seen = new Set()
+  const merged = []
+  for (const role of userAuthorizationPreviewRoles.value) {
+    const appCode = role?.application_code || ''
+    const code = roleCode(role)
+    if (!code) continue
+    const key = `${appCode}::${code}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    merged.push(role)
+  }
+  return merged
+})
+const hasUserAuthorizationPreviewConflict = computed(() => userAuthorizationPreviewConflicts.value.length > 0)
+// 模板里 v-for 用的"来源分组"驱动数组。顺序固定：个人直接 → 组织 → 岗位 → 其它。
+const userAuthorizationPreviewSources = [
+  { key: 'USER', label: '用户直接授权' },
+  { key: 'ORG_UNIT', label: '组织单元继承' },
+  { key: 'POSITION', label: '岗位继承' },
+  { key: 'OTHER', label: '其它来源' },
+]
 const selectedAuthorizationRoles = computed(() => authorizationRoleOptions.value.filter((role) => authorizationDraft.role_codes.includes(role.code)))
 const authorizationEntryLayerInfo = computed(() => authorizationEntryLayer(authorizationSubjectType.value))
 const authorizationEffectivePermissions = computed(() => {
@@ -166,19 +257,109 @@ const authorizationEffectivePermissions = computed(() => {
   // 不接受或叠加任何用户自定义业务权限；最终业务鉴权仍由子系统执行。
   return uniqueValues(rolePermissions.map((item) => permissionCode(item)))
 })
+// 草稿里被勾选、但当前 ACTIVE 目录里没有的角色。这些角色如果保存就会被服务端
+// 拒绝或被静默丢弃，必须让用户在保存时显式确认是否撤销。
+const authorizationRolesToRevoke = computed(() => {
+  const selectableRoleCodes = new Set(authorizationRoleOptions.value.map((role) => roleCode(role)))
+  return authorizationDraft.role_codes.filter((code) => !selectableRoleCodes.has(code))
+})
 
+// 6 个 panel 的单一数据源：每个 panel 仍保留自身 key / label / icon / description / permission，
+// 旧逻辑（panel / visiblePanels / selectPanel / panelToKind / panelCreatePermission）一律继续读它。
+// 新增 groupKey 字段决定它在侧边 nav 哪个阶段下展示。panels[0] 仅作为 activePanel 找不到时的兜底。
 const panels = [
-  { key: 'users', label: '用户', icon: 'user', description: '自然人主体、任职状态与跨系统统一用户标识' },
-  { key: 'accounts', label: '登录账号', icon: 'account', description: '账号状态、密码与有效期统一管理' },
-  { key: 'organizations', label: '组织单元', icon: 'organization', description: '组织单元层级、编码与排序' },
-  { key: 'positions', label: '岗位', icon: 'organization', description: '组织内岗位定义，是任职关系和岗位授权的基础' },
-  { key: 'memberships', label: '任职关系', icon: 'link', description: 'Membership 任职关系：主组织、兼岗、历史任职' },
-  { key: 'positionAuthorizationTemplates', label: '岗位授权模板', icon: 'shield', description: '标准授权入口：岗位映射到各应用实际角色，由有效任职关系动态继承' },
+  { key: 'organizations', groupKey: 'foundation', label: '组织单元', icon: 'organization', description: '组织单元层级、编码与排序', permission: 'userRead' },
+  { key: 'positions', groupKey: 'foundation', label: '岗位', icon: 'organization', description: '组织内岗位定义，是任职关系和岗位授权的基础', permission: 'userRead' },
+  { key: 'users', groupKey: 'people', label: '用户', icon: 'user', description: '自然人主体、任职状态与跨系统统一用户标识', permission: 'userRead' },
+  { key: 'accounts', groupKey: 'people', label: '登录账号', icon: 'account', description: '账号状态、密码与有效期统一管理', permission: 'userRead' },
+  { key: 'memberships', groupKey: 'people', label: '任职关系', icon: 'link', description: 'Membership 任职关系：主组织、兼岗、历史任职', permission: 'userRead' },
+  { key: 'positionAuthorizationTemplates', groupKey: 'authorization', label: '岗位授权模板', icon: 'shield', description: '标准授权入口：岗位映射到各应用实际角色，由有效任职关系动态继承', permission: 'authorizationWrite' },
 ]
 
-const filters = reactive({ user: '', account: '', organization: '', position: '', membership: '' })
+// 3 个工作流阶段。运维的典型路径：先建基础数据（组织 / 岗位）→ 录入人员（用户 / 账号 / 任职）→
+// 配置授权（岗位授权模板）。阶段顺序就是用户使用顺序，不允许随意调整。
+// panels 字段是各阶段下挂的 panel key 列表；模板里再按 key 反查 `panels` 拿到完整定义。
+const panelGroups = [
+  { key: 'foundation', label: '基础数据', icon: 'organization', panels: ['organizations', 'positions'] },
+  { key: 'people', label: '人员', icon: 'user', panels: ['users', 'accounts', 'memberships'] },
+  { key: 'authorization', label: '授权', icon: 'shield', panels: ['positionAuthorizationTemplates'] },
+]
+
+// 各 panel 独立的筛选输入；切换 panel 时不会把旧 panel 的关键字带过来。
+// key 必须与 `pagination` 的 key 一一对应，`load*` 会按当前 panel 读取对应字段。
+const panelFilters = reactive({ users: '', accounts: '', organizations: '', positions: '', memberships: '' })
 
 const panel = computed(() => panels.find((item) => item.key === activePanel.value) || panels[0])
+
+// 按权限过滤侧边栏。fail-open 策略：principal 未加载或权限为空时全部可见。
+const visiblePanels = computed(() => panels.filter((item) => !item.permission || hasPermission(IAM_PERMISSIONS[item.permission])))
+
+const activePanelItemsCount = computed(() => {
+  if (activePanel.value === 'users') return filteredUsers.value.length
+  if (activePanel.value === 'accounts') return filteredAccounts.value.length
+  if (activePanel.value === 'organizations') return filteredOrganizations.value.length
+  if (activePanel.value === 'positions') return filteredPositions.value.length
+  if (activePanel.value === 'memberships') return filteredMemberships.value.length
+  return 0
+})
+
+// 侧边 nav 直接消费的分组视图：保留阶段标题、阶段完成度、按权限隐藏子 panel。
+// 任何阶段下没有可见 panel（例如没有 authorizationWrite）就直接整组隐藏。
+const visiblePanelGroups = computed(() => panelGroups
+  .map((group) => {
+    const groupPanels = group.panels
+      .map((key) => panels.find((item) => item.key === key))
+      .filter((item) => item && (!item.permission || hasPermission(IAM_PERMISSIONS[item.permission])))
+    return { ...group, panels: groupPanels }
+  })
+  .filter((group) => group.panels.length > 0))
+
+// 阶段完成度：仅读现有 pagination[key].total 与 loading[key]，不重写数据加载逻辑。
+// 返回值：'loading'（任一 panel 还在请求）/ 'complete'（全部 panel 已加载且 total > 0）/
+// 'partial'（已加载完成但部分 total === 0）/ 'empty'（已加载完成但全部 total === 0）。
+// positionAuthorizationTemplates 不在 pagination / loading 里，单独走默认 'idle' 灰点。
+const groupCompletion = computed(() => {
+  const result = {}
+  for (const group of panelGroups) {
+    const totals = group.panels
+      .map((key) => {
+        if (key === 'positionAuthorizationTemplates') return null
+        return pagination[key] ? pagination[key].total : null
+      })
+    const realTotals = totals.filter((value) => value !== null)
+    if (realTotals.length === 0) {
+      result[group.key] = 'idle'
+      continue
+    }
+    if (group.panels.some((key) => key !== 'positionAuthorizationTemplates' && loading[key])) {
+      result[group.key] = 'loading'
+      continue
+    }
+    const nonZero = realTotals.filter((value) => value > 0).length
+    if (nonZero === realTotals.length) result[group.key] = 'complete'
+    else if (nonZero === 0) result[group.key] = 'empty'
+    else result[group.key] = 'partial'
+  }
+  return result
+})
+
+// 阶段计数文本：基础数据 "组织 3 · 岗位 5"、人员 "用户 8 · 账号 12 · 任职 5"。
+// 数据来源仍是现有 pagination[key].total，零值显示 "0" 而不是隐藏，方便用户看到"建好/没建"。
+// 授权组无对应 pagination，返回空字符串，由模板自行决定是否显示。
+const groupCountLabel = computed(() => {
+  const result = {}
+  for (const group of panelGroups) {
+    const segments = []
+    for (const key of group.panels) {
+      if (key === 'positionAuthorizationTemplates') continue
+      const panelDef = panels.find((item) => item.key === key)
+      const total = pagination[key] ? pagination[key].total : null
+      if (panelDef && total !== null) segments.push(`${panelDef.label} ${total}`)
+    }
+    result[group.key] = segments.join(' · ')
+  }
+  return result
+})
 
 const metrics = computed(() => [
   { label: '有效用户', value: pagination.users.total, note: '服务端分页总数 /api/v1/users', icon: 'user', tone: 'blue' },
@@ -200,15 +381,15 @@ function includesFilter(items, filter, fields) {
     .includes(keyword))
 }
 
-const filteredUsers = computed(() => includesFilter(users.value, filters.user, ['display_name', 'employee_no', 'email', 'status']))
-const filteredAccounts = computed(() => includesFilter(accounts.value, filters.account, ['account_name', 'user_id', 'status']))
-const filteredOrganizations = computed(() => includesFilter(organizations.value, filters.organization, ['code', 'name']))
+const filteredUsers = computed(() => includesFilter(users.value, panelFilters.users, ['display_name', 'employee_no', 'email', 'status']))
+const filteredAccounts = computed(() => includesFilter(accounts.value, panelFilters.accounts, ['account_name', 'user_id', 'status']))
+const filteredOrganizations = computed(() => includesFilter(organizations.value, panelFilters.organizations, ['code', 'name']))
 const filteredPositions = computed(() => includesFilter(
   positions.value.map((item) => ({ ...item, organization_name: positionOrganizationName(item) })),
-  filters.position,
+  panelFilters.positions,
   ['code', 'name', 'organization_name'],
 ))
-const filteredMemberships = computed(() => includesFilter(memberships.value, filters.membership, ['user.name', 'org_unit.name', 'position.name', 'membership_type']))
+const filteredMemberships = computed(() => includesFilter(memberships.value, panelFilters.memberships, ['user.name', 'org_unit.name', 'position.name', 'membership_type']))
 
 // 岗位列表仅展示名称和所属组织；岗位编码与内部主键仅用于筛选、接口调用和 Vue 行标识。
 function positionOrganizationName(position) {
@@ -357,7 +538,20 @@ function roleAuthorizationSignature(role) {
   ].join('|')
 }
 
-const authorizationHasMixedRoleSettings = computed(() => new Set(applicationDirectRoles.value.map(roleAuthorizationSignature)).size > 1)
+// 草稿里勾选的每个角色都映射到原始 direct_role 的 signature。只有当用户当前
+// 真正打算提交 2+ 个不同 signature 的角色时才视为冲突——避免"打开详情"就触发。
+const authorizationHasMixedRoleSettings = computed(() => {
+  const signatureByCode = new Map()
+  applicationDirectRoles.value.forEach((role) => {
+    signatureByCode.set(roleCode(role), roleAuthorizationSignature(role))
+  })
+  const signatures = new Set()
+  authorizationDraft.role_codes.forEach((code) => {
+    const sig = signatureByCode.get(code)
+    if (sig) signatures.add(sig)
+  })
+  return signatures.size > 1
+})
 
 const authorizationEnvironmentOptions = computed(() => applicationEnvironments.value
   .map((environment) => ({
@@ -379,21 +573,48 @@ function applyAuthorizationSettings(roles) {
 
 async function openDetail(kind, item) {
   resetApplicationAuthorizationState()
+  resetUserAuthorizationPreview()
   detail.value = { kind, item }
+  if (kind === 'user') {
+    // 用户详情弹窗"有效授权总览"独立加载，不阻塞下方的"应用例外授权"表单。
+    loadUserAuthorizationPreview(item?.user_id || '')
+  }
   if (['user', 'organization', 'position'].includes(kind)) await loadApplicationsForSubject()
 }
 
 function closeDetail() {
   detail.value = null
   resetApplicationAuthorizationState()
+  resetUserAuthorizationPreview()
+}
+
+async function loadUserAuthorizationPreview(userId) {
+  // 接口为只读快照，失败不阻塞详情打开；和 EmployeeOnboardingModal 的 preview 保持一致降级语义。
+  userAuthorizationPreview.value = null
+  userAuthorizationPreviewUnavailable.value = false
+  if (!userId) return
+  userAuthorizationPreviewLoading.value = true
+  try {
+    userAuthorizationPreview.value = await previewPositionAuthorization({ user_id: userId })
+  } catch {
+    userAuthorizationPreviewUnavailable.value = true
+  } finally {
+    userAuthorizationPreviewLoading.value = false
+  }
+}
+
+function resetUserAuthorizationPreview() {
+  userAuthorizationPreview.value = null
+  userAuthorizationPreviewLoading.value = false
+  userAuthorizationPreviewUnavailable.value = false
 }
 
 function applyApplicationAccess(access) {
   applicationAccess.value = access || null
   const directRoles = Array.isArray(access?.direct_roles) ? access.direct_roles : []
-  const selectableRoleCodes = new Set(authorizationRoleOptions.value.map((role) => roleCode(role)))
-  // 禁止把已停用、不可分配或已从目录移除的角色带回可编辑草稿。
-  authorizationDraft.role_codes = uniqueValues(directRoles.map((role) => roleCode(role)).filter((code) => selectableRoleCodes.has(code)))
+  // 保留所有直绑角色（包括目录里已过期/不可分配的），让用户在保存时显式确认是否撤销。
+  // 之前按 ACTIVE 目录过滤会让“打开详情 → 保存”把历史角色默默清空。
+  authorizationDraft.role_codes = uniqueValues(directRoles.map((role) => roleCode(role)))
   applyAuthorizationSettings(directRoles)
 }
 
@@ -492,14 +713,17 @@ function onAuthorizationValidityChange() {
 }
 
 function applicationAccessPayload() {
+  // 仅序列化当前 ACTIVE 目录里可选的角色。不可分配的角色会在保存前的确认弹窗
+  // 里被显式告知用户并由他们决定是否从草稿中移除。
   const selectableRoleCodes = new Set(authorizationRoleOptions.value.map((role) => roleCode(role)))
-  authorizationDraft.role_codes = authorizationDraft.role_codes.filter((code) => selectableRoleCodes.has(code))
+  const validCodes = authorizationDraft.role_codes.filter((code) => selectableRoleCodes.has(code))
+  authorizationDraft.role_codes = validCodes
   const scopeType = authorizationDraft.scope_type === 'ENVIRONMENT' ? 'ENVIRONMENT' : 'APPLICATION'
   const environmentCode = scopeType === 'ENVIRONMENT' ? String(authorizationDraft.environment_code || '').trim() : null
   const validFrom = authorizationDraft.validity_mode === 'RANGE' ? toRFC3339(authorizationDraft.valid_from) : null
   const validUntil = authorizationDraft.validity_mode === 'RANGE' ? toRFC3339(authorizationDraft.valid_until) : null
   return {
-    roles: authorizationDraft.role_codes.map((roleCode) => ({
+    roles: validCodes.map((roleCode) => ({
       role_code: roleCode,
       scope_type: scopeType,
       environment_code: environmentCode,
@@ -526,6 +750,41 @@ async function saveApplicationAccess() {
     applicationAccessError.value = '失效时间必须晚于生效时间。'
     return
   }
+  // 阻断：草稿里同时存在 2+ 个不同 scope/有效期 signature 的角色。
+  // 直接保存会把所有角色统一成同一组 scope/有效期，其余配置会被静默抹平。
+  if (authorizationHasMixedRoleSettings.value) {
+    applicationAccessError.value = '当前勾选的角色包含不同的授权范围或有效期组合，保存会按当前统一设置替换全部角色。请在“标准继承授权（只读）”中删除冲突来源，或取消多余角色后重新提交。'
+    return
+  }
+  // 阻断：草稿里包含不再处于 ACTIVE 目录的角色；要求用户显式确认这些角色会被撤销。
+  if (authorizationRolesToRevoke.value.length) {
+    const names = authorizationRolesToRevoke.value.map((code) => {
+      const role = applicationDirectRoles.value.find((item) => roleCode(item) === code)
+      return applicationRoleName(role || { code })
+    })
+    openConfirm({
+      title: '确认撤销不在当前目录中的角色',
+      description: `以下 ${names.length} 个角色已不在当前 ACTIVE 目录中，继续保存将自动撤销它们：\n${names.join('、')}\n\n是否继续保存？`,
+      confirmText: '撤销并保存',
+      danger: true,
+      onConfirm: async () => {
+        try {
+          await performSaveApplicationAccess()
+        } finally {
+          closeConfirm()
+        }
+      },
+    })
+    return
+  }
+  await performSaveApplicationAccess()
+}
+
+async function performSaveApplicationAccess() {
+  const subjectId = authorizationSubjectId.value
+  const subjectType = authorizationSubjectType.value
+  const applicationCode = selectedApplicationCode.value
+  if (!subjectId || !subjectType || !applicationCode || applicationAccessSaving.value) return
   applicationAccessSaving.value = true
   applicationAccessError.value = ''
   try {
@@ -550,23 +809,34 @@ async function revokeApplicationAccess() {
   const inheritedNote = isUserAuthorizationSubject.value && applicationInheritedRoles.value.length
     ? '撤销后，组织或岗位继承的标准授权仍然有效，不会被删除。'
     : `撤销后，将删除该${authorizationSubjectLabel.value}在当前应用下的例外角色绑定。`
-  if (!window.confirm(`确认撤销${authorizationSubjectLabel.value}“${subjectName}”的“${applicationDisplayName(selectedApplication.value)}”例外授权吗？\n${inheritedNote}`)) return
-  applicationAccessRevoking.value = true
-  applicationAccessError.value = ''
-  try {
-    if (subjectType === 'USER') await deleteApplicationAccess(subjectId, applicationCode)
-    else await deleteSubjectApplicationAccess(subjectType, subjectId, applicationCode)
-    await loadApplicationAuthorization(applicationCode)
-    emitToast(isUserAuthorizationSubject.value && applicationInheritedRoles.value.length ? '个人例外授权已撤销；组织或岗位继承的标准授权仍然有效。' : `${authorizationEntryLayerInfo.value.title}已撤销。`)
-  } catch (error) {
-    applicationAccessError.value = error instanceof AuthorizationError ? error.message : (error?.message || '撤销应用访问失败。')
-  } finally {
-    applicationAccessRevoking.value = false
-  }
+  openConfirm({
+    title: '确认撤销例外授权',
+    description: `确认撤销${authorizationSubjectLabel.value}“${subjectName}”在“${applicationDisplayName(selectedApplication.value)}”下的例外授权吗？\n\n${inheritedNote}`,
+    confirmText: '确认撤销',
+    danger: true,
+    onConfirm: async () => {
+      if (applicationAccessRevoking.value) return
+      applicationAccessRevoking.value = true
+      applicationAccessError.value = ''
+      try {
+        if (subjectType === 'USER') await deleteApplicationAccess(subjectId, applicationCode)
+        else await deleteSubjectApplicationAccess(subjectType, subjectId, applicationCode)
+        await loadApplicationAuthorization(applicationCode)
+        emitToast(isUserAuthorizationSubject.value && applicationInheritedRoles.value.length
+          ? '个人例外授权已撤销；组织或岗位继承的标准授权仍然有效。'
+          : `${authorizationEntryLayerInfo.value.title}已撤销。`)
+      } catch (error) {
+        applicationAccessError.value = error instanceof AuthorizationError ? error.message : (error?.message || '撤销应用访问失败。')
+      } finally {
+        applicationAccessRevoking.value = false
+        closeConfirm()
+      }
+    },
+  })
 }
 
 function resetFilters() {
-  Object.keys(filters).forEach((key) => { filters[key] = '' })
+  Object.keys(panelFilters).forEach((key) => { panelFilters[key] = '' })
   emitToast('已清空筛选条件。')
 }
 
@@ -575,6 +845,79 @@ function asId(value) {
   if (typeof value === 'string') return value
   if (typeof value === 'object' && value.id) return value.id
   return String(value)
+}
+
+async function copyText(value, { success = '已复制' } = {}) {
+  if (!value) return
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value)
+    } else {
+      // 退化：选中文本 + execCommand。HTTP 站点 clipboard 不可用时仍可工作。
+      const textarea = document.createElement('textarea')
+      textarea.value = value
+      textarea.style.position = 'fixed'
+      textarea.style.opacity = '0'
+      document.body.appendChild(textarea)
+      textarea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textarea)
+    }
+    emitToast(success)
+  } catch {
+    emitToast('复制失败，请手动选中复制。')
+  }
+}
+
+function escapeCsvCell(value) {
+  if (value === null || value === undefined) return ''
+  const text = String(value)
+  if (/[",\n\r]/.test(text)) {
+    return `"${text.replace(/"/g, '""')}"`
+  }
+  return text
+}
+
+function downloadCsv(filename, headers, rows) {
+  const csv = [headers.map(escapeCsvCell).join(','), ...rows.map((row) => row.map(escapeCsvCell).join(','))].join('\r\n')
+  // 加 BOM 让 Excel 识别 UTF-8。
+  const blob = new Blob(['\ufeff', csv], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+function exportActivePanelCsv() {
+  const key = activePanel.value
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+  if (key === 'users') {
+    downloadCsv(`iam-users-${stamp}.csv`,
+      ['用户 ID', '姓名', '工号', '邮箱', '状态', '更新时间'],
+      filteredUsers.value.map((item) => [item.user_id, item.display_name, item.employee_no || '', item.email || '', displayStatus(item.status), formatDateTime(item.updated_at)]))
+  } else if (key === 'accounts') {
+    downloadCsv(`iam-accounts-${stamp}.csv`,
+      ['账号 ID', '账号名', '关联用户', '类型', '认证', '状态', '有效时间', '更新时间'],
+      filteredAccounts.value.map((item) => [item.account_id, item.account_name, item.user_id || '', displayLoginAccountType(item).split(' / ')[0], displayLoginAccountType(item).split(' / ')[1], displayStatus(item.status), item.valid_until ? formatDateTime(item.valid_until) : '长期有效', formatDateTime(item.updated_at)]))
+  } else if (key === 'organizations') {
+    downloadCsv(`iam-organizations-${stamp}.csv`,
+      ['组织 ID', '编码', '名称', '上级 ID', '排序', '状态'],
+      filteredOrganizations.value.map((item) => [item.org_unit_id, item.code || '', item.name, item.parent_id || '', item.sort_order ?? 0, displayStatus(item.status)]))
+  } else if (key === 'positions') {
+    downloadCsv(`iam-positions-${stamp}.csv`,
+      ['岗位 ID', '名称', '所属组织', '状态'],
+      filteredPositions.value.map((item) => [item.position_id || item.id, item.name, item.organization_name || '', displayStatus(item.status)]))
+  } else if (key === 'memberships') {
+    downloadCsv(`iam-memberships-${stamp}.csv`,
+      ['任职 ID', '用户', '组织', '岗位', '任职类型', '是否继承', '有效期'],
+      filteredMemberships.value.map((item) => [item.membership_id || item.id, item.user?.name || item.user_id || '', item.org_unit?.name || item.org_unit_id || '', item.position?.name || item.position_id || '', displayMembershipType(item.membership_type), item.inherit_authorization === false ? '不继承' : '继承', displayMembershipValidity(item)]))
+  } else {
+    emitToast('当前面板暂不支持导出。')
+  }
 }
 
 async function safeCall(kind, fn) {
@@ -599,27 +942,37 @@ function updatePage(key, data, items, { verifyPageSize = false } = {}) {
 }
 
 async function loadUsers(page = pagination.users.page) {
-  const data = await safeCall('users', () => listUsers({ page, pageSize, keyword: filters.user, status: 'ACTIVE' }))
+  const seq = ++requestSeq.users
+  const data = await safeCall('users', () => listUsers({ page, pageSize, keyword: panelFilters.users, status: 'ACTIVE' }))
+  if (seq !== requestSeq.users) return
   if (data) updatePage('users', data, users)
 }
 
 async function loadAccounts(page = pagination.accounts.page) {
-  const data = await safeCall('accounts', () => listAccounts({ page, pageSize, keyword: filters.account }))
+  const seq = ++requestSeq.accounts
+  const data = await safeCall('accounts', () => listAccounts({ page, pageSize, keyword: panelFilters.accounts }))
+  if (seq !== requestSeq.accounts) return
   if (data) updatePage('accounts', data, accounts)
 }
 
 async function loadOrganizations(page = pagination.organizations.page) {
-  const data = await safeCall('organizations', () => listOrgUnits({ page, pageSize, keyword: filters.organization, status: 'ACTIVE' }))
+  const seq = ++requestSeq.organizations
+  const data = await safeCall('organizations', () => listOrgUnits({ page, pageSize, keyword: panelFilters.organizations, status: 'ACTIVE' }))
+  if (seq !== requestSeq.organizations) return
   if (data) updatePage('organizations', data, organizations, { verifyPageSize: true })
 }
 
 async function loadPositions(page = pagination.positions.page) {
-  const data = await safeCall('positions', () => listPositions({ page, pageSize, keyword: filters.position, status: 'ACTIVE' }))
+  const seq = ++requestSeq.positions
+  const data = await safeCall('positions', () => listPositions({ page, pageSize, keyword: panelFilters.positions, status: 'ACTIVE' }))
+  if (seq !== requestSeq.positions) return
   if (data) updatePage('positions', data, positions, { verifyPageSize: true })
 }
 
 async function loadMemberships(page = pagination.memberships.page) {
-  const data = await safeCall('memberships', () => listMemberships({ page, pageSize, keyword: filters.membership, status: 'ACTIVE' }))
+  const seq = ++requestSeq.memberships
+  const data = await safeCall('memberships', () => listMemberships({ page, pageSize, keyword: panelFilters.memberships, status: 'ACTIVE' }))
+  if (seq !== requestSeq.memberships) return
   if (data) updatePage('memberships', data, memberships)
 }
 
@@ -645,6 +998,8 @@ function goToPage(key, page) {
   const next = Math.min(Math.max(1, page), pageTotal(key))
   if (next === pagination[key].page) return
   pagination[key].page = next
+  // 让上一次同 panel 的 load 自然失效，避免快速翻页时旧页响应覆盖新页。
+  if (requestSeq[key] !== undefined) requestSeq[key] += 1
   reloadActive()
 }
 
@@ -652,13 +1007,20 @@ const activePagination = computed(() => pagination[activePanel.value] || null)
 const activeServerPagingUnavailable = computed(() => activePagination.value?.serverPagingSupported === false)
 const activeLoading = computed(() => loading[activePanel.value])
 
+let filterTimer
+
+// 切换 panel 时同步清理挂起的筛选防抖和上次未完成的列表请求，
+// 避免“上一个 panel 的筛选触发的 load” 在新 panel 落地后把列表覆盖。
 watch(activePanel, () => {
+  clearTimeout(filterTimer)
+  filterTimer = 0
+  // 序号递增会在下一次 reload 时让上一次响应自然失效。
+  Object.keys(requestSeq).forEach((key) => { requestSeq[key] += 1 })
   detail.value = null
   reloadActive()
 })
 
-let filterTimer
-watch(filters, () => {
+watch(panelFilters, () => {
   clearTimeout(filterTimer)
   filterTimer = setTimeout(() => {
     const key = activePanel.value
@@ -756,10 +1118,21 @@ async function copyTemporaryPassword() {
   }
 }
 
+// 临时密码揭示状态：默认遮罩，避免屏幕共享/截屏/拼写补全等渠道意外泄露。
+const temporaryPasswordVisible = ref(false)
+function revealTemporaryPassword() {
+  if (!temporaryPassword.value?.value) return
+  temporaryPasswordVisible.value = true
+}
+function hideTemporaryPassword() {
+  temporaryPasswordVisible.value = false
+}
+
 // Closing this dialog clears the plaintext from browser memory. The password cannot be viewed
 // again from this page; an administrator must initiate another reset if it was not copied.
 function closeTemporaryPassword() {
   temporaryPassword.value = null
+  temporaryPasswordVisible.value = false
 }
 
 function openUserDeletionDialog(user) {
@@ -805,21 +1178,67 @@ async function openOrganizationEditor(organization) {
 }
 
 async function removeOrganization(organization) {
-  if (!organization?.org_unit_id) return
+  if (!organization?.org_unit_id || deletingOrganizationId.value) return
   const version = Number(organization.version)
   if (!Number.isInteger(version) || version < 1) {
     emitToast('组织版本信息无效，请刷新列表后重试。')
     return
   }
-  if (!window.confirm(`确认删除组织“${organization.name}”吗？其岗位和任职关系将一并停用。`)) return
-  try {
-    await deleteOrgUnit({ orgUnitId: organization.org_unit_id, version })
-    if (detail.value?.kind === 'organization' && detail.value.item?.org_unit_id === organization.org_unit_id) closeDetail()
-    await Promise.all([loadOrganizations(), loadPositions(), loadMemberships()])
-    emitToast(`组织 ${organization.name} 已删除，相关岗位和任职关系已停用。`)
-  } catch (error) {
-    emitToast(error instanceof IamError ? error.message : (error?.message || '删除组织失败。'))
+  openConfirm({
+    title: '确认删除组织',
+    description: `确认删除组织“${organization.name}”吗？其岗位和任职关系将一并停用，且当前操作不可恢复。`,
+    confirmText: '确认删除',
+    danger: true,
+    onConfirm: async () => {
+      if (deletingOrganizationId.value) return
+      deletingOrganizationId.value = organization.org_unit_id
+      try {
+        await deleteOrgUnit({ orgUnitId: organization.org_unit_id, version })
+        if (detail.value?.kind === 'organization' && detail.value.item?.org_unit_id === organization.org_unit_id) closeDetail()
+        await Promise.all([loadOrganizations(), loadPositions(), loadMemberships()])
+        emitToast(`组织 ${organization.name} 已删除，相关岗位和任职关系已停用。`)
+      } catch (error) {
+        emitToast(error instanceof IamError ? error.message : (error?.message || '删除组织失败。'))
+      } finally {
+        deletingOrganizationId.value = ''
+        closeConfirm()
+      }
+    },
+  })
+}
+
+async function removePosition(position) {
+  const positionId = position?.position_id || position?.id
+  if (!positionId || deletingPositionId.value) return
+  const version = Number(position.version)
+  if (!Number.isInteger(version) || version < 1) {
+    emitToast('岗位版本信息无效，请刷新列表后重试。')
+    return
   }
+  openConfirm({
+    title: '确认删除岗位',
+    description: `确认删除岗位“${position.name}”吗？\n\n删除后：\n1. 岗位将被停用并从可选岗位中移除；\n2. 关联的有效任职关系将一并停用；\n3. 该岗位继承的应用角色将失效；\n4. 历史记录仍会保留。`,
+    confirmText: '确认删除',
+    danger: true,
+    onConfirm: async () => {
+      if (deletingPositionId.value) return
+      deletingPositionId.value = positionId
+      try {
+        await deletePosition({ positionId, version })
+        if (detail.value?.kind === 'position' && (detail.value.item?.position_id || detail.value.item?.id) === positionId) closeDetail()
+        const nextPage = positions.value.length === 1 && pagination.positions.page > 1
+          ? pagination.positions.page - 1
+          : pagination.positions.page
+        await Promise.all([loadPositions(nextPage), loadMemberships()])
+        emitToast(`岗位 ${position.name || positionId} 已删除，相关任职关系和岗位继承授权已停用。`)
+      } catch (error) {
+        emitToast(error instanceof IamError ? error.message : (error?.message || '删除岗位失败。'))
+      } finally {
+        deletingPositionId.value = ''
+        closeConfirm()
+      }
+    },
+  })
 }
 
 // ---- 新增（对接真实 API）----
@@ -868,6 +1287,16 @@ const panelToKind = {
   memberships: 'membership',
 }
 
+// 各 panel 的“新增”所需权限。模板里直接调用，避免在多处分散布尔表达式。
+function panelCreatePermission(panelKey) {
+  if (panelKey === 'users') return IAM_PERMISSIONS.userWrite
+  if (panelKey === 'accounts') return IAM_PERMISSIONS.accountWrite
+  if (panelKey === 'organizations') return IAM_PERMISSIONS.organizationWrite
+  if (panelKey === 'positions') return IAM_PERMISSIONS.positionWrite
+  if (panelKey === 'memberships') return IAM_PERMISSIONS.membershipWrite
+  return ''
+}
+
 const editorLabels = {
   user: '用户',
   'user-batch': '批量用户',
@@ -903,16 +1332,9 @@ function openEditorForActivePanel() {
   if (kind) openEditor(kind)
 }
 
-function openEmployeeOnboarding() {
-  employeeOnboardingVisible.value = true
-  const referenceLoads = []
-  if (!organizations.value.length) referenceLoads.push(loadOrganizations())
-  if (!positions.value.length) referenceLoads.push(loadPositions())
-  if (referenceLoads.length) Promise.all(referenceLoads).catch(() => {})
-}
-
-async function refreshAfterEmployeeOnboarding() {
-  await Promise.all([loadUsers(), loadAccounts(), loadMemberships()])
+// 批量导入只创建用户档案（不创建账号 / 任职），因此只需刷新 users 列表。
+async function refreshAfterBatchImport() {
+  await loadUsers()
 }
 
 function closeEditor() {
@@ -994,7 +1416,7 @@ function validateLocalAccountInput(accountName, password) {
 
   const normalizedPassword = String(password ?? '')
   const passwordLength = Array.from(normalizedPassword).length
-  if (passwordLength < 12 || passwordLength > 128) throw new IamError('初始密码长度必须为 12–128 个字符。')
+  if (passwordLength < 8 || passwordLength > 128) throw new IamError('初始密码长度必须为 8–128 个字符。')
   if (/\s/.test(normalizedPassword)) throw new IamError('初始密码不能包含空白字符。')
   if (!/[A-Z]/.test(normalizedPassword) || !/[a-z]/.test(normalizedPassword) || !/\d/.test(normalizedPassword) || !/[^A-Za-z0-9]/.test(normalizedPassword)) {
     throw new IamError('初始密码必须同时包含大写字母、小写字母、数字和特殊字符。')
@@ -1119,8 +1541,39 @@ async function saveEditor() {
   }
 }
 
+// 全局 ESC 关闭当前打开的模态框。Vue 的 @keydown.esc 只在元素有焦点时触发，
+// 模态框通常没有焦点，所以挂到 document 上。
+function onGlobalKeydown(event) {
+  if (event?.key !== 'Escape') return
+  // 优先级：临时密码 > 用户删除 > 通用 confirm > 重置密码 > 详情/编辑器
+  if (temporaryPassword.value) {
+    if (!temporaryPasswordVisible.value) closeTemporaryPassword()
+  } else if (userDeletionDialog.value && !deletingUser.value) {
+    closeUserDeletionDialog()
+  } else if (confirmDialog.value) {
+    closeConfirm()
+  } else if (passwordResetDialog.value && !resettingPassword.value) {
+    closePasswordResetDialog()
+  } else if (detail.value) {
+    closeDetail()
+  } else if (editor.value && !saving.value) {
+    closeEditor()
+  }
+}
+
 onMounted(async () => {
+  if (typeof window !== 'undefined') {
+    window.addEventListener('keydown', onGlobalKeydown)
+  }
+  // 拉取当前 principal（包含 permission_codes），用于按权限隐藏高危按钮。
+  // 失败不影响主流程：fail-open 时所有按钮仍可见，由后端兜底。
+  refreshPrincipal().catch(() => {})
   await Promise.all([loadUsers(), loadAccounts(), loadOrganizations(), loadPositions(), loadMemberships()])
+})
+onBeforeUnmount(() => {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('keydown', onGlobalKeydown)
+  }
 })
 </script>
 
@@ -1137,16 +1590,31 @@ onMounted(async () => {
 
     <div class="iam-workspace">
       <aside class="iam-panel-nav" aria-label="身份与授权功能导航">
-        <button
-          v-for="item in panels"
-          :key="item.key"
-          type="button"
-          :class="{ active: activePanel === item.key }"
-          @click="selectPanel(item.key)"
+        <div
+          v-for="group in visiblePanelGroups"
+          :key="group.key"
+          class="iam-panel-group"
         >
-          <ConsoleIcon :name="item.icon" />
-          <span>{{ item.label }}</span>
-        </button>
+          <div class="iam-panel-group-title" :aria-label="group.label">
+            <span
+              class="iam-panel-group-dot"
+              :class="`is-${groupCompletion[group.key]}`"
+              :title="groupCompletion[group.key] === 'complete' ? '本阶段数据齐全' : groupCompletion[group.key] === 'partial' ? '本阶段部分数据缺失' : groupCompletion[group.key] === 'loading' ? '正在加载' : '尚未开始'"
+            ></span>
+            <span class="iam-panel-group-name">{{ group.label }}</span>
+            <span v-if="groupCountLabel[group.key]" class="iam-panel-group-count">{{ groupCountLabel[group.key] }}</span>
+          </div>
+          <button
+            v-for="item in group.panels"
+            :key="item.key"
+            type="button"
+            :class="{ active: activePanel === item.key }"
+            @click="selectPanel(item.key)"
+          >
+            <ConsoleIcon :name="item.icon" />
+            <span>{{ item.label }}</span>
+          </button>
+        </div>
       </aside>
 
       <section class="iam-panel-content">
@@ -1155,58 +1623,70 @@ onMounted(async () => {
           <div class="iam-panel-actions">
             <button class="console-button ghost small" type="button" @click="resetFilters"><ConsoleIcon name="reset" />清空筛选</button>
             <button class="console-button ghost small" type="button" :disabled="activeLoading" @click="reloadActive"><ConsoleIcon name="refresh" />刷新</button>
-            <button v-if="activePanel === 'users'" class="console-button ghost small" type="button" @click="openEditor('user-batch')"><ConsoleIcon name="plus" />批量新增用户</button>
-            <button v-if="activePanel === 'users'" class="console-button primary small" type="button" @click="openEmployeeOnboarding"><ConsoleIcon name="plus" />新增员工</button>
-            <button v-else class="console-button primary small" type="button" :disabled="!panelToKind[activePanel]" @click="openEditorForActivePanel"><ConsoleIcon name="plus" />新增{{ editorLabels[panelToKind[activePanel]] || '' }}</button>
+            <button v-if="['users', 'accounts', 'organizations', 'positions', 'memberships'].includes(activePanel)" class="console-button ghost small" type="button" :disabled="!activePanelItemsCount" @click="exportActivePanelCsv" title="导出当前筛选结果为 CSV"><ConsoleIcon name="download" />导出 CSV</button>
+            <button v-if="activePanel === 'users' && hasPermission(IAM_PERMISSIONS.userWrite)" class="console-button primary small" type="button" @click="openEditor('user')"><ConsoleIcon name="plus" />新增用户</button>
+            <button v-if="activePanel === 'users' && hasPermission(IAM_PERMISSIONS.userWrite)" class="console-button ghost small" type="button" @click="openEditor('user-batch')"><ConsoleIcon name="plus" />批量新增用户</button>
+            <button v-if="activePanel === 'users' && hasPermission(IAM_PERMISSIONS.userWrite)" class="console-button ghost small" type="button" @click="batchImportVisible = true"><ConsoleIcon name="download" />批量导入</button>
+            <button v-else-if="panelToKind[activePanel] && hasPermission(panelCreatePermission(activePanel))" class="console-button primary small" type="button" :disabled="!panelToKind[activePanel]" @click="openEditorForActivePanel"><ConsoleIcon name="plus" />新增{{ editorLabels[panelToKind[activePanel]] || '' }}</button>
           </div>
         </header>
 
         <section v-if="activePanel === 'users'" class="iam-table-section">
-          <div class="iam-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="filters.user" type="search" placeholder="姓名 / 工号 / 邮箱 / 状态" /></label><span>{{ filteredUsers.length }} / 共 {{ pagination.users.total }} 位用户</span></div>
-          <div class="console-table-card"><div class="console-table-scroll"><table class="console-data-table iam-data-table"><thead><tr><th>用户</th><th>工号</th><th>邮箱</th><th>状态</th><th>更新时间</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
+          <div class="iam-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="panelFilters.users" type="search" placeholder="姓名 / 工号 / 邮箱 / 状态" /></label><span>{{ filteredUsers.length }} / 共 {{ pagination.users.total }} 位用户</span></div>
+          <div class="console-table-card"><div class="console-table-scroll"><table class="console-data-table iam-data-table">
+            <colgroup><col><col style="width: 22%"><col style="width: 22%"><col style="width: 80px"><col style="width: 16%"><col style="width: 120px"></colgroup>
+            <thead><tr><th>用户</th><th>工号</th><th>邮箱</th><th>状态</th><th>更新时间</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
             <tr v-if="loading.users"><td class="console-empty" colspan="6">正在读取用户…</td></tr>
             <tr v-else-if="!filteredUsers.length"><td class="console-empty" colspan="6">暂无用户记录。</td></tr>
-            <tr v-for="item in filteredUsers" :key="item.user_id"><td><strong class="console-entity-name">{{ item.display_name }}</strong><span class="console-entity-meta console-mono">{{ item.user_id }}</span></td><td class="console-mono">{{ item.employee_no || '—' }}</td><td>{{ item.email || '—' }}</td><td><span class="console-badge" :class="(item.status || '').toUpperCase() === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(item.status) }}</span></td><td class="console-mono">{{ formatDateTime(item.updated_at) }}</td><td class="console-actions-cell"><button class="console-text-button" type="button" @click="openDetail('user', item)">详情</button><button class="console-text-button danger" type="button" @click="openUserDeletionDialog(item)">删除</button></td></tr>
+            <tr v-for="item in filteredUsers" :key="item.user_id"><td data-label="用户"><strong class="console-entity-name">{{ item.display_name }}</strong></td><td data-label="工号" class="console-mono">{{ item.employee_no || '—' }}</td><td data-label="邮箱">{{ item.email || '—' }}</td><td data-label="状态"><span class="console-badge" :class="(item.status || '').toUpperCase() === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(item.status) }}</span></td><td data-label="更新时间" class="console-mono">{{ formatDateTime(item.updated_at) }}</td><td data-label="操作" class="console-actions-cell"><button class="console-text-button" type="button" @click="openDetail('user', item)">详情</button><button v-if="hasPermission(IAM_PERMISSIONS.userDelete)" class="console-text-button danger" type="button" @click="openUserDeletionDialog(item)">删除</button></td></tr>
           </tbody></table></div></div>
         </section>
 
         <section v-else-if="activePanel === 'accounts'" class="iam-table-section iam-accounts-panel">
-          <div class="iam-filter-row iam-account-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="filters.account" type="search" placeholder="搜索账号、用户 ID 或状态" /></label><span>{{ filteredAccounts.length }} / 共 {{ pagination.accounts.total }} 个账号</span></div>
-          <div class="console-table-card iam-account-table-card"><div class="console-table-scroll"><table class="console-data-table iam-data-table"><thead><tr><th>登录账号</th><th>关联用户</th><th>认证方式</th><th>有效时间</th><th>状态</th><th>更新时间</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
-            <tr v-if="loading.accounts"><td class="console-empty" colspan="7">正在读取登录账号…</td></tr>
+          <div class="iam-filter-row iam-account-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="panelFilters.accounts" type="search" placeholder="搜索账号、用户 ID 或状态" /></label><span>{{ filteredAccounts.length }} / 共 {{ pagination.accounts.total }} 个账号</span></div>
+          <div class="console-table-card iam-account-table-card"><div class="console-table-scroll"><table class="console-data-table iam-data-table">
+            <colgroup><col style="width: 18%"><col style="width: 8%"><col style="width: 16%"><col style="width: 16%"><col style="width: 80px"><col style="width: 14%"><col style="width: 130px"></colgroup>
+            <thead><tr><th>登录账号</th><th>关联用户</th><th>认证方式</th><th>有效时间</th><th>状态</th><th>更新时间</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
+            <tr v-if="loading.accounts"><td class="console-empty" data-empty="true" colspan="7">正在读取登录账号…</td></tr>
             <tr v-else-if="!filteredAccounts.length"><td class="console-empty" colspan="7">暂无登录账号记录。可点击右上角“新增登录账号”创建。</td></tr>
-            <tr v-for="item in filteredAccounts" :key="item.account_id"><td><div class="iam-account-identity"><span class="iam-account-avatar">{{ (item.account_name || '?').slice(0, 1).toUpperCase() }}</span><span><strong>{{ item.account_name }}</strong><small class="console-mono">{{ item.account_id }}</small></span></div></td><td><span class="iam-linked-user"><ConsoleIcon name="user" />{{ item.user_id || '—' }}</span></td><td><div class="iam-auth-tags"><span class="iam-type-tag">{{ displayLoginAccountType(item).split(' / ')[0] }}</span><span class="iam-source-tag">{{ displayLoginAccountType(item).split(' / ')[1] }}</span></div></td><td><div class="iam-validity"><span class="iam-validity-chip" :class="item.valid_until ? 'is-temporary' : 'is-permanent'">{{ item.valid_until ? '临时账号' : '永久账号' }}</span><small>{{ item.valid_until ? formatDateTime(item.valid_until) : '长期有效' }}</small></div></td><td><span class="console-badge" :class="(item.status || '').toUpperCase() === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(item.status) }}</span></td><td class="console-mono iam-account-updated">{{ formatDateTime(item.updated_at) }}</td><td class="console-actions-cell iam-account-actions"><button class="console-text-button" type="button" @click="openDetail('account', item)">详情</button><button v-if="isAccountStatusManageable(item.status)" class="console-text-button" :class="{ danger: (item.status || '').toUpperCase() === 'ACTIVE' }" type="button" :disabled="updatingAccountId === item.account_id" @click="toggleAccountStatus(item)">{{ updatingAccountId === item.account_id ? '处理中…' : ((item.status || '').toUpperCase() === 'ACTIVE' ? '停用' : '启用') }}</button><button class="console-text-button danger" type="button" @click="openPasswordResetForAccount(item)">重置密码</button></td></tr>
+            <tr v-for="item in filteredAccounts" :key="item.account_id"><td data-label="登录账号"><div class="iam-account-identity"><span class="iam-account-avatar">{{ (item.account_name || '?').slice(0, 1).toUpperCase() }}</span><span><strong>{{ item.account_name }}</strong></span></div></td><td data-label="关联用户"><span class="iam-linked-user" :title="item.user_id || ''"><ConsoleIcon name="user" />{{ item.user?.display_name || item.user?.name || '—' }}</span></td><td data-label="认证方式"><div class="iam-auth-tags"><span class="iam-type-tag">{{ displayLoginAccountType(item).split(' / ')[0] }}</span><span class="iam-source-tag">{{ displayLoginAccountType(item).split(' / ')[1] }}</span></div></td><td data-label="有效时间"><div class="iam-validity"><span class="iam-validity-chip" :class="item.valid_until ? 'is-temporary' : 'is-permanent'">{{ item.valid_until ? '临时账号' : '永久账号' }}</span><small>{{ item.valid_until ? formatDateTime(item.valid_until) : '长期有效' }}</small></div></td><td data-label="状态"><span class="console-badge" :class="(item.status || '').toUpperCase() === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(item.status) }}</span></td><td data-label="更新时间" class="console-mono iam-account-updated">{{ formatDateTime(item.updated_at) }}</td><td data-label="操作" class="console-actions-cell iam-account-actions"><button class="console-text-button" type="button" @click="openDetail('account', item)">详情</button><button v-if="isAccountStatusManageable(item.status) && hasPermission(IAM_PERMISSIONS.accountWrite)" class="console-text-button" :class="{ danger: (item.status || '').toUpperCase() === 'ACTIVE' }" type="button" :disabled="updatingAccountId === item.account_id" @click="toggleAccountStatus(item)">{{ updatingAccountId === item.account_id ? '处理中…' : ((item.status || '').toUpperCase() === 'ACTIVE' ? '停用' : '启用') }}</button><button v-if="hasPermission(IAM_PERMISSIONS.accountResetPassword)" class="console-text-button danger" type="button" @click="openPasswordResetForAccount(item)">重置密码</button></td></tr>
           </tbody></table></div></div>
         </section>
 
         <section v-else-if="activePanel === 'organizations'" class="iam-table-section">
-          <div class="iam-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="filters.organization" type="search" placeholder="组织编码 / 名称" /></label><span>{{ filteredOrganizations.length }} / 共 {{ pagination.organizations.total }} 个组织</span></div>
+          <div class="iam-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="panelFilters.organizations" type="search" placeholder="组织编码 / 名称" /></label><span>{{ filteredOrganizations.length }} / 共 {{ pagination.organizations.total }} 个组织</span></div>
           <p v-if="pagination.organizations.serverPagingSupported === false && pagination.organizations.total > pagination.organizations.pageSize" class="iam-server-limit-note">当前后端尚未按 page / page_size 分页组织列表；为避免只在首批数据中翻页，已隐藏分页操作。请先完成后端分页改造。</p>
-          <div class="console-table-card"><div class="console-table-scroll"><table class="console-data-table iam-data-table"><thead><tr><th>组织单元</th><th>上级组织 ID</th><th>排序</th><th>状态</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
+          <div class="console-table-card"><div class="console-table-scroll"><table class="console-data-table iam-data-table">
+            <colgroup><col><col style="width: 22%"><col style="width: 70px"><col style="width: 80px"><col style="width: 130px"></colgroup>
+            <thead><tr><th>组织单元</th><th>上级组织 ID</th><th>排序</th><th>状态</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
             <tr v-if="loading.organizations"><td class="console-empty" colspan="5">正在读取组织…</td></tr>
             <tr v-else-if="!filteredOrganizations.length"><td class="console-empty" colspan="5">暂无组织记录。</td></tr>
-            <tr v-for="item in filteredOrganizations" :key="item.org_unit_id"><td><strong>{{ item.name }}</strong><span class="console-entity-meta console-mono">{{ item.code }} · {{ item.org_unit_id }}</span></td><td class="console-mono">{{ item.parent_id || '—' }}</td><td>{{ item.sort_order ?? 0 }}</td><td><span class="console-badge" :class="(item.status || '').toUpperCase() === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(item.status) }}</span></td><td class="console-actions-cell"><button class="console-text-button" type="button" @click="openDetail('organization', item)">详情</button><button class="console-text-button" type="button" @click="openOrganizationEditor(item)">编辑</button><button class="console-text-button danger" type="button" @click="removeOrganization(item)">删除</button></td></tr>
+            <tr v-for="item in filteredOrganizations" :key="item.org_unit_id"><td data-label="组织单元"><strong>{{ item.name }}</strong><span class="console-entity-meta console-mono">{{ item.code }} · <button class="console-id-button" type="button" :title="`复制 ${item.org_unit_id}`" @click="copyText(item.org_unit_id, { success: '组织 ID 已复制' })">{{ item.org_unit_id }}</button></span></td><td data-label="上级组织 ID" class="console-mono">{{ item.parent_id || '—' }}</td><td data-label="排序">{{ item.sort_order ?? 0 }}</td><td data-label="状态"><span class="console-badge" :class="(item.status || '').toUpperCase() === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(item.status) }}</span></td><td data-label="操作" class="console-actions-cell"><button class="console-text-button" type="button" @click="openDetail('organization', item)">详情</button><button v-if="hasPermission(IAM_PERMISSIONS.organizationWrite)" class="console-text-button" type="button" @click="openOrganizationEditor(item)">编辑</button><button v-if="hasPermission(IAM_PERMISSIONS.organizationDelete)" class="console-text-button danger" type="button" :disabled="deletingOrganizationId === item.org_unit_id" @click="removeOrganization(item)">{{ deletingOrganizationId === item.org_unit_id ? '删除中…' : '删除' }}</button></td></tr>
           </tbody></table></div></div>
         </section>
 
         <section v-else-if="activePanel === 'positions'" class="iam-table-section">
-          <div class="iam-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="filters.position" type="search" placeholder="岗位编码 / 名称 / 所属组织" /></label><span>{{ filteredPositions.length }} / 共 {{ pagination.positions.total }} 个岗位</span></div>
+          <div class="iam-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="panelFilters.positions" type="search" placeholder="岗位编码 / 名称 / 所属组织" /></label><span>{{ filteredPositions.length }} / 共 {{ pagination.positions.total }} 个岗位</span></div>
           <p v-if="pagination.positions.serverPagingSupported === false && pagination.positions.total > pagination.positions.pageSize" class="iam-server-limit-note">当前后端尚未按 page / page_size 分页岗位列表；为避免只在首批数据中翻页，已隐藏分页操作。请先完成后端分页改造。</p>
-          <div class="console-table-card"><div class="console-table-scroll"><table class="console-data-table iam-data-table"><thead><tr><th>岗位</th><th>所属组织</th><th>状态</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
-            <tr v-if="loading.positions"><td class="console-empty" colspan="4">正在读取岗位…</td></tr>
-            <tr v-else-if="!filteredPositions.length"><td class="console-empty" colspan="4">暂无岗位记录。</td></tr>
-            <tr v-for="item in filteredPositions" :key="item.position_id || item.id"><td><strong>{{ item.name }}</strong></td><td>{{ item.organization_name }}</td><td><span class="console-badge" :class="(item.status || '').toUpperCase() === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(item.status) }}</span></td><td class="console-actions-cell"><button class="console-text-button" type="button" @click="openDetail('position', item)">详情</button></td></tr>
+          <div class="console-table-card"><div class="console-table-scroll"><table class="console-data-table iam-data-table">
+            <colgroup><col style="width: 18%"><col style="width: 24%"><col><col style="width: 80px"><col style="width: 130px"></colgroup>
+            <thead><tr><th>岗位</th><th>岗位 ID</th><th>所属组织</th><th>状态</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
+            <tr v-if="loading.positions"><td class="console-empty" colspan="5">正在读取岗位…</td></tr>
+            <tr v-else-if="!filteredPositions.length"><td class="console-empty" colspan="5">暂无岗位记录。</td></tr>
+            <tr v-for="item in filteredPositions" :key="item.position_id || item.id"><td data-label="岗位"><strong>{{ item.name }}</strong></td><td data-label="岗位 ID" class="console-mono"><button class="console-id-button" type="button" :title="`复制 ${item.position_id || item.id}`" @click="copyText(item.position_id || item.id, { success: '岗位 ID 已复制' })">{{ item.position_id || item.id }}</button></td><td data-label="所属组织">{{ item.organization_name }}</td><td data-label="状态"><span class="console-badge" :class="(item.status || '').toUpperCase() === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(item.status) }}</span></td><td data-label="操作" class="console-actions-cell"><button class="console-text-button" type="button" @click="openDetail('position', item)">详情</button><button v-if="hasPermission(IAM_PERMISSIONS.positionDelete)" class="console-text-button danger" type="button" :disabled="deletingPositionId === (item.position_id || item.id)" @click="removePosition(item)">{{ deletingPositionId === (item.position_id || item.id) ? '删除中…' : '删除' }}</button></td></tr>
           </tbody></table></div></div>
         </section>
 
-        <PositionAuthorizationTemplates v-else-if="activePanel === 'positionAuthorizationTemplates'" ref="positionAuthorizationTemplates" @toast="emitToast" />
+        <PositionAuthorizationTemplates v-else-if="activePanel === 'positionAuthorizationTemplates' && hasPermission(IAM_PERMISSIONS.authorizationWrite)" ref="positionAuthorizationTemplates" @toast="emitToast" />
 
         <section v-else-if="activePanel === 'memberships'" class="iam-table-section">
-          <div class="iam-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="filters.membership" type="search" placeholder="用户 / 组织 / 岗位" /></label><span>{{ filteredMemberships.length }} / 共 {{ pagination.memberships.total }} 条任职关系</span></div>
-          <div class="console-table-card"><div class="console-table-scroll"><table class="console-data-table iam-data-table"><thead><tr><th>用户</th><th>组织</th><th>岗位</th><th>任职类型</th><th>岗位授权</th><th>有效期</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
+          <div class="iam-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="panelFilters.memberships" type="search" placeholder="用户 / 组织 / 岗位" /></label><span>{{ filteredMemberships.length }} / 共 {{ pagination.memberships.total }} 条任职关系</span></div>
+          <div class="console-table-card"><div class="console-table-scroll"><table class="console-data-table iam-data-table">
+            <colgroup><col style="width: 15%"><col style="width: 15%"><col style="width: 15%"><col style="width: 12%"><col style="width: 12%"><col style="width: 18%"><col style="width: 130px"></colgroup>
+            <thead><tr><th>用户</th><th>组织</th><th>岗位</th><th>任职类型</th><th>岗位授权</th><th>有效期</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
             <tr v-if="loading.memberships"><td class="console-empty" colspan="7">正在读取任职关系…</td></tr>
             <tr v-else-if="!filteredMemberships.length"><td class="console-empty" colspan="7">暂无任职关系。</td></tr>
-            <tr v-for="item in filteredMemberships" :key="item.membership_id || item.id"><td>{{ item.user?.name || item.user?.display_name || item.user_id || '—' }}</td><td>{{ item.org_unit?.name || item.org_unit_id || '—' }}</td><td>{{ item.position?.name || item.position_id || '—' }}</td><td>{{ displayMembershipType(item.membership_type) }}</td><td><span class="console-badge" :class="item.inherit_authorization === false ? 'status-disabled' : 'status-active'">{{ item.inherit_authorization === false ? '不继承' : '继承' }}</span></td><td>{{ displayMembershipValidity(item) }}</td><td class="console-actions-cell"><button class="console-text-button" type="button" @click="openDetail('membership', item)">详情</button></td></tr>
+            <tr v-for="item in filteredMemberships" :key="item.membership_id || item.id"><td data-label="用户">{{ item.user?.name || item.user?.display_name || '—' }}</td><td data-label="组织">{{ item.org_unit?.name || '—' }}</td><td data-label="岗位">{{ item.position?.name || '—' }}</td><td data-label="任职类型">{{ displayMembershipType(item.membership_type) }}</td><td data-label="岗位授权"><span class="console-badge" :class="item.inherit_authorization === false ? 'status-disabled' : 'status-active'">{{ item.inherit_authorization === false ? '不继承' : '继承' }}</span></td><td data-label="有效期">{{ displayMembershipValidity(item) }}</td><td data-label="操作" class="console-actions-cell"><button class="console-text-button" type="button" @click="openDetail('membership', item)">详情</button></td></tr>
           </tbody></table></div></div>
         </section>
 
@@ -1226,6 +1706,49 @@ onMounted(async () => {
             <div><span>{{ row.label }}</span><strong>{{ row.value }}</strong></div>
           </template>
         </div>
+        <section v-if="isUserAuthorizationSubject" class="iam-detail-section iam-effective-authorization-overview">
+          <div class="iam-detail-section-head">
+            <div>
+              <h4>有效授权总览</h4>
+              <p>汇总该用户当前快照下三类来源的角色：用户直接授权、组织单元继承、岗位继承。最终入口授权以"合并去重后的角色"为准；冲突时系统拒绝入口授权，请先处理冲突来源。</p>
+            </div>
+            <div class="iam-application-access-badges">
+              <span class="iam-application-badge">合并 {{ userAuthorizationPreviewMerged.length }} 个角色</span>
+              <span class="iam-application-badge">用户直接 {{ userAuthorizationPreviewBySource.USER.length }}</span>
+              <span class="iam-application-badge">组织 {{ userAuthorizationPreviewBySource.ORG_UNIT.length }}</span>
+              <span class="iam-application-badge">岗位 {{ userAuthorizationPreviewBySource.POSITION.length }}</span>
+              <span v-if="hasUserAuthorizationPreviewConflict" class="iam-application-badge is-conflict">授权冲突 · {{ userAuthorizationPreviewConflicts.length }} 项</span>
+            </div>
+          </div>
+          <p v-if="userAuthorizationPreviewLoading" class="iam-empty-inline">正在汇总该用户的有效授权…</p>
+          <template v-else-if="userAuthorizationPreviewUnavailable">
+            <p class="iam-empty-inline">授权预览接口暂不可用或尚未支持按用户查询；不影响下方个人例外授权的写入。接口就绪后此处会自动展示三类来源的角色汇总与冲突提示。</p>
+          </template>
+          <template v-else>
+            <p v-if="hasUserAuthorizationPreviewConflict" class="login-target-module__error" role="alert">
+              检测到 {{ userAuthorizationPreviewConflicts.length }} 处授权冲突：{{ userAuthorizationPreviewConflicts.join('；') }}。系统已拒绝门户入口、OIDC 授权和权限并集；请保留一类来源的角色，删除或调整其他来源。
+            </p>
+            <p v-if="!userAuthorizationPreviewRoles.length" class="iam-empty-inline">该用户当前没有任何生效的角色来源（既无个人直接角色，也未通过组织或岗位继承）。</p>
+            <div v-else class="iam-effective-authorization-grid">
+              <div v-for="source in userAuthorizationPreviewSources" :key="source.key" class="iam-effective-authorization-card">
+                <div class="iam-effective-authorization-head">
+                  <strong>{{ source.label }}</strong>
+                  <span>{{ userAuthorizationPreviewBySource[source.key].length }} 个角色</span>
+                </div>
+                <p v-if="!userAuthorizationPreviewBySource[source.key].length" class="iam-empty-inline">该来源当前没有生效角色。</p>
+                <ul v-else class="iam-effective-authorization-list">
+                  <li v-for="(role, index) in userAuthorizationPreviewBySource[source.key]" :key="`${source.key}-${roleCode(role)}-${role.source_id || index}`">
+                    <span class="iam-effective-authorization-app">{{ role.application_name || role.application_code || '—' }}</span>
+                    <span class="iam-effective-authorization-role"><strong>{{ applicationRoleName(role) }}</strong><code>{{ roleCode(role) }}</code></span>
+                    <small v-if="role.source_name || role.source_id">来源：{{ role.source_name || role.source_id }}</small>
+                  </li>
+                </ul>
+              </div>
+            </div>
+            <p class="iam-field-help">如需新增个人例外授权，请使用下方"{{ authorizationEntryLayerInfo.title }}"区域；不要把已由组织或岗位自动继承的角色重复写入个人层。</p>
+          </template>
+        </section>
+
         <section v-if="supportsApplicationAuthorization" class="iam-detail-section iam-application-access">
           <div class="iam-detail-section-head">
             <div>
@@ -1265,7 +1788,7 @@ onMounted(async () => {
                 <label><span>例外授权有效期 *</span><select v-model="authorizationDraft.validity_mode" :disabled="applicationAccessSaving || applicationAccessRevoking" @change="onAuthorizationValidityChange"><option value="PERMANENT">长期有效</option><option value="RANGE">指定有效期</option></select></label>
               </div>
               <div v-if="authorizationDraft.validity_mode === 'RANGE'" class="iam-application-validity-grid"><label><span>生效时间</span><input v-model="authorizationDraft.valid_from" type="datetime-local" :disabled="applicationAccessSaving || applicationAccessRevoking" /></label><label><span>失效时间</span><input v-model="authorizationDraft.valid_until" type="datetime-local" :disabled="applicationAccessSaving || applicationAccessRevoking" /></label></div>
-              <p v-if="authorizationHasMixedRoleSettings" class="iam-field-help iam-application-scope-warning">当前{{ authorizationSubjectLabel }}的例外角色存在不同授权范围或有效期；本次保存会按上方设置统一替换例外角色集合。</p>
+              <p v-if="authorizationHasMixedRoleSettings" class="iam-field-help iam-application-scope-warning">当前勾选的角色包含不同的授权范围或有效期组合，<strong>保存已被阻断</strong>。请取消多余角色，或切换到“整个应用 + 长期有效”并重新勾选。</p>
               <p v-if="authorizationCatalogLoading || applicationAccessLoading" class="iam-empty-inline">正在读取应用角色与当前授权…</p>
               <template v-else>
                 <div v-if="!authorizationRoleOptions.length" class="iam-application-empty-catalog"><strong>{{ authorizationCatalog ? '目录中暂无可分配的 ACTIVE 角色' : '暂无可分配角色目录' }}</strong><p>{{ authorizationCatalog ? '当前角色目录仅包含停用、不可分配或已弃用角色。请由子系统维护角色目录后再进行授权。' : '该应用尚未同步角色目录，平台不会猜测、内置或编辑子系统业务角色与权限。请由应用负责人同步授权目录后再分配角色。' }}</p></div>
@@ -1273,10 +1796,23 @@ onMounted(async () => {
                   <legend>例外角色（只可选择目录 ACTIVE 角色）</legend>
                   <p class="iam-field-help">角色和默认权限来自子系统角色目录，只读展示。基础平台仅保存“主体 / 应用 / 角色 / 范围 / 有效期”，不会提交其他子系统的自定义业务权限。</p>
                   <p v-if="catalogInactiveOrRestrictedRoleCount" class="iam-field-help">目录中另有 {{ catalogInactiveOrRestrictedRoleCount }} 个停用或不可分配角色，已从可选项中排除。</p>
-                  <p v-if="!authorizationDraft.role_codes.length" class="iam-empty-inline">{{ authorizationEntryLayerInfo.empty }}</p>
+                  <p v-if="!authorizationDraft.role_codes.length && !unavailableDirectRoles.length" class="iam-empty-inline">{{ authorizationEntryLayerInfo.empty }}</p>
                   <div class="iam-application-role-list"><label v-for="role in authorizationRoleOptions" :key="role.role_id || role.id || role.code" class="iam-application-role-option" :class="{ selected: authorizationDraft.role_codes.includes(role.code) }"><input v-model="authorizationDraft.role_codes" type="checkbox" :value="role.code" /><span class="iam-application-role-copy"><strong>{{ role.name || role.display_name || role.code }}</strong><code>{{ role.code }}</code><small v-if="role.description">{{ role.description }}</small><small class="iam-application-role-status">ACTIVE · {{ rolePermissionCodes(role).length }} 项默认权限</small><small class="iam-application-role-summary">来源：{{ authorizationEntryLayerInfo.title }} · 默认能力（子系统只读）：{{ roleDefaultPermissionSummary(role) }}</small></span></label></div>
                 </fieldset>
-                <p v-if="unavailableDirectRoles.length" class="iam-application-catalog-warning">当前已有 {{ unavailableDirectRoles.map((role) => applicationRoleName(role)).join('、') }} 等例外角色不再处于 ACTIVE 可分配目录中，已不进入可编辑选择。保存新的例外角色集合会撤销这些过期或不可分配的例外授权。</p>
+                <!-- 不在当前 ACTIVE 目录中的历史例外角色：保留在草稿（已勾选、不可改），保存时弹窗要求用户显式确认撤销。 -->
+                <fieldset v-if="unavailableDirectRoles.length" class="iam-application-role-fieldset iam-application-unavailable" :disabled="applicationAccessSaving || applicationAccessRevoking">
+                  <legend>已不再可分配（{{ unavailableDirectRoles.length }}）</legend>
+                  <p class="iam-field-help iam-application-catalog-warning">以下角色在历史直绑中保留，但已不在当前 ACTIVE 目录中。保存时会被要求显式确认撤销。</p>
+                  <div class="iam-application-role-list">
+                    <label v-for="role in unavailableDirectRoles" :key="`unavail-${roleCode(role)}`" class="iam-application-role-option selected is-unavailable">
+                      <input type="checkbox" :checked="authorizationDraft.role_codes.includes(roleCode(role))" disabled />
+                      <span class="iam-application-role-copy">
+                        <strong>{{ applicationRoleName(role) }}</strong><code>{{ roleCode(role) }}</code>
+                        <small class="iam-application-role-status">不在当前 ACTIVE 目录</small>
+                      </span>
+                    </label>
+                  </div>
+                </fieldset>
 
                 <div v-if="isUserAuthorizationSubject" class="iam-application-permission-block">
                   <div class="iam-application-permission-head"><strong>标准继承授权（只读）</strong><span>{{ applicationInheritedRoles.length }} 个角色</span></div>
@@ -1299,7 +1835,7 @@ onMounted(async () => {
             </div>
           </template>
         </section>
-        <footer><button class="console-button ghost" type="button" :disabled="applicationAccessSaving || applicationAccessRevoking" @click="closeDetail">关闭</button><button v-if="supportsApplicationAuthorization && selectedApplicationCode && hasDirectApplicationAccess" class="console-button danger" type="button" :disabled="applicationAccessSaving || applicationAccessRevoking" @click="revokeApplicationAccess">{{ applicationAccessRevoking ? '撤销中…' : '撤销例外授权' }}</button><button v-if="supportsApplicationAuthorization && selectedApplicationCode" class="console-button primary" type="button" :disabled="applicationsLoading || authorizationCatalogLoading || applicationAccessLoading || applicationAccessSaving || applicationAccessRevoking || !authorizationRoleOptions.length" @click="saveApplicationAccess"><ConsoleIcon name="save" />{{ applicationAccessSaving ? '保存中…' : '保存例外角色' }}</button></footer>
+        <footer><button class="console-button ghost" type="button" :disabled="applicationAccessSaving || applicationAccessRevoking" @click="closeDetail">关闭</button><button v-if="supportsApplicationAuthorization && selectedApplicationCode && hasDirectApplicationAccess && hasPermission(IAM_PERMISSIONS.authorizationWrite)" class="console-button danger" type="button" :disabled="applicationAccessSaving || applicationAccessRevoking" @click="revokeApplicationAccess">{{ applicationAccessRevoking ? '撤销中…' : '撤销例外授权' }}</button><button v-if="supportsApplicationAuthorization && selectedApplicationCode && hasPermission(IAM_PERMISSIONS.authorizationWrite)" class="console-button primary" type="button" :disabled="applicationsLoading || authorizationCatalogLoading || applicationAccessLoading || applicationAccessSaving || applicationAccessRevoking || !authorizationRoleOptions.length" @click="saveApplicationAccess"><ConsoleIcon name="save" />{{ applicationAccessSaving ? '保存中…' : '保存例外角色' }}</button></footer>
       </section>
     </div>
 
@@ -1318,8 +1854,13 @@ onMounted(async () => {
     <div v-if="temporaryPassword" class="iam-modal-backdrop" role="presentation" @click.self="closeTemporaryPassword">
       <section class="iam-modal iam-temporary-password-modal" role="dialog" aria-modal="true" aria-label="一次性临时密码">
         <header><div><p>请立即保存</p><h3>一次性临时密码</h3></div><button class="console-modal-close" type="button" aria-label="关闭临时密码" @click="closeTemporaryPassword"><ConsoleIcon name="close" /></button></header>
-        <div class="iam-confirm-body"><p>账号 <strong>{{ temporaryPassword.accountName }}</strong> 的密码已重置。关闭此窗口后，临时密码将从当前页面清除；如未保存，只能再次重置。</p><code class="iam-one-time-password">{{ temporaryPassword.value }}</code><p class="iam-one-time-warning">请仅通过受控的安全渠道交付给用户，不要粘贴到工单、聊天记录或日志中。</p></div>
-        <footer><button class="console-button ghost" type="button" @click="closeTemporaryPassword">我已保存</button><button class="console-button primary" type="button" @click="copyTemporaryPassword">复制临时密码</button></footer>
+        <div class="iam-confirm-body">
+          <p>账号 <strong>{{ temporaryPassword.accountName }}</strong> 的密码已重置。关闭此窗口后，临时密码将从当前页面清除；如未保存，只能再次重置。</p>
+          <!-- 默认遮罩，避免截屏/屏幕共享/拼写自动补全意外泄露；点揭示按钮才显示一次。 -->
+          <code class="iam-one-time-password" :class="{ 'is-masked': !temporaryPasswordVisible }" @click="revealTemporaryPassword" :title="temporaryPasswordVisible ? '点击隐藏' : '点击揭示一次'">{{ temporaryPasswordVisible ? temporaryPassword.value : '••••••••••••••••（点击揭示）' }}</code>
+          <p class="iam-one-time-warning">请仅通过受控的安全渠道交付给用户，不要粘贴到工单、聊天记录或日志中。揭示后请尽快复制或记录。</p>
+        </div>
+        <footer><button class="console-button ghost" type="button" @click="closeTemporaryPassword">我已保存</button><button class="console-button ghost" type="button" :disabled="!temporaryPasswordVisible" @click="hideTemporaryPassword">隐藏</button><button class="console-button primary" type="button" @click="copyTemporaryPassword">复制临时密码</button></footer>
       </section>
     </div>
 
@@ -1331,12 +1872,25 @@ onMounted(async () => {
       </section>
     </div>
 
-    <EmployeeOnboardingModal
-      v-if="employeeOnboardingVisible"
+    <!-- 通用危险/重要操作确认弹窗。替代所有 window.confirm，避免 WebView 下静默失败。 -->
+    <div v-if="confirmDialog" class="iam-modal-backdrop" role="presentation" @click.self="closeConfirm" @keydown.esc="closeConfirm">
+      <section class="iam-modal iam-confirm-modal" role="dialog" aria-modal="true" :aria-label="confirmDialog.title" @keydown.esc="closeConfirm">
+        <header><div><p>{{ confirmDialog.danger ? '危险操作' : '请确认' }}</p><h3>{{ confirmDialog.title }}</h3></div><button class="console-modal-close" type="button" :aria-label="`关闭${confirmDialog.title}`" :disabled="confirmDialog.busy" @click="closeConfirm"><ConsoleIcon name="close" /></button></header>
+        <div class="iam-confirm-body">
+          <p style="white-space: pre-line;">{{ confirmDialog.description }}</p>
+        </div>
+        <footer>
+          <button class="console-button ghost" type="button" :disabled="confirmDialog.busy" @click="closeConfirm">{{ confirmDialog.cancelText }}</button>
+          <button :class="['console-button', confirmDialog.danger ? 'iam-danger-button' : 'primary']" type="button" :disabled="confirmDialog.busy" @click="async () => { if (confirmDialog.busy) return; confirmDialog.busy = true; try { await confirmDialog.onConfirm() } catch { /* 错误已由各 handler 自身处理 */ } finally { if (confirmDialog) confirmDialog.busy = false } }">{{ confirmDialog.confirmText }}</button>
+        </footer>
+      </section>
+    </div>
+
+    <BatchUserImportDialog
+      v-if="batchImportVisible"
       :organizations="organizations"
-      :positions="positions"
-      @close="employeeOnboardingVisible = false"
-      @completed="refreshAfterEmployeeOnboarding"
+      @close="batchImportVisible = false"
+      @completed="refreshAfterBatchImport"
       @toast="emitToast"
     />
 
@@ -1351,7 +1905,7 @@ onMounted(async () => {
             <label><span>手机</span><input v-model="form.mobile" maxlength="32" placeholder="例如：13800000000" /></label>
             <label><span>状态</span><select v-model="form.status"><option value="ACTIVE">启用</option><option value="DISABLED">停用</option></select></label>
             <label><span>登录账号 *</span><input v-model="form.account_name" required minlength="3" maxlength="64" placeholder="例如：zhang.san" /><small class="iam-field-help">账号必须唯一，以字母或数字开头。</small></label>
-            <label><span>初始密码 *</span><div class="iam-password-field"><input v-model="form.initial_password" :type="initialPasswordVisible ? 'text' : 'password'" required minlength="12" maxlength="128" autocomplete="new-password" /><button type="button" :aria-label="initialPasswordVisible ? '隐藏密码' : '显示密码'" @click="initialPasswordVisible = !initialPasswordVisible"><ConsoleIcon :name="initialPasswordVisible ? 'eye-off' : 'eye'" /></button></div></label>
+            <label><span>初始密码 *</span><div class="iam-password-field"><input v-model="form.initial_password" :type="initialPasswordVisible ? 'text' : 'password'" required minlength="8" maxlength="128" autocomplete="new-password" /><button type="button" :aria-label="initialPasswordVisible ? '隐藏密码' : '显示密码'" @click="initialPasswordVisible = !initialPasswordVisible"><ConsoleIcon :name="initialPasswordVisible ? 'eye-off' : 'eye'" /></button></div></label>
             <label><span>账号有效期 *</span><select v-model="form.validity_mode"><option value="TEMPORARY">临时（默认 1 天）</option><option value="PERMANENT">永久</option></select></label>
             <label v-if="form.validity_mode !== 'PERMANENT'"><span>有效截止时间 *</span><input v-model="form.valid_until" required type="datetime-local" /></label>
           </template>
@@ -1376,7 +1930,7 @@ onMounted(async () => {
               <small class="iam-field-help">一个账号只关联一位用户，避免使用名称进行关联。</small>
             </label>
             <label class="iam-account-field"><span>账号类型</span><input value="个人账号 / 本地密码" disabled /><small class="iam-field-help">当前新增接口创建个人本地账号，使用账号名和密码登录。</small></label>
-            <label class="iam-account-field"><span>初始密码 *</span><div class="iam-password-field"><input id="initial-password" v-model="form.initial_password" required minlength="12" maxlength="128" :type="initialPasswordVisible ? 'text' : 'password'" autocomplete="new-password" placeholder="请妥善记录，将仅返回一次" /><button class="iam-password-toggle" type="button" :aria-label="initialPasswordVisible ? '隐藏初始密码' : '显示初始密码'" :title="initialPasswordVisible ? '隐藏密码' : '显示密码'" @click="initialPasswordVisible = !initialPasswordVisible"><svg v-if="!initialPasswordVisible" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5c-5 0-9.3 3-11 7 1.7 4 6 7 11 7s9.3-3 11-7c-1.7-4-6-7-11-7Zm0 12c-3.8 0-7.2-2-8.8-5C4.8 9 8.2 7 12 7s7.2 2 8.8 5c-1.6 3-5 5-8.8 5Zm0-8a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm0 4a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z" /></svg><svg v-else viewBox="0 0 24 24" aria-hidden="true"><path d="m3.3 2-1.4 1.4 3 3A12.7 12.7 0 0 0 1 12c1.7 4 6 7 11 7 1.8 0 3.5-.4 5-1l3.6 3.6 1.4-1.4L3.3 2ZM12 17c-3.8 0-7.2-2-8.8-5 .8-1.5 1.9-2.7 3.2-3.5l2.1 2.1A3.5 3.5 0 0 0 13.4 15l2 2c-1 .3-2.2.5-3.4.5V17Zm-1.6-4.5 2.1 2.1a1.6 1.6 0 0 1-2.1-2.1ZM12 7c3.8 0 7.2 2 8.8 5a9.5 9.5 0 0 1-2.1 2.8l1.4 1.4A12 12 0 0 0 23 12c-1.7-4-7-7-11-7-.8 0-1.6.1-2.4.2l1.7 1.7.7.1Zm.9 2.1 3 3a4 4 0 0 0-3-3Z" /></svg></button></div><small class="iam-field-help">12–128 个字符，不含空白，并同时包含大写字母、小写字母、数字和特殊字符。</small></label>
+            <label class="iam-account-field"><span>初始密码 *</span><div class="iam-password-field"><input id="initial-password" v-model="form.initial_password" required minlength="8" maxlength="128" :type="initialPasswordVisible ? 'text' : 'password'" autocomplete="new-password" placeholder="请妥善记录，将仅返回一次" /><button class="iam-password-toggle" type="button" :aria-label="initialPasswordVisible ? '隐藏初始密码' : '显示初始密码'" :title="initialPasswordVisible ? '隐藏密码' : '显示密码'" @click="initialPasswordVisible = !initialPasswordVisible"><svg v-if="!initialPasswordVisible" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5c-5 0-9.3 3-11 7 1.7 4 6 7 11 7s9.3-3 11-7c-1.7-4-6-7-11-7Zm0 12c-3.8 0-7.2-2-8.8-5C4.8 9 8.2 7 12 7s7.2 2 8.8 5c-1.6 3-5 5-8.8 5Zm0-8a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm0 4a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z" /></svg><svg v-else viewBox="0 0 24 24" aria-hidden="true"><path d="m3.3 2-1.4 1.4 3 3A12.7 12.7 0 0 0 1 12c1.7 4 6 7 11 7 1.8 0 3.5-.4 5-1l3.6 3.6 1.4-1.4L3.3 2ZM12 17c-3.8 0-7.2-2-8.8-5 .8-1.5 1.9-2.7 3.2-3.5l2.1 2.1A3.5 3.5 0 0 0 13.4 15l2 2c-1 .3-2.2.5-3.4.5V17Zm-1.6-4.5 2.1 2.1a1.6 1.6 0 0 1-2.1-2.1ZM12 7c3.8 0 7.2 2 8.8 5a9.5 9.5 0 0 1-2.1 2.8l1.4 1.4A12 12 0 0 0 23 12c-1.7-4-7-7-11-7-.8 0-1.6.1-2.4.2l1.7 1.7.7.1Zm.9 2.1 3 3a4 4 0 0 0-3-3Z" /></svg></button></div><small class="iam-field-help">8–128 个字符，不含空白，并同时包含大写字母、小写字母、数字和特殊字符。</small></label>
             <div class="iam-validity-picker full"><span>有效时间 *</span><div class="iam-validity-options" role="radiogroup" aria-label="账号有效时间"><button type="button" :class="{ active: form.validity_mode === 'TEMPORARY' }" role="radio" :aria-checked="form.validity_mode === 'TEMPORARY'" @click="form.validity_mode = 'TEMPORARY'"><strong>临时账号</strong><small>默认有效 1 天，可自定义截止时间</small></button><button type="button" :class="{ active: form.validity_mode === 'PERMANENT' }" role="radio" :aria-checked="form.validity_mode === 'PERMANENT'" @click="form.validity_mode = 'PERMANENT'"><strong>永久账号</strong><small>长期有效，仍可随时停用</small></button></div></div>
             <label v-if="form.validity_mode === 'TEMPORARY'" class="full iam-account-expiry-field"><span>有效截止时间 *</span><input v-model="form.valid_until" type="datetime-local" required /><small class="iam-field-help">到期后，账号将无法继续登录；请选择晚于当前时间的日期和时间。</small></label>
           </template>

@@ -1,279 +1,2365 @@
-.iam-settings { --iam-blue: #2563eb; --iam-ink: #0f172a; --iam-muted: #64748b; --iam-line: #e2e8f0; min-width: 0; }
-.iam-settings-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 22px; margin-bottom: 18px; }
-.iam-section-kicker { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; color: #2563eb; font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
-.iam-section-kicker span { width: 22px; height: 2px; border-radius: 99px; background: #3b82f6; }
-.iam-settings-head h2 { margin: 0; color: var(--iam-ink); font-size: 22px; letter-spacing: .01em; }
-.iam-settings-head > div > p { max-width: 760px; margin: 8px 0 0; color: var(--iam-muted); font-size: 13px; line-height: 1.7; }
-.iam-settings code { padding: 1px 4px; color: #1e40af; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .92em; border-radius: 3px; background: #eff6ff; }
-.iam-head-note { display: flex; width: min(310px, 34%); min-width: 230px; gap: 8px; padding: 10px 12px; color: #475569; font-size: 11px; line-height: 1.55; border: 1px solid #dbeafe; border-radius: 9px; background: #f8fbff; }
-.iam-head-note svg { width: 17px; height: 17px; flex: 0 0 auto; color: #2563eb; }
-.iam-architecture-note { display: flex; align-items: center; gap: 13px; padding: 14px 16px; margin-bottom: 16px; border: 1px solid #dbeafe; border-radius: 10px; background: linear-gradient(90deg, #f8fbff, #fff); }
-.iam-note-icon { display: grid; width: 34px; height: 34px; flex: 0 0 auto; place-items: center; color: #2563eb; border-radius: 9px; background: #dbeafe; }
-.iam-note-icon svg { width: 19px; height: 19px; }
-.iam-architecture-note > div:nth-child(2) { min-width: 0; }
-.iam-architecture-note strong { color: var(--iam-ink); font-size: 13px; }
-.iam-architecture-note p { margin: 4px 0 0; color: var(--iam-muted); font-size: 12px; line-height: 1.6; }
-.iam-architecture-note .console-button { margin-left: auto; white-space: nowrap; }
-.iam-summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
-.iam-summary-card { display: flex; align-items: center; gap: 11px; min-width: 0; padding: 14px; border: 1px solid var(--iam-line); border-radius: 10px; background: #fff; box-shadow: 0 3px 12px rgba(15, 23, 42, .025); }
-.iam-summary-icon { display: grid; width: 37px; height: 37px; flex: 0 0 auto; place-items: center; border-radius: 10px; }
-.iam-summary-icon svg { width: 20px; height: 20px; }
-.iam-summary-card small { display: block; color: #64748b; font-size: 11px; }
-.iam-summary-card strong { display: block; margin-top: 2px; color: #0f172a; font-size: 22px; line-height: 1.05; }
-.iam-summary-card p { margin: 3px 0 0; color: #94a3b8; font-size: 10px; white-space: nowrap; }
-.iam-summary-card.blue .iam-summary-icon { color: #2563eb; background: #dbeafe; }.iam-summary-card.violet .iam-summary-icon { color: #7c3aed; background: #ede9fe; }.iam-summary-card.green .iam-summary-icon { color: #059669; background: #d1fae5; }.iam-summary-card.orange .iam-summary-icon { color: #c2410c; background: #ffedd5; }
-.iam-workspace { display: grid; grid-template-columns: 176px minmax(0, 1fr); min-height: 510px; overflow: hidden; border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; box-shadow: 0 8px 26px rgba(15, 23, 42, .045); }
-.iam-panel-nav { padding: 10px; border-right: 1px solid #e2e8f0; background: #f8fafc; }
-.iam-panel-nav button { display: flex; align-items: center; width: 100%; gap: 9px; padding: 10px 10px; color: #475569; font-size: 13px; text-align: left; cursor: pointer; border-radius: 7px; background: transparent; transition: .16s ease; }
-.iam-panel-nav button + button { margin-top: 3px; }.iam-panel-nav button svg { width: 17px; height: 17px; color: #94a3b8; }.iam-panel-nav button:hover { color: #1e40af; background: #eff6ff; }.iam-panel-nav button.active { color: #1d4ed8; font-weight: 600; background: #dbeafe; }.iam-panel-nav button.active svg { color: #2563eb; }
-.iam-panel-content { min-width: 0; padding: 22px; }
-.iam-panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding-bottom: 17px; border-bottom: 1px solid #edf2f7; }.iam-panel-head h3 { margin: 0; color: #0f172a; font-size: 17px; }.iam-panel-head p { margin: 5px 0 0; color: #64748b; font-size: 12px; line-height: 1.55; }.iam-panel-actions { display: flex; gap: 8px; white-space: nowrap; }
-.iam-overview { padding-top: 18px; }.iam-overview-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }.iam-overview-card { display: flex; flex-direction: column; min-width: 0; min-height: 230px; padding: 16px; border: 1px solid #e2e8f0; border-radius: 10px; background: #fff; }.iam-card-heading { display: flex; align-items: center; gap: 10px; }.iam-card-icon { display: grid; width: 34px; height: 34px; place-items: center; color: #2563eb; border-radius: 9px; background: #eff6ff; }.iam-card-icon svg { width: 18px; height: 18px; }.iam-overview-card.organization .iam-card-icon { color: #7c3aed; background: #f5f3ff; }.iam-overview-card.authorization .iam-card-icon { color: #059669; background: #ecfdf5; }.iam-card-heading h4 { margin: 0; color: #0f172a; font-size: 13px; }.iam-card-heading p { margin: 3px 0 0; color: #94a3b8; font-size: 11px; }.iam-overview-card dl { margin: 17px 0 auto; }.iam-overview-card dl div { display: flex; justify-content: space-between; gap: 10px; padding: 9px 0; border-top: 1px solid #f1f5f9; }.iam-overview-card dt { color: #64748b; font-size: 11px; }.iam-overview-card dd { margin: 0; color: #334155; font-size: 11px; font-weight: 600; text-align: right; }.iam-overview-card .console-text-button { display: inline-flex; align-items: center; align-self: flex-start; gap: 2px; margin-top: 12px; }.iam-overview-card .console-text-button svg { width: 13px; height: 13px; }
-.iam-decision-card { display: grid; grid-template-columns: minmax(220px, .75fr) minmax(0, 1.25fr); gap: 22px; padding: 17px; margin-top: 14px; border: 1px solid #e0e7ff; border-radius: 10px; background: #f8faff; }.iam-decision-card h4 { margin: 0; color: #1e3a8a; font-size: 13px; }.iam-decision-card p { margin: 7px 0 0; color: #64748b; font-size: 12px; line-height: 1.65; }.iam-decision-card ol { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 0; padding: 0; list-style: none; counter-reset: steps; }.iam-decision-card li { position: relative; padding: 30px 8px 8px; color: #475569; font-size: 11px; line-height: 1.45; border: 1px solid #dbeafe; border-radius: 8px; background: #fff; }.iam-decision-card li::before { position: absolute; top: 8px; left: 8px; counter-increment: steps; content: counter(steps); display: grid; width: 16px; height: 16px; place-items: center; color: #fff; font-size: 10px; border-radius: 50%; background: #2563eb; }
-.iam-table-section { padding-top: 16px; }.iam-filter-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 13px; }.iam-filter-row .console-search-field { width: min(400px, 100%); }.iam-filter-row > span { color: #94a3b8; font-size: 11px; white-space: nowrap; }.iam-data-table th { white-space: nowrap; }.iam-data-table td { vertical-align: middle; }.iam-inline-code { display: inline-block; max-width: 175px; padding: 3px 6px; overflow: hidden; color: #1e3a8a; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; text-overflow: ellipsis; vertical-align: middle; white-space: nowrap; border-radius: 4px; background: #eff6ff; }.iam-type-tag, .iam-source-tag, .iam-scope-tag { display: inline-flex; padding: 4px 7px; color: #475569; font-size: 11px; border-radius: 999px; background: #f1f5f9; }.iam-source-tag { color: #6d28d9; background: #f5f3ff; }.iam-scope-tag { color: #1d4ed8; background: #eff6ff; }.iam-identity-cell { display: grid; gap: 2px; }.iam-identity-cell b { color: #334155; font-size: 11px; }.iam-identity-cell small { color: #94a3b8; font-size: 10px; }.iam-status-locked { color: #b45309; background: #fef3c7; }.iam-permission-count { color: #1d4ed8; font-size: 12px; font-weight: 600; }.iam-tree-name { position: relative; display: block; min-width: 175px; color: #0f172a; font-weight: 600; }.iam-tree-name i { display: inline-block; width: 13px; height: 13px; margin-right: 5px; vertical-align: -2px; border-left: 1px solid #94a3b8; border-bottom: 1px solid #94a3b8; }.iam-arrow { display: inline-block; padding: 0 5px; color: #94a3b8; }.iam-permission-code { display: inline-block; padding: 5px 7px !important; overflow-wrap: anywhere; color: #1e3a8a !important; font-size: 11px !important; border-radius: 5px !important; background: #eff6ff !important; }.iam-risk { display: inline-flex; min-width: 25px; justify-content: center; padding: 3px 7px; font-size: 11px; border-radius: 999px; }.iam-risk.high { color: #b91c1c; background: #fef2f2; }.iam-risk.medium { color: #b45309; background: #fef3c7; }.iam-risk.low { color: #047857; background: #ecfdf5; }.iam-footnote { display: flex; align-items: flex-start; gap: 6px; margin: 12px 0 0; color: #64748b; font-size: 11px; line-height: 1.6; }.iam-footnote svg { width: 15px; height: 15px; flex: 0 0 auto; margin-top: 1px; color: #2563eb; }
-.iam-modal-backdrop { position: fixed; z-index: 80; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(15, 23, 42, .5); }.iam-modal { width: min(760px, 100%); max-height: min(760px, calc(100vh - 40px)); overflow: auto; border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; box-shadow: 0 25px 70px rgba(15, 23, 42, .33); }.iam-modal > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 21px 24px 17px; border-bottom: 1px solid #e2e8f0; }.iam-modal > header p { margin: 0; color: #2563eb; font-size: 11px; font-weight: 700; letter-spacing: .05em; }.iam-modal > header h3 { margin: 5px 0 0; color: #0f172a; font-size: 20px; }.iam-modal > footer, .iam-editor-form > footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; padding: 15px 24px; border-top: 1px solid #e2e8f0; }.iam-detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0; margin: 20px 24px 0; overflow: hidden; border: 1px solid #e2e8f0; border-radius: 8px; }.iam-detail-grid > div { min-width: 0; padding: 12px 13px; border-bottom: 1px solid #e2e8f0; }.iam-detail-grid > div:nth-child(odd) { border-right: 1px solid #e2e8f0; background: #f8fafc; }.iam-detail-grid > div:nth-last-child(-n + 2) { border-bottom: 0; }.iam-detail-grid span { display: block; margin-bottom: 5px; color: #64748b; font-size: 11px; }.iam-detail-grid strong { display: block; overflow-wrap: anywhere; color: #0f172a; font-size: 12px; font-weight: 600; line-height: 1.5; }.iam-detail-section { margin: 20px 24px 0; }.iam-detail-section h4 { margin: 0; color: #0f172a; font-size: 13px; }.iam-detail-section p { margin: 5px 0 10px; color: #64748b; font-size: 11px; line-height: 1.65; }.iam-detail-section-head { display: flex; justify-content: space-between; gap: 12px; }.iam-mini-table { width: 100%; margin-top: 10px; overflow: hidden; font-size: 11px; border: 1px solid #e2e8f0; border-collapse: separate; border-spacing: 0; border-radius: 7px; }.iam-mini-table th, .iam-mini-table td { padding: 9px 10px; text-align: left; border-bottom: 1px solid #e2e8f0; }.iam-mini-table th { color: #64748b; font-weight: 500; background: #f8fafc; }.iam-mini-table tr:last-child td { border-bottom: 0; }.iam-identity-list { margin-top: 10px; overflow: hidden; border: 1px solid #e2e8f0; border-radius: 7px; }.iam-identity-list > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 11px; }.iam-identity-list > div + div { border-top: 1px solid #e2e8f0; }.iam-identity-list span { display: grid; gap: 3px; }.iam-identity-list b { color: #0f172a; font-size: 12px; }.iam-identity-list small { color: #64748b; font-size: 10px; }.iam-empty-inline { padding: 11px; border: 1px dashed #cbd5e1; border-radius: 7px; background: #f8fafc; }.iam-editor-modal { width: min(620px, 100%); }.iam-editor-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px; padding: 22px 24px 0; }.iam-editor-form label { display: grid; gap: 7px; color: #334155; font-size: 12px; font-weight: 600; }.iam-editor-form label.full { grid-column: 1 / -1; }.iam-editor-form input, .iam-editor-form select, .iam-editor-form textarea { width: 100%; min-height: 37px; padding: 0 10px; color: #0f172a; font-size: 13px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; }.iam-editor-form textarea { min-height: 150px; padding: 10px; resize: vertical; line-height: 1.6; }.iam-editor-form input:focus, .iam-editor-form select:focus, .iam-editor-form textarea:focus { border-color: #60a5fa; outline: 3px solid rgba(37, 99, 235, .12); }.iam-field-help { margin: 0; color: #64748b; font-size: 11px; font-weight: 400; line-height: 1.55; }.iam-form-alert { grid-column: 1 / -1; display: flex; align-items: flex-start; gap: 7px; padding: 9px 10px; margin: 0; color: #64748b; font-size: 11px; line-height: 1.6; border: 1px solid #dbeafe; border-radius: 7px; background: #f8fbff; }.iam-form-alert svg { width: 15px; height: 15px; flex: 0 0 auto; margin-top: 1px; color: #2563eb; }.iam-editor-form > footer { grid-column: 1 / -1; margin-right: -24px; margin-left: -24px; }
-@media (max-width: 1080px) { .iam-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }.iam-overview-grid { grid-template-columns: 1fr; }.iam-overview-card { min-height: 0; }.iam-decision-card { grid-template-columns: 1fr; }.iam-decision-card ol { grid-template-columns: repeat(5, minmax(120px, 1fr)); overflow-x: auto; padding-bottom: 3px; }.iam-workspace { grid-template-columns: 150px minmax(0, 1fr); }.iam-panel-content { padding: 18px; } }
-@media (max-width: 760px) { .iam-settings-head { align-items: stretch; flex-direction: column; }.iam-head-note { width: 100%; }.iam-architecture-note { align-items: flex-start; flex-wrap: wrap; }.iam-architecture-note .console-button { margin-left: 47px; }.iam-workspace { display: block; overflow: visible; border: 0; background: transparent; box-shadow: none; }.iam-panel-nav { display: flex; padding: 0 0 9px; overflow-x: auto; border: 0; background: transparent; }.iam-panel-nav button { width: auto; flex: 0 0 auto; white-space: nowrap; }.iam-panel-content { padding: 17px; border: 1px solid #e2e8f0; border-radius: 10px; background: #fff; }.iam-panel-head { align-items: stretch; flex-direction: column; }.iam-panel-actions { flex-wrap: wrap; }.iam-filter-row { align-items: stretch; flex-direction: column; }.iam-filter-row .console-search-field { width: 100%; }.iam-detail-grid { grid-template-columns: 1fr; margin: 18px 18px 0; }.iam-detail-grid > div, .iam-detail-grid > div:nth-child(odd) { border-right: 0; }.iam-detail-grid > div:nth-last-child(-n + 2) { border-bottom: 1px solid #e2e8f0; }.iam-detail-grid > div:last-child { border-bottom: 0; }.iam-detail-section { margin: 18px 18px 0; }.iam-modal > header { padding: 18px 18px 15px; }.iam-modal > footer { padding: 14px 18px; }.iam-editor-form { grid-template-columns: 1fr; padding: 18px 18px 0; }.iam-editor-form > footer { margin-right: -18px; margin-left: -18px; padding: 14px 18px; }.iam-detail-section-head { align-items: flex-start; flex-direction: column; }.iam-summary-grid { grid-template-columns: 1fr 1fr; }.iam-summary-card p { white-space: normal; } }
-@media (max-width: 460px) { .iam-summary-grid { grid-template-columns: 1fr; }.iam-architecture-note .console-button { width: 100%; margin-left: 0; }.iam-panel-actions .console-button { flex: 1; }.iam-mini-table { display: block; overflow-x: auto; } }
+/* =========================================================================
+   IAM Settings · Design System
+   -------------------------------------------------------------------------
+   重写说明（2026-07-30）：
+   1. 引入 token：颜色/间距/圆角/阴影/字号/缓动统一收敛
+   2. 蓝色克制：主色仅作强调与激活态，背景填充改用中性梯度
+   3. 留白：padding 11-17px → 18-26px；字号梯度 11-13px → 12-15px
+   4. 层次：卡片中阴影、面板重阴影、modal 浮起；分隔用空间而非线条
+   5. 微动效：cubic-bezier(0.16, 1, 0.3, 1) 200ms
+   6. 全部 class 名保持不变，仅替换样式
+   ========================================================================= */
 
-/* Password and deletion confirmations reuse the IAM modal surface without exposing credentials in toasts or logs. */
+.iam-settings {
+  /* —— 颜色：中性梯度 + 克制蓝 —— */
+  --ink-1: #0a0f1c;       /* 标题 */
+  --ink-2: #1e293b;       /* 正文 */
+  --ink-3: #475569;       /* 辅助文字 */
+  --ink-4: #94a3b8;       /* 提示 */
+  --line-1: #e6e9ef;      /* 默认边框 */
+  --line-2: #eef0f4;      /* 极弱分隔 */
+  --line-3: #f1f4f9;      /* 行内分隔 */
+  --bg-page: #f7f8fb;     /* 页面底色 */
+  --bg-soft: #fafbfd;     /* 卡片内底色 */
+  --surface: #ffffff;     /* 卡片表面 */
+
+  /* 蓝色：仅作强调 */
+  --brand-1: #1e40af;     /* 主蓝（深一档） */
+  --brand-2: #2563eb;     /* 标准蓝 */
+  --brand-3: #3b82f6;     /* 浅蓝 */
+  --brand-soft: #eff6ff;  /* 蓝填充 */
+  --brand-line: #dbe4f3;  /* 蓝边框 */
+
+  /* 状态 */
+  --ok-1: #047857;        --ok-soft: #ecfdf5;   --ok-line: #a7f3d0;
+  --warn-1: #b45309;      --warn-soft: #fffbeb; --warn-line: #fde68a;
+  --danger-1: #b91c1c;    --danger-soft: #fef2f2; --danger-line: #fecaca;
+
+  /* —— 间距 4/8/12/16/20/24/32/40 —— */
+  --s-1: 4px;  --s-2: 8px;  --s-3: 12px;  --s-4: 16px;
+  --s-5: 20px; --s-6: 24px; --s-7: 32px;  --s-8: 40px;
+
+  /* —— 圆角 6/8/10/12/16 —— */
+  --r-1: 6px;  --r-2: 8px;  --r-3: 10px;  --r-4: 12px;  --r-5: 16px;
+
+  /* —— 阴影 —— */
+  --sh-1: 0 1px 2px rgba(10, 15, 28, 0.04);
+  --sh-2: 0 2px 8px rgba(10, 15, 28, 0.05), 0 1px 2px rgba(10, 15, 28, 0.04);
+  --sh-3: 0 8px 24px rgba(10, 15, 28, 0.06), 0 2px 6px rgba(10, 15, 28, 0.04);
+  --sh-modal: 0 24px 56px rgba(10, 15, 28, 0.18), 0 8px 16px rgba(10, 15, 28, 0.08);
+
+  /* —— 缓动 —— */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --t-fast: 140ms;
+  --t-base: 200ms;
+
+  min-width: 0;
+  color: var(--ink-2);
+  font-feature-settings: "ss01", "cv11";
+}
+
+/* =========================================================================
+   页面头部
+   ========================================================================= */
+.iam-settings-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s-7);
+  margin-bottom: var(--s-6);
+}
+.iam-section-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin-bottom: var(--s-3);
+  color: var(--brand-1);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.iam-section-kicker span {
+  width: 24px;
+  height: 1px;
+  background: var(--brand-2);
+}
+.iam-settings-head h2 {
+  margin: 0;
+  color: var(--ink-1);
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+.iam-settings-head > div > p {
+  max-width: 760px;
+  margin: var(--s-3) 0 0;
+  color: var(--ink-3);
+  font-size: 13.5px;
+  line-height: 1.7;
+}
+.iam-settings code {
+  padding: 2px 6px;
+  color: var(--brand-1);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.92em;
+  border-radius: 4px;
+  background: var(--brand-soft);
+}
+.iam-head-note {
+  display: flex;
+  width: min(310px, 34%);
+  min-width: 230px;
+  gap: var(--s-2);
+  padding: 12px 14px;
+  color: var(--ink-3);
+  font-size: 12px;
+  line-height: 1.6;
+  border: 1px solid var(--brand-line);
+  border-radius: var(--r-2);
+  background: var(--brand-soft);
+}
+.iam-head-note svg {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  color: var(--brand-2);
+}
+
+/* 架构说明条 */
+.iam-architecture-note {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  padding: 16px 20px;
+  margin-bottom: var(--s-6);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-3);
+  background: var(--surface);
+  box-shadow: var(--sh-1);
+}
+.iam-note-icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--brand-1);
+  border-radius: var(--r-2);
+  background: var(--brand-soft);
+}
+.iam-note-icon svg { width: 20px; height: 20px; }
+.iam-architecture-note > div:nth-child(2) { min-width: 0; }
+.iam-architecture-note strong {
+  color: var(--ink-1);
+  font-size: 14px;
+  font-weight: 600;
+}
+.iam-architecture-note p {
+  margin: 4px 0 0;
+  color: var(--ink-3);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+.iam-architecture-note .console-button {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+/* =========================================================================
+   顶部统计卡（4 列）
+   ========================================================================= */
+.iam-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--s-4);
+  margin-bottom: var(--s-6);
+}
+.iam-summary-card {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  min-width: 0;
+  padding: 18px 20px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-3);
+  background: var(--surface);
+  box-shadow: var(--sh-1);
+  transition: box-shadow var(--t-base) var(--ease-out), transform var(--t-base) var(--ease-out);
+}
+.iam-summary-card:hover {
+  box-shadow: var(--sh-2);
+  transform: translateY(-1px);
+}
+.iam-summary-icon {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: var(--r-2);
+}
+.iam-summary-icon svg { width: 20px; height: 20px; }
+.iam-summary-card small {
+  display: block;
+  color: var(--ink-4);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.iam-summary-card strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--ink-1);
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -0.01em;
+}
+.iam-summary-card p {
+  margin: 4px 0 0;
+  color: var(--ink-4);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.iam-summary-card.blue .iam-summary-icon   { color: var(--brand-1);   background: var(--brand-soft); }
+.iam-summary-card.violet .iam-summary-icon { color: #6d28d9;          background: #f5f3ff; }
+.iam-summary-card.green .iam-summary-icon  { color: var(--ok-1);      background: var(--ok-soft); }
+.iam-summary-card.orange .iam-summary-icon { color: var(--warn-1);    background: var(--warn-soft); }
+
+/* =========================================================================
+   工作区：左侧导航 + 右侧面板
+   ========================================================================= */
+.iam-workspace {
+  display: grid;
+  grid-template-columns: 192px minmax(0, 1fr);
+  min-height: 540px;
+  overflow: hidden;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-4);
+  background: var(--surface);
+  box-shadow: var(--sh-2);
+}
+.iam-panel-nav {
+  padding: 16px 12px;
+  border-right: 1px solid var(--line-2);
+  background: var(--bg-soft);
+}
+.iam-panel-nav button {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: var(--s-3);
+  padding: 10px 12px;
+  color: var(--ink-3);
+  font-size: 13.5px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  border: 0;
+  border-radius: var(--r-2);
+  background: transparent;
+  transition: background var(--t-fast) var(--ease-out), color var(--t-fast) var(--ease-out);
+}
+.iam-panel-nav button + button { margin-top: 2px; }
+.iam-panel-nav button svg {
+  width: 18px;
+  height: 18px;
+  color: var(--ink-4);
+  transition: color var(--t-fast) var(--ease-out);
+}
+.iam-panel-nav button:hover {
+  color: var(--ink-1);
+  background: rgba(37, 99, 235, 0.05);
+}
+.iam-panel-nav button:hover svg { color: var(--brand-2); }
+.iam-panel-nav button.active {
+  color: var(--brand-1);
+  font-weight: 600;
+  background: var(--brand-soft);
+}
+.iam-panel-nav button.active svg { color: var(--brand-2); }
+
+/* 侧边 nav 工作流阶段标题（P2）：基础数据 / 人员 / 授权。
+   字号比 panel button（13.5px）小半号但带 uppercase，弱化但不消失。
+   颜色用 --ink-4 弱化；不抢眼；底部 1px 极弱分隔线，把每个阶段的子 panel 视觉收口。 */
+.iam-panel-group + .iam-panel-group { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line-2); }
+.iam-panel-group-title {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 6px 12px 8px;
+  color: var(--ink-4);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--line-2);
+}
+.iam-panel-group-name { flex: 0 0 auto; }
+.iam-panel-group-count {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-4);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.85;
+}
+.iam-panel-group-dot {
+  flex: 0 0 auto;
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--line-1);
+  box-shadow: 0 0 0 2px var(--bg-soft);
+  transition: background var(--t-fast) var(--ease-out);
+}
+.iam-panel-group-dot.is-complete { background: var(--ok-1); }
+.iam-panel-group-dot.is-partial  { background: #c79a3a; }   /* 介于灰和绿之间，提示阶段未收尾 */
+.iam-panel-group-dot.is-empty    { background: var(--ink-4); }
+.iam-panel-group-dot.is-loading  { background: var(--brand-3); animation: iam-panel-group-pulse 1.4s ease-in-out infinite; }
+.iam-panel-group-dot.is-idle     { background: var(--line-1); }
+@keyframes iam-panel-group-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.35; }
+}
+.iam-panel-content {
+  min-width: 0;
+  padding: 28px 32px;
+}
+.iam-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s-4);
+  padding-bottom: var(--s-5);
+  border-bottom: 1px solid var(--line-2);
+}
+.iam-panel-head h3 {
+  margin: 0;
+  color: var(--ink-1);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.iam-panel-head p {
+  margin: 6px 0 0;
+  color: var(--ink-3);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+.iam-panel-actions {
+  display: flex;
+  gap: var(--s-2);
+  white-space: nowrap;
+}
+
+/* =========================================================================
+   概览（3 列）
+   ========================================================================= */
+.iam-overview { padding-top: 20px; }
+.iam-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--s-4);
+}
+.iam-overview-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 240px;
+  padding: 20px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-3);
+  background: var(--surface);
+  box-shadow: var(--sh-1);
+}
+.iam-card-heading { display: flex; align-items: center; gap: var(--s-3); }
+.iam-card-icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  color: var(--brand-1);
+  border-radius: var(--r-2);
+  background: var(--brand-soft);
+}
+.iam-card-icon svg { width: 18px; height: 18px; }
+.iam-overview-card.organization .iam-card-icon { color: #6d28d9; background: #f5f3ff; }
+.iam-overview-card.authorization .iam-card-icon { color: var(--ok-1); background: var(--ok-soft); }
+.iam-card-heading h4 { margin: 0; color: var(--ink-1); font-size: 14px; font-weight: 600; }
+.iam-card-heading p { margin: 3px 0 0; color: var(--ink-4); font-size: 11.5px; }
+.iam-overview-card dl { margin: 18px 0 auto; }
+.iam-overview-card dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding: 10px 0;
+  border-top: 1px solid var(--line-3);
+}
+.iam-overview-card dt { color: var(--ink-3); font-size: 12px; }
+.iam-overview-card dd {
+  margin: 0;
+  color: var(--ink-1);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: right;
+}
+.iam-overview-card .console-text-button {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 2px;
+  margin-top: 14px;
+}
+.iam-overview-card .console-text-button svg { width: 13px; height: 13px; }
+
+/* 决策卡（5 步） */
+.iam-decision-card {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.75fr) minmax(0, 1.25fr);
+  gap: var(--s-6);
+  padding: 20px 24px;
+  margin-top: var(--s-4);
+  border: 1px solid var(--brand-line);
+  border-radius: var(--r-3);
+  background: var(--brand-soft);
+}
+.iam-decision-card h4 { margin: 0; color: var(--brand-1); font-size: 14px; font-weight: 600; }
+.iam-decision-card p {
+  margin: 8px 0 0;
+  color: var(--ink-3);
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+.iam-decision-card ol {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--s-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: steps;
+}
+.iam-decision-card li {
+  position: relative;
+  padding: 32px 10px 10px;
+  color: var(--ink-3);
+  font-size: 11.5px;
+  line-height: 1.5;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-2);
+  background: var(--surface);
+}
+.iam-decision-card li::before {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  counter-increment: steps;
+  content: counter(steps);
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 50%;
+  background: var(--brand-2);
+}
+
+/* =========================================================================
+   表格区
+   ========================================================================= */
+.iam-table-section { padding-top: var(--s-5); }
+.iam-filter-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-4);
+  margin-bottom: var(--s-4);
+}
+.iam-filter-row .console-search-field { width: min(400px, 100%); }
+.iam-filter-row > span {
+  color: var(--ink-4);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+.iam-data-table th { white-space: nowrap; }
+.iam-data-table td { vertical-align: middle; }
+.iam-inline-code {
+  display: inline-block;
+  max-width: 175px;
+  padding: 3px 8px;
+  overflow: hidden;
+  color: var(--brand-1);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+  white-space: nowrap;
+  border-radius: 4px;
+  background: var(--brand-soft);
+}
+.iam-type-tag,
+.iam-source-tag,
+.iam-scope-tag {
+  display: inline-flex;
+  padding: 4px 9px;
+  color: var(--ink-3);
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 999px;
+  background: var(--bg-soft);
+  border: 1px solid var(--line-2);
+}
+.iam-source-tag { color: #6d28d9; background: #f5f3ff; border-color: #ede9fe; }
+.iam-scope-tag { color: var(--brand-1); background: var(--brand-soft); border-color: var(--brand-line); }
+.iam-identity-cell { display: grid; gap: 2px; }
+.iam-identity-cell b { color: var(--ink-1); font-size: 12px; font-weight: 600; }
+.iam-identity-cell small { color: var(--ink-4); font-size: 11px; }
+.iam-status-locked { color: var(--warn-1); background: var(--warn-soft); }
+.iam-permission-count { color: var(--brand-1); font-size: 12.5px; font-weight: 600; }
+.iam-tree-name {
+  position: relative;
+  display: block;
+  min-width: 175px;
+  color: var(--ink-1);
+  font-weight: 600;
+}
+.iam-tree-name i {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  margin-right: 5px;
+  vertical-align: -2px;
+  border-left: 1px solid var(--ink-4);
+  border-bottom: 1px solid var(--ink-4);
+}
+.iam-arrow {
+  display: inline-block;
+  padding: 0 5px;
+  color: var(--ink-4);
+}
+.iam-permission-code {
+  display: inline-block;
+  padding: 5px 9px !important;
+  overflow-wrap: anywhere;
+  color: var(--brand-1) !important;
+  font-size: 11.5px !important;
+  border-radius: 5px !important;
+  background: var(--brand-soft) !important;
+}
+.iam-risk {
+  display: inline-flex;
+  min-width: 25px;
+  justify-content: center;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 999px;
+}
+.iam-risk.high { color: var(--danger-1); background: var(--danger-soft); }
+.iam-risk.medium { color: var(--warn-1); background: var(--warn-soft); }
+.iam-risk.low { color: var(--ok-1); background: var(--ok-soft); }
+
+/* =========================================================================
+   模态框
+   ========================================================================= */
+.iam-modal-backdrop {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(10, 15, 28, 0.55);
+  backdrop-filter: blur(4px);
+  animation: iam-fade-in 180ms var(--ease-out);
+}
+@keyframes iam-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.iam-modal {
+  width: min(820px, 100%);
+  max-height: min(820px, calc(100vh - 40px));
+  overflow: auto;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-5);
+  background: var(--surface);
+  box-shadow: var(--sh-modal);
+  animation: iam-pop-in 240ms var(--ease-out);
+}
+@keyframes iam-pop-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.985); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.iam-modal > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s-4);
+  padding: 24px 28px 18px;
+  border-bottom: 1px solid var(--line-2);
+}
+.iam-modal > header p {
+  margin: 0;
+  color: var(--brand-1);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.iam-modal > header h3 {
+  margin: 6px 0 0;
+  color: var(--ink-1);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.iam-modal > footer,
+.iam-editor-form > footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--s-2);
+  margin-top: var(--s-6);
+  padding: 18px 28px;
+  border-top: 1px solid var(--line-2);
+}
+.iam-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0;
+  margin: 24px 28px 0;
+  overflow: hidden;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-2);
+  background: var(--surface);
+}
+.iam-detail-grid > div {
+  min-width: 0;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line-2);
+}
+.iam-detail-grid > div:nth-child(odd) {
+  border-right: 1px solid var(--line-2);
+  background: var(--bg-soft);
+}
+.iam-detail-grid > div:nth-last-child(-n + 2) { border-bottom: 0; }
+.iam-detail-grid span {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--ink-3);
+  font-size: 11.5px;
+}
+.iam-detail-grid strong {
+  display: block;
+  overflow-wrap: anywhere;
+  color: var(--ink-1);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+.iam-detail-section { margin: 24px 28px 0; }
+.iam-detail-section h4 {
+  margin: 0;
+  color: var(--ink-1);
+  font-size: 14px;
+  font-weight: 600;
+}
+.iam-detail-section p {
+  margin: 6px 0 12px;
+  color: var(--ink-3);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.iam-detail-section-head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s-3);
+}
+.iam-mini-table {
+  width: 100%;
+  margin-top: var(--s-3);
+  overflow: hidden;
+  font-size: 12px;
+  border: 1px solid var(--line-1);
+  border-collapse: separate;
+  border-spacing: 0;
+  border-radius: var(--r-2);
+}
+.iam-mini-table th,
+.iam-mini-table td {
+  padding: 10px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--line-2);
+}
+.iam-mini-table th {
+  color: var(--ink-3);
+  font-size: 11.5px;
+  font-weight: 600;
+  background: var(--bg-soft);
+}
+.iam-mini-table tr:last-child td { border-bottom: 0; }
+.iam-identity-list {
+  margin-top: var(--s-3);
+  overflow: hidden;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-2);
+}
+.iam-identity-list > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding: 12px 14px;
+}
+.iam-identity-list > div + div { border-top: 1px solid var(--line-2); }
+.iam-identity-list span { display: grid; gap: 3px; }
+.iam-identity-list b { color: var(--ink-1); font-size: 12.5px; }
+.iam-identity-list small { color: var(--ink-4); font-size: 11px; }
+.iam-empty-inline {
+  padding: 14px;
+  color: var(--ink-3);
+  border: 1px dashed var(--line-1);
+  border-radius: var(--r-2);
+  background: var(--bg-soft);
+}
+.iam-editor-modal { width: min(680px, 100%); }
+.iam-editor-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s-4);
+  padding: 24px 28px 0;
+}
+.iam-editor-form label {
+  display: grid;
+  gap: 8px;
+  color: var(--ink-2);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.iam-editor-form label.full { grid-column: 1 / -1; }
+.iam-editor-form input,
+.iam-editor-form select,
+.iam-editor-form textarea {
+  width: 100%;
+  min-height: 40px;
+  padding: 0 12px;
+  color: var(--ink-1);
+  font-size: 13.5px;
+  font-weight: 400;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-2);
+  background: var(--surface);
+  transition: border-color var(--t-fast) var(--ease-out), box-shadow var(--t-fast) var(--ease-out);
+}
+.iam-editor-form textarea {
+  min-height: 150px;
+  padding: 12px;
+  line-height: 1.6;
+}
+.iam-editor-form input:focus,
+.iam-editor-form select:focus,
+.iam-editor-form textarea:focus {
+  border-color: var(--brand-2);
+  outline: 0;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+.iam-field-help {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: 11.5px;
+  font-weight: 400;
+  line-height: 1.55;
+}
+.iam-form-alert {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-2);
+  padding: 10px 12px;
+  margin: 0;
+  color: var(--ink-3);
+  font-size: 12px;
+  line-height: 1.6;
+  border: 1px solid var(--brand-line);
+  border-radius: var(--r-2);
+  background: var(--brand-soft);
+}
+.iam-form-alert svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--brand-2);
+}
+.iam-editor-form > footer {
+  grid-column: 1 / -1;
+  margin-right: -28px;
+  margin-left: -28px;
+}
+
+/* =========================================================================
+   响应式
+   ========================================================================= */
+@media (max-width: 1080px) {
+  .iam-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .iam-overview-grid { grid-template-columns: 1fr; }
+  .iam-overview-card { min-height: 0; }
+  .iam-decision-card { grid-template-columns: 1fr; }
+  .iam-decision-card ol {
+    grid-template-columns: repeat(5, minmax(120px, 1fr));
+    overflow-x: auto;
+    padding-bottom: 3px;
+  }
+  .iam-workspace { grid-template-columns: 168px minmax(0, 1fr); }
+  .iam-panel-content { padding: 22px 24px; }
+}
+@media (max-width: 760px) {
+  .iam-settings-head { align-items: stretch; flex-direction: column; }
+  .iam-head-note { width: 100%; }
+  .iam-architecture-note { align-items: flex-start; flex-wrap: wrap; }
+  .iam-architecture-note .console-button { margin-left: 47px; }
+  .iam-workspace {
+    display: block;
+    overflow: visible;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+  .iam-panel-nav {
+    display: flex;
+    padding: 0 0 12px;
+    overflow-x: auto;
+    border: 0;
+    background: transparent;
+  }
+  .iam-panel-nav button { width: auto; flex: 0 0 auto; white-space: nowrap; }
+  .iam-panel-group { display: contents; }
+  .iam-panel-group + .iam-panel-group { padding-top: 0; border-top: 0; }
+  .iam-panel-group-title { padding: 0 var(--s-3) 0 0; border-bottom: 0; flex: 0 0 auto; }
+  .iam-panel-group-count { display: none; }
+  .iam-panel-content {
+    padding: 20px;
+    border: 1px solid var(--line-1);
+    border-radius: var(--r-3);
+    background: var(--surface);
+  }
+  .iam-panel-head { align-items: stretch; flex-direction: column; }
+  .iam-panel-actions { flex-wrap: wrap; }
+  .iam-filter-row { align-items: stretch; flex-direction: column; }
+  .iam-filter-row .console-search-field { width: 100%; }
+  .iam-detail-grid { grid-template-columns: 1fr; margin: 18px 18px 0; }
+  .iam-detail-grid > div,
+  .iam-detail-grid > div:nth-child(odd) { border-right: 0; }
+  .iam-detail-grid > div:nth-last-child(-n + 2) { border-bottom: 1px solid var(--line-2); }
+  .iam-detail-grid > div:last-child { border-bottom: 0; }
+  .iam-detail-section { margin: 18px 18px 0; }
+  .iam-modal > header { padding: 20px 20px 16px; }
+  .iam-modal > footer { padding: 16px 20px; }
+  .iam-editor-form { grid-template-columns: 1fr; padding: 20px 20px 0; }
+  .iam-editor-form > footer { margin-right: -20px; margin-left: -20px; padding: 16px 20px; }
+  .iam-detail-section-head { align-items: flex-start; flex-direction: column; }
+  .iam-summary-grid { grid-template-columns: 1fr 1fr; }
+  .iam-summary-card p { white-space: normal; }
+}
+@media (max-width: 460px) {
+  .iam-summary-grid { grid-template-columns: 1fr; }
+  .iam-architecture-note .console-button { width: 100%; margin-left: 0; }
+  .iam-panel-actions .console-button { flex: 1; }
+  .iam-mini-table { display: block; overflow-x: auto; }
+}
+
+/* =========================================================================
+   确认弹窗 / 一次性密码
+   ========================================================================= */
 .iam-confirm-modal { width: min(560px, 100%); }
 .iam-temporary-password-modal { width: min(620px, 100%); }
-.iam-confirm-body { display: grid; gap: 14px; padding: 22px 24px 0; }
-.iam-confirm-body > p { margin: 0; color: #475569; font-size: 13px; line-height: 1.7; }
-.iam-confirm-body label { display: grid; gap: 7px; color: #334155; font-size: 12px; font-weight: 600; }
-.iam-confirm-body select { width: 100%; min-height: 37px; padding: 0 10px; color: #0f172a; font-size: 13px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; }
-.iam-confirm-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; overflow: hidden; border: 1px solid #e2e8f0; border-radius: 8px; }
-.iam-confirm-summary > div { min-width: 0; padding: 10px 12px; border-bottom: 1px solid #e2e8f0; }
-.iam-confirm-summary > div:nth-child(odd) { border-right: 1px solid #e2e8f0; }
+.iam-confirm-body {
+  display: grid;
+  gap: var(--s-4);
+  padding: 24px 28px 0;
+}
+.iam-confirm-body > p {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 13.5px;
+  line-height: 1.7;
+}
+.iam-confirm-body label {
+  display: grid;
+  gap: 8px;
+  color: var(--ink-2);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.iam-confirm-body select {
+  width: 100%;
+  min-height: 40px;
+  padding: 0 12px;
+  color: var(--ink-1);
+  font-size: 13.5px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-2);
+  background: var(--surface);
+}
+.iam-confirm-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-2);
+}
+.iam-confirm-summary > div {
+  min-width: 0;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line-2);
+}
+.iam-confirm-summary > div:nth-child(odd) {
+  border-right: 1px solid var(--line-2);
+}
 .iam-confirm-summary > div:nth-last-child(-n + 2) { border-bottom: 0; }
-.iam-confirm-summary dt { margin-bottom: 4px; color: #64748b; font-size: 11px; }
-.iam-confirm-summary dd { margin: 0; overflow-wrap: anywhere; color: #0f172a; font-size: 12px; font-weight: 600; }
-.iam-one-time-password { display: block; padding: 13px 14px; overflow-wrap: anywhere; color: #1d4ed8; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 16px; font-weight: 700; letter-spacing: .06em; border: 1px solid #bfdbfe; border-radius: 8px; background: #eff6ff; }
-.iam-one-time-warning { color: #b45309 !important; }
-.iam-danger-text-button { color: #dc2626; }
-.iam-danger-text-button:hover { color: #b91c1c; }
-.iam-danger-button { color: #fff; border-color: #dc2626; background: #dc2626; }
-.iam-danger-button:hover:not(:disabled) { border-color: #b91c1c; background: #b91c1c; }
-@media (max-width: 760px) { .iam-confirm-body { padding: 18px 18px 0; }.iam-confirm-summary { grid-template-columns: 1fr; }.iam-confirm-summary > div, .iam-confirm-summary > div:nth-child(odd), .iam-confirm-summary > div:nth-last-child(-n + 2) { border-right: 0; border-bottom: 1px solid #e2e8f0; }.iam-confirm-summary > div:last-child { border-bottom: 0; } }
+.iam-confirm-summary dt {
+  margin-bottom: 4px;
+  color: var(--ink-3);
+  font-size: 11.5px;
+}
+.iam-confirm-summary dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--ink-1);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.iam-one-time-password {
+  display: block;
+  padding: 14px 16px;
+  overflow-wrap: anywhere;
+  color: var(--brand-1);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  border: 1px solid var(--brand-line);
+  border-radius: var(--r-2);
+  background: var(--brand-soft);
+}
+.iam-one-time-warning { color: var(--warn-1) !important; }
+.iam-danger-text-button { color: var(--danger-1); }
+.iam-danger-text-button:hover { color: #7f1d1d; }
+.iam-danger-button {
+  color: #fff;
+  border-color: var(--danger-1);
+  background: var(--danger-1);
+}
+.iam-danger-button:hover:not(:disabled) {
+  border-color: #991b1b;
+  background: #991b1b;
+}
+@media (max-width: 760px) {
+  .iam-confirm-body { padding: 20px 20px 0; }
+  .iam-confirm-summary { grid-template-columns: 1fr; }
+  .iam-confirm-summary > div,
+  .iam-confirm-summary > div:nth-child(odd),
+  .iam-confirm-summary > div:nth-last-child(-n + 2) {
+    border-right: 0;
+    border-bottom: 1px solid var(--line-2);
+  }
+  .iam-confirm-summary > div:last-child { border-bottom: 0; }
+}
 
-.iam-pagination { display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 14px 0 0; color: #64748b; font-size: 12px; }
+/* =========================================================================
+   分页
+   ========================================================================= */
+.iam-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--s-3);
+  padding: var(--s-4) 0 0;
+  color: var(--ink-3);
+  font-size: 12.5px;
+}
 .iam-pagination span { white-space: nowrap; }
 @media (max-width: 760px) { .iam-pagination { justify-content: space-between; flex-wrap: wrap; } }
 
 .iam-server-limit-note {
   margin: -0.15rem 0 0.8rem;
-  color: var(--console-text-muted, #687386);
+  color: var(--ink-3);
   font-size: 0.8rem;
   line-height: 1.55;
 }
 
-/* The password is hidden by default; the control only changes the local input type and never persists the plaintext. */
+/* 密码字段 */
 .iam-password-field { position: relative; width: 100%; }
 .iam-editor-form .iam-password-field input { padding-right: 42px; }
-.iam-password-toggle { position: absolute; top: 50%; right: 5px; display: grid; width: 30px; height: 30px; padding: 0; place-items: center; color: #64748b; border: 0; border-radius: 5px; background: transparent; cursor: pointer; transform: translateY(-50%); }
-.iam-password-toggle:hover { color: #2563eb; background: #eff6ff; }
-.iam-password-toggle:focus-visible { outline: 3px solid rgba(37, 99, 235, .2); outline-offset: 1px; }
+.iam-password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 5px;
+  display: grid;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  place-items: center;
+  color: var(--ink-3);
+  border: 0;
+  border-radius: var(--r-1);
+  background: transparent;
+  cursor: pointer;
+  transform: translateY(-50%);
+  transition: background var(--t-fast) var(--ease-out), color var(--t-fast) var(--ease-out);
+}
+.iam-password-toggle:hover { color: var(--brand-1); background: var(--brand-soft); }
+.iam-password-toggle:focus-visible { outline: 3px solid rgba(37, 99, 235, 0.2); outline-offset: 1px; }
 .iam-password-toggle svg { width: 18px; height: 18px; fill: currentColor; }
 
-/* Login account workspace: stronger hierarchy for account state, authentication and validity. */
-.iam-accounts-panel { padding-top: 18px; }
-.iam-account-table-card { border-color: #dbe4f0; }
-.iam-account-identity { display: flex; align-items: center; gap: 9px; min-width: 180px; }
+/* =========================================================================
+   登录账号工作区
+   ========================================================================= */
+.iam-accounts-panel { padding-top: 20px; }
+.iam-account-table-card { border-color: var(--line-1); }
+.iam-account-identity {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  min-width: 180px;
+}
 .iam-account-identity > span:last-child { display: grid; min-width: 0; gap: 3px; }
-.iam-account-identity strong { overflow: hidden; color: #0f172a; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.iam-account-identity small { color: #94a3b8; font-size: 10px; }
-.iam-account-avatar { display: grid; width: 29px; height: 29px; flex: 0 0 auto; place-items: center; color: #1d4ed8; font-size: 12px; font-weight: 700; border: 1px solid #bfdbfe; border-radius: 9px; background: #eff6ff; }
-.iam-linked-user { display: inline-flex; align-items: center; gap: 5px; max-width: 180px; overflow: hidden; color: #475569; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.iam-linked-user svg { width: 14px; height: 14px; flex: 0 0 auto; color: #94a3b8; }
-.iam-auth-tags { display: flex; flex-wrap: wrap; gap: 5px; min-width: 145px; }
-.iam-validity { display: grid; gap: 4px; min-width: 126px; }
-.iam-validity small { color: #64748b; font-size: 10px; white-space: nowrap; }
-.iam-validity-chip { display: inline-flex; width: fit-content; padding: 3px 7px; font-size: 10px; font-weight: 700; border-radius: 999px; }
-.iam-validity-chip.is-permanent { color: #047857; background: #ecfdf5; }
-.iam-validity-chip.is-temporary { color: #b45309; background: #fffbeb; }
-.iam-account-updated { color: #64748b; font-size: 10px; white-space: nowrap; }
+.iam-account-identity strong {
+  overflow: hidden;
+  color: var(--ink-1);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.iam-account-identity small { color: var(--ink-4); font-size: 11px; }
+.iam-account-avatar {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--brand-1);
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid var(--brand-line);
+  border-radius: 50%;
+  background: var(--brand-soft);
+}
+.iam-linked-user {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 180px;
+  overflow: hidden;
+  color: var(--ink-3);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.iam-linked-user svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  color: var(--ink-4);
+}
+.iam-auth-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+.iam-validity { display: grid; gap: 5px; min-width: 0; }
+.iam-validity small { color: var(--ink-3); font-size: 11px; white-space: nowrap; }
+.iam-validity-chip {
+  display: inline-flex;
+  width: fit-content;
+  padding: 3px 9px;
+  font-size: 10.5px;
+  font-weight: 600;
+  border-radius: 999px;
+  letter-spacing: 0.02em;
+}
+.iam-validity-chip.is-permanent { color: var(--ok-1); background: var(--ok-soft); }
+.iam-validity-chip.is-temporary { color: var(--warn-1); background: var(--warn-soft); }
+.iam-account-updated { color: var(--ink-3); font-size: 11px; white-space: nowrap; }
 .iam-account-actions { white-space: nowrap; }
 
-/* Account creation turns the validity choice into a clear, keyboard-accessible decision. */
-.iam-account-editor-intro { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; align-items: center; gap: 11px; padding: 13px 14px; border: 1px solid #dbeafe; border-radius: 9px; background: linear-gradient(100deg, #eff6ff, #fff); }
-.iam-account-editor-intro > span { display: grid; width: 36px; height: 36px; place-items: center; color: #2563eb; border-radius: 9px; background: #dbeafe; }
-.iam-account-editor-intro svg { width: 18px; height: 18px; }
-.iam-account-editor-intro strong { display: block; color: #172554; font-size: 13px; }
-.iam-account-editor-intro p { margin: 3px 0 0; color: #64748b; font-size: 11px; font-weight: 400; line-height: 1.55; }
-.iam-account-editor-intro > small { padding: 4px 6px; color: #2563eb; font-size: 10px; font-weight: 700; border-radius: 5px; background: #dbeafe; }
-.iam-account-field { padding: 11px; border: 1px solid #e8eef6; border-radius: 8px; background: #fff; }
-.iam-account-field:focus-within { border-color: #93c5fd; box-shadow: 0 0 0 3px rgba(37, 99, 235, .08); }
-.iam-validity-picker { display: grid; gap: 8px; padding: 11px; color: #334155; font-size: 12px; font-weight: 600; border: 1px solid #e8eef6; border-radius: 8px; background: #f8fafc; }
-.iam-validity-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.iam-validity-options button { display: grid; gap: 4px; min-height: 66px; padding: 10px 11px; color: #475569; text-align: left; cursor: pointer; border: 1px solid #dbe3ee; border-radius: 8px; background: #fff; transition: border-color .16s ease, background .16s ease, box-shadow .16s ease; }
-.iam-validity-options button:hover { border-color: #93c5fd; background: #f8fbff; }
-.iam-validity-options button.active { color: #1d4ed8; border-color: #60a5fa; background: #eff6ff; box-shadow: 0 0 0 3px rgba(37, 99, 235, .09); }
-.iam-validity-options strong { font-size: 12px; }
-.iam-validity-options small { color: #64748b; font-size: 10px; font-weight: 400; line-height: 1.45; }
-.iam-validity-options button.active small { color: #3b82f6; }
-.iam-account-expiry-field { padding: 11px; border: 1px solid #fde68a; border-radius: 8px; background: #fffbeb; }
-.iam-account-expiry-field input { border-color: #fcd34d; background: #fff; }
+/* 账号编辑器：有效期 picker */
+.iam-account-editor-intro {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--s-3);
+  padding: 16px 18px;
+  border: 1px solid var(--brand-line);
+  border-radius: var(--r-3);
+  background: var(--brand-soft);
+}
+.iam-account-editor-intro > span {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  color: var(--brand-1);
+  border-radius: var(--r-2);
+  background: var(--surface);
+}
+.iam-account-editor-intro svg { width: 20px; height: 20px; }
+.iam-account-editor-intro strong {
+  display: block;
+  color: var(--brand-1);
+  font-size: 14px;
+  font-weight: 600;
+}
+.iam-account-editor-intro p {
+  margin: 4px 0 0;
+  color: var(--ink-3);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.55;
+}
+.iam-account-editor-intro > small {
+  padding: 4px 8px;
+  color: var(--brand-1);
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 5px;
+  background: var(--surface);
+  letter-spacing: 0.04em;
+}
+.iam-account-field {
+  padding: 12px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-2);
+  background: var(--surface);
+  transition: border-color var(--t-fast) var(--ease-out), box-shadow var(--t-fast) var(--ease-out);
+}
+.iam-account-field:focus-within {
+  border-color: var(--brand-2);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.08);
+}
+.iam-validity-picker {
+  display: grid;
+  gap: var(--s-2);
+  padding: 12px 14px;
+  color: var(--ink-2);
+  font-size: 12.5px;
+  font-weight: 600;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-2);
+  background: var(--bg-soft);
+}
+.iam-validity-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s-2);
+}
+.iam-validity-options button {
+  display: grid;
+  gap: 5px;
+  min-height: 72px;
+  padding: 12px 14px;
+  color: var(--ink-3);
+  text-align: left;
+  cursor: pointer;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-2);
+  background: var(--surface);
+  transition: border-color var(--t-fast) var(--ease-out), background var(--t-fast) var(--ease-out), box-shadow var(--t-fast) var(--ease-out);
+}
+.iam-validity-options button:hover {
+  border-color: var(--brand-2);
+  background: var(--brand-soft);
+}
+.iam-validity-options button.active {
+  color: var(--brand-1);
+  border-color: var(--brand-2);
+  background: var(--brand-soft);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.09);
+}
+.iam-validity-options strong { font-size: 12.5px; }
+.iam-validity-options small {
+  color: var(--ink-3);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.45;
+}
+.iam-validity-options button.active small { color: var(--brand-1); }
+.iam-account-expiry-field {
+  padding: 12px;
+  border: 1px solid var(--warn-line);
+  border-radius: var(--r-2);
+  background: var(--warn-soft);
+}
+.iam-account-expiry-field input { border-color: #fcd34d; background: var(--surface); }
 
 @media (max-width: 760px) {
-  .iam-account-editor-intro { grid-template-columns: 36px minmax(0, 1fr); }
+  .iam-account-editor-intro { grid-template-columns: 40px minmax(0, 1fr); }
   .iam-account-editor-intro > small { display: none; }
 }
 @media (max-width: 460px) {
   .iam-validity-options { grid-template-columns: 1fr; }
 }
 
-/* Authorization explanation surfaces stay inside existing details/forms rather than adding another navigation layer. */
+/* =========================================================================
+   访问预览 / 影响预览
+   ========================================================================= */
 .iam-access-preview { padding-bottom: 2px; }
 .iam-access-preview .console-button { white-space: nowrap; }
-.iam-access-summary { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 11px; }
-.iam-access-summary span { padding: 4px 7px; color: #475569; font-size: 10px; font-weight: 600; border: 1px solid #dbe3ee; border-radius: 999px; background: #f8fafc; }
-.iam-access-summary .is-eligible { color: #047857; border-color: #a7f3d0; background: #ecfdf5; }
-.iam-access-summary .is-ineligible { color: #b45309; border-color: #fde68a; background: #fffbeb; }
-.iam-access-note { margin-top: 9px; }
-.iam-preview-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
-.iam-preview-columns > div { min-width: 0; padding: 11px; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; }
-.iam-preview-columns h5 { margin: 0; color: #334155; font-size: 11px; }
-.iam-provenance-list { display: grid; gap: 7px; max-height: 220px; padding: 0; margin: 9px 0 0; overflow: auto; list-style: none; }
-.iam-provenance-list li { display: grid; gap: 3px; padding: 8px; border: 1px solid #e2e8f0; border-radius: 6px; background: #fff; }
-.iam-provenance-list strong { color: #0f172a; font-size: 11px; }
-.iam-provenance-list code { overflow: hidden; color: #2563eb; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-.iam-provenance-list small { color: #64748b; font-size: 10px; line-height: 1.45; }
-.iam-impact-preview { grid-column: 1 / -1; padding: 11px; border: 1px solid #dbeafe; border-radius: 8px; background: #f8fbff; }
-.iam-impact-preview-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.iam-impact-preview-head strong { color: #1e3a8a; font-size: 12px; }
-.iam-impact-preview-head p { margin: 4px 0 0; color: #64748b; font-size: 10px; font-weight: 400; line-height: 1.5; }
-.iam-impact-metrics { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-.iam-impact-metrics span { padding: 4px 7px; color: #1d4ed8; font-size: 10px; border-radius: 999px; background: #dbeafe; }
-.iam-impact-metrics b { font-size: 12px; }
-.iam-impact-permissions, .iam-impact-users { margin: 9px 0 0; color: #475569; font-size: 10px; font-weight: 400; line-height: 1.6; overflow-wrap: anywhere; }
-@media (max-width: 760px) { .iam-preview-columns { grid-template-columns: 1fr; }.iam-impact-preview-head { align-items: stretch; flex-direction: column; }.iam-impact-preview-head .console-button { width: fit-content; } }
+.iam-access-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: var(--s-3);
+}
+.iam-access-summary span {
+  padding: 5px 10px;
+  color: var(--ink-3);
+  font-size: 11px;
+  font-weight: 500;
+  border: 1px solid var(--line-1);
+  border-radius: 999px;
+  background: var(--bg-soft);
+}
+.iam-access-summary .is-eligible {
+  color: var(--ok-1);
+  border-color: var(--ok-line);
+  background: var(--ok-soft);
+}
+.iam-access-summary .is-ineligible {
+  color: var(--warn-1);
+  border-color: var(--warn-line);
+  background: var(--warn-soft);
+}
+.iam-access-note { margin-top: var(--s-2); }
+.iam-preview-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s-3);
+  margin-top: var(--s-3);
+}
+.iam-preview-columns > div {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-2);
+  background: var(--bg-soft);
+}
+.iam-preview-columns h5 { margin: 0; color: var(--ink-2); font-size: 11.5px; font-weight: 600; }
+.iam-provenance-list {
+  display: grid;
+  gap: 8px;
+  max-height: 240px;
+  padding: 0;
+  margin: var(--s-2) 0 0;
+  overflow: auto;
+  list-style: none;
+}
+.iam-provenance-list li {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-2);
+  background: var(--surface);
+}
+.iam-provenance-list strong { color: var(--ink-1); font-size: 11.5px; font-weight: 600; }
+.iam-provenance-list code {
+  overflow: hidden;
+  color: var(--brand-1);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.iam-provenance-list small { color: var(--ink-3); font-size: 11px; line-height: 1.5; }
+.iam-impact-preview {
+  grid-column: 1 / -1;
+  padding: 14px;
+  border: 1px solid var(--brand-line);
+  border-radius: var(--r-2);
+  background: var(--brand-soft);
+}
+.iam-impact-preview-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s-3);
+}
+.iam-impact-preview-head strong { color: var(--brand-1); font-size: 12.5px; font-weight: 600; }
+.iam-impact-preview-head p {
+  margin: 4px 0 0;
+  color: var(--ink-3);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+.iam-impact-metrics { display: flex; flex-wrap: wrap; gap: 6px; margin-top: var(--s-3); }
+.iam-impact-metrics span {
+  padding: 4px 9px;
+  color: var(--brand-1);
+  font-size: 10.5px;
+  font-weight: 500;
+  border-radius: 999px;
+  background: var(--surface);
+}
+.iam-impact-metrics b { font-size: 12.5px; }
+.iam-impact-permissions,
+.iam-impact-users {
+  margin: var(--s-2) 0 0;
+  color: var(--ink-3);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 760px) {
+  .iam-preview-columns { grid-template-columns: 1fr; }
+  .iam-impact-preview-head { align-items: stretch; flex-direction: column; }
+  .iam-impact-preview-head .console-button { width: fit-content; }
+}
 
-/* Generic application authorization in the user detail dialog. */
-.iam-application-access { padding: 16px; border: 1px solid #dbeafe; border-radius: 10px; background: #f8fbff; }
-.iam-application-access-badges { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
-.iam-application-badge { flex: 0 0 auto; padding: 4px 8px; color: #1d4ed8; font-size: 10px; font-weight: 700; border-radius: 999px; background: #dbeafe; }
-.iam-application-badge.is-warning { color: #92400e; background: #fef3c7; }
-.iam-application-access-form { display: grid; gap: 14px; }
-.iam-application-access-form > label { display: grid; gap: 7px; color: #334155; font-size: 12px; font-weight: 600; }
-.iam-application-access-form select { min-height: 38px; padding: 0 10px; color: #0f172a; border: 1px solid #cbd5e1; border-radius: 7px; background: #fff; }
-.iam-application-meta { display: flex; flex-wrap: wrap; gap: 7px; }
-.iam-application-meta span { padding: 5px 8px; color: #475569; font-size: 10px; border: 1px solid #dbe3ee; border-radius: 7px; background: #fff; }
-.iam-application-meta strong { color: #0f172a; }
-.iam-application-meta .is-legacy { color: #92400e; border-color: #fde68a; background: #fffbeb; }
-.iam-application-role-fieldset { min-width: 0; padding: 12px; border: 1px solid #dbe3ee; border-radius: 8px; background: #fff; }
-.iam-application-role-fieldset:disabled { opacity: .68; }
-.iam-application-role-fieldset legend { padding: 0 6px; color: #334155; font-size: 12px; font-weight: 700; }
-.iam-application-role-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.iam-application-role-option { display: flex; align-items: flex-start; gap: 9px; min-width: 0; padding: 10px; cursor: pointer; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; transition: border-color .16s ease, background .16s ease, box-shadow .16s ease; }
-.iam-application-role-option:hover, .iam-application-role-option.selected { border-color: #93c5fd; background: #eff6ff; box-shadow: 0 0 0 2px rgba(59, 130, 246, .08); }
-.iam-application-role-option input { width: 15px; height: 15px; flex: 0 0 auto; margin-top: 2px; }
+/* =========================================================================
+   应用授权（用户详情弹窗内）
+   ========================================================================= */
+.iam-application-access {
+  padding: 18px 20px;
+  border: 1px solid var(--brand-line);
+  border-radius: var(--r-3);
+  background: var(--brand-soft);
+}
+.iam-application-access-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.iam-application-badge {
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  color: var(--brand-1);
+  font-size: 10.5px;
+  font-weight: 600;
+  border-radius: 999px;
+  background: var(--surface);
+}
+.iam-application-badge.is-warning { color: var(--warn-1); background: var(--warn-soft); }
+.iam-application-badge.is-conflict { color: var(--danger-1); background: var(--danger-soft); }
+.iam-application-access-form { display: grid; gap: var(--s-4); }
+.iam-application-access-form > label {
+  display: grid;
+  gap: 8px;
+  color: var(--ink-2);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.iam-application-access-form select {
+  min-height: 40px;
+  padding: 0 12px;
+  color: var(--ink-1);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-2);
+  background: var(--surface);
+}
+.iam-application-meta { display: flex; flex-wrap: wrap; gap: 8px; }
+.iam-application-meta span {
+  padding: 5px 10px;
+  color: var(--ink-3);
+  font-size: 11px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-2);
+  background: var(--surface);
+}
+.iam-application-meta strong { color: var(--ink-1); }
+.iam-application-meta .is-legacy { color: var(--warn-1); border-color: var(--warn-line); background: var(--warn-soft); }
+.iam-application-role-fieldset {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-2);
+  background: var(--surface);
+}
+.iam-application-role-fieldset:disabled { opacity: 0.68; }
+.iam-application-role-fieldset legend {
+  padding: 0 6px;
+  color: var(--ink-2);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.iam-application-role-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s-2);
+}
+.iam-application-role-option {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-3);
+  min-width: 0;
+  padding: 12px 14px;
+  cursor: pointer;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-2);
+  background: var(--bg-soft);
+  transition: border-color var(--t-fast) var(--ease-out), background var(--t-fast) var(--ease-out), box-shadow var(--t-fast) var(--ease-out);
+}
+.iam-application-role-option:hover,
+.iam-application-role-option.selected {
+  border-color: var(--brand-2);
+  background: var(--brand-soft);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.08);
+}
+.iam-application-role-option input {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
 .iam-application-role-copy { display: grid; gap: 3px; min-width: 0; }
-.iam-application-role-copy strong { color: #334155; font-size: 11px; }
-.iam-application-role-copy code { width: fit-content; color: #64748b; font-size: 9px; }
-.iam-application-role-copy small { color: #64748b; font-size: 10px; line-height: 1.4; overflow-wrap: anywhere; }
-.iam-application-role-copy .iam-application-role-status { color: #047857; font-weight: 700; }
-.iam-application-role-copy .iam-application-role-summary { color: #475569; }
-.iam-application-empty-catalog { padding: 13px; color: #475569; border: 1px dashed #cbd5e1; border-radius: 8px; background: #fff; }
-.iam-application-empty-catalog strong { color: #334155; font-size: 12px; }
-.iam-application-empty-catalog p { margin: 5px 0 0; font-size: 11px; line-height: 1.55; }
-.iam-application-catalog-warning { margin: 0; padding: 9px 10px; color: #92400e; font-size: 11px; line-height: 1.55; border: 1px solid #fde68a; border-radius: 8px; background: #fffbeb; }
-.iam-contract-compatibility-note { padding: 8px 10px; color: #7c2d12; border: 1px solid #fed7aa; border-radius: 7px; background: #fff7ed; }
-.iam-application-permission-block { display: grid; gap: 8px; padding: 12px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; }
-.iam-application-permission-block.effective { border-color: #bbf7d0; background: #f0fdf4; }
-.iam-application-permission-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.iam-application-permission-head strong { color: #0f172a; font-size: 12px; }
-.iam-application-permission-head span { padding: 3px 7px; color: #047857; font-size: 10px; font-weight: 700; border-radius: 999px; background: #dcfce7; }
-.iam-application-permission-tags { display: flex; flex-wrap: wrap; gap: 7px; }
-.iam-application-permission-tags span { display: grid; gap: 2px; padding: 6px 8px; color: #334155; border: 1px solid #bbf7d0; border-radius: 7px; background: #fff; }
-.iam-application-permission-tags b { font-size: 11px; }
-.iam-application-permission-tags code { color: #64748b; font-size: 9px; }
-.console-button.danger { color: #b91c1c; border-color: #fecaca; background: #fff; }
-.console-button.danger:hover:not(:disabled) { color: #991b1b; border-color: #fca5a5; background: #fef2f2; }
+.iam-application-role-copy strong { color: var(--ink-1); font-size: 12px; font-weight: 600; }
+.iam-application-role-copy code { width: fit-content; color: var(--ink-3); font-size: 9.5px; }
+.iam-application-role-copy small {
+  color: var(--ink-3);
+  font-size: 11px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.iam-application-role-copy .iam-application-role-status { color: var(--ok-1); font-weight: 600; }
+.iam-application-role-copy .iam-application-role-summary { color: var(--ink-3); }
+.iam-application-empty-catalog {
+  padding: 14px;
+  color: var(--ink-3);
+  border: 1px dashed var(--line-1);
+  border-radius: var(--r-2);
+  background: var(--surface);
+}
+.iam-application-empty-catalog strong { color: var(--ink-1); font-size: 12.5px; }
+.iam-application-empty-catalog p { margin: 6px 0 0; font-size: 11.5px; line-height: 1.55; }
+.iam-application-catalog-warning {
+  margin: 0;
+  padding: 10px 12px;
+  color: var(--warn-1);
+  font-size: 11.5px;
+  line-height: 1.6;
+  border: 1px solid var(--warn-line);
+  border-radius: var(--r-2);
+  background: var(--warn-soft);
+}
+.iam-contract-compatibility-note {
+  padding: 9px 12px;
+  color: #7c2d12;
+  border: 1px solid #fed7aa;
+  border-radius: var(--r-2);
+  background: #fff7ed;
+}
+.iam-application-permission-block {
+  display: grid;
+  gap: var(--s-2);
+  padding: 14px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-2);
+  background: var(--surface);
+}
+.iam-application-permission-block.effective {
+  border-color: var(--ok-line);
+  background: var(--ok-soft);
+}
+.iam-application-permission-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+}
+.iam-application-permission-head strong { color: var(--ink-1); font-size: 12.5px; font-weight: 600; }
+.iam-application-permission-head span {
+  padding: 3px 9px;
+  color: var(--ok-1);
+  font-size: 10.5px;
+  font-weight: 600;
+  border-radius: 999px;
+  background: #dcfce7;
+}
+.iam-application-permission-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.iam-application-permission-tags span {
+  display: grid;
+  gap: 2px;
+  padding: 6px 10px;
+  color: var(--ink-2);
+  border: 1px solid var(--ok-line);
+  border-radius: var(--r-2);
+  background: var(--surface);
+}
+.iam-application-permission-tags b { font-size: 11.5px; }
+.iam-application-permission-tags code { color: var(--ink-3); font-size: 9.5px; }
+.console-button.danger {
+  color: var(--danger-1);
+  border-color: var(--danger-line);
+  background: var(--surface);
+}
+.console-button.danger:hover:not(:disabled) {
+  color: #7f1d1d;
+  border-color: #fca5a5;
+  background: var(--danger-soft);
+}
 @media (max-width: 760px) {
   .iam-application-access-badges { justify-content: flex-start; }
   .iam-application-role-list { grid-template-columns: 1fr; }
 }
 
+/* =========================================================================
+   用户详情弹窗「有效授权总览」（P4）：三类来源的角色汇总卡片。
+   视觉与 iam-application-access 保持一致；不依赖 applicationAccess，按
+   previewPositionAuthorization({ user_id }) 拉取的全用户快照渲染。
+   ========================================================================= */
+.iam-effective-authorization-overview {
+  padding: 18px 20px;
+  border: 1px solid var(--brand-line);
+  border-radius: var(--r-3);
+  background: var(--brand-soft);
+}
+.iam-effective-authorization-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--s-3);
+}
+.iam-effective-authorization-card {
+  display: grid;
+  gap: var(--s-2);
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-2);
+  background: var(--surface);
+}
+.iam-effective-authorization-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+}
+.iam-effective-authorization-head strong { color: var(--ink-1); font-size: 12.5px; font-weight: 600; }
+.iam-effective-authorization-head span {
+  padding: 3px 9px;
+  color: var(--brand-1);
+  font-size: 10.5px;
+  font-weight: 600;
+  border-radius: 999px;
+  background: var(--brand-soft);
+}
+.iam-effective-authorization-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.iam-effective-authorization-list li {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-2);
+  background: var(--bg-soft);
+}
+.iam-effective-authorization-app {
+  color: var(--brand-1);
+  font-size: 11px;
+  font-weight: 600;
+}
+.iam-effective-authorization-role {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.iam-effective-authorization-role strong { color: var(--ink-1); font-size: 12.5px; font-weight: 600; }
+.iam-effective-authorization-role code { color: var(--ink-3); font-size: 9.5px; }
+.iam-effective-authorization-list small {
+  color: var(--ink-3);
+  font-size: 11px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 760px) {
+  .iam-effective-authorization-grid { grid-template-columns: 1fr; }
+}
+
 .iam-application-scope-grid,
-.iam-application-validity-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.iam-application-validity-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s-3);
+}
 .iam-application-scope-grid > label,
-.iam-application-validity-grid > label { display: grid; gap: 7px; color: #334155; font-size: 12px; font-weight: 600; }
+.iam-application-validity-grid > label {
+  display: grid;
+  gap: 8px;
+  color: var(--ink-2);
+  font-size: 12.5px;
+  font-weight: 600;
+}
 .iam-application-scope-grid select,
 .iam-application-validity-grid input,
-.iam-application-validity-grid select { min-height: 38px; padding: 0 10px; color: #0f172a; border: 1px solid #cbd5e1; border-radius: 7px; background: #fff; }
+.iam-application-validity-grid select {
+  min-height: 40px;
+  padding: 0 12px;
+  color: var(--ink-1);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-2);
+  background: var(--surface);
+}
 .iam-application-scope-grid small,
-.iam-application-validity-grid small { color: #64748b; font-size: 10px; font-weight: 400; }
-.iam-application-scope-warning { margin: 0; padding: 8px 10px; color: #92400e; border: 1px solid #fde68a; border-radius: 7px; background: #fffbeb; }
+.iam-application-validity-grid small {
+  color: var(--ink-3);
+  font-size: 11px;
+  font-weight: 400;
+}
+.iam-application-scope-warning {
+  margin: 0;
+  padding: 9px 12px;
+  color: var(--warn-1);
+  border: 1px solid var(--warn-line);
+  border-radius: var(--r-2);
+  background: var(--warn-soft);
+}
 @media (max-width: 760px) { .iam-application-scope-grid, .iam-application-validity-grid { grid-template-columns: 1fr; } }
 
-/* Position authorization templates: keep application-role mappings explicit and scannable. */
-.iam-position-authorization { display: grid; gap: 14px; }
-.iam-template-editor, .iam-authorization-preview { padding: 16px; border: 1px solid #dbeafe; border-radius: 10px; background: #f8fbff; }
-.iam-template-editor h4, .iam-authorization-preview h4 { margin: 0 0 12px; color: #0f172a; font-size: 13px; }
-.iam-template-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.iam-template-grid > label, .iam-template-role-row > select, .iam-template-role-row > input { min-width: 0; }
-.iam-template-grid > label { display: grid; gap: 6px; color: #334155; font-size: 12px; font-weight: 600; }
-.iam-template-grid input, .iam-template-role-row select, .iam-template-role-row input, .iam-template-position-select { min-height: 38px; padding: 0 10px; color: #0f172a; border: 1px solid #cbd5e1; border-radius: 7px; background: #fff; }
-.iam-template-grid .full { grid-column: 1 / -1; }
-.iam-template-roles { display: grid; gap: 8px; margin-top: 12px; }
-.iam-template-role-row { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(140px, 1fr) minmax(110px, .7fr) minmax(0, .8fr) auto; gap: 8px; align-items: center; }
+/* =========================================================================
+   岗位授权模板（Position Authorization Templates）
+   ========================================================================= */
+.iam-position-authorization { display: grid; gap: 20px; }
+
+.iam-template-editor,
+.iam-authorization-preview {
+  padding: 22px 24px;
+  border: 1px solid var(--brand-line);
+  border-radius: var(--r-3);
+  background: var(--surface);
+  box-shadow: var(--sh-1);
+}
+.iam-template-card-head,
+.iam-template-mapping-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding-bottom: 20px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--line-2);
+}
+.iam-template-card-title {
+  display: flex;
+  align-items: flex-start;
+  min-width: 0;
+  gap: var(--s-3);
+}
+.iam-template-card-title h4,
+.iam-authorization-preview h4 {
+  margin: 0;
+  color: var(--ink-1);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.4;
+}
+.iam-template-card-title p {
+  max-width: 720px;
+  margin: 6px 0 0;
+  color: var(--ink-3);
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+.iam-template-card-icon {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--brand-1);
+  border: 1px solid var(--brand-line);
+  border-radius: var(--r-2);
+  background: var(--brand-soft);
+  box-shadow: var(--sh-1);
+}
+.iam-template-card-icon.is-green {
+  color: var(--ok-1);
+  border-color: var(--ok-line);
+  background: var(--ok-soft);
+}
+.iam-template-card-icon svg { width: 19px; height: 19px; }
+.iam-template-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.7fr) minmax(360px, 1.3fr);
+  gap: var(--s-4);
+}
+.iam-template-grid > label,
+.iam-template-role-row > select,
+.iam-template-role-row > input { min-width: 0; }
+.iam-template-grid > label {
+  display: grid;
+  gap: 8px;
+  color: var(--ink-2);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.iam-template-grid input,
+.iam-template-role-row select,
+.iam-template-role-row input,
+.iam-template-position-select {
+  min-height: 42px;
+  padding: 0 12px;
+  color: var(--ink-1);
+  font-size: 13.5px;
+  font-weight: 400;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-2);
+  background: var(--surface);
+  transition: border-color var(--t-fast) var(--ease-out), box-shadow var(--t-fast) var(--ease-out);
+}
+.iam-template-grid input:focus,
+.iam-template-role-row select:focus,
+.iam-template-role-row input:focus,
+.iam-template-position-select:focus {
+  border-color: var(--brand-2);
+  outline: 0;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+.iam-template-guidance {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-2);
+  padding: 12px 14px;
+  margin-top: var(--s-4);
+  color: var(--ink-3);
+  border: 1px solid var(--brand-line);
+  border-radius: var(--r-2);
+  background: var(--brand-soft);
+}
+.iam-template-guidance svg {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--brand-2);
+}
+.iam-template-guidance p { margin: 0; font-size: 12px; line-height: 1.65; }
+.iam-template-grid .full { min-width: 0; }
+.iam-template-roles { display: grid; gap: var(--s-2); margin-top: var(--s-4); }
+.iam-template-role-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) minmax(120px, 0.6fr) minmax(140px, 0.7fr) auto;
+  gap: var(--s-2);
+  align-items: center;
+  padding: 14px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-2);
+  background: var(--surface);
+  transition: border-color var(--t-fast) var(--ease-out);
+}
+.iam-template-role-row:hover { border-color: var(--brand-line); }
 .iam-template-role-row > input:only-of-type { grid-column: auto; }
-.iam-template-editor > footer, .iam-authorization-preview > footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
-.iam-template-assignment-list { display: grid; gap: 8px; }
-.iam-template-assignment { display: flex; align-items: flex-start; gap: 9px; padding: 10px; cursor: pointer; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; }
-.iam-template-assignment:has(input:checked) { border-color: #93c5fd; background: #eff6ff; }
-.iam-template-assignment input { width: 15px; height: 15px; flex: 0 0 auto; margin-top: 2px; }
-.iam-template-assignment span { display: grid; gap: 3px; min-width: 0; }
-.iam-template-assignment strong { color: #0f172a; font-size: 12px; }
-.iam-template-assignment small, .iam-template-assignment em { color: #64748b; font-size: 10px; font-style: normal; line-height: 1.5; overflow-wrap: anywhere; }
-.iam-authorization-preview ul { display: grid; gap: 7px; margin: 10px 0 0; padding: 0; list-style: none; }
-.iam-authorization-preview li { padding: 8px 10px; color: #334155; font-size: 12px; border: 1px solid #dbeafe; border-radius: 7px; background: #fff; }
-.iam-authorization-preview li small { margin-left: 6px; color: #64748b; font-size: 10px; }
-@media (max-width: 900px) { .iam-template-role-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 620px) { .iam-template-grid, .iam-template-role-row { grid-template-columns: 1fr; } .iam-template-editor > footer { justify-content: stretch; } .iam-template-editor > footer .console-button { flex: 1; } }
+.iam-template-editor .iam-panel-actions {
+  padding-top: 18px;
+  margin-top: 18px;
+  border-top: 1px solid var(--line-2);
+}
+.iam-template-editor > footer,
+.iam-authorization-preview > footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--s-2);
+  margin-top: var(--s-3);
+}
+.iam-standard-authorization-card { padding: 22px 24px; }
+.iam-template-mapping-head { align-items: center; }
+.iam-template-mapping-actions {
+  display: flex;
+  align-items: flex-end;
+  flex: 0 0 auto;
+  gap: var(--s-2);
+}
+.iam-template-position-field {
+  display: grid;
+  min-width: 240px;
+  gap: 8px;
+  color: var(--ink-3);
+  font-size: 11px;
+  font-weight: 600;
+}
+.iam-template-assignment-list { display: grid; gap: var(--s-2); margin-top: var(--s-4); }
+.iam-template-assignment-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--s-3);
+  align-items: center;
+}
+.iam-template-assignment {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-3);
+  padding: 14px 16px;
+  cursor: pointer;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-2);
+  background: var(--surface);
+  transition: border-color var(--t-fast) var(--ease-out), background var(--t-fast) var(--ease-out), box-shadow var(--t-fast) var(--ease-out);
+}
+.iam-template-assignment:hover {
+  border-color: var(--brand-line);
+  box-shadow: var(--sh-1);
+}
+.iam-template-assignment:has(input:checked) {
+  border-color: var(--ok-line);
+  background: var(--ok-soft);
+  box-shadow: 0 4px 14px rgba(5, 150, 105, 0.06);
+}
+.iam-template-assignment input {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  margin-top: 2px;
+  accent-color: var(--ok-1);
+}
+.iam-template-assignment span { display: grid; gap: 5px; min-width: 0; }
+.iam-template-assignment strong { color: var(--ink-1); font-size: 12.5px; font-weight: 600; }
+.iam-template-assignment small,
+.iam-template-assignment em {
+  color: var(--ink-3);
+  font-size: 11px;
+  font-style: normal;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.iam-template-delete { white-space: nowrap; }
+.iam-authorization-preview ul {
+  display: grid;
+  gap: 8px;
+  margin: var(--s-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.iam-authorization-preview li {
+  padding: 9px 12px;
+  color: var(--ink-2);
+  font-size: 12.5px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-2);
+  background: var(--bg-soft);
+}
+.iam-authorization-preview li small {
+  margin-left: 8px;
+  color: var(--ink-3);
+  font-size: 11px;
+}
 
-/* Authorization layers: templates are the standard path; direct grants remain controlled exceptions. */
-.iam-standard-authorization-badge { display: inline-flex; align-items: center; margin-left: 6px; padding: 2px 6px; color: #047857; font-size: 10px; font-weight: 700; line-height: 1.3; border: 1px solid #a7f3d0; border-radius: 999px; background: #ecfdf5; vertical-align: middle; }
-.iam-standard-authorization-card { border-color: #bbf7d0; background: linear-gradient(135deg, #f0fdf4, #fff); }
-.iam-authorization-layer { display: grid; gap: 7px; padding: 12px; color: #334155; border: 1px solid #bfdbfe; border-radius: 8px; background: #eff6ff; }
-.iam-authorization-layer-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.iam-authorization-layer-head strong { color: #1e3a8a; font-size: 12px; }
-.iam-authorization-layer-head span { padding: 3px 7px; color: #1d4ed8; font-size: 10px; font-weight: 700; border: 1px solid #bfdbfe; border-radius: 999px; background: #fff; }
-.iam-authorization-layer p { margin: 0; font-size: 11px; line-height: 1.55; }
-.iam-authorization-layer-risk { padding: 7px 8px; color: #92400e; border: 1px solid #fde68a; border-radius: 6px; background: #fffbeb; }
-.iam-authorization-layer.is-org_unit { border-color: #fcd34d; background: #fffbeb; }
-.iam-authorization-layer.is-org_unit .iam-authorization-layer-head strong { color: #92400e; }
-.iam-authorization-layer.is-org_unit .iam-authorization-layer-head span { color: #92400e; border-color: #fde68a; }
-.iam-authorization-layer-duplicate { padding: 8px; color: #b45309; border: 1px solid #fdba74; border-radius: 6px; background: #fff7ed; }
-.iam-authorization-layer-readonly { color: #475569; }
-@media (max-width: 620px) { .iam-authorization-layer-head { align-items: flex-start; flex-direction: column; } }
+/* P5：模板编辑卡片内的"挂载预览"——保存前影响分析。设计为虚线蓝边框的内嵌面板，
+   区别于真正的"授权预览与影响分析"卡片（实线品牌边框），不喧宾夺主。 */
+.iam-template-mount-preview {
+  margin-top: 22px;
+  padding: 18px 20px;
+  display: grid;
+  gap: 16px;
+  border: 1px dashed var(--brand-line);
+  border-radius: var(--r-2);
+  background: var(--brand-soft);
+}
+.iam-template-mount-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-3);
+}
+.iam-template-mount-head .iam-template-card-icon {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+}
+.iam-template-mount-head .iam-template-card-icon svg { width: 17px; height: 17px; }
+.iam-template-mount-head h5 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-1);
+  letter-spacing: -0.005em;
+}
+.iam-template-mount-head p {
+  max-width: 760px;
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--ink-3);
+}
+.iam-template-mount-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(280px, 1.4fr);
+  gap: 12px;
+}
+.iam-mount-tile {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: var(--r-2);
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+}
+.iam-mount-tile.is-local { border-color: var(--ok-line); background: var(--ok-soft); }
+.iam-mount-tile.is-impact { border-color: var(--brand-line); }
+.iam-mount-tile.is-muted { border-color: var(--line-2); background: var(--bg-soft); }
+.iam-mount-tile-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-1);
+}
+.iam-mount-tile-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ink-3);
+  flex: 0 0 auto;
+  display: inline-block;
+}
+.iam-mount-tile-dot.is-local { background: var(--ok-1); }
+.iam-mount-tile-dot.is-ok    { background: var(--ok-1); }
+.iam-mount-tile-dot.is-warn  { background: var(--warn-1); }
+.iam-mount-tile-dot.is-muted { background: var(--ink-3); }
+.iam-mount-tile dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+.iam-mount-tile.is-muted dl { display: none; }
+.iam-mount-tile dl > div {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: var(--r-1);
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+}
+.iam-mount-tile.is-local dl > div { border-color: var(--ok-line); }
+.iam-mount-tile dl > div.is-ok   { border-color: var(--ok-line);   background: var(--ok-soft); }
+.iam-mount-tile dl > div.is-warn { border-color: var(--warn-line); background: var(--warn-soft); }
+.iam-mount-tile dt {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ink-3);
+}
+.iam-mount-tile dd {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--ink-1);
+  letter-spacing: -0.01em;
+}
+.iam-mount-tile dd small {
+  margin-left: 4px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--ink-3);
+}
+.iam-mount-tile-loading,
+.iam-mount-tile-empty {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--ink-3);
+}
+.iam-mount-tile-foot {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--ink-3);
+  font-style: italic;
+}
+.iam-mount-conflicts {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.iam-mount-conflicts li {
+  padding: 8px 12px;
+  border-radius: var(--r-1);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--warn-1);
+  background: var(--warn-soft);
+  border: 1px solid var(--warn-line);
+}
+.iam-template-mount-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+/* 用户从编辑卡片点击"预览影响/查看完整预览"后，给目标卡片 1.6s 的描边闪烁，方便定位。 */
+.iam-authorization-preview.is-flash {
+  animation: iam-preview-flash 1.6s ease-out 1;
+}
+@keyframes iam-preview-flash {
+  0%   { box-shadow: 0 0 0 0 var(--brand-line); }
+  30%  { box-shadow: 0 0 0 4px var(--brand-line); }
+  100% { box-shadow: 0 0 0 0 var(--brand-line); }
+}
+@media (max-width: 1050px) {
+  .iam-template-grid { grid-template-columns: 1fr; }
+  .iam-template-role-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .iam-template-role-row .console-text-button { justify-self: end; }
+  .iam-template-mapping-head { align-items: flex-start; flex-direction: column; }
+  .iam-template-mapping-actions { width: 100%; }
+  .iam-template-position-field { min-width: 0; flex: 1; }
+}
+@media (max-width: 620px) {
+  .iam-template-card-head,
+  .iam-template-mapping-head,
+  .iam-template-mapping-actions { align-items: stretch; flex-direction: column; }
+  .iam-template-grid,
+  .iam-template-role-row,
+  .iam-template-assignment-row { grid-template-columns: 1fr; }
+  .iam-template-delete { justify-self: end; }
+  .iam-template-editor > footer { justify-content: stretch; }
+  .iam-template-editor > footer .console-button,
+  .iam-template-mapping-actions .console-button { width: 100%; }
+  .iam-template-mount-grid { grid-template-columns: 1fr; }
+  .iam-mount-tile dl { grid-template-columns: 1fr 1fr; }
+  .iam-template-mount-actions { width: 100%; }
+  .iam-template-mount-actions .console-button,
+  .iam-template-mount-actions .console-text-button { width: 100%; }
+}
 
-/* Employee onboarding keeps the common employee case in one flow while leaving the individual
- * user/account/membership panels available for repair and advanced administration. */
-.iam-employee-onboarding-modal { width: min(820px, 100%); }
-.iam-employee-onboarding-form { gap: 14px; }
-.iam-onboarding-steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; padding: 0; margin: 0; list-style: none; }
-.iam-onboarding-steps li { display: flex; align-items: center; gap: 7px; min-width: 0; padding: 8px 9px; color: #94a3b8; font-size: 11px; font-weight: 600; border: 1px solid #e2e8f0; border-radius: 7px; background: #f8fafc; }
-.iam-onboarding-steps li.active { color: #1d4ed8; border-color: #bfdbfe; background: #eff6ff; }
-.iam-onboarding-steps b, .iam-onboarding-step { display: inline-grid; width: 20px; height: 20px; flex: 0 0 20px; place-items: center; color: #fff; font-size: 11px; border-radius: 999px; background: #94a3b8; }
-.iam-onboarding-steps li.active b, .iam-onboarding-step { background: #2563eb; }
-.iam-onboarding-section { display: grid; gap: 13px; padding: 15px; border: 1px solid #e2e8f0; border-radius: 9px; background: #fff; }
-.iam-onboarding-section.muted { background: #f8fafc; }
-.iam-onboarding-section.muted .iam-onboarding-section-head > div, .iam-onboarding-section.muted .iam-onboarding-step { opacity: .62; }
-.iam-onboarding-section-head { display: flex; align-items: flex-start; gap: 9px; }
+/* =========================================================================
+   授权层级（Authorization Layers）
+   ========================================================================= */
+.iam-standard-authorization-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 2px 8px;
+  color: var(--ok-1);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.3;
+  border: 1px solid var(--ok-line);
+  border-radius: 999px;
+  background: var(--ok-soft);
+  vertical-align: middle;
+}
+.iam-standard-authorization-card {
+  border-color: var(--ok-line);
+  background: var(--surface);
+}
+.iam-authorization-layer {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  color: var(--ink-2);
+  border: 1px solid var(--brand-line);
+  border-radius: var(--r-2);
+  background: var(--brand-soft);
+}
+.iam-authorization-layer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+}
+.iam-authorization-layer-head strong { color: var(--brand-1); font-size: 12.5px; font-weight: 600; }
+.iam-authorization-layer-head span {
+  padding: 3px 9px;
+  color: var(--brand-1);
+  font-size: 10.5px;
+  font-weight: 600;
+  border: 1px solid var(--brand-line);
+  border-radius: 999px;
+  background: var(--surface);
+}
+.iam-authorization-layer p { margin: 0; font-size: 11.5px; line-height: 1.55; }
+.iam-authorization-layer-risk {
+  padding: 8px 10px;
+  color: var(--warn-1);
+  border: 1px solid var(--warn-line);
+  border-radius: var(--r-2);
+  background: var(--warn-soft);
+}
+.iam-authorization-layer.is-org_unit { border-color: var(--warn-line); background: var(--warn-soft); }
+.iam-authorization-layer.is-org_unit .iam-authorization-layer-head strong { color: var(--warn-1); }
+.iam-authorization-layer.is-org_unit .iam-authorization-layer-head span {
+  color: var(--warn-1);
+  border-color: var(--warn-line);
+  background: var(--surface);
+}
+.iam-authorization-layer-duplicate {
+  padding: 9px 12px;
+  color: var(--warn-1);
+  border: 1px solid #fdba74;
+  border-radius: var(--r-2);
+  background: #fff7ed;
+}
+.iam-authorization-layer-readonly { color: var(--ink-3); }
+@media (max-width: 620px) {
+  .iam-authorization-layer-head { align-items: flex-start; flex-direction: column; }
+}
+
+/* =========================================================================
+   员工入职引导（Employee Onboarding Modal）
+   ========================================================================= */
+.iam-employee-onboarding-modal { width: min(860px, 100%); }
+.iam-employee-onboarding-form { gap: var(--s-4); }
+.iam-onboarding-steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--s-2);
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+.iam-onboarding-steps li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 12px;
+  color: var(--ink-4);
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-2);
+  background: var(--bg-soft);
+}
+.iam-onboarding-steps li.active {
+  color: var(--brand-1);
+  font-weight: 600;
+  border-color: var(--brand-line);
+  background: var(--brand-soft);
+}
+.iam-onboarding-steps b,
+.iam-onboarding-step {
+  display: inline-grid;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  place-items: center;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 50%;
+  background: var(--ink-4);
+}
+.iam-onboarding-steps li.active b,
+.iam-onboarding-step { background: var(--brand-2); }
+.iam-onboarding-section {
+  display: grid;
+  gap: var(--s-4);
+  padding: 18px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-3);
+  background: var(--surface);
+}
+.iam-onboarding-section.muted { background: var(--bg-soft); }
+.iam-onboarding-section.muted .iam-onboarding-section-head > div,
+.iam-onboarding-section.muted .iam-onboarding-step { opacity: 0.62; }
+.iam-onboarding-section-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-3);
+}
 .iam-onboarding-section-head > div { min-width: 0; flex: 1; }
-.iam-onboarding-section-head h4 { margin: 0; color: #0f172a; font-size: 13px; }
-.iam-onboarding-section-head p { margin: 3px 0 0; color: #64748b; font-size: 11px; font-weight: 400; line-height: 1.55; }
-.iam-onboarding-toggle { display: inline-flex !important; grid-auto-flow: column; align-items: center; gap: 6px; width: max-content; padding: 5px 7px; color: #334155 !important; font-size: 11px !important; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; }
-.iam-onboarding-toggle input { width: 14px !important; min-height: auto !important; margin: 0; }
-.iam-onboarding-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px; }
-.iam-onboarding-grid label { display: grid; gap: 7px; color: #334155; font-size: 12px; font-weight: 600; }
+.iam-onboarding-section-head h4 { margin: 0; color: var(--ink-1); font-size: 14px; font-weight: 600; }
+.iam-onboarding-section-head p {
+  margin: 4px 0 0;
+  color: var(--ink-3);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.55;
+}
+.iam-onboarding-toggle {
+  display: inline-flex !important;
+  grid-auto-flow: column;
+  align-items: center;
+  gap: 6px;
+  width: max-content;
+  padding: 6px 9px;
+  color: var(--ink-2) !important;
+  font-size: 11.5px !important;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-1);
+  background: var(--surface);
+  cursor: pointer;
+}
+.iam-onboarding-toggle input {
+  width: 14px !important;
+  min-height: auto !important;
+  margin: 0;
+}
+.iam-onboarding-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s-4);
+}
+.iam-onboarding-grid label {
+  display: grid;
+  gap: 8px;
+  color: var(--ink-2);
+  font-size: 12.5px;
+  font-weight: 600;
+}
 .iam-onboarding-grid label.full { grid-column: 1 / -1; }
-.iam-onboarding-role-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.iam-onboarding-role-list > div { display: grid; gap: 3px; padding: 10px; border: 1px solid #bfdbfe; border-radius: 7px; background: #f8fbff; }
-.iam-onboarding-role-list strong { color: #1e3a8a; font-size: 11px; }
-.iam-onboarding-role-list span { color: #0f172a; font-size: 12px; font-weight: 600; }
-.iam-onboarding-role-list small { color: #64748b; font-size: 10px; }
+.iam-onboarding-role-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s-2);
+}
+.iam-onboarding-role-list > div {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--brand-line);
+  border-radius: var(--r-2);
+  background: var(--brand-soft);
+}
+.iam-onboarding-role-list strong { color: var(--brand-1); font-size: 11.5px; font-weight: 600; }
+.iam-onboarding-role-list span { color: var(--ink-1); font-size: 12.5px; font-weight: 600; }
+.iam-onboarding-role-list small { color: var(--ink-3); font-size: 11px; }
 .iam-onboarding-preview .iam-field-help { margin-top: -3px; }
-@media (max-width: 760px) { .iam-onboarding-steps, .iam-onboarding-grid, .iam-onboarding-role-list { grid-template-columns: 1fr; }.iam-onboarding-section { padding: 13px; }.iam-onboarding-section-head { flex-wrap: wrap; }.iam-onboarding-toggle { margin-left: 29px; } }
+
+/* 列表中可点击复制的 ID 按钮：等宽字体 + hover 高亮 + 不破坏表格布局。 */
+.console-id-button {
+  padding: 0;
+  color: var(--brand-1);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11.5px;
+  cursor: pointer;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  transition: background-color var(--t-fast) var(--ease-out);
+}
+.console-id-button:hover { background: var(--brand-soft); }
+.console-id-button:focus-visible { outline: 2px solid var(--brand-2); outline-offset: 1px; }
+
+/* 不可再分配的角色选项：保持勾选 + 灰色背景，让用户清楚"勾上但不能改"。 */
+.iam-application-role-option.is-unavailable {
+  cursor: not-allowed;
+  opacity: 0.85;
+  background: var(--danger-soft);
+}
+.iam-application-role-option.is-unavailable strong { color: #7f1d1d; }
+.iam-application-role-option.is-unavailable .iam-application-role-status { color: var(--danger-1); }
+
+/* 临时密码遮罩态：与揭示态视觉上一致，避免吸引复制。 */
+.iam-one-time-password.is-masked {
+  cursor: pointer;
+  color: var(--ink-4);
+  user-select: none;
+  background: var(--bg-soft);
+  border-color: var(--line-1);
+}
+.iam-one-time-password.is-masked:hover { color: var(--ink-2); }
+@media (max-width: 760px) {
+  .iam-onboarding-steps,
+  .iam-onboarding-grid,
+  .iam-onboarding-role-list { grid-template-columns: 1fr; }
+  .iam-onboarding-section { padding: 14px; }
+  .iam-onboarding-section-head { flex-wrap: wrap; }
+  .iam-onboarding-toggle { margin-left: 29px; }
+}
+
+/* 小屏自适应：表格转为卡片视图。每行变卡片，data-label 作为左侧字段名。 */
+@media (max-width: 768px) {
+  .iam-data-table { min-width: 0; }
+  .iam-data-table,
+  .iam-data-table thead,
+  .iam-data-table tbody,
+  .iam-data-table tr,
+  .iam-data-table th,
+  .iam-data-table td {
+    display: block;
+    width: auto !important;
+  }
+  .iam-data-table thead { display: none; }
+  .iam-data-table tbody tr {
+    margin-bottom: 12px;
+    padding: 12px 14px;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
+  }
+  .iam-data-table tbody tr:hover { background: #fff; }
+  .iam-data-table td {
+    display: flex;
+    gap: 10px;
+    align-items: baseline;
+    padding: 6px 0 !important;
+    border-bottom: 1px dashed #eef2f7;
+  }
+  .iam-data-table td:last-child { border-bottom: none; }
+  .iam-data-table td::before {
+    flex: 0 0 88px;
+    color: var(--ink-3);
+    font-size: 12px;
+    font-weight: 500;
+    content: attr(data-label);
+  }
+  .iam-data-table td[data-empty="true"]::before { display: none; }
+  .iam-data-table td[data-empty="true"] {
+    display: block;
+    padding: 14px 0 !important;
+    color: var(--ink-3);
+    text-align: center;
+  }
+  .iam-data-table td.console-actions-cell {
+    justify-content: flex-end;
+    padding-top: 10px !important;
+  }
+  .iam-data-table td.console-actions-cell::before { display: none; }
+}
+
+/* 表格列宽自适应：
+ * - 取消 .console-data-table 的硬编码 950px min-width，让列按内容占比伸缩；
+ * - table-layout: fixed + <th width> 给出稳定比例，避免邮箱 / ID 等长字段把整张表撑爆；
+ * - 长字段（邮箱 / mono ID）允许换行；短字段（状态徽章、操作）保持不换行居右。 */
+.iam-data-table {
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+}
+.iam-data-table th,
+.iam-data-table td {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.iam-data-table th.console-actions-cell,
+.iam-data-table td.console-actions-cell {
+  overflow-wrap: normal;
+  word-break: normal;
+  white-space: nowrap;
+  text-align: right;
+}
+.iam-data-table td.console-actions-cell { padding-right: 16px; }
+.iam-data-table th .console-badge,
+.iam-data-table td .console-badge,
+.iam-data-table th.console-actions-cell,
+.iam-data-table td.console-actions-cell { white-space: nowrap; }
