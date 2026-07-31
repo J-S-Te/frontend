@@ -29,11 +29,11 @@ test('sales contract creation renders and submits template-generated fields', ()
 test('saved template contracts render formatted HTML instead of plain text', () => {
   assert.match(source, /previewContractDocument\(contract\.recordId\)/)
   assert.match(source, /v-else-if="selectedContractPreviewHTML"/)
-  assert.match(source, /v-html="selectedContractPreviewHTML"/)
+  assert.match(source, /ContractDocumentPreview[^>]*:html="selectedContractPreviewHTML"/)
 })
 
 test('approval progress renders its template contract with document formatting', () => {
   assert.match(source, /previewApprovalContract\(approval\.id\)/)
   assert.match(source, /v-else-if="approvalContractPreviewHTML"/)
-  assert.match(source, /v-html="approvalContractPreviewHTML"/)
+  assert.match(source, /ContractDocumentPreview[^>]*:html="approvalContractPreviewHTML"/)
 })
