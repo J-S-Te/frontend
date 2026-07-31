@@ -33,3 +33,8 @@ test('contract template preview submits the generated field values', () => {
   assert.match(source, /`\/contract-templates\/\$\{encodeURIComponent\(templateId\)\}\/preview`/)
   assert.match(source, /body: JSON\.stringify\(\{ values \}\)/)
 })
+
+test('saved contracts expose their formatted document preview', () => {
+  assert.match(source, /previewContractDocument\(contractId\)/)
+  assert.match(source, /`\/contracts\/\$\{encodeURIComponent\(contractId\)\}\/preview`/)
+})

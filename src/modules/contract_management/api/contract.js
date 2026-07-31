@@ -175,6 +175,10 @@ export async function getContract(contractId) {
   return request(`/contracts/${contractId}`)
 }
 
+export async function previewContractDocument(contractId) {
+  return request(`/contracts/${encodeURIComponent(contractId)}/preview`)
+}
+
 export async function listApprovalTasks(params = {}) {
   const search = new URLSearchParams(params).toString()
   const data = await request(`/approvals/tasks${search ? `?${search}` : ''}`)

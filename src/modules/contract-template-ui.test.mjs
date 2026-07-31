@@ -25,3 +25,9 @@ test('sales contract creation renders and submits template-generated fields', ()
   assert.match(source, /templatePreviewRef\.value\?\.scrollIntoView/)
   assert.match(source, /templatePreviewError\.value = `请先填写/)
 })
+
+test('saved template contracts render formatted HTML instead of plain text', () => {
+  assert.match(source, /previewContractDocument\(contract\.recordId\)/)
+  assert.match(source, /v-else-if="selectedContractPreviewHTML"/)
+  assert.match(source, /v-html="selectedContractPreviewHTML"/)
+})
