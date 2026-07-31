@@ -12,6 +12,7 @@ import {
   deletePosition,
   createMembership,
   createUser,
+  createUsersBatch,
   listUsers,
 } from './iam.js'
 
@@ -55,6 +56,24 @@ test('createUser persists through the IAM API instead of mutating local-only row
     mobile: '13800000000',
     status: 'ACTIVE',
   })
+})
+
+test('createUsersBatch submits human-readable Chinese application and role names from CSV', async () => {
+  let requested
+  globalThis.fetch = async (url, options) => {
+    requested = { url, options }
+    return jsonResponse({ data: { items: [{ user_id: 'user-1' }], total: 1 } }, { status: 201 })
+  }
+
+  await createUsersBatch([{
+    displayName: '张三', email: null, mobile: null, status: 'ACTIVE',
+    applicationRoles: [{ applicationName: '合同管理系统', roleName: '销售人员' }],
+  }])
+
+  assert.equal(requested.url, '/api/v1/users/batch')
+  assert.deepEqual(JSON.parse(requested.options.body).items[0].application_roles, [
+    { application_name: '合同管理系统', role_name: '销售人员' },
+  ])
 })
 
 test('createEmployee sends the atomic employee contract to POST /employees', async () => {
