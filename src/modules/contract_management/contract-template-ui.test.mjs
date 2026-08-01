@@ -27,7 +27,8 @@ test('sales contract creation renders and submits template-generated fields', ()
 })
 
 test('admin can edit and delete templates while locked fields are read-only for other users', () => {
-  assert.match(source, /v-if="isAdmin"[\s\S]*编辑字段[\s\S]*删除/)
+  assert.match(source, /class="contract-template-actions"[\s\S]*>编辑<[\s\S]*>删除</)
+  assert.doesNotMatch(source, /<footer v-if="isAdmin"[\s\S]*editTemplate/)
   assert.match(source, /updateContractTemplate\(templateEditForm\.value\.id/)
   assert.match(source, /deleteContractTemplate\(item\.id\)/)
   assert.match(source, /:readonly="field\.locked && !isAdmin"/)

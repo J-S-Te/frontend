@@ -449,7 +449,6 @@ async function submitTemplateUpload() {
 }
 
 function editTemplate(item) {
-  if (!isAdmin.value) return
   templateEditForm.value = {
     id: item.id,
     name: item.name,
@@ -486,7 +485,7 @@ async function saveTemplate() {
 }
 
 async function removeTemplate(item) {
-  if (!isAdmin.value || !window.confirm(`确定删除合同模板“${item.name}”吗？已生成的合同不受影响。`)) return
+  if (!window.confirm(`确定删除合同模板“${item.name}”吗？已生成的合同不受影响。`)) return
   try {
     await deleteContractTemplate(item.id)
     contractTemplates.value = await listContractTemplates()
@@ -870,7 +869,7 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
             <article v-for="(item, index) in contractTemplates" :key="item.id">
               <div class="contract-template-cover" :class="['', 'purple', 'green', 'orange'][index % 4]"><span><ConsoleIcon name="save" /></span><i>DOCX</i></div>
               <div class="contract-template-copy"><span class="contract-badge success"><i></i>可用</span><h3>{{ item.name }}</h3><p>{{ item.original_filename }}</p><div><span>{{ item.fields?.length || 0 }} 个填写字段 · {{ item.fields?.filter((field) => field.locked).length || 0 }} 个管理员配置</span><span>{{ formatDate(item.created_at) }}</span></div></div>
-              <footer v-if="isAdmin"><button type="button" @click="editTemplate(item)">编辑字段</button><button class="danger" type="button" @click="removeTemplate(item)">删除</button></footer>
+              <footer class="contract-template-actions"><button type="button" @click="editTemplate(item)">编辑</button><button class="danger" type="button" @click="removeTemplate(item)">删除</button></footer>
             </article>
           </section>
           <div v-else class="contract-card contract-empty-state"><ConsoleIcon name="save" /><h3>暂无合同模板</h3><p>{{ isAdmin ? '点击右上角“上传模板”添加第一个 DOCX 模板。' : '超级管理员尚未上传合同模板。' }}</p></div>
