@@ -61,3 +61,12 @@ test('contract admin can access every contract module section', () => {
     assert.equal(canAccessContractSection(admin, section), true, section)
   }
 })
+
+test('contract section access recognizes roles returned as a role-code array', () => {
+  const admin = { roles: ['sales', 'admin'], role: { code: 'sales' }, permissions: [] }
+  const director = { roles: ['sales_director'], permissions: [] }
+  assert.equal(canAccessContractSection(admin, 'templates'), true)
+  assert.equal(canAccessContractSection(admin, 'rules'), true)
+  assert.equal(canAccessContractSection(director, 'rules'), true)
+  assert.equal(canAccessContractSection(director, 'signing'), false)
+})

@@ -30,6 +30,13 @@ async function readBody(response) {
   return contentType.includes('application/json') ? response.json() : response.text()
 }
 
+function userSafeErrorMessage(message) {
+  const text = typeof message === 'string' ? message.trim() : ''
+  if (!text) return ''
+  const exposesImplementation = /(https?:\/\/|\/api\/|\b(?:sql|http|json|uuid|trace[_ -]?id|request[_ -]?id|stack|panic)\b)/i.test(text)
+  return exposesImplementation ? '' : text
+}
+
 async function request(path, options = {}) {
   const hasFormDataBody = typeof FormData !== 'undefined' && options.body instanceof FormData
   const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -49,7 +56,13 @@ async function request(path, options = {}) {
       startContractLogin()
       throw new ContractAuthError()
     }
-    const error = new Error(body?.message || `HTTP ${response.status}`)
+    const fallbackMessages = {
+      400: '提交的内容有误，请检查后重试。',
+      403: '您没有执行此操作的权限。',
+      404: '未找到相关记录，它可能已被删除。',
+      409: '数据已发生变化，请刷新后重试。',
+    }
+    const error = new Error(userSafeErrorMessage(body?.message) || fallbackMessages[response.status] || '操作失败，请稍后重试。')
     error.status = response.status
     error.code = body?.code
     throw error
