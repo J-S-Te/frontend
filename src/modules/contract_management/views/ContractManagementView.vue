@@ -9,6 +9,7 @@ import {
   createApprovalRule,
   createContract,
   deleteApprovalRule,
+  deleteContractTemplate,
   getApproval,
   getContractSession,
   listApprovals,
@@ -21,6 +22,7 @@ import {
   previewContractDocument,
   submitContract,
   updateApprovalRule,
+  updateContractTemplate,
   uploadContractTemplate,
 } from '@/modules/contract_management/api/contract'
 import {
@@ -91,6 +93,9 @@ const ruleDialogOpen = ref(false)
 const templateUploadDialogOpen = ref(false)
 const templateUploading = ref(false)
 const templateUploadForm = ref({ name: '', file: null })
+const templateEditDialogOpen = ref(false)
+const templateSaving = ref(false)
+const templateEditForm = ref({ id: '', name: '', fields: [] })
 const templatePreviewHTML = ref('')
 const templatePreviewing = ref(false)
 const templatePreviewError = ref('')
@@ -440,6 +445,58 @@ async function submitTemplateUpload() {
     showToast(error?.message || '上传合同模板失败')
   } finally {
     templateUploading.value = false
+  }
+}
+
+function editTemplate(item) {
+  if (!isAdmin.value) return
+  templateEditForm.value = {
+    id: item.id,
+    name: item.name,
+    fields: (item.fields || []).map((field) => ({
+      name: field.name,
+      label: field.label,
+      default: field.default || '',
+      locked: Boolean(field.locked),
+    })),
+  }
+  templateEditDialogOpen.value = true
+}
+
+async function saveTemplate() {
+  templateSaving.value = true
+  try {
+    await updateContractTemplate(templateEditForm.value.id, {
+      name: templateEditForm.value.name.trim(),
+      fields: templateEditForm.value.fields.map((field) => ({
+        name: field.name,
+        label: field.label.trim(),
+        default: field.default.trim(),
+        locked: Boolean(field.locked),
+      })),
+    })
+    contractTemplates.value = await listContractTemplates()
+    templateEditDialogOpen.value = false
+    showToast('合同模板已更新')
+  } catch (error) {
+    showToast(error?.message || '更新合同模板失败')
+  } finally {
+    templateSaving.value = false
+  }
+}
+
+async function removeTemplate(item) {
+  if (!isAdmin.value || !window.confirm(`确定删除合同模板“${item.name}”吗？已生成的合同不受影响。`)) return
+  try {
+    await deleteContractTemplate(item.id)
+    contractTemplates.value = await listContractTemplates()
+    if (newContract.value.template_id === item.id) {
+      newContract.value.template_id = ''
+      selectContractTemplate()
+    }
+    showToast('合同模板已删除')
+  } catch (error) {
+    showToast(error?.message || '删除合同模板失败')
   }
 }
 
@@ -812,7 +869,8 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
           <section v-if="contractTemplates.length" class="contract-template-grid">
             <article v-for="(item, index) in contractTemplates" :key="item.id">
               <div class="contract-template-cover" :class="['', 'purple', 'green', 'orange'][index % 4]"><span><ConsoleIcon name="save" /></span><i>DOCX</i></div>
-              <div class="contract-template-copy"><span class="contract-badge success"><i></i>可用</span><h3>{{ item.name }}</h3><p>{{ item.original_filename }}</p><div><span>{{ item.fields?.length || 0 }} 个填写字段</span><span>{{ formatDate(item.created_at) }}</span></div></div>
+              <div class="contract-template-copy"><span class="contract-badge success"><i></i>可用</span><h3>{{ item.name }}</h3><p>{{ item.original_filename }}</p><div><span>{{ item.fields?.length || 0 }} 个填写字段 · {{ item.fields?.filter((field) => field.locked).length || 0 }} 个管理员配置</span><span>{{ formatDate(item.created_at) }}</span></div></div>
+              <footer v-if="isAdmin"><button type="button" @click="editTemplate(item)">编辑字段</button><button class="danger" type="button" @click="removeTemplate(item)">删除</button></footer>
             </article>
           </section>
           <div v-else class="contract-card contract-empty-state"><ConsoleIcon name="save" /><h3>暂无合同模板</h3><p>{{ isAdmin ? '点击右上角“上传模板”添加第一个 DOCX 模板。' : '超级管理员尚未上传合同模板。' }}</p></div>
@@ -869,7 +927,7 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
           </div>
           <div v-if="selectedContractTemplate" class="contract-generated-form">
             <div class="contract-section-title"><div><h3>填写模板字段</h3><p>{{ selectedContractTemplate.original_filename }}</p></div><button class="contract-button secondary small" type="button" :disabled="templatePreviewing" @click="previewNewContract">{{ templatePreviewing ? '正在生成预览…' : '预览合同' }}</button></div>
-            <div class="contract-template-field-grid"><label v-for="field in selectedContractTemplate.fields || []" :key="field.name"><span>{{ field.label }}</span><input v-model="newContract.template_values[field.name]" required :placeholder="field.default ? `默认：${field.default}` : `请输入${field.label}`" /></label></div>
+            <div class="contract-template-field-grid"><label v-for="field in selectedContractTemplate.fields || []" :key="field.name"><span>{{ field.label }}</span><input v-model="newContract.template_values[field.name]" required :readonly="field.locked && !isAdmin" :class="{ 'is-admin-configured': field.locked && !isAdmin }" :placeholder="field.default ? `默认：${field.default}` : `请输入${field.label}`" /><small v-if="field.locked && !isAdmin">该字段由管理员配置</small></label></div>
             <p v-if="templatePreviewError" class="contract-template-preview-error" role="alert">{{ templatePreviewError }}</p>
           </div>
           <label v-else class="contract-comment-label"><span>合同内容</span><textarea v-model="newContract.content" required placeholder="请输入合同内容"></textarea></label>
@@ -880,6 +938,8 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
     </div>
 
     <div v-if="templateUploadDialogOpen" class="contract-modal-mask" @click.self="templateUploadDialogOpen = false"><form class="contract-detail-modal contract-template-upload-modal" @submit.prevent="submitTemplateUpload"><header><div><span class="contract-badge info">超级管理员</span><h2>上传合同模板</h2><p>上传不超过 10MB 的 DOCX，模板中使用 <code v-pre>{{field_name:字段名称}}</code> 标记填写项。</p></div><button type="button" aria-label="关闭" @click="templateUploadDialogOpen = false"><ConsoleIcon name="close" /></button></header><section><div class="contract-form-grid"><label><span>模板名称</span><input v-model="templateUploadForm.name" required maxlength="160" placeholder="例如：标准服务合同" /></label><label><span>DOCX 文件</span><input required type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" @change="selectTemplateFile" /></label></div></section><footer><button class="contract-button secondary" type="button" :disabled="templateUploading" @click="templateUploadDialogOpen = false">取消</button><button class="contract-button primary" type="submit" :disabled="templateUploading">{{ templateUploading ? '正在上传…' : '上传模板' }}</button></footer></form></div>
+
+    <div v-if="templateEditDialogOpen" class="contract-modal-mask" @click.self="templateEditDialogOpen = false"><form class="contract-detail-modal contract-template-edit-modal" @submit.prevent="saveTemplate"><header><div><span class="contract-badge info">超级管理员</span><h2>编辑合同模板</h2><p>可修改字段显示名称、默认值，并将需要统一控制的字段设为管理员配置。</p></div><button type="button" aria-label="关闭" @click="templateEditDialogOpen = false"><ConsoleIcon name="close" /></button></header><section><label class="contract-template-name-field"><span>模板名称</span><input v-model="templateEditForm.name" required maxlength="160" /></label><div class="contract-template-editor-list"><div v-for="field in templateEditForm.fields" :key="field.name" class="contract-template-editor-row"><label><span>字段标识</span><input :value="field.name" readonly /></label><label><span>显示名称</span><input v-model="field.label" required /></label><label><span>{{ field.locked ? '管理员配置值' : '默认值（可选）' }}</span><input v-model="field.default" :required="field.locked" :placeholder="field.locked ? '请输入固定值' : '新建合同时仍可修改'" /></label><label class="contract-check-label"><input v-model="field.locked" type="checkbox" /><span>由管理员配置</span></label></div><p v-if="!templateEditForm.fields.length" class="contract-session-error">该 DOCX 中没有可配置字段。</p></div></section><footer><button class="contract-button secondary" type="button" :disabled="templateSaving" @click="templateEditDialogOpen = false">取消</button><button class="contract-button primary" type="submit" :disabled="templateSaving">{{ templateSaving ? '正在保存…' : '保存模板' }}</button></footer></form></div>
 
     <Transition name="contract-toast"><div v-if="toast" class="contract-toast"><ConsoleIcon name="save" />{{ toast }}</div></Transition>
   </div>

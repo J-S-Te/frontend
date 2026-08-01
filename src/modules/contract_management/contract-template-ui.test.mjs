@@ -26,6 +26,14 @@ test('sales contract creation renders and submits template-generated fields', ()
   assert.match(source, /templatePreviewError\.value = `请先填写/)
 })
 
+test('admin can edit and delete templates while locked fields are read-only for other users', () => {
+  assert.match(source, /v-if="isAdmin"[\s\S]*编辑字段[\s\S]*删除/)
+  assert.match(source, /updateContractTemplate\(templateEditForm\.value\.id/)
+  assert.match(source, /deleteContractTemplate\(item\.id\)/)
+  assert.match(source, /:readonly="field\.locked && !isAdmin"/)
+  assert.match(source, /该字段由管理员配置/)
+})
+
 test('saved template contracts render formatted HTML instead of plain text', () => {
   assert.match(source, /previewContractDocument\(contract\.recordId\)/)
   assert.match(source, /v-else-if="selectedContractPreviewHTML"/)

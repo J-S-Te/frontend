@@ -157,6 +157,19 @@ export async function uploadContractTemplate({ name, file }) {
   })
 }
 
+export async function updateContractTemplate(templateId, payload) {
+  return request(`/contract-templates/${encodeURIComponent(templateId)}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function deleteContractTemplate(templateId) {
+  return request(`/contract-templates/${encodeURIComponent(templateId)}`, {
+    method: 'DELETE',
+  })
+}
+
 export async function previewContractTemplate(templateId, values) {
   return request(`/contract-templates/${encodeURIComponent(templateId)}/preview`, {
     method: 'POST',
