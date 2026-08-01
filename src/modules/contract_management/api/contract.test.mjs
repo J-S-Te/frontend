@@ -45,6 +45,10 @@ test('saved contracts expose their formatted document preview', () => {
   assert.match(source, /`\/contracts\/\$\{encodeURIComponent\(contractId\)\}\/preview`/)
 })
 
+test('admin dashboard reads the tenant contract summary endpoint', () => {
+  assert.match(source, /getContractDashboard\(\)[\s\S]*request\('\/dashboard'\)/)
+})
+
 test('approval participants can request the formatted contract preview', () => {
   assert.match(source, /previewApprovalContract\(approvalId\)/)
   assert.match(source, /`\/approvals\/\$\{encodeURIComponent\(approvalId\)\}\/contract-preview`/)

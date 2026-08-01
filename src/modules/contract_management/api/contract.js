@@ -135,6 +135,10 @@ export async function listContracts(params = {}) {
   return Array.isArray(data) ? data : []
 }
 
+export async function getContractDashboard() {
+  return request('/dashboard')
+}
+
 export async function createContract(payload) {
   return request('/contracts', {
     method: 'POST',
