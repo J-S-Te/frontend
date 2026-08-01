@@ -204,9 +204,9 @@
 .contract-template-field-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin-top: 14px; }
 .contract-template-field-grid label { display: flex; min-width: 0; flex-direction: column; gap: 6px; }
 .contract-template-field-grid label span { color: var(--cm-secondary); font-size: 10px; font-weight: 600; }
-.contract-template-field-grid input { width: 100%; height: 36px; padding: 0 10px; color: var(--cm-text); font-size: 11px; outline: 0; border: 1px solid var(--cm-border); border-radius: 7px; background: #fff; }
-.contract-template-field-grid input:focus { border-color: #93c5fd; box-shadow: 0 0 0 3px rgba(37,99,235,.07); }
-.contract-template-field-grid input.is-admin-configured { color: var(--cm-secondary); cursor: not-allowed; border-color: #dbe3ee; background: #f1f5f9; }
+.contract-template-field-grid input,.contract-template-field-grid select { width: 100%; height: 36px; padding: 0 10px; color: var(--cm-text); font-size: 11px; outline: 0; border: 1px solid var(--cm-border); border-radius: 7px; background: #fff; }
+.contract-template-field-grid input:focus,.contract-template-field-grid select:focus { border-color: #93c5fd; box-shadow: 0 0 0 3px rgba(37,99,235,.07); }
+.contract-template-field-grid input.is-admin-configured,.contract-template-field-grid select.is-admin-configured { color: var(--cm-secondary); cursor: not-allowed; border-color: #dbe3ee; background:#f1f5f9;opacity:1; }
 .contract-template-field-grid label small { color: var(--cm-primary); font-size: 9px; }
 .contract-template-edit-modal { width: min(880px,calc(100vw - 32px)); }
 .contract-template-name-field,.contract-template-editor-row>label { display:flex;flex-direction:column;gap:6px;color:var(--cm-secondary);font-size:10px;font-weight:600; }
