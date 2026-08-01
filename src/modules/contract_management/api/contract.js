@@ -4,6 +4,7 @@ import { getCurrentPrincipal } from '@/modules/platform/auth/api/auth'
 
 const CONTRACT_PUBLIC_PATH_PREFIX = (import.meta.env.VITE_CONTRACT_PUBLIC_PATH_PREFIX || '/contract_management').replace(/\/$/, '')
 const API_BASE_URL = (import.meta.env.VITE_CONTRACT_API_BASE_URL || `${CONTRACT_PUBLIC_PATH_PREFIX}/api/v1`).replace(/\/$/, '')
+const CUSTOMER_API_BASE_URL = (import.meta.env.VITE_CUSTOMER_API_BASE_URL || '/customer_management/api/v1').replace(/\/$/, '')
 
 let currentSession = null
 let sessionRequest = null
@@ -157,6 +158,23 @@ export async function createContract(payload) {
     method: 'POST',
     body: JSON.stringify(payload),
   })
+}
+
+// 商机数据始终由客户与商机管理系统按当前登录人的数据权限过滤，合同系统不缓存全量商机。
+export async function listMyOpportunities(params = {}) {
+  const search = new URLSearchParams({ ...params, scope: 'mine' }).toString()
+  const response = await fetch(`${CUSTOMER_API_BASE_URL}/opportunities?${search}`, {
+    credentials: 'include',
+    headers: { Accept: 'application/json' },
+  })
+  const body = await readBody(response)
+  if (!response.ok) {
+    const error = new Error(userSafeErrorMessage(body?.message) || '读取可关联商机失败，请稍后重试。')
+    error.status = response.status
+    throw error
+  }
+  const data = body?.data ?? body
+  return Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : []
 }
 
 export async function listContractTemplates() {

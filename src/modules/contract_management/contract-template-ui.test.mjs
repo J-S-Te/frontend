@@ -31,7 +31,14 @@ test('admin can edit and delete templates while locked fields are read-only for 
   assert.match(source, /updateContractTemplate\(templateEditForm\.value\.id/)
   assert.match(source, /deleteContractTemplate\(item\.id\)/)
   assert.match(source, /:readonly="field\.locked && !isAdmin"/)
-  assert.match(source, /该字段由管理员配置/)
+  assert.match(source, /此项已由管理员预设/)
+  assert.match(source, /:title="field\.locked && !isAdmin \? '此项已由管理员预设' : undefined"/)
+})
+
+test('admin can edit the automatic contract number format on a template', () => {
+  assert.match(source, /v-model="templateEditForm\.number_format"/)
+  assert.match(source, /number_format: templateEditForm\.value\.number_format\.trim\(\)/)
+  assert.match(source, /必须包含 \{ID8\}/)
 })
 
 test('saved template contracts render formatted HTML instead of plain text', () => {
