@@ -39,6 +39,7 @@ const route = useRoute()
 const router = useRouter()
 const session = ref(null)
 const sessionError = ref('')
+const businessDataErrors = ref({})
 
 const sectionMeta = {
   dashboard: { title: '工作台', description: '合同全生命周期概览与重点事项提醒' },
@@ -112,7 +113,6 @@ const initiatedApprovals = ref([])
 const approvalTab = ref('tasks')
 const rules = ref([])
 const contractTemplates = ref([])
-const businessDataError = ref('')
 const businessDataLoading = ref(false)
 const approvalComment = ref('')
 const approvalDetail = ref(null)
@@ -224,6 +224,7 @@ const activeSection = computed(() => {
   const section = typeof route.params.section === 'string' ? route.params.section : 'dashboard'
   return sectionMeta[section] ? section : 'dashboard'
 })
+const businessDataError = computed(() => businessDataErrors.value[activeSection.value] || '')
 const pageMeta = computed(() => sectionMeta[activeSection.value])
 
 const filteredContracts = computed(() => {
@@ -475,27 +476,28 @@ function ruleConditionSummary(rule) {
 
 async function loadBusinessData() {
   businessDataLoading.value = true
-  businessDataError.value = ''
+  businessDataErrors.value = {}
   const requests = []
+  const addRequest = (label, sections, promise) => requests.push({ label, sections, promise })
   if (can('contract.read')) {
-    requests.push(getContractDashboard().then((summary) => { adminDashboard.value = summary }))
+    addRequest('合同统计', ['dashboard', 'reports'], getContractDashboard().then((summary) => { adminDashboard.value = summary }))
   } else {
     adminDashboard.value = null
   }
-  requests.push(listApprovals({ limit: 200 }).then((items) => { initiatedApprovals.value = items.map(normalizeApproval) }))
+  addRequest('我发起的审批', ['dashboard', 'approvals'], listApprovals({ limit: 200 }).then((items) => { initiatedApprovals.value = items.map(normalizeApproval) }))
   if (can('contract.read')) {
-    requests.push(listContracts({ limit: 200 }).then((items) => { contracts.value = items.map(normalizeContract) }))
+    addRequest('合同台账', ['dashboard', 'contracts', 'signing', 'reports'], listContracts({ limit: 200 }).then((items) => { contracts.value = items.map(normalizeContract) }))
   }
   if (can('approval.process')) {
-    requests.push(listApprovalTasks({ limit: 200 }).then((items) => { approvals.value = items.map(normalizeApproval) }))
+    addRequest('审批待办', ['dashboard', 'approvals'], listApprovalTasks({ limit: 200 }).then((items) => { approvals.value = items.map(normalizeApproval) }))
   }
   if (can('approval.view') || can('approval_rule.manage')) {
-    requests.push(listApprovalRules().then((items) => { rules.value = items }))
+    addRequest('审批规则', ['rules'], listApprovalRules().then((items) => { rules.value = items }))
   }
   if (can('contract.create') || isAdmin.value) {
-    requests.push(listContractTemplates().then((items) => { contractTemplates.value = items }))
+    addRequest('合同模板', ['templates', 'contracts'], listContractTemplates().then((items) => { contractTemplates.value = items }))
   }
-  const results = await Promise.allSettled(requests)
+  const results = await Promise.allSettled(requests.map((request) => request.promise))
   const failures = results.filter((result) => result.status === 'rejected')
   // API 客户端已在第一次 401 时发起单次 OIDC 跳转。页面不再把多个并发 401
   // 拼成重复的“登录状态无效”提示，避免跳转前出现误导性错误横幅。
@@ -503,9 +505,16 @@ async function loadBusinessData() {
     businessDataLoading.value = false
     return
   }
-  if (failures.length) {
-    businessDataError.value = failures.map((result) => result.reason?.message || '业务数据加载失败').join('；')
-  }
+  const nextErrors = {}
+  results.forEach((result, index) => {
+    if (result.status !== 'rejected') return
+    const request = requests[index]
+    for (const section of request.sections) {
+      const message = `${request.label}加载失败，请刷新重试。`
+      nextErrors[section] = nextErrors[section] ? `${nextErrors[section]}；${message}` : message
+    }
+  })
+  businessDataErrors.value = nextErrors
   businessDataLoading.value = false
 }
 

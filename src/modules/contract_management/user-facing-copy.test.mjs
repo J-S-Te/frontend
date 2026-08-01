@@ -25,6 +25,13 @@ test('request failures never fall back to an HTTP status string', () => {
   assert.match(apiSource, /操作失败，请稍后重试。/)
 })
 
+test('partial loading failures are limited to related business pages', () => {
+  assert.match(viewSource, /businessDataErrors\.value\[activeSection\.value\]/)
+  assert.match(viewSource, /addRequest\('合同统计', \['dashboard', 'reports'\]/)
+  assert.match(viewSource, /addRequest\('合同模板', \['templates', 'contracts'\]/)
+  assert.doesNotMatch(viewSource, /failures\.map\(\(result\) => result\.reason\?\.message/)
+})
+
 test('statistics render complete contract business details', () => {
   assert.match(viewSource, /<ContractReportsPanel/)
   assert.match(viewSource, /:contracts="reportContracts"/)
