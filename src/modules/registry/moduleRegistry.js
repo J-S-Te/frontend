@@ -12,6 +12,7 @@ import customerPortalModule from './customer_portal/module.js'
  */
 export const frontendModules = Object.freeze([
   platformModule,
+  projectManagementModule,
   contractManagementModule,
   customerOpportunityModule,
   customerPortalModule,

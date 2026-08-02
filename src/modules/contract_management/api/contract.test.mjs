@@ -34,7 +34,22 @@ test('contract template preview submits the generated field values', () => {
   assert.match(source, /body: JSON\.stringify\(\{ values \}\)/)
 })
 
+test('contract template management uses tenant-scoped resource routes', () => {
+  assert.match(source, /updateContractTemplate\(templateId, payload\)[\s\S]*method: 'PUT'/)
+  assert.match(source, /deleteContractTemplate\(templateId\)[\s\S]*method: 'DELETE'/)
+  assert.match(source, /encodeURIComponent\(templateId\)/)
+})
+
 test('saved contracts expose their formatted document preview', () => {
   assert.match(source, /previewContractDocument\(contractId\)/)
   assert.match(source, /`\/contracts\/\$\{encodeURIComponent\(contractId\)\}\/preview`/)
+})
+
+test('admin dashboard reads the tenant contract summary endpoint', () => {
+  assert.match(source, /getContractDashboard\(\)[\s\S]*request\('\/dashboard'\)/)
+})
+
+test('approval participants can request the formatted contract preview', () => {
+  assert.match(source, /previewApprovalContract\(approvalId\)/)
+  assert.match(source, /`\/approvals\/\$\{encodeURIComponent\(approvalId\)\}\/contract-preview`/)
 })

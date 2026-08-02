@@ -4,6 +4,7 @@ import { getCurrentPrincipal } from '@/modules/platform/auth/api/auth'
 
 const CONTRACT_PUBLIC_PATH_PREFIX = (import.meta.env.VITE_CONTRACT_PUBLIC_PATH_PREFIX || '/contract_management').replace(/\/$/, '')
 const API_BASE_URL = (import.meta.env.VITE_CONTRACT_API_BASE_URL || `${CONTRACT_PUBLIC_PATH_PREFIX}/api/v1`).replace(/\/$/, '')
+const CUSTOMER_API_BASE_URL = (import.meta.env.VITE_CUSTOMER_API_BASE_URL || '/customer_management/api/v1').replace(/\/$/, '')
 
 let currentSession = null
 let sessionRequest = null
@@ -30,6 +31,13 @@ async function readBody(response) {
   return contentType.includes('application/json') ? response.json() : response.text()
 }
 
+function userSafeErrorMessage(message) {
+  const text = typeof message === 'string' ? message.trim() : ''
+  if (!text) return ''
+  const exposesImplementation = /(https?:\/\/|\/api\/|\b(?:sql|http|json|uuid|trace[_ -]?id|request[_ -]?id|stack|panic)\b)/i.test(text)
+  return exposesImplementation ? '' : text
+}
+
 async function request(path, options = {}) {
   const hasFormDataBody = typeof FormData !== 'undefined' && options.body instanceof FormData
   const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -49,7 +57,13 @@ async function request(path, options = {}) {
       startContractLogin()
       throw new ContractAuthError()
     }
-    const error = new Error(body?.message || `HTTP ${response.status}`)
+    const fallbackMessages = {
+      400: '提交的内容有误，请检查后重试。',
+      403: '您没有执行此操作的权限。',
+      404: '未找到相关记录，它可能已被删除。',
+      409: '数据已发生变化，请刷新后重试。',
+    }
+    const error = new Error(userSafeErrorMessage(body?.message) || fallbackMessages[response.status] || '操作失败，请稍后重试。')
     error.status = response.status
     error.code = body?.code
     throw error
@@ -191,6 +205,23 @@ export async function createContract(payload) {
   })
 }
 
+// 商机数据始终由客户与商机管理系统按当前登录人的数据权限过滤，合同系统不缓存全量商机。
+export async function listMyOpportunities(params = {}) {
+  const search = new URLSearchParams({ ...params, scope: 'mine' }).toString()
+  const response = await fetch(`${CUSTOMER_API_BASE_URL}/opportunities?${search}`, {
+    credentials: 'include',
+    headers: { Accept: 'application/json' },
+  })
+  const body = await readBody(response)
+  if (!response.ok) {
+    const error = new Error(userSafeErrorMessage(body?.message) || '读取可关联商机失败，请稍后重试。')
+    error.status = response.status
+    throw error
+  }
+  const data = body?.data ?? body
+  return Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : []
+}
+
 export async function listContractTemplates() {
   const data = await request('/contract-templates')
   return Array.isArray(data) ? data : []
@@ -203,6 +234,19 @@ export async function uploadContractTemplate({ name, file }) {
   return request('/contract-templates', {
     method: 'POST',
     body: form,
+  })
+}
+
+export async function updateContractTemplate(templateId, payload) {
+  return request(`/contract-templates/${encodeURIComponent(templateId)}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function deleteContractTemplate(templateId) {
+  return request(`/contract-templates/${encodeURIComponent(templateId)}`, {
+    method: 'DELETE',
   })
 }
 
@@ -242,6 +286,10 @@ export async function listApprovals(params = {}) {
 
 export async function getApproval(approvalId) {
   return request(`/approvals/${approvalId}`)
+}
+
+export async function previewApprovalContract(approvalId) {
+  return request(`/approvals/${encodeURIComponent(approvalId)}/contract-preview`)
 }
 
 export async function commandApproval(approvalId, action, payload = {}) {

@@ -78,10 +78,10 @@ export function canAccessContractSection(session, section) {
   if (roleCode === 'admin') {
     return Object.hasOwn(CONTRACT_SECTION_PERMISSIONS, section)
   }
-  if (['sales_director', 'tech_director', 'finance_director'].includes(roleCode)) {
+  if (['sales_director', 'tech_director', 'finance_director'].some((roleCode) => roleCodes.has(roleCode))) {
     return ['dashboard', 'customers', 'contracts', 'approvals', 'rules', 'reports'].includes(section)
   }
-  if (roleCode === 'sales' && section === 'rules') return false
+  if (roleCodes.has('sales') && section === 'rules') return false
 
   const required = CONTRACT_SECTION_PERMISSIONS[section]
   if (!required) return false

@@ -18,6 +18,25 @@ test('未内置的已登记应用使用后端地址', () => {
   const cards = buildPortalSubsystems([{
     application_id: 'app-1',
     environment_id: 'env-1',
+    code: 'project_management',
+    name: '',
+    description: '',
+    environment: 'prod',
+    public_url: 'https://portal.example.com/project-management',
+  }])
+
+  assert.equal(cards.length, 2)
+  assert.equal(cards[1].name, '项目管理系统')
+  assert.equal(cards[1].description, '项目立项、计划、协作、进度、风险与归档管理')
+  assert.deepEqual(cards[1].route, { name: 'project_management', params: { section: 'dashboard' } })
+  assert.equal(cards[1].publicURL, '')
+  assert.equal(cards[1].source, 'application-registry')
+})
+
+test('未内置的已登记应用使用后端地址', () => {
+  const cards = buildPortalSubsystems([{
+    application_id: 'external-app',
+    environment_id: 'external-env',
     code: 'external-system',
     name: '外部业务系统',
     description: '由基础能力平台完成接入',

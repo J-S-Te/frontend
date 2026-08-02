@@ -8,7 +8,7 @@ import {
   contractRole,
   effectiveContractPermissions,
   hasContractPermission,
-} from './shared/authz/sys004.js'
+} from './sys004.js'
 
 test('SYS-004 frontend catalog includes the dedicated opportunity intake permissions', () => {
   assert.equal(CONTRACT_ROLE_DEFINITIONS.length, 6)
