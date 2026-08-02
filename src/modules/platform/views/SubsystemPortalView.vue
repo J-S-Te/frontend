@@ -5,7 +5,7 @@ import { AuthError, getCurrentPrincipal, logoutCurrentSession } from '@/modules/
 import { AUTHORIZATION_REFRESHED_EVENT } from '@/modules/platform/auth/utils/authorizationRefresh'
 import { ApplicationRegistryError, listPortalApplications } from '@/modules/platform/applications/api/applications'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
-import { buildPortalSubsystems } from '@/modules/moduleRegistry.js'
+import { buildPortalSubsystems } from '@/modules/registry/moduleRegistry.js'
 import {
   canAccessPlatformConsole,
   platformConsoleLandingRoute,

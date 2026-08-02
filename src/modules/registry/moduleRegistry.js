@@ -1,7 +1,8 @@
-import platformModule from './platform/module.js'
-import contractManagementModule from './contract_management/module.js'
-import customerOpportunityModule from './customer_opportunity/module.js'
-import customerPortalModule from './customer_portal/module.js'
+import platformModule from '../platform/module.js'
+import projectManagementModule from '../project_management/module.js'
+import contractManagementModule from '../contract_management/module.js'
+import customerOpportunityModule from '../customer_opportunity/module.js'
+import customerPortalModule from '../customer_portal/module.js'
 
 /**
  * 前端模块清单。

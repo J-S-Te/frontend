@@ -112,7 +112,6 @@ const opportunityIntakeConflictNotice = ref('')
 const opportunityIntakeReviewBlocked = ref(false)
 let opportunityIntakeLoadSequence = 0
 let opportunityIntakeDetailSequence = 0
-const businessDataError = ref('')
 const businessDataLoading = ref(false)
 const approvalComment = ref('')
 const approvalDetail = ref(null)

@@ -143,6 +143,10 @@ export async function ensureContractSession() {
   }
 }
 
+export function getContractDashboard() {
+  return request('/dashboard')
+}
+
 export async function listContracts(params = {}) {
   const search = new URLSearchParams(params).toString()
   const data = await request(`/contracts${search ? `?${search}` : ''}`)
