@@ -10,11 +10,13 @@ import {
   hasContractPermission,
 } from './shared/authz/sys004.js'
 
-test('SYS-004 frontend catalog contains six roles and twenty permissions', () => {
+test('SYS-004 frontend catalog includes the dedicated opportunity intake permissions', () => {
   assert.equal(CONTRACT_ROLE_DEFINITIONS.length, 6)
-  assert.equal(CONTRACT_PERMISSION_DEFINITIONS.length, 20)
+  assert.equal(CONTRACT_PERMISSION_DEFINITIONS.length, 22)
   assert.equal(CONTRACT_PERMISSION_DEFINITIONS.some(({ code }) => code === 'approval.manage'), true)
   assert.equal(CONTRACT_PERMISSION_DEFINITIONS.some(({ code }) => code === 'approval_rule.manage'), true)
+  assert.equal(CONTRACT_PERMISSION_DEFINITIONS.some(({ code }) => code === 'opportunity_intake.read'), true)
+  assert.equal(CONTRACT_PERMISSION_DEFINITIONS.some(({ code }) => code === 'opportunity_intake.process'), true)
 })
 
 test('contract role codes have Chinese display names', () => {
@@ -56,8 +58,13 @@ test('sales can track initiated approvals but cannot configure rules', () => {
 })
 
 test('contract admin can access every contract module section', () => {
-  const admin = { role: { code: 'admin' }, permissions: ['contract.read'] }
+  const admin = { role: { code: 'admin' }, permissions: ['contract.read', 'opportunity_intake.read'] }
   for (const section of Object.keys(CONTRACT_SECTION_PERMISSIONS)) {
     assert.equal(canAccessContractSection(admin, section), true, section)
   }
+})
+
+test('opportunity intake queue requires its dedicated backend permission even for a named admin role', () => {
+  assert.equal(canAccessContractSection({ role: { code: 'admin' }, permissions: ['contract.read'] }, 'intakes'), false)
+  assert.equal(canAccessContractSection({ role: { code: 'audit_admin' }, permissions: ['opportunity_intake.read'] }, 'intakes'), true)
 })

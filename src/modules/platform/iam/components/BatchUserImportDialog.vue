@@ -306,7 +306,7 @@ function selectValidOnly() {
 const selectedValidRows = computed(() => rows.filter((row) => row.selected && row.valid))
 
 // ---- 样例 CSV ----
-const SAMPLE_CSV = '姓名,邮箱,手机号,状态,应用角色\n张三,zhang.san@example.com,13800000000,启用,合同管理系统：销售人员\n李四,,13900000000,启用,合同管理系统：销售总监\n王五,wang.wu@example.com,,启用,\n赵六,zhao.liu@example.com,13500000000,停用,合同管理系统：审计管理员\n'
+const SAMPLE_CSV = '姓名,邮箱,手机号,状态,应用角色\n张三,zhang.san@example.com,13800000000,启用,\n李四,,13900000000,启用,\n王五,wang.wu@example.com,,启用,\n赵六,zhao.liu@example.com,13500000000,停用,合同管理系统：审计管理员\n'
 
 function downloadSample() {
   // 加上 UTF-8 BOM，方便 Excel 直接打开不乱码。
@@ -439,7 +439,7 @@ function formatFileSize(bytes) {
       <div v-if="step === 1" class="iam-batch-import-body">
         <p class="iam-form-alert iam-batch-import-guide">
           <ConsoleIcon name="info" />
-          <span>表头使用“姓名、邮箱、手机号、状态、应用角色”。状态填写“启用”或“停用”；应用角色填写“应用名称：角色名称”，多个角色用“|”分隔。单次最多 {{ BATCH_LIMIT }} 行。</span>
+          <span>表头使用“姓名、邮箱、手机号、状态、应用角色”。标准角色应通过任职关系和岗位授权模板自动获得；“应用角色”仅用于少量个人例外，可留空。单次最多 {{ BATCH_LIMIT }} 行。</span>
         </p>
 
         <div
@@ -474,7 +474,7 @@ function formatFileSize(bytes) {
         <div class="iam-batch-import-sample">
           <div class="iam-batch-import-sample-copy">
             <span class="iam-batch-import-sample-title"><ConsoleIcon name="info" /><strong>文件格式示例</strong></span>
-            <p>姓名必填，其他列可留空。应用和角色均填写页面中看到的中文名称，无需记忆英文编码；名称必须已同步到基础平台且不能重名。</p>
+            <p>姓名必填，其他列可留空。个人例外角色填写“应用名称：角色名称”，多个角色用“|”分隔；日常岗位角色不要写入 CSV。</p>
             <pre><code>{{ SAMPLE_CSV }}</code></pre>
           </div>
           <button class="console-button ghost small" type="button" @click="downloadSample">
@@ -597,7 +597,7 @@ function formatFileSize(bytes) {
           <h4>用户导入完成</h4>
           <p class="iam-form-alert success">
             <ConsoleIcon name="save" />
-            成功导入 <b>{{ submitResult.createdCount }}</b> / {{ submitResult.requestedCount }} 位用户。员工编号与基础平台“普通用户”角色由后端自动生成，CSV 中的应用角色已绑定并更新授权版本。
+            成功导入 <b>{{ submitResult.createdCount }}</b> / {{ submitResult.requestedCount }} 位用户。员工编号与基础平台“普通用户”角色由后端自动生成；CSV 中非空的应用角色按个人例外授权处理并更新授权版本。
           </p>
           <p class="iam-field-help">导入后可在“用户”列表刷新查看，也可在“登录账号”中按需补建本地账号。</p>
         </div>

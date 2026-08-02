@@ -9,9 +9,12 @@ import { previewPositionAuthorization } from '@/modules/platform/iam/api/positio
 import {
   buildEmployeeOnboardingPayload,
   defaultEmployeeOnboardingForm,
-  positionOptionsForOrganization,
   resolveOnboardingExpiresAt,
 } from '@/modules/platform/iam/utils/employeeOnboarding'
+import {
+  organizationSelectOptions,
+  positionsForOrganization,
+} from '@/modules/platform/iam/utils/selectionCatalog'
 import OnboardingPrerequisiteStep from '@/modules/platform/iam/components/OnboardingPrerequisiteStep.vue'
 
 const props = defineProps({
@@ -51,10 +54,6 @@ function entityId(item, ...keys) {
   return keys.map((key) => item?.[key]).find(Boolean) || ''
 }
 
-function organizationId(item) {
-  return entityId(item, 'org_unit_id', 'id')
-}
-
 function positionId(item) {
   return entityId(item, 'position_id', 'id')
 }
@@ -63,7 +62,8 @@ function positionName(item) {
   return item?.name || item?.position_name || item?.code || positionId(item)
 }
 
-const membershipPositions = computed(() => positionOptionsForOrganization(props.positions, form.org_unit_id))
+const organizationOptions = computed(() => organizationSelectOptions(props.organizations))
+const membershipPositions = computed(() => positionsForOrganization(props.positions, form.org_unit_id))
 const selectedPosition = computed(() => membershipPositions.value.find((item) => positionId(item) === form.position_id) || null)
 const previewRoles = computed(() => Array.isArray(authorizationPreview.value?.roles) ? authorizationPreview.value.roles : [])
 const previewConflicts = computed(() => Array.isArray(authorizationPreview.value?.conflicts) ? authorizationPreview.value.conflicts : [])
@@ -328,7 +328,7 @@ async function submit() {
               <label class="console-wizard-toggle"><input v-model="form.create_membership" type="checkbox" /><span>同时建立</span></label>
             </div>
             <div v-if="form.create_membership" class="console-form-grid">
-              <label class="console-form-item"><span>所属组织 *</span><select v-model="form.org_unit_id" required><option value="">请选择组织</option><option v-for="item in organizations" :key="organizationId(item)" :value="organizationId(item)">{{ item.name }} · {{ item.code || organizationId(item) }}</option></select></label>
+              <label class="console-form-item"><span>所属组织 *</span><select v-model="form.org_unit_id" required><option value="">请选择组织</option><option v-for="item in organizationOptions" :key="item.option_id" :value="item.option_id">{{ item.option_label }}</option></select></label>
               <label class="console-form-item"><span>岗位 *</span><select v-model="form.position_id" :disabled="!form.org_unit_id || !membershipPositions.length" required><option value="">{{ !form.org_unit_id ? '请先选择组织' : (membershipPositions.length ? '请选择岗位' : '当前组织暂无岗位') }}</option><option v-for="item in membershipPositions" :key="positionId(item)" :value="positionId(item)">{{ positionName(item) }}</option></select><small v-if="form.org_unit_id && !membershipPositions.length" class="console-wizard-field-help">当前组织暂无岗位，请先在“岗位”中创建。</small></label>
               <label class="console-form-item"><span>任职类型 *</span><select v-model="form.membership_type"><option value="PRIMARY">主组织</option><option value="SECONDARY">次组织 / 兼岗</option></select></label>
               <label class="console-form-item"><span>生效方式 *</span><select v-model="form.membership_validity_mode"><option value="LONG_TERM">长期生效</option><option value="SHORT_TERM">短期生效</option></select></label>

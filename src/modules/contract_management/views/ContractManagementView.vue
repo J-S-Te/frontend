@@ -10,17 +10,26 @@ import {
   deleteApprovalRule,
   getApproval,
   getContractSession,
+  getOpportunityIntake,
   listApprovals,
   listApprovalRules,
   listApprovalTasks,
   listContractTemplates,
   listContracts,
+  listOpportunityIntakes,
   previewContractTemplate,
   previewContractDocument,
   submitContract,
+  reviewOpportunityIntake,
   updateApprovalRule,
   uploadContractTemplate,
 } from '@/modules/contract_management/api/contract'
+import {
+  ensureStableReviewAttempt,
+  isOpportunityIntakeIdempotencyConflict,
+  isOpportunityIntakeVersionConflict,
+  opportunityIntakeStatus,
+} from '@/modules/contract_management/utils/opportunityIntakeReview'
 import {
   CONTRACT_ROLE_DEFINITIONS,
   canAccessContractSection,
@@ -36,6 +45,7 @@ const sessionError = ref('')
 
 const sectionMeta = {
   dashboard: { title: '工作台', description: '合同全生命周期概览与重点事项提醒' },
+  intakes: { title: '签单关联核对', description: '人工核对 CRM 签单上下文与既有合同引用，不创建合同' },
   customers: { title: '客户查询', description: '查询客户主数据与历史合作情况' },
   contracts: { title: '合同台账', description: '统一管理合同版本、状态、金额与关键日期' },
   templates: { title: '合同模板', description: '标准模板、适用范围与版本管理' },
@@ -50,6 +60,7 @@ const navGroupDefinitions = [
     label: '业务中心',
     items: [
       { key: 'dashboard', label: '工作台', icon: 'dashboard' },
+      { key: 'intakes', label: '签单关联核对', icon: 'audit' },
       { key: 'customers', label: '客户查询', icon: 'user' },
       { key: 'contracts', label: '合同台账', icon: 'account' },
       { key: 'templates', label: '合同模板', icon: 'save' },
@@ -71,6 +82,23 @@ const approvals = ref([])
 const initiatedApprovals = ref([])
 const rules = ref([])
 const contractTemplates = ref([])
+const opportunityIntakes = ref([])
+const opportunityIntakeFilter = ref('ACCEPTED')
+const opportunityIntakeLoading = ref(false)
+const opportunityIntakeLoadingMore = ref(false)
+const opportunityIntakeError = ref('')
+const opportunityIntakeNextCursor = ref('')
+const opportunityIntakeHasMore = ref(false)
+const selectedOpportunityIntake = ref(null)
+const opportunityIntakeDetailLoading = ref(false)
+const opportunityIntakeDecision = ref('LINK_CONFIRMED')
+const opportunityIntakeReason = ref('')
+const opportunityIntakeReviewBusy = ref(false)
+const opportunityIntakeReviewAttempt = ref(null)
+const opportunityIntakeConflictNotice = ref('')
+const opportunityIntakeReviewBlocked = ref(false)
+let opportunityIntakeLoadSequence = 0
+let opportunityIntakeDetailSequence = 0
 const businessDataError = ref('')
 const businessDataLoading = ref(false)
 const approvalComment = ref('')
@@ -248,6 +276,14 @@ function formatDate(value) {
   return Number.isNaN(date.getTime()) ? String(value) : new Intl.DateTimeFormat('zh-CN').format(date)
 }
 
+function formatDateTime(value) {
+  if (!value) return '—'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? String(value) : new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).format(date)
+}
+
 function normalizeContract(item) {
   return {
     recordId: item.id,
@@ -339,7 +375,9 @@ async function loadBusinessData() {
   businessDataLoading.value = true
   businessDataError.value = ''
   const requests = []
-  requests.push(listApprovals({ limit: 200 }).then((items) => { initiatedApprovals.value = items.map(normalizeApproval) }))
+  if (can('approval.view') || can('approval.process') || can('contract.create')) {
+    requests.push(listApprovals({ limit: 200 }).then((items) => { initiatedApprovals.value = items.map(normalizeApproval) }))
+  }
   if (can('contract.read')) {
     requests.push(listContracts({ limit: 200 }).then((items) => { contracts.value = items.map(normalizeContract) }))
   }
@@ -351,6 +389,9 @@ async function loadBusinessData() {
   }
   if (can('contract.create') || isAdmin.value) {
     requests.push(listContractTemplates().then((items) => { contractTemplates.value = items }))
+  }
+  if (can('opportunity_intake.read')) {
+    requests.push(loadOpportunityIntakes())
   }
   const results = await Promise.allSettled(requests)
   const failures = results.filter((result) => result.status === 'rejected')
@@ -364,6 +405,142 @@ async function loadBusinessData() {
     businessDataError.value = failures.map((result) => result.reason?.message || '业务数据加载失败').join('；')
   }
   businessDataLoading.value = false
+}
+
+async function loadOpportunityIntakes({ append = false } = {}) {
+  if (append && (!opportunityIntakeHasMore.value || !opportunityIntakeNextCursor.value)) return
+  const sequence = ++opportunityIntakeLoadSequence
+  if (append) opportunityIntakeLoadingMore.value = true
+  else {
+    opportunityIntakeLoading.value = true
+    opportunityIntakeLoadingMore.value = false
+  }
+  opportunityIntakeError.value = ''
+  try {
+    const params = { page_size: 50 }
+    if (opportunityIntakeFilter.value) params.status = opportunityIntakeFilter.value
+    if (append && opportunityIntakeNextCursor.value) params.cursor = opportunityIntakeNextCursor.value
+    const page = await listOpportunityIntakes(params)
+    if (sequence === opportunityIntakeLoadSequence) {
+      opportunityIntakes.value = append ? [...opportunityIntakes.value, ...page.items] : page.items
+      opportunityIntakeNextCursor.value = page.next_cursor
+      opportunityIntakeHasMore.value = page.has_more
+    }
+  } catch (error) {
+    if (sequence === opportunityIntakeLoadSequence) opportunityIntakeError.value = error?.message || '读取签单关联核对队列失败'
+  } finally {
+    if (sequence === opportunityIntakeLoadSequence) {
+      opportunityIntakeLoading.value = false
+      opportunityIntakeLoadingMore.value = false
+    }
+  }
+}
+
+function changeOpportunityIntakeFilter() {
+  opportunityIntakeLoadSequence += 1
+  opportunityIntakes.value = []
+  opportunityIntakeNextCursor.value = ''
+  opportunityIntakeHasMore.value = false
+  loadOpportunityIntakes()
+}
+
+async function openOpportunityIntake(item) {
+  const sequence = ++opportunityIntakeDetailSequence
+  selectedOpportunityIntake.value = item
+  opportunityIntakeDetailLoading.value = true
+  opportunityIntakeConflictNotice.value = ''
+  opportunityIntakeReviewAttempt.value = null
+  opportunityIntakeReviewBlocked.value = false
+  opportunityIntakeDecision.value = 'LINK_CONFIRMED'
+  opportunityIntakeReason.value = ''
+  try {
+    const detail = await getOpportunityIntake(item.intake_id)
+    if (sequence === opportunityIntakeDetailSequence && selectedOpportunityIntake.value?.intake_id === item.intake_id) {
+      selectedOpportunityIntake.value = detail
+    }
+  } catch (error) {
+    if (sequence === opportunityIntakeDetailSequence) showToast(error?.message || '读取签单关联详情失败')
+  } finally {
+    if (sequence === opportunityIntakeDetailSequence) opportunityIntakeDetailLoading.value = false
+  }
+}
+
+function closeOpportunityIntake() {
+  if (opportunityIntakeReviewBusy.value) return
+  opportunityIntakeDetailSequence += 1
+  selectedOpportunityIntake.value = null
+  opportunityIntakeReason.value = ''
+  opportunityIntakeReviewAttempt.value = null
+  opportunityIntakeConflictNotice.value = ''
+  opportunityIntakeReviewBlocked.value = false
+}
+
+async function refreshSelectedOpportunityIntake() {
+  const intakeId = selectedOpportunityIntake.value?.intake_id
+  if (!intakeId) return
+  selectedOpportunityIntake.value = await getOpportunityIntake(intakeId)
+}
+
+async function submitOpportunityIntakeReview() {
+  const item = selectedOpportunityIntake.value
+  const reason = opportunityIntakeReason.value.trim()
+  if (!item || item.status !== 'ACCEPTED' || !can('opportunity_intake.process')) return
+  if (!reason) {
+    showToast('请填写可审计的核对说明。')
+    return
+  }
+  const command = {
+    intakeId: item.intake_id,
+    decision: opportunityIntakeDecision.value,
+    reason,
+    version: item.version,
+  }
+  try {
+    opportunityIntakeReviewAttempt.value = ensureStableReviewAttempt(opportunityIntakeReviewAttempt.value, command)
+  } catch (error) {
+    showToast(error?.message || '无法生成安全的幂等键')
+    return
+  }
+  opportunityIntakeReviewBusy.value = true
+  opportunityIntakeConflictNotice.value = ''
+  try {
+    const reviewed = await reviewOpportunityIntake(item.intake_id, {
+      decision: command.decision,
+      reason: command.reason,
+      version: command.version,
+    }, opportunityIntakeReviewAttempt.value.key)
+    selectedOpportunityIntake.value = reviewed
+    const visibleAfterReview = !opportunityIntakeFilter.value || opportunityIntakeFilter.value === reviewed.status
+    opportunityIntakes.value = visibleAfterReview
+      ? opportunityIntakes.value.map((entry) => entry.intake_id === reviewed.intake_id ? reviewed : entry)
+      : opportunityIntakes.value.filter((entry) => entry.intake_id !== reviewed.intake_id)
+    opportunityIntakeReviewAttempt.value = null
+    showToast(opportunityIntakeStatus(reviewed.status).label)
+  } catch (error) {
+    // 409 是服务端已经明确拒绝的命令，可以刷新版本并在下一次提交时创建新键。
+    // 网络或 5xx 的结果可能不确定，保留本页面 attempt，重试仍使用原键。
+    if (isOpportunityIntakeIdempotencyConflict(error)) {
+      opportunityIntakeReviewAttempt.value = null
+      opportunityIntakeReviewBlocked.value = true
+      opportunityIntakeConflictNotice.value = '本页面的幂等键与其他处理命令冲突，已停止提交。请关闭详情后重新打开并再次核对。'
+    } else if (isOpportunityIntakeVersionConflict(error)) {
+      opportunityIntakeReviewAttempt.value = null
+      try {
+        await refreshSelectedOpportunityIntake()
+        opportunityIntakeConflictNotice.value = error.code === 'CON_VERSION_CONFLICT'
+          ? '数据版本已变化，本次核对未提交。已刷新最新状态，请重新确认。'
+          : '该记录已被其他操作处理。已刷新最新状态，不能重复核对。'
+      } catch (refreshError) {
+        opportunityIntakeConflictNotice.value = refreshError?.message || '数据已变化，但刷新最新状态失败。请关闭后重新打开。'
+      }
+    } else if (!error?.status || error.status >= 500) {
+      showToast(`${error?.message || '核对提交失败'}；可直接重试，页面将复用同一幂等键。`)
+    } else {
+      showToast(error?.message || '核对提交被拒绝，请核对权限和输入。')
+    }
+  } finally {
+    opportunityIntakeReviewBusy.value = false
+  }
 }
 
 function selectTemplateFile(event) {
@@ -737,6 +914,16 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
           </section>
         </template>
 
+        <template v-else-if="activeSection === 'intakes'">
+          <div class="contract-info-banner"><ConsoleIcon name="info" /><span>这里仅核对 CRM 已投递的签单上下文是否正确关联到既有合同引用。核对不会创建合同、修改合同状态或启动审批。</span></div>
+          <div class="contract-filter-bar">
+            <label><span>核对状态</span><select v-model="opportunityIntakeFilter" @change="changeOpportunityIntakeFilter"><option value="">全部状态</option><option value="ACCEPTED">待核对</option><option value="LINK_CONFIRMED">关联已确认</option><option value="LINK_EXCEPTION">关联异常</option></select></label>
+            <button class="contract-button primary small" type="button" :disabled="opportunityIntakeLoading" @click="loadOpportunityIntakes"><ConsoleIcon name="reset" />{{ opportunityIntakeLoading ? '正在刷新…' : '刷新队列' }}</button>
+          </div>
+          <p v-if="opportunityIntakeError" class="contract-session-error" role="alert">{{ opportunityIntakeError }}</p>
+          <div class="contract-table-card"><div class="contract-table-scroll"><table class="contract-data-table contract-intake-table"><thead><tr><th>商机编号</th><th>客户 ID</th><th>既有合同引用</th><th>预计金额</th><th>签单发生时间</th><th>状态</th><th>版本</th><th>操作</th></tr></thead><tbody><tr v-for="item in opportunityIntakes" :key="item.intake_id"><td><strong>{{ item.opportunity_no }}</strong><small>{{ item.opportunity_id }}</small></td><td>{{ item.customer_id }}</td><td>{{ item.contract_ref }}</td><td class="amount">{{ formatAmount(Number(item.expected_amount || 0)) }}</td><td>{{ formatDateTime(item.occurred_at) }}</td><td><span class="contract-badge" :class="opportunityIntakeStatus(item.status).tone"><i></i>{{ opportunityIntakeStatus(item.status).label }}</span></td><td>V{{ item.version }}</td><td><button class="contract-text-button" type="button" @click="openOpportunityIntake(item)">{{ item.status === 'ACCEPTED' && can('opportunity_intake.process') ? '查看并核对' : '查看详情' }}</button></td></tr><tr v-if="!opportunityIntakeLoading && !opportunityIntakes.length"><td colspan="8" class="contract-empty">当前筛选条件下没有签单关联核对记录</td></tr></tbody></table></div><footer class="contract-table-footer"><span>已加载 {{ opportunityIntakes.length }} 条</span><button v-if="opportunityIntakeHasMore" class="contract-button secondary small" type="button" :disabled="opportunityIntakeLoadingMore" @click="loadOpportunityIntakes({ append: true })">{{ opportunityIntakeLoadingMore ? '正在加载…' : '加载更多' }}</button><span v-else-if="opportunityIntakes.length">已加载全部当前结果</span></footer></div>
+        </template>
+
         <template v-else-if="activeSection === 'customers'">
           <div class="contract-card contract-empty-state"><ConsoleIcon name="user" /><h3>暂无客户数据</h3><p>合同后端尚未提供客户查询接口。</p></div>
         </template>
@@ -778,6 +965,21 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
         </template>
       </section>
     </main>
+
+    <div v-if="selectedOpportunityIntake" class="contract-modal-mask" @click.self="closeOpportunityIntake">
+      <article class="contract-detail-modal contract-intake-modal"><header><div><span class="contract-badge" :class="opportunityIntakeStatus(selectedOpportunityIntake.status).tone"><i></i>{{ opportunityIntakeStatus(selectedOpportunityIntake.status).label }}</span><h2>{{ selectedOpportunityIntake.opportunity_no }}</h2><p>接收记录 {{ selectedOpportunityIntake.intake_id }} · V{{ selectedOpportunityIntake.version }}</p></div><button type="button" aria-label="关闭" @click="closeOpportunityIntake"><ConsoleIcon name="close" /></button></header>
+        <div v-if="opportunityIntakeDetailLoading" class="contract-modal-loading">正在读取签单关联详情…</div>
+        <template v-else>
+          <div class="contract-detail-highlight"><div><span>预计金额</span><strong>{{ formatAmount(Number(selectedOpportunityIntake.expected_amount || 0)) }}</strong></div><div><span>客户 ID</span><strong>{{ selectedOpportunityIntake.customer_id }}</strong></div><div><span>既有合同引用</span><strong>{{ selectedOpportunityIntake.contract_ref }}</strong></div></div>
+          <section><h3>签单上下文</h3><dl><div><dt>商机 ID</dt><dd>{{ selectedOpportunityIntake.opportunity_id }}</dd></div><div><dt>签单事件版本</dt><dd>V{{ selectedOpportunityIntake.event_version }}</dd></div><div><dt>事件 ID</dt><dd>{{ selectedOpportunityIntake.event_id }}</dd></div><div><dt>签单发生时间</dt><dd>{{ formatDateTime(selectedOpportunityIntake.occurred_at) }}</dd></div><div><dt>合同系统接收时间</dt><dd>{{ formatDateTime(selectedOpportunityIntake.accepted_at) }}</dd></div><div><dt>当前数据版本</dt><dd>V{{ selectedOpportunityIntake.version }}</dd></div></dl></section>
+          <p v-if="opportunityIntakeConflictNotice" class="contract-session-error" role="alert">{{ opportunityIntakeConflictNotice }}</p>
+          <section v-if="selectedOpportunityIntake.status === 'ACCEPTED' && can('opportunity_intake.process')"><h3>人工核对结论</h3><p class="contract-intake-boundary">请先在权威系统中核对客户、商机和既有合同引用。选择“关联已确认”会保存不可变核对证据并建立既有合同与 CRM 客户、商机的权威关联；选择“关联异常”只保存异常证据。两种结论都不会创建合同、修改合同状态或启动审批。</p><form class="contract-intake-review" @submit.prevent="submitOpportunityIntakeReview"><label><span>核对结论</span><select v-model="opportunityIntakeDecision" :disabled="opportunityIntakeReviewBusy || opportunityIntakeReviewBlocked"><option value="LINK_CONFIRMED">关联已确认</option><option value="LINK_EXCEPTION">关联异常</option></select></label><label><span>核对说明</span><textarea v-model="opportunityIntakeReason" required maxlength="500" :disabled="opportunityIntakeReviewBusy || opportunityIntakeReviewBlocked" placeholder="请填写核对依据或异常原因（最多 500 字）"></textarea><small>{{ opportunityIntakeReason.trim().length }} / 500</small></label><button class="contract-button primary" type="submit" :disabled="opportunityIntakeReviewBusy || opportunityIntakeReviewBlocked || !opportunityIntakeReason.trim()">{{ opportunityIntakeReviewBusy ? '正在保存核对结论…' : opportunityIntakeReviewBlocked ? '已停止提交，请关闭后重试' : '确认提交核对结论' }}</button></form></section>
+          <section v-else-if="selectedOpportunityIntake.status !== 'ACCEPTED'"><h3>处理记录</h3><dl><div><dt>核对人</dt><dd>{{ selectedOpportunityIntake.reviewer_display_name || selectedOpportunityIntake.reviewed_by || '—' }}</dd></div><div><dt>核对时间</dt><dd>{{ formatDateTime(selectedOpportunityIntake.reviewed_at) }}</dd></div><div class="contract-intake-reason"><dt>核对说明</dt><dd>{{ selectedOpportunityIntake.review_reason || '—' }}</dd></div></dl></section>
+          <section v-else><p class="contract-intake-boundary">当前账号只有查看权限，不能提交核对结论。</p></section>
+        </template>
+        <footer><button class="contract-button secondary" type="button" :disabled="opportunityIntakeReviewBusy" @click="closeOpportunityIntake">关闭</button></footer>
+      </article>
+    </div>
 
     <div v-if="selectedContract" class="contract-modal-mask" @click.self="closeContract">
       <article class="contract-detail-modal contract-document-modal"><header><div><span class="contract-badge" :class="statusTone(selectedContract.status)"><i></i>{{ selectedContract.status }}</span><h2>{{ selectedContract.name }}</h2><p>{{ selectedContract.id }}</p></div><button type="button" aria-label="关闭" @click="closeContract"><ConsoleIcon name="close" /></button></header><div class="contract-detail-highlight"><div><span>合同金额</span><strong>{{ formatAmount(selectedContract.amount) }}</strong></div><div><span>数据版本</span><strong>{{ selectedContract.version }}</strong></div><div><span>负责人姓名</span><strong>{{ selectedContract.owner }}</strong></div></div><section><h3>基本信息</h3><dl><div><dt>合同类型</dt><dd>{{ selectedContract.type }}</dd></div><div><dt>服务类型</dt><dd>{{ selectedContract.serviceType }}</dd></div><div><dt>创建日期</dt><dd>{{ selectedContract.createdAt }}</dd></div><div><dt>到期日期</dt><dd>{{ selectedContract.endDate }}</dd></div></dl></section><section><h3>合同内容</h3><div v-if="selectedContractPreviewLoading" class="contract-modal-loading">正在读取格式化合同…</div><p v-else-if="selectedContractPreviewError" class="contract-session-error">{{ selectedContractPreviewError }}</p><div v-else-if="selectedContractPreviewHTML" class="contract-document-preview contract-saved-document-preview"><div v-html="selectedContractPreviewHTML"></div></div><p v-else class="contract-approval-summary">{{ selectedContract.content || '未填写合同内容' }}</p><label v-if="selectedContract.status === '草稿' && can('contract.create')" class="contract-check-label"><input v-model="termsIdentical" type="checkbox" /><span>本合同条款与关联历史合同一致（参与审批规则匹配）</span></label></section><footer><button class="contract-button secondary" type="button" @click="closeContract">关闭</button><button v-if="selectedContract.status === '草稿' && can('contract.create')" class="contract-button primary" type="button" :disabled="submittingContract" @click="submitSelectedContract">{{ submittingContract ? '正在提交…' : '提交审批' }}</button></footer></article>

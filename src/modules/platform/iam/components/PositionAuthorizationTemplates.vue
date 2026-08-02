@@ -12,6 +12,11 @@ import { positionAuthorizationTargetCatalog } from '@/modules/platform/iam/utils
 import { hasPermission } from '@/modules/platform/auth/utils/principal'
 import { IAM_PERMISSIONS } from '@/modules/platform/iam/utils/iamPermissions'
 import {
+  authorizationPositionGroupLabel,
+  authorizationPositionOptionLabel,
+  groupAuthorizationPositions,
+} from '@/modules/platform/iam/utils/selectionCatalog'
+import {
   createPositionAuthorizationTemplate,
   deletePositionAuthorizationTemplate,
   listPositionAuthorizationTemplateAssignments,
@@ -75,6 +80,7 @@ function roleName(role) { return role?.name || role?.role_name || role?.code || 
 function appName(app) { return app?.name || app?.application_name || app?.code || applicationId(app) }
 function templateRoles(template) { return items(template?.roles) }
 const activeTemplates = computed(() => templates.value.filter((template) => String(template?.status || '').toUpperCase() === 'ACTIVE'))
+const positionGroups = computed(() => groupAuthorizationPositions(positions.value))
 
 async function load() {
   if (!canReadAuthorization.value) return
@@ -365,7 +371,13 @@ onMounted(() => {
             <select v-model="selectedPositionId" class="iam-template-position-select">
               <option value="" disabled>请选择岗位</option>
               <option v-if="!positions.length" value="" disabled>暂无可映射岗位</option>
-              <option v-for="position in positions" :key="positionId(position)" :value="positionId(position)">{{ positionName(position) }}</option>
+              <optgroup
+                v-for="group in positionGroups"
+                :key="group.organization_id || group.organization_name"
+                :label="authorizationPositionGroupLabel(group)"
+              >
+                <option v-for="position in group.positions" :key="positionId(position)" :value="positionId(position)">{{ authorizationPositionOptionLabel(position) }}</option>
+              </optgroup>
             </select>
           </label>
           <button v-if="canManageAuthorization" class="console-button primary small" type="button" :disabled="saving || !selectedPositionId" @click="saveAssignments"><ConsoleIcon name="save" />保存岗位映射</button>

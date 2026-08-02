@@ -5,6 +5,7 @@ import { AuthError, getCurrentPrincipal } from '@/modules/platform/auth/api/auth
 import { createSessionLifecycle } from '@/modules/platform/auth/utils/sessionLifecycle'
 import {
   AUTHORIZATION_REFRESH_INTERVAL_MS,
+  clearAuthorizationSnapshot,
   dispatchAuthorizationRefreshed,
   principalFingerprint,
 } from '@/modules/platform/auth/utils/authorizationRefresh'
@@ -13,6 +14,7 @@ const route = useRoute()
 const router = useRouter()
 const lifecycle = createSessionLifecycle({
   onSessionEnded: () => {
+    clearAuthorizationSnapshot()
     if (route.name !== 'login') {
       void router.replace({ name: 'login', query: { reason: 'session-ended' } })
     }
@@ -68,6 +70,7 @@ async function synchronizeProtectedSession(requiresAuth) {
     lifecycle.stop()
     stopAuthorizationRefresh()
     latestPrincipalFingerprint = ''
+    clearAuthorizationSnapshot()
     return
   }
   if (loading) return

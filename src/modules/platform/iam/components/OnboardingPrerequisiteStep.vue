@@ -8,6 +8,7 @@ import {
 } from '@/modules/platform/iam/api/iam'
 import { listPositionAuthorizationTargets } from '@/modules/platform/iam/api/positionAuthorization'
 import { createApplication } from '@/modules/platform/applications/api/applications'
+import { organizationSelectOptions } from '@/modules/platform/iam/utils/selectionCatalog'
 
 const props = defineProps({
   organizations: { type: Array, default: () => [] },
@@ -36,6 +37,7 @@ const formError = ref('')
 
 const organizationCount = computed(() => props.organizations.length)
 const positionCount = computed(() => props.positions.length)
+const organizationOptions = computed(() => organizationSelectOptions(props.organizations))
 
 const organizationReady = computed(() => organizationCount.value > 0)
 const positionReady = computed(() => positionCount.value > 0)
@@ -71,8 +73,8 @@ async function loadAppCatalog() {
 function openForm(kind) {
   formError.value = ''
   activeForm.value = kind
-  if (kind === 'position' && !positionForm.orgUnitId && props.organizations.length) {
-    positionForm.orgUnitId = props.organizations[0]?.org_unit_id || props.organizations[0]?.id || ''
+  if (kind === 'position' && !positionForm.orgUnitId && organizationOptions.value.length) {
+    positionForm.orgUnitId = organizationOptions.value[0].option_id
   }
 }
 
@@ -202,12 +204,12 @@ watch(() => [props.organizations.length, props.positions.length, props.applicati
             <span>上级组织（留空为根）</span>
             <select v-model="orgForm.parentId">
               <option value="">无（根组织）</option>
-              <option v-for="item in organizations" :key="item.org_unit_id || item.id" :value="item.org_unit_id || item.id">
-                {{ item.name }} · {{ item.code || (item.org_unit_id || item.id) }}
+              <option v-for="item in organizationOptions" :key="item.option_id" :value="item.option_id">
+                {{ item.option_label }}
               </option>
             </select>
           </label>
-          <label><span>排序</span><input v-model.number="orgForm.sortOrder" type="number" /></label>
+          <label><span>显示顺序</span><input v-model.number="orgForm.sortOrder" type="number" min="0" step="10" /><small>数字越小，在同一上级组织下越靠前；建议使用 10、20、30。</small></label>
           <div class="console-form-actions">
             <button class="console-button ghost small" type="button" :disabled="creatingKind === 'organization'" @click="cancelForm">取消</button>
             <button class="console-button primary small" type="submit" :disabled="creatingKind === 'organization'">
@@ -239,8 +241,8 @@ watch(() => [props.organizations.length, props.positions.length, props.applicati
             <span>所属组织 *</span>
             <select v-model="positionForm.orgUnitId" required>
               <option value="">请选择组织</option>
-              <option v-for="item in organizations" :key="item.org_unit_id || item.id" :value="item.org_unit_id || item.id">
-                {{ item.name }} · {{ item.code || (item.org_unit_id || item.id) }}
+              <option v-for="item in organizationOptions" :key="item.option_id" :value="item.option_id">
+                {{ item.option_label }}
               </option>
             </select>
             <small v-if="!organizations.length">需要先创建至少 1 个组织。</small>

@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { principalFingerprint } from './authorizationRefresh.js'
+import {
+  AUTHORIZATION_REFRESHED_EVENT,
+  clearAuthorizationSnapshot,
+  principalFingerprint,
+} from './authorizationRefresh.js'
 
 test('principalFingerprint ignores role and permission ordering', () => {
   const first = principalFingerprint({
@@ -26,4 +30,28 @@ test('principalFingerprint changes when effective permissions change', () => {
   const after = principalFingerprint({ permission_codes: ['platform:user:update'] })
 
   assert.notEqual(before, after)
+})
+
+test('clearAuthorizationSnapshot broadcasts an explicit null principal', () => {
+  const originalWindow = globalThis.window
+  let dispatched
+  globalThis.window = {
+    dispatchEvent(event) { dispatched = event },
+  }
+  const OriginalCustomEvent = globalThis.CustomEvent
+  globalThis.CustomEvent = class CustomEvent {
+    constructor(type, options) {
+      this.type = type
+      this.detail = options.detail
+    }
+  }
+
+  try {
+    clearAuthorizationSnapshot()
+    assert.equal(dispatched.type, AUTHORIZATION_REFRESHED_EVENT)
+    assert.equal(dispatched.detail.principal, null)
+  } finally {
+    globalThis.window = originalWindow
+    globalThis.CustomEvent = OriginalCustomEvent
+  }
 })

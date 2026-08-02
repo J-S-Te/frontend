@@ -135,6 +135,55 @@ export async function listContracts(params = {}) {
   return Array.isArray(data) ? data : []
 }
 
+export async function listOpportunityIntakes(params = {}) {
+  const search = new URLSearchParams(params).toString()
+  let data
+  try {
+    data = await request(`/opportunity-intakes${search ? `?${search}` : ''}`)
+  } catch (error) {
+    // Rolling deployment compatibility: the previous backend accepted limit and
+    // returned an array. Only an initial page can fall back because that backend
+    // has no cursor semantics; cursor continuation always fails closed.
+    const canUseLegacyList = error?.status === 422 && error?.code === 'CON_VALIDATION_ERROR'
+      && !params.cursor && Object.hasOwn(params, 'page_size')
+    if (!canUseLegacyList) throw error
+    const legacyParams = new URLSearchParams()
+    if (params.status) legacyParams.set('status', params.status)
+    legacyParams.set('limit', String(params.page_size))
+    data = await request(`/opportunity-intakes?${legacyParams}`)
+  }
+  // The object is the current stable pagination contract. Accepting an array
+  // keeps a rolling frontend deployment readable against the previous backend,
+  // but never invents a cursor for that legacy response.
+  if (Array.isArray(data)) {
+    return { items: data, page_size: data.length, next_cursor: '', has_more: false }
+  }
+  const nextCursor = typeof data?.next_cursor === 'string' ? data.next_cursor : ''
+  return {
+    items: Array.isArray(data?.items) ? data.items : [],
+    page_size: Number(data?.page_size || 0),
+    next_cursor: nextCursor,
+    has_more: data?.has_more === true && nextCursor !== '',
+  }
+}
+
+export async function getOpportunityIntake(intakeId) {
+  return request(`/opportunity-intakes/${encodeURIComponent(intakeId)}`)
+}
+
+/**
+ * 核对 CRM 已投递的签单与既有合同引用。LINK_CONFIRMED 会持久化
+ * 已有合同与 CRM 客户、商机的权威关联；两种结论都不创建合同、
+ * 不修改合同状态，也不启动合同审批。
+ */
+export async function reviewOpportunityIntake(intakeId, payload, idempotencyKey) {
+  return request(`/opportunity-intakes/${encodeURIComponent(intakeId)}/reviews`, {
+    method: 'POST',
+    headers: { 'Idempotency-Key': idempotencyKey },
+    body: JSON.stringify(payload),
+  })
+}
+
 export async function createContract(payload) {
   return request('/contracts', {
     method: 'POST',

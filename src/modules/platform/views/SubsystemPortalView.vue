@@ -6,6 +6,10 @@ import { AUTHORIZATION_REFRESHED_EVENT } from '@/modules/platform/auth/utils/aut
 import { ApplicationRegistryError, listPortalApplications } from '@/modules/platform/applications/api/applications'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import { buildPortalSubsystems } from '@/modules/moduleRegistry.js'
+import {
+  canAccessPlatformConsole,
+  platformConsoleLandingRoute,
+} from '@/modules/platform/auth/utils/platformConsoleAccess'
 import '@/modules/platform/styles/subsystem-portal.css'
 
 const router = useRouter()
@@ -56,7 +60,14 @@ const roleNames = computed(() => {
 
 // 代码模块和运行时接入是两层概念：除内置平台外，门户卡片必须来自
 // 当前租户的后端应用目录，不能因为 src/modules 下存在目录就自动开放访问。
-const subsystems = computed(() => buildPortalSubsystems(registeredSubsystems.value))
+const subsystems = computed(() => {
+  const platformRoute = platformConsoleLandingRoute(currentPrincipal.value)
+  return buildPortalSubsystems(registeredSubsystems.value, {
+    includeBuiltInPlatform: canAccessPlatformConsole(currentPrincipal.value),
+  }).map((subsystem) => (
+    subsystem.source === 'built-in' ? { ...subsystem, route: platformRoute } : subsystem
+  ))
+})
 
 let toastTimer = 0
 let animationFrame = 0
@@ -89,6 +100,17 @@ async function loadPortalCatalog() {
 
 function onAuthorizationRefreshed(event) {
   const principal = event?.detail?.principal
+  if (principal === null) {
+    // Logout/account switching clears the shared authorization snapshot before navigation. Remove
+    // user-specific cards immediately instead of leaving the previous account visible while the
+    // router and Set-Cookie transition complete.
+    currentPrincipal.value = null
+    registeredSubsystems.value = []
+    isPrincipalLoading.value = true
+    subsystemCatalogLoading.value = true
+    principalLoadFailed.value = false
+    return
+  }
   if (principal && typeof principal === 'object') {
     currentPrincipal.value = principal
     isPrincipalLoading.value = false

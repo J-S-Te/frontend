@@ -141,6 +141,52 @@ test('normalizeApplicationAccess trusts explicit role groups and reconstructs ef
   assert.deepEqual(access.inherited_roles.map((role) => role.code), ['tech_director'])
 })
 
+test('normalizeApplicationAccess preserves explicit manual roles and role source metadata for legacy binding cleanup', async () => {
+  const { normalizeApplicationAccess } = await import('./authorization.js')
+  const manualRole = {
+    code: 'sales',
+    source_type: 'POSITION',
+    grant_origin: 'MANUAL',
+    source_kind: 'DIRECT',
+    direct: true,
+  }
+  const templateRole = {
+    code: 'sales_director',
+    source_type: 'POSITION',
+    grant_origin: 'TEMPLATE',
+    source_kind: 'POSITION_TEMPLATE',
+    direct: true,
+  }
+
+  const access = normalizeApplicationAccess({
+    roles: [manualRole, templateRole],
+    direct_roles: [manualRole, templateRole],
+    inherited_roles: [],
+    manual_roles: [manualRole],
+  }, 'POSITION')
+
+  assert.deepEqual(access.direct_roles.map((role) => role.code), ['sales', 'sales_director'])
+  assert.deepEqual(access.manual_roles.map((role) => role.code), ['sales'])
+  assert.equal(access.manual_roles[0].grant_origin, 'MANUAL')
+  assert.equal(access.manual_roles[0].source_kind, 'DIRECT')
+  assert.equal(access.direct_roles[1].grant_origin, 'TEMPLATE')
+  assert.equal(access.direct_roles[1].source_kind, 'POSITION_TEMPLATE')
+})
+
+test('normalizeApplicationAccess derives manual roles without treating template or system roles as editable', async () => {
+  const { normalizeApplicationAccess } = await import('./authorization.js')
+  const access = normalizeApplicationAccess({
+    direct_roles: [
+      { code: 'sales', grant_origin: 'MANUAL', source_kind: 'MANUAL' },
+      { code: 'sales_director', grant_origin: 'TEMPLATE', source_kind: 'INHERITED' },
+      { code: 'platform-user', grant_origin: 'SYSTEM', source_kind: 'SYSTEM' },
+    ],
+    inherited_roles: [],
+  })
+
+  assert.deepEqual(access.manual_roles.map((role) => role.code), ['sales'])
+})
+
 test('normalizeApplicationAccess keeps source-less legacy roles editable as direct user roles', async () => {
   const { normalizeApplicationAccess } = await import('./authorization.js')
   const access = normalizeApplicationAccess({ roles: [{ code: 'sales' }, { code: 'audit_admin' }] })

@@ -10,6 +10,10 @@ test('基础能力平台是唯一无需后端登记的内置门户卡片', () =>
   assert.deepEqual(cards[0].route, { name: 'settings', params: { section: 'iam' } })
 })
 
+test('没有平台管理权限时可以隐藏内置基础平台卡片', () => {
+  assert.deepEqual(buildPortalSubsystems([], { includeBuiltInPlatform: false }), [])
+})
+
 test('未内置的已登记应用使用后端地址', () => {
   const cards = buildPortalSubsystems([{
     application_id: 'app-1',

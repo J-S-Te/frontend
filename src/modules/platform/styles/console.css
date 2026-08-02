@@ -39,9 +39,9 @@
 .console-sidebar-note svg { margin-top: 1px; color: #60a5fa; flex: 0 0 auto; }
 .console-sidebar-user { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-top: 1px solid rgba(255,255,255,.06); background: var(--sidebar-hover); }
 .console-avatar, .console-topbar-avatar { display: grid; width: 36px; height: 36px; place-items: center; flex: 0 0 auto; color: #fff; font-size: 13px; font-weight: 600; border-radius: 50%; background: linear-gradient(135deg, var(--p), var(--purple)); }
-.console-user-copy { display: grid; min-width: 0; gap: 2px; }
+.console-user-copy { display: grid; min-width: 0; flex: 1 1 auto; gap: 2px; }
 .console-user-copy strong { overflow: hidden; color: #fff; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.console-user-copy small { color: #94a3b8; font-size: 11px; }
+.console-user-copy small { overflow: hidden; color: #94a3b8; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .console-logout { display: grid; padding: 6px; margin-left: auto; color: #94a3b8; cursor: pointer; border-radius: 6px; background: transparent; }
 .console-logout:hover { color: #fff; background: rgba(255,255,255,.08); }
 .console-logout svg { width: 18px; height: 18px; }

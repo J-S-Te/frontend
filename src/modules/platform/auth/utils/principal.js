@@ -14,6 +14,7 @@ import { checkAnyPermission, checkPermission } from '@/modules/platform/auth/uti
 const principal = ref(null)
 const lastFingerprint = ref('')
 let pendingFetch = null
+let cacheGeneration = 0
 
 function applyPrincipal(next) {
   principal.value = next
@@ -23,35 +24,46 @@ function applyPrincipal(next) {
 if (typeof window !== 'undefined') {
   window.addEventListener(AUTHORIZATION_REFRESHED_EVENT, (event) => {
     const next = event?.detail?.principal
-    if (next && typeof next === 'object') applyPrincipal(next)
+    if (next && typeof next === 'object') {
+      applyPrincipal(next)
+      return
+    }
+    if (next === null) resetPrincipal()
   })
 }
 
 async function refreshPrincipal({ force = false } = {}) {
   if (typeof window === 'undefined') return null
   if (!force && principal.value) return principal.value
-  if (pendingFetch) return pendingFetch
-  pendingFetch = (async () => {
+  if (pendingFetch?.generation === cacheGeneration) return pendingFetch.request
+  const requestedGeneration = cacheGeneration
+  const request = (async () => {
     try {
       const next = await getCurrentPrincipal()
+      // A logout/login transition may complete while this request is in flight. Never let the
+      // previous account's late response repopulate the shared permission cache.
+      if (requestedGeneration !== cacheGeneration) return principal.value
       applyPrincipal(next)
       dispatchAuthorizationRefreshed(next, { changed: true })
       return next
     } catch (error) {
-      principal.value = null
-      lastFingerprint.value = ''
+      if (requestedGeneration === cacheGeneration) {
+        principal.value = null
+        lastFingerprint.value = ''
+      }
       throw error
     } finally {
-      pendingFetch = null
+      if (pendingFetch?.request === request) pendingFetch = null
     }
   })()
-  return pendingFetch
+  pendingFetch = { generation: requestedGeneration, request }
+  return request
 }
 
 function resetPrincipal() {
+  cacheGeneration += 1
   principal.value = null
   lastFingerprint.value = ''
-  pendingFetch = null
 }
 
 export function useCurrentPrincipal() {
@@ -67,9 +79,8 @@ export function useCurrentPrincipal() {
  * 检查当前 principal 是否拥有指定权限码。
  * `code` 形如 `platform:user:delete`、`iam:role:write`。
  *
- * 默认 fail-open：当 principal 已加载但 permission_codes 为空数组时（兼容尚未下放
- * 显式权限的后端），返回 true。一旦后端开始下发非空权限列表，未命中即视为不通过。
- * principal 未加载时也返回 true，避免刷新瞬间按钮集体消失导致误点。
+ * 严格失败关闭：principal 未加载、permission_codes 缺失/为空或权限码未命中时都
+ * 返回 false。这样账号切换清空缓存后不会短暂显示上一用户或未授权操作入口。
  *
  * 真正的禁用/拒绝仍由后端 403 执行，UI 隐藏只是体验优化。
  */

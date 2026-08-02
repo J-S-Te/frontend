@@ -1,5 +1,7 @@
 import platformModule from './platform/module.js'
 import contractManagementModule from './contract_management/module.js'
+import customerOpportunityModule from './customer_opportunity/module.js'
+import customerPortalModule from './customer_portal/module.js'
 
 /**
  * 前端模块清单。
@@ -11,6 +13,8 @@ import contractManagementModule from './contract_management/module.js'
 export const frontendModules = Object.freeze([
   platformModule,
   contractManagementModule,
+  customerOpportunityModule,
+  customerPortalModule,
 ])
 
 function normalizeCode(value) {
@@ -36,9 +40,10 @@ export function findFrontendModule(applicationCode) {
  * - 后端名称、描述和 public_url 是运行时真值；
  * - 本地模块清单只提供缺省展示信息，不能自行制造可访问卡片。
  */
-export function buildPortalSubsystems(registeredApplications = []) {
+export function buildPortalSubsystems(registeredApplications = [], { includeBuiltInPlatform = true } = {}) {
   const builtInModules = frontendModules
     .filter((moduleDefinition) => moduleDefinition.builtIn)
+    .filter(() => includeBuiltInPlatform)
     .map((moduleDefinition) => ({
       key: `built-in-${moduleDefinition.code}`,
       code: moduleDefinition.code,

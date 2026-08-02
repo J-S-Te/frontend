@@ -37,3 +37,13 @@ export function dispatchAuthorizationRefreshed(principal, { changed = false } = 
     detail: { principal, changed: Boolean(changed) },
   }))
 }
+
+/**
+ * Immediately removes every in-memory identity/authorization snapshot in this SPA.
+ *
+ * The HttpOnly Cookie remains server-owned; this event only prevents components from rendering
+ * the previous account while logout/login navigation is still in progress.
+ */
+export function clearAuthorizationSnapshot() {
+  dispatchAuthorizationRefreshed(null)
+}

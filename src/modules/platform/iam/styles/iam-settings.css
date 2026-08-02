@@ -170,6 +170,69 @@
 /* =========================================================================
    顶部统计卡（4 列）
    ========================================================================= */
+.iam-management-guide {
+  display: grid;
+  grid-template-columns: minmax(230px, 0.85fr) minmax(520px, 1.65fr);
+  align-items: center;
+  gap: var(--s-5);
+  padding: 20px 22px;
+  margin-bottom: var(--s-5);
+  border: 1px solid var(--brand-line);
+  border-radius: var(--r-4);
+  background: linear-gradient(135deg, var(--surface), var(--brand-soft));
+  box-shadow: var(--sh-1);
+}
+.iam-management-guide-copy { min-width: 0; }
+.iam-management-guide .iam-section-kicker { margin-bottom: 6px; }
+.iam-management-guide h3 {
+  margin: 0;
+  color: var(--ink-1);
+  font-size: 17px;
+  font-weight: 700;
+}
+.iam-management-guide-copy > p {
+  margin: 7px 0 0;
+  color: var(--ink-3);
+  font-size: 12px;
+  line-height: 1.65;
+}
+.iam-management-flow {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(104px, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: management-flow;
+}
+.iam-management-flow li {
+  position: relative;
+  min-width: 0;
+  padding: 10px 10px 10px 34px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-2);
+  background: rgba(255, 255, 255, 0.88);
+}
+.iam-management-flow li::before {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  content: counter(management-flow);
+  counter-increment: management-flow;
+  border-radius: 50%;
+  background: var(--brand-2);
+}
+.iam-management-flow strong,
+.iam-management-flow span { display: block; }
+.iam-management-flow strong { color: var(--ink-1); font-size: 11.5px; }
+.iam-management-flow span { margin-top: 3px; color: var(--ink-4); font-size: 10.5px; line-height: 1.4; }
 .iam-summary-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -361,6 +424,34 @@
   gap: var(--s-2);
   white-space: nowrap;
 }
+.iam-panel-policy-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: var(--s-4) 0 0;
+  padding: 11px 13px;
+  color: var(--ink-3);
+  font-size: 12px;
+  line-height: 1.6;
+  border: 1px solid var(--brand-line);
+  border-radius: var(--r-2);
+  background: var(--brand-soft);
+}
+.iam-panel-policy-note svg { width: 16px; height: 16px; flex: 0 0 auto; margin-top: 1px; color: var(--brand-2); }
+.iam-panel-policy-note strong { color: var(--ink-1); }
+
+.iam-legacy-binding-notice {
+  display: flex;
+  gap: 12px;
+  padding: 14px 16px;
+  color: var(--warn-1);
+  border: 1px solid var(--warn-line);
+  border-radius: var(--r-2);
+  background: var(--warn-soft);
+}
+.iam-legacy-binding-notice > svg { width: 20px; height: 20px; flex: 0 0 auto; }
+.iam-legacy-binding-notice strong { color: var(--ink-1); font-size: 13px; }
+.iam-legacy-binding-notice p { margin: 4px 0 0; color: var(--ink-3); font-size: 12px; line-height: 1.65; }
 
 /* =========================================================================
    概览（3 列）
@@ -495,6 +586,44 @@
 }
 .iam-data-table th { white-space: nowrap; }
 .iam-data-table td { vertical-align: middle; }
+.iam-table-truncate {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 用户目录：使用弹性网格按可用空间分配列宽；长字段收缩，状态和操作按内容保宽。 */
+.iam-user-table-card,
+.iam-account-table-card { container-type: inline-size; }
+.iam-user-table thead,
+.iam-user-table tbody,
+.iam-account-table thead,
+.iam-account-table tbody { display: block; width: 100%; }
+.iam-user-table tr,
+.iam-account-table tr {
+  display: grid;
+  width: 100%;
+  align-items: center;
+}
+.iam-user-table tr {
+  grid-template-columns:
+    minmax(110px, 1fr)
+    minmax(0, 1.25fr)
+    minmax(0, 1.25fr)
+    minmax(68px, .42fr)
+    minmax(130px, .86fr)
+    max-content;
+}
+.iam-user-table .console-empty,
+.iam-account-table .console-empty { grid-column: 1 / -1; }
+.iam-user-table td { min-width: 0; }
+.iam-user-table .iam-user-employee-cell,
+.iam-user-table .iam-user-email-cell,
+.iam-user-table .iam-user-updated-cell { overflow: hidden; }
+.iam-user-table .iam-user-employee-cell { white-space: normal; }
 .iam-inline-code {
   display: inline-block;
   max-width: 175px;
@@ -813,6 +942,8 @@
    响应式
    ========================================================================= */
 @media (max-width: 1080px) {
+  .iam-management-guide { grid-template-columns: 1fr; }
+  .iam-management-flow { grid-column: 1 / -1; grid-row: 2; }
   .iam-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .iam-overview-grid { grid-template-columns: 1fr; }
   .iam-overview-card { min-height: 0; }
@@ -826,6 +957,8 @@
   .iam-panel-content { padding: 22px 24px; }
 }
 @media (max-width: 760px) {
+  .iam-management-guide { grid-template-columns: 1fr; }
+  .iam-management-flow { grid-column: auto; grid-row: auto; grid-template-columns: repeat(5, minmax(120px, 1fr)); overflow-x: auto; padding-bottom: 3px; }
   .iam-settings-head { align-items: stretch; flex-direction: column; }
   .iam-head-note { width: 100%; }
   .iam-architecture-note { align-items: flex-start; flex-wrap: wrap; }
@@ -1001,6 +1134,431 @@
   line-height: 1.55;
 }
 
+/* 组织架构使用可折叠树形列表：保留名称、顺序、状态和管理动作，同时以缩进表达层级。 */
+.iam-organization-tree-card {
+  overflow: hidden;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-3);
+  background: var(--surface);
+  box-shadow: var(--sh-1);
+}
+.iam-organization-tree-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-4);
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--line-2);
+  background: var(--bg-soft);
+}
+.iam-organization-tree-toolbar > div:first-child {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+.iam-organization-tree-toolbar strong { color: var(--ink-1); font-size: 13px; }
+.iam-organization-tree-toolbar span { color: var(--ink-4); font-size: 11.5px; }
+.iam-organization-tree-toolbar-actions { display: flex; gap: var(--s-2); }
+.iam-organization-tree { min-height: 96px; }
+.iam-organization-tree-empty {
+  margin: 0;
+  padding: 34px 20px;
+  color: var(--ink-4);
+  font-size: 12.5px;
+  text-align: center;
+}
+.iam-organization-tree-row {
+  --organization-indent: calc(var(--tree-depth) * 26px);
+  display: grid;
+  grid-template-columns: minmax(270px, 1fr) minmax(300px, 0.95fr) auto;
+  gap: 16px;
+  align-items: center;
+  min-height: 70px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line-3);
+  outline: none;
+  transition: background-color var(--t-fast) var(--ease-out), box-shadow var(--t-fast) var(--ease-out);
+}
+.iam-organization-tree-row:last-child { border-bottom: 0; }
+.iam-organization-tree-row:hover { background: var(--bg-soft); }
+.iam-organization-tree-row:focus-visible {
+  position: relative;
+  z-index: 1;
+  box-shadow: inset 0 0 0 2px var(--brand-2);
+}
+.iam-organization-tree-identity {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding-left: var(--organization-indent);
+}
+.iam-organization-tree-row.is-child .iam-organization-tree-identity::before {
+  position: absolute;
+  top: 50%;
+  left: calc(var(--organization-indent) - 17px);
+  width: 13px;
+  height: 1px;
+  content: '';
+  background: var(--line-1);
+}
+.iam-organization-tree-toggle,
+.iam-organization-tree-toggle-spacer {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+}
+.iam-organization-tree-toggle {
+  display: grid;
+  padding: 0;
+  place-items: center;
+  color: var(--ink-3);
+  cursor: pointer;
+  border: 1px solid transparent;
+  border-radius: var(--r-1);
+  background: transparent;
+}
+.iam-organization-tree-toggle:hover { color: var(--brand-1); border-color: var(--brand-line); background: var(--brand-soft); }
+.iam-organization-tree-toggle:focus-visible { outline: 2px solid var(--brand-2); outline-offset: 1px; }
+.iam-organization-tree-toggle svg {
+  width: 15px;
+  height: 15px;
+  transition: transform var(--t-fast) var(--ease-out);
+}
+.iam-organization-tree-toggle.is-expanded svg { transform: rotate(90deg); }
+.iam-organization-tree-icon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  place-items: center;
+  color: var(--brand-1);
+  border-radius: var(--r-2);
+  background: var(--brand-soft);
+}
+.iam-organization-tree-icon svg { width: 16px; height: 16px; }
+.iam-organization-tree-name { min-width: 0; }
+.iam-organization-tree-name strong,
+.iam-organization-tree-name small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.iam-organization-tree-name strong { color: var(--ink-1); font-size: 13px; font-weight: 600; }
+.iam-organization-tree-name small { margin-top: 3px; color: var(--ink-4); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10.5px; }
+.iam-organization-tree-meta {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  min-width: 0;
+}
+.iam-organization-tree-meta > span:not(.console-badge) { min-width: 54px; }
+.iam-organization-tree-meta small,
+.iam-organization-tree-meta strong { display: block; }
+.iam-organization-tree-meta small { color: var(--ink-4); font-size: 10px; font-weight: 500; }
+.iam-organization-tree-meta strong { max-width: 130px; margin-top: 3px; overflow: hidden; color: var(--ink-2); font-size: 11.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.iam-organization-tree-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+@media (max-width: 1120px) {
+  .iam-organization-tree-row { grid-template-columns: minmax(250px, 1fr) auto; }
+  .iam-organization-tree-meta { grid-column: 1; padding-left: calc(var(--organization-indent) + 65px); }
+  .iam-organization-tree-actions { grid-column: 2; grid-row: 1 / span 2; flex-wrap: wrap; max-width: 165px; }
+}
+
+@media (max-width: 760px) {
+  .iam-organization-tree-toolbar { align-items: stretch; flex-direction: column; }
+  .iam-organization-tree-toolbar > div:first-child { align-items: flex-start; flex-direction: column; gap: 3px; }
+  .iam-organization-tree-toolbar-actions .console-button { flex: 1; }
+  .iam-organization-tree-row {
+    --organization-indent: calc(min(var(--tree-depth), 3) * 18px);
+    grid-template-columns: 1fr;
+    gap: 10px;
+    padding: 12px;
+  }
+  .iam-organization-tree-meta { grid-column: 1; padding-left: calc(var(--organization-indent) + 33px); flex-wrap: wrap; gap: 10px 18px; }
+  .iam-organization-tree-actions { grid-column: 1; grid-row: auto; justify-content: flex-start; max-width: none; padding-left: calc(var(--organization-indent) + 33px); }
+}
+
+/* 岗位复用组织单元树的父子层级，岗位只挂在直属组织下。 */
+.iam-position-groups-card {
+  overflow: hidden;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-3);
+  background: var(--surface);
+  box-shadow: var(--sh-1);
+}
+.iam-position-groups-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-4);
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--line-2);
+  background: var(--bg-soft);
+}
+.iam-position-groups-toolbar > div:first-child { display: flex; align-items: baseline; gap: 10px; }
+.iam-position-groups-toolbar strong { color: var(--ink-1); font-size: 13px; }
+.iam-position-groups-toolbar span { color: var(--ink-4); font-size: 11.5px; }
+.iam-position-groups-toolbar-actions { display: flex; gap: var(--s-2); }
+.iam-position-groups-empty { margin: 0; padding: 34px 20px; color: var(--ink-4); font-size: 12.5px; text-align: center; }
+.iam-position-tree-node + .iam-position-tree-node { border-top: 1px solid var(--line-2); }
+.iam-position-tree-node { --position-tree-indent: calc(var(--tree-depth, 0) * 24px); }
+.iam-position-tree-node.is-unresolved { background: #fffbeb; }
+.iam-position-group-head {
+  display: grid;
+  grid-template-columns: 24px 34px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  padding: 13px 16px 13px calc(16px + var(--position-tree-indent, 0px));
+  color: inherit;
+  text-align: left;
+  background: #f8fafc;
+}
+.iam-position-group-head:hover { background: var(--brand-soft); }
+.iam-position-group-chevron,
+.iam-position-group-chevron-spacer { display: grid; width: 24px; height: 34px; place-items: center; color: var(--ink-3); }
+.iam-position-group-chevron { padding: 0; cursor: pointer; border: 0; background: transparent; }
+.iam-position-group-chevron:focus-visible { outline: 2px solid var(--brand-2); outline-offset: -1px; border-radius: var(--r-1); }
+.iam-position-group-chevron svg { width: 15px; height: 15px; transition: transform var(--t-fast) var(--ease-out); }
+.iam-position-group-chevron.is-expanded svg { transform: rotate(90deg); }
+.iam-position-group-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  color: var(--brand-1);
+  border-radius: var(--r-2);
+  background: var(--brand-soft);
+}
+.iam-position-group-icon svg { width: 17px; height: 17px; }
+.iam-position-group-name { min-width: 0; }
+.iam-position-group-name strong,
+.iam-position-group-name small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.iam-position-group-name strong { color: var(--ink-1); font-size: 13px; font-weight: 650; }
+.iam-position-group-name small { margin-top: 3px; color: var(--ink-4); font-size: 10.5px; }
+.iam-position-group-count {
+  padding: 4px 9px;
+  color: var(--brand-1);
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 999px;
+  background: var(--brand-soft);
+}
+.iam-position-group-body { background: var(--surface); }
+.iam-position-group-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 72px 120px;
+  gap: 16px;
+  align-items: center;
+  min-height: 62px;
+  padding: 9px 16px 9px calc(74px + var(--position-tree-indent, 0px));
+  border-top: 1px solid var(--line-3);
+}
+.iam-position-group-row:hover { background: var(--bg-soft); }
+.iam-position-group-identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.iam-position-group-role-icon {
+  display: grid;
+  width: 29px;
+  height: 29px;
+  flex: 0 0 29px;
+  place-items: center;
+  color: #6d28d9;
+  border-radius: var(--r-2);
+  background: #f5f3ff;
+}
+.iam-position-group-role-icon svg { width: 14px; height: 14px; }
+.iam-position-group-identity > span:last-child { min-width: 0; }
+.iam-position-group-identity strong,
+.iam-position-group-identity small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.iam-position-group-identity strong { color: var(--ink-1); font-size: 12.5px; }
+.iam-position-group-identity small { margin-top: 3px; color: var(--ink-4); font-size: 10.5px; }
+.iam-position-group-actions { display: flex; justify-content: flex-end; gap: 7px; white-space: nowrap; }
+.iam-position-group-create {
+  width: 100%;
+  padding: 10px 16px 10px calc(74px + var(--position-tree-indent, 0px));
+  color: var(--brand-1);
+  font-size: 11.5px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  border: 0;
+  border-top: 1px dashed var(--line-1);
+  background: transparent;
+}
+.iam-position-group-create:hover { background: var(--brand-soft); }
+.iam-position-group-create:focus-visible { outline: 2px solid var(--brand-2); outline-offset: -2px; }
+
+@media (max-width: 900px) {
+  .iam-position-group-row { grid-template-columns: minmax(200px, 1fr) 74px 110px; }
+}
+
+@media (max-width: 620px) {
+  .iam-position-groups-toolbar { align-items: stretch; flex-direction: column; }
+  .iam-position-groups-toolbar > div:first-child { align-items: flex-start; flex-direction: column; gap: 3px; }
+  .iam-position-groups-toolbar-actions .console-button { flex: 1; }
+  .iam-position-group-head { grid-template-columns: 22px 30px minmax(0, 1fr); padding-left: calc(10px + var(--position-tree-indent, 0px)); }
+  .iam-position-group-count { grid-column: 2 / -1; justify-self: start; }
+  .iam-position-group-row { grid-template-columns: minmax(0, 1fr) auto; gap: 10px; padding: 11px 14px 11px calc(34px + var(--position-tree-indent, 0px)); }
+  .iam-position-group-row > .console-badge { justify-self: end; }
+  .iam-position-group-actions { grid-column: 1 / -1; justify-content: flex-end; }
+  .iam-position-group-create { padding: 10px 14px 10px calc(34px + var(--position-tree-indent, 0px)); }
+}
+
+/* 任职关系按稳定组织 ID 归类。组头表达人员归属，组内行聚焦岗位职责与授权继承。 */
+.iam-membership-groups-card {
+  overflow: hidden;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-3);
+  background: var(--surface);
+  box-shadow: var(--sh-1);
+}
+.iam-membership-groups-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-4);
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--line-2);
+  background: var(--bg-soft);
+}
+.iam-membership-groups-toolbar > div:first-child { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.iam-membership-groups-toolbar strong { color: var(--ink-1); font-size: 13px; }
+.iam-membership-groups-toolbar span { color: var(--ink-4); font-size: 11.5px; }
+.iam-membership-groups-toolbar-actions { display: flex; gap: var(--s-2); }
+.iam-membership-groups-empty { margin: 0; padding: 34px 20px; color: var(--ink-4); font-size: 12.5px; text-align: center; }
+.iam-membership-group + .iam-membership-group { border-top: 1px solid var(--line-2); }
+.iam-membership-group.is-unresolved { background: #fffbeb; }
+.iam-membership-group-head {
+  display: grid;
+  grid-template-columns: 24px 34px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  padding: 13px 16px;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  border: 0;
+  background: #f8fafc;
+}
+.iam-membership-group-head:hover { background: var(--brand-soft); }
+.iam-membership-group-head:focus-visible { outline: 2px solid var(--brand-2); outline-offset: -2px; }
+.iam-membership-group-chevron {
+  display: grid;
+  width: 24px;
+  height: 34px;
+  place-items: center;
+  color: var(--ink-3);
+}
+.iam-membership-group-chevron svg { width: 15px; height: 15px; transition: transform var(--t-fast) var(--ease-out); }
+.iam-membership-group-chevron.is-expanded svg { transform: rotate(90deg); }
+.iam-membership-group-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  color: #c2410c;
+  border-radius: var(--r-2);
+  background: #fff7ed;
+}
+.iam-membership-group-icon svg { width: 17px; height: 17px; }
+.iam-membership-group-name { min-width: 0; }
+.iam-membership-group-name strong,
+.iam-membership-group-name small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.iam-membership-group-name strong { color: var(--ink-1); font-size: 13px; font-weight: 650; }
+.iam-membership-group-name small { margin-top: 3px; color: var(--ink-4); font-size: 10.5px; }
+.iam-membership-group-count {
+  padding: 4px 9px;
+  color: #9a3412;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 999px;
+  background: #ffedd5;
+}
+.iam-membership-group-body { background: var(--surface); }
+.iam-membership-group-row {
+  display: grid;
+  grid-template-columns: minmax(190px, 1fr) minmax(140px, 0.75fr) 88px 138px minmax(145px, 0.75fr) 54px;
+  gap: 14px;
+  align-items: center;
+  min-height: 66px;
+  padding: 9px 16px 9px 74px;
+  border-top: 1px solid var(--line-3);
+}
+.iam-membership-group-row:hover { background: var(--bg-soft); }
+.iam-membership-person { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.iam-membership-person-icon {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  place-items: center;
+  color: var(--brand-1);
+  border-radius: 50%;
+  background: var(--brand-soft);
+}
+.iam-membership-person-icon svg { width: 14px; height: 14px; }
+.iam-membership-person > span:last-child,
+.iam-membership-position,
+.iam-membership-validity { min-width: 0; }
+.iam-membership-person strong,
+.iam-membership-person small,
+.iam-membership-position strong,
+.iam-membership-position small,
+.iam-membership-validity strong,
+.iam-membership-validity small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.iam-membership-person strong,
+.iam-membership-position strong,
+.iam-membership-validity strong { color: var(--ink-1); font-size: 12px; font-weight: 600; }
+.iam-membership-person small,
+.iam-membership-position small,
+.iam-membership-validity small { margin-top: 3px; color: var(--ink-4); font-size: 10.5px; }
+.iam-membership-position small,
+.iam-membership-validity small { margin: 0 0 3px; }
+.iam-membership-user-id {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+.iam-membership-type {
+  justify-self: start;
+  padding: 4px 9px;
+  color: var(--ink-2);
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid var(--line-1);
+  border-radius: 999px;
+  background: var(--bg-soft);
+  white-space: nowrap;
+}
+.iam-membership-type.is-primary { color: var(--brand-1); border-color: var(--brand-line); background: var(--brand-soft); }
+.iam-membership-type.is-secondary { color: #6d28d9; border-color: #ddd6fe; background: #f5f3ff; }
+.iam-membership-group-actions { display: flex; justify-content: flex-end; white-space: nowrap; }
+
+@media (max-width: 1080px) {
+  .iam-membership-group-row { grid-template-columns: minmax(180px, 1fr) minmax(130px, 0.8fr) 88px 138px 54px; }
+  .iam-membership-validity { grid-column: 2; grid-row: 2; }
+  .iam-membership-group-actions { grid-column: 5; grid-row: 1 / span 2; }
+}
+
+@media (max-width: 720px) {
+  .iam-membership-groups-toolbar { align-items: stretch; flex-direction: column; }
+  .iam-membership-groups-toolbar > div:first-child { align-items: flex-start; flex-direction: column; gap: 3px; }
+  .iam-membership-groups-toolbar-actions .console-button { flex: 1; }
+  .iam-membership-group-head { grid-template-columns: 22px 30px minmax(0, 1fr); padding: 11px 12px; }
+  .iam-membership-group-count { grid-column: 2 / -1; justify-self: start; }
+  .iam-membership-group-row { grid-template-columns: minmax(0, 1fr) auto; gap: 10px; padding: 12px 14px 12px 34px; }
+  .iam-membership-position,
+  .iam-membership-validity { grid-column: 1; grid-row: auto; }
+  .iam-membership-group-row > .console-badge,
+  .iam-membership-type { grid-column: 2; justify-self: end; }
+  .iam-membership-group-actions { grid-column: 1 / -1; grid-row: auto; justify-content: flex-end; }
+}
+
 /* 密码字段 */
 .iam-password-field { position: relative; width: 100%; }
 .iam-editor-form .iam-password-field input { padding-right: 42px; }
@@ -1030,14 +1588,28 @@
    ========================================================================= */
 .iam-accounts-panel { padding-top: 20px; }
 .iam-account-table-card { border-color: var(--line-1); }
+.iam-account-table tr {
+  grid-template-columns:
+    minmax(130px, 1.15fr)
+    minmax(0, .85fr)
+    minmax(108px, .95fr)
+    minmax(108px, .9fr)
+    minmax(64px, .4fr)
+    minmax(130px, .88fr)
+    max-content;
+}
+.iam-account-table td { min-width: 0; overflow: hidden; }
 .iam-account-identity {
   display: flex;
   align-items: center;
   gap: var(--s-3);
-  min-width: 180px;
+  width: 100%;
+  min-width: 0;
 }
 .iam-account-identity > span:last-child { display: grid; min-width: 0; gap: 3px; }
 .iam-account-identity strong {
+  display: block;
+  width: 100%;
   overflow: hidden;
   color: var(--ink-1);
   font-size: 12.5px;
@@ -1059,10 +1631,12 @@
   background: var(--brand-soft);
 }
 .iam-linked-user {
-  display: inline-flex;
+  display: flex;
+  width: 100%;
+  min-width: 0;
   align-items: center;
   gap: 5px;
-  max-width: 180px;
+  max-width: 100%;
   overflow: hidden;
   color: var(--ink-3);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -1076,8 +1650,16 @@
   flex: 0 0 auto;
   color: var(--ink-4);
 }
+.iam-linked-user-name {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .iam-auth-tags {
   display: flex;
+  width: 100%;
   flex-wrap: wrap;
   gap: 6px;
   min-width: 0;
@@ -1097,6 +1679,14 @@
 .iam-validity-chip.is-temporary { color: var(--warn-1); background: var(--warn-soft); }
 .iam-account-updated { color: var(--ink-3); font-size: 11px; white-space: nowrap; }
 .iam-account-actions { white-space: nowrap; }
+
+@media (max-width: 768px) {
+  .iam-user-table .iam-user-employee-cell,
+  .iam-user-table .iam-user-email-cell,
+  .iam-user-table .iam-user-updated-cell,
+  .iam-account-table td { overflow: visible; }
+  .iam-account-actions { flex-wrap: wrap; }
+}
 
 /* 账号编辑器：有效期 picker */
 .iam-account-editor-intro {
@@ -2363,3 +2953,68 @@
 .iam-data-table td .console-badge,
 .iam-data-table th.console-actions-cell,
 .iam-data-table td.console-actions-cell { white-space: nowrap; }
+
+/* 按表格容器而非整个视口判断：侧栏、窗口或嵌入布局挤压内容区时自动切卡片。 */
+@container (max-width: 720px) {
+  .iam-user-table,
+  .iam-account-table,
+  .iam-user-table thead,
+  .iam-user-table tbody,
+  .iam-account-table thead,
+  .iam-account-table tbody,
+  .iam-user-table tr,
+  .iam-account-table tr,
+  .iam-user-table th,
+  .iam-account-table th,
+  .iam-user-table td,
+  .iam-account-table td {
+    display: block;
+    width: auto !important;
+  }
+  .iam-user-table thead,
+  .iam-account-table thead { display: none; }
+  .iam-user-table tbody tr,
+  .iam-account-table tbody tr {
+    margin-bottom: 10px;
+    padding: 11px 13px;
+    border: 1px solid var(--line-1);
+    border-radius: var(--r-2);
+    background: #fff;
+    box-shadow: var(--sh-1);
+  }
+  .iam-user-table td,
+  .iam-account-table td {
+    display: flex;
+    gap: 10px;
+    align-items: baseline;
+    padding: 7px 0 !important;
+    overflow: visible;
+    border-bottom: 1px dashed var(--line-2);
+  }
+  .iam-user-table td::before,
+  .iam-account-table td::before {
+    flex: 0 0 88px;
+    color: var(--ink-3);
+    font-size: 12px;
+    font-weight: 500;
+    content: attr(data-label);
+  }
+  .iam-user-table td:last-child,
+  .iam-account-table td:last-child { border-bottom: 0; }
+  .iam-user-table td.console-actions-cell,
+  .iam-account-table td.console-actions-cell {
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    padding-top: 10px !important;
+  }
+  .iam-user-table td.console-actions-cell::before,
+  .iam-account-table td.console-actions-cell::before { display: none; }
+  .iam-user-table .iam-table-truncate,
+  .iam-account-table .iam-account-identity strong,
+  .iam-account-table .iam-linked-user-name {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}

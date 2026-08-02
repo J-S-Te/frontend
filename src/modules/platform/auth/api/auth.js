@@ -1,6 +1,13 @@
 import { broadcastSessionEnded } from '@/modules/platform/auth/utils/sessionLifecycle'
+import { clearAuthorizationSnapshot } from '@/modules/platform/auth/utils/authorizationRefresh'
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '/api/v1').replace(/\/$/, '')
+let browserSessionGeneration = 0
+
+function advanceBrowserSessionGeneration() {
+  browserSessionGeneration += 1
+  clearAuthorizationSnapshot()
+}
 
 export class AuthError extends Error {
   constructor(message, options = {}) {
@@ -75,6 +82,10 @@ export async function loginWithPassword({
     })
   }
 
+  // A successful Set-Cookie switches the browser identity. Clear the previous account's UI
+  // snapshot before the delayed top-level redirect performed by LoginView.
+  advanceBrowserSessionGeneration()
+
   return {
     body,
     status: response.status,
@@ -89,6 +100,7 @@ export async function loginWithPassword({
  */
 export async function getCurrentPrincipal() {
   let response
+  const requestedGeneration = browserSessionGeneration
 
   try {
     response = await fetch(`${API_BASE_URL}/auth/me`, {
@@ -114,6 +126,13 @@ export async function getCurrentPrincipal() {
       status: response.status,
       code: body.code,
       traceId: body.request_id || body.trace_id || body.traceId,
+    })
+  }
+
+  if (requestedGeneration !== browserSessionGeneration) {
+    throw new AuthError('浏览器登录账号已切换，请按最新会话重新读取权限。', {
+      status: 401,
+      code: 'AUTH_SESSION_CHANGED',
     })
   }
 
@@ -185,6 +204,7 @@ export async function logoutCurrentSession() {
     // 会话已经在服务端失效时，用户的退出意图仍应完成：通知同源应用页立即返回
     // 登录界面，而不把用户滞留在受保护页面。
     if (response.status === 401) {
+      advanceBrowserSessionGeneration()
       broadcastSessionEnded('manual-logout')
       return null
     }
@@ -196,6 +216,7 @@ export async function logoutCurrentSession() {
     })
   }
 
+  advanceBrowserSessionGeneration()
   broadcastSessionEnded('manual-logout')
   return body.data
 }

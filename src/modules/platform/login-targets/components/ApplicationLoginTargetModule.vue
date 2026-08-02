@@ -7,6 +7,8 @@ import {
   listApplicationLoginTargets,
   updateApplicationLoginTarget,
 } from '@/modules/platform/login-targets/api/loginTargets'
+import { hasPermission } from '@/modules/platform/auth/utils/principal'
+import { targetUriValidationMessage } from '@/modules/platform/login-targets/utils/targetUri'
 import '@/modules/platform/login-targets/styles/application-login-target.css'
 
 const props = defineProps({
@@ -28,9 +30,12 @@ const statusFilter = ref('')
 const targets = ref([])
 const editorOpen = ref(false)
 const editingTarget = ref(null)
+const targetUriError = ref('')
 const form = reactive(createEmptyForm())
 
 const hasBoundary = computed(() => Boolean(props.applicationId && props.environmentId))
+const canCreateTarget = computed(() => hasPermission('platform:application-login-target:create'))
+const canUpdateTarget = computed(() => hasPermission('platform:application-login-target:update'))
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
 const heading = computed(() => {
   const labels = [props.applicationName, props.environmentName].filter(Boolean)
@@ -54,16 +59,18 @@ function showToast(message) {
 function resetForm() {
   Object.assign(form, createEmptyForm())
   editingTarget.value = null
+  targetUriError.value = ''
 }
 
 function openCreateEditor() {
-  if (!hasBoundary.value) return
+  if (!hasBoundary.value || !canCreateTarget.value) return
   errorMessage.value = ''
   resetForm()
   editorOpen.value = true
 }
 
 function openEditEditor(target) {
+  if (!canUpdateTarget.value) return
   errorMessage.value = ''
   editingTarget.value = target
   Object.assign(form, {
@@ -137,6 +144,10 @@ async function loadTargets() {
 async function submitEditor() {
   if (!hasBoundary.value || submitting.value) return
 
+  const targetUri = form.targetUri.trim()
+  targetUriError.value = targetUriValidationMessage(targetUri)
+  if (targetUriError.value) return
+
   submitting.value = true
   errorMessage.value = ''
   try {
@@ -146,7 +157,7 @@ async function submitEditor() {
         environmentId: props.environmentId,
         loginTargetId: targetID(editingTarget.value),
         name: form.name.trim(),
-        targetUri: form.targetUri.trim(),
+        targetUri,
         status: form.status,
         version: form.version,
       })
@@ -157,7 +168,7 @@ async function submitEditor() {
         environmentId: props.environmentId,
         targetCode: form.targetCode.trim(),
         name: form.name.trim(),
-        targetUri: form.targetUri.trim(),
+        targetUri,
         status: form.status,
       })
       showToast('登录目标已创建。')
@@ -195,7 +206,7 @@ watch(
         <h2 id="login-target-heading">{{ heading }}</h2>
         <p>同一应用环境可登记多个业务入口；每个入口使用唯一目标编码，并与 OAuth 回调地址完全分离。</p>
       </div>
-      <button class="console-button primary" type="button" :disabled="!hasBoundary" @click="openCreateEditor">
+      <button v-if="canCreateTarget" class="console-button primary" type="button" :disabled="!hasBoundary" @click="openCreateEditor">
         <ConsoleIcon name="plus" /> 新建登录目标
       </button>
     </header>
@@ -256,7 +267,7 @@ watch(
                 <td class="login-target-module__uri"><code>{{ target.target_uri }}</code></td>
                 <td><span class="login-target-status" :class="`is-${String(target.status || '').toLowerCase()}`">{{ target.status === 'ACTIVE' ? '启用' : '停用' }}</span></td>
                 <td>{{ formatDate(target.updated_at) }}</td>
-                <td><button class="console-button ghost small" type="button" @click="openEditEditor(target)">编辑</button></td>
+                <td><button v-if="canUpdateTarget" class="console-button ghost small" type="button" @click="openEditEditor(target)">编辑</button><span v-else>—</span></td>
               </tr>
             </tbody>
           </table>
@@ -294,8 +305,9 @@ watch(
         </label>
         <label>
           <span>批准跳转地址</span>
-          <input v-model="form.targetUri" type="url" maxlength="2048" autocomplete="off" required placeholder="https://app.example.com/workbench" />
-          <small>必须为精确的 http/https 绝对地址。不要填写 OAuth redirect_uri。</small>
+          <input v-model="form.targetUri" type="text" inputmode="url" maxlength="2048" autocomplete="off" required placeholder="https://app.example.com/workbench 或 /customer-portal/" @input="targetUriError = ''" />
+          <small>支持精确的 https 绝对地址，或以 / 开头的相对路径（按该应用环境的 Public BaseURL 自动补全）。不要填写 OAuth redirect_uri。</small>
+          <p v-if="targetUriError" class="login-target-module__field-error" role="alert">{{ targetUriError }}</p>
         </label>
         <label>
           <span>状态</span>

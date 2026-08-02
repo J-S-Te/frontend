@@ -123,8 +123,8 @@ export function getAuditExportJob(jobId) {
 
 /**
  * 把后端 eventResponse 映射成前端模板的字段名。
- * - 后端 result 是 "SUCCESS" / "DENIED" / "ERROR" 等枚举；前端显示时翻译为中文。
- * - 后端 risk_level 是 "LOW" / "MEDIUM" / "HIGH"；前端模板用的是 "高" / "中" / "低"。
+ * - 后端 result 是 "SUCCESS" / "FAILURE" / "DENIED"；前端显示时翻译为中文。
+ * - 后端 risk_level 是 "LOW" / "MEDIUM" / "HIGH" / "CRITICAL"；前端显示中文标签。
  * - 后端 change_summary 是 []FieldChange 数组；前端展示是字符串。
  */
 function mapAuditEvent(event) {
@@ -147,14 +147,18 @@ function mapAuditEvent(event) {
     method: event.method || '',
     path: event.path || '',
     ip: event.client_ip || '',
+    userAgent: event.user_agent || '',
+    requestId: event.request_id || '',
+    traceId: event.trace_id || '',
+    correlationId: event.correlation_id || '',
     statusCode: event.status_code ?? 0,
     result: event.result || '',
     resultLabel: resultLabel(event.result),
     risk: event.risk_level || '',
     riskLabel: riskLabel(event.risk_level),
-    userAgent: '',
     detail: event.detail || '',
-    changeSummary: changeSummary || event.summary || '',
+    summary: event.summary || '',
+    changeSummary,
   }
 }
 
@@ -162,8 +166,10 @@ function formatFieldChange(change) {
   if (!change) return ''
   const field = change.field || change.name || ''
   if (!field) return ''
-  if (change.from === undefined || change.to === undefined) return `${field}: ${change.value ?? ''}`
-  return `${field}: ${change.from} → ${change.to}`
+  const before = change.before ?? change.from
+  const after = change.after ?? change.to
+  if (before === undefined && after === undefined) return `${field}: ${change.value ?? ''}`
+  return `${field}: ${before ?? '—'} → ${after ?? '—'}`
 }
 
 function resultLabel(value) {
@@ -185,6 +191,8 @@ function resultLabel(value) {
 
 function riskLabel(value) {
   switch (String(value || '').toUpperCase()) {
+    case 'CRITICAL':
+      return '严重'
     case 'HIGH':
       return '高'
     case 'MEDIUM':

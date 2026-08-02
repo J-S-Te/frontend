@@ -183,7 +183,8 @@ export async function onboardEmployee({ user, account = null, membership = null 
 }
 
 // createUsersBatch creates up to 100 users atomically. Employee numbers and the default platform
-// role are backend-managed; optional application roles are resolved from synchronized catalogs.
+// role are backend-managed. Optional application roles are exceptional USER grants; standard
+// personnel access must come from membership and position authorization templates.
 export function createUsersBatch(items) {
   return request('/users/batch', {
     method: 'POST',

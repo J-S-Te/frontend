@@ -191,6 +191,13 @@
   line-height: 1.5;
 }
 
+.login-target-module__field-error {
+  margin: 4px 0 0;
+  color: #b42318;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .login-target-dialog-backdrop {
   position: fixed;
   z-index: 40;

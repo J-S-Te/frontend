@@ -162,6 +162,16 @@ function isDirectApplicationRole(role, directSourceType = 'USER') {
   return roleSourceType(role) === String(directSourceType || 'USER').trim().toUpperCase()
 }
 
+function isManualApplicationRole(role) {
+  if (!role || typeof role !== 'object') return true
+  const grantOrigin = String(role.grant_origin || '').trim().toUpperCase()
+  if (grantOrigin) return grantOrigin === 'MANUAL'
+  const sourceKind = String(role.source_kind || '').trim().toUpperCase()
+  if (sourceKind) return sourceKind === 'MANUAL' || sourceKind === 'DIRECT'
+  // 兼容尚未返回授权来源字段的旧服务端：此时 direct_roles 本身就是唯一可用依据。
+  return true
+}
+
 /**
  * 统一新旧后端的应用授权响应。
  *
@@ -176,6 +186,7 @@ export function normalizeApplicationAccess(value, directSourceType = 'USER') {
   let roles = Array.isArray(value.roles) ? value.roles : fallbackRoles
   const hasDirectRoles = Array.isArray(value.direct_roles)
   const hasInheritedRoles = Array.isArray(value.inherited_roles)
+  const hasManualRoles = Array.isArray(value.manual_roles)
   const hasSourceMetadata = roles.some(roleHasSourceMetadata)
 
   const directRoles = hasDirectRoles
@@ -184,6 +195,9 @@ export function normalizeApplicationAccess(value, directSourceType = 'USER') {
   const inheritedRoles = hasInheritedRoles
     ? value.inherited_roles
     : (hasSourceMetadata ? roles.filter((role) => !isDirectApplicationRole(role, directSourceType)) : [])
+  const manualRoles = hasManualRoles
+    ? value.manual_roles
+    : directRoles.filter(isManualApplicationRole)
 
   if (!roles.length && (directRoles.length || inheritedRoles.length)) {
     roles = [...directRoles, ...inheritedRoles]
@@ -194,6 +208,7 @@ export function normalizeApplicationAccess(value, directSourceType = 'USER') {
     roles,
     direct_roles: directRoles,
     inherited_roles: inheritedRoles,
+    manual_roles: manualRoles,
   }
 }
 

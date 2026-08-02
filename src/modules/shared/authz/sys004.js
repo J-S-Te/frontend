@@ -1,12 +1,12 @@
 export const CONTRACT_APPLICATION_CODE = 'contract_management'
 
 export const CONTRACT_ROLE_DEFINITIONS = Object.freeze([
-  { code: 'admin', name: '超级管理员', permissions: ['contract.read', 'contract.create', 'contract.edit', 'approval.view', 'approval.process', 'approval.manage', 'approval_rule.manage'] },
+  { code: 'admin', name: '超级管理员', permissions: ['contract.read', 'contract.create', 'contract.edit', 'approval.view', 'approval.process', 'approval.manage', 'approval_rule.manage', 'opportunity_intake.read', 'opportunity_intake.process'] },
   { code: 'sales_director', name: '销售总监', permissions: ['dashboard', 'contract.read', 'customer.read', 'approval.view', 'approval.process'] },
   { code: 'tech_director', name: '技术总监', permissions: ['dashboard', 'contract.read', 'customer.read', 'approval.view', 'approval.process'] },
   { code: 'finance_director', name: '财务总监', permissions: ['dashboard', 'contract.read', 'customer.read', 'approval.view', 'approval.process'] },
   { code: 'sales', name: '销售人员', permissions: ['dashboard', 'contract.read', 'contract.create', 'contract.edit', 'customer.read', 'customer.create', 'customer.edit', 'contract_template.read'] },
-  { code: 'audit_admin', name: '审计管理员', permissions: ['dashboard', 'contract.read', 'customer.read', 'approval.view', 'audit.view', 'audit.read'] },
+  { code: 'audit_admin', name: '审计管理员', permissions: ['dashboard', 'contract.read', 'customer.read', 'approval.view', 'audit.view', 'audit.read', 'opportunity_intake.read'] },
 ])
 
 export const CONTRACT_PERMISSION_DEFINITIONS = Object.freeze([
@@ -27,6 +27,8 @@ export const CONTRACT_PERMISSION_DEFINITIONS = Object.freeze([
   ['approval.process', '处理审批'],
   ['approval.manage', '管理审批'],
   ['approval_rule.manage', '管理审批规则'],
+  ['opportunity_intake.read', '查看签单关联核对队列'],
+  ['opportunity_intake.process', '处理签单关联核对队列'],
   ['user.manage', '管理用户'],
   ['audit.view', '查看审计日志'],
   ['audit.read', '审计只读'],
@@ -61,6 +63,7 @@ export const CONTRACT_SECTION_PERMISSIONS = Object.freeze({
   dashboard: ['dashboard'],
   customers: ['customer.read'],
   contracts: ['contract.read'],
+  intakes: ['opportunity_intake.read'],
   templates: ['contract_template.read', 'contract_template.manage'],
   approvals: ['approval.view', 'approval.process', 'contract.create'],
   rules: ['approval.view', 'approval_rule.manage'],
@@ -70,6 +73,8 @@ export const CONTRACT_SECTION_PERMISSIONS = Object.freeze({
 
 export function canAccessContractSection(session, section) {
   const roleCode = session?.role?.code
+  // 签单接收队列是独立的跨系统高敏边界，不能仅凭前端角色名称放行。
+  if (section === 'intakes') return hasContractPermission(session, 'opportunity_intake.read')
   if (roleCode === 'admin') {
     return Object.hasOwn(CONTRACT_SECTION_PERMISSIONS, section)
   }

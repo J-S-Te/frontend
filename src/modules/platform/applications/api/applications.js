@@ -29,8 +29,12 @@ async function request(path, options = {}) {
     response = await fetch(`${API_BASE_URL}${path}`, {
       ...options,
       credentials: 'include',
+      // Application and portal catalogs are tenant/user authorization projections. A browser or
+      // reverse proxy must never reuse one account's response after the bp_session Cookie changes.
+      cache: 'no-store',
       headers: {
         Accept: 'application/json',
+        'Cache-Control': 'no-cache',
         ...(options.body ? { 'Content-Type': 'application/json' } : {}),
         ...(options.headers || {}),
       },
@@ -64,6 +68,12 @@ export function listApplications({ page = 1, pageSize = 100, status = 'ACTIVE', 
   return request(`/applications${pageQuery({ page, page_size: pageSize, status, keyword })}`)
 }
 
+/** 查询一个应用的最新控制面记录。 */
+export function getApplication({ applicationId } = {}) {
+  if (!applicationId) throw new ApplicationRegistryError('applicationId 不能为空。', { code: 'VALIDATION_ERROR' })
+  return request(`/applications/${encodeURIComponent(applicationId)}`)
+}
+
 /** 创建一个业务子系统登记；OAuth 客户端与登录目标仍通过各自独立接口维护。 */
 export function createApplication({ code, name, applicationType = 'web', description = null, status = 'ACTIVE' } = {}) {
   return request('/applications', {
@@ -74,6 +84,26 @@ export function createApplication({ code, name, applicationType = 'web', descrip
       application_type: applicationType,
       description,
       status,
+    }),
+  })
+}
+
+/** 更新应用可变登记信息；应用编码保持稳定，version 必须来自最近一次查询。 */
+export function updateApplication({ applicationId, name, applicationType = 'web', ownerOrgId = null, ownerUserId = null, homepageUrl = null, description = null, status = 'ACTIVE', version } = {}) {
+  if (!applicationId || !String(name || '').trim() || !Number.isInteger(Number(version)) || Number(version) < 1) {
+    throw new ApplicationRegistryError('applicationId、name 和有效 version 均不能为空。', { code: 'VALIDATION_ERROR' })
+  }
+  return request(`/applications/${encodeURIComponent(applicationId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      name: String(name).trim(),
+      application_type: applicationType,
+      owner_org_id: ownerOrgId,
+      owner_user_id: ownerUserId,
+      homepage_url: homepageUrl,
+      description,
+      status,
+      version: Number(version),
     }),
   })
 }
@@ -140,6 +170,17 @@ export function updateEnvironment({ applicationId, environmentId, baseUrl = null
   })
 }
 
+/** 删除一个非 dev 环境及其派生的登录目标和 OAuth Client。 */
+export function deleteEnvironment({ applicationId, environmentId, confirmationCode, version } = {}) {
+  if (!applicationId || !environmentId || !String(confirmationCode || '').trim() || !Number.isInteger(Number(version)) || Number(version) < 1) {
+    throw new ApplicationRegistryError('应用、环境、确认码和有效 version 均不能为空。', { code: 'VALIDATION_ERROR' })
+  }
+  return request(`/applications/${encodeURIComponent(applicationId)}/environments/${encodeURIComponent(environmentId)}`, {
+    method: 'DELETE',
+    body: JSON.stringify({ confirmation_code: String(confirmationCode).trim(), version: Number(version) }),
+  })
+}
+
 /** 一次完成应用登记、环境配置、登录目标、OAuth 客户端和自动部署。 */
 export function onboardSubsystem({
   applicationCode,
@@ -167,6 +208,35 @@ export function onboardSubsystem({
         ? { initial_admin_user_id: String(initialAdminUserId).trim() }
         : {}),
     }),
+  })
+}
+
+/** 查询部署 Agent 的持久化状态。 */
+export function getSubsystemStatus({ applicationCode, environment } = {}) {
+  return request(`/subsystem-status${pageQuery({ application_code: applicationCode, environment })}`)
+}
+
+/** 重新执行既有子系统运行时部署，不重复创建接入记录。 */
+export function retrySubsystem({ applicationCode, environment } = {}) {
+  return request('/subsystem-retry', {
+    method: 'POST',
+    body: JSON.stringify({ application_code: applicationCode, environment }),
+  })
+}
+
+/** 按已有控制面配置重新部署子系统运行时。 */
+export function updateSubsystemRuntime({ applicationCode, environment } = {}) {
+  return request('/subsystem-update', {
+    method: 'POST',
+    body: JSON.stringify({ application_code: applicationCode, environment }),
+  })
+}
+
+/** 清理子系统运行时；数据库环境记录仍需通过 deleteEnvironment 删除。 */
+export function teardownSubsystem({ applicationCode, environment } = {}) {
+  return request('/subsystem-teardown', {
+    method: 'POST',
+    body: JSON.stringify({ application_code: applicationCode, environment }),
   })
 }
 

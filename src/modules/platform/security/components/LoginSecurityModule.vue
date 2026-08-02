@@ -8,9 +8,16 @@ import {
   unlockAccount,
   updateLoginPolicy,
 } from '@/modules/platform/security/api/security'
+import { hasPermission, useCurrentPrincipal } from '@/modules/platform/auth/utils/principal'
 import '@/modules/platform/security/styles/login-security.css'
 
 const emit = defineEmits(['toast'])
+const { refreshPrincipal } = useCurrentPrincipal()
+
+const canReadPolicy = computed(() => hasPermission('platform:security-policy:read'))
+const canUpdatePolicy = computed(() => hasPermission('platform:security-policy:update'))
+const canReadLockedAccounts = computed(() => hasPermission('platform:locked-account:read'))
+const canUnlockAccount = computed(() => hasPermission('platform:locked-account:unlock'))
 
 const loginPolicy = reactive({ maxFailedAttempts: 5, lockoutDurationSeconds: 900, failureResetWindowSeconds: 1800, idleTimeoutSeconds: 1800, version: 0 })
 const policyLoading = ref(false)
@@ -32,6 +39,7 @@ function formatDateTime(value) {
 }
 
 async function loadLoginPolicy() {
+  if (!canReadPolicy.value) return
   policyLoading.value = true
   policyError.value = ''
   try {
@@ -51,7 +59,7 @@ async function loadLoginPolicy() {
 }
 
 async function saveLoginPolicy() {
-  if (policySaving.value) return
+  if (!canReadPolicy.value || !canUpdatePolicy.value || policySaving.value) return
   policySaving.value = true
   policyError.value = ''
   try {
@@ -72,6 +80,7 @@ async function saveLoginPolicy() {
 }
 
 async function loadLockedAccounts() {
+  if (!canReadLockedAccounts.value) return
   lockedLoading.value = true
   lockedError.value = ''
   try {
@@ -86,7 +95,7 @@ async function loadLockedAccounts() {
 }
 
 async function handleUnlockAccount(account) {
-  if (!account?.account_id) return
+  if (!canUnlockAccount.value || !account?.account_id) return
   try {
     await unlockAccount(account.account_id)
     lockedAccounts.value = lockedAccounts.value.filter((item) => item.account_id !== account.account_id)
@@ -103,17 +112,21 @@ function formatDuration(seconds) {
 }
 
 onMounted(async () => {
-  await Promise.all([loadLoginPolicy(), loadLockedAccounts()])
+  await refreshPrincipal().catch(() => null)
+  await Promise.all([
+    canReadPolicy.value ? loadLoginPolicy() : Promise.resolve(),
+    canReadLockedAccounts.value ? loadLockedAccounts() : Promise.resolve(),
+  ])
 })
 </script>
 
 <template>
   <section class="login-security" aria-labelledby="login-security-heading">
     <div class="so-summary-grid">
-      <article class="so-summary-card blue"><span><ConsoleIcon name="shield" /></span><div><small>当前锁定账号</small><strong>{{ activeLockCount }}</strong><p>登录失败锁定状态</p></div></article>
-      <article class="so-summary-card violet"><span><ConsoleIcon name="link" /></span><div><small>登录失败阈值</small><strong>{{ loginPolicy.maxFailedAttempts || '—' }}</strong><p>达到后自动锁定</p></div></article>
-      <article class="so-summary-card orange"><span><ConsoleIcon name="bell" /></span><div><small>锁定时长</small><strong>{{ formatDuration(loginPolicy.lockoutDurationSeconds) }}</strong><p>超过时限自动恢复</p></div></article>
-      <article class="so-summary-card green"><span><ConsoleIcon name="settings" /></span><div><small>无操作退出</small><strong>{{ formatDuration(loginPolicy.idleTimeoutSeconds) }}</strong><p>超时后统一退出全部系统</p></div></article>
+      <article v-if="canReadLockedAccounts" class="so-summary-card blue"><span><ConsoleIcon name="shield" /></span><div><small>当前锁定账号</small><strong>{{ activeLockCount }}</strong><p>登录失败锁定状态</p></div></article>
+      <article v-if="canReadPolicy" class="so-summary-card violet"><span><ConsoleIcon name="link" /></span><div><small>登录失败阈值</small><strong>{{ loginPolicy.maxFailedAttempts || '—' }}</strong><p>达到后自动锁定</p></div></article>
+      <article v-if="canReadPolicy" class="so-summary-card orange"><span><ConsoleIcon name="bell" /></span><div><small>锁定时长</small><strong>{{ formatDuration(loginPolicy.lockoutDurationSeconds) }}</strong><p>超过时限自动恢复</p></div></article>
+      <article v-if="canReadPolicy" class="so-summary-card green"><span><ConsoleIcon name="settings" /></span><div><small>无操作退出</small><strong>{{ formatDuration(loginPolicy.idleTimeoutSeconds) }}</strong><p>超时后统一退出全部系统</p></div></article>
     </div>
 
     <section class="so-content">
@@ -121,18 +134,18 @@ onMounted(async () => {
       <p v-if="policyError" class="login-target-module__error" role="alert">{{ policyError }}</p>
       <p v-if="lockedError" class="login-target-module__error" role="alert">{{ lockedError }}</p>
 
-      <article class="so-card so-policy-card">
+      <article v-if="canReadPolicy" class="so-card so-policy-card">
         <header><div><h3>认证与锁定策略</h3><p>统一由 IAM / Security 模块执行，业务系统不保存密码和失败记录。</p></div><span class="so-status success">统一生效</span></header>
         <div class="so-policy-grid">
-          <label><span>最大失败次数</span><input v-model.number="loginPolicy.maxFailedAttempts" type="number" min="1" max="20" :disabled="policyLoading" /><small>达到阈值后锁定账号</small></label>
-          <label><span>锁定时长（秒）</span><input v-model.number="loginPolicy.lockoutDurationSeconds" type="number" min="60" :disabled="policyLoading" /><small>{{ formatDuration(loginPolicy.lockoutDurationSeconds) }}</small></label>
-          <label><span>失败记录重置（秒）</span><input v-model.number="loginPolicy.failureResetWindowSeconds" type="number" min="60" :disabled="policyLoading" /><small>{{ formatDuration(loginPolicy.failureResetWindowSeconds) }}</small></label>
-          <label><span>无操作退出（秒）</span><input v-model.number="loginPolicy.idleTimeoutSeconds" type="number" min="60" max="86400" :disabled="policyLoading" /><small>{{ formatDuration(loginPolicy.idleTimeoutSeconds) }}无操作后退出所有应用系统</small></label>
+          <label><span>最大失败次数</span><input v-model.number="loginPolicy.maxFailedAttempts" type="number" min="1" max="20" :disabled="policyLoading || !canUpdatePolicy" /><small>达到阈值后锁定账号</small></label>
+          <label><span>锁定时长（秒）</span><input v-model.number="loginPolicy.lockoutDurationSeconds" type="number" min="60" :disabled="policyLoading || !canUpdatePolicy" /><small>{{ formatDuration(loginPolicy.lockoutDurationSeconds) }}</small></label>
+          <label><span>失败记录重置（秒）</span><input v-model.number="loginPolicy.failureResetWindowSeconds" type="number" min="60" :disabled="policyLoading || !canUpdatePolicy" /><small>{{ formatDuration(loginPolicy.failureResetWindowSeconds) }}</small></label>
+          <label><span>无操作退出（秒）</span><input v-model.number="loginPolicy.idleTimeoutSeconds" type="number" min="60" max="86400" :disabled="policyLoading || !canUpdatePolicy" /><small>{{ formatDuration(loginPolicy.idleTimeoutSeconds) }}无操作后退出所有应用系统</small></label>
         </div>
-        <footer><button class="console-button primary" type="button" :disabled="policySaving" @click="saveLoginPolicy"><ConsoleIcon name="save" />{{ policySaving ? '保存中…' : '保存安全策略' }}</button><button class="console-button ghost" type="button" :disabled="policyLoading" @click="loadLoginPolicy">重新读取</button></footer>
+        <footer><button v-if="canUpdatePolicy" class="console-button primary" type="button" :disabled="policySaving" @click="saveLoginPolicy"><ConsoleIcon name="save" />{{ policySaving ? '保存中…' : '保存安全策略' }}</button><button class="console-button ghost" type="button" :disabled="policyLoading" @click="loadLoginPolicy">重新读取</button></footer>
       </article>
 
-      <article class="so-card so-table-card">
+      <article v-if="canReadLockedAccounts" class="so-card so-table-card">
         <header><div><h3>已锁定账号</h3><p>管理员可手动解锁，相关操作继续写入基础审计日志。</p></div><span class="so-status warning">{{ lockedAccounts.length }} 个</span></header>
         <div class="console-table-scroll">
           <table class="console-data-table">
@@ -146,7 +159,7 @@ onMounted(async () => {
                 <td>{{ item.failure_count ?? 0 }}</td>
                 <td class="console-mono">{{ formatDateTime(item.last_failed_at) }}</td>
                 <td class="console-mono">{{ formatDateTime(item.locked_until) }}</td>
-                <td class="console-actions-cell"><button class="console-text-button" type="button" @click="handleUnlockAccount(item)">手动解锁</button></td>
+                <td class="console-actions-cell"><button v-if="canUnlockAccount" class="console-text-button" type="button" @click="handleUnlockAccount(item)">手动解锁</button><span v-else>—</span></td>
               </tr>
             </tbody>
           </table>

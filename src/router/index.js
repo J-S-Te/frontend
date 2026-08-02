@@ -3,24 +3,32 @@ import LoginView from '@/modules/platform/auth/views/LoginView.vue'
 import ForbiddenView from '@/modules/platform/auth/views/ForbiddenView.vue'
 import PlatformConsoleView from '@/modules/platform/views/PlatformConsoleView.vue'
 import SubsystemPortalView from '@/modules/platform/views/SubsystemPortalView.vue'
-import ContractManagementView from '@/modules/contract_management/views/ContractManagementView.vue'
 import { getCurrentPrincipal } from '@/modules/platform/auth/api/auth'
 import { ensureContractSession } from '@/modules/contract_management/api/contract'
+import { getCRMSession } from '@/modules/customer_opportunity/api/client'
+import { ensurePortalSession } from '@/modules/customer_portal/api/portal'
 import { canAccessContractSection } from '@/modules/shared/authz/sys004'
 import { dispatchAuthorizationRefreshed } from '@/modules/platform/auth/utils/authorizationRefresh'
 import { hasAnyPermission as principalHasAnyPermission } from '@/modules/platform/auth/utils/permissions'
-import { DICTIONARY_ENTRY_PERMISSIONS } from '@/modules/platform/dictionaries/utils/dictionaryPermissions'
-import { IAM_ENTRY_PERMISSIONS } from '@/modules/platform/iam/utils/iamPermissions'
+import {
+  PLATFORM_AUDIT_VIEW_PERMISSION,
+  PLATFORM_SETTINGS_ENTRY_PERMISSIONS,
+  PLATFORM_SETTINGS_SECTION_KEYS,
+  visiblePlatformSettingsSections,
+} from '@/modules/platform/auth/utils/platformConsoleAccess'
 
-const contractSections = ['dashboard', 'customers', 'contracts', 'templates', 'approvals', 'rules', 'signing', 'reports']
+// Business systems are large, independent route boundaries. Lazy loading keeps
+// the platform login and subsystem portal from downloading every business UI
+// before the user chooses a system.
+const ContractManagementView = () => import('@/modules/contract_management/views/ContractManagementView.vue')
+const CustomerOpportunityView = () => import('@/modules/customer_opportunity/views/CustomerOpportunityView.vue')
+const CustomerPortalView = () => import('@/modules/customer_portal/views/CustomerPortalView.vue')
 
-const settingsSections = new Set([
-  'base',
-  'iam',
-  'notify',
-  'security',
-  'dict',
-])
+const contractSections = ['dashboard', 'intakes', 'customers', 'contracts', 'templates', 'approvals', 'rules', 'signing', 'reports']
+
+// 路由守卫与设置页签共享同一份权限模块键，新增设置模块时不会出现
+// “页面已展示、点击却被守卫重定向”的双份白名单漂移。
+const settingsSections = new Set(PLATFORM_SETTINGS_SECTION_KEYS)
 
 function normalizeSettingsSection(section) {
   return settingsSections.has(section) ? section : 'iam'
@@ -56,10 +64,8 @@ const router = createRouter({
       meta: {
         title: '系统设置',
         requiresAuth: true,
-        // 路由级 OR 权限：IAM、字典或审计任一实际权限均可进入设置区。
-        // 进入后由 PlatformConsoleView 和各模块继续按真实权限细分 Tab、数据与按钮。
-        // 后端 403 仍是最终安全边界，前端只负责避免无关的 user:read 门槛。
-        permission: [...IAM_ENTRY_PERMISSIONS, ...DICTIONARY_ENTRY_PERMISSIONS, 'platform:audit:view'],
+        // 只允许拥有至少一个真实设置模块权限的主体进入；审计权限不再放大为设置权限。
+        permission: PLATFORM_SETTINGS_ENTRY_PERMISSIONS,
       },
     },
     {
@@ -71,7 +77,7 @@ const router = createRouter({
         requiresAuth: true,
         // 注意：真实权限码是 platform:audit:view，不是 audit-log:read。
         // 后端 migrations/000011_seed_platform_defaults.sql 用的是 audit:view。
-        permission: 'platform:audit:view',
+        permission: PLATFORM_AUDIT_VIEW_PERMISSION,
       },
     },
     {
@@ -85,6 +91,18 @@ const router = createRouter({
       name: 'contract_management',
       component: ContractManagementView,
       meta: { title: '合同管理系统', requiresAuth: true, requiresContractSession: true },
+    },
+    {
+      path: '/customer-opportunity/:section?',
+      name: 'customer_opportunity',
+      component: CustomerOpportunityView,
+      meta: { title: '客户与商机管理', requiresAuth: true, requiresCRMSession: true },
+    },
+    {
+      path: '/customer-portal/:section?',
+      name: 'customer_portal',
+      component: CustomerPortalView,
+      meta: { title: '客户自助门户', requiresAuth: true, requiresPortalSession: true },
     },
     {
       path: '/:pathMatch(.*)*',
@@ -156,6 +174,25 @@ router.beforeEach(async (to) => {
     }
   }
 
+  if (to.meta.requiresCRMSession) {
+    try {
+      await getCRMSession()
+      return true
+    } catch {
+      // The CRM client starts its own OIDC redirect on 401. Other errors stay
+      // closed so a backend outage cannot fall through to the platform session.
+      return false
+    }
+  }
+
+  if (to.meta.requiresPortalSession) {
+    try {
+      return Boolean(await ensurePortalSession())
+    } catch {
+      return false
+    }
+  }
+
   try {
     // `/auth/me` 使用 HttpOnly Cookie，由后端同时校验 JWT 和服务端会话状态。
     // 任意校验失败（401、网络错误或其他异常）都按未登录处理，不能 fail-open。
@@ -165,6 +202,25 @@ router.beforeEach(async (to) => {
       dispatchAuthorizationRefreshed(principal, { changed: true })
     } catch {
       // 派发失败不影响导航本身。
+    }
+    if (to.name === 'settings') {
+      const requestedSection = normalizeSettingsSection(to.params.section)
+      const allowedSections = visiblePlatformSettingsSections(principal)
+      if (!allowedSections.includes(requestedSection)) {
+        const firstAllowedSection = allowedSections[0]
+        if (firstAllowedSection) {
+          return {
+            name: 'settings',
+            params: { section: firstAllowedSection },
+            query: { ...to.query, denied: requestedSection },
+            replace: true,
+          }
+        }
+        if (principalHasAnyPermission(principal, [PLATFORM_AUDIT_VIEW_PERMISSION])) {
+          return { name: 'audit', query: { denied: requestedSection }, replace: true }
+        }
+        return { name: 'forbidden', query: { from: to.fullPath } }
+      }
     }
     // 路由级权限硬拦截：路由 meta.permission 命中 / 不命中决定能否访问。
     // 基础能力平台是身份提供方，登录即可进入，但进入之后具体到某个 section / 业务模块
