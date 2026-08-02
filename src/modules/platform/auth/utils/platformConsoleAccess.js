@@ -10,6 +10,10 @@ export const PLATFORM_SETTINGS_SECTION_PERMISSIONS = Object.freeze({
     'platform:settings:read',
     'platform:settings:update',
   ]),
+  access: Object.freeze([
+    'platform:settings:read',
+    'platform:settings:update',
+  ]),
   iam: IAM_ENTRY_PERMISSIONS,
   notify: Object.freeze([
     'platform:notification-setting:read',

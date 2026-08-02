@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { AuthError, logoutCurrentSession } from '@/modules/platform/auth/api/auth'
 import IamSettingsModule from '@/modules/platform/iam/components/IamSettingsModule.vue'
+import PublicAccessSettingsModule from '@/modules/platform/settings/components/PublicAccessSettingsModule.vue'
 import EmployeeOnboardingModal from '@/modules/platform/iam/components/EmployeeOnboardingModal.vue'
 import NotificationCenterModule from '@/modules/platform/notifications/components/NotificationCenterModule.vue'
 import LoginSecurityModule from '@/modules/platform/security/components/LoginSecurityModule.vue'
@@ -130,6 +131,12 @@ const settingsTabs = [
     description: '维护平台名称与基础展示信息。',
     capabilities: ['平台名称', '平台简称'],
     permissions: PLATFORM_SETTINGS_SECTION_PERMISSIONS.base,
+  },
+  {
+    key: 'access', label: '对外访问', icon: 'globe', tone: 'blue',
+    description: '配置统一前端的公开地址与 OAuth HTTP 回调策略。',
+    capabilities: ['公开地址', 'HTTP 回调', '应用配置'],
+    permissions: PLATFORM_SETTINGS_SECTION_PERMISSIONS.access,
   },
   {
     key: 'iam', label: '身份、组织与授权', icon: 'organization', tone: 'violet',
@@ -777,6 +784,8 @@ onBeforeUnmount(() => {
               <div v-if="canReadPlatformSettings" class="console-form-actions"><button v-if="canUpdatePlatformSettings" class="console-button primary" type="button" :disabled="settingsSaving" @click="saveSettings"><ConsoleIcon name="save" />{{ settingsSaving ? '保存中…' : '保存设置' }}</button><button class="console-button ghost" type="button" :disabled="settingsLoading" @click="resetSettings">重新读取</button></div>
             </div>
           </div>
+
+          <PublicAccessSettingsModule v-else-if="!hasNoVisibleSettingsTab && activeSettingsTab === 'access'" @toast="showToast" />
 
           <IamSettingsModule v-else-if="!hasNoVisibleSettingsTab && activeSettingsTab === 'iam'" @toast="showToast" @employee-onboarding="openEmployeeOnboarding" />
 
