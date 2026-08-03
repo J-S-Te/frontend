@@ -6,6 +6,7 @@ import {
   ApplicationRegistryError,
   deleteApplicationRegistration,
   deleteEnvironment,
+  getSubsystemCapabilities,
   getSubsystemStatus,
   listApplications,
   listEnvironments,
@@ -45,10 +46,13 @@ const pendingDeleteEnvironment = ref(null)
 const deleteConfirmation = ref('')
 const environmentDeleteConfirmation = ref('')
 const onboardExistingApplicationId = ref('')
+const provisioningCapabilities = ref(null)
 
 const standardEnvironments = Object.freeze(['dev', 'test', 'staging', 'prod'])
-const isLoopbackHost = typeof window === 'undefined' || ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname)
-const preferredEnvironments = Object.freeze(isLoopbackHost ? standardEnvironments : ['prod', 'staging', 'test', 'dev'])
+const preferredEnvironments = computed(() => {
+  const supported = provisioningCapabilities.value?.supported_environments
+  return Array.isArray(supported) && supported.length > 0 ? supported : standardEnvironments
+})
 
 const appForm = reactive(emptyApplicationForm())
 const environmentForm = reactive(emptyEnvironmentForm())
@@ -82,20 +86,20 @@ const filteredApplications = computed(() => {
 const selectedApplication = computed(() => applications.value.find((item) => item.application_id === selectedApplicationId.value) || null)
 const selectedEnvironment = computed(() => environments.value.find((item) => item.environment_id === selectedEnvironmentId.value) || null)
 const onboardingExistingApplication = computed(() => Boolean(onboardExistingApplicationId.value))
+const isProductionProvisioning = computed(() => provisioningCapabilities.value?.deployment_mode === 'production')
+const automationUnavailable = computed(() => provisioningCapabilities.value?.automation_enabled === false)
+const supportedApplicationCodes = computed(() => {
+  const supported = provisioningCapabilities.value?.supported_application_codes
+  return Array.isArray(supported) ? supported : []
+})
 const availableOnboardEnvironments = computed(() => {
-  if (!onboardingExistingApplication.value) return standardEnvironments
+  const supported = preferredEnvironments.value
+  if (!onboardingExistingApplication.value) return supported
   const existing = new Set(environments.value.map((item) => item.environment))
-  return standardEnvironments.filter((environment) => !existing.has(environment))
+  return supported.filter((environment) => !existing.has(environment))
 })
 const onboardConfirmationCode = computed(() => `${onboardForm.applicationCode.trim().toLowerCase()}/${onboardForm.environment}`)
 const onboardPreset = computed(() => subsystemOnboardingPreset(onboardForm.applicationCode))
-const productionOnboardingError = computed(() => {
-	if (isLoopbackHost) return ''
-	if (onboardForm.environment !== 'prod') return '服务器生产部署 Agent 仅允许 prod 环境；开发和测试环境请在对应隔离部署中接入。'
-  if (onboardForm.applicationCode.trim().toLowerCase() !== 'contract_management') return '生产一键接入目前仅支持合同管理系统（contract_management/prod）。'
-  if (onboardForm.clientType !== 'confidential') return '生产合同管理必须使用 confidential 客户端。'
-  return ''
-})
 const canSubmitOnboard = computed(() => Boolean(
   props.canOnboard
   && !loading.value
@@ -105,7 +109,7 @@ const canSubmitOnboard = computed(() => Boolean(
   && onboardForm.publicBaseUrl.trim()
   && onboardForm.upstreamUrl.trim()
   && onboardForm.pathPrefix.trim()
-  && !productionOnboardingError.value
+  && !automationUnavailable.value
   && onboardConfirmation.value.trim() === onboardConfirmationCode.value,
 ))
 
@@ -138,12 +142,28 @@ function emptyOnboardForm() {
     applicationCode: '',
     applicationName: '',
     description: '',
-    environment: isLoopbackHost ? 'dev' : 'prod',
+    environment: 'prod',
     publicBaseUrl: typeof window === 'undefined' ? 'http://localhost:8081' : window.location.origin,
     upstreamUrl: '',
     pathPrefix: '',
     clientType: 'confidential',
   }
+}
+
+function applyContractProductionPreset() {
+  const defaults = provisioningCapabilities.value?.defaults || {}
+  Object.assign(onboardForm, {
+    applicationCode: defaults.application_code || 'contract_management',
+    applicationName: defaults.application_name || '合同管理系统',
+    description: defaults.description || '合同创建、审批与客户管理系统',
+    environment: defaults.environment || 'prod',
+    publicBaseUrl: defaults.public_base_url || (typeof window === 'undefined' ? 'http://localhost:8081' : window.location.origin),
+    upstreamUrl: defaults.upstream_url || 'http://contract-api:8081',
+    pathPrefix: defaults.path_prefix || '/contract_management',
+    clientType: defaults.client_type || 'confidential',
+  })
+  onboardConfirmation.value = ''
+  clearError()
 }
 
 function clearError() {
@@ -199,7 +219,11 @@ function statusClass(status) {
 }
 
 function environmentStatus(environment) {
-  return deploymentStates.value[environment.environment] || (environment.status === 'ACTIVE' ? 'UNKNOWN' : environment.status)
+  return deploymentStates.value[environment.environment]?.status || (environment.status === 'ACTIVE' ? 'UNKNOWN' : environment.status)
+}
+
+function environmentNextAction(environment) {
+  return deploymentStates.value[environment.environment]?.next_action || ''
 }
 
 function selectApplication(application) {
@@ -215,7 +239,7 @@ function selectApplication(application) {
 async function loadApplications(preferredApplicationId = selectedApplicationId.value) {
   if (!canReadApplications.value) return
   loading.value = true
-	clearError()
+  clearError()
   try {
     const data = await listApplications({ page: 1, pageSize: 100, status: '' })
     const items = Array.isArray(data?.items) ? data.items : []
@@ -229,6 +253,19 @@ async function loadApplications(preferredApplicationId = selectedApplicationId.v
     setError(error, '读取应用接入列表失败。')
   } finally {
     loading.value = false
+  }
+}
+
+async function loadProvisioningCapabilities() {
+  if (!canReadApplications.value) return
+  try {
+    provisioningCapabilities.value = await getSubsystemCapabilities()
+    if (provisioningCapabilities.value?.deployment_mode === 'production') {
+      applyContractProductionPreset()
+    }
+  } catch (error) {
+    provisioningCapabilities.value = null
+    setError(error, '读取部署 Agent 能力失败；后端仍会执行最终安全校验。')
   }
 }
 
@@ -251,10 +288,10 @@ async function loadEnvironments() {
     // 其他环境，使用 allSettled 保留成功结果并回退到环境自身状态。
     const states = await Promise.allSettled(environments.value.map(async (environment) => [
       environment.environment,
-      (await getSubsystemStatus({ applicationCode: application.code, environment: environment.environment }))?.status,
+      await getSubsystemStatus({ applicationCode: application.code, environment: environment.environment }),
     ]))
     deploymentStates.value = Object.fromEntries(states
-      .filter((result) => result.status === 'fulfilled' && result.value[1])
+      .filter((result) => result.status === 'fulfilled' && result.value[1]?.status)
       .map((result) => result.value))
   } catch (error) {
     environments.value = []
@@ -273,7 +310,8 @@ function toggleOnboarding() {
   Object.assign(onboardForm, emptyOnboardForm())
   onboardExistingApplicationId.value = ''
   onboardConfirmation.value = ''
-	clearError()
+  clearError()
+  if (isProductionProvisioning.value) applyContractProductionPreset()
   showOnboard.value = true
 }
 
@@ -288,7 +326,7 @@ function openApplicationEditor() {
     status: application.status || 'ACTIVE',
     version: application.version,
   })
-	clearError()
+  clearError()
   applicationEditorOpen.value = true
 }
 
@@ -296,7 +334,7 @@ async function saveApplication() {
   const application = selectedApplication.value
   if (!application || !canUpdateApplication.value || saving.value) return
   saving.value = true
-	clearError()
+  clearError()
   try {
     const updated = await updateApplication({
       applicationId: application.application_id,
@@ -329,16 +367,20 @@ function openEnvironmentEditor(environment) {
     status: environment.status || 'ACTIVE',
     version: environment.version,
   })
-	clearError()
+  clearError()
   environmentEditorOpen.value = true
 }
 
 function openOnboardEnvironment() {
   const application = selectedApplication.value
   if (!application || !props.canOnboard) return
-  const environment = preferredEnvironments.find((item) => !environments.value.some((existing) => existing.environment === item))
+  if (supportedApplicationCodes.value.length > 0 && !supportedApplicationCodes.value.includes(application.code)) {
+    setError(null, `当前部署 Agent 不支持应用 ${application.code}，不能在此服务器新增运行环境。`)
+    return
+  }
+  const environment = preferredEnvironments.value.find((item) => !environments.value.some((existing) => existing.environment === item))
   if (!environment) {
-    errorMessage.value = 'dev、test、staging、prod 环境均已接入，不能重复创建。'
+    setError(null, `${preferredEnvironments.value.join('、')} 环境均已接入，不能重复创建。`)
     return
   }
   onboardExistingApplicationId.value = application.application_id
@@ -362,7 +404,7 @@ async function saveEnvironment() {
   if (!application || saving.value) return
   if (!environmentForm.version || !canUpdateEnvironment.value) return
   saving.value = true
-	clearError()
+  clearError()
   try {
     const saved = await updateEnvironment({
       applicationId: application.application_id,
@@ -389,14 +431,14 @@ async function saveEnvironment() {
 function openDeleteApplication(application) {
   pendingDeleteApplication.value = application
   deleteConfirmation.value = ''
-	clearError()
+  clearError()
 }
 
 async function confirmDeleteApplication() {
   const application = pendingDeleteApplication.value
   if (!application || deleteConfirmation.value.trim() !== application.code || !canUpdateApplication.value || saving.value) return
   saving.value = true
-	clearError()
+  clearError()
   try {
     await deleteApplicationRegistration({ applicationId: application.application_id, version: application.version, confirmationCode: application.code })
     pendingDeleteApplication.value = null
@@ -412,12 +454,12 @@ async function confirmDeleteApplication() {
 
 function openDeleteEnvironment(environment) {
   if (environment.environment === 'dev') {
-    errorMessage.value = 'dev 环境不能通过管理页面删除；如需清理请保留其开发数据卷。'
+    setError(null, 'dev 环境不能通过管理页面删除；如需清理请保留其开发数据卷。')
     return
   }
   pendingDeleteEnvironment.value = environment
   environmentDeleteConfirmation.value = ''
-	clearError()
+  clearError()
 }
 
 async function confirmDeleteEnvironment() {
@@ -426,7 +468,7 @@ async function confirmDeleteEnvironment() {
   const confirmationCode = `${application?.code || ''}/${environment?.environment || ''}`
   if (!application || !environment || environmentDeleteConfirmation.value.trim() !== confirmationCode || !canDeleteEnvironment.value || !canManageRuntime.value || saving.value) return
   saving.value = true
-	clearError()
+  clearError()
   try {
     // 先清理运行时，再删除控制面环境记录。若 Agent 清理失败，保留数据库配置以便重试，
     // 防止出现“记录已删但容器、密钥和网关入口仍存留”的孤儿运行时。
@@ -453,7 +495,7 @@ async function reapplyEnvironment(environment, retry = false) {
   const application = selectedApplication.value
   if (!application || !canManageRuntime.value || saving.value) return
   saving.value = true
-	clearError()
+  clearError()
   try {
     const action = retry ? retrySubsystem : updateSubsystemRuntime
     await action({ applicationCode: application.code, environment: environment.environment })
@@ -468,10 +510,6 @@ async function reapplyEnvironment(environment, retry = false) {
 
 async function submitOnboarding() {
   if (!canSubmitOnboard.value) return
-  if (productionOnboardingError.value) {
-		setError(null, productionOnboardingError.value)
-    return
-  }
   // 已纳入统一 Compose 的子系统只允许固定服务名和网关前缀；兼容旧别名时先归一化，
   // 再校验，避免数据库登记地址与实际 Docker 网络拓扑分叉。
   if (normalizeIntegratedSubsystemOnboarding(onboardForm)) {
@@ -479,11 +517,11 @@ async function submitOnboarding() {
   }
   const presetError = validateIntegratedSubsystemOnboarding(onboardForm)
   if (presetError) {
-		setError(null, presetError)
+    setError(null, presetError)
     return
   }
   saving.value = true
-	clearError()
+  clearError()
   try {
     const result = await onboardSubsystem({
       applicationCode: onboardForm.applicationCode.trim().toLowerCase(),
@@ -517,12 +555,10 @@ watch(selectedApplicationId, () => { loadEnvironments() }, { immediate: true })
 watch(() => onboardForm.applicationCode, (applicationCode, previousCode) => {
   applySubsystemOnboardingPreset(onboardForm, String(previousCode || '').trim().toLowerCase())
 })
-watch(() => [onboardForm.applicationCode, onboardForm.environment], ([applicationCode, environment]) => {
-	if (!isLoopbackHost && String(applicationCode || '').trim().toLowerCase() === 'contract_management') {
-    onboardForm.clientType = 'confidential'
-  }
+onMounted(() => {
+  loadProvisioningCapabilities()
+  loadApplications()
 })
-onMounted(() => { loadApplications() })
 </script>
 
 <template>
@@ -540,19 +576,23 @@ onMounted(() => { loadApplications() })
       </header>
 
       <form v-if="showOnboard" class="application-registry-onboard" @submit.prevent="submitOnboarding">
-        <div class="application-registry-section-title"><div><strong>新增子系统接入</strong><small>首次接入一个不存在的应用环境；已有环境请使用下面的编辑或重试。</small></div></div>
+        <div class="application-registry-section-title">
+          <div><strong>新增子系统接入</strong><small>首次接入一个不存在的应用环境；已有环境请使用下面的编辑或重试。部署能力与允许范围最终由后端 Agent 校验。</small></div>
+          <button v-if="!onboardingExistingApplication" class="console-button ghost small" type="button" @click="applyContractProductionPreset">快速填写合同生产配置</button>
+        </div>
+        <p v-if="automationUnavailable" class="application-registry-inline-warning">当前环境未启用受控部署 Agent，不能执行一键接入；请先由部署人员发布平台生产部署资产。</p>
+        <p v-else-if="isProductionProvisioning" class="application-registry-inline-note">当前服务器为生产模式，只允许合同管理系统 contract_management/prod；固定参数由平台自动填写，后端会再次校验。</p>
         <div class="console-form-grid">
-          <label class="console-form-item"><span>应用编码</span><input v-model="onboardForm.applicationCode" :disabled="onboardingExistingApplication" placeholder="customer_management" /></label>
-          <label class="console-form-item"><span>应用名称</span><input v-model="onboardForm.applicationName" :disabled="onboardingExistingApplication" placeholder="客户管理系统" /></label>
-          <label class="console-form-item"><span>环境</span><select v-model="onboardForm.environment"><option v-for="environment in availableOnboardEnvironments" :key="environment" :value="environment">{{ environment }}</option></select></label>
-		  <label class="console-form-item"><span>客户端类型</span><select v-model="onboardForm.clientType" :disabled="!isLoopbackHost"><option value="confidential">confidential（推荐）</option><option value="public">public</option></select><small v-if="!isLoopbackHost">服务器生产接入固定使用 confidential</small></label>
-          <label class="console-form-item"><span>Public BaseURL</span><input v-model="onboardForm.publicBaseUrl" placeholder="http://localhost:8081" /></label>
+          <label class="console-form-item"><span>应用编码</span><input v-model="onboardForm.applicationCode" :disabled="onboardingExistingApplication || isProductionProvisioning" placeholder="customer_management" /></label>
+          <label class="console-form-item"><span>应用名称</span><input v-model="onboardForm.applicationName" :disabled="onboardingExistingApplication || isProductionProvisioning" placeholder="客户管理系统" /></label>
+          <label class="console-form-item"><span>环境</span><select v-model="onboardForm.environment" :disabled="isProductionProvisioning"><option v-for="environment in availableOnboardEnvironments" :key="environment" :value="environment">{{ environment }}</option></select></label>
+          <label class="console-form-item"><span>客户端类型</span><select v-model="onboardForm.clientType" :disabled="isProductionProvisioning"><option value="confidential">confidential（推荐）</option><option value="public">public</option></select></label>
+          <label class="console-form-item"><span>Public BaseURL</span><input v-model="onboardForm.publicBaseUrl" :readonly="isProductionProvisioning" placeholder="http://localhost:8081" /></label>
           <label class="console-form-item"><span>UpstreamURL</span><input v-model="onboardForm.upstreamUrl" :readonly="Boolean(onboardPreset)" placeholder="http://customer-api:8080" /><small v-if="onboardPreset">统一 Docker 编排固定地址</small></label>
           <label class="console-form-item"><span>门户路径前缀</span><input v-model="onboardForm.pathPrefix" :readonly="Boolean(onboardPreset)" placeholder="/customer_management" /><small v-if="onboardPreset">统一前端固定路径</small></label>
           <label class="console-form-item"><span>应用说明</span><input v-model="onboardForm.description" placeholder="可选" /></label>
           <label class="console-form-item application-registry-confirm"><span>确认码：{{ onboardConfirmationCode || '应用编码/环境' }}</span><input v-model="onboardConfirmation" :placeholder="onboardConfirmationCode || '应用编码/环境'" autocomplete="off" /></label>
         </div>
-        <p v-if="productionOnboardingError" class="application-registry-inline-warning">{{ productionOnboardingError }}</p>
         <div class="console-form-actions"><button class="console-button primary" type="submit" :disabled="!canSubmitOnboard || saving"><ConsoleIcon name="save" />{{ saving ? '接入中…' : '确认接入并部署' }}</button><small>若应用环境已存在，平台会阻止覆盖；请在下方选择后更新或重试。</small></div>
       </form>
 
@@ -597,6 +637,7 @@ onMounted(() => { loadApplications() })
               <article v-for="environment in environments" :key="environment.environment_id" class="application-registry-environment" :class="{ 'is-selected': environment.environment_id === selectedEnvironmentId }" @click="selectEnvironment(environment)">
                 <div class="application-registry-environment-main"><strong>{{ environment.environment }}</strong><span class="application-registry-status" :class="statusClass(environmentStatus(environment))">{{ statusLabel(environmentStatus(environment)) }}</span><small>配置版本 {{ environment.version }}</small></div>
                 <div class="application-registry-environment-uri"><span>{{ environment.base_url || '未设置 BaseURL' }}{{ environment.path_prefix || '' }}</span><small>{{ environment.upstream_url || '未设置 UpstreamURL' }}</small></div>
+                <p v-if="environmentNextAction(environment)" class="application-registry-environment-guidance"><strong>处理建议：</strong>{{ environmentNextAction(environment) }}</p>
                 <div class="application-registry-environment-actions"><button v-if="canUpdateEnvironment" class="console-button ghost small" type="button" @click.stop="openEnvironmentEditor(environment)"><ConsoleIcon name="settings" />设置</button><button v-if="canRetryRuntime && environmentStatus(environment) === 'PROVISION_FAILED'" class="console-button ghost small" type="button" :disabled="saving" @click.stop="reapplyEnvironment(environment, true)"><ConsoleIcon name="reset" />重试</button><button v-if="canManageRuntime && environmentStatus(environment) === 'READY'" class="console-button ghost small" type="button" :disabled="saving" @click.stop="reapplyEnvironment(environment)"><ConsoleIcon name="reset" />更新运行时</button><button v-if="canDeleteEnvironment && environment.environment !== 'dev'" class="console-button danger small" type="button" @click.stop="openDeleteEnvironment(environment)"><ConsoleIcon name="close" />删除</button></div>
               </article>
             </div>
@@ -678,6 +719,7 @@ onMounted(() => { loadApplications() })
 .application-registry-environment-main small { color: #94a3b8; font-size: 10px; }
 .application-registry-environment-uri { display: grid; min-width: 0; gap: 3px; margin: 7px 0; color: #475569; font-size: 11px; }
 .application-registry-environment-uri small { color: #94a3b8; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.application-registry-environment-guidance { margin: 7px 0; color: #b45309; font-size: 11px; line-height: 1.55; }
 .application-registry-environment-actions { justify-content: flex-end; }
 .application-registry-empty { display: grid; min-height: 180px; place-items: center; align-content: center; gap: 7px; margin-top: 20px; color: #94a3b8; text-align: center; }
 .application-registry-empty :deep(svg) { width: 28px; height: 28px; color: #60a5fa; }
