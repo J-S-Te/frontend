@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { afterEach, test } from 'node:test'
 import {
+  ApplicationRegistryError,
   createApplication,
   createEnvironment,
   deleteApplicationRegistration,
@@ -54,6 +55,23 @@ test('createApplication persists through the registry API with session credentia
     description: null,
     status: 'ACTIVE',
   })
+})
+
+test('application registry errors retain actionable detail and request trace id', async () => {
+  globalThis.fetch = async () => jsonResponse({
+    code: 'PLATFORM_DEPENDENCY_UNAVAILABLE',
+    message: '当前部署未启用受控部署 Agent',
+    request_id: 'trace-1',
+    details: { next_action: '升级生产部署资产后重试' },
+  }, { ok: false, status: 503 })
+
+  await assert.rejects(
+    () => getSubsystemStatus({ applicationCode: 'contract_management', environment: 'prod' }),
+    (error) => error instanceof ApplicationRegistryError
+      && error.traceId === 'trace-1'
+      && error.nextAction === '升级生产部署资产后重试'
+      && error.details.next_action === '升级生产部署资产后重试',
+  )
 })
 
 test('deleteApplicationRegistration sends the stable code confirmation and optimistic-lock version', async () => {
@@ -256,5 +274,5 @@ test('adding an environment keeps the selected application identity immutable an
   assert.match(onboardingModule, /onboardExistingApplicationId/)
   assert.match(onboardingModule, /:disabled="onboardingExistingApplication"/)
   assert.match(onboardingModule, /availableOnboardEnvironments/)
-  assert.match(onboardingModule, /standardEnvironments\.find\(\(item\) => !environments\.value\.some/)
+  assert.match(onboardingModule, /preferredEnvironments\.find\(\(item\) => !environments\.value\.some/)
 })

@@ -188,6 +188,7 @@ function statusLabel(status) {
     PROVISION_FAILED: '部署失败',
     DRAINING: '下线中',
     OFFBOARDED: '已下线',
+    UNKNOWN: '状态未知',
   }[status] || status || '未知'
 }
 
@@ -223,7 +224,7 @@ async function loadApplications(preferredApplicationId = selectedApplicationId.v
     selectedApplicationId.value = nextId
   } catch (error) {
     applications.value = []
-    errorMessage.value = error instanceof ApplicationRegistryError ? error.message : '读取应用接入列表失败。'
+    setError(error, '读取应用接入列表失败。')
   } finally {
     loading.value = false
   }
@@ -255,7 +256,7 @@ async function loadEnvironments() {
       .map((result) => result.value))
   } catch (error) {
     environments.value = []
-    errorMessage.value = error instanceof ApplicationRegistryError ? error.message : '读取应用环境失败。'
+    setError(error, '读取应用环境失败。')
   } finally {
     environmentsLoading.value = false
   }
@@ -308,7 +309,7 @@ async function saveApplication() {
     applicationEditorOpen.value = false
     notify('应用登记信息已更新。')
   } catch (error) {
-    errorMessage.value = error instanceof ApplicationRegistryError ? error.message : '更新应用登记失败。'
+    setError(error, '更新应用登记失败。')
   } finally {
     saving.value = false
   }
@@ -377,7 +378,7 @@ async function saveEnvironment() {
     selectedEnvironmentId.value = saved.environment_id
     await loadEnvironments()
   } catch (error) {
-    errorMessage.value = error instanceof ApplicationRegistryError ? error.message : '保存应用环境失败。'
+    setError(error, '保存应用环境失败。')
   } finally {
     saving.value = false
   }
@@ -401,7 +402,7 @@ async function confirmDeleteApplication() {
     notify(`应用「${application.name || application.code}」已退役。`)
     await loadApplications('')
   } catch (error) {
-    errorMessage.value = error instanceof ApplicationRegistryError ? error.message : '退役应用失败。'
+    setError(error, '退役应用失败。')
   } finally {
     saving.value = false
   }
@@ -440,7 +441,7 @@ async function confirmDeleteEnvironment() {
     await loadApplications(application.application_id)
     await loadEnvironments()
   } catch (error) {
-    errorMessage.value = error instanceof ApplicationRegistryError ? error.message : '清理应用环境失败，平台配置未删除。'
+    setError(error, '清理应用环境失败，平台配置未删除。')
   } finally {
     saving.value = false
   }
@@ -457,7 +458,7 @@ async function reapplyEnvironment(environment, retry = false) {
     notify(retry ? '部署失败环境已重新尝试。' : '子系统已重新部署。')
     await loadEnvironments()
   } catch (error) {
-    errorMessage.value = error instanceof ApplicationRegistryError ? error.message : '部署 Agent 操作失败。'
+    setError(error, '部署 Agent 操作失败。')
   } finally {
     saving.value = false
   }
@@ -499,7 +500,7 @@ async function submitOnboarding() {
     emit('completed', result)
     await loadApplications(result?.application?.application_id || '')
   } catch (error) {
-    errorMessage.value = error instanceof ApplicationRegistryError ? error.message : '子系统接入失败。'
+    setError(error, '子系统接入失败。')
   } finally {
     saving.value = false
   }
@@ -513,6 +514,11 @@ function selectEnvironment(environment) {
 watch(selectedApplicationId, () => { loadEnvironments() }, { immediate: true })
 watch(() => onboardForm.applicationCode, (applicationCode, previousCode) => {
   applySubsystemOnboardingPreset(onboardForm, String(previousCode || '').trim().toLowerCase())
+})
+watch(() => [onboardForm.applicationCode, onboardForm.environment], ([applicationCode, environment]) => {
+  if (!isLoopbackHost && environment === 'prod' && String(applicationCode || '').trim().toLowerCase() === 'contract_management') {
+    onboardForm.clientType = 'confidential'
+  }
 })
 onMounted(() => { loadApplications() })
 </script>
@@ -537,17 +543,22 @@ onMounted(() => { loadApplications() })
           <label class="console-form-item"><span>应用编码</span><input v-model="onboardForm.applicationCode" :disabled="onboardingExistingApplication" placeholder="customer_management" /></label>
           <label class="console-form-item"><span>应用名称</span><input v-model="onboardForm.applicationName" :disabled="onboardingExistingApplication" placeholder="客户管理系统" /></label>
           <label class="console-form-item"><span>环境</span><select v-model="onboardForm.environment"><option v-for="environment in availableOnboardEnvironments" :key="environment" :value="environment">{{ environment }}</option></select></label>
-          <label class="console-form-item"><span>客户端类型</span><select v-model="onboardForm.clientType"><option value="confidential">confidential（推荐）</option><option value="public">public</option></select></label>
+          <label class="console-form-item"><span>客户端类型</span><select v-model="onboardForm.clientType" :disabled="!isLoopbackHost && onboardForm.environment === 'prod'"><option value="confidential">confidential（推荐）</option><option value="public">public</option></select><small v-if="!isLoopbackHost && onboardForm.environment === 'prod'">生产合同接入固定使用 confidential</small></label>
           <label class="console-form-item"><span>Public BaseURL</span><input v-model="onboardForm.publicBaseUrl" placeholder="http://localhost:8081" /></label>
           <label class="console-form-item"><span>UpstreamURL</span><input v-model="onboardForm.upstreamUrl" :readonly="Boolean(onboardPreset)" placeholder="http://customer-api:8080" /><small v-if="onboardPreset">统一 Docker 编排固定地址</small></label>
           <label class="console-form-item"><span>门户路径前缀</span><input v-model="onboardForm.pathPrefix" :readonly="Boolean(onboardPreset)" placeholder="/customer_management" /><small v-if="onboardPreset">统一前端固定路径</small></label>
           <label class="console-form-item"><span>应用说明</span><input v-model="onboardForm.description" placeholder="可选" /></label>
           <label class="console-form-item application-registry-confirm"><span>确认码：{{ onboardConfirmationCode || '应用编码/环境' }}</span><input v-model="onboardConfirmation" :placeholder="onboardConfirmationCode || '应用编码/环境'" autocomplete="off" /></label>
         </div>
+        <p v-if="productionOnboardingError" class="application-registry-inline-warning">{{ productionOnboardingError }}</p>
         <div class="console-form-actions"><button class="console-button primary" type="submit" :disabled="!canSubmitOnboard || saving"><ConsoleIcon name="save" />{{ saving ? '接入中…' : '确认接入并部署' }}</button><small>若应用环境已存在，平台会阻止覆盖；请在下方选择后更新或重试。</small></div>
       </form>
 
-      <p v-if="errorMessage" class="application-registry-error" role="alert">{{ errorMessage }}</p>
+      <div v-if="errorMessage" class="application-registry-error" role="alert">
+        <strong>{{ errorMessage }}</strong>
+        <span v-if="errorNextAction">处理建议：{{ errorNextAction }}</span>
+        <small v-if="errorTraceId">追踪号：{{ errorTraceId }}</small>
+      </div>
 
       <div v-if="!canReadApplications" class="application-registry-empty"><ConsoleIcon name="shield" /><strong>当前账号没有应用读取权限</strong><p>请联系平台管理员授予 platform:application:read。</p></div>
       <div v-else class="application-registry-layout">
@@ -576,7 +587,7 @@ onMounted(() => { loadApplications() })
           </form>
 
           <section class="application-registry-panel">
-            <header class="application-registry-panel-head"><div><h4>部署环境</h4><p>维护 Public BaseURL、UpstreamURL、门户路径和运行状态。删除环境前会先清理容器、配置文件和网关入口。</p></div><button v-if="props.canOnboard && selectedApplication.status !== 'RETIRED'" class="console-button primary small" type="button" @click="openOnboardEnvironment"><ConsoleIcon name="save" />新增接入环境</button></header>
+            <header class="application-registry-panel-head"><div><h4>部署环境</h4><p>维护 Public BaseURL、UpstreamURL、门户路径和运行状态。生产下线会停止合同 API 并保留数据库与受控运行配置，本地独立子系统按 Agent 策略清理。</p></div><button v-if="props.canOnboard && selectedApplication.status !== 'RETIRED'" class="console-button primary small" type="button" @click="openOnboardEnvironment"><ConsoleIcon name="save" />新增接入环境</button></header>
             <div v-if="!canReadEnvironments" class="application-registry-empty compact"><ConsoleIcon name="shield" /><span>当前账号没有 platform:application-environment:read，不能读取部署环境。</span></div>
             <div v-else-if="environmentsLoading" class="application-registry-list-state">正在读取环境…</div>
             <div v-else-if="!environments.length" class="application-registry-empty compact"><ConsoleIcon name="info" /><span>当前应用还没有部署环境。</span></div>
@@ -606,7 +617,7 @@ onMounted(() => { loadApplications() })
     </div>
 
     <div v-if="pendingDeleteEnvironment" class="application-registry-modal-backdrop" role="presentation" @click.self="pendingDeleteEnvironment = null">
-      <section class="application-registry-modal" role="dialog" aria-modal="true" aria-label="删除环境确认"><h3>删除环境 {{ selectedApplication.code }}/{{ pendingDeleteEnvironment.environment }}</h3><p>平台会先停止容器、删除 `.env.local`、移除网关入口，再删除环境记录及其派生登录目标和 OAuth Client。</p><label class="console-form-item"><span>请输入确认码：{{ selectedApplication.code }}/{{ pendingDeleteEnvironment.environment }}</span><input v-model="environmentDeleteConfirmation" autocomplete="off" /></label><footer class="console-form-actions"><button class="console-button danger" type="button" :disabled="environmentDeleteConfirmation.trim() !== `${selectedApplication.code}/${pendingDeleteEnvironment.environment}` || saving" @click="confirmDeleteEnvironment">确认清理并删除</button><button class="console-button ghost" type="button" @click="pendingDeleteEnvironment = null">取消</button></footer></section>
+      <section class="application-registry-modal" role="dialog" aria-modal="true" aria-label="删除环境确认"><h3>删除环境 {{ selectedApplication.code }}/{{ pendingDeleteEnvironment.environment }}</h3><p>平台会先按受控 Agent 策略下线运行时，再删除环境记录及其派生登录目标和 OAuth Client。生产合同下线仅停止 API，保留数据库、备份和服务器运行配置以便恢复。</p><label class="console-form-item"><span>请输入确认码：{{ selectedApplication.code }}/{{ pendingDeleteEnvironment.environment }}</span><input v-model="environmentDeleteConfirmation" autocomplete="off" /></label><footer class="console-form-actions"><button class="console-button danger" type="button" :disabled="environmentDeleteConfirmation.trim() !== `${selectedApplication.code}/${pendingDeleteEnvironment.environment}` || saving" @click="confirmDeleteEnvironment">确认下线并删除控制面记录</button><button class="console-button ghost" type="button" @click="pendingDeleteEnvironment = null">取消</button></footer></section>
     </div>
   </section>
 </template>
@@ -623,7 +634,9 @@ onMounted(() => { loadApplications() })
 .application-registry-section-title strong, .application-registry-section-title small { display: block; }
 .application-registry-section-title small { margin-top: 4px; color: #64748b; font-size: 12px; }
 .application-registry-confirm { grid-column: span 2; }
-.application-registry-error { margin: 14px 0 0; padding: 10px 12px; color: #b91c1c; border: 1px solid #fecaca; border-radius: 8px; background: #fff7f7; font-size: 12px; line-height: 1.55; }
+.application-registry-error { display: grid; gap: 4px; margin: 14px 0 0; padding: 10px 12px; color: #b91c1c; border: 1px solid #fecaca; border-radius: 8px; background: #fff7f7; font-size: 12px; line-height: 1.55; }
+.application-registry-error span, .application-registry-error small { color: #7f1d1d; }
+.application-registry-inline-warning { margin: 10px 0 0; color: #b45309; font-size: 12px; }
 .application-registry-layout { display: grid; grid-template-columns: 290px minmax(0, 1fr); gap: 18px; margin-top: 20px; }
 .application-registry-sidebar { min-width: 0; padding: 14px; border: 1px solid #e2e8f0; border-radius: 12px; background: #f8fafc; }
 .application-registry-sidebar-head { align-items: center; }
