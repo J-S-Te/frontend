@@ -153,6 +153,11 @@ export async function listContracts(params = {}) {
   return Array.isArray(data) ? data : []
 }
 
+export async function listContractLifecycle(contractId) {
+  const data = await request(`/contracts/${encodeURIComponent(contractId)}/lifecycle`)
+  return Array.isArray(data) ? data : []
+}
+
 export async function listOpportunityIntakes(params = {}) {
   const search = new URLSearchParams(params).toString()
   let data

@@ -21,5 +21,5 @@ test('admin metric cards open filtered contract details', () => {
 
 test('admin dashboard resolves the full contract before opening DOCX preview', () => {
   assert.match(source, /function openDashboardContract\(contract\) \{[\s\S]*contracts\.value\.find\(\(item\) => item\.recordId === contract\.recordId\)[\s\S]*openContract/)
-  assert.match(source, /if \(!contract\.templateId\) return[\s\S]*previewContractDocument\(contract\.recordId\)/)
+  assert.match(source, /if \(contract\.templateId\) \{[\s\S]*previewContractDocument\(contract\.recordId\)/)
 })

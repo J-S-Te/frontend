@@ -47,6 +47,13 @@ test('saved template contracts render formatted HTML instead of plain text', () 
   assert.match(source, /ContractDocumentPreview[^>]*:html="selectedContractPreviewHTML"/)
 })
 
+test('contract detail shows persisted lifecycle transitions', () => {
+  assert.match(source, /listContractLifecycle\(contract\.recordId\)/)
+  assert.match(source, /<h3>流转明细<\/h3>/)
+  assert.match(source, /contractStatusLabel\(event\.from_status\)[\s\S]*contractStatusLabel\(event\.to_status\)/)
+  assert.match(source, /formatDateTime\(event\.occurred_at\)/)
+})
+
 test('approval progress renders its template contract with document formatting', () => {
   assert.match(source, /listOpportunityIntakes,\s*previewApprovalContract,\s*previewContractTemplate,/)
   assert.match(source, /previewApprovalContract\(approval\.id\)/)

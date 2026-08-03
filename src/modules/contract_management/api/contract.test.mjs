@@ -45,6 +45,11 @@ test('saved contracts expose their formatted document preview', () => {
   assert.match(source, /`\/contracts\/\$\{encodeURIComponent\(contractId\)\}\/preview`/)
 })
 
+test('contract details load the persisted lifecycle timeline', () => {
+  assert.match(source, /listContractLifecycle\(contractId\)/)
+  assert.match(source, /`\/contracts\/\$\{encodeURIComponent\(contractId\)\}\/lifecycle`/)
+})
+
 test('admin dashboard reads the tenant contract summary endpoint', () => {
   assert.match(source, /getContractDashboard\(\)[\s\S]*request\('\/dashboard'\)/)
 })

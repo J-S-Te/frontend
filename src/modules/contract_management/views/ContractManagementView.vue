@@ -20,6 +20,7 @@ import {
   listApprovalTasks,
   listContractTemplates,
   listContracts,
+  listContractLifecycle,
   listOpportunityIntakes,
   previewApprovalContract,
   previewContractTemplate,
@@ -262,6 +263,9 @@ const selectedContract = ref(null)
 const selectedContractPreviewHTML = ref('')
 const selectedContractPreviewLoading = ref(false)
 const selectedContractPreviewError = ref('')
+const selectedContractLifecycle = ref([])
+const selectedContractLifecycleLoading = ref(false)
+const selectedContractLifecycleError = ref('')
 const selectedApproval = ref(null)
 const createDialogOpen = ref(false)
 const notificationOpen = ref(false)
@@ -467,22 +471,41 @@ async function openContract(contract) {
   selectedContract.value = contract
   selectedContractPreviewHTML.value = ''
   selectedContractPreviewError.value = ''
-  if (!contract.templateId) return
-  selectedContractPreviewLoading.value = true
-  try {
-    const result = await previewContractDocument(contract.recordId)
-    selectedContractPreviewHTML.value = result?.html || ''
-  } catch (error) {
-    selectedContractPreviewError.value = error?.message || '读取格式化合同失败'
-  } finally {
-    selectedContractPreviewLoading.value = false
+  selectedContractLifecycle.value = []
+  selectedContractLifecycleError.value = ''
+  selectedContractLifecycleLoading.value = true
+  const requests = [listContractLifecycle(contract.recordId)
+    .then((events) => { selectedContractLifecycle.value = events })
+    .catch((error) => { selectedContractLifecycleError.value = error?.message || '读取合同流转明细失败' })
+    .finally(() => { selectedContractLifecycleLoading.value = false })]
+  if (contract.templateId) {
+    selectedContractPreviewLoading.value = true
+    requests.push(previewContractDocument(contract.recordId)
+      .then((result) => { selectedContractPreviewHTML.value = result?.html || '' })
+      .catch((error) => { selectedContractPreviewError.value = error?.message || '读取格式化合同失败' })
+      .finally(() => { selectedContractPreviewLoading.value = false }))
   }
+  await Promise.all(requests)
 }
 
 function closeContract() {
   selectedContract.value = null
   selectedContractPreviewHTML.value = ''
   selectedContractPreviewError.value = ''
+  selectedContractLifecycle.value = []
+  selectedContractLifecycleError.value = ''
+}
+
+const lifecycleReasonLabels = {
+  'contract created': '创建合同',
+  'submitted for approval': '提交合同审批',
+  'all approval nodes passed': '全部审批节点已通过',
+  'approval completed; contract activated': '审批完成，合同生效',
+  'contract end date passed; automatically archived': '合同到期，系统自动归档',
+}
+
+function lifecycleReason(reason) {
+  return lifecycleReasonLabels[reason] || reason || '无备注'
 }
 
 function normalizeApproval(item) {
@@ -1307,7 +1330,14 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
     </div>
 
     <div v-if="selectedContract" class="contract-modal-mask" @click.self="closeContract">
-      <article class="contract-detail-modal contract-document-modal"><header><div><span class="contract-badge" :class="statusTone(selectedContract.status)"><i></i>{{ selectedContract.status }}</span><h2>{{ selectedContract.name }}</h2><p>{{ selectedContract.id }}</p></div><button type="button" aria-label="关闭" @click="closeContract"><ConsoleIcon name="close" /></button></header><div class="contract-detail-highlight"><div><span>合同金额</span><strong>{{ formatContractAmount(selectedContract) }}</strong></div><div><span>更新日期</span><strong>{{ selectedContract.updatedAt }}</strong></div><div><span>负责人姓名</span><strong>{{ selectedContract.owner }}</strong></div></div><section><h3>基本信息</h3><dl><div><dt>合同类型</dt><dd>{{ selectedContract.type }}</dd></div><div><dt>服务类型</dt><dd>{{ selectedContract.serviceType }}</dd></div><div><dt>创建日期</dt><dd>{{ selectedContract.createdAt }}</dd></div><div><dt>到期日期</dt><dd>{{ selectedContract.endDate }}</dd></div></dl></section><section><h3>合同内容</h3><div v-if="selectedContractPreviewLoading" class="contract-modal-loading">正在读取格式化合同…</div><p v-else-if="selectedContractPreviewError" class="contract-session-error">{{ selectedContractPreviewError }}</p><ContractDocumentPreview v-else-if="selectedContractPreviewHTML" class="contract-saved-document-preview" title="合同正文预览" :html="selectedContractPreviewHTML" /><p v-else class="contract-approval-summary">{{ selectedContract.content || '未填写合同内容' }}</p><label v-if="selectedContract.status === '草稿' && can('contract.create')" class="contract-check-label"><input v-model="termsIdentical" type="checkbox" /><span>本合同条款与关联历史合同一致（参与审批规则匹配）</span></label></section><footer><button class="contract-button secondary" type="button" @click="closeContract">关闭</button><button v-if="selectedContract.status === '草稿' && can('contract.create')" class="contract-button primary" type="button" :disabled="submittingContract" @click="submitSelectedContract">{{ submittingContract ? '正在提交…' : '提交审批' }}</button></footer></article>
+      <article class="contract-detail-modal contract-document-modal">
+        <header><div><span class="contract-badge" :class="statusTone(selectedContract.status)"><i></i>{{ selectedContract.status }}</span><h2>{{ selectedContract.name }}</h2><p>{{ selectedContract.id }}</p></div><button type="button" aria-label="关闭" @click="closeContract"><ConsoleIcon name="close" /></button></header>
+        <div class="contract-detail-highlight"><div><span>合同金额</span><strong>{{ formatContractAmount(selectedContract) }}</strong></div><div><span>更新日期</span><strong>{{ selectedContract.updatedAt }}</strong></div><div><span>负责人姓名</span><strong>{{ selectedContract.owner }}</strong></div></div>
+        <section><h3>基本信息</h3><dl><div><dt>合同类型</dt><dd>{{ selectedContract.type }}</dd></div><div><dt>服务类型</dt><dd>{{ selectedContract.serviceType }}</dd></div><div><dt>创建日期</dt><dd>{{ selectedContract.createdAt }}</dd></div><div><dt>到期日期</dt><dd>{{ selectedContract.endDate }}</dd></div></dl></section>
+        <section><h3>合同内容</h3><div v-if="selectedContractPreviewLoading" class="contract-modal-loading">正在读取格式化合同…</div><p v-else-if="selectedContractPreviewError" class="contract-session-error">{{ selectedContractPreviewError }}</p><ContractDocumentPreview v-else-if="selectedContractPreviewHTML" class="contract-saved-document-preview" title="合同正文预览" :html="selectedContractPreviewHTML" /><p v-else class="contract-approval-summary">{{ selectedContract.content || '未填写合同内容' }}</p><label v-if="selectedContract.status === '草稿' && can('contract.create')" class="contract-check-label"><input v-model="termsIdentical" type="checkbox" /><span>本合同条款与关联历史合同一致（参与审批规则匹配）</span></label></section>
+        <section><h3>流转明细</h3><div v-if="selectedContractLifecycleLoading" class="contract-modal-loading">正在读取流转明细…</div><p v-else-if="selectedContractLifecycleError" class="contract-session-error">{{ selectedContractLifecycleError }}</p><div v-else-if="selectedContractLifecycle.length" class="contract-action-log"><div v-for="event in selectedContractLifecycle" :key="event.id"><strong>{{ contractStatusLabel(event.from_status) }} → {{ contractStatusLabel(event.to_status) }}</strong><span>{{ event.actor_user_id === 'SYSTEM' ? '系统' : displayNameFor(event.actor_user_id) }}</span><p>{{ lifecycleReason(event.reason) }} · {{ formatDateTime(event.occurred_at) }}</p></div></div><p v-else class="contract-approval-summary">暂无流转记录</p></section>
+        <footer><button class="contract-button secondary" type="button" @click="closeContract">关闭</button><button v-if="selectedContract.status === '草稿' && can('contract.create')" class="contract-button primary" type="button" :disabled="submittingContract" @click="submitSelectedContract">{{ submittingContract ? '正在提交…' : '提交审批' }}</button></footer>
+      </article>
     </div>
 
     <div v-if="dashboardDetailKey" class="contract-modal-mask" @click.self="dashboardDetailKey = ''"><article class="contract-detail-modal contract-dashboard-detail-modal"><header><div><span class="contract-badge info">企业合同统计</span><h2>{{ dashboardDetailMeta.title }}</h2><p>{{ dashboardDetailMeta.value }} · 数据范围为当前企业</p></div><button type="button" aria-label="关闭" @click="dashboardDetailKey = ''"><ConsoleIcon name="close" /></button></header><section><p v-if="adminDashboard?.contract_detail_limited" class="contract-info-banner"><ConsoleIcon name="info" />明细仅展示最近更新的 200 份合同，卡片统计值为企业全部合同的精确结果。</p><div class="contract-table-scroll"><table class="contract-data-table contract-dashboard-detail-table"><thead><tr><th>合同编号 / 名称</th><th>金额</th><th>负责人</th><th>到期日期</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="contract in dashboardDetailContracts" :key="contract.recordId"><td><strong>{{ contract.name }}</strong><span class="block mono">{{ contract.id }}</span></td><td class="amount">{{ formatAmount(contract.amount) }}</td><td>{{ contract.owner }}</td><td>{{ contract.endDate }}</td><td><span class="contract-badge" :class="statusTone(contract.status)"><i></i>{{ contract.status }}</span></td><td><button class="contract-text-button" type="button" @click="openDashboardContract(contract)">查看详情</button></td></tr><tr v-if="!dashboardDetailContracts.length"><td colspan="6" class="contract-empty">当前分类暂无合同</td></tr></tbody></table></div></section><footer><button class="contract-button secondary" type="button" @click="dashboardDetailKey = ''">关闭</button></footer></article></div>
