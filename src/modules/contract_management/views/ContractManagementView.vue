@@ -69,7 +69,36 @@ const adminNavGroupDefinitions = [
   {
     label: '业务办理',
     items: [
-      { key: 'dashboard', label: '工作台', icon: 'dashboard' },
+      { key: 'intakes', label: '签单关联核对', icon: 'audit' },
+      { key: 'contracts', label: '合同台账', icon: 'account' },
+      { key: 'approvals', label: '审批中心', icon: 'audit' },
+    ],
+  },
+  {
+    label: '查询台账',
+    items: [
+      { key: 'customers', label: '客户查询', icon: 'user' },
+      { key: 'signing', label: '签署台账', icon: 'shield' },
+    ],
+  },
+  {
+    label: '配置管理',
+    items: [
+      { key: 'templates', label: '合同模板', icon: 'save' },
+      { key: 'rules', label: '审批规则', icon: 'organization' },
+    ],
+  },
+  { label: '统计查看', items: [{ key: 'reports', label: '统计报表', icon: 'dashboard' }] },
+]
+
+const userNavGroupDefinitions = [
+  {
+    label: '工作概览',
+    items: [{ key: 'dashboard', label: '工作台', icon: 'dashboard' }],
+  },
+  {
+    label: '合同业务',
+    items: [
       { key: 'intakes', label: '签单关联核对', icon: 'audit' },
       { key: 'customers', label: '客户查询', icon: 'user' },
       { key: 'contracts', label: '合同台账', icon: 'account' },
@@ -545,15 +574,17 @@ async function loadBusinessData() {
   businessDataLoading.value = true
   businessDataErrors.value = {}
   const requests = []
+  const addRequest = (label, sections, promise) => {
+    requests.push({ label, sections, promise })
+  }
   if (can('approval.view') || can('approval.process') || can('contract.create')) {
-    requests.push(listApprovals({ limit: 200 }).then((items) => { initiatedApprovals.value = items.map(normalizeApproval) }))
+    addRequest('我发起的审批', ['dashboard', 'approvals'], listApprovals({ limit: 200 }).then((items) => { initiatedApprovals.value = items.map(normalizeApproval) }))
   }
   if (can('contract.read')) {
     addRequest('合同统计', ['dashboard', 'reports'], getContractDashboard().then((summary) => { adminDashboard.value = summary }))
   } else {
     adminDashboard.value = null
   }
-  addRequest('我发起的审批', ['dashboard', 'approvals'], listApprovals({ limit: 200 }).then((items) => { initiatedApprovals.value = items.map(normalizeApproval) }))
   if (can('contract.read')) {
     addRequest('合同台账', ['dashboard', 'contracts', 'signing', 'reports'], listContracts({ limit: 200 }).then((items) => { contracts.value = items.map(normalizeContract) }))
   }
@@ -567,9 +598,9 @@ async function loadBusinessData() {
     addRequest('合同模板', ['templates', 'contracts'], listContractTemplates().then((items) => { contractTemplates.value = items }))
   }
   if (can('opportunity_intake.read')) {
-    requests.push(loadOpportunityIntakes())
+    addRequest('签单关联核对', ['intakes'], loadOpportunityIntakes())
   }
-  const results = await Promise.allSettled(requests)
+  const results = await Promise.allSettled(requests.map((request) => request.promise))
   const failures = results.filter((result) => result.status === 'rejected')
   // API 客户端已在第一次 401 时发起单次 OIDC 跳转。页面不再把多个并发 401
   // 拼成重复的“登录状态无效”提示，避免跳转前出现误导性错误横幅。
