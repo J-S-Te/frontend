@@ -78,7 +78,6 @@ const adminNavGroupDefinitions = [
   {
     label: '查询台账',
     items: [
-      { key: 'customers', label: '客户查询', icon: 'user' },
       { key: 'signing', label: '签署台账', icon: 'shield' },
     ],
   },
@@ -101,7 +100,6 @@ const userNavGroupDefinitions = [
     label: '合同业务',
     items: [
       { key: 'intakes', label: '签单关联核对', icon: 'audit' },
-      { key: 'customers', label: '客户查询', icon: 'user' },
       { key: 'contracts', label: '合同台账', icon: 'account' },
       { key: 'templates', label: '合同模板', icon: 'save' },
       { key: 'signing', label: '签署台账', icon: 'shield' },
@@ -336,7 +334,7 @@ function openDashboardDetail(key) {
 
 function openDashboardContract(contract) {
   dashboardDetailKey.value = ''
-  openContract(contract)
+  openContract(contracts.value.find((item) => item.recordId === contract.recordId) || contract)
 }
 
 function openReportContract(contract) {

@@ -18,3 +18,11 @@ test('navigation selects role-specific groups and removes unavailable or empty g
   assert.match(source, /items: group\.items\.filter\(\(item\) => canAccessContractSection\(session\.value, item\.key\)\)/)
   assert.match(source, /\.filter\(\(group\) => group\.items\.length\)/)
 })
+
+test('contract navigation does not expose the customer lookup entry', () => {
+  const navigationDefinitions = source.slice(
+    source.indexOf('const adminNavGroupDefinitions'),
+    source.indexOf('const contracts = ref([])'),
+  )
+  assert.doesNotMatch(navigationDefinitions, /key: 'customers'|label: '客户查询'/)
+})
