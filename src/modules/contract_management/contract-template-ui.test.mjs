@@ -48,6 +48,7 @@ test('saved template contracts render formatted HTML instead of plain text', () 
 })
 
 test('approval progress renders its template contract with document formatting', () => {
+  assert.match(source, /listOpportunityIntakes,\s*previewApprovalContract,\s*previewContractTemplate,/)
   assert.match(source, /previewApprovalContract\(approval\.id\)/)
   assert.match(source, /v-else-if="approvalContractPreviewHTML"/)
   assert.match(source, /ContractDocumentPreview[^>]*:html="approvalContractPreviewHTML"/)

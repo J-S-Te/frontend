@@ -21,6 +21,7 @@ import {
   listContractTemplates,
   listContracts,
   listOpportunityIntakes,
+  previewApprovalContract,
   previewContractTemplate,
   previewContractDocument,
   submitContract,
