@@ -272,7 +272,7 @@ test('application access UI separates logical retirement, runtime teardown and p
 
 test('adding an environment keeps the selected application identity immutable and excludes existing environment codes', () => {
   assert.match(onboardingModule, /onboardExistingApplicationId/)
-  assert.match(onboardingModule, /:disabled="onboardingExistingApplication"/)
+  assert.match(onboardingModule, /:disabled="onboardingExistingApplication \|\| !isLoopbackHost"/)
   assert.match(onboardingModule, /availableOnboardEnvironments/)
   assert.match(onboardingModule, /preferredEnvironments\.find\(\(item\) => !environments\.value\.some/)
 })
