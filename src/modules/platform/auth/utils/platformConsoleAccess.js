@@ -45,6 +45,7 @@ export const PLATFORM_SETTINGS_SECTION_PERMISSIONS = Object.freeze({
     'platform:application-login-target:update',
     'platform:oauth-client:create',
     'platform:oauth-client:disable',
+	'platform:role-binding:update',
   ]),
 })
 

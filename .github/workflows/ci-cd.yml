@@ -104,5 +104,7 @@ jobs:
           printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/id_ed25519"
           chmod 600 "$HOME/.ssh/id_ed25519"
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
-          printf -v remote_command 'cd %q && ./bin/deploy-service.sh frontend %q' "$DEPLOY_PATH" "$IMAGE_REF"
+          # 老服务器可能尚未经过新版平台资产同步。前端发布前只在文件缺失时用无秘密模板初始化，
+          # 不覆盖基础平台接入 Agent 已写入的合同 OIDC、目录和审计凭据。
+          printf -v remote_command 'cd %q && if test ! -f runtime/contract.env; then install -d -m 700 runtime && install -m 600 contract.env.example runtime/contract.env; fi && ./bin/deploy-service.sh frontend %q' "$DEPLOY_PATH" "$IMAGE_REF"
           ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "$remote_command"

@@ -69,6 +69,7 @@ const canManageRuntime = computed(() => [
   'platform:application-login-target:update',
   'platform:oauth-client:disable',
 ].every((permission) => hasPermission(permission)))
+const canRetryRuntime = computed(() => canManageRuntime.value && hasPermission('platform:role-binding:update'))
 
 const filteredApplications = computed(() => {
   const keyword = applicationKeyword.value.trim().toLowerCase()
@@ -596,7 +597,7 @@ onMounted(() => { loadApplications() })
               <article v-for="environment in environments" :key="environment.environment_id" class="application-registry-environment" :class="{ 'is-selected': environment.environment_id === selectedEnvironmentId }" @click="selectEnvironment(environment)">
                 <div class="application-registry-environment-main"><strong>{{ environment.environment }}</strong><span class="application-registry-status" :class="statusClass(environmentStatus(environment))">{{ statusLabel(environmentStatus(environment)) }}</span><small>配置版本 {{ environment.version }}</small></div>
                 <div class="application-registry-environment-uri"><span>{{ environment.base_url || '未设置 BaseURL' }}{{ environment.path_prefix || '' }}</span><small>{{ environment.upstream_url || '未设置 UpstreamURL' }}</small></div>
-                <div class="application-registry-environment-actions"><button v-if="canUpdateEnvironment" class="console-button ghost small" type="button" @click.stop="openEnvironmentEditor(environment)"><ConsoleIcon name="settings" />设置</button><button v-if="canManageRuntime && environmentStatus(environment) === 'PROVISION_FAILED'" class="console-button ghost small" type="button" :disabled="saving" @click.stop="reapplyEnvironment(environment, true)"><ConsoleIcon name="reset" />重试</button><button v-if="canManageRuntime && environmentStatus(environment) === 'READY'" class="console-button ghost small" type="button" :disabled="saving" @click.stop="reapplyEnvironment(environment)"><ConsoleIcon name="reset" />更新运行时</button><button v-if="canDeleteEnvironment && environment.environment !== 'dev'" class="console-button danger small" type="button" @click.stop="openDeleteEnvironment(environment)"><ConsoleIcon name="close" />删除</button></div>
+                <div class="application-registry-environment-actions"><button v-if="canUpdateEnvironment" class="console-button ghost small" type="button" @click.stop="openEnvironmentEditor(environment)"><ConsoleIcon name="settings" />设置</button><button v-if="canRetryRuntime && environmentStatus(environment) === 'PROVISION_FAILED'" class="console-button ghost small" type="button" :disabled="saving" @click.stop="reapplyEnvironment(environment, true)"><ConsoleIcon name="reset" />重试</button><button v-if="canManageRuntime && environmentStatus(environment) === 'READY'" class="console-button ghost small" type="button" :disabled="saving" @click.stop="reapplyEnvironment(environment)"><ConsoleIcon name="reset" />更新运行时</button><button v-if="canDeleteEnvironment && environment.environment !== 'dev'" class="console-button danger small" type="button" @click.stop="openDeleteEnvironment(environment)"><ConsoleIcon name="close" />删除</button></div>
               </article>
             </div>
           </section>
