@@ -27,6 +27,8 @@ test('request failures never fall back to an HTTP status string', () => {
 
 test('partial loading failures are limited to related business pages', () => {
   assert.match(viewSource, /businessDataErrors\.value\[activeSection\.value\]/)
+  assert.match(viewSource, /const addRequest = \(label, sections, promise\) =>/)
+  assert.match(viewSource, /Promise\.allSettled\(requests\.map\(\(request\) => request\.promise\)\)/)
   assert.match(viewSource, /addRequest\('合同统计', \['dashboard', 'reports'\]/)
   assert.match(viewSource, /addRequest\('合同模板', \['templates', 'contracts'\]/)
   assert.doesNotMatch(viewSource, /failures\.map\(\(result\) => result\.reason\?\.message/)

@@ -74,10 +74,13 @@ export const CONTRACT_SECTION_PERMISSIONS = Object.freeze({
 })
 
 export function canAccessContractSection(session, section) {
-  const roleCode = session?.role?.code
+  const roleCodes = new Set([
+    ...(Array.isArray(session?.roles) ? session.roles : []),
+    session?.role?.code,
+  ].filter(Boolean))
   // 签单接收队列是独立的跨系统高敏边界，不能仅凭前端角色名称放行。
   if (section === 'intakes') return hasContractPermission(session, 'opportunity_intake.read')
-  if (roleCode === 'admin') {
+  if (roleCodes.has('admin')) {
     return Object.hasOwn(CONTRACT_SECTION_PERMISSIONS, section)
   }
   if (['sales_director', 'tech_director', 'finance_director'].some((roleCode) => roleCodes.has(roleCode))) {

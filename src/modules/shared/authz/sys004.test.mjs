@@ -51,6 +51,16 @@ test('all is a wildcard and director routes remain constrained', () => {
   assert.equal(canAccessContractSection(director, 'signing'), false)
 })
 
+test('route access accepts the roles array returned by the contract session', () => {
+  const director = { roles: ['sales_director'], permissions: ['dashboard', 'contract.read'] }
+  assert.equal(canAccessContractSection(director, 'dashboard'), true)
+  assert.equal(canAccessContractSection(director, 'contracts'), true)
+  assert.equal(canAccessContractSection(director, 'templates'), false)
+
+  const admin = { roles: ['admin'], permissions: ['contract.read'] }
+  assert.equal(canAccessContractSection(admin, 'contracts'), true)
+})
+
 test('sales can track initiated approvals but cannot configure rules', () => {
   const sales = { role: { code: 'sales' }, permissions: ['dashboard', 'contract.create'] }
   assert.equal(canAccessContractSection(sales, 'approvals'), true)
