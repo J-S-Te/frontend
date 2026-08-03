@@ -1,4 +1,5 @@
 export function defaultAccountValidUntil(now = new Date()) {
+  // datetime-local 不带时区：先按本地偏移转换，默认值才能正确表示“当前时间后 24 小时”。
   const date = new Date(now.getTime() + 24 * 60 * 60 * 1000)
   const localOffset = date.getTimezoneOffset() * 60 * 1000
   return new Date(date.getTime() - localOffset).toISOString().slice(0, 16)
@@ -43,6 +44,8 @@ export function buildEmployeeOnboardingPayload(form, { account, user } = {}) {
   const temporaryAccount = form?.validity_mode !== 'PERMANENT'
   const shortTermMembership = form?.membership_validity_mode === 'SHORT_TERM'
 
+  // 未勾选的账号/任职必须明确发送 null，让原子入职接口区分“本次不创建”与“字段缺失”。
+  // 长期账号和任职同样清空期限，避免隐藏表单中的旧日期被意外提交。
   return {
     user: user || {
       display_name: String(form?.display_name || '').trim(),

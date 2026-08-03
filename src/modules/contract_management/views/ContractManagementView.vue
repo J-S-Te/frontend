@@ -540,6 +540,8 @@ function ruleConditionSummary(rule) {
 }
 
 async function loadBusinessData() {
+  // 各区域按权限独立加载并用 allSettled 汇总，单个非关键接口失败不会清空已经
+  // 成功的数据。权限仍由后端逐接口执行，这里的条件只避免发起无意义请求。
   businessDataLoading.value = true
   businessDataErrors.value = {}
   const requests = []
@@ -590,6 +592,8 @@ async function loadBusinessData() {
 
 async function loadOpportunityIntakes({ append = false } = {}) {
   if (append && (!opportunityIntakeHasMore.value || !opportunityIntakeNextCursor.value)) return
+  // 筛选切换和“加载更多”可能交错返回；只有最新序号可提交游标和列表，防止
+  // 旧筛选结果污染当前队列或把游标倒退。
   const sequence = ++opportunityIntakeLoadSequence
   if (append) opportunityIntakeLoadingMore.value = true
   else {
@@ -626,6 +630,7 @@ function changeOpportunityIntakeFilter() {
 }
 
 async function openOpportunityIntake(item) {
+  // 用户快速切换核对项时，详情请求不能互相覆盖；序号和 intake_id 必须同时匹配。
   const sequence = ++opportunityIntakeDetailSequence
   selectedOpportunityIntake.value = item
   opportunityIntakeDetailLoading.value = true
@@ -748,6 +753,8 @@ async function submitTemplateUpload() {
   }
   templateUploading.value = true
   try {
+    // accept 仅改善文件选择体验；DOCX 类型、大小、压缩包结构和占位符仍必须由后端
+    // 按不可信文件重新校验，页面只在服务端确认后刷新模板目录。
     await uploadContractTemplate({
       name: templateUploadForm.value.name.trim(),
       file: templateUploadForm.value.file,
@@ -891,6 +898,8 @@ async function previewNewContract() {
   templatePreviewHTML.value = ''
   templatePreviewing.value = true
   try {
+    // 预览由后端使用同一套模板替换规则生成，避免浏览器自行拼接 DOCX 内容而与最终
+    // 合同分叉；组件只渲染服务端返回的受控 HTML。
     const result = await previewContractTemplate(selectedContractTemplate.value.id, newContract.value.template_values)
     templatePreviewHTML.value = result?.html || ''
     if (!templatePreviewHTML.value) {
@@ -944,6 +953,8 @@ async function submitNewContract() {
 }
 
 async function openApproval(approval) {
+  // 审批状态与格式化正文分别读取：正文预览失败只降级为原始合同内容，不会把审批
+  // 详情误判为不可用，也不会改变服务端的待办状态。
   selectedApproval.value = approval
   approvalDetail.value = null
   approvalContractPreviewHTML.value = ''
@@ -983,6 +994,8 @@ function closeApproval() {
 }
 
 async function executeApprovalCommand(action, payload = {}, { close = false } = {}) {
+  // 本地判断用于收窄按钮入口并校验必填原因；待办归属、当前节点、角色和状态版本仍由
+  // 命令接口按当前登录主体重新验证，不能把已打开的详情快照当作授权凭据。
   const isApplicant = approvalDetail.value?.meta?.applicant_user_id === session.value?.user_id
   const allowed = ['approve', 'reject', 'sign', 'transfer', 'return'].includes(action)
     ? can('approval.process')
@@ -1044,6 +1057,8 @@ function openNewRule() {
 }
 
 function editRule(rule) {
+  // 编辑表单携带服务端版本；保存、启停和删除都由后端以该版本检测并发修改，页面不能
+  // 通过重新组装规则对象绕过乐观锁。
   editingRuleId.value = rule.id
   ruleForm.value = {
     name: rule.name,

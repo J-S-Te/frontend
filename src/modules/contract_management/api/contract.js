@@ -103,8 +103,8 @@ async function clearContractLocalSession() {
       headers: { Accept: 'application/json' },
     })
   } catch {
-    // The subsequent OIDC callback overwrites the stale cookie even if local cleanup is
-    // temporarily unavailable.
+    // 本地注销端点暂时不可用时仍继续授权；后续 OIDC 回调会覆盖旧 Cookie，
+    // 避免因为清理失败把用户永久困在登录循环中。
   }
 }
 
@@ -130,8 +130,8 @@ export async function ensureContractSession() {
         return null
       }
     } catch {
-      // A contract session remains independently valid when the platform browser cookie has
-      // expired or the platform API is temporarily unavailable.
+      // 平台浏览器 Cookie 过期或平台 API 暂时不可用，并不自动使合同系统自己的
+      // OIDC 会话失效；只有成功读取到不同主体时才执行切换，避免依赖故障误登出。
     }
     return contractSession
   } catch (error) {
@@ -159,9 +159,8 @@ export async function listOpportunityIntakes(params = {}) {
   try {
     data = await request(`/opportunity-intakes${search ? `?${search}` : ''}`)
   } catch (error) {
-    // Rolling deployment compatibility: the previous backend accepted limit and
-    // returned an array. Only an initial page can fall back because that backend
-    // has no cursor semantics; cursor continuation always fails closed.
+    // 滚动发布期间兼容旧后端：旧版本只接受 limit 并返回数组。仅首页可降级，
+    // 因为旧协议没有游标语义；继续翻页若降级会重复或遗漏记录，因此失败关闭。
     const canUseLegacyList = error?.status === 422 && error?.code === 'CON_VALIDATION_ERROR'
       && !params.cursor && Object.hasOwn(params, 'page_size')
     if (!canUseLegacyList) throw error
@@ -170,9 +169,7 @@ export async function listOpportunityIntakes(params = {}) {
     legacyParams.set('limit', String(params.page_size))
     data = await request(`/opportunity-intakes?${legacyParams}`)
   }
-  // The object is the current stable pagination contract. Accepting an array
-  // keeps a rolling frontend deployment readable against the previous backend,
-  // but never invents a cursor for that legacy response.
+  // 对象是当前稳定分页协议；数组只用于读取旧版本首页，绝不为旧响应伪造游标。
   if (Array.isArray(data)) {
     return { items: data, page_size: data.length, next_cursor: '', has_more: false }
   }

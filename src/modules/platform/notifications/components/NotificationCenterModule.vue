@@ -4,6 +4,8 @@ import { getNotification, getUnreadCount, listInbox, markAllNotificationsRead, m
 import '@/modules/platform/notifications/styles/notification-center.css'
 const emit = defineEmits(['toast']); const items = ref([]); const unreadCount = ref(0); const loading = ref(false); const detail = ref(null); const error = ref('')
 async function refresh() { loading.value = true; error.value = ''; try { const [inbox, unread] = await Promise.all([listInbox(), getUnreadCount()]); items.value = inbox.items || []; unreadCount.value = unread.unread_count || 0 } catch (e) { error.value = e.message } finally { loading.value = false } }
+// 先读取服务端详情，再在当前响应仍显示未读时提交已读；成功后乐观递减本地计数。
+// 另一标签页也可能同时完成状态转换，因此刷新接口仍是未读总数的最终校准来源。
 async function open(item) { try { detail.value = await getNotification(item.delivery_id); if (!detail.value.read_at) { detail.value = await markNotificationRead(item.delivery_id); unreadCount.value = Math.max(0, unreadCount.value - 1); const current = items.value.find((value) => value.delivery_id === item.delivery_id); if (current) current.read_at = detail.value.read_at } } catch (e) { emit('toast', e.message) } }
 async function readAll() { try { await markAllNotificationsRead(); items.value.forEach((item) => { item.read_at = new Date().toISOString() }); unreadCount.value = 0; emit('toast', '全部站内信已标记为已读。') } catch (e) { emit('toast', e.message) } }
 onMounted(refresh)

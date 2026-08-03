@@ -1308,8 +1308,7 @@ async function toggleAccountStatus(account) {
   }
 }
 
-// Password reset is keyed by account_id. When started from a user row, the matching account is
-// resolved by its user_id so that a password is never reset for an unrelated login account.
+// 密码重置以 account_id 为键。从用户行发起时先用 user_id 解析关联账号，绝不能重置无关登录账号。
 function openPasswordResetForAccount(account) {
   if (!account?.account_id) {
     emitToast('未找到可重置密码的登录账号。')
@@ -1385,8 +1384,7 @@ function hideTemporaryPassword() {
   temporaryPasswordVisible.value = false
 }
 
-// Closing this dialog clears the plaintext from browser memory. The password cannot be viewed
-// again from this page; an administrator must initiate another reset if it was not copied.
+// 关闭弹窗会清除浏览器内存中的明文；此页面无法再次查看，未复制时只能由管理员重新发起重置。
 function closeTemporaryPassword() {
   temporaryPassword.value = null
   temporaryPasswordVisible.value = false

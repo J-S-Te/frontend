@@ -34,8 +34,7 @@ export function comparePositionsByChineseName(left, right) {
     || compareText(positionId(left), positionId(right))
 }
 
-// Native select elements cannot render an interactive tree, so hierarchy is represented with
-// full-width indentation. The ordering is exactly the same as the organization management tree.
+// 原生 select 无法渲染交互树，以全角缩进表达层级；排序必须与组织管理树完全一致。
 export function organizationSelectOptions(organizations = []) {
   return flattenOrganizationTree(buildOrganizationTree(organizations)).map((organization) => {
     const id = organizationId(organization)
@@ -77,9 +76,8 @@ function positionOrganizationDepth(item) {
   return Number.isFinite(depth) && depth > 0 ? depth : 0
 }
 
-// The authorization endpoint remains task-specific and permission-safe. It may return an
-// organization path or only an organization ID; both are supported without calling broader
-// organization-management APIs from a role-binding-only screen.
+// 授权专用端点可能返回组织路径，也可能只返回组织 ID；两种形态都要兼容，避免只有
+// 角色绑定权限的页面为了展示而调用权限更广的组织管理 API。
 export function groupAuthorizationPositions(positions = []) {
   const groups = new Map()
   for (const position of positions) {
@@ -109,8 +107,7 @@ export function groupAuthorizationPositions(positions = []) {
       || compareText(left.organization_id, right.organization_id))
 }
 
-// org_unit_path is the database materialized path made of opaque IDs. It is used only for stable
-// hierarchy ordering and must never be exposed as a human-facing breadcrumb.
+// org_unit_path 是由不透明 ID 组成的数据库物化路径，只用于稳定层级排序，不能作为面向用户的面包屑展示。
 export function authorizationPositionGroupLabel(group) {
   const depth = Math.max(0, Number(group?.organization_depth || 0) - 1)
   const prefix = depth > 0 ? `${'　'.repeat(depth)}└ ` : ''

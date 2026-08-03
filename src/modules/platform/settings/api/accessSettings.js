@@ -60,7 +60,7 @@ export function getAccessSettings() {
   return request('/settings/access').then(mapAccessSettings)
 }
 
-/** 保存对外访问配置；publicOrigin 留空表示仅本机访问。 */
+/** 保存对外访问配置；publicOrigin 留空表示仅本机访问，version 用于阻止并发覆盖。 */
 export function updateAccessSettings({ publicOrigin, allowInsecureHTTPRedirect, version }) {
   return request('/settings/access', {
     method: 'PUT',
@@ -72,7 +72,10 @@ export function updateAccessSettings({ publicOrigin, allowInsecureHTTPRedirect, 
   }).then(mapAccessSettings)
 }
 
-/** 应用对外访问配置：由部署 Agent 重写覆盖环境文件并重建相关容器。 */
+/**
+ * 应用已经保存的对外访问配置：由部署 Agent 重写覆盖环境文件并重建相关容器。
+ * 此调用不携带表单草稿，避免未经保存和版本校验的值直接进入部署运行时。
+ */
 export function applyAccessSettings() {
   return request('/settings/access/apply', { method: 'POST' }).then(mapAccessSettings)
 }

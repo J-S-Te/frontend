@@ -2,6 +2,8 @@ export const CUSTOMER_QUICK_FILTERS = new Set(['', 'KEY', 'NEW', 'WON', 'FOLLOWU
 export const CUSTOMER_SORT_FIELDS = new Set(['updated_at', 'created_at', 'name', 'last_followup_at', 'opportunity_amount_sum'])
 
 export function customerFiltersFromQuery(query = {}) {
+  // 路由参数可能来自手工编辑或旧书签；只允许服务端支持的快捷筛选和排序字段，
+  // 避免把任意字段名透传成后端排序表达式。
   const scalar = (key) => Array.isArray(query[key]) ? String(query[key][0] || '') : String(query[key] || '')
   const quick = scalar('quick_filter').toUpperCase()
   const sort = scalar('sort_by').toLowerCase()
@@ -27,6 +29,7 @@ export function customerAPIParams(filters, page, pageSize) {
   const result = { ...customerFiltersToQuery(filters, page, pageSize) }
   delete result.view
   for (const key of ['created_from', 'last_followup_from']) if (result[key]) result[key] = localDateStart(result[key])
+  // “结束日期”转换为次日零点并作为不含上界，避免 23:59:59 精度差异漏掉记录。
   for (const key of ['created_to', 'last_followup_to']) if (result[key]) result[key] = localDateNextStart(result[key])
   return result
 }

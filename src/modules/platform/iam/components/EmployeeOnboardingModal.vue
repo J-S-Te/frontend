@@ -182,8 +182,7 @@ async function loadAuthorizationPreview() {
       inherit_authorization: true,
     })
   } catch {
-    // Creating an employee must not be blocked by an optional preview endpoint. The onboarding
-    // form explains this state and will pick up the real data as soon as the backend is deployed.
+    // 可选预览端点不可阻断员工创建；表单提示当前状态，后端能力部署后会自然读取真实数据。
     authorizationPreviewUnavailable.value = true
   } finally {
     authorizationPreviewLoading.value = false
@@ -198,7 +197,7 @@ async function submit() {
     const account = validateAccount()
     const membership = validateMembership()
     const payload = buildEmployeeOnboardingPayload(form, { user, account })
-    // Preserve the normalized membership data rather than rebuilding it from the raw form.
+    // 保留已经归一化的任职数据，不再从原始表单重建，以免长期/短期模式切换后旧日期回流。
     payload.membership = membership
 
     const result = await onboardEmployee(payload)

@@ -133,6 +133,8 @@ async function loadWorkspace() {
   loading.value = true
   loadError.value = ''
   try {
+    // 项目、服务项和规则共同构成当前工作区快照；三者全部成功后才一次性替换页面状态，
+    // 防止新旧数据混用。接口层仍分别执行会话与资源权限校验。
     const [projectRows, itemRows, ruleRows] = await Promise.all([listProjects(), listServiceItems(), listRules()])
     projects.value = projectRows
     serviceItems.value = itemRows.map((item) => ({ ...item, selected: ['待确认', '待复核'].includes(item.status) }))
@@ -164,6 +166,8 @@ async function confirmDecomposition() {
   if (!ids.length) { showToast('请至少选择一个服务项'); return }
   saving.value = true
   try {
+    // 只依据服务端返回的已变更服务项更新本地列表；未返回的行保持原状态，避免把整批
+    // 请求都乐观标记为成功。
     const changed = await confirmServiceItemsRequest(ids)
     const byID = new Map(changed.map((item) => [item.id, item]))
     serviceItems.value = serviceItems.value.map((item) => byID.has(item.id) ? { ...byID.get(item.id), selected: false } : item)
@@ -175,6 +179,7 @@ async function confirmDecomposition() {
 async function toggleRule(rule) {
   const next = !rule.enabled
   try {
+    // 不预先翻转开关，等待带有最新版本语义的服务端结果后再覆盖当前行。
     const updated = await setRuleEnabled(rule.id, next)
     Object.assign(rule, updated)
     showToast(next ? '规则已启用' : '规则已停用')
@@ -184,6 +189,8 @@ async function toggleRule(rule) {
 async function saveCreate() {
   saving.value = true
   try {
+    // 同一弹窗根据当前栏目创建不同资源；路由栏目在提交瞬间决定载荷形态，成功后再把
+    // 服务端生成的记录并入对应集合。
     if (activeSection.value === 'projects') {
       const created = await createProject({
         name: createForm.value.name,

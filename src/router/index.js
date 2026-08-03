@@ -55,7 +55,7 @@ const router = createRouter({
       path: '/portal',
       name: 'portal',
       component: SubsystemPortalView,
-      meta: { title: '子系统门户', requiresAuth: true },
+      meta: { title: '子系统门户', requiresAuth: true, requiresPlatformSession: true },
     },
     {
       path: '/settings/:section?',
@@ -64,6 +64,7 @@ const router = createRouter({
       meta: {
         title: '系统设置',
         requiresAuth: true,
+        requiresPlatformSession: true,
         // 只允许拥有至少一个真实设置模块权限的主体进入；审计权限不再放大为设置权限。
         permission: PLATFORM_SETTINGS_ENTRY_PERMISSIONS,
       },
@@ -75,6 +76,7 @@ const router = createRouter({
       meta: {
         title: '审计日志',
         requiresAuth: true,
+        requiresPlatformSession: true,
         // 注意：真实权限码是 platform:audit:view，不是 audit-log:read。
         // 后端 migrations/000011_seed_platform_defaults.sql 用的是 audit:view。
         permission: PLATFORM_AUDIT_VIEW_PERMISSION,

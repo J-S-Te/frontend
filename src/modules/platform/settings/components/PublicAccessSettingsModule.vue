@@ -27,6 +27,7 @@ const derivedInsecureHTTP = computed(() => {
   if (!origin) return false
   try {
     const url = new URL(origin)
+    // 非回环 HTTP 对外地址必须同步允许 HTTP OAuth 回调；回环地址仍按本地开发特例处理。
     return url.protocol === 'http:' && !['localhost', '127.0.0.1', '::1'].includes(url.hostname)
   } catch {
     return false
@@ -108,6 +109,8 @@ async function applySettings() {
   applying.value = true
   errorMessage.value = ''
   try {
+    // apply 端点只消费服务端已保存版本，不直接采用当前表单草稿；因此“保存”与
+    // “应用”保持两个显式阶段，部署 Agent 不会绕过乐观锁配置写入。
     const saved = await applyAccessSettings()
     savedSettings.value = saved
     Object.assign(form.value, {

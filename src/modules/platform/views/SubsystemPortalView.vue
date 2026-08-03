@@ -101,9 +101,8 @@ async function loadPortalCatalog() {
 function onAuthorizationRefreshed(event) {
   const principal = event?.detail?.principal
   if (principal === null) {
-    // Logout/account switching clears the shared authorization snapshot before navigation. Remove
-    // user-specific cards immediately instead of leaving the previous account visible while the
-    // router and Set-Cookie transition complete.
+    // 退出或换号会在跳转前清空共享授权快照；立即移除用户专属卡片，不能在路由与
+    // Set-Cookie 切换期间继续展示上一账号入口。
     currentPrincipal.value = null
     registeredSubsystems.value = []
     isPrincipalLoading.value = true

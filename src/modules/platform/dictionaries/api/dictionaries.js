@@ -1,8 +1,6 @@
 const API_BASE_URL = (import.meta.env?.VITE_API_BASE_URL || '/api/v1').replace(/\/$/, '')
 
-/**
- * DictionaryError preserves the safe error metadata returned by the platform API.
- */
+/** 保留平台 API 返回的安全错误元数据，不向上层泄露原始响应实现细节。 */
 export class DictionaryError extends Error {
   constructor(message, options = {}) {
     super(message)
@@ -71,12 +69,12 @@ function itemPath(dictionaryId, itemId = '') {
   return itemId ? `${collection}/${encodeURIComponent(itemId)}` : collection
 }
 
-/** Lists the current tenant's business dictionaries. */
+/** 列出当前租户的业务字典；租户边界由会话和服务端查询共同限定。 */
 export function listDictionaries(query = {}) {
   return request(`/dictionaries${pageQuery(query)}`)
 }
 
-/** Creates one tenant-scoped dictionary. */
+/** 创建一个租户级字典。 */
 export function createDictionary({ code, name, description = '', status = 'ACTIVE' }) {
   return request('/dictionaries', {
     method: 'POST',
@@ -84,12 +82,12 @@ export function createDictionary({ code, name, description = '', status = 'ACTIV
   })
 }
 
-/** Reads one dictionary by ID. */
+/** 按 ID 读取字典，服务端仍校验该 ID 是否属于当前租户。 */
 export function getDictionary(dictionaryId) {
   return request(dictionaryPath(dictionaryId))
 }
 
-/** Replaces editable dictionary fields under optimistic locking. */
+/** 使用乐观锁版本更新字典可编辑字段，防止覆盖其他管理员的并发修改。 */
 export function updateDictionary({ dictionaryId, code, name, description = '', status, version }) {
   return request(dictionaryPath(dictionaryId), {
     method: 'PATCH',
@@ -97,12 +95,12 @@ export function updateDictionary({ dictionaryId, code, name, description = '', s
   })
 }
 
-/** Lists all active and disabled items managed under a dictionary. */
+/** 列出字典下供管理使用的全部启用和停用条目。 */
 export function listDictionaryItems({ dictionaryId, ...query }) {
   return request(`${itemPath(dictionaryId)}${pageQuery(query)}`)
 }
 
-/** Creates one dictionary item. */
+/** 在指定字典下创建条目。 */
 export function createDictionaryItem({ dictionaryId, code, label, value, sortOrder = 0, status = 'ACTIVE' }) {
   return request(itemPath(dictionaryId), {
     method: 'POST',
@@ -110,7 +108,7 @@ export function createDictionaryItem({ dictionaryId, code, label, value, sortOrd
   })
 }
 
-/** Replaces editable dictionary item fields under optimistic locking. */
+/** 使用乐观锁版本更新字典条目可编辑字段。 */
 export function updateDictionaryItem({ dictionaryId, itemId, code, label, value, sortOrder = 0, status, version }) {
   return request(itemPath(dictionaryId, itemId), {
     method: 'PATCH',
@@ -118,7 +116,7 @@ export function updateDictionaryItem({ dictionaryId, itemId, code, label, value,
   })
 }
 
-/** Returns only selectable items for an enabled dictionary code. */
+/** 按启用字典编码只返回业务表单可选择的有效条目。 */
 export function listActiveDictionaryItemsByCode({ dictionaryCode, ...query }) {
   return request(`/dictionaries/code/${encodeURIComponent(dictionaryCode)}/items${pageQuery(query)}`)
 }

@@ -63,6 +63,7 @@ async function saveLoginPolicy() {
   policySaving.value = true
   policyError.value = ''
   try {
+    // 提交当前读取到的 version，服务端以乐观锁阻止两个管理员互相覆盖安全策略。
     const data = await updateLoginPolicy({
       maxFailedAttempts: Number(loginPolicy.maxFailedAttempts || 0),
       lockoutDurationSeconds: Number(loginPolicy.lockoutDurationSeconds || 0),
@@ -98,6 +99,7 @@ async function handleUnlockAccount(account) {
   if (!canUnlockAccount.value || !account?.account_id) return
   try {
     await unlockAccount(account.account_id)
+    // 服务端成功后才从本地列表移除；失败时保留记录，避免 UI 假装账号已解锁。
     lockedAccounts.value = lockedAccounts.value.filter((item) => item.account_id !== account.account_id)
     emitToast(`已解锁账号 ${account.account_name || account.account_id}。`)
   } catch (error) {

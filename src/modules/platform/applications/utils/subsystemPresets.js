@@ -36,6 +36,7 @@ export function applySubsystemOnboardingPreset(form, previousCode = '') {
   if (!preset) return
 
   const previousPreset = subsystemOnboardingPreset(previousCode)
+  // 仅覆盖空值或仍等于上一预设的值，用户手工填写的名称不会因切换应用编码而丢失。
   if (!String(form.applicationName || '').trim() || form.applicationName === previousPreset?.applicationName) {
     form.applicationName = preset.applicationName
   }
@@ -51,10 +52,10 @@ export function validateIntegratedSubsystemOnboarding(form) {
   const preset = subsystemOnboardingPreset(form?.applicationCode)
   if (!preset) return ''
   if (String(form.upstreamUrl || '').trim().replace(/\/$/, '') !== preset.upstreamUrl) {
-    return `当前应用已集成本地 Docker 编排，UpstreamURL 必须为 ${preset.upstreamUrl}`
+    return `当前应用已集成平台统一编排，UpstreamURL 必须为 ${preset.upstreamUrl}`
   }
   if (String(form.pathPrefix || '').trim().replace(/\/$/, '') !== preset.pathPrefix) {
-    return `当前应用已集成统一前端，门户路径前缀必须为 ${preset.pathPrefix}`
+    return `当前应用已集成平台统一前端，门户路径前缀必须为 ${preset.pathPrefix}`
   }
   return ''
 }
@@ -64,6 +65,7 @@ export function normalizeIntegratedSubsystemOnboarding(form) {
   if (!preset) return false
   const upstreamUrl = String(form.upstreamUrl || '').trim().replace(/\/$/, '')
   const pathPrefix = String(form.pathPrefix || '').trim().replace(/\/$/, '')
+  // 旧服务名和旧门户前缀必须成对命中才迁移，避免把用户确实配置的自定义地址误改为预设。
   const isLegacyAlias = preset.aliases.some((alias) => alias.upstreamUrl === upstreamUrl && alias.pathPrefix === pathPrefix)
   if (!isLegacyAlias) return false
   form.upstreamUrl = preset.upstreamUrl

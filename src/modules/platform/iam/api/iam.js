@@ -90,9 +90,8 @@ export function createUser({ displayName, email = null, mobile = null, status = 
   })
 }
 
-// createEmployee is the atomic employee onboarding contract. The backend creates the user and
-// optional local account / membership in one transaction, so callers never need to retry an
-// account write after a partially completed request.
+// 原子员工入职契约：后端在同一事务内创建用户及可选本地账号、任职，调用方无需在
+// 部分成功后重试账号写入。
 export function createEmployee({ user, account = null, membership = null }) {
   return request('/employees', {
     method: 'POST',
@@ -101,8 +100,8 @@ export function createEmployee({ user, account = null, membership = null }) {
 }
 
 function employeeEndpointUnavailable(error) {
-  // These responses mean the POST /employees capability is not deployed or not enabled. Do not
-  // fall back after any other response: the server may already have performed an atomic write.
+  // 只有这些响应能确认 /employees 能力未部署或未启用。其他失败可能已执行过原子写入，
+  // 不能降级重试，否则可能创建重复账号。
   return [404, 405, 501].includes(Number(error?.status))
 }
 
@@ -114,10 +113,9 @@ function employeeOnboardingPartialError(message, error) {
   })
 }
 
-// onboardEmployee is the UI-facing entry point. It always prefers POST /employees. During a
-// staged backend rollout only an unavailable endpoint uses the documented compatibility path:
-// POST /users -> optional POST /accounts -> optional POST /memberships. Each step runs at most
-// once, so the frontend never retries and accidentally creates a second local account.
+// UI 始终优先调用 POST /employees。仅在后端分阶段发布且端点明确不可用时，才按文档
+// 兼容路径依次调用 users → 可选 accounts → 可选 memberships；每步最多一次，避免重试
+// 意外创建第二个本地账号。兼容路径不是原子事务，失败时会返回已完成阶段供人工处置。
 export async function onboardEmployee({ user, account = null, membership = null }) {
   try {
     const result = await createEmployee({ user, account, membership })
@@ -182,9 +180,8 @@ export async function onboardEmployee({ user, account = null, membership = null 
   }
 }
 
-// createUsersBatch creates up to 100 users atomically. Employee numbers and the default platform
-// role are backend-managed. Optional application roles are exceptional USER grants; standard
-// personnel access must come from membership and position authorization templates.
+// 最多原子创建 100 个用户。工号和默认平台角色由后端管理；可选应用角色属于 USER
+// 例外授权，标准人员权限必须来自任职关系和岗位授权模板。
 export function createUsersBatch(items) {
   return request('/users/batch', {
     method: 'POST',
@@ -215,8 +212,7 @@ export function updateUser({ userId, displayName, employeeNo = '', email = '', m
   })
 }
 
-// deleteUser performs a business deletion. The backend disables and hides associated login accounts
-// and memberships, and revokes active sessions atomically. The version field prevents stale writes.
+// 业务删除由后端原子完成关联登录账号、任职的停用隐藏以及活跃会话撤销；version 防止旧页面误删新版本。
 export function deleteUser({ userId, version }) {
   return request(`/users/${encodeURIComponent(userId)}`, {
     method: 'DELETE',
@@ -244,7 +240,7 @@ export function updateAccountStatus({ accountId, status, version }) {
   })
 }
 
-// resetAccountPassword asks the server to generate a one-time temporary password.
+// 密码重置由服务端生成一次性临时密码；前端不接收或提交管理员自选的新密码。
 export function resetAccountPassword({ accountId, version }) {
   return request(`/accounts/${encodeURIComponent(accountId)}/password/reset`, {
     method: 'POST',
@@ -328,9 +324,7 @@ export function createMembership({
   })
 }
 
-// updateMembership updates the complete effective-dated employment relationship. The explicit
-// inheritAuthorization switch controls whether position authorization templates participate in
-// effective authorization for this membership.
+// 更新完整的带生效期任职关系；显式 inheritAuthorization 决定该任职是否参与岗位模板授权继承。
 export function updateMembership({
   membershipId,
   orgUnitId,
@@ -357,8 +351,7 @@ export function updateMembership({
   })
 }
 
-// Kept for existing status-only callers. Omitting inheritAuthorization deliberately leaves the
-// existing inheritance choice unchanged instead of silently turning it back on.
+// 兼容仅更新状态的调用方：省略 inheritAuthorization 表示保留既有继承选择，不能静默重新开启。
 export function updateMembershipStatus({ membershipId, status, version, inheritAuthorization }) {
   const payload = { status, version }
   if (inheritAuthorization !== undefined) {

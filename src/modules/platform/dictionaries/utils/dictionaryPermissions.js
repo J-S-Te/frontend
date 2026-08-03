@@ -1,6 +1,7 @@
 /**
- * Dictionary permissions must stay aligned with the backend router and
- * authz_permission seeds in migration 000015.
+ * 字典和字典项是两组独立授权边界，权限码必须同时与后端路由及初始化权限目录保持一致。
+ * 页面按该集合决定模块是否可见，但写操作仍以后端鉴权为准，不能把“能读字典”推断为
+ * “能维护字典项”。
  */
 export const DICTIONARY_PERMISSIONS = Object.freeze({
   dictionaryRead: 'platform:dictionary:read',

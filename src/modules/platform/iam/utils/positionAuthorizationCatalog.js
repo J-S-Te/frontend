@@ -4,11 +4,9 @@ import {
 } from './applicationAuthorizationCatalog.js'
 
 /**
- * Convert the task-specific position-authorization target response into the
- * catalog shape used by the selector. The endpoint already applies the
- * security boundary: platform-native roles are read from the platform itself,
- * while subsystem roles are returned only for a successfully synchronized
- * application catalog.
+ * 将岗位授权专用接口归一化为选择器使用的目录结构。该接口已建立安全边界：平台角色
+ * 读取平台自身的权威记录；子系统角色只有在应用目录成功同步后才会返回。旧目录缺少
+ * assignable 字段时沿用兼容语义，但后续选择器仍须与平台侧稳定角色 ID 取交集。
  */
 export function positionAuthorizationTargetCatalog(target) {
   const roles = (Array.isArray(target?.roles) ? target.roles : []).map((role) => ({
@@ -29,9 +27,9 @@ export function positionAuthorizationTargetCatalog(target) {
 }
 
 /**
- * The position-template API exposes stable platform role IDs; the application
- * catalog exposes the application-owned role state. Only the intersection is
- * safe to offer in a template role selector.
+ * 岗位模板接口提供平台侧稳定 role_id，应用目录提供应用方声明的实时角色状态。只有
+ * 两者按角色编码的交集同时存在，才能既提交平台可识别的 ID，又保证角色当前仍为 ACTIVE
+ * 且可分配；任一侧的孤立记录都不能出现在模板选择器中。
  */
 export function positionTemplateRoleChoices(targetRoles, catalog) {
   const rolesByCode = new Map(

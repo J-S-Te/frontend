@@ -20,6 +20,7 @@ export class CRMAPIError extends Error {
 }
 
 function redirectToLogin() {
+  // 多个并发 API 可能同时返回 401，只允许首个请求触发导航，避免重定向风暴。
   if (loginRedirectStarted) return
   loginRedirectStarted = true
   window.location.replace(buildCRMLoginURL())
@@ -53,6 +54,8 @@ export async function request(path, options = {}) {
     headers: {
       Accept: 'application/json',
       ...(options.body && !hasFormDataBody ? { 'Content-Type': 'application/json' } : {}),
+      // Cookie 会自动随同源请求发送；写操作必须显式携带 CSRF 标记，后端仍会
+      // 结合 Origin/Sec-Fetch-Site 校验，不能把该固定值视为身份凭据。
       ...(requiresCSRF ? { 'X-CSRF-Token': '1' } : {}),
       ...(options.idempotent ? { 'Idempotency-Key': options.idempotencyKey || createIdempotencyKey() } : {}),
       ...(options.headers || {}),
@@ -71,7 +74,10 @@ export async function request(path, options = {}) {
   return body?.data ?? body
 }
 
-/** Downloads an authorized response without persisting its contents in browser storage. */
+/**
+ * 下载受会话授权的 CSV，不把内容写入浏览器存储；同时对白名单媒体类型和
+ * Content-Disposition 文件名做约束，避免错误页被当文件保存及路径字符注入。
+ */
 export async function requestBlob(path) {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     credentials: 'include',
@@ -103,7 +109,10 @@ export async function requestBlob(path) {
   return { blob: await response.blob(), filename }
 }
 
-/** Downloads a server-authorized business file with an explicit MIME allowlist. */
+/**
+ * 下载服务端授权的业务文件。调用方必须给出 MIME 白名单，响应文件名还要剔除
+ * 路径与控制字符；服务端返回 200 但类型异常时同样失败关闭。
+ */
 export async function requestAuthorizedFile(path, allowedMediaTypes, fallbackFilename = 'download.bin') {
   const response = await fetch(`${API_BASE_URL}${path}`, { credentials: 'include', headers: { Accept: [...allowedMediaTypes, 'application/json'].join(', ') } })
   if (!response.ok) {
@@ -131,11 +140,11 @@ export function toQuery(params = {}) {
   return encoded ? `?${encoded}` : ''
 }
 
-/** Reads the CRM subsystem session boundary; the HttpOnly cookie is never exposed. */
+/** 读取 CRM 子系统会话边界；HttpOnly Cookie 始终由浏览器管理，不暴露给脚本。 */
 export const getCRMSession = () => request('/auth/me')
 
 /**
- * Reads non-secret optional-integration readiness for the current process.
- * This is presentation guidance only; business endpoints remain authoritative.
+ * 读取当前进程可选集成的非敏感就绪状态，仅用于禁用尚未接通的按钮；真正执行
+ * 时仍以后端业务接口鉴权和状态校验为准，不能把 capability 当授权结果缓存。
  */
 export const getCRMRuntimeCapabilities = () => request('/capabilities')

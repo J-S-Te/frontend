@@ -5,6 +5,8 @@ import { IAM_ENTRY_PERMISSIONS } from '../../iam/utils/iamPermissions.js'
 export const PLATFORM_AUDIT_VIEW_PERMISSION = 'platform:audit:view'
 export const PLATFORM_AUDIT_EXPORT_PERMISSION = 'platform:audit:export'
 
+// 设置页按业务分区独立判定入口权限。用户拥有任一相关权限即可看到该分区，分区内部
+// 再按具体 read/create/update 权限控制内容与按钮，避免 platform:user:read 成为无关总门槛。
 export const PLATFORM_SETTINGS_SECTION_PERMISSIONS = Object.freeze({
   base: Object.freeze([
     'platform:settings:read',
@@ -70,6 +72,7 @@ export function canAccessPlatformConsole(principal) {
 }
 
 export function platformConsoleLandingRoute(principal) {
+  // 默认落到第一个真正可见的设置分区；只有审计权限时直接进入审计页，无权限则交给路由守卫拒绝。
   const section = firstVisiblePlatformSettingsSection(principal)
   if (section) return { name: 'settings', params: { section } }
   if (checkAnyPermission(principal, [PLATFORM_AUDIT_VIEW_PERMISSION])) return { name: 'audit' }

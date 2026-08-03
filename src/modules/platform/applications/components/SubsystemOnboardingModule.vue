@@ -27,6 +27,8 @@ const emit = defineEmits(['toast', 'completed'])
 const loading = ref(false)
 const saving = ref(false)
 const errorMessage = ref('')
+const errorNextAction = ref('')
+const errorTraceId = ref('')
 const applications = ref([])
 const applicationKeyword = ref('')
 const applicationStatus = ref('')
@@ -45,6 +47,8 @@ const environmentDeleteConfirmation = ref('')
 const onboardExistingApplicationId = ref('')
 
 const standardEnvironments = Object.freeze(['dev', 'test', 'staging', 'prod'])
+const isLoopbackHost = typeof window === 'undefined' || ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname)
+const preferredEnvironments = Object.freeze(isLoopbackHost ? standardEnvironments : ['prod', 'staging', 'test', 'dev'])
 
 const appForm = reactive(emptyApplicationForm())
 const environmentForm = reactive(emptyEnvironmentForm())
@@ -57,6 +61,8 @@ const canUpdateApplication = computed(() => hasPermission('platform:application:
 const canUpdateEnvironment = computed(() => hasPermission('platform:application-environment:update'))
 const canDeleteEnvironment = computed(() => hasPermission('platform:application-environment:delete'))
 const canReadLoginTargets = computed(() => hasPermission('platform:application-login-target:read'))
+// 运行时重部署/下线会同时影响应用、环境、登录目标和 OAuth 客户端，必须具备完整权限集；
+// 只拥有其中一个更新权限时不展示入口，后端仍会逐项执行最终鉴权。
 const canManageRuntime = computed(() => [
   'platform:application:update',
   'platform:application-environment:update',
@@ -82,6 +88,12 @@ const availableOnboardEnvironments = computed(() => {
 })
 const onboardConfirmationCode = computed(() => `${onboardForm.applicationCode.trim().toLowerCase()}/${onboardForm.environment}`)
 const onboardPreset = computed(() => subsystemOnboardingPreset(onboardForm.applicationCode))
+const productionOnboardingError = computed(() => {
+  if (isLoopbackHost || onboardForm.environment !== 'prod') return ''
+  if (onboardForm.applicationCode.trim().toLowerCase() !== 'contract_management') return '生产一键接入目前仅支持合同管理系统（contract_management/prod）。'
+  if (onboardForm.clientType !== 'confidential') return '生产合同管理必须使用 confidential 客户端。'
+  return ''
+})
 const canSubmitOnboard = computed(() => Boolean(
   props.canOnboard
   && !loading.value
@@ -91,6 +103,7 @@ const canSubmitOnboard = computed(() => Boolean(
   && onboardForm.publicBaseUrl.trim()
   && onboardForm.upstreamUrl.trim()
   && onboardForm.pathPrefix.trim()
+  && !productionOnboardingError.value
   && onboardConfirmation.value.trim() === onboardConfirmationCode.value,
 ))
 
@@ -123,12 +136,30 @@ function emptyOnboardForm() {
     applicationCode: '',
     applicationName: '',
     description: '',
-    environment: 'dev',
+    environment: isLoopbackHost ? 'dev' : 'prod',
     publicBaseUrl: typeof window === 'undefined' ? 'http://localhost:8081' : window.location.origin,
     upstreamUrl: '',
     pathPrefix: '',
     clientType: 'confidential',
   }
+}
+
+function clearError() {
+  errorMessage.value = ''
+  errorNextAction.value = ''
+  errorTraceId.value = ''
+}
+
+function setError(error, fallback) {
+  if (error instanceof ApplicationRegistryError) {
+    errorMessage.value = error.message
+    errorNextAction.value = error.nextAction
+    errorTraceId.value = error.traceId
+    return
+  }
+  errorMessage.value = fallback
+  errorNextAction.value = ''
+  errorTraceId.value = ''
 }
 
 function nullable(value) {
@@ -165,7 +196,7 @@ function statusClass(status) {
 }
 
 function environmentStatus(environment) {
-  return deploymentStates.value[environment.environment] || (environment.status === 'ACTIVE' ? 'READY' : environment.status)
+  return deploymentStates.value[environment.environment] || (environment.status === 'ACTIVE' ? 'UNKNOWN' : environment.status)
 }
 
 function selectApplication(application) {
@@ -213,6 +244,8 @@ async function loadEnvironments() {
     selectedEnvironmentId.value = environments.value.some((item) => item.environment_id === selectedEnvironmentId.value)
       ? selectedEnvironmentId.value
       : environments.value[0]?.environment_id || ''
+    // 环境目录是控制面配置，部署状态来自 Agent。单个 Agent 状态查询失败不应抹掉
+    // 其他环境，使用 allSettled 保留成功结果并回退到环境自身状态。
     const states = await Promise.allSettled(environments.value.map(async (environment) => [
       environment.environment,
       (await getSubsystemStatus({ applicationCode: application.code, environment: environment.environment }))?.status,
@@ -300,7 +333,7 @@ function openEnvironmentEditor(environment) {
 function openOnboardEnvironment() {
   const application = selectedApplication.value
   if (!application || !props.canOnboard) return
-  const environment = standardEnvironments.find((item) => !environments.value.some((existing) => existing.environment === item))
+  const environment = preferredEnvironments.find((item) => !environments.value.some((existing) => existing.environment === item))
   if (!environment) {
     errorMessage.value = 'dev、test、staging、prod 环境均已接入，不能重复创建。'
     return
@@ -392,6 +425,8 @@ async function confirmDeleteEnvironment() {
   saving.value = true
   errorMessage.value = ''
   try {
+    // 先清理运行时，再删除控制面环境记录。若 Agent 清理失败，保留数据库配置以便重试，
+    // 防止出现“记录已删但容器、密钥和网关入口仍存留”的孤儿运行时。
     await teardownSubsystem({ applicationCode: application.code, environment: environment.environment })
     await deleteEnvironment({
       applicationId: application.application_id,
@@ -429,15 +464,21 @@ async function reapplyEnvironment(environment, retry = false) {
 }
 
 async function submitOnboarding() {
-	if (!canSubmitOnboard.value) return
-	if (normalizeIntegratedSubsystemOnboarding(onboardForm)) {
-		notify('已将客户与商机管理系统修正为统一 Docker 编排地址。')
-	}
-	const presetError = validateIntegratedSubsystemOnboarding(onboardForm)
-	if (presetError) {
-		errorMessage.value = presetError
-		return
-	}
+  if (!canSubmitOnboard.value) return
+  if (productionOnboardingError.value) {
+    errorMessage.value = productionOnboardingError.value
+    return
+  }
+  // 已纳入统一 Compose 的子系统只允许固定服务名和网关前缀；兼容旧别名时先归一化，
+  // 再校验，避免数据库登记地址与实际 Docker 网络拓扑分叉。
+  if (normalizeIntegratedSubsystemOnboarding(onboardForm)) {
+    notify('已将客户与商机管理系统修正为统一 Docker 编排地址。')
+  }
+  const presetError = validateIntegratedSubsystemOnboarding(onboardForm)
+  if (presetError) {
+    errorMessage.value = presetError
+    return
+  }
   saving.value = true
   errorMessage.value = ''
   try {
@@ -471,7 +512,7 @@ function selectEnvironment(environment) {
 
 watch(selectedApplicationId, () => { loadEnvironments() }, { immediate: true })
 watch(() => onboardForm.applicationCode, (applicationCode, previousCode) => {
-	applySubsystemOnboardingPreset(onboardForm, String(previousCode || '').trim().toLowerCase())
+  applySubsystemOnboardingPreset(onboardForm, String(previousCode || '').trim().toLowerCase())
 })
 onMounted(() => { loadApplications() })
 </script>
@@ -483,7 +524,7 @@ onMounted(() => { loadApplications() })
         <div>
           <span class="application-registry-eyebrow"><ConsoleIcon name="dashboard" /> APPLICATION REGISTRY</span>
           <h2 id="application-registry-title">应用接入管理</h2>
-          <p>应用接入、环境、门户登录目标和部署运行时统一维护。应用编码保持稳定，配置修改使用版本校验，退役操作不会物理删除历史审计记录。</p>
+          <p>应用接入、环境、门户登录目标和部署运行时统一维护。生产环境由平台通过隔离部署 Agent 安全交付一次性凭据，无需在命令行复制 OAuth 配置。</p>
         </div>
         <button v-if="props.canOnboard" class="console-button primary" type="button" @click="toggleOnboarding">
           <ConsoleIcon name="save" />{{ showOnboard ? '收起接入' : '新增接入' }}

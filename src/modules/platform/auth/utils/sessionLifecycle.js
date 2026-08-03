@@ -22,9 +22,8 @@ function notifySessionEnded(reason = 'logout') {
 }
 
 /**
- * Coordinates browser-side inactivity feedback for every route in this SPA. Server-side session
- * revocation remains authoritative: this helper provides immediate user feedback and sends a
- * throttled activity signal only after real user interaction, never after background API traffic.
+ * 统一协调 SPA 各路由的浏览器无操作退出反馈。服务端会话撤销始终是权威；这里只在
+ * 真实点击、按键、滚动或触摸后限流上报活动，后台接口请求和轮询不能延长会话。
  */
 export function createSessionLifecycle({ onSessionEnded, onSessionError } = {}) {
   let idleTimer = 0
@@ -54,8 +53,8 @@ export function createSessionLifecycle({ onSessionEnded, onSessionError } = {}) 
         try {
           await logoutCurrentSession()
         } catch {
-          // The server might already have invalidated this session. The local sign-in state must
-          // still end, and other systems will reject the shared server session as well.
+          // 服务端可能已经使基础平台会话失效，本地仍必须完成退出；各子系统持有独立会话，
+          // 是否立即失效由其退出、授权重验与会话到期机制决定。
         }
       }
       onSessionEnded?.(reason)
@@ -70,6 +69,7 @@ export function createSessionLifecycle({ onSessionEnded, onSessionError } = {}) 
   }
 
   const touchServer = async () => {
+    // 高频浏览器事件只重置本地计时；活动端点最多每分钟触发一次，避免滚动等操作放大请求。
     if (stopped || Date.now() - lastServerTouchAt < SERVER_TOUCH_INTERVAL_MS) return
     lastServerTouchAt = Date.now()
     try {
@@ -107,6 +107,7 @@ export function createSessionLifecycle({ onSessionEnded, onSessionError } = {}) 
   }
 
   if (browserAvailable()) {
+    // CustomEvent 覆盖当前标签页，BroadcastChannel 覆盖同源其他标签页；二者都不跨站传递凭据。
     window.addEventListener(SESSION_EVENT, onExternalSessionEnd)
     if (typeof BroadcastChannel !== 'undefined') {
       channel = new BroadcastChannel(SESSION_CHANNEL)
@@ -131,7 +132,7 @@ export function createSessionLifecycle({ onSessionEnded, onSessionError } = {}) 
   }
 }
 
-/** Broadcasts an explicit sign-out to same-origin application tabs immediately. */
+/** 将显式退出立即广播到当前标签页及其他同源应用标签页。 */
 export function broadcastSessionEnded(reason = 'logout') {
   notifySessionEnded(reason)
   if (browserAvailable() && typeof BroadcastChannel !== 'undefined') {

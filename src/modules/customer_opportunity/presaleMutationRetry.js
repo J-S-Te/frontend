@@ -34,8 +34,9 @@ function normalizeWorklogDecimal(value) {
 }
 
 /**
- * Normalizes the fields used by the backend mutation digest. This state stays
- * in memory and never crosses into browser storage.
+ * 按后端幂等摘要的字段规则规范化命令。日期、枚举、工时小数及执行人顺序
+ * 都必须先归一化，否则语义相同的重试会得到不同签名，导致服务端无法识别
+ * 已经执行过的命令。规范化结果只驻留当前页面内存，不写入浏览器持久存储。
  */
 export function normalizePresaleMutationPayload(operation, payload) {
   if (operation === 'create') {
@@ -87,10 +88,9 @@ export function normalizePresaleMutationPayload(operation, payload) {
 }
 
 export function createPresaleMutationRetryState(createKey) {
-  // Keep every outcome-ambiguous command for this page lifetime. A later
-  // command with a different task or payload must not evict an earlier key:
-  // the earlier command may already have committed while its response was
-  // lost, and reusing a newly generated key would enqueue it twice.
+  // 网络中断时无法判断服务端是否已提交，因此页面生命周期内要保留每条结果
+  // 不确定命令。后续不同任务或不同载荷不能挤掉旧键，否则旧命令若已落库，
+  // 使用新键重发会造成重复审批、分配或工时记录。
   const entriesBySignature = new Map()
   const signaturesByKey = new Map()
 

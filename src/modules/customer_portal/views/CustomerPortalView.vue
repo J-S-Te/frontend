@@ -9,6 +9,8 @@ import '../styles/project-export.css'
 const route = useRoute()
 const router = useRouter()
 const session = ref(null)
+// 依赖型能力默认按不可用处理；只有服务端明确返回 available=true 后才开放写入或下载，
+// 避免能力探测失败时把“未知”误当成“可用”。
 const unavailableCapability = Object.freeze({ available: false, mode: 'UNAVAILABLE', reason_code: 'CAPABILITY_STATUS_UNAVAILABLE' })
 const capabilities = ref({ report_request_submission: unavailableCapability, project_export: unavailableCapability, report_download: unavailableCapability, filing_material_upload: unavailableCapability, filing_export: unavailableCapability, filing_police_submission: unavailableCapability })
 let capabilitiesLoaded = false
@@ -115,6 +117,7 @@ async function load() {
     session.value ||= await getPortalSession()
     if (!capabilitiesLoaded) {
       capabilitiesLoaded = true
+      // 能力状态不可确认时继续保持失败关闭。
       try { capabilities.value = await getPortalCapabilities() } catch { /* Keep dependency-backed actions closed. */ }
     }
     if (section.value === 'projects' && hasPermission('project.read')) { const value = await listProjects({ page: 1, page_size: 20 }); projects.value = value?.items || [] }
@@ -124,6 +127,8 @@ async function load() {
   } catch (value) { fail(value) } finally { loading.value = false }
 }
 async function loadReportWorkspace() {
+  // 报告列表、通知、风险提醒和可申请项目彼此独立加载；代际号同时隔离栏目切换和
+  // 重复刷新产生的迟到响应，局部依赖失败不会抹掉其他已经成功的区域。
   const generation = ++reportLoadGeneration
   selectedReport.value = null
   reportDetailGeneration++
@@ -152,7 +157,7 @@ async function loadReportWorkspace() {
         reportNotificationUnreadCount.value = Number(count?.count || 0)
       }
     }).catch(() => {
-      // Notification availability must not hide the report application list.
+      // 通知依赖不可用不应隐藏报告申请主列表。
       if (generation === reportLoadGeneration && section.value === 'reports') {
         reportNotifications.value = []
         reportNotificationUnreadCount.value = 0
@@ -161,8 +166,7 @@ async function loadReportWorkspace() {
     requests.push(listReportRiskAlerts({ open_only: true, page: 1, page_size: 20 }).then((value) => {
       if (generation === reportLoadGeneration && section.value === 'reports') reportRiskAlerts.value = value?.items || []
     }).catch(() => {
-      // Risk-alert availability is isolated from the application and download
-      // history. A frozen grant itself remains enforced server-side.
+      // 风险提醒展示与申请、下载历史解耦；即使提醒接口失败，冻结授权仍由服务端强制执行。
       if (generation === reportLoadGeneration && section.value === 'reports') reportRiskAlerts.value = []
     }))
   }
@@ -214,6 +218,8 @@ async function loadProjectEvaluation(projectId, generation = projectRequestGener
   }
 }
 async function openProject(item) {
+  // 先用列表快照即时打开详情，再并行读取正文、动态和评价。三条请求共享同一代际，
+  // 快速切换项目时旧项目的任何响应都不能覆盖当前弹窗。
   const generation = ++projectRequestGeneration
   selectedProject.value = { snapshot: item, milestones: [], team: [] }
   projectDetailLoading.value = true
@@ -259,9 +265,8 @@ async function openProjectConversation() {
 }
 async function acknowledgeVisibleManagerMessages(detail) {
   const conversationId = detail?.conversation?.id
-  // Acknowledge exactly the recipient messages rendered in this page. The
-  // server stores per-message receipts, so an undisplayed historical page can
-  // never be crossed by a high-water cursor.
+  // 只确认当前页面实际渲染的经理消息。服务端逐条保存回执，因此不会用高水位游标
+  // 跨过尚未加载的历史页并误标已读。
   const managerMessageCursors = (detail?.messages?.items || []).filter((item) => item.sender_type === 'MANAGER' && item.cursor).map((item) => item.cursor)
   if (!conversationId || managerMessageCursors.length === 0) return
   const generation = ++projectMessageReadGeneration
@@ -316,6 +321,8 @@ async function exportProjectPDF() {
   projectExportLoading.value = true; projectExportError.value = ''
   projectExportController?.abort(); projectExportController = controller
   try {
+    // 创建任务和轮询共用同一个中止信号；同一项目保留已创建任务及幂等键，网络失败后
+    // 继续查询原任务，而不是重复生成 PDF。切换项目时由代际号阻止旧文件触发下载。
     let job = projectExportJobs.get(projectId)
     if (!job) {
       const retryKey = projectExportRetryKeys.get(projectId) || createIdempotencyKey()
@@ -419,9 +426,8 @@ async function downloadReportFile() {
   reportDownloadError.value = ''
   let objectURL = ''
   try {
-    // Every intentional click is a new authorization attempt. Failed grant
-    // responses are never automatically replayed because plaintext tokens are
-    // intentionally not recoverable from the server.
+    // 每次主动点击都创建一份新的短效授权。失败授权不会自动重放，因为服务端不会保存
+    // 可恢复的明文下载令牌；关闭详情或再次点击会中止旧请求并使其响应失效。
     const result = await downloadIssuedReport(reportID, { idempotencyKey: createIdempotencyKey(), signal: controller.signal })
     if (generation !== reportDownloadGeneration || selectedReport.value?.id !== reportID || section.value !== 'reports') return
     objectURL = URL.createObjectURL(result.blob)
@@ -448,8 +454,7 @@ async function submitReport() {
   if (!hasPermission('report.request') || !capabilityAvailable('report_request_submission') || reportSubmitting.value) return
   reportSubmitError.value = ''; notice.value = ''
   const fingerprint = reportRequestFingerprint(reportForm)
-  // A failed identical submission reuses the same key; changing any canonical
-  // field creates a new logical request and therefore a new key.
+  // 内容相同的失败提交复用原幂等键；任一规范化字段变化都代表新的业务申请，必须换键。
   if (fingerprint !== reportRetryFingerprint) {
     reportRetryFingerprint = fingerprint
     reportRetryKey = createIdempotencyKey()
@@ -494,6 +499,7 @@ async function revokeSession(item) { if (!hasPermission('account.security.manage
 async function acknowledgeEvent(item) { if (!hasPermission('account.security.manage')) return; error.value = ''; notice.value = ''; try { await acknowledgeSecurityEvent(item.id); notice.value = '安全事件已确认。'; accountSecurity.value = await getAccountSecurity() } catch (value) { fail(value) } }
 
 watch(section, () => {
+  // 离开报告栏目立即中止文件流，并让列表、详情的在途响应全部过期。
   cancelReportDownload()
   reportLoadGeneration++
   reportDetailGeneration++

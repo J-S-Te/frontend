@@ -78,9 +78,8 @@ function filterPositionTree(nodes, keyword) {
   })
 }
 
-// buildPositionOrganizationTree mirrors the organization-unit hierarchy exactly. Each position
-// is attached only to its direct organization; ancestors stay visible for hierarchy and search
-// context. Positions outside the visible organization scope are isolated in an anomaly root.
+// 岗位树严格复用组织单元层级：岗位只挂在直属组织，祖先仅作为层级和搜索上下文；
+// 不在可见组织范围内的岗位隔离到异常根节点，避免误归到同名组织。
 export function buildPositionOrganizationTree(positions = [], organizations = [], keyword = '') {
   const organizationTree = buildOrganizationTree(organizations)
   const visibleOrganizationIds = new Set()
@@ -144,14 +143,13 @@ export function isPositionOrganizationNodeExpanded(node, collapsedIds = new Set(
   return Boolean(node?.hasExpandableContent) && !collapsedIds.has(node.organization_id)
 }
 
-// Positions are rendered by the component below the organization header rather than as tree
-// children. Keep their visibility in the shared utility so leaf-organization collapse behavior
-// is testable without coupling tests to Vue template internals.
+// 岗位由组件渲染在组织标题下而不是作为树 children；可见性留在纯函数中，便于测试
+// 叶子组织的折叠行为而不耦合 Vue 模板。
 export function visiblePositionsForOrganizationNode(node, collapsedIds = new Set()) {
   return isPositionOrganizationNodeExpanded(node, collapsedIds) ? (node?.positions || []) : []
 }
 
-// Compatibility adapter for counts/CSV consumers that only need organization-position groups.
+// 为只需要组织—岗位分组的计数和 CSV 导出提供兼容适配，不改变树本身。
 export function groupPositionsByOrganization(positions = [], organizations = [], keyword = '') {
   return flattenPositionOrganizationTree(buildPositionOrganizationTree(positions, organizations, keyword))
     .filter((node) => node.positions.length > 0)

@@ -9,10 +9,9 @@ function normalizedContact(contact) {
 }
 
 /**
- * Retains an outcome-ambiguous Portal provisioning command for this page
- * lifetime. The key is never written to storage and is removed only after the
- * CRM confirms that the complete provisioning Saga and invite transaction
- * succeeded.
+ * Portal 开通是跨系统 Saga：CRM 建立映射、Portal 创建身份并发出邀请可能已经
+ * 部分成功，而浏览器只看到超时。相同客户和联系人必须复用原幂等键，直到 CRM
+ * 明确确认整条 Saga 成功；键仅保存在页面内存中。
  */
 export function createPortalInviteRetryState(createKey) {
   const pending = new Map()
@@ -30,4 +29,3 @@ export function createPortalInviteRetryState(createKey) {
 
   return { keyFor, confirmSuccess }
 }
-

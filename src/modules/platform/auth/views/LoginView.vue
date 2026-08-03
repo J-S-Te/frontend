@@ -23,6 +23,8 @@ function getLoginReturnTo() {
 
 function getLoginTargetSelection() {
   const parameters = new URLSearchParams(window.location.search)
+  // 三个字段只描述服务端登记记录的复合选择条件，不接受前端直接传 redirect_uri。
+  // 登录接口必须在当前租户内解析 ACTIVE 登录目标后，才可返回批准的 redirect_url。
   return {
     applicationId: parameters.get('application_id')?.trim() || '',
     environmentId: parameters.get('environment_id')?.trim() || '',
@@ -103,6 +105,8 @@ async function performPasswordLogin(replaceExistingSession = false) {
       result?.redirect_url ||
       LOGIN_SUCCESS_URL
 
+    // 跨源跳转只信任登录接口根据注册表返回的结果；URL 查询参数 return_to 始终走
+    // 同源校验，不能借统一登录页构造开放重定向。
     window.setTimeout(() => redirectTopLevel(redirectUrl, true), 450)
   } catch (error) {
     const traceText = error.traceId ? `（追踪号：${error.traceId}）` : ''

@@ -27,6 +27,8 @@ function errorMessage(value) {
 }
 
 function preferredOrganization(user, requestedOrganizationID = '') {
+  // 请求中的组织只有确实属于该用户当前有效任职时才保留；否则回退到主组织或目录
+  // 返回的首个组织，禁止自由拼接用户 ID 与组织 ID。
   const organizations = Array.isArray(user?.organizations) ? user.organizations : []
   if (requestedOrganizationID && organizations.some((item) => item.organization_id === requestedOrganizationID)) return requestedOrganizationID
   const primary = organizations.find((item) => item.is_primary)
@@ -48,6 +50,8 @@ async function load(params, initializeSelection = false) {
     const result = await listOwnerDirectory({ ...params, page: 1, page_size: 50 })
     if (sequence !== loadSequence) return
     const loadedUsers = Array.isArray(result?.items) ? result.items : []
+    // 搜索结果可能不含当前已选用户；保留服务端之前确认过的选项，避免一次关键词查询
+    // 把表单中的负责人静默清空。最终有效性仍由提交接口按平台任职关系复核。
     const previousSelection = users.value.find((item) => item.user_id === props.userId)
     users.value = previousSelection && !loadedUsers.some((item) => item.user_id === previousSelection.user_id)
       ? [previousSelection, ...loadedUsers]
@@ -81,6 +85,8 @@ function onUserChange(event) {
 }
 
 watch(() => props.userId, async (userID) => {
+  // 外层编辑表单回填了未加载的负责人时，按精确用户 ID 查询其有效组织；递增序号会
+  // 使更早的搜索响应失效，避免覆盖这次回填。
   if (props.disabled || !userID || users.value.some((item) => item.user_id === userID)) return
   await load({ user_id: userID }, false)
 })

@@ -270,11 +270,6 @@
 }
 .crm-empty.compact { padding: 26px 14px; }
 
-.crm-grid {
-  display: grid;
-  grid-template-columns: minmax(340px, .8fr) minmax(520px, 1.3fr);
-  gap: 16px;
-}
 .crm-actions {
   display: flex;
   align-items: center;
@@ -430,6 +425,14 @@
 .crm-subsection-heading h3 { margin: 0 0 5px; }
 .crm-panel-heading p,
 .crm-subsection-heading p { margin: 0; }
+.crm-presale-create-page { max-width: 780px; }
+.crm-presale-create-form { padding: 24px; }
+.crm-presale-create-form > h2 { margin-bottom: 16px; }
+.crm-presale-form-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
 .crm-quick-filters,
 .crm-customer-tabs {
   display: flex;
@@ -674,7 +677,6 @@
 .crm-attachment-upload input { min-width: 0; flex: 1; }
 
 @media (max-width: 1320px) {
-  .crm-grid { grid-template-columns: 1fr; }
   .crm-kpis { grid-template-columns: repeat(3, minmax(130px, 1fr)); }
   .crm-opportunity-side-rail {
     top: auto;
@@ -729,6 +731,7 @@
   .crm-report-bar strong { text-align: left; }
   .crm-panel-heading,
   .crm-subsection-heading { flex-direction: column; }
+  .crm-presale-form-row { grid-template-columns: 1fr; gap: 0; }
   .crm-inbox-item { grid-template-columns: 1fr; }
   .crm-inbox-item strong,
   .crm-inbox-item span:not(.crm-status),

@@ -10,6 +10,8 @@ export class PortalAPIError extends Error {
   }
 }
 function beginLogin() {
+  // 门户页面常并发加载项目、通知和能力状态；401 只允许触发一次跳转，并保留
+  // 当前相对路径作为回跳目标，避免每个失败请求互相覆盖导航。
   if (redirectStarted) return
   redirectStarted = true
   session = null
@@ -21,6 +23,7 @@ async function request(path, options = {}) {
   const requiresCSRF = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...options, credentials: 'include',
+    // 固定 CSRF 标记只声明这是受控前端写请求，后端仍需结合 Origin 和会话校验。
     headers: { Accept: 'application/json', ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...(requiresCSRF ? { 'X-CSRF-Token': '1' } : {}), ...(options.headers || {}) },
   })
   const contentType = response.headers.get('content-type') || ''
@@ -41,6 +44,8 @@ function query(params = {}) {
   return value ? `?${value}` : ''
 }
 function key() { return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}` }
+// Portal 同时兼容历史 Go 默认字段名与当前 JSON 标签。只在适配层消化差异，
+// 视图始终读取统一的小写字段，便于后端滚动升级而不污染页面逻辑。
 function projectSnapshot(value = {}) {
   return {
     ...value,
@@ -107,7 +112,10 @@ function reportStatusEvent(value = {}) {
   }
 }
 
-/** Canonicalizes the fields covered by the backend request hash. */
+/**
+ * 按后端报告申请摘要覆盖的字段规范化载荷。邮箱大小写和首尾空白不应产生新的
+ * 业务命令，否则网络重试可能绕开幂等结果并重复提交申请。
+ */
 export function normalizeReportRequestPayload(value = {}) {
   return {
     project_id: String(value.project_id || '').trim(),
@@ -124,6 +132,7 @@ export function reportRequestFingerprint(value = {}) {
 export function createIdempotencyKey() { return key() }
 
 export function getPortalSession({ force = false } = {}) {
+  // 合并并发会话读取；缓存仅驱动界面，所有业务权限仍由 HttpOnly Cookie 和后端判定。
   if (!force && session) return Promise.resolve(session)
   if (!force && sessionRequest) return sessionRequest
   sessionRequest = request('/auth/me').then((value) => { session = value; return value }).finally(() => { sessionRequest = null })
@@ -184,7 +193,10 @@ export const getProjectConversation = (projectId, params = {}) => request(`/proj
 export const sendProjectConversationMessage = (conversationId, content, idempotencyKey = key()) => request(`/project-conversations/${encodeURIComponent(conversationId)}/messages`, { method: 'POST', body: JSON.stringify({ content }), headers: { 'Idempotency-Key': idempotencyKey } })
 export const readProjectConversationMessages = (conversationId, messageCursors) => request(`/project-conversations/${encodeURIComponent(conversationId)}/read`, { method: 'POST', body: JSON.stringify({ message_cursors: messageCursors }) })
 
-/** Keeps the plaintext 15-minute grant out of URLs, bodies and browser storage. */
+/**
+ * 先领取 15 分钟短效下载授权，再通过同源请求头立即消费。明文授权不进入 URL、
+ * 请求体或浏览器存储，减少历史记录、代理日志和前端状态泄露面。
+ */
 export async function downloadProjectExport(id, { signal } = {}) {
   const exportID = encodeURIComponent(id)
   const grant = await request(`/project-exports/${exportID}/download-grants`, { method: 'POST', signal })
@@ -239,10 +251,8 @@ async function reportDownloadError(response) {
 }
 
 /**
- * Creates a one-time-visible authorization and immediately consumes it in a
- * same-origin download request. The plaintext credential remains local to
- * this function and is never returned to the view, placed in a URL/body, or
- * persisted by browser code.
+ * 创建一次可见的短效授权并立即在同源下载请求中消费。明文凭据只存在于本函数
+ * 局部变量，不返回视图、不进入 URL/请求体，也不由浏览器代码持久化。
  */
 export async function downloadIssuedReport(id, { idempotencyKey = key(), signal } = {}) {
   const reportID = encodeURIComponent(id)

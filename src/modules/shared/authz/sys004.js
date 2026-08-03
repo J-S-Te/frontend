@@ -50,11 +50,13 @@ export function contractPermissionName(code) {
 }
 
 export function hasContractPermission(session, permission) {
+  // 这是菜单展示辅助判断，不是授权执行点；后端必须基于服务端会话再次鉴权。
   const permissions = Array.isArray(session?.permissions) ? session.permissions : []
   return permissions.includes('all') || permissions.includes(permission)
 }
 
 export function effectiveContractPermissions(roleCode, customPermissions = []) {
+  // 自定义权限只与角色目录做展示合并；是否可授予、是否越过租户范围由平台后端判定。
   const role = contractRole(roleCode)
   return [...new Set([...(role?.permissions || []), ...customPermissions])].sort()
 }

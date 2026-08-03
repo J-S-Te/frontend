@@ -114,9 +114,9 @@ async function ingestFile(file) {
   step.value = 2
 }
 
-// ---- 纯手写 CSV 解析（不引第三方库） ----
-// 支持：双引号包裹字段、"" 转义为单 "、CRLF / LF 行尾、UTF-8 文本。
-// 不支持：多行字段（被换行打断）。这与 RFC 4180 一致；如需扩展，再行。
+// 解析器把引号内的逗号、换行和双引号转义保留为字段内容，只在引号外把 CRLF/LF
+// 视为记录边界。这里不做业务字段校验，解析后的每一行会在预览阶段独立标记错误，
+// 避免单行脏数据让管理员失去检查其余记录的机会。
 function parseCsv(text) {
   const records = []
   let record = []
@@ -147,13 +147,13 @@ function parseCsv(text) {
       field = ''
       if (record.some((col) => col.length > 0)) records.push(record)
       record = []
-      // 兼容 \r\n
+      // CRLF 是一个记录分隔符，消费 \r 后跳过紧随的 \n，避免生成空记录。
       if (ch === '\r' && text[i + 1] === '\n') i += 1
     } else {
       field += ch
     }
   }
-  // 文件结尾残留字段
+  // 文件可以不以换行结尾，循环结束后仍要提交最后一个字段和记录。
   if (field.length || record.length) {
     record.push(field)
     if (record.some((col) => col.length > 0)) records.push(record)

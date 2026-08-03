@@ -12,9 +12,9 @@ function normalizedCreatePayload(payload) {
 }
 
 /**
- * Keeps an attachment upload's ambiguous create and complete commands stable
- * for this page lifetime. No key, file fingerprint, or upload session is
- * written to browser storage.
+ * 上传由“创建会话—传输文件—确认完成”三段组成。这里按文件元数据和商机生成
+ * 稳定流程，分别保留创建键与完成键，使任一阶段响应丢失后都能安全重试，且
+ * 已上传文件无需再次传输。键、文件指纹和上传会话均不写入浏览器存储。
  */
 export function createAttachmentUploadRetryState(createKey) {
   const entries = new Map()
@@ -34,6 +34,7 @@ export function createAttachmentUploadRetryState(createKey) {
     const current = entries.get(flow?.fingerprint)
     if (current !== flow) return
     current.session = session
+    // 完成命令必须有独立幂等键，不能复用创建会话的键；二者是不同服务端写操作。
     current.completeKey ||= createKey()
   }
 

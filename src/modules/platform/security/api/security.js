@@ -65,7 +65,7 @@ function normalize(value) {
   }
 }
 
-// --- Login policy ---
+// 登录策略与具体业务系统解耦，由基础平台统一执行失败计数、锁定和无操作超时。
 
 export function getLoginPolicy() {
   return request('/security/login-policy')
@@ -84,7 +84,7 @@ export function updateLoginPolicy({ maxFailedAttempts, lockoutDurationSeconds, f
   })
 }
 
-// --- Locked accounts ---
+// 锁定账号列表只返回当前租户内仍处于锁定状态的账号；手动解锁由服务端审计。
 
 export function listLockedAccounts({ page = 1, pageSize = 50 } = {}) {
   return request(`/security/locked-accounts${pageQuery({ page, page_size: pageSize })}`).then(normalize)

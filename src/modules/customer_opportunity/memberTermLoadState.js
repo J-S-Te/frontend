@@ -1,5 +1,8 @@
-/** Coordinates member-term requests without coupling different opportunities
- * through one global in-flight lock. Only the newest token may commit state. */
+/**
+ * 每次读取商机成员任期时分配递增令牌，不用一个全局“加载中”锁阻塞不同商机。
+ * 用户快速切换详情时，只有最新令牌且仍对应当前商机的响应可以提交到界面，
+ * 从而避免较慢的旧响应覆盖新详情。
+ */
 export function createMemberTermLoadState() {
   let sequence = 0
   return {

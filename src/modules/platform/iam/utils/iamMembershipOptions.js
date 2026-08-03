@@ -1,11 +1,9 @@
-// positionOrgUnitId normalizes the organization reference returned by current and legacy
-// position response shapes. Internal IDs are used for matching only and are not presented alone.
+// 归一化新旧岗位响应中的组织引用；内部 ID 只用于匹配，不能单独作为用户可见名称。
 export function positionOrgUnitId(position) {
   return position?.org_unit_id || position?.org_unit?.id || ''
 }
 
-// membershipOrganizationOptions adds the number of selectable positions to every organization.
-// The original order is retained so the organization hierarchy/order from the backend is stable.
+// 为每个组织补充可选岗位数量，并保留原顺序以维持后端给出的组织层级/排序。
 export function membershipOrganizationOptions(organizations = [], positions = []) {
   const positionCounts = new Map()
   positions.forEach((position) => {
@@ -23,8 +21,7 @@ export function membershipOrganizationOptions(organizations = [], positions = []
   })
 }
 
-// defaultMembershipOrganizationId selects the first organization that actually owns a position.
-// It prevents a newly opened membership form from showing an unexplained empty position selector.
+// 默认选择第一个确实拥有岗位的组织，避免新打开任职表单时出现原因不明的空岗位选择器。
 export function defaultMembershipOrganizationId(organizations = [], positions = []) {
   const option = membershipOrganizationOptions(organizations, positions)
     .find((organization) => organization.position_count > 0)

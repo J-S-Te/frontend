@@ -1,7 +1,6 @@
 /**
- * Application authorization catalogs are application-owned, read-only data in the
- * platform console. Keep the normalisation here so every IAM entry point applies
- * the same ACTIVE + assignable rule.
+ * 应用授权目录由应用方维护，在平台控制台中只读；统一在此归一化，确保所有 IAM 入口
+ * 都执行相同的 ACTIVE 且可分配规则。
  */
 export function catalogRoles(catalog) {
   return Array.isArray(catalog?.roles) ? catalog.roles : []
@@ -17,9 +16,7 @@ export function catalogRoleStatus(role) {
 
 export function isAssignableActiveCatalogRole(role) {
   if (catalogRoleStatus(role) !== 'ACTIVE') return false
-  // Catalogs produced before the explicit assignable field existed are compatible:
-  // an omitted field means the application did not restrict assignment. An explicit
-  // false always prevents the role from being offered by the console.
+  // 兼容尚无 assignable 字段的旧目录：缺失表示应用未限制分配；显式 false 始终禁止控制台提供该角色。
   return role?.assignable !== false && role?.is_assignable !== false
 }
 

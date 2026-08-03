@@ -130,6 +130,8 @@ async function loadTargets() {
     const list = normalizedList(data)
     targets.value = list.items
     total.value = list.total
+    // 删除或状态筛选可能让当前页超出新的末页；只在确实越界时校正页码并重读，
+    // 使分页最终收敛到服务端当前仍存在的最后一页，而不是停留在空页。
     if (page.value > totalPages.value) {
       page.value = totalPages.value
       await loadTargets()
@@ -152,6 +154,8 @@ async function submitEditor() {
   errorMessage.value = ''
   try {
     if (editingTarget.value) {
+      // version 来自打开编辑器时的服务端快照。发生并发更新时由后端拒绝覆盖，页面提示
+      // 管理员重新加载，而不是自动用旧表单重试并吞掉另一位管理员的修改。
       await updateApplicationLoginTarget({
         applicationId: props.applicationId,
         environmentId: props.environmentId,

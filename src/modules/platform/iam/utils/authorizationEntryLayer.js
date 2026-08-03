@@ -40,6 +40,8 @@ export function authorizationEntryLayer(subjectType) {
 }
 
 export function duplicatedInheritedRoleCodes(selectedRoles, inheritedRoles) {
+  // 只按稳定角色编码比较。直接授权与继承授权即使来源记录 ID 不同，角色编码重复仍会
+  // 造成难以追踪的授权来源，需在提交前提示管理员。
   const inherited = new Set((Array.isArray(inheritedRoles) ? inheritedRoles : [])
     .map(roleCode)
     .filter(Boolean))

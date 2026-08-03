@@ -5,6 +5,8 @@ const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '/api/v1').replace(/\
 let browserSessionGeneration = 0
 
 function advanceBrowserSessionGeneration() {
+  // generation 是浏览器内的账号切换栅栏：切换 Cookie 后，旧 /auth/me 请求即使晚到
+  // 也不能重新写回上一账号的权限快照。
   browserSessionGeneration += 1
   clearAuthorizationSnapshot()
 }
@@ -35,7 +37,7 @@ async function readResponseBody(response) {
  *
  * 安全约定：
  * 1. 前端不持久化 access token/refresh token；
- * 2. 浏览器通过 HttpOnly + Secure + SameSite Cookie 接收会话；
+ * 2. 浏览器通过 HttpOnly、SameSite 及受配置控制的 Secure Cookie 接收会话，生产环境强制 Secure；
  * 3. 所有后续请求均携带 credentials: 'include'；
  */
 export async function loginWithPassword({
@@ -82,8 +84,7 @@ export async function loginWithPassword({
     })
   }
 
-  // A successful Set-Cookie switches the browser identity. Clear the previous account's UI
-  // snapshot before the delayed top-level redirect performed by LoginView.
+  // 登录响应中的 Set-Cookie 已切换浏览器身份；顶层跳转发生前先清除旧账号 UI 快照。
   advanceBrowserSessionGeneration()
 
   return {
@@ -130,6 +131,7 @@ export async function getCurrentPrincipal() {
   }
 
   if (requestedGeneration !== browserSessionGeneration) {
+    // 请求发出后发生过登录或退出，当前响应属于旧 Cookie 世代，按未认证失败关闭。
     throw new AuthError('浏览器登录账号已切换，请按最新会话重新读取权限。', {
       status: 401,
       code: 'AUTH_SESSION_CHANGED',

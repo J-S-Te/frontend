@@ -47,9 +47,9 @@ export function normalizeCreateMutationPayload(operation, payload) {
 }
 
 /**
- * Retains every outcome-ambiguous create command for this page lifetime.
- * Entries are removed only after the server confirms success; no key is
- * written to browser storage, URLs, or the request body.
+ * 在当前页面生命周期内保留所有结果不确定的创建命令。只有服务端明确返回成功
+ * 才释放键；键不会进入浏览器存储、URL 或请求体，既避免刷新后误重放，也避免
+ * 把幂等凭据暴露到历史记录和日志。
  */
 export function createCreateMutationRetryState(createKey) {
   const entries = new Map()
@@ -66,10 +66,9 @@ export function createCreateMutationRetryState(createKey) {
     return { key: value.key, payload: normalizedPayload, attempted: false }
   }
 
-  // Mark immediately before the real create request. A later retry may bypass
-  // the advisory duplicate precheck only when this exact canonical command was
-  // actually sent and its outcome is still unknown. Validation/precheck errors
-  // therefore never masquerade as an ambiguous server result.
+  // 仅在真实创建请求发出前标记 attempted。后续重试只有在“同一规范化命令
+  // 确实已发送但结果未知”时才能跳过提示性的重复预检；本地校验或预检失败
+  // 不能伪装成服务端结果不确定。
   function markAttempted(operation, key) {
     const signature = signaturesByKey.get(key)
     const value = signature ? entries.get(signature) : null

@@ -624,6 +624,18 @@ test('售前列表、详情与工时查询不再依赖手工 ID 操作台', asyn
   ])
 })
 
+test('TS-001 售前列表通过受控按钮进入独立创建视图并在取消或成功后返回列表', () => {
+  assert.match(view, /const presaleCreatePage = ref\(false\)/)
+  assert.match(view, /v-if="canCreatePresale && presaleRequestSubmissionAvailable"[^>]*@click="openPresaleCreatePage"[^>]*>新建申请<\/button>/)
+  assert.match(view, /v-if="activeSection === 'presale' && !presaleCreatePage"/)
+  assert.match(view, /v-if="activeSection === 'presale' && presaleCreatePage"[\s\S]*@submit\.prevent="submitPresaleFromList"/)
+  assert.match(view, /v-if="activeSection === 'presale' && presaleCreatePage"[\s\S]*@click="closePresaleCreatePage">取消<\/button>/)
+  assert.doesNotMatch(view, /<section v-if="activeSection === 'presale'" class="crm-grid"><form class="crm-panel" @submit\.prevent="submitPresale">/)
+  assert.match(view, /function openPresaleCreatePage\(\)[\s\S]*presaleCreatePage\.value = true/)
+  assert.match(view, /function closePresaleCreatePage\(\)[\s\S]*presaleCreatePage\.value = false/)
+  assert.match(view, /async function submitPresaleFromList\(\)[\s\S]*await submitPresale\([\s\S]*closePresaleCreatePage\(\)[\s\S]*await loadCurrent\(\)/)
+})
+
 test('TS-007 列表、只读状态看板和服务端可见筛选项调用真实路由', async (t) => {
   const originalFetch = globalThis.fetch
   t.after(() => { globalThis.fetch = originalFetch })

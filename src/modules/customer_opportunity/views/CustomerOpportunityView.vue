@@ -179,6 +179,7 @@ const opportunityAttachmentCapabilities = ref(null)
 const opportunityAttachmentLoading = ref(false)
 const opportunityAttachmentError = ref('')
 const opportunityAttachmentFile = ref(null)
+const presaleCreatePage = ref(false)
 const presaleCreateDialog = ref(false)
 const presaleOpportunityLocked = ref(false)
 const presaleForm = reactive({ opportunity_id: '', venue: 'REMOTE', service_address: '', contact_name: '', contact_phone: '', description: '', expected_start: '', expected_end: '', urgency: 'NORMAL' })
@@ -186,6 +187,8 @@ const operation = reactive({ progress: '', progress_link: '', progress_pct: '', 
 const presaleResult = ref(null)
 const progressSubmissionKey = ref('')
 const progressSubmissionSignature = ref('')
+// 跨系统写入和多步骤上传分别保存稳定幂等状态：网络结果不明确时复用原键，只有服务端
+// 明确成功后才清理，避免客户、商机、邀请、合同事件或附件会话被重复创建。
 const presaleMutationRetries = createPresaleMutationRetryState(createIdempotencyKey)
 const createMutationRetries = createCreateMutationRetryState(createIdempotencyKey)
 const contractTransferRetries = createContractTransferRetryState(createIdempotencyKey)
@@ -449,7 +452,7 @@ async function previewImport() {
     customerImportPreview.value = await previewCustomerImport({ file: customerImportForm.file, reason: customerImportForm.reason.trim() })
     customerImportResult.value = null
     customerImportCommitKey.value = createIdempotencyKey()
-    // The workbook is never parsed or persisted client-side after the server has accepted it.
+    // 服务端接受文件并生成预检任务后，浏览器不再解析或持久保存工作簿内容。
     customerImportForm.file = null
   } catch (value) { showCustomerImportError(value) } finally { actionLoading.value = false }
 }
@@ -503,6 +506,8 @@ function editCustomer() {
 function addCustomerContact() { customerForm.contacts.push({ id: 0, name: '', phone: '', email: '', is_registration: false }) }
 
 async function loadCurrent() {
+  // 切换栏目或筛选时旧请求不会被主动取消，因此用递增序号与栏目快照共同判定
+  // 响应归属。只有当前栏目最新一次请求可以写入列表和 loading 状态。
   const sequence = ++currentLoadSequence.value
   const section = activeSection.value
   loading.value = true; error.value = ''
@@ -593,6 +598,33 @@ async function switchPresaleView(view) {
   await loadCurrent()
 }
 
+function openPresaleCreatePage() {
+  if (!canCreatePresale.value || !presaleRequestSubmissionAvailable.value) return
+  Object.assign(presaleForm, {
+    opportunity_id: '', venue: 'REMOTE', service_address: '', contact_name: '', contact_phone: '',
+    description: '', expected_start: '', expected_end: '', urgency: 'NORMAL',
+  })
+  presaleOpportunityLocked.value = false
+  presaleCreatePage.value = true
+  resetMessages()
+}
+
+function closePresaleCreatePage() {
+  if (presaleCreateLoading.value) return
+  presaleCreatePage.value = false
+  presaleOpportunityLocked.value = false
+  resetMessages()
+}
+
+async function submitPresaleFromList() {
+  const value = await submitPresale({ openDetail: false, refreshList: false })
+  if (!value) return
+  closePresaleCreatePage()
+  notice.value = '售前申请已提交，已返回申请列表。'
+  presalePage.number = 1
+  await loadCurrent()
+}
+
 async function changePresalePage(nextPage) {
   if (presaleView.value !== 'list' || nextPage < 1) return
   presalePage.number = nextPage
@@ -608,6 +640,8 @@ function restorePresaleStateFromURL() {
   presaleColumnLimit.value = value.columnLimit
 }
 async function openCustomer(id) {
+  // 客户切换时先让旧详情及所有页签请求失效，再清空按客户缓存的数据；后续页签只会
+  // 接受同时匹配“请求序号、客户 ID、当前页签”的响应。
   const sequence = ++customerDetailLoadSequence.value
   try {
 	  const detail = await getCustomer(id)
@@ -685,6 +719,8 @@ async function openCustomerTab(tab) {
 	const sequence = ++customerTabLoadSequence.value
 	customerTabLoading.value = true; delete customerTabErrors[tab]
 	try {
+		// 各页签按需加载并独立缓存，敏感联系人、审计和门户状态不会因为打开基本资料
+		// 就被批量预取；切换页签后的迟到响应也不会写回当前视图。
 		if (tab === 'contacts') {
 			const result = await listCustomerContacts(customerID)
 			if (sequence !== customerTabLoadSequence.value || selectedCustomer.value?.id !== customerID || customerTab.value !== tab) return
@@ -751,6 +787,8 @@ async function generatePortalInvite() {
 	const retry = portalInviteRetries.keyFor(selectedCustomer.value.id, contact)
 	portalInviteLoading.value = true; delete customerTabErrors.portal; portalInviteCopied.value = false
 	try {
+		// 激活链接只在本次响应和页面内存中出现；目录预置、角色绑定或映射任一步未确认
+		// 成功都不展示链接，结果不明确的重试继续使用原幂等键。
 		const result = await createPortalInvite(selectedCustomer.value.id, retry.key)
 		portalInviteRetries.confirmSuccess(retry.signature, retry.key)
 		portalActivationURL.value = result?.activation_url || ''
@@ -800,6 +838,8 @@ async function disableCurrentPortalAccess() {
 	portalAccessDisableLoading.value = true
 	delete customerTabErrors.portal
 	try {
+		// 禁用是可恢复执行的跨系统流程：本地映射、Portal 会话和平台角色按持久化状态
+		// 推进。503 不代表整体回滚，页面随后读取权威状态并保留同一重试坐标。
 		await disablePortalAccess(customerID, { reason }, retry.key)
 		portalAccessDisableRetries.confirmSuccess(retry.signature, retry.key)
 		portalAccessDisableReason.value = ''
@@ -811,7 +851,7 @@ async function disableCurrentPortalAccess() {
 		}
 		notice.value = '门户访问已禁用：Portal 映射与会话已关闭，基础平台 Portal 角色已回收。'
 	} catch (value) {
-		try { portalAccessStatus.value = await getPortalAccessStatus(customerID) } catch { /* retain the last authoritative snapshot */ }
+		try { portalAccessStatus.value = await getPortalAccessStatus(customerID) } catch { /* 刷新失败时保留上一份权威状态快照。 */ }
 		if (value?.status === 503) customerTabErrors.portal = '禁用流程已持久化，但外部回收步骤暂不可用。系统会按状态中的时间自动重试；请勿更换原因，手工重试会复用同一 Idempotency-Key。'
 		else if (value?.status === 409) customerTabErrors.portal = '门户访问映射已变化或已有禁用流程，请刷新状态后确认。'
 		else customerTabErrors.portal = value?.message || '禁用门户访问失败。'
@@ -924,6 +964,8 @@ async function submitCustomerMerge() {
 }
 async function openOpportunity(id) {
   try {
+    // 主档、阶段、跟进和当前团队组成首屏一致快照；任期、附件、外部状态和售前依赖
+    // 随后独立加载，任一可选依赖失败都不应关闭商机基本详情。
     const [detail, history, records, team] = await Promise.all([getOpportunity(id), getOpportunityStageHistory(id, { page: 1, page_size: 50 }), listOpportunityFollowups(id, { page: 1, page_size: 50 }), getOpportunityMembers(id)])
     selectedOpportunity.value = detail; stageHistory.value = history?.items || []; followups.value = records?.items || []; opportunityTeam.value = team?.members || []
     opportunityMemberTerms.value = []; opportunityMemberTermsError.value = ''; opportunityMemberTermsPage.number = 1; opportunityMemberTermsPage.total = 0
@@ -972,6 +1014,8 @@ async function uploadOpportunityAttachment() {
   if (!opportunityID || !file || !canUploadOpportunityAttachments.value || !capability?.upload_available || opportunityAttachmentLoading.value) return
   opportunityAttachmentLoading.value = true; opportunityAttachmentError.value = ''
   try {
+    // 上传拆为“创建受控会话—直传对象存储—服务端确认”三步，每一步使用稳定状态恢复。
+    // 浏览器只接受无凭据、无片段的 HTTPS 地址，确认后文件仍须扫描通过才能下载。
     const payload = { file_name: file.name, size_bytes: file.size, mime_type: file.type, sha256: await sha256File(file) }
     const flow = attachmentUploadRetries.flowFor(opportunityID, payload)
     if (!flow.session) {
@@ -1029,6 +1073,7 @@ async function launchOpportunityExternal(type) {
   }
   opportunityLaunchLoading.value = type; opportunityLaunchError.value = ''
   try {
+    // 外部入口和短效上下文都由服务端签发；浏览器不从商机表单自行构造身份参数。
     const result = type === '报价' ? await createQuotationLaunch(opportunityID) : await createBidLaunch(opportunityID)
     const target = new URL(result.launch_url)
     target.searchParams.set('context', result.context)
@@ -1045,6 +1090,7 @@ async function submitContractTransfer() {
   const retry = contractTransferRetries.keyFor(selectedOpportunity.value.id, { version: selectedOpportunity.value.version, reason })
   contractTransferLoading.value = true
   try {
+    // 成功仅表示可靠事件已进入投递链，不把异步下游尚未创建的合同提前展示为完成。
     const result = await transferOpportunityToContract(selectedOpportunity.value.id, retry.payload, retry.key)
     contractTransferRetries.confirmSuccess(retry.coordinate, retry.key)
     notice.value = `转合同事件已受理（${result.event_id}），当前为待投递，不代表合同已创建。`
@@ -1052,8 +1098,7 @@ async function submitContractTransfer() {
   finally { contractTransferLoading.value = false }
 }
 
-// TS-010 is deliberately isolated from the opportunity detail request: an
-// unavailable presale dependency must not make the rest of the detail unusable.
+// 售前任务查询与商机主详情隔离；售前依赖不可用时，客户与商机主数据仍保持可用。
 async function loadOpportunityPresales(targetPage = opportunityPresalePage.number) {
   const opportunityID = selectedOpportunity.value?.id
   if (!opportunityID) return
@@ -1130,9 +1175,8 @@ async function openNotification(item) {
     if (item.status === 'UNREAD') await markNotificationRead(item.id)
     await refreshNotificationCount()
     await router.push(target)
-    // The route is navigation state only. Both detail methods call the real
-    // scoped backend endpoint, so a forged or stale notification cannot bypass
-    // the opportunity/presale IDOR boundary.
+    // 路由只承载导航状态；详情仍调用带数据范围校验的真实接口，伪造或过期通知不能借此
+    // 绕过商机、售前任务的对象级授权边界。
     if (target.params.section === 'presale') await openPresale(Number(target.query.request_id))
   } catch (value) { showError(value) }
 }
@@ -1158,8 +1202,7 @@ async function openOpportunityFromRoute() {
     error.value = '通知中的商机入口无效，已保留当前列表。'
     return
   }
-  // The route query is only navigation state. Opportunity visibility and data
-  // scope are still enforced by the real detail endpoint.
+  // 查询参数只用于导航，商机可见性和数据范围仍由详情接口判定。
   await openOpportunity(id)
 }
 
@@ -1266,6 +1309,7 @@ async function refreshPresaleActions(id) {
     presaleAvailableActions.value = value
   } catch {
     if (sequence !== presaleActionsLoadSequence.value || Number(selectedPresale.value?.request?.id) !== Number(id)) return
+    // 权威动作接口失败时关闭全部写按钮，不回退使用详情中可能已经过期的动作快照。
     // Failure closes all mutating controls; detail.available_actions is intentionally not used as a fallback.
     presaleAvailableActions.value = null
     presaleActionsError.value = '可用操作暂时无法加载，已安全关闭操作入口。'
@@ -1393,9 +1437,8 @@ async function submitCustomer() {
       createPayload.contacts.forEach(({ id }, index) => { delete createPayload.contacts[index].id })
       createRetry = createMutationRetries.keyFor('customer', createPayload)
     }
-    // An actually-sent command with an ambiguous result must reach the create
-    // endpoint again with its original key. Re-running the advisory precheck
-    // would find the just-created winner and prevent durable replay.
+    // 已发送但结果不明确的创建命令必须带原键重放到创建接口；若再次执行提示性的查重，
+    // 它会把上次可能已成功创建的记录当成重复项，反而阻断可靠重放。
     if (customerEditMode.value || !createRetry.attempted) {
       const duplicate = await checkCustomerDuplicate({ name: customerForm.name, unified_credit_code: customerForm.unified_credit_code })
       const candidates = (Array.isArray(duplicate) ? duplicate : []).filter((item) => item.id !== selectedCustomer.value?.id)
@@ -1508,6 +1551,8 @@ async function submitPresale({ openDetail = true, refreshList = true } = {}) {
   const opportunityID = Number(presaleForm.opportunity_id)
   presaleCreateLoading.value = true
   try {
+    // 售前投递可能已入队但响应在网络中丢失；规范化后的同一命令复用幂等键，
+    // 直到服务端明确成功才清除，避免重复启动审批流程。
     const retry = presaleMutationRetries.keyFor('create', opportunityID, {
       ...presaleForm,
       opportunity_id: opportunityID,
@@ -1527,6 +1572,8 @@ async function runPresale(action) {
   const detail = selectedPresale.value
   if (!detail?.request?.id) return
   const id = detail.request.id
+  // 可用动作和版本均来自服务端详情，是状态机的权威快照；前端权限只控制展示，
+  // 不能在缺少该快照时猜测允许写操作。
   const authoritative = presaleAvailableActions.value
   const version = Number(authoritative?.version)
   const mutationActions = new Set(['approve', 'reject', 'cancel', 'assign', 'progress', 'worklog'])
@@ -1540,6 +1587,8 @@ async function runPresale(action) {
   const mutationContext = presaleMutationContextSequence.value
   const mutationToken = mutationActions.has(action) ? ++presaleMutationLoadSequence.value : 0
   if (mutationToken) presaleMutationLoading.value = true
+  // 操作期间用户可能关闭详情或切换申请。请求仍可在服务端完成，但旧响应不得
+  // 覆盖新详情；幂等状态仍按真实成功结果清理。
   const isCurrentMutation = () => mutationContext === presaleMutationContextSequence.value && Number(selectedPresale.value?.request?.id) === Number(id)
   try {
     if (action === 'assignments') presaleResult.value = await getAssignments(id)
@@ -1621,6 +1670,7 @@ async function runPresale(action) {
 
 watch(activeSection, () => {
   closeCustomerDetail(); selectedOpportunity.value = null; closePresale(); page.number = 1
+  presaleCreatePage.value = false; presaleCreateDialog.value = false; presaleOpportunityLocked.value = false
   if (activeSection.value === 'presale') restorePresaleStateFromURL()
   loadCurrent()
 })
@@ -1628,6 +1678,7 @@ watch(() => route.fullPath, () => {
   if (activeSection.value !== 'presale') return
   const current = Object.fromEntries(Object.entries(route.query).map(([key, value]) => [key, Array.isArray(value) ? String(value[0] || '') : String(value || '')]))
   const expected = presaleStateToQuery(presaleFilters, presaleView.value, presalePage.number, presalePage.size, presaleColumnLimit.value)
+  // 组件主动 replace 也会触发 watcher；稳定比较用于打断“状态写 URL—URL 再写状态”循环。
   if (stableQuery(current) === stableQuery(expected)) return
   restorePresaleStateFromURL()
   loadCurrent()
@@ -1688,11 +1739,11 @@ onMounted(async () => {
         </div>
       </header>
       <section class="console-content crm-content">
-        <header class="console-page-head crm-page-head"><div><h1>{{ sectionTitle }}</h1><p>{{ activeSection === 'notifications' ? '通知收件人固定为当前登录用户，不受 SELF / ORG / ALL 数据范围扩展' : '可见数据与可执行动作均由服务端权限和状态控制' }}</p></div><div v-if="activeSection === 'presale'" class="crm-actions"><button @click="openReports">投入报表</button><button @click="loadAlerts">未读预警 {{ alerts.length }}</button><button @click="openAlertConfig">预警规则</button></div><div v-if="activeSection === 'opportunities'" class="crm-actions"><button @click="loadStageAlerts">刷新阶段告警</button><button v-if="canConfigureStageAlerts" @click="openStageAlertRuleEditor">阶段告警规则</button></div></header>
+        <header class="console-page-head crm-page-head"><div><h1>{{ activeSection === 'presale' && presaleCreatePage ? '新建售前申请' : sectionTitle }}</h1><p>{{ activeSection === 'presale' && presaleCreatePage ? '填写售前支持需求，提交后进入两级审批流程' : activeSection === 'notifications' ? '通知收件人固定为当前登录用户，不受 SELF / ORG / ALL 数据范围扩展' : '可见数据与可执行动作均由服务端权限和状态控制' }}</p></div><div v-if="activeSection === 'presale'" class="crm-actions"><template v-if="presaleCreatePage"><button type="button" :disabled="presaleCreateLoading" @click="closePresaleCreatePage">← 返回申请列表</button><button class="primary" type="submit" form="presale-create-form" :disabled="presaleCreateLoading">{{ presaleCreateLoading ? '提交中…' : '提交申请' }}</button></template><template v-else><button v-if="canCreatePresale && presaleRequestSubmissionAvailable" class="primary" type="button" @click="openPresaleCreatePage">新建申请</button><button @click="openReports">投入报表</button><button @click="loadAlerts">未读预警 {{ alerts.length }}</button><button @click="openAlertConfig">预警规则</button></template></div><div v-if="activeSection === 'opportunities'" class="crm-actions"><button @click="loadStageAlerts">刷新阶段告警</button><button v-if="canConfigureStageAlerts" @click="openStageAlertRuleEditor">阶段告警规则</button></div></header>
       <p v-if="error" class="crm-alert error" role="alert">{{ error }}</p><p v-if="notice" class="crm-alert success" role="status">{{ notice }}</p><p v-if="runtimeCapabilitiesError" class="crm-alert warning" role="status">{{ runtimeCapabilitiesError }}</p>
       <section v-if="activeSection === 'customers'" class="crm-toolbar crm-customer-filters"><label>客户号 / 名称<input v-model.trim="customerFilters.keyword" @keyup.enter="loadCurrent"></label><label>类型<input v-model.trim="customerFilters.type"></label><label>行业<input v-model.trim="customerFilters.industry"></label><label>区域<input v-model.trim="customerFilters.region"></label><label>负责人 ID<input v-model.trim="customerFilters.owner_id"></label><label>状态<input v-model.trim="customerFilters.status"></label><label>创建开始<input v-model="customerFilters.created_from" type="date"></label><label>创建结束<input v-model="customerFilters.created_to" type="date"></label><label>最近跟进开始<input v-model="customerFilters.last_followup_from" type="date"></label><label>最近跟进结束<input v-model="customerFilters.last_followup_to" type="date"></label><label>排序<select v-model="customerFilters.sort_by"><option value="updated_at">更新时间</option><option value="created_at">创建时间</option><option value="name">客户名称</option><option value="last_followup_at">最近跟进</option><option value="opportunity_amount_sum">商机金额汇总</option></select></label><label>顺序<select v-model="customerFilters.sort_order"><option value="desc">降序</option><option value="asc">升序</option></select></label><button @click="page.number = 1; loadCurrent()">查询</button><button @click="customerFilters.view = customerFilters.view === 'table' ? 'cards' : 'table'; syncCustomerURL()">{{ customerFilters.view === 'table' ? '卡片视图' : '列表视图' }}</button><button v-if="canCreateCustomer" class="primary" @click="openNewCustomer">新建</button><button v-if="canImportCustomers" :disabled="!customerImportScanAvailable" :title="customerImportScanAvailable ? '' : '可信文件扫描器未配置'" @click="openCustomerImport">Excel 导入</button><button v-if="canExportCustomers" :disabled="!customerExportAvailable" :title="customerExportAvailable ? '' : '客户导出 Provider 未配置'" @click="exportCustomers">导出</button></section>
       <section v-else-if="activeSection === 'opportunities'" class="crm-toolbar"><label>关键词<input v-model.trim="filters.keyword" @keyup.enter="loadCurrent"></label><label>状态<input v-model.trim="filters.status" @keyup.enter="loadCurrent"></label><label v-if="!boardMode">阶段<input v-model.trim="filters.stage" @keyup.enter="loadCurrent"></label><button @click="loadCurrent">查询</button><button @click="boardMode = !boardMode; loadCurrent()">{{ boardMode ? '列表视图' : '阶段看板' }}</button><button class="primary" @click="openNewOpportunity">新建</button></section>
-      <form v-else-if="activeSection === 'presale'" class="crm-toolbar crm-presale-filters" @submit.prevent="applyPresaleFilters"><label>申请编号<input v-model.trim="presaleFilters.request_no" maxlength="32"></label><label>商机<select v-model="presaleFilters.opportunity_id"><option value="">全部可见商机</option><option v-for="item in presaleFilterOptions.opportunities" :key="item.value" :value="String(item.value)">{{ item.label }}</option></select></label><label>申请人<select v-model="presaleFilters.applicant_id"><option value="">全部可见申请人</option><option v-for="item in presaleFilterOptions.applicants" :key="item.value" :value="item.value">{{ item.label || item.value }}</option></select></label><label>执行人<select v-model="presaleFilters.assignee_id"><option value="">全部可见执行人</option><option v-for="item in presaleFilterOptions.assignees" :key="item.value" :value="item.value">{{ item.label || item.value }}</option></select></label><label>状态<select v-model="presaleFilters.status"><option value="">全部可见状态</option><option v-for="item in presaleFilterOptions.statuses" :key="item.value" :value="item.value">{{ presaleOptionText('statuses', item) }}</option></select></label><label>场地<select v-model="presaleFilters.venue"><option value="">全部可见场地</option><option v-for="item in presaleFilterOptions.venues" :key="item.value" :value="item.value">{{ presaleOptionText('venues', item) }}</option></select></label><label>紧急度<select v-model="presaleFilters.urgency"><option value="">全部可见级别</option><option v-for="item in presaleFilterOptions.urgencies" :key="item.value" :value="item.value">{{ presaleOptionText('urgencies', item) }}</option></select></label><label>申请开始<input v-model="presaleFilters.created_from" type="datetime-local"></label><label>申请结束（不含）<input v-model="presaleFilters.created_to" type="datetime-local"></label><label>期望开始<input v-model="presaleFilters.expected_from" type="datetime-local"></label><label>期望结束（不含）<input v-model="presaleFilters.expected_to" type="datetime-local"></label><label>是否超时<select v-model="presaleFilters.overdue"><option value="">全部</option><option value="true">已超时</option><option value="false">未超时</option></select></label><label>推送状态<select v-model="presaleFilters.push_status"><option value="">全部可见状态</option><option v-for="item in presaleFilterOptions.push_statuses" :key="item.value" :value="item.value">{{ presaleOptionText('push_statuses', item) }}</option></select></label><label>排序<select v-model="presaleFilters.sort_by"><option value="created_at">申请时间</option><option value="updated_at">更新时间</option><option value="expected_end">期望结束</option><option value="request_no">申请编号</option></select></label><label>顺序<select v-model="presaleFilters.sort_order"><option value="desc">降序</option><option value="asc">升序</option></select></label><button class="primary">查询</button><button type="button" @click="switchPresaleView(presaleView === 'list' ? 'board' : 'list')">{{ presaleView === 'list' ? '状态看板' : '列表视图' }}</button></form>
+      <form v-else-if="activeSection === 'presale' && !presaleCreatePage" class="crm-toolbar crm-presale-filters" @submit.prevent="applyPresaleFilters"><label>申请编号<input v-model.trim="presaleFilters.request_no" maxlength="32"></label><label>商机<select v-model="presaleFilters.opportunity_id"><option value="">全部可见商机</option><option v-for="item in presaleFilterOptions.opportunities" :key="item.value" :value="String(item.value)">{{ item.label }}</option></select></label><label>申请人<select v-model="presaleFilters.applicant_id"><option value="">全部可见申请人</option><option v-for="item in presaleFilterOptions.applicants" :key="item.value" :value="item.value">{{ item.label || item.value }}</option></select></label><label>执行人<select v-model="presaleFilters.assignee_id"><option value="">全部可见执行人</option><option v-for="item in presaleFilterOptions.assignees" :key="item.value" :value="item.value">{{ item.label || item.value }}</option></select></label><label>状态<select v-model="presaleFilters.status"><option value="">全部可见状态</option><option v-for="item in presaleFilterOptions.statuses" :key="item.value" :value="item.value">{{ presaleOptionText('statuses', item) }}</option></select></label><label>场地<select v-model="presaleFilters.venue"><option value="">全部可见场地</option><option v-for="item in presaleFilterOptions.venues" :key="item.value" :value="item.value">{{ presaleOptionText('venues', item) }}</option></select></label><label>紧急度<select v-model="presaleFilters.urgency"><option value="">全部可见级别</option><option v-for="item in presaleFilterOptions.urgencies" :key="item.value" :value="item.value">{{ presaleOptionText('urgencies', item) }}</option></select></label><label>申请开始<input v-model="presaleFilters.created_from" type="datetime-local"></label><label>申请结束（不含）<input v-model="presaleFilters.created_to" type="datetime-local"></label><label>期望开始<input v-model="presaleFilters.expected_from" type="datetime-local"></label><label>期望结束（不含）<input v-model="presaleFilters.expected_to" type="datetime-local"></label><label>是否超时<select v-model="presaleFilters.overdue"><option value="">全部</option><option value="true">已超时</option><option value="false">未超时</option></select></label><label>推送状态<select v-model="presaleFilters.push_status"><option value="">全部可见状态</option><option v-for="item in presaleFilterOptions.push_statuses" :key="item.value" :value="item.value">{{ presaleOptionText('push_statuses', item) }}</option></select></label><label>排序<select v-model="presaleFilters.sort_by"><option value="created_at">申请时间</option><option value="updated_at">更新时间</option><option value="expected_end">期望结束</option><option value="request_no">申请编号</option></select></label><label>顺序<select v-model="presaleFilters.sort_order"><option value="desc">降序</option><option value="asc">升序</option></select></label><button class="primary">查询</button><button type="button" @click="switchPresaleView(presaleView === 'list' ? 'board' : 'list')">{{ presaleView === 'list' ? '状态看板' : '列表视图' }}</button></form>
       <p v-if="activeSection === 'presale' && presaleFilterOptionsError" class="crm-alert error" role="alert">{{ presaleFilterOptionsError }}</p><p v-else-if="activeSection === 'presale' && presaleFilterOptions.truncated" class="crm-note">筛选选项已按服务端上限截断；输入已有条件可继续缩小结果。</p>
 
       <section v-if="activeSection === 'customers'" class="crm-quick-filters" aria-label="客户快捷筛选"><button disabled title="重点客户分类字段与维护闭环尚未配置，不使用旧信用等级口径" @click="useCustomerQuickFilter('KEY')">重点客户（待配置）</button><button :class="{ active: customerFilters.quick_filter === 'NEW' }" @click="useCustomerQuickFilter('NEW')">新增客户（近 30 天）</button><button :class="{ active: customerFilters.quick_filter === 'WON' }" @click="useCustomerQuickFilter('WON')">成交客户</button><button :class="{ active: customerFilters.quick_filter === 'FOLLOWUP_DUE' }" @click="useCustomerQuickFilter('FOLLOWUP_DUE')">待跟进</button></section>
@@ -1704,7 +1755,8 @@ onMounted(async () => {
       <section v-if="activeSection === 'opportunities' && boardMode" class="crm-board"><article v-for="column in board" :key="column.stage" class="crm-board-column"><h2>{{ column.stage }} <small>{{ column.items?.length || 0 }}</small></h2><button v-for="item in column.items" :key="item.id" class="crm-board-card" @click="openOpportunity(item.id)"><strong>{{ item.name }}</strong><span>{{ item.opportunity_no }}</span><span>¥ {{ item.expected_amount }}</span></button></article></section>
       <section v-if="activeSection === 'opportunities'" class="crm-panel crm-stage-alerts"><div class="crm-panel-heading"><div><h2>阶段超时告警</h2><p class="crm-note">服务端个人列表当前返回已触发的未读/已读告警；待处理和已取消状态不会进入个人查询结果。</p></div><label class="check"><input v-model="stageAlertUnreadOnly" type="checkbox">仅看未读</label></div><p v-if="stageRuleForbidden" class="crm-alert error" role="alert">无阶段告警规则配置权限（403）；告警查询仍按现有权限执行。</p><div v-if="stageAlerts.length" class="crm-stage-alert-grid"><button v-for="item in stageAlerts" :key="item.id" @click="selectedStageAlert = item"><strong>{{ item.opportunity_no }}</strong><span>{{ item.stage }} · {{ stageAlertStatusText(item.status) }}</span><small>应提醒 {{ formatDate(item.due_at) }}</small></button></div><div v-else class="crm-empty compact">暂无{{ stageAlertUnreadOnly ? '未读' : '' }}阶段超时告警</div><p class="crm-status-legend"><span>待处理：Worker 尚未投递</span><span>已触发：站内告警已生成</span><span>已取消：阶段、终态、作废或负责人变化后失效</span></p></section>
       <section v-if="activeSection === 'presale' && alerts.length" class="crm-panel crm-alert-list"><h2>未读预警</h2><p class="crm-note">个人预警仅合并当前登录用户和身份令牌中非空的 PMS 人员绑定，不随 SELF/ORG/ALL 数据范围扩大。</p><button v-for="item in alerts" :key="item.id" @click="readAlert(item)"><strong>{{ alertTypeText(item.alert_type) }}</strong><span>{{ item.request_no }} · 起算 {{ formatDate(item.basis_at) }} · 阈值 {{ formatDate(item.due_at) }}</span></button></section>
-      <section v-if="activeSection === 'presale'" class="crm-grid"><form class="crm-panel" @submit.prevent="submitPresale"><h2>创建售前申请</h2><label>商机 ID<input v-model="presaleForm.opportunity_id" required inputmode="numeric"></label><label>支持方式<select v-model="presaleForm.venue"><option value="REMOTE">远程</option><option value="ONSITE">现场</option></select></label><label>服务地址<input v-model="presaleForm.service_address" :required="presaleForm.venue === 'ONSITE'"></label><label>联系人<input v-model="presaleForm.contact_name" required></label><label>联系电话<input v-model="presaleForm.contact_phone" required></label><label>需求说明<textarea v-model="presaleForm.description" required></textarea></label><label>预计开始<input v-model="presaleForm.expected_start" type="datetime-local" required></label><label>预计结束<input v-model="presaleForm.expected_end" type="datetime-local" required></label><label>紧急程度<select v-model="presaleForm.urgency"><option value="NORMAL">普通</option><option value="URGENT">紧急</option></select></label><button class="primary" :disabled="presaleCreateLoading">{{ presaleCreateLoading ? '提交中…' : '提交申请' }}</button></form><section v-if="presaleView === 'list'" class="crm-panel table-panel"><h2>售前申请列表</h2><p class="crm-note">列表范围由角色决定；点击记录查看详情、工时和服务端允许的动作。</p><table v-if="presales.length"><thead><tr><th>申请编号</th><th>商机</th><th>申请人</th><th>状态</th><th>场地 / 紧急度</th><th>执行人</th><th>累计工时</th><th>PMS 异常</th><th>期望结束</th><th>超时</th></tr></thead><tbody><tr v-for="item in presales" :key="item.id" @click="openPresale(item.id)"><td>{{ item.request_no }}</td><td>{{ item.opportunity_no }}</td><td>{{ item.applicant_name || item.applicant_id }}</td><td>{{ requestStatusText(item.status) }}</td><td>{{ venueText(item.venue) }} / {{ urgencyText(item.urgency) }}</td><td>{{ assignees(item.current_assignees) }}</td><td>{{ item.total_work_hours }} 小时</td><td>{{ item.push_exception_count }}</td><td>{{ formatDate(item.expected_end) }}</td><td>{{ item.overdue ? '已超时' : '否' }}</td></tr></tbody></table><div v-else class="crm-empty">暂无可见申请</div><div class="crm-actions"><button type="button" :disabled="presalePage.number <= 1 || loading" @click="changePresalePage(presalePage.number - 1)">上一页</button><span>第 {{ presalePage.number }} 页，共 {{ presalePage.total }} 条</span><button type="button" :disabled="presalePage.number * presalePage.size >= presalePage.total || loading" @click="changePresalePage(presalePage.number + 1)">下一页</button></div></section><section v-else class="crm-panel crm-presale-board-panel"><div class="crm-panel-heading"><div><h2>售前状态看板</h2><p class="crm-note">只读看板，不支持拖拽改状态。每列最多显示服务端返回的 {{ presaleColumnLimit }} 条，列总数不受截断影响。</p></div></div><div class="crm-board crm-presale-board"><article v-for="column in presaleBoard" :key="column.status" class="crm-board-column"><h2>{{ requestStatusText(column.status) }} <small>{{ column.total }}</small></h2><button v-for="item in column.items" :key="item.id" type="button" class="crm-board-card" @click="openPresale(item.id)"><strong>{{ item.request_no }}</strong><span>{{ item.opportunity_no }}</span><span>{{ item.applicant_name || item.applicant_id }} · {{ urgencyText(item.urgency) }}</span><span>{{ assignees(item.current_assignees) }}</span><span>{{ item.total_work_hours }} 小时 · {{ item.overdue ? '已超时' : '未超时' }}</span></button><p v-if="Number(column.total) > (column.items?.length || 0)" class="crm-note">另有 {{ Number(column.total) - (column.items?.length || 0) }} 条未在本列展示</p><p v-else-if="!column.items?.length" class="crm-empty compact">暂无任务</p></article></div></section></section>
+      <section v-if="activeSection === 'presale' && !presaleCreatePage"><section v-if="presaleView === 'list'" class="crm-panel table-panel"><h2>售前申请列表</h2><p class="crm-note">列表范围由角色决定；点击记录查看详情、工时和服务端允许的动作。</p><table v-if="presales.length"><thead><tr><th>申请编号</th><th>商机</th><th>申请人</th><th>状态</th><th>场地 / 紧急度</th><th>执行人</th><th>累计工时</th><th>PMS 异常</th><th>期望结束</th><th>超时</th></tr></thead><tbody><tr v-for="item in presales" :key="item.id" @click="openPresale(item.id)"><td>{{ item.request_no }}</td><td>{{ item.opportunity_no }}</td><td>{{ item.applicant_name || item.applicant_id }}</td><td>{{ requestStatusText(item.status) }}</td><td>{{ venueText(item.venue) }} / {{ urgencyText(item.urgency) }}</td><td>{{ assignees(item.current_assignees) }}</td><td>{{ item.total_work_hours }} 小时</td><td>{{ item.push_exception_count }}</td><td>{{ formatDate(item.expected_end) }}</td><td>{{ item.overdue ? '已超时' : '否' }}</td></tr></tbody></table><div v-else class="crm-empty">暂无可见申请</div><div class="crm-actions"><button type="button" :disabled="presalePage.number <= 1 || loading" @click="changePresalePage(presalePage.number - 1)">上一页</button><span>第 {{ presalePage.number }} 页，共 {{ presalePage.total }} 条</span><button type="button" :disabled="presalePage.number * presalePage.size >= presalePage.total || loading" @click="changePresalePage(presalePage.number + 1)">下一页</button></div></section><section v-else class="crm-panel crm-presale-board-panel"><div class="crm-panel-heading"><div><h2>售前状态看板</h2><p class="crm-note">只读看板，不支持拖拽改状态。每列最多显示服务端返回的 {{ presaleColumnLimit }} 条，列总数不受截断影响。</p></div></div><div class="crm-board crm-presale-board"><article v-for="column in presaleBoard" :key="column.status" class="crm-board-column"><h2>{{ requestStatusText(column.status) }} <small>{{ column.total }}</small></h2><button v-for="item in column.items" :key="item.id" type="button" class="crm-board-card" @click="openPresale(item.id)"><strong>{{ item.request_no }}</strong><span>{{ item.opportunity_no }}</span><span>{{ item.applicant_name || item.applicant_id }} · {{ urgencyText(item.urgency) }}</span><span>{{ assignees(item.current_assignees) }}</span><span>{{ item.total_work_hours }} 小时 · {{ item.overdue ? '已超时' : '未超时' }}</span></button><p v-if="Number(column.total) > (column.items?.length || 0)" class="crm-note">另有 {{ Number(column.total) - (column.items?.length || 0) }} 条未在本列展示</p><p v-else-if="!column.items?.length" class="crm-empty compact">暂无任务</p></article></div></section></section>
+      <section v-if="activeSection === 'presale' && presaleCreatePage" class="crm-presale-create-page"><p class="crm-alert warning" role="status">独立新建需填写当前账号可见的商机 ID；提交后进入两级审批流。现场支持必须填写服务地址。</p><form id="presale-create-form" class="crm-panel crm-presale-create-form" @submit.prevent="submitPresaleFromList"><h2>售前技术支持申请</h2><label>关联商机 ID<input v-model="presaleForm.opportunity_id" required inputmode="numeric" pattern="[0-9]+" placeholder="请输入可见商机 ID"></label><div class="crm-presale-form-row"><label>支持方式<select v-model="presaleForm.venue"><option value="REMOTE">远程</option><option value="ONSITE">现场</option></select></label><label>紧急程度<select v-model="presaleForm.urgency"><option value="NORMAL">普通</option><option value="URGENT">紧急</option></select></label></div><label v-if="presaleForm.venue === 'ONSITE'">服务地址<input v-model.trim="presaleForm.service_address" required maxlength="500" placeholder="客户现场详细地址"></label><div class="crm-presale-form-row"><label>联系人<input v-model.trim="presaleForm.contact_name" required maxlength="100" placeholder="客户对接人姓名 / 部门"></label><label>联系电话<input v-model.trim="presaleForm.contact_phone" required maxlength="64" placeholder="客户对接人联系电话"></label></div><label>需求说明<textarea v-model.trim="presaleForm.description" minlength="10" maxlength="2000" required placeholder="请描述售前支持需求与背景"></textarea></label><div class="crm-presale-form-row"><label>预计开始<input v-model="presaleForm.expected_start" type="datetime-local" required></label><label>预计结束<input v-model="presaleForm.expected_end" type="datetime-local" required></label></div><div class="crm-actions"><button type="button" :disabled="presaleCreateLoading" @click="closePresaleCreatePage">取消</button><button class="primary" :disabled="presaleCreateLoading">{{ presaleCreateLoading ? '提交中…' : '提交申请' }}</button></div></form></section>
       </section>
     </main>
     <div v-if="showAlertConfig" class="crm-modal"><article class="crm-detail"><h2>售前预警规则</h2><p class="crm-note">单位为小时。保存产生新版本，只影响后续扫描。</p><div v-for="rule in alertRules" :key="rule.type" class="crm-alert-rule"><strong>{{ alertTypeText(rule.type) }}</strong><label>阈值（小时）<input v-model.number="rule.threshold_hours" type="number" min="0" max="8760"></label><label class="check"><input v-model="rule.enabled" type="checkbox">启用</label><span>版本 {{ rule.config_version }} · {{ formatDate(rule.updated_at) }}</span><button class="primary" @click="saveAlertRule(rule)">保存</button></div><div class="crm-actions"><button @click="showAlertConfig = false">关闭</button></div></article></div>

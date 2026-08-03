@@ -86,9 +86,8 @@ async function load() {
   if (!canReadAuthorization.value) return
   loading.value = true
   try {
-    // The task-specific target endpoint returns stable platform role IDs together with the
-    // authorization-catalog readiness needed by this editor. Do not call the broad application
-    // catalog API here: a role-binding operator may legitimately lack platform:application:read.
+    // 专用目标端点同时返回稳定平台角色 ID 和编辑器所需的授权目录就绪状态。这里不能调用
+    // 更宽泛的应用目录 API：角色绑定管理员可能合理地没有 platform:application:read。
     const [templateResult, positionResult, targetResult] = await Promise.allSettled([
       listPositionAuthorizationTemplates(),
       listPositionAuthorizationPositions(),

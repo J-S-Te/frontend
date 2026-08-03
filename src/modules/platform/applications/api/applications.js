@@ -7,6 +7,8 @@ export class ApplicationRegistryError extends Error {
     this.status = options.status || 0
     this.code = options.code || ''
     this.traceId = options.traceId || ''
+    this.details = options.details && typeof options.details === 'object' ? options.details : {}
+    this.nextAction = options.nextAction || this.details.next_action || ''
   }
 }
 
@@ -29,8 +31,8 @@ async function request(path, options = {}) {
     response = await fetch(`${API_BASE_URL}${path}`, {
       ...options,
       credentials: 'include',
-      // Application and portal catalogs are tenant/user authorization projections. A browser or
-      // reverse proxy must never reuse one account's response after the bp_session Cookie changes.
+      // 应用和门户目录是租户/用户授权投影；bp_session Cookie 切换后，浏览器或反向代理
+      // 绝不能复用上一账号的目录响应。
       cache: 'no-store',
       headers: {
         Accept: 'application/json',
@@ -48,6 +50,8 @@ async function request(path, options = {}) {
       status: response.status,
       code: body?.code,
       traceId: body?.request_id || body?.trace_id || body?.traceId,
+      details: body?.details,
+      nextAction: body?.details?.next_action,
     })
   }
   return body?.data
@@ -181,7 +185,10 @@ export function deleteEnvironment({ applicationId, environmentId, confirmationCo
   })
 }
 
-/** 一次完成应用登记、环境配置、登录目标、OAuth 客户端和自动部署。 */
+/**
+ * 一次完成应用登记、环境配置、登录目标、OAuth 客户端和自动部署。
+ * 该接口是受控编排入口，不等同于依次调用普通 CRUD；部分失败的补偿和幂等由后端负责。
+ */
 export function onboardSubsystem({
   applicationCode,
   applicationName,
@@ -211,7 +218,7 @@ export function onboardSubsystem({
   })
 }
 
-/** 查询部署 Agent 的持久化状态。 */
+/** 查询部署 Agent 的持久化状态，页面刷新后仍可恢复真实部署结果。 */
 export function getSubsystemStatus({ applicationCode, environment } = {}) {
   return request(`/subsystem-status${pageQuery({ application_code: applicationCode, environment })}`)
 }

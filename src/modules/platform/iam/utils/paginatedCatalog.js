@@ -5,8 +5,7 @@ function pageItems(result) {
   return Array.isArray(result?.items) ? result.items : []
 }
 
-// Reads a bounded API one page at a time. The server total is authoritative, while empty pages
-// and a hard page cap prevent a malformed response from causing an infinite request loop.
+// 逐页读取有界目录，以服务端 total 为权威；空页和硬性页数上限共同防止异常响应造成无限循环。
 export async function loadAllCatalogPages(listPage, options = {}, itemKey = null) {
   const pageSize = Math.max(1, Number(options.pageSize || DEFAULT_PAGE_SIZE))
   const query = { ...options, pageSize }

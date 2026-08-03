@@ -12,8 +12,7 @@ function compareOrganizations(left, right) {
   return organizationId(left).localeCompare(organizationId(right))
 }
 
-// buildOrganizationTree converts the flat organization API response into a stable hierarchy.
-// Missing parents and cycles are kept visible as roots instead of silently dropping records.
+// 将扁平组织响应转换成稳定树。父节点缺失或出现环的数据提升为根节点展示，不能静默丢弃异常记录。
 export function buildOrganizationTree(organizations = []) {
   const nodes = organizations
     .filter((organization) => organizationId(organization))
@@ -26,6 +25,7 @@ export function buildOrganizationTree(organizations = []) {
     const parentId = String(node.parent_id || '').trim()
     let parent = parentId ? byId.get(parentId) : null
     if (parent) {
+      // 沿候选父链向上探测环；一旦回到当前节点，就放弃挂载并保留为根节点供管理员修复。
       const visited = new Set([id])
       let ancestor = parent
       while (ancestor) {
@@ -63,8 +63,7 @@ export function flattenOrganizationTree(tree = [], collapsedIds = new Set()) {
   return result
 }
 
-// filterOrganizationTree keeps the ancestors of matching nodes so search results retain their
-// organizational context. The returned nodes are copies; the complete tree remains untouched.
+// 搜索命中节点时保留其祖先上下文；返回复制节点，完整树不会因筛选被修改。
 export function filterOrganizationTree(tree = [], keyword = '') {
   const normalizedKeyword = String(keyword || '').trim().toLocaleLowerCase('zh-CN')
   if (!normalizedKeyword) return tree
@@ -81,8 +80,7 @@ export function filterOrganizationTree(tree = [], keyword = '') {
   return filterNodes(tree)
 }
 
-// organizationDescendantIds is used by the parent selector to prevent moving a node below
-// itself or one of its descendants. The API still performs the authoritative cycle check.
+// 父级选择器用后代集合排除把节点移动到自身下级的操作；API 仍执行权威防环校验。
 export function organizationDescendantIds(tree = [], organizationIdValue = '') {
   const targetId = String(organizationIdValue || '').trim()
   const descendants = new Set()

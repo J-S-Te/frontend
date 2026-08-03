@@ -1,9 +1,6 @@
 /**
- * Cross-component browser event emitted after the root application re-reads the
- * server-authoritative authenticated principal. The event never contains a token.
- *
- * Consumers must treat the supplied principal as display/navigation state only;
- * backend 401/403 responses remain the authorization authority for every action.
+ * 根组件重新读取服务端权威主体后发送的跨组件浏览器事件，事件中绝不包含令牌。
+ * 消费方只能把主体用于展示和导航；每个操作仍必须以后端 401/403 为最终鉴权结果。
  */
 export const AUTHORIZATION_REFRESHED_EVENT = 'platform-auth:authorization-refreshed'
 
@@ -22,6 +19,7 @@ export function principalFingerprint(principal) {
     ? principal.permission_codes.map((code) => String(code || '').trim()).filter(Boolean).sort()
     : []
 
+  // 排序后序列化，消除后端集合返回顺序变化造成的虚假“权限已变化”事件。
   return JSON.stringify({
     tenant: String(principal.tenant?.id || ''),
     user: String(principal.user?.id || ''),
@@ -39,10 +37,8 @@ export function dispatchAuthorizationRefreshed(principal, { changed = false } = 
 }
 
 /**
- * Immediately removes every in-memory identity/authorization snapshot in this SPA.
- *
- * The HttpOnly Cookie remains server-owned; this event only prevents components from rendering
- * the previous account while logout/login navigation is still in progress.
+ * 立即清除当前 SPA 的所有内存身份/授权快照。
+ * HttpOnly Cookie 仍完全归服务端管理；此事件只防止登录、退出跳转期间组件继续展示上一账号。
  */
 export function clearAuthorizationSnapshot() {
   dispatchAuthorizationRefreshed(null)

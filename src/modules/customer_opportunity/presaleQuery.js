@@ -21,7 +21,10 @@ function enumValue(value, allowed) {
   return allowed.has(value) ? value : ''
 }
 
-/** Rehydrates the complete TS-007 workspace state from a route query. */
+/**
+ * 从路由恢复售前工作区状态，但不直接信任 URL：枚举、页码、排序字段和长度均
+ * 按前后端契约收敛。这样复制链接可复现查询，同时恶意或陈旧参数不会进入 API。
+ */
 export function presaleStateFromQuery(query = {}) {
   const status = scalar(query, 'status').toUpperCase()
   const sortBy = scalar(query, 'sort_by').toLowerCase()
@@ -51,7 +54,10 @@ export function presaleStateFromQuery(query = {}) {
   }
 }
 
-/** Produces a stable URL query without leaking an authorization scope parameter. */
+/**
+ * 生成顺序和字段集合稳定的可分享查询参数。数据范围由服务端根据会话判定，
+ * 这里刻意不序列化 scope 一类授权参数，防止 URL 被误当成越权依据。
+ */
 export function presaleStateToQuery(filters, view, page, pageSize, columnLimit) {
   const result = {
     presale_view: view === 'board' ? 'board' : 'list',
@@ -69,7 +75,10 @@ export function presaleStateToQuery(filters, view, page, pageSize, columnLimit) 
   return result
 }
 
-/** Converts local date-time controls to the RFC3339 contract used by Gin. */
+/**
+ * 浏览器 datetime-local 没有时区信息，发送前按当前本地时区解析并转换为
+ * RFC3339 UTC；无效日期不发送，由此保持与服务端时间边界契约一致。
+ */
 export function presaleAPIParams(filters) {
   const result = {}
   for (const key of ['request_no', 'opportunity_id', 'applicant_id', 'assignee_id', 'status', 'venue', 'urgency', 'overdue', 'push_status', 'sort_by', 'sort_order']) {

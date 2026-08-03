@@ -1,8 +1,7 @@
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '/api/v1').replace(/\/$/, '')
 
 /**
- * FileTaskError retains only operational metadata from the platform response envelope. File
- * contents, storage paths and async-job payloads are deliberately never copied into this error.
+ * 只保留平台响应包中的运维错误元数据；文件内容、存储路径和异步任务负载不会复制进异常。
  */
 export class FileTaskError extends Error {
   constructor(message, options = {}) {
@@ -51,7 +50,7 @@ async function request(path, options = {}) {
   return body.data
 }
 
-/** Uploads one file. Do not set Content-Type manually: the browser must add the multipart boundary. */
+/** 上传单个文件；不得手工设置 Content-Type，multipart boundary 必须由浏览器生成。 */
 export function uploadLocalFile({ applicationId, file, classification = 'INTERNAL' }) {
   const formData = new FormData()
   formData.set('application_id', String(applicationId || '').trim())
@@ -60,7 +59,7 @@ export function uploadLocalFile({ applicationId, file, classification = 'INTERNA
   return request('/files', { method: 'POST', body: formData })
 }
 
-/** Returns a Blob and a best-effort filename after the server has authorized the download. */
+/** 服务端完成租户、文件状态和下载权限校验后，返回 Blob 及尽力解析出的文件名。 */
 export async function downloadLocalFile(fileId) {
   let response
   try {
@@ -91,7 +90,7 @@ export function listAsyncJobs({ page = 1, pageSize = 20, status = '', jobType = 
   return request(`/async-jobs?${params.toString()}`)
 }
 
-/** Creates a registered application job. Payload must be credential-free JSON. */
+/** 创建已注册的应用任务；负载必须是不含密码、密钥和令牌的 JSON。 */
 export function createAsyncJob({ applicationId = '', jobType, aggregateType = '', aggregateId = '', payload, priority = 100, maxAttempts = 3, availableAt = null }) {
   return request('/async-jobs', {
     method: 'POST',
@@ -112,7 +111,7 @@ export function cancelAsyncJob(jobId) { return request(`/async-jobs/${encodeURIC
 export function retryAsyncJob(jobId) { return request(`/async-jobs/${encodeURIComponent(jobId)}/retry`, { method: 'POST' }) }
 export function rerunAsyncJob(jobId) { return request(`/async-jobs/${encodeURIComponent(jobId)}/rerun`, { method: 'POST' }) }
 
-/** Triggers one bounded unbound-file cleanup pass; this action must be permission protected server-side. */
+/** 触发一次有数量上限的未绑定文件清理；服务端必须对该高风险操作执行权限校验。 */
 export function cleanupExpiredFiles({ before, maxFiles }) {
   return request('/files/cleanup', { method: 'POST', body: JSON.stringify({ before, max_files: maxFiles }) })
 }

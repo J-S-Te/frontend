@@ -60,6 +60,7 @@ async function download() {
   downloading.value = true; errorMessage.value = ''
   try {
     const { blob, filename } = await downloadLocalFile(fileId)
+    // 对象 URL 只在本次点击下载期间存在；触发浏览器保存后立即撤销，避免大文件 Blob 长驻内存。
     const objectUrl = URL.createObjectURL(blob); const link = document.createElement('a')
     link.href = objectUrl; link.download = filename || fileId; link.style.display = 'none'
     document.body.append(link); link.click(); link.remove()
@@ -77,6 +78,7 @@ async function loadJobs() {
 
 async function createJob() {
   let payload
+  // 这里只验证 JSON 语法；任务类型白名单、负载模式和“不得含凭据”仍由服务端执行权威校验。
   try { payload = JSON.parse(jobForm.payloadText) } catch { errorMessage.value = '任务负载必须是有效 JSON，且不得包含密码、密钥或令牌。'; return }
   errorMessage.value = ''
   try {
@@ -89,6 +91,7 @@ async function operateJob(job, operation) {
   if (!job?.job_id || actionJobId.value) return
   actionJobId.value = job.job_id; errorMessage.value = ''
   try {
+    // retry 复用原任务并重新入队，rerun 创建新记录；二者语义不同，不能在前端合并成同一操作。
     if (operation === 'cancel') await cancelAsyncJob(job.job_id)
     if (operation === 'retry') await retryAsyncJob(job.job_id)
     if (operation === 'rerun') await rerunAsyncJob(job.job_id)

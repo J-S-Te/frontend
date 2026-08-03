@@ -40,8 +40,7 @@ async function refreshPrincipal({ force = false } = {}) {
   const request = (async () => {
     try {
       const next = await getCurrentPrincipal()
-      // A logout/login transition may complete while this request is in flight. Never let the
-      // previous account's late response repopulate the shared permission cache.
+      // 请求期间可能已完成退出或换号；世代不一致时丢弃迟到响应，禁止旧账号回填共享权限缓存。
       if (requestedGeneration !== cacheGeneration) return principal.value
       applyPrincipal(next)
       dispatchAuthorizationRefreshed(next, { changed: true })

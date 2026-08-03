@@ -369,8 +369,8 @@ watch(selectedDictionaryId, () => {
   loadItems()
 })
 
-// Principal is populated asynchronously after route entry. React to that grant instead of
-// permanently rendering an empty catalog when the component mounted before /auth/me returned.
+// 路由进入后 principal 异步填充；组件若早于 /auth/me 返回就挂载，需监听权限授予后再加载，
+// 否则会永久显示空目录。
 watch(canReadDictionaries, (granted, previouslyGranted) => {
   if (granted && !previouslyGranted) {
     loadDictionaries()

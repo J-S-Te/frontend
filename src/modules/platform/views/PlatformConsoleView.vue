@@ -116,6 +116,7 @@ const subsystemOnboardingPermissions = Object.freeze([
   'platform:application-environment:create',
   'platform:application-login-target:create',
   'platform:oauth-client:create',
+  'platform:role-binding:update',
 ])
 const canOnboardSubsystem = computed(() => subsystemOnboardingPermissions.every((permission) => hasPermission(permission)))
 

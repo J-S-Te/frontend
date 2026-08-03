@@ -16,9 +16,8 @@ export function buildUserAuthorizationOverview(entries = []) {
     const applicationCode = String(access.application_code || application.code || '').trim()
     const applicationName = String(application.name || application.display_name || applicationCode || '未命名应用').trim()
 
-    // CONFLICT is fail-closed: the server intentionally returns no effective
-    // permission union. Preserve source roles for diagnosis, but never count
-    // them as effective roles in the cross-application summary.
+    // CONFLICT 必须失败关闭：服务端有意不返回有效权限并集。保留来源角色用于诊断，
+    // 但绝不能把它们计入跨应用总览的有效角色。
     const authorizationState = String(access.authorization_state || '').trim().toUpperCase()
     const effectiveRoles = authorizationState === 'CONFLICT' ? [] : (Array.isArray(access.roles) ? access.roles : [])
     const sourceRoles = Array.isArray(access.roles) ? access.roles : []

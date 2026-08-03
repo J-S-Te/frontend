@@ -1,6 +1,7 @@
 /**
- * Converts the server-authored notification target into this module's Vue
- * route. External origins and unknown CRM paths fail closed.
+ * 将服务端生成的通知目标收敛为本模块的 Vue 路由。通知内容属于不可信输入：
+ * 只接受同源、无凭据/片段、且恰好包含一个正整数资源 ID 的白名单路径；外部
+ * Origin、多余参数和未知 CRM 路径全部失败关闭，避免开放重定向和路由注入。
  */
 export function parseNotificationTarget(targetPath, origin) {
   if (typeof targetPath !== 'string' || !targetPath.trim()) return null

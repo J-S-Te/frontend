@@ -38,6 +38,9 @@ let saveQueue = Promise.resolve()
 let createIdempotencyKey = ''
 let submitIdempotencyKey = ''
 
+// 备案草稿由 7 个独立 section 和 2 张矩阵组成。每个子资源维护自己的乐观锁
+// 版本；filing.version 则协调跨 section 的整体验证、材料和最终锁定。
+
 const enumOptions = Object.freeze({
   affiliation: [['CENTRAL', '中央'], ['PROVINCE', '省级'], ['CITY', '地市级'], ['COUNTY', '县区级'], ['OTHER', '其他']],
   organizationType: [['PARTY_ORGAN', '党委机关'], ['GOVERNMENT', '政府机关'], ['PUBLIC_INSTITUTION', '事业单位'], ['ENTERPRISE', '企业'], ['OTHER', '其他']],
@@ -133,7 +136,7 @@ async function uploadMaterial(item) {
   try {
     // Keep the create key while the selected file is unchanged. If the browser
     // loses the create response, retrying recovers the same server-side grant
-    // instead of attempting a conflicting second material version.
+    // 同一文件的完成响应若丢失，继续使用服务端已有材料版本，不创建冲突的第二版。
     materialCreateKeys[item.key] ||= newKey()
     const grant = await createFilingMaterialUpload(filing.value.id, { material_code: code, file_name: file.name, mime_type: file.type, size_bytes: file.size, sha256: await fileSHA256(file) }, materialCreateKeys[item.key])
     const target = new URL(grant.upload_url)
@@ -195,6 +198,7 @@ async function openFiling(id) {
 }
 async function startFiling() {
   if (!canCreate.value) return
+  // 创建响应未知时保留同一键；只有服务端明确返回草稿才释放，防止重复建档。
   busy.value = true; createIdempotencyKey ||= newKey()
   try { applyDetail(await createFiling({ project_id: '' }, createIdempotencyKey)); createIdempotencyKey = ''; emit('notice', '备案草稿已创建。') }
   catch (error) { emit('error', error) }
@@ -202,12 +206,16 @@ async function startFiling() {
 }
 function handleConflict(error) {
   if (error?.status !== 409) return false
+  // 任一子资源发生乐观锁冲突后停止整个编辑会话的自动暂存。继续保存可能拿旧
+  // 快照覆盖其他页面的新内容，必须重新读取全部 section 和矩阵版本后再编辑。
   conflict.value = true; clearTimeout(saveTimer)
   emit('error', new Error('检测到其他页面已修改该备案。自动暂存已停止，请重新加载后再编辑；系统未覆盖服务端内容。'))
   return true
 }
 async function reloadCurrent() { if (filing.value) await openFiling(filing.value.id) }
 async function persistSection(code, snapshot, idempotencyKey) {
+  // 自动暂存必须串行提交快照。并发 PUT 即使内容来自先后输入，也会携带相同旧版本，
+  // 后一个请求只能得到冲突；串行队列让每次保存使用上次返回的新版本。
   if (!filing.value || readonly.value) return
   saveState[code] = '正在保存…'
   try {
@@ -231,6 +239,7 @@ function scheduleSave() {
   saveTimer = window.setTimeout(() => {
     const snapshot = structuredClone(sectionData[code])
     const idempotencyKey = newKey()
+    // 前一次失败不能永久阻断队列；冲突状态会在 persistSection 内停止后续暂存。
     saveQueue = saveQueue.catch(() => {}).then(() => persistSection(code, snapshot, idempotencyKey))
   }, 900)
 }
@@ -265,6 +274,7 @@ async function confirmSubmit() {
     validation.value = await validateFiling(filing.value.id)
     if (!validation.value.valid) return
     if (!window.confirm('确认提交并在 Portal 内部锁定？提交后客户不能继续修改；这不代表已经向公安机关提交。')) return
+    // 校验通过到锁定完成之间若响应丢失，必须复用同一提交键，避免生成两个备案快照。
     submitIdempotencyKey ||= newKey()
     filing.value = await submitFiling(filing.value.id, { expected_version: filing.value.version }, submitIdempotencyKey)
     submitIdempotencyKey = ''; emit('notice', '备案快照已锁定，正在等待正式公安提交契约；当前不代表已向公安提交。')
