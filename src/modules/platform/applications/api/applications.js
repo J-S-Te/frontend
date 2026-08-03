@@ -223,6 +223,11 @@ export function getSubsystemStatus({ applicationCode, environment } = {}) {
   return request(`/subsystem-status${pageQuery({ application_code: applicationCode, environment })}`)
 }
 
+/** 查询后端部署 Agent 的非敏感能力，用于按真实服务器模式渲染接入表单。 */
+export function getSubsystemCapabilities() {
+  return request('/subsystem-capabilities')
+}
+
 /** 重新执行既有子系统运行时部署，不重复创建接入记录。 */
 export function retrySubsystem({ applicationCode, environment } = {}) {
   return request('/subsystem-retry', {

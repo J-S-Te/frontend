@@ -6,6 +6,7 @@ import {
   createEnvironment,
   deleteApplicationRegistration,
   deleteEnvironment,
+  getSubsystemCapabilities,
   getSubsystemStatus,
   listPortalApplications,
   onboardSubsystem,
@@ -72,6 +73,36 @@ test('application registry errors retain actionable detail and request trace id'
       && error.nextAction === '升级生产部署资产后重试'
       && error.details.next_action === '升级生产部署资产后重试',
   )
+})
+
+test('getSubsystemCapabilities reads the backend deployment policy without client-side inference', async () => {
+  let requested
+  globalThis.fetch = async (url, options) => {
+    requested = { url, options }
+    return jsonResponse({
+      data: {
+        automation_enabled: true,
+        deployment_mode: 'production',
+        supported_application_codes: ['contract_management'],
+        supported_environments: ['prod'],
+        defaults: {
+          application_code: 'contract_management',
+          environment: 'prod',
+          public_base_url: 'https://portal.example.com',
+          upstream_url: 'http://contract-api:8081',
+          path_prefix: '/contract_management',
+          client_type: 'confidential',
+        },
+      },
+    })
+  }
+
+  const capabilities = await getSubsystemCapabilities()
+
+  assert.equal(requested.url, '/api/v1/subsystem-capabilities')
+  assert.equal(requested.options.credentials, 'include')
+  assert.equal(capabilities.deployment_mode, 'production')
+  assert.deepEqual(capabilities.supported_application_codes, ['contract_management'])
 })
 
 test('deleteApplicationRegistration sends the stable code confirmation and optimistic-lock version', async () => {
@@ -250,13 +281,14 @@ test('deployment status, update and retry use dedicated Agent lifecycle endpoint
   const requests = []
   globalThis.fetch = async (url, options) => {
     requests.push({ url, options })
-    return jsonResponse({ data: { status: 'READY' } })
+    return jsonResponse({ data: { status: 'PROVISION_FAILED', next_action: '检查生产 Agent 日志后重试' } })
   }
 
-  await getSubsystemStatus({ applicationCode: 'business-app', environment: 'dev' })
+  const status = await getSubsystemStatus({ applicationCode: 'business-app', environment: 'dev' })
   await updateSubsystemRuntime({ applicationCode: 'business-app', environment: 'dev' })
   await retrySubsystem({ applicationCode: 'business-app', environment: 'dev' })
 
+  assert.equal(status.next_action, '检查生产 Agent 日志后重试')
   assert.equal(requests[0].url, '/api/v1/subsystem-status?application_code=business-app&environment=dev')
   assert.equal(requests[1].url, '/api/v1/subsystem-update')
   assert.equal(requests[2].url, '/api/v1/subsystem-retry')
@@ -272,7 +304,25 @@ test('application access UI separates logical retirement, runtime teardown and p
 
 test('adding an environment keeps the selected application identity immutable and excludes existing environment codes', () => {
   assert.match(onboardingModule, /onboardExistingApplicationId/)
-  assert.match(onboardingModule, /:disabled="onboardingExistingApplication \|\| !isLoopbackHost"/)
+  assert.match(onboardingModule, /:disabled="onboardingExistingApplication \|\| isProductionProvisioning"/)
   assert.match(onboardingModule, /availableOnboardEnvironments/)
-  assert.match(onboardingModule, /preferredEnvironments\.find\(\(item\) => !environments\.value\.some/)
+  assert.match(onboardingModule, /preferredEnvironments\.value\.find\(\(item\) => !environments\.value\.some/)
+})
+
+test('onboarding UI does not infer deployment policy from the browser hostname', () => {
+  assert.doesNotMatch(onboardingModule, /window\.location\.hostname/)
+  assert.doesNotMatch(onboardingModule, /isLoopbackHost/)
+  assert.match(onboardingModule, /部署能力与允许范围最终由后端 Agent 校验/)
+  assert.match(onboardingModule, /快速填写合同生产配置/)
+  assert.match(onboardingModule, /getSubsystemCapabilities/)
+  assert.match(onboardingModule, /deployment_mode === 'production'/)
+  assert.match(onboardingModule, /supportedApplicationCodes/)
+  assert.match(onboardingModule, /if \(isProductionProvisioning\.value\) applyContractProductionPreset\(\)/)
+})
+
+test('deployment cards retain and render the backend next action', () => {
+  assert.match(onboardingModule, /deploymentStates\.value = Object\.fromEntries/)
+  assert.match(onboardingModule, /deploymentStates\.value\[environment\.environment\]\?\.next_action/)
+  assert.match(onboardingModule, /environmentNextAction\(environment\)/)
+  assert.match(onboardingModule, /处理建议：/)
 })
