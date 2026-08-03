@@ -11,8 +11,8 @@ import {
 } from './sys004.js'
 
 test('SYS-004 frontend catalog includes the dedicated opportunity intake permissions', () => {
-  assert.equal(CONTRACT_ROLE_DEFINITIONS.length, 6)
-  assert.equal(CONTRACT_PERMISSION_DEFINITIONS.length, 22)
+  assert.equal(CONTRACT_ROLE_DEFINITIONS.length, 7)
+  assert.equal(CONTRACT_PERMISSION_DEFINITIONS.length, 25)
   assert.equal(CONTRACT_PERMISSION_DEFINITIONS.some(({ code }) => code === 'approval.manage'), true)
   assert.equal(CONTRACT_PERMISSION_DEFINITIONS.some(({ code }) => code === 'approval_rule.manage'), true)
   assert.equal(CONTRACT_PERMISSION_DEFINITIONS.some(({ code }) => code === 'opportunity_intake.read'), true)
@@ -26,6 +26,15 @@ test('contract role codes have Chinese display names', () => {
   assert.equal(contractRole('finance_director')?.name, '财务总监')
   assert.equal(contractRole('sales')?.name, '销售人员')
   assert.equal(contractRole('audit_admin')?.name, '审计管理员')
+  assert.equal(contractRole('contract_specialist')?.name, '合同专员')
+})
+
+test('contract specialist can only enter the approved-contract signing ledger', () => {
+  const specialist = { roles: ['contract_specialist'], permissions: ['contract.approved.read', 'contract.document.download', 'contract.stamped_pdf.upload'] }
+  assert.equal(canAccessContractSection(specialist, 'signing'), true)
+  for (const section of ['dashboard', 'contracts', 'approvals', 'rules', 'reports']) {
+    assert.equal(canAccessContractSection(specialist, section), false, section)
+  }
 })
 
 test('effective permissions are the sorted union of role and custom permissions', () => {

@@ -158,6 +158,22 @@ export async function listContractLifecycle(contractId) {
   return Array.isArray(data) ? data : []
 }
 
+export async function listApprovedContracts(params = {}) {
+  const search = new URLSearchParams(params).toString()
+  const data = await request(`/approved-contracts${search ? `?${search}` : ''}`)
+  return Array.isArray(data) ? data : []
+}
+
+export function approvedContractDownloadURL(contractId, format) {
+  return `${API_BASE_URL}/approved-contracts/${encodeURIComponent(contractId)}/${format}`
+}
+
+export async function uploadStampedContractPDF(contractId, file) {
+  const form = new FormData()
+  form.append('file', file)
+  return request(`/approved-contracts/${encodeURIComponent(contractId)}/stamped-pdf`, { method: 'PUT', body: form })
+}
+
 export async function listOpportunityIntakes(params = {}) {
   const search = new URLSearchParams(params).toString()
   let data

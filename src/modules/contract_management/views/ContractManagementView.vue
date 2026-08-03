@@ -16,6 +16,7 @@ import {
   getContractSession,
   getOpportunityIntake,
   listApprovals,
+  listApprovedContracts,
   listApprovalRules,
   listApprovalTasks,
   listContractTemplates,
@@ -30,6 +31,8 @@ import {
   updateApprovalRule,
   updateContractTemplate,
   uploadContractTemplate,
+  uploadStampedContractPDF,
+  approvedContractDownloadURL,
 } from '@/modules/contract_management/api/contract'
 import {
   ensureStableReviewAttempt,
@@ -117,6 +120,8 @@ const userNavGroupDefinitions = [
 ]
 
 const contracts = ref([])
+const approvedContracts = ref([])
+const stampedUploadBusyID = ref('')
 const adminDashboard = ref(null)
 const dashboardDetailKey = ref('')
 const approvals = ref([])
@@ -508,6 +513,25 @@ function lifecycleReason(reason) {
   return lifecycleReasonLabels[reason] || reason || '无备注'
 }
 
+function downloadApprovedContract(contract, format) {
+  window.location.assign(approvedContractDownloadURL(contract.recordId, format))
+}
+
+async function uploadStampedContract(contract, event) {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file) return
+  stampedUploadBusyID.value = contract.recordId
+  try {
+    await uploadStampedContractPDF(contract.recordId, file)
+    showToast('已上传盖章合同 PDF')
+  } catch (error) {
+    showToast(error?.message || '上传盖章合同失败')
+  } finally {
+    stampedUploadBusyID.value = ''
+  }
+}
+
 function normalizeApproval(item) {
   return {
     id: item.approval_id,
@@ -572,6 +596,9 @@ async function loadBusinessData() {
   }
   if (can('contract.read')) {
     addRequest('合同台账', ['dashboard', 'contracts', 'signing', 'reports'], listContracts({ limit: 200 }).then((items) => { contracts.value = items.map(normalizeContract) }))
+  }
+  if (can('contract.approved.read')) {
+    addRequest('签署台账', ['signing'], listApprovedContracts({ limit: 200 }).then((items) => { approvedContracts.value = items.map(normalizeContract) }))
   }
   if (can('approval.process')) {
     addRequest('审批待办', ['dashboard', 'approvals'], listApprovalTasks({ limit: 200 }).then((items) => { approvals.value = items.map(normalizeApproval) }))
@@ -1305,7 +1332,8 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
         </template>
 
         <template v-else-if="activeSection === 'signing'">
-          <div class="contract-card contract-empty-state"><ConsoleIcon name="shield" /><h3>暂无签署数据</h3><p>当前没有可查看的合同签署记录。</p></div>
+          <div class="contract-info-banner"><ConsoleIcon name="info" /><span>这里只展示审批已通过的合同。可下载冻结的 DOCX、转换后的 PDF，并上传盖章合同 PDF。</span></div>
+          <div class="contract-table-card"><div class="contract-table-scroll"><table class="contract-data-table"><thead><tr><th>合同编号 / 名称</th><th>负责人</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="contract in approvedContracts" :key="contract.recordId"><td><strong>{{ contract.name }}</strong><small>{{ contract.id }}</small></td><td>{{ contract.owner }}</td><td><span class="contract-badge" :class="statusTone(contract.status)"><i></i>{{ contract.status }}</span></td><td><div class="contract-inline-actions"><button v-if="can('contract.document.download')" class="contract-text-button" type="button" @click="downloadApprovedContract(contract, 'docx')">下载 DOCX</button><button v-if="can('contract.document.download')" class="contract-text-button" type="button" @click="downloadApprovedContract(contract, 'pdf')">下载 PDF</button><label v-if="can('contract.stamped_pdf.upload')" class="contract-text-button">{{ stampedUploadBusyID === contract.recordId ? '上传中…' : '上传盖章 PDF' }}<input type="file" accept="application/pdf,.pdf" :disabled="Boolean(stampedUploadBusyID)" hidden @change="uploadStampedContract(contract, $event)" /></label></div></td></tr><tr v-if="!approvedContracts.length"><td colspan="4" class="contract-empty">当前没有审批已通过的合同</td></tr></tbody></table></div></div>
         </template>
 
         <template v-else-if="activeSection === 'reports'">

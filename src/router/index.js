@@ -5,6 +5,7 @@ import PlatformConsoleView from '@/modules/platform/views/PlatformConsoleView.vu
 import SubsystemPortalView from '@/modules/platform/views/SubsystemPortalView.vue'
 import { getCurrentPrincipal } from '@/modules/platform/auth/api/auth'
 import { ensureContractSession } from '@/modules/contract_management/api/contract'
+import { ensureProjectSession } from '@/modules/project_management/api/projectManagement'
 import { getCRMSession } from '@/modules/customer_opportunity/api/client'
 import { ensurePortalSession } from '@/modules/customer_portal/api/portal'
 import { canAccessContractSection } from '@/modules/shared/authz/sys004'
@@ -21,6 +22,7 @@ import {
 // the platform login and subsystem portal from downloading every business UI
 // before the user chooses a system.
 const ContractManagementView = () => import('@/modules/contract_management/views/ContractManagementView.vue')
+const ProjectManagementView = () => import('@/modules/project_management/views/ProjectManagementView.vue')
 const CustomerOpportunityView = () => import('@/modules/customer_opportunity/views/CustomerOpportunityView.vue')
 const CustomerPortalView = () => import('@/modules/customer_portal/views/CustomerPortalView.vue')
 
@@ -93,6 +95,12 @@ const router = createRouter({
       name: 'contract_management',
       component: ContractManagementView,
       meta: { title: '合同管理系统', requiresAuth: true, requiresContractSession: true },
+    },
+    {
+      path: '/project_management/:section?',
+      name: 'project_management',
+      component: ProjectManagementView,
+      meta: { title: '项目管理系统', requiresAuth: true, requiresProjectSession: true },
     },
     {
       path: '/customer-opportunity/:section?',
@@ -172,6 +180,24 @@ router.beforeEach(async (to) => {
     } catch {
       // 401 已由 ensureContractSession 发起 OIDC 跳转；网络或服务错误时停留在当前页，
       // 不要把合同后端故障误判成基础平台未登录。
+      return false
+    }
+  }
+
+  if (to.meta.requiresProjectSession) {
+    try {
+      // 项目系统持有独立 OIDC Cookie；进入页面前必须同时建立项目会话并确认
+      // 当前应用令牌确实包含项目读取权限，不能回退使用平台自身权限。
+      const session = await ensureProjectSession()
+      if (!session) return false
+      const permissions = Array.isArray(session.permissions) ? session.permissions : []
+      if (!permissions.includes('project.read')) {
+        return { name: 'forbidden', query: { from: to.fullPath } }
+      }
+      return true
+    } catch {
+      // 401 已由项目 API 客户端启动 OIDC；其他错误保持关闭，避免平台会话
+      // 在项目服务不可用时意外放行页面。
       return false
     }
   }

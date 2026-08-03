@@ -7,6 +7,7 @@ export const CONTRACT_ROLE_DEFINITIONS = Object.freeze([
   { code: 'finance_director', name: '财务总监', permissions: ['dashboard', 'contract.read', 'customer.read', 'approval.view', 'approval.process'] },
   { code: 'sales', name: '销售人员', permissions: ['dashboard', 'contract.read', 'contract.create', 'contract.edit', 'customer.read', 'customer.create', 'customer.edit', 'contract_template.read'] },
   { code: 'audit_admin', name: '审计管理员', permissions: ['dashboard', 'contract.read', 'customer.read', 'approval.view', 'audit.view', 'audit.read', 'opportunity_intake.read'] },
+  { code: 'contract_specialist', name: '合同专员', permissions: ['contract.approved.read', 'contract.document.download', 'contract.stamped_pdf.upload'] },
 ])
 
 export const CONTRACT_PERMISSION_DEFINITIONS = Object.freeze([
@@ -15,6 +16,9 @@ export const CONTRACT_PERMISSION_DEFINITIONS = Object.freeze([
   ['contract.read', '查看合同'],
   ['contract.create', '创建合同'],
   ['contract.edit', '编辑合同'],
+  ['contract.approved.read', '查看已通过合同'],
+  ['contract.document.download', '下载合同文档'],
+  ['contract.stamped_pdf.upload', '上传盖章合同'],
   ['contract.delete', '删除合同'],
   ['customer.read', '查看客户'],
   ['customer.create', '创建客户'],
@@ -69,7 +73,7 @@ export const CONTRACT_SECTION_PERMISSIONS = Object.freeze({
   templates: ['contract_template.read', 'contract_template.manage'],
   approvals: ['approval.view', 'approval.process', 'contract.create'],
   rules: ['approval.view', 'approval_rule.manage'],
-  signing: ['contract.read'],
+  signing: ['contract.read', 'contract.approved.read'],
   reports: ['dashboard'],
 })
 
