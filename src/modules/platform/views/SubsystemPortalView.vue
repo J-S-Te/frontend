@@ -424,7 +424,6 @@ onBeforeUnmount(() => {
           <span class="subsystem-card__icon"><ConsoleIcon :name="subsystem.icon" /></span>
           <span class="subsystem-card__name">{{ subsystem.name }}</span>
           <span v-if="subsystem.description" class="subsystem-card__description">{{ subsystem.description }}</span>
-          <span v-if="subsystem.environment" class="subsystem-card__environment">{{ subsystem.environment }}</span>
           <span class="subsystem-card__action">进入系统 <ConsoleIcon name="chevron" /></span>
         </button>
       </div>
