@@ -1,6 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import { buildPortalSubsystems, findFrontendModule } from './moduleRegistry.js'
+
+const subsystemPortalView = await readFile(new URL('../platform/views/SubsystemPortalView.vue', import.meta.url), 'utf8')
 
 test('基础能力平台是唯一无需后端登记的内置门户卡片', () => {
   const cards = buildPortalSubsystems([])
@@ -92,7 +95,7 @@ test('合同管理系统使用统一编码和统一前端路由', () => {
 
   assert.equal(cards.length, 2)
   assert.equal(cards[1].code, 'contract_management')
-  assert.equal(cards[1].environment, 'prod')
+  assert.equal(cards[1].environment, undefined)
   assert.deepEqual(cards[1].route, { name: 'contract_management', params: { section: 'dashboard' } })
   assert.equal(cards[1].publicURL, '')
 })
@@ -117,4 +120,10 @@ test('同一个外部应用返回多个环境时只显示一个逻辑子系统�
 
   assert.equal(cards.length, 2)
   assert.equal(cards[1].publicURL, 'https://dev.example.com/')
+  assert.equal(cards[1].description, '已接入统一身份平台的业务应用')
+  assert.doesNotMatch(cards[1].description, /dev|prod|test|staging/i)
+})
+
+test('子系统门户卡片不展示部署环境标识', () => {
+  assert.doesNotMatch(subsystemPortalView, /subsystem-card__environment|subsystem\.environment/)
 })

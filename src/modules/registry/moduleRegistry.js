@@ -95,8 +95,9 @@ export function buildPortalSubsystems(registeredApplications = [], { includeBuil
         key: `registered-${applicationID}-${environmentID}`,
         code,
         name: application?.name || moduleDefinition?.name || code || '未命名子系统',
-        description: application?.description || moduleDefinition?.description || `${application?.environment || '默认'} 环境`,
-        environment: application?.environment || '',
+        // 环境用于后端选择准确的登录目标，但门户卡片只展示逻辑应用，
+        // 不向终端用户暴露 dev、test、staging、prod 等部署信息。
+        description: application?.description || moduleDefinition?.description || '已接入统一身份平台的业务应用',
         icon: moduleDefinition?.icon || 'dashboard',
         allowed: true,
         // 已随统一前端构建的模块直接使用 Vue Router；只有没有本地模块的
