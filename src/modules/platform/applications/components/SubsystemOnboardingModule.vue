@@ -58,6 +58,7 @@ const appForm = reactive(emptyApplicationForm())
 const environmentForm = reactive(emptyEnvironmentForm())
 const onboardForm = reactive(emptyOnboardForm())
 const onboardConfirmation = ref('')
+const selectedProductionTargetKey = ref('')
 
 const canReadApplications = computed(() => hasPermission('platform:application:read'))
 const canReadEnvironments = computed(() => hasPermission('platform:application-environment:read'))
@@ -92,7 +93,43 @@ const supportedApplicationCodes = computed(() => {
   const supported = provisioningCapabilities.value?.supported_application_codes
   return Array.isArray(supported) ? supported : []
 })
+const productionTargets = computed(() => {
+  const targets = provisioningCapabilities.value?.targets
+  if (!Array.isArray(targets)) return []
+  return targets.filter((target) => target?.application_code && target?.environment)
+})
+const selectableProductionTargets = computed(() => {
+  if (!onboardingExistingApplication.value) return productionTargets.value
+  const applicationCode = selectedApplication.value?.code
+  const existing = new Set(environments.value.map((item) => item.environment))
+  return productionTargets.value.filter((target) => target.application_code === applicationCode && !existing.has(target.environment))
+})
+const productionProvisioningSummary = computed(() => {
+  if (productionTargets.value.length > 0) {
+    return productionTargets.value
+      .map((target) => `${target.application_name || target.application_code}（${target.application_code}/${target.environment}）`)
+      .join('、')
+  }
+  const defaults = provisioningCapabilities.value?.defaults || {}
+  const applications = supportedApplicationCodes.value.length
+    ? supportedApplicationCodes.value
+    : [defaults.application_code].filter(Boolean)
+  const environments = preferredEnvironments.value.length
+    ? preferredEnvironments.value
+    : [defaults.environment].filter(Boolean)
+  const applicationText = applications.length ? applications.join('、') : '由服务器配置'
+  const environmentText = environments.length ? environments.join('、') : '由服务器配置'
+  return `应用：${applicationText}；环境：${environmentText}`
+})
 const availableOnboardEnvironments = computed(() => {
+  if (isProductionProvisioning.value && productionTargets.value.length > 0) {
+    const supported = productionTargets.value
+      .filter((target) => target.application_code === onboardForm.applicationCode)
+      .map((target) => target.environment)
+    if (!onboardingExistingApplication.value) return [...new Set(supported)]
+    const existing = new Set(environments.value.map((item) => item.environment))
+    return [...new Set(supported)].filter((environment) => !existing.has(environment))
+  }
   const supported = preferredEnvironments.value
   if (!onboardingExistingApplication.value) return supported
   const existing = new Set(environments.value.map((item) => item.environment))
@@ -150,20 +187,38 @@ function emptyOnboardForm() {
   }
 }
 
-function applyContractProductionPreset() {
+function productionTargetKey(target) {
+  return `${target?.application_code || ''}/${target?.environment || ''}`
+}
+
+function applyProductionProvisioningPreset(preferredTarget = null) {
   const defaults = provisioningCapabilities.value?.defaults || {}
+  const preferredCode = preferredTarget?.application_code || (onboardingExistingApplication.value ? selectedApplication.value?.code : defaults.application_code)
+  const preferredEnvironment = preferredTarget?.environment || defaults.environment
+  const target = preferredTarget
+    || selectableProductionTargets.value.find((item) => item.application_code === preferredCode && item.environment === preferredEnvironment)
+    || selectableProductionTargets.value.find((item) => item.application_code === preferredCode)
+    || selectableProductionTargets.value[0]
+    || productionTargets.value[0]
+  selectedProductionTargetKey.value = target ? productionTargetKey(target) : ''
   Object.assign(onboardForm, {
-    applicationCode: defaults.application_code || 'contract_management',
-    applicationName: defaults.application_name || '合同管理系统',
-    description: defaults.description || '合同创建、审批与客户管理系统',
-    environment: defaults.environment || 'prod',
+    applicationCode: target?.application_code || defaults.application_code || supportedApplicationCodes.value[0] || '',
+    applicationName: target?.application_name || defaults.application_name || '',
+    description: target?.description || defaults.description || '',
+    environment: target?.environment || defaults.environment || preferredEnvironments.value[0] || 'prod',
     publicBaseUrl: defaults.public_base_url || (typeof window === 'undefined' ? 'http://localhost:8081' : window.location.origin),
-    upstreamUrl: defaults.upstream_url || 'http://contract-api:8081',
-    pathPrefix: defaults.path_prefix || '/contract_management',
-    clientType: defaults.client_type || 'confidential',
+    upstreamUrl: target?.upstream_url || defaults.upstream_url || '',
+    pathPrefix: target?.path_prefix || defaults.path_prefix || '',
+    clientType: target?.client_type || defaults.client_type || 'confidential',
   })
   onboardConfirmation.value = ''
   clearError()
+}
+
+function selectProductionTarget(event) {
+  const key = event?.target?.value || ''
+  const target = selectableProductionTargets.value.find((item) => productionTargetKey(item) === key)
+  if (target) applyProductionProvisioningPreset(target)
 }
 
 function clearError() {
@@ -261,7 +316,7 @@ async function loadProvisioningCapabilities() {
   try {
     provisioningCapabilities.value = await getSubsystemCapabilities()
     if (provisioningCapabilities.value?.deployment_mode === 'production') {
-      applyContractProductionPreset()
+      applyProductionProvisioningPreset()
     }
   } catch (error) {
     provisioningCapabilities.value = null
@@ -311,7 +366,7 @@ function toggleOnboarding() {
   onboardExistingApplicationId.value = ''
   onboardConfirmation.value = ''
   clearError()
-  if (isProductionProvisioning.value) applyContractProductionPreset()
+  if (isProductionProvisioning.value) applyProductionProvisioningPreset()
   showOnboard.value = true
 }
 
@@ -378,7 +433,10 @@ function openOnboardEnvironment() {
     setError(null, `当前部署 Agent 不支持应用 ${application.code}，不能在此服务器新增运行环境。`)
     return
   }
-  const environment = preferredEnvironments.value.find((item) => !environments.value.some((existing) => existing.environment === item))
+  const target = isProductionProvisioning.value
+    ? selectableProductionTargets.value.find((item) => item.application_code === application.code)
+    : null
+  const environment = target?.environment || preferredEnvironments.value.find((item) => !environments.value.some((existing) => existing.environment === item))
   if (!environment) {
     setError(null, `${preferredEnvironments.value.join('、')} 环境均已接入，不能重复创建。`)
     return
@@ -394,7 +452,8 @@ function openOnboardEnvironment() {
     pathPrefix: `/${application.code}`,
     clientType: 'confidential',
   })
-  applySubsystemOnboardingPreset(onboardForm)
+  if (target) applyProductionProvisioningPreset(target)
+  else applySubsystemOnboardingPreset(onboardForm)
   onboardConfirmation.value = ''
   showOnboard.value = true
 }
@@ -553,6 +612,7 @@ function selectEnvironment(environment) {
 
 watch(selectedApplicationId, () => { loadEnvironments() }, { immediate: true })
 watch(() => onboardForm.applicationCode, (applicationCode, previousCode) => {
+  if (isProductionProvisioning.value) return
   applySubsystemOnboardingPreset(onboardForm, String(previousCode || '').trim().toLowerCase())
 })
 onMounted(() => {
@@ -578,19 +638,20 @@ onMounted(() => {
       <form v-if="showOnboard" class="application-registry-onboard" @submit.prevent="submitOnboarding">
         <div class="application-registry-section-title">
           <div><strong>新增子系统接入</strong><small>首次接入一个不存在的应用环境；已有环境请使用下面的编辑或重试。部署能力与允许范围最终由后端 Agent 校验。</small></div>
-          <button v-if="!onboardingExistingApplication" class="console-button ghost small" type="button" @click="applyContractProductionPreset">快速填写合同生产配置</button>
+          <button v-if="isProductionProvisioning && !onboardingExistingApplication" class="console-button ghost small" type="button" @click="applyProductionProvisioningPreset">填入服务器接入配置</button>
         </div>
         <p v-if="automationUnavailable" class="application-registry-inline-warning">当前环境未启用受控部署 Agent，不能执行一键接入；请先由部署人员发布平台生产部署资产。</p>
-        <p v-else-if="isProductionProvisioning" class="application-registry-inline-note">当前服务器为生产模式，只允许合同管理系统 contract_management/prod；固定参数由平台自动填写，后端会再次校验。</p>
+        <p v-else-if="isProductionProvisioning" class="application-registry-inline-note">当前服务器使用生产部署策略（{{ productionProvisioningSummary }}）；接入参数由服务器能力配置自动填写，后端 Agent 会再次校验。</p>
         <div class="console-form-grid">
+          <label v-if="isProductionProvisioning" class="console-form-item"><span>服务器接入目标</span><select :value="selectedProductionTargetKey" @change="selectProductionTarget"><option v-for="target in selectableProductionTargets" :key="productionTargetKey(target)" :value="productionTargetKey(target)">{{ target.application_name || target.application_code }}（{{ productionTargetKey(target) }}）</option></select><small>仅显示 subsystems.d 中审核通过且尚未接入的目标</small></label>
           <label class="console-form-item"><span>应用编码</span><input v-model="onboardForm.applicationCode" :disabled="onboardingExistingApplication || isProductionProvisioning" placeholder="customer_management" /></label>
           <label class="console-form-item"><span>应用名称</span><input v-model="onboardForm.applicationName" :disabled="onboardingExistingApplication || isProductionProvisioning" placeholder="客户管理系统" /></label>
           <label class="console-form-item"><span>环境</span><select v-model="onboardForm.environment" :disabled="isProductionProvisioning"><option v-for="environment in availableOnboardEnvironments" :key="environment" :value="environment">{{ environment }}</option></select></label>
           <label class="console-form-item"><span>客户端类型</span><select v-model="onboardForm.clientType" :disabled="isProductionProvisioning"><option value="confidential">confidential（推荐）</option><option value="public">public</option></select></label>
           <label class="console-form-item"><span>Public BaseURL</span><input v-model="onboardForm.publicBaseUrl" :readonly="isProductionProvisioning" placeholder="http://localhost:8081" /></label>
-          <label class="console-form-item"><span>UpstreamURL</span><input v-model="onboardForm.upstreamUrl" :readonly="Boolean(onboardPreset)" placeholder="http://customer-api:8080" /><small v-if="onboardPreset">统一 Docker 编排固定地址</small></label>
-          <label class="console-form-item"><span>门户路径前缀</span><input v-model="onboardForm.pathPrefix" :readonly="Boolean(onboardPreset)" placeholder="/customer_management" /><small v-if="onboardPreset">统一前端固定路径</small></label>
-          <label class="console-form-item"><span>应用说明</span><input v-model="onboardForm.description" placeholder="可选" /></label>
+          <label class="console-form-item"><span>UpstreamURL</span><input v-model="onboardForm.upstreamUrl" :readonly="isProductionProvisioning || Boolean(onboardPreset)" placeholder="http://customer-api:8080" /><small v-if="isProductionProvisioning || onboardPreset">服务器受控编排地址</small></label>
+          <label class="console-form-item"><span>门户路径前缀</span><input v-model="onboardForm.pathPrefix" :readonly="isProductionProvisioning || Boolean(onboardPreset)" placeholder="/customer_management" /><small v-if="isProductionProvisioning || onboardPreset">服务器受控门户路径</small></label>
+          <label class="console-form-item"><span>应用说明</span><input v-model="onboardForm.description" :readonly="isProductionProvisioning" placeholder="可选" /></label>
           <label class="console-form-item application-registry-confirm"><span>确认码：{{ onboardConfirmationCode || '应用编码/环境' }}</span><input v-model="onboardConfirmation" :placeholder="onboardConfirmationCode || '应用编码/环境'" autocomplete="off" /></label>
         </div>
         <div class="console-form-actions"><button class="console-button primary" type="submit" :disabled="!canSubmitOnboard || saving"><ConsoleIcon name="save" />{{ saving ? '接入中…' : '确认接入并部署' }}</button><small>若应用环境已存在，平台会阻止覆盖；请在下方选择后更新或重试。</small></div>
