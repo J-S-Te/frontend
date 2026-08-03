@@ -89,7 +89,8 @@ const availableOnboardEnvironments = computed(() => {
 const onboardConfirmationCode = computed(() => `${onboardForm.applicationCode.trim().toLowerCase()}/${onboardForm.environment}`)
 const onboardPreset = computed(() => subsystemOnboardingPreset(onboardForm.applicationCode))
 const productionOnboardingError = computed(() => {
-  if (isLoopbackHost || onboardForm.environment !== 'prod') return ''
+	if (isLoopbackHost) return ''
+	if (onboardForm.environment !== 'prod') return '服务器生产部署 Agent 仅允许 prod 环境；开发和测试环境请在对应隔离部署中接入。'
   if (onboardForm.applicationCode.trim().toLowerCase() !== 'contract_management') return '生产一键接入目前仅支持合同管理系统（contract_management/prod）。'
   if (onboardForm.clientType !== 'confidential') return '生产合同管理必须使用 confidential 客户端。'
   return ''
@@ -213,7 +214,7 @@ function selectApplication(application) {
 async function loadApplications(preferredApplicationId = selectedApplicationId.value) {
   if (!canReadApplications.value) return
   loading.value = true
-  errorMessage.value = ''
+	clearError()
   try {
     const data = await listApplications({ page: 1, pageSize: 100, status: '' })
     const items = Array.isArray(data?.items) ? data.items : []
@@ -271,7 +272,7 @@ function toggleOnboarding() {
   Object.assign(onboardForm, emptyOnboardForm())
   onboardExistingApplicationId.value = ''
   onboardConfirmation.value = ''
-  errorMessage.value = ''
+	clearError()
   showOnboard.value = true
 }
 
@@ -286,7 +287,7 @@ function openApplicationEditor() {
     status: application.status || 'ACTIVE',
     version: application.version,
   })
-  errorMessage.value = ''
+	clearError()
   applicationEditorOpen.value = true
 }
 
@@ -294,7 +295,7 @@ async function saveApplication() {
   const application = selectedApplication.value
   if (!application || !canUpdateApplication.value || saving.value) return
   saving.value = true
-  errorMessage.value = ''
+	clearError()
   try {
     const updated = await updateApplication({
       applicationId: application.application_id,
@@ -327,7 +328,7 @@ function openEnvironmentEditor(environment) {
     status: environment.status || 'ACTIVE',
     version: environment.version,
   })
-  errorMessage.value = ''
+	clearError()
   environmentEditorOpen.value = true
 }
 
@@ -360,7 +361,7 @@ async function saveEnvironment() {
   if (!application || saving.value) return
   if (!environmentForm.version || !canUpdateEnvironment.value) return
   saving.value = true
-  errorMessage.value = ''
+	clearError()
   try {
     const saved = await updateEnvironment({
       applicationId: application.application_id,
@@ -387,14 +388,14 @@ async function saveEnvironment() {
 function openDeleteApplication(application) {
   pendingDeleteApplication.value = application
   deleteConfirmation.value = ''
-  errorMessage.value = ''
+	clearError()
 }
 
 async function confirmDeleteApplication() {
   const application = pendingDeleteApplication.value
   if (!application || deleteConfirmation.value.trim() !== application.code || !canUpdateApplication.value || saving.value) return
   saving.value = true
-  errorMessage.value = ''
+	clearError()
   try {
     await deleteApplicationRegistration({ applicationId: application.application_id, version: application.version, confirmationCode: application.code })
     pendingDeleteApplication.value = null
@@ -415,7 +416,7 @@ function openDeleteEnvironment(environment) {
   }
   pendingDeleteEnvironment.value = environment
   environmentDeleteConfirmation.value = ''
-  errorMessage.value = ''
+	clearError()
 }
 
 async function confirmDeleteEnvironment() {
@@ -424,7 +425,7 @@ async function confirmDeleteEnvironment() {
   const confirmationCode = `${application?.code || ''}/${environment?.environment || ''}`
   if (!application || !environment || environmentDeleteConfirmation.value.trim() !== confirmationCode || !canDeleteEnvironment.value || !canManageRuntime.value || saving.value) return
   saving.value = true
-  errorMessage.value = ''
+	clearError()
   try {
     // 先清理运行时，再删除控制面环境记录。若 Agent 清理失败，保留数据库配置以便重试，
     // 防止出现“记录已删但容器、密钥和网关入口仍存留”的孤儿运行时。
@@ -451,7 +452,7 @@ async function reapplyEnvironment(environment, retry = false) {
   const application = selectedApplication.value
   if (!application || !canManageRuntime.value || saving.value) return
   saving.value = true
-  errorMessage.value = ''
+	clearError()
   try {
     const action = retry ? retrySubsystem : updateSubsystemRuntime
     await action({ applicationCode: application.code, environment: environment.environment })
@@ -467,7 +468,7 @@ async function reapplyEnvironment(environment, retry = false) {
 async function submitOnboarding() {
   if (!canSubmitOnboard.value) return
   if (productionOnboardingError.value) {
-    errorMessage.value = productionOnboardingError.value
+		setError(null, productionOnboardingError.value)
     return
   }
   // 已纳入统一 Compose 的子系统只允许固定服务名和网关前缀；兼容旧别名时先归一化，
@@ -477,11 +478,11 @@ async function submitOnboarding() {
   }
   const presetError = validateIntegratedSubsystemOnboarding(onboardForm)
   if (presetError) {
-    errorMessage.value = presetError
+		setError(null, presetError)
     return
   }
   saving.value = true
-  errorMessage.value = ''
+	clearError()
   try {
     const result = await onboardSubsystem({
       applicationCode: onboardForm.applicationCode.trim().toLowerCase(),
@@ -516,7 +517,7 @@ watch(() => onboardForm.applicationCode, (applicationCode, previousCode) => {
   applySubsystemOnboardingPreset(onboardForm, String(previousCode || '').trim().toLowerCase())
 })
 watch(() => [onboardForm.applicationCode, onboardForm.environment], ([applicationCode, environment]) => {
-  if (!isLoopbackHost && environment === 'prod' && String(applicationCode || '').trim().toLowerCase() === 'contract_management') {
+	if (!isLoopbackHost && String(applicationCode || '').trim().toLowerCase() === 'contract_management') {
     onboardForm.clientType = 'confidential'
   }
 })
@@ -543,7 +544,7 @@ onMounted(() => { loadApplications() })
           <label class="console-form-item"><span>应用编码</span><input v-model="onboardForm.applicationCode" :disabled="onboardingExistingApplication" placeholder="customer_management" /></label>
           <label class="console-form-item"><span>应用名称</span><input v-model="onboardForm.applicationName" :disabled="onboardingExistingApplication" placeholder="客户管理系统" /></label>
           <label class="console-form-item"><span>环境</span><select v-model="onboardForm.environment"><option v-for="environment in availableOnboardEnvironments" :key="environment" :value="environment">{{ environment }}</option></select></label>
-          <label class="console-form-item"><span>客户端类型</span><select v-model="onboardForm.clientType" :disabled="!isLoopbackHost && onboardForm.environment === 'prod'"><option value="confidential">confidential（推荐）</option><option value="public">public</option></select><small v-if="!isLoopbackHost && onboardForm.environment === 'prod'">生产合同接入固定使用 confidential</small></label>
+		  <label class="console-form-item"><span>客户端类型</span><select v-model="onboardForm.clientType" :disabled="!isLoopbackHost"><option value="confidential">confidential（推荐）</option><option value="public">public</option></select><small v-if="!isLoopbackHost">服务器生产接入固定使用 confidential</small></label>
           <label class="console-form-item"><span>Public BaseURL</span><input v-model="onboardForm.publicBaseUrl" placeholder="http://localhost:8081" /></label>
           <label class="console-form-item"><span>UpstreamURL</span><input v-model="onboardForm.upstreamUrl" :readonly="Boolean(onboardPreset)" placeholder="http://customer-api:8080" /><small v-if="onboardPreset">统一 Docker 编排固定地址</small></label>
           <label class="console-form-item"><span>门户路径前缀</span><input v-model="onboardForm.pathPrefix" :readonly="Boolean(onboardPreset)" placeholder="/customer_management" /><small v-if="onboardPreset">统一前端固定路径</small></label>
