@@ -85,6 +85,14 @@ test('getSubsystemCapabilities reads the backend deployment policy without clien
         deployment_mode: 'production',
         supported_application_codes: ['contract_management'],
         supported_environments: ['prod'],
+        targets: [{
+          application_code: 'contract_management',
+          application_name: '合同管理系统',
+          environment: 'prod',
+          upstream_url: 'http://contract-api:8081',
+          path_prefix: '/contract_management',
+          client_type: 'confidential',
+        }],
         defaults: {
           application_code: 'contract_management',
           environment: 'prod',
@@ -103,6 +111,7 @@ test('getSubsystemCapabilities reads the backend deployment policy without clien
   assert.equal(requested.options.credentials, 'include')
   assert.equal(capabilities.deployment_mode, 'production')
   assert.deepEqual(capabilities.supported_application_codes, ['contract_management'])
+  assert.equal(capabilities.targets[0].path_prefix, '/contract_management')
 })
 
 test('deleteApplicationRegistration sends the stable code confirmation and optimistic-lock version', async () => {
@@ -313,11 +322,14 @@ test('onboarding UI does not infer deployment policy from the browser hostname',
   assert.doesNotMatch(onboardingModule, /window\.location\.hostname/)
   assert.doesNotMatch(onboardingModule, /isLoopbackHost/)
   assert.match(onboardingModule, /部署能力与允许范围最终由后端 Agent 校验/)
-  assert.match(onboardingModule, /快速填写合同生产配置/)
+  assert.match(onboardingModule, /填入服务器接入配置/)
+  assert.doesNotMatch(onboardingModule, /只允许合同管理系统 contract_management\/prod/)
   assert.match(onboardingModule, /getSubsystemCapabilities/)
   assert.match(onboardingModule, /deployment_mode === 'production'/)
   assert.match(onboardingModule, /supportedApplicationCodes/)
-  assert.match(onboardingModule, /if \(isProductionProvisioning\.value\) applyContractProductionPreset\(\)/)
+  assert.match(onboardingModule, /selectableProductionTargets/)
+  assert.match(onboardingModule, /服务器接入目标/)
+  assert.match(onboardingModule, /if \(isProductionProvisioning\.value\) applyProductionProvisioningPreset\(\)/)
 })
 
 test('deployment cards retain and render the backend next action', () => {
