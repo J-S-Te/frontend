@@ -114,6 +114,8 @@
 .subsystem-portal__user-menu {
   position: relative;
   z-index: 4;
+  /* 显式钉在头部右侧，避免任何父级覆盖 justify-content 时影响布局。 */
+  margin-left: auto;
 }
 
 .subsystem-portal__user-trigger {
@@ -459,6 +461,15 @@
   padding: 0 0 28px;
   color: rgba(203, 213, 225, 0.55);
   font-size: 12px;
+}
+
+/* 页脚左右分列：左侧浏览器/分辨率说明，右侧版本版权。 */
+.subsystem-portal__footer .subsystem-portal__footer-note {
+  margin-right: auto;
+}
+
+.subsystem-portal__footer .subsystem-portal__footer-copyright {
+  margin-left: auto;
 }
 
 .subsystem-portal__toast {

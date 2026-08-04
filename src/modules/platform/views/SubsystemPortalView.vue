@@ -430,8 +430,8 @@ onBeforeUnmount(() => {
     </section>
 
     <footer class="subsystem-portal__footer">
-      <span>建议分辨率：1920×1080 · 浏览器：Chrome / Edge 最新版</span>
-      <span>© 2026 V2.1.0</span>
+      <span class="subsystem-portal__footer-note">建议分辨率：1920×1080 · 浏览器：Chrome / Edge 最新版</span>
+      <span class="subsystem-portal__footer-copyright">© 2026 V2.1.0</span>
     </footer>
 
     <Transition name="portal-toast">
