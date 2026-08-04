@@ -82,17 +82,25 @@ function showToast(message, type = 'enter') {
   }, 2200)
 }
 
-async function loadPortalCatalog() {
-  subsystemCatalogLoading.value = true
-  subsystemCatalogError.value = ''
+async function loadPortalCatalog({ silent = false } = {}) {
+  // 静默刷新（授权后台轮询）不切换加载状态、不清空已有卡片，避免门户每 15 秒
+  // 出现“正在加载已接入的子系统…”并整体重绘；仅首次加载时显示加载态。
+  if (!silent) {
+    subsystemCatalogLoading.value = true
+    subsystemCatalogError.value = ''
+  }
   try {
     const data = await listPortalApplications({ environment: portalEnvironment })
     registeredSubsystems.value = Array.isArray(data) ? data : []
+    if (silent) subsystemCatalogError.value = ''
   } catch (error) {
-    registeredSubsystems.value = []
-    subsystemCatalogError.value = error instanceof ApplicationRegistryError
-      ? error.message
-      : '无法加载已接入的子系统。'
+    if (!silent) {
+      registeredSubsystems.value = []
+      subsystemCatalogError.value = error instanceof ApplicationRegistryError
+        ? error.message
+        : '无法加载已接入的子系统。'
+    }
+    // 静默刷新失败时保留当前卡片，避免后台轮询抖动破坏已展示的门户。
   } finally {
     subsystemCatalogLoading.value = false
   }
@@ -115,10 +123,10 @@ function onAuthorizationRefreshed(event) {
     isPrincipalLoading.value = false
     principalLoadFailed.value = false
   }
-  // 应用入口也属于授权结果。即使基础平台角色没有变化，子系统角色调整后
-  // 服务端目录仍可能不同，因此每次授权检查都重新读取门户目录。
-  void loadPortalCatalog()
+  // 应用入口也属于授权结果。只有角色/权限确实发生变化时才静默重新读取门户目录；
+  // 普通 15 秒授权轮询不再刷新页面，也不会触发加载提示或重绘卡片。
   if (event?.detail?.changed) {
+    void loadPortalCatalog({ silent: true })
     showToast('角色或权限已更新，已按最新授权刷新可访问应用。', 'enter')
   }
 }
@@ -404,8 +412,7 @@ onBeforeUnmount(() => {
         <p>请选择需要访问的业务子系统</p>
       </div>
 
-      <p v-if="subsystemCatalogLoading" class="subsystem-portal__catalog-status">正在加载已接入的子系统…</p>
-      <p v-else-if="subsystemCatalogError" class="subsystem-portal__catalog-status is-error" role="alert">{{ subsystemCatalogError }}</p>
+      <p v-if="subsystemCatalogError" class="subsystem-portal__catalog-status is-error" role="alert">{{ subsystemCatalogError }}</p>
       <p v-else-if="registeredSubsystems.length === 0" class="subsystem-portal__catalog-status">当前账号暂无可访问的业务子系统。若子系统已经接入，请联系平台管理员为当前用户分配对应应用角色。</p>
 
       <div class="subsystem-portal__cards" aria-label="子系统列表">
