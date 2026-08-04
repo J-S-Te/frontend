@@ -9,6 +9,7 @@ export class ApplicationRegistryError extends Error {
     this.traceId = options.traceId || ''
     this.details = options.details && typeof options.details === 'object' ? options.details : {}
     this.nextAction = options.nextAction || this.details.next_action || ''
+    this.detail = options.detail || this.details.detail || ''
   }
 }
 
