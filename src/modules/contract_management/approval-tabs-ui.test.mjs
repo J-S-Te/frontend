@@ -22,3 +22,9 @@ test('approval center presents workflow statuses in Chinese', () => {
   assert.match(source, /approvalStatusLabel\(runtime\.status\)/)
   assert.match(source, /contractStatusLabel\(approvalDetail\.meta\.from_status\)/)
 })
+
+test('pending assigned approvals are viewable but cannot be processed early', () => {
+  assert.match(source, /const requiresActiveTask = \['approve', 'reject', 'sign', 'transfer', 'return'\]\.includes\(action\)/)
+  assert.match(source, /can\('approval\.process'\) && selectedApproval\.value\?\.status === 'active'/)
+  assert.match(source, /该审批尚未流转到当前节点，暂时只能查看/)
+})

@@ -1032,15 +1032,18 @@ async function executeApprovalCommand(action, payload = {}, { close = false } = 
   // 本地判断用于收窄按钮入口并校验必填原因；待办归属、当前节点、角色和状态版本仍由
   // 命令接口按当前登录主体重新验证，不能把已打开的详情快照当作授权凭据。
   const isApplicant = approvalDetail.value?.meta?.applicant_user_id === session.value?.user_id
-  const allowed = ['approve', 'reject', 'sign', 'transfer', 'return'].includes(action)
-    ? can('approval.process')
+  const requiresActiveTask = ['approve', 'reject', 'sign', 'transfer', 'return'].includes(action)
+  const allowed = requiresActiveTask
+    ? can('approval.process') && selectedApproval.value?.status === 'active'
     : action === 'comments'
       ? can('approval.view') || can('approval.process') || isApplicant
       : action === 'urge'
         ? can('approval.manage') || isApplicant
         : action === 'withdraw' && isApplicant
   if (!allowed) {
-    showToast('当前用户无权执行此审批操作。')
+    showToast(requiresActiveTask && selectedApproval.value?.status === 'pending'
+      ? '该审批尚未流转到当前节点，暂时只能查看。'
+      : '当前用户无权执行此审批操作。')
     return
   }
   if (['reject', 'sign', 'transfer', 'return', 'withdraw'].includes(action) && !approvalComment.value.trim()) {
@@ -1251,7 +1254,7 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
         </div>
         <div v-if="notificationOpen" class="contract-notification-panel">
           <header><strong>通知中心</strong><span>{{ approvals.length }} 项待办</span></header>
-          <button v-if="can('approval.process')" type="button" @click="navigate('approvals')"><i class="warning"></i><span><strong>您有 {{ approvals.length }} 项合同审批待处理</strong><small>请按审批时限及时处理</small></span></button>
+          <button v-if="can('approval.process')" type="button" @click="navigate('approvals')"><i class="warning"></i><span><strong>您有 {{ approvals.length }} 项合同审批流程</strong><small>包含当前待处理和后续待流转节点</small></span></button>
         </div>
       </header>
 
@@ -1270,7 +1273,7 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
         </header>
 
         <template v-if="activeSection === 'dashboard'">
-          <section class="contract-welcome"><div><span>已安全登录</span><h2>您好，{{ currentUserLabel }}</h2><p>当前角色：<b>{{ currentRoleLabel }}</b>。您可以使用当前角色已授权的合同功能。</p></div><button v-if="can('approval.process')" type="button" @click="navigate('approvals')">查看我的待办 <ConsoleIcon name="chevron" /></button></section>
+          <section class="contract-welcome"><div><span>已安全登录</span><h2>您好，{{ currentUserLabel }}</h2><p>当前角色：<b>{{ currentRoleLabel }}</b>。您可以使用当前角色已授权的合同功能。</p></div><button v-if="can('approval.process')" type="button" @click="navigate('approvals')">查看我的审批流程 <ConsoleIcon name="chevron" /></button></section>
           <section v-if="isAdmin" class="contract-stat-grid contract-admin-stat-grid">
             <button class="blue" type="button" @click="openDashboardDetail('total_amount')"><span class="contract-stat-icon"><ConsoleIcon name="account" /></span><p>当前企业合同总额</p><strong>{{ formatAmount(Number(adminDashboard?.total_amount_minor || 0) / 100) }}</strong><em>点击查看全部合同</em></button>
             <button class="purple" type="button" @click="openDashboardDetail('total_count')"><span class="contract-stat-icon"><ConsoleIcon name="save" /></span><p>当前企业合同份数</p><strong>{{ adminDashboard?.total_contracts || 0 }}<small>份</small></strong><em>点击查看全部合同</em></button>
@@ -1281,7 +1284,7 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
           <section v-else class="contract-stat-grid">
             <article class="blue"><span class="contract-stat-icon"><ConsoleIcon name="account" /></span><p>本人合同总额</p><strong>{{ formatAmount(totalContractAmount) }}</strong><em>按当前可查合同汇总</em></article>
             <article class="purple"><span class="contract-stat-icon"><ConsoleIcon name="save" /></span><p>本人合同</p><strong>{{ contracts.length }}<small>份</small></strong><em>当前可见范围</em></article>
-            <article v-if="can('approval.process')" class="orange"><span class="contract-stat-icon"><ConsoleIcon name="audit" /></span><p>待我审批</p><strong>{{ approvals.length }}<small>项</small></strong><em>当前活动任务</em></article>
+            <article v-if="can('approval.process')" class="orange"><span class="contract-stat-icon"><ConsoleIcon name="audit" /></span><p>分配给我</p><strong>{{ approvals.length }}<small>项</small></strong><em>含待流转节点</em></article>
             <article class="green"><span class="contract-stat-icon"><ConsoleIcon name="shield" /></span><p>生效及履约</p><strong>{{ activeContractCount }}<small>份</small></strong><em>按当前状态统计</em></article>
           </section>
         </template>
@@ -1318,7 +1321,7 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
 
         <template v-else-if="activeSection === 'approvals'">
           <div class="contract-tabs" role="tablist" aria-label="审批列表">
-            <button :class="{ active: approvalTab === 'tasks' }" type="button" role="tab" :aria-selected="approvalTab === 'tasks'" @click="approvalTab = 'tasks'">活动待办 <i>{{ approvals.length }}</i></button>
+            <button :class="{ active: approvalTab === 'tasks' }" type="button" role="tab" :aria-selected="approvalTab === 'tasks'" @click="approvalTab = 'tasks'">分配给我 <i>{{ approvals.length }}</i></button>
             <button :class="{ active: approvalTab === 'initiated' }" type="button" role="tab" :aria-selected="approvalTab === 'initiated'" @click="approvalTab = 'initiated'">我发起的 {{ initiatedApprovals.length }}</button>
             <button type="button" @click="loadBusinessData">刷新</button>
           </div>
