@@ -278,6 +278,14 @@ function navigate(view) {
   mobileMenuOpen.value = false
 }
 
+// 从平台控制台返回子系统门户；门户是统一登录后的入口，不属于系统管理权限模块。
+function goToPortal() {
+  mobileMenuOpen.value = false
+  if (route.name !== 'portal') {
+    router.push({ name: 'portal' })
+  }
+}
+
 function showToast(message) {
   toastMessage.value = message
   if (toastTimer) {
@@ -614,6 +622,10 @@ onBeforeUnmount(() => {
       </div>
 
       <nav class="console-nav" aria-label="平台导航">
+        <button class="console-nav-item console-nav-item--portal" type="button" @click="goToPortal">
+          <ConsoleIcon name="dashboard" />
+          <span>返回子系统门户</span>
+        </button>
         <p class="console-nav-label">系统管理</p>
         <button
           v-if="canOpenSettings"
