@@ -26,3 +26,9 @@ test('contract navigation does not expose the customer lookup entry', () => {
   )
   assert.doesNotMatch(navigationDefinitions, /key: 'customers'|label: '客户查询'/)
 })
+
+test('returning to the unified portal releases the subsystem tab with an in-tab fallback', () => {
+  assert.match(source, /closeSubsystemTabOrFallback\(window, \(\) => router\.replace\(\{ name: 'portal' \}\)\)/)
+  assert.equal((source.match(/@click="returnToUnifiedPortal"/g) || []).length, 2)
+  assert.doesNotMatch(source, /navigatePlatform\('portal'\)/)
+})

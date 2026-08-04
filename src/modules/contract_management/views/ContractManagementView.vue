@@ -51,6 +51,8 @@ import {
   contractRole,
   hasContractPermission,
 } from '@/modules/shared/authz/sys004'
+import { buildTemplateValues } from '@/modules/contract_management/utils/currentUserPrefill'
+import { closeSubsystemTabOrFallback } from '@/modules/contract_management/utils/returnToPortal'
 import '@/modules/contract_management/styles/contract-management.css'
 
 const route = useRoute()
@@ -357,6 +359,11 @@ function navigate(section) {
 
 function navigatePlatform(name) {
   router.push({ name })
+}
+
+function returnToUnifiedPortal() {
+  mobileMenuOpen.value = false
+  closeSubsystemTabOrFallback(window, () => router.replace({ name: 'portal' }))
 }
 
 function resetFilters() {
@@ -1080,11 +1087,10 @@ function removeSystemRow(index) {
 }
 
 function selectContractTemplate() {
-  const values = {}
-  for (const field of selectedContractTemplate.value?.fields || []) {
-    values[field.name] = field.default || ''
-  }
-  newContract.value.template_values = values
+  newContract.value.template_values = buildTemplateValues(
+    selectedContractTemplate.value?.fields,
+    session.value,
+  )
   templatePreviewHTML.value = ''
   templatePreviewError.value = ''
 }
@@ -1407,10 +1413,10 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
         <section>
           <p>平台能力</p>
           <button v-if="can('all')" type="button" @click="navigatePlatform('settings')"><ConsoleIcon name="settings" /><span>系统设置</span><em>平台</em></button>
-          <button type="button" @click="navigatePlatform('portal')"><ConsoleIcon name="logout" /><span>返回统一门户</span><em>平台</em></button>
+          <button type="button" @click="returnToUnifiedPortal"><ConsoleIcon name="logout" /><span>返回统一门户</span><em>平台</em></button>
         </section>
       </nav>
-      <div class="contract-sidebar-user"><span class="contract-avatar">{{ currentUserInitial }}</span><span><strong>{{ currentUserLabel }}</strong><small>{{ currentRoleLabel }}</small></span><button type="button" aria-label="返回门户" @click="navigatePlatform('portal')"><ConsoleIcon name="logout" /></button></div>
+      <div class="contract-sidebar-user"><span class="contract-avatar">{{ currentUserInitial }}</span><span><strong>{{ currentUserLabel }}</strong><small>{{ currentRoleLabel }}</small></span><button type="button" aria-label="返回门户" @click="returnToUnifiedPortal"><ConsoleIcon name="logout" /></button></div>
     </aside>
 
     <main class="contract-main">
@@ -1585,6 +1591,7 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
           <div class="contract-form-grid">
             <label><span>关联商机（选填）</span><div class="contract-opportunity-control"><button type="button" @click="openOpportunityPicker">{{ newContract.opportunity_name || '点击选择权限范围内的商机' }}</button><button v-if="newContract.opportunity_id" type="button" aria-label="清除关联商机" @click="clearOpportunity">×</button></div><small>合同编号将在审批通过后自动生成</small></label>
             <label><span>合同名称</span><input v-model="newContract.title" required placeholder="请输入合同名称" /></label>
+            <label><span>合同负责人</span><input :value="currentUserLabel" readonly aria-readonly="true" /><small>已根据当前登录用户自动填入</small></label>
             <label><span>合同类型</span><select v-model="newContract.contract_type" required><option value="" disabled>请选择合同类型</option><option v-for="item in contractTypeOptions" :key="item" :value="item">{{ item }}</option></select></label>
             <label><span>服务类型</span><select v-model="newContract.service_type" required><option value="" disabled>请选择服务类型</option><option v-for="item in serviceTypeOptions" :key="item" :value="item">{{ item }}</option></select></label>
             <div class="contract-form-wide contract-system-information"><div class="contract-section-title"><div><h3>系统信息（选填）</h3><p>填写完整后可继续新增，最多 15 个系统</p></div><button class="contract-text-button" type="button" :disabled="!canAddSystemRow" @click="addSystemRow">＋ 继续新增一行</button></div><div v-for="(system, index) in newContract.systems" :key="index" class="contract-system-row"><label><span>系统名称</span><input v-model="system.name" :required="Boolean(system.name || system.level)" maxlength="255" placeholder="请输入系统名称" /></label><label><span>系统等级</span><select v-model="system.level" :required="Boolean(system.name || system.level)"><option value="">请选择系统等级</option><option v-for="level in systemLevelOptions" :key="level" :value="level">{{ level }}</option></select></label><button type="button" aria-label="删除系统信息" @click="removeSystemRow(index)">×</button></div></div>
@@ -1597,7 +1604,7 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
             <label class="contract-form-wide"><span>合同模板</span><select v-model="newContract.template_id" @change="selectContractTemplate"><option value="">不使用模板，手工填写正文</option><option v-for="item in contractTemplates" :key="item.id" :value="item.id">{{ item.name }}（{{ item.fields?.length || 0 }} 个字段）</option></select></label>
           </div>
           <div v-if="selectedContractTemplate" class="contract-generated-form">
-            <div class="contract-section-title"><div><h3>填写模板字段</h3><p>{{ selectedContractTemplate.original_filename }}</p></div><button class="contract-button secondary small" type="button" :disabled="templatePreviewing" @click="previewNewContract">{{ templatePreviewing ? '正在生成预览…' : '预览合同' }}</button></div>
+            <div class="contract-section-title"><div><h3>填写模板字段</h3><p>{{ selectedContractTemplate.original_filename }} · 姓名、账号、邮箱等当前用户已有信息会自动填入空白字段</p></div><button class="contract-button secondary small" type="button" :disabled="templatePreviewing" @click="previewNewContract">{{ templatePreviewing ? '正在生成预览…' : '预览合同' }}</button></div>
             <div class="contract-template-field-grid"><label v-for="field in selectedContractTemplate.fields || []" :key="field.name" :title="field.locked && !isAdmin ? '此项已由管理员预设' : undefined"><span>{{ field.label }}</span><input v-model="newContract.template_values[field.name]" required :readonly="field.locked && !isAdmin" :class="{ 'is-admin-configured': field.locked && !isAdmin }" :title="field.locked && !isAdmin ? '此项已由管理员预设' : undefined" :placeholder="field.default ? `默认：${field.default}` : `请输入${field.label}`" /><small v-if="field.locked && !isAdmin">此项已由管理员预设</small></label></div>
             <p v-if="templatePreviewError" class="contract-template-preview-error" role="alert">{{ templatePreviewError }}</p>
           </div>

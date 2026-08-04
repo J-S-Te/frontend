@@ -26,3 +26,10 @@ test('system and customer information follow creation requirements', () => {
   for (const level of ['一级', '二级', '三级', '四级']) assert.match(source, new RegExp(level))
   for (const label of ['客户名称', '客户地址', '客户联系人', '客户联系电话']) assert.match(source, new RegExp(`<span>${label}</span>`))
 })
+
+test('template fields reuse the current user profile', () => {
+  assert.match(source, /<span>合同负责人<\/span><input :value="currentUserLabel" readonly/)
+  assert.match(source, /已根据当前登录用户自动填入/)
+  assert.match(source, /buildTemplateValues\(/)
+  assert.match(source, /当前用户已有信息会自动填入空白字段/)
+})
