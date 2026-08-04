@@ -14,9 +14,10 @@ import {
   getApproval,
   getContractDashboard,
   getContractSession,
+  getSigningRecord,
   getOpportunityIntake,
   listApprovals,
-  listApprovedContracts,
+  listSigningRecords,
   listApprovalRules,
   listApprovalTasks,
   listContractTemplates,
@@ -28,6 +29,10 @@ import {
   previewContractDocument,
   submitContract,
   reviewOpportunityIntake,
+  saveSigningShipment,
+  markSigningReceived,
+  recordSigningReminder,
+  confirmSigning,
   updateApprovalRule,
   updateContractTemplate,
   uploadContractTemplate,
@@ -120,8 +125,16 @@ const userNavGroupDefinitions = [
 ]
 
 const contracts = ref([])
-const approvedContracts = ref([])
+const signingRecords = ref([])
 const stampedUploadBusyID = ref('')
+const selectedSigningRecord = ref(null)
+const signingDetailLoading = ref(false)
+const signingOperationBusy = ref(false)
+const signingKeyword = ref('')
+const signingMethodFilter = ref('')
+const signingStatusFilter = ref('')
+const signingShipmentForm = ref({ courier_number: '', recipient_name: '', recipient_address: '', mailed_at: '' })
+const signingConfirmationForm = ref({ seal_verified: false, signature_verified: false, signed_at: '' })
 const adminDashboard = ref(null)
 const dashboardDetailKey = ref('')
 const approvals = ref([])
@@ -292,6 +305,27 @@ const filteredContracts = computed(() => {
   })
 })
 
+const filteredSigningRecords = computed(() => {
+  const query = signingKeyword.value.trim().toLowerCase()
+  return signingRecords.value.filter((record) => {
+    const contract = record.contract
+    const hitKeyword = !query || [contract.id, contract.name, contract.customerName, record.courier_number].join(' ').toLowerCase().includes(query)
+    return hitKeyword && (!signingMethodFilter.value || record.method === signingMethodFilter.value) && (!signingStatusFilter.value || signingDisplayStatus(record).key === signingStatusFilter.value)
+  })
+})
+const signingStats = computed(() => {
+  const now = new Date()
+  return {
+    completed: signingRecords.value.filter((item) => item.status === 'completed').length,
+    processing: signingRecords.value.filter((item) => ['pending_shipment', 'in_return', 'pending_review'].includes(item.status) && !isSigningExpired(item)).length,
+    monthly: signingRecords.value.filter((item) => {
+      const confirmed = item.confirmed_at ? new Date(item.confirmed_at) : null
+      return confirmed && confirmed.getFullYear() === now.getFullYear() && confirmed.getMonth() === now.getMonth()
+    }).length,
+    expired: signingRecords.value.filter(isSigningExpired).length,
+  }
+})
+
 const totalContractAmount = computed(() => contracts.value.reduce((total, item) => total + item.amount, 0))
 const activeContractCount = computed(() => contracts.value.filter((item) => ['已批准', '已生效', '履约中', '待付款'].includes(item.status)).length)
 const averageContractAmount = computed(() => contracts.value.length ? totalContractAmount.value / contracts.value.length : 0)
@@ -457,10 +491,12 @@ function normalizeContract(item) {
     amount: Number(item.amount_minor || 0) / 100,
     currency: item.currency || 'CNY',
     owner: displayNameFor(item.owner_user_id, item.owner_display_name),
+    customerName: item.customer_name || '—',
     createdAt: formatDate(item.created_at),
     updatedAt: formatDate(item.updated_at),
     startDate: formatDate(item.start_date),
     endDate: formatDate(item.end_date),
+    endAt: item.end_date || '',
     status: contractStatusLabel(item.status),
     version: item.version,
     content: item.content || '',
@@ -470,6 +506,34 @@ function normalizeContract(item) {
     activeUnexpired: Boolean(item.active_unexpired),
     expired: Boolean(item.expired),
   }
+}
+
+function normalizeSigningRecord(item) {
+  return { ...item, contract: normalizeContract(item.contract || {}) }
+}
+
+function isSigningExpired(record) {
+  if (record.status === 'completed' || !record.contract?.endAt) return false
+  const end = new Date(record.contract.endAt)
+  return !Number.isNaN(end.getTime()) && end.getTime() < Date.now()
+}
+
+function signingDisplayStatus(record) {
+  if (isSigningExpired(record)) return { key: 'expired', label: '已失效', tone: 'danger' }
+  return {
+    pending_shipment: { key: 'pending_shipment', label: '待寄出', tone: 'warning' },
+    in_return: { key: 'in_return', label: '回传中', tone: 'info' },
+    pending_review: { key: 'pending_review', label: '待核验', tone: 'warning' },
+    completed: { key: 'completed', label: '已完成', tone: 'success' },
+  }[record.status] || { key: record.status, label: record.status || '—', tone: 'neutral' }
+}
+
+function signingProgress(record) {
+  if (record.status === 'completed') return 100
+  if (record.status === 'pending_review') return 80
+  if (record.customer_received_at) return 60
+  if (record.status === 'in_return') return 40
+  return 20
 }
 
 async function openContract(contract) {
@@ -517,6 +581,110 @@ function downloadApprovedContract(contract, format) {
   window.location.assign(approvedContractDownloadURL(contract.recordId, format))
 }
 
+async function refreshSigningRecords() {
+  const items = await listSigningRecords({ limit: 200 })
+  signingRecords.value = items.map(normalizeSigningRecord)
+}
+
+function applySigningRecord(record) {
+  selectedSigningRecord.value = normalizeSigningRecord(record)
+  const selected = selectedSigningRecord.value
+  signingShipmentForm.value = {
+    courier_number: selected.courier_number || '',
+    recipient_name: selected.recipient_name || '',
+    recipient_address: selected.recipient_address || '',
+    mailed_at: selected.mailed_at ? String(selected.mailed_at).slice(0, 10) : '',
+  }
+  signingConfirmationForm.value = {
+    seal_verified: Boolean(selected.seal_verified),
+    signature_verified: Boolean(selected.signature_verified),
+    signed_at: selected.signed_at ? String(selected.signed_at).slice(0, 10) : '',
+  }
+}
+
+async function openSigningRecord(record) {
+  signingDetailLoading.value = true
+  applySigningRecord(record)
+  try {
+    applySigningRecord(await getSigningRecord(record.contract.recordId))
+  } catch (error) {
+    showToast(error?.message || '读取签署详情失败')
+  } finally {
+    signingDetailLoading.value = false
+  }
+}
+
+function closeSigningRecord() {
+  selectedSigningRecord.value = null
+}
+
+async function refreshSelectedSigningRecord() {
+  const contractID = selectedSigningRecord.value?.contract.recordId
+  if (!contractID) return
+  applySigningRecord(await getSigningRecord(contractID))
+  await refreshSigningRecords()
+}
+
+async function submitSigningShipment() {
+  const contractID = selectedSigningRecord.value?.contract.recordId
+  if (!contractID) return
+  signingOperationBusy.value = true
+  try {
+    await saveSigningShipment(contractID, signingShipmentForm.value)
+    await refreshSelectedSigningRecord()
+    showToast('寄出信息已登记，合同进入回传跟踪')
+  } catch (error) {
+    showToast(error?.message || '保存寄出信息失败')
+  } finally {
+    signingOperationBusy.value = false
+  }
+}
+
+async function confirmCustomerReceived() {
+  const contractID = selectedSigningRecord.value?.contract.recordId
+  if (!contractID) return
+  signingOperationBusy.value = true
+  try {
+    await markSigningReceived(contractID)
+    await refreshSelectedSigningRecord()
+    showToast('已记录客户签收')
+  } catch (error) {
+    showToast(error?.message || '记录客户签收失败')
+  } finally {
+    signingOperationBusy.value = false
+  }
+}
+
+async function sendSigningReminder() {
+  const contractID = selectedSigningRecord.value?.contract.recordId
+  if (!contractID) return
+  signingOperationBusy.value = true
+  try {
+    await recordSigningReminder(contractID)
+    await refreshSelectedSigningRecord()
+    showToast('催办记录已保存')
+  } catch (error) {
+    showToast(error?.message || '保存催办记录失败')
+  } finally {
+    signingOperationBusy.value = false
+  }
+}
+
+async function confirmSigningRecord() {
+  const contractID = selectedSigningRecord.value?.contract.recordId
+  if (!contractID) return
+  signingOperationBusy.value = true
+  try {
+    await confirmSigning(contractID, signingConfirmationForm.value)
+    await refreshSelectedSigningRecord()
+    showToast('回传合同已核验，签署流程完成')
+  } catch (error) {
+    showToast(error?.message || '完成核验失败')
+  } finally {
+    signingOperationBusy.value = false
+  }
+}
+
 async function uploadStampedContract(contract, event) {
   const file = event.target.files?.[0]
   event.target.value = ''
@@ -524,7 +692,9 @@ async function uploadStampedContract(contract, event) {
   stampedUploadBusyID.value = contract.recordId
   try {
     await uploadStampedContractPDF(contract.recordId, file)
-    showToast('已上传盖章合同 PDF')
+    if (selectedSigningRecord.value?.contract.recordId === contract.recordId) await refreshSelectedSigningRecord()
+    else await refreshSigningRecords()
+    showToast('回传合同 PDF 已上传，等待人工核验')
   } catch (error) {
     showToast(error?.message || '上传盖章合同失败')
   } finally {
@@ -598,7 +768,7 @@ async function loadBusinessData() {
     addRequest('合同台账', ['dashboard', 'contracts', 'signing', 'reports'], listContracts({ limit: 200 }).then((items) => { contracts.value = items.map(normalizeContract) }))
   }
   if (can('contract.approved.read')) {
-    addRequest('签署台账', ['signing'], listApprovedContracts({ limit: 200 }).then((items) => { approvedContracts.value = items.map(normalizeContract) }))
+    addRequest('签署台账', ['signing'], refreshSigningRecords())
   }
   if (can('approval.process')) {
     addRequest('审批待办', ['dashboard', 'approvals'], listApprovalTasks({ limit: 200 }).then((items) => { approvals.value = items.map(normalizeApproval) }))
@@ -1335,8 +1505,20 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
         </template>
 
         <template v-else-if="activeSection === 'signing'">
-          <div class="contract-info-banner"><ConsoleIcon name="info" /><span>这里只展示审批已通过的合同。可下载冻结的 DOCX、转换后的 PDF，并上传盖章合同 PDF。</span></div>
-          <div class="contract-table-card"><div class="contract-table-scroll"><table class="contract-data-table"><thead><tr><th>合同编号 / 名称</th><th>负责人</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="contract in approvedContracts" :key="contract.recordId"><td><strong>{{ contract.name }}</strong><small>{{ contract.id }}</small></td><td>{{ contract.owner }}</td><td><span class="contract-badge" :class="statusTone(contract.status)"><i></i>{{ contract.status }}</span></td><td><div class="contract-inline-actions"><button v-if="can('contract.document.download')" class="contract-text-button" type="button" @click="downloadApprovedContract(contract, 'docx')">下载 DOCX</button><button v-if="can('contract.document.download')" class="contract-text-button" type="button" @click="downloadApprovedContract(contract, 'pdf')">下载 PDF</button><label v-if="can('contract.stamped_pdf.upload')" class="contract-text-button">{{ stampedUploadBusyID === contract.recordId ? '上传中…' : '上传盖章 PDF' }}<input type="file" accept="application/pdf,.pdf" :disabled="Boolean(stampedUploadBusyID)" hidden @change="uploadStampedContract(contract, $event)" /></label></div></td></tr><tr v-if="!approvedContracts.length"><td colspan="4" class="contract-empty">当前没有审批已通过的合同</td></tr></tbody></table></div></div>
+          <div class="contract-info-banner"><ConsoleIcon name="info" /><span>审批通过的合同在此进入纸质签署流程。登记寄出、客户签收、催办和回传文件；回传 PDF 需由合同专员核验印章、签名与签署日期。</span></div>
+          <section class="contract-sign-stats contract-sign-stats-four">
+            <article><span class="success"><ConsoleIcon name="shield" /></span><div><p>已完成签署</p><strong>{{ signingStats.completed }}</strong></div></article>
+            <article><span class="info"><ConsoleIcon name="reset" /></span><div><p>签署进行中</p><strong>{{ signingStats.processing }}</strong></div></article>
+            <article><span class="success"><ConsoleIcon name="save" /></span><div><p>本月完成</p><strong>{{ signingStats.monthly }}</strong></div></article>
+            <article><span class="warning"><ConsoleIcon name="info" /></span><div><p>已失效</p><strong>{{ signingStats.expired }}</strong></div></article>
+          </section>
+          <div class="contract-filter-bar">
+            <label class="contract-search-field"><ConsoleIcon name="search" /><input v-model="signingKeyword" type="search" placeholder="合同编号 / 名称 / 客户 / 快递单号" /></label>
+            <label><select v-model="signingMethodFilter"><option value="">全部签署方式</option><option value="paper">纸质签署</option></select></label>
+            <label><select v-model="signingStatusFilter"><option value="">全部状态</option><option value="pending_shipment">待寄出</option><option value="in_return">回传中</option><option value="pending_review">待核验</option><option value="completed">已完成</option><option value="expired">已失效</option></select></label>
+            <button class="contract-button primary small" type="button" @click="refreshSigningRecords"><ConsoleIcon name="reset" />刷新</button>
+          </div>
+          <div class="contract-table-card"><div class="contract-table-scroll"><table class="contract-data-table contract-signing-table"><thead><tr><th>合同编号 / 名称</th><th>签署方</th><th>签署方式</th><th>签署进度</th><th>当前状态</th><th>签署日期</th><th>到期日期</th><th>操作</th></tr></thead><tbody><tr v-for="record in filteredSigningRecords" :key="record.contract.recordId"><td><button class="contract-entity-link" type="button" @click="openSigningRecord(record)"><strong>{{ record.contract.name }}</strong><small>{{ record.contract.id }}</small></button></td><td>{{ record.contract.customerName }}</td><td>纸质签署</td><td><div class="contract-progress"><i><b :style="{ width: `${signingProgress(record)}%` }"></b></i><span>{{ signingProgress(record) }}%</span></div></td><td><span class="contract-badge" :class="signingDisplayStatus(record).tone"><i></i>{{ signingDisplayStatus(record).label }}</span></td><td>{{ formatDate(record.signed_at) }}</td><td>{{ record.contract.endDate }}</td><td><button class="contract-text-button" type="button" @click="openSigningRecord(record)">{{ record.status === 'pending_shipment' ? '登记寄出' : record.status === 'completed' ? '查看详情' : '回传跟踪' }}</button></td></tr><tr v-if="!filteredSigningRecords.length"><td colspan="8" class="contract-empty">当前没有符合条件的签署记录</td></tr></tbody></table></div><footer class="contract-table-footer"><span>共 {{ filteredSigningRecords.length }} 条签署记录</span></footer></div>
         </template>
 
         <template v-else-if="activeSection === 'reports'">
@@ -1344,6 +1526,25 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
         </template>
       </section>
     </main>
+
+    <div v-if="selectedSigningRecord" class="contract-modal-mask" @click.self="closeSigningRecord">
+      <article class="contract-detail-modal contract-signing-modal">
+        <header><div><span class="contract-badge" :class="signingDisplayStatus(selectedSigningRecord).tone"><i></i>{{ signingDisplayStatus(selectedSigningRecord).label }}</span><h2>{{ selectedSigningRecord.contract.name }}</h2><p>{{ selectedSigningRecord.contract.id }} · 纸质签署</p></div><button type="button" aria-label="关闭" @click="closeSigningRecord"><ConsoleIcon name="close" /></button></header>
+        <div v-if="signingDetailLoading" class="contract-modal-loading">正在读取签署详情…</div>
+        <template v-else>
+          <div class="contract-detail-highlight"><div><span>签署方</span><strong>{{ selectedSigningRecord.contract.customerName }}</strong></div><div><span>负责人</span><strong>{{ selectedSigningRecord.contract.owner }}</strong></div><div><span>到期日期</span><strong>{{ selectedSigningRecord.contract.endDate }}</strong></div></div>
+          <section><div class="contract-section-title"><h3>合同文件</h3><div class="contract-inline-actions"><button v-if="can('contract.document.download')" class="contract-text-button" type="button" @click="downloadApprovedContract(selectedSigningRecord.contract, 'docx')">下载 DOCX</button><button v-if="can('contract.document.download')" class="contract-text-button" type="button" @click="downloadApprovedContract(selectedSigningRecord.contract, 'pdf')">下载 PDF</button><button v-if="selectedSigningRecord.returned_document_name && can('contract.document.download')" class="contract-text-button" type="button" @click="downloadApprovedContract(selectedSigningRecord.contract, 'stamped-pdf')">下载回传 PDF</button></div></div></section>
+          <section v-if="selectedSigningRecord.status === 'pending_shipment'"><h3>寄出登记</h3><form class="contract-form-grid" @submit.prevent="submitSigningShipment"><label><span>快递单号</span><input v-model.trim="signingShipmentForm.courier_number" required maxlength="80" /></label><label><span>收件人</span><input v-model.trim="signingShipmentForm.recipient_name" required maxlength="100" /></label><label class="contract-form-wide"><span>收件地址</span><input v-model.trim="signingShipmentForm.recipient_address" required maxlength="300" /></label><label><span>邮寄日期</span><input v-model="signingShipmentForm.mailed_at" required type="date" /></label><button v-if="can('contract.signing.manage')" class="contract-button primary contract-signing-submit" type="submit" :disabled="signingOperationBusy">{{ signingOperationBusy ? '正在保存…' : '确认寄出并开始跟踪' }}</button></form></section>
+          <template v-else>
+            <section><h3>回传进度</h3><div class="contract-detail-timeline contract-signing-timeline"><div class="done"><i>1</i><span><strong>合同寄出</strong><small>{{ formatDate(selectedSigningRecord.mailed_at) }}<br />{{ selectedSigningRecord.courier_number }}</small></span></div><div :class="selectedSigningRecord.customer_received_at ? 'done' : 'active'"><i>2</i><span><strong>客户签收</strong><small>{{ selectedSigningRecord.customer_received_at ? formatDateTime(selectedSigningRecord.customer_received_at) : '等待确认' }}</small></span></div><div :class="selectedSigningRecord.returned_at ? 'done' : selectedSigningRecord.customer_received_at ? 'active' : ''"><i>3</i><span><strong>合同回传</strong><small>{{ selectedSigningRecord.returned_at ? formatDateTime(selectedSigningRecord.returned_at) : '等待回传 PDF' }}</small></span></div><div :class="selectedSigningRecord.status === 'completed' ? 'done' : selectedSigningRecord.status === 'pending_review' ? 'active' : ''"><i>4</i><span><strong>人工核验</strong><small>{{ selectedSigningRecord.confirmed_at ? formatDateTime(selectedSigningRecord.confirmed_at) : '核验印章与签名' }}</small></span></div></div></section>
+            <section><h3>寄送与催办记录</h3><dl><div><dt>快递单号</dt><dd>{{ selectedSigningRecord.courier_number || '—' }}</dd></div><div><dt>邮寄日期</dt><dd>{{ formatDate(selectedSigningRecord.mailed_at) }}</dd></div><div><dt>收件人</dt><dd>{{ selectedSigningRecord.recipient_name || '—' }}</dd></div><div><dt>收件地址</dt><dd>{{ selectedSigningRecord.recipient_address || '—' }}</dd></div><div><dt>催办次数</dt><dd>{{ selectedSigningRecord.reminder_count || 0 }} 次</dd></div><div><dt>最近催办</dt><dd>{{ formatDateTime(selectedSigningRecord.last_reminded_at) }}</dd></div></dl><div v-if="selectedSigningRecord.status === 'in_return' && can('contract.signing.manage')" class="contract-signing-operations"><button v-if="!selectedSigningRecord.customer_received_at" class="contract-button secondary" type="button" :disabled="signingOperationBusy" @click="confirmCustomerReceived">确认客户已签收</button><button class="contract-button secondary" type="button" :disabled="signingOperationBusy" @click="sendSigningReminder">记录催办</button><label v-if="can('contract.stamped_pdf.upload')" class="contract-button primary">{{ stampedUploadBusyID ? '上传中…' : '上传回传 PDF' }}<input type="file" accept="application/pdf,.pdf" :disabled="Boolean(stampedUploadBusyID)" hidden @change="uploadStampedContract(selectedSigningRecord.contract, $event)" /></label></div></section>
+            <section v-if="selectedSigningRecord.status === 'pending_review'"><h3>回传合同人工核验</h3><p class="contract-approval-summary">系统不自动判定合同内容。请合同专员打开回传 PDF，核对客户印章、签名及实际签署日期后确认。</p><form class="contract-signing-review" @submit.prevent="confirmSigningRecord"><label class="contract-check-label"><input v-model="signingConfirmationForm.seal_verified" type="checkbox" /><span>已核验客户印章完整有效</span></label><label class="contract-check-label"><input v-model="signingConfirmationForm.signature_verified" type="checkbox" /><span>已核验签名完整有效</span></label><label><span>实际签署日期</span><input v-model="signingConfirmationForm.signed_at" required type="date" /></label><button v-if="can('contract.signing.manage')" class="contract-button primary" type="submit" :disabled="signingOperationBusy || !signingConfirmationForm.seal_verified || !signingConfirmationForm.signature_verified || !signingConfirmationForm.signed_at">{{ signingOperationBusy ? '正在确认…' : '确认核验并完成签署' }}</button></form></section>
+            <section v-else-if="selectedSigningRecord.status === 'completed'"><h3>签署结果</h3><dl><div><dt>签署日期</dt><dd>{{ formatDate(selectedSigningRecord.signed_at) }}</dd></div><div><dt>完成核验时间</dt><dd>{{ formatDateTime(selectedSigningRecord.confirmed_at) }}</dd></div><div><dt>客户印章</dt><dd>{{ selectedSigningRecord.seal_verified ? '已核验' : '未核验' }}</dd></div><div><dt>客户签名</dt><dd>{{ selectedSigningRecord.signature_verified ? '已核验' : '未核验' }}</dd></div></dl></section>
+          </template>
+        </template>
+        <footer><button class="contract-button secondary" type="button" @click="closeSigningRecord">关闭</button></footer>
+      </article>
+    </div>
 
     <div v-if="selectedOpportunityIntake" class="contract-modal-mask" @click.self="closeOpportunityIntake">
       <article class="contract-detail-modal contract-intake-modal"><header><div><span class="contract-badge" :class="opportunityIntakeStatus(selectedOpportunityIntake.status).tone"><i></i>{{ opportunityIntakeStatus(selectedOpportunityIntake.status).label }}</span><h2>{{ selectedOpportunityIntake.opportunity_no }}</h2><p>接收记录 {{ selectedOpportunityIntake.intake_id }} · V{{ selectedOpportunityIntake.version }}</p></div><button type="button" aria-label="关闭" @click="closeOpportunityIntake"><ConsoleIcon name="close" /></button></header>

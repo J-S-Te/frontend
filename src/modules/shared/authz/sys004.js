@@ -1,13 +1,13 @@
 export const CONTRACT_APPLICATION_CODE = 'contract_management'
 
 export const CONTRACT_ROLE_DEFINITIONS = Object.freeze([
-  { code: 'admin', name: '超级管理员', permissions: ['contract.read', 'contract.create', 'contract.edit', 'approval.view', 'approval.process', 'approval.manage', 'approval_rule.manage', 'opportunity_intake.read', 'opportunity_intake.process'] },
+  { code: 'admin', name: '超级管理员', permissions: ['contract.read', 'contract.create', 'contract.edit', 'contract.approved.read', 'contract.document.download', 'contract.stamped_pdf.upload', 'contract.signing.manage', 'approval.view', 'approval.process', 'approval.manage', 'approval_rule.manage', 'opportunity_intake.read', 'opportunity_intake.process'] },
   { code: 'sales_director', name: '销售总监', permissions: ['dashboard', 'contract.read', 'customer.read', 'approval.view', 'approval.process'] },
   { code: 'tech_director', name: '技术总监', permissions: ['dashboard', 'contract.read', 'customer.read', 'approval.view', 'approval.process'] },
   { code: 'finance_director', name: '财务总监', permissions: ['dashboard', 'contract.read', 'customer.read', 'approval.view', 'approval.process'] },
   { code: 'sales', name: '销售人员', permissions: ['dashboard', 'contract.read', 'contract.create', 'contract.edit', 'customer.read', 'customer.create', 'customer.edit', 'contract_template.read'] },
   { code: 'audit_admin', name: '审计管理员', permissions: ['dashboard', 'contract.read', 'customer.read', 'approval.view', 'audit.view', 'audit.read', 'opportunity_intake.read'] },
-  { code: 'contract_specialist', name: '合同专员', permissions: ['contract.approved.read', 'contract.document.download', 'contract.stamped_pdf.upload'] },
+  { code: 'contract_specialist', name: '合同专员', permissions: ['contract.approved.read', 'contract.document.download', 'contract.stamped_pdf.upload', 'contract.signing.manage'] },
 ])
 
 export const CONTRACT_PERMISSION_DEFINITIONS = Object.freeze([
@@ -19,6 +19,7 @@ export const CONTRACT_PERMISSION_DEFINITIONS = Object.freeze([
   ['contract.approved.read', '查看已通过合同'],
   ['contract.document.download', '下载合同文档'],
   ['contract.stamped_pdf.upload', '上传盖章合同'],
+  ['contract.signing.manage', '管理合同签署与回传'],
   ['contract.delete', '删除合同'],
   ['customer.read', '查看客户'],
   ['customer.create', '创建客户'],

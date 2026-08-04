@@ -12,7 +12,7 @@ import {
 
 test('SYS-004 frontend catalog includes the dedicated opportunity intake permissions', () => {
   assert.equal(CONTRACT_ROLE_DEFINITIONS.length, 7)
-  assert.equal(CONTRACT_PERMISSION_DEFINITIONS.length, 25)
+  assert.equal(CONTRACT_PERMISSION_DEFINITIONS.length, 26)
   assert.equal(CONTRACT_PERMISSION_DEFINITIONS.some(({ code }) => code === 'approval.manage'), true)
   assert.equal(CONTRACT_PERMISSION_DEFINITIONS.some(({ code }) => code === 'approval_rule.manage'), true)
   assert.equal(CONTRACT_PERMISSION_DEFINITIONS.some(({ code }) => code === 'opportunity_intake.read'), true)

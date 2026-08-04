@@ -164,6 +164,32 @@ export async function listApprovedContracts(params = {}) {
   return Array.isArray(data) ? data : []
 }
 
+export async function listSigningRecords(params = {}) {
+  const search = new URLSearchParams(params).toString()
+  const data = await request(`/signing-records${search ? `?${search}` : ''}`)
+  return Array.isArray(data) ? data : []
+}
+
+export function getSigningRecord(contractId) {
+  return request(`/signing-records/${encodeURIComponent(contractId)}`)
+}
+
+export function saveSigningShipment(contractId, payload) {
+  return request(`/signing-records/${encodeURIComponent(contractId)}/shipment`, { method: 'PUT', body: JSON.stringify(payload) })
+}
+
+export function markSigningReceived(contractId) {
+  return request(`/signing-records/${encodeURIComponent(contractId)}/received`, { method: 'POST' })
+}
+
+export function recordSigningReminder(contractId) {
+  return request(`/signing-records/${encodeURIComponent(contractId)}/reminders`, { method: 'POST' })
+}
+
+export function confirmSigning(contractId, payload) {
+  return request(`/signing-records/${encodeURIComponent(contractId)}/confirm`, { method: 'POST', body: JSON.stringify(payload) })
+}
+
 export function approvedContractDownloadURL(contractId, format) {
   return `${API_BASE_URL}/approved-contracts/${encodeURIComponent(contractId)}/${format}`
 }

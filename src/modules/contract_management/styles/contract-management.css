@@ -267,3 +267,17 @@
 }
 .contract-inline-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
 .contract-inline-actions label.contract-text-button { cursor: pointer; }
+.contract-sign-stats-four { grid-template-columns: repeat(4,minmax(0,1fr)); }
+.contract-signing-table { min-width: 1120px; }
+.contract-signing-modal { width: min(920px,100%); }
+.contract-signing-modal .contract-section-title > div { display: flex; flex-wrap: wrap; justify-content: flex-end; }
+.contract-signing-submit { align-self: end; }
+.contract-signing-operations { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.contract-signing-operations label.contract-button { cursor: pointer; }
+.contract-signing-review { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; margin-top: 14px; }
+.contract-signing-review > label:not(.contract-check-label) { display: flex; flex-direction: column; gap: 7px; color: var(--cm-secondary); font-size: 10px; font-weight: 600; }
+.contract-signing-review > label:not(.contract-check-label) input { height: 36px; padding: 0 10px; color: var(--cm-text); font-size: 11px; border: 1px solid var(--cm-border); border-radius: 7px; background: #fff; }
+.contract-signing-review > .contract-button { align-self: end; }
+
+@media (max-width: 1180px){.contract-sign-stats-four{grid-template-columns:repeat(2,1fr)}}
+@media (max-width: 640px){.contract-sign-stats-four,.contract-signing-review{grid-template-columns:1fr}.contract-signing-operations>*{flex:1}.contract-signing-timeline>div{min-width:145px}}
