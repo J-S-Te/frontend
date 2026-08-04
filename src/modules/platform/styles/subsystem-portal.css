@@ -55,7 +55,6 @@
   background: radial-gradient(circle, rgba(124, 58, 237, 0.34), transparent 66%);
 }
 
-.subsystem-portal__footer,
 .subsystem-portal__content {
   width: min(1180px, calc(100% - 64px));
   margin: 0 auto;
@@ -456,11 +455,14 @@
   transform: translateX(3px);
 }
 
+/* 页脚通栏：分辨率/浏览器说明钉在最左侧，版本版权钉在最右侧。 */
 .subsystem-portal__footer {
   display: flex;
+  width: 100%;
+  box-sizing: border-box;
   justify-content: space-between;
   gap: 16px;
-  padding: 0 0 28px;
+  padding: 0 32px 28px;
   color: rgba(203, 213, 225, 0.55);
   font-size: 12px;
 }
@@ -526,7 +528,6 @@
 }
 
 @media (max-width: 700px) {
-  .subsystem-portal__footer,
   .subsystem-portal__content {
     width: min(100% - 32px, 520px);
   }
@@ -590,7 +591,7 @@
 
   .subsystem-portal__footer {
     align-items: flex-start;
-    padding-bottom: 20px;
+    padding: 0 16px 20px;
     flex-direction: column;
   }
 }
