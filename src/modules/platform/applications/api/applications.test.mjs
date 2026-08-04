@@ -313,9 +313,25 @@ test('application access UI separates logical retirement, runtime teardown and p
 
 test('adding an environment keeps the selected application identity immutable and excludes existing environment codes', () => {
   assert.match(onboardingModule, /onboardExistingApplicationId/)
-  assert.match(onboardingModule, /:disabled="onboardingExistingApplication \|\| isProductionProvisioning"/)
+  assert.match(onboardingModule, /:disabled="onboardingExistingApplication"/)
   assert.match(onboardingModule, /availableOnboardEnvironments/)
   assert.match(onboardingModule, /preferredEnvironments\.value\.find\(\(item\) => !environments\.value\.some/)
+})
+
+test('production onboarding only exposes reviewed unused targets and locks target-derived fields', () => {
+  assert.match(onboardingModule, /provisioningCapabilities\.value\?\.targets/)
+  assert.match(onboardingModule, /registeredProductionTargetKeys/)
+  assert.match(onboardingModule, /productionTargetInventoryReady/)
+  assert.match(onboardingModule, /仅显示 subsystems\.d 中审核通过且尚未接入的目标/)
+  assert.match(onboardingModule, /暂无可接入目标/)
+  assert.match(onboardingModule, /:value="onboardForm\.applicationCode" disabled/)
+  assert.match(onboardingModule, /:value="onboardForm\.applicationName" disabled/)
+  assert.match(onboardingModule, /:value="onboardForm\.environment" disabled/)
+  assert.match(onboardingModule, /:value="onboardForm\.clientType" disabled/)
+  assert.match(onboardingModule, /:value="onboardForm\.upstreamUrl" readonly/)
+  assert.match(onboardingModule, /:value="onboardForm\.pathPrefix" readonly/)
+  assert.match(onboardingModule, /defaults\.public_base_url \|\| ''/)
+  assert.match(onboardingModule, /当前没有可选服务器目标，不能自由填写接入参数。/)
 })
 
 test('onboarding UI does not infer deployment policy from the browser hostname', () => {

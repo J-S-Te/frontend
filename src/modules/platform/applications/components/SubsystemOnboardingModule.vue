@@ -29,6 +29,7 @@ const loading = ref(false)
 const saving = ref(false)
 const errorMessage = ref('')
 const errorNextAction = ref('')
+const errorDetail = ref('')
 const errorTraceId = ref('')
 const applications = ref([])
 const applicationKeyword = ref('')
@@ -47,6 +48,11 @@ const deleteConfirmation = ref('')
 const environmentDeleteConfirmation = ref('')
 const onboardExistingApplicationId = ref('')
 const provisioningCapabilities = ref(null)
+const applicationsLoaded = ref(false)
+const productionTargetInventoryReady = ref(false)
+const productionTargetInventoryLoading = ref(false)
+const productionTargetInventoryError = ref('')
+const registeredProductionTargetKeys = ref(new Set())
 
 const standardEnvironments = Object.freeze(['dev', 'test', 'staging', 'prod'])
 const preferredEnvironments = computed(() => {
@@ -99,12 +105,16 @@ const productionTargets = computed(() => {
   return targets.filter((target) => target?.application_code && target?.environment)
 })
 const selectableProductionTargets = computed(() => {
-  if (!onboardingExistingApplication.value) return productionTargets.value
-  const applicationCode = selectedApplication.value?.code
-  const existing = new Set(environments.value.map((item) => item.environment))
-  return productionTargets.value.filter((target) => target.application_code === applicationCode && !existing.has(target.environment))
+  if (!productionTargetInventoryReady.value || productionTargetInventoryLoading.value || productionTargetInventoryError.value) return []
+  const applicationCode = onboardingExistingApplication.value ? selectedApplication.value?.code : ''
+  return productionTargets.value.filter((target) => {
+    if (applicationCode && target.application_code !== applicationCode) return false
+    return !registeredProductionTargetKeys.value.has(productionTargetKey(target))
+  })
 })
+const selectedProductionTarget = computed(() => selectableProductionTargets.value.find((target) => productionTargetKey(target) === selectedProductionTargetKey.value) || null)
 const productionProvisioningSummary = computed(() => {
+  if (isProductionProvisioning.value && productionTargets.value.length === 0) return '暂无可接入目标'
   if (productionTargets.value.length > 0) {
     return productionTargets.value
       .map((target) => `${target.application_name || target.application_code}（${target.application_code}/${target.environment}）`)
@@ -147,6 +157,7 @@ const canSubmitOnboard = computed(() => Boolean(
   && onboardForm.upstreamUrl.trim()
   && onboardForm.pathPrefix.trim()
   && !automationUnavailable.value
+  && (!isProductionProvisioning.value || selectedProductionTarget.value)
   && onboardConfirmation.value.trim() === onboardConfirmationCode.value,
 ))
 
@@ -199,17 +210,18 @@ function applyProductionProvisioningPreset(preferredTarget = null) {
     || selectableProductionTargets.value.find((item) => item.application_code === preferredCode && item.environment === preferredEnvironment)
     || selectableProductionTargets.value.find((item) => item.application_code === preferredCode)
     || selectableProductionTargets.value[0]
-    || productionTargets.value[0]
   selectedProductionTargetKey.value = target ? productionTargetKey(target) : ''
   Object.assign(onboardForm, {
-    applicationCode: target?.application_code || defaults.application_code || supportedApplicationCodes.value[0] || '',
-    applicationName: target?.application_name || defaults.application_name || '',
-    description: target?.description || defaults.description || '',
-    environment: target?.environment || defaults.environment || preferredEnvironments.value[0] || 'prod',
-    publicBaseUrl: defaults.public_base_url || (typeof window === 'undefined' ? 'http://localhost:8081' : window.location.origin),
-    upstreamUrl: target?.upstream_url || defaults.upstream_url || '',
-    pathPrefix: target?.path_prefix || defaults.path_prefix || '',
-    clientType: target?.client_type || defaults.client_type || 'confidential',
+    applicationCode: target?.application_code || '',
+    applicationName: target?.application_name || '',
+    description: target?.description || '',
+    environment: target?.environment || '',
+    // Production public origin is supplied by the backend OIDC issuer. Never infer it
+    // from the browser address bar, which may be a private host or an alternate alias.
+    publicBaseUrl: defaults.public_base_url || '',
+    upstreamUrl: target?.upstream_url || '',
+    pathPrefix: target?.path_prefix || '',
+    clientType: target?.client_type || 'confidential',
   })
   onboardConfirmation.value = ''
   clearError()
@@ -224,6 +236,7 @@ function selectProductionTarget(event) {
 function clearError() {
   errorMessage.value = ''
   errorNextAction.value = ''
+  errorDetail.value = ''
   errorTraceId.value = ''
 }
 
@@ -231,11 +244,13 @@ function setError(error, fallback) {
   if (error instanceof ApplicationRegistryError) {
     errorMessage.value = error.message
     errorNextAction.value = error.nextAction
+    errorDetail.value = error.detail
     errorTraceId.value = error.traceId
     return
   }
   errorMessage.value = fallback
   errorNextAction.value = ''
+  errorDetail.value = ''
   errorTraceId.value = ''
 }
 
@@ -294,6 +309,9 @@ function selectApplication(application) {
 async function loadApplications(preferredApplicationId = selectedApplicationId.value) {
   if (!canReadApplications.value) return
   loading.value = true
+  applicationsLoaded.value = false
+  productionTargetInventoryReady.value = false
+  productionTargetInventoryError.value = ''
   clearError()
   try {
     const data = await listApplications({ page: 1, pageSize: 100, status: '' })
@@ -303,11 +321,54 @@ async function loadApplications(preferredApplicationId = selectedApplicationId.v
       ? preferredApplicationId
       : items[0]?.application_id || ''
     selectedApplicationId.value = nextId
+    applicationsLoaded.value = true
+    await refreshProductionTargetInventory()
   } catch (error) {
     applications.value = []
+    applicationsLoaded.value = false
+    productionTargetInventoryReady.value = false
     setError(error, '读取应用接入列表失败。')
   } finally {
     loading.value = false
+  }
+}
+
+// capabilities.targets only describes reviewed server manifests. The browser must also
+// inventory every registered application's environments before showing a target, otherwise
+// an already-onboarded target could briefly appear selectable while the page is loading.
+async function refreshProductionTargetInventory() {
+  if (!isProductionProvisioning.value || !applicationsLoaded.value) return
+  productionTargetInventoryLoading.value = true
+  productionTargetInventoryReady.value = false
+  productionTargetInventoryError.value = ''
+  registeredProductionTargetKeys.value = new Set()
+  if (!canReadEnvironments.value) {
+    productionTargetInventoryError.value = '当前账号没有读取应用环境的权限，无法确认服务器接入目标是否已使用。'
+    productionTargetInventoryLoading.value = false
+    return
+  }
+  try {
+    const results = await Promise.allSettled(applications.value.map(async (application) => {
+      const data = await listEnvironments({ applicationId: application.application_id, page: 1, pageSize: 100, status: '' })
+      return { application, environments: Array.isArray(data?.items) ? data.items : [] }
+    }))
+    if (results.some((result) => result.status !== 'fulfilled')) {
+      productionTargetInventoryError.value = '暂时无法读取已接入环境，已隐藏服务器接入目标；请刷新后重试。'
+      return
+    }
+    const registered = new Set()
+    results.forEach((result) => {
+      result.value.environments.forEach((environment) => {
+        registered.add(productionTargetKey({
+          application_code: result.value.application.code,
+          environment: environment.environment,
+        }))
+      })
+    })
+    registeredProductionTargetKeys.value = registered
+    productionTargetInventoryReady.value = true
+  } finally {
+    productionTargetInventoryLoading.value = false
   }
 }
 
@@ -316,10 +377,12 @@ async function loadProvisioningCapabilities() {
   try {
     provisioningCapabilities.value = await getSubsystemCapabilities()
     if (provisioningCapabilities.value?.deployment_mode === 'production') {
-      applyProductionProvisioningPreset()
+      await refreshProductionTargetInventory()
+      if (productionTargetInventoryReady.value) applyProductionProvisioningPreset()
     }
   } catch (error) {
     provisioningCapabilities.value = null
+    productionTargetInventoryReady.value = false
     setError(error, '读取部署 Agent 能力失败；后端仍会执行最终安全校验。')
   }
 }
@@ -436,6 +499,10 @@ function openOnboardEnvironment() {
   const target = isProductionProvisioning.value
     ? selectableProductionTargets.value.find((item) => item.application_code === application.code)
     : null
+  if (isProductionProvisioning.value && !target) {
+    setError(null, '暂无可接入目标：该应用在服务器审核清单中没有尚未接入的环境。')
+    return
+  }
   const environment = target?.environment || preferredEnvironments.value.find((item) => !environments.value.some((existing) => existing.environment === item))
   if (!environment) {
     setError(null, `${preferredEnvironments.value.join('、')} 环境均已接入，不能重复创建。`)
@@ -641,25 +708,44 @@ onMounted(() => {
           <button v-if="isProductionProvisioning && !onboardingExistingApplication" class="console-button ghost small" type="button" @click="applyProductionProvisioningPreset">填入服务器接入配置</button>
         </div>
         <p v-if="automationUnavailable" class="application-registry-inline-warning">当前环境未启用受控部署 Agent，不能执行一键接入；请先由部署人员发布平台生产部署资产。</p>
-        <p v-else-if="isProductionProvisioning" class="application-registry-inline-note">当前服务器使用生产部署策略（{{ productionProvisioningSummary }}）；接入参数由服务器能力配置自动填写，后端 Agent 会再次校验。</p>
+        <p v-else-if="isProductionProvisioning" class="application-registry-inline-note">当前服务器使用生产部署策略（{{ productionProvisioningSummary }}）；仅可选择服务器审核通过且尚未接入的目标，接入参数由服务器能力配置锁定。</p>
         <div class="console-form-grid">
-          <label v-if="isProductionProvisioning" class="console-form-item"><span>服务器接入目标</span><select :value="selectedProductionTargetKey" @change="selectProductionTarget"><option v-for="target in selectableProductionTargets" :key="productionTargetKey(target)" :value="productionTargetKey(target)">{{ target.application_name || target.application_code }}（{{ productionTargetKey(target) }}）</option></select><small>仅显示 subsystems.d 中审核通过且尚未接入的目标</small></label>
-          <label class="console-form-item"><span>应用编码</span><input v-model="onboardForm.applicationCode" :disabled="onboardingExistingApplication || isProductionProvisioning" placeholder="customer_management" /></label>
-          <label class="console-form-item"><span>应用名称</span><input v-model="onboardForm.applicationName" :disabled="onboardingExistingApplication || isProductionProvisioning" placeholder="客户管理系统" /></label>
-          <label class="console-form-item"><span>环境</span><select v-model="onboardForm.environment" :disabled="isProductionProvisioning"><option v-for="environment in availableOnboardEnvironments" :key="environment" :value="environment">{{ environment }}</option></select></label>
-          <label class="console-form-item"><span>客户端类型</span><select v-model="onboardForm.clientType" :disabled="isProductionProvisioning"><option value="confidential">confidential（推荐）</option><option value="public">public</option></select></label>
-          <label class="console-form-item"><span>Public BaseURL</span><input v-model="onboardForm.publicBaseUrl" :readonly="isProductionProvisioning" placeholder="http://localhost:8081" /></label>
-          <label class="console-form-item"><span>UpstreamURL</span><input v-model="onboardForm.upstreamUrl" :readonly="isProductionProvisioning || Boolean(onboardPreset)" placeholder="http://customer-api:8080" /><small v-if="isProductionProvisioning || onboardPreset">服务器受控编排地址</small></label>
-          <label class="console-form-item"><span>门户路径前缀</span><input v-model="onboardForm.pathPrefix" :readonly="isProductionProvisioning || Boolean(onboardPreset)" placeholder="/customer_management" /><small v-if="isProductionProvisioning || onboardPreset">服务器受控门户路径</small></label>
-          <label class="console-form-item"><span>应用说明</span><input v-model="onboardForm.description" :readonly="isProductionProvisioning" placeholder="可选" /></label>
-          <label class="console-form-item application-registry-confirm"><span>确认码：{{ onboardConfirmationCode || '应用编码/环境' }}</span><input v-model="onboardConfirmation" :placeholder="onboardConfirmationCode || '应用编码/环境'" autocomplete="off" /></label>
+          <template v-if="isProductionProvisioning">
+            <label v-if="productionTargetInventoryLoading" class="console-form-item"><span>服务器接入目标</span><input value="正在读取已接入环境…" disabled /></label>
+            <label v-else-if="productionTargetInventoryError" class="console-form-item"><span>服务器接入目标</span><input :value="productionTargetInventoryError" disabled /></label>
+            <label v-else-if="selectableProductionTargets.length" class="console-form-item"><span>服务器接入目标</span><select :value="selectedProductionTargetKey" @change="selectProductionTarget"><option v-for="target in selectableProductionTargets" :key="productionTargetKey(target)" :value="productionTargetKey(target)">{{ target.application_name || target.application_code }}（{{ productionTargetKey(target) }}）</option></select><small>仅显示 subsystems.d 中审核通过且尚未接入的目标</small></label>
+            <div v-else class="application-registry-target-empty" role="status"><ConsoleIcon name="info" /><strong>暂无可接入目标</strong><span>subsystems.d 中没有审核通过且尚未接入的应用环境。</span></div>
+            <template v-if="selectedProductionTarget">
+              <label class="console-form-item"><span>应用编码</span><input :value="onboardForm.applicationCode" disabled /></label>
+              <label class="console-form-item"><span>应用名称</span><input :value="onboardForm.applicationName" disabled /></label>
+              <label class="console-form-item"><span>环境</span><input :value="onboardForm.environment" disabled /></label>
+              <label class="console-form-item"><span>客户端类型</span><input :value="onboardForm.clientType" disabled /></label>
+              <label class="console-form-item"><span>Public BaseURL</span><input :value="onboardForm.publicBaseUrl" readonly /></label>
+              <label class="console-form-item"><span>UpstreamURL</span><input :value="onboardForm.upstreamUrl" readonly /><small>服务器审核清单中的受控编排地址</small></label>
+              <label class="console-form-item"><span>门户路径前缀</span><input :value="onboardForm.pathPrefix" readonly /><small>服务器审核清单中的受控门户路径</small></label>
+              <label class="console-form-item"><span>应用说明</span><input :value="onboardForm.description" readonly /></label>
+              <label class="console-form-item application-registry-confirm"><span>确认码：{{ onboardConfirmationCode }}</span><input v-model="onboardConfirmation" :placeholder="onboardConfirmationCode" autocomplete="off" /></label>
+            </template>
+          </template>
+          <template v-else>
+            <label class="console-form-item"><span>应用编码</span><input v-model="onboardForm.applicationCode" :disabled="onboardingExistingApplication" placeholder="customer_management" /></label>
+            <label class="console-form-item"><span>应用名称</span><input v-model="onboardForm.applicationName" :disabled="onboardingExistingApplication" placeholder="客户管理系统" /></label>
+            <label class="console-form-item"><span>环境</span><select v-model="onboardForm.environment"><option v-for="environment in availableOnboardEnvironments" :key="environment" :value="environment">{{ environment }}</option></select></label>
+            <label class="console-form-item"><span>客户端类型</span><select v-model="onboardForm.clientType"><option value="confidential">confidential（推荐）</option><option value="public">public</option></select></label>
+            <label class="console-form-item"><span>Public BaseURL</span><input v-model="onboardForm.publicBaseUrl" placeholder="http://localhost:8081" /></label>
+            <label class="console-form-item"><span>UpstreamURL</span><input v-model="onboardForm.upstreamUrl" :readonly="Boolean(onboardPreset)" placeholder="http://customer-api:8080" /><small v-if="onboardPreset">服务器受控编排地址</small></label>
+            <label class="console-form-item"><span>门户路径前缀</span><input v-model="onboardForm.pathPrefix" :readonly="Boolean(onboardPreset)" placeholder="/customer_management" /><small v-if="onboardPreset">服务器受控门户路径</small></label>
+            <label class="console-form-item"><span>应用说明</span><input v-model="onboardForm.description" placeholder="可选" /></label>
+            <label class="console-form-item application-registry-confirm"><span>确认码：{{ onboardConfirmationCode || '应用编码/环境' }}</span><input v-model="onboardConfirmation" :placeholder="onboardConfirmationCode || '应用编码/环境'" autocomplete="off" /></label>
+          </template>
         </div>
-        <div class="console-form-actions"><button class="console-button primary" type="submit" :disabled="!canSubmitOnboard || saving"><ConsoleIcon name="save" />{{ saving ? '接入中…' : '确认接入并部署' }}</button><small>若应用环境已存在，平台会阻止覆盖；请在下方选择后更新或重试。</small></div>
+        <div class="console-form-actions"><button class="console-button primary" type="submit" :disabled="!canSubmitOnboard || saving"><ConsoleIcon name="save" />{{ saving ? '接入中…' : '确认接入并部署' }}</button><small v-if="!isProductionProvisioning || selectedProductionTarget">若应用环境已存在，平台会阻止覆盖；请在下方选择后更新或重试。</small><small v-else>当前没有可选服务器目标，不能自由填写接入参数。</small></div>
       </form>
 
       <div v-if="errorMessage" class="application-registry-error" role="alert">
         <strong>{{ errorMessage }}</strong>
         <span v-if="errorNextAction">处理建议：{{ errorNextAction }}</span>
+        <pre v-if="errorDetail" class="application-registry-error-detail">{{ errorDetail }}</pre>
         <small v-if="errorTraceId">追踪号：{{ errorTraceId }}</small>
       </div>
 
@@ -738,8 +824,12 @@ onMounted(() => {
 .application-registry-section-title strong, .application-registry-section-title small { display: block; }
 .application-registry-section-title small { margin-top: 4px; color: #64748b; font-size: 12px; }
 .application-registry-confirm { grid-column: span 2; }
+.application-registry-target-empty { display: grid; grid-column: span 2; justify-items: start; gap: 4px; padding: 12px; color: #64748b; border: 1px dashed #cbd5e1; border-radius: 8px; background: #f8fafc; font-size: 12px; }
+.application-registry-target-empty :deep(svg) { width: 18px; height: 18px; color: #3b82f6; }
+.application-registry-target-empty strong { color: #334155; }
 .application-registry-error { display: grid; gap: 4px; margin: 14px 0 0; padding: 10px 12px; color: #b91c1c; border: 1px solid #fecaca; border-radius: 8px; background: #fff7f7; font-size: 12px; line-height: 1.55; }
 .application-registry-error span, .application-registry-error small { color: #7f1d1d; }
+.application-registry-error-detail { margin: 6px 0 0; padding: 8px; overflow: auto; max-height: 220px; color: #7f1d1d; border: 1px solid #fecaca; border-radius: 6px; background: #fff; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
 .application-registry-inline-warning { margin: 10px 0 0; color: #b45309; font-size: 12px; }
 .application-registry-layout { display: grid; grid-template-columns: 290px minmax(0, 1fr); gap: 18px; margin-top: 20px; }
 .application-registry-sidebar { min-width: 0; padding: 14px; border: 1px solid #e2e8f0; border-radius: 12px; background: #f8fafc; }
