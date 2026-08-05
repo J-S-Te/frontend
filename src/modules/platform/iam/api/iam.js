@@ -1,4 +1,4 @@
-const API_BASE_URL = (import.meta.env?.VITE_API_BASE_URL || '/api/v1').replace(/\/$/, '')
+import { createRequest, API_BASE_URL } from '../../shared/api/request.js'
 
 export class IamError extends Error {
   constructor(message, options = {}) {
@@ -12,44 +12,9 @@ export class IamError extends Error {
   }
 }
 
-async function readBody(response) {
-  const contentType = response.headers.get('content-type') || ''
-  if (contentType.includes('application/json')) {
-    try {
-      return await response.json()
-    } catch {
-      return {}
-    }
-  }
-  const text = await response.text()
-  return text ? { message: text } : {}
-}
 
-async function request(path, options = {}) {
-  let response
-  try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
-      ...options,
-      credentials: 'include',
-      headers: {
-        Accept: 'application/json',
-        ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-        ...(options.headers || {}),
-      },
-    })
-  } catch (error) {
-    throw new IamError('无法连接 IAM 服务，请确认后端服务已启动。', { code: 'NETWORK_ERROR', cause: error })
-  }
-  const body = await readBody(response)
-  if (!response.ok) {
-    throw new IamError(body?.message || 'IAM 请求失败。', {
-      status: response.status,
-      code: body?.code,
-      traceId: body?.request_id || body?.trace_id || body?.traceId,
-    })
-  }
-  return body?.data
-}
+
+const request = createRequest({ ErrorClass: IamError, networkMessage: '无法连接 IAM 服务，请确认后端服务已启动。', failureMessage: 'IAM 请求失败。' })
 
 function pageQuery(parameters = {}) {
   const search = new URLSearchParams()

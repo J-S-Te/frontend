@@ -1,4 +1,4 @@
-const API_BASE_URL = (import.meta.env?.VITE_API_BASE_URL || '/api/v1').replace(/\/$/, '')
+import { createRequest } from '../../shared/api/request.js'
 
 export class ApplicationRegistryError extends Error {
   constructor(message, options = {}) {
@@ -13,51 +13,8 @@ export class ApplicationRegistryError extends Error {
   }
 }
 
-async function readBody(response) {
-  const contentType = response.headers.get('content-type') || ''
-  if (contentType.includes('application/json')) {
-    try {
-      return await response.json()
-    } catch {
-      return {}
-    }
-  }
-  const text = await response.text()
-  return text ? { message: text } : {}
-}
 
-async function request(path, options = {}) {
-  let response
-  try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
-      ...options,
-      credentials: 'include',
-      // 应用和门户目录是租户/用户授权投影；bp_session Cookie 切换后，浏览器或反向代理
-      // 绝不能复用上一账号的目录响应。
-      cache: 'no-store',
-      headers: {
-        Accept: 'application/json',
-        'Cache-Control': 'no-cache',
-        ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-        ...(options.headers || {}),
-      },
-    })
-  } catch {
-    throw new ApplicationRegistryError('无法连接应用注册服务，请确认后端服务已启动。', { code: 'NETWORK_ERROR' })
-  }
-  const body = await readBody(response)
-  if (!response.ok) {
-    throw new ApplicationRegistryError(body?.message || '应用注册请求失败。', {
-      status: response.status,
-      code: body?.code,
-      traceId: body?.request_id || body?.trace_id || body?.traceId,
-      details: body?.details,
-      nextAction: body?.details?.next_action,
-    })
-  }
-  return body?.data
-}
-
+const request = createRequest({ ErrorClass: ApplicationRegistryError, networkMessage: '无法连接应用注册服务，请确认后端服务已启动。', failureMessage: '应用注册请求失败。' })
 function pageQuery(parameters = {}) {
   const search = new URLSearchParams()
   Object.entries(parameters).forEach(([key, value]) => {
@@ -238,10 +195,16 @@ export function retrySubsystem({ applicationCode, environment } = {}) {
 }
 
 /** 按已有控制面配置重新部署子系统运行时。 */
-export function updateSubsystemRuntime({ applicationCode, environment } = {}) {
+export function updateSubsystemRuntime({ applicationCode, environment, publicBaseUrl = '', upstreamUrl = '', pathPrefix = '' } = {}) {
   return request('/subsystem-update', {
     method: 'POST',
-    body: JSON.stringify({ application_code: applicationCode, environment }),
+    body: JSON.stringify({
+      application_code: applicationCode,
+      environment,
+      ...(String(publicBaseUrl || '').trim() ? { public_base_url: String(publicBaseUrl).trim().replace(/\/$/, '') } : {}),
+      ...(String(upstreamUrl || '').trim() ? { upstream_url: String(upstreamUrl).trim().replace(/\/$/, '') } : {}),
+      ...(String(pathPrefix || '').trim() ? { path_prefix: String(pathPrefix).trim().replace(/\/$/, '') } : {}),
+    }),
   })
 }
 

@@ -1,4 +1,4 @@
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '/api/v1').replace(/\/$/, '')
+import { createRequest, API_BASE_URL } from '../../shared/api/request.js'
 
 /** 保留服务端错误元数据，供设置页展示安全提示，不暴露原始响应和传输实现。 */
 export class ApplicationLoginTargetError extends Error {
@@ -21,35 +21,7 @@ async function readResponse(response) {
   return text ? { message: text } : {}
 }
 
-async function request(path, options = {}) {
-  let response
-  try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
-      credentials: 'include',
-      ...options,
-      headers: {
-        Accept: 'application/json',
-        ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-        ...(options.headers || {}),
-      },
-    })
-  } catch {
-    throw new ApplicationLoginTargetError('无法连接统一登录目标服务，请确认后端服务已启动。', {
-      code: 'NETWORK_ERROR',
-    })
-  }
-
-  const body = await readResponse(response)
-  if (!response.ok) {
-    throw new ApplicationLoginTargetError(body.message || '统一登录目标请求失败。', {
-      status: response.status,
-      code: body.code,
-      traceId: body.request_id || body.trace_id || body.traceId,
-    })
-  }
-
-  return body.data
-}
+const request = createRequest({ ErrorClass: ApplicationLoginTargetError, networkMessage: '无法连接统一登录目标服务，请确认后端服务已启动。', failureMessage: '统一登录目标请求失败。' })
 
 function loginTargetCollectionPath(applicationId, environmentId) {
   return `/applications/${encodeURIComponent(applicationId)}/environments/${encodeURIComponent(environmentId)}/login-targets`

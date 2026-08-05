@@ -1,41 +1,10 @@
+import { createRequest, API_BASE_URL } from '../../shared/api/request.js'
 import { AuthorizationError } from './authorization.js'
 
-const API_BASE_URL = (import.meta.env?.VITE_API_BASE_URL || '/api/v1').replace(/\/$/, '')
 
-async function readBody(response) {
-  const contentType = response.headers.get('content-type') || ''
-  if (contentType.includes('application/json')) {
-    try { return await response.json() } catch { return {} }
-  }
-  const text = await response.text()
-  return text ? { message: text } : {}
-}
 
-async function request(path, options = {}) {
-  let response
-  try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
-      ...options,
-      credentials: 'include',
-      headers: {
-        Accept: 'application/json',
-        ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-        ...(options.headers || {}),
-      },
-    })
-  } catch {
-    throw new AuthorizationError('无法连接岗位授权模板服务，请确认基础平台后端已启动。', { code: 'NETWORK_ERROR' })
-  }
-  const body = await readBody(response)
-  if (!response.ok) {
-    throw new AuthorizationError(body?.message || '岗位授权模板请求失败。', {
-      status: response.status,
-      code: body?.code,
-      traceId: body?.request_id || body?.trace_id || body?.traceId,
-    })
-  }
-  return body?.data
-}
+
+const request = createRequest({ ErrorClass: AuthorizationError, networkMessage: '无法连接岗位授权模板服务，请确认基础平台后端已启动。', failureMessage: '岗位授权模板请求失败。' })
 
 export function listPositionAuthorizationTargets() {
   return request('/position-authorization-targets')

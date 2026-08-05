@@ -1,4 +1,4 @@
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '/api/v1').replace(/\/$/, '')
+import { createRequest, API_BASE_URL } from '../../shared/api/request.js'
 
 /**
  * 只保留平台响应包中的运维错误元数据；文件内容、存储路径和异步任务负载不会复制进异常。
@@ -29,26 +29,7 @@ function makeError(body, response, fallback) {
   })
 }
 
-async function request(path, options = {}) {
-  let response
-  try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
-      credentials: 'include',
-      ...options,
-      headers: {
-        Accept: 'application/json',
-        ...(options.body && !(options.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
-        ...(options.headers || {}),
-      },
-    })
-  } catch {
-    throw new FileTaskError('无法连接文件与异步任务服务，请确认后端服务已启动。', { code: 'NETWORK_ERROR' })
-  }
-
-  const body = await readResponse(response)
-  if (!response.ok) throw makeError(body, response, '文件与异步任务请求失败。')
-  return body.data
-}
+const request = createRequest({ ErrorClass: FileTaskError, networkMessage: '无法连接文件与异步任务服务，请确认后端服务已启动。', failureMessage: '文件与异步任务请求失败。' })
 
 /** 上传单个文件；不得手工设置 Content-Type，multipart boundary 必须由浏览器生成。 */
 export function uploadLocalFile({ applicationId, file, classification = 'INTERNAL' }) {

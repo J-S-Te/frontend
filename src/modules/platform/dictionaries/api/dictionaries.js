@@ -1,4 +1,4 @@
-const API_BASE_URL = (import.meta.env?.VITE_API_BASE_URL || '/api/v1').replace(/\/$/, '')
+import { createRequest, API_BASE_URL } from '../../shared/api/request.js'
 
 /** 保留平台 API 返回的安全错误元数据，不向上层泄露原始响应实现细节。 */
 export class DictionaryError extends Error {
@@ -11,47 +11,9 @@ export class DictionaryError extends Error {
   }
 }
 
-async function readBody(response) {
-  const contentType = response.headers.get('content-type') || ''
-  if (contentType.includes('application/json')) {
-    try {
-      return await response.json()
-    } catch {
-      return {}
-    }
-  }
 
-  const text = await response.text()
-  return text ? { message: text } : {}
-}
 
-async function request(path, options = {}) {
-  let response
-  try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
-      ...options,
-      credentials: 'include',
-      headers: {
-        Accept: 'application/json',
-        ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-        ...(options.headers || {}),
-      },
-    })
-  } catch {
-    throw new DictionaryError('无法连接字典服务，请确认后端服务已启动。', { code: 'NETWORK_ERROR' })
-  }
-
-  const body = await readBody(response)
-  if (!response.ok) {
-    throw new DictionaryError(body.message || '字典请求失败。', {
-      status: response.status,
-      code: body.code,
-      traceId: body.request_id || body.trace_id || body.traceId,
-    })
-  }
-
-  return body.data
-}
+const request = createRequest({ ErrorClass: DictionaryError, networkMessage: '无法连接字典服务，请确认后端服务已启动。', failureMessage: '字典请求失败。' })
 
 function pageQuery({ page = 1, pageSize = 20, keyword = '', status = '' } = {}) {
   const query = new URLSearchParams({ page: String(page), page_size: String(pageSize) })

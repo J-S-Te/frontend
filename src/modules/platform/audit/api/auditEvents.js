@@ -1,4 +1,4 @@
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '/api/v1').replace(/\/$/, '')
+import { createRequest, API_BASE_URL } from '../../shared/api/request.js'
 
 export class AuditEventsError extends Error {
   constructor(message, options = {}) {
@@ -10,38 +10,9 @@ export class AuditEventsError extends Error {
   }
 }
 
-async function readBody(response) {
-  const contentType = response.headers.get('content-type') || ''
-  if (contentType.includes('application/json')) return response.json()
-  const text = await response.text()
-  return text ? { message: text } : {}
-}
 
-async function request(path, options = {}) {
-  let response
-  try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
-      credentials: 'include',
-      ...options,
-      headers: {
-        Accept: 'application/json',
-        ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-        ...(options.headers || {}),
-      },
-    })
-  } catch {
-    throw new AuditEventsError('无法连接审计事件服务，请确认后端服务已启动。', { code: 'NETWORK_ERROR' })
-  }
-  const body = await readBody(response)
-  if (!response.ok) {
-    throw new AuditEventsError(body.message || '审计事件查询失败。', {
-      status: response.status,
-      code: body.code,
-      traceId: body.request_id || body.trace_id || body.traceId,
-    })
-  }
-  return body.data
-}
+
+const request = createRequest({ ErrorClass: AuditEventsError, networkMessage: '无法连接审计事件服务，请确认后端服务已启动。', failureMessage: '审计事件查询失败。' })
 
 function encodeFilter(parameters) {
   const search = new URLSearchParams()
