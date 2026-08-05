@@ -191,13 +191,25 @@
 .contract-rule-editor-list button:disabled { color: var(--cm-placeholder); cursor: not-allowed; background: #f1f5f9; }
 .contract-create-modal { width: min(960px,100%); }
 .contract-form-wide { grid-column: 1/-1; }
+.contract-template-first { padding:14px; border:1px solid #bfdbfe; border-radius:9px; background:#eff6ff; }
+.contract-template-first>span { color:#1d4ed8 !important; font-size:11px !important; }
 .contract-form-grid label>small { color: var(--cm-muted); font-size: 9px; }
 .contract-opportunity-control { display:flex; gap:6px; }
 .contract-opportunity-control>button:first-child { height:36px; min-width:0; flex:1; overflow:hidden; padding:0 10px; color:var(--cm-secondary); text-align:left; text-overflow:ellipsis; white-space:nowrap; cursor:pointer; border:1px solid var(--cm-border); border-radius:7px; background:#fff; }
 .contract-opportunity-control>button:last-child { width:36px; color:var(--cm-red); cursor:pointer; border-radius:7px; background:var(--cm-red-soft); }
-.contract-system-information { padding:14px; border:1px solid var(--cm-border); border-radius:9px; background:#f8fafc; }
+.contract-service-items { padding:14px; border:1px solid var(--cm-border); border-radius:9px; background:#f8fafc; }
+.contract-service-items>.contract-section-title h3 { margin:0; font-size:12px; }
+.contract-service-items>.contract-section-title p { margin:4px 0 0; color:var(--cm-muted); font-size:9px; }
+.contract-service-item { margin-top:12px; padding:13px; border:1px solid #dbe3ee; border-radius:9px; background:#fff; }
+.contract-service-item>header { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+.contract-service-item>header strong { color:var(--cm-text); font-size:11px; }
+.contract-service-item>header button { width:30px; height:30px; color:var(--cm-red); cursor:pointer; border-radius:7px; background:var(--cm-red-soft); }
+.contract-service-item>label { display:flex; flex-direction:column; gap:6px; color:var(--cm-secondary); font-size:10px; font-weight:600; }
+.contract-service-item>label select { height:36px; padding:0 10px; border:1px solid var(--cm-border); border-radius:7px; background:#fff; }
+.contract-system-information { margin-top:12px; padding:12px; border:1px dashed #cbd5e1; border-radius:8px; background:#f8fafc; }
 .contract-system-information .contract-section-title h3 { margin:0; font-size:11px; }
 .contract-system-information .contract-section-title p { margin:4px 0 0; color:var(--cm-muted); font-size:9px; }
+.contract-service-empty { margin:10px 0 0; color:var(--cm-muted); font-size:9px; }
 .contract-system-row { display:grid; grid-template-columns:1fr 1fr 34px; align-items:end; gap:10px; margin-top:10px; }
 .contract-system-row>button { height:36px; color:var(--cm-red); cursor:pointer; border-radius:7px; background:var(--cm-red-soft); }
 .contract-opportunity-mask { z-index:90; }

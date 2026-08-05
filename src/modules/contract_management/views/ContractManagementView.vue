@@ -186,23 +186,13 @@ const templatePreviewError = ref('')
 const templatePreviewRef = ref(null)
 const ruleSaving = ref(false)
 const editingRuleId = ref('')
-const newContract = ref({
-  opportunity_id: '',
-  opportunity_name: '',
-  title: '',
-  contract_type: '',
-  service_type: '',
-  amount: '',
-  currency: 'CNY',
-  content: '',
-  customer_name: '',
-  customer_address: '',
-  customer_contact: '',
-  customer_phone: '',
-  systems: [{ name: '', level: '' }],
-  template_id: '',
-  template_values: {},
+const emptyServiceItem = () => ({ service_type: '', systems: [] })
+const emptyNewContract = () => ({
+  opportunity_id: '', opportunity_name: '', title: '', contract_type: '', amount: '', currency: 'CNY',
+  customer_name: '', customer_address: '', customer_contact: '', customer_phone: '',
+  service_items: [emptyServiceItem()], template_id: '', template_values: {},
 })
+const newContract = ref(emptyNewContract())
 
 const contractTypeOptions = ['直签', '三方']
 const serviceTypeOptions = ['等保测评', '商用密码应用安全性评估', '软件测试', '源代码审计', '渗透测试', '漏洞扫描', 'APP安全加固', '上线测试', '安全加固', '网络安全风险评估', '差距分析', '机房检测', '网络安全巡检服务', '安全培训', '安全性测试', '应急响应服务', '网络安全攻防演练', '安全运维']
@@ -216,10 +206,7 @@ const filteredOpportunityOptions = computed(() => {
   const query = opportunityKeyword.value.trim().toLowerCase()
   return opportunityOptions.value.filter((item) => !query || [item.name, item.title, item.code, item.customer_name].join(' ').toLowerCase().includes(query))
 })
-const canAddSystemRow = computed(() => {
-  const last = newContract.value.systems.at(-1)
-  return newContract.value.systems.length < 15 && Boolean(last?.name.trim() && last?.level)
-})
+const canAddServiceItem = computed(() => newContract.value.service_items.length < 20 && Boolean(newContract.value.service_items.at(-1)?.service_type))
 
 const ruleFieldOptions = [
   { value: 'amount_minor', label: '合同金额（元）', kind: 'number' },
@@ -1073,17 +1060,31 @@ function clearOpportunity() {
   newContract.value.opportunity_name = ''
 }
 
-function addSystemRow() {
-  if (!canAddSystemRow.value) return
-  newContract.value.systems.push({ name: '', level: '' })
+function addServiceItem() {
+  if (!canAddServiceItem.value) return
+  newContract.value.service_items.push(emptyServiceItem())
 }
 
-function removeSystemRow(index) {
-  if (newContract.value.systems.length === 1) {
-    newContract.value.systems[0] = { name: '', level: '' }
+function removeServiceItem(index) {
+  if (newContract.value.service_items.length === 1) {
+    newContract.value.service_items[0] = emptyServiceItem()
     return
   }
-  newContract.value.systems.splice(index, 1)
+  newContract.value.service_items.splice(index, 1)
+}
+
+function canAddSystemRow(serviceItem) {
+  const last = serviceItem.systems.at(-1)
+  return serviceItem.systems.length < 15 && (!last || Boolean(last.name.trim() && last.level))
+}
+
+function addSystemRow(serviceItem) {
+  if (!canAddSystemRow(serviceItem)) return
+  serviceItem.systems.push({ name: '', level: '' })
+}
+
+function removeSystemRow(serviceItem, index) {
+  serviceItem.systems.splice(index, 1)
 }
 
 function selectContractTemplate() {
@@ -1129,32 +1130,30 @@ async function previewNewContract() {
 
 async function submitNewContract() {
   try {
+    if (!selectedContractTemplate.value) throw new Error('请先选择合同模板。')
     const payload = {
       opportunity_id: newContract.value.opportunity_id,
       opportunity_name: newContract.value.opportunity_name,
       title: newContract.value.title.trim(),
       contract_type: newContract.value.contract_type,
-      service_type: newContract.value.service_type,
+      service_type: newContract.value.service_items[0]?.service_type || '',
       amount_minor: Math.round(Number(newContract.value.amount) * 100),
       currency: newContract.value.currency,
       customer_name: newContract.value.customer_name.trim(),
       customer_address: newContract.value.customer_address.trim(),
       customer_contact: newContract.value.customer_contact.trim(),
       customer_phone: newContract.value.customer_phone.trim(),
-      systems: newContract.value.systems
-        .filter((item) => item.name.trim() || item.level)
-        .map((item) => ({ name: item.name.trim(), level: item.level })),
-    }
-    if (selectedContractTemplate.value) {
-      payload.content = ''
-      payload.template_id = selectedContractTemplate.value.id
-      payload.template_values = { ...newContract.value.template_values }
-    } else {
-      payload.content = newContract.value.content.trim()
+      service_items: newContract.value.service_items.map((serviceItem) => ({
+        service_type: serviceItem.service_type,
+        systems: serviceItem.systems.map((system) => ({ name: system.name.trim(), level: system.level })),
+      })),
+      content: '',
+      template_id: selectedContractTemplate.value.id,
+      template_values: { ...newContract.value.template_values },
     }
     await createContract(payload)
     createDialogOpen.value = false
-    newContract.value = { opportunity_id: '', opportunity_name: '', title: '', contract_type: '', service_type: '', amount: '', currency: 'CNY', content: '', customer_name: '', customer_address: '', customer_contact: '', customer_phone: '', systems: [{ name: '', level: '' }], template_id: '', template_values: {} }
+    newContract.value = emptyNewContract()
     templatePreviewHTML.value = ''
     await loadBusinessData()
     showToast('合同草稿已创建')
@@ -1589,29 +1588,30 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
         <header><div><span class="contract-badge info">合同草稿</span><h2>新建合同</h2><p>选择模板后直接填写自动生成的合同字段</p></div><button type="button" aria-label="关闭" @click="createDialogOpen = false"><ConsoleIcon name="close" /></button></header>
         <section>
           <div class="contract-form-grid">
-            <label><span>关联商机（选填）</span><div class="contract-opportunity-control"><button type="button" @click="openOpportunityPicker">{{ newContract.opportunity_name || '点击选择权限范围内的商机' }}</button><button v-if="newContract.opportunity_id" type="button" aria-label="清除关联商机" @click="clearOpportunity">×</button></div><small>合同编号将在审批通过后自动生成</small></label>
-            <label><span>合同名称</span><input v-model="newContract.title" required placeholder="请输入合同名称" /></label>
-            <label><span>合同负责人</span><input :value="currentUserLabel" readonly aria-readonly="true" /><small>已根据当前登录用户自动填入</small></label>
-            <label><span>合同类型</span><select v-model="newContract.contract_type" required><option value="" disabled>请选择合同类型</option><option v-for="item in contractTypeOptions" :key="item" :value="item">{{ item }}</option></select></label>
-            <label><span>服务类型</span><select v-model="newContract.service_type" required><option value="" disabled>请选择服务类型</option><option v-for="item in serviceTypeOptions" :key="item" :value="item">{{ item }}</option></select></label>
-            <div class="contract-form-wide contract-system-information"><div class="contract-section-title"><div><h3>系统信息（选填）</h3><p>填写完整后可继续新增，最多 15 个系统</p></div><button class="contract-text-button" type="button" :disabled="!canAddSystemRow" @click="addSystemRow">＋ 继续新增一行</button></div><div v-for="(system, index) in newContract.systems" :key="index" class="contract-system-row"><label><span>系统名称</span><input v-model="system.name" :required="Boolean(system.name || system.level)" maxlength="255" placeholder="请输入系统名称" /></label><label><span>系统等级</span><select v-model="system.level" :required="Boolean(system.name || system.level)"><option value="">请选择系统等级</option><option v-for="level in systemLevelOptions" :key="level" :value="level">{{ level }}</option></select></label><button type="button" aria-label="删除系统信息" @click="removeSystemRow(index)">×</button></div></div>
-            <label><span>合同金额</span><input v-model="newContract.amount" required type="number" min="0" step="0.01" placeholder="0.00" /></label>
-            <label><span>币种</span><input v-model="newContract.currency" required /></label>
-            <label><span>客户名称</span><input v-model="newContract.customer_name" required placeholder="请输入客户名称" /></label>
-            <label><span>客户地址</span><input v-model="newContract.customer_address" placeholder="请输入客户地址" /></label>
-            <label><span>客户联系人</span><input v-model="newContract.customer_contact" placeholder="请输入客户联系人" /></label>
-            <label><span>客户联系电话</span><input v-model="newContract.customer_phone" type="tel" placeholder="请输入客户联系电话" /></label>
-            <label class="contract-form-wide"><span>合同模板</span><select v-model="newContract.template_id" @change="selectContractTemplate"><option value="">不使用模板，手工填写正文</option><option v-for="item in contractTemplates" :key="item.id" :value="item.id">{{ item.name }}（{{ item.fields?.length || 0 }} 个字段）</option></select></label>
+            <label class="contract-form-wide contract-template-first"><span>第一步：选择合同模板</span><select v-model="newContract.template_id" required @change="selectContractTemplate"><option value="" disabled>请选择用于新建合同的模板</option><option v-for="item in contractTemplates" :key="item.id" :value="item.id">{{ item.name }}（{{ item.fields?.length || 0 }} 个字段）</option></select><small>新合同必须基于模板创建，不支持手工填写正文。</small></label>
+            <template v-if="selectedContractTemplate">
+              <label><span>关联商机（选填）</span><div class="contract-opportunity-control"><button type="button" @click="openOpportunityPicker">{{ newContract.opportunity_name || '点击选择权限范围内的商机' }}</button><button v-if="newContract.opportunity_id" type="button" aria-label="清除关联商机" @click="clearOpportunity">×</button></div><small>合同编号将在审批通过后自动生成</small></label>
+              <label><span>合同名称</span><input v-model="newContract.title" required placeholder="请输入合同名称" /></label>
+              <label><span>合同负责人</span><input :value="currentUserLabel" readonly aria-readonly="true" /><small>已根据当前登录用户自动填入</small></label>
+              <label><span>合同类型</span><select v-model="newContract.contract_type" required><option value="" disabled>请选择合同类型</option><option v-for="item in contractTypeOptions" :key="item" :value="item">{{ item }}</option></select></label>
+              <div class="contract-form-wide contract-service-items"><div class="contract-section-title"><div><h3>服务项</h3><p>先增加服务项，再在对应服务项中增加系统信息；最多 20 个服务项。</p></div><button class="contract-text-button" type="button" :disabled="!canAddServiceItem" @click="addServiceItem">＋ 增加服务项</button></div><article v-for="(serviceItem, serviceIndex) in newContract.service_items" :key="serviceIndex" class="contract-service-item"><header><strong>服务项 {{ serviceIndex + 1 }}</strong><button type="button" :aria-label="`删除服务项 ${serviceIndex + 1}`" @click="removeServiceItem(serviceIndex)">×</button></header><label><span>服务类型</span><select v-model="serviceItem.service_type" required><option value="" disabled>请选择服务类型</option><option v-for="item in serviceTypeOptions" :key="item" :value="item">{{ item }}</option></select></label><section class="contract-system-information"><div class="contract-section-title"><div><h3>系统信息（选填）</h3><p>此处系统仅归属于当前服务项，最多 15 个。</p></div><button class="contract-text-button" type="button" :disabled="!canAddSystemRow(serviceItem)" @click="addSystemRow(serviceItem)">＋ 增加系统信息</button></div><p v-if="!serviceItem.systems.length" class="contract-service-empty">尚未增加系统信息</p><div v-for="(system, systemIndex) in serviceItem.systems" :key="systemIndex" class="contract-system-row"><label><span>系统名称</span><input v-model="system.name" required maxlength="255" placeholder="请输入系统名称" /></label><label><span>系统等级</span><select v-model="system.level" required><option value="">请选择系统等级</option><option v-for="level in systemLevelOptions" :key="level" :value="level">{{ level }}</option></select></label><button type="button" aria-label="删除系统信息" @click="removeSystemRow(serviceItem, systemIndex)">×</button></div></section></article></div>
+              <label><span>合同金额</span><input v-model="newContract.amount" required type="number" min="0" step="0.01" placeholder="0.00" /></label>
+              <label><span>币种</span><input v-model="newContract.currency" required /></label>
+              <label><span>客户名称</span><input v-model="newContract.customer_name" required placeholder="请输入客户名称" /></label>
+              <label><span>客户地址</span><input v-model="newContract.customer_address" placeholder="请输入客户地址" /></label>
+              <label><span>客户联系人</span><input v-model="newContract.customer_contact" placeholder="请输入客户联系人" /></label>
+              <label><span>客户联系电话</span><input v-model="newContract.customer_phone" type="tel" placeholder="请输入客户联系电话" /></label>
+            </template>
           </div>
           <div v-if="selectedContractTemplate" class="contract-generated-form">
             <div class="contract-section-title"><div><h3>填写模板字段</h3><p>{{ selectedContractTemplate.original_filename }} · 姓名、账号、邮箱等当前用户已有信息会自动填入空白字段</p></div><button class="contract-button secondary small" type="button" :disabled="templatePreviewing" @click="previewNewContract">{{ templatePreviewing ? '正在生成预览…' : '预览合同' }}</button></div>
             <div class="contract-template-field-grid"><label v-for="field in selectedContractTemplate.fields || []" :key="field.name" :title="field.locked && !isAdmin ? '此项已由管理员预设' : undefined"><span>{{ field.label }}</span><input v-model="newContract.template_values[field.name]" required :readonly="field.locked && !isAdmin" :class="{ 'is-admin-configured': field.locked && !isAdmin }" :title="field.locked && !isAdmin ? '此项已由管理员预设' : undefined" :placeholder="field.default ? `默认：${field.default}` : `请输入${field.label}`" /><small v-if="field.locked && !isAdmin">此项已由管理员预设</small></label></div>
             <p v-if="templatePreviewError" class="contract-template-preview-error" role="alert">{{ templatePreviewError }}</p>
           </div>
-          <label v-else class="contract-comment-label"><span>合同内容</span><textarea v-model="newContract.content" required placeholder="请输入合同内容"></textarea></label>
+          <p v-else class="contract-info-banner"><ConsoleIcon name="info" />请先选择合同模板，再填写合同、服务项和系统信息。</p>
           <ContractDocumentPreview v-if="templatePreviewHTML" ref="templatePreviewRef" closable :html="templatePreviewHTML" @close="templatePreviewHTML = ''" />
         </section>
-        <footer><button class="contract-button secondary" type="button" @click="createDialogOpen = false">取消</button><button class="contract-button primary" type="submit"><ConsoleIcon name="save" />生成并保存合同</button></footer>
+        <footer><button class="contract-button secondary" type="button" @click="createDialogOpen = false">取消</button><button class="contract-button primary" type="submit" :disabled="!selectedContractTemplate"><ConsoleIcon name="save" />生成并保存合同</button></footer>
       </form>
     </div>
 
