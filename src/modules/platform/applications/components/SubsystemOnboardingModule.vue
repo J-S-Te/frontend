@@ -6,6 +6,7 @@ import {
   ApplicationRegistryError,
   deleteApplicationRegistration,
   deleteEnvironment,
+  purgeEnvironment,
   getSubsystemCapabilities,
   getSubsystemStatus,
   listApplications,
@@ -48,6 +49,11 @@ const pendingDeleteApplication = ref(null)
 const pendingDeleteEnvironment = ref(null)
 const deleteConfirmation = ref('')
 const environmentDeleteConfirmation = ref('')
+const pendingPurgeEnvironment = ref(null)
+const purgeConfirmation = ref('')
+const purgeApprovalId = ref('')
+const purgeRetentionConfirmed = ref(false)
+const purgeOffboardedConfirmed = ref(false)
 const onboardExistingApplicationId = ref('')
 const provisioningCapabilities = ref(null)
 const applicationsLoaded = ref(false)
@@ -635,6 +641,47 @@ function openDeleteEnvironment(environment) {
   clearError()
 }
 
+function openPurgeEnvironment(environment) {
+  if (environment.environment === 'dev' || environmentStatus(environment) !== 'OFFBOARDED') {
+    setError(null, '只有已下线的非 dev 环境才能永久清理。')
+    return
+  }
+  pendingPurgeEnvironment.value = environment
+  purgeConfirmation.value = ''
+  purgeApprovalId.value = ''
+  purgeRetentionConfirmed.value = false
+  purgeOffboardedConfirmed.value = false
+  clearError()
+}
+
+async function confirmPurgeEnvironment() {
+  const application = selectedApplication.value
+  const environment = pendingPurgeEnvironment.value
+  const confirmationCode = `PURGE/${application?.code || ''}/${environment?.environment || ''}`
+  if (!application || !environment || purgeConfirmation.value.trim() !== confirmationCode || !purgeApprovalId.value.trim() || !purgeRetentionConfirmed.value || !purgeOffboardedConfirmed.value || !canDeleteEnvironment.value || saving.value) return
+  saving.value = true
+  clearError()
+  try {
+    await purgeEnvironment({
+      applicationId: application.application_id,
+      environmentId: environment.environment_id,
+      confirmationCode,
+      retentionApprovalId: purgeApprovalId.value,
+      retentionConfirmed: true,
+      offboardedConfirmed: true,
+      version: environment.version,
+    })
+    pendingPurgeEnvironment.value = null
+    notify(`环境 ${confirmationCode} 已永久清理。`)
+    await loadApplications(application.application_id)
+    await loadEnvironments()
+  } catch (error) {
+    setError(error, '永久清理应用环境失败。')
+  } finally {
+    saving.value = false
+  }
+}
+
 async function confirmDeleteEnvironment() {
   const application = selectedApplication.value
   const environment = pendingDeleteEnvironment.value
@@ -840,7 +887,7 @@ onMounted(() => {
                 <div class="application-registry-environment-uri"><span>{{ environment.base_url || '未设置 BaseURL' }}{{ environment.path_prefix || '' }}</span><small>{{ environment.upstream_url || '未设置 UpstreamURL' }}</small></div>
                 <p v-if="environmentNextAction(environment)" class="application-registry-environment-guidance"><strong>处理建议：</strong>{{ environmentNextAction(environment) }}</p>
                 <p v-if="environmentStatusError(environment)" class="application-registry-environment-guidance is-error"><strong>状态读取失败：</strong>{{ environmentStatusError(environment).message }}<span v-if="environmentStatusError(environment).nextAction">{{ environmentStatusError(environment).nextAction }}</span><button class="console-button ghost small" type="button" :disabled="environmentsLoading" @click.stop="loadEnvironments">重试查询</button></p>
-                <div class="application-registry-environment-actions"><button v-if="canUpdateEnvironment" class="console-button ghost small" type="button" @click.stop="openEnvironmentEditor(environment)"><ConsoleIcon name="settings" />设置</button><button v-if="canRetryRuntime && environmentStatus(environment) === 'PROVISION_FAILED'" class="console-button ghost small" type="button" :disabled="saving" @click.stop="reapplyEnvironment(environment, true)"><ConsoleIcon name="reset" />重试</button><button v-if="canManageRuntime && environmentStatus(environment) === 'READY'" class="console-button ghost small" type="button" :disabled="saving" @click.stop="reapplyEnvironment(environment)"><ConsoleIcon name="reset" />更新运行时</button><button v-if="canDeleteEnvironment && environment.environment !== 'dev'" class="console-button danger small" type="button" @click.stop="openDeleteEnvironment(environment)"><ConsoleIcon name="close" />删除</button></div>
+                <div class="application-registry-environment-actions"><button v-if="canUpdateEnvironment" class="console-button ghost small" type="button" @click.stop="openEnvironmentEditor(environment)"><ConsoleIcon name="settings" />设置</button><button v-if="canRetryRuntime && environmentStatus(environment) === 'PROVISION_FAILED'" class="console-button ghost small" type="button" :disabled="saving" @click.stop="reapplyEnvironment(environment, true)"><ConsoleIcon name="reset" />重试</button><button v-if="canManageRuntime && environmentStatus(environment) === 'READY'" class="console-button ghost small" type="button" :disabled="saving" @click.stop="reapplyEnvironment(environment)"><ConsoleIcon name="reset" />更新运行时</button><button v-if="canDeleteEnvironment && environment.environment !== 'dev'" class="console-button danger small" type="button" @click.stop="openDeleteEnvironment(environment)"><ConsoleIcon name="close" />删除</button><button v-if="canDeleteEnvironment && environment.environment !== 'dev' && environmentStatus(environment) === 'OFFBOARDED'" class="console-button danger small" type="button" @click.stop="openPurgeEnvironment(environment)"><ConsoleIcon name="close" />永久清理</button></div>
               </article>
             </div>
           </section>
@@ -863,6 +910,9 @@ onMounted(() => {
 
     <div v-if="pendingDeleteEnvironment" class="application-registry-modal-backdrop" role="presentation" @click.self="pendingDeleteEnvironment = null">
       <section class="application-registry-modal" role="dialog" aria-modal="true" aria-label="删除环境确认"><h3>删除环境 {{ selectedApplication.code }}/{{ pendingDeleteEnvironment.environment }}</h3><p>平台会先按受控 Agent 策略下线运行时，再删除环境记录及其派生登录目标和 OAuth Client。生产合同下线仅停止 API，保留数据库、备份和服务器运行配置以便恢复。</p><label class="console-form-item"><span>请输入确认码：{{ selectedApplication.code }}/{{ pendingDeleteEnvironment.environment }}</span><input v-model="environmentDeleteConfirmation" autocomplete="off" /></label><footer class="console-form-actions"><button class="console-button danger" type="button" :disabled="environmentDeleteConfirmation.trim() !== `${selectedApplication.code}/${pendingDeleteEnvironment.environment}` || saving" @click="confirmDeleteEnvironment">确认下线并删除控制面记录</button><button class="console-button ghost" type="button" @click="pendingDeleteEnvironment = null">取消</button></footer></section>
+    </div>
+    <div v-if="pendingPurgeEnvironment" class="application-registry-modal-backdrop" role="presentation" @click.self="pendingPurgeEnvironment = null">
+      <section class="application-registry-modal" role="dialog" aria-modal="true" aria-label="永久清理环境确认"><h3>永久清理 {{ selectedApplication.code }}/{{ pendingPurgeEnvironment.environment }}</h3><p class="application-registry-inline-warning">该操作不可恢复，将删除 OAuth 客户端、登录目标、服务凭据、配置命名空间和审计记录。请先确认数据保留审批已完成。</p><label class="console-form-item"><span>数据保留审批编号 *</span><input v-model="purgeApprovalId" autocomplete="off" placeholder="例如 RETENTION-APPROVAL-20260806-001" /></label><label class="console-form-item"><span>请输入确认码：PURGE/{{ selectedApplication.code }}/{{ pendingPurgeEnvironment.environment }}</span><input v-model="purgeConfirmation" autocomplete="off" /></label><label class="console-form-checkbox"><input v-model="purgeRetentionConfirmed" type="checkbox" />我确认审计记录可以永久删除</label><label class="console-form-checkbox"><input v-model="purgeOffboardedConfirmed" type="checkbox" />我确认该环境已经完成下线</label><footer class="console-form-actions"><button class="console-button danger" type="button" :disabled="purgeConfirmation.trim() !== `PURGE/${selectedApplication.code}/${pendingPurgeEnvironment.environment}` || !purgeApprovalId.trim() || !purgeRetentionConfirmed || !purgeOffboardedConfirmed || saving" @click="confirmPurgeEnvironment">确认永久清理</button><button class="console-button ghost" type="button" @click="pendingPurgeEnvironment = null">取消</button></footer></section>
     </div>
   </section>
 </template>
