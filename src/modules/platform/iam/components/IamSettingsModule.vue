@@ -1040,8 +1040,8 @@ function exportActivePanelCsv() {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
   if (key === 'users') {
     downloadCsv(`iam-users-${stamp}.csv`,
-      ['用户 ID', '姓名', '工号', '邮箱', '状态', '更新时间'],
-      filteredUsers.value.map((item) => [item.user_id, item.display_name, item.employee_no || '', item.email || '', displayStatus(item.status), formatDateTime(item.updated_at)]))
+      ['用户 ID', '姓名', '工号', '邮箱', '手机号（脱敏）', '状态', '更新时间'],
+      filteredUsers.value.map((item) => [item.user_id, item.display_name, item.employee_no || '', item.email || '', item.mobile_masked || '', displayStatus(item.status), formatDateTime(item.updated_at)]))
   } else if (key === 'accounts') {
     downloadCsv(`iam-accounts-${stamp}.csv`,
       ['账号 ID', '账号名', '关联用户', '类型', '认证', '状态', '有效时间', '更新时间'],
@@ -1950,10 +1950,10 @@ onBeforeUnmount(() => {
         <section v-if="activePanel === 'users' && canReadActivePanel" class="iam-table-section">
           <div class="iam-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="panelFilters.users" type="search" placeholder="姓名 / 工号 / 邮箱 / 状态" /></label><span>{{ filteredUsers.length }} / 共 {{ pagination.users.total }} 位用户</span></div>
           <div class="console-table-card iam-user-table-card"><div class="console-table-scroll"><table class="console-data-table iam-data-table iam-user-table">
-            <thead><tr><th>用户</th><th>工号</th><th>邮箱</th><th>状态</th><th>更新时间</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
-            <tr v-if="loading.users"><td class="console-empty" colspan="6">正在读取用户…</td></tr>
-            <tr v-else-if="!filteredUsers.length"><td class="console-empty" colspan="6">暂无用户记录。</td></tr>
-            <tr v-for="item in filteredUsers" :key="item.user_id"><td data-label="用户"><strong class="console-entity-name iam-table-truncate" :title="item.display_name || ''">{{ item.display_name }}</strong></td><td data-label="工号" class="console-mono iam-user-employee-cell"><span class="iam-table-truncate" :title="item.employee_no || ''">{{ item.employee_no || '—' }}</span></td><td data-label="邮箱" class="iam-user-email-cell"><span class="iam-table-truncate" :title="item.email || ''">{{ item.email || '—' }}</span></td><td data-label="状态"><span class="console-badge" :class="(item.status || '').toUpperCase() === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(item.status) }}</span></td><td data-label="更新时间" class="console-mono iam-user-updated-cell"><span class="iam-table-truncate" :title="formatDateTime(item.updated_at)">{{ formatDateTime(item.updated_at) }}</span></td><td data-label="操作" class="console-actions-cell"><button class="console-text-button" type="button" @click="openDetail('user', item)">详情</button><button v-if="hasPermission(IAM_PERMISSIONS.userDelete)" class="console-text-button danger" type="button" @click="openUserDeletionDialog(item)">删除</button></td></tr>
+            <thead><tr><th>用户</th><th>工号</th><th>邮箱</th><th>手机号</th><th>状态</th><th>更新时间</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
+            <tr v-if="loading.users"><td class="console-empty" colspan="7">正在读取用户…</td></tr>
+            <tr v-else-if="!filteredUsers.length"><td class="console-empty" colspan="7">暂无用户记录。</td></tr>
+            <tr v-for="item in filteredUsers" :key="item.user_id"><td data-label="用户"><strong class="console-entity-name iam-table-truncate" :title="item.display_name || ''">{{ item.display_name }}</strong></td><td data-label="工号" class="console-mono iam-user-employee-cell"><span class="iam-table-truncate" :title="item.employee_no || ''">{{ item.employee_no || '—' }}</span></td><td data-label="邮箱" class="iam-user-email-cell"><span class="iam-table-truncate" :title="item.email || ''">{{ item.email || '—' }}</span></td><td data-label="手机号" class="console-mono iam-user-mobile-cell"><span class="iam-table-truncate" :title="item.mobile_masked || ''">{{ item.mobile_masked || '—' }}</span></td><td data-label="状态"><span class="console-badge" :class="(item.status || '').toUpperCase() === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(item.status) }}</span></td><td data-label="更新时间" class="console-mono iam-user-updated-cell"><span class="iam-table-truncate" :title="formatDateTime(item.updated_at)">{{ formatDateTime(item.updated_at) }}</span></td><td data-label="操作" class="console-actions-cell"><button class="console-text-button" type="button" @click="openDetail('user', item)">详情</button><button v-if="hasPermission(IAM_PERMISSIONS.userDelete)" class="console-text-button danger" type="button" @click="openUserDeletionDialog(item)">删除</button></td></tr>
           </tbody></table></div></div>
         </section>
 
@@ -2249,7 +2249,7 @@ onBeforeUnmount(() => {
             <p class="iam-form-alert"><ConsoleIcon name="info" />员工编号由后端自动生成；本次会同时创建该用户的本地登录账号。</p>
             <label><span>展示姓名 *</span><input v-model="form.display_name" required maxlength="100" placeholder="例如：张三" /></label>
             <label><span>邮箱</span><input v-model="form.email" type="email" placeholder="例如：zhang.san@example.com" /></label>
-            <label><span>手机</span><input v-model="form.mobile" maxlength="32" placeholder="例如：13800000000" /></label>
+            <label><span>手机号</span><input v-model="form.mobile" maxlength="32" placeholder="例如：13800000000" /></label>
             <label><span>状态</span><select v-model="form.status"><option value="ACTIVE">启用</option><option value="DISABLED">停用</option></select></label>
             <label><span>登录账号 *</span><input v-model="form.account_name" required minlength="3" maxlength="64" placeholder="例如：zhang.san" /><small class="iam-field-help">账号必须唯一，以字母或数字开头。</small></label>
             <label><span>初始密码 *</span><div class="iam-password-field"><input v-model="form.initial_password" :type="initialPasswordVisible ? 'text' : 'password'" required minlength="8" maxlength="128" autocomplete="new-password" /><button type="button" :aria-label="initialPasswordVisible ? '隐藏密码' : '显示密码'" @click="initialPasswordVisible = !initialPasswordVisible"><ConsoleIcon :name="initialPasswordVisible ? 'eye-off' : 'eye'" /></button></div></label>

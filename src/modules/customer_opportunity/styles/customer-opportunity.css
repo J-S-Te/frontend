@@ -32,7 +32,7 @@
 .crm-menu-mask { z-index: 35; }
 .crm-content { min-width: 0; }
 .crm-page-head { align-items: flex-start; }
-.crm-page-head .crm-actions { max-width: 52%; }
+.crm-page-head .crm-actions { max-width: 100%; flex-wrap: wrap; }
 
 .crm-content button:not(.console-icon-button),
 .crm-modal button,
@@ -124,23 +124,25 @@
   background: #fff;
   box-shadow: 0 1px 3px rgba(15, 23, 42, .04);
 }
+/* 筛选项数量因业务页而异，允许字段按 180px 基准换行，并让末尾操作按钮始终贴齐字段底部。 */
 .crm-toolbar {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
   gap: 12px;
-  align-items: end;
   margin-bottom: 16px;
-  padding: 16px;
+  padding: 14px 16px;
 }
 .crm-toolbar > label {
   display: grid;
   min-width: 0;
+  flex: 1 1 180px;
   gap: 7px;
   color: var(--crm-secondary);
   font-size: 12px;
   font-weight: 500;
 }
-.crm-toolbar > button { align-self: end; }
+.crm-toolbar > button { align-self: flex-end; }
 .crm-panel { min-width: 0; padding: 18px; }
 .crm-panel > h2,
 .crm-panel-heading h2 {
@@ -188,6 +190,66 @@
 }
 .crm-content textarea,
 .crm-modal textarea { min-height: 82px; resize: vertical; line-height: 1.6; }
+
+/*
+ * 仅统一旧版 .crm-modal 的直系表单；已迁移的 console-detail-modal 继续使用平台的
+ * .console-form-grid，避免两套栅格叠加。说明块、集合编辑器、长文本和操作区必须独占整行。
+ */
+.crm-modal > form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px 20px;
+  align-content: start;
+}
+.crm-modal > form > label { margin: 0; }
+.crm-modal > form > fieldset,
+.crm-modal > form > section,
+.crm-modal > form > dl,
+.crm-modal > form > p,
+.crm-modal > form > h2,
+.crm-modal > form > h3,
+.crm-modal > form > .crm-actions,
+.crm-modal > form > .crm-toolbar,
+.crm-modal > form > .crm-engineer-list,
+.crm-modal > form > .crm-presale-form-row,
+.crm-modal > form > label:has(textarea),
+.crm-modal > form > label.check { grid-column: 1 / -1; }
+.crm-modal > form > h2 {
+  margin: -24px -24px 0;
+  padding: 22px 24px 17px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+/* 售前新建页不在弹窗内，因此单独复用双列规则；组合字段和需求说明保持全宽。 */
+.crm-presale-create-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px 20px;
+  align-content: start;
+}
+.crm-presale-create-form > label { margin: 0; }
+.crm-presale-create-form > h2,
+.crm-presale-create-form > .crm-presale-form-row,
+.crm-presale-create-form > label:has(textarea) { grid-column: 1 / -1; }
+
+/* Portal 邀请撤销与访问禁用仍是详情内联表单，统一为 console 卡片式字段。 */
+.crm-inline-form {
+  display: grid;
+  gap: 12px;
+  margin: 14px 0;
+  padding: 14px 16px;
+  border: 1px solid var(--crm-border, #e4ecfc);
+  border-radius: 10px;
+  background: #fff;
+}
+.crm-inline-form > label {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  color: var(--crm-secondary, #475569);
+  font-size: 13px;
+  font-weight: 500;
+}
 
 .crm-note {
   color: var(--crm-muted, #64748b);
@@ -269,6 +331,7 @@
   text-align: center;
 }
 .crm-empty.compact { padding: 26px 14px; }
+.crm-light-table { min-width: 0 !important; }
 
 .crm-actions {
   display: flex;
@@ -348,10 +411,147 @@
 }
 .crm-modal .crm-actions .crm-actions { margin: 0; padding: 0; border: 0; }
 .crm-detail { width: min(900px, 100%) !important; }
+.crm-opportunity-detail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 380px;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 18px;
+  width: min(1400px, calc(100vw - 48px)) !important;
+  max-height: calc(100vh - 48px) !important;
+  min-height: min(680px, calc(100vh - 48px));
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+.crm-opportunity-detail > h2 {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  margin: 0;
+  padding: 22px 28px 17px;
+  border-bottom: 1px solid #e2e8f0;
+}
+.crm-opportunity-main {
+  grid-column: 1;
+  grid-row: 2;
+  min-width: 0;
+  min-height: 0;
+  padding: 24px 0 24px 28px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.crm-opportunity-actions {
+  grid-column: 1 / -1;
+  grid-row: 3;
+  min-width: 0;
+  margin: 0;
+  padding: 14px 28px;
+  border-top: 1px solid #e2e8f0;
+  background: #fff;
+  z-index: 2;
+}
 .crm-collection-editor { width: min(900px, 100%) !important; }
 .crm-import-wizard { width: min(1120px, 100%) !important; }
 .crm-presale-detail { width: min(980px, 100%) !important; }
 .crm-report { width: min(1160px, 100%) !important; }
+/* 新版客户、商机表单继承 console 弹窗壳层，此处只补业务宽度、正文留白和全宽复合字段。 */
+.crm-customer-dialog { width: min(840px, 100%); }
+.crm-customer-dialog__body { padding: 20px 24px 6px; }
+.crm-opportunity-dialog { width: min(860px, 100%); }
+.crm-opportunity-dialog__body { padding: 20px 24px 4px; }
+.crm-opportunity-presale-create-backdrop { z-index: 90; }
+.crm-opportunity-presale-create-dialog { width: min(780px, 100%); max-height: min(820px, calc(100vh - 40px)); }
+.crm-opportunity-presale-create-context { margin-bottom: 0; }
+.crm-opportunity-presale-create-body { padding: 20px 24px 4px; }
+.crm-opportunity-presale-create-body .console-form-item small { color: var(--muted, #64748b); font-size: 12px; line-height: 1.55; }
+.crm-opportunity-presale-create-status {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+}
+.crm-opportunity-presale-create-status .console-button { flex: 0 0 auto; }
+.crm-opportunity-customer-picker { padding: 14px; border: 1px solid #e2e8f0; border-radius: 10px; background: #fbfdff; }
+.crm-opportunity-customer-search { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.crm-opportunity-customer-search .console-button { min-height: 36px; }
+.crm-opportunity-customer-picker .crm-alert,
+.crm-opportunity-customer-picker .crm-note { margin: 0; }
+.crm-opportunity-owner { grid-column: 1 / -1; margin: 0; }
+.crm-opportunity-dialog .crm-owner-selector { margin: 0; border-color: #e2e8f0; background: #fbfdff; }
+.crm-opportunity-dialog .crm-owner-selector input,
+.crm-opportunity-dialog .crm-owner-selector select {
+  width: 100%;
+  padding: 9px 10px;
+  color: var(--text, #0f172a);
+  border: 1px solid var(--border, #e4ecfc);
+  border-radius: 6px;
+  outline: 0;
+  background: #fff;
+}
+.crm-opportunity-dialog .crm-owner-selector input:focus,
+.crm-opportunity-dialog .crm-owner-selector select:focus {
+  border-color: var(--p, #2563eb);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, .1);
+}
+
+.crm-business-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-column: 1 / -1;
+  align-items: end;
+  gap: 10px 12px;
+  padding: 14px;
+  border: 1px solid #dbe4f2;
+  border-radius: 10px;
+  background: #fbfdff;
+}
+.crm-business-picker > label { margin: 0; }
+.crm-business-picker > label:has(select),
+.crm-business-picker > small { grid-column: 1 / -1; }
+.crm-business-picker > small { margin: 0; }
+.crm-team-editor { display: grid; grid-column: 1 / -1; gap: 8px; }
+.crm-team-editor > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(150px, .7fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+}
+.crm-team-editor > div > span { display: grid; gap: 3px; min-width: 0; }
+.crm-team-editor strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crm-team-editor small,
+.crm-team-summary small { color: var(--secondary, #64748b); overflow-wrap: anywhere; }
+.crm-team-editor em,
+.crm-team-summary em { display: block; color: #b45309; font-size: 12px; font-style: normal; }
+.crm-team-summary { display: grid; gap: 8px; padding-left: 20px; }
+.crm-team-summary li { line-height: 1.55; }
+.crm-customer-dialog .console-form-item input[type='checkbox'] { width: 16px; height: 16px; flex: 0 0 auto; margin: 0; }
+.crm-customer-dialog .crm-check-item { display: flex; align-items: center; gap: 8px; }
+.crm-customer-dialog .crm-check-item > span { flex: 0 0 auto; }
+.crm-customer-contacts { grid-column: 1 / -1; margin: 0; padding: 14px; border: 1px solid #e2e8f0; border-radius: 10px; background: #fbfdff; }
+.crm-customer-contacts h3 { margin: 0 0 12px; color: var(--secondary, #475569); font-size: 13px; font-weight: 600; }
+.crm-customer-contact-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.crm-customer-contact-heading h3 { margin: 0; }
+.crm-customer-contact-heading .console-button { min-height: 30px; padding: 5px 10px; font-size: 12px; }
+.crm-customer-dialog .crm-owner-selector { margin: 0; border-color: #e2e8f0; background: #fbfdff; }
+.crm-customer-dialog .crm-owner-selector input,
+.crm-customer-dialog .crm-owner-selector select {
+  width: 100%;
+  padding: 9px 10px;
+  color: var(--text, #0f172a);
+  border: 1px solid var(--border, #e4ecfc);
+  border-radius: 6px;
+  outline: 0;
+  background: #fff;
+}
+.crm-customer-dialog .crm-owner-selector input:focus,
+.crm-customer-dialog .crm-owner-selector select:focus {
+  border-color: var(--p, #2563eb);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, .1);
+}
 .crm-panel pre {
   max-height: 300px;
   overflow: auto;
@@ -366,9 +566,10 @@
 
 .crm-board {
   display: grid;
-  grid-template-columns: repeat(7, minmax(220px, 1fr));
+  grid-template-columns: repeat(7, minmax(200px, 1fr));
   gap: 12px;
   overflow-x: auto;
+  overscroll-behavior-inline: contain;
   padding: 2px 0 14px;
 }
 .crm-board-column {
@@ -396,6 +597,109 @@
   font-size: 10px;
   border-radius: 999px;
   background: var(--crm-primary-soft);
+}
+/* 看板列的 data-stage / data-status 均由模板中的服务端状态绑定，颜色变量只负责视觉映射。 */
+.crm-opportunity-board .crm-board-column {
+  --crm-stage-accent: #94a3b8;
+  --crm-stage-border: #cbd5e1;
+  --crm-stage-surface: #f8fafc;
+  border-color: var(--crm-stage-border);
+  background: linear-gradient(180deg, var(--crm-stage-surface) 0%, #fff 72%);
+  box-shadow: inset 0 3px 0 var(--crm-stage-accent);
+}
+.crm-opportunity-board .crm-board-column[data-stage='初步接触'] {
+  --crm-stage-accent: #94a3b8;
+  --crm-stage-border: #cbd5e1;
+  --crm-stage-surface: #f8fafc;
+}
+.crm-opportunity-board .crm-board-column[data-stage='需求沟通'] {
+  --crm-stage-accent: #2563eb;
+  --crm-stage-border: #bfdbfe;
+  --crm-stage-surface: #eff6ff;
+}
+.crm-opportunity-board .crm-board-column[data-stage='方案制定'] {
+  --crm-stage-accent: #8b5cf6;
+  --crm-stage-border: #ddd6fe;
+  --crm-stage-surface: #f5f3ff;
+}
+.crm-opportunity-board .crm-board-column[data-stage='报价'] {
+  --crm-stage-accent: #f59e0b;
+  --crm-stage-border: #fde68a;
+  --crm-stage-surface: #fffbeb;
+}
+.crm-opportunity-board .crm-board-column[data-stage='投标'] {
+  --crm-stage-accent: #0d9488;
+  --crm-stage-border: #99f6e4;
+  --crm-stage-surface: #f0fdfa;
+}
+.crm-opportunity-board .crm-board-column[data-stage='已签约'] {
+  --crm-stage-accent: #059669;
+  --crm-stage-border: #a7f3d0;
+  --crm-stage-surface: #ecfdf5;
+}
+.crm-opportunity-board .crm-board-column[data-stage='失败'] {
+  --crm-stage-accent: #dc2626;
+  --crm-stage-border: #fecaca;
+  --crm-stage-surface: #fef2f2;
+}
+.crm-opportunity-board .crm-board-column h2 { color: var(--crm-stage-accent); }
+.crm-opportunity-board .crm-board-column h2 small {
+  color: var(--crm-stage-accent);
+  background: rgb(255 255 255 / 78%);
+}
+.crm-opportunity-board .crm-board-card:hover {
+  border-color: var(--crm-stage-accent) !important;
+}
+.crm-presale-board .crm-board-column {
+  --crm-status-accent: #64748b;
+  --crm-status-border: #cbd5e1;
+  --crm-status-surface: #f8fafc;
+  border-color: var(--crm-status-border);
+  background: linear-gradient(180deg, var(--crm-status-surface) 0%, #fff 72%);
+  box-shadow: inset 0 3px 0 var(--crm-status-accent);
+}
+.crm-presale-board .crm-board-column[data-status='APPROVAL_STARTING'] {
+  --crm-status-accent: #64748b;
+  --crm-status-border: #cbd5e1;
+  --crm-status-surface: #f8fafc;
+}
+.crm-presale-board .crm-board-column[data-status='PENDING_APPROVAL'] {
+  --crm-status-accent: #d97706;
+  --crm-status-border: #fde68a;
+  --crm-status-surface: #fffbeb;
+}
+.crm-presale-board .crm-board-column[data-status='APPROVED_PENDING_ASSIGNMENT'] {
+  --crm-status-accent: #2563eb;
+  --crm-status-border: #bfdbfe;
+  --crm-status-surface: #eff6ff;
+}
+.crm-presale-board .crm-board-column[data-status='EXECUTING'] {
+  --crm-status-accent: #7c3aed;
+  --crm-status-border: #ddd6fe;
+  --crm-status-surface: #f5f3ff;
+}
+.crm-presale-board .crm-board-column[data-status='COMPLETED'] {
+  --crm-status-accent: #059669;
+  --crm-status-border: #a7f3d0;
+  --crm-status-surface: #ecfdf5;
+}
+.crm-presale-board .crm-board-column[data-status='REJECTED'] {
+  --crm-status-accent: #dc2626;
+  --crm-status-border: #fecaca;
+  --crm-status-surface: #fef2f2;
+}
+.crm-presale-board .crm-board-column[data-status='CANCELLED'] {
+  --crm-status-accent: #475569;
+  --crm-status-border: #cbd5e1;
+  --crm-status-surface: #f1f5f9;
+}
+.crm-presale-board .crm-board-column h2 { color: var(--crm-status-accent); }
+.crm-presale-board .crm-board-column h2 small {
+  color: var(--crm-status-accent);
+  background: rgb(255 255 255 / 78%);
+}
+.crm-presale-board .crm-board-card:hover {
+  border-color: var(--crm-status-accent) !important;
 }
 .crm-board-card {
   display: grid !important;
@@ -453,17 +757,50 @@
   padding: 16px;
 }
 .crm-customer-cards > button {
+  --crm-customer-card-accent: #94a3b8;
+  --crm-customer-card-border: #e2e8f0;
+  --crm-customer-card-surface: #fff;
   display: grid !important;
   min-width: 0;
   gap: 7px !important;
   justify-items: start !important;
   padding: 16px !important;
   text-align: left;
-  border-color: #e2e8f0 !important;
+  border-color: var(--crm-customer-card-border) !important;
   border-radius: 10px !important;
-  background: #fff !important;
+  background: linear-gradient(135deg, var(--crm-customer-card-surface) 0%, #fff 78%) !important;
+  box-shadow: inset 3px 0 0 var(--crm-customer-card-accent);
 }
-.crm-customer-cards > button:hover { transform: translateY(-1px); box-shadow: 0 8px 20px rgba(15, 23, 42, .08); }
+.crm-customer-cards > button[data-status='ACTIVE'] {
+  --crm-customer-card-accent: #059669;
+  --crm-customer-card-border: #a7f3d0;
+  --crm-customer-card-surface: #ecfdf5;
+}
+.crm-customer-cards[data-quick-filter='WON'] > button[data-status='ACTIVE'] {
+  --crm-customer-card-accent: #059669;
+  --crm-customer-card-border: #6ee7b7;
+  --crm-customer-card-surface: #d1fae5;
+}
+.crm-customer-cards[data-quick-filter='FOLLOWUP_DUE'] > button[data-status='ACTIVE'] {
+  --crm-customer-card-accent: #d97706;
+  --crm-customer-card-border: #fcd34d;
+  --crm-customer-card-surface: #fef3c7;
+}
+.crm-customer-cards > button[data-status='VOID'] {
+  --crm-customer-card-accent: #dc2626;
+  --crm-customer-card-border: #fecaca;
+  --crm-customer-card-surface: #fef2f2;
+}
+.crm-customer-cards > button[data-status='MERGED'] {
+  --crm-customer-card-accent: #7c3aed;
+  --crm-customer-card-border: #ddd6fe;
+  --crm-customer-card-surface: #f5f3ff;
+}
+.crm-customer-cards > button:hover {
+  border-color: var(--crm-customer-card-accent) !important;
+  transform: translateY(-1px);
+  box-shadow: inset 3px 0 0 var(--crm-customer-card-accent), 0 8px 20px rgba(15, 23, 42, .08);
+}
 .crm-customer-cards strong { color: var(--crm-text); }
 .crm-customer-cards span { color: var(--crm-muted); font-size: 12px; white-space: normal; }
 .crm-customer-filters,
@@ -517,8 +854,7 @@
 .crm-stage-alert-grid small { color: var(--crm-muted); white-space: normal; }
 .crm-status-legend { display: flex; gap: 16px; flex-wrap: wrap; color: var(--crm-muted); font-size: 12px; }
 .crm-alert-list { margin-bottom: 16px; }
-.crm-alert-list button,
-.crm-alert-rule {
+.crm-alert-list button {
   display: grid;
   grid-template-columns: minmax(170px, 1fr) minmax(250px, 2fr);
   width: 100%;
@@ -526,15 +862,43 @@
   margin: 8px 0;
   text-align: left;
 }
-.crm-alert-list span,
-.crm-alert-rule span { color: var(--crm-muted); white-space: normal; }
-.crm-alert-rule { align-items: end; padding: 12px 0; border-bottom: 1px solid #e2e8f0; }
+.crm-alert-list span { color: var(--crm-muted); white-space: normal; }
+.crm-alert-rules-dialog { width: min(860px, 100%); }
+.crm-alert-rules-dialog__body { padding: 20px 24px 0; }
+.crm-alert-rules-dialog__body .console-card-hint { margin-top: 0; }
+/*
+ * .crm-alert-rule 仍被旧版“商机阶段超时规则”弹窗复用；BEM 子元素仅增强新版售前规则行，
+ * 旧结构携带的版本信息和保存按钮继续参与自动排布，并在 820px 以下统一降为单列。
+ */
+.crm-alert-rule {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 130px 105px auto;
+  align-items: end;
+  gap: 18px;
+}
+.crm-alert-rule__identity p { margin: 4px 0 0; color: var(--muted, #64748b); font-size: 12px; line-height: 1.5; }
+.crm-alert-rule__threshold { min-width: 0; }
+.crm-alert-rule__threshold .console-number-input { width: 100%; }
+.crm-alert-rule__switch { display: grid; gap: 8px; color: var(--secondary, #475569); font-size: 13px; }
+.crm-alert-rule__switch > span { font-weight: 500; }
 
+.crm-report-dialog { width: min(1160px, 100%); max-height: min(860px, calc(100vh - 40px)); }
+.crm-report-dialog__body { padding: 20px 24px 0; }
+.crm-report-dialog__body > .console-card-hint { margin-top: 0; }
 .crm-report-filters {
   display: grid;
   grid-template-columns: repeat(3, minmax(180px, 1fr));
   gap: 10px;
   align-items: end;
+}
+.crm-report-dialog .crm-report-filters { padding: 0; }
+/* 操作区跨越三列筛选栅格；数值表保留最小宽度并交由外层 console-table-scroll 横向滚动。 */
+.crm-report-filter-actions {
+  display: flex;
+  grid-column: 1 / -1;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 2px;
 }
 .crm-kpis {
   display: grid;
@@ -563,6 +927,9 @@
 }
 .crm-report-bar i { display: block; min-width: 0; height: 12px; border-radius: 999px; background: var(--crm-primary); }
 .crm-report-bar strong { color: var(--crm-secondary); font-size: 12px; text-align: right; }
+.crm-report-table-section { margin-top: 20px; }
+.crm-report-table-section h3 { margin: 0 0 10px; color: var(--text, #0f172a); font-size: 14px; }
+.crm-report-table { min-width: 720px; }
 .crm-merge-compare,
 .crm-import-summary,
 .crm-assignment-diff {
@@ -599,8 +966,28 @@
 }
 .crm-unavailable-assignees strong { display: block; margin-bottom: 7px; }
 
+/* 售前详情沿用 console 头尾壳层，业务区块按正文 24px 轨道对齐；表单动作横跨双列栅格。 */
+.crm-presale-console-detail { width: min(1040px, 100%); max-height: min(860px, calc(100vh - 40px)); }
+.crm-presale-summary { margin-top: 20px; }
+.crm-presale-phone__actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 8px; }
+.crm-presale-phone small { display: block; margin-top: 7px; }
 .crm-presale-actions,
-.crm-presale-timeline { margin-top: 18px; padding-top: 18px; border-top: 1px solid #e2e8f0; }
+.crm-presale-timeline,
+.crm-presale-entry-card,
+.crm-presale-worklogs {
+  margin: 20px 24px 0;
+  padding: 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 9px;
+  background: #fff;
+}
+.crm-presale-actions { background: #f8fafc; }
+.crm-presale-action-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.crm-presale-entry-card > p { margin-bottom: 14px; }
+.crm-presale-entry-card form { margin-top: 14px; }
+.crm-presale-form-actions { display: flex; grid-column: 1 / -1; justify-content: flex-end; }
+.crm-presale-worklog-form summary { color: var(--text, #0f172a); font-size: 14px; font-weight: 600; cursor: pointer; }
+.crm-presale-worklog-form[open] summary { margin-bottom: 14px; }
 .crm-timeline-list { margin: 14px 0; padding: 0 !important; list-style: none; }
 .crm-timeline-list li {
   position: relative;
@@ -636,20 +1023,24 @@
 .crm-timeline-list p { margin: 0; color: var(--crm-secondary); }
 .crm-timeline-list a { color: var(--crm-primary-dark); overflow-wrap: anywhere; }
 .crm-worklog { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid #e2e8f0; }
+.crm-presale-worklogs pre { max-height: 260px; margin: 14px 0 0; overflow: auto; }
 
-/* 商机详情的三个补充区域归并到同一滚动轨道，避免相同 fixed 坐标彼此遮挡。 */
+/* 商机详情的补充区域作为弹窗内第二列，与主信息分别滚动，不再 fixed 遮挡主弹窗。 */
 .crm-opportunity-side-rail {
-  position: fixed;
-  z-index: 72;
-  top: 76px;
-  right: 20px;
-  bottom: 20px;
+  position: static;
   display: grid;
-  width: min(410px, calc(100vw - 40px));
+  grid-column: 2;
+  grid-row: 2;
+  width: auto;
+  min-height: 0;
+  padding: 24px 28px 24px 0;
+  max-height: none;
   align-content: start;
   gap: 12px;
-  overflow: auto;
-  pointer-events: none;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  pointer-events: auto;
 }
 .crm-opportunity-attachment-panel,
 .crm-opportunity-external-panel {
@@ -669,7 +1060,7 @@
 .crm-opportunity-external-panel h3 { margin: 0 0 10px; font-size: 14px; }
 .crm-opportunity-external-panel dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 7px 12px; font-size: 12px; }
 .crm-opportunity-external-panel dd { margin: 0; overflow-wrap: anywhere; }
-.crm-opportunity-side-rail table { min-width: 720px; }
+.crm-opportunity-side-rail table { min-width: 560px; }
 .crm-opportunity-attachment-panel { overflow-x: auto; }
 .crm-attachment-list { margin: 0; padding: 0; list-style: none; }
 .crm-attachment-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; border-top: 1px solid #e2e8f0; }
@@ -678,19 +1069,17 @@
 
 @media (max-width: 1320px) {
   .crm-kpis { grid-template-columns: repeat(3, minmax(130px, 1fr)); }
-  .crm-opportunity-side-rail {
-    top: auto;
-    right: 16px;
-    bottom: 16px;
-    left: 16px;
-    display: flex;
-    width: auto;
-    max-height: min(38vh, 340px);
-    align-items: flex-start;
-    overflow: auto;
-  }
+  .crm-opportunity-detail { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr) auto auto; width: min(900px, calc(100vw - 40px)) !important; }
+  .crm-opportunity-detail > h2,
+  .crm-opportunity-main,
+  .crm-opportunity-side-rail,
+  .crm-opportunity-actions { grid-column: 1; grid-row: auto; }
+  .crm-opportunity-main { padding: 20px 24px 0; }
+  .crm-opportunity-main { grid-row: 2; }
+  .crm-opportunity-side-rail { grid-column: 1; grid-row: 3; padding: 0 24px 20px; overflow-x: hidden; overflow-y: auto; }
+  .crm-opportunity-actions { grid-row: 4; }
   .crm-opportunity-attachment-panel,
-  .crm-opportunity-external-panel { width: min(420px, calc(100vw - 48px)); flex: 0 0 auto; max-height: 310px; overflow: auto; }
+  .crm-opportunity-external-panel { width: auto; max-height: none; }
 }
 
 @media (max-width: 820px) {
@@ -701,7 +1090,8 @@
   .crm-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .crm-alert-list button,
   .crm-alert-rule { grid-template-columns: 1fr; }
-  .crm-opportunity-side-rail { z-index: 82; }
+  /* 单列规则行仍将开关标签与控件并排，避免窄屏出现不必要的两行高度。 */
+  .crm-alert-rule__switch { grid-template-columns: 1fr auto; align-items: center; }
 }
 
 @media (max-width: 620px) {
@@ -712,6 +1102,10 @@
   .crm-engineer-filters { grid-template-columns: 1fr; padding: 12px; }
   .crm-toolbar > button { width: 100%; }
   .crm-owner-search { grid-template-columns: 1fr; }
+  .crm-business-picker,
+  .crm-team-editor > div { grid-template-columns: 1fr; }
+  .crm-business-picker > button,
+  .crm-team-editor > div > button { width: 100%; }
   .crm-panel { padding: 14px; }
   .table-panel { padding: 0; }
   .crm-customer-cards { grid-template-columns: 1fr; padding: 12px; }
@@ -729,6 +1123,26 @@
   .crm-kpis { grid-template-columns: 1fr; }
   .crm-report-bar { grid-template-columns: 1fr; }
   .crm-report-bar strong { text-align: left; }
+  .crm-opportunity-dialog__body,
+  .crm-opportunity-presale-create-body,
+  .crm-alert-rules-dialog__body,
+  .crm-report-dialog__body { padding: 18px 18px 0; }
+  .crm-opportunity-presale-create-context { grid-template-columns: 1fr; margin: 18px 18px 0; }
+  .crm-opportunity-presale-create-context > div { border-right: 0 !important; border-bottom: 1px solid #e2e8f0 !important; }
+  .crm-opportunity-presale-create-context > div:last-child { border-bottom: 0 !important; }
+  .crm-opportunity-presale-create-status { align-items: stretch; flex-direction: column; }
+  /* 平台栅格已在此断点改单列，这里同步清除双列摘要边框并让关键操作填满可用宽度。 */
+  .crm-presale-summary { grid-template-columns: 1fr; margin: 18px 18px 0; }
+  .crm-presale-summary > div { border-right: 0 !important; border-bottom: 1px solid #e2e8f0 !important; }
+  .crm-presale-summary > div:last-child { border-bottom: 0 !important; }
+  .crm-presale-actions,
+  .crm-presale-timeline,
+  .crm-presale-entry-card,
+  .crm-presale-worklogs { margin: 18px 18px 0; }
+  .crm-report-filter-actions,
+  .crm-presale-form-actions { justify-content: stretch; }
+  .crm-report-filter-actions .console-button,
+  .crm-presale-form-actions .console-button { flex: 1; }
   .crm-panel-heading,
   .crm-subsection-heading { flex-direction: column; }
   .crm-presale-form-row { grid-template-columns: 1fr; gap: 0; }
@@ -740,7 +1154,22 @@
   .crm-timeline-list li { grid-template-columns: 1fr; gap: 6px; }
   .crm-timeline-list li::before { top: 32px; left: 5px; }
   .crm-timeline-list li > div { padding-left: 24px; }
-  .crm-opportunity-side-rail { right: 10px; bottom: 10px; left: 10px; max-height: 44vh; }
-  .crm-opportunity-attachment-panel,
-  .crm-opportunity-external-panel { width: calc(100vw - 32px); }
 }
+
+/* ===== 商机详情布局加固：任何内容不得撑破弹窗/页面边界 ===== */
+.crm-opportunity-side-rail,
+.crm-opportunity-attachment-panel,
+.crm-opportunity-external-panel,
+.crm-opportunity-main { min-width: 0; }
+.crm-opportunity-detail > h2 { overflow-wrap: anywhere; }
+/* 团队任期明细表适配 380px 侧栏：允许单元格换行，避免表体超出列宽产生面板内横向滚动 */
+.crm-opportunity-attachment-panel table { min-width: 0; }
+.crm-opportunity-attachment-panel th,
+.crm-opportunity-attachment-panel td { white-space: normal; overflow-wrap: anywhere; }
+.crm-opportunity-main .table-panel { max-width: 100%; }
+.crm-opportunity-presale ol,
+.crm-opportunity-presale li { overflow-wrap: anywhere; }
+
+/* 从详情弹窗内打开的 console 弹窗（编辑客户/编辑商机/售前详情）需叠在详情之上，
+   与 .crm-modal.nested(z-index:80) 同一层级，避免被 z-index:70 的详情遮住。 */
+.console-modal-backdrop.nested { z-index: 80; }

@@ -100,7 +100,7 @@ onMounted(initialize)
     <div class="crm-owner-search">
       <label>
         查找内部用户
-        <input v-model.trim="keyword" type="search" placeholder="姓名或平台用户 ID" @keydown.enter.prevent="search">
+        <input v-model.trim="keyword" type="search" placeholder="输入姓名关键字" @keydown.enter.prevent="search">
       </label>
       <button type="button" :disabled="loading" @click="search">{{ loading ? '查询中…' : '查询' }}</button>
       <button v-if="error" type="button" :disabled="loading" @click="initialize">重试</button>
@@ -111,7 +111,7 @@ onMounted(initialize)
       <select :value="userId" :disabled="disabled || loading || Boolean(error)" required @change="onUserChange">
         <option value="">请选择负责人</option>
         <option v-for="user in users" :key="user.user_id" :value="user.user_id">
-          {{ user.display_name }}（{{ user.user_id }}）
+          {{ user.display_name }}
         </option>
       </select>
     </label>

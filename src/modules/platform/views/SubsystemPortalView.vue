@@ -197,14 +197,14 @@ function openSubsystem(subsystem) {
   }
 
   if (subsystem.publicURL) {
+    // 外部系统不在统一前端路由内，保持新标签页打开，避免当前门户页被替换。
     window.open(subsystem.publicURL, '_blank', 'noopener,noreferrer')
     return
   }
 
   if (subsystem.route) {
-    // 使用当前 Vue Router 的解析结果打开新标签页，确保部署在子路径时仍能得到正确的完整地址。
-    const target = router.resolve(subsystem.route)
-    window.open(target.href, '_blank', 'noopener,noreferrer')
+    // 内部子系统与门户同源，在当前页面直接进入；“返回统一门户”回到本页，不再堆积新标签页。
+    router.push(subsystem.route)
     return
   }
 

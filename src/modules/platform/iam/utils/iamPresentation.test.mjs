@@ -37,6 +37,24 @@ test('旧账号响应缺少类型字段时使用兼容展示值', () => {
   assert.equal(displayLoginAccountType({}), '个人账号 / 本地密码')
 })
 
+test('用户详情将手机号按脱敏字段展示', () => {
+  const rows = detailRows({
+    kind: 'user',
+    item: {
+      user_id: 'user-001',
+      display_name: '张三',
+      mobile_masked: '138****0000',
+      status: 'ACTIVE',
+      version: 1,
+    },
+  })
+
+  assert.deepEqual(rows.find((row) => row.label === '手机号（脱敏）'), {
+    label: '手机号（脱敏）',
+    value: '138****0000',
+  })
+})
+
 test('任职关系详情不会跨脚本引用未定义的格式化函数', () => {
   const rows = detailRows({
     kind: 'membership',

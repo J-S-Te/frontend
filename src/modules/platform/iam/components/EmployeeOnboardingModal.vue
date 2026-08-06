@@ -296,7 +296,7 @@ async function submit() {
               <label class="console-form-item"><span>展示姓名 *</span><input v-model="form.display_name" required maxlength="100" placeholder="例如：张三" /></label>
               <label class="console-form-item"><span>状态</span><select v-model="form.status"><option value="ACTIVE">启用</option><option value="DISABLED">停用</option></select></label>
               <label class="console-form-item"><span>邮箱</span><input v-model="form.email" type="email" placeholder="例如：zhang.san@example.com" /></label>
-              <label class="console-form-item"><span>手机</span><input v-model="form.mobile" maxlength="32" placeholder="例如：13800000000" /></label>
+              <label class="console-form-item"><span>手机号</span><input v-model="form.mobile" maxlength="32" placeholder="例如：13800000000" /></label>
             </div>
           </section>
 

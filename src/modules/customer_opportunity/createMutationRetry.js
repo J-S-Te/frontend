@@ -9,8 +9,6 @@ function normalizeCustomer(payload) {
     customer_type: text(payload?.customer_type),
     industry: text(payload?.industry),
     region: text(payload?.region),
-    owner_user_id: text(payload?.owner_user_id),
-    owner_org_id: text(payload?.owner_org_id),
     contacts: (payload?.contacts || []).map((item) => ({
       name: text(item?.name),
       phone: text(item?.phone),
@@ -35,8 +33,6 @@ function normalizeOpportunity(payload) {
     system_count: Number(payload?.system_count || 0),
     pain_points: text(payload?.pain_points),
     competitor_info: text(payload?.competitor_info),
-    owner_user_id: text(payload?.owner_user_id),
-    owner_org_id: text(payload?.owner_org_id),
   }
 }
 

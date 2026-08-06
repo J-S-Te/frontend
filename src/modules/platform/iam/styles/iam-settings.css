@@ -610,11 +610,12 @@
 }
 .iam-user-table tr {
   grid-template-columns:
-    minmax(110px, 1fr)
+    minmax(100px, .9fr)
+    minmax(0, 1fr)
     minmax(0, 1.25fr)
-    minmax(0, 1.25fr)
+    minmax(0, 1fr)
     minmax(68px, .42fr)
-    minmax(130px, .86fr)
+    minmax(118px, .8fr)
     max-content;
 }
 .iam-user-table .console-empty,
@@ -622,6 +623,7 @@
 .iam-user-table td { min-width: 0; }
 .iam-user-table .iam-user-employee-cell,
 .iam-user-table .iam-user-email-cell,
+.iam-user-table .iam-user-mobile-cell,
 .iam-user-table .iam-user-updated-cell { overflow: hidden; }
 .iam-user-table .iam-user-employee-cell { white-space: normal; }
 .iam-inline-code {
@@ -1683,6 +1685,7 @@
 @media (max-width: 768px) {
   .iam-user-table .iam-user-employee-cell,
   .iam-user-table .iam-user-email-cell,
+  .iam-user-table .iam-user-mobile-cell,
   .iam-user-table .iam-user-updated-cell,
   .iam-account-table td { overflow: visible; }
   .iam-account-actions { flex-wrap: wrap; }

@@ -20,6 +20,7 @@ const { createAttachmentUploadRetryState } = await import('./customer_opportunit
 const { createMemberTermLoadState } = await import('./customer_opportunity/memberTermLoadState.js')
 const { createPortalInviteRetryState } = await import('./customer_opportunity/portalInviteRetry.js')
 const { createPortalAccessDisableRetryState } = await import('./customer_opportunity/portalAccessDisableRetry.js')
+const { formatSignedContractCount } = await import('./customer_opportunity/signedContractCount.js')
 
 test('客户与商机管理复用基础平台壳层、图标导航和响应式规范', () => {
   assert.match(view, /import ConsoleIcon from '@\/modules\/platform\/shared\/components\/ConsoleIcon\.vue'/)
@@ -36,9 +37,39 @@ test('客户与商机管理复用基础平台壳层、图标导航和响应式�
   assert.match(style, /@media \(max-width: 620px\)/)
 })
 
+test('商机列表、七阶段看板和详情统一展示已签约合同数量', () => {
+  assert.equal(formatSignedContractCount(2), '2 份')
+  assert.equal(formatSignedContractCount(0), '0 份')
+  assert.equal(formatSignedContractCount(null), '暂不可用')
+  assert.equal(formatSignedContractCount(undefined), '暂不可用')
+  assert.match(view, /<th>已签约合同<\/th>/)
+  assert.match(view, /<td>\{\{ formatSignedContractCount\(item\.signed_contract_count\) \}\}<\/td>/)
+  assert.match(view, /已签约合同 \{\{ formatSignedContractCount\(item\.signed_contract_count\) \}\}/)
+  assert.match(view, /<dt>累计已签约合同<\/dt><dd>\{\{ formatSignedContractCount\(selectedOpportunity\.signed_contract_count\) \}\}<\/dd>/)
+})
+
+test('商机和售前核心表单统一使用大系统 console 弹窗规范', () => {
+  assert.match(view, /v-if="opportunityDialog" class="console-modal-backdrop"[\s\S]*class="console-detail-modal crm-opportunity-dialog"[\s\S]*class="console-form-grid crm-opportunity-dialog__body"/)
+  assert.match(view, /v-if="showReport" class="console-modal-backdrop"[\s\S]*class="console-detail-modal crm-report-dialog"[\s\S]*class="console-form-grid crm-report-filters"/)
+  assert.match(view, /v-if="showAlertConfig" class="console-modal-backdrop"[\s\S]*class="console-detail-modal crm-alert-rules-dialog"[\s\S]*class="console-setting-list"/)
+  assert.match(view, /v-if="selectedPresale" class="console-modal-backdrop"[\s\S]*class="console-detail-modal crm-presale-console-detail"[\s\S]*class="console-detail-grid crm-presale-summary"/)
+  for (const className of ['crm-opportunity-dialog', 'crm-report-dialog', 'crm-alert-rules-dialog', 'crm-presale-console-detail']) {
+    assert.match(style, new RegExp(`\\.${className}`))
+  }
+  assert.match(view, /class="console-modal-close"[^>]*aria-label="关闭商机表单"/)
+  assert.match(view, /class="console-button primary" type="submit"[^>]*>\{\{ actionLoading/)
+  assert.match(view, /class="console-data-table crm-report-table"/)
+  assert.match(view, /class="console-switch"|\['console-switch', \{ on: rule\.enabled \}\]/)
+  assert.doesNotMatch(view, /v-if="opportunityDialog" class="crm-modal"/)
+  assert.doesNotMatch(view, /v-if="showReport" class="crm-modal"/)
+  assert.doesNotMatch(view, /v-if="showAlertConfig" class="crm-modal"/)
+})
+
 test('负责人通过基础平台授权目录选择用户及其有效组织', async (t) => {
   assert.match(view, /import OwnerSelector from '\.\.\/components\/OwnerSelector\.vue'/)
-  assert.equal((view.match(/<OwnerSelector/g) || []).length, 3)
+  assert.equal((view.match(/<OwnerSelector/g) || []).length, 2)
+  assert.match(view, /v-if="customerEditMode" class="console-form-item full"><OwnerSelector v-model:user-id="customerForm\.owner_user_id"/)
+  assert.doesNotMatch(view, /v-if="!opportunityEditMode"[^>]*><OwnerSelector/)
   assert.doesNotMatch(view, /负责人用户 ID<input/)
   assert.doesNotMatch(view, /真实人员目录校验尚待稳定契约/)
   assert.match(ownerSelector, /基础平台 OIDC sub/)
@@ -46,6 +77,8 @@ test('负责人通过基础平台授权目录选择用户及其有效组织', as
   assert.match(ownerSelector, /organization\.is_primary/)
   assert.match(ownerSelector, /CRM_OWNER_DIRECTORY_UNAVAILABLE/)
   assert.match(ownerSelector, /required/)
+  assert.match(ownerSelector, /\{\{ user\.display_name \}\}\s*<\/option>/)
+  assert.doesNotMatch(ownerSelector, /display_name \}\}（\{\{ user\.user_id \}\}）/)
   assert.match(style, /\.crm-owner-selector/)
 
   const originalFetch = globalThis.fetch
@@ -60,10 +93,25 @@ test('负责人通过基础平台授权目录选择用户及其有效组织', as
   assert.equal(requests[0].options.credentials, 'include')
 })
 
+test('商机团队从基础平台真实人员目录选择并展示姓名与组织', () => {
+  assert.match(view, /const teamForm = reactive\(\{ members: \[\], reason: '' \}\)/)
+  assert.match(view, /await listOwnerDirectory\(\{ keyword: teamDirectoryKeyword\.value\.trim\(\), page: 1, page_size: 50 \}\)/)
+  assert.match(view, /不会退回为手填账号 ID/)
+  assert.match(view, /user\.display_name \}\}（\{\{ user\.user_id \}\}） · \{\{ teamMemberOrganizations\(user\) \}\}/)
+  assert.match(view, /member\.display_name \|\| member\.user_id/)
+  assert.match(view, /team\.directory_available !== false/)
+  assert.match(view, /提交时服务端会再次校验人员状态/)
+  assert.doesNotMatch(view, /teamForm\.members_text|platform-sub,TECHNICAL_SUPPORT/)
+  assert.match(style, /\.crm-team-summary/)
+})
+
 test('商机补充信息使用统一滚动轨道，避免团队任期、附件和外部状态浮层重叠', () => {
   assert.match(view, /class="crm-opportunity-side-rail"/)
   assert.match(style, /\.crm-opportunity-side-rail\s*\{/)
   assert.match(style, /\.crm-opportunity-attachment-panel,[\s\S]*\.crm-opportunity-external-panel\s*\{[\s\S]*position:\s*static/)
+  assert.match(style, /\.crm-opportunity-detail\s*\{[\s\S]*max-height:\s*calc\(100vh - 48px\)[\s\S]*overflow:\s*hidden/)
+  assert.match(style, /\.crm-opportunity-main\s*\{[\s\S]*min-height:\s*0[\s\S]*overflow:\s*auto/)
+  assert.match(style, /\.crm-opportunity-actions\s*\{[\s\S]*background:\s*#fff/)
 })
 
 test('presale alert inbox documents the exact user/person recipient union', () => {
@@ -218,6 +266,8 @@ test('客户与商机创建失败重试复用规范载荷键且仅成功后清�
   assert.equal(retriedCustomer.key, firstCustomer.key)
   assert.equal(retriedCustomer.attempted, false)
   assert.deepEqual(firstCustomer.payload, normalizeCreateMutationPayload('customer', customerPayload))
+  assert.equal('owner_user_id' in firstCustomer.payload, false)
+  assert.equal('owner_org_id' in firstCustomer.payload, false)
   assert.equal(state.markAttempted('customer', firstCustomer.key), true)
   assert.equal(state.keyFor('customer', customerPayload).attempted, true)
   state.confirmSuccess('customer', firstCustomer.key)
@@ -227,6 +277,8 @@ test('客户与商机创建失败重试复用规范载荷键且仅成功后清�
   const firstOpportunity = state.keyFor('opportunity', opportunityPayload)
   assert.equal(state.keyFor('opportunity', { ...opportunityPayload }).key, firstOpportunity.key)
   assert.notEqual(state.keyFor('opportunity', { ...opportunityPayload, expected_amount: '101.00' }).key, firstOpportunity.key)
+  assert.equal('owner_user_id' in firstOpportunity.payload, false)
+  assert.equal('owner_org_id' in firstOpportunity.payload, false)
 
   const originalFetch = globalThis.fetch
   t.after(() => { globalThis.fetch = originalFetch })
@@ -405,6 +457,74 @@ test('界面已接入客户生命周期、商机看板/跟进/历史/终态待�
   assert.doesNotMatch(view, /后端暂未提供申请列表与详情/)
 })
 
+test('商机阶段看板按推进程度设置独立背景色且不影响售前看板', () => {
+  assert.match(view, /class="crm-board crm-opportunity-board"/)
+  assert.match(view, /:data-stage="column\.stage"/)
+  for (const stage of ['初步接触', '需求沟通', '方案制定', '报价', '投标', '已签约', '失败']) {
+    assert.match(style, new RegExp(`\\.crm-opportunity-board \\.crm-board-column\\[data-stage='${stage}'\\]`))
+  }
+  assert.match(style, /\.crm-opportunity-board \.crm-board-column\s*\{[\s\S]*background:\s*linear-gradient/)
+})
+
+test('售前状态看板按流程状态设置独立背景色', () => {
+  assert.match(view, /class="crm-board crm-presale-board"/)
+  assert.match(view, /:data-status="column\.status"/)
+  for (const status of ['APPROVAL_STARTING', 'PENDING_APPROVAL', 'APPROVED_PENDING_ASSIGNMENT', 'EXECUTING', 'COMPLETED', 'REJECTED', 'CANCELLED']) {
+    assert.match(style, new RegExp(`\\.crm-presale-board \\.crm-board-column\\[data-status='${status}'\\]`))
+  }
+  assert.match(style, /\.crm-presale-board \.crm-board-column\s*\{[\s\S]*background:\s*linear-gradient/)
+})
+
+test('客户卡片视图按客户状态设置独立背景色', () => {
+  assert.match(view, /class="crm-customer-cards"/)
+  assert.match(view, /:data-status="item\.status"/)
+  for (const status of ['ACTIVE', 'VOID', 'MERGED']) {
+    assert.match(style, new RegExp(`\\.crm-customer-cards > button\\[data-status='${status}'\\]`))
+  }
+  assert.match(style, /\.crm-customer-cards > button\s*\{[\s\S]*background:\s*linear-gradient/)
+})
+
+test('客户成交与待跟进快捷筛选使用不同卡片背景色', () => {
+  assert.match(view, /:data-quick-filter="customerFilters\.quick_filter"/)
+  assert.match(style, /\.crm-customer-cards\[data-quick-filter='WON'\] > button\[data-status='ACTIVE'\]/)
+  assert.match(style, /\.crm-customer-cards\[data-quick-filter='FOLLOWUP_DUE'\] > button\[data-status='ACTIVE'\]/)
+  assert.match(style, /data-quick-filter='WON'[\s\S]*--crm-customer-card-surface:\s*#d1fae5/)
+  assert.match(style, /data-quick-filter='FOLLOWUP_DUE'[\s\S]*--crm-customer-card-surface:\s*#fef3c7/)
+})
+
+test('客户表单支持删除联系人且始终至少保留一个登记联系人', () => {
+  assert.match(view, /@click="removeCustomerContact\(index\)">删除联系人<\/button>/)
+  assert.match(view, /:disabled="customerForm\.contacts\.length <= 1"/)
+  assert.match(view, /function removeCustomerContact\(index\)[\s\S]*customerForm\.contacts\.splice\(index, 1\)/)
+  assert.match(view, /removed\?\.is_registration[\s\S]*customerForm\.contacts\[0\]\.is_registration = true/)
+  assert.match(style, /\.crm-customer-contact-heading/)
+})
+
+test('客户新建表单的行业使用受控下拉菜单并兼容历史值', () => {
+  for (const industry of ['金融', '政府', '医疗', '教育', '能源', '制造', '软件', '互联网', '通信', '物流', '交通', '建筑', '房地产', '零售', '服务', '其他']) {
+    assert.match(view, new RegExp(`'${industry}'`))
+  }
+  assert.match(view, /<span>行业 \*<\/span><select v-model="customerForm\.industry" required>/)
+  assert.match(view, /<option value="" disabled>请选择行业<\/option>/)
+  assert.match(view, /!customerIndustryOptions\.includes\(customerForm\.industry\)[^>]*>\{\{ customerForm\.industry \}\}（历史值）/)
+  assert.doesNotMatch(view, /<span>行业 \*<\/span><input v-model="customerForm\.industry"/)
+})
+
+test('新建商机从客户管理加载可见有效客户且不允许手填客户 ID', async (t) => {
+  assert.match(view, /await listCustomers\(\{[\s\S]*status: 'ACTIVE',[\s\S]*page_size: 100/)
+  assert.match(view, /v-model="opportunityForm\.customer_id" required[^>]*><option value="" disabled>/)
+  assert.match(view, /v-for="customer in opportunityCustomerOptions"[^>]*:value="String\(customer\.id\)"/)
+  assert.match(view, /请先在客户管理中创建客户/)
+  assert.doesNotMatch(view, /<span>客户 ID \*<\/span><input v-model="opportunityForm\.customer_id"/)
+
+  const originalFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = originalFetch })
+  const requests = []
+  globalThis.fetch = async (url, options) => { requests.push({ url, options }); return jsonResponse({ items: [], total: 0 }) }
+  await customer.listCustomers({ keyword: '示例客户', status: 'ACTIVE', page: 1, page_size: 100, sort_by: 'name', sort_order: 'asc' })
+  assert.equal(requests[0].url, '/customer-opportunity/api/v1/customers?keyword=%E7%A4%BA%E4%BE%8B%E5%AE%A2%E6%88%B7&status=ACTIVE&page=1&page_size=100&sort_by=name&sort_order=asc')
+})
+
 test('客户沟通与商机维护调用实际生命周期路由并携带 CSRF', async (t) => {
   const originalFetch = globalThis.fetch
   t.after(() => { globalThis.fetch = originalFetch })
@@ -459,7 +579,7 @@ test('CM-002 组合筛选、URL 状态、卡片视图和按需页签已接入真
   assert.match(view, /customerFiltersToQuery\(customerFilters/)
   assert.match(view, /customerAPIParams\(customerFilters/)
   assert.match(view, /新增客户（近 30 天）/)
-  assert.match(view, /重点客户分类字段与维护闭环尚未配置/)
+  assert.doesNotMatch(view, /重点客户（待配置）/)
   assert.doesNotMatch(view, /高价值客户/)
   assert.match(view, /customerFilters\.view === 'table'/)
   for (const tab of ['contacts', 'opportunities', 'projects', 'followups', 'audit']) assert.match(view, new RegExp(`openCustomerTab\\('${tab}'\\)`))
@@ -822,7 +942,7 @@ test('TS-001 联系电话页面同时校验独立权限和服务端业务关系�
   assert.match(view, /getPresaleContactPhone\(id\)/)
   assert.match(view, /presaleContactPhone\.value = value\?\.contact_phone \|\| ''/)
   assert.match(view, /presaleContactPhone\.value = ''; presaleContactPhoneError\.value = ''/)
-  assert.match(view, /显式查看将写入敏感信息访问审计，本页关闭后即清除/)
+  assert.match(view, /查看明文会写入敏感信息访问审计，关闭详情后立即清除/)
   assert.doesNotMatch(view, /localStorage.*presaleContactPhone|sessionStorage.*presaleContactPhone/)
 })
 
@@ -857,8 +977,9 @@ test('TS 写操作页面只在 prompt 与业务校验后分配内存重试键', 
 	assert.match(view, /presaleMutationRetries\.keyFor\('approval', id/)
 	assert.match(view, /authoritativePresaleActions\.includes\('APPROVE'\)/)
 	assert.match(view, /authoritativePresaleActions\.includes\('REJECT'\)/)
-  assert.match(view, /const rawReason = window\.prompt\('请输入取消原因'\)/)
-  assert.match(view, /if \(rawReason === null\) return/)
+  assert.match(view, /presaleDecisionSpec\(action\)/)
+  assert.match(view, /runPresaleDecision\('cancel'\)/)
+  assert.match(view, /submitPresaleDecision\(action, id, version, comment\)/)
   assert.match(view, /if \(!assignmentReason\.value\.trim\(\)\).*return/)
   assert.match(view, /const opportunityID = Number\(presaleForm\.opportunity_id\)/)
   assert.match(view, /presaleMutationRetries\.keyFor\('create', opportunityID/)
@@ -878,7 +999,7 @@ test('TS 写操作页面只在 prompt 与业务校验后分配内存重试键', 
   assert.match(view, /if \(!mutationToken \|\| isCurrentMutation\(\)\) showError\(value\)/)
   assert.doesNotMatch(view, /presaleMutationRetries\.clear\(\)/)
   assert.doesNotMatch(view, /localStorage|sessionStorage/)
-  assert.match(view, /:disabled="presaleMutationLoading" @click="runPresale\('worklog'\)"/)
+  assert.match(view, /@submit\.prevent="runPresale\('worklog'\)"[\s\S]*:disabled="presaleMutationLoading"/)
 })
 
 test('TS-004 时间线与权威操作区调用后端真实只读路由', async (t) => {
@@ -944,8 +1065,18 @@ test('TS-010 关联查询调用真实路由和分页参数', async (t) => {
 test('TS-010 从商机发起申请锁定机会且提交后只刷新面板不改阶段', () => {
   assert.match(view, /presale\.create/)
   assert.match(view, /v-if="canCreatePresale && selectedOpportunity\.opp_status !== 'VOID'"/)
+  assert.match(view, /aria-haspopup="dialog"[\s\S]*@click="openOpportunityPresaleCreate"/)
   assert.match(view, /opportunity_id: String\(selectedOpportunity\.value\.id\)/)
-  assert.match(view, /:readonly="presaleOpportunityLocked"/)
+  assert.match(view, /class="console-modal-backdrop crm-opportunity-presale-create-backdrop"/)
+  assert.match(view, /class="console-detail-modal crm-opportunity-presale-create-dialog"/)
+  assert.match(view, /id="opportunity-presale-create-form" class="console-form-grid crm-opportunity-presale-create-body"/)
+  assert.match(style, /\.crm-opportunity-presale-create-backdrop\s*\{[^}]*z-index:\s*90/)
+  assert.match(style, /\.crm-opportunity-presale-create-dialog/)
+  assert.match(view, /\{\{ selectedOpportunity\.opportunity_no \}\}[\s\S]*\{\{ selectedOpportunity\.name \}\}/)
+  assert.match(view, /售前投递 Worker 尚未就绪。可以先填写申请，但当前不会向服务端提交。/)
+  assert.match(view, /@click="refreshPresaleSubmissionCapability"/)
+  assert.match(view, /:disabled="presaleCreateLoading \|\| !presaleRequestSubmissionAvailable"/)
+  assert.match(view, /expectedEnd <= expectedStart/)
   assert.match(view, /submitPresale\(\{ openDetail: false, refreshList: false \}\)/)
   assert.match(view, /await loadOpportunityPresales\(1\)/)
   assert.match(view, /售前申请已提交；商机阶段保持不变/)
@@ -1042,13 +1173,44 @@ test('售前投入报表调用真实三类查询和失败关闭的导出路由',
   assert.equal(requests[3].options.headers['X-CSRF-Token'], '1')
 })
 
-test('商机负责人和团队维护界面调用真实 API 并公开人员目录缺口', () => {
+test('商机负责人和团队维护均使用基础平台人员目录', () => {
   assert.match(view, /changeOpportunityOwner/)
   assert.match(view, /getOpportunityMembers/)
   assert.match(view, /replaceOpportunityMembers/)
+  assert.match(view, /listOwnerDirectory/)
+  assert.match(view, /loadTeamDirectory/)
   assert.match(view, /变更负责人/)
   assert.match(view, /维护团队/)
-  assert.match(view, /平台人员目录选择器与停用校验尚待稳定接口/)
+  assert.match(view, /人员姓名与有效组织实时取自基础平台权威目录/)
+  assert.match(view, /directory_status === 'NOT_AVAILABLE'/)
+  assert.match(view, /服务端会再次校验人员状态/)
+  assert.doesNotMatch(view, /members_text/)
+  assert.doesNotMatch(view, /platform-sub,TECHNICAL_SUPPORT/)
+  assert.doesNotMatch(view, /平台人员目录选择器与停用校验尚待稳定接口/)
+})
+
+test('客户与商机关联操作使用业务选择器而不是手填 ID', () => {
+  assert.match(view, /<label v-if="!customerOwnerOptionsError">负责人<select v-model="customerFilters\.owner_id"/)
+  assert.match(view, /<label>目标客户<select v-model="customerMergeForm\.target_customer_id"/)
+  assert.match(view, /<label>关联商机<select v-model="presaleForm\.opportunity_id"/)
+  assert.match(view, /<span>归属组织<\/span><select v-model="reportFilters\.organization_id"/)
+  assert.match(view, /<span>参与人员<\/span><select v-model="reportFilters\.person_id"/)
+  assert.match(view, /<span>关联商机<\/span><select v-model="reportFilters\.opportunity_id"/)
+  // 人员目录不可用时，负责人筛选允许手动输入用户 ID，其余关联选择器仍禁止手填。
+  assert.match(view, /<label v-else>负责人 ID<input/)
+  assert.match(view, /负责人筛选已回退为手动输入用户 ID/)
+  assert.doesNotMatch(view, /目标客户 ID<input/)
+  assert.doesNotMatch(view, /关联商机 ID<input/)
+  assert.doesNotMatch(view, /<span>组织 ID<\/span><input/)
+  assert.doesNotMatch(view, /<span>人员 ID<\/span><input/)
+  assert.doesNotMatch(view, /<span>商机 ID<\/span><input/)
+})
+
+test('负责人列表与详情会按需补全人员目录名字', () => {
+  assert.match(view, /async function resolveOwnerNames\(userIDs\)/)
+  assert.match(view, /void resolveOwnerNames\(customers\.value\.map\(\(item\) => item\.owner_user_id\)\)/)
+  assert.match(view, /void resolveOwnerNames\(opportunities\.value\.map\(\(item\) => item\.owner_user_id\)\)/)
+  assert.match(view, /void resolveOwnerNames\(\[detail\?\.owner_user_id\]\)/)
 })
 
 test('商机负责人和团队 API 使用独立权限路由及幂等键', async (t) => {
@@ -1156,4 +1318,10 @@ test('阶段告警界面展示详情、状态语义和权限关闭行为', () =>
   assert.match(view, /version: Number\(rule\.version\)/)
   assert.match(view, /阶段起算/)
   assert.match(view, /阈值版本/)
+})
+
+test('从详情打开的编辑弹窗叠在详情之上，不被遮住', () => {
+  assert.match(view, /console-modal-backdrop" :class="\{ nested: !!selectedCustomer \}"/)
+  assert.match(view, /console-modal-backdrop" :class="\{ nested: !!selectedOpportunity \}"/)
+  assert.match(style, /console-modal-backdrop\.nested \{ z-index: 80; \}/)
 })

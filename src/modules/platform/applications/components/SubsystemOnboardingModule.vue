@@ -31,6 +31,7 @@ const errorMessage = ref('')
 const errorNextAction = ref('')
 const errorDetail = ref('')
 const errorTraceId = ref('')
+const errorRecovery = ref(null)
 const applications = ref([])
 const applicationKeyword = ref('')
 const applicationStatus = ref('')
@@ -39,6 +40,7 @@ const environments = ref([])
 const environmentsLoading = ref(false)
 const selectedEnvironmentId = ref('')
 const deploymentStates = ref({})
+const deploymentStatusErrors = ref({})
 const showOnboard = ref(false)
 const applicationEditorOpen = ref(false)
 const environmentEditorOpen = ref(false)
@@ -238,20 +240,52 @@ function clearError() {
   errorNextAction.value = ''
   errorDetail.value = ''
   errorTraceId.value = ''
+  errorRecovery.value = null
 }
 
 function setError(error, fallback) {
+  errorRecovery.value = null
   if (error instanceof ApplicationRegistryError) {
     errorMessage.value = error.message
     errorNextAction.value = error.nextAction
     errorDetail.value = error.detail
     errorTraceId.value = error.traceId
+    const applicationCode = textValue(error.details?.application_code)
+    const environment = textValue(error.details?.environment)
+    if (error.code === 'IAM_SUBSYSTEM_ALREADY_ONBOARDED' && applicationCode && environment) {
+      errorRecovery.value = { type: 'existing-environment', applicationCode, environment, label: '查看已有环境' }
+    }
     return
   }
   errorMessage.value = fallback
   errorNextAction.value = ''
   errorDetail.value = ''
   errorTraceId.value = ''
+}
+
+async function recoverExistingEnvironment() {
+  const recovery = errorRecovery.value
+  if (!recovery || recovery.type !== 'existing-environment' || saving.value) return
+  saving.value = true
+  try {
+    const targetCode = recovery.applicationCode.toLowerCase()
+    clearError()
+    await loadApplications()
+    const application = applications.value.find((item) => textValue(item.code).toLowerCase() === targetCode)
+    if (!application) {
+      setError(null, `未找到应用 ${recovery.applicationCode}，请刷新应用登记后重试。`)
+      return
+    }
+    selectApplication(application)
+    await loadEnvironments()
+    const environment = environments.value.find((item) => textValue(item.environment).toLowerCase() === recovery.environment.toLowerCase())
+    if (environment) selectEnvironment(environment)
+    else setError(null, `已找到应用 ${recovery.applicationCode}，但未找到 ${recovery.environment} 环境，请刷新后重试。`)
+  } catch (error) {
+    setError(error, '读取已有接入环境失败。')
+  } finally {
+    saving.value = false
+  }
 }
 
 function nullable(value) {
@@ -294,6 +328,10 @@ function environmentStatus(environment) {
 
 function environmentNextAction(environment) {
   return deploymentStates.value[environment.environment]?.next_action || ''
+}
+
+function environmentStatusError(environment) {
+  return deploymentStatusErrors.value[environment.environment] || null
 }
 
 function selectApplication(application) {
@@ -393,9 +431,12 @@ async function loadEnvironments() {
     environments.value = []
     selectedEnvironmentId.value = ''
     deploymentStates.value = {}
+    deploymentStatusErrors.value = {}
     return
   }
   environmentsLoading.value = true
+  deploymentStates.value = {}
+  deploymentStatusErrors.value = {}
   try {
     const data = await listEnvironments({ applicationId: application.application_id, page: 1, pageSize: 100, status: '' })
     environments.value = Array.isArray(data?.items) ? data.items : []
@@ -411,6 +452,12 @@ async function loadEnvironments() {
     deploymentStates.value = Object.fromEntries(states
       .filter((result) => result.status === 'fulfilled' && result.value[1]?.status)
       .map((result) => result.value))
+    deploymentStatusErrors.value = Object.fromEntries(states
+      .map((result, index) => result.status === 'rejected' ? [environments.value[index].environment, {
+        message: result.reason instanceof ApplicationRegistryError ? result.reason.message : '无法读取部署 Agent 状态。',
+        nextAction: result.reason instanceof ApplicationRegistryError ? result.reason.nextAction : '请刷新状态后重试。',
+      }] : null)
+      .filter(Boolean))
   } catch (error) {
     environments.value = []
     setError(error, '读取应用环境失败。')
@@ -624,7 +671,13 @@ async function reapplyEnvironment(environment, retry = false) {
   clearError()
   try {
     const action = retry ? retrySubsystem : updateSubsystemRuntime
-    await action({ applicationCode: application.code, environment: environment.environment })
+    await action({
+      applicationCode: application.code,
+      environment: environment.environment,
+      publicBaseUrl: environment.base_url || '',
+      upstreamUrl: environment.upstream_url || '',
+      pathPrefix: environment.path_prefix || '',
+    })
     notify(retry ? '部署失败环境已重新尝试。' : '子系统已重新部署。')
     await loadEnvironments()
   } catch (error) {
@@ -708,7 +761,7 @@ onMounted(() => {
           <button v-if="isProductionProvisioning && !onboardingExistingApplication" class="console-button ghost small" type="button" @click="applyProductionProvisioningPreset">填入服务器接入配置</button>
         </div>
         <p v-if="automationUnavailable" class="application-registry-inline-warning">当前环境未启用受控部署 Agent，不能执行一键接入；请先由部署人员发布平台生产部署资产。</p>
-        <p v-else-if="isProductionProvisioning" class="application-registry-inline-note">当前服务器使用生产部署策略（{{ productionProvisioningSummary }}）；仅可选择服务器审核通过且尚未接入的目标，接入参数由服务器能力配置锁定。</p>
+        <p v-else-if="isProductionProvisioning" class="application-registry-inline-note">当前服务器使用生产部署策略（{{ productionProvisioningSummary }}）；应用、环境、内部 UpstreamURL 和门户路径由服务器审核清单控制，公网访问地址可按实际域名或端口手动填写。</p>
         <div class="console-form-grid">
           <template v-if="isProductionProvisioning">
             <label v-if="productionTargetInventoryLoading" class="console-form-item"><span>服务器接入目标</span><input value="正在读取已接入环境…" disabled /></label>
@@ -720,7 +773,7 @@ onMounted(() => {
               <label class="console-form-item"><span>应用名称</span><input :value="onboardForm.applicationName" disabled /></label>
               <label class="console-form-item"><span>环境</span><input :value="onboardForm.environment" disabled /></label>
               <label class="console-form-item"><span>客户端类型</span><input :value="onboardForm.clientType" disabled /></label>
-              <label class="console-form-item"><span>Public BaseURL</span><input :value="onboardForm.publicBaseUrl" readonly /></label>
+              <label class="console-form-item"><span>Public BaseURL</span><input v-model="onboardForm.publicBaseUrl" type="url" inputmode="url" placeholder="https://portal.example.com" required /><small>浏览器实际访问的协议、域名和端口；回调地址会由此地址和门户路径自动生成。</small></label>
               <label class="console-form-item"><span>UpstreamURL</span><input :value="onboardForm.upstreamUrl" readonly /><small>服务器审核清单中的受控编排地址</small></label>
               <label class="console-form-item"><span>门户路径前缀</span><input :value="onboardForm.pathPrefix" readonly /><small>服务器审核清单中的受控门户路径</small></label>
               <label class="console-form-item"><span>应用说明</span><input :value="onboardForm.description" readonly /></label>
@@ -747,6 +800,7 @@ onMounted(() => {
         <span v-if="errorNextAction">处理建议：{{ errorNextAction }}</span>
         <pre v-if="errorDetail" class="application-registry-error-detail">{{ errorDetail }}</pre>
         <small v-if="errorTraceId">追踪号：{{ errorTraceId }}</small>
+        <div v-if="errorRecovery" class="application-registry-error-actions"><button class="console-button ghost small" type="button" :disabled="saving" @click="recoverExistingEnvironment">{{ errorRecovery.label }}</button></div>
       </div>
 
       <div v-if="!canReadApplications" class="application-registry-empty"><ConsoleIcon name="shield" /><strong>当前账号没有应用读取权限</strong><p>请联系平台管理员授予 platform:application:read。</p></div>
@@ -785,6 +839,7 @@ onMounted(() => {
                 <div class="application-registry-environment-main"><strong>{{ environment.environment }}</strong><span class="application-registry-status" :class="statusClass(environmentStatus(environment))">{{ statusLabel(environmentStatus(environment)) }}</span><small>配置版本 {{ environment.version }}</small></div>
                 <div class="application-registry-environment-uri"><span>{{ environment.base_url || '未设置 BaseURL' }}{{ environment.path_prefix || '' }}</span><small>{{ environment.upstream_url || '未设置 UpstreamURL' }}</small></div>
                 <p v-if="environmentNextAction(environment)" class="application-registry-environment-guidance"><strong>处理建议：</strong>{{ environmentNextAction(environment) }}</p>
+                <p v-if="environmentStatusError(environment)" class="application-registry-environment-guidance is-error"><strong>状态读取失败：</strong>{{ environmentStatusError(environment).message }}<span v-if="environmentStatusError(environment).nextAction">{{ environmentStatusError(environment).nextAction }}</span><button class="console-button ghost small" type="button" :disabled="environmentsLoading" @click.stop="loadEnvironments">重试查询</button></p>
                 <div class="application-registry-environment-actions"><button v-if="canUpdateEnvironment" class="console-button ghost small" type="button" @click.stop="openEnvironmentEditor(environment)"><ConsoleIcon name="settings" />设置</button><button v-if="canRetryRuntime && environmentStatus(environment) === 'PROVISION_FAILED'" class="console-button ghost small" type="button" :disabled="saving" @click.stop="reapplyEnvironment(environment, true)"><ConsoleIcon name="reset" />重试</button><button v-if="canManageRuntime && environmentStatus(environment) === 'READY'" class="console-button ghost small" type="button" :disabled="saving" @click.stop="reapplyEnvironment(environment)"><ConsoleIcon name="reset" />更新运行时</button><button v-if="canDeleteEnvironment && environment.environment !== 'dev'" class="console-button danger small" type="button" @click.stop="openDeleteEnvironment(environment)"><ConsoleIcon name="close" />删除</button></div>
               </article>
             </div>
@@ -828,8 +883,11 @@ onMounted(() => {
 .application-registry-target-empty :deep(svg) { width: 18px; height: 18px; color: #3b82f6; }
 .application-registry-target-empty strong { color: #334155; }
 .application-registry-error { display: grid; gap: 4px; margin: 14px 0 0; padding: 10px 12px; color: #b91c1c; border: 1px solid #fecaca; border-radius: 8px; background: #fff7f7; font-size: 12px; line-height: 1.55; }
+.application-registry-error-actions { display: flex; gap: 8px; margin-top: 4px; }
 .application-registry-error span, .application-registry-error small { color: #7f1d1d; }
 .application-registry-error-detail { margin: 6px 0 0; padding: 8px; overflow: auto; max-height: 220px; color: #7f1d1d; border: 1px solid #fecaca; border-radius: 6px; background: #fff; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
+.application-registry-environment-guidance.is-error { color: #b91c1c; }
+.application-registry-environment-guidance.is-error span { display: block; margin-top: 2px; color: #7f1d1d; }
 .application-registry-inline-warning { margin: 10px 0 0; color: #b45309; font-size: 12px; }
 .application-registry-layout { display: grid; grid-template-columns: 290px minmax(0, 1fr); gap: 18px; margin-top: 20px; }
 .application-registry-sidebar { min-width: 0; padding: 14px; border: 1px solid #e2e8f0; border-radius: 12px; background: #f8fafc; }

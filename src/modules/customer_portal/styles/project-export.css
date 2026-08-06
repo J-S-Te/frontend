@@ -1,28 +1,65 @@
-.project-export-actions {
-  position: fixed;
-  z-index: 31;
-  right: max(24px, calc((100vw - 900px) / 2 + 24px));
-  bottom: 24px;
-  display: flex;
-  align-items: center;
+/*
+ * 项目导出与站内会话沿用客户门户/基础平台 console 视觉规范。
+ */
+/* 项目操作区并入项目详情弹窗，作为普通区块展示，不再悬浮右下角 */
+.project-actions {
+  display: grid;
   gap: 10px;
-  max-width: min(720px, calc(100vw - 48px));
-  padding: 12px 14px;
-  border: 1px solid #cbd8e8;
-  border-radius: 10px;
+  margin-top: 20px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border, #e4ecfc);
+}
+.project-actions h3 { margin: 0 0 4px; font-size: 16px; }
+.project-actions p { margin: 0; }
+.project-actions > button { justify-self: start; white-space: nowrap; }
+.project-conversation {
+  min-width: min(520px, 80vw);
+  max-height: 55vh;
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid var(--border, #e4ecfc);
+  border-radius: 8px;
   background: #fff;
-  box-shadow: 0 10px 30px #21365126;
+  color: var(--text, #0f172a);
 }
-
-.project-export-actions p { margin: 0; }
-.project-export-actions button { white-space: nowrap; }
-.project-conversation { min-width: min(520px, 80vw); max-height: 55vh; overflow: auto; background: #fff; color: #16243a; padding: 14px; border-radius: 8px; }
-.project-message { border-left: 3px solid #8fb2e5; padding: 8px 12px; margin: 8px 0; }
-.project-message p { white-space: pre-wrap; overflow-wrap: anywhere; margin: 5px 0; }
-.project-message small { color: #748196; }
-.project-conversation form, .project-conversation label { display: grid; gap: 8px; }
-.project-conversation textarea { min-height: 80px; padding: 8px; }
-
-@media (max-width: 800px) {
-  .project-export-actions { left: 16px; right: 16px; bottom: 16px; display: grid; }
+.project-conversation h3 { margin: 0 0 10px; font-size: 14px; }
+.project-message { padding: 8px 12px; margin: 8px 0; border-left: 3px solid #8fb2e5; }
+.project-message p { overflow-wrap: anywhere; margin: 5px 0; white-space: pre-wrap; }
+.project-message small { color: var(--muted, #64748b); }
+.project-conversation form,
+.project-conversation label { display: grid; gap: 8px; }
+.project-conversation textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 80px;
+  padding: 9px 11px;
+  color: var(--text, #0f172a);
+  font-size: 13px;
+  border: 1px solid var(--border, #e4ecfc);
+  border-radius: 7px;
+  outline: 0;
+  background: #fff;
 }
+.project-conversation textarea:focus { border-color: var(--p, #2563eb); box-shadow: 0 0 0 3px rgba(37, 99, 235, .1); }
+.project-conversation button,
+.project-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  gap: 6px;
+  padding: 8px 14px;
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid var(--p, #2563eb);
+  border-radius: 8px;
+  background: var(--p, #2563eb);
+}
+.project-conversation button:hover:not(:disabled),
+.project-actions button:hover:not(:disabled) { border-color: var(--p-dark, #1d4ed8); background: var(--p-dark, #1d4ed8); }
+.project-conversation button:disabled,
+.project-actions button:disabled { color: #94a3b8; cursor: not-allowed; border-color: #e2e8f0; background: #f1f5f9; }
+

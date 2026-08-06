@@ -46,7 +46,7 @@ test('Portal feedback and security views fail closed by exact permission', async
   assert.match(view, /feedbackCloseRetryKeys\.delete\(feedbackID\)/)
   assert.match(view, /:disabled="feedbackClosing"/)
   assert.match(view, /section\.value === 'security' && hasPermission\('account\.security\.manage'\)/)
-  assert.match(view, /v-if="hasPermission\('account\.security\.manage'\)"[^>]*>账号安全/)
+  assert.match(view, /v-if="hasPermission\('account\.security\.manage'\)"[\s\S]*?<span>账号安全<\/span>/)
   assert.match(view, /当前账号没有反馈相关权限/)
   assert.match(view, /当前账号没有账户安全管理权限/)
 })

@@ -62,7 +62,7 @@ export function detailRows(detail) {
     rows.push({ label: '用户 ID', value: item.user_id })
     rows.push({ label: '工号', value: item.employee_no || '—' })
     rows.push({ label: '邮箱', value: item.email || '—' })
-    rows.push({ label: '手机（脱敏）', value: item.mobile_masked || '—' })
+    rows.push({ label: '手机号（脱敏）', value: item.mobile_masked || '—' })
     rows.push({ label: '状态', value: item.status || '—' })
     rows.push({ label: '更新时间', value: formatDateTime(item.updated_at) })
   } else if (kind === 'account') {

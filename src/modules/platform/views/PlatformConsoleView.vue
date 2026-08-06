@@ -44,6 +44,7 @@ import {
   PLATFORM_AUDIT_VIEW_PERMISSION,
   PLATFORM_SETTINGS_SECTION_PERMISSIONS,
 } from '@/modules/platform/auth/utils/platformConsoleAccess'
+import { closeSubsystemTabOrFallback } from '@/modules/shared/utils/returnToPortal'
 import { IAM_PERMISSIONS } from '@/modules/platform/iam/utils/iamPermissions'
 import '@/modules/platform/styles/console.css'
 import '@/modules/platform/styles/settings-showcase.css'
@@ -281,9 +282,7 @@ function navigate(view) {
 // 从平台控制台返回子系统门户；门户是统一登录后的入口，不属于系统管理权限模块。
 function goToPortal() {
   mobileMenuOpen.value = false
-  if (route.name !== 'portal') {
-    router.push({ name: 'portal' })
-  }
+  closeSubsystemTabOrFallback(window, () => router.replace({ name: 'portal' }))
 }
 
 function showToast(message) {

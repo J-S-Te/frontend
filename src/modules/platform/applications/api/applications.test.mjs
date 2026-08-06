@@ -75,6 +75,13 @@ test('application registry errors retain actionable detail and request trace id'
   )
 })
 
+test('onboarding errors expose a direct recovery path for an existing environment', () => {
+  assert.match(onboardingModule, /IAM_SUBSYSTEM_ALREADY_ONBOARDED/)
+  assert.match(onboardingModule, /recoverExistingEnvironment/)
+  assert.match(onboardingModule, /查看已有环境/)
+  assert.match(onboardingModule, /状态读取失败/)
+})
+
 test('getSubsystemCapabilities reads the backend deployment policy without client-side inference', async () => {
   let requested
   globalThis.fetch = async (url, options) => {
@@ -294,12 +301,25 @@ test('deployment status, update and retry use dedicated Agent lifecycle endpoint
   }
 
   const status = await getSubsystemStatus({ applicationCode: 'business-app', environment: 'dev' })
-  await updateSubsystemRuntime({ applicationCode: 'business-app', environment: 'dev' })
+  await updateSubsystemRuntime({
+    applicationCode: 'business-app',
+    environment: 'dev',
+    publicBaseUrl: 'https://portal.example.com',
+    upstreamUrl: 'http://10.0.0.8:8081',
+    pathPrefix: '/business-app',
+  })
   await retrySubsystem({ applicationCode: 'business-app', environment: 'dev' })
 
   assert.equal(status.next_action, '检查生产 Agent 日志后重试')
   assert.equal(requests[0].url, '/api/v1/subsystem-status?application_code=business-app&environment=dev')
   assert.equal(requests[1].url, '/api/v1/subsystem-update')
+  assert.deepEqual(JSON.parse(requests[1].options.body), {
+    application_code: 'business-app',
+    environment: 'dev',
+    public_base_url: 'https://portal.example.com',
+    upstream_url: 'http://10.0.0.8:8081',
+    path_prefix: '/business-app',
+  })
   assert.equal(requests[2].url, '/api/v1/subsystem-retry')
   assert.deepEqual(JSON.parse(requests[2].options.body), { application_code: 'business-app', environment: 'dev' })
 })
@@ -318,7 +338,7 @@ test('adding an environment keeps the selected application identity immutable an
   assert.match(onboardingModule, /preferredEnvironments\.value\.find\(\(item\) => !environments\.value\.some/)
 })
 
-test('production onboarding only exposes reviewed unused targets and locks target-derived fields', () => {
+test('production onboarding only exposes reviewed unused targets while allowing the public base URL to be entered', () => {
   assert.match(onboardingModule, /provisioningCapabilities\.value\?\.targets/)
   assert.match(onboardingModule, /registeredProductionTargetKeys/)
   assert.match(onboardingModule, /productionTargetInventoryReady/)
@@ -328,6 +348,7 @@ test('production onboarding only exposes reviewed unused targets and locks targe
   assert.match(onboardingModule, /:value="onboardForm\.applicationName" disabled/)
   assert.match(onboardingModule, /:value="onboardForm\.environment" disabled/)
   assert.match(onboardingModule, /:value="onboardForm\.clientType" disabled/)
+  assert.match(onboardingModule, /v-model="onboardForm\.publicBaseUrl" type="url"/)
   assert.match(onboardingModule, /:value="onboardForm\.upstreamUrl" readonly/)
   assert.match(onboardingModule, /:value="onboardForm\.pathPrefix" readonly/)
   assert.match(onboardingModule, /defaults\.public_base_url \|\| ''/)

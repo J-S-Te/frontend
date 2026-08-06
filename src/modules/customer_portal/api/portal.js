@@ -145,6 +145,15 @@ function capability(value = {}) {
     reason_code: String(value.reason_code || ''),
   }
 }
+function customerCapabilities(value = {}) {
+  return {
+    project_enabled: value?.project_enabled !== false,
+    report_enabled: value?.report_enabled !== false,
+    filing_enabled: value?.filing_enabled !== false,
+    feedback_enabled: value?.feedback_enabled !== false,
+    evaluation_enabled: value?.evaluation_enabled !== false,
+  }
+}
 export async function getPortalCapabilities() {
   const value = await request('/capabilities')
   return {
@@ -154,6 +163,7 @@ export async function getPortalCapabilities() {
     filing_material_upload: capability(value?.filing_material_upload),
     filing_export: capability(value?.filing_export),
     filing_police_submission: capability(value?.filing_police_submission),
+    customer: customerCapabilities(value?.customer),
   }
 }
 export function ensurePortalSession() { return getPortalSession({ force: true }).catch((error) => error?.status === 401 ? null : Promise.reject(error)) }
@@ -304,5 +314,6 @@ export const saveFilingSection = (id, code, payload, idempotencyKey = key()) => 
 export const saveFilingMatrix = (id, code, payload, idempotencyKey = key()) => request(`/filings/${encodeURIComponent(id)}/matrix/${encodeURIComponent(code)}`, { method: 'PUT', body: JSON.stringify(payload), headers: { 'Idempotency-Key': idempotencyKey } })
 export const validateFiling = (id) => request(`/filings/${encodeURIComponent(id)}/validate`, { method: 'POST', body: JSON.stringify({}) })
 export const submitFiling = (id, payload, idempotencyKey = key()) => request(`/filings/${encodeURIComponent(id)}/submit`, { method: 'POST', body: JSON.stringify(payload), headers: { 'Idempotency-Key': idempotencyKey } })
+export const deleteFiling = (id) => request(`/filings/${encodeURIComponent(id)}`, { method: 'DELETE' })
 export const createFilingMaterialUpload = (id, payload, idempotencyKey = key()) => request(`/filings/${encodeURIComponent(id)}/material-uploads`, { method: 'POST', body: JSON.stringify(payload), headers: { 'Idempotency-Key': idempotencyKey } })
 export const completeFilingMaterialUpload = (id, materialId, expectedVersion) => request(`/filings/${encodeURIComponent(id)}/materials/${encodeURIComponent(materialId)}/complete`, { method: 'POST', body: JSON.stringify({ expected_version: expectedVersion }) })
