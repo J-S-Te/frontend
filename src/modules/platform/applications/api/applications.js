@@ -143,6 +143,23 @@ export function deleteEnvironment({ applicationId, environmentId, confirmationCo
   })
 }
 
+/** Permanently purges an already offboarded environment after retention approval. */
+export function purgeEnvironment({ applicationId, environmentId, confirmationCode, retentionApprovalId, retentionConfirmed, offboardedConfirmed, version } = {}) {
+  if (!applicationId || !environmentId || !String(confirmationCode || '').trim() || !String(retentionApprovalId || '').trim() || !retentionConfirmed || !offboardedConfirmed || !Number.isInteger(Number(version)) || Number(version) < 1) {
+    throw new ApplicationRegistryError('应用、环境、确认码、审批编号、下线确认和有效 version 均不能为空。', { code: 'VALIDATION_ERROR' })
+  }
+  return request(`/applications/${encodeURIComponent(applicationId)}/environments/${encodeURIComponent(environmentId)}/purge`, {
+    method: 'POST',
+    body: JSON.stringify({
+      confirmation_code: String(confirmationCode).trim(),
+      retention_approval_id: String(retentionApprovalId).trim(),
+      retention_confirmed: true,
+      offboarded_confirmed: true,
+      version: Number(version),
+    }),
+  })
+}
+
 /**
  * 一次完成应用登记、环境配置、登录目标、OAuth 客户端和自动部署。
  * 该接口是受控编排入口，不等同于依次调用普通 CRUD；部分失败的补偿和幂等由后端负责。
