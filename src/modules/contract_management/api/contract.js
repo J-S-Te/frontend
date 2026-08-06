@@ -253,21 +253,41 @@ export async function createContract(payload) {
   })
 }
 
-// 商机数据始终由客户与商机管理系统按当前登录人的数据权限过滤，合同系统不缓存全量商机。
+// CRM 仅接受 created_by=me，不允许浏览器提交任意创建人。逐页读取确保负责人已转交的
+// 商机仍会完整出现在其原创建人的合同选择器中。
 export async function listMyOpportunities(params = {}) {
-  const search = new URLSearchParams({ ...params, scope: 'mine' }).toString()
-  const response = await fetch(`${CUSTOMER_API_BASE_URL}/opportunities?${search}`, {
-    credentials: 'include',
-    headers: { Accept: 'application/json' },
+  const items = []
+  for (let page = 1; page <= 100; page += 1) {
+    const search = new URLSearchParams({ ...params, created_by: 'me', page: String(page), page_size: '100' }).toString()
+    const response = await fetch(`${CUSTOMER_API_BASE_URL}/opportunities?${search}`, { credentials: 'include', headers: { Accept: 'application/json' } })
+    const body = await readBody(response)
+    if (!response.ok) {
+      const error = new Error(userSafeErrorMessage(body?.message) || '读取可关联商机失败，请稍后重试。')
+      error.status = response.status
+      throw error
+    }
+    const data = body?.data ?? body
+    const pageItems = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : []
+    items.push(...pageItems)
+    const total = Number(data?.total ?? items.length)
+    if (!pageItems.length || items.length >= total || pageItems.length < 100) break
+  }
+  return items
+}
+
+export async function linkOpportunityContractDraft(opportunityId, payload) {
+  const response = await fetch(`${CUSTOMER_API_BASE_URL}/opportunities/${encodeURIComponent(opportunityId)}/contract-drafts`, {
+    method: 'POST', credentials: 'include',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-CSRF-Token': '1' },
+    body: JSON.stringify(payload),
   })
   const body = await readBody(response)
   if (!response.ok) {
-    const error = new Error(userSafeErrorMessage(body?.message) || '读取可关联商机失败，请稍后重试。')
+    const error = new Error(userSafeErrorMessage(body?.message) || '合同已创建，但回传客户与商机系统失败。')
     error.status = response.status
     throw error
   }
-  const data = body?.data ?? body
-  return Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : []
+  return body?.data ?? body
 }
 
 export async function listContractTemplates() {

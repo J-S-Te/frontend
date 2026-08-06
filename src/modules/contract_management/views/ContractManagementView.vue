@@ -24,6 +24,7 @@ import {
   listContracts,
   listContractLifecycle,
   listOpportunityIntakes,
+  linkOpportunityContractDraft,
   previewApprovalContract,
   previewContractTemplate,
   previewContractDocument,
@@ -188,7 +189,7 @@ const ruleSaving = ref(false)
 const editingRuleId = ref('')
 const emptyServiceItem = () => ({ service_type: '', systems: [] })
 const emptyNewContract = () => ({
-  opportunity_id: '', opportunity_name: '', title: '', contract_type: '', amount: '', currency: 'CNY',
+  opportunity_id: '', opportunity_name: '', customer_id: '', title: '', contract_type: '', amount: '', currency: 'CNY',
   customer_name: '', customer_address: '', customer_contact: '', customer_phone: '',
   service_items: [emptyServiceItem()], template_id: '', template_values: {},
 })
@@ -204,7 +205,7 @@ const opportunityKeyword = ref('')
 const opportunityOptions = ref([])
 const filteredOpportunityOptions = computed(() => {
   const query = opportunityKeyword.value.trim().toLowerCase()
-  return opportunityOptions.value.filter((item) => !query || [item.name, item.title, item.code, item.customer_name].join(' ').toLowerCase().includes(query))
+  return opportunityOptions.value.filter((item) => !query || [item.name, item.title, item.opportunity_no, item.code, item.opportunity_code, item.customer_name].join(' ').toLowerCase().includes(query))
 })
 const canAddServiceItem = computed(() => newContract.value.service_items.length < 20 && Boolean(newContract.value.service_items.at(-1)?.service_type))
 
@@ -1040,7 +1041,7 @@ async function openOpportunityPicker() {
   opportunityError.value = ''
   opportunityLoading.value = true
   try {
-    opportunityOptions.value = await listMyOpportunities({ limit: 200 })
+    opportunityOptions.value = await listMyOpportunities()
   } catch (error) {
     opportunityError.value = error?.message || '读取可关联商机失败，请稍后重试。'
   } finally {
@@ -1051,13 +1052,17 @@ async function openOpportunityPicker() {
 function selectOpportunity(item) {
   newContract.value.opportunity_id = String(item.id || item.opportunity_id || '')
   newContract.value.opportunity_name = item.name || item.title || item.opportunity_name || '未命名商机'
-  if (!newContract.value.customer_name) newContract.value.customer_name = item.customer_name || item.customer?.name || ''
+  newContract.value.customer_id = String(item.customer_id || item.customer?.id || '')
+  newContract.value.customer_name = item.customer_name || item.customer?.name || ''
+  if (!newContract.value.amount && item.expected_amount) newContract.value.amount = item.expected_amount
   opportunityPickerOpen.value = false
 }
 
 function clearOpportunity() {
   newContract.value.opportunity_id = ''
   newContract.value.opportunity_name = ''
+  newContract.value.customer_id = ''
+  newContract.value.customer_name = ''
 }
 
 function addServiceItem() {
@@ -1134,6 +1139,7 @@ async function submitNewContract() {
     const payload = {
       opportunity_id: newContract.value.opportunity_id,
       opportunity_name: newContract.value.opportunity_name,
+      crm_customer_id: Number(newContract.value.customer_id || 0),
       title: newContract.value.title.trim(),
       contract_type: newContract.value.contract_type,
       service_type: newContract.value.service_items[0]?.service_type || '',
@@ -1151,12 +1157,24 @@ async function submitNewContract() {
       template_id: selectedContractTemplate.value.id,
       template_values: { ...newContract.value.template_values },
     }
-    await createContract(payload)
+    const created = await createContract(payload)
+    let callbackWarning = ''
+    if (newContract.value.opportunity_id) {
+      try {
+        await linkOpportunityContractDraft(newContract.value.opportunity_id, {
+          contract_id: created.id,
+          contract_title: created.title,
+          customer_id: Number(newContract.value.customer_id),
+        })
+      } catch (error) {
+        callbackWarning = `合同已创建，但回传客户与商机系统失败：${error?.message || '请稍后重试。'}`
+      }
+    }
     createDialogOpen.value = false
     newContract.value = emptyNewContract()
     templatePreviewHTML.value = ''
     await loadBusinessData()
-    showToast('合同草稿已创建')
+    showToast(callbackWarning || '合同草稿已创建，并已回传客户与商机系统')
   } catch (error) {
     showToast(error?.message || '创建合同失败')
   }
@@ -1615,7 +1633,7 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
       </form>
     </div>
 
-    <div v-if="opportunityPickerOpen" class="contract-modal-mask contract-opportunity-mask" @click.self="opportunityPickerOpen = false"><article class="contract-detail-modal contract-opportunity-modal"><header><div><span class="contract-badge info">客户与商机管理</span><h2>选择关联商机</h2><p>仅显示当前账号权限范围内的商机</p></div><button type="button" aria-label="关闭" @click="opportunityPickerOpen = false"><ConsoleIcon name="close" /></button></header><section><label class="contract-opportunity-search"><span>搜索商机</span><input v-model="opportunityKeyword" type="search" placeholder="商机名称 / 编号 / 客户名称" /></label><p v-if="opportunityLoading" class="contract-modal-loading">正在读取商机…</p><p v-else-if="opportunityError" class="contract-session-error">{{ opportunityError }}</p><div v-else class="contract-opportunity-list"><button v-for="item in filteredOpportunityOptions" :key="item.id || item.opportunity_id" type="button" @click="selectOpportunity(item)"><strong>{{ item.name || item.title || item.opportunity_name }}</strong><span>{{ item.code || item.opportunity_code || '—' }} · {{ item.customer_name || item.customer?.name || '未关联客户' }}</span></button><p v-if="!filteredOpportunityOptions.length" class="contract-empty">当前没有可关联的商机</p></div></section><footer><button class="contract-button secondary" type="button" @click="opportunityPickerOpen = false">取消</button></footer></article></div>
+    <div v-if="opportunityPickerOpen" class="contract-modal-mask contract-opportunity-mask" @click.self="opportunityPickerOpen = false"><article class="contract-detail-modal contract-opportunity-modal"><header><div><span class="contract-badge info">客户与商机管理</span><h2>选择关联商机</h2><p>显示当前用户创建的全部商机，包括后续已转交负责人的商机</p></div><button type="button" aria-label="关闭" @click="opportunityPickerOpen = false"><ConsoleIcon name="close" /></button></header><section><label class="contract-opportunity-search"><span>搜索商机</span><input v-model="opportunityKeyword" type="search" placeholder="商机名称 / 编号 / 客户名称" /></label><p v-if="opportunityLoading" class="contract-modal-loading">正在读取商机…</p><p v-else-if="opportunityError" class="contract-session-error">{{ opportunityError }}</p><div v-else class="contract-opportunity-list"><button v-for="item in filteredOpportunityOptions" :key="item.id || item.opportunity_id" type="button" @click="selectOpportunity(item)"><strong>{{ item.name || item.title || item.opportunity_name }}</strong><span>{{ item.opportunity_no || item.code || item.opportunity_code || '—' }} · {{ item.customer_name || item.customer?.name || '未关联客户' }} · {{ item.current_stage || '阶段未知' }}</span></button><p v-if="!filteredOpportunityOptions.length" class="contract-empty">当前没有由您创建的商机</p></div></section><footer><button class="contract-button secondary" type="button" @click="opportunityPickerOpen = false">取消</button></footer></article></div>
 
     <div v-if="templateUploadDialogOpen" class="contract-modal-mask" @click.self="templateUploadDialogOpen = false"><form class="contract-detail-modal contract-template-upload-modal" @submit.prevent="submitTemplateUpload"><header><div><span class="contract-badge info">超级管理员</span><h2>上传合同模板</h2><p>上传不超过 10MB 的 DOCX，模板中使用 <code v-pre>{{field_name:字段名称}}</code> 标记填写项。</p></div><button type="button" aria-label="关闭" @click="templateUploadDialogOpen = false"><ConsoleIcon name="close" /></button></header><section><div class="contract-form-grid"><label><span>模板名称</span><input v-model="templateUploadForm.name" required maxlength="160" placeholder="例如：标准服务合同" /></label><label><span>DOCX 文件</span><input required type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" @change="selectTemplateFile" /></label></div></section><footer><button class="contract-button secondary" type="button" :disabled="templateUploading" @click="templateUploadDialogOpen = false">取消</button><button class="contract-button primary" type="submit" :disabled="templateUploading">{{ templateUploading ? '正在上传…' : '上传模板' }}</button></footer></form></div>
 

@@ -8,9 +8,19 @@ const api = await readFile(new URL('./api/contract.js', import.meta.url), 'utf8'
 test('new contracts select an optional permission-scoped opportunity and have no manual number', () => {
   assert.match(source, /关联商机（选填）/)
   assert.match(source, /合同编号将在审批通过后自动生成/)
-  assert.match(source, /listMyOpportunities\(\{ limit: 200 \}\)/)
+  assert.match(source, /listMyOpportunities\(\)/)
   assert.doesNotMatch(source, /v-model="newContract\.contract_number"/)
-  assert.match(api, /scope: 'mine'/)
+  assert.match(api, /created_by: 'me'/)
+  assert.match(api, /page_size: '100'/)
+})
+
+test('opportunity selection fills customer context and returns the created draft to CRM', () => {
+  assert.match(source, /newContract\.value\.customer_id = String\(item\.customer_id/)
+  assert.match(source, /newContract\.value\.customer_name = item\.customer_name/)
+  assert.match(source, /crm_customer_id: Number\(newContract\.value\.customer_id/)
+  assert.match(source, /linkOpportunityContractDraft\(newContract\.value\.opportunity_id/)
+  assert.match(api, /\/contract-drafts`/)
+  assert.match(api, /'X-CSRF-Token': '1'/)
 })
 
 test('contract and service types are constrained selects', () => {
