@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, toRaw, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import OwnerSelector from '../components/OwnerSelector.vue'
@@ -1857,7 +1857,13 @@ async function submitCustomer() {
   try {
     let createRetry = null
     if (!customerEditMode.value) {
-      const createPayload = structuredClone(customerForm)
+      // customerForm 是 Vue reactive Proxy，不能直接交给 structuredClone；
+      // 先取原始对象并逐项展开联系人，避免新增客户在浏览器端提交前直接失败。
+      const rawCustomerForm = toRaw(customerForm)
+      const createPayload = {
+        ...rawCustomerForm,
+        contacts: rawCustomerForm.contacts.map((item) => ({ ...toRaw(item) })),
+      }
       createPayload.contacts.forEach(({ id }, index) => { delete createPayload.contacts[index].id })
       createRetry = createMutationRetries.keyFor('customer', createPayload)
     }
