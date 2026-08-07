@@ -89,6 +89,10 @@ export async function onboardEmployee({ user, account = null, membership = null 
     if (!employeeEndpointUnavailable(error)) throw error
   }
 
+  if (!membership) {
+    throw new IamError('用户必须与任职关系一起创建；当前服务端未提供原子员工入职接口。')
+  }
+
   const userResult = await createUser({
     displayName: user?.display_name,
     email: user?.email ?? null,

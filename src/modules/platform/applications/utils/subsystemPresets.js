@@ -65,9 +65,12 @@ export function normalizeIntegratedSubsystemOnboarding(form) {
   if (!preset) return false
   const upstreamUrl = String(form.upstreamUrl || '').trim().replace(/\/$/, '')
   const pathPrefix = String(form.pathPrefix || '').trim().replace(/\/$/, '')
-  // 旧服务名和旧门户前缀必须成对命中才迁移，避免把用户确实配置的自定义地址误改为预设。
-  const isLegacyAlias = preset.aliases.some((alias) => alias.upstreamUrl === upstreamUrl && alias.pathPrefix === pathPrefix)
-  if (!isLegacyAlias) return false
+  // 集成应用的服务地址和门户前缀可能在历史版本中分别迁移，不能要求两者
+  // 必须成对出现；只要两项都属于已知的 canonical/legacy 值，就统一归一化。
+  const knownUpstreams = new Set([preset.upstreamUrl, ...preset.aliases.map((alias) => alias.upstreamUrl)])
+  const knownPaths = new Set([preset.pathPrefix, ...preset.aliases.map((alias) => alias.pathPrefix)])
+  if (!knownUpstreams.has(upstreamUrl) || !knownPaths.has(pathPrefix)) return false
+  if (upstreamUrl === preset.upstreamUrl && pathPrefix === preset.pathPrefix) return false
   form.upstreamUrl = preset.upstreamUrl
   form.pathPrefix = preset.pathPrefix
   return true

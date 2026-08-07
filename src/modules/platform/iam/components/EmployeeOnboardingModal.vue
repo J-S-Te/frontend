@@ -152,8 +152,7 @@ function validateAccount() {
 }
 
 function validateMembership() {
-  if (!form.create_membership) return null
-  if (!form.org_unit_id || !form.position_id) throw new IamError('请选择员工所属组织和岗位，或关闭“同时建立任职关系”。')
+  if (!form.org_unit_id || !form.position_id) throw new IamError('请选择员工所属组织和岗位，用户必须对应一条任职关系。')
   if (!membershipPositions.value.some((item) => positionId(item) === form.position_id)) throw new IamError('请选择当前组织下的岗位。')
 
   const isShortTerm = form.membership_validity_mode === 'SHORT_TERM'
@@ -173,7 +172,7 @@ function validateMembership() {
 async function loadAuthorizationPreview() {
   authorizationPreview.value = null
   authorizationPreviewUnavailable.value = false
-  if (!form.create_membership || !form.inherit_authorization || !form.position_id) return
+  if (!form.inherit_authorization || !form.position_id) return
 
   authorizationPreviewLoading.value = true
   try {
@@ -317,16 +316,15 @@ async function submit() {
             </div>
           </section>
 
-          <section class="console-wizard-section" :class="{ active: form.create_membership, muted: !form.create_membership }">
+          <section class="console-wizard-section active">
             <div class="console-wizard-section-head">
               <span class="console-wizard-section-icon"><ConsoleIcon name="role" /></span>
               <div>
                 <h3>任职关系</h3>
-                <p>可选。岗位是标准授权的来源；兼岗或临时任职可在这里明确有效期。</p>
+                <p>必填。用户与人员通过任职关系一一对应；岗位是标准授权的来源。</p>
               </div>
-              <label class="console-wizard-toggle"><input v-model="form.create_membership" type="checkbox" /><span>同时建立</span></label>
             </div>
-            <div v-if="form.create_membership" class="console-form-grid">
+            <div class="console-form-grid">
               <label class="console-form-item"><span>所属组织 *</span><select v-model="form.org_unit_id" required><option value="">请选择组织</option><option v-for="item in organizationOptions" :key="item.option_id" :value="item.option_id">{{ item.option_label }}</option></select></label>
               <label class="console-form-item"><span>岗位 *</span><select v-model="form.position_id" :disabled="!form.org_unit_id || !membershipPositions.length" required><option value="">{{ !form.org_unit_id ? '请先选择组织' : (membershipPositions.length ? '请选择岗位' : '当前组织暂无岗位') }}</option><option v-for="item in membershipPositions" :key="positionId(item)" :value="positionId(item)">{{ positionName(item) }}</option></select><small v-if="form.org_unit_id && !membershipPositions.length" class="console-wizard-field-help">当前组织暂无岗位，请先在“岗位”中创建。</small></label>
               <label class="console-form-item"><span>任职类型 *</span><select v-model="form.membership_type"><option value="PRIMARY">主组织</option><option value="SECONDARY">次组织 / 兼岗</option></select></label>
@@ -337,7 +335,7 @@ async function submit() {
             </div>
           </section>
 
-          <section class="console-wizard-section" :class="{ active: form.create_membership && form.inherit_authorization, muted: !form.create_membership || !form.inherit_authorization }">
+          <section class="console-wizard-section" :class="{ active: form.inherit_authorization, muted: !form.inherit_authorization }">
             <div class="console-wizard-section-head">
               <span class="console-wizard-section-icon"><ConsoleIcon name="shield" /></span>
               <div>
@@ -345,8 +343,7 @@ async function submit() {
                 <p>只展示岗位授权模板计算出的角色。基础平台不会在这里创建或修改子系统的业务角色、权限。</p>
               </div>
             </div>
-            <p v-if="!form.create_membership" class="console-wizard-empty">未建立任职关系，因此本次不会产生岗位继承授权。</p>
-            <p v-else-if="!form.inherit_authorization" class="console-wizard-empty">已关闭岗位授权继承。本次仅创建任职关系，不会自动获得岗位模板角色。</p>
+            <p v-if="!form.inherit_authorization" class="console-wizard-empty">已关闭岗位授权继承。本次仍会创建任职关系，但不会自动获得岗位模板角色。</p>
             <p v-else-if="!selectedPosition" class="console-wizard-empty">请选择组织和岗位后查看授权预览。</p>
             <p v-else-if="authorizationPreviewLoading" class="console-wizard-empty">正在读取 {{ positionName(selectedPosition) }} 的岗位授权模板…</p>
             <p v-else-if="previewConflicts.length" class="console-wizard-empty error">{{ previewConflicts.join('；') }}</p>

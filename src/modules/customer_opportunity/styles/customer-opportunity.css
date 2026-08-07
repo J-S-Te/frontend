@@ -978,6 +978,108 @@
 }
 .crm-unavailable-assignees strong { display: block; margin-bottom: 7px; }
 
+/* 售前指派弹窗：以基础平台人员目录为中心，弱化技术字段，突出当前选择结果。 */
+.crm-engineer-picker {
+  width: min(760px, 100%);
+  max-height: min(820px, calc(100vh - 40px));
+  overflow: auto;
+  padding: 24px;
+  border: 1px solid #dbe7fb;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #f8fbff 0, #fff 180px);
+  box-shadow: 0 24px 70px rgba(30, 64, 175, .18);
+}
+.crm-modal > form.crm-engineer-picker > h2 {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: -24px -24px 0;
+  padding: 22px 24px 16px;
+  color: #172554;
+  border-bottom: 1px solid #e2e8f0;
+  background: rgba(239, 246, 255, .72);
+}
+.crm-modal > form.crm-engineer-picker > h2 small {
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.crm-engineer-picker__intro {
+  margin: 0 -2px 16px !important;
+  padding: 10px 12px;
+  color: #475569;
+  border-left: 3px solid #60a5fa;
+  border-radius: 0 8px 8px 0;
+  background: #eff6ff;
+}
+.crm-engineer-picker__toolbar {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto auto;
+  align-items: end;
+  gap: 10px;
+  margin: 0 0 14px;
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, .04);
+}
+.crm-engineer-picker__toolbar label { margin: 0; }
+.crm-engineer-picker__toolbar button { min-height: 40px; }
+.crm-engineer-picker__toolbar button.ghost { color: #2563eb; background: #eff6ff; border-color: #bfdbfe; }
+.crm-engineer-picker .crm-engineer-list {
+  max-height: 300px;
+  margin: 0;
+  padding: 4px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+.crm-engineer-picker .crm-engineer {
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center !important;
+  padding: 12px;
+  border-color: #e2e8f0;
+  background: #fff;
+  transition: border-color .15s ease, background .15s ease, box-shadow .15s ease;
+}
+.crm-engineer-picker .crm-engineer:hover,
+.crm-engineer-picker .crm-engineer:has(input:checked) {
+  border-color: #93c5fd;
+  background: #eff6ff;
+  box-shadow: 0 3px 10px rgba(37, 99, 235, .1);
+}
+.crm-engineer-picker .crm-engineer input { width: 16px; height: 16px; margin: 0; accent-color: #2563eb; }
+.crm-engineer-picker .crm-engineer span { min-width: 0; color: #475569; line-height: 1.5; }
+.crm-engineer-picker .crm-engineer strong { color: #0f172a; font-size: 14px; }
+.crm-engineer-picker__diff {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 16px 0 12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.crm-engineer-picker__diff dt,
+.crm-engineer-picker__diff dd { margin: 0; padding: 8px 10px; border: 1px solid #e2e8f0; background: #fff; }
+.crm-engineer-picker__diff dt { color: #64748b; font-size: 12px; font-weight: 600; border-bottom: 0; border-radius: 8px 8px 0 0; }
+.crm-engineer-picker__diff dd { min-height: 38px; color: #1e3a8a; font-size: 12px; border-radius: 0 0 8px 8px; overflow-wrap: anywhere; }
+.crm-engineer-picker__reason { margin: 0 !important; }
+.crm-engineer-picker__reason textarea { min-height: 72px; }
+.crm-engineer-picker__footer {
+  position: sticky;
+  bottom: -24px;
+  margin: 8px -24px -24px !important;
+  padding: 14px 24px 24px;
+  border-top: 1px solid #e2e8f0;
+  background: rgba(255, 255, 255, .94);
+  backdrop-filter: blur(8px);
+}
+
 /* 售前详情沿用 console 头尾壳层，业务区块按正文 24px 轨道对齐；表单动作横跨双列栅格。 */
 .crm-presale-console-detail { width: min(1040px, 100%); max-height: min(860px, calc(100vh - 40px)); }
 .crm-presale-summary { margin-top: 20px; }
@@ -1124,6 +1226,12 @@
   .crm-actions { justify-content: stretch; }
   .crm-actions > button { flex: 1 1 calc(50% - 5px); }
   .crm-modal { padding: 10px; }
+  .crm-engineer-picker { max-height: calc(100vh - 20px); padding: 18px; border-radius: 12px; }
+  .crm-modal > form.crm-engineer-picker > h2 { margin: -18px -18px 0; padding: 18px; }
+  .crm-engineer-picker__toolbar { grid-template-columns: 1fr 1fr; }
+  .crm-engineer-picker__toolbar button { width: 100%; }
+  .crm-engineer-picker__diff { grid-template-columns: 1fr; }
+  .crm-engineer-picker__footer { bottom: -18px; margin: 8px -18px -18px !important; padding: 12px 18px 18px; }
   .crm-modal > form,
   .crm-modal > article { max-height: calc(100vh - 20px); padding: 18px; border-radius: 10px; }
   .crm-modal dl { grid-template-columns: 1fr; }
@@ -1185,3 +1293,55 @@
 /* 从详情弹窗内打开的 console 弹窗（编辑客户/编辑商机/售前详情）需叠在详情之上，
    与 .crm-modal.nested(z-index:80) 同一层级，避免被 z-index:70 的详情遮住。 */
 .console-modal-backdrop.nested { z-index: 80; }
+
+/* 售前审批规则：用卡片、状态徽章和节点轨道强化配置层次。 */
+.crm-approval-rules-panel { background: linear-gradient(145deg, #fff 0%, #f8fbff 100%); border: 1px solid #dbe7f5; box-shadow: 0 12px 30px rgba(31, 66, 113, .07); }
+.crm-approval-rules-heading { align-items: center; margin-bottom: 18px; }
+.crm-approval-rules-heading h2 { display: flex; align-items: center; gap: 10px; }
+.crm-approval-rules-heading h2::before { content: '✓'; display: inline-grid; width: 28px; height: 28px; place-items: center; border-radius: 9px; color: #2563eb; background: #e8f0ff; font-size: 15px; }
+.crm-approval-rule-row { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-top: 10px; padding: 16px 18px; border: 1px solid #e3ebf5; border-radius: 14px; background: #fff; cursor: pointer; transition: border-color .2s ease, box-shadow .2s ease, transform .2s ease; }
+.crm-approval-rule-row:hover { border-color: #b9d0f5; box-shadow: 0 8px 18px rgba(37, 99, 235, .08); transform: translateY(-1px); }
+.crm-approval-rule-row.is-active { border-color: #5b8def; box-shadow: 0 0 0 3px rgba(37, 99, 235, .11), 0 10px 22px rgba(37, 99, 235, .1); background: linear-gradient(100deg, #fff 0%, #f5f9ff 100%); }
+.crm-approval-rules-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 8px 0 4px; padding: 0 2px; color: #536985; }
+.crm-approval-rules-section-heading > div { display: flex; align-items: baseline; gap: 9px; }
+.crm-approval-rules-section-heading strong { color: #1d3557; font-size: 13px; }
+.crm-approval-rules-section-heading span { color: #8091a8; font-size: 12px; }
+.crm-approval-rules-list { display: grid; gap: 10px; }
+.crm-approval-rule-dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: #94a3b8; box-shadow: 0 0 0 4px #eef2f7; }
+.crm-approval-rule-dot.is-enabled { background: #16a36a; box-shadow: 0 0 0 4px #e7f8ef; }
+.crm-approval-collapse-button { display: inline-flex; align-items: center; gap: 5px; }
+.crm-approval-chevron { display: inline-block; color: #71839c; font-size: 18px; line-height: 1; transform: rotate(0deg); transition: transform .18s ease; }
+.crm-approval-chevron.is-open { transform: rotate(180deg); }
+.crm-approval-rule-main { min-width: 0; }
+.crm-approval-rule-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.crm-approval-rule-title strong { color: #172b4d; font-size: 15px; }
+.crm-approval-rule-meta { display: block; margin-top: 6px; color: #71839c; font-size: 12px; }
+.crm-approval-status, .crm-approval-editor-badge { display: inline-flex; align-items: center; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+.crm-approval-status.is-enabled, .crm-approval-editor-badge { color: #087443; background: #e7f8ef; }
+.crm-approval-status.is-disabled { color: #64748b; background: #eef2f7; }
+.crm-approval-rules-empty { display: grid; place-items: center; gap: 5px; min-height: 92px; margin: 12px 0; padding: 18px; border: 1px dashed #cbd8e8; border-radius: 14px; color: #6b7e98; text-align: center; }
+.crm-approval-rules-empty strong { color: #415674; }
+.crm-approval-rule-editor { display: grid; gap: 14px; margin-top: 20px; padding: 20px; border: 1px solid #d8e5f5; border-radius: 16px; background: #f7faff; }
+.crm-approval-editor-heading { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 12px; padding: 0 0 10px; border: 0; border-bottom: 1px solid #e1eaf5; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.crm-approval-editor-heading-actions { display: inline-flex; align-items: center; gap: 10px; }
+.crm-approval-editor-body { display: grid; gap: 14px; }
+.crm-approval-editor-heading strong, .crm-approval-node-heading strong { display: block; color: #1d3557; }
+.crm-approval-editor-heading span:not(.crm-approval-editor-badge), .crm-approval-node-heading span { color: #8091a8; font-size: 12px; }
+.crm-approval-rule-fields { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(150px, .7fr) auto; align-items: end; gap: 12px; }
+.crm-approval-rule-editor label { color: #536985; font-size: 12px; font-weight: 650; }
+.crm-approval-rule-editor input, .crm-approval-rule-editor select { width: 100%; margin-top: 6px; }
+.crm-approval-node-heading { display: inline-flex; align-items: baseline; gap: 9px; }
+.crm-approval-editor-body > div:nth-of-type(3) { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.crm-approval-node { display: grid; grid-template-columns: 28px minmax(0, 1.5fr) minmax(130px, .8fr) minmax(130px, .8fr) auto; align-items: center; gap: 10px; padding: 10px; border: 1px solid #e1eaf5; border-radius: 12px; background: #fff; }
+.crm-approval-node-index { display: grid; width: 26px; height: 26px; place-items: center; border-radius: 8px; color: #2563eb; background: #eaf2ff; font-weight: 800; font-size: 12px; }
+.crm-approval-rule-editor > button[type="submit"] { justify-self: end; min-width: 150px; }
+@media (max-width: 760px) {
+  .crm-approval-rule-row, .crm-approval-editor-heading { align-items: stretch; flex-direction: column; }
+  .crm-approval-rules-section-heading { align-items: flex-start; flex-direction: column; }
+  .crm-approval-editor-heading-actions { justify-content: space-between; }
+  .crm-approval-rule-row .crm-actions { justify-content: flex-start; }
+  .crm-approval-rule-fields { grid-template-columns: 1fr; }
+  .crm-approval-node { grid-template-columns: 28px 1fr; }
+  .crm-approval-node select, .crm-approval-node button { grid-column: 2; }
+  .crm-approval-rule-editor > button[type="submit"] { justify-self: stretch; }
+}

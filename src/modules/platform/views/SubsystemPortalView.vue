@@ -203,8 +203,11 @@ function openSubsystem(subsystem) {
   }
 
   if (subsystem.route) {
-    // 内部子系统与门户同源，在当前页面直接进入；“返回统一门户”回到本页，不再堆积新标签页。
-    router.push(subsystem.route)
+    // 内部子系统虽然与门户同源，也要在独立页面展示，避免覆盖门户上下文；
+    // 通过 Router 解析保持 base、编码和命名路由参数一致。
+    const routeURL = router.resolve(subsystem.route).href
+    const targetURL = new URL(routeURL, window.location.origin).href
+    window.open(targetURL, '_blank', 'noopener,noreferrer')
     return
   }
 

@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
+import RoleMultiSelect from './RoleMultiSelect.vue'
 import { AuthorizationError } from '@/modules/platform/iam/api/authorization'
 import {
   assignableActiveCatalogRoles,
@@ -19,11 +20,15 @@ import {
 import {
   createPositionAuthorizationTemplate,
   deletePositionAuthorizationTemplate,
+  getPositionAuthorizationTemplate,
+  updatePositionAuthorizationTemplate,
   listPositionAuthorizationTemplateAssignments,
   listPositionAuthorizationTargets,
   listPositionAuthorizationPositions,
   listPositionAuthorizationTemplates,
+  listRoleInheritanceMappings,
   previewPositionAuthorization,
+  replaceRoleInheritanceMappings,
   replacePositionAuthorizationTemplateAssignments,
 } from '@/modules/platform/iam/api/positionAuthorization'
 
@@ -35,8 +40,13 @@ const saving = ref(false)
 const templates = ref([])
 const positions = ref([])
 const applications = ref([])
+const inheritanceMappings = ref([])
+const mappingSourceRoleId = ref('')
+const mappingTargets = ref([])
 const selectedPositionId = ref('')
 const assignedTemplateIds = ref([])
+const editingTemplateId = ref('')
+const editingTemplateVersion = ref(0)
 // 通用确认弹窗。不用 window.confirm 是为了避免在 WebView 容器里静默失败。
 const confirmDialog = ref(null)
 function openConfirm({ title, description, confirmText = '确认', danger = false, onConfirm }) {
@@ -54,23 +64,25 @@ const editorPreviewLoading = ref(false)
 const editorPreviewUnavailable = ref(false)
 const positionPreviewRef = ref(null)
 let editorPreviewRequest = 0
-const emptySubsystemRole = () => ({ application_id: '', role_id: '', scope_type: 'TENANT', scope_id: '' })
-const form = ref({ name: '', description: '', platform_application_id: '', platform_role_id: '', platform_scope_type: 'TENANT', platform_scope_id: '', subsystem_roles: [emptySubsystemRole()] })
+const emptySubsystemRole = () => ({
+  application_id: '',
+  role_ids: [],
+  scope_type: 'TENANT',
+  scope_id: '',
+})
+const form = ref({
+  name: '',
+  description: '',
+  platform_application_id: '',
+  platform_role_ids: [],
+  platform_scope_type: 'TENANT',
+  platform_scope_id: '',
+  additional_roles: [],
+})
 const catalogs = ref({})
 
 function items(data) { return Array.isArray(data?.items) ? data.items : (Array.isArray(data) ? data : []) }
 function id(item, ...keys) { return keys.map((key) => item?.[key]).find(Boolean) || '' }
-function expandPositionAuthorizationRoleMappings(mapping) {
-  const roles = []
-  if (mapping?.platform_application_id && mapping?.platform_role_id) {
-    roles.push({ application_id: mapping.platform_application_id, role_id: mapping.platform_role_id, scope_type: mapping.platform_scope_type || 'TENANT', scope_id: mapping.platform_scope_type === 'ENVIRONMENT' ? String(mapping.platform_scope_id || '').trim() : '' })
-  }
-  for (const item of Array.isArray(mapping?.subsystem_roles) ? mapping.subsystem_roles : []) {
-    if (!item?.application_id || !item?.role_id) continue
-    roles.push({ application_id: item.application_id, role_id: item.role_id, scope_type: item.scope_type || 'TENANT', scope_id: item.scope_type === 'ENVIRONMENT' ? String(item.scope_id || '').trim() : '' })
-  }
-  return roles
-}
 function applicationId(item) { return id(item, 'application_id', 'id') }
 function positionId(item) { return id(item, 'position_id', 'id') }
 function positionName(item) { return item?.name || item?.position_name || item?.code || item?.position_code || positionId(item) }
@@ -92,6 +104,7 @@ function roleName(role) { return role?.name || role?.role_name || role?.code || 
 function appName(app) { return app?.name || app?.application_name || app?.code || applicationId(app) }
 function templateRoles(template) { return items(template?.roles) }
 const platformApplications = computed(() => applications.value.filter((app) => String(app?.application_code || app?.code || '').toLowerCase() === 'platform'))
+const templateApplications = computed(() => applications.value)
 const subsystemApplications = computed(() => applications.value.filter((app) => String(app?.application_code || app?.code || '').toLowerCase() !== 'platform'))
 const activeTemplates = computed(() => templates.value.filter((template) => String(template?.status || '').toUpperCase() === 'ACTIVE'))
 const positionGroups = computed(() => groupAuthorizationPositions(positions.value))
@@ -102,10 +115,11 @@ async function load() {
   try {
     // 专用目标端点同时返回稳定平台角色 ID 和编辑器所需的授权目录就绪状态。这里不能调用
     // 更宽泛的应用目录 API：角色绑定管理员可能合理地没有 platform:application:read。
-    const [templateResult, positionResult, targetResult] = await Promise.allSettled([
+    const [templateResult, positionResult, targetResult, mappingResult] = await Promise.allSettled([
       listPositionAuthorizationTemplates(),
       listPositionAuthorizationPositions(),
       listPositionAuthorizationTargets(),
+      listRoleInheritanceMappings(),
     ])
     const failures = []
     if (templateResult.status === 'fulfilled') templates.value = items(templateResult.value)
@@ -125,6 +139,13 @@ async function load() {
       catalogs.value = {}
       failures.push(targetResult.reason)
     }
+    if (mappingResult.status === 'fulfilled') {
+      inheritanceMappings.value = items(mappingResult.value)
+      if (!mappingSourceRoleId.value && inheritanceMappings.value.length) {
+        mappingSourceRoleId.value = inheritanceMappings.value[0].source_role_id
+      }
+      loadMappingTargets()
+    } else failures.push(mappingResult.reason)
     if (!selectedPositionId.value && positions.value.length) selectedPositionId.value = positionId(positions.value[0])
     if (selectedPositionId.value) await loadAssignments()
     if (failures.length) {
@@ -155,34 +176,188 @@ async function loadAssignments() {
   }
 }
 
-function addSubsystemRole() { form.value.subsystem_roles.push(emptySubsystemRole()) }
-function removeSubsystemRole(index) {
-  if (form.value.subsystem_roles.length > 1) form.value.subsystem_roles.splice(index, 1)
+function addMappingTarget() { mappingTargets.value.push(emptySubsystemRole()) }
+function removeMappingTarget(index) { mappingTargets.value.splice(index, 1) }
+function revokeMappingTarget(index) {
+  mappingTargets.value.splice(index, 1)
+  if (!mappingTargets.value.length) mappingTargets.value.push(emptySubsystemRole())
+  emit('toast', '该子系统角色已标记为撤回，请点击“保存角色映射”完成提交。')
 }
-function onApplicationChange(row) { row.role_id = '' }
-function onPlatformApplicationChange() { form.value.platform_role_id = '' }
+function loadMappingTargets() {
+  const grouped = new Map()
+  inheritanceMappings.value
+    .filter((item) => item.source_role_id === mappingSourceRoleId.value)
+    .forEach((item) => {
+      const scopeType = item.scope_type || 'TENANT'
+      const scopeId = item.scope_id || ''
+      const key = `${item.target_application_id}|${scopeType}|${scopeId}`
+      const current = grouped.get(key) || {
+        application_id: item.target_application_id,
+        role_ids: [],
+        scope_type: scopeType,
+        scope_id: scopeId,
+      }
+      if (item.target_role_id && !current.role_ids.includes(item.target_role_id)) {
+        current.role_ids.push(item.target_role_id)
+      }
+      grouped.set(key, current)
+    })
+  mappingTargets.value = [...grouped.values()]
+  if (!mappingTargets.value.length) mappingTargets.value = [emptySubsystemRole()]
+}
+function onApplicationChange(row) { row.role_ids = [] }
+function onPlatformApplicationChange() { form.value.platform_role_ids = [] }
+function addAdditionalRoleGroup() { form.value.additional_roles.push(emptySubsystemRole()) }
+function removeAdditionalRoleGroup(index) { form.value.additional_roles.splice(index, 1) }
+function resetTemplateForm() {
+  form.value = {
+    name: '',
+    description: '',
+    platform_application_id: '',
+    platform_role_ids: [],
+    platform_scope_type: 'TENANT',
+    platform_scope_id: '',
+    additional_roles: [],
+  }
+  editingTemplateId.value = ''
+  editingTemplateVersion.value = 0
+}
+async function editTemplate(template) {
+  if (!canManageAuthorization.value || saving.value) return
+  let fullTemplate = template
+  // 列表摘要或旧缓存可能没有 roles；编辑时补读详情，确保历史授权完整回填。
+  if (!templateRoles(fullTemplate).length && templateId(template)) {
+    saving.value = true
+    try {
+      fullTemplate = await getPositionAuthorizationTemplate(templateId(template))
+    } catch (error) {
+      emit('toast', error instanceof AuthorizationError ? error.message : (error?.message || '读取模板授权明细失败。'))
+      return
+    } finally {
+      saving.value = false
+    }
+  }
+  const roles = templateRoles(fullTemplate)
+  if (!roles.length) {
+    emit('toast', '该模板当前没有可编辑的应用角色。')
+    return
+  }
+  const primary = roles[0]
+  const primaryRoleIds = roles
+    .filter((role) => role.application_id === primary?.application_id && (role.scope_type || 'TENANT') === (primary?.scope_type || 'TENANT') && (role.scope_id || '') === (primary?.scope_id || ''))
+    .map((role) => role.role_id)
+    .filter(Boolean)
+  const groups = new Map()
+  roles.filter((role) => !(role.application_id === primary?.application_id && (role.scope_type || 'TENANT') === (primary?.scope_type || 'TENANT') && (role.scope_id || '') === (primary?.scope_id || '') && primaryRoleIds.includes(role.role_id))).forEach((role) => {
+    const scopeType = role.scope_type || 'TENANT'
+    const scopeId = role.scope_id || ''
+    const key = `${role.application_id}|${scopeType}|${scopeId}`
+    const group = groups.get(key) || {
+      application_id: role.application_id,
+      role_ids: [],
+      scope_type: scopeType,
+      scope_id: scopeId,
+    }
+    if (role.role_id && !group.role_ids.includes(role.role_id)) group.role_ids.push(role.role_id)
+    groups.set(key, group)
+  })
+  editingTemplateId.value = templateId(fullTemplate)
+  editingTemplateVersion.value = Number(fullTemplate.version || 0)
+  form.value = {
+    name: fullTemplate.name || '',
+    description: fullTemplate.description || '',
+    platform_application_id: primary?.application_id || '',
+    platform_role_ids: primaryRoleIds,
+    platform_scope_type: primary?.scope_type || 'TENANT',
+    platform_scope_id: primary?.scope_id || '',
+    additional_roles: [...groups.values()],
+  }
+  window.setTimeout(() => document.querySelector('.iam-template-editor:not(.iam-role-inheritance-editor)')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0)
+}
+
+async function saveRoleInheritanceMappings() {
+  if (!canManageAuthorization.value || !mappingSourceRoleId.value) return
+  const mappings = mappingTargets.value.flatMap((row) => (
+    Array.isArray(row.role_ids) ? row.role_ids : []
+  )
+    .filter((roleIdValue) => row.application_id && roleIdValue)
+    .map((roleIdValue) => ({
+      target_application_id: row.application_id,
+      target_role_id: roleIdValue,
+      scope_type: row.scope_type || 'TENANT',
+      scope_id: row.scope_type === 'ENVIRONMENT' ? String(row.scope_id || '').trim() : '',
+      status: 'ACTIVE',
+    })))
+  saving.value = true
+  try {
+    await replaceRoleInheritanceMappings(mappingSourceRoleId.value, mappings)
+    emit('toast', '角色继承映射已保存。')
+    const result = await listRoleInheritanceMappings()
+    inheritanceMappings.value = items(result)
+    loadMappingTargets()
+  } catch (error) {
+    emit('toast', error instanceof AuthorizationError ? error.message : (error?.message || '保存角色继承映射失败。'))
+  } finally {
+    saving.value = false
+  }
+}
 
 async function createTemplate() {
-	if (!canManageAuthorization.value) return
+  if (!canManageAuthorization.value) return
   const name = String(form.value.name || '').trim()
-  const roles = expandPositionAuthorizationRoleMappings(form.value)
-  if (!name || !form.value.platform_role_id || !roles.length) {
-    emit('toast', '请填写模板名称，选择一个基础平台角色，并至少配置一个子系统角色。')
+  const roles = []
+  ;(Array.isArray(form.value.platform_role_ids) ? form.value.platform_role_ids : []).forEach((roleIdValue) => {
+    if (!form.value.platform_application_id || !roleIdValue) return
+    roles.push({
+      application_id: form.value.platform_application_id,
+      role_id: roleIdValue,
+      scope_type: form.value.platform_scope_type,
+      scope_id: form.value.platform_scope_type === 'ENVIRONMENT'
+        ? String(form.value.platform_scope_id || '').trim()
+        : '',
+    })
+  })
+  form.value.additional_roles.forEach((row) => {
+    ;(Array.isArray(row.role_ids) ? row.role_ids : []).forEach((roleIdValue) => {
+      if (!row.application_id || !roleIdValue) return
+      roles.push({
+        application_id: row.application_id,
+        role_id: roleIdValue,
+        scope_type: row.scope_type || 'TENANT',
+        scope_id: row.scope_type === 'ENVIRONMENT' ? String(row.scope_id || '').trim() : '',
+      })
+    })
+  })
+  if (!name || !roles.length) {
+    emit('toast', '请填写模板名称并选择一个应用角色。')
     return
   }
   saving.value = true
   try {
-    await createPositionAuthorizationTemplate({ name, description: String(form.value.description || '').trim(), status: 'ACTIVE', roles })
-    form.value = { name: '', description: '', platform_application_id: '', platform_role_id: '', platform_scope_type: 'TENANT', platform_scope_id: '', subsystem_roles: [emptySubsystemRole()] }
-    emit('toast', '标准岗位授权模板已创建。')
+    const payload = {
+      name,
+      description: String(form.value.description || '').trim(),
+      status: 'ACTIVE',
+      roles,
+    }
+    if (editingTemplateId.value) {
+      await updatePositionAuthorizationTemplate(editingTemplateId.value, { ...payload, version: editingTemplateVersion.value })
+      emit('toast', '岗位授权模板已更新。')
+    } else {
+      await createPositionAuthorizationTemplate(payload)
+      emit('toast', '标准岗位授权模板已创建。')
+    }
+    resetTemplateForm()
     await load()
   } catch (error) {
     emit('toast', error instanceof AuthorizationError ? error.message : (error?.message || '创建岗位授权模板失败。'))
-  } finally { saving.value = false }
+  } finally {
+    saving.value = false
+  }
 }
 
 async function saveAssignments() {
-	if (!canManageAuthorization.value) return
+  if (!canManageAuthorization.value) return
   if (!selectedPositionId.value) return
   saving.value = true
   try {
@@ -191,7 +366,9 @@ async function saveAssignments() {
     emit('toast', '标准岗位授权模板映射已保存；有效任职关系将动态继承这些角色。')
   } catch (error) {
     emit('toast', error instanceof AuthorizationError ? error.message : (error?.message || '保存岗位授权配置失败。'))
-  } finally { saving.value = false }
+  } finally {
+    saving.value = false
+  }
 }
 
 async function loadPreview() {
@@ -225,7 +402,7 @@ async function loadEditorPreview() {
 }
 
 async function deleteTemplate(template) {
-	if (!canManageAuthorization.value) return
+  if (!canManageAuthorization.value) return
   openConfirm({
     title: '确认删除岗位授权模板',
     description: `确认删除岗位授权模板“${template.name}”吗？\n\n删除后：\n1. 该模板不再出现在岗位映射列表；\n2. 该模板生成的岗位角色授权将被撤销；\n3. 用户、岗位或组织的手工授权不会被删除；\n4. 授权和审计历史仍会保留。`,
@@ -247,15 +424,40 @@ async function deleteTemplate(template) {
 }
 
 const selectedPosition = computed(() => positions.value.find((item) => positionId(item) === selectedPositionId.value))
+const isEditingTemplate = computed(() => Boolean(editingTemplateId.value))
 
-// 本地模板草稿统计：纯前端 derived，不打 API，因此对主角色和子系统映射的编辑都会即时反映。
+const platformApplicationId = computed(() => applicationId(platformApplications.value[0]))
+const mappingSourceRole = computed(() => {
+  for (const app of applications.value) {
+    const role = roleItems(catalogForApplication(applicationId(app)))
+      .find((item) => roleId(item) === mappingSourceRoleId.value)
+    if (role) return role
+  }
+  return null
+})
+// 本地模板草稿统计：模板保存当前下拉框选中的应用角色；平台角色的继承关系由上方映射在服务端展开。
 const templateDraftStats = computed(() => {
-  const valid = expandPositionAuthorizationRoleMappings(form.value)
+  const valid = form.value.platform_role_ids.length
+    ? [{
+      application_id: form.value.platform_application_id,
+      scope_type: form.value.platform_scope_type,
+      role_count: form.value.platform_role_ids.length,
+    }]
+    : []
+  const mapped = mappingTargets.value.filter((row) => (
+    row.application_id && Array.isArray(row.role_ids) && row.role_ids.length
+  ))
+  const additional = form.value.additional_roles.filter((row) => (
+    row.application_id && Array.isArray(row.role_ids) && row.role_ids.length
+  ))
   return {
-    totalRows: form.value.subsystem_roles.length,
-    validRows: valid.length,
-    distinctApps: new Set(valid.map((row) => row.application_id)).size,
-    environmentRows: valid.filter((row) => row.scope_type === 'ENVIRONMENT').length,
+    totalRows: valid.length + additional.length + mapped.length,
+    validRows: valid.length + additional.length + mapped.length,
+    distinctApps: new Set([...valid.map((row) => row.application_id), ...additional.map((row) => row.application_id), ...mapped.map((row) => row.application_id)]).size,
+    environmentRows:
+      valid.filter((row) => row.scope_type === 'ENVIRONMENT').length
+      + additional.filter((row) => row.scope_type === 'ENVIRONMENT').length
+      + mapped.filter((row) => row.scope_type === 'ENVIRONMENT').length,
   }
 })
 const editorPreviewRoles = computed(() => Array.isArray(editorPreview.value?.roles) ? editorPreview.value.roles : [])
@@ -279,13 +481,105 @@ onMounted(() => {
 
 <template>
   <section class="iam-table-section iam-position-authorization">
+    <div v-if="canManageAuthorization" class="console-table-card iam-template-editor iam-role-inheritance-editor">
+      <header class="iam-template-card-head">
+        <div class="iam-template-card-title">
+          <span class="iam-template-card-icon is-green"><ConsoleIcon name="link" /></span>
+          <div>
+            <h4>基础平台角色继承映射</h4>
+            <p>一个基础平台角色可以统一继承多个子系统角色，模板和岗位只需引用基础平台角色。</p>
+          </div>
+        </div>
+        <span class="iam-standard-authorization-badge">角色授权组</span>
+      </header>
+      <div class="iam-template-grid">
+        <label class="full">
+          <span>基础平台主角色 *</span>
+          <select v-model="mappingSourceRoleId" @change="loadMappingTargets">
+            <option value="">选择基础平台角色</option>
+            <option
+              v-for="role in roleItems(catalogForApplication(platformApplicationId))"
+              :key="roleId(role)"
+              :value="roleId(role)"
+            >
+              {{ roleName(role) }}
+            </option>
+          </select>
+        </label>
+      </div>
+      <p v-if="mappingSourceRole" class="iam-field-help">
+        当前映射源：{{ roleName(mappingSourceRole) }}。保存后，使用该基础平台角色的岗位授权模板会自动展开为下列子系统角色。
+      </p>
+      <div
+        v-for="(mapping, mappingIndex) in mappingTargets"
+        :key="mappingIndex"
+        class="iam-template-role-row iam-template-subsystem-role-row"
+      >
+        <div class="iam-template-catalog-field">
+          <select v-model="mapping.application_id" @change="onApplicationChange(mapping)">
+            <option value="">选择子系统</option>
+            <option
+              v-for="app in subsystemApplications"
+              :key="applicationId(app)"
+              :value="applicationId(app)"
+            >
+              {{ appName(app) }}
+            </option>
+          </select>
+          <small v-if="mapping.application_id">
+            目录 {{ catalogVersion(catalogForApplication(mapping.application_id)) }} ·
+            {{ catalogSyncText(catalogForApplication(mapping.application_id)) }}
+          </small>
+        </div>
+        <RoleMultiSelect
+          v-model="mapping.role_ids"
+          :roles="roleItems(catalogForApplication(mapping.application_id))"
+          :ready="Boolean(mapping.application_id && catalogIsReady(mapping.application_id))"
+          empty-text="请等待目录成功同步"
+        />
+        <select v-model="mapping.scope_type">
+          <option value="TENANT">租户范围</option>
+          <option value="ENVIRONMENT">环境范围</option>
+        </select>
+        <input v-if="mapping.scope_type === 'ENVIRONMENT'" v-model="mapping.scope_id" placeholder="环境 ID" />
+        <button
+          v-if="mapping.role_ids.length"
+          class="console-text-button danger"
+          type="button"
+          @click="revokeMappingTarget(mappingIndex)"
+        >
+          撤回角色赋权
+        </button>
+        <button
+          class="console-text-button danger"
+          type="button"
+          @click="removeMappingTarget(mappingIndex)"
+        >
+          移除
+        </button>
+      </div>
+      <div class="iam-panel-actions">
+        <button class="console-button ghost small" type="button" @click="addMappingTarget">
+          <ConsoleIcon name="plus" />增加子系统角色
+        </button>
+        <button
+          class="console-button primary small"
+          type="button"
+          :disabled="saving || !mappingSourceRoleId"
+          @click="saveRoleInheritanceMappings"
+        >
+          <ConsoleIcon name="save" />保存角色映射
+        </button>
+      </div>
+    </div>
+
     <div v-if="canManageAuthorization" class="console-table-card iam-template-editor">
       <header class="iam-template-card-head">
         <div class="iam-template-card-title">
           <span class="iam-template-card-icon"><ConsoleIcon name="shield" /></span>
           <div>
-            <h4>新建岗位授权模板</h4>
-            <p>把岗位与各应用的实际角色建立标准映射，员工任职生效后即可动态继承。</p>
+            <h4>{{ isEditingTemplate ? '编辑岗位授权模板' : '新建岗位授权模板' }}</h4>
+            <p>把岗位与应用角色建立标准映射，员工任职生效后即可动态继承平台及子系统权限。</p>
           </div>
         </div>
         <span class="iam-standard-authorization-badge">标准授权</span>
@@ -296,34 +590,53 @@ onMounted(() => {
       </div>
       <div class="iam-template-guidance">
         <ConsoleIcon name="info" />
-        <p>模板编码由服务端自动生成。选择一个基础平台主角色，再配置多个“子系统 + 子系统角色”映射；保存后会展开为该主角色对应的授权条目，不按中文名称匹配，也不会创建用户级复制授权。</p>
+        <p>{{ isEditingTemplate ? '以下内容已从岗位映射中的现有模板回填。可直接调整已授权的应用、子系统和角色，保存后更新原模板，不会创建重复模板。' : '模板可选择一个应用并多选角色，也可追加多个子系统及其多个角色。下拉框同时展示基础平台和所有已同步子系统，角色目录由各应用维护并只读同步，保存时按稳定角色 ID 写入。' }}</p>
+      </div>
+      <div v-if="isEditingTemplate" class="iam-template-editing-notice">
+        <ConsoleIcon name="edit" />
+        <span>正在编辑：{{ form.name }}<small>已回填 {{ templateDraftStats.validRows }} 个应用角色</small></span>
+        <button class="console-text-button" type="button" :disabled="saving" @click="resetTemplateForm">取消编辑</button>
       </div>
       <p v-if="!loading && !applications.length" class="iam-field-help">暂无可授权的目标应用。请确认应用已启用；子系统还需要成功同步至少一个 ACTIVE 且可分配的角色。</p>
       <div class="iam-template-roles">
           <div class="iam-template-role-row iam-template-primary-role-row">
             <div class="iam-template-catalog-field">
-              <select v-model="form.platform_application_id" @change="onPlatformApplicationChange"><option value="">选择基础平台</option><option v-for="app in platformApplications" :key="applicationId(app)" :value="applicationId(app)">{{ appName(app) }}</option></select>
-              <small v-if="form.platform_application_id">目录 {{ catalogVersion(catalogForApplication(form.platform_application_id)) }} · 已同步</small>
+              <select v-model="form.platform_application_id" aria-label="选择应用" @change="onPlatformApplicationChange"><option value="">选择应用（平台或子系统）</option><option v-for="app in templateApplications" :key="applicationId(app)" :value="applicationId(app)">{{ appName(app) }}</option></select>
+              <small v-if="form.platform_application_id">目录 {{ catalogVersion(catalogForApplication(form.platform_application_id)) }} · {{ catalogSyncText(catalogForApplication(form.platform_application_id)) }}</small>
             </div>
-            <div class="iam-template-catalog-field">
-              <select v-model="form.platform_role_id" :disabled="!form.platform_application_id"><option value="">选择基础平台主角色</option><option v-for="role in roleItems(catalogForApplication(form.platform_application_id))" :key="roleId(role)" :value="roleId(role)">{{ roleName(role) }}</option></select>
-            </div>
+            <RoleMultiSelect
+              v-model="form.platform_role_ids"
+              :roles="roleItems(catalogForApplication(form.platform_application_id))"
+              :ready="Boolean(form.platform_application_id && catalogIsReady(form.platform_application_id))"
+            />
             <select v-model="form.platform_scope_type"><option value="TENANT">租户范围</option><option value="ENVIRONMENT">环境范围</option></select>
             <input v-if="form.platform_scope_type === 'ENVIRONMENT'" v-model="form.platform_scope_id" placeholder="环境 ID" />
           </div>
-          <div v-for="(mapping, mappingIndex) in form.subsystem_roles" :key="mappingIndex" class="iam-template-role-row iam-template-subsystem-role-row">
+          <div
+            v-for="(row, index) in form.additional_roles"
+            :key="`additional-role-${index}`"
+            class="iam-template-role-row iam-template-subsystem-role-row"
+          >
             <div class="iam-template-catalog-field">
-              <select v-model="mapping.application_id" @change="onApplicationChange(mapping)"><option value="">选择子系统</option><option v-for="app in subsystemApplications" :key="applicationId(app)" :value="applicationId(app)">{{ appName(app) }}</option></select>
-              <small v-if="mapping.application_id">目录 {{ catalogVersion(catalogForApplication(mapping.application_id)) }} · {{ catalogSyncText(catalogForApplication(mapping.application_id)) }}</small>
+              <select v-model="row.application_id" aria-label="选择追加子系统" @change="onApplicationChange(row)">
+                <option value="">选择追加应用</option>
+                <option v-for="app in templateApplications" :key="applicationId(app)" :value="applicationId(app)">{{ appName(app) }}</option>
+              </select>
+              <small v-if="row.application_id">目录 {{ catalogVersion(catalogForApplication(row.application_id)) }} · {{ catalogSyncText(catalogForApplication(row.application_id)) }}</small>
             </div>
-            <div class="iam-template-catalog-field">
-              <select v-model="mapping.role_id" :disabled="!mapping.application_id || !catalogIsReady(mapping.application_id)"><option value="">{{ catalogIsReady(mapping.application_id) ? '选择子系统角色' : '请等待目录成功同步' }}</option><option v-for="role in roleItems(catalogForApplication(mapping.application_id))" :key="roleId(role)" :value="roleId(role)">{{ roleName(role) }}</option></select>
-            </div>
-            <select v-model="mapping.scope_type"><option value="TENANT">租户范围</option><option value="ENVIRONMENT">环境范围</option></select>
-            <input v-if="mapping.scope_type === 'ENVIRONMENT'" v-model="mapping.scope_id" placeholder="环境 ID" />
-            <button class="console-text-button danger" type="button" :disabled="form.subsystem_roles.length === 1" @click="removeSubsystemRole(mappingIndex)">移除</button>
+            <RoleMultiSelect
+              v-model="row.role_ids"
+              :roles="roleItems(catalogForApplication(row.application_id))"
+              :ready="Boolean(row.application_id && catalogIsReady(row.application_id))"
+              empty-text="请先选择已同步应用"
+            />
+            <select v-model="row.scope_type"><option value="TENANT">租户范围</option><option value="ENVIRONMENT">环境范围</option></select>
+            <input v-if="row.scope_type === 'ENVIRONMENT'" v-model="row.scope_id" placeholder="环境 ID" />
+            <button class="console-text-button danger" type="button" @click="removeAdditionalRoleGroup(index)">移除</button>
           </div>
-          <button class="console-button ghost small" type="button" @click="addSubsystemRole"><ConsoleIcon name="plus" />增加子系统角色</button>
+          <button class="console-button ghost small iam-template-add-role-button" type="button" @click="addAdditionalRoleGroup">
+            <ConsoleIcon name="plus" />追加子系统
+          </button>
       </div>
       <div class="iam-template-mount-preview" aria-label="挂载预览（保存前影响分析）">
         <div class="iam-template-mount-head">
@@ -377,7 +690,7 @@ onMounted(() => {
           <button class="console-text-button" type="button" :disabled="!selectedPositionId" @click="scrollToPositionPreview">查看完整预览</button>
         </div>
       </div>
-      <div class="iam-panel-actions"><button class="console-text-button" type="button" :disabled="!selectedPositionId" @click="scrollToPositionPreview">预览影响</button><button class="console-button primary small" type="button" :disabled="saving" @click="createTemplate"><ConsoleIcon name="save" />创建模板</button></div>
+      <div class="iam-panel-actions"><button class="console-text-button" type="button" :disabled="!selectedPositionId" @click="scrollToPositionPreview">预览影响</button><button v-if="editingTemplateId" class="console-button ghost small" type="button" :disabled="saving" @click="resetTemplateForm">取消编辑</button><button class="console-button primary small" type="button" :disabled="saving" @click="createTemplate"><ConsoleIcon name="save" />{{ editingTemplateId ? '保存模板修改' : '创建模板' }}</button></div>
     </div>
 
     <p v-if="canReadAuthorization && !canManageAuthorization" class="iam-field-help" role="status">当前为只读模式：可以查看模板、岗位映射和授权预览，但不能创建、修改或删除模板。</p>
@@ -415,7 +728,7 @@ onMounted(() => {
       <div v-else class="iam-template-assignment-list">
         <div v-for="template in activeTemplates" :key="templateId(template)" class="iam-template-assignment-row">
           <label class="iam-template-assignment"><input v-model="assignedTemplateIds" type="checkbox" :value="templateId(template)" :disabled="!canManageAuthorization" /><span><strong>{{ template.name }}</strong><small>{{ template.code }} · {{ template.affected_users || 0 }} 位受影响用户</small><em>{{ templateRoles(template).map((role) => `${role.application_name || role.application_code} / ${role.role_name || role.role_code}`).join('；') || '未配置角色' }}</em></span></label>
-          <button v-if="canManageAuthorization" class="console-text-button danger iam-template-delete" type="button" :disabled="saving" @click="deleteTemplate(template)">删除模板</button>
+          <div v-if="canManageAuthorization" class="iam-template-row-actions"><button class="console-text-button" type="button" :disabled="saving" @click="editTemplate(template)">编辑</button><button class="console-text-button danger iam-template-delete" type="button" :disabled="saving" @click="deleteTemplate(template)">删除模板</button></div>
         </div>
       </div>
     </div>

@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref, toRaw, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import OwnerSelector from '../components/OwnerSelector.vue'
+import PresaleApprovalRulesPanel from '../components/PresaleApprovalRulesPanel.vue'
 import { formatSignedContractCount } from '../signedContractCount.js'
 import {
   checkCustomerDuplicate, commitCustomerImport, createCustomer, createCustomerFollowup, downloadCustomerImportErrors,
@@ -38,13 +39,13 @@ import { getNotificationUnreadCount, listNotifications, markNotificationRead } f
 import { listOwnerDirectory } from '../api/ownerDirectory.js'
 import { parseNotificationTarget } from '../navigation.js'
 import {
-  addProgress, addWorklog, createPresaleRequest, getApprovalHistory, getAssignments, getPresaleRequest,
+  addProgress, addWorklog, createPresaleRequest, reopenPresaleRequest, getApprovalHistory, getAssignments, getPresaleRequest,
   getPresaleContactPhone,
   getPresaleAvailableActions, getPresaleBoard, getPresaleFilterOptions, getPresaleTimeline,
   cancelPresaleRequest, listPresaleRequests, listWorklogs, replaceAssignments, submitApprovalAction,
   listPresaleAlerts, markPresaleAlertRead,
   listPresaleAlertRules, updatePresaleAlertRule, getPresaleReportSummary, getPresaleReportTrend,
-  getPresaleReportDistribution, requestPresaleReportExport,
+  getPresaleReportDistribution, requestPresaleReportExport, listPresaleExecutionDepartments, selectPresaleExecutionDepartment,
 } from '../api/presale.js'
 import '@/modules/platform/styles/console.css'
 import '../styles/customer-opportunity.css'
@@ -89,6 +90,8 @@ const selectedCustomer = ref(null)
 const customerDetailLoadSequence = ref(0)
 const customerTabLoadSequence = ref(0)
 const selectedOpportunity = ref(null)
+// 详情展示不暴露组织 ID，但负责人变更仍需保留服务端返回的组织归属。
+const selectedOpportunityOwnerOrgID = ref('')
 const selectedPresale = ref(null)
 const presaleContactPhone = ref('')
 const presaleContactPhoneLoading = ref(false)
@@ -110,6 +113,9 @@ const engineerDirectoryLoading = ref(false)
 const selectedEngineerIDs = ref([])
 const engineerQuery = reactive({ keyword: '', department: '' })
 const assignmentReason = ref('')
+const executionDepartments = ref([])
+const selectedExecutionDepartmentID = ref('')
+const departmentSaving = ref(false)
 const stageHistory = ref([])
 const followups = ref([])
 const customerFollowups = ref([])
@@ -229,6 +235,7 @@ const opportunityAttachmentLoading = ref(false)
 const opportunityAttachmentError = ref('')
 const opportunityAttachmentFile = ref(null)
 const presaleCreatePage = ref(false)
+const presaleReopenRequest = ref(null)
 const presaleCreateDialog = ref(false)
 const presaleForm = reactive({ opportunity_id: '', venue: 'REMOTE', service_address: '', contact_name: '', contact_phone: '', description: '', expected_start: '', expected_end: '', urgency: 'NORMAL' })
 const presaleOpportunityKeyword = ref('')
@@ -259,6 +266,7 @@ const showAlertConfig = ref(false)
 const showReport = ref(false)
 const reportLoading = ref(false)
 const reportSummary = ref(null)
+const reportError = ref('')
 const reportTrend = ref([])
 const reportDistribution = ref([])
 const reportFilters = reactive(defaultReportFilters())
@@ -269,6 +277,7 @@ const crmSession = ref(null)
 const crmRoleNames = Object.freeze({
   sales: '销售人员',
   sales_director: '销售总监',
+  crm_super_admin: '客户与商机超级管理员',
   team_lead: '团队负责人',
   technician: '技术人员',
   implementation_engineer: '实施工程师',
@@ -276,7 +285,7 @@ const crmRoleNames = Object.freeze({
   customer_admin: '客户管理员',
   auditor: '审计员',
 })
-const currentUserLabel = computed(() => String(crmSession.value?.display_name || crmSession.value?.user_id || '').trim() || '当前用户')
+const currentUserLabel = computed(() => String(crmSession.value?.username || crmSession.value?.account_name || crmSession.value?.display_name || '').trim() || '当前用户')
 const currentUserInitial = computed(() => {
   const label = currentUserLabel.value
   return /^[\x00-\x7F]+$/.test(label) ? label.slice(0, 2).toUpperCase() : Array.from(label)[0] || '用'
@@ -301,6 +310,7 @@ const canReadOpportunities = computed(() => (crmSession.value?.permissions || []
 const canReadPresales = computed(() => (crmSession.value?.permissions || []).includes('presale.read'))
 const canReadNotifications = computed(() => canReadOpportunities.value || canReadPresales.value)
 const canConfigureStageAlerts = computed(() => (crmSession.value?.permissions || []).includes('opportunity.alert.config'))
+const canManagePresaleApprovalRules = computed(() => (crmSession.value?.permissions || []).includes('presale.approval_rule.manage'))
 const canReadCustomerAudit = computed(() => (crmSession.value?.permissions || []).includes('customer.audit.read'))
 const canProvisionPortalAccount = computed(() => (crmSession.value?.permissions || []).includes('portal_account.provision'))
 const canRevokePortalAccount = computed(() => (crmSession.value?.permissions || []).includes('portal_account.revoke'))
@@ -349,6 +359,7 @@ const portalDisableAvailable = computed(() => runtimeCapability('portal_access_d
 const customerImportScanAvailable = computed(() => runtimeCapability('customer_import_scan').available)
 const customerExportAvailable = computed(() => runtimeCapability('customer_export').available)
 const presaleReportExportAvailable = computed(() => runtimeCapability('presale_report_export').available)
+const canReadPresaleReports = computed(() => (crmSession.value?.permissions || []).includes('presale.report'))
 const presaleRequestSubmissionAvailable = computed(() => runtimeCapability('presale_request_submission').available)
 const qbLaunchQuotationAvailable = computed(() => runtimeCapability('qb_launch_quotation').available)
 const qbLaunchBidAvailable = computed(() => runtimeCapability('qb_launch_bid').available)
@@ -408,14 +419,14 @@ function navigatePlatform() {
   mobileMenuOpen.value = false
   closeSubsystemTabOrFallback(window, () => router.replace({ name: 'portal' }))
 }
-function assignees(value) { return (value || []).map((item) => item.person_name || item.person_id).join('、') || '未指派' }
+function assignees(value) { return (value || []).map((item) => item.person_name || '未命名执行人').join('、') || '未指派' }
 // 指派接口采用全量替换语义；以当前指派为基线计算差异，可让已停用或不在本次目录结果中的人员
 // 被明确保留或移出，避免一次目录筛选把仍有效的既有指派静默删除。
 const assignmentDiff = computed(() => {
   const current = new Set((selectedPresale.value?.current_assignees || []).map((item) => item.person_id))
   const target = new Set(selectedEngineerIDs.value)
-  const names = new Map(engineerDirectory.value.map((item) => [item.person_id, `${item.person_name}（${item.person_id}）`]))
-  return { added: [...target].filter((id) => !current.has(id)).map((id) => names.get(id) || id), retained: [...target].filter((id) => current.has(id)).map((id) => names.get(id) || id), removed: [...current].filter((id) => !target.has(id)).map((id) => names.get(id) || id) }
+  const names = new Map(engineerDirectory.value.map((item) => [item.person_id, item.person_name]))
+  return { added: [...target].filter((id) => !current.has(id)).map((id) => names.get(id) || '未命名人员'), retained: [...target].filter((id) => current.has(id)).map((id) => names.get(id) || '未命名人员'), removed: [...current].filter((id) => !target.has(id)).map((id) => names.get(id) || '未命名人员') }
 })
 const unavailableCurrentAssignees = computed(() => {
   const visible = new Set(engineerDirectory.value.map((item) => item.person_id))
@@ -442,15 +453,20 @@ const customerStatusOptions = Object.freeze([{ value: 'ACTIVE', label: '有效' 
 const opportunityStatusOptions = Object.freeze([{ value: 'FOLLOWING', label: '跟进中' }, { value: 'CLOSED', label: '已关闭' }, { value: 'VOID', label: '已作废' }])
 const opportunityStageOptions = Object.freeze(['初步接触', '需求沟通', '方案制定', '报价', '投标', '已签约', '失败'])
 const ownerDirectoryNames = ref({})
+function platformUserName(item) {
+  return String(item?.username || item?.account_name || item?.display_name || '').trim() || '未命名用户'
+}
 function rememberOwnerDirectory(items) {
   for (const item of items || []) {
-    if (item?.user_id && item?.display_name) ownerDirectoryNames.value[item.user_id] = item.display_name
+    if (item?.user_id) ownerDirectoryNames.value[item.user_id] = platformUserName(item)
   }
 }
-function ownerLabel(userId) { return ownerDirectoryNames.value[userId] || userId || '—' }
+function ownerLabel(userId) { return ownerDirectoryNames.value[userId] || '未命名用户' }
+function operationUserLabel(item) { return item?.actor_name || ownerLabel(item?.actor_id) }
+function operationSubjectLabel(item) { return item?.subject_name || ownerLabel(item?.subject_id) }
 
 // 列表或详情里的负责人可能不在已加载的目录分页中；按缺失的用户 ID 精确查询并缓存名字，
-// 让“负责人”列优先显示姓名而不是原始用户 ID。目录暂不可用时静默保持 ID 回退。
+// 让“负责人”列只显示基础平台姓名。目录暂不可用时显示通用提示，不向业务用户暴露 ID。
 async function resolveOwnerNames(userIDs) {
   const missing = [...new Set((userIDs || []).filter((id) => id && !ownerDirectoryNames.value[id]))]
   if (!missing.length) return
@@ -462,7 +478,7 @@ async function resolveOwnerNames(userIDs) {
         const result = await listOwnerDirectory({ user_id: id, page: 1, page_size: 1 })
         rememberOwnerDirectory(result?.items || [])
       } catch {
-        // 目录暂不可用时保持 ID 回退，不影响列表本身。
+        // 目录暂不可用时保持通用提示，不影响列表本身。
       }
     }
   }
@@ -497,6 +513,23 @@ function requestStatusText(value) {
 }
 function venueText(value) { return ({ REMOTE: '远程', ONSITE: '现场' })[value] || '未知场地' }
 function urgencyText(value) { return ({ NORMAL: '普通', URGENT: '紧急' })[value] || '未知级别' }
+function presaleOpportunityLabel(item) {
+  const name = String(item?.opportunity_name || '').trim()
+  const number = String(item?.opportunity_no || '').trim()
+  if (name && number) return `${name}（${number}）`
+  return name || number || '—'
+}
+// 看板和列表都应使用服务端返回的申请主键；兼容旧版接口曾返回 request_id 的响应，
+// 避免卡片点击时把 undefined 传给详情接口而表现为“点击无反应”。
+function presaleRequestID(item) {
+  return item?.id ?? item?.request_id ?? item?.request?.id ?? ''
+}
+function applicantLabel(item) {
+  return String(item?.applicant_name || '').trim() || ownerLabel(item?.applicant_id)
+}
+function presalePersonOptionLabel(item) {
+  return String(item?.label || '').trim() || ownerLabel(item?.value)
+}
 function pushStatusText(value) {
   return ({ PENDING: '历史待处理', SENDING: '历史处理中', SUCCESS: '已记录', RETRY_WAIT: '历史待重试', DEAD_LETTER: '历史异常' })[value] || '未知状态'
 }
@@ -542,6 +575,7 @@ function reportBarWidth(value) {
 }
 async function openReports() {
   showReport.value = true
+  reportError.value = ''
   await loadReportFilterOptions()
   await loadReports()
 }
@@ -551,7 +585,7 @@ async function loadReports() {
     const params = reportParams()
     const [summary, trend, distribution] = await Promise.all([getPresaleReportSummary(params), getPresaleReportTrend(params), getPresaleReportDistribution(params)])
     reportSummary.value = summary; reportTrend.value = trend || []; reportDistribution.value = distribution || []
-  } catch (value) { showError(value) } finally { reportLoading.value = false }
+  } catch (value) { reportError.value = value?.message || '投入报表加载失败' } finally { reportLoading.value = false }
 }
 async function exportReport() {
   if (!presaleReportExportAvailable.value) {
@@ -799,7 +833,7 @@ function editOpportunity() {
     expected_amount: value.expected_amount, expected_sign_date: value.expected_sign_date,
     requirement_summary: value.requirement_summary, system_count: value.system_count || 0,
     pain_points: value.pain_points || '', competitor_info: value.competitor_info || '',
-    owner_user_id: value.owner_user_id, owner_org_id: value.owner_org_id || '', reason: '',
+    owner_user_id: value.owner_user_id, owner_org_id: selectedOpportunityOwnerOrgID.value, reason: '',
   })
   opportunityEditMode.value = true
   opportunityFormInitial = JSON.stringify(opportunityForm)
@@ -868,6 +902,7 @@ async function loadCurrent() {
         const result = await listPresaleRequests({ ...params, page: presalePage.number, page_size: presalePage.size })
         if (sequence !== currentLoadSequence.value || activeSection.value !== section) return
         presales.value = result?.items || []
+        void resolveOwnerNames(presales.value.flatMap((item) => [item.applicant_id, ...(item.current_assignees || []).map((assignee) => assignee.person_id)]))
         presalePage.number = Number(result?.page || presalePage.number)
         presalePage.size = Number(result?.page_size || presalePage.size)
         presalePage.total = Number(result?.total || 0)
@@ -926,6 +961,7 @@ async function switchPresaleView(view) {
 
 async function openPresaleCreatePage() {
   if (!canCreatePresale.value || !presaleRequestSubmissionAvailable.value) return
+  presaleReopenRequest.value = null
   Object.assign(presaleForm, {
     opportunity_id: '', venue: 'REMOTE', service_address: '', contact_name: '', contact_phone: '',
     description: '', expected_start: '', expected_end: '', urgency: 'NORMAL',
@@ -945,6 +981,7 @@ function closePresaleCreatePage() {
   if (!confirmDiscardIfDirty(presaleFormDirty.value)) return
   presaleOpportunityOptionsLoadSequence.value += 1
   presaleCreatePage.value = false
+  presaleReopenRequest.value = null
   presaleFormInitial = ''
   resetMessages()
 }
@@ -1099,6 +1136,7 @@ async function openCustomerTab(tab) {
 			const result = await listCustomerAuditLogs(customerID, { page: 1, page_size: 50 })
 			if (sequence !== customerTabLoadSequence.value || selectedCustomer.value?.id !== customerID || customerTab.value !== tab) return
 			customerAuditLogs.value = result?.items || []
+			void resolveOwnerNames(customerAuditLogs.value.map((item) => item.actor_id))
 		}
 		if (tab === 'portal') {
 			const inviteRequest = canReadPortalInvite.value ? getCurrentPortalInvite(customerID) : Promise.resolve(null)
@@ -1319,7 +1357,8 @@ async function openOpportunity(id) {
     // 主档、阶段、跟进和当前团队组成首屏一致快照；任期、附件、外部状态和售前依赖
     // 随后独立加载，任一可选依赖失败都不应关闭商机基本详情。
     const [detail, history, records, team] = await Promise.all([getOpportunity(id), getOpportunityStageHistory(id, { page: 1, page_size: 50 }), listOpportunityFollowups(id, { page: 1, page_size: 50 }), getOpportunityMembers(id)])
-    selectedOpportunity.value = detail; stageHistory.value = history?.items || []; followups.value = records?.items || []; opportunityTeam.value = team?.members || []; opportunityTeamDirectoryAvailable.value = team?.directory_available !== false
+    selectedOpportunityOwnerOrgID.value = detail?.owner_org_id || ''
+    selectedOpportunity.value = { ...detail, owner_org_id: '基础平台组织' }; stageHistory.value = history?.items || []; followups.value = records?.items || []; opportunityTeam.value = team?.members || []; opportunityTeamDirectoryAvailable.value = team?.directory_available !== false
     void resolveOwnerNames([detail?.owner_user_id])
     opportunityMemberTerms.value = []; opportunityMemberTermsError.value = ''; opportunityMemberTermsPage.number = 1; opportunityMemberTermsPage.total = 0
     void loadOpportunityMemberTerms(id, 1)
@@ -1339,6 +1378,7 @@ async function loadOpportunityMemberTerms(opportunityID = selectedOpportunity.va
     const result = await listOpportunityMemberTerms(opportunityID, { page, page_size: opportunityMemberTermsPage.size })
 		if (opportunityMemberTermLoads.isCurrent(loadToken, selectedOpportunity.value?.id)) {
       opportunityMemberTerms.value = result?.items || []
+      void resolveOwnerNames((result?.items || []).flatMap((item) => [item.user_id, item.started_by, item.ended_by]))
       opportunityMemberTermsPage.number = Number(result?.page || page)
       opportunityMemberTermsPage.total = Number(result?.total || 0)
     }
@@ -1501,6 +1541,27 @@ function openOpportunityPresaleCreate() {
   presaleCreateDialog.value = true
 }
 
+async function reopenPresaleApproval() {
+  const request = selectedPresale.value?.request
+  if (!request || !canCreatePresale.value || !presaleRequestSubmissionAvailable.value) return
+  resetMessages()
+  presaleReopenRequest.value = { id: request.id, version: request.version, request_no: request.request_no }
+  Object.assign(presaleForm, {
+    opportunity_id: String(request.opportunity_id || ''), venue: request.venue || 'REMOTE', service_address: request.service_address || '',
+    contact_name: request.contact_name || '', contact_phone: '', description: request.description || '',
+    expected_start: request.expected_start ? new Date(request.expected_start).toISOString().slice(0, 16) : '',
+    expected_end: request.expected_end ? new Date(request.expected_end).toISOString().slice(0, 16) : '', urgency: request.urgency || 'NORMAL',
+  })
+  selectedPresale.value = null
+  presaleCreatePage.value = true
+  presaleOpportunityKeyword.value = ''
+  presaleOpportunityOptions.value = []
+  presaleOpportunityOptionsTotal.value = 0
+  presaleOpportunityOptionsError.value = ''
+  presaleFormInitial = JSON.stringify(presaleForm)
+  await loadPresaleOpportunityOptions()
+}
+
 function closeOpportunityPresaleCreate() {
   if (presaleCreateLoading.value) return
   presaleCreateDialog.value = false
@@ -1654,7 +1715,7 @@ async function saveStageAlertRule(rule) {
   }
 }
 function openOwnerEditor() {
-  Object.assign(ownerForm, { owner_user_id: selectedOpportunity.value.owner_user_id, owner_org_id: selectedOpportunity.value.owner_org_id || '', reason: '' })
+  Object.assign(ownerForm, { owner_user_id: selectedOpportunity.value.owner_user_id, owner_org_id: selectedOpportunityOwnerOrgID.value, reason: '' })
   ownerDialog.value = true
 }
 function teamDirectoryUser(member) {
@@ -1662,7 +1723,7 @@ function teamDirectoryUser(member) {
   return teamDirectoryOptions.value.find((item) => item.user_id === userID) || (typeof member === 'object' ? member : null)
 }
 function teamMemberName(member) {
-  return teamDirectoryUser(member)?.display_name || (typeof member === 'string' ? member : member?.user_id) || '未知人员'
+  return platformUserName(teamDirectoryUser(member))
 }
 function teamMemberOrganizations(member) {
   const organizations = teamDirectoryUser(member)?.organizations || []
@@ -1694,7 +1755,8 @@ function removeTeamMember(index) {
 }
 async function submitOwner() {
   try {
-    selectedOpportunity.value = await changeOpportunityOwner(selectedOpportunity.value.id, { ...ownerForm, version: selectedOpportunity.value.version })
+    selectedOpportunityOwnerOrgID.value = ownerForm.owner_org_id
+    selectedOpportunity.value = { ...(await changeOpportunityOwner(selectedOpportunity.value.id, { ...ownerForm, version: selectedOpportunity.value.version })), owner_org_id: '基础平台组织' }
     ownerDialog.value = false; notice.value = '负责人已变更，事务通知事件已生成。'; await openOpportunity(selectedOpportunity.value.id); await loadCurrent()
   } catch (value) { showError(value) }
 }
@@ -1743,6 +1805,7 @@ async function refreshPresaleTimeline(id) {
     const value = await getPresaleTimeline(id, { limit: 20 })
     if (sequence !== presaleTimelineLoadSequence.value || Number(selectedPresale.value?.request?.id) !== Number(id)) return
     presaleTimeline.value = value?.items || []
+    void resolveOwnerNames(presaleTimeline.value.flatMap((item) => [item.actor_id, item.subject_id]))
     presaleTimelineCursor.value = value?.next_cursor || ''
   } catch {
     if (sequence !== presaleTimelineLoadSequence.value || Number(selectedPresale.value?.request?.id) !== Number(id)) return
@@ -1763,6 +1826,7 @@ async function loadMorePresaleTimeline() {
     // 稳定游标的分页边界仍可能重复返回末条事件，按事件 ID 去重后再追加，保持时间线只读且无重复。
     const known = new Set(presaleTimeline.value.map((item) => item.event_id))
     presaleTimeline.value = [...presaleTimeline.value, ...(value?.items || []).filter((item) => !known.has(item.event_id))]
+    void resolveOwnerNames((value?.items || []).flatMap((item) => [item.actor_id, item.subject_id]))
     presaleTimelineCursor.value = value?.next_cursor || ''
   } catch {
     if (sequence !== presaleTimelineLoadSequence.value || Number(selectedPresale.value?.request?.id) !== Number(id)) return
@@ -1823,7 +1887,7 @@ async function loadEngineerDirectory() {
     const value = await listOwnerDirectory({ keyword: engineerQuery.keyword, page: 1, page_size: 50 })
     engineerDirectory.value = (value?.items || []).map((item) => ({
       person_id: item.user_id,
-      person_name: item.display_name || item.user_id,
+      person_name: platformUserName(item),
       department: (item.organizations || []).map((org) => org.organization_name).filter(Boolean).join('、'),
       role: 'implementation_engineer',
       valid_flag: true,
@@ -1836,12 +1900,18 @@ async function openEngineerPicker() {
   selectedEngineerIDs.value = (selectedPresale.value?.current_assignees || []).map((item) => item.person_id)
   assignmentReason.value = ''; engineerPickerOpen.value = true; await loadEngineerDirectory()
 }
+async function loadExecutionDepartments() { try { const result = await listPresaleExecutionDepartments(); executionDepartments.value = result?.data || result || [] } catch (value) { showError(value) } }
+async function saveExecutionDepartment() {
+  if (!selectedPresale.value?.request?.id || !selectedExecutionDepartmentID.value) return
+  departmentSaving.value = true
+  try { await selectPresaleExecutionDepartment(selectedPresale.value.request.id, { department_id: selectedExecutionDepartmentID.value, version: Number(presaleAvailableActions.value?.version) }); await openPresale(selectedPresale.value.request.id, { clearResult: false }) } catch (value) { showError(value) } finally { departmentSaving.value = false }
+}
 function assignmentTargets() {
   const byID = new Map(engineerDirectory.value.map((item) => [item.person_id, item]))
   const current = new Map((selectedPresale.value?.current_assignees || []).map((item) => [item.person_id, item]))
   return selectedEngineerIDs.value.map((personID) => {
     const person = byID.get(personID) || current.get(personID)
-    return { person_id: personID, person_name: person?.person_name || personID, department: person?.department || '', role: person?.role || 'implementation_engineer' }
+    return { person_id: personID, person_name: person?.person_name || '未命名用户', department: person?.department || '', department_id: selectedPresale.value?.request?.execution_department_id || '', role: person?.role || 'implementation_engineer' }
   })
 }
 async function loadAlerts() {
@@ -1934,7 +2004,9 @@ async function submitOpportunity() {
       // 普通更新 DTO 不接受客户归属和负责人字段；负责人变更必须走独立接口，
       // 以执行人员目录校验、对象权限检查、乐观锁和审计记录。
       const { customer_id, owner_user_id, owner_org_id, ...payload } = opportunityForm
-      selectedOpportunity.value = await updateOpportunity(selectedOpportunity.value.id, { ...payload, system_count: Number(payload.system_count || 0), version: selectedOpportunity.value.version })
+      const updatedOpportunity = await updateOpportunity(selectedOpportunity.value.id, { ...payload, system_count: Number(payload.system_count || 0), version: selectedOpportunity.value.version })
+      selectedOpportunityOwnerOrgID.value = updatedOpportunity?.owner_org_id || selectedOpportunityOwnerOrgID.value
+      selectedOpportunity.value = { ...updatedOpportunity, owner_org_id: '基础平台组织' }
       notice.value = '商机主档已更新。'
     } else {
       const { reason, ...payload } = opportunityForm
@@ -1958,9 +2030,10 @@ function changeOpportunityStatus(action) {
     confirmText: voiding ? '确认作废' : '确认恢复',
     onSubmit: async (reason) => {
       try {
-        selectedOpportunity.value = voiding
+        const statusResult = voiding
           ? await voidOpportunity(opportunity.id, { version: opportunity.version, reason })
           : await restoreOpportunity(opportunity.id, { version: opportunity.version, reason })
+        selectedOpportunity.value = { ...statusResult, owner_org_id: '基础平台组织' }
         notice.value = voiding ? '商机已作废。' : '商机已恢复。'
         await loadCurrent()
       } catch (value) { showError(value) }
@@ -1973,7 +2046,7 @@ async function submitStage() {
     const payload = { target_stage: stageForm.target_stage, reason: stageForm.reason, version: selectedOpportunity.value.version }
     if (stageForm.contract_ref) payload.contract_ref = stageForm.contract_ref
     if (stageForm.lost_reason) payload.lost_reason = stageForm.lost_reason
-    selectedOpportunity.value = await changeOpportunityStage(selectedOpportunity.value.id, payload)
+    selectedOpportunity.value = { ...(await changeOpportunityStage(selectedOpportunity.value.id, payload)), owner_org_id: '基础平台组织' }
     stageDialog.value = false; notice.value = '阶段已生效并写入历史。'; await openOpportunity(selectedOpportunity.value.id); await loadCurrent()
   } catch (value) { showError(value) }
 }
@@ -1982,7 +2055,7 @@ async function submitTerminal() {
     const payload = { version: selectedOpportunity.value.version, reason: terminalForm.reason }
     if (selectedOpportunity.value.terminal_pending_type === 'CONTRACT') payload.contract_ref = terminalForm.contract_ref
     if (selectedOpportunity.value.terminal_pending_type === 'LOST_REASON') payload.lost_reason = terminalForm.lost_reason
-    selectedOpportunity.value = await completeOpportunityTerminalTodo(selectedOpportunity.value.id, payload)
+    selectedOpportunity.value = { ...(await completeOpportunityTerminalTodo(selectedOpportunity.value.id, payload)), owner_org_id: '基础平台组织' }
     terminalDialog.value = false; notice.value = '终态待办已补全。'; await openOpportunity(selectedOpportunity.value.id); await loadCurrent()
   } catch (value) { showError(value) }
 }
@@ -1997,7 +2070,7 @@ async function submitCustomerFollowup() {
   try {
     const payload = { type: customerFollowupForm.type, content: customerFollowupForm.content, followed_at: new Date(customerFollowupForm.followed_at).toISOString() }
     if (customerFollowupForm.next_follow_at) payload.next_follow_at = new Date(customerFollowupForm.next_follow_at).toISOString()
-    await createCustomerFollowup(selectedCustomer.value.id, payload); customerFollowupDialog.value = false; notice.value = '客户沟通记录已添加。'; await openCustomer(selectedCustomer.value.id)
+    await createCustomerFollowup(selectedCustomer.value.id, payload); customerFollowupDialog.value = false; notice.value = '客户沟通记录已添加。'; await openCustomer(selectedCustomer.value.id); await loadCurrent()
   } catch (value) { showError(value) }
 }
 async function submitPresale({ openDetail = true, refreshList = true } = {}) {
@@ -2020,6 +2093,15 @@ async function submitPresale({ openDetail = true, refreshList = true } = {}) {
   if (expectedEnd <= expectedStart) { error.value = '预计结束时间必须晚于预计开始时间。'; return null }
   presaleCreateLoading.value = true
   try {
+    if (presaleReopenRequest.value) {
+      const reopened = await reopenPresaleRequest(presaleReopenRequest.value.id, presaleReopenRequest.value.version)
+      notice.value = `申请 ${presaleReopenRequest.value.request_no} 已重新发起审批，申请 ID 保持不变。`
+      presaleReopenRequest.value = null
+      presaleCreatePage.value = false
+      if (refreshList) await loadCurrent()
+      if (openDetail) await openPresale(reopened.id)
+      return reopened
+    }
     // 内部流程可能已提交但响应在网络中丢失；同一规范化命令复用幂等键，
     // 直到服务端明确成功才清除，避免重复创建申请。
     const retry = presaleMutationRetries.keyFor('create', opportunityID, {
@@ -2113,7 +2195,10 @@ async function runPresale(action) {
   const isCurrentMutation = () => mutationContext === presaleMutationContextSequence.value && Number(selectedPresale.value?.request?.id) === Number(id)
   try {
     if (action === 'assignments') presaleResult.value = await getAssignments(id)
-    if (action === 'history') presaleResult.value = await getApprovalHistory(id)
+    if (action === 'history') {
+      presaleResult.value = await getApprovalHistory(id)
+      void resolveOwnerNames((presaleResult.value || []).map((item) => item.approver_id || item.actor_id))
+    }
     if (action === 'assign') {
       if (!assignmentReason.value.trim()) { error.value = '改派原因必填。'; return }
       const targets = assignmentTargets()
@@ -2232,20 +2317,21 @@ onMounted(async () => {
         </div>
       </header>
       <section class="console-content crm-content">
-        <header class="console-page-head crm-page-head"><div><h1>{{ activeSection === 'presale' && presaleCreatePage ? '新建售前申请' : sectionTitle }}</h1><p>{{ activeSection === 'presale' && presaleCreatePage ? '填写售前支持需求，提交后进入两级审批流程' : activeSection === 'notifications' ? '通知收件人固定为当前登录用户，不受 SELF / ORG / ALL 数据范围扩展' : '可见数据与可执行动作均由服务端权限和状态控制' }}</p></div><div v-if="activeSection === 'presale'" class="crm-actions"><template v-if="presaleCreatePage"><button type="button" :disabled="presaleCreateLoading" @click="closePresaleCreatePage">← 返回申请列表</button><button class="primary" type="submit" form="presale-create-form" :disabled="presaleCreateLoading">{{ presaleCreateLoading ? '提交中…' : '提交申请' }}</button></template><template v-else><button v-if="canCreatePresale && presaleRequestSubmissionAvailable" class="primary" type="button" @click="openPresaleCreatePage">新建申请</button><button @click="openReports">投入报表</button><button @click="loadAlerts">未读预警 {{ alerts.length }}</button><button @click="openAlertConfig">预警规则</button></template></div><div v-if="activeSection === 'opportunities'" class="crm-actions"><button @click="loadStageAlerts">刷新阶段告警</button><button v-if="canConfigureStageAlerts" @click="openStageAlertRuleEditor">阶段告警规则</button></div></header>
+        <header class="console-page-head crm-page-head"><div><h1>{{ activeSection === 'presale' && presaleCreatePage ? '新建售前申请' : sectionTitle }}</h1><p>{{ activeSection === 'presale' && presaleCreatePage ? '填写售前支持需求，提交后进入两级审批流程' : activeSection === 'notifications' ? '通知收件人固定为当前登录用户，不受 SELF / ORG / ALL 数据范围扩展' : '可见数据与可执行动作均由服务端权限和状态控制' }}</p></div><div v-if="activeSection === 'presale'" class="crm-actions"><template v-if="presaleCreatePage"><button type="button" :disabled="presaleCreateLoading" @click="closePresaleCreatePage">← 返回申请列表</button><button class="primary" type="submit" form="presale-create-form" :disabled="presaleCreateLoading">{{ presaleCreateLoading ? '提交中…' : '提交申请' }}</button></template><template v-else><button v-if="canCreatePresale && presaleRequestSubmissionAvailable" class="primary" type="button" @click="openPresaleCreatePage">新建申请</button><button v-if="canReadPresaleReports" @click="openReports">投入报表</button><button @click="loadAlerts">未读预警 {{ alerts.length }}</button><button @click="openAlertConfig">预警规则</button></template></div><div v-if="activeSection === 'opportunities'" class="crm-actions"><button @click="loadStageAlerts">刷新阶段告警</button><button v-if="canConfigureStageAlerts" @click="openStageAlertRuleEditor">阶段告警规则</button></div></header>
       <p v-if="error" class="crm-alert error" role="alert">{{ error }}</p><p v-if="notice" class="crm-alert success" role="status">{{ notice }}</p><p v-if="runtimeCapabilitiesError" class="crm-alert warning" role="status">{{ runtimeCapabilitiesError }}</p>
       <section v-if="activeSection === 'customers'" class="crm-toolbar crm-customer-filters">
         <label>客户号 / 名称<input v-model.trim="customerFilters.keyword" @keyup.enter="loadCurrent"></label>
         <label>类型<input v-model.trim="customerFilters.type" list="customer-type-options" placeholder="业主 / 三方 等"></label><datalist id="customer-type-options"><option v-for="item in customerTypeSuggestions" :key="item" :value="item"></option></datalist><label>行业<select v-model="customerFilters.industry"><option value="">全部行业</option><option v-for="item in customerIndustryOptions" :key="item" :value="item">{{ item }}</option></select></label><label>区域<input v-model.trim="customerFilters.region" list="customer-region-options" placeholder="华北 / 华南 等"></label><datalist id="customer-region-options"><option v-for="item in customerRegionSuggestions" :key="item" :value="item"></option></datalist>
         <label>查找负责人<input v-model.trim="customerOwnerKeyword" type="search" placeholder="输入姓名" @keyup.enter.prevent="loadCustomerOwnerOptions"></label>
-        <label v-if="!customerOwnerOptionsError">负责人<select v-model="customerFilters.owner_id" :disabled="customerOwnerOptionsLoading"><option value="">全部负责人</option><option v-for="user in customerOwnerOptions" :key="user.user_id" :value="user.user_id">{{ user.display_name }}</option></select></label>
+        <label v-if="!customerOwnerOptionsError">负责人<select v-model="customerFilters.owner_id" :disabled="customerOwnerOptionsLoading"><option value="">全部负责人</option><option v-for="user in customerOwnerOptions" :key="user.user_id" :value="user.user_id">{{ platformUserName(user) }}</option></select></label>
         <label v-else>负责人 ID<input v-model.trim="customerFilters.owner_id" type="text" placeholder="输入负责人用户 ID（OIDC sub）"></label>
         <label>状态<select v-model="customerFilters.status"><option value="">全部状态</option><option v-for="item in customerStatusOptions" :key="item.value" :value="item.value">{{ item.label }}</option></select></label><label>创建开始<input v-model="customerFilters.created_from" type="date"></label><label>创建结束<input v-model="customerFilters.created_to" type="date"></label><label>最近跟进开始<input v-model="customerFilters.last_followup_from" type="date"></label><label>最近跟进结束<input v-model="customerFilters.last_followup_to" type="date"></label><label>排序<select v-model="customerFilters.sort_by"><option value="updated_at">更新时间</option><option value="created_at">创建时间</option><option value="name">客户名称</option><option value="last_followup_at">最近跟进</option><option value="opportunity_amount_sum">商机金额汇总</option></select></label><label>顺序<select v-model="customerFilters.sort_order"><option value="desc">降序</option><option value="asc">升序</option></select></label>
         <button type="button" :disabled="customerOwnerOptionsLoading" @click="loadCustomerOwnerOptions">{{ customerOwnerOptionsLoading ? '查找中…' : '查找负责人' }}</button><button @click="page.number = 1; loadCurrent()">查询</button><button @click="customerFilters.view = customerFilters.view === 'table' ? 'cards' : 'table'; syncCustomerURL()">{{ customerFilters.view === 'table' ? '卡片视图' : '列表视图' }}</button><button v-if="canCreateCustomer" class="primary" @click="openNewCustomer">新建</button><button v-if="canImportCustomers" :disabled="!customerImportScanAvailable" :title="customerImportScanAvailable ? '' : '可信文件扫描器未配置'" @click="openCustomerImport">Excel 导入</button><button v-if="canExportCustomers" :disabled="!customerExportAvailable" :title="customerExportAvailable ? '' : '客户导出 Provider 未配置'" @click="exportCustomers">导出</button>
       </section>
       <p v-if="activeSection === 'customers' && customerOwnerOptionsError" class="crm-alert error" role="alert">{{ customerOwnerOptionsError }} 负责人筛选已回退为手动输入用户 ID。</p>
       <section v-else-if="activeSection === 'opportunities'" class="crm-toolbar"><label>关键词<input v-model.trim="filters.keyword" @keyup.enter="loadCurrent"></label><label v-if="!boardMode">状态<select v-model="filters.status"><option value="">全部状态</option><option v-for="item in opportunityStatusOptions" :key="item.value" :value="item.value">{{ item.label }}</option></select></label><label v-if="!boardMode">阶段<select v-model="filters.stage"><option value="">全部阶段</option><option v-for="item in opportunityStageOptions" :key="item" :value="item">{{ item }}</option></select></label><button @click="loadCurrent">查询</button><button @click="boardMode = !boardMode; loadCurrent()">{{ boardMode ? '列表视图' : '阶段看板' }}</button><button class="primary" @click="openNewOpportunity">新建</button></section>
-      <form v-else-if="activeSection === 'presale' && !presaleCreatePage" class="crm-toolbar crm-presale-filters" @submit.prevent="applyPresaleFilters"><label>申请编号<input v-model.trim="presaleFilters.request_no" maxlength="32"></label><label>商机<select v-model="presaleFilters.opportunity_id"><option value="">全部可见商机</option><option v-for="item in presaleFilterOptions.opportunities" :key="item.value" :value="String(item.value)">{{ item.label }}</option></select></label><label>申请人<select v-model="presaleFilters.applicant_id"><option value="">全部可见申请人</option><option v-for="item in presaleFilterOptions.applicants" :key="item.value" :value="item.value">{{ item.label || item.value }}</option></select></label><label>执行人<select v-model="presaleFilters.assignee_id"><option value="">全部可见执行人</option><option v-for="item in presaleFilterOptions.assignees" :key="item.value" :value="item.value">{{ item.label || item.value }}</option></select></label><label>状态<select v-model="presaleFilters.status"><option value="">全部可见状态</option><option v-for="item in presaleFilterOptions.statuses" :key="item.value" :value="item.value">{{ presaleOptionText('statuses', item) }}</option></select></label><label>场地<select v-model="presaleFilters.venue"><option value="">全部可见场地</option><option v-for="item in presaleFilterOptions.venues" :key="item.value" :value="item.value">{{ presaleOptionText('venues', item) }}</option></select></label><label>紧急度<select v-model="presaleFilters.urgency"><option value="">全部可见级别</option><option v-for="item in presaleFilterOptions.urgencies" :key="item.value" :value="item.value">{{ presaleOptionText('urgencies', item) }}</option></select></label><label>申请开始<input v-model="presaleFilters.created_from" type="datetime-local"></label><label>申请结束（不含）<input v-model="presaleFilters.created_to" type="datetime-local"></label><label>期望开始<input v-model="presaleFilters.expected_from" type="datetime-local"></label><label>期望结束（不含）<input v-model="presaleFilters.expected_to" type="datetime-local"></label><label>是否超时<select v-model="presaleFilters.overdue"><option value="">全部</option><option value="true">已超时</option><option value="false">未超时</option></select></label><label>排序<select v-model="presaleFilters.sort_by"><option value="created_at">申请时间</option><option value="updated_at">更新时间</option><option value="expected_end">期望结束</option><option value="request_no">申请编号</option></select></label><label>顺序<select v-model="presaleFilters.sort_order"><option value="desc">降序</option><option value="asc">升序</option></select></label><button class="primary">查询</button><button type="button" @click="switchPresaleView(presaleView === 'list' ? 'board' : 'list')">{{ presaleView === 'list' ? '状态看板' : '列表视图' }}</button></form>
+      <form v-else-if="activeSection === 'presale' && !presaleCreatePage" class="crm-toolbar crm-presale-filters" @submit.prevent="applyPresaleFilters"><label>申请编号<input v-model.trim="presaleFilters.request_no" maxlength="32"></label><label>商机<select v-model="presaleFilters.opportunity_id"><option value="">全部可见商机</option><option v-for="item in presaleFilterOptions.opportunities" :key="item.value" :value="String(item.value)">{{ item.label }}</option></select></label><label>申请人<select v-model="presaleFilters.applicant_id"><option value="">全部可见申请人</option><option v-for="item in presaleFilterOptions.applicants" :key="item.value" :value="item.value">{{ presalePersonOptionLabel(item) }}</option></select></label><label>执行人<select v-model="presaleFilters.assignee_id"><option value="">全部可见执行人</option><option v-for="item in presaleFilterOptions.assignees" :key="item.value" :value="item.value">{{ presalePersonOptionLabel(item) }}</option></select></label><label>状态<select v-model="presaleFilters.status"><option value="">全部可见状态</option><option v-for="item in presaleFilterOptions.statuses" :key="item.value" :value="item.value">{{ presaleOptionText('statuses', item) }}</option></select></label><label>场地<select v-model="presaleFilters.venue"><option value="">全部可见场地</option><option v-for="item in presaleFilterOptions.venues" :key="item.value" :value="item.value">{{ presaleOptionText('venues', item) }}</option></select></label><label>紧急度<select v-model="presaleFilters.urgency"><option value="">全部可见级别</option><option v-for="item in presaleFilterOptions.urgencies" :key="item.value" :value="item.value">{{ presaleOptionText('urgencies', item) }}</option></select></label><label>申请开始<input v-model="presaleFilters.created_from" type="datetime-local"></label><label>申请结束（不含）<input v-model="presaleFilters.created_to" type="datetime-local"></label><label>期望开始<input v-model="presaleFilters.expected_from" type="datetime-local"></label><label>期望结束（不含）<input v-model="presaleFilters.expected_to" type="datetime-local"></label><label>是否超时<select v-model="presaleFilters.overdue"><option value="">全部</option><option value="true">已超时</option><option value="false">未超时</option></select></label><label>排序<select v-model="presaleFilters.sort_by"><option value="created_at">申请时间</option><option value="updated_at">更新时间</option><option value="expected_end">期望结束</option><option value="request_no">申请编号</option></select></label><label>顺序<select v-model="presaleFilters.sort_order"><option value="desc">降序</option><option value="asc">升序</option></select></label><button class="primary">查询</button><button type="button" @click="switchPresaleView(presaleView === 'list' ? 'board' : 'list')">{{ presaleView === 'list' ? '状态看板' : '列表视图' }}</button></form>
+      <PresaleApprovalRulesPanel v-if="activeSection === 'presale' && !presaleCreatePage && canManagePresaleApprovalRules" :is-admin="canManagePresaleApprovalRules" />
       <p v-if="activeSection === 'presale' && presaleFilterOptionsError" class="crm-alert error" role="alert">{{ presaleFilterOptionsError }}</p><p v-else-if="activeSection === 'presale' && presaleFilterOptions.truncated" class="crm-note">筛选选项已按服务端上限截断；输入已有条件可继续缩小结果。</p>
 
       <section v-if="activeSection === 'customers'" class="crm-quick-filters" aria-label="客户快捷筛选"><button <button :class="{ active: customerFilters.quick_filter === 'NEW' }" @click="useCustomerQuickFilter('NEW')">新增客户（近 30 天）</button><button :class="{ active: customerFilters.quick_filter === 'WON' }" @click="useCustomerQuickFilter('WON')">成交客户</button><button :class="{ active: customerFilters.quick_filter === 'FOLLOWUP_DUE' }" @click="useCustomerQuickFilter('FOLLOWUP_DUE')">待跟进</button></section>
@@ -2257,7 +2343,7 @@ onMounted(async () => {
       <section v-if="activeSection === 'opportunities' && boardMode" class="crm-board crm-opportunity-board"><article v-for="column in board" :key="column.stage" class="crm-board-column" :data-stage="column.stage"><h2>{{ column.stage }} <small>{{ column.items?.length || 0 }}</small></h2><button v-for="item in column.items" :key="item.id" class="crm-board-card" @click="openOpportunity(item.id)"><strong>{{ item.name }}</strong><span>{{ item.opportunity_no }}</span><span>{{ formatAmount(item.expected_amount) }}</span><span>已签约合同 {{ formatSignedContractCount(item.signed_contract_count) }}</span></button></article></section>
       <section v-if="activeSection === 'opportunities'" class="crm-panel crm-stage-alerts"><div class="crm-panel-heading"><div><h2>阶段超时告警</h2><p class="crm-note">服务端个人列表当前返回已触发的未读/已读告警；待处理和已取消状态不会进入个人查询结果。</p></div><label class="check"><input v-model="stageAlertUnreadOnly" type="checkbox">仅看未读</label></div><p v-if="stageRuleForbidden" class="crm-alert error" role="alert">无阶段告警规则配置权限（403）；告警查询仍按现有权限执行。</p><div v-if="stageAlerts.length" class="crm-stage-alert-grid"><button v-for="item in stageAlerts" :key="item.id" @click="selectedStageAlert = item"><strong>{{ item.opportunity_no }}</strong><span>{{ item.stage }} · {{ stageAlertStatusText(item.status) }}</span><small>应提醒 {{ formatDate(item.due_at) }}</small></button></div><div v-else class="crm-empty compact">暂无{{ stageAlertUnreadOnly ? '未读' : '' }}阶段超时告警</div><p class="crm-status-legend"><span>待处理：Worker 尚未投递</span><span>已触发：站内告警已生成</span><span>已取消：阶段、终态、作废或负责人变化后失效</span></p></section>
       <section v-if="activeSection === 'presale' && alerts.length" class="crm-panel crm-alert-list"><h2>未读预警</h2><p class="crm-note">个人预警仅合并当前登录用户的内部人员身份，不随 SELF/ORG/ALL 数据范围扩大。</p><button v-for="item in alerts" :key="item.id" @click="readAlert(item)"><strong>{{ alertTypeText(item.alert_type) }}</strong><span>{{ item.request_no }} · 起算 {{ formatDate(item.basis_at) }} · 阈值 {{ formatDate(item.due_at) }}</span></button></section>
-      <section v-if="activeSection === 'presale' && !presaleCreatePage"><section v-if="presaleView === 'list'" class="crm-panel table-panel"><h2>售前申请列表</h2><p class="crm-note">列表范围由角色决定；点击记录查看详情、工时和服务端允许的动作。</p><table v-if="presales.length"><thead><tr><th>申请编号</th><th>商机</th><th>申请人</th><th>状态</th><th>场地 / 紧急度</th><th>执行人</th><th>累计工时</th><th>期望结束</th><th>超时</th></tr></thead><tbody><tr v-for="item in presales" :key="item.id" @click="openPresale(item.id)"><td>{{ item.request_no }}</td><td>{{ item.opportunity_no }}</td><td>{{ item.applicant_name || item.applicant_id }}</td><td>{{ requestStatusText(item.status) }}</td><td>{{ venueText(item.venue) }} / {{ urgencyText(item.urgency) }}</td><td>{{ assignees(item.current_assignees) }}</td><td>{{ item.total_work_hours }} 小时</td><td>{{ formatDate(item.expected_end) }}</td><td>{{ item.overdue ? '已超时' : '否' }}</td></tr></tbody></table><div v-else class="crm-empty">暂无可见申请</div><div class="crm-actions"><button type="button" :disabled="presalePage.number <= 1 || loading" @click="changePresalePage(presalePage.number - 1)">上一页</button><span>第 {{ presalePage.number }} 页，共 {{ presalePage.total }} 条</span><button type="button" :disabled="presalePage.number * presalePage.size >= presalePage.total || loading" @click="changePresalePage(presalePage.number + 1)">下一页</button></div></section><section v-else class="crm-panel crm-presale-board-panel"><div class="crm-panel-heading"><div><h2>售前状态看板</h2><p class="crm-note">只读看板，不支持拖拽改状态。每列最多显示服务端返回的 {{ presaleColumnLimit }} 条，列总数不受截断影响。</p></div></div><div class="crm-board crm-presale-board"><article v-for="column in presaleBoard" :key="column.status" class="crm-board-column" :data-status="column.status"><h2>{{ requestStatusText(column.status) }} <small>{{ column.total }}</small></h2><button v-for="item in column.items" :key="item.id" type="button" class="crm-board-card" @click="openPresale(item.id)"><strong>{{ item.request_no }}</strong><span>{{ item.opportunity_no }}</span><span>{{ item.applicant_name || item.applicant_id }} · {{ urgencyText(item.urgency) }}</span><span>{{ assignees(item.current_assignees) }}</span><span>{{ item.total_work_hours }} 小时 · {{ item.overdue ? '已超时' : '未超时' }}</span></button><p v-if="Number(column.total) > (column.items?.length || 0)" class="crm-note">另有 {{ Number(column.total) - (column.items?.length || 0) }} 条未在本列展示</p><p v-else-if="!column.items?.length" class="crm-empty compact">暂无任务</p></article></div></section></section>
+      <section v-if="activeSection === 'presale' && !presaleCreatePage"><section v-if="presaleView === 'list'" class="crm-panel table-panel"><h2>售前申请列表</h2><p class="crm-note">列表范围由角色决定；点击记录查看详情、工时和服务端允许的动作。</p><table v-if="presales.length"><thead><tr><th>申请编号</th><th>商机</th><th>申请人</th><th>状态</th><th>场地 / 紧急度</th><th>执行人</th><th>累计工时</th><th>期望结束</th><th>超时</th></tr></thead><tbody><tr v-for="item in presales" :key="presaleRequestID(item)" @click="openPresale(presaleRequestID(item))"><td>{{ item.request_no }}</td><td>{{ presaleOpportunityLabel(item) }}</td><td>{{ applicantLabel(item) }}</td><td>{{ requestStatusText(item.status) }}</td><td>{{ venueText(item.venue) }} / {{ urgencyText(item.urgency) }}</td><td>{{ assignees(item.current_assignees) }}</td><td>{{ item.total_work_hours }} 小时</td><td>{{ formatDate(item.expected_end) }}</td><td>{{ item.overdue ? '已超时' : '否' }}</td></tr></tbody></table><div v-else class="crm-empty">暂无可见申请</div><div class="crm-actions"><button type="button" :disabled="presalePage.number <= 1 || loading" @click="changePresalePage(presalePage.number - 1)">上一页</button><span>第 {{ presalePage.number }} 页，共 {{ presalePage.total }} 条</span><button type="button" :disabled="presalePage.number * presalePage.size >= presalePage.total || loading" @click="changePresalePage(presalePage.number + 1)">下一页</button></div></section><section v-else class="crm-panel crm-presale-board-panel"><div class="crm-panel-heading"><div><h2>售前状态看板</h2><p class="crm-note">只读看板，不支持拖拽改状态。每列最多显示服务端返回的 {{ presaleColumnLimit }} 条，列总数不受截断影响。</p></div></div><div class="crm-board crm-presale-board"><article v-for="column in presaleBoard" :key="column.status" class="crm-board-column" :data-status="column.status"><h2>{{ requestStatusText(column.status) }} <small>{{ column.total }}</small></h2><button v-for="item in column.items" :key="presaleRequestID(item)" type="button" class="crm-board-card" :aria-label="`打开售前申请 ${item.request_no}`" :disabled="!presaleRequestID(item)" @click="openPresale(presaleRequestID(item))"><strong>{{ item.request_no }}</strong><span>{{ presaleOpportunityLabel(item) }}</span><span>{{ applicantLabel(item) }} · {{ urgencyText(item.urgency) }}</span><span>{{ assignees(item.current_assignees) }}</span><span>{{ item.total_work_hours }} 小时 · {{ item.overdue ? '已超时' : '未超时' }}</span></button><p v-if="Number(column.total) > (column.items?.length || 0)" class="crm-note">另有 {{ Number(column.total) - (column.items?.length || 0) }} 条未在本列展示</p><p v-else-if="!column.items?.length" class="crm-empty compact">暂无任务</p></article></div></section></section>
       <section v-if="activeSection === 'presale' && presaleCreatePage" class="crm-presale-create-page">
         <p class="crm-alert warning" role="status">请从当前账号可见的商机中选择；提交后进入两级审批流。现场支持必须填写服务地址。</p>
         <form id="presale-create-form" class="crm-panel crm-presale-create-form" @submit.prevent="submitPresaleFromList">
@@ -2301,13 +2387,13 @@ onMounted(async () => {
           <div><p class="console-modal-eyebrow">售前技术支持</p><h2>售前投入报表</h2></div>
           <button class="console-modal-close" type="button" aria-label="关闭售前投入报表" @click="showReport = false"><ConsoleIcon name="close" /></button>
         </header>
-        <div class="crm-report-dialog__body">
+        <div class="crm-report-dialog__body"><p v-if="reportError" class="crm-alert error" role="alert">{{ reportError }}</p>
           <p class="console-card-hint">全部工时为标准小时；时间筛选发送 RFC3339 并由服务端统一换算为 UTC 半开区间。成功率字段单位为百分比。</p>
           <form class="console-form-grid crm-report-filters" @submit.prevent="loadReports">
             <label class="console-form-item"><span>开始时间 *</span><input v-model="reportFilters.from" type="datetime-local" required></label>
             <label class="console-form-item"><span>结束时间 *</span><input v-model="reportFilters.to" type="datetime-local" required></label>
             <label class="console-form-item"><span>归属组织</span><select v-model="reportFilters.organization_id" :disabled="reportFilterOptionsLoading"><option value="">全部可见组织</option><option v-for="organization in reportOrganizationOptions" :key="organization.organization_id" :value="organization.organization_id">{{ organization.organization_name }}</option></select></label>
-            <label class="console-form-item"><span>参与人员</span><select v-model="reportFilters.person_id" :disabled="reportFilterOptionsLoading"><option value="">全部可见人员</option><option v-for="item in presaleFilterOptions.assignees" :key="item.value" :value="item.value">{{ item.label || item.value }}</option></select></label>
+            <label class="console-form-item"><span>参与人员</span><select v-model="reportFilters.person_id" :disabled="reportFilterOptionsLoading"><option value="">全部可见人员</option><option v-for="item in presaleFilterOptions.assignees" :key="item.value" :value="item.value">{{ presalePersonOptionLabel(item) }}</option></select></label>
             <label class="console-form-item"><span>关联商机</span><select v-model="reportFilters.opportunity_id" :disabled="reportFilterOptionsLoading"><option value="">全部可见商机</option><option v-for="item in presaleFilterOptions.opportunities" :key="item.value" :value="String(item.value)">{{ item.label }}</option></select></label>
             <label class="console-form-item"><span>分布维度</span><select v-model="reportFilters.dimension"><option value="PERSON">人员</option><option value="DEPARTMENT">部门</option><option value="OPPORTUNITY">商机</option></select></label>
             <div class="crm-report-filter-actions"><button class="console-button primary" type="submit" :disabled="reportLoading">{{ reportLoading ? '加载中…' : '查询' }}</button><button class="console-button ghost" type="button" @click="exportReport">导出</button></div>
@@ -2385,7 +2471,7 @@ onMounted(async () => {
           <label class="console-form-item"><span>系统数量</span><input v-model.number="opportunityForm.system_count" type="number" min="0" placeholder="0"></label>
           <label class="console-form-item full"><span>客户痛点</span><textarea v-model="opportunityForm.pain_points" rows="3" placeholder="选填"></textarea></label>
           <label class="console-form-item full"><span>竞争信息</span><textarea v-model="opportunityForm.competitor_info" rows="3" placeholder="选填"></textarea></label>
-          <fieldset v-if="opportunityEditMode" class="crm-owner-selector crm-opportunity-owner" disabled><legend>负责人</legend><div class="console-form-grid"><label class="console-form-item"><span>负责人用户</span><input :value="opportunityForm.owner_user_id" readonly></label><label class="console-form-item"><span>负责人组织</span><input :value="opportunityForm.owner_org_id" readonly></label></div><p class="crm-note">商机主档编辑不变更负责人，请使用详情中的“变更负责人”。</p></fieldset>
+          <fieldset v-if="opportunityEditMode" class="crm-owner-selector crm-opportunity-owner" disabled><legend>负责人</legend><div class="console-form-grid"><label class="console-form-item"><span>负责人用户</span><input :value="ownerLabel(opportunityForm.owner_user_id)" readonly></label><label class="console-form-item"><span>负责人组织</span><input value="由基础平台组织目录确定" readonly></label></div><p class="crm-note">商机主档编辑不变更负责人，请使用详情中的“变更负责人”。</p></fieldset>
           <label v-if="opportunityEditMode" class="console-form-item full"><span>更新原因 *</span><textarea v-model="opportunityForm.reason" required maxlength="500" rows="3" placeholder="请说明本次更新原因"></textarea></label>
         </div>
         <footer><button class="console-button ghost" type="button" :disabled="actionLoading" @click="closeOpportunityDialog">取消</button><button class="console-button primary" type="submit" :disabled="actionLoading">{{ actionLoading ? '提交中…' : opportunityEditMode ? '保存' : '创建' }}</button></footer>
@@ -2609,7 +2695,7 @@ onMounted(async () => {
     <div v-if="selectedOpportunity" class="crm-modal"><article class="crm-detail crm-opportunity-detail"><h2>{{ selectedOpportunity.name }}</h2><div class="crm-opportunity-main"><dl><dt>商机编号</dt><dd>{{ selectedOpportunity.opportunity_no }}</dd><dt>负责人</dt><dd>{{ ownerLabel(selectedOpportunity.owner_user_id) }} / {{ selectedOpportunity.owner_org_id || '未填写组织' }}</dd><dt>当前阶段</dt><dd>{{ selectedOpportunity.current_stage }}</dd><dt>累计已签约合同</dt><dd>{{ formatSignedContractCount(selectedOpportunity.signed_contract_count) }}</dd><dt>状态</dt><dd>{{ opportunityStatusText(selectedOpportunity.opp_status) }}</dd><dt>终态待办</dt><dd>{{ selectedOpportunity.terminal_pending_type === 'CONTRACT' ? '待关联合同' : selectedOpportunity.terminal_pending_type === 'LOST_REASON' ? '待补失败原因' : '无' }}</dd><dt>需求摘要</dt><dd>{{ selectedOpportunity.requirement_summary }}</dd><dt>系统数量</dt><dd>{{ selectedOpportunity.system_count || 0 }}</dd><dt>客户痛点</dt><dd>{{ selectedOpportunity.pain_points || '—' }}</dd><dt>竞争信息</dt><dd>{{ selectedOpportunity.competitor_info || '—' }}</dd><dt>版本</dt><dd>{{ selectedOpportunity.version }}</dd></dl><section class="crm-opportunity-presale" aria-labelledby="opportunity-presale-heading"><div class="crm-panel-heading"><div><h3 id="opportunity-presale-heading">关联售前任务</h3><p class="crm-note">售前状态独立流转，不会自动修改商机阶段。</p></div><button v-if="canCreatePresale && selectedOpportunity.opp_status !== 'VOID'" type="button" class="console-button primary" aria-haspopup="dialog" :disabled="presaleCreateLoading" :title="presaleRequestSubmissionAvailable ? '为当前商机创建售前支持申请' : '售前内部流程恢复后即可提交'" @click="openOpportunityPresaleCreate">发起售前支持</button></div><p v-if="opportunityPresaleLoading">正在加载关联售前任务…</p><div v-else-if="opportunityPresaleError" class="crm-alert error" role="alert">{{ opportunityPresaleError }} <button type="button" @click="loadOpportunityPresales()">重试</button></div><div v-else-if="!opportunityPresales.length" class="crm-empty compact">暂无关联售前任务</div><div v-else class="table-panel"><table><thead><tr><th>任务号 / 申请时间</th><th>状态 / 紧急度</th><th>场地</th><th>当前执行人</th><th>最新进度</th><th>累计小时</th><th>期望结束</th><th>超时</th><th>详情</th></tr></thead><tbody><tr v-for="item in opportunityPresales" :key="item.id"><td>{{ item.request_no }}<br><small>{{ formatDate(item.created_at) }}</small></td><td>{{ requestStatusText(item.status) }} / {{ urgencyText(item.urgency) }}</td><td>{{ venueText(item.venue) }}</td><td>{{ assignees(item.current_assignees) }}</td><td>{{ item.latest_progress || '—' }}</td><td>{{ item.total_work_hours }} 小时</td><td>{{ formatDate(item.expected_end) }}</td><td>{{ item.overdue ? '已超时' : '否' }}</td><td><button v-if="item.can_view_detail" type="button" @click="openOpportunityPresale(item)">查看详情</button><span v-else>仅摘要</span></td></tr></tbody></table><div class="crm-actions"><button type="button" :disabled="opportunityPresalePage.number <= 1 || opportunityPresaleLoading" @click="loadOpportunityPresales(opportunityPresalePage.number - 1)">上一页</button><span>第 {{ opportunityPresalePage.number }} 页，共 {{ opportunityPresalePage.total }} 条</span><button type="button" :disabled="opportunityPresalePage.number * opportunityPresalePage.size >= opportunityPresalePage.total || opportunityPresaleLoading" @click="loadOpportunityPresales(opportunityPresalePage.number + 1)">下一页</button><button v-if="opportunityPresalePage.total > opportunityPresalePage.size && opportunityPresalePage.size < 100" type="button" @click="viewAllOpportunityPresales">查看全部（最多 100 条）</button></div></div></section><h3>跟进记录</h3><p v-if="!followups.length">暂无记录</p><ol><li v-for="item in followups" :key="item.id"><strong>{{ item.type }}</strong> · {{ formatDate(item.followed_at) }}<br>{{ item.content }}</li></ol><h3>阶段历史</h3><ol><li v-for="item in stageHistory" :key="item.id">{{ item.from_stage }} → {{ item.to_stage }} · {{ formatDate(item.changed_at) }} · {{ item.reason }}</li></ol></div><div class="crm-opportunity-actions crm-actions"><button @click="selectedOpportunity = null">关闭</button><template v-if="selectedOpportunity.opp_status !== 'VOID'"><button @click="editOpportunity">编辑</button><button @click="openOwnerEditor">变更负责人</button><button v-if="canManageOpportunityTeam && opportunityTeamDirectoryAvailable" @click="openTeamEditor">维护团队</button><button @click="followupDialog = true">添加跟进</button><button class="primary" @click="stageDialog = true">调整阶段</button><button class="danger" @click="changeOpportunityStatus('void')">作废</button><button v-if="selectedOpportunity.terminal_pending_type && selectedOpportunity.terminal_pending_type !== 'NONE'" class="primary" @click="terminalDialog = true">补全终态待办</button></template><button v-else class="primary" @click="changeOpportunityStatus('restore')">恢复</button></div>
       <div v-if="selectedOpportunity" class="crm-opportunity-side-rail" aria-label="商机补充信息">
     <aside class="crm-opportunity-attachment-panel crm-opportunity-team-panel" aria-label="商机团队">
-<h3>商机团队</h3><p class="crm-note">人员姓名与有效组织实时取自基础平台权威目录，平台用户 ID 仅作为稳定标识。</p><p v-if="!opportunityTeamDirectoryAvailable" class="crm-alert warning" role="status">基础平台人员目录暂不可用，当前仅展示稳定用户 ID；团队维护已安全关闭。</p><p v-if="!opportunityTeam.length">当前无辅助团队成员</p><ul class="crm-team-summary"><li v-for="member in opportunityTeam" :key="member.user_id"><strong>{{ member.display_name || member.user_id }}</strong>（{{ member.user_id }}） · {{ teamRoleText(member.role) }}<br><small>{{ teamMemberOrganizations(member) }}</small><em v-if="member.directory_status === 'NOT_AVAILABLE'">已停用或不再具有本应用授权</em></li></ul>
+<h3>商机团队</h3><p class="crm-note">人员用户名与有效组织实时取自基础平台权威目录。</p><p v-if="!opportunityTeamDirectoryAvailable" class="crm-alert warning" role="status">基础平台人员目录暂不可用；团队维护已安全关闭。</p><p v-if="!opportunityTeam.length">当前无辅助团队成员</p><ul class="crm-team-summary"><li v-for="member in opportunityTeam" :key="member.user_id"><strong>{{ platformUserName(member) }}</strong> · {{ teamRoleText(member.role) }}<br><small>{{ teamMemberOrganizations(member) }}</small><em v-if="member.directory_status === 'NOT_AVAILABLE'">已停用或不再具有本应用授权</em></li></ul>
     </aside>
     <aside v-if="selectedOpportunity" class="crm-opportunity-attachment-panel" aria-label="商机团队任期明细">
       <h3>团队任期明细</h3>
@@ -2618,7 +2704,7 @@ onMounted(async () => {
       <p v-else-if="opportunityMemberTermsError" class="crm-alert error" role="alert">{{ opportunityMemberTermsError }} <button type="button" @click="loadOpportunityMemberTerms()">重试</button></p>
       <p v-else-if="!opportunityMemberTerms.length">暂无任期明细</p>
       <template v-else>
-        <table><thead><tr><th>成员</th><th>角色</th><th>开始 / 快照</th><th>结束</th><th>操作人</th><th>来源</th></tr></thead><tbody><tr v-for="term in opportunityMemberTerms" :key="term.id"><td>{{ ownerLabel(term.user_id) }}</td><td>{{ teamRoleText(term.role) }}</td><td>{{ term.source_kind === 'LEGACY_SNAPSHOT' ? `快照于 ${formatDate(term.snapshot_at)}` : formatDate(term.started_at) }}</td><td>{{ term.source_kind === 'LEGACY_SNAPSHOT' ? (term.ended_at ? formatDate(term.ended_at) : (term.active_at_snapshot ? '尚在团队' : '迁移前未知')) : formatDate(term.ended_at) }}</td><td>{{ term.source_kind === 'LEGACY_SNAPSHOT' ? '迁移程序观察' : term.started_by }}<template v-if="term.ended_by"> → {{ term.ended_by }}</template></td><td>{{ term.source_kind === 'LEGACY_SNAPSHOT' ? (term.active_at_snapshot ? '迁移快照（当时在组）' : '迁移快照（当时已移出）') : '完整记录' }}</td></tr></tbody></table>
+        <table><thead><tr><th>成员</th><th>角色</th><th>开始 / 快照</th><th>结束</th><th>操作人</th><th>来源</th></tr></thead><tbody><tr v-for="term in opportunityMemberTerms" :key="term.id"><td>{{ ownerLabel(term.user_id) }}</td><td>{{ teamRoleText(term.role) }}</td><td>{{ term.source_kind === 'LEGACY_SNAPSHOT' ? `快照于 ${formatDate(term.snapshot_at)}` : formatDate(term.started_at) }}</td><td>{{ term.source_kind === 'LEGACY_SNAPSHOT' ? (term.ended_at ? formatDate(term.ended_at) : (term.active_at_snapshot ? '尚在团队' : '迁移前未知')) : formatDate(term.ended_at) }}</td><td>{{ term.source_kind === 'LEGACY_SNAPSHOT' ? '迁移程序观察' : ownerLabel(term.started_by) }}<template v-if="term.ended_by"> → {{ ownerLabel(term.ended_by) }}</template></td><td>{{ term.source_kind === 'LEGACY_SNAPSHOT' ? (term.active_at_snapshot ? '迁移快照（当时在组）' : '迁移快照（当时已移出）') : '完整记录' }}</td></tr></tbody></table>
         <div class="crm-actions"><button type="button" :disabled="opportunityMemberTermsPage.number <= 1 || opportunityMemberTermsLoading" @click="loadOpportunityMemberTerms(undefined, opportunityMemberTermsPage.number - 1)">上一页</button><span>第 {{ opportunityMemberTermsPage.number }} 页，共 {{ opportunityMemberTermsPage.total }} 条</span><button type="button" :disabled="opportunityMemberTermsPage.number * opportunityMemberTermsPage.size >= opportunityMemberTermsPage.total || opportunityMemberTermsLoading" @click="loadOpportunityMemberTerms(undefined, opportunityMemberTermsPage.number + 1)">下一页</button></div>
       </template>
     </aside>
@@ -2712,7 +2798,7 @@ onMounted(async () => {
         <section class="crm-business-picker">
           <label>查找内部人员<input v-model.trim="teamDirectoryKeyword" type="search" placeholder="输入姓名关键字" @keyup.enter.prevent="loadTeamDirectory"></label>
           <button type="button" :disabled="teamDirectoryLoading" @click="loadTeamDirectory">{{ teamDirectoryLoading ? '查询中…' : '查询人员' }}</button>
-          <label>选择成员<select v-model="teamCandidate.user_id" :disabled="teamDirectoryLoading || !teamDirectoryOptions.length"><option value="">请选择人员</option><option v-for="user in teamDirectoryOptions" :key="user.user_id" :value="user.user_id" :disabled="teamForm.members.some((item) => item.user_id === user.user_id)">{{ user.display_name }}（{{ user.user_id }}） · {{ teamMemberOrganizations(user) }}</option></select></label>
+          <label>选择成员<select v-model="teamCandidate.user_id" :disabled="teamDirectoryLoading || !teamDirectoryOptions.length"><option value="">请选择人员</option><option v-for="user in teamDirectoryOptions" :key="user.user_id" :value="user.user_id" :disabled="teamForm.members.some((item) => item.user_id === user.user_id)">{{ platformUserName(user) }} · {{ teamMemberOrganizations(user) }}</option></select></label>
           <label>团队职责<select v-model="teamCandidate.role"><option value="SALES_SUPPORT">销售支持</option><option value="TECHNICAL_SUPPORT">技术支持</option><option value="BUSINESS_SUPPORT">商务支持</option><option value="OTHER">其他</option></select></label>
           <button type="button" :disabled="!teamCandidate.user_id || teamForm.members.length >= 50" @click="addTeamMember">添加成员</button>
           <small v-if="teamDirectoryError" class="crm-alert error" role="alert">{{ teamDirectoryError }} 不会退回为手填账号 ID。</small>
@@ -2720,7 +2806,7 @@ onMounted(async () => {
         <p v-if="!teamForm.members.length" class="crm-empty compact">当前团队为空；直接提交可移除全部现有成员。</p>
         <section v-else class="crm-team-editor">
           <div v-for="(member, index) in teamForm.members" :key="member.user_id">
-            <span><strong>{{ teamMemberName(member) }}</strong><small>{{ member.user_id }} · {{ teamMemberOrganizations(member) }}</small><em v-if="member.directory_status === 'NOT_AVAILABLE'">该人员已停用或不再具有本应用授权，请移出后再提交。</em></span>
+            <span><strong>{{ teamMemberName(member) }}</strong><small>{{ teamMemberOrganizations(member) }}</small><em v-if="member.directory_status === 'NOT_AVAILABLE'">该人员已停用或不再具有本应用授权，请移出后再提交。</em></span>
             <select v-model="member.role" :aria-label="`${teamMemberName(member)}的团队职责`"><option value="SALES_SUPPORT">销售支持</option><option value="TECHNICAL_SUPPORT">技术支持</option><option value="BUSINESS_SUPPORT">商务支持</option><option value="OTHER">其他</option></select>
             <button type="button" class="danger" @click="removeTeamMember(index)">移除</button>
           </div>
@@ -2733,7 +2819,7 @@ onMounted(async () => {
     <div v-if="terminalDialog" class="crm-modal nested"><form @submit.prevent="submitTerminal"><h2>补全终态待办</h2><label v-if="selectedOpportunity.terminal_pending_type === 'CONTRACT'">合同编号<input v-model.trim="terminalForm.contract_ref" required placeholder="请输入合同管理系统中的合同编号"><small>提交时会向合同系统精确校验该编号是否属于当前客户。</small></label><label v-else>失败原因<input v-model="terminalForm.lost_reason" required></label><label>补全原因<textarea v-model="terminalForm.reason" required></textarea></label><div class="crm-actions"><button type="button" @click="terminalDialog = false">取消</button><button class="primary">提交</button></div></form></div>
     <div v-if="followupDialog" class="crm-modal nested"><form @submit.prevent="submitFollowup"><h2>添加跟进</h2><label>类型<select v-model="followupForm.type"><option value="PHONE">电话</option><option value="VISIT">拜访</option><option value="EMAIL">邮件</option><option value="OTHER">其他</option></select></label><label>内容<textarea v-model="followupForm.content" required></textarea></label><label>跟进时间<input v-model="followupForm.followed_at" type="datetime-local" required></label><label>下次跟进<input v-model="followupForm.next_follow_at" type="datetime-local"></label><div class="crm-actions"><button type="button" @click="followupDialog = false">取消</button><button class="primary">保存</button></div></form></div>
     <div v-if="customerFollowupDialog" class="crm-modal nested"><form @submit.prevent="submitCustomerFollowup"><h2>添加客户沟通</h2><label>类型<select v-model="customerFollowupForm.type"><option value="PHONE">电话</option><option value="VISIT">拜访</option><option value="EMAIL">邮件</option><option value="OTHER">其他</option></select></label><label>内容<textarea v-model="customerFollowupForm.content" required></textarea></label><label>沟通时间<input v-model="customerFollowupForm.followed_at" type="datetime-local" required></label><label>下次跟进<input v-model="customerFollowupForm.next_follow_at" type="datetime-local"></label><div class="crm-actions"><button type="button" @click="customerFollowupDialog = false">取消</button><button class="primary">保存</button></div></form></div>
-    <div v-if="engineerPickerOpen && selectedPresale" class="crm-modal nested"><form class="crm-detail" @submit.prevent="runPresale('assign')"><h2>从基础平台选择执行人员</h2><p class="crm-note">人员来自基础平台当前有效且已获得本应用授权的用户目录，指派和后续工时全部保存在客户与商机系统内。</p><section class="crm-toolbar"><label>姓名<input v-model.trim="engineerQuery.keyword"></label><label>部门<input v-model.trim="engineerQuery.department"></label><button type="button" :disabled="engineerDirectoryLoading" @click="loadEngineerDirectory">{{ engineerDirectoryLoading ? '读取中…' : '查询' }}</button><button type="button" class="ghost" :disabled="engineerDirectoryLoading" @click="loadEngineerDirectory">{{ engineerDirectoryLoading ? '刷新中…' : '刷新人员信息' }}</button></section><p v-if="engineerDirectoryLoading" class="crm-note" role="status">正在从基础平台读取最新人员信息，当前已选择人员不会被清除。</p><div v-if="engineerDirectory.length" class="crm-engineer-list"><label v-for="person in engineerDirectory" :key="person.person_id" class="check crm-engineer"><input v-model="selectedEngineerIDs" type="checkbox" :value="person.person_id"><span><strong>{{ person.person_name }}</strong>（{{ person.person_id }}） · {{ person.department || '未标注部门' }}</span></label></div><p v-else-if="!engineerDirectoryLoading" class="crm-empty">当前筛选没有可指派人员。</p><section v-if="unavailableCurrentAssignees.length" class="crm-alert warning"><strong>当前指派人员不在本次查询结果中</strong><label v-for="person in unavailableCurrentAssignees" :key="person.person_id" class="check"><input v-model="selectedEngineerIDs" type="checkbox" :value="person.person_id">保留 {{ person.person_name || person.person_id }}（取消勾选即移出）</label></section><dl class="crm-assignment-diff"><dt>新增</dt><dd>{{ assignmentDiff.added.join('、') || '无' }}</dd><dt>保留</dt><dd>{{ assignmentDiff.retained.join('、') || '无' }}</dd><dt>移出</dt><dd>{{ assignmentDiff.removed.join('、') || '无' }}</dd></dl><label>改派原因<textarea v-model.trim="assignmentReason" required maxlength="500"></textarea></label><div class="crm-actions"><button type="button" @click="engineerPickerOpen = false">取消</button><button class="primary">确认替换指派</button></div></form></div>
+    <div v-if="engineerPickerOpen && selectedPresale" class="crm-modal nested"><form class="crm-detail crm-engineer-picker" @submit.prevent="runPresale('assign')"><h2>从基础平台选择执行人员 <small>已选择 {{ selectedEngineerIDs.length }} 人</small></h2><p class="crm-note crm-engineer-picker__intro">人员来自基础平台当前有效且已获得本应用授权的用户目录，指派和后续工时全部保存在客户与商机系统内。</p><section class="crm-toolbar crm-engineer-picker__toolbar"><label>姓名<input v-model.trim="engineerQuery.keyword"></label><label>部门<input v-model.trim="engineerQuery.department"></label><button type="button" :disabled="engineerDirectoryLoading" @click="loadEngineerDirectory">{{ engineerDirectoryLoading ? '读取中…' : '查询' }}</button><button type="button" class="ghost" :disabled="engineerDirectoryLoading" @click="loadEngineerDirectory">{{ engineerDirectoryLoading ? '刷新中…' : '刷新人员信息' }}</button></section><p v-if="engineerDirectoryLoading" class="crm-note" role="status">正在从基础平台读取最新人员信息，当前已选择人员不会被清除。</p><div v-if="engineerDirectory.length" class="crm-engineer-list" aria-label="基础平台人员列表"><label v-for="person in engineerDirectory" :key="person.person_id" class="check crm-engineer"><input v-model="selectedEngineerIDs" type="checkbox" :value="person.person_id"><span><strong>{{ person.person_name }}</strong> · {{ person.department || '未标注部门' }}</span></label></div><p v-else-if="!engineerDirectoryLoading" class="crm-empty">当前筛选没有可指派人员。</p><section v-if="unavailableCurrentAssignees.length" class="crm-alert warning"><strong>当前指派人员不在本次查询结果中</strong><label v-for="person in unavailableCurrentAssignees" :key="person.person_id" class="check"><input v-model="selectedEngineerIDs" type="checkbox" :value="person.person_id">保留 {{ person.person_name || '未命名用户' }}（取消勾选即移出）</label></section><dl class="crm-assignment-diff crm-engineer-picker__diff"><dt>新增</dt><dd>{{ assignmentDiff.added.join('、') || '无' }}</dd><dt>保留</dt><dd>{{ assignmentDiff.retained.join('、') || '无' }}</dd><dt>移出</dt><dd>{{ assignmentDiff.removed.join('、') || '无' }}</dd></dl><label class="crm-engineer-picker__reason">改派原因<textarea v-model.trim="assignmentReason" required maxlength="500"></textarea></label><div class="crm-actions crm-engineer-picker__footer"><button type="button" @click="engineerPickerOpen = false">取消</button><button class="primary">确认替换指派</button></div></form></div>
     <div v-if="selectedPresale" class="console-modal-backdrop" :class="{ nested: !!selectedOpportunity }" role="presentation" @click.self="closePresale">
       <article class="console-detail-modal crm-presale-console-detail" role="dialog" aria-modal="true" aria-label="售前申请详情">
         <header>
@@ -2755,7 +2841,7 @@ onMounted(async () => {
           <p v-else-if="presaleActionsError" class="crm-alert error" role="alert">{{ presaleActionsError }} <button class="console-button ghost small" type="button" @click="refreshPresaleActions(selectedPresale.request.id)">重试</button></p>
           <p v-else>{{ authoritativePresaleActions.map(actionText).join('、') || '当前仅可查看' }}。多人任务在所有当前执行人各有至少一笔有效工时后自动完成。</p>
           <p v-if="selectedPresale.request.status === 'PENDING_APPROVAL'">审批操作在客户与商机系统内按流程节点和当前登录审批人实时校验；浏览器不会接收或提交内部任务 ID。</p>
-          <div class="crm-presale-action-buttons"><button class="console-button ghost small" type="button" @click="runPresale('assignments')">查看指派</button><button class="console-button ghost small" type="button" @click="runPresale('history')">审批历史</button><button v-if="authoritativePresaleActions.includes('APPROVE')" class="console-button primary small" type="button" :disabled="presaleMutationLoading" @click="runPresaleDecision('approve')">通过审批</button><button v-if="authoritativePresaleActions.includes('REJECT')" class="console-button danger small" type="button" :disabled="presaleMutationLoading" @click="runPresaleDecision('reject')">驳回审批</button><button v-if="authoritativePresaleActions.includes('CANCEL')" class="console-button danger small" type="button" @click="runPresaleDecision('cancel')">取消申请</button><button v-if="authoritativePresaleActions.includes('ASSIGN')" class="console-button ghost small" type="button" @click="openEngineerPicker">从基础平台选择执行人</button></div>
+          <div v-if="selectedPresale.request.status === 'APPROVED_PENDING_ASSIGNMENT' && (crmSession?.roles || []).includes('technical_director')" class="crm-presale-action-buttons"><select v-model="selectedExecutionDepartmentID" @focus="loadExecutionDepartments"><option value="">选择执行部门</option><option v-for="item in executionDepartments" :key="item.id" :value="item.id">{{ item.name }}</option></select><button class="console-button primary small" type="button" :disabled="departmentSaving || !selectedExecutionDepartmentID" @click="saveExecutionDepartment">{{ departmentSaving ? '保存中…' : '保存部门' }}</button></div><div class="crm-presale-action-buttons"><button class="console-button ghost small" type="button" @click="runPresale('assignments')">查看指派</button><button class="console-button ghost small" type="button" @click="runPresale('history')">审批历史</button><button v-if="authoritativePresaleActions.includes('APPROVE')" class="console-button primary small" type="button" :disabled="presaleMutationLoading" @click="runPresaleDecision('approve')">通过审批</button><button v-if="authoritativePresaleActions.includes('REJECT')" class="console-button danger small" type="button" :disabled="presaleMutationLoading" @click="runPresaleDecision('reject')">驳回审批</button><button v-if="authoritativePresaleActions.includes('CANCEL')" class="console-button danger small" type="button" @click="runPresaleDecision('cancel')">取消申请</button><button v-if="authoritativePresaleActions.includes('ASSIGN')" class="console-button ghost small" type="button" @click="openEngineerPicker">从基础平台选择执行人</button><button v-if="['REJECTED', 'CANCELLED'].includes(selectedPresale.request.status) && canCreatePresale && presaleRequestSubmissionAvailable" class="console-button primary small" type="button" @click="reopenPresaleApproval">重新发起审批</button></div>
         </section>
         <section v-if="authoritativePresaleActions.includes('ADD_PROGRESS')" class="console-detail-section crm-presale-entry-card">
           <h3>登记进度</h3><p>补充本次工作的最新进展，参考链接仅允许 HTTPS。</p>
@@ -2765,8 +2851,8 @@ onMounted(async () => {
           <summary>登记工时</summary>
           <form class="console-form-grid" @submit.prevent="runPresale('worklog')"><label class="console-form-item"><span>开始</span><input v-model="operation.work_start" type="datetime-local"></label><label class="console-form-item"><span>结束</span><input v-model="operation.work_end" type="datetime-local"></label><label class="console-form-item"><span>单位</span><select v-model="operation.raw_unit"><option value="HOUR">小时</option><option value="PERSON_DAY">人天（1 人天 = 8 小时）</option></select></label><label class="console-form-item"><span>数值</span><input v-model="operation.raw_value"></label><label class="console-form-item full"><span>工作地点</span><input v-model="operation.work_site_address"></label><label class="console-form-item"><span>工作内容</span><select v-model="operation.work_content"><option value="SOLUTION_DESIGN">方案设计</option><option value="TECH_EXCHANGE">技术交流</option><option value="POC_DEMO">POC 演示</option><option value="TECH_QA">技术答疑</option><option value="OTHER">其他</option></select></label><label class="console-form-item"><span>备注</span><input v-model="operation.remark"></label><div class="crm-presale-form-actions"><button class="console-button primary" type="submit" :disabled="presaleMutationLoading">{{ presaleMutationLoading ? '提交中…' : '提交工时' }}</button></div></form>
         </details>
-        <section class="console-detail-section crm-presale-timeline" aria-labelledby="presale-timeline-heading"><div class="crm-subsection-heading"><div><h3 id="presale-timeline-heading">流程时间线</h3><p>按服务端稳定游标倒序加载，流程记录只读。</p></div><button class="console-button ghost small" type="button" :disabled="presaleTimelineLoading" @click="refreshPresaleTimeline(selectedPresale.request.id)">刷新</button></div><p v-if="presaleTimelineLoading && !presaleTimeline.length">正在加载流程记录…</p><p v-if="presaleTimelineError" class="crm-alert error" role="alert">{{ presaleTimelineError }}</p><ol v-if="presaleTimeline.length" class="crm-timeline-list"><li v-for="item in presaleTimeline" :key="item.event_id"><time :datetime="item.occurred_at">{{ formatDate(item.occurred_at) }}</time><div><strong>{{ timelineEventText(item.type) }}</strong><span v-if="item.actor_name || item.actor_id">操作人：{{ item.actor_name || item.actor_id }}</span><span v-if="item.type === 'STATUS_CHANGED'">{{ requestStatusText(item.from_status) }} → {{ requestStatusText(item.to_status) }}</span><span v-if="item.type === 'APPROVAL_DECIDED'">审批结果：{{ approvalResultText(item.result) }}</span><span v-if="item.type === 'ASSIGNEE_ADDED' || item.type === 'ASSIGNEE_REMOVED'">执行人：{{ item.subject_name || item.subject_id }}</span><p v-if="item.content">{{ item.content }}</p><span v-if="item.progress_pct !== null && item.progress_pct !== undefined">进度：{{ item.progress_pct }}%</span><a v-if="safeHTTPSURL(item.link_url)" :href="safeHTTPSURL(item.link_url)" target="_blank" rel="noopener noreferrer">打开安全链接</a><span v-if="item.work_hours">{{ workContentText(item.work_content) }} · {{ item.work_hours }} 小时</span></div></li></ol><p v-else-if="!presaleTimelineLoading && !presaleTimelineError" class="crm-empty compact">暂无流程记录</p><button v-if="presaleTimelineCursor" class="console-button ghost small" type="button" :disabled="presaleTimelineLoading" @click="loadMorePresaleTimeline">{{ presaleTimelineLoading ? '加载中…' : '加载更多' }}</button></section>
-        <section class="console-detail-section crm-presale-worklogs"><h3>工时记录</h3><p v-if="!worklogs.length">暂无工时。</p><div v-for="item in worklogs" :key="item.id" class="crm-worklog"><span>{{ item.person_name || item.person_id }} · {{ item.work_hours }} 小时 · {{ pushStatusText(item.push_status) }}</span></div></section>
+        <section class="console-detail-section crm-presale-timeline" aria-labelledby="presale-timeline-heading"><div class="crm-subsection-heading"><div><h3 id="presale-timeline-heading">流程时间线</h3><p>按服务端稳定游标倒序加载，流程记录只读。</p></div><button class="console-button ghost small" type="button" :disabled="presaleTimelineLoading" @click="refreshPresaleTimeline(selectedPresale.request.id)">刷新</button></div><p v-if="presaleTimelineLoading && !presaleTimeline.length">正在加载流程记录…</p><p v-if="presaleTimelineError" class="crm-alert error" role="alert">{{ presaleTimelineError }}</p><ol v-if="presaleTimeline.length" class="crm-timeline-list"><li v-for="item in presaleTimeline" :key="item.event_id"><time :datetime="item.occurred_at">{{ formatDate(item.occurred_at) }}</time><div><strong>{{ timelineEventText(item.type) }}</strong><span v-if="item.actor_name || item.actor_id">操作人：{{ operationUserLabel(item) }}</span><span v-if="item.type === 'STATUS_CHANGED'">{{ requestStatusText(item.from_status) }} → {{ requestStatusText(item.to_status) }}</span><span v-if="item.type === 'APPROVAL_DECIDED'">审批结果：{{ approvalResultText(item.result) }}</span><span v-if="item.type === 'ASSIGNEE_ADDED' || item.type === 'ASSIGNEE_REMOVED'">执行人：{{ operationSubjectLabel(item) }}</span><p v-if="item.content">{{ item.content }}</p><span v-if="item.progress_pct !== null && item.progress_pct !== undefined">进度：{{ item.progress_pct }}%</span><a v-if="safeHTTPSURL(item.link_url)" :href="safeHTTPSURL(item.link_url)" target="_blank" rel="noopener noreferrer">打开安全链接</a><span v-if="item.work_hours">{{ workContentText(item.work_content) }} · {{ item.work_hours }} 小时</span></div></li></ol><p v-else-if="!presaleTimelineLoading && !presaleTimelineError" class="crm-empty compact">暂无流程记录</p><button v-if="presaleTimelineCursor" class="console-button ghost small" type="button" :disabled="presaleTimelineLoading" @click="loadMorePresaleTimeline">{{ presaleTimelineLoading ? '加载中…' : '加载更多' }}</button></section>
+        <section class="console-detail-section crm-presale-worklogs"><h3>工时记录</h3><p v-if="!worklogs.length">暂无工时。</p><div v-for="item in worklogs" :key="item.id" class="crm-worklog"><span>{{ item.person_name || '未命名用户' }} · {{ item.work_hours }} 小时 · {{ pushStatusText(item.push_status) }}</span></div></section>
         <footer><button class="console-button ghost" type="button" @click="closePresale">关闭</button></footer>
       </article>
     </div>

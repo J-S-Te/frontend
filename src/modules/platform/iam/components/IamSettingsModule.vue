@@ -728,10 +728,13 @@ async function loadApplicationsForSubject() {
     // 未接入的子系统登记没有可授权的入口，列出来只会让用户误解为可操作。
     const onboarded = await filterOnboardedApplications(allApps)
     if (!isCurrentRequest()) return null
-    applications.value = onboarded
-    const preferredCode = selectedApplicationCode.value && onboarded.some((item) => item.code === selectedApplicationCode.value)
+    // 基础平台自身的 PLATFORM 角色（尤其是 platform-super-admin）不属于子系统个人例外授权，
+    // 后端会通过受保护的通用角色绑定入口管理；在这里隐藏，避免用户选择后得到 422。
+    const assignableApplications = onboarded.filter((item) => String(item?.code || '').trim().toLowerCase() !== 'platform')
+    applications.value = assignableApplications
+    const preferredCode = selectedApplicationCode.value && assignableApplications.some((item) => item.code === selectedApplicationCode.value)
       ? selectedApplicationCode.value
-      : onboarded[0]?.code || ''
+      : assignableApplications[0]?.code || ''
     selectedApplicationCode.value = preferredCode
     if (preferredCode) await loadApplicationAuthorization(preferredCode)
     if (!isCurrentRequest()) return null
@@ -1956,12 +1959,11 @@ onBeforeUnmount(() => {
             <button class="console-button ghost small" type="button" :disabled="activeLoading || !canReadActivePanel" @click="reloadActive"><ConsoleIcon name="refresh" />刷新</button>
             <button v-if="canReadActivePanel && ['users', 'accounts', 'organizations', 'positions', 'memberships'].includes(activePanel)" class="console-button ghost small" type="button" :disabled="!activePanelItemsCount" @click="exportActivePanelCsv" title="导出当前筛选结果为 CSV"><ConsoleIcon name="download" />导出 CSV</button>
             <button v-if="activePanel === 'users' && hasPermission(IAM_PERMISSIONS.userCreate)" class="console-button primary small" type="button" @click="openEmployeeOnboarding"><ConsoleIcon name="user" />新增员工</button>
-            <button v-if="activePanel === 'users' && hasPermission(IAM_PERMISSIONS.userCreate)" class="console-button ghost small" type="button" @click="batchImportVisible = true"><ConsoleIcon name="download" />批量导入用户</button>
             <button v-else-if="panelToKind[activePanel] && hasPermission(panelCreatePermission(activePanel))" class="console-button primary small" type="button" :disabled="!panelToKind[activePanel]" @click="openEditorForActivePanel"><ConsoleIcon name="plus" />{{ activePanel === 'accounts' ? '补建登录账号' : `新增${editorLabels[panelToKind[activePanel]] || ''}` }}</button>
           </div>
         </header>
 
-        <p v-if="activePanel === 'users'" class="iam-panel-policy-note"><ConsoleIcon name="info" /><span><strong>员工入职走统一流程：</strong>“新增员工”会连续创建用户、登录账号和任职关系。批量导入只适合已有外部账号或后续受控补齐的特殊场景。</span></p>
+        <p v-if="activePanel === 'users'" class="iam-panel-policy-note"><ConsoleIcon name="info" /><span><strong>用户与人员一一对应：</strong>“新增员工”必须同时建立任职关系；用户列表只展示已具备任职关系的人员。登录账号仍可单独补建。</span></p>
         <p v-else-if="activePanel === 'accounts'" class="iam-panel-policy-note"><ConsoleIcon name="info" /><span><strong>账号只负责认证：</strong>不提供账号级角色授权入口；新增员工请使用统一流程，“补建登录账号”仅用于修复缺失凭证，已有账号可在此维护状态、密码与有效期。</span></p>
         <p v-else-if="activePanel === 'organizations'" class="iam-panel-policy-note"><ConsoleIcon name="info" /><span><strong>组织只表达人员归属：</strong>应用角色请配置到岗位授权模板。组织详情仅展示并允许清理历史直绑，不允许新增或修改。</span></p>
         <p v-else-if="activePanel === 'positions'" class="iam-panel-policy-note"><ConsoleIcon name="info" /><span><strong>岗位表达职责：</strong>岗位与应用角色的标准映射统一在“岗位授权模板”维护。岗位详情仅用于清理历史直绑。</span></p>
@@ -2046,8 +2048,16 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-if="detail" class="iam-modal-backdrop" role="presentation" @click.self="closeDetail">
-      <section class="iam-modal" role="dialog" aria-modal="true" aria-label="身份授权详情">
+      <section class="iam-modal" :class="{ 'iam-user-detail-modal': isUserAuthorizationSubject }" role="dialog" aria-modal="true" aria-label="身份授权详情">
         <header><div><p>详情</p><h3>{{ detailTitle(detail) }}</h3></div><button class="console-modal-close" type="button" aria-label="关闭详情" @click="closeDetail"><ConsoleIcon name="close" /></button></header>
+        <div v-if="isUserAuthorizationSubject" class="iam-user-detail-hero">
+          <span class="iam-user-detail-avatar">{{ String(detail.item?.display_name || detail.item?.name || '?').trim().slice(0, 1) }}</span>
+          <div class="iam-user-detail-identity">
+            <div class="iam-user-detail-name-row"><h4>{{ detail.item?.display_name || detail.item?.name || '未命名用户' }}</h4><span class="console-badge" :class="String(detail.item?.status || '').toUpperCase() === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(detail.item?.status) }}</span></div>
+            <p><span>{{ detail.item?.employee_no || '未生成员工编号' }}</span><i /> <span>{{ detail.item?.email || '未填写邮箱' }}</span></p>
+          </div>
+          <div class="iam-user-detail-hero-note"><ConsoleIcon name="link" /><span>人员主档案<br /><small>任职关系统一维护</small></span></div>
+        </div>
         <div class="iam-detail-grid">
           <template v-for="row in detailRows(detail)" :key="row.label">
             <div><span>{{ row.label }}</span><strong>{{ row.value }}</strong></div>
