@@ -2356,6 +2356,18 @@
 .iam-template-guidance p { margin: 0; font-size: 12px; line-height: 1.65; }
 .iam-template-grid .full { min-width: 0; }
 .iam-template-roles { display: grid; gap: var(--s-2); margin-top: var(--s-4); }
+.iam-template-role-group {
+  display: grid;
+  gap: var(--s-2);
+  padding: 12px;
+  border: 1px solid var(--brand-line);
+  border-radius: var(--r-2);
+  background: color-mix(in srgb, var(--brand-soft) 35%, var(--surface));
+}
+.iam-template-role-group-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--brand-1); font-size: 12px; }
+.iam-template-role-group .iam-template-role-row { padding: 10px; background: var(--surface); }
+.iam-template-subsystem-role-row { margin-left: 18px; border-style: dashed; }
+.iam-template-role-group > .console-button { justify-self: start; }
 .iam-template-role-row {
   display: grid;
   grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) minmax(120px, 0.6fr) minmax(140px, 0.7fr) auto;
@@ -2638,6 +2650,7 @@
   .iam-template-mount-grid { grid-template-columns: 1fr; }
   .iam-mount-tile dl { grid-template-columns: 1fr 1fr; }
   .iam-template-mount-actions { width: 100%; }
+  .iam-template-subsystem-role-row { margin-left: 0; }
   .iam-template-mount-actions .console-button,
   .iam-template-mount-actions .console-text-button { width: 100%; }
 }

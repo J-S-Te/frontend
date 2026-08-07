@@ -9,6 +9,7 @@ import {
   isCatalogSynchronized,
 } from '@/modules/platform/iam/utils/applicationAuthorizationCatalog'
 import { positionAuthorizationTargetCatalog } from '@/modules/platform/iam/utils/positionAuthorizationCatalog'
+import { expandPositionAuthorizationRoleGroups } from '@/modules/platform/iam/utils/positionAuthorizationRoleGroups'
 import { hasPermission } from '@/modules/platform/auth/utils/principal'
 import { IAM_PERMISSIONS } from '@/modules/platform/iam/utils/iamPermissions'
 import {
@@ -54,7 +55,9 @@ const editorPreviewLoading = ref(false)
 const editorPreviewUnavailable = ref(false)
 const positionPreviewRef = ref(null)
 let editorPreviewRequest = 0
-const form = ref({ name: '', description: '', roles: [{ application_id: '', role_id: '', scope_type: 'TENANT', scope_id: '' }] })
+const emptySubsystemRole = () => ({ application_id: '', role_id: '', scope_type: 'TENANT', scope_id: '' })
+const emptyRoleGroup = () => ({ platform_application_id: '', platform_role_id: '', platform_scope_type: 'TENANT', platform_scope_id: '', subsystem_roles: [emptySubsystemRole()] })
+const form = ref({ name: '', description: '', groups: [emptyRoleGroup()] })
 const catalogs = ref({})
 
 function items(data) { return Array.isArray(data?.items) ? data.items : (Array.isArray(data) ? data : []) }
@@ -79,6 +82,8 @@ function roleId(role) { return id(role, 'role_id', 'id') }
 function roleName(role) { return role?.name || role?.role_name || role?.code || roleId(role) }
 function appName(app) { return app?.name || app?.application_name || app?.code || applicationId(app) }
 function templateRoles(template) { return items(template?.roles) }
+const platformApplications = computed(() => applications.value.filter((app) => String(app?.application_code || app?.code || '').toLowerCase() === 'platform'))
+const subsystemApplications = computed(() => applications.value.filter((app) => String(app?.application_code || app?.code || '').toLowerCase() !== 'platform'))
 const activeTemplates = computed(() => templates.value.filter((template) => String(template?.status || '').toUpperCase() === 'ACTIVE'))
 const positionGroups = computed(() => groupAuthorizationPositions(positions.value))
 
@@ -141,22 +146,27 @@ async function loadAssignments() {
   }
 }
 
-function addRole() { form.value.roles.push({ application_id: '', role_id: '', scope_type: 'TENANT', scope_id: '' }) }
-function removeRole(index) { if (form.value.roles.length > 1) form.value.roles.splice(index, 1) }
+function addRoleGroup() { form.value.groups.push(emptyRoleGroup()) }
+function removeRoleGroup(index) { if (form.value.groups.length > 1) form.value.groups.splice(index, 1) }
+function addSubsystemRole(group) { group.subsystem_roles.push(emptySubsystemRole()) }
+function removeSubsystemRole(group, index) {
+  if (group.subsystem_roles.length > 1) group.subsystem_roles.splice(index, 1)
+}
 function onApplicationChange(row) { row.role_id = '' }
+function onPlatformApplicationChange(group) { group.platform_role_id = '' }
 
 async function createTemplate() {
 	if (!canManageAuthorization.value) return
   const name = String(form.value.name || '').trim()
-  const roles = form.value.roles.filter((row) => row.application_id && row.role_id).map((row) => ({ ...row, scope_type: row.scope_type || 'TENANT', scope_id: row.scope_type === 'ENVIRONMENT' ? String(row.scope_id || '').trim() : '' }))
+  const roles = expandPositionAuthorizationRoleGroups(form.value.groups)
   if (!name || !roles.length) {
-    emit('toast', '请填写模板名称，并至少选择一个“应用 + 实际角色”。')
+    emit('toast', '请填写模板名称，并至少选择一个基础平台角色或子系统角色。')
     return
   }
   saving.value = true
   try {
     await createPositionAuthorizationTemplate({ name, description: String(form.value.description || '').trim(), status: 'ACTIVE', roles })
-    form.value = { name: '', description: '', roles: [{ application_id: '', role_id: '', scope_type: 'TENANT', scope_id: '' }] }
+    form.value = { name: '', description: '', groups: [emptyRoleGroup()] }
     emit('toast', '标准岗位授权模板已创建。')
     await load()
   } catch (error) {
@@ -231,12 +241,12 @@ async function deleteTemplate(template) {
 
 const selectedPosition = computed(() => positions.value.find((item) => positionId(item) === selectedPositionId.value))
 
-// 本地模板草稿统计：纯前端 derived，不打 API，因此对 form.roles 的任何编辑都会即时反映在挂载预览面板上。
+// 本地模板草稿统计：纯前端 derived，不打 API，因此对授权组的任何编辑都会即时反映在挂载预览面板上。
 const templateDraftStats = computed(() => {
-  const rows = Array.isArray(form.value.roles) ? form.value.roles : []
-  const valid = rows.filter((row) => row && row.application_id && row.role_id)
+  const groups = Array.isArray(form.value.groups) ? form.value.groups : []
+  const valid = expandPositionAuthorizationRoleGroups(groups)
   return {
-    totalRows: rows.length,
+    totalRows: groups.length,
     validRows: valid.length,
     distinctApps: new Set(valid.map((row) => row.application_id)).size,
     environmentRows: valid.filter((row) => row.scope_type === 'ENVIRONMENT').length,
@@ -280,22 +290,36 @@ onMounted(() => {
       </div>
       <div class="iam-template-guidance">
         <ConsoleIcon name="info" />
-        <p>模板编码由服务端自动生成。基础平台内置角色可直接选择；子系统仅展示已同步且可分配的实际角色，不按中文名称匹配，也不会创建用户级复制授权。</p>
+        <p>模板编码由服务端自动生成。每个授权组选择一个基础平台角色，并可一次关联多个子系统实际角色；保存后会按组展开为多个授权条目，不按中文名称匹配，也不会创建用户级复制授权。</p>
       </div>
       <p v-if="!loading && !applications.length" class="iam-field-help">暂无可授权的目标应用。请确认应用已启用；子系统还需要成功同步至少一个 ACTIVE 且可分配的角色。</p>
       <div class="iam-template-roles">
-        <div v-for="(row, index) in form.roles" :key="index" class="iam-template-role-row">
-          <div class="iam-template-catalog-field">
-            <select v-model="row.application_id" @change="onApplicationChange(row)"><option value="">选择目标应用</option><option v-for="app in applications" :key="applicationId(app)" :value="applicationId(app)">{{ appName(app) }}</option></select>
-            <small v-if="row.application_id">目录 {{ catalogVersion(catalogForApplication(row.application_id)) }} · {{ catalogSyncText(catalogForApplication(row.application_id)) }}</small>
+        <div v-for="(group, groupIndex) in form.groups" :key="groupIndex" class="iam-template-role-group">
+          <div class="iam-template-role-group-head"><strong>授权组 {{ groupIndex + 1 }}</strong><button class="console-text-button danger" type="button" :disabled="form.groups.length === 1" @click="removeRoleGroup(groupIndex)">移除授权组</button></div>
+          <div class="iam-template-role-row">
+            <div class="iam-template-catalog-field">
+              <select v-model="group.platform_application_id" @change="onPlatformApplicationChange(group)"><option value="">选择基础平台</option><option v-for="app in platformApplications" :key="applicationId(app)" :value="applicationId(app)">{{ appName(app) }}</option></select>
+              <small v-if="group.platform_application_id">目录 {{ catalogVersion(catalogForApplication(group.platform_application_id)) }} · 已同步</small>
+            </div>
+            <div class="iam-template-catalog-field">
+              <select v-model="group.platform_role_id" :disabled="!group.platform_application_id"><option value="">选择基础平台角色</option><option v-for="role in roleItems(catalogForApplication(group.platform_application_id))" :key="roleId(role)" :value="roleId(role)">{{ roleName(role) }}</option></select>
+            </div>
+            <select v-model="group.platform_scope_type"><option value="TENANT">租户范围</option><option value="ENVIRONMENT">环境范围</option></select>
+            <input v-if="group.platform_scope_type === 'ENVIRONMENT'" v-model="group.platform_scope_id" placeholder="环境 ID" />
           </div>
-          <div class="iam-template-catalog-field">
-            <select v-model="row.role_id" :disabled="!row.application_id || !catalogIsReady(row.application_id)"><option value="">{{ catalogIsReady(row.application_id) ? '选择实际角色' : '请等待目录成功同步' }}</option><option v-for="role in roleItems(catalogForApplication(row.application_id))" :key="roleId(role)" :value="roleId(role)">{{ roleName(role) }}</option></select>
-            <small v-if="row.application_id && catalogIsReady(row.application_id) && !roleItems(catalogForApplication(row.application_id)).length">目录中没有 ACTIVE 且可分配的角色</small>
+          <div v-for="(mapping, mappingIndex) in group.subsystem_roles" :key="mappingIndex" class="iam-template-role-row iam-template-subsystem-role-row">
+            <div class="iam-template-catalog-field">
+              <select v-model="mapping.application_id" @change="onApplicationChange(mapping)"><option value="">选择子系统</option><option v-for="app in subsystemApplications" :key="applicationId(app)" :value="applicationId(app)">{{ appName(app) }}</option></select>
+              <small v-if="mapping.application_id">目录 {{ catalogVersion(catalogForApplication(mapping.application_id)) }} · {{ catalogSyncText(catalogForApplication(mapping.application_id)) }}</small>
+            </div>
+            <div class="iam-template-catalog-field">
+              <select v-model="mapping.role_id" :disabled="!mapping.application_id || !catalogIsReady(mapping.application_id)"><option value="">{{ catalogIsReady(mapping.application_id) ? '选择子系统角色' : '请等待目录成功同步' }}</option><option v-for="role in roleItems(catalogForApplication(mapping.application_id))" :key="roleId(role)" :value="roleId(role)">{{ roleName(role) }}</option></select>
+            </div>
+            <select v-model="mapping.scope_type"><option value="TENANT">租户范围</option><option value="ENVIRONMENT">环境范围</option></select>
+            <input v-if="mapping.scope_type === 'ENVIRONMENT'" v-model="mapping.scope_id" placeholder="环境 ID" />
+            <button class="console-text-button danger" type="button" :disabled="group.subsystem_roles.length === 1" @click="removeSubsystemRole(group, mappingIndex)">移除</button>
           </div>
-          <select v-model="row.scope_type"><option value="TENANT">租户范围</option><option value="ENVIRONMENT">环境范围</option></select>
-          <input v-if="row.scope_type === 'ENVIRONMENT'" v-model="row.scope_id" placeholder="环境 ID" />
-          <button class="console-text-button danger" type="button" :disabled="form.roles.length === 1" @click="removeRole(index)">移除</button>
+          <button class="console-button ghost small" type="button" @click="addSubsystemRole(group)"><ConsoleIcon name="plus" />增加子系统角色</button>
         </div>
       </div>
       <div class="iam-template-mount-preview" aria-label="挂载预览（保存前影响分析）">
@@ -350,7 +374,7 @@ onMounted(() => {
           <button class="console-text-button" type="button" :disabled="!selectedPositionId" @click="scrollToPositionPreview">查看完整预览</button>
         </div>
       </div>
-      <div class="iam-panel-actions"><button class="console-button ghost small" type="button" @click="addRole"><ConsoleIcon name="plus" />增加角色</button><button class="console-text-button" type="button" :disabled="!selectedPositionId" @click="scrollToPositionPreview">预览影响</button><button class="console-button primary small" type="button" :disabled="saving" @click="createTemplate"><ConsoleIcon name="save" />创建模板</button></div>
+      <div class="iam-panel-actions"><button class="console-button ghost small" type="button" @click="addRoleGroup"><ConsoleIcon name="plus" />增加授权组</button><button class="console-text-button" type="button" :disabled="!selectedPositionId" @click="scrollToPositionPreview">预览影响</button><button class="console-button primary small" type="button" :disabled="saving" @click="createTemplate"><ConsoleIcon name="save" />创建模板</button></div>
     </div>
 
     <p v-if="canReadAuthorization && !canManageAuthorization" class="iam-field-help" role="status">当前为只读模式：可以查看模板、岗位映射和授权预览，但不能创建、修改或删除模板。</p>
