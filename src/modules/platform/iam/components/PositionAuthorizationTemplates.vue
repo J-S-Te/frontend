@@ -9,7 +9,6 @@ import {
   isCatalogSynchronized,
 } from '@/modules/platform/iam/utils/applicationAuthorizationCatalog'
 import { positionAuthorizationTargetCatalog } from '@/modules/platform/iam/utils/positionAuthorizationCatalog'
-import { expandPositionAuthorizationRoleGroups } from '@/modules/platform/iam/utils/positionAuthorizationRoleGroups'
 import { hasPermission } from '@/modules/platform/auth/utils/principal'
 import { IAM_PERMISSIONS } from '@/modules/platform/iam/utils/iamPermissions'
 import {
@@ -62,6 +61,42 @@ const catalogs = ref({})
 
 function items(data) { return Array.isArray(data?.items) ? data.items : (Array.isArray(data) ? data : []) }
 function id(item, ...keys) { return keys.map((key) => item?.[key]).find(Boolean) || '' }
+function expandPositionAuthorizationRoleGroups(groups) {
+  const roles = []
+  for (const group of Array.isArray(groups) ? groups : []) {
+    const platformApplicationId = id(group, 'platform_application_id')
+    const platformRoleId = id(group, 'platform_role_id')
+    if (platformApplicationId && platformRoleId) {
+      roles.push(normalizePositionAuthorizationRole(
+        platformApplicationId,
+        platformRoleId,
+        group.platform_scope_type,
+        group.platform_scope_id,
+      ))
+    }
+    for (const mapping of Array.isArray(group?.subsystem_roles) ? group.subsystem_roles : []) {
+      const applicationId = id(mapping, 'application_id')
+      const roleIdValue = id(mapping, 'role_id')
+      if (applicationId && roleIdValue) {
+        roles.push(normalizePositionAuthorizationRole(
+          applicationId,
+          roleIdValue,
+          mapping.scope_type,
+          mapping.scope_id,
+        ))
+      }
+    }
+  }
+  return roles
+}
+function normalizePositionAuthorizationRole(applicationId, roleIdValue, scopeType = 'TENANT', scopeId = '') {
+  return {
+    application_id: applicationId,
+    role_id: roleIdValue,
+    scope_type: scopeType || 'TENANT',
+    scope_id: scopeType === 'ENVIRONMENT' ? String(scopeId || '').trim() : '',
+  }
+}
 function applicationId(item) { return id(item, 'application_id', 'id') }
 function positionId(item) { return id(item, 'position_id', 'id') }
 function positionName(item) { return item?.name || item?.position_name || item?.code || item?.position_code || positionId(item) }
