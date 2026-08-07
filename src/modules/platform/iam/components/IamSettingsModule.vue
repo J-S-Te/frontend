@@ -87,6 +87,11 @@ import {
 } from '@/modules/platform/iam/utils/iamPermissions'
 import '@/modules/platform/iam/styles/iam-settings.css'
 
+const props = defineProps({
+  // EmployeeOnboardingModal is owned by PlatformConsoleView, so its successful
+  // completion must explicitly invalidate the IAM lists mounted here.
+  refreshKey: { type: Number, default: 0 },
+})
 const emit = defineEmits(['toast', 'employee-onboarding'])
 
 // 当前登录用户的权限集合（来自 /auth/me 的 permission_codes 字段）。
@@ -171,6 +176,7 @@ const authorizationSubjectId = computed(() => {
   return ''
 })
 const canReadApplicationAuthorization = computed(() => hasPermission(IAM_PERMISSIONS.roleBindingRead))
+const canManageApplicationAuthorization = computed(() => hasPermission(IAM_PERMISSIONS.roleBindingUpdate))
 const supportsApplicationAuthorization = computed(() => Boolean(
   canReadApplicationAuthorization.value && authorizationSubjectType.value && authorizationSubjectId.value,
 ))
@@ -271,7 +277,7 @@ const userAuthorizationPreviewSources = [
   { key: 'POSITION', label: '岗位继承' },
   { key: 'OTHER', label: '系统或其它来源' },
 ]
-const selectedAuthorizationRoles = computed(() => authorizationRoleOptions.value.filter((role) => authorizationDraft.role_codes.includes(role.code)))
+const selectedAuthorizationRoles = computed(() => authorizationRoleOptions.value.filter((role) => authorizationDraft.role_codes.includes(roleCode(role))))
 const authorizationEntryLayerInfo = computed(() => authorizationEntryLayer(authorizationSubjectType.value))
 const authorizationEffectivePermissions = computed(() => {
   if (hasApplicationAuthorizationConflict.value) return []
@@ -279,7 +285,7 @@ const authorizationEffectivePermissions = computed(() => {
     ...authorizationDraft.role_codes,
     ...applicationInheritedRoles.value.map((role) => roleCode(role)),
   ])
-  const effectiveRoles = authorizationRoleOptions.value.filter((role) => roleCodes.includes(role.code))
+  const effectiveRoles = authorizationRoleOptions.value.filter((role) => roleCodes.includes(roleCode(role)))
   const rolePermissions = effectiveRoles.flatMap((role) => rolePermissionsFor(role))
   // 子系统权限目录是只读镜像。基础平台只预览目录声明的角色默认权限，
   // 不接受或叠加任何用户自定义业务权限；最终业务鉴权仍由子系统执行。
@@ -1236,6 +1242,21 @@ async function reloadActive() {
   }
 }
 
+async function reloadVisiblePanels() {
+  const loaders = {
+    users: loadUsers,
+    accounts: loadAccounts,
+    organizations: loadOrganizations,
+    positions: loadPositions,
+    memberships: loadMemberships,
+  }
+  await Promise.all(visiblePanels.value
+    .filter(canReadPanel)
+    .map((panel) => loaders[panel.key])
+    .filter(Boolean)
+    .map((loader) => loader()))
+}
+
 function pageTotal(key) {
   return Math.max(1, Math.ceil(pagination[key].total / pagination[key].pageSize))
 }
@@ -1270,6 +1291,16 @@ watch(activePanel, () => {
   Object.keys(requestSeq).forEach((key) => { requestSeq[key] += 1 })
   detail.value = null
   reloadActive()
+})
+
+watch(() => props.refreshKey, (current, previous) => {
+  if (!current || current === previous) return
+  // A successful employee onboarding changes three lists and all five summary
+  // totals. Invalidate every visible IAM list together, while each loader's
+  // request sequence still prevents an older response from winning a race.
+  detail.value = null
+  Object.keys(requestSeq).forEach((key) => { requestSeq[key] += 1 })
+  reloadVisiblePanels()
 })
 
 watch(panelFilters, () => {
@@ -1852,18 +1883,7 @@ onMounted(async () => {
   // 先获取 permission_codes，再只加载当前账号具有对应 read 权限的目录，
   // 避免角色绑定管理员因为缺少 user:read 等无关权限产生一组 403。
   await refreshPrincipal().catch(() => null)
-  const loaders = {
-    users: loadUsers,
-    accounts: loadAccounts,
-    organizations: loadOrganizations,
-    positions: loadPositions,
-    memberships: loadMemberships,
-  }
-  await Promise.all(visiblePanels.value
-    .filter(canReadPanel)
-    .map((item) => loaders[item.key])
-    .filter(Boolean)
-    .map((loader) => loader()))
+  await reloadVisiblePanels()
 })
 onBeforeUnmount(() => {
   if (typeof window !== 'undefined') {
@@ -2144,7 +2164,7 @@ onBeforeUnmount(() => {
                   <p class="iam-field-help">角色和默认权限来自子系统角色目录，只读展示。基础平台仅保存“主体 / 应用 / 角色 / 范围 / 有效期”，不会提交其他子系统的自定义业务权限。</p>
                   <p v-if="catalogInactiveOrRestrictedRoleCount" class="iam-field-help">目录中另有 {{ catalogInactiveOrRestrictedRoleCount }} 个停用或不可分配角色，已从可选项中排除。</p>
                   <p v-if="!authorizationDraft.role_codes.length && !unavailableDirectRoles.length" class="iam-empty-inline">{{ authorizationEntryLayerInfo.empty }}</p>
-                  <div class="iam-application-role-list"><label v-for="role in authorizationRoleOptions" :key="role.role_id || role.id || role.code" class="iam-application-role-option" :class="{ selected: authorizationDraft.role_codes.includes(role.code) }"><input v-model="authorizationDraft.role_codes" type="checkbox" :value="role.code" /><span class="iam-application-role-copy"><strong>{{ role.name || role.display_name || role.code }}</strong><code>{{ role.code }}</code><small v-if="role.description">{{ role.description }}</small><small class="iam-application-role-status">ACTIVE · {{ rolePermissionCodes(role).length }} 项默认权限</small><small class="iam-application-role-summary">来源：{{ authorizationEntryLayerInfo.title }} · 默认能力（子系统只读）：{{ roleDefaultPermissionSummary(role) }}</small></span></label></div>
+                  <div class="iam-application-role-list"><label v-for="role in authorizationRoleOptions" :key="role.role_id || role.id || roleCode(role)" class="iam-application-role-option" :class="{ selected: authorizationDraft.role_codes.includes(roleCode(role)) }"><input v-model="authorizationDraft.role_codes" type="checkbox" :value="roleCode(role)" /><span class="iam-application-role-copy"><strong>{{ role.name || role.display_name || roleCode(role) }}</strong><code>{{ roleCode(role) }}</code><small v-if="role.description">{{ role.description }}</small><small class="iam-application-role-status">ACTIVE · {{ rolePermissionCodes(role).length }} 项默认权限</small><small class="iam-application-role-summary">来源：{{ authorizationEntryLayerInfo.title }} · 默认能力（子系统只读）：{{ roleDefaultPermissionSummary(role) }}</small></span></label></div>
                 </fieldset>
                 <!-- 不在当前 ACTIVE 目录中的历史例外角色：保留在草稿（已勾选、不可改），保存时弹窗要求用户显式确认撤销。 -->
                 <fieldset v-if="isUserAuthorizationSubject && unavailableDirectRoles.length" class="iam-application-role-fieldset iam-application-unavailable" :disabled="applicationAccessSaving || applicationAccessRevoking">
@@ -2178,11 +2198,12 @@ onBeforeUnmount(() => {
                 </div>
 
                 <div class="iam-application-permission-block effective"><div class="iam-application-permission-head"><strong>角色默认权限摘要（只读）</strong><span>{{ authorizationEffectivePermissions.length }} 项</span></div><p v-if="hasApplicationAuthorizationConflict" class="iam-empty-inline">角色存在冲突，服务端不会计算或签发权限并集。请先处理冲突来源。</p><p v-else-if="!authorizationEffectivePermissions.length" class="iam-empty-inline">当前直接角色与继承角色没有可展示的默认权限；请由子系统同步完整角色目录。最终业务鉴权仍由子系统执行。</p><div v-else class="iam-application-permission-tags"><span v-for="permission in authorizationEffectivePermissions" :key="permission"><b>{{ permissionName(permission) }}</b><code>{{ permission }}</code></span></div><p class="iam-field-help">该摘要只来自子系统已同步角色的默认权限，供授权预览与影响分析使用。基础平台不提供新增、删除或覆盖其他子系统业务权限的入口；保存时只提交上方勾选的例外角色。</p></div>
+                <p v-if="isUserAuthorizationSubject && !canManageApplicationAuthorization" class="iam-field-help" role="status">当前账号只有查看权限，缺少“更新角色绑定”权限，因此不能保存个人例外授权。请让平台安全管理员为该账号授予 <code>platform:role-binding:update</code>。</p>
               </template>
             </div>
           </template>
         </section>
-        <footer><button class="console-button ghost" type="button" :disabled="applicationAccessSaving || applicationAccessRevoking" @click="closeDetail">关闭</button><button v-if="supportsApplicationAuthorization && selectedApplicationCode && hasDirectApplicationAccess && hasPermission(IAM_PERMISSIONS.roleBindingUpdate)" class="console-button danger" type="button" :disabled="applicationAccessSaving || applicationAccessRevoking" @click="revokeApplicationAccess">{{ applicationAccessRevoking ? '撤销中…' : (isLegacyStructuralAuthorizationSubject ? '清理历史直绑' : '撤销个人例外') }}</button><button v-if="isUserAuthorizationSubject && selectedApplicationCode && hasPermission(IAM_PERMISSIONS.roleBindingUpdate)" class="console-button primary" type="button" :disabled="applicationsLoading || authorizationCatalogLoading || applicationAccessLoading || applicationAccessSaving || applicationAccessRevoking || !authorizationRoleOptions.length" @click="saveApplicationAccess"><ConsoleIcon name="save" />{{ applicationAccessSaving ? '保存中…' : '保存个人例外' }}</button></footer>
+        <footer><button class="console-button ghost" type="button" :disabled="applicationAccessSaving || applicationAccessRevoking" @click="closeDetail">关闭</button><button v-if="supportsApplicationAuthorization && selectedApplicationCode && hasDirectApplicationAccess && canManageApplicationAuthorization" class="console-button danger" type="button" :disabled="applicationAccessSaving || applicationAccessRevoking" @click="revokeApplicationAccess">{{ applicationAccessRevoking ? '撤销中…' : (isLegacyStructuralAuthorizationSubject ? '清理历史直绑' : '撤销个人例外') }}</button><button v-if="isUserAuthorizationSubject && selectedApplicationCode && canManageApplicationAuthorization" class="console-button primary" type="button" :disabled="applicationsLoading || authorizationCatalogLoading || applicationAccessLoading || applicationAccessSaving || applicationAccessRevoking || !authorizationRoleOptions.length" @click="saveApplicationAccess"><ConsoleIcon name="save" />{{ applicationAccessSaving ? '保存中…' : '保存个人例外' }}</button></footer>
       </section>
     </div>
 

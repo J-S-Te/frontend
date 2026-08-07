@@ -84,6 +84,7 @@ let toastTimer = null
 const showEmployeeOnboarding = ref(false)
 const onboardingOrganizations = ref([])
 const onboardingPositions = ref([])
+const iamRefreshKey = ref(0)
 
 const { principal, refreshPrincipal } = useCurrentPrincipal()
 
@@ -426,6 +427,9 @@ async function refreshOnboardingReferences() {
 
 function handleEmployeeOnboardingCompleted() {
   // 新增员工成功后刷新缓存，让下一次打开 modal 时看到刚建好的组织 / 岗位。
+  // IAM 列表组件与员工 modal 是兄弟组件，递增 key 让用户、账号、任职关系
+  // 及顶部统计在当前页面立即重新读取，而不必整页刷新。
+  iamRefreshKey.value += 1
   loadOnboardingReferences().catch(() => {})
 }
 
@@ -799,7 +803,7 @@ onBeforeUnmount(() => {
 
           <PublicAccessSettingsModule v-else-if="!hasNoVisibleSettingsTab && activeSettingsTab === 'access'" @toast="showToast" />
 
-          <IamSettingsModule v-else-if="!hasNoVisibleSettingsTab && activeSettingsTab === 'iam'" @toast="showToast" @employee-onboarding="openEmployeeOnboarding" />
+          <IamSettingsModule v-else-if="!hasNoVisibleSettingsTab && activeSettingsTab === 'iam'" :refresh-key="iamRefreshKey" @toast="showToast" @employee-onboarding="openEmployeeOnboarding" />
 
           <NotificationCenterModule v-else-if="!hasNoVisibleSettingsTab && activeSettingsTab === 'notify'" @toast="showToast" />
 
