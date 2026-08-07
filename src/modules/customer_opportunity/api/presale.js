@@ -13,8 +13,8 @@ export const getPresaleAvailableActions = (id) => request(`/presale/requests/${e
 export const createPresaleRequest = (payload, idempotencyKey) => request('/presale/requests', {
   method: 'POST', body: JSON.stringify(payload), idempotent: true, idempotencyKey,
 })
-export const reopenPresaleRequest = (id, version) => request(`/presale/requests/${encodeURIComponent(id)}/reopen?version=${encodeURIComponent(version)}`, {
-  method: 'POST', idempotent: true,
+export const reopenPresaleRequest = (id, version, payload) => request(`/presale/requests/${encodeURIComponent(id)}/reopen?version=${encodeURIComponent(version)}`, {
+  method: 'POST', body: JSON.stringify(payload), idempotent: true,
 })
 export const submitApprovalAction = (id, payload, idempotencyKey) => request(`/presale/requests/${encodeURIComponent(id)}/approval-actions`, {
   method: 'POST', body: JSON.stringify(payload), idempotent: true, idempotencyKey,
