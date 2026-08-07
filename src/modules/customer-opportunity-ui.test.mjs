@@ -442,6 +442,8 @@ test('商机团队任期切换时新请求不被旧 loading 锁住且旧响应�
 
 test('售前多人指派使用内部人员目录，工时支持 PERSON_DAY', () => {
   assert.match(view, /const person = byID\.get\(personID\) \|\| current\.get\(personID\)/)
+  assert.match(view, /department_id: item\.organizations\?\.find\(\(org\) => org\.is_primary\)\?\.organization_id/)
+  assert.match(view, /targets\.some\(\(target\) => !target\.department_id\)/)
   assert.match(view, /person_name: person\?\.person_name \|\| '未命名用户'/)
   assert.match(view, /department: person\?\.department \|\| ''/)
   assert.match(view, /value="PERSON_DAY">人天（1 人天 = 8 小时）/)
@@ -777,9 +779,17 @@ test('TS-001 售前列表通过受控按钮进入独立创建视图并在取消�
 })
 
 test('驳回或取消的售前重新审批后刷新列表和状态看板', () => {
-  assert.match(view, /reopenPresaleRequest\(presaleReopenRequest\.value\.id, presaleReopenRequest\.value\.version\)/)
-  assert.match(view, /presaleReopenRequest\.value = \{ id: request\.id, version: request\.version/)
-  assert.match(view, /const reopened = await reopenPresaleRequest\(presaleReopenRequest\.value\.id, presaleReopenRequest\.value\.version\)[\s\S]*await loadCurrent\(\)[\s\S]*await openPresale\(reopened\.id\)/)
+	assert.match(view, /reopenPresaleRequest\(presaleReopenRequest\.value\.id, presaleReopenRequest\.value\.version, \{/)
+	assert.match(view, /presaleReopenRequest\.value = \{ id: request\.id, version: request\.version/)
+	assert.match(view, /const reopened = await reopenPresaleRequest\([\s\S]*contact_phone: presaleForm\.contact_phone[\s\S]*expected_start: expectedStart\.toISOString\(\)[\s\S]*await loadCurrent\(\)[\s\S]*await openPresale\(reopened\.id\)/)
+})
+
+test('客户最近跟进明确包含商机记录且商机历史可进入详情', () => {
+  assert.match(view, /最近跟进（含商机）/)
+  assert.match(view, /v-for="item in customerOpportunities"[^>]*role="button"[^>]*@click="openOpportunity\(item\.id\)"/)
+  assert.match(view, /@keydown\.enter\.prevent="openOpportunity\(item\.id\)"/)
+  assert.doesNotMatch(view, /负责人 ID<input/)
+  assert.doesNotMatch(view, /回退为手动输入用户 ID/)
 })
 
 test('TS-007 列表、只读状态看板和服务端可见筛选项调用真实路由', async (t) => {
@@ -1222,9 +1232,9 @@ test('客户与商机关联操作使用业务选择器而不是手填 ID', () =>
   assert.match(view, /<span>归属组织<\/span><select v-model="reportFilters\.organization_id"/)
   assert.match(view, /<span>参与人员<\/span><select v-model="reportFilters\.person_id"/)
   assert.match(view, /<span>关联商机<\/span><select v-model="reportFilters\.opportunity_id"/)
-  // 人员目录不可用时，负责人筛选允许手动输入用户 ID，其余关联选择器仍禁止手填。
-  assert.match(view, /<label v-else>负责人 ID<input/)
-  assert.match(view, /负责人筛选已回退为手动输入用户 ID/)
+  // 人员目录不可用时失败关闭，不允许退回手填任何内部 ID。
+  assert.match(view, /基础平台负责人目录暂不可用，当前不能按负责人筛选/)
+  assert.match(view, /请在基础平台人员目录恢复后重试负责人筛选/)
   assert.doesNotMatch(view, /目标客户 ID<input/)
   assert.doesNotMatch(view, /关联商机 ID<input/)
   assert.doesNotMatch(view, /<span>组织 ID<\/span><input/)
