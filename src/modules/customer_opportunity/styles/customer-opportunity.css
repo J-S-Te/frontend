@@ -573,6 +573,7 @@
   padding: 2px 0 14px;
 }
 .crm-board-column {
+  min-width: 0;
   min-height: 350px;
   padding: 12px;
   border: 1px solid #e2e8f0;
@@ -703,7 +704,11 @@
 }
 .crm-board-card {
   display: grid !important;
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
   width: 100%;
+  overflow: hidden;
   gap: 6px !important;
   justify-items: start !important;
   margin-bottom: 9px;
@@ -713,6 +718,13 @@
   border-radius: 9px !important;
   background: #fff !important;
   box-shadow: 0 1px 3px rgba(15, 23, 42, .05);
+}
+.crm-board-card strong,
+.crm-board-card span {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .crm-board-card strong { color: var(--crm-text); font-size: 13px; }
 .crm-board-card span { color: var(--crm-muted); font-size: 11px; white-space: normal; }
