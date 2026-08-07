@@ -114,8 +114,8 @@ test('商机补充信息使用统一滚动轨道，避免团队任期、附件�
   assert.match(style, /\.crm-opportunity-actions\s*\{[\s\S]*background:\s*#fff/)
 })
 
-test('presale alert inbox documents the exact user/person recipient union', () => {
-  assert.match(view, /个人预警仅合并当前登录用户和身份令牌中非空的 PMS 人员绑定/)
+test('售前预警仅使用当前基础平台用户身份', () => {
+  assert.match(view, /个人预警仅合并当前登录用户的内部人员身份/)
   assert.match(view, /不随 SELF\/ORG\/ALL 数据范围扩大/)
 })
 
@@ -245,7 +245,7 @@ test('可选外部集成按服务端运行能力提前关闭且失败不影响�
   assert.match(view, /:disabled="!customerImportScanAvailable"/)
   assert.match(view, /:disabled="!customerExportAvailable"/)
   assert.match(view, /presaleRequestSubmissionAvailable = computed\(\(\) => runtimeCapability\('presale_request_submission'\)\.available\)/)
-  assert.match(view, /售前投递 Worker 没有新鲜运行证据/)
+  assert.match(view, /售前内部流程当前不可用/)
   assert.match(view, /!opportunityAttachmentCapabilities\.value\?\.download_available/)
   assert.match(view, /!opportunityAttachmentCapabilities\?\.download_available/)
   assert.match(view, /qbActiveQueryMode === 'CALLBACK_ONLY'/)
@@ -427,11 +427,10 @@ test('商机团队任期切换时新请求不被旧 loading 锁住且旧响应�
   assert.doesNotMatch(view, /if \(!opportunityID \|\| opportunityMemberTermsLoading\.value\) return/)
 })
 
-test('售前多人指派使用 PMS 人员真实角色，工时支持 PERSON_DAY', () => {
-  assert.match(view, /role: byID\.get\(personID\)\?\.role \|\| current\.get\(personID\)\?\.role/)
-  for (const role of ['technical_director', 'team_lead', 'project_manager', 'implementation_engineer']) {
-    assert.match(view, new RegExp(`value="${role}"`))
-  }
+test('售前多人指派使用内部人员目录，工时支持 PERSON_DAY', () => {
+  assert.match(view, /const person = byID\.get\(personID\) \|\| current\.get\(personID\)/)
+  assert.match(view, /person_name: person\?\.person_name \|\| personID/)
+  assert.match(view, /department: person\?\.department \|\| ''/)
   assert.match(view, /value="PERSON_DAY">人天（1 人天 = 8 小时）/)
   assert.match(view, /所有当前执行人各有至少一笔有效工时后自动完成/)
 })
@@ -452,7 +451,7 @@ test('界面已接入客户生命周期、商机看板/跟进/历史/终态待�
   assert.match(view, /getPresaleRequest/)
   assert.match(view, /listWorklogs/)
 	assert.match(view, /submitApprovalAction/)
-	assert.match(view, /服务端按实例、节点和当前登录审批人实时解析权威待办/)
+	assert.match(view, /审批操作在客户与商机系统内/)
   assert.match(view, /cancelPresaleRequest/)
   assert.doesNotMatch(view, /后端暂未提供申请列表与详情/)
 })
@@ -1073,7 +1072,7 @@ test('TS-010 从商机发起申请锁定机会且提交后只刷新面板不改�
   assert.match(style, /\.crm-opportunity-presale-create-backdrop\s*\{[^}]*z-index:\s*90/)
   assert.match(style, /\.crm-opportunity-presale-create-dialog/)
   assert.match(view, /\{\{ selectedOpportunity\.opportunity_no \}\}[\s\S]*\{\{ selectedOpportunity\.name \}\}/)
-  assert.match(view, /售前投递 Worker 尚未就绪。可以先填写申请，但当前不会向服务端提交。/)
+  assert.match(view, /售前内部流程暂时不可用/)
   assert.match(view, /@click="refreshPresaleSubmissionCapability"/)
   assert.match(view, /:disabled="presaleCreateLoading \|\| !presaleRequestSubmissionAvailable"/)
   assert.match(view, /expectedEnd <= expectedStart/)
@@ -1098,7 +1097,7 @@ test('客户导入提交可显式复用同一内存幂等键', async (t) => {
   assert.doesNotMatch(view, /localStorage|sessionStorage/)
 })
 
-test('PMS 技术人员池查询与手动同步使用真实异步接口', async (t) => {
+test('历史 PMS 人员接口仅保留协议兼容，售前主界面不再调用', async (t) => {
   const originalFetch = globalThis.fetch
   t.after(() => { globalThis.fetch = originalFetch })
   const requests = []
@@ -1114,21 +1113,20 @@ test('PMS 技术人员池查询与手动同步使用真实异步接口', async (
   ])
   assert.equal(requests[1].options.method, 'POST')
   assert.ok(requests[1].options.headers['Idempotency-Key'])
+  assert.doesNotMatch(view, /listPresaleEngineers|syncPresaleEngineers/)
 })
 
-test('PMS 人员选择器展示有效状态、同步时间和替换差异', () => {
-  assert.match(view, /仅展示 PMS 当前有效人员/)
-  assert.match(view, /person\.valid_flag \? '有效' : '停用'/)
-  assert.match(view, /person\.source_updated_at/)
-  assert.match(view, /person\.synced_at/)
+test('内部人员选择器使用基础平台授权目录并展示替换差异', () => {
+  assert.match(view, /listOwnerDirectory/)
+  assert.match(view, /从基础平台选择执行人员/)
+  assert.match(view, />从基础平台选择执行人<\/button>/)
+  assert.match(view, /人员来自基础平台当前有效且已获得本应用授权的用户目录/)
   assert.match(view, /assignmentDiff\.added/)
   assert.match(view, /assignmentDiff\.retained/)
   assert.match(view, /assignmentDiff\.removed/)
-  assert.match(view, /旧缓存会保留至任务成功/)
-  assert.match(view, /canSyncEngineers/)
-  assert.match(view, /v-if="canSyncEngineers"[^>]*@click="requestEngineerSync"/)
   assert.match(view, /unavailableCurrentAssignees/)
-  assert.match(view, /当前指派但已停用或不在有效池/)
+  assert.match(view, /当前指派人员不在本次查询结果中/)
+  assert.doesNotMatch(view, /手动同步 PMS/)
 })
 
 test('售前超时预警接入规则、未读、已读和聚合标记界面', () => {
@@ -1144,7 +1142,8 @@ test('售前投入报表提供筛选、KPI、图形和等价数值表', () => {
   assert.match(view, /getPresaleReportSummary/)
   assert.match(view, /投入小时/)
   assert.match(view, /商机覆盖率/)
-  assert.match(view, /PMS 最终成功率/)
+  assert.match(view, /自动完成任务/)
+  assert.doesNotMatch(view, /PMS 最终成功率/)
   assert.match(view, /趋势数值表（UTC 日）/)
   assert.match(view, /分布数值表/)
   assert.match(view, /异步导出尚未接通对象存储与导出 Worker/)
