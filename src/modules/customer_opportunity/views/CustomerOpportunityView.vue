@@ -1889,6 +1889,7 @@ async function loadEngineerDirectory() {
       person_id: item.user_id,
       person_name: platformUserName(item),
       department: (item.organizations || []).map((org) => org.organization_name).filter(Boolean).join('、'),
+      department_id: item.organizations?.find((org) => org.is_primary)?.organization_id || item.organizations?.[0]?.organization_id || '',
       role: 'implementation_engineer',
       valid_flag: true,
     })).filter((item) => !engineerQuery.department || item.department.includes(engineerQuery.department))
@@ -1911,7 +1912,7 @@ function assignmentTargets() {
   const current = new Map((selectedPresale.value?.current_assignees || []).map((item) => [item.person_id, item]))
   return selectedEngineerIDs.value.map((personID) => {
     const person = byID.get(personID) || current.get(personID)
-    return { person_id: personID, person_name: person?.person_name || '未命名用户', department: person?.department || '', department_id: selectedPresale.value?.request?.execution_department_id || '', role: person?.role || 'implementation_engineer' }
+    return { person_id: personID, person_name: person?.person_name || '未命名用户', department: person?.department || '', department_id: person?.department_id || selectedPresale.value?.request?.execution_department_id || '', role: person?.role || 'implementation_engineer' }
   })
 }
 async function loadAlerts() {
@@ -2203,6 +2204,7 @@ async function runPresale(action) {
       if (!assignmentReason.value.trim()) { error.value = '改派原因必填。'; return }
       const targets = assignmentTargets()
       if (!targets.length || targets.length !== selectedEngineerIDs.value.length) { error.value = '请选择有效的内部执行人员。'; return }
+      if (targets.some((target) => !target.department_id)) { error.value = '所选执行人员缺少有效组织，请刷新基础平台人员目录后重试。'; return }
       const retry = presaleMutationRetries.keyFor('assignment', id, { assignees: targets, change_reason: assignmentReason.value, version })
       const result = await replaceAssignments(id, retry.payload, retry.key)
       presaleMutationRetries.confirmSuccess('assignment', id, retry.key)

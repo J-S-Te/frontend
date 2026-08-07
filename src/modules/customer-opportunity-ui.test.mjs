@@ -442,6 +442,8 @@ test('商机团队任期切换时新请求不被旧 loading 锁住且旧响应�
 
 test('售前多人指派使用内部人员目录，工时支持 PERSON_DAY', () => {
   assert.match(view, /const person = byID\.get\(personID\) \|\| current\.get\(personID\)/)
+  assert.match(view, /department_id: item\.organizations\?\.find\(\(org\) => org\.is_primary\)\?\.organization_id/)
+  assert.match(view, /targets\.some\(\(target\) => !target\.department_id\)/)
   assert.match(view, /person_name: person\?\.person_name \|\| '未命名用户'/)
   assert.match(view, /department: person\?\.department \|\| ''/)
   assert.match(view, /value="PERSON_DAY">人天（1 人天 = 8 小时）/)
