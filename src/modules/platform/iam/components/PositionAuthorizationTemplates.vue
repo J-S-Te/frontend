@@ -9,7 +9,6 @@ import {
   isCatalogSynchronized,
 } from '@/modules/platform/iam/utils/applicationAuthorizationCatalog'
 import { positionAuthorizationTargetCatalog } from '@/modules/platform/iam/utils/positionAuthorizationCatalog'
-import { expandPositionAuthorizationRoleMappings } from '@/modules/platform/iam/utils/positionAuthorizationRoleGroups'
 import { hasPermission } from '@/modules/platform/auth/utils/principal'
 import { IAM_PERMISSIONS } from '@/modules/platform/iam/utils/iamPermissions'
 import {
@@ -61,6 +60,17 @@ const catalogs = ref({})
 
 function items(data) { return Array.isArray(data?.items) ? data.items : (Array.isArray(data) ? data : []) }
 function id(item, ...keys) { return keys.map((key) => item?.[key]).find(Boolean) || '' }
+function expandPositionAuthorizationRoleMappings(mapping) {
+  const roles = []
+  if (mapping?.platform_application_id && mapping?.platform_role_id) {
+    roles.push({ application_id: mapping.platform_application_id, role_id: mapping.platform_role_id, scope_type: mapping.platform_scope_type || 'TENANT', scope_id: mapping.platform_scope_type === 'ENVIRONMENT' ? String(mapping.platform_scope_id || '').trim() : '' })
+  }
+  for (const item of Array.isArray(mapping?.subsystem_roles) ? mapping.subsystem_roles : []) {
+    if (!item?.application_id || !item?.role_id) continue
+    roles.push({ application_id: item.application_id, role_id: item.role_id, scope_type: item.scope_type || 'TENANT', scope_id: item.scope_type === 'ENVIRONMENT' ? String(item.scope_id || '').trim() : '' })
+  }
+  return roles
+}
 function applicationId(item) { return id(item, 'application_id', 'id') }
 function positionId(item) { return id(item, 'position_id', 'id') }
 function positionName(item) { return item?.name || item?.position_name || item?.code || item?.position_code || positionId(item) }
