@@ -14,6 +14,10 @@ const fromPath = computed(() => {
   return ''
 })
 
+const accessHint = computed(() => fromPath.value === '/settings/iam'
+  ? 'IAM 管理需要基础平台超级管理员或具备对应 platform:* 权限的角色；客户与商机角色不会自动继承平台 IAM 权限。'
+  : '当前账号没有访问该模块的权限，请联系平台管理员调整角色或权限。')
+
 function goPortal() {
   router.push({ name: 'portal' })
 }
@@ -31,7 +35,7 @@ function goLogin() {
       </span>
       <h1 class="forbidden-title">无权访问</h1>
       <p class="forbidden-subtitle">
-        当前账号没有访问该模块的权限，请联系平台管理员调整角色或权限。
+        {{ accessHint }}
       </p>
       <p v-if="fromPath" class="forbidden-meta">
         原始请求：<code>{{ fromPath }}</code>

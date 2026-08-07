@@ -13,6 +13,9 @@ export const getPresaleAvailableActions = (id) => request(`/presale/requests/${e
 export const createPresaleRequest = (payload, idempotencyKey) => request('/presale/requests', {
   method: 'POST', body: JSON.stringify(payload), idempotent: true, idempotencyKey,
 })
+export const reopenPresaleRequest = (id, version) => request(`/presale/requests/${encodeURIComponent(id)}/reopen?version=${encodeURIComponent(version)}`, {
+  method: 'POST', idempotent: true,
+})
 export const submitApprovalAction = (id, payload, idempotencyKey) => request(`/presale/requests/${encodeURIComponent(id)}/approval-actions`, {
   method: 'POST', body: JSON.stringify(payload), idempotent: true, idempotencyKey,
 })
@@ -20,8 +23,12 @@ export const getApprovalHistory = (id) => request(`/presale/requests/${encodeURI
 export const replaceAssignments = (id, payload, idempotencyKey) => request(`/presale/requests/${encodeURIComponent(id)}/assignments`, {
   method: 'PUT', body: JSON.stringify(payload), idempotent: true, idempotencyKey,
 })
+export const selectPresaleExecutionDepartment = (id, payload) => request(`/presale/requests/${encodeURIComponent(id)}/execution-department`, {
+  method: 'PUT', body: JSON.stringify(payload), idempotent: true,
+})
 export const getAssignments = (id) => request(`/presale/requests/${encodeURIComponent(id)}/assignments`)
 export const listPresaleEngineers = (params) => request(`/presale/engineers${toQuery(params)}`)
+export const listPresaleExecutionDepartments = () => request('/presale/execution-departments')
 export const syncPresaleEngineers = () => request('/presale/engineers/sync', { method: 'POST', idempotent: true })
 export const addProgress = (id, payload, idempotencyKey) => request(`/presale/requests/${encodeURIComponent(id)}/progress`, {
   method: 'POST', body: JSON.stringify(payload), idempotent: true, idempotencyKey,
@@ -42,6 +49,16 @@ export const markPresaleAlertRead = (id) => request(`/presale/alerts/${encodeURI
 export const listPresaleAlertRules = () => request('/presale/alert-rules')
 export const updatePresaleAlertRule = (type, payload) => request(`/presale/alert-rules/${encodeURIComponent(type)}`, {
   method: 'PUT', body: JSON.stringify(payload), idempotent: true,
+})
+export const listPresaleApprovalRules = () => request('/presale/approval-rules')
+export const createPresaleApprovalRule = (payload) => request('/presale/approval-rules', {
+  method: 'POST', body: JSON.stringify(payload), idempotent: true,
+})
+export const updatePresaleApprovalRule = (id, payload) => request(`/presale/approval-rules/${encodeURIComponent(id)}`, {
+  method: 'PUT', body: JSON.stringify(payload), idempotent: true,
+})
+export const deletePresaleApprovalRule = (id, version) => request(`/presale/approval-rules/${encodeURIComponent(id)}?version=${encodeURIComponent(version)}`, {
+  method: 'DELETE', idempotent: true,
 })
 export const getPresaleReportSummary = (params) => request(`/presale/reports/summary${toQuery(params)}`)
 export const getPresaleReportTrend = (params) => request(`/presale/reports/trend${toQuery(params)}`)

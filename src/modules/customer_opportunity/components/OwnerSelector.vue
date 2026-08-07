@@ -19,6 +19,9 @@ let loadSequence = 0
 
 const selectedUser = computed(() => users.value.find((item) => item.user_id === props.userId) || null)
 const organizations = computed(() => selectedUser.value?.organizations || [])
+function platformUserName(user) {
+  return String(user?.username || user?.account_name || user?.display_name || '').trim() || '未命名用户'
+}
 
 function errorMessage(value) {
   if (value?.status === 403) return '当前账号没有选择客户或商机负责人的权限。'
@@ -111,7 +114,7 @@ onMounted(initialize)
       <select :value="userId" :disabled="disabled || loading || Boolean(error)" required @change="onUserChange">
         <option value="">请选择负责人</option>
         <option v-for="user in users" :key="user.user_id" :value="user.user_id">
-          {{ user.display_name }}
+          {{ platformUserName(user) }}
         </option>
       </select>
     </label>

@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises'
 
 const view = await readFile(new URL('./customer_opportunity/views/CustomerOpportunityView.vue', import.meta.url), 'utf8')
 const style = await readFile(new URL('./customer_opportunity/styles/customer-opportunity.css', import.meta.url), 'utf8')
+const approvalPanel = await readFile(new URL('./customer_opportunity/components/PresaleApprovalRulesPanel.vue', import.meta.url), 'utf8')
 const ownerSelector = await readFile(new URL('./customer_opportunity/components/OwnerSelector.vue', import.meta.url), 'utf8')
 const api = await import('./customer_opportunity/api/presale.js')
 const customer = await import('./customer_opportunity/api/customer.js')
@@ -21,6 +22,16 @@ const { createMemberTermLoadState } = await import('./customer_opportunity/membe
 const { createPortalInviteRetryState } = await import('./customer_opportunity/portalInviteRetry.js')
 const { createPortalAccessDisableRetryState } = await import('./customer_opportunity/portalAccessDisableRetry.js')
 const { formatSignedContractCount } = await import('./customer_opportunity/signedContractCount.js')
+
+test('售前审批规则支持规则列表和编辑区折叠', () => {
+  assert.match(approvalPanel, /const rulesExpanded = ref\(true\)/)
+  assert.match(approvalPanel, /const editorExpanded = ref\(true\)/)
+  assert.match(approvalPanel, /aria-expanded="rulesExpanded"/)
+  assert.match(approvalPanel, /收起列表/)
+  assert.match(approvalPanel, /展开列表/)
+  assert.match(approvalPanel, /crm-approval-editor-body/)
+  assert.match(style, /\.crm-approval-collapse-button/)
+})
 
 test('客户与商机管理复用基础平台壳层、图标导航和响应式规范', () => {
   assert.match(view, /import ConsoleIcon from '@\/modules\/platform\/shared\/components\/ConsoleIcon\.vue'/)
@@ -40,12 +51,14 @@ test('客户与商机管理复用基础平台壳层、图标导航和响应式�
 test('商机列表、七阶段看板和详情统一展示已签约合同数量', () => {
   assert.equal(formatSignedContractCount(2), '2 份')
   assert.equal(formatSignedContractCount(0), '0 份')
-  assert.equal(formatSignedContractCount(null), '暂不可用')
-  assert.equal(formatSignedContractCount(undefined), '暂不可用')
+  assert.equal(formatSignedContractCount(null), '合同服务未接入')
+  assert.equal(formatSignedContractCount(undefined), '合同服务未接入')
   assert.match(view, /<th>已签约合同<\/th>/)
   assert.match(view, /<td>\{\{ formatSignedContractCount\(item\.signed_contract_count\) \}\}<\/td>/)
   assert.match(view, /已签约合同 \{\{ formatSignedContractCount\(item\.signed_contract_count\) \}\}/)
   assert.match(view, /<dt>累计已签约合同<\/dt><dd>\{\{ formatSignedContractCount\(selectedOpportunity\.signed_contract_count\) \}\}<\/dd>/)
+  assert.match(view, /selectedOpportunityOwnerOrgID/)
+  assert.match(view, /selectedOpportunity\.value = \{ \.\.\.detail, owner_org_id: '基础平台组织' \}/)
 })
 
 test('商机和售前核心表单统一使用大系统 console 弹窗规范', () => {
@@ -77,7 +90,7 @@ test('负责人通过基础平台授权目录选择用户及其有效组织', as
   assert.match(ownerSelector, /organization\.is_primary/)
   assert.match(ownerSelector, /CRM_OWNER_DIRECTORY_UNAVAILABLE/)
   assert.match(ownerSelector, /required/)
-  assert.match(ownerSelector, /\{\{ user\.display_name \}\}\s*<\/option>/)
+  assert.match(ownerSelector, /platformUserName\(user\)/)
   assert.doesNotMatch(ownerSelector, /display_name \}\}（\{\{ user\.user_id \}\}）/)
   assert.match(style, /\.crm-owner-selector/)
 
@@ -97,8 +110,8 @@ test('商机团队从基础平台真实人员目录选择并展示姓名与组�
   assert.match(view, /const teamForm = reactive\(\{ members: \[\], reason: '' \}\)/)
   assert.match(view, /await listOwnerDirectory\(\{ keyword: teamDirectoryKeyword\.value\.trim\(\), page: 1, page_size: 50 \}\)/)
   assert.match(view, /不会退回为手填账号 ID/)
-  assert.match(view, /user\.display_name \}\}（\{\{ user\.user_id \}\}） · \{\{ teamMemberOrganizations\(user\) \}\}/)
-  assert.match(view, /member\.display_name \|\| member\.user_id/)
+  assert.match(view, /platformUserName\(user\) \}\} · \{\{ teamMemberOrganizations\(user\) \}\}/)
+  assert.match(view, /platformUserName\(member\)/)
   assert.match(view, /team\.directory_available !== false/)
   assert.match(view, /提交时服务端会再次校验人员状态/)
   assert.doesNotMatch(view, /teamForm\.members_text|platform-sub,TECHNICAL_SUPPORT/)
@@ -429,7 +442,7 @@ test('商机团队任期切换时新请求不被旧 loading 锁住且旧响应�
 
 test('售前多人指派使用内部人员目录，工时支持 PERSON_DAY', () => {
   assert.match(view, /const person = byID\.get\(personID\) \|\| current\.get\(personID\)/)
-  assert.match(view, /person_name: person\?\.person_name \|\| personID/)
+  assert.match(view, /person_name: person\?\.person_name \|\| '未命名用户'/)
   assert.match(view, /department: person\?\.department \|\| ''/)
   assert.match(view, /value="PERSON_DAY">人天（1 人天 = 8 小时）/)
   assert.match(view, /所有当前执行人各有至少一笔有效工时后自动完成/)
@@ -743,6 +756,14 @@ test('售前列表、详情与工时查询不再依赖手工 ID 操作台', asyn
   ])
 })
 
+test('售前列表与状态看板展示商机名称并保留商机编号', () => {
+  assert.match(view, /function presaleOpportunityLabel\(item\)[\s\S]*opportunity_name/)
+  assert.match(view, /function presaleRequestID\(item\)[\s\S]*request_id/)
+  assert.match(view, /<td>\{\{ presaleOpportunityLabel\(item\) \}\}<\/td>/)
+  assert.match(view, /<span>\{\{ presaleOpportunityLabel\(item\) \}\}<\/span>/)
+  assert.match(view, /class="crm-board-card"[^>]*@click="openPresale\(presaleRequestID\(item\)\)"/)
+})
+
 test('TS-001 售前列表通过受控按钮进入独立创建视图并在取消或成功后返回列表', () => {
   assert.match(view, /const presaleCreatePage = ref\(false\)/)
   assert.match(view, /v-if="canCreatePresale && presaleRequestSubmissionAvailable"[^>]*@click="openPresaleCreatePage"[^>]*>新建申请<\/button>/)
@@ -753,6 +774,12 @@ test('TS-001 售前列表通过受控按钮进入独立创建视图并在取消�
   assert.match(view, /function openPresaleCreatePage\(\)[\s\S]*presaleCreatePage\.value = true/)
   assert.match(view, /function closePresaleCreatePage\(\)[\s\S]*presaleCreatePage\.value = false/)
   assert.match(view, /async function submitPresaleFromList\(\)[\s\S]*await submitPresale\([\s\S]*closePresaleCreatePage\(\)[\s\S]*await loadCurrent\(\)/)
+})
+
+test('驳回或取消的售前重新审批后刷新列表和状态看板', () => {
+  assert.match(view, /reopenPresaleRequest\(presaleReopenRequest\.value\.id, presaleReopenRequest\.value\.version\)/)
+  assert.match(view, /presaleReopenRequest\.value = \{ id: request\.id, version: request\.version/)
+  assert.match(view, /const reopened = await reopenPresaleRequest\(presaleReopenRequest\.value\.id, presaleReopenRequest\.value\.version\)[\s\S]*await loadCurrent\(\)[\s\S]*await openPresale\(reopened\.id\)/)
 })
 
 test('TS-007 列表、只读状态看板和服务端可见筛选项调用真实路由', async (t) => {
@@ -1180,7 +1207,7 @@ test('商机负责人和团队维护均使用基础平台人员目录', () => {
   assert.match(view, /loadTeamDirectory/)
   assert.match(view, /变更负责人/)
   assert.match(view, /维护团队/)
-  assert.match(view, /人员姓名与有效组织实时取自基础平台权威目录/)
+  assert.match(view, /人员用户名与有效组织实时取自基础平台权威目录/)
   assert.match(view, /directory_status === 'NOT_AVAILABLE'/)
   assert.match(view, /服务端会再次校验人员状态/)
   assert.doesNotMatch(view, /members_text/)

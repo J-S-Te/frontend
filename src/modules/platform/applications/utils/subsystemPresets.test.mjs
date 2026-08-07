@@ -40,3 +40,10 @@ test('normalization upgrades the legacy customer values shown in the failed form
   assert.equal(form.upstreamUrl, 'http://customer-api:8090')
   assert.equal(form.pathPrefix, '/customer-opportunity')
 })
+
+test('normalization repairs independently migrated integrated values', () => {
+  const form = { applicationCode: 'customer_and_opportunity', upstreamUrl: 'http://customer-api:8090', pathPrefix: '/customer_and_opportunity' }
+  assert.equal(normalizeIntegratedSubsystemOnboarding(form), true)
+  assert.equal(form.upstreamUrl, 'http://customer-api:8090')
+  assert.equal(form.pathPrefix, '/customer-opportunity')
+})

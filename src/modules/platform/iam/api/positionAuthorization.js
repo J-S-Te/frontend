@@ -10,6 +10,17 @@ export function listPositionAuthorizationTargets() {
   return request('/position-authorization-targets')
 }
 
+export function listRoleInheritanceMappings() {
+  return request('/role-inheritance-mappings')
+}
+
+export function replaceRoleInheritanceMappings(sourceRoleId, mappings) {
+  return request('/role-inheritance-mappings', {
+    method: 'PUT',
+    body: JSON.stringify({ source_role_id: sourceRoleId, mappings }),
+  })
+}
+
 // 岗位模板映射使用专用岗位目录，避免要求岗位管理的 platform:position:read 权限。
 export function listPositionAuthorizationPositions() {
   return request('/position-authorization-positions')
@@ -17,6 +28,10 @@ export function listPositionAuthorizationPositions() {
 
 export function listPositionAuthorizationTemplates() {
   return request('/position-authorization-templates')
+}
+
+export function getPositionAuthorizationTemplate(templateId) {
+  return request(`/position-authorization-templates/${encodeURIComponent(templateId)}`)
 }
 
 export function createPositionAuthorizationTemplate(payload = {}) {

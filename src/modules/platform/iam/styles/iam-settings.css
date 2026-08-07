@@ -766,6 +766,49 @@
   padding: 18px 28px;
   border-top: 1px solid var(--line-2);
 }
+.iam-user-detail-modal {
+  width: min(1120px, calc(100vw - 40px));
+  max-height: min(92vh, 980px);
+  background: #f8fafc;
+}
+.iam-user-detail-modal > header {
+  background: var(--surface);
+}
+.iam-user-detail-hero {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 20px 28px 0;
+  padding: 20px 22px;
+  border: 1px solid #dbeafe;
+  border-radius: 16px;
+  background: linear-gradient(120deg, #eff6ff 0%, #ffffff 72%);
+  box-shadow: 0 8px 24px rgba(30, 64, 175, 0.06);
+}
+.iam-user-detail-avatar {
+  display: grid;
+  flex: 0 0 56px;
+  width: 56px;
+  height: 56px;
+  place-items: center;
+  color: #1d4ed8;
+  font-size: 24px;
+  font-weight: 700;
+  border: 4px solid #dbeafe;
+  border-radius: 50%;
+  background: #ffffff;
+}
+.iam-user-detail-identity { min-width: 0; flex: 1; }
+.iam-user-detail-name-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.iam-user-detail-name-row h4 { margin: 0; color: var(--ink-1); font-size: 20px; }
+.iam-user-detail-identity p { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; margin: 7px 0 0; color: var(--ink-3); font-size: 12px; }
+.iam-user-detail-identity p i { width: 3px; height: 3px; border-radius: 50%; background: var(--ink-4); }
+.iam-user-detail-hero-note { display: flex; align-items: center; gap: 8px; padding-left: 18px; color: #2563eb; font-size: 12px; line-height: 1.5; border-left: 1px solid #bfdbfe; }
+.iam-user-detail-hero-note small { color: var(--ink-3); font-size: 11px; }
+.iam-user-detail-modal .iam-detail-grid { margin-top: 16px; background: var(--surface); }
+.iam-user-detail-modal .iam-detail-section { padding: 18px 20px; margin-top: 16px; border: 1px solid var(--line-1); border-radius: 16px; background: var(--surface); }
+.iam-user-detail-modal .iam-detail-section + .iam-detail-section { margin-top: 14px; }
+.iam-user-detail-modal > footer { background: var(--surface); }
 .iam-detail-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2112,6 +2155,10 @@
   background: var(--danger-soft);
 }
 @media (max-width: 760px) {
+  .iam-user-detail-modal { width: calc(100vw - 20px); max-height: 96vh; }
+  .iam-user-detail-hero { align-items: flex-start; margin: 14px 18px 0; padding: 16px; }
+  .iam-user-detail-hero-note { display: none; }
+  .iam-user-detail-modal .iam-detail-section { margin-right: 18px; margin-left: 18px; padding: 15px; }
   .iam-application-access-badges { justify-content: flex-start; }
   .iam-application-role-list { grid-template-columns: 1fr; }
 }
@@ -2273,12 +2320,62 @@
   letter-spacing: -0.01em;
   line-height: 1.4;
 }
+.iam-role-inheritance-editor {
+  border-color: color-mix(in srgb, var(--ok-line) 65%, var(--line-1));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--ok-soft) 18%, var(--surface)) 0%, var(--surface) 150px);
+}
+.iam-role-inheritance-editor .iam-template-card-head,
+.iam-template-editor:not(.iam-role-inheritance-editor) .iam-template-card-head {
+  padding-bottom: 16px;
+  margin-bottom: 18px;
+}
+.iam-role-inheritance-editor .iam-template-role-row {
+  grid-template-columns: minmax(180px, .8fr) minmax(320px, 1.8fr) minmax(130px, .65fr) minmax(130px, .7fr) auto;
+  align-items: start;
+}
+.iam-role-inheritance-editor .iam-template-role-row > select,
+.iam-role-inheritance-editor .iam-template-role-row > input,
+.iam-role-inheritance-editor .iam-template-role-row .console-text-button { margin-top: 24px; }
+.iam-role-inheritance-editor .iam-template-catalog-field { display: grid; gap: 6px; min-width: 0; }
+.iam-role-inheritance-editor .iam-template-catalog-field > small { color: var(--ink-3); font-size: 11px; line-height: 1.4; }
+.iam-role-inheritance-editor .iam-template-multi-role-field { min-height: 92px; }
+.iam-template-editor + .iam-template-editor { margin-top: 2px; }
+.iam-template-editor:not(.iam-role-inheritance-editor) {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--brand-soft) 20%, var(--surface)) 0%, var(--surface) 170px);
+}
 .iam-template-card-title p {
   max-width: 720px;
   margin: 6px 0 0;
   color: var(--ink-3);
   font-size: 12.5px;
   line-height: 1.7;
+}
+.iam-template-editing-notice {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: -4px 0 16px;
+  padding: 10px 12px;
+  color: var(--brand-1);
+  font-size: 12px;
+  border: 1px solid var(--brand-line);
+  border-radius: var(--r-2);
+  background: color-mix(in srgb, var(--brand-soft) 60%, var(--surface));
+}
+.iam-template-editing-notice > span { display: grid; gap: 2px; min-width: 0; flex: 1; font-weight: 600; }
+.iam-template-editing-notice small { color: var(--ink-3); font-size: 11px; font-weight: 400; }
+.iam-template-selected-roles { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+.iam-template-selected-role {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 3px 8px;
+  overflow-wrap: anywhere;
+  color: var(--brand-1);
+  font-size: 10.5px;
+  border: 1px solid var(--brand-line);
+  border-radius: 999px;
+  background: var(--brand-soft);
 }
 .iam-template-card-icon {
   display: grid;
@@ -2381,6 +2478,14 @@
 }
 .iam-template-role-row:hover { border-color: var(--brand-line); }
 .iam-template-role-row > input:only-of-type { grid-column: auto; }
+.iam-template-multi-role-field { min-width: 0; align-self: stretch; }
+.iam-template-subsystem-heading { display: flex; align-items: baseline; gap: 10px; padding: 14px 4px 2px; color: var(--ink-2); font-size: 13px; }
+.iam-template-subsystem-heading span { color: var(--ink-3); font-size: 12px; }
+.iam-template-multi-role-label { display: block; margin-bottom: 6px; color: var(--ink-3); font-size: 12px; }
+.iam-template-role-checks { display: flex; flex-wrap: wrap; gap: 6px 10px; max-height: 128px; overflow: auto; padding: 8px 10px; border: 1px solid var(--line-1); border-radius: var(--r-2); background: var(--surface); }
+.iam-template-role-check { display: inline-flex; align-items: center; gap: 5px; color: var(--ink-2); font-size: 12px; font-weight: 500; white-space: nowrap; }
+.iam-template-role-check input { min-height: 0; padding: 0; }
+.iam-template-role-checks small { color: var(--ink-3); font-size: 12px; }
 .iam-template-editor .iam-panel-actions {
   padding-top: 18px;
   margin-top: 18px;
@@ -2631,6 +2736,10 @@
 @media (max-width: 1050px) {
   .iam-template-grid { grid-template-columns: 1fr; }
   .iam-template-role-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .iam-role-inheritance-editor .iam-template-role-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .iam-role-inheritance-editor .iam-template-role-row > select,
+  .iam-role-inheritance-editor .iam-template-role-row > input,
+  .iam-role-inheritance-editor .iam-template-role-row .console-text-button { margin-top: 0; }
   .iam-template-role-row .console-text-button { justify-self: end; }
   .iam-template-mapping-head { align-items: flex-start; flex-direction: column; }
   .iam-template-mapping-actions { width: 100%; }
@@ -2651,6 +2760,8 @@
   .iam-mount-tile dl { grid-template-columns: 1fr 1fr; }
   .iam-template-mount-actions { width: 100%; }
   .iam-template-subsystem-role-row { margin-left: 0; }
+  .iam-template-subsystem-heading { align-items: flex-start; flex-direction: column; gap: 3px; }
+  .iam-role-inheritance-editor .iam-template-role-row { grid-template-columns: 1fr; }
   .iam-template-mount-actions .console-button,
   .iam-template-mount-actions .console-text-button { width: 100%; }
 }
