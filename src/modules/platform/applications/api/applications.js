@@ -212,7 +212,7 @@ export function retrySubsystem({ applicationCode, environment } = {}) {
 }
 
 /** 按已有控制面配置重新部署子系统运行时。 */
-export function updateSubsystemRuntime({ applicationCode, environment, publicBaseUrl = '', upstreamUrl = '', pathPrefix = '' } = {}) {
+export function updateSubsystemRuntime({ applicationCode, environment, publicBaseUrl = '', upstreamUrl = '', pathPrefix = '', issuerAlias = '' } = {}) {
   return request('/subsystem-update', {
     method: 'POST',
     body: JSON.stringify({
@@ -221,6 +221,21 @@ export function updateSubsystemRuntime({ applicationCode, environment, publicBas
       ...(String(publicBaseUrl || '').trim() ? { public_base_url: String(publicBaseUrl).trim().replace(/\/$/, '') } : {}),
       ...(String(upstreamUrl || '').trim() ? { upstream_url: String(upstreamUrl).trim().replace(/\/$/, '') } : {}),
       ...(String(pathPrefix || '').trim() ? { path_prefix: String(pathPrefix).trim().replace(/\/$/, '') } : {}),
+      ...(String(issuerAlias || '').trim() ? { issuer_alias: String(issuerAlias).trim().toLowerCase() } : {}),
+    }),
+  })
+}
+
+/** Creates/updates the Keycloak Realm Client and required token-claim mappers. */
+export function syncKeycloakClient({ applicationCode, environment, publicBaseUrl, upstreamUrl, pathPrefix } = {}) {
+  return request('/subsystem-keycloak/sync', {
+    method: 'POST',
+    body: JSON.stringify({
+      application_code: applicationCode,
+      environment,
+      public_base_url: String(publicBaseUrl || '').trim().replace(/\/$/, ''),
+      upstream_url: String(upstreamUrl || '').trim().replace(/\/$/, ''),
+      path_prefix: String(pathPrefix || '').trim().replace(/\/$/, ''),
     }),
   })
 }

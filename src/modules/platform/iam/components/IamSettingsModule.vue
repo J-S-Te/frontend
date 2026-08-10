@@ -40,6 +40,7 @@ import {
   resetAccountPassword,
   updateAccountStatus,
   updateOrgUnit,
+  updateUser,
 } from '@/modules/platform/iam/api/iam'
 import { listApplications, listEnvironments } from '@/modules/platform/applications/api/applications'
 import {
@@ -1455,6 +1456,16 @@ async function confirmUserDeletion() {
   }
 }
 
+async function terminateEmployee(user) {
+  if (!user?.user_id || (user.status || '').toUpperCase() !== 'ACTIVE') return
+  if (typeof window !== 'undefined' && !window.confirm(`确认办理 ${user.display_name || user.user_id} 的离职吗？账号、任职和会话将被停用，历史保留。`)) return
+  try {
+    await updateUser({ userId: user.user_id, displayName: user.display_name, employeeNo: user.employee_no || '', email: user.email || '', mobile: '', status: 'DISABLED', version: user.version })
+    await Promise.all([loadUsers(), loadAccounts(), loadMemberships()])
+    emitToast(`${user.display_name || user.user_id} 已办理离职。`)
+  } catch (error) { emitToast(error instanceof IamError ? error.message : (error?.message || '办理离职失败。')) }
+}
+
 async function openOrganizationEditor(organization) {
   if (!organization?.org_unit_id) return
   openEditor('organization')
@@ -2057,6 +2068,7 @@ onBeforeUnmount(() => {
             <p><span>{{ detail.item?.employee_no || '未生成员工编号' }}</span><i /> <span>{{ detail.item?.email || '未填写邮箱' }}</span></p>
           </div>
           <div class="iam-user-detail-hero-note"><ConsoleIcon name="link" /><span>人员主档案<br /><small>任职关系统一维护</small></span></div>
+          <button v-if="hasPermission(IAM_PERMISSIONS.userUpdate) && String(detail.item?.status || '').toUpperCase() === 'ACTIVE'" class="console-button danger small" type="button" @click="terminateEmployee(detail.item)">办理离职</button>
         </div>
         <div class="iam-detail-grid">
           <template v-for="row in detailRows(detail)" :key="row.label">
@@ -2332,6 +2344,7 @@ onBeforeUnmount(() => {
             <label v-if="form.validity_mode === 'SHORT_TERM'"><span>生效日期 *</span><input v-model="form.effective_from" required type="date" /></label>
             <label v-if="form.validity_mode === 'SHORT_TERM'"><span>失效日期 *</span><input v-model="form.effective_to" required type="date" /></label>
             <label class="full iam-checkbox-field"><input v-model="form.inherit_authorization" type="checkbox" /><span>参与岗位授权继承</span><small class="iam-field-help">这是标准授权开关：开启后，该任职会动态继承岗位授权模板映射的应用角色；关闭不会影响用户详情中单独配置的个人例外。</small></label>
+            <p class="iam-form-alert"><ConsoleIcon name="info" />人员晋升、降职或调岗时，请保留原任职并新建此任职；有效岗位模板角色会自动重算。离职请在人员详情中停用人员，系统会同时撤销账号、任职和会话。</p>
           </template>
           <p class="iam-form-alert"><ConsoleIcon name="info" />提交后由 Go API 写入 MySQL，并生成审计事件。</p>
           <footer>
