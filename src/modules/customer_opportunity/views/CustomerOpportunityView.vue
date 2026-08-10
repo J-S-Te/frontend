@@ -26,7 +26,7 @@ import {
   markOpportunityStageAlertRead, listOpportunityStageAlertRules, updateOpportunityStageAlertRule,
   listOpportunityPresaleRequests, transferOpportunityToContract,
   getOpportunityAttachmentCapabilities, listOpportunityAttachments, createOpportunityAttachmentUpload,
-  completeOpportunityAttachmentUpload, downloadOpportunityAttachment,
+  uploadOpportunityAttachmentContent, completeOpportunityAttachmentUpload, downloadOpportunityAttachment,
 } from '../api/opportunity.js'
 import { createIdempotencyKey, getCRMSession, getCRMRuntimeCapabilities } from '../api/client.js'
 import { createCreateMutationRetryState } from '../createMutationRetry.js'
@@ -278,6 +278,7 @@ const crmRoleNames = Object.freeze({
   sales: '销售人员',
   sales_director: '销售总监',
   crm_super_admin: '客户与商机超级管理员',
+  technical_director: '技术总监',
   team_lead: '团队负责人',
   technician: '技术人员',
   implementation_engineer: '实施工程师',
@@ -462,8 +463,14 @@ function rememberOwnerDirectory(items) {
   }
 }
 function ownerLabel(userId) { return ownerDirectoryNames.value[userId] || '未命名用户' }
-function operationUserLabel(item) { return item?.actor_name || ownerLabel(item?.actor_id) }
-function operationSubjectLabel(item) { return item?.subject_name || ownerLabel(item?.subject_id) }
+// 历史数据和旧审批回调可能把内部 user_id 误写进“姓名快照”。这类值不能优先于
+// 基础平台目录，否则时间线会在目录已成功解析后仍向业务用户暴露内部 ID。
+function usableOperationName(snapshot, userId) {
+  const value = String(snapshot || '').trim()
+  return value && value !== String(userId || '').trim() ? value : ''
+}
+function operationUserLabel(item) { return usableOperationName(item?.actor_name, item?.actor_id) || ownerLabel(item?.actor_id) }
+function operationSubjectLabel(item) { return usableOperationName(item?.subject_name, item?.subject_id) || ownerLabel(item?.subject_id) }
 
 // 列表或详情里的负责人可能不在已加载的目录分页中；按缺失的用户 ID 精确查询并缓存名字，
 // 让“负责人”列只显示基础平台姓名。目录暂不可用时显示通用提示，不向业务用户暴露 ID。
@@ -1416,15 +1423,19 @@ async function uploadOpportunityAttachment() {
       attachmentUploadRetries.confirmCreate(flow, session)
     }
     if (!flow.uploaded) {
-      const target = new URL(flow.session.upload_url)
-      if (target.protocol !== 'https:' || target.username || target.password || target.hash) throw new Error('上传地址不安全')
-      const uploaded = await fetch(target, { method: 'PUT', body: file, headers: { 'Content-Type': flow.payload.mime_type }, credentials: 'omit', redirect: 'error' })
-      if (!uploaded.ok) throw new Error('对象存储上传失败')
+      if (flow.session.upload_mode === 'INTERNAL') {
+        await uploadOpportunityAttachmentContent(opportunityID, flow.session.attachment.id, file)
+      } else {
+        const target = new URL(flow.session.upload_url)
+        if (target.protocol !== 'https:' || target.username || target.password || target.hash) throw new Error('上传地址不安全')
+        const uploaded = await fetch(target, { method: 'PUT', body: file, headers: { 'Content-Type': flow.payload.mime_type }, credentials: 'omit', redirect: 'error' })
+        if (!uploaded.ok) throw new Error('对象存储上传失败')
+      }
       attachmentUploadRetries.markUploaded(flow)
     }
     await completeOpportunityAttachmentUpload(opportunityID, flow.session.attachment.id, { version: flow.session.attachment.version }, flow.completeKey)
     attachmentUploadRetries.confirmComplete(flow)
-    opportunityAttachmentFile.value = null; notice.value = '附件已上传并进入安全扫描；扫描通过前不能下载。'
+    opportunityAttachmentFile.value = null; notice.value = '附件已上传并完成代码安全扫描；扫描通过前不能下载。'
     await loadOpportunityAttachments(opportunityID)
   } catch (value) { opportunityAttachmentError.value = value?.code === 'CRM_OPPORTUNITY_ATTACHMENT_UNAVAILABLE' ? '可信对象存储或病毒扫描尚未配置，上传已安全关闭。' : (value?.message || '附件上传失败。') }
   finally { opportunityAttachmentLoading.value = false }
@@ -1889,7 +1900,6 @@ async function loadEngineerDirectory() {
       person_id: item.user_id,
       person_name: platformUserName(item),
       department: (item.organizations || []).map((org) => org.organization_name).filter(Boolean).join('、'),
-      department_id: item.organizations?.find((org) => org.is_primary)?.organization_id || item.organizations?.[0]?.organization_id || '',
       role: 'implementation_engineer',
       valid_flag: true,
     })).filter((item) => !engineerQuery.department || item.department.includes(engineerQuery.department))
@@ -1912,7 +1922,7 @@ function assignmentTargets() {
   const current = new Map((selectedPresale.value?.current_assignees || []).map((item) => [item.person_id, item]))
   return selectedEngineerIDs.value.map((personID) => {
     const person = byID.get(personID) || current.get(personID)
-    return { person_id: personID, person_name: person?.person_name || '未命名用户', department: person?.department || '', department_id: person?.department_id || selectedPresale.value?.request?.execution_department_id || '', role: person?.role || 'implementation_engineer' }
+    return { person_id: personID, person_name: person?.person_name || '未命名用户', department: person?.department || '', role: person?.role || 'implementation_engineer' }
   })
 }
 async function loadAlerts() {
@@ -2213,7 +2223,6 @@ async function runPresale(action) {
       if (!assignmentReason.value.trim()) { error.value = '改派原因必填。'; return }
       const targets = assignmentTargets()
       if (!targets.length || targets.length !== selectedEngineerIDs.value.length) { error.value = '请选择有效的内部执行人员。'; return }
-      if (targets.some((target) => !target.department_id)) { error.value = '所选执行人员缺少有效组织，请刷新基础平台人员目录后重试。'; return }
       const retry = presaleMutationRetries.keyFor('assignment', id, { assignees: targets, change_reason: assignmentReason.value, version })
       const result = await replaceAssignments(id, retry.payload, retry.key)
       presaleMutationRetries.confirmSuccess('assignment', id, retry.key)

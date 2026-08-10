@@ -83,6 +83,14 @@ export default defineConfig(({ mode }) => {
           index: fileURLToPath(new URL('./index.html', import.meta.url)),
           login: fileURLToPath(new URL('./login.html', import.meta.url)),
         },
+        output: {
+          // 第三方运行时单独缓存，避免平台主入口随业务代码变更整体失效，
+          // 同时把首屏主包控制在构建告警阈值以内。
+          manualChunks(id) {
+            if (id.includes('/node_modules/')) return 'vendor'
+            return undefined
+          },
+        },
       },
     },
   }

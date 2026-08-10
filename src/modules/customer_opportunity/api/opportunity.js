@@ -47,6 +47,9 @@ export const listOpportunityAttachments = (id) => request(`/opportunities/${enco
 export const createOpportunityAttachmentUpload = (id, payload, idempotencyKey) => request(`/opportunities/${encodeURIComponent(id)}/attachments`, {
   method: 'POST', body: JSON.stringify(payload), idempotent: true, idempotencyKey,
 })
+export const uploadOpportunityAttachmentContent = (id, attachmentID, file) => request(`/opportunities/${encodeURIComponent(id)}/attachments/${encodeURIComponent(attachmentID)}/content`, {
+  method: 'PUT', body: file, headers: { 'Content-Type': file.type },
+})
 export const completeOpportunityAttachmentUpload = (id, attachmentID, payload, idempotencyKey) => request(`/opportunities/${encodeURIComponent(id)}/attachments/${encodeURIComponent(attachmentID)}/complete`, {
   method: 'POST', body: JSON.stringify(payload), idempotent: true, idempotencyKey,
 })
