@@ -279,6 +279,8 @@ const createDialogOpen = ref(false)
 const notificationOpen = ref(false)
 const toast = ref('')
 let toastTimer = 0
+let approvalRealtimeTimer = 0
+let approvalRealtimeBusy = false
 
 const activeSection = computed(() => {
   const section = typeof route.params.section === 'string' ? route.params.section : 'dashboard'
@@ -708,6 +710,110 @@ function normalizeApproval(item) {
   }
 }
 
+function setInitiatedApprovals(items) {
+  const normalized = items.map(normalizeApproval)
+  const materializedIDs = new Set(normalized.map((item) => item.id))
+  const initializing = initiatedApprovals.value.filter((item) => item.initializing && !materializedIDs.has(item.id))
+  initiatedApprovals.value = [...initializing, ...normalized]
+}
+
+function initializingApproval(started, contractItem) {
+  return {
+    id: started.approval_id,
+    contractId: contractItem.recordId,
+    step: '流程初始化中',
+    type: '合同审批',
+    status: 'pending',
+    submittedAt: '刚刚',
+    initializing: true,
+  }
+}
+
+async function waitForInitiatedApproval(approvalID) {
+  const delays = [0, 200, 400, 800, 1200]
+  for (const delay of delays) {
+    if (delay) await new Promise((resolve) => window.setTimeout(resolve, delay))
+    try {
+      const items = await listApprovals({ limit: 200 })
+      setInitiatedApprovals(items)
+      if (items.some((item) => item.approval_id === approvalID)) return true
+    } catch {
+      // 提交已被工作流受理，查询失败时保留初始化占位，避免用户误以为未提交。
+    }
+  }
+  return false
+}
+
+function approvalCommandIsDurable(detail, commandID, action) {
+  if (!detail?.actions?.some((item) => item.command_id === commandID)) return false
+  if (action === 'approve' && detail.state?.status === 'approved') return detail.contract?.status === 'active'
+  if (['reject', 'withdraw'].includes(action)) return detail.contract?.status === 'draft'
+  return true
+}
+
+async function waitForApprovalCommand(commandID, action, approvalID) {
+  const delays = [0, 150, 300, 500, 800, 1200, 1800]
+  for (const delay of delays) {
+    if (delay) await new Promise((resolve) => window.setTimeout(resolve, delay))
+    try {
+      const detail = await getApproval(approvalID)
+      if (selectedApproval.value?.id === approvalID) approvalDetail.value = detail
+      if (approvalCommandIsDurable(detail, commandID, action)) return true
+    } catch {
+      // Temporal 已受理命令时继续等待数据库活动提交，最终以服务端快照为准。
+    }
+  }
+  return false
+}
+
+async function refreshApprovalRealtime() {
+  if (approvalRealtimeBusy || !session.value || activeSection.value !== 'approvals' || document.visibilityState !== 'visible') return
+  approvalRealtimeBusy = true
+  try {
+    const initiatedRequest = listApprovals({ limit: 200 })
+    const taskRequest = can('approval.process') ? listApprovalTasks({ limit: 200 }) : Promise.resolve([])
+    const detailRequest = selectedApproval.value && !selectedApproval.value.initializing && !approvalCommandBusy.value
+      ? getApproval(selectedApproval.value.id)
+      : Promise.resolve(null)
+    const [initiatedResult, taskResult, detailResult] = await Promise.allSettled([initiatedRequest, taskRequest, detailRequest])
+    if (initiatedResult.status === 'fulfilled') setInitiatedApprovals(initiatedResult.value)
+    if (taskResult.status === 'fulfilled') {
+      approvals.value = taskResult.value.map(normalizeApproval)
+      if (selectedApproval.value && can('approval.process')) {
+        const currentTask = approvals.value.find((item) => item.id === selectedApproval.value.id)
+        if (currentTask) selectedApproval.value = { ...selectedApproval.value, ...currentTask }
+        else if (['active', 'pending'].includes(selectedApproval.value.status)) selectedApproval.value = { ...selectedApproval.value, status: 'pending' }
+      }
+    }
+    if (detailResult.status === 'fulfilled' && detailResult.value && selectedApproval.value?.id === detailResult.value.meta?.id) {
+      approvalDetail.value = detailResult.value
+      if (Number.isInteger(detailResult.value.state?.current_node_index)) {
+        selectedApproval.value = { ...selectedApproval.value, step: `第 ${detailResult.value.state.current_node_index + 1} 节点` }
+      }
+    }
+  } finally {
+    approvalRealtimeBusy = false
+  }
+}
+
+function stopApprovalRealtime() {
+  window.clearTimeout(approvalRealtimeTimer)
+  approvalRealtimeTimer = 0
+}
+
+function scheduleApprovalRealtime({ immediate = false } = {}) {
+  stopApprovalRealtime()
+  if (!session.value || activeSection.value !== 'approvals' || document.visibilityState !== 'visible') return
+  approvalRealtimeTimer = window.setTimeout(async () => {
+    await refreshApprovalRealtime()
+    scheduleApprovalRealtime()
+  }, immediate ? 0 : 1000)
+}
+
+function handleApprovalVisibilityChange() {
+  scheduleApprovalRealtime({ immediate: document.visibilityState === 'visible' })
+}
+
 function displayNameFor(userId, displayName) {
   if (userId && userId === session.value?.user_id) return currentUserLabel.value
   const directoryEntry = userDirectory.value.find((item) => item.user_id === userId)
@@ -752,7 +858,7 @@ async function loadBusinessData() {
     requests.push({ label, sections, promise })
   }
   if (can('approval.view') || can('approval.process') || can('contract.create')) {
-    addRequest('我发起的审批', ['dashboard', 'approvals'], listApprovals({ limit: 200 }).then((items) => { initiatedApprovals.value = items.map(normalizeApproval) }))
+    addRequest('我发起的审批', ['dashboard', 'approvals'], listApprovals({ limit: 200 }).then(setInitiatedApprovals))
   }
   if (can('contract.read')) {
     addRequest('合同统计', ['dashboard', 'reports'], getContractDashboard().then((summary) => { adminDashboard.value = summary }))
@@ -1253,12 +1359,12 @@ async function executeApprovalCommand(action, payload = {}, { close = false } = 
   if (!target) return
   approvalCommandBusy.value = true
   try {
-    await commandApproval(target.id, action, { comment: approvalComment.value.trim(), ...payload })
-    if (close) closeApproval()
-    else approvalDetail.value = await getApproval(target.id)
-    await loadBusinessData()
+    const accepted = await commandApproval(target.id, action, { comment: approvalComment.value.trim(), ...payload })
+    const durable = await waitForApprovalCommand(accepted.command_id, action, target.id)
+    if (close && durable) closeApproval()
+    await refreshApprovalRealtime()
     const labels = { approve: '审批已通过', reject: '审批已驳回', comments: '评论已提交', urge: '催办已发送', sign: '加签请求已提交', transfer: '转交请求已提交', return: '退回请求已提交', withdraw: '审批已撤回' }
-    showToast(labels[action] || '操作已提交')
+    showToast(durable ? (labels[action] || '操作已完成') : '操作已受理，流程仍在处理，状态将自动更新')
     approvalComment.value = ''
   } catch (error) {
     showToast(error?.message || '处理审批失败')
@@ -1275,11 +1381,16 @@ async function submitSelectedContract() {
   if (!selectedContract.value || selectedContract.value.status !== '草稿') return
   submittingContract.value = true
   try {
-    await submitContract(selectedContract.value.recordId, { terms_identical: termsIdentical.value })
+    const submittedContract = selectedContract.value
+    const started = await submitContract(submittedContract.recordId, { terms_identical: termsIdentical.value })
+    const pendingApproval = initializingApproval(started, submittedContract)
+    initiatedApprovals.value = [pendingApproval, ...initiatedApprovals.value.filter((item) => item.id !== pendingApproval.id)]
+    approvalTab.value = 'initiated'
     selectedContract.value = null
     termsIdentical.value = false
+    const materialized = await waitForInitiatedApproval(started.approval_id)
     await loadBusinessData()
-    showToast('合同已提交审批')
+    showToast(materialized ? '合同已提交审批，可在“我发起的”查看进度' : '合同已提交审批，流程正在初始化，可在“我发起的”查看')
   } catch (error) {
     showToast(error?.message || '提交审批失败')
   } finally {
@@ -1402,19 +1513,26 @@ watch(activeSection, () => {
   resetFilters()
   notificationOpen.value = false
   document.title = `${pageMeta.value.title} · 机构合同管理系统`
+  scheduleApprovalRealtime({ immediate: true })
 }, { immediate: true })
 
 onMounted(async () => {
   try {
     session.value = await getContractSession()
     await loadBusinessData()
+    document.addEventListener('visibilitychange', handleApprovalVisibilityChange)
+    scheduleApprovalRealtime({ immediate: true })
   } catch (error) {
     if (error instanceof ContractAuthError || error?.status === 401) return
     sessionError.value = error?.message || '读取合同系统登录状态失败。'
   }
 })
 
-onBeforeUnmount(() => window.clearTimeout(toastTimer))
+onBeforeUnmount(() => {
+  window.clearTimeout(toastTimer)
+  stopApprovalRealtime()
+  document.removeEventListener('visibilitychange', handleApprovalVisibilityChange)
+})
 </script>
 
 <template>
@@ -1525,7 +1643,7 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
             <button type="button" @click="loadBusinessData">刷新</button>
           </div>
           <section v-if="approvalTab === 'tasks'" class="contract-approval-list" role="tabpanel"><article v-for="approval in approvals" :key="approval.id"><header><span class="contract-badge" :class="approvalStatusTone(approval.status)"><i></i>{{ approvalStatusLabel(approval.status) }}</span><small>{{ approval.submittedAt }}</small></header><div><span class="contract-approval-icon"><ConsoleIcon name="audit" /></span><section><div><span class="contract-badge neutral">{{ approval.type }}</span><h3>合同审批</h3></div><p>任务创建于 {{ approval.submittedAt }}</p></section></div><footer><span><i></i>当前节点：{{ approval.step }}</span><button v-if="can('approval.process')" class="contract-button primary small" type="button" @click="openApproval(approval)">查看并处理</button></footer></article><div v-if="!approvals.length" class="contract-card contract-empty-state"><ConsoleIcon name="save" /><h3>当前没有活动待办</h3><p>当有合同流转到您处理时，待办会显示在这里。</p></div></section>
-          <section v-else class="contract-approval-list" role="tabpanel"><article v-for="approval in initiatedApprovals" :key="approval.id"><header><span class="contract-badge" :class="approvalStatusTone(approval.status)"><i></i>{{ approvalStatusLabel(approval.status) }}</span><small>{{ approval.submittedAt }}</small></header><div><span class="contract-approval-icon"><ConsoleIcon name="audit" /></span><section><div><span class="contract-badge neutral">{{ approval.type }}</span><h3>合同审批</h3></div><p>发起于 {{ approval.submittedAt }}</p></section></div><footer><span><i></i>流程位置：{{ approval.step }}</span><button class="contract-button secondary small" type="button" @click="openApproval(approval)">查看进度</button></footer></article><div v-if="!initiatedApprovals.length" class="contract-card contract-empty-state"><ConsoleIcon name="save" /><h3>尚未发起审批</h3><p>在合同台账打开草稿并点击“提交审批”。</p></div></section>
+          <section v-else class="contract-approval-list" role="tabpanel"><article v-for="approval in initiatedApprovals" :key="approval.id"><header><span class="contract-badge" :class="approvalStatusTone(approval.status)"><i></i>{{ approvalStatusLabel(approval.status) }}</span><small>{{ approval.submittedAt }}</small></header><div><span class="contract-approval-icon"><ConsoleIcon name="audit" /></span><section><div><span class="contract-badge neutral">{{ approval.type }}</span><h3>合同审批</h3></div><p>发起于 {{ approval.submittedAt }}</p></section></div><footer><span><i></i>流程位置：{{ approval.step }}</span><button class="contract-button secondary small" type="button" :disabled="approval.initializing" @click="openApproval(approval)">{{ approval.initializing ? '正在初始化' : '查看进度' }}</button></footer></article><div v-if="!initiatedApprovals.length" class="contract-card contract-empty-state"><ConsoleIcon name="save" /><h3>尚未发起审批</h3><p>在合同台账打开草稿并点击“提交审批”。</p></div></section>
         </template>
 
         <template v-else-if="activeSection === 'rules'">
