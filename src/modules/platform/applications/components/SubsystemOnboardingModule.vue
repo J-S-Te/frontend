@@ -13,6 +13,7 @@ import {
   listEnvironments,
   onboardSubsystem,
   retrySubsystem,
+  syncKeycloakClient,
   teardownSubsystem,
   updateApplication,
   updateEnvironment,
@@ -89,6 +90,10 @@ const canManageRuntime = computed(() => [
   'platform:oauth-client:disable',
 ].every((permission) => hasPermission(permission)))
 const canRetryRuntime = computed(() => canManageRuntime.value && hasPermission('platform:role-binding:update'))
+const authenticationProviders = computed(() => Array.isArray(provisioningCapabilities.value?.authentication_providers)
+  ? provisioningCapabilities.value.authentication_providers : [])
+const selectedAuthenticationProvider = computed(() => authenticationProviders.value.find((item) => item.alias === (environmentForm.issuerAlias || 'platform'))
+  || authenticationProviders.value.find((item) => item.alias === 'platform') || null)
 
 const filteredApplications = computed(() => {
   const keyword = applicationKeyword.value.trim().toLowerCase()
@@ -432,15 +437,18 @@ async function loadProvisioningCapabilities() {
 }
 
 async function loadEnvironments() {
-  const application = selectedApplication.value
+	const application = selectedApplication.value
   if (!application?.application_id || !canReadEnvironments.value) {
     environments.value = []
     selectedEnvironmentId.value = ''
     deploymentStates.value = {}
     deploymentStatusErrors.value = {}
     return
-  }
-  environmentsLoading.value = true
+	}
+	// 切换应用时先撤销旧环境选择。否则子组件会短暂拿到“新应用 + 旧环境”这组
+	// 不属于同一边界的 ID，并向登录目标接口发出必然 404 的请求。
+	selectedEnvironmentId.value = ''
+	environmentsLoading.value = true
   deploymentStates.value = {}
   deploymentStatusErrors.value = {}
   try {
@@ -534,7 +542,7 @@ function openEnvironmentEditor(environment) {
     baseUrl: textValue(environment.base_url),
     upstreamUrl: textValue(environment.upstream_url),
     pathPrefix: textValue(environment.path_prefix),
-    issuerAlias: textValue(environment.issuer_alias),
+    issuerAlias: textValue(environment.issuer_alias) || 'platform',
     status: environment.status || 'ACTIVE',
     version: environment.version,
   })
@@ -595,8 +603,9 @@ async function saveEnvironment() {
       status: environmentForm.status,
       version: environmentForm.version,
     })
+    const providerChanged = (textValue(saved.issuer_alias) || 'platform') !== (textValue(environmentForm.issuerAlias) || 'platform')
     environmentEditorOpen.value = false
-    notify('应用环境配置已更新。')
+    notify(providerChanged ? '认证提供方已保存，请使用“切换并部署”下发运行配置。' : '应用环境配置已更新。')
     await loadApplications(application.application_id)
     selectedEnvironmentId.value = saved.environment_id
     await loadEnvironments()
@@ -724,11 +733,76 @@ async function reapplyEnvironment(environment, retry = false) {
       publicBaseUrl: environment.base_url || '',
       upstreamUrl: environment.upstream_url || '',
       pathPrefix: environment.path_prefix || '',
+      issuerAlias: environment.issuer_alias || 'platform',
     })
     notify(retry ? '部署失败环境已重新尝试。' : '子系统已重新部署。')
     await loadEnvironments()
   } catch (error) {
     setError(error, '部署 Agent 操作失败。')
+  } finally {
+    saving.value = false
+  }
+}
+
+function providerLabel(alias) {
+  return alias === 'keycloak' ? 'Keycloak' : '基础平台 OIDC'
+}
+
+function providerStatus(alias) {
+  return authenticationProviders.value.find((item) => item.alias === alias) || null
+}
+
+async function switchAuthenticationProvider(environment, alias) {
+  const application = selectedApplication.value
+  const provider = providerStatus(alias)
+  if (!application || !environment || !provider?.switch_ready || saving.value) return
+  saving.value = true
+  clearError()
+  try {
+    const saved = await updateEnvironment({
+      applicationId: application.application_id,
+      environmentId: environment.environment_id,
+      baseUrl: environment.base_url,
+      upstreamUrl: environment.upstream_url,
+      pathPrefix: environment.path_prefix,
+      issuerAlias: alias === 'platform' ? null : alias,
+      status: environment.status,
+      version: environment.version,
+    })
+    await updateSubsystemRuntime({
+      applicationCode: application.code,
+      environment: environment.environment,
+      publicBaseUrl: saved.base_url || environment.base_url || '',
+      upstreamUrl: saved.upstream_url || environment.upstream_url || '',
+      pathPrefix: saved.path_prefix || environment.path_prefix || '',
+      issuerAlias: alias,
+    })
+    notify(`已切换为 ${providerLabel(alias)} 并下发运行配置。`)
+    await loadEnvironments()
+  } catch (error) {
+    setError(error, '认证提供方切换失败；环境记录已保留，可在修复后重试。')
+    await loadEnvironments()
+  } finally {
+    saving.value = false
+  }
+}
+
+async function synchronizeKeycloakClient(environment) {
+  const application = selectedApplication.value
+  if (!application || !environment || saving.value) return
+  saving.value = true
+  clearError()
+  try {
+    await syncKeycloakClient({
+      applicationCode: application.code,
+      environment: environment.environment,
+      publicBaseUrl: environment.base_url || '',
+      upstreamUrl: environment.upstream_url || '',
+      pathPrefix: environment.path_prefix || '',
+    })
+    notify('Keycloak Realm Client 与 Claims 映射已同步；请完成 Broker 登录验证后再切换认证提供方。')
+  } catch (error) {
+    setError(error, '同步 Keycloak Realm Client 失败。')
   } finally {
     saving.value = false
   }
@@ -883,18 +957,18 @@ onMounted(() => {
             <div v-else-if="!environments.length" class="application-registry-empty compact"><ConsoleIcon name="info" /><span>当前应用还没有部署环境。</span></div>
             <div v-else class="application-registry-environments">
               <article v-for="environment in environments" :key="environment.environment_id" class="application-registry-environment" :class="{ 'is-selected': environment.environment_id === selectedEnvironmentId }" @click="selectEnvironment(environment)">
-                <div class="application-registry-environment-main"><strong>{{ environment.environment }}</strong><span class="application-registry-status" :class="statusClass(environmentStatus(environment))">{{ statusLabel(environmentStatus(environment)) }}</span><small>配置版本 {{ environment.version }}</small></div>
+                <div class="application-registry-environment-main"><strong>{{ environment.environment }}</strong><span class="application-registry-status" :class="statusClass(environmentStatus(environment))">{{ statusLabel(environmentStatus(environment)) }}</span><small>认证：{{ providerLabel(environment.issuer_alias || 'platform') }} · 配置版本 {{ environment.version }}</small></div>
                 <div class="application-registry-environment-uri"><span>{{ environment.base_url || '未设置 BaseURL' }}{{ environment.path_prefix || '' }}</span><small>{{ environment.upstream_url || '未设置 UpstreamURL' }}</small></div>
                 <p v-if="environmentNextAction(environment)" class="application-registry-environment-guidance"><strong>处理建议：</strong>{{ environmentNextAction(environment) }}</p>
                 <p v-if="environmentStatusError(environment)" class="application-registry-environment-guidance is-error"><strong>状态读取失败：</strong>{{ environmentStatusError(environment).message }}<span v-if="environmentStatusError(environment).nextAction">{{ environmentStatusError(environment).nextAction }}</span><button class="console-button ghost small" type="button" :disabled="environmentsLoading" @click.stop="loadEnvironments">重试查询</button></p>
-                <div class="application-registry-environment-actions"><button v-if="canUpdateEnvironment" class="console-button ghost small" type="button" @click.stop="openEnvironmentEditor(environment)"><ConsoleIcon name="settings" />设置</button><button v-if="canRetryRuntime && environmentStatus(environment) === 'PROVISION_FAILED'" class="console-button ghost small" type="button" :disabled="saving" @click.stop="reapplyEnvironment(environment, true)"><ConsoleIcon name="reset" />重试</button><button v-if="canManageRuntime && environmentStatus(environment) === 'READY'" class="console-button ghost small" type="button" :disabled="saving" @click.stop="reapplyEnvironment(environment)"><ConsoleIcon name="reset" />更新运行时</button><button v-if="canDeleteEnvironment && environment.environment !== 'dev'" class="console-button danger small" type="button" @click.stop="openDeleteEnvironment(environment)"><ConsoleIcon name="close" />删除</button><button v-if="canDeleteEnvironment && environment.environment !== 'dev' && environmentStatus(environment) === 'OFFBOARDED'" class="console-button danger small" type="button" @click.stop="openPurgeEnvironment(environment)"><ConsoleIcon name="close" />永久清理</button></div>
+                <div class="application-registry-environment-actions"><button v-if="canUpdateEnvironment" class="console-button ghost small" type="button" @click.stop="openEnvironmentEditor(environment)"><ConsoleIcon name="settings" />设置</button><button v-if="canManageRuntime" class="console-button ghost small" type="button" :disabled="saving || !providerStatus('keycloak') || providerStatus('keycloak')?.status === 'NOT_CONFIGURED'" @click.stop="synchronizeKeycloakClient(environment)"><ConsoleIcon name="shield" />同步 Keycloak</button><button v-if="canManageRuntime && (environment.issuer_alias || 'platform') !== 'keycloak'" class="console-button ghost small" type="button" :disabled="saving || !providerStatus('keycloak')?.switch_ready" @click.stop="switchAuthenticationProvider(environment, 'keycloak')"><ConsoleIcon name="shield" />切换 Keycloak</button><button v-if="canManageRuntime && (environment.issuer_alias || 'platform') === 'keycloak'" class="console-button ghost small" type="button" :disabled="saving || !providerStatus('platform')?.switch_ready" @click.stop="switchAuthenticationProvider(environment, 'platform')"><ConsoleIcon name="reset" />回滚基础平台</button><button v-if="canRetryRuntime && environmentStatus(environment) === 'PROVISION_FAILED'" class="console-button ghost small" type="button" :disabled="saving" @click.stop="reapplyEnvironment(environment, true)"><ConsoleIcon name="reset" />重试</button><button v-if="canManageRuntime && environmentStatus(environment) === 'READY'" class="console-button ghost small" type="button" :disabled="saving" @click.stop="reapplyEnvironment(environment)"><ConsoleIcon name="reset" />更新运行时</button><button v-if="canDeleteEnvironment && environment.environment !== 'dev'" class="console-button danger small" type="button" @click.stop="openDeleteEnvironment(environment)"><ConsoleIcon name="close" />删除</button><button v-if="canDeleteEnvironment && environment.environment !== 'dev' && environmentStatus(environment) === 'OFFBOARDED'" class="console-button danger small" type="button" @click.stop="openPurgeEnvironment(environment)"><ConsoleIcon name="close" />永久清理</button></div>
               </article>
             </div>
           </section>
 
           <form v-if="environmentEditorOpen" class="application-registry-editor" @submit.prevent="saveEnvironment">
             <div class="application-registry-section-title"><div><strong>设置应用环境</strong><small>environment 编码创建后不可修改；URL 和路径更新需要重新部署运行时。</small></div></div>
-            <div class="console-form-grid"><label class="console-form-item"><span>环境</span><input v-model="environmentForm.environment" :disabled="Boolean(environmentForm.version)" placeholder="dev / test / staging / prod" /></label><label class="console-form-item"><span>环境状态</span><select v-model="environmentForm.status"><option value="ACTIVE">启用</option><option value="DISABLED">停用</option></select></label><label class="console-form-item"><span>Public BaseURL</span><input v-model="environmentForm.baseUrl" placeholder="http://localhost:8081" /></label><label class="console-form-item"><span>UpstreamURL</span><input v-model="environmentForm.upstreamUrl" placeholder="http://customer-api:8080" /></label><label class="console-form-item"><span>门户路径前缀</span><input v-model="environmentForm.pathPrefix" placeholder="/customer_management" /></label><label class="console-form-item"><span>Issuer Alias</span><input v-model="environmentForm.issuerAlias" placeholder="可选" /></label></div>
+            <div class="console-form-grid"><label class="console-form-item"><span>环境</span><input v-model="environmentForm.environment" :disabled="Boolean(environmentForm.version)" placeholder="dev / test / staging / prod" /></label><label class="console-form-item"><span>环境状态</span><select v-model="environmentForm.status"><option value="ACTIVE">启用</option><option value="DISABLED">停用</option></select></label><label class="console-form-item"><span>Public BaseURL</span><input v-model="environmentForm.baseUrl" placeholder="http://localhost:8081" /></label><label class="console-form-item"><span>UpstreamURL</span><input v-model="environmentForm.upstreamUrl" placeholder="http://customer-api:8080" /></label><label class="console-form-item"><span>门户路径前缀</span><input v-model="environmentForm.pathPrefix" placeholder="/customer_management" /></label><label class="console-form-item"><span>认证提供方</span><select v-model="environmentForm.issuerAlias"><option v-for="provider in authenticationProviders" :key="provider.alias" :value="provider.alias" :disabled="!provider.switch_ready">{{ provider.name }}{{ provider.switch_ready ? '' : '（未就绪）' }}</option></select><small v-if="selectedAuthenticationProvider">{{ selectedAuthenticationProvider.status }} · {{ selectedAuthenticationProvider.realm || selectedAuthenticationProvider.issuer }}{{ selectedAuthenticationProvider.detail ? `；${selectedAuthenticationProvider.detail}` : '' }}</small></label></div>
             <div class="console-form-actions"><button class="console-button primary" type="submit" :disabled="saving"><ConsoleIcon name="save" />{{ saving ? '保存中…' : '保存环境' }}</button><button class="console-button ghost" type="button" :disabled="saving" @click="environmentEditorOpen = false">取消</button></div>
           </form>
 
