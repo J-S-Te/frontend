@@ -23,4 +23,7 @@ test('项目管理页面覆盖原型的五个业务域与核心交互', () => {
   assert.match(source, /onMounted\(loadWorkspace\)/)
   assert.match(source, /await confirmServiceItemsRequest\(ids\)/)
   assert.match(source, /await setRuleEnabled\(rule\.id, next\)/)
+  assert.match(source, /listDeliveryEvents\(\)/)
+  assert.match(source, /listCapabilities\(\)/)
+  assert.match(source, /DEVIATION_REPORTED/)
 })

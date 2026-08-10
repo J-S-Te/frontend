@@ -46,3 +46,11 @@ test('服务项确认与规则切换使用后端写接口', () => {
   assert.match(source, /request\('\/service-items\/confirm', \{ method: 'POST'/)
   assert.match(source, /request\(`\/rules\/\$\{encodeURIComponent\(id\)\}`, \{ method: 'PATCH'/)
 })
+
+test('项目交付闭环调用真实后端接口而非本地模拟', () => {
+  for (const path of [
+    '/contracts/activate', '/decomposition-adjustments', '/team-assignment', '/execution-assignment',
+    '/implementation-plan', '/preparation', '/check-in', '/field-records', '/deviations', '/review',
+    '/field-complete', '/delivery-events', '/capabilities',
+  ]) assert.match(source, new RegExp(path.replaceAll('/', '\\/')))
+})

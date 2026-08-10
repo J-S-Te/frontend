@@ -7,6 +7,8 @@ import {
   createProject,
   createRule,
   listProjects,
+  listCapabilities,
+  listDeliveryEvents,
   listRules,
   listServiceItems,
   setRuleEnabled,
@@ -103,6 +105,8 @@ const riskRows = [
 ]
 
 const serviceItems = ref([])
+const deliveryEvents = ref([])
+const capabilities = ref([])
 
 const kanbanColumns = computed(() => [
   { key: '待分配', count: 26, color: 'slate', cards: projects.value.filter((p) => ['待分配', '待拆解确认'].includes(p.status)) },
@@ -114,14 +118,14 @@ const kanbanColumns = computed(() => [
 
 const operationRows = computed(() => ({
   monitoring: projects.value.slice(0, 5).map((p) => ({ name: `${p.id} · ${p.customer}`, detail: p.category, owner: p.manager, state: p.health, progress: p.progress, due: p.due })),
-  allocation: serviceItems.value.map((s, i) => ({ name: `${s.id} · ${s.category}`, detail: s.site, owner: i === 2 ? '渗透测试组' : '测评一组', state: i === 2 ? '能力待校验' : '可下达', progress: i === 2 ? 45 : 80, due: '2 工作日内' })),
+  allocation: serviceItems.value.map((s) => ({ name: `${s.id} · ${s.category}`, detail: `${s.site} / ${s.batch}`, owner: s.team_lead_id || '待分配团队负责人', state: s.conflict_status === 'CONFLICT' ? '能力冲突' : s.team_lead_id ? '已分配' : '待分配', progress: s.project_manager_id ? 100 : s.team_lead_id ? 50 : 0, due: s.planned_end?.slice(0, 10) || '待排期' })),
   inbox: projects.value.slice(0, 3).map((p, i) => ({ name: `${p.id} · ${p.customer}`, detail: i ? '实施工程师指派' : '项目经理指派', owner: '王晓飞', state: i === 2 ? '即将超时' : '待接受', progress: 0, due: i === 2 ? '剩余 2 小时' : '今日' })),
-  planning: projects.value.slice(0, 5).map((p) => ({ name: `${p.id} · ${p.customer}`, detail: `${p.services} 个服务项`, owner: p.manager, state: p.progress > 50 ? '计划已发布' : '待排期', progress: p.progress, due: p.due })),
-  preparation: serviceItems.value.map((s, i) => ({ name: `${s.id} · ${s.site}`, detail: ['客户授权书', '检测工具', '出行申请', '资料清单'][i], owner: ['王明', '陈静', '李娜', '张磊'][i], state: i === 1 ? '缺失 1 项' : '已就绪', progress: i === 1 ? 75 : 100, due: '07-20' })),
-  qualifications: ['张磊', '李娜', '王明', '陈静'].map((name, i) => ({ name, detail: ['等保测评高级 / 项目经理', '商用密码评估 / 等保测评', '渗透测试 / 应急响应', '软件测试 / 源代码审计'][i], owner: '测评技术部', state: i === 2 ? '60 天后到期' : '有效', progress: i === 2 ? 60 : 92, due: ['2027-04-30', '2027-01-18', '2026-09-20', '2027-06-12'][i] })),
-  assignments: projects.value.slice(0, 4).map((p, i) => ({ name: `${p.id} · ${p.customer}`, detail: `${p.team} / ${p.services} 项`, owner: p.manager, state: i === 2 ? '排期冲突' : '校验通过', progress: i === 2 ? 50 : 100, due: p.due })),
-  methods: serviceItems.value.filter((s) => s.special === '是').concat(serviceItems.value.slice(0, 2)).map((s, i) => ({ name: `${s.id} · ${s.category}`, detail: i ? '取证抽样比例调整' : '黑盒测试方法', owner: ['赵毅', '孙工', '周工'][i], state: i === 0 ? '待复核' : '已通过', progress: i === 0 ? 35 : 100, due: i === 0 ? '今日 17:00' : '已完成' })),
-  exceptions: riskRows.map((r, i) => ({ name: r.project, detail: r.issue, owner: r.owner, state: i ? '待评审' : '阻断', progress: i ? 40 : 20, due: r.deadline })),
+  planning: serviceItems.value.map((s) => ({ name: `${s.id} · ${s.site}`, detail: s.test_mode === 'PENETRATION' ? '渗透测试专项计划' : '现场实施计划', owner: s.project_manager_id || '待指派项目经理', state: s.planned_start ? '计划已发布' : '待排期', progress: s.planned_start ? 100 : 0, due: s.planned_end?.slice(0, 10) || '待排期' })),
+  preparation: deliveryEvents.value.filter((e) => e.type === 'PREPARATION_STARTED').map((e) => ({ name: e.service_item_id, detail: `设备申领 ${e.payload.equipment_request_id} / 行程 ${e.payload.travel_request_id}`, owner: e.actor_user_id, state: '准备中', progress: 50, due: new Date(e.created_at).toLocaleDateString() })),
+  qualifications: capabilities.value.map((c) => ({ name: c.resource_name, detail: c.codes.join(' / '), owner: c.resource_type === 'PERSON' ? '人员资质' : '设备能力', state: c.status === 'ACTIVE' ? '有效' : c.status, progress: c.status === 'ACTIVE' ? 100 : 0, due: c.valid_until?.slice(0, 10) || '长期' })),
+  assignments: serviceItems.value.map((s) => ({ name: `${s.id} · ${s.site}`, detail: `${s.engineer_ids?.length || 0} 人 / ${s.equipment_ids?.length || 0} 台设备`, owner: s.project_manager_id || '待指派', state: s.conflict_status === 'CONFLICT' ? '排期冲突' : s.conflict_status === 'PASSED' ? '校验通过' : '待校验', progress: s.conflict_status === 'PASSED' ? 100 : 30, due: s.planned_end?.slice(0, 10) || '待排期' })),
+  methods: serviceItems.value.filter((s) => s.test_mode === 'PENETRATION').map((s) => ({ name: `${s.id} · ${s.category}`, detail: `${s.site} / ${s.system}`, owner: s.project_manager_id || '待指派', state: s.planned_start ? '专项计划已发布' : '待制定渗透测试计划', progress: s.planned_start ? 100 : 20, due: s.planned_end?.slice(0, 10) || '待排期' })),
+  exceptions: deliveryEvents.value.filter((e) => e.type === 'DEVIATION_REPORTED').map((e) => ({ name: `${e.payload.deviation_id} · ${e.service_item_id}`, detail: e.payload.description, owner: e.actor_user_id, state: e.payload.decision === 'PENDING' ? '待评审' : e.payload.decision, progress: e.payload.decision === 'PENDING' ? 20 : 100, due: new Date(e.created_at).toLocaleString() })),
   standards: ['GB/T 28448-2019', 'GB/T 39786-2021', '网络安全等级保护测评要求'].map((name, i) => ({ name, detail: ['2026 年修订版发布', '密码应用测评指标调整', '检测证据要求更新'][i], owner: '质量管理部', state: i === 0 ? '影响 12 项' : '评估中', progress: [62, 45, 80][i], due: ['07-25', '07-28', '08-02'][i] })),
   reports: projects.value.slice(1, 5).map((p, i) => ({ name: `${p.id} · ${p.customer}`, detail: `${p.services} 个服务项报告`, owner: p.manager, state: ['编制中', '待复核', '客户确认', '待编制'][i], progress: [68, 86, 92, 20][i], due: p.due })),
 }[activeSection.value] || []))
@@ -135,10 +139,12 @@ async function loadWorkspace() {
   try {
     // 项目、服务项和规则共同构成当前工作区快照；三者全部成功后才一次性替换页面状态，
     // 防止新旧数据混用。接口层仍分别执行会话与资源权限校验。
-    const [projectRows, itemRows, ruleRows] = await Promise.all([listProjects(), listServiceItems(), listRules()])
+    const [projectRows, itemRows, ruleRows, eventRows, capabilityRows] = await Promise.all([listProjects(), listServiceItems(), listRules(), listDeliveryEvents(), listCapabilities()])
     projects.value = projectRows
     serviceItems.value = itemRows.map((item) => ({ ...item, selected: ['待确认', '待复核'].includes(item.status) }))
     rules.value = ruleRows
+    deliveryEvents.value = eventRows
+    capabilities.value = capabilityRows
   } catch (error) {
     loadError.value = error?.message || '项目管理数据加载失败'
   } finally {
