@@ -52,3 +52,11 @@ test('pending assigned approvals are viewable but cannot be processed early', ()
   assert.match(source, /can\('approval\.process'\) && selectedApproval\.value\?\.status === 'active'/)
   assert.match(source, /该审批尚未流转到当前节点，暂时只能查看/)
 })
+
+test('add-sign candidates are limited to users with contract approval permission', () => {
+  assert.match(source, /const approvalTargetUsers = computed/)
+  assert.match(source, /contractRole\(roleCode\)\?\.permissions\?\.includes\('approval\.process'\)/)
+  assert.match(source, /!assigned\.has\(user\.user_id\)/)
+  assert.match(source, /v-for="user in approvalTargetUsers"/)
+  assert.match(source, /请选择具有合同审批权限的人员/)
+})
