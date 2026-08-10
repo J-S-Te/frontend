@@ -27,3 +27,13 @@ test('项目管理页面覆盖原型的五个业务域与核心交互', () => {
   assert.match(source, /listCapabilities\(\)/)
   assert.match(source, /DEVIATION_REPORTED/)
 })
+
+test('项目管理页面不再渲染原型模拟业务数据', () => {
+  for (const mockValue of ['87.4', '92.1', '96.8', 'PJ-2026-0817', '某证券交易所', '王晓飞', 'GB/T 28448-2019']) {
+    assert.doesNotMatch(source, new RegExp(mockValue.replaceAll('.', '\\.')))
+  }
+  assert.match(source, /getDashboard\(\)/)
+  assert.match(source, /getProjectSession\(\)/)
+  assert.match(source, /standards: \[\]/)
+  assert.match(source, /projectEvents\(drawerProject\)/)
+})
