@@ -392,6 +392,8 @@ test('商机附件只展示后端扫描状态并在能力未配置时失败关�
   assert.match(view, /upload_available/)
   assert.match(view, /扫描通过前不能下载/)
   assert.match(view, /item\.scan_status !== 'CLEAN'/)
+	assert.match(view, /flow\.session\.upload_mode === 'INTERNAL'/)
+	assert.match(view, /uploadOpportunityAttachmentContent\(opportunityID, flow\.session\.attachment\.id, file\)/)
   assert.doesNotMatch(view, /FileReader/)
 })
 
@@ -442,8 +444,8 @@ test('商机团队任期切换时新请求不被旧 loading 锁住且旧响应�
 
 test('售前多人指派使用内部人员目录，工时支持 PERSON_DAY', () => {
   assert.match(view, /const person = byID\.get\(personID\) \|\| current\.get\(personID\)/)
-  assert.match(view, /department_id: item\.organizations\?\.find\(\(org\) => org\.is_primary\)\?\.organization_id/)
-  assert.match(view, /targets\.some\(\(target\) => !target\.department_id\)/)
+  assert.doesNotMatch(view, /department_id: item\.organizations\?\.find\(\(org\) => org\.is_primary\)\?\.organization_id/)
+  assert.doesNotMatch(view, /targets\.some\(\(target\) => !target\.department_id\)/)
   assert.match(view, /person_name: person\?\.person_name \|\| '未命名用户'/)
   assert.match(view, /department: person\?\.department \|\| ''/)
   assert.match(view, /value="PERSON_DAY">人天（1 人天 = 8 小时）/)
@@ -1068,6 +1070,9 @@ test('TS-004 详情以权威操作接口和稳定游标驱动且安全展示时�
   for (const label of ['售前申请已创建', '任务状态已变更', '审批已处理', '已加入执行人', '已移出执行人', '已登记进度', '已登记工时']) assert.match(view, new RegExp(label))
   assert.match(view, /parsed\.protocol === 'https:'/)
   assert.match(view, /target="_blank" rel="noopener noreferrer"/)
+	assert.match(view, /function usableOperationName\(snapshot, userId\)/)
+	assert.match(view, /value !== String\(userId \|\| ''\)\.trim\(\)/)
+	assert.match(view, /operationUserLabel\(item\).*usableOperationName\(item\?\.actor_name, item\?\.actor_id\).*ownerLabel\(item\?\.actor_id\)/)
 	assert.doesNotMatch(view, /v-html/)
 	assert.match(view, /progressSubmissionSignature\.value !== progressSignature/)
 	assert.match(view, /const submissionKey = progressSubmissionKey\.value/)
