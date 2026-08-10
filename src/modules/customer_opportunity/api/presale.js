@@ -39,6 +39,9 @@ export const cancelPresaleRequest = (id, payload, idempotencyKey) => request(`/p
 export const addWorklog = (id, payload, idempotencyKey) => request(`/presale/requests/${encodeURIComponent(id)}/worklogs`, {
   method: 'POST', body: JSON.stringify(payload), idempotent: true, idempotencyKey,
 })
+export const completePresale = (id, payload) => request(`/presale/requests/${encodeURIComponent(id)}/complete`, {
+  method: 'POST', body: JSON.stringify(payload), idempotent: true,
+})
 export const listWorklogs = (id) => request(`/presale/requests/${encodeURIComponent(id)}/worklogs`)
 export const getWorklogDelivery = (id) => request(`/presale/worklogs/${encodeURIComponent(id)}/delivery`)
 export const retryWorklogDelivery = (id) => request(`/presale/worklogs/${encodeURIComponent(id)}/retry`, {

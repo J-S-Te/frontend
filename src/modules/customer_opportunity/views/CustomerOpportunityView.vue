@@ -111,6 +111,7 @@ const engineerPickerOpen = ref(false)
 const engineerDirectory = ref([])
 const engineerDirectoryLoading = ref(false)
 const selectedEngineerIDs = ref([])
+const selectedEngineerRoles = reactive({})
 const engineerQuery = reactive({ keyword: '', department: '' })
 const assignmentReason = ref('')
 const executionDepartments = ref([])
@@ -1900,7 +1901,7 @@ async function loadEngineerDirectory() {
       person_id: item.user_id,
       person_name: platformUserName(item),
       department: (item.organizations || []).map((org) => org.organization_name).filter(Boolean).join('、'),
-      role: 'implementation_engineer',
+      role: 'technician',
       valid_flag: true,
     })).filter((item) => !engineerQuery.department || item.department.includes(engineerQuery.department))
   }
@@ -1909,6 +1910,8 @@ async function loadEngineerDirectory() {
 }
 async function openEngineerPicker() {
   selectedEngineerIDs.value = (selectedPresale.value?.current_assignees || []).map((item) => item.person_id)
+  Object.keys(selectedEngineerRoles).forEach((key) => delete selectedEngineerRoles[key])
+  ;(selectedPresale.value?.current_assignees || []).forEach((item) => { selectedEngineerRoles[item.person_id] = item.role === 'project_manager' ? 'project_manager' : 'technician' })
   assignmentReason.value = ''; engineerPickerOpen.value = true; await loadEngineerDirectory()
 }
 async function loadExecutionDepartments() { try { const result = await listPresaleExecutionDepartments(); executionDepartments.value = result?.data || result || [] } catch (value) { showError(value) } }
@@ -1922,7 +1925,7 @@ function assignmentTargets() {
   const current = new Map((selectedPresale.value?.current_assignees || []).map((item) => [item.person_id, item]))
   return selectedEngineerIDs.value.map((personID) => {
     const person = byID.get(personID) || current.get(personID)
-    return { person_id: personID, person_name: person?.person_name || '未命名用户', department: person?.department || '', role: person?.role || 'implementation_engineer' }
+    return { person_id: personID, person_name: person?.person_name || '未命名用户', department: person?.department || '', role: selectedEngineerRoles[personID] || 'technician' }
   })
 }
 async function loadAlerts() {
