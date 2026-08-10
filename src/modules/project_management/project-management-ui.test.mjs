@@ -37,3 +37,8 @@ test('项目管理页面不再渲染原型模拟业务数据', () => {
   assert.match(source, /standards: \[\]/)
   assert.match(source, /projectEvents\(drawerProject\)/)
 })
+
+test('返回统一门户会关闭门户打开的项目标签页并提供页内回退', () => {
+  assert.match(source, /closeSubsystemTabOrFallback\(window, \(\) => router\.replace\(\{ name: 'portal' \}\)\)/)
+  assert.equal((source.match(/@click="returnToUnifiedPortal"/g) || []).length, 2)
+})

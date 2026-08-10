@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
+import { closeSubsystemTabOrFallback } from '@/modules/shared/utils/returnToPortal'
 import {
   confirmServiceItems as confirmServiceItemsRequest,
   createProject,
@@ -187,6 +188,12 @@ function navigate(section) {
   mobileMenuOpen.value = false
 }
 
+function returnToUnifiedPortal() {
+  mobileMenuOpen.value = false
+  notificationOpen.value = false
+  closeSubsystemTabOrFallback(window, () => router.replace({ name: 'portal' }))
+}
+
 function showToast(message) {
   toastMessage.value = message
   window.clearTimeout(toastTimer)
@@ -300,6 +307,10 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
             <ConsoleIcon :name="item.icon" /><span>{{ item.label }}</span><em v-if="item.badge">{{ item.badge }}</em>
           </button>
         </div>
+        <div class="pm-nav-group">
+          <div class="pm-nav-label">平台能力</div>
+          <button class="pm-nav-item" type="button" @click="returnToUnifiedPortal"><ConsoleIcon name="logout" /><span>返回统一门户</span><em class="pm-platform-tag">平台</em></button>
+        </div>
       </nav>
       <div class="pm-sidebar-foot">V1.0 · 项目服务内容管理</div>
     </aside>
@@ -312,7 +323,7 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
         <div class="pm-top-tools">
           <button class="pm-icon-button" aria-label="全局搜索" @click="showToast('全局搜索即将开放')"><ConsoleIcon name="search" /></button>
           <button class="pm-icon-button pm-notification-button" aria-label="通知" @click="notificationOpen = !notificationOpen"><ConsoleIcon name="bell" /><em v-if="notificationCount">{{ notificationCount }}</em></button>
-          <div class="pm-user"><span>{{ currentUserName.slice(0, 1) }}</span><div><b>{{ currentUserName }}</b><small>{{ currentUserRole }}</small></div></div>
+          <div class="pm-user"><span>{{ currentUserName.slice(0, 1) }}</span><div><b>{{ currentUserName }}</b><small>{{ currentUserRole }}</small></div><button class="pm-user-return" type="button" aria-label="返回门户" @click="returnToUnifiedPortal"><ConsoleIcon name="logout" /></button></div>
         </div>
         <div v-if="notificationOpen" class="pm-notifications">
           <div class="pm-popover-head"><b>业务待办</b><span>{{ notificationCount }} 条</span></div>
