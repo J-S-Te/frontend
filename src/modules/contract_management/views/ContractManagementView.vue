@@ -281,6 +281,8 @@ const toast = ref('')
 let toastTimer = 0
 let approvalRealtimeTimer = 0
 let approvalRealtimeBusy = false
+let signingRealtimeTimer = 0
+let signingRealtimeBusy = false
 
 const activeSection = computed(() => {
   const section = typeof route.params.section === 'string' ? route.params.section : 'dashboard'
@@ -812,6 +814,39 @@ function scheduleApprovalRealtime({ immediate = false } = {}) {
 
 function handleApprovalVisibilityChange() {
   scheduleApprovalRealtime({ immediate: document.visibilityState === 'visible' })
+  scheduleSigningRealtime({ immediate: document.visibilityState === 'visible' })
+}
+
+async function refreshSigningRealtime() {
+  if (signingRealtimeBusy || !session.value || activeSection.value !== 'signing' || document.visibilityState !== 'visible') return
+  signingRealtimeBusy = true
+  try {
+    const listRequest = listSigningRecords({ limit: 200 })
+    const detailRequest = selectedSigningRecord.value && !signingOperationBusy.value
+      ? getSigningRecord(selectedSigningRecord.value.contract.recordId)
+      : Promise.resolve(null)
+    const [listResult, detailResult] = await Promise.allSettled([listRequest, detailRequest])
+    if (listResult.status === 'fulfilled') signingRecords.value = listResult.value.map(normalizeSigningRecord)
+    if (detailResult.status === 'fulfilled' && detailResult.value && selectedSigningRecord.value?.contract.recordId === detailResult.value.contract?.id) {
+      applySigningRecord(detailResult.value)
+    }
+  } finally {
+    signingRealtimeBusy = false
+  }
+}
+
+function stopSigningRealtime() {
+  window.clearTimeout(signingRealtimeTimer)
+  signingRealtimeTimer = 0
+}
+
+function scheduleSigningRealtime({ immediate = false } = {}) {
+  stopSigningRealtime()
+  if (!session.value || activeSection.value !== 'signing' || document.visibilityState !== 'visible') return
+  signingRealtimeTimer = window.setTimeout(async () => {
+    await refreshSigningRealtime()
+    scheduleSigningRealtime()
+  }, immediate ? 0 : 1000)
 }
 
 function displayNameFor(userId, displayName) {
@@ -1514,6 +1549,7 @@ watch(activeSection, () => {
   notificationOpen.value = false
   document.title = `${pageMeta.value.title} · 机构合同管理系统`
   scheduleApprovalRealtime({ immediate: true })
+  scheduleSigningRealtime({ immediate: true })
 }, { immediate: true })
 
 onMounted(async () => {
@@ -1522,6 +1558,7 @@ onMounted(async () => {
     await loadBusinessData()
     document.addEventListener('visibilitychange', handleApprovalVisibilityChange)
     scheduleApprovalRealtime({ immediate: true })
+    scheduleSigningRealtime({ immediate: true })
   } catch (error) {
     if (error instanceof ContractAuthError || error?.status === 401) return
     sessionError.value = error?.message || '读取合同系统登录状态失败。'
@@ -1531,6 +1568,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   window.clearTimeout(toastTimer)
   stopApprovalRealtime()
+  stopSigningRealtime()
   document.removeEventListener('visibilitychange', handleApprovalVisibilityChange)
 })
 </script>

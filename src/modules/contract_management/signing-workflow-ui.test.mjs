@@ -25,3 +25,12 @@ test('return tracking persists shipment receipt reminder upload and manual confi
   assert.match(source, /已核验签名完整有效/)
   assert.match(source, /系统不自动判定合同内容/)
 })
+
+test('contract specialists receive newly approved contracts through realtime signing synchronization', () => {
+  assert.match(source, /activeSection\.value !== 'signing' \|\| document\.visibilityState !== 'visible'/)
+  assert.match(source, /const listRequest = listSigningRecords\(\{ limit: 200 \}\)/)
+  assert.match(source, /scheduleSigningRealtime\(\)/)
+  assert.match(source, /immediate \? 0 : 1000/)
+  assert.match(source, /scheduleSigningRealtime\(\{ immediate: document\.visibilityState === 'visible' \}\)/)
+  assert.match(source, /stopSigningRealtime\(\)/)
+})
