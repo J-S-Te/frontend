@@ -110,6 +110,19 @@ const capabilities = ref([])
 
 const projectByID = computed(() => new Map(projects.value.map((project) => [project.id, project])))
 const itemByID = computed(() => new Map(serviceItems.value.map((item) => [item.id, item])))
+const stampedContractStateByProject = computed(() => {
+  const states = new Map()
+  for (const event of deliveryEvents.value) {
+    if (event.type === 'CONTRACT_STAMP_STATUS_SYNCED' && !states.has(event.project_id) && typeof event.payload?.stamped_contract_uploaded === 'boolean') {
+      states.set(event.project_id, event.payload.stamped_contract_uploaded)
+    }
+    if (event.type === 'CONTRACT_ACTIVATED' && !states.has(event.project_id) && typeof event.payload?.stamped_contract_uploaded === 'boolean') {
+      states.set(event.project_id, event.payload.stamped_contract_uploaded)
+    }
+  }
+  return states
+})
+const missingStampedContractCount = computed(() => new Set(serviceItems.value.filter((item) => stampedContractStateByProject.value.get(item.project_id) === false).map((item) => item.project_id)).size)
 const reviewedDeviationIDs = computed(() => new Set(deliveryEvents.value.filter((event) => event.type === 'DEVIATION_REVIEWED').map((event) => event.payload?.deviation_id)))
 const pendingDeviations = computed(() => deliveryEvents.value.filter((event) => event.type === 'DEVIATION_REPORTED' && !reviewedDeviationIDs.value.has(event.payload?.deviation_id)))
 const decompositionItems = computed(() => serviceItems.value.filter((item) => ['待确认', '待复核'].includes(item.status)))
@@ -122,7 +135,7 @@ const currentUserName = computed(() => session.value?.display_name || session.va
 const currentUserRole = computed(() => session.value?.roles?.join(' / ') || '项目成员')
 const lastUpdatedLabel = computed(() => lastUpdatedAt.value ? lastUpdatedAt.value.toLocaleString() : '尚未加载')
 const serviceFlow = computed(() => [
-  { key: '待分配', color: 'slate', count: serviceItems.value.filter((item) => ['待确认', '待复核', '待分配'].includes(item.status)).length, route: 'allocation' },
+  { key: '待分配', color: 'slate', count: serviceItems.value.filter((item) => item.status === '待分配').length, route: 'allocation' },
   { key: '待实施', color: 'violet', count: serviceItems.value.filter((item) => ['待制定计划', '待实施', '实施准备中'].includes(item.status)).length, route: 'planning' },
   { key: '实施中', color: 'amber', count: serviceItems.value.filter((item) => ['实施中', '异常处理中'].includes(item.status)).length, route: 'implementation' },
   { key: '报告编制', color: 'blue', count: projects.value.filter((item) => item.status === '报告编制').length, route: 'reports' },
@@ -145,7 +158,7 @@ const kanbanColumns = computed(() => [
 
 const operationRows = computed(() => ({
   monitoring: projects.value.slice(0, 5).map((p) => ({ name: `${p.id} · ${p.customer}`, detail: p.category, owner: p.manager, state: p.health, progress: p.progress, due: p.due })),
-  allocation: serviceItems.value.map((s) => ({ name: `${s.id} · ${s.category}`, detail: `${s.site} / ${s.batch}`, owner: s.team_lead_id || '待分配团队负责人', state: s.conflict_status === 'CONFLICT' ? '能力冲突' : s.team_lead_id ? '已分配' : '待分配', progress: s.project_manager_id ? 100 : s.team_lead_id ? 50 : 0, due: s.planned_end?.slice(0, 10) || '待排期' })),
+  allocation: serviceItems.value.filter((s) => s.status === '待分配').map((s) => ({ name: `${s.id} · ${s.category}`, detail: `${s.site} / ${s.batch}`, warning: stampedContractStateByProject.value.get(s.project_id) === false ? '未上传盖章合同' : '', owner: s.team_lead_id || '待分配团队负责人', state: s.conflict_status === 'CONFLICT' ? '能力冲突' : s.team_lead_id ? '已分配' : '待分配', progress: s.project_manager_id ? 100 : s.team_lead_id ? 50 : 0, due: s.planned_end?.slice(0, 10) || '待排期' })),
   inbox: inboxItems.value.map((s) => ({ name: `${s.id} · ${projectByID.value.get(s.project_id)?.customer || s.site}`, detail: s.project_manager_id ? '实施工程师待指派' : '项目经理待指派', owner: s.team_lead_id, state: '待处理', progress: s.project_manager_id ? 50 : 0, due: s.planned_start?.slice(0, 10) || '待排期' })),
   planning: serviceItems.value.map((s) => ({ name: `${s.id} · ${s.site}`, detail: s.test_mode === 'PENETRATION' ? '渗透测试专项计划' : '现场实施计划', owner: s.project_manager_id || '待指派项目经理', state: s.planned_start ? '计划已发布' : '待排期', progress: s.planned_start ? 100 : 0, due: s.planned_end?.slice(0, 10) || '待排期' })),
   preparation: deliveryEvents.value.filter((e) => e.type === 'PREPARATION_STARTED').map((e) => ({ name: e.service_item_id, detail: `设备申领 ${e.payload.equipment_request_id} / 行程 ${e.payload.travel_request_id}`, owner: e.actor_user_id, state: '准备中', progress: 50, due: new Date(e.created_at).toLocaleDateString() })),
@@ -349,6 +362,8 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
           <ConsoleIcon name="info" /><b>后端数据加载失败</b><span>{{ loadError }}</span><button class="pm-button" @click="loadWorkspace">重新加载</button>
         </section>
 
+        <section v-if="['decomposition', 'allocation'].includes(activeSection) && missingStampedContractCount" class="pm-contract-warning"><ConsoleIcon name="info" /><div><b>{{ missingStampedContractCount }} 份合同尚未上传盖章合同</b><p>{{ activeSection === 'decomposition' ? '合同审批已完成，可继续核对并确认服务项拆解；该提示不阻断拆解确认。' : '服务项拆解已确认，可继续分配团队、人员及设备；上传盖章合同后提示将自动清除。' }}</p></div></section>
+
         <template v-if="activeSection === 'dashboard'">
           <section class="pm-kpis">
             <button type="button" class="pm-kpi blue" @click="navigate('projects')"><div><span>全部项目</span><em>实时</em></div><strong>{{ dashboard.project_count }}</strong><p><span>{{ dashboard.in_flight_projects }} 个在途项目</span></p></button>
@@ -387,7 +402,7 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
         <template v-else-if="activeSection === 'decomposition'">
           <section v-if="decompositionProject" class="pm-source-card"><div class="pm-source-icon"><ConsoleIcon name="account" /></div><div><span>合同来源</span><h2>{{ decompositionProject.contract }} · {{ decompositionProject.customer }}</h2><p>合同版本 {{ decompositionProject.contract_version || '—' }} · 自动生成于 {{ formatDateTime(decompositionProject.created_at) }}</p></div><span class="pm-badge normal">{{ decompositionProject.status }}</span></section>
           <section class="pm-decompose-grid"><article class="pm-panel pm-tree-panel"><header><div><p class="pm-panel-kicker">SERVICE TREE</p><h2>服务项树</h2></div><span>{{ decompositionItems.length }} 项</span></header><button v-for="([batch, items], index) in decompositionBatches" :key="batch" :class="{ active: index === 0 }"><span>{{ String(index + 1).padStart(2, '0') }}</span><div><b>{{ batch }}</b><small>{{ items.length }} 个服务项</small></div></button><div class="pm-tree-note"><b>自动拆解校验</b><p>{{ penetrationPending.length }} 项渗透测试需要专项计划；确认后的服务项进入资源分配。</p></div></article>
-            <article class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>纳入</th><th>服务项编号</th><th>场所 / 批次</th><th>检测类别</th><th>技术要求摘要</th><th>体系</th><th>特殊方法</th><th>状态</th></tr></thead><tbody><tr v-for="item in serviceItems" :key="item.id"><td><input v-model="item.selected" type="checkbox" :aria-label="`纳入 ${item.id}`" /></td><td class="mono"><b>{{ item.id }}</b></td><td>{{ item.site }}<span class="pm-cell-sub">{{ item.batch }}</span></td><td>{{ item.category }}</td><td>{{ item.requirement }}</td><td>{{ item.system }}</td><td><span class="pm-badge" :class="item.special === '是' ? '待确认' : 'neutral'">{{ item.special }}</span></td><td><span class="pm-badge neutral">{{ item.status }}</span></td></tr></tbody></table></div></article>
+            <article class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>纳入</th><th>服务项编号</th><th>场所 / 批次</th><th>检测类别</th><th>技术要求摘要</th><th>体系</th><th>特殊方法</th><th>状态</th></tr></thead><tbody><tr v-for="item in decompositionItems" :key="item.id"><td><input v-model="item.selected" type="checkbox" :aria-label="`纳入 ${item.id}`" /></td><td class="mono"><b>{{ item.id }}</b></td><td>{{ item.site }}<span class="pm-cell-sub">{{ item.batch }}</span></td><td>{{ item.category }}</td><td>{{ item.requirement }}</td><td>{{ item.system }}</td><td><span class="pm-badge" :class="item.special === '是' ? '待确认' : 'neutral'">{{ item.special }}</span></td><td><span class="pm-badge neutral">{{ item.status }}</span></td></tr></tbody></table></div></article>
           </section>
         </template>
 
@@ -403,7 +418,7 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
         <template v-else>
           <section class="pm-operational-stats"><article><span>待处理</span><strong>{{ operationRows.filter((r) => !['有效', '已就绪', '校验通过', '已通过', '计划已发布', '专项计划已发布'].includes(r.state)).length }}</strong><small>来自当前工作区</small></article><article><span>处理中</span><strong>{{ operationRows.filter((r) => ['准备中', '编制中', '实施中'].includes(r.state)).length }}</strong><small>按实际状态统计</small></article><article><span>已完成项目</span><strong>{{ completedProjectCount }}</strong><small>当前租户累计</small></article></section>
           <section class="pm-filters"><label><ConsoleIcon name="search" /><input v-model="keyword" placeholder="搜索编号、项目或负责人" /></label><span>{{ operationRows.length }} 条结果</span></section>
-          <section class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>事项 / 项目</th><th>内容摘要</th><th>负责人 / 归属</th><th>状态</th><th>完成度</th><th>时限</th><th></th></tr></thead><tbody><tr v-for="row in operationRows" :key="row.name"><td><b>{{ row.name }}</b></td><td>{{ row.detail }}</td><td>{{ row.owner }}</td><td><span class="pm-badge" :class="['阻断', '排期冲突'].includes(row.state) ? '风险' : 'neutral'">{{ row.state }}</span></td><td><div class="pm-inline-progress"><i :style="{ width: `${row.progress}%` }"></i></div><small>{{ row.progress }}%</small></td><td>{{ row.due }}</td><td><button class="pm-link" @click="showToast(`已打开：${row.name}`)">处理</button></td></tr></tbody></table></div><div v-if="!operationRows.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无数据</b><span>当前页面尚无待处理事项</span></div></section>
+          <section class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>事项 / 项目</th><th>内容摘要</th><th>负责人 / 归属</th><th>状态</th><th>完成度</th><th>时限</th><th></th></tr></thead><tbody><tr v-for="row in operationRows" :key="row.name"><td><b>{{ row.name }}</b></td><td>{{ row.detail }}<span v-if="row.warning" class="pm-cell-warning">{{ row.warning }}</span></td><td>{{ row.owner }}</td><td><span class="pm-badge" :class="['阻断', '排期冲突'].includes(row.state) ? '风险' : 'neutral'">{{ row.state }}</span></td><td><div class="pm-inline-progress"><i :style="{ width: `${row.progress}%` }"></i></div><small>{{ row.progress }}%</small></td><td>{{ row.due }}</td><td><button class="pm-link" @click="showToast(`已打开：${row.name}`)">处理</button></td></tr></tbody></table></div><div v-if="!operationRows.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无数据</b><span>当前页面尚无待处理事项</span></div></section>
         </template>
       </div>
     </main>

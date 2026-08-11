@@ -506,6 +506,11 @@
 .pm-badge.关注, .pm-badge.待确认 { color: var(--pm-amber-text); background: var(--pm-amber-soft); }
 .pm-badge.风险 { color: var(--pm-red-text); background: var(--pm-red-soft); }
 .pm-badge.neutral { color: var(--pm-body); background: #f1f5f9; }
+.pm-contract-warning { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 14px; padding: 14px 16px; border: 1px solid #f1cf8c; border-radius: 12px; background: #fff8e8; color: #8c5b08; box-shadow: var(--pm-shadow); }
+.pm-contract-warning > svg { flex: 0 0 20px; width: 20px; height: 20px; margin-top: 1px; }
+.pm-contract-warning b { display: block; margin-bottom: 3px; color: #754900; font-size: 13px; }
+.pm-contract-warning p { margin: 0; font-size: 12px; line-height: 1.6; }
+.pm-cell-warning { display: block; width: fit-content; margin-top: 5px; padding: 2px 7px; border-radius: 999px; background: var(--pm-amber-soft); color: var(--pm-amber-text); font-size: 10px; font-weight: 700; }
 
 /* Business-specific panels */
 .pm-source-card { padding: 16px 20px; border-color: var(--pm-blue-border); border-left-color: var(--pm-blue); border-radius: 12px; background: linear-gradient(90deg, var(--pm-blue-soft), #fff 60%); box-shadow: var(--pm-shadow); }
