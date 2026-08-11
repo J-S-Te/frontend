@@ -34,3 +34,9 @@ test('contract specialists receive newly approved contracts through realtime sig
   assert.match(source, /scheduleSigningRealtime\(\{ immediate: document\.visibilityState === 'visible' \}\)/)
   assert.match(source, /stopSigningRealtime\(\)/)
 })
+
+test('realtime signing refresh does not overwrite shipment or verification forms being edited', () => {
+  assert.match(source, /function applySigningRecord\(record, \{ preserveForms = false \} = \{\}\)/)
+  assert.match(source, /if \(preserveForms\) return/)
+  assert.match(source, /applySigningRecord\(detailResult\.value, \{ preserveForms: true \}\)/)
+})

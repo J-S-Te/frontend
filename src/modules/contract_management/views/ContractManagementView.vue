@@ -592,9 +592,12 @@ async function refreshSigningRecords() {
   signingRecords.value = items.map(normalizeSigningRecord)
 }
 
-function applySigningRecord(record) {
+function applySigningRecord(record, { preserveForms = false } = {}) {
   selectedSigningRecord.value = normalizeSigningRecord(record)
   const selected = selectedSigningRecord.value
+  // Realtime synchronization keeps lifecycle data current, but must never
+  // overwrite an operator's in-progress shipment or verification input.
+  if (preserveForms) return
   signingShipmentForm.value = {
     courier_number: selected.courier_number || '',
     recipient_name: selected.recipient_name || '',
@@ -835,7 +838,7 @@ async function refreshSigningRealtime() {
     const [listResult, detailResult] = await Promise.allSettled([listRequest, detailRequest])
     if (listResult.status === 'fulfilled') signingRecords.value = listResult.value.map(normalizeSigningRecord)
     if (detailResult.status === 'fulfilled' && detailResult.value && selectedSigningRecord.value?.contract.recordId === detailResult.value.contract?.id) {
-      applySigningRecord(detailResult.value)
+      applySigningRecord(detailResult.value, { preserveForms: true })
     }
   } finally {
     signingRealtimeBusy = false
