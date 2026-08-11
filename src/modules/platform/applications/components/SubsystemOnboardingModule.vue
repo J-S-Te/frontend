@@ -6,6 +6,7 @@ import {
   ApplicationRegistryError,
   deleteApplicationRegistration,
   deleteEnvironment,
+  discoverSubsystemCandidates,
   purgeEnvironment,
   getSubsystemCapabilities,
   getSubsystemStatus,
@@ -43,6 +44,7 @@ const environmentsLoading = ref(false)
 const selectedEnvironmentId = ref('')
 const deploymentStates = ref({})
 const deploymentStatusErrors = ref({})
+const keycloakSwitchStates = ref({})
 const showOnboard = ref(false)
 const applicationEditorOpen = ref(false)
 const environmentEditorOpen = ref(false)
@@ -62,6 +64,8 @@ const productionTargetInventoryReady = ref(false)
 const productionTargetInventoryLoading = ref(false)
 const productionTargetInventoryError = ref('')
 const registeredProductionTargetKeys = ref(new Set())
+const discoveredCandidates = ref([])
+const discoveryLoading = ref(false)
 
 const standardEnvironments = Object.freeze(['dev', 'test', 'staging', 'prod'])
 const preferredEnvironments = computed(() => {
@@ -208,6 +212,7 @@ function emptyOnboardForm() {
     upstreamUrl: '',
     pathPrefix: '',
     clientType: 'confidential',
+    issuerAlias: '',
   }
 }
 
@@ -443,6 +448,7 @@ async function loadEnvironments() {
     selectedEnvironmentId.value = ''
     deploymentStates.value = {}
     deploymentStatusErrors.value = {}
+    keycloakSwitchStates.value = {}
     return
 	}
 	// 切换应用时先撤销旧环境选择。否则子组件会短暂拿到“新应用 + 旧环境”这组
@@ -451,6 +457,7 @@ async function loadEnvironments() {
 	environmentsLoading.value = true
   deploymentStates.value = {}
   deploymentStatusErrors.value = {}
+  keycloakSwitchStates.value = {}
   try {
     const data = await listEnvironments({ applicationId: application.application_id, page: 1, pageSize: 100, status: '' })
     environments.value = Array.isArray(data?.items) ? data.items : []
@@ -492,6 +499,45 @@ function toggleOnboarding() {
   clearError()
   if (isProductionProvisioning.value) applyProductionProvisioningPreset()
   showOnboard.value = true
+}
+
+async function discoverSubsystems() {
+  if (discoveryLoading.value || saving.value) return
+  discoveryLoading.value = true
+  clearError()
+  try {
+    const result = await discoverSubsystemCandidates()
+    discoveredCandidates.value = Array.isArray(result) ? result : []
+    if (!discoveredCandidates.value.length) notify('未发现尚未登记且带标准标签的子系统。')
+  } catch (error) {
+    setError(error, '探测子系统失败。请确认 subsystem-provisioner 正在运行且容器已配置 discovery 标签。')
+  } finally {
+    discoveryLoading.value = false
+  }
+}
+
+function useDiscoveredCandidate(candidate) {
+  if (!candidate || saving.value) return
+  const callbackPath = textValue(candidate.oidc_callback_path)
+  const pathPrefix = callbackPath.endsWith('/auth/callback')
+    ? callbackPath.slice(0, -'/auth/callback'.length) || '/'
+    : `/${textValue(candidate.application_code)}`
+  Object.assign(onboardForm, {
+    applicationCode: textValue(candidate.application_code),
+    applicationName: textValue(candidate.application_code),
+    description: `通过 Docker 标签发现：${textValue(candidate.service_name)}${candidate.version ? ` · ${candidate.version}` : ''}`,
+    environment: textValue(candidate.environment),
+    publicBaseUrl: typeof window === 'undefined' ? 'http://localhost:8081' : window.location.origin,
+    upstreamUrl: `${textValue(candidate.protocol) || 'http'}://${textValue(candidate.internal_host)}:${Number(candidate.internal_port)}`,
+    pathPrefix,
+    clientType: 'confidential',
+    issuerAlias: authenticationProviders.value.some((provider) => provider.alias === 'keycloak' && provider.switch_ready) ? 'keycloak' : '',
+  })
+  onboardExistingApplicationId.value = ''
+  selectedProductionTargetKey.value = ''
+  onboardConfirmation.value = ''
+  showOnboard.value = true
+  clearError()
 }
 
 function openApplicationEditor() {
@@ -752,10 +798,23 @@ function providerStatus(alias) {
   return authenticationProviders.value.find((item) => item.alias === alias) || null
 }
 
+function keycloakSwitchState(environment) {
+  if (!environment) return { switch_ready: false, switch_gates: [], next_action: '' }
+  return keycloakSwitchStates.value[environment.environment_id]
+    || providerStatus('keycloak')
+    || { switch_ready: false, switch_gates: [], next_action: '' }
+}
+
+function keycloakSwitchReady(environment) {
+  const state = keycloakSwitchState(environment)
+  const gates = Array.isArray(state.switch_gates) ? state.switch_gates : []
+  return state.switch_ready === true && gates.length === 4 && gates.every((gate) => gate?.passed === true)
+}
+
 async function switchAuthenticationProvider(environment, alias) {
   const application = selectedApplication.value
   const provider = providerStatus(alias)
-  if (!application || !environment || !provider?.switch_ready || saving.value) return
+  if (!application || !environment || (alias === 'keycloak' && !keycloakSwitchReady(environment)) || (alias !== 'keycloak' && !provider?.switch_ready) || saving.value) return
   saving.value = true
   clearError()
   try {
@@ -793,14 +852,18 @@ async function synchronizeKeycloakClient(environment) {
   saving.value = true
   clearError()
   try {
-    await syncKeycloakClient({
+    const result = await syncKeycloakClient({
       applicationCode: application.code,
       environment: environment.environment,
       publicBaseUrl: environment.base_url || '',
       upstreamUrl: environment.upstream_url || '',
       pathPrefix: environment.path_prefix || '',
     })
-    notify('Keycloak Realm Client 与 Claims 映射已同步；请完成 Broker 登录验证后再切换认证提供方。')
+    keycloakSwitchStates.value = {
+      ...keycloakSwitchStates.value,
+      [environment.environment_id]: result && typeof result === 'object' ? result : { switch_ready: false, switch_gates: [] },
+    }
+    notify(result?.next_action || 'Keycloak 同步完成；请完成剩余门禁后再切换认证提供方。')
   } catch (error) {
     setError(error, '同步 Keycloak Realm Client 失败。')
   } finally {
@@ -832,6 +895,7 @@ async function submitOnboarding() {
       upstreamUrl: onboardForm.upstreamUrl.trim().replace(/\/$/, ''),
       pathPrefix: onboardForm.pathPrefix.trim(),
       clientType: onboardForm.clientType,
+      issuerAlias: onboardForm.issuerAlias,
     })
     showOnboard.value = false
     onboardExistingApplicationId.value = ''
@@ -871,10 +935,23 @@ onMounted(() => {
           <h2 id="application-registry-title">应用接入管理</h2>
           <p>应用接入、环境、门户登录目标和部署运行时统一维护。生产环境由平台通过隔离部署 Agent 安全交付一次性凭据，无需在命令行复制 OAuth 配置。</p>
         </div>
-        <button v-if="props.canOnboard" class="console-button primary" type="button" @click="toggleOnboarding">
-          <ConsoleIcon name="save" />{{ showOnboard ? '收起接入' : '新增接入' }}
-        </button>
+        <div class="application-registry-header-actions">
+          <button v-if="canReadApplications" class="console-button secondary" type="button" :disabled="discoveryLoading" @click="discoverSubsystems">
+            <ConsoleIcon name="search" />{{ discoveryLoading ? '探测中…' : '探测子系统' }}
+          </button>
+          <button v-if="props.canOnboard" class="console-button primary" type="button" @click="toggleOnboarding">
+            <ConsoleIcon name="save" />{{ showOnboard ? '收起接入' : '新增接入' }}
+          </button>
+        </div>
       </header>
+
+      <section v-if="discoveredCandidates.length" class="application-registry-discovery" aria-label="发现的未登记子系统">
+        <div><strong>发现到 {{ discoveredCandidates.length }} 个未登记子系统</strong><small>服务通过 Docker 标签声明自身能力；选择后会预填接入信息，并优先使用 Keycloak。</small></div>
+        <article v-for="candidate in discoveredCandidates" :key="`${candidate.application_code}/${candidate.environment}/${candidate.service_name}`">
+          <div><strong>{{ candidate.application_code }}</strong><span>{{ candidate.environment }} · {{ candidate.service_name }} · {{ candidate.status }}</span><small>{{ candidate.protocol }}://{{ candidate.internal_host }}:{{ candidate.internal_port }} · {{ candidate.health_endpoint || '未声明健康检查' }}</small></div>
+          <button v-if="props.canOnboard" class="console-button primary small" type="button" @click="useDiscoveredCandidate(candidate)">采用并接入</button>
+        </article>
+      </section>
 
       <form v-if="showOnboard" class="application-registry-onboard" @submit.prevent="submitOnboarding">
         <div class="application-registry-section-title">
@@ -906,6 +983,7 @@ onMounted(() => {
             <label class="console-form-item"><span>应用名称</span><input v-model="onboardForm.applicationName" :disabled="onboardingExistingApplication" placeholder="客户管理系统" /></label>
             <label class="console-form-item"><span>环境</span><select v-model="onboardForm.environment"><option v-for="environment in availableOnboardEnvironments" :key="environment" :value="environment">{{ environment }}</option></select></label>
             <label class="console-form-item"><span>客户端类型</span><select v-model="onboardForm.clientType"><option value="confidential">confidential（推荐）</option><option value="public">public</option></select></label>
+            <label class="console-form-item"><span>认证提供方</span><select v-model="onboardForm.issuerAlias"><option value="">基础平台 OIDC</option><option v-for="provider in authenticationProviders.filter((provider) => provider.alias === 'keycloak' && provider.switch_ready)" :key="provider.alias" :value="provider.alias">{{ provider.name }}</option></select><small>选择 Keycloak 时会在接入过程中同步 Realm Client 与 Claims。</small></label>
             <label class="console-form-item"><span>Public BaseURL</span><input v-model="onboardForm.publicBaseUrl" placeholder="http://localhost:8081" /></label>
             <label class="console-form-item"><span>UpstreamURL</span><input v-model="onboardForm.upstreamUrl" :readonly="Boolean(onboardPreset)" placeholder="http://customer-api:8080" /><small v-if="onboardPreset">服务器受控编排地址</small></label>
             <label class="console-form-item"><span>门户路径前缀</span><input v-model="onboardForm.pathPrefix" :readonly="Boolean(onboardPreset)" placeholder="/customer_management" /><small v-if="onboardPreset">服务器受控门户路径</small></label>
@@ -959,9 +1037,17 @@ onMounted(() => {
               <article v-for="environment in environments" :key="environment.environment_id" class="application-registry-environment" :class="{ 'is-selected': environment.environment_id === selectedEnvironmentId }" @click="selectEnvironment(environment)">
                 <div class="application-registry-environment-main"><strong>{{ environment.environment }}</strong><span class="application-registry-status" :class="statusClass(environmentStatus(environment))">{{ statusLabel(environmentStatus(environment)) }}</span><small>认证：{{ providerLabel(environment.issuer_alias || 'platform') }} · 配置版本 {{ environment.version }}</small></div>
                 <div class="application-registry-environment-uri"><span>{{ environment.base_url || '未设置 BaseURL' }}{{ environment.path_prefix || '' }}</span><small>{{ environment.upstream_url || '未设置 UpstreamURL' }}</small></div>
+                <div v-if="providerStatus('keycloak')" class="application-registry-switch-gates">
+                  <strong>切换 Keycloak 门禁</strong>
+                  <ul v-if="keycloakSwitchState(environment).switch_gates?.length">
+                    <li v-for="gate in keycloakSwitchState(environment).switch_gates" :key="gate.key" :class="{ 'is-passed': gate.passed }"><span>{{ gate.passed ? '已通过' : '未通过' }}</span>{{ gate.label }}<small>{{ gate.detail }}{{ !gate.passed && gate.next_action ? ` 下一步：${gate.next_action}` : '' }}</small></li>
+                  </ul>
+                  <small v-else>后端尚未返回门禁状态；为安全起见，不能切换 Issuer。</small>
+                  <p v-if="!keycloakSwitchReady(environment) && keycloakSwitchState(environment).next_action">下一步：{{ keycloakSwitchState(environment).next_action }}</p>
+                </div>
                 <p v-if="environmentNextAction(environment)" class="application-registry-environment-guidance"><strong>处理建议：</strong>{{ environmentNextAction(environment) }}</p>
                 <p v-if="environmentStatusError(environment)" class="application-registry-environment-guidance is-error"><strong>状态读取失败：</strong>{{ environmentStatusError(environment).message }}<span v-if="environmentStatusError(environment).nextAction">{{ environmentStatusError(environment).nextAction }}</span><button class="console-button ghost small" type="button" :disabled="environmentsLoading" @click.stop="loadEnvironments">重试查询</button></p>
-                <div class="application-registry-environment-actions"><button v-if="canUpdateEnvironment" class="console-button ghost small" type="button" @click.stop="openEnvironmentEditor(environment)"><ConsoleIcon name="settings" />设置</button><button v-if="canManageRuntime" class="console-button ghost small" type="button" :disabled="saving || !providerStatus('keycloak') || providerStatus('keycloak')?.status === 'NOT_CONFIGURED'" @click.stop="synchronizeKeycloakClient(environment)"><ConsoleIcon name="shield" />同步 Keycloak</button><button v-if="canManageRuntime && (environment.issuer_alias || 'platform') !== 'keycloak'" class="console-button ghost small" type="button" :disabled="saving || !providerStatus('keycloak')?.switch_ready" @click.stop="switchAuthenticationProvider(environment, 'keycloak')"><ConsoleIcon name="shield" />切换 Keycloak</button><button v-if="canManageRuntime && (environment.issuer_alias || 'platform') === 'keycloak'" class="console-button ghost small" type="button" :disabled="saving || !providerStatus('platform')?.switch_ready" @click.stop="switchAuthenticationProvider(environment, 'platform')"><ConsoleIcon name="reset" />回滚基础平台</button><button v-if="canRetryRuntime && environmentStatus(environment) === 'PROVISION_FAILED'" class="console-button ghost small" type="button" :disabled="saving" @click.stop="reapplyEnvironment(environment, true)"><ConsoleIcon name="reset" />重试</button><button v-if="canManageRuntime && environmentStatus(environment) === 'READY'" class="console-button ghost small" type="button" :disabled="saving" @click.stop="reapplyEnvironment(environment)"><ConsoleIcon name="reset" />更新运行时</button><button v-if="canDeleteEnvironment && environment.environment !== 'dev'" class="console-button danger small" type="button" @click.stop="openDeleteEnvironment(environment)"><ConsoleIcon name="close" />删除</button><button v-if="canDeleteEnvironment && environment.environment !== 'dev' && environmentStatus(environment) === 'OFFBOARDED'" class="console-button danger small" type="button" @click.stop="openPurgeEnvironment(environment)"><ConsoleIcon name="close" />永久清理</button></div>
+                <div class="application-registry-environment-actions"><button v-if="canUpdateEnvironment" class="console-button ghost small" type="button" @click.stop="openEnvironmentEditor(environment)"><ConsoleIcon name="settings" />设置</button><button v-if="canManageRuntime" class="console-button ghost small" type="button" :disabled="saving || !providerStatus('keycloak') || providerStatus('keycloak')?.status === 'NOT_CONFIGURED'" @click.stop="synchronizeKeycloakClient(environment)"><ConsoleIcon name="shield" />同步 Keycloak</button><button v-if="canManageRuntime && (environment.issuer_alias || 'platform') !== 'keycloak'" class="console-button ghost small" type="button" :disabled="saving || !keycloakSwitchReady(environment)" @click.stop="switchAuthenticationProvider(environment, 'keycloak')"><ConsoleIcon name="shield" />切换 Keycloak</button><button v-if="canManageRuntime && (environment.issuer_alias || 'platform') === 'keycloak'" class="console-button ghost small" type="button" :disabled="saving || !providerStatus('platform')?.switch_ready" @click.stop="switchAuthenticationProvider(environment, 'platform')"><ConsoleIcon name="reset" />回滚基础平台</button><button v-if="canRetryRuntime && environmentStatus(environment) === 'PROVISION_FAILED'" class="console-button ghost small" type="button" :disabled="saving" @click.stop="reapplyEnvironment(environment, true)"><ConsoleIcon name="reset" />重试</button><button v-if="canManageRuntime && environmentStatus(environment) === 'READY'" class="console-button ghost small" type="button" :disabled="saving" @click.stop="reapplyEnvironment(environment)"><ConsoleIcon name="reset" />更新运行时</button><button v-if="canDeleteEnvironment && environment.environment !== 'dev'" class="console-button danger small" type="button" @click.stop="openDeleteEnvironment(environment)"><ConsoleIcon name="close" />删除</button><button v-if="canDeleteEnvironment && environment.environment !== 'dev' && environmentStatus(environment) === 'OFFBOARDED'" class="console-button danger small" type="button" @click.stop="openPurgeEnvironment(environment)"><ConsoleIcon name="close" />永久清理</button></div>
               </article>
             </div>
           </section>
@@ -994,6 +1080,7 @@ onMounted(() => {
 <style scoped>
 .application-registry-module { overflow: hidden; }
 .application-registry-header, .application-registry-detail-head, .application-registry-panel-head, .application-registry-sidebar-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.application-registry-header-actions { display: flex; flex: 0 0 auto; gap: 8px; }
 .application-registry-header h2 { margin: 6px 0 0; }
 .application-registry-header p, .application-registry-panel-head p { max-width: 820px; margin: 7px 0 0; color: #64748b; font-size: 13px; line-height: 1.65; }
 .application-registry-eyebrow { display: inline-flex; align-items: center; gap: 6px; color: #2563eb; font-size: 11px; font-weight: 750; letter-spacing: .08em; }
@@ -1006,6 +1093,14 @@ onMounted(() => {
 .application-registry-target-empty { display: grid; grid-column: span 2; justify-items: start; gap: 4px; padding: 12px; color: #64748b; border: 1px dashed #cbd5e1; border-radius: 8px; background: #f8fafc; font-size: 12px; }
 .application-registry-target-empty :deep(svg) { width: 18px; height: 18px; color: #3b82f6; }
 .application-registry-target-empty strong { color: #334155; }
+.application-registry-discovery { display: grid; gap: 10px; margin-top: 16px; padding: 14px; border: 1px solid #c7d2fe; border-radius: 12px; background: linear-gradient(135deg, #f8faff, #faf8ff); }
+.application-registry-discovery > div > strong, .application-registry-discovery > div > small { display: block; }
+.application-registry-discovery > div > small { margin-top: 3px; color: #64748b; font-size: 12px; line-height: 1.55; }
+.application-registry-discovery article { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 12px; border: 1px solid #e0e7ff; border-radius: 9px; background: #fff; }
+.application-registry-discovery article > div { min-width: 0; }
+.application-registry-discovery article strong, .application-registry-discovery article span, .application-registry-discovery article small { display: block; }
+.application-registry-discovery article strong { color: #1e293b; font-size: 13px; }
+.application-registry-discovery article span, .application-registry-discovery article small { margin-top: 3px; overflow: hidden; color: #64748b; font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
 .application-registry-error { display: grid; gap: 4px; margin: 14px 0 0; padding: 10px 12px; color: #b91c1c; border: 1px solid #fecaca; border-radius: 8px; background: #fff7f7; font-size: 12px; line-height: 1.55; }
 .application-registry-error-actions { display: flex; gap: 8px; margin-top: 4px; }
 .application-registry-error span, .application-registry-error small { color: #7f1d1d; }
@@ -1052,6 +1147,14 @@ onMounted(() => {
 .application-registry-environment-main small { color: #94a3b8; font-size: 10px; }
 .application-registry-environment-uri { display: grid; min-width: 0; gap: 3px; margin: 7px 0; color: #475569; font-size: 11px; }
 .application-registry-environment-uri small { color: #94a3b8; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.application-registry-switch-gates { margin: 8px 0; padding: 8px 10px; border: 1px solid #fde68a; border-radius: 7px; background: #fffbeb; color: #78350f; font-size: 11px; }
+.application-registry-switch-gates > strong { display: block; margin-bottom: 4px; }
+.application-registry-switch-gates ul { display: grid; gap: 3px; margin: 0; padding: 0; list-style: none; }
+.application-registry-switch-gates li { display: grid; grid-template-columns: 44px 1fr; gap: 4px; align-items: baseline; }
+.application-registry-switch-gates li span { color: #b45309; font-weight: 700; }
+.application-registry-switch-gates li.is-passed span { color: #15803d; }
+.application-registry-switch-gates li small { grid-column: 2; color: #92400e; line-height: 1.45; }
+.application-registry-switch-gates p { margin: 6px 0 0; line-height: 1.45; }
 .application-registry-environment-guidance { margin: 7px 0; color: #b45309; font-size: 11px; line-height: 1.55; }
 .application-registry-environment-actions { justify-content: flex-end; }
 .application-registry-empty { display: grid; min-height: 180px; place-items: center; align-content: center; gap: 7px; margin-top: 20px; color: #94a3b8; text-align: center; }

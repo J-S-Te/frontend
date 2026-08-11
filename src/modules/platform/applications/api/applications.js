@@ -174,6 +174,7 @@ export function onboardSubsystem({
   pathPrefix = '',
   clientType = 'confidential',
   initialAdminUserId = '',
+  issuerAlias = '',
 } = {}) {
   return request('/subsystem-onboarding', {
     method: 'POST',
@@ -186,6 +187,7 @@ export function onboardSubsystem({
       upstream_url: upstreamUrl,
       path_prefix: pathPrefix,
       client_type: clientType,
+      ...(String(issuerAlias || '').trim() ? { issuer_alias: String(issuerAlias).trim() } : {}),
       ...(String(initialAdminUserId || '').trim()
         ? { initial_admin_user_id: String(initialAdminUserId).trim() }
         : {}),
@@ -201,6 +203,11 @@ export function getSubsystemStatus({ applicationCode, environment } = {}) {
 /** 查询后端部署 Agent 的非敏感能力，用于按真实服务器模式渲染接入表单。 */
 export function getSubsystemCapabilities() {
   return request('/subsystem-capabilities')
+}
+
+/** 查询带标准 Docker 发现标签、但尚未在当前租户登记的子系统。 */
+export function discoverSubsystemCandidates() {
+  return request('/subsystem-discovery')
 }
 
 /** 重新执行既有子系统运行时部署，不重复创建接入记录。 */

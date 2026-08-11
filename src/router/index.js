@@ -3,7 +3,7 @@ import LoginView from '@/modules/platform/auth/views/LoginView.vue'
 import ForbiddenView from '@/modules/platform/auth/views/ForbiddenView.vue'
 import PlatformConsoleView from '@/modules/platform/views/PlatformConsoleView.vue'
 import SubsystemPortalView from '@/modules/platform/views/SubsystemPortalView.vue'
-import { getCurrentPrincipal } from '@/modules/platform/auth/api/auth'
+import { AuthError, getCurrentPrincipal } from '@/modules/platform/auth/api/auth'
 import { ensureContractSession } from '@/modules/contract_management/api/contract'
 import { ensureProjectSession } from '@/modules/project_management/api/projectManagement'
 import { getCRMSession } from '@/modules/customer_opportunity/api/client'
@@ -261,7 +261,10 @@ router.beforeEach(async (to) => {
       }
     }
     return true
-  } catch {
+  } catch (error) {
+    // 只有明确的 401 才代表会话失效。502、网络中断或平台 API 短暂重启时
+    // 保留当前页面和 HttpOnly Cookie，避免一次部署抖动把用户误退出。
+    if (error instanceof AuthError && error.status !== 401) return false
     return { name: 'login' }
   }
 })

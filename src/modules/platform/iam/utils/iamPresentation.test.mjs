@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import {
   detailRows,
   detailTitle,
@@ -71,4 +73,19 @@ test('任职关系详情不会跨脚本引用未定义的格式化函数', () =>
     label: '任职类型',
     value: '兼岗',
   })
+})
+
+test('用户详情提供受权限控制的管理员临时密码入口', () => {
+  const source = readFileSync(fileURLToPath(new URL('../components/IamSettingsModule.vue', import.meta.url)), 'utf8')
+  assert.match(source, /hasPermission\(IAM_PERMISSIONS\.accountPasswordReset\).*重置登录密码/)
+  assert.match(source, /@click="openPasswordResetForUser\(detail\.item\)"/)
+  assert.match(source, /后端未返回一次性临时密码/)
+})
+
+test('用户详情展示脱敏的 Keycloak 映射状态和 external subject', () => {
+  const source = readFileSync(fileURLToPath(new URL('../components/IamSettingsModule.vue', import.meta.url)), 'utf8')
+  assert.match(source, /keycloakMappingState/)
+  assert.match(source, /keycloakExternalSubject/)
+  assert.match(source, /Subject：\{\{ keycloakExternalSubject \}\}/)
+  assert.match(source, /raw\.slice\(0, 4\).*raw\.slice\(-4\)/s)
 })

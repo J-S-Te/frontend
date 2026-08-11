@@ -12,7 +12,7 @@ function principal(...permissionCodes) {
 }
 
 test('平台设置页签只由各自后端权限决定', () => {
-  assert.deepEqual(visiblePlatformSettingsSections(principal('platform:user:read')), ['iam'])
+  assert.deepEqual(visiblePlatformSettingsSections(principal('platform:user:read')), ['iam', 'personnel'])
   assert.deepEqual(visiblePlatformSettingsSections(principal('platform:settings:read')), ['base', 'access'])
   assert.deepEqual(visiblePlatformSettingsSections(principal('platform:security-policy:read')), ['security'])
   assert.deepEqual(visiblePlatformSettingsSections(principal('platform:dictionary-item:update')), ['dict'])
@@ -34,6 +34,6 @@ test('普通业务账号没有平台管理入口', () => {
 })
 
 test('通配权限可访问所有设置页签', () => {
-  assert.deepEqual(visiblePlatformSettingsSections(principal('*')), ['base', 'access', 'iam', 'notify', 'security', 'dict', 'applications'])
+  assert.deepEqual(visiblePlatformSettingsSections(principal('*')), ['base', 'access', 'iam', 'personnel', 'notify', 'security', 'dict', 'applications'])
   assert.deepEqual(platformConsoleLandingRoute(principal('*')), { name: 'settings', params: { section: 'base' } })
 })

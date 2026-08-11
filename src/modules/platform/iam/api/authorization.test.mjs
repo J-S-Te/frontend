@@ -1,11 +1,38 @@
 import assert from 'node:assert/strict'
 import { afterEach, test } from 'node:test'
-import { createRole, updateRole } from './authorization.js'
+import { createRole, getAuthorizationOverview, updateRole } from './authorization.js'
 
 const originalFetch = globalThis.fetch
 
 afterEach(() => {
   globalThis.fetch = originalFetch
+})
+
+test('authorization overview normalizes account, change, handover and Keycloak state', async () => {
+  let requested
+  globalThis.fetch = async (url) => {
+    requested = url
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: () => 'application/json' },
+      json: async () => ({ data: {
+        user: { id: 'u-1' }, accounts: [{ status: 'ACTIVE' }], memberships: [{ status: 'ACTIVE' }],
+        role_bindings: [{ role_id: 'r-1' }], pending_changes: [{ status: 'SCHEDULED' }],
+        handover: [{ status: 'PENDING', system_code: 'customer_and_opportunity' }],
+        keycloak_sync: [{ status: 'PENDING' }],
+      } }),
+      text: async () => '',
+    }
+  }
+  const result = await getAuthorizationOverview('u / 1')
+  assert.equal(requested, '/api/v1/people/u%20%2F%201/authorization-overview')
+  assert.equal(result.accounts.length, 1)
+  assert.equal(result.memberships.length, 1)
+  assert.equal(result.role_bindings.length, 1)
+  assert.equal(result.pending_changes[0].status, 'SCHEDULED')
+  assert.equal(result.handover[0].system_code, 'customer_and_opportunity')
+  assert.equal(result.keycloak_sync[0].status, 'PENDING')
 })
 
 test('createRole leaves role code generation to the backend', async () => {
