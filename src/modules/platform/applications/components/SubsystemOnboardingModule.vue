@@ -817,6 +817,8 @@ async function switchAuthenticationProvider(environment, alias) {
   if (!application || !environment || (alias === 'keycloak' && !keycloakSwitchReady(environment)) || (alias !== 'keycloak' && !provider?.switch_ready) || saving.value) return
   saving.value = true
   clearError()
+  const previousIssuerAlias = environment.issuer_alias || 'platform'
+  let persistedEnvironment = null
   try {
     const saved = await updateEnvironment({
       applicationId: application.application_id,
@@ -828,6 +830,7 @@ async function switchAuthenticationProvider(environment, alias) {
       status: environment.status,
       version: environment.version,
     })
+    persistedEnvironment = saved
     await updateSubsystemRuntime({
       applicationCode: application.code,
       environment: environment.environment,
@@ -839,6 +842,29 @@ async function switchAuthenticationProvider(environment, alias) {
     notify(`已切换为 ${providerLabel(alias)} 并下发运行配置。`)
     await loadEnvironments()
   } catch (error) {
+    // Environment metadata is persisted before the external deployment Agent
+    // runs. If the Agent rejects the change, restore the previous provider
+    // with the version returned by the first request so the control plane does
+    // not claim Keycloak while the running container still uses platform OIDC.
+    if (persistedEnvironment && previousIssuerAlias !== alias) {
+      try {
+        await updateEnvironment({
+          applicationId: application.application_id,
+          environmentId: environment.environment_id,
+          baseUrl: persistedEnvironment.base_url || environment.base_url,
+          upstreamUrl: persistedEnvironment.upstream_url || environment.upstream_url,
+          pathPrefix: persistedEnvironment.path_prefix || environment.path_prefix,
+          issuerAlias: previousIssuerAlias === 'platform' ? null : previousIssuerAlias,
+          status: persistedEnvironment.status || environment.status,
+          version: persistedEnvironment.version,
+        })
+        notify('运行时更新失败，已恢复原认证提供方配置。')
+      } catch (rollbackError) {
+        setError(rollbackError, '运行时更新失败，且认证提供方自动恢复失败；请勿继续切换，先核对环境状态。')
+        await loadEnvironments()
+        return
+      }
+    }
     setError(error, '认证提供方切换失败；环境记录已保留，可在修复后重试。')
     await loadEnvironments()
   } finally {
