@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises'
 import projectManagementModule from './module.js'
 
 const source = await readFile(new URL('./views/ProjectManagementView.vue', import.meta.url), 'utf8')
+const styles = await readFile(new URL('./styles/project-management.css', import.meta.url), 'utf8')
 
 test('项目管理模块暴露统一前端路由', () => {
   assert.deepEqual(projectManagementModule.route, {
@@ -41,4 +42,24 @@ test('项目管理页面不再渲染原型模拟业务数据', () => {
 test('返回统一门户会关闭门户打开的项目标签页并提供页内回退', () => {
   assert.match(source, /closeSubsystemTabOrFallback\(window, \(\) => router\.replace\(\{ name: 'portal' \}\)\)/)
   assert.equal((source.match(/@click="returnToUnifiedPortal"/g) || []).length, 2)
+})
+
+test('项目管理页面对齐合同系统 UniLab UI 设计规范', () => {
+  for (const token of [
+    '--pm-ink: #0f172a',
+    '--pm-body: #475569',
+    '--pm-muted: #64748b',
+    '--pm-blue: #2563eb',
+    '--pm-green-text: #15803d',
+    '--pm-amber-text: #b45309',
+    '--pm-red-text: #b91c1c',
+  ]) {
+    assert.match(styles, new RegExp(token))
+  }
+  assert.match(styles, /\.pm-sidebar \{[\s\S]*?width: 248px;[\s\S]*?background: #0f172a;/)
+  assert.match(styles, /\.pm-button \{[\s\S]*?min-height: 38px;[\s\S]*?font-size: 13\.5px;/)
+  assert.match(styles, /\.pm-table \{ font-size: 13\.5px; \}/)
+  assert.match(styles, /\.pm-table th \{[\s\S]*?font-size: 12\.5px;/)
+  assert.match(styles, /:focus-visible \{[\s\S]*?outline: 2px solid var\(--pm-blue\)/)
+  assert.match(styles, /@media \(prefers-reduced-motion: reduce\)/)
 })

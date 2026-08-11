@@ -303,7 +303,7 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
       <nav class="pm-nav" aria-label="项目管理导航">
         <div v-for="group in navGroups" :key="group.label" class="pm-nav-group">
           <div class="pm-nav-label">{{ group.label }}</div>
-          <button v-for="item in group.items" :key="item.key" class="pm-nav-item" :class="{ active: activeSection === item.key }" @click="navigate(item.key)">
+          <button v-for="item in group.items" :key="item.key" class="pm-nav-item" :class="{ active: activeSection === item.key }" :aria-current="activeSection === item.key ? 'page' : undefined" @click="navigate(item.key)">
             <ConsoleIcon :name="item.icon" /><span>{{ item.label }}</span><em v-if="item.badge">{{ item.badge }}</em>
           </button>
         </div>
@@ -351,10 +351,10 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
 
         <template v-if="activeSection === 'dashboard'">
           <section class="pm-kpis">
-            <article class="pm-kpi blue" @click="navigate('projects')"><div><span>全部项目</span><em>实时</em></div><strong>{{ dashboard.project_count }}</strong><p><span>{{ dashboard.in_flight_projects }} 个在途项目</span></p></article>
-            <article class="pm-kpi cyan" @click="navigate('decomposition')"><div><span>全部服务项</span><em>合同拆解</em></div><strong>{{ dashboard.service_items }}</strong><p><span>{{ decompositionItems.length }} 项待确认</span></p></article>
-            <article class="pm-kpi amber" @click="navigate('allocation')"><div><span>资源分配待办</span><em>待处理</em></div><strong>{{ serviceFlow[0].count }}</strong><p><span>{{ inboxItems.length }} 项已下达待完善</span></p></article>
-            <article class="pm-kpi violet" @click="navigate('exceptions')"><div><span>风险项目 / 异常</span><em>实时</em></div><strong>{{ dashboard.risk_projects }}<small> / {{ pendingDeviations.length }}</small></strong><p><span>风险项目与待评审偏离</span></p></article>
+            <button type="button" class="pm-kpi blue" @click="navigate('projects')"><div><span>全部项目</span><em>实时</em></div><strong>{{ dashboard.project_count }}</strong><p><span>{{ dashboard.in_flight_projects }} 个在途项目</span></p></button>
+            <button type="button" class="pm-kpi cyan" @click="navigate('decomposition')"><div><span>全部服务项</span><em>合同拆解</em></div><strong>{{ dashboard.service_items }}</strong><p><span>{{ decompositionItems.length }} 项待确认</span></p></button>
+            <button type="button" class="pm-kpi amber" @click="navigate('allocation')"><div><span>资源分配待办</span><em>待处理</em></div><strong>{{ serviceFlow[0].count }}</strong><p><span>{{ inboxItems.length }} 项已下达待完善</span></p></button>
+            <button type="button" class="pm-kpi violet" @click="navigate('exceptions')"><div><span>风险项目 / 异常</span><em>实时</em></div><strong>{{ dashboard.risk_projects }}<small> / {{ pendingDeviations.length }}</small></strong><p><span>风险项目与待评审偏离</span></p></button>
           </section>
           <section class="pm-dashboard-grid">
             <article class="pm-panel pm-status-panel">
