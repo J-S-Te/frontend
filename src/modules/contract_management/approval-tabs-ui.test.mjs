@@ -12,6 +12,30 @@ test('approval center switches between tasks and initiated approvals', () => {
   assert.match(source, /<section v-else class="contract-approval-list" role="tabpanel">/)
 })
 
+test('submitted approvals remain visible while the workflow instance is materializing', () => {
+  assert.match(source, /const started = await submitContract/)
+  assert.match(source, /initiatedApprovals\.value = \[pendingApproval,/)
+  assert.match(source, /approvalTab\.value = 'initiated'/)
+  assert.match(source, /waitForInitiatedApproval\(started\.approval_id\)/)
+  assert.match(source, /const initializing = initiatedApprovals\.value\.filter/)
+  assert.match(source, /:disabled="approval\.initializing"/)
+  assert.match(source, /approval\.initializing \? '正在初始化' : '查看进度'/)
+})
+
+test('approval center continuously synchronizes visible workflow state and confirms commands durably', () => {
+  assert.match(source, /activeSection\.value !== 'approvals' \|\| document\.visibilityState !== 'visible'/)
+  assert.match(source, /scheduleApprovalRealtime\(\)/)
+  assert.match(source, /immediate \? 0 : 1000/)
+  assert.match(source, /document\.addEventListener\('visibilitychange'/)
+  assert.match(source, /document\.removeEventListener\('visibilitychange'/)
+  assert.match(source, /const accepted = await commandApproval/)
+  assert.match(source, /waitForApprovalCommand\(accepted\.command_id, action, target\.id\)/)
+  assert.match(source, /detail\?\.actions\?\.some\(\(item\) => item\.command_id === commandID\)/)
+  assert.match(source, /const currentTask = approvals\.value\.find/)
+  assert.match(source, /selectedApproval\.value = \{ \.\.\.selectedApproval\.value, \.\.\.currentTask \}/)
+  assert.match(source, /操作已受理，流程仍在处理，状态将自动更新/)
+})
+
 test('approval center presents workflow statuses in Chinese', () => {
   assert.match(source, /running: '审批中'/)
   assert.match(source, /rejected: '已驳回'/)
@@ -27,4 +51,12 @@ test('pending assigned approvals are viewable but cannot be processed early', ()
   assert.match(source, /const requiresActiveTask = \['approve', 'reject', 'sign', 'transfer', 'return'\]\.includes\(action\)/)
   assert.match(source, /can\('approval\.process'\) && selectedApproval\.value\?\.status === 'active'/)
   assert.match(source, /该审批尚未流转到当前节点，暂时只能查看/)
+})
+
+test('add-sign candidates are limited to users with contract approval permission', () => {
+  assert.match(source, /const approvalTargetUsers = computed/)
+  assert.match(source, /contractRole\(roleCode\)\?\.permissions\?\.includes\('approval\.process'\)/)
+  assert.match(source, /!assigned\.has\(user\.user_id\)/)
+  assert.match(source, /v-for="user in approvalTargetUsers"/)
+  assert.match(source, /请选择具有合同审批权限的人员/)
 })

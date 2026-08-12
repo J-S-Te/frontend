@@ -119,3 +119,19 @@ export function setRuleEnabled(id, enabled) {
 export function getDashboard() {
   return request('/dashboard')
 }
+
+export function activateContract(payload) { return request('/contracts/activate', { method: 'POST', body: JSON.stringify(payload) }) }
+export function adjustDecomposition(projectID, payload) { return request(`/projects/${encodeURIComponent(projectID)}/decomposition-adjustments`, { method: 'POST', body: JSON.stringify(payload) }) }
+export function assignServiceItem(itemID, payload) { return request(`/service-items/${encodeURIComponent(itemID)}/assignment`, { method: 'POST', body: JSON.stringify(payload) }) }
+export function assignTeam(itemID, payload) { return request(`/service-items/${encodeURIComponent(itemID)}/team-assignment`, { method: 'POST', body: JSON.stringify(payload) }) }
+export function assignExecutionTeam(itemID, payload) { return request(`/service-items/${encodeURIComponent(itemID)}/execution-assignment`, { method: 'POST', body: JSON.stringify(payload) }) }
+export function planImplementation(itemID, payload) { return request(`/service-items/${encodeURIComponent(itemID)}/implementation-plan`, { method: 'POST', body: JSON.stringify(payload) }) }
+export function startImplementationPreparation(itemID, payload) { return request(`/service-items/${encodeURIComponent(itemID)}/preparation`, { method: 'POST', body: JSON.stringify(payload) }) }
+export function fieldCheckIn(itemID, payload) { return request(`/service-items/${encodeURIComponent(itemID)}/check-in`, { method: 'POST', body: JSON.stringify(payload) }) }
+export function submitFieldRecord(itemID, payload) { return request(`/service-items/${encodeURIComponent(itemID)}/field-records`, { method: 'POST', body: JSON.stringify(payload) }) }
+export function reportDeviation(itemID, payload) { return request(`/service-items/${encodeURIComponent(itemID)}/deviations`, { method: 'POST', body: JSON.stringify(payload) }) }
+export function reviewDeviation(deviationID, payload) { return request(`/deviations/${encodeURIComponent(deviationID)}/review`, { method: 'POST', body: JSON.stringify(payload) }) }
+export function completeFieldImplementation(projectID) { return request(`/projects/${encodeURIComponent(projectID)}/field-complete`, { method: 'POST' }) }
+export async function listDeliveryEvents(projectID = '') { const query = projectID ? `?project_id=${encodeURIComponent(projectID)}` : ''; const data = await request(`/delivery-events${query}`); return Array.isArray(data) ? data : [] }
+export async function listCapabilities(resourceType = '') { const query = resourceType ? `?resource_type=${encodeURIComponent(resourceType)}` : ''; const data = await request(`/capabilities${query}`); return Array.isArray(data) ? data : [] }
+export function saveCapability(payload) { return request('/capabilities', { method: 'PUT', body: JSON.stringify(payload) }) }
