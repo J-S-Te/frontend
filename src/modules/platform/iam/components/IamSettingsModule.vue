@@ -49,6 +49,7 @@ import {
   deleteSubjectApplicationAccess,
   getApplicationAccess,
   getApplicationAuthorizationCatalog,
+  getAuthorizationOverview,
   getSubjectApplicationAccess,
   updateApplicationAccess,
   updateSubjectApplicationAccess,
@@ -164,6 +165,25 @@ const userAuthorizationPreview = ref(null)
 const userAuthorizationPreviewLoading = ref(false)
 const userAuthorizationPreviewUnavailable = ref(false)
 const userAuthorizationPreviewErrorCount = ref(0)
+const authorizationOverview = ref(null)
+const authorizationOverviewLoading = ref(false)
+const authorizationOverviewUnavailable = ref(false)
+const keycloakMappingState = computed(() => {
+  const entries = authorizationOverview.value?.keycloak_sync || []
+  const latest = entries[0]
+  const status = String(latest?.status || latest?.state || '').toUpperCase()
+  if (['FAILED', 'ERROR', 'CONFLICT'].includes(status)) return '冲突/失败'
+  if (['PENDING', 'RUNNING', 'PROCESSING'].includes(status)) return '同步中'
+  if (['COMPLETED', 'SUCCEEDED', 'SUCCESS', 'ACTIVE'].includes(status)) return '已同步'
+  return entries.length ? '状态未知' : '未映射'
+})
+const keycloakExternalSubject = computed(() => {
+  const account = (authorizationOverview.value?.accounts || []).find((item) => item.external_subject || item.keycloak_subject || item.subject)
+  const raw = String(account?.external_subject || account?.keycloak_subject || account?.subject || '').trim()
+  if (!raw) return '未返回'
+  if (raw.length <= 8) return `${raw.slice(0, 2)}****`
+  return `${raw.slice(0, 4)}****${raw.slice(-4)}`
+})
 const authorizationSubjectType = computed(() => {
   if (detail.value?.kind === 'user') return 'USER'
   if (detail.value?.kind === 'organization') return 'ORG_UNIT'
@@ -627,6 +647,7 @@ async function openDetail(kind, item) {
   resetApplicationAuthorizationState()
   resetUserAuthorizationPreview()
   detail.value = { kind, item }
+  if (kind === 'user') loadAuthorizationOverview(item?.user_id || '', detailRequestId)
   if (kind === 'user' && canReadApplicationAuthorization.value) userAuthorizationPreviewLoading.value = true
   const loadedApplications = canReadApplicationAuthorization.value && ['user', 'organization', 'position'].includes(kind)
     ? await loadApplicationsForSubject()
@@ -637,11 +658,30 @@ async function openDetail(kind, item) {
   }
 }
 
+async function loadAuthorizationOverview(userId, detailRequestId = detailAuthorizationRequestSeq.value) {
+  authorizationOverview.value = null
+  authorizationOverviewUnavailable.value = false
+  if (!userId) return
+  authorizationOverviewLoading.value = true
+  try {
+    const overview = await getAuthorizationOverview(userId)
+    if (detailRequestId !== detailAuthorizationRequestSeq.value || detail.value?.item?.user_id !== userId) return
+    authorizationOverview.value = overview
+  } catch (_error) {
+    if (detailRequestId === detailAuthorizationRequestSeq.value) authorizationOverviewUnavailable.value = true
+  } finally {
+    if (detailRequestId === detailAuthorizationRequestSeq.value) authorizationOverviewLoading.value = false
+  }
+}
+
 function closeDetail() {
   detailAuthorizationRequestSeq.value += 1
   detail.value = null
   resetApplicationAuthorizationState()
   resetUserAuthorizationPreview()
+  authorizationOverview.value = null
+  authorizationOverviewLoading.value = false
+  authorizationOverviewUnavailable.value = false
 }
 
 async function loadUserAuthorizationPreview(userId, targetApplications = applications.value, detailRequestId = detailAuthorizationRequestSeq.value) {
@@ -2068,6 +2108,7 @@ onBeforeUnmount(() => {
             <p><span>{{ detail.item?.employee_no || '未生成员工编号' }}</span><i /> <span>{{ detail.item?.email || '未填写邮箱' }}</span></p>
           </div>
           <div class="iam-user-detail-hero-note"><ConsoleIcon name="link" /><span>人员主档案<br /><small>任职关系统一维护</small></span></div>
+          <button v-if="hasPermission(IAM_PERMISSIONS.accountPasswordReset)" class="console-button secondary small" type="button" @click="openPasswordResetForUser(detail.item)">重置登录密码</button>
           <button v-if="hasPermission(IAM_PERMISSIONS.userUpdate) && String(detail.item?.status || '').toUpperCase() === 'ACTIVE'" class="console-button danger small" type="button" @click="terminateEmployee(detail.item)">办理离职</button>
         </div>
         <div class="iam-detail-grid">
@@ -2075,6 +2116,18 @@ onBeforeUnmount(() => {
             <div><span>{{ row.label }}</span><strong>{{ row.value }}</strong></div>
           </template>
         </div>
+        <section v-if="isUserAuthorizationSubject" class="iam-detail-section iam-person-authorization-summary">
+          <div class="iam-detail-section-head"><div><h4>人员状态与交接摘要</h4><p>账号、任职、待处理异动、业务交接和 Keycloak 同步状态均来自基础平台只读汇总接口。</p></div></div>
+          <p v-if="authorizationOverviewLoading" class="iam-empty-inline">正在读取人员状态摘要…</p>
+          <p v-else-if="authorizationOverviewUnavailable" class="iam-empty-inline">人员状态摘要暂不可用，不影响下方授权维护，请稍后重试。</p>
+          <div v-else-if="authorizationOverview" class="iam-person-summary-grid">
+            <div><span>登录账号</span><strong>{{ authorizationOverview.accounts.length }} 个</strong><small>{{ authorizationOverview.accounts.filter((item) => String(item.status || '').toUpperCase() === 'ACTIVE').length }} 个启用</small></div>
+            <div><span>有效任职</span><strong>{{ authorizationOverview.memberships.filter((item) => String(item.status || '').toUpperCase() === 'ACTIVE').length }} 个</strong><small>历史任职 {{ authorizationOverview.memberships.length }} 个</small></div>
+            <div><span>待处理异动</span><strong>{{ authorizationOverview.pending_changes.length }} 单</strong><small>{{ authorizationOverview.pending_changes[0]?.status || '无待处理异动' }}</small></div>
+            <div><span>交接责任</span><strong>{{ authorizationOverview.handover.length }} 项</strong><small>{{ authorizationOverview.handover.length ? '需完成后方可离职' : '无未完成交接' }}</small></div>
+            <div><span>Keycloak 映射</span><strong>{{ keycloakMappingState }}</strong><small>Subject：{{ keycloakExternalSubject }}</small></div>
+          </div>
+        </section>
         <section v-if="isUserAuthorizationSubject && canReadApplicationAuthorization" class="iam-detail-section iam-effective-authorization-overview">
           <div class="iam-detail-section-head">
             <div>

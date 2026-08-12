@@ -185,6 +185,20 @@ export function getApplicationAccess(userId, applicationCode) {
     .then(normalizeApplicationAccess)
 }
 
+// 汇总人员账号、任职、待异动、交接和 Keycloak 同步状态；该接口只读，
+// 用于用户详情页的一致状态卡片，不参与授权写入。
+export function getAuthorizationOverview(userId) {
+  return request(`/people/${encodeURIComponent(userId)}/authorization-overview`).then((value) => ({
+    user: value?.user || null,
+    accounts: Array.isArray(value?.accounts) ? value.accounts : [],
+    memberships: Array.isArray(value?.memberships) ? value.memberships : [],
+    role_bindings: Array.isArray(value?.role_bindings) ? value.role_bindings : [],
+    pending_changes: Array.isArray(value?.pending_changes) ? value.pending_changes : [],
+    handover: Array.isArray(value?.handover) ? value.handover : [],
+    keycloak_sync: Array.isArray(value?.keycloak_sync) ? value.keycloak_sync : [],
+  }))
+}
+
 /**
  * 用完整角色集合替换用户在应用下的角色绑定。
  * roles 中的每一项使用后端通用授权接口约定的 role_code、scope_type 和有效期字段。

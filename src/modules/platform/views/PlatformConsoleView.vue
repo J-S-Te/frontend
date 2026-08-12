@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { AuthError, logoutCurrentSession } from '@/modules/platform/auth/api/auth'
 import IamSettingsModule from '@/modules/platform/iam/components/IamSettingsModule.vue'
+import PersonnelChangeCenter from '@/modules/platform/iam/components/PersonnelChangeCenter.vue'
 import PublicAccessSettingsModule from '@/modules/platform/settings/components/PublicAccessSettingsModule.vue'
 import EmployeeOnboardingModal from '@/modules/platform/iam/components/EmployeeOnboardingModal.vue'
 import NotificationCenterModule from '@/modules/platform/notifications/components/NotificationCenterModule.vue'
@@ -145,6 +146,12 @@ const settingsTabs = [
     key: 'iam', label: '身份、组织与授权', icon: 'organization', tone: 'violet',
     description: '按组织归属、岗位职责、标准岗位模板和个人例外分层管理。',
     capabilities: ['新增员工', '组织与岗位', '任职关系', '岗位授权模板', '个人例外'],
+    permissions: PLATFORM_SETTINGS_SECTION_PERMISSIONS.iam,
+  },
+  {
+    key: 'personnel', label: '人员异动中心', icon: 'organization', tone: 'violet',
+    description: '集中办理晋升、降职、调岗、离职和复职，并跟踪审批与权限影响。',
+    capabilities: ['异动单', '权限预览', '审批轨迹', '未来生效'],
     permissions: PLATFORM_SETTINGS_SECTION_PERMISSIONS.iam,
   },
   {
@@ -685,7 +692,9 @@ onBeforeUnmount(() => {
         <div class="console-page-head">
           <div>
             <h1>{{ viewMeta.title }}</h1>
-            <p>{{ viewMeta.description }}</p>
+            <span v-if="currentView === 'settings' && activeSettingsTab === 'base'" class="console-requirement-chip">{{ viewMeta.description }}</span>
+            <p v-else-if="viewMeta.description">{{ viewMeta.description }}</p>
+            <span v-if="currentView === 'audit'" class="console-requirement-chip">AUD-001 · 统一审计查询</span>
           </div>
           <button v-if="currentView === 'audit' && canExportAudit" class="console-button secondary" type="button" @click="exportAuditRecords"><ConsoleIcon name="export" />导出日志</button>
         </div>
@@ -804,6 +813,8 @@ onBeforeUnmount(() => {
           <PublicAccessSettingsModule v-else-if="!hasNoVisibleSettingsTab && activeSettingsTab === 'access'" @toast="showToast" />
 
           <IamSettingsModule v-else-if="!hasNoVisibleSettingsTab && activeSettingsTab === 'iam'" :refresh-key="iamRefreshKey" @toast="showToast" @employee-onboarding="openEmployeeOnboarding" />
+
+          <PersonnelChangeCenter v-else-if="!hasNoVisibleSettingsTab && activeSettingsTab === 'personnel'" @toast="showToast" @employee-onboarding="openEmployeeOnboarding" />
 
           <NotificationCenterModule v-else-if="!hasNoVisibleSettingsTab && activeSettingsTab === 'notify'" @toast="showToast" />
 
