@@ -7,10 +7,19 @@ import {
   deleteApplicationRegistration,
   deleteEnvironment,
   getSubsystemCapabilities,
+  getKeycloakIntegrationStatus,
+	getKeycloakProjectionAlerts,
   getSubsystemStatus,
   listPortalApplications,
+	listKeycloakProjectionFailures,
   onboardSubsystem,
+  registerSubsystemDirectory,
   retrySubsystem,
+  rollbackToPlatform,
+	replayKeycloakProjectionFailure,
+	startKeycloakObservation,
+  syncKeycloakClient,
+  switchToKeycloak,
   teardownSubsystem,
   updateApplication,
   updateEnvironment,
@@ -277,6 +286,38 @@ test('onboardSubsystem requests automatic deployment and returns only safe onboa
   })
 })
 
+test('registerSubsystemDirectory only registers the directory and never sends OAuth client fields', async () => {
+  let requested
+  globalThis.fetch = async (url, options) => {
+    requested = { url, options }
+    return jsonResponse({ data: { application: { application_id: 'app-1' }, environment: { environment_id: 'env-1' }, next_action: '同步 Keycloak Client' } }, { status: 201 })
+  }
+
+  const result = await registerSubsystemDirectory({
+    applicationCode: 'business-app', applicationName: '业务应用', environment: 'prod',
+    publicBaseUrl: 'https://portal.example.com', upstreamUrl: 'http://business-api:8080', pathPrefix: '/business-app', issuerAlias: 'keycloak',
+  })
+
+  assert.equal(result.next_action, '同步 Keycloak Client')
+  assert.equal(requested.url, '/api/v1/subsystem-directory')
+  const body = JSON.parse(requested.options.body)
+  assert.equal(body.issuer_alias, 'keycloak')
+  assert.equal('client_type' in body, false)
+  assert.equal('client_secret' in body, false)
+})
+
+test('getKeycloakIntegrationStatus reads the dedicated durable integration endpoint', async () => {
+  let requested
+  globalThis.fetch = async (url, options) => {
+    requested = { url, options }
+    return jsonResponse({ data: { provider: 'keycloak', client_state: 'SYNCED' } })
+  }
+  const result = await getKeycloakIntegrationStatus({ applicationCode: 'business-app', environment: 'prod' })
+  assert.equal(result.client_state, 'SYNCED')
+  assert.equal(requested.url, '/api/v1/keycloak-integration/status?application_code=business-app&environment=prod')
+  assert.equal(requested.options.method, undefined)
+})
+
 test('listPortalApplications uses the authenticated tenant catalog endpoint', async () => {
   let requested
   globalThis.fetch = async (url, options) => {
@@ -347,7 +388,7 @@ test('production onboarding only exposes reviewed unused targets while allowing 
   assert.match(onboardingModule, /:value="onboardForm\.applicationCode" disabled/)
   assert.match(onboardingModule, /:value="onboardForm\.applicationName" disabled/)
   assert.match(onboardingModule, /:value="onboardForm\.environment" disabled/)
-  assert.match(onboardingModule, /:value="onboardForm\.clientType" disabled/)
+  assert.doesNotMatch(onboardingModule, /:value="onboardForm\.clientType" disabled/)
   assert.match(onboardingModule, /v-model="onboardForm\.publicBaseUrl" type="url"/)
   assert.match(onboardingModule, /:value="onboardForm\.upstreamUrl" readonly/)
   assert.match(onboardingModule, /:value="onboardForm\.pathPrefix" readonly/)
@@ -374,4 +415,100 @@ test('deployment cards retain and render the backend next action', () => {
   assert.match(onboardingModule, /deploymentStates\.value\[environment\.environment\]\?\.next_action/)
   assert.match(onboardingModule, /environmentNextAction\(environment\)/)
   assert.match(onboardingModule, /处理建议：/)
+})
+
+test('Keycloak client synchronization uses the dedicated controlled endpoint', async () => {
+  let requested
+  globalThis.fetch = async (url, options) => {
+    requested = { url, options }
+    return jsonResponse({ data: { alias: 'keycloak', realm: 'basic-platform', client_id: 'contract-prod-web', claims_state: 'READY' } })
+  }
+
+  const result = await syncKeycloakClient({
+    applicationCode: 'contract_management',
+    environment: 'prod',
+    publicBaseUrl: 'https://portal.example.com/',
+    upstreamUrl: 'http://contract-api:8081/',
+    pathPrefix: '/contract_management/',
+  })
+
+  assert.equal(requested.url, '/api/v1/keycloak-integration/sync')
+  assert.equal(requested.options.method, 'POST')
+  assert.deepEqual(JSON.parse(requested.options.body), {
+    application_code: 'contract_management',
+    environment: 'prod',
+    public_base_url: 'https://portal.example.com',
+    upstream_url: 'http://contract-api:8081',
+    path_prefix: '/contract_management',
+  })
+  assert.equal(result.client_id, 'contract-prod-web')
+})
+
+test('Keycloak cutover and rollback use dedicated fixed-provider endpoints', async () => {
+  const requests = []
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url, options })
+    return jsonResponse({ data: { status: 'READY' } })
+  }
+
+  const payload = {
+    applicationCode: 'contract_management',
+    environment: 'prod',
+    publicBaseUrl: 'https://portal.example.com/',
+    upstreamUrl: 'http://contract-api:8081/',
+    pathPrefix: '/contract_management/',
+  }
+  await switchToKeycloak(payload)
+  await rollbackToPlatform(payload)
+
+  const expectedBody = {
+    application_code: 'contract_management',
+    environment: 'prod',
+    public_base_url: 'https://portal.example.com',
+    upstream_url: 'http://contract-api:8081',
+    path_prefix: '/contract_management',
+  }
+  assert.equal(requests[0].url, '/api/v1/keycloak-integration/switch')
+  assert.equal(requests[1].url, '/api/v1/keycloak-integration/rollback')
+  assert.deepEqual(JSON.parse(requests[0].options.body), expectedBody)
+  assert.deepEqual(JSON.parse(requests[1].options.body), expectedBody)
+  assert.equal('issuer_alias' in JSON.parse(requests[0].options.body), false)
+  assert.equal('issuer_alias' in JSON.parse(requests[1].options.body), false)
+})
+
+test('Keycloak operations use dedicated status, observation and controlled replay endpoints', async () => {
+  const requests = []
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url, options })
+    return jsonResponse({ data: { state: 'OK', items: [], event_id: 'evt-1', replayed: true } })
+  }
+
+  await getKeycloakProjectionAlerts()
+  await listKeycloakProjectionFailures({ applicationCode: 'customer_portal', environment: 'prod' })
+  await startKeycloakObservation({ applicationCode: 'customer_portal', environment: 'prod' })
+  await replayKeycloakProjectionFailure({ eventId: 'evt-1', confirmation: 'evt-1', reason: '已修复 Keycloak 连接并确认安全重放。' })
+
+  assert.equal(requests[0].url, '/api/v1/keycloak-integration/projection-alerts')
+  assert.equal(requests[1].url, '/api/v1/keycloak-integration/projection-failures?page=1&page_size=50&application_code=customer_portal&environment=prod')
+  assert.equal(requests[2].url, '/api/v1/keycloak-integration/observation')
+  assert.deepEqual(JSON.parse(requests[2].options.body), { application_code: 'customer_portal', environment: 'prod' })
+  assert.equal(requests[3].url, '/api/v1/keycloak-integration/projection-failures/evt-1/replay')
+  assert.deepEqual(JSON.parse(requests[3].options.body), { confirmation: 'evt-1', reason: '已修复 Keycloak 连接并确认安全重放。' })
+})
+
+test('application workspaces isolate directory, Keycloak authentication and runtime actions', () => {
+  assert.match(onboardingModule, /应用目录与授权/)
+  assert.match(onboardingModule, /Keycloak 认证接入/)
+  assert.match(onboardingModule, /运行时与部署/)
+  assert.match(onboardingModule, /activeWorkspace === 'directory'/)
+  assert.match(onboardingModule, /activeWorkspace === 'authentication'/)
+  assert.match(onboardingModule, /activeWorkspace === 'runtime'/)
+  assert.match(onboardingModule, /导入\/同步 Keycloak Client/)
+  assert.match(onboardingModule, /切换 Keycloak/)
+  assert.match(onboardingModule, /回滚基础平台/)
+	assert.match(onboardingModule, /开始 7 天观察/)
+	assert.match(onboardingModule, /授权投影告警与受控重放/)
+  assert.match(onboardingModule, /Realm/)
+  assert.match(onboardingModule, /Claims 映射/)
+  assert.match(onboardingModule, /认证提供方在“Keycloak 认证接入”中切换/)
 })

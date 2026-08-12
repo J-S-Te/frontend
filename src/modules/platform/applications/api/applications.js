@@ -195,9 +195,71 @@ export function onboardSubsystem({
   })
 }
 
+/**
+ * V2 directory registration: only creates the application, environment and
+ * login target. Authentication Client creation belongs to Keycloak integration
+ * and runtime deployment is a separate controlled step.
+ */
+export function registerSubsystemDirectory({
+  applicationCode,
+  applicationName,
+  description = null,
+  environment = 'prod',
+  publicBaseUrl,
+  upstreamUrl,
+  pathPrefix = '',
+  issuerAlias = '',
+} = {}) {
+  return request('/subsystem-directory', {
+    method: 'POST',
+    body: JSON.stringify({
+      application_code: applicationCode,
+      application_name: applicationName,
+      description,
+      environment,
+      public_base_url: publicBaseUrl,
+      upstream_url: upstreamUrl,
+      path_prefix: pathPrefix,
+      ...(String(issuerAlias || '').trim() ? { issuer_alias: String(issuerAlias).trim() } : {}),
+    }),
+  })
+}
+
 /** 查询部署 Agent 的持久化状态，页面刷新后仍可恢复真实部署结果。 */
 export function getSubsystemStatus({ applicationCode, environment } = {}) {
   return request(`/subsystem-status${pageQuery({ application_code: applicationCode, environment })}`)
+}
+
+/** Reads durable non-sensitive Keycloak Client/mapping/cutover state. */
+export function getKeycloakIntegrationStatus({ applicationCode, environment } = {}) {
+  return request(`/keycloak-integration/status${pageQuery({ application_code: applicationCode, environment })}`)
+}
+
+/** Starts the server-controlled seven-day Keycloak observation window. */
+export function startKeycloakObservation({ applicationCode, environment } = {}) {
+  return request('/keycloak-integration/observation', {
+    method: 'POST',
+    body: JSON.stringify({ application_code: applicationCode, environment }),
+  })
+}
+
+/** Lists durable FAILED Keycloak authorization projections without payloads or secrets. */
+export function listKeycloakProjectionFailures({ page = 1, pageSize = 50, applicationCode = '', environment = '' } = {}) {
+  return request(`/keycloak-integration/projection-failures${pageQuery({ page, page_size: pageSize, application_code: applicationCode, environment })}`)
+}
+
+/** Reads the compact Keycloak projection alert signal for the current tenant. */
+export function getKeycloakProjectionAlerts() {
+  return request('/keycloak-integration/projection-alerts')
+}
+
+/** Performs a guarded FAILED -> PENDING replay after explicit operator confirmation. */
+export function replayKeycloakProjectionFailure({ eventId, confirmation, reason } = {}) {
+  if (!String(eventId || '').trim()) throw new ApplicationRegistryError('eventId 不能为空。', { code: 'VALIDATION_ERROR' })
+  return request(`/keycloak-integration/projection-failures/${encodeURIComponent(String(eventId).trim())}/replay`, {
+    method: 'POST',
+    body: JSON.stringify({ confirmation, reason }),
+  })
 }
 
 /** 查询后端部署 Agent 的非敏感能力，用于按真实服务器模式渲染接入表单。 */
@@ -235,7 +297,7 @@ export function updateSubsystemRuntime({ applicationCode, environment, publicBas
 
 /** Creates/updates the Keycloak Realm Client and required token-claim mappers. */
 export function syncKeycloakClient({ applicationCode, environment, publicBaseUrl, upstreamUrl, pathPrefix } = {}) {
-  return request('/subsystem-keycloak/sync', {
+  return request('/keycloak-integration/sync', {
     method: 'POST',
     body: JSON.stringify({
       application_code: applicationCode,
@@ -243,6 +305,34 @@ export function syncKeycloakClient({ applicationCode, environment, publicBaseUrl
       public_base_url: String(publicBaseUrl || '').trim().replace(/\/$/, ''),
       upstream_url: String(upstreamUrl || '').trim().replace(/\/$/, ''),
       path_prefix: String(pathPrefix || '').trim().replace(/\/$/, ''),
+    }),
+  })
+}
+
+/** 切换到 Keycloak 认证；目标提供方由专用后端路由固定，浏览器不可篡改。 */
+export function switchToKeycloak({ applicationCode, environment, publicBaseUrl = '', upstreamUrl = '', pathPrefix = '' } = {}) {
+  return request('/keycloak-integration/switch', {
+    method: 'POST',
+    body: JSON.stringify({
+      application_code: applicationCode,
+      environment,
+      ...(String(publicBaseUrl || '').trim() ? { public_base_url: String(publicBaseUrl).trim().replace(/\/$/, '') } : {}),
+      ...(String(upstreamUrl || '').trim() ? { upstream_url: String(upstreamUrl).trim().replace(/\/$/, '') } : {}),
+      ...(String(pathPrefix || '').trim() ? { path_prefix: String(pathPrefix).trim().replace(/\/$/, '') } : {}),
+    }),
+  })
+}
+
+/** 回滚到基础平台认证；目标提供方同样由专用后端路由固定。 */
+export function rollbackToPlatform({ applicationCode, environment, publicBaseUrl = '', upstreamUrl = '', pathPrefix = '' } = {}) {
+  return request('/keycloak-integration/rollback', {
+    method: 'POST',
+    body: JSON.stringify({
+      application_code: applicationCode,
+      environment,
+      ...(String(publicBaseUrl || '').trim() ? { public_base_url: String(publicBaseUrl).trim().replace(/\/$/, '') } : {}),
+      ...(String(upstreamUrl || '').trim() ? { upstream_url: String(upstreamUrl).trim().replace(/\/$/, '') } : {}),
+      ...(String(pathPrefix || '').trim() ? { path_prefix: String(pathPrefix).trim().replace(/\/$/, '') } : {}),
     }),
   })
 }
