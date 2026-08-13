@@ -100,6 +100,27 @@ test('合同管理系统使用统一编码和统一前端路由', () => {
   assert.equal(cards[1].publicURL, '')
 })
 
+test('客户与商机系统门户入口强制先经过服务端 OIDC 登录', () => {
+  const cards = buildPortalSubsystems([{
+    application_id: 'crm-app',
+    environment_id: 'crm-prod',
+    code: 'customer_and_opportunity',
+    name: '客户与商机管理系统',
+    environment: 'prod',
+    public_url: 'http://localhost:8090/customer-opportunity/',
+  }])
+
+  assert.equal(
+    cards[1].authenticationURL,
+    '/customer-opportunity/auth/login?return_to=%2Fcustomer-opportunity%2Fcustomers',
+  )
+  assert.match(subsystemPortalView, /if \(subsystem\.authenticationURL\)/)
+  assert.ok(
+    subsystemPortalView.indexOf('if (subsystem.authenticationURL)')
+      < subsystemPortalView.indexOf('if (subsystem.publicURL)'),
+  )
+})
+
 test('同一个外部应用返回多个环境时只显示一个逻辑子系统入口', () => {
   const cards = buildPortalSubsystems([
     {

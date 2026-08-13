@@ -100,6 +100,7 @@ export function buildPortalSubsystems(registeredApplications = [], { includeBuil
         description: application?.description || moduleDefinition?.description || '已接入统一身份平台的业务应用',
         icon: moduleDefinition?.icon || 'dashboard',
         allowed: true,
+        authenticationURL: moduleDefinition?.authenticationURL || '',
         // 已随统一前端构建的模块直接使用 Vue Router；只有没有本地模块的
         // 独立子系统才使用后端登记的 public_url。
         route: moduleDefinition?.route,
