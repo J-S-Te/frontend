@@ -1,4 +1,9 @@
 import { getCurrentPrincipal } from '@/modules/platform/auth/api/auth'
+import {
+  normalizeAuthorizationSession,
+  principalIdentityID,
+  shouldStartSubsystemLogin,
+} from '../../shared/authz/sessionCompatibility.js'
 
 const runtimeEnv = import.meta.env || {}
 const PUBLIC_PATH_PREFIX = (runtimeEnv.VITE_PROJECT_PUBLIC_PATH_PREFIX || '/project_management').replace(/\/$/, '')
@@ -26,18 +31,18 @@ async function request(path, options = {}) {
     },
   })
   const contentType = response.headers.get('content-type') || ''
-  const body = contentType.includes('application/json') ? await response.json() : await response.text()
+  const body = contentType.includes('application/json') ? await response.json() : { message: await response.text() }
   if (!response.ok) {
-    if (response.status === 401) {
-      startProjectLogin()
-      const error = new Error('项目系统登录状态已失效。')
-      error.status = 401
-      error.code = 'PROJECT_UNAUTHENTICATED'
-      throw error
-    }
     const error = new Error(body?.message || `HTTP ${response.status}`)
     error.status = response.status
     error.code = body?.code
+    error.requestID = body?.request_id || ''
+    error.details = body?.details || null
+    if (response.status === 401) {
+      if (!error.code) error.code = 'PROJECT_UNAUTHENTICATED'
+      if (shouldStartSubsystemLogin(error)) startProjectLogin()
+      throw error
+    }
     throw error
   }
   return body?.data ?? body
@@ -49,7 +54,7 @@ export async function getProjectSession({ force = false } = {}) {
   // 合并同一时刻的 /auth/me 请求，防止多个组件各自读取并提交不同时间点的会话。
   if (!force && currentSession) return currentSession
   if (!force && sessionRequest) return sessionRequest
-  sessionRequest = request('/auth/me').then((session) => { currentSession = session; return session }).finally(() => { sessionRequest = null })
+  sessionRequest = request('/auth/me').then((session) => { currentSession = normalizeAuthorizationSession(session); return currentSession }).finally(() => { sessionRequest = null })
   return sessionRequest
 }
 
@@ -68,13 +73,16 @@ export async function ensureProjectSession() {
     const projectSession = await getProjectSession({ force: true })
     try {
       const platformPrincipal = await getCurrentPrincipal()
-      const userChanged = String(platformPrincipal?.user?.id || '') && String(platformPrincipal.user.id) !== String(projectSession?.user_id || '')
-      const tenantChanged = String(platformPrincipal?.tenant?.id || '') && String(platformPrincipal.tenant.id) !== String(projectSession?.tenant_id || '')
+      const platformIdentityID = principalIdentityID(platformPrincipal)
+      const projectIdentityID = principalIdentityID(projectSession)
+      const userChanged = platformIdentityID && projectIdentityID && platformIdentityID !== projectIdentityID
+      const platformTenantID = String(platformPrincipal?.tenant_id || platformPrincipal?.tenant?.id || '')
+      const tenantChanged = platformTenantID && platformTenantID !== String(projectSession?.tenant_id || '')
       if (userChanged || tenantChanged) { await clearProjectLocalSession(); startProjectLogin(); return null }
     } catch { /* 基础平台暂时不可用时，项目 OIDC 会话仍按自身有效期独立生效。 */ }
     return projectSession
   } catch (error) {
-    if (error?.status === 401) { startProjectLogin(); return null }
+    if (shouldStartSubsystemLogin(error)) { startProjectLogin(); return null }
     throw error
   }
 }

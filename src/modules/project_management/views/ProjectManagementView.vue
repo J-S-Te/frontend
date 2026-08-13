@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
+import { subsystemAccessMessage } from '@/modules/shared/authz/sessionCompatibility'
 import { closeSubsystemTabOrFallback } from '@/modules/shared/utils/returnToPortal'
 import {
   confirmServiceItems as confirmServiceItemsRequest,
@@ -190,7 +191,7 @@ async function loadWorkspace() {
     if (!createForm.value.manager) createForm.value.manager = sessionData?.display_name || ''
     lastUpdatedAt.value = new Date()
   } catch (error) {
-    loadError.value = error?.message || '项目管理数据加载失败'
+    loadError.value = subsystemAccessMessage(error, '项目管理数据加载失败。')
   } finally {
     loading.value = false
   }

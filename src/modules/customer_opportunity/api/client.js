@@ -1,3 +1,5 @@
+import { normalizeAuthorizationSession, shouldStartSubsystemLogin } from '../../shared/authz/sessionCompatibility.js'
+
 const PUBLIC_PATH_PREFIX = (import.meta.env?.VITE_CRM_PUBLIC_PATH_PREFIX || '/customer-opportunity').replace(/\/$/, '')
 const API_BASE_URL = (import.meta.env?.VITE_CRM_API_BASE_URL || `${PUBLIC_PATH_PREFIX}/api/v1`).replace(/\/$/, '')
 
@@ -63,13 +65,14 @@ export async function request(path, options = {}) {
   })
   const body = await readResponse(response)
   if (!response.ok) {
-    if (response.status === 401) redirectToLogin()
-    throw new CRMAPIError(body?.message || `HTTP ${response.status}`, {
+    const error = new CRMAPIError(body?.message || `HTTP ${response.status}`, {
       status: response.status,
       code: body?.code,
       requestID: body?.request_id,
       details: body?.details,
     })
+    if (shouldStartSubsystemLogin(error)) redirectToLogin()
+    throw error
   }
   return body?.data ?? body
 }
@@ -85,13 +88,14 @@ export async function requestBlob(path) {
   })
   if (!response.ok) {
     const body = await readResponse(response)
-    if (response.status === 401) redirectToLogin()
-    throw new CRMAPIError(body?.message || `HTTP ${response.status}`, {
+    const error = new CRMAPIError(body?.message || `HTTP ${response.status}`, {
       status: response.status,
       code: body?.code,
       requestID: body?.request_id,
       details: body?.details,
     })
+    if (shouldStartSubsystemLogin(error)) redirectToLogin()
+    throw error
   }
   const contentType = response.headers.get('content-type') || ''
   if (!contentType.toLowerCase().includes('text/csv')) {
@@ -117,8 +121,9 @@ export async function requestAuthorizedFile(path, allowedMediaTypes, fallbackFil
   const response = await fetch(`${API_BASE_URL}${path}`, { credentials: 'include', headers: { Accept: [...allowedMediaTypes, 'application/json'].join(', ') } })
   if (!response.ok) {
     const body = await readResponse(response)
-    if (response.status === 401) redirectToLogin()
-    throw new CRMAPIError(body?.message || `HTTP ${response.status}`, { status: response.status, code: body?.code, requestID: body?.request_id, details: body?.details })
+    const error = new CRMAPIError(body?.message || `HTTP ${response.status}`, { status: response.status, code: body?.code, requestID: body?.request_id, details: body?.details })
+    if (shouldStartSubsystemLogin(error)) redirectToLogin()
+    throw error
   }
   const contentType = (response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase()
   if (!allowedMediaTypes.has(contentType)) throw new CRMAPIError('下载响应的文件类型不受支持。', { status: response.status, code: 'CRM_DOWNLOAD_CONTENT_TYPE_INVALID' })
@@ -141,7 +146,7 @@ export function toQuery(params = {}) {
 }
 
 /** 读取 CRM 子系统会话边界；HttpOnly Cookie 始终由浏览器管理，不暴露给脚本。 */
-export const getCRMSession = () => request('/auth/me')
+export const getCRMSession = async () => normalizeAuthorizationSession(await request('/auth/me'))
 
 /**
  * 读取当前进程可选集成的非敏感就绪状态，仅用于禁用尚未接通的按钮；真正执行

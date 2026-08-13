@@ -1,3 +1,5 @@
+import { normalizeAuthorizationSession, shouldStartSubsystemLogin } from '../../shared/authz/sessionCompatibility.js'
+
 const PUBLIC_PATH_PREFIX = (import.meta.env?.VITE_CUSTOMER_PORTAL_PUBLIC_PATH_PREFIX || '/customer-portal').replace(/\/$/, '')
 const API_BASE_URL = (import.meta.env?.VITE_CUSTOMER_PORTAL_API_BASE_URL || `${PUBLIC_PATH_PREFIX}/api/v1`).replace(/\/$/, '')
 let session = null
@@ -5,8 +7,8 @@ let sessionRequest = null
 let redirectStarted = false
 
 export class PortalAPIError extends Error {
-  constructor(message, { status = 0, code = '', details = null } = {}) {
-    super(message); this.name = 'PortalAPIError'; this.status = status; this.code = code; this.details = details
+  constructor(message, { status = 0, code = '', requestID = '', details = null } = {}) {
+    super(message); this.name = 'PortalAPIError'; this.status = status; this.code = code; this.requestID = requestID; this.details = details
   }
 }
 function beginLogin() {
@@ -34,8 +36,9 @@ async function request(path, options = {}) {
     body = { message: await response.text() }
   }
   if (!response.ok) {
-    if (response.status === 401) beginLogin()
-    throw new PortalAPIError(body?.message || `HTTP ${response.status}`, { status: response.status, code: body?.code, details: body?.details })
+    const error = new PortalAPIError(body?.message || `HTTP ${response.status}`, { status: response.status, code: body?.code, requestID: body?.request_id, details: body?.details })
+    if (shouldStartSubsystemLogin(error)) beginLogin()
+    throw error
   }
   return body?.data ?? body
 }
@@ -135,7 +138,7 @@ export function getPortalSession({ force = false } = {}) {
   // 合并并发会话读取；缓存仅驱动界面，所有业务权限仍由 HttpOnly Cookie 和后端判定。
   if (!force && session) return Promise.resolve(session)
   if (!force && sessionRequest) return sessionRequest
-  sessionRequest = request('/auth/me').then((value) => { session = value; return value }).finally(() => { sessionRequest = null })
+  sessionRequest = request('/auth/me').then((value) => { session = normalizeAuthorizationSession(value); return session }).finally(() => { sessionRequest = null })
   return sessionRequest
 }
 function capability(value = {}) {
@@ -166,7 +169,7 @@ export async function getPortalCapabilities() {
     customer: customerCapabilities(value?.customer),
   }
 }
-export function ensurePortalSession() { return getPortalSession({ force: true }).catch((error) => error?.status === 401 ? null : Promise.reject(error)) }
+export function ensurePortalSession() { return getPortalSession({ force: true }).catch((error) => shouldStartSubsystemLogin(error) ? null : Promise.reject(error)) }
 export async function logoutPortal() {
   session = null
   try {
@@ -256,8 +259,9 @@ async function reportDownloadError(response) {
   if (contentType.toLowerCase().includes('application/json')) {
     try { body = await response.json() } catch { body = {} }
   }
-  if (response.status === 401) beginLogin()
-  return new PortalAPIError(body?.message || `HTTP ${response.status}`, { status: response.status, code: body?.code, details: body?.details })
+  const error = new PortalAPIError(body?.message || `HTTP ${response.status}`, { status: response.status, code: body?.code, requestID: body?.request_id, details: body?.details })
+  if (shouldStartSubsystemLogin(error)) beginLogin()
+  return error
 }
 
 /**
