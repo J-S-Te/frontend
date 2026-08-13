@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import LoginView from '@/modules/platform/auth/views/LoginView.vue'
 import ForbiddenView from '@/modules/platform/auth/views/ForbiddenView.vue'
+import SubsystemAccessErrorView from '@/modules/platform/auth/views/SubsystemAccessErrorView.vue'
 import PlatformConsoleView from '@/modules/platform/views/PlatformConsoleView.vue'
 import SubsystemPortalView from '@/modules/platform/views/SubsystemPortalView.vue'
 import { AuthError, getCurrentPrincipal } from '@/modules/platform/auth/api/auth'
@@ -9,6 +10,7 @@ import { ensureProjectSession } from '@/modules/project_management/api/projectMa
 import { getCRMSession } from '@/modules/customer_opportunity/api/client'
 import { ensurePortalSession } from '@/modules/customer_portal/api/portal'
 import { canAccessContractSection } from '@/modules/shared/authz/sys004'
+import { buildSubsystemAccessErrorRoute } from '@/modules/shared/authz/sessionCompatibility'
 import { dispatchAuthorizationRefreshed } from '@/modules/platform/auth/utils/authorizationRefresh'
 import { hasAnyPermission as principalHasAnyPermission } from '@/modules/platform/auth/utils/permissions'
 import {
@@ -34,6 +36,10 @@ const settingsSections = new Set(PLATFORM_SETTINGS_SECTION_KEYS)
 
 function normalizeSettingsSection(section) {
   return settingsSections.has(section) ? section : 'iam'
+}
+
+function subsystemAccessFailure(error, to) {
+  return buildSubsystemAccessErrorRoute(error, to.fullPath) || false
 }
 
 const router = createRouter({
@@ -89,6 +95,12 @@ const router = createRouter({
       name: 'forbidden',
       component: ForbiddenView,
       meta: { title: '无权访问' },
+    },
+    {
+      path: '/access-error',
+      name: 'subsystem_access_error',
+      component: SubsystemAccessErrorView,
+      meta: { title: '子系统访问失败' },
     },
     {
       path: '/contract_management/:section?',
@@ -168,7 +180,9 @@ router.beforeEach(async (to) => {
       const requestedSection = typeof to.params.section === 'string' ? to.params.section : 'dashboard'
       if (!canAccessContractSection(session, requestedSection)) {
         const firstAllowedSection = contractSections.find((section) => canAccessContractSection(session, section))
-        if (!firstAllowedSection) return { name: 'login' }
+        if (!firstAllowedSection) {
+          return buildSubsystemAccessErrorRoute({ status: 403, code: 'CONTRACT_AUTHORIZATION_REQUIRED' }, to.fullPath)
+        }
         return {
           name: 'contract_management',
           params: { section: firstAllowedSection },
@@ -177,28 +191,24 @@ router.beforeEach(async (to) => {
         }
       }
       return true
-    } catch {
+    } catch (error) {
       // 401 已由 ensureContractSession 发起 OIDC 跳转；网络或服务错误时停留在当前页，
       // 不要把合同后端故障误判成基础平台未登录。
-      return false
+      return subsystemAccessFailure(error, to)
     }
   }
 
   if (to.meta.requiresProjectSession) {
     try {
-      // 项目系统持有独立 OIDC Cookie；进入页面前必须同时建立项目会话并确认
-      // 当前应用令牌确实包含项目读取权限，不能回退使用平台自身权限。
+      // 项目系统持有独立 OIDC Cookie。这里只确认服务器已经建立项目会话；
+      // 具体 Permission 与 Data Scope 由项目 API 逐请求执行，浏览器不推导授权范围。
       const session = await ensureProjectSession()
       if (!session) return false
-      const permissions = Array.isArray(session.permissions) ? session.permissions : []
-      if (!permissions.includes('project.read')) {
-        return { name: 'forbidden', query: { from: to.fullPath } }
-      }
       return true
-    } catch {
+    } catch (error) {
       // 401 已由项目 API 客户端启动 OIDC；其他错误保持关闭，避免平台会话
       // 在项目服务不可用时意外放行页面。
-      return false
+      return subsystemAccessFailure(error, to)
     }
   }
 
@@ -206,18 +216,18 @@ router.beforeEach(async (to) => {
     try {
       await getCRMSession()
       return true
-    } catch {
+    } catch (error) {
       // The CRM client starts its own OIDC redirect on 401. Other errors stay
       // closed so a backend outage cannot fall through to the platform session.
-      return false
+      return subsystemAccessFailure(error, to)
     }
   }
 
   if (to.meta.requiresPortalSession) {
     try {
       return Boolean(await ensurePortalSession())
-    } catch {
-      return false
+    } catch (error) {
+      return subsystemAccessFailure(error, to)
     }
   }
 

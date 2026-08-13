@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref, toRaw, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
+import { subsystemAccessMessage } from '@/modules/shared/authz/sessionCompatibility'
 import OwnerSelector from '../components/OwnerSelector.vue'
 import PresaleApprovalRulesPanel from '../components/PresaleApprovalRulesPanel.vue'
 import { formatSignedContractCount } from '../signedContractCount.js'
@@ -401,7 +402,7 @@ function showError(value) {
   else if (value?.code === 'CRM_OPPORTUNITY_MEMBER_INVALID') error.value = '所选团队人员已停用或不再具有本应用授权，请重新从基础平台人员目录选择。'
   else if (value?.code === 'CRM_OWNER_DIRECTORY_UNAVAILABLE') error.value = '基础平台人员目录暂不可用，本次人员变更未保存。'
   else if (value?.code === 'INTEGRATION_CONTRACT_NOT_CONFIGURED') error.value = '合同归属校验服务尚未配置，合同类终态待办暂不能完成。'
-  else error.value = value?.message || '操作失败'
+  else error.value = subsystemAccessMessage(value, '操作失败，请稍后重试。')
 }
 function formatDate(value) {
   if (!value) return '—'

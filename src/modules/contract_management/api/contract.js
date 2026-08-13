@@ -1,6 +1,12 @@
 // 合同管理 API 客户端。
 // 合同后端使用独立同源前缀，避免与基础平台的 /api/v1 接口发生路由冲突。
 import { getCurrentPrincipal } from '@/modules/platform/auth/api/auth'
+import {
+  normalizeAuthorizationSession,
+  principalIdentityID,
+  shouldStartSubsystemLogin,
+  subsystemAccessMessage,
+} from '../../shared/authz/sessionCompatibility.js'
 
 const CONTRACT_PUBLIC_PATH_PREFIX = (import.meta.env.VITE_CONTRACT_PUBLIC_PATH_PREFIX || '/contract_management').replace(/\/$/, '')
 const API_BASE_URL = (import.meta.env.VITE_CONTRACT_API_BASE_URL || `${CONTRACT_PUBLIC_PATH_PREFIX}/api/v1`).replace(/\/$/, '')
@@ -14,8 +20,10 @@ export class ContractAuthError extends Error {
   constructor(message = '合同系统登录状态已失效。', options = {}) {
     super(message, options)
     this.name = 'ContractAuthError'
-    this.status = 401
-    this.code = 'CONTRACT_UNAUTHENTICATED'
+    this.status = options.status || 401
+    this.code = options.code || 'CONTRACT_UNAUTHENTICATED'
+    this.requestID = options.requestID || ''
+    this.details = options.details || null
   }
 }
 
@@ -28,7 +36,9 @@ function startContractLogin() {
 
 async function readBody(response) {
   const contentType = response.headers.get('content-type') || ''
-  return contentType.includes('application/json') ? response.json() : response.text()
+  if (contentType.includes('application/json')) return response.json()
+  const text = await response.text()
+  return text ? { message: text } : {}
 }
 
 function userSafeErrorMessage(message) {
@@ -52,10 +62,16 @@ async function request(path, options = {}) {
   const body = await readBody(response)
   if (!response.ok) {
     if (response.status === 401) {
-      // 会话可能在页面停留期间过期或因平台权限变化被后端撤销。任意合同 API
-      // 返回 401 都统一进入 OIDC，不允许每个并发请求各显示一条“登录状态无效”。
-      startContractLogin()
-      throw new ContractAuthError()
+      const authError = new ContractAuthError(userSafeErrorMessage(body?.message) || '合同系统登录状态已失效。', {
+        status: response.status,
+        code: body?.code,
+        requestID: body?.request_id,
+        details: body?.details,
+      })
+      // 只有普通会话失效才重新走登录。Claims/Client 配置错误保留原始分类，
+      // 交给统一访问错误页展示，避免形成“登录—回调—再次登录”的循环。
+      if (shouldStartSubsystemLogin(authError)) startContractLogin()
+      throw authError
     }
     const fallbackMessages = {
       400: '提交的内容有误，请检查后重试。',
@@ -66,6 +82,9 @@ async function request(path, options = {}) {
     const error = new Error(userSafeErrorMessage(body?.message) || fallbackMessages[response.status] || '操作失败，请稍后重试。')
     error.status = response.status
     error.code = body?.code
+    error.requestID = body?.request_id || ''
+    error.details = body?.details || null
+    error.message = subsystemAccessMessage(error, error.message)
     throw error
   }
   return body?.data ?? body
@@ -81,8 +100,8 @@ export async function getContractSession({ force = false } = {}) {
 
   sessionRequest = request('/auth/me')
     .then((session) => {
-      currentSession = session
-      return session
+      currentSession = normalizeAuthorizationSession(session)
+      return currentSession
     })
     .finally(() => { sessionRequest = null })
 
@@ -120,9 +139,10 @@ export async function ensureContractSession() {
     const contractSession = await getContractSession({ force: true })
     try {
       const platformPrincipal = await getCurrentPrincipal()
-      const platformUserID = String(platformPrincipal?.user?.id || '')
-      const platformTenantID = String(platformPrincipal?.tenant?.id || '')
-      const userChanged = platformUserID && platformUserID !== String(contractSession?.user_id || '')
+      const platformUserID = principalIdentityID(platformPrincipal)
+      const platformTenantID = String(platformPrincipal?.tenant_id || platformPrincipal?.tenant?.id || '')
+      const contractIdentityID = principalIdentityID(contractSession)
+      const userChanged = platformUserID && contractIdentityID && platformUserID !== contractIdentityID
       const tenantChanged = platformTenantID && platformTenantID !== String(contractSession?.tenant_id || '')
       if (userChanged || tenantChanged) {
         await clearContractLocalSession()
@@ -135,7 +155,7 @@ export async function ensureContractSession() {
     }
     return contractSession
   } catch (error) {
-    if (error?.status === 401) {
+    if (shouldStartSubsystemLogin(error)) {
       startContractLogin()
       return null
     }

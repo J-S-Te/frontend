@@ -5,8 +5,9 @@ import test from 'node:test'
 // source assertions protect the contract that every API request—not only /auth/me—handles 401.
 const source = await import('node:fs/promises').then(({ readFile }) => readFile(new URL('./contract.js', import.meta.url), 'utf8'))
 
-test('contract API starts one shared OIDC redirect for any 401 response', () => {
+test('contract API starts one shared OIDC redirect only for an expired session', () => {
   assert.match(source, /if \(response\.status === 401\)[\s\S]*startContractLogin\(\)/)
+  assert.match(source, /if \(shouldStartSubsystemLogin\(authError\)\) startContractLogin\(\)/)
   assert.match(source, /if \(loginRedirectStarted\) return/)
   assert.match(source, /window\.location\.replace\(`\$\{CONTRACT_PUBLIC_PATH_PREFIX\}\/auth\/login`\)/)
 })
@@ -16,8 +17,10 @@ test('contract session cache is cleared before reauthentication', () => {
 })
 
 test('contract session is replaced when the platform browser switches users', () => {
-  assert.match(source, /const platformUserID = String\(platformPrincipal\?\.user\?\.id \|\| ''\)/)
-  assert.match(source, /platformUserID !== String\(contractSession\?\.user_id \|\| ''\)/)
+  assert.match(source, /const platformUserID = principalIdentityID\(platformPrincipal\)/)
+  assert.match(source, /const contractIdentityID = principalIdentityID\(contractSession\)/)
+  assert.match(source, /platformUserID !== contractIdentityID/)
+  assert.match(source, /platformPrincipal\?\.tenant_id \|\| platformPrincipal\?\.tenant\?\.id/)
   assert.match(source, /await clearContractLocalSession\(\)[\s\S]*startContractLogin\(\)/)
   assert.match(source, /\/auth\/local-logout/)
 })

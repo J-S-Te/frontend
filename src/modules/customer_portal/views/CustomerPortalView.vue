@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
+import { subsystemAccessMessage } from '@/modules/shared/authz/sessionCompatibility'
 import { acknowledgeSecurityEvent, addFeedbackMessage, closeFeedback, createFeedback, createIdempotencyKey, createProjectConversation, createProjectExport, createReportRequest, downloadIssuedReport, downloadProjectExport, getAccountSecurity, getEvaluation, getEvaluationEligibility, getFeedback, getPortalCapabilities, getPortalSession, getProject, getProjectConversation, getProjectExport, getReportRequest, getReportNotificationUnreadCount, listAccountSessions, listFeedbacks, listProjectActivities, listProjects, listReportNotifications, listReportRequests, listReportRiskAlerts, logoutPortal, readProjectConversationMessages, readReportNotification, reportRequestFingerprint, revokeAccountSession, sendProjectConversationMessage, submitEvaluation } from '../api/portal.js'
 import FilingWizard from '../components/FilingWizard.vue'
 import '@/modules/platform/styles/console.css'
@@ -121,7 +122,7 @@ function onDialogKeydown(event) {
 }
 function formatDate(value) { if (!value) return '—'; const date = new Date(value); return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(date) }
 function formatDay(value) { if (!value) return '—'; const date = new Date(value); return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium' }).format(date) }
-function fail(value) { error.value = value?.message || '服务暂时不可用' }
+function fail(value) { error.value = subsystemAccessMessage(value) }
 function feedbackType(value) { return ({ OBJECTION: '异议', COMPLAINT: '投诉', SUGGESTION: '建议' })[value] || value }
 function feedbackStatus(value) { return ({ SUBMITTED: '已提交', ACCEPTED: '已受理', PROCESSING: '处理中', NEED_CUSTOMER_INFO: '待客户补充', RESOLVED: '已解决', CLOSED: '已关闭', REJECTED: '无效反馈' })[value] || value }
 function projectStatus(value) { return ({ NOT_STARTED: '未开始', IN_PROGRESS: '进行中', COMPLETED: '已完成', SUSPENDED: '已暂停', CANCELLED: '已取消' })[value] || value || '—' }
