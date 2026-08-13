@@ -70,6 +70,7 @@ const subsystems = computed(() => {
 })
 
 let toastTimer = 0
+let projectionRefreshTimer = 0
 let animationFrame = 0
 let resizeCanvas = null
 let particles = []
@@ -198,20 +199,30 @@ function openSubsystemTarget(targetURL) {
 
   let opened = null
   try {
-    opened = window.open(target, '_blank', 'noopener,noreferrer')
+    // 直接以 noopener 打开时，部分浏览器即使成功也会按规范返回 null，
+    // 从而被下面的弹窗拦截兜底误判，造成“新标签页 + 当前页”同时跳转。
+    // 先取得同源空白窗口句柄，断开 opener 后再导航，既避免反向控制
+    // 门户窗口，也能可靠地区分弹窗是否真的被拦截。
+    opened = window.open('', '_blank')
+    if (opened) {
+      opened.opener = null
+      opened.location.replace(target)
+      return true
+    }
   } catch {
     opened = null
   }
 
-  if (!opened) {
-    window.location.assign(target)
-  }
+  window.location.assign(target)
   return true
 }
 
 function openSubsystem(subsystem) {
   if (!subsystem.allowed) {
-    showToast(`您暂无「${subsystem.name}」的访问权限`, 'deny')
+    showToast(
+      subsystem.projectionNextAction || `「${subsystem.name}」账号权限尚未同步完成，请稍后重试。`,
+      'deny',
+    )
     return
   }
 
@@ -353,12 +364,21 @@ onMounted(() => {
   startParticleBackground()
   loadCurrentPrincipal()
   loadPortalCatalog()
+  projectionRefreshTimer = window.setInterval(() => {
+    const hasProjectionInFlight = registeredSubsystems.value.some((application) => (
+      ['PENDING', 'RUNNING'].includes(String(application?.projection_status || '').toUpperCase())
+    ))
+    if (hasProjectionInFlight) {
+      void loadPortalCatalog({ silent: true })
+    }
+  }, 3000)
   document.addEventListener('click', closeUserMenuWhenClickOutside)
   document.addEventListener('keydown', closeUserMenuOnEscape)
 })
 
 onBeforeUnmount(() => {
   window.clearTimeout(toastTimer)
+  window.clearInterval(projectionRefreshTimer)
   window.cancelAnimationFrame(animationFrame)
   document.removeEventListener('click', closeUserMenuWhenClickOutside)
   document.removeEventListener('keydown', closeUserMenuOnEscape)
@@ -451,9 +471,11 @@ onBeforeUnmount(() => {
           v-for="(subsystem, index) in subsystems"
           :key="subsystem.key"
           class="subsystem-card"
+          :class="{ 'is-syncing': !subsystem.allowed }"
           :style="{ '--portal-card-delay': `${(index + 1) * 0.06}s` }"
           type="button"
-          :aria-label="`进入${subsystem.name}`"
+          :aria-label="subsystem.allowed ? `进入${subsystem.name}` : `${subsystem.name}权限同步未完成`"
+          :aria-disabled="!subsystem.allowed"
           @click="openSubsystem(subsystem)"
           @pointermove="handleCardPointerMove"
           @pointerleave="resetCardTransform"
@@ -462,7 +484,10 @@ onBeforeUnmount(() => {
           <span class="subsystem-card__icon"><ConsoleIcon :name="subsystem.icon" /></span>
           <span class="subsystem-card__name">{{ subsystem.name }}</span>
           <span v-if="subsystem.description" class="subsystem-card__description">{{ subsystem.description }}</span>
-          <span class="subsystem-card__action">进入系统 <ConsoleIcon name="chevron" /></span>
+          <span class="subsystem-card__action">
+            {{ subsystem.allowed ? '进入系统' : '权限同步中' }}
+            <ConsoleIcon name="chevron" />
+          </span>
         </button>
       </div>
     </section>
