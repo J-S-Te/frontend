@@ -455,6 +455,27 @@
   transform: translateX(3px);
 }
 
+.subsystem-card.is-syncing {
+  cursor: wait;
+  opacity: 0.68;
+}
+
+.subsystem-card.is-syncing:hover,
+.subsystem-card.is-syncing:focus-visible {
+  border-color: rgba(148, 163, 184, 0.45);
+  background: linear-gradient(150deg, rgba(30, 41, 59, 0.72), rgba(15, 23, 42, 0.65));
+  box-shadow: 0 20px 46px rgba(2, 6, 23, 0.22);
+}
+
+.subsystem-card.is-syncing:hover::before,
+.subsystem-card.is-syncing:focus-visible::before {
+  opacity: 0;
+}
+
+.subsystem-card.is-syncing .subsystem-card__action svg {
+  transform: none;
+}
+
 /* 页脚通栏：分辨率/浏览器说明钉在最左侧，版本版权钉在最右侧。 */
 .subsystem-portal__footer {
   display: flex;

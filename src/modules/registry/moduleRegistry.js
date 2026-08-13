@@ -91,6 +91,8 @@ export function buildPortalSubsystems(registeredApplications = [], { includeBuil
       const code = normalizeCode(moduleDefinition?.code) || normalizeCode(application?.code)
       const applicationID = application?.application_id || code || 'application'
       const environmentID = application?.environment_id || application?.environment || 'environment'
+      const projectionStatus = String(application?.projection_status || '').trim().toUpperCase()
+      const projectionReady = application?.projection_ready !== false && application?.allowed !== false
       return {
         key: `registered-${applicationID}-${environmentID}`,
         code,
@@ -99,7 +101,9 @@ export function buildPortalSubsystems(registeredApplications = [], { includeBuil
         // 不向终端用户暴露 dev、test、staging、prod 等部署信息。
         description: application?.description || moduleDefinition?.description || '已接入统一身份平台的业务应用',
         icon: moduleDefinition?.icon || 'dashboard',
-        allowed: true,
+        allowed: projectionReady,
+        projectionStatus,
+        projectionNextAction: String(application?.projection_next_action || '').trim(),
         authenticationURL: moduleDefinition?.authenticationURL || '',
         // 已随统一前端构建的模块直接使用 Vue Router；只有没有本地模块的
         // 独立子系统才使用后端登记的 public_url。

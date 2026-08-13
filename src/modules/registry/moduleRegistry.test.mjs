@@ -121,6 +121,27 @@ test('客户与商机系统门户入口强制先经过服务端 OIDC 登录', ()
   )
 })
 
+test('Keycloak 用户投影未完成时门户入口保持失败关闭并保留恢复提示', () => {
+  const cards = buildPortalSubsystems([{
+    application_id: 'crm-app',
+    environment_id: 'crm-prod',
+    code: 'customer_and_opportunity',
+    name: '客户与商机管理系统',
+    projection_status: 'PENDING',
+    projection_ready: false,
+    allowed: false,
+    projection_next_action: '账号权限正在等待同步，请稍后重试。',
+  }])
+
+  assert.equal(cards[1].allowed, false)
+  assert.equal(cards[1].projectionStatus, 'PENDING')
+  assert.equal(cards[1].projectionNextAction, '账号权限正在等待同步，请稍后重试。')
+  assert.match(subsystemPortalView, /subsystem\.projectionNextAction/)
+  assert.match(subsystemPortalView, /权限同步中/)
+  assert.match(subsystemPortalView, /\['PENDING', 'RUNNING'\]/)
+  assert.match(subsystemPortalView, /loadPortalCatalog\(\{ silent: true \}\)/)
+})
+
 test('同一个外部应用返回多个环境时只显示一个逻辑子系统入口', () => {
   const cards = buildPortalSubsystems([
     {
