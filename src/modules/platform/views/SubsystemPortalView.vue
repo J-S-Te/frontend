@@ -215,6 +215,15 @@ function openSubsystem(subsystem) {
     return
   }
 
+  if (subsystem.authenticationURL) {
+    // 需要统一认证的内嵌子系统不能直接打开 SPA 路由。始终从子系统服务端
+    // OIDC 入口开始，确保本次访问经过 Keycloak；有效的基础平台会话会由
+    // Broker 自动复用，因此用户不会看到 Keycloak 登录或选择页面。
+    const targetURL = new URL(subsystem.authenticationURL, window.location.origin).href
+    openSubsystemTarget(targetURL)
+    return
+  }
+
   if (subsystem.publicURL) {
     // 外部系统不在统一前端路由内，保持新标签页打开，避免当前门户页被替换。
     openSubsystemTarget(subsystem.publicURL)
