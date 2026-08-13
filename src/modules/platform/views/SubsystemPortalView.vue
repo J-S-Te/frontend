@@ -198,14 +198,21 @@ function openSubsystemTarget(targetURL) {
 
   let opened = null
   try {
-    opened = window.open(target, '_blank', 'noopener,noreferrer')
+    // 直接以 noopener 打开时，部分浏览器即使成功也会按规范返回 null，
+    // 从而被下面的弹窗拦截兜底误判，造成“新标签页 + 当前页”同时跳转。
+    // 先取得同源空白窗口句柄，断开 opener 后再导航，既避免反向控制
+    // 门户窗口，也能可靠地区分弹窗是否真的被拦截。
+    opened = window.open('', '_blank')
+    if (opened) {
+      opened.opener = null
+      opened.location.replace(target)
+      return true
+    }
   } catch {
     opened = null
   }
 
-  if (!opened) {
-    window.location.assign(target)
-  }
+  window.location.assign(target)
   return true
 }
 
