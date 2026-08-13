@@ -190,6 +190,25 @@ async function logoutApplication() {
   }
 }
 
+// 门户入口优先在新标签页打开，避免覆盖门户上下文；如果浏览器拦截弹窗，
+// 必须回退到当前窗口，否则用户点击卡片后会看不到任何反馈。
+function openSubsystemTarget(targetURL) {
+  const target = String(targetURL || '').trim()
+  if (!target) return false
+
+  let opened = null
+  try {
+    opened = window.open(target, '_blank', 'noopener,noreferrer')
+  } catch {
+    opened = null
+  }
+
+  if (!opened) {
+    window.location.assign(target)
+  }
+  return true
+}
+
 function openSubsystem(subsystem) {
   if (!subsystem.allowed) {
     showToast(`您暂无「${subsystem.name}」的访问权限`, 'deny')
@@ -198,7 +217,7 @@ function openSubsystem(subsystem) {
 
   if (subsystem.publicURL) {
     // 外部系统不在统一前端路由内，保持新标签页打开，避免当前门户页被替换。
-    window.open(subsystem.publicURL, '_blank', 'noopener,noreferrer')
+    openSubsystemTarget(subsystem.publicURL)
     return
   }
 
@@ -207,7 +226,7 @@ function openSubsystem(subsystem) {
     // 通过 Router 解析保持 base、编码和命名路由参数一致。
     const routeURL = router.resolve(subsystem.route).href
     const targetURL = new URL(routeURL, window.location.origin).href
-    window.open(targetURL, '_blank', 'noopener,noreferrer')
+    openSubsystemTarget(targetURL)
     return
   }
 
