@@ -39,7 +39,7 @@
 .console-nav-note { padding: 2px 7px; margin-left: auto; color: #93c5fd; font-size: 10px; border-radius: 999px; background: rgba(37,99,235,.18); }
 .console-nav-empty { margin: 4px 12px 8px; padding: 10px 12px; color: #94a3b8; font-size: 11px; line-height: 1.55; border: 1px dashed rgba(148,163,184,.25); border-radius: 8px; background: rgba(30,41,59,.35); }
 .settings-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 64px 24px; margin: 24px 0; background: var(--card-bg, #fff); border: 1px dashed rgba(148,163,184,.35); border-radius: 12px; color: #64748b; text-align: center; }
-.settings-empty-icon { display: inline-flex; align-items: center; justify-content: center; width: 56px; height: 56px; border-radius: 50%; background: rgba(99,102,241,.08); color: #4f46e5; margin-bottom: 16px; }
+.settings-empty-icon { display: inline-flex; align-items: center; justify-content: center; width: 56px; height: 56px; border-radius: 50%; background: rgba(139,92,246,.08); color: #8b5cf6; margin-bottom: 16px; }
 .settings-empty h3 { margin: 0 0 8px; font-size: 16px; font-weight: 600; color: #0f172a; }
 .settings-empty p { margin: 0; font-size: 13px; line-height: 1.7; max-width: 480px; }
 .settings-empty code { background: #f1f5f9; padding: 1px 6px; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: #0f172a; }
@@ -142,8 +142,8 @@
 .console-role-chip.large { max-width: none; margin-top: 7px; padding: 5px 9px; }
 .console-role-type { display: inline-flex; padding: 3px 8px; color: #475569; font-size: 12px; line-height: 1.3; border-radius: 99px; background: #f1f5f9; }
 .console-role-type.role-平台角色 { color: #1d4ed8; background: #eff6ff; }
-.console-role-type.role-应用角色 { color: #7c3aed; background: #f5f3ff; }
-.console-role-type.role-自定义角色 { color: #b45309; background: #fffbeb; }
+.console-role-type.role-应用角色 { color: #8b5cf6; background: #f5f3ff; }
+.console-role-type.role-自定义角色 { color: #b45309; background: #fef3c7; }
 .console-badge.status-active { color: #15803d; background: #ecfdf5; }
 .console-badge.status-disabled { color: #64748b; background: #f1f5f9; }
 .console-actions-cell { min-width: 110px; text-align: right; white-space: nowrap; }
@@ -171,7 +171,7 @@
 .console-detail-modal > footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; padding: 16px 24px; border-top: 1px solid #e2e8f0; }
 
 /* AUD-001 审计中心：跨系统事件、变更摘要与链路追溯 */
-.audit-readonly-note code { padding: 1px 4px; color: #1e40af; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; border-radius: 3px; background: #eff6ff; }
+.audit-readonly-note code { padding: 1px 4px; color: #1d4ed8; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; border-radius: 3px; background: #eff6ff; }
 .audit-context-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0 0 14px; }
 .audit-context-grid article { padding: 13px 14px; border: 1px solid #dbeafe; border-radius: 9px; background: #f8fbff; }
 .audit-context-grid span { display: block; color: #64748b; font-size: 11px; }
@@ -187,7 +187,7 @@
 .audit-data-table td { vertical-align: top; }
 .audit-check-cell { width: 34px; min-width: 34px; text-align: center !important; }
 .audit-check-cell input { width: 14px; height: 14px; accent-color: #2563eb; }
-.audit-method { display: inline-flex; padding: 3px 5px; color: #7c3aed; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; border-radius: 4px; background: #f5f3ff; }
+.audit-method { display: inline-flex; padding: 3px 5px; color: #8b5cf6; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; border-radius: 4px; background: #f5f3ff; }
 .audit-id { display: block; max-width: 168px; overflow: hidden; color: #64748b; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .audit-action-badge { max-width: 112px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .type-登录失败, .type-账号锁定 { color: #b91c1c; background: #fef2f2; }
@@ -196,7 +196,7 @@
 .audit-result-badge::before { width: 6px; height: 6px; flex: 0 0 auto; content: ''; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 3px rgba(100, 116, 139, .1); }
 .audit-result-success { color: #15803d; background: #ecfdf5; }
 .audit-result-success::before { box-shadow: 0 0 0 3px rgba(22, 163, 74, .12); }
-.audit-result-denied { color: #b45309; background: #fffbeb; }
+.audit-result-denied { color: #b45309; background: #fef3c7; }
 .audit-result-denied::before { box-shadow: 0 0 0 3px rgba(217, 119, 6, .12); }
 .audit-result-error { color: #b91c1c; background: #fef2f2; }
 .audit-result-error::before { box-shadow: 0 0 0 3px rgba(220, 38, 38, .12); }
@@ -374,7 +374,7 @@
 .console-password-toggle svg { width: 16px; height: 16px; }
 
 .console-status-dot { display: inline-grid; width: 28px; height: 28px; flex: 0 0 auto; place-items: center; border-radius: 50%; }
-.console-status-dot--ok { color: var(--green); background: var(--green-bg); border: 1px solid #a7f3d0; }
+.console-status-dot--ok { color: var(--green); background: var(--green-bg); border: 1px solid #c7f0d6; }
 .console-status-dot--error { color: #dc2626; background: #fef2f2; border: 1px solid #fecaca; }
 .console-status-dot--pending { color: var(--muted); background: #f1f5f9; border: 1px solid var(--border); }
 .console-status-dot svg { width: 14px; height: 14px; }
@@ -385,7 +385,7 @@
 .console-tag--pending { color: var(--muted); background: #f1f5f9; }
 
 .console-prereq-card { padding: 16px 18px; }
-.console-prereq-card[data-ready='true'] { border-color: #a7f3d0; }
+.console-prereq-card[data-ready='true'] { border-color: #c7f0d6; }
 .console-prereq-card[data-ready='false'] { border-color: #fecaca; }
 .console-prereq-card-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
 .console-prereq-card-head > div { flex: 1; min-width: 0; }

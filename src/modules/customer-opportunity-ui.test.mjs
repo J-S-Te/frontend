@@ -504,7 +504,7 @@ test('客户成交与待跟进快捷筛选使用不同卡片背景色', () => {
   assert.match(view, /:data-quick-filter="customerFilters\.quick_filter"/)
   assert.match(style, /\.crm-customer-cards\[data-quick-filter='WON'\] > button\[data-status='ACTIVE'\]/)
   assert.match(style, /\.crm-customer-cards\[data-quick-filter='FOLLOWUP_DUE'\] > button\[data-status='ACTIVE'\]/)
-  assert.match(style, /data-quick-filter='WON'[\s\S]*--crm-customer-card-surface:\s*#d1fae5/)
+  assert.match(style, /data-quick-filter='WON'[\s\S]*--crm-customer-card-surface:\s*#ecfdf5/)
   assert.match(style, /data-quick-filter='FOLLOWUP_DUE'[\s\S]*--crm-customer-card-surface:\s*#fef3c7/)
 })
 

@@ -1,3 +1,4 @@
+/* 登录目标管理 · 对齐 UniLab UI Kit v1.0 令牌（主色 #2563eb / 墨色四级 / 语义色） */
 .login-target-module {
   display: grid;
   gap: 18px;
@@ -18,7 +19,7 @@
 .login-target-module__header h2,
 .login-target-dialog h3 {
   margin: 4px 0 7px;
-  color: #17223b;
+  color: #0f172a;
   font-size: 22px;
   line-height: 1.25;
 }
@@ -27,13 +28,13 @@
 .login-target-module__empty p,
 .login-target-dialog small {
   margin: 0;
-  color: #667085;
+  color: #64748b;
   font-size: 13px;
   line-height: 1.65;
 }
 
 .login-target-module__eyebrow {
-  color: #3563d9;
+  color: #2563eb;
   font-size: 11px;
   font-weight: 800;
   letter-spacing: .1em;
@@ -45,23 +46,23 @@
   align-items: flex-start;
   gap: 11px;
   padding: 15px 16px;
-  border: 1px solid #d9e3fa;
+  border: 1px solid #bfdbfe;
   border-radius: 10px;
-  background: #f6f8ff;
-  color: #344054;
+  background: #eff6ff;
+  color: #475569;
 }
 
 .login-target-module__empty svg,
 .login-target-module__guardrail svg {
   flex: 0 0 auto;
   width: 19px;
-  color: #3563d9;
+  color: #2563eb;
 }
 
 .login-target-module__empty strong {
   display: block;
   margin-bottom: 3px;
-  color: #17223b;
+  color: #0f172a;
 }
 
 .login-target-module__guardrail {
@@ -83,7 +84,7 @@
 .login-target-dialog label {
   display: grid;
   gap: 6px;
-  color: #344054;
+  color: #475569;
   font-size: 13px;
   font-weight: 700;
 }
@@ -97,11 +98,11 @@
 .login-target-dialog input,
 .login-target-dialog select {
   min-height: 36px;
-  border: 1px solid #d0d5dd;
+  border: 1px solid #e2e8f0;
   border-radius: 7px;
   outline: none;
   background: #fff;
-  color: #1d2939;
+  color: #0f172a;
   font: inherit;
 }
 
@@ -119,8 +120,8 @@
 .login-target-dialog input:focus,
 .login-target-dialog select:focus,
 .login-target-module select:focus {
-  border-color: #5c82eb;
-  box-shadow: 0 0 0 3px rgba(53, 99, 217, .12);
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, .12);
 }
 
 .login-target-module__table-card {
@@ -134,7 +135,7 @@
 
 .login-target-module__uri {
   max-width: 430px;
-  color: #475467;
+  color: #475569;
   font-size: 12px;
 }
 
@@ -144,7 +145,7 @@
 
 .login-target-module__state {
   padding: 42px 16px !important;
-  color: #667085;
+  color: #64748b;
   text-align: center;
 }
 
@@ -160,17 +161,17 @@
 }
 
 .login-target-status.is-active {
-  background: #eaf8ef;
-  color: #16794a;
+  background: #ecfdf5;
+  color: #15803d;
 }
 
 .login-target-status.is-disabled {
-  background: #f2f4f7;
-  color: #667085;
+  background: #f1f5f9;
+  color: #64748b;
 }
 
 .login-target-module__pagination {
-  color: #667085;
+  color: #64748b;
   font-size: 13px;
 }
 
@@ -183,17 +184,17 @@
 .login-target-module__error {
   margin: 0;
   padding: 10px 12px;
-  border: 1px solid #fecdca;
+  border: 1px solid #fecaca;
   border-radius: 8px;
-  background: #fff5f4;
-  color: #b42318;
+  background: #fef2f2;
+  color: #b91c1c;
   font-size: 13px;
   line-height: 1.5;
 }
 
 .login-target-module__field-error {
   margin: 4px 0 0;
-  color: #b42318;
+  color: #b91c1c;
   font-size: 12px;
   line-height: 1.5;
 }
@@ -205,7 +206,7 @@
   display: grid;
   place-items: center;
   padding: 20px;
-  background: rgba(16, 24, 40, .46);
+  background: rgba(15, 23, 42, .4);
 }
 
 .login-target-dialog {
@@ -215,7 +216,7 @@
   padding: 22px;
   border-radius: 12px;
   background: #fff;
-  box-shadow: 0 24px 48px rgba(16, 24, 40, .24);
+  box-shadow: 0 20px 60px rgba(15, 23, 42, .3);
 }
 
 .login-target-dialog h3 {
@@ -228,14 +229,14 @@
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: #667085;
+  color: #64748b;
   cursor: pointer;
   font-size: 25px;
   line-height: 1;
 }
 
 .login-target-dialog__close:hover {
-  background: #f2f4f7;
+  background: #f1f5f9;
 }
 
 @media (max-width: 720px) {

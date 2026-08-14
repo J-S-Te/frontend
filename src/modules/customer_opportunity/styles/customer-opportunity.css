@@ -266,8 +266,8 @@
   border-radius: 8px;
 }
 .crm-alert.error { color: #b91c1c; border-color: #fecaca; background: #fef2f2; }
-.crm-alert.success { color: #047857; border-color: #a7f3d0; background: #ecfdf5; }
-.crm-alert.warning { color: #92400e; border-color: #fde68a; background: #fffbeb; }
+.crm-alert.success { color: #15803d; border-color: #c7f0d6; background: #ecfdf5; }
+.crm-alert.warning { color: #b45309; border-color: #fde68a; background: #fef3c7; }
 
 .crm-owner-selector {
   min-width: 0;
@@ -625,18 +625,18 @@
   --crm-stage-surface: #f5f3ff;
 }
 .crm-opportunity-board .crm-board-column[data-stage='报价'] {
-  --crm-stage-accent: #f59e0b;
+  --crm-stage-accent: #d97706;
   --crm-stage-border: #fde68a;
-  --crm-stage-surface: #fffbeb;
+  --crm-stage-surface: #fef3c7;
 }
 .crm-opportunity-board .crm-board-column[data-stage='投标'] {
-  --crm-stage-accent: #0d9488;
-  --crm-stage-border: #99f6e4;
-  --crm-stage-surface: #f0fdfa;
+  --crm-stage-accent: #0369a1;
+  --crm-stage-border: #c7f0d6;
+  --crm-stage-surface: #ecfdf5;
 }
 .crm-opportunity-board .crm-board-column[data-stage='已签约'] {
-  --crm-stage-accent: #059669;
-  --crm-stage-border: #a7f3d0;
+  --crm-stage-accent: #16a34a;
+  --crm-stage-border: #c7f0d6;
   --crm-stage-surface: #ecfdf5;
 }
 .crm-opportunity-board .crm-board-column[data-stage='失败'] {
@@ -668,7 +668,7 @@
 .crm-presale-board .crm-board-column[data-status='PENDING_APPROVAL'] {
   --crm-status-accent: #d97706;
   --crm-status-border: #fde68a;
-  --crm-status-surface: #fffbeb;
+  --crm-status-surface: #fef3c7;
 }
 .crm-presale-board .crm-board-column[data-status='APPROVED_PENDING_ASSIGNMENT'] {
   --crm-status-accent: #2563eb;
@@ -676,13 +676,13 @@
   --crm-status-surface: #eff6ff;
 }
 .crm-presale-board .crm-board-column[data-status='EXECUTING'] {
-  --crm-status-accent: #7c3aed;
+  --crm-status-accent: #8b5cf6;
   --crm-status-border: #ddd6fe;
   --crm-status-surface: #f5f3ff;
 }
 .crm-presale-board .crm-board-column[data-status='COMPLETED'] {
-  --crm-status-accent: #059669;
-  --crm-status-border: #a7f3d0;
+  --crm-status-accent: #16a34a;
+  --crm-status-border: #c7f0d6;
   --crm-status-surface: #ecfdf5;
 }
 .crm-presale-board .crm-board-column[data-status='REJECTED'] {
@@ -749,7 +749,7 @@
   background: #eff6ff !important;
 }
 .crm-alert { border-radius: 10px; }
-.crm-alert.success { color: #15803d; border-color: #bbf7d0; background: #ecfdf5; }
+.crm-alert.success { color: #15803d; border-color: #c7f0d6; background: #ecfdf5; }
 .crm-alert.warning { color: #b45309; border-color: #fde68a; background: #fef3c7; }
 .crm-alert.error { color: #b91c1c; border-color: #fecaca; background: #fef2f2; }
 
@@ -808,14 +808,14 @@
   box-shadow: inset 3px 0 0 var(--crm-customer-card-accent);
 }
 .crm-customer-cards > button[data-status='ACTIVE'] {
-  --crm-customer-card-accent: #059669;
-  --crm-customer-card-border: #a7f3d0;
+  --crm-customer-card-accent: #16a34a;
+  --crm-customer-card-border: #c7f0d6;
   --crm-customer-card-surface: #ecfdf5;
 }
 .crm-customer-cards[data-quick-filter='WON'] > button[data-status='ACTIVE'] {
-  --crm-customer-card-accent: #059669;
-  --crm-customer-card-border: #6ee7b7;
-  --crm-customer-card-surface: #d1fae5;
+  --crm-customer-card-accent: #16a34a;
+  --crm-customer-card-border: #c7f0d6;
+  --crm-customer-card-surface: #ecfdf5;
 }
 .crm-customer-cards[data-quick-filter='FOLLOWUP_DUE'] > button[data-status='ACTIVE'] {
   --crm-customer-card-accent: #d97706;
@@ -828,7 +828,7 @@
   --crm-customer-card-surface: #fef2f2;
 }
 .crm-customer-cards > button[data-status='MERGED'] {
-  --crm-customer-card-accent: #7c3aed;
+  --crm-customer-card-accent: #8b5cf6;
   --crm-customer-card-border: #ddd6fe;
   --crm-customer-card-surface: #f5f3ff;
 }
@@ -855,7 +855,7 @@
 .crm-profile-list span { color: var(--crm-muted); }
 .crm-collection-editor fieldset { margin: 14px 0; padding: 14px; }
 .crm-collection-editor fieldset > .danger { margin-top: 8px; }
-.crm-project-stale { color: #a16207; font-weight: 600; }
+.crm-project-stale { color: #b45309; font-weight: 600; }
 
 .crm-inbox-item {
   display: grid !important;
@@ -998,7 +998,7 @@
   padding: 12px;
   border: 1px solid #fde68a;
   border-radius: 8px;
-  background: #fffbeb;
+  background: #fef3c7;
 }
 .crm-unavailable-assignees strong { display: block; margin-bottom: 7px; }
 
@@ -1325,34 +1325,34 @@
 .crm-approval-rules-heading h2::before { content: '✓'; display: inline-grid; width: 28px; height: 28px; place-items: center; border-radius: 9px; color: #2563eb; background: #e8f0ff; font-size: 15px; }
 .crm-approval-rule-row { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-top: 10px; padding: 16px 18px; border: 1px solid #e3ebf5; border-radius: 14px; background: #fff; cursor: pointer; transition: border-color .2s ease, box-shadow .2s ease, transform .2s ease; }
 .crm-approval-rule-row:hover { border-color: #b9d0f5; box-shadow: 0 8px 18px rgba(37, 99, 235, .08); transform: translateY(-1px); }
-.crm-approval-rule-row.is-active { border-color: #5b8def; box-shadow: 0 0 0 3px rgba(37, 99, 235, .11), 0 10px 22px rgba(37, 99, 235, .1); background: linear-gradient(100deg, #fff 0%, #f5f9ff 100%); }
-.crm-approval-rules-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 8px 0 4px; padding: 0 2px; color: #536985; }
+.crm-approval-rule-row.is-active { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, .11), 0 10px 22px rgba(37, 99, 235, .1); background: linear-gradient(100deg, #fff 0%, #f5f9ff 100%); }
+.crm-approval-rules-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 8px 0 4px; padding: 0 2px; color: #475569; }
 .crm-approval-rules-section-heading > div { display: flex; align-items: baseline; gap: 9px; }
-.crm-approval-rules-section-heading strong { color: #1d3557; font-size: 13px; }
-.crm-approval-rules-section-heading span { color: #8091a8; font-size: 12px; }
+.crm-approval-rules-section-heading strong { color: #0f172a; font-size: 13px; }
+.crm-approval-rules-section-heading span { color: #64748b; font-size: 12px; }
 .crm-approval-rules-list { display: grid; gap: 10px; }
 .crm-approval-rule-dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: #94a3b8; box-shadow: 0 0 0 4px #eef2f7; }
-.crm-approval-rule-dot.is-enabled { background: #16a36a; box-shadow: 0 0 0 4px #e7f8ef; }
+.crm-approval-rule-dot.is-enabled { background: #16a34a; box-shadow: 0 0 0 4px #ecfdf5; }
 .crm-approval-collapse-button { display: inline-flex; align-items: center; gap: 5px; }
-.crm-approval-chevron { display: inline-block; color: #71839c; font-size: 18px; line-height: 1; transform: rotate(0deg); transition: transform .18s ease; }
+.crm-approval-chevron { display: inline-block; color: #64748b; font-size: 18px; line-height: 1; transform: rotate(0deg); transition: transform .18s ease; }
 .crm-approval-chevron.is-open { transform: rotate(180deg); }
 .crm-approval-rule-main { min-width: 0; }
 .crm-approval-rule-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.crm-approval-rule-title strong { color: #172b4d; font-size: 15px; }
-.crm-approval-rule-meta { display: block; margin-top: 6px; color: #71839c; font-size: 12px; }
+.crm-approval-rule-title strong { color: #0f172a; font-size: 15px; }
+.crm-approval-rule-meta { display: block; margin-top: 6px; color: #64748b; font-size: 12px; }
 .crm-approval-status, .crm-approval-editor-badge { display: inline-flex; align-items: center; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; }
-.crm-approval-status.is-enabled, .crm-approval-editor-badge { color: #087443; background: #e7f8ef; }
+.crm-approval-status.is-enabled, .crm-approval-editor-badge { color: #15803d; background: #ecfdf5; }
 .crm-approval-status.is-disabled { color: #64748b; background: #eef2f7; }
-.crm-approval-rules-empty { display: grid; place-items: center; gap: 5px; min-height: 92px; margin: 12px 0; padding: 18px; border: 1px dashed #cbd8e8; border-radius: 14px; color: #6b7e98; text-align: center; }
-.crm-approval-rules-empty strong { color: #415674; }
+.crm-approval-rules-empty { display: grid; place-items: center; gap: 5px; min-height: 92px; margin: 12px 0; padding: 18px; border: 1px dashed #cbd8e8; border-radius: 14px; color: #64748b; text-align: center; }
+.crm-approval-rules-empty strong { color: #475569; }
 .crm-approval-rule-editor { display: grid; gap: 14px; margin-top: 20px; padding: 20px; border: 1px solid #d8e5f5; border-radius: 16px; background: #f7faff; }
 .crm-approval-editor-heading { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 12px; padding: 0 0 10px; border: 0; border-bottom: 1px solid #e1eaf5; background: transparent; color: inherit; text-align: left; cursor: pointer; }
 .crm-approval-editor-heading-actions { display: inline-flex; align-items: center; gap: 10px; }
 .crm-approval-editor-body { display: grid; gap: 14px; }
-.crm-approval-editor-heading strong, .crm-approval-node-heading strong { display: block; color: #1d3557; }
-.crm-approval-editor-heading span:not(.crm-approval-editor-badge), .crm-approval-node-heading span { color: #8091a8; font-size: 12px; }
+.crm-approval-editor-heading strong, .crm-approval-node-heading strong { display: block; color: #0f172a; }
+.crm-approval-editor-heading span:not(.crm-approval-editor-badge), .crm-approval-node-heading span { color: #64748b; font-size: 12px; }
 .crm-approval-rule-fields { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(150px, .7fr) auto; align-items: end; gap: 12px; }
-.crm-approval-rule-editor label { color: #536985; font-size: 12px; font-weight: 650; }
+.crm-approval-rule-editor label { color: #475569; font-size: 12px; font-weight: 650; }
 .crm-approval-rule-editor input, .crm-approval-rule-editor select { width: 100%; margin-top: 6px; }
 .crm-approval-node-heading { display: inline-flex; align-items: baseline; gap: 9px; }
 .crm-approval-editor-body > div:nth-of-type(3) { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
