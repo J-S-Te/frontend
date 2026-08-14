@@ -1,12 +1,18 @@
 <script setup>
+import { computed } from 'vue'
+
 const props = defineProps({
   roles: { type: Array, default: () => [] },
   modelValue: { type: Array, default: () => [] },
   ready: { type: Boolean, default: false },
   emptyText: { type: String, default: '请先选择应用' },
+  // 应用目录声明的最大有效角色数；0 表示不限制。只读展示与超限提示，最终仍由后端拒绝。
+  maxEffectiveRoles: { type: Number, default: 0 },
 })
 
 const emit = defineEmits(['update:modelValue'])
+
+const limitExceeded = computed(() => props.maxEffectiveRoles > 0 && props.modelValue.length > props.maxEffectiveRoles)
 
 function roleId(role) { return role?.role_id || role?.id || '' }
 function roleName(role) { return role?.name || role?.role_name || role?.code || roleId(role) }
@@ -21,7 +27,9 @@ function toggle(role, event) {
 
 <template>
   <div class="iam-template-catalog-field iam-template-multi-role-field">
-    <span class="iam-template-multi-role-label">{{ ready ? `选择角色（已选 ${modelValue.length} 个）` : emptyText }}</span>
+    <span class="iam-template-multi-role-label">{{ ready ? (maxEffectiveRoles ? `选择角色（已选 ${modelValue.length} / 最多 ${maxEffectiveRoles} 个）` : `选择角色（已选 ${modelValue.length} 个）`) : emptyText }}</span>
+    <small v-if="ready && maxEffectiveRoles" class="iam-template-role-limit-hint">该应用限制每个用户最多 {{ maxEffectiveRoles }} 个有效角色（含组织/岗位继承）。</small>
+    <small v-if="ready && limitExceeded" class="iam-template-role-limit-warning" role="alert">已选 {{ modelValue.length }} 个角色，超过该应用允许的最大有效角色数（{{ maxEffectiveRoles }} 个）；请取消多余角色。</small>
     <div v-if="ready" class="iam-template-role-checks">
       <label v-for="role in roles" :key="roleId(role)" class="iam-template-role-check">
         <input type="checkbox" :checked="modelValue.includes(roleId(role))" @change="toggle(role, $event)" />

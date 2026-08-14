@@ -3,6 +3,7 @@ import { test } from 'node:test'
 import {
   assignableActiveCatalogRoles,
   catalogLastSyncedAt,
+  catalogMaxEffectiveRoles,
   catalogSyncText,
   catalogVersion,
   isAssignableActiveCatalogRole,
@@ -22,6 +23,15 @@ test('application catalog only exposes ACTIVE and assignable roles', () => {
   assert.equal(isAssignableActiveCatalogRole(roles[2]), false)
   assert.equal(isAssignableActiveCatalogRole(roles[3]), false)
   assert.deepEqual(assignableActiveCatalogRoles({ roles }).map((role) => role.code), ['sales', 'auditor'])
+})
+
+test('catalog max effective roles reads the declared policy and defaults to unlimited', () => {
+  assert.equal(catalogMaxEffectiveRoles({ policy: { max_effective_roles: 3 } }), 3)
+  assert.equal(catalogMaxEffectiveRoles({ policy: { max_effective_roles: 0 } }), 0)
+  assert.equal(catalogMaxEffectiveRoles({ policy: { max_effective_roles: -1 } }), 0)
+  assert.equal(catalogMaxEffectiveRoles({ policy: {} }), 0)
+  assert.equal(catalogMaxEffectiveRoles({ max_effective_roles: 8 }), 8)
+  assert.equal(catalogMaxEffectiveRoles(null), 0)
 })
 
 test('application catalog metadata presents version and synchronization state', () => {

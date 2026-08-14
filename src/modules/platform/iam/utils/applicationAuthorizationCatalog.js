@@ -24,6 +24,16 @@ export function assignableActiveCatalogRoles(catalog) {
   return catalogRoles(catalog).filter(isAssignableActiveCatalogRole)
 }
 
+/**
+ * 应用目录声明的最大有效角色数。0 表示应用未限制；负数或缺失一律按 0 处理。
+ * 该值由子系统目录同步写入 authz_application_authorization_policy，平台只读展示与校验。
+ */
+export function catalogMaxEffectiveRoles(catalog) {
+  const raw = catalog?.policy?.max_effective_roles ?? catalog?.max_effective_roles
+  const parsed = Number(raw)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0
+}
+
 export function catalogVersion(catalog) {
   return catalog?.catalog_version || catalog?.version || catalog?.metadata?.catalog_version || '—'
 }

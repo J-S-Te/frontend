@@ -102,7 +102,7 @@ onBeforeUnmount(() => {
       </div>
     </header>
     <div ref="viewport" class="contract-document-preview__viewport">
-      <div class="contract-document-preview__document" :style="{ zoom: `${zoomPercent}%` }" v-html="props.html"></div>
+      <div class="contract-document-preview__document" :style="{ zoom: `${zoomPercent}%` }" v-html="sanitizedHtml"></div>
     </div>
   </section>
 </template>
