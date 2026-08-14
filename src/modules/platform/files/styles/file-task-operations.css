@@ -3,7 +3,7 @@
 .filetask-module__eyebrow { display: inline-block; margin-bottom: 7px; color: #2563eb; font-size: 11px; font-weight: 800; letter-spacing: .12em; }
 .filetask-module h2, .filetask-card h3 { margin: 0; color: #0f172a; }
 .filetask-module h2 { font-size: 22px; }.filetask-module p { margin: 7px 0 0; color: #64748b; font-size: 13px; line-height: 1.65; }
-.filetask-module__error { margin: 0; border: 1px solid #fecaca; border-radius: 8px; background: #fef2f2; color: #b91c1c; padding: 10px 13px; font-size: 13px; }
+.filetask-module__error { margin: 0; border: 1px solid #fecaca; border-radius: 8px; background: #fef2f2; color: #b91c1c; padding: 10px 13px; font-size: 13px; overflow-wrap: anywhere; word-break: break-word; }
 .filetask-module__grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 .filetask-card { display: grid; gap: 14px; padding: 18px; border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; box-shadow: 0 6px 20px rgba(15, 23, 42, .05); }
 .filetask-card > header > svg { flex: 0 0 auto; width: 21px; height: 21px; margin-top: 2px; color: #2563eb; }.filetask-card h3 { font-size: 15px; }

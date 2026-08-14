@@ -1318,11 +1318,11 @@ onMounted(() => {
 .application-registry-discovery article { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 12px; border: 1px solid #e0e7ff; border-radius: 9px; background: #fff; }
 .application-registry-discovery article > div { min-width: 0; }
 .application-registry-discovery article strong, .application-registry-discovery article span, .application-registry-discovery article small { display: block; }
-.application-registry-discovery article strong { color: #1e293b; font-size: 13px; }
+.application-registry-discovery article strong { color: #1e293b; font-size: 13px; overflow-wrap: anywhere; word-break: break-all; }
 .application-registry-discovery article span, .application-registry-discovery article small { margin-top: 3px; overflow: hidden; color: #64748b; font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
 .application-registry-error { display: grid; gap: 4px; margin: 14px 0 0; padding: 10px 12px; color: #b91c1c; border: 1px solid #fecaca; border-radius: 8px; background: #fff7f7; font-size: 12px; line-height: 1.55; }
 .application-registry-error-actions { display: flex; gap: 8px; margin-top: 4px; }
-.application-registry-error span, .application-registry-error small { color: #7f1d1d; }
+.application-registry-error span, .application-registry-error small { color: #7f1d1d; overflow-wrap: anywhere; word-break: break-all; }
 .application-registry-error-detail { margin: 6px 0 0; padding: 8px; overflow: auto; max-height: 220px; color: #7f1d1d; border: 1px solid #fecaca; border-radius: 6px; background: #fff; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
 .application-registry-environment-guidance.is-error { color: #b91c1c; }
 .application-registry-environment-guidance.is-error span { display: block; margin-top: 2px; color: #7f1d1d; }
@@ -1377,6 +1377,7 @@ onMounted(() => {
 .application-registry-switch-gates > strong { display: block; margin-bottom: 4px; }
 .application-registry-switch-gates ul { display: grid; gap: 3px; margin: 0; padding: 0; list-style: none; }
 .application-registry-switch-gates li { display: grid; grid-template-columns: 44px 1fr; gap: 4px; align-items: baseline; }
+.application-registry-switch-gates li code { overflow-wrap: anywhere; word-break: break-all; }
 .application-registry-switch-gates li span { color: #b45309; font-weight: 700; }
 .application-registry-switch-gates li.is-passed span { color: #15803d; }
 .application-registry-switch-gates li small { grid-column: 2; color: #92400e; line-height: 1.45; }

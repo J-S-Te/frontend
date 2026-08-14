@@ -487,6 +487,8 @@ button {
   border-radius: 8px;
   font-size: 11px;
   line-height: 1.55;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .form-message svg {
@@ -520,6 +522,8 @@ button {
   color: #9a3412;
   font-size: 11px;
   line-height: 1.55;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .session-takeover button {

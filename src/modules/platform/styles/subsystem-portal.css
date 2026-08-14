@@ -430,6 +430,21 @@
   font-weight: 700;
   text-align: center;
   line-height: 1.5;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.subsystem-card__description {
+  position: relative;
+  z-index: 1;
+  max-width: 100%;
+  margin-top: 9px;
+  color: rgba(203, 213, 225, 0.82);
+  font-size: 13px;
+  line-height: 1.6;
+  text-align: center;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .subsystem-card__action {

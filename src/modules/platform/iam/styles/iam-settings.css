@@ -3175,3 +3175,6 @@
     overflow-wrap: anywhere;
   }
 }
+
+/* 角色码 / 权限码 / 应用编码等 mono 长串统一断词（此前 code 漏加） */
+.iam-settings code { overflow-wrap: anywhere; word-break: break-all; }
