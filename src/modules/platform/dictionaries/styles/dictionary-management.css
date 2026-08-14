@@ -39,9 +39,9 @@
 .dictionary-module .so-summary-card strong { display: block; margin-top: 2px; color: var(--so-ink); font-size: 22px; line-height: 1.05; }
 .dictionary-module .so-summary-card p { margin: 3px 0 0; overflow: hidden; color: #94a3b8; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .dictionary-module .so-summary-card.blue > span { color: #2563eb; background: #dbeafe; }
-.dictionary-module .so-summary-card.violet > span { color: #7c3aed; background: #ede9fe; }
-.dictionary-module .so-summary-card.orange > span { color: #c2410c; background: #ffedd5; }
-.dictionary-module .so-summary-card.green > span { color: #15803d; background: #dcfce7; }
+.dictionary-module .so-summary-card.violet > span { color: #8b5cf6; background: #f5f3ff; }
+.dictionary-module .so-summary-card.orange > span { color: #b45309; background: #fef3c7; }
+.dictionary-module .so-summary-card.green > span { color: #15803d; background: #ecfdf5; }
 
 .dictionary-module .so-content {
   min-width: 0;
@@ -189,12 +189,12 @@
 .dictionary-module__error {
   margin: 12px;
   padding: 9px 11px;
-  color: #b42318;
+  color: #b91c1c;
   font-size: 12px;
   line-height: 1.5;
   border: 1px solid #fecaca;
   border-radius: 7px;
-  background: #fff1f2;
+  background: #fef2f2;
 }
 
 .dictionary-dialog { width: min(680px, 100%); }

@@ -8,7 +8,7 @@
   color: #f8fafc;
   background:
     linear-gradient(135deg, rgba(15, 23, 42, 0.18), rgba(15, 23, 42, 0.78)),
-    linear-gradient(135deg, #111c35 0%, #0f172a 52%, #17233b 100%);
+    linear-gradient(135deg, #111c35 0%, #0f172a 52%, #0f172a 100%);
 }
 
 .subsystem-portal__particles,
@@ -159,7 +159,7 @@
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.04em;
-  background: linear-gradient(135deg, #2563eb, #5b5bd6);
+  background: linear-gradient(135deg, #2563eb, #8b5cf6);
 }
 
 .subsystem-portal__user-summary {
@@ -268,7 +268,7 @@
   padding: 10px 14px;
   border: 1px solid rgba(252, 165, 165, 0.48);
   border-radius: 10px;
-  color: #fee2e2;
+  color: #fecaca;
   cursor: pointer;
   font: inherit;
   font-size: 13px;
@@ -413,7 +413,7 @@
   border: 1px solid rgba(191, 219, 254, 0.4);
   border-radius: 18px;
   color: #eff6ff;
-  background: linear-gradient(135deg, #2563eb, #5b5bd6);
+  background: linear-gradient(135deg, #2563eb, #8b5cf6);
   box-shadow: 0 14px 34px rgba(37, 99, 235, 0.32);
 }
 
@@ -517,7 +517,7 @@
 
 .subsystem-portal__toast.is-deny {
   border-color: rgba(252, 165, 165, 0.45);
-  color: #fee2e2;
+  color: #fecaca;
 }
 
 .portal-toast-enter-active,
