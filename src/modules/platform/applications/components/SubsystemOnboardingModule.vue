@@ -49,9 +49,10 @@ const selectedApplicationId = ref('')
 const environments = ref([])
 const environmentsLoading = ref(false)
 const selectedEnvironmentId = ref('')
-// 应用目录、认证接入和运行时部署属于不同职责边界。保留同一应用选择
-// 上下文，但不在“应用目录与授权”中泄漏任何 OIDC / Keycloak 配置动作。
-const activeWorkspace = ref('directory')
+// 环境卡片内按职责分区（目录入口 / 运行时 / 认证），不再用平级工作区切换；
+// 认证区默认折叠，避免单个环境卡片承载过多信息。登记向导用两步收敛新增接入。
+const expandedAuthentication = ref({})
+const onboardStep = ref(1)
 const deploymentStates = ref({})
 const deploymentStatusErrors = ref({})
 const keycloakSwitchStates = ref({})
@@ -363,20 +364,12 @@ function environmentStatusError(environment) {
 
 function selectApplication(application) {
   selectedApplicationId.value = application.application_id
-  activeWorkspace.value = 'directory'
   applicationEditorOpen.value = false
   environmentEditorOpen.value = false
   pendingDeleteApplication.value = null
   deleteConfirmation.value = ''
   showOnboard.value = false
   onboardExistingApplicationId.value = ''
-}
-
-function selectWorkspace(workspace) {
-  if (!['directory', 'authentication', 'runtime'].includes(workspace)) return
-  activeWorkspace.value = workspace
-  environmentEditorOpen.value = false
-  clearError()
 }
 
 async function loadApplications(preferredApplicationId = selectedApplicationId.value) {
@@ -546,14 +539,24 @@ function toggleOnboarding() {
   if (showOnboard.value) {
     showOnboard.value = false
     onboardExistingApplicationId.value = ''
+    onboardStep.value = 1
     return
   }
   Object.assign(onboardForm, emptyOnboardForm())
   onboardExistingApplicationId.value = ''
   onboardConfirmation.value = ''
+  onboardStep.value = 1
   clearError()
   if (isProductionProvisioning.value) applyProductionProvisioningPreset()
   showOnboard.value = true
+}
+
+function nextOnboardStep() {
+  if (onboardStep.value < 2) onboardStep.value += 1
+}
+
+function prevOnboardStep() {
+  if (onboardStep.value > 1) onboardStep.value -= 1
 }
 
 async function discoverSubsystems() {
@@ -874,6 +877,12 @@ function keycloakRuntimePreparationReady(environment) {
   return required.size === gates.filter((gate) => required.has(gate?.key) && gate?.passed === true).length
 }
 
+function gateProgress(environment) {
+  const gates = Array.isArray(keycloakSwitchState(environment).switch_gates) ? keycloakSwitchState(environment).switch_gates : []
+  const passed = gates.filter((gate) => gate?.passed === true).length
+  return { passed, total: gates.length || 4 }
+}
+
 function keycloakClientState(environment) {
   const state = keycloakSwitchState(environment)
   return state.client_id ? '已同步' : '待同步'
@@ -1088,6 +1097,34 @@ function selectEnvironment(environment) {
   environmentEditorOpen.value = false
 }
 
+function toggleAuthentication(environment) {
+  if (!environment?.environment_id) return
+  const next = { ...expandedAuthentication.value }
+  next[environment.environment_id] = !next[environment.environment_id]
+  expandedAuthentication.value = next
+}
+
+function authenticationExpanded(environment) {
+  return Boolean(environment && expandedAuthentication.value[environment.environment_id])
+}
+
+// 接入进度：按“最领先环境”推进，仅作顶部引导，后端四项门禁仍是最终校验。
+const onboardingSteps = computed(() => {
+  const envs = environments.value
+  const any = (predicate) => envs.some(predicate)
+  const steps = [
+    { key: 'registered', label: '登记应用', done: Boolean(selectedApplication.value) },
+    { key: 'environment', label: '登记环境', done: envs.length > 0 },
+    { key: 'client', label: '同步 Client', done: any((environment) => Boolean(keycloakSwitchState(environment).client_id)) },
+    { key: 'projection', label: '用户投影', done: any((environment) => keycloakRuntimePreparationReady(environment)) },
+    { key: 'gates', label: '门禁通过', done: any((environment) => keycloakSwitchReady(environment)) },
+    { key: 'observation', label: '观察期', done: any((environment) => keycloakCutoverState(environment).status !== 'NOT_STARTED') },
+    { key: 'switched', label: '切换 Keycloak', done: any((environment) => (environment.issuer_alias || 'platform') === 'keycloak') },
+  ]
+  const completed = steps.filter((step) => step.done).length
+  return { steps, completed, total: steps.length }
+})
+
 watch(selectedApplicationId, () => { loadEnvironments() }, { immediate: true })
 watch(() => onboardForm.applicationCode, (applicationCode, previousCode) => {
   if (isProductionProvisioning.value) return
@@ -1105,70 +1142,22 @@ onMounted(() => {
       <header class="application-registry-header">
         <div>
           <span class="application-registry-eyebrow"><ConsoleIcon name="dashboard" /> APPLICATION REGISTRY</span>
-          <h2 id="application-registry-title">应用目录与授权</h2>
-          <p>应用目录、访问入口与授权信息由基础平台维护；认证接入和运行时部署使用独立工作区，避免把业务授权与 OIDC Client 管理混在一起。</p>
+          <h2 id="application-registry-title">应用接入</h2>
+          <p>应用目录、访问入口与授权信息由基础平台维护；认证接入和运行时部署按环境分区维护，避免把业务授权与 OIDC Client 管理混在一起。</p>
         </div>
-        <div v-if="activeWorkspace === 'runtime'" class="application-registry-header-actions">
-          <button v-if="canReadApplications" class="console-button secondary" type="button" :disabled="discoveryLoading" @click="discoverSubsystems">
-            <ConsoleIcon name="search" />{{ discoveryLoading ? '探测中…' : '探测子系统' }}
-          </button>
-          <button v-if="props.canOnboard" class="console-button primary" type="button" @click="toggleOnboarding">
-            <ConsoleIcon name="save" />{{ showOnboard ? '收起接入' : '新增接入' }}
-          </button>
+        <div class="application-registry-header-actions">
+          <button v-if="canReadApplications" class="console-button secondary" type="button" :disabled="discoveryLoading" @click="discoverSubsystems"><ConsoleIcon name="search" />{{ discoveryLoading ? '探测中…' : '探测子系统' }}</button>
+          <button v-if="props.canOnboard" class="console-button primary" type="button" @click="toggleOnboarding"><ConsoleIcon name="save" />新增接入</button>
         </div>
       </header>
 
-      <nav class="application-registry-workspaces" aria-label="应用接入管理工作区">
-        <button type="button" :class="{ 'is-active': activeWorkspace === 'directory' }" @click="selectWorkspace('directory')"><ConsoleIcon name="dashboard" />应用目录与授权</button>
-        <button type="button" :class="{ 'is-active': activeWorkspace === 'authentication' }" @click="selectWorkspace('authentication')"><ConsoleIcon name="shield" />Keycloak 认证接入</button>
-        <button type="button" :class="{ 'is-active': activeWorkspace === 'runtime' }" @click="selectWorkspace('runtime')"><ConsoleIcon name="settings" />运行时与部署</button>
-      </nav>
-
-      <section v-if="activeWorkspace === 'runtime' && discoveredCandidates.length" class="application-registry-discovery" aria-label="发现的未登记子系统">
-        <div><strong>发现到 {{ discoveredCandidates.length }} 个未登记子系统</strong><small>服务通过 Docker 标签声明自身能力；选择后会预填运行时接入信息。认证 Client 请在“Keycloak 认证接入”中单独同步。</small></div>
+      <section v-if="discoveredCandidates.length" class="application-registry-discovery" aria-label="发现的未登记子系统">
+        <div><strong>发现到 {{ discoveredCandidates.length }} 个未登记子系统</strong><small>服务通过 Docker 标签声明自身能力；选择后会预填运行时接入信息。认证 Client 请在对应环境的“Keycloak 认证”分区中单独同步。</small></div>
         <article v-for="candidate in discoveredCandidates" :key="`${candidate.application_code}/${candidate.environment}/${candidate.service_name}`">
           <div><strong>{{ candidate.application_code }}</strong><span>{{ candidate.environment }} · {{ candidate.service_name }} · {{ candidate.status }}</span><small>{{ candidate.protocol }}://{{ candidate.internal_host }}:{{ candidate.internal_port }} · {{ candidate.health_endpoint || '未声明健康检查' }}</small></div>
           <button v-if="props.canOnboard" class="console-button primary small" type="button" @click="useDiscoveredCandidate(candidate)">采用并接入</button>
         </article>
       </section>
-
-      <form v-if="activeWorkspace === 'runtime' && showOnboard" class="application-registry-onboard" @submit.prevent="submitOnboarding">
-        <div class="application-registry-section-title">
-          <div><strong>登记应用环境</strong><small>第 1 步：只登记应用、环境和登录入口；不会创建 OIDC Client 或启动服务。随后请在“Keycloak 认证接入”同步 Client，最后再应用运行时。部署能力与允许范围最终由后端 Agent 校验。</small></div>
-          <button v-if="isProductionProvisioning && !onboardingExistingApplication" class="console-button ghost small" type="button" @click="applyProductionProvisioningPreset">填入服务器接入配置</button>
-        </div>
-        <p v-if="automationUnavailable" class="application-registry-inline-warning">当前环境未启用受控部署 Agent，不能执行一键接入；请先由部署人员发布平台生产部署资产。</p>
-        <p v-else-if="isProductionProvisioning" class="application-registry-inline-note">当前服务器使用生产部署策略（{{ productionProvisioningSummary }}）；应用、环境、内部 UpstreamURL 和门户路径由服务器审核清单控制，公网访问地址可按实际域名或端口手动填写。</p>
-        <div class="console-form-grid">
-          <template v-if="isProductionProvisioning">
-            <label v-if="productionTargetInventoryLoading" class="console-form-item"><span>服务器接入目标</span><input value="正在读取已接入环境…" disabled /></label>
-            <label v-else-if="productionTargetInventoryError" class="console-form-item"><span>服务器接入目标</span><input :value="productionTargetInventoryError" disabled /></label>
-            <label v-else-if="selectableProductionTargets.length" class="console-form-item"><span>服务器接入目标</span><select :value="selectedProductionTargetKey" @change="selectProductionTarget"><option v-for="target in selectableProductionTargets" :key="productionTargetKey(target)" :value="productionTargetKey(target)">{{ target.application_name || target.application_code }}（{{ productionTargetKey(target) }}）</option></select><small>仅显示 subsystems.d 中审核通过且尚未接入的目标</small></label>
-            <div v-else class="application-registry-target-empty" role="status"><ConsoleIcon name="info" /><strong>暂无可接入目标</strong><span>subsystems.d 中没有审核通过且尚未接入的应用环境。</span></div>
-            <template v-if="selectedProductionTarget">
-              <label class="console-form-item"><span>应用编码</span><input :value="onboardForm.applicationCode" disabled /></label>
-              <label class="console-form-item"><span>应用名称</span><input :value="onboardForm.applicationName" disabled /></label>
-              <label class="console-form-item"><span>环境</span><input :value="onboardForm.environment" disabled /></label>
-              <label class="console-form-item"><span>Public BaseURL</span><input v-model="onboardForm.publicBaseUrl" type="url" inputmode="url" placeholder="https://portal.example.com" required /><small>浏览器实际访问的协议、域名和端口；回调地址会由此地址和门户路径自动生成。</small></label>
-              <label class="console-form-item"><span>UpstreamURL</span><input :value="onboardForm.upstreamUrl" readonly /><small>服务器审核清单中的受控编排地址</small></label>
-              <label class="console-form-item"><span>门户路径前缀</span><input :value="onboardForm.pathPrefix" readonly /><small>服务器审核清单中的受控门户路径</small></label>
-              <label class="console-form-item"><span>应用说明</span><input :value="onboardForm.description" readonly /></label>
-              <label class="console-form-item application-registry-confirm"><span>确认码：{{ onboardConfirmationCode }}</span><input v-model="onboardConfirmation" :placeholder="onboardConfirmationCode" autocomplete="off" /></label>
-            </template>
-          </template>
-          <template v-else>
-            <label class="console-form-item"><span>应用编码</span><input v-model="onboardForm.applicationCode" :disabled="onboardingExistingApplication" placeholder="customer_management" /></label>
-            <label class="console-form-item"><span>应用名称</span><input v-model="onboardForm.applicationName" :disabled="onboardingExistingApplication" placeholder="客户管理系统" /></label>
-            <label class="console-form-item"><span>环境</span><select v-model="onboardForm.environment"><option v-for="environment in availableOnboardEnvironments" :key="environment" :value="environment">{{ environment }}</option></select></label>
-            <label class="console-form-item"><span>Public BaseURL</span><input v-model="onboardForm.publicBaseUrl" placeholder="http://localhost:8081" /></label>
-            <label class="console-form-item"><span>UpstreamURL</span><input v-model="onboardForm.upstreamUrl" :readonly="Boolean(onboardPreset)" placeholder="http://customer-api:8080" /><small v-if="onboardPreset">服务器受控编排地址</small></label>
-            <label class="console-form-item"><span>门户路径前缀</span><input v-model="onboardForm.pathPrefix" :readonly="Boolean(onboardPreset)" placeholder="/customer_management" /><small v-if="onboardPreset">服务器受控门户路径</small></label>
-            <label class="console-form-item"><span>应用说明</span><input v-model="onboardForm.description" placeholder="可选" /></label>
-            <label class="console-form-item application-registry-confirm"><span>确认码：{{ onboardConfirmationCode || '应用编码/环境' }}</span><input v-model="onboardConfirmation" :placeholder="onboardConfirmationCode || '应用编码/环境'" autocomplete="off" /></label>
-          </template>
-        </div>
-        <div class="console-form-actions"><button class="console-button primary" type="submit" :disabled="!canSubmitOnboard || saving"><ConsoleIcon name="save" />{{ saving ? '登记中…' : '登记目录并进入认证配置' }}</button><small v-if="!isProductionProvisioning || selectedProductionTarget">若应用环境已存在，平台会阻止覆盖；请在下方选择后更新或重试。</small><small v-else>当前没有可选服务器目标，不能自由填写接入参数。</small></div>
-      </form>
 
       <div v-if="errorMessage" class="application-registry-error" role="alert">
         <strong>{{ errorMessage }}</strong>
@@ -1195,87 +1184,145 @@ onMounted(() => {
         <main v-if="selectedApplication" class="application-registry-detail">
           <header class="application-registry-detail-head">
             <div><span class="application-registry-eyebrow">APPLICATION</span><h3>{{ selectedApplication.name || selectedApplication.code }}</h3><p><code>{{ selectedApplication.code }}</code><span> · 版本 {{ selectedApplication.version }}</span></p></div>
-            <div class="application-registry-detail-actions"><span class="application-registry-status" :class="statusClass(selectedApplication.status)">{{ statusLabel(selectedApplication.status) }}</span><button v-if="activeWorkspace === 'directory' && canUpdateApplication && selectedApplication.code !== 'platform'" class="console-button ghost small" type="button" @click="openApplicationEditor"><ConsoleIcon name="settings" />编辑应用</button><button v-if="activeWorkspace === 'directory' && canUpdateApplication && selectedApplication.code !== 'platform' && selectedApplication.status !== 'RETIRED'" class="console-button danger small" type="button" @click="openDeleteApplication(selectedApplication)"><ConsoleIcon name="close" />退役应用</button></div>
+            <div class="application-registry-detail-actions"><span class="application-registry-status" :class="statusClass(selectedApplication.status)">{{ statusLabel(selectedApplication.status) }}</span><button v-if="canUpdateApplication && selectedApplication.code !== 'platform'" class="console-button ghost small" type="button" @click="openApplicationEditor"><ConsoleIcon name="settings" />编辑应用</button><button v-if="canUpdateApplication && selectedApplication.code !== 'platform' && selectedApplication.status !== 'RETIRED'" class="console-button danger small" type="button" @click="openDeleteApplication(selectedApplication)"><ConsoleIcon name="close" />退役应用</button></div>
           </header>
 
-          <form v-if="activeWorkspace === 'directory' && applicationEditorOpen" class="application-registry-editor" @submit.prevent="saveApplication">
+          <form v-if="applicationEditorOpen" class="application-registry-editor" @submit.prevent="saveApplication">
             <div class="application-registry-section-title"><div><strong>编辑应用登记</strong><small>应用编码不可修改；修改会使用当前 version 防止覆盖其他管理员的更新。</small></div></div>
             <div class="console-form-grid"><label class="console-form-item"><span>应用编码</span><input :value="selectedApplication.code" disabled /></label><label class="console-form-item"><span>应用名称</span><input v-model="appForm.name" /></label><label class="console-form-item"><span>应用类型</span><select v-model="appForm.applicationType"><option value="web">web</option><option value="spa">spa</option><option value="backend">backend</option><option value="mobile">mobile</option><option value="third_party">third_party</option></select></label><label class="console-form-item"><span>应用状态</span><select v-model="appForm.status"><option value="DRAFT">草稿</option><option value="ACTIVE">启用</option><option value="SUSPENDED">暂停</option><option value="RETIRED">已退役</option></select></label><label class="console-form-item"><span>主页地址</span><input v-model="appForm.homepageUrl" placeholder="可选 HTTPS 地址" /></label><label class="console-form-item"><span>应用说明</span><input v-model="appForm.description" /></label></div>
             <div class="console-form-actions"><button class="console-button primary" type="submit" :disabled="saving"><ConsoleIcon name="save" />保存应用</button><button class="console-button ghost" type="button" :disabled="saving" @click="applicationEditorOpen = false">取消</button></div>
           </form>
 
-          <section v-if="activeWorkspace === 'directory'" class="application-registry-panel">
-            <header class="application-registry-panel-head"><div><h4>应用目录与授权</h4><p>维护应用名称、门户访问入口和登录目标。岗位模板、角色分配与个人例外授权在“身份、组织与授权”中维护；角色目录由子系统只读同步。</p></div></header>
-            <div v-if="!canReadEnvironments" class="application-registry-empty compact"><ConsoleIcon name="shield" /><span>当前账号没有读取应用环境的权限，不能读取访问入口。</span></div>
-            <div v-else-if="environmentsLoading" class="application-registry-list-state">正在读取已登记环境…</div>
-            <div v-else-if="!environments.length" class="application-registry-empty compact"><ConsoleIcon name="info" /><span>当前应用还没有已登记环境。</span></div>
-            <div v-else class="application-registry-environments">
-              <article v-for="environment in environments" :key="environment.environment_id" class="application-registry-environment" :class="{ 'is-selected': environment.environment_id === selectedEnvironmentId }" @click="selectEnvironment(environment)">
-                <div class="application-registry-environment-main"><strong>{{ environment.environment }}</strong><span class="application-registry-status" :class="statusClass(environment.status)">{{ statusLabel(environment.status) }}</span><small>配置版本 {{ environment.version }}</small></div>
-                <div class="application-registry-environment-uri"><span>{{ environment.base_url || '未设置门户地址' }}{{ environment.path_prefix || '' }}</span><small>选择环境后维护登录目标</small></div>
-              </article>
-            </div>
-            <ApplicationLoginTargetModule v-if="selectedEnvironment && canReadLoginTargets" :application-id="selectedApplication.application_id" :environment-id="selectedEnvironment.environment_id" :application-name="selectedApplication.name || selectedApplication.code" :environment-name="selectedEnvironment.environment" @toast="notify" />
-          </section>
+          <nav class="application-registry-progress" aria-label="接入进度">
+            <ol>
+              <li v-for="(step, index) in onboardingSteps.steps" :key="step.key" :class="{ 'is-done': step.done, 'is-current': !step.done && (index === 0 || onboardingSteps.steps[index - 1].done) }"><i>{{ step.done ? '✓' : index + 1 }}</i><span>{{ step.label }}</span></li>
+            </ol>
+            <small>{{ onboardingSteps.completed }}/{{ onboardingSteps.total }} 步已完成</small>
+          </nav>
 
-          <section v-else-if="activeWorkspace === 'authentication'" class="application-registry-panel">
-            <header class="application-registry-panel-head"><div><h4>Keycloak 认证接入</h4><p>仅维护 Realm、Client、回调地址和 Claims 映射的同步状态。基础平台继续负责用户、组织、岗位、角色分配与最终权限计算。</p></div></header>
-            <div v-if="!canReadEnvironments" class="application-registry-empty compact"><ConsoleIcon name="shield" /><span>当前账号没有读取应用环境的权限，不能读取认证接入状态。</span></div>
-            <div v-else-if="environmentsLoading" class="application-registry-list-state">正在读取认证接入状态…</div>
-            <div v-else-if="!environments.length" class="application-registry-empty compact"><ConsoleIcon name="info" /><span>请先在“运行时与部署”登记应用环境。</span></div>
-            <div v-else class="application-registry-environments">
-              <article v-for="environment in environments" :key="environment.environment_id" class="application-registry-environment authentication">
-                <div class="application-registry-environment-main"><strong>{{ environment.environment }}</strong><span class="application-registry-status" :class="statusClass(keycloakClientState(environment) === '已同步' ? 'READY' : 'DRAFT')">{{ keycloakClientState(environment) }}</span><small>当前提供方：{{ providerLabel(environment.issuer_alias || 'platform') }}</small></div>
-                <dl class="application-registry-auth-details"><div><dt>Realm</dt><dd>{{ providerStatus('keycloak')?.realm || '未配置' }}</dd></div><div><dt>Client ID</dt><dd><code>{{ keycloakClientID(environment) }}</code></dd></div><div><dt>Redirect URI</dt><dd><code>{{ keycloakRedirectURI(environment) }}</code></dd></div><div><dt>Claims 映射</dt><dd>{{ keycloakClaimsState(environment) }}</dd></div></dl>
-                <div v-if="providerStatus('keycloak')" class="application-registry-switch-gates">
-                  <strong>切换 Keycloak 门禁</strong>
-                  <ul v-if="keycloakSwitchState(environment).switch_gates?.length"><li v-for="gate in keycloakSwitchState(environment).switch_gates" :key="gate.key" :class="{ 'is-passed': gate.passed }"><span>{{ gate.passed ? '已通过' : '未通过' }}</span>{{ gate.label }}<small>{{ gate.detail }}{{ !gate.passed && gate.next_action ? ` 下一步：${gate.next_action}` : '' }}</small></li></ul>
-                  <small v-else>请先同步 Keycloak Client 以读取该环境的切换门禁。</small>
-                  <p v-if="!keycloakSwitchReady(environment) && keycloakSwitchState(environment).next_action">下一步：{{ keycloakSwitchState(environment).next_action }}</p>
-                </div>
-                <div class="application-registry-switch-gates">
-                  <strong>灰度迁移状态</strong>
-                  <p>状态：{{ keycloakCutoverState(environment).status }}；观察开始：{{ dateTime(keycloakCutoverState(environment).observation_started_at) }}；观察截止：{{ dateTime(keycloakCutoverState(environment).observation_ends_at) }}</p>
-                  <p v-if="keycloakCutoverState(environment).rollback_deadline_at">回滚截止：{{ dateTime(keycloakCutoverState(environment).rollback_deadline_at) }}</p>
-                  <ul v-if="keycloakSwitchState(environment).timeline?.length"><li v-for="event in keycloakSwitchState(environment).timeline" :key="event.id"><span>已记录</span>{{ event.summary }}<small>{{ dateTime(event.occurred_at) }}</small></li></ul>
-                  <small v-else>完成同步与门禁后，开始七天观察期；每次观察、切换和回滚都会追加审计时间线。</small>
-                </div>
-                <div class="application-registry-environment-actions"><button v-if="canManageRuntime" class="console-button ghost small" type="button" :disabled="saving || !providerStatus('keycloak') || providerStatus('keycloak')?.status === 'NOT_CONFIGURED'" @click="synchronizeKeycloakClient(environment)"><ConsoleIcon name="shield" />导入/同步 Keycloak Client</button><button v-if="canManageRuntime && keycloakSwitchReady(environment) && keycloakCutoverState(environment).status === 'NOT_STARTED'" class="console-button ghost small" type="button" :disabled="saving" @click="beginKeycloakObservation(environment)"><ConsoleIcon name="shield" />开始 7 天观察</button><button v-if="canManageRuntime && (environment.issuer_alias || 'platform') !== 'keycloak'" class="console-button ghost small" type="button" :disabled="saving || !keycloakRuntimePreparationReady(environment)" @click="switchAuthenticationProvider(environment, 'keycloak')"><ConsoleIcon name="shield" />准备并切换 Keycloak</button><button v-if="canManageRuntime && (environment.issuer_alias || 'platform') === 'keycloak'" class="console-button ghost small" type="button" :disabled="saving || !keycloakRollbackAvailable(environment)" @click="switchAuthenticationProvider(environment, 'platform')"><ConsoleIcon name="reset" />回滚基础平台</button></div>
-              </article>
-            </div>
-            <section class="application-registry-switch-gates" aria-label="Keycloak 授权投影告警">
-              <strong>授权投影告警与受控重放</strong>
-              <p v-if="keycloakOperationsLoading">正在读取 FAILED 投影状态…</p>
-              <p v-else-if="keycloakProjectionAlert?.state === 'ALERT'">{{ keycloakProjectionAlert.summary }}（{{ keycloakProjectionAlert.failed_count }} 条）。FAILED 投影会阻断对应环境切换。</p>
-              <p v-else>当前没有 FAILED 授权投影。</p>
-              <ul v-if="keycloakProjectionFailures.length"><li v-for="failure in keycloakProjectionFailures" :key="failure.event_id"><span>FAILED</span><code>{{ failure.application_code }}/{{ failure.environment || '全局' }}</code> · {{ failure.error_code || 'KEYCLOAK_SYNC_FAILED' }}<small>{{ failure.error_message || '请查看平台与 Keycloak 日志后受控重放。' }}</small><button v-if="canManageRuntime" class="console-button ghost small" type="button" :disabled="saving" @click="replayProjectionFailure(failure)">受控重放</button></li></ul>
-            </section>
-          </section>
+          <div v-if="environmentsLoading" class="application-registry-list-state">正在读取已登记环境…</div>
+          <div v-else-if="!environments.length" class="application-registry-empty compact"><ConsoleIcon name="info" /><span>当前应用还没有已登记环境，点击右上角「新增接入」登记应用环境。</span></div>
+          <div v-else class="application-registry-environments">
+            <article v-for="environment in environments" :key="environment.environment_id" class="application-registry-environment" :class="{ 'is-selected': environment.environment_id === selectedEnvironmentId }" @click="selectEnvironment(environment)">
+              <div class="application-registry-environment-main">
+                <strong>{{ environment.environment }}</strong>
+                <span class="application-registry-status" :class="statusClass(environmentStatus(environment))">{{ statusLabel(environmentStatus(environment)) }}</span>
+                <span class="application-registry-provider" :class="`is-${environment.issuer_alias || 'platform'}`">{{ providerLabel(environment.issuer_alias || 'platform') }}</span>
+                <small>配置版本 {{ environment.version }}</small>
+              </div>
 
-          <section v-else class="application-registry-panel">
-            <header class="application-registry-panel-head"><div><h4>运行时与部署</h4><p>维护 Public BaseURL、UpstreamURL、门户路径和运行状态。运行时更新不会改变岗位、角色分配或个人例外授权。</p></div><button v-if="props.canOnboard && selectedApplication.status !== 'RETIRED'" class="console-button primary small" type="button" @click="openOnboardEnvironment"><ConsoleIcon name="save" />新增接入环境</button></header>
-            <div v-if="!canReadEnvironments" class="application-registry-empty compact"><ConsoleIcon name="shield" /><span>当前账号没有 platform:application-environment:read，不能读取部署环境。</span></div>
-            <div v-else-if="environmentsLoading" class="application-registry-list-state">正在读取运行时状态…</div>
-            <div v-else-if="!environments.length" class="application-registry-empty compact"><ConsoleIcon name="info" /><span>当前应用还没有部署环境。</span></div>
-            <div v-else class="application-registry-environments">
-              <article v-for="environment in environments" :key="environment.environment_id" class="application-registry-environment" :class="{ 'is-selected': environment.environment_id === selectedEnvironmentId }" @click="selectEnvironment(environment)">
-                <div class="application-registry-environment-main"><strong>{{ environment.environment }}</strong><span class="application-registry-status" :class="statusClass(environmentStatus(environment))">{{ statusLabel(environmentStatus(environment)) }}</span><small>配置版本 {{ environment.version }}</small></div>
-                <div class="application-registry-environment-uri"><span>{{ environment.base_url || '未设置 BaseURL' }}{{ environment.path_prefix || '' }}</span><small>{{ environment.upstream_url || '未设置 UpstreamURL' }}</small></div>
+              <section class="application-registry-zone directory">
+                <header class="application-registry-zone-head"><h5>目录与入口</h5><span class="application-registry-zone-hint">点击环境卡片后在此维护登录目标</span></header>
+                <div class="application-registry-environment-uri"><span>{{ environment.base_url || '未设置门户地址' }}{{ environment.path_prefix || '' }}</span><small>{{ environment.upstream_url || '未设置 UpstreamURL' }}</small></div>
+                <ApplicationLoginTargetModule v-if="selectedEnvironmentId === environment.environment_id && canReadLoginTargets" :application-id="selectedApplication.application_id" :environment-id="environment.environment_id" :application-name="selectedApplication.name || selectedApplication.code" :environment-name="environment.environment" @toast="notify" />
+              </section>
+
+              <section class="application-registry-zone runtime">
+                <header class="application-registry-zone-head"><h5>运行时与部署</h5></header>
                 <p v-if="environmentNextAction(environment)" class="application-registry-environment-guidance"><strong>处理建议：</strong>{{ environmentNextAction(environment) }}</p>
                 <p v-if="environmentStatusError(environment)" class="application-registry-environment-guidance is-error"><strong>状态读取失败：</strong>{{ environmentStatusError(environment).message }}<span v-if="environmentStatusError(environment).nextAction">{{ environmentStatusError(environment).nextAction }}</span><button class="console-button ghost small" type="button" :disabled="environmentsLoading" @click.stop="loadEnvironments">重试查询</button></p>
                 <div class="application-registry-environment-actions"><button v-if="canUpdateEnvironment" class="console-button ghost small" type="button" @click.stop="openEnvironmentEditor(environment)"><ConsoleIcon name="settings" />设置</button><button v-if="canRetryRuntime && environmentStatus(environment) === 'PROVISION_FAILED'" class="console-button ghost small" type="button" :disabled="saving" @click.stop="reapplyEnvironment(environment, true)"><ConsoleIcon name="reset" />重试</button><button v-if="canManageRuntime && environmentStatus(environment) === 'READY'" class="console-button ghost small" type="button" :disabled="saving" @click.stop="reapplyEnvironment(environment)"><ConsoleIcon name="reset" />更新运行时</button><button v-if="canDeleteEnvironment && environment.environment !== 'dev'" class="console-button danger small" type="button" @click.stop="openDeleteEnvironment(environment)"><ConsoleIcon name="close" />删除</button><button v-if="canDeleteEnvironment && environment.environment !== 'dev' && environmentStatus(environment) === 'OFFBOARDED'" class="console-button danger small" type="button" @click.stop="openPurgeEnvironment(environment)"><ConsoleIcon name="close" />永久清理</button></div>
-              </article>
-            </div>
-          </section>
+              </section>
 
-          <form v-if="activeWorkspace === 'runtime' && environmentEditorOpen" class="application-registry-editor" @submit.prevent="saveEnvironment">
-            <div class="application-registry-section-title"><div><strong>设置运行时环境</strong><small>environment 编码创建后不可修改；URL 和路径更新需要重新部署运行时。认证提供方在“Keycloak 认证接入”中切换。</small></div></div>
-            <div class="console-form-grid"><label class="console-form-item"><span>环境</span><input v-model="environmentForm.environment" :disabled="Boolean(environmentForm.version)" placeholder="dev / test / staging / prod" /></label><label class="console-form-item"><span>环境状态</span><select v-model="environmentForm.status"><option value="ACTIVE">启用</option><option value="DISABLED">停用</option></select></label><label class="console-form-item"><span>Public BaseURL</span><input v-model="environmentForm.baseUrl" placeholder="http://localhost:8081" /></label><label class="console-form-item"><span>UpstreamURL</span><input v-model="environmentForm.upstreamUrl" placeholder="http://customer-api:8080" /></label><label class="console-form-item"><span>门户路径前缀</span><input v-model="environmentForm.pathPrefix" placeholder="/customer_management" /></label></div>
-            <div class="console-form-actions"><button class="console-button primary" type="submit" :disabled="saving"><ConsoleIcon name="save" />{{ saving ? '保存中…' : '保存运行时设置' }}</button><button class="console-button ghost" type="button" :disabled="saving" @click="environmentEditorOpen = false">取消</button></div>
-          </form>
+              <section class="application-registry-zone authentication">
+                <header class="application-registry-zone-head"><h5>Keycloak 认证</h5><button class="application-registry-zone-toggle" type="button" @click.stop="toggleAuthentication(environment)">{{ authenticationExpanded(environment) ? '收起' : '展开' }}</button></header>
+                <div class="application-registry-auth-summary"><span>Client：{{ keycloakClientState(environment) }}</span><span>门禁：{{ gateProgress(environment).passed }}/{{ gateProgress(environment).total }}</span><span>灰度：{{ keycloakCutoverState(environment).status }}</span></div>
+                <template v-if="authenticationExpanded(environment)">
+                  <dl class="application-registry-auth-details"><div><dt>Realm</dt><dd>{{ providerStatus('keycloak')?.realm || '未配置' }}</dd></div><div><dt>Client ID</dt><dd><code>{{ keycloakClientID(environment) }}</code></dd></div><div><dt>Redirect URI</dt><dd><code>{{ keycloakRedirectURI(environment) }}</code></dd></div><div><dt>Claims 映射</dt><dd>{{ keycloakClaimsState(environment) }}</dd></div></dl>
+                  <div v-if="providerStatus('keycloak')" class="application-registry-switch-gates">
+                    <strong>切换 Keycloak 门禁</strong>
+                    <ul v-if="keycloakSwitchState(environment).switch_gates?.length"><li v-for="gate in keycloakSwitchState(environment).switch_gates" :key="gate.key" :class="{ 'is-passed': gate.passed }"><span>{{ gate.passed ? '已通过' : '未通过' }}</span>{{ gate.label }}<small>{{ gate.detail }}{{ !gate.passed && gate.next_action ? ` 下一步：${gate.next_action}` : '' }}</small></li></ul>
+                    <small v-else>请先同步 Keycloak Client 以读取该环境的切换门禁。</small>
+                    <p v-if="!keycloakSwitchReady(environment) && keycloakSwitchState(environment).next_action">下一步：{{ keycloakSwitchState(environment).next_action }}</p>
+                  </div>
+                  <div class="application-registry-switch-gates">
+                    <strong>灰度迁移状态</strong>
+                    <p>状态：{{ keycloakCutoverState(environment).status }}；观察开始：{{ dateTime(keycloakCutoverState(environment).observation_started_at) }}；观察截止：{{ dateTime(keycloakCutoverState(environment).observation_ends_at) }}</p>
+                    <p v-if="keycloakCutoverState(environment).rollback_deadline_at">回滚截止：{{ dateTime(keycloakCutoverState(environment).rollback_deadline_at) }}</p>
+                    <ul v-if="keycloakSwitchState(environment).timeline?.length"><li v-for="event in keycloakSwitchState(environment).timeline" :key="event.id"><span>已记录</span>{{ event.summary }}<small>{{ dateTime(event.occurred_at) }}</small></li></ul>
+                    <small v-else>完成同步与门禁后，开始七天观察期；每次观察、切换和回滚都会追加审计时间线。</small>
+                  </div>
+                  <div class="application-registry-environment-actions"><button v-if="canManageRuntime" class="console-button ghost small" type="button" :disabled="saving || !providerStatus('keycloak') || providerStatus('keycloak')?.status === 'NOT_CONFIGURED'" @click.stop="synchronizeKeycloakClient(environment)"><ConsoleIcon name="shield" />导入/同步 Keycloak Client</button><button v-if="canManageRuntime && keycloakSwitchReady(environment) && keycloakCutoverState(environment).status === 'NOT_STARTED'" class="console-button ghost small" type="button" :disabled="saving" @click.stop="beginKeycloakObservation(environment)"><ConsoleIcon name="shield" />开始 7 天观察</button><button v-if="canManageRuntime && (environment.issuer_alias || 'platform') !== 'keycloak'" class="console-button ghost small" type="button" :disabled="saving || !keycloakRuntimePreparationReady(environment)" @click.stop="switchAuthenticationProvider(environment, 'keycloak')"><ConsoleIcon name="shield" />准备并切换 Keycloak</button><button v-if="canManageRuntime && (environment.issuer_alias || 'platform') === 'keycloak'" class="console-button ghost small" type="button" :disabled="saving || !keycloakRollbackAvailable(environment)" @click.stop="switchAuthenticationProvider(environment, 'platform')"><ConsoleIcon name="reset" />回滚基础平台</button></div>
+                </template>
+              </section>
+            </article>
+          </div>
+
+          <section class="application-registry-switch-gates" aria-label="Keycloak 授权投影告警">
+            <strong>授权投影告警与受控重放</strong>
+            <p v-if="keycloakOperationsLoading">正在读取 FAILED 投影状态…</p>
+            <p v-else-if="keycloakProjectionAlert?.state === 'ALERT'">{{ keycloakProjectionAlert.summary }}（{{ keycloakProjectionAlert.failed_count }} 条）。FAILED 投影会阻断对应环境切换。</p>
+            <p v-else>当前没有 FAILED 授权投影。</p>
+            <ul v-if="keycloakProjectionFailures.length"><li v-for="failure in keycloakProjectionFailures" :key="failure.event_id"><span>FAILED</span><code>{{ failure.application_code }}/{{ failure.environment || '全局' }}</code> · {{ failure.error_code || 'KEYCLOAK_SYNC_FAILED' }}<small>{{ failure.error_message || '请查看平台与 Keycloak 日志后受控重放。' }}</small><button v-if="canManageRuntime" class="console-button ghost small" type="button" :disabled="saving" @click="replayProjectionFailure(failure)">受控重放</button></li></ul>
+          </section>
         </main>
         <div v-else class="application-registry-empty"><ConsoleIcon name="dashboard" /><strong>请选择一个应用</strong><p>应用登记、环境配置和登录目标将在这里统一维护。</p></div>
       </div>
+    </div>
+
+    <div v-if="showOnboard" class="application-registry-modal-backdrop" role="presentation" @click.self="toggleOnboarding">
+      <section class="application-registry-modal application-registry-wizard-modal" role="dialog" aria-modal="true" aria-label="新增接入">
+        <header class="application-registry-wizard-head">
+          <div><span class="application-registry-eyebrow">ONBOARD</span><h3>新增接入</h3><p>登记应用、环境和登录入口后不会自动创建 OIDC Client 或启动服务；部署能力与允许范围最终由后端 Agent 校验。</p><p v-if="isProductionProvisioning">服务器使用生产部署策略，请从审核清单中选择接入目标。</p><p v-else>第 1 步登记应用，第 2 步登记环境与入口。</p></div>
+          <button class="application-registry-wizard-close" type="button" aria-label="关闭" @click="toggleOnboarding">×</button>
+        </header>
+        <p v-if="automationUnavailable" class="application-registry-inline-warning">当前环境未启用受控部署 Agent，不能执行一键接入；请先由部署人员发布平台生产部署资产。</p>
+        <form @submit.prevent="submitOnboarding">
+          <template v-if="isProductionProvisioning">
+            <p class="application-registry-inline-note">当前服务器使用生产部署策略（{{ productionProvisioningSummary }}）；应用、环境、内部 UpstreamURL 和门户路径由服务器审核清单控制，公网访问地址可按实际域名或端口手动填写。</p>
+            <button v-if="!onboardingExistingApplication" class="console-button ghost small" type="button" @click="applyProductionProvisioningPreset()">填入服务器接入配置</button>
+            <div class="console-form-grid">
+              <label v-if="productionTargetInventoryLoading" class="console-form-item"><span>服务器接入目标</span><input value="正在读取已接入环境…" disabled /></label>
+              <label v-else-if="productionTargetInventoryError" class="console-form-item"><span>服务器接入目标</span><input :value="productionTargetInventoryError" disabled /></label>
+              <label v-else-if="selectableProductionTargets.length" class="console-form-item"><span>服务器接入目标</span><select :value="selectedProductionTargetKey" @change="selectProductionTarget"><option v-for="target in selectableProductionTargets" :key="productionTargetKey(target)" :value="productionTargetKey(target)">{{ target.application_name || target.application_code }}（{{ productionTargetKey(target) }}）</option></select><small>仅显示 subsystems.d 中审核通过且尚未接入的目标</small></label>
+              <div v-else class="application-registry-target-empty" role="status"><ConsoleIcon name="info" /><strong>暂无可接入目标</strong><span>subsystems.d 中没有审核通过且尚未接入的应用环境。</span></div>
+              <template v-if="selectedProductionTarget">
+                <label class="console-form-item"><span>应用编码</span><input :value="onboardForm.applicationCode" disabled /></label>
+                <label class="console-form-item"><span>应用名称</span><input :value="onboardForm.applicationName" disabled /></label>
+                <label class="console-form-item"><span>环境</span><input :value="onboardForm.environment" disabled /></label>
+                <label class="console-form-item"><span>Public BaseURL</span><input v-model="onboardForm.publicBaseUrl" type="url" inputmode="url" placeholder="https://portal.example.com" required /><small>浏览器实际访问的协议、域名和端口；回调地址会由此地址和门户路径自动生成。</small></label>
+                <label class="console-form-item"><span>UpstreamURL</span><input :value="onboardForm.upstreamUrl" readonly /><small>服务器审核清单中的受控编排地址</small></label>
+                <label class="console-form-item"><span>门户路径前缀</span><input :value="onboardForm.pathPrefix" readonly /><small>服务器审核清单中的受控门户路径</small></label>
+                <label class="console-form-item"><span>应用说明</span><input :value="onboardForm.description" readonly /></label>
+                <label class="console-form-item application-registry-confirm"><span>确认码：{{ onboardConfirmationCode }}</span><input v-model="onboardConfirmation" :placeholder="onboardConfirmationCode" autocomplete="off" /></label>
+              </template>
+            </div>
+          </template>
+          <template v-else>
+            <div v-show="onboardStep === 1" class="console-form-grid">
+              <label class="console-form-item"><span>应用编码</span><input v-model="onboardForm.applicationCode" :disabled="onboardingExistingApplication" placeholder="customer_management" /></label>
+              <label class="console-form-item"><span>应用名称</span><input v-model="onboardForm.applicationName" :disabled="onboardingExistingApplication" placeholder="客户管理系统" /></label>
+              <label class="console-form-item application-registry-confirm"><span>应用说明</span><input v-model="onboardForm.description" placeholder="可选" /></label>
+            </div>
+            <div v-show="onboardStep === 2" class="console-form-grid">
+              <label class="console-form-item"><span>环境</span><select v-model="onboardForm.environment"><option v-for="environment in availableOnboardEnvironments" :key="environment" :value="environment">{{ environment }}</option></select></label>
+              <label class="console-form-item"><span>Public BaseURL</span><input v-model="onboardForm.publicBaseUrl" placeholder="http://localhost:8081" /></label>
+              <label class="console-form-item"><span>UpstreamURL</span><input v-model="onboardForm.upstreamUrl" :readonly="Boolean(onboardPreset)" placeholder="http://customer-api:8080" /><small v-if="onboardPreset">服务器受控编排地址</small></label>
+              <label class="console-form-item"><span>门户路径前缀</span><input v-model="onboardForm.pathPrefix" :readonly="Boolean(onboardPreset)" placeholder="/customer_management" /><small v-if="onboardPreset">服务器受控门户路径</small></label>
+              <label class="console-form-item application-registry-confirm"><span>确认码：{{ onboardConfirmationCode || '应用编码/环境' }}</span><input v-model="onboardConfirmation" :placeholder="onboardConfirmationCode || '应用编码/环境'" autocomplete="off" /></label>
+            </div>
+          </template>
+          <footer class="console-form-actions">
+            <button v-if="!isProductionProvisioning && onboardStep === 2" class="console-button ghost" type="button" @click="prevOnboardStep">上一步</button>
+            <button v-if="!isProductionProvisioning && onboardStep === 1" class="console-button primary" type="button" @click="nextOnboardStep">下一步</button>
+            <button v-else class="console-button primary" type="submit" :disabled="!canSubmitOnboard || saving">{{ saving ? '登记中…' : '登记目录' }}</button>
+            <button class="console-button ghost" type="button" @click="toggleOnboarding">取消</button>
+          </footer>
+          <p v-if="isProductionProvisioning && !selectedProductionTarget" class="application-registry-inline-warning">当前没有可选服务器目标，不能自由填写接入参数。</p>
+          <p v-else class="application-registry-inline-note">若应用环境已存在，平台会阻止覆盖；请在下方选择后更新或重试。</p>
+        </form>
+      </section>
+    </div>
+
+    <div v-if="environmentEditorOpen" class="application-registry-modal-backdrop" role="presentation" @click.self="environmentEditorOpen = false">
+      <section class="application-registry-modal" role="dialog" aria-modal="true" aria-label="设置运行时环境">
+        <h3>设置运行时环境</h3>
+        <p>environment 编码创建后不可修改；URL 和路径更新需要重新部署运行时。认证提供方在环境卡片的“Keycloak 认证”分区中切换。</p>
+        <form @submit.prevent="saveEnvironment">
+          <div class="console-form-grid"><label class="console-form-item"><span>环境</span><input v-model="environmentForm.environment" :disabled="Boolean(environmentForm.version)" placeholder="dev / test / staging / prod" /></label><label class="console-form-item"><span>环境状态</span><select v-model="environmentForm.status"><option value="ACTIVE">启用</option><option value="DISABLED">停用</option></select></label><label class="console-form-item"><span>Public BaseURL</span><input v-model="environmentForm.baseUrl" placeholder="http://localhost:8081" /></label><label class="console-form-item"><span>UpstreamURL</span><input v-model="environmentForm.upstreamUrl" placeholder="http://customer-api:8080" /></label><label class="console-form-item"><span>门户路径前缀</span><input v-model="environmentForm.pathPrefix" placeholder="/customer_management" /></label></div>
+          <footer class="console-form-actions"><button class="console-button primary" type="submit" :disabled="saving">{{ saving ? '保存中…' : '保存运行时设置' }}</button><button class="console-button ghost" type="button" @click="environmentEditorOpen = false">取消</button></footer>
+        </form>
+      </section>
     </div>
 
     <div v-if="pendingDeleteApplication" class="application-registry-modal-backdrop" role="presentation" @click.self="pendingDeleteApplication = null">
@@ -1290,6 +1337,7 @@ onMounted(() => {
     </div>
   </section>
 </template>
+
 
 <style scoped>
 .application-registry-module { overflow: hidden; }
@@ -1397,4 +1445,44 @@ onMounted(() => {
 .console-button.danger { color: #b91c1c; border-color: #fecaca; background: #fff7f7; }
 @media (max-width: 980px) { .application-registry-layout { grid-template-columns: 1fr; } .application-registry-sidebar { max-height: 300px; overflow: auto; } }
 @media (max-width: 640px) { .application-registry-header, .application-registry-detail-head, .application-registry-panel-head { flex-direction: column; align-items: stretch; } .application-registry-confirm { grid-column: auto; } .application-registry-detail-actions { justify-content: flex-start; } .application-registry-workspaces { display: grid; grid-template-columns: 1fr; } .application-registry-auth-details { grid-template-columns: 1fr; } }
+
+/* 接入进度 stepper */
+.application-registry-progress { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 18px 0 4px; }
+.application-registry-progress ol { display: flex; flex: 1 1 auto; gap: 0; margin: 0; padding: 0; list-style: none; }
+.application-registry-progress li { display: flex; flex: 1; align-items: center; gap: 6px; min-width: 0; color: #94a3b8; font-size: 11px; }
+.application-registry-progress li::after { content: ''; flex: 1; min-width: 12px; height: 1px; margin: 0 6px; background: #e2e8f0; }
+.application-registry-progress li:last-child::after { display: none; }
+.application-registry-progress li i { display: grid; width: 18px; height: 18px; flex: 0 0 auto; place-items: center; color: #94a3b8; font-size: 10px; font-style: normal; font-weight: 700; border: 1px solid #cbd5e1; border-radius: 50%; background: #fff; }
+.application-registry-progress li.is-done { color: #15803d; }
+.application-registry-progress li.is-done i { color: #fff; border-color: #16a34a; background: #16a34a; }
+.application-registry-progress li.is-current { color: #1d4ed8; font-weight: 600; }
+.application-registry-progress li.is-current i { color: #fff; border-color: #2563eb; background: #2563eb; box-shadow: 0 0 0 3px rgb(37 99 235 / 12%); }
+.application-registry-progress > small { flex: 0 0 auto; color: #94a3b8; font-size: 11px; }
+
+/* 环境卡片分区 */
+.application-registry-environment { padding: 0; cursor: pointer; }
+.application-registry-environment-main { padding: 12px 14px; border-bottom: 1px solid #eef2f7; }
+.application-registry-zone { padding: 12px 14px; border-top: 1px solid #eef2f7; }
+.application-registry-zone:first-of-type { border-top: 0; }
+.application-registry-zone-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.application-registry-zone-head h5 { margin: 0; color: #475569; font-size: 12px; font-weight: 700; }
+.application-registry-zone-hint { color: #94a3b8; font-size: 10px; }
+.application-registry-zone-toggle { padding: 2px 8px; color: #2563eb; font-size: 11px; font-weight: 600; border: 0; border-radius: 6px; background: #eff6ff; cursor: pointer; }
+.application-registry-zone-toggle:hover { background: #dbeafe; }
+.application-registry-provider { display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 999px; font-size: 10px; font-weight: 700; white-space: nowrap; }
+.application-registry-provider.is-platform { color: #475569; background: #f1f5f9; }
+.application-registry-provider.is-keycloak { color: #6d28d9; background: #f5f3ff; }
+.application-registry-auth-summary { display: flex; flex-wrap: wrap; gap: 8px 16px; color: #64748b; font-size: 12px; }
+.application-registry-auth-summary span { white-space: nowrap; }
+.application-registry-auth-summary span:nth-child(2) { color: #b45309; }
+
+/* 新增接入向导弹窗 */
+.application-registry-wizard-modal { width: min(720px, 100%); max-height: min(86vh, 720px); overflow: auto; }
+.application-registry-wizard-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.application-registry-wizard-head h3 { margin: 4px 0 0; }
+.application-registry-wizard-head p { margin: 6px 0 0; font-size: 11px; }
+.application-registry-wizard-close { width: 30px; height: 30px; border: 0; border-radius: 6px; background: #f1f5f9; color: #64748b; font-size: 20px; line-height: 1; cursor: pointer; }
+.application-registry-wizard-close:hover { background: #e2e8f0; }
+.application-registry-inline-note { margin: 10px 0 0; color: #475569; font-size: 12px; line-height: 1.6; }
+
 </style>
