@@ -17,6 +17,8 @@
 .portal-card {
   overflow: hidden;
   padding: 20px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   border: 1px solid var(--border, #e4ecfc);
   border-radius: 10px;
   background: #fff;
@@ -159,6 +161,7 @@
 .project-list > button {
   display: grid;
   grid-template-columns: 1fr auto;
+  min-width: 0;
   gap: 10px;
   padding: 18px 20px;
   color: var(--text, #0f172a);
@@ -176,7 +179,7 @@
 .project-list h2 { margin: 0; font-size: 16px; font-weight: 600; }
 .project-list p,
 .project-list small,
-.project-list strong { color: var(--muted, #64748b); font-size: 12px; }
+.project-list strong { color: var(--muted, #64748b); font-size: 12px; overflow-wrap: anywhere; word-break: break-word; }
 .project-list progress { grid-column: 1 / -1; width: 100%; accent-color: var(--p, #2563eb); }
 
 .project-detail { width: min(900px, 100%) !important; }
@@ -238,8 +241,8 @@
 .report-row:hover { background: #fbfdff; }
 .report-row:focus-visible { outline: 3px solid rgba(37, 99, 235, .2); outline-offset: 2px; }
 .report-row span { display: grid; gap: 4px; min-width: 0; }
-.report-row strong { font-size: 13px; }
-.report-row small { color: var(--muted, #64748b); }
+.report-row strong { font-size: 13px; overflow-wrap: anywhere; word-break: break-word; }
+.report-row small { color: var(--muted, #64748b); overflow-wrap: anywhere; word-break: break-word; }
 .report-row em { color: var(--p, #2563eb); font-style: normal; white-space: nowrap; font-size: 12px; font-weight: 500; }
 .report-detail { width: min(780px, 100%) !important; }
 .report-detail > section { border-top: 1px solid var(--border, #e4ecfc); margin-top: 18px; padding-top: 10px; }
@@ -270,7 +273,7 @@
 /* ===== 反馈 ===== */
 .feedback-row { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 0; text-align: left; border: 0 !important; border-bottom: 1px solid #f1f5f9 !important; background: #fff !important; color: var(--text, #0f172a) !important; }
 .feedback-row:last-child { border-bottom: 0 !important; }
-.feedback-row span { display: grid; gap: 4px; min-width: 0; }
+.feedback-row span { display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
 .feedback-row small,
 .feedback-message small { color: var(--muted, #64748b); }
 .feedback-row em { padding: 4px 10px; color: var(--p, #2563eb); font-style: normal; font-size: 12px; border-radius: 999px; background: #e7efff; }
@@ -289,11 +292,11 @@
   border-radius: 10px;
   background: #fff;
 }
-.security-summary > div { display: grid; gap: 5px; }
+.security-summary > div { display: grid; gap: 5px; min-width: 0; }
 .security-summary small,
 .security-summary span,
 .security-row small { color: var(--muted, #64748b); }
-.security-summary strong { font-size: 16px; }
+.security-summary strong { font-size: 16px; overflow-wrap: anywhere; word-break: break-word; }
 .portal-security-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 .security-row { display: flex; align-items: center; justify-content: space-between; gap: 15px; padding: 14px 0; border-bottom: 1px solid #f1f5f9; }
 .security-row:last-child { border-bottom: 0; }
@@ -378,7 +381,7 @@
 
 /* 备案工具栏：与 console 卡片风格一致 */
 .filing-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
-.filing-toolbar h2 { margin: 5px 0; }
+.filing-toolbar h2 { margin: 5px 0; min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
 .filing-toolbar > div:last-child { display: flex; gap: 8px; }
 .filing-toolbar .filing-toolbar-meta { display: grid; gap: 3px; }
 
@@ -438,7 +441,7 @@
   box-shadow: none !important;
 }
 .filing-list-open:hover:not(:disabled) { color: var(--p, #2563eb); background: transparent !important; border-color: transparent !important; box-shadow: none !important; }
-.filing-list-open span { display: grid; gap: 4px; min-width: 0; }
+.filing-list-open span { display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
 .filing-list-open small { color: var(--muted, #64748b); }
 .filing-list-open em { padding: 4px 10px; color: var(--p, #2563eb); font-style: normal; font-size: 12px; border-radius: 999px; background: #e7efff; }
 .filing-list-delete { flex: 0 0 auto; min-height: 32px !important; padding: 6px 12px !important; font-size: 12px !important; }

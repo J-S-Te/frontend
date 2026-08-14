@@ -316,7 +316,8 @@
 .crm-opportunity-side-rail td {
   padding: 13px 15px;
   vertical-align: middle;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   border-bottom: 1px solid #f1f5f9;
 }
 .crm-shell tbody tr:last-child td,
@@ -837,8 +838,8 @@
   transform: translateY(-1px);
   box-shadow: inset 3px 0 0 var(--crm-customer-card-accent), 0 8px 20px rgba(15, 23, 42, .08);
 }
-.crm-customer-cards strong { color: var(--crm-text); }
-.crm-customer-cards span { color: var(--crm-muted); font-size: 12px; white-space: normal; }
+.crm-customer-cards strong { color: var(--crm-text); overflow-wrap: anywhere; word-break: break-word; }
+.crm-customer-cards span { color: var(--crm-muted); font-size: 12px; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
 .crm-customer-filters,
 .crm-presale-filters { grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); }
 .crm-customer-tabs { margin-top: 12px; }
@@ -852,7 +853,7 @@
   border-radius: 9px;
   background: #fff;
 }
-.crm-profile-list span { color: var(--crm-muted); }
+.crm-profile-list span { color: var(--crm-muted); overflow-wrap: anywhere; word-break: break-word; }
 .crm-collection-editor fieldset { margin: 14px 0; padding: 14px; }
 .crm-collection-editor fieldset > .danger { margin-top: 8px; }
 .crm-project-stale { color: #b45309; font-weight: 600; }
@@ -885,9 +886,10 @@
   grid-template-columns: repeat(auto-fill, minmax(235px, 1fr));
   gap: 10px;
 }
-.crm-stage-alert-grid button { display: grid !important; gap: 5px !important; justify-items: start !important; text-align: left; }
+.crm-stage-alert-grid button { display: grid !important; min-width: 0; gap: 5px !important; justify-items: start !important; text-align: left; }
 .crm-stage-alert-grid span,
-.crm-stage-alert-grid small { color: var(--crm-muted); white-space: normal; }
+.crm-stage-alert-grid small { color: var(--crm-muted); white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
+.crm-stage-alert-grid strong { white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
 .crm-status-legend { display: flex; gap: 16px; flex-wrap: wrap; color: var(--crm-muted); font-size: 12px; }
 .crm-alert-list { margin-bottom: 16px; }
 .crm-alert-list button {
@@ -898,7 +900,7 @@
   margin: 8px 0;
   text-align: left;
 }
-.crm-alert-list span { color: var(--crm-muted); white-space: normal; }
+.crm-alert-list span { color: var(--crm-muted); white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
 .crm-alert-rules-dialog { width: min(860px, 100%); }
 .crm-alert-rules-dialog__body { padding: 20px 24px 0; }
 .crm-alert-rules-dialog__body .console-card-hint { margin-top: 0; }
@@ -976,7 +978,7 @@
   background: #f8fafc;
 }
 .crm-import-wizard table { margin: 14px 0; }
-.crm-import-wizard td { white-space: normal; vertical-align: top; }
+.crm-import-wizard td { white-space: normal; vertical-align: top; overflow-wrap: anywhere; word-break: break-word; }
 .crm-import-wizard ul { margin: 0; padding-left: 18px; }
 .crm-import-summary { grid-template-columns: 150px 1fr !important; }
 

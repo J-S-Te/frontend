@@ -164,8 +164,8 @@
 .pm-table small { display: block; margin-top: 4px; color: #7e899b; font-size: 8px; }
 .pm-table-panel > footer { display: flex; justify-content: space-between; padding: 12px 16px; background: #fafbfd; color: #7e899b; font-size: 9px; }
 .pm-project-link { display: flex; flex-direction: column; gap: 3px; padding: 0; border: 0; background: transparent; color: #607089; text-align: left; }
-.pm-project-link b { color: var(--pm-blue); }
-.pm-cell-sub { display: block; margin-top: 3px; color: #8c97a8; font-size: 8px; }
+.pm-project-link b { color: var(--pm-blue); overflow-wrap: anywhere; word-break: break-word; }
+.pm-cell-sub { display: block; margin-top: 3px; color: #8c97a8; font-size: 8px; overflow-wrap: anywhere; word-break: break-word; }
 .pm-inline-progress { width: 90px; display: inline-block; vertical-align: middle; }
 .pm-shell .mono { font-family: "SFMono-Regular", Consolas, monospace; font-size: 9px; }
 .pm-text-danger { color: #d33e4c !important; font-weight: 700; }
@@ -199,8 +199,8 @@
 .pm-kanban-body { min-height: 370px; padding: 8px; }
 .pm-kanban-body > button { width: 100%; margin-bottom: 8px; padding: 13px; border: 1px solid #e2e7ef; border-radius: 8px; background: white; text-align: left; box-shadow: 0 3px 10px rgba(24,40,67,.04); }
 .pm-kanban-body > button:hover { border-color: #aac9fb; }
-.pm-kanban-body > button > b { color: var(--pm-blue); font-size: 9px; }
-.pm-kanban-body h3 { min-height: 30px; margin: 6px 0 10px; font-size: 11px; }
+.pm-kanban-body > button > b { color: var(--pm-blue); font-size: 9px; overflow-wrap: anywhere; word-break: break-word; }
+.pm-kanban-body h3 { min-height: 30px; margin: 6px 0 10px; font-size: 11px; overflow-wrap: anywhere; word-break: break-word; }
 .pm-kanban-body footer { display: flex; justify-content: space-between; margin-top: 7px; color: #8390a2; font-size: 8px; }
 .pm-empty-mini { padding: 30px 10px; color: #a1a9b6; text-align: center; font-size: 9px; }
 .pm-config-layout { display: grid; grid-template-columns: 260px minmax(0,1fr); gap: 14px; align-items: start; }
@@ -465,7 +465,7 @@
 .pm-risk-list .high { color: var(--pm-red-text); background: var(--pm-red-soft); }
 .pm-risk-list .medium { color: var(--pm-amber-text); background: var(--pm-amber-soft); }
 .pm-risk-list b { color: var(--pm-ink); font-size: 13.5px; }
-.pm-risk-list p { color: var(--pm-muted); font-size: 12px; line-height: 1.6; }
+.pm-risk-list p { color: var(--pm-muted); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; word-break: break-word; }
 .pm-risk-list time { color: var(--pm-muted); font-size: 12px; }
 .pm-progress-row { min-height: 60px; padding: 10px 20px; border-color: var(--pm-line-soft); }
 .pm-progress-row:hover { background: var(--pm-soft); }
@@ -489,7 +489,7 @@
 .pm-table-panel { overflow: hidden; }
 .pm-table { font-size: 13.5px; }
 .pm-table th { height: auto; padding: 12px 16px; border-color: var(--pm-line); background: var(--pm-soft); color: var(--pm-muted); font-size: 12.5px; font-weight: 600; }
-.pm-table td { padding: 13px 16px; border-color: var(--pm-line-soft); color: var(--pm-body); }
+.pm-table td { padding: 13px 16px; border-color: var(--pm-line-soft); color: var(--pm-body); overflow-wrap: anywhere; word-break: break-word; }
 .pm-table tbody tr:hover { background: var(--pm-soft); }
 .pm-table tbody tr.selected { background: var(--pm-blue-soft); }
 .pm-table tbody tr.risk { box-shadow: inset 3px 0 var(--pm-red); }
@@ -604,3 +604,14 @@
 @media (prefers-reduced-motion: reduce) {
   .pm-shell *, .pm-shell *::before, .pm-shell *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+/* 文字溢出防御：长编号/合同号/交付事件 ID 在抽屉、进度行、时间线中可断词换行 */
+.pm-drawer > header > div,
+.pm-dialog > header > div { min-width: 0; flex: 1; }
+.pm-drawer h2,
+.pm-dialog h2 { overflow-wrap: anywhere; word-break: break-word; }
+.pm-drawer dl > div { min-width: 0; }
+.pm-drawer dd { overflow-wrap: anywhere; word-break: break-word; }
+.pm-timeline p { overflow-wrap: anywhere; word-break: break-word; }
+.pm-progress-row > div:first-child { min-width: 0; }
+.pm-progress-row > div:first-child b { min-width: 0; overflow-wrap: anywhere; word-break: break-word; }

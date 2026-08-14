@@ -960,6 +960,8 @@ function formatFileSize(bytes) {
   border-bottom: 1px solid var(--line-2, #e5e7eb);
   color: var(--ink-2, #374151);
   vertical-align: middle;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .iam-batch-import-table tbody tr { transition: background 140ms; }
 .iam-batch-import-table tbody tr:hover:not(.invalid):not(.failed) { background: #f8fbff; }

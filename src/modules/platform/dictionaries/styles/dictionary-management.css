@@ -106,7 +106,8 @@
 .dictionary-section-head p,
 .dictionary-items-panel__head p { margin: 5px 0 0; color: var(--so-muted); font-size: 11px; line-height: 1.55; }
 .dictionary-items-panel__head > div:first-child > span { display: block; margin-bottom: 4px; color: #94a3b8; font-size: 10px; font-weight: 600; }
-.dictionary-items-panel__head code { color: #2563eb; font-family: "SFMono-Regular", Consolas, monospace; }
+.dictionary-items-panel__head > div:first-child { min-width: 0; }
+.dictionary-items-panel__head code { color: #2563eb; font-family: "SFMono-Regular", Consolas, monospace; overflow-wrap: anywhere; word-break: break-all; }
 .dictionary-header-actions { display: flex; flex: 0 0 auto; gap: 8px; }
 
 .dictionary-module .console-filter-bar {

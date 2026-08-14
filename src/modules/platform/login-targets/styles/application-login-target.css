@@ -137,6 +137,8 @@
   max-width: 430px;
   color: #475569;
   font-size: 12px;
+  overflow-wrap: anywhere;
+  word-break: break-all;
 }
 
 .login-target-module__action-column {
