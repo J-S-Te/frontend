@@ -5,6 +5,7 @@ import RoleMultiSelect from './RoleMultiSelect.vue'
 import { AuthorizationError } from '@/modules/platform/iam/api/authorization'
 import {
   assignableActiveCatalogRoles,
+  catalogMaxEffectiveRoles,
   catalogSyncText,
   catalogVersion,
   isCatalogSynchronized,
@@ -97,6 +98,10 @@ function catalogForApplication(applicationIdValue) {
 
 function catalogIsReady(applicationIdValue) {
   return isCatalogSynchronized(catalogForApplication(applicationIdValue))
+}
+
+function maxEffectiveRolesFor(applicationIdValue) {
+  return catalogMaxEffectiveRoles(catalogForApplication(applicationIdValue))
 }
 
 function roleId(role) { return id(role, 'role_id', 'id') }
@@ -535,6 +540,7 @@ onMounted(() => {
           v-model="mapping.role_ids"
           :roles="roleItems(catalogForApplication(mapping.application_id))"
           :ready="Boolean(mapping.application_id && catalogIsReady(mapping.application_id))"
+          :max-effective-roles="maxEffectiveRolesFor(mapping.application_id)"
           empty-text="请等待目录成功同步"
         />
         <select v-model="mapping.scope_type">
@@ -608,6 +614,7 @@ onMounted(() => {
               v-model="form.platform_role_ids"
               :roles="roleItems(catalogForApplication(form.platform_application_id))"
               :ready="Boolean(form.platform_application_id && catalogIsReady(form.platform_application_id))"
+              :max-effective-roles="maxEffectiveRolesFor(form.platform_application_id)"
             />
             <select v-model="form.platform_scope_type"><option value="TENANT">租户范围</option><option value="ENVIRONMENT">环境范围</option></select>
             <input v-if="form.platform_scope_type === 'ENVIRONMENT'" v-model="form.platform_scope_id" placeholder="环境 ID" />
@@ -628,6 +635,7 @@ onMounted(() => {
               v-model="row.role_ids"
               :roles="roleItems(catalogForApplication(row.application_id))"
               :ready="Boolean(row.application_id && catalogIsReady(row.application_id))"
+              :max-effective-roles="maxEffectiveRolesFor(row.application_id)"
               empty-text="请先选择已同步应用"
             />
             <select v-model="row.scope_type"><option value="TENANT">租户范围</option><option value="ENVIRONMENT">环境范围</option></select>

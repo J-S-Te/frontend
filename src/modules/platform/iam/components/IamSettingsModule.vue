@@ -57,6 +57,7 @@ import {
 import {
   assignableActiveCatalogRoles,
   catalogLastSyncedAt as readCatalogLastSyncedAt,
+  catalogMaxEffectiveRoles,
   catalogRolePermissions,
   catalogRoles,
   catalogSyncText as authorizationCatalogSyncText,
@@ -227,6 +228,21 @@ const catalogRoleTotal = computed(() => authorizationCatalogRoles.value.length)
 const catalogInactiveOrRestrictedRoleCount = computed(() => Math.max(catalogRoleTotal.value - authorizationRoleOptions.value.length, 0))
 const catalogSyncText = computed(() => authorizationCatalogSyncText(authorizationCatalog.value))
 const catalogLastSyncedAt = computed(() => readCatalogLastSyncedAt(authorizationCatalog.value))
+// 应用目录声明的最大有效角色数（0 表示不限制）。在保存前就提示管理员，避免选中超过
+// 应用策略的角色后由后端 422 拒绝，用户只能看到笼统的“请求参数不合法”。
+const authorizationMaxEffectiveRoles = computed(() => catalogMaxEffectiveRoles(authorizationCatalog.value))
+// 本次保存实际会提交的去重直接角色数（只统计当前 ACTIVE 且可分配的目录角色，与
+// applicationAccessPayload / 后端 validateDirectRoleLimit 的语义一致）。已在草稿中但不再
+// 可分配的历史角色会在保存时被单独确认撤销，不计入这里。继承角色也不混入。
+const authorizationSelectedDirectRoleCount = computed(() => {
+  const selectableRoleCodes = new Set(authorizationRoleOptions.value.map((role) => roleCode(role)))
+  return uniqueValues(authorizationDraft.role_codes.filter((code) => selectableRoleCodes.has(code))).length
+})
+// 勾选的直接角色数是否已经超过应用声明的最大有效角色数（该应用永远无法被授权）。
+const authorizationDirectLimitExceeded = computed(() => {
+  const maximum = authorizationMaxEffectiveRoles.value
+  return maximum > 0 && authorizationSelectedDirectRoleCount.value > maximum
+})
 const applicationDirectRoles = computed(() => Array.isArray(applicationAccess.value?.direct_roles) ? applicationAccess.value.direct_roles : [])
 // 编辑和历史清理只能操作 MANUAL 来源。TEMPLATE / SYSTEM 即使属于当前主体，
 // 也只能通过岗位授权模板或系统流程维护，绝不能混入替换、撤销草稿。
@@ -933,6 +949,12 @@ async function saveApplicationAccess() {
   }
   if (authorizationDraft.validity_mode === 'RANGE' && authorizationDraft.valid_from && authorizationDraft.valid_until && new Date(authorizationDraft.valid_until) <= new Date(authorizationDraft.valid_from)) {
     applicationAccessError.value = '失效时间必须晚于生效时间。'
+    return
+  }
+  // 阻断：勾选的直接角色数超过应用目录声明的最大有效角色数。该集合永远无法被授权，
+  // 后端也会以同样的策略拒绝；在本地提前拦截并把具体限制说清楚，避免用户只看到“请求参数不合法”。
+  if (authorizationDirectLimitExceeded.value) {
+    applicationAccessError.value = `当前勾选了 ${authorizationSelectedDirectRoleCount.value} 个例外角色，超过该应用允许的最大有效角色数（${authorizationMaxEffectiveRoles.value} 个）。请取消多余角色后再保存。`
     return
   }
   // 阻断：草稿里同时存在 2+ 个不同 scope/有效期 signature 的角色。
@@ -2209,7 +2231,7 @@ onBeforeUnmount(() => {
                 :role-name="applicationRoleName"
               />
               <label><span>应用 *</span><select v-model="selectedApplicationCode" :disabled="applicationAccessLoading || applicationAccessSaving || applicationAccessRevoking" @change="loadApplicationAuthorization(selectedApplicationCode)"><option v-for="application in applications" :key="application.application_id || application.id || application.code" :value="application.code">{{ applicationDisplayName(application) }} · {{ application.code }}</option></select></label>
-              <div class="iam-application-meta"><span>授权主体：<strong>{{ authorizationSubjectLabel }}</strong></span><span>应用编码：<code>{{ selectedApplication?.code || '—' }}</code></span><span>目录版本：<strong>{{ catalogVersion(authorizationCatalog) }}</strong></span><span>目录同步：<strong>{{ catalogSyncText }}</strong></span><span>{{ isLegacyStructuralAuthorizationSubject ? '目录角色' : '可分配角色' }}：<strong>{{ authorizationRoleOptions.length }} / {{ catalogRoleTotal }}</strong></span><span v-if="catalogLastSyncedAt">最近同步：<strong>{{ formatDateTime(catalogLastSyncedAt) }}</strong></span></div>
+              <div class="iam-application-meta"><span>授权主体：<strong>{{ authorizationSubjectLabel }}</strong></span><span>应用编码：<code>{{ selectedApplication?.code || '—' }}</code></span><span>目录版本：<strong>{{ catalogVersion(authorizationCatalog) }}</strong></span><span>目录同步：<strong>{{ catalogSyncText }}</strong></span><span>{{ isLegacyStructuralAuthorizationSubject ? '目录角色' : '可分配角色' }}：<strong>{{ authorizationRoleOptions.length }} / {{ catalogRoleTotal }}</strong></span><span v-if="authorizationMaxEffectiveRoles">最大有效角色：<strong>{{ authorizationMaxEffectiveRoles }}</strong></span><span v-if="catalogLastSyncedAt">最近同步：<strong>{{ formatDateTime(catalogLastSyncedAt) }}</strong></span></div>
               <p v-if="authorizationCatalog && !hasSynchronizedAuthorizationCatalog" class="iam-empty-inline">角色目录当前为“{{ catalogSyncText }}”，为避免使用过期或不完整的应用角色，暂不允许新增或修改授权；请等待子系统重新同步目录。</p>
               <div v-if="isUserAuthorizationSubject" class="iam-application-scope-grid">
                 <label><span>例外授权范围 *</span><select v-model="authorizationDraft.scope_type" :disabled="applicationAccessLoading || applicationAccessSaving || applicationAccessRevoking" @change="onAuthorizationScopeChange"><option value="APPLICATION">整个应用</option><option value="ENVIRONMENT" :disabled="!authorizationEnvironmentOptions.length">指定环境</option></select></label>
@@ -2237,6 +2259,8 @@ onBeforeUnmount(() => {
                 <fieldset v-else class="iam-application-role-fieldset" :disabled="applicationAccessSaving || applicationAccessRevoking">
                   <legend>例外角色（只可选择目录 ACTIVE 角色）</legend>
                   <p class="iam-field-help">角色和默认权限来自子系统角色目录，只读展示。基础平台仅保存“主体 / 应用 / 角色 / 范围 / 有效期”，不会提交其他子系统的自定义业务权限。</p>
+                  <p v-if="authorizationMaxEffectiveRoles" class="iam-field-help">该应用限制每个用户最多 {{ authorizationMaxEffectiveRoles }} 个有效角色（含个人例外与组织/岗位继承）。当前已勾选 <strong>{{ authorizationSelectedDirectRoleCount }}</strong> 个直接例外角色。</p>
+                  <p v-if="authorizationDirectLimitExceeded" class="iam-field-help iam-application-scope-warning" role="alert">已勾选 {{ authorizationSelectedDirectRoleCount }} 个例外角色，超过该应用允许的最大有效角色数（{{ authorizationMaxEffectiveRoles }} 个）；请取消多余角色后再保存。</p>
                   <p v-if="catalogInactiveOrRestrictedRoleCount" class="iam-field-help">目录中另有 {{ catalogInactiveOrRestrictedRoleCount }} 个停用或不可分配角色，已从可选项中排除。</p>
                   <p v-if="!authorizationDraft.role_codes.length && !unavailableDirectRoles.length" class="iam-empty-inline">{{ authorizationEntryLayerInfo.empty }}</p>
                   <div class="iam-application-role-list"><label v-for="role in authorizationRoleOptions" :key="role.role_id || role.id || roleCode(role)" class="iam-application-role-option" :class="{ selected: authorizationDraft.role_codes.includes(roleCode(role)) }"><input v-model="authorizationDraft.role_codes" type="checkbox" :value="roleCode(role)" /><span class="iam-application-role-copy"><strong>{{ role.name || role.display_name || roleCode(role) }}</strong><code>{{ roleCode(role) }}</code><small v-if="role.description">{{ role.description }}</small><small class="iam-application-role-status">ACTIVE · {{ rolePermissionCodes(role).length }} 项默认权限</small><small class="iam-application-role-summary">来源：{{ authorizationEntryLayerInfo.title }} · 默认能力（子系统只读）：{{ roleDefaultPermissionSummary(role) }}</small></span></label></div>

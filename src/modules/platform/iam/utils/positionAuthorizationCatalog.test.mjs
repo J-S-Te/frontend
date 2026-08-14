@@ -31,6 +31,18 @@ test('position target catalog treats platform-native roles as ready without an e
   }])
 })
 
+test('position target catalog exposes the application max_effective_roles policy for the role selector', () => {
+  const catalog = positionAuthorizationTargetCatalog({
+    application_id: 'crm-app',
+    application_code: 'customer_and_opportunity',
+    max_effective_roles: 10,
+    roles: [],
+  })
+
+  assert.deepEqual(catalog.policy, { max_effective_roles: 10 })
+  assert.equal(positionAuthorizationTargetCatalog({ application_id: 'x', roles: [] }).policy.max_effective_roles, 0)
+})
+
 test('position target catalog keeps an explicit subsystem catalog failure state', () => {
   const catalog = positionAuthorizationTargetCatalog({
     application_id: 'contract-app',

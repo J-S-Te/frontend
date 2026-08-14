@@ -22,6 +22,7 @@ export function positionAuthorizationTargetCatalog(target) {
     application_code: applicationCode,
     catalog_version: target?.catalog_version || (applicationCode === 'platform' ? 'built-in' : '—'),
     sync_status: syncStatus || (roles.length ? 'SYNCED' : 'NOT_SYNCED'),
+    policy: { max_effective_roles: Number(target?.max_effective_roles) || 0 },
     roles,
   }
 }

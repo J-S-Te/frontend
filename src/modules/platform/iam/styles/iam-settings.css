@@ -2516,6 +2516,8 @@
 .iam-template-role-check { display: inline-flex; align-items: center; gap: 5px; color: var(--ink-2); font-size: 12px; font-weight: 500; white-space: nowrap; }
 .iam-template-role-check input { min-height: 0; padding: 0; }
 .iam-template-role-checks small { color: var(--ink-3); font-size: 12px; }
+.iam-template-role-limit-hint { display: block; margin: 2px 0 6px; color: var(--ink-3); font-size: 12px; }
+.iam-template-role-limit-warning { display: block; margin: 2px 0 6px; color: var(--warn-1); font-size: 12px; font-weight: 500; }
 .iam-template-editor .iam-panel-actions {
   padding-top: 18px;
   margin-top: 18px;
