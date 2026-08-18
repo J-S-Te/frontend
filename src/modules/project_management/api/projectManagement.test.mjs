@@ -55,3 +55,9 @@ test('项目交付闭环调用真实后端接口而非本地模拟', () => {
     '/field-complete', '/delivery-events', '/capabilities',
   ]) assert.match(source, new RegExp(path.replaceAll('/', '\\/')))
 })
+
+test('项目列表将 keyword 兼容转换为后端实际读取的 q 参数', () => {
+  assert.match(source, /if \(query\.q === undefined && query\.keyword !== undefined\) query\.q = query\.keyword/)
+  assert.match(source, /delete query\.keyword/)
+  assert.match(source, /new URLSearchParams\(Object\.entries\(query\)/)
+})

@@ -253,6 +253,19 @@ function openSubsystem(subsystem) {
   showToast(`「${subsystem.name}」尚未配置公开访问地址`, 'deny')
 }
 
+/**
+ * 门户目录的授权投影是异步完成的。除了明确的 PENDING/RUNNING 状态，
+ * 后端在刚创建用户、角色或子系统 Client 后也可能短暂返回
+ * projection_ready=false；此时必须继续读取目录，直到最新投影可用。
+ * FAILED 不进入轮询，避免服务端已经给出明确失败结果时前端空转请求。
+ */
+function isProjectionRefreshPending(application) {
+  const status = String(application?.projection_status || '').trim().toUpperCase()
+  if (status === 'FAILED') return false
+  return ['PENDING', 'RUNNING', 'QUEUED', 'RETRYING', 'SYNCING'].includes(status)
+    || application?.projection_ready === false
+}
+
 function handleCardPointerMove(event) {
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
     return
@@ -365,9 +378,7 @@ onMounted(() => {
   loadCurrentPrincipal()
   loadPortalCatalog()
   projectionRefreshTimer = window.setInterval(() => {
-    const hasProjectionInFlight = registeredSubsystems.value.some((application) => (
-      ['PENDING', 'RUNNING'].includes(String(application?.projection_status || '').toUpperCase())
-    ))
+    const hasProjectionInFlight = registeredSubsystems.value.some(isProjectionRefreshPending)
     if (hasProjectionInFlight) {
       void loadPortalCatalog({ silent: true })
     }

@@ -10,7 +10,9 @@ import vue from '@vitejs/plugin-vue'
 const DEFAULT_API_PROXY_TARGET = 'http://127.0.0.1:8080'
 const DEFAULT_CONTRACT_API_PROXY_TARGET = 'http://127.0.0.1:8081'
 const DEFAULT_PROJECT_API_PROXY_TARGET = 'http://127.0.0.1:8082'
-const DEFAULT_CUSTOMER_OPPORTUNITY_PROXY_TARGET = 'http://127.0.0.1:8090'
+// customer-api is kept inside the local Compose network. The local Vite server
+// reaches it through the loopback-only port published by compose.local.yaml.
+const DEFAULT_CUSTOMER_OPPORTUNITY_PROXY_TARGET = 'http://127.0.0.1:18083'
 const DEFAULT_CUSTOMER_PORTAL_PROXY_TARGET = 'http://127.0.0.1:8091'
 const DEFAULT_DATA_ANALYSIS_PROXY_TARGET = 'http://127.0.0.1:8080'
 const PROXIED_PATHS = ['/api', '/authorize', '/oauth2', '/.well-known']

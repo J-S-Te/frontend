@@ -19,3 +19,11 @@ test('external subsystem addresses use the same popup fallback', () => {
   assert.match(openSubsystem, /openSubsystemTarget\(subsystem\.publicURL\)/)
   assert.match(openSubsystem, /openSubsystemTarget\(targetURL\)/)
 })
+
+test('门户会持续刷新未完成的用户授权投影，而不是依赖手工同步 Client 或刷新页面', () => {
+  assert.match(source, /function isProjectionRefreshPending\(application\)/)
+  assert.match(source, /application\?\.projection_ready === false/)
+  assert.match(source, /\['PENDING', 'RUNNING', 'QUEUED', 'RETRYING', 'SYNCING'\]/)
+  assert.match(source, /if \(status === 'FAILED'\) return false/)
+  assert.match(source, /registeredSubsystems\.value\.some\(isProjectionRefreshPending\)/)
+})

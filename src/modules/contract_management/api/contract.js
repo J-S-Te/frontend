@@ -295,21 +295,6 @@ export async function listMyOpportunities(params = {}) {
   return items
 }
 
-export async function linkOpportunityContractDraft(opportunityId, payload) {
-  const response = await fetch(`${CUSTOMER_API_BASE_URL}/opportunities/${encodeURIComponent(opportunityId)}/contract-drafts`, {
-    method: 'POST', credentials: 'include',
-    headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-CSRF-Token': '1' },
-    body: JSON.stringify(payload),
-  })
-  const body = await readBody(response)
-  if (!response.ok) {
-    const error = new Error(userSafeErrorMessage(body?.message) || '合同已创建，但回传客户与商机系统失败。')
-    error.status = response.status
-    throw error
-  }
-  return body?.data ?? body
-}
-
 export async function listContractTemplates() {
   const data = await request('/contract-templates')
   return Array.isArray(data) ? data : []

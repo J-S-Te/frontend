@@ -24,7 +24,6 @@ import {
   listContracts,
   listContractLifecycle,
   listOpportunityIntakes,
-  linkOpportunityContractDraft,
   previewApprovalContract,
   previewContractTemplate,
   previewContractDocument,
@@ -911,7 +910,7 @@ async function loadBusinessData() {
     adminDashboard.value = null
   }
   if (can('contract.read')) {
-    addRequest('合同台账', ['dashboard', 'contracts', 'signing', 'reports'], listContracts({ limit: 200 }).then((items) => { contracts.value = items.map(normalizeContract) }))
+    addRequest('合同台账', ['dashboard', 'contracts', 'signing', 'reports'], listContracts({ limit: 200, keyword: keyword.value.trim() }).then((items) => { contracts.value = items.map(normalizeContract) }))
   }
   if (can('contract.approved.read')) {
     addRequest('签署台账', ['signing'], refreshSigningRecords())
@@ -1315,23 +1314,14 @@ async function submitNewContract() {
       template_values: { ...newContract.value.template_values },
     }
     const created = await createContract(payload)
-    let callbackWarning = ''
-    if (newContract.value.opportunity_id) {
-      try {
-        await linkOpportunityContractDraft(newContract.value.opportunity_id, {
-          contract_id: created.id,
-          contract_title: created.title,
-          customer_id: Number(newContract.value.customer_id),
-        })
-      } catch (error) {
-        callbackWarning = `合同已创建，但回传客户与商机系统失败：${error?.message || '请稍后重试。'}`
-      }
-    }
     createDialogOpen.value = false
     newContract.value = emptyNewContract()
     templatePreviewHTML.value = ''
     await loadBusinessData()
-    showToast(callbackWarning || '合同草稿已创建，并已回传客户与商机系统')
+    // 合同创建只负责写入合同系统。CRM 的合同转交由商机签单流程通过
+    // /opportunities/:id/contract-transfer 发起，不能在这里调用不存在的
+    // /contract-drafts 回传接口，也不能把合同创建 ID 当作转交事件 ID。
+    showToast('合同草稿已创建')
   } catch (error) {
     showToast(error?.message || '创建合同失败')
   }
@@ -1612,7 +1602,7 @@ onBeforeUnmount(() => {
       <header class="contract-topbar">
         <button class="contract-menu-button" type="button" aria-label="打开菜单" @click="mobileMenuOpen = true"><ConsoleIcon name="menu" /></button>
         <div class="contract-breadcrumb"><span>合同管理系统</span><ConsoleIcon name="chevron" /><strong>{{ pageMeta.title }}</strong></div>
-        <label class="contract-global-search"><ConsoleIcon name="search" /><input v-model="keyword" type="search" placeholder="搜索合同编号 / 名称 / 类型…" /></label>
+        <label class="contract-global-search"><ConsoleIcon name="search" /><input v-model="keyword" type="search" placeholder="搜索合同编号 / 名称 / 类型…" @change="loadBusinessData" /></label>
         <div class="contract-topbar-actions">
           <button class="contract-icon-button" type="button" aria-label="通知" @click="notificationOpen = !notificationOpen"><ConsoleIcon name="bell" /><i></i></button>
           <span class="contract-topbar-avatar">{{ currentUserInitial }}</span>
@@ -1669,7 +1659,7 @@ onBeforeUnmount(() => {
         </template>
 
         <template v-else-if="activeSection === 'contracts'">
-          <div class="contract-filter-bar"><label class="contract-search-field"><ConsoleIcon name="search" /><input v-model="keyword" type="search" placeholder="合同编号 / 名称 / 类型" /></label><button class="contract-button ghost small" type="button" @click="resetFilters"><ConsoleIcon name="reset" />重置</button><button class="contract-button primary small" type="button" @click="loadBusinessData"><ConsoleIcon name="reset" />刷新</button></div>
+          <div class="contract-filter-bar"><label class="contract-search-field"><ConsoleIcon name="search" /><input v-model="keyword" type="search" placeholder="合同编号 / 名称 / 类型" @change="loadBusinessData" /></label><button class="contract-button ghost small" type="button" @click="resetFilters"><ConsoleIcon name="reset" />重置</button><button class="contract-button primary small" type="button" @click="loadBusinessData"><ConsoleIcon name="reset" />刷新</button></div>
           <div class="contract-table-card"><div class="contract-table-scroll"><table class="contract-data-table contract-ledger-table"><thead><tr><th>合同编号 / 名称</th><th>合同类型</th><th>服务类型</th><th>合同金额</th><th>负责人姓名</th><th>创建日期</th><th>到期日期</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="contract in filteredContracts" :key="contract.recordId"><td><button class="contract-entity-link" type="button" @click="openContract(contract)"><strong>{{ contract.name }}</strong><small>{{ contract.id }}</small></button></td><td>{{ contract.type }}</td><td>{{ contract.serviceType }}</td><td class="amount">{{ formatContractAmount(contract) }}</td><td>{{ contract.owner }}</td><td>{{ contract.createdAt }}</td><td>{{ contract.endDate }}</td><td><span class="contract-badge" :class="statusTone(contract.status)"><i></i>{{ contract.status }}</span></td><td><button class="contract-text-button" type="button" @click="openContract(contract)">详情</button></td></tr><tr v-if="!filteredContracts.length"><td colspan="9" class="contract-empty">当前没有可查看的合同</td></tr></tbody></table></div><footer class="contract-table-footer"><span>共 {{ filteredContracts.length }} 条合同记录</span></footer></div>
         </template>
 

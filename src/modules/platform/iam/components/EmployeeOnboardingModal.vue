@@ -216,17 +216,18 @@ async function submit() {
 
 <template>
   <div class="console-modal-backdrop" role="presentation" @click.self="close">
-    <section class="console-detail-modal console-wizard-modal" role="dialog" aria-modal="true" aria-label="新增员工">
-      <header>
+    <section class="console-detail-modal console-wizard-modal personnel-workbench-modal" role="dialog" aria-modal="true" aria-label="新增员工">
+      <header class="personnel-workbench-header">
         <div>
-          <p class="console-modal-eyebrow">员工入职</p>
+          <p class="console-modal-eyebrow"><span class="personnel-workbench-eyebrow-icon"><ConsoleIcon name="organization" /></span>人员工作台 · 入职向导</p>
           <h2>新增员工</h2>
+          <p class="personnel-workbench-header-hint">一次完成员工档案、登录账号、任职关系与岗位授权继承配置。</p>
         </div>
         <button class="console-modal-close" type="button" aria-label="关闭新增员工" :disabled="saving" @click="close"><ConsoleIcon name="close" /></button>
       </header>
 
       <form class="console-wizard-body" @submit.prevent="submit">
-        <div class="settings-active-summary">
+        <div class="settings-active-summary personnel-workbench-summary">
           <span class="settings-active-summary-icon"><ConsoleIcon name="info" /></span>
           <div class="settings-active-summary-copy">
             <strong>员工编号由服务端自动生成</strong>
@@ -234,7 +235,8 @@ async function submit() {
           </div>
         </div>
 
-        <ol class="console-stepper" aria-label="新增员工流程">
+        <div class="personnel-workbench-stepper-heading"><strong>创建流程</strong><span>完成前置检查后即可开始录入</span></div>
+        <ol class="console-stepper personnel-workbench-stepper" aria-label="新增员工流程">
           <li class="console-stepper-step" :class="{ active: currentStep === 0, done: currentStep > 0 }" role="button" tabindex="0" @click="goToStep(0)" @keydown.enter.prevent="goToStep(0)">
             <span class="console-stepper-circle">
               <ConsoleIcon v-if="currentStep > 0" name="audit" />
@@ -368,3 +370,47 @@ async function submit() {
     </section>
   </div>
 </template>
+
+<style scoped>
+.personnel-workbench-modal { overflow: hidden; border: 1px solid #dce7f5; box-shadow: 0 24px 70px rgba(28, 54, 98, .2); }
+.personnel-workbench-header { position: relative; overflow: hidden; padding: 1.45rem 1.75rem 1.3rem; background: linear-gradient(135deg, #f7faff 0%, #edf4ff 100%); border-bottom: 1px solid #e1eaf5; }
+.personnel-workbench-header::after { position: absolute; right: -3rem; bottom: -4.5rem; width: 13rem; height: 13rem; content: ''; border: 1.5rem solid rgba(110, 145, 220, .08); border-radius: 50%; }
+.personnel-workbench-header > div { position: relative; z-index: 1; }
+.personnel-workbench-header h2 { margin-top: .35rem; font-size: 1.45rem; letter-spacing: -.02em; }
+.personnel-workbench-header-hint { margin: .4rem 0 0; color: var(--muted, #71829b); font-size: .78rem; line-height: 1.5; }
+.personnel-workbench-eyebrow-icon { display: inline-grid; place-items: center; width: 1.35rem; height: 1.35rem; margin-right: .35rem; color: #4b70ca; background: #dfeaff; border-radius: .4rem; vertical-align: middle; }
+.personnel-workbench-eyebrow-icon svg { width: .8rem; height: .8rem; }
+.personnel-workbench-summary { margin: 1.1rem 0 1.25rem; border: 1px solid #dce8f7; border-radius: .8rem; background: linear-gradient(135deg, #fbfdff, #f5f9ff); }
+.personnel-workbench-summary strong { color: #2c4f91; }
+.personnel-workbench-summary p { max-width: 680px; }
+.personnel-workbench-stepper-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; margin: 0 0 .65rem; color: var(--text, #263650); }
+.personnel-workbench-stepper-heading strong { font-size: .86rem; }
+.personnel-workbench-stepper-heading span { color: var(--muted, #71829b); font-size: .73rem; }
+.personnel-workbench-stepper { margin-bottom: 1.35rem; padding: .9rem 1rem; border: 1px solid #e3ebf6; border-radius: .75rem; background: #fbfdff; }
+.personnel-workbench-modal .console-wizard-section { border-radius: .8rem; box-shadow: 0 2px 8px rgba(41, 68, 111, .025); }
+.personnel-workbench-modal .console-wizard-section.active { border-left-width: 4px; box-shadow: 0 5px 16px rgba(56, 92, 150, .06); }
+.personnel-workbench-modal .console-wizard-section-head h3 { font-size: .92rem; }
+.personnel-workbench-modal .console-wizard-section-head p { max-width: 650px; }
+.personnel-workbench-modal .console-wizard-section-icon { border-radius: .7rem; }
+.personnel-workbench-modal .console-form-item input, .personnel-workbench-modal .console-form-item select { min-height: 2.35rem; }
+.personnel-workbench-modal .console-wizard-role-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.personnel-workbench-modal .console-wizard-role-list > div { position: relative; padding: .85rem .9rem .85rem 1.05rem; border-color: #dfe8f4; box-shadow: 0 2px 7px rgba(45, 76, 124, .035); }
+.personnel-workbench-modal .console-wizard-role-list > div::before { position: absolute; top: 0; bottom: 0; left: 0; width: 3px; content: ''; border-radius: 7px 0 0 7px; background: #7b9ce2; }
+.personnel-workbench-modal .console-wizard-empty { background: #fbfdff; }
+.personnel-workbench-modal .console-form-actions { position: sticky; bottom: 0; z-index: 2; margin: 1rem -1.75rem -1.5rem; padding: .9rem 1.75rem; border-top: 1px solid #e3ebf6; background: rgba(255, 255, 255, .94); backdrop-filter: blur(8px); }
+@media (max-width: 760px) {
+  .personnel-workbench-header { padding: 1.2rem 1.15rem 1.1rem; }
+  .personnel-workbench-modal .console-wizard-body { padding: 1rem 1.15rem 1.25rem; }
+  .personnel-workbench-summary { margin-top: .85rem; }
+  .personnel-workbench-stepper { padding: .75rem; }
+  .personnel-workbench-stepper-heading { align-items: flex-start; flex-direction: column; gap: .2rem; }
+  .personnel-workbench-modal .console-wizard-role-list { grid-template-columns: 1fr; }
+  .personnel-workbench-modal .console-form-actions { margin-right: -1.15rem; margin-left: -1.15rem; padding-right: 1.15rem; padding-left: 1.15rem; }
+}
+@media (max-width: 480px) {
+  .personnel-workbench-header h2 { font-size: 1.25rem; }
+  .personnel-workbench-header-hint { max-width: 18rem; }
+  .personnel-workbench-modal .console-form-actions { flex-direction: column-reverse; }
+  .personnel-workbench-modal .console-form-actions .console-button { width: 100%; justify-content: center; }
+}
+</style>

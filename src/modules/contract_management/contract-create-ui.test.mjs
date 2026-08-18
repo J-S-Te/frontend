@@ -14,13 +14,12 @@ test('new contracts select an optional permission-scoped opportunity and have no
   assert.match(api, /page_size: '100'/)
 })
 
-test('opportunity selection fills customer context and returns the created draft to CRM', () => {
+test('opportunity selection fills customer context without calling an unsupported CRM draft endpoint', () => {
   assert.match(source, /newContract\.value\.customer_id = String\(item\.customer_id/)
   assert.match(source, /newContract\.value\.customer_name = item\.customer_name/)
   assert.match(source, /crm_customer_id: Number\(newContract\.value\.customer_id/)
-  assert.match(source, /linkOpportunityContractDraft\(newContract\.value\.opportunity_id/)
-  assert.match(api, /\/contract-drafts`/)
-  assert.match(api, /'X-CSRF-Token': '1'/)
+  assert.doesNotMatch(source, /linkOpportunityContractDraft/)
+  assert.doesNotMatch(api, /\/contract-drafts`/)
 })
 
 test('contract and service types are constrained selects', () => {
