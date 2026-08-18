@@ -88,7 +88,12 @@ export async function ensureProjectSession() {
 }
 
 export async function listProjects(params = {}) {
-  const search = new URLSearchParams(params).toString()
+  // 项目后端的查询参数名称是 q；保留 keyword 作为前端调用兼容别名，避免
+  // 将未被后端读取的 keyword 原样发送，导致关键词筛选静默失效。
+  const query = { ...params }
+  if (query.q === undefined && query.keyword !== undefined) query.q = query.keyword
+  delete query.keyword
+  const search = new URLSearchParams(Object.entries(query).filter(([, value]) => value !== undefined && value !== null && value !== '')).toString()
   const data = await request(`/projects${search ? `?${search}` : ''}`)
   return Array.isArray(data) ? data : []
 }

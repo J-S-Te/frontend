@@ -156,7 +156,7 @@ test('Keycloak 用户投影未完成时门户入口保持失败关闭并保留�
   assert.equal(cards[1].projectionNextAction, '账号权限正在等待同步，请稍后重试。')
   assert.match(subsystemPortalView, /subsystem\.projectionNextAction/)
   assert.match(subsystemPortalView, /权限同步中/)
-  assert.match(subsystemPortalView, /\['PENDING', 'RUNNING'\]/)
+  assert.match(subsystemPortalView, /\['PENDING', 'RUNNING', 'QUEUED', 'RETRYING', 'SYNCING'\]/)
   assert.match(subsystemPortalView, /loadPortalCatalog\(\{ silent: true \}\)/)
 })
 

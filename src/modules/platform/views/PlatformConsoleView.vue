@@ -150,8 +150,8 @@ const settingsTabs = [
   },
   {
     key: 'personnel', label: '人员异动中心', icon: 'organization', tone: 'violet',
-    description: '集中办理晋升、降职、调岗、离职和复职，并跟踪审批与权限影响。',
-    capabilities: ['异动单', '权限预览', '审批轨迹', '未来生效'],
+    description: '由管理员集中配置晋升、降职、调岗、离职和复职，并跟踪权限影响与生效结果。',
+    capabilities: ['管理员配置', '权限预览', '未来生效', '执行记录'],
     permissions: PLATFORM_SETTINGS_SECTION_PERMISSIONS.iam,
   },
   {

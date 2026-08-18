@@ -71,6 +71,7 @@ import {
   organizationDescendantIds,
 } from '@/modules/platform/iam/utils/organizationTree'
 import { groupPositionsByOrganization } from '@/modules/platform/iam/utils/positionGroups'
+import { buildOrganizationExportRows, buildPositionExportRows } from '@/modules/platform/iam/utils/treeExport'
 import {
   filteredMembershipsFromGroups,
   groupMembershipsByOrganization,
@@ -482,6 +483,10 @@ function includesFilter(items, filter, fields) {
 const filteredUsers = computed(() => includesFilter(users.value, panelFilters.users, ['display_name', 'employee_no', 'email', 'status']))
 const filteredAccounts = computed(() => includesFilter(accounts.value, panelFilters.accounts, ['account_name', 'user_id', 'status']))
 const filteredOrganizations = computed(() => includesFilter(organizations.value, panelFilters.organizations, ['code', 'name']))
+const organizationExportRows = computed(() => buildOrganizationExportRows(
+  organizations.value,
+  new Set(filteredOrganizations.value.map((item) => String(item.org_unit_id || item.id || ''))),
+))
 const organizationExportContext = computed(() => {
   const context = new Map()
   const visit = (nodes, parentPath = []) => {
@@ -513,6 +518,11 @@ const filteredPositions = computed(() => groupPositionsByOrganization(
   organization_code: group.organization_code,
   organization_path: group.organization_path,
 }))))
+const positionExportRows = computed(() => buildPositionExportRows(
+  positions.value,
+  organizations.value,
+  new Set(filteredPositions.value.map((item) => String(item.position_id || item.id || ''))),
+))
 // 任职搜索必须在完整数据集上同时匹配用户、组织和岗位；CSV 直接消费相同结果，
 // 与页面折叠状态无关，确保导出的是完整搜索结果而不是当前可见卡片。
 const filteredMemberships = computed(() => filteredMembershipsFromGroups(groupMembershipsByOrganization(
@@ -1221,13 +1231,14 @@ function exportActivePanelCsv() {
       }))
   } else if (key === 'organizations') {
     downloadCsv(`iam-organizations-${stamp}.csv`,
-      ['组织 ID', '组织编码', '组织名称', '上级组织 ID', '上级组织名称', '组织路径', '层级', '显示顺序', '状态', '版本', '更新时间'],
-      filteredOrganizations.value.map((item) => {
-        const id = item.org_unit_id || item.id || ''
-        const context = organizationExportContext.value.get(String(id)) || {}
+      ['树状名称', '组织 ID', '组织编码', '组织名称', '上级组织 ID', '上级组织名称', '组织路径', '层级', '显示顺序', '状态', '版本', '更新时间'],
+      organizationExportRows.value.map((item) => {
+        const id = item.id
+        const context = item
         const parentId = item.parent_id || ''
         const parent = organizations.value.find((candidate) => String(candidate.org_unit_id || candidate.id || '') === String(parentId))
         return [
+          item.treeName,
           id,
           item.code || '',
           item.name || '',
@@ -1243,9 +1254,10 @@ function exportActivePanelCsv() {
       }))
   } else if (key === 'positions') {
     downloadCsv(`iam-positions-${stamp}.csv`,
-      ['岗位 ID', '岗位编码', '岗位名称', '组织 ID', '组织编码', '所属组织', '组织路径', '状态', '版本', '更新时间'],
-      filteredPositions.value.map((item) => [
-        item.position_id || item.id || '',
+      ['树状名称', '岗位 ID', '岗位编码', '岗位名称', '组织 ID', '组织编码', '所属组织', '组织路径', '状态', '版本', '更新时间'],
+      positionExportRows.value.map((item) => [
+        item.treeName,
+        item.id,
         item.code || '',
         item.name || item.position_name || '',
         item.organization_id || item.org_unit_id || '',
