@@ -541,6 +541,16 @@ test('新建商机从客户管理加载可见有效客户且不允许手填客�
   assert.equal(requests[0].url, '/customer-opportunity/api/v1/customers?keyword=%E7%A4%BA%E4%BE%8B%E5%AE%A2%E6%88%B7&status=ACTIVE&page=1&page_size=100&sort_by=name&sort_order=asc')
 })
 
+test('新建商机类型和来源使用受控多选下拉菜单', () => {
+  assert.match(view, /const opportunityTypeOptions = Object\.freeze\(/)
+  assert.match(view, /const opportunitySourceOptions = Object\.freeze\(/)
+  assert.match(view, /v-model="opportunityTypeSelections" multiple/)
+  assert.match(view, /v-model="opportunitySourceSelections" multiple/)
+  for (const value of ['等保审查', '密码应用安全性评估', '网络安全攻防演内容', '安全运维', '客户主动咨询', '公开招标', '内部转介']) {
+    assert.match(view, new RegExp(value))
+  }
+})
+
 test('客户沟通与商机维护调用实际生命周期路由并携带 CSRF', async (t) => {
   const originalFetch = globalThis.fetch
   t.after(() => { globalThis.fetch = originalFetch })

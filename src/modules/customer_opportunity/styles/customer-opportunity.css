@@ -459,6 +459,7 @@
 .crm-customer-dialog__body { padding: 20px 24px 6px; }
 .crm-opportunity-dialog { width: min(860px, 100%); }
 .crm-opportunity-dialog__body { padding: 20px 24px 4px; }
+.crm-opportunity-dialog select[multiple] { min-height: 112px; padding: 6px 8px; background-image: none; }
 .crm-opportunity-presale-create-backdrop { z-index: 90; }
 .crm-opportunity-presale-create-dialog { width: min(780px, 100%); max-height: min(820px, calc(100vh - 40px)); }
 .crm-opportunity-presale-create-context { margin-bottom: 0; }
