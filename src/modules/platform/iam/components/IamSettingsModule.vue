@@ -65,7 +65,7 @@ import {
   isAssignableActiveCatalogRole,
   isCatalogSynchronized,
 } from '@/modules/platform/iam/utils/applicationAuthorizationCatalog'
-import { authorizationEntryLayer } from '@/modules/platform/iam/utils/authorizationEntryLayer'
+import { authorizationEntryLayer, duplicatedInheritedRoleCodes } from '@/modules/platform/iam/utils/authorizationEntryLayer'
 import {
   buildOrganizationTree,
   organizationDescendantIds,
@@ -142,6 +142,21 @@ function openConfirm({ title, description, confirmText = '确认', cancelText = 
 function closeConfirm() {
   if (confirmDialog.value?.busy) return
   confirmDialog.value = null
+}
+async function runConfirm() {
+  const dialog = confirmDialog.value
+  if (!dialog || dialog.busy) return
+  dialog.busy = true
+  try {
+    const completed = await dialog.onConfirm()
+    // 回调返回 false 表示业务失败，保留弹窗让用户看到错误并可重试；
+    // 其他返回值均表示确认动作已完成，统一自动关闭弹窗。
+    if (completed !== false && confirmDialog.value === dialog) confirmDialog.value = null
+  } catch {
+    // 业务回调负责展示错误提示，异常时保留弹窗避免误以为操作成功。
+  } finally {
+    if (confirmDialog.value === dialog) dialog.busy = false
+  }
 }
 const applications = ref([])
 const applicationsLoading = ref(false)
@@ -467,11 +482,37 @@ function includesFilter(items, filter, fields) {
 const filteredUsers = computed(() => includesFilter(users.value, panelFilters.users, ['display_name', 'employee_no', 'email', 'status']))
 const filteredAccounts = computed(() => includesFilter(accounts.value, panelFilters.accounts, ['account_name', 'user_id', 'status']))
 const filteredOrganizations = computed(() => includesFilter(organizations.value, panelFilters.organizations, ['code', 'name']))
+const organizationExportContext = computed(() => {
+  const context = new Map()
+  const visit = (nodes, parentPath = []) => {
+    for (const node of nodes) {
+      const id = String(node.org_unit_id || node.id || '')
+      if (!id) continue
+      const name = node.name || node.code || id
+      context.set(id, {
+        parentName: parentPath.length ? parentPath[parentPath.length - 1] : '',
+        path: [...parentPath, name].join(' / '),
+        depth: parentPath.length,
+      })
+      visit(node.children || [], [...parentPath, name])
+    }
+  }
+  visit(buildOrganizationTree(organizations.value))
+  return context
+})
 const filteredPositions = computed(() => groupPositionsByOrganization(
   positions.value,
   organizations.value,
   panelFilters.positions,
-).flatMap((group) => group.positions))
+).flatMap((group) => (group.positions || []).map((position) => ({
+  ...position,
+  // 分组结果携带的是组织节点，导出时必须把组织上下文回填到每一条岗位记录；
+  // 不能把组织节点本身当成岗位行导出。
+  organization_id: group.organization_id,
+  organization_name: group.organization_name,
+  organization_code: group.organization_code,
+  organization_path: group.organization_path,
+}))))
 // 任职搜索必须在完整数据集上同时匹配用户、组织和岗位；CSV 直接消费相同结果，
 // 与页面折叠状态无关，确保导出的是完整搜索结果而不是当前可见卡片。
 const filteredMemberships = computed(() => filteredMembershipsFromGroups(groupMembershipsByOrganization(
@@ -545,6 +586,37 @@ function applicationRoleCatalogEntry(role) {
 function applicationRoleName(role) {
   const catalogRole = applicationRoleCatalogEntry(role)
   return role?.name || role?.display_name || catalogRole?.name || catalogRole?.display_name || roleCode(role) || '未命名角色'
+}
+
+function onExceptionRoleToggle(code, event) {
+  const roleCodeValue = String(code || '').trim()
+  if (!roleCodeValue || !event?.target?.checked) return
+  if (confirmDialog.value) {
+    authorizationDraft.role_codes = authorizationDraft.role_codes.filter((item) => item !== roleCodeValue)
+    return
+  }
+  const duplicateCodes = duplicatedInheritedRoleCodes([roleCodeValue], applicationInheritedRoles.value)
+  if (!duplicateCodes.length) return
+
+  // 先撤销 v-model 刚加入的角色；只有管理员在确认弹窗中选择继续时才重新加入，
+  // 避免关闭弹窗或点击取消后草稿仍然残留重复的个人例外角色。
+  authorizationDraft.role_codes = authorizationDraft.role_codes.filter((item) => item !== roleCodeValue)
+  const inheritedRole = applicationInheritedRoles.value.find((role) => roleCode(role) === roleCodeValue)
+  const name = applicationRoleName(inheritedRole || { code: roleCodeValue })
+  openConfirm({
+    title: '确认添加重复例外角色',
+    description: `角色“${name}”已经通过岗位或组织授权模板获得。再次添加个人例外不会增加实际权限，但会增加后续排查和回收成本。\n\n仍要添加这个个人例外角色吗？`,
+    confirmText: '仍然添加',
+    cancelText: '取消勾选',
+      onConfirm: () => {
+        if (!authorizationDraft.role_codes.includes(roleCodeValue)) {
+          authorizationDraft.role_codes = [...authorizationDraft.role_codes, roleCodeValue]
+        }
+        // 通用确认按钮会先把弹窗标记为 busy；这里直接清理弹窗，避免 closeConfirm
+        // 因 busy 状态拒绝关闭而让“仍然添加”后的提示残留在页面上。
+        confirmDialog.value = null
+      },
+  })
 }
 
 function authorizationSourceTypeName(role) {
@@ -976,7 +1048,7 @@ async function saveApplicationAccess() {
       danger: true,
       onConfirm: async () => {
         try {
-          await performSaveApplicationAccess()
+          return await performSaveApplicationAccess()
         } finally {
           closeConfirm()
         }
@@ -991,10 +1063,10 @@ async function performSaveApplicationAccess() {
   const subjectId = authorizationSubjectId.value
   const subjectType = authorizationSubjectType.value
   const applicationCode = selectedApplicationCode.value
-  if (!subjectId || !subjectType || !applicationCode || applicationAccessSaving.value) return
+  if (!subjectId || !subjectType || !applicationCode || applicationAccessSaving.value) return false
   if (subjectType !== 'USER') {
     applicationAccessError.value = '该主体不允许保存直接角色。'
-    return
+    return false
   }
   applicationAccessSaving.value = true
   applicationAccessError.value = ''
@@ -1004,8 +1076,10 @@ async function performSaveApplicationAccess() {
       : await updateSubjectApplicationAccess(subjectType, subjectId, applicationCode, applicationAccessPayload())
     applyApplicationAccess(access)
     emitToast(`${authorizationEntryLayerInfo.value.title}已保存。${subjectType === 'USER' ? '基础平台会在下一次请求立即按最新权限校验；已打开页面会自动刷新授权状态。' : '相关用户会按最新授权重新计算继承角色。'}`)
+    return true
   } catch (error) {
     applicationAccessError.value = error instanceof AuthorizationError ? error.message : (error?.message || '保存应用访问授权失败。')
+    return false
   } finally {
     applicationAccessSaving.value = false
   }
@@ -1042,6 +1116,7 @@ async function revokeApplicationAccess() {
           : `${authorizationEntryLayerInfo.value.title}已撤销。`)
       } catch (error) {
         applicationAccessError.value = error instanceof AuthorizationError ? error.message : (error?.message || '撤销应用访问失败。')
+        return false
       } finally {
         applicationAccessRevoking.value = false
         closeConfirm()
@@ -1112,24 +1187,107 @@ function exportActivePanelCsv() {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
   if (key === 'users') {
     downloadCsv(`iam-users-${stamp}.csv`,
-      ['用户 ID', '姓名', '工号', '邮箱', '手机号（脱敏）', '状态', '更新时间'],
-      filteredUsers.value.map((item) => [item.user_id, item.display_name, item.employee_no || '', item.email || '', item.mobile_masked || '', displayStatus(item.status), formatDateTime(item.updated_at)]))
+      ['用户 ID', '姓名', '工号', '邮箱', '手机号（脱敏）', '主组织 ID', '任职状态', '用户状态', '版本', '更新时间'],
+      filteredUsers.value.map((item) => [
+        item.user_id || item.id || '',
+        item.display_name || item.name || '',
+        item.employee_no || '',
+        item.email || '',
+        item.mobile_masked || '',
+        item.primary_org_id || item.primary_organization_id || '',
+        item.employment_status || '',
+        displayStatus(item.status),
+        item.version ?? '',
+        formatDateTime(item.updated_at),
+      ]))
   } else if (key === 'accounts') {
     downloadCsv(`iam-accounts-${stamp}.csv`,
-      ['账号 ID', '账号名', '关联用户', '类型', '认证', '状态', '有效时间', '更新时间'],
-      filteredAccounts.value.map((item) => [item.account_id, item.account_name, item.user_id || '', displayLoginAccountType(item).split(' / ')[0], displayLoginAccountType(item).split(' / ')[1], displayStatus(item.status), item.valid_until ? formatDateTime(item.valid_until) : '长期有效', formatDateTime(item.updated_at)]))
+      ['账号 ID', '登录账号', '关联用户 ID', '关联用户姓名', '账号类型', '认证来源', '密码状态', '有效截止时间', '状态', '版本', '更新时间'],
+      filteredAccounts.value.map((item) => {
+        const accountType = displayLoginAccountType(item).split(' / ')
+        return [
+          item.account_id || item.id || '',
+          item.account_name || item.username || '',
+          item.user_id || item.user?.id || '',
+          item.user?.display_name || item.user?.name || '',
+          accountType[0] || '',
+          accountType[1] || '',
+          item.password_initialized === false ? '待初始化密码' : '已初始化密码',
+          item.valid_until ? formatDateTime(item.valid_until) : '长期有效',
+          displayStatus(item.status),
+          item.version ?? '',
+          formatDateTime(item.updated_at),
+        ]
+      }))
   } else if (key === 'organizations') {
     downloadCsv(`iam-organizations-${stamp}.csv`,
-      ['组织 ID', '编码', '名称', '上级 ID', '显示顺序', '状态'],
-      filteredOrganizations.value.map((item) => [item.org_unit_id, item.code || '', item.name, item.parent_id || '', item.sort_order ?? 0, displayStatus(item.status)]))
+      ['组织 ID', '组织编码', '组织名称', '上级组织 ID', '上级组织名称', '组织路径', '层级', '显示顺序', '状态', '版本', '更新时间'],
+      filteredOrganizations.value.map((item) => {
+        const id = item.org_unit_id || item.id || ''
+        const context = organizationExportContext.value.get(String(id)) || {}
+        const parentId = item.parent_id || ''
+        const parent = organizations.value.find((candidate) => String(candidate.org_unit_id || candidate.id || '') === String(parentId))
+        return [
+          id,
+          item.code || '',
+          item.name || '',
+          parentId,
+          parent?.name || (parentId ? '上级组织不可见' : ''),
+          context.path || item.name || item.code || id,
+          context.depth ?? '',
+          item.sort_order ?? 0,
+          displayStatus(item.status),
+          item.version ?? '',
+          formatDateTime(item.updated_at),
+        ]
+      }))
   } else if (key === 'positions') {
     downloadCsv(`iam-positions-${stamp}.csv`,
-      ['岗位 ID', '名称', '所属组织', '状态'],
-      filteredPositions.value.map((item) => [item.position_id || item.id, item.name, item.organization_name || '', displayStatus(item.status)]))
+      ['岗位 ID', '岗位编码', '岗位名称', '组织 ID', '组织编码', '所属组织', '组织路径', '状态', '版本', '更新时间'],
+      filteredPositions.value.map((item) => [
+        item.position_id || item.id || '',
+        item.code || '',
+        item.name || item.position_name || '',
+        item.organization_id || item.org_unit_id || '',
+        item.organization_code || '',
+        item.organization_name || '',
+        item.organization_path || '',
+        displayStatus(item.status),
+        item.version ?? '',
+        formatDateTime(item.updated_at),
+      ]))
   } else if (key === 'memberships') {
     downloadCsv(`iam-memberships-${stamp}.csv`,
-      ['任职 ID', '用户', '组织', '岗位', '任职类型', '是否继承', '有效期'],
-      filteredMemberships.value.map((item) => [item.membership_id || item.id, item.user?.name || item.user_id || '', item.org_unit?.name || item.org_unit_id || '', item.position?.name || item.position_id || '', displayMembershipType(item.membership_type), item.inherit_authorization === false ? '不继承' : '继承', displayMembershipValidity(item)]))
+      ['任职 ID', '用户 ID', '用户姓名', '组织 ID', '组织编码', '组织名称', '组织路径', '岗位 ID', '岗位编码', '岗位名称', '任职类型', '是否主组织', '是否继承岗位授权', '生效时间', '失效时间', '状态', '版本', '更新时间'],
+      filteredMemberships.value.map((item) => {
+        const membershipId = item.membership_id || item.id || ''
+        const userId = item.user_id || item.user?.id || ''
+        const organizationId = item.org_unit_id || item.org_unit?.id || item.org_unit?.org_unit_id || ''
+        const positionId = item.position_id || item.position?.id || ''
+        const organization = organizations.value.find((candidate) => String(candidate.org_unit_id || candidate.id || '') === String(organizationId))
+        const position = positions.value.find((candidate) => String(candidate.position_id || candidate.id || '') === String(positionId))
+        const context = organizationExportContext.value.get(String(organizationId)) || {}
+        return [
+          membershipId,
+          userId,
+          item.user?.display_name || item.user?.name || '',
+          organizationId,
+          organization?.code || '',
+          item.org_unit?.name || organization?.name || '',
+          context.path || organization?.name || organizationId,
+          positionId,
+          position?.code || '',
+          item.position?.name || position?.name || '',
+          displayMembershipType(item.membership_type),
+          item.is_primary ? '是' : '否',
+          item.inherit_authorization === false ? '不继承' : '继承',
+          formatDateTime(item.effective_from || item.valid_from),
+          formatDateTime(item.effective_to || item.valid_until),
+          displayStatus(item.status),
+          item.version ?? '',
+          formatDateTime(item.updated_at),
+        ]
+      }))
   } else {
     emitToast('当前面板暂不支持导出。')
   }
@@ -1520,12 +1678,23 @@ async function confirmUserDeletion() {
 
 async function terminateEmployee(user) {
   if (!user?.user_id || (user.status || '').toUpperCase() !== 'ACTIVE') return
-  if (typeof window !== 'undefined' && !window.confirm(`确认办理 ${user.display_name || user.user_id} 的离职吗？账号、任职和会话将被停用，历史保留。`)) return
-  try {
-    await updateUser({ userId: user.user_id, displayName: user.display_name, employeeNo: user.employee_no || '', email: user.email || '', mobile: '', status: 'DISABLED', version: user.version })
-    await Promise.all([loadUsers(), loadAccounts(), loadMemberships()])
-    emitToast(`${user.display_name || user.user_id} 已办理离职。`)
-  } catch (error) { emitToast(error instanceof IamError ? error.message : (error?.message || '办理离职失败。')) }
+  openConfirm({
+    title: '确认办理离职',
+    description: `确认办理 ${user.display_name || user.user_id} 的离职吗？账号、任职和会话将被停用，历史保留。`,
+    confirmText: '确认办理',
+    danger: true,
+    onConfirm: async () => {
+      try {
+        await updateUser({ userId: user.user_id, displayName: user.display_name, employeeNo: user.employee_no || '', email: user.email || '', mobile: '', status: 'DISABLED', version: user.version })
+        await Promise.all([loadUsers(), loadAccounts(), loadMemberships()])
+        emitToast(`${user.display_name || user.user_id} 已办理离职。`)
+        return true
+      } catch (error) {
+        emitToast(error instanceof IamError ? error.message : (error?.message || '办理离职失败。'))
+        return false
+      }
+    },
+  })
 }
 
 async function openOrganizationEditor(organization) {
@@ -1575,6 +1744,7 @@ async function removeOrganization(organization) {
         emitToast(`组织 ${organization.name} 已删除，相关岗位和任职关系已停用。`)
       } catch (error) {
         emitToast(error instanceof IamError ? error.message : (error?.message || '删除组织失败。'))
+        return false
       } finally {
         deletingOrganizationId.value = ''
         closeConfirm()
@@ -1606,6 +1776,7 @@ async function removePosition(position) {
         emitToast(`岗位 ${position.name || positionId} 已删除，相关任职关系和岗位继承授权已停用。`)
       } catch (error) {
         emitToast(error instanceof IamError ? error.message : (error?.message || '删除岗位失败。'))
+        return false
       } finally {
         deletingPositionId.value = ''
         closeConfirm()
@@ -1723,9 +1894,9 @@ function openEmployeeOnboarding() {
   emit('employee-onboarding')
 }
 
-// 批量导入只创建用户档案（不创建账号 / 任职），因此只需刷新 users 列表。
+// 批量导入在后端事务中同时创建用户和主任职关系，因此提交成功后刷新关联列表。
 async function refreshAfterBatchImport() {
-  await loadUsers()
+  await Promise.all([loadUsers(), loadMemberships(), loadPositions(), loadOrganizations()])
 }
 
 function closeEditor() {
@@ -2031,7 +2202,10 @@ onBeforeUnmount(() => {
             <button class="console-button ghost small" type="button" @click="resetFilters"><ConsoleIcon name="reset" />清空筛选</button>
             <button class="console-button ghost small" type="button" :disabled="activeLoading || !canReadActivePanel" @click="reloadActive"><ConsoleIcon name="refresh" />刷新</button>
             <button v-if="canReadActivePanel && ['users', 'accounts', 'organizations', 'positions', 'memberships'].includes(activePanel)" class="console-button ghost small" type="button" :disabled="!activePanelItemsCount" @click="exportActivePanelCsv" title="导出当前筛选结果为 CSV"><ConsoleIcon name="download" />导出 CSV</button>
-            <button v-if="activePanel === 'users' && hasPermission(IAM_PERMISSIONS.userCreate)" class="console-button primary small" type="button" @click="openEmployeeOnboarding"><ConsoleIcon name="user" />新增员工</button>
+            <template v-if="activePanel === 'users' && hasPermission(IAM_PERMISSIONS.userCreate)">
+              <button class="console-button ghost small" type="button" @click="batchImportVisible = true"><ConsoleIcon name="download" />批量导入用户</button>
+              <button class="console-button primary small" type="button" @click="openEmployeeOnboarding"><ConsoleIcon name="user" />新增员工</button>
+            </template>
             <button v-else-if="panelToKind[activePanel] && hasPermission(panelCreatePermission(activePanel))" class="console-button primary small" type="button" :disabled="!panelToKind[activePanel]" @click="openEditorForActivePanel"><ConsoleIcon name="plus" />{{ activePanel === 'accounts' ? '补建登录账号' : `新增${editorLabels[panelToKind[activePanel]] || ''}` }}</button>
           </div>
         </header>
@@ -2263,7 +2437,7 @@ onBeforeUnmount(() => {
                   <p v-if="authorizationDirectLimitExceeded" class="iam-field-help iam-application-scope-warning" role="alert">已勾选 {{ authorizationSelectedDirectRoleCount }} 个例外角色，超过该应用允许的最大有效角色数（{{ authorizationMaxEffectiveRoles }} 个）；请取消多余角色后再保存。</p>
                   <p v-if="catalogInactiveOrRestrictedRoleCount" class="iam-field-help">目录中另有 {{ catalogInactiveOrRestrictedRoleCount }} 个停用或不可分配角色，已从可选项中排除。</p>
                   <p v-if="!authorizationDraft.role_codes.length && !unavailableDirectRoles.length" class="iam-empty-inline">{{ authorizationEntryLayerInfo.empty }}</p>
-                  <div class="iam-application-role-list"><label v-for="role in authorizationRoleOptions" :key="role.role_id || role.id || roleCode(role)" class="iam-application-role-option" :class="{ selected: authorizationDraft.role_codes.includes(roleCode(role)) }"><input v-model="authorizationDraft.role_codes" type="checkbox" :value="roleCode(role)" /><span class="iam-application-role-copy"><strong>{{ role.name || role.display_name || roleCode(role) }}</strong><code>{{ roleCode(role) }}</code><small v-if="role.description">{{ role.description }}</small><small class="iam-application-role-status">ACTIVE · {{ rolePermissionCodes(role).length }} 项默认权限</small><small class="iam-application-role-summary">来源：{{ authorizationEntryLayerInfo.title }} · 默认能力（子系统只读）：{{ roleDefaultPermissionSummary(role) }}</small></span></label></div>
+                  <div class="iam-application-role-list"><label v-for="role in authorizationRoleOptions" :key="role.role_id || role.id || roleCode(role)" class="iam-application-role-option" :class="{ selected: authorizationDraft.role_codes.includes(roleCode(role)) }"><input v-model="authorizationDraft.role_codes" type="checkbox" :value="roleCode(role)" @change="onExceptionRoleToggle(roleCode(role), $event)" /><span class="iam-application-role-copy"><strong>{{ role.name || role.display_name || roleCode(role) }}</strong><code>{{ roleCode(role) }}</code><small v-if="role.description">{{ role.description }}</small><small class="iam-application-role-status">ACTIVE · {{ rolePermissionCodes(role).length }} 项默认权限</small><small class="iam-application-role-summary">来源：{{ authorizationEntryLayerInfo.title }} · 默认能力（子系统只读）：{{ roleDefaultPermissionSummary(role) }}</small></span></label></div>
                 </fieldset>
                 <!-- 不在当前 ACTIVE 目录中的历史例外角色：保留在草稿（已勾选、不可改），保存时弹窗要求用户显式确认撤销。 -->
                 <fieldset v-if="isUserAuthorizationSubject && unavailableDirectRoles.length" class="iam-application-role-fieldset iam-application-unavailable" :disabled="applicationAccessSaving || applicationAccessRevoking">
@@ -2348,7 +2522,7 @@ onBeforeUnmount(() => {
         </div>
         <footer>
           <button class="console-button ghost" type="button" :disabled="confirmDialog.busy" @click="closeConfirm">{{ confirmDialog.cancelText }}</button>
-          <button :class="['console-button', confirmDialog.danger ? 'iam-danger-button' : 'primary']" type="button" :disabled="confirmDialog.busy" @click="async () => { if (confirmDialog.busy) return; confirmDialog.busy = true; try { await confirmDialog.onConfirm() } catch { /* 错误已由各 handler 自身处理 */ } finally { if (confirmDialog) confirmDialog.busy = false } }">{{ confirmDialog.confirmText }}</button>
+          <button :class="['console-button', confirmDialog.danger ? 'iam-danger-button' : 'primary']" type="button" :disabled="confirmDialog.busy" @click="runConfirm">{{ confirmDialog.confirmText }}</button>
         </footer>
       </section>
     </div>
@@ -2356,6 +2530,7 @@ onBeforeUnmount(() => {
     <BatchUserImportDialog
       v-if="batchImportVisible"
       :organizations="organizations"
+      :positions="positions"
       @close="batchImportVisible = false"
       @completed="refreshAfterBatchImport"
       @toast="emitToast"

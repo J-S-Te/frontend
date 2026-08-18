@@ -13,6 +13,7 @@ import {
   createMembership,
   createUser,
   createUsersBatch,
+  createEmployeesBatch,
   listUsers,
 } from './iam.js'
 
@@ -93,6 +94,27 @@ test('createEmployee sends the atomic employee contract to POST /employees', asy
   assert.equal(requested.url, '/api/v1/employees')
   assert.equal(requested.options.method, 'POST')
   assert.deepEqual(JSON.parse(requested.options.body), payload)
+})
+
+test('createEmployeesBatch sends Chinese organization and position names to the atomic batch endpoint', async () => {
+  let requested
+  globalThis.fetch = async (url, options) => {
+    requested = { url, options }
+    return jsonResponse({ data: { items: [], total: 0 } }, { status: 201 })
+  }
+
+  await createEmployeesBatch([{
+    displayName: '李四', email: 'li.si@example.com', mobile: '13900000000', status: 'ACTIVE',
+    organizationName: '华东事业部', positionName: '合同专员',
+    applicationRoles: [{ applicationName: '合同管理系统', roleName: '审计管理员' }],
+  }])
+
+  assert.equal(requested.url, '/api/v1/employees/batch')
+  assert.deepEqual(JSON.parse(requested.options.body).items[0], {
+    display_name: '李四', email: 'li.si@example.com', mobile: '13900000000', status: 'ACTIVE',
+    organization: '华东事业部', position: '合同专员',
+    application_roles: [{ application_name: '合同管理系统', role_name: '审计管理员' }],
+  })
 })
 
 test('onboardEmployee uses the legacy sequence only when POST /employees is unavailable', async () => {

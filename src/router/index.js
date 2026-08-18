@@ -9,6 +9,7 @@ import { ensureContractSession } from '@/modules/contract_management/api/contrac
 import { ensureProjectSession } from '@/modules/project_management/api/projectManagement'
 import { getCRMSession } from '@/modules/customer_opportunity/api/client'
 import { ensurePortalSession } from '@/modules/customer_portal/api/portal'
+import { ensureDataAnalysisSession } from '@/modules/data_analysis/api/dataAnalysis'
 import { canAccessContractSection } from '@/modules/shared/authz/sys004'
 import { buildSubsystemAccessErrorRoute } from '@/modules/shared/authz/sessionCompatibility'
 import { dispatchAuthorizationRefreshed } from '@/modules/platform/auth/utils/authorizationRefresh'
@@ -27,6 +28,7 @@ const ContractManagementView = () => import('@/modules/contract_management/views
 const ProjectManagementView = () => import('@/modules/project_management/views/ProjectManagementView.vue')
 const CustomerOpportunityView = () => import('@/modules/customer_opportunity/views/CustomerOpportunityView.vue')
 const CustomerPortalView = () => import('@/modules/customer_portal/views/CustomerPortalView.vue')
+const DataAnalysisView = () => import('@/modules/data_analysis/views/DashboardShellView.vue')
 
 const contractSections = ['dashboard', 'intakes', 'customers', 'contracts', 'templates', 'approvals', 'rules', 'signing', 'reports']
 
@@ -127,6 +129,14 @@ const router = createRouter({
       meta: { title: '客户自助门户', requiresAuth: true, requiresPortalSession: true },
     },
     {
+      // section 支持单段（overview/alerts/dictionary）与管理子路径（admin/sources、admin/rules），
+      // 使用 (.*) 自定义匹配允许斜杠；默认回落到经营总览。
+      path: '/data_analysis/:section(.*)?',
+      name: 'data_analysis',
+      component: DataAnalysisView,
+      meta: { title: '数据看板与统计分析', requiresAuth: true, requiresDataAnalysisSession: true },
+    },
+    {
       path: '/:pathMatch(.*)*',
       redirect: { name: 'portal' },
     },
@@ -219,6 +229,16 @@ router.beforeEach(async (to) => {
     } catch (error) {
       // The CRM client starts its own OIDC redirect on 401. Other errors stay
       // closed so a backend outage cannot fall through to the platform session.
+      return subsystemAccessFailure(error, to)
+    }
+  }
+
+  if (to.meta.requiresDataAnalysisSession) {
+    try {
+      // 看板系统持有独立 OIDC Cookie；Permission 与 Data Scope 由后端逐请求执行，
+      // 浏览器不推导授权范围（对齐 project 模式）。
+      return Boolean(await ensureDataAnalysisSession())
+    } catch (error) {
       return subsystemAccessFailure(error, to)
     }
   }

@@ -12,6 +12,7 @@ const DEFAULT_CONTRACT_API_PROXY_TARGET = 'http://127.0.0.1:8081'
 const DEFAULT_PROJECT_API_PROXY_TARGET = 'http://127.0.0.1:8082'
 const DEFAULT_CUSTOMER_OPPORTUNITY_PROXY_TARGET = 'http://127.0.0.1:8090'
 const DEFAULT_CUSTOMER_PORTAL_PROXY_TARGET = 'http://127.0.0.1:8091'
+const DEFAULT_DATA_ANALYSIS_PROXY_TARGET = 'http://127.0.0.1:8080'
 const PROXIED_PATHS = ['/api', '/authorize', '/oauth2', '/.well-known']
 const CONTRACT_BACKEND_PATHS = [
   '/contract_management/api',
@@ -24,6 +25,13 @@ const PROJECT_BACKEND_PATHS = [
   '/project_management/auth',
   '/project_management/logged-out',
   '/project_management/healthz',
+]
+const DATA_ANALYSIS_BACKEND_PATHS = [
+  '/data_analysis/api',
+  '/data_analysis/auth',
+  '/data_analysis/logged-out',
+  '/data_analysis/healthz',
+  '/data_analysis/readyz',
 ]
 
 function apiProxy(target) {
@@ -41,6 +49,7 @@ export default defineConfig(({ mode }) => {
   const projectProxyTarget = env.VITE_PROJECT_API_PROXY_TARGET || DEFAULT_PROJECT_API_PROXY_TARGET
   const customerOpportunityProxyTarget = env.VITE_CUSTOMER_OPPORTUNITY_PROXY_TARGET || DEFAULT_CUSTOMER_OPPORTUNITY_PROXY_TARGET
   const customerPortalProxyTarget = env.VITE_CUSTOMER_PORTAL_PROXY_TARGET || DEFAULT_CUSTOMER_PORTAL_PROXY_TARGET
+  const dataAnalysisProxyTarget = env.VITE_DATA_ANALYSIS_PROXY_TARGET || DEFAULT_DATA_ANALYSIS_PROXY_TARGET
 
   const proxy = Object.fromEntries(PROXIED_PATHS.map((path) => [path, apiProxy(proxyTarget)]))
   for (const path of CONTRACT_BACKEND_PATHS) {
@@ -59,6 +68,11 @@ export default defineConfig(({ mode }) => {
   // retain their public path prefix at the backend boundary.
   proxy['/customer-opportunity'] = apiProxy(customerOpportunityProxyTarget)
   proxy['/customer-portal'] = apiProxy(customerPortalProxyTarget)
+  // 数据分析后端自身保留 /data_analysis 前缀；只代理会话、API 和健康检查，
+  // 页面路径继续交给 Vite 的 SPA fallback，避免开发服务器把 Vue 页面转发给 API。
+  for (const path of DATA_ANALYSIS_BACKEND_PATHS) {
+    proxy[path] = apiProxy(dataAnalysisProxyTarget)
+  }
 
   return {
     plugins: [vue()],

@@ -173,6 +173,31 @@ export function createUsersBatch(items) {
   })
 }
 
+// 批量创建员工：用户、主任职关系和可选应用角色在平台后端同一事务中写入。
+export function createEmployeesBatch(items) {
+  return request('/employees/batch', {
+    method: 'POST',
+    body: JSON.stringify({
+      items: items.map((item) => ({
+        display_name: item.displayName,
+        email: item.email,
+        mobile: item.mobile,
+        status: item.status || 'ACTIVE',
+        organization: item.organizationName,
+        position: item.positionName,
+        application_roles: Array.isArray(item.applicationRoles)
+          ? item.applicationRoles.map((role) => ({
+            ...(role.applicationCode ? { application_code: role.applicationCode } : {}),
+            ...(role.applicationName ? { application_name: role.applicationName } : {}),
+            ...(role.roleCode ? { role_code: role.roleCode } : {}),
+            ...(role.roleName ? { role_name: role.roleName } : {}),
+          }))
+          : [],
+      })),
+    }),
+  })
+}
+
 
 export function updateUser({ userId, displayName, employeeNo = '', email = '', mobile = '', status, version }) {
   return request(`/users/${encodeURIComponent(userId)}`, {

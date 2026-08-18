@@ -83,6 +83,24 @@ test('后端重复返回基础平台登记时不会生成第二张平台卡片',
   assert.equal(cards[0].code, 'basic-platform')
 })
 
+test('数据看板子系统使用本地默认文案与统一前端路由', () => {
+  const cards = buildPortalSubsystems([{
+    application_id: 'da-app',
+    environment_id: 'da-prod',
+    code: 'data_analysis',
+    name: '',
+    description: '',
+    environment: 'prod',
+    public_url: 'http://localhost:8081/data_analysis/',
+  }])
+
+  assert.equal(cards.length, 2)
+  assert.equal(cards[1].name, '数据看板与统计分析')
+  assert.equal(cards[1].description, '经营总览、合同/项目/报告/财务看板、预警中心与指标字典')
+  assert.deepEqual(cards[1].route, { name: 'data_analysis', params: { section: 'overview' } })
+  assert.equal(cards[1].publicURL, '')
+})
+
 test('合同管理系统使用统一编码和统一前端路由', () => {
   const cards = buildPortalSubsystems([{
     application_id: 'contract-app',
