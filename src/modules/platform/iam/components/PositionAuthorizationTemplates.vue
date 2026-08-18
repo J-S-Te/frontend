@@ -27,9 +27,7 @@ import {
   listPositionAuthorizationTargets,
   listPositionAuthorizationPositions,
   listPositionAuthorizationTemplates,
-  listRoleInheritanceMappings,
   previewPositionAuthorization,
-  replaceRoleInheritanceMappings,
   replacePositionAuthorizationTemplateAssignments,
 } from '@/modules/platform/iam/api/positionAuthorization'
 
@@ -41,9 +39,6 @@ const saving = ref(false)
 const templates = ref([])
 const positions = ref([])
 const applications = ref([])
-const inheritanceMappings = ref([])
-const mappingSourceRoleId = ref('')
-const mappingTargets = ref([])
 const selectedPositionId = ref('')
 const assignedTemplateIds = ref([])
 const editingTemplateId = ref('')
@@ -121,9 +116,7 @@ function roleId(role) { return id(role, 'role_id', 'id') }
 function roleName(role) { return role?.name || role?.role_name || role?.code || roleId(role) }
 function appName(app) { return app?.name || app?.application_name || app?.code || applicationId(app) }
 function templateRoles(template) { return items(template?.roles) }
-const platformApplications = computed(() => applications.value.filter((app) => String(app?.application_code || app?.code || '').toLowerCase() === 'platform'))
 const templateApplications = computed(() => applications.value)
-const subsystemApplications = computed(() => applications.value.filter((app) => String(app?.application_code || app?.code || '').toLowerCase() !== 'platform'))
 const activeTemplates = computed(() => templates.value.filter((template) => String(template?.status || '').toUpperCase() === 'ACTIVE'))
 const positionGroups = computed(() => groupAuthorizationPositions(positions.value))
 
@@ -133,11 +126,10 @@ async function load() {
   try {
     // 专用目标端点同时返回稳定平台角色 ID 和编辑器所需的授权目录就绪状态。这里不能调用
     // 更宽泛的应用目录 API：角色绑定管理员可能合理地没有 platform:application:read。
-    const [templateResult, positionResult, targetResult, mappingResult] = await Promise.allSettled([
+    const [templateResult, positionResult, targetResult] = await Promise.allSettled([
       listPositionAuthorizationTemplates(),
       listPositionAuthorizationPositions(),
       listPositionAuthorizationTargets(),
-      listRoleInheritanceMappings(),
     ])
     const failures = []
     if (templateResult.status === 'fulfilled') templates.value = items(templateResult.value)
@@ -157,13 +149,6 @@ async function load() {
       catalogs.value = {}
       failures.push(targetResult.reason)
     }
-    if (mappingResult.status === 'fulfilled') {
-      inheritanceMappings.value = items(mappingResult.value)
-      if (!mappingSourceRoleId.value && inheritanceMappings.value.length) {
-        mappingSourceRoleId.value = inheritanceMappings.value[0].source_role_id
-      }
-      loadMappingTargets()
-    } else failures.push(mappingResult.reason)
     if (!selectedPositionId.value && positions.value.length) selectedPositionId.value = positionId(positions.value[0])
     if (selectedPositionId.value) await loadAssignments()
     if (failures.length) {
@@ -194,35 +179,6 @@ async function loadAssignments() {
   }
 }
 
-function addMappingTarget() { mappingTargets.value.push(emptySubsystemRole()) }
-function removeMappingTarget(index) { mappingTargets.value.splice(index, 1) }
-function revokeMappingTarget(index) {
-  mappingTargets.value.splice(index, 1)
-  if (!mappingTargets.value.length) mappingTargets.value.push(emptySubsystemRole())
-  emit('toast', '该子系统角色已标记为撤回，请点击“保存角色映射”完成提交。')
-}
-function loadMappingTargets() {
-  const grouped = new Map()
-  inheritanceMappings.value
-    .filter((item) => item.source_role_id === mappingSourceRoleId.value)
-    .forEach((item) => {
-      const scopeType = item.scope_type || 'TENANT'
-      const scopeId = item.scope_id || ''
-      const key = `${item.target_application_id}|${scopeType}|${scopeId}`
-      const current = grouped.get(key) || {
-        application_id: item.target_application_id,
-        role_ids: [],
-        scope_type: scopeType,
-        scope_id: scopeId,
-      }
-      if (item.target_role_id && !current.role_ids.includes(item.target_role_id)) {
-        current.role_ids.push(item.target_role_id)
-      }
-      grouped.set(key, current)
-    })
-  mappingTargets.value = [...grouped.values()]
-  if (!mappingTargets.value.length) mappingTargets.value = [emptySubsystemRole()]
-}
 function onApplicationChange(row) { row.role_ids = [] }
 function onPlatformApplicationChange() { form.value.platform_role_ids = [] }
 function addAdditionalRoleGroup() { form.value.additional_roles.push(emptySubsystemRole()) }
@@ -290,34 +246,7 @@ async function editTemplate(template) {
     platform_scope_id: primary?.scope_id || '',
     additional_roles: [...groups.values()],
   }
-  window.setTimeout(() => document.querySelector('.iam-template-editor:not(.iam-role-inheritance-editor)')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0)
-}
-
-async function saveRoleInheritanceMappings() {
-  if (!canManageAuthorization.value || !mappingSourceRoleId.value) return
-  const mappings = mappingTargets.value.flatMap((row) => (
-    Array.isArray(row.role_ids) ? row.role_ids : []
-  )
-    .filter((roleIdValue) => row.application_id && roleIdValue)
-    .map((roleIdValue) => ({
-      target_application_id: row.application_id,
-      target_role_id: roleIdValue,
-      scope_type: row.scope_type || 'TENANT',
-      scope_id: row.scope_type === 'ENVIRONMENT' ? String(row.scope_id || '').trim() : '',
-      status: 'ACTIVE',
-    })))
-  saving.value = true
-  try {
-    await replaceRoleInheritanceMappings(mappingSourceRoleId.value, mappings)
-    emit('toast', '角色继承映射已保存。')
-    const result = await listRoleInheritanceMappings()
-    inheritanceMappings.value = items(result)
-    loadMappingTargets()
-  } catch (error) {
-    emit('toast', error instanceof AuthorizationError ? error.message : (error?.message || '保存角色继承映射失败。'))
-  } finally {
-    saving.value = false
-  }
+  window.setTimeout(() => document.querySelector('.iam-template-editor')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0)
 }
 
 async function createTemplate() {
@@ -445,16 +374,7 @@ async function deleteTemplate(template) {
 const selectedPosition = computed(() => positions.value.find((item) => positionId(item) === selectedPositionId.value))
 const isEditingTemplate = computed(() => Boolean(editingTemplateId.value))
 
-const platformApplicationId = computed(() => applicationId(platformApplications.value[0]))
-const mappingSourceRole = computed(() => {
-  for (const app of applications.value) {
-    const role = roleItems(catalogForApplication(applicationId(app)))
-      .find((item) => roleId(item) === mappingSourceRoleId.value)
-    if (role) return role
-  }
-  return null
-})
-// 本地模板草稿统计：模板保存当前下拉框选中的应用角色；平台角色的继承关系由上方映射在服务端展开。
+// 本地模板草稿统计：模板保存当前下拉框选中的应用角色。
 const templateDraftStats = computed(() => {
   const valid = form.value.platform_role_ids.length
     ? [{
@@ -463,20 +383,16 @@ const templateDraftStats = computed(() => {
       role_count: form.value.platform_role_ids.length,
     }]
     : []
-  const mapped = mappingTargets.value.filter((row) => (
-    row.application_id && Array.isArray(row.role_ids) && row.role_ids.length
-  ))
   const additional = form.value.additional_roles.filter((row) => (
     row.application_id && Array.isArray(row.role_ids) && row.role_ids.length
   ))
   return {
-    totalRows: valid.length + additional.length + mapped.length,
-    validRows: valid.length + additional.length + mapped.length,
-    distinctApps: new Set([...valid.map((row) => row.application_id), ...additional.map((row) => row.application_id), ...mapped.map((row) => row.application_id)]).size,
+    totalRows: valid.length + additional.length,
+    validRows: valid.length + additional.length,
+    distinctApps: new Set([...valid.map((row) => row.application_id), ...additional.map((row) => row.application_id)]).size,
     environmentRows:
       valid.filter((row) => row.scope_type === 'ENVIRONMENT').length
-      + additional.filter((row) => row.scope_type === 'ENVIRONMENT').length
-      + mapped.filter((row) => row.scope_type === 'ENVIRONMENT').length,
+      + additional.filter((row) => row.scope_type === 'ENVIRONMENT').length,
   }
 })
 const editorPreviewRoles = computed(() => Array.isArray(editorPreview.value?.roles) ? editorPreview.value.roles : [])
@@ -500,99 +416,6 @@ onMounted(() => {
 
 <template>
   <section class="iam-table-section iam-position-authorization">
-    <div v-if="canManageAuthorization" class="console-table-card iam-template-editor iam-role-inheritance-editor">
-      <header class="iam-template-card-head">
-        <div class="iam-template-card-title">
-          <span class="iam-template-card-icon is-green"><ConsoleIcon name="link" /></span>
-          <div>
-            <h4>基础平台角色继承映射</h4>
-            <p>一个基础平台角色可以统一继承多个子系统角色，模板和岗位只需引用基础平台角色。</p>
-          </div>
-        </div>
-        <span class="iam-standard-authorization-badge">角色授权组</span>
-      </header>
-      <div class="iam-template-grid">
-        <label class="full">
-          <span>基础平台主角色 *</span>
-          <select v-model="mappingSourceRoleId" @change="loadMappingTargets">
-            <option value="">选择基础平台角色</option>
-            <option
-              v-for="role in roleItems(catalogForApplication(platformApplicationId))"
-              :key="roleId(role)"
-              :value="roleId(role)"
-            >
-              {{ roleName(role) }}
-            </option>
-          </select>
-        </label>
-      </div>
-      <p v-if="mappingSourceRole" class="iam-field-help">
-        当前映射源：{{ roleName(mappingSourceRole) }}。保存后，使用该基础平台角色的岗位授权模板会自动展开为下列子系统角色。
-      </p>
-      <div
-        v-for="(mapping, mappingIndex) in mappingTargets"
-        :key="mappingIndex"
-        class="iam-template-role-row iam-template-subsystem-role-row"
-      >
-        <div class="iam-template-catalog-field">
-          <select v-model="mapping.application_id" @change="onApplicationChange(mapping)">
-            <option value="">选择子系统</option>
-            <option
-              v-for="app in subsystemApplications"
-              :key="applicationId(app)"
-              :value="applicationId(app)"
-            >
-              {{ appName(app) }}
-            </option>
-          </select>
-          <small v-if="mapping.application_id">
-            目录 {{ catalogVersion(catalogForApplication(mapping.application_id)) }} ·
-            {{ catalogSyncText(catalogForApplication(mapping.application_id)) }}
-          </small>
-        </div>
-        <RoleMultiSelect
-          v-model="mapping.role_ids"
-          :roles="roleItems(catalogForApplication(mapping.application_id))"
-          :ready="Boolean(mapping.application_id && catalogIsReady(mapping.application_id))"
-          :max-effective-roles="maxEffectiveRolesFor(mapping.application_id)"
-          empty-text="请等待目录成功同步"
-        />
-        <select v-model="mapping.scope_type">
-          <option value="TENANT">租户范围</option>
-          <option value="ENVIRONMENT">环境范围</option>
-        </select>
-        <input v-if="mapping.scope_type === 'ENVIRONMENT'" v-model="mapping.scope_id" placeholder="环境 ID" />
-        <button
-          v-if="mapping.role_ids.length"
-          class="console-text-button danger"
-          type="button"
-          @click="revokeMappingTarget(mappingIndex)"
-        >
-          撤回角色赋权
-        </button>
-        <button
-          class="console-text-button danger"
-          type="button"
-          @click="removeMappingTarget(mappingIndex)"
-        >
-          移除
-        </button>
-      </div>
-      <div class="iam-panel-actions">
-        <button class="console-button ghost small" type="button" @click="addMappingTarget">
-          <ConsoleIcon name="plus" />增加子系统角色
-        </button>
-        <button
-          class="console-button primary small"
-          type="button"
-          :disabled="saving || !mappingSourceRoleId"
-          @click="saveRoleInheritanceMappings"
-        >
-          <ConsoleIcon name="save" />保存角色映射
-        </button>
-      </div>
-    </div>
-
     <div v-if="canManageAuthorization" class="console-table-card iam-template-editor">
       <header class="iam-template-card-head">
         <div class="iam-template-card-title">

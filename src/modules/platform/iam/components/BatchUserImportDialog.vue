@@ -54,8 +54,14 @@ const stats = computed(() => {
   return { total, valid, invalid: total - valid, selected }
 })
 
-const allSelected = computed(() => rows.length > 0 && rows.every((row) => row.selected))
-const someSelected = computed(() => rows.some((row) => row.selected) && !allSelected.value)
+const allSelected = computed(() => {
+  const validRows = rows.filter((row) => row.valid)
+  return validRows.length > 0 && validRows.every((row) => row.selected)
+})
+const someSelected = computed(() => {
+  const validRows = rows.filter((row) => row.valid)
+  return validRows.some((row) => row.selected) && !allSelected.value
+})
 
 // ---- 拖拽上传 ----
 const dragOver = ref(false)
@@ -123,6 +129,7 @@ function parseCsv(text) {
   let record = []
   let field = ''
   let inQuote = false
+  let quoteClosed = false
   for (let i = 0; i < text.length; i += 1) {
     const ch = text[i]
     if (inQuote) {
@@ -132,13 +139,20 @@ function parseCsv(text) {
           i += 1
         } else {
           inQuote = false
+          quoteClosed = true
         }
       } else {
         field += ch
       }
       continue
     }
-    if (ch === '"') {
+    if (quoteClosed) {
+      if (ch !== ',' && ch !== '\r' && ch !== '\n' && ch !== ' ' && ch !== '\t') {
+        throw new Error('发现引号后仍有未分隔的内容，请检查双引号是否成对出现')
+      }
+      if (ch === ',' || ch === '\r' || ch === '\n') quoteClosed = false
+    }
+    if (ch === '"' && !quoteClosed) {
       inQuote = true
     } else if (ch === ',') {
       record.push(field)
@@ -154,6 +168,7 @@ function parseCsv(text) {
       field += ch
     }
   }
+  if (inQuote) throw new Error('存在未闭合的双引号，请检查 CSV 文件格式')
   // 文件可以不以换行结尾，循环结束后仍要提交最后一个字段和记录。
   if (field.length || record.length) {
     record.push(field)
@@ -216,7 +231,7 @@ function rebuildRows() {
   let columnMap = { display_name: 0, email: 1, mobile: 2, status: 3, organization_name: 4, position_name: 5, application_roles: 6 }
   let dataStart = 0
   if (hasHeader) {
-    columnMap = { display_name: -1, email: -1, mobile: -1, status: -1, application_roles: -1 }
+    columnMap = { display_name: -1, email: -1, mobile: -1, status: -1, organization_name: -1, position_name: -1, application_roles: -1 }
     firstRow.forEach((cell, idx) => {
       const key = normalizeHeader(cell)
       if (key in columnMap) columnMap[key] = idx
@@ -233,6 +248,25 @@ function rebuildRows() {
     const lineNo = i + 1
     const row = makeRow(cells, columnMap, lineNo)
     rows.push(row)
+  }
+
+  // 后端会按姓名生成登录账号；提前标记本批次内可能生成同名全拼账号的行，
+  // 避免等到数据库唯一约束处才整批回滚。
+  const accountOwners = new Map()
+  for (const row of rows) {
+    const accountKey = String(row.displayName || '').trim().toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
+    if (!accountKey) continue
+    const previous = accountOwners.get(accountKey)
+    if (previous) {
+      row.errors.push(`账号名可能重复（姓名全拼冲突）：与第 ${previous.lineNo} 行重复`)
+      row.valid = false
+      row.selected = false
+      previous.errors.push(`账号名可能重复（姓名全拼冲突）：与第 ${row.lineNo} 行重复`)
+      previous.valid = false
+      previous.selected = false
+    } else {
+      accountOwners.set(accountKey, row)
+    }
   }
 
   if (rows.length > BATCH_LIMIT) {
@@ -304,6 +338,8 @@ function makeRow(cells, columnMap, lineNo) {
     positionName,
     rawApplicationRoles,
     applicationRoles,
+    // 应用角色为空时由岗位授权模板提供子系统角色；填写后作为用户级个人例外追加。
+    authorizationSource: rawApplicationRoles ? '岗位模板 + 个人例外' : '岗位授权模板',
     valid: errors.length === 0,
     errors,
     selected: errors.length === 0, // 默认勾选合法行
@@ -315,11 +351,15 @@ function makeRow(cells, columnMap, lineNo) {
 
 // ---- 选中控制 ----
 function toggleAll(value) {
-  for (const row of rows) row.selected = Boolean(value)
+  for (const row of rows) {
+    if (row.valid) row.selected = Boolean(value)
+  }
 }
 function selectAll() { toggleAll(true) }
 function invertSelection() {
-  for (const row of rows) row.selected = !row.selected
+  for (const row of rows) {
+    if (row.valid) row.selected = !row.selected
+  }
 }
 function selectValidOnly() {
   for (const row of rows) row.selected = row.valid
@@ -375,25 +415,28 @@ async function submit() {
         createdByLineNo.set(Number(item.line_no || item.lineNo), item)
       }
     }
-    // 标记每行结果。后端当前是全量提交/全量回滚；如果有 line_no 回执，单独标记成功行。
+    // 后端当前是全量提交/全量回滚。只有返回数量与请求数量一致时才显示全部成功；
+    // 若服务端将来提供 line_no，则按行展示，避免前端无条件误报成功。
+    const batchSucceeded = created.length === items.length
     for (const row of items) {
-      if (createdByLineNo.has(row.lineNo)) {
-        row.submitStatus = 'success'
-        row.submitMessage = ''
+      if (createdByLineNo.size > 0) {
+        row.submitStatus = createdByLineNo.has(row.lineNo) ? 'success' : 'failed'
+        row.submitMessage = row.submitStatus === 'failed' ? '服务端未返回该行的创建结果' : ''
       } else {
-        row.submitStatus = 'success'
-        row.submitMessage = ''
+        row.submitStatus = batchSucceeded ? 'success' : 'failed'
+        row.submitMessage = batchSucceeded ? '' : '服务端返回的创建数量与提交数量不一致'
       }
     }
+    const failedCount = items.filter((row) => row.submitStatus === 'failed').length
     submitResult.value = {
-      createdCount: created.length || items.length,
+      createdCount: created.length,
       requestedCount: items.length,
-      failedCount: 0,
-      failures: [],
+      failedCount,
+      failures: items.filter((row) => row.submitStatus === 'failed').map((row) => ({ lineNo: row.lineNo, message: row.submitMessage })),
     }
     step.value = 3
-    emit('toast', `已批量创建 ${created.length || items.length} 位用户。`)
-    emit('completed', { createdCount: created.length || items.length })
+    emit('toast', failedCount ? `批量导入返回异常：成功 ${created.length} 条，失败 ${failedCount} 条。` : `已批量创建 ${created.length} 位用户。`)
+    if (!failedCount) emit('completed', { createdCount: created.length })
   } catch (error) {
     submitError.value = error instanceof IamError ? error.message : (error?.message || '批量导入失败。')
     emit('toast', submitError.value)
@@ -463,7 +506,7 @@ function formatFileSize(bytes) {
       <div v-if="step === 1" class="iam-batch-import-body">
         <p class="iam-form-alert iam-batch-import-guide">
           <ConsoleIcon name="info" />
-          <span>表头使用“姓名、邮箱、手机号、状态、组织、岗位、应用角色”。组织和岗位必须填写系统中的中文名称；应用角色仅用于个人例外，可留空。单次最多 {{ BATCH_LIMIT }} 行。</span>
+          <span>表头使用“姓名、邮箱、手机号、状态、组织、岗位、应用角色”。组织和岗位必须填写系统中的中文名称；应用角色仅用于个人例外，可留空，留空时自动继承所选岗位的授权模板。单次最多 {{ BATCH_LIMIT }} 行。</span>
         </p>
 
         <div
@@ -545,6 +588,14 @@ function formatFileSize(bytes) {
           </div>
         </div>
 
+        <div class="iam-batch-import-role-notice" role="status">
+          <span class="iam-batch-import-role-notice-icon"><ConsoleIcon name="shield" /></span>
+          <div>
+            <strong>权限继承规则</strong>
+            <p>应用角色留空：按所选岗位的授权模板继承子系统角色；填写应用角色：在岗位模板角色之外追加用户级个人例外，不会覆盖岗位模板。</p>
+          </div>
+        </div>
+
         <div v-if="parseError" class="iam-batch-import-error" role="alert">{{ parseError }}</div>
 
         <div class="iam-batch-import-table-wrap">
@@ -568,7 +619,7 @@ function formatFileSize(bytes) {
                 <th>状态</th>
                 <th>组织</th>
                 <th>岗位</th>
-                <th>应用角色</th>
+                <th>应用角色 / 权限来源</th>
                 <th class="col-status">校验</th>
               </tr>
             </thead>
@@ -596,7 +647,11 @@ function formatFileSize(bytes) {
                 <td>{{ row.status === 'ACTIVE' ? '启用' : '停用' }}</td>
                 <td>{{ row.organizationName || '—' }}</td>
                 <td>{{ row.positionName || '—' }}</td>
-                <td><code>{{ row.rawApplicationRoles || '—' }}</code></td>
+                <td class="col-roles">
+                  <code v-if="row.rawApplicationRoles">{{ row.rawApplicationRoles }}</code>
+                  <span v-else class="role-inherited"><ConsoleIcon name="shield" />继承岗位授权模板</span>
+                  <small v-if="row.rawApplicationRoles" class="role-source">{{ row.authorizationSource }}</small>
+                </td>
                 <td class="col-status">
                   <span v-if="row.submitStatus === 'success'" class="badge ok">
                     <ConsoleIcon name="save" />已创建
@@ -621,13 +676,15 @@ function formatFileSize(bytes) {
       <!-- 步骤 3：结果 -->
       <div v-else class="iam-batch-import-body">
         <div v-if="submitResult" class="iam-batch-import-result">
-          <span class="iam-batch-import-result-icon success"><ConsoleIcon name="save" /></span>
-          <h4>用户导入完成</h4>
-          <p class="iam-form-alert success">
-            <ConsoleIcon name="save" />
-            成功导入 <b>{{ submitResult.createdCount }}</b> / {{ submitResult.requestedCount }} 位用户。员工编号与基础平台“普通用户”角色由后端自动生成；CSV 中非空的应用角色按个人例外授权处理并更新授权版本。
+          <span class="iam-batch-import-result-icon" :class="submitResult.failedCount ? 'danger' : 'success'"><ConsoleIcon :name="submitResult.failedCount ? 'info' : 'save'" /></span>
+          <h4>{{ submitResult.failedCount ? '用户导入结果异常' : '用户导入完成' }}</h4>
+          <p class="iam-form-alert" :class="submitResult.failedCount ? 'danger' : 'success'">
+            <ConsoleIcon :name="submitResult.failedCount ? 'info' : 'save'" />
+            成功导入 <b>{{ submitResult.createdCount }}</b> / {{ submitResult.requestedCount }} 位用户
+            <template v-if="submitResult.failedCount">，失败 {{ submitResult.failedCount }} 位，请检查结果列后重试。</template>
+            <template v-else>。系统已自动创建用户名全拼账号、初始密码、员工编号、组织岗位任职、基础平台“普通用户”角色；CSV 中非空的应用角色按个人例外授权处理并更新授权版本。</template>
           </p>
-          <p class="iam-field-help">导入后可在“用户”列表刷新查看，也可在“登录账号”中按需补建本地账号。</p>
+          <p class="iam-field-help">默认账号为姓名小写全拼，默认初始密码为 <code>!QAZxsw@1234</code>；首次登录必须修改密码，请在“登录账号”中核对账号状态。</p>
         </div>
         <div v-else class="iam-batch-import-result">
           <span class="iam-batch-import-result-icon danger"><ConsoleIcon name="info" /></span>
@@ -937,6 +994,28 @@ function formatFileSize(bytes) {
   gap: 8px;
   flex-wrap: wrap;
 }
+.iam-batch-import-role-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 14px;
+  border: 1px solid #dbe7f7;
+  border-radius: 10px;
+  color: #3f5574;
+  background: #f6f9fe;
+  font-size: 12px;
+}
+.iam-batch-import-role-notice-icon {
+  display: grid;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  color: var(--brand-2, #2563eb);
+}
+.iam-batch-import-role-notice-icon svg { width: 17px; height: 17px; }
+.iam-batch-import-role-notice strong { display: block; color: var(--ink-1, #172033); font-size: 12.5px; }
+.iam-batch-import-role-notice p { margin: 3px 0 0; line-height: 1.55; }
 .iam-batch-import-filter {
   display: inline-flex;
   align-items: center;
@@ -1000,6 +1079,18 @@ function formatFileSize(bytes) {
 .iam-batch-import-table tbody td.empty { text-align: center; color: var(--ink-3, #6b7280); padding: 18px; }
 .iam-batch-import-table .col-check { width: 36px; text-align: center; }
 .iam-batch-import-table .col-line { width: 50px; color: var(--ink-3, #6b7280); }
+.iam-batch-import-table .col-roles { min-width: 170px; }
+.iam-batch-import-table .col-roles code { display: block; white-space: normal; }
+.iam-batch-import-table .role-inherited {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 600;
+}
+.iam-batch-import-table .role-inherited svg { width: 14px; height: 14px; }
+.iam-batch-import-table .role-source { display: block; margin-top: 4px; color: #64748b; font-size: 11px; }
 .iam-batch-import-table .col-status { width: 200px; }
 .iam-batch-import-table .badge {
   display: inline-flex;

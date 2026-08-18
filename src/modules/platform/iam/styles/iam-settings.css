@@ -2350,27 +2350,12 @@
   letter-spacing: -0.01em;
   line-height: 1.4;
 }
-.iam-role-inheritance-editor {
-  border-color: color-mix(in srgb, var(--ok-line) 65%, var(--line-1));
-  background: linear-gradient(180deg, color-mix(in srgb, var(--ok-soft) 18%, var(--surface)) 0%, var(--surface) 150px);
-}
-.iam-role-inheritance-editor .iam-template-card-head,
-.iam-template-editor:not(.iam-role-inheritance-editor) .iam-template-card-head {
+.iam-template-editor .iam-template-card-head {
   padding-bottom: 16px;
   margin-bottom: 18px;
 }
-.iam-role-inheritance-editor .iam-template-role-row {
-  grid-template-columns: minmax(180px, .8fr) minmax(320px, 1.8fr) minmax(130px, .65fr) minmax(130px, .7fr) auto;
-  align-items: start;
-}
-.iam-role-inheritance-editor .iam-template-role-row > select,
-.iam-role-inheritance-editor .iam-template-role-row > input,
-.iam-role-inheritance-editor .iam-template-role-row .console-text-button { margin-top: 24px; }
-.iam-role-inheritance-editor .iam-template-catalog-field { display: grid; gap: 6px; min-width: 0; }
-.iam-role-inheritance-editor .iam-template-catalog-field > small { color: var(--ink-3); font-size: 11px; line-height: 1.4; }
-.iam-role-inheritance-editor .iam-template-multi-role-field { min-height: 92px; }
 .iam-template-editor + .iam-template-editor { margin-top: 2px; }
-.iam-template-editor:not(.iam-role-inheritance-editor) {
+.iam-template-editor {
   background: linear-gradient(180deg, color-mix(in srgb, var(--brand-soft) 20%, var(--surface)) 0%, var(--surface) 170px);
 }
 .iam-template-card-title p {
@@ -2768,10 +2753,6 @@
 @media (max-width: 1050px) {
   .iam-template-grid { grid-template-columns: 1fr; }
   .iam-template-role-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .iam-role-inheritance-editor .iam-template-role-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .iam-role-inheritance-editor .iam-template-role-row > select,
-  .iam-role-inheritance-editor .iam-template-role-row > input,
-  .iam-role-inheritance-editor .iam-template-role-row .console-text-button { margin-top: 0; }
   .iam-template-role-row .console-text-button { justify-self: end; }
   .iam-template-mapping-head { align-items: flex-start; flex-direction: column; }
   .iam-template-mapping-actions { width: 100%; }
@@ -2793,7 +2774,6 @@
   .iam-template-mount-actions { width: 100%; }
   .iam-template-subsystem-role-row { margin-left: 0; }
   .iam-template-subsystem-heading { align-items: flex-start; flex-direction: column; gap: 3px; }
-  .iam-role-inheritance-editor .iam-template-role-row { grid-template-columns: 1fr; }
   .iam-template-mount-actions .console-button,
   .iam-template-mount-actions .console-text-button { width: 100%; }
 }
