@@ -112,7 +112,8 @@ test('createEmployeesBatch sends Chinese organization and position names to the 
   assert.equal(requested.url, '/api/v1/employees/batch')
   assert.deepEqual(JSON.parse(requested.options.body).items[0], {
     display_name: '李四', email: 'li.si@example.com', mobile: '13900000000', status: 'ACTIVE',
-    organization: '华东事业部', position: '合同专员',
+    organization: '华东事业部', organization_name: '华东事业部',
+    position: '合同专员', position_name: '合同专员',
     application_roles: [{ application_name: '合同管理系统', role_name: '审计管理员' }],
   })
 })

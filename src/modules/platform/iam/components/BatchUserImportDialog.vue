@@ -1,11 +1,13 @@
 <script setup>
 import { computed, reactive, ref } from 'vue'
+import { pinyin } from 'pinyin-pro'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import { IamError, createEmployeesBatch } from '@/modules/platform/iam/api/iam'
 import { parseApplicationRoles } from '@/modules/platform/iam/utils/batchUserImport.js'
 
 // 上限与后端 POST /users/batch 的硬性约束保持一致：超过会一次性整体失败。
 const BATCH_LIMIT = 100
+const MAX_FILE_SIZE = 2 * 1024 * 1024
 const ACCEPTED_STATUSES = new Set(['ACTIVE', 'DISABLED'])
 const STATUS_ALIASES = new Map([
   ['启用', 'ACTIVE'],
@@ -65,7 +67,7 @@ const someSelected = computed(() => {
 
 // ---- 拖拽上传 ----
 const dragOver = ref(false)
-let fileInputEl = null
+const fileInputEl = ref(null)
 
 function onDragOver(event) {
   event.preventDefault()
@@ -88,7 +90,7 @@ function onFilePicked(event) {
   if (event.target) event.target.value = ''
 }
 function pickFile() {
-  fileInputEl?.click()
+  fileInputEl.value?.click()
 }
 
 async function ingestFile(file) {
@@ -98,8 +100,8 @@ async function ingestFile(file) {
     parseError.value = '请选择 .csv 文件（UTF-8 编码）。'
     return
   }
-  if (file.size > 5 * 1024 * 1024) {
-    parseError.value = `文件过大（${(file.size / 1024).toFixed(0)} KB），建议拆成多个小批次。`
+  if (file.size > MAX_FILE_SIZE) {
+    parseError.value = `文件过大（${(file.size / 1024).toFixed(0)} KB），单个文件不能超过 2 MB，请拆成多个小批次。`
     return
   }
   let text = ''
@@ -205,8 +207,51 @@ const HEADER_ALIASES = {
 }
 
 function normalizeHeader(value) {
-  const key = String(value ?? '').trim().toLowerCase()
+  // Excel/下载样例通常会在 UTF-8 文件首字段前附加 BOM；不去除时“姓名”表头
+  // 会被当成未知字段，整行随后会以数据行参与校验并最终触发 422。
+  const key = String(value ?? '').replace(/^\uFEFF/, '').trim().toLowerCase()
   return HEADER_ALIASES[key] || key
+}
+
+function organizationId(item) {
+  return String(item?.org_unit_id || item?.organization_id || item?.id || '').trim()
+}
+
+function getOrganizationName(item) {
+  return String(item?.name || item?.org_unit_name || item?.organization_name || item?.code || '').trim()
+}
+
+function positionId(item) {
+  return String(item?.position_id || item?.id || '').trim()
+}
+
+function getPositionName(item) {
+  return String(item?.name || item?.position_name || item?.code || '').trim()
+}
+
+function positionOrganizationId(item) {
+  return String(item?.org_unit_id || item?.organization_id || item?.org_unit?.id || item?.org_unit?.org_unit_id || '').trim()
+}
+
+function findOrganization(name) {
+  return props.organizations.find((item) => getOrganizationName(item) === name)
+}
+
+function importedAccountName(displayName) {
+  const value = pinyin(String(displayName || '').trim(), { toneType: 'none' })
+    .toLowerCase()
+    .replace(/[^a-z0-9\p{N}]+/gu, '')
+  return value
+}
+
+function formatBatchError(error) {
+  const issues = Array.isArray(error?.details?.issues) ? error.details.issues : []
+  if (!issues.length) return error?.message || '批量导入失败。'
+  return issues.map((issue) => {
+    const row = Number(issue?.row || 0) > 0 ? `第 ${issue.row} 行` : '本批次'
+    const field = issue?.field ? `（${issue.field}）` : ''
+    return `${row}${field}：${issue?.message || error.message}`
+  }).join('；')
 }
 
 function rebuildRows() {
@@ -254,7 +299,7 @@ function rebuildRows() {
   // 避免等到数据库唯一约束处才整批回滚。
   const accountOwners = new Map()
   for (const row of rows) {
-    const accountKey = String(row.displayName || '').trim().toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
+    const accountKey = importedAccountName(row.displayName)
     if (!accountKey) continue
     const previous = accountOwners.get(accountKey)
     if (previous) {
@@ -309,10 +354,11 @@ function makeRow(cells, columnMap, lineNo) {
 
   if (!organizationName) errors.push('组织必填，请填写组织中文名称')
   if (!positionName) errors.push('岗位必填，请填写岗位中文名称')
-  if (organizationName && props.organizations.length && !props.organizations.some((item) => String(item.name || '').trim() === organizationName)) {
+  const organization = organizationName ? findOrganization(organizationName) : null
+  if (organizationName && props.organizations.length && !organization) {
     errors.push(`组织不存在：${organizationName}`)
   }
-  if (positionName && props.positions.length && !props.positions.some((item) => String(item.name || '').trim() === positionName && (!organizationName || String(item.org_unit_id || item.organization_id || '') === String(props.organizations.find((org) => String(org.name || '').trim() === organizationName)?.org_unit_id || '')))) {
+  if (positionName && props.positions.length && !props.positions.some((item) => getPositionName(item) === positionName && (!organizationName || positionOrganizationId(item) === organizationId(organization)))) {
     errors.push(`岗位不存在或不属于组织：${positionName}`)
   }
 
@@ -406,6 +452,7 @@ async function submit() {
       organizationName: row.organizationName,
       positionName: row.positionName,
       applicationRoles: row.applicationRoles,
+      lineNo: row.lineNo,
     }))
     const result = await createEmployeesBatch(payload)
     const created = Array.isArray(result?.items) ? result.items : []
@@ -438,7 +485,7 @@ async function submit() {
     emit('toast', failedCount ? `批量导入返回异常：成功 ${created.length} 条，失败 ${failedCount} 条。` : `已批量创建 ${created.length} 位用户。`)
     if (!failedCount) emit('completed', { createdCount: created.length })
   } catch (error) {
-    submitError.value = error instanceof IamError ? error.message : (error?.message || '批量导入失败。')
+    submitError.value = error instanceof IamError ? formatBatchError(error) : (error?.message || '批量导入失败。')
     emit('toast', submitError.value)
   } finally {
     submitting.value = false

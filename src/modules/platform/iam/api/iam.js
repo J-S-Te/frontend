@@ -7,6 +7,7 @@ export class IamError extends Error {
     this.status = options.status || 0
     this.code = options.code || ''
     this.traceId = options.traceId || ''
+    this.details = options.details || null
     // 保留原始错误对象，便于上层排查网络层、JSON 解析等非 HTTP 失败。
     this.cause = options.cause || null
   }
@@ -180,11 +181,14 @@ export function createEmployeesBatch(items) {
     body: JSON.stringify({
       items: items.map((item) => ({
         display_name: item.displayName,
-        email: item.email,
-        mobile: item.mobile,
-        status: item.status || 'ACTIVE',
-        organization: item.organizationName,
+    email: item.email,
+    mobile: item.mobile,
+    status: item.status || 'ACTIVE',
+    line_no: item.lineNo,
+    organization: item.organizationName,
+        organization_name: item.organizationName,
         position: item.positionName,
+        position_name: item.positionName,
         application_roles: Array.isArray(item.applicationRoles)
           ? item.applicationRoles.map((role) => ({
             ...(role.applicationCode ? { application_code: role.applicationCode } : {}),
