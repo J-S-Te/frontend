@@ -116,6 +116,40 @@ function roleId(role) { return id(role, 'role_id', 'id') }
 function roleName(role) { return role?.name || role?.role_name || role?.code || roleId(role) }
 function appName(app) { return app?.name || app?.application_name || app?.code || applicationId(app) }
 function templateRoles(template) { return items(template?.roles) }
+function templateRoleApplicationId(role) { return String(role?.application_id || role?.applicationId || '').trim() }
+function templateRoleScopeType(role) { return String(role?.scope_type || role?.scopeType || 'TENANT').trim() || 'TENANT' }
+function templateRoleScopeId(role) { return templateRoleScopeType(role) === 'ENVIRONMENT' ? String(role?.scope_id || role?.scopeId || '').trim() : '' }
+
+// 将后端模板明细转换为编辑器的“主应用 + 追加应用”结构。模板角色可能来自旧版本
+// 接口（ID 为数字或字符串、字段采用 camelCase），这里统一成字符串并按应用/范围分组，
+// 确保销售模板同时包含合同管理和商机管理角色时，两组都会回填到编辑器。
+function templateEditorForm(template) {
+  const groups = new Map()
+  templateRoles(template).forEach((role) => {
+    const applicationIdValue = templateRoleApplicationId(role)
+    const scopeType = templateRoleScopeType(role)
+    const scopeId = templateRoleScopeId(role)
+    const roleIdValue = String(role?.role_id || role?.roleId || role?.id || '').trim()
+    if (!applicationIdValue || !roleIdValue) return
+    const key = `${applicationIdValue}|${scopeType}|${scopeId}`
+    const group = groups.get(key) || {
+      application_id: applicationIdValue,
+      role_ids: [],
+      scope_type: scopeType,
+      scope_id: scopeId,
+    }
+    if (!group.role_ids.includes(roleIdValue)) group.role_ids.push(roleIdValue)
+    groups.set(key, group)
+  })
+  const [primary, ...additional] = [...groups.values()]
+  return {
+    platform_application_id: primary?.application_id || '',
+    platform_role_ids: primary?.role_ids || [],
+    platform_scope_type: primary?.scope_type || 'TENANT',
+    platform_scope_id: primary?.scope_id || '',
+    additional_roles: additional,
+  }
+}
 const templateApplications = computed(() => applications.value)
 const activeTemplates = computed(() => templates.value.filter((template) => String(template?.status || '').toUpperCase() === 'ACTIVE'))
 const positionGroups = computed(() => groupAuthorizationPositions(positions.value))
@@ -211,40 +245,17 @@ async function editTemplate(template) {
       saving.value = false
     }
   }
-  const roles = templateRoles(fullTemplate)
-  if (!roles.length) {
+  const editorRoles = templateEditorForm(fullTemplate)
+  if (!editorRoles.platform_application_id || !editorRoles.platform_role_ids.length) {
     emit('toast', '该模板当前没有可编辑的应用角色。')
     return
   }
-  const primary = roles[0]
-  const primaryRoleIds = roles
-    .filter((role) => role.application_id === primary?.application_id && (role.scope_type || 'TENANT') === (primary?.scope_type || 'TENANT') && (role.scope_id || '') === (primary?.scope_id || ''))
-    .map((role) => role.role_id)
-    .filter(Boolean)
-  const groups = new Map()
-  roles.filter((role) => !(role.application_id === primary?.application_id && (role.scope_type || 'TENANT') === (primary?.scope_type || 'TENANT') && (role.scope_id || '') === (primary?.scope_id || '') && primaryRoleIds.includes(role.role_id))).forEach((role) => {
-    const scopeType = role.scope_type || 'TENANT'
-    const scopeId = role.scope_id || ''
-    const key = `${role.application_id}|${scopeType}|${scopeId}`
-    const group = groups.get(key) || {
-      application_id: role.application_id,
-      role_ids: [],
-      scope_type: scopeType,
-      scope_id: scopeId,
-    }
-    if (role.role_id && !group.role_ids.includes(role.role_id)) group.role_ids.push(role.role_id)
-    groups.set(key, group)
-  })
   editingTemplateId.value = templateId(fullTemplate)
   editingTemplateVersion.value = Number(fullTemplate.version || 0)
   form.value = {
     name: fullTemplate.name || '',
     description: fullTemplate.description || '',
-    platform_application_id: primary?.application_id || '',
-    platform_role_ids: primaryRoleIds,
-    platform_scope_type: primary?.scope_type || 'TENANT',
-    platform_scope_id: primary?.scope_id || '',
-    additional_roles: [...groups.values()],
+    ...editorRoles,
   }
   window.setTimeout(() => document.querySelector('.iam-template-editor')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0)
 }
