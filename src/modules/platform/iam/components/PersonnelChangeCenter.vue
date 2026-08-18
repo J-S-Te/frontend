@@ -19,6 +19,7 @@ const positions = ref([])
 const organizations = ref([])
 const memberships = ref([])
 const membershipsLoading = ref(false)
+const personConfirmed = ref(false)
 const preview = ref(null)
 const authorizationDetail = ref(null)
 const authorizationLoading = ref(false)
@@ -54,11 +55,21 @@ async function openForm() {
 async function loadUserMemberships() {
   memberships.value = []
   form.sourceMembershipId = ''
+  personConfirmed.value = false
+  if (!form.userId) return
+  await refreshUserMemberships()
+}
+
+async function refreshUserMemberships() {
   if (!form.userId) return
   membershipsLoading.value = true
   try {
     const result = await listMemberships({ page: 1, pageSize: 100, keyword: form.userId, status: 'ACTIVE' })
     memberships.value = result.items.filter((item) => String(item.user_id || item.user?.id || '') === String(form.userId))
+    personConfirmed.value = true
+    const primary = memberships.value.find((item) => item.is_primary === true || String(item.membership_type || '').toUpperCase() === 'PRIMARY')
+    const current = primary || (memberships.value.length === 1 ? memberships.value[0] : null)
+    if (current) form.sourceMembershipId = current.membership_id || current.id || ''
   } catch (e) {
     error.value = e.message || '加载当前任职关系失败'
   } finally {
@@ -66,7 +77,8 @@ async function loadUserMemberships() {
   }
 }
 
-function resetForm() { Object.assign(form, { userId: '', type: 'TRANSFER', sourceMembershipId: '', targetOrgUnitId: '', targetPositionId: '', reason: '', effectiveDate: '' }); memberships.value = []; preview.value = null }
+function resetForm() { Object.assign(form, { userId: '', type: 'TRANSFER', sourceMembershipId: '', targetOrgUnitId: '', targetPositionId: '', reason: '', effectiveDate: '' }); memberships.value = []; preview.value = null; personConfirmed.value = false }
+function closeForm() { showForm.value = false; resetForm(); error.value = '' }
 
 const sourceMembershipOptions = computed(() => memberships.value.filter((item) => String(item.status || 'ACTIVE').toUpperCase() === 'ACTIVE'))
 const targetPositionOptions = computed(() => positions.value.filter((item) => {
@@ -196,20 +208,20 @@ onMounted(load)
       <div v-else class="personnel-change-table-shell"><div class="personnel-change-table"><div class="personnel-change-row personnel-change-header"><span>人员</span><span>异动类型</span><span>组织 / 岗位变更</span><span>状态</span><span>生效日期</span><span>操作</span></div><div v-for="item in visibleRecords" :key="item.id || item.change_id" class="personnel-change-row"><span class="personnel-change-person"><span class="personnel-person-avatar">{{ userLabel(item).slice(0, 1) || '?' }}</span><span><strong>{{ userLabel(item) || '—' }}</strong><small class="console-mono">{{ item.user_id || item.userId || '人员信息' }}</small></span></span><span><span class="personnel-change-type">{{ typeLabel(item.change_type || item.type) }}</span><small class="personnel-change-code console-mono">{{ item.change_type || item.type || '—' }}</small></span><span class="personnel-change-move"><small>目标任职</small><strong>{{ organizationName(item.target_org_unit_id) }} / {{ positionName(item.target_position_id) }}</strong></span><span><span class="console-badge" :class="statusTone(item.status)">{{ statusLabels[item.status] || item.status || '—' }}</span></span><span class="personnel-change-date">{{ item.effective_at || item.effective_date || '—' }}</span><span class="personnel-change-actions"><button class="console-button compact" type="button" @click="openAuthorization(item)">授权概览</button></span></div></div></div>
     </div>
   </section>
-  <div v-if="showForm" class="console-modal-backdrop" role="presentation" @click.self="showForm = false">
-    <section class="console-detail-modal personnel-change-modal" role="dialog" aria-modal="true" aria-label="新建人员异动单"><header class="personnel-change-modal-header"><div><p class="console-modal-eyebrow"><span class="personnel-modal-eyebrow-icon"><ConsoleIcon name="organization" /></span>PERSONNEL CHANGE</p><h2>新建人员异动单</h2><p>管理员配置人员变更，确认后按生效日期自动执行。</p></div><button class="console-modal-close" type="button" aria-label="关闭新建人员异动单" @click="showForm = false">×</button></header>
+  <div v-if="showForm" class="console-modal-backdrop" role="presentation" @click.self="closeForm">
+    <section class="console-detail-modal personnel-change-modal" role="dialog" aria-modal="true" aria-label="新建人员异动单"><header class="personnel-change-modal-header"><div><p class="console-modal-eyebrow"><span class="personnel-modal-eyebrow-icon"><ConsoleIcon name="organization" /></span>PERSONNEL CHANGE</p><h2>新建人员异动单</h2><p>管理员配置人员变更，确认后按生效日期自动执行。</p></div><button class="console-modal-close" type="button" aria-label="关闭新建人员异动单" @click.stop="closeForm">×</button></header>
       <div class="personnel-change-modal-body"><div class="personnel-change-form-intro"><span class="personnel-change-form-intro-icon"><ConsoleIcon name="info" /></span><div><strong>管理员直接配置，无需审批</strong><p>原任职用于确认当前关系，目标组织和岗位用于计算后续权限影响。</p></div></div>
       <div class="console-form-grid personnel-change-form-grid">
-        <label class="console-form-item"><span>人员 *</span><select v-model="form.userId" @change="loadUserMemberships"><option value="">请选择人员</option><option v-for="item in users" :key="item.id || item.user_id" :value="item.id || item.user_id">{{ userLabel(item) }}</option></select></label>
+        <label class="console-form-item personnel-user-picker"><span>人员 *</span><div class="personnel-user-picker-row"><select v-model="form.userId" @change="loadUserMemberships"><option value="">请选择人员</option><option v-for="item in users" :key="item.id || item.user_id" :value="item.id || item.user_id">{{ userLabel(item) }}</option></select><button class="console-button secondary compact" type="button" :disabled="!form.userId || membershipsLoading" @click="refreshUserMemberships">{{ membershipsLoading ? '读取中…' : (personConfirmed ? '已确认' : '确认人员') }}</button></div><small>选择人员后点击确认，系统会同步显示该人员当前有效组织和岗位。</small></label>
         <label class="console-form-item"><span>异动类型 *</span><select v-model="form.type"><option v-for="[key, label] in typeOptions" :key="key" :value="key">{{ label }}</option></select></label>
-        <label class="console-form-item"><span>原任职 *</span><select v-model="form.sourceMembershipId" :disabled="!form.userId || membershipsLoading" :required="['PROMOTION', 'DEMOTION', 'TRANSFER'].includes(form.type)"><option value="">{{ membershipsLoading ? '正在读取任职…' : '请选择原组织 / 原岗位' }}</option><option v-for="item in sourceMembershipOptions" :key="item.membership_id || item.id" :value="item.membership_id || item.id">{{ membershipLabel(item) }}</option></select><small>必须选择真实任职关系，不能只选岗位。</small></label>
+        <label class="console-form-item"><span>原任职 *</span><select v-model="form.sourceMembershipId" :disabled="!personConfirmed || membershipsLoading" :required="['PROMOTION', 'DEMOTION', 'TRANSFER'].includes(form.type)"><option value="">{{ !personConfirmed ? '请先确认人员' : (membershipsLoading ? '正在读取任职…' : '请选择原组织 / 原岗位') }}</option><option v-for="item in sourceMembershipOptions" :key="item.membership_id || item.id" :value="item.membership_id || item.id">{{ membershipLabel(item) }}</option></select><div v-if="personConfirmed && sourceMembershipOptions.length" class="personnel-current-memberships"><span v-for="item in sourceMembershipOptions" :key="item.membership_id || item.id" class="personnel-current-membership">当前：{{ membershipLabel(item) }}</span></div><small>必须选择真实任职关系，不能只选岗位。</small></label>
         <label class="console-form-item"><span>新组织 *</span><select v-model="form.targetOrgUnitId" @change="onTargetOrganizationChange" :required="['PROMOTION', 'DEMOTION', 'TRANSFER'].includes(form.type)"><option value="">请选择目标组织</option><option v-for="item in organizations" :key="item.id || item.org_unit_id" :value="item.id || item.org_unit_id">{{ item.name }}</option></select></label>
         <label class="console-form-item"><span>新岗位 *</span><select v-model="form.targetPositionId" :disabled="!form.targetOrgUnitId" :required="['PROMOTION', 'DEMOTION', 'TRANSFER'].includes(form.type)"><option value="">{{ form.targetOrgUnitId ? '请选择目标岗位' : '请先选择目标组织' }}</option><option v-for="item in targetPositionOptions" :key="item.id || item.position_id" :value="item.id || item.position_id">{{ item.name || item.position_name || item.code }}</option></select><small>只展示属于目标组织的有效岗位。</small></label>
         <label class="console-form-item"><span>生效日期 *</span><input v-model="form.effectiveDate" type="date" /></label>
         <label class="console-form-item full"><span>变更原因 *</span><textarea v-model="form.reason" rows="3" placeholder="填写业务原因、交接说明或复职依据" /></label>
       </div>
       <div class="personnel-preview"><div class="personnel-preview-heading"><div><strong>权限影响预览</strong><p>确认岗位与组织变化带来的角色新增、移除和保留范围。</p></div><button class="console-button secondary compact" type="button" :disabled="saving || !form.userId" @click="loadPreview"><ConsoleIcon name="audit" />{{ saving ? '计算中…' : '生成预览' }}</button></div><div v-if="preview" class="personnel-preview-grid"><div class="preview-added"><span>新增角色</span><strong>{{ (preview.added_roles || preview.added || []).length }} 项</strong></div><div class="preview-removed"><span>移除角色</span><strong>{{ (preview.removed_roles || preview.removed || []).length }} 项</strong></div><div class="preview-kept"><span>保留角色</span><strong>{{ (preview.kept_roles || preview.kept || []).length }} 项</strong></div></div><p v-else class="console-card-hint">保存前生成平台及子系统角色的新增、移除、保留清单。</p></div></div>
-      <footer class="console-form-actions"><button class="console-button ghost" type="button" @click="showForm = false">取消</button><button class="console-button primary" type="button" :disabled="saving" @click="save">{{ saving ? '保存中…' : '保存异动单' }}</button></footer>
+      <footer class="console-form-actions"><button class="console-button ghost" type="button" @click="closeForm">取消</button><button class="console-button primary" type="button" :disabled="saving" @click="save">{{ saving ? '保存中…' : '保存异动单' }}</button></footer>
     </section>
   </div>
   <div v-if="authorizationDetail" class="console-modal-backdrop" role="presentation" @click.self="closeAuthorization">
@@ -292,8 +304,9 @@ onMounted(load)
 .console-badge.status-executed { color: #20764e; background: #e0f5e9; }
 .console-badge.status-rejected { color: #b34a4a; background: #ffebeb; }
 .personnel-change-modal { width: min(860px, 100%); max-height: min(820px, calc(100vh - 40px)); overflow: hidden; border: 1px solid #dce7f5; box-shadow: 0 24px 70px rgba(28, 54, 98, .2); }
-.personnel-change-modal-header { position: relative; overflow: hidden; padding: 1.45rem 1.75rem 1.25rem; background: linear-gradient(135deg, #f8fbff 0%, #edf4ff 100%); border-bottom: 1px solid var(--line-soft, #e5edf7); }
-.personnel-change-modal-header::after { position: absolute; right: -4rem; bottom: -6rem; width: 15rem; height: 15rem; content: ''; border: 1.5rem solid rgba(110, 145, 220, .08); border-radius: 50%; }
+.personnel-change-modal-header { position: relative; display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; overflow: hidden; padding: 1.45rem 1.75rem 1.25rem; background: linear-gradient(135deg, #f8fbff 0%, #edf4ff 100%); border-bottom: 1px solid var(--line-soft, #e5edf7); }
+.personnel-change-modal-header::after { position: absolute; right: -4rem; bottom: -6rem; width: 15rem; height: 15rem; pointer-events: none; content: ''; border: 1.5rem solid rgba(110, 145, 220, .08); border-radius: 50%; }
+.personnel-change-modal-header .console-modal-close { position: relative; z-index: 2; flex: 0 0 auto; }
 .personnel-change-modal-header > div { position: relative; z-index: 1; }
 .personnel-change-modal-header h2 { margin: .35rem 0 0; color: var(--text, #18253a); font-size: 1.35rem; letter-spacing: -.02em; }
 .personnel-change-modal-header p:not(.console-modal-eyebrow) { margin: .4rem 0 0; color: var(--muted, #71829b); font-size: .78rem; line-height: 1.5; }
@@ -306,6 +319,11 @@ onMounted(load)
 .personnel-change-form-intro p { margin: .18rem 0 0; color: var(--muted, #71829b); font-size: .74rem; line-height: 1.5; }
 .personnel-change-form-grid { padding: 1rem; border: 1px solid var(--line-soft, #e5edf7); border-radius: .75rem; background: #fff; }
 .personnel-change-form-grid .console-form-item > span { color: var(--text, #34445d); font-weight: 650; }
+.personnel-user-picker-row { display: flex; align-items: stretch; gap: .5rem; }
+.personnel-user-picker-row select { flex: 1 1 auto; min-width: 0; }
+.personnel-user-picker-row .console-button { flex: 0 0 auto; white-space: nowrap; }
+.personnel-current-memberships { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .35rem; }
+.personnel-current-membership { padding: .25rem .5rem; color: #2d4f91; border: 1px solid #dce8f7; border-radius: .4rem; background: #f1f6ff; font-size: .72rem; }
 .personnel-change-form-grid .console-form-item em { color: var(--muted, #8190a5); font-size: .7rem; font-style: normal; font-weight: 400; }
 .personnel-change-form-grid textarea { min-height: 5.5rem; resize: vertical; }
 .personnel-change-modal .full { grid-column: 1 / -1; }
