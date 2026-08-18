@@ -58,6 +58,15 @@ const customerIndustryOptions = Object.freeze([
   '金融', '政府', '医疗', '教育', '能源', '制造', '软件', '互联网', '通信',
   '物流', '交通', '建筑', '房地产', '零售', '服务', '其他',
 ])
+const opportunityTypeOptions = Object.freeze([
+  '等保审查', '密码应用安全性评估', '软件测试', '源代码审计', '渗透测试', '漏洞扫描',
+  'APP安全完整性', '在线测试', '安全系数', '网络安全风险评估', '缺口分析', '机房检测',
+  '网络安全检测服务', '安全培训', '安全性测试', '应急响应服务', '网络安全攻防演内容', '安全运维',
+])
+const opportunitySourceOptions = Object.freeze([
+  '客户主动咨询', '老客户复购/续约', '老客户转介绍', '公开招标', '销售开拓', '合作伙伴推荐',
+  '展会/活动', '政府/主管单位指派', '线上渠道', '内部转介',
+])
 const activeSection = computed(() => sections.has(route.params.section) ? route.params.section : 'customers')
 const sectionTitle = computed(() => ({ customers: '客户管理', opportunities: '商机管理', presale: '售前技术支持', notifications: '个人通知中心' })[activeSection.value])
 const mobileMenuOpen = ref(false)
@@ -148,6 +157,8 @@ const customerImportDialog = ref(false)
 const customerEditMode = ref(false)
 const opportunityDialog = ref(false)
 const opportunityEditMode = ref(false)
+const opportunityTypeSelections = ref([])
+const opportunitySourceSelections = ref([])
 const stageDialog = ref(false)
 const terminalDialog = ref(false)
 const followupDialog = ref(false)
@@ -396,6 +407,15 @@ function projectProgressText(value) {
 function emptyOpportunity() {
   return { name: '', customer_id: '', type: '', source: '', expected_amount: '', expected_sign_date: '', requirement_summary: '', system_count: 0, pain_points: '', competitor_info: '', owner_user_id: '', owner_org_id: '', reason: '' }
 }
+function parseOpportunitySelections(value) {
+  return [...new Set(String(value || '').split('、').map((item) => item.trim()).filter(Boolean))]
+}
+function syncOpportunitySelections() {
+  opportunityForm.type = opportunityTypeSelections.value.join('、')
+  opportunityForm.source = opportunitySourceSelections.value.join('、')
+}
+const opportunityTypeSelectOptions = computed(() => [...new Set([...opportunityTypeOptions, ...opportunityTypeSelections.value])])
+const opportunitySourceSelectOptions = computed(() => [...new Set([...opportunitySourceOptions, ...opportunitySourceSelections.value])])
 function resetMessages() { error.value = ''; notice.value = '' }
 function showError(value) {
   if (value?.status === 409) error.value = value.code === 'CRM_CUSTOMER_VOID_BLOCKED' ? '客户仍有关联中的商机、售前申请或门户邀请，暂不能作废。' : '数据状态或版本已变化，请刷新详情后重试。'
@@ -827,6 +847,8 @@ async function loadReportFilterOptions() {
 }
 async function openNewOpportunity() {
   Object.assign(opportunityForm, emptyOpportunity())
+  opportunityTypeSelections.value = []
+  opportunitySourceSelections.value = []
   opportunityEditMode.value = false
   opportunityCustomerKeyword.value = ''
   opportunityCustomerOptions.value = []
@@ -844,6 +866,8 @@ function editOpportunity() {
     pain_points: value.pain_points || '', competitor_info: value.competitor_info || '',
     owner_user_id: value.owner_user_id, owner_org_id: selectedOpportunityOwnerOrgID.value, reason: '',
   })
+  opportunityTypeSelections.value = parseOpportunitySelections(value.type)
+  opportunitySourceSelections.value = parseOpportunitySelections(value.source)
   opportunityEditMode.value = true
   opportunityFormInitial = JSON.stringify(opportunityForm)
   opportunityDialog.value = true
@@ -2013,6 +2037,7 @@ function changeCustomerStatus(action) {
   })
 }
 async function submitOpportunity() {
+  syncOpportunitySelections()
   actionLoading.value = true; resetMessages()
   try {
     if (opportunityEditMode.value) {
@@ -2487,8 +2512,8 @@ onMounted(async () => {
             <select v-model="opportunityForm.customer_id" required :disabled="opportunityCustomerOptionsLoading || !opportunityCustomerOptions.length"><option value="" disabled>{{ opportunityCustomerOptionsLoading ? '正在加载客户…' : '请选择客户' }}</option><option v-for="customer in opportunityCustomerOptions" :key="customer.id" :value="String(customer.id)">{{ customer.name }}（{{ customer.customer_no }}）· {{ customer.industry }} / {{ customer.region }}</option></select>
             <small v-if="opportunityCustomerOptionsError" class="crm-alert error" role="alert">{{ opportunityCustomerOptionsError }}</small><small v-else-if="!opportunityCustomerOptionsLoading && !opportunityCustomerOptions.length" class="crm-note">暂无符合条件的有效客户，请先在客户管理中创建客户。</small><small v-else-if="opportunityCustomerOptionsTotal > opportunityCustomerOptions.length" class="crm-note">当前显示前 {{ opportunityCustomerOptions.length }} 条，请输入关键词缩小范围。</small>
           </div>
-          <label class="console-form-item"><span>商机类型 *</span><input v-model="opportunityForm.type" required autocomplete="off" placeholder="请输入商机类型"></label>
-          <label class="console-form-item"><span>来源 *</span><input v-model="opportunityForm.source" required autocomplete="off" placeholder="请输入商机来源"></label>
+          <label class="console-form-item"><span>商机类型 *（可多选）</span><select v-model="opportunityTypeSelections" multiple required size="4" @change="syncOpportunitySelections"><option v-for="item in opportunityTypeSelectOptions" :key="item" :value="item">{{ item }}</option></select><small class="crm-note">按住 Ctrl/⌘ 可多选</small></label>
+          <label class="console-form-item"><span>来源 *（可多选）</span><select v-model="opportunitySourceSelections" multiple required size="4" @change="syncOpportunitySelections"><option v-for="item in opportunitySourceSelectOptions" :key="item" :value="item">{{ item }}</option></select><small class="crm-note">按住 Ctrl/⌘ 可多选</small></label>
           <label class="console-form-item"><span>预计金额 *</span><input v-model="opportunityForm.expected_amount" required inputmode="decimal" autocomplete="off" placeholder="请输入预计金额"></label>
           <label class="console-form-item"><span>预计签单日期 *</span><input v-model="opportunityForm.expected_sign_date" type="date" required></label>
           <label class="console-form-item full"><span>需求摘要 *</span><textarea v-model="opportunityForm.requirement_summary" required rows="3" placeholder="请概述客户需求和项目范围"></textarea></label>
