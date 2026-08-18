@@ -1,7 +1,7 @@
 <script setup>
 import { computed, reactive, ref } from 'vue'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
-import { IamError, createUsersBatch } from '@/modules/platform/iam/api/iam'
+import { IamError, createEmployeesBatch } from '@/modules/platform/iam/api/iam'
 import { parseApplicationRoles } from '@/modules/platform/iam/utils/batchUserImport.js'
 
 // 上限与后端 POST /users/batch 的硬性约束保持一致：超过会一次性整体失败。
@@ -16,6 +16,7 @@ const STATUS_ALIASES = new Map([
 
 const props = defineProps({
   organizations: { type: Array, default: () => [] },
+  positions: { type: Array, default: () => [] },
 })
 const emit = defineEmits(['close', 'completed', 'toast'])
 
@@ -177,6 +178,14 @@ const HEADER_ALIASES = {
   '状态': 'status',
   application_roles: 'application_roles',
   '应用角色': 'application_roles',
+  organization_name: 'organization_name',
+  '组织': 'organization_name',
+  '组织名称': 'organization_name',
+  position_name: 'position_name',
+  '岗位': 'position_name',
+  '岗位名称': 'position_name',
+  '岗位角色': 'application_roles',
+  '角色': 'application_roles',
   roles: 'application_roles',
 }
 
@@ -204,7 +213,7 @@ function rebuildRows() {
   // 表头检测：第一行若任意 cell 命中 HEADER_ALIASES，则视为表头。
   const firstRow = records[0]
   const hasHeader = firstRow.some((cell) => normalizeHeader(cell) in HEADER_ALIASES)
-  let columnMap = { display_name: 0, email: 1, mobile: 2, status: 3, application_roles: 4 }
+  let columnMap = { display_name: 0, email: 1, mobile: 2, status: 3, organization_name: 4, position_name: 5, application_roles: 6 }
   let dataStart = 0
   if (hasHeader) {
     columnMap = { display_name: -1, email: -1, mobile: -1, status: -1, application_roles: -1 }
@@ -244,6 +253,8 @@ function makeRow(cells, columnMap, lineNo) {
   const rawStatus = pickColumn(cells, columnMap.status)
   const normalizedStatus = rawStatus.toUpperCase()
   const status = STATUS_ALIASES.get(rawStatus) || STATUS_ALIASES.get(normalizedStatus) || 'ACTIVE'
+  const organizationName = pickColumn(cells, columnMap.organization_name)
+  const positionName = pickColumn(cells, columnMap.position_name)
   const rawApplicationRoles = pickColumn(cells, columnMap.application_roles)
   const applicationRoles = []
 
@@ -260,6 +271,15 @@ function makeRow(cells, columnMap, lineNo) {
 
   if (rawStatus && !STATUS_ALIASES.has(rawStatus) && !ACCEPTED_STATUSES.has(normalizedStatus)) {
     errors.push('状态只能填写“启用”或“停用”')
+  }
+
+  if (!organizationName) errors.push('组织必填，请填写组织中文名称')
+  if (!positionName) errors.push('岗位必填，请填写岗位中文名称')
+  if (organizationName && props.organizations.length && !props.organizations.some((item) => String(item.name || '').trim() === organizationName)) {
+    errors.push(`组织不存在：${organizationName}`)
+  }
+  if (positionName && props.positions.length && !props.positions.some((item) => String(item.name || '').trim() === positionName && (!organizationName || String(item.org_unit_id || item.organization_id || '') === String(props.organizations.find((org) => String(org.name || '').trim() === organizationName)?.org_unit_id || '')))) {
+    errors.push(`岗位不存在或不属于组织：${positionName}`)
   }
 
   if (rawApplicationRoles) {
@@ -280,6 +300,8 @@ function makeRow(cells, columnMap, lineNo) {
     email,
     mobile,
     status,
+    organizationName,
+    positionName,
     rawApplicationRoles,
     applicationRoles,
     valid: errors.length === 0,
@@ -306,7 +328,7 @@ function selectValidOnly() {
 const selectedValidRows = computed(() => rows.filter((row) => row.selected && row.valid))
 
 // ---- 样例 CSV ----
-const SAMPLE_CSV = '姓名,邮箱,手机号,状态,应用角色\n张三,zhang.san@example.com,13800000000,启用,\n李四,,13900000000,启用,\n王五,wang.wu@example.com,,启用,\n赵六,zhao.liu@example.com,13500000000,停用,合同管理系统：审计管理员\n'
+const SAMPLE_CSV = '姓名,邮箱,手机号,状态,组织,岗位,应用角色\n张三,zhang.san@example.com,13800000000,启用,华东事业部,销售经理,\n李四,,13900000000,启用,华东事业部,项目经理,\n王五,wang.wu@example.com,,启用,华南事业部,技术顾问,\n赵六,zhao.liu@example.com,13500000000,停用,华东事业部,合同专员,合同管理系统：审计管理员\n'
 
 function downloadSample() {
   // 加上 UTF-8 BOM，方便 Excel 直接打开不乱码。
@@ -341,9 +363,11 @@ async function submit() {
       email: row.email || null,
       mobile: row.mobile || null,
       status: row.status || 'ACTIVE',
+      organizationName: row.organizationName,
+      positionName: row.positionName,
       applicationRoles: row.applicationRoles,
     }))
-    const result = await createUsersBatch(payload)
+    const result = await createEmployeesBatch(payload)
     const created = Array.isArray(result?.items) ? result.items : []
     const createdByLineNo = new Map()
     for (const item of created) {
@@ -439,7 +463,7 @@ function formatFileSize(bytes) {
       <div v-if="step === 1" class="iam-batch-import-body">
         <p class="iam-form-alert iam-batch-import-guide">
           <ConsoleIcon name="info" />
-          <span>表头使用“姓名、邮箱、手机号、状态、应用角色”。标准角色应通过任职关系和岗位授权模板自动获得；“应用角色”仅用于少量个人例外，可留空。单次最多 {{ BATCH_LIMIT }} 行。</span>
+          <span>表头使用“姓名、邮箱、手机号、状态、组织、岗位、应用角色”。组织和岗位必须填写系统中的中文名称；应用角色仅用于个人例外，可留空。单次最多 {{ BATCH_LIMIT }} 行。</span>
         </p>
 
         <div
@@ -474,7 +498,7 @@ function formatFileSize(bytes) {
         <div class="iam-batch-import-sample">
           <div class="iam-batch-import-sample-copy">
             <span class="iam-batch-import-sample-title"><ConsoleIcon name="info" /><strong>文件格式示例</strong></span>
-            <p>姓名必填，其他列可留空。个人例外角色填写“应用名称：角色名称”，多个角色用“|”分隔；日常岗位角色不要写入 CSV。</p>
+            <p>姓名、组织、岗位必填。组织和岗位填写中文名称；个人例外角色填写“应用名称：角色名称”，多个角色用“|”分隔。日常岗位角色由岗位授权模板自动继承。</p>
             <pre><code>{{ SAMPLE_CSV }}</code></pre>
           </div>
           <button class="console-button ghost small" type="button" @click="downloadSample">
@@ -542,13 +566,15 @@ function formatFileSize(bytes) {
                 <th>邮箱</th>
                 <th>手机</th>
                 <th>状态</th>
+                <th>组织</th>
+                <th>岗位</th>
                 <th>应用角色</th>
                 <th class="col-status">校验</th>
               </tr>
             </thead>
             <tbody>
               <tr v-if="!visibleRows.length">
-                <td colspan="8" class="empty">当前筛选下没有数据行。</td>
+                <td colspan="10" class="empty">当前筛选下没有数据行。</td>
               </tr>
               <tr
                 v-for="row in visibleRows"
@@ -568,6 +594,8 @@ function formatFileSize(bytes) {
                 <td>{{ row.email || '—' }}</td>
                 <td>{{ row.mobile || '—' }}</td>
                 <td>{{ row.status === 'ACTIVE' ? '启用' : '停用' }}</td>
+                <td>{{ row.organizationName || '—' }}</td>
+                <td>{{ row.positionName || '—' }}</td>
                 <td><code>{{ row.rawApplicationRoles || '—' }}</code></td>
                 <td class="col-status">
                   <span v-if="row.submitStatus === 'success'" class="badge ok">

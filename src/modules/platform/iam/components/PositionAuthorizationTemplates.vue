@@ -57,6 +57,19 @@ function closeConfirm() {
   if (confirmDialog.value?.busy) return
   confirmDialog.value = null
 }
+async function runConfirm() {
+  const dialog = confirmDialog.value
+  if (!dialog || dialog.busy) return
+  dialog.busy = true
+  try {
+    const completed = await dialog.onConfirm()
+    if (completed !== false && confirmDialog.value === dialog) confirmDialog.value = null
+  } catch {
+    // 业务回调负责展示错误提示；异常时保留弹窗，避免误判为成功。
+  } finally {
+    if (confirmDialog.value === dialog) dialog.busy = false
+  }
+}
 const preview = ref(null)
 // 编辑器内的"挂载预览"独立 state：与下方页面级 `preview` 共享同一接口，但保留专属 loading / unavailable 态，
 // 以便在模板编辑卡片内独立显示骨架、错误与刷新按钮，而不影响已有的"授权预览与影响分析"卡片渲染。
@@ -421,6 +434,7 @@ async function deleteTemplate(template) {
         await load()
       } catch (error) {
         emit('toast', error instanceof AuthorizationError ? error.message : (error?.message || '删除岗位授权模板失败。'))
+        return false
       } finally {
         closeConfirm()
       }
@@ -750,7 +764,7 @@ onMounted(() => {
         <div class="iam-confirm-body"><p style="white-space: pre-line;">{{ confirmDialog.description }}</p></div>
         <footer>
           <button class="console-button ghost" type="button" :disabled="confirmDialog.busy" @click="closeConfirm">取消</button>
-          <button :class="['console-button', confirmDialog.danger ? 'iam-danger-button' : 'primary']" type="button" :disabled="confirmDialog.busy" @click="async () => { if (confirmDialog.busy) return; confirmDialog.busy = true; try { await confirmDialog.onConfirm() } catch { /* 错误已由 handler 处理 */ } finally { if (confirmDialog) confirmDialog.busy = false } }">{{ confirmDialog.confirmText }}</button>
+          <button :class="['console-button', confirmDialog.danger ? 'iam-danger-button' : 'primary']" type="button" :disabled="confirmDialog.busy" @click="runConfirm">{{ confirmDialog.confirmText }}</button>
         </footer>
       </section>
     </div>

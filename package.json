@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
-    "test": "node --test src/modules/*.test.mjs src/modules/registry/*.test.mjs src/modules/contract_management/*.test.mjs src/modules/contract_management/api/*.test.mjs src/modules/project_management/*.test.mjs src/modules/project_management/api/*.test.mjs src/modules/shared/authz/*.test.mjs src/modules/shared/utils/*.test.mjs src/modules/customer_portal/api/*.test.mjs src/modules/platform/auth/utils/*.test.mjs src/modules/platform/applications/api/*.test.mjs src/modules/platform/iam/api/*.test.mjs src/modules/platform/iam/utils/*.test.mjs src/modules/platform/login-targets/utils/*.test.mjs src/modules/platform/audit/utils/*.test.mjs src/modules/platform/dictionaries/api/*.test.mjs src/modules/platform/dictionaries/utils/*.test.mjs",
+    "test": "node --test src/modules/*.test.mjs src/modules/registry/*.test.mjs src/modules/contract_management/*.test.mjs src/modules/contract_management/api/*.test.mjs src/modules/project_management/*.test.mjs src/modules/project_management/api/*.test.mjs src/modules/shared/authz/*.test.mjs src/modules/shared/utils/*.test.mjs src/modules/customer_portal/api/*.test.mjs src/modules/data_analysis/*.test.mjs src/modules/platform/auth/utils/*.test.mjs src/modules/platform/applications/api/*.test.mjs src/modules/platform/iam/api/*.test.mjs src/modules/platform/iam/utils/*.test.mjs src/modules/platform/login-targets/utils/*.test.mjs src/modules/platform/audit/utils/*.test.mjs src/modules/platform/dictionaries/api/*.test.mjs src/modules/platform/dictionaries/utils/*.test.mjs",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0"
   },

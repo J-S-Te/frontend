@@ -3,6 +3,7 @@ import projectManagementModule from '../project_management/module.js'
 import contractManagementModule from '../contract_management/module.js'
 import customerOpportunityModule from '../customer_opportunity/module.js'
 import customerPortalModule from '../customer_portal/module.js'
+import dataAnalysisModule from '../data_analysis/module.js'
 
 /**
  * 前端模块清单。
@@ -17,6 +18,7 @@ export const frontendModules = Object.freeze([
   contractManagementModule,
   customerOpportunityModule,
   customerPortalModule,
+  dataAnalysisModule,
 ])
 
 function normalizeCode(value) {
