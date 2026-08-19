@@ -8,7 +8,7 @@ import SubsystemPortalView from '@/modules/platform/views/SubsystemPortalView.vu
 import { AuthError, getCurrentPrincipal } from '@/modules/platform/auth/api/auth'
 import { ensureContractSession } from '@/modules/contract_management/api/contract'
 import { ensureProjectSession } from '@/modules/project_management/api/projectManagement'
-import { getCRMSession } from '@/modules/customer_opportunity/api/client'
+import { ensureCRMSession } from '@/modules/customer_opportunity/api/client'
 import { ensurePortalSession } from '@/modules/customer_portal/api/portal'
 import { ensureDataAnalysisSession } from '@/modules/data_analysis/api/dataAnalysis'
 import { canAccessContractSection } from '@/modules/shared/authz/sys004'
@@ -231,8 +231,7 @@ router.beforeEach(async (to) => {
 
   if (to.meta.requiresCRMSession) {
     try {
-      await getCRMSession()
-      return true
+      return Boolean(await ensureCRMSession())
     } catch (error) {
       // The CRM client starts its own OIDC redirect on 401. Other errors stay
       // closed so a backend outage cannot fall through to the platform session.
