@@ -1,5 +1,11 @@
 import { createRequest, API_BASE_URL } from '../../shared/api/request.js'
+import { attachStructuredContext } from '../../shared/api/requestContext.js'
 
+/**
+ * AuditEventsError 与业务错误分类相关的错误类型定义。
+ * @class
+ * @property {string} name 标准错误类型名。
+ */
 export class AuditEventsError extends Error {
   constructor(message, options = {}) {
     super(message)
@@ -12,7 +18,13 @@ export class AuditEventsError extends Error {
 
 
 
-const request = createRequest({ ErrorClass: AuditEventsError, networkMessage: '无法连接审计事件服务，请确认后端服务已启动。', failureMessage: '审计事件查询失败。' })
+const request = createRequest({
+  ErrorClass: AuditEventsError,
+  networkMessage: '无法连接审计事件服务，请确认后端服务已启动。',
+  failureMessage: '审计事件查询失败。',
+  subsystem: 'platform',
+  feature: 'audit',
+})
 
 function encodeFilter(parameters) {
   const search = new URLSearchParams()
@@ -67,10 +79,31 @@ export async function listAuditEvents({
   }
 }
 
+/**
+ * getAuditEvent 查询单条审计事件详情并映射为前端消费字段。
+ * @param {string|number} eventId 事件 ID。
+ * @returns {Promise<object>} 事件详情对象。
+ * @throws {Error} 会话失效、ID 不存在或服务端异常时抛出。
+ */
 export function getAuditEvent(eventId) {
   return request(`/audit/events/${encodeURIComponent(eventId)}`).then(mapAuditEvent)
 }
 
+/**
+ * createAuditExportJob 创建审计导出任务，用于异步导出满足筛选条件的审计结果。
+ * @param {Object} options 筛选条件。
+ * @param {string} [options.keyword=''] 全文关键字。
+ * @param {string} [options.applicationCode=''] 应用代码。
+ * @param {string} [options.environmentCode=''] 环境代码。
+ * @param {string} [options.action=''] 动作类型。
+ * @param {string} [options.actionCategory=''] 动作分类。
+ * @param {string} [options.result=''] 处理结果。
+ * @param {string} [options.riskLevel=''] 风险等级。
+ * @param {string} [options.occurredFrom=''] 起始时间。
+ * @param {string} [options.occurredTo=''] 截止时间。
+ * @returns {Promise<object>} 导出任务对象。
+ * @throws {Error} 鉴权失败或参数异常时抛出。
+ */
 export function createAuditExportJob({ keyword = '', applicationCode = '', environmentCode = '', action = '', actionCategory = '', result = '', riskLevel = '', occurredFrom = '', occurredTo = '' } = {}) {
   return request('/audit/export-jobs', {
     method: 'POST',
@@ -88,6 +121,12 @@ export function createAuditExportJob({ keyword = '', applicationCode = '', envir
   })
 }
 
+/**
+ * getAuditExportJob 查询导出任务状态与失败原因，用于下载页展示轮询。
+ * @param {string|number} jobId 任务 ID。
+ * @returns {Promise<object>} 导出任务详情。
+ * @throws {Error} 任务不存在或会话失效时抛出。
+ */
 export function getAuditExportJob(jobId) {
   return request(`/audit/export-jobs/${encodeURIComponent(jobId)}`)
 }
@@ -178,23 +217,59 @@ function riskLabel(value) {
 
 /** 下载已完成的审计导出文件；服务端会再次校验当前会话与任务归属。 */
 export async function downloadAuditExportJob(jobId) {
+  const encodedId = encodeURIComponent(jobId)
   let response
   try {
-    response = await fetch(`${API_BASE_URL}/audit/export-jobs/${encodeURIComponent(jobId)}/download`, {
+    response = await fetch(`${API_BASE_URL}/audit/export-jobs/${encodedId}/download`, {
       credentials: 'include',
       headers: { Accept: 'application/octet-stream, application/json' },
     })
   } catch {
-    throw new AuditEventsError('无法连接审计导出下载服务，请稍后重试。', { code: 'NETWORK_ERROR' })
+    const requestError = new AuditEventsError('无法连接审计导出下载服务，请稍后重试。', { code: 'NETWORK_ERROR' })
+    attachStructuredContext(requestError, {
+      subsystem: 'platform',
+      feature: 'audit',
+      operation: 'GET',
+      path: `/audit/export-jobs/${encodedId}/download`,
+      method: 'GET',
+      metadata: { source: 'audit_export_download' },
+    }, {
+      status: 0,
+      code: 'NETWORK_ERROR',
+      requestId: '',
+      traceId: '',
+    })
+    throw requestError
   }
   const contentType = response.headers.get('content-type') || ''
   if (!response.ok) {
     const body = contentType.includes('application/json') ? await response.json().catch(() => ({})) : {}
-    throw new AuditEventsError(body.message || '审计导出下载失败。', {
+    const requestId = body.request_id || ''
+    const traceId = body.trace_id || body.traceId || ''
+    const requestError = new AuditEventsError(body.message || '审计导出下载失败。', {
       status: response.status,
       code: body.code,
-      traceId: body.request_id || body.trace_id || body.traceId,
+      traceId,
     })
+    attachStructuredContext(requestError, {
+      subsystem: 'platform',
+      feature: 'audit',
+      operation: 'GET',
+      path: `/audit/export-jobs/${encodedId}/download`,
+      method: 'GET',
+      requestId,
+      traceId,
+      metadata: {
+        source: 'audit_export_download',
+        contentType,
+      },
+    }, {
+      status: response.status,
+      code: body.code,
+      requestId,
+      traceId,
+    })
+    throw requestError
   }
   const disposition = response.headers.get('content-disposition') || ''
   const matched = disposition.match(/filename\*?=(?:UTF-8''|\")?([^;\"]+)/i)

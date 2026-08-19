@@ -1,5 +1,11 @@
 import { createRequest, API_BASE_URL } from '../../shared/api/request.js'
 
+/**
+ * AuthorizationError 表示授权管理接口返回的结构化错误。
+ * @property {number} status HTTP 状态码；网络异常时为 0。
+ * @property {string} code 服务端错误码。
+ * @property {string} traceId 请求跟踪标识。
+ */
 export class AuthorizationError extends Error {
   constructor(message, options = {}) {
     super(message)
@@ -12,7 +18,13 @@ export class AuthorizationError extends Error {
 
 
 
-const request = createRequest({ ErrorClass: AuthorizationError, networkMessage: '无法连接授权管理服务，请确认后端服务已启动。', failureMessage: '授权管理请求失败。' })
+const request = createRequest({
+  ErrorClass: AuthorizationError,
+  networkMessage: '无法连接授权管理服务，请确认后端服务已启动。',
+  failureMessage: '授权管理请求失败。',
+  subsystem: 'platform',
+  feature: 'iam_authorization',
+})
 
 function pageQuery(parameters = {}) {
   const search = new URLSearchParams()
@@ -46,26 +58,62 @@ function normalize(value) {
 // 2) 后端后续若开放平台侧角色管理，可在不破坏模块结构的情况下挂回 UI。
 // 新增 UI 时请同步去掉本注释，并恢复 `/* unused */` 行的调用。
 // ============================================================================
+/**
+ * listResources 分页查询权限资源目录。
+ * @param {Object} [options] 查询参数，包含 page、pageSize、keyword 和 status。
+ * @returns {Promise<Object>} 返回标准化的资源分页数据。
+ * @throws {AuthorizationError} 会话无效、无查询权限或授权服务不可用时抛出。
+ */
 export function listResources({ page = 1, pageSize = 100, keyword = '', status = '' } = {}) {
   return request(`/resources${pageQuery({ page, page_size: pageSize, keyword, 'filter[status]': status })}`).then(normalize)
 }
 
+/**
+ * listPermissions 分页查询权限项目录。
+ * @param {Object} [options] 查询参数，包含 page、pageSize、keyword 和 status。
+ * @returns {Promise<Object>} 返回标准化的权限项分页数据。
+ * @throws {AuthorizationError} 会话无效、无查询权限或授权服务不可用时抛出。
+ */
 export function listPermissions({ page = 1, pageSize = 100, keyword = '', status = '' } = {}) {
   return request(`/permissions${pageQuery({ page, page_size: pageSize, keyword, 'filter[status]': status })}`).then(normalize)
 }
 
+/**
+ * listRoles 分页查询角色目录。
+ * @param {Object} [options] 查询参数，包含 page、pageSize、keyword 和 status。
+ * @returns {Promise<Object>} 返回标准化的角色分页数据。
+ * @throws {AuthorizationError} 会话无效、无查询权限或授权服务不可用时抛出。
+ */
 export function listRoles({ page = 1, pageSize = 100, keyword = '', status = '' } = {}) {
   return request(`/roles${pageQuery({ page, page_size: pageSize, keyword, 'filter[status]': status })}`).then(normalize)
 }
 
+/**
+ * getRole 查询指定角色及其权限项。
+ * @param {string} roleId 角色标识。
+ * @returns {Promise<Object>} 返回角色详情。
+ * @throws {AuthorizationError} 角色不存在、无访问权限或授权服务不可用时抛出。
+ */
 export function getRole(roleId) {
   return request(`/roles/${encodeURIComponent(roleId)}`)
 }
 
+/**
+ * listRoleBindings 分页查询角色绑定关系。
+ * @param {Object} [options] 查询参数，包含 page、pageSize、keyword 和 status。
+ * @returns {Promise<Object>} 返回标准化的角色绑定分页数据。
+ * @throws {AuthorizationError} 会话无效、无查询权限或授权服务不可用时抛出。
+ */
 export function listRoleBindings({ page = 1, pageSize = 100, keyword = '', status = '' } = {}) {
   return request(`/role-bindings${pageQuery({ page, page_size: pageSize, keyword, 'filter[status]': status })}`).then(normalize)
 }
 
+/**
+ * createRole 创建角色并关联权限项。
+ * @param {Object} options 角色参数，包含 name、description 和 permissionIds。
+ * @returns {Promise<Object>} 返回新建的角色。
+ * @throws {AuthorizationError} 角色数据无效、名称冲突、权限项不存在或操作无权限时抛出。
+ */
 export function createRole({ name, description = '', permissionIds = [] }) {
   return request('/roles', {
     method: 'POST',
@@ -73,6 +121,12 @@ export function createRole({ name, description = '', permissionIds = [] }) {
   })
 }
 
+/**
+ * updateRole 更新角色、权限项及状态。
+ * @param {Object} options 更新参数，包含 roleId、name、description、permissionIds、status 和 version。
+ * @returns {Promise<Object>} 返回更新后的角色。
+ * @throws {AuthorizationError} 角色不存在、权限项无效、版本冲突或操作无权限时抛出。
+ */
 export function updateRole({ roleId, name, description = '', permissionIds = [], status = 'ACTIVE', version }) {
   return request(`/roles/${encodeURIComponent(roleId)}`, {
     method: 'PATCH',
@@ -80,6 +134,12 @@ export function updateRole({ roleId, name, description = '', permissionIds = [],
   })
 }
 
+/**
+ * createRoleBinding 将角色绑定到指定主体和作用域。
+ * @param {Object} options 绑定参数，包含 roleId、subjectType、subjectId、scopeType、scopeId、status 和 expiresAt。
+ * @returns {Promise<Object>} 返回新建的角色绑定。
+ * @throws {AuthorizationError} 角色或主体不存在、作用域无效、绑定冲突或操作无权限时抛出。
+ */
 export function createRoleBinding({ roleId, subjectType, subjectId, scopeType, scopeId = null, status = 'ACTIVE', expiresAt = null }) {
   return request('/role-bindings', {
     method: 'POST',
@@ -95,6 +155,12 @@ export function createRoleBinding({ roleId, subjectType, subjectId, scopeType, s
   })
 }
 
+/**
+ * createPermission 在指定资源下创建权限项。
+ * @param {Object} options 权限参数，包含 resourceId、code、name 和 action。
+ * @returns {Promise<Object>} 返回新建的权限项。
+ * @throws {AuthorizationError} 资源不存在、权限编码冲突、动作无效或操作无权限时抛出。
+ */
 export function createPermission({ resourceId, code, name, action }) {
   return request('/permissions', {
     method: 'POST',
@@ -103,7 +169,10 @@ export function createPermission({ resourceId, code, name, action }) {
 }
 
 /**
- * 查询应用的权限目录。目录由应用自己维护，平台只负责校验并展示。
+ * getApplicationAuthorizationCatalog 查询应用自主维护、由平台校验展示的权限目录。
+ * @param {string} applicationId 应用标识。
+ * @returns {Promise<Object>} 返回应用的角色与权限目录。
+ * @throws {AuthorizationError} 应用不存在、目录未接入、无访问权限或服务不可用时抛出。
  */
 export function getApplicationAuthorizationCatalog(applicationId) {
   return request(`/applications/${encodeURIComponent(applicationId)}/authorization-catalog`)
@@ -138,11 +207,15 @@ function isManualApplicationRole(role) {
 }
 
 /**
- * 统一新旧后端的应用授权响应。
+ * normalizeApplicationAccess 统一新旧后端的应用授权响应。
  *
  * 新后端直接返回 direct_roles / inherited_roles；旧后端缺少这两个字段时，
  * 优先根据 direct/source_type 判断来源。若整份旧数据完全没有来源字段，
  * 则维持历史行为，将 roles 全部视为用户直接授权。
+ *
+ * @param {Object|null} value 服务端返回的应用授权数据。
+ * @param {string} [directSourceType='USER'] 判定直接授权的主体类型。
+ * @returns {Object|null} 返回补齐 roles、direct_roles、inherited_roles 和 manual_roles 的数据；输入无效时返回 null。
  */
 export function normalizeApplicationAccess(value, directSourceType = 'USER') {
   if (!value || typeof value !== 'object') return null
@@ -178,15 +251,23 @@ export function normalizeApplicationAccess(value, directSourceType = 'USER') {
 }
 
 /**
- * 查询用户在指定应用下的完整有效授权。
+ * getApplicationAccess 查询用户在指定应用下的完整有效授权。
+ * @param {string} userId 用户标识。
+ * @param {string} applicationCode 应用编码。
+ * @returns {Promise<Object|null>} 返回标准化的直接、继承与手工角色集合。
+ * @throws {AuthorizationError} 用户或应用不存在、无访问权限或授权服务不可用时抛出。
  */
 export function getApplicationAccess(userId, applicationCode) {
   return request(`/users/${encodeURIComponent(userId)}/applications/${encodeURIComponent(applicationCode)}/access`)
     .then(normalizeApplicationAccess)
 }
 
-// 汇总人员账号、任职、待异动、交接和 Keycloak 同步状态；该接口只读，
-// 用于用户详情页的一致状态卡片，不参与授权写入。
+/**
+ * getAuthorizationOverview 只读汇总人员账号、任职、待异动、交接和 Keycloak 同步状态。
+ * @param {string} userId 用户标识。
+ * @returns {Promise<Object>} 返回用户详情页所需的一致状态摘要。
+ * @throws {AuthorizationError} 用户不存在、无访问权限或汇总服务不可用时抛出。
+ */
 export function getAuthorizationOverview(userId) {
   return request(`/people/${encodeURIComponent(userId)}/authorization-overview`).then((value) => ({
     user: value?.user || null,
@@ -200,8 +281,13 @@ export function getAuthorizationOverview(userId) {
 }
 
 /**
- * 用完整角色集合替换用户在应用下的角色绑定。
- * roles 中的每一项使用后端通用授权接口约定的 role_code、scope_type 和有效期字段。
+ * updateApplicationAccess 用完整角色集合替换用户在应用下的直接角色绑定。
+ * @param {string} userId 用户标识。
+ * @param {string} applicationCode 应用编码。
+ * @param {Object} [options] 替换参数。
+ * @param {Array<Object>} [options.roles] 包含 role_code、scope_type 和可选有效期的完整角色集合。
+ * @returns {Promise<Object|null>} 返回标准化的有效授权。
+ * @throws {AuthorizationError} 用户、应用或角色不存在，作用域无效或操作无权限时抛出。
  */
 export function updateApplicationAccess(userId, applicationCode, { roles = [] } = {}) {
   return request(`/users/${encodeURIComponent(userId)}/applications/${encodeURIComponent(applicationCode)}/access`, {
@@ -211,7 +297,11 @@ export function updateApplicationAccess(userId, applicationCode, { roles = [] } 
 }
 
 /**
- * 撤销用户在指定应用下的全部访问授权。
+ * deleteApplicationAccess 撤销用户在指定应用下的全部直接访问授权。
+ * @param {string} userId 用户标识。
+ * @param {string} applicationCode 应用编码。
+ * @returns {Promise<Object>} 返回撤销结果。
+ * @throws {AuthorizationError} 用户或应用不存在、授权不可撤销或操作无权限时抛出。
  */
 export function deleteApplicationAccess(userId, applicationCode) {
   return request(`/users/${encodeURIComponent(userId)}/applications/${encodeURIComponent(applicationCode)}/access`, {
@@ -223,13 +313,28 @@ function subjectApplicationAccessPath(subjectType, subjectId, applicationCode) {
   return `/authorization-subjects/${encodeURIComponent(subjectType)}/${encodeURIComponent(subjectId)}/applications/${encodeURIComponent(applicationCode)}/access`
 }
 
-/** 查询组织单元或岗位主体在应用下的角色绑定。 */
+/**
+ * getSubjectApplicationAccess 查询组织单元或岗位主体在应用下的角色绑定。
+ * @param {string} subjectType 主体类型，如 ORG_UNIT 或 POSITION。
+ * @param {string} subjectId 主体标识。
+ * @param {string} applicationCode 应用编码。
+ * @returns {Promise<Object|null>} 返回标准化的主体授权。
+ * @throws {AuthorizationError} 主体或应用不存在、主体类型无效或无访问权限时抛出。
+ */
 export function getSubjectApplicationAccess(subjectType, subjectId, applicationCode) {
   return request(subjectApplicationAccessPath(subjectType, subjectId, applicationCode))
     .then((value) => normalizeApplicationAccess(value, subjectType))
 }
 
-/** 用完整角色集合替换组织单元或岗位主体在应用下的直接角色绑定。 */
+/**
+ * updateSubjectApplicationAccess 用完整角色集合替换组织或岗位在应用下的直接绑定。
+ * @param {string} subjectType 主体类型。
+ * @param {string} subjectId 主体标识。
+ * @param {string} applicationCode 应用编码。
+ * @param {Object} [options] 包含 roles 完整角色集合的替换参数。
+ * @returns {Promise<Object|null>} 返回标准化的主体授权。
+ * @throws {AuthorizationError} 主体、应用或角色不存在，角色集合无效或操作无权限时抛出。
+ */
 export function updateSubjectApplicationAccess(subjectType, subjectId, applicationCode, { roles = [] } = {}) {
   return request(subjectApplicationAccessPath(subjectType, subjectId, applicationCode), {
     method: 'PUT',
@@ -237,7 +342,14 @@ export function updateSubjectApplicationAccess(subjectType, subjectId, applicati
   }).then((value) => normalizeApplicationAccess(value, subjectType))
 }
 
-/** 撤销组织单元或岗位主体在应用下的全部直接角色绑定。 */
+/**
+ * deleteSubjectApplicationAccess 撤销组织或岗位主体在应用下的全部直接角色绑定。
+ * @param {string} subjectType 主体类型。
+ * @param {string} subjectId 主体标识。
+ * @param {string} applicationCode 应用编码。
+ * @returns {Promise<Object>} 返回撤销结果。
+ * @throws {AuthorizationError} 主体或应用不存在、绑定不可撤销或操作无权限时抛出。
+ */
 export function deleteSubjectApplicationAccess(subjectType, subjectId, applicationCode) {
   return request(subjectApplicationAccessPath(subjectType, subjectId, applicationCode), {
     method: 'DELETE',

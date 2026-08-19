@@ -1,5 +1,10 @@
 import { createRequest, API_BASE_URL } from '../../shared/api/request.js'
 
+/**
+ * PlatformSettingsError 与业务错误分类相关的错误类型定义。
+ * @class
+ * @property {string} name 标准错误类型名。
+ */
 export class PlatformSettingsError extends Error {
   constructor(message, options = {}) {
     super(message)
@@ -12,7 +17,13 @@ export class PlatformSettingsError extends Error {
 
 
 
-const request = createRequest({ ErrorClass: PlatformSettingsError, networkMessage: '无法连接平台设置服务，请确认后端服务已启动。', failureMessage: '平台设置请求失败。' })
+const request = createRequest({
+  ErrorClass: PlatformSettingsError,
+  networkMessage: '无法连接平台设置服务，请确认后端服务已启动。',
+  failureMessage: '平台设置请求失败。',
+  subsystem: 'platform',
+  feature: 'platform_settings',
+})
 
 /** 拉取平台基础设置（organization_name / organization_alias / timezone / qualification）。 */
 export function getPlatformSettings() {
