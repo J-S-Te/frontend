@@ -1,4 +1,4 @@
-import { normalizeAuthorizationSession, shouldStartSubsystemLogin } from '../../shared/authz/sessionCompatibility.js'
+import { normalizeAuthorizationSession, principalIdentityID, shouldStartSubsystemLogin } from '../../shared/authz/sessionCompatibility.js'
 import { attachStructuredContext } from '../../platform/shared/api/requestContext.js'
 
 const PUBLIC_PATH_PREFIX = (import.meta.env?.VITE_CRM_PUBLIC_PATH_PREFIX || '/customer-opportunity').replace(/\/$/, '')
@@ -41,6 +41,33 @@ function redirectToLogin() {
   if (loginRedirectStarted) return
   loginRedirectStarted = true
   window.location.replace(buildCRMLoginURL())
+}
+
+function startForcedCRMLogin() {
+  if (loginRedirectStarted) return
+  loginRedirectStarted = true
+  const target = new URL(buildCRMLoginURL(), window.location.origin)
+  target.searchParams.set('prompt', 'login')
+  window.location.replace(`${target.pathname}${target.search}`)
+}
+
+async function clearCRMLocalSession() {
+  try {
+    await fetch(`${PUBLIC_PATH_PREFIX}/auth/local-logout`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { Accept: 'application/json' },
+    })
+  } catch {
+    // 强制登录仍会覆盖旧 CRM Cookie；清理失败不应让账号切换卡死。
+  }
+}
+
+async function getPlatformPrincipalForSessionCheck() {
+  const response = await fetch('/api/v1/auth/me', { credentials: 'include', cache: 'no-store', headers: { Accept: 'application/json' } })
+  if (!response.ok) throw new Error(`platform session check failed: ${response.status}`)
+  const body = await response.json()
+  return normalizeAuthorizationSession(body?.data ?? body)
 }
 
 /**
@@ -280,6 +307,25 @@ export function toQuery(params = {}) {
  * @throws {CRMAPIError} 会话失效或服务端返回非成功状态时抛出。
  * @throws {TypeError} 网络连接失败时抛出。
  */
+export async function ensureCRMSession() {
+  const crmSession = normalizeAuthorizationSession(await request('/auth/me'))
+  try {
+    const platformPrincipal = await getPlatformPrincipalForSessionCheck()
+    const platformIdentityID = principalIdentityID(platformPrincipal)
+    const crmIdentityID = principalIdentityID(crmSession)
+    const platformTenantID = String(platformPrincipal?.tenant_id || platformPrincipal?.tenant?.id || '')
+    const crmTenantID = String(crmSession?.tenant_id || '')
+    if ((platformIdentityID && crmIdentityID && platformIdentityID !== crmIdentityID) || (platformTenantID && crmTenantID && platformTenantID !== crmTenantID)) {
+      await clearCRMLocalSession()
+      startForcedCRMLogin()
+      return null
+    }
+  } catch {
+    // 平台短暂不可用时保留 CRM 自己的有效会话；平台恢复后下一次校验会完成切换。
+  }
+  return crmSession
+}
+
 export const getCRMSession = async () => normalizeAuthorizationSession(await request('/auth/me'))
 
 /**

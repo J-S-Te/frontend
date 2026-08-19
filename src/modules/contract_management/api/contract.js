@@ -37,11 +37,12 @@ export class ContractAuthError extends Error {
  * startContractLogin 清理会话缓存并发起合同子系统登录；并发调用只允许首次跳转生效。
  * @returns {void}
  */
-function startContractLogin() {
+function startContractLogin({ force = false } = {}) {
   if (loginRedirectStarted) return
   loginRedirectStarted = true
   clearContractSessionCache()
-  window.location.replace(`${CONTRACT_PUBLIC_PATH_PREFIX}/auth/login`)
+  const prompt = force ? '?prompt=login' : ''
+  window.location.replace(`${CONTRACT_PUBLIC_PATH_PREFIX}/auth/login${prompt}`)
 }
 
 /**
@@ -230,7 +231,7 @@ export async function ensureContractSession() {
       const tenantChanged = platformTenantID && platformTenantID !== String(contractSession?.tenant_id || '')
       if (userChanged || tenantChanged) {
         await clearContractLocalSession()
-        startContractLogin()
+        startContractLogin({ force: true })
         return null
       }
     } catch {

@@ -9,11 +9,11 @@ test('contract API starts one shared OIDC redirect only for an expired session',
   assert.match(source, /if \(response\.status === 401\)[\s\S]*startContractLogin\(\)/)
   assert.match(source, /if \(shouldStartSubsystemLogin\(authError\)\) startContractLogin\(\)/)
   assert.match(source, /if \(loginRedirectStarted\) return/)
-  assert.match(source, /window\.location\.replace\(`\$\{CONTRACT_PUBLIC_PATH_PREFIX\}\/auth\/login`\)/)
+  assert.match(source, /window\.location\.replace\(`\$\{CONTRACT_PUBLIC_PATH_PREFIX\}\/auth\/login\$\{prompt\}`\)/)
 })
 
 test('contract session cache is cleared before reauthentication', () => {
-  assert.match(source, /function startContractLogin\(\)[\s\S]*clearContractSessionCache\(\)/)
+  assert.match(source, /function startContractLogin\(\{ force = false \} = \{\}\)[\s\S]*clearContractSessionCache\(\)/)
 })
 
 test('contract session is replaced when the platform browser switches users', () => {
