@@ -1,7 +1,7 @@
 // 数据看板后端 API 封装（骨架，对齐 project_management/api/projectManagement.js 模式）
 // 认证约定：HttpOnly Cookie 会话；401 由本客户端发起 OIDC 跳转；403 交由页面展示无权限。
-import { attachStructuredContext } from '../platform/shared/api/requestContext.js'
-import { createApiRequestContext } from '../platform/shared/api/requestContext.js'
+import { attachStructuredContext } from '../../platform/shared/api/requestContext.js'
+import { createApiRequestContext } from '../../platform/shared/api/requestContext.js'
 
 const runtimeEnv = import.meta.env || {}
 const PUBLIC_PATH_PREFIX = (runtimeEnv.VITE_DATA_ANALYSIS_PUBLIC_PATH_PREFIX || '/data_analysis').replace(/\/$/, '')

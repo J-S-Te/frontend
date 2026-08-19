@@ -1,5 +1,5 @@
 import { createRequest, API_BASE_URL } from '../../shared/api/request.js'
-import { attachStructuredContext } from '../../platform/shared/api/requestContext.js'
+import { attachStructuredContext } from '../../shared/api/requestContext.js'
 
 /**
  * FileTaskError 表示文件或异步任务接口返回的结构化错误。

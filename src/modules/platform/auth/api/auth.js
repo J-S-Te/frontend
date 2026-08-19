@@ -1,7 +1,7 @@
 import { broadcastSessionEnded } from '@/modules/platform/auth/utils/sessionLifecycle'
 import { clearAuthorizationSnapshot } from '@/modules/platform/auth/utils/authorizationRefresh'
 import { normalizeAuthorizationSession } from '@/modules/shared/authz/sessionCompatibility'
-import { createApiRequestContext, attachStructuredContext } from '../../platform/shared/api/requestContext.js'
+import { createApiRequestContext, attachStructuredContext } from '../../shared/api/requestContext.js'
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '/api/v1').replace(/\/$/, '')
 let browserSessionGeneration = 0
