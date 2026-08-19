@@ -13,7 +13,13 @@ export class DictionaryError extends Error {
 
 
 
-const request = createRequest({ ErrorClass: DictionaryError, networkMessage: '无法连接字典服务，请确认后端服务已启动。', failureMessage: '字典请求失败。' })
+const request = createRequest({
+  ErrorClass: DictionaryError,
+  networkMessage: '无法连接字典服务，请确认后端服务已启动。',
+  failureMessage: '字典请求失败。',
+  subsystem: 'platform',
+  feature: 'dictionaries',
+})
 
 function pageQuery({ page = 1, pageSize = 20, keyword = '', status = '' } = {}) {
   const query = new URLSearchParams({ page: String(page), page_size: String(pageSize) })

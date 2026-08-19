@@ -21,7 +21,13 @@ async function readResponse(response) {
   return text ? { message: text } : {}
 }
 
-const request = createRequest({ ErrorClass: ApplicationLoginTargetError, networkMessage: '无法连接统一登录目标服务，请确认后端服务已启动。', failureMessage: '统一登录目标请求失败。' })
+const request = createRequest({
+  ErrorClass: ApplicationLoginTargetError,
+  networkMessage: '无法连接统一登录目标服务，请确认后端服务已启动。',
+  failureMessage: '统一登录目标请求失败。',
+  subsystem: 'platform',
+  feature: 'login_targets',
+})
 
 function loginTargetCollectionPath(applicationId, environmentId) {
   return `/applications/${encodeURIComponent(applicationId)}/environments/${encodeURIComponent(environmentId)}/login-targets`
