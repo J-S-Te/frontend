@@ -288,6 +288,45 @@ button {
   margin: auto;
 }
 
+.force-password-card {
+  max-width: 410px;
+}
+
+.force-password-form .field-group {
+  margin-bottom: 16px;
+}
+
+.force-password-form .input-wrap input {
+  padding-left: 14px;
+}
+
+.password-policy {
+  margin: 4px 0 16px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: #52647d;
+  border: 1px solid #dbeafe;
+  border-radius: 10px;
+  background: #f8fbff;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.password-policy strong {
+  color: #1e3a8a;
+  font-size: 12px;
+}
+
+.force-password-note {
+  margin: 15px 0 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.6;
+  text-align: center;
+}
+
 .login-header {
   margin-bottom: 28px;
 }

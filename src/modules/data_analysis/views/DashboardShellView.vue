@@ -265,13 +265,13 @@ onMounted(async () => {
         </div>
         <div class="da-nav-group">
           <div class="da-nav-label">平台能力</div>
-          <button class="da-nav-item" type="button" :disabled="isLoggingOut" @click="logoutSystem"><ConsoleIcon name="logout" /><span>{{ isLoggingOut ? "正在退出…" : "退出系统" }}</span></button>
+          <button class="da-nav-item" type="button" @click="returnToUnifiedPortal"><ConsoleIcon name="dashboard" /><span>返回子系统门户</span></button>
         </div>
       </nav>
       <div class="da-sidebar-user">
         <span class="da-avatar">{{ currentUserInitial }}</span>
         <span class="da-sidebar-user-copy"><strong>{{ currentUserName }}</strong><small>{{ currentUserRole }}</small></span>
-        <button type="button" :disabled="isLoggingOut" aria-label="退出系统" @click="logoutSystem"><ConsoleIcon name="logout" /></button>
+        <button type="button" :disabled="isLoggingOut" aria-label="退出应用系统" @click="logoutSystem"><ConsoleIcon name="logout" /></button>
       </div>
     </aside>
     <div v-if="mobileMenuOpen" class="da-menu-mask" @click="mobileMenuOpen = false"></div>
