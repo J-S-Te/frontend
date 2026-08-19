@@ -2469,13 +2469,13 @@ onMounted(async () => {
         <p class="console-nav-label">消息中心</p>
         <button v-if="canReadNotifications" class="console-nav-item" type="button" :class="{ active: activeSection === 'notifications' }" @click="navigate('notifications')"><ConsoleIcon name="bell" /><span>个人通知</span><span v-if="notificationUnreadCount" class="crm-nav-badge">{{ notificationUnreadCount > 99 ? '99+' : notificationUnreadCount }}</span></button>
         <p class="console-nav-label">平台能力</p>
-        <button class="console-nav-item" type="button" :disabled="isLoggingOut" @click="logoutSystem"><ConsoleIcon name="logout" /><span>{{ isLoggingOut ? '正在退出…' : '退出系统' }}</span></button>
+        <button class="console-nav-item" type="button" @click="navigatePlatform"><ConsoleIcon name="dashboard" /><span>返回子系统门户</span></button>
       </nav>
       <div class="console-sidebar-note"><ConsoleIcon name="shield" /><span>统一身份认证已生效，菜单与操作由服务端权限控制。</span></div>
       <div class="console-sidebar-user">
         <span class="console-avatar" aria-hidden="true">{{ currentUserInitial }}</span>
         <span class="console-user-copy"><strong :title="currentUserLabel">{{ currentUserLabel }}</strong><small :title="currentRoleLabel">{{ currentRoleLabel }}</small></span>
-        <button class="console-logout" type="button" :disabled="isLoggingOut" aria-label="退出系统" @click="logoutSystem"><ConsoleIcon name="logout" /></button>
+        <button class="console-logout" type="button" :disabled="isLoggingOut" aria-label="退出应用系统" @click="logoutSystem"><ConsoleIcon name="logout" /></button>
       </div>
     </aside>
     <main class="console-main crm-main">

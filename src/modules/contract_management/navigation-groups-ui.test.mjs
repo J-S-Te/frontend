@@ -27,9 +27,11 @@ test('contract navigation does not expose the customer lookup entry', () => {
   assert.doesNotMatch(navigationDefinitions, /key: 'customers'|label: '客户查询'/)
 })
 
-test('contract system exit revokes the session instead of returning to the portal', () => {
+test('contract navigation returns to the portal while the user control revokes the application session', () => {
   assert.match(source, /logoutCurrentSession\(\)/)
   assert.match(source, /router\.replace\(\{ name: 'login', query: \{ reason: 'session-ended' \} \}\)/)
-  assert.equal((source.match(/@click="logoutSystem"/g) || []).length, 2)
-  assert.match(source, /退出系统/)
+  assert.equal((source.match(/@click="logoutSystem"/g) || []).length, 1)
+  assert.equal((source.match(/@click="returnToUnifiedPortal"/g) || []).length, 1)
+  assert.match(source, /返回子系统门户/)
+  assert.match(source, /aria-label="退出应用系统"/)
 })

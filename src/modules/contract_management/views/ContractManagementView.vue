@@ -1630,10 +1630,10 @@ onBeforeUnmount(() => {
         <section>
           <p>平台能力</p>
           <button v-if="can('all')" type="button" @click="navigatePlatform('settings')"><ConsoleIcon name="settings" /><span>系统设置</span><em>平台</em></button>
-          <button type="button" :disabled="isLoggingOut" @click="logoutSystem"><ConsoleIcon name="logout" /><span>{{ isLoggingOut ? '正在退出…' : '退出系统' }}</span></button>
+          <button type="button" @click="returnToUnifiedPortal"><ConsoleIcon name="dashboard" /><span>返回子系统门户</span></button>
         </section>
       </nav>
-      <div class="contract-sidebar-user"><span class="contract-avatar">{{ currentUserInitial }}</span><span><strong>{{ currentUserLabel }}</strong><small>{{ currentRoleLabel }}</small></span><button type="button" :disabled="isLoggingOut" aria-label="退出系统" @click="logoutSystem"><ConsoleIcon name="logout" /></button></div>
+      <div class="contract-sidebar-user"><span class="contract-avatar">{{ currentUserInitial }}</span><span><strong>{{ currentUserLabel }}</strong><small>{{ currentRoleLabel }}</small></span><button type="button" :disabled="isLoggingOut" aria-label="退出应用系统" @click="logoutSystem"><ConsoleIcon name="logout" /></button></div>
     </aside>
 
     <main class="contract-main">

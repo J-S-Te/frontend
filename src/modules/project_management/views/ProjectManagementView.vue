@@ -341,7 +341,7 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
         </div>
         <div class="pm-nav-group">
           <div class="pm-nav-label">平台能力</div>
-          <button class="pm-nav-item" type="button" :disabled="isLoggingOut" @click="logoutSystem"><ConsoleIcon name="logout" /><span>{{ isLoggingOut ? '正在退出…' : '退出系统' }}</span></button>
+          <button class="pm-nav-item" type="button" @click="returnToUnifiedPortal"><ConsoleIcon name="dashboard" /><span>返回子系统门户</span></button>
         </div>
       </nav>
       <div class="pm-sidebar-foot">V1.0 · 项目服务内容管理</div>
@@ -355,7 +355,7 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
         <div class="pm-top-tools">
           <button class="pm-icon-button" aria-label="全局搜索" @click="showToast('全局搜索即将开放')"><ConsoleIcon name="search" /></button>
           <button class="pm-icon-button pm-notification-button" aria-label="通知" @click="notificationOpen = !notificationOpen"><ConsoleIcon name="bell" /><em v-if="notificationCount">{{ notificationCount }}</em></button>
-          <div class="pm-user"><span>{{ currentUserName.slice(0, 1) }}</span><div><b>{{ currentUserName }}</b><small>{{ currentUserRole }}</small></div><button class="pm-user-return" type="button" :disabled="isLoggingOut" aria-label="退出系统" @click="logoutSystem"><ConsoleIcon name="logout" /></button></div>
+          <div class="pm-user"><span>{{ currentUserName.slice(0, 1) }}</span><div><b>{{ currentUserName }}</b><small>{{ currentUserRole }}</small></div><button class="pm-user-return" type="button" :disabled="isLoggingOut" aria-label="退出应用系统" @click="logoutSystem"><ConsoleIcon name="logout" /></button></div>
         </div>
         <div v-if="notificationOpen" class="pm-notifications">
           <div class="pm-popover-head"><b>业务待办</b><span>{{ notificationCount }} 条</span></div>
