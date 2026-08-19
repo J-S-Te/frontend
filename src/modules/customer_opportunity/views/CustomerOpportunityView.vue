@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref, toRaw, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { AuthError, logoutCurrentSession } from '@/modules/platform/auth/api/auth'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import { subsystemAccessMessage } from '@/modules/shared/authz/sessionCompatibility'
 import OwnerSelector from '../components/OwnerSelector.vue'
@@ -36,6 +37,7 @@ import { createAttachmentUploadRetryState } from '../attachmentUploadRetry.js'
 import { createMemberTermLoadState } from '../memberTermLoadState.js'
 import { createPortalInviteRetryState } from '../portalInviteRetry.js'
 import { createPortalAccessDisableRetryState } from '../portalAccessDisableRetry.js'
+import { createPresaleReportFilters } from '../composables/usePresaleReportFilters.js'
 import { getNotificationUnreadCount, listNotifications, markNotificationRead } from '../api/notification.js'
 import { listOwnerDirectory } from '../api/ownerDirectory.js'
 import { parseNotificationTarget } from '../navigation.js'
@@ -46,7 +48,7 @@ import {
   cancelPresaleRequest, listPresaleRequests, listWorklogs, replaceAssignments, submitApprovalAction,
   listPresaleAlerts, markPresaleAlertRead,
   listPresaleAlertRules, updatePresaleAlertRule, getPresaleReportSummary, getPresaleReportTrend,
-  getPresaleReportDistribution, requestPresaleReportExport, listPresaleExecutionDepartments, selectPresaleExecutionDepartment,
+  getPresaleReportDistribution, getPresaleReportFilterOptions, requestPresaleReportExport, listPresaleExecutionDepartments, selectPresaleExecutionDepartment,
 } from '../api/presale.js'
 import '@/modules/platform/styles/console.css'
 import '../styles/customer-opportunity.css'
@@ -100,6 +102,7 @@ const selectedCustomer = ref(null)
 const customerDetailLoadSequence = ref(0)
 const customerTabLoadSequence = ref(0)
 const selectedOpportunity = ref(null)
+const opportunityDetailLoadSequence = ref(0)
 // 详情展示不暴露组织 ID，但负责人变更仍需保留服务端返回的组织归属。
 const selectedOpportunityOwnerOrgID = ref('')
 const selectedPresale = ref(null)
@@ -117,6 +120,11 @@ const presaleTimelineLoading = ref(false)
 const presaleTimelineError = ref('')
 const presaleTimelineLoadSequence = ref(0)
 const presaleDetailLoadSequence = ref(0)
+const presaleInspectorPanel = ref('')
+const presaleAssignments = ref([])
+const presaleApprovalHistory = ref([])
+const presaleInspectorLoading = ref(false)
+const presaleInspectorError = ref('')
 const engineerPickerOpen = ref(false)
 const engineerDirectory = ref([])
 const engineerDirectoryLoading = ref(false)
@@ -284,8 +292,36 @@ const reportTrend = ref([])
 const reportDistribution = ref([])
 const reportFilters = reactive(defaultReportFilters())
 const reportOrganizationOptions = ref([])
+const reportFilterOptions = ref({ opportunities: [], assignees: [] })
 const reportFilterOptionsLoading = ref(false)
 const reportFilterOptionsError = ref('')
+const {
+  load: loadPresaleReportFilterOptions,
+} = createPresaleReportFilters({
+  showReport,
+  reportFilters,
+  reportParams,
+  reportFilterOptions,
+  reportFilterOptionsLoading,
+  reportFilterOptionsError,
+  reportOrganizationOptions,
+  getPresaleReportFilterOptions,
+  listOwnerDirectory,
+  rememberOwnerDirectory,
+  directoryErrorMessage,
+})
+async function loadReportFilterOptions() {
+  return loadPresaleReportFilterOptions()
+}
+async function onReportPersonChange() {
+  reportFilters.opportunity_id = ''
+  await loadReportFilterOptions()
+}
+async function onReportOrganizationChange() {
+  reportFilters.person_id = ''
+  reportFilters.opportunity_id = ''
+  await loadReportFilterOptions()
+}
 const crmSession = ref(null)
 const crmRoleNames = Object.freeze({
   sales: '销售人员',
@@ -442,6 +478,23 @@ function navigatePlatform() {
   mobileMenuOpen.value = false
   closeSubsystemTabOrFallback(window, () => router.replace({ name: 'portal' }))
 }
+const isLoggingOut = ref(false)
+async function logoutSystem() {
+  if (isLoggingOut.value) return
+  isLoggingOut.value = true
+  try {
+    await logoutCurrentSession()
+    await router.replace({ name: 'login', query: { reason: 'session-ended' } })
+  } catch (value) {
+    if (value instanceof AuthError && value.status === 401) {
+      await router.replace({ name: 'login', query: { reason: 'session-ended' } })
+      return
+    }
+    showError(value)
+  } finally {
+    isLoggingOut.value = false
+  }
+}
 function assignees(value) { return (value || []).map((item) => item.person_name || '未命名执行人').join('、') || '未指派' }
 // 指派接口采用全量替换语义；以当前指派为基线计算差异，可让已停用或不在本次目录结果中的人员
 // 被明确保留或移出，避免一次目录筛选把仍有效的既有指派静默删除。
@@ -591,9 +644,32 @@ function alertTypeText(type) { return ({ APPROVAL_NODE_1_OVERDUE: '节点 1 审�
 function stageAlertStatusText(status) {
   return ({ PENDING: '待处理', UNREAD: '已触发（未读）', READ: '已触发（已读）', CANCELLED: '已取消' })[status] || status
 }
+function reportDateParam(value) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) throw new Error('请输入有效的报表时间范围。')
+  return date.toISOString()
+}
+function normalizeReportSummary(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  return {
+    work_hours: value.work_hours ?? '0.00',
+    participant_count: value.participant_count ?? 0,
+    auto_completed_task_count: value.auto_completed_task_count ?? 0,
+    opportunity_coverage_rate_percent: value.opportunity_coverage_rate_percent ?? '0.00',
+    covered_opportunity_count: value.covered_opportunity_count ?? 0,
+    active_opportunity_count: value.active_opportunity_count ?? 0,
+  }
+}
+function normalizeReportRows(value) {
+  if (Array.isArray(value)) return value
+  // 兼容网关/旧接口将数组包在 items 或 data 中的响应，避免渲染阶段对非数组调用 map/length 导致白页。
+  if (Array.isArray(value?.items)) return value.items
+  if (Array.isArray(value?.data)) return value.data
+  return []
+}
 function reportParams() {
   return {
-    from: new Date(reportFilters.from).toISOString(), to: new Date(reportFilters.to).toISOString(),
+    from: reportDateParam(reportFilters.from), to: reportDateParam(reportFilters.to),
     organization_id: reportFilters.organization_id, person_id: reportFilters.person_id,
     opportunity_id: reportFilters.opportunity_id, dimension: reportFilters.dimension,
   }
@@ -613,7 +689,9 @@ async function loadReports() {
   try {
     const params = reportParams()
     const [summary, trend, distribution] = await Promise.all([getPresaleReportSummary(params), getPresaleReportTrend(params), getPresaleReportDistribution(params)])
-    reportSummary.value = summary; reportTrend.value = trend || []; reportDistribution.value = distribution || []
+    reportSummary.value = normalizeReportSummary(summary)
+    reportTrend.value = normalizeReportRows(trend)
+    reportDistribution.value = normalizeReportRows(distribution)
   } catch (value) { reportError.value = value?.message || '投入报表加载失败' } finally { reportLoading.value = false }
 }
 async function exportReport() {
@@ -816,35 +894,6 @@ async function loadTeamDirectory() {
   }
 }
 
-async function loadReportFilterOptions() {
-  reportFilterOptionsLoading.value = true
-  reportFilterOptionsError.value = ''
-  try {
-    const [filterOptions, directory] = await Promise.all([
-      getPresaleFilterOptions(presaleAPIParams(presaleFilters)),
-      listOwnerDirectory({ page: 1, page_size: 50 }),
-    ])
-    if (!showReport.value) return
-    rememberOwnerDirectory(directory?.items)
-    presaleFilterOptions.value = {
-      opportunities: filterOptions?.opportunities || [], applicants: filterOptions?.applicants || [], assignees: filterOptions?.assignees || [],
-      statuses: filterOptions?.statuses || [], venues: filterOptions?.venues || [], urgencies: filterOptions?.urgencies || [],
-      push_statuses: filterOptions?.push_statuses || [], truncated: Boolean(filterOptions?.truncated),
-    }
-    const organizations = new Map()
-    for (const user of directory?.items || []) {
-      for (const organization of user.organizations || []) organizations.set(organization.organization_id, organization)
-    }
-    reportOrganizationOptions.value = [...organizations.values()].sort((left, right) => left.organization_name.localeCompare(right.organization_name, 'zh-CN'))
-    if (reportFilters.organization_id && !organizations.has(reportFilters.organization_id)) reportFilters.organization_id = ''
-    if (reportFilters.person_id && !presaleFilterOptions.value.assignees.some((item) => item.value === reportFilters.person_id)) reportFilters.person_id = ''
-    if (reportFilters.opportunity_id && !presaleFilterOptions.value.opportunities.some((item) => String(item.value) === String(reportFilters.opportunity_id))) reportFilters.opportunity_id = ''
-  } catch (value) {
-    if (showReport.value) reportFilterOptionsError.value = directoryErrorMessage(value)
-  } finally {
-    reportFilterOptionsLoading.value = false
-  }
-}
 async function openNewOpportunity() {
   Object.assign(opportunityForm, emptyOpportunity())
   opportunityTypeSelections.value = []
@@ -1386,10 +1435,39 @@ async function submitCustomerMerge() {
   } finally { actionLoading.value = false }
 }
 async function openOpportunity(id) {
+  const loadSequence = ++opportunityDetailLoadSequence.value
+  selectedOpportunity.value = null
+  selectedOpportunityOwnerOrgID.value = ''
+  stageHistory.value = []
+  followups.value = []
+  opportunityTeam.value = []
+  opportunityTeamDirectoryAvailable.value = true
+  opportunityMemberTerms.value = []
+  opportunityMemberTermsError.value = ''
+  opportunityMemberTermsPage.number = 1
+  opportunityMemberTermsPage.total = 0
+  opportunityMemberTermsLoading.value = false
+  opportunityExternalStatus.value = null
+  opportunityQuoteAmountCheck.value = null
+  opportunityExternalStatusError.value = ''
+  opportunityPresales.value = []
+  opportunityPresaleError.value = ''
+  opportunityPresalePage.number = 1
+  opportunityPresalePage.total = 0
+  opportunityAttachments.value = []
+  opportunityAttachmentCapabilities.value = null
+  opportunityAttachmentError.value = ''
+  opportunityAttachmentLoading.value = false
   try {
     // 主档、阶段、跟进和当前团队组成首屏一致快照；任期、附件、外部状态和售前依赖
     // 随后独立加载，任一可选依赖失败都不应关闭商机基本详情。
     const [detail, history, records, team] = await Promise.all([getOpportunity(id), getOpportunityStageHistory(id, { page: 1, page_size: 50 }), listOpportunityFollowups(id, { page: 1, page_size: 50 }), getOpportunityMembers(id)])
+    if (loadSequence !== opportunityDetailLoadSequence.value) return
+    if (!detail || typeof detail !== 'object' || Array.isArray(detail)) {
+      const message = '商机详情返回异常，请返回列表重试。'
+      error.value = message
+      throw new Error(message)
+    }
     selectedOpportunityOwnerOrgID.value = detail?.owner_org_id || ''
     selectedOpportunity.value = { ...detail, owner_org_id: '基础平台组织' }; stageHistory.value = history?.items || []; followups.value = records?.items || []; opportunityTeam.value = team?.members || []; opportunityTeamDirectoryAvailable.value = team?.directory_available !== false
     void resolveOwnerNames([detail?.owner_user_id])
@@ -1400,7 +1478,10 @@ async function openOpportunity(id) {
     if (canReadOpportunityAttachments.value) void loadOpportunityAttachments(id)
     opportunityPresales.value = []; opportunityPresaleError.value = ''; opportunityPresalePage.number = 1; opportunityPresalePage.total = 0
     void loadOpportunityPresales()
-  } catch (value) { showError(value) }
+  } catch (value) {
+    if (loadSequence !== opportunityDetailLoadSequence.value) return
+    if (!error.value) showError(value)
+  }
 }
 
 async function loadOpportunityMemberTerms(opportunityID = selectedOpportunity.value?.id, page = opportunityMemberTermsPage.number) {
@@ -1884,6 +1965,8 @@ async function openPresale(id, { clearResult = true } = {}) {
   selectedPresale.value = null; worklogs.value = []
   presaleAvailableActions.value = null; presaleActionsError.value = ''
   presaleTimeline.value = []; presaleTimelineCursor.value = ''; presaleTimelineError.value = ''
+  presaleInspectorPanel.value = ''; presaleAssignments.value = []; presaleApprovalHistory.value = []
+  presaleInspectorLoading.value = false; presaleInspectorError.value = ''
   progressSubmissionKey.value = ''; progressSubmissionSignature.value = ''
   const loaded = await loadPresaleCore(id, { clearResult })
   if (!loaded) return
@@ -1897,7 +1980,29 @@ function closePresale() {
   presaleDetailLoadSequence.value++; presaleActionsLoadSequence.value++; presaleTimelineLoadSequence.value++
   presaleContactPhoneLoadSequence.value++; presaleContactPhone.value = ''; presaleContactPhoneError.value = ''; presaleContactPhoneLoading.value = false
   selectedPresale.value = null; presaleAvailableActions.value = null; presaleTimeline.value = []
+  presaleInspectorPanel.value = ''; presaleAssignments.value = []; presaleApprovalHistory.value = []
+  presaleInspectorLoading.value = false; presaleInspectorError.value = ''
   progressSubmissionKey.value = ''; progressSubmissionSignature.value = ''
+}
+async function loadPresaleInspector(panel) {
+  const id = selectedPresale.value?.request?.id
+  if (!id || presaleInspectorLoading.value) return
+  presaleInspectorPanel.value = panel
+  presaleInspectorLoading.value = true
+  presaleInspectorError.value = ''
+  try {
+    if (panel === 'assignments') {
+      presaleAssignments.value = await getAssignments(id) || []
+      void resolveOwnerNames(presaleAssignments.value.flatMap((item) => [item.assignee_id, item.assigned_by]))
+    } else {
+      presaleApprovalHistory.value = await getApprovalHistory(id) || []
+      void resolveOwnerNames(presaleApprovalHistory.value.map((item) => item.approver_id))
+    }
+  } catch (value) {
+    presaleInspectorError.value = subsystemAccessMessage(value, panel === 'assignments' ? '指派记录暂时无法加载，请稍后重试。' : '审批历史暂时无法加载，请稍后重试。')
+  } finally {
+    presaleInspectorLoading.value = false
+  }
 }
 async function viewPresaleContactPhone() {
   const id = selectedPresale.value?.request?.id
@@ -1941,9 +2046,22 @@ async function openEngineerPicker() {
 }
 async function loadExecutionDepartments() { try { const result = await listPresaleExecutionDepartments(); executionDepartments.value = result?.data || result || [] } catch (value) { showError(value) } }
 async function saveExecutionDepartment() {
-  if (!selectedPresale.value?.request?.id || !selectedExecutionDepartmentID.value) return
+  const id = selectedPresale.value?.request?.id
+  if (!id || !selectedExecutionDepartmentID.value) return
+  const requestVersion = Number(selectedPresale.value?.request?.version)
+  const availableActionsVersion = Number(presaleAvailableActions.value?.version)
+  const version = Number.isInteger(requestVersion) ? requestVersion : availableActionsVersion
+  if (!Number.isInteger(version) || version <= 0) {
+    error.value = '保存失败：当前审批动作版本异常，请先刷新售前详情。'
+    return
+  }
   departmentSaving.value = true
-  try { await selectPresaleExecutionDepartment(selectedPresale.value.request.id, { department_id: selectedExecutionDepartmentID.value, version: Number(presaleAvailableActions.value?.version) }); await openPresale(selectedPresale.value.request.id, { clearResult: false }) } catch (value) { showError(value) } finally { departmentSaving.value = false }
+  try {
+    await selectPresaleExecutionDepartment(id, { department_id: selectedExecutionDepartmentID.value, version })
+    await openPresale(id, { clearResult: false })
+  } catch (value) {
+    showError(value)
+  } finally { departmentSaving.value = false }
 }
 function assignmentTargets() {
   const byID = new Map(engineerDirectory.value.map((item) => [item.person_id, item]))
@@ -2038,6 +2156,12 @@ function changeCustomerStatus(action) {
 }
 async function submitOpportunity() {
   syncOpportunitySelections()
+  if (!opportunityTypeSelections.value.length || !opportunitySourceSelections.value.length) {
+    error.value = !opportunityTypeSelections.value.length && !opportunitySourceSelections.value.length
+      ? '请至少选择一个商机类型和一个来源。'
+      : !opportunityTypeSelections.value.length ? '请至少选择一个商机类型。' : '请至少选择一个来源。'
+    return
+  }
   actionLoading.value = true; resetMessages()
   try {
     if (opportunityEditMode.value) {
@@ -2124,6 +2248,7 @@ async function submitPresale({ openDetail = true, refreshList = true } = {}) {
     error.value = '售前内部流程当前不可用，不会受理新的售前申请。'
     return null
   }
+  if (!presaleForm.description.trim()) { error.value = '需求说明不能为空，请填写售前支持需求与背景。'; return null }
   if (presaleForm.venue === 'ONSITE' && !presaleForm.service_address.trim()) { error.value = '现场支持必须填写服务地址。'; return null }
   const opportunityID = Number(presaleForm.opportunity_id)
   if (!Number.isSafeInteger(opportunityID) || opportunityID <= 0) { error.value = '请选择有效的关联商机。'; return null }
@@ -2243,11 +2368,8 @@ async function runPresale(action) {
   // 覆盖新详情；幂等状态仍按真实成功结果清理。
   const isCurrentMutation = () => mutationContext === presaleMutationContextSequence.value && Number(selectedPresale.value?.request?.id) === Number(id)
   try {
-    if (action === 'assignments') presaleResult.value = await getAssignments(id)
-    if (action === 'history') {
-      presaleResult.value = await getApprovalHistory(id)
-      void resolveOwnerNames((presaleResult.value || []).map((item) => item.approver_id || item.actor_id))
-    }
+    if (action === 'assignments') { await loadPresaleInspector('assignments'); return }
+    if (action === 'history') { await loadPresaleInspector('history'); return }
     if (action === 'assign') {
       if (!assignmentReason.value.trim()) { error.value = '改派原因必填。'; return }
       const targets = assignmentTargets()
@@ -2347,13 +2469,13 @@ onMounted(async () => {
         <p class="console-nav-label">消息中心</p>
         <button v-if="canReadNotifications" class="console-nav-item" type="button" :class="{ active: activeSection === 'notifications' }" @click="navigate('notifications')"><ConsoleIcon name="bell" /><span>个人通知</span><span v-if="notificationUnreadCount" class="crm-nav-badge">{{ notificationUnreadCount > 99 ? '99+' : notificationUnreadCount }}</span></button>
         <p class="console-nav-label">平台能力</p>
-        <button class="console-nav-item" type="button" @click="navigatePlatform"><ConsoleIcon name="logout" /><span>返回统一门户</span><span class="console-nav-note">平台</span></button>
+        <button class="console-nav-item" type="button" :disabled="isLoggingOut" @click="logoutSystem"><ConsoleIcon name="logout" /><span>{{ isLoggingOut ? '正在退出…' : '退出系统' }}</span></button>
       </nav>
       <div class="console-sidebar-note"><ConsoleIcon name="shield" /><span>统一身份认证已生效，菜单与操作由服务端权限控制。</span></div>
       <div class="console-sidebar-user">
         <span class="console-avatar" aria-hidden="true">{{ currentUserInitial }}</span>
         <span class="console-user-copy"><strong :title="currentUserLabel">{{ currentUserLabel }}</strong><small :title="currentRoleLabel">{{ currentRoleLabel }}</small></span>
-        <button class="console-logout" type="button" aria-label="返回统一门户" @click="navigatePlatform"><ConsoleIcon name="logout" /></button>
+        <button class="console-logout" type="button" :disabled="isLoggingOut" aria-label="退出系统" @click="logoutSystem"><ConsoleIcon name="logout" /></button>
       </div>
     </aside>
     <main class="console-main crm-main">
@@ -2400,10 +2522,10 @@ onMounted(async () => {
           <section class="crm-business-picker">
             <label>查找商机<input v-model.trim="presaleOpportunityKeyword" type="search" placeholder="商机编号或名称" @keyup.enter.prevent="loadPresaleOpportunityOptions"></label>
             <button type="button" :disabled="presaleOpportunityOptionsLoading" @click="loadPresaleOpportunityOptions">{{ presaleOpportunityOptionsLoading ? '查询中…' : '查询商机' }}</button>
-            <label>关联商机<select v-model="presaleForm.opportunity_id" required :disabled="presaleOpportunityOptionsLoading || !presaleOpportunityOptions.length"><option value="" disabled>请选择商机</option><option v-for="opportunity in presaleOpportunityOptions" :key="opportunity.id" :value="String(opportunity.id)">{{ opportunity.name }}（{{ opportunity.opportunity_no }}）</option></select></label>
+            <label>关联商机 *<select v-model="presaleForm.opportunity_id" required :disabled="presaleOpportunityOptionsLoading || !presaleOpportunityOptions.length"><option value="" disabled>请选择商机</option><option v-for="opportunity in presaleOpportunityOptions" :key="opportunity.id" :value="String(opportunity.id)">{{ opportunity.name }}（{{ opportunity.opportunity_no }}）</option></select></label>
             <small v-if="presaleOpportunityOptionsError" class="crm-alert error" role="alert">{{ presaleOpportunityOptionsError }}</small><small v-else-if="!presaleOpportunityOptionsLoading && !presaleOpportunityOptions.length" class="crm-note">暂无可关联商机。</small><small v-else-if="presaleOpportunityOptionsTotal > presaleOpportunityOptions.length" class="crm-note">当前显示前 {{ presaleOpportunityOptions.length }} 条，请按编号或名称缩小范围。</small>
           </section>
-          <div class="crm-presale-form-row"><label>支持方式<select v-model="presaleForm.venue"><option value="REMOTE">远程</option><option value="ONSITE">现场</option></select></label><label>紧急程度<select v-model="presaleForm.urgency"><option value="NORMAL">普通</option><option value="URGENT">紧急</option></select></label></div><label v-if="presaleForm.venue === 'ONSITE'">服务地址<input v-model.trim="presaleForm.service_address" required maxlength="500" placeholder="客户现场详细地址"></label><div class="crm-presale-form-row"><label>联系人<input v-model.trim="presaleForm.contact_name" required maxlength="100" placeholder="客户对接人姓名 / 部门"></label><label>联系电话<input v-model.trim="presaleForm.contact_phone" required maxlength="64" placeholder="客户对接人联系电话"></label></div><label>需求说明<textarea v-model.trim="presaleForm.description" minlength="10" maxlength="2000" required placeholder="请描述售前支持需求与背景"></textarea></label><div class="crm-presale-form-row"><label>预计开始<input v-model="presaleForm.expected_start" type="datetime-local" required></label><label>预计结束<input v-model="presaleForm.expected_end" type="datetime-local" required></label></div><div class="crm-actions"><button type="button" :disabled="presaleCreateLoading" @click="closePresaleCreatePage">取消</button><button class="primary" :disabled="presaleCreateLoading || !presaleForm.opportunity_id">{{ presaleCreateLoading ? '提交中…' : '提交申请' }}</button></div>
+          <div class="crm-presale-form-row"><label>支持方式 *<select v-model="presaleForm.venue" required><option value="REMOTE">远程</option><option value="ONSITE">现场</option></select></label><label>紧急程度 *<select v-model="presaleForm.urgency" required><option value="NORMAL">普通</option><option value="URGENT">紧急</option></select></label></div><label v-if="presaleForm.venue === 'ONSITE'">服务地址 *<input v-model.trim="presaleForm.service_address" required maxlength="500" placeholder="客户现场详细地址"></label><div class="crm-presale-form-row"><label>联系人 *<input v-model.trim="presaleForm.contact_name" required maxlength="100" placeholder="客户对接人姓名 / 部门"></label><label>联系电话 *<input v-model.trim="presaleForm.contact_phone" required maxlength="64" placeholder="客户对接人联系电话"></label></div><label>需求说明 *<textarea v-model.trim="presaleForm.description" required placeholder="请描述售前支持需求与背景"></textarea></label><div class="crm-presale-form-row"><label>预计开始 *<input v-model="presaleForm.expected_start" type="datetime-local" required></label><label>预计结束 *<input v-model="presaleForm.expected_end" type="datetime-local" required></label></div><div class="crm-actions"><button type="button" :disabled="presaleCreateLoading" @click="closePresaleCreatePage">取消</button><button class="primary" :disabled="presaleCreateLoading || !presaleForm.opportunity_id">{{ presaleCreateLoading ? '提交中…' : '提交申请' }}</button></div>
         </form>
       </section>
       </section>
@@ -2441,9 +2563,9 @@ onMounted(async () => {
           <form class="console-form-grid crm-report-filters" @submit.prevent="loadReports">
             <label class="console-form-item"><span>开始时间 *</span><input v-model="reportFilters.from" type="datetime-local" required></label>
             <label class="console-form-item"><span>结束时间 *</span><input v-model="reportFilters.to" type="datetime-local" required></label>
-            <label class="console-form-item"><span>归属组织</span><select v-model="reportFilters.organization_id" :disabled="reportFilterOptionsLoading"><option value="">全部可见组织</option><option v-for="organization in reportOrganizationOptions" :key="organization.organization_id" :value="organization.organization_id">{{ organization.organization_name }}</option></select></label>
-            <label class="console-form-item"><span>参与人员</span><select v-model="reportFilters.person_id" :disabled="reportFilterOptionsLoading"><option value="">全部可见人员</option><option v-for="item in presaleFilterOptions.assignees" :key="item.value" :value="item.value">{{ presalePersonOptionLabel(item) }}</option></select></label>
-            <label class="console-form-item"><span>关联商机</span><select v-model="reportFilters.opportunity_id" :disabled="reportFilterOptionsLoading"><option value="">全部可见商机</option><option v-for="item in presaleFilterOptions.opportunities" :key="item.value" :value="String(item.value)">{{ item.label }}</option></select></label>
+            <label class="console-form-item"><span>归属组织</span><select v-model="reportFilters.organization_id" :disabled="reportFilterOptionsLoading" @change="onReportOrganizationChange"><option value="">全部可见组织</option><option v-for="organization in reportOrganizationOptions" :key="organization.organization_id" :value="organization.organization_id">{{ organization.organization_name }}</option></select></label>
+            <label class="console-form-item"><span>参与人员</span><select v-model="reportFilters.person_id" :disabled="reportFilterOptionsLoading" @change="onReportPersonChange"><option value="">全部可见人员</option><option v-for="item in reportFilterOptions.assignees" :key="item.value" :value="item.value">{{ presalePersonOptionLabel(item) }}</option></select></label>
+            <label class="console-form-item"><span>关联商机</span><select v-model="reportFilters.opportunity_id" :disabled="reportFilterOptionsLoading" @change="loadReportFilterOptions"><option value="">全部可见商机</option><option v-for="item in reportFilterOptions.opportunities" :key="item.value" :value="String(item.value)">{{ item.label }}</option></select></label>
             <label class="console-form-item"><span>分布维度</span><select v-model="reportFilters.dimension"><option value="PERSON">人员</option><option value="DEPARTMENT">部门</option><option value="OPPORTUNITY">商机</option></select></label>
             <div class="crm-report-filter-actions"><button class="console-button primary" type="submit" :disabled="reportLoading">{{ reportLoading ? '加载中…' : '查询' }}</button><button class="console-button ghost" type="button" @click="exportReport">导出</button></div>
           </form>
@@ -2512,8 +2634,8 @@ onMounted(async () => {
             <select v-model="opportunityForm.customer_id" required :disabled="opportunityCustomerOptionsLoading || !opportunityCustomerOptions.length"><option value="" disabled>{{ opportunityCustomerOptionsLoading ? '正在加载客户…' : '请选择客户' }}</option><option v-for="customer in opportunityCustomerOptions" :key="customer.id" :value="String(customer.id)">{{ customer.name }}（{{ customer.customer_no }}）· {{ customer.industry }} / {{ customer.region }}</option></select>
             <small v-if="opportunityCustomerOptionsError" class="crm-alert error" role="alert">{{ opportunityCustomerOptionsError }}</small><small v-else-if="!opportunityCustomerOptionsLoading && !opportunityCustomerOptions.length" class="crm-note">暂无符合条件的有效客户，请先在客户管理中创建客户。</small><small v-else-if="opportunityCustomerOptionsTotal > opportunityCustomerOptions.length" class="crm-note">当前显示前 {{ opportunityCustomerOptions.length }} 条，请输入关键词缩小范围。</small>
           </div>
-          <label class="console-form-item"><span>商机类型 *（可多选）</span><select v-model="opportunityTypeSelections" multiple required size="4" @change="syncOpportunitySelections"><option v-for="item in opportunityTypeSelectOptions" :key="item" :value="item">{{ item }}</option></select><small class="crm-note">按住 Ctrl/⌘ 可多选</small></label>
-          <label class="console-form-item"><span>来源 *（可多选）</span><select v-model="opportunitySourceSelections" multiple required size="4" @change="syncOpportunitySelections"><option v-for="item in opportunitySourceSelectOptions" :key="item" :value="item">{{ item }}</option></select><small class="crm-note">按住 Ctrl/⌘ 可多选</small></label>
+          <fieldset class="console-form-item crm-opportunity-multi-field"><legend>商机类型 *（可多选）</legend><div class="crm-opportunity-check-list" aria-label="商机类型"><label v-for="item in opportunityTypeSelectOptions" :key="item" class="crm-opportunity-check-item"><input v-model="opportunityTypeSelections" type="checkbox" :value="item" @change="syncOpportunitySelections"><span>{{ item }}</span></label></div><small class="crm-note">已选择 {{ opportunityTypeSelections.length }} 项，点击复选框即可多选。</small></fieldset>
+          <fieldset class="console-form-item crm-opportunity-multi-field"><legend>来源 *（可多选）</legend><div class="crm-opportunity-check-list" aria-label="来源"><label v-for="item in opportunitySourceSelectOptions" :key="item" class="crm-opportunity-check-item"><input v-model="opportunitySourceSelections" type="checkbox" :value="item" @change="syncOpportunitySelections"><span>{{ item }}</span></label></div><small class="crm-note">已选择 {{ opportunitySourceSelections.length }} 项，点击复选框即可多选。</small></fieldset>
           <label class="console-form-item"><span>预计金额 *</span><input v-model="opportunityForm.expected_amount" required inputmode="decimal" autocomplete="off" placeholder="请输入预计金额"></label>
           <label class="console-form-item"><span>预计签单日期 *</span><input v-model="opportunityForm.expected_sign_date" type="date" required></label>
           <label class="console-form-item full"><span>需求摘要 *</span><textarea v-model="opportunityForm.requirement_summary" required rows="3" placeholder="请概述客户需求和项目范围"></textarea></label>
@@ -2831,7 +2953,7 @@ onMounted(async () => {
           <label class="console-form-item"><span>联系电话 *</span><input v-model.trim="presaleForm.contact_phone" required maxlength="64" autocomplete="tel" inputmode="tel" placeholder="请输入联系电话"></label>
           <label class="console-form-item"><span>预计开始 *</span><input v-model="presaleForm.expected_start" type="datetime-local" required></label>
           <label class="console-form-item"><span>预计结束 *</span><input v-model="presaleForm.expected_end" type="datetime-local" required></label>
-          <label class="console-form-item full"><span>需求说明 *</span><textarea v-model.trim="presaleForm.description" rows="5" minlength="10" maxlength="2000" required placeholder="请描述支持背景、目标和交付预期"></textarea><small>10–2000 字；提交后进入售前审批流程，不会自动修改商机阶段。</small></label>
+          <label class="console-form-item full"><span>需求说明 *</span><textarea v-model.trim="presaleForm.description" rows="5" required placeholder="请描述支持背景、目标和交付预期"></textarea><small>需求说明必须填写内容，不限制字数；提交后进入售前审批流程。</small></label>
         </form>
         <footer>
           <button class="console-button ghost" type="button" :disabled="presaleCreateLoading" @click="closeOpportunityPresaleCreate">取消</button>
@@ -2890,7 +3012,14 @@ onMounted(async () => {
           <p v-else-if="presaleActionsError" class="crm-alert error" role="alert">{{ presaleActionsError }} <button class="console-button ghost small" type="button" @click="refreshPresaleActions(selectedPresale.request.id)">重试</button></p>
           <p v-else>{{ authoritativePresaleActions.map(actionText).join('、') || '当前仅可查看' }}。多人任务在所有当前执行人各有至少一笔有效工时后自动完成。</p>
           <p v-if="selectedPresale.request.status === 'PENDING_APPROVAL'">审批操作在客户与商机系统内按流程节点和当前登录审批人实时校验；浏览器不会接收或提交内部任务 ID。</p>
-          <div v-if="selectedPresale.request.status === 'APPROVED_PENDING_ASSIGNMENT' && (crmSession?.roles || []).includes('technical_director')" class="crm-presale-action-buttons"><select v-model="selectedExecutionDepartmentID" @focus="loadExecutionDepartments"><option value="">选择执行部门</option><option v-for="item in executionDepartments" :key="item.id" :value="item.id">{{ item.name }}</option></select><button class="console-button primary small" type="button" :disabled="departmentSaving || !selectedExecutionDepartmentID" @click="saveExecutionDepartment">{{ departmentSaving ? '保存中…' : '保存部门' }}</button></div><div class="crm-presale-action-buttons"><button class="console-button ghost small" type="button" @click="runPresale('assignments')">查看指派</button><button class="console-button ghost small" type="button" @click="runPresale('history')">审批历史</button><button v-if="authoritativePresaleActions.includes('APPROVE')" class="console-button primary small" type="button" :disabled="presaleMutationLoading" @click="runPresaleDecision('approve')">通过审批</button><button v-if="authoritativePresaleActions.includes('REJECT')" class="console-button danger small" type="button" :disabled="presaleMutationLoading" @click="runPresaleDecision('reject')">驳回审批</button><button v-if="authoritativePresaleActions.includes('CANCEL')" class="console-button danger small" type="button" @click="runPresaleDecision('cancel')">取消申请</button><button v-if="authoritativePresaleActions.includes('ASSIGN')" class="console-button ghost small" type="button" @click="openEngineerPicker">从基础平台选择执行人</button><button v-if="['REJECTED', 'CANCELLED'].includes(selectedPresale.request.status) && canCreatePresale && presaleRequestSubmissionAvailable" class="console-button primary small" type="button" @click="reopenPresaleApproval">重新发起审批</button></div>
+          <div v-if="selectedPresale.request.status === 'APPROVED_PENDING_ASSIGNMENT' && (crmSession?.roles || []).includes('technical_director')" class="crm-presale-action-buttons"><select v-model="selectedExecutionDepartmentID" @focus="loadExecutionDepartments"><option value="">选择执行部门</option><option v-for="item in executionDepartments" :key="item.id" :value="item.id">{{ item.name }}</option></select><button class="console-button primary small" type="button" :disabled="departmentSaving || !selectedExecutionDepartmentID" @click="saveExecutionDepartment">{{ departmentSaving ? '保存中…' : '保存部门' }}</button></div><div class="crm-presale-action-buttons"><button class="console-button ghost small" type="button" :disabled="presaleInspectorLoading" @click="runPresale('assignments')">{{ presaleInspectorLoading && presaleInspectorPanel === 'assignments' ? '加载指派中…' : '查看指派' }}</button><button class="console-button ghost small" type="button" :disabled="presaleInspectorLoading" @click="runPresale('history')">{{ presaleInspectorLoading && presaleInspectorPanel === 'history' ? '加载审批历史…' : '审批历史' }}</button><button v-if="authoritativePresaleActions.includes('APPROVE')" class="console-button primary small" type="button" :disabled="presaleMutationLoading" @click="runPresaleDecision('approve')">通过审批</button><button v-if="authoritativePresaleActions.includes('REJECT')" class="console-button danger small" type="button" :disabled="presaleMutationLoading" @click="runPresaleDecision('reject')">驳回审批</button><button v-if="authoritativePresaleActions.includes('CANCEL')" class="console-button danger small" type="button" @click="runPresaleDecision('cancel')">取消申请</button><button v-if="authoritativePresaleActions.includes('ASSIGN')" class="console-button ghost small" type="button" @click="openEngineerPicker">从基础平台选择执行人</button><button v-if="['REJECTED', 'CANCELLED'].includes(selectedPresale.request.status) && canCreatePresale && presaleRequestSubmissionAvailable" class="console-button primary small" type="button" @click="reopenPresaleApproval">重新发起审批</button></div>
+        </section>
+        <section v-if="presaleInspectorPanel" class="console-detail-section crm-presale-inspector" aria-live="polite">
+          <div class="crm-subsection-heading"><div><h3>{{ presaleInspectorPanel === 'assignments' ? '指派记录' : '审批历史' }}</h3><p>{{ presaleInspectorPanel === 'assignments' ? '展示当前及历史执行人、指派时间和变更原因。' : '展示每个审批节点的结果、审批人和审批意见。' }}</p></div><button class="console-button ghost small" type="button" :disabled="presaleInspectorLoading" @click="loadPresaleInspector(presaleInspectorPanel)">刷新</button></div>
+          <p v-if="presaleInspectorLoading" class="crm-note" role="status">正在加载，请稍候…</p>
+          <p v-else-if="presaleInspectorError" class="crm-alert error" role="alert">{{ presaleInspectorError }} <button class="console-button ghost small" type="button" @click="loadPresaleInspector(presaleInspectorPanel)">重试</button></p>
+          <template v-else-if="presaleInspectorPanel === 'assignments'"><div v-if="presaleAssignments.length" class="crm-presale-record-list"><article v-for="item in presaleAssignments" :key="item.id" class="crm-presale-record"><div><strong>{{ item.assignee_name_snapshot || ownerLabel(item.assignee_id) }}</strong><span>{{ item.assignee_role || '执行人员' }} · {{ item.is_current ? '当前指派' : '历史指派' }}</span></div><dl><div><dt>开始</dt><dd>{{ formatDate(item.assigned_at) }}</dd></div><div><dt>结束</dt><dd>{{ item.ended_at ? formatDate(item.ended_at) : '—' }}</dd></div><div><dt>变更原因</dt><dd>{{ item.change_reason || '—' }}</dd></div></dl></article></div><p v-else class="crm-empty compact">暂无指派记录</p></template>
+          <template v-else><div v-if="presaleApprovalHistory.length" class="crm-presale-record-list"><article v-for="item in presaleApprovalHistory" :key="item.id" class="crm-presale-record"><div><strong>节点 {{ item.node }} · {{ approvalResultText(item.result) }}</strong><span>{{ item.approver_name_snapshot || ownerLabel(item.approver_id) }} · {{ formatDate(item.approved_at) }}</span></div><p>{{ item.comment || '未填写审批意见' }}</p></article></div><p v-else class="crm-empty compact">暂无审批历史</p></template>
         </section>
         <section v-if="authoritativePresaleActions.includes('ADD_PROGRESS')" class="console-detail-section crm-presale-entry-card">
           <h3>登记进度</h3><p>补充本次工作的最新进展，参考链接仅允许 HTTPS。</p>

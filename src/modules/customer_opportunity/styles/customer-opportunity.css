@@ -459,7 +459,14 @@
 .crm-customer-dialog__body { padding: 20px 24px 6px; }
 .crm-opportunity-dialog { width: min(860px, 100%); }
 .crm-opportunity-dialog__body { padding: 20px 24px 4px; }
-.crm-opportunity-dialog select[multiple] { min-height: 112px; padding: 6px 8px; background-image: none; }
+.crm-opportunity-multi-field { min-width: 0; margin: 0; padding: 0; border: 0; }
+.crm-opportunity-multi-field legend { display: block; width: 100%; margin-bottom: 7px; color: var(--text); font-size: 13px; font-weight: 600; }
+.crm-opportunity-check-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px 10px; min-height: 112px; max-height: 174px; overflow-y: auto; padding: 10px; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
+.crm-opportunity-check-item { display: flex; align-items: flex-start; gap: 8px; min-width: 0; padding: 7px 8px; border-radius: 5px; color: var(--text); font-size: 13px; line-height: 1.35; cursor: pointer; }
+.crm-opportunity-check-item:hover { background: #f1f5f9; }
+.crm-opportunity-check-item input { width: 16px; height: 16px; flex: 0 0 auto; margin: 0; accent-color: var(--p); }
+.crm-opportunity-check-item span { overflow-wrap: anywhere; }
+.crm-opportunity-multi-field .crm-note { display: block; margin-top: 7px; }
 .crm-opportunity-presale-create-backdrop { z-index: 90; }
 .crm-opportunity-presale-create-dialog { width: min(780px, 100%); max-height: min(820px, calc(100vh - 40px)); }
 .crm-opportunity-presale-create-context { margin-bottom: 0; }
@@ -1108,8 +1115,10 @@
 }
 
 /* 售前详情沿用 console 头尾壳层，业务区块按正文 24px 轨道对齐；表单动作横跨双列栅格。 */
-.crm-presale-console-detail { width: min(1040px, 100%); max-height: min(860px, calc(100vh - 40px)); }
-.crm-presale-summary { margin-top: 20px; }
+.crm-presale-console-detail { width: min(1120px, 100%); max-height: min(900px, calc(100vh - 32px)); overflow: auto; background: linear-gradient(180deg, #f8fbff 0, #fff 230px); }
+.crm-presale-console-detail > header { position: sticky; top: 0; z-index: 2; background: rgba(255, 255, 255, .94); backdrop-filter: blur(12px); border-bottom: 1px solid #e5edf7; }
+.crm-presale-summary { margin-top: 20px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.crm-presale-summary > div { min-height: 76px; }
 .crm-presale-phone__actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 8px; }
 .crm-presale-phone small { display: block; margin-top: 7px; }
 .crm-presale-actions,
@@ -1124,6 +1133,22 @@
 }
 .crm-presale-actions { background: #f8fafc; }
 .crm-presale-action-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.crm-presale-actions > h3,
+.crm-presale-inspector h3,
+.crm-presale-timeline h3,
+.crm-presale-worklogs h3 { margin: 0; color: #0f172a; font-size: 16px; }
+.crm-presale-actions > p { line-height: 1.65; }
+.crm-presale-inspector { background: linear-gradient(135deg, #f8fbff 0, #fff 72%); }
+.crm-presale-record-list { display: grid; gap: 10px; margin-top: 14px; }
+.crm-presale-record { display: grid; gap: 10px; padding: 14px 16px; border: 1px solid #dbe7f5; border-radius: 12px; background: #fff; box-shadow: 0 4px 14px rgba(30, 64, 175, .05); }
+.crm-presale-record > div:first-child { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.crm-presale-record strong { color: #172554; }
+.crm-presale-record span,
+.crm-presale-record p { margin: 0; color: #64748b; font-size: 12px; line-height: 1.6; }
+.crm-presale-record dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 0; }
+.crm-presale-record dl > div { padding: 9px 10px; border-radius: 9px; background: #f8fafc; }
+.crm-presale-record dt { color: #94a3b8; font-size: 11px; }
+.crm-presale-record dd { margin: 3px 0 0; color: #334155; font-size: 12px; overflow-wrap: anywhere; }
 .crm-presale-entry-card > p { margin-bottom: 14px; }
 .crm-presale-entry-card form { margin-top: 14px; }
 .crm-presale-form-actions { display: flex; grid-column: 1 / -1; justify-content: flex-end; }
@@ -1283,9 +1308,12 @@
   .crm-presale-summary > div { border-right: 0 !important; border-bottom: 1px solid #e2e8f0 !important; }
   .crm-presale-summary > div:last-child { border-bottom: 0 !important; }
   .crm-presale-actions,
+  .crm-presale-inspector,
   .crm-presale-timeline,
   .crm-presale-entry-card,
   .crm-presale-worklogs { margin: 18px 18px 0; }
+  .crm-presale-record > div:first-child { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .crm-presale-record dl { grid-template-columns: 1fr; }
   .crm-report-filter-actions,
   .crm-presale-form-actions { justify-content: stretch; }
   .crm-report-filter-actions .console-button,

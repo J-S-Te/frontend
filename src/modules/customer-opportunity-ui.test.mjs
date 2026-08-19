@@ -3,6 +3,7 @@ import test from 'node:test'
 import { readFile } from 'node:fs/promises'
 
 const view = await readFile(new URL('./customer_opportunity/views/CustomerOpportunityView.vue', import.meta.url), 'utf8')
+const apiSource = await readFile(new URL('./customer_opportunity/api/presale.js', import.meta.url), 'utf8')
 const style = await readFile(new URL('./customer_opportunity/styles/customer-opportunity.css', import.meta.url), 'utf8')
 const approvalPanel = await readFile(new URL('./customer_opportunity/components/PresaleApprovalRulesPanel.vue', import.meta.url), 'utf8')
 const ownerSelector = await readFile(new URL('./customer_opportunity/components/OwnerSelector.vue', import.meta.url), 'utf8')
@@ -59,6 +60,16 @@ test('商机列表、七阶段看板和详情统一展示已签约合同数量',
   assert.match(view, /<dt>累计已签约合同<\/dt><dd>\{\{ formatSignedContractCount\(selectedOpportunity\.signed_contract_count\) \}\}<\/dd>/)
   assert.match(view, /selectedOpportunityOwnerOrgID/)
   assert.match(view, /selectedOpportunity\.value = \{ \.\.\.detail, owner_org_id: '基础平台组织' \}/)
+})
+
+test('商机详情空响应时清空旧数据并提示错误', () => {
+  assert.match(view, /const opportunityDetailLoadSequence = ref\(0\)/)
+  assert.match(view, /const loadSequence = \+\+opportunityDetailLoadSequence\.value/)
+  assert.match(view, /selectedOpportunity\.value = null/)
+  assert.match(view, /const message = '商机详情返回异常，请返回列表重试。'/)
+  assert.match(view, /if \(!detail \|\| typeof detail !== 'object' \|\| Array\.isArray\(detail\)\)/)
+  assert.match(view, /error\.value = message/)
+  assert.match(view, /if \(loadSequence !== opportunityDetailLoadSequence\.value\) return/)
 })
 
 test('商机和售前核心表单统一使用大系统 console 弹窗规范', () => {
@@ -541,11 +552,13 @@ test('新建商机从客户管理加载可见有效客户且不允许手填客�
   assert.equal(requests[0].url, '/customer-opportunity/api/v1/customers?keyword=%E7%A4%BA%E4%BE%8B%E5%AE%A2%E6%88%B7&status=ACTIVE&page=1&page_size=100&sort_by=name&sort_order=asc')
 })
 
-test('新建商机类型和来源使用受控多选下拉菜单', () => {
+test('新建商机类型和来源使用受控勾选多选', () => {
   assert.match(view, /const opportunityTypeOptions = Object\.freeze\(/)
   assert.match(view, /const opportunitySourceOptions = Object\.freeze\(/)
-  assert.match(view, /v-model="opportunityTypeSelections" multiple/)
-  assert.match(view, /v-model="opportunitySourceSelections" multiple/)
+  assert.match(view, /v-model="opportunityTypeSelections" type="checkbox"/)
+  assert.match(view, /v-model="opportunitySourceSelections" type="checkbox"/)
+  assert.match(view, /crm-opportunity-check-list/)
+  assert.match(view, /请至少选择一个商机类型和一个来源。/)
   for (const value of ['等保审查', '密码应用安全性评估', '网络安全攻防演内容', '安全运维', '客户主动咨询', '公开招标', '内部转介']) {
     assert.match(view, new RegExp(value))
   }
@@ -1149,23 +1162,10 @@ test('客户导入提交可显式复用同一内存幂等键', async (t) => {
   assert.doesNotMatch(view, /localStorage|sessionStorage/)
 })
 
-test('历史 PMS 人员接口仅保留协议兼容，售前主界面不再调用', async (t) => {
-  const originalFetch = globalThis.fetch
-  t.after(() => { globalThis.fetch = originalFetch })
-  const requests = []
-  globalThis.fetch = async (url, options = {}) => {
-    requests.push({ url, options })
-    return jsonResponse({ items: [], job_no: 'PES202608010001', status: 'PENDING' })
-  }
-  await api.listPresaleEngineers({ keyword: '张', department: '交付', role: 'project_manager', skill: '等保', page: 1, page_size: 100 })
-  await api.syncPresaleEngineers()
-  assert.deepEqual(requests.map((item) => item.url), [
-    '/customer-opportunity/api/v1/presale/engineers?keyword=%E5%BC%A0&department=%E4%BA%A4%E4%BB%98&role=project_manager&skill=%E7%AD%89%E4%BF%9D&page=1&page_size=100',
-    '/customer-opportunity/api/v1/presale/engineers/sync',
-  ])
-  assert.equal(requests[1].options.method, 'POST')
-  assert.ok(requests[1].options.headers['Idempotency-Key'])
+test('已废弃的 PMS 人员接口不再暴露，售前人员统一来自基础平台目录', () => {
   assert.doesNotMatch(view, /listPresaleEngineers|syncPresaleEngineers/)
+  assert.doesNotMatch(apiSource, /listPresaleEngineers|syncPresaleEngineers/)
+  assert.match(view, /listOwnerDirectory/)
 })
 
 test('内部人员选择器使用基础平台授权目录并展示替换差异', () => {
@@ -1192,6 +1192,10 @@ test('售前超时预警接入规则、未读、已读和聚合标记界面', ()
 
 test('售前投入报表提供筛选、KPI、图形和等价数值表', () => {
   assert.match(view, /getPresaleReportSummary/)
+  assert.match(view, /function reportDateParam\(value\)/)
+  assert.match(view, /function normalizeReportSummary\(value\)/)
+  assert.match(view, /function normalizeReportRows\(value\)/)
+  assert.match(view, /reportDistribution\.value = normalizeReportRows\(distribution\)/)
   assert.match(view, /投入小时/)
   assert.match(view, /商机覆盖率/)
   assert.match(view, /自动完成任务/)
@@ -1199,6 +1203,12 @@ test('售前投入报表提供筛选、KPI、图形和等价数值表', () => {
   assert.match(view, /趋势数值表（UTC 日）/)
   assert.match(view, /分布数值表/)
   assert.match(view, /异步导出尚未接通对象存储与导出 Worker/)
+})
+
+test('售前投入报表按归属组织刷新参与人员和商机选项', () => {
+  assert.match(view, /function onReportOrganizationChange\(\)/)
+  assert.match(view, /reportFilters\.organization_id"[^>]*@change="onReportOrganizationChange"/)
+  assert.match(view, /reportFilters\.person_id = ''[\s\S]*reportFilters\.opportunity_id = ''[\s\S]*loadReportFilterOptions\(\)/)
 })
 
 test('售前投入报表调用真实三类查询和失败关闭的导出路由', async (t) => {
@@ -1243,7 +1253,7 @@ test('商机负责人和团队维护均使用基础平台人员目录', () => {
 test('客户与商机关联操作使用业务选择器而不是手填 ID', () => {
   assert.match(view, /<label v-if="!customerOwnerOptionsError">负责人<select v-model="customerFilters\.owner_id"/)
   assert.match(view, /<label>目标客户<select v-model="customerMergeForm\.target_customer_id"/)
-  assert.match(view, /<label>关联商机<select v-model="presaleForm\.opportunity_id"/)
+  assert.match(view, /<label>关联商机 \*<select v-model="presaleForm\.opportunity_id"/)
   assert.match(view, /<span>归属组织<\/span><select v-model="reportFilters\.organization_id"/)
   assert.match(view, /<span>参与人员<\/span><select v-model="reportFilters\.person_id"/)
   assert.match(view, /<span>关联商机<\/span><select v-model="reportFilters\.opportunity_id"/)
@@ -1255,6 +1265,17 @@ test('客户与商机关联操作使用业务选择器而不是手填 ID', () =>
   assert.doesNotMatch(view, /<span>组织 ID<\/span><input/)
   assert.doesNotMatch(view, /<span>人员 ID<\/span><input/)
   assert.doesNotMatch(view, /<span>商机 ID<\/span><input/)
+})
+
+test('新建售前申请需求说明只要求有内容且必填项显示星标', () => {
+  assert.match(view, /if \(!presaleForm\.description\.trim\(\)\) \{ error\.value = '需求说明不能为空/)
+  assert.match(view, /<label>需求说明 \*<textarea v-model\.trim="presaleForm\.description"[^>]*required/)
+  assert.match(view, /<span>需求说明 \*<\/span><textarea v-model\.trim="presaleForm\.description"[^>]*required/)
+  assert.doesNotMatch(view, /presaleForm\.description" minlength=/)
+  assert.doesNotMatch(view, /presaleForm\.description"[^>]*maxlength=/)
+  for (const label of ['关联商机 *', '支持方式 *', '紧急程度 *', '联系人 *', '联系电话 *', '预计开始 *', '预计结束 *']) {
+    assert.match(view, new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+  }
 })
 
 test('负责人列表与详情会按需补全人员目录名字', () => {

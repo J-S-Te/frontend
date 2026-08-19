@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { AuthError, logoutCurrentSession } from '@/modules/platform/auth/api/auth'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import { subsystemAccessMessage } from '@/modules/shared/authz/sessionCompatibility'
 import { closeSubsystemTabOrFallback } from '@/modules/shared/utils/returnToPortal'
@@ -86,6 +87,7 @@ const drawerProject = ref(null)
 const createOpen = ref(false)
 const notificationOpen = ref(false)
 const toastMessage = ref('')
+const isLoggingOut = ref(false)
 const loading = ref(true)
 const loadError = ref('')
 const saving = ref(false)
@@ -207,6 +209,22 @@ function returnToUnifiedPortal() {
   notificationOpen.value = false
   closeSubsystemTabOrFallback(window, () => router.replace({ name: 'portal' }))
 }
+async function logoutSystem() {
+  if (isLoggingOut.value) return
+  isLoggingOut.value = true
+  try {
+    await logoutCurrentSession()
+    await router.replace({ name: 'login', query: { reason: 'session-ended' } })
+  } catch (error) {
+    if (error instanceof AuthError && error.status === 401) {
+      await router.replace({ name: 'login', query: { reason: 'session-ended' } })
+      return
+    }
+    showToast(error?.message || '退出系统失败，请稍后重试。')
+  } finally {
+    isLoggingOut.value = false
+  }
+}
 
 function showToast(message) {
   toastMessage.value = message
@@ -323,7 +341,7 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
         </div>
         <div class="pm-nav-group">
           <div class="pm-nav-label">平台能力</div>
-          <button class="pm-nav-item" type="button" @click="returnToUnifiedPortal"><ConsoleIcon name="logout" /><span>返回统一门户</span><em class="pm-platform-tag">平台</em></button>
+          <button class="pm-nav-item" type="button" :disabled="isLoggingOut" @click="logoutSystem"><ConsoleIcon name="logout" /><span>{{ isLoggingOut ? '正在退出…' : '退出系统' }}</span></button>
         </div>
       </nav>
       <div class="pm-sidebar-foot">V1.0 · 项目服务内容管理</div>
@@ -337,7 +355,7 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
         <div class="pm-top-tools">
           <button class="pm-icon-button" aria-label="全局搜索" @click="showToast('全局搜索即将开放')"><ConsoleIcon name="search" /></button>
           <button class="pm-icon-button pm-notification-button" aria-label="通知" @click="notificationOpen = !notificationOpen"><ConsoleIcon name="bell" /><em v-if="notificationCount">{{ notificationCount }}</em></button>
-          <div class="pm-user"><span>{{ currentUserName.slice(0, 1) }}</span><div><b>{{ currentUserName }}</b><small>{{ currentUserRole }}</small></div><button class="pm-user-return" type="button" aria-label="返回门户" @click="returnToUnifiedPortal"><ConsoleIcon name="logout" /></button></div>
+          <div class="pm-user"><span>{{ currentUserName.slice(0, 1) }}</span><div><b>{{ currentUserName }}</b><small>{{ currentUserRole }}</small></div><button class="pm-user-return" type="button" :disabled="isLoggingOut" aria-label="退出系统" @click="logoutSystem"><ConsoleIcon name="logout" /></button></div>
         </div>
         <div v-if="notificationOpen" class="pm-notifications">
           <div class="pm-popover-head"><b>业务待办</b><span>{{ notificationCount }} 条</span></div>

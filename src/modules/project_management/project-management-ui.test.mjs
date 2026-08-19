@@ -39,9 +39,11 @@ test('项目管理页面不再渲染原型模拟业务数据', () => {
   assert.match(source, /projectEvents\(drawerProject\)/)
 })
 
-test('返回统一门户会关闭门户打开的项目标签页并提供页内回退', () => {
-  assert.match(source, /closeSubsystemTabOrFallback\(window, \(\) => router\.replace\(\{ name: 'portal' \}\)\)/)
-  assert.equal((source.match(/@click="returnToUnifiedPortal"/g) || []).length, 2)
+test('项目系统退出会撤销会话而不是返回统一门户', () => {
+  assert.match(source, /logoutCurrentSession\(\)/)
+  assert.match(source, /router\.replace\(\{ name: 'login', query: \{ reason: 'session-ended' \} \}\)/)
+  assert.equal((source.match(/@click="logoutSystem"/g) || []).length, 2)
+  assert.match(source, /退出系统/)
 })
 
 test('项目管理页面对齐合同系统 UniLab UI 设计规范', () => {

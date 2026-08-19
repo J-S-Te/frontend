@@ -94,6 +94,28 @@ export async function loginWithPassword({
   }
 }
 
+export async function changeOwnPassword({ currentPassword, newPassword }) {
+  let response
+  try {
+    response = await fetch(`${API_BASE_URL}/auth/password/change`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-CSRF-Token': '1' },
+      body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+    })
+  } catch {
+    throw new AuthError('无法连接密码修改服务，请稍后重试。', { code: 'NETWORK_ERROR' })
+  }
+  const body = await readResponseBody(response)
+  if (!response.ok) {
+    throw new AuthError(body.message || body.msg || '密码修改失败，请检查当前密码和新密码。', {
+      status: response.status, code: body.code, traceId: body.request_id || body.trace_id || body.traceId,
+    })
+  }
+  advanceBrowserSessionGeneration()
+  return body
+}
+
 /**
  * 读取当前浏览器会话对应的已认证主体。
  *
