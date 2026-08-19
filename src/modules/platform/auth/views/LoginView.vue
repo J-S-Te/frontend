@@ -107,7 +107,8 @@ async function performPasswordLogin(replaceExistingSession = false) {
 
     // 跨源跳转只信任登录接口根据注册表返回的结果；URL 查询参数 return_to 始终走
     // 同源校验，不能借统一登录页构造开放重定向。
-    window.setTimeout(() => redirectTopLevel(redirectUrl, true), 450)
+    const nextUrl = data?.must_change_password ? '/force-password-change' : redirectUrl
+    window.setTimeout(() => redirectTopLevel(nextUrl, !data?.must_change_password), 450)
   } catch (error) {
     const traceText = error.traceId ? `（追踪号：${error.traceId}）` : ''
     concurrentSessionDetected.value = error.code === 'AUTH_CONCURRENT_SESSION'

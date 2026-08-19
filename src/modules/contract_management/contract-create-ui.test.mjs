@@ -8,10 +8,11 @@ const api = await readFile(new URL('./api/contract.js', import.meta.url), 'utf8'
 test('new contracts select an optional permission-scoped opportunity and have no manual number', () => {
   assert.match(source, /关联商机（选填）/)
   assert.match(source, /合同编号将在审批通过后自动生成/)
-  assert.match(source, /listMyOpportunities\(\)/)
+  assert.match(source, /listMyOpportunities\(\{ keyword: opportunityKeyword\.value, page, page_size: 50 \}\)/)
   assert.doesNotMatch(source, /v-model="newContract\.contract_number"/)
-  assert.match(api, /created_by: 'me'/)
-  assert.match(api, /page_size: '100'/)
+  assert.match(api, /keyword: String\(params\.keyword \|\| ''\)\.trim\(\)/)
+  assert.match(api, /page_size: String\(Math\.min\(100/)
+  assert.doesNotMatch(source, /filteredOpportunityOptions/)
 })
 
 test('opportunity selection fills customer context without calling an unsupported CRM draft endpoint', () => {

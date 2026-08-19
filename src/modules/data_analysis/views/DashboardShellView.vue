@@ -4,6 +4,7 @@
 // 总览、报告、财务看板经嵌入桥加载；合同、项目看板使用本地原生模型，避免空白 iframe。
 import { computed, onMounted, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
+import { AuthError, logoutCurrentSession } from "@/modules/platform/auth/api/auth"
 import ConsoleIcon from "@/modules/platform/shared/components/ConsoleIcon.vue"
 import { closeSubsystemTabOrFallback } from "@/modules/shared/utils/returnToPortal"
 import { getAuthMe, getEmbedToken, getContractDashboardSummary, getProjectDashboardSummary } from "../api/dataAnalysis"
@@ -16,6 +17,7 @@ import "@/modules/data_analysis/styles/data-analysis.css"
 
 const route = useRoute()
 const router = useRouter()
+const isLoggingOut = ref(false)
 
 const DASHBOARD_CODES = {
   overview: 'overview',
@@ -193,6 +195,22 @@ function returnToUnifiedPortal() {
   mobileMenuOpen.value = false
   closeSubsystemTabOrFallback(window, () => router.replace({ name: "portal" }))
 }
+async function logoutSystem() {
+  if (isLoggingOut.value) return
+  isLoggingOut.value = true
+  try {
+    await logoutCurrentSession()
+    await router.replace({ name: "login", query: { reason: "session-ended" } })
+  } catch (error) {
+    if (error instanceof AuthError && error.status === 401) {
+      await router.replace({ name: "login", query: { reason: "session-ended" } })
+      return
+    }
+    summaryError.value = error?.message || "退出系统失败，请稍后重试。"
+  } finally {
+    isLoggingOut.value = false
+  }
+}
 
 watch(() => section.value, (value) => {
   if (DASHBOARD_SECTIONS.includes(value)) {
@@ -247,13 +265,13 @@ onMounted(async () => {
         </div>
         <div class="da-nav-group">
           <div class="da-nav-label">平台能力</div>
-          <button class="da-nav-item" type="button" @click="returnToUnifiedPortal"><ConsoleIcon name="logout" /><span>返回统一门户</span><span class="da-platform-tag">平台</span></button>
+          <button class="da-nav-item" type="button" :disabled="isLoggingOut" @click="logoutSystem"><ConsoleIcon name="logout" /><span>{{ isLoggingOut ? "正在退出…" : "退出系统" }}</span></button>
         </div>
       </nav>
       <div class="da-sidebar-user">
         <span class="da-avatar">{{ currentUserInitial }}</span>
         <span class="da-sidebar-user-copy"><strong>{{ currentUserName }}</strong><small>{{ currentUserRole }}</small></span>
-        <button type="button" aria-label="返回门户" @click="returnToUnifiedPortal"><ConsoleIcon name="logout" /></button>
+        <button type="button" :disabled="isLoggingOut" aria-label="退出系统" @click="logoutSystem"><ConsoleIcon name="logout" /></button>
       </div>
     </aside>
     <div v-if="mobileMenuOpen" class="da-menu-mask" @click="mobileMenuOpen = false"></div>

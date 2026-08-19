@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import LoginView from '@/modules/platform/auth/views/LoginView.vue'
+import ForcePasswordChangeView from '@/modules/platform/auth/views/ForcePasswordChangeView.vue'
 import ForbiddenView from '@/modules/platform/auth/views/ForbiddenView.vue'
 import SubsystemAccessErrorView from '@/modules/platform/auth/views/SubsystemAccessErrorView.vue'
 import PlatformConsoleView from '@/modules/platform/views/PlatformConsoleView.vue'
@@ -60,6 +61,12 @@ const router = createRouter({
       name: 'login',
       component: LoginView,
       meta: { title: '登录' },
+    },
+    {
+      path: '/force-password-change',
+      name: 'force_password_change',
+      component: ForcePasswordChangeView,
+      meta: { title: '首次修改密码', requiresAuth: true, requiresPlatformSession: true },
     },
     {
       path: '/portal',

@@ -1,6 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { AuthError, logoutCurrentSession } from '@/modules/platform/auth/api/auth'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import ContractDocumentPreview from '@/modules/contract_management/components/ContractDocumentPreview.vue'
 import ContractReportsPanel from '@/modules/contract_management/components/ContractReportsPanel.vue'
@@ -202,10 +203,9 @@ const opportunityLoading = ref(false)
 const opportunityError = ref('')
 const opportunityKeyword = ref('')
 const opportunityOptions = ref([])
-const filteredOpportunityOptions = computed(() => {
-  const query = opportunityKeyword.value.trim().toLowerCase()
-  return opportunityOptions.value.filter((item) => !query || [item.name, item.title, item.opportunity_no, item.code, item.opportunity_code, item.customer_name].join(' ').toLowerCase().includes(query))
-})
+const opportunityPage = ref(1)
+const opportunityTotal = ref(0)
+const opportunityHasMore = ref(false)
 const canAddServiceItem = computed(() => newContract.value.service_items.length < 20 && Boolean(newContract.value.service_items.at(-1)?.service_type))
 
 const ruleFieldOptions = [
@@ -284,6 +284,7 @@ const selectedApproval = ref(null)
 const createDialogOpen = ref(false)
 const notificationOpen = ref(false)
 const toast = ref('')
+const isLoggingOut = ref(false)
 let toastTimer = 0
 let approvalRealtimeTimer = 0
 let approvalRealtimeBusy = false
@@ -362,6 +363,22 @@ function navigatePlatform(name) {
 function returnToUnifiedPortal() {
   mobileMenuOpen.value = false
   closeSubsystemTabOrFallback(window, () => router.replace({ name: 'portal' }))
+}
+async function logoutSystem() {
+  if (isLoggingOut.value) return
+  isLoggingOut.value = true
+  try {
+    await logoutCurrentSession()
+    await router.replace({ name: 'login', query: { reason: 'session-ended' } })
+  } catch (error) {
+    if (error instanceof AuthError && error.status === 401) {
+      await router.replace({ name: 'login', query: { reason: 'session-ended' } })
+      return
+    }
+    showToast(error?.message || '退出系统失败，请稍后重试。')
+  } finally {
+    isLoggingOut.value = false
+  }
 }
 
 function resetFilters() {
@@ -1186,17 +1203,38 @@ function openNewContract() {
   createDialogOpen.value = true
 }
 
-async function openOpportunityPicker() {
+async function loadOpportunityOptions({ reset = true } = {}) {
+  const page = reset ? 1 : opportunityPage.value + 1
   opportunityPickerOpen.value = true
   opportunityError.value = ''
   opportunityLoading.value = true
   try {
-    opportunityOptions.value = await listMyOpportunities()
+    const result = await listMyOpportunities({ keyword: opportunityKeyword.value, page, page_size: 50 })
+    opportunityPage.value = result.page
+    opportunityTotal.value = result.total
+    opportunityHasMore.value = result.has_more
+    opportunityOptions.value = reset ? result.items : [...opportunityOptions.value, ...result.items]
   } catch (error) {
     opportunityError.value = error?.message || '读取可关联商机失败，请稍后重试。'
   } finally {
     opportunityLoading.value = false
   }
+}
+
+async function openOpportunityPicker() {
+  opportunityKeyword.value = ''
+  opportunityOptions.value = []
+  await loadOpportunityOptions()
+}
+
+async function searchOpportunityOptions() {
+  opportunityOptions.value = []
+  await loadOpportunityOptions()
+}
+
+async function loadMoreOpportunityOptions() {
+  if (!opportunityHasMore.value || opportunityLoading.value) return
+  await loadOpportunityOptions({ reset: false })
 }
 
 function selectOpportunity(item) {
@@ -1592,10 +1630,10 @@ onBeforeUnmount(() => {
         <section>
           <p>平台能力</p>
           <button v-if="can('all')" type="button" @click="navigatePlatform('settings')"><ConsoleIcon name="settings" /><span>系统设置</span><em>平台</em></button>
-          <button type="button" @click="returnToUnifiedPortal"><ConsoleIcon name="logout" /><span>返回统一门户</span><em>平台</em></button>
+          <button type="button" :disabled="isLoggingOut" @click="logoutSystem"><ConsoleIcon name="logout" /><span>{{ isLoggingOut ? '正在退出…' : '退出系统' }}</span></button>
         </section>
       </nav>
-      <div class="contract-sidebar-user"><span class="contract-avatar">{{ currentUserInitial }}</span><span><strong>{{ currentUserLabel }}</strong><small>{{ currentRoleLabel }}</small></span><button type="button" aria-label="返回门户" @click="returnToUnifiedPortal"><ConsoleIcon name="logout" /></button></div>
+      <div class="contract-sidebar-user"><span class="contract-avatar">{{ currentUserInitial }}</span><span><strong>{{ currentUserLabel }}</strong><small>{{ currentRoleLabel }}</small></span><button type="button" :disabled="isLoggingOut" aria-label="退出系统" @click="logoutSystem"><ConsoleIcon name="logout" /></button></div>
     </aside>
 
     <main class="contract-main">
@@ -1795,7 +1833,7 @@ onBeforeUnmount(() => {
       </form>
     </div>
 
-    <div v-if="opportunityPickerOpen" class="contract-modal-mask contract-opportunity-mask" @click.self="opportunityPickerOpen = false"><article class="contract-detail-modal contract-opportunity-modal"><header><div><span class="contract-badge info">客户与商机管理</span><h2>选择关联商机</h2><p>显示当前用户创建的全部商机，包括后续已转交负责人的商机</p></div><button type="button" aria-label="关闭" @click="opportunityPickerOpen = false"><ConsoleIcon name="close" /></button></header><section><label class="contract-opportunity-search"><span>搜索商机</span><input v-model="opportunityKeyword" type="search" placeholder="商机名称 / 编号 / 客户名称" /></label><p v-if="opportunityLoading" class="contract-modal-loading">正在读取商机…</p><p v-else-if="opportunityError" class="contract-session-error">{{ opportunityError }}</p><div v-else class="contract-opportunity-list"><button v-for="item in filteredOpportunityOptions" :key="item.id || item.opportunity_id" type="button" @click="selectOpportunity(item)"><strong>{{ item.name || item.title || item.opportunity_name }}</strong><span>{{ item.opportunity_no || item.code || item.opportunity_code || '—' }} · {{ item.customer_name || item.customer?.name || '未关联客户' }} · {{ item.current_stage || '阶段未知' }}</span></button><p v-if="!filteredOpportunityOptions.length" class="contract-empty">当前没有由您创建的商机</p></div></section><footer><button class="contract-button secondary" type="button" @click="opportunityPickerOpen = false">取消</button></footer></article></div>
+    <div v-if="opportunityPickerOpen" class="contract-modal-mask contract-opportunity-mask" @click.self="opportunityPickerOpen = false"><article class="contract-detail-modal contract-opportunity-modal"><header><div><span class="contract-badge info">客户与商机管理</span><h2>选择关联商机</h2><p>显示当前用户权限范围内的商机，检索由客户与商机管理服务端完成</p></div><button type="button" aria-label="关闭" @click="opportunityPickerOpen = false"><ConsoleIcon name="close" /></button></header><section><div class="contract-opportunity-search"><label><span>搜索商机</span><input v-model="opportunityKeyword" type="search" placeholder="商机名称 / 编号 / 客户名称" @keydown.enter.prevent="searchOpportunityOptions" /></label><button class="contract-button secondary" type="button" :disabled="opportunityLoading" @click="searchOpportunityOptions">搜索</button></div><p v-if="opportunityLoading" class="contract-modal-loading">正在读取商机…</p><p v-else-if="opportunityError" class="contract-session-error">{{ opportunityError }}</p><div v-else class="contract-opportunity-list"><button v-for="item in opportunityOptions" :key="item.id || item.opportunity_id" type="button" @click="selectOpportunity(item)"><strong>{{ item.name || item.title || item.opportunity_name }}</strong><span>{{ item.opportunity_no || item.code || item.opportunity_code || '—' }} · {{ item.customer_name || item.customer?.name || '未关联客户' }} · {{ item.current_stage || '阶段未知' }}</span></button><p v-if="!opportunityOptions.length" class="contract-empty">没有匹配的商机，请调整关键词后重试</p><button v-if="opportunityHasMore" class="contract-button secondary contract-opportunity-load-more" type="button" :disabled="opportunityLoading" @click="loadMoreOpportunityOptions">加载更多（已显示 {{ opportunityOptions.length }} / {{ opportunityTotal }}）</button></div></section><footer><button class="contract-button secondary" type="button" @click="opportunityPickerOpen = false">取消</button></footer></article></div>
 
     <div v-if="templateUploadDialogOpen" class="contract-modal-mask" @click.self="templateUploadDialogOpen = false"><form class="contract-detail-modal contract-template-upload-modal" @submit.prevent="submitTemplateUpload"><header><div><span class="contract-badge info">超级管理员</span><h2>上传合同模板</h2><p>上传不超过 10MB 的 DOCX，模板中使用 <code v-pre>{{field_name:字段名称}}</code> 标记填写项。</p></div><button type="button" aria-label="关闭" @click="templateUploadDialogOpen = false"><ConsoleIcon name="close" /></button></header><section><div class="contract-form-grid"><label><span>模板名称</span><input v-model="templateUploadForm.name" required maxlength="160" placeholder="例如：标准服务合同" /></label><label><span>DOCX 文件</span><input required type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" @change="selectTemplateFile" /></label></div></section><footer><button class="contract-button secondary" type="button" :disabled="templateUploading" @click="templateUploadDialogOpen = false">取消</button><button class="contract-button primary" type="submit" :disabled="templateUploading">{{ templateUploading ? '正在上传…' : '上传模板' }}</button></footer></form></div>
 

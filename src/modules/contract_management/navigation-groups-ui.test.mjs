@@ -27,8 +27,9 @@ test('contract navigation does not expose the customer lookup entry', () => {
   assert.doesNotMatch(navigationDefinitions, /key: 'customers'|label: '客户查询'/)
 })
 
-test('returning to the unified portal releases the subsystem tab with an in-tab fallback', () => {
-  assert.match(source, /closeSubsystemTabOrFallback\(window, \(\) => router\.replace\(\{ name: 'portal' \}\)\)/)
-  assert.equal((source.match(/@click="returnToUnifiedPortal"/g) || []).length, 2)
-  assert.doesNotMatch(source, /navigatePlatform\('portal'\)/)
+test('contract system exit revokes the session instead of returning to the portal', () => {
+  assert.match(source, /logoutCurrentSession\(\)/)
+  assert.match(source, /router\.replace\(\{ name: 'login', query: \{ reason: 'session-ended' \} \}\)/)
+  assert.equal((source.match(/@click="logoutSystem"/g) || []).length, 2)
+  assert.match(source, /退出系统/)
 })

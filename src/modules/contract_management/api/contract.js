@@ -273,26 +273,28 @@ export async function createContract(payload) {
   })
 }
 
-// CRM 仅接受 created_by=me，不允许浏览器提交任意创建人。逐页读取确保负责人已转交的
-// 商机仍会完整出现在其原创建人的合同选择器中。
+// 商机选择器使用 CRM 的服务端关键字检索和分页。不要在浏览器端对某一页做
+// 二次过滤，否则命中后续页的商机会被误判为不存在。
 export async function listMyOpportunities(params = {}) {
-  const items = []
-  for (let page = 1; page <= 100; page += 1) {
-    const search = new URLSearchParams({ ...params, created_by: 'me', page: String(page), page_size: '100' }).toString()
-    const response = await fetch(`${CUSTOMER_API_BASE_URL}/opportunities?${search}`, { credentials: 'include', headers: { Accept: 'application/json' } })
-    const body = await readBody(response)
-    if (!response.ok) {
-      const error = new Error(userSafeErrorMessage(body?.message) || '读取可关联商机失败，请稍后重试。')
-      error.status = response.status
-      throw error
-    }
-    const data = body?.data ?? body
-    const pageItems = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : []
-    items.push(...pageItems)
-    const total = Number(data?.total ?? items.length)
-    if (!pageItems.length || items.length >= total || pageItems.length < 100) break
+  const search = new URLSearchParams({
+    keyword: String(params.keyword || '').trim(),
+    page: String(Math.max(1, Number(params.page) || 1)),
+    page_size: String(Math.min(100, Math.max(1, Number(params.page_size) || 50))),
+  })
+  const response = await fetch(`${CUSTOMER_API_BASE_URL}/opportunities?${search}`, { credentials: 'include', headers: { Accept: 'application/json' } })
+  const body = await readBody(response)
+  if (!response.ok) {
+    const error = new Error(userSafeErrorMessage(body?.message) || '读取可关联商机失败，请稍后重试。')
+    error.status = response.status
+    throw error
   }
-  return items
+  const data = body?.data ?? body
+  if (Array.isArray(data)) return { items: data, page: 1, page_size: data.length, total: data.length, has_more: false }
+  const items = Array.isArray(data?.items) ? data.items : []
+  const page = Number(data?.page || params.page || 1)
+  const pageSize = Number(data?.page_size || params.page_size || items.length)
+  const total = Number(data?.total ?? items.length)
+  return { items, page, page_size: pageSize, total, has_more: page * pageSize < total }
 }
 
 export async function listContractTemplates() {
