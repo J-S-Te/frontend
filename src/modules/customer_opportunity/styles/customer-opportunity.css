@@ -1466,6 +1466,8 @@
 .crm-approval-rules-heading { align-items: center; margin-bottom: 18px; }
 .crm-approval-rules-heading h2 { display: flex; align-items: center; gap: 10px; }
 .crm-approval-rules-heading h2::before { content: '✓'; display: inline-grid; width: 28px; height: 28px; place-items: center; border-radius: 9px; color: #2563eb; background: #e8f0ff; font-size: 15px; }
+.crm-approval-heading-actions { display: inline-flex; align-items: center; gap: 10px; }
+.crm-approval-count-badge { padding: 6px 10px; border: 1px solid #d8e5f5; border-radius: 999px; color: #5b6f8d; background: #f7faff; font-size: 12px; font-weight: 650; }
 .crm-approval-rule-row { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-top: 10px; padding: 16px 18px; border: 1px solid #e3ebf5; border-radius: 14px; background: #fff; cursor: pointer; transition: border-color .2s ease, box-shadow .2s ease, transform .2s ease; }
 .crm-approval-rule-row:hover { border-color: #b9d0f5; box-shadow: 0 8px 18px rgba(37, 99, 235, .08); transform: translateY(-1px); }
 .crm-approval-rule-row:focus-visible, .crm-approval-editor-heading:focus-visible, .crm-approval-rules-panel button:focus-visible, .crm-approval-rules-panel input:focus-visible, .crm-approval-rules-panel select:focus-visible { outline: 3px solid rgba(37, 99, 235, .3); outline-offset: 2px; }
@@ -1489,21 +1491,27 @@
 .crm-approval-status.is-disabled { color: #64748b; background: #eef2f7; }
 .crm-approval-rules-empty { display: grid; place-items: center; gap: 5px; min-height: 92px; margin: 12px 0; padding: 18px; border: 1px dashed #cbd8e8; border-radius: 14px; color: #64748b; text-align: center; }
 .crm-approval-rules-empty strong { color: #475569; }
-.crm-approval-rule-editor { display: grid; gap: 14px; margin-top: 20px; padding: 20px; border: 1px solid #d8e5f5; border-radius: 16px; background: #f7faff; }
+.crm-approval-rule-editor { display: grid; gap: 16px; margin-top: 20px; padding: 22px; border: 1px solid #d8e5f5; border-radius: 16px; background: linear-gradient(145deg, #f8fbff 0%, #f2f7fd 100%); }
 .crm-approval-editor-heading { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 12px; padding: 0 0 10px; border: 0; border-bottom: 1px solid #e1eaf5; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.crm-approval-editor-heading-copy { display: grid; gap: 4px; }
 .crm-approval-editor-heading-actions { display: inline-flex; align-items: center; gap: 10px; }
 .crm-approval-editor-body { display: grid; gap: 14px; }
 .crm-approval-editor-heading strong, .crm-approval-node-heading strong { display: block; color: #0f172a; }
 .crm-approval-editor-heading span:not(.crm-approval-editor-badge), .crm-approval-node-heading span { color: #64748b; font-size: 12px; }
-.crm-approval-rule-fields { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(150px, .7fr) auto; align-items: end; gap: 12px; }
+.crm-approval-rule-fields { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(150px, .7fr) minmax(150px, .65fr); align-items: end; gap: 14px; padding: 14px; border: 1px solid #e1eaf5; border-radius: 12px; background: #fff; }
 .crm-approval-rule-editor label { color: #475569; font-size: 12px; font-weight: 650; }
+.crm-approval-rule-editor label > span { display: block; }
+.crm-approval-rule-editor label.checkbox { display: flex; align-items: center; gap: 8px; min-height: 40px; }
+.crm-approval-rule-editor label.checkbox input { width: auto; margin: 0; accent-color: #2563eb; }
 .crm-approval-rule-editor input, .crm-approval-rule-editor select { width: 100%; margin-top: 6px; }
 .crm-approval-node-heading { display: inline-flex; align-items: baseline; gap: 9px; }
 .crm-approval-node-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.crm-approval-node { display: grid; grid-template-columns: 28px minmax(0, 1.5fr) minmax(130px, .8fr) minmax(130px, .8fr) auto; align-items: center; gap: 10px; padding: 10px; border: 1px solid #e1eaf5; border-radius: 12px; background: #fff; }
+.crm-approval-node-list { display: grid; gap: 10px; }
+.crm-approval-node { display: grid; grid-template-columns: 28px minmax(0, 1.5fr) minmax(130px, .8fr) minmax(130px, .8fr) auto; align-items: center; gap: 10px; padding: 10px; border: 1px solid #e1eaf5; border-radius: 12px; background: #fff; transition: border-color .2s ease, box-shadow .2s ease; }
 .crm-approval-node:focus-within { border-color: #8fb4ee; box-shadow: 0 0 0 3px rgba(37, 99, 235, .08); }
 .crm-approval-node-index { display: grid; width: 26px; height: 26px; place-items: center; border-radius: 8px; color: #2563eb; background: #eaf2ff; font-weight: 800; font-size: 12px; }
-.crm-approval-rule-editor > button[type="submit"] { justify-self: end; min-width: 150px; }
+.crm-approval-form-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 2px; }
+.crm-approval-form-footer .console-button { min-width: 150px; }
 @media (max-width: 760px) {
   .crm-approval-rule-row, .crm-approval-editor-heading { align-items: stretch; flex-direction: column; }
   .crm-approval-rules-section-heading { align-items: flex-start; flex-direction: column; }
@@ -1513,12 +1521,14 @@
   .crm-approval-rule-fields { grid-template-columns: 1fr; }
   .crm-approval-node { grid-template-columns: 28px 1fr; }
   .crm-approval-node select, .crm-approval-node button { grid-column: 2; }
-  .crm-approval-rule-editor > button[type="submit"] { justify-self: stretch; }
+  .crm-approval-form-footer { align-items: stretch; flex-direction: column; }
+  .crm-approval-form-footer .console-button { width: 100%; }
 }
 @media (max-width: 520px) {
   .crm-approval-rules-panel { padding: 16px; }
   .crm-approval-rules-heading { align-items: flex-start; flex-direction: column; }
-  .crm-approval-rules-heading .console-button { width: 100%; }
+  .crm-approval-heading-actions, .crm-approval-rules-heading .console-button { width: 100%; }
+  .crm-approval-heading-actions { justify-content: space-between; }
   .crm-approval-node { grid-template-columns: 28px minmax(0, 1fr); }
   .crm-approval-node input, .crm-approval-node select, .crm-approval-node button { grid-column: 2; min-width: 0; }
 }
