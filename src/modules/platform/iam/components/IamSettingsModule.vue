@@ -1584,20 +1584,6 @@ function openPasswordResetForAccount(account) {
   passwordResetDialog.value = { accountId: account.account_id, accounts: [account], userName: '', initialize: account.password_initialized === false }
 }
 
-function openPasswordResetForUser(user) {
-  const linkedAccounts = accountsForUser(user?.user_id)
-  if (!linkedAccounts.length) {
-    emitToast('该用户没有可管理的登录账号，无法重置密码。')
-    return
-  }
-  passwordResetDialog.value = {
-    accountId: linkedAccounts[0].account_id,
-    accounts: linkedAccounts,
-    userName: user.display_name || user.user_id,
-    initialize: linkedAccounts[0].password_initialized === false,
-  }
-}
-
 function closePasswordResetDialog() {
   if (resettingPassword.value) return
   passwordResetDialog.value = null
@@ -2316,7 +2302,6 @@ onBeforeUnmount(() => {
             <p><span>{{ detail.item?.employee_no || '未生成员工编号' }}</span><i /> <span>{{ detail.item?.email || '未填写邮箱' }}</span></p>
           </div>
           <div class="iam-user-detail-hero-note"><ConsoleIcon name="link" /><span>人员主档案<br /><small>任职关系统一维护</small></span></div>
-          <button v-if="hasPermission(IAM_PERMISSIONS.accountPasswordReset)" class="console-button secondary small" type="button" @click="openPasswordResetForUser(detail.item)">重置登录密码</button>
           <button v-if="hasPermission(IAM_PERMISSIONS.userUpdate) && String(detail.item?.status || '').toUpperCase() === 'ACTIVE'" class="console-button danger small" type="button" @click="terminateEmployee(detail.item)">办理离职</button>
         </div>
         <div class="iam-detail-grid">

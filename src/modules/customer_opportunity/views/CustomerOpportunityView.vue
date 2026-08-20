@@ -330,8 +330,9 @@ const crmRoleNames = Object.freeze({
   technical_director: '技术总监',
   team_lead: '团队负责人',
   technician: '技术人员',
-  implementation_engineer: '实施工程师',
-  technical_lead: '技术负责人',
+  // 历史授权/指派记录仍可能带旧编码，但页面统一显示合并后的角色名称。
+  implementation_engineer: '技术人员',
+  technical_lead: '技术总监',
   customer_admin: '客户管理员',
   auditor: '审计员',
 })
@@ -358,6 +359,7 @@ const showStageAlertRules = ref(false)
 const stageRuleForbidden = ref(false)
 const canReadOpportunities = computed(() => (crmSession.value?.permissions || []).includes('opportunity.read'))
 const canReadPresales = computed(() => (crmSession.value?.permissions || []).includes('presale.read'))
+const canReadCustomers = computed(() => (crmSession.value?.permissions || []).includes('customer.read'))
 const canReadNotifications = computed(() => canReadOpportunities.value || canReadPresales.value)
 const canConfigureStageAlerts = computed(() => (crmSession.value?.permissions || []).includes('opportunity.alert.config'))
 const canManagePresaleApprovalRules = computed(() => (crmSession.value?.permissions || []).includes('presale.approval_rule.manage'))
@@ -371,6 +373,7 @@ const canViewPortalAccess = computed(() => canReadPortalInvite.value || canReadP
 const portalAccessDisableInProgress = computed(() => ['PROCESSING', 'RETRY_WAIT'].includes(portalAccessStatus.value?.operation_status))
 const canGeneratePortalInvite = computed(() => portalAccessStatus.value?.access_status !== 'DISABLED' && !portalAccessDisableInProgress.value)
 const canCreateCustomer = computed(() => (crmSession.value?.permissions || []).includes('customer.create'))
+const canCreateOpportunity = computed(() => (crmSession.value?.permissions || []).includes('opportunity.create'))
 const canExportCustomers = computed(() => (crmSession.value?.permissions || []).includes('customer.export'))
 const canUpdateCustomer = computed(() => (crmSession.value?.permissions || []).includes('customer.update'))
 const canImportCustomers = computed(() => (crmSession.value?.permissions || []).includes('customer.import'))
@@ -470,6 +473,8 @@ function portalInviteStatusText(value) {
 }
 const portalRegistrationContact = computed(() => (selectedCustomer.value?.contacts || []).find((item) => item.is_registration) || null)
 function navigate(section) {
+  const allowed = { customers: canReadCustomers.value, opportunities: canReadOpportunities.value, presale: canReadPresales.value, notifications: canReadNotifications.value }
+  if (!allowed[section]) return
   if (activeSection.value === 'presale' && presaleCreatePage.value && !confirmDiscardIfDirty(presaleFormDirty.value)) return
   mobileMenuOpen.value = false
   return router.push({ name: 'customer_opportunity', params: { section } })
@@ -2448,6 +2453,10 @@ watch(notificationUnreadOnly, () => { page.number = 1; if (activeSection.value =
 watch(stageAlertUnreadOnly, loadStageAlerts)
 onMounted(async () => {
   try { crmSession.value = await getCRMSession() } catch (value) { showError(value) }
+  if (!['customers', 'opportunities', 'presale', 'notifications'].some((section) => section === activeSection.value && ({ customers: canReadCustomers.value, opportunities: canReadOpportunities.value, presale: canReadPresales.value, notifications: canReadNotifications.value })[section])) {
+    const fallback = canReadPresales.value ? 'presale' : canReadOpportunities.value ? 'opportunities' : canReadCustomers.value ? 'customers' : 'notifications'
+    await router.replace({ name: 'customer_opportunity', params: { section: fallback } })
+  }
   await refreshRuntimeCapabilities()
   const permissionTasks = [
     ...(canReadOpportunities.value ? [loadStageAlerts()] : []),
@@ -2469,9 +2478,9 @@ onMounted(async () => {
       </div>
       <nav class="console-nav crm-nav" aria-label="客户与商机功能">
         <p class="console-nav-label">业务中心</p>
-        <button class="console-nav-item" type="button" :class="{ active: activeSection === 'customers' }" @click="navigate('customers')"><ConsoleIcon name="user" /><span>客户管理</span></button>
-        <button class="console-nav-item" type="button" :class="{ active: activeSection === 'opportunities' }" @click="navigate('opportunities')"><ConsoleIcon name="dashboard" /><span>商机管理</span></button>
-        <button class="console-nav-item" type="button" :class="{ active: activeSection === 'presale' }" @click="navigate('presale')"><ConsoleIcon name="organization" /><span>售前技术支持</span></button>
+        <button v-if="canReadCustomers" class="console-nav-item" type="button" :class="{ active: activeSection === 'customers' }" @click="navigate('customers')"><ConsoleIcon name="user" /><span>客户管理</span></button>
+        <button v-if="canReadOpportunities" class="console-nav-item" type="button" :class="{ active: activeSection === 'opportunities' }" @click="navigate('opportunities')"><ConsoleIcon name="dashboard" /><span>商机管理</span></button>
+        <button v-if="canReadPresales" class="console-nav-item" type="button" :class="{ active: activeSection === 'presale' }" @click="navigate('presale')"><ConsoleIcon name="organization" /><span>售前技术支持</span></button>
         <p class="console-nav-label">消息中心</p>
         <button v-if="canReadNotifications" class="console-nav-item" type="button" :class="{ active: activeSection === 'notifications' }" @click="navigate('notifications')"><ConsoleIcon name="bell" /><span>个人通知</span><span v-if="notificationUnreadCount" class="crm-nav-badge">{{ notificationUnreadCount > 99 ? '99+' : notificationUnreadCount }}</span></button>
         <p class="console-nav-label">平台能力</p>
@@ -2506,7 +2515,7 @@ onMounted(async () => {
         <button type="button" :disabled="customerOwnerOptionsLoading" @click="loadCustomerOwnerOptions">{{ customerOwnerOptionsLoading ? '查找中…' : '查找负责人' }}</button><button @click="page.number = 1; loadCurrent()">查询</button><button @click="customerFilters.view = customerFilters.view === 'table' ? 'cards' : 'table'; syncCustomerURL()">{{ customerFilters.view === 'table' ? '卡片视图' : '列表视图' }}</button><button v-if="canCreateCustomer" class="primary" @click="openNewCustomer">新建</button><button v-if="canImportCustomers" :disabled="!customerImportScanAvailable" :title="customerImportScanAvailable ? '' : '可信文件扫描器未配置'" @click="openCustomerImport">Excel 导入</button><button v-if="canExportCustomers" :disabled="!customerExportAvailable" :title="customerExportAvailable ? '' : '客户导出 Provider 未配置'" @click="exportCustomers">导出</button>
       </section>
       <p v-if="activeSection === 'customers' && customerOwnerOptionsError" class="crm-alert error" role="alert">{{ customerOwnerOptionsError }} 请在基础平台人员目录恢复后重试负责人筛选。</p>
-      <section v-else-if="activeSection === 'opportunities'" class="crm-toolbar"><label>关键词<input v-model.trim="filters.keyword" @keyup.enter="loadCurrent"></label><label v-if="!boardMode">状态<select v-model="filters.status"><option value="">全部状态</option><option v-for="item in opportunityStatusOptions" :key="item.value" :value="item.value">{{ item.label }}</option></select></label><label v-if="!boardMode">阶段<select v-model="filters.stage"><option value="">全部阶段</option><option v-for="item in opportunityStageOptions" :key="item" :value="item">{{ item }}</option></select></label><button @click="loadCurrent">查询</button><button @click="boardMode = !boardMode; loadCurrent()">{{ boardMode ? '列表视图' : '阶段看板' }}</button><button class="primary" @click="openNewOpportunity">新建</button></section>
+      <section v-else-if="activeSection === 'opportunities' && canReadOpportunities" class="crm-toolbar"><label>关键词<input v-model.trim="filters.keyword" @keyup.enter="loadCurrent"></label><label v-if="!boardMode">状态<select v-model="filters.status"><option value="">全部状态</option><option v-for="item in opportunityStatusOptions" :key="item.value" :value="item.value">{{ item.label }}</option></select></label><label v-if="!boardMode">阶段<select v-model="filters.stage"><option value="">全部阶段</option><option v-for="item in opportunityStageOptions" :key="item" :value="item">{{ item }}</option></select></label><button @click="loadCurrent">查询</button><button @click="boardMode = !boardMode; loadCurrent()">{{ boardMode ? '列表视图' : '阶段看板' }}</button><button v-if="canCreateOpportunity" class="primary" @click="openNewOpportunity">新建</button></section>
       <form v-else-if="activeSection === 'presale' && !presaleCreatePage" class="crm-toolbar crm-presale-filters" @submit.prevent="applyPresaleFilters"><label>申请编号<input v-model.trim="presaleFilters.request_no" maxlength="32"></label><label>商机<select v-model="presaleFilters.opportunity_id"><option value="">全部可见商机</option><option v-for="item in presaleFilterOptions.opportunities" :key="item.value" :value="String(item.value)">{{ item.label }}</option></select></label><label>申请人<select v-model="presaleFilters.applicant_id"><option value="">全部可见申请人</option><option v-for="item in presaleFilterOptions.applicants" :key="item.value" :value="item.value">{{ presalePersonOptionLabel(item) }}</option></select></label><label>执行人<select v-model="presaleFilters.assignee_id"><option value="">全部可见执行人</option><option v-for="item in presaleFilterOptions.assignees" :key="item.value" :value="item.value">{{ presalePersonOptionLabel(item) }}</option></select></label><label>状态<select v-model="presaleFilters.status"><option value="">全部可见状态</option><option v-for="item in presaleFilterOptions.statuses" :key="item.value" :value="item.value">{{ presaleOptionText('statuses', item) }}</option></select></label><label>场地<select v-model="presaleFilters.venue"><option value="">全部可见场地</option><option v-for="item in presaleFilterOptions.venues" :key="item.value" :value="item.value">{{ presaleOptionText('venues', item) }}</option></select></label><label>紧急度<select v-model="presaleFilters.urgency"><option value="">全部可见级别</option><option v-for="item in presaleFilterOptions.urgencies" :key="item.value" :value="item.value">{{ presaleOptionText('urgencies', item) }}</option></select></label><label>申请开始<input v-model="presaleFilters.created_from" type="datetime-local"></label><label>申请结束（不含）<input v-model="presaleFilters.created_to" type="datetime-local"></label><label>期望开始<input v-model="presaleFilters.expected_from" type="datetime-local"></label><label>期望结束（不含）<input v-model="presaleFilters.expected_to" type="datetime-local"></label><label>是否超时<select v-model="presaleFilters.overdue"><option value="">全部</option><option value="true">已超时</option><option value="false">未超时</option></select></label><label>排序<select v-model="presaleFilters.sort_by"><option value="created_at">申请时间</option><option value="updated_at">更新时间</option><option value="expected_end">期望结束</option><option value="request_no">申请编号</option></select></label><label>顺序<select v-model="presaleFilters.sort_order"><option value="desc">降序</option><option value="asc">升序</option></select></label><button class="primary">查询</button><button type="button" @click="switchPresaleView(presaleView === 'list' ? 'board' : 'list')">{{ presaleView === 'list' ? '状态看板' : '列表视图' }}</button></form>
       <PresaleApprovalRulesPanel v-if="activeSection === 'presale' && !presaleCreatePage && canManagePresaleApprovalRules" :is-admin="canManagePresaleApprovalRules" />
       <p v-if="activeSection === 'presale' && presaleFilterOptionsError" class="crm-alert error" role="alert">{{ presaleFilterOptionsError }}</p><p v-else-if="activeSection === 'presale' && presaleFilterOptions.truncated" class="crm-note">筛选选项已按服务端上限截断；输入已有条件可继续缩小结果。</p>
