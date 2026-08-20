@@ -198,19 +198,19 @@ onMounted(() => {
         启用
       </label>
       </div>
-      <div>
+      <div class="crm-approval-node-toolbar">
         <div class="crm-approval-node-heading"><strong>流程节点</strong><span>按列表顺序执行</span></div>
         <button class="console-button ghost small" type="button" @click="addNode">添加节点</button>
       </div>
       <div v-for="(node, index) in form.nodes" :key="node.id" class="crm-approval-node">
         <span class="crm-approval-node-index">{{ index + 1 }}</span>
-        <input v-model.trim="node.name" required placeholder="节点名称" />
-        <select v-model="node.type">
+        <input v-model.trim="node.name" required placeholder="节点名称" :aria-label="`第 ${index + 1} 个节点名称`" />
+        <select v-model="node.type" :aria-label="`第 ${index + 1} 个节点类型`">
           <option v-for="item in nodeTypes" :key="item.value" :value="item.value">
             {{ item.label }}
           </option>
         </select>
-        <select v-model="node.role_code">
+        <select v-model="node.role_code" :aria-label="`第 ${index + 1} 个节点角色`">
           <option v-for="item in roles" :key="item.value" :value="item.value">
             {{ item.label }}
           </option>
@@ -219,6 +219,7 @@ onMounted(() => {
           class="console-button danger small"
           type="button"
           :disabled="form.nodes.length <= 1"
+          :aria-label="`删除第 ${index + 1} 个节点`"
           @click="form.nodes.splice(index, 1)"
         >
           删除

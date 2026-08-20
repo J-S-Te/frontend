@@ -2547,21 +2547,23 @@
   font-size: 11px;
   font-weight: 600;
 }
-.iam-template-assignment-list { display: grid; gap: var(--s-2); margin-top: var(--s-4); }
+.iam-template-assignment-list { display: grid; gap: 10px; margin-top: var(--s-4); }
 .iam-template-assignment-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: var(--s-3);
+  gap: 12px;
   align-items: center;
 }
 .iam-template-assignment {
   display: flex;
-  align-items: flex-start;
-  gap: var(--s-3);
-  padding: 14px 16px;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+  min-height: 68px;
+  padding: 10px 13px;
   cursor: pointer;
   border: 1px solid var(--line-1);
-  border-radius: var(--r-2);
+  border-radius: 12px;
   background: var(--surface);
   transition: border-color var(--t-fast) var(--ease-out), background var(--t-fast) var(--ease-out), box-shadow var(--t-fast) var(--ease-out);
 }
@@ -2578,19 +2580,28 @@
   width: 16px;
   height: 16px;
   flex: 0 0 auto;
-  margin-top: 2px;
   accent-color: var(--ok-1);
 }
-.iam-template-assignment span { display: grid; gap: 5px; min-width: 0; }
-.iam-template-assignment strong { color: var(--ink-1); font-size: 12.5px; font-weight: 600; }
+.iam-template-assignment-content { display: grid; gap: 4px; min-width: 0; }
+.iam-template-assignment-topline { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.iam-template-assignment strong { min-width: 0; overflow: hidden; color: var(--ink-1); font-size: 12.5px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.iam-template-assignment-topline b { flex: 0 0 auto; padding: 2px 7px; color: var(--ok-1); border: 1px solid var(--ok-line); border-radius: 999px; background: var(--ok-soft); font-size: 10px; font-weight: 650; white-space: nowrap; }
 .iam-template-assignment small,
 .iam-template-assignment em {
   color: var(--ink-3);
   font-size: 11px;
   font-style: normal;
-  line-height: 1.55;
+  line-height: 1.35;
   overflow-wrap: anywhere;
 }
+.iam-template-assignment small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.iam-template-assignment small.is-muted { color: var(--ink-4); }
+.iam-template-role-tags { display: flex; gap: 5px; min-width: 0; overflow: hidden; }
+.iam-template-role-tags em { max-width: 260px; padding: 2px 7px; overflow: hidden; color: var(--ink-2); border: 1px solid var(--line-2); border-radius: 999px; background: var(--bg-soft); text-overflow: ellipsis; white-space: nowrap; }
+.iam-template-role-tags em.is-more { flex: 0 0 auto; color: var(--brand-1); background: var(--brand-soft); border-color: var(--brand-line); }
+.iam-template-pagination { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; padding-top: 12px; color: var(--ink-3); border-top: 1px solid var(--line-2); font-size: 11px; }
+.iam-template-pagination-controls { display: flex; align-items: center; gap: 9px; }
+.iam-template-pagination-controls .console-button { min-width: 58px; }
 .iam-template-delete { white-space: nowrap; }
 .iam-authorization-preview ul {
   display: grid;
@@ -2781,6 +2792,8 @@
   .iam-template-grid,
   .iam-template-role-row,
   .iam-template-assignment-row { grid-template-columns: 1fr; }
+  .iam-template-pagination { align-items: stretch; flex-direction: column; }
+  .iam-template-pagination-controls { justify-content: space-between; }
   .iam-template-delete { justify-self: end; }
   .iam-template-editor > footer { justify-content: stretch; }
   .iam-template-editor > footer .console-button,
