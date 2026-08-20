@@ -1202,6 +1202,12 @@
 .iam-pagination span { white-space: nowrap; }
 @media (max-width: 760px) { .iam-pagination { justify-content: space-between; flex-wrap: wrap; } }
 
+.iam-user-filter-row { align-items: center; }
+.iam-user-list-controls { display: flex; align-items: center; justify-content: flex-end; gap: 12px; color: var(--ink-3); font-size: 12px; }
+.iam-user-list-controls label { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.iam-user-list-controls select { min-height: 32px; padding: 0 25px 0 8px; color: var(--ink-2); font-size: 12px; border: 1px solid var(--line-1); border-radius: 7px; background: var(--surface); }
+.iam-user-list-controls span { white-space: nowrap; }
+
 .iam-server-limit-note {
   margin: -0.15rem 0 0.8rem;
   color: var(--ink-3);
@@ -1222,19 +1228,24 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--s-4);
-  padding: 13px 16px;
+  padding: 15px 18px;
   border-bottom: 1px solid var(--line-2);
-  background: var(--bg-soft);
+  background: linear-gradient(115deg, #eff6ff, #f8fafc 58%, #fff);
 }
 .iam-organization-tree-toolbar > div:first-child {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
+  display: grid;
+  gap: 3px;
   min-width: 0;
 }
+.iam-organization-tree-toolbar p,
+.iam-position-groups-toolbar p,
+.iam-membership-groups-toolbar p { margin: 0; color: var(--brand-1); font-size: 10px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
 .iam-organization-tree-toolbar strong { color: var(--ink-1); font-size: 13px; }
 .iam-organization-tree-toolbar span { color: var(--ink-4); font-size: 11.5px; }
 .iam-organization-tree-toolbar-actions { display: flex; gap: var(--s-2); }
+.iam-tree-toolbar-metrics { display: flex; gap: 8px; margin-left: auto; }
+.iam-tree-toolbar-metrics span { padding: 5px 8px; color: var(--ink-3) !important; font-size: 10.5px !important; border: 1px solid var(--line-2); border-radius: 999px; background: rgba(255,255,255,.72); white-space: nowrap; }
+.iam-tree-toolbar-metrics b { color: var(--brand-1); font-size: 12px; }
 .iam-organization-tree { min-height: 96px; }
 .iam-organization-tree-empty {
   margin: 0;
@@ -1344,6 +1355,9 @@
 }
 
 @media (max-width: 760px) {
+  .iam-user-list-controls { width: 100%; justify-content: space-between; }
+  .iam-tree-toolbar-metrics { width: 100%; margin-left: 0; }
+  .iam-tree-toolbar-metrics span { flex: 1; text-align: center; }
   .iam-organization-tree-toolbar { align-items: stretch; flex-direction: column; }
   .iam-organization-tree-toolbar > div:first-child { align-items: flex-start; flex-direction: column; gap: 3px; }
   .iam-organization-tree-toolbar-actions .console-button { flex: 1; }
@@ -1370,11 +1384,11 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--s-4);
-  padding: 13px 16px;
+  padding: 15px 18px;
   border-bottom: 1px solid var(--line-2);
-  background: var(--bg-soft);
+  background: linear-gradient(115deg, #f5f3ff, #fafafa 58%, #fff);
 }
-.iam-position-groups-toolbar > div:first-child { display: flex; align-items: baseline; gap: 10px; }
+.iam-position-groups-toolbar > div:first-child { display: grid; gap: 3px; }
 .iam-position-groups-toolbar strong { color: var(--ink-1); font-size: 13px; }
 .iam-position-groups-toolbar span { color: var(--ink-4); font-size: 11.5px; }
 .iam-position-groups-toolbar-actions { display: flex; gap: var(--s-2); }
@@ -1496,11 +1510,11 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--s-4);
-  padding: 13px 16px;
+  padding: 15px 18px;
   border-bottom: 1px solid var(--line-2);
-  background: var(--bg-soft);
+  background: linear-gradient(115deg, #fff7ed, #fafafa 58%, #fff);
 }
-.iam-membership-groups-toolbar > div:first-child { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.iam-membership-groups-toolbar > div:first-child { display: grid; gap: 3px; min-width: 0; }
 .iam-membership-groups-toolbar strong { color: var(--ink-1); font-size: 13px; }
 .iam-membership-groups-toolbar span { color: var(--ink-4); font-size: 11.5px; }
 .iam-membership-groups-toolbar-actions { display: flex; gap: var(--s-2); }
@@ -1555,6 +1569,8 @@
   background: #fef3c7;
 }
 .iam-membership-group-body { background: var(--surface); }
+.iam-group-load-more { display: block; width: calc(100% - 32px); margin: 10px 16px 14px; padding: 9px 12px; color: var(--brand-1); font-size: 12px; font-weight: 700; text-align: center; cursor: pointer; border: 1px dashed var(--brand-line); border-radius: 8px; background: var(--brand-soft); }
+.iam-group-load-more:hover { border-style: solid; background: #eaf2ff; }
 .iam-membership-group-row {
   display: grid;
   grid-template-columns: minmax(190px, 1fr) minmax(140px, 0.75fr) 88px 138px minmax(145px, 0.75fr) 54px;

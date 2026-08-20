@@ -42,7 +42,7 @@ import { getNotificationUnreadCount, listNotifications, markNotificationRead } f
 import { listOwnerDirectory } from '../api/ownerDirectory.js'
 import { parseNotificationTarget } from '../navigation.js'
 import {
-  addProgress, addWorklog, createPresaleRequest, reopenPresaleRequest, getApprovalHistory, getAssignments, getPresaleRequest,
+  addProgress, addWorklog, completePresaleRequest, createPresaleRequest, reopenPresaleRequest, getApprovalHistory, getAssignments, getPresaleRequest,
   getPresaleContactPhone,
   getPresaleAvailableActions, getPresaleBoard, getPresaleFilterOptions, getPresaleTimeline,
   cancelPresaleRequest, listPresaleRequests, listWorklogs, replaceAssignments, submitApprovalAction,
@@ -420,9 +420,13 @@ const qbActiveQueryMode = computed(() => runtimeCapability('qb_active_query').mo
 
 function defaultReportFilters() {
   const now = new Date()
-  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))
-  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1))
-  return { from: start.toISOString().slice(0, 16), to: end.toISOString().slice(0, 16), organization_id: '', person_id: '', opportunity_id: '', dimension: 'PERSON' }
+  const start = new Date(now.getFullYear(), now.getMonth(), 1)
+  const end = new Date(now.getFullYear(), now.getMonth() + 1, 1)
+  return { from: formatDateTimeLocal(start), to: formatDateTimeLocal(end), organization_id: '', person_id: '', opportunity_id: '', dimension: 'PERSON' }
+}
+function formatDateTimeLocal(value) {
+  const pad = (part) => String(part).padStart(2, '0')
+  return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}T${pad(value.getHours())}:${pad(value.getMinutes())}`
 }
 
 function emptyCustomer() {
@@ -509,6 +513,7 @@ const assignmentDiff = computed(() => {
   const names = new Map(engineerDirectory.value.map((item) => [item.person_id, item.person_name]))
   return { added: [...target].filter((id) => !current.has(id)).map((id) => names.get(id) || '未命名人员'), retained: [...target].filter((id) => current.has(id)).map((id) => names.get(id) || '未命名人员'), removed: [...current].filter((id) => !target.has(id)).map((id) => names.get(id) || '未命名人员') }
 })
+// 当前指派人员不在本次查询结果中时仍保留可见、可撤销的勾选项，避免筛选造成误移出。
 const unavailableCurrentAssignees = computed(() => {
   const visible = new Set(engineerDirectory.value.map((item) => item.person_id))
   return (selectedPresale.value?.current_assignees || []).filter((item) => !visible.has(item.person_id))
@@ -628,10 +633,21 @@ function presaleOptionText(group, item) {
   return item.label || item.value
 }
 function actionText(value) {
-  return ({ APPROVE: '通过审批', REJECT: '驳回审批', ASSIGN: '指派执行人', ADD_PROGRESS: '登记进度', ADD_WORKLOG: '登记工时', CANCEL: '取消申请' })[value] || '未知操作'
+  return ({ APPROVE: '通过审批', REJECT: '驳回审批', ASSIGN: '指派执行人', ADD_PROGRESS: '登记进度', ADD_WORKLOG: '登记工时', COMPLETE: '结束进度', CANCEL: '取消申请' })[value] || '未知操作'
 }
 function timelineEventText(value) {
   return ({ REQUEST_CREATED: '售前申请已创建', STATUS_CHANGED: '任务状态已变更', APPROVAL_DECIDED: '审批已处理', ASSIGNEE_ADDED: '已加入执行人', ASSIGNEE_REMOVED: '已移出执行人', PROGRESS_ADDED: '已登记进度', WORKLOG_ADDED: '已登记工时' })[value] || '流程记录'
+}
+function timelineEventMeta(value) {
+  return ({
+    REQUEST_CREATED: { icon: '建', stage: '发起', tone: 'created' },
+    STATUS_CHANGED: { icon: '流', stage: '流转', tone: 'status' },
+    APPROVAL_DECIDED: { icon: '审', stage: '审批', tone: 'approval' },
+    ASSIGNEE_ADDED: { icon: '人', stage: '指派', tone: 'assignment' },
+    ASSIGNEE_REMOVED: { icon: '人', stage: '调整', tone: 'assignment' },
+    PROGRESS_ADDED: { icon: '进', stage: '进度', tone: 'progress' },
+    WORKLOG_ADDED: { icon: '时', stage: '工时', tone: 'worklog' },
+  })[value] || { icon: '记', stage: '记录', tone: 'default' }
 }
 function approvalResultText(value) {
   return ({ PASS: '通过', APPROVED: '通过', REJECT: '驳回', REJECTED: '驳回' })[value] || '已处理'
@@ -693,6 +709,9 @@ async function loadReports() {
   reportLoading.value = true; resetMessages()
   try {
     const params = reportParams()
+    if (new Date(params.to) <= new Date(params.from)) {
+      throw new Error('结束时间必须晚于开始时间。')
+    }
     const [summary, trend, distribution] = await Promise.all([getPresaleReportSummary(params), getPresaleReportTrend(params), getPresaleReportDistribution(params)])
     reportSummary.value = normalizeReportSummary(summary)
     reportTrend.value = normalizeReportRows(trend)
@@ -2382,7 +2401,6 @@ async function runPresale(action) {
     if (action === 'assignments') { await loadPresaleInspector('assignments'); return }
     if (action === 'history') { await loadPresaleInspector('history'); return }
     if (action === 'assign') {
-      if (!assignmentReason.value.trim()) { error.value = '改派原因必填。'; return }
       const targets = assignmentTargets()
       if (!targets.length || targets.length !== selectedEngineerIDs.value.length) { error.value = '请选择有效的内部执行人员。'; return }
       const retry = presaleMutationRetries.keyFor('assignment', id, { assignees: targets, change_reason: assignmentReason.value, version })
@@ -2410,7 +2428,12 @@ async function runPresale(action) {
       }
     }
     if (action === 'worklog') {
-      const retry = presaleMutationRetries.keyFor('worklog', id, { work_start: new Date(operation.work_start).toISOString(), work_end: new Date(operation.work_end).toISOString(), raw_unit: operation.raw_unit, raw_value: operation.raw_value, work_site_address: operation.work_site_address, work_content: operation.work_content, remark: operation.remark, version })
+      const workStart = new Date(operation.work_start)
+      const workEnd = new Date(operation.work_end)
+      if (Number.isNaN(workStart.getTime()) || Number.isNaN(workEnd.getTime())) { error.value = '请填写有效的开始和结束时间。'; return }
+      if (!(workEnd > workStart)) { error.value = '结束时间必须晚于开始时间。'; return }
+      if (!String(operation.raw_value || '').trim() || !String(operation.work_site_address || '').trim()) { error.value = '请填写工时数值和工作地点。'; return }
+      const retry = presaleMutationRetries.keyFor('worklog', id, { work_start: workStart.toISOString(), work_end: workEnd.toISOString(), raw_unit: operation.raw_unit, raw_value: operation.raw_value, work_site_address: operation.work_site_address, work_content: operation.work_content, remark: operation.remark, version })
       presaleMutationRetries.markAttempted('worklog', id, retry.key)
       const result = await addWorklog(id, retry.payload, retry.key)
       presaleMutationRetries.confirmSuccess('worklog', id, retry.key)
@@ -2428,6 +2451,40 @@ async function runPresale(action) {
     if (!mutationToken || isCurrentMutation()) showError(value)
   } finally {
     if (mutationToken && mutationToken === presaleMutationLoadSequence.value) presaleMutationLoading.value = false
+  }
+}
+
+function runPresaleComplete() {
+  const detail = selectedPresale.value
+  if (!detail?.request?.id || presaleMutationLoading.value) return
+  const id = detail.request.id
+  const authoritative = presaleAvailableActions.value
+  const version = Number(authoritative?.version)
+  if (!authoritative || !Number.isInteger(version) || !authoritativePresaleActions.value.includes('COMPLETE')) {
+    error.value = '服务端未授权该操作或操作状态已变化，请刷新可用操作。'
+    void refreshPresaleActions(id)
+    return
+  }
+  askReason({ title: '结束进度', label: '结束说明', required: false, confirmText: '确认结束', onSubmit: (reason) => submitPresaleComplete(id, version, reason) })
+}
+
+async function submitPresaleComplete(id, version, reason) {
+  const mutationContext = presaleMutationContextSequence.value
+  const mutationToken = ++presaleMutationLoadSequence.value
+  presaleMutationLoading.value = true
+  try {
+    const result = await completePresaleRequest(id, { reason, version })
+    if (mutationContext !== presaleMutationContextSequence.value || Number(selectedPresale.value?.request?.id) !== Number(id)) return
+    presaleResult.value = result
+    notice.value = '售前支持流程已完成。'
+    const loaded = await loadPresaleCore(id, { clearResult: false })
+    if (loaded) await Promise.all([refreshPresaleActions(id), refreshPresaleTimeline(id)])
+    await loadCurrent()
+    if (selectedOpportunity.value) await loadOpportunityPresales(opportunityPresalePage.number)
+  } catch (value) {
+    if (mutationToken === presaleMutationLoadSequence.value) showError(value)
+  } finally {
+    if (mutationToken === presaleMutationLoadSequence.value) presaleMutationLoading.value = false
   }
 }
 
@@ -2565,7 +2622,13 @@ onMounted(async () => {
         <footer><button class="console-button ghost" type="button" @click="showAlertConfig = false">关闭</button></footer>
       </section>
     </div>
-    <div v-if="showStageAlertRules" class="crm-modal"><article class="crm-detail"><h2>商机阶段超时规则</h2><p class="crm-note">仅前五个推进阶段可配置，单位为小时。保存时提交数据版本用于并发控制；配置版本进入后续告警的幂等标识。</p><div v-for="rule in stageAlertRules" :key="rule.stage" class="crm-alert-rule"><strong>{{ rule.stage }}</strong><label>阈值（小时）<input v-model.number="rule.threshold_hours" type="number" min="1" max="8760"></label><label class="check"><input v-model="rule.enabled" type="checkbox">启用</label><span>配置版本 {{ rule.config_version }} · 数据版本 {{ rule.version }} · {{ formatDate(rule.updated_at) }}</span><button class="primary" @click="saveStageAlertRule(rule)">保存</button></div><div class="crm-actions"><button @click="showStageAlertRules = false">关闭</button></div></article></div>
+    <div v-if="showStageAlertRules" class="console-modal-backdrop" role="presentation" @click.self="showStageAlertRules = false">
+      <section class="console-detail-modal crm-stage-rule-dialog" role="dialog" aria-modal="true" aria-label="商机阶段超时规则">
+        <header><div><p class="console-modal-eyebrow">商机推进 · 预警配置</p><h2>商机阶段超时规则</h2></div><button class="console-modal-close" type="button" aria-label="关闭商机阶段超时规则" @click="showStageAlertRules = false"><ConsoleIcon name="close" /></button></header>
+        <div class="crm-stage-rule-dialog__body"><section class="crm-stage-rule-dialog__intro"><span class="crm-stage-rule-dialog__intro-icon" aria-hidden="true">时</span><div><strong>配置各阶段的超时提醒阈值</strong><p>仅前五个推进阶段可配置，单位为小时。保存后仅影响后续扫描，已有告警不会被重写。</p></div></section><div class="crm-stage-rule-list"><article v-for="(rule, index) in stageAlertRules" :key="rule.stage" class="crm-stage-rule-card" :class="{ 'is-disabled': !rule.enabled }"><div class="crm-stage-rule-card__order">{{ String(index + 1).padStart(2, '0') }}</div><div class="crm-stage-rule-card__identity"><strong>{{ rule.stage }}</strong><span>{{ rule.enabled ? '规则已启用' : '规则已停用' }}</span></div><label class="console-form-item crm-stage-rule-card__threshold"><span>超时阈值（小时）</span><div><input v-model.number="rule.threshold_hours" class="console-number-input" type="number" min="1" max="8760"><small>1–8760 小时</small></div></label><div class="crm-stage-rule-card__switch"><span>启用规则</span><button :class="['console-switch', { on: rule.enabled }]" type="button" :aria-pressed="rule.enabled" :aria-label="`${rule.stage}${rule.enabled ? '已启用' : '已停用'}`" @click="rule.enabled = !rule.enabled"><i></i></button></div><div class="crm-stage-rule-card__meta"><span>配置版本 {{ rule.config_version }}</span><span>数据版本 {{ rule.version }}</span><span>{{ formatDate(rule.updated_at) }}</span></div><button class="console-button primary small crm-stage-rule-card__save" type="button" @click="saveStageAlertRule(rule)">保存本阶段</button></article></div></div>
+        <footer><p>规则变更即时生效，超时告警由后台任务按规则扫描生成。</p><button class="console-button ghost" type="button" @click="showStageAlertRules = false">关闭</button></footer>
+      </section>
+    </div>
     <div v-if="selectedStageAlert" class="crm-modal"><article><h2>阶段超时告警详情</h2><dl><dt>商机编号</dt><dd>{{ selectedStageAlert.opportunity_no }}</dd><dt>阶段</dt><dd>{{ selectedStageAlert.stage }}</dd><dt>状态</dt><dd>{{ stageAlertStatusText(selectedStageAlert.status) }}</dd><dt>阶段起算</dt><dd>{{ formatDate(selectedStageAlert.basis_at) }}</dd><dt>应提醒时间</dt><dd>{{ formatDate(selectedStageAlert.due_at) }}</dd><dt>阈值版本</dt><dd>{{ selectedStageAlert.threshold_version }}</dd><dt>触发时间</dt><dd>{{ formatDate(selectedStageAlert.sent_at) }}</dd><dt>已读时间</dt><dd>{{ formatDate(selectedStageAlert.read_at) }}</dd></dl><div class="crm-actions"><button @click="selectedStageAlert = null">关闭</button><button class="primary" @click="openStageAlertOpportunity(selectedStageAlert)">{{ selectedStageAlert.status === 'UNREAD' ? '标为已读并打开商机' : '打开商机' }}</button></div></article></div>
     <div v-if="showReport" class="console-modal-backdrop" role="presentation" @click.self="showReport = false">
       <article class="console-detail-modal crm-report-dialog" role="dialog" aria-modal="true" aria-label="售前投入报表">
@@ -2574,8 +2637,9 @@ onMounted(async () => {
           <button class="console-modal-close" type="button" aria-label="关闭售前投入报表" @click="showReport = false"><ConsoleIcon name="close" /></button>
         </header>
         <div class="crm-report-dialog__body"><p v-if="reportError" class="crm-alert error" role="alert">{{ reportError }}</p>
-          <p class="console-card-hint">全部工时为标准小时；时间筛选发送 RFC3339 并由服务端统一换算为 UTC 半开区间。成功率字段单位为百分比。</p>
+          <section class="crm-report-intro" aria-label="报表说明"><div><p>投入洞察</p><h3>按工时记录，掌握售前资源投入</h3><span>时间按当前浏览器时区输入，服务端以 UTC 半开区间统计；趋势按 UTC 日期归集。</span></div><strong><small>统计口径</small>标准小时</strong></section>
           <form class="console-form-grid crm-report-filters" @submit.prevent="loadReports">
+            <div class="crm-report-filters__heading"><div><strong>筛选范围</strong><span>组织、人员和商机选项仅展示当前授权范围内的数据。</span></div><button class="console-button ghost" type="button" :disabled="reportLoading || reportFilterOptionsLoading" @click="loadReportFilterOptions">刷新选项</button></div>
             <label class="console-form-item"><span>开始时间 *</span><input v-model="reportFilters.from" type="datetime-local" required></label>
             <label class="console-form-item"><span>结束时间 *</span><input v-model="reportFilters.to" type="datetime-local" required></label>
             <label class="console-form-item"><span>归属组织</span><select v-model="reportFilters.organization_id" :disabled="reportFilterOptionsLoading" @change="onReportOrganizationChange"><option value="">全部可见组织</option><option v-for="organization in reportOrganizationOptions" :key="organization.organization_id" :value="organization.organization_id">{{ organization.organization_name }}</option></select></label>
@@ -2585,10 +2649,10 @@ onMounted(async () => {
             <div class="crm-report-filter-actions"><button class="console-button primary" type="submit" :disabled="reportLoading">{{ reportLoading ? '加载中…' : '查询' }}</button><button class="console-button ghost" type="button" @click="exportReport">导出</button></div>
           </form>
           <p v-if="reportFilterOptionsError" class="crm-alert error" role="alert">{{ reportFilterOptionsError }} 请关闭报表后重试；不会退回为手填 ID。</p>
-          <div v-if="reportSummary" class="crm-kpis"><div><span>投入小时</span><strong>{{ reportSummary.work_hours }}</strong></div><div><span>参与人数</span><strong>{{ reportSummary.participant_count }}</strong></div><div><span>自动完成任务</span><strong>{{ reportSummary.auto_completed_task_count }}</strong></div><div><span>商机覆盖率</span><strong>{{ reportSummary.opportunity_coverage_rate_percent }}%</strong><small>{{ reportSummary.covered_opportunity_count }} / {{ reportSummary.active_opportunity_count }}</small></div></div>
-          <section class="crm-report-chart"><h3>投入分布</h3><div v-for="item in reportDistribution" :key="item.dimension_id" class="crm-report-bar"><span>{{ item.dimension_name }}</span><i :style="{ width: reportBarWidth(item.work_hours) }"></i><strong>{{ item.work_hours }} 小时</strong></div><p v-if="!reportDistribution.length" class="crm-note">当前筛选没有投入记录。</p></section>
-          <section class="crm-report-table-section"><h3>趋势数值表（UTC 日）</h3><div class="console-table-card"><div class="console-table-scroll"><table class="console-data-table crm-report-table"><thead><tr><th>日期</th><th>工时</th><th>参与人数</th><th>工时记录</th></tr></thead><tbody><tr v-for="item in reportTrend" :key="item.date"><td>{{ item.date }}</td><td>{{ item.work_hours }}</td><td>{{ item.participant_count }}</td><td>{{ item.worklog_count }}</td></tr></tbody></table></div></div></section>
-          <section class="crm-report-table-section"><h3>分布数值表</h3><div class="console-table-card"><div class="console-table-scroll"><table class="console-data-table crm-report-table"><thead><tr><th>维度</th><th>部门</th><th>工时</th><th>人数</th><th>任务</th><th>工时记录</th></tr></thead><tbody><tr v-for="item in reportDistribution" :key="`row-${item.dimension_id}`"><td>{{ item.dimension_name }}</td><td>{{ item.department || '—' }}</td><td>{{ item.work_hours }}</td><td>{{ item.participant_count }}</td><td>{{ item.request_count }}</td><td>{{ item.worklog_count }}</td></tr></tbody></table></div></div></section>
+          <template v-if="reportSummary"><div class="crm-kpis"><div class="crm-kpi crm-kpi--primary"><span>投入小时</span><strong>{{ reportSummary.work_hours }}</strong><small>已登记的有效工时</small></div><div class="crm-kpi crm-kpi--violet"><span>参与人数</span><strong>{{ reportSummary.participant_count }}</strong><small>有工时记录的执行人员</small></div><div class="crm-kpi crm-kpi--amber"><span>自动完成任务</span><strong>{{ reportSummary.auto_completed_task_count }}</strong><small>按自动完成规则归集</small></div><div class="crm-kpi crm-kpi--green"><span>商机覆盖率</span><strong>{{ reportSummary.opportunity_coverage_rate_percent }}%</strong><small>{{ reportSummary.covered_opportunity_count }} / {{ reportSummary.active_opportunity_count }} 个活跃商机</small></div></div>
+          <div class="crm-report-insights"><section class="crm-report-chart"><div class="crm-report-section-title"><div><span>结构分析</span><h3>投入分布</h3></div><small>{{ ({ PERSON: '按人员', DEPARTMENT: '按部门', OPPORTUNITY: '按商机' })[reportFilters.dimension] }}查看</small></div><div v-for="item in reportDistribution" :key="item.dimension_id" class="crm-report-bar"><span>{{ item.dimension_name }}</span><i :style="{ width: reportBarWidth(item.work_hours) }"></i><strong>{{ item.work_hours }} 小时</strong></div><p v-if="!reportDistribution.length" class="crm-note">当前筛选没有投入记录。</p></section>
+          <section class="crm-report-table-section"><div class="crm-report-section-title"><div><span>时间趋势</span><h3>趋势数值表（UTC 日）</h3></div><small>按日连续补齐</small></div><div class="console-table-card"><div class="console-table-scroll"><table class="console-data-table crm-report-table"><thead><tr><th>日期</th><th>工时</th><th>参与人数</th><th>工时记录</th></tr></thead><tbody><tr v-for="item in reportTrend" :key="item.date"><td>{{ item.date }}</td><td>{{ item.work_hours }}</td><td>{{ item.participant_count }}</td><td>{{ item.worklog_count }}</td></tr></tbody></table></div></div></section></div>
+          <section class="crm-report-table-section crm-report-table-section--distribution"><div class="crm-report-section-title"><div><span>明细核对</span><h3>分布数值表</h3></div><small>与上方分布图口径一致</small></div><div class="console-table-card"><div class="console-table-scroll"><table class="console-data-table crm-report-table"><thead><tr><th>维度</th><th>部门</th><th>工时</th><th>人数</th><th>任务</th><th>工时记录</th></tr></thead><tbody><tr v-for="item in reportDistribution" :key="`row-${item.dimension_id}`"><td>{{ item.dimension_name }}</td><td>{{ item.department || '—' }}</td><td>{{ item.work_hours }}</td><td>{{ item.participant_count }}</td><td>{{ item.request_count }}</td><td>{{ item.worklog_count }}</td></tr></tbody></table></div></div></section></template>
         </div>
         <footer><button class="console-button ghost" type="button" @click="showReport = false">关闭</button></footer>
       </article>
@@ -3005,7 +3069,7 @@ onMounted(async () => {
     <div v-if="terminalDialog" class="crm-modal nested"><form @submit.prevent="submitTerminal"><h2>补全终态待办</h2><label v-if="selectedOpportunity.terminal_pending_type === 'CONTRACT'">合同编号<input v-model.trim="terminalForm.contract_ref" required placeholder="请输入合同管理系统中的合同编号"><small>提交时会向合同系统精确校验该编号是否属于当前客户。</small></label><label v-else>失败原因<input v-model="terminalForm.lost_reason" required></label><label>补全原因<textarea v-model="terminalForm.reason" required></textarea></label><div class="crm-actions"><button type="button" @click="terminalDialog = false">取消</button><button class="primary">提交</button></div></form></div>
     <div v-if="followupDialog" class="crm-modal nested"><form @submit.prevent="submitFollowup"><h2>添加跟进</h2><label>类型<select v-model="followupForm.type"><option value="PHONE">电话</option><option value="VISIT">拜访</option><option value="EMAIL">邮件</option><option value="OTHER">其他</option></select></label><label>内容<textarea v-model="followupForm.content" required></textarea></label><label>跟进时间<input v-model="followupForm.followed_at" type="datetime-local" required></label><label>下次跟进<input v-model="followupForm.next_follow_at" type="datetime-local"></label><div class="crm-actions"><button type="button" @click="followupDialog = false">取消</button><button class="primary">保存</button></div></form></div>
     <div v-if="customerFollowupDialog" class="crm-modal nested"><form @submit.prevent="submitCustomerFollowup"><h2>添加客户沟通</h2><label>类型<select v-model="customerFollowupForm.type"><option value="PHONE">电话</option><option value="VISIT">拜访</option><option value="EMAIL">邮件</option><option value="OTHER">其他</option></select></label><label>内容<textarea v-model="customerFollowupForm.content" required></textarea></label><label>沟通时间<input v-model="customerFollowupForm.followed_at" type="datetime-local" required></label><label>下次跟进<input v-model="customerFollowupForm.next_follow_at" type="datetime-local"></label><div class="crm-actions"><button type="button" @click="customerFollowupDialog = false">取消</button><button class="primary">保存</button></div></form></div>
-    <div v-if="engineerPickerOpen && selectedPresale" class="crm-modal nested"><form class="crm-detail crm-engineer-picker" @submit.prevent="runPresale('assign')"><h2>从基础平台选择执行人员 <small>已选择 {{ selectedEngineerIDs.length }} 人</small></h2><p class="crm-note crm-engineer-picker__intro">人员来自基础平台当前有效且已获得本应用授权的用户目录，指派和后续工时全部保存在客户与商机系统内。</p><section class="crm-toolbar crm-engineer-picker__toolbar"><label>姓名<input v-model.trim="engineerQuery.keyword"></label><label>部门<input v-model.trim="engineerQuery.department"></label><button type="button" :disabled="engineerDirectoryLoading" @click="loadEngineerDirectory">{{ engineerDirectoryLoading ? '读取中…' : '查询' }}</button><button type="button" class="ghost" :disabled="engineerDirectoryLoading" @click="loadEngineerDirectory">{{ engineerDirectoryLoading ? '刷新中…' : '刷新人员信息' }}</button></section><p v-if="engineerDirectoryLoading" class="crm-note" role="status">正在从基础平台读取最新人员信息，当前已选择人员不会被清除。</p><div v-if="engineerDirectory.length" class="crm-engineer-list" aria-label="基础平台人员列表"><label v-for="person in engineerDirectory" :key="person.person_id" class="check crm-engineer"><input v-model="selectedEngineerIDs" type="checkbox" :value="person.person_id"><span><strong>{{ person.person_name }}</strong> · {{ person.department || '未标注部门' }}</span></label></div><p v-else-if="!engineerDirectoryLoading" class="crm-empty">当前筛选没有可指派人员。</p><section v-if="unavailableCurrentAssignees.length" class="crm-alert warning"><strong>当前指派人员不在本次查询结果中</strong><label v-for="person in unavailableCurrentAssignees" :key="person.person_id" class="check"><input v-model="selectedEngineerIDs" type="checkbox" :value="person.person_id">保留 {{ person.person_name || '未命名用户' }}（取消勾选即移出）</label></section><dl class="crm-assignment-diff crm-engineer-picker__diff"><dt>新增</dt><dd>{{ assignmentDiff.added.join('、') || '无' }}</dd><dt>保留</dt><dd>{{ assignmentDiff.retained.join('、') || '无' }}</dd><dt>移出</dt><dd>{{ assignmentDiff.removed.join('、') || '无' }}</dd></dl><label class="crm-engineer-picker__reason">改派原因<textarea v-model.trim="assignmentReason" required maxlength="500"></textarea></label><div class="crm-actions crm-engineer-picker__footer"><button type="button" @click="engineerPickerOpen = false">取消</button><button class="primary">确认替换指派</button></div></form></div>
+    <div v-if="engineerPickerOpen && selectedPresale" class="crm-modal nested"><form class="crm-detail crm-engineer-picker" @submit.prevent="runPresale('assign')"><header class="crm-engineer-picker__header"><div><p>售前协作 · 人员指派</p><h2>从基础平台选择执行人员</h2><span>人员来自基础平台当前有效且已获得本应用授权的用户目录</span></div><strong><b>{{ selectedEngineerIDs.length }}</b><small>已选择</small></strong></header><section class="crm-engineer-picker__filter"><div><strong>筛选人员</strong><span>按姓名或部门快速定位，可多选执行人员。</span></div><section class="crm-toolbar crm-engineer-picker__toolbar"><label>姓名<input v-model.trim="engineerQuery.keyword" placeholder="输入姓名关键字"></label><label>部门<input v-model.trim="engineerQuery.department" placeholder="输入部门名称"></label><button type="button" :disabled="engineerDirectoryLoading" @click="loadEngineerDirectory">{{ engineerDirectoryLoading ? '读取中…' : '查询人员' }}</button><button type="button" class="ghost" :disabled="engineerDirectoryLoading" @click="loadEngineerDirectory">{{ engineerDirectoryLoading ? '刷新中…' : '刷新目录' }}</button></section></section><section class="crm-engineer-picker__directory"><header><div><strong>可指派人员</strong><span>{{ engineerDirectoryLoading ? '正在同步基础平台目录…' : `本次查询共 ${engineerDirectory.length} 人` }}</span></div><span class="crm-engineer-picker__selection">已勾选 {{ selectedEngineerIDs.length }} 人</span></header><p v-if="engineerDirectoryLoading" class="crm-note" role="status">当前已选择人员会被保留，请稍候。</p><div v-else-if="engineerDirectory.length" class="crm-engineer-list" aria-label="基础平台人员列表"><label v-for="person in engineerDirectory" :key="person.person_id" class="check crm-engineer" :class="{ selected: selectedEngineerIDs.includes(person.person_id) }"><input v-model="selectedEngineerIDs" type="checkbox" :value="person.person_id"><span class="crm-engineer__avatar" aria-hidden="true">{{ (person.person_name || '人').slice(0, 1) }}</span><span class="crm-engineer__identity"><strong>{{ person.person_name }}</strong><small>{{ person.department || '未标注部门' }}</small></span><em>{{ selectedEngineerIDs.includes(person.person_id) ? '已选择' : '选择' }}</em></label></div><p v-else class="crm-empty">当前筛选没有可指派人员。</p></section><section v-if="unavailableCurrentAssignees.length" class="crm-engineer-picker__legacy"><div><strong>保留现有执行人</strong><span>以下人员不在当前筛选结果中，取消勾选后才会被移出。</span></div><label v-for="person in unavailableCurrentAssignees" :key="person.person_id" class="check"><input v-model="selectedEngineerIDs" type="checkbox" :value="person.person_id">{{ person.person_name || '未命名用户' }}</label></section><section class="crm-engineer-picker__changes"><div class="crm-engineer-picker__section-heading"><strong>本次变更预览</strong><span>提交后立即更新当前执行人。</span></div><dl class="crm-assignment-diff crm-engineer-picker__diff"><div class="is-added"><dt>新增</dt><dd>{{ assignmentDiff.added.join('、') || '无' }}</dd></div><div class="is-retained"><dt>保留</dt><dd>{{ assignmentDiff.retained.join('、') || '无' }}</dd></div><div class="is-removed"><dt>移出</dt><dd>{{ assignmentDiff.removed.join('、') || '无' }}</dd></div></dl></section><label class="crm-engineer-picker__reason"><span>改派原因（选填）</span><textarea v-model.trim="assignmentReason" maxlength="500" placeholder="如需说明本次人员调整，可在此填写"></textarea></label><div class="crm-actions crm-engineer-picker__footer"><button type="button" @click="engineerPickerOpen = false">取消</button><button class="primary">确认替换指派（{{ selectedEngineerIDs.length }} 人）</button></div></form></div>
     <div v-if="selectedPresale" class="console-modal-backdrop" :class="{ nested: !!selectedOpportunity }" role="presentation" @click.self="closePresale">
       <article class="console-detail-modal crm-presale-console-detail" role="dialog" aria-modal="true" aria-label="售前申请详情">
         <header>
@@ -3038,13 +3102,13 @@ onMounted(async () => {
         </section>
         <section v-if="authoritativePresaleActions.includes('ADD_PROGRESS')" class="console-detail-section crm-presale-entry-card">
           <h3>登记进度</h3><p>补充本次工作的最新进展，参考链接仅允许 HTTPS。</p>
-          <form class="console-form-grid" @submit.prevent="runPresale('progress')"><label class="console-form-item full"><span>进度说明 *</span><textarea v-model.trim="operation.progress" minlength="1" maxlength="2000" required rows="3"></textarea></label><label class="console-form-item"><span>参考链接（仅 HTTPS）</span><input v-model.trim="operation.progress_link" type="url" placeholder="https://"></label><label class="console-form-item"><span>进度百分比</span><input v-model="operation.progress_pct" type="number" min="0" max="100"></label><div class="crm-presale-form-actions"><button class="console-button primary" type="submit" :disabled="presaleMutationLoading">登记进度</button></div></form>
+          <form class="console-form-grid" @submit.prevent="runPresale('progress')"><label class="console-form-item full"><span>进度说明 *</span><textarea v-model.trim="operation.progress" minlength="1" maxlength="2000" required rows="3"></textarea></label><label class="console-form-item"><span>参考链接（仅 HTTPS）</span><input v-model.trim="operation.progress_link" type="url" placeholder="https://"></label><label class="console-form-item"><span>进度百分比</span><input v-model="operation.progress_pct" type="number" min="0" max="100"></label><div class="crm-presale-form-actions"><button class="console-button primary" type="submit" :disabled="presaleMutationLoading">登记进度</button><button v-if="authoritativePresaleActions.includes('COMPLETE')" class="console-button danger" type="button" :disabled="presaleMutationLoading" @click="runPresaleComplete">结束进度</button></div></form>
         </section>
         <details v-if="authoritativePresaleActions.includes('ADD_WORKLOG')" class="console-detail-section crm-presale-entry-card crm-presale-worklog-form">
           <summary>登记工时</summary>
-          <form class="console-form-grid" @submit.prevent="runPresale('worklog')"><label class="console-form-item"><span>开始</span><input v-model="operation.work_start" type="datetime-local"></label><label class="console-form-item"><span>结束</span><input v-model="operation.work_end" type="datetime-local"></label><label class="console-form-item"><span>单位</span><select v-model="operation.raw_unit"><option value="HOUR">小时</option><option value="PERSON_DAY">人天（1 人天 = 8 小时）</option></select></label><label class="console-form-item"><span>数值</span><input v-model="operation.raw_value"></label><label class="console-form-item full"><span>工作地点</span><input v-model="operation.work_site_address"></label><label class="console-form-item"><span>工作内容</span><select v-model="operation.work_content"><option value="SOLUTION_DESIGN">方案设计</option><option value="TECH_EXCHANGE">技术交流</option><option value="POC_DEMO">POC 演示</option><option value="TECH_QA">技术答疑</option><option value="OTHER">其他</option></select></label><label class="console-form-item"><span>备注</span><input v-model="operation.remark"></label><div class="crm-presale-form-actions"><button class="console-button primary" type="submit" :disabled="presaleMutationLoading">{{ presaleMutationLoading ? '提交中…' : '提交工时' }}</button></div></form>
+          <form class="console-form-grid" @submit.prevent="runPresale('worklog')"><label class="console-form-item"><span>开始 *</span><input v-model="operation.work_start" type="datetime-local" required></label><label class="console-form-item"><span>结束 *</span><input v-model="operation.work_end" type="datetime-local" required></label><label class="console-form-item"><span>单位</span><select v-model="operation.raw_unit"><option value="HOUR">小时</option><option value="PERSON_DAY">人天（1 人天 = 8 小时）</option></select></label><label class="console-form-item"><span>数值 *</span><input v-model.trim="operation.raw_value" required inputmode="decimal" pattern="(?:0|[1-9][0-9]{0,7})(?:\\.[0-9]{1,2})?"></label><label class="console-form-item full"><span>工作地点 *</span><input v-model.trim="operation.work_site_address" required maxlength="500"></label><label class="console-form-item"><span>工作内容</span><select v-model="operation.work_content"><option value="SOLUTION_DESIGN">方案设计</option><option value="TECH_EXCHANGE">技术交流</option><option value="POC_DEMO">POC 演示</option><option value="TECH_QA">技术答疑</option><option value="OTHER">其他</option></select></label><label class="console-form-item"><span>备注</span><input v-model.trim="operation.remark" maxlength="1000"></label><div class="crm-presale-form-actions"><button class="console-button primary" type="submit" :disabled="presaleMutationLoading">{{ presaleMutationLoading ? '提交中…' : '提交工时' }}</button></div></form>
         </details>
-        <section class="console-detail-section crm-presale-timeline" aria-labelledby="presale-timeline-heading"><div class="crm-subsection-heading"><div><h3 id="presale-timeline-heading">流程时间线</h3><p>按服务端稳定游标倒序加载，流程记录只读。</p></div><button class="console-button ghost small" type="button" :disabled="presaleTimelineLoading" @click="refreshPresaleTimeline(selectedPresale.request.id)">刷新</button></div><p v-if="presaleTimelineLoading && !presaleTimeline.length">正在加载流程记录…</p><p v-if="presaleTimelineError" class="crm-alert error" role="alert">{{ presaleTimelineError }}</p><ol v-if="presaleTimeline.length" class="crm-timeline-list"><li v-for="item in presaleTimeline" :key="item.event_id"><time :datetime="item.occurred_at">{{ formatDate(item.occurred_at) }}</time><div><strong>{{ timelineEventText(item.type) }}</strong><span v-if="item.actor_name || item.actor_id">操作人：{{ operationUserLabel(item) }}</span><span v-if="item.type === 'STATUS_CHANGED'">{{ requestStatusText(item.from_status) }} → {{ requestStatusText(item.to_status) }}</span><span v-if="item.type === 'APPROVAL_DECIDED'">审批结果：{{ approvalResultText(item.result) }}</span><span v-if="item.type === 'ASSIGNEE_ADDED' || item.type === 'ASSIGNEE_REMOVED'">执行人：{{ operationSubjectLabel(item) }}</span><p v-if="item.content">{{ item.content }}</p><span v-if="item.progress_pct !== null && item.progress_pct !== undefined">进度：{{ item.progress_pct }}%</span><a v-if="safeHTTPSURL(item.link_url)" :href="safeHTTPSURL(item.link_url)" target="_blank" rel="noopener noreferrer">打开安全链接</a><span v-if="item.work_hours">{{ workContentText(item.work_content) }} · {{ item.work_hours }} 小时</span></div></li></ol><p v-else-if="!presaleTimelineLoading && !presaleTimelineError" class="crm-empty compact">暂无流程记录</p><button v-if="presaleTimelineCursor" class="console-button ghost small" type="button" :disabled="presaleTimelineLoading" @click="loadMorePresaleTimeline">{{ presaleTimelineLoading ? '加载中…' : '加载更多' }}</button></section>
+        <section class="console-detail-section crm-presale-timeline" aria-labelledby="presale-timeline-heading"><div class="crm-subsection-heading"><div><h3 id="presale-timeline-heading">流程时间线</h3><p>按服务端稳定游标倒序展示，关键动作以步骤条呈现。</p></div><button class="console-button ghost small" type="button" :disabled="presaleTimelineLoading" @click="refreshPresaleTimeline(selectedPresale.request.id)">刷新</button></div><p v-if="presaleTimelineLoading && !presaleTimeline.length">正在加载流程记录…</p><p v-if="presaleTimelineError" class="crm-alert error" role="alert">{{ presaleTimelineError }}</p><ol v-if="presaleTimeline.length" class="crm-timeline-list" aria-label="售前流程步骤"><li v-for="item in presaleTimeline" :key="item.event_id" :class="`crm-timeline-step is-${timelineEventMeta(item.type).tone}`"><div class="crm-timeline-rail" aria-hidden="true"><span>{{ timelineEventMeta(item.type).icon }}</span></div><time :datetime="item.occurred_at"><strong>{{ formatDate(item.occurred_at) }}</strong><small>{{ timelineEventMeta(item.type).stage }}节点</small></time><article class="crm-timeline-card"><header><span class="crm-timeline-stage">{{ timelineEventMeta(item.type).stage }}</span><h4>{{ timelineEventText(item.type) }}</h4></header><div class="crm-timeline-meta"><span v-if="item.actor_name || item.actor_id">操作人：{{ operationUserLabel(item) }}</span><span v-if="item.type === 'STATUS_CHANGED'">{{ requestStatusText(item.from_status) }} <b>→</b> {{ requestStatusText(item.to_status) }}</span><span v-if="item.type === 'APPROVAL_DECIDED'">审批结果：{{ approvalResultText(item.result) }}</span><span v-if="item.type === 'ASSIGNEE_ADDED' || item.type === 'ASSIGNEE_REMOVED'">执行人：{{ operationSubjectLabel(item) }}</span><span v-if="item.progress_pct !== null && item.progress_pct !== undefined" class="crm-timeline-progress">进度 {{ item.progress_pct }}%</span><span v-if="item.work_hours" class="crm-timeline-hours">{{ workContentText(item.work_content) }} · {{ item.work_hours }} 小时</span></div><p v-if="item.content" class="crm-timeline-content">{{ item.content }}</p><a v-if="safeHTTPSURL(item.link_url)" :href="safeHTTPSURL(item.link_url)" target="_blank" rel="noopener noreferrer">打开参考链接 <span aria-hidden="true">↗</span></a></article></li></ol><p v-else-if="!presaleTimelineLoading && !presaleTimelineError" class="crm-empty compact">暂无流程记录</p><button v-if="presaleTimelineCursor" class="console-button ghost small" type="button" :disabled="presaleTimelineLoading" @click="loadMorePresaleTimeline">{{ presaleTimelineLoading ? '加载中…' : '加载更多' }}</button></section>
         <section class="console-detail-section crm-presale-worklogs"><h3>工时记录</h3><p v-if="!worklogs.length">暂无工时。</p><div v-for="item in worklogs" :key="item.id" class="crm-worklog"><span>{{ item.person_name || '未命名用户' }} · {{ item.work_hours }} 小时 · {{ pushStatusText(item.push_status) }}</span></div></section>
         <footer><button class="console-button ghost" type="button" @click="closePresale">关闭</button></footer>
       </article>

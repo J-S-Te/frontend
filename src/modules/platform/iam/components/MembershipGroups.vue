@@ -20,6 +20,8 @@ const props = defineProps({
 const emit = defineEmits(['detail'])
 const collapsedIds = ref(new Set())
 const initialized = ref(false)
+const membershipDisplayLimits = ref({})
+const defaultMembershipDisplayLimit = 20
 
 const groups = computed(() => groupMembershipsByOrganization(props.memberships, props.organizations, props.keyword))
 const allGroups = computed(() => groupMembershipsByOrganization(props.memberships, props.organizations))
@@ -58,15 +60,31 @@ function userName(membership) {
 function positionName(membership) {
   return membership?.position?.name || membership?.position?.id || '岗位信息不可见'
 }
+
+function displayedMemberships(group) {
+  return group.memberships.slice(0, membershipDisplayLimits.value[group.organization_id] || defaultMembershipDisplayLimit)
+}
+
+function canShowMoreMemberships(group) {
+  return group.memberships.length > displayedMemberships(group).length
+}
+
+function showMoreMemberships(group) {
+  membershipDisplayLimits.value = {
+    ...membershipDisplayLimits.value,
+    [group.organization_id]: (membershipDisplayLimits.value[group.organization_id] || defaultMembershipDisplayLimit) + defaultMembershipDisplayLimit,
+  }
+}
 </script>
 
 <template>
   <section class="iam-membership-groups-card" aria-label="按组织归类展示任职关系">
     <header class="iam-membership-groups-toolbar">
       <div>
-        <strong>任职组织分组</strong>
+        <p>任职目录</p><strong>任职组织分组</strong>
         <span>{{ allGroups.length }} 个组织 · {{ memberships.length }} 条任职关系</span>
       </div>
+      <div class="iam-tree-toolbar-metrics"><span><b>{{ groups.length }}</b> 个当前分组</span><span><b>{{ memberships.length }}</b> 条有效任职</span></div>
       <div class="iam-membership-groups-toolbar-actions">
         <button class="console-button ghost small" type="button" :disabled="loading || !groupIds.size" @click="expandAll">全部展开</button>
         <button class="console-button ghost small" type="button" :disabled="loading || !groupIds.size" @click="collapseAll">全部收起</button>
@@ -99,7 +117,7 @@ function positionName(membership) {
         </button>
 
         <div v-if="!effectiveCollapsedIds.has(group.organization_id)" class="iam-membership-group-body">
-          <article v-for="membership in group.memberships" :key="membershipId(membership)" class="iam-membership-group-row">
+          <article v-for="membership in displayedMemberships(group)" :key="membershipId(membership)" class="iam-membership-group-row">
             <div class="iam-membership-person">
               <span class="iam-membership-person-icon"><ConsoleIcon name="user" /></span>
               <span><strong :title="userName(membership)">{{ userName(membership) }}</strong><small class="iam-membership-user-id" :title="membership.user?.id || ''">{{ membership.user?.id || '暂无用户 ID' }}</small></span>
@@ -110,6 +128,7 @@ function positionName(membership) {
             <div class="iam-membership-validity"><small>有效期</small><strong>{{ displayMembershipValidity(membership) }}</strong></div>
             <div class="iam-membership-group-actions"><button class="console-text-button" type="button" @click="emit('detail', membership)">详情</button></div>
           </article>
+          <button v-if="canShowMoreMemberships(group)" class="iam-group-load-more" type="button" @click="showMoreMemberships(group)">显示更多任职（还有 {{ group.memberships.length - displayedMemberships(group).length }} 条）</button>
         </div>
       </section>
     </div>

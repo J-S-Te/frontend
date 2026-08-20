@@ -16,22 +16,43 @@ export function createPresaleReportFilters({
   rememberOwnerDirectory,
   directoryErrorMessage,
 }) {
+  const directoryPageSize = 50
+  const directoryMaxPages = 200
+
+  async function loadOwnerDirectory() {
+    const firstPage = await listOwnerDirectory({ page: 1, page_size: directoryPageSize })
+    const users = [...(firstPage?.items || [])]
+    const total = Number(firstPage?.total)
+    const expectedTotal = Number.isFinite(total) && total >= 0 ? total : null
+
+    // 基础平台目录接口单页最多 50 人；报表组织筛选不能只拿首屏数据，否则人数较多的
+    // 租户会遗漏组织，并把用户已选择的有效组织误判为无效后清空。
+    for (let page = 2; page <= directoryMaxPages; page += 1) {
+      if ((expectedTotal !== null && users.length >= expectedTotal) || users.length % directoryPageSize !== 0) break
+      const result = await listOwnerDirectory({ page, page_size: directoryPageSize })
+      const items = result?.items || []
+      users.push(...items)
+      if (items.length < directoryPageSize) break
+    }
+    return users
+  }
+
   async function load() {
     reportFilterOptionsLoading.value = true
     reportFilterOptionsError.value = ''
     try {
-      const [filterOptions, directory] = await Promise.all([
+      const [filterOptions, directoryUsers] = await Promise.all([
         getPresaleReportFilterOptions({ ...reportParams(), dimension: undefined }),
-        listOwnerDirectory({ page: 1, page_size: 50 }),
+        loadOwnerDirectory(),
       ])
       if (!showReport.value) return
-      rememberOwnerDirectory(directory?.items)
+      rememberOwnerDirectory(directoryUsers)
       reportFilterOptions.value = {
         opportunities: filterOptions?.opportunities || [],
         assignees: filterOptions?.assignees || [],
       }
       const organizations = new Map()
-      for (const user of directory?.items || []) {
+      for (const user of directoryUsers) {
         for (const organization of user.organizations || []) organizations.set(organization.organization_id, organization)
       }
       reportOrganizationOptions.value = [...organizations.values()].sort((left, right) => left.organization_name.localeCompare(right.organization_name, 'zh-CN'))

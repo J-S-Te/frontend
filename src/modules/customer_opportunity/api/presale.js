@@ -31,6 +31,9 @@ export const listPresaleExecutionDepartments = () => request('/presale/execution
 export const addProgress = (id, payload, idempotencyKey) => request(`/presale/requests/${encodeURIComponent(id)}/progress`, {
   method: 'POST', body: JSON.stringify(payload), idempotent: true, idempotencyKey,
 })
+export const completePresaleRequest = (id, payload) => request(`/presale/requests/${encodeURIComponent(id)}/complete`, {
+  method: 'POST', body: JSON.stringify(payload), idempotent: true,
+})
 export const cancelPresaleRequest = (id, payload, idempotencyKey) => request(`/presale/requests/${encodeURIComponent(id)}/cancel`, {
   method: 'POST', body: JSON.stringify(payload), idempotent: true, idempotencyKey,
 })
