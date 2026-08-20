@@ -56,6 +56,7 @@ export async function listAuditEvents({
   riskLevel = '',
   occurredFrom = '',
   occurredTo = '',
+  signal,
 } = {}) {
   const query = new URLSearchParams({ page: String(page), page_size: String(pageSize) })
   if (keyword) query.set('keyword', keyword)
@@ -70,7 +71,7 @@ export async function listAuditEvents({
     occurred_to: occurredTo,
   })
   filter.forEach((value, key) => query.set(key, value))
-  const data = await request(`/audit/events?${query.toString()}`)
+  const data = await request(`/audit/events?${query.toString()}`, { signal })
   return {
     items: Array.isArray(data?.items) ? data.items.map(mapAuditEvent) : [],
     total: Number(data?.total || 0),
