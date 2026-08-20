@@ -75,6 +75,10 @@ const auditTotal = ref(0)
 const auditLoading = ref(false)
 const auditError = ref('')
 const auditExporting = ref(false)
+// 筛选器会在用户连续操作时触发多次请求；序号和 AbortController 共同保证旧响应
+// 不会覆盖最后一次查询结果，也避免无效请求继续占用浏览器与 API 连接。
+let auditRequestSequence = 0
+let auditRequestController = null
 const applications = ref([])
 const environments = ref([])
 let toastTimer = null
@@ -442,6 +446,10 @@ function handleEmployeeOnboardingCompleted() {
 
 async function loadAuditEvents() {
   if (currentView.value !== 'audit' || !canViewAudit.value) return
+  const requestSequence = ++auditRequestSequence
+  auditRequestController?.abort()
+  const requestController = new AbortController()
+  auditRequestController = requestController
   auditLoading.value = true
   auditError.value = ''
   try {
@@ -457,7 +465,10 @@ async function loadAuditEvents() {
       riskLevel: auditRiskValue(auditRisk.value),
       occurredFrom: bounds.from,
       occurredTo: bounds.to,
+      signal: requestController.signal,
     })
+    // 后端返回前用户可能已修改筛选条件；旧请求即使成功也不能回写当前列表。
+    if (requestSequence !== auditRequestSequence || requestController.signal.aborted) return
     auditRecords.value = data.items
     auditTotal.value = data.total
     if (auditPage.value > auditTotalPages.value) {
@@ -465,11 +476,15 @@ async function loadAuditEvents() {
       await loadAuditEvents()
     }
   } catch (error) {
+    if (requestController.signal.aborted || requestSequence !== auditRequestSequence) return
     auditError.value = error instanceof AuditEventsError ? error.message : '读取审计事件失败。'
     auditRecords.value = []
     auditTotal.value = 0
   } finally {
-    auditLoading.value = false
+    if (requestSequence === auditRequestSequence) {
+      auditLoading.value = false
+      if (auditRequestController === requestController) auditRequestController = null
+    }
   }
 }
 
@@ -611,6 +626,9 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  auditRequestSequence += 1
+  auditRequestController?.abort()
+  auditRequestController = null
   if (toastTimer) {
     window.clearTimeout(toastTimer)
   }
