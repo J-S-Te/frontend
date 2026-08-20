@@ -41,6 +41,8 @@ const positions = ref([])
 const applications = ref([])
 const selectedPositionId = ref('')
 const assignedTemplateIds = ref([])
+const templatePage = ref(1)
+const templatePageSize = 6
 const editingTemplateId = ref('')
 const editingTemplateVersion = ref(0)
 // 通用确认弹窗。不用 window.confirm 是为了避免在 WebView 容器里静默失败。
@@ -116,9 +118,45 @@ function roleId(role) { return id(role, 'role_id', 'id') }
 function roleName(role) { return role?.name || role?.role_name || role?.code || roleId(role) }
 function appName(app) { return app?.name || app?.application_name || app?.code || applicationId(app) }
 function templateRoles(template) { return items(template?.roles) }
+function templateRoleLabel(role) {
+  return `${role?.application_name || role?.application_code || '应用'} / ${role?.role_name || role?.role_code || '未命名角色'}`
+}
+function templateRoleLabels(template) { return templateRoles(template).map(templateRoleLabel) }
 function templateRoleApplicationId(role) { return String(role?.application_id || role?.applicationId || '').trim() }
 function templateRoleScopeType(role) { return String(role?.scope_type || role?.scopeType || 'TENANT').trim() || 'TENANT' }
 function templateRoleScopeId(role) { return templateRoleScopeType(role) === 'ENVIRONMENT' ? String(role?.scope_id || role?.scopeId || '').trim() : '' }
+
+// 兼容旧版模板详情：部分历史数据只保存了应用/角色名称或编码，没有回传稳定 ID。
+// 目标目录已经同时返回应用和角色的稳定 ID，因此编辑时按“ID → 编码 → 名称”顺序补全，
+// 不改变展示语义，也不允许凭空生成角色 ID。
+function resolveTemplateRole(role) {
+  const applicationCode = String(role?.application_code || role?.applicationCode || '').trim()
+  const applicationName = String(role?.application_name || role?.applicationName || '').trim()
+  const application = applications.value.find((item) => {
+    const itemId = applicationId(item)
+    const itemCode = String(item?.application_code || item?.code || '').trim()
+    const itemName = String(item?.application_name || item?.name || '').trim()
+    return (templateRoleApplicationId(role) && itemId === templateRoleApplicationId(role))
+      || (applicationCode && itemCode === applicationCode)
+      || (applicationName && itemName === applicationName)
+  })
+  const resolvedApplicationId = templateRoleApplicationId(role) || applicationId(application)
+  const targetRoles = Array.isArray(application?.roles) ? application.roles : []
+  const roleCode = String(role?.role_code || role?.roleCode || '').trim()
+  const roleName = String(role?.role_name || role?.roleName || '').trim()
+  const targetRole = targetRoles.find((item) => {
+    const itemId = roleId(item)
+    const itemCode = String(item?.role_code || item?.code || '').trim()
+    const itemName = String(item?.role_name || item?.name || '').trim()
+    return (roleId(role) && itemId === roleId(role))
+      || (roleCode && itemCode === roleCode)
+      || (roleName && itemName === roleName)
+  })
+  return {
+    application_id: resolvedApplicationId,
+    role_id: roleId(role) || roleId(targetRole),
+  }
+}
 
 // 将后端模板明细转换为编辑器的“主应用 + 追加应用”结构。模板角色可能来自旧版本
 // 接口（ID 为数字或字符串、字段采用 camelCase），这里统一成字符串并按应用/范围分组，
@@ -126,10 +164,11 @@ function templateRoleScopeId(role) { return templateRoleScopeType(role) === 'ENV
 function templateEditorForm(template) {
   const groups = new Map()
   templateRoles(template).forEach((role) => {
-    const applicationIdValue = templateRoleApplicationId(role)
+    const resolved = resolveTemplateRole(role)
+    const applicationIdValue = resolved.application_id
     const scopeType = templateRoleScopeType(role)
     const scopeId = templateRoleScopeId(role)
-    const roleIdValue = String(role?.role_id || role?.roleId || role?.id || '').trim()
+    const roleIdValue = resolved.role_id
     if (!applicationIdValue || !roleIdValue) return
     const key = `${applicationIdValue}|${scopeType}|${scopeId}`
     const group = groups.get(key) || {
@@ -152,7 +191,20 @@ function templateEditorForm(template) {
 }
 const templateApplications = computed(() => applications.value)
 const activeTemplates = computed(() => templates.value.filter((template) => String(template?.status || '').toUpperCase() === 'ACTIVE'))
+const templatePageCount = computed(() => Math.max(1, Math.ceil(activeTemplates.value.length / templatePageSize)))
+const pagedActiveTemplates = computed(() => {
+  const start = (templatePage.value - 1) * templatePageSize
+  return activeTemplates.value.slice(start, start + templatePageSize)
+})
 const positionGroups = computed(() => groupAuthorizationPositions(positions.value))
+
+function setTemplatePage(page) {
+  templatePage.value = Math.min(Math.max(1, page), templatePageCount.value)
+}
+
+watch(activeTemplates, () => {
+  if (templatePage.value > templatePageCount.value) templatePage.value = templatePageCount.value
+})
 
 async function load() {
   if (!canReadAuthorization.value) return
@@ -582,11 +634,30 @@ onMounted(() => {
       <div v-if="loading" class="console-empty">正在读取模板…</div>
       <div v-else-if="!activeTemplates.length" class="console-empty">暂无可用授权模板，请先创建模板。</div>
       <div v-else class="iam-template-assignment-list">
-        <div v-for="template in activeTemplates" :key="templateId(template)" class="iam-template-assignment-row">
-          <label class="iam-template-assignment"><input v-model="assignedTemplateIds" type="checkbox" :value="templateId(template)" :disabled="!canManageAuthorization" /><span><strong>{{ template.name }}</strong><small>{{ template.code }} · {{ template.affected_users || 0 }} 位受影响用户</small><em>{{ templateRoles(template).map((role) => `${role.application_name || role.application_code} / ${role.role_name || role.role_code}`).join('；') || '未配置角色' }}</em></span></label>
+        <div v-for="template in pagedActiveTemplates" :key="templateId(template)" class="iam-template-assignment-row">
+          <label class="iam-template-assignment">
+            <input v-model="assignedTemplateIds" type="checkbox" :value="templateId(template)" :disabled="!canManageAuthorization" />
+            <span class="iam-template-assignment-content">
+              <span class="iam-template-assignment-topline"><strong>{{ template.name }}</strong><b>{{ template.affected_users || 0 }} 位受影响用户</b></span>
+              <small>{{ template.code }}</small>
+              <span v-if="templateRoleLabels(template).length" class="iam-template-role-tags">
+                <em v-for="roleLabel in templateRoleLabels(template).slice(0, 2)" :key="roleLabel">{{ roleLabel }}</em>
+                <em v-if="templateRoleLabels(template).length > 2" class="is-more">+{{ templateRoleLabels(template).length - 2 }}</em>
+              </span>
+              <small v-else class="is-muted">未配置角色</small>
+            </span>
+          </label>
           <div v-if="canManageAuthorization" class="iam-template-row-actions"><button class="console-text-button" type="button" :disabled="saving" @click="editTemplate(template)">编辑</button><button class="console-text-button danger iam-template-delete" type="button" :disabled="saving" @click="deleteTemplate(template)">删除模板</button></div>
         </div>
       </div>
+      <nav v-if="activeTemplates.length > templatePageSize" class="iam-template-pagination" aria-label="授权模板分页">
+        <span>共 {{ activeTemplates.length }} 个模板</span>
+        <div class="iam-template-pagination-controls">
+          <button class="console-button ghost small" type="button" :disabled="templatePage === 1" @click="setTemplatePage(templatePage - 1)">上一页</button>
+          <span>第 {{ templatePage }} / {{ templatePageCount }} 页</span>
+          <button class="console-button ghost small" type="button" :disabled="templatePage === templatePageCount" @click="setTemplatePage(templatePage + 1)">下一页</button>
+        </div>
+      </nav>
     </div>
 
     <div v-if="preview" ref="positionPreviewRef" class="console-table-card iam-authorization-preview"><h4>授权预览与影响分析</h4><p v-if="preview.conflicts?.length" class="login-target-module__error">{{ preview.conflicts.join('；') }}</p><p v-else class="iam-field-help">以下为该岗位模板产生的角色；用户同时有多个有效任职时，实际权限是全部有效来源的并集。</p><ul><li v-for="role in preview.roles || []" :key="`${role.template_id}-${role.role_id}`"><strong>{{ role.application_name || role.application_code }}</strong> / {{ role.role_name || role.role_code }} <small>来源：{{ role.template_name }}</small></li><li v-if="!(preview.roles || []).length">当前岗位没有从模板获得有效应用角色。</li></ul></div>
