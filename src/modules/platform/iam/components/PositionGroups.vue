@@ -22,6 +22,8 @@ const props = defineProps({
 const emit = defineEmits(['create', 'detail', 'remove'])
 const collapsedIds = ref(new Set())
 const initialized = ref(false)
+const positionDisplayLimits = ref({})
+const defaultPositionDisplayLimit = 16
 
 const completeTree = computed(() => buildPositionOrganizationTree(props.positions, props.organizations))
 const displayedTree = computed(() => buildPositionOrganizationTree(props.positions, props.organizations, props.keyword))
@@ -75,15 +77,31 @@ function isExpanded(node) {
 function visiblePositions(node) {
   return visiblePositionsForOrganizationNode(node, effectiveCollapsedIds.value)
 }
+
+function displayedPositions(node) {
+  return visiblePositions(node).slice(0, positionDisplayLimits.value[node.organization_id] || defaultPositionDisplayLimit)
+}
+
+function canShowMorePositions(node) {
+  return visiblePositions(node).length > displayedPositions(node).length
+}
+
+function showMorePositions(node) {
+  positionDisplayLimits.value = {
+    ...positionDisplayLimits.value,
+    [node.organization_id]: (positionDisplayLimits.value[node.organization_id] || defaultPositionDisplayLimit) + defaultPositionDisplayLimit,
+  }
+}
 </script>
 
 <template>
   <section class="iam-position-groups-card" aria-label="按组织架构展示岗位">
     <header class="iam-position-groups-toolbar">
       <div>
-        <strong>岗位组织树</strong>
+        <p>岗位目录</p><strong>岗位组织树</strong>
         <span>与组织单元层级一致 · {{ organizationCount }} 个组织</span>
       </div>
+      <div class="iam-tree-toolbar-metrics"><span><b>{{ positions.length }}</b> 个岗位</span><span><b>{{ visibleNodes.length }}</b> 个当前节点</span></div>
       <div class="iam-position-groups-toolbar-actions">
         <button class="console-button ghost small" type="button" :disabled="loading || !branchIds.size" @click="expandAll">全部展开</button>
         <button class="console-button ghost small" type="button" :disabled="loading || !branchIds.size" @click="collapseAll">全部收起</button>
@@ -125,7 +143,7 @@ function visiblePositions(node) {
         </header>
 
         <div v-if="visiblePositions(node).length" class="iam-position-group-body">
-          <article v-for="position in visiblePositions(node)" :key="positionId(position)" class="iam-position-group-row">
+          <article v-for="position in displayedPositions(node)" :key="positionId(position)" class="iam-position-group-row">
             <div class="iam-position-group-identity">
               <span class="iam-position-group-role-icon"><ConsoleIcon name="role" /></span>
               <span><strong>{{ position.name }}</strong><small>{{ position.code || '暂无岗位编码' }}</small></span>
@@ -136,6 +154,7 @@ function visiblePositions(node) {
               <button v-if="canDelete" class="console-text-button danger" type="button" :disabled="deletingId === positionId(position)" @click="emit('remove', position)">{{ deletingId === positionId(position) ? '删除中…' : '删除' }}</button>
             </div>
           </article>
+          <button v-if="canShowMorePositions(node)" class="iam-group-load-more" type="button" @click="showMorePositions(node)">显示更多岗位（还有 {{ visiblePositions(node).length - displayedPositions(node).length }} 个）</button>
         </div>
 
         <button v-if="canCreate && !node.unresolved && (!node.hasExpandableContent || isExpanded(node))" class="iam-position-group-create" type="button" @click="emit('create', node)">+ 在“{{ node.organization_name }}”下新增岗位</button>

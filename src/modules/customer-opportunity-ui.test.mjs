@@ -1041,7 +1041,7 @@ test('TS 写操作页面只在 prompt 与业务校验后分配内存重试键', 
   assert.match(view, /presaleDecisionSpec\(action\)/)
   assert.match(view, /runPresaleDecision\('cancel'\)/)
   assert.match(view, /submitPresaleDecision\(action, id, version, comment\)/)
-  assert.match(view, /if \(!assignmentReason\.value\.trim\(\)\).*return/)
+  assert.doesNotMatch(view, /改派原因必填/)
   assert.match(view, /const opportunityID = Number\(presaleForm\.opportunity_id\)/)
   assert.match(view, /presaleMutationRetries\.keyFor\('create', opportunityID/)
   assert.match(view, /presaleMutationRetries\.keyFor\('assignment', id/)

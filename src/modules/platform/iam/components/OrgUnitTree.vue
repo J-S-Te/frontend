@@ -32,6 +32,7 @@ const completeTree = computed(() => buildOrganizationTree(props.organizations))
 const displayedTree = computed(() => filterOrganizationTree(completeTree.value, props.keyword))
 const effectiveCollapsedIds = computed(() => String(props.keyword || '').trim() ? new Set() : collapsedIds.value)
 const visibleNodes = computed(() => flattenOrganizationTree(displayedTree.value, effectiveCollapsedIds.value))
+const activeOrganizationCount = computed(() => props.organizations.filter((item) => String(item?.status || '').toUpperCase() === 'ACTIVE').length)
 const organizationById = computed(() => new Map(props.organizations.map((item) => [organizationId(item), item])))
 const branchIds = computed(() => new Set(
   flattenOrganizationTree(completeTree.value)
@@ -112,9 +113,10 @@ function handleNodeKeydown(event, item, index) {
   <section class="iam-organization-tree-card" aria-label="组织架构">
     <header class="iam-organization-tree-toolbar">
       <div>
-        <strong>组织架构树</strong>
+        <p>组织目录</p><strong>组织架构树</strong>
         <span>同一上级下按显示顺序由小到大排列</span>
       </div>
+      <div class="iam-tree-toolbar-metrics"><span><b>{{ activeOrganizationCount }}</b> 个有效组织</span><span><b>{{ visibleNodes.length }}</b> 个当前可见</span></div>
       <div class="iam-organization-tree-toolbar-actions">
         <button class="console-button ghost small" type="button" :disabled="loading || !branchIds.size" @click="expandAll">全部展开</button>
         <button class="console-button ghost small" type="button" :disabled="loading || !branchIds.size" @click="collapseAll">全部收起</button>

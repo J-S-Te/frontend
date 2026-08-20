@@ -111,8 +111,9 @@ const detail = ref(null)
 const loading = reactive({ users: false, accounts: false, organizations: false, positions: false, memberships: false, positionAuthorizationTemplates: false })
 const errorMessage = ref('')
 const pageSize = 50
+const userPageSize = ref(50)
 const pagination = reactive({
-  users: { page: 1, pageSize, total: 0 },
+  users: { page: 1, pageSize: userPageSize.value, total: 0 },
   accounts: { page: 1, pageSize, total: 0 },
   organizations: { page: 1, pageSize, total: 0, serverPagingSupported: true },
   positions: { page: 1, pageSize, total: 0, serverPagingSupported: true },
@@ -1329,9 +1330,16 @@ function updatePage(key, data, items, { verifyPageSize = false } = {}) {
 async function loadUsers(page = pagination.users.page) {
   if (!canReadPanel(panels.find((item) => item.key === 'users'))) return
   const seq = ++requestSeq.users
-  const data = await safeCall('users', () => listUsers({ page, pageSize, keyword: panelFilters.users, status: 'ACTIVE' }))
+  const data = await safeCall('users', () => listUsers({ page, pageSize: userPageSize.value, keyword: panelFilters.users, status: 'ACTIVE' }))
   if (seq !== requestSeq.users) return
   if (data) updatePage('users', data, users)
+}
+
+function changeUserPageSize() {
+  pagination.users.page = 1
+  // 变更每页条数后以第一页重新查询，防止旧页码在新总页数下落到空页。
+  requestSeq.users += 1
+  loadUsers(1)
 }
 
 async function loadAccounts(page = pagination.accounts.page) {
@@ -2215,7 +2223,7 @@ onBeforeUnmount(() => {
         <p v-else-if="activePanel === 'memberships'" class="iam-panel-policy-note"><ConsoleIcon name="info" /><span><strong>任职连接人员与职责：</strong>开启“参与岗位授权继承”后，用户会动态获得该岗位授权模板中的标准角色。</span></p>
 
         <section v-if="activePanel === 'users' && canReadActivePanel" class="iam-table-section">
-          <div class="iam-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="panelFilters.users" type="search" placeholder="姓名 / 工号 / 邮箱 / 状态" /></label><span>{{ filteredUsers.length }} / 共 {{ pagination.users.total }} 位用户</span></div>
+          <div class="iam-filter-row iam-user-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="panelFilters.users" type="search" placeholder="姓名 / 工号 / 邮箱 / 状态" /></label><div class="iam-user-list-controls"><label>每页<select v-model.number="userPageSize" aria-label="用户列表每页条数" @change="changeUserPageSize"><option :value="20">20</option><option :value="50">50</option><option :value="100">100</option></select> 条</label><span>本页 {{ filteredUsers.length }} 位 / 共 {{ pagination.users.total }} 位</span></div></div>
           <div class="console-table-card iam-user-table-card"><div class="console-table-scroll"><table class="console-data-table iam-data-table iam-user-table">
             <thead><tr><th>用户</th><th>工号</th><th>邮箱</th><th>手机号</th><th>状态</th><th>更新时间</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
             <tr v-if="loading.users"><td class="console-empty" colspan="7">正在读取用户…</td></tr>
