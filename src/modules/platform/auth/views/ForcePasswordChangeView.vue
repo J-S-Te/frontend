@@ -63,7 +63,7 @@ async function submit() {
         <header class="login-header">
           <span class="login-kicker">FIRST LOGIN SECURITY</span>
           <h2 id="force-password-heading">首次登录，请修改密码</h2>
-          <p>管理员为你设置了初始密码。修改完成后需要重新登录，才能进入基础能力平台。</p>
+        <p>管理员为你设置了初始密码或重置了账户密码。修改完成后需要重新登录，才能进入基础能力平台。</p>
         </header>
         <form class="force-password-form" novalidate @submit.prevent="submit">
           <div class="field-group"><label for="current-password">当前密码</label><div class="input-wrap"><input id="current-password" v-model="currentPassword" type="password" autocomplete="current-password" required /></div></div>

@@ -75,10 +75,10 @@ test('任职关系详情不会跨脚本引用未定义的格式化函数', () =>
   })
 })
 
-test('用户详情提供受权限控制的管理员临时密码入口', () => {
+test('登录账号列表提供唯一的管理员临时密码入口', () => {
   const source = readFileSync(fileURLToPath(new URL('../components/IamSettingsModule.vue', import.meta.url)), 'utf8')
-  assert.match(source, /hasPermission\(IAM_PERMISSIONS\.accountPasswordReset\).*重置登录密码/)
-  assert.match(source, /@click="openPasswordResetForUser\(detail\.item\)"/)
+  assert.match(source, /hasPermission\(IAM_PERMISSIONS\.accountPasswordReset\).*openPasswordResetForAccount\(item\)/)
+  assert.doesNotMatch(source, /openPasswordResetForUser|重置登录密码/)
   assert.match(source, /后端未返回一次性临时密码/)
 })
 
