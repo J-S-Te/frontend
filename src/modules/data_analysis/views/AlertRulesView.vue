@@ -3,6 +3,9 @@
 // 由后端整表替换并写入审计；开关状态先本地标记，保存时统一提交。
 import { computed, onBeforeUnmount, onMounted, ref } from "vue"
 import ConsoleIcon from "@/modules/platform/shared/components/ConsoleIcon.vue"
+import EmptyState from "@/modules/platform/shared/components/EmptyState.vue"
+import ErrorState from "@/modules/platform/shared/components/ErrorState.vue"
+import LoadingState from "@/modules/platform/shared/components/LoadingState.vue"
 import { getAlertRules, putAlertRules } from "../api/dataAnalysis"
 
 const props = defineProps({ permissions: { type: Array, default: () => [] } })
@@ -75,8 +78,8 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
       <button class="da-button primary" :disabled="saving || !canManage" @click="onSave"><ConsoleIcon name="save" />{{ saving ? '保存中…' : '保存修改' }}</button>
     </div>
 
-    <div v-if="loading" class="da-empty"><div class="da-spinner"></div><b>预警规则加载中…</b></div>
-    <div v-else-if="error" class="da-empty"><ConsoleIcon name="info" /><b>{{ error }}</b><button class="da-button" @click="load">重新加载</button></div>
+    <LoadingState v-if="loading" title="预警规则加载中…" />
+    <ErrorState v-else-if="error" :error="error" @retry="load" />
     <div v-else class="da-table-panel">
       <div class="da-table-scroll">
         <table class="da-table">
@@ -93,7 +96,7 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
           </tbody>
         </table>
       </div>
-      <div v-if="filteredRules.length === 0" class="da-empty"><ConsoleIcon name="info" /><b>暂无预警规则</b><span>尚未配置任何预警规则</span></div>
+      <EmptyState v-if="filteredRules.length === 0" title="暂无预警规则" description="尚未配置任何预警规则" />
       <footer v-else><span>共 {{ filteredRules.length }} 条规则{{ dirtyCount ? ` · ${dirtyCount} 处未保存修改` : '' }}</span><span>变更保存后对新触发生效</span></footer>
     </div>
 

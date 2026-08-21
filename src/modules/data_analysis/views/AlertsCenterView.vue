@@ -3,6 +3,9 @@
 // 权限与数据范围由后端逐请求执行，前端仅按 permissions 控制动作显隐。
 import { computed, onMounted, ref } from "vue"
 import ConsoleIcon from "@/modules/platform/shared/components/ConsoleIcon.vue"
+import EmptyState from "@/modules/platform/shared/components/EmptyState.vue"
+import ErrorState from "@/modules/platform/shared/components/ErrorState.vue"
+import LoadingState from "@/modules/platform/shared/components/LoadingState.vue"
 import { ackAlert, closeAlert, getAlerts } from "../api/dataAnalysis"
 
 const props = defineProps({ permissions: { type: Array, default: () => [] } })
@@ -87,8 +90,8 @@ onMounted(load)
       <span>{{ filteredAlerts.length }} 条预警</span>
     </div>
 
-    <div v-if="loading" class="da-empty"><div class="da-spinner"></div><b>预警加载中…</b></div>
-    <div v-else-if="error" class="da-empty"><ConsoleIcon name="info" /><b>{{ error }}</b><button class="da-button" @click="load">重新加载</button></div>
+    <LoadingState v-if="loading" title="预警加载中…" />
+    <ErrorState v-else-if="error" :error="error" @retry="load" />
     <div v-else class="da-alert-list">
       <article v-for="item in filteredAlerts" :key="item.id" class="da-alert-card">
         <i class="da-alert-severity" :class="item.severity.toLowerCase()"></i>
@@ -105,7 +108,7 @@ onMounted(load)
           <button v-if="item.status !== 'CLOSED'" class="da-button ghost" :disabled="acting === item.id" @click="onClose(item.id)">关闭</button>
         </div>
       </article>
-      <div v-if="filteredAlerts.length === 0" class="da-empty"><ConsoleIcon name="info" /><b>暂无预警</b><span>当前筛选条件下没有预警记录</span></div>
+      <EmptyState v-if="filteredAlerts.length === 0" title="暂无预警" description="当前筛选条件下没有预警记录" />
     </div>
   </section>
 </template>

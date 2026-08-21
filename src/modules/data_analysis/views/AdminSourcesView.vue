@@ -3,6 +3,9 @@
 // 接入、启停与最近同步结果；触发同步由后端排队执行。
 import { computed, onMounted, ref } from "vue"
 import ConsoleIcon from "@/modules/platform/shared/components/ConsoleIcon.vue"
+import EmptyState from "@/modules/platform/shared/components/EmptyState.vue"
+import ErrorState from "@/modules/platform/shared/components/ErrorState.vue"
+import LoadingState from "@/modules/platform/shared/components/LoadingState.vue"
 import { listSources, triggerSource } from "../api/dataAnalysis"
 
 const props = defineProps({ permissions: { type: Array, default: () => [] } })
@@ -82,8 +85,8 @@ onMounted(load)
       <span>{{ filteredSources.length }} 个数据源</span>
     </div>
 
-    <div v-if="loading" class="da-empty"><div class="da-spinner"></div><b>数据源状态加载中…</b></div>
-    <div v-else-if="error" class="da-empty"><ConsoleIcon name="info" /><b>{{ error }}</b><button class="da-button" @click="load">重新加载</button></div>
+    <LoadingState v-if="loading" title="数据源状态加载中…" />
+    <ErrorState v-else-if="error" :error="error" @retry="load" />
     <div v-else class="da-table-panel">
       <div class="da-table-scroll">
         <table class="da-table">
@@ -102,7 +105,7 @@ onMounted(load)
           </tbody>
         </table>
       </div>
-      <div v-if="filteredSources.length === 0" class="da-empty"><ConsoleIcon name="info" /><b>暂无数据源</b><span>尚未登记任何子系统数据源</span></div>
+      <EmptyState v-if="filteredSources.length === 0" title="暂无数据源" description="尚未登记任何子系统数据源" />
       <footer v-else><span>共 {{ filteredSources.length }} 个数据源</span><span>同步调度由 aggregation-worker 执行</span></footer>
     </div>
   </section>

@@ -1,0 +1,82 @@
+/*
+ * 统一三态（Loading / Empty / Error）样式：供 @/modules/platform/shared/components
+ * 下的 LoadingState / EmptyState / ErrorState 共用。
+ *
+ * 设计要点：
+ *   - 视觉沿用 data_analysis 的 da-empty 体系，保证 dashboard 改造时观感一致；
+ *   - 使用 CSS 变量驱动色值，便于后续在不破坏统一风格的前提下做微调；
+ *   - compact 模式把最小高度从 250px 压到 120px，适配行内 / 卡片内场景。
+ */
+
+.ui-state {
+  min-height: 250px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 24px 16px;
+  color: var(--ui-state-muted, #64748b);
+  text-align: center;
+}
+
+.ui-state--compact {
+  min-height: 120px;
+  padding: 16px;
+}
+
+.ui-state__icon {
+  width: 30px;
+  height: 30px;
+  margin-bottom: 6px;
+  color: var(--ui-state-faint, #94a3b8);
+}
+
+.ui-state__spinner {
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--ui-state-spinner-track, #dbeafe);
+  border-top-color: var(--ui-state-spinner-active, #2563eb);
+  border-radius: 50%;
+  animation: ui-state-spin 0.8s linear infinite;
+  margin-bottom: 6px;
+}
+
+.ui-state__title {
+  color: var(--ui-state-title, #0f172a);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.ui-state__description {
+  font-size: 12px;
+  color: var(--ui-state-muted, #64748b);
+  max-width: 480px;
+}
+
+.ui-state__retry {
+  margin-top: 8px;
+  min-height: 32px;
+  padding: 6px 14px;
+  border: 1px solid var(--ui-state-retry-border, #dce5f2);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ui-state-title, #0f172a);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+}
+
+.ui-state__retry:hover {
+  border-color: var(--ui-state-spinner-active, #2563eb);
+  color: var(--ui-state-spinner-active, #2563eb);
+}
+
+.ui-state__retry:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@keyframes ui-state-spin {
+  to { transform: rotate(360deg); }
+}

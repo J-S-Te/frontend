@@ -7,6 +7,7 @@ import {
   auditResultLabel,
   auditResultMeta,
   auditResultSummary,
+  auditRiskLabel,
   auditResultTone,
 } from './auditPresentation.js'
 
@@ -51,4 +52,17 @@ test('未知操作和结果保持后端原值，不猜测业务名称', () => {
   assert.equal(auditActionLabel(record), 'custom.sync')
   assert.equal(auditResultLabel(record), 'QUEUED')
   assert.equal(auditResultTone(record.result), 'audit-result-unknown')
+})
+
+test('常见子系统操作显示为中文，同时保留原始操作编码', () => {
+  assert.equal(auditActionLabel({ action: 'customer.create' }), '新增客户')
+  assert.equal(auditActionLabel({ action: 'contract.approve' }), '合同审批')
+  assert.equal(auditActionLabel({ action: 'project.archive' }), '归档项目')
+  assert.equal(auditActionCode({ action: 'project.archive' }), 'project.archive')
+})
+
+test('风险编码统一显示中文名称，未知编码保持原值', () => {
+  assert.equal(auditRiskLabel({ risk: 'HIGH' }), '高')
+  assert.equal(auditRiskLabel({ risk: 'critical' }), '严重')
+  assert.equal(auditRiskLabel({ risk: 'CUSTOM' }), 'CUSTOM')
 })

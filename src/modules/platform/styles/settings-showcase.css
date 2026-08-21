@@ -5,6 +5,17 @@
 .settings-showcase-head h2 { margin: 7px 0 0; color: #0f172a; font-size: 22px; letter-spacing: .01em; }
 .settings-showcase-head p { max-width: 720px; margin: 7px 0 0; color: #64748b; font-size: 13px; line-height: 1.65; }
 
+.settings-tab-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.settings-tab-search { position: relative; display: flex; flex: 1 1 auto; align-items: center; min-width: 0; max-width: 360px; padding: 0 10px; color: #64748b; border: 1px solid #e2e8f0; border-radius: 6px; background: #fff; transition: border-color .15s ease, box-shadow .15s ease; }
+.settings-tab-search:focus-within { border-color: #93c5fd; box-shadow: 0 0 0 3px rgba(37,99,235,.12); }
+.settings-tab-search svg { width: 14px; height: 14px; flex: 0 0 auto; color: #94a3b8; }
+.settings-tab-search input { flex: 1 1 auto; min-width: 0; padding: 7px 0 7px 8px; color: #0f172a; font-size: 12.5px; border: 0; background: transparent; outline: none; }
+.settings-tab-search input::placeholder { color: #94a3b8; }
+.settings-tab-search-clear { display: grid; place-items: center; width: 18px; height: 18px; padding: 0; color: #64748b; font-size: 14px; line-height: 1; border: 0; border-radius: 50%; background: #f1f5f9; cursor: pointer; }
+.settings-tab-search-clear:hover { color: #0f172a; background: #e2e8f0; }
+.settings-tab-count { color: #94a3b8; font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.settings-tab-empty { display: inline-flex; align-items: center; padding: 10px 14px; color: #94a3b8; font-size: 12px; }
+
 .settings-tab-bar { display: flex; gap: 3px; margin-bottom: 12px; overflow-x: auto; border-bottom: 1px solid #e2e8f0; scrollbar-width: thin; }
 .settings-tab { position: relative; display: inline-flex; flex: 0 0 auto; align-items: center; gap: 6px; padding: 10px 11px; margin-bottom: -1px; color: #64748b; font-size: 12px; font-weight: 600; line-height: 1.4; white-space: nowrap; cursor: pointer; border: 0; border-bottom: 2px solid transparent; background: transparent; transition: color .16s ease, background .16s ease, border-color .16s ease; }
 .settings-tab svg { width: 15px; height: 15px; color: #94a3b8; }

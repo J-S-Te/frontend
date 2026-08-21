@@ -1,17 +1,4 @@
-const ACTION_LABELS = Object.freeze({
-  'auth.login': '登录',
-  'auth.login.failed': '登录失败',
-  'auth.login.locked': '账号锁定',
-  'auth.logout': '退出登录',
-})
-
-const RESULT_LABELS = Object.freeze({
-  SUCCESS: '成功',
-  FAILURE: '失败',
-  DENIED: '拒绝',
-  ERROR: '异常',
-  PARTIAL: '部分成功',
-})
+import { AUDIT_ACTION_LABELS, AUDIT_RESULT_LABELS, AUDIT_RISK_LABELS } from './auditDictionaries.js'
 
 function normalized(value) {
   return String(value || '').trim()
@@ -23,7 +10,7 @@ function normalized(value) {
  */
 export function auditActionLabel(record = {}) {
   const action = normalized(record.action || record.type)
-  return ACTION_LABELS[action] || normalized(record.type) || action || '—'
+  return AUDIT_ACTION_LABELS[action] || normalized(record.type) || action || '—'
 }
 
 /** 返回用于排查和接口对照的稳定操作代码。 */
@@ -44,7 +31,13 @@ export function auditResultLabel(record = {}) {
   if (action.startsWith('auth.login') && ['FAILURE', 'DENIED', 'ERROR'].includes(result)) return '登录失败'
   if (action === 'auth.logout' && result === 'SUCCESS') return '退出成功'
 
-  return normalized(record.resultLabel) || RESULT_LABELS[result] || normalized(record.result) || '状态未知'
+  return normalized(record.resultLabel) || AUDIT_RESULT_LABELS[result] || normalized(record.result) || '状态未知'
+}
+
+/** 将后端风险编码转换成稳定的管理员可读名称。 */
+export function auditRiskLabel(record = {}) {
+  const risk = normalized(record.risk).toUpperCase()
+  return normalized(record.riskLabel) || AUDIT_RISK_LABELS[risk] || normalized(record.risk) || '—'
 }
 
 /** 返回结果徽标的语义色类名。 */
@@ -76,7 +69,7 @@ export function auditResultMeta(record = {}) {
   const status = auditHttpStatusLabel(record.statusCode)
   if (status) parts.push(status)
 
-  const risk = normalized(record.riskLabel || record.risk)
+  const risk = auditRiskLabel(record)
   if (risk && risk !== '—') parts.push(`${risk}风险`)
 
   return parts.join(' · ')

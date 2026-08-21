@@ -12,7 +12,8 @@ test('看板 iframe 只经嵌入桥代理加载，不直连 Metabase', () => {
   assert.match(shell, /getEmbedToken\(code\)/)
   assert.match(shell, /embed-proxy/)
   assert.doesNotMatch(shell, /https?:\/\/.*metabase/i) // 无 Metabase 直连 URL
-  assert.match(shell, /sandbox="allow-scripts allow-same-origin allow-forms allow-popups"/)
+  assert.match(shell, /sandbox="allow-scripts allow-forms allow-popups"/) // 无 allow-same-origin，iframe 内容视为 opaque origin
+  assert.match(shell, /referrerpolicy="no-referrer"/)
 })
 
 test('看板 code 映射覆盖经营总览与 4 张业务看板', () => {
@@ -59,6 +60,31 @@ test('合同和项目看板展示聚合库最新摘要', () => {
   assert.match(shell, /getProjectDashboardSummary/)
   assert.match(native, /合同总数/)
   assert.match(native, /项目总数/)
+  for (const field of ['total_amount_minor', 'total_contracts', 'approval_contracts', 'active_contracts', 'expired_contracts']) {
+    assert.match(native, new RegExp(`contract\\.${field}`))
+  }
+  for (const field of ['project_count', 'in_flight_projects', 'risk_projects', 'service_items', 'status_counts']) {
+    assert.match(native, new RegExp(`project(?:Summary)?[^\\n]*${field}|project\\.${field}`))
+  }
+  assert.match(native, /formatAmountMinor/)
+  assert.match(native, /formatSnapshotAt/)
+  assert.match(native, /barWidth\(item\.value\)/)
+})
+
+test('页面只展示后端真实支持的状态筛选，不保留无效时间、区域和角色控件', () => {
+  assert.match(shell, /const statusOptions = computed/)
+  assert.match(shell, /v-model="statusFilter"/)
+  assert.match(shell, /:status-filter="statusFilter"/)
+  assert.doesNotMatch(shell, /v-model="filters\.(?:period|region|role|status)"/)
+  assert.match(native, /props\.statusFilter === "全部"/)
+  assert.match(native, /items\.filter\(\(item\) => item\.label === props\.statusFilter\)/)
+})
+
+test('摘要和嵌入请求丢弃跨路由返回的旧响应', () => {
+  assert.match(shell, /iframeRequestVersion/)
+  assert.match(shell, /summaryRequestVersion/)
+  assert.match(shell, /requestVersion !== iframeRequestVersion/)
+  assert.match(shell, /requestVersion !== summaryRequestVersion/)
 })
 
 test('看板按权限控制角色可见分区并标示数据范围', () => {
@@ -82,7 +108,7 @@ test('合同和项目页面不申请或渲染嵌入看板', () => {
   assert.match(shell, /!\['contract', 'project'\]\.includes\(code\)/)
   assert.match(shell, /if \(EMBEDDED_DASHBOARD_SECTIONS\.includes\(value\)\)/)
   assert.match(shell, /v-if="EMBEDDED_DASHBOARD_SECTIONS\.includes\(section\)" class="da-frame-panel"/)
-  assert.match(shell, /v-if="EMBEDDED_DASHBOARD_SECTIONS\.includes\(section\)" class="da-button"/)
+  assert.match(shell, /v-if="DASHBOARD_SECTIONS\.includes\(section\)" class="da-button"/)
 })
 
 test('总览、报告和财务页面提供高保真本地内容兜底', () => {
