@@ -1,6 +1,8 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
+import { sanitizePreviewHTML } from '../utils/sanitizePreview.js'
+
 const props = defineProps({
   html: { type: String, required: true },
   title: { type: String, default: '合同预览' },
@@ -18,6 +20,7 @@ const minimumZoom = 40
 const maximumZoom = 200
 const zoomStep = 10
 const isFullscreen = computed(() => nativeFullscreen.value || fallbackFullscreen.value)
+const sanitizedHtml = computed(() => sanitizePreviewHTML(props.html))
 
 function setZoom(value) {
   zoomPercent.value = Math.min(maximumZoom, Math.max(minimumZoom, Math.round(value / zoomStep) * zoomStep))

@@ -6,6 +6,8 @@ import { computed, onMounted, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import { AuthError, logoutCurrentSession } from "@/modules/platform/auth/api/auth"
 import ConsoleIcon from "@/modules/platform/shared/components/ConsoleIcon.vue"
+import ErrorState from "@/modules/platform/shared/components/ErrorState.vue"
+import LoadingState from "@/modules/platform/shared/components/LoadingState.vue"
 import { closeSubsystemTabOrFallback } from "@/modules/shared/utils/returnToPortal"
 import { getAuthMe, getEmbedToken, getContractDashboardSummary, getProjectDashboardSummary } from "../api/dataAnalysis"
 import AlertsCenterView from "./AlertsCenterView.vue"
@@ -101,7 +103,9 @@ const dashboardSummary = ref(null)
 const overviewSummary = ref({ contract: null, project: null })
 const summaryLoading = ref(false)
 const summaryError = ref("")
-const filters = ref({ period: "今年累计（截至昨日）", region: "全部区域", role: "全量（老板视图）", status: "全部" })
+const statusFilter = ref("全部")
+let iframeRequestVersion = 0
+let summaryRequestVersion = 0
 
 const currentMeta = computed(() => pageMeta[section.value] || pageMeta.overview)
 const currentUserName = computed(() => me.value?.display_name || "当前用户")
@@ -118,6 +122,14 @@ const dataScopeLabel = computed(() => {
   const role = (me.value?.roles || []).find((item) => ROLE_SCOPE_LABELS[item])
   return ROLE_SCOPE_LABELS[role] || "当前授权数据范围"
 })
+const statusOptions = computed(() => {
+  if (section.value === "contract") return ["全部", "审批中", "履行中", "已到期"]
+  if (section.value !== "project") return []
+  const statuses = Object.keys(dashboardSummary.value?.status_counts || {})
+    .filter(Boolean)
+    .sort((left, right) => left.localeCompare(right, "zh-CN"))
+  return ["全部", ...statuses]
+})
 
 async function loadMe() {
   loading.value = true
@@ -132,21 +144,25 @@ async function loadMe() {
 }
 
 async function loadDashboard(code) {
+  const requestVersion = ++iframeRequestVersion
   iframeLoading.value = true
   iframeError.value = null
   iframeSrc.value = ""
   try {
     const { token } = await getEmbedToken(code)
+    if (requestVersion !== iframeRequestVersion || section.value !== code) return
     // 令牌单次消费：仅本次 iframe 加载使用
     iframeSrc.value = `/data_analysis/api/v1/embed-proxy/${encodeURIComponent(token)}`
   } catch (err) {
+    if (requestVersion !== iframeRequestVersion) return
     iframeError.value = err?.code === "FORBIDDEN" ? "当前账号无权限查看该看板" : (err?.message || "看板加载失败")
   } finally {
-    iframeLoading.value = false
+    if (requestVersion === iframeRequestVersion) iframeLoading.value = false
   }
 }
 
 async function loadSummary(code) {
+  const requestVersion = ++summaryRequestVersion
   if (code === 'overview') {
     summaryLoading.value = true
     summaryError.value = ""
@@ -155,19 +171,23 @@ async function loadSummary(code) {
         canViewDashboard("contract") ? getContractDashboardSummary() : Promise.reject(new Error("contract dashboard unavailable")),
         canViewDashboard("project") ? getProjectDashboardSummary() : Promise.reject(new Error("project dashboard unavailable")),
       ])
+      if (requestVersion !== summaryRequestVersion || section.value !== code) return
       overviewSummary.value = {
         contract: contractResult.status === "fulfilled" ? contractResult.value : null,
         project: projectResult.status === "fulfilled" ? projectResult.value : null,
       }
     } catch (err) {
+      if (requestVersion !== summaryRequestVersion) return
       overviewSummary.value = { contract: null, project: null }
       summaryError.value = err?.message || "摘要加载失败"
     } finally {
-      summaryLoading.value = false
+      if (requestVersion === summaryRequestVersion) summaryLoading.value = false
     }
     return
   }
   if (!['contract', 'project'].includes(code)) {
+    summaryLoading.value = false
+    summaryError.value = ""
     dashboardSummary.value = null
     overviewSummary.value = { contract: null, project: null }
     return
@@ -175,15 +195,26 @@ async function loadSummary(code) {
   summaryLoading.value = true
   summaryError.value = ""
   try {
-    dashboardSummary.value = code === 'contract'
+    const result = code === 'contract'
       ? await getContractDashboardSummary()
       : await getProjectDashboardSummary()
+    if (requestVersion !== summaryRequestVersion || section.value !== code) return
+    dashboardSummary.value = result
   } catch (err) {
+    if (requestVersion !== summaryRequestVersion) return
     dashboardSummary.value = null
     summaryError.value = err?.message || "摘要加载失败"
   } finally {
-    summaryLoading.value = false
+    if (requestVersion === summaryRequestVersion) summaryLoading.value = false
   }
+}
+
+async function refreshCurrentDashboard() {
+  const code = DASHBOARD_CODES[section.value]
+  if (!code) return
+  const tasks = [loadSummary(code)]
+  if (EMBEDDED_DASHBOARD_SECTIONS.includes(section.value)) tasks.push(loadDashboard(code))
+  await Promise.all(tasks)
 }
 
 function navigate(key) {
@@ -213,6 +244,7 @@ async function logoutSystem() {
 }
 
 watch(() => section.value, (value) => {
+  statusFilter.value = "全部"
   if (DASHBOARD_SECTIONS.includes(value)) {
     if (me.value && !canViewDashboard(value)) {
       const fallback = visibleDashboardSections.value[0]
@@ -223,12 +255,17 @@ watch(() => section.value, (value) => {
       loadDashboard(DASHBOARD_CODES[value])
     } else {
       // 离开嵌入看板时清理上一次令牌，避免业务摘要页残留旧 iframe 状态。
+      iframeRequestVersion += 1
       iframeSrc.value = ""
       iframeError.value = null
       iframeLoading.value = false
     }
     loadSummary(DASHBOARD_CODES[value])
   }
+})
+
+watch(statusOptions, (options) => {
+  if (!options.includes(statusFilter.value)) statusFilter.value = "全部"
 })
 
 onMounted(async () => {
@@ -286,36 +323,34 @@ onMounted(async () => {
       <div class="da-page">
         <section class="da-page-head">
           <div><p class="da-eyebrow">DATA INTELLIGENCE</p><h1>{{ currentMeta[0] }}</h1><p>{{ currentMeta[1] }} · {{ dataScopeLabel }}</p></div>
-          <div class="da-page-filters" aria-label="看板筛选条件">
-            <label>时间<select v-model="filters.period"><option>今年累计（截至昨日）</option><option>2026年7月</option><option>2026年Q3</option><option>2026年</option></select></label>
-            <label>区域<select v-model="filters.region"><option>全部区域</option><option>华东</option><option>华南</option><option>华北</option></select></label>
-            <label>角色<select v-model="filters.role"><option>全量（老板视图）</option><option>本人及下属</option><option>管辖团队</option></select></label>
-            <label>状态<select v-model="filters.status"><option>全部</option><option>进行中</option><option>已逾期</option></select></label>
+          <div v-if="statusOptions.length" class="da-page-filters" aria-label="看板筛选条件">
+            <label>状态<select v-model="statusFilter"><option v-for="option in statusOptions" :key="option" :value="option">{{ option }}</option></select></label>
           </div>
           <div class="da-actions">
-            <button v-if="EMBEDDED_DASHBOARD_SECTIONS.includes(section)" class="da-button" :disabled="iframeLoading" @click="loadDashboard(DASHBOARD_CODES[section])"><ConsoleIcon name="reset" />{{ iframeLoading ? '加载中' : '刷新看板' }}</button>
+            <button v-if="DASHBOARD_SECTIONS.includes(section)" class="da-button" :disabled="iframeLoading || summaryLoading" @click="refreshCurrentDashboard"><ConsoleIcon name="reset" />{{ iframeLoading || summaryLoading ? '加载中' : '刷新看板' }}</button>
           </div>
         </section>
 
-        <section v-if="loadError" class="da-empty">
-          <ConsoleIcon name="info" /><b>会话读取失败</b><span>{{ loadError }}</span><button class="da-button" @click="loadMe">重新加载</button>
-        </section>
+        <ErrorState v-if="loadError" title="会话读取失败" :error="loadError" @retry="loadMe" />
 
         <template v-else-if="DASHBOARD_SECTIONS.includes(section)">
+          <LoadingState v-if="summaryLoading && ['contract', 'project'].includes(section)" title="摘要加载中…" compact />
+          <ErrorState v-else-if="summaryError && ['contract', 'project'].includes(section)" title="摘要加载失败" :error="summaryError" @retry="loadSummary(DASHBOARD_CODES[section])" compact />
           <NativeDashboardView
-            v-if="['overview', 'contract', 'project', 'report', 'finance'].includes(section)"
+            v-else-if="['overview', 'contract', 'project', 'report', 'finance'].includes(section)"
             :section="section"
             :contract-summary="section === 'overview' ? overviewSummary.contract : section === 'contract' ? dashboardSummary : null"
             :project-summary="section === 'overview' ? overviewSummary.project : section === 'project' ? dashboardSummary : null"
             :can-view-contract="canViewDashboard('contract')"
             :can-view-project="canViewDashboard('project')"
+            :status-filter="statusFilter"
           />
           <section v-if="EMBEDDED_DASHBOARD_SECTIONS.includes(section)" class="da-frame-panel">
             <header class="da-frame-head"><div><p>EMBEDDED DASHBOARD</p><b>{{ currentMeta[0] }}</b></div><span>经统一嵌入桥加载 · 数据实时刷新</span></header>
             <div class="da-frame-stage">
-              <div v-if="iframeLoading" class="da-state"><div class="da-spinner"></div><b>看板加载中…</b></div>
-              <div v-else-if="iframeError" class="da-state is-error"><ConsoleIcon name="info" /><b>{{ iframeError }}</b><button class="da-button" @click="loadDashboard(DASHBOARD_CODES[section])">重新加载</button></div>
-              <iframe v-else :src="iframeSrc" class="da-iframe" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
+              <LoadingState v-if="iframeLoading" title="看板加载中…" compact />
+              <ErrorState v-else-if="iframeError" :error="iframeError" @retry="loadDashboard(DASHBOARD_CODES[section])" compact />
+              <iframe v-else :src="iframeSrc" class="da-iframe" :title="`${currentMeta[0]}嵌入看板`" sandbox="allow-scripts allow-forms allow-popups" referrerpolicy="no-referrer" />
             </div>
           </section>
         </template>

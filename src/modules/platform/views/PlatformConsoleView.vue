@@ -26,10 +26,16 @@ import {
   auditActionCode,
   auditActionLabel,
   auditHttpStatusLabel,
+  auditRiskLabel,
   auditResultLabel,
   auditResultMeta,
   auditResultTone,
 } from '@/modules/platform/audit/utils/auditPresentation'
+import {
+  AUDIT_ACTION_CATEGORY_OPTIONS,
+  AUDIT_RESULT_LABELS,
+  AUDIT_RISK_LABELS,
+} from '@/modules/platform/audit/utils/auditDictionaries'
 import {
   PlatformSettingsError,
   getPlatformSettings,
@@ -186,6 +192,17 @@ const hasNoVisibleSettingsTab = computed(() => visibleSettingsTabs.value.length 
 const canOpenSettings = computed(() => visibleSettingsTabs.value.length > 0)
 const hasAnySettingsOrAuditPermission = computed(() => canOpenSettings.value || canViewAudit.value)
 const lastSettingsSection = ref('iam')
+// 设置页 tab 快速过滤：匹配 label / description / capabilities 任一字段，
+// 用于在 8 个 tab 中快速定位；空字符串不过滤。
+const settingsTabKeyword = ref('')
+const filteredSettingsTabs = computed(() => {
+  const query = settingsTabKeyword.value.trim().toLowerCase()
+  if (!query) return visibleSettingsTabs.value
+  return visibleSettingsTabs.value.filter((tab) => {
+    const haystack = [tab.label, tab.description, ...(tab.capabilities || [])].join(' ').toLowerCase()
+    return haystack.includes(query)
+  })
+})
 const activeSettingsTab = computed({
   get() {
     const section = typeof route.params.section === 'string' ? route.params.section : ''
@@ -216,33 +233,22 @@ const activeSettingsMeta = computed(() => {
   // 兜底：可见 tab 里第一个；完全没有可见 tab 时返回 null（template v-if 拦截）。
   return visibleSettingsTabs.value[0] || null
 })
+// 搜索无结果时不再继续展示被过滤掉的模块内容，避免导航与主体状态不一致。
+const hasActiveFilteredSettingsTab = computed(() => (
+  filteredSettingsTabs.value.some((tab) => tab.key === activeSettingsTab.value)
+))
 
 // 前后端 result / risk 枚举到中文标签的映射，与后端 audit/application 层枚举保持一致。
-const RESULT_LABELS = { SUCCESS: '成功', FAILURE: '失败', DENIED: '拒绝' }
-const RISK_LABELS = { CRITICAL: '严重', HIGH: '高', MEDIUM: '中', LOW: '低' }
 // 下拉框展示中文标签，提交给后端的是稳定的机器可读分类值，不能把中文标签当作 action 精确值查询。
-const AUDIT_TYPE_OPTIONS = [
-  { label: '登录', value: 'LOGIN' },
-  { label: '新增', value: 'CREATE' },
-  { label: '修改', value: 'UPDATE' },
-  { label: '删除', value: 'DELETE' },
-  { label: '授权变更', value: 'AUTHORIZATION_CHANGE' },
-  { label: '凭据轮换', value: 'SECRET_ROTATION' },
-  { label: '密码重置', value: 'PASSWORD_RESET' },
-  { label: '目录同步', value: 'CATALOG_SYNC' },
-  { label: '审计访问', value: 'AUDIT_ACCESS' },
-  { label: '导入', value: 'IMPORT' },
-  { label: '导出', value: 'EXPORT' },
-  { label: '状态变更', value: 'STATUS_CHANGE' },
-]
-const AUDIT_RESULT_OPTIONS = Object.values(RESULT_LABELS)
-const AUDIT_RISK_OPTIONS = Object.values(RISK_LABELS)
+const AUDIT_TYPE_OPTIONS = AUDIT_ACTION_CATEGORY_OPTIONS
+const AUDIT_RESULT_OPTIONS = Object.values(AUDIT_RESULT_LABELS)
+const AUDIT_RISK_OPTIONS = Object.values(AUDIT_RISK_LABELS)
 
 function auditResultValue(label) {
-  return Object.entries(RESULT_LABELS).find(([, value]) => value === label)?.[0] || ''
+  return Object.entries(AUDIT_RESULT_LABELS).find(([, value]) => value === label)?.[0] || ''
 }
 function auditRiskValue(label) {
-  return Object.entries(RISK_LABELS).find(([, value]) => value === label)?.[0] || ''
+  return Object.entries(AUDIT_RISK_LABELS).find(([, value]) => value === label)?.[0] || ''
 }
 
 function rangeBounds(range) {
@@ -563,10 +569,25 @@ async function logout() {
 }
 
 watch(currentView, (view) => {
+  if (view !== 'settings') {
+    // 搜索只属于当前设置页会话，离开后清空，避免返回时隐藏设置模块。
+    settingsTabKeyword.value = ''
+  }
   if (view === 'audit' && canViewAudit.value) {
     if (canReadApplications.value && !applications.value.length) loadApplications()
     loadAuditEvents()
   }
+})
+
+watch(filteredSettingsTabs, (tabs) => {
+  if (currentView.value !== 'settings' || !tabs.length) return
+  if (tabs.some((tab) => tab.key === activeSettingsTab.value)) return
+
+  // 当前 tab 被搜索条件排除时，同步切换到第一个匹配项。
+  // 搜索输入不应为每次自动切换新增浏览器历史，因此使用 replace。
+  const nextSection = tabs[0].key
+  lastSettingsSection.value = nextSection
+  void router.replace({ name: 'settings', params: { section: nextSection } })
 })
 
 watch(auditApplication, (value, previous) => {
@@ -681,11 +702,6 @@ onBeforeUnmount(() => {
         </p>
       </nav>
 
-      <div class="console-sidebar-note">
-        <ConsoleIcon name="info" />
-        <span>本期仅开放系统设置与审计日志。</span>
-      </div>
-
       <div class="console-sidebar-user">
         <span class="console-avatar" aria-hidden="true">{{ currentAccountAvatar }}</span>
         <span class="console-user-copy">
@@ -744,7 +760,7 @@ onBeforeUnmount(() => {
           <div class="console-table-card audit-table-card">
             <div class="console-table-scroll">
               <table class="console-data-table audit-data-table">
-                <thead><tr><th>发生时间</th><th>操作人</th><th>操作</th><th>应用 / 环境</th><th>资源对象</th><th>方法 / 路径</th><th>客户端 IP</th><th>状态</th><th>风险</th><th class="console-actions-cell">操作</th></tr></thead>
+                <thead><tr><th>发生时间</th><th>操作人</th><th>操作</th><th>应用 / 环境</th><th>资源对象</th><th>方法 / 路径</th><th>客户端 IP</th><th>状态</th><th>风险</th><th class="console-actions-cell">查看</th></tr></thead>
                 <tbody>
                   <tr v-if="auditLoading">
                     <td colspan="10" class="login-target-module__state">正在读取审计事件…</td>
@@ -761,7 +777,7 @@ onBeforeUnmount(() => {
                     <td data-label="方法 / 路径"><span class="audit-method">{{ record.method || '—' }}</span><span class="console-entity-meta console-mono">{{ record.path || '—' }}</span></td>
                     <td class="console-mono" data-label="客户端 IP">{{ record.ip || '—' }}</td>
                     <td data-label="状态"><span class="console-badge audit-result-badge" :class="auditResultTone(record.result)">{{ auditResultLabel(record) }}</span><span v-if="auditHttpStatusLabel(record.statusCode)" class="console-entity-meta audit-status-code">{{ auditHttpStatusLabel(record.statusCode) }}</span></td>
-                    <td data-label="风险"><span class="console-badge" :class="`risk-${record.risk}`">{{ record.riskLabel || record.risk || '—' }}</span></td>
+                    <td data-label="风险"><span class="console-badge" :class="`risk-${record.risk}`">{{ auditRiskLabel(record) }}</span></td>
                     <td class="console-actions-cell" data-label="操作"><button class="console-text-button" type="button" @click="openAuditDetail(record)">详情</button></td>
                   </tr>
                 </tbody>
@@ -781,9 +797,28 @@ onBeforeUnmount(() => {
             </div>
           </header>
 
+          <div v-if="!hasNoVisibleSettingsTab" class="settings-tab-toolbar">
+            <label class="settings-tab-search">
+              <ConsoleIcon name="search" />
+              <input
+                v-model="settingsTabKeyword"
+                type="search"
+                placeholder="搜索设置模块（按名称 / 描述 / 功能）"
+                aria-label="搜索设置模块"
+              />
+              <button
+                v-if="settingsTabKeyword"
+                type="button"
+                class="settings-tab-search-clear"
+                aria-label="清空搜索"
+                @click="settingsTabKeyword = ''"
+              >×</button>
+            </label>
+            <span class="settings-tab-count">{{ filteredSettingsTabs.length }} / {{ visibleSettingsTabs.length }}</span>
+          </div>
           <nav v-if="!hasNoVisibleSettingsTab" class="settings-tab-bar" role="tablist" aria-label="系统设置分类">
             <button
-              v-for="tab in visibleSettingsTabs"
+              v-for="tab in filteredSettingsTabs"
               :key="tab.key"
               class="settings-tab"
               :class="{ active: activeSettingsTab === tab.key }"
@@ -796,6 +831,7 @@ onBeforeUnmount(() => {
               <ConsoleIcon :name="tab.icon" />
               <span>{{ tab.label }}</span>
             </button>
+            <span v-if="filteredSettingsTabs.length === 0" class="settings-tab-empty">没有匹配“{{ settingsTabKeyword }}”的设置模块</span>
           </nav>
           <div v-else class="settings-empty" role="status">
             <span class="settings-empty-icon" aria-hidden="true"><ConsoleIcon name="shield" /></span>
@@ -803,7 +839,7 @@ onBeforeUnmount(() => {
             <p>请联系平台管理员授予对应模块的读取或管理权限；IAM 不要求额外授予 <code>platform:user:read</code>。</p>
           </div>
 
-          <div v-if="!hasNoVisibleSettingsTab && activeSettingsMeta" class="settings-active-summary" :class="activeSettingsMeta.tone">
+          <div v-if="hasActiveFilteredSettingsTab && activeSettingsMeta" class="settings-active-summary" :class="activeSettingsMeta.tone">
             <span class="settings-active-summary-icon"><ConsoleIcon :name="activeSettingsMeta.icon" /></span>
             <div class="settings-active-summary-copy">
               <strong>{{ activeSettingsMeta.label }}</strong>
@@ -814,7 +850,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <div v-if="!hasNoVisibleSettingsTab && activeSettingsTab === 'base'" class="console-card settings-card">
+          <div v-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'base'" class="console-card settings-card">
             <div class="console-card-body">
               <h2>平台基础信息</h2>
               <p class="console-card-hint">用于定义基础能力平台的展示名称。</p>
@@ -828,21 +864,21 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <PublicAccessSettingsModule v-else-if="!hasNoVisibleSettingsTab && activeSettingsTab === 'access'" @toast="showToast" />
+          <PublicAccessSettingsModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'access'" @toast="showToast" />
 
-          <IamSettingsModule v-else-if="!hasNoVisibleSettingsTab && activeSettingsTab === 'iam'" :refresh-key="iamRefreshKey" @toast="showToast" @employee-onboarding="openEmployeeOnboarding" />
+          <IamSettingsModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'iam'" :refresh-key="iamRefreshKey" @toast="showToast" @employee-onboarding="openEmployeeOnboarding" />
 
-          <PersonnelChangeCenter v-else-if="!hasNoVisibleSettingsTab && activeSettingsTab === 'personnel'" @toast="showToast" @employee-onboarding="openEmployeeOnboarding" />
+          <PersonnelChangeCenter v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'personnel'" @toast="showToast" @employee-onboarding="openEmployeeOnboarding" />
 
-          <NotificationCenterModule v-else-if="!hasNoVisibleSettingsTab && activeSettingsTab === 'notify'" @toast="showToast" />
+          <NotificationCenterModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'notify'" @toast="showToast" />
 
-          <LoginSecurityModule v-else-if="!hasNoVisibleSettingsTab && activeSettingsTab === 'security'" @toast="showToast" />
+          <LoginSecurityModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'security'" @toast="showToast" />
 
 
-          <DictionaryManagementModule v-else-if="!hasNoVisibleSettingsTab && activeSettingsTab === 'dict'" @toast="showToast" />
+          <DictionaryManagementModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'dict'" @toast="showToast" />
 
           <SubsystemOnboardingModule
-            v-else-if="!hasNoVisibleSettingsTab && activeSettingsTab === 'applications'"
+            v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'applications'"
             :can-onboard="canOnboardSubsystem"
             @toast="showToast"
             @completed="loadApplications"

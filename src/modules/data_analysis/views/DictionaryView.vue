@@ -3,6 +3,9 @@
 // 由版本卡片结构化展示，不再使用调试用 JSON 直出。
 import { computed, onMounted, ref } from "vue"
 import ConsoleIcon from "@/modules/platform/shared/components/ConsoleIcon.vue"
+import EmptyState from "@/modules/platform/shared/components/EmptyState.vue"
+import ErrorState from "@/modules/platform/shared/components/ErrorState.vue"
+import LoadingState from "@/modules/platform/shared/components/LoadingState.vue"
 import { getDictionary } from "../api/dataAnalysis"
 
 const dictionary = ref(null)
@@ -34,8 +37,8 @@ onMounted(load)
 
 <template>
   <section>
-    <div v-if="loading" class="da-empty"><div class="da-spinner"></div><b>指标字典加载中…</b></div>
-    <div v-else-if="error" class="da-empty"><ConsoleIcon name="info" /><b>{{ error }}</b><button class="da-button" @click="load">重新加载</button></div>
+    <LoadingState v-if="loading" title="指标字典加载中…" />
+    <ErrorState v-else-if="error" :error="error" @retry="load" />
     <div v-else-if="dictionary" class="da-dict-grid">
       <article class="da-dict-card">
         <p class="da-panel-kicker">DICTIONARY VERSION</p>
@@ -55,7 +58,7 @@ onMounted(load)
       <div class="da-dict-metrics da-table-panel">
         <div class="da-filters"><label><ConsoleIcon name="search" /><input v-model="keyword" placeholder="检索指标名称 / 看板 / 关键词" /></label><span>{{ filteredMetrics.length }} / {{ dictionary.metrics?.length || 0 }} 项指标</span></div>
         <div class="da-table-scroll"><table class="da-table"><thead><tr><th>编码</th><th>指标</th><th>看板</th><th>业务定义</th><th>计算公式</th><th>数据源</th><th>周期</th><th>状态</th></tr></thead><tbody><tr v-for="item in filteredMetrics" :key="item.code"><td class="mono">{{ item.code }}</td><td><b>{{ item.name }}</b></td><td>{{ item.dashboard }}</td><td>{{ item.definition }}</td><td>{{ item.formula }}</td><td class="mono">{{ item.source }}</td><td>{{ item.period }}</td><td><span class="da-badge normal">{{ item.status }}</span></td></tr></tbody></table></div>
-        <div v-if="filteredMetrics.length === 0" class="da-empty"><ConsoleIcon name="info" /><b>未找到匹配指标</b></div>
+        <EmptyState v-if="filteredMetrics.length === 0" title="未找到匹配指标" />
       </div>
     </div>
   </section>

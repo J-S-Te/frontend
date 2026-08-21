@@ -19,3 +19,10 @@ test('contract document preview supports native and fallback fullscreen display'
   assert.match(source, /is-fullscreen-fallback/)
   assert.match(source, /isFullscreen \? '退出全屏' : '全屏显示'/)
 })
+
+test('contract document preview sanitizes HTML before rendering it', () => {
+  assert.match(source, /import \{ sanitizePreviewHTML \} from '\.\.\/utils\/sanitizePreview\.js'/)
+  assert.match(source, /const sanitizedHtml = computed\(\(\) => sanitizePreviewHTML\(props\.html\)\)/)
+  assert.match(source, /v-html="sanitizedHtml"/)
+  assert.doesNotMatch(source, /v-html="(?:props\.)?html"/)
+})
