@@ -54,6 +54,9 @@ const canReadItems = computed(() => hasPermission(DICTIONARY_PERMISSIONS.itemRea
 const canCreateItem = computed(() => hasPermission(DICTIONARY_PERMISSIONS.itemCreate))
 const canUpdateItem = computed(() => hasPermission(DICTIONARY_PERMISSIONS.itemUpdate))
 const selectedDictionary = computed(() => dictionaries.value.find((entry) => dictionaryID(entry) === selectedDictionaryId.value) || null)
+// 停用父字典下的条目不会被运行时业务接口返回；管理页面也不应继续允许新增，
+// 否则会出现“保存成功但业务侧永远不可用”的误导状态。
+const canCreateSelectedItem = computed(() => canCreateItem.value && selectedDictionary.value?.status === 'ACTIVE')
 const dictionaryTotalPages = computed(() => Math.max(1, Math.ceil(dictionaryTotal.value / dictionaryPageSize)))
 const itemTotalPages = computed(() => Math.max(1, Math.ceil(itemTotal.value / itemPageSize)))
 const activeDictionaryCount = computed(() => dictionaries.value.filter((entry) => entry.status === 'ACTIVE').length)
@@ -86,7 +89,9 @@ function normalizedPage(payload) {
 function formatDate(value) {
   if (!value) return '—'
   const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false })
+  // Go time.Time 的零值会被序列化为 0001-01-01；这不是可供管理员使用的更新时间。
+  if (Number.isNaN(date.getTime()) || date.getUTCFullYear() <= 1) return '—'
+  return date.toLocaleString('zh-CN', { hour12: false })
 }
 
 function userMessage(error, fallback) {
@@ -288,7 +293,7 @@ async function submitDictionary() {
 }
 
 function openCreateItem() {
-  if (!selectedDictionary.value || !canCreateItem.value) return
+  if (!selectedDictionary.value || !canCreateSelectedItem.value) return
   editingItem.value = null
   itemFormError.value = ''
   Object.assign(itemForm, emptyItemForm())
@@ -320,7 +325,7 @@ function closeItemEditor() {
 
 async function submitItem() {
   if (!selectedDictionary.value || itemSubmitting.value) return
-  if (editingItem.value ? !canUpdateItem.value : !canCreateItem.value) return
+  if (editingItem.value ? !canUpdateItem.value : !canCreateSelectedItem.value) return
   itemSubmitting.value = true
   itemFormError.value = ''
   try {
@@ -428,8 +433,10 @@ watch(canReadDictionaries, (granted, previouslyGranted) => {
           <template v-if="selectedDictionary">
             <header class="dictionary-items-panel__head">
               <div><span>当前字典</span><h3>{{ selectedDictionary.name }}</h3><p><code>{{ selectedDictionary.code }}</code> · {{ selectedDictionary.description || '暂无说明' }}</p></div>
-              <div class="dictionary-header-actions"><button v-if="canUpdateDictionary" class="console-button ghost" type="button" @click="openEditDictionary(selectedDictionary)">编辑字典</button><button v-if="canCreateItem" class="console-button primary" type="button" @click="openCreateItem">新增字典项</button></div>
+              <div class="dictionary-header-actions"><button v-if="canUpdateDictionary" class="console-button ghost" type="button" @click="openEditDictionary(selectedDictionary)">编辑字典</button><button v-if="canCreateItem" class="console-button primary" type="button" :disabled="!canCreateSelectedItem" :title="canCreateSelectedItem ? '新增字典项' : '请先启用当前字典'" @click="openCreateItem">新增字典项</button></div>
             </header>
+
+            <p v-if="selectedDictionary.status !== 'ACTIVE'" class="dictionary-module__warning" role="status">当前字典已停用，业务接口不会读取其中的字典项。请先点击“编辑字典”将状态改为“启用”，再新增字典项。</p>
 
             <div v-if="canReadItems" class="console-filter-bar dictionary-items-toolbar">
               <label class="console-search-field"><ConsoleIcon name="search" /><input v-model="itemKeyword" type="search" maxlength="100" placeholder="项编码 / 名称 / 值" @keyup.enter="applyItemFilter" /></label>

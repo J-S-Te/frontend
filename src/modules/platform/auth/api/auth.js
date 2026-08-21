@@ -258,6 +258,25 @@ export async function recordSessionActivity() {
 }
 
 /**
+ * refreshCurrentSession renews the browser cookie only after the lifecycle has observed a
+ * real user interaction. It must not be called by background authorization polling.
+ *
+ * @returns {Promise<Object>} the refreshed session metadata.
+ */
+export async function refreshCurrentSession() {
+  const body = await requestWithStructuredContext('/auth/token/refresh', {
+    method: 'POST',
+    headers: { Accept: 'application/json' },
+  }, {
+    operation: 'REFRESH_SESSION',
+    failureMessage: '当前登录状态已失效，请重新登录。',
+    networkMessage: '无法刷新登录状态，请确认后端服务已启动。',
+  })
+
+  return body.data
+}
+
+/**
  * logoutCurrentSession 退出当前账号在同一租户下的所有应用会话。
  *
  * 后端会撤销当前账号在租户下的全部服务端会话并写入过期的 HttpOnly Cookie；
