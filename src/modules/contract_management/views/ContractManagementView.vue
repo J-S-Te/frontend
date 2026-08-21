@@ -473,6 +473,10 @@ function approvalKindLabel(kind) {
   return approvalKindLabels[kind] || '合同审批'
 }
 
+function approvalNotificationTitle(approval) {
+  return `${approval.type || '合同审批'}已流转至${approval.step || '当前节点'}`
+}
+
 function approvalActionLabel(action) {
   return approvalActionLabels[action] || '审批处理'
 }
@@ -1647,7 +1651,11 @@ onBeforeUnmount(() => {
         </div>
         <div v-if="notificationOpen" class="contract-notification-panel">
           <header><strong>通知中心</strong><span>{{ approvals.length }} 项待办</span></header>
-          <button v-if="can('approval.process')" type="button" @click="navigate('approvals')"><i class="warning"></i><span><strong>您有 {{ approvals.length }} 项合同审批流程</strong><small>包含当前待处理和后续待流转节点</small></span></button>
+          <template v-if="can('approval.process') && approvals.length">
+            <button v-for="approval in approvals.slice(0, 5)" :key="approval.id" type="button" @click="openApproval(approval)"><i class="warning"></i><span><strong>{{ approvalNotificationTitle(approval) }}</strong><small>事件：流程流转 · 当前节点：{{ approval.step }} · 状态：{{ approvalStatusLabel(approval.status) }}</small><small>点击查看并处理</small></span></button>
+            <button v-if="approvals.length > 5" type="button" @click="navigate('approvals')"><i class="info"></i><span><strong>查看全部待处理事件</strong><small>还有 {{ approvals.length - 5 }} 项审批待办</small></span></button>
+          </template>
+          <p v-else class="contract-notification-empty">当前没有待处理流程事件。</p>
         </div>
       </header>
 

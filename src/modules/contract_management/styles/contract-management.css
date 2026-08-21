@@ -85,6 +85,7 @@
 .contract-notification-panel > button > i.warning { background: #d97706; }.contract-notification-panel > button > i.info { background: #3b82f6; }
 .contract-notification-panel button span { display: flex; flex-direction: column; gap: 3px; }
 .contract-notification-panel button strong { font-size: 12px; }.contract-notification-panel button small { color: var(--cm-muted); font-size: 11px; }
+.contract-notification-empty { padding: 18px 16px; margin: 0; color: var(--cm-muted); font-size: 12px; text-align: center; }
 
 .contract-content { width: min(100%,1600px); margin: 0 auto; padding: 25px 28px 38px; }
 .contract-page-head { display: flex; min-height: 52px; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 19px; }
