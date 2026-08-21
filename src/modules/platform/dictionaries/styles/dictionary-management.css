@@ -110,6 +110,17 @@
 .dictionary-items-panel__head code { color: #2563eb; font-family: "SFMono-Regular", Consolas, monospace; overflow-wrap: anywhere; word-break: break-all; }
 .dictionary-header-actions { display: flex; flex: 0 0 auto; gap: 8px; }
 
+.dictionary-module__warning {
+  padding: 9px 11px;
+  margin: 12px 0 0;
+  color: #92400e;
+  font-size: 12px;
+  line-height: 1.55;
+  border: 1px solid #fcd34d;
+  border-radius: 7px;
+  background: #fffbeb;
+}
+
 .dictionary-module .console-filter-bar {
   padding: 12px;
   margin: 0;

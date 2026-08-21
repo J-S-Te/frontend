@@ -1761,7 +1761,15 @@ function notificationContext(item) {
     PREVIOUS_OWNER: '原负责人', NEW_OWNER: '新负责人',
     ASSIGNEE_ADDED: '新增执行人', ASSIGNEE_REMOVED: '移出执行人',
   }
-  return `${item.request_no || item.opportunity_no || '业务通知'} · ${labels[item.recipient_kind] || '收件人'}`
+  const events = {
+    PRESALE_APPROVAL_PENDING: '审批待处理',
+    PRESALE_APPROVAL_APPROVED: '审批通过',
+    PRESALE_APPROVAL_REJECTED: '审批驳回',
+    PRESALE_ASSIGNEE_ADDED: '人员指派',
+    PRESALE_ASSIGNEE_REMOVED: '人员移除',
+    OPPORTUNITY_OWNER_CHANGED: '负责人变更',
+  }
+  return `${events[item.type] || '业务事件'} · ${item.request_no || item.opportunity_no || '业务通知'} · ${labels[item.recipient_kind] || '收件人'}`
 }
 
 async function openOpportunityFromRoute() {

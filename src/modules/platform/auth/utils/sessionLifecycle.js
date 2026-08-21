@@ -1,10 +1,12 @@
-import { AuthError, logoutCurrentSession, recordSessionActivity } from '@/modules/platform/auth/api/auth'
+import { AuthError, logoutCurrentSession, recordSessionActivity, refreshCurrentSession } from '@/modules/platform/auth/api/auth'
 
 const SESSION_EVENT = 'platform-auth:session-ended'
 const SESSION_CHANNEL = 'basic-platform-auth'
 const DEFAULT_IDLE_TIMEOUT_SECONDS = 30 * 60
 const ACTIVITY_EVENTS = ['pointerdown', 'keydown', 'scroll', 'touchstart']
 const SERVER_TOUCH_INTERVAL_MS = 60 * 1000
+const MIN_SERVER_TOUCH_INTERVAL_MS = 10 * 1000
+const SESSION_REFRESH_INTERVAL_MS = 10 * 60 * 1000
 
 function browserAvailable() {
   return typeof window !== 'undefined'
@@ -31,6 +33,8 @@ export function createSessionLifecycle({ onSessionEnded, onSessionError } = {}) 
   let stopped = true
   let expiring = false
   let lastServerTouchAt = 0
+  let lastSessionRefreshAt = 0
+  let serverTouchInFlight = false
   let channel = null
 
   const clearTimer = () => {
@@ -69,12 +73,22 @@ export function createSessionLifecycle({ onSessionEnded, onSessionError } = {}) 
   }
 
   const touchServer = async () => {
-    // 高频浏览器事件只重置本地计时；活动端点最多每分钟触发一次，避免滚动等操作放大请求。
-    if (stopped || Date.now() - lastServerTouchAt < SERVER_TOUCH_INTERVAL_MS) return
-    lastServerTouchAt = Date.now()
+    // 首次真实交互必须立即写入服务端。后续间隔取空闲窗口的三分之一（上限一分钟），
+    // 让最短 60 秒策略也有足够余量，不会因用户恰好在旧窗口末尾操作而被服务端误判为空闲。
+    const interval = Math.max(MIN_SERVER_TOUCH_INTERVAL_MS, Math.min(SERVER_TOUCH_INTERVAL_MS, Math.floor(timeoutSeconds * 1000 / 3)))
+    if (stopped || serverTouchInFlight || Date.now() - lastServerTouchAt < interval) return
+    serverTouchInFlight = true
     try {
       const principal = await recordSessionActivity()
       timeoutSeconds = normalizeTimeout(principal?.idle_timeout_seconds)
+      // 服务端仅在这条由真实交互触发的路径上延长 Cookie；/auth/me、权限轮询及隐藏
+      // 标签页均不会调用它，所以无人操作的会话仍会在空闲窗口到期后退出。
+      const touchedAt = Date.now()
+      if (touchedAt - lastSessionRefreshAt >= SESSION_REFRESH_INTERVAL_MS) {
+        await refreshCurrentSession()
+        lastSessionRefreshAt = touchedAt
+      }
+      lastServerTouchAt = touchedAt
     } catch (error) {
       if (error instanceof AuthError && error.status === 401) {
         notifySessionEnded('server-revoked')
@@ -82,6 +96,8 @@ export function createSessionLifecycle({ onSessionEnded, onSessionError } = {}) 
         return
       }
       onSessionError?.(error)
+    } finally {
+      serverTouchInFlight = false
     }
   }
 
@@ -101,7 +117,10 @@ export function createSessionLifecycle({ onSessionEnded, onSessionError } = {}) 
     stop()
     timeoutSeconds = normalizeTimeout(principal?.idle_timeout_seconds)
     stopped = false
-    lastServerTouchAt = Date.now()
+    // 登录本身已写入初始交互时间；保留 0 可使用户登录后的第一次操作立即与服务端
+    // 同步，而不是被固定一分钟的节流窗口吞掉。
+    lastServerTouchAt = 0
+    lastSessionRefreshAt = 0
     ACTIVITY_EVENTS.forEach((event) => window.addEventListener(event, onActivity, { passive: true }))
     scheduleExpiry()
   }
