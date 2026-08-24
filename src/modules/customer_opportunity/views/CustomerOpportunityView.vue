@@ -462,6 +462,7 @@ const opportunitySourceSelectOptions = computed(() => [...new Set([...opportunit
 function resetMessages() { error.value = ''; notice.value = '' }
 function showError(value) {
   if (value?.status === 409) error.value = value.code === 'CRM_CUSTOMER_VOID_BLOCKED' ? '客户仍有关联中的商机、售前申请或门户邀请，暂不能作废。' : '数据状态或版本已变化，请刷新详情后重试。'
+  else if (value?.code === 'CRM_OPPORTUNITY_NOT_FOUND') error.value = '关联商机不存在、已作废或不再属于当前账号的数据范围，请刷新商机列表后重新选择。'
   else if (value?.code === 'CRM_OPPORTUNITY_MEMBER_INVALID') error.value = '所选团队人员已停用或不再具有本应用授权，请重新从基础平台人员目录选择。'
   else if (value?.code === 'CRM_OWNER_DIRECTORY_UNAVAILABLE') error.value = '基础平台人员目录暂不可用，本次人员变更未保存。'
   else if (value?.code === 'INTEGRATION_CONTRACT_NOT_CONFIGURED') error.value = '合同归属校验服务尚未配置，合同类终态待办暂不能完成。'
