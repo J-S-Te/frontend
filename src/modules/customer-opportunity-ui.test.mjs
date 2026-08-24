@@ -1063,6 +1063,11 @@ test('TS 写操作页面只在 prompt 与业务校验后分配内存重试键', 
   assert.match(view, /@submit\.prevent="runPresale\('worklog'\)"[\s\S]*:disabled="presaleMutationLoading"/)
 })
 
+test('售前创建遇到商机不可见时展示明确中文提示', () => {
+  assert.match(view, /CRM_OPPORTUNITY_NOT_FOUND/)
+  assert.match(view, /关联商机不存在、已作废或不再属于当前账号的数据范围/)
+})
+
 test('TS-004 时间线与权威操作区调用后端真实只读路由', async (t) => {
   const originalFetch = globalThis.fetch
   t.after(() => { globalThis.fetch = originalFetch })
