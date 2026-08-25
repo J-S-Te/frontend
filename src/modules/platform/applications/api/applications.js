@@ -296,7 +296,7 @@ export function registerSubsystemDirectory({
 
 /**
  * getSubsystemStatus 查询部署 Agent 的持久化状态。
- * @param {Object} options 包含 applicationCode 和 environment 的定位参数。
+ * @param {Object} options 包含应用定位及当前网关配置；接入恢复时必须携带完整地址，供平台重新下发 Keycloak Client 凭据。
  * @returns {Promise<Object>} 返回页面刷新后仍可恢复的真实部署结果。
  * @throws {ApplicationRegistryError} 子系统不存在、无查询权限或部署服务不可用时抛出。
  */
@@ -384,24 +384,38 @@ export function discoverSubsystemCandidates() {
  * @returns {Promise<Object>} 返回重试后的部署任务。
  * @throws {ApplicationRegistryError} 接入记录不存在、当前状态不允许重试或部署 Agent 不可用时抛出。
  */
-export function retrySubsystem({ applicationCode, environment } = {}) {
+export function retrySubsystem({ applicationCode, environment, publicBaseUrl = '', upstreamUrl = '', pathPrefix = '', issuerAlias = '' } = {}) {
   return request('/subsystem-retry', {
     method: 'POST',
-    body: JSON.stringify({ application_code: applicationCode, environment }),
+    body: JSON.stringify({
+      application_code: applicationCode,
+      environment,
+      ...(String(publicBaseUrl || '').trim() ? { public_base_url: String(publicBaseUrl).trim().replace(/\/$/, '') } : {}),
+      ...(String(upstreamUrl || '').trim() ? { upstream_url: String(upstreamUrl).trim().replace(/\/$/, '') } : {}),
+      ...(String(pathPrefix || '').trim() ? { path_prefix: String(pathPrefix).trim().replace(/\/$/, '') } : {}),
+      ...(String(issuerAlias || '').trim() ? { issuer_alias: String(issuerAlias).trim().toLowerCase() } : {}),
+    }),
   })
 }
 
 /**
  * adoptSubsystemRuntime 将已登记、由本地或外部编排运行的环境纳入受控部署状态机。
  * 该操作只接管现有运行时，不删除数据库、数据卷、环境目录或登录目标；实际安全校验由部署 Agent 执行。
- * @param {Object} options 包含 applicationCode 和 environment 的定位参数。
+ * @param {Object} options 包含应用定位及当前网关配置；接管时使用这些值写入完整运行时配置。
  * @returns {Promise<Object>} 返回接管后的部署任务或当前运行时状态。
  * @throws {ApplicationRegistryError} 接管不受支持、运行时不健康、资源不存在或操作无权限时抛出。
  */
-export function adoptSubsystemRuntime({ applicationCode, environment } = {}) {
+export function adoptSubsystemRuntime({ applicationCode, environment, publicBaseUrl = '', upstreamUrl = '', pathPrefix = '', issuerAlias = '' } = {}) {
   return request('/subsystem-adoption', {
     method: 'POST',
-    body: JSON.stringify({ application_code: applicationCode, environment }),
+    body: JSON.stringify({
+      application_code: applicationCode,
+      environment,
+      ...(String(publicBaseUrl || '').trim() ? { public_base_url: String(publicBaseUrl).trim().replace(/\/$/, '') } : {}),
+      ...(String(upstreamUrl || '').trim() ? { upstream_url: String(upstreamUrl).trim().replace(/\/$/, '') } : {}),
+      ...(String(pathPrefix || '').trim() ? { path_prefix: String(pathPrefix).trim().replace(/\/$/, '') } : {}),
+      ...(String(issuerAlias || '').trim() ? { issuer_alias: String(issuerAlias).trim().toLowerCase() } : {}),
+    }),
   })
 }
 

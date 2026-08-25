@@ -784,7 +784,14 @@ async function confirmRuntimeAdoption() {
   saving.value = true
   clearError()
   try {
-    await adoptSubsystemRuntime({ applicationCode: application.code, environment: environment.environment })
+    await adoptSubsystemRuntime({
+      applicationCode: application.code,
+      environment: environment.environment,
+      publicBaseUrl: environment.base_url || '',
+      upstreamUrl: environment.upstream_url || '',
+      pathPrefix: environment.path_prefix || '',
+      issuerAlias: environment.issuer_alias || '',
+    })
     pendingRuntimeAdoption.value = null
     notify(`已提交 ${application.code}/${environment.environment} 的运行时接管；平台将核验服务健康状态后更新部署状态。`)
     await loadEnvironments()
