@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { afterEach, test } from 'node:test'
 import {
   ApplicationRegistryError,
+  adoptSubsystemRuntime,
   createApplication,
   createEnvironment,
   deleteApplicationRegistration,
@@ -334,7 +335,7 @@ test('listPortalApplications uses the authenticated tenant catalog endpoint', as
   assert.equal(result[0].code, 'business-app')
 })
 
-test('deployment status, update and retry use dedicated Agent lifecycle endpoints', async () => {
+test('deployment status, adoption, update and retry use dedicated Agent lifecycle endpoints', async () => {
   const requests = []
   globalThis.fetch = async (url, options) => {
     requests.push({ url, options })
@@ -342,6 +343,7 @@ test('deployment status, update and retry use dedicated Agent lifecycle endpoint
   }
 
   const status = await getSubsystemStatus({ applicationCode: 'business-app', environment: 'dev' })
+  await adoptSubsystemRuntime({ applicationCode: 'business-app', environment: 'dev' })
   await updateSubsystemRuntime({
     applicationCode: 'business-app',
     environment: 'dev',
@@ -353,16 +355,28 @@ test('deployment status, update and retry use dedicated Agent lifecycle endpoint
 
   assert.equal(status.next_action, '检查生产 Agent 日志后重试')
   assert.equal(requests[0].url, '/api/v1/subsystem-status?application_code=business-app&environment=dev')
-  assert.equal(requests[1].url, '/api/v1/subsystem-update')
-  assert.deepEqual(JSON.parse(requests[1].options.body), {
+  assert.equal(requests[1].url, '/api/v1/subsystem-adoption')
+  assert.equal(requests[1].options.method, 'POST')
+  assert.deepEqual(JSON.parse(requests[1].options.body), { application_code: 'business-app', environment: 'dev' })
+  assert.equal(requests[2].url, '/api/v1/subsystem-update')
+  assert.deepEqual(JSON.parse(requests[2].options.body), {
     application_code: 'business-app',
     environment: 'dev',
     public_base_url: 'https://portal.example.com',
     upstream_url: 'http://10.0.0.8:8081',
     path_prefix: '/business-app',
   })
-  assert.equal(requests[2].url, '/api/v1/subsystem-retry')
-  assert.deepEqual(JSON.parse(requests[2].options.body), { application_code: 'business-app', environment: 'dev' })
+  assert.equal(requests[3].url, '/api/v1/subsystem-retry')
+  assert.deepEqual(JSON.parse(requests[3].options.body), { application_code: 'business-app', environment: 'dev' })
+})
+
+test('unmanaged environments expose a guarded runtime adoption entry without data deletion language', () => {
+  assert.match(onboardingModule, /environmentStatus\(environment\) === 'UNMANAGED'/)
+  assert.match(onboardingModule, /接管运行时/)
+  assert.match(onboardingModule, /openRuntimeAdoption/)
+  assert.match(onboardingModule, /adoptSubsystemRuntime/)
+  assert.match(onboardingModule, /不会删除或格式化数据库、数据卷、环境目录、登录目标及现有业务数据/)
+  assert.match(onboardingModule, /接管运行时失败；现有服务、数据库和数据卷均未删除/)
 })
 
 test('application access UI separates logical retirement, runtime teardown and protected dev deletion', () => {

@@ -10,6 +10,7 @@ import vue from '@vitejs/plugin-vue'
 const DEFAULT_API_PROXY_TARGET = 'http://127.0.0.1:8080'
 const DEFAULT_CONTRACT_API_PROXY_TARGET = 'http://127.0.0.1:8081'
 const DEFAULT_PROJECT_API_PROXY_TARGET = 'http://127.0.0.1:8082'
+const DEFAULT_SETTLEMENT_API_PROXY_TARGET = 'http://127.0.0.1:8085'
 // customer-api is kept inside the local Compose network. The local Vite server
 // reaches it through the loopback-only port published by compose.local.yaml.
 const DEFAULT_CUSTOMER_OPPORTUNITY_PROXY_TARGET = 'http://127.0.0.1:18083'
@@ -27,6 +28,13 @@ const PROJECT_BACKEND_PATHS = [
   '/project_management/auth',
   '/project_management/logged-out',
   '/project_management/healthz',
+]
+const SETTLEMENT_BACKEND_PATHS = [
+  '/settlement/api',
+  '/settlement/auth',
+  '/settlement/logged-out',
+  '/settlement/healthz',
+  '/settlement/readyz',
 ]
 const DATA_ANALYSIS_BACKEND_PATHS = [
   '/data_analysis/api',
@@ -49,6 +57,7 @@ export default defineConfig(({ mode }) => {
   const proxyTarget = env.VITE_API_PROXY_TARGET || DEFAULT_API_PROXY_TARGET
   const contractProxyTarget = env.VITE_CONTRACT_API_PROXY_TARGET || DEFAULT_CONTRACT_API_PROXY_TARGET
   const projectProxyTarget = env.VITE_PROJECT_API_PROXY_TARGET || DEFAULT_PROJECT_API_PROXY_TARGET
+  const settlementProxyTarget = env.VITE_SETTLEMENT_API_PROXY_TARGET || DEFAULT_SETTLEMENT_API_PROXY_TARGET
   const customerOpportunityProxyTarget = env.VITE_CUSTOMER_OPPORTUNITY_PROXY_TARGET || DEFAULT_CUSTOMER_OPPORTUNITY_PROXY_TARGET
   const customerPortalProxyTarget = env.VITE_CUSTOMER_PORTAL_PROXY_TARGET || DEFAULT_CUSTOMER_PORTAL_PROXY_TARGET
   const dataAnalysisProxyTarget = env.VITE_DATA_ANALYSIS_PROXY_TARGET || DEFAULT_DATA_ANALYSIS_PROXY_TARGET
@@ -64,6 +73,12 @@ export default defineConfig(({ mode }) => {
     proxy[path] = {
       ...apiProxy(projectProxyTarget),
       rewrite: (requestPath) => requestPath.replace(/^\/project_management/, ''),
+    }
+  }
+  for (const path of SETTLEMENT_BACKEND_PATHS) {
+    proxy[path] = {
+      ...apiProxy(settlementProxyTarget),
+      rewrite: (requestPath) => requestPath.replace(/^\/settlement/, ''),
     }
   }
   // CRM and the external-customer Portal are independent services and both

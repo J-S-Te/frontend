@@ -392,6 +392,20 @@ export function retrySubsystem({ applicationCode, environment } = {}) {
 }
 
 /**
+ * adoptSubsystemRuntime 将已登记、由本地或外部编排运行的环境纳入受控部署状态机。
+ * 该操作只接管现有运行时，不删除数据库、数据卷、环境目录或登录目标；实际安全校验由部署 Agent 执行。
+ * @param {Object} options 包含 applicationCode 和 environment 的定位参数。
+ * @returns {Promise<Object>} 返回接管后的部署任务或当前运行时状态。
+ * @throws {ApplicationRegistryError} 接管不受支持、运行时不健康、资源不存在或操作无权限时抛出。
+ */
+export function adoptSubsystemRuntime({ applicationCode, environment } = {}) {
+  return request('/subsystem-adoption', {
+    method: 'POST',
+    body: JSON.stringify({ application_code: applicationCode, environment }),
+  })
+}
+
+/**
  * updateSubsystemRuntime 更新控制面访问配置并重新部署子系统运行时。
  * @param {Object} options 包含应用与环境定位、公开地址、上游地址、路径和发行方别名。
  * @returns {Promise<Object>} 返回更新后的部署任务。
