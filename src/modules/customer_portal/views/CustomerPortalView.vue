@@ -50,6 +50,9 @@ const accountInitial = computed(() => {
   return label.trim().slice(0, 1).toUpperCase() || '客'
 })
 const permissions = computed(() => session.value?.permissions || [])
+// 内部超级管理员不继承任何客户身份。业务数据必须先经过后续的受控客户上下文，
+// 不能用 CustomerID=0 直接查询或把管理员伪装成某个客户。
+const isPortalSuperAdmin = computed(() => (session.value?.roles || []).includes('portal_super_admin'))
 const canUseFeedback = computed(() => ['feedback.create', 'feedback.read', 'feedback.reply'].some(hasPermission))
 const reportForm = reactive({ project_id: '', report_type: '', reason: '', receive_email: '' })
 const reportTypeOptions = Object.freeze(['等级保护测评报告', '风险评估报告', '安全验收测评报告', '渗透测试报告', '安全整改报告', '其他'])
@@ -155,6 +158,10 @@ async function load() {
   loading.value = true; error.value = ''; notice.value = ''
   try {
     session.value ||= await getPortalSession()
+    if (isPortalSuperAdmin.value) {
+      // 管理员主会话只展示管理入口，避免页面初始化请求把空客户范围带入客户侧 API。
+      return
+    }
     if (!capabilitiesLoaded) {
       capabilitiesLoaded = true
       // 能力状态不可确认时继续保持失败关闭。
@@ -652,15 +659,15 @@ onBeforeUnmount(() => {
     <aside class="console-sidebar portal-sidebar" :class="{ open: mobileMenuOpen }">
       <div class="console-brand portal-brand">
         <span class="console-brand-mark"><ConsoleIcon name="logo" /></span>
-        <span class="console-brand-copy"><strong>客户自助门户</strong><small>统一身份平台安全登录</small></span>
+        <span class="console-brand-copy"><strong>{{ isPortalSuperAdmin ? '客户门户管理' : '客户自助门户' }}</strong><small>统一身份平台安全登录</small></span>
         <button class="console-close-menu" type="button" aria-label="关闭导航菜单" @click="mobileMenuOpen = false"><ConsoleIcon name="close" /></button>
       </div>
       <nav class="console-nav portal-nav" aria-label="客户门户功能">
-        <p class="console-nav-label">业务中心</p>
+        <template v-if="!isPortalSuperAdmin"><p class="console-nav-label">业务中心</p>
         <button v-if="hasPermission('project.read')" class="console-nav-item" type="button" :class="{ active: section === 'projects' }" @click="navigate('projects')"><ConsoleIcon name="dashboard" /><span>我的项目</span></button>
         <button v-if="hasPermission('report.read') || hasPermission('report.request')" class="console-nav-item" type="button" :class="{ active: section === 'reports' }" @click="navigate('reports')"><ConsoleIcon name="download" /><span>电子报告</span></button>
         <button v-if="hasPermission('filing.read')" class="console-nav-item" type="button" :class="{ active: section === 'filings' }" @click="navigate('filings')"><ConsoleIcon name="shield" /><span>等保备案</span></button>
-        <button v-if="canUseFeedback" class="console-nav-item" type="button" :class="{ active: section === 'feedback' }" @click="navigate('feedback')"><ConsoleIcon name="bell" /><span>客户反馈</span></button>
+        <button v-if="canUseFeedback" class="console-nav-item" type="button" :class="{ active: section === 'feedback' }" @click="navigate('feedback')"><ConsoleIcon name="bell" /><span>客户反馈</span></button></template>
         <p class="console-nav-label">账号</p>
         <button v-if="hasPermission('account.security.manage')" class="console-nav-item" type="button" :class="{ active: section === 'security' }" @click="navigate('security')"><ConsoleIcon name="account" /><span>账号安全</span></button>
         <button class="console-nav-item" type="button" @click="logoutPortal"><ConsoleIcon name="logout" /><span>退出登录</span></button>
@@ -675,13 +682,14 @@ onBeforeUnmount(() => {
     <main class="console-main portal-main">
       <header class="console-topbar portal-topbar">
         <button class="console-menu-button" type="button" aria-label="打开导航菜单" @click="mobileMenuOpen = true"><ConsoleIcon name="menu" /></button>
-        <div class="console-crumb"><span>客户自助门户</span><ConsoleIcon name="chevron" /><strong>{{ sectionTitle }}</strong></div>
+        <div class="console-crumb"><span>{{ isPortalSuperAdmin ? '客户门户管理' : '客户自助门户' }}</span><ConsoleIcon name="chevron" /><strong>{{ isPortalSuperAdmin ? '管理入口' : sectionTitle }}</strong></div>
         <div class="console-topbar-actions">
           <span class="console-topbar-avatar" aria-hidden="true">{{ accountInitial }}</span>
           <button class="console-button secondary small" type="button" @click="logoutPortal">退出登录</button>
         </div>
       </header>
       <section class="console-content portal-content">
+      <template v-if="isPortalSuperAdmin"><div class="portal-title"><h1>客户门户管理</h1><p>当前为内部超级管理员会话，未绑定任何客户身份。</p></div><section class="portal-card"><h2>安全访问规则</h2><p>客户项目、报告、备案和反馈始终按客户边界隔离。管理员需要在受控的客户上下文中查看或处理具体客户数据，系统会记录操作人、目标客户、原因和审计记录。</p><p class="portal-info">当前可通过“客户与商机管理 → 客户详情 → 门户访问”完成客户开通、邀请、撤销和禁用。客户侧自助页面不会以管理员身份直接加载，避免误操作或跨客户数据泄露。</p></section></template><template v-else>
       <p class="portal-info" role="status">登录、会话、项目查询、报告申请和等保备案草稿均已接入门户服务；客户反馈与账号安全也使用 Portal 服务端会话。项目快照和已发放报告支持短效受控 PDF 下载；备案材料已接受控上传与扫描状态，正式 Provider 未配置时失败关闭，备案 PDF 和公安提交仍未接通。</p><p v-if="error" class="portal-error" role="alert">{{ error }}</p><p v-if="notice" class="portal-success" role="status">{{ notice }}</p><p v-if="loading">正在加载…</p>
       <template v-else-if="section === 'projects' && hasPermission('project.read')"><div class="portal-title"><h1>我的项目</h1><p>项目数据以最近一次同步快照为准</p></div><section v-if="projects.length" class="project-list"><button v-for="item in projects" :key="item.project_id" type="button" @click="openProject(item)"><div><h2>{{ item.project_name || '未命名项目' }}</h2><p>{{ item.contract_no || '无合同编号' }} · {{ item.current_stage || '阶段未同步' }}</p></div><strong>{{ item.progress_pct ?? 0 }}%</strong><progress :value="item.progress_pct ?? 0" max="100"></progress><small>数据更新：{{ formatDate(item.source_updated_at) }}<template v-if="item.delayed"> · 已延期</template></small></button></section><nav v-if="projects.length && projects.length < projectTotal" class="project-pagination" aria-label="项目加载更多"><button type="button" :disabled="loading" @click="loadMoreProjects">加载更多项目</button><span>已显示 {{ projects.length }} / {{ projectTotal }} 个</span></nav><div v-else class="portal-empty">暂无可查看的项目</div></template>
       <div v-else-if="section === 'projects'" class="portal-empty">{{ serviceUnavailableText('project_enabled', '当前账号没有项目读取权限。如需开通，请联系您的服务人员。') }}</div>
@@ -692,7 +700,7 @@ onBeforeUnmount(() => {
       <template v-else-if="section === 'feedback' && canUseFeedback"><div class="portal-title"><h1>客户反馈</h1><p>异议、投诉或建议均会生成唯一编号，首次人工响应目标为 24 小时</p></div><div class="portal-columns"><form v-if="hasPermission('feedback.create')" class="portal-card" @submit.prevent="submitFeedback"><h2>提交反馈</h2><label>反馈类型<select v-model="feedbackForm.type"><option value="OBJECTION">异议</option><option value="COMPLAINT">投诉</option><option value="SUGGESTION">建议</option></select></label><label>标题<input v-model.trim="feedbackForm.title" maxlength="200" required></label><label>详细描述<textarea v-model.trim="feedbackForm.description" maxlength="5000" required></textarea></label><label>关联项目（可选）<select v-model="feedbackForm.project_id"><option value="">不关联项目</option><option v-for="item in projects" :key="item.project_id" :value="item.project_id">{{ item.project_name || '未命名项目' }}（{{ item.contract_no || item.project_id }}）</option></select></label><label>期望联系方式（手机或邮箱，加密保存）<input v-model.trim="feedbackForm.expected_contact" maxlength="200"></label><p v-if="feedbackContactError" class="portal-error" role="alert">{{ feedbackContactError }}</p><p v-if="feedbackSubmitError" class="portal-error" role="alert">{{ feedbackSubmitError }}</p><button>提交反馈</button><small>附件需待可信上传与病毒扫描接通后开放。</small></form><section v-else class="portal-card"><h2>提交反馈</h2><p class="portal-empty">当前账号没有反馈提交权限。</p></section><section class="portal-card"><h2>我的反馈</h2><template v-if="hasPermission('feedback.read')"><button v-for="item in feedbacks" :key="item.id" class="feedback-row" type="button" @click="openFeedback(item)"><span><strong>{{ item.feedback_no }} · {{ feedbackType(item.type) }}</strong><small>{{ item.title }}</small><small>{{ slaText(item) }}</small></span><em>{{ feedbackStatus(item.status) }}</em></button><nav v-if="feedbacks.length && feedbacks.length < feedbackTotal" class="project-pagination" aria-label="反馈加载更多"><button type="button" :disabled="loading" @click="loadMoreFeedbacks">加载更多反馈</button><span>已显示 {{ feedbacks.length }} / {{ feedbackTotal }} 条</span></nav><p v-if="!feedbacks.length">暂无反馈</p></template><p v-else class="portal-empty">当前账号没有反馈读取权限。</p></section></div></template>
       <div v-else-if="section === 'feedback'" class="portal-empty">{{ serviceUnavailableText('feedback_enabled', '当前账号没有反馈相关权限。如需开通，请联系您的服务人员。') }}</div>
       <template v-else-if="section === 'security' && hasPermission('account.security.manage')"><div class="portal-title"><h1>账号安全</h1><p>密码、MFA 与账号恢复由统一身份平台负责</p></div><section class="security-summary portal-card"><div><small>统一身份账号</small><strong>{{ accountSecurity?.account_identifier || '—' }}</strong></div><div><small>最近登录</small><strong>{{ formatDate(accountSecurity?.last_portal_login_at) }}</strong><span>{{ accountSecurity?.last_ip_masked || '地址未知' }} · {{ accountSecurity?.last_device || '设备未知' }}</span></div><a :href="securityCenterHref" rel="noopener noreferrer">前往统一身份账号安全中心</a></section><div class="portal-security-columns"><section class="portal-card"><h2>Portal 活跃会话</h2><div v-for="item in accountSessions" :key="item.id" class="security-row"><span><strong>{{ item.device || '未知设备' }}<em v-if="item.current">当前会话</em></strong><small>{{ item.ip_masked || '地址未知' }} · 最近活动 {{ formatDate(item.last_seen_at) }}</small></span><button @click="revokeSession(item)">{{ item.current ? '退出当前会话' : '撤销' }}</button></div><p v-if="!accountSessions.length">暂无活跃会话</p></section><section class="portal-card"><h2>近期安全事件</h2><div v-for="item in accountSecurity?.events || []" :key="item.id" class="security-row"><span><strong>{{ securityEventLabel(item.type) }}<em :class="`risk-${item.risk_level?.toLowerCase()}`">{{ item.risk_level }}</em></strong><small>{{ formatDate(item.occurred_at) }} · {{ item.ip_masked || '地址未知' }}</small></span><button v-if="!item.acknowledged_at && item.risk_level !== 'LOW'" @click="acknowledgeEvent(item)">确认</button></div><p v-if="!accountSecurity?.events?.length">暂无安全事件</p></section></div></template>
-      <div v-else-if="section === 'security'" class="portal-empty">当前账号没有账户安全管理权限。如需开通，请联系您的服务人员。</div>
+      <div v-else-if="section === 'security'" class="portal-empty">当前账号没有账户安全管理权限。如需开通，请联系您的服务人员。</div></template>
       </section>
     </main>
     <div v-if="selectedReport || reportDetailLoading || reportDetailError" class="portal-dialog" role="dialog" aria-modal="true" aria-labelledby="report-dialog-title"><article class="report-detail" tabindex="-1"><button class="close" aria-label="关闭" @click="closeReport">×</button><h2 id="report-dialog-title">{{ selectedReport?.request_no || '报告申请详情' }}</h2><p v-if="reportDetailError" class="portal-error" role="alert">{{ reportDetailError }}</p><p v-if="reportDetailLoading">正在加载报告详情…</p><template v-else-if="selectedReport"><dl class="report-summary"><div><dt>当前状态</dt><dd>{{ reportStatus(selectedReport.status) }}</dd></div><div><dt>报告类型</dt><dd>{{ selectedReport.report_type || '—' }}</dd></div><div><dt>关联项目</dt><dd>{{ selectedReport.project_id || '—' }}</dd></div><div><dt>提交时间</dt><dd>{{ formatDate(selectedReport.submitted_at) }}</dd></div><div><dt>审批时间</dt><dd>{{ formatDate(selectedReport.approved_at) }}</dd></div><div><dt>发放时间</dt><dd>{{ formatDate(selectedReport.issued_at) }}</dd></div></dl><section><h3>申请原因</h3><p>{{ selectedReport.reason || '—' }}</p></section><section v-if="selectedReport.approval_result"><h3>审批结果</h3><p>{{ selectedReport.approval_result }}</p></section><section><h3>状态时间线</h3><ol v-if="selectedReport.events?.length" class="report-timeline"><li v-for="item in selectedReport.events" :key="item.sequence"><span>{{ item.sequence }}</span><div><strong>{{ reportEventType(item.event_type) }}</strong><small>{{ formatDate(item.occurred_at) }}</small><p><template v-if="item.from_status">{{ reportStatus(item.from_status) }} → </template>{{ reportStatus(item.to_status) }}</p></div></li></ol><p v-else class="project-empty">暂无状态事件</p></section><section class="report-download"><h3>报告下载</h3><p v-if="selectedReport.status !== 'ISSUED'">报告发放后才可申请短效下载授权。</p><p v-else-if="!hasPermission('report.download')">报告已发放，但当前账号没有报告下载权限。</p><template v-else><p>每次点击都会创建新的短效授权；下载凭据不会写入链接或浏览器存储。</p><p v-if="!capabilityAvailable('report_download')" class="portal-warning">{{ capabilityReason('report_download') }}</p><p v-if="reportDownloadError" class="portal-error" role="alert">{{ reportDownloadError }}</p><button type="button" :disabled="reportDownloadLoading || !capabilityAvailable('report_download')" @click="downloadReportFile">{{ reportDownloadLoading ? '正在安全下载…' : '下载 PDF 报告' }}</button></template></section></template></article></div>

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import {
   IamError,
@@ -38,16 +38,25 @@ const authorizationPreviewUnavailable = ref(false)
 // modal 打开时总是落在 step 0；前置检查全绿后用户点击"开始新增员工"才进入 step 1。
 const currentStep = ref(0)
 const prerequisitesReady = ref(false)
+let previousBodyOverflow = ''
 // 触发前置检查组件内部"快速补齐"操作时使用的轻量递增计数器。
 // 父组件 (PlatformConsoleView) 监听 prerequisites-bump 事件并按需刷新 orgs/positions/applications。
 const prereqRefreshKey = ref(0)
 
 onMounted(() => {
+  // The wizard has its own scroll container. Lock the page behind it so a wheel
+  // event at the modal edge cannot scroll the settings page underneath.
+  previousBodyOverflow = document.body.style.overflow
+  document.body.style.overflow = 'hidden'
   // 同步触发父级钩子；父级用它在挂载瞬间发起数据预加载。
   // 钩子失败不应阻塞 modal 自身的前置检查流程。
   if (typeof props.onBeforeOpen === 'function') {
     try { props.onBeforeOpen() } catch (error) { console.error('onBeforeOpen hook failed', error) }
   }
+})
+
+onUnmounted(() => {
+  document.body.style.overflow = previousBodyOverflow
 })
 
 function entityId(item, ...keys) {
@@ -372,7 +381,7 @@ async function submit() {
 </template>
 
 <style scoped>
-.personnel-workbench-modal { overflow: hidden; border: 1px solid #dce7f5; box-shadow: 0 24px 70px rgba(28, 54, 98, .2); }
+.personnel-workbench-modal { overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; border: 1px solid #dce7f5; box-shadow: 0 24px 70px rgba(28, 54, 98, .2); }
 .personnel-workbench-header { position: relative; overflow: hidden; padding: 1.45rem 1.75rem 1.3rem; background: linear-gradient(135deg, #f7faff 0%, #edf4ff 100%); border-bottom: 1px solid #e1eaf5; }
 .personnel-workbench-header::after { position: absolute; right: -3rem; bottom: -4.5rem; width: 13rem; height: 13rem; content: ''; border: 1.5rem solid rgba(110, 145, 220, .08); border-radius: 50%; }
 .personnel-workbench-header > div { position: relative; z-index: 1; }

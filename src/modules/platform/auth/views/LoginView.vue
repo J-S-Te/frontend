@@ -18,7 +18,20 @@ const currentYear = new Date().getFullYear()
 
 function getLoginReturnTo() {
   const oidcReturnTo = new URLSearchParams(window.location.search).get('return_to')
-  return resolveSameOriginRedirect(oidcReturnTo || LOGIN_SUCCESS_URL)
+  if (oidcReturnTo === null) {
+    return ''
+  }
+  // OIDC /authorize 会把完整授权请求放入 return_to。这里只保留同源路径，
+  // 既能在首次改密后继续原授权流程，也不会把查询参数变成开放重定向入口。
+  return resolveSameOriginRedirect(oidcReturnTo)
+}
+
+function buildForcePasswordChangeURL(returnTo) {
+  const target = new URL('/force-password-change', window.location.origin)
+  if (returnTo) {
+    target.searchParams.set('return_to', returnTo)
+  }
+  return `${target.pathname}${target.search}`
 }
 
 function getLoginTargetSelection() {
@@ -99,16 +112,20 @@ async function performPasswordLogin(replaceExistingSession = false) {
       ? '原会话已退出，正在进入平台…'
       : result?.message || result?.msg || '登录成功，正在进入平台…'
 
-    const redirectUrl =
+    const serverRedirectUrl =
       data?.redirect_url ||
       data?.redirectUrl ||
       result?.redirect_url ||
       LOGIN_SUCCESS_URL
+    const oidcReturnTo = getLoginReturnTo()
 
     // 跨源跳转只信任登录接口根据注册表返回的结果；URL 查询参数 return_to 始终走
     // 同源校验，不能借统一登录页构造开放重定向。
-    const nextUrl = data?.must_change_password ? '/force-password-change' : redirectUrl
-    window.setTimeout(() => redirectTopLevel(nextUrl, !data?.must_change_password), 450)
+    const nextUrl = data?.must_change_password
+      ? buildForcePasswordChangeURL(oidcReturnTo)
+      : oidcReturnTo || serverRedirectUrl
+    const allowApprovedCrossOrigin = !data?.must_change_password && !oidcReturnTo
+    window.setTimeout(() => redirectTopLevel(nextUrl, allowApprovedCrossOrigin), 450)
   } catch (error) {
     const traceText = error.traceId ? `（追踪号：${error.traceId}）` : ''
     concurrentSessionDetected.value = error.code === 'AUTH_CONCURRENT_SESSION'
