@@ -343,7 +343,14 @@ test('deployment status, adoption, update and retry use dedicated Agent lifecycl
   }
 
   const status = await getSubsystemStatus({ applicationCode: 'business-app', environment: 'dev' })
-  await adoptSubsystemRuntime({ applicationCode: 'business-app', environment: 'dev' })
+  await adoptSubsystemRuntime({
+    applicationCode: 'business-app',
+    environment: 'dev',
+    publicBaseUrl: 'https://portal.example.com',
+    upstreamUrl: 'http://10.0.0.8:8081',
+    pathPrefix: '/business-app',
+    issuerAlias: 'keycloak',
+  })
   await updateSubsystemRuntime({
     applicationCode: 'business-app',
     environment: 'dev',
@@ -351,13 +358,27 @@ test('deployment status, adoption, update and retry use dedicated Agent lifecycl
     upstreamUrl: 'http://10.0.0.8:8081',
     pathPrefix: '/business-app',
   })
-  await retrySubsystem({ applicationCode: 'business-app', environment: 'dev' })
+  await retrySubsystem({
+    applicationCode: 'business-app',
+    environment: 'dev',
+    publicBaseUrl: 'https://portal.example.com',
+    upstreamUrl: 'http://10.0.0.8:8081',
+    pathPrefix: '/business-app',
+    issuerAlias: 'keycloak',
+  })
 
   assert.equal(status.next_action, '检查生产 Agent 日志后重试')
   assert.equal(requests[0].url, '/api/v1/subsystem-status?application_code=business-app&environment=dev')
   assert.equal(requests[1].url, '/api/v1/subsystem-adoption')
   assert.equal(requests[1].options.method, 'POST')
-  assert.deepEqual(JSON.parse(requests[1].options.body), { application_code: 'business-app', environment: 'dev' })
+  assert.deepEqual(JSON.parse(requests[1].options.body), {
+    application_code: 'business-app',
+    environment: 'dev',
+    public_base_url: 'https://portal.example.com',
+    upstream_url: 'http://10.0.0.8:8081',
+    path_prefix: '/business-app',
+    issuer_alias: 'keycloak',
+  })
   assert.equal(requests[2].url, '/api/v1/subsystem-update')
   assert.deepEqual(JSON.parse(requests[2].options.body), {
     application_code: 'business-app',
@@ -367,7 +388,14 @@ test('deployment status, adoption, update and retry use dedicated Agent lifecycl
     path_prefix: '/business-app',
   })
   assert.equal(requests[3].url, '/api/v1/subsystem-retry')
-  assert.deepEqual(JSON.parse(requests[3].options.body), { application_code: 'business-app', environment: 'dev' })
+  assert.deepEqual(JSON.parse(requests[3].options.body), {
+    application_code: 'business-app',
+    environment: 'dev',
+    public_base_url: 'https://portal.example.com',
+    upstream_url: 'http://10.0.0.8:8081',
+    path_prefix: '/business-app',
+    issuer_alias: 'keycloak',
+  })
 })
 
 test('unmanaged environments expose a guarded runtime adoption entry without data deletion language', () => {
