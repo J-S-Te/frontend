@@ -476,7 +476,10 @@ function formatDate(value) {
 function portalInviteStatusText(value) {
   return ({ PENDING: '待激活', USED: '已使用', EXPIRED: '已过期', REVOKED: '已撤销' })[value] || value || '尚未生成'
 }
-const portalRegistrationContact = computed(() => (selectedCustomer.value?.contacts || []).find((item) => item.is_registration) || null)
+const portalRegistrationContact = computed(() => {
+  const contacts = customerContacts.value.length ? customerContacts.value : (selectedCustomer.value?.contacts || [])
+  return contacts.find((item) => item.is_registration) || null
+})
 function navigate(section) {
   const allowed = { customers: canReadCustomers.value, opportunities: canReadOpportunities.value, presale: canReadPresales.value, notifications: canReadNotifications.value }
   if (!allowed[section]) return
@@ -1246,6 +1249,16 @@ async function openCustomerTab(tab) {
 			void resolveOwnerNames(customerAuditLogs.value.map((item) => item.actor_id))
 		}
 		if (tab === 'portal') {
+			// The customer detail endpoint intentionally omits sensitive contacts.
+			// Load them when entering Portal so the registration contact is not
+			// incorrectly shown as unconfigured and the invite action is not
+			// disabled merely because the Contacts tab was never opened.
+			if (!customerTabLoaded.contacts) {
+				const contacts = await listCustomerContacts(customerID)
+				if (sequence !== customerTabLoadSequence.value || selectedCustomer.value?.id !== customerID || customerTab.value !== tab) return
+				customerContacts.value = contacts || []
+				customerTabLoaded.contacts = true
+			}
 			const inviteRequest = canReadPortalInvite.value ? getCurrentPortalInvite(customerID) : Promise.resolve(null)
 			const accessRequest = canReadPortalAccessStatus.value ? getPortalAccessStatus(customerID) : Promise.resolve(null)
 			const [inviteResult, accessResult] = await Promise.allSettled([inviteRequest, accessRequest])
