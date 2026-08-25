@@ -18,6 +18,7 @@ export function createPresaleReportFilters({
 }) {
   const directoryPageSize = 50
   const directoryMaxPages = 200
+  const loadGuard = createLatestRequestGuard()
 
   async function loadOwnerDirectory() {
     const firstPage = await listOwnerDirectory({ page: 1, page_size: directoryPageSize })
@@ -38,6 +39,7 @@ export function createPresaleReportFilters({
   }
 
   async function load() {
+    const requestGeneration = loadGuard.begin()
     reportFilterOptionsLoading.value = true
     reportFilterOptionsError.value = ''
     try {
@@ -45,7 +47,7 @@ export function createPresaleReportFilters({
         getPresaleReportFilterOptions({ ...reportParams(), dimension: undefined }),
         loadOwnerDirectory(),
       ])
-      if (!showReport.value) return
+      if (!loadGuard.isCurrent(requestGeneration) || !showReport.value) return
       rememberOwnerDirectory(directoryUsers)
       reportFilterOptions.value = {
         opportunities: filterOptions?.opportunities || [],
@@ -60,9 +62,9 @@ export function createPresaleReportFilters({
       if (reportFilters.person_id && !reportFilterOptions.value.assignees.some((item) => item.value === reportFilters.person_id)) reportFilters.person_id = ''
       if (reportFilters.opportunity_id && !reportFilterOptions.value.opportunities.some((item) => String(item.value) === String(reportFilters.opportunity_id))) reportFilters.opportunity_id = ''
     } catch (value) {
-      if (showReport.value) reportFilterOptionsError.value = directoryErrorMessage(value)
+      if (loadGuard.isCurrent(requestGeneration) && showReport.value) reportFilterOptionsError.value = directoryErrorMessage(value)
     } finally {
-      reportFilterOptionsLoading.value = false
+      if (loadGuard.isCurrent(requestGeneration)) reportFilterOptionsLoading.value = false
     }
   }
 
@@ -79,3 +81,4 @@ export function createPresaleReportFilters({
 
   return { load, onPersonChange, onOrganizationChange }
 }
+import { createLatestRequestGuard } from './latestRequest.js'

@@ -8,6 +8,7 @@ import SubsystemPortalView from '@/modules/platform/views/SubsystemPortalView.vu
 import { AuthError, getCurrentPrincipal } from '@/modules/platform/auth/api/auth'
 import { ensureContractSession } from '@/modules/contract_management/api/contract'
 import { ensureProjectSession } from '@/modules/project_management/api/projectManagement'
+import { ensureSettlementSession } from '@/modules/settlement/api/settlement'
 import { ensureCRMSession } from '@/modules/customer_opportunity/api/client'
 import { ensurePortalSession } from '@/modules/customer_portal/api/portal'
 import { ensureDataAnalysisSession } from '@/modules/data_analysis/api/dataAnalysis'
@@ -27,6 +28,7 @@ import {
 // before the user chooses a system.
 const ContractManagementView = () => import('@/modules/contract_management/views/ContractManagementView.vue')
 const ProjectManagementView = () => import('@/modules/project_management/views/ProjectManagementView.vue')
+const SettlementView = () => import('@/modules/settlement/views/SettlementView.vue')
 const CustomerOpportunityView = () => import('@/modules/customer_opportunity/views/CustomerOpportunityView.vue')
 const CustomerPortalView = () => import('@/modules/customer_portal/views/CustomerPortalView.vue')
 const DataAnalysisView = () => import('@/modules/data_analysis/views/DashboardShellView.vue')
@@ -122,6 +124,12 @@ const router = createRouter({
       name: 'project_management',
       component: ProjectManagementView,
       meta: { title: '项目管理系统', requiresAuth: true, requiresProjectSession: true },
+    },
+    {
+      path: '/settlement/:section?',
+      name: 'settlement',
+      component: SettlementView,
+      meta: { title: '结算与开票管理', requiresAuth: true, requiresSettlementSession: true },
     },
     {
       path: '/customer-opportunity/:section?',
@@ -225,6 +233,16 @@ router.beforeEach(async (to) => {
     } catch (error) {
       // 401 已由项目 API 客户端启动 OIDC；其他错误保持关闭，避免平台会话
       // 在项目服务不可用时意外放行页面。
+      return subsystemAccessFailure(error, to)
+    }
+  }
+
+  if (to.meta.requiresSettlementSession) {
+    try {
+      const session = await ensureSettlementSession()
+      if (!session) return false
+      return true
+    } catch (error) {
       return subsystemAccessFailure(error, to)
     }
   }

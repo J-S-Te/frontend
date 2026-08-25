@@ -4,6 +4,7 @@ import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import ApplicationLoginTargetModule from '@/modules/platform/login-targets/components/ApplicationLoginTargetModule.vue'
 import {
   ApplicationRegistryError,
+  adoptSubsystemRuntime,
   deleteApplicationRegistration,
   deleteEnvironment,
   discoverSubsystemCandidates,
@@ -67,6 +68,7 @@ const pendingDeleteEnvironment = ref(null)
 const deleteConfirmation = ref('')
 const environmentDeleteConfirmation = ref('')
 const pendingPurgeEnvironment = ref(null)
+const pendingRuntimeAdoption = ref(null)
 const purgeConfirmation = ref('')
 const purgeApprovalId = ref('')
 const purgeRetentionConfirmed = ref(false)
@@ -342,6 +344,7 @@ function statusLabel(status) {
     PROVISION_FAILED: '部署失败',
     DRAINING: '下线中',
     OFFBOARDED: '已下线',
+		UNMANAGED: '已登记，待接管',
     UNKNOWN: '状态未知',
   }[status] || status || '未知'
 }
@@ -766,6 +769,30 @@ function openPurgeEnvironment(environment) {
   purgeRetentionConfirmed.value = false
   purgeOffboardedConfirmed.value = false
   clearError()
+}
+
+function openRuntimeAdoption(environment) {
+  if (!environment || environmentStatus(environment) !== 'UNMANAGED' || !canManageRuntime.value || saving.value) return
+  pendingRuntimeAdoption.value = environment
+  clearError()
+}
+
+async function confirmRuntimeAdoption() {
+  const application = selectedApplication.value
+  const environment = pendingRuntimeAdoption.value
+  if (!application || !environment || environmentStatus(environment) !== 'UNMANAGED' || !canManageRuntime.value || saving.value) return
+  saving.value = true
+  clearError()
+  try {
+    await adoptSubsystemRuntime({ applicationCode: application.code, environment: environment.environment })
+    pendingRuntimeAdoption.value = null
+    notify(`已提交 ${application.code}/${environment.environment} 的运行时接管；平台将核验服务健康状态后更新部署状态。`)
+    await loadEnvironments()
+  } catch (error) {
+    setError(error, '接管运行时失败；现有服务、数据库和数据卷均未删除。')
+  } finally {
+    saving.value = false
+  }
 }
 
 async function confirmPurgeEnvironment() {
@@ -1221,7 +1248,7 @@ onMounted(() => {
                 <header class="application-registry-zone-head"><h5>运行时与部署</h5></header>
                 <p v-if="environmentNextAction(environment)" class="application-registry-environment-guidance"><strong>处理建议：</strong>{{ environmentNextAction(environment) }}</p>
                 <p v-if="environmentStatusError(environment)" class="application-registry-environment-guidance is-error"><strong>状态读取失败：</strong>{{ environmentStatusError(environment).message }}<span v-if="environmentStatusError(environment).nextAction">{{ environmentStatusError(environment).nextAction }}</span><button class="console-button ghost small" type="button" :disabled="environmentsLoading" @click.stop="loadEnvironments">重试查询</button></p>
-                <div class="application-registry-environment-actions"><button v-if="canUpdateEnvironment" class="console-button ghost small" type="button" @click.stop="openEnvironmentEditor(environment)"><ConsoleIcon name="settings" />设置</button><button v-if="canRetryRuntime && environmentStatus(environment) === 'PROVISION_FAILED'" class="console-button ghost small" type="button" :disabled="saving" @click.stop="reapplyEnvironment(environment, true)"><ConsoleIcon name="reset" />重试</button><button v-if="canManageRuntime && environmentStatus(environment) === 'READY'" class="console-button ghost small" type="button" :disabled="saving" @click.stop="reapplyEnvironment(environment)"><ConsoleIcon name="reset" />更新运行时</button><button v-if="canDeleteEnvironment && environment.environment !== 'dev'" class="console-button danger small" type="button" @click.stop="openDeleteEnvironment(environment)"><ConsoleIcon name="close" />删除</button><button v-if="canDeleteEnvironment && environment.environment !== 'dev' && environmentStatus(environment) === 'OFFBOARDED'" class="console-button danger small" type="button" @click.stop="openPurgeEnvironment(environment)"><ConsoleIcon name="close" />永久清理</button></div>
+                <div class="application-registry-environment-actions"><button v-if="canUpdateEnvironment" class="console-button ghost small" type="button" @click.stop="openEnvironmentEditor(environment)"><ConsoleIcon name="settings" />设置</button><button v-if="canManageRuntime && environmentStatus(environment) === 'UNMANAGED'" class="console-button primary small" type="button" :disabled="saving" @click.stop="openRuntimeAdoption(environment)"><ConsoleIcon name="reset" />接管运行时</button><button v-if="canRetryRuntime && environmentStatus(environment) === 'PROVISION_FAILED'" class="console-button ghost small" type="button" :disabled="saving" @click.stop="reapplyEnvironment(environment, true)"><ConsoleIcon name="reset" />重试</button><button v-if="canManageRuntime && environmentStatus(environment) === 'READY'" class="console-button ghost small" type="button" :disabled="saving" @click.stop="reapplyEnvironment(environment)"><ConsoleIcon name="reset" />更新运行时</button><button v-if="canDeleteEnvironment && environment.environment !== 'dev'" class="console-button danger small" type="button" @click.stop="openDeleteEnvironment(environment)"><ConsoleIcon name="close" />删除</button><button v-if="canDeleteEnvironment && environment.environment !== 'dev' && environmentStatus(environment) === 'OFFBOARDED'" class="console-button danger small" type="button" @click.stop="openPurgeEnvironment(environment)"><ConsoleIcon name="close" />永久清理</button></div>
               </section>
 
               <section class="application-registry-zone authentication">
@@ -1334,6 +1361,9 @@ onMounted(() => {
     </div>
     <div v-if="pendingPurgeEnvironment" class="application-registry-modal-backdrop" role="presentation" @click.self="pendingPurgeEnvironment = null">
       <section class="application-registry-modal" role="dialog" aria-modal="true" aria-label="永久清理环境确认"><h3>永久清理 {{ selectedApplication.code }}/{{ pendingPurgeEnvironment.environment }}</h3><p class="application-registry-inline-warning">该操作不可恢复，将删除 OAuth 客户端、登录目标、服务凭据、配置命名空间和审计记录。请先确认数据保留审批已完成。</p><label class="console-form-item"><span>数据保留审批编号 *</span><input v-model="purgeApprovalId" autocomplete="off" placeholder="例如 RETENTION-APPROVAL-20260806-001" /></label><label class="console-form-item"><span>请输入确认码：PURGE/{{ selectedApplication.code }}/{{ pendingPurgeEnvironment.environment }}</span><input v-model="purgeConfirmation" autocomplete="off" /></label><label class="console-form-checkbox"><input v-model="purgeRetentionConfirmed" type="checkbox" />我确认审计记录可以永久删除</label><label class="console-form-checkbox"><input v-model="purgeOffboardedConfirmed" type="checkbox" />我确认该环境已经完成下线</label><footer class="console-form-actions"><button class="console-button danger" type="button" :disabled="purgeConfirmation.trim() !== `PURGE/${selectedApplication.code}/${pendingPurgeEnvironment.environment}` || !purgeApprovalId.trim() || !purgeRetentionConfirmed || !purgeOffboardedConfirmed || saving" @click="confirmPurgeEnvironment">确认永久清理</button><button class="console-button ghost" type="button" @click="pendingPurgeEnvironment = null">取消</button></footer></section>
+    </div>
+    <div v-if="pendingRuntimeAdoption" class="application-registry-modal-backdrop" role="presentation" @click.self="pendingRuntimeAdoption = null">
+      <section class="application-registry-modal" role="dialog" aria-modal="true" aria-label="接管运行时确认"><h3>接管 {{ selectedApplication.code }}/{{ pendingRuntimeAdoption.environment }} 运行时</h3><p>平台会核验当前服务、网关路由和 Worker 状态，并将已运行的环境纳入受控部署。此操作不会删除或格式化数据库、数据卷、环境目录、登录目标及现有业务数据。</p><footer class="console-form-actions"><button class="console-button primary" type="button" :disabled="saving" @click="confirmRuntimeAdoption">确认接管运行时</button><button class="console-button ghost" type="button" :disabled="saving" @click="pendingRuntimeAdoption = null">取消</button></footer></section>
     </div>
   </section>
 </template>

@@ -1,5 +1,6 @@
 import platformModule from '../platform/module.js'
 import projectManagementModule from '../project_management/module.js'
+import settlementModule from '../settlement/module.js'
 import contractManagementModule from '../contract_management/module.js'
 import customerOpportunityModule from '../customer_opportunity/module.js'
 import customerPortalModule from '../customer_portal/module.js'
@@ -15,6 +16,7 @@ import dataAnalysisModule from '../data_analysis/module.js'
 export const frontendModules = Object.freeze([
   platformModule,
   projectManagementModule,
+  settlementModule,
   contractManagementModule,
   customerOpportunityModule,
   customerPortalModule,
