@@ -35,7 +35,7 @@ import { createCreateMutationRetryState } from '../createMutationRetry.js'
 import { createContractTransferRetryState } from '../contractTransferRetry.js'
 import { createAttachmentUploadRetryState } from '../attachmentUploadRetry.js'
 import { createMemberTermLoadState } from '../memberTermLoadState.js'
-import { createPortalInviteRetryState } from '../portalInviteRetry.js'
+import { createPortalInviteRetryState, validatePortalInviteResult } from '../portalInviteRetry.js'
 import { createPortalAccessDisableRetryState } from '../portalAccessDisableRetry.js'
 import { createPresaleReportFilters } from '../composables/usePresaleReportFilters.js'
 import { getNotificationUnreadCount, listNotifications, markNotificationRead } from '../api/notification.js'
@@ -1293,8 +1293,16 @@ async function generatePortalInvite() {
 		// 激活链接只在本次响应和页面内存中出现；目录预置、角色绑定或映射任一步未确认
 		// 成功都不展示链接，结果不明确的重试继续使用原幂等键。
 		const result = await createPortalInvite(selectedCustomer.value.id, retry.key)
+		const activationURL = validatePortalInviteResult(result)
+		if (!activationURL) {
+			// 不能把“任务已完成但响应缺少 Bearer 链接”当作可交付成功。保留同一
+			// 幂等键，待接口恢复后重放同一 Saga，避免重发操作撤销当前有效邀请。
+			try { currentPortalInvite.value = await getCurrentPortalInvite(selectedCustomer.value.id) } catch { /* 状态查询失败不覆盖本次协议异常。 */ }
+			customerTabErrors.portal = '邀请流程可能已完成，但服务端响应未携带可交付的一次性链接。请勿刷新或重发邀请；本页会复用同一请求重试。'
+			return
+		}
+		portalActivationURL.value = activationURL
 		portalInviteRetries.confirmSuccess(retry.signature, retry.key)
-		portalActivationURL.value = result?.activation_url || ''
 		try { currentPortalInvite.value = await getCurrentPortalInvite(selectedCustomer.value.id) }
 		catch { currentPortalInvite.value = result }
 		notice.value = 'Portal 邀请已由服务端确认生成。链接仅在当前页面内存中临时显示，请安全发送给登记联系人。'

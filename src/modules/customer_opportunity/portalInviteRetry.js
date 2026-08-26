@@ -29,3 +29,26 @@ export function createPortalInviteRetryState(createKey) {
 
   return { keyFor, confirmSuccess }
 }
+
+/**
+ * validatePortalInviteResult 校验创建邀请响应中仅本次可见的一次性激活链接。
+ *
+ * 链接是 Bearer 凭证：CRM 不能用状态查询接口补取它。因此只有确认响应携带
+ * 有效激活链接后，调用方才能清除页面内存中的幂等键并提示操作成功。
+ *
+ * @param {unknown} result 创建邀请接口已解包的响应数据。
+ * @returns {string} 可安全交付给当前页面展示的激活链接；无效时返回空字符串。
+ */
+export function validatePortalInviteResult(result) {
+  const rawURL = typeof result?.activation_url === 'string' ? result.activation_url.trim() : ''
+  if (!rawURL) return ''
+
+  try {
+    const value = new URL(rawURL)
+    if (!['http:', 'https:'].includes(value.protocol)) return ''
+    if (value.pathname !== '/customer-portal/activate' || !value.searchParams.get('token')) return ''
+    return value.toString()
+  } catch {
+    return ''
+  }
+}
