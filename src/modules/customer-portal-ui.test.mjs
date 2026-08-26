@@ -16,7 +16,8 @@ function jsonResponse(data, status = 200) {
 test('Portal 页面已对齐真实 HTTP 路由并对未配置能力失败关闭', () => {
   assert.match(view, /登录、会话、项目查询、报告申请和等保备案草稿均已接入门户服务/)
   assert.match(view, /备案材料已接(?:受控|入受控)上传与扫描状态/)
-  assert.match(view, /退出登录/)
+  assert.doesNotMatch(view, /退出登录/)
+  assert.match(view, /aria-label="结束门户会话"/)
   assert.match(view, /下载 PDF 报告/)
   assert.match(view, /账号安全/)
   assert.match(view, /统一身份账号安全中心/)

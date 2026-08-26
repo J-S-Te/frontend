@@ -670,13 +670,12 @@ onBeforeUnmount(() => {
         <button v-if="canUseFeedback" class="console-nav-item" type="button" :class="{ active: section === 'feedback' }" @click="navigate('feedback')"><ConsoleIcon name="bell" /><span>客户反馈</span></button></template>
         <p class="console-nav-label">账号</p>
         <button v-if="hasPermission('account.security.manage')" class="console-nav-item" type="button" :class="{ active: section === 'security' }" @click="navigate('security')"><ConsoleIcon name="account" /><span>账号安全</span></button>
-        <button class="console-nav-item" type="button" @click="logoutPortal"><ConsoleIcon name="logout" /><span>退出登录</span></button>
       </nav>
       <div class="console-sidebar-note"><ConsoleIcon name="shield" /><span>统一身份认证已生效，菜单与操作由服务端权限控制。</span></div>
       <div class="console-sidebar-user">
         <span class="console-avatar" aria-hidden="true">{{ accountInitial }}</span>
         <span class="console-user-copy"><strong :title="accountSecurity?.account_identifier || '当前客户'">{{ accountSecurity?.account_identifier || '当前客户' }}</strong><small>Portal 会话</small></span>
-        <button class="console-logout" type="button" aria-label="退出登录" @click="logoutPortal"><ConsoleIcon name="logout" /></button>
+        <button class="console-logout" type="button" aria-label="结束门户会话" title="结束门户会话" @click="logoutPortal"><ConsoleIcon name="logout" /></button>
       </div>
     </aside>
     <main class="console-main portal-main">
@@ -685,7 +684,6 @@ onBeforeUnmount(() => {
         <div class="console-crumb"><span>{{ isPortalSuperAdmin ? '客户门户管理' : '客户自助门户' }}</span><ConsoleIcon name="chevron" /><strong>{{ isPortalSuperAdmin ? '管理入口' : sectionTitle }}</strong></div>
         <div class="console-topbar-actions">
           <span class="console-topbar-avatar" aria-hidden="true">{{ accountInitial }}</span>
-          <button class="console-button secondary small" type="button" @click="logoutPortal">退出登录</button>
         </div>
       </header>
       <section class="console-content portal-content">

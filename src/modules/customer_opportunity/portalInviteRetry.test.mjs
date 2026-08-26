@@ -9,6 +9,17 @@ test('validatePortalInviteResult accepts a one-time Portal activation URL', () =
   assert.equal(value, 'https://portal.example/customer-portal/activate?token=opaque-test-token')
 })
 
+test('validatePortalInviteResult accepts activation URLs with different path prefixes', () => {
+  assert.equal(
+    validatePortalInviteResult({ activation_url: 'https://portal.example/activate?token=abc123' }),
+    'https://portal.example/activate?token=abc123'
+  )
+  assert.equal(
+    validatePortalInviteResult({ activation_url: 'https://portal.example/portal/activate?token=xyz' }),
+    'https://portal.example/portal/activate?token=xyz'
+  )
+})
+
 test('validatePortalInviteResult rejects an incomplete or non-Portal response', () => {
   assert.equal(validatePortalInviteResult({}), '')
   assert.equal(validatePortalInviteResult({ activation_url: 'https://portal.example/customer-portal/activate' }), '')
