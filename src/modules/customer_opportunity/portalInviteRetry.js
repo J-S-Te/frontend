@@ -46,7 +46,7 @@ export function validatePortalInviteResult(result) {
   try {
     const value = new URL(rawURL)
     if (!['http:', 'https:'].includes(value.protocol)) return ''
-    if (value.pathname !== '/customer-portal/activate' || !value.searchParams.get('token')) return ''
+    if (!value.pathname.endsWith('/activate') || !value.searchParams.get('token')) return ''
     return value.toString()
   } catch {
     return ''
