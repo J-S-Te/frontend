@@ -3,6 +3,8 @@ import { request, toQuery } from './client.js'
 const customerPath = (id, suffix = '') => `/customers/${encodeURIComponent(id)}/credit${suffix}`
 
 export const getCustomerCredit = (id) => request(customerPath(id))
+export const getCustomerCreditRuleSettings = () => request('/credit/rule-settings')
+export const updateCustomerCreditRuleSettings = (payload) => request('/credit/rule-settings', { method: 'PUT', body: JSON.stringify(payload) })
 export const listCustomerCreditHistory = (id, params) => request(`${customerPath(id, '/history')}${toQuery(params)}`)
 export const listCustomerCreditPaymentRecords = (id, params = {}) => request(`${customerPath(id, '/payment-records')}${toQuery(params)}`)
 export const listCustomerCreditPayments = listCustomerCreditPaymentRecords
