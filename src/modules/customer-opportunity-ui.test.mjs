@@ -664,7 +664,7 @@ test('CM-002 Tab 和失败关闭导出调用真实路由', async (t) => {
   assert.ok(requests[4].options.headers['Idempotency-Key'])
 })
 
-test('CM-001 关键干系人和信息系统按需页签、权限门禁且不混淆信用评级', () => {
+test('CM-001 关键干系人和信息系统按需页签、权限门禁且不混淆等保与信用评级', () => {
   assert.match(view, /openCustomerTab\('stakeholders'\)/)
   assert.match(view, /openCustomerTab\('systems'\)/)
   assert.match(view, /listCustomerStakeholders/)
@@ -672,7 +672,8 @@ test('CM-001 关键干系人和信息系统按需页签、权限门禁且不混�
   assert.match(view, /canUpdateCustomer && selectedCustomer\.status === 'ACTIVE'/)
   assert.match(view, /保护等级指网络安全等级保护定级，与客户信用评级无关/)
   assert.match(view, /等保等级/)
-  assert.doesNotMatch(view, />信用等级</)
+  // 客户信用等级现已由独立 CM-003 面板提供；此处只保护“信息系统等保等级”文案不被误用。
+  assert.match(view, /CustomerCreditPanel/)
   assert.doesNotMatch(view, /v-html/)
 })
 

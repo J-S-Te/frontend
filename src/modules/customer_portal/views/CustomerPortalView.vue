@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { useRoute, useRouter } from 'vue-router'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import { subsystemAccessMessage } from '@/modules/shared/authz/sessionCompatibility'
+import { closeSubsystemTabOrFallback } from '@/modules/shared/utils/returnToPortal'
 import { acknowledgeSecurityEvent, addFeedbackMessage, closeFeedback, createFeedback, createIdempotencyKey, createProjectConversation, createProjectExport, createReportRequest, downloadIssuedReport, downloadProjectExport, getAccountSecurity, getEvaluation, getEvaluationEligibility, getFeedback, getPortalCapabilities, getPortalSession, getProject, getProjectConversation, getProjectExport, getReportRequest, getReportNotificationUnreadCount, listAccountSessions, listFeedbacks, listProjectActivities, listProjects, listReportNotifications, listReportRequests, listReportRiskAlerts, logoutPortal, readProjectConversationMessages, readReportNotification, reportRequestFingerprint, revokeAccountSession, sendProjectConversationMessage, submitEvaluation } from '../api/portal.js'
 import FilingWizard from '../components/FilingWizard.vue'
 import '@/modules/platform/styles/console.css'
@@ -110,6 +111,10 @@ const evaluationReady = computed(() => scoreDimensions.every(([key]) => evaluati
 const evaluationAverage = computed(() => evaluationReady.value ? (scoreDimensions.reduce((sum, [key]) => sum + evaluationForm[key], 0) / 4).toFixed(2) : '—')
 
 function navigate(value) { router.push({ name: 'customer_portal', params: { section: value } }) }
+function returnToUnifiedPortal() {
+  mobileMenuOpen.value = false
+  closeSubsystemTabOrFallback(window, () => router.replace({ name: 'portal' }))
+}
 const anyDialogOpen = computed(() => !!(selectedProject.value || selectedReport.value || reportDetailLoading.value || reportDetailError.value || selectedFeedback.value))
 const securityCenterHref = computed(() => {
   const url = accountSecurity.value?.security_center_url
@@ -670,6 +675,8 @@ onBeforeUnmount(() => {
         <button v-if="canUseFeedback" class="console-nav-item" type="button" :class="{ active: section === 'feedback' }" @click="navigate('feedback')"><ConsoleIcon name="bell" /><span>客户反馈</span></button></template>
         <p class="console-nav-label">账号</p>
         <button v-if="hasPermission('account.security.manage')" class="console-nav-item" type="button" :class="{ active: section === 'security' }" @click="navigate('security')"><ConsoleIcon name="account" /><span>账号安全</span></button>
+        <p class="console-nav-label">平台能力</p>
+        <button class="console-nav-item" type="button" @click="returnToUnifiedPortal"><ConsoleIcon name="dashboard" /><span>返回子系统门户</span></button>
       </nav>
       <div class="console-sidebar-note"><ConsoleIcon name="shield" /><span>统一身份认证已生效，菜单与操作由服务端权限控制。</span></div>
       <div class="console-sidebar-user">

@@ -15,6 +15,7 @@ export function parseNotificationTarget(targetPath, origin) {
   const routes = {
     '/customer-opportunity/opportunities': { section: 'opportunities', parameter: 'opportunity_id' },
     '/customer-opportunity/presale': { section: 'presale', parameter: 'request_id' },
+    '/customer-opportunity/credit-approvals': { section: 'credit-approvals', parameter: 'application_id' },
   }
   const route = routes[target.pathname]
   if (!route) return null

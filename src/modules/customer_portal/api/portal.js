@@ -1,5 +1,6 @@
 import { normalizeAuthorizationSession, shouldStartSubsystemLogin } from '../../shared/authz/sessionCompatibility.js'
 import { attachStructuredContext } from '../../platform/shared/api/requestContext.js'
+import { logoutCurrentSession } from '../../platform/auth/api/auth.js'
 
 const PUBLIC_PATH_PREFIX = (import.meta.env?.VITE_CUSTOMER_PORTAL_PUBLIC_PATH_PREFIX || '/customer-portal').replace(/\/$/, '')
 const API_BASE_URL = (import.meta.env?.VITE_CUSTOMER_PORTAL_API_BASE_URL || `${PUBLIC_PATH_PREFIX}/api/v1`).replace(/\/$/, '')
@@ -305,6 +306,31 @@ export async function logoutPortal() {
       code: 'PORTAL_LOGOUT_NETWORK_ERROR',
       requestId: '',
       traceId: '',
+    })
+  }
+
+  // Portal has its own session cookie, while the entry point is protected by
+  // the platform's shared SSO session. Revoke both sessions so returning to
+  // the portal cannot immediately authenticate again through the existing
+  // platform browser session.
+  try {
+    await logoutCurrentSession()
+  } catch (error) {
+    // The local Portal session has already been revoked. Continue to the
+    // unauthenticated entry page even if the shared session endpoint is
+    // temporarily unavailable; the next protected request will require login.
+    attachStructuredContext(error, {
+      subsystem: 'customer_portal',
+      feature: 'portal_auth',
+      operation: 'POST',
+      path: '/auth/logout',
+      method: 'POST',
+      metadata: { source: 'platform_logout_after_portal_logout' },
+    }, {
+      status: error?.status || 0,
+      code: error?.code || 'PLATFORM_LOGOUT_ERROR',
+      requestId: error?.requestId || '',
+      traceId: error?.traceId || '',
     })
   } finally {
     window.location.assign(`${PUBLIC_PATH_PREFIX}/`)

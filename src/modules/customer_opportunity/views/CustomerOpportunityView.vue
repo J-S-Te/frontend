@@ -6,6 +6,8 @@ import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import { subsystemAccessMessage } from '@/modules/shared/authz/sessionCompatibility'
 import OwnerSelector from '../components/OwnerSelector.vue'
 import PresaleApprovalRulesPanel from '../components/PresaleApprovalRulesPanel.vue'
+import CustomerCreditPanel from '../components/CustomerCreditPanel.vue'
+import CreditApprovalInbox from '../components/CreditApprovalInbox.vue'
 import { formatSignedContractCount } from '../signedContractCount.js'
 import {
   checkCustomerDuplicate, commitCustomerImport, createCustomer, createCustomerFollowup, downloadCustomerImportErrors,
@@ -55,7 +57,7 @@ import '../styles/customer-opportunity.css'
 
 const route = useRoute()
 const router = useRouter()
-const sections = new Set(['customers', 'opportunities', 'presale', 'notifications'])
+const sections = new Set(['customers', 'opportunities', 'presale', 'notifications', 'credit-approvals'])
 const customerIndustryOptions = Object.freeze([
   '金融', '政府', '医疗', '教育', '能源', '制造', '软件', '互联网', '通信',
   '物流', '交通', '建筑', '房地产', '零售', '服务', '其他',
@@ -70,7 +72,7 @@ const opportunitySourceOptions = Object.freeze([
   '展会/活动', '政府/主管单位指派', '线上渠道', '内部转介',
 ])
 const activeSection = computed(() => sections.has(route.params.section) ? route.params.section : 'customers')
-const sectionTitle = computed(() => ({ customers: '客户管理', opportunities: '商机管理', presale: '售前技术支持', notifications: '个人通知中心' })[activeSection.value])
+const sectionTitle = computed(() => ({ customers: '客户管理', opportunities: '商机管理', presale: '售前技术支持', notifications: '个人通知中心', 'credit-approvals': '信用审批待办' })[activeSection.value])
 const mobileMenuOpen = ref(false)
 const loading = ref(false)
 const currentLoadSequence = ref(0)
@@ -360,6 +362,9 @@ const stageRuleForbidden = ref(false)
 const canReadOpportunities = computed(() => (crmSession.value?.permissions || []).includes('opportunity.read'))
 const canReadPresales = computed(() => (crmSession.value?.permissions || []).includes('presale.read'))
 const canReadCustomers = computed(() => (crmSession.value?.permissions || []).includes('customer.read'))
+const canReadCredit = computed(() => (crmSession.value?.permissions || []).includes('customer.credit.read'))
+const canApplyCredit = computed(() => (crmSession.value?.permissions || []).includes('customer.credit.apply'))
+const canApproveCredit = computed(() => (crmSession.value?.permissions || []).includes('customer.credit.approve'))
 const canReadNotifications = computed(() => canReadOpportunities.value || canReadPresales.value)
 const canConfigureStageAlerts = computed(() => (crmSession.value?.permissions || []).includes('opportunity.alert.config'))
 const canManagePresaleApprovalRules = computed(() => (crmSession.value?.permissions || []).includes('presale.approval_rule.manage'))
@@ -481,7 +486,7 @@ const portalRegistrationContact = computed(() => {
   return contacts.find((item) => item.is_registration) || null
 })
 function navigate(section) {
-  const allowed = { customers: canReadCustomers.value, opportunities: canReadOpportunities.value, presale: canReadPresales.value, notifications: canReadNotifications.value }
+  const allowed = { customers: canReadCustomers.value, opportunities: canReadOpportunities.value, presale: canReadPresales.value, notifications: canReadNotifications.value, 'credit-approvals': canApproveCredit.value }
   if (!allowed[section]) return
   if (activeSection.value === 'presale' && presaleCreatePage.value && !confirmDiscardIfDirty(presaleFormDirty.value)) return
   mobileMenuOpen.value = false
@@ -1019,7 +1024,9 @@ async function loadCurrent() {
         presaleBoard.value = []
       }
       void loadPresaleFilterOptions(params)
-    } else {
+    } else if (section === 'credit-approvals') {
+      // CreditApprovalInbox owns its paged query and only loads when this section is visible.
+    } else if (section === 'notifications') {
       await loadNotifications()
     }
   } catch (value) {
@@ -1590,12 +1597,12 @@ async function uploadOpportunityAttachment() {
     attachmentUploadRetries.confirmComplete(flow)
     opportunityAttachmentFile.value = null; notice.value = '附件已上传并完成代码安全扫描；扫描通过前不能下载。'
     await loadOpportunityAttachments(opportunityID)
-  } catch (value) { opportunityAttachmentError.value = value?.code === 'CRM_OPPORTUNITY_ATTACHMENT_UNAVAILABLE' ? '可信对象存储或病毒扫描尚未配置，上传已安全关闭。' : (value?.message || '附件上传失败。') }
+  } catch (value) { opportunityAttachmentError.value = value?.code === 'CRM_OPPORTUNITY_ATTACHMENT_UNAVAILABLE' ? '可信文件存储或安全校验尚未配置，上传已安全关闭。' : (value?.message || '附件上传失败。') }
   finally { opportunityAttachmentLoading.value = false }
 }
 function opportunityAttachmentStatusText(value) { return ({ PENDING_UPLOAD:'等待上传', FINALIZING:'正在校验上传', SCANNING:'安全扫描中', CLEAN:'扫描通过', REJECTED:'检测到风险，已拒绝', SCAN_FAILED:'扫描失败，禁止下载' })[value] || '未知状态' }
 async function downloadTrustedOpportunityAttachment(item) {
-  if (!canDownloadOpportunityAttachments.value || !opportunityAttachmentCapabilities.value?.download_available || item.scan_status !== 'CLEAN') return
+  if (!canDownloadOpportunityAttachments.value || !opportunityAttachmentCapabilities.value?.download_available || (item.file_status !== 'READY' && item.scan_status !== 'CLEAN')) return
   opportunityAttachmentError.value = ''
   try { const { blob, filename } = await downloadOpportunityAttachment(selectedOpportunity.value.id, item.id, item.file_name); const href = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = href; anchor.download = filename; document.body.append(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(href) }
   catch (value) { opportunityAttachmentError.value = value?.message || '附件下载失败。' }
@@ -2540,8 +2547,8 @@ watch(notificationUnreadOnly, () => { page.number = 1; if (activeSection.value =
 watch(stageAlertUnreadOnly, loadStageAlerts)
 onMounted(async () => {
   try { crmSession.value = await getCRMSession() } catch (value) { showError(value) }
-  if (!['customers', 'opportunities', 'presale', 'notifications'].some((section) => section === activeSection.value && ({ customers: canReadCustomers.value, opportunities: canReadOpportunities.value, presale: canReadPresales.value, notifications: canReadNotifications.value })[section])) {
-    const fallback = canReadPresales.value ? 'presale' : canReadOpportunities.value ? 'opportunities' : canReadCustomers.value ? 'customers' : 'notifications'
+  if (!['customers', 'opportunities', 'presale', 'notifications', 'credit-approvals'].some((section) => section === activeSection.value && ({ customers: canReadCustomers.value, opportunities: canReadOpportunities.value, presale: canReadPresales.value, notifications: canReadNotifications.value, 'credit-approvals': canApproveCredit.value })[section])) {
+    const fallback = canReadPresales.value ? 'presale' : canReadOpportunities.value ? 'opportunities' : canReadCustomers.value ? 'customers' : canApproveCredit.value ? 'credit-approvals' : 'notifications'
     await router.replace({ name: 'customer_opportunity', params: { section: fallback } })
   }
   await refreshRuntimeCapabilities()
@@ -2568,6 +2575,7 @@ onMounted(async () => {
         <button v-if="canReadCustomers" class="console-nav-item" type="button" :class="{ active: activeSection === 'customers' }" @click="navigate('customers')"><ConsoleIcon name="user" /><span>客户管理</span></button>
         <button v-if="canReadOpportunities" class="console-nav-item" type="button" :class="{ active: activeSection === 'opportunities' }" @click="navigate('opportunities')"><ConsoleIcon name="dashboard" /><span>商机管理</span></button>
         <button v-if="canReadPresales" class="console-nav-item" type="button" :class="{ active: activeSection === 'presale' }" @click="navigate('presale')"><ConsoleIcon name="organization" /><span>售前技术支持</span></button>
+        <button v-if="canApproveCredit" class="console-nav-item" type="button" :class="{ active: activeSection === 'credit-approvals' }" @click="navigate('credit-approvals')"><ConsoleIcon name="shield" /><span>信用审批待办</span></button>
         <p class="console-nav-label">消息中心</p>
         <button v-if="canReadNotifications" class="console-nav-item" type="button" :class="{ active: activeSection === 'notifications' }" @click="navigate('notifications')"><ConsoleIcon name="bell" /><span>个人通知</span><span v-if="notificationUnreadCount" class="crm-nav-badge">{{ notificationUnreadCount > 99 ? '99+' : notificationUnreadCount }}</span></button>
         <p class="console-nav-label">平台能力</p>
@@ -2590,12 +2598,12 @@ onMounted(async () => {
         </div>
       </header>
       <section class="console-content crm-content">
-        <header class="console-page-head crm-page-head"><div><h1>{{ activeSection === 'presale' && presaleCreatePage ? '新建售前申请' : sectionTitle }}</h1><p>{{ activeSection === 'presale' && presaleCreatePage ? '填写售前支持需求，提交后进入两级审批流程' : activeSection === 'notifications' ? '通知收件人固定为当前登录用户，不受 SELF / ORG / ALL 数据范围扩展' : '可见数据与可执行动作均由服务端权限和状态控制' }}</p><span class="console-requirement-chip">{{ activeSection === 'customers' ? 'CM-001 ~ CM-004' : activeSection === 'opportunities' ? 'BM-001 ~ BM-002' : activeSection === 'presale' ? 'TS-001 ~ TS-010' : 'CRM-NOTIFY-001' }}</span></div><div v-if="activeSection === 'presale'" class="crm-actions"><template v-if="presaleCreatePage"><button type="button" :disabled="presaleCreateLoading" @click="closePresaleCreatePage">← 返回申请列表</button><button class="primary" type="submit" form="presale-create-form" :disabled="presaleCreateLoading">{{ presaleCreateLoading ? '提交中…' : '提交申请' }}</button></template><template v-else><button v-if="canCreatePresale && presaleRequestSubmissionAvailable" class="primary" type="button" @click="openPresaleCreatePage">新建申请</button><button v-if="canReadPresaleReports" @click="openReports">投入报表</button><button @click="loadAlerts">未读预警 {{ alerts.length }}</button><button @click="openAlertConfig">预警规则</button></template></div><div v-if="activeSection === 'opportunities'" class="crm-actions"><button @click="loadStageAlerts">刷新阶段告警</button><button v-if="canConfigureStageAlerts" @click="openStageAlertRuleEditor">阶段告警规则</button></div></header>
+        <header class="console-page-head crm-page-head"><div><h1>{{ activeSection === 'presale' && presaleCreatePage ? '新建售前申请' : sectionTitle }}</h1><p>{{ activeSection === 'presale' && presaleCreatePage ? '填写售前支持需求，提交后进入两级审批流程' : activeSection === 'notifications' ? '通知收件人固定为当前登录用户，不受 SELF / ORG / ALL 数据范围扩展' : activeSection === 'credit-approvals' ? '仅展示当前账号可审批的信用等级调整申请' : '可见数据与可执行动作均由服务端权限和状态控制' }}</p><span class="console-requirement-chip">{{ activeSection === 'customers' ? 'CM-001 ~ CM-004' : activeSection === 'opportunities' ? 'BM-001 ~ BM-002' : activeSection === 'presale' ? 'TS-001 ~ TS-010' : activeSection === 'credit-approvals' ? 'CM-003' : 'CRM-NOTIFY-001' }}</span></div><div v-if="activeSection === 'presale'" class="crm-actions"><template v-if="presaleCreatePage"><button type="button" :disabled="presaleCreateLoading" @click="closePresaleCreatePage">← 返回申请列表</button><button class="primary" type="submit" form="presale-create-form" :disabled="presaleCreateLoading">{{ presaleCreateLoading ? '提交中…' : '提交申请' }}</button></template><template v-else><button v-if="canCreatePresale && presaleRequestSubmissionAvailable" class="primary" type="button" @click="openPresaleCreatePage">新建申请</button><button v-if="canReadPresaleReports" @click="openReports">投入报表</button><button @click="loadAlerts">未读预警 {{ alerts.length }}</button><button @click="openAlertConfig">预警规则</button></template></div><div v-if="activeSection === 'opportunities'" class="crm-actions"><button @click="loadStageAlerts">刷新阶段告警</button><button v-if="canConfigureStageAlerts" @click="openStageAlertRuleEditor">阶段告警规则</button></div></header>
       <p v-if="error" class="crm-alert error" role="alert">{{ error }}</p><p v-if="notice" class="crm-alert success" role="status">{{ notice }}</p><p v-if="runtimeCapabilitiesError" class="crm-alert warning" role="status">{{ runtimeCapabilitiesError }}</p>
       <section v-if="activeSection === 'customers'" class="crm-toolbar crm-customer-filters">
         <label>客户号 / 名称<input v-model.trim="customerFilters.keyword" @keyup.enter="loadCurrent"></label>
         <label>类型<input v-model.trim="customerFilters.type" list="customer-type-options" placeholder="业主 / 三方 等"></label><datalist id="customer-type-options"><option v-for="item in customerTypeSuggestions" :key="item" :value="item"></option></datalist><label>行业<select v-model="customerFilters.industry"><option value="">全部行业</option><option v-for="item in customerIndustryOptions" :key="item" :value="item">{{ item }}</option></select></label><label>区域<input v-model.trim="customerFilters.region" list="customer-region-options" placeholder="华北 / 华南 等"></label><datalist id="customer-region-options"><option v-for="item in customerRegionSuggestions" :key="item" :value="item"></option></datalist>
-        <label>查找负责人<input v-model.trim="customerOwnerKeyword" type="search" placeholder="输入姓名" @keyup.enter.prevent="loadCustomerOwnerOptions"></label>
+        <label>信用等级<select v-model="customerFilters.credit_level"><option value="">全部等级</option><option value="A">A · 优秀</option><option value="B">B · 正常</option><option value="C">C · 关注</option><option value="D">D · 高风险</option></select></label><label>查找负责人<input v-model.trim="customerOwnerKeyword" type="search" placeholder="输入姓名" @keyup.enter.prevent="loadCustomerOwnerOptions"></label>
         <label v-if="!customerOwnerOptionsError">负责人<select v-model="customerFilters.owner_id" :disabled="customerOwnerOptionsLoading"><option value="">全部负责人</option><option v-for="user in customerOwnerOptions" :key="user.user_id" :value="user.user_id">{{ platformUserName(user) }}</option></select></label>
         <p v-else class="crm-note">基础平台负责人目录暂不可用，当前不能按负责人筛选。</p>
         <label>状态<select v-model="customerFilters.status"><option value="">全部状态</option><option v-for="item in customerStatusOptions" :key="item.value" :value="item.value">{{ item.label }}</option></select></label><label>创建开始<input v-model="customerFilters.created_from" type="date"></label><label>创建结束<input v-model="customerFilters.created_to" type="date"></label><label>最近跟进开始<input v-model="customerFilters.last_followup_from" type="date"></label><label>最近跟进结束<input v-model="customerFilters.last_followup_to" type="date"></label><label>排序<select v-model="customerFilters.sort_by"><option value="updated_at">更新时间</option><option value="created_at">创建时间</option><option value="name">客户名称</option><option value="last_followup_at">最近跟进</option><option value="opportunity_amount_sum">商机金额汇总</option></select></label><label>顺序<select v-model="customerFilters.sort_order"><option value="desc">降序</option><option value="asc">升序</option></select></label>
@@ -2610,8 +2618,9 @@ onMounted(async () => {
       <section v-if="activeSection === 'customers'" class="crm-quick-filters" aria-label="客户快捷筛选"><button :class="{ active: customerFilters.quick_filter === 'NEW' }" @click="useCustomerQuickFilter('NEW')">新增客户（近 30 天）</button><button :class="{ active: customerFilters.quick_filter === 'WON' }" @click="useCustomerQuickFilter('WON')">成交客户</button><button :class="{ active: customerFilters.quick_filter === 'FOLLOWUP_DUE' }" @click="useCustomerQuickFilter('FOLLOWUP_DUE')">待跟进</button></section>
 
       <section v-if="activeSection === 'notifications'" class="crm-panel crm-inbox"><div class="crm-panel-heading"><div><h2>我的业务通知</h2><p class="crm-note">只包含发给当前用户的商机负责人和售前执行人通知；点击后标为已读，并通过真实详情接口再次校验数据范围。</p></div><label class="check"><input v-model="notificationUnreadOnly" type="checkbox">仅看未读</label></div><p v-if="loading">正在加载…</p><div v-else-if="notifications.length" class="crm-inbox-list"><button v-for="item in notifications" :key="item.id" :class="['crm-inbox-item', { unread: item.status === 'UNREAD' }]" @click="openNotification(item)"><span class="crm-status">{{ item.status === 'UNREAD' ? '未读' : '已读' }}</span><strong>{{ item.title }}</strong><span>{{ item.body }}</span><small>{{ notificationContext(item) }} · {{ formatDate(item.created_at) }}</small></button></div><div v-else class="crm-empty">暂无{{ notificationUnreadOnly ? '未读' : '' }}个人通知</div></section>
+      <CreditApprovalInbox v-if="activeSection === 'credit-approvals'" :permissions="crmSession?.permissions || []" />
 
-      <section v-if="activeSection === 'customers'" class="crm-panel table-panel"><p v-if="loading">正在加载…</p><table v-else-if="customers.length && customerFilters.view === 'table'"><thead><tr><th>客户编号</th><th>客户名称</th><th>类型</th><th>行业 / 区域</th><th>负责人</th><th>状态</th><th title="包含客户沟通记录和关联商机跟进记录">最近跟进（含商机）</th><th>商机金额汇总</th></tr></thead><tbody><tr v-for="item in customers" :key="item.id" @click="openCustomer(item.id)"><td>{{ item.customer_no }}</td><td>{{ item.name }}</td><td>{{ item.customer_type }}</td><td>{{ item.industry }} / {{ item.region }}</td><td>{{ ownerLabel(item.owner_user_id) }}</td><td>{{ customerStatusText(item.status) }}</td><td>{{ formatDate(item.last_followup_at) }}</td><td>{{ formatAmount(item.opportunity_amount_sum) }}</td></tr></tbody></table><div v-else-if="customers.length" class="crm-customer-cards" :data-quick-filter="customerFilters.quick_filter"><button v-for="item in customers" :key="item.id" :data-status="item.status" @click="openCustomer(item.id)"><strong>{{ item.name }}</strong><span>{{ item.customer_no }} · {{ customerStatusText(item.status) }}</span><span>{{ item.customer_type }} · {{ item.industry }} / {{ item.region }}</span><span>负责人：{{ ownerLabel(item.owner_user_id) }}</span><span>最近跟进（含商机）：{{ formatDate(item.last_followup_at) }}</span><span>商机金额汇总：{{ formatAmount(item.opportunity_amount_sum) }}</span></button></div><div v-else class="crm-empty">暂无符合条件的客户</div></section>
+      <section v-if="activeSection === 'customers'" class="crm-panel table-panel"><p v-if="loading">正在加载…</p><table v-else-if="customers.length && customerFilters.view === 'table'"><thead><tr><th>客户编号</th><th>客户名称</th><th>信用等级</th><th>类型</th><th>行业 / 区域</th><th>负责人</th><th>状态</th><th title="包含客户沟通记录和关联商机跟进记录">最近跟进（含商机）</th><th>商机金额汇总</th></tr></thead><tbody><tr v-for="item in customers" :key="item.id" @click="openCustomer(item.id)"><td>{{ item.customer_no }}</td><td>{{ item.name }}</td><td><span class="crm-credit-level crm-credit-level--inline" :class="`is-${String(item.credit_level || 'B').toLowerCase()}`">{{ item.credit_level || 'B' }}</span></td><td>{{ item.customer_type }}</td><td>{{ item.industry }} / {{ item.region }}</td><td>{{ ownerLabel(item.owner_user_id) }}</td><td>{{ customerStatusText(item.status) }}</td><td>{{ formatDate(item.last_followup_at) }}</td><td>{{ formatAmount(item.opportunity_amount_sum) }}</td></tr></tbody></table><div v-else-if="customers.length" class="crm-customer-cards" :data-quick-filter="customerFilters.quick_filter"><button v-for="item in customers" :key="item.id" :data-status="item.status" @click="openCustomer(item.id)"><strong>{{ item.name }} <span class="crm-credit-level crm-credit-level--inline" :class="`is-${String(item.credit_level || 'B').toLowerCase()}`">{{ item.credit_level || 'B' }}</span></strong><span>{{ item.customer_no }} · {{ customerStatusText(item.status) }}</span><span>{{ item.customer_type }} · {{ item.industry }} / {{ item.region }}</span><span>负责人：{{ ownerLabel(item.owner_user_id) }}</span><span>最近跟进（含商机）：{{ formatDate(item.last_followup_at) }}</span><span>商机金额汇总：{{ formatAmount(item.opportunity_amount_sum) }}</span></button></div><div v-else class="crm-empty">暂无符合条件的客户</div></section>
       <section v-if="activeSection === 'opportunities' && !boardMode" class="crm-panel table-panel"><p v-if="loading">正在加载…</p><table v-else-if="opportunities.length"><thead><tr><th>商机编号</th><th>名称</th><th>客户</th><th>预计金额</th><th>阶段</th><th>状态</th><th>已签约合同</th><th>终态待办</th></tr></thead><tbody><tr v-for="item in opportunities" :key="item.id" @click="openOpportunity(item.id)"><td>{{ item.opportunity_no }}</td><td>{{ item.name }}</td><td>{{ item.customer_name || `客户 #${item.customer_id}` }}</td><td>{{ formatAmount(item.expected_amount) }}</td><td>{{ item.current_stage }}</td><td>{{ opportunityStatusText(item.opp_status) }}</td><td>{{ formatSignedContractCount(item.signed_contract_count) }}</td><td>{{ terminalPendingText(item.terminal_pending_type) }}</td></tr></tbody></table><div v-else class="crm-empty">暂无符合条件的商机</div></section>
       <section v-if="activeSection === 'opportunities' && boardMode" class="crm-board crm-opportunity-board"><article v-for="column in board" :key="column.stage" class="crm-board-column" :data-stage="column.stage"><h2>{{ column.stage }} <small>{{ column.items?.length || 0 }}</small></h2><button v-for="item in column.items" :key="item.id" class="crm-board-card" @click="openOpportunity(item.id)"><strong>{{ item.name }}</strong><span>{{ item.opportunity_no }}</span><span>{{ formatAmount(item.expected_amount) }}</span><span>已签约合同 {{ formatSignedContractCount(item.signed_contract_count) }}</span></button></article></section>
       <section v-if="activeSection === 'opportunities'" class="crm-panel crm-stage-alerts"><div class="crm-panel-heading"><div><h2>阶段超时告警</h2><p class="crm-note">服务端个人列表当前返回已触发的未读/已读告警；待处理和已取消状态不会进入个人查询结果。</p></div><label class="check"><input v-model="stageAlertUnreadOnly" type="checkbox">仅看未读</label></div><p v-if="stageRuleForbidden" class="crm-alert error" role="alert">无阶段告警规则配置权限（403）；告警查询仍按现有权限执行。</p><div v-if="stageAlerts.length" class="crm-stage-alert-grid"><button v-for="item in stageAlerts" :key="item.id" @click="selectedStageAlert = item"><strong>{{ item.opportunity_no }}</strong><span>{{ item.stage }} · {{ stageAlertStatusText(item.status) }}</span><small>应提醒 {{ formatDate(item.due_at) }}</small></button></div><div v-else class="crm-empty compact">暂无{{ stageAlertUnreadOnly ? '未读' : '' }}阶段超时告警</div><p class="crm-status-legend"><span>待处理：Worker 尚未投递</span><span>已触发：站内告警已生成</span><span>已取消：阶段、终态、作废或负责人变化后失效</span></p></section>
@@ -2762,6 +2771,7 @@ onMounted(async () => {
 <h2>{{ selectedCustomer.name }}</h2>
 <nav class="crm-customer-tabs" aria-label="客户详情页签">
 <button :class="{ active: customerTab === 'basic' }" @click="openCustomerTab('basic')">基本信息</button>
+<button v-if="canReadCredit" :class="{ active: customerTab === 'credit' }" @click="openCustomerTab('credit')">信用等级&nbsp;</button>
 <button :class="{ active: customerTab === 'contacts' }" @click="openCustomerTab('contacts')">联系人</button>
 <button :class="{ active: customerTab === 'stakeholders' }" @click="openCustomerTab('stakeholders')">关键干系人</button>
 <button :class="{ active: customerTab === 'systems' }" @click="openCustomerTab('systems')">信息系统</button>
@@ -2793,6 +2803,7 @@ onMounted(async () => {
 <dt>版本</dt>
 <dd>{{ selectedCustomer.version }}</dd>
 </dl>
+<CustomerCreditPanel v-if="customerTab === 'credit' && canReadCredit" :customer="selectedCustomer" :permissions="crmSession?.permissions || []" />
 <section v-if="customerTab === 'portal'" class="crm-portal-access" aria-labelledby="portal-access-heading">
 <div class="crm-subsection-heading"><div><h3 id="portal-access-heading">门户访问</h3><p class="crm-note">客户通过统一身份平台 OIDC 登录。CRM 不创建、展示或传递固定密码。</p></div></div>
 <dl>
@@ -2992,9 +3003,9 @@ onMounted(async () => {
       <h3>可信附件</h3>
       <p v-if="opportunityAttachmentLoading">正在加载附件状态…</p>
       <p v-if="opportunityAttachmentError" class="crm-alert error" role="alert">{{ opportunityAttachmentError }}</p>
-      <p v-if="opportunityAttachmentCapabilities && !opportunityAttachmentCapabilities.upload_available" class="crm-note">当前未配置可信对象存储或病毒扫描，上传已安全关闭；系统不会把文件内容写入 CRM 数据库。</p>
+      <p v-if="opportunityAttachmentCapabilities && !opportunityAttachmentCapabilities.upload_available" class="crm-note">当前未配置可信文件存储或安全校验，上传已安全关闭；系统不会把文件内容写入 CRM 数据库。</p>
       <ul v-if="opportunityAttachments.length" class="crm-attachment-list">
-        <li v-for="item in opportunityAttachments" :key="item.id"><span><strong>{{ item.file_name }}</strong><br>{{ opportunityAttachmentStatusText(item.scan_status) }} · {{ item.size_bytes }} 字节</span><button type="button" :disabled="!canDownloadOpportunityAttachments || !opportunityAttachmentCapabilities?.download_available || item.scan_status !== 'CLEAN'" @click="downloadTrustedOpportunityAttachment(item)">下载</button></li>
+        <li v-for="item in opportunityAttachments" :key="item.id"><span><strong>{{ item.file_name }}</strong><br>{{ opportunityAttachmentStatusText(item.scan_status) }} · {{ item.size_bytes }} 字节</span><button type="button" :disabled="!canDownloadOpportunityAttachments || !opportunityAttachmentCapabilities?.download_available || (item.file_status !== 'READY' && item.scan_status !== 'CLEAN')" @click="downloadTrustedOpportunityAttachment(item)">下载</button></li>
       </ul>
       <p v-else-if="!opportunityAttachmentLoading" class="crm-note">暂无附件。</p>
       <div v-if="canUploadOpportunityAttachments" class="crm-attachment-upload">
