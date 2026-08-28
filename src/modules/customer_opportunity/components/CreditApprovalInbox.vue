@@ -13,7 +13,8 @@ async function decide(item, action) {
   const opinion = window.prompt(action === 'approve' ? '审批意见（可选）' : '驳回意见（必填）', '')
   if (opinion === null || (action === 'reject' && !opinion.trim())) return
   actionID.value = String(item.id || item.application_id)
-  try { await (action === 'approve' ? approveCustomerCreditApplication(item.id || item.application_id, { opinion: opinion.trim() }, createIdempotencyKey()) : rejectCustomerCreditApplication(item.id || item.application_id, { opinion: opinion.trim() }, createIdempotencyKey())); await load() } catch (value) { error.value = value?.message || '审批操作失败，请刷新后重试。' } finally { actionID.value = '' }
+  if (!Number(item.version)) { error.value = '待办版本缺失，请刷新后重试。'; actionID.value = ''; return }
+  try { await (action === 'approve' ? approveCustomerCreditApplication(item.id || item.application_id, { opinion: opinion.trim(), version: item.version }, createIdempotencyKey()) : rejectCustomerCreditApplication(item.id || item.application_id, { opinion: opinion.trim(), version: item.version }, createIdempotencyKey())); await load() } catch (value) { error.value = value?.message || '审批操作失败，请刷新后重试。' } finally { actionID.value = '' }
 }
 onMounted(load)
 </script>
