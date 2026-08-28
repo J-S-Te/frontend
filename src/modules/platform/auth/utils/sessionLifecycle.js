@@ -1,4 +1,5 @@
-import { AuthError, logoutCurrentSession, recordSessionActivity, refreshCurrentSession } from '@/modules/platform/auth/api/auth'
+// 与 auth.js 互相调用的生命周期协调器使用相对导入，避免 Node 测试环境依赖 Vite 别名。
+import { AuthError, logoutCurrentSession, recordSessionActivity, refreshCurrentSession } from '../api/auth.js'
 
 const SESSION_EVENT = 'platform-auth:session-ended'
 const SESSION_CHANNEL = 'basic-platform-auth'

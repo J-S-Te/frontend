@@ -1,9 +1,11 @@
-import { broadcastSessionEnded } from '@/modules/platform/auth/utils/sessionLifecycle'
-import { clearAuthorizationSnapshot } from '@/modules/platform/auth/utils/authorizationRefresh'
-import { normalizeAuthorizationSession } from '@/modules/shared/authz/sessionCompatibility'
+// 使用相对路径，确保该纯 API 模块既能被 Vite 解析，也能被 Node 原生测试运行器直接加载。
+import { broadcastSessionEnded } from '../utils/sessionLifecycle.js'
+import { clearAuthorizationSnapshot } from '../utils/authorizationRefresh.js'
+import { normalizeAuthorizationSession } from '../../../shared/authz/sessionCompatibility.js'
 import { createApiRequestContext, attachStructuredContext } from '../../shared/api/requestContext.js'
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '/api/v1').replace(/\/$/, '')
+// Node 原生测试没有注入 Vite 的 import.meta.env，使用可选链回退到同源 API 前缀。
+const API_BASE_URL = (import.meta.env?.VITE_API_BASE_URL || '/api/v1').replace(/\/$/, '')
 let browserSessionGeneration = 0
 
 function requestContext(path, options = {}, extra = {}) {
