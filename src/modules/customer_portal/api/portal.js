@@ -1,5 +1,6 @@
 import { normalizeAuthorizationSession, shouldStartSubsystemLogin } from '../../shared/authz/sessionCompatibility.js'
 import { attachStructuredContext } from '../../platform/shared/api/requestContext.js'
+import { logoutCurrentSession } from '../../platform/auth/api/auth.js'
 
 const PUBLIC_PATH_PREFIX = (import.meta.env?.VITE_CUSTOMER_PORTAL_PUBLIC_PATH_PREFIX || '/customer-portal').replace(/\/$/, '')
 const API_BASE_URL = (import.meta.env?.VITE_CUSTOMER_PORTAL_API_BASE_URL || `${PUBLIC_PATH_PREFIX}/api/v1`).replace(/\/$/, '')
@@ -285,6 +286,26 @@ export function ensurePortalSession() { return getPortalSession({ force: true })
  */
 export async function logoutPortal() {
   session = null
+  // 先撤销基础平台共享会话，再撤销门户会话；这样即使两个请求都被记录，
+  // 门户注销仍是用户可观察到的最终边界，且任一请求失败都不会阻断另一请求。
+  try {
+    await logoutCurrentSession()
+  } catch (error) {
+    attachStructuredContext(error, {
+      subsystem: 'customer_portal',
+      feature: 'portal_auth',
+      operation: 'POST',
+      path: '/auth/logout',
+      method: 'POST',
+      metadata: { source: 'platform_logout_before_portal_logout' },
+    }, {
+      status: error?.status || 0,
+      code: error?.code || 'PLATFORM_LOGOUT_ERROR',
+      requestId: error?.requestId || '',
+      traceId: error?.traceId || '',
+    })
+  }
+
   try {
     await fetch(`${PUBLIC_PATH_PREFIX}/auth/logout`, {
       method: 'POST',
@@ -306,9 +327,9 @@ export async function logoutPortal() {
       requestId: '',
       traceId: '',
     })
-  } finally {
-    window.location.assign(`${PUBLIC_PATH_PREFIX}/`)
   }
+
+  window.location.assign(`${PUBLIC_PATH_PREFIX}/`)
 }
 /**
  * listProjects 获取客户可见项目分页结果，并规范化每个项目快照。
