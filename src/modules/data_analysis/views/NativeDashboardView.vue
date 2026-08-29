@@ -6,9 +6,12 @@ const props = defineProps({
   section: { type: String, required: true },
   contractSummary: { type: Object, default: null },
   projectSummary: { type: Object, default: null },
+  contractDetails: { type: Object, default: () => ({ items: [], total: 0 }) },
   canViewContract: { type: Boolean, default: true },
   canViewProject: { type: Boolean, default: true },
   statusFilter: { type: String, default: "全部" },
+  trend: { type: Array, default: () => [] },
+  alertSummary: { type: Object, default: null },
 })
 
 // 合同目标仅作为当前浏览器的展示配置保存；真实合同金额始终来自后端聚合快照。
@@ -99,6 +102,14 @@ const contractStatusItems = computed(() => {
     { label: "已到期", value: numberValue(contract.expired_contracts), tone: "danger" },
   ]
 })
+const contractFunnelItems = computed(() => {
+  const contract = props.contractSummary || {}
+  return [
+    { label: "有效商机", value: numberValue(contract.opportunity_count) },
+    { label: "已转合同", value: numberValue(contract.won_contract_count) },
+  ]
+})
+const contractDiscountItems = computed(() => Object.entries(props.contractSummary?.discount_buckets || {}).map(([label, value]) => ({ label, value: numberValue(value) })))
 
 const projectStatusItems = computed(() => Object.entries(props.projectSummary?.status_counts || {})
   .map(([label, value]) => ({ label, value: numberValue(value) }))
@@ -111,11 +122,23 @@ const breakdownItems = computed(() => {
 })
 
 const maxBreakdownValue = computed(() => Math.max(1, ...breakdownItems.value.map((item) => item.value)))
+const trendItems = computed(() => [...(props.trend || [])].reverse())
+const maxTrendAmount = computed(() => Math.max(1, ...trendItems.value.map((item) => numberValue(item.contract_amount_minor))))
+const alertItems = computed(() => Object.entries(props.alertSummary?.by_severity || {}).map(([label, value]) => ({ label, value: numberValue(value) })))
+const maxAlertValue = computed(() => Math.max(1, ...alertItems.value.map((item) => item.value)))
 
 function barWidth(value) {
   const normalized = numberValue(value)
   if (normalized <= 0) return "0%"
   return `${Math.max(4, Math.round((normalized / maxBreakdownValue.value) * 100))}%`
+}
+
+function trendWidth(value) {
+  return `${Math.max(4, Math.round((numberValue(value) / maxTrendAmount.value) * 100))}%`
+}
+
+function alertWidth(value) {
+  return `${Math.max(4, Math.round((numberValue(value) / maxAlertValue.value) * 100))}%`
 }
 
 function metricsForSection() {
@@ -211,29 +234,27 @@ function metricsForSection() {
     <div v-else class="da-native-columns">
       <article class="da-native-panel">
         <header><b>{{ section === 'overview' ? '签约与项目趋势' : section === 'report' ? '质量效率分析' : '经营回款分析' }}</b><span>T+1 · 指标口径见字典</span></header>
-        <div class="da-native-empty"><span class="da-native-empty-icon">⌁</span><b>等待完整趋势快照</b><p>当前先展示已接入的聚合摘要，完整趋势由下方嵌入看板提供。</p></div>
+        <div v-if="section === 'overview' && trendItems.length" class="da-native-bars"><div v-for="item in trendItems" :key="item.period" class="da-native-bar-row"><span>{{ item.period }}</span><i><em :style="{ width: trendWidth(item.contract_amount_minor) }"></em></i><small>{{ formatAmountMinor(item.contract_amount_minor) }} 万元</small></div></div><div v-else class="da-native-empty"><span class="da-native-empty-icon">⌁</span><b>暂无趋势快照</b><p>完成合同与项目同步后，这里会展示真实月度趋势。</p></div>
       </article>
       <article class="da-native-panel">
         <header><b>{{ section === 'overview' ? '预警聚合' : section === 'report' ? '退回原因分布' : '应收账款账龄' }}</b><span>只读</span></header>
-        <div class="da-native-empty"><span class="da-native-empty-icon">⌁</span><b>暂无独立摘要</b><p>请以下方嵌入看板中的真实数据为准。</p></div>
+        <div v-if="section === 'overview' && alertItems.length" class="da-native-bars"><div v-for="item in alertItems" :key="item.label" class="da-native-bar-row"><span>{{ item.label }}</span><i><em :style="{ width: alertWidth(item.value) }"></em></i><small>{{ formatInteger(item.value) }} 条</small></div><p class="da-native-note">未关闭 {{ formatInteger(numberValue(alertSummary?.open) + numberValue(alertSummary?.ack)) }} 条，共 {{ formatInteger(numberValue(alertSummary?.total)) }} 条</p></div><div v-else class="da-native-empty"><span class="da-native-empty-icon">⌁</span><b>暂无预警摘要</b><p>当前租户没有可展示的预警聚合数据。</p></div>
       </article>
     </div>
     <div v-if="section === 'contract' || section === 'project'" class="da-native-columns da-native-secondary">
       <article class="da-native-panel">
         <header><b>{{ section === 'contract' ? '商机→合同转化率漏斗' : '返工率（报告退回+现场重测）' }}</b><span>聚合级</span></header>
-        <div class="da-native-empty"><span class="da-native-empty-icon">⌁</span><b>暂无明细快照</b><p>接入对应事实表后展示分布与下钻数据。</p></div>
+        <div v-if="section === 'contract' && summaryAvailable && contractFunnelItems.some((item) => item.value > 0)" class="da-native-bars"><div v-for="item in contractFunnelItems" :key="item.label" class="da-native-bar-row"><span>{{ item.label }}</span><i><em :style="{ width: barWidth(item.value) }"></em></i><small>{{ formatInteger(item.value) }}</small></div></div><div v-else class="da-native-empty"><span class="da-native-empty-icon">⌁</span><b>暂无明细快照</b><p>同步商机与合同事实后展示转化漏斗。</p></div>
       </article>
       <article class="da-native-panel">
         <header><b>{{ section === 'contract' ? '折扣分析（区间分布）' : '人员 / 设备利用率（本月）' }}</b><span>只读</span></header>
-        <div class="da-native-bars">
-          <div v-for="label in (section === 'contract' ? ['0%', '1-5%', '5-10%', '>10%'] : ['人员利用率', '设备利用率'])" :key="label" class="da-native-bar-row"><span>{{ label }}</span><i><em></em></i><small>—</small></div>
-        </div>
+        <div v-if="section === 'contract' && summaryAvailable && contractDiscountItems.length" class="da-native-bars"><div v-for="item in contractDiscountItems" :key="item.label" class="da-native-bar-row"><span>{{ item.label }}</span><i><em :style="{ width: barWidth(item.value) }"></em></i><small>{{ formatInteger(item.value) }}</small></div></div><div v-else class="da-native-empty"><span class="da-native-empty-icon">⌁</span><b>暂无折扣快照</b><p>当前合同数据未提供可计算的折扣区间。</p></div>
         <p class="da-native-note">暂无可用快照，不使用演示数据填充业务指标。</p>
       </article>
     </div>
     <div v-if="section === 'contract' || section === 'project'" class="da-native-panel da-native-table-panel">
       <header><b>{{ section === 'contract' ? '合同列表（下钻明细）' : '项目执行明细' }}</b><span>聚合级 · 不含敏感字段</span></header>
-      <div class="da-native-empty"><b>暂无明细数据</b><p>当前租户没有可展示的{{ section === 'contract' ? '合同' : '项目' }}记录。</p></div>
+      <div v-if="section === 'contract' && contractDetails.items?.length" class="da-native-detail-table"><table class="da-table"><thead><tr><th>合同编号</th><th>名称</th><th>状态</th><th>金额</th><th>到期日</th></tr></thead><tbody><tr v-for="item in contractDetails.items" :key="item.contract_number"><td class="mono">{{ item.contract_number }}</td><td>{{ item.title }}</td><td>{{ item.status }}</td><td>{{ formatAmountMinor(item.amount_minor) }} 万元</td><td>{{ item.end_date || '—' }}</td></tr></tbody></table><p class="da-native-note">共 {{ contractDetails.total }} 条，当前展示前 10 条</p></div><div v-else class="da-native-empty"><b>暂无明细数据</b><p>当前租户没有可展示的{{ section === 'contract' ? '合同' : '项目' }}记录。</p></div>
     </div>
   </section>
 </template>
