@@ -1,6 +1,6 @@
 <script setup>
 // 高保真模型的本地兜底视图：没有 Metabase 或业务摘要时，仍提供清晰的指标层级与数据状态。
-import { computed } from "vue"
+import { computed, ref, watch } from "vue"
 
 const props = defineProps({
   section: { type: String, required: true },
@@ -9,6 +9,23 @@ const props = defineProps({
   canViewContract: { type: Boolean, default: true },
   canViewProject: { type: Boolean, default: true },
   statusFilter: { type: String, default: "全部" },
+})
+
+// 合同目标仅作为当前浏览器的展示配置保存；真实合同金额始终来自后端聚合快照。
+const contractTargetWan = ref(0)
+try {
+  const savedTarget = Number(window.localStorage.getItem("data-analysis.contract-target-wan"))
+  if (Number.isFinite(savedTarget) && savedTarget > 0) contractTargetWan.value = savedTarget
+} catch {
+  // 隐私模式或禁用存储时仍可正常查看看板，不影响业务数据。
+}
+watch(contractTargetWan, (value) => {
+  try {
+    if (Number.isFinite(value) && value > 0) window.localStorage.setItem("data-analysis.contract-target-wan", String(value))
+    else window.localStorage.removeItem("data-analysis.contract-target-wan")
+  } catch {
+    // 存储不可用时忽略持久化失败。
+  }
 })
 
 const sectionMeta = {
@@ -33,6 +50,19 @@ function formatInteger(value) {
 function formatAmountMinor(value) {
   return new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(numberValue(value) / 1_000_000)
 }
+
+const contractAmountWan = computed(() => numberValue(props.contractSummary?.total_amount_minor) / 1_000_000)
+const contractTargetRatio = computed(() => {
+  if (contractTargetWan.value <= 0) return 0
+  return contractAmountWan.value / contractTargetWan.value
+})
+const contractProgressWidth = computed(() => `${Math.min(100, Math.round(contractTargetRatio.value * 100))}%`)
+const contractExcessWidth = computed(() => `${Math.min(100, Math.max(0, Math.round((contractTargetRatio.value - 1) * 100)))}%`)
+const contractProgressLabel = computed(() => {
+  if (contractTargetWan.value <= 0) return "设置目标后显示完成进度"
+  if (contractTargetRatio.value > 1) return `已超额 ${(contractTargetRatio.value - 1) * 100 >= 10 ? Math.round((contractTargetRatio.value - 1) * 100) : ((contractTargetRatio.value - 1) * 100).toFixed(1)}%`
+  return `完成 ${(contractTargetRatio.value * 100).toFixed(1)}%`
+})
 
 function formatSnapshotAt(value) {
   if (!value) return "暂无快照"
@@ -143,6 +173,17 @@ function metricsForSection() {
       <article v-for="item in metricsForSection()" :key="item.label" class="da-native-metric" :class="item.tone">
         <span>{{ item.label }}</span>
         <strong>{{ item.value }}</strong><small>{{ item.suffix }}</small>
+        <template v-if="section === 'contract' && item.label === '合同总金额' && contractSummary?.available">
+          <div class="da-contract-target-row">
+            <label for="contract-target">目标</label>
+            <input id="contract-target" v-model.number="contractTargetWan" type="number" min="0" step="1" placeholder="万元" />
+            <small>万元</small>
+          </div>
+          <div v-if="contractTargetWan > 0" class="da-contract-progress" role="progressbar" :aria-valuenow="Math.round(contractTargetRatio * 100)" aria-valuemin="0" :aria-valuemax="100">
+            <i class="da-contract-progress-track"><em :style="{ width: contractProgressWidth }"></em><b v-if="contractTargetRatio > 1" :style="{ width: contractExcessWidth }"></b></i>
+            <span :class="{ excess: contractTargetRatio > 1 }">{{ contractProgressLabel }}</span>
+          </div>
+        </template>
       </article>
     </div>
 
