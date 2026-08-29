@@ -269,6 +269,19 @@
 .da-contract-progress-track b { left: auto; right: 0; background: #f59e0b; }
 .da-contract-progress > span { display: block; margin-top: 4px; color: #2563eb; font-size: 10px; text-align: right; }
 .da-contract-progress > span.excess { color: #d97706; font-weight: 600; }
+.da-button.compact { padding: 5px 10px; font-size: 12px; }
+.da-rule-actions { display: flex; gap: 6px; }
+.da-button.compact.danger { color: #b91c1c; border-color: #fecaca; background: #fff; }
+.da-button.compact.danger:hover { background: #fef2f2; }
+.da-modal-backdrop { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 20px; background: rgba(15, 23, 42, .42); }
+.da-modal { width: min(460px, 100%); display: grid; gap: 14px; padding: 22px; border-radius: 14px; background: #fff; box-shadow: 0 20px 50px rgba(15, 23, 42, .22); }
+.da-modal header, .da-modal footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.da-modal header div { display: grid; gap: 4px; }
+.da-modal header span, .da-modal-help { color: var(--da-muted); font-size: 12px; }
+.da-modal label { display: grid; gap: 6px; color: var(--da-body); font-size: 12px; font-weight: 600; }
+.da-modal input, .da-modal select, .da-modal textarea { width: 100%; box-sizing: border-box; padding: 9px 10px; border: 1px solid var(--da-line); border-radius: 7px; color: var(--da-ink); background: #fff; font: inherit; font-weight: 400; }
+.da-modal textarea { resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.da-modal-help { margin: -4px 0 0; }
 .da-native-columns { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; }
 .da-native-panel { min-height: 218px; padding: 16px; border: 1px solid var(--da-line, #e4ecfc); border-radius: 12px; background: #fff; }
 .da-native-panel > header { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 14px; }

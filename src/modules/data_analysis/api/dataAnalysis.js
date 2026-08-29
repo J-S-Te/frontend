@@ -181,6 +181,14 @@ export function putAlertRules(payload) {
 }
 
 /**
+ * deleteAlertRule 删除没有历史预警记录的规则。
+ * @param {string} id 规则 ID。
+ * @returns {Promise<any>} 返回删除结果。
+ * @throws {Error} 规则存在历史预警或请求失败时抛出。
+ */
+export function deleteAlertRule(id) { return request(`/alert-rules/${encodeURIComponent(id)}`, { method: 'DELETE' }) }
+
+/**
  * getDictionary 查询指标字典（维度码值、状态口径）。
  * @returns {Promise<any>} 返回指标字典对象。
  * @throws {Error} 查询失败抛出错误。
