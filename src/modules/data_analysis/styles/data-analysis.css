@@ -258,6 +258,17 @@
 .da-native-metric strong { display: inline-block; margin-top: 8px; color: var(--da-ink, #0f172a); font-size: 24px; line-height: 1; }
 .da-native-metric small { margin-left: 4px; color: var(--da-muted, #64748b); font-size: 12px; }
 .da-native-metric.danger strong { color: #dc2626; }
+.da-contract-target-row { display: flex; align-items: center; gap: 4px; margin-top: 8px; color: var(--da-muted, #64748b); font-size: 11px; }
+.da-contract-target-row label { flex: 0 0 auto; }
+.da-contract-target-row input { width: 72px; padding: 3px 6px; border: 1px solid var(--da-line, #e4ecfc); border-radius: 5px; color: var(--da-ink, #0f172a); font-size: 11px; }
+.da-contract-target-row input:focus { outline: 2px solid rgba(37, 99, 235, .18); border-color: #2563eb; }
+.da-contract-progress { margin-top: 7px; }
+.da-contract-progress-track { display: block; position: relative; height: 7px; overflow: hidden; border-radius: 999px; background: #e8edf5; }
+.da-contract-progress-track em, .da-contract-progress-track b { display: block; position: absolute; inset: 0 auto 0 0; border-radius: inherit; }
+.da-contract-progress-track em { background: linear-gradient(90deg, #2563eb, #38bdf8); }
+.da-contract-progress-track b { left: auto; right: 0; background: #f59e0b; }
+.da-contract-progress > span { display: block; margin-top: 4px; color: #2563eb; font-size: 10px; text-align: right; }
+.da-contract-progress > span.excess { color: #d97706; font-weight: 600; }
 .da-native-columns { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; }
 .da-native-panel { min-height: 218px; padding: 16px; border: 1px solid var(--da-line, #e4ecfc); border-radius: 12px; background: #fff; }
 .da-native-panel > header { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
