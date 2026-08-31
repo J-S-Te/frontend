@@ -1866,9 +1866,14 @@ async function openCustomerFromRoute() {
     error.value = '客户详情入口无效，已保留当前列表。'
     return
   }
-  if (selectedCustomer.value?.id === id) return
+  const requestedTab = Array.isArray(route.query.tab) ? route.query.tab[0] : route.query.tab
+  if (selectedCustomer.value?.id === id) {
+    if (requestedTab === 'credit') await openCustomerTab('credit')
+    return
+  }
   // 查询参数只用于导航，客户可见性和数据范围仍由详情接口判定。
   await openCustomer(id)
+  if (requestedTab === 'credit') await openCustomerTab('credit')
 }
 
 async function refreshNotificationCount() {
