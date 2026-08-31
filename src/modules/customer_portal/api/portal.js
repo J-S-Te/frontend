@@ -533,6 +533,9 @@ export const listReportNotifications = (params) => request(`/report-notification
  * @throws {Error} 会话失效、网络失败或服务端返回非成功状态时抛出。
  */
 export const getReportNotificationUnreadCount = () => request('/report-notifications/unread-count')
+export const listFeedbackNotifications = (params = {}) => request(`/feedback-notifications?${new URLSearchParams(params).toString()}`)
+export const getFeedbackNotificationUnreadCount = () => request('/feedback-notifications/unread-count')
+export const readFeedbackNotification = (id) => request(`/feedback-notifications/${id}/read`, { method: 'POST', headers: { 'X-CSRF-Token': '1' } })
 
 /**
  * readReportNotification 将指定报告通知标记为已读。

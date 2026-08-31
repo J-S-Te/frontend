@@ -752,7 +752,7 @@ function openNewCustomer() {
 }
 function openCustomerImport() {
   if (!customerImportScanAvailable.value) {
-    error.value = '客户导入依赖可信文件扫描器，当前环境尚未配置，入口已安全关闭。'
+    error.value = '客户导入代码安全校验当前不可用，入口已安全关闭。'
     return
   }
   Object.assign(customerImportForm, { file: null, reason: '' })
@@ -772,8 +772,8 @@ function selectCustomerImportFile(event) {
   if (file && !customerImportForm.file) error.value = '只接受 .xlsx 文件，请重新选择。'
 }
 function showCustomerImportError(value) {
-  if (value?.code === 'CRM_CUSTOMER_IMPORT_SCANNER_UNAVAILABLE') error.value = '客户导入必须先通过服务端病毒扫描；扫描器尚未配置，当前功能未接通。'
-  else if (value?.code === 'CRM_CUSTOMER_IMPORT_FILE_REJECTED') error.value = '文件未通过服务端安全扫描，已拒绝预检。'
+  if (value?.code === 'CRM_CUSTOMER_IMPORT_SCANNER_UNAVAILABLE') error.value = '客户导入代码安全校验当前不可用，暂不能预检。'
+  else if (value?.code === 'CRM_CUSTOMER_IMPORT_FILE_REJECTED') error.value = '文件未通过服务端代码安全校验，已拒绝预检。'
   else if (value?.code === 'CRM_CUSTOMER_IMPORT_FILE_INVALID') error.value = 'Excel 文件格式、表头或内容不符合导入规范。'
   else if (value?.code === 'CRM_CUSTOMER_IMPORT_JOB_EXPIRED' || value?.code === 'CRM_CUSTOMER_IMPORT_JOB_CONFLICT' || value?.code === 'COMMON_VERSION_CONFLICT' || value?.status === 409) {
     error.value = '导入预检已过期或状态发生变化，请重新上传文件预检。'
@@ -1440,10 +1440,17 @@ async function submitSystems() {
 }
 
 async function exportCustomers() {
-	try { await requestCustomerExport({ filters: customerAPIParams(customerFilters, 1, page.size) }) }
+	try {
+		const result = await requestCustomerExport({ filters: customerAPIParams(customerFilters, 1, page.size) })
+		const blob = result.blob
+		const url = URL.createObjectURL(blob)
+		const anchor = document.createElement('a')
+		anchor.href = url; anchor.download = result.filename || 'customers.csv'; anchor.click()
+		URL.revokeObjectURL(url)
+		notice.value = '客户导出已完成，文件仅在本次响应中生成。'
+	}
 	catch (value) {
-		if (value?.code === 'CRM_CUSTOMER_EXPORT_NOT_CONFIGURED') error.value = '客户导出依赖受控 XLSX Worker、加密对象存储和短效下载链接，当前已安全关闭。'
-		else showError(value)
+		showError(value)
 	}
 }
 async function openCustomerMerge() {
@@ -2124,8 +2131,14 @@ async function openEngineerPicker() {
 function canActOnConfiguredAssignment(action) {
   const request = selectedPresale.value?.request
   const roles = crmSession.value?.roles || []
-  if (request?.status !== 'APPROVED_PENDING_ASSIGNMENT' || request?.assignment_action !== action) return false
-  return roles.includes('crm_super_admin') || (request.assignment_role_code && roles.includes(request.assignment_role_code))
+  if (!['APPROVED_PENDING_ASSIGNMENT', 'EXECUTING'].includes(request?.status) || request?.assignment_action !== action) return false
+  if (roles.includes('crm_super_admin')) return true
+  const roleAliases = {
+    technical_director: ['technical_director', 'technical_lead'],
+    technical_lead: ['technical_director', 'technical_lead'],
+  }
+  const acceptedRoles = roleAliases[request.assignment_role_code] || [request.assignment_role_code]
+  return acceptedRoles.some((role) => roles.includes(role))
 }
 async function loadExecutionDepartments() { try { const result = await listPresaleExecutionDepartments(); executionDepartments.value = result?.data || result || [] } catch (value) { showError(value) } }
 async function saveExecutionDepartment() {
@@ -2625,7 +2638,7 @@ onMounted(async () => {
         <label v-if="!customerOwnerOptionsError">负责人<select v-model="customerFilters.owner_id" :disabled="customerOwnerOptionsLoading"><option value="">全部负责人</option><option v-for="user in customerOwnerOptions" :key="user.user_id" :value="user.user_id">{{ platformUserName(user) }}</option></select></label>
         <p v-else class="crm-note">基础平台负责人目录暂不可用，当前不能按负责人筛选。</p>
         <label>状态<select v-model="customerFilters.status"><option value="">全部状态</option><option v-for="item in customerStatusOptions" :key="item.value" :value="item.value">{{ item.label }}</option></select></label><label>创建开始<input v-model="customerFilters.created_from" type="date"></label><label>创建结束<input v-model="customerFilters.created_to" type="date"></label><label>最近跟进开始<input v-model="customerFilters.last_followup_from" type="date"></label><label>最近跟进结束<input v-model="customerFilters.last_followup_to" type="date"></label><label>排序<select v-model="customerFilters.sort_by"><option value="updated_at">更新时间</option><option value="created_at">创建时间</option><option value="name">客户名称</option><option value="last_followup_at">最近跟进</option><option value="opportunity_amount_sum">商机金额汇总</option></select></label><label>顺序<select v-model="customerFilters.sort_order"><option value="desc">降序</option><option value="asc">升序</option></select></label>
-        <button type="button" :disabled="customerOwnerOptionsLoading" @click="loadCustomerOwnerOptions">{{ customerOwnerOptionsLoading ? '查找中…' : '查找负责人' }}</button><button @click="page.number = 1; loadCurrent()">查询</button><button @click="customerFilters.view = customerFilters.view === 'table' ? 'cards' : 'table'; syncCustomerURL()">{{ customerFilters.view === 'table' ? '卡片视图' : '列表视图' }}</button><button v-if="canCreateCustomer" class="primary" @click="openNewCustomer">新建</button><button v-if="canImportCustomers" :disabled="!customerImportScanAvailable" :title="customerImportScanAvailable ? '' : '可信文件扫描器未配置'" @click="openCustomerImport">Excel 导入</button><button v-if="canExportCustomers" :disabled="!customerExportAvailable" :title="customerExportAvailable ? '' : '客户导出 Provider 未配置'" @click="exportCustomers">导出</button>
+        <button type="button" :disabled="customerOwnerOptionsLoading" @click="loadCustomerOwnerOptions">{{ customerOwnerOptionsLoading ? '查找中…' : '查找负责人' }}</button><button @click="page.number = 1; loadCurrent()">查询</button><button @click="customerFilters.view = customerFilters.view === 'table' ? 'cards' : 'table'; syncCustomerURL()">{{ customerFilters.view === 'table' ? '卡片视图' : '列表视图' }}</button><button v-if="canCreateCustomer" class="primary" @click="openNewCustomer">新建</button><button v-if="canImportCustomers" :disabled="!customerImportScanAvailable" :title="customerImportScanAvailable ? '' : '导入代码安全校验未启用'" @click="openCustomerImport">Excel 导入</button><button v-if="canExportCustomers" :disabled="!customerExportAvailable" :title="customerExportAvailable ? '' : '导出能力未启用'" @click="exportCustomers">导出</button>
       </section>
       <p v-if="activeSection === 'customers' && customerOwnerOptionsError" class="crm-alert error" role="alert">{{ customerOwnerOptionsError }} 请在基础平台人员目录恢复后重试负责人筛选。</p>
       <section v-else-if="activeSection === 'opportunities' && canReadOpportunities" class="crm-toolbar"><label>关键词<input v-model.trim="filters.keyword" @keyup.enter="loadCurrent"></label><label v-if="!boardMode">状态<select v-model="filters.status"><option value="">全部状态</option><option v-for="item in opportunityStatusOptions" :key="item.value" :value="item.value">{{ item.label }}</option></select></label><label v-if="!boardMode">阶段<select v-model="filters.stage"><option value="">全部阶段</option><option v-for="item in opportunityStageOptions" :key="item" :value="item">{{ item }}</option></select></label><button @click="loadCurrent">查询</button><button @click="boardMode = !boardMode; loadCurrent()">{{ boardMode ? '列表视图' : '阶段看板' }}</button><button v-if="canCreateOpportunity" class="primary" @click="openNewOpportunity">新建</button></section>

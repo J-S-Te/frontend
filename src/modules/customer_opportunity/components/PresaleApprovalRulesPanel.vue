@@ -53,7 +53,7 @@ function reset() {
       { id: 'sales-director', name: '销售总监审批', type: 'APPROVAL', role_code: 'sales_director' },
       { id: 'technical-director', name: '技术总监审批', type: 'APPROVAL', role_code: 'technical_director' },
       { id: 'department', name: '选择执行部门', type: 'DEPARTMENT_ASSIGNMENT', role_code: 'technical_director' },
-      { id: 'people', name: '选择执行人员', type: 'PERSON_ASSIGNMENT', role_code: 'team_lead' },
+      { id: 'people', name: '选择执行人员', type: 'PERSON_ASSIGNMENT', role_code: 'technical_director' },
     ],
   })
   editing.value = null

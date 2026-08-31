@@ -156,17 +156,25 @@ export async function request(path, options = {}) {
 }
 
 /**
- * requestBlob 下载受会话授权的 CSV，并约束媒体类型与响应文件名。
+ * requestBlob 下载受会话授权的 CSV，并约束媒体类型与响应文件名；支持 GET/POST 等请求方法。
  * @param {string} path 相对于 CRM API 根路径的下载地址。
+ * @param {RequestInit} [options={}] Fetch 请求选项。
  * @returns {Promise<{blob: Blob, filename: string}>} CSV 二进制数据与清理后的文件名。
  * @throws {CRMAPIError} 服务端返回非成功状态，或成功响应的媒体类型不是 CSV 时抛出。
  * @throws {TypeError} 网络连接或 Fetch 调用失败时抛出。
  */
-export async function requestBlob(path) {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    credentials: 'include',
-    headers: { Accept: 'text/csv, application/json' },
-  })
+export async function requestBlob(path, options = {}) {
+	const method = String(options.method || 'GET').toUpperCase()
+	const response = await fetch(`${API_BASE_URL}${path}`, {
+		credentials: 'include',
+		...options,
+		headers: {
+			Accept: 'text/csv, application/json',
+			...(options.body ? { 'Content-Type': 'application/json' } : {}),
+			...(method !== 'GET' ? { 'X-CSRF-Token': '1' } : {}),
+			...(options.headers || {}),
+		},
+	})
   if (!response.ok) {
     const body = await readResponse(response)
     const error = new CRMAPIError(body?.message || `HTTP ${response.status}`, {
@@ -178,9 +186,9 @@ export async function requestBlob(path) {
     attachStructuredContext(error, {
       subsystem: 'customer_opportunity',
       feature: 'crm_export',
-      operation: 'GET',
+		operation: method,
       path,
-      method: 'GET',
+		method,
       requestId: body?.request_id || '',
       traceId: body?.trace_id || body?.traceId || '',
       metadata: { source: 'crm_blob' },

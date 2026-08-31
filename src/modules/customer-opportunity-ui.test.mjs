@@ -34,6 +34,13 @@ test('售前审批规则支持规则列表和编辑区折叠', () => {
   assert.match(style, /\.crm-approval-collapse-button/)
 })
 
+test('技术总监可作为人员指派节点负责人，完成审批后展示指派入口', () => {
+  assert.match(approvalPanel, /type: 'PERSON_ASSIGNMENT', role_code: 'technical_director'/)
+  assert.match(view, /\['APPROVED_PENDING_ASSIGNMENT', 'EXECUTING'\]\.includes\(request\?\.status\)/)
+  assert.match(view, /technical_director: \['technical_director', 'technical_lead'\]/)
+  assert.match(view, /request\?\.assignment_action !== action/)
+})
+
 test('客户与商机管理复用基础平台壳层、图标导航和响应式规范', () => {
   assert.match(view, /import ConsoleIcon from '@\/modules\/platform\/shared\/components\/ConsoleIcon\.vue'/)
   assert.match(view, /import '@\/modules\/platform\/styles\/console\.css'/)
@@ -647,7 +654,11 @@ test('CM-002 Tab 和失败关闭导出调用真实路由', async (t) => {
   const originalFetch = globalThis.fetch
   t.after(() => { globalThis.fetch = originalFetch })
   const requests = []
-  globalThis.fetch = async (url, options = {}) => { requests.push({ url, options }); return jsonResponse({ items: [] }) }
+  globalThis.fetch = async (url, options = {}) => {
+    requests.push({ url, options })
+    if (url.endsWith('/customer-exports')) return new Response('客户编号,客户名称\n', { status: 200, headers: { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': 'attachment; filename="customers.csv"' } })
+    return jsonResponse({ items: [] })
+  }
   await customer.listCustomerContacts(8)
   await customer.listCustomerOpportunities(8, { page: 1, page_size: 50 })
   await customer.listCustomerProjects(8, { page: 2, page_size: 20 })
@@ -661,7 +672,7 @@ test('CM-002 Tab 和失败关闭导出调用真实路由', async (t) => {
     '/customer-opportunity/api/v1/customer-exports',
   ])
   assert.equal(requests[4].options.method, 'POST')
-  assert.ok(requests[4].options.headers['Idempotency-Key'])
+  assert.equal(requests[4].options.headers['X-CSRF-Token'], '1')
 })
 
 test('CM-001 关键干系人和信息系统按需页签、权限门禁且不混淆等保与信用评级', () => {
