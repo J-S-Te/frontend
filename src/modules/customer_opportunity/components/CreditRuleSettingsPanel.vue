@@ -24,6 +24,7 @@ async function save() {
     const value = await updateCustomerCreditRuleSettings({
       grace_days: Number(form.grace_days), on_time_threshold: Number(form.on_time_threshold),
       late_threshold: Number(form.late_threshold), level_step: Number(form.level_step), enabled: Boolean(form.enabled),
+      updated_at: form.updated_at || null,
     })
     Object.assign(form, value || {})
     emit('notice', '信用规则已保存；仅影响后续回款事件，不会重算历史记录。')
