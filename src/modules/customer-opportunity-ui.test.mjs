@@ -1353,6 +1353,10 @@ test('通知目标只接受当前源的现有 CRM 商机或售前入口', () => 
     parseNotificationTarget('/customer-opportunity/presale?request_id=17', 'https://crm.example'),
     { name: 'customer_opportunity', params: { section: 'presale' }, query: { request_id: '17' } },
   )
+  assert.deepEqual(
+    parseNotificationTarget('/customer-opportunity/customers?customer_id=31&tab=credit', 'https://crm.example'),
+    { name: 'customer_opportunity', params: { section: 'customers' }, query: { customer_id: '31', tab: 'credit' } },
+  )
   for (const target of [
     'https://evil.example/customer-opportunity/opportunities?opportunity_id=31',
     '/customer-opportunity/opportunities?opportunity_id=0',
@@ -1360,6 +1364,9 @@ test('通知目标只接受当前源的现有 CRM 商机或售前入口', () => 
     '/customer-opportunity/notifications?opportunity_id=31',
     '/customer-opportunity/presale?request_id=0',
     '/customer-opportunity/presale?request_id=17&scope=ALL',
+    '/customer-opportunity/customers?customer_id=31',
+    '/customer-opportunity/customers?customer_id=31&tab=basic',
+    '/customer-opportunity/customers?customer_id=31&tab=credit&scope=ALL',
   ]) assert.equal(parseNotificationTarget(target, 'https://crm.example'), null)
 })
 
@@ -1370,6 +1377,8 @@ test('个人通知界面明确个人边界并通过路由查询打开真实详�
   assert.match(view, /await openOpportunity\(id\)/)
   assert.match(view, /target\.params\.section === 'presale'/)
   assert.match(view, /await openPresale\(Number\(target\.query\.request_id\)\)/)
+  assert.match(view, /requestedTab === 'credit'/)
+  assert.match(view, /await openCustomerTab\('credit'\)/)
   assert.match(view, /canReadNotifications/)
   assert.match(view, /只包含发给当前用户的商机负责人和售前执行人通知/)
   assert.match(view, /ASSIGNEE_ADDED/)
