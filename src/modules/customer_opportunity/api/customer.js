@@ -43,8 +43,8 @@ export const replaceCustomerSystems = (id, payload) => request(`/customers/${enc
 export const listCustomerOpportunities = (id, params) => request(`/customers/${encodeURIComponent(id)}/opportunities${toQuery(params)}`)
 export const listCustomerProjects = (id, params) => request(`/customers/${encodeURIComponent(id)}/projects${toQuery(params)}`)
 export const listCustomerAuditLogs = (id, params) => request(`/customers/${encodeURIComponent(id)}/audit-logs${toQuery(params)}`)
-export const requestCustomerExport = (payload) => request('/customer-exports', {
-  method: 'POST', body: JSON.stringify(payload), idempotent: true,
+export const requestCustomerExport = (payload) => requestBlob('/customer-exports', {
+	method: 'POST', body: JSON.stringify(payload),
 })
 export const createCustomerFollowup = (id, payload) => request(`/customers/${encodeURIComponent(id)}/followups`, {
   method: 'POST', body: JSON.stringify(payload), idempotent: true,

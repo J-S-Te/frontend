@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { completeFilingMaterialUpload, createFiling, createFilingMaterialUpload, deleteFiling, getFiling, listFilings, saveFilingMatrix, saveFilingSection, submitFiling, validateFiling } from '../api/portal.js'
 
 const props = defineProps({ permissions: { type: Array, default: () => [] }, capabilities: { type: Object, default: () => ({}) }, projects: { type: Array, default: () => [] } })
@@ -25,7 +25,9 @@ const createProjectId = ref('')
 const filing = ref(null)
 const currentStep = ref(0)
 const busy = ref(false)
+const savingNow = ref(false)
 const validation = ref(null)
+const validationNotice = ref([])
 const saveState = reactive(Object.fromEntries(steps.map(([code]) => [code, '未暂存'])))
 const dirty = computed(() => Object.values(saveState).some(value => value.startsWith('等待自动暂存') || value.startsWith('正在保存')))
 watch(dirty, (pending) => {
@@ -42,10 +44,11 @@ const materialBusy = reactive({})
 const materialErrors = reactive({})
 const materialCreateKeys = reactive({})
 const materialFileSignatures = reactive({})
-let saveTimer = 0
+const saveTimers = new Map()
 let saveQueue = Promise.resolve()
 let createIdempotencyKey = ''
 let submitIdempotencyKey = ''
+let validationNoticeTimer = 0
 
 // 备案草稿由 7 个独立 section 和 2 张矩阵组成。每个子资源维护自己的乐观锁
 // 版本；filing.version 则协调跨 section 的整体验证、材料和最终锁定。
@@ -191,13 +194,44 @@ async function uploadMaterial(item) {
 }
 function labelForStep(code) { return steps.find(item => item[0] === code)?.[1] || code }
 function issueLabel(issue) {
-  const parts = String(issue.path || '').split('.')
-  const code = parts[1]
-  const key = parts[2]
+  const parts = String(issue.path || '').split('.').filter(Boolean)
+  const code = parts[0] === 'sections' ? parts[1] : currentCode.value
+  const key = parts[0] === 'sections' || parts[0] === 'materials' ? parts[2] || parts[1] : parts.at(-1)
   const item = fields[code]?.find(value => value.key === key || value.fileKey === key)
-  return `${labelForStep(code)}${item ? ` / ${item.label}` : ''}：${issue.message || issue.code}`
+  const label = item?.label || key || labelForStep(code)
+  const messages = {
+    REQUIRED: `${label}未填写，请补充。`,
+    RANGE: `${label}填写不合规，请填写允许范围内的内容。`,
+    ENUM: `${label}选择不合规，请重新选择。`,
+    FORMAT: `${label}格式不正确，请按要求填写。`,
+    TYPE: `${label}填写类型不正确，请重新填写。`,
+    DUPLICATE_ITEM: `${label}存在重复内容，请修改后重试。`,
+    MUTUALLY_EXCLUSIVE: `${label}选项组合不合规，请重新选择。`,
+    CLEAN_MATERIAL_REQUIRED: `${label}尚未完成安全校验，暂时不能提交。`,
+    LEVEL_MISMATCH: `${label}与定级结果不一致，请检查后修改。`,
+  }
+  return messages[issue.code] || `${label}填写不合规，请检查后重试。`
+}
+function showValidationNotice(issues) {
+  clearTimeout(validationNoticeTimer)
+  validationNotice.value = [...new Set((issues || []).map(issue => issueLabel(issue)).filter(Boolean))]
+  if (validationNotice.value.length) validationNoticeTimer = window.setTimeout(() => { validationNotice.value = [] }, 5000)
+}
+function dismissValidationNotice() {
+  clearTimeout(validationNoticeTimer)
+  validationNoticeTimer = 0
+  validationNotice.value = []
 }
 function statusText(value) { return ({ DRAFT: '草稿', WAITING_CONTRACT: '已锁定，等待公安提交契约', SUBMITTING: '正在向公安提交', SUBMISSION_FAILED: '公安提交失败，待人工处理', SUBMITTED: '公安回执已确认', ARCHIVED: '已归档' })[value] || value }
+function filingTitle(item) {
+  const title = [item.unit_name, item.system_name].map(value => String(value || '').trim()).filter(Boolean).join(' - ')
+  return title || item.filing_no || '未命名备案'
+}
+function snapshotSection(code) {
+  // sectionData 是 Vue reactive Proxy，不能直接交给 structuredClone；备案字段
+  // 只允许 JSON 值，用 JSON 快照隔离响应式代理，避免浏览器抛出 DataCloneError。
+  return JSON.parse(JSON.stringify(sectionData[code]))
+}
 function resetDraft() {
   Object.assign(sectionData, initialData())
   for (const [code] of steps) { sectionVersions[code] = 0; sectionIssues[code] = []; saveState[code] = '未暂存' }
@@ -214,6 +248,9 @@ function applyDetail(value) {
     sectionIssues[item.code] = item.validation_issues || []
     saveState[item.code] = `${item.validation_status === 'VALID' ? '服务端已保存' : '服务端已保存（待完善）'} · v${item.version}`
   }
+  // 兼容旧版详情接口：名称保存在 section 中时，详情标题也必须立即可见。
+  filing.value.unit_name ||= sectionData.ORGANIZATION.unit_name || ''
+  filing.value.system_name ||= sectionData.CLASSIFIED_OBJECT.system_name || ''
   for (const item of value.matrices || []) {
     if (matrices[item.code]) Object.assign(matrices[item.code], item)
     matrixVersions[item.code] = item.version || 0
@@ -256,7 +293,9 @@ function handleConflict(error) {
   if (error?.status !== 409) return false
   // 任一子资源发生乐观锁冲突后停止整个编辑会话的自动暂存。继续保存可能拿旧
   // 快照覆盖其他页面的新内容，必须重新读取全部 section 和矩阵版本后再编辑。
-  conflict.value = true; clearTimeout(saveTimer)
+  conflict.value = true
+  for (const timer of saveTimers.values()) clearTimeout(timer)
+  saveTimers.clear()
   emit('error', new Error('检测到其他页面已修改该备案。自动暂存已停止，请重新加载后再编辑；系统未覆盖服务端内容。'))
   return true
 }
@@ -283,21 +322,53 @@ async function persistSection(code, snapshot, idempotencyKey) {
 function scheduleSave() {
   if (!filing.value || readonly.value) return
   const code = currentCode.value
-  saveState[code] = '等待自动暂存…'; clearTimeout(saveTimer)
-  saveTimer = window.setTimeout(() => {
-    const snapshot = structuredClone(sectionData[code])
+  saveState[code] = '等待自动暂存…'
+  clearTimeout(saveTimers.get(code))
+  const timer = window.setTimeout(() => {
+    saveTimers.delete(code)
+    const snapshot = snapshotSection(code)
     const idempotencyKey = newKey()
     // 前一次失败不能永久阻断队列；冲突状态会在 persistSection 内停止后续暂存。
     saveQueue = saveQueue.catch(() => {}).then(() => persistSection(code, snapshot, idempotencyKey))
   }, 900)
+  saveTimers.set(code, timer)
 }
-async function saveNow() {
-  if (!filing.value || readonly.value) return
-  clearTimeout(saveTimer)
+async function saveNow(announce = true) {
+  if (!filing.value || readonly.value) return false
   const code = currentCode.value
-  const snapshot = structuredClone(sectionData[code])
+  clearTimeout(saveTimers.get(code))
+  saveTimers.delete(code)
+  const snapshot = snapshotSection(code)
+  saveState[code] = '正在保存…'
   saveQueue = saveQueue.catch(() => {}).then(() => persistSection(code, snapshot, newKey()))
-  await saveQueue.catch(() => {})
+  savingNow.value = true
+  try {
+    await saveQueue
+    if (announce) emit('notice', `${labelForStep(code)}已暂存。`)
+    return true
+  } catch (_) {
+    // persistSection already emits the detailed error and updates the save state.
+    return false
+  } finally {
+    savingNow.value = false
+  }
+}
+async function nextStep() {
+  if (readonly.value || currentStep.value >= steps.length - 1) return
+  if (!await saveNow(false) || conflict.value) return
+  const issues = sectionIssues[currentCode.value] || []
+  // 流程校验只负责提示当前步骤的问题，不阻断继续填写后续步骤；最终提交时
+  // 仍由 confirmSubmit 执行全量校验并阻止不合规备案提交。
+  if (issues.length) showValidationNotice(issues)
+  currentStep.value += 1
+}
+async function goToStep(index) {
+  if (index <= currentStep.value) {
+    currentStep.value = index
+    return
+  }
+  // 前进只能逐步进行，避免点击顶部步骤直接绕过当前流程校验。
+  if (index === currentStep.value + 1) await nextStep()
 }
 async function chooseMatrix(code, rowCode, columnCode) {
   if (readonly.value) return
@@ -310,17 +381,17 @@ async function chooseMatrix(code, rowCode, columnCode) {
   } catch (error) { if (!handleConflict(error)) emit('error', error) }
 }
 async function runValidation() {
-  await saveNow()
+  await saveNow(false)
   if (conflict.value) return
-  try { validation.value = await validateFiling(filing.value.id); if (validation.value.valid) emit('notice', '服务端全量校验已通过。') }
+  try { validation.value = await validateFiling(filing.value.id); if (validation.value.valid) emit('notice', '服务端全量校验已通过。'); else showValidationNotice(validation.value.issues) }
   catch (error) { emit('error', error) }
 }
 async function confirmSubmit() {
   if (!canSubmit.value || readonly.value) return
-  await saveNow(); if (conflict.value) return
+  await saveNow(false); if (conflict.value) return
   try {
     validation.value = await validateFiling(filing.value.id)
-    if (!validation.value.valid) return
+    if (!validation.value.valid) { showValidationNotice(validation.value.issues); return }
     if (!window.confirm('确认提交并在 Portal 内部锁定？提交后客户不能继续修改；这不代表已经向公安机关提交。')) return
     // 校验通过到锁定完成之间若响应丢失，必须复用同一提交键，避免生成两个备案快照。
     submitIdempotencyKey ||= newKey()
@@ -333,6 +404,7 @@ async function confirmSubmit() {
 }
 
 onMounted(loadList)
+onUnmounted(() => clearTimeout(validationNoticeTimer))
 </script>
 
 <template>
@@ -340,17 +412,17 @@ onMounted(loadList)
     <div class="portal-title"><h1 id="filing-title">等保备案信息</h1></div>
     <div v-if="!filing" class="portal-card filing-list">
       <div class="filing-toolbar"><h2>我的备案</h2><div v-if="canCreate" class="filing-create"><button v-if="!creating" type="button" class="primary" :disabled="busy" @click="creating = true">新建备案</button><template v-else><label>关联项目（可选）<select v-model="createProjectId"><option value="">不关联项目</option><option v-for="item in projects" :key="item.project_id" :value="item.project_id">{{ item.project_name || '未命名项目' }}（{{ item.contract_no || item.project_id }}）</option></select></label><button type="button" class="primary" :disabled="busy" @click="startFiling">确认创建</button><button type="button" class="secondary" :disabled="busy" @click="creating = false">取消</button></template></div></div>
-      <div v-for="item in filings" :key="item.id" class="filing-list-row"><button type="button" class="filing-list-open" @click="openFiling(item.id)"><span><strong>{{ item.filing_no }}</strong><small v-if="item.unit_name || item.system_name">{{ [item.unit_name, item.system_name].filter(Boolean).join(' · ') }}</small><small>更新于 {{ new Date(item.updated_at).toLocaleString('zh-CN') }}</small></span><em>{{ statusText(item.status) }}</em></button><button v-if="item.status === 'DRAFT' && canDelete" type="button" class="secondary filing-list-delete" :disabled="busy" @click="deleteDraft(item)">删除草稿</button></div>
+      <div v-for="item in filings" :key="item.id" class="filing-list-row"><button type="button" class="filing-list-open" @click="openFiling(item.id)"><span><strong>{{ filingTitle(item) }}</strong><small>更新于 {{ new Date(item.updated_at).toLocaleString('zh-CN') }}</small></span><em>{{ statusText(item.status) }}</em></button><button v-if="item.status === 'DRAFT' && canDelete" type="button" class="secondary filing-list-delete" :disabled="busy" @click="deleteDraft(item)">删除草稿</button></div>
       <p v-if="!busy && !filings.length">暂无备案记录。</p>
     </div>
     <template v-else>
-      <div class="filing-toolbar portal-card"><div><button type="button" class="link-button" @click="filing = null; loadList()">← 返回列表</button><h2>{{ filing.filing_no }}</h2><small>{{ statusText(filing.status) }} · 完成度 {{ filing.completion_pct }}%</small></div><div><button type="button" class="secondary" :disabled="currentCode !== 'MATERIALS' || readonly || !materialUploadAvailable" @click="currentStep = 4">上传材料</button><button type="button" class="secondary" :disabled="!filingExportAvailable" :title="filingExportAvailable ? '生成备案 PDF' : '当前运行环境尚未启用备案 PDF 导出'">生成 PDF{{ filingExportAvailable ? '' : '（未接通）' }}</button><button v-if="filing.status === 'DRAFT' && canDelete" type="button" class="secondary" :disabled="busy" @click="deleteDraft(filing)">删除草稿</button></div></div>
+      <div class="filing-toolbar portal-card"><div><button type="button" class="link-button" @click="filing = null; loadList()">← 返回列表</button><h2>{{ filingTitle(filing) }}</h2><small>{{ statusText(filing.status) }} · 完成度 {{ filing.completion_pct }}%</small></div><div><button type="button" class="secondary" :disabled="currentCode !== 'MATERIALS' || readonly || !materialUploadAvailable" @click="currentStep = 4">上传材料</button><button type="button" class="secondary" :disabled="!filingExportAvailable" :title="filingExportAvailable ? '生成备案 PDF' : '当前运行环境尚未启用备案 PDF 导出'">生成 PDF{{ filingExportAvailable ? '' : '（未接通）' }}</button><button v-if="filing.status === 'DRAFT' && canDelete" type="button" class="secondary" :disabled="busy" @click="deleteDraft(filing)">删除草稿</button></div></div>
       <p v-if="filing.status === 'WAITING_CONTRACT'" class="portal-warning">备案快照已在 Portal 内部锁定，尚未向公安机关提交；正式提交契约未配置时会保持此状态。后续将由服务人员与您联系办理，如需修改请联系您的服务人员。</p>
       <p v-else-if="filing.status === 'SUBMITTING'" class="portal-info">正在通过正式公安 Provider 提交；重复投递使用同一业务事件号，页面不能修改快照。</p>
       <p v-else-if="filing.status === 'SUBMISSION_FAILED'" class="portal-error">公安提交重试已耗尽，备案仍未确认提交，请联系管理员核对失败原因并恢复处理。</p>
       <p v-else-if="filing.status === 'SUBMITTED'" class="portal-success">公安 Provider 已返回并验证回执，本记录已确认提交且保持只读；外部客户界面不提供管理员解锁操作。</p>
       <p v-if="conflict" class="portal-error" role="alert">存在版本冲突，自动暂存已停止。<button type="button" @click="reloadCurrent">重新加载服务端版本</button></p>
-      <nav class="filing-steps" aria-label="备案填写步骤"><button v-for="([code, label], index) in steps" :key="code" type="button" :class="{ active: currentStep === index, done: saveState[code].startsWith('服务端已保存') }" @click="currentStep = index"><span>{{ index + 1 }}</span>{{ label }}<small>{{ saveState[code] }}</small></button></nav>
+      <nav class="filing-steps" aria-label="备案填写步骤"><button v-for="([code, label], index) in steps" :key="code" type="button" :class="{ active: currentStep === index, done: saveState[code].startsWith('服务端已保存') }" @click="goToStep(index)"><span>{{ index + 1 }}</span>{{ label }}<small>{{ saveState[code] }}</small></button></nav>
       <section class="portal-card filing-step-panel">
         <header><div><h2>步骤 {{ currentStep + 1 }}：{{ steps[currentStep][1] }}</h2></div><strong :class="saveState[currentCode].includes('失败') || saveState[currentCode].includes('冲突') ? 'save-bad' : 'save-good'">{{ saveState[currentCode] }}</strong></header>
         <p v-if="currentCode === 'MATERIALS' && !materialUploadAvailable" class="portal-warning">正式对象存储或病毒扫描尚未配置，材料上传已安全关闭；材料声明仍可暂存。</p><p v-else-if="currentCode === 'MATERIALS'" class="portal-info">材料先保存声明，再通过受控对象存储上传并完成病毒扫描；只有服务端返回 CLEAN 的不可变对象版本才允许锁定备案。</p>
@@ -371,14 +443,14 @@ onMounted(loadList)
             </template>
           </template>
         </div>
-        <section v-if="sectionIssues[currentCode].length" class="section-issues" aria-live="polite"><h3>本节服务端校验提示</h3><ul><li v-for="issue in sectionIssues[currentCode]" :key="`${issue.path}-${issue.code}`">{{ issue.message }}（{{ issue.path }}）</li></ul></section>
+        <Transition name="filing-validation-popover"><aside v-if="validationNotice.length" class="filing-validation-popover" role="alert" aria-live="assertive"><button type="button" class="filing-validation-popover-close" aria-label="关闭校验提示" title="关闭" @click="dismissValidationNotice">×</button><strong>请完善当前填写</strong><ul><li v-for="message in validationNotice" :key="message">{{ message }}</li></ul></aside></Transition>
         <section v-if="currentCode === 'CLASSIFICATION_REPORT'" class="filing-matrices">
           <h3>等级矩阵</h3><p>每张矩阵只能选择一个单元格；再次选择当前项可以撤销。原生单选控件支持 Tab、方向键和空格键。</p>
           <fieldset v-for="(title, matrixCode) in { BUSINESS_INFORMATION: '业务信息安全矩阵', SYSTEM_SERVICE: '系统服务安全矩阵' }" :key="matrixCode" :disabled="readonly"><legend>{{ title }}</legend><div class="filing-matrix-scroll"><table><thead><tr><th scope="col">受侵害客体</th><th v-for="column in matrixColumns" :key="column[0]" scope="col">{{ column[1] }}</th></tr></thead><tbody><tr v-for="row in matrixRows" :key="row[0]"><th scope="row">{{ row[1] }}</th><td v-for="column in matrixColumns" :key="column[0]"><label><input type="radio" :name="`matrix-${matrixCode}`" :checked="matrices[matrixCode].selected && matrices[matrixCode].row_code === row[0] && matrices[matrixCode].column_code === column[0]" :disabled="readonly" @change="chooseMatrix(matrixCode, row[0], column[0])"><span>{{ matrices[matrixCode].selected && matrices[matrixCode].row_code === row[0] && matrices[matrixCode].column_code === column[0] ? '已选择' : `${row[1]} / ${column[1]}` }}</span></label></td></tr></tbody></table></div><button v-if="matrices[matrixCode].selected" type="button" :disabled="readonly" @click="chooseMatrix(matrixCode, matrices[matrixCode].row_code, matrices[matrixCode].column_code)">撤销当前选择</button></fieldset>
         </section>
-        <footer><button type="button" class="secondary" :disabled="currentStep === 0" @click="currentStep--">上一步</button><button type="button" class="secondary" :disabled="readonly" @click="saveNow">立即暂存</button><button v-if="currentStep < 6" type="button" class="primary" @click="currentStep++">下一步</button><template v-else><button type="button" class="secondary" @click="runValidation">全量校验</button><button v-if="canSubmit" type="button" class="primary" :disabled="readonly" @click="confirmSubmit">确认提交并锁定</button></template></footer><p v-if="currentStep === 6 && !policeSubmissionAvailable" class="portal-warning">本操作只锁定 Portal 内部备案快照；正式公安提交契约尚未启用，不会显示为已向公安提交。</p>
+        <footer><button type="button" class="secondary" :disabled="currentStep === 0" @click="currentStep--">上一步</button><button type="button" class="secondary" :disabled="readonly || savingNow" @click="saveNow()">{{ savingNow ? '暂存中…' : '立即暂存' }}</button><button v-if="currentStep < 6" type="button" class="primary" :disabled="savingNow" @click="nextStep">下一步</button><template v-else><button type="button" class="secondary" @click="runValidation">全量校验</button><button v-if="canSubmit" type="button" class="primary" :disabled="readonly" @click="confirmSubmit">确认提交并锁定</button></template></footer><p v-if="currentStep === 6 && !policeSubmissionAvailable" class="portal-warning">本操作只锁定 Portal 内部备案快照；正式公安提交契约尚未启用，不会显示为已向公安提交。</p>
       </section>
-      <section v-if="validation" class="portal-card filing-validation" aria-live="polite"><h2>服务端全量校验</h2><p v-if="validation.valid" class="portal-success">全部 7 个 section 与 2 张矩阵已通过校验。</p><template v-else><p class="portal-error">共有 {{ validation.issues?.length || 0 }} 项需要处理：</p><ol><li v-for="issue in validation.issues || []" :key="`${issue.path}-${issue.code}`">{{ issueLabel(issue) }}</li></ol></template></section>
+      <section v-if="validation" class="portal-card filing-validation" :class="validation.valid ? 'is-valid' : 'is-invalid'" aria-live="polite"><header class="filing-validation-heading"><div><span class="filing-validation-eyebrow">备案完整性检查</span><h2>服务端全量校验</h2></div><span class="filing-validation-badge">{{ validation.valid ? '校验通过' : '待处理' }}</span></header><div v-if="validation.valid" class="filing-validation-summary"><span class="filing-validation-icon">✓</span><div><strong>全部校验通过</strong><p>7 个流程与 2 张等级矩阵均符合提交要求。</p></div></div><template v-else><div class="filing-validation-summary"><span class="filing-validation-icon">!</span><div><strong>发现 {{ validation.issues?.length || 0 }} 项待处理问题</strong><p>请根据下方提示完善备案信息后再提交。</p></div></div><ol><li v-for="issue in validation.issues || []" :key="`${issue.path}-${issue.code}`">{{ issueLabel(issue) }}</li></ol></template></section>
     </template>
   </section>
 </template>

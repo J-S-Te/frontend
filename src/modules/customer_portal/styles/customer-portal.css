@@ -109,20 +109,6 @@
   box-shadow: none;
 }
 .filing-toolbar .link-button:hover { color: var(--p-dark, #1d4ed8); background: transparent; }
-.security-summary a {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 36px;
-  padding: 8px 14px;
-  color: #fff;
-  font-size: 13px;
-  text-decoration: none;
-  border-radius: 8px;
-  background: var(--p, #2563eb);
-}
-.security-summary a:hover { background: var(--p-dark, #1d4ed8); box-shadow: 0 3px 9px rgba(37, 99, 235, .2); }
-
 /* ===== 状态提示 ===== */
 .portal-info,
 .portal-error,
@@ -283,7 +269,7 @@
 /* ===== 账号安全 ===== */
 .security-summary {
   display: grid;
-  grid-template-columns: 1fr 2fr auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: center;
   gap: 24px;
   margin-bottom: 18px;
@@ -316,6 +302,43 @@
   background: #fff;
 }
 .security-row button:hover:not(:disabled) { color: var(--p, #2563eb); border-color: #93c5fd; }
+
+.filing-validation-popover {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 20;
+  width: min(420px, calc(100vw - 32px));
+  padding: 15px 18px;
+  color: #7f1d1d;
+  border: 1px solid #fecaca;
+  border-radius: 12px;
+  background: #fff7f7;
+  box-shadow: 0 12px 30px rgba(127, 29, 29, .16);
+}
+.filing-validation-popover-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: grid;
+  width: 24px;
+  min-height: 24px !important;
+  place-items: center;
+  padding: 0 !important;
+  color: #64748b !important;
+  font-size: 18px !important;
+  line-height: 1;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.filing-validation-popover-close:hover:not(:disabled) { color: #0f172a !important; background: #e2e8f0 !important; box-shadow: none !important; }
+.filing-validation-popover strong { display: block; margin-bottom: 7px; color: #991b1b; font-size: 14px; }
+.filing-validation-popover ul { display: grid; gap: 4px; margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.5; }
+.filing-validation-popover-enter-active,
+.filing-validation-popover-leave-active { transition: opacity .3s ease, transform .3s ease; }
+.filing-validation-popover-enter-from,
+.filing-validation-popover-leave-to { opacity: 0; transform: translateY(12px); }
 
 /* ===== 服务评价 ===== */
 .evaluation-panel { border-top: 1px solid var(--border, #e4ecfc); margin-top: 22px; padding-top: 12px; }
@@ -439,9 +462,11 @@
   border-radius: 0 !important;
   background: transparent !important;
   box-shadow: none !important;
+  transition: none !important;
 }
-.filing-list-open:hover:not(:disabled) { color: var(--p, #2563eb); background: transparent !important; border-color: transparent !important; box-shadow: none !important; }
+.filing-list-open:hover:not(:disabled) { color: var(--text, #0f172a); background: transparent !important; border-color: transparent !important; box-shadow: none !important; }
 .filing-list-open span { display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
+.filing-list-open strong { display: block; visibility: visible; opacity: 1; transform: none; color: var(--text, #0f172a); }
 .filing-list-open small { color: var(--muted, #64748b); }
 .filing-list-open em { padding: 4px 10px; color: var(--p, #2563eb); font-style: normal; font-size: 12px; border-radius: 999px; background: #e7efff; }
 .filing-list-delete { flex: 0 0 auto; min-height: 32px !important; padding: 6px 12px !important; font-size: 12px !important; }
@@ -743,8 +768,19 @@
 .filing-matrices fieldset > button:hover:not(:disabled) { color: var(--p, #2563eb); border-color: #93c5fd; }
 
 /* 校验结果 */
-.filing-validation ol { display: grid; gap: 7px; }
-.filing-validation li { color: #b91c1c; }
+.filing-validation { overflow: hidden; padding: 0 !important; }
+.filing-validation-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 18px; border-bottom: 1px solid var(--border, #e4ecfc); background: #fbfdff; }
+.filing-validation-heading h2 { margin: 3px 0 0; color: var(--text, #0f172a); font-size: 16px; }
+.filing-validation-eyebrow { color: var(--muted, #64748b); font-size: 11px; }
+.filing-validation-badge { padding: 5px 10px; color: #b45309; font-size: 12px; font-weight: 600; white-space: nowrap; border: 1px solid #fde68a; border-radius: 999px; background: #fffbeb; }
+.filing-validation.is-valid .filing-validation-badge { color: #15803d; border-color: #bbf7d0; background: #f0fdf4; }
+.filing-validation-summary { display: flex; align-items: center; gap: 11px; padding: 16px 18px 12px; }
+.filing-validation-icon { display: grid; width: 28px; height: 28px; flex: 0 0 auto; place-items: center; color: #b45309; font-size: 16px; font-weight: 700; border-radius: 50%; background: #fef3c7; }
+.filing-validation.is-valid .filing-validation-icon { color: #15803d; background: #dcfce7; }
+.filing-validation-summary strong { color: var(--text, #0f172a); font-size: 13px; }
+.filing-validation-summary p { margin: 3px 0 0; color: var(--muted, #64748b); font-size: 12px; }
+.filing-validation ol { display: grid; gap: 7px; margin: 0 18px 18px 58px; padding: 12px 14px 12px 28px; color: #b91c1c; font-size: 12px; line-height: 1.6; border: 1px solid #fee2e2; border-radius: 8px; background: #fffafa; }
+.filing-validation li { padding-left: 3px; }
 .filing-workspace .portal-error button { min-height: 30px; margin-left: 12px; padding: 5px 8px; color: #b91c1c; border: 1px solid currentColor; border-radius: 5px; background: #fff; }
 
 /* ===== 响应式 ===== */

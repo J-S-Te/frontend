@@ -9,7 +9,7 @@ import ConsoleIcon from "@/modules/platform/shared/components/ConsoleIcon.vue"
 import ErrorState from "@/modules/platform/shared/components/ErrorState.vue"
 import LoadingState from "@/modules/platform/shared/components/LoadingState.vue"
 import { closeSubsystemTabOrFallback } from "@/modules/shared/utils/returnToPortal"
-import { getAuthMe, getEmbedToken, getContractDashboardSummary, getProjectDashboardSummary } from "../api/dataAnalysis"
+import { getAuthMe, getEmbedToken, getContractDashboardSummary, getProjectDashboardSummary, getContractDetails, getDashboardTrend, getAlertSummary } from "../api/dataAnalysis"
 import AlertsCenterView from "./AlertsCenterView.vue"
 import DictionaryView from "./DictionaryView.vue"
 import AdminSourcesView from "./AdminSourcesView.vue"
@@ -100,7 +100,10 @@ const iframeSrc = ref("")
 const iframeLoading = ref(false)
 const iframeError = ref(null)
 const dashboardSummary = ref(null)
+const contractDetails = ref({ items: [], total: 0 })
 const overviewSummary = ref({ contract: null, project: null })
+const dashboardTrend = ref([])
+const alertSummary = ref(null)
 const summaryLoading = ref(false)
 const summaryError = ref("")
 const statusFilter = ref("全部")
@@ -167,15 +170,19 @@ async function loadSummary(code) {
     summaryLoading.value = true
     summaryError.value = ""
     try {
-      const [contractResult, projectResult] = await Promise.allSettled([
+      const [contractResult, projectResult, trendResult, alertResult] = await Promise.allSettled([
         canViewDashboard("contract") ? getContractDashboardSummary() : Promise.reject(new Error("contract dashboard unavailable")),
         canViewDashboard("project") ? getProjectDashboardSummary() : Promise.reject(new Error("project dashboard unavailable")),
+        canViewDashboard("overview") ? getDashboardTrend() : Promise.reject(new Error("trend unavailable")),
+        hasPermission("alert.view") ? getAlertSummary() : Promise.reject(new Error("alerts unavailable")),
       ])
       if (requestVersion !== summaryRequestVersion || section.value !== code) return
       overviewSummary.value = {
         contract: contractResult.status === "fulfilled" ? contractResult.value : null,
         project: projectResult.status === "fulfilled" ? projectResult.value : null,
       }
+      dashboardTrend.value = trendResult.status === "fulfilled" ? (Array.isArray(trendResult.value) ? trendResult.value : trendResult.value?.items || []) : []
+      alertSummary.value = alertResult.status === "fulfilled" ? alertResult.value : null
     } catch (err) {
       if (requestVersion !== summaryRequestVersion) return
       overviewSummary.value = { contract: null, project: null }
@@ -200,6 +207,7 @@ async function loadSummary(code) {
       : await getProjectDashboardSummary()
     if (requestVersion !== summaryRequestVersion || section.value !== code) return
     dashboardSummary.value = result
+    if (code === 'contract') contractDetails.value = await getContractDetails({ page: 1, page_size: 10 })
   } catch (err) {
     if (requestVersion !== summaryRequestVersion) return
     dashboardSummary.value = null
@@ -341,9 +349,12 @@ onMounted(async () => {
             :section="section"
             :contract-summary="section === 'overview' ? overviewSummary.contract : section === 'contract' ? dashboardSummary : null"
             :project-summary="section === 'overview' ? overviewSummary.project : section === 'project' ? dashboardSummary : null"
+            :contract-details="section === 'contract' ? contractDetails : { items: [], total: 0 }"
             :can-view-contract="canViewDashboard('contract')"
             :can-view-project="canViewDashboard('project')"
-            :status-filter="statusFilter"
+    :status-filter="statusFilter"
+            :trend="section === 'overview' ? dashboardTrend : []"
+            :alert-summary="section === 'overview' ? alertSummary : null"
           />
           <section v-if="EMBEDDED_DASHBOARD_SECTIONS.includes(section)" class="da-frame-panel">
             <header class="da-frame-head"><div><p>EMBEDDED DASHBOARD</p><b>{{ currentMeta[0] }}</b></div><span>经统一嵌入桥加载 · 数据实时刷新</span></header>

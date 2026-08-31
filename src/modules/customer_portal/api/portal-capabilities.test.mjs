@@ -21,7 +21,7 @@ test('Portal capabilities use the session API and normalize fail-closed values',
       report_download: { available: false, mode: 'UNAVAILABLE', reason_code: 'REPORT_SECURITY_PROVIDERS_NOT_CONFIGURED', ignored: 'secret' },
       filing_material_upload: { available: true, mode: 'READY' },
       filing_export: { available: 1, mode: 'UNAVAILABLE' },
-      filing_police_submission: { available: false, mode: 'LOCAL_ONLY', reason_code: 'FILING_POLICE_SUBMISSION_CONTRACT_NOT_CONFIGURED' },
+      filing_police_submission: { available: false, mode: 'CRM_MANUAL_REVIEW', reason_code: 'FILING_CRM_REVIEW_REQUIRED' },
     })
   }
   const api = await import(`./portal.js?capabilities=${Date.now()}`)

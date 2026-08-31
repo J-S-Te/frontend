@@ -6,7 +6,7 @@ import ConsoleIcon from "@/modules/platform/shared/components/ConsoleIcon.vue"
 import EmptyState from "@/modules/platform/shared/components/EmptyState.vue"
 import ErrorState from "@/modules/platform/shared/components/ErrorState.vue"
 import LoadingState from "@/modules/platform/shared/components/LoadingState.vue"
-import { listSources, triggerSource } from "../api/dataAnalysis"
+import { listSources, triggerAllSources, triggerSource } from "../api/dataAnalysis"
 
 const props = defineProps({ permissions: { type: Array, default: () => [] } })
 
@@ -14,6 +14,7 @@ const sources = ref([])
 const loading = ref(true)
 const error = ref(null)
 const triggering = ref(null)
+const triggeringAll = ref(false)
 const notice = ref("")
 const keyword = ref("")
 
@@ -73,6 +74,22 @@ async function onTrigger(id) {
   }
 }
 
+async function onTriggerAll() {
+  if (!canTrigger.value || triggeringAll.value || triggering.value) return
+  triggeringAll.value = true
+  error.value = null
+  notice.value = ""
+  try {
+    const result = await triggerAllSources()
+    notice.value = `${result?.note || "批量同步已入队"}：${result?.queued || 0} 个已入队，${result?.skipped || 0} 个跳过（未启用或已有任务）`
+    await load()
+  } catch (err) {
+    error.value = err?.message || "批量触发同步失败"
+  } finally {
+    triggeringAll.value = false
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -82,6 +99,7 @@ onMounted(load)
     <div class="da-filters">
       <label><ConsoleIcon name="search" /><input v-model="keyword" placeholder="搜索子系统 / 库 / 主机" /></label>
       <button class="da-button ghost" :disabled="loading" @click="load"><ConsoleIcon name="reset" />刷新</button>
+      <button class="da-button primary" :disabled="!canTrigger || loading || triggeringAll || triggering" @click="onTriggerAll"><ConsoleIcon name="reset" />{{ triggeringAll ? '同步入队中…' : '一键同步全部' }}</button>
       <span>{{ filteredSources.length }} 个数据源</span>
     </div>
 

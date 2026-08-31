@@ -136,6 +136,15 @@ export function getContractDashboardSummary() { return request('/dashboard/contr
  */
 export function getProjectDashboardSummary() { return request('/dashboard/project') }
 
+/** getContractDetails 查询合同下钻分页明细。 */
+export function getContractDetails(params = {}) { const query = new URLSearchParams(params).toString(); return request(`/dashboard/contracts${query ? `?${query}` : ''}`) }
+
+/** getDashboardTrend 查询合同/项目月度趋势。 */
+export function getDashboardTrend() { return request('/dashboard/trend') }
+
+/** getAlertSummary 查询当前租户预警聚合。 */
+export function getAlertSummary() { return request('/alerts/summary') }
+
 /**
  * getAlerts 查询预警列表，默认返回当前租户可见告警。
  * @param {Object} params 筛选参数。
@@ -181,11 +190,22 @@ export function putAlertRules(payload) {
 }
 
 /**
+ * deleteAlertRule 删除没有历史预警记录的规则。
+ * @param {string} id 规则 ID。
+ * @returns {Promise<any>} 返回删除结果。
+ * @throws {Error} 规则存在历史预警或请求失败时抛出。
+ */
+export function deleteAlertRule(id) { return request(`/alert-rules/${encodeURIComponent(id)}`, { method: 'DELETE' }) }
+
+/**
  * getDictionary 查询指标字典（维度码值、状态口径）。
  * @returns {Promise<any>} 返回指标字典对象。
  * @throws {Error} 查询失败抛出错误。
  */
 export function getDictionary() { return request('/dictionary') }
+
+/** putDictionary 保存当前租户指标定义（仅管理员）。 */
+export function putDictionary(metrics) { return request('/dictionary', { method: 'PUT', body: JSON.stringify(metrics) }) }
 
 /**
  * listSources 查询数据源同步接入状态。
@@ -201,3 +221,10 @@ export function listSources() { return request('/admin/sources') }
  * @throws {Error} 触发失败抛出错误。
  */
 export function triggerSource(id) { return request(`/admin/sources/${encodeURIComponent(id)}/trigger`, { method: 'POST' }) }
+
+/**
+ * triggerAllSources 将当前租户全部启用数据源一次性加入同步队列。
+ * @returns {Promise<any>} 返回入队数量和跳过数量。
+ * @throws {Error} 批量入队失败时抛出。
+ */
+export function triggerAllSources() { return request('/admin/sources/trigger-all', { method: 'POST' }) }
