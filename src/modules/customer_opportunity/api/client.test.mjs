@@ -27,6 +27,22 @@ test('CRM auth session carries the unified authorization context fields', async 
   assert.deepEqual(session.data_scopes, [{ scope_type: 'ORG', scope_id: 'org-1' }])
 })
 
+test('CRM GET requests bypass browser caches because customer visibility follows the current session', async (t) => {
+  const originalFetch = globalThis.fetch
+  let requestOptions = null
+  t.after(() => { globalThis.fetch = originalFetch })
+  globalThis.fetch = async (_url, options) => {
+    requestOptions = options
+    return new Response(JSON.stringify({ data: { items: [] } }), { status: 200, headers: { 'content-type': 'application/json' } })
+  }
+
+  await request('/customers?page=1&page_size=20')
+
+  assert.equal(requestOptions?.method, undefined)
+  assert.equal(requestOptions?.cache, 'no-store')
+  assert.equal(requestOptions?.credentials, 'include')
+})
+
 test('CRM does not turn invalid OIDC claims into an automatic login loop', async (t) => {
   const originalFetch = globalThis.fetch
   const originalWindow = globalThis.window
