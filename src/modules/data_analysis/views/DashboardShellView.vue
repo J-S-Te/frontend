@@ -106,6 +106,7 @@ const dashboardTrend = ref([])
 const alertSummary = ref(null)
 const summaryLoading = ref(false)
 const summaryError = ref("")
+const detailError = ref("")
 const statusFilter = ref("全部")
 let iframeRequestVersion = 0
 let summaryRequestVersion = 0
@@ -166,6 +167,7 @@ async function loadDashboard(code) {
 
 async function loadSummary(code) {
   const requestVersion = ++summaryRequestVersion
+  detailError.value = ""
   if (code === 'overview') {
     summaryLoading.value = true
     summaryError.value = ""
@@ -177,12 +179,19 @@ async function loadSummary(code) {
         hasPermission("alert.view") ? getAlertSummary() : Promise.reject(new Error("alerts unavailable")),
       ])
       if (requestVersion !== summaryRequestVersion || section.value !== code) return
+      const failedParts = [
+        ['合同摘要', contractResult],
+        ['项目摘要', projectResult],
+        ['趋势', trendResult],
+        ['预警摘要', alertResult],
+      ].filter(([, result]) => result.status === 'rejected').map(([label]) => label)
       overviewSummary.value = {
         contract: contractResult.status === "fulfilled" ? contractResult.value : null,
         project: projectResult.status === "fulfilled" ? projectResult.value : null,
       }
       dashboardTrend.value = trendResult.status === "fulfilled" ? (Array.isArray(trendResult.value) ? trendResult.value : trendResult.value?.items || []) : []
       alertSummary.value = alertResult.status === "fulfilled" ? alertResult.value : null
+      summaryError.value = failedParts.length ? `${failedParts.join('、')}加载失败，页面仅展示已成功返回的数据。` : ""
     } catch (err) {
       if (requestVersion !== summaryRequestVersion) return
       overviewSummary.value = { contract: null, project: null }
@@ -201,13 +210,24 @@ async function loadSummary(code) {
   }
   summaryLoading.value = true
   summaryError.value = ""
+  detailError.value = ""
   try {
     const result = code === 'contract'
       ? await getContractDashboardSummary()
       : await getProjectDashboardSummary()
     if (requestVersion !== summaryRequestVersion || section.value !== code) return
     dashboardSummary.value = result
-    if (code === 'contract') contractDetails.value = await getContractDetails({ page: 1, page_size: 10 })
+    if (code === 'contract') {
+      try {
+        const details = await getContractDetails({ page: 1, page_size: 10 })
+        if (requestVersion !== summaryRequestVersion || section.value !== code) return
+        contractDetails.value = details
+      } catch (err) {
+        if (requestVersion !== summaryRequestVersion || section.value !== code) return
+        contractDetails.value = { items: [], total: 0 }
+        detailError.value = `合同摘要已加载，但明细加载失败：${err?.message || '请稍后重试'}`
+      }
+    }
   } catch (err) {
     if (requestVersion !== summaryRequestVersion) return
     dashboardSummary.value = null
@@ -356,6 +376,8 @@ onMounted(async () => {
             :trend="section === 'overview' ? dashboardTrend : []"
             :alert-summary="section === 'overview' ? alertSummary : null"
           />
+          <p v-if="summaryError && section === 'overview'" class="da-native-inline-error" role="alert">{{ summaryError }}</p>
+          <p v-if="detailError && section === 'contract'" class="da-native-inline-error" role="alert">{{ detailError }}</p>
           <section v-if="EMBEDDED_DASHBOARD_SECTIONS.includes(section)" class="da-frame-panel">
             <header class="da-frame-head"><div><p>EMBEDDED DASHBOARD</p><b>{{ currentMeta[0] }}</b></div><span>经统一嵌入桥加载 · 数据实时刷新</span></header>
             <div class="da-frame-stage">
