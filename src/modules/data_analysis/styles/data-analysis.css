@@ -297,6 +297,7 @@
 .da-native-bar-row em { display: block; width: 0; height: 100%; border-radius: inherit; background: #2563eb; }
 .da-native-bar-row small { text-align: right; color: var(--da-muted, #64748b); }
 .da-native-note { margin: 14px 0 0; padding: 8px 10px; border: 1px solid #dbeafe; border-radius: 8px; color: #475569; background: #eff6ff; font-size: 11px; }
+.da-native-inline-error { margin: 12px 0 0; padding: 10px 12px; color: #9f2d2d; background: #fff1f0; border: 1px solid #ffc9c5; border-radius: 8px; font-size: 13px; }
 .da-native-secondary { margin-top: 12px; }
 .da-native-table-panel { margin-top: 12px; min-height: 176px; }
 .da-page-filters { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 14px; }
