@@ -160,7 +160,31 @@
 .crm-credit-panel details ul { margin: 12px 0 0; padding-left: 20px; color: var(--crm-secondary); font-size: 13px; }
 .crm-credit-apply-form, .crm-credit-decision { display: grid; gap: 10px; padding: 16px; border: 1px solid var(--crm-border); border-radius: 10px; background: #f8fafc; }
 .crm-credit-apply-form h3, .crm-credit-decision h3 { margin: 0; color: var(--crm-text); }
-.crm-credit-approval-list { display: grid; gap: 12px; }.crm-credit-approval-item { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px; border: 1px solid var(--crm-border); border-radius: 10px; }.crm-credit-approval-item > div:first-child { display: grid; gap: 5px; min-width: 0; }.crm-credit-approval-item span, .crm-credit-approval-item small { color: var(--crm-muted); font-size: 12px; }.crm-credit-approval-item small { overflow-wrap: anywhere; }
+.crm-credit-approvals { display: grid; gap: 18px; padding: 24px; }
+.crm-credit-approval-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; padding-bottom: 20px; border-bottom: 1px solid #edf2f7; }
+.crm-credit-approval-eyebrow { margin-bottom: 7px; color: var(--crm-primary); font-size: 11px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+.crm-credit-approval-title-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.crm-credit-approval-title-row h2 { font-size: 20px; letter-spacing: -.01em; }
+.crm-credit-approval-title-row .crm-credit-approval-count { padding: 4px 9px; color: #1d4ed8; font-size: 12px; font-weight: 650; border: 1px solid #bfdbfe; border-radius: 999px; background: #eff6ff; }
+.crm-credit-approval-header .crm-note { max-width: 680px; margin: 7px 0 0; }
+.crm-credit-refresh { flex: 0 0 auto; }
+.crm-credit-refresh span { font-size: 18px; line-height: 1; }
+.crm-credit-approval-list { display: grid; gap: 12px; }
+.crm-credit-approval-item { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 18px 20px; border: 1px solid #e2e8f0; border-radius: 12px; background: linear-gradient(135deg, #fff 0%, #fbfdff 100%); transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
+.crm-credit-approval-item:hover { border-color: #bfdbfe; box-shadow: 0 6px 18px rgba(37, 99, 235, .08); transform: translateY(-1px); }
+.crm-credit-approval-main { display: grid; min-width: 0; flex: 1; gap: 9px; }
+.crm-credit-approval-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; color: var(--crm-muted); font-size: 12px; }
+.crm-credit-pending-tag { padding: 3px 8px; color: #1d4ed8; font-size: 11px; font-weight: 700; border-radius: 999px; background: #eff6ff; }
+.crm-credit-customer-row { display: flex; align-items: center; flex-wrap: wrap; gap: 16px; }
+.crm-credit-customer-row strong { min-width: 0; overflow-wrap: anywhere; color: var(--crm-text); font-size: 16px; }
+.crm-credit-level-flow { display: inline-flex; align-items: center; gap: 8px; color: var(--crm-muted); font-size: 15px; }
+.crm-credit-level-flow b { display: inline-grid; width: 28px; height: 28px; place-items: center; color: #1d4ed8; font-size: 13px; border-radius: 8px; background: #dbeafe; }
+.crm-credit-level-flow b[data-level="A"] { color: #166534; background: #dcfce7; }.crm-credit-level-flow b[data-level="C"] { color: #c2410c; background: #ffedd5; }.crm-credit-level-flow b[data-level="D"] { color: #b91c1c; background: #fee2e2; }
+.crm-credit-level-flow i { color: #94a3b8; font-style: normal; }
+.crm-credit-approval-reason { margin: 0; color: var(--crm-secondary); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.crm-credit-applicant { color: var(--crm-muted); font-size: 12px; overflow-wrap: anywhere; }
+.crm-credit-approval-actions { display: flex; flex: 0 0 auto; gap: 8px; }
+@media (max-width: 700px) { .crm-credit-approvals { padding: 18px; } .crm-credit-approval-header { flex-direction: column; gap: 14px; } .crm-credit-refresh { width: 100%; } .crm-credit-approval-item { align-items: stretch; flex-direction: column; gap: 16px; } .crm-credit-approval-actions { width: 100%; } .crm-credit-approval-actions button { flex: 1; } }
 .crm-credit-panel__heading, .crm-credit-todo header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
 .crm-credit-panel__heading h3, .crm-credit-panel h4, .crm-credit-todos h2 { margin: 0; color: var(--crm-text); }
 .crm-credit-panel__heading p, .crm-credit-panel h4 + p { margin: 5px 0 0; color: var(--crm-muted); font-size: 12px; }
