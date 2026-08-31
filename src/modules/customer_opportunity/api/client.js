@@ -120,6 +120,9 @@ export async function request(path, options = {}) {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     credentials: 'include',
     ...options,
+    // CRM 查询结果受当前登录身份、租户和服务端数据范围约束。禁止浏览器复用
+    // 上一个账号或旧授权修订下的 GET/HEAD 响应，避免账号切换后短暂展示旧客户数据。
+    cache: ['GET', 'HEAD'].includes(method) ? 'no-store' : options.cache,
     headers: {
       Accept: 'application/json',
       ...(options.body && !hasFormDataBody ? { 'Content-Type': 'application/json' } : {}),

@@ -988,6 +988,10 @@ async function loadCurrent() {
   loading.value = true; error.value = ''
   try {
     if (section === 'customers') {
+	  // 客户可见范围由服务端按当前身份重新计算。开始新查询时先清空旧结果，
+	  // 请求失败后也不能回显上一账号或上一授权修订下的客户列表。
+	  customers.value = []
+	  page.total = 0
 	  await syncCustomerURL()
       const result = await listCustomers(customerAPIParams(customerFilters, page.number, page.size))
       if (sequence !== currentLoadSequence.value || activeSection.value !== section) return
@@ -1135,6 +1139,8 @@ async function openCustomer(id) {
   // 客户切换时先让旧详情及所有页签请求失效，再清空按客户缓存的数据；后续页签只会
   // 接受同时匹配“请求序号、客户 ID、当前页签”的响应。
   const sequence = ++customerDetailLoadSequence.value
+  // 切换客户时立即隐藏上一份详情；新详情必须通过服务端对象级权限校验后才展示。
+  if (String(selectedCustomer.value?.id || '') !== String(id)) selectedCustomer.value = null
   try {
 	  const detail = await getCustomer(id)
 	  if (sequence !== customerDetailLoadSequence.value) return
@@ -1155,7 +1161,13 @@ async function openCustomer(id) {
 	    await router.replace({ name: route.name, params: route.params, query })
 	  }
   } catch (value) {
-	  if (sequence === customerDetailLoadSequence.value) showError(value)
+	  if (sequence !== customerDetailLoadSequence.value) return
+	  if (value?.status === 403 || value?.status === 404) {
+	    closeCustomerDetail()
+	    error.value = value.status === 403 ? '当前账号无权查看该客户，详情已关闭。' : '客户不存在或已不在当前账号的可见范围内，详情已关闭。'
+	    return
+	  }
+	  showError(value)
   }
 }
 
@@ -2835,7 +2847,7 @@ onMounted(async () => {
 <dt>版本</dt>
 <dd>{{ selectedCustomer.version }}</dd>
 </dl>
-<CustomerCreditPanel v-if="customerTab === 'credit' && canReadCredit" :customer="selectedCustomer" :permissions="crmSession?.permissions || []" />
+<CustomerCreditPanel v-if="customerTab === 'credit' && canReadCredit" :customer="selectedCustomer" :permissions="crmSession?.permissions || []" @notice="notice = $event" @error="error = $event" />
 <section v-if="customerTab === 'portal'" class="crm-portal-access" aria-labelledby="portal-access-heading">
 <div class="crm-subsection-heading"><div><h3 id="portal-access-heading">门户访问</h3><p class="crm-note">客户通过统一身份平台 OIDC 登录。CRM 不创建、展示或传递固定密码。</p></div></div>
 <dl>

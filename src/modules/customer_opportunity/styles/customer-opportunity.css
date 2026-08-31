@@ -178,6 +178,21 @@
 .crm-credit-records > section { min-width: 0; padding: 14px; border: 1px solid var(--crm-border); border-radius: 10px; }
 .crm-credit-records h4 { margin-bottom: 10px; }.crm-credit-records ol { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }.crm-credit-records li { display: grid; gap: 3px; padding-bottom: 10px; border-bottom: 1px solid #edf2f7; }.crm-credit-records li:last-child { padding-bottom: 0; border-bottom: 0; }.crm-credit-records span, .crm-credit-records small { color: var(--crm-muted); font-size: 12px; }
 .crm-credit-todo-list { display: grid; gap: 12px; margin-top: 14px; }.crm-credit-todo { padding: 14px; border: 1px solid var(--crm-border); border-radius: 10px; }.crm-credit-todo header span { display: block; margin-top: 4px; color: var(--crm-muted); font-size: 12px; }.crm-credit-todo > p { white-space: pre-wrap; }.crm-credit-todo form { display: grid; gap: 10px; margin-top: 12px; }.crm-credit-todo label { margin: 0; }
+
+/* 信用规则采用双列表单，减少长滚动并让参数、说明和操作形成清晰层次。 */
+.crm-credit-rule-form { gap: 20px; padding: 22px; border-color: #dbe5f0; background: linear-gradient(180deg, #fbfdff 0%, #f6f9fc 100%); }
+.crm-credit-rule-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 24px; }
+.crm-credit-rule-grid label { gap: 8px; margin: 0; color: var(--crm-text); font-size: 14px; font-weight: 650; }
+.crm-credit-rule-grid input { width: 100%; min-height: 44px; padding: 0 13px; border: 1px solid #d8e2ee; border-radius: 9px; background: #fff; color: var(--crm-text); font-size: 16px; font-weight: 600; transition: border-color .18s ease, box-shadow .18s ease; }
+.crm-credit-rule-grid input:focus { border-color: #3978e8; box-shadow: 0 0 0 3px rgb(57 120 232 / 12%); outline: 0; }
+.crm-credit-rule-grid small, .crm-credit-rule-toggle small { color: var(--crm-muted); font-size: 12px; font-weight: 400; line-height: 1.5; }
+.crm-credit-rule-toggle { display: flex !important; align-items: flex-start; gap: 10px; margin: 0 !important; padding: 14px 16px; border: 1px solid #dbe5f0; border-radius: 10px; background: #fff; }
+.crm-credit-rule-toggle input { width: 18px; height: 18px; margin-top: 2px; accent-color: #2868df; }
+.crm-credit-rule-toggle span { display: grid; gap: 3px; }
+.crm-credit-rule-toggle strong { color: var(--crm-text); font-size: 14px; }
+.crm-credit-rule-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-top: 4px; border-top: 1px solid #e5ebf3; }
+.crm-credit-rule-footer .crm-note { margin: 0; }
+@media (max-width: 700px) { .crm-credit-rule-grid { grid-template-columns: 1fr; } .crm-credit-rule-footer { align-items: flex-start; flex-direction: column; } .crm-credit-rule-footer button { width: 100%; } }
 .crm-panel > h2,
 .crm-panel-heading h2 {
   margin: 0;
