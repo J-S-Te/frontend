@@ -523,6 +523,7 @@
   background: linear-gradient(180deg, #f8fbff 0%, #ffffff 72%);
   box-shadow: 0 -10px 24px rgba(15, 23, 42, .055);
   z-index: 2;
+  justify-content: flex-start;
 }
 .crm-opportunity-actions::before {
   content: '操作区';
@@ -534,10 +535,13 @@
   letter-spacing: .08em;
 }
 .crm-opportunity-actions > button {
+  min-width: 0;
+  max-width: 100%;
   min-height: 44px;
   padding-inline: 18px;
   border-radius: 11px;
   box-shadow: 0 2px 5px rgba(15, 23, 42, .04);
+  flex: 0 1 auto;
 }
 .crm-opportunity-actions > .primary { box-shadow: 0 6px 14px rgba(37, 99, 235, .2); }
 .crm-opportunity-actions > .danger { box-shadow: 0 6px 14px rgba(220, 38, 38, .16); }

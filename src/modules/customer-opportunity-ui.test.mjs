@@ -142,7 +142,8 @@ test('商机补充信息使用统一滚动轨道，避免团队任期、附件�
   assert.match(style, /\.crm-opportunity-attachment-panel,[\s\S]*\.crm-opportunity-external-panel\s*\{[\s\S]*position:\s*static/)
   assert.match(style, /\.crm-opportunity-detail\s*\{[\s\S]*max-height:\s*calc\(100vh - 48px\)[\s\S]*overflow:\s*hidden/)
   assert.match(style, /\.crm-opportunity-main\s*\{[\s\S]*min-height:\s*0[\s\S]*overflow:\s*auto/)
-  assert.match(style, /\.crm-opportunity-actions\s*\{[\s\S]*background:\s*#fff/)
+  assert.match(style, /\.crm-opportunity-actions\s*\{[\s\S]*justify-content:\s*flex-start/)
+  assert.match(style, /\.crm-opportunity-actions > button\s*\{[\s\S]*max-width:\s*100%[\s\S]*flex:\s*0 1 auto/)
 })
 
 test('售前预警仅使用当前基础平台用户身份', () => {
