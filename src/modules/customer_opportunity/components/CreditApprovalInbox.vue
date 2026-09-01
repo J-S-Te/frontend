@@ -4,9 +4,20 @@ import { approveCustomerCreditApplication, listPendingCustomerCreditApplications
 import { createIdempotencyKey } from '../api/client.js'
 import { listOwnerDirectory } from '../api/ownerDirectory.js'
 
-const props = defineProps({ permissions: { type: Array, default: () => [] } })
+const props = defineProps({
+  permissions: { type: Array, default: () => [] },
+  roles: { type: Array, default: () => [] },
+})
 const items = ref([]); const loading = ref(false); const error = ref(''); const actionID = ref(''); const applicantNames = ref({})
-const canApprove = () => props.permissions.includes('customer.credit.approve')
+const CREDIT_APPROVAL_ROLES = new Set(['sales_director', 'crm_super_admin'])
+// Existing sessions can carry a signed approval role but miss the permission
+// added by a later catalog publication. Keep this allow-list explicit; do not
+// infer arbitrary permissions from arbitrary roles in the browser.
+const canApprove = () => props.permissions.includes('customer.credit.approve') || props.roles.some((role) => CREDIT_APPROVAL_ROLES.has(role))
+const applicationID = (item) => String(item?.id || item?.application_id || '').trim()
+// Use an explicit boolean instead of binding the ref object itself to the
+// native disabled attribute. All rows remain locked during one mutation.
+const actionInProgress = () => actionID.value !== ''
 function dateLabel(value) { return value ? new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : '—' }
 function rememberApplicantNames(users) { for (const user of users || []) { if (user?.user_id) applicantNames.value[user.user_id] = String(user.username || user.account_name || user.display_name || '').trim() || '未命名用户' } }
 function applicantLabel(item) { const id = String(item?.applicant_id || '').trim(); const snapshot = String(item?.applicant_name || '').trim(); return (snapshot && snapshot !== id ? snapshot : '') || applicantNames.value[id] || '未命名用户' }
@@ -18,8 +29,9 @@ async function load() { loading.value = true; error.value = ''; try { const resu
 async function decide(item, action) {
   if (!canApprove() || actionID.value) return
   const opinion = window.prompt(action === 'approve' ? '审批意见（可选）' : '驳回意见（必填）', '')
-  if (opinion === null || (action === 'reject' && !opinion.trim())) return
-  actionID.value = String(item.id || item.application_id)
+  if (opinion === null || (action === 'reject' && opinion.trim().length < 2)) return
+  actionID.value = applicationID(item)
+  if (!actionID.value) { error.value = '待办编号缺失，请刷新后重试。'; actionID.value = ''; return }
   if (!Number(item.version)) { error.value = '待办版本缺失，请刷新后重试。'; actionID.value = ''; return }
   try { await (action === 'approve' ? approveCustomerCreditApplication(item.id || item.application_id, { opinion: opinion.trim(), version: item.version }, createIdempotencyKey()) : rejectCustomerCreditApplication(item.id || item.application_id, { opinion: opinion.trim(), version: item.version }, createIdempotencyKey())); await load() } catch (value) { error.value = value?.message || '审批操作失败，请刷新后重试。' } finally { actionID.value = '' }
 }
@@ -62,8 +74,8 @@ onMounted(load)
           <small class="crm-credit-applicant">申请人：{{ applicantLabel(item) }}</small>
         </div>
         <div v-if="canApprove()" class="crm-credit-approval-actions">
-          <button type="button" class="primary" :disabled="actionID" @click="decide(item, 'approve')">通过</button>
-          <button type="button" class="danger" :disabled="actionID" @click="decide(item, 'reject')">驳回</button>
+          <button type="button" class="primary" :disabled="actionInProgress()" @click="decide(item, 'approve')">通过</button>
+          <button type="button" class="danger" :disabled="actionInProgress()" @click="decide(item, 'reject')">驳回</button>
         </div>
       </article>
     </div>
