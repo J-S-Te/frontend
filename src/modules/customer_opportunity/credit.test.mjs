@@ -57,10 +57,12 @@ test('信用审批待办清空后将 null 或非数组响应归一化为空列�
   assert.match(inbox, /Array\.isArray\(result\?\.items\) \? result\.items : Array\.isArray\(result\) \? result : \[\]/)
 })
 
-test('客户信用历史使用稳定蛇形字段并以 24 小时制格式化时间', () => {
+test('客户信用历史将 ISO 时间格式化为年月日时分秒', () => {
   const panel = read('./components/CustomerCreditPanel.vue')
   assert.match(panel, /formatCreditDate\(value\)/)
   assert.match(panel, /hour12: true/)
+  assert.match(panel, /\$\{parts\.year\}-\$\{parts\.month\}-\$\{parts\.day\} \$\{parts\.dayPeriod\}\$\{parts\.hour\}:\$\{parts\.minute\}:\$\{parts\.second\}/)
+  assert.doesNotMatch(panel, /format\(date\)\.replace\(\/\\\//)
   assert.match(panel, /item\.from_level\).*item\.to_level/)
   assert.match(panel, /formatCreditDate\(item\.occurred_at\)/)
 })

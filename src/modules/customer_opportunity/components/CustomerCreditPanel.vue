@@ -26,10 +26,11 @@ function formatCreditDate(value) {
   if (!value) return '—'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return '—'
-  return new Intl.DateTimeFormat('zh-CN', {
+  const parts = new Intl.DateTimeFormat('zh-CN', {
     year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true,
-  }).format(date).replace(/\//g, '-')
+  }).formatToParts(date).reduce((result, part) => ({ ...result, [part.type]: part.value }), {})
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.dayPeriod}${parts.hour}:${parts.minute}:${parts.second}`
 }
 function operatorLabel(item) { const id = String(item?.operator_id || '').trim(); return !id || id === 'system' ? '系统' : operatorNames.value[id] || '未命名用户' }
 const customerID = computed(() => props.customer?.id)
