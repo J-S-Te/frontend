@@ -52,6 +52,31 @@ test('信用审批待办仅在提交中禁用按钮，初始状态可点击', ()
   assert.doesNotMatch(inbox, /:disabled="actionID"/)
 })
 
+test('信用审批待办清空后将 null 或非数组响应归一化为空列表', () => {
+  const inbox = read('./components/CreditApprovalInbox.vue')
+  assert.match(inbox, /Array\.isArray\(result\?\.items\) \? result\.items : Array\.isArray\(result\) \? result : \[\]/)
+})
+
+test('客户信用历史将 ISO 时间格式化为年月日时分秒', () => {
+  const panel = read('./components/CustomerCreditPanel.vue')
+  assert.match(panel, /formatCreditDate\(value\)/)
+  assert.match(panel, /hour12: true/)
+  assert.match(panel, /\$\{parts\.year\}-\$\{parts\.month\}-\$\{parts\.day\} \$\{parts\.dayPeriod\}\$\{parts\.hour\}:\$\{parts\.minute\}:\$\{parts\.second\}/)
+  assert.doesNotMatch(panel, /format\(date\)\.replace\(\/\\\//)
+  assert.match(panel, /item\.from_level\).*item\.to_level/)
+  assert.match(panel, /formatCreditDate\(item\.occurred_at\)/)
+})
+
+test('客户信用历史将来源编码和操作人转换为业务展示值', () => {
+  const panel = read('./components/CustomerCreditPanel.vue')
+  assert.match(panel, /MANUAL: '手动调整'/)
+  assert.match(panel, /RULE: '自动规则调整'/)
+  assert.match(panel, /RULE_CAP: '自动规则调整'/)
+  assert.match(panel, /listOwnerDirectory/)
+  assert.match(panel, /operatorNames\.value\[id\]/)
+  assert.match(panel, /操作人：\{\{ operatorLabel\(item\) \}\}/)
+})
+
 test('客户信用调整表单不会静默吞掉校验结果，并以表单提交发送完整申请参数', () => {
   const view = read('./views/CustomerOpportunityView.vue')
   const panel = read('./components/CustomerCreditPanel.vue')
@@ -61,4 +86,7 @@ test('客户信用调整表单不会静默吞掉校验结果，并以表单提�
   assert.match(panel, /<textarea v-model\.trim="form\.reason" required/)
   assert.match(panel, /<button type="submit" class="primary" :disabled="submitting">/)
   assert.match(panel, /createCustomerCreditApplication\(customerID\.value, \{ target_level: form\.value\.target_level, reason: form\.value\.reason\.trim\(\) \}, createIdempotencyKey\(\)\)/)
+  assert.match(view, /:can-apply="canApplyCredit"/)
+  assert.match(view, /CREDIT_APPLICATION_ROLES = new Set\(\['sales'\]\)/)
+  assert.match(panel, /canApplyPermission = computed\(\(\) => props\.canApply === true\)/)
 })

@@ -365,7 +365,8 @@ const canReadOpportunities = computed(() => (crmSession.value?.permissions || []
 const canReadPresales = computed(() => (crmSession.value?.permissions || []).includes('presale.read'))
 const canReadCustomers = computed(() => (crmSession.value?.permissions || []).includes('customer.read'))
 const canReadCredit = computed(() => (crmSession.value?.permissions || []).includes('customer.credit.read'))
-const canApplyCredit = computed(() => (crmSession.value?.permissions || []).includes('customer.credit.apply'))
+const CREDIT_APPLICATION_ROLES = new Set(['sales'])
+const canApplyCredit = computed(() => (crmSession.value?.permissions || []).includes('customer.credit.apply') && (crmSession.value?.roles || []).some((role) => CREDIT_APPLICATION_ROLES.has(role)) && !(crmSession.value?.roles || []).some((role) => CREDIT_APPROVAL_ROLES.has(role)))
 const CREDIT_APPROVAL_ROLES = new Set(['sales_director', 'crm_super_admin'])
 const hasCreditApprovalAccess = (session) => (session?.permissions || []).includes('customer.credit.approve') || (session?.roles || []).some((role) => CREDIT_APPROVAL_ROLES.has(role))
 const canApproveCredit = computed(() => hasCreditApprovalAccess(crmSession.value))
@@ -2854,7 +2855,7 @@ onMounted(async () => {
 <dt>版本</dt>
 <dd>{{ selectedCustomer.version }}</dd>
 </dl>
-<CustomerCreditPanel v-if="customerTab === 'credit' && canReadCredit" :customer="selectedCustomer" :permissions="crmSession?.permissions || []" @notice="notice = $event" @error="error = $event" />
+<CustomerCreditPanel v-if="customerTab === 'credit' && canReadCredit" :customer="selectedCustomer" :can-apply="canApplyCredit" :permissions="crmSession?.permissions || []" @notice="notice = $event" @error="error = $event" />
 <section v-if="customerTab === 'portal'" class="crm-portal-access" aria-labelledby="portal-access-heading">
 <div class="crm-subsection-heading"><div><h3 id="portal-access-heading">门户访问</h3><p class="crm-note">客户通过统一身份平台 OIDC 登录。CRM 不创建、展示或传递固定密码。</p></div></div>
 <dl>
