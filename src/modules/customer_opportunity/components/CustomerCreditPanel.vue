@@ -15,6 +15,15 @@ const form = ref({ target_level: '', reason: '' }); const decisionOpinion = ref(
 const levels = ['A', 'B', 'C', 'D']
 const levelLabel = (value) => ({ A: 'A · 优秀', B: 'B · 良好', C: 'C · 关注', D: 'D · 差' })[value] || value || '未设置'
 const unwrapItems = (value) => Array.isArray(value) ? value : (value?.items || value?.data?.items || [])
+function formatCreditDate(value) {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '—'
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+  }).format(date).replace(/\//g, '-')
+}
 const customerID = computed(() => props.customer?.id)
 const isApprovalView = computed(() => props.approvals || props.standalone)
 const currentLevel = computed(() => credit.value?.credit_level || props.customer?.credit_level || 'B')
@@ -71,11 +80,11 @@ watch(customerID, loadCustomerCredit, { immediate: true }); onMounted(() => { if
     <p v-if="loading">正在加载审批待办…</p><div v-else-if="applications.length" class="crm-credit-approval-list"><article v-for="item in applications" :key="item.id" class="crm-credit-approval-item"><div><strong>{{ item.customer_name || `客户 #${item.customer_id}` }}</strong><span>{{ levelLabel(item.from_level) }} → {{ levelLabel(item.target_level) }}</span><small>申请人：{{ item.applicant_name || item.applicant_id || '—' }} · {{ item.reason }}</small></div><div class="crm-actions"><button type="button" class="primary" @click="openDecision(item, 'approve')">通过</button><button type="button" class="danger" @click="openDecision(item, 'reject')">驳回</button></div></article></div><p v-else class="crm-empty">暂无待审批信用调整申请</p>
   </section>
   <section v-else class="crm-credit-panel" aria-labelledby="customer-credit-title">
-    <div class="crm-credit-summary"><div><span class="crm-credit-kicker">客户信用等级</span><strong :class="`credit-level-${currentLevel}`">{{ currentLevel }}</strong><span>{{ levelLabel(currentLevel) }}</span></div><div><small>最近变更</small><span>{{ credit?.credit_updated_time || credit?.updated_at || '—' }}</span></div><button v-if="canApplyPermission && customer?.status === 'ACTIVE'" type="button" @click="openApply">申请调整</button></div>
-    <p v-if="risk" class="crm-alert warning" role="status">该客户信用等级为 {{ levelLabel(currentLevel) }}，请关注回款与交易风险。最近变更：{{ credit?.updated_at || '—' }}；最近一次不及时回款期次：{{ credit?.last_late_period_no || '暂无' }}。等级提示不阻断业务流程。</p>
+    <div class="crm-credit-summary"><div><span class="crm-credit-kicker">客户信用等级</span><strong :class="`credit-level-${currentLevel}`">{{ currentLevel }}</strong><span>{{ levelLabel(currentLevel) }}</span></div><div><small>最近变更</small><span>{{ formatCreditDate(credit?.credit_updated_time || credit?.updated_at) }}</span></div><button v-if="canApplyPermission && customer?.status === 'ACTIVE'" type="button" @click="openApply">申请调整</button></div>
+    <p v-if="risk" class="crm-alert warning" role="status">该客户信用等级为 {{ levelLabel(currentLevel) }}，请关注回款与交易风险。最近变更：{{ formatCreditDate(credit?.updated_at) }}；最近一次不及时回款期次：{{ credit?.last_late_period_no || '暂无' }}。等级提示不阻断业务流程。</p>
     <p v-if="loading">正在加载信用记录…</p><template v-else>
       <div class="crm-credit-counters"><span>连续按时：<strong>{{ credit?.consecutive_ontime_count ?? 0 }}</strong></span><span>连续逾期：<strong>{{ credit?.consecutive_late_count ?? 0 }}</strong></span><span>规则来源：{{ credit?.credit_change_source || 'INITIAL' }}</span></div>
-      <details open><summary>等级变更历史</summary><p v-if="!history.length" class="crm-empty compact">暂无变更记录</p><ul v-else><li v-for="item in history" :key="item.id"><strong>{{ levelLabel(item.from_level) }} → {{ levelLabel(item.to_level || item.credit_level) }}</strong> · {{ item.source || item.change_source }} · {{ item.reason || item.rule_result || '—' }}<small>操作人：{{ item.operator_id || '系统' }} · {{ item.occurred_at || '—' }}<template v-if="item.payment_id"> · 回款号：{{ item.payment_id }}</template><template v-if="item.application_id"> · 申请单：#{{ item.application_id }}</template></small></li></ul></details>
+      <details open><summary>等级变更历史</summary><p v-if="!history.length" class="crm-empty compact">暂无变更记录</p><ul v-else><li v-for="item in history" :key="item.id"><strong>{{ levelLabel(item.from_level) }} → {{ levelLabel(item.to_level || item.credit_level) }}</strong> · {{ item.source || item.change_source || '—' }} · {{ item.reason || item.rule_result || '—' }}<small>操作人：{{ item.operator_id || '系统' }} · {{ formatCreditDate(item.occurred_at) }}<template v-if="item.payment_id"> · 回款号：{{ item.payment_id }}</template><template v-if="item.application_id"> · 申请单：#{{ item.application_id }}</template></small></li></ul></details>
       <details><summary>回款评估记录</summary><p v-if="!payments.length" class="crm-empty compact">暂无回款评估记录</p><ul v-else><li v-for="item in payments" :key="item.id"><strong>{{ item.payment_id || item.receipt_id }}</strong> · {{ item.evaluation || item.evaluation_result || item.result || '未参与评估' }} · 宽限期 {{ item.grace_days ?? item.grace_days_applied ?? '—' }} 天<small>合同：{{ item.contract_no || '—' }} · 期次：{{ item.period_no || '—' }} · 应收 {{ item.due_amount || '—' }}（{{ item.due_date || '—' }}）· 实收 {{ item.paid_amount || '—' }}（{{ item.paid_date || '—' }}）<template v-if="item.ignore_reason"> · 忽略原因：{{ item.ignore_reason }}</template></small></li></ul></details>
     </template>
     <form v-if="showForm" class="crm-credit-apply-form" @submit.prevent="submitApply"><h3>申请调整信用等级</h3><label>目标等级<select v-model="form.target_level" required><option value="" disabled>请选择</option><option v-for="item in levels" :key="item" :value="item" :disabled="item === currentLevel">{{ levelLabel(item) }}</option></select></label><label>调整原因<textarea v-model.trim="form.reason" required rows="4"></textarea></label><div class="crm-actions"><button type="button" @click="showForm = false">取消</button><button type="submit" class="primary" :disabled="submitting">{{ submitting ? '提交中…' : '提交申请' }}</button></div></form>

@@ -25,7 +25,7 @@ async function resolveApplicantNames(applicationItems) {
   const IDs = [...new Set(applicationItems.map((item) => item?.applicant_id).filter((id) => id && !applicantNames.value[id]))]
   await Promise.all(IDs.map(async (id) => { try { const result = await listOwnerDirectory({ user_id: id, page: 1, page_size: 1 }); rememberApplicantNames(result?.items || []) } catch { /* 目录不可用时显示通用名称，不向业务用户暴露内部 ID。 */ } }))
 }
-async function load() { loading.value = true; error.value = ''; try { const result = await listPendingCustomerCreditApplications({ page: 1, page_size: 50 }); items.value = result?.items || result || []; await resolveApplicantNames(items.value) } catch (value) { error.value = value?.status === 403 ? '当前账号无审批权限。' : value?.message || '待审批列表加载失败。' } finally { loading.value = false } }
+async function load() { loading.value = true; error.value = ''; try { const result = await listPendingCustomerCreditApplications({ page: 1, page_size: 50 }); items.value = Array.isArray(result?.items) ? result.items : Array.isArray(result) ? result : []; await resolveApplicantNames(items.value) } catch (value) { error.value = value?.status === 403 ? '当前账号无审批权限。' : value?.message || '待审批列表加载失败。' } finally { loading.value = false } }
 async function decide(item, action) {
   if (!canApprove() || actionID.value) return
   const opinion = window.prompt(action === 'approve' ? '审批意见（可选）' : '驳回意见（必填）', '')

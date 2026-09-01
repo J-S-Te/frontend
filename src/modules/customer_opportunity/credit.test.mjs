@@ -52,6 +52,19 @@ test('信用审批待办仅在提交中禁用按钮，初始状态可点击', ()
   assert.doesNotMatch(inbox, /:disabled="actionID"/)
 })
 
+test('信用审批待办清空后将 null 或非数组响应归一化为空列表', () => {
+  const inbox = read('./components/CreditApprovalInbox.vue')
+  assert.match(inbox, /Array\.isArray\(result\?\.items\) \? result\.items : Array\.isArray\(result\) \? result : \[\]/)
+})
+
+test('客户信用历史使用稳定蛇形字段并以 24 小时制格式化时间', () => {
+  const panel = read('./components/CustomerCreditPanel.vue')
+  assert.match(panel, /formatCreditDate\(value\)/)
+  assert.match(panel, /hour12: false/)
+  assert.match(panel, /item\.from_level\).*item\.to_level/)
+  assert.match(panel, /formatCreditDate\(item\.occurred_at\)/)
+})
+
 test('客户信用调整表单不会静默吞掉校验结果，并以表单提交发送完整申请参数', () => {
   const view = read('./views/CustomerOpportunityView.vue')
   const panel = read('./components/CustomerCreditPanel.vue')
