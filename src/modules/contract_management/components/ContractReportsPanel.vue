@@ -16,7 +16,7 @@ const typeFilter = ref('')
 const totalAmount = computed(() => props.summary ? Number(props.summary.total_amount_minor || 0) / 100 : props.contracts.reduce((total, item) => total + Number(item.amount || 0), 0))
 const totalCount = computed(() => props.summary ? Number(props.summary.total_contracts || 0) : props.contracts.length)
 const averageAmount = computed(() => totalCount.value ? totalAmount.value / totalCount.value : 0)
-const activeCount = computed(() => props.summary ? Number(props.summary.active_contracts || 0) : props.contracts.filter((item) => item.activeUnexpired || ['已生效', '履约中', '待付款'].includes(item.status)).length)
+const activeCount = computed(() => props.summary ? Number(props.summary.active_contracts || 0) : props.contracts.filter((item) => item.activeUnexpired || ['已生效', '履约中', '待付款','已归档'].includes(item.status)).length)
 const expiredCount = computed(() => props.summary ? Number(props.summary.expired_contracts || 0) : props.contracts.filter((item) => item.expired).length)
 
 function groupCounts(field) {
@@ -52,7 +52,7 @@ function statusTone(status) {
 
 <template>
   <section class="contract-report-summary">
-    <article><p>{{ enterpriseScope ? '企业合同总额' : '本人合同总额' }}</p><strong>{{ formatAmount(totalAmount) }}</strong><span>{{ enterpriseScope ? '当前企业范围' : '本人负责范围' }}</span></article>
+    <article><p>{{ enterpriseScope ? '企业合同总额' : '合同总额' }}</p><strong>{{ formatAmount(totalAmount) }}</strong><span>{{ enterpriseScope ? '当前企业范围' : '负责范围' }}</span></article>
     <article><p>合同数量</p><strong>{{ totalCount }} 份</strong><span>当前授权范围</span></article>
     <article><p>平均合同金额</p><strong>{{ formatAmount(averageAmount) }}</strong><span>按当前合同计算</span></article>
     <article><p>有效 / 超期</p><strong>{{ activeCount }} / {{ expiredCount }} 份</strong><span>按状态和到期日期统计</span></article>
