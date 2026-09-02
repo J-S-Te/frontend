@@ -71,6 +71,11 @@ test('合同和项目看板展示聚合库最新摘要', () => {
   assert.match(native, /barWidth\(item\.value\)/)
 })
 
+test('经营总览无预警权限时静默跳过可选预警摘要', () => {
+  assert.match(shell, /hasPermission\("alert\.view"\) \? getAlertSummary\(\) : Promise\.resolve\(null\)/)
+  assert.doesNotMatch(shell, /hasPermission\("alert\.view"\) \? getAlertSummary\(\) : Promise\.reject/)
+})
+
 test('合同下钻明细将状态码转换为中文并保留未知状态原值', () => {
   assert.match(native, /const CONTRACT_STATUS_LABELS = \{/)
   assert.match(native, /PENDING: "待审批"/)
