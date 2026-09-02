@@ -20,3 +20,12 @@ test('客户详情只在服务端校验成功后展示，并在越权或不可�
   assert.match(source, /if \(value\?\.status === 403 \|\| value\?\.status === 404\) \{\s*closeCustomerDetail\(\)/)
   assert.match(source, /当前账号无权查看该客户，详情已关闭。/)
 })
+
+test('客户基础资料使用受控选项，并优先显示服务端返回的负责人名称', async () => {
+  const source = await readFile(viewPath, 'utf8')
+
+  assert.match(source, /customerForm\.customer_type && !customerTypeSuggestions\.includes\(customerForm\.customer_type\)/)
+  assert.match(source, /customerForm\.region && !customerRegionSuggestions\.includes\(customerForm\.region\)/)
+  assert.match(source, /owner\?\.owner_display_name/)
+  assert.match(source, /负责人账号已失效/)
+})
