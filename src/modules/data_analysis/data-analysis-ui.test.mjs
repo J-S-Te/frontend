@@ -71,6 +71,16 @@ test('合同和项目看板展示聚合库最新摘要', () => {
   assert.match(native, /barWidth\(item\.value\)/)
 })
 
+test('合同下钻明细将状态码转换为中文并保留未知状态原值', () => {
+  assert.match(native, /const CONTRACT_STATUS_LABELS = \{/)
+  assert.match(native, /PENDING: "待审批"/)
+  assert.match(native, /DRAFT: "草稿"/)
+  assert.match(native, /ACTIVE: "生效中"/)
+  assert.match(native, /ARCHIVED: "已归档"/)
+  assert.match(native, /function contractStatusLabel\(value\)/)
+  assert.match(native, /contractStatusLabel\(item\.status\)/)
+})
+
 test('页面只展示后端真实支持的状态筛选，不保留无效时间、区域和角色控件', () => {
   assert.match(shell, /const statusOptions = computed/)
   assert.match(shell, /v-model="statusFilter"/)

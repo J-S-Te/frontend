@@ -54,6 +54,22 @@ function formatAmountMinor(value) {
   return new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(numberValue(value) / 1_000_000)
 }
 
+const CONTRACT_STATUS_LABELS = {
+  PENDING: "待审批",
+  DRAFT: "草稿",
+  ACTIVE: "生效中",
+  EXPIRED: "已到期",
+  COMPLETED: "已完成",
+  TERMINATED: "已终止",
+  ARCHIVED: "已归档",
+  REJECTED: "已驳回",
+}
+
+function contractStatusLabel(value) {
+  const normalized = String(value || "").trim().toUpperCase()
+  return CONTRACT_STATUS_LABELS[normalized] || String(value || "—")
+}
+
 const contractAmountWan = computed(() => numberValue(props.contractSummary?.total_amount_minor) / 1_000_000)
 const contractTargetRatio = computed(() => {
   if (contractTargetWan.value <= 0) return 0
@@ -254,7 +270,7 @@ function metricsForSection() {
     </div>
     <div v-if="section === 'contract' || section === 'project'" class="da-native-panel da-native-table-panel">
       <header><b>{{ section === 'contract' ? '合同列表（下钻明细）' : '项目执行明细' }}</b><span>聚合级 · 不含敏感字段</span></header>
-      <div v-if="section === 'contract' && contractDetails.items?.length" class="da-native-detail-table"><table class="da-table"><thead><tr><th>合同编号</th><th>名称</th><th>状态</th><th>金额</th><th>到期日</th></tr></thead><tbody><tr v-for="item in contractDetails.items" :key="item.contract_number"><td class="mono">{{ item.contract_number }}</td><td>{{ item.title }}</td><td>{{ item.status }}</td><td>{{ formatAmountMinor(item.amount_minor) }} 万元</td><td>{{ item.end_date || '—' }}</td></tr></tbody></table><p class="da-native-note">共 {{ contractDetails.total }} 条，当前展示前 10 条</p></div><div v-else class="da-native-empty"><b>暂无明细数据</b><p>当前租户没有可展示的{{ section === 'contract' ? '合同' : '项目' }}记录。</p></div>
+      <div v-if="section === 'contract' && contractDetails.items?.length" class="da-native-detail-table"><table class="da-table"><thead><tr><th>合同编号</th><th>名称</th><th>状态</th><th>金额</th><th>到期日</th></tr></thead><tbody><tr v-for="item in contractDetails.items" :key="item.contract_number"><td class="mono">{{ item.contract_number }}</td><td>{{ item.title }}</td><td>{{ contractStatusLabel(item.status) }}</td><td>{{ formatAmountMinor(item.amount_minor) }} 万元</td><td>{{ item.end_date || '—' }}</td></tr></tbody></table><p class="da-native-note">共 {{ contractDetails.total }} 条，当前展示前 10 条</p></div><div v-else class="da-native-empty"><b>暂无明细数据</b><p>当前租户没有可展示的{{ section === 'contract' ? '合同' : '项目' }}记录。</p></div>
     </div>
   </section>
 </template>
