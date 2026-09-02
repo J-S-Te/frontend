@@ -2,6 +2,16 @@ export function displayStatus(status) {
   return ({ ACTIVE: '启用', DISABLED: '停用', LOCKED: '已锁定', EXPIRED: '已失效' }[status] || status || '—')
 }
 
+export function effectiveAccountStatus(account, now = Date.now()) {
+  const status = String(account?.status || '').toUpperCase()
+  if (status !== 'ACTIVE') return status
+  const validUntil = Date.parse(account?.valid_until || '')
+  if (Number.isFinite(validUntil) && validUntil <= now) return 'EXPIRED'
+  const lockedUntil = Date.parse(account?.locked_until || '')
+  if (Number.isFinite(lockedUntil) && lockedUntil > now) return 'LOCKED'
+  return status
+}
+
 export function displayEmployment(status) {
   return ({ ACTIVE: '在职', ON_LEAVE: '请假中', TERMINATED: '已离职' }[status] || status || '—')
 }
