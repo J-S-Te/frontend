@@ -1,4 +1,4 @@
-import { request, requestBlob, toQuery } from './client.js'
+import { request, requestAuthorizedFile, requestBlob, toQuery } from './client.js'
 
 export const listCustomers = (params) => request(`/customers${toQuery(params)}`)
 export const getCustomer = (id) => request(`/customers/${encodeURIComponent(id)}`)
@@ -30,6 +30,17 @@ export const commitCustomerImport = (jobNo, payload, idempotencyKey) => request(
   method: 'POST', body: JSON.stringify(payload), idempotent: true, idempotencyKey,
 })
 export const downloadCustomerImportErrors = (jobNo) => requestBlob(`/customers/imports/${encodeURIComponent(jobNo)}/errors`)
+export const downloadCustomerImportTemplate = async () => {
+  const download = await requestAuthorizedFile(
+    '/customers/imports/template',
+    new Set(['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']),
+    'customer-import-template.xlsx',
+  )
+  return {
+    ...download,
+    filename: download.filename.toLowerCase().endsWith('.xlsx') ? download.filename : 'customer-import-template.xlsx',
+  }
+}
 export const listCustomerFollowups = (id, params) => request(`/customers/${encodeURIComponent(id)}/followups${toQuery(params)}`)
 export const listCustomerContacts = (id) => request(`/customers/${encodeURIComponent(id)}/contacts`)
 export const listCustomerStakeholders = (id) => request(`/customers/${encodeURIComponent(id)}/stakeholders`)

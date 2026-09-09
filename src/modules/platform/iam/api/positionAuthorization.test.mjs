@@ -3,7 +3,6 @@ import { afterEach, test } from 'node:test'
 import {
   createPositionAuthorizationTemplate,
   deletePositionAuthorizationTemplate,
-  disablePositionAuthorizationTemplate,
   listPositionAuthorizationTargets,
   listPositionAuthorizationPositions,
   listPositionAuthorizationTemplateAssignments,
@@ -69,18 +68,4 @@ test('position authorization template APIs keep application-role mappings and po
   assert.deepEqual(JSON.parse(requests[6].options.body), { position_id: 'position / 1', inherit_authorization: true })
   assert.equal(requests[7].url, '/api/v1/position-authorization-templates/template%20%2F%201?version=4')
   assert.equal(requests[7].options.method, 'DELETE')
-})
-
-
-test('legacy disable template API remains an alias of logical deletion', async () => {
-  const requests = []
-  globalThis.fetch = async (url, options) => {
-    requests.push({ url, options })
-    return response()
-  }
-
-  await disablePositionAuthorizationTemplate('template-legacy', 2)
-
-  assert.equal(requests[0].url, '/api/v1/position-authorization-templates/template-legacy?version=2')
-  assert.equal(requests[0].options.method, 'DELETE')
 })

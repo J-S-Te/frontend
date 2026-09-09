@@ -74,8 +74,3 @@ export function auditResultMeta(record = {}) {
 
   return parts.join(' · ')
 }
-
-/** 审计详情弹窗使用的完整结果摘要。 */
-export function auditResultSummary(record = {}) {
-  return [auditResultLabel(record), auditResultMeta(record)].filter(Boolean).join(' · ')
-}

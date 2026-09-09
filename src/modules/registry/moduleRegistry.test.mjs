@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import { buildPortalSubsystems, findFrontendModule } from './moduleRegistry.js'
+import { buildPortalSubsystems } from './moduleRegistry.js'
 
 const subsystemPortalView = await readFile(new URL('../platform/views/SubsystemPortalView.vue', import.meta.url), 'utf8')
 

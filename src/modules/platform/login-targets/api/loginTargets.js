@@ -1,4 +1,4 @@
-import { createRequest, API_BASE_URL } from '../../shared/api/request.js'
+import { createRequest } from '../../shared/api/request.js'
 
 /** 保留服务端错误元数据，供设置页展示安全提示，不暴露原始响应和传输实现。 */
 export class ApplicationLoginTargetError extends Error {

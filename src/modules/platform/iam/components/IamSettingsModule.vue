@@ -13,7 +13,6 @@ import {
   displayLoginAccountType,
   effectiveAccountStatus,
   displayMembershipType,
-  displayMembershipValidity,
   displayStatus,
   formatDateTime,
 } from '@/modules/platform/iam/utils/iamPresentation'
@@ -332,7 +331,6 @@ const userAuthorizationPreviewSources = [
   { key: 'POSITION', label: '岗位继承' },
   { key: 'OTHER', label: '系统或其它来源' },
 ]
-const selectedAuthorizationRoles = computed(() => authorizationRoleOptions.value.filter((role) => authorizationDraft.role_codes.includes(roleCode(role))))
 const authorizationEntryLayerInfo = computed(() => authorizationEntryLayer(authorizationSubjectType.value))
 const authorizationEffectivePermissions = computed(() => {
   if (hasApplicationAuthorizationConflict.value) return []
@@ -538,10 +536,6 @@ const selectedPasswordResetAccount = computed(() => {
   if (!dialog) return null
   return dialog.accounts.find((account) => account.account_id === dialog.accountId) || null
 })
-
-function accountsForUser(userId) {
-  return accounts.value.filter((account) => account.user_id === userId)
-}
 
 function emitToast(message) {
   emit('toast', message)
@@ -1140,13 +1134,6 @@ async function revokeApplicationAccess() {
 function resetFilters() {
   Object.keys(panelFilters).forEach((key) => { panelFilters[key] = '' })
   emitToast('已清空筛选条件。')
-}
-
-function asId(value) {
-  if (!value) return '—'
-  if (typeof value === 'string') return value
-  if (typeof value === 'object' && value.id) return value.id
-  return String(value)
 }
 
 async function copyText(value, { success = '已复制' } = {}) {

@@ -3,7 +3,6 @@ import { afterEach, test } from 'node:test'
 import {
   createDictionary,
   createDictionaryItem,
-  listActiveDictionaryItemsByCode,
   listDictionaries,
   listDictionaryItems,
   updateDictionary,
@@ -91,16 +90,4 @@ test('dictionary item requests use the nested resource routes', async () => {
   })
   assert.equal(requests[2].url, '/api/v1/dictionaries/dict-1/items/item-1')
   assert.equal(JSON.parse(requests[2].options.body).version, 2)
-})
-
-test('listActiveDictionaryItemsByCode uses the business read endpoint', async () => {
-  let requested
-  globalThis.fetch = async (url, options) => {
-    requested = { url, options }
-    return jsonResponse({ data: { items: [] } })
-  }
-
-  await listActiveDictionaryItemsByCode({ dictionaryCode: 'AUDIT.ACTION', pageSize: 100 })
-
-  assert.equal(requested.url, '/api/v1/dictionaries/code/AUDIT.ACTION/items?page=1&page_size=100')
 })

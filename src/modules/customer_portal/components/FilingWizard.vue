@@ -5,7 +5,6 @@ import { completeFilingMaterialUpload, createFiling, createFilingMaterialUpload,
 const props = defineProps({ permissions: { type: Array, default: () => [] }, capabilities: { type: Object, default: () => ({}) }, projects: { type: Array, default: () => [] } })
 const emit = defineEmits(['error', 'notice'])
 
-const FORM_VERSION = '2025.1'
 const steps = Object.freeze([
   ['ORGANIZATION', '单位基本情况'], ['CLASSIFIED_OBJECT', '定级对象情况'], ['CLASSIFICATION', '定级情况'],
   ['NEW_TECHNOLOGY', '新技术应用'], ['MATERIALS', '提交材料'], ['DATA_INVENTORY', '数据摸底'],
@@ -157,7 +156,7 @@ function beforeUnloadGuard(event) {
   event.preventDefault()
   event.returnValue = ''
 }
-function materialStatusText(value) { return ({ PENDING_UPLOAD: '等待上传', FINALIZING: '正在核验对象', SCANNING: '安全扫描中', CLEAN: '扫描通过', REJECTED: '检测到风险，已拒绝', SCAN_FAILED: '扫描失败，禁止提交' })[value] || '未上传' }
+function materialStatusText(value) { return ({ PENDING_UPLOAD: '等待上传', FINALIZING: '正在核验对象', SCANNING: '文件校验中', CLEAN: '文件校验通过', REJECTED: '检测到风险，已拒绝', SCAN_FAILED: '文件校验失败，禁止提交' })[value] || '未上传' }
 function selectMaterialFile(fieldKey, event) {
   const file = event.target.files?.[0] || null
   const signature = file ? `${file.name}\u0000${file.type}\u0000${file.size}\u0000${file.lastModified}` : ''
@@ -187,9 +186,9 @@ async function uploadMaterial(item) {
     materialFileSignatures[item.key] = ''
     materialCreateKeys[item.key] = ''
     await reloadCurrent()
-    emit('notice', `${item.label}已上传并进入安全扫描，扫描通过前不能提交备案。`)
+    emit('notice', `${item.label}已上传并进入静态文件校验，文件校验通过前不能提交备案。`)
   } catch (error) {
-    materialErrors[item.key] = error?.code === 'PORTAL_FILING_MATERIAL_DEPENDENCY_UNAVAILABLE' ? '正式对象存储或病毒扫描尚未配置，上传已安全关闭。' : (error?.message || '材料上传失败。')
+    materialErrors[item.key] = error?.code === 'PORTAL_FILING_MATERIAL_DEPENDENCY_UNAVAILABLE' ? '对象存储或文件校验服务尚未配置，上传已安全关闭。' : (error?.message || '材料上传失败。')
   } finally { materialBusy[item.key] = false }
 }
 function labelForStep(code) { return steps.find(item => item[0] === code)?.[1] || code }
@@ -425,7 +424,7 @@ onUnmounted(() => clearTimeout(validationNoticeTimer))
       <nav class="filing-steps" aria-label="备案填写步骤"><button v-for="([code, label], index) in steps" :key="code" type="button" :class="{ active: currentStep === index, done: saveState[code].startsWith('服务端已保存') }" @click="goToStep(index)"><span>{{ index + 1 }}</span>{{ label }}<small>{{ saveState[code] }}</small></button></nav>
       <section class="portal-card filing-step-panel">
         <header><div><h2>步骤 {{ currentStep + 1 }}：{{ steps[currentStep][1] }}</h2></div><strong :class="saveState[currentCode].includes('失败') || saveState[currentCode].includes('冲突') ? 'save-bad' : 'save-good'">{{ saveState[currentCode] }}</strong></header>
-        <p v-if="currentCode === 'MATERIALS' && !materialUploadAvailable" class="portal-warning">正式对象存储或病毒扫描尚未配置，材料上传已安全关闭；材料声明仍可暂存。</p><p v-else-if="currentCode === 'MATERIALS'" class="portal-info">材料先保存声明，再通过受控对象存储上传并完成病毒扫描；只有服务端返回 CLEAN 的不可变对象版本才允许锁定备案。</p>
+        <p v-if="currentCode === 'MATERIALS' && !materialUploadAvailable" class="portal-warning">对象存储或文件校验服务尚未配置，材料上传已安全关闭；材料声明仍可暂存。</p><p v-else-if="currentCode === 'MATERIALS'" class="portal-info">材料先保存声明，再通过受控对象存储上传并完成静态文件校验；只有服务端返回 CLEAN 的不可变对象版本才允许锁定备案。</p>
         <div class="filing-fields" :aria-disabled="readonly">
           <template v-for="group in visibleGroups" :key="group.title || 'ungrouped'">
             <h4 v-if="group.title" class="filing-group-title">{{ group.title }}</h4>

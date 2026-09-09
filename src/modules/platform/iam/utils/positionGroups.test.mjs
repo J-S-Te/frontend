@@ -4,7 +4,6 @@ import {
   buildPositionOrganizationTree,
   flattenPositionOrganizationTree,
   groupPositionsByOrganization,
-  groupedPositionCount,
   visiblePositionsForOrganizationNode,
 } from './positionGroups.js'
 
@@ -25,7 +24,6 @@ test('岗位按照组织树顺序归类，并在组内按照名称排序', () =>
   const groups = groupPositionsByOrganization(positions, organizations)
   assert.deepEqual(groups.map((group) => group.organization_id), ['headquarters', 'sales', '__UNRESOLVED_ORGANIZATION__'])
   assert.deepEqual(groups[1].positions.map((position) => position.position_id), ['p-sales', 'p-director'])
-  assert.equal(groupedPositionCount(groups), 4)
 })
 
 test('岗位树与组织单元树保持相同父子层级，并将岗位挂到直属组织', () => {

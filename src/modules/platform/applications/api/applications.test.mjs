@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
 import { afterEach, test } from 'node:test'
+import { runInNewContext } from 'node:vm'
+import { computed, ref } from 'vue'
 import {
   ApplicationRegistryError,
   adoptSubsystemRuntime,
   createApplication,
-  createEnvironment,
   deleteApplicationRegistration,
   deleteEnvironment,
   getSubsystemCapabilities,
@@ -13,7 +14,6 @@ import {
   getSubsystemStatus,
   listPortalApplications,
 	listKeycloakProjectionFailures,
-  onboardSubsystem,
   registerSubsystemDirectory,
   retrySubsystem,
   rollbackToPlatform,
@@ -179,34 +179,6 @@ test('updateApplication preserves the stable code and sends optimistic-lock fiel
   assert.equal('code' in body, false)
 })
 
-test('createEnvironment sends public, upstream and path-prefix fields separately', async () => {
-  let requested
-  globalThis.fetch = async (url, options) => {
-    requested = { url, options }
-    return jsonResponse({ data: { environment_id: 'env-1' } })
-  }
-
-  await createEnvironment({
-    applicationId: 'app/1',
-    environment: 'production',
-    baseUrl: 'http://portal.example',
-    upstreamUrl: 'http://10.0.0.8:8081',
-    pathPrefix: '/business-app',
-  })
-
-  assert.equal(requested.url, '/api/v1/applications/app%2F1/environments')
-  assert.equal(requested.options.method, 'POST')
-  assert.deepEqual(JSON.parse(requested.options.body), {
-    environment: 'production',
-    base_url: 'http://portal.example',
-    upstream_url: 'http://10.0.0.8:8081',
-    path_prefix: '/business-app',
-    issuer_alias: null,
-    metadata: {},
-    status: 'ACTIVE',
-  })
-})
-
 test('updateEnvironment carries the optimistic-lock version and gateway fields', async () => {
   let requested
   globalThis.fetch = async (url, options) => {
@@ -254,38 +226,6 @@ test('deleteEnvironment sends exact scoped confirmation after runtime teardown i
   })
 })
 
-
-test('onboardSubsystem requests automatic deployment and returns only safe onboarding metadata', async () => {
-  let requested
-  globalThis.fetch = async (url, options) => {
-    requested = { url, options }
-    return jsonResponse({ data: { automation: { status: 'completed', public_url: 'https://portal.example.com/business-app/' } } }, { status: 201 })
-  }
-
-  const result = await onboardSubsystem({
-    applicationCode: 'business-app',
-    applicationName: '业务应用',
-    publicBaseUrl: 'https://portal.example.com',
-    upstreamUrl: 'http://10.0.0.8:8081',
-    pathPrefix: '/business-app',
-  })
-
-  assert.equal(result.automation.status, 'completed')
-  assert.equal(result.automation.public_url, 'https://portal.example.com/business-app/')
-  assert.equal('integration' in result, false)
-  assert.equal(requested.url, '/api/v1/subsystem-onboarding')
-  assert.equal(requested.options.method, 'POST')
-  assert.deepEqual(JSON.parse(requested.options.body), {
-    application_code: 'business-app',
-    application_name: '业务应用',
-    description: null,
-    environment: 'prod',
-    public_base_url: 'https://portal.example.com',
-    upstream_url: 'http://10.0.0.8:8081',
-    path_prefix: '/business-app',
-    client_type: 'confidential',
-  })
-})
 
 test('registerSubsystemDirectory only registers the directory and never sends OAuth client fields', async () => {
   let requested
@@ -414,11 +354,65 @@ test('application access UI separates logical retirement, runtime teardown and p
   assert.match(onboardingModule, /dev 环境不能通过管理页面删除/)
 })
 
-test('adding an environment keeps the selected application identity immutable and excludes existing environment codes', () => {
-  assert.match(onboardingModule, /onboardExistingApplicationId/)
-  assert.match(onboardingModule, /:disabled="onboardingExistingApplication"/)
-  assert.match(onboardingModule, /availableOnboardEnvironments/)
-  assert.match(onboardingModule, /preferredEnvironments\.value\.find\(\(item\) => !environments\.value\.some/)
+// Execute the component's actual computed declarations so an unreachable branch
+// cannot pass merely because its source text still exists.
+function onboardingComputed(name, nextName, bindings) {
+  const start = onboardingModule.indexOf(`const ${name} = computed(`)
+  const end = onboardingModule.indexOf(`const ${nextName} = `, start)
+  assert.ok(start >= 0 && end > start, `missing computed declaration: ${name}`)
+  return runInNewContext(`${onboardingModule.slice(start, end)}; ${name}`, { computed, ...bindings })
+}
+
+test('onboarding environment options use configured defaults and deduplicate reviewed targets for the selected application', () => {
+  const production = ref(false)
+  const targets = ref([])
+  const preferred = ref(['dev', 'prod'])
+  const result = onboardingComputed('availableOnboardEnvironments', 'onboardConfirmationCode', {
+    isProductionProvisioning: production,
+    productionTargets: targets,
+    preferredEnvironments: preferred,
+    onboardForm: { applicationCode: 'crm' },
+  })
+  assert.deepEqual(Array.from(result.value), ['dev', 'prod'])
+  production.value = true
+  targets.value = [
+    { application_code: 'crm', environment: 'prod' },
+    { application_code: 'crm', environment: 'prod' },
+    { application_code: 'contract', environment: 'test' },
+    { application_code: 'crm', environment: 'staging' },
+  ]
+  assert.deepEqual(Array.from(result.value), ['prod', 'staging'])
+  targets.value = [{ application_code: 'contract', environment: 'prod' }]
+  assert.deepEqual(Array.from(result.value), [])
+  targets.value = []
+  assert.deepEqual(Array.from(result.value), ['dev', 'prod'])
+})
+
+test('reviewed production targets stay closed until inventory is ready and exclude registered application environments', () => {
+  const ready = ref(false)
+  const loading = ref(false)
+  const error = ref('')
+  const result = onboardingComputed('selectableProductionTargets', 'selectedProductionTarget', {
+    productionTargetInventoryReady: ready,
+    productionTargetInventoryLoading: loading,
+    productionTargetInventoryError: error,
+    productionTargets: ref([
+      { application_code: 'crm', environment: 'prod' },
+      { application_code: 'contract', environment: 'prod' },
+    ]),
+    registeredProductionTargetKeys: ref(new Set(['crm/prod'])),
+    productionTargetKey: (target) => `${target.application_code}/${target.environment}`,
+  })
+  assert.equal(result.value.length, 0)
+  ready.value = true
+  assert.deepEqual(Array.from(result.value, (target) => target.application_code), ['contract'])
+  loading.value = true
+  assert.equal(result.value.length, 0)
+  loading.value = false
+  error.value = 'inventory unavailable'
+  assert.equal(result.value.length, 0)
+  error.value = ''
+  assert.equal(result.value.length, 1)
 })
 
 test('production onboarding only exposes reviewed unused targets while allowing the public base URL to be entered', () => {

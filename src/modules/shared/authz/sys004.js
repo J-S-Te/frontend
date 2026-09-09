@@ -1,5 +1,3 @@
-export const CONTRACT_APPLICATION_CODE = 'contract_management'
-
 export const CONTRACT_ROLE_DEFINITIONS = Object.freeze([
   { code: 'admin', name: '超级管理员', permissions: ['contract.read', 'contract.create', 'contract.edit', 'contract.approved.read', 'contract.document.download', 'contract.stamped_pdf.upload', 'contract.signing.manage', 'approval.view', 'approval.process', 'approval.manage', 'approval_rule.manage', 'opportunity_intake.read', 'opportunity_intake.process'] },
   { code: 'sales_director', name: '销售总监', permissions: ['dashboard', 'contract.read', 'customer.read', 'approval.view', 'approval.process'] },
@@ -10,60 +8,16 @@ export const CONTRACT_ROLE_DEFINITIONS = Object.freeze([
   { code: 'contract_specialist', name: '合同专员', permissions: ['contract.approved.read', 'contract.document.download', 'contract.stamped_pdf.upload', 'contract.signing.manage'] },
 ])
 
-export const CONTRACT_PERMISSION_DEFINITIONS = Object.freeze([
-  ['all', '全部权限'],
-  ['dashboard', '仪表盘访问'],
-  ['contract.read', '查看合同'],
-  ['contract.create', '创建合同'],
-  ['contract.edit', '编辑合同'],
-  ['contract.approved.read', '查看已通过合同'],
-  ['contract.document.download', '下载合同文档'],
-  ['contract.stamped_pdf.upload', '上传盖章合同'],
-  ['contract.signing.manage', '管理合同签署与回传'],
-  ['contract.delete', '删除合同'],
-  ['customer.read', '查看客户'],
-  ['customer.create', '创建客户'],
-  ['customer.edit', '编辑客户'],
-  ['customer.delete', '删除客户'],
-  ['contract_type.manage', '管理合同类型'],
-  ['contract_template.read', '查看合同模板'],
-  ['contract_template.manage', '管理合同模板'],
-  ['approval.view', '查看审批'],
-  ['approval.process', '处理审批'],
-  ['approval.manage', '管理审批'],
-  ['approval_rule.manage', '管理审批规则'],
-  ['opportunity_intake.read', '查看签单关联核对队列'],
-  ['opportunity_intake.process', '处理签单关联核对队列'],
-  ['user.manage', '管理用户'],
-  ['audit.view', '查看审计日志'],
-  ['audit.read', '审计只读'],
-].map(([code, name]) => Object.freeze({ code, name })))
-
-export const CONTRACT_CUSTOM_PERMISSION_DEFINITIONS = Object.freeze(
-  CONTRACT_PERMISSION_DEFINITIONS.filter(({ code }) => !['all', 'user.manage'].includes(code)),
-)
-
 const roleMap = new Map(CONTRACT_ROLE_DEFINITIONS.map((role) => [role.code, role]))
-const permissionMap = new Map(CONTRACT_PERMISSION_DEFINITIONS.map((permission) => [permission.code, permission]))
 
 export function contractRole(code) {
   return roleMap.get(code) || null
-}
-
-export function contractPermissionName(code) {
-  return permissionMap.get(code)?.name || code
 }
 
 export function hasContractPermission(session, permission) {
   // 这是菜单展示辅助判断，不是授权执行点；后端必须基于服务端会话再次鉴权。
   const permissions = Array.isArray(session?.permissions) ? session.permissions : []
   return permissions.includes('all') || permissions.includes(permission)
-}
-
-export function effectiveContractPermissions(roleCode, customPermissions = []) {
-  // 自定义权限只与角色目录做展示合并；是否可授予、是否越过租户范围由平台后端判定。
-  const role = contractRole(roleCode)
-  return [...new Set([...(role?.permissions || []), ...customPermissions])].sort()
 }
 
 export const CONTRACT_SECTION_PERMISSIONS = Object.freeze({

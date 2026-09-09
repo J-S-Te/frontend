@@ -176,7 +176,8 @@ async function loadSummary(code) {
         canViewDashboard("contract") ? getContractDashboardSummary() : Promise.reject(new Error("contract dashboard unavailable")),
         canViewDashboard("project") ? getProjectDashboardSummary() : Promise.reject(new Error("project dashboard unavailable")),
         canViewDashboard("overview") ? getDashboardTrend() : Promise.reject(new Error("trend unavailable")),
-        hasPermission("alert.view") ? getAlertSummary() : Promise.reject(new Error("alerts unavailable")),
+        // 预警摘要是总览中的可选模块；没有查看权限时静默跳过，不能把权限缺失误报成总览加载失败。
+        hasPermission("alert.view") ? getAlertSummary() : Promise.resolve(null),
       ])
       if (requestVersion !== summaryRequestVersion || section.value !== code) return
       const failedParts = [

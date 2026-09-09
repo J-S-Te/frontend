@@ -1,22 +1,20 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
-  CONTRACT_PERMISSION_DEFINITIONS,
   CONTRACT_ROLE_DEFINITIONS,
   CONTRACT_SECTION_PERMISSIONS,
   canAccessContractSection,
   contractRole,
-  effectiveContractPermissions,
   hasContractPermission,
 } from './sys004.js'
 
-test('SYS-004 frontend catalog includes the dedicated opportunity intake permissions', () => {
+test('SYS-004 active role catalog includes the dedicated opportunity intake permissions', () => {
   assert.equal(CONTRACT_ROLE_DEFINITIONS.length, 7)
-  assert.equal(CONTRACT_PERMISSION_DEFINITIONS.length, 26)
-  assert.equal(CONTRACT_PERMISSION_DEFINITIONS.some(({ code }) => code === 'approval.manage'), true)
-  assert.equal(CONTRACT_PERMISSION_DEFINITIONS.some(({ code }) => code === 'approval_rule.manage'), true)
-  assert.equal(CONTRACT_PERMISSION_DEFINITIONS.some(({ code }) => code === 'opportunity_intake.read'), true)
-  assert.equal(CONTRACT_PERMISSION_DEFINITIONS.some(({ code }) => code === 'opportunity_intake.process'), true)
+  const adminPermissions = contractRole('admin').permissions
+  assert.equal(adminPermissions.includes('approval.manage'), true)
+  assert.equal(adminPermissions.includes('approval_rule.manage'), true)
+  assert.equal(adminPermissions.includes('opportunity_intake.read'), true)
+  assert.equal(adminPermissions.includes('opportunity_intake.process'), true)
 })
 
 test('contract role codes have Chinese display names', () => {
@@ -35,20 +33,6 @@ test('contract specialist can only enter the approved-contract signing ledger', 
   for (const section of ['dashboard', 'contracts', 'approvals', 'rules', 'reports']) {
     assert.equal(canAccessContractSection(specialist, section), false, section)
   }
-})
-
-test('effective permissions are the sorted union of role and custom permissions', () => {
-  assert.deepEqual(effectiveContractPermissions('sales', ['contract_template.manage', 'contract.read']), [
-    'contract.create',
-    'contract.edit',
-    'contract.read',
-    'contract_template.manage',
-    'contract_template.read',
-    'customer.create',
-    'customer.edit',
-    'customer.read',
-    'dashboard',
-  ])
 })
 
 test('all is a wildcard and director routes remain constrained', () => {

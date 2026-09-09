@@ -1,4 +1,4 @@
-import { createRequest, API_BASE_URL } from '../../shared/api/request.js'
+import { createRequest } from '../../shared/api/request.js'
 /**
  * NotificationError 与业务错误分类相关的错误类型定义。
  * @class

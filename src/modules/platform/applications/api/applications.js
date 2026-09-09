@@ -50,18 +50,6 @@ export function listApplications({ page = 1, pageSize = 100, status = 'ACTIVE', 
 }
 
 /**
- * getApplication 查询指定应用的最新控制面记录。
- * @param {Object} options 查询参数。
- * @param {string} options.applicationId 应用标识。
- * @returns {Promise<Object>} 返回应用详情。
- * @throws {ApplicationRegistryError} applicationId 为空、应用不存在或请求无权限时抛出。
- */
-export function getApplication({ applicationId } = {}) {
-  if (!applicationId) throw new ApplicationRegistryError('applicationId 不能为空。', { code: 'VALIDATION_ERROR' })
-  return request(`/applications/${encodeURIComponent(applicationId)}`)
-}
-
-/**
  * createApplication 创建业务子系统登记，不同步创建 OAuth 客户端或登录目标。
  * @param {Object} options 应用参数，包含 code、name、applicationType、description 和 status。
  * @returns {Promise<Object>} 返回新建的应用登记。
@@ -144,28 +132,6 @@ export function listEnvironments({ applicationId, page = 1, pageSize = 50, statu
 }
 
 /**
- * createEnvironment 创建应用环境，并配置公开地址到内部上游的网关映射。
- * @param {Object} options 环境参数，包含 applicationId、environment、访问地址、路径、发行方别名、metadata 和 status。
- * @returns {Promise<Object>} 返回新建的应用环境。
- * @throws {ApplicationRegistryError} applicationId 为空、环境数据无效、环境冲突或操作无权限时抛出。
- */
-export function createEnvironment({ applicationId, environment, baseUrl = null, upstreamUrl = null, pathPrefix = null, issuerAlias = null, metadata = {}, status = 'ACTIVE' } = {}) {
-  if (!applicationId) throw new ApplicationRegistryError('applicationId 不能为空。', { code: 'VALIDATION_ERROR' })
-  return request(`/applications/${encodeURIComponent(applicationId)}/environments`, {
-    method: 'POST',
-    body: JSON.stringify({
-      environment,
-      base_url: baseUrl,
-      upstream_url: upstreamUrl,
-      path_prefix: pathPrefix,
-      issuer_alias: issuerAlias,
-      metadata,
-      status,
-    }),
-  })
-}
-
-/**
  * updateEnvironment 更新应用环境及网关映射配置。
  * @param {Object} options 更新参数，包含 applicationId、environmentId、访问地址、路径、metadata、status 和 version。
  * @returns {Promise<Object>} 返回更新后的环境。
@@ -221,44 +187,6 @@ export function purgeEnvironment({ applicationId, environmentId, confirmationCod
       retention_confirmed: true,
       offboarded_confirmed: true,
       version: Number(version),
-    }),
-  })
-}
-
-/**
- * onboardSubsystem 一次完成应用登记、环境配置、登录目标、OAuth 客户端和自动部署。
- * 该接口是受控编排入口，不等同于依次调用普通 CRUD；部分失败的补偿和幂等由后端负责。
- * @param {Object} options 接入参数，包含应用编码与名称、环境、公开与上游地址、路径、客户端类型及可选初始管理员。
- * @returns {Promise<Object>} 返回编排后的接入记录与部署状态。
- * @throws {ApplicationRegistryError} 接入参数无效、资源冲突、编排失败或操作无权限时抛出。
- */
-export function onboardSubsystem({
-  applicationCode,
-  applicationName,
-  description = null,
-  environment = 'prod',
-  publicBaseUrl,
-  upstreamUrl,
-  pathPrefix = '',
-  clientType = 'confidential',
-  initialAdminUserId = '',
-  issuerAlias = '',
-} = {}) {
-  return request('/subsystem-onboarding', {
-    method: 'POST',
-    body: JSON.stringify({
-      application_code: applicationCode,
-      application_name: applicationName,
-      description,
-      environment,
-      public_base_url: publicBaseUrl,
-      upstream_url: upstreamUrl,
-      path_prefix: pathPrefix,
-      client_type: clientType,
-      ...(String(issuerAlias || '').trim() ? { issuer_alias: String(issuerAlias).trim() } : {}),
-      ...(String(initialAdminUserId || '').trim()
-        ? { initial_admin_user_id: String(initialAdminUserId).trim() }
-        : {}),
     }),
   })
 }

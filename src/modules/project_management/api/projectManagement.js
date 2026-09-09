@@ -106,6 +106,17 @@ export async function getProjectSession({ force = false } = {}) {
   return sessionRequest
 }
 
+export async function getProjectNavigation() {
+  const data = await request('/navigation')
+  return {
+    roles: Array.isArray(data?.roles) ? data.roles : [],
+    sections: Array.isArray(data?.sections) ? data.sections : [],
+    default_section: typeof data?.default_section === 'string' ? data.default_section : '',
+    authorization_revision: data?.authorization_revision ?? null,
+    catalog_version: data?.catalog_version || '',
+  }
+}
+
 async function clearProjectLocalSession() {
   clearProjectSessionCache()
   try {
@@ -256,47 +267,6 @@ export function getDashboard() {
 }
 
 /**
- * activateContract 激活合同接收流程并返回可用于后续阶段操作的合同信息。
- * @param {Object} payload 合同激活参数。
- * @returns {Promise<object>} 激活后的执行结果。
- * @throws {Error} 合同数据非法、重复激活或权限不足时抛出。
- */
-export function activateContract(payload) {
-  return request('/contracts/activate', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  })
-}
-
-/**
- * adjustDecomposition 更新项目服务项的拆解或分工结构。
- * @param {string|number} projectID 项目 ID。
- * @param {Object} payload 拆解调整数据。
- * @returns {Promise<object>} 调整结果。
- * @throws {Error} 会话失效、项目状态不允许重算时抛出。
- */
-export function adjustDecomposition(projectID, payload) {
-  return request(`/projects/${encodeURIComponent(projectID)}/decomposition-adjustments`, {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  })
-}
-
-/**
- * assignServiceItem 为服务项分配签派/负责人。
- * @param {string|number} itemID 服务项 ID。
- * @param {Object} payload 分配负载。
- * @returns {Promise<object>} 分配结果。
- * @throws {Error} 参数非法或服务项状态不允许分配时抛出。
- */
-export function assignServiceItem(itemID, payload) {
-  return request(`/service-items/${encodeURIComponent(itemID)}/assignment`, {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  })
-}
-
-/**
  * assignTeam 为服务项指派实施团队。
  * @param {string|number} itemID 服务项 ID。
  * @param {Object} payload 团队指派负载。
@@ -444,15 +414,11 @@ export async function listCapabilities(resourceType = '') {
   return Array.isArray(data) ? data : []
 }
 
-/**
- * saveCapability 维护能力定义（增/改）。
- * @param {Object} payload 能力对象。
- * @returns {Promise<object>} 保存结果。
- * @throws {Error} 入参非法或无权限更新能力时抛出。
- */
-export function saveCapability(payload) {
-  return request('/capabilities', {
-    method: 'PUT',
-    body: JSON.stringify(payload),
-  })
+export async function listEquipment() {
+  const data = await request('/equipment')
+  return Array.isArray(data) ? data : []
+}
+
+export function upsertEquipment(payload) {
+  return request('/equipment', { method: 'PUT', body: JSON.stringify({ ...payload, resource_type: 'EQUIPMENT' }) })
 }

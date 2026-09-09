@@ -27,11 +27,6 @@ export function defaultEmployeeOnboardingForm(now = new Date()) {
   }
 }
 
-export function positionOptionsForOrganization(positions = [], orgUnitId = '') {
-  if (!orgUnitId) return []
-  return positions.filter((item) => (item?.org_unit_id || item?.organization_id || '') === orgUnitId)
-}
-
 export function resolveOnboardingExpiresAt(value) {
   if (!value) return null
   const date = new Date(value)

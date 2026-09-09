@@ -1,4 +1,4 @@
-import { createRequest, API_BASE_URL } from '../../shared/api/request.js'
+import { createRequest } from '../../shared/api/request.js'
 
 /** 保留平台 API 返回的安全错误元数据，不向上层泄露原始响应实现细节。 */
 export class DictionaryError extends Error {
@@ -82,9 +82,4 @@ export function updateDictionaryItem({ dictionaryId, itemId, code, label, value,
     method: 'PATCH',
     body: JSON.stringify({ code, label, value, sort_order: Number(sortOrder) || 0, status, version }),
   })
-}
-
-/** 按启用字典编码只返回业务表单可选择的有效条目。 */
-export function listActiveDictionaryItemsByCode({ dictionaryCode, ...query }) {
-  return request(`/dictionaries/code/${encodeURIComponent(dictionaryCode)}/items${pageQuery(query)}`)
 }
