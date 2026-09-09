@@ -217,6 +217,19 @@ export async function listServiceItems(projectID = '') {
 }
 
 /**
+ * listPersonnel 从基础平台负责人目录查询可选人员，供服务项操作台按人员选择团队负责人、
+ * 项目经理和工程师，避免业务用户手工填写平台用户 ID。
+ * @param {Object} [params={}] 查询参数：keyword、user_id、page、page_size。
+ * @returns {Promise<{items: Array<object>, total: number}>} 人员分页结果；目录未返回列表时兜底为空。
+ * @throws {Error} 目录未开通、权限不足或平台暂不可用时抛出。
+ */
+export async function listPersonnel(params = {}) {
+  const search = new URLSearchParams(Object.entries(params).filter(([, value]) => value !== undefined && value !== null && value !== '')).toString()
+  const data = await request(`/personnel${search ? `?${search}` : ''}`)
+  return data && Array.isArray(data.items) ? data : { items: [], total: 0 }
+}
+
+/**
  * confirmServiceItems 批量确认服务项归属/签收。
  * @param {Array<string|number>} ids 服务项 ID 列表。
  * @returns {Promise<object>} 批量确认结果。
