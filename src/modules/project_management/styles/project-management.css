@@ -573,7 +573,8 @@
 .pm-timeline p { color: var(--pm-muted); font-size: 12px; line-height: 1.6; }
 .pm-timeline time { color: var(--pm-muted); font-size: 11.5px; }
 .pm-drawer > footer, .pm-dialog > footer { padding: 14px 24px; }
-.pm-dialog { width: min(560px, 92vw); border-radius: 14px; box-shadow: var(--pm-shadow-modal); }
+.pm-dialog { width: min(560px, 92vw); display: flex; flex-direction: column; max-height: calc(100vh - 32px); border-radius: 14px; box-shadow: var(--pm-shadow-modal); }
+.pm-dialog > .pm-form { min-height: 0; overflow-y: auto; }
 .pm-form { gap: 16px; padding: 20px 24px; }
 .pm-form label { gap: 7px; color: var(--pm-body); font-size: 12.5px; }
 .pm-form em { color: var(--pm-red-text); }
@@ -586,12 +587,17 @@
 .pm-selection-row span { display: grid; gap: 3px; }
 .pm-selection-row small, .pm-form-hint { color: var(--pm-muted); font-size: 12px; }
 .pm-form-hint { margin: -8px 0 0; }
-.pm-service-links { display: grid; gap: 10px; padding: 14px; border: 1px solid var(--pm-line); border-radius: 10px; background: #f8fafc; }
+.pm-service-links { grid-column: 1 / -1; display: grid; gap: 10px; padding: 14px; border: 1px solid var(--pm-line); border-radius: 10px; background: #f8fafc; }
 .pm-service-links > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .pm-service-links > header div { display: grid; gap: 3px; }
 .pm-service-links > header small { color: var(--pm-muted); font-size: 11px; }
-.pm-service-link-row { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 8px; align-items: center; }
+.pm-service-link-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) auto; gap: 8px; align-items: center; }
 .pm-service-link-row .pm-icon-button { width: 34px; height: 34px; color: var(--pm-muted); }
+/* 窄屏下列宽不足，纵向堆叠，避免输入内容被截断。必须位于基础规则之后才能生效。 */
+@media (max-width: 560px) {
+  .pm-service-link-row { grid-template-columns: minmax(0, 1fr); }
+  .pm-service-link-row .pm-icon-button { justify-self: end; }
+}
 .pm-equipment-layout { margin-bottom: 16px; }
 .pm-equipment-layout > header { padding: 20px 24px 0; }
 .pm-equipment-layout > header p { color: var(--pm-muted); font-size: 12px; }

@@ -72,3 +72,17 @@ test('项目管理页面对齐合同系统 UniLab UI 设计规范', () => {
   assert.match(styles, /:focus-visible \{[\s\S]*?outline: 2px solid var\(--pm-blue\)/)
   assert.match(styles, /@media \(prefers-reduced-motion: reduce\)/)
 })
+
+test('关联服务项在新建对话框中占满整行，输入框不会被压窄截断', () => {
+  assert.match(styles, /\.pm-service-links \{[^}]*grid-column: 1 \/ -1;/)
+  assert.match(styles, /\.pm-service-link-row \{[^}]*grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\) minmax\(0, 1fr\) auto;/)
+  const baseIndex = styles.indexOf('.pm-service-link-row { display: grid;')
+  const narrowIndex = styles.indexOf('.pm-service-link-row { grid-template-columns: minmax(0, 1fr); }')
+  assert.ok(baseIndex !== -1, '缺少关联服务项行基础样式')
+  assert.ok(narrowIndex > baseIndex, '窄屏堆叠规则必须位于基础规则之后，否则同优先级下会被覆盖')
+})
+
+test('新建对话框限制高度并可滚动，内容不会被视口裁切', () => {
+  assert.match(styles, /\.pm-dialog \{[^}]*max-height: calc\(100vh - 32px\);/)
+  assert.match(styles, /\.pm-dialog > \.pm-form \{[^}]*overflow-y: auto;/)
+})
