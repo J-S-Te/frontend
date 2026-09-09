@@ -11,7 +11,7 @@ import CreditApprovalInbox from '../components/CreditApprovalInbox.vue'
 import CreditRuleSettingsPanel from '../components/CreditRuleSettingsPanel.vue'
 import { formatSignedContractCount } from '../signedContractCount.js'
 import {
-  checkCustomerDuplicate, commitCustomerImport, createCustomer, createCustomerFollowup, downloadCustomerImportErrors,
+  checkCustomerDuplicate, commitCustomerImport, createCustomer, createCustomerFollowup, downloadCustomerImportErrors, downloadCustomerImportTemplate,
   createPortalInvite, disablePortalAccess, getCurrentPortalInvite, getPortalAccessStatus,
   getCustomer, listCustomerFollowups, listCustomers, previewCustomerImport,
   listCustomerAuditLogs, listCustomerContacts, listCustomerOpportunities, listCustomerProjects,
@@ -63,6 +63,10 @@ const customerIndustryOptions = Object.freeze([
   '金融', '政府', '医疗', '教育', '能源', '制造', '软件', '互联网', '通信',
   '物流', '交通', '建筑', '房地产', '零售', '服务', '其他',
 ])
+const customerImportTemplateColumns = Object.freeze([
+  ['客户名称', '示例科技有限公司'], ['统一社会信用代码', '913100001234567890'], ['客户类型', '企业'], ['行业', '软件'], ['区域', '华东'],
+  ['负责人用户ID', '请填写负责人用户ID'], ['负责人组织ID', '请填写负责人组织ID'], ['登记联系人姓名', '张三'], ['登记联系人电话', '13800138000'], ['登记联系人邮箱', 'zhangsan@example.com'],
+])
 const opportunityTypeOptions = Object.freeze([
   '等保审查', '密码应用安全性评估', '软件测试', '源代码审计', '渗透测试', '漏洞扫描',
   'APP安全完整性', '在线测试', '安全系数', '网络安全风险评估', '缺口分析', '机房检测',
@@ -72,6 +76,11 @@ const opportunitySourceOptions = Object.freeze([
   '客户主动咨询', '老客户复购/续约', '老客户转介绍', '公开招标', '销售开拓', '合作伙伴推荐',
   '展会/活动', '政府/主管单位指派', '线上渠道', '内部转介',
 ])
+const presaleEligibleOpportunityStages = new Set(['初步接触', '需求沟通', '方案制定', '报价', '投标'])
+const presaleEligibilityMessage = '只能为处于跟进中的初步接触、需求沟通、方案制定、报价或投标阶段商机发起售前支持。商机阶段不会自动调整。'
+function isPresaleEligibleOpportunity(opportunity) {
+  return opportunity?.opp_status === 'FOLLOWING' && presaleEligibleOpportunityStages.has(opportunity?.current_stage)
+}
 const activeSection = computed(() => sections.has(route.params.section) ? route.params.section : 'customers')
 const sectionTitle = computed(() => ({ customers: '客户管理', opportunities: '商机管理', presale: '售前技术支持', notifications: '个人通知中心', 'credit-approvals': '信用审批待办', 'credit-rules': '信用规则管理' })[activeSection.value])
 const mobileMenuOpen = ref(false)
@@ -473,7 +482,8 @@ const opportunityTypeSelectOptions = computed(() => [...new Set([...opportunityT
 const opportunitySourceSelectOptions = computed(() => [...new Set([...opportunitySourceOptions, ...opportunitySourceSelections.value])])
 function resetMessages() { error.value = ''; notice.value = '' }
 function showError(value) {
-  if (value?.status === 409) error.value = value.code === 'CRM_CUSTOMER_VOID_BLOCKED' ? '客户仍有关联中的商机、售前申请或门户邀请，暂不能作废。' : '数据状态或版本已变化，请刷新详情后重试。'
+  if (value?.code === 'CRM_PRESALE_OPPORTUNITY_NOT_ELIGIBLE') error.value = presaleEligibilityMessage
+  else if (value?.status === 409) error.value = value.code === 'CRM_CUSTOMER_VOID_BLOCKED' ? '客户仍有关联中的商机、售前申请或门户邀请，暂不能作废。' : '数据状态或版本已变化，请刷新详情后重试。'
   else if (value?.code === 'CRM_OPPORTUNITY_NOT_FOUND') error.value = '关联商机不存在、已作废或不再属于当前账号的数据范围，请刷新商机列表后重新选择。'
   else if (value?.code === 'CRM_OPPORTUNITY_MEMBER_INVALID') error.value = '所选团队人员已停用或不再具有本应用授权，请重新从基础平台人员目录选择。'
   else if (value?.code === 'CRM_OWNER_DIRECTORY_UNAVAILABLE') error.value = '基础平台人员目录暂不可用，本次人员变更未保存。'
@@ -534,7 +544,6 @@ const unavailableCurrentAssignees = computed(() => {
   const visible = new Set(engineerDirectory.value.map((item) => item.person_id))
   return (selectedPresale.value?.current_assignees || []).filter((item) => !visible.has(item.person_id))
 })
-function alertText(level) { return level === 'OVERDUE' ? '已超时' : level === 'DUE_SOON' ? '即将超时' : '正常' }
 function customerStatusText(value) {
   return ({ ACTIVE: '有效', VOID: '已作废', MERGED: '已合并' })[value] || value || '—'
 }
@@ -830,6 +839,16 @@ async function downloadImportErrors() {
     window.setTimeout(() => URL.revokeObjectURL(objectURL), 0)
   } catch (value) { showCustomerImportError(value) }
 }
+async function downloadCustomerImportExample() {
+  try {
+    const { blob, filename } = await downloadCustomerImportTemplate()
+    const objectURL = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = objectURL; link.download = filename
+    document.body.appendChild(link); link.click(); link.remove()
+    window.setTimeout(() => URL.revokeObjectURL(objectURL), 0)
+  } catch (value) { showCustomerImportError(value) }
+}
 async function loadOpportunityCustomerOptions() {
   const sequence = ++opportunityCustomerOptionsLoadSequence.value
   opportunityCustomerOptionsLoading.value = true
@@ -914,8 +933,8 @@ async function loadPresaleOpportunityOptions() {
   try {
     const result = await listOpportunities({ keyword: presaleOpportunityKeyword.value.trim(), page: 1, page_size: 100, sort_by: 'updated_at', sort_order: 'desc' })
     if (sequence !== presaleOpportunityOptionsLoadSequence.value || !presaleCreatePage.value) return
-    presaleOpportunityOptions.value = (result?.items || []).filter((item) => item.opp_status !== 'VOID')
-    presaleOpportunityOptionsTotal.value = Number(result?.total || 0)
+    presaleOpportunityOptions.value = (result?.items || []).filter(isPresaleEligibleOpportunity)
+    presaleOpportunityOptionsTotal.value = presaleOpportunityOptions.value.length
     if (presaleForm.opportunity_id && !presaleOpportunityOptions.value.some((item) => String(item.id) === String(presaleForm.opportunity_id))) {
       presaleForm.opportunity_id = ''
     }
@@ -1618,7 +1637,7 @@ async function uploadOpportunityAttachment() {
   opportunityAttachmentLoading.value = true; opportunityAttachmentError.value = ''
   try {
     // 上传拆为“创建受控会话—直传对象存储—服务端确认”三步，每一步使用稳定状态恢复。
-    // 浏览器只接受无凭据、无片段的 HTTPS 地址，确认后文件仍须扫描通过才能下载。
+    // 浏览器只接受无凭据、无片段的 HTTPS 地址，确认后文件仍须文件校验通过才能下载。
     const payload = { file_name: file.name, size_bytes: file.size, mime_type: file.type, sha256: await sha256File(file) }
     const flow = attachmentUploadRetries.flowFor(opportunityID, payload)
     if (!flow.session) {
@@ -1638,12 +1657,12 @@ async function uploadOpportunityAttachment() {
     }
     await completeOpportunityAttachmentUpload(opportunityID, flow.session.attachment.id, { version: flow.session.attachment.version }, flow.completeKey)
     attachmentUploadRetries.confirmComplete(flow)
-    opportunityAttachmentFile.value = null; notice.value = '附件已上传并完成代码安全扫描；扫描通过前不能下载。'
+    opportunityAttachmentFile.value = null; notice.value = '附件已上传并完成静态文件校验；文件校验通过前不能下载。'
     await loadOpportunityAttachments(opportunityID)
   } catch (value) { opportunityAttachmentError.value = value?.code === 'CRM_OPPORTUNITY_ATTACHMENT_UNAVAILABLE' ? '可信文件存储或安全校验尚未配置，上传已安全关闭。' : (value?.message || '附件上传失败。') }
   finally { opportunityAttachmentLoading.value = false }
 }
-function opportunityAttachmentStatusText(value) { return ({ PENDING_UPLOAD:'等待上传', FINALIZING:'正在校验上传', SCANNING:'安全扫描中', CLEAN:'扫描通过', REJECTED:'检测到风险，已拒绝', SCAN_FAILED:'扫描失败，禁止下载' })[value] || '未知状态' }
+function opportunityAttachmentStatusText(value) { return ({ PENDING_UPLOAD:'等待上传', FINALIZING:'正在校验上传', SCANNING:'文件校验中', CLEAN:'文件校验通过', REJECTED:'检测到风险，已拒绝', SCAN_FAILED:'文件校验失败，禁止下载' })[value] || '未知状态' }
 async function downloadTrustedOpportunityAttachment(item) {
   if (!canDownloadOpportunityAttachments.value || !opportunityAttachmentCapabilities.value?.download_available || (item.file_status !== 'READY' && item.scan_status !== 'CLEAN')) return
   opportunityAttachmentError.value = ''
@@ -1746,7 +1765,11 @@ async function openOpportunityPresale(item) {
 }
 
 function openOpportunityPresaleCreate() {
-  if (!selectedOpportunity.value || !canCreatePresale.value || selectedOpportunity.value.opp_status === 'VOID') return
+  if (!selectedOpportunity.value || !canCreatePresale.value) return
+  if (!isPresaleEligibleOpportunity(selectedOpportunity.value)) {
+    error.value = presaleEligibilityMessage
+    return
+  }
   resetMessages()
   Object.assign(presaleForm, {
     opportunity_id: String(selectedOpportunity.value.id), venue: 'REMOTE', service_address: '',
@@ -1774,6 +1797,7 @@ async function reopenPresaleApproval() {
   presaleOpportunityOptionsError.value = ''
   presaleFormInitial = JSON.stringify(presaleForm)
   await loadPresaleOpportunityOptions()
+  if (!presaleForm.opportunity_id) error.value = presaleEligibilityMessage
 }
 
 function closeOpportunityPresaleCreate() {
@@ -1795,8 +1819,8 @@ async function submitOpportunityPresale() {
   if (!opportunityID || Number(presaleForm.opportunity_id) !== Number(opportunityID)) {
     error.value = '商机上下文已变化，请关闭申请窗口后重试。'; return
   }
-  if (selectedOpportunity.value?.opp_status === 'VOID') {
-    error.value = '已作废商机不能发起售前支持。'; return
+  if (!isPresaleEligibleOpportunity(selectedOpportunity.value)) {
+    error.value = presaleEligibilityMessage; return
   }
   const value = await submitPresale({ openDetail: false, refreshList: false })
   if (!value) return
@@ -2691,14 +2715,14 @@ onMounted(async () => {
       <section v-if="activeSection === 'presale' && alerts.length" class="crm-panel crm-alert-list"><h2>未读预警</h2><p class="crm-note">个人预警仅合并当前登录用户的内部人员身份，不随 SELF/ORG/ALL 数据范围扩大。</p><button v-for="item in alerts" :key="item.id" @click="readAlert(item)"><strong>{{ alertTypeText(item.alert_type) }}</strong><span>{{ item.request_no }} · 起算 {{ formatDate(item.basis_at) }} · 阈值 {{ formatDate(item.due_at) }}</span></button></section>
       <section v-if="activeSection === 'presale' && !presaleCreatePage"><section v-if="presaleView === 'list'" class="crm-panel table-panel"><h2>售前申请列表</h2><p class="crm-note">列表范围由角色决定；点击记录查看详情、工时和服务端允许的动作。</p><table v-if="presales.length"><thead><tr><th>申请编号</th><th>商机</th><th>申请人</th><th>状态</th><th>场地 / 紧急度</th><th>执行人</th><th>累计工时</th><th>期望结束</th><th>超时</th></tr></thead><tbody><tr v-for="item in presales" :key="presaleRequestID(item)" @click="openPresale(presaleRequestID(item))"><td>{{ item.request_no }}</td><td>{{ presaleOpportunityLabel(item) }}</td><td>{{ applicantLabel(item) }}</td><td>{{ requestStatusText(item.status) }}</td><td>{{ venueText(item.venue) }} / {{ urgencyText(item.urgency) }}</td><td>{{ assignees(item.current_assignees) }}</td><td>{{ item.total_work_hours }} 小时</td><td>{{ formatDate(item.expected_end) }}</td><td>{{ item.overdue ? '已超时' : '否' }}</td></tr></tbody></table><div v-else class="crm-empty">暂无可见申请</div><div class="crm-actions"><button type="button" :disabled="presalePage.number <= 1 || loading" @click="changePresalePage(presalePage.number - 1)">上一页</button><span>第 {{ presalePage.number }} 页，共 {{ presalePage.total }} 条</span><button type="button" :disabled="presalePage.number * presalePage.size >= presalePage.total || loading" @click="changePresalePage(presalePage.number + 1)">下一页</button></div></section><section v-else class="crm-panel crm-presale-board-panel"><div class="crm-panel-heading"><div><h2>售前状态看板</h2><p class="crm-note">只读看板，不支持拖拽改状态。每列最多显示服务端返回的 {{ presaleColumnLimit }} 条，列总数不受截断影响。</p></div></div><div class="crm-board crm-presale-board"><article v-for="column in presaleBoard" :key="column.status" class="crm-board-column" :data-status="column.status"><h2>{{ requestStatusText(column.status) }} <small>{{ column.total }}</small></h2><button v-for="item in column.items" :key="presaleRequestID(item)" type="button" class="crm-board-card" :aria-label="`打开售前申请 ${item.request_no}`" :disabled="!presaleRequestID(item)" @click="openPresale(presaleRequestID(item))"><strong>{{ item.request_no }}</strong><span>{{ presaleOpportunityLabel(item) }}</span><span>{{ applicantLabel(item) }} · {{ urgencyText(item.urgency) }}</span><span>{{ assignees(item.current_assignees) }}</span><span>{{ item.total_work_hours }} 小时 · {{ item.overdue ? '已超时' : '未超时' }}</span></button><p v-if="Number(column.total) > (column.items?.length || 0)" class="crm-note">另有 {{ Number(column.total) - (column.items?.length || 0) }} 条未在本列展示</p><p v-else-if="!column.items?.length" class="crm-empty compact">暂无任务</p></article></div></section></section>
       <section v-if="activeSection === 'presale' && presaleCreatePage" class="crm-presale-create-page">
-        <p class="crm-alert warning" role="status">请从当前账号可见的商机中选择；提交后进入两级审批流。现场支持必须填写服务地址。</p>
+        <p class="crm-alert warning" role="status">仅可选择处于跟进中的初步接触、需求沟通、方案制定、报价或投标阶段商机；提交后进入两级审批流。售前申请不会自动调整商机阶段，现场支持必须填写服务地址。</p>
         <form id="presale-create-form" class="crm-panel crm-presale-create-form" @submit.prevent="submitPresaleFromList">
           <h2>售前技术支持申请</h2>
           <section class="crm-business-picker">
             <label>查找商机<input v-model.trim="presaleOpportunityKeyword" type="search" placeholder="商机编号或名称" @keyup.enter.prevent="loadPresaleOpportunityOptions"></label>
             <button type="button" :disabled="presaleOpportunityOptionsLoading" @click="loadPresaleOpportunityOptions">{{ presaleOpportunityOptionsLoading ? '查询中…' : '查询商机' }}</button>
             <label>关联商机 *<select v-model="presaleForm.opportunity_id" required :disabled="presaleOpportunityOptionsLoading || !presaleOpportunityOptions.length"><option value="" disabled>请选择商机</option><option v-for="opportunity in presaleOpportunityOptions" :key="opportunity.id" :value="String(opportunity.id)">{{ opportunity.name }}（{{ opportunity.opportunity_no }}）</option></select></label>
-            <small v-if="presaleOpportunityOptionsError" class="crm-alert error" role="alert">{{ presaleOpportunityOptionsError }}</small><small v-else-if="!presaleOpportunityOptionsLoading && !presaleOpportunityOptions.length" class="crm-note">暂无可关联商机。</small><small v-else-if="presaleOpportunityOptionsTotal > presaleOpportunityOptions.length" class="crm-note">当前显示前 {{ presaleOpportunityOptions.length }} 条，请按编号或名称缩小范围。</small>
+            <small v-if="presaleOpportunityOptionsError" class="crm-alert error" role="alert">{{ presaleOpportunityOptionsError }}</small><small v-else-if="!presaleOpportunityOptionsLoading && !presaleOpportunityOptions.length" class="crm-note">暂无符合售前发起条件的商机。</small>
           </section>
           <div class="crm-presale-form-row"><label>支持方式 *<select v-model="presaleForm.venue" required><option value="REMOTE">远程</option><option value="ONSITE">现场</option></select></label><label>紧急程度 *<select v-model="presaleForm.urgency" required><option value="NORMAL">普通</option><option value="URGENT">紧急</option></select></label></div><label v-if="presaleForm.venue === 'ONSITE'">服务地址 *<input v-model.trim="presaleForm.service_address" required maxlength="500" placeholder="客户现场详细地址"></label><div class="crm-presale-form-row"><label>联系人 *<input v-model.trim="presaleForm.contact_name" required maxlength="100" placeholder="客户对接人姓名 / 部门"></label><label>联系电话 *<input v-model.trim="presaleForm.contact_phone" required maxlength="64" placeholder="客户对接人联系电话"></label></div><label>需求说明 *<textarea v-model.trim="presaleForm.description" required placeholder="请描述售前支持需求与背景"></textarea></label><div class="crm-presale-form-row"><label>预计开始 *<input v-model="presaleForm.expected_start" type="datetime-local" required></label><label>预计结束 *<input v-model="presaleForm.expected_end" type="datetime-local" required></label></div><div class="crm-actions"><button type="button" :disabled="presaleCreateLoading" @click="closePresaleCreatePage">取消</button><button class="primary" :disabled="presaleCreateLoading || !presaleForm.opportunity_id">{{ presaleCreateLoading ? '提交中…' : '提交申请' }}</button></div>
         </form>
@@ -2800,7 +2824,7 @@ onMounted(async () => {
         </footer>
       </form>
     </div>
-    <div v-if="customerImportDialog" class="crm-modal" role="dialog" aria-modal="true"><form class="crm-import-wizard" @submit.prevent="previewImport"><h2>客户 Excel 导入</h2><p class="crm-note">第一步：上传 .xlsx 后由服务端先执行病毒扫描，再进行固定表头和逐行预检。浏览器不会读取 Excel 内容，也不会保存文件或敏感字段。</p><template v-if="!customerImportPreview"><label>Excel 文件<input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required @change="selectCustomerImportFile"></label><label>导入原因<textarea v-model.trim="customerImportForm.reason" required maxlength="500"></textarea></label><div class="crm-actions"><button type="button" @click="closeCustomerImport">取消</button><button class="primary" :disabled="actionLoading || !customerImportForm.file || !customerImportForm.reason">{{ actionLoading ? '服务端扫描与预检中…' : '上传并预检' }}</button></div></template><template v-else><h3>第二步：服务端预检结果</h3><dl class="crm-import-summary"><dt>任务号</dt><dd>{{ customerImportPreview.job_no }}</dd><dt>状态</dt><dd>{{ customerImportPreview.status }}</dd><dt>总行数</dt><dd>{{ customerImportPreview.total_rows }}</dd><dt>可导入</dt><dd>{{ customerImportPreview.importable_rows }}</dd><dt>警告</dt><dd>{{ customerImportPreview.warning_rows }}</dd><dt>错误</dt><dd>{{ customerImportPreview.error_rows }}</dd><dt>预检过期时间</dt><dd>{{ formatDate(customerImportPreview.expires_at) }}</dd></dl><p class="crm-note">警告行和错误行本次均跳过；只有状态为“可导入”的行会提交。下表的信用代码、电话和邮箱均为服务端返回的脱敏值。</p><table v-if="customerImportPreview.rows?.length"><thead><tr><th>行号</th><th>状态</th><th>客户</th><th>信用代码（脱敏）</th><th>联系人</th><th>联系方式（脱敏）</th><th>问题</th></tr></thead><tbody><tr v-for="row in customerImportPreview.rows" :key="row.row_no"><td>{{ row.row_no }}</td><td>{{ importRowStatusText(row.status) }}</td><td>{{ row.name || '—' }}<br>{{ row.customer_type || '—' }} · {{ row.industry || '—' }} · {{ row.region || '—' }}</td><td>{{ row.unified_credit_code || '—' }}</td><td>{{ row.contact_name || '—' }}</td><td>{{ row.contact_phone || '—' }}<br>{{ row.contact_email || '—' }}</td><td><span v-if="!row.issues?.length">—</span><ul v-else><li v-for="issue in row.issues" :key="`${issue.column}-${issue.code}`">{{ issue.column }} · {{ issue.code }} · {{ issue.message }}</li></ul></td></tr></tbody></table><template v-if="!customerImportResult"><div class="crm-actions"><button type="button" @click="resetCustomerImportPreview">重新上传</button><button type="button" @click="downloadImportErrors">下载错误报告 CSV</button><button type="button" class="primary" :disabled="actionLoading || Number(customerImportPreview.importable_rows) === 0" @click="commitImport">{{ actionLoading ? '提交中…' : '第三步：确认导入可导入行' }}</button></div></template><template v-else><h3>第三步：导入结果</h3><dl class="crm-import-summary"><dt>状态</dt><dd>{{ customerImportResult.status }}</dd><dt>总行数</dt><dd>{{ customerImportResult.total_rows }}</dd><dt>成功</dt><dd>{{ customerImportResult.succeeded_rows }}</dd><dt>失败</dt><dd>{{ customerImportResult.failed_rows }}</dd><dt>跳过</dt><dd>{{ customerImportResult.skipped_rows }}</dd><dt>完成时间</dt><dd>{{ formatDate(customerImportResult.completed_at) }}</dd></dl><table v-if="customerImportResult.rows?.length"><thead><tr><th>行号</th><th>结果</th><th>客户编号</th><th>错误码</th><th>说明</th></tr></thead><tbody><tr v-for="row in customerImportResult.rows" :key="row.row_no"><td>{{ row.row_no }}</td><td>{{ importRowStatusText(row.status) }}</td><td>{{ row.customer_no || '—' }}</td><td>{{ row.error_code || '—' }}</td><td>{{ row.message || '—' }}</td></tr></tbody></table><div class="crm-actions"><button type="button" @click="downloadImportErrors">下载错误报告 CSV</button><button type="button" class="primary" @click="closeCustomerImport">完成</button></div></template></template></form></div>
+    <div v-if="customerImportDialog" class="crm-modal" role="dialog" aria-modal="true"><form class="crm-import-wizard" @submit.prevent="previewImport"><h2>客户 Excel 导入</h2><p class="crm-note">第一步：上传 .xlsx 后由服务端先执行文件格式和内容结构校验，再进行固定表头和逐行预检。浏览器不会读取 Excel 内容，也不会保存文件或敏感字段。</p><template v-if="!customerImportPreview"><section class="crm-import-template" aria-labelledby="customer-import-template-title"><h3 id="customer-import-template-title">填写示例</h3><p class="crm-note">下载模板后，请将示例行替换为真实客户数据。负责人用户 ID 和负责人组织 ID 可通过“查找负责人”获取。</p><div class="crm-import-template-scroll"><table><thead><tr><th v-for="column in customerImportTemplateColumns" :key="column[0]">{{ column[0] }}</th></tr></thead><tbody><tr><td v-for="column in customerImportTemplateColumns" :key="column[0]">{{ column[1] }}</td></tr></tbody></table></div><button type="button" @click="downloadCustomerImportExample">下载 .xlsx 示例文件</button></section><label>Excel 文件<input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required @change="selectCustomerImportFile"></label><label>导入原因<textarea v-model.trim="customerImportForm.reason" required maxlength="500"></textarea></label><div class="crm-actions"><button type="button" @click="closeCustomerImport">取消</button><button class="primary" :disabled="actionLoading || !customerImportForm.file || !customerImportForm.reason">{{ actionLoading ? '服务端校验与预检中…' : '上传并预检' }}</button></div></template><template v-else><h3>第二步：服务端预检结果</h3><dl class="crm-import-summary"><dt>任务号</dt><dd>{{ customerImportPreview.job_no }}</dd><dt>状态</dt><dd>{{ customerImportPreview.status }}</dd><dt>总行数</dt><dd>{{ customerImportPreview.total_rows }}</dd><dt>可导入</dt><dd>{{ customerImportPreview.importable_rows }}</dd><dt>警告</dt><dd>{{ customerImportPreview.warning_rows }}</dd><dt>错误</dt><dd>{{ customerImportPreview.error_rows }}</dd><dt>预检过期时间</dt><dd>{{ formatDate(customerImportPreview.expires_at) }}</dd></dl><p class="crm-note">警告行和错误行本次均跳过；只有状态为“可导入”的行会提交。下表的信用代码、电话和邮箱均为服务端返回的脱敏值。</p><table v-if="customerImportPreview.rows?.length"><thead><tr><th>行号</th><th>状态</th><th>客户</th><th>信用代码（脱敏）</th><th>联系人</th><th>联系方式（脱敏）</th><th>问题</th></tr></thead><tbody><tr v-for="row in customerImportPreview.rows" :key="row.row_no"><td>{{ row.row_no }}</td><td>{{ importRowStatusText(row.status) }}</td><td>{{ row.name || '—' }}<br>{{ row.customer_type || '—' }} · {{ row.industry || '—' }} · {{ row.region || '—' }}</td><td>{{ row.unified_credit_code || '—' }}</td><td>{{ row.contact_name || '—' }}</td><td>{{ row.contact_phone || '—' }}<br>{{ row.contact_email || '—' }}</td><td><span v-if="!row.issues?.length">—</span><ul v-else><li v-for="issue in row.issues" :key="`${issue.column}-${issue.code}`">{{ issue.column }} · {{ issue.code }} · {{ issue.message }}</li></ul></td></tr></tbody></table><template v-if="!customerImportResult"><div class="crm-actions"><button type="button" @click="resetCustomerImportPreview">重新上传</button><button type="button" @click="downloadImportErrors">下载错误报告 CSV</button><button type="button" class="primary" :disabled="actionLoading || Number(customerImportPreview.importable_rows) === 0" @click="commitImport">{{ actionLoading ? '提交中…' : '第三步：确认导入可导入行' }}</button></div></template><template v-else><h3>第三步：导入结果</h3><dl class="crm-import-summary"><dt>状态</dt><dd>{{ customerImportResult.status }}</dd><dt>总行数</dt><dd>{{ customerImportResult.total_rows }}</dd><dt>成功</dt><dd>{{ customerImportResult.succeeded_rows }}</dd><dt>失败</dt><dd>{{ customerImportResult.failed_rows }}</dd><dt>跳过</dt><dd>{{ customerImportResult.skipped_rows }}</dd><dt>完成时间</dt><dd>{{ formatDate(customerImportResult.completed_at) }}</dd></dl><table v-if="customerImportResult.rows?.length"><thead><tr><th>行号</th><th>结果</th><th>客户编号</th><th>错误码</th><th>说明</th></tr></thead><tbody><tr v-for="row in customerImportResult.rows" :key="row.row_no"><td>{{ row.row_no }}</td><td>{{ importRowStatusText(row.status) }}</td><td>{{ row.customer_no || '—' }}</td><td>{{ row.error_code || '—' }}</td><td>{{ row.message || '—' }}</td></tr></tbody></table><div class="crm-actions"><button type="button" @click="downloadImportErrors">下载错误报告 CSV</button><button type="button" class="primary" @click="closeCustomerImport">完成</button></div></template></template></form></div>
     <div v-if="opportunityDialog" class="console-modal-backdrop" :class="{ nested: !!selectedOpportunity }" role="presentation" @click.self="closeOpportunityDialog">
       <form class="console-detail-modal crm-opportunity-dialog" role="dialog" aria-modal="true" :aria-label="opportunityEditMode ? '编辑商机' : '新建商机'" @submit.prevent="submitOpportunity">
         <header>
@@ -3125,6 +3149,7 @@ onMounted(async () => {
           <div><span>负责人</span><strong>{{ ownerLabel(selectedOpportunity.owner_user_id) }}</strong></div>
         </div>
         <form id="opportunity-presale-create-form" class="console-form-grid crm-opportunity-presale-create-body" @submit.prevent="submitOpportunityPresale">
+          <p class="console-form-item full crm-note">当前商机处于“{{ selectedOpportunity.current_stage }}”阶段。售前申请不会自动调整商机阶段；如销售推进需要，请单独调整阶段并留痕。</p>
           <div v-if="!presaleRequestSubmissionAvailable" class="crm-alert warning crm-opportunity-presale-create-status" role="status">
             <span>售前内部流程暂时不可用，可以先填写申请后重试。</span>
             <button class="console-button ghost small" type="button" :disabled="runtimeCapabilitiesLoading" @click="refreshPresaleSubmissionCapability">{{ runtimeCapabilitiesLoading ? '检测中…' : '重新检测' }}</button>

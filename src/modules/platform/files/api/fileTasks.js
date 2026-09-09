@@ -1,5 +1,4 @@
-import { createRequest, API_BASE_URL } from '../../shared/api/request.js'
-import { attachStructuredContext } from '../../shared/api/requestContext.js'
+import { createRequest } from '../../shared/api/request.js'
 
 /**
  * FileTaskError 表示文件或异步任务接口返回的结构化错误。
@@ -20,22 +19,6 @@ export class FileTaskError extends Error {
   }
 }
 
-async function readResponse(response) {
-  const contentType = response.headers.get('content-type') || ''
-  if (contentType.includes('application/json')) return response.json()
-
-  const text = await response.text()
-  return text ? { message: text } : {}
-}
-
-function makeError(body, response, fallback) {
-  return new FileTaskError(body.message || body.msg || fallback, {
-    status: response.status,
-    code: body.code,
-    traceId: body.request_id || body.trace_id || body.traceId,
-  })
-}
-
 const request = createRequest({
   ErrorClass: FileTaskError,
   networkMessage: '无法连接文件与异步任务服务，请确认后端服务已启动。',
@@ -43,86 +26,6 @@ const request = createRequest({
   subsystem: 'platform',
   feature: 'files',
 })
-
-/**
- * uploadLocalFile 上传单个本地文件。
- *
- * 不得手工设置 Content-Type，multipart boundary 必须由浏览器生成。
- *
- * @param {Object} options 文件上传参数。
- * @param {string} options.applicationId 文件归属的应用标识。
- * @param {File|Blob} options.file 待上传的文件对象。
- * @param {string} [options.classification='INTERNAL'] 文件密级分类。
- * @returns {Promise<Object>} 返回服务端创建的文件记录。
- * @throws {FileTaskError} 上传参数无效、无文件权限或服务不可用时抛出。
- */
-export function uploadLocalFile({ applicationId, file, classification = 'INTERNAL' }) {
-  const formData = new FormData()
-  formData.set('application_id', String(applicationId || '').trim())
-  formData.set('classification', String(classification || 'INTERNAL').trim().toUpperCase())
-  formData.set('file', file)
-  return request('/files', { method: 'POST', body: formData })
-}
-
-/**
- * downloadLocalFile 下载指定文件并解析响应中的文件名。
- *
- * @param {string} fileId 文件标识。
- * @returns {Promise<{blob: Blob, filename: string}>} 返回文件二进制内容及尽力解析的文件名。
- * @throws {FileTaskError} 文件不存在、状态不允许下载、无访问权限或网络不可达时抛出。
- */
-export async function downloadLocalFile(fileId) {
-  let response
-  try {
-    response = await fetch(`${API_BASE_URL}/files/${encodeURIComponent(fileId)}/content`, {
-      credentials: 'include',
-      headers: { Accept: 'application/octet-stream, application/json' },
-    })
-  } catch {
-    const error = new FileTaskError('无法连接文件下载服务，请稍后重试。', { code: 'NETWORK_ERROR' })
-    attachStructuredContext(error, {
-      subsystem: 'platform',
-      feature: 'files',
-      operation: 'GET',
-      path: `/files/${encodeURIComponent(fileId)}/content`,
-      method: 'GET',
-      metadata: { fileId, source: 'file_download' },
-    }, {
-      status: 0,
-      code: 'NETWORK_ERROR',
-      requestId: '',
-      traceId: '',
-    })
-    throw error
-  }
-  if (!response.ok) {
-    const body = await readResponse(response)
-    const requestId = body.request_id || ''
-    const traceId = body.trace_id || body.traceId || ''
-    const error = makeError(body, response, '文件下载失败。')
-    attachStructuredContext(error, {
-      subsystem: 'platform',
-      feature: 'files',
-      operation: 'GET',
-      path: `/files/${encodeURIComponent(fileId)}/content`,
-      method: 'GET',
-      requestId,
-      traceId,
-      metadata: { fileId, source: 'file_download' },
-    }, {
-      status: response.status,
-      code: body?.code,
-      requestId,
-      traceId,
-    })
-    throw error
-  }
-
-  const disposition = response.headers.get('content-disposition') || ''
-  const matched = disposition.match(/filename\*?=(?:UTF-8''|\")?([^;\"]+)/i)
-  const filename = matched ? decodeURIComponent(matched[1].replace(/\"/g, '').trim()) : ''
-  return { blob: await response.blob(), filename }
-}
 
 /**
  * listAsyncJobs 分页查询异步任务，并按状态、类型或应用筛选。
@@ -202,15 +105,3 @@ export function retryAsyncJob(jobId) { return request(`/async-jobs/${encodeURICo
  * @throws {FileTaskError} 原任务不存在、任务类型不允许重新执行或操作无权限时抛出。
  */
 export function rerunAsyncJob(jobId) { return request(`/async-jobs/${encodeURIComponent(jobId)}/rerun`, { method: 'POST' }) }
-
-/**
- * cleanupExpiredFiles 触发一次有数量上限的过期未绑定文件清理。
- * @param {Object} options 清理参数。
- * @param {string} options.before 只清理该时间之前的文件。
- * @param {number} options.maxFiles 本次最多清理的文件数。
- * @returns {Promise<Object>} 返回本次清理的统计结果。
- * @throws {FileTaskError} 参数无效、操作者无高风险操作权限或服务不可用时抛出。
- */
-export function cleanupExpiredFiles({ before, maxFiles }) {
-  return request('/files/cleanup', { method: 'POST', body: JSON.stringify({ before, max_files: maxFiles }) })
-}

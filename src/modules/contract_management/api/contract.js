@@ -269,6 +269,12 @@ export async function listContracts(params = {}) {
   return Array.isArray(data) ? data : []
 }
 
+export async function listApprovedContracts(params = {}) {
+  const search = new URLSearchParams({ limit: 200, ...params }).toString()
+  const data = await request(`/approved-contracts?${search}`)
+  return Array.isArray(data) ? data : []
+}
+
 /**
  * listContractLifecycle 获取指定合同的生命周期事件，并将非数组响应安全降级为空列表。
  * @param {string|number} contractId 合同标识。
@@ -277,18 +283,6 @@ export async function listContracts(params = {}) {
  */
 export async function listContractLifecycle(contractId) {
   const data = await request(`/contracts/${encodeURIComponent(contractId)}/lifecycle`)
-  return Array.isArray(data) ? data : []
-}
-
-/**
- * listApprovedContracts 按查询条件获取已审批合同列表。
- * @param {Record<string, string|number|boolean>} [params={}] 筛选与分页参数。
- * @returns {Promise<Array<unknown>>} 已审批合同列表；响应异常时返回空列表。
- * @throws {Error} 会话失效、网络失败或服务端返回非成功状态时抛出。
- */
-export async function listApprovedContracts(params = {}) {
-  const search = new URLSearchParams(params).toString()
-  const data = await request(`/approved-contracts${search ? `?${search}` : ''}`)
   return Array.isArray(data) ? data : []
 }
 
@@ -595,16 +589,6 @@ export async function submitContract(contractId, payload = {}) {
     method: 'POST',
     body: JSON.stringify(payload),
   })
-}
-
-/**
- * getContract 获取指定合同详情。
- * @param {string|number} contractId 合同标识。
- * @returns {Promise<unknown>} 合同详情。
- * @throws {Error} 网络失败、响应解析失败或服务端返回非成功状态时抛出。
- */
-export async function getContract(contractId) {
-  return request(`/contracts/${contractId}`)
 }
 
 /**

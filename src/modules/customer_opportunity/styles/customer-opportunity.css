@@ -1138,6 +1138,10 @@
 .crm-import-wizard td { white-space: normal; vertical-align: top; overflow-wrap: anywhere; word-break: break-word; }
 .crm-import-wizard ul { margin: 0; padding-left: 18px; }
 .crm-import-summary { grid-template-columns: 150px 1fr !important; }
+.crm-import-template { grid-column: 1 / -1; }
+.crm-import-template-scroll { overflow-x: auto; border: 1px solid #dbe5f0; border-radius: 8px; }
+.crm-import-template-scroll table { min-width: 980px; margin: 0; }
+.crm-import-template-scroll th { white-space: nowrap; }
 
 .crm-engineer-filters,
 .crm-report-filters { margin-bottom: 14px; }

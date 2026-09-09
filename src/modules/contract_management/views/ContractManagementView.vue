@@ -329,7 +329,6 @@ const signingStats = computed(() => {
 
 const totalContractAmount = computed(() => contracts.value.reduce((total, item) => total + item.amount, 0))
 const activeContractCount = computed(() => contracts.value.filter((item) => ['已批准', '已生效', '履约中', '待付款'].includes(item.status)).length)
-const averageContractAmount = computed(() => contracts.value.length ? totalContractAmount.value / contracts.value.length : 0)
 const adminDashboardContracts = computed(() => (adminDashboard.value?.contracts || []).map(normalizeContract))
 const reportContracts = computed(() => adminDashboardContracts.value.length ? adminDashboardContracts.value : contracts.value)
 const dashboardDetailMeta = computed(() => ({

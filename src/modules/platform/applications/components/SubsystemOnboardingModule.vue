@@ -73,7 +73,6 @@ const purgeConfirmation = ref('')
 const purgeApprovalId = ref('')
 const purgeRetentionConfirmed = ref(false)
 const purgeOffboardedConfirmed = ref(false)
-const onboardExistingApplicationId = ref('')
 const provisioningCapabilities = ref(null)
 const applicationsLoaded = ref(false)
 const productionTargetInventoryReady = ref(false)
@@ -122,8 +121,6 @@ const filteredApplications = computed(() => {
   })
 })
 const selectedApplication = computed(() => applications.value.find((item) => item.application_id === selectedApplicationId.value) || null)
-const selectedEnvironment = computed(() => environments.value.find((item) => item.environment_id === selectedEnvironmentId.value) || null)
-const onboardingExistingApplication = computed(() => Boolean(onboardExistingApplicationId.value))
 const isProductionProvisioning = computed(() => provisioningCapabilities.value?.deployment_mode === 'production')
 const automationUnavailable = computed(() => provisioningCapabilities.value?.automation_enabled === false)
 const supportedApplicationCodes = computed(() => {
@@ -137,9 +134,7 @@ const productionTargets = computed(() => {
 })
 const selectableProductionTargets = computed(() => {
   if (!productionTargetInventoryReady.value || productionTargetInventoryLoading.value || productionTargetInventoryError.value) return []
-  const applicationCode = onboardingExistingApplication.value ? selectedApplication.value?.code : ''
   return productionTargets.value.filter((target) => {
-    if (applicationCode && target.application_code !== applicationCode) return false
     return !registeredProductionTargetKeys.value.has(productionTargetKey(target))
   })
 })
@@ -167,14 +162,9 @@ const availableOnboardEnvironments = computed(() => {
     const supported = productionTargets.value
       .filter((target) => target.application_code === onboardForm.applicationCode)
       .map((target) => target.environment)
-    if (!onboardingExistingApplication.value) return [...new Set(supported)]
-    const existing = new Set(environments.value.map((item) => item.environment))
-    return [...new Set(supported)].filter((environment) => !existing.has(environment))
+    return [...new Set(supported)]
   }
-  const supported = preferredEnvironments.value
-  if (!onboardingExistingApplication.value) return supported
-  const existing = new Set(environments.value.map((item) => item.environment))
-  return supported.filter((environment) => !existing.has(environment))
+  return preferredEnvironments.value
 })
 const onboardConfirmationCode = computed(() => `${onboardForm.applicationCode.trim().toLowerCase()}/${onboardForm.environment}`)
 const onboardPreset = computed(() => subsystemOnboardingPreset(onboardForm.applicationCode))
@@ -236,7 +226,7 @@ function productionTargetKey(target) {
 
 function applyProductionProvisioningPreset(preferredTarget = null) {
   const defaults = provisioningCapabilities.value?.defaults || {}
-  const preferredCode = preferredTarget?.application_code || (onboardingExistingApplication.value ? selectedApplication.value?.code : defaults.application_code)
+  const preferredCode = preferredTarget?.application_code || defaults.application_code
   const preferredEnvironment = preferredTarget?.environment || defaults.environment
   const target = preferredTarget
     || selectableProductionTargets.value.find((item) => item.application_code === preferredCode && item.environment === preferredEnvironment)
@@ -372,7 +362,6 @@ function selectApplication(application) {
   pendingDeleteApplication.value = null
   deleteConfirmation.value = ''
   showOnboard.value = false
-  onboardExistingApplicationId.value = ''
 }
 
 async function loadApplications(preferredApplicationId = selectedApplicationId.value) {
@@ -541,12 +530,10 @@ async function loadKeycloakProjectionOperations(applicationCode = selectedApplic
 function toggleOnboarding() {
   if (showOnboard.value) {
     showOnboard.value = false
-    onboardExistingApplicationId.value = ''
     onboardStep.value = 1
     return
   }
   Object.assign(onboardForm, emptyOnboardForm())
-  onboardExistingApplicationId.value = ''
   onboardConfirmation.value = ''
   onboardStep.value = 1
   clearError()
@@ -596,7 +583,6 @@ function useDiscoveredCandidate(candidate) {
     // 页面显式同步，避免目录登记隐式创建认证 Client。
     issuerAlias: '',
   })
-  onboardExistingApplicationId.value = ''
   selectedProductionTargetKey.value = ''
   onboardConfirmation.value = ''
   showOnboard.value = true
@@ -657,42 +643,6 @@ function openEnvironmentEditor(environment) {
   })
   clearError()
   environmentEditorOpen.value = true
-}
-
-function openOnboardEnvironment() {
-  const application = selectedApplication.value
-  if (!application || !props.canOnboard) return
-  if (supportedApplicationCodes.value.length > 0 && !supportedApplicationCodes.value.includes(application.code)) {
-    setError(null, `当前部署 Agent 不支持应用 ${application.code}，不能在此服务器新增运行环境。`)
-    return
-  }
-  const target = isProductionProvisioning.value
-    ? selectableProductionTargets.value.find((item) => item.application_code === application.code)
-    : null
-  if (isProductionProvisioning.value && !target) {
-    setError(null, '暂无可接入目标：该应用在服务器审核清单中没有尚未接入的环境。')
-    return
-  }
-  const environment = target?.environment || preferredEnvironments.value.find((item) => !environments.value.some((existing) => existing.environment === item))
-  if (!environment) {
-    setError(null, `${preferredEnvironments.value.join('、')} 环境均已接入，不能重复创建。`)
-    return
-  }
-  onboardExistingApplicationId.value = application.application_id
-  Object.assign(onboardForm, {
-    applicationCode: application.code,
-    applicationName: application.name || application.code,
-    description: textValue(application.description),
-    environment,
-    publicBaseUrl: typeof window === 'undefined' ? 'http://localhost:8081' : window.location.origin,
-    upstreamUrl: '',
-    pathPrefix: `/${application.code}`,
-    clientType: 'confidential',
-  })
-  if (target) applyProductionProvisioningPreset(target)
-  else applySubsystemOnboardingPreset(onboardForm)
-  onboardConfirmation.value = ''
-  showOnboard.value = true
 }
 
 async function saveEnvironment() {
@@ -934,10 +884,6 @@ function keycloakCutoverState(environment) {
   return keycloakSwitchState(environment).cutover || { status: 'NOT_STARTED', timeline: [] }
 }
 
-function keycloakObservationReady(environment) {
-  return keycloakCutoverState(environment).status === 'READY_TO_SWITCH'
-}
-
 function keycloakRollbackAvailable(environment) {
   const state = keycloakCutoverState(environment)
   if (state.status !== 'SWITCHED') return false
@@ -1114,7 +1060,6 @@ async function submitOnboarding() {
       issuerAlias: onboardForm.issuerAlias,
     })
     showOnboard.value = false
-    onboardExistingApplicationId.value = ''
     onboardConfirmation.value = ''
     notify(result?.next_action || `${onboardForm.applicationName} ${onboardForm.environment} 目录已登记；请继续同步 Keycloak Client。`)
     emit('completed', result)
@@ -1304,7 +1249,7 @@ onMounted(() => {
         <form @submit.prevent="submitOnboarding">
           <template v-if="isProductionProvisioning">
             <p class="application-registry-inline-note">当前服务器使用生产部署策略（{{ productionProvisioningSummary }}）；应用、环境、内部 UpstreamURL 和门户路径由服务器审核清单控制，公网访问地址可按实际域名或端口手动填写。</p>
-            <button v-if="!onboardingExistingApplication" class="console-button ghost small" type="button" @click="applyProductionProvisioningPreset()">填入服务器接入配置</button>
+            <button class="console-button ghost small" type="button" @click="applyProductionProvisioningPreset()">填入服务器接入配置</button>
             <div class="console-form-grid">
               <label v-if="productionTargetInventoryLoading" class="console-form-item"><span>服务器接入目标</span><input value="正在读取已接入环境…" disabled /></label>
               <label v-else-if="productionTargetInventoryError" class="console-form-item"><span>服务器接入目标</span><input :value="productionTargetInventoryError" disabled /></label>
@@ -1324,8 +1269,8 @@ onMounted(() => {
           </template>
           <template v-else>
             <div v-show="onboardStep === 1" class="console-form-grid">
-              <label class="console-form-item"><span>应用编码</span><input v-model="onboardForm.applicationCode" :disabled="onboardingExistingApplication" placeholder="customer_management" /></label>
-              <label class="console-form-item"><span>应用名称</span><input v-model="onboardForm.applicationName" :disabled="onboardingExistingApplication" placeholder="客户管理系统" /></label>
+              <label class="console-form-item"><span>应用编码</span><input v-model="onboardForm.applicationCode" placeholder="customer_management" /></label>
+              <label class="console-form-item"><span>应用名称</span><input v-model="onboardForm.applicationName" placeholder="客户管理系统" /></label>
               <label class="console-form-item application-registry-confirm"><span>应用说明</span><input v-model="onboardForm.description" placeholder="可选" /></label>
             </div>
             <div v-show="onboardStep === 2" class="console-form-grid">

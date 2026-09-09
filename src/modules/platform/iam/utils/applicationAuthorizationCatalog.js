@@ -6,10 +6,6 @@ export function catalogRoles(catalog) {
   return Array.isArray(catalog?.roles) ? catalog.roles : []
 }
 
-export function catalogRoleCode(role) {
-  return String(role?.code || role?.role_code || '').trim()
-}
-
 export function catalogRoleStatus(role) {
   return String(role?.status || role?.role_status || '').trim().toUpperCase()
 }

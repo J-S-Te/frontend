@@ -154,7 +154,3 @@ export function groupPositionsByOrganization(positions = [], organizations = [],
   return flattenPositionOrganizationTree(buildPositionOrganizationTree(positions, organizations, keyword))
     .filter((node) => node.positions.length > 0)
 }
-
-export function groupedPositionCount(groups = []) {
-  return groups.reduce((total, group) => total + (group.positions?.length || 0), 0)
-}

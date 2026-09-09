@@ -209,7 +209,3 @@ export const createDunningPolicy = (payload) =>
   });
 export const listDunningCases = () => request("/dunning/cases");
 export const listDunningActions = () => request("/dunning/actions");
-export function logoutSettlement() {
-  clearSettlementSessionCache();
-  window.location.assign(`${PUBLIC_PATH_PREFIX}/auth/logout`);
-}

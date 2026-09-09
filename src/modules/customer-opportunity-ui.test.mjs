@@ -409,7 +409,7 @@ test('商机附件只展示后端扫描状态并在能力未配置时失败关�
   assert.deepEqual(requests.map(({ url }) => url), ['/customer-opportunity/api/v1/opportunities/7/attachment-capabilities', '/customer-opportunity/api/v1/opportunities/7/attachments'])
   assert.match(view, /opportunity\.attachment\.read/)
   assert.match(view, /upload_available/)
-  assert.match(view, /扫描通过前不能下载/)
+  assert.match(view, /文件校验通过前不能下载/)
   assert.match(view, /item\.scan_status !== 'CLEAN'/)
 	assert.match(view, /flow\.session\.upload_mode === 'INTERNAL'/)
 	assert.match(view, /uploadOpportunityAttachmentContent\(opportunityID, flow\.session\.attachment\.id, file\)/)
@@ -727,23 +727,28 @@ test('CM-001 敏感联系方式不回填脱敏值且集合更新刷新客户版�
 test('CM-001 Excel 导入权限、三阶段和失败关闭语义已接入', () => {
   assert.match(view, /customer\.import/)
   assert.match(view, /v-if="canImportCustomers"[^>]*@click="openCustomerImport"/)
-  assert.match(view, /服务端先执行病毒扫描/)
+  assert.match(view, /服务端先执行文件格式和内容结构校验/)
   assert.match(view, /浏览器不会读取 Excel 内容，也不会保存文件或敏感字段/)
   for (const field of ['total_rows', 'importable_rows', 'warning_rows', 'error_rows', 'succeeded_rows', 'failed_rows', 'skipped_rows']) assert.match(view, new RegExp(field))
   assert.match(view, /Number\(customerImportPreview\.importable_rows\) === 0/)
   assert.match(view, /CRM_CUSTOMER_IMPORT_SCANNER_UNAVAILABLE/)
   assert.match(view, /预检已过期或状态发生变化，请重新上传文件预检/)
+  assert.match(view, /填写示例/)
+  assert.match(view, /customerImportTemplateColumns/)
+  assert.match(view, /下载 \.xlsx 示例文件/)
+  assert.match(view, /downloadCustomerImportExample/)
   assert.match(view, /URL\.createObjectURL\(blob\)/)
   assert.match(view, /URL\.revokeObjectURL\(objectURL\)/)
   assert.doesNotMatch(view, /FileReader|readAsArrayBuffer|xlsx\.read|localStorage|sessionStorage|v-html/)
 })
 
-test('CM-001 Excel 导入 API 严格使用真实 multipart、版本提交和 CSV 路由', async (t) => {
+test('CM-001 Excel 导入 API 严格使用真实 multipart、模板下载、版本提交和 CSV 路由', async (t) => {
   const originalFetch = globalThis.fetch
   t.after(() => { globalThis.fetch = originalFetch })
   const requests = []
   globalThis.fetch = async (url, options = {}) => {
     requests.push({ url, options })
+    if (url.endsWith('/template')) return new Response('xlsx-template', { status: 200, headers: { 'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'content-disposition': 'attachment; filename="customer-import-template.xlsx"' } })
     if (url.endsWith('/errors')) return new Response('row,status\n2,ERROR', { status: 200, headers: { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': 'attachment; filename="customer-import-JOB-1-errors.csv"' } })
     return jsonResponse(url.endsWith('/commit') ? { job_no: 'JOB-1', status: 'COMPLETED', version: 2, rows: [] } : { job_no: 'JOB-1', status: 'PREVIEWED', version: 1, rows: [] }, url.endsWith('/preview') ? 201 : 200)
   }
@@ -751,10 +756,12 @@ test('CM-001 Excel 导入 API 严格使用真实 multipart、版本提交和 CSV
   await customer.previewCustomerImport({ file, reason: '批量录入' })
   await customer.commitCustomerImport('JOB-1', { version: 1 })
   const errors = await customer.downloadCustomerImportErrors('JOB-1')
+  const template = await customer.downloadCustomerImportTemplate()
   assert.deepEqual(requests.map((item) => item.url), [
     '/customer-opportunity/api/v1/customers/imports/preview',
     '/customer-opportunity/api/v1/customers/imports/JOB-1/commit',
     '/customer-opportunity/api/v1/customers/imports/JOB-1/errors',
+    '/customer-opportunity/api/v1/customers/imports/template',
   ])
   assert.ok(requests[0].options.body instanceof FormData)
   assert.equal(requests[0].options.body.get('reason'), '批量录入')
@@ -763,6 +770,7 @@ test('CM-001 Excel 导入 API 严格使用真实 multipart、版本提交和 CSV
   assert.deepEqual(JSON.parse(requests[1].options.body), { version: 1 })
   assert.ok(requests[1].options.headers['Idempotency-Key'])
   assert.equal(errors.filename, 'customer-import-JOB-1-errors.csv')
+  assert.equal(template.filename, 'customer-import-template.xlsx')
 })
 
 test('客户合并调用真实路由并携带版本、原因和幂等键', async (t) => {
@@ -1146,7 +1154,10 @@ test('TS-010 关联查询调用真实路由和分页参数', async (t) => {
 
 test('TS-010 从商机发起申请锁定机会且提交后只刷新面板不改阶段', () => {
   assert.match(view, /presale\.create/)
-  assert.match(view, /v-if="canCreatePresale && selectedOpportunity\.opp_status !== 'VOID'"/)
+  assert.match(view, /const presaleEligibleOpportunityStages = new Set\(\['初步接触', '需求沟通', '方案制定', '报价', '投标'\]\)/)
+  assert.match(view, /function isPresaleEligibleOpportunity\(opportunity\)/)
+  assert.match(view, /opportunity\?\.opp_status === 'FOLLOWING'/)
+  assert.match(view, /filter\(isPresaleEligibleOpportunity\)/)
   assert.match(view, /aria-haspopup="dialog"[\s\S]*@click="openOpportunityPresaleCreate"/)
   assert.match(view, /opportunity_id: String\(selectedOpportunity\.value\.id\)/)
   assert.match(view, /class="console-modal-backdrop crm-opportunity-presale-create-backdrop"/)
@@ -1162,6 +1173,8 @@ test('TS-010 从商机发起申请锁定机会且提交后只刷新面板不改�
   assert.match(view, /submitPresale\(\{ openDetail: false, refreshList: false \}\)/)
   assert.match(view, /await loadOpportunityPresales\(1\)/)
   assert.match(view, /售前申请已提交；商机阶段保持不变/)
+  assert.match(view, /CRM_PRESALE_OPPORTUNITY_NOT_ELIGIBLE/)
+  assert.match(view, /商机阶段不会自动调整/)
   assert.doesNotMatch(view, /submitOpportunityPresale[\s\S]{0,1000}changeOpportunityStage/)
 })
 

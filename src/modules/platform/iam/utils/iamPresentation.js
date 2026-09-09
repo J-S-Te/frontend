@@ -12,10 +12,6 @@ export function effectiveAccountStatus(account, now = Date.now()) {
   return status
 }
 
-export function displayEmployment(status) {
-  return ({ ACTIVE: '在职', ON_LEAVE: '请假中', TERMINATED: '已离职' }[status] || status || '—')
-}
-
 export function displayAccountType(type) {
   return ({ HUMAN: '个人账号', SERVICE: '服务账号' }[type] || type || '—')
 }
@@ -32,10 +28,6 @@ export function displayLoginAccountType(account) {
 export function displayMembershipValidity(membership) {
   if (!membership?.effective_from && !membership?.effective_to) return '长期生效'
   return `${membership?.effective_from || '—'} ～ ${membership?.effective_to || '—'}`
-}
-
-export function displayOrgType(type) {
-  return ({ COMPANY: '主体', DEPARTMENT: '部门', TEAM: '团队' }[type] || type || '—')
 }
 
 export function displayMembershipType(type) {

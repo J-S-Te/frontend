@@ -72,29 +72,3 @@ export function previewPersonnelChange(payload) {
 export function createPersonnelChange(payload) {
   return request('/personnel-changes', { method: 'POST', body: JSON.stringify(payload) })
 }
-
-/**
- * submitPersonnelChange 将草稿异动提交到审批链路。
- * @param {string|number} id 异动单 ID。
- * @returns {Promise<object>} 流转后的异动单状态。
- * @throws {Error} 单据状态不允许提交、鉴权失败或版本冲突时抛出。
- */
-export function submitPersonnelChange(id) {
-  return request(`/personnel-changes/${encodeURIComponent(id)}/transition`, {
-    method: 'POST',
-    body: JSON.stringify({ to_status: 'PENDING_APPROVAL' }),
-  })
-}
-
-/**
- * cancelPersonnelChange 撤销待办异动，撤回后不可继续提交。
- * @param {string|number} id 异动单 ID。
- * @returns {Promise<object>} 撤回后的异动单状态。
- * @throws {Error} 单据不可取消、已审批完成或权限不足时抛出。
- */
-export function cancelPersonnelChange(id) {
-  return request(`/personnel-changes/${encodeURIComponent(id)}/transition`, {
-    method: 'POST',
-    body: JSON.stringify({ to_status: 'CANCELLED' }),
-  })
-}

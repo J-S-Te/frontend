@@ -1,4 +1,4 @@
-import { createRequest, API_BASE_URL } from '../../shared/api/request.js'
+import { createRequest } from '../../shared/api/request.js'
 import { AuthorizationError } from './authorization.js'
 
 
@@ -88,12 +88,6 @@ export function deletePositionAuthorizationTemplate(templateId, version) {
   const search = new URLSearchParams({ version: String(version) })
   return request(`/position-authorization-templates/${encodeURIComponent(templateId)}?${search.toString()}`, { method: 'DELETE' })
 }
-
-/**
- * disablePositionAuthorizationTemplate 是逻辑删除函数的兼容别名。
- * @type {typeof deletePositionAuthorizationTemplate}
- */
-export const disablePositionAuthorizationTemplate = deletePositionAuthorizationTemplate
 
 /**
  * listPositionAuthorizationTemplateAssignments 查询指定岗位已分配的授权模板。

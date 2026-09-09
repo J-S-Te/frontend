@@ -1,4 +1,4 @@
-import { createRequest, API_BASE_URL } from '../../shared/api/request.js'
+import { createRequest } from '../../shared/api/request.js'
 
 /**
  * IamError 表示 IAM 接口返回的结构化错误。
@@ -68,16 +68,6 @@ function normalize(value) {
  */
 export function listUsers({ page = 1, pageSize = 50, keyword = '', status = '' } = {}) {
   return request(`/users${pageQuery({ page, page_size: pageSize, keyword, 'filter[status]': status })}`).then(normalize)
-}
-
-/**
- * getUser 查询指定用户的详细资料。
- * @param {string} userId 用户标识。
- * @returns {Promise<Object>} 返回用户详情。
- * @throws {IamError} 用户不存在、无访问权限或 IAM 服务不可用时抛出。
- */
-export function getUser(userId) {
-  return request(`/users/${encodeURIComponent(userId)}`)
 }
 
 /**
@@ -534,70 +524,5 @@ export function createMembership({
       effective_to: effectiveTo,
       inherit_authorization: inheritAuthorization !== false,
     }),
-  })
-}
-
-/**
- * updateMembership 更新完整的任职关系及生效期。
- * @param {Object} options 任职更新参数。
- * @param {string} options.membershipId 任职关系标识。
- * @param {string} options.orgUnitId 组织标识。
- * @param {string} options.positionId 岗位标识。
- * @param {string} [options.membershipType='PRIMARY'] 任职类型。
- * @param {string|null} [options.effectiveFrom] 生效开始时间。
- * @param {string|null} [options.effectiveTo] 生效结束时间。
- * @param {boolean} [options.inheritAuthorization=true] 是否继承岗位授权模板。
- * @param {string} [options.status='ACTIVE'] 任职状态。
- * @param {number} options.version 当前乐观锁版本号。
- * @returns {Promise<Object>} 返回更新后的任职关系。
- * @throws {IamError} 任职不存在、时间范围或主任职约束无效、版本冲突时抛出。
- */
-export function updateMembership({
-  membershipId,
-  orgUnitId,
-  positionId,
-  membershipType = 'PRIMARY',
-  effectiveFrom = null,
-  effectiveTo = null,
-  inheritAuthorization = true,
-  status = 'ACTIVE',
-  version,
-}) {
-  return request(`/memberships/${encodeURIComponent(membershipId)}`, {
-    method: 'PATCH',
-    body: JSON.stringify({
-      org_unit_id: orgUnitId,
-      position_id: positionId,
-      membership_type: membershipType,
-      effective_from: effectiveFrom,
-      effective_to: effectiveTo,
-      inherit_authorization: inheritAuthorization !== false,
-      status,
-      version,
-    }),
-  })
-}
-
-/**
- * updateMembershipStatus 更新任职状态，并可选调整岗位授权继承。
- *
- * 省略 inheritAuthorization 时保留已有继承设置，不会静默重新开启。
- *
- * @param {Object} options 状态更新参数。
- * @param {string} options.membershipId 任职关系标识。
- * @param {string} options.status 目标状态。
- * @param {number} options.version 当前乐观锁版本号。
- * @param {boolean} [options.inheritAuthorization] 是否继承岗位授权。
- * @returns {Promise<Object>} 返回更新后的任职关系。
- * @throws {IamError} 任职不存在、状态转换无效、版本冲突或操作无权限时抛出。
- */
-export function updateMembershipStatus({ membershipId, status, version, inheritAuthorization }) {
-  const payload = { status, version }
-  if (inheritAuthorization !== undefined) {
-    payload.inherit_authorization = inheritAuthorization !== false
-  }
-  return request(`/memberships/${encodeURIComponent(membershipId)}`, {
-    method: 'PATCH',
-    body: JSON.stringify(payload),
   })
 }

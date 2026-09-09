@@ -3,7 +3,6 @@ import test from 'node:test'
 import {
   buildEmployeeOnboardingPayload,
   defaultEmployeeOnboardingForm,
-  positionOptionsForOrganization,
 } from './employeeOnboarding.js'
 
 test('employee onboarding defaults to a one-day local account and an inheriting primary membership', () => {
@@ -72,14 +71,4 @@ test('employee onboarding payload mirrors account and membership dates for the a
     effective_to: '2026-08-31',
     inherit_authorization: true,
   })
-})
-
-test('position filtering keeps the organization and selected position aligned', () => {
-  assert.deepEqual(
-    positionOptionsForOrganization([
-      { position_id: 'p1', org_unit_id: 'org-a' },
-      { position_id: 'p2', org_unit_id: 'org-b' },
-    ], 'org-a').map((item) => item.position_id),
-    ['p1'],
-  )
 })
