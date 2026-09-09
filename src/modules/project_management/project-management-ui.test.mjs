@@ -86,3 +86,11 @@ test('新建对话框限制高度并可滚动，内容不会被视口裁切', ()
   assert.match(styles, /\.pm-dialog \{[^}]*max-height: calc\(100vh - 32px\);/)
   assert.match(styles, /\.pm-dialog > \.pm-form \{[^}]*overflow-y: auto;/)
 })
+
+test('服务项操作台的团队负责人从基础平台人员目录选择而不是填写用户 ID', () => {
+  assert.match(source, /listPersonnel\(\{/)
+  assert.match(source, /const personnelOptions = computed/)
+  assert.match(source, /<select v-model="operationForm\.teamLeadID"/)
+  assert.match(source, /<select v-model="operationForm\.projectManagerID"/)
+  assert.doesNotMatch(source, /v-model\.trim="operationForm\.teamLeadID"/)
+})
