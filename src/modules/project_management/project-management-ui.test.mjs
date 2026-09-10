@@ -54,24 +54,95 @@ test('项目系统侧边栏返回门户，用户控件负责撤销应用会话',
   assert.match(source, /aria-label="退出应用系统"/)
 })
 
-test('项目管理页面对齐合同系统 UniLab UI 设计规范', () => {
-  for (const token of [
-    '--pm-ink: #0f172a',
-    '--pm-body: #475569',
-    '--pm-muted: #64748b',
-    '--pm-blue: #2563eb',
-    '--pm-green-text: #15803d',
-    '--pm-amber-text: #b45309',
-    '--pm-red-text: #b91c1c',
-  ]) {
-    assert.match(styles, new RegExp(token))
+test('项目管理页面严格遵守 UniLab v1.0 设计规范', () => {
+  const css = styles.replace(/\/\*[\s\S]*?\*\//g, '')
+  const declarations = (property) =>
+    [...css.matchAll(new RegExp(`(?<![-\\w])${property}\\s*:\\s*([^;}]+)`, 'g'))].map((match) => match[1].trim())
+  const ruleBody = (selector) => {
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const match = css.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`))
+    assert.ok(match, `missing rule for ${selector}`)
+    return match[1]
   }
-  assert.match(styles, /\.pm-sidebar \{[\s\S]*?width: 248px;[\s\S]*?background: #0f172a;/)
-  assert.match(styles, /\.pm-button \{[\s\S]*?min-height: 38px;[\s\S]*?font-size: 13\.5px;/)
-  assert.match(styles, /\.pm-table \{ font-size: 13\.5px; \}/)
-  assert.match(styles, /\.pm-table th \{[\s\S]*?font-size: 12\.5px;/)
-  assert.match(styles, /:focus-visible \{[\s\S]*?outline: 2px solid var\(--pm-blue\)/)
-  assert.match(styles, /@media \(prefers-reduced-motion: reduce\)/)
+
+  // §1 令牌层：规范取值必须原样落在令牌层，组件只引用令牌（换肤只改这一层）。
+  const specTokens = {
+    '--pm-primary': '#2563eb', '--pm-primary-d': '#1d4ed8',
+    '--pm-primary-soft': '#eff6ff', '--pm-primary-border': '#bfdbfe',
+    '--pm-ink': '#0f172a', '--pm-body': '#475569', '--pm-muted': '#64748b', '--pm-faint': '#94a3b8',
+    '--pm-content': '#f1f5f9', '--pm-sunken': '#f8fafc',
+    '--pm-line': '#e2e8f0', '--pm-line-soft': '#edf0f5', '--pm-line-strong': '#cbd5e1',
+    '--pm-sidebar': '#0f172a', '--pm-sidebar-hover': '#1e293b', '--pm-sidebar-active': '#1e293b',
+    '--pm-sidebar-text': '#cbd5e1', '--pm-sidebar-label': '#94a3b8', '--pm-sidebar-dot': '#334155',
+    '--pm-green': '#16a34a', '--pm-green-soft': '#ecfdf5', '--pm-green-text': '#15803d',
+    '--pm-amber': '#d97706', '--pm-amber-soft': '#fef3c7', '--pm-amber-text': '#b45309',
+    '--pm-red': '#dc2626', '--pm-red-soft': '#fef2f2', '--pm-red-text': '#b91c1c',
+    '--pm-sky': '#0ea5e9', '--pm-sky-soft': '#e0f2fe', '--pm-sky-text': '#0369a1',
+    '--pm-violet': '#8b5cf6', '--pm-violet-soft': '#f5f3ff', '--pm-violet-text': '#6d28d9',
+    '--pm-gray': '#64748b', '--pm-gray-soft': '#f1f5f9', '--pm-gray-text': '#475569',
+    '--pm-blue-text': '#1d4ed8',
+    '--pm-fs-display': '28px', '--pm-fs-title': '22px', '--pm-fs-subtitle': '16px',
+    '--pm-fs-card': '15px', '--pm-fs-base': '14px', '--pm-fs-ui': '13.5px', '--pm-fs-sm': '13px',
+    '--pm-fs-label': '12.5px', '--pm-fs-hint': '12px', '--pm-fs-micro': '11.5px', '--pm-fs-nano': '11px',
+    '--pm-w-sidebar': '248px', '--pm-h-topbar': '64px',
+    '--pm-w-drawer': '420px', '--pm-w-modal': '560px',
+    '--pm-h-control': '32px', '--pm-h-button': '38px',
+    '--pm-r-xs': '6px', '--pm-r-sm': '8px', '--pm-r-md': '10px',
+    '--pm-r-lg': '12px', '--pm-r-xl': '14px', '--pm-r-full': '999px',
+    '--pm-z-sticky': '20', '--pm-z-dropdown': '30', '--pm-z-mask': '40',
+    '--pm-z-drawer': '41', '--pm-z-modal': '50', '--pm-z-toast': '60',
+  }
+  for (const [token, value] of Object.entries(specTokens)) {
+    assert.match(css, new RegExp(`${token}:\\s*${value};`), `${token} must be ${value}`)
+  }
+
+  // §3~§5 骨架：侧栏 248 平涂深色、顶栏 64、内容区 24 内边距。
+  const sidebar = ruleBody('.pm-sidebar')
+  assert.match(sidebar, /width: var\(--pm-w-sidebar\);/)
+  assert.match(sidebar, /background: var\(--pm-sidebar\);/)
+  assert.match(ruleBody('.pm-topbar'), /min-height: var\(--pm-h-topbar\);/)
+  assert.match(ruleBody('.pm-page'), /padding: var\(--pm-pad-page\)/)
+  assert.match(ruleBody('.pm-page-head h1'), /font-size: var\(--pm-fs-title\);/)
+
+  // §6 按钮：38 高、13.5 字号、8 圆角。
+  const button = ruleBody('.pm-button')
+  assert.match(button, /min-height: var\(--pm-h-button\);/)
+  assert.match(button, /font-size: var\(--pm-fs-ui\);/)
+  assert.match(button, /border-radius: var\(--pm-r-sm\);/)
+
+  // §9 表格：正文 13.5、表头 12.5/600 + sunken 底。
+  assert.match(ruleBody('.pm-table'), /font-size: var\(--pm-fs-ui\);/)
+  const tableHead = ruleBody('.pm-table th')
+  assert.match(tableHead, /font-size: var\(--pm-fs-label\);/)
+  assert.match(tableHead, /font-weight: var\(--pm-fw-semibold\);/)
+  assert.match(tableHead, /background: var\(--pm-sunken\);/)
+
+  // §2 无障碍底线：焦点环、动效降级、屏幕阅读器文本、触控目标。
+  assert.match(css, /:focus-visible \{[\s\S]*?outline: 2px solid var\(--pm-primary\);/)
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)/)
+  assert.match(css, /@media \(pointer: coarse\)/)
+  assert.ok(ruleBody('.pm-shell .sr-only'), 'screen-reader-only helper is required')
+
+  // 禁止新增字号档位：所有 font-size 必须引用令牌。
+  for (const value of declarations('font-size')) {
+    assert.match(value, /^var\(--pm-fs-[a-z]+\)$/, `font-size ${value} is outside the UniLab type scale`)
+  }
+
+  // 禁止第七种色相：所有十六进制颜色必须来自规范调色板。
+  const palette = new Set(
+    Object.values(specTokens)
+      .filter((value) => value.startsWith('#'))
+      .map((value) => value.toLowerCase())
+      .concat(['#ffffff', '#fff']),
+  )
+  for (const [hex] of css.matchAll(/#[0-9a-fA-F]{3,8}\b/g)) {
+    assert.ok(palette.has(hex.toLowerCase()), `color ${hex} is not part of the UniLab palette`)
+  }
+
+  // 层级必须引用令牌，避免出现规范之外的层级。
+  for (const value of declarations('z-index')) {
+    assert.match(value, /^var\(--pm-z-[a-z]+\)$/, `z-index ${value} is outside the UniLab scale`)
+  }
 })
 
 test('关联服务项在新建对话框中占满整行，输入框不会被压窄截断', () => {
@@ -142,7 +213,7 @@ test('资质与能力管理提供新建、CSV 导入导出与类型状态筛选'
   assert.match(source, /v-model="capabilityTypeFilter"/)
   assert.match(source, /v-model="capabilityStatusFilter"/)
   assert.match(source, /pm-file-input/)
-  assert.match(styles, /\.pm-panel-actions \{[\s\S]*?gap: 8px;/)
+  assert.match(styles, /\.pm-panel-actions \{[\s\S]*?gap: var\(--pm-sp-2\);/)
 })
 
 test('资质与能力管理的人员/设备编号由系统按类型自动生成', () => {
@@ -199,9 +270,81 @@ test('服务项操作台使用可搜索的服务项卡片选择器而不是原�
   assert.match(styles, /\.pm-picker-card \{/)
   assert.match(styles, /\.pm-picker-card\.selected \{/)
   assert.match(styles, /\.pm-picker-search \{/)
-  // 搜索图标必须被约束尺寸：否则 SVG 会撑满整行，操作台会变成一个巨大的圆圈。
-  assert.match(styles, /\.pm-picker-search svg \{[^}]*width: 14px; height: 14px;/)
-  // 选择器直接放在无内边距的 .pm-panel 里，必须自带内边距。
-  assert.match(styles, /\.pm-picker \{[^}]*padding: 16px 20px;/)
+  // 搜索图标必须被显式约束尺寸：否则 SVG 会撑满整行，操作台会变成一个巨大的圆圈。
+  // 只锁定“同时声明了宽高”这一不变量，具体像素值由设计令牌决定。
+  assert.match(styles, /\.pm-picker-search svg \{[^}]*width: \d+px; height: \d+px;/)
+  // 选择器直接放在无内边距的 .pm-panel 里，必须自带内边距（规范间距令牌 = 16px 20px）。
+  assert.match(styles, /\.pm-picker \{[^}]*padding: var\(--pm-sp-4\) var\(--pm-sp-5\);/)
   assert.doesNotMatch(styles, /\.pm-selection-list \{/)
+})
+
+test('项目管理系统的文本/底色组合满足 WCAG 2.1 AA 对比度', () => {
+  const luminance = (hex) => {
+    const channels = [1, 3, 5].map((offset) => parseInt(hex.slice(offset, offset + 2), 16) / 255)
+    const [r, g, b] = channels.map((value) => (value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4))
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+  }
+  const contrast = (foreground, background) => {
+    const [high, low] = [luminance(foreground), luminance(background)].sort((a, b) => b - a)
+    return (high + 0.05) / (low + 0.05)
+  }
+
+  // 正文与标题必须在本模块出现的每一种表面上都达标。
+  const surfaces = {
+    '--pm-card': '#ffffff',
+    '--pm-content': '#f1f5f9',
+    '--pm-sunken': '#f8fafc',
+    '--pm-primary-soft': '#eff6ff',
+    '--pm-green-soft': '#ecfdf5',
+    '--pm-amber-soft': '#fef3c7',
+    '--pm-red-soft': '#fef2f2',
+    '--pm-sky-soft': '#e0f2fe',
+    '--pm-violet-soft': '#f5f3ff',
+  }
+  for (const [surfaceName, surface] of Object.entries(surfaces)) {
+    for (const [inkName, ink] of Object.entries({ '--pm-ink': '#0f172a', '--pm-body': '#475569' })) {
+      assert.ok(
+        contrast(ink, surface) >= 4.5,
+        `${inkName} on ${surfaceName} is ${contrast(ink, surface).toFixed(2)}:1`,
+      )
+    }
+  }
+
+  // --pm-muted 在白底与下沉底上达标；在带色浅底上仅 4.2~4.4:1，不得承载正文。
+  assert.ok(contrast('#64748b', '#ffffff') >= 4.5)
+  assert.ok(contrast('#64748b', '#f8fafc') >= 4.5)
+  for (const tinted of ['#f1f5f9', '#eff6ff', '#fef3c7', '#fef2f2', '#e0f2fe', '#f5f3ff']) {
+    assert.ok(contrast('#64748b', tinted) < 4.5, `--pm-muted unexpectedly passes on ${tinted}`)
+  }
+  // 因此页面说明、抽屉导语、来源卡说明与选择器副标题必须使用 --pm-body。
+  for (const selector of [
+    '.pm-page-head > div > p:last-child',
+    '.pm-drawer-hero p',
+    '.pm-source-card p',
+    '.pm-picker-body small',
+  ]) {
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const body = styles.replace(/\/\*[\s\S]*?\*\//g, '').match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`))
+    assert.ok(body, `missing rule for ${selector}`)
+    assert.match(body[1], /color: var\(--pm-body\);/)
+  }
+
+  // 小字号语义文本一律使用 -text 安全变体，并在各自的 soft 底上达标。
+  for (const [text, soft] of [
+    ['--pm-green-text', '--pm-green-soft'],
+    ['--pm-amber-text', '--pm-amber-soft'],
+    ['--pm-red-text', '--pm-red-soft'],
+    ['--pm-sky-text', '--pm-sky-soft'],
+    ['--pm-violet-text', '--pm-violet-soft'],
+    ['--pm-blue-text', '--pm-primary-soft'],
+  ]) {
+    const value = (name) => styles.match(new RegExp(`${name}:\\s*(#[0-9a-f]{6});`))[1]
+    assert.ok(
+      contrast(value(text), value(soft)) >= 4.5,
+      `${text} on ${soft} is ${contrast(value(text), value(soft)).toFixed(2)}:1`,
+    )
+  }
+
+  // 主按钮白字必须达标。
+  assert.ok(contrast('#ffffff', '#2563eb') >= 4.5)
 })
