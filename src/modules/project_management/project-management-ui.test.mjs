@@ -92,18 +92,24 @@ test('服务项操作台的团队负责人从基础平台人员目录选择而�
   assert.match(source, /const personnelOptions = computed/)
   assert.match(source, /<select v-model="operationForm\.teamLeadID"/)
   assert.match(source, /<select v-model="operationForm\.projectManagerID"/)
-  assert.match(source, /engineerIDSet\.has\(option\.id\)/)
-  assert.match(source, /toggleEngineer\(option\.id\)/)
+  assert.match(source, /<select v-model="engineerSelection" multiple/)
+  assert.match(source, /const engineerSelection = computed/)
   assert.doesNotMatch(source, /v-model\.trim="operationForm\.teamLeadID"/)
   assert.doesNotMatch(source, /placeholder="至少一个用户 ID"/)
 })
 
-test('服务项操作台的设备从设备能力清单勾选而不是填写设备 ID', () => {
+test('服务项操作台的工程师与设备改为下拉多选，能力码按所选设备自动汇总', () => {
   assert.match(source, /const equipmentOptions = computed/)
-  assert.match(source, /equipmentIDSet\.has\(option\.id\)/)
-  assert.match(source, /toggleEquipment\(option\.id\)/)
+  assert.match(source, /const equipmentSelection = computed/)
+  assert.match(source, /function capabilityCodesForEquipment\(/)
+  assert.match(source, /const capabilityCodeList = computed/)
   assert.match(source, /item\.status !== 'DISABLED'/)
+  assert.match(source, /<select v-model="equipmentSelection" multiple/)
+  assert.match(source, /选择设备后自动汇总，无需填写/)
   assert.doesNotMatch(source, /v-model\.trim="operationForm\.equipmentIDs"/)
+  assert.doesNotMatch(source, /v-model\.trim="operationForm\.requiredCodes"/)
+  assert.doesNotMatch(source, /toggleEquipment\(/)
+  assert.doesNotMatch(source, /toggleEngineer\(/)
 })
 
 test('操作台各区块的查看按钮真实打开详情抽屉而不是只提示已打开', () => {

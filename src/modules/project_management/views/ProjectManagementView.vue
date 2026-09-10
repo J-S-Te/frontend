@@ -314,33 +314,38 @@ const personnelOptions = computed(() => {
   }
   return options
 })
-// 工程师是多选：把勾选结果写回逗号分隔的 engineerIDs，保持后端载荷不变。
-const engineerIDSet = computed(() => new Set(selectedIDs(operationForm.value.engineerIDs)))
-function toggleEngineer(id) {
-  const selected = new Set(selectedIDs(operationForm.value.engineerIDs))
-  if (selected.has(id)) selected.delete(id)
-  else selected.add(id)
-  operationForm.value.engineerIDs = [...selected].join(',')
+// 工程师与设备改为下拉多选：选中结果仍写回逗号分隔的 engineerIDs/equipmentIDs，保持后端载荷不变。
+const engineerSelection = computed({
+  get: () => selectedIDs(operationForm.value.engineerIDs),
+  set: (values) => { operationForm.value.engineerIDs = values.join(',') },
+})
+const equipmentByID = computed(() => new Map(equipment.value.map((item) => [item.resource_id, item])))
+function capabilityCodesForEquipment(ids) {
+  const codes = new Set()
+  for (const id of ids) {
+    for (const code of equipmentByID.value.get(id)?.codes || []) codes.add(code)
+  }
+  return [...codes]
 }
-const equipmentIDSet = computed(() => new Set(selectedIDs(operationForm.value.equipmentIDs)))
+const equipmentSelection = computed({
+  get: () => selectedIDs(operationForm.value.equipmentIDs),
+  set: (values) => {
+    operationForm.value.equipmentIDs = values.join(',')
+    operationForm.value.requiredCodes = capabilityCodesForEquipment(values).join(',')
+  },
+})
 const equipmentOptions = computed(() => {
-  const byID = new Map(equipment.value.map((item) => [item.resource_id, item]))
   const options = equipment.value.filter((item) => item.status !== 'DISABLED').map((item) => ({ id: item.resource_id, name: item.resource_name || item.resource_id }))
   const known = new Set(options.map((option) => option.id))
   for (const id of selectedIDs(operationForm.value.equipmentIDs)) {
     if (!id || known.has(id)) continue
-    const item = byID.get(id)
+    const item = equipmentByID.value.get(id)
     options.push({ id, name: item ? item.resource_name || id : `${id}（当前值）` })
     known.add(id)
   }
   return options
 })
-function toggleEquipment(id) {
-  const selected = new Set(selectedIDs(operationForm.value.equipmentIDs))
-  if (selected.has(id)) selected.delete(id)
-  else selected.add(id)
-  operationForm.value.equipmentIDs = [...selected].join(',')
-}
+const capabilityCodeList = computed(() => selectedIDs(operationForm.value.requiredCodes))
 const selectedServiceItems = computed(() => serviceItems.value.filter((item) => selectedServiceItemIDs.value.includes(item.id)))
 const selectedServiceItem = computed(() => selectedServiceItems.value[0] || null)
 
@@ -1001,7 +1006,7 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
             <header><div><p class="pm-panel-kicker">REAL OPERATION</p><h2>服务项操作台</h2></div><span v-if="selectedServiceItem">当前：{{ selectedServiceItem.id }} · {{ selectedServiceItem.status }}</span></header>
             <template v-if="activeSection === 'allocation'"><div class="pm-selection-list"><label v-for="item in serviceItems" :key="item.id" class="pm-selection-row"><input type="checkbox" :checked="selectedServiceItemIDs.includes(item.id)" @change="toggleServiceItem(item)" /><span><b>{{ item.id }}</b><small>{{ item.site || '未设置场所' }} · {{ item.category || '未设置检测类别' }} · {{ item.status }}</small></span></label><div v-if="!serviceItems.length" class="pm-empty-mini">暂无可分配服务项</div></div><p class="pm-form-hint">可同时选择多个服务项，批量分配团队负责人或执行团队。</p></template><label v-else><span>选择服务项</span><select :value="selectedServiceItem?.id || ''" @change="selectServiceItem(serviceItems.find((item) => item.id === $event.target.value))"><option value="">请选择服务项</option><option v-for="item in serviceItems" :key="item.id" :value="item.id">{{ item.id }} · {{ item.site }} · {{ item.status }}</option></select></label>
             <div v-if="selectedServiceItem" class="pm-form pm-operation-form">
-              <template v-if="['allocation', 'inbox', 'assignments'].includes(activeSection)"><div class="pm-personnel-search"><label><span>查找平台人员</span><input v-model.trim="personnelKeyword" placeholder="输入姓名关键字" @keydown.enter.prevent="loadPersonnel" /></label><button type="button" class="pm-button" :disabled="personnelLoading" @click="loadPersonnel">{{ personnelLoading ? '查询中…' : '查询' }}</button></div><p v-if="personnelError" class="pm-form-hint" role="alert">{{ personnelError }}</p><label><span>团队负责人 <em>*</em></span><select v-model="operationForm.teamLeadID" :disabled="personnelLoading" required><option value="">请选择团队负责人</option><option v-for="option in personnelOptions" :key="option.id" :value="option.id">{{ option.name }}</option></select></label><template v-if="canExecutionAssign"><label><span>项目经理 <em>*</em></span><select v-model="operationForm.projectManagerID" :disabled="personnelLoading" required><option value="">请选择项目经理</option><option v-for="option in personnelOptions" :key="option.id" :value="option.id">{{ option.name }}</option></select></label><div class="pm-personnel-checklist-field"><span>工程师 <em>*</em></span><div class="pm-personnel-checklist"><label v-for="option in personnelOptions" :key="option.id" class="pm-personnel-check"><input type="checkbox" :checked="engineerIDSet.has(option.id)" @change="toggleEngineer(option.id)" /><span>{{ option.name }}</span></label><p v-if="!personnelOptions.length" class="pm-empty-mini">暂无可选人员</p></div></div><label><span>设备</span><div class="pm-personnel-checklist"><label v-for="option in equipmentOptions" :key="option.id" class="pm-personnel-check"><input type="checkbox" :checked="equipmentIDSet.has(option.id)" @change="toggleEquipment(option.id)" /><span>{{ option.name }}</span></label><p v-if="!equipmentOptions.length" class="pm-empty-mini">暂无可选设备</p></div></label><label><span>能力码</span><input v-model.trim="operationForm.requiredCodes" placeholder="可选，逗号分隔" /></label></template><button class="pm-button primary" :disabled="saving" @click="runOperation('allocation')">{{ saving ? '提交中…' : canExecutionAssign ? '保存分配并校验能力' : '分配团队负责人' }}</button></template>
+              <template v-if="['allocation', 'inbox', 'assignments'].includes(activeSection)"><div class="pm-personnel-search"><label><span>查找平台人员</span><input v-model.trim="personnelKeyword" placeholder="输入姓名关键字" @keydown.enter.prevent="loadPersonnel" /></label><button type="button" class="pm-button" :disabled="personnelLoading" @click="loadPersonnel">{{ personnelLoading ? '查询中…' : '查询' }}</button></div><p v-if="personnelError" class="pm-form-hint" role="alert">{{ personnelError }}</p><label><span>团队负责人 <em>*</em></span><select v-model="operationForm.teamLeadID" :disabled="personnelLoading" required><option value="">请选择团队负责人</option><option v-for="option in personnelOptions" :key="option.id" :value="option.id">{{ option.name }}</option></select></label><template v-if="canExecutionAssign"><label><span>项目经理 <em>*</em></span><select v-model="operationForm.projectManagerID" :disabled="personnelLoading" required><option value="">请选择项目经理</option><option v-for="option in personnelOptions" :key="option.id" :value="option.id">{{ option.name }}</option></select></label><label><span>工程师 <em>*</em></span><select v-model="engineerSelection" multiple class="pm-multi-select"><option v-for="option in personnelOptions" :key="option.id" :value="option.id">{{ option.name }}</option></select><small class="pm-multi-hint">按住 ⌘ / Ctrl 可多选</small></label><label><span>设备</span><select v-model="equipmentSelection" multiple class="pm-multi-select"><option v-for="option in equipmentOptions" :key="option.id" :value="option.id">{{ option.name }}</option></select><small class="pm-multi-hint">按住 ⌘ / Ctrl 可多选</small></label><label><span>能力码 <em>自动</em></span><div class="pm-code-chips"><button v-for="code in capabilityCodeList" :key="code" type="button" class="pm-code-chip" @click.prevent>{{ code }}</button><p v-if="!capabilityCodeList.length" class="pm-empty-mini">选择设备后自动汇总，无需填写</p></div></label></template><button class="pm-button primary" :disabled="saving" @click="runOperation('allocation')">{{ saving ? '提交中…' : canExecutionAssign ? '保存分配并校验能力' : '分配团队负责人' }}</button></template>
               <template v-else-if="['planning', 'methods'].includes(activeSection)"><label><span>计划开始 <em>*</em></span><input v-model.trim="operationForm.plannedStart" type="datetime-local" /></label><label><span>计划结束 <em>*</em></span><input v-model.trim="operationForm.plannedEnd" type="datetime-local" /></label><label><span>现场计划 <em>*</em></span><textarea v-model.trim="operationForm.sitePlan" rows="3" placeholder="现场实施步骤和窗口"></textarea></label><label v-if="selectedServiceItem.test_mode === 'PENETRATION'"><span>渗透测试专项计划 <em>*</em></span><textarea v-model.trim="operationForm.penetrationTestPlan" rows="3"></textarea></label><button class="pm-button primary" :disabled="saving" @click="runOperation('planning')">发布实施计划</button></template>
               <template v-else-if="activeSection === 'preparation'"><label><span>设备申领单 <em>*</em></span><input v-model.trim="operationForm.equipmentRequestID" /></label><label><span>行程预订单 <em>*</em></span><input v-model.trim="operationForm.travelRequestID" /></label><label><span>备注</span><textarea v-model.trim="operationForm.comment" rows="3"></textarea></label><button class="pm-button primary" :disabled="saving" @click="runOperation('preparation')">发起实施准备</button></template>
               <template v-else-if="activeSection === 'exceptions'"><label><span>偏离描述</span><textarea v-model.trim="operationForm.deviationDescription" rows="3" placeholder="选择服务项后填写偏离内容"></textarea></label><label><span>严重度</span><select v-model="operationForm.severity"><option value="LOW">低</option><option value="MEDIUM">中</option><option value="HIGH">高</option></select></label><button class="pm-button primary" :disabled="saving" @click="runOperation('exception-report')">上报偏离</button><label><span>评审偏离 ID</span><input v-model.trim="operationForm.deviationID" placeholder="DV-..." /></label><label><span>评审决定</span><select v-model="operationForm.decision"><option value="RELEASE">放行</option><option value="RETEST">重测</option><option value="TERMINATE">终止</option></select></label><button class="pm-button" :disabled="saving" @click="runOperation('exception-review')">提交偏离评审</button></template>
