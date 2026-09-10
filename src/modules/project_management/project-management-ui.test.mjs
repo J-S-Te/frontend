@@ -199,5 +199,9 @@ test('服务项操作台使用可搜索的服务项卡片选择器而不是原�
   assert.match(styles, /\.pm-picker-card \{/)
   assert.match(styles, /\.pm-picker-card\.selected \{/)
   assert.match(styles, /\.pm-picker-search \{/)
+  // 搜索图标必须被约束尺寸：否则 SVG 会撑满整行，操作台会变成一个巨大的圆圈。
+  assert.match(styles, /\.pm-picker-search svg \{[^}]*width: 14px; height: 14px;/)
+  // 选择器直接放在无内边距的 .pm-panel 里，必须自带内边距。
+  assert.match(styles, /\.pm-picker \{[^}]*padding: 16px 20px;/)
   assert.doesNotMatch(styles, /\.pm-selection-list \{/)
 })
