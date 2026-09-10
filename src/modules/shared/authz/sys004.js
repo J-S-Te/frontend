@@ -28,7 +28,9 @@ export const CONTRACT_SECTION_PERMISSIONS = Object.freeze({
   templates: ['contract_template.read', 'contract_template.manage'],
   approvals: ['approval.view', 'approval.process', 'contract.create'],
   rules: ['approval.view', 'approval_rule.manage'],
-  signing: ['contract.read', 'contract.approved.read'],
+  // 签署台账涉及盖章件与签署状态，属于签署管理职责：只有 contract.signing.manage 才展示。
+  // 仅持有 contract.approved.read 的跨系统角色（例如项目侧「合同导入只读」）不应看到该菜单。
+  signing: ['contract.signing.manage'],
   reports: ['dashboard'],
 })
 

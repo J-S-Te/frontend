@@ -28,10 +28,22 @@ test('contract role codes have Chinese display names', () => {
 })
 
 test('contract specialist can only enter the approved-contract signing ledger', () => {
-  const specialist = { roles: ['contract_specialist'], permissions: ['contract.approved.read', 'contract.document.download', 'contract.stamped_pdf.upload'] }
+  // contract_specialist 实际持有 contract.signing.manage（见 permission-manifest.yaml），
+  // 签署台账由该权限把守，因此夹具必须带上它。
+  const specialist = { roles: ['contract_specialist'], permissions: ['contract.approved.read', 'contract.document.download', 'contract.stamped_pdf.upload', 'contract.signing.manage'] }
   assert.equal(canAccessContractSection(specialist, 'signing'), true)
   for (const section of ['dashboard', 'contracts', 'approvals', 'rules', 'reports']) {
     assert.equal(canAccessContractSection(specialist, section), false, section)
+  }
+})
+
+test('读取已审批合同不足以进入签署台账', () => {
+  // 项目侧「合同导入只读」只需要读已审批合同；签署台账涉及盖章件与签署状态，
+  // 必须由 contract.signing.manage 单独把守，不能被读权限顺带放开。
+  const importer = { roles: ['contract_importer'], permissions: ['contract.approved.read'] }
+  assert.equal(canAccessContractSection(importer, 'signing'), false)
+  for (const section of ['dashboard', 'customers', 'contracts', 'templates', 'approvals', 'rules', 'reports']) {
+    assert.equal(canAccessContractSection(importer, section), false, section)
   }
 })
 
