@@ -14,6 +14,9 @@ import {
   getProjectNavigation,
   listProjects,
   listCapabilities,
+  upsertCapability,
+  importCapabilities,
+  exportCapabilities,
   listEquipment,
   upsertEquipment,
   listDeliveryEvents,
@@ -189,6 +192,13 @@ function resetProjectFilters() { keyword.value = ''; statusFilter.value = ''; ca
 const serviceItems = ref([])
 const deliveryEvents = ref([])
 const capabilities = ref([])
+const capabilityTypeFilter = ref('')
+const capabilityStatusFilter = ref('')
+const capabilityDialog = ref(null)
+const importResult = ref(null)
+const qualificationFileInput = ref(null)
+const filteredCapabilities = computed(() => capabilities.value.filter((item) => (!capabilityTypeFilter.value || item.resource_type === capabilityTypeFilter.value) && (!capabilityStatusFilter.value || item.status === capabilityStatusFilter.value)))
+const canManageResource = computed(() => Array.isArray(session.value?.permissions) && session.value.permissions.includes('project.resource.manage'))
 const selectedServiceItemIDs = ref([])
 const operationForm = ref({ teamLeadID: '', projectManagerID: '', engineerIDs: '', equipmentIDs: '', requiredCodes: '', plannedStart: '', plannedEnd: '', sitePlan: '', penetrationTestPlan: '', equipmentRequestID: '', travelRequestID: '', latitude: '', longitude: '', rawData: '', environment: '', deviationDescription: '', severity: 'MEDIUM', decision: 'RELEASE', comment: '' })
 const personnel = ref([])
@@ -459,6 +469,62 @@ async function saveEquipment() {
     showToast('设备信息已保存')
   } catch (error) { showToast(error?.message || '设备信息保存失败') }
   finally { saving.value = false }
+}
+
+function openCapabilityDialog(item) {
+  capabilityDialog.value = item
+    ? { resource_type: item.resource_type, resource_id: item.resource_id, resource_name: item.resource_name, codes: (item.codes || []).join(','), valid_from: item.valid_from?.slice(0, 10) || '', valid_until: item.valid_until?.slice(0, 10) || '', status: item.status || 'ACTIVE' }
+    : { resource_type: 'PERSON', resource_id: '', resource_name: '', codes: '', valid_from: '', valid_until: '', status: 'ACTIVE' }
+}
+
+async function saveCapability() {
+  if (!capabilityDialog.value) return
+  saving.value = true
+  try {
+    const form = capabilityDialog.value
+    const saved = await upsertCapability({
+      resource_type: form.resource_type,
+      resource_id: form.resource_id,
+      resource_name: form.resource_name,
+      codes: selectedIDs(form.codes),
+      valid_from: form.valid_from ? new Date(form.valid_from).toISOString() : '',
+      valid_until: form.valid_until ? new Date(form.valid_until).toISOString() : '',
+      status: form.status,
+    })
+    capabilities.value = [saved, ...capabilities.value.filter((row) => !(row.resource_type === saved.resource_type && row.resource_id === saved.resource_id))]
+    capabilityDialog.value = null
+    showToast('资质 / 能力已保存')
+  } catch (error) { showToast(error?.message || '资质保存失败') }
+  finally { saving.value = false }
+}
+
+async function importQualificationFile(event) {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file) return
+  saving.value = true
+  try {
+    importResult.value = await importCapabilities(file)
+    capabilities.value = await listCapabilities()
+    if (importResult.value.skipped > 0) showToast(`导入完成：成功 ${importResult.value.imported} 条，跳过 ${importResult.value.skipped} 条`)
+    else showToast(`导入完成：成功 ${importResult.value.imported} 条`)
+  } catch (error) { showToast(error?.message || 'CSV 导入失败') }
+  finally { saving.value = false }
+}
+
+async function downloadCapabilities() {
+  try {
+    const { blob, filename } = await exportCapabilities(capabilityTypeFilter.value)
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+    showToast('已开始导出 CSV')
+  } catch (error) { showToast(error?.message || 'CSV 导出失败') }
 }
 
 function navigate(section) {
@@ -816,7 +882,7 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
         <template v-else-if="activeSection === 'equipment'">
           <section class="pm-panel pm-equipment-layout"><header><div><p class="pm-panel-kicker">EQUIPMENT CAPABILITY</p><h2>设备能力维护</h2><p>维护设备基础信息、能力编码、检定有效期与启停状态。</p></div></header><form class="pm-form pm-equipment-form" @submit.prevent="saveEquipment"><label><span>设备编号 <em>*</em></span><input v-model.trim="equipmentForm.resourceID" required placeholder="例如 EQ-001" /></label><label><span>设备名称 <em>*</em></span><input v-model.trim="equipmentForm.resourceName" required placeholder="请输入设备名称" /></label><label><span>能力编码 <em>*</em></span><input v-model.trim="equipmentForm.codes" required placeholder="多个编码用逗号分隔" /></label><label><span>检定开始</span><input v-model="equipmentForm.validFrom" type="date" /></label><label><span>检定到期</span><input v-model="equipmentForm.validUntil" type="date" /></label><label><span>状态</span><select v-model="equipmentForm.status"><option value="ACTIVE">启用</option><option value="DISABLED">停用</option></select></label><button class="pm-button primary">保存设备</button></form></section><section class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>设备编号</th><th>设备名称</th><th>能力</th><th>检定有效期</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="item in equipment" :key="item.resource_id"><td class="mono">{{ item.resource_id }}</td><td><b>{{ item.resource_name }}</b></td><td>{{ (item.codes || []).join(' / ') }}</td><td>{{ item.valid_until ? formatDateTime(item.valid_until) : '未设置' }}</td><td><span class="pm-badge" :class="item.status === 'ACTIVE' ? 'normal' : 'neutral'">{{ item.status === 'ACTIVE' ? '启用' : '停用' }}</span></td><td><button class="pm-link" @click="equipmentForm = { resourceID: item.resource_id, resourceName: item.resource_name, codes: (item.codes || []).join(','), validFrom: item.valid_from?.slice(0, 10) || '', validUntil: item.valid_until?.slice(0, 10) || '', status: item.status || 'ACTIVE' }">编辑 / 更新</button></td></tr></tbody></table></div><div v-if="!equipment.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无设备</b><span>使用上方表单新增设备。</span></div></section>
         </template>
-        <template v-else-if="['split-rules', 'warning-rules', 'automations', 'permissions', 'sla'].includes(activeSection)">
+        <template v-else-if="activeSection === 'qualifications'"><section class="pm-panel"><header><div><p class="pm-panel-kicker">RESOURCE CAPABILITY</p><h2>资质与能力管理</h2><p>维护并展示人员资质与设备能力记录。</p></div><div class="pm-panel-actions"><input ref="qualificationFileInput" class="pm-file-input" type="file" accept=".csv,text/csv" @change="importQualificationFile" /><button class="pm-button" :disabled="saving" @click="downloadCapabilities">导出 CSV</button><template v-if="canManageResource"><button class="pm-button" :disabled="saving" @click="qualificationFileInput.click()">导入 CSV</button><button class="pm-button primary" :disabled="saving" @click="openCapabilityDialog()">＋ 新建资质</button></template></div></header><div class="pm-qualification-filter"><label><span>资源类型</span><select v-model="capabilityTypeFilter"><option value="">全部</option><option value="PERSON">人员资质</option><option value="EQUIPMENT">设备能力</option></select></label><label><span>状态</span><select v-model="capabilityStatusFilter"><option value="">全部</option><option value="ACTIVE">有效</option><option value="DISABLED">停用</option></select></label></div></section><section class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>资源类型</th><th>编号</th><th>名称</th><th>资质 / 能力编码</th><th>有效期</th><th>状态</th><th></th></tr></thead><tbody><tr v-for="item in filteredCapabilities" :key="item.resource_id"><td><span class="pm-badge neutral">{{ item.resource_type === 'PERSON' ? '人员' : '设备' }}</span></td><td class="mono">{{ item.resource_id }}</td><td><b>{{ item.resource_name }}</b></td><td>{{ (item.codes || []).join(' / ') }}</td><td>{{ item.valid_until ? (item.valid_from ? `${item.valid_from.slice(0, 10)} ~ ` : '') + item.valid_until.slice(0, 10) : '长期' }}</td><td><span class="pm-badge" :class="item.status === 'ACTIVE' ? 'normal' : 'neutral'">{{ item.status === 'ACTIVE' ? '有效' : '停用' }}</span></td><td style="width: 90px; min-width: 90px;"><button class="pm-link" @click="openCapabilityDialog(item)">编辑 / 更新</button></td></tr></tbody></table></div><div v-if="!filteredCapabilities.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无资质记录</b><span>点击「＋ 新建资质」或通过 CSV 导入添加记录。</span></div><footer v-if="importResult"><span role="status">导入完成：成功 {{ importResult.imported }} 条，跳过 {{ importResult.skipped }} 条。</span><span v-if="importResult.errors?.length"><small>{{ importResult.errors.slice(0, 3).join('；') }}{{ importResult.errors.length > 3 ? '…' : '' }}</small></span></footer></section><div v-if="capabilityDialog" class="pm-overlay" @click.self="capabilityDialog = null"><form class="pm-dialog" @submit.prevent="saveCapability"><header><div><span>CAPABILITY</span><h2>{{ capabilityDialog.resource_id ? '编辑资质 / 能力' : '新建资质 / 能力' }}</h2></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="capabilityDialog = null"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>资源类型 <em>*</em></span><select v-model="capabilityDialog.resource_type" required><option value="PERSON">人员资质</option><option value="EQUIPMENT">设备能力</option></select></label><label><span>资源编号 <em>*</em></span><input v-model.trim="capabilityDialog.resource_id" required placeholder="例如 P-001 或 EQ-001" /></label><label><span>资源名称 <em>*</em></span><input v-model.trim="capabilityDialog.resource_name" required placeholder="例如 张三 或 基站A" /></label><label><span>资质 / 能力编码 <em>*</em></span><input v-model.trim="capabilityDialog.codes" required placeholder="多个编码用逗号分隔" /></label><label><span>起始日期</span><input v-model="capabilityDialog.valid_from" type="date" /></label><label><span>截止日期</span><input v-model="capabilityDialog.valid_until" type="date" /></label><label><span>状态</span><select v-model="capabilityDialog.status"><option value="ACTIVE">有效</option><option value="DISABLED">停用</option></select></label></div><footer><button type="button" class="pm-button" @click="capabilityDialog = null">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : '保存资质' }}</button></footer></form></div></template><template v-else-if="['split-rules', 'warning-rules', 'automations', 'permissions', 'sla'].includes(activeSection)">
           <section class="pm-config-layout"><aside class="pm-config-note"><span><ConsoleIcon name="info" /></span><h2>配置说明</h2><p>{{ currentMeta[1] }}。变更将在保存后对新任务生效，已有项目不自动追溯。</p><ul><li>配置修改需业务管理员权限</li><li>关键规则变更会记录审计日志</li><li>关闭规则前请确认影响范围</li></ul></aside><article class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>配置名称</th><th>适用范围</th><th>触发条件</th><th>状态</th><th>最后更新</th><th></th></tr></thead><tbody><tr v-for="rule in visibleRules" :key="rule.id"><td><b>{{ rule.name }}</b></td><td>{{ rule.scope }}</td><td>{{ rule.trigger }}</td><td><button class="pm-switch" :class="{ on: rule.enabled }" :aria-label="`${rule.enabled ? '停用' : '启用'} ${rule.name}`" @click="toggleRule(rule)"><i></i></button></td><td>{{ rule.updated }}</td><td><button class="pm-link" @click="showToast(`正在编辑：${rule.name}`)">编辑</button></td></tr></tbody></table></div><div v-if="!visibleRules.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无配置规则</b><span>点击“新建规则”添加当前类型的配置。</span></div></article></section>
         </template>
 

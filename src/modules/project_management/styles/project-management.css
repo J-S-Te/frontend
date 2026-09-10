@@ -488,6 +488,12 @@
 .pm-filters input, .pm-filters select { height: 32px; color: var(--pm-body); font-size: 13px; }
 .pm-filters select { border-color: var(--pm-line); border-radius: 8px; }
 .pm-filters > span { color: var(--pm-muted); font-size: 12px; }
+.pm-panel-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.pm-file-input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+.pm-qualification-filter { padding: 12px 18px; display: flex; gap: 12px; border-bottom: 1px solid var(--pm-line-soft); }
+.pm-qualification-filter label { display: flex; align-items: center; gap: 8px; }
+.pm-qualification-filter span { color: var(--pm-muted); font-size: 12px; }
+.pm-qualification-filter select { height: 32px; min-width: 140px; padding: 0 10px; border: 1px solid var(--pm-line); border-radius: 8px; background: white; color: var(--pm-body); font-size: 13px; }
 .pm-table-panel { overflow: hidden; }
 .pm-table { font-size: 13.5px; }
 .pm-table th { height: auto; padding: 12px 16px; border-color: var(--pm-line); background: var(--pm-soft); color: var(--pm-muted); font-size: 12.5px; font-weight: 600; }
