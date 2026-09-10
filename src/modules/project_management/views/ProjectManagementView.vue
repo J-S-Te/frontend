@@ -202,7 +202,7 @@ const weeklyDeliveryTrend = computed(() => {
   const weeks = []
   for (let offset = 11; offset >= 0; offset--) {
     const weekStart = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() - offset * 7)
-    weeks.push({ key: dateKey(weekStart), label: `W${isoWeekOf(weekStart)}`, total: 0, onTime: 0 })
+    weeks.push({ key: dateKey(weekStart), label: `W${isoWeekOf(weekStart)}`, total: 0, scheduled: 0, onTime: 0 })
   }
   const byKey = Object.fromEntries(weeks.map((week) => [week.key, week]))
   const plannedEndByItem = new Map(serviceItems.value.map((item) => [item.id, item.planned_end]))
@@ -211,16 +211,19 @@ const weeklyDeliveryTrend = computed(() => {
     if (!week) continue
     week.total += 1
     const plannedEnd = plannedEndByItem.get(event.service_item_id)
-    if (!plannedEnd || new Date(plannedEnd) >= new Date(event.created_at)) week.onTime += 1
+    if (plannedEnd) {
+      week.scheduled += 1
+      if (new Date(plannedEnd) >= new Date(event.created_at)) week.onTime += 1
+    }
   }
   return weeks.map((week) => ({
     ...week,
-    rate: week.total ? Math.round((week.onTime / week.total) * 100) : 0,
-    tooltip: week.total ? `${week.label} 完成 ${week.total} 项 · 准时 ${week.onTime} 项` : `${week.label} 暂无完成记录`,
+    rate: week.scheduled ? Math.round((week.onTime / week.scheduled) * 100) : 0,
+    tooltip: week.total ? `${week.label} 完成 ${week.total} 项 · 已排期 ${week.scheduled} 项 · 准时 ${week.onTime} 项` : `${week.label} 暂无完成记录`,
   }))
 })
 const onTimeRecentAverage = computed(() => {
-  const recent = weeklyDeliveryTrend.value.slice(-4).filter((week) => week.total)
+  const recent = weeklyDeliveryTrend.value.slice(-4).filter((week) => week.scheduled)
   return recent.length ? Math.round(recent.reduce((sum, week) => sum + week.rate, 0) / recent.length) : null
 })
 const categoryDist = computed(() => {
@@ -252,10 +255,15 @@ const teamUtilization = computed(() => {
     counts.set(team, (counts.get(team) || 0) + 1)
   }
   const entries = [...counts.entries()].sort((a, b) => b[1] - a[1])
-  const max = Math.max(...entries.map(([, count]) => count), 1)
-  return entries.map(([name, count]) => ({ name, count, pct: Math.round((count / max) * 100) }))
+  const total = active.length || 1
+  return entries.map(([name, count]) => ({ name, count, pct: Math.round((count / total) * 100) }))
 })
-const overloadedTeam = computed(() => teamUtilization.value.find((team) => team.pct >= 90))
+const concentratedTeam = computed(() => {
+  const activeCount = serviceItems.value.filter((item) => !['已完成', '已终止', '终止'].includes(item.status)).length
+  if (activeCount < 5) return null
+  const top = teamUtilization.value[0]
+  return top && top.pct >= 40 ? top : null
+})
 const monitoredProjects = computed(() => {
   const query = keyword.value.trim().toLowerCase()
   return inFlightProjects.value.filter((p) => {
@@ -902,12 +910,12 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
               </div>
             </article>
             <article class="pm-panel pm-util-panel">
-              <header><div><p class="pm-panel-kicker">TEAM LOAD</p><h2>团队资源利用率</h2></div><span>在途负载估算</span></header>
+              <header><div><p class="pm-panel-kicker">TEAM LOAD</p><h2>团队资源利用率</h2></div><span>按当前在途服务项统计</span></header>
               <div class="pm-status-list">
-                <div v-for="team in teamUtilization" :key="team.name" class="pm-status-libar"><span class="pm-lib-lbl">{{ team.name }}</span><div class="pm-bar-bg"><i class="pm-bar-fill" :class="team.pct >= 90 ? 'warn' : 'normal'" :style="{ width: `${team.pct}%` }"></i></div><span class="pm-num">{{ team.pct }}%</span></div>
+                <div v-for="team in teamUtilization" :key="team.name" class="pm-status-libar"><span class="pm-lib-lbl">{{ team.name }}</span><div class="pm-bar-bg"><i class="pm-bar-fill" :class="team.pct >= 40 ? 'warn' : 'normal'" :style="{ width: `${team.pct}%` }"></i></div><span class="pm-num">{{ team.pct }}%</span></div>
                 <div v-if="!teamUtilization.length" class="pm-empty-mini">暂无在途团队负载数据</div>
               </div>
-              <p v-if="overloadedTeam" class="pm-alert warn"><i></i><b>{{ overloadedTeam.name }} {{ overloadedTeam.pct }}%</b> 接近满载 · 建议关注排期与人力调配</p>
+              <p v-if="concentratedTeam" class="pm-alert warn"><i></i><b>{{ concentratedTeam.name }} 承担 {{ concentratedTeam.pct }}%</b> 的当前在途工作 · 建议关注排期与人力调配</p>
             </article>
           </section>
           <section class="pm-table-panel pm-panel-inflight">
