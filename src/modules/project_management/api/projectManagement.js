@@ -240,7 +240,7 @@ export function confirmServiceItems(ids) {
 }
 
 /**
- * listRules 查询项目规则列表（含启停状态）。
+ * listRules 查询项目规则列表（全部配置类型）。
  * @returns {Promise<Array<object>>} 规则列表。
  * @throws {Error} 会话失效、鉴权失败或网关返回非成功状态时抛出。
  */
@@ -250,7 +250,7 @@ export async function listRules() {
 }
 
 /**
- * createRule 新建规则定义。
+ * createRule 新建配置规则（按 kind 落入五套真实配置表中的对应一张）。
  * @param {Object} payload 规则内容。
  * @returns {Promise<object>} 创建结果。
  * @throws {Error} 入参非法、冲突或操作被拒绝时抛出。
@@ -260,14 +260,54 @@ export function createRule(payload) {
 }
 
 /**
- * setRuleEnabled 更新单条规则启停。
+ * updateRule 整行更新配置规则（名称、启停开关与该配置类型专属字段）。
  * @param {string|number} id 规则 ID。
+ * @param {Object} payload 更新后的规则内容（必须携带 kind）。
+ * @returns {Promise<object>} 更新后的规则信息。
+ * @throws {Error} 规则不存在、校验失败或无权限时抛出。
+ */
+export function updateRule(id, payload) {
+  return request(`/rules/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(payload) })
+}
+
+/**
+ * setRuleEnabled 更新单条配置规则启停。
+ * @param {string|number} id 规则 ID。
+ * @param {string} kind 配置类型（split-rules / warning-rules / automations / permissions / sla）。
  * @param {boolean} enabled 是否启用。
  * @returns {Promise<object>} 更新后的规则信息。
  * @throws {Error} 规则不存在、版本校验失败或无权限时抛出。
  */
-export function setRuleEnabled(id, enabled) {
-  return request(`/rules/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ enabled }) })
+export function setRuleEnabled(id, kind, enabled) {
+  return request(`/rules/${encodeURIComponent(id)}?kind=${encodeURIComponent(kind)}`, { method: 'PATCH', body: JSON.stringify({ enabled }) })
+}
+
+/**
+ * reviewSpecialMethod 技术总监对特殊方法服务项进行复核。
+ * @param {string|number} itemID 服务项 ID。
+ * @param {Object} payload 复核决定 { decision: 'APPROVED' | 'REJECTED', comment }。
+ * @returns {Promise<object>} 复核结果。
+ * @throws {Error} 状态不允许、无权限或复核内容非法时抛出。
+ */
+export function reviewSpecialMethod(itemID, payload) {
+  return request(`/service-items/${encodeURIComponent(itemID)}/special-method-review`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+/**
+ * updateReportStatus 推进服务项报告状态（编制中→已审核→已签发→已归档）。
+ * @param {string|number} itemID 服务项 ID。
+ * @param {string} phase 目标阶段（COMPILING / REVIEWED / ISSUED / ARCHIVED）。
+ * @returns {Promise<object>} 更新结果。
+ * @throws {Error} 状态不允许、无权限或目标阶段非法时抛出。
+ */
+export function updateReportStatus(itemID, phase) {
+  return request(`/service-items/${encodeURIComponent(itemID)}/report-status`, {
+    method: 'POST',
+    body: JSON.stringify({ phase }),
+  })
 }
 
 /**

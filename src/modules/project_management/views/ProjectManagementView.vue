@@ -33,6 +33,9 @@ import {
   reviewDeviation,
   completeFieldImplementation,
   setRuleEnabled,
+  updateRule,
+  reviewSpecialMethod,
+  updateReportStatus,
 } from '@/modules/project_management/api/projectManagement'
 import { listApprovedContracts } from '@/modules/contract_management/api/contract'
 import '@/modules/project_management/styles/project-management.css'
@@ -202,7 +205,7 @@ const weeklyDeliveryTrend = computed(() => {
   const weeks = []
   for (let offset = 11; offset >= 0; offset--) {
     const weekStart = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() - offset * 7)
-    weeks.push({ key: dateKey(weekStart), label: `W${isoWeekOf(weekStart)}`, total: 0, onTime: 0 })
+    weeks.push({ key: dateKey(weekStart), label: `W${isoWeekOf(weekStart)}`, total: 0, scheduled: 0, onTime: 0 })
   }
   const byKey = Object.fromEntries(weeks.map((week) => [week.key, week]))
   const plannedEndByItem = new Map(serviceItems.value.map((item) => [item.id, item.planned_end]))
@@ -211,16 +214,19 @@ const weeklyDeliveryTrend = computed(() => {
     if (!week) continue
     week.total += 1
     const plannedEnd = plannedEndByItem.get(event.service_item_id)
-    if (!plannedEnd || new Date(plannedEnd) >= new Date(event.created_at)) week.onTime += 1
+    if (plannedEnd) {
+      week.scheduled += 1
+      if (new Date(plannedEnd) >= new Date(event.created_at)) week.onTime += 1
+    }
   }
   return weeks.map((week) => ({
     ...week,
-    rate: week.total ? Math.round((week.onTime / week.total) * 100) : 0,
-    tooltip: week.total ? `${week.label} 完成 ${week.total} 项 · 准时 ${week.onTime} 项` : `${week.label} 暂无完成记录`,
+    rate: week.scheduled ? Math.round((week.onTime / week.scheduled) * 100) : 0,
+    tooltip: week.total ? `${week.label} 完成 ${week.total} 项 · 已排期 ${week.scheduled} 项 · 准时 ${week.onTime} 项` : `${week.label} 暂无完成记录`,
   }))
 })
 const onTimeRecentAverage = computed(() => {
-  const recent = weeklyDeliveryTrend.value.slice(-4).filter((week) => week.total)
+  const recent = weeklyDeliveryTrend.value.slice(-4).filter((week) => week.scheduled)
   return recent.length ? Math.round(recent.reduce((sum, week) => sum + week.rate, 0) / recent.length) : null
 })
 const categoryDist = computed(() => {
@@ -252,10 +258,15 @@ const teamUtilization = computed(() => {
     counts.set(team, (counts.get(team) || 0) + 1)
   }
   const entries = [...counts.entries()].sort((a, b) => b[1] - a[1])
-  const max = Math.max(...entries.map(([, count]) => count), 1)
-  return entries.map(([name, count]) => ({ name, count, pct: Math.round((count / max) * 100) }))
+  const total = active.length || 1
+  return entries.map(([name, count]) => ({ name, count, pct: Math.round((count / total) * 100) }))
 })
-const overloadedTeam = computed(() => teamUtilization.value.find((team) => team.pct >= 90))
+const concentratedTeam = computed(() => {
+  const activeCount = serviceItems.value.filter((item) => !['已完成', '已终止', '终止'].includes(item.status)).length
+  if (activeCount < 5) return null
+  const top = teamUtilization.value[0]
+  return top && top.pct >= 40 ? top : null
+})
 const monitoredProjects = computed(() => {
   const query = keyword.value.trim().toLowerCase()
   return inFlightProjects.value.filter((p) => {
@@ -279,7 +290,51 @@ const qualificationFileInput = ref(null)
 const filteredCapabilities = computed(() => capabilities.value.filter((item) => (!capabilityTypeFilter.value || item.resource_type === capabilityTypeFilter.value) && (!capabilityStatusFilter.value || item.status === capabilityStatusFilter.value)))
 const canManageResource = computed(() => Array.isArray(session.value?.permissions) && session.value.permissions.includes('project.resource.manage'))
 const selectedServiceItemIDs = ref([])
-const operationForm = ref({ teamLeadID: '', projectManagerID: '', engineerIDs: '', equipmentIDs: '', requiredCodes: '', plannedStart: '', plannedEnd: '', sitePlan: '', penetrationTestPlan: '', equipmentRequestID: '', travelRequestID: '', latitude: '', longitude: '', rawData: '', environment: '', deviationDescription: '', severity: 'MEDIUM', decision: 'RELEASE', comment: '' })
+const operationForm = ref({ teamLeadID: '', projectManagerID: '', engineerIDs: '', equipmentIDs: '', requiredCodes: '', plannedStart: '', plannedEnd: '', sitePlan: '', penetrationTestPlan: '', authDocNo: '', authStart: '', authEnd: '', authScope: '', testScope: '', testWindow: '', emergencyContact: '', rollbackPlan: '', reviewComment: '', equipmentRequestID: '', travelRequestID: '', latitude: '', longitude: '', rawData: '', environment: '', deviationDescription: '', severity: 'MEDIUM', decision: 'RELEASE', comment: '' })
+
+// 五套真实配置表的列与编辑字段元数据。
+const configKindsMeta = [
+  { kind: 'split-rules', label: '拆解规则', columns: [{ key: 'scope', label: '适用范围' }], fields: [{ key: 'scope', label: '适用范围', field: 'text', required: true, placeholder: '例如 单批次金额超过 50 万元' }] },
+  { kind: 'warning-rules', label: '预警规则', columns: [{ key: 'check_type', label: '检查类型' }, { key: 'threshold', label: '阈值' }], fields: [{ key: 'check_type', label: '检查类型', field: 'text', required: true, placeholder: '例如 资质能力冲突 / 排期冲突 / 场地冲突' }, { key: 'threshold', label: '阈值', field: 'text', placeholder: '例如 连续 3 项冲突' }] },
+  { kind: 'automations', label: '自动化动作', columns: [{ key: 'trigger', label: '触发事件' }, { key: 'target', label: '目标' }], fields: [{ key: 'trigger', label: '触发事件', field: 'text', required: true, placeholder: '例如 DEVIATION_REPORTED' }, { key: 'target', label: '目标', field: 'text', required: true, placeholder: '例如 通知技术总监 / 创建整改工单' }] },
+  { kind: 'permissions', label: '字段级权限', columns: [{ key: 'role_code', label: '角色' }, { key: 'field_name', label: '字段' }, { key: 'access_level', label: '访问级别' }], fields: [{ key: 'role_code', label: '角色', field: 'text', required: true, placeholder: '例如 project_manager' }, { key: 'field_name', label: '字段', field: 'text', required: true, placeholder: '例如 report_revenue' }, { key: 'access_level', label: '访问级别', field: 'select', required: true, options: [{ value: 'view', label: '只读可见' }, { value: 'edit', label: '可编辑' }, { value: 'hidden', label: '隐藏' }] }] },
+  { kind: 'sla', label: 'SLA 规则', columns: [{ key: 'status', label: '状态' }, { key: 'deadline_hours', label: '时限(小时)' }, { key: 'remind_hours', label: '提醒(小时)' }], fields: [{ key: 'status', label: '生效状态', field: 'text', required: true, placeholder: '例如 报告编制' }, { key: 'deadline_hours', label: '时限(小时)', field: 'number', required: true, min: 1 }, { key: 'remind_hours', label: '提前提醒(小时)', field: 'number', min: 0 }] },
+]
+const activeConfigMeta = computed(() => configKindsMeta.find((meta) => meta.kind === activeSection.value) || configKindsMeta[0])
+const configEditorOpen = ref(false)
+const configForm = ref({})
+function openConfigCreate() {
+  configForm.value = { id: null, kind: activeSection.value, name: '', enabled: true }
+  for (const field of activeConfigMeta.value.fields) {
+    configForm.value[field.key] = field.field === 'number' ? (field.key === 'deadline_hours' ? 24 : field.key === 'remind_hours' ? 4 : 0) : field.key === 'access_level' ? 'view' : ''
+  }
+  configEditorOpen.value = true
+}
+function openConfigEdit(rule) {
+  configForm.value = { ...rule, name: rule.name || '', enabled: rule.enabled !== false, kind: rule.kind || activeSection.value }
+  configEditorOpen.value = true
+}
+async function saveConfigRule() {
+  saving.value = true
+  try {
+    const payload = { kind: configForm.value.kind, name: configForm.value.name.trim(), enabled: configForm.value.enabled }
+    for (const field of activeConfigMeta.value.fields) payload[field.key] = typeof configForm.value[field.key] === 'number' ? configForm.value[field.key] : String(configForm.value[field.key] || '').trim()
+    if (!payload.name) { showToast('请填写配置名称'); return }
+    const saved = configForm.value.id ? await updateRule(configForm.value.id, payload) : await createRule(payload)
+    const index = rules.value.findIndex((rule) => rule.id === saved.id)
+    if (index >= 0) rules.value.splice(index, 1, saved)
+    else rules.value.push(saved)
+    configEditorOpen.value = false
+    showToast(configForm.value.id ? '配置已保存' : '配置已创建')
+  } catch (error) { showToast(error?.message || '配置保存失败') }
+  finally { saving.value = false }
+}
+
+const reportStatusLabel = { COMPILING: '编制中', REVIEWED: '已审核', ISSUED: '已签发', ARCHIVED: '已归档' }
+const reportStatusRank = { COMPILING: 1, REVIEWED: 2, ISSUED: 3, ARCHIVED: 4 }
+const reportPhaseNext = { COMPILING: 'REVIEWED', REVIEWED: 'ISSUED', ISSUED: 'ARCHIVED' }
+const reportItems = computed(() => serviceItems.value.filter((item) => item.report_status && item.report_status !== 'NONE'))
+const reportTechReviewLabel = (status) => ({ NONE: '未提交', PENDING: '待复核', APPROVED: '已通过', REJECTED: '已驳回' }[status] || '未提交')
 const personnel = ref([])
 const personnelKeyword = ref('')
 const personnelLoading = ref(false)
@@ -380,8 +435,8 @@ const serviceFlow = computed(() => [
   { key: '待分配', color: 'slate', count: serviceItems.value.filter((item) => item.status === '待分配').length, route: 'allocation' },
   { key: '待实施', color: 'violet', count: serviceItems.value.filter((item) => ['待制定计划', '待实施', '实施准备中'].includes(item.status)).length, route: 'planning' },
   { key: '实施中', color: 'amber', count: serviceItems.value.filter((item) => ['实施中', '异常处理中'].includes(item.status)).length, route: 'implementation' },
-  { key: '报告编制', color: 'blue', count: projects.value.filter((item) => item.status === '报告编制').length, route: 'reports' },
-  { key: '已完成', color: 'green', count: serviceItems.value.filter((item) => ['现场实施完成', '已完成'].includes(item.status)).length, route: 'implementation' },
+  { key: '报告编制', color: 'blue', count: reportItems.value.filter((item) => item.report_status !== 'ARCHIVED').length, route: 'reports' },
+  { key: '已完成', color: 'green', count: serviceItems.value.filter((item) => item.report_status === 'ARCHIVED' || (['现场实施完成', '已完成'].includes(item.status) && (!item.report_status || item.report_status === 'NONE'))).length, route: 'implementation' },
 ])
 const decompositionProject = computed(() => projectByID.value.get(decompositionItems.value[0]?.project_id) || null)
 const decompositionBatches = computed(() => Object.entries(decompositionItems.value.reduce((groups, item) => { const key = item.batch || '未设置批次'; (groups[key] ||= []).push(item); return groups }, {})))
@@ -390,12 +445,13 @@ const riskRows = computed(() => [
   ...serviceItems.value.filter((item) => item.conflict_status === 'CONFLICT').map((item) => { const project = projectByID.value.get(item.project_id); return { id: `conflict-${item.id}`, level: '高', project: `${item.project_id} · ${project?.customer || item.site}`, issue: `${item.id} 人员或设备能力冲突`, owner: item.project_manager_id || item.team_lead_id || '待分配', deadline: item.planned_start?.slice(0, 10) || '待处理' } }),
 ].slice(0, 10))
 
+const reportActiveProjectIDs = computed(() => new Set(reportItems.value.filter((item) => item.report_status !== 'ARCHIVED').map((item) => item.project_id)))
 const kanbanColumns = computed(() => [
   { key: '待分配', color: 'slate', cards: projects.value.filter((p) => ['待分配', '待拆解确认'].includes(p.status)) },
   { key: '待实施', color: 'violet', cards: projects.value.filter((p) => ['待实施', '实施准备中', '待制定计划'].includes(p.status)) },
   { key: '实施中', color: 'amber', cards: projects.value.filter((p) => ['实施中', '异常处理中'].includes(p.status)) },
-  { key: '报告编制', color: 'blue', cards: projects.value.filter((p) => p.status === '报告编制') },
-  { key: '已完成', color: 'green', cards: projects.value.filter((p) => ['已完成', '现场实施完成'].includes(p.status)) },
+  { key: '报告编制', color: 'blue', cards: projects.value.filter((p) => reportActiveProjectIDs.value.has(p.id)) },
+  { key: '已完成', color: 'green', cards: projects.value.filter((p) => ['已完成', '现场实施完成'].includes(p.status) && !reportActiveProjectIDs.value.has(p.id)) },
 ].map((column) => ({ ...column, count: column.cards.length })))
 
 const operationRows = computed(() => ({
@@ -406,10 +462,10 @@ const operationRows = computed(() => ({
   preparation: deliveryEvents.value.filter((e) => e.type === 'PREPARATION_STARTED').map((e) => ({ id: e.id, name: e.service_item_id, detail: `设备申领 ${e.payload.equipment_request_id} / 行程 ${e.payload.travel_request_id}`, owner: e.actor_user_id, state: '准备中', progress: 50, due: new Date(e.created_at).toLocaleDateString() })),
   qualifications: capabilities.value.map((c) => ({ id: c.resource_id, name: c.resource_name, detail: c.codes.join(' / '), owner: c.resource_type === 'PERSON' ? '人员资质' : '设备能力', state: c.status === 'ACTIVE' ? '有效' : c.status, progress: c.status === 'ACTIVE' ? 100 : 0, due: c.valid_until?.slice(0, 10) || '长期' })),
   assignments: serviceItems.value.map((s) => ({ id: s.id, name: `${s.id} · ${s.site}`, detail: `${s.engineer_ids?.length || 0} 人 / ${s.equipment_ids?.length || 0} 台设备`, owner: s.project_manager_id || '待指派', state: s.conflict_status === 'CONFLICT' ? '排期冲突' : s.conflict_status === 'PASSED' ? '校验通过' : '待校验', progress: s.conflict_status === 'PASSED' ? 100 : 30, due: s.planned_end?.slice(0, 10) || '待排期' })),
-  methods: serviceItems.value.filter((s) => s.test_mode === 'PENETRATION').map((s) => ({ id: s.id, name: `${s.id} · ${s.category}`, detail: `${s.site} / ${s.system}`, owner: s.project_manager_id || '待指派', state: s.planned_start ? '专项计划已发布' : '待制定渗透测试计划', progress: s.planned_start ? 100 : 0, due: s.planned_end?.slice(0, 10) || '待排期' })),
+  methods: serviceItems.value.filter((s) => s.special === '是').map((s) => ({ id: s.id, name: `${s.id} · ${s.category}`, detail: `${s.site} / ${s.system || '—'}`, owner: s.project_manager_id || '待指派', state: reportTechReviewLabel(s.tech_review_status), progress: s.tech_review_status === 'APPROVED' ? 100 : s.tech_review_status === 'PENDING' ? 50 : 0, due: s.planned_end?.slice(0, 10) || '待排期', review: s.tech_review_status, comment: s.tech_review_comment, reviewedAt: s.tech_reviewed_at })),
   exceptions: pendingDeviations.value.map((e) => ({ id: e.id, name: `${e.payload?.deviation_id} · ${e.service_item_id}`, detail: e.payload?.description || '现场偏离', owner: e.actor_user_id, state: '待评审', progress: 0, due: formatDateTime(e.created_at) })),
   standards: [],
-  reports: projects.value.filter((p) => ['现场实施完成', '报告编制'].includes(p.status)).map((p) => ({ id: p.id, name: `${p.id} · ${p.customer}`, detail: `${p.services} 个服务项报告`, owner: p.manager || '待指派', state: p.status === '报告编制' ? '编制中' : '待编制', progress: p.progress, due: p.due || '待排期' })),
+  reports: reportItems.value.map((item) => { const project = projectByID.value.get(item.project_id); return { id: item.id, name: `${item.id} · ${item.site}`, detail: `${project?.customer || item.project_id} / 报告${reportStatusLabel[item.report_status] || item.report_status}`, owner: item.project_manager_id || project?.manager || '待指派', state: reportStatusLabel[item.report_status] || item.report_status, progress: (reportStatusRank[item.report_status] || 0) * 25, due: item.report_updated_at ? item.report_updated_at.slice(0, 10) : item.planned_end?.slice(0, 10) || '待排期', report_status: item.report_status } }),
 }[activeSection.value] || []))
 
 const rules = ref([])
@@ -424,10 +480,10 @@ const operationSectionLabel = (section) => ({
 function openOperationDetail(row) {
   const section = activeSection.value
   let record = null
-  if (['allocation', 'inbox', 'planning', 'assignments', 'methods'].includes(section)) record = serviceItems.value.find((item) => item.id === row.id) || null
+  if (['allocation', 'inbox', 'planning', 'assignments', 'methods', 'reports'].includes(section)) record = serviceItems.value.find((item) => item.id === row.id) || null
   else if (section === 'qualifications') record = capabilities.value.find((cap) => cap.resource_id === row.id) || capabilities.value.find((cap) => cap.resource_name === row.name) || null
   else if (['preparation', 'exceptions'].includes(section)) record = deliveryEvents.value.find((event) => event.id === row.id) || null
-  else if (['monitoring', 'reports'].includes(section)) record = projects.value.find((project) => project.id === row.id) || null
+  else if (['monitoring'].includes(section)) record = projects.value.find((project) => project.id === row.id) || null
   operationDetail.value = { section, row: { ...row }, record }
 }
 const operationDetailFields = computed(() => {
@@ -435,7 +491,7 @@ const operationDetailFields = computed(() => {
   if (!detail) return []
   const record = detail.record || {}
   const section = detail.section
-  if (['allocation', 'inbox', 'planning', 'assignments', 'methods'].includes(section)) {
+  if (['allocation', 'inbox', 'planning', 'assignments', 'methods', 'reports'].includes(section)) {
     return [
       { label: '服务项编号', value: record.id || detail.row.name },
       { label: '所属项目', value: record.project_id || '—' },
@@ -486,6 +542,18 @@ const operationDetailFields = computed(() => {
     ]
   }
   if (['monitoring', 'reports'].includes(section)) {
+    if (section === 'reports') {
+      return [
+        { label: '服务项编号', value: record.id || detail.row.name },
+        { label: '所属项目', value: record.project_id || '—' },
+        { label: '客户', value: projectByID.value.get(record.project_id)?.customer || '—' },
+        { label: '实施场所', value: record.site || '—' },
+        { label: '报告状态', value: reportStatusLabel[record.report_status] || record.report_status || '—' },
+        { label: '报告更新时间', value: record.report_updated_at ? formatDateTime(record.report_updated_at) : '—' },
+        { label: '报告更新人', value: record.report_updated_by || '—' },
+        { label: '现场状态', value: record.status || '—' },
+      ]
+    }
     return [
       { label: '项目编号', value: record.id || '—' },
       { label: '客户', value: record.customer || '—' },
@@ -682,7 +750,7 @@ async function toggleRule(rule) {
   const next = !rule.enabled
   try {
     // 不预先翻转开关，等待带有最新版本语义的服务端结果后再覆盖当前行。
-    const updated = await setRuleEnabled(rule.id, next)
+    const updated = await setRuleEnabled(rule.id, rule.kind || activeSection.value, next)
     Object.assign(rule, updated)
     showToast(next ? '规则已启用' : '规则已停用')
   } catch (error) { showToast(error?.message || '规则更新失败') }
@@ -696,7 +764,8 @@ function selectServiceItem(item) {
   fillOperationForm(item)
 }
 function fillOperationForm(item) {
-  operationForm.value = { ...operationForm.value, teamLeadID: item.team_lead_id || '', projectManagerID: item.project_manager_id || '', engineerIDs: (item.engineer_ids || []).join(','), equipmentIDs: (item.equipment_ids || []).join(','), requiredCodes: (item.required_codes || []).join(','), plannedStart: item.planned_start || '', plannedEnd: item.planned_end || '' }
+  const plan = item.implementation_plan || {}
+  operationForm.value = { ...operationForm.value, teamLeadID: item.team_lead_id || '', projectManagerID: item.project_manager_id || '', engineerIDs: (item.engineer_ids || []).join(','), equipmentIDs: (item.equipment_ids || []).join(','), requiredCodes: (item.required_codes || []).join(','), plannedStart: item.planned_start || plan.planned_start || '', plannedEnd: item.planned_end || plan.planned_end || '', sitePlan: plan.site_plan || '', penetrationTestPlan: plan.penetration_test_plan || '', authDocNo: plan.auth_doc_no || '', authStart: plan.auth_start || '', authEnd: plan.auth_end || '', authScope: plan.auth_scope || '', testScope: plan.test_scope || '', testWindow: plan.test_window || '', emergencyContact: plan.emergency_contact || '', rollbackPlan: plan.rollback_plan || '', reviewComment: item.tech_review_comment || '' }
 }
 function toggleServiceItem(item) {
   const selected = new Set(selectedServiceItemIDs.value)
@@ -726,8 +795,15 @@ async function runOperation(kind) {
       }
       showToast(canExecutionAssign.value ? `已批量保存 ${items.length} 个服务项并完成能力校验` : `已批量分配 ${items.length} 个服务项的团队负责人`)
     } else if (kind === 'planning') {
-      await planImplementation(item.id, { planned_start: asRFC3339(form.plannedStart), planned_end: asRFC3339(form.plannedEnd), site_plan: form.sitePlan, penetration_test_plan: form.penetrationTestPlan })
+      await planImplementation(item.id, { planned_start: asRFC3339(form.plannedStart), planned_end: asRFC3339(form.plannedEnd), site_plan: form.sitePlan, penetration_test_plan: form.penetrationTestPlan, auth_doc_no: form.authDocNo, auth_start: asRFC3339(form.authStart), auth_end: asRFC3339(form.authEnd), auth_scope: form.authScope, test_scope: form.testScope, test_window: form.testWindow, emergency_contact: form.emergencyContact, rollback_plan: form.rollbackPlan })
       showToast('实施计划已发布')
+    } else if (kind === 'special-approve' || kind === 'special-reject') {
+      await reviewSpecialMethod(item.id, { decision: kind === 'special-approve' ? 'APPROVED' : 'REJECTED', comment: form.reviewComment })
+      showToast(kind === 'special-approve' ? '复核已通过，可发布实施计划' : '复核已驳回，请修正后重新提交复核')
+    } else if (kind === 'report-next') {
+      const next = reportPhaseNext[item.report_status]
+      await updateReportStatus(item.id, next)
+      showToast(`报告状态已推进至：${reportStatusLabel[next]}`)
     } else if (kind === 'preparation') {
       await startImplementationPreparation(item.id, { equipment_request_id: form.equipmentRequestID, travel_request_id: form.travelRequestID, notes: form.comment })
       showToast('实施准备已发起')
@@ -767,19 +843,9 @@ async function saveCreate() {
       })
       projects.value = [created, ...projects.value]
       showToast(`项目 ${created.id} 已创建`)
-    } else {
-      const created = await createRule({
-        kind: activeSection.value,
-        name: createForm.value.name,
-        scope: createForm.value.scope,
-        trigger: createForm.value.trigger || createForm.value.notes,
-        enabled: true,
-      })
-      rules.value = [...rules.value, created]
-      showToast('配置规则已创建')
+      createOpen.value = false
+      createForm.value = { name: '', customer: '', contract: '', contractID: '', contractVersion: '', site: '', requirement: '', testMode: 'STANDARD', serviceLinks: [emptyServiceLink()], scope: '', trigger: '', notes: '' }
     }
-    createOpen.value = false
-    createForm.value = { name: '', customer: '', contract: '', contractID: '', contractVersion: '', site: '', requirement: '', testMode: 'STANDARD', serviceLinks: [emptyServiceLink()], scope: '', trigger: '', notes: '' }
   } catch (error) { showToast(error?.message || '保存失败') }
   finally { saving.value = false }
 }
@@ -853,7 +919,7 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
           <div class="pm-actions">
             <button class="pm-button" :disabled="loading" @click="loadWorkspace"><ConsoleIcon name="reset" />{{ loading ? '加载中' : '刷新' }}</button>
             <button v-if="activeSection === 'projects'" class="pm-button" @click="exportProjects"><ConsoleIcon name="export" />导出</button>
-            <button v-if="['split-rules', 'warning-rules', 'automations'].includes(activeSection)" class="pm-button primary" @click="createOpen = true">＋ 新建规则</button><button v-if="activeSection === 'projects'" class="pm-button primary" @click="openCreateProject">＋ 新建项目</button>
+            <button v-if="['split-rules', 'warning-rules', 'automations', 'permissions', 'sla'].includes(activeSection)" class="pm-button primary" @click="openConfigCreate">＋ 新建规则</button><button v-if="activeSection === 'projects'" class="pm-button primary" @click="openCreateProject">＋ 新建项目</button>
             <button v-if="activeSection === 'decomposition'" class="pm-button primary" :disabled="saving" @click="confirmDecomposition">{{ saving ? '提交中…' : '确认拆解' }}</button>
           </div>
         </section>
@@ -902,12 +968,12 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
               </div>
             </article>
             <article class="pm-panel pm-util-panel">
-              <header><div><p class="pm-panel-kicker">TEAM LOAD</p><h2>团队资源利用率</h2></div><span>在途负载估算</span></header>
+              <header><div><p class="pm-panel-kicker">TEAM LOAD</p><h2>团队资源利用率</h2></div><span>按当前在途服务项统计</span></header>
               <div class="pm-status-list">
-                <div v-for="team in teamUtilization" :key="team.name" class="pm-status-libar"><span class="pm-lib-lbl">{{ team.name }}</span><div class="pm-bar-bg"><i class="pm-bar-fill" :class="team.pct >= 90 ? 'warn' : 'normal'" :style="{ width: `${team.pct}%` }"></i></div><span class="pm-num">{{ team.pct }}%</span></div>
+                <div v-for="team in teamUtilization" :key="team.name" class="pm-status-libar"><span class="pm-lib-lbl">{{ team.name }}</span><div class="pm-bar-bg"><i class="pm-bar-fill" :class="team.pct >= 40 ? 'warn' : 'normal'" :style="{ width: `${team.pct}%` }"></i></div><span class="pm-num">{{ team.pct }}%</span></div>
                 <div v-if="!teamUtilization.length" class="pm-empty-mini">暂无在途团队负载数据</div>
               </div>
-              <p v-if="overloadedTeam" class="pm-alert warn"><i></i><b>{{ overloadedTeam.name }} {{ overloadedTeam.pct }}%</b> 接近满载 · 建议关注排期与人力调配</p>
+              <p v-if="concentratedTeam" class="pm-alert warn"><i></i><b>{{ concentratedTeam.name }} 承担 {{ concentratedTeam.pct }}%</b> 的当前在途工作 · 建议关注排期与人力调配</p>
             </article>
           </section>
           <section class="pm-table-panel pm-panel-inflight">
@@ -996,7 +1062,7 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
           <section class="pm-panel pm-equipment-layout"><header><div><p class="pm-panel-kicker">EQUIPMENT CAPABILITY</p><h2>设备能力维护</h2><p>维护设备基础信息、能力编码、检定有效期与启停状态。</p></div></header><form class="pm-form pm-equipment-form" @submit.prevent="saveEquipment"><label><span>设备编号 <em>*</em></span><input v-model.trim="equipmentForm.resourceID" required placeholder="例如 EQ-001" /></label><label><span>设备名称 <em>*</em></span><input v-model.trim="equipmentForm.resourceName" required placeholder="请输入设备名称" /></label><label><span>能力编码 <em>*</em></span><input v-model.trim="equipmentForm.codes" required placeholder="多个编码用逗号分隔" /></label><label><span>检定开始</span><input v-model="equipmentForm.validFrom" type="date" /></label><label><span>检定到期</span><input v-model="equipmentForm.validUntil" type="date" /></label><label><span>状态</span><select v-model="equipmentForm.status"><option value="ACTIVE">启用</option><option value="DISABLED">停用</option></select></label><button class="pm-button primary">保存设备</button></form></section><section class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>设备编号</th><th>设备名称</th><th>能力</th><th>检定有效期</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="item in equipment" :key="item.resource_id"><td class="mono">{{ item.resource_id }}</td><td><b>{{ item.resource_name }}</b></td><td>{{ (item.codes || []).join(' / ') }}</td><td>{{ item.valid_until ? formatDateTime(item.valid_until) : '未设置' }}</td><td><span class="pm-badge" :class="item.status === 'ACTIVE' ? 'normal' : 'neutral'">{{ item.status === 'ACTIVE' ? '启用' : '停用' }}</span></td><td><button class="pm-link" @click="equipmentForm = { resourceID: item.resource_id, resourceName: item.resource_name, codes: (item.codes || []).join(','), validFrom: item.valid_from?.slice(0, 10) || '', validUntil: item.valid_until?.slice(0, 10) || '', status: item.status || 'ACTIVE' }">编辑 / 更新</button></td></tr></tbody></table></div><div v-if="!equipment.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无设备</b><span>使用上方表单新增设备。</span></div></section>
         </template>
         <template v-else-if="activeSection === 'qualifications'"><section class="pm-panel"><header><div><p class="pm-panel-kicker">RESOURCE CAPABILITY</p><h2>资质与能力管理</h2><p>维护并展示人员资质与设备能力记录。</p></div><div class="pm-panel-actions"><input ref="qualificationFileInput" class="pm-file-input" type="file" accept=".csv,text/csv" @change="importQualificationFile" /><button class="pm-button" :disabled="saving" @click="downloadCapabilities">导出 CSV</button><template v-if="canManageResource"><button class="pm-button" :disabled="saving" @click="qualificationFileInput.click()">导入 CSV</button><button class="pm-button primary" :disabled="saving" @click="openCapabilityDialog()">＋ 新建资质</button></template></div></header><div class="pm-qualification-filter"><label><span>资源类型</span><select v-model="capabilityTypeFilter"><option value="">全部</option><option value="PERSON">人员资质</option><option value="EQUIPMENT">设备能力</option></select></label><label><span>状态</span><select v-model="capabilityStatusFilter"><option value="">全部</option><option value="ACTIVE">有效</option><option value="DISABLED">停用</option></select></label></div></section><section class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>资源类型</th><th>编号</th><th>名称</th><th>资质 / 能力编码</th><th>有效期</th><th>状态</th><th></th></tr></thead><tbody><tr v-for="item in filteredCapabilities" :key="item.resource_id"><td><span class="pm-badge neutral">{{ item.resource_type === 'PERSON' ? '人员' : '设备' }}</span></td><td class="mono">{{ item.resource_id }}</td><td><b>{{ item.resource_name }}</b></td><td>{{ (item.codes || []).join(' / ') }}</td><td>{{ item.valid_until ? (item.valid_from ? `${item.valid_from.slice(0, 10)} ~ ` : '') + item.valid_until.slice(0, 10) : '长期' }}</td><td><span class="pm-badge" :class="item.status === 'ACTIVE' ? 'normal' : 'neutral'">{{ item.status === 'ACTIVE' ? '有效' : '停用' }}</span></td><td style="width: 90px; min-width: 90px;"><button class="pm-link" @click="openCapabilityDialog(item)">编辑 / 更新</button></td></tr></tbody></table></div><div v-if="!filteredCapabilities.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无资质记录</b><span>点击「＋ 新建资质」或通过 CSV 导入添加记录。</span></div><footer v-if="importResult"><span role="status">导入完成：成功 {{ importResult.imported }} 条，跳过 {{ importResult.skipped }} 条。</span><span v-if="importResult.errors?.length"><small>{{ importResult.errors.slice(0, 3).join('；') }}{{ importResult.errors.length > 3 ? '…' : '' }}</small></span></footer></section><div v-if="capabilityDialog" class="pm-overlay" @click.self="capabilityDialog = null"><form class="pm-dialog" @submit.prevent="saveCapability"><header><div><span>CAPABILITY</span><h2>{{ capabilityDialog.resource_id ? '编辑资质 / 能力' : '新建资质 / 能力' }}</h2></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="capabilityDialog = null"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>资源类型 <em>*</em></span><select v-model="capabilityDialog.resource_type" required><option value="PERSON">人员资质</option><option value="EQUIPMENT">设备能力</option></select></label><label><span>资源编号 <em>*</em></span><input v-model.trim="capabilityDialog.resource_id" required placeholder="例如 P-001 或 EQ-001" /></label><label><span>资源名称 <em>*</em></span><input v-model.trim="capabilityDialog.resource_name" required placeholder="例如 张三 或 基站A" /></label><label><span>资质 / 能力编码 <em>*</em></span><input v-model.trim="capabilityDialog.codes" required placeholder="多个编码用逗号分隔" /></label><label><span>起始日期</span><input v-model="capabilityDialog.valid_from" type="date" /></label><label><span>截止日期</span><input v-model="capabilityDialog.valid_until" type="date" /></label><label><span>状态</span><select v-model="capabilityDialog.status"><option value="ACTIVE">有效</option><option value="DISABLED">停用</option></select></label></div><footer><button type="button" class="pm-button" @click="capabilityDialog = null">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : '保存资质' }}</button></footer></form></div></template><template v-else-if="['split-rules', 'warning-rules', 'automations', 'permissions', 'sla'].includes(activeSection)">
-          <section class="pm-config-layout"><aside class="pm-config-note"><span><ConsoleIcon name="info" /></span><h2>配置说明</h2><p>{{ currentMeta[1] }}。变更将在保存后对新任务生效，已有项目不自动追溯。</p><ul><li>配置修改需业务管理员权限</li><li>关键规则变更会记录审计日志</li><li>关闭规则前请确认影响范围</li></ul></aside><article class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>配置名称</th><th>适用范围</th><th>触发条件</th><th>状态</th><th>最后更新</th><th></th></tr></thead><tbody><tr v-for="rule in visibleRules" :key="rule.id"><td><b>{{ rule.name }}</b></td><td>{{ rule.scope }}</td><td>{{ rule.trigger }}</td><td><button class="pm-switch" :class="{ on: rule.enabled }" :aria-label="`${rule.enabled ? '停用' : '启用'} ${rule.name}`" @click="toggleRule(rule)"><i></i></button></td><td>{{ rule.updated }}</td><td><button class="pm-link" @click="showToast(`正在编辑：${rule.name}`)">编辑</button></td></tr></tbody></table></div><div v-if="!visibleRules.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无配置规则</b><span>点击“新建规则”添加当前类型的配置。</span></div></article></section>
+          <section class="pm-config-layout"><aside class="pm-config-note"><span><ConsoleIcon name="info" /></span><h2>配置说明</h2><p>{{ currentMeta[1] }}。变更将在保存后对新任务生效，已有项目不自动追溯。</p><ul><li>配置修改需业务管理员权限</li><li>关键规则变更会记录审计日志</li><li>关闭规则前请确认影响范围</li></ul></aside><article class="pm-table-panel"><header class="pm-filter-bar"><div class="pm-sm-tabs"><button v-for="meta in configKindsMeta" :key="meta.kind" type="button" class="pm-tab-pill" :class="{ active: activeSection === meta.kind }" @click="navigate(meta.kind)">{{ meta.label }}</button></div><span class="pm-filter-count">{{ activeConfigMeta.label }} 共 {{ visibleRules.length }} 条</span></header><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>配置名称</th><th v-for="column in activeConfigMeta.columns" :key="column.key">{{ column.label }}</th><th>状态</th><th>最后更新</th><th></th></tr></thead><tbody><tr v-for="rule in visibleRules" :key="rule.id"><td><b>{{ rule.name }}</b></td><td v-for="column in activeConfigMeta.columns" :key="column.key">{{ rule[column.key] !== undefined && rule[column.key] !== '' ? rule[column.key] : '—' }}</td><td><button class="pm-switch" :class="{ on: rule.enabled }" :aria-label="`${rule.enabled ? '停用' : '启用'} ${rule.name}`" @click="toggleRule(rule)"><i></i></button></td><td>{{ rule.updated }}</td><td><button class="pm-link" @click="openConfigEdit(rule)">编辑</button></td></tr></tbody></table></div><div v-if="!visibleRules.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无配置规则</b><span>点击「＋ 新建规则」添加 {{ activeConfigMeta.label }} 配置。</span></div></article></section>
         </template>
 
         <template v-else>
@@ -1007,10 +1073,11 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
             <template v-if="activeSection === 'allocation'"><div class="pm-selection-list"><label v-for="item in serviceItems" :key="item.id" class="pm-selection-row"><input type="checkbox" :checked="selectedServiceItemIDs.includes(item.id)" @change="toggleServiceItem(item)" /><span><b>{{ item.id }}</b><small>{{ item.site || '未设置场所' }} · {{ item.category || '未设置检测类别' }} · {{ item.status }}</small></span></label><div v-if="!serviceItems.length" class="pm-empty-mini">暂无可分配服务项</div></div><p class="pm-form-hint">可同时选择多个服务项，批量分配团队负责人或执行团队。</p></template><label v-else><span>选择服务项</span><select :value="selectedServiceItem?.id || ''" @change="selectServiceItem(serviceItems.find((item) => item.id === $event.target.value))"><option value="">请选择服务项</option><option v-for="item in serviceItems" :key="item.id" :value="item.id">{{ item.id }} · {{ item.site }} · {{ item.status }}</option></select></label>
             <div v-if="selectedServiceItem" class="pm-form pm-operation-form">
               <template v-if="['allocation', 'inbox', 'assignments'].includes(activeSection)"><div class="pm-personnel-search"><label><span>查找平台人员</span><input v-model.trim="personnelKeyword" placeholder="输入姓名关键字" @keydown.enter.prevent="loadPersonnel" /></label><button type="button" class="pm-button" :disabled="personnelLoading" @click="loadPersonnel">{{ personnelLoading ? '查询中…' : '查询' }}</button></div><p v-if="personnelError" class="pm-form-hint" role="alert">{{ personnelError }}</p><label><span>团队负责人 <em>*</em></span><select v-model="operationForm.teamLeadID" :disabled="personnelLoading" required><option value="">请选择团队负责人</option><option v-for="option in personnelOptions" :key="option.id" :value="option.id">{{ option.name }}</option></select></label><template v-if="canExecutionAssign"><label><span>项目经理 <em>*</em></span><select v-model="operationForm.projectManagerID" :disabled="personnelLoading" required><option value="">请选择项目经理</option><option v-for="option in personnelOptions" :key="option.id" :value="option.id">{{ option.name }}</option></select></label><label><span>工程师 <em>*</em></span><select v-model="engineerSelection" multiple class="pm-multi-select"><option v-for="option in personnelOptions" :key="option.id" :value="option.id">{{ option.name }}</option></select><small class="pm-multi-hint">按住 ⌘ / Ctrl 可多选</small></label><label><span>设备</span><select v-model="equipmentSelection" multiple class="pm-multi-select"><option v-for="option in equipmentOptions" :key="option.id" :value="option.id">{{ option.name }}</option></select><small class="pm-multi-hint">按住 ⌘ / Ctrl 可多选</small></label><label><span>能力码 <em>自动</em></span><div class="pm-code-chips"><button v-for="code in capabilityCodeList" :key="code" type="button" class="pm-code-chip" @click.prevent>{{ code }}</button><p v-if="!capabilityCodeList.length" class="pm-empty-mini">选择设备后自动汇总，无需填写</p></div></label></template><button class="pm-button primary" :disabled="saving" @click="runOperation('allocation')">{{ saving ? '提交中…' : canExecutionAssign ? '保存分配并校验能力' : '分配团队负责人' }}</button></template>
-              <template v-else-if="['planning', 'methods'].includes(activeSection)"><label><span>计划开始 <em>*</em></span><input v-model.trim="operationForm.plannedStart" type="datetime-local" /></label><label><span>计划结束 <em>*</em></span><input v-model.trim="operationForm.plannedEnd" type="datetime-local" /></label><label><span>现场计划 <em>*</em></span><textarea v-model.trim="operationForm.sitePlan" rows="3" placeholder="现场实施步骤和窗口"></textarea></label><label v-if="selectedServiceItem.test_mode === 'PENETRATION'"><span>渗透测试专项计划 <em>*</em></span><textarea v-model.trim="operationForm.penetrationTestPlan" rows="3"></textarea></label><button class="pm-button primary" :disabled="saving" @click="runOperation('planning')">发布实施计划</button></template>
+              <template v-else-if="activeSection === 'planning'"><label><span>计划开始 <em>*</em></span><input v-model.trim="operationForm.plannedStart" type="datetime-local" /></label><label><span>计划结束 <em>*</em></span><input v-model.trim="operationForm.plannedEnd" type="datetime-local" /></label><label><span>现场计划 <em>*</em></span><textarea v-model.trim="operationForm.sitePlan" rows="3" placeholder="现场实施步骤和窗口"></textarea></label><template v-if="selectedServiceItem.test_mode === 'PENETRATION'"><label><span>渗透测试专项计划 <em>*</em></span><textarea v-model.trim="operationForm.penetrationTestPlan" rows="3"></textarea></label><fieldset class="pm-compliant-fieldset"><legend>专项合规要素（授权 / 白名单 / 时间窗 / 应急 / 回滚）</legend><label><span>授权书编号 <em>*</em></span><input v-model.trim="operationForm.authDocNo" required placeholder="例如 AUTH-2026-001" /></label><label><span>授权生效 <em>*</em></span><input v-model.trim="operationForm.authStart" type="datetime-local" required /></label><label><span>授权截止 <em>*</em></span><input v-model.trim="operationForm.authEnd" type="datetime-local" required /></label><label><span>授权范围 <em>*</em></span><input v-model.trim="operationForm.authScope" required placeholder="例如 内网段 10.0.0.0/8" /></label><label><span>计划测试范围 <em>*</em></span><input v-model.trim="operationForm.testScope" required placeholder="例如 关键业务系统 WEB 渗透" /></label><label><span>测试时间窗 <em>*</em></span><input v-model.trim="operationForm.testWindow" required placeholder="例如 00:00-06:00" /></label><label><span>应急联系人 <em>*</em></span><input v-model.trim="operationForm.emergencyContact" required placeholder="姓名 + 电话" /></label><label><span>回滚方案 <em>*</em></span><textarea v-model.trim="operationForm.rollbackPlan" rows="3" required></textarea></label></fieldset></template><button class="pm-button primary" :disabled="saving" @click="runOperation('planning')">发布实施计划</button></template>
+              <template v-else-if="activeSection === 'methods'"><div class="pm-review-state"><span>复核状态</span><b>{{ item && reportTechReviewLabel(item.tech_review_status) }}</b></div><template v-if="item && ['PENDING', 'REJECTED'].includes(item.tech_review_status)"><label><span>复核意见</span><textarea v-model.trim="operationForm.reviewComment" rows="3" placeholder="填写风险说明或驳回原因"></textarea></label><div class="pm-form-row"><button class="pm-button primary" :disabled="saving" @click="runOperation('special-approve')">通过复核</button><button class="pm-button" :disabled="saving" @click="runOperation('special-reject')">驳回复核</button></div></template><template v-else-if="item && item.tech_review_status === 'APPROVED'"><p class="pm-form-hint">{{ item.tech_review_comment || '已通过复核，可发布实施计划' }}<span v-if="item.tech_reviewed_at"> · {{ formatDateTime(item.tech_reviewed_at) }} · {{ item.tech_reviewed_by }} </span></p></template><template v-else-if="item && item.tech_review_status === 'PENDING'"><p class="pm-form-hint">等待技术总监复核特殊方法。</p></template></template>
               <template v-else-if="activeSection === 'preparation'"><label><span>设备申领单 <em>*</em></span><input v-model.trim="operationForm.equipmentRequestID" /></label><label><span>行程预订单 <em>*</em></span><input v-model.trim="operationForm.travelRequestID" /></label><label><span>备注</span><textarea v-model.trim="operationForm.comment" rows="3"></textarea></label><button class="pm-button primary" :disabled="saving" @click="runOperation('preparation')">发起实施准备</button></template>
               <template v-else-if="activeSection === 'exceptions'"><label><span>偏离描述</span><textarea v-model.trim="operationForm.deviationDescription" rows="3" placeholder="选择服务项后填写偏离内容"></textarea></label><label><span>严重度</span><select v-model="operationForm.severity"><option value="LOW">低</option><option value="MEDIUM">中</option><option value="HIGH">高</option></select></label><button class="pm-button primary" :disabled="saving" @click="runOperation('exception-report')">上报偏离</button><label><span>评审偏离 ID</span><input v-model.trim="operationForm.deviationID" placeholder="DV-..." /></label><label><span>评审决定</span><select v-model="operationForm.decision"><option value="RELEASE">放行</option><option value="RETEST">重测</option><option value="TERMINATE">终止</option></select></label><button class="pm-button" :disabled="saving" @click="runOperation('exception-review')">提交偏离评审</button></template>
-              <template v-else-if="activeSection === 'reports'"><button class="pm-button primary" :disabled="saving" @click="runOperation('complete')">确认现场实施完成</button></template>
+              <template v-else-if="activeSection === 'reports'"><div class="pm-report-phase" v-if="item && item.report_status"><span>当前报告阶段</span><b>{{ reportStatusLabel[item.report_status] || item.report_status }}</b></div><button v-if="item && reportPhaseNext[item.report_status]" class="pm-button primary" :disabled="saving" @click="runOperation('report-next')">推进至{{ reportStatusLabel[reportPhaseNext[item.report_status]] }}</button><button class="pm-button" :disabled="saving" @click="runOperation('complete')">确认现场实施完成</button></template>
             </div><div v-else class="pm-empty-mini">请先选择服务项</div>
           </section>
           <section class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>事项 / 项目</th><th>内容摘要</th><th>负责人 / 归属</th><th>状态</th><th>完成度</th><th>时限</th><th></th></tr></thead><tbody><tr v-for="row in operationRows" :key="row.name"><td><b>{{ row.name }}</b></td><td>{{ row.detail }}<span v-if="row.warning" class="pm-cell-warning">{{ row.warning }}</span></td><td>{{ row.owner }}</td><td><span class="pm-badge" :class="['阻断', '排期冲突'].includes(row.state) ? '风险' : 'neutral'">{{ row.state }}</span></td><td><div class="pm-inline-progress"><i :style="{ width: `${row.progress}%` }"></i></div><small>{{ row.progress }}%</small></td><td>{{ row.due }}</td><td style="width: 90px; min-width: 90px;"><button class="pm-link" @click="openOperationDetail(row)">查看详情</button></td></tr></tbody></table></div><div v-if="!operationRows.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无数据</b><span>当前页面尚无待处理事项</span></div></section>
@@ -1022,7 +1089,9 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
 
     <div v-if="operationDetail" class="pm-overlay" @click.self="operationDetail = null"><aside class="pm-drawer"><header><div><span>{{ operationSectionLabel(operationDetail.section) }}</span><h2>{{ operationDetail.row.name }}</h2></div><button class="pm-icon-button" aria-label="关闭" @click="operationDetail = null"><ConsoleIcon name="close" /></button></header><div class="pm-drawer-body"><section class="pm-drawer-hero"><span class="pm-badge neutral">{{ operationDetail.row.state }}</span><p>{{ operationDetail.row.detail }}<span v-if="operationDetail.row.warning" class="pm-cell-warning">{{ operationDetail.row.warning }}</span></p><div class="pm-progress"><i :style="{ width: `${operationDetail.row.progress}%` }"></i></div><b>{{ operationDetail.row.progress }}% 已完成</b></section><dl><div v-for="field in operationDetailFields" :key="field.label"><dt>{{ field.label }}</dt><dd>{{ field.value }}</dd></div></dl></div><footer><button class="pm-button" @click="operationDetail = null">关闭</button></footer></aside></div>
 
-    <div v-if="createOpen" class="pm-overlay" @click.self="createOpen = false"><form class="pm-dialog" @submit.prevent="saveCreate"><header><div><span>CREATE</span><h2>{{ activeSection === 'projects' ? '新建项目' : '新建配置规则' }}</h2></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="createOpen = false"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>名称 <em>*</em></span><input v-model.trim="createForm.name" required :placeholder="activeSection === 'projects' ? '请输入项目名称' : '请输入规则名称'" /></label><template v-if="activeSection === 'projects'"><label><span>已审批合同 <em>*</em></span><select v-model="createForm.contractID" required @change="selectApprovedContract(approvedContracts.find((item) => item.id === createForm.contractID))"><option value="">请选择已通过审批的合同</option><option v-for="contract in approvedContracts" :key="contract.id" :value="contract.id">{{ contract.contract_number }} · {{ contract.title }} · {{ contract.customer_name || '未填写客户' }}</option></select></label><label><span>客户</span><input v-model.trim="createForm.customer" readonly /></label><label><span>合同编号</span><input v-model.trim="createForm.contract" readonly /></label><label><span>实施场所 <em>*</em></span><input v-model.trim="createForm.site" required placeholder="例如 杭州机房" /></label><label><span>技术要求</span><input v-model.trim="createForm.requirement" placeholder="请输入服务项技术要求" /></label><label><span>测试模式</span><select v-model="createForm.testMode"><option value="STANDARD">标准方法</option><option value="PENETRATION">渗透测试</option></select></label><section class="pm-service-links"><header><div><b>关联服务项</b><small>系统名称、系统等级、检测类别均为非必填</small></div><button type="button" class="pm-link" @click="addServiceLink">＋ 增加一行</button></header><div v-for="(link, index) in createForm.serviceLinks" :key="index" class="pm-service-link-row"><input v-model.trim="link.system" placeholder="系统名称" /><input v-model.trim="link.systemLevel" placeholder="系统等级" /><input v-model.trim="link.category" placeholder="检测类别" /><button type="button" class="pm-icon-button" :aria-label="`删除第 ${index + 1} 行`" @click="removeServiceLink(index)">×</button></div></section></template><template v-else><label><span>适用范围 <em>*</em></span><input v-model.trim="createForm.scope" required placeholder="请输入适用范围" /></label><label><span>触发条件</span><input v-model.trim="createForm.trigger" placeholder="请输入触发条件" /></label></template><label><span>备注</span><textarea v-model.trim="createForm.notes" rows="4" placeholder="补充说明（选填）"></textarea></label></div><footer><button type="button" class="pm-button" @click="createOpen = false">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : '保存' }}</button></footer></form></div>
+    <div v-if="createOpen" class="pm-overlay" @click.self="createOpen = false"><form class="pm-dialog" @submit.prevent="saveCreate"><header><div><span>CREATE</span><h2>新建项目</h2></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="createOpen = false"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>名称 <em>*</em></span><input v-model.trim="createForm.name" required placeholder="请输入项目名称" /></label><template v-if="activeSection === 'projects'"><label><span>已审批合同 <em>*</em></span><select v-model="createForm.contractID" required @change="selectApprovedContract(approvedContracts.find((item) => item.id === createForm.contractID))"><option value="">请选择已通过审批的合同</option><option v-for="contract in approvedContracts" :key="contract.id" :value="contract.id">{{ contract.contract_number }} · {{ contract.title }} · {{ contract.customer_name || '未填写客户' }}</option></select></label><label><span>客户</span><input v-model.trim="createForm.customer" readonly /></label><label><span>合同编号</span><input v-model.trim="createForm.contract" readonly /></label><label><span>实施场所 <em>*</em></span><input v-model.trim="createForm.site" required placeholder="例如 杭州机房" /></label><label><span>技术要求</span><input v-model.trim="createForm.requirement" placeholder="请输入服务项技术要求" /></label><label><span>测试模式</span><select v-model="createForm.testMode"><option value="STANDARD">标准方法</option><option value="PENETRATION">渗透测试</option></select></label><section class="pm-service-links"><header><div><b>关联服务项</b><small>系统名称、系统等级、检测类别均为非必填</small></div><button type="button" class="pm-link" @click="addServiceLink">＋ 增加一行</button></header><div v-for="(link, index) in createForm.serviceLinks" :key="index" class="pm-service-link-row"><input v-model.trim="link.system" placeholder="系统名称" /><input v-model.trim="link.systemLevel" placeholder="系统等级" /><input v-model.trim="link.category" placeholder="检测类别" /><button type="button" class="pm-icon-button" :aria-label="`删除第 ${index + 1} 行`" @click="removeServiceLink(index)">×</button></div></section></template><label><span>备注</span><textarea v-model.trim="createForm.notes" rows="4" placeholder="补充说明（选填）"></textarea></label></div><footer><button type="button" class="pm-button" @click="createOpen = false">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : '保存' }}</button></footer></form></div>
+
+    <div v-if="configEditorOpen" class="pm-overlay" @click.self="configEditorOpen = false"><form class="pm-dialog" @submit.prevent="saveConfigRule"><header><div><span>CONFIG</span><h2>{{ configForm.id ? '编辑配置' : '新建配置' }} · {{ activeConfigMeta.label }}</h2></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="configEditorOpen = false"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>配置名称 <em>*</em></span><input v-model.trim="configForm.name" required placeholder="请输入配置名称" /></label><template v-for="field in activeConfigMeta.fields" :key="field.key"><label v-if="field.field === 'select'"><span>{{ field.label }} <em>*</em></span><select v-model="configForm[field.key]" required><option v-for="option in field.options" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label v-else-if="field.field === 'number'"><span>{{ field.label }} <em v-if="field.required">*</em></span><input v-model.number="configForm[field.key]" type="number" :required="field.required" :min="field.min || 0" /></label><label v-else><span>{{ field.label }} <em v-if="field.required">*</em></span><input v-model.trim="configForm[field.key]" :required="field.required" :placeholder="field.placeholder || ''" /></label></template><label><span>启用</span><button type="button" class="pm-switch" :class="{ on: configForm.enabled }" :aria-label="`${configForm.enabled ? '停用' : '启用'}`" @click="configForm.enabled = !configForm.enabled"><i></i></button></label></div><footer><button type="button" class="pm-button" @click="configEditorOpen = false">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : '保存' }}</button></footer></form></div>
     <Transition name="pm-toast"><div v-if="toastMessage" class="pm-toast"><span>✓</span>{{ toastMessage }}</div></Transition>
   </div>
 </template>
