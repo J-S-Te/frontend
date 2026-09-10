@@ -441,11 +441,20 @@ test('新建项目入口按服务端同一权限 project.create 门控', () => {
 })
 
 test('项目页读取已审批合同不得把用户劫持到合同系统登录', () => {
-  // 合同 API 返回 401 时客户端默认跳转合同登录；对没有合同应用授权的账号，
-  // 该回调只会以 403 结束。项目页必须关闭这个跳转并就地提示。
+  // 合同 API 返回 401 时客户端默认整页跳转合同登录，会把用户甩出项目系统。
+  // 项目页必须关闭这个跳转，改为在新标签页补一次授权（见下一条用例）。
   assert.match(contractSource, /const \{ suppressLoginRedirect = false, \.\.\.fetchOptions \} = options/)
   assert.match(contractSource, /if \(!suppressLoginRedirect && shouldStartSubsystemLogin\(authError\)\) startContractLogin\(\)/)
   assert.match(contractSource, /export async function listApprovedContracts\(params = \{\}, options = \{\}\)/)
   assert.match(source, /listApprovedContracts\(\{\}, \{ suppressLoginRedirect: true \}\)/)
-  assert.match(source, /没有合同系统访问权限/)
+})
+
+test('新建项目在缺少合同会话时补授权而不是把用户甩出项目系统', () => {
+  // 401 无法区分"没有合同授权"与"有授权但没有合同会话"：在新标签页补一次 SSO 授权，
+  // 当前页面保持可用；合同登录固定回跳合同首页，所以不能做整页跳转。
+  assert.match(source, /import \{ listApprovedContracts, openContractAuthorizationInNewTab \} from '@\/modules\/contract_management\/api\/contract'/)
+  assert.match(source, /const opened = openContractAuthorizationInNewTab\(\)/)
+  assert.match(source, /已在新标签页打开合同系统授权，完成后回到本页重新点击「新建项目」/)
+  // 已经判定为"缺权限"的旧文案必须消失：现在缺角色和缺会话都以可执行的方式引导。
+  assert.doesNotMatch(source, /当前账号没有合同系统访问权限，请联系管理员开通后再新建项目/)
 })

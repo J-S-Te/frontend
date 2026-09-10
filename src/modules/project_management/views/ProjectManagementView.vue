@@ -39,7 +39,7 @@ import {
   reviewSpecialMethod,
   updateReportStatus,
 } from '@/modules/project_management/api/projectManagement'
-import { listApprovedContracts } from '@/modules/contract_management/api/contract'
+import { listApprovedContracts, openContractAuthorizationInNewTab } from '@/modules/contract_management/api/contract'
 import '@/modules/project_management/styles/project-management.css'
 
 const route = useRoute()
@@ -731,9 +731,16 @@ async function openCreateProject() {
     if (!approvedContracts.value.length) { showToast('当前没有已通过审批的可用合同'); return }
     createOpen.value = true
   } catch (error) {
-    showToast(error?.status === 401
-      ? '无法读取已审批合同：当前账号没有合同系统访问权限，请联系管理员开通后再新建项目'
-      : (error?.message || '读取已审批合同失败'))
+    if (error?.status === 401) {
+      // 401 分不清"没有合同授权"和"有授权但还没建立合同会话"。在新标签页补一次授权，
+      // 不劫持当前页面；授权成功后回到本页重试即可。
+      const opened = openContractAuthorizationInNewTab()
+      showToast(opened
+        ? '已在新标签页打开合同系统授权，完成后回到本页重新点击「新建项目」'
+        : '无法打开合同系统授权窗口，请手动进入合同系统完成一次授权，或联系管理员开通权限')
+      return
+    }
+    showToast(error?.message || '读取已审批合同失败')
   }
 }
 function selectApprovedContract(contract) {

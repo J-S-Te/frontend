@@ -62,3 +62,10 @@ test('approval participants can request the formatted contract preview', () => {
   assert.match(source, /previewApprovalContract\(approvalId\)/)
   assert.match(source, /`\/approvals\/\$\{encodeURIComponent\(approvalId\)\}\/contract-preview`/)
 })
+
+test('合同授权在新标签页建立会话，不劫持当前页面', () => {
+  // 合同登录固定回跳合同首页（ReturnPath 硬编码为合同根路径），
+  // 所以跨子系统调用方只能用新标签页补授权，不能整页跳转。
+  assert.match(source, /export function openContractAuthorizationInNewTab\(\)/)
+  assert.match(source, /window\.open\(`\$\{CONTRACT_PUBLIC_PATH_PREFIX\}\/auth\/login`, '_blank', 'noopener'\)/)
+})
