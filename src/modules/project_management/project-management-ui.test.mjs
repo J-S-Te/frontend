@@ -5,6 +5,7 @@ import projectManagementModule from './module.js'
 
 const source = await readFile(new URL('./views/ProjectManagementView.vue', import.meta.url), 'utf8')
 const styles = await readFile(new URL('./styles/project-management.css', import.meta.url), 'utf8')
+const pickerSource = await readFile(new URL('./components/ServiceItemPicker.vue', import.meta.url), 'utf8')
 
 test('项目管理模块暴露统一前端路由', () => {
   assert.deepEqual(projectManagementModule.route, {
@@ -177,4 +178,26 @@ test('执行总览新增准时交付率趋势、检测类别分布与团队资�
   assert.match(styles, /\.pm-status-libar \{/)
   assert.doesNotMatch(source, /测评一组/)
   assert.doesNotMatch(source, /渗透测试组/)
+})
+
+test('服务项操作台使用可搜索的服务项卡片选择器而不是原生下拉框', () => {
+  assert.match(source, /import ServiceItemPicker from '@\/modules\/project_management\/components\/ServiceItemPicker\.vue'/)
+  assert.match(source, /<ServiceItemPicker/)
+  assert.match(source, /@select="selectServiceItem"/)
+  assert.match(source, /@toggle="toggleServiceItem"/)
+  assert.match(source, /:selected-ids="selectedServiceItemIDs"/)
+  // 旧的原生下拉框与朴素复选框列表必须被替换掉。
+  assert.doesNotMatch(source, /<select :value="selectedServiceItem\?\.id/)
+  assert.doesNotMatch(source, /class="pm-selection-list"/)
+  assert.doesNotMatch(source, /class="pm-selection-row"/)
+  // 选择器自身提供搜索、卡片与选中态。
+  assert.match(pickerSource, /class="pm-picker-search"/)
+  assert.match(pickerSource, /class="pm-picker-card"/)
+  assert.match(pickerSource, /:class="\{ selected: isSelected\(item\) \}"/)
+  assert.match(pickerSource, /role="option"/)
+  assert.match(pickerSource, /aria-multiselectable/)
+  assert.match(styles, /\.pm-picker-card \{/)
+  assert.match(styles, /\.pm-picker-card\.selected \{/)
+  assert.match(styles, /\.pm-picker-search \{/)
+  assert.doesNotMatch(styles, /\.pm-selection-list \{/)
 })
