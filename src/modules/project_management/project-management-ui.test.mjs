@@ -144,6 +144,18 @@ test('资质与能力管理提供新建、CSV 导入导出与类型状态筛选'
   assert.match(styles, /\.pm-panel-actions \{[\s\S]*?gap: 8px;/)
 })
 
+test('资质与能力管理的人员/设备编号由系统按类型自动生成', () => {
+  assert.match(source, /function resourceIDPrefix\(resourceType\)/)
+  assert.match(source, /resourceType === 'EQUIPMENT' \? 'EQ-' : 'P-'/)
+  assert.match(source, /function nextResourceID\(resourceType\)/)
+  assert.match(source, /function onCapabilityTypeChange\(/)
+  assert.match(source, /capabilityAutoID/)
+  assert.match(source, /@change="onCapabilityTypeChange"/)
+  assert.match(source, /:readonly="capabilityAutoID"/)
+  assert.match(source, /capabilityDialog\.resource_type === 'EQUIPMENT' \? '设备编号' : '人员编号'/)
+  assert.doesNotMatch(source, /placeholder="例如 P-001 或 EQ-001"/)
+})
+
 test('执行总览新增准时交付率趋势、检测类别分布与团队资源利用率三卡，数据由真实记录推导', () => {
   assert.match(source, /pm-dashboard-grid-3/)
   assert.match(source, /近 12 周准时交付率趋势/)
