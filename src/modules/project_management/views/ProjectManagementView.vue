@@ -233,6 +233,25 @@ function toggleEngineer(id) {
   else selected.add(id)
   operationForm.value.engineerIDs = [...selected].join(',')
 }
+const equipmentIDSet = computed(() => new Set(selectedIDs(operationForm.value.equipmentIDs)))
+const equipmentOptions = computed(() => {
+  const byID = new Map(equipment.value.map((item) => [item.resource_id, item]))
+  const options = equipment.value.filter((item) => item.status !== 'DISABLED').map((item) => ({ id: item.resource_id, name: item.resource_name || item.resource_id }))
+  const known = new Set(options.map((option) => option.id))
+  for (const id of selectedIDs(operationForm.value.equipmentIDs)) {
+    if (!id || known.has(id)) continue
+    const item = byID.get(id)
+    options.push({ id, name: item ? item.resource_name || id : `${id}（当前值）` })
+    known.add(id)
+  }
+  return options
+})
+function toggleEquipment(id) {
+  const selected = new Set(selectedIDs(operationForm.value.equipmentIDs))
+  if (selected.has(id)) selected.delete(id)
+  else selected.add(id)
+  operationForm.value.equipmentIDs = [...selected].join(',')
+}
 const selectedServiceItems = computed(() => serviceItems.value.filter((item) => selectedServiceItemIDs.value.includes(item.id)))
 const selectedServiceItem = computed(() => selectedServiceItems.value[0] || null)
 
@@ -286,21 +305,104 @@ const kanbanColumns = computed(() => [
 ].map((column) => ({ ...column, count: column.cards.length })))
 
 const operationRows = computed(() => ({
-  monitoring: projects.value.slice(0, 5).map((p) => ({ name: `${p.id} · ${p.customer}`, detail: p.category, owner: p.manager, state: p.health, progress: p.progress, due: p.due })),
-  allocation: serviceItems.value.filter((s) => s.status === '待分配').map((s) => ({ name: `${s.id} · ${s.category}`, detail: `${s.site} / ${s.batch}`, warning: stampedContractStateByProject.value.get(s.project_id) === false ? '未上传盖章合同' : '', owner: s.team_lead_id || '待分配团队负责人', state: s.conflict_status === 'CONFLICT' ? '能力冲突' : s.team_lead_id ? '已分配' : '待分配', progress: s.project_manager_id ? 100 : s.team_lead_id ? 50 : 0, due: s.planned_end?.slice(0, 10) || '待排期' })),
-  inbox: inboxItems.value.map((s) => ({ name: `${s.id} · ${projectByID.value.get(s.project_id)?.customer || s.site}`, detail: s.project_manager_id ? '实施工程师待指派' : '项目经理待指派', owner: s.team_lead_id, state: '待处理', progress: s.project_manager_id ? 50 : 0, due: s.planned_start?.slice(0, 10) || '待排期' })),
-  planning: serviceItems.value.map((s) => ({ name: `${s.id} · ${s.site}`, detail: s.test_mode === 'PENETRATION' ? '渗透测试专项计划' : '现场实施计划', owner: s.project_manager_id || '待指派项目经理', state: s.planned_start ? '计划已发布' : '待排期', progress: s.planned_start ? 100 : 0, due: s.planned_end?.slice(0, 10) || '待排期' })),
-  preparation: deliveryEvents.value.filter((e) => e.type === 'PREPARATION_STARTED').map((e) => ({ name: e.service_item_id, detail: `设备申领 ${e.payload.equipment_request_id} / 行程 ${e.payload.travel_request_id}`, owner: e.actor_user_id, state: '准备中', progress: 50, due: new Date(e.created_at).toLocaleDateString() })),
-  qualifications: capabilities.value.map((c) => ({ name: c.resource_name, detail: c.codes.join(' / '), owner: c.resource_type === 'PERSON' ? '人员资质' : '设备能力', state: c.status === 'ACTIVE' ? '有效' : c.status, progress: c.status === 'ACTIVE' ? 100 : 0, due: c.valid_until?.slice(0, 10) || '长期' })),
-  assignments: serviceItems.value.map((s) => ({ name: `${s.id} · ${s.site}`, detail: `${s.engineer_ids?.length || 0} 人 / ${s.equipment_ids?.length || 0} 台设备`, owner: s.project_manager_id || '待指派', state: s.conflict_status === 'CONFLICT' ? '排期冲突' : s.conflict_status === 'PASSED' ? '校验通过' : '待校验', progress: s.conflict_status === 'PASSED' ? 100 : 30, due: s.planned_end?.slice(0, 10) || '待排期' })),
-  methods: serviceItems.value.filter((s) => s.test_mode === 'PENETRATION').map((s) => ({ name: `${s.id} · ${s.category}`, detail: `${s.site} / ${s.system}`, owner: s.project_manager_id || '待指派', state: s.planned_start ? '专项计划已发布' : '待制定渗透测试计划', progress: s.planned_start ? 100 : 0, due: s.planned_end?.slice(0, 10) || '待排期' })),
-  exceptions: pendingDeviations.value.map((e) => ({ name: `${e.payload?.deviation_id} · ${e.service_item_id}`, detail: e.payload?.description || '现场偏离', owner: e.actor_user_id, state: '待评审', progress: 0, due: formatDateTime(e.created_at) })),
+  monitoring: projects.value.slice(0, 5).map((p) => ({ id: p.id, name: `${p.id} · ${p.customer}`, detail: p.category, owner: p.manager, state: p.health, progress: p.progress, due: p.due })),
+  allocation: serviceItems.value.filter((s) => s.status === '待分配').map((s) => ({ id: s.id, name: `${s.id} · ${s.category}`, detail: `${s.site} / ${s.batch}`, warning: stampedContractStateByProject.value.get(s.project_id) === false ? '未上传盖章合同' : '', owner: s.team_lead_id || '待分配团队负责人', state: s.conflict_status === 'CONFLICT' ? '能力冲突' : s.team_lead_id ? '已分配' : '待分配', progress: s.project_manager_id ? 100 : s.team_lead_id ? 50 : 0, due: s.planned_end?.slice(0, 10) || '待排期' })),
+  inbox: inboxItems.value.map((s) => ({ id: s.id, name: `${s.id} · ${projectByID.value.get(s.project_id)?.customer || s.site}`, detail: s.project_manager_id ? '实施工程师待指派' : '项目经理待指派', owner: s.team_lead_id, state: '待处理', progress: s.project_manager_id ? 50 : 0, due: s.planned_start?.slice(0, 10) || '待排期' })),
+  planning: serviceItems.value.map((s) => ({ id: s.id, name: `${s.id} · ${s.site}`, detail: s.test_mode === 'PENETRATION' ? '渗透测试专项计划' : '现场实施计划', owner: s.project_manager_id || '待指派项目经理', state: s.planned_start ? '计划已发布' : '待排期', progress: s.planned_start ? 100 : 0, due: s.planned_end?.slice(0, 10) || '待排期' })),
+  preparation: deliveryEvents.value.filter((e) => e.type === 'PREPARATION_STARTED').map((e) => ({ id: e.id, name: e.service_item_id, detail: `设备申领 ${e.payload.equipment_request_id} / 行程 ${e.payload.travel_request_id}`, owner: e.actor_user_id, state: '准备中', progress: 50, due: new Date(e.created_at).toLocaleDateString() })),
+  qualifications: capabilities.value.map((c) => ({ id: c.resource_id, name: c.resource_name, detail: c.codes.join(' / '), owner: c.resource_type === 'PERSON' ? '人员资质' : '设备能力', state: c.status === 'ACTIVE' ? '有效' : c.status, progress: c.status === 'ACTIVE' ? 100 : 0, due: c.valid_until?.slice(0, 10) || '长期' })),
+  assignments: serviceItems.value.map((s) => ({ id: s.id, name: `${s.id} · ${s.site}`, detail: `${s.engineer_ids?.length || 0} 人 / ${s.equipment_ids?.length || 0} 台设备`, owner: s.project_manager_id || '待指派', state: s.conflict_status === 'CONFLICT' ? '排期冲突' : s.conflict_status === 'PASSED' ? '校验通过' : '待校验', progress: s.conflict_status === 'PASSED' ? 100 : 30, due: s.planned_end?.slice(0, 10) || '待排期' })),
+  methods: serviceItems.value.filter((s) => s.test_mode === 'PENETRATION').map((s) => ({ id: s.id, name: `${s.id} · ${s.category}`, detail: `${s.site} / ${s.system}`, owner: s.project_manager_id || '待指派', state: s.planned_start ? '专项计划已发布' : '待制定渗透测试计划', progress: s.planned_start ? 100 : 0, due: s.planned_end?.slice(0, 10) || '待排期' })),
+  exceptions: pendingDeviations.value.map((e) => ({ id: e.id, name: `${e.payload?.deviation_id} · ${e.service_item_id}`, detail: e.payload?.description || '现场偏离', owner: e.actor_user_id, state: '待评审', progress: 0, due: formatDateTime(e.created_at) })),
   standards: [],
-  reports: projects.value.filter((p) => ['现场实施完成', '报告编制'].includes(p.status)).map((p) => ({ name: `${p.id} · ${p.customer}`, detail: `${p.services} 个服务项报告`, owner: p.manager || '待指派', state: p.status === '报告编制' ? '编制中' : '待编制', progress: p.progress, due: p.due || '待排期' })),
+  reports: projects.value.filter((p) => ['现场实施完成', '报告编制'].includes(p.status)).map((p) => ({ id: p.id, name: `${p.id} · ${p.customer}`, detail: `${p.services} 个服务项报告`, owner: p.manager || '待指派', state: p.status === '报告编制' ? '编制中' : '待编制', progress: p.progress, due: p.due || '待排期' })),
 }[activeSection.value] || []))
 
 const rules = ref([])
 const visibleRules = computed(() => rules.value.filter((rule) => rule.kind === activeSection.value))
+
+const operationDetail = ref(null)
+const operationSectionLabel = (section) => ({
+  allocation: '任务分配', inbox: '实施收件箱', planning: '现场实施计划制定', preparation: '实施准备',
+  assignments: '匹配校验与冲突预警', methods: '特殊方法复核待办', qualifications: '资质与能力管理',
+  exceptions: '偏离评审', reports: '报告与收尾', monitoring: '执行总览',
+}[section] || '事项详情')
+function openOperationDetail(row) {
+  const section = activeSection.value
+  let record = null
+  if (['allocation', 'inbox', 'planning', 'assignments', 'methods'].includes(section)) record = serviceItems.value.find((item) => item.id === row.id) || null
+  else if (section === 'qualifications') record = capabilities.value.find((cap) => cap.resource_id === row.id) || capabilities.value.find((cap) => cap.resource_name === row.name) || null
+  else if (['preparation', 'exceptions'].includes(section)) record = deliveryEvents.value.find((event) => event.id === row.id) || null
+  else if (['monitoring', 'reports'].includes(section)) record = projects.value.find((project) => project.id === row.id) || null
+  operationDetail.value = { section, row: { ...row }, record }
+}
+const operationDetailFields = computed(() => {
+  const detail = operationDetail.value
+  if (!detail) return []
+  const record = detail.record || {}
+  const section = detail.section
+  if (['allocation', 'inbox', 'planning', 'assignments', 'methods'].includes(section)) {
+    return [
+      { label: '服务项编号', value: record.id || detail.row.name },
+      { label: '所属项目', value: record.project_id || '—' },
+      { label: '检测类别', value: record.category || '—' },
+      { label: '实施场所 / 批次', value: `${record.site || '—'} / ${record.batch || '—'}` },
+      { label: '技术要求', value: record.requirement || '—' },
+      { label: '特殊方法', value: record.special || '—' },
+      { label: '当前状态', value: record.status || detail.row.state || '—' },
+      { label: '团队负责人', value: record.team_lead_id || '待分配' },
+      { label: '项目经理', value: record.project_manager_id || '待指派' },
+      { label: '工程师', value: (record.engineer_ids || []).join('、') || '未指派' },
+      { label: '设备', value: (record.equipment_ids || []).join('、') || '未指派' },
+      { label: '能力码', value: (record.required_codes || []).join('、') || '—' },
+      { label: '匹配校验', value: record.conflict_status === 'CONFLICT' ? '排期冲突' : record.conflict_status === 'PASSED' ? '校验通过' : record.conflict_status || '待校验' },
+      { label: '测试模式', value: record.test_mode === 'PENETRATION' ? '渗透测试' : '标准方法' },
+      { label: '计划窗口', value: `${(record.planned_start || '—').replace('T', ' ')} 至 ${(record.planned_end || '—').replace('T', ' ')}` },
+    ]
+  }
+  if (section === 'preparation') {
+    const payload = record.payload || {}
+    return [
+      { label: '事件编号', value: record.id || '—' },
+      { label: '服务项', value: record.service_item_id || detail.row.name },
+      { label: '设备申领单', value: payload.equipment_request_id || '—' },
+      { label: '行程预订单', value: payload.travel_request_id || '—' },
+      { label: '操作人', value: record.actor_user_id || '—' },
+      { label: '发起时间', value: record.created_at ? formatDateTime(record.created_at) : '—' },
+    ]
+  }
+  if (section === 'qualifications') {
+    return [
+      { label: '资源类型', value: record.resource_type === 'PERSON' ? '人员资质' : '设备能力' },
+      { label: '资源名称', value: record.resource_name || '-—' },
+      { label: '能力编码', value: (record.codes || []).join('、') || '—' },
+      { label: '状态', value: record.status === 'ACTIVE' ? '有效' : record.status || '—' },
+      { label: '检定有效期', value: record.valid_until ? formatDateTime(record.valid_until) : '长期有效' },
+    ]
+  }
+  if (section === 'exceptions') {
+    const payload = record.payload || {}
+    return [
+      { label: '偏离编号', value: payload.deviation_id || record.id || '—' },
+      { label: '服务项', value: record.service_item_id || '—' },
+      { label: '偏离描述', value: payload.description || detail.row.detail || '—' },
+      { label: '严重度', value: payload.severity || '—' },
+      { label: '操作人', value: record.actor_user_id || '—' },
+      { label: '上报时间', value: record.created_at ? formatDateTime(record.created_at) : '—' },
+    ]
+  }
+  if (['monitoring', 'reports'].includes(section)) {
+    return [
+      { label: '项目编号', value: record.id || '—' },
+      { label: '客户', value: record.customer || '—' },
+      { label: '服务项', value: record.services ? `${record.services} 项` : detail.row.detail || '—' },
+      { label: '项目经理', value: record.manager || '待指派' },
+      { label: '当前状态', value: record.status || detail.row.state || '—' },
+      { label: '计划完成', value: record.due || detail.row.due || '待排期' },
+    ]
+  }
+  return []
+})
 
 async function loadWorkspace() {
   loading.value = true
@@ -317,7 +419,7 @@ async function loadWorkspace() {
     dashboard.value = dashboardData
     session.value = sessionData
     navigation.value = navigationData
-    if (navigationData.sections.includes('equipment')) equipment.value = await listEquipment()
+    equipment.value = await listEquipment()
     const allowed = new Set(navigationData.sections)
     if (!allowed.has(route.params.section)) {
       await router.replace({ name: 'project_management', params: { section: navigationData.default_section || navigationData.sections[0] || 'dashboard' } })
@@ -725,19 +827,21 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
             <header><div><p class="pm-panel-kicker">REAL OPERATION</p><h2>服务项操作台</h2></div><span v-if="selectedServiceItem">当前：{{ selectedServiceItem.id }} · {{ selectedServiceItem.status }}</span></header>
             <template v-if="activeSection === 'allocation'"><div class="pm-selection-list"><label v-for="item in serviceItems" :key="item.id" class="pm-selection-row"><input type="checkbox" :checked="selectedServiceItemIDs.includes(item.id)" @change="toggleServiceItem(item)" /><span><b>{{ item.id }}</b><small>{{ item.site || '未设置场所' }} · {{ item.category || '未设置检测类别' }} · {{ item.status }}</small></span></label><div v-if="!serviceItems.length" class="pm-empty-mini">暂无可分配服务项</div></div><p class="pm-form-hint">可同时选择多个服务项，批量分配团队负责人或执行团队。</p></template><label v-else><span>选择服务项</span><select :value="selectedServiceItem?.id || ''" @change="selectServiceItem(serviceItems.find((item) => item.id === $event.target.value))"><option value="">请选择服务项</option><option v-for="item in serviceItems" :key="item.id" :value="item.id">{{ item.id }} · {{ item.site }} · {{ item.status }}</option></select></label>
             <div v-if="selectedServiceItem" class="pm-form pm-operation-form">
-              <template v-if="['allocation', 'inbox', 'assignments'].includes(activeSection)"><div class="pm-personnel-search"><label><span>查找平台人员</span><input v-model.trim="personnelKeyword" placeholder="输入姓名关键字" @keydown.enter.prevent="loadPersonnel" /></label><button type="button" class="pm-button" :disabled="personnelLoading" @click="loadPersonnel">{{ personnelLoading ? '查询中…' : '查询' }}</button></div><p v-if="personnelError" class="pm-form-hint" role="alert">{{ personnelError }}</p><label><span>团队负责人 <em>*</em></span><select v-model="operationForm.teamLeadID" :disabled="personnelLoading" required><option value="">请选择团队负责人</option><option v-for="option in personnelOptions" :key="option.id" :value="option.id">{{ option.name }}</option></select></label><template v-if="canExecutionAssign"><label><span>项目经理 <em>*</em></span><select v-model="operationForm.projectManagerID" :disabled="personnelLoading" required><option value="">请选择项目经理</option><option v-for="option in personnelOptions" :key="option.id" :value="option.id">{{ option.name }}</option></select></label><div class="pm-personnel-checklist-field"><span>工程师 <em>*</em></span><div class="pm-personnel-checklist"><label v-for="option in personnelOptions" :key="option.id" class="pm-personnel-check"><input type="checkbox" :checked="engineerIDSet.has(option.id)" @change="toggleEngineer(option.id)" /><span>{{ option.name }}</span></label><p v-if="!personnelOptions.length" class="pm-empty-mini">暂无可选人员</p></div></div><label><span>设备 ID</span><input v-model.trim="operationForm.equipmentIDs" placeholder="可选，逗号分隔" /></label><label><span>能力码</span><input v-model.trim="operationForm.requiredCodes" placeholder="可选，逗号分隔" /></label></template><button class="pm-button primary" :disabled="saving" @click="runOperation('allocation')">{{ saving ? '提交中…' : canExecutionAssign ? '保存分配并校验能力' : '分配团队负责人' }}</button></template>
+              <template v-if="['allocation', 'inbox', 'assignments'].includes(activeSection)"><div class="pm-personnel-search"><label><span>查找平台人员</span><input v-model.trim="personnelKeyword" placeholder="输入姓名关键字" @keydown.enter.prevent="loadPersonnel" /></label><button type="button" class="pm-button" :disabled="personnelLoading" @click="loadPersonnel">{{ personnelLoading ? '查询中…' : '查询' }}</button></div><p v-if="personnelError" class="pm-form-hint" role="alert">{{ personnelError }}</p><label><span>团队负责人 <em>*</em></span><select v-model="operationForm.teamLeadID" :disabled="personnelLoading" required><option value="">请选择团队负责人</option><option v-for="option in personnelOptions" :key="option.id" :value="option.id">{{ option.name }}</option></select></label><template v-if="canExecutionAssign"><label><span>项目经理 <em>*</em></span><select v-model="operationForm.projectManagerID" :disabled="personnelLoading" required><option value="">请选择项目经理</option><option v-for="option in personnelOptions" :key="option.id" :value="option.id">{{ option.name }}</option></select></label><div class="pm-personnel-checklist-field"><span>工程师 <em>*</em></span><div class="pm-personnel-checklist"><label v-for="option in personnelOptions" :key="option.id" class="pm-personnel-check"><input type="checkbox" :checked="engineerIDSet.has(option.id)" @change="toggleEngineer(option.id)" /><span>{{ option.name }}</span></label><p v-if="!personnelOptions.length" class="pm-empty-mini">暂无可选人员</p></div></div><label><span>设备</span><div class="pm-personnel-checklist"><label v-for="option in equipmentOptions" :key="option.id" class="pm-personnel-check"><input type="checkbox" :checked="equipmentIDSet.has(option.id)" @change="toggleEquipment(option.id)" /><span>{{ option.name }}</span></label><p v-if="!equipmentOptions.length" class="pm-empty-mini">暂无可选设备</p></div></label><label><span>能力码</span><input v-model.trim="operationForm.requiredCodes" placeholder="可选，逗号分隔" /></label></template><button class="pm-button primary" :disabled="saving" @click="runOperation('allocation')">{{ saving ? '提交中…' : canExecutionAssign ? '保存分配并校验能力' : '分配团队负责人' }}</button></template>
               <template v-else-if="['planning', 'methods'].includes(activeSection)"><label><span>计划开始 <em>*</em></span><input v-model.trim="operationForm.plannedStart" type="datetime-local" /></label><label><span>计划结束 <em>*</em></span><input v-model.trim="operationForm.plannedEnd" type="datetime-local" /></label><label><span>现场计划 <em>*</em></span><textarea v-model.trim="operationForm.sitePlan" rows="3" placeholder="现场实施步骤和窗口"></textarea></label><label v-if="selectedServiceItem.test_mode === 'PENETRATION'"><span>渗透测试专项计划 <em>*</em></span><textarea v-model.trim="operationForm.penetrationTestPlan" rows="3"></textarea></label><button class="pm-button primary" :disabled="saving" @click="runOperation('planning')">发布实施计划</button></template>
               <template v-else-if="activeSection === 'preparation'"><label><span>设备申领单 <em>*</em></span><input v-model.trim="operationForm.equipmentRequestID" /></label><label><span>行程预订单 <em>*</em></span><input v-model.trim="operationForm.travelRequestID" /></label><label><span>备注</span><textarea v-model.trim="operationForm.comment" rows="3"></textarea></label><button class="pm-button primary" :disabled="saving" @click="runOperation('preparation')">发起实施准备</button></template>
               <template v-else-if="activeSection === 'exceptions'"><label><span>偏离描述</span><textarea v-model.trim="operationForm.deviationDescription" rows="3" placeholder="选择服务项后填写偏离内容"></textarea></label><label><span>严重度</span><select v-model="operationForm.severity"><option value="LOW">低</option><option value="MEDIUM">中</option><option value="HIGH">高</option></select></label><button class="pm-button primary" :disabled="saving" @click="runOperation('exception-report')">上报偏离</button><label><span>评审偏离 ID</span><input v-model.trim="operationForm.deviationID" placeholder="DV-..." /></label><label><span>评审决定</span><select v-model="operationForm.decision"><option value="RELEASE">放行</option><option value="RETEST">重测</option><option value="TERMINATE">终止</option></select></label><button class="pm-button" :disabled="saving" @click="runOperation('exception-review')">提交偏离评审</button></template>
               <template v-else-if="activeSection === 'reports'"><button class="pm-button primary" :disabled="saving" @click="runOperation('complete')">确认现场实施完成</button></template>
             </div><div v-else class="pm-empty-mini">请先选择服务项</div>
           </section>
-          <section class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>事项 / 项目</th><th>内容摘要</th><th>负责人 / 归属</th><th>状态</th><th>完成度</th><th>时限</th><th></th></tr></thead><tbody><tr v-for="row in operationRows" :key="row.name"><td><b>{{ row.name }}</b></td><td>{{ row.detail }}<span v-if="row.warning" class="pm-cell-warning">{{ row.warning }}</span></td><td>{{ row.owner }}</td><td><span class="pm-badge" :class="['阻断', '排期冲突'].includes(row.state) ? '风险' : 'neutral'">{{ row.state }}</span></td><td><div class="pm-inline-progress"><i :style="{ width: `${row.progress}%` }"></i></div><small>{{ row.progress }}%</small></td><td>{{ row.due }}</td><td><button class="pm-link" @click="showToast(`已打开：${row.name}`)">查看</button></td></tr></tbody></table></div><div v-if="!operationRows.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无数据</b><span>当前页面尚无待处理事项</span></div></section>
+          <section class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>事项 / 项目</th><th>内容摘要</th><th>负责人 / 归属</th><th>状态</th><th>完成度</th><th>时限</th><th></th></tr></thead><tbody><tr v-for="row in operationRows" :key="row.name"><td><b>{{ row.name }}</b></td><td>{{ row.detail }}<span v-if="row.warning" class="pm-cell-warning">{{ row.warning }}</span></td><td>{{ row.owner }}</td><td><span class="pm-badge" :class="['阻断', '排期冲突'].includes(row.state) ? '风险' : 'neutral'">{{ row.state }}</span></td><td><div class="pm-inline-progress"><i :style="{ width: `${row.progress}%` }"></i></div><small>{{ row.progress }}%</small></td><td>{{ row.due }}</td><td style="width: 90px; min-width: 90px;"><button class="pm-link" @click="openOperationDetail(row)">查看详情</button></td></tr></tbody></table></div><div v-if="!operationRows.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无数据</b><span>当前页面尚无待处理事项</span></div></section>
         </template>
       </div>
     </main>
 
     <div v-if="drawerProject" class="pm-overlay" @click.self="drawerProject = null"><aside class="pm-drawer"><header><div><span>项目详情</span><h2>{{ drawerProject.id }}</h2></div><button class="pm-icon-button" aria-label="关闭" @click="drawerProject = null"><ConsoleIcon name="close" /></button></header><div class="pm-drawer-body"><section class="pm-drawer-hero"><span class="pm-badge" :class="drawerProject.health">{{ drawerProject.health }}</span><h3>{{ drawerProject.customer }}</h3><p>{{ drawerProject.category }}</p><div class="pm-progress"><i :style="{ width: `${drawerProject.progress}%` }"></i></div><b>{{ drawerProject.progress }}% 已完成</b></section><dl><div><dt>合同编号</dt><dd>{{ drawerProject.contract || '—' }}</dd></div><div><dt>服务项数量</dt><dd>{{ drawerProject.services || '—' }}</dd></div><div><dt>负责团队</dt><dd>{{ drawerProject.team || '—' }}</dd></div><div><dt>项目经理</dt><dd>{{ drawerProject.manager || '—' }}</dd></div><div><dt>当前状态</dt><dd>{{ drawerProject.status || '—' }}</dd></div><div><dt>计划完成</dt><dd>{{ drawerProject.due || '—' }}</dd></div></dl><section class="pm-timeline"><h3>最近动态</h3><div v-for="event in projectEvents(drawerProject)" :key="event.id"><i></i><b>{{ eventLabel(event) }}</b><p>{{ event.service_item_id || drawerProject.id }} · 操作人 {{ event.actor_user_id }}</p><time>{{ formatDateTime(event.created_at) }}</time></div><div v-if="!projectEvents(drawerProject).length" class="pm-empty-mini">暂无交付动态</div></section></div><footer><button class="pm-button" @click="drawerProject = null">关闭</button></footer></aside></div>
+
+    <div v-if="operationDetail" class="pm-overlay" @click.self="operationDetail = null"><aside class="pm-drawer"><header><div><span>{{ operationSectionLabel(operationDetail.section) }}</span><h2>{{ operationDetail.row.name }}</h2></div><button class="pm-icon-button" aria-label="关闭" @click="operationDetail = null"><ConsoleIcon name="close" /></button></header><div class="pm-drawer-body"><section class="pm-drawer-hero"><span class="pm-badge neutral">{{ operationDetail.row.state }}</span><p>{{ operationDetail.row.detail }}<span v-if="operationDetail.row.warning" class="pm-cell-warning">{{ operationDetail.row.warning }}</span></p><div class="pm-progress"><i :style="{ width: `${operationDetail.row.progress}%` }"></i></div><b>{{ operationDetail.row.progress }}% 已完成</b></section><dl><div v-for="field in operationDetailFields" :key="field.label"><dt>{{ field.label }}</dt><dd>{{ field.value }}</dd></div></dl></div><footer><button class="pm-button" @click="operationDetail = null">关闭</button></footer></aside></div>
 
     <div v-if="createOpen" class="pm-overlay" @click.self="createOpen = false"><form class="pm-dialog" @submit.prevent="saveCreate"><header><div><span>CREATE</span><h2>{{ activeSection === 'projects' ? '新建项目' : '新建配置规则' }}</h2></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="createOpen = false"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>名称 <em>*</em></span><input v-model.trim="createForm.name" required :placeholder="activeSection === 'projects' ? '请输入项目名称' : '请输入规则名称'" /></label><template v-if="activeSection === 'projects'"><label><span>已审批合同 <em>*</em></span><select v-model="createForm.contractID" required @change="selectApprovedContract(approvedContracts.find((item) => item.id === createForm.contractID))"><option value="">请选择已通过审批的合同</option><option v-for="contract in approvedContracts" :key="contract.id" :value="contract.id">{{ contract.contract_number }} · {{ contract.title }} · {{ contract.customer_name || '未填写客户' }}</option></select></label><label><span>客户</span><input v-model.trim="createForm.customer" readonly /></label><label><span>合同编号</span><input v-model.trim="createForm.contract" readonly /></label><label><span>实施场所 <em>*</em></span><input v-model.trim="createForm.site" required placeholder="例如 杭州机房" /></label><label><span>技术要求</span><input v-model.trim="createForm.requirement" placeholder="请输入服务项技术要求" /></label><label><span>测试模式</span><select v-model="createForm.testMode"><option value="STANDARD">标准方法</option><option value="PENETRATION">渗透测试</option></select></label><section class="pm-service-links"><header><div><b>关联服务项</b><small>系统名称、系统等级、检测类别均为非必填</small></div><button type="button" class="pm-link" @click="addServiceLink">＋ 增加一行</button></header><div v-for="(link, index) in createForm.serviceLinks" :key="index" class="pm-service-link-row"><input v-model.trim="link.system" placeholder="系统名称" /><input v-model.trim="link.systemLevel" placeholder="系统等级" /><input v-model.trim="link.category" placeholder="检测类别" /><button type="button" class="pm-icon-button" :aria-label="`删除第 ${index + 1} 行`" @click="removeServiceLink(index)">×</button></div></section></template><template v-else><label><span>适用范围 <em>*</em></span><input v-model.trim="createForm.scope" required placeholder="请输入适用范围" /></label><label><span>触发条件</span><input v-model.trim="createForm.trigger" placeholder="请输入触发条件" /></label></template><label><span>备注</span><textarea v-model.trim="createForm.notes" rows="4" placeholder="补充说明（选填）"></textarea></label></div><footer><button type="button" class="pm-button" @click="createOpen = false">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : '保存' }}</button></footer></form></div>
     <Transition name="pm-toast"><div v-if="toastMessage" class="pm-toast"><span>✓</span>{{ toastMessage }}</div></Transition>

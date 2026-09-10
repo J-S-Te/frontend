@@ -97,3 +97,19 @@ test('服务项操作台的团队负责人从基础平台人员目录选择而�
   assert.doesNotMatch(source, /v-model\.trim="operationForm\.teamLeadID"/)
   assert.doesNotMatch(source, /placeholder="至少一个用户 ID"/)
 })
+
+test('服务项操作台的设备从设备能力清单勾选而不是填写设备 ID', () => {
+  assert.match(source, /const equipmentOptions = computed/)
+  assert.match(source, /equipmentIDSet\.has\(option\.id\)/)
+  assert.match(source, /toggleEquipment\(option\.id\)/)
+  assert.match(source, /item\.status !== 'DISABLED'/)
+  assert.doesNotMatch(source, /v-model\.trim="operationForm\.equipmentIDs"/)
+})
+
+test('操作台各区块的查看按钮真实打开详情抽屉而不是只提示已打开', () => {
+  assert.match(source, /function openOperationDetail\(/)
+  assert.match(source, /const operationDetailFields = computed/)
+  assert.match(source, /@click="openOperationDetail\(row\)"/)
+  assert.match(source, /operationSectionLabel\(operationDetail\.section\)/)
+  assert.doesNotMatch(source, /@click="showToast\(`已打开：\$\{row\.name\}`\)"/)
+})
