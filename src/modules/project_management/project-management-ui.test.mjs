@@ -383,3 +383,19 @@ test('实施计划的时间在 RFC3339 与 datetime-local 之间正确往返', (
   assert.match(source, /authStart: toDateTimeLocal\(plan\.auth_start\)/)
   assert.match(source, /authEnd: toDateTimeLocal\(plan\.auth_end\)/)
 })
+
+test('项目状态只由服务端派生，前端不再自行拼装状态集合', () => {
+  // 服务端 domain.ProjectStatusNodes() 是唯一的顺序表；这里锁定前端的只读镜像，
+  // 防止两侧各自演化后出现"筛选下拉有的状态列表里没有"这类漂移。
+  assert.match(source, /const projectStatusNodes = \['待拆解确认', '待分配', '待制定计划', '待实施', '实施准备中', '实施中', '异常处理中', '现场实施完成', '报告编制', '已完成'\]/)
+  assert.match(source, /const projectStatusCompleted = '已完成'/)
+  // 状态筛选必须由节点表生成，而不是手写 option 列表。
+  assert.match(source, /<option v-for="node in projectStatusNodes"/)
+  // 看板泳道只做归类，卡片仍展示唯一的 project.status。
+  assert.match(source, /statuses: \['待拆解确认', '待分配'\]/)
+  assert.match(source, /statuses: \[projectStatusCompleted\]/)
+  assert.match(source, /<span class="pm-badge neutral">\{\{ card\.status \}\}<\/span>/)
+  // 不得再用"还有报告未归档"二次推断项目完成态。
+  assert.doesNotMatch(source, /reportActiveProjectIDs/)
+  assert.match(source, /project\.status === projectStatusCompleted/)
+})

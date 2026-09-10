@@ -135,6 +135,11 @@ const session = ref(null)
 const lastUpdatedAt = ref(null)
 let toastTimer = 0
 
+// 项目状态节点必须与服务端 domain.ProjectStatusNodes 完全一致。
+// 服务端按服务项派生唯一状态，前端只做展示，不得再自行拼装状态集合。
+const projectStatusNodes = ['待拆解确认', '待分配', '待制定计划', '待实施', '实施准备中', '实施中', '异常处理中', '现场实施完成', '报告编制', '已完成']
+const projectStatusCompleted = '已完成'
+
 const projects = ref([])
 
 const filteredProjects = computed(() => {
@@ -149,9 +154,9 @@ const filteredProjects = computed(() => {
 })
 const categoryOptions = computed(() => [...new Set(projects.value.map((p) => p.category).filter(Boolean))])
 const teamOptions = computed(() => [...new Set(projects.value.map((p) => p.team).filter(Boolean))])
-const inFlightProjects = computed(() => projects.value.filter((p) => p.status !== '已完成'))
+const inFlightProjects = computed(() => projects.value.filter((p) => p.status !== projectStatusCompleted))
 const riskProjectCount = computed(() => projects.value.filter((p) => p.health === '风险').length)
-const doneProjectCount = computed(() => projects.value.filter((p) => ['已完成', '现场实施完成'].includes(p.status)).length)
+const doneProjectCount = computed(() => projects.value.filter((p) => p.status === projectStatusCompleted).length)
 const pendingDecompositionCount = computed(() => projects.value.filter((p) => p.status === '待拆解确认').length)
 const averageProgress = computed(() => {
   const raw = projects.value.length ? projects.value.reduce((sum, p) => sum + (p.progress || 0), 0) / projects.value.length : 0
@@ -162,8 +167,8 @@ const healthDist = computed(() => ({
   attention: projects.value.filter((p) => p.health === '关注').length,
   warning: projects.value.filter((p) => p.health === '预警').length,
   risk: projects.value.filter((p) => p.health === '风险').length,
-  ready: projects.value.filter((p) => ['待拆解确认', '待分配', '待实施'].includes(p.status)).length,
-  done: projects.value.filter((p) => ['已完成', '现场实施完成'].includes(p.status)).length,
+  ready: projects.value.filter((p) => ['待拆解确认', '待分配', '待制定计划', '待实施'].includes(p.status)).length,
+  done: projects.value.filter((p) => p.status === projectStatusCompleted).length,
 }))
 const healthScore = computed(() => {
   const d = healthDist.value
@@ -455,7 +460,7 @@ const inboxItems = computed(() => serviceItems.value.filter((item) => item.team_
 const penetrationPending = computed(() => serviceItems.value.filter((item) => item.test_mode === 'PENETRATION' && !item.planned_start))
 const notificationCount = computed(() => pendingDeviations.value.length + decompositionItems.value.length + inboxItems.value.length)
 const activeServiceCount = computed(() => serviceItems.value.filter((item) => !['现场实施完成', '已完成', '已终止'].includes(item.status)).length)
-const completedProjectCount = computed(() => projects.value.filter((project) => ['已完成', '现场实施完成'].includes(project.status)).length)
+const completedProjectCount = computed(() => projects.value.filter((project) => project.status === projectStatusCompleted).length)
 const currentUserName = computed(() => session.value?.display_name || session.value?.user_name || '当前用户')
 const currentUserRole = computed(() => session.value?.roles?.join(' / ') || '项目成员')
 const canExecutionAssign = computed(() => Array.isArray(session.value?.permissions) && session.value.permissions.includes('project.execution.assign'))
@@ -491,14 +496,17 @@ const riskRows = computed(() => [
   ...serviceItems.value.filter((item) => item.conflict_status === 'CONFLICT').map((item) => { const project = projectByID.value.get(item.project_id); return { id: `conflict-${item.id}`, level: '高', project: `${item.project_id} · ${project?.customer || item.site}`, issue: `${item.id} 人员或设备能力冲突`, owner: item.project_manager_id || item.team_lead_id || '待分配', deadline: item.planned_start?.slice(0, 10) || '待处理' } }),
 ].slice(0, 10))
 
-const reportActiveProjectIDs = computed(() => new Set(reportItems.value.filter((item) => item.report_status !== 'ARCHIVED').map((item) => item.project_id)))
+// 看板泳道是派生状态的确定性分组：只做归类，卡片仍展示唯一的 project.status。
 const kanbanColumns = computed(() => [
-  { key: '待分配', color: 'slate', cards: projects.value.filter((p) => ['待分配', '待拆解确认'].includes(p.status)) },
-  { key: '待实施', color: 'violet', cards: projects.value.filter((p) => ['待实施', '实施准备中', '待制定计划'].includes(p.status)) },
-  { key: '实施中', color: 'amber', cards: projects.value.filter((p) => ['实施中', '异常处理中'].includes(p.status)) },
-  { key: '报告编制', color: 'blue', cards: projects.value.filter((p) => reportActiveProjectIDs.value.has(p.id)) },
-  { key: '已完成', color: 'green', cards: projects.value.filter((p) => ['已完成', '现场实施完成'].includes(p.status) && !reportActiveProjectIDs.value.has(p.id)) },
-].map((column) => ({ ...column, count: column.cards.length })))
+  { key: '待分配', color: 'slate', statuses: ['待拆解确认', '待分配'] },
+  { key: '待实施', color: 'violet', statuses: ['待制定计划', '待实施', '实施准备中'] },
+  { key: '实施中', color: 'amber', statuses: ['实施中', '异常处理中'] },
+  { key: '报告编制', color: 'blue', statuses: ['报告编制'] },
+  { key: '已完成', color: 'green', statuses: [projectStatusCompleted] },
+].map((column) => {
+  const cards = projects.value.filter((p) => column.statuses.includes(p.status))
+  return { ...column, cards, count: cards.length }
+}))
 
 const operationRows = computed(() => ({
   monitoring: projects.value.slice(0, 5).map((p) => ({ id: p.id, name: `${p.id} · ${p.customer}`, detail: p.category, owner: p.manager, state: p.health, progress: p.progress, due: p.due })),
@@ -1113,7 +1121,7 @@ onBeforeUnmount(() => {
             <button type="button" @click="statusFilter = '已完成'"><span>已完成</span><b>{{ doneProjectCount }}</b><em>已完成交付</em></button>
             <button type="button" class="danger" @click="navigate('monitoring')"><span>风险项目</span><b>{{ riskProjectCount }}</b><em>含终止 / 超期</em></button>
           </section>
-          <section class="pm-filters"><label><ConsoleIcon name="search" /><input v-model="keyword" placeholder="搜索项目编号 / 客户名称 / 服务项" /></label><select v-model="statusFilter"><option value="">状态：全部</option><option>待拆解确认</option><option>待分配</option><option>待实施</option><option>实施中</option><option>报告编制</option><option>异常处理中</option></select><select v-model="categoryFilter"><option value="">检测类别：全部</option><option v-for="option in categoryOptions" :key="option" :value="option">{{ option }}</option></select><select v-model="teamFilter"><option value="">团队：全部</option><option v-for="option in teamOptions" :key="option" :value="option">{{ option }}</option></select><button class="pm-button ghost" @click="resetProjectFilters">重置</button><span class="pm-filter-count">{{ filteredProjects.length }} 条结果</span></section>
+          <section class="pm-filters"><label><ConsoleIcon name="search" /><input v-model="keyword" placeholder="搜索项目编号 / 客户名称 / 服务项" /></label><select v-model="statusFilter"><option value="">状态：全部</option><option v-for="node in projectStatusNodes" :key="node" :value="node">{{ node }}</option></select><select v-model="categoryFilter"><option value="">检测类别：全部</option><option v-for="option in categoryOptions" :key="option" :value="option">{{ option }}</option></select><select v-model="teamFilter"><option value="">团队：全部</option><option v-for="option in teamOptions" :key="option" :value="option">{{ option }}</option></select><button class="pm-button ghost" @click="resetProjectFilters">重置</button><span class="pm-filter-count">{{ filteredProjects.length }} 条结果</span></section>
           <section class="pm-table-panel">
             <div class="pm-table-scroll"><table class="pm-table"><thead><tr><th></th><th>项目 / 客户</th><th>合同编号</th><th>服务项</th><th>检测类别</th><th>团队 / 项目经理</th><th>健康度</th><th>状态</th><th>交付进度</th><th>计划完成</th><th></th></tr></thead><tbody>
               <tr v-for="project in filteredProjects" :key="project.id" :class="{ selected: selectedRows.includes(project.id), risk: project.health === '风险' }"><td><input type="checkbox" :checked="selectedRows.includes(project.id)" :aria-label="`选择 ${project.id}`" @change="toggleRow(project.id)" /></td><td><button class="pm-project-link" @click="openProject(project)"><b>{{ project.id }}</b><span>{{ project.customer }}</span></button></td><td class="mono">{{ project.contract }}</td><td>{{ project.services }}</td><td>{{ project.category }}</td><td><b>{{ project.team }}</b><span class="pm-cell-sub">{{ project.manager }}</span></td><td><span class="pm-badge" :class="project.health">{{ project.health }}</span></td><td><span class="pm-badge neutral">{{ project.status }}</span></td><td><div class="pm-progress-cell"><div class="pm-inline-progress"><i :style="{ width: `${project.progress}%` }"></i></div><small>{{ project.progress }}%</small></div></td><td :class="{ 'pm-text-danger': project.due.includes('超期') }">{{ project.due }}</td><td><button class="pm-link" @click="openProject(project)">详情</button></td></tr>
@@ -1176,7 +1184,7 @@ onBeforeUnmount(() => {
 
         <template v-else-if="activeSection === 'implementation'">
           <section class="pm-board-summary"><div><strong>{{ serviceItems.length }}</strong><span>全部服务项</span></div><div><strong>{{ serviceFlow[2].count }}</strong><span>正在实施</span></div><div><strong>{{ serviceFlow[3].count }}</strong><span>报告编制</span></div><div><strong>{{ serviceFlow[4].count }}</strong><span>现场完成</span></div></section>
-          <section class="pm-kanban"><article v-for="column in kanbanColumns" :key="column.key"><header><div><i :class="column.color"></i><b>{{ column.key }}</b></div><span>{{ column.count }}</span></header><div class="pm-kanban-body"><button v-for="card in column.cards" :key="card.id" @click="openProject(card)"><b>{{ card.id }}</b><h3>{{ card.customer }}</h3><div class="pm-inline-progress"><i :style="{ width: `${card.progress}%` }"></i></div><footer><span>{{ card.progress }}%</span><time>{{ card.due || '待排期' }}</time></footer></button><div v-if="!column.cards.length" class="pm-empty-mini">暂无数据</div></div></article></section>
+          <section class="pm-kanban"><article v-for="column in kanbanColumns" :key="column.key"><header><div><i :class="column.color"></i><b>{{ column.key }}</b></div><span>{{ column.count }}</span></header><div class="pm-kanban-body"><button v-for="card in column.cards" :key="card.id" @click="openProject(card)"><b>{{ card.id }}</b><h3>{{ card.customer }}</h3><span class="pm-badge neutral">{{ card.status }}</span><div class="pm-inline-progress"><i :style="{ width: `${card.progress}%` }"></i></div><footer><span>{{ card.progress }}%</span><time>{{ card.due || '待排期' }}</time></footer></button><div v-if="!column.cards.length" class="pm-empty-mini">暂无数据</div></div></article></section>
           <section class="pm-panel pm-operation-panel"><header><div><p class="pm-panel-kicker">FIELD EXECUTION</p><h2>现场签到与原始记录</h2></div></header><ServiceItemPicker :items="serviceItems" :selected-ids="selectedServiceItem ? [selectedServiceItem.id] : []" empty-text="暂无可签到服务项" @select="selectServiceItem" /><div v-if="selectedServiceItem" class="pm-form pm-operation-form"><label><span>纬度 <em>*</em></span><input v-model.trim="operationForm.latitude" type="number" step="any" placeholder="例如 30.2741" /></label><label><span>经度 <em>*</em></span><input v-model.trim="operationForm.longitude" type="number" step="any" placeholder="例如 120.1551" /></label><label><span>现场原始数据 <em>*</em></span><textarea v-model.trim="operationForm.rawData" rows="3"></textarea></label><label><span>环境条件 <em>*</em></span><textarea v-model.trim="operationForm.environment" rows="3"></textarea></label><button class="pm-button primary" :disabled="saving" @click="runOperation('field')">提交签到和现场记录</button></div><div v-else class="pm-empty-mini">请先选择服务项</div></section>
         </template>
 
