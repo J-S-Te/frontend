@@ -46,6 +46,22 @@ function startContractLogin({ force = false } = {}) {
 }
 
 /**
+ * openContractAuthorizationInNewTab 在新标签页建立合同子系统会话，不劫持当前页面。
+ * 跨子系统调用方（项目管理的新建项目）读到 401 时使用：401 既可能是"确实没有合同
+ * 授权"，也可能是"有授权但还没建立合同会话"，两者无法在本端区分。让用户在新标签页
+ * 走一次 SSO 授权：有授权的账号会立即拿到会话，没授权的账号会停在合同系统的无权提示页，
+ * 而当前页面始终保持可用。合同登录固定回跳合同首页，因此不做整页跳转。
+ * @returns {boolean} 是否成功发起了打开动作（被浏览器拦截时返回 false）。
+ */
+export function openContractAuthorizationInNewTab() {
+  try {
+    return Boolean(window.open(`${CONTRACT_PUBLIC_PATH_PREFIX}/auth/login`, '_blank', 'noopener'))
+  } catch {
+    return false
+  }
+}
+
+/**
  * readBody 按响应媒体类型解析 JSON 或文本错误体。
  * @param {Response} response Fetch 响应。
  * @returns {Promise<unknown>} JSON 数据，或包装为 message 字段的文本数据。
