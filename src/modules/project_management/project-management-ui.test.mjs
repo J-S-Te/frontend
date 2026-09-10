@@ -6,6 +6,7 @@ import projectManagementModule from './module.js'
 const source = await readFile(new URL('./views/ProjectManagementView.vue', import.meta.url), 'utf8')
 const styles = await readFile(new URL('./styles/project-management.css', import.meta.url), 'utf8')
 const pickerSource = await readFile(new URL('./components/ServiceItemPicker.vue', import.meta.url), 'utf8')
+const contractSource = await readFile(new URL('../contract_management/api/contract.js', import.meta.url), 'utf8')
 
 test('项目管理模块暴露统一前端路由', () => {
   assert.deepEqual(projectManagementModule.route, {
@@ -429,4 +430,22 @@ test('团队负责人、项目经理、工程师显示姓名而不是平台 ID',
   assert.match(source, /\{ label: '团队负责人', value: personLabel\(record\.team_lead_id, '待分配'\) \}/)
   assert.match(source, /\{ label: '项目经理', value: personLabel\(record\.project_manager_id, '待指派'\) \}/)
   assert.match(source, /\{ label: '工程师', value: personListLabel\(record\.engineer_ids\) \}/)
+})
+
+test('新建项目入口按服务端同一权限 project.create 门控', () => {
+  // 服务端 POST /projects 要求 project.create；前端必须用同一权限隐藏入口，
+  // 否则没有该权限的角色会点进注定 403 的链路（该链路还会调用合同系统接口）。
+  assert.match(source, /const canCreateProject = computed\(\(\) => Array\.isArray\(session\.value\?\.permissions\) && session\.value\.permissions\.includes\('project\.create'\)\)/)
+  assert.match(source, /v-if="activeSection === 'projects' && canCreateProject"/)
+  assert.doesNotMatch(source, /v-if="activeSection === 'projects'" class="pm-button primary" @click="openCreateProject"/)
+})
+
+test('项目页读取已审批合同不得把用户劫持到合同系统登录', () => {
+  // 合同 API 返回 401 时客户端默认跳转合同登录；对没有合同应用授权的账号，
+  // 该回调只会以 403 结束。项目页必须关闭这个跳转并就地提示。
+  assert.match(contractSource, /const \{ suppressLoginRedirect = false, \.\.\.fetchOptions \} = options/)
+  assert.match(contractSource, /if \(!suppressLoginRedirect && shouldStartSubsystemLogin\(authError\)\) startContractLogin\(\)/)
+  assert.match(contractSource, /export async function listApprovedContracts\(params = \{\}, options = \{\}\)/)
+  assert.match(source, /listApprovedContracts\(\{\}, \{ suppressLoginRedirect: true \}\)/)
+  assert.match(source, /没有合同系统访问权限/)
 })
