@@ -7,7 +7,8 @@ const source = await import('node:fs/promises').then(({ readFile }) => readFile(
 
 test('contract API starts one shared OIDC redirect only for an expired session', () => {
   assert.match(source, /if \(response\.status === 401\)[\s\S]*startContractLogin\(\)/)
-  assert.match(source, /if \(shouldStartSubsystemLogin\(authError\)\) startContractLogin\(\)/)
+  // 只有未显式关闭跳转的调用方才重新走登录；跨子系统调用方会传 suppressLoginRedirect。
+  assert.match(source, /if \(!suppressLoginRedirect && shouldStartSubsystemLogin\(authError\)\) startContractLogin\(\)/)
   assert.match(source, /if \(loginRedirectStarted\) return/)
   assert.match(source, /window\.location\.replace\(`\$\{CONTRACT_PUBLIC_PATH_PREFIX\}\/auth\/login\$\{prompt\}`\)/)
 })
@@ -26,7 +27,7 @@ test('contract session is replaced when the platform browser switches users', ()
 })
 
 test('contract template upload preserves browser multipart boundary', () => {
-  assert.match(source, /options\.body instanceof FormData/)
+  assert.match(source, /fetchOptions\.body instanceof FormData/)
   assert.match(source, /!hasFormDataBody \? \{ 'Content-Type': 'application\/json' \}/)
   assert.match(source, /request\('\/contract-templates',[\s\S]*method: 'POST',[\s\S]*body: form/)
 })

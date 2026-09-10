@@ -24,6 +24,7 @@ import {
   listRules,
   listServiceItems,
   listPersonnel,
+  resolvePersonnelNames,
   assignTeam,
   assignExecutionTeam,
   planImplementation,
@@ -357,6 +358,7 @@ async function loadPersonnel() {
   try {
     const result = await listPersonnel({ keyword: personnelKeyword.value.trim(), page: 1, page_size: 50 })
     personnel.value = result.items
+    rememberPersonnelNames(Object.fromEntries(result.items.map((person) => [person.user_id, person.display_name])))
   } catch (error) {
     personnel.value = []
     personnelError.value = error?.message || '基础平台人员目录加载失败'
@@ -367,12 +369,13 @@ async function loadPersonnel() {
 
 // 已保存的角色可能不在当前查询结果里；补一条“当前值”选项，避免编辑既有服务项时被静默清空。
 const personnelOptions = computed(() => {
-  const options = personnel.value.map((person) => ({ id: person.user_id, name: person.display_name || person.user_id }))
+  const options = personnel.value.map((person) => ({ id: person.user_id, name: person.display_name || '未命名人员' }))
   const known = new Set(options.map((option) => option.id))
   const selected = [operationForm.value.teamLeadID, operationForm.value.projectManagerID, ...selectedIDs(operationForm.value.engineerIDs)]
   for (const id of selected) {
     if (id && !known.has(id)) {
-      options.push({ id, name: `${id}（当前值）` })
+      // 下拉里也不显示 ULID：姓名尚未解析时用占位符，解析成功后自动变成姓名。
+      options.push({ id, name: personnelNameByID.value.get(id) || '姓名解析中…' })
       known.add(id)
     }
   }
@@ -463,7 +466,38 @@ const activeServiceCount = computed(() => serviceItems.value.filter((item) => ![
 const completedProjectCount = computed(() => projects.value.filter((project) => project.status === projectStatusCompleted).length)
 const currentUserName = computed(() => session.value?.display_name || session.value?.user_name || '当前用户')
 const currentUserRole = computed(() => session.value?.roles?.join(' / ') || '项目成员')
+// 团队负责人 / 项目经理 / 工程师在界面上必须显示姓名而不是平台 ULID。
+// 目录只支持单个 user_id 查询，所以由服务端批量解析，这里缓存映射避免重复请求。
+const personnelNameByID = ref(new Map())
+const personnelNameError = ref('')
+
+// personLabel 渲染单个人员；personListLabel 渲染工程师这类多人字段。
+// 解析不到时显示占位符而不是回退成 ULID：对业务用户来说 ID 没有任何信息量。
+function personLabel(userID, fallback = '待指派') {
+  const id = String(userID || '').trim()
+  if (!id) return fallback
+  return personnelNameByID.value.get(id) || '—'
+}
+function personListLabel(ids, fallback = '未指派') {
+  const list = (Array.isArray(ids) ? ids : []).map((id) => String(id || '').trim()).filter(Boolean)
+  if (!list.length) return fallback
+  return list.map((id) => personnelNameByID.value.get(id) || '—').join('、')
+}
+function rememberPersonnelNames(names = {}) {
+  const merged = new Map(personnelNameByID.value)
+  let changed = false
+  for (const [id, name] of Object.entries(names)) {
+    const key = String(id || '').trim()
+    const value = String(name || '').trim()
+    if (key && value && merged.get(key) !== value) { merged.set(key, value); changed = true }
+  }
+  if (changed) personnelNameByID.value = merged
+}
+
 const canExecutionAssign = computed(() => Array.isArray(session.value?.permissions) && session.value.permissions.includes('project.execution.assign'))
+// 服务端 POST /projects 强制要求 project.create。前端必须用同一权限门控入口按钮：
+// 否则项目经理等角色会点进一个注定 403 的链路（且该链路会调用合同系统接口，把用户弹到合同登录）。
+const canCreateProject = computed(() => Array.isArray(session.value?.permissions) && session.value.permissions.includes('project.create'))
 // 服务端在"发布实施计划"时强校验前置状态。这里提前把"还差哪一步"说清楚并禁用主按钮，
 // 避免用户填完整张表单才被拒绝（规范原则④：不允许「点了才报错」，且必须给可执行替代方案）。
 // tone 按规范 §2.5 取色：能力冲突=red，其余"待处理"=amber。
@@ -492,8 +526,8 @@ const serviceFlow = computed(() => [
 const decompositionProject = computed(() => projectByID.value.get(decompositionItems.value[0]?.project_id) || null)
 const decompositionBatches = computed(() => Object.entries(decompositionItems.value.reduce((groups, item) => { const key = item.batch || '未设置批次'; (groups[key] ||= []).push(item); return groups }, {})))
 const riskRows = computed(() => [
-  ...pendingDeviations.value.map((event) => { const item = itemByID.value.get(event.service_item_id); const project = projectByID.value.get(item?.project_id); return { id: event.id, level: event.payload?.severity === 'HIGH' ? '高' : '中', project: `${project?.id || item?.project_id || '未知项目'} · ${project?.customer || item?.site || '现场任务'}`, issue: event.payload?.description || '现场偏离待评审', owner: event.actor_user_id || '待认领', deadline: formatDateTime(event.created_at) } }),
-  ...serviceItems.value.filter((item) => item.conflict_status === 'CONFLICT').map((item) => { const project = projectByID.value.get(item.project_id); return { id: `conflict-${item.id}`, level: '高', project: `${item.project_id} · ${project?.customer || item.site}`, issue: `${item.id} 人员或设备能力冲突`, owner: item.project_manager_id || item.team_lead_id || '待分配', deadline: item.planned_start?.slice(0, 10) || '待处理' } }),
+  ...pendingDeviations.value.map((event) => { const item = itemByID.value.get(event.service_item_id); const project = projectByID.value.get(item?.project_id); return { id: event.id, level: event.payload?.severity === 'HIGH' ? '高' : '中', project: `${project?.id || item?.project_id || '未知项目'} · ${project?.customer || item?.site || '现场任务'}`, issue: event.payload?.description || '现场偏离待评审', owner: personLabel(event.actor_user_id, '待认领'), deadline: formatDateTime(event.created_at) } }),
+  ...serviceItems.value.filter((item) => item.conflict_status === 'CONFLICT').map((item) => { const project = projectByID.value.get(item.project_id); return { id: `conflict-${item.id}`, level: '高', project: `${item.project_id} · ${project?.customer || item.site}`, issue: `${item.id} 人员或设备能力冲突`, owner: personLabel(item.project_manager_id || item.team_lead_id, '待分配'), deadline: item.planned_start?.slice(0, 10) || '待处理' } }),
 ].slice(0, 10))
 
 // 看板泳道是派生状态的确定性分组：只做归类，卡片仍展示唯一的 project.status。
@@ -510,16 +544,16 @@ const kanbanColumns = computed(() => [
 
 const operationRows = computed(() => ({
   monitoring: projects.value.slice(0, 5).map((p) => ({ id: p.id, name: `${p.id} · ${p.customer}`, detail: p.category, owner: p.manager, state: p.health, progress: p.progress, due: p.due })),
-  allocation: serviceItems.value.filter((s) => s.status === '待分配').map((s) => ({ id: s.id, name: `${s.id} · ${s.category}`, detail: `${s.site} / ${s.batch}`, warning: stampedContractStateByProject.value.get(s.project_id) === false ? '未上传盖章合同' : '', owner: s.team_lead_id || '待分配团队负责人', state: s.conflict_status === 'CONFLICT' ? '能力冲突' : s.team_lead_id ? '已分配' : '待分配', progress: s.project_manager_id ? 100 : s.team_lead_id ? 50 : 0, due: s.planned_end?.slice(0, 10) || '待排期' })),
-  inbox: inboxItems.value.map((s) => ({ id: s.id, name: `${s.id} · ${projectByID.value.get(s.project_id)?.customer || s.site}`, detail: s.project_manager_id ? '实施工程师待指派' : '项目经理待指派', owner: s.team_lead_id, state: '待处理', progress: s.project_manager_id ? 50 : 0, due: s.planned_start?.slice(0, 10) || '待排期' })),
-  planning: serviceItems.value.map((s) => ({ id: s.id, name: `${s.id} · ${s.site}`, detail: s.test_mode === 'PENETRATION' ? '渗透测试专项计划' : '现场实施计划', owner: s.project_manager_id || '待指派项目经理', state: s.planned_start ? '计划已发布' : '待排期', progress: s.planned_start ? 100 : 0, due: s.planned_end?.slice(0, 10) || '待排期' })),
-  preparation: deliveryEvents.value.filter((e) => e.type === 'PREPARATION_STARTED').map((e) => ({ id: e.id, name: e.service_item_id, detail: `设备申领 ${e.payload.equipment_request_id} / 行程 ${e.payload.travel_request_id}`, owner: e.actor_user_id, state: '准备中', progress: 50, due: new Date(e.created_at).toLocaleDateString() })),
+  allocation: serviceItems.value.filter((s) => s.status === '待分配').map((s) => ({ id: s.id, name: `${s.id} · ${s.category}`, detail: `${s.site} / ${s.batch}`, warning: stampedContractStateByProject.value.get(s.project_id) === false ? '未上传盖章合同' : '', owner: personLabel(s.team_lead_id, '待分配团队负责人'), state: s.conflict_status === 'CONFLICT' ? '能力冲突' : s.team_lead_id ? '已分配' : '待分配', progress: s.project_manager_id ? 100 : s.team_lead_id ? 50 : 0, due: s.planned_end?.slice(0, 10) || '待排期' })),
+  inbox: inboxItems.value.map((s) => ({ id: s.id, name: `${s.id} · ${projectByID.value.get(s.project_id)?.customer || s.site}`, detail: s.project_manager_id ? '实施工程师待指派' : '项目经理待指派', owner: personLabel(s.team_lead_id, '—'), state: '待处理', progress: s.project_manager_id ? 50 : 0, due: s.planned_start?.slice(0, 10) || '待排期' })),
+  planning: serviceItems.value.map((s) => ({ id: s.id, name: `${s.id} · ${s.site}`, detail: s.test_mode === 'PENETRATION' ? '渗透测试专项计划' : '现场实施计划', owner: personLabel(s.project_manager_id, '待指派项目经理'), state: s.planned_start ? '计划已发布' : '待排期', progress: s.planned_start ? 100 : 0, due: s.planned_end?.slice(0, 10) || '待排期' })),
+  preparation: deliveryEvents.value.filter((e) => e.type === 'PREPARATION_STARTED').map((e) => ({ id: e.id, name: e.service_item_id, detail: `设备申领 ${e.payload.equipment_request_id} / 行程 ${e.payload.travel_request_id}`, owner: personLabel(e.actor_user_id, '—'), state: '准备中', progress: 50, due: new Date(e.created_at).toLocaleDateString() })),
   qualifications: capabilities.value.map((c) => ({ id: c.resource_id, name: c.resource_name, detail: c.codes.join(' / '), owner: c.resource_type === 'PERSON' ? '人员资质' : '设备能力', state: c.status === 'ACTIVE' ? '有效' : c.status, progress: c.status === 'ACTIVE' ? 100 : 0, due: c.valid_until?.slice(0, 10) || '长期' })),
-  assignments: serviceItems.value.map((s) => ({ id: s.id, name: `${s.id} · ${s.site}`, detail: `${s.engineer_ids?.length || 0} 人 / ${s.equipment_ids?.length || 0} 台设备`, owner: s.project_manager_id || '待指派', state: s.conflict_status === 'CONFLICT' ? '排期冲突' : s.conflict_status === 'PASSED' ? '校验通过' : '待校验', progress: s.conflict_status === 'PASSED' ? 100 : 30, due: s.planned_end?.slice(0, 10) || '待排期' })),
-  methods: serviceItems.value.filter((s) => s.special === '是').map((s) => ({ id: s.id, name: `${s.id} · ${s.category}`, detail: `${s.site} / ${s.system || '—'}`, owner: s.project_manager_id || '待指派', state: reportTechReviewLabel(s.tech_review_status), progress: s.tech_review_status === 'APPROVED' ? 100 : s.tech_review_status === 'PENDING' ? 50 : 0, due: s.planned_end?.slice(0, 10) || '待排期', review: s.tech_review_status, comment: s.tech_review_comment, reviewedAt: s.tech_reviewed_at })),
-  exceptions: pendingDeviations.value.map((e) => ({ id: e.id, name: `${e.payload?.deviation_id} · ${e.service_item_id}`, detail: e.payload?.description || '现场偏离', owner: e.actor_user_id, state: '待评审', progress: 0, due: formatDateTime(e.created_at) })),
+  assignments: serviceItems.value.map((s) => ({ id: s.id, name: `${s.id} · ${s.site}`, detail: `${s.engineer_ids?.length || 0} 人 / ${s.equipment_ids?.length || 0} 台设备`, owner: personLabel(s.project_manager_id), state: s.conflict_status === 'CONFLICT' ? '排期冲突' : s.conflict_status === 'PASSED' ? '校验通过' : '待校验', progress: s.conflict_status === 'PASSED' ? 100 : 30, due: s.planned_end?.slice(0, 10) || '待排期' })),
+  methods: serviceItems.value.filter((s) => s.special === '是').map((s) => ({ id: s.id, name: `${s.id} · ${s.category}`, detail: `${s.site} / ${s.system || '—'}`, owner: personLabel(s.project_manager_id), state: reportTechReviewLabel(s.tech_review_status), progress: s.tech_review_status === 'APPROVED' ? 100 : s.tech_review_status === 'PENDING' ? 50 : 0, due: s.planned_end?.slice(0, 10) || '待排期', review: s.tech_review_status, comment: s.tech_review_comment, reviewedAt: s.tech_reviewed_at })),
+  exceptions: pendingDeviations.value.map((e) => ({ id: e.id, name: `${e.payload?.deviation_id} · ${e.service_item_id}`, detail: e.payload?.description || '现场偏离', owner: personLabel(e.actor_user_id, '—'), state: '待评审', progress: 0, due: formatDateTime(e.created_at) })),
   standards: [],
-  reports: reportItems.value.map((item) => { const project = projectByID.value.get(item.project_id); return { id: item.id, name: `${item.id} · ${item.site}`, detail: `${project?.customer || item.project_id} / 报告${reportStatusLabel[item.report_status] || item.report_status}`, owner: item.project_manager_id || project?.manager || '待指派', state: reportStatusLabel[item.report_status] || item.report_status, progress: (reportStatusRank[item.report_status] || 0) * 25, due: item.report_updated_at ? item.report_updated_at.slice(0, 10) : item.planned_end?.slice(0, 10) || '待排期', report_status: item.report_status } }),
+  reports: reportItems.value.map((item) => { const project = projectByID.value.get(item.project_id); return { id: item.id, name: `${item.id} · ${item.site}`, detail: `${project?.customer || item.project_id} / 报告${reportStatusLabel[item.report_status] || item.report_status}`, owner: personLabel(item.project_manager_id, project?.manager || '待指派'), state: reportStatusLabel[item.report_status] || item.report_status, progress: (reportStatusRank[item.report_status] || 0) * 25, due: item.report_updated_at ? item.report_updated_at.slice(0, 10) : item.planned_end?.slice(0, 10) || '待排期', report_status: item.report_status } }),
 }[activeSection.value] || []))
 
 const rules = ref([])
@@ -554,9 +588,9 @@ const operationDetailFields = computed(() => {
       { label: '技术要求', value: record.requirement || '—' },
       { label: '特殊方法', value: record.special || '—' },
       { label: '当前状态', value: record.status || detail.row.state || '—' },
-      { label: '团队负责人', value: record.team_lead_id || '待分配' },
-      { label: '项目经理', value: record.project_manager_id || '待指派' },
-      { label: '工程师', value: (record.engineer_ids || []).join('、') || '未指派' },
+      { label: '团队负责人', value: personLabel(record.team_lead_id, '待分配') },
+      { label: '项目经理', value: personLabel(record.project_manager_id, '待指派') },
+      { label: '工程师', value: personListLabel(record.engineer_ids) },
       { label: '设备', value: (record.equipment_ids || []).join('、') || '未指派' },
       { label: '能力码', value: (record.required_codes || []).join('、') || '—' },
       { label: '匹配校验', value: record.conflict_status === 'CONFLICT' ? '排期冲突' : record.conflict_status === 'PASSED' ? '校验通过' : record.conflict_status || '待校验' },
@@ -649,7 +683,34 @@ async function loadWorkspace() {
   }
   // 设备目录只作为表单下拉选项，属于辅助数据：单独加载并容忍失败，
   // 避免某一个下拉数据源不可用就把整个工作区替换成错误页。
-  if (loaded) await loadEquipment()
+  if (loaded) {
+    await loadEquipment()
+    await loadPersonnelNames()
+  }
+}
+
+// loadPersonnelNames 把当前工作区引用的平台 user_id 批量解析成姓名：
+// 团队负责人、项目经理、工程师以及操作人都不应该在界面上显示成 ULID。
+// 解析失败只降级为占位符，不影响工作区本身的可读性。
+async function loadPersonnelNames() {
+  const wanted = new Set()
+  const remember = (value) => {
+    const id = String(value || '').trim()
+    if (id && !personnelNameByID.value.has(id)) wanted.add(id)
+  }
+  for (const item of serviceItems.value) {
+    remember(item.team_lead_id)
+    remember(item.project_manager_id)
+    for (const id of item.engineer_ids || []) remember(id)
+  }
+  for (const event of deliveryEvents.value) remember(event.actor_user_id)
+  if (!wanted.size) return
+  try {
+    rememberPersonnelNames(await resolvePersonnelNames([...wanted]))
+    personnelNameError.value = ''
+  } catch (error) {
+    personnelNameError.value = subsystemAccessMessage(error, '人员姓名暂时无法解析，将显示占位符。')
+  }
 }
 
 async function loadEquipment() {
@@ -664,10 +725,16 @@ async function loadEquipment() {
 
 async function openCreateProject() {
   try {
-    approvedContracts.value = await listApprovedContracts()
+    // 项目系统只依赖自身会话：合同系统返回 401 时不得把用户跳转到合同登录
+    // （对没有合同应用授权的账号，那里只会以 403 结束），改为就地给出可执行提示。
+    approvedContracts.value = await listApprovedContracts({}, { suppressLoginRedirect: true })
     if (!approvedContracts.value.length) { showToast('当前没有已通过审批的可用合同'); return }
     createOpen.value = true
-  } catch (error) { showToast(error?.message || '读取已审批合同失败') }
+  } catch (error) {
+    showToast(error?.status === 401
+      ? '无法读取已审批合同：当前账号没有合同系统访问权限，请联系管理员开通后再新建项目'
+      : (error?.message || '读取已审批合同失败'))
+  }
 }
 function selectApprovedContract(contract) {
   if (!contract) {
@@ -1049,7 +1116,7 @@ onBeforeUnmount(() => {
           <div class="pm-actions">
             <button class="pm-button" :disabled="loading" @click="loadWorkspace"><ConsoleIcon name="reset" />{{ loading ? '加载中' : '刷新' }}</button>
             <button v-if="activeSection === 'projects'" class="pm-button" @click="exportProjects"><ConsoleIcon name="export" />导出</button>
-            <button v-if="['split-rules', 'warning-rules', 'automations', 'permissions', 'sla'].includes(activeSection)" class="pm-button primary" @click="openConfigCreate">＋ 新建规则</button><button v-if="activeSection === 'projects'" class="pm-button primary" @click="openCreateProject">＋ 新建项目</button>
+            <button v-if="['split-rules', 'warning-rules', 'automations', 'permissions', 'sla'].includes(activeSection)" class="pm-button primary" @click="openConfigCreate">＋ 新建规则</button><button v-if="activeSection === 'projects' && canCreateProject" class="pm-button primary" @click="openCreateProject">＋ 新建项目</button>
             <button v-if="activeSection === 'decomposition'" class="pm-button primary" :disabled="saving" @click="confirmDecomposition">{{ saving ? '提交中…' : '确认拆解' }}</button>
           </div>
         </section>

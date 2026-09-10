@@ -230,6 +230,21 @@ export async function listPersonnel(params = {}) {
 }
 
 /**
+ * resolvePersonnelNames 批量把平台 user_id 翻译成显示名。
+ * 团队负责人、项目经理、工程师在界面上必须显示姓名而不是 ULID；负责人目录只支持单个
+ * user_id 查询，因此由服务端聚合并一次返回映射。
+ * @param {Array<string>} ids 平台 user_id 列表。
+ * @returns {Promise<Object>} user_id → display_name 映射；解析不到的 ID 不出现在结果中。
+ * @throws {Error} 目录未开通、权限不足或平台暂不可用时抛出。
+ */
+export async function resolvePersonnelNames(ids = []) {
+  const unique = [...new Set((Array.isArray(ids) ? ids : []).map((id) => String(id || '').trim()).filter(Boolean))]
+  if (!unique.length) return {}
+  const data = await request(`/personnel/names?user_ids=${encodeURIComponent(unique.join(','))}`)
+  return data && typeof data.names === 'object' && data.names !== null ? data.names : {}
+}
+
+/**
  * confirmServiceItems 批量确认服务项归属/签收。
  * @param {Array<string|number>} ids 服务项 ID 列表。
  * @returns {Promise<object>} 批量确认结果。
