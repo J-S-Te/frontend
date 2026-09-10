@@ -177,6 +177,85 @@ const healthDonutStyle = computed(() => {
   const stops = segments.map(([color, n]) => { const from = acc; acc += (n / totalCount) * 100; return `${color} ${from}% ${Math.min(acc, 100)}%` })
   return `conic-gradient(${stops.join(', ')})`
 })
+function startOfWeek(date) {
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7))
+  d.setHours(0, 0, 0, 0)
+  return d
+}
+function dateKey(date) {
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+function isoWeekOf(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))
+  const dayNum = (d.getUTCDay() + 6) % 7
+  d.setUTCDate(d.getUTCDate() - dayNum + 3)
+  const firstThursday = d.getTime()
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7) + 3)
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1))
+  return Math.ceil(((firstThursday - yearStart) / 86400000 + 1) / 7)
+}
+const completedDeliveryEvents = computed(() => deliveryEvents.value.filter((event) => event.type === 'FIELD_IMPLEMENTATION_COMPLETED'))
+const weeklyDeliveryTrend = computed(() => {
+  const monday = startOfWeek(new Date())
+  const weeks = []
+  for (let offset = 11; offset >= 0; offset--) {
+    const weekStart = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() - offset * 7)
+    weeks.push({ key: dateKey(weekStart), label: `W${isoWeekOf(weekStart)}`, total: 0, onTime: 0 })
+  }
+  const byKey = Object.fromEntries(weeks.map((week) => [week.key, week]))
+  const plannedEndByItem = new Map(serviceItems.value.map((item) => [item.id, item.planned_end]))
+  for (const event of completedDeliveryEvents.value) {
+    const week = byKey[dateKey(startOfWeek(new Date(event.created_at)))]
+    if (!week) continue
+    week.total += 1
+    const plannedEnd = plannedEndByItem.get(event.service_item_id)
+    if (!plannedEnd || new Date(plannedEnd) >= new Date(event.created_at)) week.onTime += 1
+  }
+  return weeks.map((week) => ({
+    ...week,
+    rate: week.total ? Math.round((week.onTime / week.total) * 100) : 0,
+    tooltip: week.total ? `${week.label} 完成 ${week.total} 项 · 准时 ${week.onTime} 项` : `${week.label} 暂无完成记录`,
+  }))
+})
+const onTimeRecentAverage = computed(() => {
+  const recent = weeklyDeliveryTrend.value.slice(-4).filter((week) => week.total)
+  return recent.length ? Math.round(recent.reduce((sum, week) => sum + week.rate, 0) / recent.length) : null
+})
+const categoryDist = computed(() => {
+  const counts = new Map()
+  for (const item of serviceItems.value) {
+    const category = item.category || '未分类'
+    counts.set(category, (counts.get(category) || 0) + 1)
+  }
+  const palette = ['#0ea5e9', '#8b5cf6', '#d97706', '#dc2626', '#f59e0b', '#16a34a', '#64748b']
+  const total = serviceItems.value.length || 1
+  const entries = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([name, count], index) => ({ name, count, pct: Math.round((count / total) * 100), color: palette[index % palette.length] }))
+  const others = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(6)
+  if (others.length) entries.push({ name: '其他', count: others.reduce((sum, [, count]) => sum + count, 0), pct: Math.round((others.reduce((sum, [, count]) => sum + count, 0) / total) * 100), color: palette[6] })
+  return entries
+})
+const categoryDonutStyle = computed(() => {
+  const total = serviceItems.value.length
+  if (!total) return 'conic-gradient(#e2e8f0 0 100%)'
+  let acc = 0
+  const stops = categoryDist.value.map((segment) => { const from = acc; acc += (segment.count / total) * 100; return `${segment.color} ${from}% ${Math.min(acc, 100)}%` })
+  return `conic-gradient(${stops.join(', ')})`
+})
+const teamUtilization = computed(() => {
+  const teamByProject = new Map(projects.value.map((project) => [project.id, project.team || '未归属']))
+  const active = serviceItems.value.filter((item) => !['已完成', '已终止', '终止'].includes(item.status))
+  const counts = new Map()
+  for (const item of active) {
+    const team = teamByProject.get(item.project_id) || '未归属'
+    counts.set(team, (counts.get(team) || 0) + 1)
+  }
+  const entries = [...counts.entries()].sort((a, b) => b[1] - a[1])
+  const max = Math.max(...entries.map(([, count]) => count), 1)
+  return entries.map(([name, count]) => ({ name, count, pct: Math.round((count / max) * 100) }))
+})
+const overloadedTeam = computed(() => teamUtilization.value.find((team) => team.pct >= 90))
 const monitoredProjects = computed(() => {
   const query = keyword.value.trim().toLowerCase()
   return inFlightProjects.value.filter((p) => {
@@ -795,6 +874,35 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
             <article class="pm-panel">
               <header><div><p class="pm-panel-kicker danger">ATTENTION</p><h2>风险与待办</h2></div><button class="pm-link" @click="navigate('exceptions')">查看全部 →</button></header>
               <div class="pm-risk-list"><button v-for="risk in riskRows" :key="risk.id" @click="navigate('exceptions')"><span :class="risk.level === '高' ? 'high' : 'medium'">{{ risk.level }}</span><div><b>{{ risk.project }}</b><p>{{ risk.issue }}</p></div><time>{{ risk.deadline }}</time></button><div v-if="!riskRows.length" class="pm-empty-mini">暂无风险或待评审异常</div></div>
+            </article>
+          </section>
+          <section class="pm-dashboard-grid-3">
+            <article class="pm-panel pm-trend-panel">
+              <header><div><p class="pm-panel-kicker">ON-TIME DELIVERY</p><h2>近 12 周准时交付率趋势</h2></div><span>近 4 周均值 <b>{{ onTimeRecentAverage !== null ? `${onTimeRecentAverage}%` : '—' }}</b></span></header>
+              <div class="pm-trend-chart">
+                <div v-for="week in weeklyDeliveryTrend" :key="week.key" class="pm-trend-bar" :title="week.tooltip">
+                  <span class="pm-trend-val">{{ week.rate }}%</span>
+                  <i :class="week.rate >= 85 ? 'good' : 'low'" :style="{ height: `${week.rate}%` }"></i>
+                  <span class="pm-trend-lbl">{{ week.label }}</span>
+                </div>
+              </div>
+              <div class="pm-chart-legend"><span><i class="pm-swatch good"></i>≥ 85% 准时</span><span><i class="pm-swatch low"></i>&lt; 85%</span></div>
+            </article>
+            <article class="pm-panel pm-category-panel">
+              <header><div><p class="pm-panel-kicker">CATEGORY MIX</p><h2>检测类别分布（占比）</h2></div><span>{{ serviceItems.length }} 项服务项</span></header>
+              <div class="pm-donut pm-category-donut" :style="{ background: categoryDonutStyle }"><div><strong>{{ serviceItems.length }}</strong><span>服务项</span></div></div>
+              <div class="pm-status-list">
+                <div v-for="segment in categoryDist" :key="segment.name" class="pm-status-row"><i class="pm-dot" :style="{ background: segment.color }"></i>{{ segment.name }}<b class="pm-num">{{ segment.pct }}%</b></div>
+                <div v-if="!categoryDist.length" class="pm-empty-mini">暂无服务项数据</div>
+              </div>
+            </article>
+            <article class="pm-panel pm-util-panel">
+              <header><div><p class="pm-panel-kicker">TEAM LOAD</p><h2>团队资源利用率</h2></div><span>在途负载估算</span></header>
+              <div class="pm-status-list">
+                <div v-for="team in teamUtilization" :key="team.name" class="pm-status-libar"><span class="pm-lib-lbl">{{ team.name }}</span><div class="pm-bar-bg"><i class="pm-bar-fill" :class="team.pct >= 90 ? 'warn' : 'normal'" :style="{ width: `${team.pct}%` }"></i></div><span class="pm-num">{{ team.pct }}%</span></div>
+                <div v-if="!teamUtilization.length" class="pm-empty-mini">暂无在途团队负载数据</div>
+              </div>
+              <p v-if="overloadedTeam" class="pm-alert warn"><i></i><b>{{ overloadedTeam.name }} {{ overloadedTeam.pct }}%</b> 接近满载 · 建议关注排期与人力调配</p>
             </article>
           </section>
           <section class="pm-table-panel pm-panel-inflight">
