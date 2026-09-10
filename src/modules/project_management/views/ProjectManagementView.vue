@@ -105,6 +105,9 @@ const currentMeta = computed(() => pageMeta[activeSection.value])
 const mobileMenuOpen = ref(false)
 const keyword = ref('')
 const statusFilter = ref('')
+const categoryFilter = ref('')
+const teamFilter = ref('')
+const healthFilter = ref('')
 const selectedRows = ref([])
 const drawerProject = ref(null)
 const createOpen = ref(false)
@@ -130,9 +133,58 @@ const filteredProjects = computed(() => {
   const query = keyword.value.trim().toLowerCase()
   return projects.value.filter((project) => {
     const matchKeyword = !query || [project.id, project.customer, project.contract, project.category, project.manager].join(' ').toLowerCase().includes(query)
-    return matchKeyword && (!statusFilter.value || project.status === statusFilter.value)
+    return matchKeyword
+      && (!statusFilter.value || project.status === statusFilter.value)
+      && (!categoryFilter.value || project.category === categoryFilter.value)
+      && (!teamFilter.value || project.team === teamFilter.value)
   })
 })
+const categoryOptions = computed(() => [...new Set(projects.value.map((p) => p.category).filter(Boolean))])
+const teamOptions = computed(() => [...new Set(projects.value.map((p) => p.team).filter(Boolean))])
+const inFlightProjects = computed(() => projects.value.filter((p) => p.status !== '已完成'))
+const riskProjectCount = computed(() => projects.value.filter((p) => p.health === '风险').length)
+const doneProjectCount = computed(() => projects.value.filter((p) => ['已完成', '现场实施完成'].includes(p.status)).length)
+const pendingDecompositionCount = computed(() => projects.value.filter((p) => p.status === '待拆解确认').length)
+const averageProgress = computed(() => {
+  const raw = projects.value.length ? projects.value.reduce((sum, p) => sum + (p.progress || 0), 0) / projects.value.length : 0
+  return Math.round(raw)
+})
+const healthDist = computed(() => ({
+  healthy: projects.value.filter((p) => p.health === '正常').length,
+  attention: projects.value.filter((p) => p.health === '关注').length,
+  warning: projects.value.filter((p) => p.health === '预警').length,
+  risk: projects.value.filter((p) => p.health === '风险').length,
+  ready: projects.value.filter((p) => ['待拆解确认', '待分配', '待实施'].includes(p.status)).length,
+  done: projects.value.filter((p) => ['已完成', '现场实施完成'].includes(p.status)).length,
+}))
+const healthScore = computed(() => {
+  const d = healthDist.value
+  const total = projects.value.length
+  if (!total) return 100
+  const score = Math.round(100 - d.risk * 8 - d.warning * 3 - d.attention * 1 + (d.done / total) * 5)
+  return Math.max(0, Math.min(100, score))
+})
+const healthDonutStyle = computed(() => {
+  const d = healthDist.value
+  const total = projects.value.length
+  if (!total) return 'conic-gradient(#e2e8f0 0 100%)'
+  const segments = [['#16a34a', d.healthy + d.done], ['#8b5cf6', d.attention], ['#d97706', d.warning], ['#dc2626', d.risk], ['#64748b', d.ready]]
+  const totalCount = Math.max(segments.reduce((sum, [, n]) => sum + n, 0), 1)
+  let acc = 0
+  const stops = segments.map(([color, n]) => { const from = acc; acc += (n / totalCount) * 100; return `${color} ${from}% ${Math.min(acc, 100)}%` })
+  return `conic-gradient(${stops.join(', ')})`
+})
+const monitoredProjects = computed(() => {
+  const query = keyword.value.trim().toLowerCase()
+  return inFlightProjects.value.filter((p) => {
+    const matchKeyword = !query || [p.id, p.customer, p.team, p.manager].join(' ').toLowerCase().includes(query)
+    return matchKeyword && (!healthFilter.value || p.health === healthFilter.value) && (!teamFilter.value || p.team === teamFilter.value)
+  })
+})
+const healthPillTone = (health) => ({ 正常: 'healthy', 关注: 'attention', 预警: 'warning', 风险: 'risk' })[health] || 'healthy'
+const pmHealthCount = (health) => projects.value.filter((p) => p.health === health).length
+const flowHealthTone = (key) => (['待实施', '实施中', '报告编制', '已完成'].includes(key) ? 'normal' : 'neutral')
+function resetProjectFilters() { keyword.value = ''; statusFilter.value = ''; categoryFilter.value = ''; teamFilter.value = '' }
 
 const serviceItems = ref([])
 const deliveryEvents = ref([])
@@ -164,11 +216,23 @@ async function loadPersonnel() {
 const personnelOptions = computed(() => {
   const options = personnel.value.map((person) => ({ id: person.user_id, name: person.display_name || person.user_id }))
   const known = new Set(options.map((option) => option.id))
-  for (const id of [operationForm.value.teamLeadID, operationForm.value.projectManagerID]) {
-    if (id && !known.has(id)) options.push({ id, name: `${id}（当前值）` })
+  const selected = [operationForm.value.teamLeadID, operationForm.value.projectManagerID, ...selectedIDs(operationForm.value.engineerIDs)]
+  for (const id of selected) {
+    if (id && !known.has(id)) {
+      options.push({ id, name: `${id}（当前值）` })
+      known.add(id)
+    }
   }
   return options
 })
+// 工程师是多选：把勾选结果写回逗号分隔的 engineerIDs，保持后端载荷不变。
+const engineerIDSet = computed(() => new Set(selectedIDs(operationForm.value.engineerIDs)))
+function toggleEngineer(id) {
+  const selected = new Set(selectedIDs(operationForm.value.engineerIDs))
+  if (selected.has(id)) selected.delete(id)
+  else selected.add(id)
+  operationForm.value.engineerIDs = [...selected].join(',')
+}
 const selectedServiceItems = computed(() => serviceItems.value.filter((item) => selectedServiceItemIDs.value.includes(item.id)))
 const selectedServiceItem = computed(() => selectedServiceItems.value[0] || null)
 
@@ -550,36 +614,87 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
 
         <template v-if="activeSection === 'dashboard'">
           <section class="pm-kpis">
-            <button type="button" class="pm-kpi blue" @click="navigate('projects')"><div><span>全部项目</span><em>实时</em></div><strong>{{ dashboard.project_count }}</strong><p><span>{{ dashboard.in_flight_projects }} 个在途项目</span></p></button>
-            <button type="button" class="pm-kpi cyan" @click="navigate('decomposition')"><div><span>全部服务项</span><em>合同拆解</em></div><strong>{{ dashboard.service_items }}</strong><p><span>{{ decompositionItems.length }} 项待确认</span></p></button>
-            <button type="button" class="pm-kpi amber" @click="navigate('allocation')"><div><span>资源分配待办</span><em>待处理</em></div><strong>{{ serviceFlow[0].count }}</strong><p><span>{{ inboxItems.length }} 项已下达待完善</span></p></button>
-            <button type="button" class="pm-kpi violet" @click="navigate('exceptions')"><div><span>风险项目 / 异常</span><em>实时</em></div><strong>{{ dashboard.risk_projects }}<small> / {{ pendingDeviations.length }}</small></strong><p><span>风险项目与待评审偏离</span></p></button>
+            <button type="button" class="pm-kpi blue" @click="navigate('projects')"><div class="pm-kpi-label"><span>全部项目</span><em>实时</em></div><strong class="pm-kpi-value">{{ dashboard.project_count }}<small>个</small></strong><p class="pm-kpi-note"><span>{{ dashboard.in_flight_projects }} 个在途项目</span></p></button>
+            <button type="button" class="pm-kpi cyan" @click="navigate('decomposition')"><div class="pm-kpi-label"><span>全部服务项</span><em>合同拆解</em></div><strong class="pm-kpi-value">{{ dashboard.service_items }}<small>项</small></strong><p class="pm-kpi-note"><span>{{ decompositionItems.length }} 项待确认 · 需业务管理员处理</span></p></button>
+            <button type="button" class="pm-kpi amber" @click="navigate('allocation')"><div class="pm-kpi-label"><span>资源分配待办</span><em>待处理</em></div><strong class="pm-kpi-value">{{ serviceFlow[0].count }}<small>项</small></strong><p class="pm-kpi-note"><span>{{ inboxItems.length }} 项已下达待完善</span></p></button>
+            <button type="button" class="pm-kpi violet" @click="navigate('exceptions')"><div class="pm-kpi-label"><span>风险项目 / 异常</span><em>实时</em></div><strong class="pm-kpi-value">{{ dashboard.risk_projects }}<small>项</small></strong><p class="pm-kpi-note"><span>{{ pendingDeviations.length }} 项偏离待评审</span></p></button>
           </section>
           <section class="pm-dashboard-grid">
             <article class="pm-panel pm-status-panel">
               <header><div><p class="pm-panel-kicker">SERVICE FLOW</p><h2>服务项状态分布</h2></div><span>总计 <b>{{ serviceItems.length }}</b> 项</span></header>
-              <div class="pm-status-chart"><div class="pm-donut"><div><strong>{{ activeServiceCount }}</strong><span>在途服务项</span></div></div><div class="pm-legend">
-                <button v-for="flow in serviceFlow" :key="flow.key" @click="navigate(flow.route)"><i :class="flow.color"></i><span>{{ flow.key }}</span><b>{{ flow.count }}</b><em>{{ serviceItems.length ? (flow.count * 100 / serviceItems.length).toFixed(1) : '0.0' }}%</em></button>
-              </div></div>
+              <div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>状态</th><th class="num">数量</th><th>占比</th><th>健康度</th><th></th></tr></thead><tbody><tr v-for="flow in serviceFlow" :key="flow.key" @click="navigate(flow.route)"><td><span class="pm-badge" :class="flowHealthTone(flow.key)">{{ flow.key }}</span></td><td class="num">{{ flow.count }}</td><td><div class="pm-bar-bg"><i class="pm-bar-fill" :class="flow.color" :style="{ width: `${serviceItems.length ? (flow.count * 100 / serviceItems.length).toFixed(1) : 0}%` }"></i></div><small>{{ serviceItems.length ? (flow.count * 100 / serviceItems.length).toFixed(1) : '0.0' }}%</small></td><td>{{ flowHealthTone(flow.key) === 'normal' ? '正常' : '待处理' }}</td><td><button class="pm-link">查看 →</button></td></tr><tr v-if="!serviceFlow.length"><td colspan="5" class="pm-empty-mini">暂无服务项数据</td></tr></tbody></table></div>
             </article>
             <article class="pm-panel">
               <header><div><p class="pm-panel-kicker danger">ATTENTION</p><h2>风险与待办</h2></div><button class="pm-link" @click="navigate('exceptions')">查看全部 →</button></header>
               <div class="pm-risk-list"><button v-for="risk in riskRows" :key="risk.id" @click="navigate('exceptions')"><span :class="risk.level === '高' ? 'high' : 'medium'">{{ risk.level }}</span><div><b>{{ risk.project }}</b><p>{{ risk.issue }}</p></div><time>{{ risk.deadline }}</time></button><div v-if="!riskRows.length" class="pm-empty-mini">暂无风险或待评审异常</div></div>
             </article>
           </section>
-          <section class="pm-panel pm-project-progress">
-            <header><div><p class="pm-panel-kicker">DELIVERY PULSE</p><h2>重点项目交付进度</h2></div><button class="pm-link" @click="navigate('monitoring')">实时监控 →</button></header>
-            <div class="pm-progress-row" v-for="project in projects.slice(0, 4)" :key="project.id" @click="openProject(project)"><div><b>{{ project.id }}</b><span>{{ project.customer }}</span></div><span class="pm-badge" :class="project.health">{{ project.health }}</span><div class="pm-progress"><i :style="{ width: `${project.progress}%` }"></i></div><strong>{{ project.progress }}%</strong><time>{{ project.due }}</time></div>
+          <section class="pm-table-panel pm-panel-inflight">
+            <header><div><p class="pm-panel-kicker">DELIVERY PULSE</p><h2>在途项目 · 实时动态</h2></div><span>共 {{ inFlightProjects.length }} 个在途项目</span></header>
+            <div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>项目编号</th><th>客户</th><th>服务项</th><th>团队 / 项目经理</th><th>健康度</th><th>进度</th><th>计划完成</th><th></th></tr></thead><tbody><tr v-for="project in inFlightProjects.slice(0, 8)" :key="project.id" :class="{ risk: project.health === '风险' }"><td><button class="pm-project-link" @click="openProject(project)"><b>{{ project.id }}</b></button></td><td>{{ project.customer }}</td><td>{{ project.services }} 项</td><td><b>{{ project.team }}</b><span class="pm-cell-sub">{{ project.manager }}</span></td><td><span class="pm-badge" :class="project.health">{{ project.health }}</span></td><td><div class="pm-progress-cell"><div class="pm-inline-progress"><i :style="{ width: `${project.progress}%` }"></i></div><small>{{ project.progress }}%</small></div></td><td :class="{ 'pm-text-danger': project.due.includes('超期') }">{{ project.due }}</td><td><button class="pm-link" @click="openProject(project)">详情</button></td></tr><tr v-if="!inFlightProjects.length"><td colspan="8" class="pm-empty-mini">暂无在途项目</td></tr></tbody></table></div>
+            <footer class="pm-table-footer"><span>共 {{ inFlightProjects.length }} 个在途项目</span><span>前 8 条 · 完整列表请前往实时监控</span></footer>
           </section>
         </template>
 
         <template v-else-if="activeSection === 'projects'">
-          <section class="pm-summary-strip"><button><b>{{ projects.length }}</b><span>全部项目</span></button><button><b>{{ projects.filter((p) => p.status === '待拆解确认').length }}</b><span>待拆解确认</span></button><button><b>{{ projects.filter((p) => p.status !== '已完成').length }}</b><span>在途项目</span></button><button><b>{{ projects.filter((p) => p.status === '已完成').length }}</b><span>已完成</span></button><button class="danger"><b>{{ projects.filter((p) => p.health === '风险').length }}</b><span>风险项目</span></button></section>
-          <section class="pm-filters"><label><ConsoleIcon name="search" /><input v-model="keyword" placeholder="搜索项目编号 / 客户 / 合同 / 项目经理" /></label><select v-model="statusFilter"><option value="">全部状态</option><option>待拆解确认</option><option>待分配</option><option>待实施</option><option>实施中</option><option>报告编制</option><option>异常处理中</option></select><button class="pm-button ghost" @click="keyword = ''; statusFilter = ''">重置</button><span>{{ filteredProjects.length }} 条结果</span></section>
+          <section class="pm-summary-strip">
+            <button type="button" @click="statusFilter = ''"><span>全部项目</span><b>{{ projects.length }}</b><em>当前租户 · 实时</em></button>
+            <button type="button" @click="statusFilter = '待拆解确认'"><span>待拆解确认</span><b>{{ pendingDecompositionCount }}</b><em>需业务管理员处理</em></button>
+            <button type="button" @click="statusFilter = ''"><span>在途项目</span><b>{{ inFlightProjects.length }}</b><em>含实施中 / 报告编制</em></button>
+            <button type="button" @click="statusFilter = '已完成'"><span>已完成</span><b>{{ doneProjectCount }}</b><em>已完成交付</em></button>
+            <button type="button" class="danger" @click="navigate('monitoring')"><span>风险项目</span><b>{{ riskProjectCount }}</b><em>含终止 / 超期</em></button>
+          </section>
+          <section class="pm-filters"><label><ConsoleIcon name="search" /><input v-model="keyword" placeholder="搜索项目编号 / 客户名称 / 服务项" /></label><select v-model="statusFilter"><option value="">状态：全部</option><option>待拆解确认</option><option>待分配</option><option>待实施</option><option>实施中</option><option>报告编制</option><option>异常处理中</option></select><select v-model="categoryFilter"><option value="">检测类别：全部</option><option v-for="option in categoryOptions" :key="option" :value="option">{{ option }}</option></select><select v-model="teamFilter"><option value="">团队：全部</option><option v-for="option in teamOptions" :key="option" :value="option">{{ option }}</option></select><button class="pm-button ghost" @click="resetProjectFilters">重置</button><span class="pm-filter-count">{{ filteredProjects.length }} 条结果</span></section>
           <section class="pm-table-panel">
             <div class="pm-table-scroll"><table class="pm-table"><thead><tr><th></th><th>项目 / 客户</th><th>合同编号</th><th>服务项</th><th>检测类别</th><th>团队 / 项目经理</th><th>健康度</th><th>状态</th><th>交付进度</th><th>计划完成</th><th></th></tr></thead><tbody>
-              <tr v-for="project in filteredProjects" :key="project.id" :class="{ selected: selectedRows.includes(project.id), risk: project.health === '风险' }"><td><input type="checkbox" :checked="selectedRows.includes(project.id)" :aria-label="`选择 ${project.id}`" @change="toggleRow(project.id)" /></td><td><button class="pm-project-link" @click="openProject(project)"><b>{{ project.id }}</b><span>{{ project.customer }}</span></button></td><td class="mono">{{ project.contract }}</td><td>{{ project.services }}</td><td>{{ project.category }}</td><td><b>{{ project.team }}</b><span class="pm-cell-sub">{{ project.manager }}</span></td><td><span class="pm-badge" :class="project.health">{{ project.health }}</span></td><td><span class="pm-badge neutral">{{ project.status }}</span></td><td><div class="pm-inline-progress"><i :style="{ width: `${project.progress}%` }"></i></div><small>{{ project.progress }}%</small></td><td :class="{ 'pm-text-danger': project.due.includes('超期') }">{{ project.due }}</td><td><button class="pm-link" @click="openProject(project)">详情</button></td></tr>
-            </tbody></table></div><footer><span>已选择 {{ selectedRows.length }} 项</span><span>第 1 / 1 页</span></footer>
+              <tr v-for="project in filteredProjects" :key="project.id" :class="{ selected: selectedRows.includes(project.id), risk: project.health === '风险' }"><td><input type="checkbox" :checked="selectedRows.includes(project.id)" :aria-label="`选择 ${project.id}`" @change="toggleRow(project.id)" /></td><td><button class="pm-project-link" @click="openProject(project)"><b>{{ project.id }}</b><span>{{ project.customer }}</span></button></td><td class="mono">{{ project.contract }}</td><td>{{ project.services }}</td><td>{{ project.category }}</td><td><b>{{ project.team }}</b><span class="pm-cell-sub">{{ project.manager }}</span></td><td><span class="pm-badge" :class="project.health">{{ project.health }}</span></td><td><span class="pm-badge neutral">{{ project.status }}</span></td><td><div class="pm-progress-cell"><div class="pm-inline-progress"><i :style="{ width: `${project.progress}%` }"></i></div><small>{{ project.progress }}%</small></div></td><td :class="{ 'pm-text-danger': project.due.includes('超期') }">{{ project.due }}</td><td><button class="pm-link" @click="openProject(project)">详情</button></td></tr>
+            </tbody></table></div>
+            <footer class="pm-table-footer"><span>已选择 {{ selectedRows.length }} 项 · 共 {{ filteredProjects.length }} 条</span><div class="pm-pagination"><button class="pm-pg" disabled>‹</button><button class="pm-pg active">1</button><button class="pm-pg" disabled>›</button></div></footer>
+          </section>
+        </template>
+
+        <template v-else-if="activeSection === 'monitoring'">
+          <section class="pm-dashboard-grid">
+            <article class="pm-panel">
+              <header><div><p class="pm-panel-kicker">HEALTH MATRIX</p><h2>在途项目健康度分布</h2></div><span>共 {{ inFlightProjects.length }} 个在途项目 · 健康分 {{ healthScore }} / 100</span></header>
+              <div class="pm-health-bar">
+                <button type="button" class="pm-health-cell healthy" @click="healthFilter = ''"><span class="num">{{ healthDist.healthy }}</span><b>健康</b></button>
+                <button type="button" class="pm-health-cell attention" @click="healthFilter = '关注'"><span class="num">{{ healthDist.attention }}</span><b>关注</b></button>
+                <button type="button" class="pm-health-cell warning" @click="healthFilter = '预警'"><span class="num">{{ healthDist.warning }}</span><b>预警</b></button>
+                <button type="button" class="pm-health-cell danger" @click="healthFilter = '风险'"><span class="num">{{ healthDist.risk }}</span><b>风险</b></button>
+                <button type="button" class="pm-health-cell ready" @click="healthFilter = ''"><span class="num">{{ healthDist.ready }}</span><b>待实施</b></button>
+                <button type="button" class="pm-health-cell done" @click="healthFilter = ''"><span class="num">{{ healthDist.done }}</span><b>已完成</b></button>
+              </div>
+              <div class="pm-health-score">
+                <div class="pm-donut pm-health-donut" :style="{ background: healthDonutStyle }"><div><strong>{{ healthScore }}</strong><span>健康分</span></div></div>
+                <dl class="pm-desc-list">
+                  <div class="pm-desc-item"><dt>平均完成度</dt><dd>{{ averageProgress }}%</dd></div>
+                  <div class="pm-desc-item"><dt>服务项总数</dt><dd>{{ serviceItems.length }}</dd></div>
+                  <div class="pm-desc-item"><dt>待拆解确认</dt><dd>{{ pendingDecompositionCount }}</dd></div>
+                  <div class="pm-desc-item"><dt>活跃异常</dt><dd class="pm-text-danger">{{ riskRows.length }}</dd></div>
+                  <div class="pm-desc-item"><dt>待评审偏离</dt><dd class="pm-text-danger">{{ pendingDeviations.length }}</dd></div>
+                  <div class="pm-desc-item"><dt>已完成项目</dt><dd class="pm-text-success">{{ doneProjectCount }}</dd></div>
+                </dl>
+              </div>
+            </article>
+            <article class="pm-panel pm-risk-card">
+              <header><div><p class="pm-panel-kicker danger">RISK WATCH</p><h2>⚠ 风险预警 <b class="pm-num-badge">{{ riskProjectCount }}</b></h2></div><button class="pm-link" @click="navigate('exceptions')">查看全部 →</button></header>
+              <div class="pm-risk-list"><button v-for="risk in riskRows" :key="risk.id" @click="navigate('exceptions')"><span :class="risk.level === '高' ? 'high' : 'medium'">{{ risk.level }}</span><div><b>{{ risk.project }}</b><p>{{ risk.issue }}</p></div><time>{{ risk.deadline }}</time></button><div v-if="!riskRows.length" class="pm-empty-mini">暂无风险待处理</div></div>
+            </article>
+          </section>
+          <section class="pm-table-panel">
+            <header class="pm-monitor-head">
+              <div class="pm-tabs-bar" role="tablist" aria-label="按健康度筛选">
+                <button type="button" class="pm-tab-pill" :class="{ active: healthFilter === '' }" @click="healthFilter = ''">全部 {{ inFlightProjects.length }}</button>
+                <button type="button" class="pm-tab-pill" :class="{ active: healthFilter === '正常' }" @click="healthFilter = '正常'">健康 {{ pmHealthCount('正常') }}</button>
+                <button type="button" class="pm-tab-pill" :class="{ active: healthFilter === '关注' }" @click="healthFilter = '关注'">关注 {{ pmHealthCount('关注') }}</button>
+                <button type="button" class="pm-tab-pill" :class="{ active: healthFilter === '风险' }" @click="healthFilter = '风险'">风险 {{ pmHealthCount('风险') }}</button>
+              </div>
+              <span class="pm-filter-count">共 {{ monitoredProjects.length }} 条</span>
+            </header>
+            <div class="pm-filters pm-filters-flat"><label><ConsoleIcon name="search" /><input v-model="keyword" placeholder="搜索项目 / 客户 / 团队" /></label><select v-model="teamFilter"><option value="">团队：全部</option><option v-for="option in teamOptions" :key="option" :value="option">{{ option }}</option></select><button class="pm-button ghost" @click="resetProjectFilters">重置</button></div>
+            <div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>项目编号</th><th>客户</th><th>服务项</th><th>团队</th><th>项目经理</th><th>状态</th><th>进度</th><th>计划完成</th><th>健康度</th><th></th></tr></thead><tbody><tr v-for="project in monitoredProjects" :key="project.id" :class="{ risk: project.health === '风险' }"><td><button class="pm-project-link" @click="openProject(project)"><b>{{ project.id }}</b></button></td><td>{{ project.customer }}</td><td>{{ project.services }} 项</td><td>{{ project.team }}</td><td>{{ project.manager }}</td><td><span class="pm-badge neutral">{{ project.status }}</span></td><td><div class="pm-progress-cell"><div class="pm-inline-progress"><i :style="{ width: `${project.progress}%` }"></i></div><small>{{ project.progress }}%</small></div></td><td :class="{ 'pm-text-danger': project.due.includes('超期') }">{{ project.due }}</td><td><span class="pm-health-pill" :class="healthPillTone(project.health)"><i></i>{{ project.health }}</span></td><td><button class="pm-btn-link" @click="openProject(project)">详情</button></td></tr><tr v-if="!monitoredProjects.length"><td colspan="10" class="pm-empty-mini">暂无匹配的在途项目</td></tr></tbody></table></div>
+            <footer class="pm-table-footer"><span>共 {{ monitoredProjects.length }} 个在途项目</span><div class="pm-pagination"><button class="pm-pg" disabled>‹</button><button class="pm-pg active">1</button><button class="pm-pg" disabled>›</button></div></footer>
           </section>
         </template>
 
@@ -610,7 +725,7 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
             <header><div><p class="pm-panel-kicker">REAL OPERATION</p><h2>服务项操作台</h2></div><span v-if="selectedServiceItem">当前：{{ selectedServiceItem.id }} · {{ selectedServiceItem.status }}</span></header>
             <template v-if="activeSection === 'allocation'"><div class="pm-selection-list"><label v-for="item in serviceItems" :key="item.id" class="pm-selection-row"><input type="checkbox" :checked="selectedServiceItemIDs.includes(item.id)" @change="toggleServiceItem(item)" /><span><b>{{ item.id }}</b><small>{{ item.site || '未设置场所' }} · {{ item.category || '未设置检测类别' }} · {{ item.status }}</small></span></label><div v-if="!serviceItems.length" class="pm-empty-mini">暂无可分配服务项</div></div><p class="pm-form-hint">可同时选择多个服务项，批量分配团队负责人或执行团队。</p></template><label v-else><span>选择服务项</span><select :value="selectedServiceItem?.id || ''" @change="selectServiceItem(serviceItems.find((item) => item.id === $event.target.value))"><option value="">请选择服务项</option><option v-for="item in serviceItems" :key="item.id" :value="item.id">{{ item.id }} · {{ item.site }} · {{ item.status }}</option></select></label>
             <div v-if="selectedServiceItem" class="pm-form pm-operation-form">
-              <template v-if="['allocation', 'inbox', 'assignments'].includes(activeSection)"><div class="pm-personnel-search"><label><span>查找平台人员</span><input v-model.trim="personnelKeyword" placeholder="输入姓名关键字" @keydown.enter.prevent="loadPersonnel" /></label><button type="button" class="pm-button" :disabled="personnelLoading" @click="loadPersonnel">{{ personnelLoading ? '查询中…' : '查询' }}</button></div><p v-if="personnelError" class="pm-form-hint" role="alert">{{ personnelError }}</p><label><span>团队负责人 <em>*</em></span><select v-model="operationForm.teamLeadID" :disabled="personnelLoading" required><option value="">请选择团队负责人</option><option v-for="option in personnelOptions" :key="option.id" :value="option.id">{{ option.name }}</option></select></label><template v-if="canExecutionAssign"><label><span>项目经理 <em>*</em></span><select v-model="operationForm.projectManagerID" :disabled="personnelLoading" required><option value="">请选择项目经理</option><option v-for="option in personnelOptions" :key="option.id" :value="option.id">{{ option.name }}</option></select></label><label><span>工程师 ID（逗号分隔） <em>*</em></span><input v-model.trim="operationForm.engineerIDs" placeholder="至少一个用户 ID" /></label><label><span>设备 ID</span><input v-model.trim="operationForm.equipmentIDs" placeholder="可选，逗号分隔" /></label><label><span>能力码</span><input v-model.trim="operationForm.requiredCodes" placeholder="可选，逗号分隔" /></label></template><button class="pm-button primary" :disabled="saving" @click="runOperation('allocation')">{{ saving ? '提交中…' : canExecutionAssign ? '保存分配并校验能力' : '分配团队负责人' }}</button></template>
+              <template v-if="['allocation', 'inbox', 'assignments'].includes(activeSection)"><div class="pm-personnel-search"><label><span>查找平台人员</span><input v-model.trim="personnelKeyword" placeholder="输入姓名关键字" @keydown.enter.prevent="loadPersonnel" /></label><button type="button" class="pm-button" :disabled="personnelLoading" @click="loadPersonnel">{{ personnelLoading ? '查询中…' : '查询' }}</button></div><p v-if="personnelError" class="pm-form-hint" role="alert">{{ personnelError }}</p><label><span>团队负责人 <em>*</em></span><select v-model="operationForm.teamLeadID" :disabled="personnelLoading" required><option value="">请选择团队负责人</option><option v-for="option in personnelOptions" :key="option.id" :value="option.id">{{ option.name }}</option></select></label><template v-if="canExecutionAssign"><label><span>项目经理 <em>*</em></span><select v-model="operationForm.projectManagerID" :disabled="personnelLoading" required><option value="">请选择项目经理</option><option v-for="option in personnelOptions" :key="option.id" :value="option.id">{{ option.name }}</option></select></label><div class="pm-personnel-checklist-field"><span>工程师 <em>*</em></span><div class="pm-personnel-checklist"><label v-for="option in personnelOptions" :key="option.id" class="pm-personnel-check"><input type="checkbox" :checked="engineerIDSet.has(option.id)" @change="toggleEngineer(option.id)" /><span>{{ option.name }}</span></label><p v-if="!personnelOptions.length" class="pm-empty-mini">暂无可选人员</p></div></div><label><span>设备 ID</span><input v-model.trim="operationForm.equipmentIDs" placeholder="可选，逗号分隔" /></label><label><span>能力码</span><input v-model.trim="operationForm.requiredCodes" placeholder="可选，逗号分隔" /></label></template><button class="pm-button primary" :disabled="saving" @click="runOperation('allocation')">{{ saving ? '提交中…' : canExecutionAssign ? '保存分配并校验能力' : '分配团队负责人' }}</button></template>
               <template v-else-if="['planning', 'methods'].includes(activeSection)"><label><span>计划开始 <em>*</em></span><input v-model.trim="operationForm.plannedStart" type="datetime-local" /></label><label><span>计划结束 <em>*</em></span><input v-model.trim="operationForm.plannedEnd" type="datetime-local" /></label><label><span>现场计划 <em>*</em></span><textarea v-model.trim="operationForm.sitePlan" rows="3" placeholder="现场实施步骤和窗口"></textarea></label><label v-if="selectedServiceItem.test_mode === 'PENETRATION'"><span>渗透测试专项计划 <em>*</em></span><textarea v-model.trim="operationForm.penetrationTestPlan" rows="3"></textarea></label><button class="pm-button primary" :disabled="saving" @click="runOperation('planning')">发布实施计划</button></template>
               <template v-else-if="activeSection === 'preparation'"><label><span>设备申领单 <em>*</em></span><input v-model.trim="operationForm.equipmentRequestID" /></label><label><span>行程预订单 <em>*</em></span><input v-model.trim="operationForm.travelRequestID" /></label><label><span>备注</span><textarea v-model.trim="operationForm.comment" rows="3"></textarea></label><button class="pm-button primary" :disabled="saving" @click="runOperation('preparation')">发起实施准备</button></template>
               <template v-else-if="activeSection === 'exceptions'"><label><span>偏离描述</span><textarea v-model.trim="operationForm.deviationDescription" rows="3" placeholder="选择服务项后填写偏离内容"></textarea></label><label><span>严重度</span><select v-model="operationForm.severity"><option value="LOW">低</option><option value="MEDIUM">中</option><option value="HIGH">高</option></select></label><button class="pm-button primary" :disabled="saving" @click="runOperation('exception-report')">上报偏离</button><label><span>评审偏离 ID</span><input v-model.trim="operationForm.deviationID" placeholder="DV-..." /></label><label><span>评审决定</span><select v-model="operationForm.decision"><option value="RELEASE">放行</option><option value="RETEST">重测</option><option value="TERMINATE">终止</option></select></label><button class="pm-button" :disabled="saving" @click="runOperation('exception-review')">提交偏离评审</button></template>

@@ -583,6 +583,11 @@
 .pm-personnel-search { grid-column: 1 / -1; display: flex; align-items: flex-end; gap: 10px; }
 .pm-personnel-search label { flex: 1; }
 .pm-personnel-search .pm-button { flex: 0 0 auto; }
+.pm-personnel-checklist-field { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 7px; color: var(--pm-body); font-size: 12.5px; }
+.pm-personnel-checklist-field > span { font-weight: 600; }
+.pm-personnel-checklist { display: grid; gap: 6px; max-height: 200px; overflow: auto; padding: 10px 12px; border: 1px solid var(--pm-line); border-radius: 8px; background: #f8fafc; }
+.pm-personnel-check { display: flex !important; flex-direction: row !important; align-items: center; gap: 8px !important; font-size: 13px; }
+.pm-personnel-check input { width: auto; min-height: 0; }
 .pm-selection-list { display: grid; gap: 8px; max-height: 260px; overflow: auto; padding: 4px; border: 1px solid var(--pm-line); border-radius: 10px; background: #f8fafc; }
 .pm-selection-row { display: flex !important; flex-direction: row !important; align-items: center; gap: 10px !important; padding: 10px 12px; border: 1px solid transparent; border-radius: 8px; background: #fff; cursor: pointer; }
 .pm-selection-row:hover { border-color: #bfdbfe; background: #eff6ff; }
@@ -645,3 +650,129 @@
 .pm-timeline p { overflow-wrap: anywhere; word-break: break-word; }
 .pm-progress-row > div:first-child { min-width: 0; }
 .pm-progress-row > div:first-child b { min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
+
+/* ==========================================================================
+   Prototype layout alignment
+   Bring the SPA 原型 (PG-DASH-01 / PG-DASH-02 / PG-PRJ-01) layout components
+   into the project-management namespace while sharing the UniLab tokens above:
+   stat rows, status distribution table, in-flight project table, health bar,
+   health score ring, tabs, search-bar filters and pagination.
+   ========================================================================== */
+
+/* KPI value with suffix and caption (stat-card look) */
+.pm-kpi-value { letter-spacing: -.03em; }
+.pm-kpi-value small { margin-left: 6px; font-size: 15px; font-weight: 700; color: var(--pm-muted); letter-spacing: 0; }
+.pm-kpi-note { display: flex; align-items: center; gap: 6px; }
+.pm-kpi-note span { font-weight: 600; }
+
+/* Percentage bar used inside table cells and status rows */
+.pm-bar-bg { height: 8px; overflow: hidden; border-radius: 4px; background: #f1f5f9; }
+.pm-bar-fill { display: block; height: 100%; min-width: 0; border-radius: inherit; transition: width .3s ease; }
+.pm-table .pm-bar-bg { width: min(140px, 72%); margin-top: 6px; }
+.pm-table td .pm-bar-bg + small { display: block; margin-top: 5px; color: var(--pm-muted); font-size: 11.5px; }
+
+/* Progress cell column: inline bar + percent */
+.pm-progress-cell { display: flex; align-items: center; gap: 8px; min-width: 112px; }
+.pm-progress-cell .pm-inline-progress { flex: 1; width: auto; }
+.pm-progress-cell small { margin-top: 0; white-space: nowrap; }
+
+/* Right-aligned numeric table cells */
+.pm-table .num { text-align: right; }
+
+/* Status distribution panel: rows are quick links to the matching section */
+.pm-status-panel .pm-table td { cursor: pointer; }
+.pm-status-panel .pm-table tbody tr:hover { background: var(--pm-blue-soft); }
+
+/* In-flight / monitor table panel headers */
+.pm-table-panel > header { min-height: 60px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--pm-line-soft); }
+.pm-table-panel > header h2 { margin: 2px 0 0; color: var(--pm-ink); font-size: 15px; }
+.pm-table-panel > header > span { color: var(--pm-muted); font-size: 12px; white-space: nowrap; }
+
+/* Table footer with pagination */
+.pm-table-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.pm-pagination { display: flex; align-items: center; gap: 4px; }
+.pm-pg { min-width: 28px; height: 28px; padding: 0 7px; border: 1px solid var(--pm-line); border-radius: 6px; background: #fff; color: var(--pm-body); font-size: 12.5px; line-height: 1; }
+.pm-pg:hover:not(:disabled) { border-color: var(--pm-blue-border); color: var(--pm-blue); }
+.pm-pg.active { border-color: var(--pm-blue); background: var(--pm-blue); color: #fff; font-weight: 600; }
+.pm-pg:disabled { opacity: .45; }
+
+/* Filter result count inside the search bar / panel header */
+.pm-filter-count { margin-left: auto; color: var(--pm-muted); font-size: 12px; white-space: nowrap; }
+
+/* Health tabs (monitor main table) */
+.pm-monitor-head { flex-wrap: wrap; }
+.pm-tabs-bar { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.pm-tab-pill { min-height: 32px; padding: 4px 14px; border: 1px solid transparent; border-radius: 999px; background: transparent; color: var(--pm-muted); font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.pm-tab-pill:hover { background: var(--pm-soft); }
+.pm-tab-pill.active { border-color: var(--pm-blue-border); background: var(--pm-blue-soft); color: var(--pm-blue-dark); }
+
+/* Flat filter bar embedded into the monitor table panel */
+.pm-filters-flat { margin: 0; padding: 12px 16px; border: 0; border-bottom: 1px solid var(--pm-line-soft); border-radius: 0; box-shadow: none; }
+
+/* Health distribution bar (PG-DASH-02) */
+.pm-health-bar { display: grid; grid-template-columns: repeat(6, minmax(92px, 1fr)); gap: 10px; padding: 6px 20px 0; }
+.pm-health-cell { min-height: 84px; display: flex; flex-direction: column; justify-content: center; gap: 5px; padding: 12px 14px; border: 1px solid var(--pm-line); border-radius: 10px; background: #fff; text-align: left; transition: border-color .18s ease, background .18s ease; }
+.pm-health-cell:hover { border-color: var(--pm-blue-border); background: var(--pm-blue-soft); }
+.pm-health-cell .num { font-size: 25px; font-weight: 800; line-height: 1; letter-spacing: -.02em; }
+.pm-health-cell b { color: var(--pm-muted); font-size: 12.5px; font-weight: 600; }
+.pm-health-cell.healthy .num, .pm-health-cell.done .num { color: var(--pm-green-text); }
+.pm-health-cell.attention .num { color: var(--pm-violet-text); }
+.pm-health-cell.warning .num { color: var(--pm-amber-text); }
+.pm-health-cell.danger .num { color: var(--pm-red-text); }
+.pm-health-cell.ready .num { color: var(--pm-sky-text); }
+
+/* Health score row: donut ring + desc list */
+.pm-health-score { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 28px; padding: 16px 20px 22px; }
+.pm-shell .pm-donut { position: relative; }
+.pm-health-donut { width: 148px; height: 148px; margin: 0; }
+.pm-health-donut::before { width: 100px; height: 100px; }
+.pm-desc-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 26px; margin: 0; }
+.pm-desc-item { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pm-desc-item dt { color: var(--pm-muted); font-size: 12px; }
+.pm-desc-item dd { margin: 0; color: var(--pm-ink); font-size: 15px; font-weight: 700; overflow-wrap: anywhere; word-break: break-word; }
+
+/* Risk watch card (PG-DASH-02) */
+.pm-risk-card { border: 2px solid var(--pm-red); }
+.pm-risk-card > header h2 b { font-style: normal; }
+.pm-num-badge { display: inline-grid; place-items: center; min-width: 20px; height: 20px; margin-left: 8px; padding: 0 6px; border-radius: 999px; background: var(--pm-red); color: #fff; font-size: 11px; font-weight: 700; vertical-align: 2px; }
+
+/* Health pill shown in the monitor table */
+.pm-health-pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.pm-health-pill i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.pm-health-pill.healthy { color: var(--pm-green-text); background: var(--pm-green-soft); }
+.pm-health-pill.attention { color: var(--pm-violet-text); background: var(--pm-violet-soft); }
+.pm-health-pill.warning { color: var(--pm-amber-text); background: var(--pm-amber-soft); }
+.pm-health-pill.risk { color: var(--pm-red-text); background: var(--pm-red-soft); }
+
+/* Text-link action inside tables */
+.pm-btn-link { padding: 0; border: 0; background: transparent; color: var(--pm-blue); font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.pm-btn-link:hover { text-decoration: underline; }
+.pm-text-success { color: var(--pm-green-text) !important; }
+
+/* Summary strip restructured as stat cards (label / value / note) */
+.pm-summary-strip button { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 16px 20px 14px; }
+.pm-summary-strip button > span { color: var(--pm-muted); font-size: 12px; font-weight: 600; }
+.pm-summary-strip button > b { color: var(--pm-ink); font-size: 26px; line-height: 1; letter-spacing: -.02em; }
+.pm-summary-strip button > em { color: var(--pm-muted); font-size: 11px; font-style: normal; }
+
+/* Badge variants keyed to the service-flow colors */
+.pm-badge.slate { color: var(--pm-body); background: #f1f5f9; }
+.pm-badge.violet { color: var(--pm-violet-text); background: var(--pm-violet-soft); }
+.pm-badge.amber { color: var(--pm-amber-text); background: var(--pm-amber-soft); }
+.pm-badge.blue { color: var(--pm-sky-text); background: var(--pm-sky-soft); }
+.pm-badge.green { color: var(--pm-green-text); background: var(--pm-green-soft); }
+
+@media (max-width: 1280px) {
+  .pm-health-bar { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+  .pm-health-score { grid-template-columns: 1fr; justify-items: start; }
+  .pm-summary-strip { grid-template-columns: repeat(5, minmax(100px, 1fr)); overflow-x: auto; }
+}
+@media (max-width: 560px) {
+  .pm-health-bar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pm-desc-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pm-health-score { justify-items: start; }
+  .pm-table-panel > header { flex-direction: column; align-items: flex-start; }
+  .pm-table-footer { flex-direction: column; align-items: flex-start; }
+}
