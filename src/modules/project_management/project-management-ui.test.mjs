@@ -92,5 +92,8 @@ test('服务项操作台的团队负责人从基础平台人员目录选择而�
   assert.match(source, /const personnelOptions = computed/)
   assert.match(source, /<select v-model="operationForm\.teamLeadID"/)
   assert.match(source, /<select v-model="operationForm\.projectManagerID"/)
+  assert.match(source, /engineerIDSet\.has\(option\.id\)/)
+  assert.match(source, /toggleEngineer\(option\.id\)/)
   assert.doesNotMatch(source, /v-model\.trim="operationForm\.teamLeadID"/)
+  assert.doesNotMatch(source, /placeholder="至少一个用户 ID"/)
 })
