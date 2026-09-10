@@ -14,6 +14,9 @@ import {
   getProjectNavigation,
   listProjects,
   listCapabilities,
+  upsertCapability,
+  importCapabilities,
+  exportCapabilities,
   listEquipment,
   upsertEquipment,
   listDeliveryEvents,
@@ -174,6 +177,85 @@ const healthDonutStyle = computed(() => {
   const stops = segments.map(([color, n]) => { const from = acc; acc += (n / totalCount) * 100; return `${color} ${from}% ${Math.min(acc, 100)}%` })
   return `conic-gradient(${stops.join(', ')})`
 })
+function startOfWeek(date) {
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7))
+  d.setHours(0, 0, 0, 0)
+  return d
+}
+function dateKey(date) {
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+function isoWeekOf(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))
+  const dayNum = (d.getUTCDay() + 6) % 7
+  d.setUTCDate(d.getUTCDate() - dayNum + 3)
+  const firstThursday = d.getTime()
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7) + 3)
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1))
+  return Math.ceil(((firstThursday - yearStart) / 86400000 + 1) / 7)
+}
+const completedDeliveryEvents = computed(() => deliveryEvents.value.filter((event) => event.type === 'FIELD_IMPLEMENTATION_COMPLETED'))
+const weeklyDeliveryTrend = computed(() => {
+  const monday = startOfWeek(new Date())
+  const weeks = []
+  for (let offset = 11; offset >= 0; offset--) {
+    const weekStart = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() - offset * 7)
+    weeks.push({ key: dateKey(weekStart), label: `W${isoWeekOf(weekStart)}`, total: 0, onTime: 0 })
+  }
+  const byKey = Object.fromEntries(weeks.map((week) => [week.key, week]))
+  const plannedEndByItem = new Map(serviceItems.value.map((item) => [item.id, item.planned_end]))
+  for (const event of completedDeliveryEvents.value) {
+    const week = byKey[dateKey(startOfWeek(new Date(event.created_at)))]
+    if (!week) continue
+    week.total += 1
+    const plannedEnd = plannedEndByItem.get(event.service_item_id)
+    if (!plannedEnd || new Date(plannedEnd) >= new Date(event.created_at)) week.onTime += 1
+  }
+  return weeks.map((week) => ({
+    ...week,
+    rate: week.total ? Math.round((week.onTime / week.total) * 100) : 0,
+    tooltip: week.total ? `${week.label} 完成 ${week.total} 项 · 准时 ${week.onTime} 项` : `${week.label} 暂无完成记录`,
+  }))
+})
+const onTimeRecentAverage = computed(() => {
+  const recent = weeklyDeliveryTrend.value.slice(-4).filter((week) => week.total)
+  return recent.length ? Math.round(recent.reduce((sum, week) => sum + week.rate, 0) / recent.length) : null
+})
+const categoryDist = computed(() => {
+  const counts = new Map()
+  for (const item of serviceItems.value) {
+    const category = item.category || '未分类'
+    counts.set(category, (counts.get(category) || 0) + 1)
+  }
+  const palette = ['#0ea5e9', '#8b5cf6', '#d97706', '#dc2626', '#f59e0b', '#16a34a', '#64748b']
+  const total = serviceItems.value.length || 1
+  const entries = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([name, count], index) => ({ name, count, pct: Math.round((count / total) * 100), color: palette[index % palette.length] }))
+  const others = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(6)
+  if (others.length) entries.push({ name: '其他', count: others.reduce((sum, [, count]) => sum + count, 0), pct: Math.round((others.reduce((sum, [, count]) => sum + count, 0) / total) * 100), color: palette[6] })
+  return entries
+})
+const categoryDonutStyle = computed(() => {
+  const total = serviceItems.value.length
+  if (!total) return 'conic-gradient(#e2e8f0 0 100%)'
+  let acc = 0
+  const stops = categoryDist.value.map((segment) => { const from = acc; acc += (segment.count / total) * 100; return `${segment.color} ${from}% ${Math.min(acc, 100)}%` })
+  return `conic-gradient(${stops.join(', ')})`
+})
+const teamUtilization = computed(() => {
+  const teamByProject = new Map(projects.value.map((project) => [project.id, project.team || '未归属']))
+  const active = serviceItems.value.filter((item) => !['已完成', '已终止', '终止'].includes(item.status))
+  const counts = new Map()
+  for (const item of active) {
+    const team = teamByProject.get(item.project_id) || '未归属'
+    counts.set(team, (counts.get(team) || 0) + 1)
+  }
+  const entries = [...counts.entries()].sort((a, b) => b[1] - a[1])
+  const max = Math.max(...entries.map(([, count]) => count), 1)
+  return entries.map(([name, count]) => ({ name, count, pct: Math.round((count / max) * 100) }))
+})
+const overloadedTeam = computed(() => teamUtilization.value.find((team) => team.pct >= 90))
 const monitoredProjects = computed(() => {
   const query = keyword.value.trim().toLowerCase()
   return inFlightProjects.value.filter((p) => {
@@ -189,6 +271,13 @@ function resetProjectFilters() { keyword.value = ''; statusFilter.value = ''; ca
 const serviceItems = ref([])
 const deliveryEvents = ref([])
 const capabilities = ref([])
+const capabilityTypeFilter = ref('')
+const capabilityStatusFilter = ref('')
+const capabilityDialog = ref(null)
+const importResult = ref(null)
+const qualificationFileInput = ref(null)
+const filteredCapabilities = computed(() => capabilities.value.filter((item) => (!capabilityTypeFilter.value || item.resource_type === capabilityTypeFilter.value) && (!capabilityStatusFilter.value || item.status === capabilityStatusFilter.value)))
+const canManageResource = computed(() => Array.isArray(session.value?.permissions) && session.value.permissions.includes('project.resource.manage'))
 const selectedServiceItemIDs = ref([])
 const operationForm = ref({ teamLeadID: '', projectManagerID: '', engineerIDs: '', equipmentIDs: '', requiredCodes: '', plannedStart: '', plannedEnd: '', sitePlan: '', penetrationTestPlan: '', equipmentRequestID: '', travelRequestID: '', latitude: '', longitude: '', rawData: '', environment: '', deviationDescription: '', severity: 'MEDIUM', decision: 'RELEASE', comment: '' })
 const personnel = ref([])
@@ -461,6 +550,62 @@ async function saveEquipment() {
   finally { saving.value = false }
 }
 
+function openCapabilityDialog(item) {
+  capabilityDialog.value = item
+    ? { resource_type: item.resource_type, resource_id: item.resource_id, resource_name: item.resource_name, codes: (item.codes || []).join(','), valid_from: item.valid_from?.slice(0, 10) || '', valid_until: item.valid_until?.slice(0, 10) || '', status: item.status || 'ACTIVE' }
+    : { resource_type: 'PERSON', resource_id: '', resource_name: '', codes: '', valid_from: '', valid_until: '', status: 'ACTIVE' }
+}
+
+async function saveCapability() {
+  if (!capabilityDialog.value) return
+  saving.value = true
+  try {
+    const form = capabilityDialog.value
+    const saved = await upsertCapability({
+      resource_type: form.resource_type,
+      resource_id: form.resource_id,
+      resource_name: form.resource_name,
+      codes: selectedIDs(form.codes),
+      valid_from: form.valid_from ? new Date(form.valid_from).toISOString() : '',
+      valid_until: form.valid_until ? new Date(form.valid_until).toISOString() : '',
+      status: form.status,
+    })
+    capabilities.value = [saved, ...capabilities.value.filter((row) => !(row.resource_type === saved.resource_type && row.resource_id === saved.resource_id))]
+    capabilityDialog.value = null
+    showToast('资质 / 能力已保存')
+  } catch (error) { showToast(error?.message || '资质保存失败') }
+  finally { saving.value = false }
+}
+
+async function importQualificationFile(event) {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file) return
+  saving.value = true
+  try {
+    importResult.value = await importCapabilities(file)
+    capabilities.value = await listCapabilities()
+    if (importResult.value.skipped > 0) showToast(`导入完成：成功 ${importResult.value.imported} 条，跳过 ${importResult.value.skipped} 条`)
+    else showToast(`导入完成：成功 ${importResult.value.imported} 条`)
+  } catch (error) { showToast(error?.message || 'CSV 导入失败') }
+  finally { saving.value = false }
+}
+
+async function downloadCapabilities() {
+  try {
+    const { blob, filename } = await exportCapabilities(capabilityTypeFilter.value)
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+    showToast('已开始导出 CSV')
+  } catch (error) { showToast(error?.message || 'CSV 导出失败') }
+}
+
 function navigate(section) {
   router.push({ name: 'project_management', params: { section } })
   mobileMenuOpen.value = false
@@ -731,6 +876,35 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
               <div class="pm-risk-list"><button v-for="risk in riskRows" :key="risk.id" @click="navigate('exceptions')"><span :class="risk.level === '高' ? 'high' : 'medium'">{{ risk.level }}</span><div><b>{{ risk.project }}</b><p>{{ risk.issue }}</p></div><time>{{ risk.deadline }}</time></button><div v-if="!riskRows.length" class="pm-empty-mini">暂无风险或待评审异常</div></div>
             </article>
           </section>
+          <section class="pm-dashboard-grid-3">
+            <article class="pm-panel pm-trend-panel">
+              <header><div><p class="pm-panel-kicker">ON-TIME DELIVERY</p><h2>近 12 周准时交付率趋势</h2></div><span>近 4 周均值 <b>{{ onTimeRecentAverage !== null ? `${onTimeRecentAverage}%` : '—' }}</b></span></header>
+              <div class="pm-trend-chart">
+                <div v-for="week in weeklyDeliveryTrend" :key="week.key" class="pm-trend-bar" :title="week.tooltip">
+                  <span class="pm-trend-val">{{ week.rate }}%</span>
+                  <i :class="week.rate >= 85 ? 'good' : 'low'" :style="{ height: `${week.rate}%` }"></i>
+                  <span class="pm-trend-lbl">{{ week.label }}</span>
+                </div>
+              </div>
+              <div class="pm-chart-legend"><span><i class="pm-swatch good"></i>≥ 85% 准时</span><span><i class="pm-swatch low"></i>&lt; 85%</span></div>
+            </article>
+            <article class="pm-panel pm-category-panel">
+              <header><div><p class="pm-panel-kicker">CATEGORY MIX</p><h2>检测类别分布（占比）</h2></div><span>{{ serviceItems.length }} 项服务项</span></header>
+              <div class="pm-donut pm-category-donut" :style="{ background: categoryDonutStyle }"><div><strong>{{ serviceItems.length }}</strong><span>服务项</span></div></div>
+              <div class="pm-status-list">
+                <div v-for="segment in categoryDist" :key="segment.name" class="pm-status-row"><i class="pm-dot" :style="{ background: segment.color }"></i>{{ segment.name }}<b class="pm-num">{{ segment.pct }}%</b></div>
+                <div v-if="!categoryDist.length" class="pm-empty-mini">暂无服务项数据</div>
+              </div>
+            </article>
+            <article class="pm-panel pm-util-panel">
+              <header><div><p class="pm-panel-kicker">TEAM LOAD</p><h2>团队资源利用率</h2></div><span>在途负载估算</span></header>
+              <div class="pm-status-list">
+                <div v-for="team in teamUtilization" :key="team.name" class="pm-status-libar"><span class="pm-lib-lbl">{{ team.name }}</span><div class="pm-bar-bg"><i class="pm-bar-fill" :class="team.pct >= 90 ? 'warn' : 'normal'" :style="{ width: `${team.pct}%` }"></i></div><span class="pm-num">{{ team.pct }}%</span></div>
+                <div v-if="!teamUtilization.length" class="pm-empty-mini">暂无在途团队负载数据</div>
+              </div>
+              <p v-if="overloadedTeam" class="pm-alert warn"><i></i><b>{{ overloadedTeam.name }} {{ overloadedTeam.pct }}%</b> 接近满载 · 建议关注排期与人力调配</p>
+            </article>
+          </section>
           <section class="pm-table-panel pm-panel-inflight">
             <header><div><p class="pm-panel-kicker">DELIVERY PULSE</p><h2>在途项目 · 实时动态</h2></div><span>共 {{ inFlightProjects.length }} 个在途项目</span></header>
             <div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>项目编号</th><th>客户</th><th>服务项</th><th>团队 / 项目经理</th><th>健康度</th><th>进度</th><th>计划完成</th><th></th></tr></thead><tbody><tr v-for="project in inFlightProjects.slice(0, 8)" :key="project.id" :class="{ risk: project.health === '风险' }"><td><button class="pm-project-link" @click="openProject(project)"><b>{{ project.id }}</b></button></td><td>{{ project.customer }}</td><td>{{ project.services }} 项</td><td><b>{{ project.team }}</b><span class="pm-cell-sub">{{ project.manager }}</span></td><td><span class="pm-badge" :class="project.health">{{ project.health }}</span></td><td><div class="pm-progress-cell"><div class="pm-inline-progress"><i :style="{ width: `${project.progress}%` }"></i></div><small>{{ project.progress }}%</small></div></td><td :class="{ 'pm-text-danger': project.due.includes('超期') }">{{ project.due }}</td><td><button class="pm-link" @click="openProject(project)">详情</button></td></tr><tr v-if="!inFlightProjects.length"><td colspan="8" class="pm-empty-mini">暂无在途项目</td></tr></tbody></table></div>
@@ -816,7 +990,7 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
         <template v-else-if="activeSection === 'equipment'">
           <section class="pm-panel pm-equipment-layout"><header><div><p class="pm-panel-kicker">EQUIPMENT CAPABILITY</p><h2>设备能力维护</h2><p>维护设备基础信息、能力编码、检定有效期与启停状态。</p></div></header><form class="pm-form pm-equipment-form" @submit.prevent="saveEquipment"><label><span>设备编号 <em>*</em></span><input v-model.trim="equipmentForm.resourceID" required placeholder="例如 EQ-001" /></label><label><span>设备名称 <em>*</em></span><input v-model.trim="equipmentForm.resourceName" required placeholder="请输入设备名称" /></label><label><span>能力编码 <em>*</em></span><input v-model.trim="equipmentForm.codes" required placeholder="多个编码用逗号分隔" /></label><label><span>检定开始</span><input v-model="equipmentForm.validFrom" type="date" /></label><label><span>检定到期</span><input v-model="equipmentForm.validUntil" type="date" /></label><label><span>状态</span><select v-model="equipmentForm.status"><option value="ACTIVE">启用</option><option value="DISABLED">停用</option></select></label><button class="pm-button primary">保存设备</button></form></section><section class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>设备编号</th><th>设备名称</th><th>能力</th><th>检定有效期</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="item in equipment" :key="item.resource_id"><td class="mono">{{ item.resource_id }}</td><td><b>{{ item.resource_name }}</b></td><td>{{ (item.codes || []).join(' / ') }}</td><td>{{ item.valid_until ? formatDateTime(item.valid_until) : '未设置' }}</td><td><span class="pm-badge" :class="item.status === 'ACTIVE' ? 'normal' : 'neutral'">{{ item.status === 'ACTIVE' ? '启用' : '停用' }}</span></td><td><button class="pm-link" @click="equipmentForm = { resourceID: item.resource_id, resourceName: item.resource_name, codes: (item.codes || []).join(','), validFrom: item.valid_from?.slice(0, 10) || '', validUntil: item.valid_until?.slice(0, 10) || '', status: item.status || 'ACTIVE' }">编辑 / 更新</button></td></tr></tbody></table></div><div v-if="!equipment.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无设备</b><span>使用上方表单新增设备。</span></div></section>
         </template>
-        <template v-else-if="['split-rules', 'warning-rules', 'automations', 'permissions', 'sla'].includes(activeSection)">
+        <template v-else-if="activeSection === 'qualifications'"><section class="pm-panel"><header><div><p class="pm-panel-kicker">RESOURCE CAPABILITY</p><h2>资质与能力管理</h2><p>维护并展示人员资质与设备能力记录。</p></div><div class="pm-panel-actions"><input ref="qualificationFileInput" class="pm-file-input" type="file" accept=".csv,text/csv" @change="importQualificationFile" /><button class="pm-button" :disabled="saving" @click="downloadCapabilities">导出 CSV</button><template v-if="canManageResource"><button class="pm-button" :disabled="saving" @click="qualificationFileInput.click()">导入 CSV</button><button class="pm-button primary" :disabled="saving" @click="openCapabilityDialog()">＋ 新建资质</button></template></div></header><div class="pm-qualification-filter"><label><span>资源类型</span><select v-model="capabilityTypeFilter"><option value="">全部</option><option value="PERSON">人员资质</option><option value="EQUIPMENT">设备能力</option></select></label><label><span>状态</span><select v-model="capabilityStatusFilter"><option value="">全部</option><option value="ACTIVE">有效</option><option value="DISABLED">停用</option></select></label></div></section><section class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>资源类型</th><th>编号</th><th>名称</th><th>资质 / 能力编码</th><th>有效期</th><th>状态</th><th></th></tr></thead><tbody><tr v-for="item in filteredCapabilities" :key="item.resource_id"><td><span class="pm-badge neutral">{{ item.resource_type === 'PERSON' ? '人员' : '设备' }}</span></td><td class="mono">{{ item.resource_id }}</td><td><b>{{ item.resource_name }}</b></td><td>{{ (item.codes || []).join(' / ') }}</td><td>{{ item.valid_until ? (item.valid_from ? `${item.valid_from.slice(0, 10)} ~ ` : '') + item.valid_until.slice(0, 10) : '长期' }}</td><td><span class="pm-badge" :class="item.status === 'ACTIVE' ? 'normal' : 'neutral'">{{ item.status === 'ACTIVE' ? '有效' : '停用' }}</span></td><td style="width: 90px; min-width: 90px;"><button class="pm-link" @click="openCapabilityDialog(item)">编辑 / 更新</button></td></tr></tbody></table></div><div v-if="!filteredCapabilities.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无资质记录</b><span>点击「＋ 新建资质」或通过 CSV 导入添加记录。</span></div><footer v-if="importResult"><span role="status">导入完成：成功 {{ importResult.imported }} 条，跳过 {{ importResult.skipped }} 条。</span><span v-if="importResult.errors?.length"><small>{{ importResult.errors.slice(0, 3).join('；') }}{{ importResult.errors.length > 3 ? '…' : '' }}</small></span></footer></section><div v-if="capabilityDialog" class="pm-overlay" @click.self="capabilityDialog = null"><form class="pm-dialog" @submit.prevent="saveCapability"><header><div><span>CAPABILITY</span><h2>{{ capabilityDialog.resource_id ? '编辑资质 / 能力' : '新建资质 / 能力' }}</h2></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="capabilityDialog = null"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>资源类型 <em>*</em></span><select v-model="capabilityDialog.resource_type" required><option value="PERSON">人员资质</option><option value="EQUIPMENT">设备能力</option></select></label><label><span>资源编号 <em>*</em></span><input v-model.trim="capabilityDialog.resource_id" required placeholder="例如 P-001 或 EQ-001" /></label><label><span>资源名称 <em>*</em></span><input v-model.trim="capabilityDialog.resource_name" required placeholder="例如 张三 或 基站A" /></label><label><span>资质 / 能力编码 <em>*</em></span><input v-model.trim="capabilityDialog.codes" required placeholder="多个编码用逗号分隔" /></label><label><span>起始日期</span><input v-model="capabilityDialog.valid_from" type="date" /></label><label><span>截止日期</span><input v-model="capabilityDialog.valid_until" type="date" /></label><label><span>状态</span><select v-model="capabilityDialog.status"><option value="ACTIVE">有效</option><option value="DISABLED">停用</option></select></label></div><footer><button type="button" class="pm-button" @click="capabilityDialog = null">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : '保存资质' }}</button></footer></form></div></template><template v-else-if="['split-rules', 'warning-rules', 'automations', 'permissions', 'sla'].includes(activeSection)">
           <section class="pm-config-layout"><aside class="pm-config-note"><span><ConsoleIcon name="info" /></span><h2>配置说明</h2><p>{{ currentMeta[1] }}。变更将在保存后对新任务生效，已有项目不自动追溯。</p><ul><li>配置修改需业务管理员权限</li><li>关键规则变更会记录审计日志</li><li>关闭规则前请确认影响范围</li></ul></aside><article class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>配置名称</th><th>适用范围</th><th>触发条件</th><th>状态</th><th>最后更新</th><th></th></tr></thead><tbody><tr v-for="rule in visibleRules" :key="rule.id"><td><b>{{ rule.name }}</b></td><td>{{ rule.scope }}</td><td>{{ rule.trigger }}</td><td><button class="pm-switch" :class="{ on: rule.enabled }" :aria-label="`${rule.enabled ? '停用' : '启用'} ${rule.name}`" @click="toggleRule(rule)"><i></i></button></td><td>{{ rule.updated }}</td><td><button class="pm-link" @click="showToast(`正在编辑：${rule.name}`)">编辑</button></td></tr></tbody></table></div><div v-if="!visibleRules.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无配置规则</b><span>点击“新建规则”添加当前类型的配置。</span></div></article></section>
         </template>
 

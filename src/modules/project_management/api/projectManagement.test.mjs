@@ -61,3 +61,13 @@ test('项目列表将 keyword 兼容转换为后端实际读取的 q 参数', ()
   assert.match(source, /delete query\.keyword/)
   assert.match(source, /new URLSearchParams\(Object\.entries\(query\)/)
 })
+
+test('资质能力更新、CSV 导入导出使用后端接口，上传不携带 JSON 内容类型', () => {
+  assert.match(source, /options\.body && !\(options\.body instanceof FormData\)/)
+  assert.match(source, /request\('\/capabilities', \{ method: 'PUT', body: JSON\.stringify\(payload\) \}\)/)
+  assert.match(source, /formData\.append\('file', file\)/)
+  assert.match(source, /request\('\/capabilities\/import', \{ method: 'POST', body: formData \}\)/)
+  assert.match(source, /fetch\(`\$\{API_BASE_URL\}\/capabilities\/export/)
+  assert.match(source, /filename\*?=\(?:UTF-8''|"\)\?\(\[\^";\]\+\)/i)
+  assert.match(source, /return \{ blob: await response\.blob\(\), filename \}/)
+})

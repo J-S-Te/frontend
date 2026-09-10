@@ -38,7 +38,7 @@ async function request(path, options = {}) {
       ...options,
       headers: {
         Accept: 'application/json',
-        ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+        ...(options.body && !(options.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
         ...(options.headers || {}),
       },
     })
@@ -434,4 +434,57 @@ export async function listEquipment() {
 
 export function upsertEquipment(payload) {
   return request('/equipment', { method: 'PUT', body: JSON.stringify({ ...payload, resource_type: 'EQUIPMENT' }) })
+}
+
+/**
+ * upsertCapability 新增或更新人员资质/设备能力记录（按资源类型+编号覆盖能力码）。
+ * @param {Object} payload 能力字段：resource_type、resource_id、resource_name、codes、status、valid_from、valid_until。
+ * @returns {Promise<object>} 保存后的能力记录。
+ * @throws {Error} 校验失败、权限不足或服务端异常时抛出。
+ */
+export function upsertCapability(payload) {
+  return request('/capabilities', { method: 'PUT', body: JSON.stringify(payload) })
+}
+
+/**
+ * importCapabilities 以 CSV 批量导入能力记录。
+ * @param {File} file 待上传的 CSV 文件。
+ * @param {string} [resourceType=''] 目标资源类型，可空表示两类均可。
+ * @returns {Promise<{imported: number, skipped: number, errors?: string[]}>} 导入结果统计。
+ * @throws {Error} 解析失败、权限不足或服务端异常时抛出。
+ */
+export async function importCapabilities(file, resourceType = '') {
+  const formData = new FormData()
+  formData.append('file', file)
+  if (resourceType) formData.append('resource_type', resourceType)
+  return request('/capabilities/import', { method: 'POST', body: formData })
+}
+
+/**
+ * exportCapabilities 导出能力记录为 CSV 附件（UTF-8 BOM，可直接用 Excel 打开）。
+ * @param {string} [resourceType=''] 资源类型过滤。
+ * @returns {Promise<{blob: Blob, filename: string}>} 下载内容与文件名。
+ * @throws {Error} 权限不足、网络失败或服务端异常时抛出。
+ */
+export async function exportCapabilities(resourceType = '') {
+  const query = resourceType ? `?resource_type=${encodeURIComponent(resourceType)}` : ''
+  const response = await fetch(`${API_BASE_URL}/capabilities/export${query}`, {
+    credentials: 'include',
+    headers: { Accept: '*/*' },
+  })
+  if (!response.ok) {
+    let message = `HTTP ${response.status}`
+    try {
+      const parsed = await response.json()
+      message = parsed?.message || message
+    } catch { /* 保持默认提示 */ }
+    const error = new Error(message)
+    error.status = response.status
+    throw error
+  }
+  const disposition = response.headers.get('content-disposition') || ''
+  let filename = `capabilities-${new Date().toISOString().slice(0, 10)}.csv`
+  const match = disposition.match(/filename\*?=(?:UTF-8''|")?([^";]+)/i)
+  if (match) filename = match[1].replace(/^"|"$/g, '')
+  return { blob: await response.blob(), filename }
 }
