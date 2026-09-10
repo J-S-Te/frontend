@@ -399,3 +399,34 @@ test('项目状态只由服务端派生，前端不再自行拼装状态集合',
   assert.doesNotMatch(source, /reportActiveProjectIDs/)
   assert.match(source, /project\.status === projectStatusCompleted/)
 })
+
+test('新建项目入口按服务端同一权限 project.create 门控', () => {
+  // 服务端 POST /projects 要求 project.create；前端必须用同一权限隐藏入口，
+  // 否则无该权限的角色会点进注定 403 的链路（该链路还会调用合同系统接口并弹出合同登录）。
+  assert.match(source, /const canCreateProject = computed\(\(\) => Array\.isArray\(session\.value\?\.permissions\) && session\.value\.permissions\.includes\('project\.create'\)\)/)
+  assert.match(source, /v-if="activeSection === 'projects' && canCreateProject"/)
+  // 入口按钮不得再以「只看 section」的方式无条件渲染。
+  assert.doesNotMatch(source, /v-if="activeSection === 'projects'" class="pm-button primary" @click="openCreateProject"/)
+})
+
+test('团队负责人、项目经理、工程师显示姓名而不是平台 ID', () => {
+  // 服务端批量解析 user_id → 姓名，前端缓存映射并在工作区加载后补齐。
+  assert.match(source, /^\s+resolvePersonnelNames,$/m)
+  assert.match(source, /const personnelNameByID = ref\(new Map\(\)\)/)
+  assert.match(source, /function personLabel\(userID, fallback = '待指派'\)/)
+  assert.match(source, /function personListLabel\(ids, fallback = '未指派'\)/)
+  assert.match(source, /async function loadPersonnelNames\(/)
+  assert.match(source, /await loadPersonnelNames\(\)/)
+  // 解析不到时显示占位符，绝不回退成对业务用户无意义的 ULID。
+  assert.match(source, /personnelNameByID\.value\.get\(id\) \|\| '—'/)
+  assert.doesNotMatch(source, /name: `\$\{id\}（当前值）`/)
+  assert.doesNotMatch(source, /person\.display_name \|\| person\.user_id/)
+  // 列表与详情一律走姓名渲染：每个 owner 值都必须是姓名渲染（或本来就是姓名的字段），
+  // 不得再出现 owner: xxx_id 这种直接渲染平台 ID 的写法。
+  const ownerValues = [...source.matchAll(/owner: (personLabel\(|personListLabel\(|p\.manager|c\.resource_type)/g)]
+  const ownerTotal = [...source.matchAll(/owner: /g)]
+  assert.equal(ownerValues.length, ownerTotal.length, 'every owner value must render a person name or a name field')
+  assert.match(source, /\{ label: '团队负责人', value: personLabel\(record\.team_lead_id, '待分配'\) \}/)
+  assert.match(source, /\{ label: '项目经理', value: personLabel\(record\.project_manager_id, '待指派'\) \}/)
+  assert.match(source, /\{ label: '工程师', value: personListLabel\(record\.engineer_ids\) \}/)
+})

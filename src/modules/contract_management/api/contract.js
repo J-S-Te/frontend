@@ -79,7 +79,10 @@ function userSafeErrorMessage(message) {
  * @throws {Error} 网络失败、响应解析失败或服务端返回其他非成功状态时抛出。
  */
 async function request(path, options = {}) {
-  const method = String(options.method || 'GET').toUpperCase()
+  // 跨子系统调用方（例如项目管理页读取已审批合同）可以关闭「401 即跳转子系统登录」：
+  // 对没有该应用授权的用户，子系统登录回调本身就会返回 403，跳转只会把用户甩出当前系统。
+  const { suppressLoginRedirect = false, ...fetchOptions } = options
+  const method = String(fetchOptions.method || 'GET').toUpperCase()
   const requestContext = {
     subsystem: 'contract_management',
     feature: 'contract',
@@ -88,14 +91,14 @@ async function request(path, options = {}) {
     method,
   }
 
-  const hasFormDataBody = typeof FormData !== 'undefined' && options.body instanceof FormData
+  const hasFormDataBody = typeof FormData !== 'undefined' && fetchOptions.body instanceof FormData
   const response = await fetch(`${API_BASE_URL}${path}`, {
     credentials: 'include',
-    ...options,
+    ...fetchOptions,
     headers: {
       Accept: 'application/json',
-      ...(options.body && !hasFormDataBody ? { 'Content-Type': 'application/json' } : {}),
-      ...(options.headers || {}),
+      ...(fetchOptions.body && !hasFormDataBody ? { 'Content-Type': 'application/json' } : {}),
+      ...(fetchOptions.headers || {}),
     },
   })
   const body = await readBody(response)
@@ -109,7 +112,7 @@ async function request(path, options = {}) {
       })
       // 只有普通会话失效才重新走登录。Claims/Client 配置错误保留原始分类，
       // 交给统一访问错误页展示，避免形成“登录—回调—再次登录”的循环。
-      if (shouldStartSubsystemLogin(authError)) startContractLogin()
+      if (!suppressLoginRedirect && shouldStartSubsystemLogin(authError)) startContractLogin()
       attachStructuredContext(authError, {
         ...requestContext,
         tenantId: String(body?.tenant_id || ''),
@@ -269,9 +272,9 @@ export async function listContracts(params = {}) {
   return Array.isArray(data) ? data : []
 }
 
-export async function listApprovedContracts(params = {}) {
+export async function listApprovedContracts(params = {}, options = {}) {
   const search = new URLSearchParams({ limit: 200, ...params }).toString()
-  const data = await request(`/approved-contracts?${search}`)
+  const data = await request(`/approved-contracts?${search}`, options)
   return Array.isArray(data) ? data : []
 }
 

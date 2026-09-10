@@ -74,3 +74,12 @@ test('资质能力更新、CSV 导入导出使用后端接口，上传不携带 
   assert.match(source, /filename\*?=\(?:UTF-8''|"\)\?\(\[\^";\]\+\)/i)
   assert.match(source, /return \{ blob: await response\.blob\(\), filename \}/)
 })
+
+test('人员姓名批量解析走独立端点，并对 user_id 去重后编码', () => {
+  // 负责人目录只支持单个 user_id 查询，因此由服务端聚合成一次批量请求。
+  assert.match(source, /export async function resolvePersonnelNames\(ids = \[\]\)/)
+  assert.match(source, /request\(`\/personnel\/names\?user_ids=\$\{encodeURIComponent\(unique\.join\(','\)\)\}`\)/)
+  assert.match(source, /new Set\(\(Array\.isArray\(ids\) \? ids : \[\]\)/)
+  // 没有可解析的 ID 时不发请求。
+  assert.match(source, /if \(!unique\.length\) return \{\}/)
+})
