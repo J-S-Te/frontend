@@ -1313,6 +1313,27 @@
 .pm-empty span { margin-top: var(--pm-sp-1); font-size: var(--pm-fs-hint); }
 .pm-empty-mini { padding: var(--pm-sp-7) 10px; color: var(--pm-muted); font-size: var(--pm-fs-sm); text-align: center; }
 
+/* 前置条件拦截：提交前的结构化提示，颜色 + 文案 + 替代动作三重表达（规范原则④）。
+   amber = 还差一步（待处理），red = 能力/排期冲突。 */
+.pm-blocker {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--pm-sp-2) var(--pm-sp-3);
+  padding: var(--pm-sp-3) var(--pm-sp-4);
+  border: 1.5px solid var(--pm-amber);
+  border-radius: var(--pm-r-sm);
+  background: var(--pm-amber-soft);
+  color: var(--pm-amber-text);
+  font-size: var(--pm-fs-sm);
+}
+
+.pm-blocker b { font-size: var(--pm-fs-sm); font-weight: var(--pm-fw-semibold); }
+.pm-blocker span { flex: 1; min-width: 220px; line-height: var(--pm-lh-loose); }
+.pm-blocker .pm-button { flex: 0 0 auto; }
+.pm-blocker.danger { border-color: var(--pm-red); background: var(--pm-red-soft); color: var(--pm-red-text); }
+
 /* 危险态三重表达：红框 + 浅底 + 文案（不能只靠颜色） */
 .pm-conflict { border: 1.5px solid var(--pm-red); background: var(--pm-red-soft); border-radius: var(--pm-r-sm); padding: var(--pm-sp-3); color: var(--pm-red-text); font-size: var(--pm-fs-sm); }
 .pm-okbox { border: 1.5px solid var(--pm-green); background: var(--pm-green-soft); border-radius: var(--pm-r-sm); padding: var(--pm-sp-3); color: var(--pm-green-text); font-size: var(--pm-fs-sm); }

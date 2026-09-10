@@ -348,3 +348,38 @@ test('项目管理系统的文本/底色组合满足 WCAG 2.1 AA 对比度', () 
   // 主按钮白字必须达标。
   assert.ok(contrast('#ffffff', '#2563eb') >= 4.5)
 })
+
+test('发布实施计划在提交前拦截未完成的前置步骤', () => {
+  // 服务端对"发布实施计划"有前置状态强校验。界面必须提前说清楚还差哪一步，
+  // 而不是让用户填完整张表单才收到一句笼统的"请求参数不合法"（规范原则④）。
+  assert.match(source, /const planningBlocked = computed\(\(\) => \{/)
+  assert.match(source, /请先在「任务分配」中指派项目经理/)
+  assert.match(source, /请先在「任务分配」中完成能力校验/)
+  assert.match(source, /技术总监复核后才能发布实施计划/)
+  // 冲突用 red、还差一步用 amber，符合规范 §2.5 的语义映射。
+  assert.match(source, /tone: 'danger'/)
+  assert.match(source, /tone: 'warn'/)
+  // 主按钮在拦截态下禁用，并给出可执行的替代动作。
+  assert.match(source, /:disabled="saving \|\| !!planningBlocked"/)
+  assert.match(source, /class="pm-blocker"/)
+  assert.match(source, /前往任务分配/)
+  assert.match(source, /@click="navigate\('allocation'\)"/)
+  // 操作台是 div 而不是 <form>，浏览器 required 不生效，必须显式前置拦截。
+  assert.match(source, /请填写计划开始与计划结束时间/)
+  assert.match(source, /计划结束时间必须晚于计划开始时间/)
+  assert.match(source, /请填写现场计划/)
+  assert.match(source, /请补充渗透测试专项合规要素/)
+  // 样式：amber 拦截 + red 冲突，均带描边与文案，不只靠颜色。
+  assert.match(styles, /\.pm-blocker \{/)
+  assert.match(styles, /\.pm-blocker\.danger \{/)
+})
+
+test('实施计划的时间在 RFC3339 与 datetime-local 之间正确往返', () => {
+  // 后端存 RFC3339(UTC)，<input type="datetime-local"> 只接受本地 YYYY-MM-DDTHH:mm。
+  // 直接把 ISO 串塞进输入框会被浏览器判为非法值并显示为空，再次编辑已有计划时时间会"丢失"。
+  assert.match(source, /function toDateTimeLocal\(value\)/)
+  assert.match(source, /plannedStart: toDateTimeLocal\(item\.planned_start \|\| plan\.planned_start\)/)
+  assert.match(source, /plannedEnd: toDateTimeLocal\(item\.planned_end \|\| plan\.planned_end\)/)
+  assert.match(source, /authStart: toDateTimeLocal\(plan\.auth_start\)/)
+  assert.match(source, /authEnd: toDateTimeLocal\(plan\.auth_end\)/)
+})
