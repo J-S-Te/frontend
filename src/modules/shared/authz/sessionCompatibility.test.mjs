@@ -47,6 +47,18 @@ test('access failures remain distinct and only plain 401 starts login', () => {
   assert.match(subsystemAccessMessage({ status: 403, code: 'PORTAL_IDENTITY_NOT_PROVISIONED' }), /客户门户身份/)
 })
 
+test('a feature permission denial is not reported as an application access denial', () => {
+  // 403 有两种事实：整个应用未授权（PORTAL_AUTHORIZATION_REQUIRED / *_AUTHORIZATION_DENIED），
+  // 以及已进入应用但缺少某个功能角色（*_FORBIDDEN）。后者必须给出可操作的功能权限提示。
+  for (const code of ['PM_FORBIDDEN', 'PM_SCOPE_FORBIDDEN', 'SETTLEMENT_FORBIDDEN', 'CRM_PRESALE_FORBIDDEN', 'AUTH_FORBIDDEN']) {
+    const message = subsystemAccessMessage({ status: 403, code })
+    assert.match(message, /没有访问该功能的权限/, `${code} should report a feature permission gap`)
+    assert.doesNotMatch(message, /服务器拒绝了当前应用访问/, `${code} must not claim the application is denied`)
+  }
+  assert.match(subsystemAccessMessage({ status: 403, code: 'PORTAL_AUTHORIZATION_REQUIRED' }), /服务器拒绝了当前应用访问/)
+  assert.match(subsystemAccessMessage({ status: 403 }), /服务器拒绝了当前应用访问/)
+})
+
 test('route query exposes stable diagnostics, not backend messages or scope decisions', () => {
   const route = buildSubsystemAccessErrorRoute({ status: 403, code: 'PORTAL_IDENTITY_NOT_PROVISIONED', requestID: 'req-1', message: 'internal detail' }, '/customer-portal')
   assert.deepEqual(route, {

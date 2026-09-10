@@ -142,7 +142,21 @@ export const SUBSYSTEM_ACCESS_PRESENTATION = Object.freeze({
   }),
 })
 
+/**
+ * A subsystem feature permission denial (`PM_FORBIDDEN`, `SETTLEMENT_FORBIDDEN`, ...) is a
+ * different fact from "this account may not access the application at all"
+ * (`PORTAL_AUTHORIZATION_REQUIRED`, `*_AUTHORIZATION_DENIED`). Both arrive as 403, but telling
+ * a user with a working session that "the server rejected this application" sends them to the
+ * wrong place: they only lack one feature role.
+ */
+function isFeaturePermissionDenial(code) {
+  return /_FORBIDDEN$/.test(code) && !/AUTHORIZATION/.test(code)
+}
+
 export function subsystemAccessMessage(error, fallback = '服务暂时不可用，请稍后重试。') {
+  if (isFeaturePermissionDenial(errorCode(error))) {
+    return '当前账号没有访问该功能的权限，请联系管理员分配对应的应用角色。'
+  }
   const { reason } = classifySubsystemAccessError(error)
   if (reason === SUBSYSTEM_ACCESS_REASON.UNKNOWN) return errorMessage(error) || fallback
   return SUBSYSTEM_ACCESS_PRESENTATION[reason]?.message || fallback
