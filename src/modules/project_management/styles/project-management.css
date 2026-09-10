@@ -620,9 +620,18 @@
 .pm-personnel-search .pm-button { flex: 0 0 auto; }
 .pm-personnel-checklist-field { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 7px; color: var(--pm-body); font-size: 12.5px; }
 .pm-personnel-checklist-field > span { font-weight: 600; }
-.pm-multi-select { min-height: 104px; overflow-y: auto; }
-.pm-multi-select option { padding: 7px 9px; }
-.pm-multi-hint { margin-top: 4px; color: var(--pm-muted); font-size: 11.5px; }
+.pm-form .pm-field { display: flex; flex-direction: column; gap: 7px; color: var(--pm-body); font-size: 12.5px; }
+.pm-form .pm-field > span { font-weight: 600; }
+.pm-form .pm-field em { color: var(--pm-red-text); font-style: normal; }
+.pm-multi-dropdown { position: relative; }
+.pm-multi-trigger { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-height: 38px; padding: 9px 11px; border: 1px solid var(--pm-line); border-radius: 8px; background: #fff; color: var(--pm-ink); font-size: 13.5px; text-align: left; cursor: pointer; }
+.pm-multi-trigger.placeholder { color: var(--pm-muted); }
+.pm-multi-trigger:disabled { cursor: not-allowed; opacity: .6; }
+.pm-multi-caret { flex: 0 0 auto; width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid currentColor; opacity: .55; }
+.pm-multi-menu { position: absolute; z-index: 30; top: calc(100% + 4px); left: 0; right: 0; max-height: 220px; overflow: auto; padding: 6px; border: 1px solid var(--pm-line); border-radius: 8px; background: #fff; box-shadow: var(--pm-shadow); }
+.pm-multi-option { display: flex !important; flex-direction: row !important; align-items: center; gap: 8px !important; padding: 7px 8px; border-radius: 6px; font-size: 13px; cursor: pointer; }
+.pm-multi-option:hover { background: #eff6ff; }
+.pm-multi-option input { width: auto; min-height: 0; }
 .pm-code-chips { display: flex; flex-wrap: wrap; gap: 6px; min-height: 40px; padding: 7px 10px; border: 1px dashed var(--pm-line); border-radius: 8px; background: var(--pm-soft); }
 .pm-code-chip { padding: 4px 10px; border: 1px solid var(--pm-line); border-radius: 999px; background: white; color: var(--pm-blue-dark); font-size: 12px; font-variant-numeric: tabular-nums; }
 .pm-personnel-checklist { display: grid; gap: 6px; max-height: 200px; overflow: auto; padding: 10px 12px; border: 1px solid var(--pm-line); border-radius: 8px; background: #f8fafc; }
