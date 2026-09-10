@@ -135,6 +135,11 @@ const session = ref(null)
 const lastUpdatedAt = ref(null)
 let toastTimer = 0
 
+// 项目状态节点必须与服务端 domain.ProjectStatusNodes 完全一致。
+// 服务端按服务项派生唯一状态，前端只做展示，不得再自行拼装状态集合。
+const projectStatusNodes = ['待拆解确认', '待分配', '待制定计划', '待实施', '实施准备中', '实施中', '异常处理中', '现场实施完成', '报告编制', '已完成']
+const projectStatusCompleted = '已完成'
+
 const projects = ref([])
 
 const filteredProjects = computed(() => {
@@ -149,9 +154,9 @@ const filteredProjects = computed(() => {
 })
 const categoryOptions = computed(() => [...new Set(projects.value.map((p) => p.category).filter(Boolean))])
 const teamOptions = computed(() => [...new Set(projects.value.map((p) => p.team).filter(Boolean))])
-const inFlightProjects = computed(() => projects.value.filter((p) => p.status !== '已完成'))
+const inFlightProjects = computed(() => projects.value.filter((p) => p.status !== projectStatusCompleted))
 const riskProjectCount = computed(() => projects.value.filter((p) => p.health === '风险').length)
-const doneProjectCount = computed(() => projects.value.filter((p) => ['已完成', '现场实施完成'].includes(p.status)).length)
+const doneProjectCount = computed(() => projects.value.filter((p) => p.status === projectStatusCompleted).length)
 const pendingDecompositionCount = computed(() => projects.value.filter((p) => p.status === '待拆解确认').length)
 const averageProgress = computed(() => {
   const raw = projects.value.length ? projects.value.reduce((sum, p) => sum + (p.progress || 0), 0) / projects.value.length : 0
@@ -162,8 +167,8 @@ const healthDist = computed(() => ({
   attention: projects.value.filter((p) => p.health === '关注').length,
   warning: projects.value.filter((p) => p.health === '预警').length,
   risk: projects.value.filter((p) => p.health === '风险').length,
-  ready: projects.value.filter((p) => ['待拆解确认', '待分配', '待实施'].includes(p.status)).length,
-  done: projects.value.filter((p) => ['已完成', '现场实施完成'].includes(p.status)).length,
+  ready: projects.value.filter((p) => ['待拆解确认', '待分配', '待制定计划', '待实施'].includes(p.status)).length,
+  done: projects.value.filter((p) => p.status === projectStatusCompleted).length,
 }))
 const healthScore = computed(() => {
   const d = healthDist.value
@@ -455,10 +460,27 @@ const inboxItems = computed(() => serviceItems.value.filter((item) => item.team_
 const penetrationPending = computed(() => serviceItems.value.filter((item) => item.test_mode === 'PENETRATION' && !item.planned_start))
 const notificationCount = computed(() => pendingDeviations.value.length + decompositionItems.value.length + inboxItems.value.length)
 const activeServiceCount = computed(() => serviceItems.value.filter((item) => !['现场实施完成', '已完成', '已终止'].includes(item.status)).length)
-const completedProjectCount = computed(() => projects.value.filter((project) => ['已完成', '现场实施完成'].includes(project.status)).length)
+const completedProjectCount = computed(() => projects.value.filter((project) => project.status === projectStatusCompleted).length)
 const currentUserName = computed(() => session.value?.display_name || session.value?.user_name || '当前用户')
 const currentUserRole = computed(() => session.value?.roles?.join(' / ') || '项目成员')
 const canExecutionAssign = computed(() => Array.isArray(session.value?.permissions) && session.value.permissions.includes('project.execution.assign'))
+// 服务端在"发布实施计划"时强校验前置状态。这里提前把"还差哪一步"说清楚并禁用主按钮，
+// 避免用户填完整张表单才被拒绝（规范原则④：不允许「点了才报错」，且必须给可执行替代方案）。
+// tone 按规范 §2.5 取色：能力冲突=red，其余"待处理"=amber。
+const planningBlocked = computed(() => {
+  const item = selectedServiceItem.value
+  if (!item) return null
+  if (!['待分配', '待制定计划'].includes(item.status)) {
+    return { tone: 'warn', reason: `服务项当前状态为「${item.status}」，不能发布实施计划。` }
+  }
+  if (!item.project_manager_id) return { tone: 'warn', reason: '请先在「任务分配」中指派项目经理、工程师与设备。' }
+  if (item.conflict_status === 'CONFLICT') return { tone: 'danger', reason: '当前人员或设备能力存在冲突，请调整分配后重新校验。' }
+  if (item.conflict_status !== 'PASSED') return { tone: 'warn', reason: `请先在「任务分配」中完成能力校验（当前状态：${conflictStatusLabel(item.conflict_status)}）。` }
+  if (item.special === '是' && item.tech_review_status !== 'APPROVED') {
+    return { tone: 'warn', reason: '该服务项为特殊方法，需先通过技术总监复核后才能发布实施计划。' }
+  }
+  return null
+})
 const lastUpdatedLabel = computed(() => lastUpdatedAt.value ? lastUpdatedAt.value.toLocaleString() : '尚未加载')
 const serviceFlow = computed(() => [
   { key: '待分配', color: 'slate', count: serviceItems.value.filter((item) => item.status === '待分配').length, route: 'allocation' },
@@ -474,14 +496,17 @@ const riskRows = computed(() => [
   ...serviceItems.value.filter((item) => item.conflict_status === 'CONFLICT').map((item) => { const project = projectByID.value.get(item.project_id); return { id: `conflict-${item.id}`, level: '高', project: `${item.project_id} · ${project?.customer || item.site}`, issue: `${item.id} 人员或设备能力冲突`, owner: item.project_manager_id || item.team_lead_id || '待分配', deadline: item.planned_start?.slice(0, 10) || '待处理' } }),
 ].slice(0, 10))
 
-const reportActiveProjectIDs = computed(() => new Set(reportItems.value.filter((item) => item.report_status !== 'ARCHIVED').map((item) => item.project_id)))
+// 看板泳道是派生状态的确定性分组：只做归类，卡片仍展示唯一的 project.status。
 const kanbanColumns = computed(() => [
-  { key: '待分配', color: 'slate', cards: projects.value.filter((p) => ['待分配', '待拆解确认'].includes(p.status)) },
-  { key: '待实施', color: 'violet', cards: projects.value.filter((p) => ['待实施', '实施准备中', '待制定计划'].includes(p.status)) },
-  { key: '实施中', color: 'amber', cards: projects.value.filter((p) => ['实施中', '异常处理中'].includes(p.status)) },
-  { key: '报告编制', color: 'blue', cards: projects.value.filter((p) => reportActiveProjectIDs.value.has(p.id)) },
-  { key: '已完成', color: 'green', cards: projects.value.filter((p) => ['已完成', '现场实施完成'].includes(p.status) && !reportActiveProjectIDs.value.has(p.id)) },
-].map((column) => ({ ...column, count: column.cards.length })))
+  { key: '待分配', color: 'slate', statuses: ['待拆解确认', '待分配'] },
+  { key: '待实施', color: 'violet', statuses: ['待制定计划', '待实施', '实施准备中'] },
+  { key: '实施中', color: 'amber', statuses: ['实施中', '异常处理中'] },
+  { key: '报告编制', color: 'blue', statuses: ['报告编制'] },
+  { key: '已完成', color: 'green', statuses: [projectStatusCompleted] },
+].map((column) => {
+  const cards = projects.value.filter((p) => column.statuses.includes(p.status))
+  return { ...column, cards, count: cards.length }
+}))
 
 const operationRows = computed(() => ({
   monitoring: projects.value.slice(0, 5).map((p) => ({ id: p.id, name: `${p.id} · ${p.customer}`, detail: p.category, owner: p.manager, state: p.health, progress: p.progress, due: p.due })),
@@ -830,6 +855,20 @@ async function toggleRule(rule) {
 
 function selectedIDs(value) { return String(value || '').split(/[\s,，]+/).map((item) => item.trim()).filter(Boolean) }
 function asRFC3339(value) { if (!value) return ''; const date = new Date(value); return Number.isNaN(date.getTime()) ? value : date.toISOString() }
+// 后端保存 RFC3339（UTC），而 <input type="datetime-local"> 只接受本地时间的 YYYY-MM-DDTHH:mm。
+// 直接把 ISO 串塞进输入框会被浏览器判为非法值并显示为空，导致再次编辑已有计划时时间"丢失"。
+function toDateTimeLocal(value) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const pad = (part) => String(part).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+function conflictStatusLabel(status) {
+  if (status === 'PASSED') return '校验通过'
+  if (status === 'CONFLICT') return '存在冲突'
+  return '尚未校验'
+}
 function selectServiceItem(item) {
   if (!item) return
   selectedServiceItemIDs.value = [item.id]
@@ -837,7 +876,7 @@ function selectServiceItem(item) {
 }
 function fillOperationForm(item) {
   const plan = item.implementation_plan || {}
-  operationForm.value = { ...operationForm.value, teamLeadID: item.team_lead_id || '', projectManagerID: item.project_manager_id || '', engineerIDs: (item.engineer_ids || []).join(','), equipmentIDs: (item.equipment_ids || []).join(','), requiredCodes: (item.required_codes || []).join(','), plannedStart: item.planned_start || plan.planned_start || '', plannedEnd: item.planned_end || plan.planned_end || '', sitePlan: plan.site_plan || '', penetrationTestPlan: plan.penetration_test_plan || '', authDocNo: plan.auth_doc_no || '', authStart: plan.auth_start || '', authEnd: plan.auth_end || '', authScope: plan.auth_scope || '', testScope: plan.test_scope || '', testWindow: plan.test_window || '', emergencyContact: plan.emergency_contact || '', rollbackPlan: plan.rollback_plan || '', reviewComment: item.tech_review_comment || '' }
+  operationForm.value = { ...operationForm.value, teamLeadID: item.team_lead_id || '', projectManagerID: item.project_manager_id || '', engineerIDs: (item.engineer_ids || []).join(','), equipmentIDs: (item.equipment_ids || []).join(','), requiredCodes: (item.required_codes || []).join(','), plannedStart: toDateTimeLocal(item.planned_start || plan.planned_start), plannedEnd: toDateTimeLocal(item.planned_end || plan.planned_end), sitePlan: plan.site_plan || '', penetrationTestPlan: plan.penetration_test_plan || '', authDocNo: plan.auth_doc_no || '', authStart: toDateTimeLocal(plan.auth_start), authEnd: toDateTimeLocal(plan.auth_end), authScope: plan.auth_scope || '', testScope: plan.test_scope || '', testWindow: plan.test_window || '', emergencyContact: plan.emergency_contact || '', rollbackPlan: plan.rollback_plan || '', reviewComment: item.tech_review_comment || '' }
 }
 function toggleServiceItem(item) {
   const selected = new Set(selectedServiceItemIDs.value)
@@ -867,6 +906,21 @@ async function runOperation(kind) {
       }
       showToast(canExecutionAssign.value ? `已批量保存 ${items.length} 个服务项并完成能力校验` : `已批量分配 ${items.length} 个服务项的团队负责人`)
     } else if (kind === 'planning') {
+      // 操作台用的是 div 而非 <form>，浏览器不会执行 required 校验，这里显式前置拦截。
+      if (planningBlocked.value) { showToast(planningBlocked.value.reason); return }
+      if (!form.plannedStart || !form.plannedEnd) { showToast('请填写计划开始与计划结束时间'); return }
+      if (new Date(form.plannedEnd).getTime() <= new Date(form.plannedStart).getTime()) { showToast('计划结束时间必须晚于计划开始时间'); return }
+      if (!String(form.sitePlan || '').trim()) { showToast('请填写现场计划'); return }
+      if (selectedServiceItem.value?.test_mode === 'PENETRATION') {
+        const compliance = [
+          [form.penetrationTestPlan, '渗透测试专项计划'], [form.authDocNo, '授权书编号'],
+          [form.authScope, '授权范围'], [form.testScope, '计划测试范围'], [form.testWindow, '测试时间窗'],
+          [form.emergencyContact, '应急联系人'], [form.rollbackPlan, '回滚方案'],
+        ].filter(([value]) => !String(value || '').trim()).map(([, label]) => label)
+        if (compliance.length) { showToast(`请补充渗透测试专项合规要素：${compliance.join('、')}`); return }
+        if (!form.authStart || !form.authEnd) { showToast('请填写授权生效与授权截止时间'); return }
+        if (new Date(form.authEnd).getTime() <= new Date(form.authStart).getTime()) { showToast('授权截止时间必须晚于授权生效时间'); return }
+      }
       await planImplementation(item.id, { planned_start: asRFC3339(form.plannedStart), planned_end: asRFC3339(form.plannedEnd), site_plan: form.sitePlan, penetration_test_plan: form.penetrationTestPlan, auth_doc_no: form.authDocNo, auth_start: asRFC3339(form.authStart), auth_end: asRFC3339(form.authEnd), auth_scope: form.authScope, test_scope: form.testScope, test_window: form.testWindow, emergency_contact: form.emergencyContact, rollback_plan: form.rollbackPlan })
       showToast('实施计划已发布')
     } else if (kind === 'special-approve' || kind === 'special-reject') {
@@ -1067,7 +1121,7 @@ onBeforeUnmount(() => {
             <button type="button" @click="statusFilter = '已完成'"><span>已完成</span><b>{{ doneProjectCount }}</b><em>已完成交付</em></button>
             <button type="button" class="danger" @click="navigate('monitoring')"><span>风险项目</span><b>{{ riskProjectCount }}</b><em>含终止 / 超期</em></button>
           </section>
-          <section class="pm-filters"><label><ConsoleIcon name="search" /><input v-model="keyword" placeholder="搜索项目编号 / 客户名称 / 服务项" /></label><select v-model="statusFilter"><option value="">状态：全部</option><option>待拆解确认</option><option>待分配</option><option>待实施</option><option>实施中</option><option>报告编制</option><option>异常处理中</option></select><select v-model="categoryFilter"><option value="">检测类别：全部</option><option v-for="option in categoryOptions" :key="option" :value="option">{{ option }}</option></select><select v-model="teamFilter"><option value="">团队：全部</option><option v-for="option in teamOptions" :key="option" :value="option">{{ option }}</option></select><button class="pm-button ghost" @click="resetProjectFilters">重置</button><span class="pm-filter-count">{{ filteredProjects.length }} 条结果</span></section>
+          <section class="pm-filters"><label><ConsoleIcon name="search" /><input v-model="keyword" placeholder="搜索项目编号 / 客户名称 / 服务项" /></label><select v-model="statusFilter"><option value="">状态：全部</option><option v-for="node in projectStatusNodes" :key="node" :value="node">{{ node }}</option></select><select v-model="categoryFilter"><option value="">检测类别：全部</option><option v-for="option in categoryOptions" :key="option" :value="option">{{ option }}</option></select><select v-model="teamFilter"><option value="">团队：全部</option><option v-for="option in teamOptions" :key="option" :value="option">{{ option }}</option></select><button class="pm-button ghost" @click="resetProjectFilters">重置</button><span class="pm-filter-count">{{ filteredProjects.length }} 条结果</span></section>
           <section class="pm-table-panel">
             <div class="pm-table-scroll"><table class="pm-table"><thead><tr><th></th><th>项目 / 客户</th><th>合同编号</th><th>服务项</th><th>检测类别</th><th>团队 / 项目经理</th><th>健康度</th><th>状态</th><th>交付进度</th><th>计划完成</th><th></th></tr></thead><tbody>
               <tr v-for="project in filteredProjects" :key="project.id" :class="{ selected: selectedRows.includes(project.id), risk: project.health === '风险' }"><td><input type="checkbox" :checked="selectedRows.includes(project.id)" :aria-label="`选择 ${project.id}`" @change="toggleRow(project.id)" /></td><td><button class="pm-project-link" @click="openProject(project)"><b>{{ project.id }}</b><span>{{ project.customer }}</span></button></td><td class="mono">{{ project.contract }}</td><td>{{ project.services }}</td><td>{{ project.category }}</td><td><b>{{ project.team }}</b><span class="pm-cell-sub">{{ project.manager }}</span></td><td><span class="pm-badge" :class="project.health">{{ project.health }}</span></td><td><span class="pm-badge neutral">{{ project.status }}</span></td><td><div class="pm-progress-cell"><div class="pm-inline-progress"><i :style="{ width: `${project.progress}%` }"></i></div><small>{{ project.progress }}%</small></div></td><td :class="{ 'pm-text-danger': project.due.includes('超期') }">{{ project.due }}</td><td><button class="pm-link" @click="openProject(project)">详情</button></td></tr>
@@ -1130,7 +1184,7 @@ onBeforeUnmount(() => {
 
         <template v-else-if="activeSection === 'implementation'">
           <section class="pm-board-summary"><div><strong>{{ serviceItems.length }}</strong><span>全部服务项</span></div><div><strong>{{ serviceFlow[2].count }}</strong><span>正在实施</span></div><div><strong>{{ serviceFlow[3].count }}</strong><span>报告编制</span></div><div><strong>{{ serviceFlow[4].count }}</strong><span>现场完成</span></div></section>
-          <section class="pm-kanban"><article v-for="column in kanbanColumns" :key="column.key"><header><div><i :class="column.color"></i><b>{{ column.key }}</b></div><span>{{ column.count }}</span></header><div class="pm-kanban-body"><button v-for="card in column.cards" :key="card.id" @click="openProject(card)"><b>{{ card.id }}</b><h3>{{ card.customer }}</h3><div class="pm-inline-progress"><i :style="{ width: `${card.progress}%` }"></i></div><footer><span>{{ card.progress }}%</span><time>{{ card.due || '待排期' }}</time></footer></button><div v-if="!column.cards.length" class="pm-empty-mini">暂无数据</div></div></article></section>
+          <section class="pm-kanban"><article v-for="column in kanbanColumns" :key="column.key"><header><div><i :class="column.color"></i><b>{{ column.key }}</b></div><span>{{ column.count }}</span></header><div class="pm-kanban-body"><button v-for="card in column.cards" :key="card.id" @click="openProject(card)"><b>{{ card.id }}</b><h3>{{ card.customer }}</h3><span class="pm-badge neutral">{{ card.status }}</span><div class="pm-inline-progress"><i :style="{ width: `${card.progress}%` }"></i></div><footer><span>{{ card.progress }}%</span><time>{{ card.due || '待排期' }}</time></footer></button><div v-if="!column.cards.length" class="pm-empty-mini">暂无数据</div></div></article></section>
           <section class="pm-panel pm-operation-panel"><header><div><p class="pm-panel-kicker">FIELD EXECUTION</p><h2>现场签到与原始记录</h2></div></header><ServiceItemPicker :items="serviceItems" :selected-ids="selectedServiceItem ? [selectedServiceItem.id] : []" empty-text="暂无可签到服务项" @select="selectServiceItem" /><div v-if="selectedServiceItem" class="pm-form pm-operation-form"><label><span>纬度 <em>*</em></span><input v-model.trim="operationForm.latitude" type="number" step="any" placeholder="例如 30.2741" /></label><label><span>经度 <em>*</em></span><input v-model.trim="operationForm.longitude" type="number" step="any" placeholder="例如 120.1551" /></label><label><span>现场原始数据 <em>*</em></span><textarea v-model.trim="operationForm.rawData" rows="3"></textarea></label><label><span>环境条件 <em>*</em></span><textarea v-model.trim="operationForm.environment" rows="3"></textarea></label><button class="pm-button primary" :disabled="saving" @click="runOperation('field')">提交签到和现场记录</button></div><div v-else class="pm-empty-mini">请先选择服务项</div></section>
         </template>
 
@@ -1149,7 +1203,7 @@ onBeforeUnmount(() => {
             <ServiceItemPicker v-if="activeSection === 'allocation'" :items="serviceItems" :selected-ids="selectedServiceItemIDs" multiple empty-text="暂无可分配服务项" hint="可同时选择多个服务项，批量分配团队负责人或执行团队。" @toggle="toggleServiceItem" /><ServiceItemPicker v-else :items="serviceItems" :selected-ids="selectedServiceItem ? [selectedServiceItem.id] : []" empty-text="暂无可操作服务项" @select="selectServiceItem" />
             <div v-if="selectedServiceItem" class="pm-form pm-operation-form">
               <template v-if="['allocation', 'inbox', 'assignments'].includes(activeSection)"><div class="pm-personnel-search"><label><span>查找平台人员</span><input v-model.trim="personnelKeyword" placeholder="输入姓名关键字" @keydown.enter.prevent="loadPersonnel" /></label><button type="button" class="pm-button" :disabled="personnelLoading" @click="loadPersonnel">{{ personnelLoading ? '查询中…' : '查询' }}</button></div><p v-if="personnelError" class="pm-form-hint" role="alert">{{ personnelError }}</p><label><span>团队负责人 <em>*</em></span><select v-model="operationForm.teamLeadID" :disabled="personnelLoading" required><option value="">请选择团队负责人</option><option v-for="option in personnelOptions" :key="option.id" :value="option.id">{{ option.name }}</option></select></label><template v-if="canExecutionAssign"><label><span>项目经理 <em>*</em></span><select v-model="operationForm.projectManagerID" :disabled="personnelLoading" required><option value="">请选择项目经理</option><option v-for="option in personnelOptions" :key="option.id" :value="option.id">{{ option.name }}</option></select></label><div class="pm-field"><span>工程师 <em>*</em></span><div class="pm-multi-dropdown" :class="{ open: openMulti === 'engineer' }"><button type="button" class="pm-multi-trigger" :class="{ placeholder: !engineerSelection.length }" :disabled="personnelLoading" @click.stop="toggleMulti('engineer')"><span>{{ multiSummary(engineerSelection, personnelOptions, '请选择工程师') }}</span><i class="pm-multi-caret"></i></button><div v-if="openMulti === 'engineer'" class="pm-multi-menu"><label v-for="option in personnelOptions" :key="option.id" class="pm-multi-option"><input type="checkbox" :checked="engineerSelection.includes(option.id)" @change="toggleEngineer(option.id)" /><span>{{ option.name }}</span></label><p v-if="!personnelOptions.length" class="pm-empty-mini">暂无可选人员</p></div></div></div><div class="pm-field"><span>设备</span><div class="pm-multi-dropdown" :class="{ open: openMulti === 'equipment' }"><button type="button" class="pm-multi-trigger" :class="{ placeholder: !equipmentSelection.length }" @click.stop="toggleMulti('equipment')"><span>{{ multiSummary(equipmentSelection, equipmentOptions, '请选择设备（可选）') }}</span><i class="pm-multi-caret"></i></button><div v-if="openMulti === 'equipment'" class="pm-multi-menu"><label v-for="option in equipmentOptions" :key="option.id" class="pm-multi-option"><input type="checkbox" :checked="equipmentSelection.includes(option.id)" @change="toggleEquipment(option.id)" /><span>{{ option.name }}</span></label><p v-if="equipmentError" class="pm-empty-mini" role="alert">{{ equipmentError }}</p><p v-else-if="!equipmentOptions.length" class="pm-empty-mini">暂无可选设备</p></div></div></div><label><span>能力码 <em>自动</em></span><div class="pm-code-chips"><button v-for="code in capabilityCodeList" :key="code" type="button" class="pm-code-chip" @click.prevent>{{ code }}</button><p v-if="!capabilityCodeList.length" class="pm-empty-mini">选择设备后自动汇总，无需填写</p></div></label></template><button class="pm-button primary" :disabled="saving" @click="runOperation('allocation')">{{ saving ? '提交中…' : canExecutionAssign ? '保存分配并校验能力' : '分配团队负责人' }}</button></template>
-              <template v-else-if="activeSection === 'planning'"><label><span>计划开始 <em>*</em></span><input v-model.trim="operationForm.plannedStart" type="datetime-local" /></label><label><span>计划结束 <em>*</em></span><input v-model.trim="operationForm.plannedEnd" type="datetime-local" /></label><label><span>现场计划 <em>*</em></span><textarea v-model.trim="operationForm.sitePlan" rows="3" placeholder="现场实施步骤和窗口"></textarea></label><template v-if="selectedServiceItem.test_mode === 'PENETRATION'"><label><span>渗透测试专项计划 <em>*</em></span><textarea v-model.trim="operationForm.penetrationTestPlan" rows="3"></textarea></label><fieldset class="pm-compliant-fieldset"><legend>专项合规要素（授权 / 白名单 / 时间窗 / 应急 / 回滚）</legend><label><span>授权书编号 <em>*</em></span><input v-model.trim="operationForm.authDocNo" required placeholder="例如 AUTH-2026-001" /></label><label><span>授权生效 <em>*</em></span><input v-model.trim="operationForm.authStart" type="datetime-local" required /></label><label><span>授权截止 <em>*</em></span><input v-model.trim="operationForm.authEnd" type="datetime-local" required /></label><label><span>授权范围 <em>*</em></span><input v-model.trim="operationForm.authScope" required placeholder="例如 内网段 10.0.0.0/8" /></label><label><span>计划测试范围 <em>*</em></span><input v-model.trim="operationForm.testScope" required placeholder="例如 关键业务系统 WEB 渗透" /></label><label><span>测试时间窗 <em>*</em></span><input v-model.trim="operationForm.testWindow" required placeholder="例如 00:00-06:00" /></label><label><span>应急联系人 <em>*</em></span><input v-model.trim="operationForm.emergencyContact" required placeholder="姓名 + 电话" /></label><label><span>回滚方案 <em>*</em></span><textarea v-model.trim="operationForm.rollbackPlan" rows="3" required></textarea></label></fieldset></template><button class="pm-button primary" :disabled="saving" @click="runOperation('planning')">发布实施计划</button></template>
+              <template v-else-if="activeSection === 'planning'"><div v-if="planningBlocked" class="pm-blocker" :class="planningBlocked.tone" role="alert"><b>暂时不能发布实施计划</b><span>{{ planningBlocked.reason }}</span><button class="pm-button" type="button" @click="navigate('allocation')">前往任务分配</button></div><label><span>计划开始 <em>*</em></span><input v-model.trim="operationForm.plannedStart" type="datetime-local" /></label><label><span>计划结束 <em>*</em></span><input v-model.trim="operationForm.plannedEnd" type="datetime-local" /></label><label><span>现场计划 <em>*</em></span><textarea v-model.trim="operationForm.sitePlan" rows="3" placeholder="现场实施步骤和窗口"></textarea></label><template v-if="selectedServiceItem.test_mode === 'PENETRATION'"><label><span>渗透测试专项计划 <em>*</em></span><textarea v-model.trim="operationForm.penetrationTestPlan" rows="3"></textarea></label><fieldset class="pm-compliant-fieldset"><legend>专项合规要素（授权 / 白名单 / 时间窗 / 应急 / 回滚）</legend><label><span>授权书编号 <em>*</em></span><input v-model.trim="operationForm.authDocNo" required placeholder="例如 AUTH-2026-001" /></label><label><span>授权生效 <em>*</em></span><input v-model.trim="operationForm.authStart" type="datetime-local" required /></label><label><span>授权截止 <em>*</em></span><input v-model.trim="operationForm.authEnd" type="datetime-local" required /></label><label><span>授权范围 <em>*</em></span><input v-model.trim="operationForm.authScope" required placeholder="例如 内网段 10.0.0.0/8" /></label><label><span>计划测试范围 <em>*</em></span><input v-model.trim="operationForm.testScope" required placeholder="例如 关键业务系统 WEB 渗透" /></label><label><span>测试时间窗 <em>*</em></span><input v-model.trim="operationForm.testWindow" required placeholder="例如 00:00-06:00" /></label><label><span>应急联系人 <em>*</em></span><input v-model.trim="operationForm.emergencyContact" required placeholder="姓名 + 电话" /></label><label><span>回滚方案 <em>*</em></span><textarea v-model.trim="operationForm.rollbackPlan" rows="3" required></textarea></label></fieldset></template><button class="pm-button primary" :disabled="saving || !!planningBlocked" :title="planningBlocked ? planningBlocked.reason : ''" @click="runOperation('planning')">发布实施计划</button></template>
               <template v-else-if="activeSection === 'methods'"><div class="pm-review-state"><span>复核状态</span><b>{{ item && reportTechReviewLabel(item.tech_review_status) }}</b></div><template v-if="item && ['PENDING', 'REJECTED'].includes(item.tech_review_status)"><label><span>复核意见</span><textarea v-model.trim="operationForm.reviewComment" rows="3" placeholder="填写风险说明或驳回原因"></textarea></label><div class="pm-form-row"><button class="pm-button primary" :disabled="saving" @click="runOperation('special-approve')">通过复核</button><button class="pm-button" :disabled="saving" @click="runOperation('special-reject')">驳回复核</button></div></template><template v-else-if="item && item.tech_review_status === 'APPROVED'"><p class="pm-form-hint">{{ item.tech_review_comment || '已通过复核，可发布实施计划' }}<span v-if="item.tech_reviewed_at"> · {{ formatDateTime(item.tech_reviewed_at) }} · {{ item.tech_reviewed_by }} </span></p></template><template v-else-if="item && item.tech_review_status === 'PENDING'"><p class="pm-form-hint">等待技术总监复核特殊方法。</p></template></template>
               <template v-else-if="activeSection === 'preparation'"><label><span>设备申领单 <em>*</em></span><input v-model.trim="operationForm.equipmentRequestID" /></label><label><span>行程预订单 <em>*</em></span><input v-model.trim="operationForm.travelRequestID" /></label><label><span>备注</span><textarea v-model.trim="operationForm.comment" rows="3"></textarea></label><button class="pm-button primary" :disabled="saving" @click="runOperation('preparation')">发起实施准备</button></template>
               <template v-else-if="activeSection === 'exceptions'"><label><span>偏离描述</span><textarea v-model.trim="operationForm.deviationDescription" rows="3" placeholder="选择服务项后填写偏离内容"></textarea></label><label><span>严重度</span><select v-model="operationForm.severity"><option value="LOW">低</option><option value="MEDIUM">中</option><option value="HIGH">高</option></select></label><button class="pm-button primary" :disabled="saving" @click="runOperation('exception-report')">上报偏离</button><label><span>评审偏离 ID</span><input v-model.trim="operationForm.deviationID" placeholder="DV-..." /></label><label><span>评审决定</span><select v-model="operationForm.decision"><option value="RELEASE">放行</option><option value="RETEST">重测</option><option value="TERMINATE">终止</option></select></label><button class="pm-button" :disabled="saving" @click="runOperation('exception-review')">提交偏离评审</button></template>
