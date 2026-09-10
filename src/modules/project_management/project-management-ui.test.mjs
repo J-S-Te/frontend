@@ -23,7 +23,7 @@ test('项目管理页面覆盖原型的五个业务域与核心交互', () => {
   assert.match(source, /class="pm-drawer"/)
   assert.match(source, /onMounted\(loadWorkspace\)/)
   assert.match(source, /await confirmServiceItemsRequest\(ids\)/)
-  assert.match(source, /await setRuleEnabled\(rule\.id, next\)/)
+  assert.match(source, /await setRuleEnabled\(rule\.id, rule\.kind \|\| activeSection\.value, next\)/)
   for (const operation of ['assignTeam', 'assignExecutionTeam', 'planImplementation', 'startImplementationPreparation', 'fieldCheckIn', 'submitFieldRecord', 'reportDeviation', 'reviewDeviation', 'completeFieldImplementation']) {
     assert.match(source, new RegExp(`runOperation[\\s\\S]*${operation}`))
   }

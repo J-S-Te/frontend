@@ -45,7 +45,10 @@ test('开发服务器和生产 Nginx 只把项目后端路径转发给 project-a
 
 test('服务项确认与规则切换使用后端写接口', () => {
   assert.match(source, /request\('\/service-items\/confirm', \{ method: 'POST'/)
-  assert.match(source, /request\(`\/rules\/\$\{encodeURIComponent\(id\)\}`, \{ method: 'PATCH'/)
+  // 启停按配置类型定位到对应真实配置表，因此 PATCH 必须携带 kind。
+  assert.match(source, /request\(`\/rules\/\$\{encodeURIComponent\(id\)\}\?kind=\$\{encodeURIComponent\(kind\)\}`, \{ method: 'PATCH'/)
+  // 整行编辑走 PUT，可更新该配置类型专属字段。
+  assert.match(source, /request\(`\/rules\/\$\{encodeURIComponent\(id\)\}`, \{ method: 'PUT'/)
 })
 
 test('项目交付闭环调用真实后端接口而非本地模拟', () => {
