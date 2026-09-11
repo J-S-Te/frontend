@@ -1642,3 +1642,10 @@
 .pm-approval-panel header { margin-bottom: var(--pm-sp-3); }
 .pm-detail-tabs { margin-bottom: var(--pm-sp-4); }
 .pm-capability-tabs { flex-basis: 100%; }
+
+/* 18.13 状态胶囊统一：全部状态字段经 statusTone 输出语义色调；
+   warning 作为既有调用点的兼容别名（设备选择器状态）。 */
+.pm-badge.warning { background: var(--pm-amber-soft); color: var(--pm-amber-text); }
+.pm-op-current { display: inline-flex; align-items: center; gap: 6px; }
+.pm-review-state b,
+.pm-report-phase b { width: fit-content; }
