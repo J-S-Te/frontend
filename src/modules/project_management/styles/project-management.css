@@ -751,38 +751,6 @@
 .pm-progress-row time { font-size: var(--pm-fs-sm); text-align: right; }
 
 /* 统计条 / 运营指标 */
-.pm-summary-strip {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  margin-bottom: var(--pm-gap-grid);
-  overflow: hidden;
-  border: 1px solid var(--pm-line);
-  border-radius: var(--pm-r-lg);
-  background: var(--pm-card);
-  box-shadow: var(--pm-shadow);
-}
-
-.pm-summary-strip button {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 3px;
-  padding: var(--pm-sp-4) var(--pm-sp-5) 14px;
-  border: 0;
-  border-right: 1px solid var(--pm-line);
-  background: var(--pm-card);
-  text-align: left;
-}
-
-.pm-summary-strip button:last-child { border-right: 0; }
-.pm-summary-strip button:hover { background: var(--pm-sunken); }
-.pm-summary-strip button > span,
-.pm-summary-strip span { color: var(--pm-muted); font-size: var(--pm-fs-label); font-weight: var(--pm-fw-semibold); }
-.pm-summary-strip button > b,
-.pm-summary-strip b { color: var(--pm-ink); font-size: var(--pm-fs-title); font-weight: var(--pm-fw-bold); line-height: var(--pm-lh-tight); letter-spacing: -.02em; }
-.pm-summary-strip button > em { color: var(--pm-muted); font-size: var(--pm-fs-nano); font-style: normal; }
-.pm-summary-strip .danger b { color: var(--pm-red-text); }
-
 .pm-board-summary {
   display: flex;
   gap: 1px;
@@ -1306,9 +1274,16 @@
 .pm-conflict { border: 1.5px solid var(--pm-red); background: var(--pm-red-soft); border-radius: var(--pm-r-sm); padding: var(--pm-sp-3); color: var(--pm-red-text); font-size: var(--pm-fs-sm); }
 .pm-okbox { border: 1.5px solid var(--pm-green); background: var(--pm-green-soft); border-radius: var(--pm-r-sm); padding: var(--pm-sp-3); color: var(--pm-green-text); font-size: var(--pm-fs-sm); }
 
-.pm-alert.warn { display: flex; align-items: flex-start; gap: 7px; margin: 0 var(--pm-sp-4) var(--pm-sp-4); padding: 9px var(--pm-sp-3); border: 1.5px solid var(--pm-amber); border-radius: var(--pm-r-sm); background: var(--pm-amber-soft); color: var(--pm-amber-text); font-size: var(--pm-fs-hint); }
-.pm-alert.warn i { width: 8px; height: 8px; flex: none; margin-top: 3px; border-radius: 50%; background: var(--pm-amber); }
+/* 提示条：布局与圆点由基类承担，颜色由 warn/info 变体决定。此前只有 .warn 一套规则，
+   而视图里同时用了 .pm-alert.info（SLA 口径说明），该面板因此完全无样式。 */
+.pm-alert { display: flex; align-items: flex-start; gap: 7px; margin: 0 var(--pm-sp-4) var(--pm-sp-4); padding: 9px var(--pm-sp-3); border: 1.5px solid transparent; border-radius: var(--pm-r-sm); font-size: var(--pm-fs-hint); }
+.pm-alert i { width: 8px; height: 8px; flex: none; margin-top: 3px; border-radius: 50%; }
+.pm-alert.warn { border-color: var(--pm-amber); background: var(--pm-amber-soft); color: var(--pm-amber-text); }
+.pm-alert.warn i { background: var(--pm-amber); }
 .pm-alert.warn b { color: var(--pm-amber-text); }
+.pm-alert.info { border-color: var(--pm-sky); background: var(--pm-sky-soft); color: var(--pm-sky-text); }
+.pm-alert.info i { background: var(--pm-sky); }
+.pm-alert.info b { color: var(--pm-sky-text); }
 
 .pm-contract-warning {
   display: flex;
@@ -1416,7 +1391,6 @@
   .pm-user div { display: none; }
   .pm-page { padding: var(--pm-sp-5) var(--pm-sp-4) var(--pm-sp-7); }
   .pm-page-head { align-items: flex-start; }
-  .pm-summary-strip { grid-template-columns: repeat(5, minmax(100px, 1fr)); overflow-x: auto; }
   .pm-decompose-grid,
   .pm-config-layout { grid-template-columns: 1fr; }
   .pm-tree-panel { display: none; }
@@ -1530,10 +1504,12 @@
 .pm-kpi .pm-kpi-trend.flat { color: var(--pm-gray-text); }
 .pm-kpi .pm-kpi-meta { margin-top: var(--pm-sp-1); color: var(--pm-muted); font-size: var(--pm-fs-nano); line-height: var(--pm-lh-loose); }
 .pm-kpi .pm-kpi-corner { position: absolute; top: var(--pm-sp-2); right: var(--pm-sp-3); padding: 1px 8px; border-radius: var(--pm-r-full); background: var(--pm-primary-soft); color: var(--pm-blue-text); font-size: var(--pm-fs-nano); font-weight: var(--pm-fw-semibold); }
+/* 角标固定在卡片右上角（top/right 见上），与标签行右侧的「实时」药丸同处一条水平带，
+   两者各自定位会压在一起。有角标时给标签行留出角标宽度：现有两个角标文案为 3–4 个
+   汉字（11px）+ 左右各 8px 内边距，64px 可覆盖且不改动无角标卡片的排版。 */
+.pm-kpi:has(.pm-kpi-corner) > .pm-kpi-label { padding-right: 64px; }
 .pm-kpi.green { background: linear-gradient(0deg, var(--pm-green-soft), var(--pm-green-soft)); }
-.pm-kpi.green::before { background: var(--pm-green); }
 .pm-kpi.red { background: linear-gradient(0deg, var(--pm-red-soft), var(--pm-red-soft)); }
-.pm-kpi.red::before { background: var(--pm-red); }
 .pm-kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--pm-gap-grid); }
 
 /* 18.2 搜索筛选栏（原型 .search-bar / .search-input / .filter-select / .filter-tag） */

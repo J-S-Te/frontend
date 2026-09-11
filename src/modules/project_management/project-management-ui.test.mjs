@@ -617,11 +617,15 @@ test('每个写操作入口都按服务端同款权限码门控', () => {
     "canReviewDeviation = computed(() => permissionSet.value.has('project.deviation.review'))",
     "canManageRules = computed(() => permissionSet.value.has('project_rule.manage'))",
     "canManageFieldPermissions = computed(() => permissionSet.value.has('project.field_permission.manage'))",
+    "canConfirmDecomposition = computed(() => permissionSet.value.has('service_item.confirm'))",
   ]) {
     assert.ok(source.includes(guard), `缺少权限守卫：${guard}`)
   }
   // 各按钮必须挂上对应守卫，而不是无条件渲染。
   assert.match(source, /v-if="canSubmitAllocation" class="pm-button primary" :disabled="saving" @click="runOperation\('allocation'\)"/)
+  // 确认拆解走 POST /service-items/confirm（服务端要求 service_item.confirm），与
+  // 调整拆解的 project.decomposition.manage 是两个权限码，不能共用同一个守卫。
+  assert.match(source, /v-if="activeSection === 'decomposition' && canConfirmDecomposition"[^>]*@click="confirmDecomposition"/)
   assert.match(source, /v-if="canPlanImplementation" class="pm-button primary" :disabled="saving \|\| !!planningBlocked"/)
   assert.match(source, /v-if="selectedServiceItem && canExecuteField" class="pm-form pm-operation-form"/)
   assert.match(source, /canCompleteField" class="pm-button" :disabled="saving" @click="runOperation\('complete'\)"/)
@@ -635,6 +639,11 @@ test('每个写操作入口都按服务端同款权限码门控', () => {
   assert.match(source, /phase === 'ARCHIVED' \? 'project\.report\.archive' : 'project\.report\.manage'/)
   // 字段级权限页签只对持有该权限的角色可见，避免"能打开、提交必 403"。
   assert.match(source, /configKindsMeta\.filter\(\(meta\) => meta\.kind !== 'permissions' \|\| canManageFieldPermissions\.value\)/)
+  // 页签隐藏后配置面板与「新建规则」不能仍按 activeSection 渲染：否则表头取回退后的
+  // 首个可见配置、列表按被隐藏的 kind 过滤，得到标题与内容不符的空表。
+  assert.match(source, /const isVisibleConfigSection = computed\(\(\) => visibleConfigKinds\.value\.some\(\(meta\) => meta\.kind === activeSection\.value\)\)/)
+  assert.match(source, /v-else-if="isVisibleConfigSection"/)
+  assert.match(source, /v-if="canManageRules && isVisibleConfigSection"/)
 })
 
 test('交付事件名与后端常量逐字一致', () => {
@@ -737,4 +746,22 @@ test('按 V1.1 原型还原：详情页、步骤条、审批流、状态分布�
   // 看板卡片使用左色条增强样式，并保留风险行标记。
   assert.match(styles, /\.pm-kanban-card \{/)
   assert.match(styles, /\.pm-kanban-card\.risk \{/)
+})
+
+test('样式表修掉信息提示、卡片角标与残留样式三处缺陷', () => {
+  // SLA 口径说明用 .pm-alert.info，但样式表此前只定义了 .pm-alert.warn，
+  // 该面板完全没有布局与配色；现在布局由基类承担，颜色由 warn/info 变体决定。
+  assert.match(styles, /\.pm-alert \{ display: flex;/)
+  assert.match(styles, /\.pm-alert\.info \{ border-color: var\(--pm-sky\)/)
+  assert.match(styles, /\.pm-alert\.info i \{ background: var\(--pm-sky\); \}/)
+  // 右上角标与标签行右侧「实时」药丸同处一条水平带，有角标时须给标签行留出宽度。
+  assert.match(styles, /\.pm-kpi:has\(\.pm-kpi-corner\) > \.pm-kpi-label \{ padding-right: 64px; \}/)
+  // .pm-kpi.green/.red 的 ::before 没有任何基础规则，只设 background 属死规则；
+  // 真正的配色是卡片自身的渐变背景，必须保留。
+  assert.doesNotMatch(styles, /\.pm-kpi\.green::before/)
+  assert.doesNotMatch(styles, /\.pm-kpi\.red::before/)
+  assert.match(styles, /\.pm-kpi\.green \{ background: linear-gradient/)
+  assert.match(styles, /\.pm-kpi\.red \{ background: linear-gradient/)
+  // 统计条已被看板 KPI 行取代，其样式不得再残留。
+  assert.doesNotMatch(styles, /pm-summary-strip/)
 })
