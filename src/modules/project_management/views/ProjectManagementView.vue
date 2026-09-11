@@ -154,6 +154,22 @@ const filteredProjects = computed(() => {
       && (!teamFilter.value || project.team === teamFilter.value)
   })
 })
+// 项目表分页。后端列表接口已支持 page/page_size（返回 items+total），但类别/团队
+// 筛选目前仍在前端完成，因此这里先对筛选后的结果分页；筛选下推到服务端后可直接
+// 切换到服务端分页，无需改动表格结构。
+const projectPage = ref(1)
+const projectPageSize = 20
+const projectPageCount = computed(() => Math.max(1, Math.ceil(filteredProjects.value.length / projectPageSize)))
+const pagedProjects = computed(() => {
+  const start = (projectPage.value - 1) * projectPageSize
+  return filteredProjects.value.slice(start, start + projectPageSize)
+})
+function gotoProjectPage(page) {
+  projectPage.value = Math.min(Math.max(1, page), projectPageCount.value)
+}
+// 筛选条件变化后回到第一页，避免停留在越界页码上看到空表。
+watch([keyword, statusFilter, categoryFilter, teamFilter], () => { projectPage.value = 1 })
+
 const categoryOptions = computed(() => [...new Set(projects.value.map((p) => p.category).filter(Boolean))])
 const teamOptions = computed(() => [...new Set(projects.value.map((p) => p.team).filter(Boolean))])
 const inFlightProjects = computed(() => projects.value.filter((p) => p.status !== projectStatusCompleted))
@@ -1335,9 +1351,9 @@ onBeforeUnmount(() => {
           <section class="pm-filters"><label><ConsoleIcon name="search" /><input v-model="keyword" placeholder="搜索项目编号 / 客户名称 / 服务项" /></label><select v-model="statusFilter"><option value="">状态：全部</option><option v-for="node in projectStatusNodes" :key="node" :value="node">{{ node }}</option></select><select v-model="categoryFilter"><option value="">检测类别：全部</option><option v-for="option in categoryOptions" :key="option" :value="option">{{ option }}</option></select><select v-model="teamFilter"><option value="">团队：全部</option><option v-for="option in teamOptions" :key="option" :value="option">{{ option }}</option></select><button class="pm-button ghost" @click="resetProjectFilters">重置</button><span class="pm-filter-count">{{ filteredProjects.length }} 条结果</span></section>
           <section class="pm-table-panel">
             <div class="pm-table-scroll"><table class="pm-table"><thead><tr><th></th><th>项目 / 客户</th><th>合同编号</th><th>服务项</th><th>检测类别</th><th>团队 / 项目经理</th><th>状态</th><th>交付进度</th><th>计划完成</th><th></th></tr></thead><tbody>
-              <tr v-for="project in filteredProjects" :key="project.id" :class="{ selected: selectedRows.includes(project.id), risk: riskProjectStatuses.includes(project.status) }"><td><input type="checkbox" :checked="selectedRows.includes(project.id)" :aria-label="`选择 ${project.id}`" @change="toggleRow(project.id)" /></td><td><button class="pm-project-link" @click="openProject(project)"><b>{{ project.id }}</b><span>{{ project.customer }}</span></button></td><td class="mono">{{ project.contract }}</td><td>{{ project.services }}</td><td>{{ project.category }}</td><td><b>{{ project.team }}</b><span class="pm-cell-sub">{{ project.manager }}</span></td><td><span class="pm-badge neutral">{{ project.status }}</span></td><td><div class="pm-progress-cell"><div class="pm-inline-progress"><i :style="{ width: `${project.progress}%` }"></i></div><small>{{ project.progress }}%</small></div></td><td :class="{ 'pm-text-danger': project.due.includes('超期') }">{{ project.due }}</td><td><button class="pm-link" @click="openProject(project)">详情</button></td></tr>
+              <tr v-for="project in pagedProjects" :key="project.id" :class="{ selected: selectedRows.includes(project.id), risk: riskProjectStatuses.includes(project.status) }"><td><input type="checkbox" :checked="selectedRows.includes(project.id)" :aria-label="`选择 ${project.id}`" @change="toggleRow(project.id)" /></td><td><button class="pm-project-link" @click="openProject(project)"><b>{{ project.id }}</b><span>{{ project.customer }}</span></button></td><td class="mono">{{ project.contract }}</td><td>{{ project.services }}</td><td>{{ project.category }}</td><td><b>{{ project.team }}</b><span class="pm-cell-sub">{{ project.manager }}</span></td><td><span class="pm-badge neutral">{{ project.status }}</span></td><td><div class="pm-progress-cell"><div class="pm-inline-progress"><i :style="{ width: `${project.progress}%` }"></i></div><small>{{ project.progress }}%</small></div></td><td :class="{ 'pm-text-danger': project.due.includes('超期') }">{{ project.due }}</td><td><button class="pm-link" @click="openProject(project)">详情</button></td></tr>
             </tbody></table></div>
-            <footer class="pm-table-footer"><span>已选择 {{ selectedRows.length }} 项 · 共 {{ filteredProjects.length }} 条</span><div class="pm-pagination"><button class="pm-pg" disabled>‹</button><button class="pm-pg active">1</button><button class="pm-pg" disabled>›</button></div></footer>
+            <footer class="pm-table-footer"><span>已选择 {{ selectedRows.length }} 项 · 共 {{ filteredProjects.length }} 条 · 第 {{ projectPage }} / {{ projectPageCount }} 页</span><div class="pm-pagination"><button class="pm-pg" :disabled="projectPage <= 1" @click="gotoProjectPage(projectPage - 1)">‹</button><button class="pm-pg active">{{ projectPage }}</button><button class="pm-pg" :disabled="projectPage >= projectPageCount" @click="gotoProjectPage(projectPage + 1)">›</button></div></footer>
           </section>
         </template>
 

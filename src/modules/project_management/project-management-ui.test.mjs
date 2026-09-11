@@ -571,3 +571,14 @@ test('人员资质档案展示并复核基础平台身份状态', () => {
   assert.match(source, /<th>人员状态<\/th>/)
   assert.match(source, /item\.identity_status === 'MISSING' \? '风险'/)
 })
+
+test('项目表提供真实分页控件', () => {
+  assert.match(source, /const projectPage = ref\(1\)/)
+  assert.match(source, /const projectPageCount = computed/)
+  assert.match(source, /const pagedProjects = computed/)
+  assert.match(source, /v-for="project in pagedProjects"/)
+  // 筛选变化后回到第一页，避免停在越界页码看到空表。
+  assert.match(source, /watch\(\[keyword, statusFilter, categoryFilter, teamFilter\], \(\) => \{ projectPage\.value = 1 \}\)/)
+  assert.match(source, /:disabled="projectPage <= 1" @click="gotoProjectPage\(projectPage - 1\)"/)
+  assert.match(source, /:disabled="projectPage >= projectPageCount" @click="gotoProjectPage\(projectPage \+ 1\)"/)
+})

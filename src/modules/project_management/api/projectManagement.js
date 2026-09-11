@@ -167,6 +167,21 @@ export async function ensureProjectSession() {
 }
 
 /**
+ * unwrapPage 兼容两种列表响应：分页 envelope（{items,total,page,page_size}）与历史数组。
+ * 后端列表接口统一返回 envelope，page_size 未指定时 items 即全量，
+ * 因此下拉数据源（服务项、设备）仍能拿到完整集合。
+ * @param {unknown} data 接口返回体。
+ * @returns {{items: Array<object>, total: number}} 列表与总数。
+ */
+function unwrapPage(data) {
+  if (Array.isArray(data)) return { items: data, total: data.length }
+  if (data && Array.isArray(data.items)) {
+    return { items: data.items, total: Number(data.total ?? data.items.length) }
+  }
+  return { items: [], total: 0 }
+}
+
+/**
  * listProjects 按前端约定参数查询项目列表，并在返回非数组时兜底为空列表。
  *
  * @param {Record<string, string|number|boolean>} [params={}] 查询条件。支持 keyword 兼容映射为 q。
@@ -181,7 +196,22 @@ export async function listProjects(params = {}) {
   delete query.keyword
   const search = new URLSearchParams(Object.entries(query).filter(([, value]) => value !== undefined && value !== null && value !== '')).toString()
   const data = await request(`/projects${search ? `?${search}` : ''}`)
-  return Array.isArray(data) ? data : []
+  return unwrapPage(data).items
+}
+
+/**
+ * listProjectsPage 分页查询项目列表，返回 items 与 total 供分页控件渲染。
+ * 状态过滤发生在服务端的派生态上，因此 total 是"筛选后的总数"。
+ * @param {Record<string, string|number|boolean>} [params={}] 查询条件，含 page / page_size。
+ * @returns {Promise<{items: Array<object>, total: number}>} 当前页与筛选后的总数。
+ * @throws {Error} 会话失效、鉴权失败或分页参数不合法时抛出。
+ */
+export async function listProjectsPage(params = {}) {
+  const query = { ...params }
+  if (query.q === undefined && query.keyword !== undefined) query.q = query.keyword
+  delete query.keyword
+  const search = new URLSearchParams(Object.entries(query).filter(([, value]) => value !== undefined && value !== null && value !== '')).toString()
+  return unwrapPage(await request(`/projects${search ? `?${search}` : ''}`))
 }
 
 /**
@@ -213,7 +243,7 @@ export function createProject(payload) {
 export async function listServiceItems(projectID = '') {
   const search = projectID ? `?project_id=${encodeURIComponent(projectID)}` : ''
   const data = await request(`/service-items${search}`)
-  return Array.isArray(data) ? data : []
+  return unwrapPage(data).items
 }
 
 /**
@@ -517,7 +547,7 @@ export async function listCapabilities(resourceType = '') {
 
 export async function listEquipment() {
   const data = await request('/equipment')
-  return Array.isArray(data) ? data : []
+  return unwrapPage(data).items
 }
 
 export function upsertEquipment(payload) {

@@ -101,3 +101,14 @@ test('人员身份复核调用独立端点', () => {
   assert.match(source, /export function syncPersonnelIdentities\(\)/)
   assert.match(source, /request\('\/capabilities\/sync-identities', \{ method: 'POST' \}\)/)
 })
+
+test('列表接口统一解包分页 envelope，未分页时拿到完整集合', () => {
+  // 后端列表接口统一返回 {items,total,page,page_size}；page_size 未指定时 items 即全量。
+  assert.match(source, /function unwrapPage\(data\)/)
+  assert.match(source, /if \(Array\.isArray\(data\)\) return \{ items: data, total: data\.length \}/)
+  assert.match(source, /if \(data && Array\.isArray\(data\.items\)\)/)
+  // 三个列表都走解包：服务项与设备是下拉数据源，必须仍是完整集合。
+  assert.equal((source.match(/return unwrapPage\(data\)\.items/g) || []).length, 3)
+  assert.match(source, /export async function listProjectsPage\(params = \{\}\)/)
+  assert.match(source, /return unwrapPage\(await request\(`\/projects\$\{search \? `\?\$\{search\}` : ''\}`\)\)/)
+})
