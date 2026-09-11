@@ -235,6 +235,18 @@ export function createProject(payload) {
 }
 
 /**
+ * adjustDecomposition 调整服务项拆解并发起补充协议。
+ * 服务端要求 project.decomposition.manage，且仅当项目不存在"待确认/待复核"之外的服务项时才受理。
+ * @param {string|number} projectID 项目 ID。
+ * @param {{reason: string, supplement_contract_id: string, items: Array<object>}} payload 调整原因、补充协议编号与新的服务项清单。
+ * @returns {Promise<object>} 服务端返回的项目唯一状态。
+ * @throws {Error} 数据校验失败或权限不足时抛出。
+ */
+export function adjustDecomposition(projectID, payload) {
+  return request(`/projects/${encodeURIComponent(projectID)}/decomposition-adjustments`, { method: 'POST', body: JSON.stringify(payload) })
+}
+
+/**
  * listServiceItems 查询项目下的服务项；projectID 为空时返回全部。
  * @param {string|number} [projectID=''] 可选项目 ID。
  * @returns {Promise<Array<object>>} 服务项列表。
@@ -440,6 +452,16 @@ export function updateReportStatus(itemID, phase) {
  */
 export function getDashboard() {
   return request('/dashboard')
+}
+
+/**
+ * listSlaOverdue 获取 SLA 超期 / 临近超期服务项（服务端口径：计划完成超期 + 状态停留超期/临近）。
+ * @returns {Promise<Array<object>>} SLA 超期项列表，kind 区分 PLAN_END_OVERDUE / STATUS_DEADLINE_OVERDUE / STATUS_DEADLINE_APPROACHING。
+ * @throws {Error} 会话失效或服务异常时抛出。
+ */
+export async function listSlaOverdue() {
+  const data = await request('/delivery/sla-overdue')
+  return Array.isArray(data) ? data : []
 }
 
 /**

@@ -7,6 +7,7 @@ const source = await readFile(new URL('./views/ProjectManagementView.vue', impor
 const styles = await readFile(new URL('./styles/project-management.css', import.meta.url), 'utf8')
 const pickerSource = await readFile(new URL('./components/ServiceItemPicker.vue', import.meta.url), 'utf8')
 const contractSource = await readFile(new URL('../contract_management/api/contract.js', import.meta.url), 'utf8')
+const pmApiSource = await readFile(new URL('./api/projectManagement.js', import.meta.url), 'utf8')
 
 test('项目管理模块暴露统一前端路由', () => {
   assert.deepEqual(projectManagementModule.route, {
@@ -43,7 +44,7 @@ test('项目管理页面不再渲染原型模拟业务数据', () => {
   assert.match(source, /getDashboard\(\)/)
   assert.match(source, /getProjectSession\(\)/)
   assert.match(source, /standards: \[\]/)
-  assert.match(source, /projectEvents\(drawerProject\)/)
+  assert.match(source, /projectEvents\(detailProject\.value\)/)
 })
 
 test('项目系统侧边栏返回门户，用户控件负责撤销应用会话', () => {
@@ -250,7 +251,9 @@ test('执行总览新增准时交付率趋势、检测类别分布与团队资�
   assert.match(source, /检测类别分布（占比）/)
   assert.match(source, /团队资源利用率/)
   assert.match(source, /const weeklyDeliveryTrend = computed/)
-  assert.match(source, /FIELD_IMPLEMENTATION_COMPLETED/)
+  // 趋势卡按后端真实发出的事件名过滤：此前断言的是不存在的
+  // FIELD_IMPLEMENTATION_COMPLETED，恰好把「趋势恒空」这个缺陷固化成了绿测。
+  assert.match(source, /const completedDeliveryEvents = computed\(\(\) => deliveryEvents\.value\.filter\(\(event\) => event\.type === 'FIELD_COMPLETED'\)\)/)
   assert.match(source, /const categoryDist = computed/)
   assert.match(source, /const categoryDonutStyle = computed/)
   assert.match(source, /const teamUtilization = computed/)
@@ -490,9 +493,9 @@ test('实施计划提交人员清单，设备清单在实施准备登记并校�
   assert.match(source, /function planPersonnelFor\(/)
   assert.match(source, /function planPersonnelRows\(/)
   // 至少一名人员与服务端同口径，先给即时提示。
-  assert.match(source, /if \(!personRows\.length\) \{ showToast\('请至少添加一名实施人员'\); return \}/)
+  assert.match(source, /if \(!personRows\.length\) \{ showToast\('请至少添加一名实施人员', 'warning'\); return \}/)
   // 实施准备：设备清单必填、提交时带上使用时段。
-  assert.match(source, /if \(!form\.equipment\.length\) \{ showToast\('请至少选择一台实施设备'\); return \}/)
+  assert.match(source, /if \(!form\.equipment\.length\) \{ showToast\('请至少选择一台实施设备', 'warning'\); return \}/)
   assert.match(source, /equipment: form\.equipment\.map\(\(row\) => \(\{ resource_type: 'EQUIPMENT', resource_id: row\.resourceID, window_start: row\.windowStart, window_end: row\.windowEnd, note: row\.note \}\)\)/)
   assert.match(source, /function planEquipmentFor\(/)
   // 添加设备只能从设备目录挑选，不调用设备维护接口（设备档案由设备管理员维护）。
@@ -601,4 +604,137 @@ test('站点档案支持现场用浏览器定位自动获取坐标', () => {
   assert.match(source, /<span v-else class="pm-badge neutral">未采集<\/span>/)
   // 停用而非物理删除，保留历史可追溯。
   assert.match(source, /async function disableSite\(item\)/)
+})
+
+test('每个写操作入口都按服务端同款权限码门控', () => {
+  // 只门控少数几个权限码时，其余角色会看到自己无权执行的按钮，点击必然 403。
+  for (const guard of [
+    "canAssignTeam = computed(() => permissionSet.value.has('project.team.assign'))",
+    "canPlanImplementation = computed(() => permissionSet.value.has('project.implementation.plan'))",
+    "canExecuteField = computed(() => permissionSet.value.has('project.field.execute'))",
+    "canCompleteField = computed(() => permissionSet.value.has('project.field.complete'))",
+    "canReportDeviation = computed(() => permissionSet.value.has('project.deviation.report'))",
+    "canReviewDeviation = computed(() => permissionSet.value.has('project.deviation.review'))",
+    "canManageRules = computed(() => permissionSet.value.has('project_rule.manage'))",
+    "canManageFieldPermissions = computed(() => permissionSet.value.has('project.field_permission.manage'))",
+  ]) {
+    assert.ok(source.includes(guard), `缺少权限守卫：${guard}`)
+  }
+  // 各按钮必须挂上对应守卫，而不是无条件渲染。
+  assert.match(source, /v-if="canSubmitAllocation" class="pm-button primary" :disabled="saving" @click="runOperation\('allocation'\)"/)
+  assert.match(source, /v-if="canPlanImplementation" class="pm-button primary" :disabled="saving \|\| !!planningBlocked"/)
+  assert.match(source, /v-if="selectedServiceItem && canExecuteField" class="pm-form pm-operation-form"/)
+  assert.match(source, /canCompleteField" class="pm-button" :disabled="saving" @click="runOperation\('complete'\)"/)
+  assert.match(source, /v-if="canReportDeviation" class="pm-button primary" :disabled="saving" @click="runOperation\('exception-report'\)"/)
+  assert.match(source, /v-if="canReviewDeviation" class="pm-button" :disabled="saving" @click="runOperation\('exception-review'\)"/)
+  assert.match(source, /v-if="canReviewSpecialMethod" class="pm-form-row"/)
+  assert.match(source, /v-if="canManageResource" class="pm-link" @click="openCapabilityDialog\(item\)"/)
+  assert.match(source, /v-if="canManageRules" class="pm-switch"/)
+  // 报告推进按阶段区分权限：归档需要 project.report.archive。
+  assert.match(source, /canAdvanceReportPhase\(reportPhaseNext\[item\.report_status\]\)/)
+  assert.match(source, /phase === 'ARCHIVED' \? 'project\.report\.archive' : 'project\.report\.manage'/)
+  // 字段级权限页签只对持有该权限的角色可见，避免"能打开、提交必 403"。
+  assert.match(source, /configKindsMeta\.filter\(\(meta\) => meta\.kind !== 'permissions' \|\| canManageFieldPermissions\.value\)/)
+})
+
+test('交付事件名与后端常量逐字一致', () => {
+  // 后端只发 FIELD_COMPLETED；曾写成 FIELD_IMPLEMENTATION_COMPLETED，导致趋势图恒空。
+  assert.match(source, /event\.type === 'FIELD_COMPLETED'/)
+  assert.doesNotMatch(source, /FIELD_IMPLEMENTATION_COMPLETED/)
+  assert.match(source, /FIELD_COMPLETED: '现场实施已完成'/)
+})
+
+test('拆解调整入口按 project.decomposition.manage 门控并调用真实接口', () => {
+  // 业务管理员持有 project.decomposition.manage，此前前端没有任何入口调用该端点，
+  // 拆解调整能力完全埋没；入口必须与能力一起补齐，并按同一权限码门控。
+  assert.ok(source.includes("canManageDecomposition = computed(() => permissionSet.value.has('project.decomposition.manage'))"))
+  assert.match(source, /v-if="activeSection === 'decomposition' && canManageDecomposition"[^>]*@click="openDecompositionAdjust"/)
+  assert.match(source, /await adjustDecomposition\(project\.id, \{ reason: adjustForm\.value\.reason, supplement_contract_id: adjustForm\.value\.supplementContractID, items \}\)/)
+  assert.match(source, /showToast\('拆解已调整，项目进入补充协议处理中'\)/)
+  // 服务端在同一事务里替换全部服务项，提交前必须校验前端必填项。
+  assert.match(source, /每个服务项都要填写场所、批次与检测类别/)
+  // API 客户端必须走真实端点而不是本地模拟。
+  assert.match(pmApiSource, /export function adjustDecomposition\(projectID, payload\)/)
+  assert.match(pmApiSource, /decomposition-adjustments/)
+})
+
+test('多选下拉对齐统一交互基线：aria 语义、键盘导航与已选 chip 回显', () => {
+  // aria：触发器声明 listbox 展开态，菜单与选项具备 listbox/option 角色。
+  assert.match(source, /aria-haspopup="listbox"/)
+  assert.match(source, /:aria-expanded="openMulti === 'engineer'"/)
+  assert.match(source, /role="listbox"/)
+  assert.match(source, /role="option"/)
+  assert.match(source, /:aria-selected="engineerSelection\.includes\(option\.id\)"/)
+  // 键盘：↑↓ 移动高亮、Enter 勾选、Esc 关闭，选项支持禁用态。
+  assert.match(source, /function onMultiKeydown\(event\)/)
+  assert.match(source, /event\.key === 'Escape'/)
+  assert.match(source, /event\.key === 'ArrowDown' \|\| event\.key === 'ArrowUp'/)
+  assert.match(source, /'is-active': engineerOptions\[multiActiveIndex\]\?\.id === option\.id/)
+  assert.match(source, /'is-disabled': option\.disabled/)
+  // 已选人员以 chip 回显并支持单个移除，摘要文本保留。
+  assert.match(source, /const engineerChipOptions = computed/)
+  assert.match(source, /class="pm-chip"/)
+  assert.match(source, /class="pm-chip-x"/)
+  assert.match(source, /multiSummary\(engineerSelection, engineerOptions/)
+  // 筛选栏下拉统一走 pm-filter-select（对齐原型 filter-select 形态）。
+  assert.match(styles, /\.pm-filter-select \{/)
+  assert.match(source, /class="pm-filter-select"/)
+})
+
+test('轻提示按结果切换语义色，错误不再是绿色对勾', () => {
+  assert.match(source, /function showToast\(message, type = 'success'\)/)
+  assert.match(source, /:class="toastType"/)
+  for (const tone of ['success', 'error', 'warning', 'info']) {
+    assert.match(styles, new RegExp(`\\.pm-toast\\.${tone} span \\{ background: var\\(--pm-[a-z]+\\); \\}`))
+  }
+  assert.match(source, /showToast\(error\?\.message \|\| '[^']*', 'error'\)/)
+  assert.match(source, /, 'warning'\); return \}/)
+})
+
+test('按 V1.1 原型还原：详情页、步骤条、审批流、状态分布条、矩阵与甘特', () => {
+  // 项目详情是独立下钻页（原型 PG-PRJ-02），带摘要卡、计数标签页、甘特与时间线。
+  assert.match(source, /project_detail: \['项目详情',/)
+  assert.match(source, /activeSection === 'project_detail'/)
+  assert.match(source, /class="pm-detail-summary"/)
+  assert.match(source, /pm-detail-tabs/)
+  assert.match(source, /const detailGantt = computed/)
+  assert.match(source, /class="pm-gantt"/)
+  assert.match(styles, /\.pm-gantt \{/)
+  assert.match(styles, /\.pm-gantt-bar \{/)
+  // 实施计划七步交付链与报告四阶段链（原型 stepper）。
+  assert.match(source, /const operationSteps = computed/)
+  assert.match(source, /const reportSteps = computed/)
+  assert.match(source, /class="pm-stepper"/)
+  assert.match(styles, /\.pm-stepper \{/)
+  // 异常评审审批流（原型 approval-flow）。
+  assert.match(source, /const exceptionFlow = computed/)
+  assert.match(source, /class="pm-approval"/)
+  assert.match(styles, /\.pm-approval \{/)
+  assert.match(styles, /@keyframes pm-approval-pulse/)
+  // 监控页状态分布条与胶囊筛选（口径为派生状态，不使用已删除字段）。
+  assert.match(source, /const monitoredStatusMix = computed/)
+  assert.match(source, /class="pm-statusbar"/)
+  assert.match(styles, /\.pm-statusbar \{/)
+  assert.match(source, /const monitorFilter = ref\(''\)/)
+  // 字段级权限矩阵（原型 matrix）。
+  assert.match(source, /const permissionMatrix = computed/)
+  assert.match(source, /class="pm-matrix"/)
+  assert.match(styles, /\.pm-matrix \{/)
+  // 列表页指标概览行与原型搜索栏。
+  assert.match(source, /class="pm-kpi-row"/)
+  assert.match(source, /class="pm-search-bar"/)
+  assert.match(styles, /\.pm-kpi-row \{/)
+  assert.match(styles, /\.pm-search-bar \{/)
+  // 资质页体系与编码、到期提醒标签页（真实台账聚合，不引入静态映射）。
+  assert.match(source, /const capabilityCodeRows = computed/)
+  assert.match(source, /const expiringCapabilities = computed/)
+  assert.match(source, /const capabilityTab = ref\('all'\)/)
+  // 配置页 KPI 与 SLA 口径说明。
+  assert.match(source, /const configStats = computed/)
+  assert.match(source, /SLA 口径说明/)
+  // 导航角标由工作区数据派生。
+  assert.match(source, /const navBadges = computed/)
+  // 看板卡片使用左色条增强样式，并保留风险行标记。
+  assert.match(styles, /\.pm-kanban-card \{/)
+  assert.match(styles, /\.pm-kanban-card\.risk \{/)
 })
