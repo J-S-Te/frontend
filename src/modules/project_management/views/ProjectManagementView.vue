@@ -31,11 +31,10 @@ import {
   assignExecutionTeam,
   planImplementation,
   startImplementationPreparation,
-  fieldCheckIn,
   submitFieldRecord,
   reportDeviation,
   reviewDeviation,
-  completeFieldImplementation,
+  completeServiceItemField,
   setRuleEnabled,
   updateRule,
   reviewSpecialMethod,
@@ -139,7 +138,7 @@ let toastTimer = 0
 
 // 项目状态节点必须与服务端 domain.ProjectStatusNodes 完全一致。
 // 服务端按服务项派生唯一状态，前端只做展示，不得再自行拼装状态集合。
-const projectStatusNodes = ['待拆解确认', '待分配', '待制定计划', '待实施', '实施准备中', '实施中', '异常处理中', '现场实施完成', '报告编制', '已完成']
+const projectStatusNodes = ['待拆解确认', '待分配', '待实施', '实施准备中', '实施中', '异常处理中', '现场实施完成', '报告编制', '已完成']
 const projectStatusCompleted = '已完成'
 
 const projects = ref([])
@@ -277,7 +276,7 @@ const qualificationFileInput = ref(null)
 const filteredCapabilities = computed(() => capabilities.value.filter((item) => (!capabilityTypeFilter.value || item.resource_type === capabilityTypeFilter.value) && (!capabilityStatusFilter.value || item.status === capabilityStatusFilter.value)))
 const canManageResource = computed(() => Array.isArray(session.value?.permissions) && session.value.permissions.includes('project.resource.manage'))
 const selectedServiceItemIDs = ref([])
-const operationForm = ref({ teamLeadID: '', projectManagerID: '', engineerIDs: '', plannedStart: '', plannedEnd: '', sitePlan: '', penetrationTestPlan: '', authDocNo: '', authStart: '', authEnd: '', authScope: '', testScope: '', testWindow: '', emergencyContact: '', rollbackPlan: '', reviewComment: '', personnel: [], equipment: [], travelRequestID: '', latitude: '', longitude: '', rawData: '', environment: '', deviationDescription: '', severity: 'MEDIUM', decision: 'RELEASE', comment: '' })
+const operationForm = ref({ teamLeadID: '', projectManagerID: '', engineerIDs: '', plannedStart: '', plannedEnd: '', sitePlan: '', penetrationTestPlan: '', authDocNo: '', authStart: '', authEnd: '', authScope: '', testScope: '', testWindow: '', emergencyContact: '', rollbackPlan: '', reviewComment: '', personnel: [], equipment: [], travelRequestID: '', rawData: '', environment: '', deviationDescription: '', severity: 'MEDIUM', decision: 'RELEASE', comment: '' })
 
 // 六套真实配置表的列与编辑字段元数据。
 const configKindsMeta = [
@@ -473,7 +472,7 @@ const canCreateProject = computed(() => Array.isArray(session.value?.permissions
 const planningBlocked = computed(() => {
   const item = selectedServiceItem.value
   if (!item) return null
-  if (!['待分配', '待制定计划'].includes(item.status)) {
+  if (item.status !== '待分配') {
     return { tone: 'warn', reason: `服务项当前状态为「${item.status}」，不能发布实施计划。` }
   }
   if (!item.project_manager_id) return { tone: 'warn', reason: '请先在「任务分配」中指派项目经理、工程师与设备。' }
@@ -487,7 +486,7 @@ const planningBlocked = computed(() => {
 const lastUpdatedLabel = computed(() => lastUpdatedAt.value ? lastUpdatedAt.value.toLocaleString() : '尚未加载')
 const serviceFlow = computed(() => [
   { key: '待分配', color: 'slate', count: serviceItems.value.filter((item) => item.status === '待分配').length, route: 'allocation' },
-  { key: '待实施', color: 'violet', count: serviceItems.value.filter((item) => ['待制定计划', '待实施', '实施准备中'].includes(item.status)).length, route: 'planning' },
+  { key: '待实施', color: 'violet', count: serviceItems.value.filter((item) => ['待实施', '实施准备中'].includes(item.status)).length, route: 'planning' },
   { key: '实施中', color: 'amber', count: serviceItems.value.filter((item) => ['实施中', '异常处理中'].includes(item.status)).length, route: 'implementation' },
   { key: '报告编制', color: 'blue', count: reportItems.value.filter((item) => item.report_status !== 'ARCHIVED').length, route: 'reports' },
   { key: '已完成', color: 'green', count: serviceItems.value.filter((item) => item.report_status === 'ARCHIVED' || (['现场实施完成', '已完成'].includes(item.status) && (!item.report_status || item.report_status === 'NONE'))).length, route: 'implementation' },
@@ -502,7 +501,7 @@ const riskRows = computed(() => [
 // 看板泳道是派生状态的确定性分组：只做归类，卡片仍展示唯一的 project.status。
 const kanbanColumns = computed(() => [
   { key: '待分配', color: 'slate', statuses: ['待拆解确认', '待分配'] },
-  { key: '待实施', color: 'violet', statuses: ['待制定计划', '待实施', '实施准备中'] },
+  { key: '待实施', color: 'violet', statuses: ['待实施', '实施准备中'] },
   { key: '实施中', color: 'amber', statuses: ['实施中', '异常处理中'] },
   { key: '报告编制', color: 'blue', statuses: ['报告编制'] },
   { key: '已完成', color: 'green', statuses: [projectStatusCompleted] },
@@ -889,7 +888,7 @@ function projectEvents(project) {
 }
 
 function eventLabel(event) {
-  return ({ CONTRACT_ACTIVATED: '合同生效并生成项目', DECOMPOSITION_ADJUSTED: '服务项拆解已调整', ASSIGNMENT_PUBLISHED: '资源分配已下达', TEAM_ASSIGNED: '团队负责人已分配', EXECUTION_TEAM_ASSIGNED: '项目经理及工程师已指派', IMPLEMENTATION_PLANNED: '现场实施计划已发布', PREPARATION_STARTED: '实施准备已发起', FIELD_CHECK_IN: '现场签到已完成', FIELD_RECORD_SUBMITTED: '现场原始记录已提交', DEVIATION_REPORTED: '现场偏离已上报', DEVIATION_REVIEWED: '偏离评审已完成', FIELD_IMPLEMENTATION_COMPLETED: '现场实施已完成' })[event.type] || event.type
+  return ({ CONTRACT_ACTIVATED: '合同生效并生成项目', DECOMPOSITION_ADJUSTED: '服务项拆解已调整', TEAM_ASSIGNED: '团队负责人已分配', EXECUTION_TEAM_ASSIGNED: '项目经理及工程师已指派', IMPLEMENTATION_PLANNED: '现场实施计划已发布', PREPARATION_STARTED: '实施准备已发起', FIELD_CHECK_IN: '现场签到已完成', FIELD_RECORD_SUBMITTED: '现场原始记录已提交', DEVIATION_REPORTED: '现场偏离已上报', DEVIATION_REVIEWED: '偏离评审已完成', FIELD_IMPLEMENTATION_COMPLETED: '现场实施已完成' })[event.type] || event.type
 }
 
 function openProject(project) { drawerProject.value = project }
@@ -1111,9 +1110,11 @@ async function runOperation(kind) {
       await startImplementationPreparation(item.id, { travel_request_id: form.travelRequestID, notes: form.comment, equipment: form.equipment.map((row) => ({ resource_type: 'EQUIPMENT', resource_id: row.resourceID, window_start: row.windowStart, window_end: row.windowEnd, note: row.note })) })
       showToast('实施准备已发起')
     } else if (kind === 'field') {
-      await fieldCheckIn(item.id, { latitude: Number(form.latitude), longitude: Number(form.longitude), occurred_at: new Date().toISOString() })
+      // 坐标签到已删除：手工填写的经纬度没有任何证明力，服务端也不再保存。
+      // 现场记录（原始数据 / 环境条件）是进入"实施中"的真实动作。
+      if (!String(form.rawData || '').trim() || !String(form.environment || '').trim()) { showToast('请填写现场原始数据与环境条件'); return }
       await submitFieldRecord(item.id, { raw_data: form.rawData, environment: form.environment, evidence_urls: [] })
-      showToast('签到和现场记录已提交')
+      showToast('现场记录已提交，服务项进入实施中')
     } else if (kind === 'exception-report') {
       const result = await reportDeviation(item.id, { description: form.deviationDescription, severity: form.severity, evidence_url: '' })
       showToast(`偏离已上报：${result.deviation_id || '待评审'}`)
@@ -1121,9 +1122,8 @@ async function runOperation(kind) {
       await reviewDeviation(form.deviationID, { decision: form.decision, comment: form.comment })
       showToast('偏离评审已完成')
     } else if (kind === 'complete') {
-      const project = projectByID.value.get(item.project_id)
-      await completeFieldImplementation(project?.id || item.project_id)
-      showToast('现场实施已完成')
+      await completeServiceItemField(item.id)
+      showToast('该服务项现场实施已完成，进入报告编制')
     }
     await loadWorkspace()
   } catch (error) { showToast(error?.message || '操作失败') }
@@ -1358,7 +1358,7 @@ onBeforeUnmount(() => {
         <template v-else-if="activeSection === 'implementation'">
           <section class="pm-board-summary"><div><strong>{{ serviceItems.length }}</strong><span>全部服务项</span></div><div><strong>{{ serviceFlow[2].count }}</strong><span>正在实施</span></div><div><strong>{{ serviceFlow[3].count }}</strong><span>报告编制</span></div><div><strong>{{ serviceFlow[4].count }}</strong><span>现场完成</span></div></section>
           <section class="pm-kanban"><article v-for="column in kanbanColumns" :key="column.key"><header><div><i :class="column.color"></i><b>{{ column.key }}</b></div><span>{{ column.count }}</span></header><div class="pm-kanban-body"><button v-for="card in column.cards" :key="card.id" @click="openProject(card)"><b>{{ card.id }}</b><h3>{{ card.customer }}</h3><span class="pm-badge neutral">{{ card.status }}</span><div class="pm-inline-progress"><i :style="{ width: `${card.progress}%` }"></i></div><footer><span>{{ card.progress }}%</span><time>{{ card.due || '待排期' }}</time></footer></button><div v-if="!column.cards.length" class="pm-empty-mini">暂无数据</div></div></article></section>
-          <section class="pm-panel pm-operation-panel"><header><div><p class="pm-panel-kicker">FIELD EXECUTION</p><h2>现场签到与原始记录</h2></div></header><ServiceItemPicker :items="serviceItems" :selected-ids="selectedServiceItem ? [selectedServiceItem.id] : []" empty-text="暂无可签到服务项" @select="selectServiceItem" /><div v-if="selectedServiceItem" class="pm-form pm-operation-form"><label><span>纬度 <em>*</em></span><input v-model.trim="operationForm.latitude" type="number" step="any" placeholder="例如 30.2741" /></label><label><span>经度 <em>*</em></span><input v-model.trim="operationForm.longitude" type="number" step="any" placeholder="例如 120.1551" /></label><label><span>现场原始数据 <em>*</em></span><textarea v-model.trim="operationForm.rawData" rows="3"></textarea></label><label><span>环境条件 <em>*</em></span><textarea v-model.trim="operationForm.environment" rows="3"></textarea></label><button class="pm-button primary" :disabled="saving" @click="runOperation('field')">提交签到和现场记录</button></div><div v-else class="pm-empty-mini">请先选择服务项</div></section>
+          <section class="pm-panel pm-operation-panel"><header><div><p class="pm-panel-kicker">FIELD EXECUTION</p><h2>现场记录与实施完成</h2></div></header><ServiceItemPicker :items="serviceItems" :selected-ids="selectedServiceItem ? [selectedServiceItem.id] : []" empty-text="暂无可签到服务项" @select="selectServiceItem" /><div v-if="selectedServiceItem" class="pm-form pm-operation-form"><label><span>现场原始数据 <em>*</em></span><textarea v-model.trim="operationForm.rawData" rows="3" placeholder="记录现场实测数据与依据"></textarea></label><label><span>环境条件 <em>*</em></span><textarea v-model.trim="operationForm.environment" rows="3" placeholder="记录现场环境条件"></textarea></label><button class="pm-button primary" :disabled="saving" @click="runOperation('field')">提交现场记录</button></div><button v-if="selectedServiceItem && selectedServiceItem.status === '实施中'" class="pm-button" :disabled="saving" @click="runOperation('complete')">确认该服务项现场完成</button><div v-else-if="!selectedServiceItem" class="pm-empty-mini">请先选择服务项</div></section>
         </template>
 
         <template v-else-if="activeSection === 'equipment'">

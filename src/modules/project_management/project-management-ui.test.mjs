@@ -26,7 +26,7 @@ test('项目管理页面覆盖原型的五个业务域与核心交互', () => {
   assert.match(source, /onMounted\(loadWorkspace\)/)
   assert.match(source, /await confirmServiceItemsRequest\(ids\)/)
   assert.match(source, /await setRuleEnabled\(rule\.id, rule\.kind \|\| activeSection\.value, next\)/)
-  for (const operation of ['assignTeam', 'assignExecutionTeam', 'planImplementation', 'startImplementationPreparation', 'fieldCheckIn', 'submitFieldRecord', 'reportDeviation', 'reviewDeviation', 'completeFieldImplementation']) {
+  for (const operation of ['assignTeam', 'assignExecutionTeam', 'planImplementation', 'startImplementationPreparation', 'submitFieldRecord', 'reportDeviation', 'reviewDeviation', 'completeServiceItemField']) {
     assert.match(source, new RegExp(`runOperation[\\s\\S]*${operation}`))
   }
   assert.match(source, /asRFC3339\(form\.plannedStart\)/)
@@ -403,7 +403,7 @@ test('实施计划的时间在 RFC3339 与 datetime-local 之间正确往返', (
 test('项目状态只由服务端派生，前端不再自行拼装状态集合', () => {
   // 服务端 domain.ProjectStatusNodes() 是唯一的顺序表；这里锁定前端的只读镜像，
   // 防止两侧各自演化后出现"筛选下拉有的状态列表里没有"这类漂移。
-  assert.match(source, /const projectStatusNodes = \['待拆解确认', '待分配', '待制定计划', '待实施', '实施准备中', '实施中', '异常处理中', '现场实施完成', '报告编制', '已完成'\]/)
+  assert.match(source, /const projectStatusNodes = \['待拆解确认', '待分配', '待实施', '实施准备中', '实施中', '异常处理中', '现场实施完成', '报告编制', '已完成'\]/)
   assert.match(source, /const projectStatusCompleted = '已完成'/)
   // 状态筛选必须由节点表生成，而不是手写 option 列表。
   assert.match(source, /<option v-for="node in projectStatusNodes"/)

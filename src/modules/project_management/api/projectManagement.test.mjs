@@ -52,11 +52,15 @@ test('服务项确认与规则切换使用后端写接口', () => {
 })
 
 test('项目交付闭环调用真实后端接口而非本地模拟', () => {
+  // /check-in 已删除：手工填写经纬度没有证明力，现场记录自身即进入"实施中"。
+  // /field-complete 由项目级改为按服务项推进。
   for (const path of [
     '/team-assignment', '/execution-assignment',
-    '/implementation-plan', '/preparation', '/check-in', '/field-records', '/deviations', '/review',
+    '/implementation-plan', '/preparation', '/field-records', '/deviations', '/review',
     '/field-complete', '/delivery-events', '/capabilities',
   ]) assert.match(source, new RegExp(path.replaceAll('/', '\\/')))
+  assert.doesNotMatch(source, /\/check-in/)
+  assert.match(source, /service-items\/\$\{encodeURIComponent\(itemID\)\}\/field-complete/)
 })
 
 test('项目列表将 keyword 兼容转换为后端实际读取的 q 参数', () => {
