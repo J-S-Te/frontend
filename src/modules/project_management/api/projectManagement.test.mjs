@@ -96,3 +96,8 @@ test('人员目录按重复 role_code 参数查询，数组参数不会被压成
   assert.match(source, /search\.append\(key, item\)/)
   assert.match(source, /request\(`\/personnel\$\{query \? `\?\$\{query\}` : ''\}`\)/)
 })
+
+test('人员身份复核调用独立端点', () => {
+  assert.match(source, /export function syncPersonnelIdentities\(\)/)
+  assert.match(source, /request\('\/capabilities\/sync-identities', \{ method: 'POST' \}\)/)
+})

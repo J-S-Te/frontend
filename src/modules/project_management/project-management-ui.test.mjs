@@ -558,3 +558,16 @@ test('实施准备不再要求设备申领单，设备清单本身就是申领�
   assert.match(source, /startImplementationPreparation\(item\.id, \{ travel_request_id: form\.travelRequestID/)
   assert.match(source, /equipment: form\.equipment\.map\(/)
 })
+
+test('人员资质档案展示并复核基础平台身份状态', () => {
+  // 资质在本系统维护，但"这个人是否仍在职"只能由基础平台回答：
+  // 界面必须展示复核结果，并提供回平台复核的入口。
+  assert.match(source, /^\s+syncPersonnelIdentities,$/m)
+  assert.match(source, /async function syncIdentities\(\)/)
+  assert.match(source, /const result = await syncPersonnelIdentities\(\)/)
+  assert.match(source, /function identityStatusLabel\(status\)/)
+  assert.match(source, /已离职\/查无此人/)
+  assert.match(source, /@click="syncIdentities"/)
+  assert.match(source, /<th>人员状态<\/th>/)
+  assert.match(source, /item\.identity_status === 'MISSING' \? '风险'/)
+})

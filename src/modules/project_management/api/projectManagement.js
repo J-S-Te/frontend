@@ -280,6 +280,17 @@ export async function resolvePersonnelNames(ids = []) {
 }
 
 /**
+ * syncPersonnelIdentities 回基础平台负责人目录复核人员资质档案。
+ * 资质在本系统维护，但"这个人是否真实存在（在职）"只能由基础平台回答：
+ * 复核结果写入 identity_status，界面据此区分在职 / 已离职 / 未关联。
+ * @returns {Promise<{total:number, active:number, missing:number, unlinked:number, unverified:number, checked_at:string}>} 复核统计。
+ * @throws {Error} 目录未开通、权限不足或平台暂不可用时抛出。
+ */
+export function syncPersonnelIdentities() {
+  return request('/capabilities/sync-identities', { method: 'POST' })
+}
+
+/**
  * confirmServiceItems 批量确认服务项归属/签收。
  * @param {Array<string|number>} ids 服务项 ID 列表。
  * @returns {Promise<object>} 批量确认结果。
