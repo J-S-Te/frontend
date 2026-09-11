@@ -497,13 +497,14 @@ test('实施计划提交人员清单，设备清单在实施准备登记并校�
   assert.match(source, /function planEquipmentFor\(/)
   // 添加设备只能从设备目录挑选，不调用设备维护接口（设备档案由设备管理员维护）。
   assert.match(source, /function addPlanEquipment\(equipmentItem\)/)
-  assert.match(source, /const planEquipmentPickable = computed/)
-  assert.match(source, /@click="planEquipmentPickerOpen = true">＋ 添加设备</)
+  assert.match(source, /const planEquipmentFiltered = computed/)
+  assert.match(source, /@click="openEquipmentPicker">＋ 添加设备</)
   assert.match(source, /class="pm-plan-window"/)
   // 已占用设备置灰并显示占用方与日期。
   assert.match(source, /function equipmentReservationLabel\(resourceID\)/)
   assert.match(source, /listEquipmentReservations\(item\.id\)/)
   assert.match(source, /已被占用/)
+  assert.match(source, /pm-dialog-wide/)
 })
 
 test('设备在位状态与使用范围在设备能力维护中维护，借出中可归还', () => {
@@ -519,5 +520,41 @@ test('设备在位状态与使用范围在设备能力维护中维护，借出�
   assert.match(source, /function equipmentUnavailableReason\(item\)/)
   assert.match(source, /仅在公司使用 · 不可借出/)
   assert.match(source, /当前不在公司/)
-  assert.match(source, /!equipmentUnavailableReason\(item\)/)
+  assert.match(source, /function equipmentPickerState\(item\)/)
+})
+
+test('已有设备的使用范围在资质与能力、设备维护两处都可修改且不会被重置', () => {
+  // 资质与能力对话框：设备行显示使用范围，编辑既有记录时带回原值，保存时提交。
+  assert.match(source, /capabilityDialog\.resource_type === 'EQUIPMENT'[\s\S]{0,60}capabilityDialog\.usage_scope/)
+  assert.match(source, /usage_scope: item\.usage_scope \|\| 'ANY'/)
+  assert.match(source, /usage_scope: form\.usage_scope \|\| 'ANY'/)
+  // 设备能力维护表单：编辑既有设备同样带回原值。
+  assert.match(source, /usageScope: item\.usage_scope \|\| 'ANY'/)
+  assert.match(source, /<option value="COMPANY_ONLY">仅在公司使用（不可借出）<\/option>/)
+})
+
+test('设备选择器与清单表不再被两列表单栅格挤窄', () => {
+  // 选择器用宽弹窗 + 专用可滚动主体，表格不再放进 .pm-form 的两列栅格。
+  assert.match(source, /class="pm-dialog pm-dialog-wide"/)
+  assert.match(source, /class="pm-dialog-body"/)
+  // 弹窗自身不得再用两列表单栅格：抽出弹窗片段做精确断言。
+  const pickerStart = source.indexOf('planEquipmentPickerOpen" class="pm-overlay')
+  const pickerEnd = source.indexOf('</aside>', pickerStart)
+  assert.ok(pickerStart !== -1 && pickerEnd > pickerStart, '未找到设备选择器弹窗')
+  assert.doesNotMatch(source.slice(pickerStart, pickerEnd), /class="pm-form"/)
+  assert.match(styles, /\.pm-dialog-wide \{ width: min\(920px, 94vw\); \}/)
+  assert.match(styles, /\.pm-plan-resources \{[^}]*grid-column: 1 \/ -1;/)
+  assert.match(styles, /\.pm-table-picker \{ min-width: 640px; \}/)
+  // 弹窗内层级必须走 UniLab 令牌（表头吸顶）。
+  assert.match(styles, /\.pm-table-picker th \{ position: sticky; top: 0; z-index: var\(--pm-z-sticky\); \}/)
+})
+
+test('实施准备不再要求设备申领单，设备清单本身就是申领依据', () => {
+  assert.doesNotMatch(source, /设备申领单/)
+  assert.doesNotMatch(source, /equipmentRequestID/)
+  assert.doesNotMatch(source, /equipment_request_id/)
+  // 行程预订单仍然必填，并随准备事件提交；设备清单一起提交。
+  assert.match(source, /<label><span>行程预订单 <em>\*<\/em><\/span>/)
+  assert.match(source, /startImplementationPreparation\(item\.id, \{ travel_request_id: form\.travelRequestID/)
+  assert.match(source, /equipment: form\.equipment\.map\(/)
 })
