@@ -18,7 +18,11 @@ import {
   upsertCapability,
   importCapabilities,
   exportCapabilities,
+  syncPersonnelIdentities,
   listEquipment,
+  listSites,
+  upsertSite,
+  deleteSite,
   upsertEquipment,
   listDeliveryEvents,
   listRules,
@@ -31,11 +35,10 @@ import {
   assignExecutionTeam,
   planImplementation,
   startImplementationPreparation,
-  fieldCheckIn,
   submitFieldRecord,
   reportDeviation,
   reviewDeviation,
-  completeFieldImplementation,
+  completeServiceItemField,
   setRuleEnabled,
   updateRule,
   reviewSpecialMethod,
@@ -63,6 +66,7 @@ const allNavGroups = [
     { key: 'preparation', label: '实施准备', icon: 'save' },
     { key: 'qualifications', label: '资质与能力', icon: 'shield' },
     { key: 'equipment', label: '设备能力', icon: 'settings' },
+    { key: 'sites', label: '站点档案', icon: 'organization' },
     { key: 'assignments', label: '人员设备指派', icon: 'organization' },
     { key: 'methods', label: '特殊方法复核', icon: 'info' },
   ] },
@@ -92,6 +96,7 @@ const pageMeta = {
   preparation: ['实施准备', '集中核验授权、资料、工具与出行准备'],
   qualifications: ['资质与能力管理', '维护人员资质、能力标签和有效期'],
   equipment: ['设备能力维护', '新增、停用、检定和更新设备基础信息'],
+  sites: ['站点档案', '维护站点编码、地址与坐标；坐标可在现场用浏览器定位自动获取'],
   assignments: ['匹配校验与冲突预警', '校验人员、设备、资质与计划冲突'],
   methods: ['特殊方法复核待办', '复核非标准方法的适用性与风险控制'],
   implementation: ['实施看板 · 进度总览', '按状态跟踪服务项现场执行与闭环进度'],
@@ -131,6 +136,12 @@ const createForm = ref({ name: '', customer: '', contract: '', contractID: '', c
 const approvedContracts = ref([])
 const equipment = ref([])
 const equipmentError = ref('')
+const sites = ref([])
+const siteDialog = ref(null)
+const siteError = ref('')
+const locatingSite = ref(false)
+// 坐标未采集与"坐标为 0"必须区分：0,0 是合法位置，因此单独用 has_coordinates 表达。
+const emptySite = () => ({ site_code: '', name: '', address: '', latitude: '', longitude: '', has_coordinates: false, status: 'ACTIVE', notes: '' })
 const equipmentForm = ref({ resourceID: '', resourceName: '', codes: '', validFrom: '', validUntil: '', status: 'ACTIVE', usageScope: 'ANY' })
 const dashboard = ref({ project_count: 0, in_flight_projects: 0, risk_projects: 0, service_items: 0, status_counts: {} })
 const session = ref(null)
@@ -139,7 +150,7 @@ let toastTimer = 0
 
 // 项目状态节点必须与服务端 domain.ProjectStatusNodes 完全一致。
 // 服务端按服务项派生唯一状态，前端只做展示，不得再自行拼装状态集合。
-const projectStatusNodes = ['待拆解确认', '待分配', '待制定计划', '待实施', '实施准备中', '实施中', '异常处理中', '现场实施完成', '报告编制', '已完成']
+const projectStatusNodes = ['待拆解确认', '待分配', '待实施', '实施准备中', '实施中', '异常处理中', '现场实施完成', '报告编制', '已完成']
 const projectStatusCompleted = '已完成'
 
 const projects = ref([])
@@ -154,6 +165,22 @@ const filteredProjects = computed(() => {
       && (!teamFilter.value || project.team === teamFilter.value)
   })
 })
+// 项目表分页。后端列表接口已支持 page/page_size（返回 items+total），但类别/团队
+// 筛选目前仍在前端完成，因此这里先对筛选后的结果分页；筛选下推到服务端后可直接
+// 切换到服务端分页，无需改动表格结构。
+const projectPage = ref(1)
+const projectPageSize = 20
+const projectPageCount = computed(() => Math.max(1, Math.ceil(filteredProjects.value.length / projectPageSize)))
+const pagedProjects = computed(() => {
+  const start = (projectPage.value - 1) * projectPageSize
+  return filteredProjects.value.slice(start, start + projectPageSize)
+})
+function gotoProjectPage(page) {
+  projectPage.value = Math.min(Math.max(1, page), projectPageCount.value)
+}
+// 筛选条件变化后回到第一页，避免停留在越界页码上看到空表。
+watch([keyword, statusFilter, categoryFilter, teamFilter], () => { projectPage.value = 1 })
+
 const categoryOptions = computed(() => [...new Set(projects.value.map((p) => p.category).filter(Boolean))])
 const teamOptions = computed(() => [...new Set(projects.value.map((p) => p.team).filter(Boolean))])
 const inFlightProjects = computed(() => projects.value.filter((p) => p.status !== projectStatusCompleted))
@@ -277,7 +304,7 @@ const qualificationFileInput = ref(null)
 const filteredCapabilities = computed(() => capabilities.value.filter((item) => (!capabilityTypeFilter.value || item.resource_type === capabilityTypeFilter.value) && (!capabilityStatusFilter.value || item.status === capabilityStatusFilter.value)))
 const canManageResource = computed(() => Array.isArray(session.value?.permissions) && session.value.permissions.includes('project.resource.manage'))
 const selectedServiceItemIDs = ref([])
-const operationForm = ref({ teamLeadID: '', projectManagerID: '', engineerIDs: '', plannedStart: '', plannedEnd: '', sitePlan: '', penetrationTestPlan: '', authDocNo: '', authStart: '', authEnd: '', authScope: '', testScope: '', testWindow: '', emergencyContact: '', rollbackPlan: '', reviewComment: '', personnel: [], equipment: [], travelRequestID: '', latitude: '', longitude: '', rawData: '', environment: '', deviationDescription: '', severity: 'MEDIUM', decision: 'RELEASE', comment: '' })
+const operationForm = ref({ teamLeadID: '', projectManagerID: '', engineerIDs: '', plannedStart: '', plannedEnd: '', sitePlan: '', penetrationTestPlan: '', authDocNo: '', authStart: '', authEnd: '', authScope: '', testScope: '', testWindow: '', emergencyContact: '', rollbackPlan: '', reviewComment: '', personnel: [], equipment: [], travelRequestID: '', rawData: '', environment: '', deviationDescription: '', severity: 'MEDIUM', decision: 'RELEASE', comment: '' })
 
 // 六套真实配置表的列与编辑字段元数据。
 const configKindsMeta = [
@@ -473,7 +500,7 @@ const canCreateProject = computed(() => Array.isArray(session.value?.permissions
 const planningBlocked = computed(() => {
   const item = selectedServiceItem.value
   if (!item) return null
-  if (!['待分配', '待制定计划'].includes(item.status)) {
+  if (item.status !== '待分配') {
     return { tone: 'warn', reason: `服务项当前状态为「${item.status}」，不能发布实施计划。` }
   }
   if (!item.project_manager_id) return { tone: 'warn', reason: '请先在「任务分配」中指派项目经理、工程师与设备。' }
@@ -487,7 +514,7 @@ const planningBlocked = computed(() => {
 const lastUpdatedLabel = computed(() => lastUpdatedAt.value ? lastUpdatedAt.value.toLocaleString() : '尚未加载')
 const serviceFlow = computed(() => [
   { key: '待分配', color: 'slate', count: serviceItems.value.filter((item) => item.status === '待分配').length, route: 'allocation' },
-  { key: '待实施', color: 'violet', count: serviceItems.value.filter((item) => ['待制定计划', '待实施', '实施准备中'].includes(item.status)).length, route: 'planning' },
+  { key: '待实施', color: 'violet', count: serviceItems.value.filter((item) => ['待实施', '实施准备中'].includes(item.status)).length, route: 'planning' },
   { key: '实施中', color: 'amber', count: serviceItems.value.filter((item) => ['实施中', '异常处理中'].includes(item.status)).length, route: 'implementation' },
   { key: '报告编制', color: 'blue', count: reportItems.value.filter((item) => item.report_status !== 'ARCHIVED').length, route: 'reports' },
   { key: '已完成', color: 'green', count: serviceItems.value.filter((item) => item.report_status === 'ARCHIVED' || (['现场实施完成', '已完成'].includes(item.status) && (!item.report_status || item.report_status === 'NONE'))).length, route: 'implementation' },
@@ -502,7 +529,7 @@ const riskRows = computed(() => [
 // 看板泳道是派生状态的确定性分组：只做归类，卡片仍展示唯一的 project.status。
 const kanbanColumns = computed(() => [
   { key: '待分配', color: 'slate', statuses: ['待拆解确认', '待分配'] },
-  { key: '待实施', color: 'violet', statuses: ['待制定计划', '待实施', '实施准备中'] },
+  { key: '待实施', color: 'violet', statuses: ['待实施', '实施准备中'] },
   { key: '实施中', color: 'amber', statuses: ['实施中', '异常处理中'] },
   { key: '报告编制', color: 'blue', statuses: ['报告编制'] },
   { key: '已完成', color: 'green', statuses: [projectStatusCompleted] },
@@ -655,7 +682,84 @@ async function loadWorkspace() {
   // 避免某一个下拉数据源不可用就把整个工作区替换成错误页。
   if (loaded) {
     await loadEquipment()
+    await loadSites()
     await loadPersonnelNames()
+  }
+}
+
+// loadSites 读取站点台账。失败不阻断工作区：站点档案是辅助主数据。
+async function loadSites() {
+  siteError.value = ''
+  try {
+    sites.value = await listSites()
+  } catch (error) {
+    sites.value = []
+    siteError.value = subsystemAccessMessage(error, '站点档案加载失败，请稍后重试。')
+  }
+}
+
+function openSiteDialog(item = null) {
+  siteDialog.value = item
+    ? { site_code: item.site_code, name: item.name, address: item.address || '', latitude: item.has_coordinates ? String(item.latitude) : '', longitude: item.has_coordinates ? String(item.longitude) : '', has_coordinates: Boolean(item.has_coordinates), status: item.status || 'ACTIVE', notes: item.notes || '' }
+    : emptySite()
+}
+
+// locateCurrentSite 用浏览器定位自动获取坐标——录入人通常就在现场，因此不需要
+// 任何外部地图凭据。定位失败（未授权 / 不支持 / 超时）时保留手工填写路径。
+function locateCurrentSite() {
+  if (!navigator.geolocation) { showToast('当前浏览器不支持定位，请手工填写坐标'); return }
+  locatingSite.value = true
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      locatingSite.value = false
+      if (!siteDialog.value) return
+      siteDialog.value.latitude = position.coords.latitude.toFixed(6)
+      siteDialog.value.longitude = position.coords.longitude.toFixed(6)
+      siteDialog.value.has_coordinates = true
+      showToast(`已获取当前位置（精度约 ${Math.round(position.coords.accuracy || 0)} 米）`)
+    },
+    (error) => {
+      locatingSite.value = false
+      const reasons = { 1: '定位权限被拒绝', 2: '无法获取位置', 3: '定位超时' }
+      showToast(`${reasons[error?.code] || '定位失败'}，请手工填写坐标`)
+    },
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
+  )
+}
+
+async function saveSite() {
+  const form = siteDialog.value
+  if (!form) return
+  const hasCoordinates = form.has_coordinates && form.latitude !== '' && form.longitude !== ''
+  saving.value = true
+  try {
+    await upsertSite({
+      site_code: form.site_code, name: form.name, address: form.address,
+      has_coordinates: hasCoordinates,
+      latitude: hasCoordinates ? Number(form.latitude) : 0,
+      longitude: hasCoordinates ? Number(form.longitude) : 0,
+      status: form.status, notes: form.notes,
+    })
+    await loadSites()
+    siteDialog.value = null
+    showToast('站点档案已保存')
+  } catch (error) {
+    showToast(error?.message || '站点保存失败')
+  } finally {
+    saving.value = false
+  }
+}
+
+async function disableSite(item) {
+  saving.value = true
+  try {
+    await deleteSite(item.site_code)
+    await loadSites()
+    showToast(`站点 ${item.site_code} 已停用`)
+  } catch (error) {
+    showToast(error?.message || '站点停用失败')
+  } finally {
+    saving.value = false
   }
 }
 
@@ -829,6 +933,21 @@ async function importQualificationFile(event) {
   finally { saving.value = false }
 }
 
+// 人员资质档案的身份必须回基础平台复核：本系统只知道"谁有资质"，
+// "这个人是否还在职"只能由基础平台回答。
+async function syncIdentities() {
+  saving.value = true
+  try {
+    const result = await syncPersonnelIdentities()
+    await loadWorkspace()
+    showToast(`人员状态已复核：在职 ${result.active} · 已离职/查无此人 ${result.missing} · 未关联 ${result.unlinked}${result.unverified ? ` · 目录未响应 ${result.unverified}` : ''}`)
+  } catch (error) {
+    showToast(error?.message || '人员状态复核失败')
+  } finally {
+    saving.value = false
+  }
+}
+
 async function downloadCapabilities() {
   try {
     const { blob, filename } = await exportCapabilities(capabilityTypeFilter.value)
@@ -889,7 +1008,7 @@ function projectEvents(project) {
 }
 
 function eventLabel(event) {
-  return ({ CONTRACT_ACTIVATED: '合同生效并生成项目', DECOMPOSITION_ADJUSTED: '服务项拆解已调整', ASSIGNMENT_PUBLISHED: '资源分配已下达', TEAM_ASSIGNED: '团队负责人已分配', EXECUTION_TEAM_ASSIGNED: '项目经理及工程师已指派', IMPLEMENTATION_PLANNED: '现场实施计划已发布', PREPARATION_STARTED: '实施准备已发起', FIELD_CHECK_IN: '现场签到已完成', FIELD_RECORD_SUBMITTED: '现场原始记录已提交', DEVIATION_REPORTED: '现场偏离已上报', DEVIATION_REVIEWED: '偏离评审已完成', FIELD_IMPLEMENTATION_COMPLETED: '现场实施已完成' })[event.type] || event.type
+  return ({ CONTRACT_ACTIVATED: '合同生效并生成项目', DECOMPOSITION_ADJUSTED: '服务项拆解已调整', TEAM_ASSIGNED: '团队负责人已分配', EXECUTION_TEAM_ASSIGNED: '项目经理及工程师已指派', IMPLEMENTATION_PLANNED: '现场实施计划已发布', PREPARATION_STARTED: '实施准备已发起', FIELD_CHECK_IN: '现场签到已完成', FIELD_RECORD_SUBMITTED: '现场原始记录已提交', DEVIATION_REPORTED: '现场偏离已上报', DEVIATION_REVIEWED: '偏离评审已完成', FIELD_IMPLEMENTATION_COMPLETED: '现场实施已完成' })[event.type] || event.type
 }
 
 function openProject(project) { drawerProject.value = project }
@@ -932,6 +1051,13 @@ function toDateTimeLocal(value) {
   const pad = (part) => String(part).padStart(2, '0')
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
+// identityStatusLabel 把身份复核结果翻译成用户能读懂的状态。
+function identityStatusLabel(status) {
+  if (status === 'ACTIVE') return '在职'
+  if (status === 'MISSING') return '已离职/查无此人'
+  return '未关联平台账号'
+}
+
 function conflictStatusLabel(status) {
   if (status === 'PASSED') return '校验通过'
   if (status === 'CONFLICT') return '存在冲突'
@@ -1111,9 +1237,11 @@ async function runOperation(kind) {
       await startImplementationPreparation(item.id, { travel_request_id: form.travelRequestID, notes: form.comment, equipment: form.equipment.map((row) => ({ resource_type: 'EQUIPMENT', resource_id: row.resourceID, window_start: row.windowStart, window_end: row.windowEnd, note: row.note })) })
       showToast('实施准备已发起')
     } else if (kind === 'field') {
-      await fieldCheckIn(item.id, { latitude: Number(form.latitude), longitude: Number(form.longitude), occurred_at: new Date().toISOString() })
+      // 坐标签到已删除：手工填写的经纬度没有任何证明力，服务端也不再保存。
+      // 现场记录（原始数据 / 环境条件）是进入"实施中"的真实动作。
+      if (!String(form.rawData || '').trim() || !String(form.environment || '').trim()) { showToast('请填写现场原始数据与环境条件'); return }
       await submitFieldRecord(item.id, { raw_data: form.rawData, environment: form.environment, evidence_urls: [] })
-      showToast('签到和现场记录已提交')
+      showToast('现场记录已提交，服务项进入实施中')
     } else if (kind === 'exception-report') {
       const result = await reportDeviation(item.id, { description: form.deviationDescription, severity: form.severity, evidence_url: '' })
       showToast(`偏离已上报：${result.deviation_id || '待评审'}`)
@@ -1121,9 +1249,8 @@ async function runOperation(kind) {
       await reviewDeviation(form.deviationID, { decision: form.decision, comment: form.comment })
       showToast('偏离评审已完成')
     } else if (kind === 'complete') {
-      const project = projectByID.value.get(item.project_id)
-      await completeFieldImplementation(project?.id || item.project_id)
-      showToast('现场实施已完成')
+      await completeServiceItemField(item.id)
+      showToast('该服务项现场实施已完成，进入报告编制')
     }
     await loadWorkspace()
   } catch (error) { showToast(error?.message || '操作失败') }
@@ -1312,9 +1439,9 @@ onBeforeUnmount(() => {
           <section class="pm-filters"><label><ConsoleIcon name="search" /><input v-model="keyword" placeholder="搜索项目编号 / 客户名称 / 服务项" /></label><select v-model="statusFilter"><option value="">状态：全部</option><option v-for="node in projectStatusNodes" :key="node" :value="node">{{ node }}</option></select><select v-model="categoryFilter"><option value="">检测类别：全部</option><option v-for="option in categoryOptions" :key="option" :value="option">{{ option }}</option></select><select v-model="teamFilter"><option value="">团队：全部</option><option v-for="option in teamOptions" :key="option" :value="option">{{ option }}</option></select><button class="pm-button ghost" @click="resetProjectFilters">重置</button><span class="pm-filter-count">{{ filteredProjects.length }} 条结果</span></section>
           <section class="pm-table-panel">
             <div class="pm-table-scroll"><table class="pm-table"><thead><tr><th></th><th>项目 / 客户</th><th>合同编号</th><th>服务项</th><th>检测类别</th><th>团队 / 项目经理</th><th>状态</th><th>交付进度</th><th>计划完成</th><th></th></tr></thead><tbody>
-              <tr v-for="project in filteredProjects" :key="project.id" :class="{ selected: selectedRows.includes(project.id), risk: riskProjectStatuses.includes(project.status) }"><td><input type="checkbox" :checked="selectedRows.includes(project.id)" :aria-label="`选择 ${project.id}`" @change="toggleRow(project.id)" /></td><td><button class="pm-project-link" @click="openProject(project)"><b>{{ project.id }}</b><span>{{ project.customer }}</span></button></td><td class="mono">{{ project.contract }}</td><td>{{ project.services }}</td><td>{{ project.category }}</td><td><b>{{ project.team }}</b><span class="pm-cell-sub">{{ project.manager }}</span></td><td><span class="pm-badge neutral">{{ project.status }}</span></td><td><div class="pm-progress-cell"><div class="pm-inline-progress"><i :style="{ width: `${project.progress}%` }"></i></div><small>{{ project.progress }}%</small></div></td><td :class="{ 'pm-text-danger': project.due.includes('超期') }">{{ project.due }}</td><td><button class="pm-link" @click="openProject(project)">详情</button></td></tr>
+              <tr v-for="project in pagedProjects" :key="project.id" :class="{ selected: selectedRows.includes(project.id), risk: riskProjectStatuses.includes(project.status) }"><td><input type="checkbox" :checked="selectedRows.includes(project.id)" :aria-label="`选择 ${project.id}`" @change="toggleRow(project.id)" /></td><td><button class="pm-project-link" @click="openProject(project)"><b>{{ project.id }}</b><span>{{ project.customer }}</span></button></td><td class="mono">{{ project.contract }}</td><td>{{ project.services }}</td><td>{{ project.category }}</td><td><b>{{ project.team }}</b><span class="pm-cell-sub">{{ project.manager }}</span></td><td><span class="pm-badge neutral">{{ project.status }}</span></td><td><div class="pm-progress-cell"><div class="pm-inline-progress"><i :style="{ width: `${project.progress}%` }"></i></div><small>{{ project.progress }}%</small></div></td><td :class="{ 'pm-text-danger': project.due.includes('超期') }">{{ project.due }}</td><td><button class="pm-link" @click="openProject(project)">详情</button></td></tr>
             </tbody></table></div>
-            <footer class="pm-table-footer"><span>已选择 {{ selectedRows.length }} 项 · 共 {{ filteredProjects.length }} 条</span><div class="pm-pagination"><button class="pm-pg" disabled>‹</button><button class="pm-pg active">1</button><button class="pm-pg" disabled>›</button></div></footer>
+            <footer class="pm-table-footer"><span>已选择 {{ selectedRows.length }} 项 · 共 {{ filteredProjects.length }} 条 · 第 {{ projectPage }} / {{ projectPageCount }} 页</span><div class="pm-pagination"><button class="pm-pg" :disabled="projectPage <= 1" @click="gotoProjectPage(projectPage - 1)">‹</button><button class="pm-pg active">{{ projectPage }}</button><button class="pm-pg" :disabled="projectPage >= projectPageCount" @click="gotoProjectPage(projectPage + 1)">›</button></div></footer>
           </section>
         </template>
 
@@ -1358,13 +1485,19 @@ onBeforeUnmount(() => {
         <template v-else-if="activeSection === 'implementation'">
           <section class="pm-board-summary"><div><strong>{{ serviceItems.length }}</strong><span>全部服务项</span></div><div><strong>{{ serviceFlow[2].count }}</strong><span>正在实施</span></div><div><strong>{{ serviceFlow[3].count }}</strong><span>报告编制</span></div><div><strong>{{ serviceFlow[4].count }}</strong><span>现场完成</span></div></section>
           <section class="pm-kanban"><article v-for="column in kanbanColumns" :key="column.key"><header><div><i :class="column.color"></i><b>{{ column.key }}</b></div><span>{{ column.count }}</span></header><div class="pm-kanban-body"><button v-for="card in column.cards" :key="card.id" @click="openProject(card)"><b>{{ card.id }}</b><h3>{{ card.customer }}</h3><span class="pm-badge neutral">{{ card.status }}</span><div class="pm-inline-progress"><i :style="{ width: `${card.progress}%` }"></i></div><footer><span>{{ card.progress }}%</span><time>{{ card.due || '待排期' }}</time></footer></button><div v-if="!column.cards.length" class="pm-empty-mini">暂无数据</div></div></article></section>
-          <section class="pm-panel pm-operation-panel"><header><div><p class="pm-panel-kicker">FIELD EXECUTION</p><h2>现场签到与原始记录</h2></div></header><ServiceItemPicker :items="serviceItems" :selected-ids="selectedServiceItem ? [selectedServiceItem.id] : []" empty-text="暂无可签到服务项" @select="selectServiceItem" /><div v-if="selectedServiceItem" class="pm-form pm-operation-form"><label><span>纬度 <em>*</em></span><input v-model.trim="operationForm.latitude" type="number" step="any" placeholder="例如 30.2741" /></label><label><span>经度 <em>*</em></span><input v-model.trim="operationForm.longitude" type="number" step="any" placeholder="例如 120.1551" /></label><label><span>现场原始数据 <em>*</em></span><textarea v-model.trim="operationForm.rawData" rows="3"></textarea></label><label><span>环境条件 <em>*</em></span><textarea v-model.trim="operationForm.environment" rows="3"></textarea></label><button class="pm-button primary" :disabled="saving" @click="runOperation('field')">提交签到和现场记录</button></div><div v-else class="pm-empty-mini">请先选择服务项</div></section>
+          <section class="pm-panel pm-operation-panel"><header><div><p class="pm-panel-kicker">FIELD EXECUTION</p><h2>现场记录与实施完成</h2></div></header><ServiceItemPicker :items="serviceItems" :selected-ids="selectedServiceItem ? [selectedServiceItem.id] : []" empty-text="暂无可签到服务项" @select="selectServiceItem" /><div v-if="selectedServiceItem" class="pm-form pm-operation-form"><label><span>现场原始数据 <em>*</em></span><textarea v-model.trim="operationForm.rawData" rows="3" placeholder="记录现场实测数据与依据"></textarea></label><label><span>环境条件 <em>*</em></span><textarea v-model.trim="operationForm.environment" rows="3" placeholder="记录现场环境条件"></textarea></label><button class="pm-button primary" :disabled="saving" @click="runOperation('field')">提交现场记录</button></div><button v-if="selectedServiceItem && selectedServiceItem.status === '实施中'" class="pm-button" :disabled="saving" @click="runOperation('complete')">确认该服务项现场完成</button><div v-else-if="!selectedServiceItem" class="pm-empty-mini">请先选择服务项</div></section>
         </template>
 
+        <template v-else-if="activeSection === 'sites'">
+          <section class="pm-panel pm-equipment-layout"><header><div><p class="pm-panel-kicker">SITE REGISTRY</p><h2>站点档案</h2><p>维护站点编码、地址与坐标；坐标可在现场用浏览器定位自动获取，也可手工填写。</p></div><div class="pm-panel-actions"><button class="pm-button" :disabled="saving" @click="loadSites">刷新</button><button v-if="canManageResource" class="pm-button primary" :disabled="saving" @click="openSiteDialog()">＋ 新建站点</button></div></header></section>
+          <p v-if="siteError" class="pm-form-hint" role="alert">{{ siteError }}</p>
+          <section class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>站点编码</th><th>站点名称</th><th>地址</th><th>坐标</th><th>状态</th><th></th></tr></thead><tbody><tr v-for="item in sites" :key="item.site_code"><td class="mono">{{ item.site_code }}</td><td><b>{{ item.name }}</b></td><td>{{ item.address || '—' }}</td><td><span v-if="item.has_coordinates" class="mono">{{ item.latitude }}, {{ item.longitude }}</span><span v-else class="pm-badge neutral">未采集</span></td><td><span class="pm-badge" :class="item.status === 'ACTIVE' ? 'normal' : 'neutral'">{{ item.status === 'ACTIVE' ? '启用' : '停用' }}</span></td><td style="width: 160px; min-width: 160px;"><button v-if="canManageResource" class="pm-link" @click="openSiteDialog(item)">编辑</button><button v-if="canManageResource && item.status === 'ACTIVE'" class="pm-link" :disabled="saving" @click="disableSite(item)">停用</button></td></tr></tbody></table></div><div v-if="!sites.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无站点档案</b><span>点击「＋ 新建站点」开始维护站点主数据。</span></div></section>
+          <div v-if="siteDialog" class="pm-overlay" @click.self="siteDialog = null"><form class="pm-dialog" @submit.prevent="saveSite"><header><div><span>SITE</span><h2>{{ siteDialog.site_code ? '编辑站点' : '新建站点' }}</h2></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="siteDialog = null"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>站点编码 <em>*</em></span><input v-model.trim="siteDialog.site_code" required placeholder="例如 SITE-HZ-01" /></label><label><span>站点名称 <em>*</em></span><input v-model.trim="siteDialog.name" required placeholder="例如 杭州机房" /></label><label><span>地址</span><input v-model.trim="siteDialog.address" placeholder="例如 杭州市余杭区..." /></label><div class="pm-field"><span>坐标</span><div class="pm-form-row"><input v-model.trim="siteDialog.latitude" type="number" step="any" placeholder="纬度" /><input v-model.trim="siteDialog.longitude" type="number" step="any" placeholder="经度" /><button type="button" class="pm-button" :disabled="locatingSite" @click="locateCurrentSite">{{ locatingSite ? '定位中…' : '定位当前位置' }}</button></div><p class="pm-form-hint">在现场点击「定位当前位置」可由浏览器自动获取坐标；留空表示尚未采集。</p></div><label><span>状态</span><select v-model="siteDialog.status"><option value="ACTIVE">启用</option><option value="DISABLED">停用</option></select></label><label><span>备注</span><textarea v-model.trim="siteDialog.notes" rows="2"></textarea></label></div><footer><button type="button" class="pm-button" @click="siteDialog = null">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : '保存站点' }}</button></footer></form></div>
+        </template>
         <template v-else-if="activeSection === 'equipment'">
           <section class="pm-panel pm-equipment-layout"><header><div><p class="pm-panel-kicker">EQUIPMENT CAPABILITY</p><h2>设备能力维护</h2><p>维护设备基础信息、能力编码、检定有效期与启停状态。</p></div></header><form class="pm-form pm-equipment-form" @submit.prevent="saveEquipment"><label><span>设备编号 <em>*</em></span><input v-model.trim="equipmentForm.resourceID" required placeholder="例如 EQ-001" /></label><label><span>设备名称 <em>*</em></span><input v-model.trim="equipmentForm.resourceName" required placeholder="请输入设备名称" /></label><label><span>能力编码 <em>*</em></span><input v-model.trim="equipmentForm.codes" required placeholder="多个编码用逗号分隔" /></label><label><span>检定开始</span><input v-model="equipmentForm.validFrom" type="date" /></label><label><span>检定到期</span><input v-model="equipmentForm.validUntil" type="date" /></label><label><span>状态</span><select v-model="equipmentForm.status"><option value="ACTIVE">启用</option><option value="DISABLED">停用</option></select></label><label><span>使用范围</span><select v-model="equipmentForm.usageScope"><option value="ANY">可借出</option><option value="COMPANY_ONLY">仅在公司使用（不可借出）</option></select></label><button class="pm-button primary">保存设备</button></form></section><section class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>设备编号</th><th>设备名称</th><th>能力</th><th>检定有效期</th><th>状态</th><th>在位 / 使用范围</th><th>操作</th></tr></thead><tbody><tr v-for="item in equipment" :key="item.resource_id"><td class="mono">{{ item.resource_id }}</td><td><b>{{ item.resource_name }}</b></td><td>{{ (item.codes || []).join(' / ') }}</td><td>{{ item.valid_until ? formatDateTime(item.valid_until) : '未设置' }}</td><td><span class="pm-badge" :class="item.status === 'ACTIVE' ? 'normal' : 'neutral'">{{ item.status === 'ACTIVE' ? '启用' : '停用' }}</span></td><td><span class="pm-badge" :class="item.presence === 'OUT_OF_COMPANY' ? 'warning' : 'normal'">{{ equipmentPresenceLabel(item) }}</span><small v-if="item.borrowed_by" class="pm-cell-sub">{{ item.borrowed_by }} · {{ item.borrowed_window }}</small><small v-if="item.usage_scope === 'COMPANY_ONLY'" class="pm-form-hint">仅在公司使用 · 不可借出</small></td><td><button class="pm-link" @click="editEquipment(item)">编辑 / 更新</button><button v-if="item.presence === 'OUT_OF_COMPANY'" class="pm-link danger" @click="returnEquipment(item)">归还</button></td></tr></tbody></table></div><p v-if="equipmentError" class="pm-form-hint" role="alert">{{ equipmentError }}</p><div v-else-if="!equipment.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无设备</b><span>使用上方表单新增设备。</span></div></section>
         </template>
-        <template v-else-if="activeSection === 'qualifications'"><section class="pm-panel"><header><div><p class="pm-panel-kicker">RESOURCE CAPABILITY</p><h2>资质与能力管理</h2><p>维护并展示人员资质与设备能力记录。</p></div><div class="pm-panel-actions"><input ref="qualificationFileInput" class="pm-file-input" type="file" accept=".csv,text/csv" @change="importQualificationFile" /><button class="pm-button" :disabled="saving" @click="downloadCapabilities">导出 CSV</button><template v-if="canManageResource"><button class="pm-button" :disabled="saving" @click="qualificationFileInput.click()">导入 CSV</button><button class="pm-button primary" :disabled="saving" @click="openCapabilityDialog()">＋ 新建资质</button></template></div></header><div class="pm-qualification-filter"><label><span>资源类型</span><select v-model="capabilityTypeFilter"><option value="">全部</option><option value="PERSON">人员资质</option><option value="EQUIPMENT">设备能力</option></select></label><label><span>状态</span><select v-model="capabilityStatusFilter"><option value="">全部</option><option value="ACTIVE">有效</option><option value="DISABLED">停用</option></select></label></div></section><section class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>资源类型</th><th>编号</th><th>名称</th><th>资质 / 能力编码</th><th>有效期</th><th>使用范围</th><th>状态</th><th></th></tr></thead><tbody><tr v-for="item in filteredCapabilities" :key="item.resource_id"><td><span class="pm-badge neutral">{{ item.resource_type === 'PERSON' ? '人员' : '设备' }}</span></td><td class="mono">{{ item.resource_id }}</td><td><b>{{ item.resource_name }}</b></td><td>{{ (item.codes || []).join(' / ') }}</td><td>{{ item.valid_until ? (item.valid_from ? `${item.valid_from.slice(0, 10)} ~ ` : '') + item.valid_until.slice(0, 10) : '长期' }}</td><td><span v-if="item.resource_type === 'EQUIPMENT'" class="pm-badge" :class="item.usage_scope === 'COMPANY_ONLY' ? 'warning' : 'neutral'">{{ item.usage_scope === 'COMPANY_ONLY' ? '仅在公司使用' : '可借出' }}</span><span v-else>—</span></td><td><span class="pm-badge" :class="item.status === 'ACTIVE' ? 'normal' : 'neutral'">{{ item.status === 'ACTIVE' ? '有效' : '停用' }}</span></td><td style="width: 90px; min-width: 90px;"><button class="pm-link" @click="openCapabilityDialog(item)">编辑 / 更新</button></td></tr></tbody></table></div><div v-if="!filteredCapabilities.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无资质记录</b><span>点击「＋ 新建资质」或通过 CSV 导入添加记录。</span></div><footer v-if="importResult"><span role="status">导入完成：成功 {{ importResult.imported }} 条，跳过 {{ importResult.skipped }} 条。</span><span v-if="importResult.errors?.length"><small>{{ importResult.errors.slice(0, 3).join('；') }}{{ importResult.errors.length > 3 ? '…' : '' }}</small></span></footer></section><div v-if="capabilityDialog" class="pm-overlay" @click.self="capabilityDialog = null"><form class="pm-dialog" @submit.prevent="saveCapability"><header><div><span>CAPABILITY</span><h2>{{ capabilityDialog.resource_id ? '编辑资质 / 能力' : '新建资质 / 能力' }}</h2></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="capabilityDialog = null"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>资源类型 <em>*</em></span><select v-model="capabilityDialog.resource_type" required @change="onCapabilityTypeChange"><option value="PERSON">人员资质</option><option value="EQUIPMENT">设备能力</option></select></label><label><span>{{ capabilityDialog.resource_type === 'EQUIPMENT' ? '设备编号' : '人员编号' }} <em>*</em></span><input v-model.trim="capabilityDialog.resource_id" :readonly="capabilityAutoID" required placeholder="系统自动生成" /><small v-if="capabilityAutoID" class="pm-form-hint">由系统自动生成（人员 P- / 设备 EQ-），无需手工填写</small></label><label><span>资源名称 <em>*</em></span><input v-model.trim="capabilityDialog.resource_name" required placeholder="例如 张三 或 基站A" /></label><label><span>资质 / 能力编码 <em>*</em></span><input v-model.trim="capabilityDialog.codes" required placeholder="多个编码用逗号分隔" /></label><label><span>起始日期</span><input v-model="capabilityDialog.valid_from" type="date" /></label><label><span>截止日期</span><input v-model="capabilityDialog.valid_until" type="date" /></label><label v-if="capabilityDialog.resource_type === 'EQUIPMENT'"><span>使用范围</span><select v-model="capabilityDialog.usage_scope"><option value="ANY">可借出</option><option value="COMPANY_ONLY">仅在公司使用（不可借出）</option></select></label><label><span>状态</span><select v-model="capabilityDialog.status"><option value="ACTIVE">有效</option><option value="DISABLED">停用</option></select></label></div><footer><button type="button" class="pm-button" @click="capabilityDialog = null">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : '保存资质' }}</button></footer></form></div></template><template v-else-if="['split-rules', 'warning-rules', 'automations', 'permissions', 'sla', 'standards'].includes(activeSection)">
+        <template v-else-if="activeSection === 'qualifications'"><section class="pm-panel"><header><div><p class="pm-panel-kicker">RESOURCE CAPABILITY</p><h2>资质与能力管理</h2><p>维护并展示人员资质与设备能力记录。</p></div><div class="pm-panel-actions"><input ref="qualificationFileInput" class="pm-file-input" type="file" accept=".csv,text/csv" @change="importQualificationFile" /><button class="pm-button" :disabled="saving" @click="downloadCapabilities">导出 CSV</button><template v-if="canManageResource"><button class="pm-button" :disabled="saving" @click="qualificationFileInput.click()">导入 CSV</button><button class="pm-button" :disabled="saving" @click="syncIdentities">同步人员状态</button><button class="pm-button primary" :disabled="saving" @click="openCapabilityDialog()">＋ 新建资质</button></template></div></header><div class="pm-qualification-filter"><label><span>资源类型</span><select v-model="capabilityTypeFilter"><option value="">全部</option><option value="PERSON">人员资质</option><option value="EQUIPMENT">设备能力</option></select></label><label><span>状态</span><select v-model="capabilityStatusFilter"><option value="">全部</option><option value="ACTIVE">有效</option><option value="DISABLED">停用</option></select></label></div></section><section class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>资源类型</th><th>编号</th><th>名称</th><th>资质 / 能力编码</th><th>有效期</th><th>使用范围</th><th>状态</th><th>人员状态</th><th></th></tr></thead><tbody><tr v-for="item in filteredCapabilities" :key="item.resource_id"><td><span class="pm-badge neutral">{{ item.resource_type === 'PERSON' ? '人员' : '设备' }}</span></td><td class="mono">{{ item.resource_id }}</td><td><b>{{ item.resource_name }}</b></td><td>{{ (item.codes || []).join(' / ') }}</td><td>{{ item.valid_until ? (item.valid_from ? `${item.valid_from.slice(0, 10)} ~ ` : '') + item.valid_until.slice(0, 10) : '长期' }}</td><td><span v-if="item.resource_type === 'EQUIPMENT'" class="pm-badge" :class="item.usage_scope === 'COMPANY_ONLY' ? 'warning' : 'neutral'">{{ item.usage_scope === 'COMPANY_ONLY' ? '仅在公司使用' : '可借出' }}</span><span v-else>—</span></td><td><span class="pm-badge" :class="item.status === 'ACTIVE' ? 'normal' : 'neutral'">{{ item.status === 'ACTIVE' ? '有效' : '停用' }}</span></td><td><template v-if="item.resource_type === 'PERSON'"><span class="pm-badge" :class="item.identity_status === 'MISSING' ? '风险' : item.identity_status === 'ACTIVE' ? 'normal' : 'neutral'">{{ identityStatusLabel(item.identity_status) }}</span></template><span v-else>—</span></td><td style="width: 90px; min-width: 90px;"><button class="pm-link" @click="openCapabilityDialog(item)">编辑 / 更新</button></td></tr></tbody></table></div><div v-if="!filteredCapabilities.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无资质记录</b><span>点击「＋ 新建资质」或通过 CSV 导入添加记录。</span></div><footer v-if="importResult"><span role="status">导入完成：成功 {{ importResult.imported }} 条，跳过 {{ importResult.skipped }} 条。</span><span v-if="importResult.errors?.length"><small>{{ importResult.errors.slice(0, 3).join('；') }}{{ importResult.errors.length > 3 ? '…' : '' }}</small></span></footer></section><div v-if="capabilityDialog" class="pm-overlay" @click.self="capabilityDialog = null"><form class="pm-dialog" @submit.prevent="saveCapability"><header><div><span>CAPABILITY</span><h2>{{ capabilityDialog.resource_id ? '编辑资质 / 能力' : '新建资质 / 能力' }}</h2></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="capabilityDialog = null"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>资源类型 <em>*</em></span><select v-model="capabilityDialog.resource_type" required @change="onCapabilityTypeChange"><option value="PERSON">人员资质</option><option value="EQUIPMENT">设备能力</option></select></label><label><span>{{ capabilityDialog.resource_type === 'EQUIPMENT' ? '设备编号' : '人员编号' }} <em>*</em></span><input v-model.trim="capabilityDialog.resource_id" :readonly="capabilityAutoID" required placeholder="系统自动生成" /><small v-if="capabilityAutoID" class="pm-form-hint">由系统自动生成（人员 P- / 设备 EQ-），无需手工填写</small></label><label><span>资源名称 <em>*</em></span><input v-model.trim="capabilityDialog.resource_name" required placeholder="例如 张三 或 基站A" /></label><label><span>资质 / 能力编码 <em>*</em></span><input v-model.trim="capabilityDialog.codes" required placeholder="多个编码用逗号分隔" /></label><label><span>起始日期</span><input v-model="capabilityDialog.valid_from" type="date" /></label><label><span>截止日期</span><input v-model="capabilityDialog.valid_until" type="date" /></label><label v-if="capabilityDialog.resource_type === 'EQUIPMENT'"><span>使用范围</span><select v-model="capabilityDialog.usage_scope"><option value="ANY">可借出</option><option value="COMPANY_ONLY">仅在公司使用（不可借出）</option></select></label><label><span>状态</span><select v-model="capabilityDialog.status"><option value="ACTIVE">有效</option><option value="DISABLED">停用</option></select></label></div><footer><button type="button" class="pm-button" @click="capabilityDialog = null">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : '保存资质' }}</button></footer></form></div></template><template v-else-if="['split-rules', 'warning-rules', 'automations', 'permissions', 'sla', 'standards'].includes(activeSection)">
           <section class="pm-config-layout"><aside class="pm-config-note"><span><ConsoleIcon name="info" /></span><h2>配置说明</h2><p>{{ currentMeta[1] }}。变更将在保存后对新任务生效，已有项目不自动追溯。</p><ul><li>配置修改需业务管理员权限</li><li>关键规则变更会记录审计日志</li><li>关闭规则前请确认影响范围</li></ul></aside><article class="pm-table-panel"><header class="pm-filter-bar"><div class="pm-sm-tabs"><button v-for="meta in configKindsMeta" :key="meta.kind" type="button" class="pm-tab-pill" :class="{ active: activeSection === meta.kind }" @click="navigate(meta.kind)">{{ meta.label }}</button></div><span class="pm-filter-count">{{ activeConfigMeta.label }} 共 {{ visibleRules.length }} 条</span></header><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>配置名称</th><th v-for="column in activeConfigMeta.columns" :key="column.key">{{ column.label }}</th><th>状态</th><th>最后更新</th><th></th></tr></thead><tbody><tr v-for="rule in visibleRules" :key="rule.id"><td><b>{{ rule.name }}</b></td><td v-for="column in activeConfigMeta.columns" :key="column.key">{{ rule[column.key] !== undefined && rule[column.key] !== '' ? rule[column.key] : '—' }}</td><td><button class="pm-switch" :class="{ on: rule.enabled }" :aria-label="`${rule.enabled ? '停用' : '启用'} ${rule.name}`" @click="toggleRule(rule)"><i></i></button></td><td>{{ rule.updated }}</td><td><button class="pm-link" @click="openConfigEdit(rule)">编辑</button></td></tr></tbody></table></div><div v-if="!visibleRules.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无配置规则</b><span>点击「＋ 新建规则」添加 {{ activeConfigMeta.label }} 配置。</span></div></article></section>
         </template>
 

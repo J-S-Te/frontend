@@ -167,6 +167,21 @@ export async function ensureProjectSession() {
 }
 
 /**
+ * unwrapPage 兼容两种列表响应：分页 envelope（{items,total,page,page_size}）与历史数组。
+ * 后端列表接口统一返回 envelope，page_size 未指定时 items 即全量，
+ * 因此下拉数据源（服务项、设备）仍能拿到完整集合。
+ * @param {unknown} data 接口返回体。
+ * @returns {{items: Array<object>, total: number}} 列表与总数。
+ */
+function unwrapPage(data) {
+  if (Array.isArray(data)) return { items: data, total: data.length }
+  if (data && Array.isArray(data.items)) {
+    return { items: data.items, total: Number(data.total ?? data.items.length) }
+  }
+  return { items: [], total: 0 }
+}
+
+/**
  * listProjects 按前端约定参数查询项目列表，并在返回非数组时兜底为空列表。
  *
  * @param {Record<string, string|number|boolean>} [params={}] 查询条件。支持 keyword 兼容映射为 q。
@@ -181,7 +196,22 @@ export async function listProjects(params = {}) {
   delete query.keyword
   const search = new URLSearchParams(Object.entries(query).filter(([, value]) => value !== undefined && value !== null && value !== '')).toString()
   const data = await request(`/projects${search ? `?${search}` : ''}`)
-  return Array.isArray(data) ? data : []
+  return unwrapPage(data).items
+}
+
+/**
+ * listProjectsPage 分页查询项目列表，返回 items 与 total 供分页控件渲染。
+ * 状态过滤发生在服务端的派生态上，因此 total 是"筛选后的总数"。
+ * @param {Record<string, string|number|boolean>} [params={}] 查询条件，含 page / page_size。
+ * @returns {Promise<{items: Array<object>, total: number}>} 当前页与筛选后的总数。
+ * @throws {Error} 会话失效、鉴权失败或分页参数不合法时抛出。
+ */
+export async function listProjectsPage(params = {}) {
+  const query = { ...params }
+  if (query.q === undefined && query.keyword !== undefined) query.q = query.keyword
+  delete query.keyword
+  const search = new URLSearchParams(Object.entries(query).filter(([, value]) => value !== undefined && value !== null && value !== '')).toString()
+  return unwrapPage(await request(`/projects${search ? `?${search}` : ''}`))
 }
 
 /**
@@ -213,7 +243,7 @@ export function createProject(payload) {
 export async function listServiceItems(projectID = '') {
   const search = projectID ? `?project_id=${encodeURIComponent(projectID)}` : ''
   const data = await request(`/service-items${search}`)
-  return Array.isArray(data) ? data : []
+  return unwrapPage(data).items
 }
 
 /**
@@ -277,6 +307,49 @@ export async function resolvePersonnelNames(ids = []) {
   if (!unique.length) return {}
   const data = await request(`/personnel/names?user_ids=${encodeURIComponent(unique.join(','))}`)
   return data && typeof data.names === 'object' && data.names !== null ? data.names : {}
+}
+
+/**
+ * listSites 查询站点台账。
+ * @param {string} [status=''] 可选状态过滤（ACTIVE / DISABLED）。
+ * @returns {Promise<Array<object>>} 站点列表。
+ * @throws {Error} 会话失效或鉴权失败时抛出。
+ */
+export async function listSites(status = '') {
+  const search = status ? `?status=${encodeURIComponent(status)}` : ''
+  const data = await request(`/sites${search}`)
+  return Array.isArray(data) ? data : []
+}
+
+/**
+ * upsertSite 按站点编码幂等写入站点档案。
+ * @param {Object} payload 站点字段：site_code、name、address、latitude、longitude、has_coordinates、status、notes。
+ * @returns {Promise<object>} 保存后的站点。
+ * @throws {Error} 编码/名称为空、坐标越界或权限不足时抛出。
+ */
+export function upsertSite(payload) {
+  return request('/sites', { method: 'PUT', body: JSON.stringify(payload) })
+}
+
+/**
+ * deleteSite 停用站点（保留行以维持历史服务项可追溯）。
+ * @param {string} siteCode 站点编码。
+ * @returns {Promise<object>} 停用结果。
+ * @throws {Error} 站点不存在或权限不足时抛出。
+ */
+export function deleteSite(siteCode) {
+  return request(`/sites/${encodeURIComponent(siteCode)}`, { method: 'DELETE' })
+}
+
+/**
+ * syncPersonnelIdentities 回基础平台负责人目录复核人员资质档案。
+ * 资质在本系统维护，但"这个人是否真实存在（在职）"只能由基础平台回答：
+ * 复核结果写入 identity_status，界面据此区分在职 / 已离职 / 未关联。
+ * @returns {Promise<{total:number, active:number, missing:number, unlinked:number, unverified:number, checked_at:string}>} 复核统计。
+ * @throws {Error} 目录未开通、权限不足或平台暂不可用时抛出。
+ */
+export function syncPersonnelIdentities() {
+  return request('/capabilities/sync-identities', { method: 'POST' })
 }
 
 /**
@@ -426,21 +499,7 @@ export function startImplementationPreparation(itemID, payload) {
 }
 
 /**
- * fieldCheckIn 提交实地核验签到记录。
- * @param {string|number} itemID 服务项 ID。
- * @param {Object} payload 签到负载。
- * @returns {Promise<object>} 提交结果。
- * @throws {Error} 请求参数无效、当前状态不允许签到或权限不足时抛出。
- */
-export function fieldCheckIn(itemID, payload) {
-  return request(`/service-items/${encodeURIComponent(itemID)}/check-in`, {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  })
-}
-
-/**
- * submitFieldRecord 提交服务项现场记录。
+ * submitFieldRecord 提交服务项现场记录；提交成功即代表该服务项进入"实施中"。
  * @param {string|number} itemID 服务项 ID。
  * @param {Object} payload 现场记录负载。
  * @returns {Promise<object>} 提交结果。
@@ -482,13 +541,14 @@ export function reviewDeviation(deviationID, payload) {
 }
 
 /**
- * completeFieldImplementation 完成现场实施阶段，触发后续验收节点。
- * @param {string|number} projectID 项目 ID。
- * @returns {Promise<object>} 完成结果。
- * @throws {Error} 会话失效、项目状态不允许完成现场实施时抛出。
+ * completeServiceItemField 确认单个服务项的现场实施完成。
+ * 项目级"一刀切"完成已移除：多服务项项目里先做完的项不必等最后一个动作顺带完成。
+ * @param {string|number} itemID 服务项 ID。
+ * @returns {Promise<object>} 完成结果；服务项随后进入报告编制阶段。
+ * @throws {Error} 会话失效、服务项不在"实施中"或权限不足时抛出。
  */
-export function completeFieldImplementation(projectID) {
-  return request(`/projects/${encodeURIComponent(projectID)}/field-complete`, {
+export function completeServiceItemField(itemID) {
+  return request(`/service-items/${encodeURIComponent(itemID)}/field-complete`, {
     method: 'POST',
   })
 }
@@ -519,7 +579,7 @@ export async function listCapabilities(resourceType = '') {
 
 export async function listEquipment() {
   const data = await request('/equipment')
-  return Array.isArray(data) ? data : []
+  return unwrapPage(data).items
 }
 
 export function upsertEquipment(payload) {

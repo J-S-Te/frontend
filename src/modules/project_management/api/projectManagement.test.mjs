@@ -52,11 +52,15 @@ test('服务项确认与规则切换使用后端写接口', () => {
 })
 
 test('项目交付闭环调用真实后端接口而非本地模拟', () => {
+  // /check-in 已删除：手工填写经纬度没有证明力，现场记录自身即进入"实施中"。
+  // /field-complete 由项目级改为按服务项推进。
   for (const path of [
     '/team-assignment', '/execution-assignment',
-    '/implementation-plan', '/preparation', '/check-in', '/field-records', '/deviations', '/review',
+    '/implementation-plan', '/preparation', '/field-records', '/deviations', '/review',
     '/field-complete', '/delivery-events', '/capabilities',
   ]) assert.match(source, new RegExp(path.replaceAll('/', '\\/')))
+  assert.doesNotMatch(source, /\/check-in/)
+  assert.match(source, /service-items\/\$\{encodeURIComponent\(itemID\)\}\/field-complete/)
 })
 
 test('项目列表将 keyword 兼容转换为后端实际读取的 q 参数', () => {
@@ -91,4 +95,27 @@ test('人员目录按重复 role_code 参数查询，数组参数不会被压成
   assert.match(source, /for \(const item of Array\.isArray\(value\) \? value : \[value\]\)/)
   assert.match(source, /search\.append\(key, item\)/)
   assert.match(source, /request\(`\/personnel\$\{query \? `\?\$\{query\}` : ''\}`\)/)
+})
+
+test('人员身份复核调用独立端点', () => {
+  assert.match(source, /export function syncPersonnelIdentities\(\)/)
+  assert.match(source, /request\('\/capabilities\/sync-identities', \{ method: 'POST' \}\)/)
+})
+
+test('列表接口统一解包分页 envelope，未分页时拿到完整集合', () => {
+  // 后端列表接口统一返回 {items,total,page,page_size}；page_size 未指定时 items 即全量。
+  assert.match(source, /function unwrapPage\(data\)/)
+  assert.match(source, /if \(Array\.isArray\(data\)\) return \{ items: data, total: data\.length \}/)
+  assert.match(source, /if \(data && Array\.isArray\(data\.items\)\)/)
+  // 三个列表都走解包：服务项与设备是下拉数据源，必须仍是完整集合。
+  assert.equal((source.match(/return unwrapPage\(data\)\.items/g) || []).length, 3)
+  assert.match(source, /export async function listProjectsPage\(params = \{\}\)/)
+  assert.match(source, /return unwrapPage\(await request\(`\/projects\$\{search \? `\?\$\{search\}` : ''\}`\)\)/)
+})
+
+test('站点台账走独立接口，停用用 DELETE', () => {
+  assert.match(source, /export async function listSites\(status = ''\)/)
+  assert.match(source, /export function upsertSite\(payload\)/)
+  assert.match(source, /export function deleteSite\(siteCode\)/)
+  assert.match(source, /request\(`\/sites\/\$\{encodeURIComponent\(siteCode\)\}`, \{ method: 'DELETE' \}\)/)
 })

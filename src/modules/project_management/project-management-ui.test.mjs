@@ -26,7 +26,7 @@ test('项目管理页面覆盖原型的五个业务域与核心交互', () => {
   assert.match(source, /onMounted\(loadWorkspace\)/)
   assert.match(source, /await confirmServiceItemsRequest\(ids\)/)
   assert.match(source, /await setRuleEnabled\(rule\.id, rule\.kind \|\| activeSection\.value, next\)/)
-  for (const operation of ['assignTeam', 'assignExecutionTeam', 'planImplementation', 'startImplementationPreparation', 'fieldCheckIn', 'submitFieldRecord', 'reportDeviation', 'reviewDeviation', 'completeFieldImplementation']) {
+  for (const operation of ['assignTeam', 'assignExecutionTeam', 'planImplementation', 'startImplementationPreparation', 'submitFieldRecord', 'reportDeviation', 'reviewDeviation', 'completeServiceItemField']) {
     assert.match(source, new RegExp(`runOperation[\\s\\S]*${operation}`))
   }
   assert.match(source, /asRFC3339\(form\.plannedStart\)/)
@@ -403,7 +403,7 @@ test('实施计划的时间在 RFC3339 与 datetime-local 之间正确往返', (
 test('项目状态只由服务端派生，前端不再自行拼装状态集合', () => {
   // 服务端 domain.ProjectStatusNodes() 是唯一的顺序表；这里锁定前端的只读镜像，
   // 防止两侧各自演化后出现"筛选下拉有的状态列表里没有"这类漂移。
-  assert.match(source, /const projectStatusNodes = \['待拆解确认', '待分配', '待制定计划', '待实施', '实施准备中', '实施中', '异常处理中', '现场实施完成', '报告编制', '已完成'\]/)
+  assert.match(source, /const projectStatusNodes = \['待拆解确认', '待分配', '待实施', '实施准备中', '实施中', '异常处理中', '现场实施完成', '报告编制', '已完成'\]/)
   assert.match(source, /const projectStatusCompleted = '已完成'/)
   // 状态筛选必须由节点表生成，而不是手写 option 列表。
   assert.match(source, /<option v-for="node in projectStatusNodes"/)
@@ -557,4 +557,48 @@ test('实施准备不再要求设备申领单，设备清单本身就是申领�
   assert.match(source, /<label><span>行程预订单 <em>\*<\/em><\/span>/)
   assert.match(source, /startImplementationPreparation\(item\.id, \{ travel_request_id: form\.travelRequestID/)
   assert.match(source, /equipment: form\.equipment\.map\(/)
+})
+
+test('人员资质档案展示并复核基础平台身份状态', () => {
+  // 资质在本系统维护，但"这个人是否仍在职"只能由基础平台回答：
+  // 界面必须展示复核结果，并提供回平台复核的入口。
+  assert.match(source, /^\s+syncPersonnelIdentities,$/m)
+  assert.match(source, /async function syncIdentities\(\)/)
+  assert.match(source, /const result = await syncPersonnelIdentities\(\)/)
+  assert.match(source, /function identityStatusLabel\(status\)/)
+  assert.match(source, /已离职\/查无此人/)
+  assert.match(source, /@click="syncIdentities"/)
+  assert.match(source, /<th>人员状态<\/th>/)
+  assert.match(source, /item\.identity_status === 'MISSING' \? '风险'/)
+})
+
+test('项目表提供真实分页控件', () => {
+  assert.match(source, /const projectPage = ref\(1\)/)
+  assert.match(source, /const projectPageCount = computed/)
+  assert.match(source, /const pagedProjects = computed/)
+  assert.match(source, /v-for="project in pagedProjects"/)
+  // 筛选变化后回到第一页，避免停在越界页码看到空表。
+  assert.match(source, /watch\(\[keyword, statusFilter, categoryFilter, teamFilter\], \(\) => \{ projectPage\.value = 1 \}\)/)
+  assert.match(source, /:disabled="projectPage <= 1" @click="gotoProjectPage\(projectPage - 1\)"/)
+  assert.match(source, /:disabled="projectPage >= projectPageCount" @click="gotoProjectPage\(projectPage \+ 1\)"/)
+})
+
+test('站点档案支持现场用浏览器定位自动获取坐标', () => {
+  // 坐标不依赖任何外部地图凭据：录入人通常就在现场，用浏览器定位即可自动填充，
+  // 定位失败时保留手工填写路径。
+  assert.match(source, /^\s+listSites,$/m)
+  assert.match(source, /^\s+upsertSite,$/m)
+  assert.match(source, /^\s+deleteSite,$/m)
+  assert.match(source, /\{ key: 'sites', label: '站点档案'/)
+  assert.match(source, /function locateCurrentSite\(\)/)
+  assert.match(source, /navigator\.geolocation\.getCurrentPosition/)
+  assert.match(source, /enableHighAccuracy: true/)
+  assert.match(source, /已获取当前位置（精度约/)
+  assert.match(source, /定位权限被拒绝/)
+  assert.match(source, /当前浏览器不支持定位，请手工填写坐标/)
+  // 未采集坐标与"坐标为 0"必须区分。
+  assert.match(source, /has_coordinates: hasCoordinates/)
+  assert.match(source, /<span v-else class="pm-badge neutral">未采集<\/span>/)
+  // 停用而非物理删除，保留历史可追溯。
+  assert.match(source, /async function disableSite\(item\)/)
 })
