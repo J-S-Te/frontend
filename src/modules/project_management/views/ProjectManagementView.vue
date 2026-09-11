@@ -351,9 +351,11 @@ const personnelError = ref('')
 
 // 服务项操作台的角色选择必须来自基础平台负责人目录，不能要求业务用户手工填写用户 ID。
 // 三个下拉各自按应用角色取人：团队负责人=team_lead、项目经理=project_manager、工程师=engineer。
-// 角色成员由平台按有效授权判定（岗位模板继承、组织绑定、直接绑定都算），因此岗位模板里新增
-// 或调整负责人后无需在前端维护任何名单。目录失败时只禁用选择并提示，不影响其余工作区数据。
+// 角色成员由平台按有效授权判定，这里再限定来源为岗位授权模板：只列出岗位模板授予的人，
+// 管理员为个人直接开通的角色（超级管理员、平台管理员等）不会出现在候选人列表里。
+// 目录失败时只禁用选择并提示，不影响其余工作区数据。
 const PROJECT_ROLE_CODES = Object.freeze({ teamLead: 'team_lead', projectManager: 'project_manager', engineer: 'engineer' })
+const PROJECT_ROLE_ORIGIN = 'TEMPLATE'
 
 const emptyPersonnelByRole = () => ({ [PROJECT_ROLE_CODES.teamLead]: [], [PROJECT_ROLE_CODES.projectManager]: [], [PROJECT_ROLE_CODES.engineer]: [] })
 const personnelByRole = ref(emptyPersonnelByRole())
@@ -367,7 +369,7 @@ async function loadPersonnel() {
     ? [PROJECT_ROLE_CODES.teamLead, PROJECT_ROLE_CODES.projectManager, PROJECT_ROLE_CODES.engineer]
     : [PROJECT_ROLE_CODES.teamLead]
   try {
-    const pages = await Promise.all(roles.map((role) => listPersonnel({ keyword, role_code: role, page: 1, page_size: 50 })))
+    const pages = await Promise.all(roles.map((role) => listPersonnel({ keyword, role_code: role, role_origin: PROJECT_ROLE_ORIGIN, page: 1, page_size: 50 })))
     const byRole = emptyPersonnelByRole()
     const names = {}
     roles.forEach((role, index) => {

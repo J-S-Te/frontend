@@ -176,6 +176,9 @@ test('团队负责人、项目经理和工程师下拉按应用角色取人，�
   assert.match(source, /projectManager: 'project_manager'/)
   assert.match(source, /engineer: 'engineer'/)
   assert.match(source, /role_code: role/)
+  // 来源限定为岗位授权模板：管理员直接开通的角色不得出现在下拉里。
+  assert.match(source, /const PROJECT_ROLE_ORIGIN = 'TEMPLATE'/)
+  assert.match(source, /role_origin: PROJECT_ROLE_ORIGIN/)
   assert.match(source, /const teamLeadOptions = computed/)
   assert.match(source, /const projectManagerOptions = computed/)
   assert.match(source, /const engineerOptions = computed/)
