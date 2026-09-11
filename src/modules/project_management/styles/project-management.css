@@ -1114,6 +1114,14 @@
 .pm-form .pm-field em { color: var(--pm-red-text); font-style: normal; }
 .pm-form-hint { margin: calc(var(--pm-sp-2) * -1) 0 0; color: var(--pm-muted); font-size: var(--pm-fs-hint); }
 
+/* 弹窗表单通栏/半宽控制：地址、坐标等长内容字段独占一行，短字段两两成行。 */
+.pm-form .pm-span-full { grid-column: 1 / -1; }
+.pm-form label.pm-span-half { grid-column: auto; }
+/* 坐标等复合字段内部的行内控件：输入框等分弹性伸展，按钮按内容宽度。 */
+.pm-form .pm-field .pm-form-row { display: flex; align-items: center; gap: var(--pm-sp-2); }
+.pm-form .pm-field .pm-form-row input { flex: 1 1 0; min-width: 0; }
+.pm-form .pm-field .pm-form-row .pm-button { flex: 0 0 auto; width: auto; white-space: nowrap; }
+
 /* 提交按钮是网格子项：独占一行、按内容宽度靠左，避免被拉满整列 */
 .pm-form > .pm-button { grid-column: 1 / -1; justify-self: start; align-self: center; width: auto; }
 .pm-form-row { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--pm-sp-2); }
@@ -1154,6 +1162,10 @@
 
 .pm-code-chips { display: flex; flex-wrap: wrap; gap: 6px; min-height: 40px; padding: 7px 10px; border: 1px dashed var(--pm-line); border-radius: var(--pm-r-sm); background: var(--pm-sunken); }
 .pm-code-chip { padding: var(--pm-sp-1) 10px; border: 1px solid var(--pm-line); border-radius: var(--pm-r-full); background: var(--pm-card); color: var(--pm-blue-text); font-size: var(--pm-fs-hint); font-variant-numeric: tabular-nums; }
+
+/* 资质/能力编码的只读胶囊标签：多个编码逐个成胶囊，空值回落为“—”占位符。 */
+.pm-code-pills { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.pm-code-pill { display: inline-flex; align-items: center; padding: 1px 8px; border: 1px solid var(--pm-primary-border); border-radius: var(--pm-r-full); background: var(--pm-primary-soft); color: var(--pm-blue-text); font-family: var(--pm-font-mono); font-size: var(--pm-fs-hint); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 .pm-service-links { grid-column: 1 / -1; display: grid; gap: 10px; padding: 14px; border: 1px solid var(--pm-line); border-radius: var(--pm-r-md); background: var(--pm-sunken); }
 .pm-service-links > header { display: flex; align-items: center; justify-content: space-between; gap: var(--pm-sp-3); }
