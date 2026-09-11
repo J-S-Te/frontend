@@ -856,7 +856,6 @@
 .pm-qualification-filter span { color: var(--pm-muted); font-size: var(--pm-fs-hint); }
 .pm-qualification-filter select { height: var(--pm-h-control); min-width: 140px; padding: 0 10px; border: 1px solid var(--pm-line); border-radius: var(--pm-r-sm); background: var(--pm-card); color: var(--pm-body); font-size: var(--pm-fs-sm); }
 
-.pm-tabs-bar { display: flex; align-items: center; gap: var(--pm-sp-1); flex-wrap: wrap; }
 .pm-tab-pill {
   min-height: var(--pm-h-control);
   padding: var(--pm-sp-1) 14px;
@@ -973,12 +972,6 @@
   font-weight: var(--pm-fw-semibold);
 }
 
-.pm-health-pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: var(--pm-r-full); font-size: var(--pm-fs-hint); font-weight: var(--pm-fw-semibold); white-space: nowrap; }
-.pm-health-pill i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
-.pm-health-pill.healthy { background: var(--pm-green-soft); color: var(--pm-green-text); }
-.pm-health-pill.attention { background: var(--pm-violet-soft); color: var(--pm-violet-text); }
-.pm-health-pill.warning { background: var(--pm-amber-soft); color: var(--pm-amber-text); }
-.pm-health-pill.risk { background: var(--pm-red-soft); color: var(--pm-red-text); }
 
 .pm-num-badge {
   display: inline-grid;
@@ -1037,35 +1030,8 @@
 .pm-category-panel .pm-donut { width: 146px; height: 146px; margin: var(--pm-sp-5) auto var(--pm-sp-2); }
 .pm-category-panel .pm-donut::before { width: 98px; height: 98px; }
 
-/* 健康度分布与评分 */
-.pm-health-bar { display: grid; grid-template-columns: repeat(6, minmax(92px, 1fr)); gap: 10px; padding: 6px var(--pm-sp-5) 0; }
-.pm-health-cell {
-  min-height: 84px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 5px;
-  padding: var(--pm-sp-3) 14px;
-  border: 1px solid var(--pm-line);
-  border-radius: var(--pm-r-md);
-  background: var(--pm-card);
-  text-align: left;
-  transition: border-color var(--pm-t-base), background var(--pm-t-base);
-}
-
-.pm-health-cell:hover { border-color: var(--pm-primary-border); background: var(--pm-primary-soft); }
-.pm-health-cell .num { font-size: var(--pm-fs-title); font-weight: var(--pm-fw-bold); line-height: var(--pm-lh-tight); font-variant-numeric: tabular-nums; }
-.pm-health-cell b { color: var(--pm-muted); font-size: var(--pm-fs-label); font-weight: var(--pm-fw-semibold); }
-.pm-health-cell.healthy .num,
-.pm-health-cell.done .num { color: var(--pm-green-text); }
-.pm-health-cell.attention .num { color: var(--pm-violet-text); }
-.pm-health-cell.warning .num { color: var(--pm-amber-text); }
-.pm-health-cell.danger .num { color: var(--pm-red-text); }
-.pm-health-cell.ready .num { color: var(--pm-sky-text); }
-
-.pm-health-score { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: var(--pm-sp-7); padding: var(--pm-sp-4) var(--pm-sp-5) 22px; }
-.pm-health-donut { width: 148px; height: 148px; margin: 0; }
-.pm-health-donut::before { width: 100px; height: 100px; }
+/* 在途项目概览指标 */
+.pm-overview-metrics { padding: var(--pm-sp-4) var(--pm-sp-5) 22px; }
 .pm-desc-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--pm-sp-3) 26px; margin: 0; }
 .pm-desc-item { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .pm-desc-item dt { color: var(--pm-muted); font-size: var(--pm-fs-hint); }
@@ -1423,7 +1389,6 @@
    ========================================================================== */
 @media (max-width: 1280px) {
   .pm-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .pm-health-bar { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
 @media (max-width: 1180px) {
@@ -1457,7 +1422,6 @@
   .pm-filters label { width: 100%; }
   .pm-notifications { right: var(--pm-sp-4); width: min(340px, calc(100vw - 30px)); }
   .pm-equipment-form { grid-template-columns: 1fr; }
-  .pm-health-score { grid-template-columns: 1fr; justify-items: start; }
 }
 
 @media (max-width: 640px) {
@@ -1484,7 +1448,6 @@
   .pm-user { padding-left: var(--pm-sp-2); margin-left: 0; }
   .pm-service-link-row { grid-template-columns: minmax(0, 1fr); }
   .pm-service-link-row .pm-icon-button { justify-self: end; }
-  .pm-health-bar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .pm-desc-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .pm-table-panel > header { flex-direction: column; align-items: flex-start; }
   .pm-table-footer { flex-direction: column; align-items: flex-start; }
@@ -1508,3 +1471,12 @@
   .pm-switch i { width: 22px; height: 22px; }
   .pm-switch.on i { transform: translateX(18px); }
 }
+
+/* 实施计划的人员与设备清单：资质与有效期只读展示，使用时段与备注随计划提交。 */
+.pm-plan-resources { display: grid; gap: var(--pm-sp-3); padding: var(--pm-sp-4) var(--pm-sp-5); border: 1px solid var(--pm-line); border-radius: var(--pm-r-md); background: var(--pm-card); }
+.pm-plan-resources > header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--pm-sp-3); }
+.pm-plan-resources > header b { display: block; font-size: var(--pm-fs-body); }
+.pm-plan-resources > header small { color: var(--pm-muted); font-size: var(--pm-fs-hint); }
+.pm-plan-window { display: flex; align-items: center; gap: 6px; }
+.pm-plan-window input { min-width: 132px; }
+.pm-plan-resources .pm-table-scroll { border: 1px solid var(--pm-line); border-radius: var(--pm-r-sm); }

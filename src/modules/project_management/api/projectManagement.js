@@ -239,6 +239,32 @@ export async function listPersonnel(params = {}) {
 }
 
 /**
+ * returnServiceItemEquipment 归还设备：释放该服务项对设备的使用登记，设备回到「在公司」。
+ * @param {string} itemID 服务项标识。
+ * @param {string} resourceID 设备编号。
+ * @returns {Promise<object>} 归还结果。
+ * @throws {Error} 未登录、无权限或服务项不存在时抛出。
+ */
+export async function returnServiceItemEquipment(itemID, resourceID) {
+  return request(`/service-items/${encodeURIComponent(itemID)}/equipment-return`, {
+    method: 'POST',
+    body: JSON.stringify({ resource_id: resourceID }),
+  })
+}
+
+/**
+ * listEquipmentReservations 查询某服务项计划窗口内、被其他服务项占用的设备。
+ * 实施准备的选择器据此把已占用设备置灰，保存时服务端仍会再次硬拦重叠占用。
+ * @param {string} itemID 服务项标识。
+ * @returns {Promise<Array<object>>} 占用记录列表；接口异常时由调用方兜底为空。
+ * @throws {Error} 未登录、无权限或项目服务不可用时抛出。
+ */
+export async function listEquipmentReservations(itemID) {
+  const data = await request(`/service-items/${encodeURIComponent(itemID)}/equipment-reservations`)
+  return Array.isArray(data) ? data : []
+}
+
+/**
  * resolvePersonnelNames 批量把平台 user_id 翻译成显示名。
  * 团队负责人、项目经理、工程师在界面上必须显示姓名而不是 ULID；负责人目录只支持单个
  * user_id 查询，因此由服务端聚合并一次返回映射。
