@@ -310,6 +310,38 @@ export async function resolvePersonnelNames(ids = []) {
 }
 
 /**
+ * listSites 查询站点台账。
+ * @param {string} [status=''] 可选状态过滤（ACTIVE / DISABLED）。
+ * @returns {Promise<Array<object>>} 站点列表。
+ * @throws {Error} 会话失效或鉴权失败时抛出。
+ */
+export async function listSites(status = '') {
+  const search = status ? `?status=${encodeURIComponent(status)}` : ''
+  const data = await request(`/sites${search}`)
+  return Array.isArray(data) ? data : []
+}
+
+/**
+ * upsertSite 按站点编码幂等写入站点档案。
+ * @param {Object} payload 站点字段：site_code、name、address、latitude、longitude、has_coordinates、status、notes。
+ * @returns {Promise<object>} 保存后的站点。
+ * @throws {Error} 编码/名称为空、坐标越界或权限不足时抛出。
+ */
+export function upsertSite(payload) {
+  return request('/sites', { method: 'PUT', body: JSON.stringify(payload) })
+}
+
+/**
+ * deleteSite 停用站点（保留行以维持历史服务项可追溯）。
+ * @param {string} siteCode 站点编码。
+ * @returns {Promise<object>} 停用结果。
+ * @throws {Error} 站点不存在或权限不足时抛出。
+ */
+export function deleteSite(siteCode) {
+  return request(`/sites/${encodeURIComponent(siteCode)}`, { method: 'DELETE' })
+}
+
+/**
  * syncPersonnelIdentities 回基础平台负责人目录复核人员资质档案。
  * 资质在本系统维护，但"这个人是否真实存在（在职）"只能由基础平台回答：
  * 复核结果写入 identity_status，界面据此区分在职 / 已离职 / 未关联。

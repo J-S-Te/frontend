@@ -112,3 +112,10 @@ test('列表接口统一解包分页 envelope，未分页时拿到完整集合',
   assert.match(source, /export async function listProjectsPage\(params = \{\}\)/)
   assert.match(source, /return unwrapPage\(await request\(`\/projects\$\{search \? `\?\$\{search\}` : ''\}`\)\)/)
 })
+
+test('站点台账走独立接口，停用用 DELETE', () => {
+  assert.match(source, /export async function listSites\(status = ''\)/)
+  assert.match(source, /export function upsertSite\(payload\)/)
+  assert.match(source, /export function deleteSite\(siteCode\)/)
+  assert.match(source, /request\(`\/sites\/\$\{encodeURIComponent\(siteCode\)\}`, \{ method: 'DELETE' \}\)/)
+})
