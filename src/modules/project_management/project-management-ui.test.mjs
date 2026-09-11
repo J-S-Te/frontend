@@ -162,14 +162,28 @@ test('新建对话框限制高度并可滚动，内容不会被视口裁切', ()
 
 test('服务项操作台的团队负责人从基础平台人员目录选择而不是填写用户 ID', () => {
   assert.match(source, /listPersonnel\(\{/)
-  assert.match(source, /const personnelOptions = computed/)
   assert.match(source, /<select v-model="operationForm\.teamLeadID"/)
   assert.match(source, /<select v-model="operationForm\.projectManagerID"/)
   assert.match(source, /class="pm-multi-dropdown"/)
-  assert.match(source, /multiSummary\(engineerSelection, personnelOptions/)
   assert.match(source, /const engineerSelection = computed/)
   assert.doesNotMatch(source, /v-model\.trim="operationForm\.teamLeadID"/)
   assert.doesNotMatch(source, /placeholder="至少一个用户 ID"/)
+})
+
+test('团队负责人、项目经理和工程师下拉按应用角色取人，候选人来自岗位模板授权结果', () => {
+  // 三个角色码必须真正发给负责人目录：团队成员由平台按有效授权判定，前端不维护名单。
+  assert.match(source, /teamLead: 'team_lead'/)
+  assert.match(source, /projectManager: 'project_manager'/)
+  assert.match(source, /engineer: 'engineer'/)
+  assert.match(source, /role_code: role/)
+  assert.match(source, /const teamLeadOptions = computed/)
+  assert.match(source, /const projectManagerOptions = computed/)
+  assert.match(source, /const engineerOptions = computed/)
+  assert.match(source, /v-for="option in teamLeadOptions"/)
+  assert.match(source, /v-for="option in projectManagerOptions"/)
+  assert.match(source, /multiSummary\(engineerSelection, engineerOptions/)
+  assert.match(source, /v-for="option in engineerOptions"/)
+  assert.doesNotMatch(source, /personnelOptions/)
 })
 
 test('服务项操作台的工程师与设备改为下拉多选，能力码按所选设备自动汇总', () => {

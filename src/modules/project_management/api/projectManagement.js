@@ -219,13 +219,22 @@ export async function listServiceItems(projectID = '') {
 /**
  * listPersonnel 从基础平台负责人目录查询可选人员，供服务项操作台按人员选择团队负责人、
  * 项目经理和工程师，避免业务用户手工填写平台用户 ID。
- * @param {Object} [params={}] 查询参数：keyword、user_id、page、page_size。
+ * @param {Object} [params={}] 查询参数：keyword、user_id、role_code、page、page_size。
+ *   role_code 为数组时按重复参数发送（平台目录按重复参数解析），可以一次只取某个角色的候选人。
  * @returns {Promise<{items: Array<object>, total: number}>} 人员分页结果；目录未返回列表时兜底为空。
  * @throws {Error} 目录未开通、权限不足或平台暂不可用时抛出。
  */
 export async function listPersonnel(params = {}) {
-  const search = new URLSearchParams(Object.entries(params).filter(([, value]) => value !== undefined && value !== null && value !== '')).toString()
-  const data = await request(`/personnel${search ? `?${search}` : ''}`)
+  const search = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null || value === '') continue
+    for (const item of Array.isArray(value) ? value : [value]) {
+      if (item === undefined || item === null || item === '') continue
+      search.append(key, item)
+    }
+  }
+  const query = search.toString()
+  const data = await request(`/personnel${query ? `?${query}` : ''}`)
   return data && Array.isArray(data.items) ? data : { items: [], total: 0 }
 }
 

@@ -345,47 +345,68 @@ const reportStatusRank = { COMPILING: 1, REVIEWED: 2, ISSUED: 3, ARCHIVED: 4 }
 const reportPhaseNext = { COMPILING: 'REVIEWED', REVIEWED: 'ISSUED', ISSUED: 'ARCHIVED' }
 const reportItems = computed(() => serviceItems.value.filter((item) => item.report_status && item.report_status !== 'NONE'))
 const reportTechReviewLabel = (status) => ({ NONE: '未提交', PENDING: '待复核', APPROVED: '已通过', REJECTED: '已驳回' }[status] || '未提交')
-const personnel = ref([])
 const personnelKeyword = ref('')
 const personnelLoading = ref(false)
 const personnelError = ref('')
 
 // 服务项操作台的角色选择必须来自基础平台负责人目录，不能要求业务用户手工填写用户 ID。
-// 目录失败时只禁用选择并提示，不影响其余工作区数据。
+// 三个下拉各自按应用角色取人：团队负责人=team_lead、项目经理=project_manager、工程师=engineer。
+// 角色成员由平台按有效授权判定（岗位模板继承、组织绑定、直接绑定都算），因此岗位模板里新增
+// 或调整负责人后无需在前端维护任何名单。目录失败时只禁用选择并提示，不影响其余工作区数据。
+const PROJECT_ROLE_CODES = Object.freeze({ teamLead: 'team_lead', projectManager: 'project_manager', engineer: 'engineer' })
+
+const emptyPersonnelByRole = () => ({ [PROJECT_ROLE_CODES.teamLead]: [], [PROJECT_ROLE_CODES.projectManager]: [], [PROJECT_ROLE_CODES.engineer]: [] })
+const personnelByRole = ref(emptyPersonnelByRole())
+
 async function loadPersonnel() {
   personnelLoading.value = true
   personnelError.value = ''
+  const keyword = personnelKeyword.value.trim()
+  // 项目经理/工程师只在具备 project.execution.assign 的表单里出现，未授权时不必查询这两个角色的目录。
+  const roles = canExecutionAssign.value
+    ? [PROJECT_ROLE_CODES.teamLead, PROJECT_ROLE_CODES.projectManager, PROJECT_ROLE_CODES.engineer]
+    : [PROJECT_ROLE_CODES.teamLead]
   try {
-    const result = await listPersonnel({ keyword: personnelKeyword.value.trim(), page: 1, page_size: 50 })
-    personnel.value = result.items
-    rememberPersonnelNames(Object.fromEntries(result.items.map((person) => [person.user_id, person.display_name])))
+    const pages = await Promise.all(roles.map((role) => listPersonnel({ keyword, role_code: role, page: 1, page_size: 50 })))
+    const byRole = emptyPersonnelByRole()
+    const names = {}
+    roles.forEach((role, index) => {
+      const items = Array.isArray(pages[index]?.items) ? pages[index].items : []
+      byRole[role] = items.map((person) => ({ id: person.user_id, name: person.display_name || '未命名人员' }))
+      for (const person of items) names[person.user_id] = person.display_name
+    })
+    personnelByRole.value = byRole
+    rememberPersonnelNames(names)
   } catch (error) {
-    personnel.value = []
+    personnelByRole.value = emptyPersonnelByRole()
     personnelError.value = error?.message || '基础平台人员目录加载失败'
   } finally {
     personnelLoading.value = false
   }
 }
 
-// 已保存的角色可能不在当前查询结果里；补一条“当前值”选项，避免编辑既有服务项时被静默清空。
-const personnelOptions = computed(() => {
-  const options = personnel.value.map((person) => ({ id: person.user_id, name: person.display_name || '未命名人员' }))
+// 已保存的角色可能不在当前查询结果里（例如任职已调整）；补一条“当前值”选项，避免编辑既有
+// 服务项时被静默清空。下拉里也不显示 ULID：姓名尚未解析时用占位符，解析成功后自动变成姓名。
+function roleOptions(roleCode, selectedIDs) {
+  const options = [...(personnelByRole.value[roleCode] || [])]
   const known = new Set(options.map((option) => option.id))
-  const selected = [operationForm.value.teamLeadID, operationForm.value.projectManagerID, ...selectedIDs(operationForm.value.engineerIDs)]
-  for (const id of selected) {
+  for (const id of selectedIDs) {
     if (id && !known.has(id)) {
-      // 下拉里也不显示 ULID：姓名尚未解析时用占位符，解析成功后自动变成姓名。
       options.push({ id, name: personnelNameByID.value.get(id) || '姓名解析中…' })
       known.add(id)
     }
   }
   return options
-})
+}
+const teamLeadOptions = computed(() => roleOptions(PROJECT_ROLE_CODES.teamLead, [operationForm.value.teamLeadID]))
+const projectManagerOptions = computed(() => roleOptions(PROJECT_ROLE_CODES.projectManager, [operationForm.value.projectManagerID]))
+
 // 工程师与设备改为下拉多选：选中结果仍写回逗号分隔的 engineerIDs/equipmentIDs，保持后端载荷不变。
 const engineerSelection = computed({
   get: () => selectedIDs(operationForm.value.engineerIDs),
   set: (values) => { operationForm.value.engineerIDs = values.join(',') },
 })
+const engineerOptions = computed(() => roleOptions(PROJECT_ROLE_CODES.engineer, engineerSelection.value))
 const equipmentByID = computed(() => new Map(equipment.value.map((item) => [item.resource_id, item])))
 function capabilityCodesForEquipment(ids) {
   const codes = new Set()
@@ -1069,6 +1090,11 @@ onMounted(() => document.addEventListener('click', closeMultiOnOutsideClick))
 watch(activeSection, (section) => {
   if (['allocation', 'inbox', 'assignments'].includes(section)) loadPersonnel()
 })
+// 会话权限异步到达：只有拿到执行团队分配权限后，项目经理/工程师的角色目录才会被查询；
+// 权限在这之后才加载完成时必须补一次，否则这两个下拉会一直空着。
+watch(canExecutionAssign, (allowed) => {
+  if (allowed && ['allocation', 'inbox', 'assignments'].includes(activeSection.value)) loadPersonnel()
+})
 onBeforeUnmount(() => {
   window.clearTimeout(toastTimer)
   document.removeEventListener('click', closeMultiOnOutsideClick)
@@ -1276,7 +1302,7 @@ onBeforeUnmount(() => {
             <header><div><p class="pm-panel-kicker">REAL OPERATION</p><h2>服务项操作台</h2></div><span v-if="selectedServiceItem">当前：{{ selectedServiceItem.id }} · {{ selectedServiceItem.status }}</span></header>
             <ServiceItemPicker v-if="activeSection === 'allocation'" :items="serviceItems" :selected-ids="selectedServiceItemIDs" multiple empty-text="暂无可分配服务项" hint="可同时选择多个服务项，批量分配团队负责人或执行团队。" @toggle="toggleServiceItem" /><ServiceItemPicker v-else :items="serviceItems" :selected-ids="selectedServiceItem ? [selectedServiceItem.id] : []" empty-text="暂无可操作服务项" @select="selectServiceItem" />
             <div v-if="selectedServiceItem" class="pm-form pm-operation-form">
-              <template v-if="['allocation', 'inbox', 'assignments'].includes(activeSection)"><div class="pm-personnel-search"><label><span>查找平台人员</span><input v-model.trim="personnelKeyword" placeholder="输入姓名关键字" @keydown.enter.prevent="loadPersonnel" /></label><button type="button" class="pm-button" :disabled="personnelLoading" @click="loadPersonnel">{{ personnelLoading ? '查询中…' : '查询' }}</button></div><p v-if="personnelError" class="pm-form-hint" role="alert">{{ personnelError }}</p><label><span>团队负责人 <em>*</em></span><select v-model="operationForm.teamLeadID" :disabled="personnelLoading" required><option value="">请选择团队负责人</option><option v-for="option in personnelOptions" :key="option.id" :value="option.id">{{ option.name }}</option></select></label><template v-if="canExecutionAssign"><label><span>项目经理 <em>*</em></span><select v-model="operationForm.projectManagerID" :disabled="personnelLoading" required><option value="">请选择项目经理</option><option v-for="option in personnelOptions" :key="option.id" :value="option.id">{{ option.name }}</option></select></label><div class="pm-field"><span>工程师 <em>*</em></span><div class="pm-multi-dropdown" :class="{ open: openMulti === 'engineer' }"><button type="button" class="pm-multi-trigger" :class="{ placeholder: !engineerSelection.length }" :disabled="personnelLoading" @click.stop="toggleMulti('engineer')"><span>{{ multiSummary(engineerSelection, personnelOptions, '请选择工程师') }}</span><i class="pm-multi-caret"></i></button><div v-if="openMulti === 'engineer'" class="pm-multi-menu"><label v-for="option in personnelOptions" :key="option.id" class="pm-multi-option"><input type="checkbox" :checked="engineerSelection.includes(option.id)" @change="toggleEngineer(option.id)" /><span>{{ option.name }}</span></label><p v-if="!personnelOptions.length" class="pm-empty-mini">暂无可选人员</p></div></div></div><div class="pm-field"><span>设备</span><div class="pm-multi-dropdown" :class="{ open: openMulti === 'equipment' }"><button type="button" class="pm-multi-trigger" :class="{ placeholder: !equipmentSelection.length }" @click.stop="toggleMulti('equipment')"><span>{{ multiSummary(equipmentSelection, equipmentOptions, '请选择设备（可选）') }}</span><i class="pm-multi-caret"></i></button><div v-if="openMulti === 'equipment'" class="pm-multi-menu"><label v-for="option in equipmentOptions" :key="option.id" class="pm-multi-option"><input type="checkbox" :checked="equipmentSelection.includes(option.id)" @change="toggleEquipment(option.id)" /><span>{{ option.name }}</span></label><p v-if="equipmentError" class="pm-empty-mini" role="alert">{{ equipmentError }}</p><p v-else-if="!equipmentOptions.length" class="pm-empty-mini">暂无可选设备</p></div></div></div><label><span>能力码 <em>自动</em></span><div class="pm-code-chips"><button v-for="code in capabilityCodeList" :key="code" type="button" class="pm-code-chip" @click.prevent>{{ code }}</button><p v-if="!capabilityCodeList.length" class="pm-empty-mini">选择设备后自动汇总，无需填写</p></div></label></template><button class="pm-button primary" :disabled="saving" @click="runOperation('allocation')">{{ saving ? '提交中…' : canExecutionAssign ? '保存分配并校验能力' : '分配团队负责人' }}</button></template>
+              <template v-if="['allocation', 'inbox', 'assignments'].includes(activeSection)"><div class="pm-personnel-search"><label><span>查找平台人员</span><input v-model.trim="personnelKeyword" placeholder="输入姓名关键字" @keydown.enter.prevent="loadPersonnel" /></label><button type="button" class="pm-button" :disabled="personnelLoading" @click="loadPersonnel">{{ personnelLoading ? '查询中…' : '查询' }}</button></div><p v-if="personnelError" class="pm-form-hint" role="alert">{{ personnelError }}</p><label><span>团队负责人 <em>*</em></span><select v-model="operationForm.teamLeadID" :disabled="personnelLoading" required><option value="">请选择团队负责人</option><option v-for="option in teamLeadOptions" :key="option.id" :value="option.id">{{ option.name }}</option></select></label><template v-if="canExecutionAssign"><label><span>项目经理 <em>*</em></span><select v-model="operationForm.projectManagerID" :disabled="personnelLoading" required><option value="">请选择项目经理</option><option v-for="option in projectManagerOptions" :key="option.id" :value="option.id">{{ option.name }}</option></select></label><div class="pm-field"><span>工程师 <em>*</em></span><div class="pm-multi-dropdown" :class="{ open: openMulti === 'engineer' }"><button type="button" class="pm-multi-trigger" :class="{ placeholder: !engineerSelection.length }" :disabled="personnelLoading" @click.stop="toggleMulti('engineer')"><span>{{ multiSummary(engineerSelection, engineerOptions, '请选择工程师') }}</span><i class="pm-multi-caret"></i></button><div v-if="openMulti === 'engineer'" class="pm-multi-menu"><label v-for="option in engineerOptions" :key="option.id" class="pm-multi-option"><input type="checkbox" :checked="engineerSelection.includes(option.id)" @change="toggleEngineer(option.id)" /><span>{{ option.name }}</span></label><p v-if="!engineerOptions.length" class="pm-empty-mini">暂无可选人员</p></div></div></div><div class="pm-field"><span>设备</span><div class="pm-multi-dropdown" :class="{ open: openMulti === 'equipment' }"><button type="button" class="pm-multi-trigger" :class="{ placeholder: !equipmentSelection.length }" @click.stop="toggleMulti('equipment')"><span>{{ multiSummary(equipmentSelection, equipmentOptions, '请选择设备（可选）') }}</span><i class="pm-multi-caret"></i></button><div v-if="openMulti === 'equipment'" class="pm-multi-menu"><label v-for="option in equipmentOptions" :key="option.id" class="pm-multi-option"><input type="checkbox" :checked="equipmentSelection.includes(option.id)" @change="toggleEquipment(option.id)" /><span>{{ option.name }}</span></label><p v-if="equipmentError" class="pm-empty-mini" role="alert">{{ equipmentError }}</p><p v-else-if="!equipmentOptions.length" class="pm-empty-mini">暂无可选设备</p></div></div></div><label><span>能力码 <em>自动</em></span><div class="pm-code-chips"><button v-for="code in capabilityCodeList" :key="code" type="button" class="pm-code-chip" @click.prevent>{{ code }}</button><p v-if="!capabilityCodeList.length" class="pm-empty-mini">选择设备后自动汇总，无需填写</p></div></label></template><button class="pm-button primary" :disabled="saving" @click="runOperation('allocation')">{{ saving ? '提交中…' : canExecutionAssign ? '保存分配并校验能力' : '分配团队负责人' }}</button></template>
               <template v-else-if="activeSection === 'planning'"><div v-if="planningBlocked" class="pm-blocker" :class="planningBlocked.tone" role="alert"><b>暂时不能发布实施计划</b><span>{{ planningBlocked.reason }}</span><button class="pm-button" type="button" @click="navigate('allocation')">前往任务分配</button></div><label><span>计划开始 <em>*</em></span><input v-model.trim="operationForm.plannedStart" type="datetime-local" /></label><label><span>计划结束 <em>*</em></span><input v-model.trim="operationForm.plannedEnd" type="datetime-local" /></label><label><span>现场计划 <em>*</em></span><textarea v-model.trim="operationForm.sitePlan" rows="3" placeholder="现场实施步骤和窗口"></textarea></label><template v-if="selectedServiceItem.test_mode === 'PENETRATION'"><label><span>渗透测试专项计划 <em>*</em></span><textarea v-model.trim="operationForm.penetrationTestPlan" rows="3"></textarea></label><fieldset class="pm-compliant-fieldset"><legend>专项合规要素（授权 / 白名单 / 时间窗 / 应急 / 回滚）</legend><label><span>授权书编号 <em>*</em></span><input v-model.trim="operationForm.authDocNo" required placeholder="例如 AUTH-2026-001" /></label><label><span>授权生效 <em>*</em></span><input v-model.trim="operationForm.authStart" type="datetime-local" required /></label><label><span>授权截止 <em>*</em></span><input v-model.trim="operationForm.authEnd" type="datetime-local" required /></label><label><span>授权范围 <em>*</em></span><input v-model.trim="operationForm.authScope" required placeholder="例如 内网段 10.0.0.0/8" /></label><label><span>计划测试范围 <em>*</em></span><input v-model.trim="operationForm.testScope" required placeholder="例如 关键业务系统 WEB 渗透" /></label><label><span>测试时间窗 <em>*</em></span><input v-model.trim="operationForm.testWindow" required placeholder="例如 00:00-06:00" /></label><label><span>应急联系人 <em>*</em></span><input v-model.trim="operationForm.emergencyContact" required placeholder="姓名 + 电话" /></label><label><span>回滚方案 <em>*</em></span><textarea v-model.trim="operationForm.rollbackPlan" rows="3" required></textarea></label></fieldset></template><button class="pm-button primary" :disabled="saving || !!planningBlocked" :title="planningBlocked ? planningBlocked.reason : ''" @click="runOperation('planning')">发布实施计划</button></template>
               <template v-else-if="activeSection === 'methods'"><div class="pm-review-state"><span>复核状态</span><b>{{ item && reportTechReviewLabel(item.tech_review_status) }}</b></div><template v-if="item && ['PENDING', 'REJECTED'].includes(item.tech_review_status)"><label><span>复核意见</span><textarea v-model.trim="operationForm.reviewComment" rows="3" placeholder="填写风险说明或驳回原因"></textarea></label><div class="pm-form-row"><button class="pm-button primary" :disabled="saving" @click="runOperation('special-approve')">通过复核</button><button class="pm-button" :disabled="saving" @click="runOperation('special-reject')">驳回复核</button></div></template><template v-else-if="item && item.tech_review_status === 'APPROVED'"><p class="pm-form-hint">{{ item.tech_review_comment || '已通过复核，可发布实施计划' }}<span v-if="item.tech_reviewed_at"> · {{ formatDateTime(item.tech_reviewed_at) }} · {{ item.tech_reviewed_by }} </span></p></template><template v-else-if="item && item.tech_review_status === 'PENDING'"><p class="pm-form-hint">等待技术总监复核特殊方法。</p></template></template>
               <template v-else-if="activeSection === 'preparation'"><label><span>设备申领单 <em>*</em></span><input v-model.trim="operationForm.equipmentRequestID" /></label><label><span>行程预订单 <em>*</em></span><input v-model.trim="operationForm.travelRequestID" /></label><label><span>备注</span><textarea v-model.trim="operationForm.comment" rows="3"></textarea></label><button class="pm-button primary" :disabled="saving" @click="runOperation('preparation')">发起实施准备</button></template>

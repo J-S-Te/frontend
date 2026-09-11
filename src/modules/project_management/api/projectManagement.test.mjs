@@ -83,3 +83,12 @@ test('人员姓名批量解析走独立端点，并对 user_id 去重后编码',
   // 没有可解析的 ID 时不发请求。
   assert.match(source, /if \(!unique\.length\) return \{\}/)
 })
+
+test('人员目录按重复 role_code 参数查询，数组参数不会被压成逗号串', () => {
+  // 团队负责人/项目经理/工程师下拉按角色取人：平台目录按重复参数解析角色码，
+  // 被压成 "a,b" 会被当成一个不存在的角色，导致下拉为空。
+  assert.match(source, /export async function listPersonnel\(params = \{\}\)/)
+  assert.match(source, /for \(const item of Array\.isArray\(value\) \? value : \[value\]\)/)
+  assert.match(source, /search\.append\(key, item\)/)
+  assert.match(source, /request\(`\/personnel\$\{query \? `\?\$\{query\}` : ''\}`\)/)
+})
