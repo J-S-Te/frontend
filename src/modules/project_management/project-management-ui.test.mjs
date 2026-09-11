@@ -413,7 +413,7 @@ test('项目状态只由服务端派生，前端不再自行拼装状态集合',
   // 看板泳道只做归类，卡片仍展示唯一的 project.status。
   assert.match(source, /statuses: \['待拆解确认', '待分配'\]/)
   assert.match(source, /statuses: \[projectStatusCompleted\]/)
-  assert.match(source, /<span class="pm-badge neutral">\{\{ card\.status \}\}<\/span>/)
+  assert.match(source, /:class="statusTone\(card\.status\)"/)
   // 不得再用"还有报告未归档"二次推断项目完成态。
   assert.doesNotMatch(source, /reportActiveProjectIDs/)
   assert.match(source, /project\.status === projectStatusCompleted/)
@@ -572,7 +572,7 @@ test('人员资质档案展示并复核基础平台身份状态', () => {
   assert.match(source, /已离职\/查无此人/)
   assert.match(source, /@click="syncIdentities"/)
   assert.match(source, /<th>人员状态<\/th>/)
-  assert.match(source, /item\.identity_status === 'MISSING' \? '风险'/)
+  assert.match(source, /statusTone\(item\.identity_status\)/)
 })
 
 test('项目表提供真实分页控件', () => {
@@ -764,4 +764,29 @@ test('样式表修掉信息提示、卡片角标与残留样式三处缺陷', ()
   assert.match(styles, /\.pm-kpi\.red \{ background: linear-gradient/)
   // 统计条已被看板 KPI 行取代，其样式不得再残留。
   assert.doesNotMatch(styles, /pm-summary-strip/)
+})
+
+test('状态字段统一为语义化胶囊标签（statusTone 单一映射）', () => {
+  // 映射表覆盖项目/服务项/报告/复核/台账全部状态，未命中回退 neutral。
+  assert.match(source, /const statusToneMap = \{/)
+  assert.match(source, /function statusTone\(status\) \{ return statusToneMap\[String\(status \?\? ''\)\.trim\(\)\] \|\| 'neutral' \}/)
+  // 原先恒为灰底的 neutral 状态徽章全部改为语义色调。
+  assert.doesNotMatch(source, /<span class="pm-badge neutral">\{\{ (card|project)\.status \}\}<\/span>/)
+  assert.match(source, /:class="statusTone\(project\.status\)"/)
+  assert.match(source, /:class="statusTone\(item\.status\)"/)
+  assert.match(source, /:class="statusTone\(flow\.key\)"/)
+  assert.match(source, /:class="statusTone\(row\.state\)"/)
+  assert.match(source, /:class="statusTone\(item\.identity_status\)"/)
+  // 纯文本状态（操作台当前项 / 复核状态 / 当前报告阶段）收口为胶囊。
+  assert.match(source, /:class="statusTone\(selectedServiceItem\.status\)"/)
+  assert.match(source, /<b class="pm-badge" :class="statusTone\(item && reportTechReviewLabel\(item\.tech_review_status\)\)"/)
+  assert.match(source, /<b class="pm-badge" :class="statusTone\(reportStatusLabel\[item\.report_status\] \|\| item\.report_status\)"/)
+  // 修复未定义的 warning 色调：设备在位改 amber，使用范围改关注，CSS 提供兼容别名。
+  assert.match(source, /item\.presence === 'OUT_OF_COMPANY' \? 'amber' : 'normal'/)
+  assert.match(source, /item\.usage_scope === 'COMPANY_ONLY' \? '关注' : 'neutral'/)
+  assert.match(styles, /\.pm-badge\.warning \{/)
+  // 状态胶囊的语义色调类必须全部存在。
+  for (const tone of ['normal', 'amber', '风险', 'neutral', 'violet', 'blue', 'green', 'warning']) {
+    assert.match(styles, new RegExp(`\\.pm-badge\\.${tone}`))
+  }
 })
