@@ -1473,10 +1473,45 @@
 }
 
 /* 实施计划的人员与设备清单：资质与有效期只读展示，使用时段与备注随计划提交。 */
-.pm-plan-resources { display: grid; gap: var(--pm-sp-3); padding: var(--pm-sp-4) var(--pm-sp-5); border: 1px solid var(--pm-line); border-radius: var(--pm-r-md); background: var(--pm-card); }
+.pm-plan-resources {
+  /* 清单表是表单栅格里的整行区块：不跨列就会只占半幅宽度，表格被挤窄显示不全。 */
+  grid-column: 1 / -1;
+  display: grid;
+  gap: var(--pm-sp-3);
+  padding: var(--pm-sp-4) var(--pm-sp-5);
+  border: 1px solid var(--pm-line);
+  border-radius: var(--pm-r-md);
+  background: var(--pm-card);
+}
 .pm-plan-resources > header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--pm-sp-3); }
 .pm-plan-resources > header b { display: block; font-size: var(--pm-fs-body); }
 .pm-plan-resources > header small { color: var(--pm-muted); font-size: var(--pm-fs-hint); }
 .pm-plan-window { display: flex; align-items: center; gap: 6px; }
 .pm-plan-window input { min-width: 132px; }
-.pm-plan-resources .pm-table-scroll { border: 1px solid var(--pm-line); border-radius: var(--pm-r-sm); }
+.pm-plan-resources .pm-table-scroll { overflow: auto; border: 1px solid var(--pm-line); border-radius: var(--pm-r-sm); }
+.pm-plan-resources .pm-table { min-width: 720px; }
+.pm-plan-resources .pm-table-scroll input[type="date"] { min-width: 132px; }
+
+/* ==========================================================================
+   §14 设备选择器：宽弹窗 + 可滚动主体，避免表格被两列表单栅格挤窄裁切
+   ========================================================================== */
+.pm-dialog-wide { width: min(920px, 94vw); }
+.pm-dialog-sub { display: block; margin-top: 6px; color: var(--pm-muted); font-size: var(--pm-fs-hint); font-weight: var(--pm-fw-regular); line-height: var(--pm-lh-loose); }
+.pm-dialog-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: var(--pm-sp-3); padding: var(--pm-sp-4) var(--pm-sp-6) var(--pm-sp-5); overflow: auto; }
+.pm-picker-search { position: relative; display: flex; align-items: center; gap: var(--pm-sp-2); flex: none; padding: 0 12px; height: var(--pm-h-control); border: 1px solid var(--pm-line); border-radius: var(--pm-r-sm); background: var(--pm-card); }
+.pm-picker-search:focus-within { border-color: var(--pm-primary-border); box-shadow: 0 0 0 3px var(--pm-primary-soft); }
+.pm-picker-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--pm-ink); font-size: var(--pm-fs-ui); }
+.pm-dialog-body .pm-table-scroll { flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--pm-line); border-radius: var(--pm-r-md); }
+.pm-table-picker { min-width: 640px; }
+.pm-table-picker th { position: sticky; top: 0; z-index: var(--pm-z-sticky); }
+.pm-table-picker .pm-col-action { width: 96px; text-align: right; }
+.pm-table-picker td:last-child { width: 96px; text-align: right; white-space: nowrap; }
+.pm-table-picker tbody tr:last-child td { border-bottom: 0; }
+.pm-cell-danger { color: var(--pm-red-text); }
+.pm-dialog-footnote { margin-right: auto; color: var(--pm-muted); font-size: var(--pm-fs-hint); }
+.pm-dialog > footer { align-items: center; }
+
+@media (max-width: 900px) {
+  .pm-dialog-wide { width: 94vw; }
+  .pm-table-picker { min-width: 560px; }
+}
