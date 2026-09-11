@@ -189,25 +189,23 @@ test('团队负责人、项目经理和工程师下拉按应用角色取人，�
   assert.doesNotMatch(source, /personnelOptions/)
 })
 
-test('服务项操作台的工程师与设备改为下拉多选，能力码按所选设备自动汇总', () => {
-  assert.match(source, /const equipmentOptions = computed/)
-  assert.match(source, /const equipmentSelection = computed/)
-  assert.match(source, /function capabilityCodesForEquipment\(/)
-  assert.match(source, /const capabilityCodeList = computed/)
-  assert.match(source, /item\.status !== 'DISABLED'/)
+test('服务项操作台的工程师改为下拉多选，设备不在任务分配中选取', () => {
   // 多选走下拉菜单逐项勾选，样式与团队负责人/项目经理一致，不要求按住 ⌘/Ctrl。
   assert.match(source, /class="pm-multi-dropdown"/)
   assert.match(source, /class="pm-multi-trigger"/)
   assert.match(source, /function toggleMulti\(/)
   assert.match(source, /function toggleEngineer\(/)
-  assert.match(source, /function toggleEquipment\(/)
   assert.match(source, /:checked="engineerSelection\.includes\(option\.id\)"/)
-  assert.match(source, /:checked="equipmentSelection\.includes\(option\.id\)"/)
-  assert.match(source, /选择设备后自动汇总，无需填写/)
   assert.doesNotMatch(source, /<select[^>]*multiple/)
   assert.doesNotMatch(source, /按住 ⌘ \/ Ctrl 可多选/)
-  assert.doesNotMatch(source, /v-model\.trim="operationForm\.equipmentIDs"/)
-  assert.doesNotMatch(source, /v-model\.trim="operationForm\.requiredCodes"/)
+  // 设备与能力码已从任务分配移除：设备清单在「实施准备」阶段登记。
+  assert.doesNotMatch(source, /const equipmentSelection = computed/)
+  assert.doesNotMatch(source, /const equipmentOptions = computed/)
+  assert.doesNotMatch(source, /capabilityCodesForEquipment/)
+  assert.doesNotMatch(source, /capabilityCodeList/)
+  assert.doesNotMatch(source, /operationForm\.equipmentIDs/)
+  assert.doesNotMatch(source, /operationForm\.requiredCodes/)
+  assert.match(source, /设备清单在「实施准备」阶段确定/)
 })
 
 test('操作台各区块的查看按钮真实打开详情抽屉而不是只提示已打开', () => {
@@ -474,4 +472,52 @@ test('新建项目在缺少合同会话时补授权而不是把用户甩出项�
   assert.match(source, /已在新标签页打开合同系统授权，完成后回到本页重新点击「新建项目」/)
   // 已经判定为"缺权限"的旧文案必须消失：现在缺角色和缺会话都以可执行的方式引导。
   assert.doesNotMatch(source, /当前账号没有合同系统访问权限，请联系管理员开通后再新建项目/)
+})
+
+test('项目健康度字段已移除，风险项目改由派生状态统计', () => {
+  // 健康度字段已从领域模型与接口中删除，前端不得再引用 project.health 或健康度样式。
+  assert.doesNotMatch(source, /health/i)
+  assert.doesNotMatch(styles, /health/i)
+  assert.doesNotMatch(source, /健康度/)
+  // 风险口径与服务端 domain.IsRiskProjectStatus 保持一致。
+  assert.match(source, /const riskProjectStatuses = \['异常处理中', '已终止'\]/)
+  assert.match(source, /risk: riskProjectStatuses\.includes\(project\.status\)/)
+})
+
+test('实施计划提交人员清单，设备清单在实施准备登记并校验占用', () => {
+  // 计划只提交人员：设备与使用时段随实施准备提交。
+  assert.match(source, /personnel: form\.personnel\.map\(\(row\) => \(\{ resource_type: 'PERSON', resource_id: row\.resourceID, window_start: row\.windowStart, window_end: row\.windowEnd, note: row\.note \}\)\)/)
+  assert.match(source, /function planPersonnelFor\(/)
+  assert.match(source, /function planPersonnelRows\(/)
+  // 至少一名人员与服务端同口径，先给即时提示。
+  assert.match(source, /if \(!personRows\.length\) \{ showToast\('请至少添加一名实施人员'\); return \}/)
+  // 实施准备：设备清单必填、提交时带上使用时段。
+  assert.match(source, /if \(!form\.equipment\.length\) \{ showToast\('请至少选择一台实施设备'\); return \}/)
+  assert.match(source, /equipment: form\.equipment\.map\(\(row\) => \(\{ resource_type: 'EQUIPMENT', resource_id: row\.resourceID, window_start: row\.windowStart, window_end: row\.windowEnd, note: row\.note \}\)\)/)
+  assert.match(source, /function planEquipmentFor\(/)
+  // 添加设备只能从设备目录挑选，不调用设备维护接口（设备档案由设备管理员维护）。
+  assert.match(source, /function addPlanEquipment\(equipmentItem\)/)
+  assert.match(source, /const planEquipmentPickable = computed/)
+  assert.match(source, /@click="planEquipmentPickerOpen = true">＋ 添加设备</)
+  assert.match(source, /class="pm-plan-window"/)
+  // 已占用设备置灰并显示占用方与日期。
+  assert.match(source, /function equipmentReservationLabel\(resourceID\)/)
+  assert.match(source, /listEquipmentReservations\(item\.id\)/)
+  assert.match(source, /已被占用/)
+})
+
+test('设备在位状态与使用范围在设备能力维护中维护，借出中可归还', () => {
+  // 使用范围（可借出 / 仅在公司使用）随设备档案保存。
+  assert.match(source, /usage_scope: equipmentForm\.value\.usageScope/)
+  assert.match(source, /<option value="COMPANY_ONLY">仅在公司使用（不可借出）<\/option>/)
+  // 在位状态由占用时段派生，列表显示借出中的占用方与时段，并提供归还。
+  assert.match(source, /function equipmentPresenceLabel\(item\)/)
+  assert.match(source, /不在公司（借出中）/)
+  assert.match(source, /async function returnEquipment\(item\)/)
+  assert.match(source, /returnServiceItemEquipment\(serviceItemID, item\.resource_id\)/)
+  // 选择器按原因置灰：仅在公司使用 > 当前不在公司 > 时段已被占用。
+  assert.match(source, /function equipmentUnavailableReason\(item\)/)
+  assert.match(source, /仅在公司使用 · 不可借出/)
+  assert.match(source, /当前不在公司/)
+  assert.match(source, /!equipmentUnavailableReason\(item\)/)
 })

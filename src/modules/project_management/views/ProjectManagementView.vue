@@ -24,6 +24,8 @@ import {
   listRules,
   listServiceItems,
   listPersonnel,
+  listEquipmentReservations,
+  returnServiceItemEquipment,
   resolvePersonnelNames,
   assignTeam,
   assignExecutionTeam,
@@ -81,7 +83,7 @@ const allNavGroups = [
 
 const pageMeta = {
   dashboard: ['项目执行总览', '全集团项目交付、资源与风险态势'],
-  monitoring: ['在途项目 · 实时监控', '在途项目的里程碑、健康度与资源状态'],
+  monitoring: ['在途项目 · 实时监控', '在途项目的里程碑、交付进度与资源状态'],
   projects: ['项目列表', '统一管理项目、合同来源、服务项及交付状态'],
   decomposition: ['服务项拆解确认', '核对合同范围与自动拆解结果，确认后进入任务分配'],
   allocation: ['任务分配', '按团队负载与专业能力完成服务项下达'],
@@ -115,7 +117,6 @@ const keyword = ref('')
 const statusFilter = ref('')
 const categoryFilter = ref('')
 const teamFilter = ref('')
-const healthFilter = ref('')
 const selectedRows = ref([])
 const drawerProject = ref(null)
 const createOpen = ref(false)
@@ -130,7 +131,7 @@ const createForm = ref({ name: '', customer: '', contract: '', contractID: '', c
 const approvedContracts = ref([])
 const equipment = ref([])
 const equipmentError = ref('')
-const equipmentForm = ref({ resourceID: '', resourceName: '', codes: '', validFrom: '', validUntil: '', status: 'ACTIVE' })
+const equipmentForm = ref({ resourceID: '', resourceName: '', codes: '', validFrom: '', validUntil: '', status: 'ACTIVE', usageScope: 'ANY' })
 const dashboard = ref({ project_count: 0, in_flight_projects: 0, risk_projects: 0, service_items: 0, status_counts: {} })
 const session = ref(null)
 const lastUpdatedAt = ref(null)
@@ -156,37 +157,14 @@ const filteredProjects = computed(() => {
 const categoryOptions = computed(() => [...new Set(projects.value.map((p) => p.category).filter(Boolean))])
 const teamOptions = computed(() => [...new Set(projects.value.map((p) => p.team).filter(Boolean))])
 const inFlightProjects = computed(() => projects.value.filter((p) => p.status !== projectStatusCompleted))
-const riskProjectCount = computed(() => projects.value.filter((p) => p.health === '风险').length)
+// 风险口径与服务端 domain.IsRiskProjectStatus 保持一致：异常处理中或已终止的派生状态。
+const riskProjectStatuses = ['异常处理中', '已终止']
+const riskProjectCount = computed(() => projects.value.filter((p) => riskProjectStatuses.includes(p.status)).length)
 const doneProjectCount = computed(() => projects.value.filter((p) => p.status === projectStatusCompleted).length)
 const pendingDecompositionCount = computed(() => projects.value.filter((p) => p.status === '待拆解确认').length)
 const averageProgress = computed(() => {
   const raw = projects.value.length ? projects.value.reduce((sum, p) => sum + (p.progress || 0), 0) / projects.value.length : 0
   return Math.round(raw)
-})
-const healthDist = computed(() => ({
-  healthy: projects.value.filter((p) => p.health === '正常').length,
-  attention: projects.value.filter((p) => p.health === '关注').length,
-  warning: projects.value.filter((p) => p.health === '预警').length,
-  risk: projects.value.filter((p) => p.health === '风险').length,
-  ready: projects.value.filter((p) => ['待拆解确认', '待分配', '待制定计划', '待实施'].includes(p.status)).length,
-  done: projects.value.filter((p) => p.status === projectStatusCompleted).length,
-}))
-const healthScore = computed(() => {
-  const d = healthDist.value
-  const total = projects.value.length
-  if (!total) return 100
-  const score = Math.round(100 - d.risk * 8 - d.warning * 3 - d.attention * 1 + (d.done / total) * 5)
-  return Math.max(0, Math.min(100, score))
-})
-const healthDonutStyle = computed(() => {
-  const d = healthDist.value
-  const total = projects.value.length
-  if (!total) return 'conic-gradient(#e2e8f0 0 100%)'
-  const segments = [['#16a34a', d.healthy + d.done], ['#8b5cf6', d.attention], ['#d97706', d.warning], ['#dc2626', d.risk], ['#64748b', d.ready]]
-  const totalCount = Math.max(segments.reduce((sum, [, n]) => sum + n, 0), 1)
-  let acc = 0
-  const stops = segments.map(([color, n]) => { const from = acc; acc += (n / totalCount) * 100; return `${color} ${from}% ${Math.min(acc, 100)}%` })
-  return `conic-gradient(${stops.join(', ')})`
 })
 function startOfWeek(date) {
   const d = new Date(date.getFullYear(), date.getMonth(), date.getDate())
@@ -279,12 +257,11 @@ const monitoredProjects = computed(() => {
   const query = keyword.value.trim().toLowerCase()
   return inFlightProjects.value.filter((p) => {
     const matchKeyword = !query || [p.id, p.customer, p.team, p.manager].join(' ').toLowerCase().includes(query)
-    return matchKeyword && (!healthFilter.value || p.health === healthFilter.value) && (!teamFilter.value || p.team === teamFilter.value)
+    return matchKeyword && (!teamFilter.value || p.team === teamFilter.value)
   })
 })
-const healthPillTone = (health) => ({ 正常: 'healthy', 关注: 'attention', 预警: 'warning', 风险: 'risk' })[health] || 'healthy'
-const pmHealthCount = (health) => projects.value.filter((p) => p.health === health).length
-const flowHealthTone = (key) => (['待实施', '实施中', '报告编制', '已完成'].includes(key) ? 'normal' : 'neutral')
+// 服务项状态色调：取自服务项自身状态，供状态分布表的徽标复用。
+const serviceFlowTone = (key) => (['待实施', '实施中', '报告编制', '已完成'].includes(key) ? 'normal' : 'neutral')
 function resetProjectFilters() { keyword.value = ''; statusFilter.value = ''; categoryFilter.value = ''; teamFilter.value = '' }
 
 const serviceItems = ref([])
@@ -300,7 +277,7 @@ const qualificationFileInput = ref(null)
 const filteredCapabilities = computed(() => capabilities.value.filter((item) => (!capabilityTypeFilter.value || item.resource_type === capabilityTypeFilter.value) && (!capabilityStatusFilter.value || item.status === capabilityStatusFilter.value)))
 const canManageResource = computed(() => Array.isArray(session.value?.permissions) && session.value.permissions.includes('project.resource.manage'))
 const selectedServiceItemIDs = ref([])
-const operationForm = ref({ teamLeadID: '', projectManagerID: '', engineerIDs: '', equipmentIDs: '', requiredCodes: '', plannedStart: '', plannedEnd: '', sitePlan: '', penetrationTestPlan: '', authDocNo: '', authStart: '', authEnd: '', authScope: '', testScope: '', testWindow: '', emergencyContact: '', rollbackPlan: '', reviewComment: '', equipmentRequestID: '', travelRequestID: '', latitude: '', longitude: '', rawData: '', environment: '', deviationDescription: '', severity: 'MEDIUM', decision: 'RELEASE', comment: '' })
+const operationForm = ref({ teamLeadID: '', projectManagerID: '', engineerIDs: '', plannedStart: '', plannedEnd: '', sitePlan: '', penetrationTestPlan: '', authDocNo: '', authStart: '', authEnd: '', authScope: '', testScope: '', testWindow: '', emergencyContact: '', rollbackPlan: '', reviewComment: '', personnel: [], equipment: [], equipmentRequestID: '', travelRequestID: '', latitude: '', longitude: '', rawData: '', environment: '', deviationDescription: '', severity: 'MEDIUM', decision: 'RELEASE', comment: '' })
 
 // 五套真实配置表的列与编辑字段元数据。
 const configKindsMeta = [
@@ -403,40 +380,15 @@ function roleOptions(roleCode, selectedIDs) {
 const teamLeadOptions = computed(() => roleOptions(PROJECT_ROLE_CODES.teamLead, [operationForm.value.teamLeadID]))
 const projectManagerOptions = computed(() => roleOptions(PROJECT_ROLE_CODES.projectManager, [operationForm.value.projectManagerID]))
 
-// 工程师与设备改为下拉多选：选中结果仍写回逗号分隔的 engineerIDs/equipmentIDs，保持后端载荷不变。
+// 工程师改为下拉多选：选中结果仍写回逗号分隔的 engineerIDs，保持后端载荷不变。
 const engineerSelection = computed({
   get: () => selectedIDs(operationForm.value.engineerIDs),
   set: (values) => { operationForm.value.engineerIDs = values.join(',') },
 })
 const engineerOptions = computed(() => roleOptions(PROJECT_ROLE_CODES.engineer, engineerSelection.value))
-const equipmentByID = computed(() => new Map(equipment.value.map((item) => [item.resource_id, item])))
-function capabilityCodesForEquipment(ids) {
-  const codes = new Set()
-  for (const id of ids) {
-    for (const code of equipmentByID.value.get(id)?.codes || []) codes.add(code)
-  }
-  return [...codes]
-}
-const equipmentSelection = computed({
-  get: () => selectedIDs(operationForm.value.equipmentIDs),
-  set: (values) => {
-    operationForm.value.equipmentIDs = values.join(',')
-    operationForm.value.requiredCodes = capabilityCodesForEquipment(values).join(',')
-  },
-})
-const equipmentOptions = computed(() => {
-  const options = equipment.value.filter((item) => item.status !== 'DISABLED').map((item) => ({ id: item.resource_id, name: item.resource_name || item.resource_id }))
-  const known = new Set(options.map((option) => option.id))
-  for (const id of selectedIDs(operationForm.value.equipmentIDs)) {
-    if (!id || known.has(id)) continue
-    const item = equipmentByID.value.get(id)
-    options.push({ id, name: item ? item.resource_name || id : `${id}（当前值）` })
-    known.add(id)
-  }
-  return options
-})
-// 工程师/设备使用与团队负责人、项目经理一致的下拉样式：展开后逐项勾选，
+// 工程师使用与团队负责人、项目经理一致的下拉样式：展开后逐项勾选，
 // 不要求用户按住 ⌘/Ctrl 做加选，选中结果仍写回逗号分隔的 ID 列表。
+// 设备不在任务分配中选取：设备清单在「实施准备」阶段登记。
 const openMulti = ref('')
 function toggleMulti(kind) { openMulti.value = openMulti.value === kind ? '' : kind }
 function multiSummary(ids, options, placeholder) {
@@ -451,16 +403,9 @@ function toggleEngineer(id) {
   else selected.add(id)
   engineerSelection.value = [...selected]
 }
-function toggleEquipment(id) {
-  const selected = new Set(equipmentSelection.value)
-  if (selected.has(id)) selected.delete(id)
-  else selected.add(id)
-  equipmentSelection.value = [...selected]
-}
 function closeMultiOnOutsideClick(event) {
   if (!(event.target instanceof Element) || !event.target.closest('.pm-multi-dropdown')) openMulti.value = ''
 }
-const capabilityCodeList = computed(() => selectedIDs(operationForm.value.requiredCodes))
 const selectedServiceItems = computed(() => serviceItems.value.filter((item) => selectedServiceItemIDs.value.includes(item.id)))
 const selectedServiceItem = computed(() => selectedServiceItems.value[0] || null)
 
@@ -566,13 +511,13 @@ const kanbanColumns = computed(() => [
 }))
 
 const operationRows = computed(() => ({
-  monitoring: projects.value.slice(0, 5).map((p) => ({ id: p.id, name: `${p.id} · ${p.customer}`, detail: p.category, owner: p.manager, state: p.health, progress: p.progress, due: p.due })),
+  monitoring: projects.value.slice(0, 5).map((p) => ({ id: p.id, name: `${p.id} · ${p.customer}`, detail: p.category, owner: p.manager, state: p.status, progress: p.progress, due: p.due })),
   allocation: serviceItems.value.filter((s) => s.status === '待分配').map((s) => ({ id: s.id, name: `${s.id} · ${s.category}`, detail: `${s.site} / ${s.batch}`, warning: stampedContractStateByProject.value.get(s.project_id) === false ? '未上传盖章合同' : '', owner: personLabel(s.team_lead_id, '待分配团队负责人'), state: s.conflict_status === 'CONFLICT' ? '能力冲突' : s.team_lead_id ? '已分配' : '待分配', progress: s.project_manager_id ? 100 : s.team_lead_id ? 50 : 0, due: s.planned_end?.slice(0, 10) || '待排期' })),
   inbox: inboxItems.value.map((s) => ({ id: s.id, name: `${s.id} · ${projectByID.value.get(s.project_id)?.customer || s.site}`, detail: s.project_manager_id ? '实施工程师待指派' : '项目经理待指派', owner: personLabel(s.team_lead_id, '—'), state: '待处理', progress: s.project_manager_id ? 50 : 0, due: s.planned_start?.slice(0, 10) || '待排期' })),
   planning: serviceItems.value.map((s) => ({ id: s.id, name: `${s.id} · ${s.site}`, detail: s.test_mode === 'PENETRATION' ? '渗透测试专项计划' : '现场实施计划', owner: personLabel(s.project_manager_id, '待指派项目经理'), state: s.planned_start ? '计划已发布' : '待排期', progress: s.planned_start ? 100 : 0, due: s.planned_end?.slice(0, 10) || '待排期' })),
   preparation: deliveryEvents.value.filter((e) => e.type === 'PREPARATION_STARTED').map((e) => ({ id: e.id, name: e.service_item_id, detail: `设备申领 ${e.payload.equipment_request_id} / 行程 ${e.payload.travel_request_id}`, owner: personLabel(e.actor_user_id, '—'), state: '准备中', progress: 50, due: new Date(e.created_at).toLocaleDateString() })),
   qualifications: capabilities.value.map((c) => ({ id: c.resource_id, name: c.resource_name, detail: c.codes.join(' / '), owner: c.resource_type === 'PERSON' ? '人员资质' : '设备能力', state: c.status === 'ACTIVE' ? '有效' : c.status, progress: c.status === 'ACTIVE' ? 100 : 0, due: c.valid_until?.slice(0, 10) || '长期' })),
-  assignments: serviceItems.value.map((s) => ({ id: s.id, name: `${s.id} · ${s.site}`, detail: `${s.engineer_ids?.length || 0} 人 / ${s.equipment_ids?.length || 0} 台设备`, owner: personLabel(s.project_manager_id), state: s.conflict_status === 'CONFLICT' ? '排期冲突' : s.conflict_status === 'PASSED' ? '校验通过' : '待校验', progress: s.conflict_status === 'PASSED' ? 100 : 30, due: s.planned_end?.slice(0, 10) || '待排期' })),
+  assignments: serviceItems.value.map((s) => ({ id: s.id, name: `${s.id} · ${s.site}`, detail: `${s.engineer_ids?.length || 0} 人 / ${(s.implementation_plan?.equipment || []).length} 台设备`, owner: personLabel(s.project_manager_id), state: s.conflict_status === 'CONFLICT' ? '排期冲突' : s.conflict_status === 'PASSED' ? '校验通过' : '待校验', progress: s.conflict_status === 'PASSED' ? 100 : 30, due: s.planned_end?.slice(0, 10) || '待排期' })),
   methods: serviceItems.value.filter((s) => s.special === '是').map((s) => ({ id: s.id, name: `${s.id} · ${s.category}`, detail: `${s.site} / ${s.system || '—'}`, owner: personLabel(s.project_manager_id), state: reportTechReviewLabel(s.tech_review_status), progress: s.tech_review_status === 'APPROVED' ? 100 : s.tech_review_status === 'PENDING' ? 50 : 0, due: s.planned_end?.slice(0, 10) || '待排期', review: s.tech_review_status, comment: s.tech_review_comment, reviewedAt: s.tech_reviewed_at })),
   exceptions: pendingDeviations.value.map((e) => ({ id: e.id, name: `${e.payload?.deviation_id} · ${e.service_item_id}`, detail: e.payload?.description || '现场偏离', owner: personLabel(e.actor_user_id, '—'), state: '待评审', progress: 0, due: formatDateTime(e.created_at) })),
   standards: [],
@@ -614,8 +559,9 @@ const operationDetailFields = computed(() => {
       { label: '团队负责人', value: personLabel(record.team_lead_id, '待分配') },
       { label: '项目经理', value: personLabel(record.project_manager_id, '待指派') },
       { label: '工程师', value: personListLabel(record.engineer_ids) },
-      { label: '设备', value: (record.equipment_ids || []).join('、') || '未指派' },
-      { label: '能力码', value: (record.required_codes || []).join('、') || '—' },
+      { label: '实施人员', value: (record.implementation_plan?.personnel || []).map((row) => row.resource_name).join('、') || '未登记' },
+      { label: '设备清单', value: (record.implementation_plan?.equipment || []).map((row) => row.resource_name).join('、') || '未登记' },
+      { label: '设备使用时段', value: (record.implementation_plan?.equipment || []).map((row) => `${row.resource_name} ${row.window_start ? `${row.window_start} ~ ${row.window_end}` : '全程'}`).join('；') || '—' },
       { label: '匹配校验', value: record.conflict_status === 'CONFLICT' ? '排期冲突' : record.conflict_status === 'PASSED' ? '校验通过' : record.conflict_status || '待校验' },
       { label: '测试模式', value: record.test_mode === 'PENETRATION' ? '渗透测试' : '标准方法' },
       { label: '计划窗口', value: `${(record.planned_start || '—').replace('T', ' ')} 至 ${(record.planned_end || '—').replace('T', ' ')}` },
@@ -778,10 +724,33 @@ function selectApprovedContract(contract) {
   createForm.value.contract = contract.contract_number || ''
   createForm.value.customer = contract.customer_name || ''
 }
+// 设备在位状态由占用时段派生：借出中显示占用方与时段，否则显示在公司。
+function equipmentPresenceLabel(item) {
+  return item.presence === 'OUT_OF_COMPANY' ? '不在公司（借出中）' : '在公司'
+}
+function editEquipment(item) {
+  equipmentForm.value = {
+    resourceID: item.resource_id, resourceName: item.resource_name, codes: (item.codes || []).join(','),
+    validFrom: item.valid_from?.slice(0, 10) || '', validUntil: item.valid_until?.slice(0, 10) || '',
+    status: item.status || 'ACTIVE', usageScope: item.usage_scope || 'ANY',
+  }
+}
+// 归还：把设备从借出它的服务项清单里释放；设备维护人员也能操作，现场可能提前寄回。
+async function returnEquipment(item) {
+  const serviceItemID = item.borrowed_service_item_id || equipmentReservationByID.value.get(item.resource_id)?.service_item_id
+  if (!serviceItemID) { showToast('未找到借出该设备的服务项，请刷新后重试'); return }
+  saving.value = true
+  try {
+    await returnServiceItemEquipment(serviceItemID, item.resource_id)
+    showToast(`设备 ${item.resource_name} 已归还`)
+    await Promise.all([loadEquipment(), loadEquipmentReservations(selectedServiceItem.value)])
+  } catch (error) { showToast(error?.message || '归还失败，请稍后重试') }
+  finally { saving.value = false }
+}
 async function saveEquipment() {
   saving.value = true
   try {
-    const item = await upsertEquipment({ resource_id: equipmentForm.value.resourceID, resource_name: equipmentForm.value.resourceName, codes: selectedIDs(equipmentForm.value.codes), valid_from: equipmentForm.value.validFrom ? new Date(equipmentForm.value.validFrom).toISOString() : '', valid_until: equipmentForm.value.validUntil ? new Date(equipmentForm.value.validUntil).toISOString() : '', status: equipmentForm.value.status })
+    const item = await upsertEquipment({ resource_id: equipmentForm.value.resourceID, resource_name: equipmentForm.value.resourceName, codes: selectedIDs(equipmentForm.value.codes), valid_from: equipmentForm.value.validFrom ? new Date(equipmentForm.value.validFrom).toISOString() : '', valid_until: equipmentForm.value.validUntil ? new Date(equipmentForm.value.validUntil).toISOString() : '', status: equipmentForm.value.status, usage_scope: equipmentForm.value.usageScope })
     equipment.value = [item, ...equipment.value.filter((row) => row.resource_id !== item.resource_id)]
     showToast('设备信息已保存')
   } catch (error) { showToast(error?.message || '设备信息保存失败') }
@@ -973,7 +942,90 @@ function selectServiceItem(item) {
 }
 function fillOperationForm(item) {
   const plan = item.implementation_plan || {}
-  operationForm.value = { ...operationForm.value, teamLeadID: item.team_lead_id || '', projectManagerID: item.project_manager_id || '', engineerIDs: (item.engineer_ids || []).join(','), equipmentIDs: (item.equipment_ids || []).join(','), requiredCodes: (item.required_codes || []).join(','), plannedStart: toDateTimeLocal(item.planned_start || plan.planned_start), plannedEnd: toDateTimeLocal(item.planned_end || plan.planned_end), sitePlan: plan.site_plan || '', penetrationTestPlan: plan.penetration_test_plan || '', authDocNo: plan.auth_doc_no || '', authStart: toDateTimeLocal(plan.auth_start), authEnd: toDateTimeLocal(plan.auth_end), authScope: plan.auth_scope || '', testScope: plan.test_scope || '', testWindow: plan.test_window || '', emergencyContact: plan.emergency_contact || '', rollbackPlan: plan.rollback_plan || '', reviewComment: item.tech_review_comment || '' }
+  operationForm.value = { ...operationForm.value, teamLeadID: item.team_lead_id || '', projectManagerID: item.project_manager_id || '', engineerIDs: (item.engineer_ids || []).join(','), plannedStart: toDateTimeLocal(item.planned_start || plan.planned_start), plannedEnd: toDateTimeLocal(item.planned_end || plan.planned_end), sitePlan: plan.site_plan || '', penetrationTestPlan: plan.penetration_test_plan || '', authDocNo: plan.auth_doc_no || '', authStart: toDateTimeLocal(plan.auth_start), authEnd: toDateTimeLocal(plan.auth_end), authScope: plan.auth_scope || '', testScope: plan.test_scope || '', testWindow: plan.test_window || '', emergencyContact: plan.emergency_contact || '', rollbackPlan: plan.rollback_plan || '', reviewComment: item.tech_review_comment || '', personnel: planPersonnelFor(item, plan), equipment: planEquipmentFor(plan) }
+}
+// 实施计划的人员与设备清单：已发布的计划用保存下来的快照回填；首次制定时按服务项已指派的
+// 团队与设备自动生成，业务用户只需调整使用时段或移除，不必手工重新挑一遍人和设备。
+// 实施计划的人员清单：已发布的计划用保存下来的快照回填；首次制定时按服务项已指派的
+// 团队自动生成，业务用户只需调整使用时段或移除。设备清单在「实施准备」阶段维护。
+function planPersonnelFor(item, plan) {
+  const saved = Array.isArray(plan.personnel) ? plan.personnel : []
+  if (saved.length) {
+    return saved.map((row) => ({ resourceType: 'PERSON', resourceID: row.resource_id, windowStart: row.window_start || '', windowEnd: row.window_end || '', note: row.note || '' }))
+  }
+  return planPersonnelRows(item)
+}
+// 已指派的执行团队默认全员参与；团队负责人同样计入，避免计划里出现"没有负责人"的空档。
+function planPersonnelRows(item) {
+  const personIDs = [item.team_lead_id, item.project_manager_id, ...(item.engineer_ids || [])].filter(Boolean)
+  return [...new Set(personIDs)].map((id) => ({ resourceType: 'PERSON', resourceID: id, windowStart: '', windowEnd: '', note: '' }))
+}
+// 实施准备的设备清单：已登记的回填快照，未登记时留空由用户在准备阶段挑选。
+function planEquipmentFor(plan) {
+  const saved = Array.isArray(plan.equipment) ? plan.equipment : []
+  return saved.map((row) => ({ resourceType: 'EQUIPMENT', resourceID: row.resource_id, windowStart: row.window_start || '', windowEnd: row.window_end || '', note: row.note || '' }))
+}
+// 清单行展示的名称/资质/有效期：优先取当前能力档案，档案缺失时回落到人员姓名缓存，
+// 避免已停用资源在表单里显示成空白。
+function planResourceName(row) {
+  const capability = capabilities.value.find((item) => item.resource_id === row.resourceID)
+  return capability?.resource_name || personnelNameByID.value.get(row.resourceID) || row.resourceID || '未命名资源'
+}
+function planResourceCodes(row) {
+  const capability = capabilities.value.find((item) => item.resource_id === row.resourceID)
+  return (capability?.codes || []).join(' / ')
+}
+function planResourceValidUntil(row) {
+  const capability = capabilities.value.find((item) => item.resource_id === row.resourceID)
+  return capability?.valid_until ? capability.valid_until.slice(0, 10) : '—'
+}
+// 设备占用：实施准备阶段把已被其他服务项在同一时段占用的设备置灰，不允许重复选取。
+const equipmentReservations = ref([])
+const equipmentReservationByID = computed(() => {
+  const map = new Map()
+  for (const item of equipmentReservations.value) {
+    if (!map.has(item.resource_id)) map.set(item.resource_id, item)
+  }
+  return map
+})
+async function loadEquipmentReservations(item) {
+  if (!item?.id) { equipmentReservations.value = []; return }
+  try {
+    equipmentReservations.value = await listEquipmentReservations(item.id)
+  } catch {
+    // 占用信息拿不到时不阻断挑选，保存时服务端仍会硬拦重叠占用。
+    equipmentReservations.value = []
+  }
+}
+// 设备不可选的三种原因按优先级解释：仅在公司使用（不可借出）> 当前不在公司 > 时段已被占用。
+function equipmentUnavailableReason(item) {
+  if (item.usage_scope === 'COMPANY_ONLY') return '仅在公司使用 · 不可借出'
+  if (item.presence === 'OUT_OF_COMPANY') return `当前不在公司（${item.borrowed_by || '借出中'} ${item.borrowed_window || ''}）`.trim()
+  const reservation = equipmentReservationByID.value.get(item.resource_id)
+  if (reservation) return `${reservation.project_id || reservation.service_item_id} 已占用 ${reservation.window_start} ~ ${reservation.window_end}`
+  return ''
+}
+function equipmentReservationLabel(resourceID) {
+  const item = equipment.value.find((row) => row.resource_id === resourceID)
+  return item ? equipmentUnavailableReason(item) : ''
+}
+const planEquipmentPickerOpen = ref(false)
+const planEquipmentOptions = computed(() => equipment.value.filter((item) => item.status !== 'DISABLED'))
+const planEquipmentPickable = computed(() => {
+  const used = new Set(operationForm.value.equipment.map((row) => row.resourceID))
+  return planEquipmentOptions.value.filter((item) => !used.has(item.resource_id) && !equipmentUnavailableReason(item))
+})
+function addPlanEquipment(equipmentItem) {
+  if (!equipmentItem) return
+  if (equipmentUnavailableReason(equipmentItem)) return
+  operationForm.value.equipment = [...operationForm.value.equipment, { resourceType: 'EQUIPMENT', resourceID: equipmentItem.resource_id, windowStart: '', windowEnd: '', note: '' }]
+  planEquipmentPickerOpen.value = false
+}
+function removePlanEquipment(index) {
+  operationForm.value.equipment = operationForm.value.equipment.filter((_, position) => position !== index)
+}
+function removePlanPersonnel(index) {
+  operationForm.value.personnel = operationForm.value.personnel.filter((_, position) => position !== index)
 }
 function toggleServiceItem(item) {
   const selected = new Set(selectedServiceItemIDs.value)
@@ -998,7 +1050,8 @@ async function runOperation(kind) {
       for (const selected of items) {
         if (!selected.team_lead_id) await assignTeam(selected.id, { team_lead_id: form.teamLeadID })
         if (canExecutionAssign.value) {
-          await assignExecutionTeam(selected.id, { project_manager_id: form.projectManagerID, engineer_ids: selectedIDs(form.engineerIDs), equipment_ids: selectedIDs(form.equipmentIDs), required_codes: selectedIDs(form.requiredCodes) })
+          // 设备清单在「实施准备」阶段确定，任务分配只指派执行团队。
+          await assignExecutionTeam(selected.id, { project_manager_id: form.projectManagerID, engineer_ids: selectedIDs(form.engineerIDs) })
         }
       }
       showToast(canExecutionAssign.value ? `已批量保存 ${items.length} 个服务项并完成能力校验` : `已批量分配 ${items.length} 个服务项的团队负责人`)
@@ -1008,6 +1061,10 @@ async function runOperation(kind) {
       if (!form.plannedStart || !form.plannedEnd) { showToast('请填写计划开始与计划结束时间'); return }
       if (new Date(form.plannedEnd).getTime() <= new Date(form.plannedStart).getTime()) { showToast('计划结束时间必须晚于计划开始时间'); return }
       if (!String(form.sitePlan || '').trim()) { showToast('请填写现场计划'); return }
+      const personRows = form.personnel
+      if (!personRows.length) { showToast('请至少添加一名实施人员'); return }
+      const windowProblem = form.personnel.find((row) => (row.windowStart && !row.windowEnd) || (!row.windowStart && row.windowEnd) || (row.windowStart && row.windowEnd && new Date(row.windowEnd) < new Date(row.windowStart)))
+      if (windowProblem) { showToast(`「${planResourceName(windowProblem)}」的使用时段不完整或结束早于开始`); return }
       if (selectedServiceItem.value?.test_mode === 'PENETRATION') {
         const compliance = [
           [form.penetrationTestPlan, '渗透测试专项计划'], [form.authDocNo, '授权书编号'],
@@ -1018,7 +1075,7 @@ async function runOperation(kind) {
         if (!form.authStart || !form.authEnd) { showToast('请填写授权生效与授权截止时间'); return }
         if (new Date(form.authEnd).getTime() <= new Date(form.authStart).getTime()) { showToast('授权截止时间必须晚于授权生效时间'); return }
       }
-      await planImplementation(item.id, { planned_start: asRFC3339(form.plannedStart), planned_end: asRFC3339(form.plannedEnd), site_plan: form.sitePlan, penetration_test_plan: form.penetrationTestPlan, auth_doc_no: form.authDocNo, auth_start: asRFC3339(form.authStart), auth_end: asRFC3339(form.authEnd), auth_scope: form.authScope, test_scope: form.testScope, test_window: form.testWindow, emergency_contact: form.emergencyContact, rollback_plan: form.rollbackPlan })
+      await planImplementation(item.id, { planned_start: asRFC3339(form.plannedStart), planned_end: asRFC3339(form.plannedEnd), site_plan: form.sitePlan, penetration_test_plan: form.penetrationTestPlan, auth_doc_no: form.authDocNo, auth_start: asRFC3339(form.authStart), auth_end: asRFC3339(form.authEnd), auth_scope: form.authScope, test_scope: form.testScope, test_window: form.testWindow, emergency_contact: form.emergencyContact, rollback_plan: form.rollbackPlan , personnel: form.personnel.map((row) => ({ resource_type: 'PERSON', resource_id: row.resourceID, window_start: row.windowStart, window_end: row.windowEnd, note: row.note })) })
       showToast('实施计划已发布')
     } else if (kind === 'special-approve' || kind === 'special-reject') {
       await reviewSpecialMethod(item.id, { decision: kind === 'special-approve' ? 'APPROVED' : 'REJECTED', comment: form.reviewComment })
@@ -1028,7 +1085,10 @@ async function runOperation(kind) {
       await updateReportStatus(item.id, next)
       showToast(`报告状态已推进至：${reportStatusLabel[next]}`)
     } else if (kind === 'preparation') {
-      await startImplementationPreparation(item.id, { equipment_request_id: form.equipmentRequestID, travel_request_id: form.travelRequestID, notes: form.comment })
+      if (!form.equipment.length) { showToast('请至少选择一台实施设备'); return }
+      const equipmentWindowProblem = form.equipment.find((row) => (row.windowStart && !row.windowEnd) || (!row.windowStart && row.windowEnd) || (row.windowStart && row.windowEnd && new Date(row.windowEnd) < new Date(row.windowStart)))
+      if (equipmentWindowProblem) { showToast(`「${planResourceName(equipmentWindowProblem)}」的使用时段不完整或结束早于开始`); return }
+      await startImplementationPreparation(item.id, { equipment_request_id: form.equipmentRequestID, travel_request_id: form.travelRequestID, notes: form.comment, equipment: form.equipment.map((row) => ({ resource_type: 'EQUIPMENT', resource_id: row.resourceID, window_start: row.windowStart, window_end: row.windowEnd, note: row.note })) })
       showToast('实施准备已发起')
     } else if (kind === 'field') {
       await fieldCheckIn(item.id, { latitude: Number(form.latitude), longitude: Number(form.longitude), occurred_at: new Date().toISOString() })
@@ -1091,9 +1151,15 @@ onMounted(() => document.addEventListener('click', closeMultiOnOutsideClick))
 // 进入资源分配/待办/指派栏目时刷新人员目录，保证新建或停用的平台账号能及时反映。
 watch(activeSection, (section) => {
   if (['allocation', 'inbox', 'assignments'].includes(section)) loadPersonnel()
+  if (section === 'preparation') loadEquipmentReservations(selectedServiceItem.value)
 })
 // 会话权限异步到达：只有拿到执行团队分配权限后，项目经理/工程师的角色目录才会被查询；
 // 权限在这之后才加载完成时必须补一次，否则这两个下拉会一直空着。
+// 切换服务项或在准备页刷新工作区时重新拉取设备占用：占用是别的项目造成的，
+// 只靠本地缓存会给出过期的可选设备。
+watch(selectedServiceItem, (item) => {
+  if (activeSection.value === 'preparation') loadEquipmentReservations(item)
+})
 watch(canExecutionAssign, (allowed) => {
   if (allowed && ['allocation', 'inbox', 'assignments'].includes(activeSection.value)) loadPersonnel()
 })
@@ -1172,7 +1238,7 @@ onBeforeUnmount(() => {
           <section class="pm-dashboard-grid">
             <article class="pm-panel pm-status-panel">
               <header><div><p class="pm-panel-kicker">SERVICE FLOW</p><h2>服务项状态分布</h2></div><span>总计 <b>{{ serviceItems.length }}</b> 项</span></header>
-              <div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>状态</th><th class="num">数量</th><th>占比</th><th>健康度</th><th></th></tr></thead><tbody><tr v-for="flow in serviceFlow" :key="flow.key" @click="navigate(flow.route)"><td><span class="pm-badge" :class="flowHealthTone(flow.key)">{{ flow.key }}</span></td><td class="num">{{ flow.count }}</td><td><div class="pm-bar-bg"><i class="pm-bar-fill" :class="flow.color" :style="{ width: `${serviceItems.length ? (flow.count * 100 / serviceItems.length).toFixed(1) : 0}%` }"></i></div><small>{{ serviceItems.length ? (flow.count * 100 / serviceItems.length).toFixed(1) : '0.0' }}%</small></td><td>{{ flowHealthTone(flow.key) === 'normal' ? '正常' : '待处理' }}</td><td><button class="pm-link">查看 →</button></td></tr><tr v-if="!serviceFlow.length"><td colspan="5" class="pm-empty-mini">暂无服务项数据</td></tr></tbody></table></div>
+              <div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>状态</th><th class="num">数量</th><th>占比</th><th></th></tr></thead><tbody><tr v-for="flow in serviceFlow" :key="flow.key" @click="navigate(flow.route)"><td><span class="pm-badge" :class="serviceFlowTone(flow.key)">{{ flow.key }}</span></td><td class="num">{{ flow.count }}</td><td><div class="pm-bar-bg"><i class="pm-bar-fill" :class="flow.color" :style="{ width: `${serviceItems.length ? (flow.count * 100 / serviceItems.length).toFixed(1) : 0}%` }"></i></div><small>{{ serviceItems.length ? (flow.count * 100 / serviceItems.length).toFixed(1) : '0.0' }}%</small></td><td><button class="pm-link">查看 →</button></td></tr><tr v-if="!serviceFlow.length"><td colspan="4" class="pm-empty-mini">暂无服务项数据</td></tr></tbody></table></div>
             </article>
             <article class="pm-panel">
               <header><div><p class="pm-panel-kicker danger">ATTENTION</p><h2>风险与待办</h2></div><button class="pm-link" @click="navigate('exceptions')">查看全部 →</button></header>
@@ -1210,7 +1276,7 @@ onBeforeUnmount(() => {
           </section>
           <section class="pm-table-panel pm-panel-inflight">
             <header><div><p class="pm-panel-kicker">DELIVERY PULSE</p><h2>在途项目 · 实时动态</h2></div><span>共 {{ inFlightProjects.length }} 个在途项目</span></header>
-            <div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>项目编号</th><th>客户</th><th>服务项</th><th>团队 / 项目经理</th><th>健康度</th><th>进度</th><th>计划完成</th><th></th></tr></thead><tbody><tr v-for="project in inFlightProjects.slice(0, 8)" :key="project.id" :class="{ risk: project.health === '风险' }"><td><button class="pm-project-link" @click="openProject(project)"><b>{{ project.id }}</b></button></td><td>{{ project.customer }}</td><td>{{ project.services }} 项</td><td><b>{{ project.team }}</b><span class="pm-cell-sub">{{ project.manager }}</span></td><td><span class="pm-badge" :class="project.health">{{ project.health }}</span></td><td><div class="pm-progress-cell"><div class="pm-inline-progress"><i :style="{ width: `${project.progress}%` }"></i></div><small>{{ project.progress }}%</small></div></td><td :class="{ 'pm-text-danger': project.due.includes('超期') }">{{ project.due }}</td><td><button class="pm-link" @click="openProject(project)">详情</button></td></tr><tr v-if="!inFlightProjects.length"><td colspan="8" class="pm-empty-mini">暂无在途项目</td></tr></tbody></table></div>
+            <div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>项目编号</th><th>客户</th><th>服务项</th><th>团队 / 项目经理</th><th>进度</th><th>计划完成</th><th></th></tr></thead><tbody><tr v-for="project in inFlightProjects.slice(0, 8)" :key="project.id" :class="{ risk: riskProjectStatuses.includes(project.status) }"><td><button class="pm-project-link" @click="openProject(project)"><b>{{ project.id }}</b></button></td><td>{{ project.customer }}</td><td>{{ project.services }} 项</td><td><b>{{ project.team }}</b><span class="pm-cell-sub">{{ project.manager }}</span></td><td><div class="pm-progress-cell"><div class="pm-inline-progress"><i :style="{ width: `${project.progress}%` }"></i></div><small>{{ project.progress }}%</small></div></td><td :class="{ 'pm-text-danger': project.due.includes('超期') }">{{ project.due }}</td><td><button class="pm-link" @click="openProject(project)">详情</button></td></tr><tr v-if="!inFlightProjects.length"><td colspan="7" class="pm-empty-mini">暂无在途项目</td></tr></tbody></table></div>
             <footer class="pm-table-footer"><span>共 {{ inFlightProjects.length }} 个在途项目</span><span>前 8 条 · 完整列表请前往实时监控</span></footer>
           </section>
         </template>
@@ -1225,8 +1291,8 @@ onBeforeUnmount(() => {
           </section>
           <section class="pm-filters"><label><ConsoleIcon name="search" /><input v-model="keyword" placeholder="搜索项目编号 / 客户名称 / 服务项" /></label><select v-model="statusFilter"><option value="">状态：全部</option><option v-for="node in projectStatusNodes" :key="node" :value="node">{{ node }}</option></select><select v-model="categoryFilter"><option value="">检测类别：全部</option><option v-for="option in categoryOptions" :key="option" :value="option">{{ option }}</option></select><select v-model="teamFilter"><option value="">团队：全部</option><option v-for="option in teamOptions" :key="option" :value="option">{{ option }}</option></select><button class="pm-button ghost" @click="resetProjectFilters">重置</button><span class="pm-filter-count">{{ filteredProjects.length }} 条结果</span></section>
           <section class="pm-table-panel">
-            <div class="pm-table-scroll"><table class="pm-table"><thead><tr><th></th><th>项目 / 客户</th><th>合同编号</th><th>服务项</th><th>检测类别</th><th>团队 / 项目经理</th><th>健康度</th><th>状态</th><th>交付进度</th><th>计划完成</th><th></th></tr></thead><tbody>
-              <tr v-for="project in filteredProjects" :key="project.id" :class="{ selected: selectedRows.includes(project.id), risk: project.health === '风险' }"><td><input type="checkbox" :checked="selectedRows.includes(project.id)" :aria-label="`选择 ${project.id}`" @change="toggleRow(project.id)" /></td><td><button class="pm-project-link" @click="openProject(project)"><b>{{ project.id }}</b><span>{{ project.customer }}</span></button></td><td class="mono">{{ project.contract }}</td><td>{{ project.services }}</td><td>{{ project.category }}</td><td><b>{{ project.team }}</b><span class="pm-cell-sub">{{ project.manager }}</span></td><td><span class="pm-badge" :class="project.health">{{ project.health }}</span></td><td><span class="pm-badge neutral">{{ project.status }}</span></td><td><div class="pm-progress-cell"><div class="pm-inline-progress"><i :style="{ width: `${project.progress}%` }"></i></div><small>{{ project.progress }}%</small></div></td><td :class="{ 'pm-text-danger': project.due.includes('超期') }">{{ project.due }}</td><td><button class="pm-link" @click="openProject(project)">详情</button></td></tr>
+            <div class="pm-table-scroll"><table class="pm-table"><thead><tr><th></th><th>项目 / 客户</th><th>合同编号</th><th>服务项</th><th>检测类别</th><th>团队 / 项目经理</th><th>状态</th><th>交付进度</th><th>计划完成</th><th></th></tr></thead><tbody>
+              <tr v-for="project in filteredProjects" :key="project.id" :class="{ selected: selectedRows.includes(project.id), risk: riskProjectStatuses.includes(project.status) }"><td><input type="checkbox" :checked="selectedRows.includes(project.id)" :aria-label="`选择 ${project.id}`" @change="toggleRow(project.id)" /></td><td><button class="pm-project-link" @click="openProject(project)"><b>{{ project.id }}</b><span>{{ project.customer }}</span></button></td><td class="mono">{{ project.contract }}</td><td>{{ project.services }}</td><td>{{ project.category }}</td><td><b>{{ project.team }}</b><span class="pm-cell-sub">{{ project.manager }}</span></td><td><span class="pm-badge neutral">{{ project.status }}</span></td><td><div class="pm-progress-cell"><div class="pm-inline-progress"><i :style="{ width: `${project.progress}%` }"></i></div><small>{{ project.progress }}%</small></div></td><td :class="{ 'pm-text-danger': project.due.includes('超期') }">{{ project.due }}</td><td><button class="pm-link" @click="openProject(project)">详情</button></td></tr>
             </tbody></table></div>
             <footer class="pm-table-footer"><span>已选择 {{ selectedRows.length }} 项 · 共 {{ filteredProjects.length }} 条</span><div class="pm-pagination"><button class="pm-pg" disabled>‹</button><button class="pm-pg active">1</button><button class="pm-pg" disabled>›</button></div></footer>
           </section>
@@ -1235,17 +1301,8 @@ onBeforeUnmount(() => {
         <template v-else-if="activeSection === 'monitoring'">
           <section class="pm-dashboard-grid">
             <article class="pm-panel">
-              <header><div><p class="pm-panel-kicker">HEALTH MATRIX</p><h2>在途项目健康度分布</h2></div><span>共 {{ inFlightProjects.length }} 个在途项目 · 健康分 {{ healthScore }} / 100</span></header>
-              <div class="pm-health-bar">
-                <button type="button" class="pm-health-cell healthy" @click="healthFilter = ''"><span class="num">{{ healthDist.healthy }}</span><b>健康</b></button>
-                <button type="button" class="pm-health-cell attention" @click="healthFilter = '关注'"><span class="num">{{ healthDist.attention }}</span><b>关注</b></button>
-                <button type="button" class="pm-health-cell warning" @click="healthFilter = '预警'"><span class="num">{{ healthDist.warning }}</span><b>预警</b></button>
-                <button type="button" class="pm-health-cell danger" @click="healthFilter = '风险'"><span class="num">{{ healthDist.risk }}</span><b>风险</b></button>
-                <button type="button" class="pm-health-cell ready" @click="healthFilter = ''"><span class="num">{{ healthDist.ready }}</span><b>待实施</b></button>
-                <button type="button" class="pm-health-cell done" @click="healthFilter = ''"><span class="num">{{ healthDist.done }}</span><b>已完成</b></button>
-              </div>
-              <div class="pm-health-score">
-                <div class="pm-donut pm-health-donut" :style="{ background: healthDonutStyle }"><div><strong>{{ healthScore }}</strong><span>健康分</span></div></div>
+              <header><div><p class="pm-panel-kicker">IN FLIGHT</p><h2>在途项目概览</h2></div><span>共 {{ inFlightProjects.length }} 个在途项目</span></header>
+              <div class="pm-overview-metrics">
                 <dl class="pm-desc-list">
                   <div class="pm-desc-item"><dt>平均完成度</dt><dd>{{ averageProgress }}%</dd></div>
                   <div class="pm-desc-item"><dt>服务项总数</dt><dd>{{ serviceItems.length }}</dd></div>
@@ -1263,16 +1320,10 @@ onBeforeUnmount(() => {
           </section>
           <section class="pm-table-panel">
             <header class="pm-monitor-head">
-              <div class="pm-tabs-bar" role="tablist" aria-label="按健康度筛选">
-                <button type="button" class="pm-tab-pill" :class="{ active: healthFilter === '' }" @click="healthFilter = ''">全部 {{ inFlightProjects.length }}</button>
-                <button type="button" class="pm-tab-pill" :class="{ active: healthFilter === '正常' }" @click="healthFilter = '正常'">健康 {{ pmHealthCount('正常') }}</button>
-                <button type="button" class="pm-tab-pill" :class="{ active: healthFilter === '关注' }" @click="healthFilter = '关注'">关注 {{ pmHealthCount('关注') }}</button>
-                <button type="button" class="pm-tab-pill" :class="{ active: healthFilter === '风险' }" @click="healthFilter = '风险'">风险 {{ pmHealthCount('风险') }}</button>
-              </div>
               <span class="pm-filter-count">共 {{ monitoredProjects.length }} 条</span>
             </header>
             <div class="pm-filters pm-filters-flat"><label><ConsoleIcon name="search" /><input v-model="keyword" placeholder="搜索项目 / 客户 / 团队" /></label><select v-model="teamFilter"><option value="">团队：全部</option><option v-for="option in teamOptions" :key="option" :value="option">{{ option }}</option></select><button class="pm-button ghost" @click="resetProjectFilters">重置</button></div>
-            <div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>项目编号</th><th>客户</th><th>服务项</th><th>团队</th><th>项目经理</th><th>状态</th><th>进度</th><th>计划完成</th><th>健康度</th><th></th></tr></thead><tbody><tr v-for="project in monitoredProjects" :key="project.id" :class="{ risk: project.health === '风险' }"><td><button class="pm-project-link" @click="openProject(project)"><b>{{ project.id }}</b></button></td><td>{{ project.customer }}</td><td>{{ project.services }} 项</td><td>{{ project.team }}</td><td>{{ project.manager }}</td><td><span class="pm-badge neutral">{{ project.status }}</span></td><td><div class="pm-progress-cell"><div class="pm-inline-progress"><i :style="{ width: `${project.progress}%` }"></i></div><small>{{ project.progress }}%</small></div></td><td :class="{ 'pm-text-danger': project.due.includes('超期') }">{{ project.due }}</td><td><span class="pm-health-pill" :class="healthPillTone(project.health)"><i></i>{{ project.health }}</span></td><td><button class="pm-btn-link" @click="openProject(project)">详情</button></td></tr><tr v-if="!monitoredProjects.length"><td colspan="10" class="pm-empty-mini">暂无匹配的在途项目</td></tr></tbody></table></div>
+            <div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>项目编号</th><th>客户</th><th>服务项</th><th>团队</th><th>项目经理</th><th>状态</th><th>进度</th><th>计划完成</th><th></th></tr></thead><tbody><tr v-for="project in monitoredProjects" :key="project.id" :class="{ risk: riskProjectStatuses.includes(project.status) }"><td><button class="pm-project-link" @click="openProject(project)"><b>{{ project.id }}</b></button></td><td>{{ project.customer }}</td><td>{{ project.services }} 项</td><td>{{ project.team }}</td><td>{{ project.manager }}</td><td><span class="pm-badge neutral">{{ project.status }}</span></td><td><div class="pm-progress-cell"><div class="pm-inline-progress"><i :style="{ width: `${project.progress}%` }"></i></div><small>{{ project.progress }}%</small></div></td><td :class="{ 'pm-text-danger': project.due.includes('超期') }">{{ project.due }}</td><td><button class="pm-btn-link" @click="openProject(project)">详情</button></td></tr><tr v-if="!monitoredProjects.length"><td colspan="9" class="pm-empty-mini">暂无匹配的在途项目</td></tr></tbody></table></div>
             <footer class="pm-table-footer"><span>共 {{ monitoredProjects.length }} 个在途项目</span><div class="pm-pagination"><button class="pm-pg" disabled>‹</button><button class="pm-pg active">1</button><button class="pm-pg" disabled>›</button></div></footer>
           </section>
         </template>
@@ -1291,7 +1342,7 @@ onBeforeUnmount(() => {
         </template>
 
         <template v-else-if="activeSection === 'equipment'">
-          <section class="pm-panel pm-equipment-layout"><header><div><p class="pm-panel-kicker">EQUIPMENT CAPABILITY</p><h2>设备能力维护</h2><p>维护设备基础信息、能力编码、检定有效期与启停状态。</p></div></header><form class="pm-form pm-equipment-form" @submit.prevent="saveEquipment"><label><span>设备编号 <em>*</em></span><input v-model.trim="equipmentForm.resourceID" required placeholder="例如 EQ-001" /></label><label><span>设备名称 <em>*</em></span><input v-model.trim="equipmentForm.resourceName" required placeholder="请输入设备名称" /></label><label><span>能力编码 <em>*</em></span><input v-model.trim="equipmentForm.codes" required placeholder="多个编码用逗号分隔" /></label><label><span>检定开始</span><input v-model="equipmentForm.validFrom" type="date" /></label><label><span>检定到期</span><input v-model="equipmentForm.validUntil" type="date" /></label><label><span>状态</span><select v-model="equipmentForm.status"><option value="ACTIVE">启用</option><option value="DISABLED">停用</option></select></label><button class="pm-button primary">保存设备</button></form></section><section class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>设备编号</th><th>设备名称</th><th>能力</th><th>检定有效期</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="item in equipment" :key="item.resource_id"><td class="mono">{{ item.resource_id }}</td><td><b>{{ item.resource_name }}</b></td><td>{{ (item.codes || []).join(' / ') }}</td><td>{{ item.valid_until ? formatDateTime(item.valid_until) : '未设置' }}</td><td><span class="pm-badge" :class="item.status === 'ACTIVE' ? 'normal' : 'neutral'">{{ item.status === 'ACTIVE' ? '启用' : '停用' }}</span></td><td><button class="pm-link" @click="equipmentForm = { resourceID: item.resource_id, resourceName: item.resource_name, codes: (item.codes || []).join(','), validFrom: item.valid_from?.slice(0, 10) || '', validUntil: item.valid_until?.slice(0, 10) || '', status: item.status || 'ACTIVE' }">编辑 / 更新</button></td></tr></tbody></table></div><p v-if="equipmentError" class="pm-form-hint" role="alert">{{ equipmentError }}</p><div v-else-if="!equipment.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无设备</b><span>使用上方表单新增设备。</span></div></section>
+          <section class="pm-panel pm-equipment-layout"><header><div><p class="pm-panel-kicker">EQUIPMENT CAPABILITY</p><h2>设备能力维护</h2><p>维护设备基础信息、能力编码、检定有效期与启停状态。</p></div></header><form class="pm-form pm-equipment-form" @submit.prevent="saveEquipment"><label><span>设备编号 <em>*</em></span><input v-model.trim="equipmentForm.resourceID" required placeholder="例如 EQ-001" /></label><label><span>设备名称 <em>*</em></span><input v-model.trim="equipmentForm.resourceName" required placeholder="请输入设备名称" /></label><label><span>能力编码 <em>*</em></span><input v-model.trim="equipmentForm.codes" required placeholder="多个编码用逗号分隔" /></label><label><span>检定开始</span><input v-model="equipmentForm.validFrom" type="date" /></label><label><span>检定到期</span><input v-model="equipmentForm.validUntil" type="date" /></label><label><span>状态</span><select v-model="equipmentForm.status"><option value="ACTIVE">启用</option><option value="DISABLED">停用</option></select></label><label><span>使用范围</span><select v-model="equipmentForm.usageScope"><option value="ANY">可借出</option><option value="COMPANY_ONLY">仅在公司使用（不可借出）</option></select></label><button class="pm-button primary">保存设备</button></form></section><section class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>设备编号</th><th>设备名称</th><th>能力</th><th>检定有效期</th><th>状态</th><th>在位 / 使用范围</th><th>操作</th></tr></thead><tbody><tr v-for="item in equipment" :key="item.resource_id"><td class="mono">{{ item.resource_id }}</td><td><b>{{ item.resource_name }}</b></td><td>{{ (item.codes || []).join(' / ') }}</td><td>{{ item.valid_until ? formatDateTime(item.valid_until) : '未设置' }}</td><td><span class="pm-badge" :class="item.status === 'ACTIVE' ? 'normal' : 'neutral'">{{ item.status === 'ACTIVE' ? '启用' : '停用' }}</span></td><td><span class="pm-badge" :class="item.presence === 'OUT_OF_COMPANY' ? 'warning' : 'normal'">{{ equipmentPresenceLabel(item) }}</span><small v-if="item.borrowed_by" class="pm-cell-sub">{{ item.borrowed_by }} · {{ item.borrowed_window }}</small><small v-if="item.usage_scope === 'COMPANY_ONLY'" class="pm-form-hint">仅在公司使用 · 不可借出</small></td><td><button class="pm-link" @click="editEquipment(item)">编辑 / 更新</button><button v-if="item.presence === 'OUT_OF_COMPANY'" class="pm-link danger" @click="returnEquipment(item)">归还</button></td></tr></tbody></table></div><p v-if="equipmentError" class="pm-form-hint" role="alert">{{ equipmentError }}</p><div v-else-if="!equipment.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无设备</b><span>使用上方表单新增设备。</span></div></section>
         </template>
         <template v-else-if="activeSection === 'qualifications'"><section class="pm-panel"><header><div><p class="pm-panel-kicker">RESOURCE CAPABILITY</p><h2>资质与能力管理</h2><p>维护并展示人员资质与设备能力记录。</p></div><div class="pm-panel-actions"><input ref="qualificationFileInput" class="pm-file-input" type="file" accept=".csv,text/csv" @change="importQualificationFile" /><button class="pm-button" :disabled="saving" @click="downloadCapabilities">导出 CSV</button><template v-if="canManageResource"><button class="pm-button" :disabled="saving" @click="qualificationFileInput.click()">导入 CSV</button><button class="pm-button primary" :disabled="saving" @click="openCapabilityDialog()">＋ 新建资质</button></template></div></header><div class="pm-qualification-filter"><label><span>资源类型</span><select v-model="capabilityTypeFilter"><option value="">全部</option><option value="PERSON">人员资质</option><option value="EQUIPMENT">设备能力</option></select></label><label><span>状态</span><select v-model="capabilityStatusFilter"><option value="">全部</option><option value="ACTIVE">有效</option><option value="DISABLED">停用</option></select></label></div></section><section class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>资源类型</th><th>编号</th><th>名称</th><th>资质 / 能力编码</th><th>有效期</th><th>状态</th><th></th></tr></thead><tbody><tr v-for="item in filteredCapabilities" :key="item.resource_id"><td><span class="pm-badge neutral">{{ item.resource_type === 'PERSON' ? '人员' : '设备' }}</span></td><td class="mono">{{ item.resource_id }}</td><td><b>{{ item.resource_name }}</b></td><td>{{ (item.codes || []).join(' / ') }}</td><td>{{ item.valid_until ? (item.valid_from ? `${item.valid_from.slice(0, 10)} ~ ` : '') + item.valid_until.slice(0, 10) : '长期' }}</td><td><span class="pm-badge" :class="item.status === 'ACTIVE' ? 'normal' : 'neutral'">{{ item.status === 'ACTIVE' ? '有效' : '停用' }}</span></td><td style="width: 90px; min-width: 90px;"><button class="pm-link" @click="openCapabilityDialog(item)">编辑 / 更新</button></td></tr></tbody></table></div><div v-if="!filteredCapabilities.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无资质记录</b><span>点击「＋ 新建资质」或通过 CSV 导入添加记录。</span></div><footer v-if="importResult"><span role="status">导入完成：成功 {{ importResult.imported }} 条，跳过 {{ importResult.skipped }} 条。</span><span v-if="importResult.errors?.length"><small>{{ importResult.errors.slice(0, 3).join('；') }}{{ importResult.errors.length > 3 ? '…' : '' }}</small></span></footer></section><div v-if="capabilityDialog" class="pm-overlay" @click.self="capabilityDialog = null"><form class="pm-dialog" @submit.prevent="saveCapability"><header><div><span>CAPABILITY</span><h2>{{ capabilityDialog.resource_id ? '编辑资质 / 能力' : '新建资质 / 能力' }}</h2></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="capabilityDialog = null"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>资源类型 <em>*</em></span><select v-model="capabilityDialog.resource_type" required @change="onCapabilityTypeChange"><option value="PERSON">人员资质</option><option value="EQUIPMENT">设备能力</option></select></label><label><span>{{ capabilityDialog.resource_type === 'EQUIPMENT' ? '设备编号' : '人员编号' }} <em>*</em></span><input v-model.trim="capabilityDialog.resource_id" :readonly="capabilityAutoID" required placeholder="系统自动生成" /><small v-if="capabilityAutoID" class="pm-form-hint">由系统自动生成（人员 P- / 设备 EQ-），无需手工填写</small></label><label><span>资源名称 <em>*</em></span><input v-model.trim="capabilityDialog.resource_name" required placeholder="例如 张三 或 基站A" /></label><label><span>资质 / 能力编码 <em>*</em></span><input v-model.trim="capabilityDialog.codes" required placeholder="多个编码用逗号分隔" /></label><label><span>起始日期</span><input v-model="capabilityDialog.valid_from" type="date" /></label><label><span>截止日期</span><input v-model="capabilityDialog.valid_until" type="date" /></label><label><span>状态</span><select v-model="capabilityDialog.status"><option value="ACTIVE">有效</option><option value="DISABLED">停用</option></select></label></div><footer><button type="button" class="pm-button" @click="capabilityDialog = null">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : '保存资质' }}</button></footer></form></div></template><template v-else-if="['split-rules', 'warning-rules', 'automations', 'permissions', 'sla'].includes(activeSection)">
           <section class="pm-config-layout"><aside class="pm-config-note"><span><ConsoleIcon name="info" /></span><h2>配置说明</h2><p>{{ currentMeta[1] }}。变更将在保存后对新任务生效，已有项目不自动追溯。</p><ul><li>配置修改需业务管理员权限</li><li>关键规则变更会记录审计日志</li><li>关闭规则前请确认影响范围</li></ul></aside><article class="pm-table-panel"><header class="pm-filter-bar"><div class="pm-sm-tabs"><button v-for="meta in configKindsMeta" :key="meta.kind" type="button" class="pm-tab-pill" :class="{ active: activeSection === meta.kind }" @click="navigate(meta.kind)">{{ meta.label }}</button></div><span class="pm-filter-count">{{ activeConfigMeta.label }} 共 {{ visibleRules.length }} 条</span></header><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>配置名称</th><th v-for="column in activeConfigMeta.columns" :key="column.key">{{ column.label }}</th><th>状态</th><th>最后更新</th><th></th></tr></thead><tbody><tr v-for="rule in visibleRules" :key="rule.id"><td><b>{{ rule.name }}</b></td><td v-for="column in activeConfigMeta.columns" :key="column.key">{{ rule[column.key] !== undefined && rule[column.key] !== '' ? rule[column.key] : '—' }}</td><td><button class="pm-switch" :class="{ on: rule.enabled }" :aria-label="`${rule.enabled ? '停用' : '启用'} ${rule.name}`" @click="toggleRule(rule)"><i></i></button></td><td>{{ rule.updated }}</td><td><button class="pm-link" @click="openConfigEdit(rule)">编辑</button></td></tr></tbody></table></div><div v-if="!visibleRules.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无配置规则</b><span>点击「＋ 新建规则」添加 {{ activeConfigMeta.label }} 配置。</span></div></article></section>
@@ -1304,10 +1355,10 @@ onBeforeUnmount(() => {
             <header><div><p class="pm-panel-kicker">REAL OPERATION</p><h2>服务项操作台</h2></div><span v-if="selectedServiceItem">当前：{{ selectedServiceItem.id }} · {{ selectedServiceItem.status }}</span></header>
             <ServiceItemPicker v-if="activeSection === 'allocation'" :items="serviceItems" :selected-ids="selectedServiceItemIDs" multiple empty-text="暂无可分配服务项" hint="可同时选择多个服务项，批量分配团队负责人或执行团队。" @toggle="toggleServiceItem" /><ServiceItemPicker v-else :items="serviceItems" :selected-ids="selectedServiceItem ? [selectedServiceItem.id] : []" empty-text="暂无可操作服务项" @select="selectServiceItem" />
             <div v-if="selectedServiceItem" class="pm-form pm-operation-form">
-              <template v-if="['allocation', 'inbox', 'assignments'].includes(activeSection)"><div class="pm-personnel-search"><label><span>查找平台人员</span><input v-model.trim="personnelKeyword" placeholder="输入姓名关键字" @keydown.enter.prevent="loadPersonnel" /></label><button type="button" class="pm-button" :disabled="personnelLoading" @click="loadPersonnel">{{ personnelLoading ? '查询中…' : '查询' }}</button></div><p v-if="personnelError" class="pm-form-hint" role="alert">{{ personnelError }}</p><label><span>团队负责人 <em>*</em></span><select v-model="operationForm.teamLeadID" :disabled="personnelLoading" required><option value="">请选择团队负责人</option><option v-for="option in teamLeadOptions" :key="option.id" :value="option.id">{{ option.name }}</option></select></label><template v-if="canExecutionAssign"><label><span>项目经理 <em>*</em></span><select v-model="operationForm.projectManagerID" :disabled="personnelLoading" required><option value="">请选择项目经理</option><option v-for="option in projectManagerOptions" :key="option.id" :value="option.id">{{ option.name }}</option></select></label><div class="pm-field"><span>工程师 <em>*</em></span><div class="pm-multi-dropdown" :class="{ open: openMulti === 'engineer' }"><button type="button" class="pm-multi-trigger" :class="{ placeholder: !engineerSelection.length }" :disabled="personnelLoading" @click.stop="toggleMulti('engineer')"><span>{{ multiSummary(engineerSelection, engineerOptions, '请选择工程师') }}</span><i class="pm-multi-caret"></i></button><div v-if="openMulti === 'engineer'" class="pm-multi-menu"><label v-for="option in engineerOptions" :key="option.id" class="pm-multi-option"><input type="checkbox" :checked="engineerSelection.includes(option.id)" @change="toggleEngineer(option.id)" /><span>{{ option.name }}</span></label><p v-if="!engineerOptions.length" class="pm-empty-mini">暂无可选人员</p></div></div></div><div class="pm-field"><span>设备</span><div class="pm-multi-dropdown" :class="{ open: openMulti === 'equipment' }"><button type="button" class="pm-multi-trigger" :class="{ placeholder: !equipmentSelection.length }" @click.stop="toggleMulti('equipment')"><span>{{ multiSummary(equipmentSelection, equipmentOptions, '请选择设备（可选）') }}</span><i class="pm-multi-caret"></i></button><div v-if="openMulti === 'equipment'" class="pm-multi-menu"><label v-for="option in equipmentOptions" :key="option.id" class="pm-multi-option"><input type="checkbox" :checked="equipmentSelection.includes(option.id)" @change="toggleEquipment(option.id)" /><span>{{ option.name }}</span></label><p v-if="equipmentError" class="pm-empty-mini" role="alert">{{ equipmentError }}</p><p v-else-if="!equipmentOptions.length" class="pm-empty-mini">暂无可选设备</p></div></div></div><label><span>能力码 <em>自动</em></span><div class="pm-code-chips"><button v-for="code in capabilityCodeList" :key="code" type="button" class="pm-code-chip" @click.prevent>{{ code }}</button><p v-if="!capabilityCodeList.length" class="pm-empty-mini">选择设备后自动汇总，无需填写</p></div></label></template><button class="pm-button primary" :disabled="saving" @click="runOperation('allocation')">{{ saving ? '提交中…' : canExecutionAssign ? '保存分配并校验能力' : '分配团队负责人' }}</button></template>
-              <template v-else-if="activeSection === 'planning'"><div v-if="planningBlocked" class="pm-blocker" :class="planningBlocked.tone" role="alert"><b>暂时不能发布实施计划</b><span>{{ planningBlocked.reason }}</span><button class="pm-button" type="button" @click="navigate('allocation')">前往任务分配</button></div><label><span>计划开始 <em>*</em></span><input v-model.trim="operationForm.plannedStart" type="datetime-local" /></label><label><span>计划结束 <em>*</em></span><input v-model.trim="operationForm.plannedEnd" type="datetime-local" /></label><label><span>现场计划 <em>*</em></span><textarea v-model.trim="operationForm.sitePlan" rows="3" placeholder="现场实施步骤和窗口"></textarea></label><template v-if="selectedServiceItem.test_mode === 'PENETRATION'"><label><span>渗透测试专项计划 <em>*</em></span><textarea v-model.trim="operationForm.penetrationTestPlan" rows="3"></textarea></label><fieldset class="pm-compliant-fieldset"><legend>专项合规要素（授权 / 白名单 / 时间窗 / 应急 / 回滚）</legend><label><span>授权书编号 <em>*</em></span><input v-model.trim="operationForm.authDocNo" required placeholder="例如 AUTH-2026-001" /></label><label><span>授权生效 <em>*</em></span><input v-model.trim="operationForm.authStart" type="datetime-local" required /></label><label><span>授权截止 <em>*</em></span><input v-model.trim="operationForm.authEnd" type="datetime-local" required /></label><label><span>授权范围 <em>*</em></span><input v-model.trim="operationForm.authScope" required placeholder="例如 内网段 10.0.0.0/8" /></label><label><span>计划测试范围 <em>*</em></span><input v-model.trim="operationForm.testScope" required placeholder="例如 关键业务系统 WEB 渗透" /></label><label><span>测试时间窗 <em>*</em></span><input v-model.trim="operationForm.testWindow" required placeholder="例如 00:00-06:00" /></label><label><span>应急联系人 <em>*</em></span><input v-model.trim="operationForm.emergencyContact" required placeholder="姓名 + 电话" /></label><label><span>回滚方案 <em>*</em></span><textarea v-model.trim="operationForm.rollbackPlan" rows="3" required></textarea></label></fieldset></template><button class="pm-button primary" :disabled="saving || !!planningBlocked" :title="planningBlocked ? planningBlocked.reason : ''" @click="runOperation('planning')">发布实施计划</button></template>
+              <template v-if="['allocation', 'inbox', 'assignments'].includes(activeSection)"><div class="pm-personnel-search"><label><span>查找平台人员</span><input v-model.trim="personnelKeyword" placeholder="输入姓名关键字" @keydown.enter.prevent="loadPersonnel" /></label><button type="button" class="pm-button" :disabled="personnelLoading" @click="loadPersonnel">{{ personnelLoading ? '查询中…' : '查询' }}</button></div><p v-if="personnelError" class="pm-form-hint" role="alert">{{ personnelError }}</p><label><span>团队负责人 <em>*</em></span><select v-model="operationForm.teamLeadID" :disabled="personnelLoading" required><option value="">请选择团队负责人</option><option v-for="option in teamLeadOptions" :key="option.id" :value="option.id">{{ option.name }}</option></select></label><template v-if="canExecutionAssign"><label><span>项目经理 <em>*</em></span><select v-model="operationForm.projectManagerID" :disabled="personnelLoading" required><option value="">请选择项目经理</option><option v-for="option in projectManagerOptions" :key="option.id" :value="option.id">{{ option.name }}</option></select></label><div class="pm-field"><span>工程师 <em>*</em></span><div class="pm-multi-dropdown" :class="{ open: openMulti === 'engineer' }"><button type="button" class="pm-multi-trigger" :class="{ placeholder: !engineerSelection.length }" :disabled="personnelLoading" @click.stop="toggleMulti('engineer')"><span>{{ multiSummary(engineerSelection, engineerOptions, '请选择工程师') }}</span><i class="pm-multi-caret"></i></button><div v-if="openMulti === 'engineer'" class="pm-multi-menu"><label v-for="option in engineerOptions" :key="option.id" class="pm-multi-option"><input type="checkbox" :checked="engineerSelection.includes(option.id)" @change="toggleEngineer(option.id)" /><span>{{ option.name }}</span></label><p v-if="!engineerOptions.length" class="pm-empty-mini">暂无可选人员</p></div></div></div></template><button class="pm-button primary" :disabled="saving" @click="runOperation('allocation')">{{ saving ? '提交中…' : canExecutionAssign ? '保存分配并校验能力' : '分配团队负责人' }}</button></template>
+              <template v-else-if="activeSection === 'planning'"><div v-if="planningBlocked" class="pm-blocker" :class="planningBlocked.tone" role="alert"><b>暂时不能发布实施计划</b><span>{{ planningBlocked.reason }}</span><button class="pm-button" type="button" @click="navigate('allocation')">前往任务分配</button></div><label><span>计划开始 <em>*</em></span><input v-model.trim="operationForm.plannedStart" type="datetime-local" /></label><label><span>计划结束 <em>*</em></span><input v-model.trim="operationForm.plannedEnd" type="datetime-local" /></label><label><span>现场计划 <em>*</em></span><textarea v-model.trim="operationForm.sitePlan" rows="3" placeholder="现场实施步骤和窗口"></textarea></label><template v-if="selectedServiceItem.test_mode === 'PENETRATION'"><label><span>渗透测试专项计划 <em>*</em></span><textarea v-model.trim="operationForm.penetrationTestPlan" rows="3"></textarea></label><fieldset class="pm-compliant-fieldset"><legend>专项合规要素（授权 / 白名单 / 时间窗 / 应急 / 回滚）</legend><label><span>授权书编号 <em>*</em></span><input v-model.trim="operationForm.authDocNo" required placeholder="例如 AUTH-2026-001" /></label><label><span>授权生效 <em>*</em></span><input v-model.trim="operationForm.authStart" type="datetime-local" required /></label><label><span>授权截止 <em>*</em></span><input v-model.trim="operationForm.authEnd" type="datetime-local" required /></label><label><span>授权范围 <em>*</em></span><input v-model.trim="operationForm.authScope" required placeholder="例如 内网段 10.0.0.0/8" /></label><label><span>计划测试范围 <em>*</em></span><input v-model.trim="operationForm.testScope" required placeholder="例如 关键业务系统 WEB 渗透" /></label><label><span>测试时间窗 <em>*</em></span><input v-model.trim="operationForm.testWindow" required placeholder="例如 00:00-06:00" /></label><label><span>应急联系人 <em>*</em></span><input v-model.trim="operationForm.emergencyContact" required placeholder="姓名 + 电话" /></label><label><span>回滚方案 <em>*</em></span><textarea v-model.trim="operationForm.rollbackPlan" rows="3" required></textarea></label></fieldset></template><section class="pm-plan-resources"><header><div><b>实施人员</b><small>资质与有效期取自「资质与能力」档案；使用时段留空表示全程；设备清单在「实施准备」中登记</small></div></header><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>名称</th><th>规格 / 资质</th><th>有效期</th><th>使用时段</th><th>备注</th><th></th></tr></thead><tbody><tr v-for="(row, index) in operationForm.personnel" :key="row.resourceID"><td>{{ planResourceName(row) }}</td><td>{{ planResourceCodes(row) || '—' }}</td><td>{{ planResourceValidUntil(row) }}</td><td><div class="pm-plan-window"><input v-model="row.windowStart" type="date" aria-label="使用时段开始" /><span>~</span><input v-model="row.windowEnd" type="date" aria-label="使用时段结束" /></div></td><td><input v-model.trim="row.note" placeholder="例如 备份" /></td><td><button type="button" class="pm-link danger" @click="removePlanPersonnel(index)">移除</button></td></tr><tr v-if="!operationForm.personnel.length"><td colspan="6" class="pm-empty-mini">请至少添加一名实施人员</td></tr></tbody></table></div></section><button class="pm-button primary" :disabled="saving || !!planningBlocked" :title="planningBlocked ? planningBlocked.reason : ''" @click="runOperation('planning')">发布实施计划</button></template>
               <template v-else-if="activeSection === 'methods'"><div class="pm-review-state"><span>复核状态</span><b>{{ item && reportTechReviewLabel(item.tech_review_status) }}</b></div><template v-if="item && ['PENDING', 'REJECTED'].includes(item.tech_review_status)"><label><span>复核意见</span><textarea v-model.trim="operationForm.reviewComment" rows="3" placeholder="填写风险说明或驳回原因"></textarea></label><div class="pm-form-row"><button class="pm-button primary" :disabled="saving" @click="runOperation('special-approve')">通过复核</button><button class="pm-button" :disabled="saving" @click="runOperation('special-reject')">驳回复核</button></div></template><template v-else-if="item && item.tech_review_status === 'APPROVED'"><p class="pm-form-hint">{{ item.tech_review_comment || '已通过复核，可发布实施计划' }}<span v-if="item.tech_reviewed_at"> · {{ formatDateTime(item.tech_reviewed_at) }} · {{ item.tech_reviewed_by }} </span></p></template><template v-else-if="item && item.tech_review_status === 'PENDING'"><p class="pm-form-hint">等待技术总监复核特殊方法。</p></template></template>
-              <template v-else-if="activeSection === 'preparation'"><label><span>设备申领单 <em>*</em></span><input v-model.trim="operationForm.equipmentRequestID" /></label><label><span>行程预订单 <em>*</em></span><input v-model.trim="operationForm.travelRequestID" /></label><label><span>备注</span><textarea v-model.trim="operationForm.comment" rows="3"></textarea></label><button class="pm-button primary" :disabled="saving" @click="runOperation('preparation')">发起实施准备</button></template>
+              <template v-else-if="activeSection === 'preparation'"><section class="pm-plan-resources"><header><div><b>设备清单</b><small>只列设备目录中的有效设备；同一设备在同一时段被其他服务项占用时不可选取</small></div><button type="button" class="pm-button" @click="planEquipmentPickerOpen = true">＋ 添加设备</button></header><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>设备</th><th>能力码</th><th>检定有效期</th><th>使用时段</th><th>备注</th><th></th></tr></thead><tbody><tr v-for="(row, index) in operationForm.equipment" :key="row.resourceID"><td>{{ planResourceName(row) }}</td><td>{{ planResourceCodes(row) || '—' }}</td><td>{{ planResourceValidUntil(row) }}</td><td><div class="pm-plan-window"><input v-model="row.windowStart" type="date" aria-label="使用时段开始" /><span>~</span><input v-model="row.windowEnd" type="date" aria-label="使用时段结束" /></div></td><td><input v-model.trim="row.note" placeholder="例如 备用机" /></td><td><button type="button" class="pm-link danger" @click="removePlanEquipment(index)">移除</button></td></tr><tr v-if="!operationForm.equipment.length"><td colspan="6" class="pm-empty-mini">请至少选择一台实施设备</td></tr></tbody></table></div></section><label><span>设备申领单 <em>*</em></span><input v-model.trim="operationForm.equipmentRequestID" /></label><label><span>行程预订单 <em>*</em></span><input v-model.trim="operationForm.travelRequestID" /></label><label><span>备注</span><textarea v-model.trim="operationForm.comment" rows="3"></textarea></label><button class="pm-button primary" :disabled="saving" @click="runOperation('preparation')">发起实施准备</button></template>
               <template v-else-if="activeSection === 'exceptions'"><label><span>偏离描述</span><textarea v-model.trim="operationForm.deviationDescription" rows="3" placeholder="选择服务项后填写偏离内容"></textarea></label><label><span>严重度</span><select v-model="operationForm.severity"><option value="LOW">低</option><option value="MEDIUM">中</option><option value="HIGH">高</option></select></label><button class="pm-button primary" :disabled="saving" @click="runOperation('exception-report')">上报偏离</button><label><span>评审偏离 ID</span><input v-model.trim="operationForm.deviationID" placeholder="DV-..." /></label><label><span>评审决定</span><select v-model="operationForm.decision"><option value="RELEASE">放行</option><option value="RETEST">重测</option><option value="TERMINATE">终止</option></select></label><button class="pm-button" :disabled="saving" @click="runOperation('exception-review')">提交偏离评审</button></template>
               <template v-else-if="activeSection === 'reports'"><div class="pm-report-phase" v-if="item && item.report_status"><span>当前报告阶段</span><b>{{ reportStatusLabel[item.report_status] || item.report_status }}</b></div><button v-if="item && reportPhaseNext[item.report_status]" class="pm-button primary" :disabled="saving" @click="runOperation('report-next')">推进至{{ reportStatusLabel[reportPhaseNext[item.report_status]] }}</button><button class="pm-button" :disabled="saving" @click="runOperation('complete')">确认现场实施完成</button></template>
             </div><div v-else class="pm-empty-mini">请先选择服务项</div>
@@ -1317,11 +1368,11 @@ onBeforeUnmount(() => {
       </div>
     </main>
 
-    <div v-if="drawerProject" class="pm-overlay" @click.self="drawerProject = null"><aside class="pm-drawer"><header><div><span>项目详情</span><h2>{{ drawerProject.id }}</h2></div><button class="pm-icon-button" aria-label="关闭" @click="drawerProject = null"><ConsoleIcon name="close" /></button></header><div class="pm-drawer-body"><section class="pm-drawer-hero"><span class="pm-badge" :class="drawerProject.health">{{ drawerProject.health }}</span><h3>{{ drawerProject.customer }}</h3><p>{{ drawerProject.category }}</p><div class="pm-progress"><i :style="{ width: `${drawerProject.progress}%` }"></i></div><b>{{ drawerProject.progress }}% 已完成</b></section><dl><div><dt>合同编号</dt><dd>{{ drawerProject.contract || '—' }}</dd></div><div><dt>服务项数量</dt><dd>{{ drawerProject.services || '—' }}</dd></div><div><dt>负责团队</dt><dd>{{ drawerProject.team || '—' }}</dd></div><div><dt>项目经理</dt><dd>{{ drawerProject.manager || '—' }}</dd></div><div><dt>当前状态</dt><dd>{{ drawerProject.status || '—' }}</dd></div><div><dt>计划完成</dt><dd>{{ drawerProject.due || '—' }}</dd></div></dl><section class="pm-timeline"><h3>最近动态</h3><div v-for="event in projectEvents(drawerProject)" :key="event.id"><i></i><b>{{ eventLabel(event) }}</b><p>{{ event.service_item_id || drawerProject.id }} · 操作人 {{ event.actor_user_id }}</p><time>{{ formatDateTime(event.created_at) }}</time></div><div v-if="!projectEvents(drawerProject).length" class="pm-empty-mini">暂无交付动态</div></section></div><footer><button class="pm-button" @click="drawerProject = null">关闭</button></footer></aside></div>
+    <div v-if="drawerProject" class="pm-overlay" @click.self="drawerProject = null"><aside class="pm-drawer"><header><div><span>项目详情</span><h2>{{ drawerProject.id }}</h2></div><button class="pm-icon-button" aria-label="关闭" @click="drawerProject = null"><ConsoleIcon name="close" /></button></header><div class="pm-drawer-body"><section class="pm-drawer-hero"><span class="pm-badge neutral">{{ drawerProject.status }}</span><h3>{{ drawerProject.customer }}</h3><p>{{ drawerProject.category }}</p><div class="pm-progress"><i :style="{ width: `${drawerProject.progress}%` }"></i></div><b>{{ drawerProject.progress }}% 已完成</b></section><dl><div><dt>合同编号</dt><dd>{{ drawerProject.contract || '—' }}</dd></div><div><dt>服务项数量</dt><dd>{{ drawerProject.services || '—' }}</dd></div><div><dt>负责团队</dt><dd>{{ drawerProject.team || '—' }}</dd></div><div><dt>项目经理</dt><dd>{{ drawerProject.manager || '—' }}</dd></div><div><dt>当前状态</dt><dd>{{ drawerProject.status || '—' }}</dd></div><div><dt>计划完成</dt><dd>{{ drawerProject.due || '—' }}</dd></div></dl><section class="pm-timeline"><h3>最近动态</h3><div v-for="event in projectEvents(drawerProject)" :key="event.id"><i></i><b>{{ eventLabel(event) }}</b><p>{{ event.service_item_id || drawerProject.id }} · 操作人 {{ event.actor_user_id }}</p><time>{{ formatDateTime(event.created_at) }}</time></div><div v-if="!projectEvents(drawerProject).length" class="pm-empty-mini">暂无交付动态</div></section></div><footer><button class="pm-button" @click="drawerProject = null">关闭</button></footer></aside></div>
 
     <div v-if="operationDetail" class="pm-overlay" @click.self="operationDetail = null"><aside class="pm-drawer"><header><div><span>{{ operationSectionLabel(operationDetail.section) }}</span><h2>{{ operationDetail.row.name }}</h2></div><button class="pm-icon-button" aria-label="关闭" @click="operationDetail = null"><ConsoleIcon name="close" /></button></header><div class="pm-drawer-body"><section class="pm-drawer-hero"><span class="pm-badge neutral">{{ operationDetail.row.state }}</span><p>{{ operationDetail.row.detail }}<span v-if="operationDetail.row.warning" class="pm-cell-warning">{{ operationDetail.row.warning }}</span></p><div class="pm-progress"><i :style="{ width: `${operationDetail.row.progress}%` }"></i></div><b>{{ operationDetail.row.progress }}% 已完成</b></section><dl><div v-for="field in operationDetailFields" :key="field.label"><dt>{{ field.label }}</dt><dd>{{ field.value }}</dd></div></dl></div><footer><button class="pm-button" @click="operationDetail = null">关闭</button></footer></aside></div>
 
-    <div v-if="createOpen" class="pm-overlay" @click.self="createOpen = false"><form class="pm-dialog" @submit.prevent="saveCreate"><header><div><span>CREATE</span><h2>新建项目</h2></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="createOpen = false"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>名称 <em>*</em></span><input v-model.trim="createForm.name" required placeholder="请输入项目名称" /></label><template v-if="activeSection === 'projects'"><label><span>已审批合同 <em>*</em></span><select v-model="createForm.contractID" required @change="selectApprovedContract(approvedContracts.find((item) => item.id === createForm.contractID))"><option value="">请选择已通过审批的合同</option><option v-for="contract in approvedContracts" :key="contract.id" :value="contract.id">{{ contract.contract_number }} · {{ contract.title }} · {{ contract.customer_name || '未填写客户' }}</option></select></label><label><span>客户</span><input v-model.trim="createForm.customer" readonly /></label><label><span>合同编号</span><input v-model.trim="createForm.contract" readonly /></label><label><span>实施场所 <em>*</em></span><input v-model.trim="createForm.site" required placeholder="例如 杭州机房" /></label><label><span>技术要求</span><input v-model.trim="createForm.requirement" placeholder="请输入服务项技术要求" /></label><label><span>测试模式</span><select v-model="createForm.testMode"><option value="STANDARD">标准方法</option><option value="PENETRATION">渗透测试</option></select></label><section class="pm-service-links"><header><div><b>关联服务项</b><small>系统名称、系统等级、检测类别均为非必填</small></div><button type="button" class="pm-link" @click="addServiceLink">＋ 增加一行</button></header><div v-for="(link, index) in createForm.serviceLinks" :key="index" class="pm-service-link-row"><input v-model.trim="link.system" placeholder="系统名称" /><input v-model.trim="link.systemLevel" placeholder="系统等级" /><input v-model.trim="link.category" placeholder="检测类别" /><button type="button" class="pm-icon-button" :aria-label="`删除第 ${index + 1} 行`" @click="removeServiceLink(index)">×</button></div></section></template><label><span>备注</span><textarea v-model.trim="createForm.notes" rows="4" placeholder="补充说明（选填）"></textarea></label></div><footer><button type="button" class="pm-button" @click="createOpen = false">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : '保存' }}</button></footer></form></div>
+    <div v-if="planEquipmentPickerOpen" class="pm-overlay" @click.self="planEquipmentPickerOpen = false"><aside class="pm-dialog"><header><div><span>EQUIPMENT</span><h2>添加设备</h2></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="planEquipmentPickerOpen = false"><ConsoleIcon name="close" /></button></header><div class="pm-form"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>设备</th><th>能力码</th><th>检定有效期</th><th></th></tr></thead><tbody><tr v-for="item in planEquipmentPickable" :key="item.resource_id"><td>{{ item.resource_name }}</td><td>{{ (item.codes || []).join(' / ') || '—' }}</td><td>{{ item.valid_until ? item.valid_until.slice(0, 10) : '—' }}</td><td><span v-if="equipmentUnavailableReason(item)" class="pm-form-hint" role="status">{{ equipmentUnavailableReason(item) }}</span><button type="button" class="pm-link" :disabled="!!equipmentUnavailableReason(item)" @click="addPlanEquipment(item)">{{ equipmentUnavailableReason(item) ? '不可选取' : '添加' }}</button></td></tr><tr v-if="!planEquipmentPickable.length"><td colspan="4" class="pm-empty-mini">没有可添加的设备：设备目录为空或已全部加入清单，请先在「资质与能力」中维护设备</td></tr></tbody></table></div></div><footer><button type="button" class="pm-button" @click="planEquipmentPickerOpen = false">关闭</button></footer></aside></div><div v-if="createOpen" class="pm-overlay" @click.self="createOpen = false"><form class="pm-dialog" @submit.prevent="saveCreate"><header><div><span>CREATE</span><h2>新建项目</h2></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="createOpen = false"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>名称 <em>*</em></span><input v-model.trim="createForm.name" required placeholder="请输入项目名称" /></label><template v-if="activeSection === 'projects'"><label><span>已审批合同 <em>*</em></span><select v-model="createForm.contractID" required @change="selectApprovedContract(approvedContracts.find((item) => item.id === createForm.contractID))"><option value="">请选择已通过审批的合同</option><option v-for="contract in approvedContracts" :key="contract.id" :value="contract.id">{{ contract.contract_number }} · {{ contract.title }} · {{ contract.customer_name || '未填写客户' }}</option></select></label><label><span>客户</span><input v-model.trim="createForm.customer" readonly /></label><label><span>合同编号</span><input v-model.trim="createForm.contract" readonly /></label><label><span>实施场所 <em>*</em></span><input v-model.trim="createForm.site" required placeholder="例如 杭州机房" /></label><label><span>技术要求</span><input v-model.trim="createForm.requirement" placeholder="请输入服务项技术要求" /></label><label><span>测试模式</span><select v-model="createForm.testMode"><option value="STANDARD">标准方法</option><option value="PENETRATION">渗透测试</option></select></label><section class="pm-service-links"><header><div><b>关联服务项</b><small>系统名称、系统等级、检测类别均为非必填</small></div><button type="button" class="pm-link" @click="addServiceLink">＋ 增加一行</button></header><div v-for="(link, index) in createForm.serviceLinks" :key="index" class="pm-service-link-row"><input v-model.trim="link.system" placeholder="系统名称" /><input v-model.trim="link.systemLevel" placeholder="系统等级" /><input v-model.trim="link.category" placeholder="检测类别" /><button type="button" class="pm-icon-button" :aria-label="`删除第 ${index + 1} 行`" @click="removeServiceLink(index)">×</button></div></section></template><label><span>备注</span><textarea v-model.trim="createForm.notes" rows="4" placeholder="补充说明（选填）"></textarea></label></div><footer><button type="button" class="pm-button" @click="createOpen = false">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : '保存' }}</button></footer></form></div>
 
     <div v-if="configEditorOpen" class="pm-overlay" @click.self="configEditorOpen = false"><form class="pm-dialog" @submit.prevent="saveConfigRule"><header><div><span>CONFIG</span><h2>{{ configForm.id ? '编辑配置' : '新建配置' }} · {{ activeConfigMeta.label }}</h2></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="configEditorOpen = false"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>配置名称 <em>*</em></span><input v-model.trim="configForm.name" required placeholder="请输入配置名称" /></label><template v-for="field in activeConfigMeta.fields" :key="field.key"><label v-if="field.field === 'select'"><span>{{ field.label }} <em>*</em></span><select v-model="configForm[field.key]" required><option v-for="option in field.options" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label v-else-if="field.field === 'number'"><span>{{ field.label }} <em v-if="field.required">*</em></span><input v-model.number="configForm[field.key]" type="number" :required="field.required" :min="field.min || 0" /></label><label v-else><span>{{ field.label }} <em v-if="field.required">*</em></span><input v-model.trim="configForm[field.key]" :required="field.required" :placeholder="field.placeholder || ''" /></label></template><label><span>启用</span><button type="button" class="pm-switch" :class="{ on: configForm.enabled }" :aria-label="`${configForm.enabled ? '停用' : '启用'}`" @click="configForm.enabled = !configForm.enabled"><i></i></button></label></div><footer><button type="button" class="pm-button" @click="configEditorOpen = false">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : '保存' }}</button></footer></form></div>
     <Transition name="pm-toast"><div v-if="toastMessage" class="pm-toast"><span>✓</span>{{ toastMessage }}</div></Transition>
