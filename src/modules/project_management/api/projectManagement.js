@@ -438,10 +438,12 @@ export function reviewSpecialMethod(itemID, payload) {
  * @returns {Promise<object>} 更新结果。
  * @throws {Error} 状态不允许、无权限或目标阶段非法时抛出。
  */
-export function updateReportStatus(itemID, phase) {
+export function updateReportStatus(itemID, phase, expectedVersion) {
+  // expectedVersion 为服务端返回的服务项版本：带上它，服务端在探测到"我基于的是旧版本"时
+  // 返回 409，避免静默覆盖他人刚提交的修改。
   return request(`/service-items/${encodeURIComponent(itemID)}/report-status`, {
     method: 'POST',
-    body: JSON.stringify({ phase }),
+    body: JSON.stringify({ phase, expected_version: Number(expectedVersion) || 0 }),
   })
 }
 
