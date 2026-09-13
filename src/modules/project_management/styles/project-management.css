@@ -1134,7 +1134,11 @@
 .pm-personnel-check { display: flex; align-items: center; gap: var(--pm-sp-2); font-size: var(--pm-fs-sm); }
 .pm-personnel-check input { width: auto; min-height: 0; }
 
-/* 下拉多选：不使用快捷键，纯点选，符合团队负责人 / 项目经理的选择样式 */
+/* 下拉多选：不使用快捷键，纯点选，与「团队负责人 / 项目经理」的原生 select 保持同一视觉基线。
+   盒高与边框已由与 .pm-form select 相同的 min-height / padding / border 决定，此处不再改动行高
+   （按钮与 select 同样从 `.pm-shell :where(...) { font: inherit }` 继承行高，显式改回 normal 反而
+   会比 select 矮 1–2px）。真正不一致的是箭头：原生 select 由 UA 用文字色（--pm-ink）画一枚细人字，
+   而这里原来是 5px 实心三角、还带 .55 透明度（占位态更浅）。因此换成同一细人字 SVG 并取文字色。 */
 .pm-multi-dropdown { position: relative; }
 .pm-multi-trigger {
   display: flex;
@@ -1143,10 +1147,10 @@
   gap: var(--pm-sp-2);
   width: 100%;
   min-height: var(--pm-h-button);
-  padding: 9px 11px;
+  padding: 9px 26px 9px 11px;
   border: 1px solid var(--pm-line);
   border-radius: var(--pm-r-sm);
-  background: var(--pm-card);
+  background: var(--pm-card) url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5L6 8l3.5-3.5' fill='none' stroke='%230f172a' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 2px center/14px;
   color: var(--pm-ink);
   font-size: var(--pm-fs-ui);
   text-align: left;
@@ -1154,7 +1158,8 @@
 
 .pm-multi-trigger.placeholder { color: var(--pm-muted); }
 .pm-multi-trigger:disabled { cursor: not-allowed; opacity: .6; }
-.pm-multi-caret { flex: 0 0 auto; width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid currentColor; opacity: .55; }
+/* 箭头已由触发器自身的背景图承担；保留元素会与原生 select 的箭头形成两种样式。 */
+.pm-multi-caret { display: none; }
 .pm-multi-menu { position: absolute; z-index: var(--pm-z-dropdown); top: calc(100% + 4px); left: 0; right: 0; max-height: 220px; overflow: auto; padding: 6px; border: 1px solid var(--pm-line); border-radius: var(--pm-r-sm); background: var(--pm-card); box-shadow: var(--pm-shadow-pop); }
 .pm-multi-option { display: flex; align-items: center; gap: var(--pm-sp-2); padding: 7px var(--pm-sp-2); border-radius: var(--pm-r-xs); font-size: var(--pm-fs-sm); cursor: pointer; }
 .pm-multi-option:hover { background: var(--pm-primary-soft); }

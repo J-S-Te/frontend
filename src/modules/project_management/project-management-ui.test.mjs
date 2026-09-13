@@ -194,6 +194,21 @@ test('服务项操作台的工程师改为下拉多选，设备不在任务分�
   // 多选走下拉菜单逐项勾选，样式与团队负责人/项目经理一致，不要求按住 ⌘/Ctrl。
   assert.match(source, /class="pm-multi-dropdown"/)
   assert.match(source, /class="pm-multi-trigger"/)
+  // 外观必须与「团队负责人 / 项目经理」的原生 select 一致：真正不一致的是箭头——原生
+  // select 由 UA 用文字色（--pm-ink）画一枚细人字，而这里原来是 5px 实心三角且带 .55
+  // 透明度（占位态更浅）。因此换成同一细人字 SVG 并取文字色，右侧内边距留出箭头位置。
+  // 盒高由与 select 相同的 min-height / padding / border 决定，不得再改行高：按钮同样从
+  // `.pm-shell :where(...) { font: inherit }` 继承行高，显式改回 normal 会比 select 矮 2px
+  // （已在 headless Chrome 实测：改前 41/40，改后 41/39）。
+  assert.match(styles, /\.pm-multi-trigger \{[^}]*min-height: var\(--pm-h-button\);/)
+  assert.doesNotMatch(styles, /\.pm-multi-trigger \{[^}]*line-height:/)
+  assert.match(styles, /\.pm-multi-trigger \{[^}]*padding: 9px 26px 9px 11px;/)
+  assert.match(styles, /\.pm-multi-trigger \{[^}]*url\("data:image\/svg\+xml;charset=utf-8,[^"]*stroke='%230f172a'/)
+  // 箭头尺寸与内缩需与原生箭头实测一致（headless Chrome 实测：原生 10x6、右缘距边框 4px）。
+  assert.match(styles, /\.pm-multi-trigger \{[^}]*no-repeat right 2px center\/14px;/)
+  assert.match(styles, /\.pm-multi-trigger \{[^}]*border: 1px solid var\(--pm-line\);/)
+  assert.match(styles, /\.pm-multi-trigger \{[^}]*border-radius: var\(--pm-r-sm\);/)
+  assert.match(styles, /\.pm-multi-caret \{ display: none; \}/)
   assert.match(source, /function toggleMulti\(/)
   assert.match(source, /function toggleEngineer\(/)
   assert.match(source, /:checked="engineerSelection\.includes\(option\.id\)"/)
@@ -477,14 +492,17 @@ test('新建项目在缺少合同会话时补授权而不是把用户甩出项�
   assert.doesNotMatch(source, /当前账号没有合同系统访问权限，请联系管理员开通后再新建项目/)
 })
 
-test('项目健康度字段已移除，风险项目改由派生状态统计', () => {
+test('项目健康度字段已移除，风险项目改由服务端派生口径统计', () => {
   // 健康度字段已从领域模型与接口中删除，前端不得再引用 project.health 或健康度样式。
   assert.doesNotMatch(source, /health/i)
   assert.doesNotMatch(styles, /health/i)
   assert.doesNotMatch(source, /健康度/)
-  // 风险口径与服务端 domain.IsRiskProjectStatus 保持一致。
-  assert.match(source, /const riskProjectStatuses = \['异常处理中', '已终止'\]/)
-  assert.match(source, /risk: riskProjectStatuses\.includes\(project\.status\)/)
+  // 风险口径由服务端统一派生（domain.IsRiskProject）：派生状态风险，或存在已终止服务项。
+  // 前端不得再复刻该规则——前后端各写一遍会在口径调整时出现不一致。
+  assert.match(source, /const isRiskProject = \(project\) => Boolean\(project && project\.risk\)/)
+  assert.match(source, /const riskProjectCount = computed\(\(\) => projects\.value\.filter\(isRiskProject\)\.length\)/)
+  assert.match(source, /risk: project\.risk/)
+  assert.doesNotMatch(source, /riskProjectStatuses/)
 })
 
 test('实施计划提交人员清单，设备清单在实施准备登记并校验占用', () => {
@@ -558,7 +576,8 @@ test('实施准备不再要求设备申领单，设备清单本身就是申领�
   assert.doesNotMatch(source, /equipment_request_id/)
   // 行程预订单仍然必填，并随准备事件提交；设备清单一起提交。
   assert.match(source, /<label><span>行程预订单 <em>\*<\/em><\/span>/)
-  assert.match(source, /startImplementationPreparation\(item\.id, \{ travel_request_id: form\.travelRequestID/)
+  // 实施准备提交时带上服务项版本：服务端据此判定"我基于的是不是最新一版"（不匹配即 409）。
+  assert.match(source, /startImplementationPreparation\(item\.id, \{ expected_version: Number\(item\.version\) \|\| 0, travel_request_id: form\.travelRequestID/)
   assert.match(source, /equipment: form\.equipment\.map\(/)
 })
 
@@ -660,6 +679,8 @@ test('拆解调整入口按 project.decomposition.manage 门控并调用真实�
   assert.match(source, /v-if="activeSection === 'decomposition' && canManageDecomposition"[^>]*@click="openDecompositionAdjust"/)
   assert.match(source, /await adjustDecomposition\(project\.id, \{ reason: adjustForm\.value\.reason, supplement_contract_id: adjustForm\.value\.supplementContractID, items \}\)/)
   assert.match(source, /showToast\('拆解已调整，项目进入补充协议处理中'\)/)
+  // 一次提交会替换该项目的全部服务项，对话框必须显示将被替换的目标项目，避免误操作。
+  assert.match(source, /目标项目：<b>\{\{ decompositionProject \?/)
   // 服务端在同一事务里替换全部服务项，提交前必须校验前端必填项。
   assert.match(source, /每个服务项都要填写场所、批次与检测类别/)
   // API 客户端必须走真实端点而不是本地模拟。
