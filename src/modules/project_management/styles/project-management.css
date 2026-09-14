@@ -427,43 +427,70 @@
   font-style: normal;
 }
 
-.pm-user { display: flex; align-items: center; gap: 10px; margin-left: var(--pm-sp-2); padding-left: var(--pm-sp-4); border-left: 1px solid var(--pm-line); }
-.pm-user > span {
-  width: var(--pm-h-control);
-  height: var(--pm-h-control);
+/* 顶栏右上角只保留通知铃铛与账号头像；账号名与退出入口在侧栏底部（与客户与商机系统一致）。
+   头像规格沿用统一 console 壳层：36px 圆形、品牌蓝到紫的渐变、白字首字。 */
+.pm-topbar-avatar,
+.pm-avatar {
+  width: 36px;
+  height: 36px;
   flex: 0 0 auto;
   display: grid;
   place-items: center;
   border-radius: 50%;
-  background: var(--pm-primary-soft);
-  color: var(--pm-blue-text);
-  font-size: var(--pm-fs-hint);
-  font-weight: var(--pm-fw-bold);
+  background: linear-gradient(135deg, var(--pm-primary), var(--pm-violet));
+  color: #fff;
+  font-size: var(--pm-fs-sm);
+  font-weight: var(--pm-fw-semibold);
 }
 
-.pm-user div { display: flex; flex-direction: column; min-width: 0; }
-.pm-user b { color: var(--pm-ink); font-size: var(--pm-fs-sm); font-weight: var(--pm-fw-semibold); }
-.pm-user small { margin-top: 1px; color: var(--pm-muted); font-size: var(--pm-fs-nano); }
+.pm-sidebar-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px var(--pm-sp-4);
+  border-top: 1px solid rgba(255, 255, 255, .06);
+  background: var(--pm-sidebar-hover);
+}
 
-.pm-user-return {
+.pm-user-copy { display: grid; min-width: 0; flex: 1 1 auto; gap: 2px; }
+.pm-user-copy strong {
+  overflow: hidden;
+  color: #fff;
+  font-size: var(--pm-fs-sm);
+  font-weight: var(--pm-fw-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pm-user-copy small {
+  overflow: hidden;
+  color: var(--pm-sidebar-label);
+  font-size: var(--pm-fs-nano);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pm-logout {
   width: var(--pm-h-button);
   height: var(--pm-h-button);
+  flex: 0 0 auto;
   display: grid;
   place-items: center;
-  margin-left: 3px;
+  margin-left: auto;
+  padding: 0;
   border: 0;
   border-radius: var(--pm-r-sm);
   background: transparent;
-  color: var(--pm-muted);
+  color: var(--pm-sidebar-label);
 }
-
-.pm-user-return:hover { color: var(--pm-blue-text); background: var(--pm-primary-soft); }
-.pm-user-return svg { width: 16px; height: 16px; }
+.pm-logout:hover { color: #fff; background: rgba(255, 255, 255, .08); }
+.pm-logout svg { width: 16px; height: 16px; }
 
 .pm-notifications {
   position: fixed;
   top: calc(var(--pm-h-topbar) - 8px);
-  right: 110px;
+  /* 对齐到铃铛右缘：右侧内边距 + 头像 36px + 工具栏间距 7px。
+     顶栏去掉账号名与退出入口后，原先为它们预留的 110px 会让面板飘在内侧。 */
+  right: calc(var(--pm-pad-page) + 43px);
   z-index: var(--pm-z-dropdown);
   width: 340px;
   padding: var(--pm-sp-2);
@@ -1405,7 +1432,7 @@
   .pm-topbar { padding-inline: var(--pm-sp-4); }
   .pm-breadcrumb span,
   .pm-breadcrumb b { display: none; }
-  .pm-user div { display: none; }
+  /* 顶栏此时只剩铃铛与头像：账号名与退出入口本就在侧栏底部，窄屏无需再隐藏任何文案。 */
   .pm-page { padding: var(--pm-sp-5) var(--pm-sp-4) var(--pm-sp-7); }
   .pm-page-head { align-items: flex-start; }
   .pm-decompose-grid,
@@ -1438,7 +1465,6 @@
   .pm-operational-stats { grid-template-columns: 1fr; }
   .pm-form { grid-template-columns: 1fr; }
   .pm-form label:last-child { grid-column: auto; }
-  .pm-user { padding-left: var(--pm-sp-2); margin-left: 0; }
   .pm-service-link-row { grid-template-columns: minmax(0, 1fr); }
   .pm-service-link-row .pm-icon-button { justify-self: end; }
   .pm-desc-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -1457,7 +1483,7 @@
   .pm-tab-pill,
   .pm-pg,
   .pm-icon-button,
-  .pm-user-return,
+  .pm-logout,
   .pm-multi-option,
   .pm-picker-card { min-height: 44px; }
   .pm-switch { width: 44px; height: 26px; }

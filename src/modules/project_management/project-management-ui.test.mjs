@@ -56,6 +56,39 @@ test('项目系统侧边栏返回门户，用户控件负责撤销应用会话',
   assert.match(source, /aria-label="退出应用系统"/)
 })
 
+test('顶栏右上角只剩通知铃铛与账号头像，账号名与退出入口移到侧栏底部', () => {
+  // 对齐客户与商机系统：顶栏右上角不再出现账号名、角色列表与退出按钮；
+  // 原先那串角色码（admin / business_admin / …）在顶栏横铺一行，既不是导航也不是操作。
+  const topTools = source.match(/<div class="pm-top-tools">([\s\S]*?)<\/div>/)
+  assert.ok(topTools, '顶栏工具区应存在')
+  assert.match(topTools[1], /class="pm-icon-button pm-notification-button"/)
+  assert.match(topTools[1], /class="pm-topbar-avatar" aria-hidden="true">\{\{ currentUserInitial \}\}/)
+  assert.doesNotMatch(topTools[1], /class="pm-user"/)
+  assert.doesNotMatch(topTools[1], /logoutSystem|currentUserName|currentUserRoleLabel/)
+  // 账号行落在侧栏底部，结构与客户与商机系统一致：头像 + 账号名 + 角色名 + 退出按钮。
+  assert.match(source, /<div class="pm-sidebar-user">\s*<span class="pm-avatar" aria-hidden="true">\{\{ currentUserInitial \}\}<\/span>\s*<span class="pm-user-copy"><strong :title="currentUserName">\{\{ currentUserName \}\}<\/strong><small :title="currentUserRoleLabel">\{\{ currentUserRoleLabel \}\}<\/small><\/span>\s*<button class="pm-logout" type="button" :disabled="isLoggingOut" aria-label="退出应用系统" @click="logoutSystem"><ConsoleIcon name="logout" \/><\/button>\s*<\/div>/)
+  // 账号行必须是侧栏的最后一个元素（离开侧栏之前），否则又会被顶栏那类信息挤上去。
+  assert.match(source, /<button class="pm-logout"[\s\S]*?<\/div>\s*<\/aside>/)
+  // 角色名取服务端角色目录（不硬编码角色码），目录未就绪时退回角色码，不出现空白。
+  assert.match(source, /const currentUserInitial = computed\(\(\) => \{/)
+  assert.match(source, /const currentUserRoleLabel = computed\(\(\) => \{/)
+  assert.match(source, /const names = new Map\(applicationRoles\.value\.map\(\(role\) => \[role\.code, role\.name\]\)\)/)
+  assert.match(source, /new Set\(roles\.map\(\(role\) => names\.get\(role\) \|\| role\)\.filter\(Boolean\)\)\]\.join\('、'\) \|\| '未分配角色'/)
+  // 目录是静态清单：随工作区加载预热（不 await，失败只影响副标题文案，不阻塞首屏）。
+  const loadWorkspaceBody = source.match(/async function loadWorkspace\(\)[\s\S]*?\n\}/)
+  assert.ok(loadWorkspaceBody, '工作区加载函数应存在')
+  assert.match(loadWorkspaceBody[0], /^\s*loadApplicationRoles\(\)$/m)
+  // 样式：新头像/账号行存在，旧顶栏用户块彻底移除（避免留下死规则）。
+  assert.match(styles, /\.pm-topbar-avatar,\s*\n\.pm-avatar \{/)
+  assert.match(styles, /\.pm-sidebar-user \{/)
+  assert.match(styles, /\.pm-logout \{/)
+  assert.doesNotMatch(styles, /\.pm-user-return/)
+  assert.doesNotMatch(styles, /\.pm-user \{/)
+  // 通知面板原为顶栏账号块预留 110px，去掉该块后必须重新对齐到铃铛。
+  assert.doesNotMatch(styles, /right: 110px/)
+  assert.match(styles, /\.pm-notifications \{[\s\S]*?right: calc\(var\(--pm-pad-page\) \+ 43px\);/)
+})
+
 test('项目管理页面严格遵守 UniLab v1.0 设计规范', () => {
   const css = styles.replace(/\/\*[\s\S]*?\*\//g, '')
   const declarations = (property) =>
