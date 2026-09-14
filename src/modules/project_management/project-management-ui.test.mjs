@@ -795,6 +795,19 @@ test('系统配置的规则可以删除：二次确认、按 kind 定位、删�
   assert.match(pmApiSource, /return request\(`\/rules\/\$\{encodeURIComponent\(id\)\}\?kind=\$\{encodeURIComponent\(kind \|\| ''\)\}`\, \{ method: 'DELETE' \}\)/)
 })
 
+test('设备维护入口按 project.device.manage 门控，创建项目后提示拆解确认', () => {
+  // 站点、资质、规则都按各自权限码门控入口，设备此前漏了：设备模块一旦对更多角色可见
+  // 就会变成「能点必 403」，表单也只能填不能存。
+  assert.match(source, /const canManageDevice = computed\(\(\) => Array\.isArray\(session\.value\?\.permissions\) && session\.value\.permissions\.includes\('project\.device\.manage'\)\)/)
+  assert.match(source, /<form v-if="canManageDevice" class="pm-form pm-equipment-form" @submit\.prevent="saveEquipment">/)
+  assert.match(source, /<button v-if="canManageDevice" class="pm-link" @click="editEquipment\(item\)">/)
+  assert.match(source, /v-if="item\.presence === 'OUT_OF_COMPANY' && \(canManageDevice \|\| canPlanImplementation\)"/)
+  // 只读角色要明确告知原因，而不是留一张静默无按钮的表单。
+  assert.match(source, /当前角色只能查看设备台账；维护设备需要「设备维护」权限。/)
+  // 手动创建的项目必须进入拆解确认，提示里写明下一步。
+  assert.match(source, /showToast\(`项目 \$\{created\.id\} 已创建，服务项待拆解确认`\)/)
+})
+
 test('轻提示按结果切换语义色，错误不再是绿色对勾', () => {
   assert.match(source, /function showToast\(message, type = 'success'\)/)
   assert.match(source, /:class="toastType"/)
