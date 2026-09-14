@@ -410,6 +410,18 @@ export function createRule(payload) {
 }
 
 /**
+ * deleteRule 删除一条配置规则。六套配置各自成表，因此 kind 必填：只有 kind 能确定目标表，
+ * 主键在不同表之间会重复，缺 kind 服务端按参数不合法拒绝。
+ * @param {string|number} id 规则 ID。
+ * @param {string} kind 规则类型（split-rules / warning-rules / automations / permissions / sla / standards）。
+ * @returns {Promise<object>} 被删除的规则。
+ * @throws {Error} 规则不存在、类型缺失、无权限或网关返回非成功状态时抛出。
+ */
+export function deleteRule(id, kind) {
+  return request(`/rules/${encodeURIComponent(id)}?kind=${encodeURIComponent(kind || '')}`, { method: 'DELETE' })
+}
+
+/**
  * updateRule 整行更新配置规则（名称、启停开关与该配置类型专属字段）。
  * @param {string|number} id 规则 ID。
  * @param {Object} payload 更新后的规则内容（必须携带 kind）。
