@@ -449,6 +449,16 @@ export function saveDetectionCategory(payload) {
 }
 
 /**
+ * importDetectionCategories 批量导入检测类别域（页面「导入」入口）。
+ * @param {Array<object>} items 检测类别行（category 必填，其余可选）。
+ * @returns {Promise<{imported: number, skipped: number, errors?: string[]}>} 导入结果摘要。
+ * @throws {Error} 无权限或网关返回非成功状态时抛出。
+ */
+export function importDetectionCategories(items) {
+  return request('/detection-categories/import', { method: 'POST', body: JSON.stringify({ items }) })
+}
+
+/**
  * deleteDetectionCategory 删除一项检测类别；仍被服务项引用时服务端返回冲突。
  * @param {string} category 检测类别。
  * @returns {Promise<object>} 被删除的类别。

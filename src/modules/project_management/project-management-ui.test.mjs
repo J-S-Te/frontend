@@ -848,6 +848,21 @@ test('合同拆解规则配置按原型 PG-CFG-01 做成三段式，口径完全
   // 首帧兜底：接口未返回前表单也必须可渲染（对 null 取属性会直接白屏）。
   assert.match(source, /const splitPolicy = ref\(\{\s*\n\s*dimension_primary: 'batch',/)
   assert.match(source, /missing_rule_action: 'HUMAN_CONFIRM',/)
+  // 检测类别域的必检能力码必须可配置：它是能力校验的输入，只做展示等于没接线。
+  assert.match(source, /<span>必检能力码（默认）<\/span><input v-model\.trim="categoryDialog\.required_codes"/)
+  assert.match(source, /按该类别拆解出的服务项会带上这些能力码，分配工程师时据此做能力校验/)
+  // 导出/导入与原型页头一致：导出在浏览器侧生成 CSV，导入走批量接口并回显逐行原因。
+  assert.match(source, /@click="downloadDetectionCategories">导出</)
+  assert.match(source, /@click="detectionCategoryFileInput\.click\(\)">导入</)
+  assert.match(source, /async function importDetectionCategoryFile\(event\)/)
+  assert.match(source, /const rows = parseDetectionCategoryCSV\(await file\.text\(\)\)/)
+  assert.match(source, /const result = await importDetectionCategories\(rows\)/)
+  assert.match(source, /导入跳过原因：\$\{result\.errors\.slice\(0, 3\)\.join\('；'\)\}/)
+  // CSV 解析必须容忍中文表头与中文枚举值。
+  assert.match(source, /const hasHeader = header\.includes\('检测类别'\)/)
+  assert.match(source, /否: 'NO', 可标记: 'MARKABLE', 必为特殊方法: 'REQUIRED'/)
+  assert.match(pmApiSource, /export function importDetectionCategories\(items\)/)
+  assert.match(pmApiSource, /request\('\/detection-categories\/import', \{ method: 'POST', body: JSON\.stringify\(\{ items \}\) \}\)/)
   // 进入页签时按需加载，不影响其它工作区首屏。
   assert.match(source, /if \(section === 'split-rules'\) loadSplitConfig\(\)/)
 })

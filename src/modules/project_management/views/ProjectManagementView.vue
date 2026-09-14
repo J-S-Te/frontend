@@ -36,6 +36,7 @@ import {
   deleteDetectionCategory,
   listSplitOverrides,
   saveSplitOverride,
+  importDetectionCategories,
   deleteSplitOverride,
   listServiceItems,
   listPersonnel,
@@ -541,6 +542,91 @@ async function submitSplitPolicy() {
     showToast('默认分组规则已保存，对新合同的拆解生效')
   } catch (error) { showToast(error?.message || '默认分组规则保存失败', 'error') }
   finally { splitPolicySaving.value = false }
+}
+
+// 检测类别域 CSV 导出/导入：导出在浏览器侧生成（UTF-8 BOM，Excel 可直接打开），
+// 导入走批量接口并把逐行原因回显，避免整批失败。
+const detectionCategoryFileInput = ref(null)
+const DETECTION_CATEGORY_HEADERS = ['检测类别', '默认体系要求', '必备资质（默认）', '必检能力码', '是否特殊方法', '状态']
+
+function csvCell(value) {
+  const text = String(value ?? '')
+  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
+}
+
+function downloadDetectionCategories() {
+  const lines = [DETECTION_CATEGORY_HEADERS.join(',')]
+  for (const item of detectionCategories.value) {
+    lines.push([
+      item.category, item.system_standard, item.required_qualifications, item.required_codes,
+      specialMethodLabel[item.special_method] || '', item.enabled ? '启用' : '停用',
+    ].map(csvCell).join(','))
+  }
+  const blob = new Blob([`\ufeff${lines.join('\n')}`], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `检测类别域-${new Date().toISOString().slice(0, 10)}.csv`
+  link.click()
+  URL.revokeObjectURL(url)
+  showToast(`已导出 ${detectionCategories.value.length} 条检测类别`)
+}
+
+// 逐行解析 CSV：识别表头、忽略空行，特殊方法/状态同时接受中文与枚举值。
+function parseDetectionCategoryCSV(text) {
+  const rows = []
+  const lines = text.replace(/\r\n?/g, '\n').split('\n').filter((line) => line.trim() !== '')
+  if (!lines.length) return rows
+  const parseLine = (line) => {
+    const cells = []
+    let current = ''
+    let quoted = false
+    for (let index = 0; index < line.length; index += 1) {
+      const char = line[index]
+      if (quoted) {
+        if (char === '"' && line[index + 1] === '"') { current += '"'; index += 1 }
+        else if (char === '"') quoted = false
+        else current += char
+      } else if (char === '"') quoted = true
+      else if (char === ',') { cells.push(current); current = '' }
+      else current += char
+    }
+    cells.push(current)
+    return cells.map((cell) => cell.trim())
+  }
+  const header = parseLine(lines[0])
+  const hasHeader = header.includes('检测类别')
+  const body = hasHeader ? lines.slice(1) : lines
+  const specialFromText = { 否: 'NO', 可标记: 'MARKABLE', 必为特殊方法: 'REQUIRED', NO: 'NO', MARKABLE: 'MARKABLE', REQUIRED: 'REQUIRED' }
+  for (const line of body) {
+    const cells = parseLine(line)
+    if (!cells.length || !cells[0]) continue
+    rows.push({
+      category: cells[0],
+      system_standard: cells[1] || '',
+      required_qualifications: cells[2] || '',
+      required_codes: cells[3] || '',
+      special_method: specialFromText[cells[4]] || 'NO',
+      enabled: (cells[5] || '启用') !== '停用',
+    })
+  }
+  return rows
+}
+
+async function importDetectionCategoryFile(event) {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file) return
+  saving.value = true
+  try {
+    const rows = parseDetectionCategoryCSV(await file.text())
+    if (!rows.length) { showToast('CSV 里没有可导入的检测类别', 'warning'); return }
+    const result = await importDetectionCategories(rows)
+    detectionCategories.value = await listDetectionCategories()
+    showToast(result?.skipped ? `导入完成：成功 ${result.imported} 条，跳过 ${result.skipped} 条` : `导入完成：成功 ${result?.imported ?? 0} 条`)
+    if (result?.errors?.length) splitConfigError.value = `导入跳过原因：${result.errors.slice(0, 3).join('；')}`
+  } catch (error) { showToast(error?.message || 'CSV 导入失败', 'error') }
+  finally { saving.value = false }
 }
 
 function openCategoryDialog(item = null) {
@@ -2263,7 +2349,7 @@ onBeforeUnmount(() => {
             </section>
 
             <section class="pm-panel pm-split-card">
-              <header><div><p class="pm-panel-kicker">DETECTION CATEGORY</p><h2>② 检测类别（服务类型）域</h2></div><span class="pm-filter-count">已配置 {{ detectionCategories.length }} 类</span><div class="pm-panel-actions"><button v-if="canManageRules" type="button" class="pm-button" @click="openCategoryDialog()">＋ 新增</button></div></header>
+              <header><div><p class="pm-panel-kicker">DETECTION CATEGORY</p><h2>② 检测类别（服务类型）域</h2></div><span class="pm-filter-count">已配置 {{ detectionCategories.length }} 类</span><div class="pm-panel-actions"><template v-if="canManageRules"><button type="button" class="pm-button" @click="downloadDetectionCategories">导出</button><button type="button" class="pm-button" :disabled="saving" @click="detectionCategoryFileInput.click()">导入</button><button type="button" class="pm-button primary" @click="openCategoryDialog()">＋ 新增</button><input ref="detectionCategoryFileInput" type="file" accept=".csv,text/csv" class="sr-only" @change="importDetectionCategoryFile" /></template></div></header>
               <div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>检测类别</th><th>默认体系要求</th><th>必备资质（默认）</th><th>是否特殊方法</th><th>关联服务项</th><th>状态</th><th></th></tr></thead><tbody><tr v-for="item in detectionCategories" :key="item.category"><td><b>{{ item.category }}</b></td><td>{{ item.system_standard || '—' }}</td><td>{{ item.required_qualifications || '—' }}</td><td><span class="pm-badge" :class="specialMethodTone[item.special_method] || 'neutral'">{{ specialMethodLabel[item.special_method] || item.special_method }}</span></td><td>{{ item.service_item_count || 0 }} 项</td><td><span class="pm-badge" :class="item.enabled ? 'normal' : 'neutral'">{{ item.enabled ? '启用' : '停用' }}</span></td><td class="pm-split-actions"><button v-if="canManageRules" class="pm-link" @click="openCategoryDialog(item)">编辑</button><button v-if="canManageRules" class="pm-link pm-text-danger" :disabled="saving" @click="removeDetectionCategory(item)">删除</button></td></tr><tr v-if="!detectionCategories.length"><td colspan="7" class="pm-empty-mini">尚未配置检测类别域</td></tr></tbody></table></div>
             </section>
 
@@ -2274,7 +2360,7 @@ onBeforeUnmount(() => {
               <p v-else-if="splitConfigLoading" class="pm-form-hint">配置加载中…</p>
             </section>
 
-            <div v-if="categoryDialog" class="pm-overlay" @click.self="categoryDialog = null"><form class="pm-dialog" @submit.prevent="submitDetectionCategory"><header><div><span>DETECTION CATEGORY</span><h2>{{ categoryDialog.id ? '编辑检测类别' : '新增检测类别' }}</h2></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="categoryDialog = null"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>检测类别 <em>*</em></span><input v-model.trim="categoryDialog.category" required placeholder="例如 等保测评" /></label><label><span>默认体系要求</span><input v-model.trim="categoryDialog.system_standard" placeholder="例如 等保 2.0 / ISO 9001" /></label><label><span>必备资质（默认）</span><input v-model.trim="categoryDialog.required_qualifications" placeholder="例如 等级保护测评师（中级+）" /></label><label><span>是否特殊方法</span><select v-model="categoryDialog.special_method"><option v-for="option in specialMethodOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label><span>状态</span><select v-model="categoryDialog.enabled"><option :value="true">启用</option><option :value="false">停用</option></select></label></div><footer><button type="button" class="pm-button" @click="categoryDialog = null">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : '保存' }}</button></footer></form></div>
+            <div v-if="categoryDialog" class="pm-overlay" @click.self="categoryDialog = null"><form class="pm-dialog" @submit.prevent="submitDetectionCategory"><header><div><span>DETECTION CATEGORY</span><h2>{{ categoryDialog.id ? '编辑检测类别' : '新增检测类别' }}</h2></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="categoryDialog = null"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>检测类别 <em>*</em></span><input v-model.trim="categoryDialog.category" required placeholder="例如 等保测评" /></label><label><span>默认体系要求</span><input v-model.trim="categoryDialog.system_standard" placeholder="例如 等保 2.0 / ISO 9001" /></label><label><span>必备资质（默认）</span><input v-model.trim="categoryDialog.required_qualifications" placeholder="例如 等级保护测评师（中级+）" /></label><label><span>必检能力码（默认）</span><input v-model.trim="categoryDialog.required_codes" placeholder="多个能力码用逗号分隔，例如 DJCP,ISO27001" /><small class="pm-form-hint">填写后，按该类别拆解出的服务项会带上这些能力码，分配工程师时据此做能力校验</small></label><label><span>是否特殊方法</span><select v-model="categoryDialog.special_method"><option v-for="option in specialMethodOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label><span>状态</span><select v-model="categoryDialog.enabled"><option :value="true">启用</option><option :value="false">停用</option></select></label></div><footer><button type="button" class="pm-button" @click="categoryDialog = null">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : '保存' }}</button></footer></form></div>
 
             <div v-if="overrideDialog" class="pm-overlay" @click.self="overrideDialog = null"><form class="pm-dialog pm-dialog-wide" @submit.prevent="submitSplitOverride"><header><div><span>OVERRIDE RULE</span><h2>{{ overrideDialog.id ? '编辑覆盖规则' : '新建覆盖规则' }}</h2><small class="pm-dialog-sub">只覆盖显式给出的设置，其余沿用默认分组规则；命中多条时取优先级最小的那条。</small></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="overrideDialog = null"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>规则名称 <em>*</em></span><input v-model.trim="overrideDialog.name" required placeholder="例如 金融行业批量合同" /></label><label><span>优先级 <em>*</em></span><input v-model.number="overrideDialog.priority" type="number" min="1" required /></label><label><span>客户名称包含</span><input v-model.trim="overrideDialog.match.customer_contains" placeholder="例如 银行 / 证券" /></label><label><span>合同号包含</span><input v-model.trim="overrideDialog.match.contract_contains" placeholder="例如 HT-2026" /></label><label><span>合同服务项数 ≤</span><input v-model.number="overrideDialog.match.max_service_items" type="number" min="0" /></label><label><span>覆盖分组维度 1</span><select v-model="overrideDialog.settings.dimension_primary"><option value="">不覆盖</option><option v-for="option in splitDimensionAnyOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label><span>覆盖分组维度 2</span><select v-model="overrideDialog.settings.dimension_secondary"><option value="">不覆盖</option><option v-for="option in splitDimensionAnyOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label><span>覆盖分组维度 3</span><select v-model="overrideDialog.settings.dimension_tertiary"><option value="">不覆盖</option><option v-for="option in splitDimensionAnyOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label><span>覆盖默认进入状态</span><select v-model="overrideDialog.settings.default_status"><option value="">不覆盖</option><option v-for="option in splitDefaultStatusOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label><span>覆盖缺规则处理</span><select v-model="overrideDialog.settings.missing_rule_action"><option value="">不覆盖</option><option v-for="option in splitMissingRuleOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label><span>状态</span><select v-model="overrideDialog.enabled"><option :value="true">启用</option><option :value="false">停用</option></select></label></div><footer><button type="button" class="pm-button" @click="overrideDialog = null">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : '保存' }}</button></footer></form></div>
           </template>
