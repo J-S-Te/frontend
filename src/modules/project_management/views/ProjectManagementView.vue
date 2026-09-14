@@ -1979,13 +1979,15 @@ function openEquipmentPicker() {
   equipmentPickerKeyword.value = ''
   planEquipmentPickerOpen.value = true
 }
-// 实施准备只可选当前有效的设备：与服务端 FindCapabilities 的 UTC 日期口径一致，
-// 到期日当天仍可使用，次日起不会再出现在选择器中。
+// 实施准备只展示有效期覆盖整个实施计划窗口的设备。设备档案只在“今天”有效仍不够：
+// 若计划结束前检定到期，提交时服务端会拒绝，因此选择阶段就应过滤掉。
 function isEquipmentValidForPreparation(item) {
   const today = new Date().toISOString().slice(0, 10)
+  const usageStart = String(selectedServiceItem.value?.planned_start || '').slice(0, 10) || today
+  const usageEnd = String(selectedServiceItem.value?.planned_end || '').slice(0, 10) || usageStart
   const validFrom = String(item.valid_from || '').slice(0, 10)
   const validUntil = String(item.valid_until || '').slice(0, 10)
-  return item.status === 'ACTIVE' && (!validFrom || validFrom <= today) && (!validUntil || validUntil >= today)
+  return item.status === 'ACTIVE' && (!validFrom || validFrom <= usageStart) && (!validUntil || validUntil >= usageEnd)
 }
 // 选择器列出全部当前有效设备（而不是过滤掉已加入/不可选的），让设备管理员一眼看到完整台账与原因。
 const planEquipmentOptions = computed(() => equipment.value.filter(isEquipmentValidForPreparation))
