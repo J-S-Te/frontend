@@ -867,6 +867,16 @@ test('合同拆解规则配置按原型 PG-CFG-01 做成三段式，口径完全
   assert.match(source, /if \(section === 'split-rules'\) loadSplitConfig\(\)/)
 })
 
+test('已建项目的合同在新建弹窗里直接标注并禁用，不再提交后才报错', () => {
+  // 同一 (合同号, 版本) 在服务端是唯一键：已有项目时再选它必然冲突，
+  // 所以要在选择阶段就把它挡掉（服务端 409 仍是最终兜底）。
+  assert.match(source, /const builtContractKeys = computed\(\(\) => \{/)
+  assert.match(source, /function contractOptionLabel\(contract\) \{/)
+  assert.match(source, /function contractOptionDisabled\(contract\) \{/)
+  assert.match(source, /\（已建项目 \$\{built\.id\}）/)
+  assert.match(source, /<option v-for="contract in approvedContracts" :key="contract\.id" :value="contract\.id" :disabled="contractOptionDisabled\(contract\)">\{\{ contractOptionLabel\(contract\) \}\}<\/option>/)
+})
+
 test('轻提示按结果切换语义色，错误不再是绿色对勾', () => {
   assert.match(source, /function showToast\(message, type = 'success'\)/)
   assert.match(source, /:class="toastType"/)
