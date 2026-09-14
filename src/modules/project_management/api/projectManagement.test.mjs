@@ -44,6 +44,12 @@ test('项目路由只建立 OIDC 会话，权限与 Data Scope 由项目 API 执
   assert.doesNotMatch(routerSource, /session\.permissions[\s\S]*includes\('project\.read'\)/)
 })
 
+test('Nginx 单独转发项目系统的就绪检查，避免被 SPA 兜底成假绿', () => {
+  // /readyz 不在 /api/ 前缀下：没有精确匹配时会被 try_files 兜底返回 200 index.html，
+  // 于是"库结构落后于代码"的部署在门禁上看起来是就绪的。
+  assert.match(nginxSource, /location = \/project_management\/readyz \{\s*proxy_pass http:\/\/\$project_backend\/readyz;/)
+})
+
 test('开发服务器和生产 Nginx 只把项目后端路径转发给 project-api', () => {
   assert.match(viteSource, /DEFAULT_PROJECT_API_PROXY_TARGET = 'http:\/\/127\.0\.0\.1:8082'/)
   assert.match(viteSource, /for \(const path of PROJECT_BACKEND_PATHS\)/)
