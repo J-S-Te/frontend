@@ -600,6 +600,10 @@ export function revokeTeamAssignment(itemID, payload) {
   return request(`/service-items/${encodeURIComponent(itemID)}/team-assignment/revoke`, { method: 'POST', body: JSON.stringify(payload) })
 }
 
+export function returnServiceItemToDecomposition(itemID, payload) {
+  return request(`/service-items/${encodeURIComponent(itemID)}/decomposition-return`, { method: 'POST', body: JSON.stringify(payload) })
+}
+
 /**
  * assignExecutionTeam 为服务项指派执行团队。
  * @param {string|number} itemID 服务项 ID。

@@ -231,6 +231,17 @@ test('待分配阶段支持带原因的受控撤销，且只向具备撤销权�
   assert.match(pmApiSource, /service-items\/\$\{encodeURIComponent\(itemID\)\}\/execution-assignment\/revoke/)
 })
 
+test('待分配服务项可按拆解管理权限退回拆解确认', () => {
+  assert.match(source, /^\s+returnServiceItemToDecomposition,$/m)
+  assert.match(source, /async function returnSelectedToDecomposition\(\)/)
+  assert.match(source, /item\.status !== '待分配'/)
+  assert.match(source, /请输入退回拆解确认的原因/)
+  assert.match(source, /returnServiceItemToDecomposition\(item\.id, \{ reason: String\(reason\)\.trim\(\), expected_version: Number\(item\.version\) \|\| 0 \}\)/)
+  assert.match(source, /v-if="canManageDecomposition"[^>]*@click="returnSelectedToDecomposition"[^>]*>退回拆解确认/)
+  assert.match(source, /DECOMPOSITION_RETURNED: '服务项已退回拆解确认'/)
+  assert.match(pmApiSource, /service-items\/\$\{encodeURIComponent\(itemID\)\}\/decomposition-return/)
+})
+
 test('平台人员查询展示真实目录结果，并按应用角色控制可分配岗位', () => {
   // 三个角色码必须真正发给负责人目录：团队成员由平台按有效授权判定，前端不维护名单。
   assert.match(source, /teamLead: 'team_lead'/)
@@ -335,6 +346,33 @@ test('新建人员资质从基础平台人员目录单选，设备仍使用资�
   assert.match(source, /@change="onCapabilityPersonChange"/)
   assert.match(source, /<label v-else><span>资源名称 <em>\*<\/em><\/span><input v-model\.trim="capabilityDialog\.resource_name" required placeholder="例如 基站A"/)
   assert.match(source, /user_id: form\.resource_type === 'PERSON' \? form\.user_id : ''/)
+})
+
+test('资质与能力编码由系统配置目录统一管理并按类型多选', () => {
+  assert.match(source, /\{ key: 'capability-codes', label: '资质 \/ 能力编码', icon: 'shield' \}/)
+  assert.match(source, /'capability-codes': \['资质 \/ 能力编码配置'/)
+  assert.match(source, /kind: 'capability-codes'[\s\S]*key: 'scope', label: '编码'[\s\S]*key: 'check_type', label: '适用类型'/)
+  assert.match(source, /value: 'PERSON', label: '人员资质'/)
+  assert.match(source, /value: 'EQUIPMENT', label: '设备能力'/)
+  assert.match(source, /function decorateRule\(rule\) \{[\s\S]*resource_type_label: rule\.check_type === 'PERSON' \? '人员资质' : rule\.check_type === 'EQUIPMENT' \? '设备能力'/)
+  assert.match(source, /rules\.value = ruleRows\.map\(decorateRule\)/)
+  // 分表自增 ID 可重复，配置保存回填必须同时比对 kind。
+  assert.match(source, /findIndex\(\(rule\) => rule\.kind === saved\.kind && rule\.id === saved\.id\)/)
+  // 人员与设备各取对应类型的启用目录，两个入口均不再自由输入编码。
+  assert.match(source, /capabilityCodeOptions\('EQUIPMENT', equipmentCodeSelection\.value\)/)
+  assert.match(source, /capabilityCodeOptions\(capabilityDialog\.value\?\.resource_type \|\| 'PERSON', capabilityCodeSelection\.value\)/)
+  assert.match(source, /openMulti === 'equipmentCodes'/)
+  assert.match(source, /openMulti === 'capabilityCodes'/)
+  assert.doesNotMatch(source, /v-model\.trim="equipmentForm\.codes"/)
+  assert.doesNotMatch(source, /v-model\.trim="capabilityDialog\.codes"/)
+  assert.match(source, /codes: \[\.\.\.equipmentCodeSelection\.value\]/)
+  assert.match(source, /codes: \[\.\.\.capabilityCodeSelection\.value\]/)
+  // 空目录明确引导到系统配置；历史停用/删除值标记后保留。
+  assert.match(source, /请先到「系统配置 → 资质 \/ 能力编码」/)
+  assert.match(source, /不在当前编码目录/)
+  assert.match(source, /仅保留历史引用/)
+  assert.match(source, /validateCapabilityCodes\('EQUIPMENT', equipmentCodeSelection\.value, equipmentForm\.value\.originalCodes \|\| \[\]\)/)
+  assert.match(source, /const original = new Set\(originalCodes\.map\(capabilityCodeKey\)\)/)
 })
 
 test('执行总览新增准时交付率趋势、检测类别分布与团队资源利用率三卡，数据由真实记录推导', () => {
@@ -904,9 +942,12 @@ test('合同拆解规则配置按原型 PG-CFG-01 做成三段式，口径完全
   // 首帧兜底：接口未返回前表单也必须可渲染（对 null 取属性会直接白屏）。
   assert.match(source, /const splitPolicy = ref\(\{\s*\n\s*dimension_primary: 'batch',/)
   assert.match(source, /missing_rule_action: 'HUMAN_CONFIRM',/)
-  // 检测类别域的必检能力码必须可配置：它是能力校验的输入，只做展示等于没接线。
-  assert.match(source, /<span>必检能力码（默认）<\/span><input v-model\.trim="categoryDialog\.required_codes"/)
-  assert.match(source, /按该类别拆解出的服务项会带上这些能力码，分配工程师时据此做能力校验/)
+  // 检测类别域的必检能力码仅用于工程师校验，因此从 PERSON 编码目录多选；保存仍兼容后端逗号字符串。
+  assert.match(source, /const detectionRequiredCodeOptions = computed\(\(\) => capabilityCodeOptions\('PERSON', detectionRequiredCodeSelection\.value\)\)/)
+  assert.match(source, /openMulti === 'detectionRequiredCodes'/)
+  assert.match(source, /required_codes: detectionRequiredCodeSelection\.value\.join\(','\)/)
+  assert.doesNotMatch(source, /v-model\.trim="categoryDialog\.required_codes"/)
+  assert.match(source, /按该类别拆解出的服务项会带上这些人员资质编码，分配工程师时据此校验/)
   // 导出/导入与原型页头一致：导出在浏览器侧生成 CSV，导入走批量接口并回显逐行原因。
   assert.match(source, /@click="downloadDetectionCategories">导出</)
   assert.match(source, /@click="detectionCategoryFileInput\.click\(\)">导入</)

@@ -47,6 +47,7 @@ import {
   assignTeam,
   assignExecutionTeam,
   revokeTeamAssignment,
+  returnServiceItemToDecomposition,
   revokeExecutionAssignment,
   revokeImplementationPlan,
   revokePreparation,
@@ -98,6 +99,7 @@ const allNavGroups = [
   ] },
   { label: '系统配置', items: [
     { key: 'split-rules', label: '合同拆解规则', icon: 'settings' },
+    { key: 'capability-codes', label: '资质 / 能力编码', icon: 'shield' },
     { key: 'warning-rules', label: '冲突预警规则', icon: 'shield' },
     { key: 'automations', label: '自动化触发', icon: 'reset' },
     { key: 'permissions', label: '字段级权限', icon: 'role' },
@@ -125,6 +127,7 @@ const pageMeta = {
   standards: ['检测标准方法更新 · 影响评估', '识别标准变更对在途项目的影响'],
   reports: ['报告编制状态维护', '衔接实施完成、报告编制、复核与签发'],
   'split-rules': ['合同拆解规则配置', '默认分组规则 + 检测类别域 + 覆盖规则：合同生效后自动生成服务项的分组与初始状态口径'],
+  'capability-codes': ['资质 / 能力编码配置', '按人员资质与设备能力分类维护可选编码，停用编码仅保留历史引用'],
   'warning-rules': ['冲突预警规则配置', '配置资源、资质、地域与排期冲突策略'],
   automations: ['自动化触发配置', '维护项目状态变化后的自动任务与通知'],
   permissions: ['字段级权限配置', '按角色控制敏感字段的查看与编辑范围'],
@@ -171,7 +174,7 @@ const siteError = ref('')
 const locatingSite = ref(false)
 // 坐标未采集与"坐标为 0"必须区分：0,0 是合法位置，因此单独用 has_coordinates 表达。
 const emptySite = () => ({ site_code: '', name: '', address: '', latitude: '', longitude: '', has_coordinates: false, status: 'ACTIVE', notes: '' })
-const equipmentForm = ref({ resourceID: '', resourceName: '', codes: '', validFrom: '', validUntil: '', status: 'ACTIVE', usageScope: 'ANY' })
+const equipmentForm = ref({ resourceID: '', resourceName: '', codes: [], originalCodes: [], validFrom: '', validUntil: '', status: 'ACTIVE', usageScope: 'ANY' })
 const dashboard = ref({ project_count: 0, in_flight_projects: 0, risk_projects: 0, service_items: 0, status_counts: {} })
 // SLA 超期/临近项来自服务端 GET /delivery/sla-overdue，口径由后端统一计算（计划完成超期 + 状态停留超期/临近）。
 const slaOverdueItems = ref([])
@@ -359,8 +362,9 @@ const canManageDevice = computed(() => Array.isArray(session.value?.permissions)
 const selectedServiceItemIDs = ref([])
 const operationForm = ref({ teamLeadID: '', projectManagerID: '', engineerIDs: '', plannedStart: '', plannedEnd: '', penetrationTestPlan: '', authDocNo: '', authStart: '', authEnd: '', authScope: '', testScope: '', testWindow: '', emergencyContact: '', rollbackPlan: '', reviewComment: '', personnel: [], equipment: [], travelRequestID: '', rawData: '', environment: '', deviationDescription: '', severity: 'MEDIUM', decision: 'RELEASE', comment: '' })
 
-// 六套真实配置表的列与编辑字段元数据。
+// 各套真实配置表的列与编辑字段元数据。
 const configKindsMeta = [
+  { kind: 'capability-codes', label: '资质 / 能力编码', columns: [{ key: 'scope', label: '编码' }, { key: 'resource_type_label', label: '适用类型' }], fields: [{ key: 'scope', label: '编码', field: 'text', required: true, placeholder: '例如 CISP / ISO27001 / EQ-SCAN' }, { key: 'check_type', label: '适用类型', field: 'select', required: true, options: [{ value: 'PERSON', label: '人员资质' }, { value: 'EQUIPMENT', label: '设备能力' }] }] },
   { kind: 'warning-rules', label: '预警规则', columns: [{ key: 'check_type', label: '检查类型' }, { key: 'threshold', label: '阈值' }], fields: [{ key: 'check_type', label: '检查类型', field: 'text', required: true, placeholder: '例如 资质能力冲突 / 排期冲突 / 场地冲突' }, { key: 'threshold', label: '阈值', field: 'text', placeholder: '例如 连续 3 项冲突' }] },
   { kind: 'automations', label: '自动化动作', columns: [{ key: 'trigger', label: '触发事件' }, { key: 'target', label: '目标' }], fields: [{ key: 'trigger', label: '触发事件', field: 'text', required: true, placeholder: '例如 DEVIATION_REPORTED' }, { key: 'target', label: '目标', field: 'text', required: true, placeholder: '例如 通知技术总监 / 创建整改工单' }] },
   { kind: 'permissions', label: '字段级权限', columns: [{ key: 'role_code', label: '角色' }, { key: 'field_name', label: '字段' }, { key: 'access_level', label: '访问级别' }], fields: [{ key: 'role_codes', label: '角色', field: 'roles', required: true }, { key: 'field_name', label: '字段', field: 'text', required: true, placeholder: '例如 report_revenue' }, { key: 'access_level', label: '访问级别', field: 'select', required: true, options: [{ value: 'view', label: '只读可见' }, { value: 'edit', label: '可编辑' }, { value: 'hidden', label: '隐藏' }] }] },
@@ -429,9 +433,11 @@ function openConfigEdit(rule) {
   configEditorOpen.value = true
 }
 function applySavedRule(saved) {
-  const index = rules.value.findIndex((rule) => rule.id === saved.id)
-  if (index >= 0) rules.value.splice(index, 1, saved)
-  else rules.value.push(saved)
+  // 规则分表的自增 ID 可以重复，因此列表回填必须以 kind + id 作为联合身份。
+  const index = rules.value.findIndex((rule) => rule.kind === saved.kind && rule.id === saved.id)
+  const normalized = decorateRule(saved)
+  if (index >= 0) rules.value.splice(index, 1, normalized)
+  else rules.value.push(normalized)
 }
 async function saveConfigRule() {
   saving.value = true
@@ -640,14 +646,15 @@ async function importDetectionCategoryFile(event) {
 function openCategoryDialog(item = null) {
   categoryDialog.value = item
     ? { ...item }
-    : { category: '', system_standard: '', required_qualifications: '', special_method: 'NO', enabled: true }
+    : { category: '', system_standard: '', required_qualifications: '', required_codes: '', special_method: 'NO', enabled: true }
+  openMulti.value = ''
 }
 
 async function submitDetectionCategory() {
   if (!categoryDialog.value) return
   saving.value = true
   try {
-    await saveDetectionCategory(categoryDialog.value)
+    await saveDetectionCategory({ ...categoryDialog.value, required_codes: detectionRequiredCodeSelection.value.join(',') })
     categoryDialog.value = null
     detectionCategories.value = await listDetectionCategories()
     showToast('检测类别已保存')
@@ -938,6 +945,9 @@ function navigateMulti(event, options, name, toggle) {
 }
 function onMultiKeydown(event) { navigateMulti(event, engineerOptions.value, 'engineer', (option) => toggleEngineer(option.id)) }
 function onConfigRolesKeydown(event) { navigateMulti(event, configRoleOptions.value, 'configRoles', (option) => toggleConfigRole(option.code)) }
+function onEquipmentCodesKeydown(event) { navigateMulti(event, equipmentCodeOptions.value, 'equipmentCodes', (option) => toggleEquipmentCode(option.code)) }
+function onCapabilityCodesKeydown(event) { navigateMulti(event, capabilityDialogCodeOptions.value, 'capabilityCodes', (option) => toggleCapabilityCode(option.code)) }
+function onDetectionRequiredCodesKeydown(event) { navigateMulti(event, detectionRequiredCodeOptions.value, 'detectionRequiredCodes', (option) => toggleDetectionRequiredCode(option.code)) }
 // 已选人员在触发器下方以 chip 回显，支持单个移除；摘要文本保留给屏幕阅读器与窄屏。
 const engineerChipOptions = computed(() => engineerSelection.value.map((id) => engineerOptions.value.find((option) => option.id === id) || { id, name: id }))
 const selectedServiceItems = computed(() => serviceItems.value.filter((item) => selectedServiceItemIDs.value.includes(item.id)))
@@ -1097,7 +1107,82 @@ const operationRows = computed(() => ({
 }[activeSection.value] || []))
 
 const rules = ref([])
+function decorateRule(rule) {
+  return { ...rule, resource_type_label: rule.check_type === 'PERSON' ? '人员资质' : rule.check_type === 'EQUIPMENT' ? '设备能力' : rule.check_type }
+}
 const visibleRules = computed(() => rules.value.filter((rule) => rule.kind === activeSection.value))
+
+// 资质 / 能力编码由租户级系统配置统一供给人员资质和设备能力表单。
+// 已停用或已删除但仍被历史档案引用的编码会补回到选项并显式标记，
+// 避免编辑其他字段时把历史编码静默丢失。
+const capabilityCodeCatalog = computed(() => rules.value.filter((rule) => rule.kind === 'capability-codes' && String(rule.scope || '').trim()))
+function capabilityCodeKey(code) { return String(code || '').trim().toUpperCase() }
+function canonicalCapabilityCodes(resourceType, codes) {
+  const configured = new Map(capabilityCodeCatalog.value
+    .filter((rule) => rule.check_type === resourceType && rule.enabled)
+    .map((rule) => [capabilityCodeKey(rule.scope), String(rule.scope).trim()]))
+  return (codes || []).map((code) => configured.get(capabilityCodeKey(code)) || String(code || '').trim()).filter(Boolean)
+}
+function capabilityCodeOptions(resourceType, selectedCodes = []) {
+  const catalog = capabilityCodeCatalog.value.filter((rule) => rule.check_type === resourceType)
+  const options = catalog
+    .filter((rule) => rule.enabled)
+    .map((rule) => ({ code: String(rule.scope).trim(), name: `${String(rule.scope).trim()} · ${rule.name}`, unavailable: false }))
+    .sort((a, b) => a.code.localeCompare(b.code, 'zh-CN'))
+  const activeKeys = new Set(options.map((option) => capabilityCodeKey(option.code)))
+  const catalogByCode = new Map(catalog.map((rule) => [capabilityCodeKey(rule.scope), rule]))
+  for (const selected of selectedCodes || []) {
+    const code = String(selected || '').trim()
+    const key = capabilityCodeKey(code)
+    if (!code || activeKeys.has(key)) continue
+    const configured = catalogByCode.get(key)
+    options.push({
+      code,
+      name: `${code} · ${configured?.name || '历史编码'}`,
+      unavailable: true,
+      unavailableReason: configured ? '已停用' : '不在当前编码目录',
+    })
+    activeKeys.add(key)
+  }
+  return options
+}
+const equipmentCodeSelection = computed({
+  get: () => Array.isArray(equipmentForm.value.codes) ? equipmentForm.value.codes : selectedIDs(equipmentForm.value.codes),
+  set: (values) => { equipmentForm.value.codes = [...values] },
+})
+const equipmentCodeOptions = computed(() => capabilityCodeOptions('EQUIPMENT', equipmentCodeSelection.value))
+const capabilityCodeSelection = computed({
+  get: () => Array.isArray(capabilityDialog.value?.codes) ? capabilityDialog.value.codes : selectedIDs(capabilityDialog.value?.codes),
+  set: (values) => { if (capabilityDialog.value) capabilityDialog.value.codes = [...values] },
+})
+const capabilityDialogCodeOptions = computed(() => capabilityCodeOptions(capabilityDialog.value?.resource_type || 'PERSON', capabilityCodeSelection.value))
+const detectionRequiredCodeSelection = computed({
+  get: () => canonicalCapabilityCodes('PERSON', selectedIDs(categoryDialog.value?.required_codes)),
+  set: (values) => { if (categoryDialog.value) categoryDialog.value.required_codes = values.join(',') },
+})
+// 检测类别的 required_codes 只用于分配工程师时的人员能力校验，
+// 因此只提供 PERSON 编码；历史停用/删除值仍显式回显。
+const detectionRequiredCodeOptions = computed(() => capabilityCodeOptions('PERSON', detectionRequiredCodeSelection.value))
+function hasActiveCapabilityCodes(resourceType) {
+  return capabilityCodeCatalog.value.some((rule) => rule.check_type === resourceType && rule.enabled)
+}
+function toggleCodeSelection(selection, update, code) {
+  const selected = new Map(selection.map((value) => [capabilityCodeKey(value), value]))
+  const key = capabilityCodeKey(code)
+  if (selected.has(key)) selected.delete(key)
+  else selected.set(key, code)
+  update([...selected.values()])
+}
+function toggleEquipmentCode(code) { toggleCodeSelection(equipmentCodeSelection.value, (values) => { equipmentCodeSelection.value = values }, code) }
+function toggleCapabilityCode(code) { toggleCodeSelection(capabilityCodeSelection.value, (values) => { capabilityCodeSelection.value = values }, code) }
+function toggleDetectionRequiredCode(code) { toggleCodeSelection(detectionRequiredCodeSelection.value, (values) => { detectionRequiredCodeSelection.value = values }, code) }
+function validateCapabilityCodes(resourceType, codes, originalCodes = []) {
+  if (!codes.length) { showToast('请至少选择一个资质 / 能力编码', 'warning'); return false }
+  const original = new Set(originalCodes.map(capabilityCodeKey))
+  const invalidAdded = capabilityCodeOptions(resourceType, codes).filter((option) => option.unavailable && !original.has(capabilityCodeKey(option.code)))
+  if (invalidAdded.length) { showToast(`不能新增已停用或不在目录的编码：${invalidAdded.map((option) => option.code).join('、')}`, 'warning'); return false }
+  return true
+}
 
 // 原型 PG-RES-04 的七步交付链：按当前服务项的真实状态与人员/计划数据判定，
 // 只读展示，不引入任何本地状态机。
@@ -1343,7 +1428,7 @@ async function loadWorkspace() {
     const [projectRows, itemRows, ruleRows, eventRows, capabilityRows, dashboardData, sessionData, navigationData] = await Promise.all([listProjects(), listServiceItems(), listRules(), listDeliveryEvents(), listCapabilities(), getDashboard(), getProjectSession(), getProjectNavigation()])
     projects.value = projectRows
     serviceItems.value = itemRows.map((item) => ({ ...item, selected: ['待确认', '待复核'].includes(item.status) }))
-    rules.value = ruleRows
+    rules.value = ruleRows.map(decorateRule)
     deliveryEvents.value = eventRows
     capabilities.value = capabilityRows
     dashboard.value = dashboardData
@@ -1546,11 +1631,13 @@ function equipmentPresenceLabel(item) {
   return item.presence === 'OUT_OF_COMPANY' ? '不在公司（借出中）' : '在公司'
 }
 function editEquipment(item) {
+  const codes = canonicalCapabilityCodes('EQUIPMENT', item.codes || [])
   equipmentForm.value = {
-    resourceID: item.resource_id, resourceName: item.resource_name, codes: (item.codes || []).join(','),
+    resourceID: item.resource_id, resourceName: item.resource_name, codes, originalCodes: [...codes],
     validFrom: item.valid_from?.slice(0, 10) || '', validUntil: item.valid_until?.slice(0, 10) || '',
     status: item.status || 'ACTIVE', usageScope: item.usage_scope || 'ANY',
   }
+  openMulti.value = ''
 }
 // 归还：把设备从借出它的服务项清单里释放；设备维护人员也能操作，现场可能提前寄回。
 async function returnEquipment(item) {
@@ -1565,9 +1652,10 @@ async function returnEquipment(item) {
   finally { saving.value = false }
 }
 async function saveEquipment() {
+  if (!validateCapabilityCodes('EQUIPMENT', equipmentCodeSelection.value, equipmentForm.value.originalCodes || [])) return
   saving.value = true
   try {
-    const item = await upsertEquipment({ resource_id: equipmentForm.value.resourceID, resource_name: equipmentForm.value.resourceName, codes: selectedIDs(equipmentForm.value.codes), valid_from: equipmentForm.value.validFrom ? new Date(equipmentForm.value.validFrom).toISOString() : '', valid_until: equipmentForm.value.validUntil ? new Date(equipmentForm.value.validUntil).toISOString() : '', status: equipmentForm.value.status, usage_scope: equipmentForm.value.usageScope })
+    const item = await upsertEquipment({ resource_id: equipmentForm.value.resourceID, resource_name: equipmentForm.value.resourceName, codes: [...equipmentCodeSelection.value], valid_from: equipmentForm.value.validFrom ? new Date(equipmentForm.value.validFrom).toISOString() : '', valid_until: equipmentForm.value.validUntil ? new Date(equipmentForm.value.validUntil).toISOString() : '', status: equipmentForm.value.status, usage_scope: equipmentForm.value.usageScope })
     equipment.value = [item, ...equipment.value.filter((row) => row.resource_id !== item.resource_id)]
     showToast('设备信息已保存')
   } catch (error) { showToast(error?.message || '设备信息保存失败', 'error') }
@@ -1611,19 +1699,25 @@ function onCapabilityTypeChange() {
   if (!capabilityDialog.value) return
   if (capabilityAutoID.value) capabilityDialog.value.resource_id = nextResourceID(capabilityDialog.value.resource_type)
   if (capabilityDialog.value.resource_type !== 'PERSON') capabilityDialog.value.user_id = ''
+  capabilityDialog.value.codes = []
+  capabilityDialog.value.original_codes = []
+  openMulti.value = ''
   if (capabilityDialog.value.resource_type === 'PERSON') void loadCapabilityPersonnel()
 }
 
 function openCapabilityDialog(item) {
   capabilityAutoID.value = !item
+  const codes = item ? canonicalCapabilityCodes(item.resource_type, item.codes || []) : []
   capabilityDialog.value = item
-    ? { resource_type: item.resource_type, resource_id: item.resource_id, resource_name: item.resource_name, user_id: item.user_id || '', codes: (item.codes || []).join(','), valid_from: item.valid_from?.slice(0, 10) || '', valid_until: item.valid_until?.slice(0, 10) || '', status: item.status || 'ACTIVE', usage_scope: item.usage_scope || 'ANY' }
-    : { resource_type: 'PERSON', resource_id: nextResourceID('PERSON'), resource_name: '', user_id: '', codes: '', valid_from: '', valid_until: '', status: 'ACTIVE', usage_scope: 'ANY' }
+    ? { resource_type: item.resource_type, resource_id: item.resource_id, resource_name: item.resource_name, user_id: item.user_id || '', codes, original_codes: [...codes], valid_from: item.valid_from?.slice(0, 10) || '', valid_until: item.valid_until?.slice(0, 10) || '', status: item.status || 'ACTIVE', usage_scope: item.usage_scope || 'ANY' }
+    : { resource_type: 'PERSON', resource_id: nextResourceID('PERSON'), resource_name: '', user_id: '', codes: [], original_codes: [], valid_from: '', valid_until: '', status: 'ACTIVE', usage_scope: 'ANY' }
+  openMulti.value = ''
   if (capabilityDialog.value.resource_type === 'PERSON') void loadCapabilityPersonnel()
 }
 
 async function saveCapability() {
   if (!capabilityDialog.value) return
+  if (!validateCapabilityCodes(capabilityDialog.value.resource_type, capabilityCodeSelection.value, capabilityDialog.value.original_codes || [])) return
   saving.value = true
   try {
     const form = capabilityDialog.value
@@ -1632,7 +1726,7 @@ async function saveCapability() {
       resource_id: form.resource_id,
       resource_name: form.resource_name,
       user_id: form.resource_type === 'PERSON' ? form.user_id : '',
-      codes: selectedIDs(form.codes),
+      codes: [...capabilityCodeSelection.value],
       valid_from: form.valid_from ? new Date(form.valid_from).toISOString() : '',
       valid_until: form.valid_until ? new Date(form.valid_until).toISOString() : '',
       status: form.status,
@@ -1788,7 +1882,7 @@ function projectEvents(project) {
 function eventLabel(event) {
   // 事件名必须与后端 application/delivery.go 的常量逐字一致：曾把现场完成的事件名
   // 多写一层 IMPLEMENTATION 前缀，导致交付趋势/准时率按该名过滤时恒为空。
-  return ({ CONTRACT_ACTIVATED: '合同生效并生成项目', CONTRACT_STAMP_STATUS_SYNCED: '盖章合同状态已同步', DECOMPOSITION_ADJUSTED: '服务项拆解已调整', TEAM_ASSIGNED: '团队负责人已分配', EXECUTION_TEAM_ASSIGNED: '项目经理及工程师已指派', IMPLEMENTATION_PLANNED: '现场实施计划已发布', PREPARATION_STARTED: '实施准备已发起', FIELD_RECORD_SUBMITTED: '现场原始记录已提交', FIELD_COMPLETED: '现场实施已完成', EQUIPMENT_RETURNED: '设备已归还', DEVIATION_REPORTED: '现场偏离已上报', DEVIATION_REVIEWED: '偏离评审已完成', SPECIAL_METHOD_REVIEWED: '特殊方法复核已完成', REPORT_STATUS_UPDATED: '报告阶段已推进', WARNING_TRIGGERED: '预警规则已触发', AUTOMATION_TRIGGERED: '自动化动作已执行' })[event.type] || event.type
+  return ({ CONTRACT_ACTIVATED: '合同生效并生成项目', CONTRACT_STAMP_STATUS_SYNCED: '盖章合同状态已同步', DECOMPOSITION_ADJUSTED: '服务项拆解已调整', DECOMPOSITION_RETURNED: '服务项已退回拆解确认', TEAM_ASSIGNED: '团队负责人已分配', EXECUTION_TEAM_ASSIGNED: '项目经理及工程师已指派', IMPLEMENTATION_PLANNED: '现场实施计划已发布', PREPARATION_STARTED: '实施准备已发起', FIELD_RECORD_SUBMITTED: '现场原始记录已提交', FIELD_COMPLETED: '现场实施已完成', EQUIPMENT_RETURNED: '设备已归还', DEVIATION_REPORTED: '现场偏离已上报', DEVIATION_REVIEWED: '偏离评审已完成', SPECIAL_METHOD_REVIEWED: '特殊方法复核已完成', REPORT_STATUS_UPDATED: '报告阶段已推进', WARNING_TRIGGERED: '预警规则已触发', AUTOMATION_TRIGGERED: '自动化动作已执行' })[event.type] || event.type
 }
 
 function toggleRow(id) {
@@ -2126,6 +2220,27 @@ async function revokeSelectedAssignment(kind) {
     await loadWorkspace()
   } catch (error) {
     showToast(error?.message || '撤销分配失败，请刷新后重试', 'error')
+  } finally { saving.value = false }
+}
+
+async function returnSelectedToDecomposition() {
+  const items = selectedServiceItems.value
+  if (!items.length) { showToast('请至少选择一个服务项', 'warning'); return }
+  if (items.some((item) => item.status !== '待分配')) { showToast('仅可将待分配服务项退回拆解确认', 'warning'); return }
+  const reason = window.prompt('请输入退回拆解确认的原因：')
+  if (reason === null) return
+  if (!String(reason).trim()) { showToast('退回原因不能为空', 'warning'); return }
+  saving.value = true
+  try {
+    for (const item of items) {
+      await returnServiceItemToDecomposition(item.id, { reason: String(reason).trim(), expected_version: Number(item.version) || 0 })
+    }
+    showToast(`已将 ${items.length} 个服务项退回拆解确认，原分配与校验结果已清除`)
+    selectedServiceItemIDs.value = []
+    await loadWorkspace()
+  } catch (error) {
+    showToast(error?.message || '退回拆解确认失败，请刷新后重试', 'error')
+    if (error?.status === 409) await loadWorkspace()
   } finally { saving.value = false }
 }
 
@@ -2552,12 +2667,65 @@ onBeforeUnmount(() => {
           <div v-if="siteDialog" class="pm-overlay" @click.self="siteDialog = null"><form class="pm-dialog" @submit.prevent="saveSite"><header><div><span>SITE</span><h2>{{ siteDialog.site_code ? '编辑站点' : '新建站点' }}</h2></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="siteDialog = null"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>站点编码 <em>*</em></span><input v-model.trim="siteDialog.site_code" required placeholder="例如 SITE-HZ-01" /></label><label><span>站点名称 <em>*</em></span><input v-model.trim="siteDialog.name" required placeholder="例如 杭州机房" /></label><label class="pm-span-full"><span>地址</span><input v-model.trim="siteDialog.address" placeholder="例如 杭州市余杭区..." /></label><div class="pm-field pm-span-full"><span>坐标</span><div class="pm-form-row"><input v-model.trim="siteDialog.latitude" type="number" step="any" aria-label="纬度" placeholder="纬度" /><input v-model.trim="siteDialog.longitude" type="number" step="any" aria-label="经度" placeholder="经度" /><button type="button" class="pm-button" :disabled="locatingSite" @click="locateCurrentSite">{{ locatingSite ? '定位中…' : '定位当前位置' }}</button></div><p class="pm-form-hint">在现场点击「定位当前位置」可由浏览器自动获取坐标；留空表示尚未采集。</p></div><label><span>状态</span><select v-model="siteDialog.status"><option value="ACTIVE">启用</option><option value="DISABLED">停用</option></select></label><label class="pm-span-half"><span>备注</span><textarea v-model.trim="siteDialog.notes" rows="2"></textarea></label></div><footer><button type="button" class="pm-button" @click="siteDialog = null">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : '保存站点' }}</button></footer></form></div>
         </template>
         <template v-else-if="activeSection === 'equipment'">
-          <section class="pm-panel pm-equipment-layout"><header><div><p class="pm-panel-kicker">EQUIPMENT CAPABILITY</p><h2>设备能力维护</h2><p>维护设备基础信息、能力编码、检定有效期与启停状态。</p></div></header><form v-if="canManageDevice" class="pm-form pm-equipment-form" @submit.prevent="saveEquipment"><label><span>设备编号 <em>*</em></span><input v-model.trim="equipmentForm.resourceID" required placeholder="例如 EQ-001" /></label><label><span>设备名称 <em>*</em></span><input v-model.trim="equipmentForm.resourceName" required placeholder="请输入设备名称" /></label><label><span>能力编码 <em>*</em></span><input v-model.trim="equipmentForm.codes" required placeholder="多个编码用逗号分隔" /></label><label><span>检定开始</span><input v-model="equipmentForm.validFrom" type="date" /></label><label><span>检定到期</span><input v-model="equipmentForm.validUntil" type="date" /></label><label><span>状态</span><select v-model="equipmentForm.status"><option value="ACTIVE">启用</option><option value="DISABLED">停用</option></select></label><label><span>使用范围</span><select v-model="equipmentForm.usageScope"><option value="ANY">可借出</option><option value="COMPANY_ONLY">仅在公司使用（不可借出）</option></select></label><button class="pm-button primary">保存设备</button></form><p v-else class="pm-form-hint">当前角色只能查看设备台账；维护设备需要「设备维护」权限。</p></section><section class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>设备编号</th><th>设备名称</th><th>能力</th><th>检定有效期</th><th>状态</th><th>在位 / 使用范围</th><th>操作</th></tr></thead><tbody><tr v-for="item in equipment" :key="item.resource_id"><td class="mono">{{ item.resource_id }}</td><td><b>{{ item.resource_name }}</b></td><td><span v-if="!(item.codes || []).length">—</span><span v-else class="pm-code-pills"><span v-for="code in item.codes" :key="code" class="pm-code-pill">{{ code }}</span></span></td><td>{{ item.valid_until ? formatDateTime(item.valid_until) : '未设置' }}</td><td><span class="pm-badge" :class="statusTone(item.status)">{{ item.status === 'ACTIVE' ? '启用' : '停用' }}</span></td><td><span class="pm-badge" :class="item.presence === 'OUT_OF_COMPANY' ? 'amber' : 'normal'">{{ equipmentPresenceLabel(item) }}</span><small v-if="item.borrowed_by" class="pm-cell-sub">{{ item.borrowed_by }} · {{ item.borrowed_window }}</small><small v-if="item.usage_scope === 'COMPANY_ONLY'" class="pm-form-hint">仅在公司使用 · 不可借出</small></td><td><button v-if="canManageDevice" class="pm-link" :disabled="saving" @click="editEquipment(item)">编辑 / 更新</button><button v-if="canManageDevice" class="pm-link danger" :disabled="saving" @click="removeEquipment(item)">删除</button><button v-if="item.presence === 'OUT_OF_COMPANY' && (canManageDevice || canPlanImplementation)" class="pm-link danger" :disabled="saving" @click="returnEquipment(item)">归还</button></td></tr></tbody></table></div><p v-if="equipmentError" class="pm-form-hint" role="alert">{{ equipmentError }}</p><div v-else-if="!equipment.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无设备</b><span>使用上方表单新增设备。</span></div></section>
+          <section class="pm-panel pm-equipment-layout">
+            <header><div><p class="pm-panel-kicker">EQUIPMENT CAPABILITY</p><h2>设备能力维护</h2><p>维护设备基础信息、能力编码、检定有效期与启停状态。</p></div></header>
+            <form v-if="canManageDevice" class="pm-form pm-equipment-form" @submit.prevent="saveEquipment">
+              <label><span>设备编号 <em>*</em></span><input v-model.trim="equipmentForm.resourceID" required placeholder="例如 EQ-001" /></label>
+              <label><span>设备名称 <em>*</em></span><input v-model.trim="equipmentForm.resourceName" required placeholder="请输入设备名称" /></label>
+              <div class="pm-field pm-span-full">
+                <span>能力编码 <em>*</em></span>
+                <div class="pm-multi-dropdown" :class="{ open: openMulti === 'equipmentCodes' }">
+                  <button type="button" class="pm-multi-trigger" :class="{ placeholder: !equipmentCodeSelection.length }" aria-haspopup="listbox" :aria-expanded="openMulti === 'equipmentCodes'" @click.stop="toggleMulti('equipmentCodes')" @keydown="onEquipmentCodesKeydown"><span>{{ multiSummary(equipmentCodeSelection, equipmentCodeOptions, '请选择设备能力编码', 'code') }}</span><i class="pm-multi-caret"></i></button>
+                  <div v-if="openMulti === 'equipmentCodes'" class="pm-multi-menu" role="listbox" aria-label="选择设备能力编码" aria-multiselectable="true">
+                    <label v-for="option in equipmentCodeOptions" :key="option.code" class="pm-multi-option" :class="{ 'is-active': equipmentCodeOptions[multiActiveIndex]?.code === option.code }" role="option" :aria-selected="equipmentCodeSelection.includes(option.code)"><input type="checkbox" :checked="equipmentCodeSelection.includes(option.code)" @change="toggleEquipmentCode(option.code)" /><span>{{ option.name }}<small v-if="option.unavailable" class="pm-form-hint">{{ option.unavailableReason }}，仅保留历史引用</small></span></label>
+                    <p v-if="!equipmentCodeOptions.length" class="pm-empty-mini">暂无可选编码，请先到系统配置维护设备能力编码</p>
+                  </div>
+                </div>
+                <div v-if="equipmentCodeSelection.length" class="pm-multi-chips"><span v-for="option in equipmentCodeOptions.filter((item) => equipmentCodeSelection.includes(item.code))" :key="option.code" class="pm-chip">{{ option.code }}{{ option.unavailable ? `（${option.unavailableReason}）` : '' }}<button type="button" class="pm-chip-x" :aria-label="`移除 ${option.code}`" @click.stop="toggleEquipmentCode(option.code)">✕</button></span></div>
+                <p v-if="!hasActiveCapabilityCodes('EQUIPMENT')" class="pm-form-hint">请先到「系统配置 → 资质 / 能力编码」新增并启用设备能力编码。</p>
+              </div>
+              <label><span>检定开始</span><input v-model="equipmentForm.validFrom" type="date" /></label>
+              <label><span>检定到期</span><input v-model="equipmentForm.validUntil" type="date" /></label>
+              <label><span>状态</span><select v-model="equipmentForm.status"><option value="ACTIVE">启用</option><option value="DISABLED">停用</option></select></label>
+              <label><span>使用范围</span><select v-model="equipmentForm.usageScope"><option value="ANY">可借出</option><option value="COMPANY_ONLY">仅在公司使用（不可借出）</option></select></label>
+              <button class="pm-button primary">保存设备</button>
+            </form>
+            <p v-else class="pm-form-hint">当前角色只能查看设备台账；维护设备需要「设备维护」权限。</p>
+          </section>
+          <section class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>设备编号</th><th>设备名称</th><th>能力</th><th>检定有效期</th><th>状态</th><th>在位 / 使用范围</th><th>操作</th></tr></thead><tbody><tr v-for="item in equipment" :key="item.resource_id"><td class="mono">{{ item.resource_id }}</td><td><b>{{ item.resource_name }}</b></td><td><span v-if="!(item.codes || []).length">—</span><span v-else class="pm-code-pills"><span v-for="code in item.codes" :key="code" class="pm-code-pill">{{ code }}</span></span></td><td>{{ item.valid_until ? formatDateTime(item.valid_until) : '未设置' }}</td><td><span class="pm-badge" :class="statusTone(item.status)">{{ item.status === 'ACTIVE' ? '启用' : '停用' }}</span></td><td><span class="pm-badge" :class="item.presence === 'OUT_OF_COMPANY' ? 'amber' : 'normal'">{{ equipmentPresenceLabel(item) }}</span><small v-if="item.borrowed_by" class="pm-cell-sub">{{ item.borrowed_by }} · {{ item.borrowed_window }}</small><small v-if="item.usage_scope === 'COMPANY_ONLY'" class="pm-form-hint">仅在公司使用 · 不可借出</small></td><td><button v-if="canManageDevice" class="pm-link" :disabled="saving" @click="editEquipment(item)">编辑 / 更新</button><button v-if="canManageDevice" class="pm-link danger" :disabled="saving" @click="removeEquipment(item)">删除</button><button v-if="item.presence === 'OUT_OF_COMPANY' && (canManageDevice || canPlanImplementation)" class="pm-link danger" :disabled="saving" @click="returnEquipment(item)">归还</button></td></tr></tbody></table></div><p v-if="equipmentError" class="pm-form-hint" role="alert">{{ equipmentError }}</p><div v-else-if="!equipment.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无设备</b><span>使用上方表单新增设备。</span></div></section>
         </template>
         <template v-else-if="activeSection === 'qualifications'"><section class="pm-panel"><header><div><p class="pm-panel-kicker">RESOURCE CAPABILITY</p><h2>资质与能力管理</h2><p>维护并展示人员资质与设备能力记录。</p></div><div class="pm-panel-actions"><input ref="qualificationFileInput" class="pm-file-input" type="file" accept=".csv,text/csv" @change="importQualificationFile" /><button class="pm-button" :disabled="saving" @click="downloadCapabilities">导出 CSV</button><template v-if="canManageResource"><button class="pm-button" :disabled="saving" @click="qualificationFileInput.click()">导入 CSV</button><button class="pm-button" :disabled="saving" @click="syncIdentities">同步人员状态</button><button class="pm-button primary" :disabled="saving" @click="openCapabilityDialog()">＋ 新建资质</button></template></div></header><div class="pm-qualification-filter"><section class="pm-sm-tabs pm-capability-tabs"><button v-for="tab in capabilityTabs" :key="tab.key" type="button" class="pm-tab-pill" :class="{ active: capabilityTab === tab.key }" @click="capabilityTab = tab.key">{{ tab.label }}<span class="pm-tab-count">{{ tab.count }}</span></button></section><label><span>资源类型</span><select v-model="capabilityTypeFilter" class="pm-filter-select"><option value="">全部</option><option value="PERSON">人员资质</option><option value="EQUIPMENT">设备能力</option></select></label><label><span>状态</span><select v-model="capabilityStatusFilter" class="pm-filter-select"><option value="">全部</option><option value="ACTIVE">有效</option><option value="DISABLED">停用</option></select></label></div></section><section v-if="capabilityTab === 'codes'" class="pm-table-panel"><header><div><p class="pm-panel-kicker">CODE MATRIX</p><h2>体系与编码映射</h2></div><span>按能力台账聚合：编码 × 持有人员数 / 设备数</span></header><div class="pm-matrix-wrap"><table class="pm-matrix"><thead><tr><th>能力编码</th><th>人员</th><th>设备</th><th>覆盖合计</th></tr></thead><tbody><tr v-for="row in capabilityCodeRows" :key="row.code"><td><span class="pm-code-pill">{{ row.code }}</span></td><td><span class="pm-badge" :class="row.personCount ? 'normal' : 'neutral'">{{ row.personCount }} 人</span></td><td><span class="pm-badge" :class="row.equipmentCount ? 'normal' : 'neutral'">{{ row.equipmentCount }} 台</span></td><td class="num">{{ row.personCount + row.equipmentCount }}</td></tr><tr v-if="!capabilityCodeRows.length"><td colspan="4" class="pm-empty-mini">暂无能力编码，请在资质记录中维护</td></tr></tbody></table></div></section>
           <section v-else-if="capabilityTab === 'expiry'" class="pm-table-panel"><header><div><p class="pm-panel-kicker danger">EXPIRY WATCH</p><h2>到期提醒</h2></div><span>30 天内到期或已过期 · 按到期时间升序</span></header><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>编号</th><th>名称</th><th>类型</th><th>能力编码</th><th>到期日</th><th>状态</th></tr></thead><tbody><tr v-for="item in expiringCapabilities" :key="item.resource_id" :class="{ risk: new Date(item.valid_until).getTime() <= Date.now() }"><td class="mono">{{ item.resource_id }}</td><td><b>{{ item.resource_name }}</b></td><td>{{ item.resource_type === 'PERSON' ? '人员资质' : '设备能力' }}</td><td><span v-if="!(item.codes || []).length">—</span><span v-else class="pm-code-pills"><span v-for="code in item.codes" :key="code" class="pm-code-pill">{{ code }}</span></span></td><td :class="{ 'pm-text-danger': new Date(item.valid_until).getTime() <= Date.now() }">{{ item.valid_until.slice(0, 10) }}</td><td><span class="pm-badge" :class="new Date(item.valid_until).getTime() <= Date.now() ? '风险' : '关注'">{{ new Date(item.valid_until).getTime() <= Date.now() ? '已过期' : '即将到期' }}</span></td></tr><tr v-if="!expiringCapabilities.length"><td colspan="6" class="pm-empty-mini">30 天内没有到期的资质或检定</td></tr></tbody></table></div></section>
           <section v-else class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>资源类型</th><th>编号</th><th>名称</th><th>资质 / 能力编码</th><th>有效期</th><th>使用范围</th><th>状态</th><th>人员状态</th><th></th></tr></thead><tbody><tr v-for="item in filteredCapabilities" :key="item.resource_id"><td><span class="pm-badge neutral">{{ item.resource_type === 'PERSON' ? '人员' : '设备' }}</span></td><td class="mono">{{ item.resource_id }}</td><td><b>{{ item.resource_name }}</b></td><td><span v-if="!(item.codes || []).length">—</span><span v-else class="pm-code-pills"><span v-for="code in item.codes" :key="code" class="pm-code-pill">{{ code }}</span></span></td><td>{{ item.valid_until ? (item.valid_from ? `${item.valid_from.slice(0, 10)} ~ ` : '') + item.valid_until.slice(0, 10) : '长期' }}</td><td><span v-if="item.resource_type === 'EQUIPMENT'" class="pm-badge" :class="item.usage_scope === 'COMPANY_ONLY' ? '关注' : 'neutral'">{{ item.usage_scope === 'COMPANY_ONLY' ? '仅在公司使用' : '可借出' }}</span><span v-else>—</span></td><td><span class="pm-badge" :class="statusTone(item.status)">{{ item.status === 'ACTIVE' ? '有效' : '停用' }}</span></td><td><template v-if="item.resource_type === 'PERSON'"><span class="pm-badge" :class="statusTone(item.identity_status)">{{ identityStatusLabel(item.identity_status) }}</span></template><span v-else>—</span></td><td style="width: 90px; min-width: 90px;"><button v-if="canManageResource" class="pm-link" @click="openCapabilityDialog(item)">编辑 / 更新</button></td></tr></tbody></table></div><div v-if="!filteredCapabilities.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无资质记录</b><span>点击「＋ 新建资质」或通过 CSV 导入添加记录。</span></div><footer v-if="importResult"><span role="status">导入完成：成功 {{ importResult.imported }} 条，跳过 {{ importResult.skipped }} 条。</span><span v-if="importResult.errors?.length"><small>{{ importResult.errors.slice(0, 3).join('；') }}{{ importResult.errors.length > 3 ? '…' : '' }}</small></span></footer></section>
-          <div v-if="capabilityDialog" class="pm-overlay" @click.self="capabilityDialog = null"><form class="pm-dialog" @submit.prevent="saveCapability"><header><div><span>CAPABILITY</span><h2>{{ capabilityDialog.resource_id ? '编辑资质 / 能力' : '新建资质 / 能力' }}</h2></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="capabilityDialog = null"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>资源类型 <em>*</em></span><select v-model="capabilityDialog.resource_type" required @change="onCapabilityTypeChange"><option value="PERSON">人员资质</option><option value="EQUIPMENT">设备能力</option></select></label><label><span>{{ capabilityDialog.resource_type === 'EQUIPMENT' ? '设备编号' : '人员编号' }} <em>*</em></span><input v-model.trim="capabilityDialog.resource_id" :readonly="capabilityAutoID" required placeholder="系统自动生成" /><small v-if="capabilityAutoID" class="pm-form-hint">由系统自动生成（人员 P- / 设备 EQ-），无需手工填写</small></label><label v-if="capabilityDialog.resource_type === 'PERSON'"><span>人员名称 <em>*</em></span><select v-model="capabilityDialog.user_id" :disabled="capabilityPersonnelLoading" required @change="onCapabilityPersonChange"><option value="">{{ capabilityPersonnelLoading ? '基础平台人员加载中…' : '请选择基础平台人员' }}</option><option v-for="person in capabilityPersonOptions" :key="person.id" :value="person.id">{{ person.name }}</option></select><small v-if="capabilityPersonnelError" class="pm-form-hint" role="alert">{{ capabilityPersonnelError }}</small></label><label v-else><span>资源名称 <em>*</em></span><input v-model.trim="capabilityDialog.resource_name" required placeholder="例如 基站A" /></label><label><span>资质 / 能力编码 <em>*</em></span><input v-model.trim="capabilityDialog.codes" required placeholder="多个编码用逗号分隔" /></label><label><span>起始日期</span><input v-model="capabilityDialog.valid_from" type="date" /></label><label><span>截止日期</span><input v-model="capabilityDialog.valid_until" type="date" /></label><label v-if="capabilityDialog.resource_type === 'EQUIPMENT'"><span>使用范围</span><select v-model="capabilityDialog.usage_scope"><option value="ANY">可借出</option><option value="COMPANY_ONLY">仅在公司使用（不可借出）</option></select></label><label><span>状态</span><select v-model="capabilityDialog.status"><option value="ACTIVE">有效</option><option value="DISABLED">停用</option></select></label></div><footer><button type="button" class="pm-button" @click="capabilityDialog = null">取消</button><button class="pm-button primary" :disabled="saving || (capabilityDialog.resource_type === 'PERSON' && (!capabilityDialog.user_id || capabilityPersonnelLoading))">{{ saving ? '保存中…' : '保存资质' }}</button></footer></form></div></template><template v-else-if="activeSection === 'split-rules'">
+          <div v-if="capabilityDialog" class="pm-overlay" @click.self="capabilityDialog = null">
+            <form class="pm-dialog" @submit.prevent="saveCapability">
+              <header><div><span>CAPABILITY</span><h2>{{ capabilityDialog.resource_id ? '编辑资质 / 能力' : '新建资质 / 能力' }}</h2></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="capabilityDialog = null"><ConsoleIcon name="close" /></button></header>
+              <div class="pm-form">
+                <label><span>资源类型 <em>*</em></span><select v-model="capabilityDialog.resource_type" required @change="onCapabilityTypeChange"><option value="PERSON">人员资质</option><option value="EQUIPMENT">设备能力</option></select></label>
+                <label><span>{{ capabilityDialog.resource_type === 'EQUIPMENT' ? '设备编号' : '人员编号' }} <em>*</em></span><input v-model.trim="capabilityDialog.resource_id" :readonly="capabilityAutoID" required placeholder="系统自动生成" /><small v-if="capabilityAutoID" class="pm-form-hint">由系统自动生成（人员 P- / 设备 EQ-），无需手工填写</small></label>
+                <label v-if="capabilityDialog.resource_type === 'PERSON'"><span>人员名称 <em>*</em></span><select v-model="capabilityDialog.user_id" :disabled="capabilityPersonnelLoading" required @change="onCapabilityPersonChange"><option value="">{{ capabilityPersonnelLoading ? '基础平台人员加载中…' : '请选择基础平台人员' }}</option><option v-for="person in capabilityPersonOptions" :key="person.id" :value="person.id">{{ person.name }}</option></select><small v-if="capabilityPersonnelError" class="pm-form-hint" role="alert">{{ capabilityPersonnelError }}</small></label>
+                <label v-else><span>资源名称 <em>*</em></span><input v-model.trim="capabilityDialog.resource_name" required placeholder="例如 基站A" /></label>
+                <div class="pm-field pm-span-full">
+                  <span>资质 / 能力编码 <em>*</em></span>
+                  <div class="pm-multi-dropdown" :class="{ open: openMulti === 'capabilityCodes' }">
+                    <button type="button" class="pm-multi-trigger" :class="{ placeholder: !capabilityCodeSelection.length }" aria-haspopup="listbox" :aria-expanded="openMulti === 'capabilityCodes'" @click.stop="toggleMulti('capabilityCodes')" @keydown="onCapabilityCodesKeydown"><span>{{ multiSummary(capabilityCodeSelection, capabilityDialogCodeOptions, '请选择资质 / 能力编码', 'code') }}</span><i class="pm-multi-caret"></i></button>
+                    <div v-if="openMulti === 'capabilityCodes'" class="pm-multi-menu" role="listbox" aria-label="选择资质或能力编码" aria-multiselectable="true">
+                      <label v-for="option in capabilityDialogCodeOptions" :key="option.code" class="pm-multi-option" :class="{ 'is-active': capabilityDialogCodeOptions[multiActiveIndex]?.code === option.code }" role="option" :aria-selected="capabilityCodeSelection.includes(option.code)"><input type="checkbox" :checked="capabilityCodeSelection.includes(option.code)" @change="toggleCapabilityCode(option.code)" /><span>{{ option.name }}<small v-if="option.unavailable" class="pm-form-hint">{{ option.unavailableReason }}，仅保留历史引用</small></span></label>
+                      <p v-if="!capabilityDialogCodeOptions.length" class="pm-empty-mini">暂无可选编码，请先到系统配置维护</p>
+                    </div>
+                  </div>
+                  <div v-if="capabilityCodeSelection.length" class="pm-multi-chips"><span v-for="option in capabilityDialogCodeOptions.filter((item) => capabilityCodeSelection.includes(item.code))" :key="option.code" class="pm-chip">{{ option.code }}{{ option.unavailable ? `（${option.unavailableReason}）` : '' }}<button type="button" class="pm-chip-x" :aria-label="`移除 ${option.code}`" @click.stop="toggleCapabilityCode(option.code)">✕</button></span></div>
+                  <p v-if="!hasActiveCapabilityCodes(capabilityDialog.resource_type)" class="pm-form-hint">请先到「系统配置 → 资质 / 能力编码」新增并启用{{ capabilityDialog.resource_type === 'PERSON' ? '人员资质' : '设备能力' }}编码。</p>
+                </div>
+                <label><span>起始日期</span><input v-model="capabilityDialog.valid_from" type="date" /></label>
+                <label><span>截止日期</span><input v-model="capabilityDialog.valid_until" type="date" /></label>
+                <label v-if="capabilityDialog.resource_type === 'EQUIPMENT'"><span>使用范围</span><select v-model="capabilityDialog.usage_scope"><option value="ANY">可借出</option><option value="COMPANY_ONLY">仅在公司使用（不可借出）</option></select></label>
+                <label><span>状态</span><select v-model="capabilityDialog.status"><option value="ACTIVE">有效</option><option value="DISABLED">停用</option></select></label>
+              </div>
+              <footer><button type="button" class="pm-button" @click="capabilityDialog = null">取消</button><button class="pm-button primary" :disabled="saving || (capabilityDialog.resource_type === 'PERSON' && (!capabilityDialog.user_id || capabilityPersonnelLoading))">{{ saving ? '保存中…' : '保存资质' }}</button></footer>
+            </form>
+          </div>
+        </template><template v-else-if="activeSection === 'split-rules'">
             <section class="pm-panel pm-split-card">
               <header><div><p class="pm-panel-kicker">SPLIT POLICY</p><h2>① 默认分组规则</h2></div><span class="pm-badge" :class="splitPolicy?.enabled ? 'normal' : 'neutral'">{{ splitPolicy?.enabled ? '已启用' : '已停用' }}</span></header>
               <div class="pm-form pm-split-form">
@@ -2587,7 +2755,31 @@ onBeforeUnmount(() => {
               <p v-else-if="splitConfigLoading" class="pm-form-hint">配置加载中…</p>
             </section>
 
-            <div v-if="categoryDialog" class="pm-overlay" @click.self="categoryDialog = null"><form class="pm-dialog" @submit.prevent="submitDetectionCategory"><header><div><span>DETECTION CATEGORY</span><h2>{{ categoryDialog.id ? '编辑检测类别' : '新增检测类别' }}</h2></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="categoryDialog = null"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>检测类别 <em>*</em></span><input v-model.trim="categoryDialog.category" required placeholder="例如 等保测评" /></label><label><span>默认体系要求</span><input v-model.trim="categoryDialog.system_standard" placeholder="例如 等保 2.0 / ISO 9001" /></label><label><span>必备资质（默认）</span><input v-model.trim="categoryDialog.required_qualifications" placeholder="例如 等级保护测评师（中级+）" /></label><label><span>必检能力码（默认）</span><input v-model.trim="categoryDialog.required_codes" placeholder="多个能力码用逗号分隔，例如 DJCP,ISO27001" /><small class="pm-form-hint">填写后，按该类别拆解出的服务项会带上这些能力码，分配工程师时据此做能力校验</small></label><label><span>是否特殊方法</span><select v-model="categoryDialog.special_method"><option v-for="option in specialMethodOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label><span>状态</span><select v-model="categoryDialog.enabled"><option :value="true">启用</option><option :value="false">停用</option></select></label></div><footer><button type="button" class="pm-button" @click="categoryDialog = null">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : '保存' }}</button></footer></form></div>
+            <div v-if="categoryDialog" class="pm-overlay" @click.self="categoryDialog = null">
+              <form class="pm-dialog" @submit.prevent="submitDetectionCategory">
+                <header><div><span>DETECTION CATEGORY</span><h2>{{ categoryDialog.id ? '编辑检测类别' : '新增检测类别' }}</h2></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="categoryDialog = null"><ConsoleIcon name="close" /></button></header>
+                <div class="pm-form">
+                  <label><span>检测类别 <em>*</em></span><input v-model.trim="categoryDialog.category" required placeholder="例如 等保测评" /></label>
+                  <label><span>默认体系要求</span><input v-model.trim="categoryDialog.system_standard" placeholder="例如 等保 2.0 / ISO 9001" /></label>
+                  <label><span>必备资质（默认）</span><input v-model.trim="categoryDialog.required_qualifications" placeholder="例如 等级保护测评师（中级+）" /></label>
+                  <div class="pm-field pm-span-full">
+                    <span>必检人员能力码（默认）</span>
+                    <div class="pm-multi-dropdown" :class="{ open: openMulti === 'detectionRequiredCodes' }">
+                      <button type="button" class="pm-multi-trigger" :class="{ placeholder: !detectionRequiredCodeSelection.length }" aria-haspopup="listbox" :aria-expanded="openMulti === 'detectionRequiredCodes'" @click.stop="toggleMulti('detectionRequiredCodes')" @keydown="onDetectionRequiredCodesKeydown"><span>{{ multiSummary(detectionRequiredCodeSelection, detectionRequiredCodeOptions, '请选择人员资质编码', 'code') }}</span><i class="pm-multi-caret"></i></button>
+                      <div v-if="openMulti === 'detectionRequiredCodes'" class="pm-multi-menu" role="listbox" aria-label="选择必检人员能力码" aria-multiselectable="true">
+                        <label v-for="option in detectionRequiredCodeOptions" :key="option.code" class="pm-multi-option" :class="{ 'is-active': detectionRequiredCodeOptions[multiActiveIndex]?.code === option.code }" role="option" :aria-selected="detectionRequiredCodeSelection.includes(option.code)"><input type="checkbox" :checked="detectionRequiredCodeSelection.includes(option.code)" @change="toggleDetectionRequiredCode(option.code)" /><span>{{ option.name }}<small v-if="option.unavailable" class="pm-form-hint">{{ option.unavailableReason }}，仅保留历史引用</small></span></label>
+                        <p v-if="!detectionRequiredCodeOptions.length" class="pm-empty-mini">暂无可选人员资质编码，请先到系统配置维护</p>
+                      </div>
+                    </div>
+                    <div v-if="detectionRequiredCodeSelection.length" class="pm-multi-chips"><span v-for="option in detectionRequiredCodeOptions.filter((item) => detectionRequiredCodeSelection.includes(item.code))" :key="option.code" class="pm-chip">{{ option.code }}{{ option.unavailable ? `（${option.unavailableReason}）` : '' }}<button type="button" class="pm-chip-x" :aria-label="`移除 ${option.code}`" @click.stop="toggleDetectionRequiredCode(option.code)">✕</button></span></div>
+                    <small class="pm-form-hint">按该类别拆解出的服务项会带上这些人员资质编码，分配工程师时据此校验。</small>
+                  </div>
+                  <label><span>是否特殊方法</span><select v-model="categoryDialog.special_method"><option v-for="option in specialMethodOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
+                  <label><span>状态</span><select v-model="categoryDialog.enabled"><option :value="true">启用</option><option :value="false">停用</option></select></label>
+                </div>
+                <footer><button type="button" class="pm-button" @click="categoryDialog = null">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : '保存' }}</button></footer>
+              </form>
+            </div>
 
             <div v-if="overrideDialog" class="pm-overlay" @click.self="overrideDialog = null"><form class="pm-dialog pm-dialog-wide" @submit.prevent="submitSplitOverride"><header><div><span>OVERRIDE RULE</span><h2>{{ overrideDialog.id ? '编辑覆盖规则' : '新建覆盖规则' }}</h2><small class="pm-dialog-sub">只覆盖显式给出的设置，其余沿用默认分组规则；命中多条时取优先级最小的那条。</small></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="overrideDialog = null"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>规则名称 <em>*</em></span><input v-model.trim="overrideDialog.name" required placeholder="例如 金融行业批量合同" /></label><label><span>优先级 <em>*</em></span><input v-model.number="overrideDialog.priority" type="number" min="1" required /></label><label><span>客户名称包含</span><input v-model.trim="overrideDialog.match.customer_contains" placeholder="例如 银行 / 证券" /></label><label><span>合同号包含</span><input v-model.trim="overrideDialog.match.contract_contains" placeholder="例如 HT-2026" /></label><label><span>合同服务项数 ≤</span><input v-model.number="overrideDialog.match.max_service_items" type="number" min="0" /></label><label><span>覆盖分组维度 1</span><select v-model="overrideDialog.settings.dimension_primary"><option value="">不覆盖</option><option v-for="option in splitDimensionAnyOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label><span>覆盖分组维度 2</span><select v-model="overrideDialog.settings.dimension_secondary"><option value="">不覆盖</option><option v-for="option in splitDimensionAnyOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label><span>覆盖分组维度 3</span><select v-model="overrideDialog.settings.dimension_tertiary"><option value="">不覆盖</option><option v-for="option in splitDimensionAnyOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label><span>覆盖默认进入状态</span><select v-model="overrideDialog.settings.default_status"><option value="">不覆盖</option><option v-for="option in splitDefaultStatusOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label><span>覆盖缺规则处理</span><select v-model="overrideDialog.settings.missing_rule_action"><option value="">不覆盖</option><option v-for="option in splitMissingRuleOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label><span>状态</span><select v-model="overrideDialog.enabled"><option :value="true">启用</option><option :value="false">停用</option></select></label></div><footer><button type="button" class="pm-button" @click="overrideDialog = null">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : '保存' }}</button></footer></form></div>
           </template>
@@ -2612,6 +2804,7 @@ onBeforeUnmount(() => {
             <header><div><p class="pm-panel-kicker">REAL OPERATION</p><h2>服务项操作台</h2></div><span v-if="selectedServiceItem" class="pm-op-current">当前：{{ selectedServiceItem.id }} · <span class="pm-badge" :class="statusTone(selectedServiceItem.status)">{{ selectedServiceItem.status }}</span></span></header>
             <ServiceItemPicker v-if="activeSection === 'allocation'" :items="serviceItems" :selected-ids="selectedServiceItemIDs" multiple empty-text="暂无可分配服务项" hint="可同时选择多个服务项，批量分配团队负责人或执行团队。" @toggle="toggleServiceItem" /><ServiceItemPicker v-else :items="serviceItems" :selected-ids="selectedServiceItem ? [selectedServiceItem.id] : []" empty-text="暂无可操作服务项" @select="selectServiceItem" />
             <div v-if="activeSection === 'allocation' && selectedServiceItemIDs.length" class="pm-panel-actions">
+              <button v-if="canManageDecomposition" type="button" class="pm-button" :disabled="saving" @click="returnSelectedToDecomposition">退回拆解确认</button>
               <button v-if="canRevokeExecution" type="button" class="pm-button" :disabled="saving" @click="revokeSelectedAssignment('execution')">撤销执行团队</button>
               <button v-if="canRevokeTeam" type="button" class="pm-button danger" :disabled="saving" @click="revokeSelectedAssignment('team')">撤销团队负责人</button>
             </div>
