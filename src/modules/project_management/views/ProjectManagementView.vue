@@ -44,6 +44,7 @@ import {
   completeServiceItemField,
   setRuleEnabled,
   updateRule,
+  deleteRule,
   reviewSpecialMethod,
   updateReportStatus,
 } from '@/modules/project_management/api/projectManagement'
@@ -1438,6 +1439,22 @@ async function toggleRule(rule) {
   } catch (error) { showToast(error?.message || '规则更新失败', 'error') }
 }
 
+// 删除配置规则。停用开关是可逆操作，删除不可恢复，因此必须二次确认；kind 必填，
+// 六套配置表主键各自自增，只按 id 删会命中别的配置类型。删除按钮与新建、编辑同权限门控。
+async function removeConfigRule(rule) {
+  if (saving.value) return
+  const kind = rule.kind || activeSection.value
+  if (!window.confirm(`确认删除配置「${rule.name || rule.id}」？删除后无法恢复，如需临时停用请使用状态开关。`)) return
+  saving.value = true
+  try {
+    const removed = await deleteRule(rule.id, kind)
+    const index = rules.value.indexOf(rule)
+    if (index >= 0) rules.value.splice(index, 1)
+    showToast(`配置「${removed?.name || rule.name || rule.id}」已删除`)
+  } catch (error) { showToast(error?.message || '配置删除失败', 'error') }
+  finally { saving.value = false }
+}
+
 function selectedIDs(value) { return String(value || '').split(/[\s,，]+/).map((item) => item.trim()).filter(Boolean) }
 function asRFC3339(value) { if (!value) return ''; const date = new Date(value); return Number.isNaN(date.getTime()) ? value : date.toISOString() }
 // 后端保存 RFC3339（UTC），而 <input type="datetime-local"> 只接受本地时间的 YYYY-MM-DDTHH:mm。
@@ -1995,7 +2012,7 @@ onBeforeUnmount(() => {
             <header><div><p class="pm-panel-kicker">ACCESS MATRIX</p><h2>字段 × 角色 访问矩阵</h2></div><span>{{ permissionMatrix.rows.length }} 个受控字段 · {{ permissionMatrix.roles.length }} 个角色</span></header>
             <div class="pm-matrix-wrap"><table class="pm-matrix"><thead><tr><th>字段 ↓ \ 角色 →</th><th v-for="role in permissionMatrix.roles" :key="role">{{ role }}</th></tr></thead><tbody><tr v-for="row in permissionMatrix.rows" :key="row.field"><td class="mono">{{ row.field }}</td><td v-for="(cell, index) in row.cells" :key="`${row.field}-${permissionMatrix.roles[index]}`"><span v-if="cell" class="pm-badge" :class="permissionLevelTone[cell] || 'neutral'">{{ permissionLevelLabel[cell] || cell }}</span><span v-else class="pm-matrix-empty">未配置</span></td></tr></tbody></table></div>
           </section>
-          <section class="pm-config-layout"><aside class="pm-config-note"><span><ConsoleIcon name="info" /></span><h2>配置说明</h2><p>{{ currentMeta[1] }}。变更将在保存后对新任务生效，已有项目不自动追溯。</p><ul><li>配置修改需业务管理员权限</li><li>关键规则变更会记录审计日志</li><li>关闭规则前请确认影响范围</li></ul></aside><article class="pm-table-panel"><header class="pm-filter-bar"><div class="pm-sm-tabs"><button v-for="meta in visibleConfigKinds" :key="meta.kind" type="button" class="pm-tab-pill" :class="{ active: activeSection === meta.kind }" @click="navigate(meta.kind)">{{ meta.label }}</button></div><span class="pm-filter-count">{{ activeConfigMeta.label }} 共 {{ visibleRules.length }} 条</span></header><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>配置名称</th><th v-for="column in activeConfigMeta.columns" :key="column.key">{{ column.label }}</th><th>状态</th><th>最后更新</th><th></th></tr></thead><tbody><tr v-for="rule in visibleRules" :key="rule.id"><td><b>{{ rule.name }}</b></td><td v-for="column in activeConfigMeta.columns" :key="column.key">{{ rule[column.key] !== undefined && rule[column.key] !== '' ? rule[column.key] : '—' }}</td><td><button v-if="canManageRules" class="pm-switch" :class="{ on: rule.enabled }" :aria-label="`${rule.enabled ? '停用' : '启用'} ${rule.name}`" @click="toggleRule(rule)"><i></i></button></td><td>{{ rule.updated }}</td><td><button v-if="canManageRules" class="pm-link" @click="openConfigEdit(rule)">编辑</button></td></tr></tbody></table></div><div v-if="!visibleRules.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无配置规则</b><span>点击「＋ 新建规则」添加 {{ activeConfigMeta.label }} 配置。</span></div></article></section>
+          <section class="pm-config-layout"><aside class="pm-config-note"><span><ConsoleIcon name="info" /></span><h2>配置说明</h2><p>{{ currentMeta[1] }}。变更将在保存后对新任务生效，已有项目不自动追溯。</p><ul><li>配置修改需业务管理员权限</li><li>关键规则变更会记录审计日志</li><li>关闭规则前请确认影响范围</li></ul></aside><article class="pm-table-panel"><header class="pm-filter-bar"><div class="pm-sm-tabs"><button v-for="meta in visibleConfigKinds" :key="meta.kind" type="button" class="pm-tab-pill" :class="{ active: activeSection === meta.kind }" @click="navigate(meta.kind)">{{ meta.label }}</button></div><span class="pm-filter-count">{{ activeConfigMeta.label }} 共 {{ visibleRules.length }} 条</span></header><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>配置名称</th><th v-for="column in activeConfigMeta.columns" :key="column.key">{{ column.label }}</th><th>状态</th><th>最后更新</th><th></th></tr></thead><tbody><tr v-for="rule in visibleRules" :key="rule.id"><td><b>{{ rule.name }}</b></td><td v-for="column in activeConfigMeta.columns" :key="column.key">{{ rule[column.key] !== undefined && rule[column.key] !== '' ? rule[column.key] : '—' }}</td><td><button v-if="canManageRules" class="pm-switch" :class="{ on: rule.enabled }" :aria-label="`${rule.enabled ? '停用' : '启用'} ${rule.name}`" @click="toggleRule(rule)"><i></i></button></td><td>{{ rule.updated }}</td><td><button v-if="canManageRules" class="pm-link" @click="openConfigEdit(rule)">编辑</button><button v-if="canManageRules" class="pm-link pm-text-danger" :disabled="saving" @click="removeConfigRule(rule)">删除</button></td></tr></tbody></table></div><div v-if="!visibleRules.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无配置规则</b><span>点击「＋ 新建规则」添加 {{ activeConfigMeta.label }} 配置。</span></div></article></section>
         </template>
 
         <template v-else>

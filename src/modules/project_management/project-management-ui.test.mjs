@@ -744,6 +744,24 @@ test('字段级权限的角色是服务端目录驱动的多选下拉，多选�
   assert.match(source, /applySavedRule\(saved\)\n        created\.push\(saved\)/)
 })
 
+test('系统配置的规则可以删除：二次确认、按 kind 定位、删除后从列表移除', () => {
+  // 以前配置规则只能新建/编辑/启停，配置错了或重复堆积无法清理。
+  assert.match(source, /async function removeConfigRule\(rule\)/)
+  // 停用开关本身可逆，删除不可恢复：必须先确认，且提示可逆替代手段。
+  assert.match(source, /window\.confirm\(`确认删除配置「\$\{rule\.name \|\| rule\.id\}」？删除后无法恢复，如需临时停用请使用状态开关。`\)/)
+  // kind 必填：六套配置表主键各自自增，只按 id 删会命中别的配置类型。
+  assert.match(source, /const kind = rule\.kind \|\| activeSection\.value/)
+  assert.match(source, /await deleteRule\(rule\.id, kind\)/)
+  assert.match(source, /const index = rules\.value\.indexOf\(rule\)/)
+  assert.match(source, /if \(index >= 0\) rules\.value\.splice\(index, 1\)/)
+  assert.match(source, /showToast\(`配置「\$\{removed\?\.name \|\| rule\.name \|\| rule\.id\}」已删除`\)/)
+  // 入口与新建、编辑同权限门控，避免"能建不能删"。
+  assert.match(source, /class="pm-link pm-text-danger" :disabled="saving" @click="removeConfigRule\(rule\)">删除</)
+  // API 客户端走真实端点，kind 作为查询串（与启停接口一致）。
+  assert.match(pmApiSource, /export function deleteRule\(id, kind\) \{/)
+  assert.match(pmApiSource, /return request\(`\/rules\/\$\{encodeURIComponent\(id\)\}\?kind=\$\{encodeURIComponent\(kind \|\| ''\)\}`\, \{ method: 'DELETE' \}\)/)
+})
+
 test('轻提示按结果切换语义色，错误不再是绿色对勾', () => {
   assert.match(source, /function showToast\(message, type = 'success'\)/)
   assert.match(source, /:class="toastType"/)
