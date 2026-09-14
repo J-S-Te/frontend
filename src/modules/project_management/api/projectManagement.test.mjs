@@ -13,6 +13,17 @@ test('项目管理客户端使用独立同源 API 和 Cookie 会话', () => {
   assert.match(source, /request\('\/auth\/me'\)/)
 })
 
+test('角色目录来自服务端接口并按 code 归一化，缺名回退为角色码', () => {
+  // 字段级权限的「角色」下拉不能用前端硬编码的角色列表：后端按 role_code 精确比对，
+  // 目录外的角色码不会报错却永远不会命中主体，唯一事实来源只能是服务端角色目录。
+  assert.match(source, /export async function listApplicationRoles\(\)/)
+  assert.match(source, /const data = await request\('\/role-catalog'\)/)
+  assert.match(source, /\.map\(\(role\) => \(\{ code: String\(role\?\.code \|\| ''\)\.trim\(\), name: String\(role\?\.name \|\| ''\)\.trim\(\) \|\| String\(role\?\.code \|\| ''\)\.trim\(\) \}\)\)/)
+  assert.match(source, /\.filter\(\(role\) => role\.code\)/)
+  // 端点必须落在项目后端前缀下，开发代理与生产 Nginx 才会转发到 project-api。
+  assert.match(source, /API_BASE_URL = \(runtimeEnv\.VITE_PROJECT_API_BASE_URL \|\| `\$\{PUBLIC_PATH_PREFIX\}\/api\/v1`\)/)
+})
+
 test('项目会话失效时只启动一次 OIDC 登录，Claims 错误不会循环跳转', () => {
   assert.match(source, /if \(response\.status === 401\)[\s\S]*startProjectLogin\(\)/)
   assert.match(source, /if \(shouldStartSubsystemLogin\(error\)\) startProjectLogin\(\)/)
