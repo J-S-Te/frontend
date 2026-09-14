@@ -600,7 +600,17 @@ const notificationCount = computed(() => pendingDeviations.value.length + decomp
 const activeServiceCount = computed(() => serviceItems.value.filter((item) => !['现场实施完成', '已完成', '已终止'].includes(item.status)).length)
 const completedProjectCount = computed(() => projects.value.filter((project) => project.status === projectStatusCompleted).length)
 const currentUserName = computed(() => session.value?.display_name || session.value?.user_name || '当前用户')
-const currentUserRole = computed(() => session.value?.roles?.join(' / ') || '项目成员')
+// 与客户与商机系统的账号行保持一致：首字头像 + 账号名 + 角色名。
+// 角色名取服务端角色目录，目录未就绪或请求失败时退回角色码，不出现空白副标题。
+const currentUserInitial = computed(() => {
+  const label = currentUserName.value
+  return /^[\x00-\x7F]+$/.test(label) ? label.slice(0, 2).toUpperCase() : Array.from(label)[0] || '用'
+})
+const currentUserRoleLabel = computed(() => {
+  const roles = Array.isArray(session.value?.roles) ? session.value.roles : []
+  const names = new Map(applicationRoles.value.map((role) => [role.code, role.name]))
+  return [...new Set(roles.map((role) => names.get(role) || role).filter(Boolean))].join('、') || '未分配角色'
+})
 // 团队负责人 / 项目经理 / 工程师在界面上必须显示姓名而不是平台 ULID。
 // 目录只支持单个 user_id 查询，所以由服务端批量解析，这里缓存映射避免重复请求。
 const personnelNameByID = ref(new Map())
@@ -967,6 +977,8 @@ async function loadWorkspace() {
     dashboard.value = dashboardData
     session.value = sessionData
     navigation.value = navigationData
+    // 侧栏账号行的角色名依赖服务端角色目录；不阻塞工作区首屏，失败只影响副标题文案。
+    loadApplicationRoles()
     const allowed = new Set(navigationData.sections)
     // 项目详情是从列表下钻的页面（携带 query.project），不要求出现在服务端导航清单里。
     if (route.params.section !== 'project_detail' && !allowed.has(route.params.section)) {
@@ -1756,6 +1768,11 @@ onBeforeUnmount(() => {
         </div>
       </nav>
       <div class="pm-sidebar-foot">V1.0 · 项目服务内容管理</div>
+      <div class="pm-sidebar-user">
+        <span class="pm-avatar" aria-hidden="true">{{ currentUserInitial }}</span>
+        <span class="pm-user-copy"><strong :title="currentUserName">{{ currentUserName }}</strong><small :title="currentUserRoleLabel">{{ currentUserRoleLabel }}</small></span>
+        <button class="pm-logout" type="button" :disabled="isLoggingOut" aria-label="退出应用系统" @click="logoutSystem"><ConsoleIcon name="logout" /></button>
+      </div>
     </aside>
     <div v-if="mobileMenuOpen" class="pm-menu-mask" @click="mobileMenuOpen = false"></div>
 
@@ -1765,7 +1782,7 @@ onBeforeUnmount(() => {
         <div class="pm-breadcrumb"><span>项目服务管理</span><b>/</b><template v-if="activeSection === 'project_detail'"><button type="button" class="pm-crumb-link" @click="navigate('projects')">项目列表</button><b>/</b><strong>{{ detailProject?.id || '项目详情' }}</strong></template><strong v-else>{{ currentMeta[0] }}</strong></div>
         <div class="pm-top-tools">
           <button class="pm-icon-button pm-notification-button" aria-label="通知" @click="notificationOpen = !notificationOpen"><ConsoleIcon name="bell" /><em v-if="notificationCount">{{ notificationCount }}</em></button>
-          <div class="pm-user"><span>{{ currentUserName.slice(0, 1) }}</span><div><b>{{ currentUserName }}</b><small>{{ currentUserRole }}</small></div><button class="pm-user-return" type="button" :disabled="isLoggingOut" aria-label="退出应用系统" @click="logoutSystem"><ConsoleIcon name="logout" /></button></div>
+          <span class="pm-topbar-avatar" aria-hidden="true">{{ currentUserInitial }}</span>
         </div>
         <div v-if="notificationOpen" class="pm-notifications">
           <div class="pm-popover-head"><b>业务待办</b><span>{{ notificationCount }} 条</span></div>
