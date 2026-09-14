@@ -385,6 +385,21 @@ export async function listRules() {
 }
 
 /**
+ * listApplicationRoles 读取本应用的角色目录（服务端下发，来自权限清单）。
+ * 字段级权限的「角色」必须从这个目录里选：角色码写错时规则接口不会报错，
+ * 但规则永远不会命中任何主体，属于只在运行期静默失效的错误，因此前端不得硬编码角色列表。
+ * @returns {Promise<Array<{code: string, name: string}>>} 角色目录（含中文展示名，按清单顺序）。
+ * @throws {Error} 会话失效、鉴权失败或网关返回非成功状态时抛出。
+ */
+export async function listApplicationRoles() {
+  const data = await request('/role-catalog')
+  const roles = Array.isArray(data?.roles) ? data.roles : []
+  return roles
+    .map((role) => ({ code: String(role?.code || '').trim(), name: String(role?.name || '').trim() || String(role?.code || '').trim() }))
+    .filter((role) => role.code)
+}
+
+/**
  * createRule 新建配置规则（按 kind 落入五套真实配置表中的对应一张）。
  * @param {Object} payload 规则内容。
  * @returns {Promise<object>} 创建结果。

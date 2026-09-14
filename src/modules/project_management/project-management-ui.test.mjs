@@ -711,6 +711,39 @@ test('多选下拉对齐统一交互基线：aria 语义、键盘导航与已选
   assert.match(source, /class="pm-filter-select"/)
 })
 
+test('字段级权限的角色是服务端目录驱动的多选下拉，多选即每个角色各一条规则', () => {
+  // 角色选项只能来自服务端角色目录：角色码写错时规则接口不会报错，但规则永远不会命中
+  // 任何主体（field_permission 按 role_code 精确比对），属于只在运行期静默失效的错误。
+  assert.match(source, /listApplicationRoles/)
+  assert.match(pmApiSource, /export async function listApplicationRoles\(\) \{\n  const data = await request\('\/role-catalog'\)/)
+  assert.match(source, /applicationRolesError/)
+  assert.match(source, /applicationRolesRequest = listApplicationRoles\(\)/)
+  // 配置元数据里「角色」不再是自由文本输入，而是多选下拉字段。
+  assert.match(source, /\{ key: 'role_codes', label: '角色', field: 'roles', required: true \}/)
+  assert.doesNotMatch(source, /key: 'role_code', label: '角色', field: 'text'/)
+  assert.match(source, /v-if="field\.field === 'roles'" class="pm-field pm-span-full"/)
+  // 默认多选：新建时选中值为数组，不要求按住 ⌘/Ctrl 加选。
+  assert.match(source, /field\.field === 'roles' \? \[\] :/)
+  assert.match(source, /:aria-expanded="openMulti === 'configRoles'"/)
+  assert.match(source, /aria-multiselectable="true"/)
+  assert.match(source, /:aria-selected="configRoleSelection\.includes\(option\.code\)"/)
+  assert.match(source, /multiSummary\(configRoleSelection, configRoleOptions, '请选择角色（可多选）', 'code'\)/)
+  // 复用统一交互基线：↑↓/Enter/Esc 与人员多选同源。
+  assert.match(source, /function onConfigRolesKeydown\(event\) \{ navigateMulti\(event, configRoleOptions\.value, 'configRoles', \(option\) => toggleConfigRole\(option\.code\)\) \}/)
+  assert.match(source, /function navigateMulti\(event, options, name, toggle\)/)
+  // 编辑既有规则时回填当前角色；已不在目录内的历史角色码要显式标注而不是静默改写。
+  assert.match(source, /configForm\.value\.role_codes = rule\.role_code \? \[rule\.role_code\] : \[\]/)
+  assert.match(source, /（不在角色目录中）/)
+  // 服务端一条规则只承载一个角色，多选必须落成「每个角色各一条」，并明确提示条数。
+  assert.match(source, /for \(const \[index, roleCode\] of roleCodes\.entries\(\)\)/)
+  assert.match(source, /const body = \{ \.\.\.payload, role_code: roleCode \}/)
+  assert.match(source, /已选 \{\{ configRoleSelection\.length \}\} 个角色，保存后每个角色各生成一条规则。/)
+  assert.match(source, /已保存 \$\{created\.length\} 条配置（每个角色一条）/)
+  assert.match(source, /showToast\('请至少选择一个角色', 'warning'\)/)
+  // 逐条回填列表：中途失败也能看到已生效的规则，重试不会留下看不到的重复规则。
+  assert.match(source, /applySavedRule\(saved\)\n        created\.push\(saved\)/)
+})
+
 test('轻提示按结果切换语义色，错误不再是绿色对勾', () => {
   assert.match(source, /function showToast\(message, type = 'success'\)/)
   assert.match(source, /:class="toastType"/)

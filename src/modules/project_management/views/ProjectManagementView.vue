@@ -26,6 +26,7 @@ import {
   deleteSite,
   upsertEquipment,
   listDeliveryEvents,
+  listApplicationRoles,
   listRules,
   listSlaOverdue,
   listServiceItems,
@@ -342,7 +343,7 @@ const configKindsMeta = [
   { kind: 'split-rules', label: '拆解规则', columns: [{ key: 'scope', label: '适用范围' }], fields: [{ key: 'scope', label: '适用范围', field: 'text', required: true, placeholder: '例如 单批次金额超过 50 万元' }] },
   { kind: 'warning-rules', label: '预警规则', columns: [{ key: 'check_type', label: '检查类型' }, { key: 'threshold', label: '阈值' }], fields: [{ key: 'check_type', label: '检查类型', field: 'text', required: true, placeholder: '例如 资质能力冲突 / 排期冲突 / 场地冲突' }, { key: 'threshold', label: '阈值', field: 'text', placeholder: '例如 连续 3 项冲突' }] },
   { kind: 'automations', label: '自动化动作', columns: [{ key: 'trigger', label: '触发事件' }, { key: 'target', label: '目标' }], fields: [{ key: 'trigger', label: '触发事件', field: 'text', required: true, placeholder: '例如 DEVIATION_REPORTED' }, { key: 'target', label: '目标', field: 'text', required: true, placeholder: '例如 通知技术总监 / 创建整改工单' }] },
-  { kind: 'permissions', label: '字段级权限', columns: [{ key: 'role_code', label: '角色' }, { key: 'field_name', label: '字段' }, { key: 'access_level', label: '访问级别' }], fields: [{ key: 'role_code', label: '角色', field: 'text', required: true, placeholder: '例如 project_manager' }, { key: 'field_name', label: '字段', field: 'text', required: true, placeholder: '例如 report_revenue' }, { key: 'access_level', label: '访问级别', field: 'select', required: true, options: [{ value: 'view', label: '只读可见' }, { value: 'edit', label: '可编辑' }, { value: 'hidden', label: '隐藏' }] }] },
+  { kind: 'permissions', label: '字段级权限', columns: [{ key: 'role_code', label: '角色' }, { key: 'field_name', label: '字段' }, { key: 'access_level', label: '访问级别' }], fields: [{ key: 'role_codes', label: '角色', field: 'roles', required: true }, { key: 'field_name', label: '字段', field: 'text', required: true, placeholder: '例如 report_revenue' }, { key: 'access_level', label: '访问级别', field: 'select', required: true, options: [{ value: 'view', label: '只读可见' }, { value: 'edit', label: '可编辑' }, { value: 'hidden', label: '隐藏' }] }] },
   { kind: 'sla', label: 'SLA 规则', columns: [{ key: 'status', label: '状态' }, { key: 'deadline_hours', label: '时限(小时)' }, { key: 'remind_hours', label: '提醒(小时)' }], fields: [{ key: 'status', label: '生效状态', field: 'text', required: true, placeholder: '例如 报告编制' }, { key: 'deadline_hours', label: '时限(小时)', field: 'number', required: true, min: 1 }, { key: 'remind_hours', label: '提前提醒(小时)', field: 'number', min: 0 }] },
   { kind: 'standards', label: '检测标准', columns: [{ key: 'scope', label: '适用方法/范围' }], fields: [{ key: 'scope', label: '适用方法/范围', field: 'text', required: true, placeholder: '例如 GB/T 28448 更新的检测方法进入评估' }] },
 ]
@@ -356,27 +357,93 @@ const isVisibleConfigSection = computed(() => visibleConfigKinds.value.some((met
 const activeConfigMeta = computed(() => visibleConfigKinds.value.find((meta) => meta.kind === activeSection.value) || visibleConfigKinds.value[0])
 const configEditorOpen = ref(false)
 const configForm = ref({})
+// 角色选项来自服务端角色目录（/role-catalog），前端不硬编码角色码：写入目录之外的角色既不会
+// 被规则接口拒绝、也永远不会命中任何主体，是只在运行期静默失效的一类错误。首次打开配置弹窗时
+// 拉取并缓存，失败时保留错误文案供弹窗内提示，下次打开可重试。
+const applicationRoles = ref([])
+const applicationRolesError = ref('')
+let applicationRolesRequest = null
+function loadApplicationRoles() {
+  if (applicationRoles.value.length) return Promise.resolve()
+  if (applicationRolesRequest) return applicationRolesRequest
+  applicationRolesRequest = listApplicationRoles()
+    .then((roles) => { applicationRoles.value = roles; applicationRolesError.value = '' })
+    .catch((error) => { applicationRolesError.value = error?.message || '角色目录加载失败' })
+    .finally(() => { applicationRolesRequest = null })
+  return applicationRolesRequest
+}
+const configRoleSelection = computed(() => (Array.isArray(configForm.value.role_codes) ? configForm.value.role_codes : []))
+// 已保存的角色可能已不在目录内（历史错值或目录调整）：补一条并标注，避免编辑时被静默改写。
+const configRoleOptions = computed(() => {
+  const options = [...applicationRoles.value]
+  const known = new Set(options.map((option) => option.code))
+  for (const code of configRoleSelection.value) {
+    if (code && !known.has(code)) { options.push({ code, name: `${code}（不在角色目录中）` }); known.add(code) }
+  }
+  return options
+})
+const configRoleChipOptions = computed(() => configRoleSelection.value.map((code) => configRoleOptions.value.find((option) => option.code === code) || { code, name: code }))
+function toggleConfigRole(code) {
+  const selected = new Set(configRoleSelection.value)
+  if (selected.has(code)) selected.delete(code)
+  else selected.add(code)
+  configForm.value.role_codes = [...selected]
+}
 function openConfigCreate() {
   configForm.value = { id: null, kind: activeSection.value, name: '', enabled: true }
   for (const field of activeConfigMeta.value.fields) {
-    configForm.value[field.key] = field.field === 'number' ? (field.key === 'deadline_hours' ? 24 : field.key === 'remind_hours' ? 4 : 0) : field.key === 'access_level' ? 'view' : ''
+    configForm.value[field.key] = field.field === 'number' ? (field.key === 'deadline_hours' ? 24 : field.key === 'remind_hours' ? 4 : 0) : field.field === 'roles' ? [] : field.key === 'access_level' ? 'view' : ''
   }
+  // 上一次弹窗可能在多选菜单展开时被关闭：新弹窗必须从收起态开始。
+  openMulti.value = ''
+  if (activeConfigMeta.value.fields.some((field) => field.field === 'roles')) loadApplicationRoles()
   configEditorOpen.value = true
 }
 function openConfigEdit(rule) {
   configForm.value = { ...rule, name: rule.name || '', enabled: rule.enabled !== false, kind: rule.kind || activeSection.value }
+  openMulti.value = ''
+  if (activeConfigMeta.value.fields.some((field) => field.field === 'roles')) {
+    configForm.value.role_codes = rule.role_code ? [rule.role_code] : []
+    loadApplicationRoles()
+  }
   configEditorOpen.value = true
+}
+function applySavedRule(saved) {
+  const index = rules.value.findIndex((rule) => rule.id === saved.id)
+  if (index >= 0) rules.value.splice(index, 1, saved)
+  else rules.value.push(saved)
 }
 async function saveConfigRule() {
   saving.value = true
   try {
-    const payload = { kind: configForm.value.kind, name: configForm.value.name.trim(), enabled: configForm.value.enabled }
-    for (const field of activeConfigMeta.value.fields) payload[field.key] = typeof configForm.value[field.key] === 'number' ? configForm.value[field.key] : String(configForm.value[field.key] || '').trim()
-    if (!payload.name) { showToast('请填写配置名称', 'warning'); return }
+    const name = String(configForm.value.name || '').trim()
+    if (!name) { showToast('请填写配置名称', 'warning'); return }
+    const payload = { kind: configForm.value.kind, name, enabled: configForm.value.enabled }
+    let roleCodes = []
+    let roleField = false
+    for (const field of activeConfigMeta.value.fields) {
+      if (field.field === 'roles') { roleField = true; roleCodes = configRoleSelection.value; continue }
+      payload[field.key] = typeof configForm.value[field.key] === 'number' ? configForm.value[field.key] : String(configForm.value[field.key] || '').trim()
+    }
+    if (roleField && !roleCodes.length) { showToast('请至少选择一个角色', 'warning'); return }
+    if (roleField) {
+      // 服务端 field_permission 按 role_code 与主体角色做精确比对，一条规则只承载一个角色，
+      // 因此多选即「每个选中角色各存一条」，role_code 仍是目录内的单个规范角色码。
+      // 编辑时首个角色沿用原规则 ID，新增的角色各建一条；每建一条即刻回填列表，
+      // 中途失败也能看到已生效的那几条，不会重试出重复规则。
+      const created = []
+      for (const [index, roleCode] of roleCodes.entries()) {
+        const body = { ...payload, role_code: roleCode }
+        const saved = index === 0 && configForm.value.id ? await updateRule(configForm.value.id, body) : await createRule(body)
+        applySavedRule(saved)
+        created.push(saved)
+      }
+      configEditorOpen.value = false
+      showToast(created.length > 1 ? `已保存 ${created.length} 条配置（每个角色一条）` : '配置已保存')
+      return
+    }
     const saved = configForm.value.id ? await updateRule(configForm.value.id, payload) : await createRule(payload)
-    const index = rules.value.findIndex((rule) => rule.id === saved.id)
-    if (index >= 0) rules.value.splice(index, 1, saved)
-    else rules.value.push(saved)
+    applySavedRule(saved)
     configEditorOpen.value = false
     showToast(configForm.value.id ? '配置已保存' : '配置已创建')
   } catch (error) { showToast(error?.message || '配置保存失败', 'error') }
@@ -467,8 +534,9 @@ const openMulti = ref('')
 // 与设备选择器的"禁用原因"、ServiceItemPicker 的 listbox 语义同源）。
 const multiActiveIndex = ref(-1)
 function toggleMulti(kind) { openMulti.value = openMulti.value === kind ? '' : kind }
-function multiSummary(ids, options, placeholder) {
-  const names = (ids || []).map((id) => options.find((option) => option.id === id)?.name || id)
+// 人员的选中值是 ID、角色的选中值是角色码，因此选项命中键可指定（默认 id）。
+function multiSummary(values, options, placeholder, key = 'id') {
+  const names = (values || []).map((value) => options.find((option) => option[key] === value)?.name || value)
   if (!names.length) return placeholder
   if (names.length <= 2) return names.join('、')
   return `${names.slice(0, 2).join('、')} 等 ${names.length} 项`
@@ -482,23 +550,26 @@ function toggleEngineer(id) {
 function closeMultiOnOutsideClick(event) {
   if (!(event.target instanceof Element) || !event.target.closest('.pm-multi-dropdown')) openMulti.value = ''
 }
-function onMultiKeydown(event) {
-  const count = engineerOptions.value.length
+// 键盘可达的多选下拉统一走这里：↑↓ 移动高亮、Enter 勾选、Esc 关闭；人员选择器与
+// 字段级权限的角色选择器共用同一套交互基线，只有选项来源与选中值语义不同。
+function navigateMulti(event, options, name, toggle) {
   if (event.key === 'Escape') {
-    if (openMulti.value === 'engineer') { event.stopPropagation(); openMulti.value = ''; multiActiveIndex.value = -1 }
+    if (openMulti.value === name) { event.stopPropagation(); openMulti.value = ''; multiActiveIndex.value = -1 }
     return
   }
-  if (openMulti.value !== 'engineer' || !count) return
+  if (openMulti.value !== name || !options.length) return
   if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
     event.preventDefault()
     const delta = event.key === 'ArrowDown' ? 1 : -1
-    multiActiveIndex.value = (multiActiveIndex.value + delta + count) % count
+    multiActiveIndex.value = (multiActiveIndex.value + delta + options.length) % options.length
   } else if (event.key === 'Enter') {
     event.preventDefault()
-    const option = engineerOptions.value[multiActiveIndex.value]
-    if (option && !option.disabled) toggleEngineer(option.id)
+    const option = options[multiActiveIndex.value]
+    if (option && !option.disabled) toggle(option)
   }
 }
+function onMultiKeydown(event) { navigateMulti(event, engineerOptions.value, 'engineer', (option) => toggleEngineer(option.id)) }
+function onConfigRolesKeydown(event) { navigateMulti(event, configRoleOptions.value, 'configRoles', (option) => toggleConfigRole(option.code)) }
 // 已选人员在触发器下方以 chip 回显，支持单个移除；摘要文本保留给屏幕阅读器与窄屏。
 const engineerChipOptions = computed(() => engineerSelection.value.map((id) => engineerOptions.value.find((option) => option.id === id) || { id, name: id }))
 const selectedServiceItems = computed(() => serviceItems.value.filter((item) => selectedServiceItemIDs.value.includes(item.id)))
@@ -1958,7 +2029,7 @@ onBeforeUnmount(() => {
 
     <div v-if="adjustOpen" class="pm-overlay" @click.self="adjustOpen = false"><form class="pm-dialog pm-dialog-wide" @submit.prevent="submitDecompositionAdjust"><header><div><span>ADJUST</span><h2>调整拆解</h2><small class="pm-dialog-sub">目标项目：<b>{{ decompositionProject ? `${decompositionProject.id} · ${decompositionProject.name || decompositionProject.customer || ''}` : '未选择' }}</b> —— 提交后该项目的<b>全部</b>服务项会被这份清单替换并进入补充协议处理中；原服务项转为归档保留历史。</small></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="adjustOpen = false"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>调整原因 <em>*</em></span><input v-model.trim="adjustForm.reason" required placeholder="例如 客户追加两个系统" /></label><label><span>补充协议编号 <em>*</em></span><input v-model.trim="adjustForm.supplementContractID" required placeholder="例如 SC-2026-0007" /></label><section class="pm-service-links"><header><div><b>新的服务项清单</b><small>提交后该项目的全部服务项会被这份清单替换，并进入补充协议处理中</small></div><button type="button" class="pm-link" @click="addAdjustItem">＋ 增加一行</button></header><div v-for="(row, index) in adjustForm.items" :key="index" class="pm-adjust-item"><div class="pm-service-link-row"><input v-model.trim="row.batch" required placeholder="批次" /><input v-model.trim="row.site" required placeholder="场所" /><input v-model.trim="row.category" required placeholder="检测类别" /><button type="button" class="pm-icon-button" :aria-label="`删除第 ${index + 1} 行`" @click="removeAdjustItem(index)">×</button></div><div class="pm-service-link-row"><input v-model.trim="row.system" placeholder="系统名称" /><input v-model.trim="row.systemLevel" placeholder="系统等级" /><input v-model.trim="row.requirement" placeholder="技术要求" /><select v-model="row.testMode"><option value="STANDARD">标准方法</option><option value="PENETRATION">渗透测试</option></select></div></div></section></div><footer><button type="button" class="pm-button" @click="adjustOpen = false">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '提交中…' : '提交调整' }}</button></footer></form></div>
 
-    <div v-if="configEditorOpen" class="pm-overlay" @click.self="configEditorOpen = false"><form class="pm-dialog" @submit.prevent="saveConfigRule"><header><div><span>CONFIG</span><h2>{{ configForm.id ? '编辑配置' : '新建配置' }} · {{ activeConfigMeta.label }}</h2></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="configEditorOpen = false"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>配置名称 <em>*</em></span><input v-model.trim="configForm.name" required placeholder="请输入配置名称" /></label><template v-for="field in activeConfigMeta.fields" :key="field.key"><label v-if="field.field === 'select'"><span>{{ field.label }} <em>*</em></span><select v-model="configForm[field.key]" required><option v-for="option in field.options" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label v-else-if="field.field === 'number'"><span>{{ field.label }} <em v-if="field.required">*</em></span><input v-model.number="configForm[field.key]" type="number" :required="field.required" :min="field.min || 0" /></label><label v-else><span>{{ field.label }} <em v-if="field.required">*</em></span><input v-model.trim="configForm[field.key]" :required="field.required" :placeholder="field.placeholder || ''" /></label></template><label><span>启用</span><button type="button" class="pm-switch" :class="{ on: configForm.enabled }" :aria-label="`${configForm.enabled ? '停用' : '启用'}`" @click="configForm.enabled = !configForm.enabled"><i></i></button></label></div><footer><button type="button" class="pm-button" @click="configEditorOpen = false">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : '保存' }}</button></footer></form></div>
+    <div v-if="configEditorOpen" class="pm-overlay" @click.self="configEditorOpen = false"><form class="pm-dialog" @submit.prevent="saveConfigRule"><header><div><span>CONFIG</span><h2>{{ configForm.id ? '编辑配置' : '新建配置' }} · {{ activeConfigMeta.label }}</h2></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="configEditorOpen = false"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>配置名称 <em>*</em></span><input v-model.trim="configForm.name" required placeholder="请输入配置名称" /></label><template v-for="field in activeConfigMeta.fields" :key="field.key"><div v-if="field.field === 'roles'" class="pm-field pm-span-full"><span>{{ field.label }} <em v-if="field.required">*</em></span><div class="pm-multi-dropdown" :class="{ open: openMulti === 'configRoles' }"><button type="button" class="pm-multi-trigger" :class="{ placeholder: !configRoleSelection.length }" aria-haspopup="listbox" :aria-expanded="openMulti === 'configRoles'" @click.stop="toggleMulti('configRoles')" @keydown="onConfigRolesKeydown"><span>{{ multiSummary(configRoleSelection, configRoleOptions, '请选择角色（可多选）', 'code') }}</span><i class="pm-multi-caret"></i></button><div v-if="openMulti === 'configRoles'" class="pm-multi-menu" role="listbox" aria-label="选择角色" aria-multiselectable="true"><label v-for="option in configRoleOptions" :key="option.code" class="pm-multi-option" :class="{ 'is-active': configRoleOptions[multiActiveIndex]?.code === option.code }" role="option" :aria-selected="configRoleSelection.includes(option.code)"><input type="checkbox" :checked="configRoleSelection.includes(option.code)" @change="toggleConfigRole(option.code)" /><span>{{ option.name }}</span></label><p v-if="!configRoleOptions.length" class="pm-empty-mini">{{ applicationRolesError || '角色目录加载中…' }}</p></div></div><div v-if="configRoleChipOptions.length" class="pm-multi-chips"><span v-for="option in configRoleChipOptions" :key="option.code" class="pm-chip">{{ option.name }}<button type="button" class="pm-chip-x" :aria-label="`移除 ${option.name}`" @click.stop="toggleConfigRole(option.code)">✕</button></span></div><p v-if="configRoleSelection.length > 1" class="pm-form-hint">已选 {{ configRoleSelection.length }} 个角色，保存后每个角色各生成一条规则。</p><p v-else-if="applicationRolesError" class="pm-form-hint" role="alert">{{ applicationRolesError }}</p></div><label v-else-if="field.field === 'select'"><span>{{ field.label }} <em>*</em></span><select v-model="configForm[field.key]" required><option v-for="option in field.options" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label v-else-if="field.field === 'number'"><span>{{ field.label }} <em v-if="field.required">*</em></span><input v-model.number="configForm[field.key]" type="number" :required="field.required" :min="field.min || 0" /></label><label v-else><span>{{ field.label }} <em v-if="field.required">*</em></span><input v-model.trim="configForm[field.key]" :required="field.required" :placeholder="field.placeholder || ''" /></label></template><label><span>启用</span><button type="button" class="pm-switch" :class="{ on: configForm.enabled }" :aria-label="`${configForm.enabled ? '停用' : '启用'}`" @click="configForm.enabled = !configForm.enabled"><i></i></button></label></div><footer><button type="button" class="pm-button" @click="configEditorOpen = false">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : '保存' }}</button></footer></form></div>
     <Transition name="pm-toast"><div v-if="toastMessage" class="pm-toast" :class="toastType" role="status"><span>{{ toastType === 'error' ? '✕' : toastType === 'warning' ? '⚠' : toastType === 'info' ? 'ℹ' : '✓' }}</span>{{ toastMessage }}</div></Transition>
   </div>
 </template>
