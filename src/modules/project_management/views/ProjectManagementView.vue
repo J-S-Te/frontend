@@ -57,7 +57,7 @@ import {
   reviewSpecialMethod,
   updateReportStatus,
 } from '@/modules/project_management/api/projectManagement'
-import { listApprovedContracts, openContractAuthorizationInNewTab } from '@/modules/contract_management/api/contract'
+import { listApprovedContracts } from '@/modules/contract_management/api/contract'
 import '@/modules/project_management/styles/project-management.css'
 
 const route = useRoute()
@@ -1406,19 +1406,16 @@ async function loadEquipment() {
 
 async function openCreateProject() {
   try {
-    // 项目系统只依赖自身会话：合同系统返回 401 时不得把用户跳转到合同登录
-    // （对没有合同应用授权的账号，那里只会以 403 结束），改为就地给出可执行提示。
+    // 项目系统只依赖自身会话：读取合同列表失败时绝不能改变当前标签页或新开合同系统。
+    // 新建入口必须保持在项目工作台内，由用户自行处理合同系统权限或会话问题。
     approvedContracts.value = await listApprovedContracts({}, { suppressLoginRedirect: true })
     if (!approvedContracts.value.length) { showToast('当前没有已通过审批的可用合同', 'warning'); return }
     createOpen.value = true
   } catch (error) {
     if (error?.status === 401) {
-      // 401 分不清"没有合同授权"和"有授权但还没建立合同会话"。在新标签页补一次授权，
-      // 不劫持当前页面；授权成功后回到本页重试即可。
-      const opened = openContractAuthorizationInNewTab()
-      showToast(opened
-        ? '已在新标签页打开合同系统授权，完成后回到本页重新点击「新建项目」'
-        : '无法打开合同系统授权窗口，请手动进入合同系统完成一次授权，或联系管理员开通权限')
+      // 不尝试替用户打开合同系统：这会让首次点击“新建项目”看起来像页面跳转，
+      // 也会把没有合同权限的用户带到一个必然失败的页面。
+      showToast('无法读取已审批合同：当前合同系统会话或权限不可用。项目页面未跳转，请确认权限后重试。', 'warning')
       return
     }
     showToast(error?.message || '读取已审批合同失败', 'error')
