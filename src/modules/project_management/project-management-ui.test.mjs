@@ -872,14 +872,20 @@ test('样式表修掉信息提示、卡片角标与残留样式三处缺陷', ()
   assert.match(styles, /\.pm-alert \{ display: flex;/)
   assert.match(styles, /\.pm-alert\.info \{ border-color: var\(--pm-sky\)/)
   assert.match(styles, /\.pm-alert\.info i \{ background: var\(--pm-sky\); \}/)
-  // 右上角标与标签行右侧「实时」药丸同处一条水平带，有角标时须给标签行留出宽度。
-  assert.match(styles, /\.pm-kpi:has\(\.pm-kpi-corner\) > \.pm-kpi-label \{ padding-right: 64px; \}/)
-  // .pm-kpi.green/.red 的 ::before 没有任何基础规则，只设 background 属死规则；
-  // 真正的配色是卡片自身的渐变背景，必须保留。
+  // 角标 v2 改为卡片内的常规流元素（position: static，降级为顶部小标）：它不再压在
+  // 右上角，也就不再和标签行争同一条水平带，因此标签行无需再留 64px——这里断言
+  // "不重叠"的结构性保证（角标在流内而非绝对定位），而不是某个具体的留白数值。
+  assert.match(styles, /\.pm-kpi \.pm-kpi-corner \{[^}]*position: static;/)
+  assert.doesNotMatch(styles, /\.pm-kpi \.pm-kpi-corner \{[^}]*position: absolute;/)
+  assert.match(styles, /\.pm-kpi:has\(\.pm-kpi-corner\) > \.pm-kpi-label \{ padding-right: 0; \}/)
+  // .pm-kpi.green/.red 的 ::before 没有任何基础规则，只设 background 属死规则，不得残留。
   assert.doesNotMatch(styles, /\.pm-kpi\.green::before/)
   assert.doesNotMatch(styles, /\.pm-kpi\.red::before/)
-  assert.match(styles, /\.pm-kpi\.green \{ background: linear-gradient/)
-  assert.match(styles, /\.pm-kpi\.red \{ background: linear-gradient/)
+  // v2：卡片本体保持纯白、留白优先，语义色只走顶部 3px 色条 + 标签徽标底色，
+  // 旧名（green/red/blue/amber）保留为别名，因此断言的是别名仍映射到语义色令牌。
+  assert.match(styles, /\.pm-kpi\.green\s*\{[^}]*border-top-color: var\(--pm-green\);/)
+  assert.match(styles, /\.pm-kpi\.red\s*\{[^}]*border-top-color: var\(--pm-red\);/)
+  assert.match(styles, /\.pm-kpi\.amber\s*\{[^}]*border-top-color: var\(--pm-amber\);/)
   // 统计条已被看板 KPI 行取代，其样式不得再残留。
   assert.doesNotMatch(styles, /pm-summary-strip/)
 })
