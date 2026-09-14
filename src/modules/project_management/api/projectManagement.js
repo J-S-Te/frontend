@@ -410,6 +410,95 @@ export function createRule(payload) {
 }
 
 /**
+ * getSplitPolicy 读取合同拆解的默认分组规则（原型 PG-CFG-01 第一块）。
+ * @returns {Promise<object>} 默认分组规则（未配置时服务端返回原型默认值）。
+ * @throws {Error} 会话失效或鉴权失败时抛出。
+ */
+export async function getSplitPolicy() {
+  return request('/split-policy')
+}
+
+/**
+ * saveSplitPolicy 保存默认分组规则（整行覆盖）。
+ * @param {Object} payload 分组维度、默认进入状态、摘要与缺规则处理等设置。
+ * @returns {Promise<object>} 保存后的分组规则。
+ * @throws {Error} 入参非法或无权限时抛出。
+ */
+export function saveSplitPolicy(payload) {
+  return request('/split-policy', { method: 'PUT', body: JSON.stringify(payload) })
+}
+
+/**
+ * listDetectionCategories 读取检测类别（服务类型）域，含每类的关联服务项数。
+ * @returns {Promise<Array<object>>} 检测类别列表。
+ * @throws {Error} 会话失效或鉴权失败时抛出。
+ */
+export async function listDetectionCategories() {
+  const data = await request('/detection-categories')
+  return Array.isArray(data?.items) ? data.items : []
+}
+
+/**
+ * saveDetectionCategory 新增或更新一项检测类别（按租户 + 类别幂等）。
+ * @param {Object} payload 类别、默认体系要求、必备资质与特殊方法口径。
+ * @returns {Promise<object>} 保存后的检测类别。
+ * @throws {Error} 入参非法或无权限时抛出。
+ */
+export function saveDetectionCategory(payload) {
+  return request('/detection-categories', { method: 'POST', body: JSON.stringify(payload) })
+}
+
+/**
+ * importDetectionCategories 批量导入检测类别域（页面「导入」入口）。
+ * @param {Array<object>} items 检测类别行（category 必填，其余可选）。
+ * @returns {Promise<{imported: number, skipped: number, errors?: string[]}>} 导入结果摘要。
+ * @throws {Error} 无权限或网关返回非成功状态时抛出。
+ */
+export function importDetectionCategories(items) {
+  return request('/detection-categories/import', { method: 'POST', body: JSON.stringify({ items }) })
+}
+
+/**
+ * deleteDetectionCategory 删除一项检测类别；仍被服务项引用时服务端返回冲突。
+ * @param {string} category 检测类别。
+ * @returns {Promise<object>} 被删除的类别。
+ * @throws {Error} 类别仍被引用、不存在或无权限时抛出。
+ */
+export function deleteDetectionCategory(category) {
+  return request(`/detection-categories/${encodeURIComponent(category)}`, { method: 'DELETE' })
+}
+
+/**
+ * listSplitOverrides 读取覆盖规则（按优先级升序）。
+ * @returns {Promise<Array<object>>} 覆盖规则列表。
+ * @throws {Error} 会话失效或鉴权失败时抛出。
+ */
+export async function listSplitOverrides() {
+  const data = await request('/split-overrides')
+  return Array.isArray(data?.items) ? data.items : []
+}
+
+/**
+ * saveSplitOverride 新增（无 id）或更新一条覆盖规则。
+ * @param {Object} payload 名称、匹配条件、覆盖设置、优先级与启停。
+ * @returns {Promise<object>} 保存后的覆盖规则。
+ * @throws {Error} 入参非法或无权限时抛出。
+ */
+export function saveSplitOverride(payload) {
+  return request('/split-overrides', { method: 'POST', body: JSON.stringify(payload) })
+}
+
+/**
+ * deleteSplitOverride 删除一条覆盖规则。
+ * @param {string|number} id 覆盖规则 ID。
+ * @returns {Promise<object>} 被删除的覆盖规则。
+ * @throws {Error} 规则不存在或无权限时抛出。
+ */
+export function deleteSplitOverride(id) {
+  return request(`/split-overrides/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+/**
  * deleteRule 删除一条配置规则。六套配置各自成表，因此 kind 必填：只有 kind 能确定目标表，
  * 主键在不同表之间会重复，缺 kind 服务端按参数不合法拒绝。
  * @param {string|number} id 规则 ID。

@@ -29,6 +29,15 @@ import {
   listApplicationRoles,
   listRules,
   listSlaOverdue,
+  getSplitPolicy,
+  saveSplitPolicy,
+  listDetectionCategories,
+  saveDetectionCategory,
+  deleteDetectionCategory,
+  listSplitOverrides,
+  saveSplitOverride,
+  importDetectionCategories,
+  deleteSplitOverride,
   listServiceItems,
   listPersonnel,
   listEquipmentReservations,
@@ -81,7 +90,7 @@ const allNavGroups = [
     { key: 'reports', label: '报告编制状态', icon: 'account' },
   ] },
   { label: '系统配置', items: [
-    { key: 'split-rules', label: '拆解规则', icon: 'settings' },
+    { key: 'split-rules', label: '合同拆解规则', icon: 'settings' },
     { key: 'warning-rules', label: '冲突预警规则', icon: 'shield' },
     { key: 'automations', label: '自动化触发', icon: 'reset' },
     { key: 'permissions', label: '字段级权限', icon: 'role' },
@@ -108,7 +117,7 @@ const pageMeta = {
   exceptions: ['异常评审 · 偏离上报', '处理现场偏离、阻塞与整改回路'],
   standards: ['检测标准方法更新 · 影响评估', '识别标准变更对在途项目的影响'],
   reports: ['报告编制状态维护', '衔接实施完成、报告编制、复核与签发'],
-  'split-rules': ['合同拆解规则配置', '配置合同服务清单到项目服务项的转换规则'],
+  'split-rules': ['合同拆解规则配置', '默认分组规则 + 检测类别域 + 覆盖规则：合同生效后自动生成服务项的分组与初始状态口径'],
   'warning-rules': ['冲突预警规则配置', '配置资源、资质、地域与排期冲突策略'],
   automations: ['自动化触发配置', '维护项目状态变化后的自动任务与通知'],
   permissions: ['字段级权限配置', '按角色控制敏感字段的查看与编辑范围'],
@@ -344,7 +353,6 @@ const operationForm = ref({ teamLeadID: '', projectManagerID: '', engineerIDs: '
 
 // 六套真实配置表的列与编辑字段元数据。
 const configKindsMeta = [
-  { kind: 'split-rules', label: '拆解规则', columns: [{ key: 'scope', label: '适用范围' }], fields: [{ key: 'scope', label: '适用范围', field: 'text', required: true, placeholder: '例如 单批次金额超过 50 万元' }] },
   { kind: 'warning-rules', label: '预警规则', columns: [{ key: 'check_type', label: '检查类型' }, { key: 'threshold', label: '阈值' }], fields: [{ key: 'check_type', label: '检查类型', field: 'text', required: true, placeholder: '例如 资质能力冲突 / 排期冲突 / 场地冲突' }, { key: 'threshold', label: '阈值', field: 'text', placeholder: '例如 连续 3 项冲突' }] },
   { kind: 'automations', label: '自动化动作', columns: [{ key: 'trigger', label: '触发事件' }, { key: 'target', label: '目标' }], fields: [{ key: 'trigger', label: '触发事件', field: 'text', required: true, placeholder: '例如 DEVIATION_REPORTED' }, { key: 'target', label: '目标', field: 'text', required: true, placeholder: '例如 通知技术总监 / 创建整改工单' }] },
   { kind: 'permissions', label: '字段级权限', columns: [{ key: 'role_code', label: '角色' }, { key: 'field_name', label: '字段' }, { key: 'access_level', label: '访问级别' }], fields: [{ key: 'role_codes', label: '角色', field: 'roles', required: true }, { key: 'field_name', label: '字段', field: 'text', required: true, placeholder: '例如 report_revenue' }, { key: 'access_level', label: '访问级别', field: 'select', required: true, options: [{ value: 'view', label: '只读可见' }, { value: 'edit', label: '可编辑' }, { value: 'hidden', label: '隐藏' }] }] },
@@ -451,6 +459,281 @@ async function saveConfigRule() {
     configEditorOpen.value = false
     showToast(configForm.value.id ? '配置已保存' : '配置已创建')
   } catch (error) { showToast(error?.message || '配置保存失败', 'error') }
+  finally { saving.value = false }
+}
+
+// ---- 合同拆解规则配置 v2（原型 PG-CFG-01）-------------------------------------
+// 三块配置：默认分组规则 / 检测类别（服务类型）域 / 覆盖规则。
+// 页面只负责呈现与提交，分组与初始状态的判定完全在服务端（激活合同与拆解调整共用同一套口径）。
+// 进页面即渲染表单，先用后端 domain.DefaultSplitPolicy 的同款默认值兜底，
+// 避免首帧 splitPolicy 为 null 时对 null 取属性。
+const splitPolicy = ref({
+  dimension_primary: 'batch',
+  dimension_secondary: 'category',
+  dimension_tertiary: '',
+  default_status: '待确认',
+  generate_requirement_summary: true,
+  requirement_summary_locked: false,
+  missing_rule_action: 'HUMAN_CONFIRM',
+  scope_change_detection: true,
+  enabled: true,
+})
+const splitPolicySaving = ref(false)
+const detectionCategories = ref([])
+const splitOverrides = ref([])
+const splitConfigLoading = ref(false)
+const splitConfigError = ref('')
+const categoryDialog = ref(null)
+const overrideDialog = ref(null)
+
+// 维度取值与原型一致：维度 1 取清单/项目侧字段，维度 2/3 另可含服务项属性。
+const splitDimensionPrimaryOptions = [
+  { value: 'batch', label: '批次（默认）' },
+  { value: 'site', label: '场所' },
+  { value: 'customer', label: '客户' },
+  { value: 'contract', label: '合同' },
+]
+const splitDimensionSecondaryOptions = [
+  { value: 'category', label: '检测类别（默认）' },
+  { value: 'system_standard', label: '体系要求' },
+  { value: 'test_mode', label: '方法类型' },
+]
+const splitDimensionAnyOptions = [...splitDimensionPrimaryOptions, ...splitDimensionSecondaryOptions]
+const splitDefaultStatusOptions = [
+  { value: '待确认', label: '待确认（默认，业务员确认后→待分配）' },
+  { value: '待分配', label: '待分配（跳过确认）' },
+]
+const splitMissingRuleOptions = [
+  { value: 'HUMAN_CONFIRM', label: '标记「待人工确认」并通知业务管理员（默认）' },
+  { value: 'DEFAULT_RULE', label: '按默认规则生成' },
+  { value: 'SILENT', label: '按默认规则生成（不通知，不推荐）' },
+]
+const specialMethodOptions = [
+  { value: 'NO', label: '否' },
+  { value: 'MARKABLE', label: '可标记' },
+  { value: 'REQUIRED', label: '必为特殊方法' },
+]
+const specialMethodTone = { NO: 'neutral', MARKABLE: 'violet', REQUIRED: 'violet' }
+const specialMethodLabel = Object.fromEntries(specialMethodOptions.map((option) => [option.value, option.label]))
+const splitDimensionLabel = Object.fromEntries(splitDimensionAnyOptions.map((option) => [option.value, option.label.replace(/（默认）$/, '')]))
+function splitDimensionText(value) { return splitDimensionLabel[value] || value || '—' }
+function splitMissingRuleText(value) { return splitMissingRuleOptions.find((option) => option.value === value)?.label.replace(/（默认）|（不通知，不推荐）/, '') || value }
+
+async function loadSplitConfig() {
+  splitConfigLoading.value = true
+  splitConfigError.value = ''
+  try {
+    const [policy, categories, overrides] = await Promise.all([getSplitPolicy(), listDetectionCategories(), listSplitOverrides()])
+    splitPolicy.value = policy
+    detectionCategories.value = categories
+    splitOverrides.value = overrides
+  } catch (error) {
+    splitConfigError.value = error?.message || '拆解规则配置加载失败'
+  } finally {
+    splitConfigLoading.value = false
+  }
+}
+
+async function submitSplitPolicy() {
+  if (!splitPolicy.value || splitPolicySaving.value) return
+  splitPolicySaving.value = true
+  try {
+    splitPolicy.value = await saveSplitPolicy(splitPolicy.value)
+    showToast('默认分组规则已保存，对新合同的拆解生效')
+  } catch (error) { showToast(error?.message || '默认分组规则保存失败', 'error') }
+  finally { splitPolicySaving.value = false }
+}
+
+// 检测类别域 CSV 导出/导入：导出在浏览器侧生成（UTF-8 BOM，Excel 可直接打开），
+// 导入走批量接口并把逐行原因回显，避免整批失败。
+const detectionCategoryFileInput = ref(null)
+const DETECTION_CATEGORY_HEADERS = ['检测类别', '默认体系要求', '必备资质（默认）', '必检能力码', '是否特殊方法', '状态']
+
+function csvCell(value) {
+  const text = String(value ?? '')
+  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
+}
+
+function downloadDetectionCategories() {
+  const lines = [DETECTION_CATEGORY_HEADERS.join(',')]
+  for (const item of detectionCategories.value) {
+    lines.push([
+      item.category, item.system_standard, item.required_qualifications, item.required_codes,
+      specialMethodLabel[item.special_method] || '', item.enabled ? '启用' : '停用',
+    ].map(csvCell).join(','))
+  }
+  const blob = new Blob([`\ufeff${lines.join('\n')}`], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `检测类别域-${new Date().toISOString().slice(0, 10)}.csv`
+  link.click()
+  URL.revokeObjectURL(url)
+  showToast(`已导出 ${detectionCategories.value.length} 条检测类别`)
+}
+
+// 逐行解析 CSV：识别表头、忽略空行，特殊方法/状态同时接受中文与枚举值。
+function parseDetectionCategoryCSV(text) {
+  const rows = []
+  const lines = text.replace(/\r\n?/g, '\n').split('\n').filter((line) => line.trim() !== '')
+  if (!lines.length) return rows
+  const parseLine = (line) => {
+    const cells = []
+    let current = ''
+    let quoted = false
+    for (let index = 0; index < line.length; index += 1) {
+      const char = line[index]
+      if (quoted) {
+        if (char === '"' && line[index + 1] === '"') { current += '"'; index += 1 }
+        else if (char === '"') quoted = false
+        else current += char
+      } else if (char === '"') quoted = true
+      else if (char === ',') { cells.push(current); current = '' }
+      else current += char
+    }
+    cells.push(current)
+    return cells.map((cell) => cell.trim())
+  }
+  const header = parseLine(lines[0])
+  const hasHeader = header.includes('检测类别')
+  const body = hasHeader ? lines.slice(1) : lines
+  const specialFromText = { 否: 'NO', 可标记: 'MARKABLE', 必为特殊方法: 'REQUIRED', NO: 'NO', MARKABLE: 'MARKABLE', REQUIRED: 'REQUIRED' }
+  for (const line of body) {
+    const cells = parseLine(line)
+    if (!cells.length || !cells[0]) continue
+    rows.push({
+      category: cells[0],
+      system_standard: cells[1] || '',
+      required_qualifications: cells[2] || '',
+      required_codes: cells[3] || '',
+      special_method: specialFromText[cells[4]] || 'NO',
+      enabled: (cells[5] || '启用') !== '停用',
+    })
+  }
+  return rows
+}
+
+async function importDetectionCategoryFile(event) {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file) return
+  saving.value = true
+  try {
+    const rows = parseDetectionCategoryCSV(await file.text())
+    if (!rows.length) { showToast('CSV 里没有可导入的检测类别', 'warning'); return }
+    const result = await importDetectionCategories(rows)
+    detectionCategories.value = await listDetectionCategories()
+    showToast(result?.skipped ? `导入完成：成功 ${result.imported} 条，跳过 ${result.skipped} 条` : `导入完成：成功 ${result?.imported ?? 0} 条`)
+    if (result?.errors?.length) splitConfigError.value = `导入跳过原因：${result.errors.slice(0, 3).join('；')}`
+  } catch (error) { showToast(error?.message || 'CSV 导入失败', 'error') }
+  finally { saving.value = false }
+}
+
+function openCategoryDialog(item = null) {
+  categoryDialog.value = item
+    ? { ...item }
+    : { category: '', system_standard: '', required_qualifications: '', special_method: 'NO', enabled: true }
+}
+
+async function submitDetectionCategory() {
+  if (!categoryDialog.value) return
+  saving.value = true
+  try {
+    await saveDetectionCategory(categoryDialog.value)
+    categoryDialog.value = null
+    detectionCategories.value = await listDetectionCategories()
+    showToast('检测类别已保存')
+  } catch (error) { showToast(error?.message || '检测类别保存失败', 'error') }
+  finally { saving.value = false }
+}
+
+async function removeDetectionCategory(item) {
+  if (saving.value) return
+  if (!window.confirm(`确认删除检测类别「${item.category}」？仍被服务项引用的类别不能删除，可改为禁用。`)) return
+  saving.value = true
+  try {
+    await deleteDetectionCategory(item.category)
+    detectionCategories.value = await listDetectionCategories()
+    showToast(`检测类别「${item.category}」已删除`)
+  } catch (error) { showToast(error?.message || '检测类别删除失败', 'error') }
+  finally { saving.value = false }
+}
+
+function openOverrideDialog(item = null) {
+  overrideDialog.value = item
+    ? { ...item, match: { ...item.match_conditions }, settings: { ...item.override_settings } }
+    : { name: '', match: { customer_contains: '', contract_contains: '', max_service_items: 0 }, settings: {}, priority: 100, enabled: true }
+}
+
+function overrideMatchText(item) {
+  const parts = []
+  if (item.match_conditions?.customer_contains) parts.push(`客户名称包含 ${item.match_conditions.customer_contains}`)
+  if (item.match_conditions?.contract_contains) parts.push(`合同号包含 ${item.match_conditions.contract_contains}`)
+  if (item.match_conditions?.max_service_items) parts.push(`合同服务项数 ≤ ${item.match_conditions.max_service_items}`)
+  if (item.match_conditions?.min_service_items) parts.push(`合同服务项数 ≥ ${item.match_conditions.min_service_items}`)
+  if ((item.match_conditions?.categories || []).length) parts.push(`检测类别包含 ${item.match_conditions.categories.join(' / ')}`)
+  return parts.join(' 且 ') || '—'
+}
+
+function overrideSettingsText(item) {
+  const settings = item.override_settings || {}
+  const parts = []
+  const dims = [settings.dimension_primary, settings.dimension_secondary, settings.dimension_tertiary].filter(Boolean)
+  if (dims.length) parts.push(`分组维度 = ${dims.map(splitDimensionText).join(' + ')}`)
+  if (settings.default_status) parts.push(`默认进入状态 = ${settings.default_status}`)
+  if (settings.generate_requirement_summary === false) parts.push('技术要求摘要留空人工填写')
+  if (settings.generate_requirement_summary === true) parts.push('生成技术要求摘要')
+  if (settings.requirement_summary_locked === true) parts.push('技术要求摘要锁定')
+  if (settings.missing_rule_action) parts.push(`缺规则处理 = ${splitMissingRuleText(settings.missing_rule_action)}`)
+  if (settings.scope_change_detection === false) parts.push('范围变更检测关闭')
+  return parts.join('；') || '—'
+}
+
+// 空字符串代表"不覆盖"，必须从载荷里剔除：服务端把非 null 的空串当成非法维度取值。
+function compactOverrideSettings(settings) {
+  const compact = {}
+  for (const [key, value] of Object.entries(settings || {})) {
+    if (value === undefined || value === null || value === '') continue
+    compact[key] = value
+  }
+  return compact
+}
+
+function compactOverrideMatch(match) {
+  const compact = {}
+  for (const [key, value] of Object.entries(match || {})) {
+    if (value === undefined || value === null || value === '') continue
+    if (Array.isArray(value) && !value.length) continue
+    compact[key] = value
+  }
+  return compact
+}
+
+async function submitSplitOverride() {
+  if (!overrideDialog.value) return
+  saving.value = true
+  try {
+    await saveSplitOverride({
+      ...overrideDialog.value,
+      match: compactOverrideMatch(overrideDialog.value.match),
+      settings: compactOverrideSettings(overrideDialog.value.settings),
+    })
+    overrideDialog.value = null
+    splitOverrides.value = await listSplitOverrides()
+    showToast('覆盖规则已保存')
+  } catch (error) { showToast(error?.message || '覆盖规则保存失败', 'error') }
+  finally { saving.value = false }
+}
+
+async function removeSplitOverride(item) {
+  if (saving.value) return
+  if (!window.confirm(`确认删除覆盖规则「${item.name}」？删除后该合同将回到默认分组规则。`)) return
+  saving.value = true
+  try {
+    await deleteSplitOverride(item.id)
+    splitOverrides.value = await listSplitOverrides()
+    showToast(`覆盖规则「${item.name}」已删除`)
+  } catch (error) { showToast(error?.message || '覆盖规则删除失败', 'error') }
   finally { saving.value = false }
 }
 
@@ -982,6 +1265,8 @@ async function loadWorkspace() {
     navigation.value = navigationData
     // 侧栏账号行的角色名依赖服务端角色目录；不阻塞工作区首屏，失败只影响副标题文案。
     loadApplicationRoles()
+    // 拆解规则配置由独立接口提供（不属于六类规则表），进入页面时按需加载。
+    if (activeSection.value === 'split-rules') loadSplitConfig()
     const allowed = new Set(navigationData.sections)
     // 项目详情是从列表下钻的页面（携带 query.project），不要求出现在服务端导航清单里。
     if (route.params.section !== 'project_detail' && !allowed.has(route.params.section)) {
@@ -1288,6 +1573,8 @@ async function downloadCapabilities() {
 function navigate(section) {
   router.push({ name: 'project_management', params: { section } })
   mobileMenuOpen.value = false
+  // 拆解规则配置来自独立接口：切到该页签时按需加载，避免影响其它工作区的首屏。
+  if (section === 'split-rules') loadSplitConfig()
 }
 
 // 项目详情是从列表/看板下钻的独立页面（原型 PG-PRJ-02），不在侧边栏导航里，
@@ -2043,7 +2330,41 @@ onBeforeUnmount(() => {
         </template>
         <template v-else-if="activeSection === 'qualifications'"><section class="pm-panel"><header><div><p class="pm-panel-kicker">RESOURCE CAPABILITY</p><h2>资质与能力管理</h2><p>维护并展示人员资质与设备能力记录。</p></div><div class="pm-panel-actions"><input ref="qualificationFileInput" class="pm-file-input" type="file" accept=".csv,text/csv" @change="importQualificationFile" /><button class="pm-button" :disabled="saving" @click="downloadCapabilities">导出 CSV</button><template v-if="canManageResource"><button class="pm-button" :disabled="saving" @click="qualificationFileInput.click()">导入 CSV</button><button class="pm-button" :disabled="saving" @click="syncIdentities">同步人员状态</button><button class="pm-button primary" :disabled="saving" @click="openCapabilityDialog()">＋ 新建资质</button></template></div></header><div class="pm-qualification-filter"><section class="pm-sm-tabs pm-capability-tabs"><button v-for="tab in capabilityTabs" :key="tab.key" type="button" class="pm-tab-pill" :class="{ active: capabilityTab === tab.key }" @click="capabilityTab = tab.key">{{ tab.label }}<span class="pm-tab-count">{{ tab.count }}</span></button></section><label><span>资源类型</span><select v-model="capabilityTypeFilter" class="pm-filter-select"><option value="">全部</option><option value="PERSON">人员资质</option><option value="EQUIPMENT">设备能力</option></select></label><label><span>状态</span><select v-model="capabilityStatusFilter" class="pm-filter-select"><option value="">全部</option><option value="ACTIVE">有效</option><option value="DISABLED">停用</option></select></label></div></section><section v-if="capabilityTab === 'codes'" class="pm-table-panel"><header><div><p class="pm-panel-kicker">CODE MATRIX</p><h2>体系与编码映射</h2></div><span>按能力台账聚合：编码 × 持有人员数 / 设备数</span></header><div class="pm-matrix-wrap"><table class="pm-matrix"><thead><tr><th>能力编码</th><th>人员</th><th>设备</th><th>覆盖合计</th></tr></thead><tbody><tr v-for="row in capabilityCodeRows" :key="row.code"><td><span class="pm-code-pill">{{ row.code }}</span></td><td><span class="pm-badge" :class="row.personCount ? 'normal' : 'neutral'">{{ row.personCount }} 人</span></td><td><span class="pm-badge" :class="row.equipmentCount ? 'normal' : 'neutral'">{{ row.equipmentCount }} 台</span></td><td class="num">{{ row.personCount + row.equipmentCount }}</td></tr><tr v-if="!capabilityCodeRows.length"><td colspan="4" class="pm-empty-mini">暂无能力编码，请在资质记录中维护</td></tr></tbody></table></div></section>
           <section v-else-if="capabilityTab === 'expiry'" class="pm-table-panel"><header><div><p class="pm-panel-kicker danger">EXPIRY WATCH</p><h2>到期提醒</h2></div><span>30 天内到期或已过期 · 按到期时间升序</span></header><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>编号</th><th>名称</th><th>类型</th><th>能力编码</th><th>到期日</th><th>状态</th></tr></thead><tbody><tr v-for="item in expiringCapabilities" :key="item.resource_id" :class="{ risk: new Date(item.valid_until).getTime() <= Date.now() }"><td class="mono">{{ item.resource_id }}</td><td><b>{{ item.resource_name }}</b></td><td>{{ item.resource_type === 'PERSON' ? '人员资质' : '设备能力' }}</td><td><span v-if="!(item.codes || []).length">—</span><span v-else class="pm-code-pills"><span v-for="code in item.codes" :key="code" class="pm-code-pill">{{ code }}</span></span></td><td :class="{ 'pm-text-danger': new Date(item.valid_until).getTime() <= Date.now() }">{{ item.valid_until.slice(0, 10) }}</td><td><span class="pm-badge" :class="new Date(item.valid_until).getTime() <= Date.now() ? '风险' : '关注'">{{ new Date(item.valid_until).getTime() <= Date.now() ? '已过期' : '即将到期' }}</span></td></tr><tr v-if="!expiringCapabilities.length"><td colspan="6" class="pm-empty-mini">30 天内没有到期的资质或检定</td></tr></tbody></table></div></section>
-          <section v-else class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>资源类型</th><th>编号</th><th>名称</th><th>资质 / 能力编码</th><th>有效期</th><th>使用范围</th><th>状态</th><th>人员状态</th><th></th></tr></thead><tbody><tr v-for="item in filteredCapabilities" :key="item.resource_id"><td><span class="pm-badge neutral">{{ item.resource_type === 'PERSON' ? '人员' : '设备' }}</span></td><td class="mono">{{ item.resource_id }}</td><td><b>{{ item.resource_name }}</b></td><td><span v-if="!(item.codes || []).length">—</span><span v-else class="pm-code-pills"><span v-for="code in item.codes" :key="code" class="pm-code-pill">{{ code }}</span></span></td><td>{{ item.valid_until ? (item.valid_from ? `${item.valid_from.slice(0, 10)} ~ ` : '') + item.valid_until.slice(0, 10) : '长期' }}</td><td><span v-if="item.resource_type === 'EQUIPMENT'" class="pm-badge" :class="item.usage_scope === 'COMPANY_ONLY' ? '关注' : 'neutral'">{{ item.usage_scope === 'COMPANY_ONLY' ? '仅在公司使用' : '可借出' }}</span><span v-else>—</span></td><td><span class="pm-badge" :class="statusTone(item.status)">{{ item.status === 'ACTIVE' ? '有效' : '停用' }}</span></td><td><template v-if="item.resource_type === 'PERSON'"><span class="pm-badge" :class="statusTone(item.identity_status)">{{ identityStatusLabel(item.identity_status) }}</span></template><span v-else>—</span></td><td style="width: 90px; min-width: 90px;"><button v-if="canManageResource" class="pm-link" @click="openCapabilityDialog(item)">编辑 / 更新</button></td></tr></tbody></table></div><div v-if="!filteredCapabilities.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无资质记录</b><span>点击「＋ 新建资质」或通过 CSV 导入添加记录。</span></div><footer v-if="importResult"><span role="status">导入完成：成功 {{ importResult.imported }} 条，跳过 {{ importResult.skipped }} 条。</span><span v-if="importResult.errors?.length"><small>{{ importResult.errors.slice(0, 3).join('；') }}{{ importResult.errors.length > 3 ? '…' : '' }}</small></span></footer></section><div v-if="capabilityDialog" class="pm-overlay" @click.self="capabilityDialog = null"><form class="pm-dialog" @submit.prevent="saveCapability"><header><div><span>CAPABILITY</span><h2>{{ capabilityDialog.resource_id ? '编辑资质 / 能力' : '新建资质 / 能力' }}</h2></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="capabilityDialog = null"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>资源类型 <em>*</em></span><select v-model="capabilityDialog.resource_type" required @change="onCapabilityTypeChange"><option value="PERSON">人员资质</option><option value="EQUIPMENT">设备能力</option></select></label><label><span>{{ capabilityDialog.resource_type === 'EQUIPMENT' ? '设备编号' : '人员编号' }} <em>*</em></span><input v-model.trim="capabilityDialog.resource_id" :readonly="capabilityAutoID" required placeholder="系统自动生成" /><small v-if="capabilityAutoID" class="pm-form-hint">由系统自动生成（人员 P- / 设备 EQ-），无需手工填写</small></label><label><span>资源名称 <em>*</em></span><input v-model.trim="capabilityDialog.resource_name" required placeholder="例如 张三 或 基站A" /></label><label><span>资质 / 能力编码 <em>*</em></span><input v-model.trim="capabilityDialog.codes" required placeholder="多个编码用逗号分隔" /></label><label><span>起始日期</span><input v-model="capabilityDialog.valid_from" type="date" /></label><label><span>截止日期</span><input v-model="capabilityDialog.valid_until" type="date" /></label><label v-if="capabilityDialog.resource_type === 'EQUIPMENT'"><span>使用范围</span><select v-model="capabilityDialog.usage_scope"><option value="ANY">可借出</option><option value="COMPANY_ONLY">仅在公司使用（不可借出）</option></select></label><label><span>状态</span><select v-model="capabilityDialog.status"><option value="ACTIVE">有效</option><option value="DISABLED">停用</option></select></label></div><footer><button type="button" class="pm-button" @click="capabilityDialog = null">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : '保存资质' }}</button></footer></form></div></template><template v-else-if="isVisibleConfigSection">
+          <section v-else class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>资源类型</th><th>编号</th><th>名称</th><th>资质 / 能力编码</th><th>有效期</th><th>使用范围</th><th>状态</th><th>人员状态</th><th></th></tr></thead><tbody><tr v-for="item in filteredCapabilities" :key="item.resource_id"><td><span class="pm-badge neutral">{{ item.resource_type === 'PERSON' ? '人员' : '设备' }}</span></td><td class="mono">{{ item.resource_id }}</td><td><b>{{ item.resource_name }}</b></td><td><span v-if="!(item.codes || []).length">—</span><span v-else class="pm-code-pills"><span v-for="code in item.codes" :key="code" class="pm-code-pill">{{ code }}</span></span></td><td>{{ item.valid_until ? (item.valid_from ? `${item.valid_from.slice(0, 10)} ~ ` : '') + item.valid_until.slice(0, 10) : '长期' }}</td><td><span v-if="item.resource_type === 'EQUIPMENT'" class="pm-badge" :class="item.usage_scope === 'COMPANY_ONLY' ? '关注' : 'neutral'">{{ item.usage_scope === 'COMPANY_ONLY' ? '仅在公司使用' : '可借出' }}</span><span v-else>—</span></td><td><span class="pm-badge" :class="statusTone(item.status)">{{ item.status === 'ACTIVE' ? '有效' : '停用' }}</span></td><td><template v-if="item.resource_type === 'PERSON'"><span class="pm-badge" :class="statusTone(item.identity_status)">{{ identityStatusLabel(item.identity_status) }}</span></template><span v-else>—</span></td><td style="width: 90px; min-width: 90px;"><button v-if="canManageResource" class="pm-link" @click="openCapabilityDialog(item)">编辑 / 更新</button></td></tr></tbody></table></div><div v-if="!filteredCapabilities.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无资质记录</b><span>点击「＋ 新建资质」或通过 CSV 导入添加记录。</span></div><footer v-if="importResult"><span role="status">导入完成：成功 {{ importResult.imported }} 条，跳过 {{ importResult.skipped }} 条。</span><span v-if="importResult.errors?.length"><small>{{ importResult.errors.slice(0, 3).join('；') }}{{ importResult.errors.length > 3 ? '…' : '' }}</small></span></footer></section><div v-if="capabilityDialog" class="pm-overlay" @click.self="capabilityDialog = null"><form class="pm-dialog" @submit.prevent="saveCapability"><header><div><span>CAPABILITY</span><h2>{{ capabilityDialog.resource_id ? '编辑资质 / 能力' : '新建资质 / 能力' }}</h2></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="capabilityDialog = null"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>资源类型 <em>*</em></span><select v-model="capabilityDialog.resource_type" required @change="onCapabilityTypeChange"><option value="PERSON">人员资质</option><option value="EQUIPMENT">设备能力</option></select></label><label><span>{{ capabilityDialog.resource_type === 'EQUIPMENT' ? '设备编号' : '人员编号' }} <em>*</em></span><input v-model.trim="capabilityDialog.resource_id" :readonly="capabilityAutoID" required placeholder="系统自动生成" /><small v-if="capabilityAutoID" class="pm-form-hint">由系统自动生成（人员 P- / 设备 EQ-），无需手工填写</small></label><label><span>资源名称 <em>*</em></span><input v-model.trim="capabilityDialog.resource_name" required placeholder="例如 张三 或 基站A" /></label><label><span>资质 / 能力编码 <em>*</em></span><input v-model.trim="capabilityDialog.codes" required placeholder="多个编码用逗号分隔" /></label><label><span>起始日期</span><input v-model="capabilityDialog.valid_from" type="date" /></label><label><span>截止日期</span><input v-model="capabilityDialog.valid_until" type="date" /></label><label v-if="capabilityDialog.resource_type === 'EQUIPMENT'"><span>使用范围</span><select v-model="capabilityDialog.usage_scope"><option value="ANY">可借出</option><option value="COMPANY_ONLY">仅在公司使用（不可借出）</option></select></label><label><span>状态</span><select v-model="capabilityDialog.status"><option value="ACTIVE">有效</option><option value="DISABLED">停用</option></select></label></div><footer><button type="button" class="pm-button" @click="capabilityDialog = null">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : '保存资质' }}</button></footer></form></div></template><template v-else-if="activeSection === 'split-rules'">
+            <section class="pm-panel pm-split-card">
+              <header><div><p class="pm-panel-kicker">SPLIT POLICY</p><h2>① 默认分组规则</h2></div><span class="pm-badge" :class="splitPolicy?.enabled ? 'normal' : 'neutral'">{{ splitPolicy?.enabled ? '已启用' : '已停用' }}</span></header>
+              <div class="pm-form pm-split-form">
+                <p class="pm-form-hint pm-span-full">默认规则：<b>同一{{ splitDimensionText(splitPolicy?.dimension_primary) }} + 同一{{ splitDimensionText(splitPolicy?.dimension_secondary) }} = 1 个服务项</b>（可在覆盖规则中按客户 / 合同类型定制）</p>
+                <label><span>分组维度 1</span><select v-model="splitPolicy.dimension_primary" :disabled="!canManageRules"><option v-for="option in splitDimensionPrimaryOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
+                <label><span>分组维度 2</span><select v-model="splitPolicy.dimension_secondary" :disabled="!canManageRules"><option v-for="option in splitDimensionSecondaryOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
+                <label><span>分组维度 3（可选）</span><select v-model="splitPolicy.dimension_tertiary" :disabled="!canManageRules"><option value="">不使用</option><option v-for="option in splitDimensionAnyOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
+                <label><span>默认进入状态</span><select v-model="splitPolicy.default_status" :disabled="!canManageRules"><option v-for="option in splitDefaultStatusOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
+                <label><span>是否生成「技术要求摘要」</span><select v-model="splitPolicy.generate_requirement_summary" :disabled="!canManageRules"><option :value="true">是 · 自动从合同条款抽取（默认）</option><option :value="false">否 · 留空人工填写</option></select></label>
+                <label><span>技术要求摘要字段</span><select v-model="splitPolicy.requirement_summary_locked" :disabled="!canManageRules"><option :value="false">生成后默认可编辑（默认）</option><option :value="true">锁定（仅技术总监可改）</option></select></label>
+                <label><span>分组规则缺失时</span><select v-model="splitPolicy.missing_rule_action" :disabled="!canManageRules"><option v-for="option in splitMissingRuleOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
+                <label><span>范围变更检测</span><select v-model="splitPolicy.scope_change_detection" :disabled="!canManageRules"><option :value="true">开启：合同清单与拆解结果勾对（默认）</option><option :value="false">关闭</option></select></label>
+                <label><span>启用该规则</span><select v-model="splitPolicy.enabled" :disabled="!canManageRules"><option :value="true">启用</option><option :value="false">停用</option></select></label>
+                <div v-if="canManageRules" class="pm-form-row"><button type="button" class="pm-button primary" :disabled="splitPolicySaving" @click="submitSplitPolicy">{{ splitPolicySaving ? '保存中…' : '保存默认分组规则' }}</button></div>
+              </div>
+            </section>
+
+            <section class="pm-panel pm-split-card">
+              <header><div><p class="pm-panel-kicker">DETECTION CATEGORY</p><h2>② 检测类别（服务类型）域</h2></div><span class="pm-filter-count">已配置 {{ detectionCategories.length }} 类</span><div class="pm-panel-actions"><template v-if="canManageRules"><button type="button" class="pm-button" @click="downloadDetectionCategories">导出</button><button type="button" class="pm-button" :disabled="saving" @click="detectionCategoryFileInput.click()">导入</button><button type="button" class="pm-button primary" @click="openCategoryDialog()">＋ 新增</button><input ref="detectionCategoryFileInput" type="file" accept=".csv,text/csv" class="sr-only" @change="importDetectionCategoryFile" /></template></div></header>
+              <div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>检测类别</th><th>默认体系要求</th><th>必备资质（默认）</th><th>是否特殊方法</th><th>关联服务项</th><th>状态</th><th></th></tr></thead><tbody><tr v-for="item in detectionCategories" :key="item.category"><td><b>{{ item.category }}</b></td><td>{{ item.system_standard || '—' }}</td><td>{{ item.required_qualifications || '—' }}</td><td><span class="pm-badge" :class="specialMethodTone[item.special_method] || 'neutral'">{{ specialMethodLabel[item.special_method] || item.special_method }}</span></td><td>{{ item.service_item_count || 0 }} 项</td><td><span class="pm-badge" :class="item.enabled ? 'normal' : 'neutral'">{{ item.enabled ? '启用' : '停用' }}</span></td><td class="pm-split-actions"><button v-if="canManageRules" class="pm-link" @click="openCategoryDialog(item)">编辑</button><button v-if="canManageRules" class="pm-link pm-text-danger" :disabled="saving" @click="removeDetectionCategory(item)">删除</button></td></tr><tr v-if="!detectionCategories.length"><td colspan="7" class="pm-empty-mini">尚未配置检测类别域</td></tr></tbody></table></div>
+            </section>
+
+            <section class="pm-panel pm-split-card">
+              <header><div><p class="pm-panel-kicker">OVERRIDE RULES</p><h2>③ 覆盖规则（按客户 / 合同类型）</h2></div><span class="pm-filter-count">共 {{ splitOverrides.length }} 条</span><div class="pm-panel-actions"><button v-if="canManageRules" type="button" class="pm-button" @click="openOverrideDialog()">＋ 新建覆盖</button></div></header>
+              <div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>规则名称</th><th>匹配条件</th><th>覆盖设置</th><th>优先级</th><th>状态</th><th></th></tr></thead><tbody><tr v-for="item in splitOverrides" :key="item.id"><td><b>{{ item.name }}</b></td><td>{{ overrideMatchText(item) }}</td><td>{{ overrideSettingsText(item) }}</td><td>{{ item.priority }}</td><td><span class="pm-badge" :class="item.enabled ? 'normal' : 'neutral'">{{ item.enabled ? '启用' : '停用' }}</span></td><td class="pm-split-actions"><button v-if="canManageRules" class="pm-link" @click="openOverrideDialog(item)">编辑</button><button v-if="canManageRules" class="pm-link pm-text-danger" :disabled="saving" @click="removeSplitOverride(item)">删除</button></td></tr><tr v-if="!splitOverrides.length"><td colspan="6" class="pm-empty-mini">尚未配置覆盖规则，全部合同按默认分组规则拆解</td></tr></tbody></table></div>
+              <p v-if="splitConfigError" class="pm-form-hint" role="alert">{{ splitConfigError }}</p>
+              <p v-else-if="splitConfigLoading" class="pm-form-hint">配置加载中…</p>
+            </section>
+
+            <div v-if="categoryDialog" class="pm-overlay" @click.self="categoryDialog = null"><form class="pm-dialog" @submit.prevent="submitDetectionCategory"><header><div><span>DETECTION CATEGORY</span><h2>{{ categoryDialog.id ? '编辑检测类别' : '新增检测类别' }}</h2></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="categoryDialog = null"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>检测类别 <em>*</em></span><input v-model.trim="categoryDialog.category" required placeholder="例如 等保测评" /></label><label><span>默认体系要求</span><input v-model.trim="categoryDialog.system_standard" placeholder="例如 等保 2.0 / ISO 9001" /></label><label><span>必备资质（默认）</span><input v-model.trim="categoryDialog.required_qualifications" placeholder="例如 等级保护测评师（中级+）" /></label><label><span>必检能力码（默认）</span><input v-model.trim="categoryDialog.required_codes" placeholder="多个能力码用逗号分隔，例如 DJCP,ISO27001" /><small class="pm-form-hint">填写后，按该类别拆解出的服务项会带上这些能力码，分配工程师时据此做能力校验</small></label><label><span>是否特殊方法</span><select v-model="categoryDialog.special_method"><option v-for="option in specialMethodOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label><span>状态</span><select v-model="categoryDialog.enabled"><option :value="true">启用</option><option :value="false">停用</option></select></label></div><footer><button type="button" class="pm-button" @click="categoryDialog = null">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : '保存' }}</button></footer></form></div>
+
+            <div v-if="overrideDialog" class="pm-overlay" @click.self="overrideDialog = null"><form class="pm-dialog pm-dialog-wide" @submit.prevent="submitSplitOverride"><header><div><span>OVERRIDE RULE</span><h2>{{ overrideDialog.id ? '编辑覆盖规则' : '新建覆盖规则' }}</h2><small class="pm-dialog-sub">只覆盖显式给出的设置，其余沿用默认分组规则；命中多条时取优先级最小的那条。</small></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="overrideDialog = null"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>规则名称 <em>*</em></span><input v-model.trim="overrideDialog.name" required placeholder="例如 金融行业批量合同" /></label><label><span>优先级 <em>*</em></span><input v-model.number="overrideDialog.priority" type="number" min="1" required /></label><label><span>客户名称包含</span><input v-model.trim="overrideDialog.match.customer_contains" placeholder="例如 银行 / 证券" /></label><label><span>合同号包含</span><input v-model.trim="overrideDialog.match.contract_contains" placeholder="例如 HT-2026" /></label><label><span>合同服务项数 ≤</span><input v-model.number="overrideDialog.match.max_service_items" type="number" min="0" /></label><label><span>覆盖分组维度 1</span><select v-model="overrideDialog.settings.dimension_primary"><option value="">不覆盖</option><option v-for="option in splitDimensionAnyOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label><span>覆盖分组维度 2</span><select v-model="overrideDialog.settings.dimension_secondary"><option value="">不覆盖</option><option v-for="option in splitDimensionAnyOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label><span>覆盖分组维度 3</span><select v-model="overrideDialog.settings.dimension_tertiary"><option value="">不覆盖</option><option v-for="option in splitDimensionAnyOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label><span>覆盖默认进入状态</span><select v-model="overrideDialog.settings.default_status"><option value="">不覆盖</option><option v-for="option in splitDefaultStatusOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label><span>覆盖缺规则处理</span><select v-model="overrideDialog.settings.missing_rule_action"><option value="">不覆盖</option><option v-for="option in splitMissingRuleOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label><span>状态</span><select v-model="overrideDialog.enabled"><option :value="true">启用</option><option :value="false">停用</option></select></label></div><footer><button type="button" class="pm-button" @click="overrideDialog = null">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : '保存' }}</button></footer></form></div>
+          </template>
+          <template v-else-if="isVisibleConfigSection">
           <section class="pm-kpi-row">
             <div class="pm-kpi"><div class="pm-kpi-label"><span>规则总数</span></div><strong class="pm-kpi-value">{{ configStats.total }}<small>条</small></strong><p class="pm-kpi-meta">{{ activeConfigMeta.label }}</p></div>
             <div class="pm-kpi green"><div class="pm-kpi-label"><span>已启用</span></div><strong class="pm-kpi-value">{{ configStats.enabled }}<small>条</small></strong><p class="pm-kpi-meta">参与运行时判定</p></div>

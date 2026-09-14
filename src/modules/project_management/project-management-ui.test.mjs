@@ -808,6 +808,65 @@ test('设备维护入口按 project.device.manage 门控，创建项目后提示
   assert.match(source, /showToast\(`项目 \$\{created\.id\} 已创建，服务项待拆解确认`\)/)
 })
 
+test('合同拆解规则配置按原型 PG-CFG-01 做成三段式，口径完全由服务端判定', () => {
+  // 旧实现是两个自由文本框（名称 + 适用范围），表达不了原型的分组维度、检测类别域与覆盖规则。
+  assert.doesNotMatch(source, /key: 'split-rules', label: '拆解规则', columns/)
+  assert.match(source, /\{ key: 'split-rules', label: '合同拆解规则', icon: 'settings' \}/)
+  // ① 默认分组规则：分组维度 1/2 + 可选第三维、默认进入状态、摘要与缺规则处理。
+  assert.match(source, /<h2>① 默认分组规则<\/h2>/)
+  assert.match(source, /分组维度 1<\/span><select v-model="splitPolicy\.dimension_primary"/)
+  assert.match(source, /分组维度 2<\/span><select v-model="splitPolicy\.dimension_secondary"/)
+  assert.match(source, /分组维度 3（可选）<\/span><select v-model="splitPolicy\.dimension_tertiary"/)
+  assert.match(source, /默认进入状态<\/span><select v-model="splitPolicy\.default_status"/)
+  assert.match(source, /是否生成「技术要求摘要」/)
+  assert.match(source, /分组规则缺失时<\/span><select v-model="splitPolicy\.missing_rule_action"/)
+  assert.match(source, /范围变更检测<\/span><select v-model="splitPolicy\.scope_change_detection"/)
+  // ② 检测类别域：原型的六列（类别/体系要求/必备资质/特殊方法/关联服务项/操作）。
+  assert.match(source, /<h2>② 检测类别（服务类型）域<\/h2>/)
+  for (const column of ['检测类别', '默认体系要求', '必备资质（默认）', '是否特殊方法', '关联服务项']) {
+    assert.ok(source.includes(`<th>${column}</th>`), `检测类别域缺少列：${column}`)
+  }
+  assert.match(source, /specialMethodLabel\[item\.special_method\]/)
+  assert.match(source, /\{\{ item\.service_item_count \|\| 0 \}\} 项/)
+  // ③ 覆盖规则：名称/匹配条件/覆盖设置/优先级/状态/操作。
+  assert.match(source, /<h2>③ 覆盖规则（按客户 \/ 合同类型）<\/h2>/)
+  assert.match(source, /\{\{ overrideMatchText\(item\) \}\}/)
+  assert.match(source, /\{\{ overrideSettingsText\(item\) \}\}/)
+  // 维度与特殊方法的取值必须与后端常量一致（写错会被服务端判非法取值）。
+  for (const value of ["'batch'", "'site'", "'customer'", "'contract'", "'category'", "'system_standard'", "'test_mode'", "'HUMAN_CONFIRM'", "'DEFAULT_RULE'", "'REQUIRED'", "'MARKABLE'"]) {
+    assert.ok(source.includes(value), `缺少取值 ${value}`)
+  }
+  // 空字符串代表"不覆盖"：提交前必须剔除，否则服务端会判非法维度取值。
+  assert.match(source, /function compactOverrideSettings\(settings\)/)
+  assert.match(source, /function compactOverrideMatch\(match\)/)
+  // 配置读写走独立接口，页面不再让用户手填适用范围。
+  for (const fn of ['getSplitPolicy', 'saveSplitPolicy', 'listDetectionCategories', 'saveDetectionCategory', 'deleteDetectionCategory', 'listSplitOverrides', 'saveSplitOverride', 'deleteSplitOverride']) {
+    assert.ok(pmApiSource.includes(fn), `API 客户端缺少 ${fn}`)
+  }
+  assert.match(pmApiSource, /request\('\/split-policy', \{ method: 'PUT', body: JSON\.stringify\(payload\) \}\)/)
+  assert.match(pmApiSource, /request\(`\/split-overrides\/\$\{encodeURIComponent\(id\)\}`, \{ method: 'DELETE' \}\)/)
+  // 首帧兜底：接口未返回前表单也必须可渲染（对 null 取属性会直接白屏）。
+  assert.match(source, /const splitPolicy = ref\(\{\s*\n\s*dimension_primary: 'batch',/)
+  assert.match(source, /missing_rule_action: 'HUMAN_CONFIRM',/)
+  // 检测类别域的必检能力码必须可配置：它是能力校验的输入，只做展示等于没接线。
+  assert.match(source, /<span>必检能力码（默认）<\/span><input v-model\.trim="categoryDialog\.required_codes"/)
+  assert.match(source, /按该类别拆解出的服务项会带上这些能力码，分配工程师时据此做能力校验/)
+  // 导出/导入与原型页头一致：导出在浏览器侧生成 CSV，导入走批量接口并回显逐行原因。
+  assert.match(source, /@click="downloadDetectionCategories">导出</)
+  assert.match(source, /@click="detectionCategoryFileInput\.click\(\)">导入</)
+  assert.match(source, /async function importDetectionCategoryFile\(event\)/)
+  assert.match(source, /const rows = parseDetectionCategoryCSV\(await file\.text\(\)\)/)
+  assert.match(source, /const result = await importDetectionCategories\(rows\)/)
+  assert.match(source, /导入跳过原因：\$\{result\.errors\.slice\(0, 3\)\.join\('；'\)\}/)
+  // CSV 解析必须容忍中文表头与中文枚举值。
+  assert.match(source, /const hasHeader = header\.includes\('检测类别'\)/)
+  assert.match(source, /否: 'NO', 可标记: 'MARKABLE', 必为特殊方法: 'REQUIRED'/)
+  assert.match(pmApiSource, /export function importDetectionCategories\(items\)/)
+  assert.match(pmApiSource, /request\('\/detection-categories\/import', \{ method: 'POST', body: JSON\.stringify\(\{ items \}\) \}\)/)
+  // 进入页签时按需加载，不影响其它工作区首屏。
+  assert.match(source, /if \(section === 'split-rules'\) loadSplitConfig\(\)/)
+})
+
 test('轻提示按结果切换语义色，错误不再是绿色对勾', () => {
   assert.match(source, /function showToast\(message, type = 'success'\)/)
   assert.match(source, /:class="toastType"/)
