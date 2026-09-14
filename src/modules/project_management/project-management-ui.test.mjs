@@ -37,6 +37,18 @@ test('项目管理页面覆盖原型的五个业务域与核心交互', () => {
   assert.match(source, /DEVIATION_REPORTED/)
 })
 
+test('项目管理的弹层与菜单支持一致的 Esc 关闭逻辑，保存中不会被误关闭', () => {
+  assert.match(source, /function closeActiveOverlay\(\)/)
+  assert.match(source, /if \(saving\.value\) return/)
+  assert.match(source, /if \(openMulti\.value\) \{ openMulti\.value = ''; return true \}/)
+  assert.match(source, /function onGlobalKeydown\(event\)/)
+  assert.match(source, /if \(event\.key !== 'Escape'\) return/)
+  assert.match(source, /document\.addEventListener\('keydown', onGlobalKeydown\)/)
+  assert.match(source, /document\.removeEventListener\('keydown', onGlobalKeydown\)/)
+  assert.match(styles, /\.pm-button:focus-visible, \.pm-icon-button:focus-visible, \.pm-link:focus-visible/)
+  assert.match(styles, /\.pm-overlay \{[\s\S]*?backdrop-filter: blur\(3px\);/)
+})
+
 test('项目管理页面不再渲染原型模拟业务数据', () => {
   for (const mockValue of ['87.4', '92.1', '96.8', 'PJ-2026-0817', '某证券交易所', '王晓飞', 'GB/T 28448-2019']) {
     assert.doesNotMatch(source, new RegExp(mockValue.replaceAll('.', '\\.')))
@@ -204,15 +216,36 @@ test('服务项操作台的团队负责人从基础平台人员目录选择而�
   assert.doesNotMatch(source, /placeholder="至少一个用户 ID"/)
 })
 
-test('团队负责人、项目经理和工程师下拉按应用角色取人，候选人来自岗位模板授权结果', () => {
+test('待分配阶段支持带原因的受控撤销，且只向具备撤销权限的角色显示入口', () => {
+  assert.match(source, /const canRevokeTeam = computed\(\(\) => permissionSet\.value\.has\('project\.team\.revoke'\)\)/)
+  assert.match(source, /const canRevokeExecution = computed\(\(\) => permissionSet\.value\.has\('project\.execution\.revoke'\)\)/)
+  assert.match(source, /async function revokeSelectedAssignment\(kind\)/)
+  assert.match(source, /item\.status === '待分配'/)
+  assert.match(source, /请输入撤销\$\{label\}的原因/)
+  assert.match(source, /expected_version: Number\(item\.version\) \|\| 0/)
+  assert.match(source, /await revokeTeamAssignment\(item\.id, payload\)/)
+  assert.match(source, /await revokeExecutionAssignment\(item\.id, payload\)/)
+  assert.match(source, /v-if="canRevokeExecution"[\s\S]*撤销执行团队/)
+  assert.match(source, /v-if="canRevokeTeam"[\s\S]*撤销团队负责人/)
+  assert.match(pmApiSource, /service-items\/\$\{encodeURIComponent\(itemID\)\}\/team-assignment\/revoke/)
+  assert.match(pmApiSource, /service-items\/\$\{encodeURIComponent\(itemID\)\}\/execution-assignment\/revoke/)
+})
+
+test('平台人员查询展示真实目录结果，并按应用角色控制可分配岗位', () => {
   // 三个角色码必须真正发给负责人目录：团队成员由平台按有效授权判定，前端不维护名单。
   assert.match(source, /teamLead: 'team_lead'/)
   assert.match(source, /projectManager: 'project_manager'/)
   assert.match(source, /engineer: 'engineer'/)
   assert.match(source, /role_code: role/)
-  // 来源限定为岗位授权模板：管理员直接开通的角色不得出现在下拉里。
-  assert.match(source, /const PROJECT_ROLE_ORIGIN = 'TEMPLATE'/)
-  assert.match(source, /role_origin: PROJECT_ROLE_ORIGIN/)
+  // 直接授权与岗位模板授权的有效人员都可被检索，不能只限定 TEMPLATE 来源。
+  assert.doesNotMatch(source, /PROJECT_ROLE_ORIGIN/)
+  assert.doesNotMatch(source, /role_origin: PROJECT_ROLE_ORIGIN/)
+  assert.match(source, /listPersonnel\(\{ keyword, page: 1, page_size: 50 \}\)/)
+  assert.match(source, /const personnelSearchResults = ref\(\[\]\)/)
+  assert.match(source, /平台人员查询结果/)
+  assert.match(source, /class="pm-personnel-result-grid"/)
+  assert.match(source, /function selectPersonnelForRole\(userID, roleCode\)/)
+  assert.match(styles, /\.pm-personnel-result-grid \{ display: grid;/)
   assert.match(source, /const teamLeadOptions = computed/)
   assert.match(source, /const projectManagerOptions = computed/)
   assert.match(source, /const engineerOptions = computed/)
@@ -291,6 +324,17 @@ test('资质与能力管理的人员/设备编号由系统按类型自动生成'
   assert.match(source, /:readonly="capabilityAutoID"/)
   assert.match(source, /capabilityDialog\.resource_type === 'EQUIPMENT' \? '设备编号' : '人员编号'/)
   assert.doesNotMatch(source, /placeholder="例如 P-001 或 EQ-001"/)
+})
+
+test('新建人员资质从基础平台人员目录单选，设备仍使用资源名称输入', () => {
+  assert.match(source, /async function loadCapabilityPersonnel\(\)/)
+  assert.match(source, /await listPersonnel\(\{ page: 1, page_size: 50 \}\)/)
+  assert.match(source, /const capabilityPersonOptions = computed/)
+  assert.match(source, /人员名称 <em>\*<\/em><\/span><select v-model="capabilityDialog\.user_id"/)
+  assert.match(source, /v-for="person in capabilityPersonOptions"/)
+  assert.match(source, /@change="onCapabilityPersonChange"/)
+  assert.match(source, /<label v-else><span>资源名称 <em>\*<\/em><\/span><input v-model\.trim="capabilityDialog\.resource_name" required placeholder="例如 基站A"/)
+  assert.match(source, /user_id: form\.resource_type === 'PERSON' \? form\.user_id : ''/)
 })
 
 test('执行总览新增准时交付率趋势、检测类别分布与团队资源利用率三卡，数据由真实记录推导', () => {
@@ -434,7 +478,9 @@ test('发布实施计划在提交前拦截未完成的前置步骤', () => {
   // 操作台是 div 而不是 <form>，浏览器 required 不生效，必须显式前置拦截。
   assert.match(source, /请填写计划开始与计划结束时间/)
   assert.match(source, /计划结束时间必须晚于计划开始时间/)
-  assert.match(source, /请填写现场计划/)
+  assert.doesNotMatch(source, /请填写现场计划/)
+  assert.doesNotMatch(source, /site_plan: form\.sitePlan/)
+  assert.match(styles, /textarea\[placeholder="现场实施步骤和窗口"\]/)
   assert.match(source, /请补充渗透测试专项合规要素/)
   // 样式：amber 拦截 + red 冲突，均带描边与文案，不只靠颜色。
   assert.match(styles, /\.pm-blocker \{/)
@@ -455,12 +501,13 @@ test('项目状态只由服务端派生，前端不再自行拼装状态集合',
   // 服务端 domain.ProjectStatusNodes() 是唯一的顺序表；这里锁定前端的只读镜像，
   // 防止两侧各自演化后出现"筛选下拉有的状态列表里没有"这类漂移。
   assert.match(source, /const projectStatusNodes = \['待拆解确认', '待分配', '待实施', '实施准备中', '实施中', '异常处理中', '现场实施完成', '报告编制', '已完成'\]/)
+  assert.match(source, /const projectStatusFilters = \[\.\.\.projectStatusNodes, '补充协议处理中', '已终止'\]/)
   assert.match(source, /const projectStatusCompleted = '已完成'/)
   // 状态筛选必须由节点表生成，而不是手写 option 列表。
-  assert.match(source, /<option v-for="node in projectStatusNodes"/)
+  assert.match(source, /<option v-for="node in projectStatusFilters"/)
   // 看板泳道只做归类，卡片仍展示唯一的 project.status。
   assert.match(source, /statuses: \['待拆解确认', '待分配'\]/)
-  assert.match(source, /statuses: \[projectStatusCompleted\]/)
+  assert.match(source, /statuses: \[projectStatusCompleted, '补充协议处理中', '已终止'\]/)
   assert.match(source, /:class="statusTone\(card\.status\)"/)
   // 不得再用"还有报告未归档"二次推断项目完成态。
   assert.doesNotMatch(source, /reportActiveProjectIDs/)
@@ -574,6 +621,10 @@ test('设备在位状态与使用范围在设备能力维护中维护，借出�
   assert.match(source, /仅在公司使用 · 不可借出/)
   assert.match(source, /当前不在公司/)
   assert.match(source, /function equipmentPickerState\(item\)/)
+  // 已过检定到期日的设备不进入实施准备选择器；接口侧仍会二次校验，避免绕过前端。
+  assert.match(source, /function isEquipmentValidForPreparation\(item\)/)
+  assert.match(source, /validUntil >= today/)
+  assert.match(source, /const planEquipmentOptions = computed\(\(\) => equipment\.value\.filter\(isEquipmentValidForPreparation\)\)/)
 })
 
 test('已有设备的使用范围在资质与能力、设备维护两处都可修改且不会被重置', () => {
@@ -799,7 +850,10 @@ test('设备维护入口按 project.device.manage 门控，创建项目后提示
   // 就会变成「能点必 403」，表单也只能填不能存。
   assert.match(source, /const canManageDevice = computed\(\(\) => Array\.isArray\(session\.value\?\.permissions\) && session\.value\.permissions\.includes\('project\.device\.manage'\)\)/)
   assert.match(source, /<form v-if="canManageDevice" class="pm-form pm-equipment-form" @submit\.prevent="saveEquipment">/)
-  assert.match(source, /<button v-if="canManageDevice" class="pm-link" @click="editEquipment\(item\)">/)
+  assert.match(source, /<button v-if="canManageDevice" class="pm-link" :disabled="saving" @click="editEquipment\(item\)">/)
+  assert.match(source, /async function removeEquipment\(item\)/)
+  assert.match(source, /@click="removeEquipment\(item\)">删除</)
+  assert.match(pmApiSource, /export function deleteEquipment\(resourceID\) \{[\s\S]*method: 'DELETE'/)
   assert.match(source, /v-if="item\.presence === 'OUT_OF_COMPANY' && \(canManageDevice \|\| canPlanImplementation\)"/)
   // 只读角色要明确告知原因，而不是留一张静默无按钮的表单。
   assert.match(source, /当前角色只能查看设备台账；维护设备需要「设备维护」权限。/)

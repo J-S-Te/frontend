@@ -596,6 +596,10 @@ export function assignTeam(itemID, payload) {
   })
 }
 
+export function revokeTeamAssignment(itemID, payload) {
+  return request(`/service-items/${encodeURIComponent(itemID)}/team-assignment/revoke`, { method: 'POST', body: JSON.stringify(payload) })
+}
+
 /**
  * assignExecutionTeam 为服务项指派执行团队。
  * @param {string|number} itemID 服务项 ID。
@@ -608,6 +612,26 @@ export function assignExecutionTeam(itemID, payload) {
     method: 'POST',
     body: JSON.stringify(payload),
   })
+}
+
+export function revokeExecutionAssignment(itemID, payload) {
+  return request(`/service-items/${encodeURIComponent(itemID)}/execution-assignment/revoke`, { method: 'POST', body: JSON.stringify(payload) })
+}
+
+export function revokeImplementationPlan(itemID, payload) {
+  return request(`/service-items/${encodeURIComponent(itemID)}/implementation-plan/revoke`, { method: 'POST', body: JSON.stringify(payload) })
+}
+
+export function revokePreparation(itemID, payload) {
+  return request(`/service-items/${encodeURIComponent(itemID)}/preparation/revoke`, { method: 'POST', body: JSON.stringify(payload) })
+}
+
+export function requestRollback(itemID, payload) {
+  return request(`/service-items/${encodeURIComponent(itemID)}/rollback-requests`, { method: 'POST', body: JSON.stringify(payload) })
+}
+
+export function decideRollback(itemID, requestID, payload) {
+  return request(`/service-items/${encodeURIComponent(itemID)}/rollback-requests/${encodeURIComponent(requestID)}/decision`, { method: 'POST', body: JSON.stringify(payload) })
 }
 
 /**
@@ -724,6 +748,10 @@ export async function listEquipment() {
 
 export function upsertEquipment(payload) {
   return request('/equipment', { method: 'PUT', body: JSON.stringify({ ...payload, resource_type: 'EQUIPMENT' }) })
+}
+
+export function deleteEquipment(resourceID) {
+  return request(`/equipment/${encodeURIComponent(resourceID)}`, { method: 'DELETE' })
 }
 
 /**
