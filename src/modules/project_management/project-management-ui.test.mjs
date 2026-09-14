@@ -623,7 +623,10 @@ test('设备在位状态与使用范围在设备能力维护中维护，借出�
   assert.match(source, /function equipmentPickerState\(item\)/)
   // 已过检定到期日的设备不进入实施准备选择器；接口侧仍会二次校验，避免绕过前端。
   assert.match(source, /function isEquipmentValidForPreparation\(item\)/)
-  assert.match(source, /validUntil >= today/)
+  assert.match(source, /planned_start/)
+  assert.match(source, /planned_end/)
+  assert.match(source, /validFrom <= usageStart/)
+  assert.match(source, /validUntil >= usageEnd/)
   assert.match(source, /const planEquipmentOptions = computed\(\(\) => equipment\.value\.filter\(isEquipmentValidForPreparation\)\)/)
 })
 
