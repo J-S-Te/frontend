@@ -19,6 +19,9 @@ test('Portal report API normalizes detail and orders the immutable timeline by s
       id: 7,
       request_no: 'RP-007',
       status: 'APPROVING',
+	  current_report_revision: 1,
+	  report_validity_status: 'VOID',
+	  void_notice: '已由 R2 替代',
       events: [
         { event_type: 'APPROVAL_STARTED', sequence: 2, from_status: 'SUBMITTED', to_status: 'APPROVING', occurred_at: '2026-08-01T02:00:00Z' },
         { event_type: 'REPORT_SUBMITTED', sequence: 1, to_status: 'SUBMITTED', occurred_at: '2026-08-01T01:00:00Z' },
@@ -30,6 +33,9 @@ test('Portal report API normalizes detail and orders the immutable timeline by s
   const detail = await api.getReportRequest('7/unsafe')
   assert.equal(requestURL, '/customer-portal/api/v1/reports/7%2Funsafe')
   assert.equal(detail.request_no, 'RP-007')
+	assert.equal(detail.current_report_revision, 1)
+	assert.equal(detail.report_validity_status, 'VOID')
+	assert.equal(detail.void_notice, '已由 R2 替代')
   assert.deepEqual(detail.events.map((item) => item.sequence), [1, 2])
   assert.deepEqual(Object.keys(detail.events[0]).sort(), ['event_type', 'from_status', 'occurred_at', 'sequence', 'to_status'])
 })

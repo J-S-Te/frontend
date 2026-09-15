@@ -169,6 +169,9 @@ function reportRequest(value = {}) {
     approved_at: value.approved_at ?? value.ApprovedAt,
     issued_at: value.issued_at ?? value.IssuedAt,
     version: value.version ?? value.Version,
+	current_report_revision: value.current_report_revision ?? value.CurrentReportRevision ?? 0,
+	report_validity_status: value.report_validity_status ?? value.ReportValidityStatus ?? 'ACTIVE',
+	void_notice: value.void_notice ?? value.VoidNotice ?? '',
   }
 }
 /**
