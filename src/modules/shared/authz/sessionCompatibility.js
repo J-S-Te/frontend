@@ -157,6 +157,13 @@ export function subsystemAccessMessage(error, fallback = '服务暂时不可用�
   if (isFeaturePermissionDenial(errorCode(error))) {
     return '当前账号没有访问该功能的权限，请联系管理员分配对应的应用角色。'
   }
+  // 503 不只表示统一认证依赖故障。业务子系统会用稳定错误码区分工作流、
+  // 人员目录等依赖；这类错误应保留后端已经脱敏的业务文案，避免误导用户
+  // 去排查 Keycloak。只有明确的授权依赖错误或无错误码的旧响应沿用通用提示。
+  const code = errorCode(error)
+  if (Number(error?.status || 0) === 503 && code && code !== 'AUTH_DEPENDENCY_UNAVAILABLE') {
+    return errorMessage(error) || fallback
+  }
   const { reason } = classifySubsystemAccessError(error)
   if (reason === SUBSYSTEM_ACCESS_REASON.UNKNOWN) return errorMessage(error) || fallback
   return SUBSYSTEM_ACCESS_PRESENTATION[reason]?.message || fallback
