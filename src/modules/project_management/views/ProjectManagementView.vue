@@ -61,7 +61,7 @@ import {
   startImplementationPreparation,
   submitFieldRecord,
   uploadServiceItemEvidence,
-	registerReportArtifact,
+  registerReportArtifact,
   reportDeviation,
   reviewDeviation,
   completeServiceItemField,
@@ -70,8 +70,8 @@ import {
   deleteRule,
   reviewSpecialMethod,
   updateReportStatus,
+  listApprovedContracts,
 } from '@/modules/project_management/api/projectManagement'
-import { listApprovedContracts } from '@/modules/contract_management/api/contract'
 import '@/modules/project_management/styles/project-management.css'
 
 const route = useRoute()
@@ -944,7 +944,6 @@ function navigateMulti(event, options, name, toggle) {
 }
 function onConfigRolesKeydown(event) { navigateMulti(event, configRoleOptions.value, 'configRoles', (option) => toggleConfigRole(option.code)) }
 function onEquipmentCodesKeydown(event) { navigateMulti(event, equipmentCodeOptions.value, 'equipmentCodes', (option) => toggleEquipmentCode(option.code)) }
-function onCapabilityCodesKeydown(event) { navigateMulti(event, capabilityDialogCodeOptions.value, 'capabilityCodes', (option) => toggleCapabilityCode(option.code)) }
 function onDetectionRequiredCodesKeydown(event) { navigateMulti(event, detectionRequiredCodeOptions.value, 'detectionRequiredCodes', (option) => toggleDetectionRequiredCode(option.code)) }
 const projectByID = computed(() => new Map(projects.value.map((project) => [project.id, project])))
 const projectStatusForItem = (item) => projectByID.value.get(item?.project_id)?.status || ''
@@ -1244,7 +1243,6 @@ function toggleCodeSelection(selection, update, code) {
   update([...selected.values()])
 }
 function toggleEquipmentCode(code) { toggleCodeSelection(equipmentCodeSelection.value, (values) => { equipmentCodeSelection.value = values }, code) }
-function toggleCapabilityCode(code) { toggleCodeSelection(capabilityCodeSelection.value, (values) => { capabilityCodeSelection.value = values }, code) }
 function toggleDetectionRequiredCode(code) { toggleCodeSelection(detectionRequiredCodeSelection.value, (values) => { detectionRequiredCodeSelection.value = values }, code) }
 function validateCapabilityCodes(resourceType, codes, originalCodes = []) {
   if (!codes.length) { showToast('请至少选择一个资质 / 能力编码', 'warning'); return false }
@@ -1649,19 +1647,13 @@ async function loadEquipment() {
 
 async function openCreateProject() {
   try {
-    // 项目系统只依赖自身会话：读取合同列表失败时绝不能改变当前标签页或新开合同系统。
-    // 新建入口必须保持在项目工作台内，由用户自行处理合同系统权限或会话问题。
-    approvedContracts.value = await listApprovedContracts({}, { suppressLoginRedirect: true })
+    // 浏览器只调用项目后端；项目后端通过机器身份读取合同审批结果，避免要求业务管理员
+    // 额外建立合同系统浏览器会话或持有合同读取权限。
+    approvedContracts.value = await listApprovedContracts({ limit: 200 })
     if (!approvedContracts.value.length) { showToast('当前没有已通过审批的可用合同', 'warning'); return }
     createOpen.value = true
   } catch (error) {
-    if (error?.status === 401) {
-      // 不尝试替用户打开合同系统：这会让首次点击“新建项目”看起来像页面跳转，
-      // 也会把没有合同权限的用户带到一个必然失败的页面。
-      showToast('无法读取已审批合同：当前合同系统会话或权限不可用。项目页面未跳转，请确认权限后重试。', 'warning')
-      return
-    }
-    showToast(error?.message || '读取已审批合同失败', 'error')
+    showToast(error?.message || '读取已审批合同失败，请稍后重试', error?.status === 503 ? 'warning' : 'error')
   }
 }
 // 同一 (合同号, 版本) 在服务端是唯一键：已有项目时再选它必然冲突。这里在选项上直接标注并
@@ -2842,14 +2834,20 @@ onBeforeUnmount(() => {
                 <label v-else><span>资源名称 <em>*</em></span><input v-model.trim="capabilityDialog.resource_name" required placeholder="例如 基站A" /></label>
                 <div class="pm-field pm-span-full">
                   <span>资质 / 能力编码 <em>*</em></span>
-                  <div class="pm-multi-dropdown" :class="{ open: openMulti === 'capabilityCodes' }">
-                    <button type="button" class="pm-multi-trigger" :class="{ placeholder: !capabilityCodeSelection.length }" aria-haspopup="listbox" :aria-expanded="openMulti === 'capabilityCodes'" @click.stop="toggleMulti('capabilityCodes')" @keydown="onCapabilityCodesKeydown"><span>{{ multiSummary(capabilityCodeSelection, capabilityDialogCodeOptions, '请选择资质 / 能力编码', 'code') }}</span><i class="pm-multi-caret"></i></button>
-                    <div v-if="openMulti === 'capabilityCodes'" class="pm-multi-menu" role="listbox" aria-label="选择资质或能力编码" aria-multiselectable="true">
-                      <label v-for="option in capabilityDialogCodeOptions" :key="option.code" class="pm-multi-option" :class="{ 'is-active': capabilityDialogCodeOptions[multiActiveIndex]?.code === option.code }" role="option" :aria-selected="capabilityCodeSelection.includes(option.code)"><input type="checkbox" :checked="capabilityCodeSelection.includes(option.code)" @change="toggleCapabilityCode(option.code)" /><span>{{ option.name }}<small v-if="option.unavailable" class="pm-form-hint">{{ option.unavailableReason }}，仅保留历史引用</small></span></label>
-                      <p v-if="!capabilityDialogCodeOptions.length" class="pm-empty-mini">暂无可选编码，请先到系统配置维护</p>
-                    </div>
-                  </div>
-                  <div v-if="capabilityCodeSelection.length" class="pm-multi-chips"><span v-for="option in capabilityDialogCodeOptions.filter((item) => capabilityCodeSelection.includes(item.code))" :key="option.code" class="pm-chip">{{ option.code }}{{ option.unavailable ? `（${option.unavailableReason}）` : '' }}<button type="button" class="pm-chip-x" :aria-label="`移除 ${option.code}`" @click.stop="toggleCapabilityCode(option.code)">✕</button></span></div>
+                  <SearchableSelect
+                    v-model="capabilityCodeSelection"
+                    :options="capabilityDialogCodeOptions"
+                    value-key="code"
+                    label-key="name"
+                    description-key="unavailableReason"
+                    placeholder="请选择资质 / 能力编码"
+                    search-placeholder="搜索编码或名称"
+                    empty-text="暂无匹配编码，请先到系统配置维护"
+                    aria-label="选择资质或能力编码"
+                    menu-z-index="calc(var(--pm-z-modal, 50) + 1)"
+                    multiple
+                    required
+                  />
                   <p v-if="!hasActiveCapabilityCodes(capabilityDialog.resource_type)" class="pm-form-hint">请先到「系统配置 → 资质 / 能力编码」新增并启用{{ capabilityDialog.resource_type === 'PERSON' ? '人员资质' : '设备能力' }}编码。</p>
                 </div>
                 <label v-if="capabilityDialog.resource_type === 'EQUIPMENT'"><span>检定开始</span><input v-model="capabilityDialog.valid_from" type="date" /></label>

@@ -200,6 +200,18 @@ export async function listProjects(params = {}) {
 }
 
 /**
+ * listApprovedContracts 通过项目后端读取当前租户已审批合同。
+ * 跨子系统调用由项目后端使用机器身份完成，浏览器无需合同系统 Cookie。
+ * @param {Record<string, string|number>} [params={}] 查询参数。
+ * @returns {Promise<Array<object>>} 可用于创建项目的已审批合同摘要。
+ */
+export async function listApprovedContracts(params = {}) {
+  const search = new URLSearchParams(Object.entries(params).filter(([, value]) => value !== undefined && value !== null && value !== '')).toString()
+  const data = await request(`/approved-contracts${search ? `?${search}` : ''}`)
+  return Array.isArray(data) ? data : []
+}
+
+/**
  * listProjectsPage 分页查询项目列表，返回 items 与 total 供分页控件渲染。
  * 状态过滤发生在服务端的派生态上，因此 total 是"筛选后的总数"。
  * @param {Record<string, string|number|boolean>} [params={}] 查询条件，含 page / page_size。

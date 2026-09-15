@@ -22,6 +22,8 @@ const props = defineProps({
   disabled: { type: Boolean, default: false },
   required: { type: Boolean, default: false },
   ariaLabel: { type: String, default: '下拉选择' },
+  // Teleport 会脱离弹窗 stacking context；弹窗内选择器可显式提升菜单层级。
+  menuZIndex: { type: [String, Number], default: '' },
 })
 const emit = defineEmits(['update:modelValue', 'change'])
 
@@ -76,7 +78,7 @@ function updateMenuPosition() {
     menu.value.scrollHeight,
   )
   placement.value = layout.placement
-  menuStyle.value = searchableSelectMenuStyle(layout, readSearchableSelectTheme(root.value))
+  menuStyle.value = searchableSelectMenuStyle(layout, readSearchableSelectTheme(root.value), props.menuZIndex)
   menuPositioned.value = true
 }
 function show() {

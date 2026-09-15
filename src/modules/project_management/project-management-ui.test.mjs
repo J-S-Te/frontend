@@ -7,7 +7,6 @@ const source = await readFile(new URL('./views/ProjectManagementView.vue', impor
 const styles = await readFile(new URL('./styles/project-management.css', import.meta.url), 'utf8')
 const pickerSource = await readFile(new URL('./components/ServiceItemPicker.vue', import.meta.url), 'utf8')
 const searchableSelectSource = await readFile(new URL('./components/SearchableSelect.vue', import.meta.url), 'utf8')
-const contractSource = await readFile(new URL('../contract_management/api/contract.js', import.meta.url), 'utf8')
 const pmApiSource = await readFile(new URL('./api/projectManagement.js', import.meta.url), 'utf8')
 const workflowNodeSource = await readFile(new URL('./workflowNode.js', import.meta.url), 'utf8')
 
@@ -406,7 +405,11 @@ test('资质与能力编码由系统配置目录统一管理并按类型多选',
   assert.match(source, /capabilityCodeOptions\('EQUIPMENT', equipmentCodeSelection\.value\)/)
   assert.match(source, /capabilityCodeOptions\(capabilityDialog\.value\?\.resource_type \|\| 'PERSON', capabilityCodeSelection\.value\)/)
   assert.match(source, /openMulti === 'equipmentCodes'/)
-  assert.match(source, /openMulti === 'capabilityCodes'/)
+  assert.match(source, /v-model="capabilityCodeSelection"[\s\S]*:options="capabilityDialogCodeOptions"[\s\S]*value-key="code"[\s\S]*multiple/)
+  assert.match(source, /search-placeholder="搜索编码或名称"/)
+  assert.match(source, /menu-z-index="calc\(var\(--pm-z-modal, 50\) \+ 1\)"/)
+  assert.doesNotMatch(source, /openMulti === 'capabilityCodes'/)
+  assert.doesNotMatch(source, /onCapabilityCodesKeydown|toggleCapabilityCode/)
   assert.doesNotMatch(source, /v-model\.trim="equipmentForm\.codes"/)
   assert.doesNotMatch(source, /v-model\.trim="capabilityDialog\.codes"/)
   assert.match(source, /codes: \[\.\.\.equipmentCodeSelection\.value\]/)
@@ -638,22 +641,19 @@ test('新建项目入口只向获准角色显示', () => {
   assert.doesNotMatch(source, /v-if="activeSection === 'projects'" class="pm-button primary" @click="openCreateProject"/)
 })
 
-test('项目页读取已审批合同不得把用户劫持到合同系统登录', () => {
-  // 合同 API 返回 401 时客户端默认整页跳转合同登录，会把用户甩出项目系统。
-  // 项目页必须关闭这个跳转，并在当前页给出提示。
-  assert.match(contractSource, /const \{ suppressLoginRedirect = false, \.\.\.fetchOptions \} = options/)
-  assert.match(contractSource, /if \(!suppressLoginRedirect && shouldStartSubsystemLogin\(authError\)\) startContractLogin\(\)/)
-  assert.match(contractSource, /export async function listApprovedContracts\(params = \{\}, options = \{\}\)/)
-  assert.match(source, /listApprovedContracts\(\{\}, \{ suppressLoginRedirect: true \}\)/)
+test('项目页通过项目后端机器集成读取已审批合同', () => {
+  // 浏览器只持有项目会话；合同系统鉴权由项目后端的机器身份完成。
+  assert.match(pmApiSource, /export async function listApprovedContracts\(params = \{\}\)/)
+  assert.match(pmApiSource, /request\(`\/approved-contracts\$\{search \? `\?\$\{search\}` : ''\}`\)/)
+  assert.match(source, /listApprovedContracts\(\{ limit: 200 \}\)/)
+  assert.doesNotMatch(source, /suppressLoginRedirect/)
 })
 
-test('新建项目首次读取合同失败时不跳转或打开合同系统', () => {
-  // 401 无法区分“缺合同权限”和“合同会话尚未建立”；两种情况都不能由项目页面
-  // 擅自打开合同系统，否则用户首次点击“新建项目”会被带离当前工作台。
-  assert.match(source, /import \{ listApprovedContracts \} from '@\/modules\/contract_management\/api\/contract'/)
-  assert.match(source, /项目页面未跳转，请确认权限后重试/)
+test('新建项目不依赖合同系统浏览器会话', () => {
+  assert.match(source, /listApprovedContracts,[\s\S]*from '@\/modules\/project_management\/api\/projectManagement'/)
+  assert.doesNotMatch(source, /modules\/contract_management\/api\/contract/)
+  assert.doesNotMatch(source, /当前合同系统会话或权限不可用/)
   assert.doesNotMatch(source, /openContractAuthorizationInNewTab/)
-  assert.doesNotMatch(source, /已在新标签页打开合同系统授权/)
 })
 
 test('项目健康度字段已移除，风险项目改由服务端派生口径统计', () => {
