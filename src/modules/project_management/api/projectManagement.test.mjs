@@ -143,9 +143,9 @@ test('列表接口统一解包分页 envelope，未分页时拿到完整集合',
   assert.match(source, /return unwrapPage\(await request\(`\/projects\$\{search \? `\?\$\{search\}` : ''\}`\)\)/)
 })
 
-test('站点台账走独立接口，停用用 DELETE', () => {
-  assert.match(source, /export async function listSites\(status = ''\)/)
-  assert.match(source, /export function upsertSite\(payload\)/)
-  assert.match(source, /export function deleteSite\(siteCode\)/)
-  assert.match(source, /request\(`\/sites\/\$\{encodeURIComponent\(siteCode\)\}`, \{ method: 'DELETE' \}\)/)
+test('前端 API 不再暴露已下线的站点档案维护接口', () => {
+  assert.doesNotMatch(source, /export async function listSites/)
+  assert.doesNotMatch(source, /export function upsertSite/)
+  assert.doesNotMatch(source, /export function deleteSite/)
+  assert.doesNotMatch(source, /request\(['"`]\/sites/)
 })

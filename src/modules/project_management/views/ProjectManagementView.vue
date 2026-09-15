@@ -23,9 +23,6 @@ import {
   exportCapabilities,
   syncPersonnelIdentities,
   listEquipment,
-  listSites,
-  upsertSite,
-  deleteSite,
   upsertEquipment,
   deleteEquipment,
   listDeliveryEvents,
@@ -104,7 +101,6 @@ const allNavGroups = [
     { key: 'preparation', label: '实施准备', icon: 'save' },
     { key: 'qualifications', label: '资质与能力', icon: 'shield' },
     { key: 'equipment', label: '设备能力', icon: 'settings' },
-    { key: 'sites', label: '站点档案', icon: 'organization' },
     { key: 'assignments', label: '人员设备指派', icon: 'organization' },
     { key: 'methods', label: '特殊方法复核', icon: 'info' },
   ] },
@@ -132,7 +128,6 @@ const pageMeta = {
   preparation: ['实施准备', '集中核验授权、资料、工具与出行准备'],
   qualifications: ['资质与能力管理', '维护人员资质与能力标签，以及设备检定有效期'],
   equipment: ['设备能力维护', '新增、停用、检定和更新设备基础信息'],
-  sites: ['站点档案', '维护站点编码、地址与坐标；坐标可在现场用浏览器定位自动获取'],
   assignments: ['匹配校验与冲突预警', '校验人员、设备、资质与计划冲突'],
   methods: ['特殊方法复核待办', '复核非标准方法的适用性与风险控制'],
   implementation: ['实施看板 · 进度总览', '按状态跟踪服务项现场执行与闭环进度'],
@@ -192,16 +187,10 @@ const loading = ref(true)
 const loadError = ref('')
 const saving = ref(false)
 const emptyServiceLink = () => ({ system: '', systemLevel: '', category: '' })
-const createForm = ref({ name: '', customer: '', contract: '', contractID: '', contractVersion: '', site: '', siteCode: '', requirement: '', testMode: 'STANDARD', serviceLinks: [emptyServiceLink()], scope: '', trigger: '', notes: '' })
+const createForm = ref({ name: '', customer: '', contract: '', contractID: '', contractVersion: '', site: '', requirement: '', testMode: 'STANDARD', serviceLinks: [emptyServiceLink()], scope: '', trigger: '', notes: '' })
 const approvedContracts = ref([])
 const equipment = ref([])
 const equipmentError = ref('')
-const sites = ref([])
-const siteDialog = ref(null)
-const siteError = ref('')
-const locatingSite = ref(false)
-// 坐标未采集与"坐标为 0"必须区分：0,0 是合法位置，因此单独用 has_coordinates 表达。
-const emptySite = () => ({ site_code: '', name: '', address: '', latitude: '', longitude: '', has_coordinates: false, status: 'ACTIVE', notes: '' })
 const equipmentForm = ref({ resourceID: '', resourceName: '', codes: [], originalCodes: [], validFrom: '', validUntil: '', status: 'ACTIVE', usageScope: 'ANY' })
 const dashboard = ref({ project_count: 0, in_flight_projects: 0, risk_projects: 0, pending_project_creation: 0, pending_project_creation_available: false, service_items: 0, status_counts: {} })
 // SLA 超期/临近项来自服务端 GET /delivery/sla-overdue，口径由后端统一计算（计划完成超期 + 状态停留超期/临近）。
@@ -1546,7 +1535,6 @@ async function loadWorkspace() {
   // 避免某一个下拉数据源不可用就把整个工作区替换成错误页。
   if (loaded) {
     await loadEquipment()
-    await loadSites()
     await loadPersonnelNames()
     // SLA 超期是监控页的辅助指标：拉取失败只清空面板，不阻断工作区。
     try {
@@ -1554,82 +1542,6 @@ async function loadWorkspace() {
     } catch {
       slaOverdueItems.value = []
     }
-  }
-}
-
-// loadSites 读取站点台账。失败不阻断工作区：站点档案是辅助主数据。
-async function loadSites() {
-  siteError.value = ''
-  try {
-    sites.value = await listSites()
-  } catch (error) {
-    sites.value = []
-    siteError.value = subsystemAccessMessage(error, '站点档案加载失败，请稍后重试。')
-  }
-}
-
-function openSiteDialog(item = null) {
-  siteDialog.value = item
-    ? { site_code: item.site_code, name: item.name, address: item.address || '', latitude: item.has_coordinates ? String(item.latitude) : '', longitude: item.has_coordinates ? String(item.longitude) : '', has_coordinates: Boolean(item.has_coordinates), status: item.status || 'ACTIVE', notes: item.notes || '' }
-    : emptySite()
-}
-
-// locateCurrentSite 用浏览器定位自动获取坐标——录入人通常就在现场，因此不需要
-// 任何外部地图凭据。定位失败（未授权 / 不支持 / 超时）时保留手工填写路径。
-function locateCurrentSite() {
-  if (!navigator.geolocation) { showToast('当前浏览器不支持定位，请手工填写坐标', 'warning'); return }
-  locatingSite.value = true
-  navigator.geolocation.getCurrentPosition(
-    (position) => {
-      locatingSite.value = false
-      if (!siteDialog.value) return
-      siteDialog.value.latitude = position.coords.latitude.toFixed(6)
-      siteDialog.value.longitude = position.coords.longitude.toFixed(6)
-      siteDialog.value.has_coordinates = true
-      showToast(`已获取当前位置（精度约 ${Math.round(position.coords.accuracy || 0)} 米）`)
-    },
-    (error) => {
-      locatingSite.value = false
-      const reasons = { 1: '定位权限被拒绝', 2: '无法获取位置', 3: '定位超时' }
-      showToast(`${reasons[error?.code] || '定位失败'}，请手工填写坐标`)
-    },
-    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
-  )
-}
-
-async function saveSite() {
-  const form = siteDialog.value
-  if (!form) return
-  const hasCoordinates = form.has_coordinates && form.latitude !== '' && form.longitude !== ''
-  saving.value = true
-  try {
-    await upsertSite({
-      site_code: form.site_code, name: form.name, address: form.address,
-      has_coordinates: hasCoordinates,
-      latitude: hasCoordinates ? Number(form.latitude) : 0,
-      longitude: hasCoordinates ? Number(form.longitude) : 0,
-      status: form.status, notes: form.notes,
-    })
-    await loadSites()
-    siteDialog.value = null
-    showToast('站点档案已保存')
-  } catch (error) {
-    showToast(error?.message || '站点保存失败', 'error')
-  } finally {
-    saving.value = false
-  }
-}
-
-async function disableSite(item) {
-  saving.value = true
-  try {
-    await deleteSite(item.site_code)
-    await loadSites()
-    showToast(`站点 ${item.site_code} 已停用`)
-  } catch (error) {
-    showToast(error?.message || '站点停用失败', 'error')
-  } finally {
-    saving.value = false
   }
 }
 
@@ -2420,21 +2332,18 @@ async function saveCreate() {
     // 同一弹窗根据当前栏目创建不同资源；路由栏目在提交瞬间决定载荷形态，成功后再把
     // 服务端生成的记录并入对应集合。
     if (activeSection.value === 'projects') {
-	  const linkedSite = sites.value.find((item) => item.status === 'ACTIVE' && item.name === createForm.value.site)
-	  if (!linkedSite) { showToast('实施场所必须与一个启用的站点档案名称一致，请先维护站点档案', 'warning'); return }
-	  createForm.value.siteCode = linkedSite.site_code
       const created = await createProject({
         name: createForm.value.name,
         customer: createForm.value.customer,
         contract: createForm.value.contract,
         contract_id: createForm.value.contractID,
         contract_version: createForm.value.contractVersion,
-        service_items: createForm.value.serviceLinks.map((link, index) => ({ source_id: `MANUAL-${String(index + 1).padStart(3, '0')}`, site: createForm.value.site, site_code: createForm.value.siteCode, category: link.category, system: link.system, system_level: link.systemLevel, requirement: createForm.value.requirement, test_mode: createForm.value.testMode })),
+        service_items: createForm.value.serviceLinks.map((link, index) => ({ source_id: `MANUAL-${String(index + 1).padStart(3, '0')}`, site: createForm.value.site, category: link.category, system: link.system, system_level: link.systemLevel, requirement: createForm.value.requirement, test_mode: createForm.value.testMode })),
       })
       projects.value = [created, ...projects.value]
       showToast(`项目 ${created.id} 已创建，服务项待拆解确认`)
       createOpen.value = false
-      createForm.value = { name: '', customer: '', contract: '', contractID: '', contractVersion: '', site: '', siteCode: '', requirement: '', testMode: 'STANDARD', serviceLinks: [emptyServiceLink()], scope: '', trigger: '', notes: '' }
+      createForm.value = { name: '', customer: '', contract: '', contractID: '', contractVersion: '', site: '', requirement: '', testMode: 'STANDARD', serviceLinks: [emptyServiceLink()], scope: '', trigger: '', notes: '' }
     }
   } catch (error) { showToast(error?.message || '保存失败', 'error') }
   finally { saving.value = false }
@@ -2463,7 +2372,6 @@ function closeActiveOverlay() {
   if (overrideDialog.value) { overrideDialog.value = null; return true }
   if (categoryDialog.value) { categoryDialog.value = null; return true }
   if (capabilityDialog.value) { capabilityDialog.value = null; return true }
-  if (siteDialog.value) { siteDialog.value = null; return true }
   if (adjustOpen.value) { adjustOpen.value = false; return true }
   if (createOpen.value) { createOpen.value = false; return true }
   if (mobileMenuOpen.value) { mobileMenuOpen.value = false; return true }
@@ -2810,12 +2718,6 @@ onBeforeUnmount(() => {
           <section class="pm-panel pm-operation-panel"><header><div><p class="pm-panel-kicker">FIELD EXECUTION</p><h2>现场记录与实施完成</h2></div></header><ServiceItemPicker :items="implementationItems" :selected-ids="selectedServiceItem ? [selectedServiceItem.id] : []" empty-text="暂无处于现场实施节点的服务项" @select="selectServiceItem" /><div v-if="selectedServiceItem && canExecuteField" class="pm-form pm-operation-form"><label><span>现场原始数据 <em>*</em></span><textarea v-model.trim="operationForm.rawData" rows="3" placeholder="记录现场实测数据与依据"></textarea></label><label><span>环境条件 <em>*</em></span><textarea v-model.trim="operationForm.environment" rows="3" placeholder="记录现场环境条件"></textarea></label><label><span>现场证据 <em>*</em></span><input type="file" accept="application/pdf,image/png,image/jpeg" @change="operationForm.fieldEvidenceFile = $event.target.files?.[0] || null" /><small>文件通过统一文件网关上传、扫描并以 SHA-256 回执存证。</small></label><button class="pm-button primary" :disabled="saving" @click="runOperation('field')">提交现场记录</button></div><button v-if="selectedServiceItem && selectedServiceItem.status === '实施中' && canCompleteField" class="pm-button" :disabled="saving" @click="runOperation('complete')">确认该服务项现场完成</button><div v-else-if="!selectedServiceItem" class="pm-empty-mini">请先选择服务项</div></section>
         </template>
 
-        <template v-else-if="activeSection === 'sites'">
-          <section class="pm-panel pm-equipment-layout"><header><div><p class="pm-panel-kicker">SITE REGISTRY</p><h2>站点档案</h2><p>维护站点编码、地址与坐标；坐标可在现场用浏览器定位自动获取，也可手工填写。</p></div><div class="pm-panel-actions"><button class="pm-button" :disabled="saving" @click="loadSites">刷新</button><button v-if="canManageResource" class="pm-button primary" :disabled="saving" @click="openSiteDialog()">＋ 新建站点</button></div></header></section>
-          <p v-if="siteError" class="pm-form-hint" role="alert">{{ siteError }}</p>
-          <section class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>站点编码</th><th>站点名称</th><th>地址</th><th>坐标</th><th>状态</th><th></th></tr></thead><tbody><tr v-for="item in sites" :key="item.site_code"><td class="mono">{{ item.site_code }}</td><td><b>{{ item.name }}</b></td><td>{{ item.address || '—' }}</td><td><span v-if="item.has_coordinates" class="mono">{{ item.latitude }}, {{ item.longitude }}</span><span v-else class="pm-badge neutral">未采集</span></td><td><span class="pm-badge" :class="statusTone(item.status)">{{ item.status === 'ACTIVE' ? '启用' : '停用' }}</span></td><td style="width: 160px; min-width: 160px;"><button v-if="canManageResource" class="pm-link" @click="openSiteDialog(item)">编辑</button><button v-if="canManageResource && item.status === 'ACTIVE'" class="pm-link" :disabled="saving" @click="disableSite(item)">停用</button></td></tr></tbody></table></div><div v-if="!sites.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无站点档案</b><span>点击「＋ 新建站点」开始维护站点主数据。</span></div></section>
-          <div v-if="siteDialog" class="pm-overlay" @click.self="siteDialog = null"><form class="pm-dialog" @submit.prevent="saveSite"><header><div><span>SITE</span><h2>{{ siteDialog.site_code ? '编辑站点' : '新建站点' }}</h2></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="siteDialog = null"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>站点编码 <em>*</em></span><input v-model.trim="siteDialog.site_code" required placeholder="例如 SITE-HZ-01" /></label><label><span>站点名称 <em>*</em></span><input v-model.trim="siteDialog.name" required placeholder="例如 杭州机房" /></label><label class="pm-span-full"><span>地址</span><input v-model.trim="siteDialog.address" placeholder="例如 杭州市余杭区..." /></label><div class="pm-field pm-span-full"><span>坐标</span><div class="pm-form-row"><input v-model.trim="siteDialog.latitude" type="number" step="any" aria-label="纬度" placeholder="纬度" /><input v-model.trim="siteDialog.longitude" type="number" step="any" aria-label="经度" placeholder="经度" /><button type="button" class="pm-button" :disabled="locatingSite" @click="locateCurrentSite">{{ locatingSite ? '定位中…' : '定位当前位置' }}</button></div><p class="pm-form-hint">在现场点击「定位当前位置」可由浏览器自动获取坐标；留空表示尚未采集。</p></div><label><span>状态</span><select v-model="siteDialog.status"><option value="ACTIVE">启用</option><option value="DISABLED">停用</option></select></label><label class="pm-span-half"><span>备注</span><textarea v-model.trim="siteDialog.notes" rows="2"></textarea></label></div><footer><button type="button" class="pm-button" @click="siteDialog = null">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : '保存站点' }}</button></footer></form></div>
-        </template>
         <template v-else-if="activeSection === 'equipment'">
           <section class="pm-panel pm-equipment-layout">
             <header><div><p class="pm-panel-kicker">EQUIPMENT CAPABILITY</p><h2>设备能力维护</h2><p>维护设备基础信息、能力编码、检定有效期与启停状态。</p></div></header>
