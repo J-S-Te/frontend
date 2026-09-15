@@ -13,12 +13,13 @@ let currentSession = null
 let sessionRequest = null
 let loginRedirectStarted = false
 
-function startProjectLogin() {
+function startProjectLogin({ force = false } = {}) {
   // 并发请求共享一次登录跳转，并在跳转前清空旧主体缓存。
   if (loginRedirectStarted) return
   loginRedirectStarted = true
   clearProjectSessionCache()
-  window.location.replace(`${PUBLIC_PATH_PREFIX}/auth/login`)
+  const prompt = force ? '?prompt=login' : ''
+  window.location.replace(`${PUBLIC_PATH_PREFIX}/auth/login${prompt}`)
 }
 
 async function request(path, options = {}) {
@@ -157,7 +158,10 @@ export async function ensureProjectSession() {
       const userChanged = platformIdentityID && projectIdentityID && platformIdentityID !== projectIdentityID
       const platformTenantID = String(platformPrincipal?.tenant_id || platformPrincipal?.tenant?.id || '')
       const tenantChanged = platformTenantID && platformTenantID !== String(projectSession?.tenant_id || '')
-      if (userChanged || tenantChanged) { await clearProjectLocalSession(); startProjectLogin(); return null }
+      // 普通 OIDC 登录会复用 Keycloak 中仍存活的旧 Realm 会话。账号切换后必须
+      // 强制 Keycloak 重新经过基础平台 Broker；能够切换时建立当前主体会话，
+      // Keycloak 拒绝切换时停在明确错误页，均不能再静默重建旧会话形成刷新风暴。
+      if (userChanged || tenantChanged) { await clearProjectLocalSession(); startProjectLogin({ force: true }); return null }
     } catch { /* 基础平台暂时不可用时，项目 OIDC 会话仍按自身有效期独立生效。 */ }
     return projectSession
   } catch (error) {
