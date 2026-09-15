@@ -38,6 +38,24 @@ test('项目管理页面覆盖原型的五个业务域与核心交互', () => {
   assert.match(source, /DEVIATION_REPORTED/)
 })
 
+test('系统配置侧边栏合并为一个规则配置中心并保留细粒度权限与深链接', () => {
+  // 五类规则已经在页面内以标签切换，侧栏不再重复铺开五个入口。
+  assert.match(source, /const configurationCenterSections = Object\.freeze\(\[\s*'capability-codes',\s*'warning-rules',\s*'automations',\s*'permissions',\s*'sla',\s*\]\)/)
+  assert.match(source, /\{ key: 'configuration-center', label: '规则配置中心', icon: 'shield', sectionKeys: configurationCenterSections \}/)
+  assert.doesNotMatch(source, /\{ key: 'warning-rules', label: '冲突预警规则', icon:/)
+  assert.doesNotMatch(source, /\{ key: 'automations', label: '自动化触发', icon:/)
+  assert.doesNotMatch(source, /\{ key: 'permissions', label: '字段级权限', icon:/)
+  assert.doesNotMatch(source, /\{ key: 'sla', label: '状态 SLA 配置', icon:/)
+  // 服务端仍返回细粒度栏目；合并入口取当前用户首个获授权栏目作为落点，
+  // 任一子栏目激活时侧栏入口都保持选中。
+  assert.match(source, /item\.sectionKeys\?\.find\(\(section\) => allowed\.has\(section\)\)/)
+  assert.match(source, /item\.sectionKeys\.some\(\(section\) => allowed\.has\(section\)\)/)
+  assert.match(source, /item\.sectionKeys\.includes\(activeSection\.value\)/)
+  assert.match(source, /@click="navigateNavItem\(item\)"/)
+  // 合同拆解规则仍是独立入口。
+  assert.match(source, /\{ key: 'split-rules', label: '合同拆解规则', icon: 'settings' \}/)
+})
+
 test('项目管理的弹层与菜单支持一致的 Esc 关闭逻辑，保存中不会被误关闭', () => {
   assert.match(source, /function closeActiveOverlay\(\)/)
   assert.match(source, /if \(saving\.value\) return/)
@@ -392,7 +410,7 @@ test('新建人员资质从基础平台人员目录单选，设备仍使用资�
 })
 
 test('资质与能力编码由系统配置目录统一管理并按类型多选', () => {
-  assert.match(source, /\{ key: 'capability-codes', label: '资质 \/ 能力编码', icon: 'shield' \}/)
+  assert.match(source, /'capability-codes'/)
   assert.match(source, /'capability-codes': \['资质 \/ 能力编码配置'/)
   assert.match(source, /kind: 'capability-codes'[\s\S]*key: 'scope', label: '编码'[\s\S]*key: 'check_type', label: '适用类型'/)
   assert.match(source, /value: 'PERSON', label: '人员资质'/)
@@ -667,6 +685,16 @@ test('项目健康度字段已移除，风险项目改由服务端派生口径�
   assert.match(source, /const riskProjectCount = computed\(\(\) => projects\.value\.filter\(isRiskProject\)\.length\)/)
   assert.match(source, /risk: project\.risk/)
   assert.doesNotMatch(source, /riskProjectStatuses/)
+})
+
+test('业务管理员项目列表展示合同流程完成但尚未建项目的准确统计', () => {
+  assert.match(source, /pending_project_creation: 0, pending_project_creation_available: false/)
+  assert.match(source, /v-if="canCreateProject" type="button" class="pm-kpi red" @click="openCreateProject"/)
+  assert.match(source, /<span>待新建项目<\/span>/)
+  assert.match(source, /dashboard\.pending_project_creation_available \? dashboard\.pending_project_creation : '—'/)
+  assert.match(source, /合同流程已完成 · 尚未建项目/)
+  // 非项目创建角色仍保留原风险入口，避免改变项目经理等角色的列表能力。
+  assert.match(source, /v-else type="button" class="pm-kpi red" @click="navigate\('monitoring'\)"/)
 })
 
 test('实施计划提交人员清单，设备清单在实施准备登记并校验占用', () => {
