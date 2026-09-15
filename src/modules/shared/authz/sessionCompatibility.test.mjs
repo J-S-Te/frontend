@@ -44,6 +44,14 @@ test('access failures remain distinct and only plain 401 starts login', () => {
   assert.equal(shouldStartSubsystemLogin({ status: 401, code: 'PORTAL_OIDC_INVALID_CLAIMS' }), false)
   assert.match(subsystemAccessMessage({ status: 403 }), /身份认证已经完成/)
   assert.match(subsystemAccessMessage({ status: 503 }), /统一授权上下文/)
+  assert.equal(
+    subsystemAccessMessage({ status: 503, code: 'CON_APPROVAL_WORKFLOW_UNAVAILABLE', message: '审批流程服务暂时不可用，请稍后重试' }),
+    '审批流程服务暂时不可用，请稍后重试',
+  )
+  assert.match(
+    subsystemAccessMessage({ status: 503, code: 'AUTH_DEPENDENCY_UNAVAILABLE', message: '身份或授权服务暂时不可用' }),
+    /统一授权上下文/,
+  )
   assert.match(subsystemAccessMessage({ status: 403, code: 'PORTAL_IDENTITY_NOT_PROVISIONED' }), /客户门户身份/)
 })
 
