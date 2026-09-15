@@ -28,11 +28,12 @@ test('项目会话失效时只启动一次 OIDC 登录，Claims 错误不会循�
   assert.match(source, /if \(response\.status === 401\)[\s\S]*startProjectLogin\(\)/)
   assert.match(source, /if \(shouldStartSubsystemLogin\(error\)\) startProjectLogin\(\)/)
   assert.match(source, /if \(loginRedirectStarted\) return/)
-  assert.match(source, /window\.location\.replace\(`\$\{PUBLIC_PATH_PREFIX\}\/auth\/login`\)/)
+  assert.match(source, /window\.location\.replace\(`\$\{PUBLIC_PATH_PREFIX\}\/auth\/login\$\{prompt\}`\)/)
 })
 
-test('平台浏览器切换用户时清理项目系统本地会话', () => {
-  assert.match(source, /await clearProjectLocalSession\(\); startProjectLogin\(\)/)
+test('平台浏览器切换用户时清理项目系统本地会话并强制重新经过 Broker', () => {
+  assert.match(source, /await clearProjectLocalSession\(\); startProjectLogin\(\{ force: true \}\)/)
+  assert.match(source, /const prompt = force \? '\?prompt=login' : ''/)
   assert.match(source, /\/auth\/local-logout/)
 })
 
