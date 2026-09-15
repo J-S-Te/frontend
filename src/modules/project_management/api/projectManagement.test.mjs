@@ -106,12 +106,17 @@ test('人员姓名批量解析走独立端点，并对 user_id 去重后编码',
 })
 
 test('人员目录按重复 role_code 参数查询，数组参数不会被压成逗号串', () => {
-  // 团队负责人/项目经理/工程师下拉按角色取人：平台目录按重复参数解析角色码，
-  // 被压成 "a,b" 会被当成一个不存在的角色，导致下拉为空。
+  // 基础平台目录只用于新建人员资质档案等身份选择；数组参数仍必须按平台契约发送。
   assert.match(source, /export async function listPersonnel\(params = \{\}\)/)
   assert.match(source, /for \(const item of Array\.isArray\(value\) \? value : \[value\]\)/)
   assert.match(source, /search\.append\(key, item\)/)
   assert.match(source, /request\(`\/personnel\$\{query \? `\?\$\{query\}` : ''\}`\)/)
+})
+
+test('任务分配人员只查询项目人员资质库', () => {
+  assert.match(source, /export async function listQualifiedPersonnel\(params = \{\}\)/)
+  assert.match(source, /request\(`\/qualified-personnel\$\{query \? `\?\$\{query\}` : ''\}`\)/)
+  assert.match(source, /return data && Array\.isArray\(data\.items\) \? data : \{ items: \[\], total: 0 \}/)
 })
 
 test('人员身份复核调用独立端点', () => {

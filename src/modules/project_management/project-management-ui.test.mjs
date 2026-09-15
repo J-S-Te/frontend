@@ -6,6 +6,7 @@ import projectManagementModule from './module.js'
 const source = await readFile(new URL('./views/ProjectManagementView.vue', import.meta.url), 'utf8')
 const styles = await readFile(new URL('./styles/project-management.css', import.meta.url), 'utf8')
 const pickerSource = await readFile(new URL('./components/ServiceItemPicker.vue', import.meta.url), 'utf8')
+const searchableSelectSource = await readFile(new URL('./components/SearchableSelect.vue', import.meta.url), 'utf8')
 const contractSource = await readFile(new URL('../contract_management/api/contract.js', import.meta.url), 'utf8')
 const pmApiSource = await readFile(new URL('./api/projectManagement.js', import.meta.url), 'utf8')
 const workflowNodeSource = await readFile(new URL('./workflowNode.js', import.meta.url), 'utf8')
@@ -219,11 +220,11 @@ test('新建对话框限制高度并可滚动，内容不会被视口裁切', ()
   assert.match(styles, /\.pm-dialog > \.pm-form \{[^}]*overflow-y: auto;/)
 })
 
-test('服务项操作台的团队负责人从基础平台人员目录选择而不是填写用户 ID', () => {
-  assert.match(source, /listPersonnel\(\{/)
-  assert.match(source, /<select v-model="operationForm\.teamLeadID"/)
-  assert.match(source, /<select v-model="operationForm\.projectManagerID"/)
-  assert.match(source, /class="pm-multi-dropdown"/)
+test('服务项操作台的负责人从人员资质库选择而不是填写用户 ID', () => {
+  assert.match(source, /listQualifiedPersonnel\(\{/)
+  assert.match(source, /<SearchableSelect v-model="operationForm\.teamLeadID"[^>]*:options="teamLeadOptions"/)
+  assert.match(source, /<SearchableSelect v-model="operationForm\.projectManagerID"[^>]*:options="projectManagerOptions"/)
+  assert.match(source, /<SearchableSelect v-model="engineerSelection"[^>]*:options="engineerOptions"[^>]*multiple/)
   assert.match(source, /const engineerSelection = computed/)
   assert.doesNotMatch(source, /v-model\.trim="operationForm\.teamLeadID"/)
   assert.doesNotMatch(source, /placeholder="至少一个用户 ID"/)
@@ -292,16 +293,16 @@ test('所有业务节点只展示当前归属项目并在回退后清除原节�
   assert.match(source, /当前节点项目/)
 })
 
-test('平台人员查询只在用户主动查询时紧凑展示，并与岗位字段双向联动', () => {
-  // 三个角色码必须真正发给负责人目录：团队成员由平台按有效授权判定，前端不维护名单。
+test('人员查询只在用户主动查询时紧凑展示，并与人员资质库和分配字段联动', () => {
+  // 分配职责仍复用三个表单槽位，但候选人只从项目人员资质库读取，不再按平台角色预过滤。
   assert.match(source, /teamLead: 'team_lead'/)
   assert.match(source, /projectManager: 'project_manager'/)
   assert.match(source, /engineer: 'engineer'/)
-  assert.match(source, /role_code: role/)
-  // 直接授权与岗位模板授权的有效人员都可被检索，不能只限定 TEMPLATE 来源。
-  assert.doesNotMatch(source, /PROJECT_ROLE_ORIGIN/)
-  assert.doesNotMatch(source, /role_origin: PROJECT_ROLE_ORIGIN/)
-  assert.match(source, /listPersonnel\(\{ keyword, page: 1, page_size: 50 \}\)/)
+  const assignmentPersonnelLoader = source.match(/async function loadPersonnel\([\s\S]*?\n\}\n\nfunction searchPersonnel/)
+  assert.ok(assignmentPersonnelLoader, '缺少任务分配人员资质加载函数')
+  assert.doesNotMatch(assignmentPersonnelLoader[0], /role_code: role/)
+  assert.match(source, /listQualifiedPersonnel\(\{ keyword, page: 1, page_size: 50 \}\)/)
+  assert.match(pmApiSource, /request\(`\/qualified-personnel\$\{query \? `\?\$\{query\}` : ''\}`\)/)
   assert.match(source, /const personnelSearchResults = ref\(\[\]\)/)
   // 页面进入时的 loadPersonnel() 只预加载岗位候选；查询按钮显式开启结果浮层。
   assert.match(source, /async function loadPersonnel\(\{ revealResults = false \} = \{\}\)/)
@@ -314,7 +315,9 @@ test('平台人员查询只在用户主动查询时紧凑展示，并与岗位�
   assert.match(source, /function selectPersonnelForRole\(userID, roleCode\)/)
   assert.match(source, /function personnelRoleSelected\(userID, roleCode\)/)
   assert.match(source, /:aria-pressed="personnelRoleSelected\(person\.id, PROJECT_ROLE_CODES\.teamLead\)"/)
-  assert.match(source, /点选岗位后会立即同步到下方分配字段/)
+  assert.match(source, /查询结果仅来自启用且身份有效的人员资质档案，人员不限制有效期/)
+  assert.match(source, /personnelQualificationLabel\(person\)/)
+  assert.match(source, /输入姓名、资质编号或资质编码/)
   assert.match(styles, /\.pm-personnel-result-grid \{ display: grid;/)
   assert.match(styles, /\.pm-personnel-results \{ position: absolute;[^}]*top: calc\(100% \+ 6px\);/)
   assert.match(styles, /\.pm-personnel-result-grid \{[^}]*max-height: 190px;/)
@@ -322,25 +325,21 @@ test('平台人员查询只在用户主动查询时紧凑展示，并与岗位�
   assert.match(source, /const teamLeadOptions = computed/)
   assert.match(source, /const projectManagerOptions = computed/)
   assert.match(source, /const engineerOptions = computed/)
-  assert.match(source, /v-for="option in teamLeadOptions"/)
-  assert.match(source, /v-for="option in projectManagerOptions"/)
-  assert.match(source, /multiSummary\(engineerSelection, engineerOptions/)
-  assert.match(source, /v-for="option in engineerOptions"/)
+  assert.match(source, /:options="teamLeadOptions"/)
+  assert.match(source, /:options="projectManagerOptions"/)
+  assert.match(source, /:options="engineerOptions"/)
+  assert.match(source, /search-placeholder="搜索姓名、资质编号或资质编码"/)
   assert.doesNotMatch(source, /personnelOptions/)
 })
 
-test('服务项操作台的工程师改为下拉多选，设备不在任务分配中选取', () => {
-  // 多选走下拉菜单逐项勾选，样式与团队负责人/项目经理一致，不要求按住 ⌘/Ctrl。
-  assert.match(source, /class="pm-multi-dropdown"/)
-  assert.match(source, /class="pm-multi-trigger"/)
-  // 外观必须与「团队负责人 / 项目经理」的原生 select 一致：真正不一致的是箭头——原生
-  // select 由 UA 用文字色（--pm-ink）画一枚细人字，而这里原来是 5px 实心三角且带 .55
-  // 透明度（占位态更浅）。因此换成同一细人字 SVG 并取文字色，右侧内边距留出箭头位置。
-  // 盒高由与 select 相同的 min-height / padding / border 决定，不得再改行高：按钮同样从
-  // `.pm-shell :where(...) { font: inherit }` 继承行高，显式改回 normal 会比 select 矮 2px
-  // （已在 headless Chrome 实测：改前 41/40，改后 41/39）。
-  assert.match(styles, /\.pm-multi-trigger \{[^}]*min-height: var\(--pm-h-button\);/)
-  assert.doesNotMatch(styles, /\.pm-multi-trigger \{[^}]*line-height:/)
+test('服务项操作台统一使用带模糊搜索的下拉组件', () => {
+  assert.match(source, /import SearchableSelect from '@\/modules\/project_management\/components\/SearchableSelect\.vue'/)
+  assert.match(source, /<SearchableSelect v-model="operationForm\.severity"[^>]*:options="deviationSeverityOptions"/)
+  assert.match(source, /<SearchableSelect v-model="operationForm\.decision"[^>]*:options="deviationDecisionOptions"/)
+  assert.doesNotMatch(source, /<select v-model="operationForm\./)
+  assert.match(searchableSelectSource, /filterSearchableOptions\(props\.options, keyword\.value\)/)
+  assert.match(searchableSelectSource, /type="search"/)
+  assert.match(searchableSelectSource, /role="combobox"/)
   assert.match(styles, /\.pm-multi-trigger \{[^}]*padding: 9px 26px 9px 11px;/)
   assert.match(styles, /\.pm-multi-trigger \{[^}]*url\("data:image\/svg\+xml;charset=utf-8,[^"]*stroke='%230f172a'/)
   // 箭头尺寸与内缩需与原生箭头实测一致（headless Chrome 实测：原生 10x6、右缘距边框 4px）。
@@ -350,7 +349,6 @@ test('服务项操作台的工程师改为下拉多选，设备不在任务分�
   assert.match(styles, /\.pm-multi-caret \{ display: none; \}/)
   assert.match(source, /function toggleMulti\(/)
   assert.match(source, /function toggleEngineer\(/)
-  assert.match(source, /:checked="engineerSelection\.includes\(option\.id\)"/)
   assert.doesNotMatch(source, /<select[^>]*multiple/)
   assert.doesNotMatch(source, /按住 ⌘ \/ Ctrl 可多选/)
   // 设备与能力码已从任务分配移除：设备清单在「实施准备」阶段登记。
@@ -733,6 +731,16 @@ test('设备在位状态与使用范围在设备能力维护中维护，借出�
   assert.match(source, /const planEquipmentOptions = computed\(\(\) => equipment\.value\.filter\(isEquipmentValidForPreparation\)\)/)
 })
 
+test('人员资质不受日期限制且有效期只约束设备', () => {
+  assert.match(source, /item\.resource_type === 'EQUIPMENT' && item\.valid_until/)
+  assert.match(source, /capabilityDialog\.resource_type === 'EQUIPMENT'[^>]*><span>检定开始/)
+  assert.match(source, /capabilityDialog\.resource_type === 'EQUIPMENT'[^>]*><span>检定到期/)
+  assert.match(source, /人员资质不限制有效期；停用资质或人员身份失效后将不能参与项目分配/)
+  assert.match(source, /form\.resource_type === 'EQUIPMENT' && form\.valid_from/)
+  assert.match(source, /form\.resource_type === 'EQUIPMENT' && form\.valid_until/)
+  assert.match(source, /if \(capability\?\.resource_type === 'PERSON' \|\| row\.resourceType === 'PERSON'\) return '不限制'/)
+})
+
 test('已有设备的使用范围在资质与能力、设备维护两处都可修改且不会被重置', () => {
   // 资质与能力对话框：设备行显示使用范围，编辑既有记录时带回原值，保存时提交。
   assert.match(source, /capabilityDialog\.resource_type === 'EQUIPMENT'[\s\S]{0,60}capabilityDialog\.usage_scope/)
@@ -880,23 +888,19 @@ test('拆解调整入口按 project.decomposition.manage 门控并调用真实�
 })
 
 test('多选下拉对齐统一交互基线：aria 语义、键盘导航与已选 chip 回显', () => {
-  // aria：触发器声明 listbox 展开态，菜单与选项具备 listbox/option 角色。
-  assert.match(source, /aria-haspopup="listbox"/)
-  assert.match(source, /:aria-expanded="openMulti === 'engineer'"/)
-  assert.match(source, /role="listbox"/)
-  assert.match(source, /role="option"/)
-  assert.match(source, /:aria-selected="engineerSelection\.includes\(option\.id\)"/)
+  // 服务项操作台由统一组件负责 aria、键盘搜索和多选 chip。
+  assert.match(searchableSelectSource, /aria-haspopup="listbox"/)
+  assert.match(searchableSelectSource, /:aria-expanded="open"/)
+  assert.match(searchableSelectSource, /role="listbox"/)
+  assert.match(searchableSelectSource, /role="option"/)
+  assert.match(searchableSelectSource, /:aria-selected="isSelected\(option\)"/)
   // 键盘：↑↓ 移动高亮、Enter 勾选、Esc 关闭，选项支持禁用态。
-  assert.match(source, /function onMultiKeydown\(event\)/)
-  assert.match(source, /event\.key === 'Escape'/)
-  assert.match(source, /event\.key === 'ArrowDown' \|\| event\.key === 'ArrowUp'/)
-  assert.match(source, /'is-active': engineerOptions\[multiActiveIndex\]\?\.id === option\.id/)
-  assert.match(source, /'is-disabled': option\.disabled/)
-  // 已选人员以 chip 回显并支持单个移除，摘要文本保留。
-  assert.match(source, /const engineerChipOptions = computed/)
-  assert.match(source, /class="pm-chip"/)
-  assert.match(source, /class="pm-chip-x"/)
-  assert.match(source, /multiSummary\(engineerSelection, engineerOptions/)
+  assert.match(searchableSelectSource, /event\.key === 'Escape'/)
+  assert.match(searchableSelectSource, /event\.key === 'ArrowDown' \|\| event\.key === 'ArrowUp'/)
+  assert.match(searchableSelectSource, /option\.disabled/)
+  // 已选人员以 chip 回显并支持单个移除。
+  assert.match(searchableSelectSource, /class="pm-search-select-chips"/)
+  assert.match(searchableSelectSource, /@click\.stop="remove\(optionValue\(option\)\)"/)
   // 筛选栏下拉统一走 pm-filter-select（对齐原型 filter-select 形态）。
   assert.match(styles, /\.pm-filter-select \{/)
   assert.match(source, /class="pm-filter-select"/)

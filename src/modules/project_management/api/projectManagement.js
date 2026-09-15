@@ -281,6 +281,22 @@ export async function listPersonnel(params = {}) {
 }
 
 /**
+ * listQualifiedPersonnel 查询项目系统人员资质库中的当前有效人员。
+ * 这是任务分配与“查找人员”的唯一候选源；基础平台 /personnel 仅用于建立资质档案。
+ * @param {Object} [params={}] keyword、page、page_size。
+ * @returns {Promise<{items: Array<object>, total: number}>} 有效人员资质分页结果。
+ */
+export async function listQualifiedPersonnel(params = {}) {
+  const search = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null && value !== '') search.append(key, value)
+  }
+  const query = search.toString()
+  const data = await request(`/qualified-personnel${query ? `?${query}` : ''}`)
+  return data && Array.isArray(data.items) ? data : { items: [], total: 0 }
+}
+
+/**
  * returnServiceItemEquipment 归还设备：释放该服务项对设备的使用登记，设备回到「在公司」。
  * @param {string} itemID 服务项标识。
  * @param {string} resourceID 设备编号。
