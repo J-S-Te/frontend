@@ -8,6 +8,7 @@ const styles = await readFile(new URL('./styles/project-management.css', import.
 const pickerSource = await readFile(new URL('./components/ServiceItemPicker.vue', import.meta.url), 'utf8')
 const contractSource = await readFile(new URL('../contract_management/api/contract.js', import.meta.url), 'utf8')
 const pmApiSource = await readFile(new URL('./api/projectManagement.js', import.meta.url), 'utf8')
+const workflowNodeSource = await readFile(new URL('./workflowNode.js', import.meta.url), 'utf8')
 
 test('项目管理模块暴露统一前端路由', () => {
   assert.deepEqual(projectManagementModule.route, {
@@ -57,6 +58,18 @@ test('项目管理页面不再渲染原型模拟业务数据', () => {
   assert.match(source, /getProjectSession\(\)/)
   assert.match(source, /standards: \[\]/)
   assert.match(source, /projectEvents\(detailProject\.value\)/)
+})
+
+test('服务项拆解项目切换器并入合同概览，避免脱离上下文的单独表单条', () => {
+  assert.match(source, /class="pm-source-card pm-decomposition-source-card"/)
+  assert.match(source, /class="pm-source-actions">\s*<label v-if="decompositionProjects\.length > 1" class="pm-decomposition-switcher"/)
+  assert.match(source, /class="pm-decomposition-switcher-label">当前拆解项目<\/span>/)
+  assert.match(source, /class="pm-decomposition-select-shell">/)
+  assert.match(source, /aria-label="选择当前拆解项目"/)
+  assert.doesNotMatch(source, /v-if="decompositionProjects\.length > 1" class="pm-panel"><label><span>当前拆解项目<\/span>/)
+  assert.match(styles, /\.pm-decomposition-switcher select \{[\s\S]*?appearance: none;/)
+  assert.match(styles, /\.pm-decomposition-select-shell::after \{[\s\S]*?transform: translateY\(-70%\) rotate\(45deg\);/)
+  assert.match(styles, /\.pm-decomposition-switcher:focus-within \{[\s\S]*?box-shadow: 0 0 0 3px var\(--pm-focus-ring\);/)
 })
 
 test('项目系统侧边栏返回门户，用户控件负责撤销应用会话', () => {
@@ -242,7 +255,44 @@ test('待分配服务项可按拆解管理权限退回拆解确认', () => {
   assert.match(pmApiSource, /service-items\/\$\{encodeURIComponent\(itemID\)\}\/decomposition-return/)
 })
 
-test('平台人员查询展示真实目录结果，并按应用角色控制可分配岗位', () => {
+test('退回拆解确认的项目整体退出任务分配列表', () => {
+  assert.match(source, /const projectStatusForItem = \(item\) => projectByID\.value\.get\(item\?\.project_id\)\?\.status \|\| ''/)
+  assert.match(source, /const allocationItems = computed\(\(\) => serviceItems\.value\.filter\(\(item\) => item\.status === '待分配' && projectAllowsNode\(item, 'allocation'\)\)\)/)
+  assert.match(source, /allocation: allocationItems\.value\.map/)
+  assert.match(source, /activeSection === 'allocation'" :items="allocationItems"/)
+  assert.match(source, /watch\(\[activeSection, activeNodeItems\],[\s\S]*selectedServiceItemIDs\.value = selectedServiceItemIDs\.value\.filter/)
+})
+
+test('所有业务节点只展示当前归属项目并在回退后清除原节点选择', () => {
+  assert.match(source, /const latestWorkflowEventByItem = computed/)
+  assert.match(source, /IMPLEMENTATION_PLAN_REVOKED/)
+  assert.match(source, /PREPARATION_REVOKED/)
+  assert.match(source, /event\.payload\?\.kind === 'FIELD_TO_PREPARATION'/)
+  assert.match(source, /import \{ implementationPlanReady, projectAllowsWorkflowNode \} from '@\/modules\/project_management\/workflowNode'/)
+  assert.match(workflowNodeSource, /export function implementationPlanReady\(item\)/)
+  assert.match(workflowNodeSource, /Boolean\(item\.team_lead_id && item\.project_manager_id && \(item\.engineer_ids \|\| \[\]\)\.length\)/)
+  assert.match(workflowNodeSource, /item\.conflict_status === 'PASSED'/)
+  assert.match(source, /projectAllowsNode\(item, 'planning'\) && implementationPlanReady\(item\)/)
+  assert.match(source, /const exceptionItems = computed\(\(\) => serviceItems\.value\.filter\(\(item\) => item\.status === '异常处理中' && projectAllowsNode\(item, 'exceptions'\)\)\)/)
+  assert.match(source, /exceptionItemIDs\.value\.has\(event\.service_item_id\)/)
+  assert.match(source, /const activeNodeItems = computed\(\(\) => \(\{/)
+  for (const node of ['allocation', 'inbox', 'planning', 'preparation', 'assignments', 'methods', 'exceptions', 'reports', 'implementation']) {
+    assert.match(source, new RegExp(`${node}: \\w+Items\\.value`))
+  }
+  assert.match(source, /ServiceItemPicker :items="implementationItems"/)
+  assert.match(source, /ServiceItemPicker v-else :items="activeNodeItems"/)
+  assert.match(source, /watch\(\[activeSection, activeNodeItems\],[\s\S]*selectedServiceItemIDs\.value = selectedServiceItemIDs\.value\.filter/)
+  assert.match(source, /\['现场实施完成', '报告编制', '已完成'\]\.includes\(projectStatus\)/)
+  // 现场实施页面不得再渲染包含拆解、分配、报告和完成态的全生命周期看板。
+  assert.match(source, /const implementationKanbanColumns = computed/)
+  assert.match(source, /const projectIDs = new Set\(implementationItems\.value/)
+  assert.match(source, /const cards = projects\.value\.filter\(\(project\) => projectIDs\.has\(project\.id\)\)/)
+  assert.match(source, /v-for="column in implementationKanbanColumns"/)
+  assert.doesNotMatch(source, /v-for="column in kanbanColumns"/)
+  assert.match(source, /当前节点项目/)
+})
+
+test('平台人员查询只在用户主动查询时紧凑展示，并与岗位字段双向联动', () => {
   // 三个角色码必须真正发给负责人目录：团队成员由平台按有效授权判定，前端不维护名单。
   assert.match(source, /teamLead: 'team_lead'/)
   assert.match(source, /projectManager: 'project_manager'/)
@@ -253,10 +303,22 @@ test('平台人员查询展示真实目录结果，并按应用角色控制可�
   assert.doesNotMatch(source, /role_origin: PROJECT_ROLE_ORIGIN/)
   assert.match(source, /listPersonnel\(\{ keyword, page: 1, page_size: 50 \}\)/)
   assert.match(source, /const personnelSearchResults = ref\(\[\]\)/)
-  assert.match(source, /平台人员查询结果/)
+  // 页面进入时的 loadPersonnel() 只预加载岗位候选；查询按钮显式开启结果浮层。
+  assert.match(source, /async function loadPersonnel\(\{ revealResults = false \} = \{\}\)/)
+  assert.match(source, /function searchPersonnel\(\) \{\s*return loadPersonnel\(\{ revealResults: true \}\)/)
+  assert.match(source, /@input="onPersonnelKeywordInput" @keydown\.enter\.prevent="searchPersonnel"/)
+  assert.match(source, /@click="searchPersonnel"/)
+  assert.match(source, /v-if="personnelSearchPerformed" class="pm-personnel-results"/)
+  assert.match(source, /class="pm-personnel-results-close"/)
   assert.match(source, /class="pm-personnel-result-grid"/)
   assert.match(source, /function selectPersonnelForRole\(userID, roleCode\)/)
+  assert.match(source, /function personnelRoleSelected\(userID, roleCode\)/)
+  assert.match(source, /:aria-pressed="personnelRoleSelected\(person\.id, PROJECT_ROLE_CODES\.teamLead\)"/)
+  assert.match(source, /点选岗位后会立即同步到下方分配字段/)
   assert.match(styles, /\.pm-personnel-result-grid \{ display: grid;/)
+  assert.match(styles, /\.pm-personnel-results \{ position: absolute;[^}]*top: calc\(100% \+ 6px\);/)
+  assert.match(styles, /\.pm-personnel-result-grid \{[^}]*max-height: 190px;/)
+  assert.match(styles, /\.pm-personnel-result-actions button\.selected \{[^}]*background: var\(--pm-primary\);/)
   assert.match(source, /const teamLeadOptions = computed/)
   assert.match(source, /const projectManagerOptions = computed/)
   assert.match(source, /const engineerOptions = computed/)
@@ -543,9 +605,11 @@ test('项目状态只由服务端派生，前端不再自行拼装状态集合',
   assert.match(source, /const projectStatusCompleted = '已完成'/)
   // 状态筛选必须由节点表生成，而不是手写 option 列表。
   assert.match(source, /<option v-for="node in projectStatusFilters"/)
-  // 看板泳道只做归类，卡片仍展示唯一的 project.status。
-  assert.match(source, /statuses: \['待拆解确认', '待分配'\]/)
-  assert.match(source, /statuses: \[projectStatusCompleted, '补充协议处理中', '已终止'\]/)
+  // 现场看板只消费服务端返回的当前现场状态，不再把全生命周期项目复制进来。
+  assert.match(source, /statuses: \['实施准备中'\]/)
+  assert.match(source, /statuses: \['实施中'\]/)
+  assert.doesNotMatch(source, /statuses: \['待拆解确认', '待分配'\]/)
+  assert.doesNotMatch(source, /statuses: \[projectStatusCompleted, '补充协议处理中', '已终止'\]/)
   assert.match(source, /:class="statusTone\(card\.status\)"/)
   // 不得再用"还有报告未归档"二次推断项目完成态。
   assert.doesNotMatch(source, /reportActiveProjectIDs/)
