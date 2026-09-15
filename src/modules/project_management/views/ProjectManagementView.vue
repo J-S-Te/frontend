@@ -785,96 +785,71 @@ const reportItems = computed(() => serviceItems.value.filter((item) => {
   return ['现场实施完成', '报告编制', '已完成'].includes(projectStatus) && (item.status === '现场实施完成' || (item.report_status && item.report_status !== 'NONE'))
 }))
 const reportTechReviewLabel = (status) => ({ NONE: '未提交', PENDING: '待复核', APPROVED: '已通过', REJECTED: '已驳回' }[status] || '未提交')
-const personnelKeyword = ref('')
 const personnelLoading = ref(false)
 const personnelError = ref('')
 const capabilityPersonnel = ref([])
 const capabilityPersonnelLoading = ref(false)
 const capabilityPersonnelError = ref('')
-const personnelSearchResults = ref([])
-const personnelSearchTotal = ref(0)
-const personnelSearchPerformed = ref(false)
-const personnelSearchKeyword = ref('')
-const personnelSearchSequence = ref(0)
+const personnelRequestSequence = ref(0)
 
-// 服务项操作台的人员选择必须来自项目人员资质库，不能要求业务用户手工填写用户 ID。
-// 同一批合格人员可被指派为团队负责人、项目经理或工程师；具体职责由本次流程关系决定。
-// 分配候选只来自项目系统启用且身份有效的人员资质库；人员日期不限制派工。基础平台目录仍用于新建资质时选择
-// 身份主体，但不能绕过资质库直接进入团队负责人、项目经理或工程师下拉。
+// 分配候选必须同时满足：项目人员资质有效、平台身份有效、具备对应项目角色。
+// 人员日期不限制派工；基础平台目录仍只用于新建资质时选择身份主体。
 const PROJECT_ROLE_CODES = Object.freeze({ teamLead: 'team_lead', projectManager: 'project_manager', engineer: 'engineer' })
 
 const emptyPersonnelByRole = () => ({ [PROJECT_ROLE_CODES.teamLead]: [], [PROJECT_ROLE_CODES.projectManager]: [], [PROJECT_ROLE_CODES.engineer]: [] })
 const personnelByRole = ref(emptyPersonnelByRole())
 
-async function loadPersonnel({ revealResults = false } = {}) {
-  const sequence = ++personnelSearchSequence.value
+async function loadPersonnel() {
+  const sequence = ++personnelRequestSequence.value
   personnelLoading.value = true
   personnelError.value = ''
-  const keyword = revealResults ? personnelKeyword.value.trim() : ''
   // 项目经理/工程师只在具备 project.execution.assign 的表单里出现。
   const roles = canExecutionAssign.value
     ? [PROJECT_ROLE_CODES.teamLead, PROJECT_ROLE_CODES.projectManager, PROJECT_ROLE_CODES.engineer]
     : [PROJECT_ROLE_CODES.teamLead]
   try {
-    // 后台预加载和主动搜索共用同一个资质库端点。一个人员是否成为团队负责人、项目经理
-    // 或工程师由本次指派关系决定，而不是要求他事先持有该流程角色后才能被选中。
-    const page = await listQualifiedPersonnel({ keyword, page: 1, page_size: 50 })
-    if (sequence !== personnelSearchSequence.value) return
+    const rolePages = await Promise.all(roles.map(async (roleCode) => {
+      // 浏览器内做模糊匹配，因此分别加载对应角色的全部资质候选。
+      const firstPage = await listQualifiedPersonnel({ role_code: roleCode, page: 1, page_size: 50 })
+      const total = Math.max(Number(firstPage?.total || 0), firstPage?.items?.length || 0)
+      const pageCount = Math.ceil(total / 50)
+      const remainingPages = pageCount > 1
+        ? await Promise.all(Array.from({ length: pageCount - 1 }, (_, index) => listQualifiedPersonnel({ role_code: roleCode, page: index + 2, page_size: 50 })))
+        : []
+      return { roleCode, pages: [firstPage, ...remainingPages] }
+    }))
+    if (sequence !== personnelRequestSequence.value) return
     const byRole = emptyPersonnelByRole()
     const names = {}
-    const items = Array.isArray(page?.items) ? page.items : []
-    const incoming = items.map((person) => ({
-      id: person.user_id,
-      name: person.display_name || '未命名人员',
-      resourceID: person.resource_id,
-      codes: person.codes || [],
-      description: `${person.resource_id || '资质档案'} · ${(person.codes || []).join('、') || '未设置资质编码'}`,
-    }))
-    roles.forEach((role) => {
-      // 主动查询只把新命中的人员并入已加载目录，避免搜索一个姓名后把其它负责人候选清空。
-      byRole[role] = revealResults
-        ? [...new Map([...(personnelByRole.value[role] || []), ...incoming].map((person) => [person.id, person])).values()]
-        : incoming
-    })
-    for (const person of items) names[person.user_id] = person.display_name
-    personnelByRole.value = byRole
-    if (revealResults) {
-      personnelSearchResults.value = items.map((person) => ({
-        id: person.user_id,
-        name: person.display_name || '未命名人员',
-        resourceID: person.resource_id || '',
-        codes: Array.isArray(person.codes) ? person.codes : [],
-      }))
-      personnelSearchTotal.value = Number(page?.total || personnelSearchResults.value.length)
-      personnelSearchKeyword.value = keyword
-      personnelSearchPerformed.value = true
+    for (const { roleCode, pages } of rolePages) {
+      const personnelByID = new Map()
+      const items = pages.flatMap((page) => Array.isArray(page?.items) ? page.items : [])
+      for (const person of items) {
+        const id = String(person?.user_id || '').trim()
+        if (!id) continue
+        const existing = personnelByID.get(id)
+        const codes = [...new Set([...(existing?.codes || []), ...(Array.isArray(person.codes) ? person.codes : [])])]
+        const resourceID = existing?.resourceID || person.resource_id || ''
+        personnelByID.set(id, {
+          id,
+          name: existing?.name || person.display_name || '未命名人员',
+          resourceID,
+          codes,
+          description: `${resourceID || '资质档案'} · ${codes.join('、') || '未设置资质编码'}`,
+        })
+        names[id] = personnelByID.get(id).name
+      }
+      byRole[roleCode] = [...personnelByID.values()]
     }
+    personnelByRole.value = byRole
     rememberPersonnelNames(names)
   } catch (error) {
-    if (sequence !== personnelSearchSequence.value) return
-    if (!revealResults) personnelByRole.value = emptyPersonnelByRole()
-    if (revealResults) {
-      personnelSearchResults.value = []
-      personnelSearchTotal.value = 0
-      personnelSearchKeyword.value = keyword
-      personnelSearchPerformed.value = true
-    }
+    if (sequence !== personnelRequestSequence.value) return
+    personnelByRole.value = emptyPersonnelByRole()
     personnelError.value = error?.message || '人员资质库加载失败'
   } finally {
-    if (sequence === personnelSearchSequence.value) personnelLoading.value = false
+    if (sequence === personnelRequestSequence.value) personnelLoading.value = false
   }
-}
-
-function searchPersonnel() {
-  return loadPersonnel({ revealResults: true })
-}
-
-function closePersonnelSearchResults() {
-  personnelSearchPerformed.value = false
-}
-
-function onPersonnelKeywordInput() {
-  if (personnelKeyword.value.trim() !== personnelSearchKeyword.value) closePersonnelSearchResults()
 }
 
 // 人员资质只能从基础平台目录选择主体；名称由服务端再次按 user_id 复核后写入，
@@ -907,30 +882,6 @@ function onCapabilityPersonChange() {
   if (!capabilityDialog.value) return
   const person = capabilityPersonOptions.value.find((option) => option.id === capabilityDialog.value.user_id)
   capabilityDialog.value.resource_name = person?.name || ''
-}
-
-function personnelQualificationLabel(person) {
-  const codes = Array.isArray(person?.codes) && person.codes.length ? person.codes.join('、') : '未设置资质编码'
-  return `${person?.resourceID || '资质档案'} · ${codes} · 不限制有效期`
-}
-
-function personnelCanFillRole(userID, roleCode) {
-  return (personnelByRole.value[roleCode] || []).some((person) => person.id === userID)
-}
-
-function personnelRoleSelected(userID, roleCode) {
-  if (roleCode === PROJECT_ROLE_CODES.teamLead) return operationForm.value.teamLeadID === userID
-  if (roleCode === PROJECT_ROLE_CODES.projectManager) return operationForm.value.projectManagerID === userID
-  if (roleCode === PROJECT_ROLE_CODES.engineer) return engineerSelection.value.includes(userID)
-  return false
-}
-
-function selectPersonnelForRole(userID, roleCode) {
-  if (!personnelCanFillRole(userID, roleCode)) return
-  if (roleCode === PROJECT_ROLE_CODES.teamLead) operationForm.value.teamLeadID = userID
-  if (roleCode === PROJECT_ROLE_CODES.projectManager) operationForm.value.projectManagerID = userID
-  if (roleCode === PROJECT_ROLE_CODES.engineer) toggleEngineer(userID)
-  showToast('已从人员资质库填入人员，提交时服务端会再次校验资质启停与身份状态。')
 }
 
 // 已保存的角色可能不在当前查询结果里（例如任职已调整）；补一条“当前值”选项，避免编辑既有
@@ -970,15 +921,8 @@ function multiSummary(values, options, placeholder, key = 'id') {
   if (names.length <= 2) return names.join('、')
   return `${names.slice(0, 2).join('、')} 等 ${names.length} 项`
 }
-function toggleEngineer(id) {
-  const selected = new Set(engineerSelection.value)
-  if (selected.has(id)) selected.delete(id)
-  else selected.add(id)
-  engineerSelection.value = [...selected]
-}
 function closeMultiOnOutsideClick(event) {
   if (!(event.target instanceof Element) || !event.target.closest('.pm-multi-dropdown')) openMulti.value = ''
-  if (!(event.target instanceof Element) || !event.target.closest('.pm-personnel-lookup')) closePersonnelSearchResults()
 }
 // 键盘可达的多选下拉统一走这里：↑↓ 移动高亮、Enter 勾选、Esc 关闭；人员选择器与
 // 字段级权限的角色选择器共用同一套交互基线，只有选项来源与选中值语义不同。
@@ -2499,7 +2443,6 @@ function exportProjects() {
 function closeActiveOverlay() {
   if (saving.value) return false
   if (openMulti.value) { openMulti.value = ''; return true }
-  if (personnelSearchPerformed.value) { closePersonnelSearchResults(); return true }
   if (planEquipmentPickerOpen.value) { planEquipmentPickerOpen.value = false; return true }
   if (operationDetail.value) { operationDetail.value = null; return true }
   if (configEditorOpen.value) { configEditorOpen.value = false; return true }
@@ -3010,40 +2953,7 @@ onBeforeUnmount(() => {
             <section v-if="activeSection === 'inbox' && pendingRollbackRequests.length" class="pm-panel pm-approval-panel"><header><div><p class="pm-panel-kicker">ROLLBACK APPROVAL</p><h2>待处理回退申请</h2></div><span>{{ pendingRollbackRequests.length }} 项</span></header><div v-for="request in pendingRollbackRequests" :key="request.id" class="pm-form-row"><span>{{ request.service_item_id }} · {{ request.payload?.kind === 'FIELD_TO_PREPARATION' ? '现场回退' : '报告返工' }} · {{ request.payload?.reason }}</span><template v-if="canApproveRollback && request.actor_user_id !== session?.user_id"><button type="button" class="pm-button primary" :disabled="saving" @click="decidePendingRollback(request, 'APPROVED')">批准</button><button type="button" class="pm-button danger" :disabled="saving" @click="decidePendingRollback(request, 'REJECTED')">驳回</button></template><button v-if="canRequestRollback && request.actor_user_id === session?.user_id" type="button" class="pm-button" :disabled="saving" @click="withdrawPendingRollback(request)">撤回申请</button></div></section>
             <div v-if="selectedServiceItem" class="pm-form pm-operation-form">
               <template v-if="['allocation', 'inbox', 'assignments'].includes(activeSection)">
-                <div class="pm-personnel-lookup">
-                  <div class="pm-personnel-search">
-                    <label>
-                      <span>查找人员资质</span>
-                      <input v-model.trim="personnelKeyword" placeholder="输入姓名、资质编号或资质编码" autocomplete="off" @input="onPersonnelKeywordInput" @keydown.enter.prevent="searchPersonnel" />
-                    </label>
-                    <button type="button" class="pm-button" :disabled="personnelLoading" @click="searchPersonnel">{{ personnelLoading ? '查询中…' : '查询' }}</button>
-                  </div>
-                  <section v-if="personnelSearchPerformed" class="pm-personnel-results" aria-live="polite">
-                    <header>
-                      <div>
-                        <h3>{{ personnelSearchKeyword ? `“${personnelSearchKeyword}”的查询结果` : '全部有效人员资质' }}</h3>
-                        <span>共 {{ personnelSearchTotal }} 人</span>
-                      </div>
-                      <button type="button" class="pm-personnel-results-close" aria-label="关闭人员查询结果" @click="closePersonnelSearchResults">×</button>
-                    </header>
-                    <p v-if="personnelLoading" class="pm-result-state">正在查询人员资质库…</p>
-                    <p v-else-if="personnelError" class="pm-result-state error" role="alert">人员资质库暂不可用，请稍后重试。</p>
-                    <p v-else-if="!personnelSearchResults.length" class="pm-result-state">未找到启用、身份有效且已关联平台账号的人员资质，请调整查询条件或先维护资质档案。</p>
-                    <div v-else class="pm-personnel-result-grid">
-                      <article v-for="person in personnelSearchResults" :key="person.id" class="pm-personnel-result-card">
-                        <div class="pm-personnel-result-main"><strong>{{ person.name }}</strong><small>{{ personnelQualificationLabel(person) }}</small></div>
-                        <div class="pm-personnel-result-actions">
-                          <button v-if="personnelCanFillRole(person.id, PROJECT_ROLE_CODES.teamLead)" type="button" :class="{ selected: personnelRoleSelected(person.id, PROJECT_ROLE_CODES.teamLead) }" :aria-pressed="personnelRoleSelected(person.id, PROJECT_ROLE_CODES.teamLead)" @click="selectPersonnelForRole(person.id, PROJECT_ROLE_CODES.teamLead)">{{ personnelRoleSelected(person.id, PROJECT_ROLE_CODES.teamLead) ? '已选团队负责人' : '设为团队负责人' }}</button>
-                          <button v-if="canExecutionAssign && personnelCanFillRole(person.id, PROJECT_ROLE_CODES.projectManager)" type="button" :class="{ selected: personnelRoleSelected(person.id, PROJECT_ROLE_CODES.projectManager) }" :aria-pressed="personnelRoleSelected(person.id, PROJECT_ROLE_CODES.projectManager)" @click="selectPersonnelForRole(person.id, PROJECT_ROLE_CODES.projectManager)">{{ personnelRoleSelected(person.id, PROJECT_ROLE_CODES.projectManager) ? '已选项目经理' : '设为项目经理' }}</button>
-                          <button v-if="canExecutionAssign && personnelCanFillRole(person.id, PROJECT_ROLE_CODES.engineer)" type="button" :class="{ selected: personnelRoleSelected(person.id, PROJECT_ROLE_CODES.engineer) }" :aria-pressed="personnelRoleSelected(person.id, PROJECT_ROLE_CODES.engineer)" @click="selectPersonnelForRole(person.id, PROJECT_ROLE_CODES.engineer)">{{ personnelRoleSelected(person.id, PROJECT_ROLE_CODES.engineer) ? '移出工程师' : '加入工程师' }}</button>
-                          <span v-if="!personnelCanFillRole(person.id, PROJECT_ROLE_CODES.teamLead) && (!canExecutionAssign || (!personnelCanFillRole(person.id, PROJECT_ROLE_CODES.projectManager) && !personnelCanFillRole(person.id, PROJECT_ROLE_CODES.engineer)))" class="pm-result-ineligible">无可分配项目岗位</span>
-                        </div>
-                      </article>
-                    </div>
-                    <p class="pm-personnel-results-note">查询结果仅来自启用且身份有效的人员资质档案，人员不限制有效期；点选后立即同步到分配字段，提交时服务端再次校验资质和身份状态。</p>
-                  </section>
-                </div>
-                <p v-if="personnelError && !personnelSearchPerformed" class="pm-form-hint" role="alert">{{ personnelError }}</p>
+                <p v-if="personnelError" class="pm-form-hint pm-span-full" role="alert">{{ personnelError }}</p>
                 <div class="pm-field"><span>团队负责人 <em>*</em></span><SearchableSelect v-model="operationForm.teamLeadID" :options="teamLeadOptions" value-key="id" label-key="name" description-key="description" placeholder="请选择团队负责人" search-placeholder="搜索姓名、资质编号或资质编码" empty-text="人员资质库中没有匹配的团队负责人" aria-label="选择团队负责人" :disabled="personnelLoading" required /></div>
                 <template v-if="canExecutionAssign">
                   <div class="pm-field"><span>项目经理 <em>*</em></span><SearchableSelect v-model="operationForm.projectManagerID" :options="projectManagerOptions" value-key="id" label-key="name" description-key="description" placeholder="请选择项目经理" search-placeholder="搜索姓名、资质编号或资质编码" empty-text="人员资质库中没有匹配的项目经理" aria-label="选择项目经理" :disabled="personnelLoading" required /></div>
