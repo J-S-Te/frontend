@@ -77,6 +77,17 @@ import '@/modules/project_management/styles/project-management.css'
 const route = useRoute()
 const router = useRouter()
 
+// 这五类治理规则共用同一配置工作台，侧边栏只保留一个入口，避免与页内标签重复。
+// sectionKeys 仍保留服务端下发的细粒度栏目：入口是否可见、默认落点以及页内权限
+// 都以服务端 navigation 为准，旧的栏目深链接也继续有效。
+const configurationCenterSections = Object.freeze([
+  'capability-codes',
+  'warning-rules',
+  'automations',
+  'permissions',
+  'sla',
+])
+
 const allNavGroups = [
   { label: '执行总览', items: [
     { key: 'dashboard', label: '项目执行总览', icon: 'dashboard' },
@@ -105,11 +116,7 @@ const allNavGroups = [
   ] },
   { label: '系统配置', items: [
     { key: 'split-rules', label: '合同拆解规则', icon: 'settings' },
-    { key: 'capability-codes', label: '资质 / 能力编码', icon: 'shield' },
-    { key: 'warning-rules', label: '冲突预警规则', icon: 'shield' },
-    { key: 'automations', label: '自动化触发', icon: 'reset' },
-    { key: 'permissions', label: '字段级权限', icon: 'role' },
-    { key: 'sla', label: '状态 SLA 配置', icon: 'audit' },
+    { key: 'configuration-center', label: '规则配置中心', icon: 'shield', sectionKeys: configurationCenterSections },
   ] },
 ]
 
@@ -151,9 +158,24 @@ const navBadges = computed(() => ({
 const visibleNavGroups = computed(() => {
   const allowed = new Set(navigation.value.sections)
   return allNavGroups
-    .map((group) => ({ ...group, items: group.items.filter((item) => allowed.has(item.key)).map((item) => ({ ...item, badge: navBadges.value[item.key] || '' })) }))
+    .map((group) => ({
+      ...group,
+      items: group.items
+        .map((item) => {
+          const targetSection = item.sectionKeys?.find((section) => allowed.has(section)) || item.key
+          const visible = item.sectionKeys ? item.sectionKeys.some((section) => allowed.has(section)) : allowed.has(item.key)
+          return visible ? { ...item, targetSection, badge: navBadges.value[item.key] || '' } : null
+        })
+        .filter(Boolean),
+    }))
     .filter((group) => group.items.length)
 })
+function isNavItemActive(item) {
+  return item.sectionKeys ? item.sectionKeys.includes(activeSection.value) : activeSection.value === item.key
+}
+function navigateNavItem(item) {
+  navigate(item.targetSection || item.key)
+}
 const currentMeta = computed(() => pageMeta[activeSection.value])
 const mobileMenuOpen = ref(false)
 const keyword = ref('')
@@ -181,7 +203,7 @@ const locatingSite = ref(false)
 // 坐标未采集与"坐标为 0"必须区分：0,0 是合法位置，因此单独用 has_coordinates 表达。
 const emptySite = () => ({ site_code: '', name: '', address: '', latitude: '', longitude: '', has_coordinates: false, status: 'ACTIVE', notes: '' })
 const equipmentForm = ref({ resourceID: '', resourceName: '', codes: [], originalCodes: [], validFrom: '', validUntil: '', status: 'ACTIVE', usageScope: 'ANY' })
-const dashboard = ref({ project_count: 0, in_flight_projects: 0, risk_projects: 0, service_items: 0, status_counts: {} })
+const dashboard = ref({ project_count: 0, in_flight_projects: 0, risk_projects: 0, pending_project_creation: 0, pending_project_creation_available: false, service_items: 0, status_counts: {} })
 // SLA 超期/临近项来自服务端 GET /delivery/sla-overdue，口径由后端统一计算（计划完成超期 + 状态停留超期/临近）。
 const slaOverdueItems = ref([])
 // 同一服务项可能同时命中「计划完成超期」与「状态停留超期」两条口径，列表里保留两行（口径不同），
@@ -2498,7 +2520,7 @@ onBeforeUnmount(() => {
       <nav class="pm-nav" aria-label="项目管理导航">
         <div v-for="group in visibleNavGroups" :key="group.label" class="pm-nav-group">
           <div class="pm-nav-label">{{ group.label }}</div>
-          <button v-for="item in group.items" :key="item.key" class="pm-nav-item" :class="{ active: activeSection === item.key }" :aria-current="activeSection === item.key ? 'page' : undefined" @click="navigate(item.key)">
+          <button v-for="item in group.items" :key="item.key" class="pm-nav-item" :class="{ active: isNavItemActive(item) }" :aria-current="isNavItemActive(item) ? 'page' : undefined" @click="navigateNavItem(item)">
             <ConsoleIcon :name="item.icon" /><span>{{ item.label }}</span><em v-if="item.badge">{{ item.badge }}</em>
           </button>
         </div>
@@ -2631,7 +2653,8 @@ onBeforeUnmount(() => {
             <button type="button" class="pm-kpi amber" @click="statusFilter = '待拆解确认'"><div class="pm-kpi-label"><span>待拆解确认</span></div><strong class="pm-kpi-value">{{ pendingDecompositionCount }}<small>个</small></strong><p class="pm-kpi-meta">需业务管理员处理</p></button>
             <button type="button" class="pm-kpi blue" @click="statusFilter = ''"><div class="pm-kpi-label"><span>在途项目</span></div><strong class="pm-kpi-value">{{ inFlightProjects.length }}<small>个</small></strong><p class="pm-kpi-meta">含实施中 / 报告编制</p></button>
             <button type="button" class="pm-kpi green" @click="statusFilter = '已完成'"><div class="pm-kpi-label"><span>已完成</span></div><strong class="pm-kpi-value">{{ doneProjectCount }}<small>个</small></strong><p class="pm-kpi-meta">已完成交付</p></button>
-            <button type="button" class="pm-kpi red" @click="navigate('monitoring')"><div class="pm-kpi-label"><span>风险项目</span></div><strong class="pm-kpi-value">{{ riskProjectCount }}<small>个</small></strong><p class="pm-kpi-meta">含终止 / 超期</p></button>
+            <button v-if="canCreateProject" type="button" class="pm-kpi red" @click="openCreateProject"><div class="pm-kpi-label"><span>待新建项目</span></div><strong class="pm-kpi-value">{{ dashboard.pending_project_creation_available ? dashboard.pending_project_creation : '—' }}<small v-if="dashboard.pending_project_creation_available">个</small></strong><p class="pm-kpi-meta">{{ dashboard.pending_project_creation_available ? '合同流程已完成 · 尚未建项目' : '合同统计暂时不可用' }}</p></button>
+            <button v-else type="button" class="pm-kpi red" @click="navigate('monitoring')"><div class="pm-kpi-label"><span>风险项目</span></div><strong class="pm-kpi-value">{{ riskProjectCount }}<small>个</small></strong><p class="pm-kpi-meta">含终止 / 超期</p></button>
           </section>
           <section class="pm-search-bar">
             <label class="pm-search-input"><ConsoleIcon name="search" /><input v-model="keyword" placeholder="搜索项目编号 / 客户名称 / 服务项" aria-label="搜索项目" /></label>
