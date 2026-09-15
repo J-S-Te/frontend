@@ -552,10 +552,11 @@ test('项目状态只由服务端派生，前端不再自行拼装状态集合',
   assert.match(source, /project\.status === projectStatusCompleted/)
 })
 
-test('新建项目入口按服务端同一权限 project.create 门控', () => {
-  // 服务端 POST /projects 要求 project.create；前端必须用同一权限隐藏入口，
-  // 否则无该权限的角色会点进注定 403 的链路（该链路还会调用合同系统接口并弹出合同登录）。
-  assert.match(source, /const canCreateProject = computed\(\(\) => Array\.isArray\(session\.value\?\.permissions\) && session\.value\.permissions\.includes\('project\.create'\)\)/)
+test('新建项目入口仅向超级管理员和业务管理员开放', () => {
+  // 服务端 POST /projects 除 project.create 外还校验角色，前端保持同一可见性口径。
+  assert.match(source, /const projectCreationRoles = new Set\(\['admin', 'business_admin'\]\)/)
+  assert.match(source, /session\.value\.permissions\.includes\('project\.create'\)/)
+  assert.match(source, /roles\.some\(\(role\) => projectCreationRoles\.has\(role\)\)/)
   assert.match(source, /v-if="activeSection === 'projects' && canCreateProject"/)
   // 入口按钮不得再以「只看 section」的方式无条件渲染。
   assert.doesNotMatch(source, /v-if="activeSection === 'projects'" class="pm-button primary" @click="openCreateProject"/)
@@ -583,10 +584,10 @@ test('团队负责人、项目经理、工程师显示姓名而不是平台 ID',
   assert.match(source, /\{ label: '工程师', value: personListLabel\(record\.engineer_ids\) \}/)
 })
 
-test('新建项目入口按服务端同一权限 project.create 门控', () => {
-  // 服务端 POST /projects 要求 project.create；前端必须用同一权限隐藏入口，
-  // 否则没有该权限的角色会点进注定 403 的链路（该链路还会调用合同系统接口）。
-  assert.match(source, /const canCreateProject = computed\(\(\) => Array\.isArray\(session\.value\?\.permissions\) && session\.value\.permissions\.includes\('project\.create'\)\)/)
+test('新建项目入口只向获准角色显示', () => {
+  // 即使错误授予 project.create，非 admin/business_admin 也不显示入口。
+  assert.match(source, /const projectCreationRoles = new Set\(\['admin', 'business_admin'\]\)/)
+  assert.match(source, /roles\.some\(\(role\) => projectCreationRoles\.has\(role\)\)/)
   assert.match(source, /v-if="activeSection === 'projects' && canCreateProject"/)
   assert.doesNotMatch(source, /v-if="activeSection === 'projects'" class="pm-button primary" @click="openCreateProject"/)
 })
@@ -777,9 +778,11 @@ test('每个写操作入口都按服务端同款权限码门控', () => {
   assert.match(source, /v-if="canReviewSpecialMethod" class="pm-form-row"/)
   assert.match(source, /v-if="canManageResource" class="pm-link" @click="openCapabilityDialog\(item\)"/)
   assert.match(source, /v-if="canManageRules" class="pm-switch"/)
-  // 报告推进按阶段区分权限：归档需要 project.report.archive。
+  // 报告推进按编制、审核、签发、归档四类职责分别授权。
   assert.match(source, /canAdvanceReportPhase\(reportPhaseNext\[item\.report_status\]\)/)
-  assert.match(source, /phase === 'ARCHIVED' \? 'project\.report\.archive' : 'project\.report\.manage'/)
+  for (const permission of ['project.report.prepare', 'project.report.review', 'project.report.issue', 'project.report.archive']) {
+    assert.ok(source.includes(permission), `缺少报告阶段权限：${permission}`)
+  }
   // 字段级权限页签只对持有该权限的角色可见，避免"能打开、提交必 403"。
   assert.match(source, /configKindsMeta\.filter\(\(meta\) => meta\.kind !== 'permissions' \|\| canManageFieldPermissions\.value\)/)
   // 页签隐藏后配置面板与「新建规则」不能仍按 activeSection 渲染：否则表头取回退后的
@@ -1079,4 +1082,17 @@ test('状态字段统一为语义化胶囊标签（statusTone 单一映射）', 
   for (const tone of ['normal', 'amber', '风险', 'neutral', 'violet', 'blue', 'green', 'warning']) {
     assert.match(styles, new RegExp(`\\.pm-badge\\.${tone}`))
   }
+})
+
+test('现场证据通过统一文件网关上传并以回执提交', () => {
+  assert.match(source, /uploadServiceItemEvidence\(item\.id, 'FIELD', form\.fieldEvidenceFile\)/)
+  assert.match(source, /evidence_files: \[evidence\]/)
+  assert.match(source, /请上传至少一份现场证据/)
+  assert.doesNotMatch(source, /evidence_urls: \[\]/)
+})
+
+test('报告编制版本先上传网关文件再进入审核', () => {
+  assert.match(source, /uploadServiceItemEvidence\(item\.id, 'REPORT', file\)/)
+  assert.match(source, /registerReportArtifact\(item\.id, Number\(item\.report_revision\) \|\| 0, artifact\)/)
+  assert.match(source, /审核人与编制人必须不同/)
 })

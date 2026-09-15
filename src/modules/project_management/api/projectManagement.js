@@ -638,6 +638,19 @@ export function decideRollback(itemID, requestID, payload) {
   return request(`/service-items/${encodeURIComponent(itemID)}/rollback-requests/${encodeURIComponent(requestID)}/decision`, { method: 'POST', body: JSON.stringify(payload) })
 }
 
+export function withdrawRollback(itemID, requestID, payload) {
+  return request(`/service-items/${encodeURIComponent(itemID)}/rollback-requests/${encodeURIComponent(requestID)}/withdraw`, { method: 'POST', body: JSON.stringify(payload) })
+}
+
+export async function listReportRevisions(itemID) {
+  const data = await request(`/service-items/${encodeURIComponent(itemID)}/report-revisions`)
+  return Array.isArray(data) ? data : []
+}
+
+export function registerReportArtifact(itemID, revision, payload) {
+  return request(`/service-items/${encodeURIComponent(itemID)}/report-revisions/${encodeURIComponent(revision)}/artifact`, { method: 'PUT', body: JSON.stringify(payload) })
+}
+
 /**
  * planImplementation 保存服务项实施方案与排期。
  * @param {string|number} itemID 服务项 ID。
@@ -678,6 +691,13 @@ export function submitFieldRecord(itemID, payload) {
     method: 'POST',
     body: JSON.stringify(payload),
   })
+}
+
+export function uploadServiceItemEvidence(itemID, kind, file) {
+  const body = new FormData()
+  body.append('kind', kind)
+  body.append('file', file)
+  return request(`/service-items/${encodeURIComponent(itemID)}/evidence`, { method: 'POST', body })
 }
 
 /**

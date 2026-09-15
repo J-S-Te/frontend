@@ -284,3 +284,10 @@ test('客户门户表单受控化、分页加载与流程引导', () => {
   assert.match(filingWizard, /后续将由服务人员与您联系办理/)
   assert.match(filingWizard, /filing\.status === 'DRAFT' && canDelete/)
 })
+
+test('门户报告展示版本作废原因并阻止旧版本下载', () => {
+  assert.match(view, /selectedReport\.report_validity_status === 'VOID'/)
+  assert.match(view, /本版本已作废/)
+  assert.match(view, /报告版本/)
+  assert.match(view, /PORTAL_REPORT_VOIDED/)
+})
