@@ -814,24 +814,17 @@ test('项目表提供真实分页控件', () => {
   assert.match(source, /:disabled="projectPage >= projectPageCount" @click="gotoProjectPage\(projectPage \+ 1\)"/)
 })
 
-test('站点档案支持现场用浏览器定位自动获取坐标', () => {
-  // 坐标不依赖任何外部地图凭据：录入人通常就在现场，用浏览器定位即可自动填充，
-  // 定位失败时保留手工填写路径。
-  assert.match(source, /^\s+listSites,$/m)
-  assert.match(source, /^\s+upsertSite,$/m)
-  assert.match(source, /^\s+deleteSite,$/m)
-  assert.match(source, /\{ key: 'sites', label: '站点档案'/)
-  assert.match(source, /function locateCurrentSite\(\)/)
-  assert.match(source, /navigator\.geolocation\.getCurrentPosition/)
-  assert.match(source, /enableHighAccuracy: true/)
-  assert.match(source, /已获取当前位置（精度约/)
-  assert.match(source, /定位权限被拒绝/)
-  assert.match(source, /当前浏览器不支持定位，请手工填写坐标/)
-  // 未采集坐标与"坐标为 0"必须区分。
-  assert.match(source, /has_coordinates: hasCoordinates/)
-  assert.match(source, /<span v-else class="pm-badge neutral">未采集<\/span>/)
-  // 停用而非物理删除，保留历史可追溯。
-  assert.match(source, /async function disableSite\(item\)/)
+test('站点档案下线后新建项目直接使用实施场所文本', () => {
+  assert.doesNotMatch(source, /^\s+listSites,$/m)
+  assert.doesNotMatch(source, /^\s+upsertSite,$/m)
+  assert.doesNotMatch(source, /^\s+deleteSite,$/m)
+  assert.doesNotMatch(source, /\{ key: 'sites', label: '站点档案'/)
+  assert.doesNotMatch(source, /activeSection === 'sites'/)
+  assert.doesNotMatch(source, /实施场所必须与一个启用的站点档案名称一致/)
+  assert.doesNotMatch(source, /const linkedSite =/)
+  assert.doesNotMatch(source, /site_code: createForm\.value\.siteCode/)
+  assert.match(source, /<input v-model\.trim="createForm\.site" required placeholder="例如 杭州机房" \/>/)
+  assert.match(source, /site: createForm\.value\.site, category: link\.category/)
 })
 
 test('每个写操作入口都按服务端同款权限码门控', () => {
