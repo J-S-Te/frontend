@@ -83,6 +83,7 @@ test('视口和主题读取由独立方法统一转换为菜单样式', () => {
   assert.equal(style.width, '240px')
   assert.equal(style['--pm-primary'], '#2563eb')
   assert.equal(style.fontFamily, 'system-ui')
+  assert.equal(searchableSelectMenuStyle({ top: 20, left: 30, width: 240, maxHeight: 180 }, theme, 'calc(var(--pm-z-modal, 50) + 1)').zIndex, 'calc(var(--pm-z-modal, 50) + 1)')
 })
 
 test('视口事件绑定方法统一注册并完整清理监听器', () => {
@@ -108,4 +109,9 @@ test('搜索栏图标和弹层尺寸受组件自身约束，不会被表单全�
   assert.match(component, /\.pm-search-select-menu \{[^}]*overflow: hidden;/)
   assert.match(component, /\.pm-search-select-search \{[^}]*grid-template-columns: 16px minmax\(0, 1fr\);/)
   assert.match(component, /\.pm-search-select-search input \{[^}]*height: 36px;[^}]*min-height: 0;/)
+})
+
+test('弹窗内选择器可提升 Teleport 菜单层级', () => {
+  assert.match(component, /menuZIndex: \{ type: \[String, Number\], default: '' \}/)
+  assert.match(component, /searchableSelectMenuStyle\(layout, readSearchableSelectTheme\(root\.value\), props\.menuZIndex\)/)
 })

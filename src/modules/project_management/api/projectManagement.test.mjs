@@ -86,6 +86,13 @@ test('项目列表将 keyword 兼容转换为后端实际读取的 q 参数', ()
   assert.match(source, /new URLSearchParams\(Object\.entries\(query\)/)
 })
 
+test('已审批合同通过项目后端同源接口读取', () => {
+  assert.match(source, /export async function listApprovedContracts\(params = \{\}\)/)
+  assert.match(source, /request\(`\/approved-contracts\$\{search \? `\?\$\{search\}` : ''\}`\)/)
+  assert.match(source, /return Array\.isArray\(data\) \? data : \[\]/)
+  assert.doesNotMatch(source, /contract_management\/api\/v1\/approved-contracts/)
+})
+
 test('资质能力更新、CSV 导入导出使用后端接口，上传不携带 JSON 内容类型', () => {
   assert.match(source, /options\.body && !\(options\.body instanceof FormData\)/)
   assert.match(source, /request\('\/capabilities', \{ method: 'PUT', body: JSON\.stringify\(payload\) \}\)/)

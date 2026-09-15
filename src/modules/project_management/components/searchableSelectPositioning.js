@@ -1,5 +1,5 @@
 export const searchableSelectThemeTokens = Object.freeze([
-  '--pm-z-dropdown', '--pm-line', '--pm-r-md', '--pm-card', '--pm-shadow-pop',
+  '--pm-z-dropdown', '--pm-z-modal', '--pm-line', '--pm-r-md', '--pm-card', '--pm-shadow-pop',
   '--pm-r-sm', '--pm-sunken', '--pm-faint', '--pm-muted', '--pm-primary', '--pm-ink', '--pm-font',
 ])
 
@@ -54,8 +54,8 @@ export function readSearchableSelectTheme(element, styleReader = getComputedStyl
   }
 }
 
-export function searchableSelectMenuStyle(layout, theme) {
-  return {
+export function searchableSelectMenuStyle(layout, theme, zIndex = '') {
+  const style = {
     ...theme.tokens,
     top: `${layout.top}px`,
     left: `${layout.left}px`,
@@ -65,6 +65,8 @@ export function searchableSelectMenuStyle(layout, theme) {
     fontSize: theme.fontSize,
     color: theme.color,
   }
+  if (zIndex !== '' && zIndex !== null && zIndex !== undefined) style.zIndex = String(zIndex)
+  return style
 }
 
 export function bindSearchableSelectViewport(windowObject, listener) {
