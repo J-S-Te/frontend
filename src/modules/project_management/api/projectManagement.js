@@ -400,6 +400,25 @@ export async function listApplicationRoles() {
 }
 
 /**
+ * listRuleConfigurationCatalog 读取自动化事件与服务项 SLA 状态的服务端权威目录。
+ * @returns {Promise<{automation_triggers: Array, sla_statuses: Array}>} 规则可选值。
+ */
+export async function listRuleConfigurationCatalog() {
+  const data = await request('/rule-configuration-catalog')
+  const normalize = (items) => (Array.isArray(items) ? items : [])
+    .map((item) => ({
+      value: String(item?.value || '').trim(),
+      label: String(item?.label || '').trim() || String(item?.value || '').trim(),
+      description: String(item?.description || '').trim(),
+    }))
+    .filter((item) => item.value)
+  return {
+    automation_triggers: normalize(data?.automation_triggers),
+    sla_statuses: normalize(data?.sla_statuses),
+  }
+}
+
+/**
  * createRule 新建配置规则（按 kind 落入五套真实配置表中的对应一张）。
  * @param {Object} payload 规则内容。
  * @returns {Promise<object>} 创建结果。

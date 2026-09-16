@@ -24,6 +24,14 @@ test('角色目录来自服务端接口并按 code 归一化，缺名回退为�
   assert.match(source, /API_BASE_URL = \(runtimeEnv\.VITE_PROJECT_API_BASE_URL \|\| `\$\{PUBLIC_PATH_PREFIX\}\/api\/v1`\)/)
 })
 
+test('规则编辑器从服务端读取自动化事件与 SLA 状态白名单', () => {
+  assert.match(source, /export async function listRuleConfigurationCatalog\(\)/)
+  assert.match(source, /const data = await request\('\/rule-configuration-catalog'\)/)
+  assert.match(source, /automation_triggers: normalize\(data\?\.automation_triggers\)/)
+  assert.match(source, /sla_statuses: normalize\(data\?\.sla_statuses\)/)
+  assert.match(source, /\.filter\(\(item\) => item\.value\)/)
+})
+
 test('项目会话失效时只启动一次 OIDC 登录，Claims 错误不会循环跳转', () => {
   assert.match(source, /if \(response\.status === 401\)[\s\S]*startProjectLogin\(\)/)
   assert.match(source, /if \(shouldStartSubsystemLogin\(error\)\) startProjectLogin\(\)/)
