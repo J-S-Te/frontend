@@ -78,6 +78,64 @@ test('项目管理页面不再渲染原型模拟业务数据', () => {
   assert.match(source, /projectEvents\(detailProject\.value\)/)
 })
 
+test('项目列表 KPI、趋势图、资质筛选与空态不发生视觉回归', () => {
+  // 颜色工具类只能作用于实际色块，不能覆盖 KPI 卡片的白色背景。
+  assert.doesNotMatch(styles, /\.pm-shell \.(?:slate|violet|amber|blue|green)\s*\{\s*background:/)
+  for (const tone of ['slate', 'violet', 'amber', 'blue', 'green']) {
+    assert.match(styles, new RegExp(`\\.pm-legend i\\.${tone},[\\s\\S]*?\\.pm-kanban header i\\.${tone},[\\s\\S]*?\\.pm-bar-fill\\.${tone} \\{ background:`))
+  }
+  assert.match(styles, /\.pm-kpi\.amber\s*\{ border-top-color: var\(--pm-amber\); \}/)
+  assert.match(styles, /\.pm-kpi\.blue\s*\{ border-top-color: var\(--pm-primary\); \}/)
+  assert.match(styles, /\.pm-kpi\.green\s*\{ border-top-color: var\(--pm-green\); \}/)
+
+  // 柱高由模板中的 rate 百分比驱动，不允许 flex 再把每根柱子撑满。
+  assert.match(source, /class="pm-trend-bar"[\s\S]*?:style="\{ height: `\$\{week\.rate\}%` \}"/)
+  assert.match(styles, /\.pm-trend-bar i \{[^}]*flex: 0 0 auto;/)
+  assert.doesNotMatch(styles, /\.pm-trend-bar i \{[^}]*flex: 1;/)
+
+  // CJK 筛选标签不能在狭窄空间逐字折行。
+  assert.match(styles, /\.pm-qualification-filter span \{[^}]*flex: 0 0 auto;[^}]*white-space: nowrap;/)
+
+  // 无数据与筛选无结果都必须在项目列表表体内给出明确反馈。
+  assert.match(source, /<tr v-if="!pagedProjects\.length"><td colspan="10" class="pm-empty-mini">\{\{ projects\.length \? '暂无符合当前筛选条件的项目' : '暂无项目，请先新建项目' \}\}<\/td><\/tr>/)
+})
+
+test('高密度工作台在桌面与窄屏下保持可导航和可理解', () => {
+  // 侧栏默认只展开当前分组，分组标题是真实按钮并暴露展开状态。
+  assert.match(source, /const collapsedNavGroups = ref\(new Set\(\)\)/)
+  assert.match(source, /groups\.filter\(\(group\) => !navGroupContainsActiveItem\(group\)\)/)
+  assert.match(source, /class="pm-nav-label" :aria-expanded="!isNavGroupCollapsed\(group\)" @click="toggleNavGroup\(group\)"/)
+  assert.match(source, /v-show="!isNavGroupCollapsed\(group\)" class="pm-nav-group-items"/)
+  assert.match(styles, /\.pm-nav-label\[aria-expanded="false"\] i \{ transform: rotate\(-45deg\); \}/)
+
+  // 单面板页面只保留页级标题，工具栏和业务表单不再重复同名 H2。
+  assert.doesNotMatch(source, /<h2>资质与能力管理<\/h2>/)
+  assert.doesNotMatch(source, /<h2>设备能力维护<\/h2>/)
+  assert.match(source, /<header class="pm-section-toolbar"><div class="pm-panel-actions">/)
+  assert.match(styles, /\.pm-panel > header\.pm-section-toolbar \{ justify-content: flex-end; \}/)
+
+  // 拆解页无数据时给出引导，同时确认与调整按钮都必须有数据门禁。
+  assert.match(source, /const canConfirmCurrentDecomposition = computed/)
+  assert.match(source, /:disabled="saving \|\| !canConfirmCurrentDecomposition"/)
+  assert.match(source, /:disabled="saving \|\| !decompositionProject" @click="openDecompositionAdjust"/)
+  assert.match(source, /v-if="!decompositionProject" class="pm-empty pm-decomposition-empty"[\s\S]*?暂无待拆解合同/)
+  assert.match(styles, /\.pm-kanban-body \{[^}]*min-height: 96px;[^}]*max-height: min\(48vh, 430px\);[^}]*overflow-y: auto;/)
+
+  // 用户界面不暴露数据库表名或后端派生实现术语，也不重复空列表计数。
+  assert.doesNotMatch(source, /风险口径:|服务端口径：|（pm_sla 规则）|以服务端状态为准/)
+  assert.match(source, /<footer v-if="inFlightProjects\.length" class="pm-table-footer">/)
+
+  // 静态列宽归入 CSS；项目列表在 760px 以下转换为带字段标签的卡片。
+  assert.doesNotMatch(source, /style="width: 90px; min-width: 90px;"/)
+  assert.match(styles, /\.pm-col-actions \{ width: 90px; min-width: 90px; text-align: right; \}/)
+  assert.match(source, /class="pm-table pm-responsive-list"/)
+  assert.match(source, /data-label="项目 \/ 客户"/)
+  assert.match(styles, /@media \(max-width: 760px\) \{[\s\S]*?\.pm-responsive-list tbody tr \{ display: grid;/)
+
+  // 仪表盘 KPI 最多保留标签、数值、说明三层。
+  assert.doesNotMatch(source, /pm-kpi-corner|pm-kpi-note/)
+})
+
 test('服务项拆解项目切换器并入合同概览，避免脱离上下文的单独表单条', () => {
   assert.match(source, /class="pm-source-card pm-decomposition-source-card"/)
   assert.match(source, /class="pm-source-actions">\s*<label v-if="decompositionProjects\.length > 1" class="pm-decomposition-switcher"/)
@@ -1114,12 +1172,9 @@ test('样式表修掉信息提示、卡片角标与残留样式三处缺陷', ()
   assert.match(styles, /\.pm-alert \{ display: flex;/)
   assert.match(styles, /\.pm-alert\.info \{ border-color: var\(--pm-sky\)/)
   assert.match(styles, /\.pm-alert\.info i \{ background: var\(--pm-sky\); \}/)
-  // 角标 v2 改为卡片内的常规流元素（position: static，降级为顶部小标）：它不再压在
-  // 右上角，也就不再和标签行争同一条水平带，因此标签行无需再留 64px——这里断言
-  // "不重叠"的结构性保证（角标在流内而非绝对定位），而不是某个具体的留白数值。
-  assert.match(styles, /\.pm-kpi \.pm-kpi-corner \{[^}]*position: static;/)
-  assert.doesNotMatch(styles, /\.pm-kpi \.pm-kpi-corner \{[^}]*position: absolute;/)
-  assert.match(styles, /\.pm-kpi:has\(\.pm-kpi-corner\) > \.pm-kpi-label \{ padding-right: 0; \}/)
+  // KPI 已收敛为标签、数值、说明三层，装饰角标及其专用样式不再保留。
+  assert.doesNotMatch(source, /pm-kpi-corner/)
+  assert.doesNotMatch(styles, /pm-kpi-corner/)
   // .pm-kpi.green/.red 的 ::before 没有任何基础规则，只设 background 属死规则，不得残留。
   assert.doesNotMatch(styles, /\.pm-kpi\.green::before/)
   assert.doesNotMatch(styles, /\.pm-kpi\.red::before/)
