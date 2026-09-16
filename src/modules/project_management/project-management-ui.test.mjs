@@ -844,6 +844,15 @@ test('人员资质不受日期限制且有效期只约束设备', () => {
   assert.match(source, /if \(capability\?\.resource_type === 'PERSON' \|\| row\.resourceType === 'PERSON'\) return '不限制'/)
 })
 
+test('人员资质保存不再发送无法解析的空日期字符串', () => {
+  const saveCapability = source.slice(source.indexOf('async function saveCapability()'), source.indexOf('async function importQualificationFile'))
+  assert.match(saveCapability, /const payload = \{/)
+  assert.match(saveCapability, /form\.resource_type === 'EQUIPMENT' && form\.valid_from[^\n]*payload\.valid_from/)
+  assert.match(saveCapability, /form\.resource_type === 'EQUIPMENT' && form\.valid_until[^\n]*payload\.valid_until/)
+  assert.doesNotMatch(saveCapability, /valid_from:[^\n]*: ''/)
+  assert.doesNotMatch(saveCapability, /valid_until:[^\n]*: ''/)
+})
+
 test('已有设备的使用范围在资质与能力、设备维护两处都可修改且不会被重置', () => {
   // 资质与能力对话框：设备行显示使用范围，编辑既有记录时带回原值，保存时提交。
   assert.match(source, /capabilityDialog\.resource_type === 'EQUIPMENT'[\s\S]{0,60}capabilityDialog\.usage_scope/)
