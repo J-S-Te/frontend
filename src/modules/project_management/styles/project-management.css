@@ -1193,6 +1193,7 @@
 .pm-form { display: grid; grid-template-columns: 1fr 1fr; gap: var(--pm-sp-4); padding: var(--pm-sp-5) var(--pm-sp-6); }
 .pm-dialog > .pm-form { min-height: 0; overflow-y: auto; }
 .pm-form label { display: flex; flex-direction: column; gap: 7px; color: var(--pm-body); font-size: var(--pm-fs-label); font-weight: var(--pm-fw-semibold); }
+.pm-form label > small { color: var(--pm-muted); font-size: var(--pm-fs-hint); font-weight: var(--pm-fw-regular); line-height: 1.45; }
 .pm-form label:last-child { grid-column: 1 / -1; }
 .pm-form em { color: var(--pm-red-text); font-style: normal; }
 
