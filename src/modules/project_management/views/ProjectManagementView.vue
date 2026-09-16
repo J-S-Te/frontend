@@ -196,6 +196,7 @@ const keyword = ref('')
 const statusFilter = ref('')
 const categoryFilter = ref('')
 const teamFilter = ref('')
+const projectCardFilter = ref('')
 const selectedRows = ref([])
 const createOpen = ref(false)
 const notificationOpen = ref(false)
@@ -233,7 +234,11 @@ const filteredProjects = computed(() => {
   const query = keyword.value.trim().toLowerCase()
   return projects.value.filter((project) => {
     const matchKeyword = !query || [project.id, project.customer, project.contract, project.category, project.manager].join(' ').toLowerCase().includes(query)
+    const matchCard = !projectCardFilter.value
+      || (projectCardFilter.value === 'in_flight' && project.status !== projectStatusCompleted)
+      || (projectCardFilter.value === 'risk' && isRiskProject(project))
     return matchKeyword
+      && matchCard
       && (!statusFilter.value || project.status === statusFilter.value)
       && (!categoryFilter.value || project.category === categoryFilter.value)
       && (!teamFilter.value || project.team === teamFilter.value)
@@ -253,7 +258,7 @@ function gotoProjectPage(page) {
   projectPage.value = Math.min(Math.max(1, page), projectPageCount.value)
 }
 // 筛选条件变化后回到第一页，避免停留在越界页码上看到空表。
-watch([keyword, statusFilter, categoryFilter, teamFilter], () => { projectPage.value = 1 })
+watch([keyword, statusFilter, categoryFilter, teamFilter, projectCardFilter], () => { projectPage.value = 1 })
 
 const categoryOptions = computed(() => [...new Set(projects.value.map((p) => p.category).filter(Boolean))])
 const teamOptions = computed(() => [...new Set(projects.value.map((p) => p.team).filter(Boolean))])
@@ -376,7 +381,7 @@ const statusToneMap = {
   停用: 'neutral', DISABLED: 'neutral', 未提交: 'neutral', 待校验: 'neutral', 待排期: 'neutral', '不在公司（借出中）': 'amber',
 }
 function statusTone(status) { return statusToneMap[String(status ?? '').trim()] || 'neutral' }
-function resetProjectFilters() { keyword.value = ''; statusFilter.value = ''; categoryFilter.value = ''; teamFilter.value = '' }
+function resetProjectFilters() { keyword.value = ''; statusFilter.value = ''; categoryFilter.value = ''; teamFilter.value = ''; projectCardFilter.value = '' }
 
 const serviceItems = ref([])
 const deliveryEvents = ref([])
@@ -431,6 +436,8 @@ const fieldPermissionFieldOptions = Object.freeze([
   { value: 'project_manager_id', label: '项目经理（服务项指派）', description: '服务项指派关系及事件快照' },
   { value: 'engineer_ids', label: '工程师名单', description: '服务项指派关系及事件快照' },
 ])
+const fieldPermissionFieldLabel = Object.freeze(Object.fromEntries(fieldPermissionFieldOptions.map((option) => [option.value, option.label])))
+const fieldPermissionAccessLevelLabel = Object.freeze({ hidden: '隐藏', edit: '可编辑', view: '只读' })
 const warningRuleCheckTypeOptions = Object.freeze([
   { value: '资质能力冲突', label: '资质能力冲突', description: '人员或设备缺少有效资质 / 能力记录' },
   { value: '能力缺失', label: '能力缺失', description: '人员或设备未覆盖服务项要求的能力编码' },
@@ -454,8 +461,8 @@ const standardChangeMeta = Object.freeze({
 const configKindsMeta = [
   { kind: 'capability-codes', label: '资质 / 能力编码', nameLabel: '资质 / 能力名称', effectNote: '新建或启用后立即进入对应资源类型的可选编码目录；停用只阻止新引用，已有业务记录继续保留。', columns: [{ key: 'scope', label: '编码' }, { key: 'resource_type_label', label: '适用类型' }], fields: [{ key: 'scope', label: '编码', field: 'text', required: true, lockOnEdit: true, placeholder: '例如 CISP / ISO27001 / EQ-SCAN' }, { key: 'check_type', label: '适用类型', field: 'catalog-single', required: true, lockOnEdit: true, options: capabilityTypeOptions, placeholder: '请选择适用类型', searchPlaceholder: '搜索资源类型' }] },
   { kind: 'warning-rules', label: '预警规则', nameLabel: '预警名称', effectNote: '只影响保存后新产生的能力校验冲突事件，不重新生成既有项目的历史告警。', columns: [{ key: 'check_type', label: '检查类型' }, { key: 'threshold', label: '触发数量' }], fields: [{ key: 'check_type', label: '检查类型', field: 'catalog-single', required: true, options: warningRuleCheckTypeOptions, placeholder: '请选择预警检查类型', searchPlaceholder: '搜索检查类型' }, { key: 'threshold', label: '触发数量', field: 'positive-integer', required: true, min: 1 }] },
-  { kind: 'automations', label: '自动化动作', nameLabel: '通知规则名称', effectNote: '只监听保存后新产生的交付事件；当前唯一动作是按项目角色发送站内通知，不创建工单或调用外部系统。', columns: [{ key: 'trigger', label: '触发事件' }, { key: 'target_label', label: '通知角色' }], fields: [{ key: 'trigger', label: '触发事件', field: 'catalog-single', required: true, options: automationTriggerOptions.value, placeholder: '请选择真实交付事件', searchPlaceholder: '搜索事件名称或编码' }, { key: 'target', label: '通知角色', field: 'role', required: true }] },
-  { kind: 'permissions', label: '字段级权限', nameLabel: '隐藏规则名称', effectNote: '启用后立即影响该角色读取已有和新增项目数据；接口返回对应字段时统一脱敏为 ***。', columns: [{ key: 'role_code', label: '角色' }, { key: 'field_name', label: '字段' }, { key: 'access_level', label: '访问级别' }], fields: [{ key: 'role_codes', label: '角色', field: 'roles', required: true }, { key: 'field_name', label: '字段', field: 'permission-field', required: true, options: fieldPermissionFieldOptions }, { key: 'access_level', label: '访问级别', field: 'catalog-single', required: true, options: [{ value: 'hidden', label: '隐藏（接口返回 ***）' }] }] },
+  { kind: 'automations', label: '自动化动作', nameLabel: '通知规则名称', effectNote: '只监听保存后新产生的交付事件；当前唯一动作是按项目角色发送站内通知，不创建工单或调用外部系统。', columns: [{ key: 'trigger', label: '触发事件' }, { key: 'target_label', label: '通知角色' }], fields: [{ key: 'trigger', label: '触发事件', field: 'catalog-single', required: true, options: automationTriggerOptions.value, placeholder: '请选择真实交付事件', searchPlaceholder: '搜索事件名称或编码' }, { key: 'targets', label: '通知角色', field: 'automation-roles', required: true }] },
+  { kind: 'permissions', label: '字段级权限', nameLabel: '隐藏规则名称', effectNote: '启用后立即影响该角色读取已有和新增项目数据；接口返回对应字段时统一脱敏为 ***。', columns: [{ key: 'role_label', label: '角色' }, { key: 'field_label', label: '字段' }, { key: 'access_level_label', label: '访问级别' }], fields: [{ key: 'role_codes', label: '角色', field: 'roles', required: true }, { key: 'field_name', label: '字段', field: 'permission-field', required: true, options: fieldPermissionFieldOptions }, { key: 'access_level', label: '访问级别', field: 'catalog-single', required: true, options: [{ value: 'hidden', label: '隐藏（接口返回 ***）' }] }] },
   { kind: 'sla', label: 'SLA 规则', nameLabel: 'SLA 名称', effectNote: '保存或启用后立即按当前服务项进入该状态的时间开始计算；0 小时表示不提前提醒，不改变计划完成时间超期口径。', columns: [{ key: 'status', label: '状态' }, { key: 'deadline_hours', label: '时限(小时)' }, { key: 'remind_hours', label: '提醒(小时)' }], fields: [{ key: 'status', label: '生效状态', field: 'catalog-single', required: true, options: slaStatusOptions.value, placeholder: '请选择服务项状态', searchPlaceholder: '搜索服务项状态' }, { key: 'deadline_hours', label: '时限(小时)', field: 'number', required: true, min: 1 }, { key: 'remind_hours', label: '提前提醒(小时)', field: 'number', required: true, min: 0 }] },
 ]
 // 字段级权限规则由独立权限把关（服务端 ruleKindPermission 要求 project.field_permission.manage）：
@@ -483,18 +490,19 @@ function loadApplicationRoles() {
   return applicationRolesRequest
 }
 const configRoleSelection = computed(() => (Array.isArray(configForm.value.role_codes) ? configForm.value.role_codes : []))
+const configAutomationRoleSelection = computed(() => (Array.isArray(configForm.value.targets) ? configForm.value.targets : []))
 // 已保存的角色可能已不在目录内（历史错值或目录调整）：补一条并标注，避免编辑时被静默改写。
 const configRoleOptions = computed(() => {
   const options = [...applicationRoles.value]
   const known = new Set(options.map((option) => option.code))
-  const selectedCodes = [...configRoleSelection.value, String(configForm.value.target || '').trim()].filter(Boolean)
+  const selectedCodes = [...configRoleSelection.value, ...configAutomationRoleSelection.value, String(configForm.value.target || '').trim()].filter(Boolean)
   for (const code of selectedCodes) {
     if (code && !known.has(code)) { options.push({ code, name: `${code}（不在角色目录中）` }); known.add(code) }
   }
   return options
 })
 function defaultConfigFieldValue(field) {
-  if (field.field === 'roles') return []
+  if (field.field === 'roles' || field.field === 'automation-roles') return []
   if (field.key === 'access_level') return 'hidden'
   if (field.field === 'positive-integer') return '1'
   if (field.field === 'number') {
@@ -514,12 +522,12 @@ function onConfigFieldChange(field, value) {
   if (activeSection.value === 'sla' && field.key === 'status') configForm.value.name = `${value} SLA`
   if (activeSection.value === 'automations') {
     const trigger = automationTriggerOptions.value.find((option) => option.value === configForm.value.trigger)?.label
-    const role = applicationRoles.value.find((option) => option.code === configForm.value.target)?.name
-    if (trigger && role) configForm.value.name = `${trigger} → 通知${role}`
+    const roles = configAutomationRoleSelection.value.map((code) => applicationRoles.value.find((option) => option.code === code)?.name || code)
+    if (trigger && roles.length) configForm.value.name = `${trigger} → 通知${roles.join('、')}`
   }
 }
 function configUsesRoleCatalog() {
-  return activeConfigMeta.value.fields.some((field) => field.field === 'roles' || field.field === 'role')
+  return activeConfigMeta.value.fields.some((field) => ['roles', 'automation-roles', 'role'].includes(field.field))
 }
 function configFieldDisabled(field) {
   return Boolean(configForm.value.id && field.lockOnEdit)
@@ -545,6 +553,9 @@ function openConfigEdit(rule) {
     configForm.value.access_level = 'hidden'
     loadApplicationRoles()
   }
+  if (activeConfigMeta.value.fields.some((field) => field.field === 'automation-roles')) {
+    configForm.value.targets = rule.target ? [rule.target] : []
+  }
   if (configUsesRoleCatalog()) loadApplicationRoles()
   configEditorOpen.value = true
 }
@@ -563,8 +574,10 @@ async function saveConfigRule() {
     const payload = { kind: configForm.value.kind, name, enabled: configForm.value.enabled }
     let roleCodes = []
     let roleField = false
+    let automationTargets = []
     for (const field of activeConfigMeta.value.fields) {
       if (field.field === 'roles') { roleField = true; roleCodes = configRoleSelection.value; continue }
+      if (field.field === 'automation-roles') { automationTargets = configAutomationRoleSelection.value; continue }
       payload[field.key] = typeof configForm.value[field.key] === 'number' ? configForm.value[field.key] : String(configForm.value[field.key] || '').trim()
     }
     if (payload.kind === 'warning-rules') {
@@ -575,7 +588,8 @@ async function saveConfigRule() {
     }
     if (payload.kind === 'automations') {
       if (!automationTriggerOptions.value.some((option) => option.value === payload.trigger)) { showToast('请选择有效的触发事件', 'warning'); return }
-      if (!applicationRoles.value.some((option) => option.code === payload.target)) { showToast('请选择项目系统角色作为通知目标', 'warning'); return }
+      if (!automationTargets.length) { showToast('请至少选择一个通知角色', 'warning'); return }
+      if (automationTargets.some((roleCode) => !applicationRoles.value.some((option) => option.code === roleCode))) { showToast('通知角色必须来自项目系统角色目录', 'warning'); return }
     }
     if (payload.kind === 'sla') {
       if (!slaStatusOptions.value.some((option) => option.value === payload.status)) { showToast('请选择有效的服务项状态', 'warning'); return }
@@ -601,6 +615,20 @@ async function saveConfigRule() {
       }
       configEditorOpen.value = false
       showToast(created.length > 1 ? `已保存 ${created.length} 条配置（每个角色一条）` : '配置已保存')
+      return
+    }
+    if (payload.kind === 'automations') {
+      // 自动化表保持一条规则对应一个角色；运行时会合并同一触发事件命中的所有规则，
+      // 因而多选既不需要改变数据库结构，也能让每个角色真实收到站内通知。
+      const created = []
+      for (const [index, target] of automationTargets.entries()) {
+        const body = { ...payload, target }
+        const saved = index === 0 && configForm.value.id ? await updateRule(configForm.value.id, body) : await createRule(body)
+        applySavedRule(saved)
+        created.push(saved)
+      }
+      configEditorOpen.value = false
+      showToast(created.length > 1 ? `已保存 ${created.length} 条自动化规则（每个通知角色一条）` : '自动化规则已保存')
       return
     }
     const saved = configForm.value.id ? await updateRule(configForm.value.id, payload) : await createRule(payload)
@@ -1253,6 +1281,50 @@ const canCreateProject = computed(() => {
   const roles = Array.isArray(session.value?.roles) ? session.value.roles : []
   return roles.some((role) => projectCreationRoles.has(role))
 })
+
+const projectCardRole = computed(() => {
+  const roles = new Set((Array.isArray(session.value?.roles) ? session.value.roles : []).map((role) => String(role).trim().toLowerCase()))
+  // 多角色账号采用职责覆盖面更大的卡片方案；列表数据范围仍由服务端授权上下文裁剪。
+  return ['admin', 'system_admin', 'technical_director', 'business_admin', 'team_lead', 'project_manager', 'engineer', 'penetration_engineer']
+    .find((role) => roles.has(role)) || 'default'
+})
+
+const projectKpiCards = computed(() => {
+  const pendingProjectValue = dashboard.value.pending_project_creation_available ? dashboard.value.pending_project_creation : '—'
+  const catalog = {
+    all_projects: { key: 'all_projects', label: '全部项目', value: projects.value.length, suffix: '个', meta: projectCardRole.value === 'team_lead' ? '当前团队' : '当前授权范围', action: 'all' },
+    all_service_items: { key: 'all_service_items', label: '全部服务项', value: serviceItems.value.length, suffix: '项', meta: projectCardRole.value === 'project_manager' ? '分配给我的服务项' : '当前授权范围' },
+    pending_decomposition: { key: 'pending_decomposition', label: '待拆解确认', value: pendingDecompositionCount.value, suffix: '个', meta: '需业务管理员处理', tone: 'amber', action: 'decomposition' },
+    in_flight: { key: 'in_flight', label: '在途项目', value: inFlightProjects.value.length, suffix: '个', meta: '含实施中 / 报告编制', tone: 'blue', action: 'in_flight' },
+    completed: { key: 'completed', label: '已完成项目', value: doneProjectCount.value, suffix: '个', meta: '已完成交付', tone: 'green', action: 'completed' },
+    allocation_pending: { key: 'allocation_pending', label: '资源分配待办', value: inboxItems.value.length, suffix: '项', meta: '责任团队待补齐人员', tone: 'amber', action: 'allocation' },
+    risk: { key: 'risk', label: '风险项目', value: riskProjectCount.value, suffix: '个', meta: '含终止 / 超期', tone: 'red', action: 'risk' },
+    pending_creation: { key: 'pending_creation', label: '待新建项目', value: pendingProjectValue, suffix: dashboard.value.pending_project_creation_available ? '个' : '', meta: dashboard.value.pending_project_creation_available ? '合同流程已完成 · 尚未建项目' : '合同统计暂时不可用', tone: 'red', action: canCreateProject.value ? 'create' : '' },
+  }
+  const layouts = {
+    business_admin: ['pending_decomposition', 'in_flight', 'pending_creation'],
+    technical_director: ['all_projects', 'all_service_items', 'allocation_pending', 'risk', 'pending_creation'],
+    team_lead: ['all_projects', 'in_flight', 'completed', 'risk'],
+    project_manager: ['all_projects', 'all_service_items', 'risk'],
+    engineer: ['all_projects', 'in_flight', 'completed', 'risk'],
+    penetration_engineer: ['all_projects', 'in_flight', 'completed', 'risk'],
+    admin: ['all_projects', 'all_service_items', 'pending_decomposition', 'in_flight', 'completed', 'allocation_pending', 'risk', 'pending_creation'],
+    system_admin: ['all_projects', 'all_service_items', 'pending_decomposition', 'in_flight', 'completed', 'allocation_pending', 'risk'],
+    default: ['all_projects', 'in_flight', 'completed', 'risk'],
+  }
+  return layouts[projectCardRole.value].map((key) => catalog[key])
+})
+
+const projectCardFilterLabel = computed(() => ({ in_flight: '在途项目', risk: '风险项目' })[projectCardFilter.value] || '')
+function activateProjectKpi(card) {
+  if (!card.action) return
+  if (card.action === 'create') { openCreateProject(); return }
+  if (card.action === 'allocation') { navigate('inbox'); return }
+  projectCardFilter.value = ['in_flight', 'risk'].includes(card.action) ? card.action : ''
+  if (card.action === 'decomposition') statusFilter.value = '待拆解确认'
+  else if (card.action === 'completed') statusFilter.value = projectStatusCompleted
+  else statusFilter.value = ''
+}
 // 其余写操作入口同样用服务端同款权限码门控：只门控少数几个权限码时，
 // 未授权角色会看到自己无权执行的按钮，点击必然 403。
 const permissionSet = computed(() => new Set(Array.isArray(session.value?.permissions) ? session.value.permissions : []))
@@ -1350,9 +1422,23 @@ const operationRows = computed(() => ({
 }[activeSection.value] || []))
 
 const rules = ref([])
+function applicationRoleLabel(roleCode) {
+  const code = String(roleCode || '').trim()
+  return applicationRoles.value.find((role) => role.code === code)?.name || code || '—'
+}
+function permissionFieldLabel(fieldName) {
+  const name = String(fieldName || '').trim()
+  return fieldPermissionFieldLabel[name] || name || '—'
+}
 function decorateRule(rule) {
-  const targetRole = applicationRoles.value.find((role) => role.code === rule.target)
-  return { ...rule, resource_type_label: rule.check_type === 'PERSON' ? '人员资质' : rule.check_type === 'EQUIPMENT' ? '设备能力' : rule.check_type, target_label: targetRole?.name || rule.target }
+  return {
+    ...rule,
+    resource_type_label: rule.check_type === 'PERSON' ? '人员资质' : rule.check_type === 'EQUIPMENT' ? '设备能力' : rule.check_type,
+    target_label: applicationRoleLabel(rule.target),
+    role_label: applicationRoleLabel(rule.role_code),
+    field_label: permissionFieldLabel(rule.field_name),
+    access_level_label: fieldPermissionAccessLevelLabel[rule.access_level] || rule.access_level,
+  }
 }
 const visibleRules = computed(() => rules.value.filter((rule) => rule.kind === activeSection.value))
 
@@ -1562,7 +1648,7 @@ const permissionMatrix = computed(() => {
     rows: fields.map((field) => ({ field, cells: roles.map((role) => levelFor(field, role)) })),
   }
 })
-const permissionLevelLabel = { hidden: '隐藏', edit: '可编辑', view: '只读' }
+const permissionLevelLabel = fieldPermissionAccessLevelLabel
 const permissionLevelTone = { hidden: '风险', edit: '关注', view: 'normal' }
 
 const operationDetail = ref(null)
@@ -2720,21 +2806,29 @@ onBeforeUnmount(() => {
 
         <template v-else-if="activeSection === 'projects'">
           <section class="pm-kpi-row">
-            <button type="button" class="pm-kpi" @click="statusFilter = ''"><div class="pm-kpi-label"><span>全部项目</span></div><strong class="pm-kpi-value">{{ projects.length }}<small>个</small></strong><p class="pm-kpi-meta">当前租户 · 实时</p></button>
-            <button type="button" class="pm-kpi amber" @click="statusFilter = '待拆解确认'"><div class="pm-kpi-label"><span>待拆解确认</span></div><strong class="pm-kpi-value">{{ pendingDecompositionCount }}<small>个</small></strong><p class="pm-kpi-meta">需业务管理员处理</p></button>
-            <button type="button" class="pm-kpi blue" @click="statusFilter = ''"><div class="pm-kpi-label"><span>在途项目</span></div><strong class="pm-kpi-value">{{ inFlightProjects.length }}<small>个</small></strong><p class="pm-kpi-meta">含实施中 / 报告编制</p></button>
-            <button type="button" class="pm-kpi green" @click="statusFilter = '已完成'"><div class="pm-kpi-label"><span>已完成</span></div><strong class="pm-kpi-value">{{ doneProjectCount }}<small>个</small></strong><p class="pm-kpi-meta">已完成交付</p></button>
-            <button v-if="canCreateProject" type="button" class="pm-kpi red" @click="openCreateProject"><div class="pm-kpi-label"><span>待新建项目</span></div><strong class="pm-kpi-value">{{ dashboard.pending_project_creation_available ? dashboard.pending_project_creation : '—' }}<small v-if="dashboard.pending_project_creation_available">个</small></strong><p class="pm-kpi-meta">{{ dashboard.pending_project_creation_available ? '合同流程已完成 · 尚未建项目' : '合同统计暂时不可用' }}</p></button>
-            <button v-else type="button" class="pm-kpi red" @click="navigate('monitoring')"><div class="pm-kpi-label"><span>风险项目</span></div><strong class="pm-kpi-value">{{ riskProjectCount }}<small>个</small></strong><p class="pm-kpi-meta">含终止 / 超期</p></button>
+            <component
+              :is="card.action ? 'button' : 'article'"
+              v-for="card in projectKpiCards"
+              :key="card.key"
+              :type="card.action ? 'button' : undefined"
+              class="pm-kpi"
+              :class="card.tone"
+              @click="activateProjectKpi(card)"
+            >
+              <div class="pm-kpi-label"><span>{{ card.label }}</span></div>
+              <strong class="pm-kpi-value">{{ card.value }}<small v-if="card.suffix">{{ card.suffix }}</small></strong>
+              <p class="pm-kpi-meta">{{ card.meta }}</p>
+            </component>
           </section>
           <section class="pm-search-bar">
             <label class="pm-search-input"><ConsoleIcon name="search" /><input v-model="keyword" placeholder="搜索项目编号 / 客户名称 / 服务项" aria-label="搜索项目" /></label>
-            <select v-model="statusFilter" class="pm-filter-select" aria-label="按状态筛选"><option value="">状态：全部</option><option v-for="node in projectStatusFilters" :key="node" :value="node">{{ node }}</option></select>
+            <select v-model="statusFilter" class="pm-filter-select" aria-label="按状态筛选" @change="projectCardFilter = ''"><option value="">状态：全部</option><option v-for="node in projectStatusFilters" :key="node" :value="node">{{ node }}</option></select>
             <select v-model="categoryFilter" class="pm-filter-select" aria-label="按检测类别筛选"><option value="">检测类别：全部</option><option v-for="option in categoryOptions" :key="option" :value="option">{{ option }}</option></select>
             <select v-model="teamFilter" class="pm-filter-select" aria-label="按团队筛选"><option value="">团队：全部</option><option v-for="option in teamOptions" :key="option" :value="option">{{ option }}</option></select>
             <span v-if="statusFilter" class="pm-filter-tag">状态：{{ statusFilter }}<button type="button" class="pm-filter-tag-x" :aria-label="`移除状态筛选 ${statusFilter}`" @click="statusFilter = ''">✕</button></span>
             <span v-if="categoryFilter" class="pm-filter-tag">类别：{{ categoryFilter }}<button type="button" class="pm-filter-tag-x" :aria-label="`移除类别筛选 ${categoryFilter}`" @click="categoryFilter = ''">✕</button></span>
             <span v-if="teamFilter" class="pm-filter-tag">团队：{{ teamFilter }}<button type="button" class="pm-filter-tag-x" :aria-label="`移除团队筛选 ${teamFilter}`" @click="teamFilter = ''">✕</button></span>
+            <span v-if="projectCardFilterLabel" class="pm-filter-tag">范围：{{ projectCardFilterLabel }}<button type="button" class="pm-filter-tag-x" :aria-label="`移除范围筛选 ${projectCardFilterLabel}`" @click="projectCardFilter = ''">✕</button></span>
             <div class="pm-actions-row"><button class="pm-button ghost" @click="resetProjectFilters">重置</button><span class="pm-filter-count">{{ filteredProjects.length }} 条结果</span></div>
           </section>
           <section class="pm-table-panel">
@@ -3041,7 +3135,7 @@ onBeforeUnmount(() => {
           <section v-if="activeSection === 'sla'" class="pm-alert info"><i></i><b>SLA 口径说明</b><span>状态 SLA 按「服务项停留在该状态的时长」判定（每次状态推进刷新计时）：超过时限记为超期，剩余时间不足提前提醒小时数记为临近提醒；计划完成时间超期作为独立口径在服务项列表单独统计。</span></section>
           <section v-if="activeSection === 'permissions' && permissionMatrix.rows.length" class="pm-table-panel">
             <header><div><p class="pm-panel-kicker">ACCESS MATRIX</p><h2>字段 × 角色 访问矩阵</h2></div><span>{{ permissionMatrix.rows.length }} 个受控字段 · {{ permissionMatrix.roles.length }} 个角色</span></header>
-            <div class="pm-matrix-wrap"><table class="pm-matrix"><thead><tr><th>字段 ↓ \ 角色 →</th><th v-for="role in permissionMatrix.roles" :key="role">{{ role }}</th></tr></thead><tbody><tr v-for="row in permissionMatrix.rows" :key="row.field"><td class="mono">{{ row.field }}</td><td v-for="(cell, index) in row.cells" :key="`${row.field}-${permissionMatrix.roles[index]}`"><span v-if="cell" class="pm-badge" :class="permissionLevelTone[cell] || 'neutral'">{{ permissionLevelLabel[cell] || cell }}</span><span v-else class="pm-matrix-empty">未配置</span></td></tr></tbody></table></div>
+            <div class="pm-matrix-wrap"><table class="pm-matrix"><thead><tr><th>字段 ↓ \ 角色 →</th><th v-for="role in permissionMatrix.roles" :key="role">{{ applicationRoleLabel(role) }}</th></tr></thead><tbody><tr v-for="row in permissionMatrix.rows" :key="row.field"><td>{{ permissionFieldLabel(row.field) }}</td><td v-for="(cell, index) in row.cells" :key="`${row.field}-${permissionMatrix.roles[index]}`"><span v-if="cell" class="pm-badge" :class="permissionLevelTone[cell] || 'neutral'">{{ permissionLevelLabel[cell] || cell }}</span><span v-else class="pm-matrix-empty">未配置</span></td></tr></tbody></table></div>
           </section>
           <section class="pm-config-layout"><aside class="pm-config-note"><span><ConsoleIcon name="info" /></span><h2>{{ isStandardChangeSection ? '评估流程' : '生效范围' }}</h2><template v-if="isStandardChangeSection"><p>登记标准变化与影响范围，核对在途项目、检测方法和报告模板，处置完成后将记录归档。</p><ul><li>评估中：尚有影响待确认或待处置</li><li>已归档：影响核对和处置均已完成</li><li>历史记录用于追溯，不会自动改写已有项目</li></ul></template><template v-else><p>{{ activeConfigMeta.effectNote || currentMeta[1] }}</p><ul><li>配置修改需业务管理员权限</li><li>创建、更新和重新启用执行相同校验</li><li>关闭规则前请确认影响范围</li></ul></template></aside><article class="pm-table-panel"><header class="pm-filter-bar"><div v-if="!isStandardChangeSection" class="pm-sm-tabs"><button v-for="meta in visibleConfigKinds" :key="meta.kind" type="button" class="pm-tab-pill" :class="{ active: activeSection === meta.kind }" @click="navigate(meta.kind)">{{ meta.label }}</button></div><div v-else><b>标准变更评估清单</b></div><span class="pm-filter-count">{{ activeConfigMeta.label }} 共 {{ visibleRules.length }} 条</span></header><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>{{ isStandardChangeSection ? '标准 / 方法名称' : '配置名称' }}</th><th v-for="column in activeConfigMeta.columns" :key="column.key">{{ column.label }}</th><th>状态</th><th>最后更新</th><th></th></tr></thead><tbody><tr v-for="rule in visibleRules" :key="rule.id"><td><b>{{ rule.name }}</b></td><td v-for="column in activeConfigMeta.columns" :key="column.key">{{ rule[column.key] !== undefined && rule[column.key] !== '' ? rule[column.key] : '—' }}</td><td><template v-if="isStandardChangeSection"><span class="pm-badge" :class="rule.enabled ? 'amber' : 'neutral'">{{ rule.enabled ? '评估中' : '已归档' }}</span><button v-if="canManageRules" class="pm-link" :disabled="saving" @click="toggleRule(rule)">{{ rule.enabled ? '完成并归档' : '恢复评估' }}</button></template><button v-else-if="canManageRules" class="pm-switch" :class="{ on: rule.enabled }" :aria-label="`${rule.enabled ? '停用' : '启用'} ${rule.name}`" @click="toggleRule(rule)"><i></i></button><span v-else class="pm-badge" :class="rule.enabled ? 'normal' : 'neutral'">{{ rule.enabled ? '已启用' : '已停用' }}</span></td><td>{{ rule.updated }}</td><td><button v-if="canManageRules" class="pm-link" @click="openConfigEdit(rule)">编辑</button><button v-if="canManageRules" class="pm-link pm-text-danger" :disabled="saving" @click="removeConfigRule(rule)">删除</button></td></tr></tbody></table></div><div v-if="!visibleRules.length" class="pm-empty"><ConsoleIcon name="info" /><b>{{ isStandardChangeSection ? '暂无标准变更记录' : '暂无配置规则' }}</b><span>{{ isStandardChangeSection ? '发生标准或检测方法变更时，点击“登记标准变更”开始影响评估。' : `点击“新建规则”添加 ${activeConfigMeta.label} 配置。` }}</span></div></article></section>
         </template>
@@ -3115,6 +3209,12 @@ onBeforeUnmount(() => {
               <span>{{ field.label }} <em v-if="field.required">*</em></span>
               <SearchableSelect v-model="configForm.role_codes" :options="configRoleOptions" value-key="code" label-key="name" placeholder="请选择角色（可多选）" search-placeholder="搜索角色名称或编码" :empty-text="applicationRolesError || '暂无匹配角色'" aria-label="选择字段级权限角色" menu-z-index="calc(var(--pm-z-modal, 50) + 1)" multiple required />
               <p v-if="configRoleSelection.length > 1" class="pm-form-hint">已选 {{ configRoleSelection.length }} 个角色，保存后每个角色各生成一条规则。</p>
+              <p v-else-if="applicationRolesError" class="pm-form-hint" role="alert">{{ applicationRolesError }}</p>
+            </div>
+            <div v-else-if="field.field === 'automation-roles'" class="pm-field pm-span-full">
+              <span>{{ field.label }} <em>*</em></span>
+              <SearchableSelect v-model="configForm.targets" :options="configRoleOptions" value-key="code" label-key="name" placeholder="请选择通知角色（可多选）" search-placeholder="搜索角色名称或编码" :empty-text="applicationRolesError || '暂无匹配角色'" aria-label="选择自动化通知角色" menu-z-index="calc(var(--pm-z-modal, 50) + 1)" multiple required @change="onConfigFieldChange(field, $event)" />
+              <p v-if="configAutomationRoleSelection.length > 1" class="pm-form-hint">已选 {{ configAutomationRoleSelection.length }} 个通知角色，保存后每个角色各生成一条自动化规则。</p>
               <p v-else-if="applicationRolesError" class="pm-form-hint" role="alert">{{ applicationRolesError }}</p>
             </div>
             <div v-else-if="field.field === 'role'" class="pm-field pm-span-full">

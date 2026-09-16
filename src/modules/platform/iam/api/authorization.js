@@ -129,7 +129,13 @@ export function getApplicationAccess(userId, applicationCode) {
 export function getAuthorizationOverview(userId) {
   return request(`/people/${encodeURIComponent(userId)}/authorization-overview`).then((value) => ({
     user: value?.user || null,
-    accounts: Array.isArray(value?.accounts) ? value.accounts : [],
+    accounts: Array.isArray(value?.accounts) ? value.accounts.map((account) => ({
+      ...account,
+      // 该汇总接口直接读取 iam_account，字段名是 id/username；IAM 管理接口则使用
+      // account_id/account_name。详情页统一为管理模型，避免把数据库字段差异泄漏到 UI。
+      account_id: account?.account_id || account?.id || '',
+      account_name: account?.account_name || account?.username || account?.account_id || account?.id || '',
+    })) : [],
     memberships: Array.isArray(value?.memberships) ? value.memberships : [],
     role_bindings: Array.isArray(value?.role_bindings) ? value.role_bindings : [],
     pending_changes: Array.isArray(value?.pending_changes) ? value.pending_changes : [],

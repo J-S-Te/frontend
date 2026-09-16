@@ -18,3 +18,10 @@ test('基础平台用户模块展示并导出脱敏手机号', () => {
 test('新增员工表单使用明确的手机号字段名称', () => {
   assert.match(onboarding, /<span>手机号<\/span><input v-model="form\.mobile"/)
 })
+
+test('密码重置入口位于用户详情并明确展示用户名', () => {
+  assert.match(view, /<h4>登录账号与口令<\/h4>/)
+  assert.match(view, /<span>用户名<\/span><strong>\{\{ account\.account_name \|\| '—' \}\}<\/strong>/)
+  assert.match(view, /@click="openPasswordResetFromUserDetail\(account\)"/)
+  assert.doesNotMatch(view, /@click="openPasswordResetForAccount\(item\)"/)
+})

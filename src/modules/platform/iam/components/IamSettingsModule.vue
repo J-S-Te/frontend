@@ -79,6 +79,7 @@ import {
 import { loadAllCatalogPages } from '@/modules/platform/iam/utils/paginatedCatalog'
 import { buildUserAuthorizationOverview } from '@/modules/platform/iam/utils/userAuthorizationOverview'
 import { isCurrentAuthorizationRequest } from '@/modules/platform/iam/utils/requestVersion'
+import { copyTextToClipboard } from '@/modules/shared/utils/clipboard'
 import {
   hasAnyPermission,
   hasPermission,
@@ -1137,24 +1138,14 @@ function resetFilters() {
 }
 
 async function copyText(value, { success = '已复制' } = {}) {
-  if (!value) return
+  if (!value) return false
   try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(value)
-    } else {
-      // 退化：选中文本 + execCommand。HTTP 站点 clipboard 不可用时仍可工作。
-      const textarea = document.createElement('textarea')
-      textarea.value = value
-      textarea.style.position = 'fixed'
-      textarea.style.opacity = '0'
-      document.body.appendChild(textarea)
-      textarea.select()
-      document.execCommand('copy')
-      document.body.removeChild(textarea)
-    }
+    await copyTextToClipboard(value)
     emitToast(success)
+    return true
   } catch {
     emitToast('复制失败，请手动选中复制。')
+    return false
   }
 }
 
@@ -1571,13 +1562,19 @@ async function toggleAccountStatus(account) {
   }
 }
 
-// 密码重置以 account_id 为键。从用户行发起时先用 user_id 解析关联账号，绝不能重置无关登录账号。
-function openPasswordResetForAccount(account) {
+// 密码重置始终以用户详情中选定的 account_id 为键；多账号用户必须逐个明确操作，
+// 不能仅凭姓名或 user_id 猜测目标登录账号。
+function openPasswordResetForAccount(account, userName = '') {
   if (!account?.account_id) {
     emitToast('未找到可重置密码的登录账号。')
     return
   }
-  passwordResetDialog.value = { accountId: account.account_id, accounts: [account], userName: '', initialize: account.password_initialized === false }
+  passwordResetDialog.value = { accountId: account.account_id, accounts: [account], userName, initialize: account.password_initialized === false }
+}
+
+function openPasswordResetFromUserDetail(account) {
+  if (!isUserAuthorizationSubject.value) return
+  openPasswordResetForAccount(account, detail.value?.item?.display_name || detail.value?.item?.name || '')
 }
 
 function closePasswordResetDialog() {
@@ -1603,7 +1600,11 @@ async function confirmPasswordReset() {
       value: result.temporary_password,
       initialized: initializing,
     }
-    await loadAccounts()
+    const userId = detail.value?.kind === 'user' ? detail.value.item?.user_id : ''
+    await Promise.all([
+      loadAccounts(),
+      userId ? loadAuthorizationOverview(userId, detailAuthorizationRequestSeq.value) : Promise.resolve(),
+    ])
     emitToast(initializing ? '登录密码已初始化，请立即复制并通过安全渠道交付。' : '密码已重置，请立即复制临时密码并通过安全渠道交付。')
   } catch (error) {
     emitToast(error instanceof IamError ? error.message : (error?.message || '密码重置失败。'))
@@ -1615,12 +1616,7 @@ async function confirmPasswordReset() {
 async function copyTemporaryPassword() {
   const value = temporaryPassword.value?.value
   if (!value) return
-  try {
-    await navigator.clipboard.writeText(value)
-    emitToast('临时密码已复制，请立即通过安全渠道交付。')
-  } catch {
-    emitToast('浏览器未允许复制，请手动复制临时密码。')
-  }
+  await copyText(value, { success: '临时密码已复制，请立即通过安全渠道交付。' })
 }
 
 // 临时密码揭示状态：默认遮罩，避免屏幕共享/截屏/拼写补全等渠道意外泄露。
@@ -2205,7 +2201,7 @@ onBeforeUnmount(() => {
         </header>
 
         <p v-if="activePanel === 'users'" class="iam-panel-policy-note"><ConsoleIcon name="info" /><span><strong>用户与人员一一对应：</strong>“新增员工”必须同时建立任职关系；用户列表只展示已具备任职关系的人员。登录账号仍可单独补建。</span></p>
-        <p v-else-if="activePanel === 'accounts'" class="iam-panel-policy-note"><ConsoleIcon name="info" /><span><strong>账号只负责认证：</strong>不提供账号级角色授权入口；新增员工请使用统一流程，“补建登录账号”仅用于修复缺失凭证，已有账号可在此维护状态、密码与有效期。</span></p>
+        <p v-else-if="activePanel === 'accounts'" class="iam-panel-policy-note"><ConsoleIcon name="info" /><span><strong>账号只负责认证：</strong>不提供账号级角色授权入口；此处维护账号状态与有效期，密码初始化或重置请进入关联用户的“用户详情”办理。</span></p>
         <p v-else-if="activePanel === 'organizations'" class="iam-panel-policy-note"><ConsoleIcon name="info" /><span><strong>组织只表达人员归属：</strong>应用角色请配置到岗位授权模板。组织详情仅展示并允许清理历史直绑，不允许新增或修改。</span></p>
         <p v-else-if="activePanel === 'positions'" class="iam-panel-policy-note"><ConsoleIcon name="info" /><span><strong>岗位表达职责：</strong>岗位与应用角色的标准映射统一在“岗位授权模板”维护。岗位详情仅用于清理历史直绑。</span></p>
         <p v-else-if="activePanel === 'memberships'" class="iam-panel-policy-note"><ConsoleIcon name="info" /><span><strong>任职连接人员与职责：</strong>开启“参与岗位授权继承”后，用户会动态获得该岗位授权模板中的标准角色。</span></p>
@@ -2226,7 +2222,7 @@ onBeforeUnmount(() => {
             <thead><tr><th>登录账号</th><th>关联用户</th><th>认证方式</th><th>有效时间</th><th>状态</th><th>更新时间</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
             <tr v-if="loading.accounts"><td class="console-empty" data-empty="true" colspan="7">正在读取登录账号…</td></tr>
             <tr v-else-if="!filteredAccounts.length"><td class="console-empty" colspan="7">暂无登录账号记录。新增员工请使用统一流程；如用户档案已存在，可点击右上角“补建登录账号”。</td></tr>
-            <tr v-for="item in filteredAccounts" :key="item.account_id"><td data-label="登录账号"><div class="iam-account-identity"><span class="iam-account-avatar">{{ (item.account_name || '?').slice(0, 1).toUpperCase() }}</span><span><strong :title="item.account_name || ''">{{ item.account_name }}</strong></span></div></td><td data-label="关联用户"><span class="iam-linked-user" :title="`${item.user?.display_name || item.user?.name || '—'}${item.user_id ? `（${item.user_id}）` : ''}`"><ConsoleIcon name="user" /><span class="iam-linked-user-name">{{ item.user?.display_name || item.user?.name || '—' }}</span></span></td><td data-label="认证方式"><div class="iam-auth-tags"><span class="iam-type-tag">{{ displayLoginAccountType(item).split(' / ')[0] }}</span><span class="iam-source-tag">{{ displayLoginAccountType(item).split(' / ')[1] }}</span><span v-if="item.password_initialized === false" class="iam-source-tag">待初始化密码</span></div></td><td data-label="有效时间"><div class="iam-validity"><span class="iam-validity-chip" :class="item.valid_until ? 'is-temporary' : 'is-permanent'">{{ item.valid_until ? '临时账号' : '永久账号' }}</span><small>{{ item.valid_until ? formatDateTime(item.valid_until) : '长期有效' }}</small></div></td><td data-label="状态"><span class="console-badge" :class="effectiveAccountStatus(item) === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(effectiveAccountStatus(item)) }}</span></td><td data-label="更新时间" class="console-mono iam-account-updated">{{ formatDateTime(item.updated_at) }}</td><td data-label="操作" class="console-actions-cell iam-account-actions"><button class="console-text-button" type="button" @click="openDetail('account', item)">详情</button><button v-if="isAccountStatusManageable(effectiveAccountStatus(item)) && hasPermission(IAM_PERMISSIONS.accountUpdate)" class="console-text-button" :class="{ danger: effectiveAccountStatus(item) === 'ACTIVE' }" type="button" :disabled="updatingAccountId === item.account_id" @click="toggleAccountStatus(item)">{{ updatingAccountId === item.account_id ? '处理中…' : (effectiveAccountStatus(item) === 'ACTIVE' ? '停用' : '启用') }}</button><button v-if="hasPermission(IAM_PERMISSIONS.accountPasswordReset)" class="console-text-button danger" type="button" @click="openPasswordResetForAccount(item)">{{ item.password_initialized === false ? '初始化密码' : '重置密码' }}</button></td></tr>
+            <tr v-for="item in filteredAccounts" :key="item.account_id"><td data-label="登录账号"><div class="iam-account-identity"><span class="iam-account-avatar">{{ (item.account_name || '?').slice(0, 1).toUpperCase() }}</span><span><strong :title="item.account_name || ''">{{ item.account_name }}</strong></span></div></td><td data-label="关联用户"><span class="iam-linked-user" :title="`${item.user?.display_name || item.user?.name || '—'}${item.user_id ? `（${item.user_id}）` : ''}`"><ConsoleIcon name="user" /><span class="iam-linked-user-name">{{ item.user?.display_name || item.user?.name || '—' }}</span></span></td><td data-label="认证方式"><div class="iam-auth-tags"><span class="iam-type-tag">{{ displayLoginAccountType(item).split(' / ')[0] }}</span><span class="iam-source-tag">{{ displayLoginAccountType(item).split(' / ')[1] }}</span><span v-if="item.password_initialized === false" class="iam-source-tag">待初始化密码</span></div></td><td data-label="有效时间"><div class="iam-validity"><span class="iam-validity-chip" :class="item.valid_until ? 'is-temporary' : 'is-permanent'">{{ item.valid_until ? '临时账号' : '永久账号' }}</span><small>{{ item.valid_until ? formatDateTime(item.valid_until) : '长期有效' }}</small></div></td><td data-label="状态"><span class="console-badge" :class="effectiveAccountStatus(item) === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(effectiveAccountStatus(item)) }}</span></td><td data-label="更新时间" class="console-mono iam-account-updated">{{ formatDateTime(item.updated_at) }}</td><td data-label="操作" class="console-actions-cell iam-account-actions"><button class="console-text-button" type="button" @click="openDetail('account', item)">详情</button><button v-if="isAccountStatusManageable(effectiveAccountStatus(item)) && hasPermission(IAM_PERMISSIONS.accountUpdate)" class="console-text-button" :class="{ danger: effectiveAccountStatus(item) === 'ACTIVE' }" type="button" :disabled="updatingAccountId === item.account_id" @click="toggleAccountStatus(item)">{{ updatingAccountId === item.account_id ? '处理中…' : (effectiveAccountStatus(item) === 'ACTIVE' ? '停用' : '启用') }}</button></td></tr>
           </tbody></table></div></div>
         </section>
 
@@ -2305,6 +2301,20 @@ onBeforeUnmount(() => {
             <div><span>{{ row.label }}</span><strong>{{ row.value }}</strong></div>
           </template>
         </div>
+        <section v-if="isUserAuthorizationSubject" class="iam-detail-section iam-user-account-section">
+          <div class="iam-detail-section-head"><div><h4>登录账号与口令</h4><p>用户名用于登录基础平台；密码初始化与重置统一在用户详情中办理。</p></div></div>
+          <p v-if="authorizationOverviewLoading" class="iam-empty-inline">正在读取登录账号…</p>
+          <p v-else-if="authorizationOverviewUnavailable" class="iam-empty-inline">登录账号暂不可用，请稍后重试。</p>
+          <p v-else-if="!authorizationOverview?.accounts.length" class="iam-empty-inline">该用户尚未关联登录账号，请先在“登录账号”页面补建账号。</p>
+          <div v-else class="iam-user-account-list">
+            <article v-for="account in authorizationOverview.accounts" :key="account.account_id" class="iam-user-account-card">
+              <div class="iam-user-account-name"><span>用户名</span><strong>{{ account.account_name || '—' }}</strong><small class="console-mono">账号 ID：{{ account.account_id || '—' }}</small></div>
+              <div class="iam-user-account-meta"><span class="console-badge" :class="effectiveAccountStatus(account) === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(effectiveAccountStatus(account)) }}</span><small>{{ displayLoginAccountType(account) }} · {{ account.valid_until ? `有效至 ${formatDateTime(account.valid_until)}` : '长期有效' }}</small></div>
+              <button v-if="hasPermission(IAM_PERMISSIONS.accountPasswordReset)" class="console-button danger small" type="button" @click="openPasswordResetFromUserDetail(account)">{{ account.password_initialized === false ? '初始化密码' : '重置密码' }}</button>
+            </article>
+          </div>
+          <p v-if="authorizationOverview?.accounts.length && !hasPermission(IAM_PERMISSIONS.accountPasswordReset)" class="iam-field-help" role="status">当前账号只有查看权限，缺少“重置账号密码”权限。</p>
+        </section>
         <section v-if="isUserAuthorizationSubject" class="iam-detail-section iam-person-authorization-summary">
           <div class="iam-detail-section-head"><div><h4>人员状态与交接摘要</h4><p>账号、任职、待处理异动、业务交接和 Keycloak 同步状态均来自基础平台只读汇总接口。</p></div></div>
           <p v-if="authorizationOverviewLoading" class="iam-empty-inline">正在读取人员状态摘要…</p>

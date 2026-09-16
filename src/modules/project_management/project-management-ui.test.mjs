@@ -771,14 +771,21 @@ test('项目健康度字段已移除，风险项目改由服务端派生口径�
   assert.doesNotMatch(source, /riskProjectStatuses/)
 })
 
-test('业务管理员项目列表展示合同流程完成但尚未建项目的准确统计', () => {
+test('项目列表卡片按角色职责展示并使用服务端裁剪后的统计口径', () => {
   assert.match(source, /pending_project_creation: 0, pending_project_creation_available: false/)
-  assert.match(source, /v-if="canCreateProject" type="button" class="pm-kpi red" @click="openCreateProject"/)
-  assert.match(source, /<span>待新建项目<\/span>/)
-  assert.match(source, /dashboard\.pending_project_creation_available \? dashboard\.pending_project_creation : '—'/)
+  assert.match(source, /business_admin: \['pending_decomposition', 'in_flight', 'pending_creation'\]/)
+  assert.match(source, /technical_director: \['all_projects', 'all_service_items', 'allocation_pending', 'risk', 'pending_creation'\]/)
+  assert.match(source, /team_lead: \['all_projects', 'in_flight', 'completed', 'risk'\]/)
+  assert.match(source, /project_manager: \['all_projects', 'all_service_items', 'risk'\]/)
+  assert.match(source, /engineer: \['all_projects', 'in_flight', 'completed', 'risk'\]/)
+  assert.match(source, /penetration_engineer: \['all_projects', 'in_flight', 'completed', 'risk'\]/)
+  assert.match(source, /label: '资源分配待办', value: inboxItems\.value\.length/)
+  assert.match(source, /label: '全部服务项', value: serviceItems\.value\.length/)
+  assert.match(source, /dashboard\.value\.pending_project_creation_available \? dashboard\.value\.pending_project_creation : '—'/)
   assert.match(source, /合同流程已完成 · 尚未建项目/)
-  // 非项目创建角色仍保留原风险入口，避免改变项目经理等角色的列表能力。
-  assert.match(source, /v-else type="button" class="pm-kpi red" @click="navigate\('monitoring'\)"/)
+  // 技术总监只能看统计，项目创建入口仍由 canCreateProject 单独决定。
+  assert.match(source, /action: canCreateProject\.value \? 'create' : ''/)
+  assert.match(source, /v-for="card in projectKpiCards"/)
 })
 
 test('实施计划提交人员清单，设备清单在实施准备登记并校验占用', () => {
@@ -893,7 +900,7 @@ test('项目表提供真实分页控件', () => {
   assert.match(source, /const pagedProjects = computed/)
   assert.match(source, /v-for="project in pagedProjects"/)
   // 筛选变化后回到第一页，避免停在越界页码看到空表。
-  assert.match(source, /watch\(\[keyword, statusFilter, categoryFilter, teamFilter\], \(\) => \{ projectPage\.value = 1 \}\)/)
+  assert.match(source, /watch\(\[keyword, statusFilter, categoryFilter, teamFilter, projectCardFilter\], \(\) => \{ projectPage\.value = 1 \}\)/)
   assert.match(source, /:disabled="projectPage <= 1" @click="gotoProjectPage\(projectPage - 1\)"/)
   assert.match(source, /:disabled="projectPage >= projectPageCount" @click="gotoProjectPage\(projectPage \+ 1\)"/)
 })
@@ -1008,7 +1015,7 @@ test('字段级权限的角色是服务端目录驱动的多选下拉，多选�
   assert.match(source, /v-if="field\.field === 'roles'" class="pm-field pm-span-full"/)
   // 默认多选：新建时选中值为数组，不要求按住 ⌘/Ctrl 加选。
   assert.match(source, /function defaultConfigFieldValue\(field\)/)
-  assert.match(source, /if \(field\.field === 'roles'\) return \[\]/)
+  assert.match(source, /if \(field\.field === 'roles' \|\| field\.field === 'automation-roles'\) return \[\]/)
   assert.match(source, /<SearchableSelect v-model="configForm\.role_codes" :options="configRoleOptions" value-key="code" label-key="name"/)
   assert.match(source, /placeholder="请选择角色（可多选）" search-placeholder="搜索角色名称或编码"/)
   assert.match(source, /aria-label="选择字段级权限角色" menu-z-index="calc\(var\(--pm-z-modal, 50\) \+ 1\)" multiple required/)
@@ -1028,6 +1035,18 @@ test('字段级权限的角色是服务端目录驱动的多选下拉，多选�
   assert.match(source, /showToast\('请至少选择一个角色', 'warning'\)/)
   // 逐条回填列表：中途失败也能看到已生效的规则，重试不会留下看不到的重复规则。
   assert.match(source, /applySavedRule\(saved\)\n        created\.push\(saved\)/)
+})
+
+test('字段级权限列表和矩阵将角色、字段与访问级别显示为中文', () => {
+  const permissionMeta = source.slice(source.indexOf("{ kind: 'permissions'"), source.indexOf("{ kind: 'sla'"))
+  assert.match(permissionMeta, /columns: \[\{ key: 'role_label', label: '角色' \}, \{ key: 'field_label', label: '字段' \}, \{ key: 'access_level_label', label: '访问级别' \}\]/)
+  assert.match(source, /const fieldPermissionFieldLabel = Object\.freeze\(Object\.fromEntries\(fieldPermissionFieldOptions\.map/)
+  assert.match(source, /const fieldPermissionAccessLevelLabel = Object\.freeze\(\{ hidden: '隐藏', edit: '可编辑', view: '只读' \}\)/)
+  assert.match(source, /role_label: applicationRoleLabel\(rule\.role_code\)/)
+  assert.match(source, /field_label: permissionFieldLabel\(rule\.field_name\)/)
+  assert.match(source, /access_level_label: fieldPermissionAccessLevelLabel\[rule\.access_level\]/)
+  assert.match(source, /\{\{ applicationRoleLabel\(role\) \}\}/)
+  assert.match(source, /\{\{ permissionFieldLabel\(row\.field\) \}\}/)
 })
 
 test('字段级权限只能从有效字段白名单选择且仅开放真实生效的隐藏级别', () => {
@@ -1076,10 +1095,16 @@ test('自动化、SLA、字段权限和能力编码使用服务端目录及真�
 
   const automationMeta = source.slice(source.indexOf("{ kind: 'automations'"), source.indexOf("{ kind: 'permissions'"))
   assert.match(automationMeta, /field: 'catalog-single'.*options: automationTriggerOptions\.value/)
-  assert.match(automationMeta, /key: 'target'.*field: 'role'/)
+  assert.match(automationMeta, /key: 'targets'.*field: 'automation-roles'/)
   assert.match(automationMeta, /当前唯一动作是按项目角色发送站内通知，不创建工单或调用外部系统/)
-  assert.match(source, /field\.field === 'role'/)
-  assert.match(source, /请选择项目系统角色作为通知目标/)
+  assert.match(source, /field\.field === 'automation-roles'/)
+  assert.match(source, /v-model="configForm\.targets"[\s\S]*placeholder="请选择通知角色（可多选）"/)
+  assert.match(source, /aria-label="选择自动化通知角色"[\s\S]*multiple required/)
+  assert.match(source, /configForm\.value\.targets = rule\.target \? \[rule\.target\] : \[\]/)
+  assert.match(source, /请至少选择一个通知角色/)
+  assert.match(source, /for \(const \[index, target\] of automationTargets\.entries\(\)\)/)
+  assert.match(source, /const body = \{ \.\.\.payload, target \}/)
+  assert.match(source, /每个通知角色一条/)
 
   const slaMeta = source.slice(source.indexOf("{ kind: 'sla'"), source.indexOf('// 字段级权限规则由独立权限把关'))
   assert.match(slaMeta, /key: 'status'.*field: 'catalog-single'.*options: slaStatusOptions\.value/)
