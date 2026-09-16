@@ -17,7 +17,7 @@ test('authorization overview normalizes account, change, handover and Keycloak s
       status: 200,
       headers: { get: () => 'application/json' },
       json: async () => ({ data: {
-        user: { id: 'u-1' }, accounts: [{ status: 'ACTIVE' }], memberships: [{ status: 'ACTIVE' }],
+        user: { id: 'u-1' }, accounts: [{ id: 'account-1', username: 'zhang.san', status: 'ACTIVE' }], memberships: [{ status: 'ACTIVE' }],
         role_bindings: [{ role_id: 'r-1' }], pending_changes: [{ status: 'SCHEDULED' }],
         handover: [{ status: 'PENDING', system_code: 'customer_and_opportunity' }],
         keycloak_sync: [{ status: 'PENDING' }],
@@ -28,6 +28,8 @@ test('authorization overview normalizes account, change, handover and Keycloak s
   const result = await getAuthorizationOverview('u / 1')
   assert.equal(requested, '/api/v1/people/u%20%2F%201/authorization-overview')
   assert.equal(result.accounts.length, 1)
+  assert.equal(result.accounts[0].account_id, 'account-1')
+  assert.equal(result.accounts[0].account_name, 'zhang.san')
   assert.equal(result.memberships.length, 1)
   assert.equal(result.role_bindings.length, 1)
   assert.equal(result.pending_changes[0].status, 'SCHEDULED')

@@ -838,6 +838,24 @@
 .iam-user-detail-modal .iam-detail-section { padding: 18px 20px; margin-top: 16px; border: 1px solid var(--line-1); border-radius: 16px; background: var(--surface); }
 .iam-user-detail-modal .iam-detail-section + .iam-detail-section { margin-top: 14px; }
 .iam-user-detail-modal > footer { background: var(--surface); }
+.iam-user-account-list { display: grid; gap: 10px; margin-top: 12px; }
+.iam-user-account-card {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.2fr) minmax(200px, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-2);
+  background: var(--surface-1);
+}
+.iam-user-account-name,
+.iam-user-account-meta { display: grid; min-width: 0; gap: 4px; }
+.iam-user-account-name > span,
+.iam-user-account-name > small,
+.iam-user-account-meta > small { color: var(--ink-3); font-size: 12px; }
+.iam-user-account-name > strong { overflow: hidden; color: var(--ink-1); text-overflow: ellipsis; white-space: nowrap; }
+.iam-user-account-meta > .console-badge { justify-self: start; }
 .iam-detail-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2205,6 +2223,8 @@
   .iam-user-detail-hero { align-items: flex-start; margin: 14px 18px 0; padding: 16px; }
   .iam-user-detail-hero-note { display: none; }
   .iam-user-detail-modal .iam-detail-section { margin-right: 18px; margin-left: 18px; padding: 15px; }
+  .iam-user-account-card { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .iam-user-account-card > .console-button { justify-self: stretch; }
   .iam-application-access-badges { justify-content: flex-start; }
   .iam-application-role-list { grid-template-columns: 1fr; }
 }
