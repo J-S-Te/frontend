@@ -1979,17 +1979,20 @@ async function saveCapability() {
   saving.value = true
   try {
     const form = capabilityDialog.value
-    const saved = await upsertCapability({
+    const payload = {
       resource_type: form.resource_type,
       resource_id: form.resource_id,
       resource_name: form.resource_name,
       user_id: form.resource_type === 'PERSON' ? form.user_id : '',
       codes: [...capabilityCodeSelection.value],
-      valid_from: form.resource_type === 'EQUIPMENT' && form.valid_from ? new Date(form.valid_from).toISOString() : '',
-      valid_until: form.resource_type === 'EQUIPMENT' && form.valid_until ? new Date(form.valid_until).toISOString() : '',
       status: form.status,
       usage_scope: form.usage_scope || 'ANY',
-    })
+    }
+    // 空字符串无法反序列化为服务端 time.Time。人员资质本身不受日期限制；设备日期
+    // 也是可选字段，因此只有用户实际填写后才进入 JSON 载荷。
+    if (form.resource_type === 'EQUIPMENT' && form.valid_from) payload.valid_from = new Date(form.valid_from).toISOString()
+    if (form.resource_type === 'EQUIPMENT' && form.valid_until) payload.valid_until = new Date(form.valid_until).toISOString()
+    const saved = await upsertCapability(payload)
     capabilities.value = [saved, ...capabilities.value.filter((row) => !(row.resource_type === saved.resource_type && row.resource_id === saved.resource_id))]
     capabilityDialog.value = null
     showToast('资质 / 能力已保存')
