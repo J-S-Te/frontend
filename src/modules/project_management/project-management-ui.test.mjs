@@ -56,6 +56,20 @@ test('系统配置侧边栏合并为一个规则配置中心并保留细粒度�
   assert.match(source, /\{ key: 'split-rules', label: '合同拆解规则', icon: 'settings' \}/)
 })
 
+test('检测标准变更评估是唯一业务入口，不再与规则配置中心重复', () => {
+  assert.match(source, /\{ key: 'standards', label: '标准方法更新评估', icon: 'reset' \}/)
+  assert.match(source, /const standardChangeMeta = Object\.freeze\(\{[\s\S]*?kind: 'standards',[\s\S]*?label: '检测标准变更'/)
+  assert.match(source, /const isStandardChangeSection = computed\(\(\) => activeSection\.value === standardChangeMeta\.kind\)/)
+  assert.match(source, /v-if="!isStandardChangeSection" class="pm-sm-tabs"/)
+  assert.match(source, /检测标准变更只在此处登记和评估，不再出现在“规则配置中心”/)
+  assert.match(source, /isStandardChangeSection \? '＋ 登记标准变更' : '＋ 新建规则'/)
+  assert.match(source, /rule\.enabled \? '评估中' : '已归档'/)
+  assert.match(source, /rule\.enabled \? '完成并归档' : '恢复评估'/)
+  // 配置中心的元数据在独立标准元数据声明之后开始，内部不得再声明 standards 页签。
+  const configMetaBlock = source.slice(source.indexOf('const configKindsMeta = ['), source.indexOf('// 字段级权限规则由独立权限把关'))
+  assert.doesNotMatch(configMetaBlock, /kind: 'standards'/)
+})
+
 test('项目管理的弹层与菜单支持一致的 Esc 关闭逻辑，保存中不会被误关闭', () => {
   assert.match(source, /function closeActiveOverlay\(\)/)
   assert.match(source, /if \(saving\.value\) return/)
@@ -924,7 +938,7 @@ test('每个写操作入口都按服务端同款权限码门控', () => {
   assert.match(source, /v-if="canReviewDeviation" class="pm-button" :disabled="saving" @click="runOperation\('exception-review'\)"/)
   assert.match(source, /v-if="canReviewSpecialMethod" class="pm-form-row"/)
   assert.match(source, /v-if="canManageResource" class="pm-link" @click="openCapabilityDialog\(item\)"/)
-  assert.match(source, /v-if="canManageRules" class="pm-switch"/)
+  assert.match(source, /v-(?:if|else-if)="canManageRules" class="pm-switch"/)
   // 报告推进按编制、审核、签发、归档四类职责分别授权。
   assert.match(source, /canAdvanceReportPhase\(reportPhaseNext\[item\.report_status\]\)/)
   for (const permission of ['project.report.prepare', 'project.report.review', 'project.report.issue', 'project.report.archive']) {
@@ -934,7 +948,7 @@ test('每个写操作入口都按服务端同款权限码门控', () => {
   assert.match(source, /configKindsMeta\.filter\(\(meta\) => meta\.kind !== 'permissions' \|\| canManageFieldPermissions\.value\)/)
   // 页签隐藏后配置面板与「新建规则」不能仍按 activeSection 渲染：否则表头取回退后的
   // 首个可见配置、列表按被隐藏的 kind 过滤，得到标题与内容不符的空表。
-  assert.match(source, /const isVisibleConfigSection = computed\(\(\) => visibleConfigKinds\.value\.some\(\(meta\) => meta\.kind === activeSection\.value\)\)/)
+  assert.match(source, /const isVisibleConfigSection = computed\(\(\) => isStandardChangeSection\.value \|\| visibleConfigKinds\.value\.some\(\(meta\) => meta\.kind === activeSection\.value\)\)/)
   assert.match(source, /v-else-if="isVisibleConfigSection"/)
   assert.match(source, /v-if="canManageRules && isVisibleConfigSection"/)
 })
@@ -993,7 +1007,8 @@ test('字段级权限的角色是服务端目录驱动的多选下拉，多选�
   assert.doesNotMatch(source, /key: 'role_code', label: '角色', field: 'text'/)
   assert.match(source, /v-if="field\.field === 'roles'" class="pm-field pm-span-full"/)
   // 默认多选：新建时选中值为数组，不要求按住 ⌘/Ctrl 加选。
-  assert.match(source, /field\.field === 'roles' \? \[\] :/)
+  assert.match(source, /function defaultConfigFieldValue\(field\)/)
+  assert.match(source, /if \(field\.field === 'roles'\) return \[\]/)
   assert.match(source, /<SearchableSelect v-model="configForm\.role_codes" :options="configRoleOptions" value-key="code" label-key="name"/)
   assert.match(source, /placeholder="请选择角色（可多选）" search-placeholder="搜索角色名称或编码"/)
   assert.match(source, /aria-label="选择字段级权限角色" menu-z-index="calc\(var\(--pm-z-modal, 50\) \+ 1\)" multiple required/)
@@ -1034,8 +1049,56 @@ test('字段级权限只能从有效字段白名单选择且仅开放真实生�
   const permissionMeta = source.slice(source.indexOf("{ kind: 'permissions'"), source.indexOf("{ kind: 'sla'"))
   assert.match(permissionMeta, /options: \[\{ value: 'hidden', label: '隐藏（接口返回 \*\*\*）' \}\]/)
   assert.doesNotMatch(permissionMeta, /value: 'view'|value: 'edit'/)
-  assert.match(source, /field\.key === 'access_level' \? 'hidden' : ''/)
+  assert.match(source, /if \(field\.key === 'access_level'\) return 'hidden'/)
   assert.match(source, /configForm\.value\.access_level = 'hidden'/)
+})
+
+test('预警规则只允许选择引擎支持的检查类型并使用正整数触发数量', () => {
+  for (const checkType of ['资质能力冲突', '能力缺失', '其他冲突']) {
+    assert.match(source, new RegExp(`\\{ value: '${checkType}', label: '${checkType}'`))
+  }
+  const warningMeta = source.slice(source.indexOf("{ kind: 'warning-rules'"), source.indexOf("{ kind: 'automations'"))
+  assert.match(warningMeta, /field: 'catalog-single', required: true, options: warningRuleCheckTypeOptions/)
+  assert.match(warningMeta, /key: 'threshold', label: '触发数量', field: 'positive-integer', required: true, min: 1/)
+  assert.doesNotMatch(warningMeta, /field: 'text'.*排期冲突|连续 3 项冲突/)
+  assert.match(warningMeta, /placeholder: '请选择预警检查类型', searchPlaceholder: '搜索检查类型'/)
+  assert.match(source, /required inputmode="numeric" step="1" :min="field\.min \|\| 1"/)
+  assert.match(source, /if \(String\(configForm\.value\.name \|\| ''\)\.trim\(\)\) return/)
+  assert.match(source, /configForm\.value\.name = `\$\{value\}预警`/)
+  assert.match(source, /if \(!Number\.isInteger\(threshold\) \|\| threshold < 1\)/)
+  assert.match(source, /payload\.threshold = String\(threshold\)/)
+})
+
+test('自动化、SLA、字段权限和能力编码使用服务端目录及真实生效约束', () => {
+  assert.match(pmApiSource, /export async function listRuleConfigurationCatalog\(\) \{/)
+  assert.match(pmApiSource, /request\('\/rule-configuration-catalog'\)/)
+  assert.match(source, /listRuleConfigurationCatalog\(\)/)
+
+  const automationMeta = source.slice(source.indexOf("{ kind: 'automations'"), source.indexOf("{ kind: 'permissions'"))
+  assert.match(automationMeta, /field: 'catalog-single'.*options: automationTriggerOptions\.value/)
+  assert.match(automationMeta, /key: 'target'.*field: 'role'/)
+  assert.match(automationMeta, /当前唯一动作是按项目角色发送站内通知，不创建工单或调用外部系统/)
+  assert.match(source, /field\.field === 'role'/)
+  assert.match(source, /请选择项目系统角色作为通知目标/)
+
+  const slaMeta = source.slice(source.indexOf("{ kind: 'sla'"), source.indexOf('// 字段级权限规则由独立权限把关'))
+  assert.match(slaMeta, /key: 'status'.*field: 'catalog-single'.*options: slaStatusOptions\.value/)
+  assert.match(slaMeta, /key: 'deadline_hours'.*required: true, min: 1/)
+  assert.match(slaMeta, /key: 'remind_hours'.*required: true, min: 0/)
+  assert.match(source, /remind < 0 \|\| remind >= deadline/)
+
+  const capabilityMeta = source.slice(source.indexOf("{ kind: 'capability-codes'"), source.indexOf("{ kind: 'warning-rules'"))
+  assert.match(capabilityMeta, /key: 'scope'.*lockOnEdit: true/)
+  assert.match(capabilityMeta, /key: 'check_type'.*lockOnEdit: true.*options: capabilityTypeOptions/)
+  assert.match(source, /function configFieldDisabled\(field\)/)
+  assert.match(source, /编码与类型创建后不可修改/)
+
+  assert.match(source, /activeConfigMeta\.effectNote \|\| currentMeta\[1\]/)
+  for (const kind of ['capability-codes', 'warning-rules', 'automations', 'permissions', 'sla']) {
+    const start = source.indexOf(`{ kind: '${kind}'`)
+    assert.ok(start >= 0, `missing ${kind} metadata`)
+    assert.match(source.slice(start, source.indexOf(' },', start) + 3), /effectNote:/, `${kind} needs an accurate scope note`)
+  }
 })
 
 test('系统配置的规则可以删除：二次确认、按 kind 定位、删除后从列表移除', () => {

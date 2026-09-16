@@ -27,6 +27,7 @@ import {
   deleteEquipment,
   listDeliveryEvents,
   listApplicationRoles,
+  listRuleConfigurationCatalog,
   listRules,
   listSlaOverdue,
   getSplitPolicy,
@@ -132,13 +133,13 @@ const pageMeta = {
   methods: ['特殊方法复核待办', '复核非标准方法的适用性与风险控制'],
   implementation: ['实施看板 · 进度总览', '按状态跟踪服务项现场执行与闭环进度'],
   exceptions: ['异常评审 · 偏离上报', '处理现场偏离、阻塞与整改回路'],
-  standards: ['检测标准方法更新 · 影响评估', '识别标准变更对在途项目的影响'],
+  standards: ['检测标准变更评估', '统一登记标准或方法变更及其影响范围，完成评估后归档'],
   reports: ['报告编制状态维护', '衔接实施完成、报告编制、复核与签发'],
   'split-rules': ['合同拆解规则配置', '默认分组规则 + 检测类别域 + 覆盖规则：合同生效后自动生成服务项的分组与初始状态口径'],
   'capability-codes': ['资质 / 能力编码配置', '按人员资质与设备能力分类维护可选编码，停用编码仅保留历史引用'],
-  'warning-rules': ['冲突预警规则配置', '配置资源、资质、地域与排期冲突策略'],
-  automations: ['自动化触发配置', '维护项目状态变化后的自动任务与通知'],
-  permissions: ['字段级权限配置', '按角色控制敏感字段的查看与编辑范围'],
+  'warning-rules': ['冲突预警规则配置', '配置资质与能力校验冲突的触发类型与数量阈值'],
+  automations: ['自动化触发配置', '维护真实交付事件触发的角色站内通知'],
+  permissions: ['字段级权限配置', '按角色隐藏服务端返回的敏感字段'],
   sla: ['状态 SLA 配置', '配置项目状态流转的时限与超期提醒策略'],
 }
 
@@ -430,13 +431,32 @@ const fieldPermissionFieldOptions = Object.freeze([
   { value: 'project_manager_id', label: '项目经理（服务项指派）', description: '服务项指派关系及事件快照' },
   { value: 'engineer_ids', label: '工程师名单', description: '服务项指派关系及事件快照' },
 ])
+const warningRuleCheckTypeOptions = Object.freeze([
+  { value: '资质能力冲突', label: '资质能力冲突', description: '人员或设备缺少有效资质 / 能力记录' },
+  { value: '能力缺失', label: '能力缺失', description: '人员或设备未覆盖服务项要求的能力编码' },
+  { value: '其他冲突', label: '其他冲突', description: '无法归入以上类型的能力校验冲突' },
+])
+const automationTriggerOptions = ref([])
+const slaStatusOptions = ref([])
+const ruleConfigurationCatalogError = ref('')
+const capabilityTypeOptions = Object.freeze([
+  { value: 'PERSON', label: '人员资质', description: '供项目人员能力校验和派工使用' },
+  { value: 'EQUIPMENT', label: '设备能力', description: '供实施准备设备能力筛选使用' },
+])
+// 检测标准变更是现场实施治理台账，不是运行时规则。它保留独立业务入口，不能再作为
+// “规则配置中心”的页签重复出现；底层继续复用 standards CRUD，避免迁移既有记录。
+const standardChangeMeta = Object.freeze({
+  kind: 'standards',
+  label: '检测标准变更',
+  columns: [{ key: 'scope', label: '变更内容 / 影响范围' }],
+  fields: [{ key: 'scope', label: '变更内容及影响范围', field: 'text', required: true, placeholder: '例如国家标准版本更新；影响等保测评类在途项目，需复核检测方法' }],
+})
 const configKindsMeta = [
-  { kind: 'capability-codes', label: '资质 / 能力编码', columns: [{ key: 'scope', label: '编码' }, { key: 'resource_type_label', label: '适用类型' }], fields: [{ key: 'scope', label: '编码', field: 'text', required: true, placeholder: '例如 CISP / ISO27001 / EQ-SCAN' }, { key: 'check_type', label: '适用类型', field: 'select', required: true, options: [{ value: 'PERSON', label: '人员资质' }, { value: 'EQUIPMENT', label: '设备能力' }] }] },
-  { kind: 'warning-rules', label: '预警规则', columns: [{ key: 'check_type', label: '检查类型' }, { key: 'threshold', label: '阈值' }], fields: [{ key: 'check_type', label: '检查类型', field: 'text', required: true, placeholder: '例如 资质能力冲突 / 排期冲突 / 场地冲突' }, { key: 'threshold', label: '阈值', field: 'text', placeholder: '例如 连续 3 项冲突' }] },
-  { kind: 'automations', label: '自动化动作', columns: [{ key: 'trigger', label: '触发事件' }, { key: 'target', label: '目标' }], fields: [{ key: 'trigger', label: '触发事件', field: 'text', required: true, placeholder: '例如 DEVIATION_REPORTED' }, { key: 'target', label: '目标', field: 'text', required: true, placeholder: '例如 通知技术总监 / 创建整改工单' }] },
-  { kind: 'permissions', label: '字段级权限', columns: [{ key: 'role_code', label: '角色' }, { key: 'field_name', label: '字段' }, { key: 'access_level', label: '访问级别' }], fields: [{ key: 'role_codes', label: '角色', field: 'roles', required: true }, { key: 'field_name', label: '字段', field: 'permission-field', required: true, options: fieldPermissionFieldOptions }, { key: 'access_level', label: '访问级别', field: 'select', required: true, options: [{ value: 'hidden', label: '隐藏（接口返回 ***）' }] }] },
-  { kind: 'sla', label: 'SLA 规则', columns: [{ key: 'status', label: '状态' }, { key: 'deadline_hours', label: '时限(小时)' }, { key: 'remind_hours', label: '提醒(小时)' }], fields: [{ key: 'status', label: '生效状态', field: 'text', required: true, placeholder: '例如 报告编制' }, { key: 'deadline_hours', label: '时限(小时)', field: 'number', required: true, min: 1 }, { key: 'remind_hours', label: '提前提醒(小时)', field: 'number', min: 0 }] },
-  { kind: 'standards', label: '检测标准', columns: [{ key: 'scope', label: '适用方法/范围' }], fields: [{ key: 'scope', label: '适用方法/范围', field: 'text', required: true, placeholder: '例如 GB/T 28448 更新的检测方法进入评估' }] },
+  { kind: 'capability-codes', label: '资质 / 能力编码', nameLabel: '资质 / 能力名称', effectNote: '新建或启用后立即进入对应资源类型的可选编码目录；停用只阻止新引用，已有业务记录继续保留。', columns: [{ key: 'scope', label: '编码' }, { key: 'resource_type_label', label: '适用类型' }], fields: [{ key: 'scope', label: '编码', field: 'text', required: true, lockOnEdit: true, placeholder: '例如 CISP / ISO27001 / EQ-SCAN' }, { key: 'check_type', label: '适用类型', field: 'catalog-single', required: true, lockOnEdit: true, options: capabilityTypeOptions, placeholder: '请选择适用类型', searchPlaceholder: '搜索资源类型' }] },
+  { kind: 'warning-rules', label: '预警规则', nameLabel: '预警名称', effectNote: '只影响保存后新产生的能力校验冲突事件，不重新生成既有项目的历史告警。', columns: [{ key: 'check_type', label: '检查类型' }, { key: 'threshold', label: '触发数量' }], fields: [{ key: 'check_type', label: '检查类型', field: 'catalog-single', required: true, options: warningRuleCheckTypeOptions, placeholder: '请选择预警检查类型', searchPlaceholder: '搜索检查类型' }, { key: 'threshold', label: '触发数量', field: 'positive-integer', required: true, min: 1 }] },
+  { kind: 'automations', label: '自动化动作', nameLabel: '通知规则名称', effectNote: '只监听保存后新产生的交付事件；当前唯一动作是按项目角色发送站内通知，不创建工单或调用外部系统。', columns: [{ key: 'trigger', label: '触发事件' }, { key: 'target_label', label: '通知角色' }], fields: [{ key: 'trigger', label: '触发事件', field: 'catalog-single', required: true, options: automationTriggerOptions.value, placeholder: '请选择真实交付事件', searchPlaceholder: '搜索事件名称或编码' }, { key: 'target', label: '通知角色', field: 'role', required: true }] },
+  { kind: 'permissions', label: '字段级权限', nameLabel: '隐藏规则名称', effectNote: '启用后立即影响该角色读取已有和新增项目数据；接口返回对应字段时统一脱敏为 ***。', columns: [{ key: 'role_code', label: '角色' }, { key: 'field_name', label: '字段' }, { key: 'access_level', label: '访问级别' }], fields: [{ key: 'role_codes', label: '角色', field: 'roles', required: true }, { key: 'field_name', label: '字段', field: 'permission-field', required: true, options: fieldPermissionFieldOptions }, { key: 'access_level', label: '访问级别', field: 'catalog-single', required: true, options: [{ value: 'hidden', label: '隐藏（接口返回 ***）' }] }] },
+  { kind: 'sla', label: 'SLA 规则', nameLabel: 'SLA 名称', effectNote: '保存或启用后立即按当前服务项进入该状态的时间开始计算；0 小时表示不提前提醒，不改变计划完成时间超期口径。', columns: [{ key: 'status', label: '状态' }, { key: 'deadline_hours', label: '时限(小时)' }, { key: 'remind_hours', label: '提醒(小时)' }], fields: [{ key: 'status', label: '生效状态', field: 'catalog-single', required: true, options: slaStatusOptions.value, placeholder: '请选择服务项状态', searchPlaceholder: '搜索服务项状态' }, { key: 'deadline_hours', label: '时限(小时)', field: 'number', required: true, min: 1 }, { key: 'remind_hours', label: '提前提醒(小时)', field: 'number', required: true, min: 0 }] },
 ]
 // 字段级权限规则由独立权限把关（服务端 ruleKindPermission 要求 project.field_permission.manage）：
 // 只有 project_rule.manage 的角色不该看到这个页签，否则页面能打开、提交必然 403。
@@ -444,13 +464,12 @@ const visibleConfigKinds = computed(() => configKindsMeta.filter((meta) => meta.
 // 页签被隐藏时不能只靠 activeSection 判断：那样配置页仍会打开，表头取回退后的首个可见
 // 配置、列表却按被隐藏的 kind 过滤，得到一张标题与内容不符的空表；「新建规则」也会为
 // 隐藏的 kind 建档。因此页签、面板与入口统一以可见集合为准。
-const isVisibleConfigSection = computed(() => visibleConfigKinds.value.some((meta) => meta.kind === activeSection.value))
-const activeConfigMeta = computed(() => visibleConfigKinds.value.find((meta) => meta.kind === activeSection.value) || visibleConfigKinds.value[0])
+const isStandardChangeSection = computed(() => activeSection.value === standardChangeMeta.kind)
+const isVisibleConfigSection = computed(() => isStandardChangeSection.value || visibleConfigKinds.value.some((meta) => meta.kind === activeSection.value))
+const activeConfigMeta = computed(() => isStandardChangeSection.value ? standardChangeMeta : visibleConfigKinds.value.find((meta) => meta.kind === activeSection.value) || visibleConfigKinds.value[0])
 const configEditorOpen = ref(false)
 const configForm = ref({})
-// 角色选项来自服务端角色目录（/role-catalog），前端不硬编码角色码：写入目录之外的角色既不会
-// 被规则接口拒绝、也永远不会命中任何主体，是只在运行期静默失效的一类错误。首次打开配置弹窗时
-// 拉取并缓存，失败时保留错误文案供弹窗内提示，下次打开可重试。
+// 字段隐藏与自动通知共用服务端角色目录，浏览器不维护第二份角色码。
 const applicationRoles = ref([])
 const applicationRolesError = ref('')
 let applicationRolesRequest = null
@@ -458,7 +477,7 @@ function loadApplicationRoles() {
   if (applicationRoles.value.length) return Promise.resolve()
   if (applicationRolesRequest) return applicationRolesRequest
   applicationRolesRequest = listApplicationRoles()
-    .then((roles) => { applicationRoles.value = roles; applicationRolesError.value = '' })
+    .then((roles) => { applicationRoles.value = roles; applicationRolesError.value = ''; rules.value = rules.value.map(decorateRule) })
     .catch((error) => { applicationRolesError.value = error?.message || '角色目录加载失败' })
     .finally(() => { applicationRolesRequest = null })
   return applicationRolesRequest
@@ -468,20 +487,52 @@ const configRoleSelection = computed(() => (Array.isArray(configForm.value.role_
 const configRoleOptions = computed(() => {
   const options = [...applicationRoles.value]
   const known = new Set(options.map((option) => option.code))
-  for (const code of configRoleSelection.value) {
+  const selectedCodes = [...configRoleSelection.value, String(configForm.value.target || '').trim()].filter(Boolean)
+  for (const code of selectedCodes) {
     if (code && !known.has(code)) { options.push({ code, name: `${code}（不在角色目录中）` }); known.add(code) }
   }
   return options
 })
+function defaultConfigFieldValue(field) {
+  if (field.field === 'roles') return []
+  if (field.key === 'access_level') return 'hidden'
+  if (field.field === 'positive-integer') return '1'
+  if (field.field === 'number') {
+    if (field.key === 'deadline_hours') return 24
+    if (field.key === 'remind_hours') return 4
+    return field.min || 0
+  }
+  return ''
+}
+function configNamePlaceholder() {
+  if (activeSection.value === 'standards') return '例如检测方法国家标准版本更新'
+  return ['warning-rules', 'automations', 'sla'].includes(activeSection.value) ? '选择生效条件后自动生成，可按需修改' : `请输入${activeConfigMeta.value.nameLabel || '配置名称'}`
+}
+function onConfigFieldChange(field, value) {
+  if (String(configForm.value.name || '').trim()) return
+  if (activeSection.value === 'warning-rules' && field.key === 'check_type') configForm.value.name = `${value}预警`
+  if (activeSection.value === 'sla' && field.key === 'status') configForm.value.name = `${value} SLA`
+  if (activeSection.value === 'automations') {
+    const trigger = automationTriggerOptions.value.find((option) => option.value === configForm.value.trigger)?.label
+    const role = applicationRoles.value.find((option) => option.code === configForm.value.target)?.name
+    if (trigger && role) configForm.value.name = `${trigger} → 通知${role}`
+  }
+}
+function configUsesRoleCatalog() {
+  return activeConfigMeta.value.fields.some((field) => field.field === 'roles' || field.field === 'role')
+}
+function configFieldDisabled(field) {
+  return Boolean(configForm.value.id && field.lockOnEdit)
+}
 function openConfigCreate() {
   configForm.value = { id: null, kind: activeSection.value, name: '', enabled: true }
   for (const field of activeConfigMeta.value.fields) {
-    configForm.value[field.key] = field.field === 'number' ? (field.key === 'deadline_hours' ? 24 : field.key === 'remind_hours' ? 4 : 0) : field.field === 'roles' ? [] : field.key === 'access_level' ? 'hidden' : ''
+    configForm.value[field.key] = defaultConfigFieldValue(field)
   }
   // 打开配置弹窗时收起页面上仍在使用旧式组件的设备/检测编码菜单；角色选择器
   // 自身随弹窗挂载，始终从收起态开始。
   openMulti.value = ''
-  if (activeConfigMeta.value.fields.some((field) => field.field === 'roles')) loadApplicationRoles()
+  if (configUsesRoleCatalog()) loadApplicationRoles()
   configEditorOpen.value = true
 }
 function openConfigEdit(rule) {
@@ -494,6 +545,7 @@ function openConfigEdit(rule) {
     configForm.value.access_level = 'hidden'
     loadApplicationRoles()
   }
+  if (configUsesRoleCatalog()) loadApplicationRoles()
   configEditorOpen.value = true
 }
 function applySavedRule(saved) {
@@ -515,6 +567,25 @@ async function saveConfigRule() {
       if (field.field === 'roles') { roleField = true; roleCodes = configRoleSelection.value; continue }
       payload[field.key] = typeof configForm.value[field.key] === 'number' ? configForm.value[field.key] : String(configForm.value[field.key] || '').trim()
     }
+    if (payload.kind === 'warning-rules') {
+      if (!warningRuleCheckTypeOptions.some((option) => option.value === payload.check_type)) { showToast('请选择有效的检查类型', 'warning'); return }
+      const threshold = Number(payload.threshold)
+      if (!Number.isInteger(threshold) || threshold < 1) { showToast('触发数量必须是大于等于 1 的整数', 'warning'); return }
+      payload.threshold = String(threshold)
+    }
+    if (payload.kind === 'automations') {
+      if (!automationTriggerOptions.value.some((option) => option.value === payload.trigger)) { showToast('请选择有效的触发事件', 'warning'); return }
+      if (!applicationRoles.value.some((option) => option.code === payload.target)) { showToast('请选择项目系统角色作为通知目标', 'warning'); return }
+    }
+    if (payload.kind === 'sla') {
+      if (!slaStatusOptions.value.some((option) => option.value === payload.status)) { showToast('请选择有效的服务项状态', 'warning'); return }
+      const deadline = Number(payload.deadline_hours)
+      const remind = Number(payload.remind_hours)
+      if (!Number.isInteger(deadline) || deadline < 1) { showToast('时限小时必须是大于等于 1 的整数', 'warning'); return }
+      if (!Number.isInteger(remind) || remind < 0 || remind >= deadline) { showToast('提前提醒小时必须大于等于 0 且小于时限小时', 'warning'); return }
+      payload.deadline_hours = deadline
+      payload.remind_hours = remind
+    }
     if (roleField && !roleCodes.length) { showToast('请至少选择一个角色', 'warning'); return }
     if (roleField) {
       // 服务端 field_permission 按 role_code 与主体角色做精确比对，一条规则只承载一个角色，
@@ -535,7 +606,7 @@ async function saveConfigRule() {
     const saved = configForm.value.id ? await updateRule(configForm.value.id, payload) : await createRule(payload)
     applySavedRule(saved)
     configEditorOpen.value = false
-    showToast(configForm.value.id ? '配置已保存' : '配置已创建')
+    showToast(payload.kind === 'standards' ? (configForm.value.id ? '标准变更记录已保存' : '标准变更已登记，进入影响评估') : (configForm.value.id ? '配置已保存' : '配置已创建'))
   } catch (error) { showToast(error?.message || '配置保存失败', 'error') }
   finally { saving.value = false }
 }
@@ -1280,7 +1351,8 @@ const operationRows = computed(() => ({
 
 const rules = ref([])
 function decorateRule(rule) {
-  return { ...rule, resource_type_label: rule.check_type === 'PERSON' ? '人员资质' : rule.check_type === 'EQUIPMENT' ? '设备能力' : rule.check_type }
+  const targetRole = applicationRoles.value.find((role) => role.code === rule.target)
+  return { ...rule, resource_type_label: rule.check_type === 'PERSON' ? '人员资质' : rule.check_type === 'EQUIPMENT' ? '设备能力' : rule.check_type, target_label: targetRole?.name || rule.target }
 }
 const visibleRules = computed(() => rules.value.filter((rule) => rule.kind === activeSection.value))
 
@@ -1594,11 +1666,15 @@ const operationDetailFields = computed(() => {
 async function loadWorkspace() {
   loading.value = true
   loadError.value = ''
+  ruleConfigurationCatalogError.value = ''
   let loaded = false
   try {
     // 项目、服务项和规则共同构成当前工作区快照；三者全部成功后才一次性替换页面状态，
     // 防止新旧数据混用。接口层仍分别执行会话与资源权限校验。
-    const [projectRows, itemRows, ruleRows, eventRows, capabilityRows, dashboardData, sessionData, navigationData] = await Promise.all([listProjects(), listServiceItems(), listRules(), listDeliveryEvents(), listCapabilities(), getDashboard(), getProjectSession(), getProjectNavigation()])
+    const [projectRows, itemRows, ruleRows, eventRows, capabilityRows, dashboardData, sessionData, navigationData, ruleCatalog] = await Promise.all([listProjects(), listServiceItems(), listRules(), listDeliveryEvents(), listCapabilities(), getDashboard(), getProjectSession(), getProjectNavigation(), listRuleConfigurationCatalog().catch((error) => {
+      ruleConfigurationCatalogError.value = error?.message || '规则目录加载失败'
+      return { automation_triggers: [], sla_statuses: [] }
+    })])
     projects.value = projectRows
     serviceItems.value = itemRows.map((item) => ({ ...item, selected: ['待确认', '待复核'].includes(item.status) }))
     rules.value = ruleRows.map(decorateRule)
@@ -1607,6 +1683,8 @@ async function loadWorkspace() {
     dashboard.value = dashboardData
     session.value = sessionData
     navigation.value = navigationData
+    automationTriggerOptions.value.splice(0, automationTriggerOptions.value.length, ...ruleCatalog.automation_triggers)
+    slaStatusOptions.value.splice(0, slaStatusOptions.value.length, ...ruleCatalog.sla_statuses)
     // 侧栏账号行的角色名依赖服务端角色目录；不阻塞工作区首屏，失败只影响副标题文案。
     loadApplicationRoles()
     // 拆解规则配置由独立接口提供（不属于六类规则表），进入页面时按需加载。
@@ -2044,8 +2122,8 @@ async function toggleRule(rule) {
     // 不预先翻转开关，等待带有最新版本语义的服务端结果后再覆盖当前行。
     const updated = await setRuleEnabled(rule.id, rule.kind || activeSection.value, next)
     Object.assign(rule, updated)
-    showToast(next ? '规则已启用' : '规则已停用')
-  } catch (error) { showToast(error?.message || '规则更新失败', 'error') }
+    showToast(rule.kind === 'standards' ? (next ? '标准变更已恢复评估' : '标准变更评估已完成并归档') : (next ? '规则已启用' : '规则已停用'))
+  } catch (error) { showToast(error?.message || (rule.kind === 'standards' ? '标准变更状态更新失败' : '规则更新失败'), 'error') }
 }
 
 // 删除配置规则。停用开关是可逆操作，删除不可恢复，因此必须二次确认；kind 必填，
@@ -2560,7 +2638,7 @@ onBeforeUnmount(() => {
           <div class="pm-actions">
             <button class="pm-button" :disabled="loading" @click="loadWorkspace"><ConsoleIcon name="reset" />{{ loading ? '加载中' : '刷新' }}</button>
             <button v-if="activeSection === 'projects'" class="pm-button" @click="exportProjects"><ConsoleIcon name="export" />导出</button>
-            <button v-if="canManageRules && isVisibleConfigSection" class="pm-button primary" @click="openConfigCreate">＋ 新建规则</button><button v-if="activeSection === 'projects' && canCreateProject" class="pm-button primary" @click="openCreateProject">＋ 新建项目</button>
+            <button v-if="canManageRules && isVisibleConfigSection" class="pm-button primary" @click="openConfigCreate">{{ isStandardChangeSection ? '＋ 登记标准变更' : '＋ 新建规则' }}</button><button v-if="activeSection === 'projects' && canCreateProject" class="pm-button primary" @click="openCreateProject">＋ 新建项目</button>
             <button v-if="activeSection === 'decomposition' && canConfirmDecomposition" class="pm-button primary" :disabled="saving || !canConfirmCurrentDecomposition" @click="confirmDecomposition">{{ saving ? '提交中…' : '确认拆解' }}</button><button v-if="activeSection === 'decomposition' && canManageDecomposition" type="button" class="pm-button" :disabled="saving || !decompositionProject" @click="openDecompositionAdjust">调整拆解</button>
           </div>
         </section>
@@ -2955,16 +3033,17 @@ onBeforeUnmount(() => {
           </template>
           <template v-else-if="isVisibleConfigSection">
           <section class="pm-kpi-row">
-            <div class="pm-kpi"><div class="pm-kpi-label"><span>规则总数</span></div><strong class="pm-kpi-value">{{ configStats.total }}<small>条</small></strong><p class="pm-kpi-meta">{{ activeConfigMeta.label }}</p></div>
-            <div class="pm-kpi green"><div class="pm-kpi-label"><span>已启用</span></div><strong class="pm-kpi-value">{{ configStats.enabled }}<small>条</small></strong><p class="pm-kpi-meta">参与运行时判定</p></div>
-            <div class="pm-kpi red"><div class="pm-kpi-label"><span>已停用</span></div><strong class="pm-kpi-value">{{ configStats.disabled }}<small>条</small></strong><p class="pm-kpi-meta">停用后立即对新事件生效</p></div>
+            <div class="pm-kpi"><div class="pm-kpi-label"><span>{{ isStandardChangeSection ? '变更登记' : '规则总数' }}</span></div><strong class="pm-kpi-value">{{ configStats.total }}<small>条</small></strong><p class="pm-kpi-meta">{{ activeConfigMeta.label }}</p></div>
+            <div class="pm-kpi green"><div class="pm-kpi-label"><span>{{ isStandardChangeSection ? '评估中' : '已启用' }}</span></div><strong class="pm-kpi-value">{{ configStats.enabled }}<small>条</small></strong><p class="pm-kpi-meta">{{ isStandardChangeSection ? '待确认影响并完成处置' : '参与运行时判定' }}</p></div>
+            <div class="pm-kpi red"><div class="pm-kpi-label"><span>{{ isStandardChangeSection ? '已归档' : '已停用' }}</span></div><strong class="pm-kpi-value">{{ configStats.disabled }}<small>条</small></strong><p class="pm-kpi-meta">{{ isStandardChangeSection ? '影响评估已完成' : '不再参与运行时判定' }}</p></div>
           </section>
+          <section v-if="isStandardChangeSection" class="pm-alert info"><i></i><b>唯一维护入口</b><span>检测标准变更只在此处登记和评估，不再出现在“规则配置中心”。“评估中”表示仍需核对在途项目、检测方法或报告模板；完成处置后请归档记录。</span></section>
           <section v-if="activeSection === 'sla'" class="pm-alert info"><i></i><b>SLA 口径说明</b><span>状态 SLA 按「服务项停留在该状态的时长」判定（每次状态推进刷新计时）：超过时限记为超期，剩余时间不足提前提醒小时数记为临近提醒；计划完成时间超期作为独立口径在服务项列表单独统计。</span></section>
           <section v-if="activeSection === 'permissions' && permissionMatrix.rows.length" class="pm-table-panel">
             <header><div><p class="pm-panel-kicker">ACCESS MATRIX</p><h2>字段 × 角色 访问矩阵</h2></div><span>{{ permissionMatrix.rows.length }} 个受控字段 · {{ permissionMatrix.roles.length }} 个角色</span></header>
             <div class="pm-matrix-wrap"><table class="pm-matrix"><thead><tr><th>字段 ↓ \ 角色 →</th><th v-for="role in permissionMatrix.roles" :key="role">{{ role }}</th></tr></thead><tbody><tr v-for="row in permissionMatrix.rows" :key="row.field"><td class="mono">{{ row.field }}</td><td v-for="(cell, index) in row.cells" :key="`${row.field}-${permissionMatrix.roles[index]}`"><span v-if="cell" class="pm-badge" :class="permissionLevelTone[cell] || 'neutral'">{{ permissionLevelLabel[cell] || cell }}</span><span v-else class="pm-matrix-empty">未配置</span></td></tr></tbody></table></div>
           </section>
-          <section class="pm-config-layout"><aside class="pm-config-note"><span><ConsoleIcon name="info" /></span><h2>配置说明</h2><p>{{ currentMeta[1] }}。变更将在保存后对新任务生效，已有项目不自动追溯。</p><ul><li>配置修改需业务管理员权限</li><li>关键规则变更会记录审计日志</li><li>关闭规则前请确认影响范围</li></ul></aside><article class="pm-table-panel"><header class="pm-filter-bar"><div class="pm-sm-tabs"><button v-for="meta in visibleConfigKinds" :key="meta.kind" type="button" class="pm-tab-pill" :class="{ active: activeSection === meta.kind }" @click="navigate(meta.kind)">{{ meta.label }}</button></div><span class="pm-filter-count">{{ activeConfigMeta.label }} 共 {{ visibleRules.length }} 条</span></header><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>配置名称</th><th v-for="column in activeConfigMeta.columns" :key="column.key">{{ column.label }}</th><th>状态</th><th>最后更新</th><th></th></tr></thead><tbody><tr v-for="rule in visibleRules" :key="rule.id"><td><b>{{ rule.name }}</b></td><td v-for="column in activeConfigMeta.columns" :key="column.key">{{ rule[column.key] !== undefined && rule[column.key] !== '' ? rule[column.key] : '—' }}</td><td><button v-if="canManageRules" class="pm-switch" :class="{ on: rule.enabled }" :aria-label="`${rule.enabled ? '停用' : '启用'} ${rule.name}`" @click="toggleRule(rule)"><i></i></button></td><td>{{ rule.updated }}</td><td><button v-if="canManageRules" class="pm-link" @click="openConfigEdit(rule)">编辑</button><button v-if="canManageRules" class="pm-link pm-text-danger" :disabled="saving" @click="removeConfigRule(rule)">删除</button></td></tr></tbody></table></div><div v-if="!visibleRules.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无配置规则</b><span>点击「＋ 新建规则」添加 {{ activeConfigMeta.label }} 配置。</span></div></article></section>
+          <section class="pm-config-layout"><aside class="pm-config-note"><span><ConsoleIcon name="info" /></span><h2>{{ isStandardChangeSection ? '评估流程' : '生效范围' }}</h2><template v-if="isStandardChangeSection"><p>登记标准变化与影响范围，核对在途项目、检测方法和报告模板，处置完成后将记录归档。</p><ul><li>评估中：尚有影响待确认或待处置</li><li>已归档：影响核对和处置均已完成</li><li>历史记录用于追溯，不会自动改写已有项目</li></ul></template><template v-else><p>{{ activeConfigMeta.effectNote || currentMeta[1] }}</p><ul><li>配置修改需业务管理员权限</li><li>创建、更新和重新启用执行相同校验</li><li>关闭规则前请确认影响范围</li></ul></template></aside><article class="pm-table-panel"><header class="pm-filter-bar"><div v-if="!isStandardChangeSection" class="pm-sm-tabs"><button v-for="meta in visibleConfigKinds" :key="meta.kind" type="button" class="pm-tab-pill" :class="{ active: activeSection === meta.kind }" @click="navigate(meta.kind)">{{ meta.label }}</button></div><div v-else><b>标准变更评估清单</b></div><span class="pm-filter-count">{{ activeConfigMeta.label }} 共 {{ visibleRules.length }} 条</span></header><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>{{ isStandardChangeSection ? '标准 / 方法名称' : '配置名称' }}</th><th v-for="column in activeConfigMeta.columns" :key="column.key">{{ column.label }}</th><th>状态</th><th>最后更新</th><th></th></tr></thead><tbody><tr v-for="rule in visibleRules" :key="rule.id"><td><b>{{ rule.name }}</b></td><td v-for="column in activeConfigMeta.columns" :key="column.key">{{ rule[column.key] !== undefined && rule[column.key] !== '' ? rule[column.key] : '—' }}</td><td><template v-if="isStandardChangeSection"><span class="pm-badge" :class="rule.enabled ? 'amber' : 'neutral'">{{ rule.enabled ? '评估中' : '已归档' }}</span><button v-if="canManageRules" class="pm-link" :disabled="saving" @click="toggleRule(rule)">{{ rule.enabled ? '完成并归档' : '恢复评估' }}</button></template><button v-else-if="canManageRules" class="pm-switch" :class="{ on: rule.enabled }" :aria-label="`${rule.enabled ? '停用' : '启用'} ${rule.name}`" @click="toggleRule(rule)"><i></i></button><span v-else class="pm-badge" :class="rule.enabled ? 'normal' : 'neutral'">{{ rule.enabled ? '已启用' : '已停用' }}</span></td><td>{{ rule.updated }}</td><td><button v-if="canManageRules" class="pm-link" @click="openConfigEdit(rule)">编辑</button><button v-if="canManageRules" class="pm-link pm-text-danger" :disabled="saving" @click="removeConfigRule(rule)">删除</button></td></tr></tbody></table></div><div v-if="!visibleRules.length" class="pm-empty"><ConsoleIcon name="info" /><b>{{ isStandardChangeSection ? '暂无标准变更记录' : '暂无配置规则' }}</b><span>{{ isStandardChangeSection ? '发生标准或检测方法变更时，点击“登记标准变更”开始影响评估。' : `点击“新建规则”添加 ${activeConfigMeta.label} 配置。` }}</span></div></article></section>
         </template>
 
         <template v-else>
@@ -3019,7 +3098,59 @@ onBeforeUnmount(() => {
 
     <div v-if="adjustOpen" class="pm-overlay" @click.self="adjustOpen = false"><form class="pm-dialog pm-dialog-wide" @submit.prevent="submitDecompositionAdjust"><header><div><span>ADJUST</span><h2>调整拆解</h2><small class="pm-dialog-sub">目标项目：<b>{{ decompositionProject ? `${decompositionProject.id} · ${decompositionProject.name || decompositionProject.customer || ''}` : '未选择' }}</b> —— 提交后该项目的<b>全部</b>服务项会被这份清单替换并进入补充协议处理中；原服务项转为归档保留历史。</small></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="adjustOpen = false"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>调整原因 <em>*</em></span><input v-model.trim="adjustForm.reason" required placeholder="例如 客户追加两个系统" /></label><label><span>补充协议编号 <em>*</em></span><input v-model.trim="adjustForm.supplementContractID" required placeholder="例如 SC-2026-0007" /></label><section class="pm-service-links"><header><div><b>新的服务项清单</b><small>提交后该项目的全部服务项会被这份清单替换，并进入补充协议处理中</small></div><button type="button" class="pm-link" @click="addAdjustItem">＋ 增加一行</button></header><div v-for="(row, index) in adjustForm.items" :key="index" class="pm-adjust-item"><div class="pm-service-link-row"><input v-model.trim="row.batch" required placeholder="批次" /><input v-model.trim="row.site" required placeholder="场所" /><input v-model.trim="row.category" required placeholder="检测类别" /><button type="button" class="pm-icon-button" :aria-label="`删除第 ${index + 1} 行`" @click="removeAdjustItem(index)">×</button></div><div class="pm-service-link-row"><input v-model.trim="row.system" placeholder="系统名称" /><input v-model.trim="row.systemLevel" placeholder="系统等级" /><input v-model.trim="row.requirement" placeholder="技术要求" /><select v-model="row.testMode"><option value="STANDARD">标准方法</option><option value="PENETRATION">渗透测试</option></select></div></div></section></div><footer><button type="button" class="pm-button" @click="adjustOpen = false">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '提交中…' : '提交调整' }}</button></footer></form></div>
 
-    <div v-if="configEditorOpen" class="pm-overlay" @click.self="configEditorOpen = false"><form class="pm-dialog" @submit.prevent="saveConfigRule"><header><div><span>CONFIG</span><h2>{{ configForm.id ? '编辑配置' : '新建配置' }} · {{ activeConfigMeta.label }}</h2></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="configEditorOpen = false"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>配置名称 <em>*</em></span><input v-model.trim="configForm.name" required placeholder="请输入配置名称" /></label><template v-for="field in activeConfigMeta.fields" :key="field.key"><div v-if="field.field === 'roles'" class="pm-field pm-span-full"><span>{{ field.label }} <em v-if="field.required">*</em></span><SearchableSelect v-model="configForm.role_codes" :options="configRoleOptions" value-key="code" label-key="name" placeholder="请选择角色（可多选）" search-placeholder="搜索角色名称或编码" :empty-text="applicationRolesError || '暂无匹配角色'" aria-label="选择字段级权限角色" menu-z-index="calc(var(--pm-z-modal, 50) + 1)" multiple required /><p v-if="configRoleSelection.length > 1" class="pm-form-hint">已选 {{ configRoleSelection.length }} 个角色，保存后每个角色各生成一条规则。</p><p v-else-if="applicationRolesError" class="pm-form-hint" role="alert">{{ applicationRolesError }}</p></div><div v-else-if="field.field === 'permission-field'" class="pm-field pm-span-full"><span>{{ field.label }} <em>*</em></span><SearchableSelect v-model="configForm[field.key]" :options="field.options" placeholder="请选择需要隐藏的字段" search-placeholder="搜索字段名称或编码" empty-text="没有匹配的有效字段" aria-label="选择字段级权限字段" menu-z-index="calc(var(--pm-z-modal, 50) + 1)" required /></div><label v-else-if="field.field === 'select'"><span>{{ field.label }} <em>*</em></span><select v-model="configForm[field.key]" required><option v-for="option in field.options" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label v-else-if="field.field === 'number'"><span>{{ field.label }} <em v-if="field.required">*</em></span><input v-model.number="configForm[field.key]" type="number" :required="field.required" :min="field.min || 0" /></label><label v-else><span>{{ field.label }} <em v-if="field.required">*</em></span><input v-model.trim="configForm[field.key]" :required="field.required" :placeholder="field.placeholder || ''" /></label></template><label><span>启用</span><button type="button" class="pm-switch" :class="{ on: configForm.enabled }" :aria-label="`${configForm.enabled ? '停用' : '启用'}`" @click="configForm.enabled = !configForm.enabled"><i></i></button></label></div><footer><button type="button" class="pm-button" @click="configEditorOpen = false">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : '保存' }}</button></footer></form></div>
+    <div v-if="configEditorOpen" class="pm-overlay" @click.self="configEditorOpen = false">
+      <form class="pm-dialog" @submit.prevent="saveConfigRule">
+        <header>
+          <div><span>CONFIG</span><h2>{{ configForm.id ? '编辑配置' : '新建配置' }} · {{ activeConfigMeta.label }}</h2></div>
+          <button type="button" class="pm-icon-button" aria-label="关闭" @click="configEditorOpen = false"><ConsoleIcon name="close" /></button>
+        </header>
+        <div class="pm-form">
+          <label>
+            <span>{{ activeConfigMeta.nameLabel || '配置名称' }} <em>*</em></span>
+            <input v-model.trim="configForm.name" required :placeholder="configNamePlaceholder()" />
+            <small v-if="['warning-rules', 'automations', 'sla'].includes(activeSection)">选择生效条件后会自动生成，仍可按业务口径修改。</small>
+          </label>
+          <template v-for="field in activeConfigMeta.fields" :key="field.key">
+            <div v-if="field.field === 'roles'" class="pm-field pm-span-full">
+              <span>{{ field.label }} <em v-if="field.required">*</em></span>
+              <SearchableSelect v-model="configForm.role_codes" :options="configRoleOptions" value-key="code" label-key="name" placeholder="请选择角色（可多选）" search-placeholder="搜索角色名称或编码" :empty-text="applicationRolesError || '暂无匹配角色'" aria-label="选择字段级权限角色" menu-z-index="calc(var(--pm-z-modal, 50) + 1)" multiple required />
+              <p v-if="configRoleSelection.length > 1" class="pm-form-hint">已选 {{ configRoleSelection.length }} 个角色，保存后每个角色各生成一条规则。</p>
+              <p v-else-if="applicationRolesError" class="pm-form-hint" role="alert">{{ applicationRolesError }}</p>
+            </div>
+            <div v-else-if="field.field === 'role'" class="pm-field pm-span-full">
+              <span>{{ field.label }} <em v-if="field.required">*</em></span>
+              <SearchableSelect v-model="configForm[field.key]" :options="configRoleOptions" value-key="code" label-key="name" placeholder="请选择目标角色" search-placeholder="搜索角色名称或编码" :empty-text="applicationRolesError || '暂无匹配角色'" :aria-label="`选择${field.label}`" menu-z-index="calc(var(--pm-z-modal, 50) + 1)" required @change="onConfigFieldChange(field, $event)" />
+              <p v-if="applicationRolesError" class="pm-form-hint" role="alert">{{ applicationRolesError }}</p>
+            </div>
+            <div v-else-if="field.field === 'permission-field'" class="pm-field pm-span-full">
+              <span>{{ field.label }} <em>*</em></span>
+              <SearchableSelect v-model="configForm[field.key]" :options="field.options" placeholder="请选择需要隐藏的字段" search-placeholder="搜索字段名称或编码" empty-text="没有匹配的有效字段" aria-label="选择字段级权限字段" menu-z-index="calc(var(--pm-z-modal, 50) + 1)" required />
+            </div>
+            <div v-else-if="field.field === 'catalog-single'" class="pm-field pm-span-full">
+              <span>{{ field.label }} <em v-if="field.required">*</em></span>
+              <SearchableSelect v-model="configForm[field.key]" :options="field.options" :placeholder="field.placeholder || `请选择${field.label}`" :search-placeholder="field.searchPlaceholder || `搜索${field.label}`" :empty-text="(['trigger', 'status'].includes(field.key) && ruleConfigurationCatalogError) || field.emptyText || '没有匹配的有效选项'" :aria-label="`选择${field.label}`" :disabled="configFieldDisabled(field)" menu-z-index="calc(var(--pm-z-modal, 50) + 1)" :required="field.required" @change="onConfigFieldChange(field, $event)" />
+              <p v-if="configFieldDisabled(field)" class="pm-form-hint">编码与类型创建后不可修改；如需变更，请停用原配置后新建。</p>
+            </div>
+            <label v-else-if="field.field === 'positive-integer'">
+              <span>{{ field.label }} <em>*</em></span>
+              <input v-model.trim="configForm[field.key]" type="number" required inputmode="numeric" step="1" :min="field.min || 1" @change="onConfigFieldChange(field, $event.target.value)" />
+              <small>请输入大于等于 {{ field.min || 1 }} 的整数。</small>
+            </label>
+            <label v-else-if="field.field === 'number'">
+              <span>{{ field.label }} <em v-if="field.required">*</em></span>
+              <input v-model.number="configForm[field.key]" type="number" step="1" :required="field.required" :min="field.min ?? 0" @change="onConfigFieldChange(field, $event.target.value)" />
+            </label>
+            <label v-else>
+              <span>{{ field.label }} <em v-if="field.required">*</em></span>
+              <input v-model.trim="configForm[field.key]" :required="field.required" :readonly="configFieldDisabled(field)" :aria-readonly="configFieldDisabled(field)" :placeholder="field.placeholder || ''" />
+              <small v-if="configFieldDisabled(field)">编码与类型创建后不可修改；如需变更，请停用原配置后新建。</small>
+            </label>
+          </template>
+          <label><span>启用</span><button type="button" class="pm-switch" :class="{ on: configForm.enabled }" :aria-label="`${configForm.enabled ? '停用' : '启用'}`" @click="configForm.enabled = !configForm.enabled"><i></i></button></label>
+        </div>
+        <footer><button type="button" class="pm-button" @click="configEditorOpen = false">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : '保存' }}</button></footer>
+      </form>
+    </div>
     <Transition name="pm-toast"><div v-if="toastMessage" class="pm-toast" :class="toastType" role="status"><span>{{ toastType === 'error' ? '✕' : toastType === 'warning' ? '⚠' : toastType === 'info' ? 'ℹ' : '✓' }}</span>{{ toastMessage }}</div></Transition>
   </div>
 </template>
