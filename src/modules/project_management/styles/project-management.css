@@ -1824,5 +1824,76 @@
 .pm-review-state b,
 .pm-report-phase b { width: fit-content; }
 
+/* 18.14 合同拆解规则新手引导：先解释生效顺序，再进入三层配置。 */
+.pm-split-guide {
+  display: grid;
+  grid-template-columns: minmax(260px, .85fr) minmax(460px, 1.35fr);
+  gap: var(--pm-sp-5);
+  margin-bottom: var(--pm-gap-grid);
+  padding: var(--pm-sp-6);
+  overflow: hidden;
+  border: 1px solid var(--pm-primary-border);
+  border-radius: var(--pm-r-lg);
+  background: linear-gradient(135deg, var(--pm-card) 0%, var(--pm-primary-soft) 100%);
+  box-shadow: var(--pm-shadow);
+}
+.pm-split-guide-copy { min-width: 0; }
+.pm-split-guide-copy > .pm-badge { margin-bottom: var(--pm-sp-2); }
+.pm-split-guide-copy h2 { margin: 4px 0 var(--pm-sp-2); color: var(--pm-ink); font-size: var(--pm-fs-title); }
+.pm-split-guide-copy > p:last-of-type { max-width: 620px; margin: 0; color: var(--pm-body); font-size: var(--pm-fs-sm); line-height: var(--pm-lh-loose); }
+.pm-split-guide-actions { display: flex; flex-wrap: wrap; gap: var(--pm-sp-2); margin-top: var(--pm-sp-4); }
+.pm-split-flow { grid-column: 2; grid-row: 1; display: flex; align-items: stretch; gap: var(--pm-sp-2); }
+.pm-split-flow > button {
+  flex: 1;
+  min-width: 0;
+  padding: var(--pm-sp-4);
+  border: 1px solid var(--pm-line);
+  border-radius: var(--pm-r-md);
+  background: var(--pm-card);
+  color: var(--pm-ink);
+  text-align: left;
+  transition: border-color var(--pm-t-fast), transform var(--pm-t-fast), box-shadow var(--pm-t-fast);
+}
+.pm-split-flow > button:hover { transform: translateY(-1px); border-color: var(--pm-primary-border); box-shadow: var(--pm-shadow); }
+.pm-split-flow > button > span { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; margin-bottom: var(--pm-sp-3); border-radius: var(--pm-r-full); background: var(--pm-primary); color: var(--pm-card); font-size: var(--pm-fs-hint); font-weight: var(--pm-fw-bold); }
+.pm-split-flow > button > b,
+.pm-split-flow > button > small { display: block; }
+.pm-split-flow > button > b { color: var(--pm-ink); font-size: var(--pm-fs-sm); }
+.pm-split-flow > button > small { margin-top: 5px; color: var(--pm-muted); font-size: var(--pm-fs-hint); line-height: 1.45; }
+.pm-split-flow > i { align-self: center; color: var(--pm-primary); font-size: var(--pm-fs-title); font-style: normal; }
+.pm-split-outcome { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(280px, 1fr) auto; gap: var(--pm-sp-4); align-items: center; padding: var(--pm-sp-4); border: 1px solid var(--pm-primary-border); border-radius: var(--pm-r-md); background: var(--pm-card); }
+.pm-split-outcome div > span,
+.pm-split-live-summary > span { display: block; margin-bottom: 4px; color: var(--pm-blue-text); font-size: var(--pm-fs-label); font-weight: var(--pm-fw-bold); }
+.pm-split-outcome div > b { color: var(--pm-ink); font-size: var(--pm-fs-sm); line-height: var(--pm-lh-loose); }
+.pm-split-outcome ul { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.pm-split-outcome li { padding: 5px 9px; border-radius: var(--pm-r-full); background: var(--pm-sunken); color: var(--pm-body); font-size: var(--pm-fs-hint); white-space: nowrap; }
+.pm-split-anchor { scroll-margin-top: var(--pm-sp-5); }
+.pm-split-card > header > div > p:last-child { max-width: 780px; margin: 5px 0 0; color: var(--pm-muted); font-size: var(--pm-fs-hint); line-height: var(--pm-lh-loose); }
+.pm-split-card h2 .pm-badge { margin-left: 6px; vertical-align: middle; }
+.pm-split-live-summary { padding: var(--pm-sp-4); border: 1px solid var(--pm-primary-border); border-radius: var(--pm-r-md); background: var(--pm-primary-soft); }
+.pm-split-live-summary > b,
+.pm-split-live-summary > small { display: block; }
+.pm-split-live-summary > b { color: var(--pm-ink); font-size: var(--pm-fs-sm); line-height: var(--pm-lh-loose); }
+.pm-split-live-summary > small { margin-top: 4px; color: var(--pm-muted); font-size: var(--pm-fs-hint); }
+.pm-split-validation { display: flex; flex-direction: column; gap: 3px; padding: var(--pm-sp-3) var(--pm-sp-4); border: 1px solid var(--pm-red); border-radius: var(--pm-r-md); background: var(--pm-red-soft); color: var(--pm-red-text); font-size: var(--pm-fs-hint); }
+.pm-split-validation b { font-size: var(--pm-fs-sm); }
+.pm-split-savebar { display: flex; align-items: center; justify-content: space-between; gap: var(--pm-sp-3); padding-top: var(--pm-sp-3); border-top: 1px solid var(--pm-line); }
+.pm-split-savebar > span { color: var(--pm-muted); font-size: var(--pm-fs-hint); }
+.pm-split-savebar > div { display: flex; flex-wrap: wrap; gap: var(--pm-sp-2); }
+
+@media (max-width: 1100px) {
+  .pm-split-guide { grid-template-columns: 1fr; }
+  .pm-split-flow { grid-column: 1; grid-row: auto; }
+}
+
+@media (max-width: 700px) {
+  .pm-split-guide { padding: var(--pm-sp-4); }
+  .pm-split-flow { flex-direction: column; }
+  .pm-split-flow > i { transform: rotate(90deg); }
+  .pm-split-outcome { grid-template-columns: 1fr; }
+  .pm-split-outcome ul { justify-content: flex-start; }
+  .pm-split-savebar { align-items: flex-start; flex-direction: column; }
+}
+
 /* 现场计划字段已从实施计划流程移除；保留选择器以兼容旧模板结构。 */
 .pm-operation-form label:has(textarea[placeholder="现场实施步骤和窗口"]) { display: none; }

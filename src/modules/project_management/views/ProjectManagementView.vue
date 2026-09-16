@@ -410,11 +410,31 @@ const deviationDecisionOptions = Object.freeze([
 ])
 
 // 各套真实配置表的列与编辑字段元数据。
+const fieldPermissionFieldOptions = Object.freeze([
+  { value: 'name', label: '项目名称', description: '项目主档' },
+  { value: 'customer', label: '客户名称', description: '项目主档、设备预约记录' },
+  { value: 'contract', label: '合同编号', description: '项目主档' },
+  { value: 'category', label: '检测类别', description: '项目主档、服务项及事件快照' },
+  { value: 'team', label: '执行团队', description: '项目主档' },
+  { value: 'manager', label: '项目经理（项目展示）', description: '项目主档展示字段' },
+  { value: 'due', label: '计划完成时间', description: '项目主档' },
+  { value: 'batch', label: '批次', description: '服务项及事件快照' },
+  { value: 'site', label: '实施场所', description: '服务项、SLA 超期记录及事件快照' },
+  { value: 'requirement', label: '技术要求', description: '服务项及事件快照' },
+  { value: 'system', label: '系统名称', description: '服务项及事件快照' },
+  { value: 'system_level', label: '系统等级', description: '服务项及事件快照' },
+  { value: 'special', label: '特殊方法标记', description: '服务项及事件快照' },
+  { value: 'test_mode', label: '测试模式', description: '服务项及事件快照' },
+  { value: 'source_service_id', label: '合同服务项来源编号', description: '服务项及事件快照' },
+  { value: 'team_lead_id', label: '团队负责人', description: '服务项指派关系及事件快照' },
+  { value: 'project_manager_id', label: '项目经理（服务项指派）', description: '服务项指派关系及事件快照' },
+  { value: 'engineer_ids', label: '工程师名单', description: '服务项指派关系及事件快照' },
+])
 const configKindsMeta = [
   { kind: 'capability-codes', label: '资质 / 能力编码', columns: [{ key: 'scope', label: '编码' }, { key: 'resource_type_label', label: '适用类型' }], fields: [{ key: 'scope', label: '编码', field: 'text', required: true, placeholder: '例如 CISP / ISO27001 / EQ-SCAN' }, { key: 'check_type', label: '适用类型', field: 'select', required: true, options: [{ value: 'PERSON', label: '人员资质' }, { value: 'EQUIPMENT', label: '设备能力' }] }] },
   { kind: 'warning-rules', label: '预警规则', columns: [{ key: 'check_type', label: '检查类型' }, { key: 'threshold', label: '阈值' }], fields: [{ key: 'check_type', label: '检查类型', field: 'text', required: true, placeholder: '例如 资质能力冲突 / 排期冲突 / 场地冲突' }, { key: 'threshold', label: '阈值', field: 'text', placeholder: '例如 连续 3 项冲突' }] },
   { kind: 'automations', label: '自动化动作', columns: [{ key: 'trigger', label: '触发事件' }, { key: 'target', label: '目标' }], fields: [{ key: 'trigger', label: '触发事件', field: 'text', required: true, placeholder: '例如 DEVIATION_REPORTED' }, { key: 'target', label: '目标', field: 'text', required: true, placeholder: '例如 通知技术总监 / 创建整改工单' }] },
-  { kind: 'permissions', label: '字段级权限', columns: [{ key: 'role_code', label: '角色' }, { key: 'field_name', label: '字段' }, { key: 'access_level', label: '访问级别' }], fields: [{ key: 'role_codes', label: '角色', field: 'roles', required: true }, { key: 'field_name', label: '字段', field: 'text', required: true, placeholder: '例如 report_revenue' }, { key: 'access_level', label: '访问级别', field: 'select', required: true, options: [{ value: 'view', label: '只读可见' }, { value: 'edit', label: '可编辑' }, { value: 'hidden', label: '隐藏' }] }] },
+  { kind: 'permissions', label: '字段级权限', columns: [{ key: 'role_code', label: '角色' }, { key: 'field_name', label: '字段' }, { key: 'access_level', label: '访问级别' }], fields: [{ key: 'role_codes', label: '角色', field: 'roles', required: true }, { key: 'field_name', label: '字段', field: 'permission-field', required: true, options: fieldPermissionFieldOptions }, { key: 'access_level', label: '访问级别', field: 'select', required: true, options: [{ value: 'hidden', label: '隐藏（接口返回 ***）' }] }] },
   { kind: 'sla', label: 'SLA 规则', columns: [{ key: 'status', label: '状态' }, { key: 'deadline_hours', label: '时限(小时)' }, { key: 'remind_hours', label: '提醒(小时)' }], fields: [{ key: 'status', label: '生效状态', field: 'text', required: true, placeholder: '例如 报告编制' }, { key: 'deadline_hours', label: '时限(小时)', field: 'number', required: true, min: 1 }, { key: 'remind_hours', label: '提前提醒(小时)', field: 'number', min: 0 }] },
   { kind: 'standards', label: '检测标准', columns: [{ key: 'scope', label: '适用方法/范围' }], fields: [{ key: 'scope', label: '适用方法/范围', field: 'text', required: true, placeholder: '例如 GB/T 28448 更新的检测方法进入评估' }] },
 ]
@@ -453,19 +473,13 @@ const configRoleOptions = computed(() => {
   }
   return options
 })
-const configRoleChipOptions = computed(() => configRoleSelection.value.map((code) => configRoleOptions.value.find((option) => option.code === code) || { code, name: code }))
-function toggleConfigRole(code) {
-  const selected = new Set(configRoleSelection.value)
-  if (selected.has(code)) selected.delete(code)
-  else selected.add(code)
-  configForm.value.role_codes = [...selected]
-}
 function openConfigCreate() {
   configForm.value = { id: null, kind: activeSection.value, name: '', enabled: true }
   for (const field of activeConfigMeta.value.fields) {
-    configForm.value[field.key] = field.field === 'number' ? (field.key === 'deadline_hours' ? 24 : field.key === 'remind_hours' ? 4 : 0) : field.field === 'roles' ? [] : field.key === 'access_level' ? 'view' : ''
+    configForm.value[field.key] = field.field === 'number' ? (field.key === 'deadline_hours' ? 24 : field.key === 'remind_hours' ? 4 : 0) : field.field === 'roles' ? [] : field.key === 'access_level' ? 'hidden' : ''
   }
-  // 上一次弹窗可能在多选菜单展开时被关闭：新弹窗必须从收起态开始。
+  // 打开配置弹窗时收起页面上仍在使用旧式组件的设备/检测编码菜单；角色选择器
+  // 自身随弹窗挂载，始终从收起态开始。
   openMulti.value = ''
   if (activeConfigMeta.value.fields.some((field) => field.field === 'roles')) loadApplicationRoles()
   configEditorOpen.value = true
@@ -475,6 +489,9 @@ function openConfigEdit(rule) {
   openMulti.value = ''
   if (activeConfigMeta.value.fields.some((field) => field.field === 'roles')) {
     configForm.value.role_codes = rule.role_code ? [rule.role_code] : []
+    // 历史 view/edit 规则从未进入运行时判定；编辑时收口为唯一真实生效的 hidden，
+    // 避免继续展示“保存成功但没有权限效果”的配置。
+    configForm.value.access_level = 'hidden'
     loadApplicationRoles()
   }
   configEditorOpen.value = true
@@ -546,6 +563,7 @@ const splitConfigLoading = ref(false)
 const splitConfigError = ref('')
 const categoryDialog = ref(null)
 const overrideDialog = ref(null)
+const splitPolicyBaseline = ref('')
 
 // 维度取值与原型一致：维度 1 取清单/项目侧字段，维度 2/3 另可含服务项属性。
 const splitDimensionPrimaryOptions = [
@@ -580,12 +598,64 @@ const splitDimensionLabel = Object.fromEntries(splitDimensionAnyOptions.map((opt
 function splitDimensionText(value) { return splitDimensionLabel[value] || value || '—' }
 function splitMissingRuleText(value) { return splitMissingRuleOptions.find((option) => option.value === value)?.label.replace(/（默认）|（不通知，不推荐）/, '') || value }
 
+const activeDetectionCategoryCount = computed(() => detectionCategories.value.filter((item) => item.enabled).length)
+const activeSplitOverrideCount = computed(() => splitOverrides.value.filter((item) => item.enabled).length)
+const splitPolicyDimensions = computed(() => [
+  splitPolicy.value?.dimension_primary,
+  splitPolicy.value?.dimension_secondary,
+  splitPolicy.value?.dimension_tertiary,
+].filter(Boolean))
+const splitPolicyIssues = computed(() => {
+  const issues = []
+  const dimensions = splitPolicyDimensions.value
+  if (new Set(dimensions).size !== dimensions.length) issues.push('分组维度不能重复，请为每一层选择不同字段')
+  if (!splitPolicy.value?.generate_requirement_summary && splitPolicy.value?.requirement_summary_locked) issues.push('未生成技术要求摘要时，不能锁定摘要字段')
+  return issues
+})
+const splitPolicyDirty = computed(() => Boolean(splitPolicyBaseline.value) && JSON.stringify(splitPolicy.value) !== splitPolicyBaseline.value)
+const splitPolicySummary = computed(() => {
+  if (splitPolicy.value?.enabled === false) return '自定义规则已停用。后续合同将回退到“批次 + 检测类别”的安全默认分组，全部进入“待确认”，且不应用特殊合同覆盖规则。'
+  const dimensions = splitPolicyDimensions.value.map(splitDimensionText).join(' + ') || '尚未设置分组维度'
+  const status = splitPolicy.value?.default_status || '待确认'
+  return `系统按「${dimensions}」合并合同明细，每个组合生成 1 个服务项，并进入「${status}」状态。`
+})
+
+function scrollToSplitSection(id) {
+  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+function applyRecommendedSplitPolicy() {
+  const recommended = {
+    ...splitPolicy.value,
+    dimension_primary: 'batch',
+    dimension_secondary: 'category',
+    dimension_tertiary: '',
+    default_status: '待确认',
+    generate_requirement_summary: true,
+    requirement_summary_locked: false,
+    missing_rule_action: 'HUMAN_CONFIRM',
+    scope_change_detection: true,
+    enabled: true,
+  }
+  const changed = JSON.stringify(recommended) !== JSON.stringify(splitPolicy.value)
+  splitPolicy.value = recommended
+  showToast(changed ? '已填入安全推荐配置，请确认后点击保存' : '当前已经是安全推荐配置', changed ? 'info' : 'success')
+  scrollToSplitSection('split-policy-section')
+}
+
+function resetSplitPolicyChanges() {
+  if (!splitPolicyBaseline.value) return
+  splitPolicy.value = JSON.parse(splitPolicyBaseline.value)
+  showToast('已撤销尚未保存的默认规则修改', 'info')
+}
+
 async function loadSplitConfig() {
   splitConfigLoading.value = true
   splitConfigError.value = ''
   try {
     const [policy, categories, overrides] = await Promise.all([getSplitPolicy(), listDetectionCategories(), listSplitOverrides()])
     splitPolicy.value = policy
+    splitPolicyBaseline.value = JSON.stringify(policy)
     detectionCategories.value = categories
     splitOverrides.value = overrides
   } catch (error) {
@@ -597,9 +667,12 @@ async function loadSplitConfig() {
 
 async function submitSplitPolicy() {
   if (!splitPolicy.value || splitPolicySaving.value) return
+  if (splitPolicyIssues.value.length) { showToast(splitPolicyIssues.value[0], 'warning'); return }
+  if (!splitPolicyDirty.value) { showToast('当前没有需要保存的修改', 'info'); return }
   splitPolicySaving.value = true
   try {
     splitPolicy.value = await saveSplitPolicy(splitPolicy.value)
+    splitPolicyBaseline.value = JSON.stringify(splitPolicy.value)
     showToast('默认分组规则已保存，对新合同的拆解生效')
   } catch (error) { showToast(error?.message || '默认分组规则保存失败', 'error') }
   finally { splitPolicySaving.value = false }
@@ -954,7 +1027,8 @@ function closeMultiOnOutsideClick(event) {
   if (!(event.target instanceof Element) || !event.target.closest('.pm-multi-dropdown')) openMulti.value = ''
 }
 // 键盘可达的多选下拉统一走这里：↑↓ 移动高亮、Enter 勾选、Esc 关闭；人员选择器与
-// 字段级权限的角色选择器共用同一套交互基线，只有选项来源与选中值语义不同。
+// 设备维护和检测规则的旧式多选共用同一套交互基线；字段级权限角色已统一迁移到
+// SearchableSelect，由组件处理点击触发、模糊搜索、键盘导航和视口动态定位。
 function navigateMulti(event, options, name, toggle) {
   if (event.key === 'Escape') {
     if (openMulti.value === name) { event.stopPropagation(); openMulti.value = ''; multiActiveIndex.value = -1 }
@@ -971,7 +1045,6 @@ function navigateMulti(event, options, name, toggle) {
     if (option && !option.disabled) toggle(option)
   }
 }
-function onConfigRolesKeydown(event) { navigateMulti(event, configRoleOptions.value, 'configRoles', (option) => toggleConfigRole(option.code)) }
 function onEquipmentCodesKeydown(event) { navigateMulti(event, equipmentCodeOptions.value, 'equipmentCodes', (option) => toggleEquipmentCode(option.code)) }
 function onDetectionRequiredCodesKeydown(event) { navigateMulti(event, detectionRequiredCodeOptions.value, 'detectionRequiredCodes', (option) => toggleDetectionRequiredCode(option.code)) }
 const projectByID = computed(() => new Map(projects.value.map((project) => [project.id, project])))
@@ -2798,10 +2871,35 @@ onBeforeUnmount(() => {
             </form>
           </div>
         </template><template v-else-if="activeSection === 'split-rules'">
-            <section class="pm-panel pm-split-card">
-              <header><div><p class="pm-panel-kicker">SPLIT POLICY</p><h2>① 默认分组规则</h2></div><span class="pm-badge" :class="splitPolicy?.enabled ? 'normal' : 'neutral'">{{ splitPolicy?.enabled ? '已启用' : '已停用' }}</span></header>
+            <section class="pm-split-guide" aria-labelledby="split-guide-title">
+              <div class="pm-split-guide-copy">
+                <span class="pm-badge normal">新手引导</span>
+                <p class="pm-panel-kicker">QUICK START</p>
+                <h2 id="split-guide-title">3 步完成合同自动拆解</h2>
+                <p>合同生效或补充协议调整时，系统会依次应用下面三层配置。已有项目不会被自动重算，可以放心先从推荐配置开始。</p>
+                <div class="pm-split-guide-actions">
+                  <button v-if="canManageRules" type="button" class="pm-button primary" :disabled="splitConfigLoading || splitPolicySaving" @click="applyRecommendedSplitPolicy">使用安全推荐配置</button>
+                  <button type="button" class="pm-button" @click="scrollToSplitSection('split-policy-section')">从第 1 步开始</button>
+                </div>
+              </div>
+              <div class="pm-split-flow" aria-label="拆解规则生效顺序">
+                <button type="button" @click="scrollToSplitSection('split-policy-section')"><span>1</span><b>决定怎么分组</b><small>{{ splitPolicy?.enabled ? '默认规则已启用' : '默认规则未启用' }}</small></button>
+                <i aria-hidden="true">→</i>
+                <button type="button" @click="scrollToSplitSection('split-category-section')"><span>2</span><b>补全类别要求</b><small>{{ activeDetectionCategoryCount }} 个启用类别</small></button>
+                <i aria-hidden="true">→</i>
+                <button type="button" @click="scrollToSplitSection('split-override-section')"><span>3</span><b>处理特殊合同</b><small>{{ activeSplitOverrideCount }} 条启用特例 · 可选</small></button>
+              </div>
+              <div class="pm-split-outcome">
+                <div><span>当前规则会怎样执行</span><b>{{ splitPolicySummary }}</b></div>
+                <ul><li>未匹配类别：{{ splitMissingRuleText(splitPolicy?.missing_rule_action) }}</li><li>范围变更核对：{{ splitPolicy?.scope_change_detection ? '开启' : '关闭' }}</li><li>技术要求摘要：{{ splitPolicy?.generate_requirement_summary ? '自动生成' : '人工填写' }}</li></ul>
+              </div>
+            </section>
+
+            <section id="split-policy-section" class="pm-panel pm-split-card pm-split-anchor">
+              <header><div><p class="pm-panel-kicker">STEP 1 · SPLIT POLICY</p><h2>① 默认分组规则</h2><p>先定义大多数合同如何合并明细。建议保留“批次 + 检测类别”，并让业务管理员确认后再进入分配。</p></div><span class="pm-badge" :class="splitPolicy?.enabled ? 'normal' : 'neutral'">{{ splitPolicy?.enabled ? '已启用' : '已停用' }}</span></header>
               <div class="pm-form pm-split-form">
-                <p class="pm-form-hint pm-span-full">默认规则：<b>同一{{ splitDimensionText(splitPolicy?.dimension_primary) }} + 同一{{ splitDimensionText(splitPolicy?.dimension_secondary) }} = 1 个服务项</b>（可在覆盖规则中按客户 / 合同类型定制）</p>
+                <div class="pm-split-live-summary pm-span-full"><span>实时结果预览</span><b>{{ splitPolicySummary }}</b><small>这只是配置解释，不会立即修改已有项目；保存后仅对后续合同生效。</small></div>
+                <div v-if="splitPolicyIssues.length" class="pm-split-validation pm-span-full" role="alert"><b>保存前请修正</b><span v-for="issue in splitPolicyIssues" :key="issue">{{ issue }}</span></div>
                 <label><span>分组维度 1</span><select v-model="splitPolicy.dimension_primary" :disabled="!canManageRules"><option v-for="option in splitDimensionPrimaryOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
                 <label><span>分组维度 2</span><select v-model="splitPolicy.dimension_secondary" :disabled="!canManageRules"><option v-for="option in splitDimensionSecondaryOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
                 <label><span>分组维度 3（可选）</span><select v-model="splitPolicy.dimension_tertiary" :disabled="!canManageRules"><option value="">不使用</option><option v-for="option in splitDimensionAnyOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
@@ -2810,18 +2908,18 @@ onBeforeUnmount(() => {
                 <label><span>技术要求摘要字段</span><select v-model="splitPolicy.requirement_summary_locked" :disabled="!canManageRules"><option :value="false">生成后默认可编辑（默认）</option><option :value="true">锁定（仅技术总监可改）</option></select></label>
                 <label><span>分组规则缺失时</span><select v-model="splitPolicy.missing_rule_action" :disabled="!canManageRules"><option v-for="option in splitMissingRuleOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
                 <label><span>范围变更检测</span><select v-model="splitPolicy.scope_change_detection" :disabled="!canManageRules"><option :value="true">开启：合同清单与拆解结果勾对（默认）</option><option :value="false">关闭</option></select></label>
-                <label><span>启用该规则</span><select v-model="splitPolicy.enabled" :disabled="!canManageRules"><option :value="true">启用</option><option :value="false">停用</option></select></label>
-                <div v-if="canManageRules" class="pm-form-row"><button type="button" class="pm-button primary" :disabled="splitPolicySaving" @click="submitSplitPolicy">{{ splitPolicySaving ? '保存中…' : '保存默认分组规则' }}</button></div>
+                <label><span>启用自动拆解规则</span><select v-model="splitPolicy.enabled" :disabled="!canManageRules"><option :value="true">启用自定义规则</option><option :value="false">停用并回退到安全默认</option></select><small>停用后不会停止生成服务项，而是全部进入待确认，且不应用特殊合同覆盖规则。</small></label>
+                <div v-if="canManageRules" class="pm-split-savebar pm-span-full"><span>{{ splitPolicyDirty ? '有尚未保存的修改' : '当前配置已保存' }}</span><div><button v-if="splitPolicyDirty" type="button" class="pm-button" :disabled="splitPolicySaving" @click="resetSplitPolicyChanges">撤销修改</button><button type="button" class="pm-button primary" :disabled="splitPolicySaving || !splitPolicyDirty || splitPolicyIssues.length > 0" @click="submitSplitPolicy">{{ splitPolicySaving ? '保存中…' : '保存并用于后续合同' }}</button></div></div>
               </div>
             </section>
 
-            <section class="pm-panel pm-split-card">
-              <header><div><p class="pm-panel-kicker">DETECTION CATEGORY</p><h2>② 检测类别（服务类型）域</h2></div><span class="pm-filter-count">已配置 {{ detectionCategories.length }} 类</span><div class="pm-panel-actions"><template v-if="canManageRules"><button type="button" class="pm-button" @click="downloadDetectionCategories">导出</button><button type="button" class="pm-button" :disabled="saving" @click="detectionCategoryFileInput.click()">导入</button><button type="button" class="pm-button primary" @click="openCategoryDialog()">＋ 新增</button><input ref="detectionCategoryFileInput" type="file" accept=".csv,text/csv" class="sr-only" @change="importDetectionCategoryFile" /></template></div></header>
+            <section id="split-category-section" class="pm-panel pm-split-card pm-split-anchor">
+              <header><div><p class="pm-panel-kicker">STEP 2 · DETECTION CATEGORY</p><h2>② 检测类别与人员要求</h2><p>为合同里的检测类别设置默认体系、人员资质和特殊方法要求，拆解后会自动带入服务项。</p></div><span class="pm-filter-count">启用 {{ activeDetectionCategoryCount }} / 共 {{ detectionCategories.length }} 类</span><div class="pm-panel-actions"><template v-if="canManageRules"><button type="button" class="pm-button" @click="downloadDetectionCategories">导出</button><button type="button" class="pm-button" :disabled="saving" @click="detectionCategoryFileInput.click()">导入</button><button type="button" class="pm-button primary" @click="openCategoryDialog()">＋ 新增类别</button><input ref="detectionCategoryFileInput" type="file" accept=".csv,text/csv" class="sr-only" @change="importDetectionCategoryFile" /></template></div></header>
               <div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>检测类别</th><th>默认体系要求</th><th>必备资质（默认）</th><th>是否特殊方法</th><th>关联服务项</th><th>状态</th><th></th></tr></thead><tbody><tr v-for="item in detectionCategories" :key="item.category"><td><b>{{ item.category }}</b></td><td>{{ item.system_standard || '—' }}</td><td>{{ item.required_qualifications || '—' }}</td><td><span class="pm-badge" :class="specialMethodTone[item.special_method] || 'neutral'">{{ specialMethodLabel[item.special_method] || item.special_method }}</span></td><td>{{ item.service_item_count || 0 }} 项</td><td><span class="pm-badge" :class="item.enabled ? 'normal' : 'neutral'">{{ item.enabled ? '启用' : '停用' }}</span></td><td class="pm-split-actions"><button v-if="canManageRules" class="pm-link" @click="openCategoryDialog(item)">编辑</button><button v-if="canManageRules" class="pm-link pm-text-danger" :disabled="saving" @click="removeDetectionCategory(item)">删除</button></td></tr><tr v-if="!detectionCategories.length"><td colspan="7" class="pm-empty-mini">尚未配置检测类别域</td></tr></tbody></table></div>
             </section>
 
-            <section class="pm-panel pm-split-card">
-              <header><div><p class="pm-panel-kicker">OVERRIDE RULES</p><h2>③ 覆盖规则（按客户 / 合同类型）</h2></div><span class="pm-filter-count">共 {{ splitOverrides.length }} 条</span><div class="pm-panel-actions"><button v-if="canManageRules" type="button" class="pm-button" @click="openOverrideDialog()">＋ 新建覆盖</button></div></header>
+            <section id="split-override-section" class="pm-panel pm-split-card pm-split-anchor">
+              <header><div><p class="pm-panel-kicker">STEP 3 · EXCEPTIONS</p><h2>③ 特殊合同覆盖规则 <span class="pm-badge neutral">可选</span></h2><p>只有少数客户或合同需要不同拆解方式时才配置。数字越小优先级越高，命中第一条后停止继续匹配。</p></div><span class="pm-filter-count">启用 {{ activeSplitOverrideCount }} / 共 {{ splitOverrides.length }} 条</span><div class="pm-panel-actions"><button v-if="canManageRules" type="button" class="pm-button" @click="openOverrideDialog()">＋ 新建特例</button></div></header>
               <div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>规则名称</th><th>匹配条件</th><th>覆盖设置</th><th>优先级</th><th>状态</th><th></th></tr></thead><tbody><tr v-for="item in splitOverrides" :key="item.id"><td><b>{{ item.name }}</b></td><td>{{ overrideMatchText(item) }}</td><td>{{ overrideSettingsText(item) }}</td><td>{{ item.priority }}</td><td><span class="pm-badge" :class="item.enabled ? 'normal' : 'neutral'">{{ item.enabled ? '启用' : '停用' }}</span></td><td class="pm-split-actions"><button v-if="canManageRules" class="pm-link" @click="openOverrideDialog(item)">编辑</button><button v-if="canManageRules" class="pm-link pm-text-danger" :disabled="saving" @click="removeSplitOverride(item)">删除</button></td></tr><tr v-if="!splitOverrides.length"><td colspan="6" class="pm-empty-mini">尚未配置覆盖规则，全部合同按默认分组规则拆解</td></tr></tbody></table></div>
               <p v-if="splitConfigError" class="pm-form-hint" role="alert">{{ splitConfigError }}</p>
               <p v-else-if="splitConfigLoading" class="pm-form-hint">配置加载中…</p>
@@ -2921,7 +3019,7 @@ onBeforeUnmount(() => {
 
     <div v-if="adjustOpen" class="pm-overlay" @click.self="adjustOpen = false"><form class="pm-dialog pm-dialog-wide" @submit.prevent="submitDecompositionAdjust"><header><div><span>ADJUST</span><h2>调整拆解</h2><small class="pm-dialog-sub">目标项目：<b>{{ decompositionProject ? `${decompositionProject.id} · ${decompositionProject.name || decompositionProject.customer || ''}` : '未选择' }}</b> —— 提交后该项目的<b>全部</b>服务项会被这份清单替换并进入补充协议处理中；原服务项转为归档保留历史。</small></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="adjustOpen = false"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>调整原因 <em>*</em></span><input v-model.trim="adjustForm.reason" required placeholder="例如 客户追加两个系统" /></label><label><span>补充协议编号 <em>*</em></span><input v-model.trim="adjustForm.supplementContractID" required placeholder="例如 SC-2026-0007" /></label><section class="pm-service-links"><header><div><b>新的服务项清单</b><small>提交后该项目的全部服务项会被这份清单替换，并进入补充协议处理中</small></div><button type="button" class="pm-link" @click="addAdjustItem">＋ 增加一行</button></header><div v-for="(row, index) in adjustForm.items" :key="index" class="pm-adjust-item"><div class="pm-service-link-row"><input v-model.trim="row.batch" required placeholder="批次" /><input v-model.trim="row.site" required placeholder="场所" /><input v-model.trim="row.category" required placeholder="检测类别" /><button type="button" class="pm-icon-button" :aria-label="`删除第 ${index + 1} 行`" @click="removeAdjustItem(index)">×</button></div><div class="pm-service-link-row"><input v-model.trim="row.system" placeholder="系统名称" /><input v-model.trim="row.systemLevel" placeholder="系统等级" /><input v-model.trim="row.requirement" placeholder="技术要求" /><select v-model="row.testMode"><option value="STANDARD">标准方法</option><option value="PENETRATION">渗透测试</option></select></div></div></section></div><footer><button type="button" class="pm-button" @click="adjustOpen = false">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '提交中…' : '提交调整' }}</button></footer></form></div>
 
-    <div v-if="configEditorOpen" class="pm-overlay" @click.self="configEditorOpen = false"><form class="pm-dialog" @submit.prevent="saveConfigRule"><header><div><span>CONFIG</span><h2>{{ configForm.id ? '编辑配置' : '新建配置' }} · {{ activeConfigMeta.label }}</h2></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="configEditorOpen = false"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>配置名称 <em>*</em></span><input v-model.trim="configForm.name" required placeholder="请输入配置名称" /></label><template v-for="field in activeConfigMeta.fields" :key="field.key"><div v-if="field.field === 'roles'" class="pm-field pm-span-full"><span>{{ field.label }} <em v-if="field.required">*</em></span><div class="pm-multi-dropdown" :class="{ open: openMulti === 'configRoles' }"><button type="button" class="pm-multi-trigger" :class="{ placeholder: !configRoleSelection.length }" aria-haspopup="listbox" :aria-expanded="openMulti === 'configRoles'" @click.stop="toggleMulti('configRoles')" @keydown="onConfigRolesKeydown"><span>{{ multiSummary(configRoleSelection, configRoleOptions, '请选择角色（可多选）', 'code') }}</span><i class="pm-multi-caret"></i></button><div v-if="openMulti === 'configRoles'" class="pm-multi-menu" role="listbox" aria-label="选择角色" aria-multiselectable="true"><label v-for="option in configRoleOptions" :key="option.code" class="pm-multi-option" :class="{ 'is-active': configRoleOptions[multiActiveIndex]?.code === option.code }" role="option" :aria-selected="configRoleSelection.includes(option.code)"><input type="checkbox" :checked="configRoleSelection.includes(option.code)" @change="toggleConfigRole(option.code)" /><span>{{ option.name }}</span></label><p v-if="!configRoleOptions.length" class="pm-empty-mini">{{ applicationRolesError || '角色目录加载中…' }}</p></div></div><div v-if="configRoleChipOptions.length" class="pm-multi-chips"><span v-for="option in configRoleChipOptions" :key="option.code" class="pm-chip">{{ option.name }}<button type="button" class="pm-chip-x" :aria-label="`移除 ${option.name}`" @click.stop="toggleConfigRole(option.code)">✕</button></span></div><p v-if="configRoleSelection.length > 1" class="pm-form-hint">已选 {{ configRoleSelection.length }} 个角色，保存后每个角色各生成一条规则。</p><p v-else-if="applicationRolesError" class="pm-form-hint" role="alert">{{ applicationRolesError }}</p></div><label v-else-if="field.field === 'select'"><span>{{ field.label }} <em>*</em></span><select v-model="configForm[field.key]" required><option v-for="option in field.options" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label v-else-if="field.field === 'number'"><span>{{ field.label }} <em v-if="field.required">*</em></span><input v-model.number="configForm[field.key]" type="number" :required="field.required" :min="field.min || 0" /></label><label v-else><span>{{ field.label }} <em v-if="field.required">*</em></span><input v-model.trim="configForm[field.key]" :required="field.required" :placeholder="field.placeholder || ''" /></label></template><label><span>启用</span><button type="button" class="pm-switch" :class="{ on: configForm.enabled }" :aria-label="`${configForm.enabled ? '停用' : '启用'}`" @click="configForm.enabled = !configForm.enabled"><i></i></button></label></div><footer><button type="button" class="pm-button" @click="configEditorOpen = false">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : '保存' }}</button></footer></form></div>
+    <div v-if="configEditorOpen" class="pm-overlay" @click.self="configEditorOpen = false"><form class="pm-dialog" @submit.prevent="saveConfigRule"><header><div><span>CONFIG</span><h2>{{ configForm.id ? '编辑配置' : '新建配置' }} · {{ activeConfigMeta.label }}</h2></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="configEditorOpen = false"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>配置名称 <em>*</em></span><input v-model.trim="configForm.name" required placeholder="请输入配置名称" /></label><template v-for="field in activeConfigMeta.fields" :key="field.key"><div v-if="field.field === 'roles'" class="pm-field pm-span-full"><span>{{ field.label }} <em v-if="field.required">*</em></span><SearchableSelect v-model="configForm.role_codes" :options="configRoleOptions" value-key="code" label-key="name" placeholder="请选择角色（可多选）" search-placeholder="搜索角色名称或编码" :empty-text="applicationRolesError || '暂无匹配角色'" aria-label="选择字段级权限角色" menu-z-index="calc(var(--pm-z-modal, 50) + 1)" multiple required /><p v-if="configRoleSelection.length > 1" class="pm-form-hint">已选 {{ configRoleSelection.length }} 个角色，保存后每个角色各生成一条规则。</p><p v-else-if="applicationRolesError" class="pm-form-hint" role="alert">{{ applicationRolesError }}</p></div><div v-else-if="field.field === 'permission-field'" class="pm-field pm-span-full"><span>{{ field.label }} <em>*</em></span><SearchableSelect v-model="configForm[field.key]" :options="field.options" placeholder="请选择需要隐藏的字段" search-placeholder="搜索字段名称或编码" empty-text="没有匹配的有效字段" aria-label="选择字段级权限字段" menu-z-index="calc(var(--pm-z-modal, 50) + 1)" required /></div><label v-else-if="field.field === 'select'"><span>{{ field.label }} <em>*</em></span><select v-model="configForm[field.key]" required><option v-for="option in field.options" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label v-else-if="field.field === 'number'"><span>{{ field.label }} <em v-if="field.required">*</em></span><input v-model.number="configForm[field.key]" type="number" :required="field.required" :min="field.min || 0" /></label><label v-else><span>{{ field.label }} <em v-if="field.required">*</em></span><input v-model.trim="configForm[field.key]" :required="field.required" :placeholder="field.placeholder || ''" /></label></template><label><span>启用</span><button type="button" class="pm-switch" :class="{ on: configForm.enabled }" :aria-label="`${configForm.enabled ? '停用' : '启用'}`" @click="configForm.enabled = !configForm.enabled"><i></i></button></label></div><footer><button type="button" class="pm-button" @click="configEditorOpen = false">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : '保存' }}</button></footer></form></div>
     <Transition name="pm-toast"><div v-if="toastMessage" class="pm-toast" :class="toastType" role="status"><span>{{ toastType === 'error' ? '✕' : toastType === 'warning' ? '⚠' : toastType === 'info' ? 'ℹ' : '✓' }}</span>{{ toastMessage }}</div></Transition>
   </div>
 </template>
