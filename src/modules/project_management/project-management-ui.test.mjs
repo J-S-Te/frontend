@@ -994,13 +994,14 @@ test('字段级权限的角色是服务端目录驱动的多选下拉，多选�
   assert.match(source, /v-if="field\.field === 'roles'" class="pm-field pm-span-full"/)
   // 默认多选：新建时选中值为数组，不要求按住 ⌘/Ctrl 加选。
   assert.match(source, /field\.field === 'roles' \? \[\] :/)
-  assert.match(source, /:aria-expanded="openMulti === 'configRoles'"/)
-  assert.match(source, /aria-multiselectable="true"/)
-  assert.match(source, /:aria-selected="configRoleSelection\.includes\(option\.code\)"/)
-  assert.match(source, /multiSummary\(configRoleSelection, configRoleOptions, '请选择角色（可多选）', 'code'\)/)
-  // 复用统一交互基线：↑↓/Enter/Esc 与人员多选同源。
-  assert.match(source, /function onConfigRolesKeydown\(event\) \{ navigateMulti\(event, configRoleOptions\.value, 'configRoles', \(option\) => toggleConfigRole\(option\.code\)\) \}/)
-  assert.match(source, /function navigateMulti\(event, options, name, toggle\)/)
+  assert.match(source, /<SearchableSelect v-model="configForm\.role_codes" :options="configRoleOptions" value-key="code" label-key="name"/)
+  assert.match(source, /placeholder="请选择角色（可多选）" search-placeholder="搜索角色名称或编码"/)
+  assert.match(source, /aria-label="选择字段级权限角色" menu-z-index="calc\(var\(--pm-z-modal, 50\) \+ 1\)" multiple required/)
+  // 复用统一选择器：只在点击或键盘明确触发时展开，Teleport 菜单会按视口空间动态定位。
+  assert.match(searchableSelectSource, /@click\.stop="toggle"/)
+  assert.match(searchableSelectSource, /calculateSearchableSelectLayout/)
+  assert.match(searchableSelectSource, /<Teleport to="body">/)
+  assert.doesNotMatch(source, /openMulti === 'configRoles'|onConfigRolesKeydown|toggleConfigRole|configRoleChipOptions/)
   // 编辑既有规则时回填当前角色；已不在目录内的历史角色码要显式标注而不是静默改写。
   assert.match(source, /configForm\.value\.role_codes = rule\.role_code \? \[rule\.role_code\] : \[\]/)
   assert.match(source, /（不在角色目录中）/)
@@ -1012,6 +1013,29 @@ test('字段级权限的角色是服务端目录驱动的多选下拉，多选�
   assert.match(source, /showToast\('请至少选择一个角色', 'warning'\)/)
   // 逐条回填列表：中途失败也能看到已生效的规则，重试不会留下看不到的重复规则。
   assert.match(source, /applySavedRule\(saved\)\n        created\.push\(saved\)/)
+})
+
+test('字段级权限只能从有效字段白名单选择且仅开放真实生效的隐藏级别', () => {
+  const supportedFields = [
+    'name', 'customer', 'contract', 'category', 'team', 'manager', 'due',
+    'batch', 'site', 'requirement', 'system', 'system_level', 'special', 'test_mode',
+    'source_service_id', 'team_lead_id', 'project_manager_id', 'engineer_ids',
+  ]
+  assert.match(source, /const fieldPermissionFieldOptions = Object\.freeze\(\[/)
+  for (const field of supportedFields) {
+    assert.match(source, new RegExp(`\\{ value: '${field}', label:`), `missing field permission option ${field}`)
+  }
+  assert.match(source, /key: 'field_name', label: '字段', field: 'permission-field', required: true, options: fieldPermissionFieldOptions/)
+  assert.match(source, /field\.field === 'permission-field'/)
+  assert.match(source, /<SearchableSelect v-model="configForm\[field\.key\]" :options="field\.options"/)
+  assert.match(source, /search-placeholder="搜索字段名称或编码"/)
+  assert.doesNotMatch(source, /placeholder: '例如 report_revenue'/)
+
+  const permissionMeta = source.slice(source.indexOf("{ kind: 'permissions'"), source.indexOf("{ kind: 'sla'"))
+  assert.match(permissionMeta, /options: \[\{ value: 'hidden', label: '隐藏（接口返回 \*\*\*）' \}\]/)
+  assert.doesNotMatch(permissionMeta, /value: 'view'|value: 'edit'/)
+  assert.match(source, /field\.key === 'access_level' \? 'hidden' : ''/)
+  assert.match(source, /configForm\.value\.access_level = 'hidden'/)
 })
 
 test('系统配置的规则可以删除：二次确认、按 kind 定位、删除后从列表移除', () => {
@@ -1052,6 +1076,15 @@ test('合同拆解规则配置按原型 PG-CFG-01 做成三段式，口径完全
   // 旧实现是两个自由文本框（名称 + 适用范围），表达不了原型的分组维度、检测类别域与覆盖规则。
   assert.doesNotMatch(source, /key: 'split-rules', label: '拆解规则', columns/)
   assert.match(source, /\{ key: 'split-rules', label: '合同拆解规则', icon: 'settings' \}/)
+  // 新手引导先解释生效时机和三步顺序，并允许一键填入安全推荐值（仍需人工保存）。
+  assert.match(source, /<h2 id="split-guide-title">3 步完成合同自动拆解<\/h2>/)
+  assert.match(source, /已有项目不会被自动重算，可以放心先从推荐配置开始/)
+  assert.match(source, /:disabled="splitConfigLoading \|\| splitPolicySaving" @click="applyRecommendedSplitPolicy">使用安全推荐配置<\/button>/)
+  assert.match(source, /决定怎么分组/)
+  assert.match(source, /补全类别要求/)
+  assert.match(source, /处理特殊合同/)
+  assert.match(source, /const splitPolicySummary = computed/)
+  assert.match(source, /当前规则会怎样执行/)
   // ① 默认分组规则：分组维度 1/2 + 可选第三维、默认进入状态、摘要与缺规则处理。
   assert.match(source, /<h2>① 默认分组规则<\/h2>/)
   assert.match(source, /分组维度 1<\/span><select v-model="splitPolicy\.dimension_primary"/)
@@ -1061,15 +1094,26 @@ test('合同拆解规则配置按原型 PG-CFG-01 做成三段式，口径完全
   assert.match(source, /是否生成「技术要求摘要」/)
   assert.match(source, /分组规则缺失时<\/span><select v-model="splitPolicy\.missing_rule_action"/)
   assert.match(source, /范围变更检测<\/span><select v-model="splitPolicy\.scope_change_detection"/)
+  assert.match(source, /启用自动拆解规则/)
+  assert.match(source, /停用并回退到安全默认/)
+  assert.match(source, /自定义规则已停用。后续合同将回退到/)
+  // 保存前即时发现重复维度和无效摘要组合；有改动时才允许提交，也可撤销未保存修改。
+  assert.match(source, /const splitPolicyIssues = computed/)
+  assert.match(source, /分组维度不能重复/)
+  assert.match(source, /未生成技术要求摘要时，不能锁定摘要字段/)
+  assert.match(source, /splitPolicySaving \|\| !splitPolicyDirty \|\| splitPolicyIssues\.length > 0/)
+  assert.match(source, /@click="resetSplitPolicyChanges">撤销修改<\/button>/)
+  assert.match(source, /保存并用于后续合同/)
   // ② 检测类别域：原型的六列（类别/体系要求/必备资质/特殊方法/关联服务项/操作）。
-  assert.match(source, /<h2>② 检测类别（服务类型）域<\/h2>/)
+  assert.match(source, /<h2>② 检测类别与人员要求<\/h2>/)
   for (const column of ['检测类别', '默认体系要求', '必备资质（默认）', '是否特殊方法', '关联服务项']) {
     assert.ok(source.includes(`<th>${column}</th>`), `检测类别域缺少列：${column}`)
   }
   assert.match(source, /specialMethodLabel\[item\.special_method\]/)
   assert.match(source, /\{\{ item\.service_item_count \|\| 0 \}\} 项/)
   // ③ 覆盖规则：名称/匹配条件/覆盖设置/优先级/状态/操作。
-  assert.match(source, /<h2>③ 覆盖规则（按客户 \/ 合同类型）<\/h2>/)
+  assert.match(source, /<h2>③ 特殊合同覆盖规则 <span class="pm-badge neutral">可选<\/span><\/h2>/)
+  assert.match(source, /数字越小优先级越高，命中第一条后停止继续匹配/)
   assert.match(source, /\{\{ overrideMatchText\(item\) \}\}/)
   assert.match(source, /\{\{ overrideSettingsText\(item\) \}\}/)
   // 维度与特殊方法的取值必须与后端常量一致（写错会被服务端判非法取值）。
