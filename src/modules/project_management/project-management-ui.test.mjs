@@ -725,6 +725,18 @@ test('项目页通过项目后端机器集成读取已审批合同', () => {
   assert.doesNotMatch(source, /suppressLoginRedirect/)
 })
 
+test('新建项目合同编号由合同管理系统自动带入且提交时不可伪造', () => {
+  assert.match(source, /createForm\.value\.contract = contract\.contract_number \|\| ''/)
+  assert.match(source, /<span>合同编号<\/span><input :value="createForm\.contract" readonly aria-readonly="true" \/>/)
+  assert.match(source, /以合同管理系统中的合同编号为准，不支持手工修改/)
+
+  const saveCreate = source.slice(source.indexOf('async function saveCreate()'), source.indexOf('function exportProjects()'))
+  assert.match(saveCreate, /contract_id: createForm\.value\.contractID/)
+  assert.doesNotMatch(saveCreate, /contract: createForm\.value\.contract/)
+  assert.doesNotMatch(saveCreate, /customer: createForm\.value\.customer/)
+  assert.doesNotMatch(saveCreate, /contract_version: createForm\.value\.contractVersion/)
+})
+
 test('新建项目不依赖合同系统浏览器会话', () => {
   assert.match(source, /listApprovedContracts,[\s\S]*from '@\/modules\/project_management\/api\/projectManagement'/)
   assert.doesNotMatch(source, /modules\/contract_management\/api\/contract/)
