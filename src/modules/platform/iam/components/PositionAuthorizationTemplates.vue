@@ -13,6 +13,7 @@ import {
 import { positionAuthorizationTargetCatalog } from '@/modules/platform/iam/utils/positionAuthorizationCatalog'
 import { hasPermission } from '@/modules/platform/auth/utils/principal'
 import { IAM_PERMISSIONS } from '@/modules/platform/iam/utils/iamPermissions'
+import { inspectPositionTemplateDuplicates } from '@/modules/platform/iam/utils/positionAuthorizationDuplicates'
 import {
   authorizationPositionGroupLabel,
   authorizationPositionOptionLabel,
@@ -41,6 +42,7 @@ const positions = ref([])
 const applications = ref([])
 const selectedPositionId = ref('')
 const assignedTemplateIds = ref([])
+const duplicateCheckResult = ref(null)
 const templatePage = ref(1)
 const templatePageSize = 6
 const editingTemplateId = ref('')
@@ -247,6 +249,7 @@ async function load() {
 }
 
 async function loadAssignments() {
+  duplicateCheckResult.value = null
   if (!canReadAuthorization.value) return
   if (!selectedPositionId.value) {
     assignedTemplateIds.value = []
@@ -373,12 +376,34 @@ async function saveAssignments() {
   try {
     await replacePositionAuthorizationTemplateAssignments(selectedPositionId.value, assignedTemplateIds.value.map((template_id) => ({ template_id, status: 'ACTIVE' })))
     await Promise.all([loadPreview(), loadEditorPreview()])
+    runAssignmentDuplicateCheck(false)
     emit('toast', '标准岗位授权模板映射已保存；有效任职关系将动态继承这些角色。')
   } catch (error) {
     emit('toast', error instanceof AuthorizationError ? error.message : (error?.message || '保存岗位授权配置失败。'))
   } finally {
     saving.value = false
   }
+}
+
+function runAssignmentDuplicateCheck(notify = true) {
+  if (!selectedPositionId.value) {
+    if (notify) emit('toast', '请先选择需要查重的目标岗位。')
+    return null
+  }
+  duplicateCheckResult.value = inspectPositionTemplateDuplicates(activeTemplates.value, assignedTemplateIds.value)
+  if (!notify) return duplicateCheckResult.value
+  if (!assignedTemplateIds.value.length) {
+    emit('toast', '当前岗位尚未勾选授权模板，没有需要查重的内容。')
+  } else if (duplicateCheckResult.value.duplicate_group_count) {
+    emit('toast', `查重完成：发现 ${duplicateCheckResult.value.duplicate_group_count} 组重复权限，请核对来源模板。`)
+  } else {
+    emit('toast', '查重完成：所选模板之间没有重复权限。')
+  }
+  return duplicateCheckResult.value
+}
+
+function duplicateScopeLabel(item) {
+  return item.scope_type === 'ENVIRONMENT' ? `环境范围（${item.scope_id || '未指定环境'}）` : '租户范围'
 }
 
 async function loadPreview() {
@@ -471,6 +496,7 @@ function scrollToPositionPreview() {
 }
 
 watch(selectedPositionId, loadAssignments)
+watch(assignedTemplateIds, () => { duplicateCheckResult.value = null }, { deep: true })
 defineExpose({ reload: load })
 onMounted(() => {
   if (canReadAuthorization.value) load()
@@ -627,10 +653,35 @@ onMounted(() => {
               </optgroup>
             </select>
           </label>
+          <button class="console-button ghost small" type="button" :disabled="!selectedPositionId || loading" @click="runAssignmentDuplicateCheck(true)"><ConsoleIcon name="search" />一键查重</button>
           <button v-if="canManageAuthorization" class="console-button primary small" type="button" :disabled="saving || !selectedPositionId" @click="saveAssignments"><ConsoleIcon name="save" />保存岗位映射</button>
         </div>
       </header>
       <p v-if="selectedPosition" class="iam-field-help">{{ positionName(selectedPosition) }} 的有效任职关系会动态继承下列标准模板；任职勾选“参与岗位授权继承”后才会生效。个人、岗位和组织的例外授权不会被模板覆盖或删除。</p>
+      <section
+        v-if="duplicateCheckResult"
+        class="iam-template-duplicate-result"
+        :class="duplicateCheckResult.duplicate_group_count ? 'has-duplicates' : 'is-clean'"
+        role="status"
+        aria-live="polite"
+      >
+        <header>
+          <span class="iam-template-card-icon" :class="duplicateCheckResult.duplicate_group_count ? 'is-warn' : 'is-green'"><ConsoleIcon :name="duplicateCheckResult.duplicate_group_count ? 'info' : 'save'" /></span>
+          <div>
+            <h5>{{ duplicateCheckResult.duplicate_group_count ? `发现 ${duplicateCheckResult.duplicate_group_count} 组重复权限` : '查重通过，未发现重复权限' }}</h5>
+            <p>已检查 {{ duplicateCheckResult.selected_template_count }} 个模板、{{ duplicateCheckResult.checked_role_count }} 条有效角色配置；查重依据为应用、角色、授权范围及有效期交集。</p>
+          </div>
+        </header>
+        <ul v-if="duplicateCheckResult.duplicates.length" class="iam-template-duplicate-list">
+          <li v-for="duplicate in duplicateCheckResult.duplicates" :key="duplicate.key">
+            <div><strong>{{ duplicate.application_name }} / {{ duplicate.role_name }}</strong><span>{{ duplicateScopeLabel(duplicate) }}</span></div>
+            <p>重复来源：{{ duplicate.templates.map((item) => item.template_name).join('、') }}</p>
+          </li>
+        </ul>
+        <p v-else class="iam-template-duplicate-clean">所选模板不会在同一有效期内重复授予相同范围的应用角色，可以继续保存岗位映射。</p>
+        <p v-if="duplicateCheckResult.empty_templates.length" class="iam-template-duplicate-note">以下模板没有可参与查重的有效角色：{{ duplicateCheckResult.empty_templates.map((item) => item.template_name).join('、') }}</p>
+        <p v-if="duplicateCheckResult.missing_template_ids.length" class="iam-template-duplicate-note">有 {{ duplicateCheckResult.missing_template_ids.length }} 个已选模板已不在当前目录，请刷新页面后重新选择。</p>
+      </section>
       <div v-if="loading" class="console-empty">正在读取模板…</div>
       <div v-else-if="!activeTemplates.length" class="console-empty">暂无可用授权模板，请先创建模板。</div>
       <div v-else class="iam-template-assignment-list">

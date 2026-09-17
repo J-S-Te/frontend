@@ -33,6 +33,18 @@ test('rolling compatibility keeps legacy fields but never treats role hash as ca
   assert.equal(principalIdentityID({ user: { id: 'platform-user' } }), 'platform-user')
 })
 
+test('CALLBACK_FAILED reason is exposed for subsystem OIDC callback failures', () => {
+  // 合同/项目/数据看板等子系统的 OIDC 回调失败时，后端把浏览器 302 跳到
+  // /access-error?reason=CALLBACK_FAILED&stage=...&code=...&from=...，
+  // SubsystemAccessErrorView 必须能识别该 reason 并展示对应的友好文案。
+  assert.equal(SUBSYSTEM_ACCESS_REASON.CALLBACK_FAILED, 'CALLBACK_FAILED')
+  assert.ok(Object.values(SUBSYSTEM_ACCESS_REASON).includes('CALLBACK_FAILED'))
+  assert.ok(
+    Object.values(SUBSYSTEM_ACCESS_REASON).every((value) => typeof value === 'string'),
+    'every reason must stay a stable string code so backend query params keep matching',
+  )
+})
+
 test('access failures remain distinct and only plain 401 starts login', () => {
   assert.equal(classifySubsystemAccessError({ status: 401, code: 'COMMON_UNAUTHENTICATED' }).reason, SUBSYSTEM_ACCESS_REASON.UNAUTHENTICATED)
   assert.equal(classifySubsystemAccessError({ status: 403 }).reason, SUBSYSTEM_ACCESS_REASON.FORBIDDEN)

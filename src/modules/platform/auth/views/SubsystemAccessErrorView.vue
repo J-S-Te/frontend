@@ -19,9 +19,19 @@ const fromPath = computed(() => {
   return value.startsWith('/') && !value.startsWith('/access-error') ? value : ''
 })
 const errorCode = computed(() => typeof route.query.code === 'string' ? route.query.code : '')
+const errorStage = computed(() => typeof route.query.stage === 'string' ? route.query.stage : '')
 const requestID = computed(() => typeof route.query.request_id === 'string' ? route.query.request_id : '')
+// CALLBACK_FAILED 来自子系统后端把 Keycloak 回调失败重定向到本页；from 通常是
+// 子系统的 /auth/callback 路径，浏览器直接刷新它没有意义（state / code 已过期），
+// 必须重新走一次 OIDC 登录才能拿到新的 state/code，因此回调失败只展示「重新登录」。
 const canRetry = computed(() => reason.value === SUBSYSTEM_ACCESS_REASON.DEPENDENCY_UNAVAILABLE && Boolean(fromPath.value))
-const canRelogin = computed(() => [SUBSYSTEM_ACCESS_REASON.OIDC_CLAIMS_INVALID, SUBSYSTEM_ACCESS_REASON.UNAUTHENTICATED].includes(reason.value))
+const canRelogin = computed(() =>
+  [
+    SUBSYSTEM_ACCESS_REASON.OIDC_CLAIMS_INVALID,
+    SUBSYSTEM_ACCESS_REASON.UNAUTHENTICATED,
+    SUBSYSTEM_ACCESS_REASON.CALLBACK_FAILED,
+  ].includes(reason.value),
+)
 
 function loginURL() {
   const target = fromPath.value || '/portal'
@@ -48,7 +58,8 @@ function relogin() {
       <p class="access-error-eyebrow">统一认证访问检查</p>
       <h1>{{ presentation.title }}</h1>
       <p class="access-error-message">{{ presentation.message }}</p>
-      <dl v-if="errorCode || requestID" class="access-error-diagnostics">
+      <dl v-if="errorCode || errorStage || requestID" class="access-error-diagnostics">
+        <div v-if="errorStage"><dt>错误阶段</dt><dd><code>{{ errorStage }}</code></dd></div>
         <div v-if="errorCode"><dt>错误代码</dt><dd><code>{{ errorCode }}</code></dd></div>
         <div v-if="requestID"><dt>追踪号</dt><dd><code>{{ requestID }}</code></dd></div>
       </dl>

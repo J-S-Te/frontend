@@ -2,6 +2,7 @@
 // 认证约定：HttpOnly Cookie 会话；401 由本客户端发起 OIDC 跳转；403 交由页面展示无权限。
 import { attachStructuredContext } from '../../platform/shared/api/requestContext.js'
 import { createApiRequestContext } from '../../platform/shared/api/requestContext.js'
+import { shouldStartSubsystemLogin } from '../../shared/authz/sessionCompatibility.js'
 
 const runtimeEnv = import.meta.env || {}
 const PUBLIC_PATH_PREFIX = (runtimeEnv.VITE_DATA_ANALYSIS_PUBLIC_PATH_PREFIX || '/data_analysis').replace(/\/$/, '')
@@ -99,15 +100,22 @@ export function getAuthMe() {
 }
 
 /**
- * ensureDataAnalysisSession 获取并修正会话状态；401 时返回 null，便于路由守卫统一跳登录。
- * @returns {Promise<any|null>} 会话有效返回会话对象，无效返回 null。
- * @throws {Error} 非 401 的错误会直接向上抛出。
+ * ensureDataAnalysisSession 获取并修正会话状态；真正未鉴权时发起 OIDC 跳转并返回 null。
+ * - IDENTITY_NOT_PROVISIONED / OIDC_CLAIMS_INVALID / FORBIDDEN / 503 等非登录类错误
+ *   不触发跳转，由路由守卫转交 subsystem_access_error 页。
+ * - 401 UNAUTHENTICATED 必须主动发起 Keycloak 登录，否则路由守卫只看到 null
+ *   会静默中止跳转，用户点击卡片后看不到任何反馈。
+ * @returns {Promise<any|null>} 会话有效返回会话对象，无效时若已发起跳转返回 null。
+ * @throws {Error} 非登录类鉴权错误、网络失败或服务端异常时抛出。
  */
 export async function ensureDataAnalysisSession() {
   try {
     return await getAuthMe()
   } catch (error) {
-    if (error.status === 401) return null
+    if (shouldStartSubsystemLogin(error)) {
+      startDataAnalysisLogin()
+      return null
+    }
     throw error
   }
 }

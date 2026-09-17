@@ -24,3 +24,13 @@ test('template editing resolves legacy role records through the loaded target ca
   assert.match(source, /itemName === roleName/)
   assert.match(source, /roleId\(targetRole\)/)
 })
+
+test('岗位模板映射提供一键查重并展示重复权限来源', () => {
+  assert.match(source, /inspectPositionTemplateDuplicates/)
+  assert.match(source, /function runAssignmentDuplicateCheck\(notify = true\)/)
+  assert.match(source, />一键查重<\/button>/)
+  assert.match(source, /发现 \$\{duplicateCheckResult\.value\.duplicate_group_count\} 组重复权限/)
+  assert.match(source, /查重依据为应用、角色、授权范围及有效期交集/)
+  assert.match(source, /重复来源：\{\{ duplicate\.templates\.map/)
+  assert.match(source, /watch\(assignedTemplateIds, \(\) => \{ duplicateCheckResult\.value = null \}/)
+})

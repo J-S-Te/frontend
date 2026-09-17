@@ -99,6 +99,8 @@ test('已审批合同通过项目后端同源接口读取', () => {
   assert.match(source, /export async function listApprovedContracts\(params = \{\}\)/)
   assert.match(source, /request\(`\/approved-contracts\$\{search \? `\?\$\{search\}` : ''\}`\)/)
   assert.match(source, /return Array\.isArray\(data\) \? data : \[\]/)
+  assert.match(source, /export async function getApprovedContractServiceItems\(contractID\)/)
+  assert.match(source, /request\(`\/approved-contracts\/\$\{encodeURIComponent\(contractID\)\}\/service-items`\)/)
   assert.doesNotMatch(source, /contract_management\/api\/v1\/approved-contracts/)
 })
 

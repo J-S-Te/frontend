@@ -736,7 +736,25 @@ test('项目页通过项目后端机器集成读取已审批合同', () => {
   assert.match(pmApiSource, /export async function listApprovedContracts\(params = \{\}\)/)
   assert.match(pmApiSource, /request\(`\/approved-contracts\$\{search \? `\?\$\{search\}` : ''\}`\)/)
   assert.match(source, /listApprovedContracts\(\{ limit: 200 \}\)/)
+  assert.match(pmApiSource, /export async function getApprovedContractServiceItems\(contractID\)/)
+  assert.match(source, /getApprovedContractServiceItems\(contract\.id\)/)
   assert.doesNotMatch(source, /suppressLoginRedirect/)
+})
+
+test('新建项目从合同服务范围选择服务项且不允许伪造合同字段', () => {
+  assert.match(source, /const selectedContractServiceIDs = ref\(\[\]\)/)
+  assert.match(source, /selectedContractServiceIDs\.value = catalog\.service_items\.map\(\(item\) => item\.source_id\)\.filter\(Boolean\)/)
+  assert.match(source, /<b>合同服务范围 <em>\*<\/em><\/b>/)
+  assert.match(source, /v-model="selectedContractServiceIDs"[\s\S]*value-key="source_id"[\s\S]*multiple required/)
+  assert.match(source, /item\.system_level/)
+  assert.match(source, /item\.category \|\| item\.service_type/)
+
+  const saveCreate = source.slice(source.indexOf('async function saveCreate()'), source.indexOf('function exportProjects()'))
+  assert.match(saveCreate, /service_items: selectedApprovedContractServices\.value\.map\(\(item\) => \(\{ source_id: item\.source_id, site: createForm\.value\.site \}\)\)/)
+  assert.doesNotMatch(saveCreate, /MANUAL-/)
+  assert.doesNotMatch(saveCreate, /category: item\.category/)
+  assert.doesNotMatch(saveCreate, /system: item\.system/)
+  assert.doesNotMatch(source, /addServiceLink/)
 })
 
 test('新建项目合同编号由合同管理系统自动带入且提交时不可伪造', () => {
@@ -786,6 +804,17 @@ test('项目列表卡片按角色职责展示并使用服务端裁剪后的统�
   // 技术总监只能看统计，项目创建入口仍由 canCreateProject 单独决定。
   assert.match(source, /action: canCreateProject\.value \? 'create' : ''/)
   assert.match(source, /v-for="card in projectKpiCards"/)
+  // 卡片总数随角色变化：5 张以内保持单排，更多卡片拆成两行；末行由 flex 自动均匀铺满。
+  assert.match(source, /const projectKpiColumnCount = computed\(\(\) => \{/)
+  assert.match(source, /if \(count <= 5\) return Math\.max\(count, 1\)/)
+  assert.match(source, /return Math\.ceil\(count \/ 2\)/)
+  assert.match(source, /class="pm-kpi-row pm-project-kpi-grid"/)
+  assert.match(source, /pm-project-kpi-columns-\$\{projectKpiColumnCount\}/)
+  assert.match(styles, /\.pm-project-kpi-grid \{ display: flex; flex-wrap: wrap;/)
+  assert.match(styles, /\.pm-project-kpi-grid > \.pm-kpi \{ flex: 1 1 calc\(25% - 12px\);/)
+  assert.match(styles, /@media \(max-width: 1280px\) \{[\s\S]*?\.pm-project-kpi-columns-5 > \.pm-kpi \{ flex-basis: calc\(33\.333333% - 10\.666667px\); \}/)
+  assert.match(styles, /@media \(max-width: 760px\) \{[\s\S]*?\.pm-project-kpi-grid > \.pm-kpi \{ flex-basis: calc\(50% - 8px\); \}/)
+  assert.match(styles, /@media \(max-width: 520px\) \{[\s\S]*?\.pm-project-kpi-grid > \.pm-kpi \{ flex-basis: 100%; \}/)
 })
 
 test('实施计划提交人员清单，设备清单在实施准备登记并校验占用', () => {
@@ -924,7 +953,8 @@ test('站点档案下线后新建项目直接使用实施场所文本', () => {
   assert.doesNotMatch(source, /const linkedSite =/)
   assert.doesNotMatch(source, /site_code: createForm\.value\.siteCode/)
   assert.match(source, /<input v-model\.trim="createForm\.site" required placeholder="例如 杭州机房" \/>/)
-  assert.match(source, /site: createForm\.value\.site, category: link\.category/)
+  assert.match(source, /source_id: item\.source_id, site: createForm\.value\.site/)
+  assert.doesNotMatch(source, /site_code: item\.site_code/)
 })
 
 test('每个写操作入口都按服务端同款权限码门控', () => {
@@ -983,6 +1013,10 @@ test('拆解调整入口按 project.decomposition.manage 门控并调用真实�
   assert.match(source, /v-if="activeSection === 'decomposition' && canManageDecomposition"[^>]*@click="openDecompositionAdjust"/)
   assert.match(source, /await adjustDecomposition\(project\.id, \{ reason: adjustForm\.value\.reason, supplement_contract_id: adjustForm\.value\.supplementContractID, items \}\)/)
   assert.match(source, /showToast\('拆解已调整，项目进入补充协议处理中'\)/)
+  assert.match(source, /const \[categories, contracts\] = await Promise\.all/)
+  assert.match(source, /v-for="contract in supplementContractOptions"[^>]*:value="contract\.id"/)
+  assert.doesNotMatch(source, /<input v-model\.trim="adjustForm\.supplementContractID"/)
+  assert.match(source, /只能选择当前客户已审批且不同于原合同的记录/)
   // 一次提交会替换该项目的全部服务项，对话框必须显示将被替换的目标项目，避免误操作。
   assert.match(source, /目标项目：<b>\{\{ decompositionProject \?/)
   // 服务端在同一事务里替换全部服务项，提交前必须校验前端必填项。
@@ -990,6 +1024,12 @@ test('拆解调整入口按 project.decomposition.manage 门控并调用真实�
   // API 客户端必须走真实端点而不是本地模拟。
   assert.match(pmApiSource, /export function adjustDecomposition\(projectID, payload\)/)
   assert.match(pmApiSource, /decomposition-adjustments/)
+})
+
+test('资源分配页明确区分当前阶段数量与分配进度', () => {
+  assert.match(source, /activeSection === 'allocation' \? '当前阶段服务项' : '待处理'/)
+  assert.match(source, /含已分配、待补齐执行团队的服务项/)
+  assert.match(source, /activeSection === 'allocation' \? '分配进度' : '完成度'/)
 })
 
 test('多选下拉对齐统一交互基线：aria 语义、键盘导航与已选 chip 回显', () => {
@@ -1376,4 +1416,16 @@ test('报告编制版本先上传网关文件再进入审核', () => {
   assert.match(source, /uploadServiceItemEvidence\(item\.id, 'REPORT', file\)/)
   assert.match(source, /registerReportArtifact\(item\.id, Number\(item\.report_revision\) \|\| 0, artifact\)/)
   assert.match(source, /审核人与编制人必须不同/)
+})
+
+test('过期设备展示派生无效状态且检测类别使用受控域', () => {
+  assert.match(source, /function capabilityEffectiveStatus\(item\)/)
+  assert.match(source, /EXPIRED: '无效'/)
+  assert.match(source, /NOT_YET_EFFECTIVE: '未生效'/)
+  assert.match(source, /capabilityEffectiveStatus\(item\) === capabilityStatusFilter\.value/)
+  assert.match(source, /const activeDetectionCategoryOptions = computed/)
+  assert.match(source, /const categoryOptions = computed\(\(\) => activeDetectionCategoryOptions\.value/)
+  assert.match(source, /<SearchableSelect v-model="row\.category"[^>]*:options="activeDetectionCategoryOptions"/)
+  assert.doesNotMatch(source, /<input v-model\.trim="row\.category" required placeholder="检测类别"/)
+  assert.match(source, /categoryRows,[\s\S]*listDetectionCategories\(\)/)
 })

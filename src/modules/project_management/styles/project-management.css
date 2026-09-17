@@ -1281,6 +1281,19 @@
 .pm-service-links > header small { color: var(--pm-muted); font-size: var(--pm-fs-nano); }
 .pm-service-link-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) auto; gap: var(--pm-sp-2); align-items: center; }
 .pm-service-link-row .pm-icon-button { width: var(--pm-h-control); height: var(--pm-h-control); color: var(--pm-muted); }
+.pm-contract-services { align-content: start; background: var(--pm-card); }
+.pm-contract-service-count { flex: 0 0 auto; padding: 4px 10px; border-radius: var(--pm-r-full); background: var(--pm-primary-soft); color: var(--pm-primary); font-size: var(--pm-fs-hint); font-weight: var(--pm-fw-semibold); }
+.pm-contract-service-state { min-height: 72px; display: grid; place-items: center; padding: var(--pm-sp-4); border: 1px dashed var(--pm-line-strong); border-radius: var(--pm-r-sm); background: var(--pm-sunken); color: var(--pm-muted); font-size: var(--pm-fs-sm); text-align: center; }
+.pm-contract-service-state.error { border-color: var(--pm-red); background: var(--pm-red-soft); color: var(--pm-red-text); }
+.pm-contract-service-list { display: grid; gap: var(--pm-sp-2); max-height: 320px; overflow-y: auto; padding-right: 3px; }
+.pm-contract-service-card { display: grid; gap: var(--pm-sp-3); padding: var(--pm-sp-3) var(--pm-sp-4); border: 1px solid var(--pm-line); border-left: 3px solid var(--pm-primary); border-radius: var(--pm-r-sm); background: var(--pm-card); }
+.pm-contract-service-card > div { display: flex; align-items: center; justify-content: space-between; gap: var(--pm-sp-3); }
+.pm-contract-service-card > div b { color: var(--pm-ink); font-size: var(--pm-fs-ui); }
+.pm-contract-service-card > div span { color: var(--pm-muted); font-size: var(--pm-fs-micro); }
+.pm-contract-service-card dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--pm-sp-2) var(--pm-sp-4); margin: 0; }
+.pm-contract-service-card dl > div { min-width: 0; }
+.pm-contract-service-card dt { margin-bottom: 2px; color: var(--pm-muted); font-size: var(--pm-fs-micro); }
+.pm-contract-service-card dd { margin: 0; overflow-wrap: anywhere; color: var(--pm-body); font-size: var(--pm-fs-hint); }
 /* 调整拆解的一行包含两排字段（批次/场所/类别 + 系统/等级/技术要求），单独成组堆叠。 */
 .pm-adjust-item { display: grid; gap: var(--pm-sp-2); }
 
@@ -1550,9 +1563,7 @@
   .pm-sidebar.open { transform: translateX(0); }
   .pm-menu-mask { position: fixed; inset: 0; z-index: var(--pm-z-mask); background: rgba(15, 23, 42, .5); }
   .pm-main { margin-left: 0; }
-  .pm-menu-button,
-  .pm-mobile-close { display: grid; }
-  .pm-mobile-close { margin-left: auto; color: var(--pm-sidebar-label); }
+  .pm-menu-button { display: grid; }
   .pm-topbar { padding-inline: var(--pm-sp-4); }
   .pm-breadcrumb span,
   .pm-breadcrumb b { display: none; }
@@ -1617,6 +1628,8 @@
   .pm-form label:last-child { grid-column: auto; }
   .pm-service-link-row { grid-template-columns: minmax(0, 1fr); }
   .pm-service-link-row .pm-icon-button { justify-self: end; }
+  .pm-contract-services > header { align-items: flex-start; flex-direction: column; }
+  .pm-contract-service-card dl { grid-template-columns: minmax(0, 1fr); }
   .pm-desc-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .pm-table-panel > header { flex-direction: column; align-items: flex-start; }
   .pm-table-footer { flex-direction: column; align-items: flex-start; }
@@ -1697,6 +1710,29 @@
 .pm-kpi .pm-kpi-trend.down { color: var(--pm-red-text); }
 .pm-kpi .pm-kpi-trend.flat { color: var(--pm-gray-text); }
 .pm-kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--pm-gap-grid); }
+
+/* 项目列表卡片数量由角色决定。这里用可换行 flex 而不是 auto-fit 网格：
+   既能限制首行的合理列数，也能让不足一整行的末行均匀铺满，避免 7+1 孤卡。 */
+.pm-project-kpi-grid { display: flex; flex-wrap: wrap; align-items: stretch; }
+.pm-project-kpi-grid > .pm-kpi { flex: 1 1 calc(25% - 12px); min-width: 0; min-height: 136px; padding: 18px 20px 16px; }
+.pm-project-kpi-columns-1 > .pm-kpi { flex-basis: 100%; }
+.pm-project-kpi-columns-2 > .pm-kpi { flex-basis: calc(50% - 8px); }
+.pm-project-kpi-columns-3 > .pm-kpi { flex-basis: calc(33.333333% - 10.666667px); }
+.pm-project-kpi-columns-4 > .pm-kpi { flex-basis: calc(25% - 12px); }
+.pm-project-kpi-columns-5 > .pm-kpi { flex-basis: calc(20% - 12.8px); }
+.pm-project-kpi-grid > button.pm-kpi { cursor: pointer; }
+
+@media (max-width: 1280px) {
+  .pm-project-kpi-columns-5 > .pm-kpi { flex-basis: calc(33.333333% - 10.666667px); }
+}
+
+@media (max-width: 760px) {
+  .pm-project-kpi-grid > .pm-kpi { flex-basis: calc(50% - 8px); }
+}
+
+@media (max-width: 520px) {
+  .pm-project-kpi-grid > .pm-kpi { flex-basis: 100%; }
+}
 
 /* 18.2 搜索筛选栏（原型 .search-bar / .search-input / .filter-select / .filter-tag） */
 .pm-search-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--pm-sp-2); padding: var(--pm-sp-3); background: var(--pm-card); border: 1px solid var(--pm-line); border-radius: var(--pm-r-md); box-shadow: var(--pm-shadow); }

@@ -281,7 +281,17 @@ export async function getPortalCapabilities() {
  * @returns {Promise<Record<string, unknown>|null>} 有效门户会话；需重新登录时返回 null。
  * @throws {Error} 非登录类错误、网络失败或服务端异常时抛出。
  */
-export function ensurePortalSession() { return getPortalSession({ force: true }).catch((error) => shouldStartSubsystemLogin(error) ? null : Promise.reject(error)) }
+export function ensurePortalSession() {
+  return getPortalSession({ force: true }).catch((error) => {
+    // 真正未鉴权时必须主动发起 OIDC 跳转，否则路由守卫只看到 null
+    // 会静默中止跳转，用户点击卡片后看不到任何反馈。
+    if (shouldStartSubsystemLogin(error)) {
+      beginLogin()
+      return null
+    }
+    return Promise.reject(error)
+  })
+}
 
 /**
  * logoutPortal 请求注销门户会话，并无论网络结果如何都返回门户入口页。
