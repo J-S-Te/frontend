@@ -7,6 +7,11 @@ import { ApplicationRegistryError, listPortalApplications } from '@/modules/plat
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import { buildPortalSubsystems } from '@/modules/registry/moduleRegistry.js'
 import {
+  portalGridForCount,
+  portalPageCount,
+  portalPageItems,
+} from '@/modules/platform/views/portalLayout.js'
+import {
   canAccessPlatformConsole,
   platformConsoleLandingRoute,
 } from '@/modules/platform/auth/utils/platformConsoleAccess'
@@ -99,6 +104,20 @@ const subsystems = computed(() => {
     subsystem.source === 'built-in' ? { ...subsystem, route: platformRoute } : subsystem
   ))
 })
+const portalPage = ref(1)
+const portalTotalPages = computed(() => portalPageCount(subsystems.value.length))
+const visibleSubsystems = computed(() => portalPageItems(subsystems.value, portalPage.value))
+const portalGrid = computed(() => portalGridForCount(visibleSubsystems.value.length))
+const portalGridStyle = computed(() => ({
+  '--portal-columns': portalGrid.value.columns,
+  '--portal-rows': portalGrid.value.rows,
+  '--portal-grid-max-width': `${portalGrid.value.columns === 1 ? 520 : portalGrid.value.columns === 2 ? 900 : 1380}px`,
+  '--portal-grid-max-height': `${portalGrid.value.density === 'spacious' ? 280 : portalGrid.value.density === 'standard' ? 546 : portalGrid.value.rows * 210 + (portalGrid.value.rows - 1) * 16}px`,
+}))
+
+function changePortalPage(page) {
+  portalPage.value = Math.min(Math.max(1, Number(page) || 1), portalTotalPages.value)
+}
 
 let toastTimer = 0
 let projectionRefreshTimer = 0
@@ -483,6 +502,10 @@ watch(resolvedTheme, () => {
   if (canvasRef.value) drawParticleFrame()
 })
 
+watch(() => subsystems.value.length, () => {
+  if (portalPage.value > portalTotalPages.value) portalPage.value = portalTotalPages.value
+})
+
 onBeforeUnmount(() => {
   window.clearTimeout(toastTimer)
   window.clearInterval(projectionRefreshTimer)
@@ -594,9 +617,14 @@ onBeforeUnmount(() => {
       <p v-if="subsystemCatalogError" class="subsystem-portal__catalog-status is-error" role="alert">{{ subsystemCatalogError }}</p>
       <p v-else-if="registeredSubsystems.length === 0" class="subsystem-portal__catalog-status">当前账号暂无可访问的业务子系统。若子系统已经接入，请联系平台管理员为当前用户分配对应应用角色。</p>
 
-      <div class="subsystem-portal__cards" aria-label="子系统列表">
+      <div
+        class="subsystem-portal__cards"
+        :data-density="portalGrid.density"
+        :style="portalGridStyle"
+        aria-label="子系统列表"
+      >
         <button
-          v-for="(subsystem, index) in subsystems"
+          v-for="(subsystem, index) in visibleSubsystems"
           :key="subsystem.key"
           class="subsystem-card"
           :class="{ 'is-syncing': !subsystem.allowed }"
@@ -620,6 +648,16 @@ onBeforeUnmount(() => {
           </span>
         </button>
       </div>
+
+      <nav v-if="portalTotalPages > 1" class="subsystem-portal__pagination" aria-label="子系统分页">
+        <button type="button" :disabled="portalPage <= 1" aria-label="上一页" @click="changePortalPage(portalPage - 1)">
+          <ConsoleIcon name="chevron" />
+        </button>
+        <span>第 {{ portalPage }} / {{ portalTotalPages }} 页</span>
+        <button type="button" :disabled="portalPage >= portalTotalPages" aria-label="下一页" @click="changePortalPage(portalPage + 1)">
+          <ConsoleIcon name="chevron" />
+        </button>
+      </nav>
     </section>
 
     <footer class="subsystem-portal__footer">

@@ -25,6 +25,10 @@ test('基础平台入口页遵循克制且性能受控的 UniLab 视觉规范', 
   assert.match(portal, /prefers-color-scheme: dark/)
   assert.match(portalCSS, /\.subsystem-portal\[data-theme='light'\]/)
   assert.match(portalCSS, /--portal-bg:\s*#050914/)
+  assert.match(portalCSS, /height:\s*100dvh/)
+  assert.match(portalCSS, /--portal-grid-max-height/)
+  assert.match(portal, /visibleSubsystems/)
+  assert.match(portal, /portalTotalPages > 1/)
   assert.doesNotMatch(portalCSS, /backdrop-filter/)
 })
 
