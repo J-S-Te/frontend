@@ -86,7 +86,7 @@ function relogin() {
   width: min(560px, 100%);
   padding: 40px;
   border: 1px solid #dbe4f0;
-  border-radius: 18px;
+  border-radius: 14px;
   background: #fff;
   box-shadow: 0 22px 55px -32px rgba(15, 23, 42, .45);
   text-align: center;
@@ -97,7 +97,7 @@ function relogin() {
   justify-content: center;
   width: 58px;
   height: 58px;
-  border-radius: 16px;
+  border-radius: 14px;
   color: #2563eb;
   background: #eff6ff;
 }
@@ -108,7 +108,7 @@ function relogin() {
   font-weight: 700;
   letter-spacing: .12em;
 }
-h1 { margin: 0; font-size: 25px; }
+h1 { margin: 0; font-size: 22px; }
 .access-error-message { margin: 16px auto 0; max-width: 460px; color: #475569; line-height: 1.8; }
 .access-error-diagnostics {
   margin: 24px 0 0;
@@ -121,7 +121,7 @@ h1 { margin: 0; font-size: 25px; }
 .access-error-diagnostics dt { color: #64748b; }
 .access-error-diagnostics dd { margin: 0; min-width: 0; word-break: break-all; }
 .access-error-actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 12px; margin-top: 26px; }
-.access-error-actions button { padding: 10px 18px; border-radius: 9px; cursor: pointer; font: inherit; }
+.access-error-actions button { padding: 10px 18px; border-radius: 8px; cursor: pointer; font: inherit; }
 .access-error-actions .primary { border: 1px solid #2563eb; background: #2563eb; color: white; }
 .access-error-actions .ghost { border: 1px solid #cbd5e1; background: white; color: #334155; }
 </style>

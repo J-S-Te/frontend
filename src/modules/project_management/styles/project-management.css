@@ -933,6 +933,15 @@
 .pm-tab-pill:hover { background: var(--pm-sunken); }
 .pm-tab-pill.active { border-color: var(--pm-primary-border); background: var(--pm-primary-soft); color: var(--pm-blue-text); }
 .pm-monitor-head { flex-wrap: wrap; }
+.pm-monitor-filters { flex-wrap: wrap; }
+.pm-monitor-filters > label:first-child { flex: 1 1 260px; width: auto; }
+.pm-monitor-filters .pm-filter-check,
+.pm-monitor-filters .pm-filter-date { width: auto; flex: 0 0 auto; color: var(--pm-muted); font-size: var(--pm-fs-hint); white-space: nowrap; }
+.pm-monitor-filters .pm-filter-check input { width: 16px; height: 16px; accent-color: var(--pm-primary); }
+.pm-monitor-filters .pm-filter-date input { width: 132px; height: 30px; }
+.pm-monitor-table { min-width: 1360px; }
+.pm-monitor-table td { vertical-align: top; }
+.pm-monitor-table .pm-col-actions { display: grid; gap: var(--pm-sp-1); }
 
 .pm-file-input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
 
@@ -1174,7 +1183,9 @@
 
 .pm-timeline { padding: var(--pm-sp-1) var(--pm-sp-1) var(--pm-sp-1) var(--pm-sp-4); }
 .pm-timeline h3 { margin: 0 0 15px calc(var(--pm-sp-3) * -1); color: var(--pm-ink); font-size: var(--pm-fs-card); font-weight: var(--pm-fw-semibold); }
-.pm-timeline > div { position: relative; padding: 0 0 var(--pm-sp-5) var(--pm-sp-5); border-left: 1px solid var(--pm-line); }
+.pm-timeline > div,
+.pm-timeline > button { position: relative; width: 100%; padding: 0 0 var(--pm-sp-5) var(--pm-sp-5); border: 0; border-left: 1px solid var(--pm-line); background: transparent; text-align: left; }
+.pm-timeline > button:hover b { color: var(--pm-primary); }
 .pm-timeline i { position: absolute; top: 2px; left: -4px; width: 7px; height: 7px; border: 2px solid var(--pm-card); border-radius: 50%; background: var(--pm-primary); box-shadow: 0 0 0 1px var(--pm-primary-border); }
 .pm-timeline b { color: var(--pm-ink); font-size: var(--pm-fs-sm); }
 .pm-timeline p { margin: var(--pm-sp-1) 0; color: var(--pm-muted); font-size: var(--pm-fs-hint); line-height: var(--pm-lh-loose); overflow-wrap: anywhere; word-break: break-word; }

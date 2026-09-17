@@ -1328,7 +1328,7 @@ onMounted(() => {
 .application-registry-header h2 { margin: 6px 0 0; }
 .application-registry-header p, .application-registry-panel-head p { max-width: 820px; margin: 7px 0 0; color: #64748b; font-size: 13px; line-height: 1.65; }
 .application-registry-workspaces { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 16px; padding: 6px; border: 1px solid #dbeafe; border-radius: 10px; background: #f8fbff; }
-.application-registry-workspaces button { display: inline-flex; align-items: center; gap: 6px; padding: 8px 11px; color: #475569; border: 0; border-radius: 7px; background: transparent; font-weight: 650; font-size: 12px; cursor: pointer; }
+.application-registry-workspaces button { display: inline-flex; align-items: center; gap: 6px; padding: 8px 11px; color: #475569; border: 0; border-radius: 8px; background: transparent; font-weight: 650; font-size: 12px; cursor: pointer; }
 .application-registry-workspaces button:hover { color: #1d4ed8; background: #eff6ff; }
 .application-registry-workspaces button.is-active { color: #1d4ed8; background: #fff; box-shadow: 0 1px 3px rgb(15 23 42 / 12%); }
 .application-registry-workspaces :deep(svg) { width: 15px; height: 15px; }
@@ -1345,7 +1345,7 @@ onMounted(() => {
 .application-registry-discovery { display: grid; gap: 10px; margin-top: 16px; padding: 14px; border: 1px solid #c7d2fe; border-radius: 12px; background: linear-gradient(135deg, #f8faff, #faf8ff); }
 .application-registry-discovery > div > strong, .application-registry-discovery > div > small { display: block; }
 .application-registry-discovery > div > small { margin-top: 3px; color: #64748b; font-size: 12px; line-height: 1.55; }
-.application-registry-discovery article { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 12px; border: 1px solid #e0e7ff; border-radius: 9px; background: #fff; }
+.application-registry-discovery article { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 12px; border: 1px solid #e0e7ff; border-radius: 8px; background: #fff; }
 .application-registry-discovery article > div { min-width: 0; }
 .application-registry-discovery article strong, .application-registry-discovery article span, .application-registry-discovery article small { display: block; }
 .application-registry-discovery article strong { color: #1e293b; font-size: 13px; overflow-wrap: anywhere; word-break: break-all; }
@@ -1362,16 +1362,16 @@ onMounted(() => {
 .application-registry-sidebar-head { align-items: center; }
 .application-registry-sidebar-head strong { color: #1e293b; }
 .application-registry-filters { display: grid; gap: 8px; margin: 12px 0; }
-.application-registry-filters input, .application-registry-filters select { width: 100%; min-height: 34px; padding: 0 9px; border: 1px solid #dbe3ee; border-radius: 7px; background: #fff; color: #334155; font-size: 12px; }
+.application-registry-filters input, .application-registry-filters select { width: 100%; min-height: 34px; padding: 0 9px; border: 1px solid #dbe3ee; border-radius: 8px; background: #fff; color: #334155; font-size: 12px; }
 .application-registry-list-item { display: flex; align-items: center; width: 100%; gap: 9px; padding: 10px 8px; border: 0; border-radius: 8px; background: transparent; color: #334155; text-align: left; cursor: pointer; }
 .application-registry-list-item:hover, .application-registry-list-item.is-selected { background: #eaf2ff; }
-.application-registry-app-icon { display: grid; flex: 0 0 28px; width: 28px; height: 28px; place-items: center; color: #2563eb; border-radius: 7px; background: #dbeafe; }
+.application-registry-app-icon { display: grid; flex: 0 0 28px; width: 28px; height: 28px; place-items: center; color: #2563eb; border-radius: 8px; background: #dbeafe; }
 .application-registry-app-icon :deep(svg) { width: 15px; height: 15px; }
 .application-registry-list-copy { min-width: 0; flex: 1; }
 .application-registry-list-copy strong, .application-registry-list-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .application-registry-list-copy strong { font-size: 12px; }
-.application-registry-list-copy small { margin-top: 2px; color: #94a3b8; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; }
-.application-registry-status { display: inline-flex; align-items: center; padding: 3px 7px; border-radius: 999px; font-size: 10px; font-weight: 700; white-space: nowrap; }
+.application-registry-list-copy small { margin-top: 2px; color: #94a3b8; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+.application-registry-status { display: inline-flex; align-items: center; padding: 3px 7px; border-radius: 999px; font-size: 11px; font-weight: 700; white-space: nowrap; }
 .application-registry-status.is-active, .application-registry-status.is-ready { color: #047857; background: #d1fae5; }
 .application-registry-status.is-draft, .application-registry-status.is-provisioning, .application-registry-status.is-updating { color: #1d4ed8; background: #dbeafe; }
 .application-registry-status.is-disabled, .application-registry-status.is-suspended, .application-registry-status.is-offboarded { color: #64748b; background: #e2e8f0; }
@@ -1389,21 +1389,21 @@ onMounted(() => {
 .application-registry-panel-head h4 { margin: 0; color: #1e293b; font-size: 15px; }
 .application-registry-panel-head p { margin-top: 4px; font-size: 11px; }
 .application-registry-environments { display: grid; gap: 8px; }
-.application-registry-environment { padding: 12px; border: 1px solid #e2e8f0; border-radius: 9px; background: #fff; cursor: pointer; }
+.application-registry-environment { padding: 12px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; cursor: pointer; }
 .application-registry-environment:hover, .application-registry-environment.is-selected { border-color: #93c5fd; box-shadow: 0 0 0 2px #eff6ff; }
 .application-registry-environment-main, .application-registry-environment-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .application-registry-environment-main strong { color: #0f172a; font-size: 13px; }
-.application-registry-environment-main small { color: #94a3b8; font-size: 10px; }
+.application-registry-environment-main small { color: #94a3b8; font-size: 11px; }
 .application-registry-environment-uri { display: grid; min-width: 0; gap: 3px; margin: 7px 0; color: #475569; font-size: 11px; }
 .application-registry-environment-uri small { color: #94a3b8; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .application-registry-environment.authentication { cursor: default; }
 .application-registry-environment.authentication:hover { border-color: #e2e8f0; box-shadow: none; }
 .application-registry-auth-details { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; margin: 10px 0; padding: 10px; border: 1px solid #dbeafe; border-radius: 8px; background: #f8fbff; }
 .application-registry-auth-details div { min-width: 0; }
-.application-registry-auth-details dt { color: #64748b; font-size: 10px; font-weight: 700; }
+.application-registry-auth-details dt { color: #64748b; font-size: 11px; font-weight: 700; }
 .application-registry-auth-details dd { min-width: 0; margin: 3px 0 0; overflow: hidden; color: #1e293b; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.application-registry-auth-details code { font-size: 10px; }
-.application-registry-switch-gates { margin: 8px 0; padding: 8px 10px; border: 1px solid #fde68a; border-radius: 7px; background: #fffbeb; color: #78350f; font-size: 11px; }
+.application-registry-auth-details code { font-size: 11px; }
+.application-registry-switch-gates { margin: 8px 0; padding: 8px 10px; border: 1px solid #fde68a; border-radius: 8px; background: #fffbeb; color: #78350f; font-size: 11px; }
 .application-registry-switch-gates > strong { display: block; margin-bottom: 4px; }
 .application-registry-switch-gates ul { display: grid; gap: 3px; margin: 0; padding: 0; list-style: none; }
 .application-registry-switch-gates li { display: grid; grid-template-columns: 44px 1fr; gap: 4px; align-items: baseline; }
@@ -1421,7 +1421,7 @@ onMounted(() => {
 .application-registry-empty.compact { min-height: 90px; display: flex; justify-content: center; }
 .application-registry-modal-backdrop { position: fixed; z-index: 30; inset: 0; display: grid; place-items: center; padding: 20px; background: rgb(15 23 42 / 35%); }
 .application-registry-modal { width: min(460px, 100%); padding: 22px; border-radius: 14px; background: #fff; box-shadow: 0 20px 60px rgb(15 23 42 / 25%); }
-.application-registry-modal h3 { margin: 0; color: #0f172a; font-size: 17px; }
+.application-registry-modal h3 { margin: 0; color: #0f172a; font-size: 16px; }
 .application-registry-modal p { margin: 10px 0 16px; color: #64748b; font-size: 12px; line-height: 1.65; }
 .application-registry-modal .console-form-actions { justify-content: flex-end; margin-top: 16px; }
 .console-button.danger { color: #b91c1c; border-color: #fecaca; background: #fff7f7; }
@@ -1434,7 +1434,7 @@ onMounted(() => {
 .application-registry-progress li { display: flex; flex: 1; align-items: center; gap: 6px; min-width: 0; color: #94a3b8; font-size: 11px; }
 .application-registry-progress li::after { content: ''; flex: 1; min-width: 12px; height: 1px; margin: 0 6px; background: #e2e8f0; }
 .application-registry-progress li:last-child::after { display: none; }
-.application-registry-progress li i { display: grid; width: 18px; height: 18px; flex: 0 0 auto; place-items: center; color: #94a3b8; font-size: 10px; font-style: normal; font-weight: 700; border: 1px solid #cbd5e1; border-radius: 50%; background: #fff; }
+.application-registry-progress li i { display: grid; width: 18px; height: 18px; flex: 0 0 auto; place-items: center; color: #94a3b8; font-size: 11px; font-style: normal; font-weight: 700; border: 1px solid #cbd5e1; border-radius: var(--radius-pill); background: #fff; }
 .application-registry-progress li.is-done { color: #15803d; }
 .application-registry-progress li.is-done i { color: #fff; border-color: #16a34a; background: #16a34a; }
 .application-registry-progress li.is-current { color: #1d4ed8; font-weight: 600; }
@@ -1448,10 +1448,10 @@ onMounted(() => {
 .application-registry-zone:first-of-type { border-top: 0; }
 .application-registry-zone-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
 .application-registry-zone-head h5 { margin: 0; color: #475569; font-size: 12px; font-weight: 700; }
-.application-registry-zone-hint { color: #94a3b8; font-size: 10px; }
+.application-registry-zone-hint { color: #94a3b8; font-size: 11px; }
 .application-registry-zone-toggle { padding: 2px 8px; color: #2563eb; font-size: 11px; font-weight: 600; border: 0; border-radius: 6px; background: #eff6ff; cursor: pointer; }
 .application-registry-zone-toggle:hover { background: #dbeafe; }
-.application-registry-provider { display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 999px; font-size: 10px; font-weight: 700; white-space: nowrap; }
+.application-registry-provider { display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; white-space: nowrap; }
 .application-registry-provider.is-platform { color: #475569; background: #f1f5f9; }
 .application-registry-provider.is-keycloak { color: #6d28d9; background: #f5f3ff; }
 .application-registry-auth-summary { display: flex; flex-wrap: wrap; gap: 8px 16px; color: #64748b; font-size: 12px; }
@@ -1463,7 +1463,7 @@ onMounted(() => {
 .application-registry-wizard-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
 .application-registry-wizard-head h3 { margin: 4px 0 0; }
 .application-registry-wizard-head p { margin: 6px 0 0; font-size: 11px; }
-.application-registry-wizard-close { width: 30px; height: 30px; border: 0; border-radius: 6px; background: #f1f5f9; color: #64748b; font-size: 20px; line-height: 1; cursor: pointer; }
+.application-registry-wizard-close { width: 30px; height: 30px; border: 0; border-radius: 6px; background: #f1f5f9; color: #64748b; font-size: 16px; line-height: 1; cursor: pointer; }
 .application-registry-wizard-close:hover { background: #e2e8f0; }
 .application-registry-inline-note { margin: 10px 0 0; color: #475569; font-size: 12px; line-height: 1.6; }
 

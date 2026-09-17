@@ -11,24 +11,24 @@
    ========================================================================= */
 
 .iam-settings {
-  /* —— 颜色：中性梯度 + 克制蓝 —— */
-  --ink-1: #0f172a;       /* 标题 */
-  --ink-2: #475569;       /* 正文 */
-  --ink-3: #64748b;       /* 辅助文字 */
-  --ink-4: #94a3b8;       /* 提示 */
-  --line-1: #e2e8f0;      /* 默认边框 */
-  --line-2: #edf0f5;      /* 极弱分隔 */
-  --line-3: #f1f5f9;      /* 行内分隔 */
-  --bg-page: #f1f5f9;     /* 页面底色 */
-  --bg-soft: #f8fafc;     /* 卡片内底色 */
-  --surface: #ffffff;     /* 卡片表面 */
+  /* 模块仅保留语义别名，实际值来自平台全局 UniLab token。 */
+  --ink-1: var(--text);
+  --ink-2: var(--text-secondary);
+  --ink-3: var(--text-muted);
+  --ink-4: var(--text-faint);
+  --line-1: var(--border);
+  --line-2: var(--line-soft);
+  --line-3: var(--surface-content);
+  --bg-page: var(--surface-content);
+  --bg-soft: var(--surface-muted);
+  --surface: var(--surface-card);
 
   /* 蓝色：仅作强调 */
-  --brand-1: #1d4ed8;     /* 主蓝（深一档） */
-  --brand-2: #2563eb;     /* 标准蓝 */
-  --brand-3: #60a5fa;     /* 浅蓝 */
-  --brand-soft: #eff6ff;  /* 蓝填充 */
-  --brand-line: #bfdbfe;  /* 蓝边框 */
+  --brand-1: var(--primary-dark);
+  --brand-2: var(--primary);
+  --brand-3: var(--primary-light);
+  --brand-soft: var(--primary-soft);
+  --brand-line: var(--primary-border);
 
   /* 状态 */
   --ok-1: #15803d;        --ok-soft: #ecfdf5;   --ok-line: #c7f0d6;
@@ -36,22 +36,23 @@
   --danger-1: #b91c1c;    --danger-soft: #fef2f2; --danger-line: #fecaca;
 
   /* —— 间距 4/8/12/16/20/24/32/40 —— */
-  --s-1: 4px;  --s-2: 8px;  --s-3: 12px;  --s-4: 16px;
-  --s-5: 20px; --s-6: 24px; --s-7: 32px;  --s-8: 40px;
+  --s-1: var(--space-1); --s-2: var(--space-2); --s-3: var(--space-3); --s-4: var(--space-4);
+  --s-5: var(--space-5); --s-6: var(--space-6); --s-7: var(--space-8); --s-8: var(--space-10);
 
   /* —— 圆角 6/8/10/12/16 —— */
-  --r-1: 6px;  --r-2: 8px;  --r-3: 10px;  --r-4: 12px;  --r-5: 16px;
+  --r-1: var(--radius-sm); --r-2: var(--radius-md); --r-3: var(--radius-lg);
+  --r-4: var(--radius-xl); --r-5: var(--radius-panel);
 
   /* —— 阴影 —— */
-  --sh-1: 0 1px 2px rgba(10, 15, 28, 0.04);
-  --sh-2: 0 2px 8px rgba(10, 15, 28, 0.05), 0 1px 2px rgba(10, 15, 28, 0.04);
-  --sh-3: 0 8px 24px rgba(10, 15, 28, 0.06), 0 2px 6px rgba(10, 15, 28, 0.04);
-  --sh-modal: 0 24px 56px rgba(10, 15, 28, 0.18), 0 8px 16px rgba(10, 15, 28, 0.08);
+  --sh-1: var(--shadow-card);
+  --sh-2: var(--shadow-raised);
+  --sh-3: var(--shadow-popover);
+  --sh-modal: var(--shadow-modal);
 
   /* —— 缓动 —— */
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --t-fast: 140ms;
-  --t-base: 200ms;
+  --ease-out: var(--ease-standard);
+  --t-fast: var(--duration-fast);
+  --t-base: var(--duration-base);
 
   min-width: 0;
   color: var(--ink-2);
@@ -105,7 +106,7 @@
 .iam-settings-head h2 {
   margin: 0;
   color: var(--ink-1);
-  font-size: 26px;
+  font-size: 22px;
   font-weight: 700;
   letter-spacing: -0.01em;
   line-height: 1.2;
@@ -121,8 +122,8 @@
   padding: 2px 6px;
   color: var(--brand-1);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.92em;
-  border-radius: 4px;
+  font-size: 12.5px;
+  border-radius: 6px;
   background: var(--brand-soft);
 }
 .iam-head-note {
@@ -197,7 +198,7 @@
   margin-bottom: var(--s-5);
   border: 1px solid var(--brand-line);
   border-radius: var(--r-4);
-  background: linear-gradient(135deg, var(--surface), var(--brand-soft));
+  background: var(--surface);
   box-shadow: var(--sh-1);
 }
 .iam-management-guide-copy { min-width: 0; }
@@ -205,7 +206,7 @@
 .iam-management-guide h3 {
   margin: 0;
   color: var(--ink-1);
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 700;
 }
 .iam-management-guide-copy > p {
@@ -247,17 +248,17 @@
   height: 18px;
   place-items: center;
   color: #fff;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   content: counter(management-flow);
   counter-increment: management-flow;
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
   background: var(--brand-2);
 }
 .iam-management-flow strong,
 .iam-management-flow span { display: block; }
 .iam-management-flow strong { color: var(--ink-1); font-size: 12px; }
-.iam-management-flow span { margin-top: 4px; color: var(--ink-4); font-size: 10.5px; line-height: 1.4; }
+.iam-management-flow span { margin-top: 4px; color: var(--ink-4); font-size: 11px; line-height: 1.4; }
 .iam-summary-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -302,7 +303,7 @@
   display: block;
   margin-top: 2px;
   color: var(--ink-1);
-  font-size: 24px;
+  font-size: 22px;
   font-weight: 700;
   line-height: 1.05;
   letter-spacing: -0.01em;
@@ -409,7 +410,7 @@
   display: inline-block;
   width: 7px;
   height: 7px;
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
   background: var(--line-1);
   box-shadow: 0 0 0 2px var(--bg-soft);
   transition: background var(--t-fast) var(--ease-out);
@@ -438,7 +439,7 @@
 .iam-panel-head h3 {
   margin: 0;
   color: var(--ink-1);
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 700;
   letter-spacing: -0.01em;
 }
@@ -590,9 +591,9 @@
   height: 18px;
   place-items: center;
   color: #fff;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
   background: var(--brand-2);
 }
 
@@ -666,7 +667,7 @@
   text-overflow: ellipsis;
   vertical-align: middle;
   white-space: nowrap;
-  border-radius: 4px;
+  border-radius: 6px;
   background: var(--brand-soft);
 }
 .iam-type-tag,
@@ -711,12 +712,12 @@
 }
 .iam-permission-code {
   display: inline-block;
-  padding: 5px 9px !important;
+  padding: 5px 9px;
   overflow-wrap: anywhere;
-  color: var(--brand-1) !important;
-  font-size: 11.5px !important;
-  border-radius: 5px !important;
-  background: var(--brand-soft) !important;
+  color: var(--brand-1);
+  font-size: 11.5px;
+  border-radius: 6px;
+  background: var(--brand-soft);
 }
 .iam-risk {
   display: inline-flex;
@@ -742,7 +743,6 @@
   place-items: center;
   padding: 20px;
   background: rgba(10, 15, 28, 0.55);
-  backdrop-filter: blur(4px);
   animation: iam-fade-in 180ms var(--ease-out);
 }
 @keyframes iam-fade-in {
@@ -810,8 +810,8 @@
   margin: 20px 28px 0;
   padding: 20px 22px;
   border: 1px solid #dbeafe;
-  border-radius: 16px;
-  background: linear-gradient(120deg, #eff6ff 0%, #ffffff 72%);
+  border-radius: 14px;
+  background: var(--brand-soft);
   box-shadow: 0 8px 24px rgba(30, 64, 175, 0.06);
 }
 .iam-user-detail-avatar {
@@ -821,21 +821,21 @@
   height: 56px;
   place-items: center;
   color: #1d4ed8;
-  font-size: 24px;
+  font-size: 22px;
   font-weight: 700;
   border: 4px solid #dbeafe;
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
   background: #ffffff;
 }
 .iam-user-detail-identity { min-width: 0; flex: 1; }
 .iam-user-detail-name-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
-.iam-user-detail-name-row h4 { margin: 0; color: var(--ink-1); font-size: 20px; }
+.iam-user-detail-name-row h4 { margin: 0; color: var(--ink-1); font-size: 16px; }
 .iam-user-detail-identity p { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; margin: 7px 0 0; color: var(--ink-3); font-size: 12px; }
-.iam-user-detail-identity p i { width: 3px; height: 3px; border-radius: 50%; background: var(--ink-4); }
+.iam-user-detail-identity p i { width: 3px; height: 3px; border-radius: var(--radius-pill); background: var(--ink-4); }
 .iam-user-detail-hero-note { display: flex; align-items: center; gap: 8px; padding-left: 18px; color: #2563eb; font-size: 12px; line-height: 1.5; border-left: 1px solid #bfdbfe; }
 .iam-user-detail-hero-note small { color: var(--ink-3); font-size: 11px; }
 .iam-user-detail-modal .iam-detail-grid { margin-top: 16px; background: var(--surface); }
-.iam-user-detail-modal .iam-detail-section { padding: 18px 20px; margin-top: 16px; border: 1px solid var(--line-1); border-radius: 16px; background: var(--surface); }
+.iam-user-detail-modal .iam-detail-section { padding: 18px 20px; margin-top: 16px; border: 1px solid var(--line-1); border-radius: 14px; background: var(--surface); }
 .iam-user-detail-modal .iam-detail-section + .iam-detail-section { margin-top: 14px; }
 .iam-user-detail-modal > footer { background: var(--surface); }
 .iam-user-account-list { display: grid; gap: 10px; margin-top: 12px; }
@@ -1181,7 +1181,7 @@
   border-radius: var(--r-2);
   background: var(--brand-soft);
 }
-.iam-one-time-warning { color: var(--warn-1) !important; }
+.iam-one-time-warning { color: var(--warn-1); }
 .iam-danger-text-button { color: var(--danger-1); }
 .iam-danger-text-button:hover { color: #b91c1c; }
 .iam-danger-button {
@@ -1223,13 +1223,13 @@
 .iam-user-filter-row { align-items: center; }
 .iam-user-list-controls { display: flex; align-items: center; justify-content: flex-end; gap: 12px; color: var(--ink-3); font-size: 12px; }
 .iam-user-list-controls label { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
-.iam-user-list-controls select { min-height: 32px; padding: 0 25px 0 8px; color: var(--ink-2); font-size: 12px; border: 1px solid var(--line-1); border-radius: 7px; background: var(--surface); }
+.iam-user-list-controls select { min-height: 32px; padding: 0 25px 0 8px; color: var(--ink-2); font-size: 12px; border: 1px solid var(--line-1); border-radius: 8px; background: var(--surface); }
 .iam-user-list-controls span { white-space: nowrap; }
 
 .iam-server-limit-note {
   margin: -0.15rem 0 0.8rem;
   color: var(--ink-3);
-  font-size: 0.8rem;
+  font-size: 13px;
   line-height: 1.55;
 }
 
@@ -1248,7 +1248,7 @@
   gap: var(--s-4);
   padding: 15px 18px;
   border-bottom: 1px solid var(--line-2);
-  background: linear-gradient(115deg, #eff6ff, #f8fafc 58%, #fff);
+  background: var(--brand-soft);
 }
 .iam-organization-tree-toolbar > div:first-child {
   display: grid;
@@ -1257,12 +1257,12 @@
 }
 .iam-organization-tree-toolbar p,
 .iam-position-groups-toolbar p,
-.iam-membership-groups-toolbar p { margin: 0; color: var(--brand-1); font-size: 10px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+.iam-membership-groups-toolbar p { margin: 0; color: var(--brand-1); font-size: 11px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
 .iam-organization-tree-toolbar strong { color: var(--ink-1); font-size: 13px; }
 .iam-organization-tree-toolbar span { color: var(--ink-4); font-size: 11.5px; }
 .iam-organization-tree-toolbar-actions { display: flex; gap: var(--s-2); }
 .iam-tree-toolbar-metrics { display: flex; gap: 8px; margin-left: auto; }
-.iam-tree-toolbar-metrics span { padding: 5px 8px; color: var(--ink-3) !important; font-size: 10.5px !important; border: 1px solid var(--line-2); border-radius: 999px; background: rgba(255,255,255,.72); white-space: nowrap; }
+.iam-tree-toolbar-metrics span { padding: 5px 8px; color: var(--ink-3); font-size: 11px; border: 1px solid var(--line-2); border-radius: 999px; background: rgba(255,255,255,.72); white-space: nowrap; }
 .iam-tree-toolbar-metrics b { color: var(--brand-1); font-size: 12px; }
 .iam-organization-tree { min-height: 96px; }
 .iam-organization-tree-empty {
@@ -1347,7 +1347,7 @@
 .iam-organization-tree-name strong,
 .iam-organization-tree-name small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .iam-organization-tree-name strong { color: var(--ink-1); font-size: 13px; font-weight: 600; }
-.iam-organization-tree-name small { margin-top: 3px; color: var(--ink-4); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10.5px; }
+.iam-organization-tree-name small { margin-top: 3px; color: var(--ink-4); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
 .iam-organization-tree-meta {
   display: flex;
   align-items: center;
@@ -1357,7 +1357,7 @@
 .iam-organization-tree-meta > span:not(.console-badge) { min-width: 54px; }
 .iam-organization-tree-meta small,
 .iam-organization-tree-meta strong { display: block; }
-.iam-organization-tree-meta small { color: var(--ink-4); font-size: 10px; font-weight: 500; }
+.iam-organization-tree-meta small { color: var(--ink-4); font-size: 11px; font-weight: 500; }
 .iam-organization-tree-meta strong { max-width: 130px; margin-top: 3px; overflow: hidden; color: var(--ink-2); font-size: 11.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .iam-organization-tree-actions {
   display: flex;
@@ -1404,7 +1404,7 @@
   gap: var(--s-4);
   padding: 15px 18px;
   border-bottom: 1px solid var(--line-2);
-  background: linear-gradient(115deg, #f5f3ff, #fafafa 58%, #fff);
+  background: var(--bg-soft);
 }
 .iam-position-groups-toolbar > div:first-child { display: grid; gap: 3px; }
 .iam-position-groups-toolbar strong { color: var(--ink-1); font-size: 13px; }
@@ -1446,7 +1446,7 @@
 .iam-position-group-name strong,
 .iam-position-group-name small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .iam-position-group-name strong { color: var(--ink-1); font-size: 13px; font-weight: 650; }
-.iam-position-group-name small { margin-top: 3px; color: var(--ink-4); font-size: 10.5px; }
+.iam-position-group-name small { margin-top: 3px; color: var(--ink-4); font-size: 11px; }
 .iam-position-group-count {
   padding: 4px 9px;
   color: var(--brand-1);
@@ -1482,7 +1482,7 @@
 .iam-position-group-identity strong,
 .iam-position-group-identity small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .iam-position-group-identity strong { color: var(--ink-1); font-size: 12.5px; }
-.iam-position-group-identity small { margin-top: 3px; color: var(--ink-4); font-size: 10.5px; }
+.iam-position-group-identity small { margin-top: 3px; color: var(--ink-4); font-size: 11px; }
 .iam-position-group-actions { display: flex; justify-content: flex-end; gap: 7px; white-space: nowrap; }
 .iam-position-group-create {
   width: 100%;
@@ -1530,7 +1530,7 @@
   gap: var(--s-4);
   padding: 15px 18px;
   border-bottom: 1px solid var(--line-2);
-  background: linear-gradient(115deg, #fff7ed, #fafafa 58%, #fff);
+  background: var(--warn-soft);
 }
 .iam-membership-groups-toolbar > div:first-child { display: grid; gap: 3px; min-width: 0; }
 .iam-membership-groups-toolbar strong { color: var(--ink-1); font-size: 13px; }
@@ -1577,7 +1577,7 @@
 .iam-membership-group-name strong,
 .iam-membership-group-name small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .iam-membership-group-name strong { color: var(--ink-1); font-size: 13px; font-weight: 650; }
-.iam-membership-group-name small { margin-top: 3px; color: var(--ink-4); font-size: 10.5px; }
+.iam-membership-group-name small { margin-top: 3px; color: var(--ink-4); font-size: 11px; }
 .iam-membership-group-count {
   padding: 4px 9px;
   color: #b45309;
@@ -1607,7 +1607,7 @@
   flex: 0 0 30px;
   place-items: center;
   color: var(--brand-1);
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
   background: var(--brand-soft);
 }
 .iam-membership-person-icon svg { width: 14px; height: 14px; }
@@ -1625,7 +1625,7 @@
 .iam-membership-validity strong { color: var(--ink-1); font-size: 12px; font-weight: 600; }
 .iam-membership-person small,
 .iam-membership-position small,
-.iam-membership-validity small { margin-top: 3px; color: var(--ink-4); font-size: 10.5px; }
+.iam-membership-validity small { margin-top: 3px; color: var(--ink-4); font-size: 11px; }
 .iam-membership-position small,
 .iam-membership-validity small { margin: 0 0 3px; }
 .iam-membership-user-id {
@@ -1736,7 +1736,7 @@
   font-size: 12px;
   font-weight: 700;
   border: 1px solid var(--brand-line);
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
   background: var(--brand-soft);
 }
 .iam-linked-user {
@@ -1779,7 +1779,7 @@
   display: inline-flex;
   width: fit-content;
   padding: 3px 9px;
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 600;
   border-radius: 999px;
   letter-spacing: 0.02em;
@@ -1835,9 +1835,9 @@
 .iam-account-editor-intro > small {
   padding: 4px 8px;
   color: var(--brand-1);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
-  border-radius: 5px;
+  border-radius: 6px;
   background: var(--surface);
   letter-spacing: 0.04em;
 }
@@ -1981,7 +1981,7 @@
 .iam-provenance-list code {
   overflow: hidden;
   color: var(--brand-1);
-  font-size: 10.5px;
+  font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2011,7 +2011,7 @@
 .iam-impact-metrics span {
   padding: 4px 9px;
   color: var(--brand-1);
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 500;
   border-radius: 999px;
   background: var(--surface);
@@ -2051,7 +2051,7 @@
   flex: 0 0 auto;
   padding: 4px 10px;
   color: var(--brand-1);
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 600;
   border-radius: 999px;
   background: var(--surface);
@@ -2130,7 +2130,7 @@
 }
 .iam-application-role-copy { display: grid; gap: 3px; min-width: 0; }
 .iam-application-role-copy strong { color: var(--ink-1); font-size: 12px; font-weight: 600; }
-.iam-application-role-copy code { width: fit-content; color: var(--ink-3); font-size: 9.5px; }
+.iam-application-role-copy code { width: fit-content; color: var(--ink-3); font-size: 11px; }
 .iam-application-role-copy small {
   color: var(--ink-3);
   font-size: 11px;
@@ -2187,7 +2187,7 @@
 .iam-application-permission-head span {
   padding: 3px 9px;
   color: var(--ok-1);
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 600;
   border-radius: 999px;
   background: #ecfdf5;
@@ -2207,7 +2207,7 @@
   background: var(--surface);
 }
 .iam-application-permission-tags b { font-size: 11.5px; }
-.iam-application-permission-tags code { color: var(--ink-3); font-size: 9.5px; }
+.iam-application-permission-tags code { color: var(--ink-3); font-size: 11px; }
 .console-button.danger {
   color: var(--danger-1);
   border-color: var(--danger-line);
@@ -2264,7 +2264,7 @@
 .iam-effective-authorization-head span {
   padding: 3px 9px;
   color: var(--brand-1);
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 600;
   border-radius: 999px;
   background: var(--brand-soft);
@@ -2297,7 +2297,7 @@
   min-width: 0;
 }
 .iam-effective-authorization-role strong { color: var(--ink-1); font-size: 12.5px; font-weight: 600; }
-.iam-effective-authorization-role code { color: var(--ink-3); font-size: 9.5px; }
+.iam-effective-authorization-role code { color: var(--ink-3); font-size: 11px; }
 .iam-effective-authorization-list small {
   color: var(--ink-3);
   font-size: 11px;
@@ -2392,7 +2392,7 @@
 }
 .iam-template-editor + .iam-template-editor { margin-top: 2px; }
 .iam-template-editor {
-  background: linear-gradient(180deg, color-mix(in srgb, var(--brand-soft) 20%, var(--surface)) 0%, var(--surface) 170px);
+  background: var(--surface);
 }
 .iam-template-card-title p {
   max-width: 720px;
@@ -2423,7 +2423,7 @@
   padding: 3px 8px;
   overflow-wrap: anywhere;
   color: var(--brand-1);
-  font-size: 10.5px;
+  font-size: 11px;
   border: 1px solid var(--brand-line);
   border-radius: 999px;
   background: var(--brand-soft);
@@ -2602,7 +2602,7 @@
 }
 .iam-template-duplicate-list li > div { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
 .iam-template-duplicate-list strong { color: var(--ink-1); font-size: 12px; }
-.iam-template-duplicate-list span { color: var(--warn-1); font-size: 10.5px; font-weight: 600; }
+.iam-template-duplicate-list span { color: var(--warn-1); font-size: 11px; font-weight: 600; }
 .iam-template-duplicate-list p { margin: 0; color: var(--ink-3); font-size: 11.5px; overflow-wrap: anywhere; }
 .iam-template-duplicate-note { color: var(--warn-1); }
 .iam-template-assignment-list { display: grid; gap: 10px; margin-top: var(--s-4); }
@@ -2643,7 +2643,7 @@
 .iam-template-assignment-content { display: grid; gap: 4px; min-width: 0; }
 .iam-template-assignment-topline { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .iam-template-assignment strong { min-width: 0; overflow: hidden; color: var(--ink-1); font-size: 12.5px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-.iam-template-assignment-topline b { flex: 0 0 auto; padding: 2px 7px; color: var(--ok-1); border: 1px solid var(--ok-line); border-radius: 999px; background: var(--ok-soft); font-size: 10px; font-weight: 650; white-space: nowrap; }
+.iam-template-assignment-topline b { flex: 0 0 auto; padding: 2px 7px; color: var(--ok-1); border: 1px solid var(--ok-line); border-radius: 999px; background: var(--ok-soft); font-size: 11px; font-weight: 650; white-space: nowrap; }
 .iam-template-assignment small,
 .iam-template-assignment em {
   color: var(--ink-3);
@@ -2745,7 +2745,7 @@
 .iam-mount-tile-dot {
   width: 8px;
   height: 8px;
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
   background: var(--ink-3);
   flex: 0 0 auto;
   display: inline-block;
@@ -2779,7 +2779,7 @@
 }
 .iam-mount-tile dd {
   margin: 0;
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--ink-1);
   letter-spacing: -0.01em;
@@ -2874,7 +2874,7 @@
   margin-left: 6px;
   padding: 2px 8px;
   color: var(--ok-1);
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 600;
   line-height: 1.3;
   border: 1px solid var(--ok-line);
@@ -2905,7 +2905,7 @@
 .iam-authorization-layer-head span {
   padding: 3px 9px;
   color: var(--brand-1);
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 600;
   border: 1px solid var(--brand-line);
   border-radius: 999px;
@@ -2980,7 +2980,7 @@
   color: #fff;
   font-size: 11px;
   font-weight: 700;
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
   background: var(--ink-4);
 }
 .iam-onboarding-steps li.active b,
@@ -3011,22 +3011,22 @@
   line-height: 1.55;
 }
 .iam-onboarding-toggle {
-  display: inline-flex !important;
+  display: inline-flex;
   grid-auto-flow: column;
   align-items: center;
   gap: 6px;
   width: max-content;
   padding: 6px 9px;
-  color: var(--ink-2) !important;
-  font-size: 11.5px !important;
+  color: var(--ink-2);
+  font-size: 11.5px;
   border: 1px solid var(--line-1);
   border-radius: var(--r-1);
   background: var(--surface);
   cursor: pointer;
 }
 .iam-onboarding-toggle input {
-  width: 14px !important;
-  min-height: auto !important;
+  width: 14px;
+  min-height: auto;
   margin: 0;
 }
 .iam-onboarding-grid {
@@ -3068,7 +3068,7 @@
   font-size: 11.5px;
   cursor: pointer;
   border: 0;
-  border-radius: 3px;
+  border-radius: 6px;
   background: transparent;
   transition: background-color var(--t-fast) var(--ease-out);
 }
@@ -3112,7 +3112,7 @@
   .iam-data-table th,
   .iam-data-table td {
     display: block;
-    width: auto !important;
+    width: auto;
   }
   .iam-data-table thead { display: none; }
   .iam-data-table tbody tr {
@@ -3128,7 +3128,7 @@
     display: flex;
     gap: 10px;
     align-items: baseline;
-    padding: 6px 0 !important;
+    padding: 6px 0;
     border-bottom: 1px dashed #eef2f7;
   }
   .iam-data-table td:last-child { border-bottom: none; }
@@ -3142,13 +3142,13 @@
   .iam-data-table td[data-empty="true"]::before { display: none; }
   .iam-data-table td[data-empty="true"] {
     display: block;
-    padding: 14px 0 !important;
+    padding: 14px 0;
     color: var(--ink-3);
     text-align: center;
   }
   .iam-data-table td.console-actions-cell {
     justify-content: flex-end;
-    padding-top: 10px !important;
+    padding-top: 10px;
   }
   .iam-data-table td.console-actions-cell::before { display: none; }
 }
@@ -3195,7 +3195,7 @@
   .iam-user-table td,
   .iam-account-table td {
     display: block;
-    width: auto !important;
+    width: auto;
   }
   .iam-user-table thead,
   .iam-account-table thead { display: none; }
@@ -3213,7 +3213,7 @@
     display: flex;
     gap: 10px;
     align-items: baseline;
-    padding: 7px 0 !important;
+    padding: 7px 0;
     overflow: visible;
     border-bottom: 1px dashed var(--line-2);
   }
@@ -3231,7 +3231,7 @@
   .iam-account-table td.console-actions-cell {
     justify-content: flex-end;
     flex-wrap: wrap;
-    padding-top: 10px !important;
+    padding-top: 10px;
   }
   .iam-user-table td.console-actions-cell::before,
   .iam-account-table td.console-actions-cell::before { display: none; }

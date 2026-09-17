@@ -153,9 +153,6 @@ function showAccountHelp() {
 <template>
   <main class="login-page">
     <section class="brand-panel" aria-labelledby="platform-heading">
-      <div class="brand-glow brand-glow-top" aria-hidden="true"></div>
-      <div class="brand-glow brand-glow-bottom" aria-hidden="true"></div>
-      <div class="brand-grid" aria-hidden="true"></div>
 
       <header class="brand-logo">
         <span class="brand-logo-mark" aria-hidden="true">

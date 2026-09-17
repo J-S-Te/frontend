@@ -7,6 +7,16 @@ const source = await readFile(new URL('./views/ProjectManagementView.vue', impor
 const styles = await readFile(new URL('./styles/project-management.css', import.meta.url), 'utf8')
 const pickerSource = await readFile(new URL('./components/ServiceItemPicker.vue', import.meta.url), 'utf8')
 const searchableSelectSource = await readFile(new URL('./components/SearchableSelect.vue', import.meta.url), 'utf8')
+const filterBarSource = await readFile(new URL('./components/FilterBar.vue', import.meta.url), 'utf8')
+const sharedComponentSources = await Promise.all([
+  'CodePills.vue',
+  'EmptyHint.vue',
+  'FilterBar.vue',
+  'KpiCard.vue',
+  'PageHead.vue',
+  'ProgressCell.vue',
+  'RiskList.vue',
+].map((name) => readFile(new URL(`./components/${name}`, import.meta.url), 'utf8')))
 const pmApiSource = await readFile(new URL('./api/projectManagement.js', import.meta.url), 'utf8')
 const workflowNodeSource = await readFile(new URL('./workflowNode.js', import.meta.url), 'utf8')
 
@@ -1342,7 +1352,8 @@ test('按 V1.1 原型还原：详情页、步骤条、审批流、状态分布�
   assert.match(styles, /\.pm-matrix \{/)
   // 列表页指标概览行与原型搜索栏。
   assert.match(source, /class="pm-kpi-row"/)
-  assert.match(source, /class="pm-search-bar"/)
+  assert.match(source, /<FilterBar :count="filteredProjects\.length"/)
+  assert.match(filterBarSource, /'pm-search-bar'/)
   assert.match(styles, /\.pm-kpi-row \{/)
   assert.match(styles, /\.pm-search-bar \{/)
   // 资质页体系与编码、到期提醒标签页（真实台账聚合，不引入静态映射）。
@@ -1357,6 +1368,24 @@ test('按 V1.1 原型还原：详情页、步骤条、审批流、状态分布�
   // 看板卡片使用左色条增强样式，并保留风险行标记。
   assert.match(styles, /\.pm-kanban-card \{/)
   assert.match(styles, /\.pm-kanban-card\.risk \{/)
+})
+
+test('项目管理工作台使用共享展示组件并保持界面文案全中文', () => {
+  for (const component of ['CodePills', 'EmptyHint', 'FilterBar', 'KpiCard', 'PageHead', 'ProgressCell', 'RiskList']) {
+    assert.match(source, new RegExp(`<${component}`))
+  }
+  assert.equal(sharedComponentSources.length, 7)
+  for (const englishKicker of [
+    'SERVICE FLOW', 'ATTENTION', 'DELIVERY PULSE', 'FIELD EXECUTION', 'CODE MATRIX',
+    'EXPIRY WATCH', 'QUICK START', 'ACCESS MATRIX', 'REAL OPERATION',
+    'ROLLBACK APPROVAL', 'REVIEW FLOW', 'REPORT PHASE', 'REVIEW HISTORY',
+  ]) {
+    assert.doesNotMatch(source, new RegExp(`>${englishKicker}<`))
+  }
+  for (const chineseKicker of ['服务流程', '风险提示', '交付脉搏', '现场实施', '资质矩阵', '到期提醒', '权限矩阵', '报告阶段']) {
+    assert.match(source, new RegExp(`>${chineseKicker}<`))
+  }
+  assert.match(source, /项目服务内容管理 · 版本 1\.0/)
 })
 
 test('样式表修掉信息提示、卡片角标与残留样式三处缺陷', () => {
@@ -1428,4 +1457,21 @@ test('过期设备展示派生无效状态且检测类别使用受控域', () =>
   assert.match(source, /<SearchableSelect v-model="row\.category"[^>]*:options="activeDetectionCategoryOptions"/)
   assert.doesNotMatch(source, /<input v-model\.trim="row\.category" required placeholder="检测类别"/)
   assert.match(source, /categoryRows,[\s\S]*listDetectionCategories\(\)/)
+})
+
+test('在途监控使用服务端快照、自动刷新、真分页和节点下钻', () => {
+  assert.match(source, /monitoringSnapshot = ref\(\{ items: \[\], recent_events: \[\], status_counts:/)
+  assert.match(source, /await getProjectMonitoring\(monitoringParams\(\)\)/)
+  assert.match(source, /window\.setInterval\([\s\S]*15000\)/)
+  assert.match(source, /document\.addEventListener\('visibilitychange', onMonitoringVisibility\)/)
+  assert.match(source, /window\.addEventListener\('focus', onMonitoringVisibility\)/)
+  assert.match(source, /changeMonitoringPage\(monitorPage - 1\)/)
+  assert.match(source, /changeMonitoringPage\(monitorPage \+ 1\)/)
+  assert.doesNotMatch(source, /<button class="pm-pg" disabled>‹<\/button><button class="pm-pg active">1<\/button>/)
+  for (const label of ['当前 / 下一里程碑', '服务项状态', '资源', 'SLA / 冲突', '最近交付事件', '前往当前节点']) assert.match(source, new RegExp(label))
+  assert.match(source, /monitorSLAOnly/)
+  assert.match(source, /monitorConflictOnly/)
+  assert.match(source, /monitorProjectManager/)
+  assert.match(source, /monitorDueFrom/)
+  assert.match(source, /monitorDueTo/)
 })

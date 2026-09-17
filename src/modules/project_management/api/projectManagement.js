@@ -203,6 +203,28 @@ export async function listProjects(params = {}) {
   return unwrapPage(data).items
 }
 
+/** Return one server-owned, role-scoped in-flight monitoring snapshot. */
+export async function getProjectMonitoring(params = {}) {
+  const query = { ...params }
+  if (query.q === undefined && query.keyword !== undefined) query.q = query.keyword
+  delete query.keyword
+  const search = new URLSearchParams(Object.entries(query).filter(([, value]) => value !== undefined && value !== null && value !== '' && value !== false)).toString()
+  const data = await request(`/projects-monitoring${search ? `?${search}` : ''}`)
+  return {
+    items: Array.isArray(data?.items) ? data.items : [],
+    recent_events: Array.isArray(data?.recent_events) ? data.recent_events : [],
+    status_counts: data?.status_counts || {},
+    categories: Array.isArray(data?.categories) ? data.categories : [],
+    teams: Array.isArray(data?.teams) ? data.teams : [],
+    project_manager_ids: Array.isArray(data?.project_manager_ids) ? data.project_manager_ids : [],
+    total: Number(data?.total || 0),
+    page: Number(data?.page || 1),
+    page_size: Number(data?.page_size || params.page_size || 20),
+    server_time: data?.server_time || '',
+    snapshot_version: data?.snapshot_version || '',
+  }
+}
+
 /**
  * listApprovedContracts 通过项目后端读取当前租户已审批合同。
  * 跨子系统调用由项目后端使用机器身份完成，浏览器无需合同系统 Cookie。

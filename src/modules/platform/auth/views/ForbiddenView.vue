@@ -67,7 +67,7 @@ function goLogin() {
   max-width: 440px;
   width: 100%;
   background: #ffffff;
-  border-radius: 16px;
+  border-radius: 14px;
   box-shadow: 0 18px 48px -16px rgba(15, 23, 42, 0.18);
   padding: 40px 32px;
   text-align: center;
@@ -80,7 +80,7 @@ function goLogin() {
   justify-content: center;
   width: 64px;
   height: 64px;
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
   background: rgba(239, 68, 68, 0.08);
   color: #b91c1c;
   margin-bottom: 20px;
@@ -110,7 +110,7 @@ function goLogin() {
 .forbidden-meta code {
   background: #f1f5f9;
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: 6px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
   color: #0f172a;
@@ -128,7 +128,7 @@ function goLogin() {
   padding: 8px 18px;
   border-radius: 8px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
   font-family: inherit;
 }
 

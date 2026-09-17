@@ -1,17 +1,67 @@
 :root {
   color: #0f172a;
-  background: #0f172a;
-  font-family: "PingFang SC", "Microsoft YaHei", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #f1f5f9;
+  font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, "Segoe UI", sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
+
+  /* UniLab UI Kit：基础平台唯一的全局设计变量源。 */
   --primary: #2563eb;
   --primary-dark: #1d4ed8;
   --primary-light: #60a5fa;
+  --primary-soft: #eff6ff;
+  --primary-border: #bfdbfe;
   --text: #0f172a;
   --text-secondary: #475569;
   --text-muted: #64748b;
-  --border: #dce5f2;
-  --surface-muted: #f6f8fc;
+  --text-faint: #94a3b8;
+  --border: #e2e8f0;
+  --line-soft: #edf0f5;
+  --line-strong: #cbd5e1;
+  --surface-content: #f1f5f9;
+  --surface-card: #ffffff;
+  --surface-muted: #f8fafc;
+  --sidebar: #0f172a;
+  --sidebar-hover: #1e293b;
+
+  --success: #16a34a;
+  --success-text: #15803d;
+  --success-soft: #ecfdf5;
+  --warning: #d97706;
+  --warning-text: #b45309;
+  --warning-soft: #fef3c7;
+  --danger: #dc2626;
+  --danger-text: #b91c1c;
+  --danger-soft: #fef2f2;
+
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-body: 13px;
+  --fs-body-lg: 14px;
+  --fs-title-sm: 16px;
+  --fs-title: 22px;
+  --fs-display: 28px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+  --radius-panel: 14px;
+  --radius-pill: 999px;
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-raised: 0 8px 24px rgba(15, 23, 42, 0.08);
+  --shadow-popover: 0 18px 42px rgba(15, 23, 42, 0.14);
+  --shadow-modal: 0 24px 56px rgba(15, 23, 42, 0.18);
+  --ease-standard: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 140ms;
+  --duration-base: 200ms;
 }
 
 * {
@@ -58,45 +108,7 @@ button {
   justify-content: space-between;
   color: #fff;
   overflow: hidden;
-  background:
-    linear-gradient(135deg, rgba(15, 23, 42, 0.1), rgba(15, 23, 42, 0.72)),
-    linear-gradient(135deg, #111c35 0%, #0f172a 52%, #17233b 100%);
-}
-
-.brand-grid {
-  position: absolute;
-  z-index: -2;
-  inset: 0;
-  opacity: 0.22;
-  background-image:
-    linear-gradient(rgba(148, 163, 184, 0.1) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(148, 163, 184, 0.1) 1px, transparent 1px);
-  background-size: 44px 44px;
-  mask-image: linear-gradient(to bottom right, #000, transparent 80%);
-}
-
-.brand-glow {
-  position: absolute;
-  z-index: -1;
-  border-radius: 50%;
-  filter: blur(4px);
-  pointer-events: none;
-}
-
-.brand-glow-top {
-  width: 760px;
-  height: 420px;
-  top: -230px;
-  left: -160px;
-  background: radial-gradient(circle, rgba(37, 99, 235, 0.55), transparent 66%);
-}
-
-.brand-glow-bottom {
-  width: 680px;
-  height: 520px;
-  right: -240px;
-  bottom: -280px;
-  background: radial-gradient(circle, rgba(124, 58, 237, 0.34), transparent 66%);
+  background: var(--sidebar);
 }
 
 .brand-logo {
@@ -110,10 +122,10 @@ button {
   height: 44px;
   display: grid;
   place-items: center;
-  border-radius: 13px;
+  border-radius: var(--radius-xl);
   color: #fff;
-  background: linear-gradient(145deg, #3b82f6, #1d4ed8);
-  box-shadow: 0 14px 35px rgba(37, 99, 235, 0.34);
+  background: var(--primary);
+  box-shadow: none;
 }
 
 .brand-logo-mark svg {
@@ -128,13 +140,13 @@ button {
 }
 
 .brand-logo strong {
-  font-size: 17px;
+  font-size: var(--fs-title-sm);
   letter-spacing: 0.03em;
 }
 
 .brand-logo small {
   color: #718198;
-  font-size: 10px;
+  font-size: var(--fs-xs);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -157,13 +169,13 @@ button {
 .brand-eyebrow span {
   width: 25px;
   height: 2px;
-  border-radius: 99px;
+  border-radius: var(--radius-pill);
   background: #3b82f6;
 }
 
 .brand-content h1 {
   margin: 0;
-  font-size: clamp(38px, 4vw, 58px);
+  font-size: var(--fs-display);
   line-height: 1.25;
   letter-spacing: 0.025em;
   font-weight: 700;
@@ -171,7 +183,6 @@ button {
 
 .brand-content h1 span {
   color: #60a5fa;
-  text-shadow: 0 8px 32px rgba(59, 130, 246, 0.15);
 }
 
 .brand-description {
@@ -198,9 +209,8 @@ button {
   align-items: center;
   gap: 12px;
   border: 1px solid rgba(148, 163, 184, 0.13);
-  border-radius: 13px;
-  background: rgba(255, 255, 255, 0.045);
-  backdrop-filter: blur(12px);
+  border-radius: var(--radius-xl);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .capability-icon {
@@ -235,7 +245,7 @@ button {
 .capability-list small {
   overflow: hidden;
   color: #73839a;
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.45;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -260,7 +270,7 @@ button {
   width: 7px;
   height: 7px;
   display: inline-block;
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
   background: #10b981;
   box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.1);
 }
@@ -335,7 +345,7 @@ button {
   display: block;
   margin-bottom: 9px;
   color: var(--primary);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.18em;
 }
@@ -343,7 +353,7 @@ button {
 .login-header h2 {
   margin: 0;
   color: var(--text);
-  font-size: 27px;
+  font-size: var(--fs-display);
   line-height: 1.35;
 }
 
@@ -427,7 +437,7 @@ button {
   padding: 0 42px 0 40px;
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: var(--radius-md);
   outline: none;
   background: #fff;
   font-size: 13px;
@@ -463,7 +473,7 @@ button {
   display: grid;
   place-items: center;
   color: #94a3b8;
-  border-radius: 7px;
+  border-radius: 8px;
   background: transparent;
   cursor: pointer;
   transform: translateY(-50%);
@@ -552,7 +562,7 @@ button {
   margin: -6px 0 15px;
   padding: 12px;
   border: 1px solid #fdba74;
-  border-radius: 9px;
+  border-radius: 8px;
   background: #fff7ed;
 }
 
@@ -569,7 +579,7 @@ button {
   width: 100%;
   min-height: 36px;
   border: 1px solid #ea580c;
-  border-radius: 7px;
+  border-radius: 8px;
   color: #c2410c;
   background: #fff;
   font-size: 12px;
@@ -595,23 +605,22 @@ button {
   justify-content: center;
   gap: 10px;
   color: #fff;
-  border-radius: 9px;
-  background: linear-gradient(135deg, #2563eb, #1d4ed8);
-  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.22);
+  border-radius: var(--radius-md);
+  background: var(--primary);
+  box-shadow: none;
   font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.12em;
   cursor: pointer;
-  transition: transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease;
+  transition: background var(--duration-fast) ease, opacity var(--duration-fast) ease;
 }
 
 .login-button:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 13px 28px rgba(37, 99, 235, 0.28);
+  background: var(--primary-dark);
 }
 
 .login-button:active:not(:disabled) {
-  transform: translateY(0);
+  background: #1e40af;
 }
 
 .login-button:disabled {
@@ -630,7 +639,7 @@ button {
   height: 17px;
   border: 2px solid rgba(255, 255, 255, 0.4);
   border-top-color: #fff;
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
   animation: spin 0.8s linear infinite;
 }
 
@@ -648,7 +657,7 @@ button {
   border: 1px solid #d7efe7;
   border-radius: 8px;
   background: #f0fdf8;
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.5;
 }
 
@@ -728,7 +737,7 @@ button {
 .qr-tenant-field p {
   margin: 6px 0 0;
   color: #94a3b8;
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.45;
 }
 
@@ -808,7 +817,7 @@ button {
   margin-top: 5px;
   padding: 7px 13px;
   color: #fff;
-  border-radius: 7px;
+  border-radius: 8px;
   background: var(--primary);
   cursor: pointer;
   font-size: 11px;
@@ -824,7 +833,7 @@ button {
   height: 22px;
   border: 2px solid #dbeafe;
   border-top-color: var(--primary);
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
   animation: spin 0.75s linear infinite;
 }
 
@@ -842,7 +851,7 @@ button {
 .qr-status i {
   width: 6px;
   height: 6px;
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
   background: #22c55e;
   box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.13);
 }
@@ -880,7 +889,7 @@ button {
   margin: 15px auto 0;
   max-width: 292px;
   color: #94a3b8;
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.65;
 }
 
@@ -893,13 +902,13 @@ button {
   justify-content: center;
   gap: 9px;
   color: #a0adbd;
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .form-footer i {
   width: 3px;
   height: 3px;
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
   background: #cbd5e1;
 }
 
@@ -932,9 +941,7 @@ button {
     justify-content: center;
     padding: 32px 20px;
     overflow: auto;
-    background:
-      radial-gradient(circle at 20% 10%, rgba(59, 130, 246, 0.3), transparent 35%),
-      linear-gradient(145deg, #0f172a, #1e293b);
+    background: var(--surface-content);
   }
 
   .brand-panel {
@@ -945,8 +952,8 @@ button {
     width: min(460px, 100%);
     min-height: auto;
     padding: 34px 34px 25px;
-    border-radius: 20px;
-    box-shadow: 0 24px 60px rgba(2, 6, 23, 0.32);
+    border-radius: var(--radius-panel);
+    box-shadow: var(--shadow-modal);
   }
 
   .mobile-brand {
@@ -967,7 +974,7 @@ button {
     place-items: center;
     color: #fff;
     border-radius: 10px;
-    background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+    background: var(--primary);
   }
 
   .login-card {
@@ -1003,7 +1010,7 @@ button {
   }
 
   .login-header h2 {
-    font-size: 25px;
+    font-size: 22px;
   }
 }
 
