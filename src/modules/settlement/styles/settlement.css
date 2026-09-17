@@ -140,11 +140,11 @@
   display: inline-flex;
   align-items: center;
   padding: 5px 9px;
-  color: #15803d;
+  color: var(--green-text, #15803d);
   font-size: 12px;
   font-weight: 600;
   border-radius: 999px;
-  background: #ecfdf5;
+  background: var(--green-bg, #ecfdf5);
 }
 .settlement-dashboard {
   display: grid;
@@ -167,6 +167,11 @@
   min-height: 132px;
   padding: 18px;
   overflow: hidden;
+  transition: transform .2s ease, box-shadow .2s ease;
+}
+.settlement-cards article:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
 }
 .settlement-cards article:before {
   position: absolute;
@@ -178,13 +183,13 @@
   background: var(--settlement-blue);
 }
 .settlement-cards article.tone-green:before {
-  background: #059669;
+  background: var(--green, #16a34a);
 }
 .settlement-cards article.tone-orange:before {
-  background: #f59e0b;
+  background: var(--orange, #d97706);
 }
 .settlement-cards article.tone-purple:before {
-  background: #8b5cf6;
+  background: var(--purple, #8b5cf6);
 }
 .settlement-cards span {
   display: block;
@@ -214,7 +219,7 @@
   min-width: 0;
 }
 .settlement-panel {
-  padding: 20px;
+  padding: 20px 22px;
   margin-bottom: 18px;
 }
 .settlement-panel h2 {
@@ -287,12 +292,12 @@
   height: 18px;
 }
 .settlement-todo-icon.tone-orange {
-  color: #d97706;
-  background: #fef3c7;
+  color: var(--orange, #d97706);
+  background: var(--orange-bg, #fef3c7);
 }
 .settlement-todo-icon.tone-purple {
-  color: #7c3aed;
-  background: #f5f3ff;
+  color: var(--purple-text, #6d28d9);
+  background: var(--purple-bg, #f5f3ff);
 }
 .settlement-todo strong {
   display: block;
@@ -333,16 +338,16 @@
   height: 100%;
   min-width: 0;
   border-radius: 99px;
-  background: #2563eb;
+  background: var(--p, #2563eb);
 }
 .settlement-aging-row > i b.tone-green {
-  background: #059669;
+  background: var(--green, #16a34a);
 }
 .settlement-aging-row > i b.tone-orange {
-  background: #f59e0b;
+  background: var(--orange, #d97706);
 }
 .settlement-aging-row > i b.tone-red {
-  background: #dc2626;
+  background: var(--red, #dc2626);
 }
 .settlement-aging-row strong {
   font-size: 13px;
@@ -1108,6 +1113,209 @@
   border-color: #bfdbfe;
   background: #fff;
 }
+.settlement-operation-card,
+.settlement-match-panel {
+  border-color: #bfdbfe;
+  background: linear-gradient(180deg, #fbfdff, #fff);
+}
+.settlement-operation-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 20px;
+}
+.settlement-operation-form label,
+.settlement-review-reason {
+  display: grid;
+  gap: 7px;
+  color: var(--text, #0f172a);
+  font-size: 13px;
+  font-weight: 600;
+}
+.settlement-operation-form .wide {
+  grid-column: 1 / -1;
+}
+.settlement-operation-form input,
+.settlement-operation-form select,
+.settlement-operation-form textarea,
+.settlement-review-reason textarea {
+  width: 100%;
+  padding: 10px 12px;
+  color: var(--text, #0f172a);
+  font: inherit;
+  font-weight: 400;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 8px;
+  background: #fff;
+  resize: vertical;
+}
+.settlement-operation-form input:focus,
+.settlement-operation-form select:focus,
+.settlement-operation-form textarea:focus,
+.settlement-review-reason textarea:focus {
+  border-color: var(--settlement-blue);
+  outline: 0;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+.settlement-review-reason {
+  margin-top: 18px;
+}
+.settlement-operation-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+}
+.settlement-operation-actions.wide {
+  margin-top: 0;
+}
+.settlement-operation-actions .console-button.danger {
+  color: #fff;
+  border-color: #dc2626;
+  background: #dc2626;
+}
+.settlement-operation-actions .console-button.danger:hover:not(:disabled) {
+  border-color: #b91c1c;
+  background: #b91c1c;
+}
+.settlement-match-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+}
+.settlement-match-list > button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 68px;
+  padding: 12px 14px !important;
+  color: var(--text, #0f172a) !important;
+  text-align: left;
+  border-color: #dbeafe !important;
+  background: #f8fbff !important;
+}
+.settlement-match-list > button:hover {
+  border-color: #93c5fd !important;
+  background: #eff6ff !important;
+}
+.settlement-match-list span {
+  display: grid;
+  gap: 4px;
+}
+.settlement-match-list span:last-child {
+  text-align: right;
+}
+.settlement-match-list small {
+  color: var(--muted, #64748b);
+  font-size: 12px;
+}
+.settlement-empty.compact {
+  min-height: 92px;
+}
+.settlement-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.settlement-document-link {
+  display: block;
+  min-height: auto !important;
+  padding: 2px 0 !important;
+  text-align: left;
+}
+
+/* ============ 我的待办 ============ */
+.settlement-tasks {
+  display: grid;
+  gap: 16px;
+}
+.settlement-task-count {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  color: var(--secondary, #475569);
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 999px;
+  background: var(--bg, #f1f5f9);
+}
+.settlement-task-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+.settlement-task-item {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(0, 2fr);
+  gap: 14px;
+  align-items: center;
+  padding: 10px 14px;
+  text-align: left;
+  color: var(--text, #0f172a);
+  background: var(--sunken, #f8fafc);
+  border: 1px solid var(--line-soft, #edf0f5);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease, transform .15s ease;
+}
+.settlement-task-item:hover {
+  border-color: var(--p, #2563eb);
+  background: #fff;
+  transform: translateY(-1px);
+}
+.settlement-task-id {
+  font-size: 13.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text, #0f172a);
+}
+.settlement-task-meta {
+  font-size: 12.5px;
+  color: var(--muted, #64748b);
+}
+.settlement-task-more {
+  margin: 6px 4px 0 !important;
+  color: var(--muted, #64748b) !important;
+  font-size: 12px !important;
+}
+
+/* ============ Timeline 附属 ============ */
+.settlement-timeline-hint {
+  margin: 12px 0 0 !important;
+  padding: 10px 12px !important;
+  color: var(--orange-text, #b45309) !important;
+  font-size: 12.5px !important;
+  background: var(--orange-bg, #fef3c7);
+  border-radius: 8px;
+}
+
+/* ============ 微交互 ============ */
+@keyframes settlement-fade-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+.settlement-content > section {
+  animation: settlement-fade-in .25s ease-out;
+}
+.settlement-shell .console-button:not(:disabled):hover {
+  transform: translateY(-1px);
+}
+.settlement-shell .console-text-button {
+  transition: color .15s ease, background .15s ease;
+}
+.settlement-panel table tbody tr {
+  transition: background .15s ease;
+}
+.settlement-panel table tbody tr:hover {
+  background: #fafcff;
+}
 @media (max-width: 620px) {
   .settlement-invoices .settlement-section-head > div:last-child {
     width: 100%;
@@ -1122,5 +1330,23 @@
   }
   .settlement-tabs button {
     font-size: 14px;
+  }
+  .settlement-operation-form {
+    grid-template-columns: 1fr;
+  }
+  .settlement-operation-form .wide {
+    grid-column: auto;
+  }
+  .settlement-operation-actions,
+  .settlement-match-list > button {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .settlement-operation-actions .console-button {
+    width: 100%;
+    justify-content: center;
+  }
+  .settlement-match-list span:last-child {
+    text-align: left;
   }
 }

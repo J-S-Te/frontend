@@ -132,3 +132,16 @@ test('总览、报告和财务页面提供高保真本地内容兜底', () => {
   assert.match(shell, /overviewSummary\.contract/)
   assert.match(shell, /overviewSummary\.project/)
 })
+
+test('ensureDataAnalysisSession on plain 401 triggers OIDC login instead of silent null', () => {
+  // 修复前：ensureDataAnalysisSession 对任何 401 都返回 null，不发起跳转 →
+  // 用户点击看板卡片后路由守卫静默中止跳转、新标签页空白。
+  // 修复后：必须复用 shouldStartSubsystemLogin 分类器，仅对 UNAUTHENTICATED
+  // 发起 startDataAnalysisLogin()，OIDC_CLAIMS_INVALID 等特殊码仍按错误页处理。
+  assert.match(api, /import \{ shouldStartSubsystemLogin \}/)
+  assert.match(
+    api,
+    /shouldStartSubsystemLogin\(error\)\)\s*\{\s*startDataAnalysisLogin\(\)\s*;?\s*return null\s*;?\s*\}/,
+  )
+  assert.doesNotMatch(api, /if \(error\.status === 401\) return null/)
+})

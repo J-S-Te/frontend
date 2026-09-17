@@ -46,3 +46,22 @@ test('Portal invalid claims are not collapsed into generic unauthenticated redir
   await assert.rejects(api.ensurePortalSession(), (error) => error.code === 'PORTAL_OIDC_INVALID_CLAIMS')
   assert.equal(redirect, '')
 })
+
+test('Portal plain 401 triggers OIDC login instead of silently returning null', async (t) => {
+  // 修复前：ensurePortalSession 对 401 仅返回 null，不发起跳转 → 用户点击
+  // 客户自助门户卡片后路由守卫静默中止，页面空白。
+  // 修复后：真正未鉴权（无 OIDC_CLAIMS_INVALID / IDENTITY_NOT_PROVISIONED
+  // 等特殊码）必须调用 beginLogin() 跳转 Keycloak。
+  const originalFetch = globalThis.fetch
+  const originalWindow = globalThis.window
+  let redirect = ''
+  t.after(() => { globalThis.fetch = originalFetch; globalThis.window = originalWindow })
+  globalThis.window = { location: { pathname: '/customer-portal/projects', search: '', hash: '', replace: (value) => { redirect = value } } }
+  globalThis.fetch = async () => jsonResponse({ code: 'SESSION_EXPIRED', message: 'session expired' }, 401)
+  const api = await import(`./portal.js?plain401=${Date.now()}`)
+
+  const result = await api.ensurePortalSession()
+  assert.equal(result, null, 'should resolve to null after triggering login')
+  assert.match(redirect, /\/auth\/login/, 'should redirect to portal OIDC login')
+  assert.match(redirect, /return_to=/, 'should preserve current path for post-login return')
+})

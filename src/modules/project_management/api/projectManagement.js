@@ -216,6 +216,21 @@ export async function listApprovedContracts(params = {}) {
 }
 
 /**
+ * getApprovedContractServiceItems 读取一份已审批合同可关联的权威服务范围。
+ * 返回值只包含项目创建所需的结构化服务项，不包含合同正文、金额或附件。
+ * @param {string} contractID 合同管理系统合同 ID。
+ * @returns {Promise<{contract_id: string, contract_version: number, service_items: Array<object>}>} 合同版本及可选服务项。
+ */
+export async function getApprovedContractServiceItems(contractID) {
+  const data = await request(`/approved-contracts/${encodeURIComponent(contractID)}/service-items`)
+  return {
+    contract_id: String(data?.contract_id || ''),
+    contract_version: Number(data?.contract_version || 0),
+    service_items: Array.isArray(data?.service_items) ? data.service_items : [],
+  }
+}
+
+/**
  * listProjectsPage 分页查询项目列表，返回 items 与 total 供分页控件渲染。
  * 状态过滤发生在服务端的派生态上，因此 total 是"筛选后的总数"。
  * @param {Record<string, string|number|boolean>} [params={}] 查询条件，含 page / page_size。

@@ -1,4 +1,10 @@
 import { attachStructuredContext } from "@/modules/platform/shared/api/requestContext.js";
+import { getCurrentPrincipal } from "@/modules/platform/auth/api/auth";
+import {
+  normalizeAuthorizationSession,
+  principalIdentityID,
+  shouldStartSubsystemLogin,
+} from "@/modules/shared/authz/sessionCompatibility.js";
 
 const PUBLIC_PATH_PREFIX = (
   import.meta.env.VITE_SETTLEMENT_PUBLIC_PATH_PREFIX || "/settlement"
@@ -11,11 +17,18 @@ let sessionPromise = null;
 let loginStarted = false;
 const retryKeys = new Map();
 
-function beginLogin() {
+function isSettlementDevelopmentSession(value) {
+  return (
+    String(value?.catalog_version || "").trim().toLowerCase() === "development" &&
+    String(value?.tenant_id || "").trim().toLowerCase() === "dev"
+  );
+}
+
+function beginLogin({ force = false } = {}) {
   if (loginStarted) return;
   loginStarted = true;
   clearSettlementSessionCache();
-  window.location.replace(`${PUBLIC_PATH_PREFIX}/auth/login`);
+  window.location.replace(`${PUBLIC_PATH_PREFIX}/auth/login${force ? "?prompt=login" : ""}`);
 }
 
 function idempotencyKey() {
@@ -25,8 +38,10 @@ function idempotencyKey() {
 
 async function request(path, options = {}) {
   const method = String(options.method || "GET").toUpperCase();
+  const multipart =
+    typeof FormData !== "undefined" && options.body instanceof FormData;
   const retryFingerprint = options.idempotent
-    ? `${method}:${path}:${String(options.body || "")}`
+    ? `${method}:${path}:${options.idempotencyFingerprint || String(options.body || "")}`
     : "";
   const retryKey = retryFingerprint
     ? retryKeys.get(retryFingerprint) || idempotencyKey()
@@ -40,7 +55,10 @@ async function request(path, options = {}) {
       headers: {
         Accept: "application/json",
         ...(options.body
-          ? { "Content-Type": "application/json", "X-CSRF-Token": "1" }
+          ? {
+              ...(multipart ? {} : { "Content-Type": "application/json" }),
+              "X-CSRF-Token": "1",
+            }
           : {}),
         ...(retryKey ? { "Idempotency-Key": retryKey } : {}),
         ...(options.headers || {}),
@@ -84,7 +102,7 @@ async function request(path, options = {}) {
       },
       { status: response.status, code: error.code, requestId: error.requestID },
     );
-    if (response.status === 401) beginLogin();
+    if (shouldStartSubsystemLogin(error)) beginLogin();
     if (
       retryFingerprint &&
       response.status >= 400 &&
@@ -108,8 +126,8 @@ export async function getSettlementSession({ force = false } = {}) {
   if (!force && sessionPromise) return sessionPromise;
   sessionPromise = request("/auth/me")
     .then((value) => {
-      session = value;
-      return value;
+      session = normalizeAuthorizationSession(value);
+      return session;
     })
     .finally(() => {
       sessionPromise = null;
@@ -118,10 +136,51 @@ export async function getSettlementSession({ force = false } = {}) {
 }
 export async function ensureSettlementSession() {
   try {
-    return await getSettlementSession({ force: true });
+    const settlementSession = await getSettlementSession({ force: true });
+    // 本地 DevelopmentAuth 使用固定的 dev-finance 主体，不是基础平台 OIDC
+    // 用户。若仍做跨系统主体比较，会永久命中“账号已切换”，形成
+    // local-logout -> /auth/login -> /settlement/dashboard 的刷新循环。
+    // 生产 OIDC 会话不会携带 development/dev 标记，继续执行严格一致性校验。
+    if (isSettlementDevelopmentSession(settlementSession)) {
+      return settlementSession;
+    }
+    try {
+      const platformPrincipal = await getCurrentPrincipal();
+      const platformIdentityID = principalIdentityID(platformPrincipal);
+      const settlementIdentityID = principalIdentityID(settlementSession);
+      const platformTenantID = String(platformPrincipal?.tenant_id || platformPrincipal?.tenant?.id || "");
+      const tenantChanged = platformTenantID && platformTenantID !== String(settlementSession?.tenant_id || "");
+      const userChanged = platformIdentityID && settlementIdentityID && platformIdentityID !== settlementIdentityID;
+      if (userChanged || tenantChanged) {
+        await clearSettlementLocalSession();
+        beginLogin({ force: true });
+        return null;
+      }
+    } catch {
+      // 基础平台暂时不可用时，Settlement 自己的有效 OIDC 会话继续生效。
+    }
+    return settlementSession;
   } catch (error) {
-    if (error.status === 401) return null;
+    // 真正未鉴权时必须主动发起 OIDC 跳转，否则路由守卫只看到 null
+    // 会静默中止跳转，用户点击卡片后看不到任何反馈。
+    if (shouldStartSubsystemLogin(error)) {
+      beginLogin();
+      return null;
+    }
     throw error;
+  }
+}
+
+async function clearSettlementLocalSession() {
+  clearSettlementSessionCache();
+  try {
+    await fetch(`${PUBLIC_PATH_PREFIX}/auth/local-logout`, {
+      method: "POST",
+      credentials: "include",
+      headers: { Accept: "application/json", "X-CSRF-Token": "1" },
+    });
+  } catch {
+    // OIDC 回调会覆盖旧 Cookie；清理失败不应形成重定向循环。
   }
 }
 export const getDashboard = () => request("/dashboard");
@@ -129,6 +188,12 @@ export const getInvoicedReceivablesTop10 = () =>
   request("/reports/invoiced-receivables-top10");
 export const createInvoicedReceivablesExport = () =>
   request("/reports/invoiced-receivables/export", {
+    method: "POST",
+    body: JSON.stringify({}),
+    idempotent: true,
+  });
+export const createAgingReceivablesExport = () =>
+  request("/reports/aging/export", {
     method: "POST",
     body: JSON.stringify({}),
     idempotent: true,
@@ -141,10 +206,10 @@ export function downloadReportExport(id) {
   );
 }
 export const listReceivablePlans = () => request("/receivable-plans");
-export const confirmReceivablePlan = (id, version) =>
+export const confirmReceivablePlan = (id, payload) =>
   request(`/receivable-plans/${encodeURIComponent(id)}/confirm`, {
     method: "POST",
-    body: JSON.stringify({ version }),
+    body: JSON.stringify(payload),
     idempotent: true,
   });
 export const listReceivables = () => request("/receivables");
@@ -152,6 +217,8 @@ export const listReceivables = () => request("/receivables");
 export const listInvoiceEligibleReceivables = () =>
   request("/invoice-eligible-receivables");
 export const listReceipts = () => request("/receipts");
+export const listReceiptMatches = (id) =>
+  request(`/receipts/${encodeURIComponent(id)}/matches`);
 export const createReceipt = (payload) =>
   request("/receipts", {
     method: "POST",
@@ -175,6 +242,40 @@ export const listInvoiceRequests = () => request("/invoice-requests");
 export const listTaxInvoices = () => request("/tax-invoices");
 export const getTaxInvoice = (id) =>
   request(`/tax-invoices/${encodeURIComponent(id)}`);
+export const uploadTaxInvoiceDocument = (id, file) => {
+  const body = new FormData();
+  body.append("document_type", "ELECTRONIC_INVOICE");
+  body.append("file", file);
+  return request(`/tax-invoices/${encodeURIComponent(id)}/documents`, {
+    method: "POST",
+    body,
+    idempotent: true,
+    idempotencyFingerprint: `${file.name}:${file.size}:${file.lastModified}`,
+  });
+};
+export function downloadTaxInvoiceDocument(invoiceID, documentID) {
+  window.location.assign(
+    `${API_BASE_URL}/tax-invoices/${encodeURIComponent(invoiceID)}/documents/${encodeURIComponent(documentID)}/download`,
+  );
+}
+export const requestTaxInvoiceRedFlush = (id, payload) =>
+  request(`/tax-invoices/${encodeURIComponent(id)}/red-flush`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+    idempotent: true,
+  });
+export const approveInvoiceRedFlush = (id, version) =>
+  request(`/invoice-red-flush-requests/${encodeURIComponent(id)}/approve`, {
+    method: "POST",
+    body: JSON.stringify({ version }),
+    idempotent: true,
+  });
+export const rejectInvoiceRedFlush = (id, version, reason) =>
+  request(`/invoice-red-flush-requests/${encodeURIComponent(id)}/reject`, {
+    method: "POST",
+    body: JSON.stringify({ version, reason }),
+    idempotent: true,
+  });
 export const createInvoiceRequest = (payload) =>
   request("/invoice-requests", {
     method: "POST",
@@ -185,6 +286,12 @@ export const approveInvoiceRequest = (id, version) =>
   request(`/invoice-requests/${encodeURIComponent(id)}/approve`, {
     method: "POST",
     body: JSON.stringify({ version }),
+    idempotent: true,
+  });
+export const rejectInvoiceRequest = (id, version, reason) =>
+  request(`/invoice-requests/${encodeURIComponent(id)}/reject`, {
+    method: "POST",
+    body: JSON.stringify({ version, reason }),
     idempotent: true,
   });
 export const registerManualInvoice = (id, payload) =>

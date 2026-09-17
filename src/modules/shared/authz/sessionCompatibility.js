@@ -4,6 +4,9 @@ export const SUBSYSTEM_ACCESS_REASON = Object.freeze({
   DEPENDENCY_UNAVAILABLE: 'DEPENDENCY_UNAVAILABLE',
   IDENTITY_NOT_PROVISIONED: 'IDENTITY_NOT_PROVISIONED',
   OIDC_CLAIMS_INVALID: 'OIDC_CLAIMS_INVALID',
+  // 子系统 OIDC 回调阶段失败（state 失效 / token exchange / id_token 校验 / authorization_context
+  // 无法解析等）。后端在每个失败点都会带着 stage 跳到 /access-error?reason=CALLBACK_FAILED。
+  CALLBACK_FAILED: 'CALLBACK_FAILED',
   UNKNOWN: 'UNKNOWN',
 })
 
@@ -135,6 +138,10 @@ export const SUBSYSTEM_ACCESS_PRESENTATION = Object.freeze({
   [SUBSYSTEM_ACCESS_REASON.OIDC_CLAIMS_INVALID]: Object.freeze({
     title: 'OIDC 登录响应校验失败',
     message: '服务器未接受本次 Keycloak 登录响应。请重新发起登录；若仍失败，请管理员检查 Client、回调地址和 Claims 映射。',
+  }),
+  [SUBSYSTEM_ACCESS_REASON.CALLBACK_FAILED]: Object.freeze({
+    title: '子系统登录回调未能完成',
+    message: '子系统服务端在处理 Keycloak 回调时未能完成校验或权限解析。请点击「重新发起 Keycloak 登录」重新走一次登录流程；若再次失败，请把页面下方的「错误阶段 / 追踪号」一并提供给管理员，由后端按 stage 定位（常见 stage：login_state / token_exchange / id_token / authorization_context）。',
   }),
   [SUBSYSTEM_ACCESS_REASON.UNKNOWN]: Object.freeze({
     title: '暂时无法进入子系统',
