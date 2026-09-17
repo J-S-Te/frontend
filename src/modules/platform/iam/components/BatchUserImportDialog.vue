@@ -802,7 +802,7 @@ function formatFileSize(bytes) {
 }
 
 .iam-batch-import-heading-icon svg { width: 22px; height: 22px; }
-.iam-batch-import-heading h3 { margin-top: 4px !important; }
+.iam-batch-import-heading h3 { margin-top: 4px; }
 .iam-batch-import-heading small {
   display: block;
   margin-top: 5px;
@@ -935,7 +935,7 @@ function formatFileSize(bytes) {
 .iam-batch-import-dropzone code {
   background: #fff;
   border: 1px solid #dce5f1;
-  border-radius: 4px;
+  border-radius: 6px;
   padding: 0 4px;
   font-size: 11.5px;
 }
@@ -994,7 +994,7 @@ function formatFileSize(bytes) {
   place-items: center;
   color: var(--brand-2, #2563eb);
   border: 1px solid #d7e4f7;
-  border-radius: 9px;
+  border-radius: 8px;
   background: #fff;
 }
 .iam-batch-import-file > span svg { width: 18px; height: 18px; }
@@ -1016,11 +1016,11 @@ function formatFileSize(bytes) {
   gap: 3px 6px;
   min-width: 72px;
   padding: 8px 10px;
-  border-radius: 9px;
+  border-radius: 8px;
   background: #fff;
   border: 1px solid var(--line-1, #e6e9ef);
 }
-.iam-batch-import-stats .stat b { font-size: 17px; line-height: 1; }
+.iam-batch-import-stats .stat b { font-size: 16px; line-height: 1; }
 .iam-batch-import-stats .stat small { margin: 0; font-size: 11px; color: var(--ink-3, #6b7280); }
 .iam-batch-import-stats .stat.valid b { color: #15803d; }
 .iam-batch-import-stats .stat.invalid b { color: #b91c1c; }
@@ -1168,12 +1168,12 @@ function formatFileSize(bytes) {
   width: 58px;
   height: 58px;
   place-items: center;
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
 }
 .iam-batch-import-result-icon svg { width: 28px; height: 28px; }
 .iam-batch-import-result-icon.success { color: var(--ok-1, #047857); background: var(--ok-soft, #ecfdf5); }
 .iam-batch-import-result-icon.danger { color: var(--danger-1, #b91c1c); background: var(--danger-soft, #fef2f2); }
-.iam-batch-import-result h4 { margin: 2px 0 6px; color: var(--ink-1, #0a0f1c); font-size: 18px; }
+.iam-batch-import-result h4 { margin: 2px 0 6px; color: var(--ink-1, #0a0f1c); font-size: 16px; }
 .iam-batch-import-result .iam-form-alert { width: min(620px, 100%); justify-content: center; }
 .iam-batch-import-result .iam-form-alert.success {
   background: #f0fdf4;
@@ -1191,7 +1191,6 @@ function formatFileSize(bytes) {
   bottom: 0;
   margin-top: 18px;
   background: rgba(255, 255, 255, .96);
-  backdrop-filter: blur(8px);
 }
 
 @media (max-width: 760px) {

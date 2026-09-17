@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { AuthError, getCurrentPrincipal, logoutCurrentSession } from '@/modules/platform/auth/api/auth'
 import { AUTHORIZATION_REFRESHED_EVENT } from '@/modules/platform/auth/utils/authorizationRefresh'
@@ -25,6 +25,37 @@ const registeredSubsystems = ref([])
 const subsystemCatalogLoading = ref(true)
 const subsystemCatalogError = ref('')
 const portalEnvironment = String(import.meta.env?.VITE_PORTAL_ENVIRONMENT || '').trim().toLowerCase()
+const PORTAL_THEME_STORAGE_KEY = 'basic-platform.portal-theme'
+const PORTAL_THEME_OPTIONS = [
+  { value: 'light', label: '浅色' },
+  { value: 'dark', label: '深色' },
+  { value: 'system', label: '跟随系统' },
+]
+
+function readStoredPortalTheme() {
+  try {
+    const storedTheme = window.localStorage.getItem(PORTAL_THEME_STORAGE_KEY)
+    return PORTAL_THEME_OPTIONS.some((option) => option.value === storedTheme) ? storedTheme : 'dark'
+  } catch {
+    return 'dark'
+  }
+}
+
+function readSystemPrefersDark() {
+  try {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches
+  } catch {
+    return false
+  }
+}
+
+const themeMode = ref(readStoredPortalTheme())
+const systemPrefersDark = ref(readSystemPrefersDark())
+const resolvedTheme = computed(() => (
+  themeMode.value === 'system'
+    ? (systemPrefersDark.value ? 'dark' : 'light')
+    : themeMode.value
+))
 
 const userDisplayName = computed(() => {
   const principal = currentPrincipal.value
@@ -71,9 +102,28 @@ const subsystems = computed(() => {
 
 let toastTimer = 0
 let projectionRefreshTimer = 0
-let animationFrame = 0
-let resizeCanvas = null
+let particleAnimationFrame = 0
+let particleResizeFrame = 0
+let particleCanvasSize = { width: 0, height: 0, pixelRatio: 1 }
 let particles = []
+let reducedMotionQuery = null
+let finePointerQuery = null
+let systemThemeQuery = null
+let cardTiltFrame = 0
+
+function setPortalTheme(nextTheme) {
+  if (!PORTAL_THEME_OPTIONS.some((option) => option.value === nextTheme)) return
+  themeMode.value = nextTheme
+  try {
+    window.localStorage.setItem(PORTAL_THEME_STORAGE_KEY, nextTheme)
+  } catch {
+    // 浏览器禁用本地存储时仍保留当前会话内的主题选择。
+  }
+}
+
+function syncSystemTheme(event) {
+  systemPrefersDark.value = Boolean(event?.matches ?? systemThemeQuery?.matches)
+}
 
 function showToast(message, type = 'enter') {
   toast.value = { visible: true, message, type }
@@ -266,115 +316,157 @@ function isProjectionRefreshPending(application) {
     || application?.projection_ready === false
 }
 
-function handleCardPointerMove(event) {
-  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+function cardEntranceStyle(index) {
+  return { '--portal-card-delay': `${Math.min(index, 7) * 45}ms` }
+}
+
+function portalMotionAllowed() {
+  return !reducedMotionQuery?.matches && document.visibilityState === 'visible'
+}
+
+function createParticles(width, height) {
+  const particleCount = Math.max(16, Math.min(48, Math.floor((width * height) / 32000)))
+  return Array.from({ length: particleCount }, () => ({
+    x: Math.random() * width,
+    y: Math.random() * height,
+    radius: 0.8 + Math.random() * 1.2,
+    velocityX: (Math.random() - 0.5) * 0.16,
+    velocityY: (Math.random() - 0.5) * 0.16,
+  }))
+}
+
+function resizeParticleCanvas() {
+  const canvas = canvasRef.value
+  const context = canvas?.getContext('2d')
+  if (!canvas || !context) return
+
+  const width = Math.max(1, window.innerWidth)
+  const height = Math.max(1, window.innerHeight)
+  const pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5)
+  particleCanvasSize = { width, height, pixelRatio }
+  canvas.width = Math.floor(width * pixelRatio)
+  canvas.height = Math.floor(height * pixelRatio)
+  canvas.style.width = `${width}px`
+  canvas.style.height = `${height}px`
+  context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0)
+  particles = createParticles(width, height)
+}
+
+function scheduleParticleResize() {
+  window.cancelAnimationFrame(particleResizeFrame)
+  particleResizeFrame = window.requestAnimationFrame(() => {
+    resizeParticleCanvas()
+    drawParticleFrame()
+  })
+}
+
+function drawParticleFrame() {
+  window.cancelAnimationFrame(particleAnimationFrame)
+  const canvas = canvasRef.value
+  const context = canvas?.getContext('2d')
+  if (!canvas || !context) return
+
+  const { width, height } = particleCanvasSize
+  context.clearRect(0, 0, width, height)
+  if (reducedMotionQuery?.matches) return
+
+  const connectionDistance = Math.min(140, Math.max(100, width * 0.1))
+  const connectionDistanceSquared = connectionDistance * connectionDistance
+
+  particles.forEach((particle, index) => {
+    particle.x += particle.velocityX
+    particle.y += particle.velocityY
+    if (particle.x < -4) particle.x = width + 4
+    if (particle.x > width + 4) particle.x = -4
+    if (particle.y < -4) particle.y = height + 4
+    if (particle.y > height + 4) particle.y = -4
+
+    context.beginPath()
+    context.arc(particle.x, particle.y, particle.radius, 0, Math.PI * 2)
+    context.fillStyle = resolvedTheme.value === 'dark'
+      ? 'rgba(125, 211, 252, 0.42)'
+      : 'rgba(37, 99, 235, 0.2)'
+    context.fill()
+
+    for (let nextIndex = index + 1; nextIndex < particles.length; nextIndex += 1) {
+      const nextParticle = particles[nextIndex]
+      const distanceX = particle.x - nextParticle.x
+      const distanceY = particle.y - nextParticle.y
+      const distanceSquared = distanceX * distanceX + distanceY * distanceY
+      if (distanceSquared >= connectionDistanceSquared) continue
+
+      const opacityBase = resolvedTheme.value === 'dark' ? 0.16 : 0.07
+      const opacity = opacityBase * (1 - Math.sqrt(distanceSquared) / connectionDistance)
+      context.beginPath()
+      context.moveTo(particle.x, particle.y)
+      context.lineTo(nextParticle.x, nextParticle.y)
+      context.strokeStyle = resolvedTheme.value === 'dark'
+        ? `rgba(56, 189, 248, ${opacity})`
+        : `rgba(59, 130, 246, ${opacity})`
+      context.lineWidth = 0.8
+      context.stroke()
+    }
+  })
+
+  if (portalMotionAllowed()) {
+    particleAnimationFrame = window.requestAnimationFrame(drawParticleFrame)
+  }
+}
+
+function syncPortalMotion() {
+  if (portalMotionAllowed()) {
+    drawParticleFrame()
     return
   }
+  window.cancelAnimationFrame(particleAnimationFrame)
+  if (reducedMotionQuery?.matches) drawParticleFrame()
+}
+
+function setupPortalEffects() {
+  reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)')
+  finePointerQuery = window.matchMedia('(hover: hover) and (pointer: fine)')
+  systemThemeQuery = window.matchMedia('(prefers-color-scheme: dark)')
+  syncSystemTheme(systemThemeQuery)
+  resizeParticleCanvas()
+  syncPortalMotion()
+  window.addEventListener('resize', scheduleParticleResize, { passive: true })
+  document.addEventListener('visibilitychange', syncPortalMotion)
+  reducedMotionQuery.addEventListener?.('change', syncPortalMotion)
+  systemThemeQuery.addEventListener?.('change', syncSystemTheme)
+}
+
+function handleCardPointerMove(event) {
+  if (reducedMotionQuery?.matches || !finePointerQuery?.matches) return
 
   const card = event.currentTarget
-  const bounds = card.getBoundingClientRect()
-  const x = (event.clientX - bounds.left) / bounds.width
-  const y = (event.clientY - bounds.top) / bounds.height
-  const rotateX = (y - 0.5) * -8
-  const rotateY = (x - 0.5) * 10
-
-  card.style.transform = `perspective(900px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) translateY(-8px)`
-  card.style.setProperty('--portal-mouse-x', `${x * 100}%`)
-  card.style.setProperty('--portal-mouse-y', `${y * 100}%`)
+  window.cancelAnimationFrame(cardTiltFrame)
+  const { clientX, clientY } = event
+  cardTiltFrame = window.requestAnimationFrame(() => {
+    const bounds = card.getBoundingClientRect()
+    const x = Math.min(1, Math.max(0, (clientX - bounds.left) / bounds.width))
+    const y = Math.min(1, Math.max(0, (clientY - bounds.top) / bounds.height))
+    const rotateX = (0.5 - y) * 5
+    const rotateY = (x - 0.5) * 7
+    card.style.setProperty('--portal-rotate-x', `${rotateX.toFixed(2)}deg`)
+    card.style.setProperty('--portal-rotate-y', `${rotateY.toFixed(2)}deg`)
+    card.style.setProperty('--portal-mouse-x', `${(x * 100).toFixed(1)}%`)
+    card.style.setProperty('--portal-mouse-y', `${(y * 100).toFixed(1)}%`)
+  })
 }
 
 function resetCardTransform(event) {
   const card = event.currentTarget
-  card.style.transform = ''
-  card.style.setProperty('--portal-mouse-x', '50%')
-  card.style.setProperty('--portal-mouse-y', '50%')
-}
-
-function startParticleBackground() {
-  const canvas = canvasRef.value
-  const context = canvas?.getContext('2d')
-  if (!canvas || !context) {
-    return
-  }
-
-  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  let width = 0
-  let height = 0
-
-  resizeCanvas = () => {
-    const pixelRatio = Math.min(window.devicePixelRatio || 1, 2)
-    width = window.innerWidth
-    height = window.innerHeight
-    canvas.width = Math.floor(width * pixelRatio)
-    canvas.height = Math.floor(height * pixelRatio)
-    canvas.style.width = `${width}px`
-    canvas.style.height = `${height}px`
-    context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0)
-
-    const particleCount = Math.min(90, Math.floor((width * height) / 18000))
-    particles = Array.from({ length: particleCount }, () => ({
-      x: Math.random() * width,
-      y: Math.random() * height,
-      velocityX: (Math.random() - 0.5) * 0.22,
-      velocityY: (Math.random() - 0.5) * 0.22,
-    }))
-  }
-
-  const draw = () => {
-    context.clearRect(0, 0, width, height)
-
-    particles.forEach((particle, index) => {
-      if (!reducedMotion) {
-        particle.x += particle.velocityX
-        particle.y += particle.velocityY
-
-        if (particle.x < 0 || particle.x > width) {
-          particle.velocityX *= -1
-        }
-        if (particle.y < 0 || particle.y > height) {
-          particle.velocityY *= -1
-        }
-      }
-
-      context.beginPath()
-      context.arc(particle.x, particle.y, 1.2, 0, Math.PI * 2)
-      context.fillStyle = 'rgba(147, 197, 253, 0.52)'
-      context.fill()
-
-      for (let nextIndex = index + 1; nextIndex < particles.length; nextIndex += 1) {
-        const nextParticle = particles[nextIndex]
-        const distanceX = particle.x - nextParticle.x
-        const distanceY = particle.y - nextParticle.y
-        const distanceSquared = distanceX * distanceX + distanceY * distanceY
-        const connectionDistance = 145
-
-        if (distanceSquared >= connectionDistance * connectionDistance) {
-          continue
-        }
-
-        const opacity = 0.12 * (1 - Math.sqrt(distanceSquared) / connectionDistance)
-        context.beginPath()
-        context.moveTo(particle.x, particle.y)
-        context.lineTo(nextParticle.x, nextParticle.y)
-        context.strokeStyle = `rgba(96, 165, 250, ${opacity})`
-        context.lineWidth = 1
-        context.stroke()
-      }
-    })
-
-    if (!reducedMotion) {
-      animationFrame = window.requestAnimationFrame(draw)
-    }
-  }
-
-  resizeCanvas()
-  window.addEventListener('resize', resizeCanvas)
-  window.addEventListener(AUTHORIZATION_REFRESHED_EVENT, onAuthorizationRefreshed)
-  draw()
+  window.cancelAnimationFrame(cardTiltFrame)
+  cardTiltFrame = 0
+  card.style.removeProperty('--portal-rotate-x')
+  card.style.removeProperty('--portal-rotate-y')
+  card.style.removeProperty('--portal-mouse-x')
+  card.style.removeProperty('--portal-mouse-y')
 }
 
 onMounted(() => {
-  startParticleBackground()
+  window.addEventListener(AUTHORIZATION_REFRESHED_EVENT, onAuthorizationRefreshed)
+  setupPortalEffects()
   loadCurrentPrincipal()
   loadPortalCatalog()
   projectionRefreshTimer = window.setInterval(() => {
@@ -387,21 +479,28 @@ onMounted(() => {
   document.addEventListener('keydown', closeUserMenuOnEscape)
 })
 
+watch(resolvedTheme, () => {
+  if (canvasRef.value) drawParticleFrame()
+})
+
 onBeforeUnmount(() => {
   window.clearTimeout(toastTimer)
   window.clearInterval(projectionRefreshTimer)
-  window.cancelAnimationFrame(animationFrame)
+  window.cancelAnimationFrame(particleAnimationFrame)
+  window.cancelAnimationFrame(particleResizeFrame)
+  window.cancelAnimationFrame(cardTiltFrame)
+  window.removeEventListener('resize', scheduleParticleResize)
+  document.removeEventListener('visibilitychange', syncPortalMotion)
+  reducedMotionQuery?.removeEventListener?.('change', syncPortalMotion)
+  systemThemeQuery?.removeEventListener?.('change', syncSystemTheme)
   document.removeEventListener('click', closeUserMenuWhenClickOutside)
   document.removeEventListener('keydown', closeUserMenuOnEscape)
-  if (resizeCanvas) {
-    window.removeEventListener('resize', resizeCanvas)
-  }
   window.removeEventListener(AUTHORIZATION_REFRESHED_EVENT, onAuthorizationRefreshed)
 })
 </script>
 
 <template>
-  <main class="subsystem-portal" aria-label="子系统门户">
+  <main class="subsystem-portal" :data-theme="resolvedTheme" :style="{ colorScheme: resolvedTheme }" aria-label="子系统门户">
     <canvas ref="canvasRef" class="subsystem-portal__particles" aria-hidden="true"></canvas>
     <div class="subsystem-portal__grid" aria-hidden="true"></div>
     <div class="subsystem-portal__glow subsystem-portal__glow--top" aria-hidden="true"></div>
@@ -415,55 +514,73 @@ onBeforeUnmount(() => {
           <small>BASIC PLATFORM</small>
         </span>
       </div>
-      <div ref="userMenuRef" class="subsystem-portal__user-menu">
-        <button
-          class="subsystem-portal__user-trigger"
-          type="button"
-          aria-haspopup="dialog"
-          aria-controls="portal-user-panel"
-          :aria-expanded="userMenuOpen"
-          @click="toggleUserMenu"
-        >
-          <span class="subsystem-portal__user-avatar" aria-hidden="true">{{ userAvatarText }}</span>
-          <span class="subsystem-portal__user-summary">
-            <strong>{{ userDisplayName }}</strong>
-            <small>{{ accountDisplayName }}</small>
-          </span>
-          <ConsoleIcon class="subsystem-portal__user-chevron" :class="{ 'is-open': userMenuOpen }" name="chevron" />
-        </button>
+      <div class="subsystem-portal__header-actions">
+        <div class="subsystem-portal__theme-switcher" role="group" aria-label="页面主题">
+          <button
+            v-for="option in PORTAL_THEME_OPTIONS"
+            :key="option.value"
+            class="subsystem-portal__theme-option"
+            :class="{ 'is-active': themeMode === option.value }"
+            type="button"
+            :aria-pressed="themeMode === option.value"
+            :title="`切换为${option.label}模式`"
+            @click="setPortalTheme(option.value)"
+          >
+            <span class="subsystem-portal__theme-dot" aria-hidden="true"></span>
+            {{ option.label }}
+          </button>
+        </div>
 
-        <Transition name="portal-user-panel">
-          <section v-if="userMenuOpen" id="portal-user-panel" class="subsystem-portal__user-panel" aria-label="个人信息">
-            <p class="subsystem-portal__user-panel-title">个人信息</p>
+        <div ref="userMenuRef" class="subsystem-portal__user-menu">
+          <button
+            class="subsystem-portal__user-trigger"
+            type="button"
+            aria-haspopup="dialog"
+            aria-controls="portal-user-panel"
+            :aria-expanded="userMenuOpen"
+            @click="toggleUserMenu"
+          >
+            <span class="subsystem-portal__user-avatar" aria-hidden="true">{{ userAvatarText }}</span>
+            <span class="subsystem-portal__user-summary">
+              <strong>{{ userDisplayName }}</strong>
+              <small>{{ accountDisplayName }}</small>
+            </span>
+            <ConsoleIcon class="subsystem-portal__user-chevron" :class="{ 'is-open': userMenuOpen }" name="chevron" />
+          </button>
 
-            <p v-if="isPrincipalLoading" class="subsystem-portal__user-panel-status">正在读取当前登录用户信息…</p>
-            <template v-else-if="currentPrincipal">
-              <dl class="subsystem-portal__user-details">
-                <div>
-                  <dt>用户名</dt>
-                  <dd>{{ currentPrincipal.user?.name || '—' }}</dd>
-                </div>
-                <div>
-                  <dt>账号</dt>
-                  <dd>{{ currentPrincipal.account?.code || currentPrincipal.account?.name || '—' }}</dd>
-                </div>
-                <div>
-                  <dt>租户</dt>
-                  <dd>{{ currentPrincipal.tenant?.name || currentPrincipal.tenant?.code || '—' }}</dd>
-                </div>
-                <div>
-                  <dt>角色</dt>
-                  <dd>{{ roleNames }}</dd>
-                </div>
-              </dl>
-            </template>
-            <p v-else class="subsystem-portal__user-panel-status is-error">当前用户信息暂不可用。</p>
+          <Transition name="portal-user-panel">
+            <section v-if="userMenuOpen" id="portal-user-panel" class="subsystem-portal__user-panel" aria-label="个人信息">
+              <p class="subsystem-portal__user-panel-title">个人信息</p>
 
-            <button class="subsystem-portal__logout-button" type="button" :disabled="isLoggingOut" @click="logoutApplication">
-              {{ isLoggingOut ? '正在退出…' : '退出应用系统' }}
-            </button>
-          </section>
-        </Transition>
+              <p v-if="isPrincipalLoading" class="subsystem-portal__user-panel-status">正在读取当前登录用户信息…</p>
+              <template v-else-if="currentPrincipal">
+                <dl class="subsystem-portal__user-details">
+                  <div>
+                    <dt>用户名</dt>
+                    <dd>{{ currentPrincipal.user?.name || '—' }}</dd>
+                  </div>
+                  <div>
+                    <dt>账号</dt>
+                    <dd>{{ currentPrincipal.account?.code || currentPrincipal.account?.name || '—' }}</dd>
+                  </div>
+                  <div>
+                    <dt>租户</dt>
+                    <dd>{{ currentPrincipal.tenant?.name || currentPrincipal.tenant?.code || '—' }}</dd>
+                  </div>
+                  <div>
+                    <dt>角色</dt>
+                    <dd>{{ roleNames }}</dd>
+                  </div>
+                </dl>
+              </template>
+              <p v-else class="subsystem-portal__user-panel-status is-error">当前用户信息暂不可用。</p>
+
+              <button class="subsystem-portal__logout-button" type="button" :disabled="isLoggingOut" @click="logoutApplication">
+                {{ isLoggingOut ? '正在退出…' : '退出应用系统' }}
+              </button>
+            </section>
+          </Transition>
+        </div>
       </div>
     </header>
 
@@ -483,13 +600,15 @@ onBeforeUnmount(() => {
           :key="subsystem.key"
           class="subsystem-card"
           :class="{ 'is-syncing': !subsystem.allowed }"
-          :style="{ '--portal-card-delay': `${(index + 1) * 0.06}s` }"
+          :style="cardEntranceStyle(index)"
           type="button"
           :aria-label="subsystem.allowed ? `进入${subsystem.name}` : `${subsystem.name}权限同步未完成`"
           :aria-disabled="!subsystem.allowed"
           @click="openSubsystem(subsystem)"
           @pointermove="handleCardPointerMove"
           @pointerleave="resetCardTransform"
+          @pointercancel="resetCardTransform"
+          @blur="resetCardTransform"
         >
           <span v-if="subsystem.todo" class="subsystem-card__todo">待办 {{ subsystem.todo }}</span>
           <span class="subsystem-card__icon"><ConsoleIcon :name="subsystem.icon" /></span>

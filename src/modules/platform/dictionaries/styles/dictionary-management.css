@@ -37,7 +37,7 @@
 .dictionary-module .so-summary-card > span svg { width: 20px; height: 20px; }
 .dictionary-module .so-summary-card small { display: block; color: var(--so-muted); font-size: 11px; }
 .dictionary-module .so-summary-card strong { display: block; margin-top: 2px; color: var(--so-ink); font-size: 22px; line-height: 1.05; }
-.dictionary-module .so-summary-card p { margin: 3px 0 0; overflow: hidden; color: #94a3b8; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.dictionary-module .so-summary-card p { margin: 3px 0 0; overflow: hidden; color: #94a3b8; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .dictionary-module .so-summary-card.blue > span { color: #2563eb; background: #dbeafe; }
 .dictionary-module .so-summary-card.violet > span { color: #8b5cf6; background: #f5f3ff; }
 .dictionary-module .so-summary-card.orange > span { color: #b45309; background: #fef3c7; }
@@ -57,7 +57,7 @@
   border-bottom: 1px solid #eef2f7;
 }
 
-.dictionary-module .so-panel-head h2 { margin: 0; color: var(--so-ink); font-size: 18px; }
+.dictionary-module .so-panel-head h2 { margin: 0; color: var(--so-ink); font-size: 16px; }
 .dictionary-module .so-panel-head p { margin: 6px 0 0; color: var(--so-muted); font-size: 12px; line-height: 1.55; }
 
 .dictionary-panel-head {
@@ -79,7 +79,7 @@
   padding: 0;
   overflow: hidden;
   border: 1px solid var(--so-line);
-  border-radius: 9px;
+  border-radius: 8px;
   background: #fff;
 }
 
@@ -105,7 +105,7 @@
 .dictionary-items-panel__head h3 { margin: 0; color: var(--so-ink); font-size: 14px; }
 .dictionary-section-head p,
 .dictionary-items-panel__head p { margin: 5px 0 0; color: var(--so-muted); font-size: 11px; line-height: 1.55; }
-.dictionary-items-panel__head > div:first-child > span { display: block; margin-bottom: 4px; color: #94a3b8; font-size: 10px; font-weight: 600; }
+.dictionary-items-panel__head > div:first-child > span { display: block; margin-bottom: 4px; color: #94a3b8; font-size: 11px; font-weight: 600; }
 .dictionary-items-panel__head > div:first-child { min-width: 0; }
 .dictionary-items-panel__head code { color: #2563eb; font-family: "SFMono-Regular", Consolas, monospace; overflow-wrap: anywhere; word-break: break-all; }
 .dictionary-header-actions { display: flex; flex: 0 0 auto; gap: 8px; }
@@ -117,7 +117,7 @@
   font-size: 12px;
   line-height: 1.55;
   border: 1px solid #fcd34d;
-  border-radius: 7px;
+  border-radius: 8px;
   background: #fffbeb;
 }
 
@@ -153,20 +153,20 @@
   color: var(--secondary);
   text-align: left;
   cursor: pointer;
-  border: 1px solid #e2e8f0 !important;
+  border: 1px solid #e2e8f0;
   border-radius: 8px;
   background: #fff;
   transition: border-color .15s, background .15s, box-shadow .15s;
 }
 
-.dictionary-card:hover { border-color: #bfdbfe !important; }
-.dictionary-card.active { border-color: #93c5fd !important; background: #eff6ff; box-shadow: 0 2px 7px rgba(37, 99, 235, .08); }
+.dictionary-card:hover { border-color: #bfdbfe; }
+.dictionary-card.active { border-color: #93c5fd; background: #eff6ff; box-shadow: 0 2px 7px rgba(37, 99, 235, .08); }
 .dictionary-card__top,
 .dictionary-card__meta { display: flex; align-items: center; justify-content: space-between; gap: 9px; }
 .dictionary-card code { overflow: hidden; color: #2563eb; font-family: "SFMono-Regular", Consolas, monospace; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .dictionary-card > strong { overflow: hidden; color: var(--so-ink); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .dictionary-card > small { min-height: 34px; overflow: hidden; color: var(--so-muted); font-size: 11px; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-.dictionary-card__meta { color: #94a3b8; font-size: 10px; }
+.dictionary-card__meta { color: #94a3b8; font-size: 11px; }
 .dictionary-card__meta b { color: #64748b; font-weight: 500; }
 
 .dictionary-pagination { min-height: 54px; margin-top: auto; }
@@ -205,7 +205,7 @@
   font-size: 12px;
   line-height: 1.5;
   border: 1px solid #fecaca;
-  border-radius: 7px;
+  border-radius: 8px;
   background: #fef2f2;
 }
 

@@ -61,9 +61,6 @@ async function submit() {
 <template>
   <main class="login-page">
     <section class="brand-panel" aria-label="基础能力平台安全能力">
-      <div class="brand-grid"></div>
-      <div class="brand-glow brand-glow-top"></div>
-      <div class="brand-glow brand-glow-bottom"></div>
       <header class="brand-logo">
         <span class="brand-logo-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 2 4.5 5.4v5.1c0 4.7 3.2 9 7.5 10.2 4.3-1.2 7.5-5.5 7.5-10.2V5.4L12 2Zm0 2.2 5.5 2.5v3.8c0 3.5-2.2 6.8-5.5 8-3.3-1.2-5.5-4.5-5.5-8V6.7L12 4.2Z" /></svg></span>
         <span><strong>基础能力平台</strong><small>Basic Capability Platform</small></span>

@@ -153,6 +153,12 @@ test('列表接口统一解包分页 envelope，未分页时拿到完整集合',
   assert.match(source, /return unwrapPage\(await request\(`\/projects\$\{search \? `\?\$\{search\}` : ''\}`\)\)/)
 })
 
+test('实时监控读取独立服务端快照并保留分页与版本元数据', () => {
+  assert.match(source, /export async function getProjectMonitoring\(params = \{\}\)/)
+  assert.match(source, /request\(`\/projects-monitoring\$\{search \? `\?\$\{search\}` : ''\}`\)/)
+  for (const field of ['recent_events', 'status_counts', 'server_time', 'snapshot_version']) assert.match(source, new RegExp(field))
+})
+
 test('前端 API 不再暴露已下线的站点档案维护接口', () => {
   assert.doesNotMatch(source, /export async function listSites/)
   assert.doesNotMatch(source, /export function upsertSite/)
