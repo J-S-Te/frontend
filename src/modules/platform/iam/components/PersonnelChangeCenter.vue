@@ -361,7 +361,7 @@ onMounted(load)
 .console-badge.status-scheduled { color: #2f65b4; background: #e6f0ff; }
 .console-badge.status-executed { color: #20764e; background: #e0f5e9; }
 .console-badge.status-rejected { color: #b34a4a; background: #ffebeb; }
-.personnel-change-modal { width: min(860px, 100%); max-height: min(820px, calc(100vh - 40px)); overflow: hidden; border: 1px solid #dce7f5; box-shadow: 0 24px 70px rgba(28, 54, 98, .2); }
+.personnel-change-modal { display: flex; width: min(860px, 100%); max-height: min(820px, calc(100vh - 40px)); flex-direction: column; overflow: hidden; border: 1px solid #dce7f5; box-shadow: 0 24px 70px rgba(28, 54, 98, .2); }
 .personnel-change-modal-header { position: relative; display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; overflow: hidden; padding: 1.45rem 1.75rem 1.25rem; background: linear-gradient(135deg, #f8fbff 0%, #edf4ff 100%); border-bottom: 1px solid var(--line-soft, #e5edf7); }
 .personnel-change-modal-header::after { position: absolute; right: -4rem; bottom: -6rem; width: 15rem; height: 15rem; pointer-events: none; content: ''; border: 1.5rem solid rgba(110, 145, 220, .08); border-radius: var(--radius-pill); }
 .personnel-change-modal-header .console-modal-close { position: relative; z-index: 2; flex: 0 0 auto; }
@@ -370,7 +370,7 @@ onMounted(load)
 .personnel-change-modal-header p:not(.console-modal-eyebrow) { margin: .4rem 0 0; color: var(--muted, #71829b); font-size: 12.5px; line-height: 1.5; }
 .personnel-modal-eyebrow-icon { display: inline-grid; place-items: center; width: 1.35rem; height: 1.35rem; margin-right: .35rem; color: #496fd0; background: #dfe9ff; border-radius: .4rem; vertical-align: middle; }
 .personnel-modal-eyebrow-icon svg { width: .8rem; height: .8rem; }
-.personnel-change-modal-body { max-height: calc(100vh - 180px); overflow-y: auto; padding: 1.35rem 1.75rem 1.5rem; }
+.personnel-change-modal-body { min-height: 0; flex: 1 1 auto; overflow-y: auto; padding: 1.35rem 1.75rem 1.5rem; }
 .personnel-change-form-intro { display: flex; align-items: flex-start; gap: .7rem; margin-bottom: 1.15rem; padding: .8rem .9rem; border: 1px solid #dce8f7; border-radius: .7rem; background: #f7faff; }
 .personnel-change-form-intro-icon { display: grid; flex: 0 0 auto; place-items: center; width: 1.9rem; height: 1.9rem; color: #4b70ca; background: #e3edff; border-radius: .55rem; }
 .personnel-change-form-intro strong { color: #2d4f91; font-size: 13px; }
@@ -401,7 +401,7 @@ onMounted(load)
 .personnel-preview-grid .preview-removed strong { color: #b34a4a; }
 .personnel-preview-grid .preview-kept { border-top: 3px solid #7094d6; }
 .personnel-preview-grid .preview-kept strong { color: #3c70c9; }
-.personnel-change-modal > .console-form-actions { margin: 0; padding: .9rem 1.75rem; border-top: 1px solid var(--line-soft, #e5edf7); background: rgba(255, 255, 255, .96); }
+.personnel-change-modal > .console-form-actions { position: relative; z-index: 2; flex: 0 0 auto; margin: 0; padding: .9rem 1.75rem; border-top: 1px solid var(--line-soft, #e5edf7); background: rgba(255, 255, 255, .98); box-shadow: 0 -4px 14px rgba(28, 54, 98, .06); }
 .personnel-authorization-modal { max-width: 900px; }
 .personnel-authorization-list { display: grid; gap: .7rem; max-height: 55vh; overflow: auto; }
 .personnel-authorization-card { padding: 1rem; border: 1px solid var(--line-soft, #e0e8f2); border-radius: .75rem; background: var(--card, #fff); }
