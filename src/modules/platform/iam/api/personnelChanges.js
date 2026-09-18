@@ -72,3 +72,14 @@ export function previewPersonnelChange(payload) {
 export function createPersonnelChange(payload) {
   return request('/personnel-changes', { method: 'POST', body: JSON.stringify(payload) })
 }
+
+export function submitPersonnelChange(changeId) {
+  return request(`/personnel-changes/${encodeURIComponent(changeId)}/submit`, { method: 'POST', body: '{}' })
+}
+
+export function transitionPersonnelChange(changeId, toStatus, approvalReference = '') {
+  return request(`/personnel-changes/${encodeURIComponent(changeId)}/transition`, {
+    method: 'POST',
+    body: JSON.stringify({ to_status: toStatus, approval_reference: approvalReference }),
+  })
+}

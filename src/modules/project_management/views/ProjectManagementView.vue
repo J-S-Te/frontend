@@ -3021,7 +3021,7 @@ onBeforeUnmount(() => {
         </div>
         <Transition name="pm-notification-pop">
           <div v-if="notificationOpen" id="project-notifications" class="pm-notifications" role="status" aria-live="polite">
-            <div class="pm-popover-head"><b>Notification 通知</b><span>{{ notificationCount }} 条</span></div>
+            <div class="pm-popover-head"><b>业务待办</b><span>{{ notificationCount }} 条</span></div>
             <p v-if="notificationLoading" class="pm-notification-state">正在加载未读通知…</p>
             <p v-else-if="notificationError" class="pm-notification-state danger">{{ notificationError }}</p>
             <button v-for="item in notificationItems" :key="item.delivery_id" :disabled="notificationActionID === item.delivery_id" @click="openNotification(item)"><i :class="item.category === 'DEVIATION_REPORTED' ? 'danger' : 'warning'"></i><span><b>{{ item.title }}</b><small>{{ item.content }}</small></span></button>

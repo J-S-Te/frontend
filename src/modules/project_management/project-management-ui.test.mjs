@@ -215,13 +215,13 @@ test('顶栏右上角只剩通知铃铛与账号头像，账号名与退出入�
   assert.match(styles, /\.pm-notifications \{[\s\S]*?right: calc\(var\(--pm-pad-page\) \+ 43px\);/)
 })
 
-test('通知铃铛显示 Notification 通知并在五秒后带动画收起', () => {
+test('通知铃铛显示业务待办并在五秒后带动画收起', () => {
   assert.match(source, /function toggleNotifications\(\) \{/)
   assert.match(source, /notificationAutoCloseTimer = window\.setTimeout\(closeNotifications, 5000\)/)
   assert.match(source, /window\.clearTimeout\(notificationAutoCloseTimer\)/)
   assert.match(source, /@click="toggleNotifications"/)
   assert.match(source, /<Transition name="pm-notification-pop">/)
-  assert.match(source, /<b>Notification 通知<\/b>/)
+  assert.match(source, /<b>业务待办<\/b>/)
   assert.match(source, /id="project-notifications" class="pm-notifications" role="status" aria-live="polite"/)
   assert.match(styles, /\.pm-notification-pop-enter-active,[\s\S]*?transition: opacity \.2s ease, transform \.2s ease;/)
   assert.match(styles, /\.pm-notification-pop-enter-from,[\s\S]*?transform: translateY\(-8px\) scale\(\.98\);/)
