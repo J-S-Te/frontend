@@ -989,14 +989,14 @@ test('每个写操作入口都按服务端同款权限码门控', () => {
   assert.match(source, /v-if="activeSection === 'decomposition' && canConfirmDecomposition"[^>]*@click="confirmDecomposition"/)
   assert.match(source, /v-if="canPlanImplementation" class="pm-button primary" :disabled="saving \|\| !!planningBlocked"/)
   assert.match(source, /v-if="selectedServiceItem && canExecuteField" class="pm-form pm-operation-form"/)
-  assert.match(source, /canCompleteField" class="pm-button" :disabled="saving" @click="runOperation\('complete'\)"/)
+  assert.match(source, /selectedServiceItem\.status === '实施中' && canCompleteField" class="pm-button" :disabled="saving" @click="runOperation\('complete'\)"/)
   assert.match(source, /v-if="canReportDeviation" class="pm-button primary" :disabled="saving" @click="runOperation\('exception-report'\)"/)
   assert.match(source, /v-if="canReviewDeviation" class="pm-button" :disabled="saving" @click="runOperation\('exception-review'\)"/)
   assert.match(source, /v-if="canReviewSpecialMethod" class="pm-form-row"/)
   assert.match(source, /v-if="canManageResource" class="pm-link" @click="openCapabilityDialog\(item\)"/)
   assert.match(source, /v-(?:if|else-if)="canManageRules" class="pm-switch"/)
   // 报告推进按编制、审核、签发、归档四类职责分别授权。
-  assert.match(source, /canAdvanceReportPhase\(reportPhaseNext\[item\.report_status\]\)/)
+  assert.match(source, /canAdvanceReportPhase\(reportPhaseNext\[selectedServiceItem\.report_status\]\)/)
   for (const permission of ['project.report.prepare', 'project.report.review', 'project.report.issue', 'project.report.archive']) {
     assert.ok(source.includes(permission), `缺少报告阶段权限：${permission}`)
   }
@@ -1423,7 +1423,7 @@ test('状态字段统一为语义化胶囊标签（statusTone 单一映射）', 
   // 纯文本状态（操作台当前项 / 复核状态 / 当前报告阶段）收口为胶囊。
   assert.match(source, /:class="statusTone\(selectedServiceItem\.status\)"/)
   assert.match(source, /<b class="pm-badge" :class="statusTone\(item && reportTechReviewLabel\(item\.tech_review_status\)\)"/)
-  assert.match(source, /<b class="pm-badge" :class="statusTone\(reportStatusLabel\[item\.report_status\] \|\| item\.report_status\)"/)
+  assert.match(source, /<b class="pm-badge" :class="statusTone\(reportStatusLabel\[selectedServiceItem\.report_status\] \|\| selectedServiceItem\.report_status\)"/)
   // 修复未定义的 warning 色调：设备在位改 amber，使用范围改关注，CSS 提供兼容别名。
   assert.match(source, /item\.presence === 'OUT_OF_COMPANY' \? 'amber' : 'normal'/)
   assert.match(source, /item\.usage_scope === 'COMPANY_ONLY' \? '关注' : 'neutral'/)
@@ -1445,6 +1445,21 @@ test('报告编制版本先上传网关文件再进入审核', () => {
   assert.match(source, /uploadServiceItemEvidence\(item\.id, 'REPORT', file\)/)
   assert.match(source, /registerReportArtifact\(item\.id, Number\(item\.report_revision\) \|\| 0, artifact\)/)
   assert.match(source, /审核人与编制人必须不同/)
+})
+
+test('已签发或归档报告支持受控更正申请与职责分离审批', () => {
+  assert.ok(source.includes("canRequestReportCorrection = computed(() => permissionSet.value.has('project.report.correction.request'))"))
+  assert.ok(source.includes("canApproveReportCorrection = computed(() => permissionSet.value.has('project.report.correction.approve'))"))
+  assert.match(source, /\['ISSUED', 'ARCHIVED'\]\.includes\(selectedServiceItem\.value\?\.report_status\)/)
+  assert.match(source, /selectedReportCorrectionRequests\.value\.length === 0/)
+  assert.match(source, /await requestReportCorrection\(item\.id, \{ reason, expected_version: Number\(item\.version\) \|\| 0 \}\)/)
+  assert.match(source, /request\.actor_user_id === session\.value\?\.user_id/)
+  assert.match(source, /await decideReportCorrection\(item\.id, request\.id, \{ decision, comment, expected_version: Number\(item\.version\) \|\| 0 \}\)/)
+  assert.match(source, /REPORT_CORRECTION_REQUESTED: '报告更正已申请'/)
+  assert.match(source, /批准更正/)
+  assert.match(source, /审批通过后旧版本作废并生成下一报告版本/)
+  assert.match(pmApiSource, /export function requestReportCorrection\(itemID, payload\)/)
+  assert.match(pmApiSource, /export function decideReportCorrection\(itemID, requestID, payload\)/)
 })
 
 test('过期设备展示派生无效状态且检测类别使用受控域', () => {

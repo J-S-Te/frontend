@@ -698,6 +698,14 @@ export function withdrawRollback(itemID, requestID, payload) {
   return request(`/service-items/${encodeURIComponent(itemID)}/rollback-requests/${encodeURIComponent(requestID)}/withdraw`, { method: 'POST', body: JSON.stringify(payload) })
 }
 
+export function requestReportCorrection(itemID, payload) {
+  return request(`/service-items/${encodeURIComponent(itemID)}/report-corrections`, { method: 'POST', body: JSON.stringify(payload) })
+}
+
+export function decideReportCorrection(itemID, requestID, payload) {
+  return request(`/service-items/${encodeURIComponent(itemID)}/report-corrections/${encodeURIComponent(requestID)}/decision`, { method: 'POST', body: JSON.stringify(payload) })
+}
+
 export async function listReportRevisions(itemID) {
   const data = await request(`/service-items/${encodeURIComponent(itemID)}/report-revisions`)
   return Array.isArray(data) ? data : []
