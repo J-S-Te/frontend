@@ -26,6 +26,12 @@ test('return tracking persists shipment receipt reminder upload and manual confi
   assert.match(source, /系统不自动判定合同内容/)
 })
 
+test('successful signing confirmations close the detail dialog automatically', () => {
+  for (const action of ['saveSigningShipment', 'markSigningReceived', 'confirmSigning']) {
+    assert.match(source, new RegExp(`await ${action}\\([\\s\\S]{0,260}closeSigningRecord\\(\\)`))
+  }
+})
+
 test('contract specialists receive newly approved contracts through realtime signing synchronization', () => {
   assert.match(source, /activeSection\.value !== 'signing' \|\| document\.visibilityState !== 'visible'/)
   assert.match(source, /const listRequest = listSigningRecords\(\{ limit: 200 \}\)/)

@@ -28,6 +28,10 @@ test('Portal 页面已对齐真实 HTTP 路由并对未配置能力失败关闭'
   assert.match(portalStyles, /\.filing-list-open:hover:not\(:disabled\) \{ color: var\(--text, #0f172a\)/)
 })
 
+test('反馈确认关闭成功后自动关闭详情弹窗', () => {
+  assert.match(view, /await closeFeedback\(feedbackID, idempotencyKey\)[\s\S]{0,160}selectedFeedback\.value = null/)
+})
+
 test('备案 API 使用后端真实路径、版本字段、CSRF 与调用方幂等键', async (t) => {
   const originalFetch = globalThis.fetch
   t.after(() => { globalThis.fetch = originalFetch })

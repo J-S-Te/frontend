@@ -18,6 +18,7 @@ const sharedComponentSources = await Promise.all([
   'RiskList.vue',
 ].map((name) => readFile(new URL(`./components/${name}`, import.meta.url), 'utf8')))
 const pmApiSource = await readFile(new URL('./api/projectManagement.js', import.meta.url), 'utf8')
+const notificationApiSource = await readFile(new URL('../platform/notifications/api/notifications.js', import.meta.url), 'utf8')
 const workflowNodeSource = await readFile(new URL('./workflowNode.js', import.meta.url), 'utf8')
 
 test('项目管理模块暴露统一前端路由', () => {
@@ -212,6 +213,30 @@ test('顶栏右上角只剩通知铃铛与账号头像，账号名与退出入�
   // 通知面板原为顶栏账号块预留 110px，去掉该块后必须重新对齐到铃铛。
   assert.doesNotMatch(styles, /right: 110px/)
   assert.match(styles, /\.pm-notifications \{[\s\S]*?right: calc\(var\(--pm-pad-page\) \+ 43px\);/)
+})
+
+test('通知铃铛显示 Notification 通知并在五秒后带动画收起', () => {
+  assert.match(source, /function toggleNotifications\(\) \{/)
+  assert.match(source, /notificationAutoCloseTimer = window\.setTimeout\(closeNotifications, 5000\)/)
+  assert.match(source, /window\.clearTimeout\(notificationAutoCloseTimer\)/)
+  assert.match(source, /@click="toggleNotifications"/)
+  assert.match(source, /<Transition name="pm-notification-pop">/)
+  assert.match(source, /<b>Notification 通知<\/b>/)
+  assert.match(source, /id="project-notifications" class="pm-notifications" role="status" aria-live="polite"/)
+  assert.match(styles, /\.pm-notification-pop-enter-active,[\s\S]*?transition: opacity \.2s ease, transform \.2s ease;/)
+  assert.match(styles, /\.pm-notification-pop-enter-from,[\s\S]*?transform: translateY\(-8px\) scale\(\.98\);/)
+})
+
+test('通知铃铛只读取未点击事件，点击后持久化已读并立即移除', () => {
+  assert.match(notificationApiSource, /if \(unreadOnly\) query\.set\('unread_only', 'true'\)/)
+  assert.match(source, /listNotificationInbox\(\{ page: 1, pageSize: 20, unreadOnly: true \}\)/)
+  assert.match(source, /notificationItems\.value = \(inbox\?\.items \|\| \[\]\)\.filter\(\(item\) => !item\.read_at\)/)
+  assert.match(source, /await markNotificationRead\(deliveryID\)/)
+  assert.match(source, /notificationItems\.value = notificationItems\.value\.filter\(\(entry\) => entry\.delivery_id !== deliveryID\)/)
+  assert.match(source, /notificationCount\.value = Math\.max\(0, notificationCount\.value - 1\)/)
+  assert.match(source, /message="暂无未读通知"/)
+  assert.doesNotMatch(source, /pendingDeviations\.length \+ decompositionItems\.value\.length \+ inboxItems\.value\.length/)
+  assert.match(styles, /\.pm-notifications \{[\s\S]*?max-height: min\(520px,[\s\S]*?overflow-y: auto;/)
 })
 
 test('项目管理页面严格遵守 UniLab v1.0 设计规范', () => {
@@ -1301,14 +1326,15 @@ test('合同拆解规则配置按原型 PG-CFG-01 做成三段式，口径完全
   assert.match(source, /if \(section === 'split-rules'\) loadSplitConfig\(\)/)
 })
 
-test('已建项目的合同在新建弹窗里直接标注并禁用，不再提交后才报错', () => {
-  // 同一 (合同号, 版本) 在服务端是唯一键：已有项目时再选它必然冲突，
-  // 所以要在选择阶段就把它挡掉（服务端 409 仍是最终兜底）。
+test('新建项目只显示尚未建立项目的已审批合同', () => {
+  // 后端按租户全量项目过滤，前端再按当前列表防护；已使用合同不能以禁用项继续出现。
   assert.match(source, /const builtContractKeys = computed\(\(\) => \{/)
+  assert.match(source, /const availableApprovedContracts = computed\(\(\) => approvedContracts\.value\.filter/)
   assert.match(source, /function contractOptionLabel\(contract\) \{/)
-  assert.match(source, /function contractOptionDisabled\(contract\) \{/)
-  assert.match(source, /\（已建项目 \$\{built\.id\}）/)
-  assert.match(source, /<option v-for="contract in approvedContracts" :key="contract\.id" :value="contract\.id" :disabled="contractOptionDisabled\(contract\)">\{\{ contractOptionLabel\(contract\) \}\}<\/option>/)
+  assert.doesNotMatch(source, /function contractOptionDisabled\(contract\)/)
+  assert.doesNotMatch(source, /（已建项目/)
+  assert.match(source, /请选择尚未建立项目的已审批合同/)
+  assert.match(source, /<option v-for="contract in availableApprovedContracts" :key="contract\.id" :value="contract\.id">\{\{ contractOptionLabel\(contract\) \}\}<\/option>/)
 })
 
 test('轻提示按结果切换语义色，错误不再是绿色对勾', () => {

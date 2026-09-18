@@ -96,6 +96,11 @@ test('商机和售前核心表单统一使用大系统 console 弹窗规范', ()
   assert.doesNotMatch(view, /v-if="showAlertConfig" class="crm-modal"/)
 })
 
+test('确认导入成功后自动关闭客户 Excel 导入弹窗', () => {
+  assert.match(view, /const result = await commitCustomerImport\([\s\S]{0,420}closeCustomerImport\(\)[\s\S]{0,80}await loadCurrent\(\)/)
+  assert.doesNotMatch(view, /customerImportResult\.value = await commitCustomerImport/)
+})
+
 test('负责人通过基础平台授权目录选择用户及其有效组织', async (t) => {
   assert.match(view, /import OwnerSelector from '\.\.\/components\/OwnerSelector\.vue'/)
   assert.equal((view.match(/<OwnerSelector/g) || []).length, 2)
