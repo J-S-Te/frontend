@@ -89,6 +89,13 @@ test('项目交付闭环调用真实后端接口而非本地模拟', () => {
   assert.match(source, /service-items\/\$\{encodeURIComponent\(itemID\)\}\/field-complete/)
 })
 
+test('报告更正申请与审批使用带版本保护的真实接口', () => {
+  assert.match(source, /export function requestReportCorrection\(itemID, payload\)/)
+  assert.match(source, /`\/service-items\/\$\{encodeURIComponent\(itemID\)\}\/report-corrections`/)
+  assert.match(source, /export function decideReportCorrection\(itemID, requestID, payload\)/)
+  assert.match(source, /report-corrections\/\$\{encodeURIComponent\(requestID\)\}\/decision/)
+})
+
 test('项目列表将 keyword 兼容转换为后端实际读取的 q 参数', () => {
   assert.match(source, /if \(query\.q === undefined && query\.keyword !== undefined\) query\.q = query\.keyword/)
   assert.match(source, /delete query\.keyword/)

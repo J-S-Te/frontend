@@ -63,6 +63,8 @@ import {
   requestRollback,
   decideRollback,
   withdrawRollback,
+  requestReportCorrection,
+  decideReportCorrection,
   planImplementation,
   startImplementationPreparation,
   submitFieldRecord,
@@ -436,7 +438,7 @@ const canManageResource = computed(() => Array.isArray(session.value?.permission
 // 权限码门控入口，设备此前没有门控，一旦设备模块对更多角色可见就会变成「能点必 403」。
 const canManageDevice = computed(() => Array.isArray(session.value?.permissions) && session.value.permissions.includes('project.device.manage'))
 const selectedServiceItemIDs = ref([])
-const operationForm = ref({ teamLeadID: '', projectManagerID: '', engineerIDs: '', plannedStart: '', plannedEnd: '', penetrationTestPlan: '', authDocNo: '', authStart: '', authEnd: '', authScope: '', testScope: '', testWindow: '', emergencyContact: '', rollbackPlan: '', reviewComment: '', personnel: [], equipment: [], travelRequestID: '', rawData: '', environment: '', fieldEvidenceFile: null, reportFile: null, deviationDescription: '', deviationEvidenceFile: null, severity: 'MEDIUM', decision: 'RELEASE', comment: '' })
+const operationForm = ref({ teamLeadID: '', projectManagerID: '', engineerIDs: '', plannedStart: '', plannedEnd: '', penetrationTestPlan: '', authDocNo: '', authStart: '', authEnd: '', authScope: '', testScope: '', testWindow: '', emergencyContact: '', rollbackPlan: '', reviewComment: '', personnel: [], equipment: [], travelRequestID: '', rawData: '', environment: '', fieldEvidenceFile: null, reportFile: null, reportCorrectionReason: '', reportCorrectionComment: '', deviationDescription: '', deviationEvidenceFile: null, severity: 'MEDIUM', decision: 'RELEASE', comment: '' })
 const deviationSeverityOptions = Object.freeze([
   { value: 'LOW', label: '低' },
   { value: 'MEDIUM', label: '中' },
@@ -1374,6 +1376,8 @@ const canRevokeExecution = computed(() => permissionSet.value.has('project.execu
 const canRevokeImplementation = computed(() => permissionSet.value.has('project.implementation.revoke'))
 const canRequestRollback = computed(() => permissionSet.value.has('project.rollback.request'))
 const canApproveRollback = computed(() => permissionSet.value.has('project.rollback.approve'))
+const canRequestReportCorrection = computed(() => permissionSet.value.has('project.report.correction.request'))
+const canApproveReportCorrection = computed(() => permissionSet.value.has('project.report.correction.approve'))
 const canPlanImplementation = computed(() => permissionSet.value.has('project.implementation.plan'))
 const canExecuteField = computed(() => permissionSet.value.has('project.field.execute'))
 const canCompleteField = computed(() => permissionSet.value.has('project.field.complete'))
@@ -2298,7 +2302,7 @@ function projectEvents(project) {
 function eventLabel(event) {
   // 事件名必须与后端 application/delivery.go 的常量逐字一致：曾把现场完成的事件名
   // 多写一层 IMPLEMENTATION 前缀，导致交付趋势/准时率按该名过滤时恒为空。
-  return ({ CONTRACT_ACTIVATED: '合同生效并生成项目', CONTRACT_STAMP_STATUS_SYNCED: '盖章合同状态已同步', DECOMPOSITION_ADJUSTED: '服务项拆解已调整', DECOMPOSITION_RETURNED: '服务项已退回拆解确认', TEAM_ASSIGNED: '团队负责人已分配', EXECUTION_TEAM_ASSIGNED: '项目经理及工程师已指派', IMPLEMENTATION_PLANNED: '现场实施计划已发布', PREPARATION_STARTED: '实施准备已发起', FIELD_RECORD_SUBMITTED: '现场原始记录已提交', FIELD_COMPLETED: '现场实施已完成', EQUIPMENT_RETURNED: '设备已归还', DEVIATION_REPORTED: '现场偏离已上报', DEVIATION_REVIEWED: '偏离评审已完成', SPECIAL_METHOD_REVIEWED: '特殊方法复核已完成', REPORT_STATUS_UPDATED: '报告阶段已推进', WARNING_TRIGGERED: '预警规则已触发', AUTOMATION_TRIGGERED: '自动化动作已执行' })[event.type] || event.type
+  return ({ CONTRACT_ACTIVATED: '合同生效并生成项目', CONTRACT_STAMP_STATUS_SYNCED: '盖章合同状态已同步', DECOMPOSITION_ADJUSTED: '服务项拆解已调整', DECOMPOSITION_RETURNED: '服务项已退回拆解确认', TEAM_ASSIGNED: '团队负责人已分配', EXECUTION_TEAM_ASSIGNED: '项目经理及工程师已指派', IMPLEMENTATION_PLANNED: '现场实施计划已发布', PREPARATION_STARTED: '实施准备已发起', FIELD_RECORD_SUBMITTED: '现场原始记录已提交', FIELD_COMPLETED: '现场实施已完成', EQUIPMENT_RETURNED: '设备已归还', DEVIATION_REPORTED: '现场偏离已上报', DEVIATION_REVIEWED: '偏离评审已完成', SPECIAL_METHOD_REVIEWED: '特殊方法复核已完成', REPORT_STATUS_UPDATED: '报告阶段已推进', REPORT_CORRECTION_REQUESTED: '报告更正已申请', REPORT_CORRECTION_APPROVED: '报告更正已批准', REPORT_CORRECTION_REJECTED: '报告更正已驳回', WARNING_TRIGGERED: '预警规则已触发', AUTOMATION_TRIGGERED: '自动化动作已执行' })[event.type] || event.type
 }
 
 function toggleRow(id) {
@@ -2693,6 +2697,15 @@ const pendingRollbackRequests = computed(() => {
   const decided = new Set(deliveryEvents.value.filter((event) => ['ROLLBACK_APPROVED', 'ROLLBACK_REJECTED', 'ROLLBACK_WITHDRAWN'].includes(event.type)).map((event) => event.payload?.request_id))
   return deliveryEvents.value.filter((event) => event.type === 'ROLLBACK_REQUESTED' && !decided.has(event.id))
 })
+const pendingReportCorrectionRequests = computed(() => {
+  const decided = new Set(deliveryEvents.value.filter((event) => ['REPORT_CORRECTION_APPROVED', 'REPORT_CORRECTION_REJECTED'].includes(event.type)).map((event) => event.payload?.request_id))
+  return deliveryEvents.value.filter((event) => event.type === 'REPORT_CORRECTION_REQUESTED' && !decided.has(event.id))
+})
+const selectedReportCorrectionRequests = computed(() => pendingReportCorrectionRequests.value.filter((event) => event.service_item_id === selectedServiceItem.value?.id))
+const canSubmitReportCorrection = computed(() => canRequestReportCorrection.value
+  && selectedServiceItem.value?.status === '现场实施完成'
+  && ['ISSUED', 'ARCHIVED'].includes(selectedServiceItem.value?.report_status)
+  && selectedReportCorrectionRequests.value.length === 0)
 async function withdrawPendingRollback(request) {
   const reason = window.prompt('请输入撤回原因：')
   if (reason === null) return
@@ -2746,6 +2759,41 @@ async function decidePendingRollback(request, decision) {
     showToast(decision === 'APPROVED' ? '回退申请已批准，服务项已按补偿规则回退' : '回退申请已驳回')
     await loadWorkspace()
   } catch (error) { showToast(error?.message || '审批失败，请刷新后重试', 'error') } finally { saving.value = false }
+}
+
+async function submitReportCorrection() {
+  const item = selectedServiceItem.value
+  const reason = String(operationForm.value.reportCorrectionReason || '').trim()
+  if (!item || !canSubmitReportCorrection.value) { showToast('当前报告不能申请更正', 'warning'); return }
+  if (!reason) { showToast('请填写报告更正原因', 'warning'); return }
+  saving.value = true
+  try {
+    await requestReportCorrection(item.id, { reason, expected_version: Number(item.version) || 0 })
+    operationForm.value.reportCorrectionReason = ''
+    showToast('报告更正申请已提交，等待技术总监审批')
+    await loadWorkspace()
+  } catch (error) {
+    showToast(error?.message || '报告更正申请失败', 'error')
+    if (error?.status === 409) await loadWorkspace()
+  } finally { saving.value = false }
+}
+
+async function decidePendingReportCorrection(request, decision) {
+  const item = itemByID.value.get(request.service_item_id)
+  const comment = String(operationForm.value.reportCorrectionComment || '').trim()
+  if (!item) { showToast('服务项已不可见，无法审批', 'warning'); return }
+  if (request.actor_user_id === session.value?.user_id) { showToast('申请人与审批人不能是同一人', 'warning'); return }
+  if (!comment) { showToast('请填写报告更正审批意见', 'warning'); return }
+  saving.value = true
+  try {
+    await decideReportCorrection(item.id, request.id, { decision, comment, expected_version: Number(item.version) || 0 })
+    operationForm.value.reportCorrectionComment = ''
+    showToast(decision === 'APPROVED' ? '报告更正已批准，已生成新版本待编制' : '报告更正申请已驳回')
+    await loadWorkspace()
+  } catch (error) {
+    showToast(error?.message || '报告更正审批失败', 'error')
+    if (error?.status === 409) await loadWorkspace()
+  } finally { saving.value = false }
 }
 
 async function saveCreate() {
@@ -3360,7 +3408,27 @@ onBeforeUnmount(() => {
               <template v-else-if="activeSection === 'methods'"><div class="pm-review-state"><span>复核状态</span><b class="pm-badge" :class="statusTone(item && reportTechReviewLabel(item.tech_review_status))">{{ item && reportTechReviewLabel(item.tech_review_status) }}</b></div><template v-if="item && ['PENDING', 'REJECTED'].includes(item.tech_review_status)"><label><span>复核意见</span><textarea v-model.trim="operationForm.reviewComment" rows="3" placeholder="填写风险说明或驳回原因"></textarea></label><div v-if="canReviewSpecialMethod" class="pm-form-row"><button class="pm-button primary" :disabled="saving" @click="runOperation('special-approve')">通过复核</button><button class="pm-button" :disabled="saving" @click="runOperation('special-reject')">驳回复核</button></div></template><template v-else-if="item && item.tech_review_status === 'APPROVED'"><p class="pm-form-hint">{{ item.tech_review_comment || '已通过复核，可发布实施计划' }}<span v-if="item.tech_reviewed_at"> · {{ formatDateTime(item.tech_reviewed_at) }} · {{ item.tech_reviewed_by }} </span></p></template><template v-else-if="item && item.tech_review_status === 'PENDING'"><p class="pm-form-hint">等待技术总监复核特殊方法。</p></template></template>
               <template v-else-if="activeSection === 'preparation'"><section class="pm-plan-resources"><header><div><b>设备清单</b><small>只列设备目录中的有效设备；同一设备在同一时段被其他服务项占用时不可选取</small></div><button type="button" class="pm-button" @click="openEquipmentPicker">＋ 添加设备</button></header><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>设备</th><th>能力码</th><th>检定有效期</th><th>使用时段</th><th>备注</th><th></th></tr></thead><tbody><tr v-for="(row, index) in operationForm.equipment" :key="row.resourceID"><td>{{ planResourceName(row) }}</td><td><CodePills :codes="planResourceCodes(row)" /></td><td>{{ planResourceValidUntil(row) }}</td><td><div class="pm-plan-window"><input v-model="row.windowStart" type="date" aria-label="使用时段开始" /><span>~</span><input v-model="row.windowEnd" type="date" aria-label="使用时段结束" /></div></td><td><input v-model.trim="row.note" placeholder="例如 备用机" /></td><td><button type="button" class="pm-link danger" @click="removePlanEquipment(index)">移除</button></td></tr><tr v-if="!operationForm.equipment.length"><td colspan="6" class="pm-empty-mini">请至少选择一台实施设备</td></tr></tbody></table></div></section><label><span>行程预订单 <em>*</em></span><input v-model.trim="operationForm.travelRequestID" /></label><label><span>备注</span><textarea v-model.trim="operationForm.comment" rows="3"></textarea></label><button v-if="canPlanImplementation" class="pm-button primary" :disabled="saving" @click="runOperation('preparation')">发起实施准备</button></template>
               <template v-else-if="activeSection === 'exceptions'"><section v-if="exceptionFlow.length" class="pm-panel pm-approval-panel"><header><div><p class="pm-panel-kicker">复核流程</p><h2>异常处置流程 · {{ selectedDeviation?.payload?.deviation_id || '—' }}</h2></div><span>{{ pendingDeviations.length }} 项待评审</span></header><div class="pm-approval"><template v-for="(step, index) in exceptionFlow" :key="step.title"><div class="pm-approval-step" :class="step.state"><span class="pm-approval-dot">{{ step.state === 'done' ? '✓' : step.state === 'doing' ? '!' : '○' }}</span><div class="pm-approval-body"><b>{{ step.title }}</b><small>{{ step.when }}</small><em>{{ step.note }}</em></div></div><span v-if="index < exceptionFlow.length - 1" class="pm-approval-arrow">→</span></template></div></section><label><span>偏离描述</span><textarea v-model.trim="operationForm.deviationDescription" rows="3" placeholder="选择服务项后填写偏离内容"></textarea></label><label><span>偏离证据</span><input type="file" accept="application/pdf,image/png,image/jpeg" @change="operationForm.deviationEvidenceFile = $event.target.files?.[0] || null" /></label><div class="pm-field"><span>严重度</span><SearchableSelect v-model="operationForm.severity" :options="deviationSeverityOptions" placeholder="请选择严重度" search-placeholder="搜索严重度" aria-label="选择偏离严重度" /></div><button v-if="canReportDeviation" class="pm-button primary" :disabled="saving" @click="runOperation('exception-report')">上报偏离</button><label><span>评审偏离 ID</span><input v-model.trim="operationForm.deviationID" placeholder="DV-..." /></label><div class="pm-field"><span>评审决定</span><SearchableSelect v-model="operationForm.decision" :options="deviationDecisionOptions" placeholder="请选择评审决定" search-placeholder="搜索放行、重测或终止" aria-label="选择评审决定" /></div><button v-if="canReviewDeviation" class="pm-button" :disabled="saving" @click="runOperation('exception-review')">提交偏离评审</button></template>
-              <template v-else-if="activeSection === 'reports'"><section class="pm-panel pm-stepper-panel"><header><div><p class="pm-panel-kicker">报告阶段</p><h2>报告阶段链</h2></div><span v-if="selectedServiceItem" class="pm-op-current">当前：<span class="pm-badge" :class="statusTone(reportStatusLabel[selectedServiceItem.report_status] || '未开始')">{{ reportStatusLabel[selectedServiceItem.report_status] || '未开始' }}</span></span></header><div class="pm-stepper"><template v-for="(step, index) in reportSteps" :key="step.phase"><div class="pm-step" :class="step.state"><span class="pm-step-num">{{ step.state === 'done' ? '✓' : index + 1 }}</span><span>{{ step.label }}</span></div><div v-if="index < reportSteps.length - 1" class="pm-step-line"></div></template></div></section><div class="pm-report-phase" v-if="item && item.report_status"><span>当前报告阶段</span><b class="pm-badge" :class="statusTone(reportStatusLabel[item.report_status] || item.report_status)">{{ reportStatusLabel[item.report_status] || item.report_status }}</b></div><div v-if="item?.report_status === 'COMPILING' && can('project.report.prepare')" class="pm-form"><label><span>R{{ Number(item.report_revision) || 0 }} 报告文件 <em>*</em></span><input type="file" accept="application/pdf" @change="operationForm.reportFile = $event.target.files?.[0] || null" /><small>上传后由统一文件网关扫描并登记摘要，审核人与编制人必须不同。</small></label><button class="pm-button" :disabled="saving" @click="uploadCurrentReport">上传并登记报告</button></div><button v-if="item && reportPhaseNext[item.report_status] && canAdvanceReportPhase(reportPhaseNext[item.report_status])" class="pm-button primary" :disabled="saving" @click="runOperation('report-next')">推进至{{ reportStatusLabel[reportPhaseNext[item.report_status]] }}</button><button v-if="canCompleteField" class="pm-button" :disabled="saving" @click="runOperation('complete')">确认现场实施完成</button></template>
+              <template v-else-if="activeSection === 'reports'">
+                <section class="pm-panel pm-stepper-panel"><header><div><p class="pm-panel-kicker">报告阶段</p><h2>报告阶段链</h2></div><span v-if="selectedServiceItem" class="pm-op-current">当前：<span class="pm-badge" :class="statusTone(reportStatusLabel[selectedServiceItem.report_status] || '未开始')">{{ reportStatusLabel[selectedServiceItem.report_status] || '未开始' }}</span></span></header><div class="pm-stepper"><template v-for="(step, index) in reportSteps" :key="step.phase"><div class="pm-step" :class="step.state"><span class="pm-step-num">{{ step.state === 'done' ? '✓' : index + 1 }}</span><span>{{ step.label }}</span></div><div v-if="index < reportSteps.length - 1" class="pm-step-line"></div></template></div></section>
+                <div class="pm-report-phase" v-if="selectedServiceItem?.report_status"><span>当前报告阶段</span><b class="pm-badge" :class="statusTone(reportStatusLabel[selectedServiceItem.report_status] || selectedServiceItem.report_status)">{{ reportStatusLabel[selectedServiceItem.report_status] || selectedServiceItem.report_status }}</b></div>
+                <div v-if="selectedServiceItem?.report_status === 'COMPILING' && can('project.report.prepare')" class="pm-form"><label><span>R{{ Number(selectedServiceItem.report_revision) || 0 }} 报告文件 <em>*</em></span><input type="file" accept="application/pdf" @change="operationForm.reportFile = $event.target.files?.[0] || null" /><small>上传后由统一文件网关扫描并登记摘要，审核人与编制人必须不同。</small></label><button class="pm-button" :disabled="saving" @click="uploadCurrentReport">上传并登记报告</button></div>
+                <section v-if="selectedReportCorrectionRequests.length" class="pm-panel pm-approval-panel">
+                  <header><div><p class="pm-panel-kicker">报告更正</p><h2>待处理更正申请</h2></div><span>{{ selectedReportCorrectionRequests.length }} 项</span></header>
+                  <div v-for="request in selectedReportCorrectionRequests" :key="request.id" class="pm-form">
+                    <p class="pm-form-hint">R{{ Number(request.payload?.old_revision) || 0 }} · {{ request.payload?.reason }} · 申请人：{{ personLabel(request.actor_user_id, '未知') }}</p>
+                    <template v-if="canApproveReportCorrection && request.actor_user_id !== session?.user_id">
+                      <label><span>审批意见 <em>*</em></span><textarea v-model.trim="operationForm.reportCorrectionComment" rows="2" placeholder="填写批准或驳回意见"></textarea></label>
+                      <div class="pm-form-row"><button type="button" class="pm-button primary" :disabled="saving" @click="decidePendingReportCorrection(request, 'APPROVED')">批准更正</button><button type="button" class="pm-button danger" :disabled="saving" @click="decidePendingReportCorrection(request, 'REJECTED')">驳回申请</button></div>
+                    </template>
+                    <p v-else class="pm-form-hint">更正申请正在等待其他有审批权限的人员处理。</p>
+                  </div>
+                </section>
+                <div v-if="canSubmitReportCorrection" class="pm-form">
+                  <label><span>报告更正原因 <em>*</em></span><textarea v-model.trim="operationForm.reportCorrectionReason" rows="3" placeholder="说明已签发或已归档报告需要更正的内容"></textarea><small>审批通过后旧版本作废并生成下一报告版本，需重新完成编制、审核、签发和归档。</small></label>
+                  <button type="button" class="pm-button" :disabled="saving" @click="submitReportCorrection">申请报告更正</button>
+                </div>
+                <button v-if="selectedServiceItem && reportPhaseNext[selectedServiceItem.report_status] && canAdvanceReportPhase(reportPhaseNext[selectedServiceItem.report_status])" class="pm-button primary" :disabled="saving" @click="runOperation('report-next')">推进至{{ reportStatusLabel[reportPhaseNext[selectedServiceItem.report_status]] }}</button>
+              </template>
             </div><div v-else class="pm-empty-mini">请先选择服务项</div>
           </section>
           <section v-if="activeSection === 'methods'" class="pm-table-panel">
