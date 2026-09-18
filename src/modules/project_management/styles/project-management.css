@@ -506,11 +506,24 @@
   right: calc(var(--pm-pad-page) + 43px);
   z-index: var(--pm-z-dropdown);
   width: 340px;
+  max-height: min(520px, calc(100vh - var(--pm-h-topbar) - var(--pm-sp-4)));
+  overflow-y: auto;
   padding: var(--pm-sp-2);
   border: 1px solid var(--pm-line);
   border-radius: var(--pm-r-lg);
   background: var(--pm-card);
   box-shadow: var(--pm-shadow-pop);
+  transform-origin: top right;
+}
+
+.pm-notification-pop-enter-active,
+.pm-notification-pop-leave-active {
+  transition: opacity .2s ease, transform .2s ease;
+}
+.pm-notification-pop-enter-from,
+.pm-notification-pop-leave-to {
+  opacity: 0;
+  transform: translateY(-8px) scale(.98);
 }
 
 .pm-popover-head { display: flex; align-items: center; justify-content: space-between; gap: var(--pm-sp-2); padding: var(--pm-sp-3); border-bottom: 1px solid var(--pm-line-soft); }
@@ -530,12 +543,15 @@
 }
 
 .pm-notifications > button:hover { background: var(--pm-sunken); }
+.pm-notifications > button:disabled { cursor: wait; opacity: .65; }
 .pm-notifications i { width: 7px; height: 7px; margin-top: 5px; border-radius: 50%; background: var(--pm-primary); }
 .pm-notifications i.danger { background: var(--pm-red); }
 .pm-notifications i.warning { background: var(--pm-amber); }
 .pm-notifications button span { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .pm-notifications button b { color: var(--pm-ink); font-size: var(--pm-fs-sm); }
 .pm-notifications button small { color: var(--pm-muted); font-size: var(--pm-fs-hint); }
+.pm-notification-state { margin: 0; padding: var(--pm-sp-3); color: var(--pm-muted); font-size: var(--pm-fs-hint); }
+.pm-notification-state.danger { color: var(--pm-red-text); }
 
 /* ==========================================================================
    §6 按钮 Buttons

@@ -21,8 +21,12 @@ const request = createRequest({
   subsystem: 'platform',
   feature: 'notifications',
 })
-/** listInbox 读取站内信收件箱分页列表。 */
-export const listInbox = ({ page = 1, pageSize = 20 } = {}) => request(`/notifications/inbox?page=${page}&page_size=${pageSize}`)
+/** listInbox 读取站内信收件箱分页列表，可由通知铃铛只请求未读事件。 */
+export const listInbox = ({ page = 1, pageSize = 20, unreadOnly = false } = {}) => {
+  const query = new URLSearchParams({ page: String(page), page_size: String(pageSize) })
+  if (unreadOnly) query.set('unread_only', 'true')
+  return request(`/notifications/inbox?${query}`)
+}
 /**
  * getNotification 拉取单条站内信正文与附件元数据。
  * @param {string|number} deliveryID 消息投递 ID。

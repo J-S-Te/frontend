@@ -659,8 +659,13 @@ async function submitSigningShipment() {
   signingOperationBusy.value = true
   try {
     await saveSigningShipment(contractID, signingShipmentForm.value)
-    await refreshSelectedSigningRecord()
+    closeSigningRecord()
     showToast('寄出信息已登记，合同进入回传跟踪')
+    try {
+      await refreshSigningRecords()
+    } catch {
+      showToast('寄出信息已登记，但签署列表刷新失败，请手动刷新')
+    }
   } catch (error) {
     showToast(error?.message || '保存寄出信息失败')
   } finally {
@@ -674,8 +679,13 @@ async function confirmCustomerReceived() {
   signingOperationBusy.value = true
   try {
     await markSigningReceived(contractID)
-    await refreshSelectedSigningRecord()
+    closeSigningRecord()
     showToast('已记录客户签收')
+    try {
+      await refreshSigningRecords()
+    } catch {
+      showToast('客户签收已确认，但签署列表刷新失败，请手动刷新')
+    }
   } catch (error) {
     showToast(error?.message || '记录客户签收失败')
   } finally {
@@ -704,8 +714,13 @@ async function confirmSigningRecord() {
   signingOperationBusy.value = true
   try {
     await confirmSigning(contractID, signingConfirmationForm.value)
-    await refreshSelectedSigningRecord()
+    closeSigningRecord()
     showToast('回传合同已核验，签署流程完成')
+    try {
+      await refreshSigningRecords()
+    } catch {
+      showToast('合同核验已完成，但签署列表刷新失败，请手动刷新')
+    }
   } catch (error) {
     showToast(error?.message || '完成核验失败')
   } finally {
@@ -1067,6 +1082,7 @@ async function submitOpportunityIntakeReview() {
   }
   opportunityIntakeReviewBusy.value = true
   opportunityIntakeConflictNotice.value = ''
+  let completed = false
   try {
     const reviewed = await reviewOpportunityIntake(item.intake_id, {
       decision: command.decision,
@@ -1079,6 +1095,7 @@ async function submitOpportunityIntakeReview() {
       ? opportunityIntakes.value.map((entry) => entry.intake_id === reviewed.intake_id ? reviewed : entry)
       : opportunityIntakes.value.filter((entry) => entry.intake_id !== reviewed.intake_id)
     opportunityIntakeReviewAttempt.value = null
+    completed = true
     showToast(opportunityIntakeStatus(reviewed.status).label)
   } catch (error) {
     // 409 是服务端已经明确拒绝的命令，可以刷新版本并在下一次提交时创建新键。
@@ -1104,6 +1121,7 @@ async function submitOpportunityIntakeReview() {
     }
   } finally {
     opportunityIntakeReviewBusy.value = false
+    if (completed) closeOpportunityIntake()
   }
 }
 

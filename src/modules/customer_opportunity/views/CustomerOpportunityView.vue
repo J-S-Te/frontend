@@ -821,9 +821,9 @@ async function commitImport() {
   actionLoading.value = true; resetMessages()
   try {
     if (!customerImportCommitKey.value) customerImportCommitKey.value = createIdempotencyKey()
-    customerImportResult.value = await commitCustomerImport(preview.job_no, { version: Number(preview.version) }, customerImportCommitKey.value)
-    customerImportPreview.value = { ...preview, version: customerImportResult.value.version, status: customerImportResult.value.status }
-    notice.value = `客户导入完成：成功 ${customerImportResult.value.succeeded_rows || 0} 行，失败 ${customerImportResult.value.failed_rows || 0} 行，跳过 ${customerImportResult.value.skipped_rows || 0} 行。`
+    const result = await commitCustomerImport(preview.job_no, { version: Number(preview.version) }, customerImportCommitKey.value)
+    notice.value = `客户导入完成：成功 ${result.succeeded_rows || 0} 行，失败 ${result.failed_rows || 0} 行，跳过 ${result.skipped_rows || 0} 行。`
+    closeCustomerImport()
     await loadCurrent()
   } catch (value) { showCustomerImportError(value) } finally { actionLoading.value = false }
 }

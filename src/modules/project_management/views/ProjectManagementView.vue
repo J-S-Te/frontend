@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { AuthError, logoutCurrentSession } from '@/modules/platform/auth/api/auth'
+import { getUnreadCount, listInbox as listNotificationInbox, markNotificationRead } from '@/modules/platform/notifications/api/notifications'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import CodePills from '@/modules/project_management/components/CodePills.vue'
 import EmptyHint from '@/modules/project_management/components/EmptyHint.vue'
@@ -211,6 +212,12 @@ const projectCardFilter = ref('')
 const selectedRows = ref([])
 const createOpen = ref(false)
 const notificationOpen = ref(false)
+const notificationItems = ref([])
+const notificationCount = ref(0)
+const notificationLoading = ref(false)
+const notificationError = ref('')
+const notificationActionID = ref('')
+let notificationAutoCloseTimer = 0
 const toastMessage = ref('')
 const toastType = ref('success')
 const isLoggingOut = ref(false)
@@ -1263,7 +1270,6 @@ const activeNodeItems = computed(() => ({
   implementation: implementationItems.value,
 }[activeSection.value] || serviceItems.value))
 const penetrationPending = computed(() => serviceItems.value.filter((item) => item.test_mode === 'PENETRATION' && !item.planned_start))
-const notificationCount = computed(() => pendingDeviations.value.length + decompositionItems.value.length + inboxItems.value.length)
 const activeServiceCount = computed(() => serviceItems.value.filter((item) => !['现场实施完成', '已完成', '已终止'].includes(item.status)).length)
 const completedProjectCount = computed(() => projects.value.filter((project) => project.status === projectStatusCompleted).length)
 const currentUserName = computed(() => session.value?.display_name || session.value?.user_name || '当前用户')
@@ -1969,7 +1975,7 @@ async function openCreateProject() {
     // 浏览器只调用项目后端；项目后端通过机器身份读取合同审批结果，避免要求业务管理员
     // 额外建立合同系统浏览器会话或持有合同读取权限。
     approvedContracts.value = await listApprovedContracts({ limit: 200 })
-    if (!approvedContracts.value.length) { showToast('当前没有已通过审批的可用合同', 'warning'); return }
+    if (!approvedContracts.value.length) { showToast('当前没有尚未建立项目的已审批合同', 'warning'); return }
     createForm.value = emptyCreateForm()
     approvedContractServiceItems.value = []
     selectedContractServiceIDs.value = []
@@ -1979,9 +1985,8 @@ async function openCreateProject() {
     showToast(error?.message || '读取已审批合同失败，请稍后重试', error?.status === 503 ? 'warning' : 'error')
   }
 }
-// 同一 (合同号, 版本) 在服务端是唯一键：已有项目时再选它必然冲突。这里在选项上直接标注并
-// 禁用，把"提交后才报错"提前到"选择时就能看见"；服务端的 409 仍是最终兜底
-// （本页项目列表受数据范围过滤，可能看不到别人建的项目）。
+// 后端会按租户全量项目过滤已使用合同；这里再基于当前列表做一层展示防护，避免刷新期间
+// 已出现于本页的合同短暂进入选择器。后端唯一约束和创建时 409 继续处理并发创建。
 const builtContractKeys = computed(() => {
   const keys = new Set()
   for (const project of projects.value) {
@@ -1990,15 +1995,11 @@ const builtContractKeys = computed(() => {
   return keys
 })
 
-function contractOptionLabel(contract) {
-  const base = `${contract.contract_number} · ${contract.title} · ${contract.customer_name || '未填写客户'}`
-  const key = `${contract.contract_number || ''}\u0000${String(contract.version || '')}`
-  const built = projects.value.find((project) => project.contract === contract.contract_number && (project.contract_version || '') === String(contract.version || ''))
-  return built ? `${base}（已建项目 ${built.id}）` : base
-}
+const availableApprovedContracts = computed(() => approvedContracts.value.filter((contract) =>
+  !builtContractKeys.value.has(`${contract.contract_number || ''}\u0000${String(contract.version || '')}`)))
 
-function contractOptionDisabled(contract) {
-  return builtContractKeys.value.has(`${contract.contract_number || ''}\u0000${String(contract.version || '')}`)
+function contractOptionLabel(contract) {
+  return `${contract.contract_number} · ${contract.title} · ${contract.customer_name || '未填写客户'}`
 }
 
 async function selectApprovedContract(contract) {
@@ -2260,8 +2261,80 @@ function ganttTone(status) {
 
 function returnToUnifiedPortal() {
   mobileMenuOpen.value = false
-  notificationOpen.value = false
+  closeNotifications()
   closeSubsystemTabOrFallback(window, () => router.replace({ name: 'portal' }))
+}
+
+function closeNotifications() {
+  window.clearTimeout(notificationAutoCloseTimer)
+  notificationAutoCloseTimer = 0
+  notificationOpen.value = false
+}
+
+async function refreshNotificationCount() {
+  try {
+    const result = await getUnreadCount()
+    notificationCount.value = Number(result?.unread_count || 0)
+  } catch {
+    // 通知是辅助能力，平台暂不可用时不阻断项目工作区。
+    notificationCount.value = 0
+  }
+}
+
+async function loadUnreadNotifications() {
+  notificationLoading.value = true
+  notificationError.value = ''
+  try {
+    const [inbox, unread] = await Promise.all([
+      listNotificationInbox({ page: 1, pageSize: 20, unreadOnly: true }),
+      getUnreadCount(),
+    ])
+    // unread_only 由服务端按当前用户和 read_at 过滤；前端再过滤一次用于兼容滚动升级。
+    notificationItems.value = (inbox?.items || []).filter((item) => !item.read_at)
+    notificationCount.value = Number(unread?.unread_count || notificationItems.value.length)
+  } catch (error) {
+    notificationItems.value = []
+    notificationError.value = error?.message || '未读通知加载失败'
+  } finally {
+    notificationLoading.value = false
+  }
+}
+
+function notificationSection(item) {
+  const category = String(item?.category || '').toUpperCase()
+  if (category === 'DEVIATION_REPORTED') return 'exceptions'
+  if (category === 'SPLIT_RULE_MISSING') return 'decomposition'
+  if (['TEAM_ASSIGNED', 'EXECUTION_TEAM_ASSIGNED'].includes(category)) return 'inbox'
+  return ''
+}
+
+async function openNotification(item) {
+  const deliveryID = String(item?.delivery_id || '')
+  if (!deliveryID || notificationActionID.value) return
+  notificationActionID.value = deliveryID
+  try {
+    await markNotificationRead(deliveryID)
+    notificationItems.value = notificationItems.value.filter((entry) => entry.delivery_id !== deliveryID)
+    notificationCount.value = Math.max(0, notificationCount.value - 1)
+    const section = notificationSection(item)
+    closeNotifications()
+    if (section) navigate(section)
+  } catch (error) {
+    showToast(error?.message || '通知已读状态保存失败，请重试', 'error')
+  } finally {
+    notificationActionID.value = ''
+  }
+}
+
+function toggleNotifications() {
+  if (notificationOpen.value) {
+    closeNotifications()
+    return
+  }
+  notificationOpen.value = true
+  loadUnreadNotifications()
+  window.clearTimeout(notificationAutoCloseTimer)
+  notificationAutoCloseTimer = window.setTimeout(closeNotifications, 5000)
 }
 async function logoutSystem() {
   if (isLoggingOut.value) return
@@ -2847,6 +2920,7 @@ function closeActiveOverlay() {
   if (capabilityDialog.value) { capabilityDialog.value = null; return true }
   if (adjustOpen.value) { adjustOpen.value = false; return true }
   if (createOpen.value) { createOpen.value = false; return true }
+  if (notificationOpen.value) { closeNotifications(); return true }
   if (mobileMenuOpen.value) { mobileMenuOpen.value = false; return true }
   return false
 }
@@ -2858,6 +2932,7 @@ function onGlobalKeydown(event) {
 
 onMounted(loadWorkspace)
 onMounted(loadPersonnel)
+onMounted(refreshNotificationCount)
 onMounted(() => {
   document.addEventListener('click', closeMultiOnOutsideClick)
   document.addEventListener('keydown', onGlobalKeydown)
@@ -2896,6 +2971,7 @@ watch(canExecutionAssign, (allowed) => {
 })
 onBeforeUnmount(() => {
   window.clearTimeout(toastTimer)
+  window.clearTimeout(notificationAutoCloseTimer)
   window.clearTimeout(monitoringFilterTimer)
   window.clearInterval(monitoringPollTimer)
   document.removeEventListener('click', closeMultiOnOutsideClick)
@@ -2940,16 +3016,18 @@ onBeforeUnmount(() => {
         <button class="pm-icon-button pm-menu-button" aria-label="打开菜单" @click="mobileMenuOpen = true"><ConsoleIcon name="menu" /></button>
         <div class="pm-breadcrumb"><span>项目服务管理</span><b>/</b><template v-if="activeSection === 'project_detail'"><button type="button" class="pm-crumb-link" @click="navigate('projects')">项目列表</button><b>/</b><strong>{{ detailProject?.id || '项目详情' }}</strong></template><strong v-else>{{ currentMeta[0] }}</strong></div>
         <div class="pm-top-tools">
-          <button class="pm-icon-button pm-notification-button" aria-label="通知" @click="notificationOpen = !notificationOpen"><ConsoleIcon name="bell" /><em v-if="notificationCount">{{ notificationCount }}</em></button>
+          <button class="pm-icon-button pm-notification-button" aria-label="通知" aria-controls="project-notifications" :aria-expanded="notificationOpen" @click="toggleNotifications"><ConsoleIcon name="bell" /><em v-if="notificationCount">{{ notificationCount }}</em></button>
           <span class="pm-topbar-avatar" aria-hidden="true">{{ currentUserInitial }}</span>
         </div>
-        <div v-if="notificationOpen" class="pm-notifications">
-          <div class="pm-popover-head"><b>业务待办</b><span>{{ notificationCount }} 条</span></div>
-          <button v-if="pendingDeviations.length" @click="navigate('exceptions'); notificationOpen = false"><i class="danger"></i><span><b>{{ pendingDeviations.length }} 项异常待评审</b><small>来自现场偏离上报</small></span></button>
-          <button v-if="decompositionItems.length" @click="navigate('decomposition'); notificationOpen = false"><i></i><span><b>{{ decompositionItems.length }} 个服务项待拆解确认</b><small>合同生效后自动生成</small></span></button>
-          <button v-if="inboxItems.length" @click="navigate('inbox'); notificationOpen = false"><i class="warning"></i><span><b>{{ inboxItems.length }} 项资源分配待办</b><small>项目经理或工程师尚未完成指派</small></span></button>
-          <EmptyHint v-if="!notificationCount" message="暂无业务待办" />
-        </div>
+        <Transition name="pm-notification-pop">
+          <div v-if="notificationOpen" id="project-notifications" class="pm-notifications" role="status" aria-live="polite">
+            <div class="pm-popover-head"><b>Notification 通知</b><span>{{ notificationCount }} 条</span></div>
+            <p v-if="notificationLoading" class="pm-notification-state">正在加载未读通知…</p>
+            <p v-else-if="notificationError" class="pm-notification-state danger">{{ notificationError }}</p>
+            <button v-for="item in notificationItems" :key="item.delivery_id" :disabled="notificationActionID === item.delivery_id" @click="openNotification(item)"><i :class="item.category === 'DEVIATION_REPORTED' ? 'danger' : 'warning'"></i><span><b>{{ item.title }}</b><small>{{ item.content }}</small></span></button>
+            <EmptyHint v-if="!notificationLoading && !notificationError && !notificationItems.length" message="暂无未读通知" />
+          </div>
+        </Transition>
       </header>
 
       <div class="pm-page">
@@ -3449,7 +3527,7 @@ onBeforeUnmount(() => {
         <div class="pm-form">
           <label><span>名称 <em>*</em></span><input v-model.trim="createForm.name" required placeholder="请输入项目名称" /></label>
           <template v-if="activeSection === 'projects'">
-            <label><span>已审批合同 <em>*</em></span><select v-model="createForm.contractID" required @change="selectApprovedContract(approvedContracts.find((item) => item.id === createForm.contractID))"><option value="">请选择已通过审批的合同</option><option v-for="contract in approvedContracts" :key="contract.id" :value="contract.id" :disabled="contractOptionDisabled(contract)">{{ contractOptionLabel(contract) }}</option></select></label>
+            <label><span>已审批合同 <em>*</em></span><select v-model="createForm.contractID" required @change="selectApprovedContract(availableApprovedContracts.find((item) => item.id === createForm.contractID))"><option value="">请选择尚未建立项目的已审批合同</option><option v-for="contract in availableApprovedContracts" :key="contract.id" :value="contract.id">{{ contractOptionLabel(contract) }}</option></select></label>
             <label><span>客户</span><input :value="createForm.customer" readonly aria-readonly="true" /><small>选择合同后由合同管理系统自动带入</small></label>
             <label><span>合同编号</span><input :value="createForm.contract" readonly aria-readonly="true" /><small>以合同管理系统中的合同编号为准，不支持手工修改</small></label>
             <label><span>实施场所 <em>*</em></span><input v-model.trim="createForm.site" required placeholder="例如 杭州机房" /><small>这是本项目的实施场所，将应用到本次选择的服务项。</small></label>

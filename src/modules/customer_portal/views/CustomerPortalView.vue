@@ -621,8 +621,9 @@ async function confirmCloseFeedback() {
   }
   error.value = ''; notice.value = ''; feedbackClosing.value = true
   try {
-    selectedFeedback.value = await closeFeedback(feedbackID, idempotencyKey)
+    await closeFeedback(feedbackID, idempotencyKey)
     feedbackCloseRetryKeys.delete(feedbackID)
+    selectedFeedback.value = null
     notice.value = '反馈已关闭。'
     if (hasPermission('feedback.read')) await load()
   } catch (value) {
