@@ -265,7 +265,8 @@ const projects = ref([])
 const filteredProjects = computed(() => {
   const query = keyword.value.trim().toLowerCase()
   return projects.value.filter((project) => {
-    const matchKeyword = !query || [project.id, project.customer, project.contract, project.category, project.manager].join(' ').toLowerCase().includes(query)
+    const assigned = projectAssignmentPeople(project.id)
+    const matchKeyword = !query || [project.id, project.customer, project.contract, project.category, assigned.teamLeads, assigned.projectManagers].join(' ').toLowerCase().includes(query)
     const matchCard = !projectCardFilter.value
       || (projectCardFilter.value === 'in_flight' && project.status !== projectStatusCompleted)
       || (projectCardFilter.value === 'risk' && isRiskProject(project))
@@ -426,6 +427,21 @@ function capabilityStatusLabel(item) {
 function resetProjectFilters() { keyword.value = ''; statusFilter.value = ''; categoryFilter.value = ''; teamFilter.value = ''; projectCardFilter.value = '' }
 
 const serviceItems = ref([])
+// 项目本身的 team/manager 是建项时的展示快照，不能代表后续资源分配结果。
+// 列表中的“团队 / 项目经理”必须按服务项上的真实指派关系聚合，且同一人员只显示一次。
+const projectAssignmentIDsByProject = computed(() => {
+  const assignments = new Map()
+  for (const item of serviceItems.value) {
+    if (!assignments.has(item.project_id)) assignments.set(item.project_id, { teamLeads: new Set(), projectManagers: new Set() })
+    const assigned = assignments.get(item.project_id)
+    if (item.team_lead_id) assigned.teamLeads.add(item.team_lead_id)
+    if (item.project_manager_id) assigned.projectManagers.add(item.project_manager_id)
+  }
+  return new Map([...assignments].map(([projectID, assigned]) => [projectID, {
+    teamLeads: [...assigned.teamLeads],
+    projectManagers: [...assigned.projectManagers],
+  }]))
+})
 const deliveryEvents = ref([])
 const capabilities = ref([])
 const capabilityTypeFilter = ref('')
@@ -1307,6 +1323,13 @@ function personListLabel(ids, fallback = '未指派') {
   if (!list.length) return fallback
   return list.map((id) => personnelNameByID.value.get(id) || '—').join('、')
 }
+function projectAssignmentPeople(projectID) {
+  const assigned = projectAssignmentIDsByProject.value.get(projectID) || { teamLeads: [], projectManagers: [] }
+  return {
+    teamLeads: personListLabel(assigned.teamLeads, '待分配'),
+    projectManagers: personListLabel(assigned.projectManagers, '待指派'),
+  }
+}
 function rememberPersonnelNames(names = {}) {
   const merged = new Map(personnelNameByID.value)
   let changed = false
@@ -1880,7 +1903,8 @@ const operationDetailFields = computed(() => {
       { label: '项目编号', value: record.id || '—' },
       { label: '客户', value: record.customer || '—' },
       { label: '服务项', value: record.services ? `${record.services} 项` : detail.row.detail || '—' },
-      { label: '项目经理', value: record.manager || '待指派' },
+      { label: '团队负责人', value: projectAssignmentPeople(record.id).teamLeads },
+      { label: '项目经理', value: projectAssignmentPeople(record.id).projectManagers },
       { label: '当前状态', value: record.status || detail.row.state || '—' },
       { label: '计划完成', value: record.due || detail.row.due || '待排期' },
     ]
@@ -3093,7 +3117,7 @@ onBeforeUnmount(() => {
           </section>
           <section class="pm-table-panel pm-panel-inflight">
             <header><div><p class="pm-panel-kicker">交付脉搏</p><h2>在途项目 · 实时动态</h2></div></header>
-            <div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>项目编号</th><th>客户</th><th>服务项</th><th>团队 / 项目经理</th><th>进度</th><th>计划完成</th><th></th></tr></thead><tbody><tr v-for="project in inFlightProjects.slice(0, 8)" :key="project.id" :class="{ risk: project.risk }"><td><button class="pm-project-link" @click="openProject(project)"><b>{{ project.id }}</b></button></td><td>{{ project.customer }}</td><td>{{ project.services }} 项</td><td><b>{{ project.team }}</b><span class="pm-cell-sub">{{ project.manager }}</span></td><td><ProgressCell :percent="project.progress" /></td><td :class="{ 'pm-text-danger': project.due.includes('超期') }">{{ project.due }}</td><td><button class="pm-link" @click="openProject(project)">详情</button></td></tr><tr v-if="!inFlightProjects.length"><td colspan="7" class="pm-empty-mini">暂无在途项目</td></tr></tbody></table></div>
+            <div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>项目编号</th><th>客户</th><th>服务项</th><th>团队 / 项目经理</th><th>进度</th><th>计划完成</th><th></th></tr></thead><tbody><tr v-for="project in inFlightProjects.slice(0, 8)" :key="project.id" :class="{ risk: project.risk }"><td><button class="pm-project-link" @click="openProject(project)"><b>{{ project.id }}</b></button></td><td>{{ project.customer }}</td><td>{{ project.services }} 项</td><td><b>团队负责人：{{ projectAssignmentPeople(project.id).teamLeads }}</b><span class="pm-cell-sub">项目经理：{{ projectAssignmentPeople(project.id).projectManagers }}</span></td><td><ProgressCell :percent="project.progress" /></td><td :class="{ 'pm-text-danger': project.due.includes('超期') }">{{ project.due }}</td><td><button class="pm-link" @click="openProject(project)">详情</button></td></tr><tr v-if="!inFlightProjects.length"><td colspan="7" class="pm-empty-mini">暂无在途项目</td></tr></tbody></table></div>
             <footer v-if="inFlightProjects.length" class="pm-table-footer"><span>显示前 {{ Math.min(inFlightProjects.length, 8) }} 条</span><span>完整列表请前往实时监控</span></footer>
           </section>
         </template>
@@ -3130,7 +3154,7 @@ onBeforeUnmount(() => {
           </FilterBar>
           <section class="pm-table-panel">
             <div class="pm-table-scroll"><table class="pm-table pm-responsive-list"><thead><tr><th></th><th>项目 / 客户</th><th>合同编号</th><th>服务项</th><th>检测类别</th><th>团队 / 项目经理</th><th>状态</th><th>交付进度</th><th>计划完成</th><th></th></tr></thead><tbody>
-              <tr v-for="project in pagedProjects" :key="project.id" :class="{ selected: selectedRows.includes(project.id), risk: project.risk }"><td class="pm-card-select" data-label="选择"><input type="checkbox" :checked="selectedRows.includes(project.id)" :aria-label="`选择 ${project.id}`" @change="toggleRow(project.id)" /></td><td class="pm-card-title" data-label="项目 / 客户"><button class="pm-project-link" @click="openProject(project)"><b>{{ project.id }}</b><span>{{ project.customer }}</span></button></td><td class="mono" data-label="合同编号">{{ project.contract }}</td><td data-label="服务项">{{ project.services }}</td><td data-label="检测类别">{{ project.category }}</td><td data-label="团队 / 项目经理"><b>{{ project.team }}</b><span class="pm-cell-sub">{{ project.manager }}</span></td><td data-label="状态"><span class="pm-badge" :class="statusTone(project.status)">{{ project.status }}</span></td><td data-label="交付进度"><ProgressCell :percent="project.progress" /></td><td data-label="计划完成" :class="{ 'pm-text-danger': project.due.includes('超期') }">{{ project.due }}</td><td class="pm-card-action" data-label="操作"><button class="pm-link" @click="openProject(project)">详情</button></td></tr>
+              <tr v-for="project in pagedProjects" :key="project.id" :class="{ selected: selectedRows.includes(project.id), risk: project.risk }"><td class="pm-card-select" data-label="选择"><input type="checkbox" :checked="selectedRows.includes(project.id)" :aria-label="`选择 ${project.id}`" @change="toggleRow(project.id)" /></td><td class="pm-card-title" data-label="项目 / 客户"><button class="pm-project-link" @click="openProject(project)"><b>{{ project.id }}</b><span>{{ project.customer }}</span></button></td><td class="mono" data-label="合同编号">{{ project.contract }}</td><td data-label="服务项">{{ project.services }}</td><td data-label="检测类别">{{ project.category }}</td><td data-label="团队 / 项目经理"><b>团队负责人：{{ projectAssignmentPeople(project.id).teamLeads }}</b><span class="pm-cell-sub">项目经理：{{ projectAssignmentPeople(project.id).projectManagers }}</span></td><td data-label="状态"><span class="pm-badge" :class="statusTone(project.status)">{{ project.status }}</span></td><td data-label="交付进度"><ProgressCell :percent="project.progress" /></td><td data-label="计划完成" :class="{ 'pm-text-danger': project.due.includes('超期') }">{{ project.due }}</td><td class="pm-card-action" data-label="操作"><button class="pm-link" @click="openProject(project)">详情</button></td></tr>
               <tr v-if="!pagedProjects.length"><td colspan="10" class="pm-empty-mini">{{ projects.length ? '暂无符合当前筛选条件的项目' : '暂无项目，请先新建项目' }}</td></tr>
             </tbody></table></div>
             <footer class="pm-table-footer"><span>已选择 {{ selectedRows.length }} 项 · 共 {{ filteredProjects.length }} 条 · 第 {{ projectPage }} / {{ projectPageCount }} 页</span><div class="pm-pagination"><button class="pm-pg" :disabled="projectPage <= 1" @click="gotoProjectPage(projectPage - 1)">‹</button><button class="pm-pg active">{{ projectPage }}</button><button class="pm-pg" :disabled="projectPage >= projectPageCount" @click="gotoProjectPage(projectPage + 1)">›</button></div></footer>
