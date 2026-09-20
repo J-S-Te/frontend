@@ -125,6 +125,15 @@ test('项目列表 KPI、趋势图、资质筛选与空态不发生视觉回归'
   assert.match(source, /<tr v-if="!pagedProjects\.length"><td colspan="10" class="pm-empty-mini">\{\{ projects\.length \? '暂无符合当前筛选条件的项目' : '暂无项目，请先新建项目' \}\}<\/td><\/tr>/)
 })
 
+test('执行总览的在途项目以项目名称为主信息并悬停提示项目编号', () => {
+  assert.match(source, /<th>项目名称<\/th><th>客户<\/th>/)
+  assert.match(source, /:title="`项目编号：\$\{project\.id\}`"/)
+  assert.match(source, /<b>\{\{ project\.name \|\| '未命名项目' \}\}<\/b>/)
+  assert.match(source, /:aria-label="`\$\{project\.name \|\| '未命名项目'\}，项目编号：\$\{project\.id\}`"/)
+  assert.match(source, /\[project\.name, project\.id, project\.customer/)
+  assert.match(source, /placeholder="搜索项目名称 \/ 项目编号 \/ 客户名称 \/ 服务项"/)
+})
+
 test('高密度工作台在桌面与窄屏下保持可导航和可理解', () => {
   // 侧栏默认只展开当前分组，分组标题是真实按钮并暴露展开状态。
   assert.match(source, /const collapsedNavGroups = ref\(new Set\(\)\)/)
@@ -872,8 +881,10 @@ test('实施计划提交人员清单，设备清单在实施准备登记并校�
   assert.match(source, /function planPersonnelRows\(/)
   // 至少一名人员与服务端同口径，先给即时提示。
   assert.match(source, /if \(!personRows\.length\) \{ showToast\('请至少添加一名实施人员', 'warning'\); return \}/)
-  // 实施准备：设备清单必填、提交时带上使用时段。
-  assert.match(source, /if \(!form\.equipment\.length\) \{ showToast\('请至少选择一台实施设备', 'warning'\); return \}/)
+  // 实施准备：设备清单选填；无需设备时可直接提交，选择设备后仍提交并校验使用时段。
+  assert.doesNotMatch(source, /if \(!form\.equipment\.length\) \{ showToast\('请至少选择一台实施设备'/)
+  assert.match(source, /设备清单（选填）/)
+  assert.match(source, /本服务项无需设备时可留空/)
   assert.match(source, /equipment: form\.equipment\.map\(\(row\) => \(\{ resource_type: 'EQUIPMENT', resource_id: row\.resourceID, window_start: row\.windowStart, window_end: row\.windowEnd, note: row\.note \}\)\)/)
   assert.match(source, /function planEquipmentFor\(/)
   // 添加设备只能从设备目录挑选，不调用设备维护接口（设备档案由设备管理员维护）。
@@ -952,15 +963,29 @@ test('设备选择器与清单表不再被两列表单栅格挤窄', () => {
   assert.match(styles, /\.pm-table-picker th \{ position: sticky; top: 0; z-index: var\(--pm-z-sticky\); \}/)
 })
 
-test('实施准备不再要求设备申领单，设备清单本身就是申领依据', () => {
+test('实施准备使用可理解的行程安排而不是要求人员手填内部编号', () => {
   assert.doesNotMatch(source, /设备申领单/)
   assert.doesNotMatch(source, /equipmentRequestID/)
   assert.doesNotMatch(source, /equipment_request_id/)
-  // 行程预订单仍然必填，并随准备事件提交；设备清单一起提交。
-  assert.match(source, /<label><span>行程预订单 <em>\*<\/em><\/span>/)
+  assert.doesNotMatch(source, /operationForm\.travelRequestID/)
+  assert.match(source, /<b>行程安排 <em>\*<\/em><\/b>/)
+  assert.match(source, /value="NO_TRAVEL"[\s\S]*<b>无需出差<\/b>/)
+  assert.match(source, /value="EXISTING"[\s\S]*<b>关联已有行程<\/b>/)
+  assert.match(source, /value="NEW"[\s\S]*<b>新建行程申请<\/b>/)
+  assert.match(source, /const travelExistingOptions = computed/)
+  assert.match(source, /<SearchableSelect v-model="operationForm\.travelReferenceEventID"/)
+  assert.match(source, /<SearchableSelect v-model="operationForm\.travelTravelerIDs"[^>]*multiple required/)
   // 实施准备提交时带上服务项版本：服务端据此判定"我基于的是不是最新一版"（不匹配即 409）。
-  assert.match(source, /startImplementationPreparation\(item\.id, \{ expected_version: Number\(item\.version\) \|\| 0, travel_request_id: form\.travelRequestID/)
+  assert.match(source, /expected_version: Number\(item\.version\) \|\| 0,[\s\S]*travel: \{[\s\S]*mode: form\.travelMode/)
+  assert.match(source, /reference_event_id: form\.travelReferenceEventID/)
+  assert.match(source, /traveler_ids: form\.travelTravelerIDs/)
   assert.match(source, /equipment: form\.equipment\.map\(/)
+  assert.match(styles, /\.pm-travel-arrangement \{[\s\S]*grid-column: 1 \/ -1;/)
+  assert.match(source, /class="pm-travel-mode-card"/)
+  assert.match(source, /class="pm-travel-route-preview"/)
+  assert.match(source, /class="pm-travel-empty"/)
+  assert.match(styles, /\.pm-travel-mode-card:has\(input:checked\)/)
+  assert.match(styles, /@keyframes pm-travel-detail-in/)
 })
 
 test('人员资质档案展示并复核基础平台身份状态', () => {
