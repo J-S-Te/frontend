@@ -354,6 +354,13 @@ test('application access UI separates logical retirement, runtime teardown and p
   assert.match(onboardingModule, /dev 环境不能通过管理页面删除/)
 })
 
+test('offboarded production environments expose controlled re-onboarding without duplicate registration', () => {
+  assert.match(onboardingModule, /environmentStatus\(environment\) === 'OFFBOARDED'/)
+  assert.match(onboardingModule, /environmentStatus\(environment\) === 'OFFBOARDED'[\s\S]*重新接入/)
+  assert.match(onboardingModule, /@click\.stop="reapplyEnvironment\(environment\)"/)
+  assert.match(onboardingModule, /updateSubsystemRuntime/)
+})
+
 // Execute the component's actual computed declarations so an unreachable branch
 // cannot pass merely because its source text still exists.
 function onboardingComputed(name, nextName, bindings) {
