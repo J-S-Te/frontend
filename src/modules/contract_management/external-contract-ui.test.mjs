@@ -47,6 +47,8 @@ test('existing contract dates are submitted and no payment-plan fields are intro
 })
 
 test('external project decomposition fields are required while template mode stays compatible', () => {
+  assert.match(source, /batch: '第一批次'/)
+  assert.match(source, /if \(!serviceItem\.batch\.trim\(\)\) serviceItem\.batch = '第一批次'/)
   assert.match(source, /v-model="serviceItem\.site" :required="isExternalContractMode"/)
   assert.match(source, /v-model="serviceItem\.batch" :required="isExternalContractMode"/)
   assert.match(source, /v-if="isExternalContractMode" v-model="serviceItem\.category" required/)
