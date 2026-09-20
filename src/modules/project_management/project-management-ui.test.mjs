@@ -477,43 +477,48 @@ test('操作台各区块的查看按钮真实打开详情抽屉而不是只提�
   assert.doesNotMatch(source, /@click="showToast\(`已打开：\$\{row\.name\}`\)"/)
 })
 
-test('资质与能力管理提供新建、CSV 导入导出与类型状态筛选', () => {
+test('资质与能力管理只新建和导入人员资质，设备保持只读', () => {
   assert.match(source, /activeSection === 'qualifications'/)
   assert.match(source, /function openCapabilityDialog\(/)
   assert.match(source, /await upsertCapability\(/)
   assert.match(source, /await importCapabilities\(file\)/)
   assert.match(source, /await exportCapabilities\(capabilityTypeFilter\.value\)/)
   assert.match(source, /canManageResource/)
-  assert.match(source, /导入 CSV/)
+  assert.match(source, /导入人员资质 CSV/)
   assert.match(source, /导出 CSV/)
-  assert.match(source, /＋ 新建资质/)
+  assert.match(source, /＋ 新建人员资质/)
+  assert.match(source, /canManageResource && item\.resource_type === 'PERSON'/)
+  assert.match(source, /设备能力（只读）/)
+  assert.match(source, /请到设备能力维护/)
   assert.match(source, /v-model="capabilityTypeFilter"/)
   assert.match(source, /v-model="capabilityStatusFilter"/)
   assert.match(source, /pm-file-input/)
   assert.match(styles, /\.pm-panel-actions \{[\s\S]*?gap: var\(--pm-sp-2\);/)
 })
 
-test('资质与能力管理的人员/设备编号由系统按类型自动生成', () => {
+test('人员资质编号由系统自动生成且不再允许切换为设备', () => {
   assert.match(source, /function resourceIDPrefix\(resourceType\)/)
   assert.match(source, /resourceType === 'EQUIPMENT' \? 'EQ-' : 'P-'/)
   assert.match(source, /function nextResourceID\(resourceType\)/)
-  assert.match(source, /function onCapabilityTypeChange\(/)
   assert.match(source, /capabilityAutoID/)
-  assert.match(source, /@change="onCapabilityTypeChange"/)
   assert.match(source, /:readonly="capabilityAutoID"/)
-  assert.match(source, /capabilityDialog\.resource_type === 'EQUIPMENT' \? '设备编号' : '人员编号'/)
+  assert.match(source, /<input value="人员资质" readonly/)
+  assert.match(source, /由系统自动生成（P-）/)
+  assert.doesNotMatch(source, /@change="onCapabilityTypeChange"/)
+  assert.doesNotMatch(source, /<option value="EQUIPMENT">设备能力<\/option>/)
   assert.doesNotMatch(source, /placeholder="例如 P-001 或 EQ-001"/)
 })
 
-test('新建人员资质从基础平台人员目录单选，设备仍使用资源名称输入', () => {
+test('新建人员资质从基础平台人员目录单选且载荷固定为 PERSON', () => {
   assert.match(source, /async function loadCapabilityPersonnel\(\)/)
   assert.match(source, /await listPersonnel\(\{ page: 1, page_size: 50 \}\)/)
   assert.match(source, /const capabilityPersonOptions = computed/)
   assert.match(source, /人员名称 <em>\*<\/em><\/span><select v-model="capabilityDialog\.user_id"/)
   assert.match(source, /v-for="person in capabilityPersonOptions"/)
   assert.match(source, /@change="onCapabilityPersonChange"/)
-  assert.match(source, /<label v-else><span>资源名称 <em>\*<\/em><\/span><input v-model\.trim="capabilityDialog\.resource_name" required placeholder="例如 基站A"/)
-  assert.match(source, /user_id: form\.resource_type === 'PERSON' \? form\.user_id : ''/)
+  assert.match(source, /resource_type: 'PERSON'/)
+  assert.match(source, /user_id: form\.user_id/)
+  assert.doesNotMatch(source, /placeholder="例如 基站A"/)
 })
 
 test('资质与能力编码由系统配置目录统一管理并按类型多选', () => {
@@ -900,31 +905,27 @@ test('设备在位状态与使用范围在设备能力维护中维护，借出�
 
 test('人员资质不受日期限制且有效期只约束设备', () => {
   assert.match(source, /item\.resource_type === 'EQUIPMENT' && item\.valid_until/)
-  assert.match(source, /capabilityDialog\.resource_type === 'EQUIPMENT'[^>]*><span>检定开始/)
-  assert.match(source, /capabilityDialog\.resource_type === 'EQUIPMENT'[^>]*><span>检定到期/)
   assert.match(source, /人员资质不限制有效期；停用资质或人员身份失效后将不能参与项目分配/)
-  assert.match(source, /form\.resource_type === 'EQUIPMENT' && form\.valid_from/)
-  assert.match(source, /form\.resource_type === 'EQUIPMENT' && form\.valid_until/)
+  assert.match(source, /设备新建、停用和删除请到「设备能力」/)
+  assert.doesNotMatch(source, /v-model="capabilityDialog\.valid_from"/)
+  assert.doesNotMatch(source, /v-model="capabilityDialog\.valid_until"/)
   assert.match(source, /if \(capability\?\.resource_type === 'PERSON' \|\| row\.resourceType === 'PERSON'\) return '不限制'/)
 })
 
-test('人员资质保存不再发送无法解析的空日期字符串', () => {
+test('人员资质保存不发送设备字段或日期', () => {
   const saveCapability = source.slice(source.indexOf('async function saveCapability()'), source.indexOf('async function importQualificationFile'))
   assert.match(saveCapability, /const payload = \{/)
-  assert.match(saveCapability, /form\.resource_type === 'EQUIPMENT' && form\.valid_from[^\n]*payload\.valid_from/)
-  assert.match(saveCapability, /form\.resource_type === 'EQUIPMENT' && form\.valid_until[^\n]*payload\.valid_until/)
+  assert.match(saveCapability, /resource_type: 'PERSON'/)
   assert.doesNotMatch(saveCapability, /valid_from:[^\n]*: ''/)
   assert.doesNotMatch(saveCapability, /valid_until:[^\n]*: ''/)
+  assert.doesNotMatch(saveCapability, /usage_scope:/)
 })
 
-test('已有设备的使用范围在资质与能力、设备维护两处都可修改且不会被重置', () => {
-  // 资质与能力对话框：设备行显示使用范围，编辑既有记录时带回原值，保存时提交。
-  assert.match(source, /capabilityDialog\.resource_type === 'EQUIPMENT'[\s\S]{0,60}capabilityDialog\.usage_scope/)
-  assert.match(source, /usage_scope: item\.usage_scope \|\| 'ANY'/)
-  assert.match(source, /usage_scope: form\.usage_scope \|\| 'ANY'/)
-  // 设备能力维护表单：编辑既有设备同样带回原值。
+test('设备使用范围只在设备能力维护', () => {
   assert.match(source, /usageScope: item\.usage_scope \|\| 'ANY'/)
   assert.match(source, /<option value="COMPANY_ONLY">仅在公司使用（不可借出）<\/option>/)
+  const saveCapability = source.slice(source.indexOf('async function saveCapability()'), source.indexOf('async function importQualificationFile'))
+  assert.doesNotMatch(saveCapability, /usage_scope/)
 })
 
 test('设备选择器与清单表不再被两列表单栅格挤窄', () => {
@@ -1003,6 +1004,7 @@ test('每个写操作入口都按服务端同款权限码门控', () => {
     "canReviewDeviation = computed(() => permissionSet.value.has('project.deviation.review'))",
     "canManageRules = computed(() => permissionSet.value.has('project_rule.manage'))",
     "canManageFieldPermissions = computed(() => permissionSet.value.has('project.field_permission.manage'))",
+    "canManageCapabilityCodes = computed(() => canManageRules.value || permissionSet.value.has('project.capability_code.manage'))",
     "canConfirmDecomposition = computed(() => permissionSet.value.has('service_item.confirm'))",
   ]) {
     assert.ok(source.includes(guard), `缺少权限守卫：${guard}`)
@@ -1018,20 +1020,21 @@ test('每个写操作入口都按服务端同款权限码门控', () => {
   assert.match(source, /v-if="canReportDeviation" class="pm-button primary" :disabled="saving" @click="runOperation\('exception-report'\)"/)
   assert.match(source, /v-if="canReviewDeviation" class="pm-button" :disabled="saving" @click="runOperation\('exception-review'\)"/)
   assert.match(source, /v-if="canReviewSpecialMethod" class="pm-form-row"/)
-  assert.match(source, /v-if="canManageResource" class="pm-link" @click="openCapabilityDialog\(item\)"/)
-  assert.match(source, /v-(?:if|else-if)="canManageRules" class="pm-switch"/)
+  assert.match(source, /v-if="canManageResource && item\.resource_type === 'PERSON'" class="pm-link" @click="openCapabilityDialog\(item\)"/)
+  assert.match(source, /v-(?:if|else-if)="canManageActiveConfig" class="pm-switch"/)
   // 报告推进按编制、审核、签发、归档四类职责分别授权。
   assert.match(source, /canAdvanceReportPhase\(reportPhaseNext\[selectedServiceItem\.report_status\]\)/)
   for (const permission of ['project.report.prepare', 'project.report.review', 'project.report.issue', 'project.report.archive']) {
     assert.ok(source.includes(permission), `缺少报告阶段权限：${permission}`)
   }
   // 字段级权限页签只对持有该权限的角色可见，避免"能打开、提交必 403"。
-  assert.match(source, /configKindsMeta\.filter\(\(meta\) => meta\.kind !== 'permissions' \|\| canManageFieldPermissions\.value\)/)
+  assert.match(source, /if \(kind === 'permissions'\) return canManageFieldPermissions\.value/)
+  assert.match(source, /if \(kind === 'capability-codes'\) return canManageCapabilityCodes\.value/)
   // 页签隐藏后配置面板与「新建规则」不能仍按 activeSection 渲染：否则表头取回退后的
   // 首个可见配置、列表按被隐藏的 kind 过滤，得到标题与内容不符的空表。
   assert.match(source, /const isVisibleConfigSection = computed\(\(\) => isStandardChangeSection\.value \|\| visibleConfigKinds\.value\.some\(\(meta\) => meta\.kind === activeSection\.value\)\)/)
   assert.match(source, /v-else-if="isVisibleConfigSection"/)
-  assert.match(source, /v-if="canManageRules && isVisibleConfigSection"/)
+  assert.match(source, /v-if="canManageActiveConfig && isVisibleConfigSection"/)
 })
 
 test('交付事件名与后端常量逐字一致', () => {
@@ -1411,7 +1414,7 @@ test('项目管理工作台使用共享展示组件并保持界面文案全中�
   for (const chineseKicker of ['服务流程', '风险提示', '交付脉搏', '现场实施', '资质矩阵', '到期提醒', '权限矩阵', '报告阶段']) {
     assert.match(source, new RegExp(`>${chineseKicker}<`))
   }
-  assert.match(source, /项目服务内容管理 · 版本 1\.0/)
+  assert.match(source, />项目服务管理</)
 })
 
 test('样式表修掉信息提示、卡片角标与残留样式三处缺陷', () => {
@@ -1515,4 +1518,11 @@ test('在途监控使用服务端快照、自动刷新、真分页和节点下�
   assert.match(source, /monitorProjectManager/)
   assert.match(source, /monitorDueFrom/)
   assert.match(source, /monitorDueTo/)
+})
+
+test('最近交付事件默认折叠并保留展开后的时间线下钻', () => {
+  assert.match(source, /<details class="pm-event-stream">[\s\S]*<summary class="pm-event-stream-summary">/)
+  assert.match(source, /<h2>最近交付事件<\/h2>[\s\S]*\{\{ monitoringSnapshot\.recent_events\.length \}\} 条 · 点击展开/)
+  assert.match(source, /<div class="pm-timeline"><button v-for="event in monitoringSnapshot\.recent_events"/)
+  assert.match(source, /@click="openProjectTimeline\(\{ id: event\.project_id \}\)"/)
 })

@@ -139,7 +139,7 @@ const pageMeta = {
   inbox: ['分配待办收件箱', '处理指派给我的项目与服务项'],
   planning: ['现场实施计划制定', '编排现场窗口、里程碑及交付节奏'],
   preparation: ['实施准备', '集中核验授权、资料、工具与出行准备'],
-  qualifications: ['资质与能力管理', '维护人员资质与能力标签，以及设备检定有效期'],
+  qualifications: ['资质与能力管理', '维护人员资质与能力标签，查看设备能力与检定状态'],
   equipment: ['设备能力维护', '新增、停用、检定和更新设备基础信息'],
   assignments: ['匹配校验与冲突预警', '校验人员、设备、资质与计划冲突'],
   methods: ['特殊方法复核待办', '复核非标准方法的适用性与风险控制'],
@@ -431,7 +431,7 @@ const capabilities = ref([])
 const capabilityTypeFilter = ref('')
 const capabilityStatusFilter = ref('')
 const capabilityDialog = ref(null)
-// 新建资质时编号由系统生成：人员 P-0001 / 设备 EQ-0001，编辑既有记录时保持原编号。
+// 资质工作台只新建/编辑人员资质；设备由「设备能力」统一维护。
 const capabilityAutoID = ref(false)
 const importResult = ref(null)
 const qualificationFileInput = ref(null)
@@ -507,15 +507,21 @@ const configKindsMeta = [
   { kind: 'permissions', label: '字段级权限', nameLabel: '隐藏规则名称', effectNote: '启用后立即影响该角色读取已有和新增项目数据；接口返回对应字段时统一脱敏为 ***。', columns: [{ key: 'role_label', label: '角色' }, { key: 'field_label', label: '字段' }, { key: 'access_level_label', label: '访问级别' }], fields: [{ key: 'role_codes', label: '角色', field: 'roles', required: true }, { key: 'field_name', label: '字段', field: 'permission-field', required: true, options: fieldPermissionFieldOptions }, { key: 'access_level', label: '访问级别', field: 'catalog-single', required: true, options: [{ value: 'hidden', label: '隐藏（接口返回 ***）' }] }] },
   { kind: 'sla', label: 'SLA 规则', nameLabel: 'SLA 名称', effectNote: '保存或启用后立即按当前服务项进入该状态的时间开始计算；0 小时表示不提前提醒，不改变计划完成时间超期口径。', columns: [{ key: 'status', label: '状态' }, { key: 'deadline_hours', label: '时限(小时)' }, { key: 'remind_hours', label: '提醒(小时)' }], fields: [{ key: 'status', label: '生效状态', field: 'catalog-single', required: true, options: slaStatusOptions.value, placeholder: '请选择服务项状态', searchPlaceholder: '搜索服务项状态' }, { key: 'deadline_hours', label: '时限(小时)', field: 'number', required: true, min: 1 }, { key: 'remind_hours', label: '提前提醒(小时)', field: 'number', required: true, min: 0 }] },
 ]
-// 字段级权限规则由独立权限把关（服务端 ruleKindPermission 要求 project.field_permission.manage）：
-// 只有 project_rule.manage 的角色不该看到这个页签，否则页面能打开、提交必然 403。
-const visibleConfigKinds = computed(() => configKindsMeta.filter((meta) => meta.kind !== 'permissions' || canManageFieldPermissions.value))
+// 配置中心按 kind 与服务端使用同一权限边界：设备管理员只能管理编码目录，
+// 字段脱敏仍需独立高风险权限，其余运营规则由 project_rule.manage 把关。
+const canViewConfigKind = (kind) => {
+  if (kind === 'permissions') return canManageFieldPermissions.value
+  if (kind === 'capability-codes') return canManageCapabilityCodes.value
+  return canManageRules.value
+}
+const visibleConfigKinds = computed(() => configKindsMeta.filter((meta) => canViewConfigKind(meta.kind)))
 // 页签被隐藏时不能只靠 activeSection 判断：那样配置页仍会打开，表头取回退后的首个可见
 // 配置、列表却按被隐藏的 kind 过滤，得到一张标题与内容不符的空表；「新建规则」也会为
 // 隐藏的 kind 建档。因此页签、面板与入口统一以可见集合为准。
 const isStandardChangeSection = computed(() => activeSection.value === standardChangeMeta.kind)
 const isVisibleConfigSection = computed(() => isStandardChangeSection.value || visibleConfigKinds.value.some((meta) => meta.kind === activeSection.value))
 const activeConfigMeta = computed(() => isStandardChangeSection.value ? standardChangeMeta : visibleConfigKinds.value.find((meta) => meta.kind === activeSection.value) || visibleConfigKinds.value[0])
+const canManageActiveConfig = computed(() => isStandardChangeSection.value ? canManageRules.value : canViewConfigKind(activeSection.value))
 const configEditorOpen = ref(false)
 const configForm = ref({})
 // 字段隐藏与自动通知共用服务端角色目录，浏览器不维护第二份角色码。
@@ -1391,6 +1397,7 @@ const canReportDeviation = computed(() => permissionSet.value.has('project.devia
 const canReviewDeviation = computed(() => permissionSet.value.has('project.deviation.review'))
 const canManageRules = computed(() => permissionSet.value.has('project_rule.manage'))
 const canManageFieldPermissions = computed(() => permissionSet.value.has('project.field_permission.manage'))
+const canManageCapabilityCodes = computed(() => canManageRules.value || permissionSet.value.has('project.capability_code.manage'))
 const canReviewSpecialMethod = computed(() => permissionSet.value.has('project.special_method.review'))
 // 确认拆解与调整拆解是两个独立权限，不能共用：服务端 POST /service-items/confirm
 // 由 service_item.confirm 把关，POST /projects/:id/decomposition-adjustments 由
@@ -2105,53 +2112,38 @@ function nextResourceID(resourceType) {
   } while (used.has(candidate))
   return candidate
 }
-function onCapabilityTypeChange() {
-  if (!capabilityDialog.value) return
-  if (capabilityAutoID.value) capabilityDialog.value.resource_id = nextResourceID(capabilityDialog.value.resource_type)
-  if (capabilityDialog.value.resource_type !== 'PERSON') capabilityDialog.value.user_id = ''
-  if (capabilityDialog.value.resource_type === 'PERSON') {
-    capabilityDialog.value.valid_from = ''
-    capabilityDialog.value.valid_until = ''
-  }
-  capabilityDialog.value.codes = []
-  capabilityDialog.value.original_codes = []
-  openMulti.value = ''
-  if (capabilityDialog.value.resource_type === 'PERSON') void loadCapabilityPersonnel()
-}
-
 function openCapabilityDialog(item) {
+  if (item && item.resource_type !== 'PERSON') {
+    showToast('设备请在「设备能力」中新建或维护', 'error')
+    return
+  }
   capabilityAutoID.value = !item
-  const codes = item ? canonicalCapabilityCodes(item.resource_type, item.codes || []) : []
+  const codes = item ? canonicalCapabilityCodes('PERSON', item.codes || []) : []
   capabilityDialog.value = item
-    ? { resource_type: item.resource_type, resource_id: item.resource_id, resource_name: item.resource_name, user_id: item.user_id || '', codes, original_codes: [...codes], valid_from: item.valid_from?.slice(0, 10) || '', valid_until: item.valid_until?.slice(0, 10) || '', status: item.status || 'ACTIVE', usage_scope: item.usage_scope || 'ANY' }
-    : { resource_type: 'PERSON', resource_id: nextResourceID('PERSON'), resource_name: '', user_id: '', codes: [], original_codes: [], valid_from: '', valid_until: '', status: 'ACTIVE', usage_scope: 'ANY' }
+    ? { resource_type: 'PERSON', resource_id: item.resource_id, resource_name: item.resource_name, user_id: item.user_id || '', codes, original_codes: [...codes], status: item.status || 'ACTIVE' }
+    : { resource_type: 'PERSON', resource_id: nextResourceID('PERSON'), resource_name: '', user_id: '', codes: [], original_codes: [], status: 'ACTIVE' }
   openMulti.value = ''
-  if (capabilityDialog.value.resource_type === 'PERSON') void loadCapabilityPersonnel()
+  void loadCapabilityPersonnel()
 }
 
 async function saveCapability() {
   if (!capabilityDialog.value) return
-  if (!validateCapabilityCodes(capabilityDialog.value.resource_type, capabilityCodeSelection.value, capabilityDialog.value.original_codes || [])) return
+  if (!validateCapabilityCodes('PERSON', capabilityCodeSelection.value, capabilityDialog.value.original_codes || [])) return
   saving.value = true
   try {
     const form = capabilityDialog.value
     const payload = {
-      resource_type: form.resource_type,
+      resource_type: 'PERSON',
       resource_id: form.resource_id,
       resource_name: form.resource_name,
-      user_id: form.resource_type === 'PERSON' ? form.user_id : '',
+      user_id: form.user_id,
       codes: [...capabilityCodeSelection.value],
       status: form.status,
-      usage_scope: form.usage_scope || 'ANY',
     }
-    // 空字符串无法反序列化为服务端 time.Time。人员资质本身不受日期限制；设备日期
-    // 也是可选字段，因此只有用户实际填写后才进入 JSON 载荷。
-    if (form.resource_type === 'EQUIPMENT' && form.valid_from) payload.valid_from = new Date(form.valid_from).toISOString()
-    if (form.resource_type === 'EQUIPMENT' && form.valid_until) payload.valid_until = new Date(form.valid_until).toISOString()
     const saved = await upsertCapability(payload)
     capabilities.value = [saved, ...capabilities.value.filter((row) => !(row.resource_type === saved.resource_type && row.resource_id === saved.resource_id))]
     capabilityDialog.value = null
-    showToast('资质 / 能力已保存')
+    showToast('人员资质已保存')
   } catch (error) { showToast(error?.message || '资质保存失败', 'error') }
   finally { saving.value = false }
 }
@@ -3002,7 +2994,6 @@ onBeforeUnmount(() => {
           <button class="pm-nav-item" type="button" @click="returnToUnifiedPortal"><ConsoleIcon name="dashboard" /><span>返回子系统门户</span></button>
         </div>
       </nav>
-      <div class="pm-sidebar-foot">项目服务内容管理 · 版本 1.0</div>
       <div class="pm-sidebar-user">
         <span class="pm-avatar" aria-hidden="true">{{ currentUserInitial }}</span>
         <span class="pm-user-copy"><strong :title="currentUserName">{{ currentUserName }}</strong><small :title="currentUserRoleLabel">{{ currentUserRoleLabel }}</small></span>
@@ -3035,7 +3026,7 @@ onBeforeUnmount(() => {
           <template #actions>
             <button class="pm-button" :disabled="loading" @click="loadWorkspace"><ConsoleIcon name="reset" />{{ loading ? '加载中' : '刷新' }}</button>
             <button v-if="activeSection === 'projects'" class="pm-button" @click="exportProjects"><ConsoleIcon name="export" />导出</button>
-            <button v-if="canManageRules && isVisibleConfigSection" class="pm-button primary" @click="openConfigCreate">{{ isStandardChangeSection ? '＋ 登记标准变更' : '＋ 新建规则' }}</button><button v-if="activeSection === 'projects' && canCreateProject" class="pm-button primary" @click="openCreateProject">＋ 新建项目</button>
+            <button v-if="canManageActiveConfig && isVisibleConfigSection" class="pm-button primary" @click="openConfigCreate">{{ isStandardChangeSection ? '＋ 登记标准变更' : '＋ 新建规则' }}</button><button v-if="activeSection === 'projects' && canCreateProject" class="pm-button primary" @click="openCreateProject">＋ 新建项目</button>
             <button v-if="activeSection === 'decomposition' && canConfirmDecomposition" class="pm-button primary" :disabled="saving || !canConfirmCurrentDecomposition" @click="confirmDecomposition">{{ saving ? '提交中…' : '确认拆解' }}</button><button v-if="activeSection === 'decomposition' && canManageDecomposition" type="button" class="pm-button" :disabled="saving || !decompositionProject" @click="openDecompositionAdjust">调整拆解</button>
           </template>
         </PageHead>
@@ -3201,15 +3192,22 @@ onBeforeUnmount(() => {
         </template>
 
         <template v-else-if="activeSection === 'monitoring'">
-          <article class="pm-panel">
+          <article class="pm-panel pm-monitoring-snapshot" :class="{ 'is-empty': !monitoringLoading && !monitoredStatusMix.length }">
             <header><div><p class="pm-panel-kicker">实时快照</p><h2>在途项目实时监控</h2><small>服务端快照 {{ monitoringUpdatedLabel }} · 与本机相差 {{ monitoringLagSeconds ?? '—' }} 秒</small></div><div class="pm-panel-actions"><span>共 {{ monitoringSnapshot.total }} 个在途项目</span><button type="button" class="pm-button ghost" :disabled="monitoringLoading" @click="loadMonitoring()">{{ monitoringLoading ? '同步中…' : '立即刷新' }}</button></div></header>
             <div v-if="monitoringError" class="pm-inline-alert danger" role="alert">{{ monitoringError }}；已保留上一份成功快照。</div>
-            <div class="pm-statusbar" role="img" :aria-label="monitoredStatusMix.map((bucket) => `${bucket.key} ${bucket.count} 个`).join('，')">
-              <i v-for="bucket in monitoredStatusMix" :key="bucket.key" :style="{ width: `${bucket.pct}%`, background: bucket.tone }" :title="`${bucket.key} ${bucket.count} 个（${bucket.pct}%）`"></i>
-            </div>
-            <div class="pm-statusbar-legend">
-              <span v-for="bucket in monitoredStatusMix" :key="bucket.key"><i :style="{ background: bucket.tone }"></i>{{ bucket.key }} {{ bucket.count }} 个</span>
-              <span v-if="!monitoredStatusMix.length">暂无在途项目</span><span v-else class="mono">版本 {{ monitoringSnapshot.snapshot_version }}</span>
+            <template v-if="monitoredStatusMix.length">
+              <div class="pm-statusbar" role="img" :aria-label="monitoredStatusMix.map((bucket) => `${bucket.key} ${bucket.count} 个`).join('，')">
+                <i v-for="bucket in monitoredStatusMix" :key="bucket.key" :style="{ width: `${bucket.pct}%`, background: bucket.tone }" :title="`${bucket.key} ${bucket.count} 个（${bucket.pct}%）`"></i>
+              </div>
+              <div class="pm-statusbar-legend">
+                <span v-for="bucket in monitoredStatusMix" :key="bucket.key"><i :style="{ background: bucket.tone }"></i>{{ bucket.key }} {{ bucket.count }} 个</span>
+                <span class="mono">版本 {{ monitoringSnapshot.snapshot_version }}</span>
+              </div>
+            </template>
+            <div v-else class="pm-monitoring-empty-state" role="status">
+              <span class="pm-monitoring-empty-icon" aria-hidden="true"><ConsoleIcon name="info" /></span>
+              <div><b>{{ monitoringLoading ? '正在同步监控快照' : '当前没有在途项目' }}</b><span>{{ monitoringLoading ? '正在向服务端获取最新项目状态，请稍候。' : '新项目完成审批并进入交付后，会自动出现在这里。' }}</span></div>
+              <small v-if="monitoringSnapshot.snapshot_version" class="mono">版本 {{ monitoringSnapshot.snapshot_version }}</small>
             </div>
           </article>
           <section class="pm-sm-tabs">
@@ -3252,9 +3250,14 @@ onBeforeUnmount(() => {
             </tbody></table></div>
             <footer class="pm-table-footer"><span>第 {{ monitoringSnapshot.page }} / {{ monitoringTotalPages }} 页 · 共 {{ monitoringSnapshot.total }} 个在途项目</span><div class="pm-pagination"><button class="pm-pg" :disabled="monitorPage <= 1 || monitoringLoading" @click="changeMonitoringPage(monitorPage - 1)">‹</button><button class="pm-pg active">{{ monitorPage }}</button><button class="pm-pg" :disabled="monitorPage >= monitoringTotalPages || monitoringLoading" @click="changeMonitoringPage(monitorPage + 1)">›</button></div></footer>
           </section>
-          <section class="pm-table-panel">
-            <header><div><p class="pm-panel-kicker">事件流</p><h2>最近交付事件</h2></div><span>按服务端发生时间倒序</span></header>
-            <div class="pm-timeline"><button v-for="event in monitoringSnapshot.recent_events" :key="event.id" type="button" @click="openProjectTimeline({ id: event.project_id })"><i></i><b>{{ eventLabel(event) }}</b><p>{{ event.project_id }}<template v-if="event.service_item_id"> · {{ event.service_item_id }}</template> · {{ personLabel(event.actor_user_id, '系统') }}</p><time>{{ formatDateTime(event.created_at) }}</time></button><div v-if="!monitoringSnapshot.recent_events.length" class="pm-empty-mini">当前筛选范围内暂无交付事件</div></div>
+          <section class="pm-table-panel pm-event-stream-panel">
+            <details class="pm-event-stream">
+              <summary class="pm-event-stream-summary">
+                <div><p class="pm-panel-kicker">事件流</p><h2>最近交付事件</h2></div>
+                <span>{{ monitoringSnapshot.recent_events.length }} 条 · 点击展开</span>
+              </summary>
+              <div class="pm-timeline"><button v-for="event in monitoringSnapshot.recent_events" :key="event.id" type="button" @click="openProjectTimeline({ id: event.project_id })"><i></i><b>{{ eventLabel(event) }}</b><p>{{ event.project_id }}<template v-if="event.service_item_id"> · {{ event.service_item_id }}</template> · {{ personLabel(event.actor_user_id, '系统') }}</p><time>{{ formatDateTime(event.created_at) }}</time></button><div v-if="!monitoringSnapshot.recent_events.length" class="pm-empty-mini">当前筛选范围内暂无交付事件</div></div>
+            </details>
           </section>
         </template>
 
@@ -3317,17 +3320,16 @@ onBeforeUnmount(() => {
           </section>
           <section class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>设备编号</th><th>设备名称</th><th>能力</th><th>检定有效期</th><th>状态</th><th>在位 / 使用范围</th><th>操作</th></tr></thead><tbody><tr v-for="item in equipment" :key="item.resource_id"><td class="mono">{{ item.resource_id }}</td><td><b>{{ item.resource_name }}</b></td><td><CodePills :codes="item.codes || []" /></td><td>{{ item.valid_until ? formatDateTime(item.valid_until) : '未设置' }}</td><td><span class="pm-badge" :class="statusTone(capabilityEffectiveStatus(item))">{{ capabilityStatusLabel(item) }}</span><small v-if="item.status_reason" class="pm-cell-sub">{{ item.status_reason }}</small></td><td><span class="pm-badge" :class="item.presence === 'OUT_OF_COMPANY' ? 'amber' : 'normal'">{{ equipmentPresenceLabel(item) }}</span><small v-if="item.borrowed_by" class="pm-cell-sub">{{ item.borrowed_by }} · {{ item.borrowed_window }}</small><small v-if="item.usage_scope === 'COMPANY_ONLY'" class="pm-form-hint">仅在公司使用 · 不可借出</small></td><td><button v-if="canManageDevice" class="pm-link" :disabled="saving" @click="editEquipment(item)">编辑 / 更新</button><button v-if="canManageDevice" class="pm-link danger" :disabled="saving" @click="removeEquipment(item)">删除</button><button v-if="item.presence === 'OUT_OF_COMPANY' && (canManageDevice || canPlanImplementation)" class="pm-link danger" :disabled="saving" @click="returnEquipment(item)">归还</button></td></tr></tbody></table></div><p v-if="equipmentError" class="pm-form-hint" role="alert">{{ equipmentError }}</p><div v-else-if="!equipment.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无设备</b><span>使用上方表单新增设备。</span></div></section>
         </template>
-        <template v-else-if="activeSection === 'qualifications'"><section class="pm-panel"><header class="pm-section-toolbar"><div class="pm-panel-actions"><input ref="qualificationFileInput" class="pm-file-input" type="file" accept=".csv,text/csv" @change="importQualificationFile" /><button class="pm-button" :disabled="saving" @click="downloadCapabilities">导出 CSV</button><template v-if="canManageResource"><button class="pm-button" :disabled="saving" @click="qualificationFileInput.click()">导入 CSV</button><button class="pm-button" :disabled="saving" @click="syncIdentities">同步人员状态</button><button class="pm-button primary" :disabled="saving" @click="openCapabilityDialog()">＋ 新建资质</button></template></div></header><div class="pm-qualification-filter"><section class="pm-sm-tabs pm-capability-tabs"><button v-for="tab in capabilityTabs" :key="tab.key" type="button" class="pm-tab-pill" :class="{ active: capabilityTab === tab.key }" @click="capabilityTab = tab.key">{{ tab.label }}<span class="pm-tab-count">{{ tab.count }}</span></button></section><label><span>资源类型</span><select v-model="capabilityTypeFilter" class="pm-filter-select"><option value="">全部</option><option value="PERSON">人员资质</option><option value="EQUIPMENT">设备能力</option></select></label><label><span>状态</span><select v-model="capabilityStatusFilter" class="pm-filter-select"><option value="">全部</option><option value="ACTIVE">有效</option><option value="EXPIRED">无效（已过期）</option><option value="NOT_YET_EFFECTIVE">未生效</option><option value="DISABLED">停用</option></select></label></div></section><section v-if="capabilityTab === 'codes'" class="pm-table-panel"><header><div><p class="pm-panel-kicker">资质矩阵</p><h2>体系与编码映射</h2></div><span>按能力台账聚合：编码 × 持有人员数 / 设备数</span></header><div class="pm-matrix-wrap"><table class="pm-matrix"><thead><tr><th>能力编码</th><th>人员</th><th>设备</th><th>覆盖合计</th></tr></thead><tbody><tr v-for="row in capabilityCodeRows" :key="row.code"><td><span class="pm-code-pill">{{ row.code }}</span></td><td><span class="pm-badge" :class="row.personCount ? 'normal' : 'neutral'">{{ row.personCount }} 人</span></td><td><span class="pm-badge" :class="row.equipmentCount ? 'normal' : 'neutral'">{{ row.equipmentCount }} 台</span></td><td class="num">{{ row.personCount + row.equipmentCount }}</td></tr><tr v-if="!capabilityCodeRows.length"><td colspan="4" class="pm-empty-mini">暂无能力编码，请在资质记录中维护</td></tr></tbody></table></div></section>
+        <template v-else-if="activeSection === 'qualifications'"><section class="pm-panel"><header class="pm-section-toolbar"><div class="pm-panel-actions"><input ref="qualificationFileInput" class="pm-file-input" type="file" accept=".csv,text/csv" @change="importQualificationFile" /><button class="pm-button" :disabled="saving" @click="downloadCapabilities">导出 CSV</button><template v-if="canManageResource"><button class="pm-button" :disabled="saving" @click="qualificationFileInput.click()">导入人员资质 CSV</button><button class="pm-button" :disabled="saving" @click="syncIdentities">同步人员状态</button><button class="pm-button primary" :disabled="saving" @click="openCapabilityDialog()">＋ 新建人员资质</button></template></div></header><div class="pm-qualification-filter"><section class="pm-sm-tabs pm-capability-tabs"><button v-for="tab in capabilityTabs" :key="tab.key" type="button" class="pm-tab-pill" :class="{ active: capabilityTab === tab.key }" @click="capabilityTab = tab.key">{{ tab.label }}<span class="pm-tab-count">{{ tab.count }}</span></button></section><label><span>资源类型</span><select v-model="capabilityTypeFilter" class="pm-filter-select"><option value="">全部</option><option value="PERSON">人员资质</option><option value="EQUIPMENT">设备能力（只读）</option></select></label><label><span>状态</span><select v-model="capabilityStatusFilter" class="pm-filter-select"><option value="">全部</option><option value="ACTIVE">有效</option><option value="EXPIRED">无效（已过期）</option><option value="NOT_YET_EFFECTIVE">未生效</option><option value="DISABLED">停用</option></select></label></div></section><section v-if="capabilityTab === 'codes'" class="pm-table-panel"><header><div><p class="pm-panel-kicker">资质矩阵</p><h2>体系与编码映射</h2></div><span>按能力台账聚合：编码 × 持有人员数 / 设备数</span></header><div class="pm-matrix-wrap"><table class="pm-matrix"><thead><tr><th>能力编码</th><th>人员</th><th>设备</th><th>覆盖合计</th></tr></thead><tbody><tr v-for="row in capabilityCodeRows" :key="row.code"><td><span class="pm-code-pill">{{ row.code }}</span></td><td><span class="pm-badge" :class="row.personCount ? 'normal' : 'neutral'">{{ row.personCount }} 人</span></td><td><span class="pm-badge" :class="row.equipmentCount ? 'normal' : 'neutral'">{{ row.equipmentCount }} 台</span></td><td class="num">{{ row.personCount + row.equipmentCount }}</td></tr><tr v-if="!capabilityCodeRows.length"><td colspan="4" class="pm-empty-mini">暂无能力编码，请在规则配置中心维护</td></tr></tbody></table></div></section>
           <section v-else-if="capabilityTab === 'expiry'" class="pm-table-panel"><header><div><p class="pm-panel-kicker danger">到期提醒</p><h2>设备检定到期提醒</h2></div><span>30 天内到期或已过期 · 按到期时间升序</span></header><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>设备编号</th><th>设备名称</th><th>能力编码</th><th>检定到期日</th><th>状态</th></tr></thead><tbody><tr v-for="item in expiringCapabilities" :key="item.resource_id" :class="{ risk: new Date(item.valid_until).getTime() <= Date.now() }"><td class="mono">{{ item.resource_id }}</td><td><b>{{ item.resource_name }}</b></td><td><CodePills :codes="item.codes || []" /></td><td :class="{ 'pm-text-danger': new Date(item.valid_until).getTime() <= Date.now() }">{{ item.valid_until.slice(0, 10) }}</td><td><span class="pm-badge" :class="new Date(item.valid_until).getTime() <= Date.now() ? '风险' : '关注'">{{ new Date(item.valid_until).getTime() <= Date.now() ? '已过期' : '即将到期' }}</span></td></tr><tr v-if="!expiringCapabilities.length"><td colspan="5" class="pm-empty-mini">30 天内没有到期的设备检定</td></tr></tbody></table></div></section>
-          <section v-else class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>资源类型</th><th>编号</th><th>名称</th><th>资质 / 能力编码</th><th>有效期</th><th>使用范围</th><th>状态</th><th>人员状态</th><th></th></tr></thead><tbody><tr v-for="item in filteredCapabilities" :key="item.resource_id"><td><span class="pm-badge neutral">{{ item.resource_type === 'PERSON' ? '人员' : '设备' }}</span></td><td class="mono">{{ item.resource_id }}</td><td><b>{{ item.resource_name }}</b></td><td><CodePills :codes="item.codes || []" /></td><td>{{ item.valid_until ? (item.valid_from ? `${item.valid_from.slice(0, 10)} ~ ` : '') + item.valid_until.slice(0, 10) : '长期' }}</td><td><span v-if="item.resource_type === 'EQUIPMENT'" class="pm-badge" :class="item.usage_scope === 'COMPANY_ONLY' ? '关注' : 'neutral'">{{ item.usage_scope === 'COMPANY_ONLY' ? '仅在公司使用' : '可借出' }}</span><span v-else>—</span></td><td><span class="pm-badge" :class="statusTone(capabilityEffectiveStatus(item))">{{ capabilityStatusLabel(item) }}</span><small v-if="item.status_reason" class="pm-cell-sub">{{ item.status_reason }}</small></td><td><template v-if="item.resource_type === 'PERSON'"><span class="pm-badge" :class="statusTone(item.identity_status)">{{ identityStatusLabel(item.identity_status) }}</span></template><span v-else>—</span></td><td class="pm-col-actions"><button v-if="canManageResource" class="pm-link" @click="openCapabilityDialog(item)">编辑 / 更新</button></td></tr></tbody></table></div><div v-if="!filteredCapabilities.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无资质记录</b><span>点击「＋ 新建资质」或通过 CSV 导入添加记录。</span></div><footer v-if="importResult"><span role="status">导入完成：成功 {{ importResult.imported }} 条，跳过 {{ importResult.skipped }} 条。</span><span v-if="importResult.errors?.length"><small>{{ importResult.errors.slice(0, 3).join('；') }}{{ importResult.errors.length > 3 ? '…' : '' }}</small></span></footer></section>
+          <section v-else class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>资源类型</th><th>编号</th><th>名称</th><th>资质 / 能力编码</th><th>有效期</th><th>使用范围</th><th>状态</th><th>人员状态</th><th></th></tr></thead><tbody><tr v-for="item in filteredCapabilities" :key="item.resource_id"><td><span class="pm-badge neutral">{{ item.resource_type === 'PERSON' ? '人员' : '设备' }}</span></td><td class="mono">{{ item.resource_id }}</td><td><b>{{ item.resource_name }}</b></td><td><CodePills :codes="item.codes || []" /></td><td>{{ item.valid_until ? (item.valid_from ? `${item.valid_from.slice(0, 10)} ~ ` : '') + item.valid_until.slice(0, 10) : '长期' }}</td><td><span v-if="item.resource_type === 'EQUIPMENT'" class="pm-badge" :class="item.usage_scope === 'COMPANY_ONLY' ? '关注' : 'neutral'">{{ item.usage_scope === 'COMPANY_ONLY' ? '仅在公司使用' : '可借出' }}</span><span v-else>—</span></td><td><span class="pm-badge" :class="statusTone(capabilityEffectiveStatus(item))">{{ capabilityStatusLabel(item) }}</span><small v-if="item.status_reason" class="pm-cell-sub">{{ item.status_reason }}</small></td><td><template v-if="item.resource_type === 'PERSON'"><span class="pm-badge" :class="statusTone(item.identity_status)">{{ identityStatusLabel(item.identity_status) }}</span></template><span v-else>—</span></td><td class="pm-col-actions"><button v-if="canManageResource && item.resource_type === 'PERSON'" class="pm-link" @click="openCapabilityDialog(item)">编辑人员资质</button><span v-else-if="item.resource_type === 'EQUIPMENT'" class="pm-cell-sub">请到设备能力维护</span></td></tr></tbody></table></div><div v-if="!filteredCapabilities.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无资质记录</b><span>点击「＋ 新建人员资质」或通过 CSV 导入添加人员资质。</span></div><footer v-if="importResult"><span role="status">导入完成：成功 {{ importResult.imported }} 条，跳过 {{ importResult.skipped }} 条。</span><span v-if="importResult.errors?.length"><small>{{ importResult.errors.slice(0, 3).join('；') }}{{ importResult.errors.length > 3 ? '…' : '' }}</small></span></footer></section>
           <div v-if="capabilityDialog" class="pm-overlay" @click.self="capabilityDialog = null">
             <form class="pm-dialog" @submit.prevent="saveCapability">
-              <header><div><span>资质能力</span><h2>{{ capabilityDialog.resource_id ? '编辑资质 / 能力' : '新建资质 / 能力' }}</h2></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="capabilityDialog = null"><ConsoleIcon name="close" /></button></header>
+              <header><div><span>人员资质</span><h2>{{ capabilityAutoID ? '新建人员资质' : '编辑人员资质' }}</h2></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="capabilityDialog = null"><ConsoleIcon name="close" /></button></header>
               <div class="pm-form">
-                <label><span>资源类型 <em>*</em></span><select v-model="capabilityDialog.resource_type" required @change="onCapabilityTypeChange"><option value="PERSON">人员资质</option><option value="EQUIPMENT">设备能力</option></select></label>
-                <label><span>{{ capabilityDialog.resource_type === 'EQUIPMENT' ? '设备编号' : '人员编号' }} <em>*</em></span><input v-model.trim="capabilityDialog.resource_id" :readonly="capabilityAutoID" required placeholder="系统自动生成" /><small v-if="capabilityAutoID" class="pm-form-hint">由系统自动生成（人员 P- / 设备 EQ-），无需手工填写</small></label>
-                <label v-if="capabilityDialog.resource_type === 'PERSON'"><span>人员名称 <em>*</em></span><select v-model="capabilityDialog.user_id" :disabled="capabilityPersonnelLoading" required @change="onCapabilityPersonChange"><option value="">{{ capabilityPersonnelLoading ? '基础平台人员加载中…' : '请选择基础平台人员' }}</option><option v-for="person in capabilityPersonOptions" :key="person.id" :value="person.id">{{ person.name }}</option></select><small v-if="capabilityPersonnelError" class="pm-form-hint" role="alert">{{ capabilityPersonnelError }}</small></label>
-                <label v-else><span>资源名称 <em>*</em></span><input v-model.trim="capabilityDialog.resource_name" required placeholder="例如 基站A" /></label>
+                <label><span>资源类型</span><input value="人员资质" readonly /></label>
+                <label><span>人员编号 <em>*</em></span><input v-model.trim="capabilityDialog.resource_id" :readonly="capabilityAutoID" required placeholder="系统自动生成" /><small v-if="capabilityAutoID" class="pm-form-hint">由系统自动生成（P-），无需手工填写</small></label>
+                <label><span>人员名称 <em>*</em></span><select v-model="capabilityDialog.user_id" :disabled="capabilityPersonnelLoading" required @change="onCapabilityPersonChange"><option value="">{{ capabilityPersonnelLoading ? '基础平台人员加载中…' : '请选择基础平台人员' }}</option><option v-for="person in capabilityPersonOptions" :key="person.id" :value="person.id">{{ person.name }}</option></select><small v-if="capabilityPersonnelError" class="pm-form-hint" role="alert">{{ capabilityPersonnelError }}</small></label>
                 <div class="pm-field pm-span-full">
                   <span>资质 / 能力编码 <em>*</em></span>
                   <SearchableSelect
@@ -3344,15 +3346,12 @@ onBeforeUnmount(() => {
                     multiple
                     required
                   />
-                  <p v-if="!hasActiveCapabilityCodes(capabilityDialog.resource_type)" class="pm-form-hint">请先到「系统配置 → 资质 / 能力编码」新增并启用{{ capabilityDialog.resource_type === 'PERSON' ? '人员资质' : '设备能力' }}编码。</p>
+                  <p v-if="!hasActiveCapabilityCodes('PERSON')" class="pm-form-hint">请先到「规则配置中心 → 资质 / 能力编码」新增并启用人员资质编码。</p>
                 </div>
-                <label v-if="capabilityDialog.resource_type === 'EQUIPMENT'"><span>检定开始</span><input v-model="capabilityDialog.valid_from" type="date" /></label>
-                <label v-if="capabilityDialog.resource_type === 'EQUIPMENT'"><span>检定到期</span><input v-model="capabilityDialog.valid_until" type="date" /></label>
-                <p v-else class="pm-form-hint pm-span-full">人员资质不限制有效期；停用资质或人员身份失效后将不能参与项目分配。</p>
-                <label v-if="capabilityDialog.resource_type === 'EQUIPMENT'"><span>使用范围</span><select v-model="capabilityDialog.usage_scope"><option value="ANY">可借出</option><option value="COMPANY_ONLY">仅在公司使用（不可借出）</option></select></label>
+                <p class="pm-form-hint pm-span-full">人员资质不限制有效期；停用资质或人员身份失效后将不能参与项目分配。设备新建、停用和删除请到「设备能力」。</p>
                 <label><span>状态</span><select v-model="capabilityDialog.status"><option value="ACTIVE">有效</option><option value="DISABLED">停用</option></select></label>
               </div>
-              <footer><button type="button" class="pm-button" @click="capabilityDialog = null">取消</button><button class="pm-button primary" :disabled="saving || (capabilityDialog.resource_type === 'PERSON' && (!capabilityDialog.user_id || capabilityPersonnelLoading))">{{ saving ? '保存中…' : '保存资质' }}</button></footer>
+              <footer><button type="button" class="pm-button" @click="capabilityDialog = null">取消</button><button class="pm-button primary" :disabled="saving || !capabilityDialog.user_id || capabilityPersonnelLoading">{{ saving ? '保存中…' : '保存人员资质' }}</button></footer>
             </form>
           </div>
         </template><template v-else-if="activeSection === 'split-rules'">
@@ -3450,7 +3449,7 @@ onBeforeUnmount(() => {
             <header><div><p class="pm-panel-kicker">权限矩阵</p><h2>字段 × 角色 访问矩阵</h2></div><span>{{ permissionMatrix.rows.length }} 个受控字段 · {{ permissionMatrix.roles.length }} 个角色</span></header>
             <div class="pm-matrix-wrap"><table class="pm-matrix"><thead><tr><th>字段 ↓ \ 角色 →</th><th v-for="role in permissionMatrix.roles" :key="role">{{ applicationRoleLabel(role) }}</th></tr></thead><tbody><tr v-for="row in permissionMatrix.rows" :key="row.field"><td>{{ permissionFieldLabel(row.field) }}</td><td v-for="(cell, index) in row.cells" :key="`${row.field}-${permissionMatrix.roles[index]}`"><span v-if="cell" class="pm-badge" :class="permissionLevelTone[cell] || 'neutral'">{{ permissionLevelLabel[cell] || cell }}</span><span v-else class="pm-matrix-empty">未配置</span></td></tr></tbody></table></div>
           </section>
-          <section class="pm-config-layout"><aside class="pm-config-note"><span><ConsoleIcon name="info" /></span><h2>{{ isStandardChangeSection ? '评估流程' : '生效范围' }}</h2><template v-if="isStandardChangeSection"><p>登记标准变化与影响范围，核对在途项目、检测方法和报告模板，处置完成后将记录归档。</p><ul><li>评估中：尚有影响待确认或待处置</li><li>已归档：影响核对和处置均已完成</li><li>历史记录用于追溯，不会自动改写已有项目</li></ul></template><template v-else><p>{{ activeConfigMeta.effectNote || currentMeta[1] }}</p><ul><li>配置修改需业务管理员权限</li><li>创建、更新和重新启用执行相同校验</li><li>关闭规则前请确认影响范围</li></ul></template></aside><article class="pm-table-panel"><header class="pm-filter-bar"><div v-if="!isStandardChangeSection" class="pm-sm-tabs"><button v-for="meta in visibleConfigKinds" :key="meta.kind" type="button" class="pm-tab-pill" :class="{ active: activeSection === meta.kind }" @click="navigate(meta.kind)">{{ meta.label }}</button></div><div v-else><b>标准变更评估清单</b></div><span class="pm-filter-count">{{ activeConfigMeta.label }} 共 {{ visibleRules.length }} 条</span></header><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>{{ isStandardChangeSection ? '标准 / 方法名称' : '配置名称' }}</th><th v-for="column in activeConfigMeta.columns" :key="column.key">{{ column.label }}</th><th>状态</th><th>最后更新</th><th></th></tr></thead><tbody><tr v-for="rule in visibleRules" :key="rule.id"><td><b>{{ rule.name }}</b></td><td v-for="column in activeConfigMeta.columns" :key="column.key">{{ rule[column.key] !== undefined && rule[column.key] !== '' ? rule[column.key] : '—' }}</td><td><template v-if="isStandardChangeSection"><span class="pm-badge" :class="rule.enabled ? 'amber' : 'neutral'">{{ rule.enabled ? '评估中' : '已归档' }}</span><button v-if="canManageRules" class="pm-link" :disabled="saving" @click="toggleRule(rule)">{{ rule.enabled ? '完成并归档' : '恢复评估' }}</button></template><button v-else-if="canManageRules" class="pm-switch" :class="{ on: rule.enabled }" :aria-label="`${rule.enabled ? '停用' : '启用'} ${rule.name}`" @click="toggleRule(rule)"><i></i></button><span v-else class="pm-badge" :class="rule.enabled ? 'normal' : 'neutral'">{{ rule.enabled ? '已启用' : '已停用' }}</span></td><td>{{ rule.updated }}</td><td><button v-if="canManageRules" class="pm-link" @click="openConfigEdit(rule)">编辑</button><button v-if="canManageRules" class="pm-link pm-text-danger" :disabled="saving" @click="removeConfigRule(rule)">删除</button></td></tr></tbody></table></div><div v-if="!visibleRules.length" class="pm-empty"><ConsoleIcon name="info" /><b>{{ isStandardChangeSection ? '暂无标准变更记录' : '暂无配置规则' }}</b><span>{{ isStandardChangeSection ? '发生标准或检测方法变更时，点击“登记标准变更”开始影响评估。' : `点击“新建规则”添加 ${activeConfigMeta.label} 配置。` }}</span></div></article></section>
+          <section class="pm-config-layout"><aside class="pm-config-note"><span><ConsoleIcon name="info" /></span><h2>{{ isStandardChangeSection ? '评估流程' : '生效范围' }}</h2><template v-if="isStandardChangeSection"><p>登记标准变化与影响范围，核对在途项目、检测方法和报告模板，处置完成后将记录归档。</p><ul><li>评估中：尚有影响待确认或待处置</li><li>已归档：影响核对和处置均已完成</li><li>历史记录用于追溯，不会自动改写已有项目</li></ul></template><template v-else><p>{{ activeConfigMeta.effectNote || currentMeta[1] }}</p><ul><li>配置修改需当前配置类型的管理权限</li><li>创建、更新和重新启用执行相同校验</li><li>关闭规则前请确认影响范围</li></ul></template></aside><article class="pm-table-panel"><header class="pm-filter-bar"><div v-if="!isStandardChangeSection" class="pm-sm-tabs"><button v-for="meta in visibleConfigKinds" :key="meta.kind" type="button" class="pm-tab-pill" :class="{ active: activeSection === meta.kind }" @click="navigate(meta.kind)">{{ meta.label }}</button></div><div v-else><b>标准变更评估清单</b></div><span class="pm-filter-count">{{ activeConfigMeta.label }} 共 {{ visibleRules.length }} 条</span></header><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>{{ isStandardChangeSection ? '标准 / 方法名称' : '配置名称' }}</th><th v-for="column in activeConfigMeta.columns" :key="column.key">{{ column.label }}</th><th>状态</th><th>最后更新</th><th></th></tr></thead><tbody><tr v-for="rule in visibleRules" :key="rule.id"><td><b>{{ rule.name }}</b></td><td v-for="column in activeConfigMeta.columns" :key="column.key">{{ rule[column.key] !== undefined && rule[column.key] !== '' ? rule[column.key] : '—' }}</td><td><template v-if="isStandardChangeSection"><span class="pm-badge" :class="rule.enabled ? 'amber' : 'neutral'">{{ rule.enabled ? '评估中' : '已归档' }}</span><button v-if="canManageRules" class="pm-link" :disabled="saving" @click="toggleRule(rule)">{{ rule.enabled ? '完成并归档' : '恢复评估' }}</button></template><button v-else-if="canManageActiveConfig" class="pm-switch" :class="{ on: rule.enabled }" :aria-label="`${rule.enabled ? '停用' : '启用'} ${rule.name}`" @click="toggleRule(rule)"><i></i></button><span v-else class="pm-badge" :class="rule.enabled ? 'normal' : 'neutral'">{{ rule.enabled ? '已启用' : '已停用' }}</span></td><td>{{ rule.updated }}</td><td><button v-if="canManageActiveConfig" class="pm-link" @click="openConfigEdit(rule)">编辑</button><button v-if="canManageActiveConfig" class="pm-link pm-text-danger" :disabled="saving" @click="removeConfigRule(rule)">删除</button></td></tr></tbody></table></div><div v-if="!visibleRules.length" class="pm-empty"><ConsoleIcon name="info" /><b>{{ isStandardChangeSection ? '暂无标准变更记录' : '暂无配置规则' }}</b><span>{{ isStandardChangeSection ? '发生标准或检测方法变更时，点击“登记标准变更”开始影响评估。' : `点击“新建规则”添加 ${activeConfigMeta.label} 配置。` }}</span></div></article></section>
         </template>
 
         <template v-else>
