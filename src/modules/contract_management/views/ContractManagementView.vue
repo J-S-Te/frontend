@@ -226,6 +226,7 @@ const customerHasMore = ref(false)
 const detectionCategoryOptions = ref([])
 const detectionCategoryLoading = ref(false)
 const detectionCategoryError = ref('')
+let detectionCategoryRequestID = 0
 const canAddServiceItem = computed(() => newContract.value.service_items.length < 20 && Boolean(newContract.value.service_items.at(-1)?.service_type))
 const isExternalContractMode = computed(() => contractCreationMode.value === 'external')
 const canSaveNewContract = computed(() => {
@@ -1255,6 +1256,7 @@ function openNewContract() {
 }
 
 function selectContractCreationMode(mode) {
+  detectionCategoryRequestID += 1
   contractCreationMode.value = mode
   templatePreviewHTML.value = ''
   templatePreviewError.value = ''
@@ -1273,16 +1275,20 @@ function selectContractCreationMode(mode) {
 }
 
 async function loadDetectionCategoryOptions() {
+  const requestID = ++detectionCategoryRequestID
   detectionCategoryLoading.value = true
   detectionCategoryError.value = ''
   try {
-    detectionCategoryOptions.value = await listContractDetectionCategories()
-    if (!detectionCategoryOptions.value.length) detectionCategoryError.value = '项目管理尚未配置可用的检测类别。'
+    const options = await listContractDetectionCategories()
+    if (requestID !== detectionCategoryRequestID) return
+    detectionCategoryOptions.value = options
+    if (!options.length) detectionCategoryError.value = '项目管理尚未配置可用的检测类别。'
   } catch (error) {
+    if (requestID !== detectionCategoryRequestID) return
     detectionCategoryOptions.value = []
     detectionCategoryError.value = error?.message || '读取检测类别目录失败，请稍后重试。'
   } finally {
-    detectionCategoryLoading.value = false
+    if (requestID === detectionCategoryRequestID) detectionCategoryLoading.value = false
   }
 }
 
