@@ -1711,6 +1711,70 @@
 .pm-plan-resources .pm-table { min-width: 720px; }
 .pm-plan-resources .pm-table-scroll input[type="date"] { min-width: 132px; }
 
+/* 行程安排优先呈现业务场景，内部编号仅作为已有关联项的辅助信息。 */
+.pm-travel-arrangement {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: var(--pm-sp-4);
+  padding: var(--pm-sp-5);
+  border: 1px solid var(--pm-line);
+  border-radius: var(--pm-r-lg);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--pm-primary-soft) 45%, var(--pm-card)) 0, var(--pm-card) 92px);
+  box-shadow: 0 10px 28px rgb(15 23 42 / 5%);
+}
+.pm-travel-head { display: flex; align-items: center; gap: var(--pm-sp-3); }
+.pm-travel-head-icon { display: grid; place-items: center; flex: 0 0 42px; width: 42px; height: 42px; border-radius: 13px; background: linear-gradient(135deg, var(--pm-primary), var(--pm-violet)); color: white; font-size: var(--pm-fs-sm); font-weight: var(--pm-fw-bold); box-shadow: 0 8px 18px rgb(79 70 229 / 20%); }
+.pm-travel-head > div { min-width: 0; flex: 1; }
+.pm-travel-head b,
+.pm-travel-head small { display: block; }
+.pm-travel-head b { color: var(--pm-ink); font-size: var(--pm-fs-body); }
+.pm-travel-head small { margin-top: 3px; color: var(--pm-muted); font-size: var(--pm-fs-hint); }
+.pm-travel-head-status { padding: 5px 10px; border: 1px solid var(--pm-primary-border); border-radius: var(--pm-r-full); background: var(--pm-card); color: var(--pm-blue-text); font-size: var(--pm-fs-hint); font-weight: var(--pm-fw-bold); }
+.pm-travel-mode { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--pm-sp-3); }
+.pm-travel-mode-card { position: relative; display: flex; align-items: center; gap: var(--pm-sp-3); min-width: 0; min-height: 82px; padding: var(--pm-sp-3); border: 1px solid var(--pm-line); border-radius: var(--pm-r-md); background: var(--pm-card); cursor: pointer; transition: transform var(--pm-t-fast), border-color var(--pm-t-fast), box-shadow var(--pm-t-fast), background var(--pm-t-fast); }
+.pm-travel-mode-card:hover { transform: translateY(-2px); border-color: var(--pm-primary-border); box-shadow: var(--pm-shadow); }
+.pm-travel-mode-card:has(input:focus-visible) { outline: 3px solid var(--pm-primary-soft); outline-offset: 2px; }
+.pm-travel-mode-card:has(input:checked) { border-color: var(--pm-primary); background: var(--pm-primary-soft); box-shadow: 0 0 0 1px var(--pm-primary), 0 10px 22px rgb(79 70 229 / 10%); }
+.pm-travel-mode-card > input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.pm-travel-mode-icon { display: grid; place-items: center; flex: 0 0 38px; width: 38px; height: 38px; border-radius: 12px; font-size: var(--pm-fs-sm); font-weight: var(--pm-fw-bold); }
+.pm-travel-mode-icon.no-travel { background: var(--pm-green-soft); color: var(--pm-green-text); }
+.pm-travel-mode-icon.existing { background: var(--pm-blue-soft); color: var(--pm-blue-text); }
+.pm-travel-mode-icon.new-travel { background: var(--pm-violet-soft); color: var(--pm-violet-text); }
+.pm-travel-mode-copy { min-width: 0; flex: 1; }
+.pm-travel-mode-copy b,
+.pm-travel-mode-copy small { display: block; }
+.pm-travel-mode-copy b { color: var(--pm-ink); font-size: var(--pm-fs-sm); }
+.pm-travel-mode-copy small { margin-top: 4px; color: var(--pm-muted); font-size: var(--pm-fs-hint); line-height: 1.45; }
+.pm-travel-mode-card > i { display: grid; place-items: center; align-self: flex-start; width: 20px; height: 20px; border-radius: var(--pm-r-full); background: var(--pm-primary); color: white; font-size: var(--pm-fs-hint); font-style: normal; opacity: 0; transform: scale(.65); transition: opacity var(--pm-t-fast), transform var(--pm-t-fast); }
+.pm-travel-mode-card:has(input:checked) > i { opacity: 1; transform: scale(1); }
+.pm-travel-empty { display: flex; align-items: center; justify-content: center; gap: var(--pm-sp-3); min-height: 88px; border: 1px dashed var(--pm-line-strong); border-radius: var(--pm-r-md); background: var(--pm-sunken); color: var(--pm-muted); text-align: left; }
+.pm-travel-empty > span { font-size: var(--pm-fs-title); color: var(--pm-primary); }
+.pm-travel-empty b,
+.pm-travel-empty small { display: block; }
+.pm-travel-empty b { color: var(--pm-body); font-size: var(--pm-fs-sm); }
+.pm-travel-empty small { margin-top: 3px; font-size: var(--pm-fs-hint); }
+.pm-travel-detail { display: grid; gap: var(--pm-sp-3); padding: var(--pm-sp-4); border: 1px solid var(--pm-line); border-radius: var(--pm-r-md); background: var(--pm-card); animation: pm-travel-detail-in var(--pm-t-base) ease-out; }
+.pm-travel-detail.mode-no_travel { border-left: 3px solid var(--pm-green); }
+.pm-travel-detail.mode-existing { border-left: 3px solid var(--pm-blue); }
+.pm-travel-detail.mode-new { border-left: 3px solid var(--pm-violet); }
+.pm-travel-detail-title { display: flex; align-items: baseline; justify-content: space-between; gap: var(--pm-sp-3); padding-bottom: var(--pm-sp-2); border-bottom: 1px solid var(--pm-line); }
+.pm-travel-detail-title span { color: var(--pm-ink); font-size: var(--pm-fs-sm); font-weight: var(--pm-fw-bold); }
+.pm-travel-detail-title small,
+.pm-travel-hint { color: var(--pm-muted); font-size: var(--pm-fs-hint); }
+.pm-travel-hint { margin: -4px 0 0; }
+.pm-travel-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--pm-sp-3); }
+.pm-travel-route-preview { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: var(--pm-sp-3); padding: var(--pm-sp-3) var(--pm-sp-4); border-radius: var(--pm-r-md); background: linear-gradient(90deg, var(--pm-blue-soft), var(--pm-violet-soft)); color: var(--pm-ink); font-weight: var(--pm-fw-bold); text-align: center; }
+.pm-travel-route-preview > i { color: var(--pm-primary); font-size: var(--pm-fs-title); font-style: normal; }
+.pm-travel-route-preview > small { grid-column: 1 / -1; color: var(--pm-muted); font-size: var(--pm-fs-hint); font-weight: var(--pm-fw-regular); }
+@keyframes pm-travel-detail-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+
+@media (max-width: 700px) {
+  .pm-travel-mode,
+  .pm-travel-grid { grid-template-columns: 1fr; }
+  .pm-travel-head-status { display: none; }
+  .pm-travel-detail-title { align-items: flex-start; flex-direction: column; gap: 3px; }
+}
+
 /* ==========================================================================
    §14 设备选择器：宽弹窗 + 可滚动主体，避免表格被两列表单栅格挤窄裁切
    ========================================================================== */
