@@ -747,6 +747,8 @@ test('团队负责人、项目经理、工程师显示姓名而不是平台 ID',
   assert.match(source, /const personnelNameByID = ref\(new Map\(\)\)/)
   assert.match(source, /function personLabel\(userID, fallback = '待指派'\)/)
   assert.match(source, /function personListLabel\(ids, fallback = '未指派'\)/)
+  assert.match(source, /const projectAssignmentIDsByProject = computed\(\(\) =>/)
+  assert.match(source, /function projectAssignmentPeople\(projectID\)/)
   assert.match(source, /async function loadPersonnelNames\(/)
   assert.match(source, /await loadPersonnelNames\(\)/)
   // 解析不到时显示占位符，绝不回退成对业务用户无意义的 ULID。
@@ -761,6 +763,12 @@ test('团队负责人、项目经理、工程师显示姓名而不是平台 ID',
   assert.match(source, /\{ label: '团队负责人', value: personLabel\(record\.team_lead_id, '待分配'\) \}/)
   assert.match(source, /\{ label: '项目经理', value: personLabel\(record\.project_manager_id, '待指派'\) \}/)
   assert.match(source, /\{ label: '工程师', value: personListLabel\(record\.engineer_ids\) \}/)
+  // 项目列表不能继续展示建项快照 project.team/project.manager，必须展示服务项实际指派人员。
+  assert.match(source, /团队负责人：\{\{ projectAssignmentPeople\(project\.id\)\.teamLeads \}\}/)
+  assert.match(source, /项目经理：\{\{ projectAssignmentPeople\(project\.id\)\.projectManagers \}\}/)
+  assert.doesNotMatch(source, /data-label="团队 \/ 项目经理"><b>\{\{ project\.team \}\}<\/b><span class="pm-cell-sub">\{\{ project\.manager \}\}/)
+  assert.match(source, /\{ label: '团队负责人', value: projectAssignmentPeople\(record\.id\)\.teamLeads \}/)
+  assert.match(source, /\{ label: '项目经理', value: projectAssignmentPeople\(record\.id\)\.projectManagers \}/)
 })
 
 test('新建项目入口只向获准角色显示', () => {
