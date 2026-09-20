@@ -42,12 +42,14 @@ test('service items own their system information and customer fields remain avai
   for (const label of ['客户名称', '客户地址', '客户联系人', '客户联系电话']) assert.match(source, new RegExp(`<span>${label}</span>`))
 })
 
-test('template selection is first and mandatory with no manual-content creation path', () => {
+test('template creation stays mandatory within template mode and external contracts use DOCX instead of manual content', () => {
   const templatePosition = source.indexOf('第一步：选择合同模板')
   const opportunityPosition = source.indexOf('关联商机（选填）', templatePosition)
   assert.ok(templatePosition > -1 && opportunityPosition > templatePosition)
   assert.match(source, /v-model="newContract\.template_id" required/)
-  assert.match(source, /新合同必须基于模板创建，不支持手工填写正文/)
+  assert.match(source, /模板将生成合同正文，合同编号在审批通过后自动生成/)
+  assert.match(source, /上传外部合同/)
+  assert.match(source, /accept="\.docx,application\/vnd\.openxmlformats-officedocument\.wordprocessingml\.document"/)
   assert.doesNotMatch(source, /不使用模板，手工填写正文|v-model="newContract\.content"/)
 })
 

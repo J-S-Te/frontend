@@ -10,6 +10,7 @@ import {
   ContractAuthError,
   createApprovalRule,
   createContract,
+  createExternalContract,
   deleteApprovalRule,
   deleteContractTemplate,
   getApproval,
@@ -18,10 +19,12 @@ import {
   getSigningRecord,
   getOpportunityIntake,
   listApprovals,
+  listMyCustomers,
   listSigningRecords,
   listApprovalRules,
   listApprovalTasks,
   listContractTemplates,
+  listContractDetectionCategories,
   listContracts,
   listContractLifecycle,
   listOpportunityIntakes,
@@ -187,10 +190,16 @@ const templatePreviewError = ref('')
 const templatePreviewRef = ref(null)
 const ruleSaving = ref(false)
 const editingRuleId = ref('')
+const contractCreationMode = ref('template')
+const externalContractFile = ref(null)
+const externalContractFileError = ref('')
+const externalContractFileInputKey = ref(0)
+const contractCreating = ref(false)
 const emptyServiceItem = () => ({ service_type: '', name: '', site: '', batch: '', category: '', requirement: '', test_mode: 'STANDARD', systems: [] })
 const emptyNewContract = () => ({
   opportunity_id: '', opportunity_name: '', customer_id: '', title: '', contract_type: '', amount: '', currency: 'CNY',
   customer_name: '', customer_address: '', customer_contact: '', customer_phone: '',
+  start_date: '', end_date: '',
   service_items: [emptyServiceItem()], template_id: '', template_values: {},
 })
 const newContract = ref(emptyNewContract())
@@ -206,7 +215,23 @@ const opportunityOptions = ref([])
 const opportunityPage = ref(1)
 const opportunityTotal = ref(0)
 const opportunityHasMore = ref(false)
+const customerPickerOpen = ref(false)
+const customerLoading = ref(false)
+const customerError = ref('')
+const customerKeyword = ref('')
+const customerOptions = ref([])
+const customerPage = ref(1)
+const customerTotal = ref(0)
+const customerHasMore = ref(false)
+const detectionCategoryOptions = ref([])
+const detectionCategoryLoading = ref(false)
+const detectionCategoryError = ref('')
 const canAddServiceItem = computed(() => newContract.value.service_items.length < 20 && Boolean(newContract.value.service_items.at(-1)?.service_type))
+const isExternalContractMode = computed(() => contractCreationMode.value === 'external')
+const canSaveNewContract = computed(() => {
+  if (contractCreating.value) return false
+  return isExternalContractMode.value ? Boolean(externalContractFile.value) : Boolean(selectedContractTemplate.value)
+})
 
 const ruleFieldOptions = [
   { value: 'amount_minor', label: '合同金额（元）', kind: 'number' },
@@ -1219,9 +1244,119 @@ async function removeTemplate(item) {
 }
 
 function openNewContract() {
+  newContract.value = emptyNewContract()
+  contractCreationMode.value = 'template'
+  externalContractFile.value = null
+  externalContractFileError.value = ''
+  externalContractFileInputKey.value += 1
   templatePreviewHTML.value = ''
   templatePreviewError.value = ''
   createDialogOpen.value = true
+}
+
+function selectContractCreationMode(mode) {
+  contractCreationMode.value = mode
+  templatePreviewHTML.value = ''
+  templatePreviewError.value = ''
+  if (mode === 'template') {
+    externalContractFile.value = null
+    externalContractFileError.value = ''
+    externalContractFileInputKey.value += 1
+    return
+  }
+  newContract.value.template_id = ''
+  newContract.value.template_values = {}
+  void loadDetectionCategoryOptions()
+}
+
+async function loadDetectionCategoryOptions() {
+  detectionCategoryLoading.value = true
+  detectionCategoryError.value = ''
+  try {
+    detectionCategoryOptions.value = await listContractDetectionCategories()
+    if (!detectionCategoryOptions.value.length) detectionCategoryError.value = '项目管理尚未配置可用的检测类别。'
+  } catch (error) {
+    detectionCategoryOptions.value = []
+    detectionCategoryError.value = error?.message || '读取检测类别目录失败，请稍后重试。'
+  } finally {
+    detectionCategoryLoading.value = false
+  }
+}
+
+async function loadCustomerOptions({ reset = true } = {}) {
+  const page = reset ? 1 : customerPage.value + 1
+  customerPickerOpen.value = true
+  customerError.value = ''
+  customerLoading.value = true
+  try {
+    const result = await listMyCustomers({ keyword: customerKeyword.value, page, page_size: 50 })
+    customerPage.value = result.page
+    customerTotal.value = result.total
+    customerHasMore.value = result.has_more
+    customerOptions.value = reset ? result.items : [...customerOptions.value, ...result.items]
+  } catch (error) {
+    customerError.value = error?.message || '读取可关联客户失败，请稍后重试。'
+  } finally {
+    customerLoading.value = false
+  }
+}
+
+async function openCustomerPicker() {
+  customerKeyword.value = ''
+  customerOptions.value = []
+  await loadCustomerOptions()
+}
+
+async function searchCustomerOptions() {
+  customerOptions.value = []
+  await loadCustomerOptions()
+}
+
+async function loadMoreCustomerOptions() {
+  if (!customerHasMore.value || customerLoading.value) return
+  await loadCustomerOptions({ reset: false })
+}
+
+function selectCustomer(item) {
+  const customerID = String(item.id || item.customer_id || '')
+  if (newContract.value.opportunity_id && String(newContract.value.customer_id) !== customerID) {
+    newContract.value.opportunity_id = ''
+    newContract.value.opportunity_name = ''
+  }
+  newContract.value.customer_id = customerID
+  newContract.value.customer_name = item.name || item.customer_name || ''
+  customerPickerOpen.value = false
+}
+
+function clearCustomer() {
+  newContract.value.customer_id = ''
+  newContract.value.customer_name = ''
+  newContract.value.opportunity_id = ''
+  newContract.value.opportunity_name = ''
+}
+
+function selectExternalContractFile(event) {
+  const file = event.target.files?.[0] || null
+  externalContractFile.value = null
+  externalContractFileError.value = ''
+  if (!file) return
+  const expectedMIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+  if (!file.name.toLowerCase().endsWith('.docx') || (file.type && file.type !== expectedMIME)) {
+    externalContractFileError.value = '仅支持有效的 DOCX 文件。'
+    event.target.value = ''
+    return
+  }
+  if (file.size <= 0) {
+    externalContractFileError.value = 'DOCX 文件不能为空。'
+    event.target.value = ''
+    return
+  }
+  if (file.size > 10 * 1024 * 1024) {
+    externalContractFileError.value = 'DOCX 文件不能超过 10MB。'
+    event.target.value = ''
+    return
+  }
+  externalContractFile.value = file
 }
 
 async function loadOpportunityOptions({ reset = true } = {}) {
@@ -1234,7 +1369,10 @@ async function loadOpportunityOptions({ reset = true } = {}) {
     opportunityPage.value = result.page
     opportunityTotal.value = result.total
     opportunityHasMore.value = result.has_more
-    opportunityOptions.value = reset ? result.items : [...opportunityOptions.value, ...result.items]
+    const matchingItems = !isExternalContractMode.value || !newContract.value.customer_id
+      ? result.items
+      : result.items.filter((item) => String(item.customer_id || item.customer?.id || '') === String(newContract.value.customer_id))
+    opportunityOptions.value = reset ? matchingItems : [...opportunityOptions.value, ...matchingItems]
   } catch (error) {
     opportunityError.value = error?.message || '读取可关联商机失败，请稍后重试。'
   } finally {
@@ -1243,7 +1381,11 @@ async function loadOpportunityOptions({ reset = true } = {}) {
 }
 
 async function openOpportunityPicker() {
-  opportunityKeyword.value = ''
+  if (isExternalContractMode.value && !newContract.value.customer_id) {
+    showToast('请先选择 CRM 客户，再关联商机。')
+    return
+  }
+  opportunityKeyword.value = isExternalContractMode.value ? newContract.value.customer_name : ''
   opportunityOptions.value = []
   await loadOpportunityOptions()
 }
@@ -1270,8 +1412,6 @@ function selectOpportunity(item) {
 function clearOpportunity() {
   newContract.value.opportunity_id = ''
   newContract.value.opportunity_name = ''
-  newContract.value.customer_id = ''
-  newContract.value.customer_name = ''
 }
 
 function addServiceItem() {
@@ -1342,47 +1482,102 @@ async function previewNewContract() {
   }
 }
 
+function contractDateValue(value) {
+  return value ? `${value}T00:00:00Z` : null
+}
+
+function buildNewContractPayload() {
+  return {
+    opportunity_id: newContract.value.opportunity_id,
+    opportunity_name: newContract.value.opportunity_name,
+    crm_customer_id: Number(newContract.value.customer_id || 0),
+    title: newContract.value.title.trim(),
+    contract_type: newContract.value.contract_type,
+    service_type: newContract.value.service_items[0]?.service_type || '',
+    amount_minor: Math.round(Number(newContract.value.amount) * 100),
+    currency: newContract.value.currency.trim().toUpperCase(),
+    customer_name: newContract.value.customer_name.trim(),
+    customer_address: newContract.value.customer_address.trim(),
+    customer_contact: newContract.value.customer_contact.trim(),
+    customer_phone: newContract.value.customer_phone.trim(),
+    start_date: contractDateValue(newContract.value.start_date),
+    end_date: contractDateValue(newContract.value.end_date),
+    service_items: newContract.value.service_items.map((serviceItem) => ({
+      service_type: serviceItem.service_type,
+      name: serviceItem.name.trim(),
+      site: serviceItem.site.trim(),
+      batch: serviceItem.batch.trim(),
+      category: serviceItem.category.trim(),
+      requirement: serviceItem.requirement.trim(),
+      test_mode: serviceItem.test_mode,
+      systems: serviceItem.systems.map((system) => ({ name: system.name.trim(), level: system.level })),
+    })),
+    content: '',
+  }
+}
+
+function validateExternalContract() {
+  if (!externalContractFile.value) throw new Error(externalContractFileError.value || '请选择不超过 10MB 的 DOCX 文件。')
+  if (!newContract.value.customer_id) throw new Error('请选择 CRM 客户。')
+  if (detectionCategoryLoading.value) throw new Error('检测类别目录正在加载，请稍后再试。')
+  if (detectionCategoryError.value) throw new Error(detectionCategoryError.value)
+  const allowedCategories = new Set(detectionCategoryOptions.value.map((item) => String(item.category || '').trim()))
+  const invalidIndex = newContract.value.service_items.findIndex((item) => !item.service_type || !item.site.trim() || !item.batch.trim() || !allowedCategories.has(item.category.trim()) || !item.test_mode)
+  if (invalidIndex >= 0) throw new Error(`请补全服务项 ${invalidIndex + 1} 的服务类型、实施场所、实施批次、检测类别和检测方式。`)
+  if (newContract.value.start_date && newContract.value.end_date && newContract.value.start_date > newContract.value.end_date) {
+    throw new Error('合同开始日期不能晚于结束日期。')
+  }
+}
+
+async function refreshSelectedCRMAccess() {
+  const customerID = String(newContract.value.customer_id || '')
+  const customers = await listMyCustomers({ keyword: newContract.value.customer_name, page: 1, page_size: 100 })
+  if (!customers.items.some((item) => String(item.id || item.customer_id || '') === customerID)) {
+    throw new Error('所选 CRM 客户已失效或不在当前权限范围内，请重新选择。')
+  }
+  if (!newContract.value.opportunity_id) return
+  const opportunityID = String(newContract.value.opportunity_id)
+  const opportunities = await listMyOpportunities({ keyword: newContract.value.opportunity_name, page: 1, page_size: 100 })
+  const selected = opportunities.items.find((item) => String(item.id || item.opportunity_id || '') === opportunityID)
+  const selectedCustomerID = String(selected?.customer_id || selected?.customer?.id || '')
+  if (!selected || selectedCustomerID !== customerID) {
+    throw new Error('所选 CRM 商机已失效、不在当前权限范围内或不属于所选客户，请重新选择。')
+  }
+}
+
 async function submitNewContract() {
+  contractCreating.value = true
   try {
-    if (!selectedContractTemplate.value) throw new Error('请先选择合同模板。')
-    const payload = {
-      opportunity_id: newContract.value.opportunity_id,
-      opportunity_name: newContract.value.opportunity_name,
-      crm_customer_id: Number(newContract.value.customer_id || 0),
-      title: newContract.value.title.trim(),
-      contract_type: newContract.value.contract_type,
-      service_type: newContract.value.service_items[0]?.service_type || '',
-      amount_minor: Math.round(Number(newContract.value.amount) * 100),
-      currency: newContract.value.currency,
-      customer_name: newContract.value.customer_name.trim(),
-      customer_address: newContract.value.customer_address.trim(),
-      customer_contact: newContract.value.customer_contact.trim(),
-      customer_phone: newContract.value.customer_phone.trim(),
-      service_items: newContract.value.service_items.map((serviceItem) => ({
-        service_type: serviceItem.service_type,
-        name: serviceItem.name.trim(),
-        site: serviceItem.site.trim(),
-        batch: serviceItem.batch.trim(),
-        category: serviceItem.category.trim(),
-        requirement: serviceItem.requirement.trim(),
-        test_mode: serviceItem.test_mode,
-        systems: serviceItem.systems.map((system) => ({ name: system.name.trim(), level: system.level })),
-      })),
-      content: '',
-      template_id: selectedContractTemplate.value.id,
-      template_values: { ...newContract.value.template_values },
+    const payload = buildNewContractPayload()
+    if (isExternalContractMode.value) {
+      validateExternalContract()
+      // 提交前重新经过 CRM 浏览器鉴权，既给用户即时反馈，也刷新 CRM 的服务端授权快照；
+      // 合同后端随后仍会使用机器接口再次校验，不能把此前端检查当作安全边界。
+      await refreshSelectedCRMAccess()
+      await createExternalContract(externalContractFile.value, payload)
+    } else {
+      if (!selectedContractTemplate.value) throw new Error('请先选择合同模板。')
+      await createContract({
+        ...payload,
+        template_id: selectedContractTemplate.value.id,
+        template_values: { ...newContract.value.template_values },
+      })
     }
-    const created = await createContract(payload)
     createDialogOpen.value = false
     newContract.value = emptyNewContract()
+    externalContractFile.value = null
+    externalContractFileError.value = ''
+    externalContractFileInputKey.value += 1
     templatePreviewHTML.value = ''
     await loadBusinessData()
     // 合同创建只负责写入合同系统。CRM 的合同转交由商机签单流程通过
     // /opportunities/:id/contract-transfer 发起，不能在这里调用不存在的
     // /contract-drafts 回传接口，也不能把合同创建 ID 当作转交事件 ID。
-    showToast('合同草稿已创建')
+    showToast(isExternalContractMode.value ? '外部合同草稿已创建' : '合同草稿已创建')
   } catch (error) {
     showToast(error?.message || '创建合同失败')
+  } finally {
+    contractCreating.value = false
   }
 }
 
@@ -1828,19 +2023,24 @@ onBeforeUnmount(() => {
 
     <div v-if="createDialogOpen" class="contract-modal-mask" @click.self="createDialogOpen = false">
       <form class="contract-detail-modal contract-create-modal" @submit.prevent="submitNewContract">
-        <header><div><span class="contract-badge info">合同草稿</span><h2>新建合同</h2><p>选择模板后直接填写自动生成的合同字段</p></div><button type="button" aria-label="关闭" @click="createDialogOpen = false"><ConsoleIcon name="close" /></button></header>
+        <header><div><span class="contract-badge info">合同草稿</span><h2>新建合同</h2><p>可使用标准模板生成，也可上传不依赖模板的外部合同 DOCX</p></div><button type="button" aria-label="关闭" @click="createDialogOpen = false"><ConsoleIcon name="close" /></button></header>
         <section>
           <div class="contract-form-grid">
-            <label class="contract-form-wide contract-template-first"><span>第一步：选择合同模板</span><select v-model="newContract.template_id" required @change="selectContractTemplate"><option value="" disabled>请选择用于新建合同的模板</option><option v-for="item in contractTemplates" :key="item.id" :value="item.id">{{ item.name }}（{{ item.fields?.length || 0 }} 个字段）</option></select><small>新合同必须基于模板创建，不支持手工填写正文。</small></label>
-            <template v-if="selectedContractTemplate">
-              <label><span>关联商机（选填）</span><div class="contract-opportunity-control"><button type="button" @click="openOpportunityPicker">{{ newContract.opportunity_name || '点击选择权限范围内的商机' }}</button><button v-if="newContract.opportunity_id" type="button" aria-label="清除关联商机" @click="clearOpportunity">×</button></div><small>合同编号将在审批通过后自动生成</small></label>
+            <div class="contract-form-wide contract-creation-mode" role="radiogroup" aria-label="合同创建方式"><button type="button" :class="{ active: contractCreationMode === 'template' }" role="radio" :aria-checked="contractCreationMode === 'template'" @click="selectContractCreationMode('template')"><strong>使用合同模板</strong><span>选择标准模板并填写模板字段</span></button><button type="button" :class="{ active: contractCreationMode === 'external' }" role="radio" :aria-checked="contractCreationMode === 'external'" @click="selectContractCreationMode('external')"><strong>上传外部合同</strong><span>上传未签署 DOCX，并补全结构化字段</span></button></div>
+            <label v-if="contractCreationMode === 'template'" class="contract-form-wide contract-template-first"><span>第一步：选择合同模板</span><select v-model="newContract.template_id" required @change="selectContractTemplate"><option value="" disabled>请选择用于新建合同的模板</option><option v-for="item in contractTemplates" :key="item.id" :value="item.id">{{ item.name }}（{{ item.fields?.length || 0 }} 个字段）</option></select><small>模板将生成合同正文，合同编号在审批通过后自动生成。</small></label>
+            <label v-else class="contract-form-wide contract-external-file"><span>第一步：上传外部合同 DOCX</span><input :key="externalContractFileInputKey" required type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" @change="selectExternalContractFile" /><small v-if="externalContractFile">已选择：{{ externalContractFile.name }}（{{ (externalContractFile.size / 1024 / 1024).toFixed(2) }}MB）</small><small v-else>仅支持未签署 DOCX，文件不能为空且不超过 10MB；服务端将继续校验文件结构和安全边界。</small><small v-if="externalContractFileError" class="contract-field-error" role="alert">{{ externalContractFileError }}</small></label>
+            <template v-if="selectedContractTemplate || isExternalContractMode">
+              <label v-if="isExternalContractMode"><span>CRM 客户</span><div class="contract-opportunity-control"><button type="button" @click="openCustomerPicker">{{ newContract.customer_name || '点击选择权限范围内的客户' }}</button><button v-if="newContract.customer_id" type="button" aria-label="清除 CRM 客户" @click="clearCustomer">×</button></div><small>外部合同必须关联 CRM 客户，不能只输入客户名称</small></label>
+              <label><span>关联商机（选填）</span><div class="contract-opportunity-control"><button type="button" :disabled="isExternalContractMode && !newContract.customer_id" @click="openOpportunityPicker">{{ newContract.opportunity_name || (isExternalContractMode && !newContract.customer_id ? '请先选择 CRM 客户' : (isExternalContractMode ? '点击选择该客户的商机' : '点击选择权限范围内的商机')) }}</button><button v-if="newContract.opportunity_id" type="button" aria-label="清除关联商机" @click="clearOpportunity">×</button></div><small>合同编号将在审批通过后自动生成</small></label>
               <label><span>合同名称</span><input v-model="newContract.title" required placeholder="请输入合同名称" /></label>
               <label><span>合同负责人</span><input :value="currentUserLabel" readonly aria-readonly="true" /><small>已根据当前登录用户自动填入</small></label>
               <label><span>合同类型</span><select v-model="newContract.contract_type" required><option value="" disabled>请选择合同类型</option><option v-for="item in contractTypeOptions" :key="item" :value="item">{{ item }}</option></select></label>
-              <div class="contract-form-wide contract-service-items"><div class="contract-section-title"><div><h3>服务项</h3><p>场所、批次和检测类别用于合同生效后的项目自动拆解；最多 20 个服务项。</p></div><button class="contract-text-button" type="button" :disabled="!canAddServiceItem" @click="addServiceItem">＋ 增加服务项</button></div><article v-for="(serviceItem, serviceIndex) in newContract.service_items" :key="serviceIndex" class="contract-service-item"><header><strong>服务项 {{ serviceIndex + 1 }}</strong><button type="button" :aria-label="`删除服务项 ${serviceIndex + 1}`" @click="removeServiceItem(serviceIndex)">×</button></header><label><span>服务类型</span><select v-model="serviceItem.service_type" required><option value="" disabled>请选择服务类型</option><option v-for="item in serviceTypeOptions" :key="item" :value="item">{{ item }}</option></select></label><label><span>服务名称</span><input v-model="serviceItem.name" placeholder="默认使用服务类型" /></label><label><span>实施场所</span><input v-model="serviceItem.site" placeholder="例如：上海总部" /></label><label><span>实施批次</span><input v-model="serviceItem.batch" placeholder="例如：第一批" /></label><label><span>检测类别</span><input v-model="serviceItem.category" placeholder="默认使用服务类型" /></label><label><span>检测方式</span><select v-model="serviceItem.test_mode"><option value="STANDARD">常规检测</option><option value="PENETRATION">渗透测试</option></select></label><label><span>体系 / 能力要求</span><input v-model="serviceItem.requirement" placeholder="例如：等保三级" /></label><section class="contract-system-information"><div class="contract-section-title"><div><h3>系统信息（选填）</h3><p>每个系统将形成可独立实施的服务来源，最多 15 个。</p></div><button class="contract-text-button" type="button" :disabled="!canAddSystemRow(serviceItem)" @click="addSystemRow(serviceItem)">＋ 增加系统信息</button></div><p v-if="!serviceItem.systems.length" class="contract-service-empty">尚未增加系统信息</p><div v-for="(system, systemIndex) in serviceItem.systems" :key="systemIndex" class="contract-system-row"><label><span>系统名称</span><input v-model="system.name" required maxlength="255" placeholder="请输入系统名称" /></label><label><span>系统等级</span><select v-model="system.level" required><option value="">请选择系统等级</option><option v-for="level in systemLevelOptions" :key="level" :value="level">{{ level }}</option></select></label><button type="button" aria-label="删除系统信息" @click="removeSystemRow(serviceItem, systemIndex)">×</button></div></section></article></div>
+              <div class="contract-form-wide contract-service-items"><div class="contract-section-title"><div><h3>服务项</h3><p>外部合同的场所、批次和检测类别必须完整，合同生效后将用于项目拆解；最多 20 个服务项。</p></div><button class="contract-text-button" type="button" :disabled="!canAddServiceItem" @click="addServiceItem">＋ 增加服务项</button></div><p v-if="isExternalContractMode && detectionCategoryLoading" class="contract-service-directory-state">正在读取项目管理检测类别…</p><p v-else-if="isExternalContractMode && detectionCategoryError" class="contract-field-error" role="alert">{{ detectionCategoryError }} <button type="button" @click="loadDetectionCategoryOptions">重新加载</button></p><article v-for="(serviceItem, serviceIndex) in newContract.service_items" :key="serviceIndex" class="contract-service-item"><header><strong>服务项 {{ serviceIndex + 1 }}</strong><button type="button" :aria-label="`删除服务项 ${serviceIndex + 1}`" @click="removeServiceItem(serviceIndex)">×</button></header><label><span>服务类型</span><select v-model="serviceItem.service_type" required><option value="" disabled>请选择服务类型</option><option v-for="item in serviceTypeOptions" :key="item" :value="item">{{ item }}</option></select></label><label><span>服务名称</span><input v-model="serviceItem.name" placeholder="默认使用服务类型" /></label><label><span>实施场所</span><input v-model="serviceItem.site" :required="isExternalContractMode" placeholder="例如：上海总部" /></label><label><span>实施批次</span><input v-model="serviceItem.batch" :required="isExternalContractMode" placeholder="例如：第一批" /></label><label><span>检测类别</span><select v-if="isExternalContractMode" v-model="serviceItem.category" required :disabled="detectionCategoryLoading || !detectionCategoryOptions.length"><option value="" disabled>{{ detectionCategoryLoading ? '正在加载检测类别' : '请选择检测类别' }}</option><option v-for="item in detectionCategoryOptions" :key="item.category" :value="item.category">{{ item.category }}</option></select><input v-else v-model="serviceItem.category" placeholder="默认使用服务类型" /></label><label><span>检测方式</span><select v-model="serviceItem.test_mode" required><option value="STANDARD">常规检测</option><option value="PENETRATION">渗透测试</option></select></label><label><span>体系 / 能力要求</span><input v-model="serviceItem.requirement" placeholder="例如：等保三级" /></label><section class="contract-system-information"><div class="contract-section-title"><div><h3>系统信息（选填）</h3><p>每个系统将形成可独立实施的服务来源，最多 15 个。</p></div><button class="contract-text-button" type="button" :disabled="!canAddSystemRow(serviceItem)" @click="addSystemRow(serviceItem)">＋ 增加系统信息</button></div><p v-if="!serviceItem.systems.length" class="contract-service-empty">尚未增加系统信息</p><div v-for="(system, systemIndex) in serviceItem.systems" :key="systemIndex" class="contract-system-row"><label><span>系统名称</span><input v-model="system.name" required maxlength="255" placeholder="请输入系统名称" /></label><label><span>系统等级</span><select v-model="system.level" required><option value="">请选择系统等级</option><option v-for="level in systemLevelOptions" :key="level" :value="level">{{ level }}</option></select></label><button type="button" aria-label="删除系统信息" @click="removeSystemRow(serviceItem, systemIndex)">×</button></div></section></article></div>
               <label><span>合同金额</span><input v-model="newContract.amount" required type="number" min="0" step="0.01" placeholder="0.00" /></label>
               <label><span>币种</span><input v-model="newContract.currency" required /></label>
-              <label><span>客户名称</span><input v-model="newContract.customer_name" required placeholder="请输入客户名称" /></label>
+              <label><span>开始日期（选填）</span><input v-model="newContract.start_date" type="date" /></label>
+              <label><span>结束日期（选填）</span><input v-model="newContract.end_date" type="date" :min="newContract.start_date || undefined" /></label>
+              <label><span>客户名称</span><input v-model="newContract.customer_name" required :readonly="isExternalContractMode" :aria-readonly="isExternalContractMode ? 'true' : undefined" :placeholder="isExternalContractMode ? '请从 CRM 客户目录选择' : '请输入客户名称'" /></label>
               <label><span>客户地址</span><input v-model="newContract.customer_address" placeholder="请输入客户地址" /></label>
               <label><span>客户联系人</span><input v-model="newContract.customer_contact" placeholder="请输入客户联系人" /></label>
               <label><span>客户联系电话</span><input v-model="newContract.customer_phone" type="tel" placeholder="请输入客户联系电话" /></label>
@@ -1851,12 +2051,14 @@ onBeforeUnmount(() => {
             <div class="contract-template-field-grid"><label v-for="field in selectedContractTemplate.fields || []" :key="field.name" :title="field.locked && !isAdmin ? '此项已由管理员预设' : undefined"><span>{{ field.label }}</span><input v-model="newContract.template_values[field.name]" required :readonly="field.locked && !isAdmin" :class="{ 'is-admin-configured': field.locked && !isAdmin }" :title="field.locked && !isAdmin ? '此项已由管理员预设' : undefined" :placeholder="field.default ? `默认：${field.default}` : `请输入${field.label}`" /><small v-if="field.locked && !isAdmin">此项已由管理员预设</small></label></div>
             <p v-if="templatePreviewError" class="contract-template-preview-error" role="alert">{{ templatePreviewError }}</p>
           </div>
-          <p v-else class="contract-info-banner"><ConsoleIcon name="info" />请先选择合同模板，再填写合同、服务项和系统信息。</p>
+          <p v-else-if="contractCreationMode === 'template'" class="contract-info-banner"><ConsoleIcon name="info" />请先选择合同模板，再填写合同、服务项和系统信息。</p>
           <ContractDocumentPreview v-if="templatePreviewHTML" ref="templatePreviewRef" closable :html="templatePreviewHTML" @close="templatePreviewHTML = ''" />
         </section>
-        <footer><button class="contract-button secondary" type="button" @click="createDialogOpen = false">取消</button><button class="contract-button primary" type="submit" :disabled="!selectedContractTemplate"><ConsoleIcon name="save" />生成并保存合同</button></footer>
+        <footer><button class="contract-button secondary" type="button" :disabled="contractCreating" @click="createDialogOpen = false">取消</button><button class="contract-button primary" type="submit" :disabled="!canSaveNewContract"><ConsoleIcon name="save" />{{ contractCreating ? '正在保存…' : (isExternalContractMode ? '上传并保存合同' : '生成并保存合同') }}</button></footer>
       </form>
     </div>
+
+    <div v-if="customerPickerOpen" class="contract-modal-mask contract-opportunity-mask" @click.self="customerPickerOpen = false"><article class="contract-detail-modal contract-opportunity-modal"><header><div><span class="contract-badge info">客户主数据</span><h2>选择 CRM 客户</h2><p>仅显示当前账号权限范围内的有效客户</p></div><button type="button" aria-label="关闭" @click="customerPickerOpen = false"><ConsoleIcon name="close" /></button></header><section><div class="contract-opportunity-search"><label><span>搜索客户</span><input v-model="customerKeyword" type="search" placeholder="客户名称 / 客户编号" @keydown.enter.prevent="searchCustomerOptions" /></label><button class="contract-button secondary" type="button" :disabled="customerLoading" @click="searchCustomerOptions">搜索</button></div><p v-if="customerLoading" class="contract-modal-loading">正在读取客户…</p><p v-else-if="customerError" class="contract-session-error">{{ customerError }}</p><div v-else class="contract-opportunity-list"><button v-for="item in customerOptions" :key="item.id || item.customer_id" type="button" @click="selectCustomer(item)"><strong>{{ item.name || item.customer_name }}</strong><span>{{ item.customer_no || '—' }} · {{ item.industry || '行业未填写' }} / {{ item.region || '区域未填写' }}</span></button><p v-if="!customerOptions.length" class="contract-empty">没有匹配的有效客户，请调整关键词后重试</p><button v-if="customerHasMore" class="contract-button secondary contract-opportunity-load-more" type="button" :disabled="customerLoading" @click="loadMoreCustomerOptions">加载更多（已显示 {{ customerOptions.length }} / {{ customerTotal }}）</button></div></section><footer><button class="contract-button secondary" type="button" @click="customerPickerOpen = false">取消</button></footer></article></div>
 
     <div v-if="opportunityPickerOpen" class="contract-modal-mask contract-opportunity-mask" @click.self="opportunityPickerOpen = false"><article class="contract-detail-modal contract-opportunity-modal"><header><div><span class="contract-badge info">客户与商机管理</span><h2>选择关联商机</h2><p>显示当前用户权限范围内的商机，检索由客户与商机管理服务端完成</p></div><button type="button" aria-label="关闭" @click="opportunityPickerOpen = false"><ConsoleIcon name="close" /></button></header><section><div class="contract-opportunity-search"><label><span>搜索商机</span><input v-model="opportunityKeyword" type="search" placeholder="商机名称 / 编号 / 客户名称" @keydown.enter.prevent="searchOpportunityOptions" /></label><button class="contract-button secondary" type="button" :disabled="opportunityLoading" @click="searchOpportunityOptions">搜索</button></div><p v-if="opportunityLoading" class="contract-modal-loading">正在读取商机…</p><p v-else-if="opportunityError" class="contract-session-error">{{ opportunityError }}</p><div v-else class="contract-opportunity-list"><button v-for="item in opportunityOptions" :key="item.id || item.opportunity_id" type="button" @click="selectOpportunity(item)"><strong>{{ item.name || item.title || item.opportunity_name }}</strong><span>{{ item.opportunity_no || item.code || item.opportunity_code || '—' }} · {{ item.customer_name || item.customer?.name || '未关联客户' }} · {{ item.current_stage || '阶段未知' }}</span></button><p v-if="!opportunityOptions.length" class="contract-empty">没有匹配的商机，请调整关键词后重试</p><button v-if="opportunityHasMore" class="contract-button secondary contract-opportunity-load-more" type="button" :disabled="opportunityLoading" @click="loadMoreOpportunityOptions">加载更多（已显示 {{ opportunityOptions.length }} / {{ opportunityTotal }}）</button></div></section><footer><button class="contract-button secondary" type="button" @click="opportunityPickerOpen = false">取消</button></footer></article></div>
 

@@ -467,6 +467,78 @@ export async function createContract(payload) {
 }
 
 /**
+ * createExternalContract 上传未签署 DOCX 并使用既有合同字段创建草稿。
+ * 浏览器不能手工设置 multipart Content-Type，否则会丢失 boundary。
+ * @param {File} file 外部合同 DOCX。
+ * @param {Record<string, unknown>} metadata 合同与服务项结构化字段。
+ * @returns {Promise<unknown>} 新建合同。
+ */
+export async function createExternalContract(file, metadata) {
+  const form = new FormData()
+  form.set('file', file)
+  form.set('metadata', JSON.stringify(metadata))
+  return request('/contracts/external', { method: 'POST', body: form })
+}
+
+async function requestBusinessDirectory(baseURL, path, fallbackMessage, source) {
+  let response
+  try {
+    response = await fetch(`${baseURL}${path}`, {
+      credentials: 'include',
+      headers: { Accept: 'application/json' },
+    })
+  } catch (error) {
+    const requestError = new Error(fallbackMessage)
+    attachStructuredContext(requestError, {
+      subsystem: 'contract_management', feature: 'contract_directory', operation: 'GET', path, method: 'GET',
+      metadata: { source, network: true },
+    }, { status: 0, code: 'NETWORK_ERROR', requestId: '', traceId: '' })
+    throw requestError
+  }
+  const body = await readBody(response)
+  if (!response.ok) {
+    const error = new Error(userSafeErrorMessage(body?.message) || fallbackMessage)
+    error.status = response.status
+    error.code = body?.code
+    attachStructuredContext(error, {
+      subsystem: 'contract_management', feature: 'contract_directory', operation: 'GET', path, method: 'GET',
+      requestId: body?.request_id || '', traceId: body?.trace_id || body?.traceId || '', metadata: { source },
+    }, {
+      status: response.status, code: body?.code, requestId: body?.request_id || '', traceId: body?.trace_id || body?.traceId || '',
+    })
+    throw error
+  }
+  return body?.data ?? body
+}
+
+/** 读取当前账号数据范围内的有效 CRM 客户，作为合同客户权威选择项。 */
+export async function listMyCustomers(params = {}) {
+  const search = new URLSearchParams({
+    keyword: String(params.keyword || '').trim(),
+    status: 'ACTIVE',
+    page: String(Math.max(1, Number(params.page) || 1)),
+    page_size: String(Math.min(100, Math.max(1, Number(params.page_size) || 50))),
+    sort_by: 'name',
+    sort_order: 'asc',
+  })
+  const data = await requestBusinessDirectory(CUSTOMER_API_BASE_URL, `/customers?${search}`, '读取可关联客户失败，请稍后重试。', 'crm_customer_lookup')
+  const items = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : []
+  const page = Number(data?.page || params.page || 1)
+  const pageSize = Number(data?.page_size || params.page_size || items.length || 50)
+  const total = Number(data?.total ?? items.length)
+  return { items, page, page_size: pageSize, total, has_more: page * pageSize < total }
+}
+
+/** 读取项目管理当前启用的检测类别目录，合同表单不得保存自由文本类别。 */
+export async function listContractDetectionCategories() {
+  // 合同后端使用机器身份读取项目管理目录；浏览器只访问合同同源接口，避免要求
+  // 合同专员同时持有项目管理的浏览器会话或 project.read 权限。
+  const data = await request('/detection-categories')
+  const items = Array.isArray(data?.items) ? data.items : []
+  return items.filter((item) => item?.enabled !== false && String(item?.category || '').trim())
+}
+
+/**
  * listMyOpportunities 使用 CRM 服务端关键字检索和分页获取当前用户可关联的商机。
  * @param {{keyword?: string, page?: number, page_size?: number}} [params={}] 关键字与页码参数；page_size 会限制在 1 至 100。
  * @returns {Promise<{items: Array<unknown>, page: number, page_size: number, total: number, has_more: boolean}>} 规范化后的商机分页结果。
