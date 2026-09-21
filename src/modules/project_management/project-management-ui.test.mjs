@@ -7,6 +7,7 @@ const source = await readFile(new URL('./views/ProjectManagementView.vue', impor
 const styles = await readFile(new URL('./styles/project-management.css', import.meta.url), 'utf8')
 const pickerSource = await readFile(new URL('./components/ServiceItemPicker.vue', import.meta.url), 'utf8')
 const searchableSelectSource = await readFile(new URL('./components/SearchableSelect.vue', import.meta.url), 'utf8')
+const penetrationWorkPackageSource = await readFile(new URL('./components/PenetrationWorkPackageCard.vue', import.meta.url), 'utf8')
 const filterBarSource = await readFile(new URL('./components/FilterBar.vue', import.meta.url), 'utf8')
 const sharedComponentSources = await Promise.all([
   'CodePills.vue',
@@ -39,7 +40,7 @@ test('项目管理页面覆盖原型的五个业务域与核心交互', () => {
   assert.match(source, /onMounted\(loadWorkspace\)/)
   assert.match(source, /await confirmServiceItemsRequest\(ids\)/)
   assert.match(source, /await setRuleEnabled\(rule\.id, rule\.kind \|\| activeSection\.value, next\)/)
-  for (const operation of ['assignTeam', 'assignExecutionTeam', 'planImplementation', 'startImplementationPreparation', 'submitFieldRecord', 'reportDeviation', 'reviewDeviation', 'completeServiceItemField']) {
+  for (const operation of ['assignTeam', 'assignExecutionTeam', 'planImplementation', 'startImplementationPreparation', 'startFieldExecution', 'submitFieldRecord', 'reportDeviation', 'reviewDeviation', 'completeServiceItemField']) {
     assert.match(source, new RegExp(`runOperation[\\s\\S]*${operation}`))
   }
   assert.match(source, /asRFC3339\(form\.plannedStart\)/)
@@ -47,6 +48,21 @@ test('项目管理页面覆盖原型的五个业务域与核心交互', () => {
   assert.match(source, /listDeliveryEvents\(\)/)
   assert.match(source, /listCapabilities\(\)/)
   assert.match(source, /DEVIATION_REPORTED/)
+})
+
+test('等保附属渗透测试以专项卡片呈现且不混入服务项统计', () => {
+  assert.match(source, /PenetrationWorkPackageCard/)
+  assert.match(source, /penetrationPackageStats/)
+  assert.match(source, /渗透专项（待确认/)
+  assert.match(source, /penetration_work_package/)
+  assert.match(source, /String\(item\?\.test_mode \|\| ''\)\.toUpperCase\(\) !== 'PENETRATION'/)
+  assert.match(penetrationWorkPackageSource, /不计入服务项与结算/)
+  assert.match(penetrationWorkPackageSource, /decision_status/)
+  assert.match(penetrationWorkPackageSource, /execution_status/)
+  assert.match(penetrationWorkPackageSource, /report_status/)
+  assert.match(penetrationWorkPackageSource, /expected_version: workPackage\.value\.version/)
+  assert.match(penetrationWorkPackageSource, /选择具备 PENETRATION_TEST 能力的工程师/)
+  assert.match(penetrationWorkPackageSource, /取消专项并归入不开展/)
 })
 
 test('系统配置侧边栏合并为一个规则配置中心并保留细粒度权限与深链接', () => {
@@ -1048,8 +1064,10 @@ test('每个写操作入口都按服务端同款权限码门控', () => {
   // 调整拆解的 project.decomposition.manage 是两个权限码，不能共用同一个守卫。
   assert.match(source, /v-if="activeSection === 'decomposition' && canConfirmDecomposition"[^>]*@click="confirmDecomposition"/)
   assert.match(source, /v-if="canPlanImplementation" class="pm-button primary" :disabled="saving \|\| !!planningBlocked"/)
-  assert.match(source, /v-if="selectedServiceItem && canExecuteField" class="pm-form pm-operation-form"/)
+  assert.match(source, /selectedServiceItem\.status === '实施准备中' && canExecuteField" class="pm-button primary"[^>]*runOperation\('field-start'\)[^>]*>进入实施中</)
+  assert.match(source, /selectedServiceItem\.status === '实施中' && canExecuteField" class="pm-form pm-operation-form"/)
   assert.match(source, /selectedServiceItem\.status === '实施中' && canCompleteField" class="pm-button" :disabled="saving" @click="runOperation\('complete'\)"/)
+  assert.match(source, />现场测评结束<\/button>/)
   assert.match(source, /v-if="canReportDeviation" class="pm-button primary" :disabled="saving" @click="runOperation\('exception-report'\)"/)
   assert.match(source, /v-if="canReviewDeviation" class="pm-button" :disabled="saving" @click="runOperation\('exception-review'\)"/)
   assert.match(source, /v-if="canReviewSpecialMethod" class="pm-form-row"/)
@@ -1074,7 +1092,7 @@ test('交付事件名与后端常量逐字一致', () => {
   // 后端只发 FIELD_COMPLETED；曾写成 FIELD_IMPLEMENTATION_COMPLETED，导致趋势图恒空。
   assert.match(source, /event\.type === 'FIELD_COMPLETED'/)
   assert.doesNotMatch(source, /FIELD_IMPLEMENTATION_COMPLETED/)
-  assert.match(source, /FIELD_COMPLETED: '现场实施已完成'/)
+  assert.match(source, /FIELD_COMPLETED: '现场测评已结束'/)
 })
 
 test('拆解调整入口按 project.decomposition.manage 门控并调用真实接口', () => {
