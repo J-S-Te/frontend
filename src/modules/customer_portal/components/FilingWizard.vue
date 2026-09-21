@@ -156,7 +156,7 @@ function beforeUnloadGuard(event) {
   event.preventDefault()
   event.returnValue = ''
 }
-function materialStatusText(value) { return ({ PENDING_UPLOAD: '等待上传', FINALIZING: '正在核验对象', SCANNING: '文件校验中', CLEAN: '文件校验通过', REJECTED: '检测到风险，已拒绝', SCAN_FAILED: '文件校验失败，禁止提交' })[value] || '未上传' }
+function materialStatusText(value) { return ({ PENDING_UPLOAD: '等待上传', FINALIZING: '正在核验文件', SCANNING: '文件校验中', CLEAN: '文件校验通过', REJECTED: '检测到风险，已拒绝', SCAN_FAILED: '文件校验失败，禁止提交' })[value] || '未上传' }
 function selectMaterialFile(fieldKey, event) {
   const file = event.target.files?.[0] || null
   const signature = file ? `${file.name}\u0000${file.type}\u0000${file.size}\u0000${file.lastModified}` : ''
@@ -177,10 +177,12 @@ async function uploadMaterial(item) {
     // 同一文件的完成响应若丢失，继续使用服务端已有材料版本，不创建冲突的第二版。
     materialCreateKeys[item.key] ||= newKey()
     const grant = await createFilingMaterialUpload(filing.value.id, { material_code: code, file_name: file.name, mime_type: file.type, size_bytes: file.size, sha256: await fileSHA256(file) }, materialCreateKeys[item.key])
-    const target = new URL(grant.upload_url)
-    if (target.protocol !== 'https:' || target.username || target.password || target.hash) throw new Error('对象存储上传地址不安全。')
-    const uploaded = await fetch(target, { method: 'PUT', body: file, credentials: 'omit', redirect: 'error', headers: { 'Content-Type': file.type } })
-    if (!uploaded.ok) throw new Error('对象存储上传失败。')
+    const target = new URL(grant.upload_url, window.location.origin)
+    if (target.origin !== window.location.origin || target.username || target.password || target.hash) throw new Error('统一文件网关上传地址不安全。')
+    const uploadHeaders = { 'Content-Type': file.type }
+    if (grant.upload_ticket) uploadHeaders.Authorization = `UploadTicket ${grant.upload_ticket}`
+    const uploaded = await fetch(target, { method: 'PUT', body: file, credentials: 'omit', redirect: 'error', headers: uploadHeaders })
+    if (!uploaded.ok) throw new Error('统一文件网关上传失败。')
     await completeFilingMaterialUpload(filing.value.id, grant.material.id, grant.material.version)
     materialFiles[item.key] = null
     materialFileSignatures[item.key] = ''
@@ -188,7 +190,7 @@ async function uploadMaterial(item) {
     await reloadCurrent()
     emit('notice', `${item.label}已上传并进入静态文件校验，文件校验通过前不能提交备案。`)
   } catch (error) {
-    materialErrors[item.key] = error?.code === 'PORTAL_FILING_MATERIAL_DEPENDENCY_UNAVAILABLE' ? '对象存储或文件校验服务尚未配置，上传已安全关闭。' : (error?.message || '材料上传失败。')
+    materialErrors[item.key] = error?.code === 'PORTAL_FILING_MATERIAL_DEPENDENCY_UNAVAILABLE' ? '统一文件网关或文件校验服务尚未配置，上传已安全关闭。' : (error?.message || '材料上传失败。')
   } finally { materialBusy[item.key] = false }
 }
 function labelForStep(code) { return steps.find(item => item[0] === code)?.[1] || code }
@@ -424,14 +426,14 @@ onUnmounted(() => clearTimeout(validationNoticeTimer))
       <nav class="filing-steps" aria-label="备案填写步骤"><button v-for="([code, label], index) in steps" :key="code" type="button" :class="{ active: currentStep === index, done: saveState[code].startsWith('服务端已保存') }" @click="goToStep(index)"><span>{{ index + 1 }}</span>{{ label }}<small>{{ saveState[code] }}</small></button></nav>
       <section class="portal-card filing-step-panel">
         <header><div><h2>步骤 {{ currentStep + 1 }}：{{ steps[currentStep][1] }}</h2></div><strong :class="saveState[currentCode].includes('失败') || saveState[currentCode].includes('冲突') ? 'save-bad' : 'save-good'">{{ saveState[currentCode] }}</strong></header>
-        <p v-if="currentCode === 'MATERIALS' && !materialUploadAvailable" class="portal-warning">对象存储或文件校验服务尚未配置，材料上传已安全关闭；材料声明仍可暂存。</p><p v-else-if="currentCode === 'MATERIALS'" class="portal-info">材料先保存声明，再通过受控对象存储上传并完成静态文件校验；只有服务端返回 CLEAN 的不可变对象版本才允许锁定备案。</p>
+        <p v-if="currentCode === 'MATERIALS' && !materialUploadAvailable" class="portal-warning">统一文件网关或文件校验服务尚未配置，材料上传已安全关闭；材料声明仍可暂存。</p><p v-else-if="currentCode === 'MATERIALS'" class="portal-info">材料先保存声明，再通过统一文件网关上传并完成静态文件校验；只有服务端返回 CLEAN 的不可变文件版本才允许锁定备案。</p>
         <div class="filing-fields" :aria-disabled="readonly">
           <template v-for="group in visibleGroups" :key="group.title || 'ungrouped'">
             <h4 v-if="group.title" class="filing-group-title">{{ group.title }}</h4>
             <template v-for="item in group.items" :key="item.key">
             <fieldset v-if="item.type === 'boolean'" class="filing-field"><span class="filing-field-label">{{ item.label }}<span v-if="item.required"> *</span></span><span class="filing-field-control"><label><input v-model="sectionData[currentCode][item.key]" type="radio" :name="`${currentCode}-${item.key}`" :value="true" :disabled="readonly" @change="scheduleSave">是</label><label><input v-model="sectionData[currentCode][item.key]" type="radio" :name="`${currentCode}-${item.key}`" :value="false" :disabled="readonly" @change="scheduleSave">否</label></span></fieldset>
             <fieldset v-else-if="item.type === 'checks'" class="filing-field filing-wide"><span class="filing-field-label">{{ item.label }}<span v-if="item.required"> *</span></span><span class="filing-field-control"><label v-for="option in item.options" :key="option[0]"><input v-model="sectionData[currentCode][item.key]" type="checkbox" :value="option[0]" :disabled="readonly" @change="scheduleSave">{{ option[1] }}</label></span></fieldset>
-            <fieldset v-else-if="item.type === 'material'" class="filing-field filing-wide material-declaration"><span class="filing-field-label">{{ item.label }} *</span><span class="filing-field-control"><label><input v-model="sectionData[currentCode][item.key]" type="radio" :name="`${currentCode}-${item.key}`" :value="true" :disabled="readonly" @change="scheduleSave">已有材料声明</label><label><input v-model="sectionData[currentCode][item.key]" type="radio" :name="`${currentCode}-${item.key}`" :value="false" :disabled="readonly" @change="scheduleSave">暂无材料</label><label v-if="sectionData[currentCode][item.key]">文件名元数据<input v-model.trim="sectionData[currentCode][item.fileKey]" maxlength="255" :disabled="readonly" placeholder="填写后选择同一文件上传" @input="scheduleSave"></label><template v-if="sectionData[currentCode][item.key]"><label>安全材料文件（PDF/PNG/JPG，最大 20 MiB）<input type="file" accept="application/pdf,image/png,image/jpeg" :disabled="readonly || materialBusy[item.key] || !materialUploadAvailable" @change="selectMaterialFile(item.key, $event)"></label><button type="button" :disabled="readonly || !materialFiles[item.key] || materialBusy[item.key] || !materialUploadAvailable" @click="uploadMaterial(item)">{{ materialBusy[item.key] ? '上传处理中…' : '上传并进入扫描' }}</button></template><em>上传状态：{{ materialStatusText(materialByCode[materialCodeByField[item.key]]?.scan_status) }}</em><small v-if="materialByCode[materialCodeByField[item.key]]">{{ materialByCode[materialCodeByField[item.key]].file_name }} · v{{ materialByCode[materialCodeByField[item.key]].version }}</small><p v-if="materialErrors[item.key]" class="portal-error" role="alert">{{ materialErrors[item.key] }}</p></span></fieldset>
+            <fieldset v-else-if="item.type === 'material'" class="filing-field filing-wide material-declaration"><span class="filing-field-label">{{ item.label }} *</span><span class="filing-field-control"><label><input v-model="sectionData[currentCode][item.key]" type="radio" :name="`${currentCode}-${item.key}`" :value="true" :disabled="readonly" @change="scheduleSave">已有材料声明</label><label><input v-model="sectionData[currentCode][item.key]" type="radio" :name="`${currentCode}-${item.key}`" :value="false" :disabled="readonly" @change="scheduleSave">暂无材料</label><label v-if="sectionData[currentCode][item.key]">文件名元数据<input v-model.trim="sectionData[currentCode][item.fileKey]" maxlength="255" :disabled="readonly" placeholder="填写后选择同一文件上传" @input="scheduleSave"></label><template v-if="sectionData[currentCode][item.key]"><label>安全材料文件（PDF/PNG/JPG，最大 20 MiB）<input type="file" accept="application/pdf,image/png,image/jpeg" :disabled="readonly || materialBusy[item.key] || !materialUploadAvailable" @change="selectMaterialFile(item.key, $event)"></label><button type="button" :disabled="readonly || !materialFiles[item.key] || materialBusy[item.key] || !materialUploadAvailable" @click="uploadMaterial(item)">{{ materialBusy[item.key] ? '上传处理中…' : '上传并校验' }}</button></template><em>上传状态：{{ materialStatusText(materialByCode[materialCodeByField[item.key]]?.scan_status) }}</em><small v-if="materialByCode[materialCodeByField[item.key]]">{{ materialByCode[materialCodeByField[item.key]].file_name }} · v{{ materialByCode[materialCodeByField[item.key]].version }}</small><p v-if="materialErrors[item.key]" class="portal-error" role="alert">{{ materialErrors[item.key] }}</p></span></fieldset>
             <label v-else class="filing-field" :class="{ 'filing-wide': item.type === 'textarea' }"><span class="filing-field-label">{{ item.label }}<span v-if="item.required"> *</span></span><span class="filing-field-control">
               <select v-if="item.type === 'select'" v-model="sectionData[currentCode][item.key]" :required="item.required" :disabled="readonly" @change="scheduleSave"><option value="">请选择</option><option v-for="option in item.options" :key="option[0]" :value="option[0]">{{ option[1] }}</option></select>
               <select v-else-if="item.type === 'level'" v-model.number="sectionData[currentCode][item.key]" :required="item.required" :disabled="readonly" @change="scheduleSave"><option value="">请选择</option><option v-for="level in 5" :key="level" :value="level">第 {{ level }} 级</option></select>

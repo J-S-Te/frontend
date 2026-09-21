@@ -510,8 +510,10 @@ export function saveDetectionCategory(payload) {
  * @returns {Promise<{imported: number, skipped: number, errors?: string[]}>} 导入结果摘要。
  * @throws {Error} 无权限或网关返回非成功状态时抛出。
  */
-export function importDetectionCategories(items) {
-  return request('/detection-categories/import', { method: 'POST', body: JSON.stringify({ items }) })
+export function importDetectionCategories(file) {
+  const formData = new FormData()
+  formData.append('file', file)
+  return request('/detection-categories/import', { method: 'POST', body: formData })
 }
 
 /**
@@ -715,6 +717,51 @@ export function registerReportArtifact(itemID, revision, payload) {
   return request(`/service-items/${encodeURIComponent(itemID)}/report-revisions/${encodeURIComponent(revision)}/artifact`, { method: 'PUT', body: JSON.stringify(payload) })
 }
 
+function commandKey(prefix) {
+  const random = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`
+  return `${prefix}-${random}`.slice(0, 128)
+}
+
+function penetrationCommand(itemID, suffix, method, payload) {
+  return request(`/service-items/${encodeURIComponent(itemID)}/penetration-work-package${suffix}`, {
+    method,
+    headers: { 'Idempotency-Key': commandKey(`penetration-${String(itemID)}-${suffix || 'ensure'}`) },
+    body: JSON.stringify(payload),
+  })
+}
+
+export function getPenetrationWorkPackage(itemID) {
+  return request(`/service-items/${encodeURIComponent(itemID)}/penetration-work-package`)
+}
+
+export function ensurePenetrationWorkPackage(itemID, expectedVersion) {
+  return penetrationCommand(itemID, '', 'POST', { expected_version: Number(expectedVersion) || 0 })
+}
+
+export function savePenetrationDecision(itemID, payload) {
+  return penetrationCommand(itemID, '/decision', 'PUT', payload)
+}
+
+export function savePenetrationPlan(itemID, payload) {
+  return penetrationCommand(itemID, '/plan', 'PUT', payload)
+}
+
+export function advancePenetrationExecution(itemID, payload) {
+  return penetrationCommand(itemID, '/execution', 'POST', payload)
+}
+
+export function listPenetrationReportRevisions(itemID) {
+  return request(`/service-items/${encodeURIComponent(itemID)}/penetration-work-package/report-revisions`).then((value) => Array.isArray(value) ? value : [])
+}
+
+export function registerPenetrationReportArtifact(itemID, payload) {
+  return penetrationCommand(itemID, '/report-artifact', 'PUT', payload)
+}
+
+export function advancePenetrationReport(itemID, payload) {
+  return penetrationCommand(itemID, '/report-status', 'POST', payload)
+}
+
 /**
  * planImplementation 保存服务项实施方案与排期。
  * @param {string|number} itemID 服务项 ID。
@@ -840,6 +887,12 @@ export function upsertEquipment(payload) {
 
 export function deleteEquipment(resourceID) {
   return request(`/equipment/${encodeURIComponent(resourceID)}`, { method: 'DELETE' })
+}
+
+export function importEquipment(file) {
+  const formData = new FormData()
+  formData.append('file', file)
+  return request('/equipment/import', { method: 'POST', body: formData })
 }
 
 /**

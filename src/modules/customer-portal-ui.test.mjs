@@ -16,7 +16,7 @@ function jsonResponse(data, status = 200) {
 
 test('Portal 页面已对齐真实 HTTP 路由并对未配置能力失败关闭', () => {
   assert.match(view, /登录、会话、项目查询、报告申请和等保备案草稿均已接入门户服务/)
-  assert.match(view, /备案材料已接(?:受控|入受控)上传与扫描状态/)
+  assert.match(view, /备案材料已接(?:受控|入受控)上传与文件校验状态/)
   assert.doesNotMatch(view, /退出登录/)
   assert.match(view, /aria-label="结束门户会话"/)
   assert.match(view, /下载 PDF 报告/)
@@ -146,8 +146,8 @@ test('备案矩阵使用原生单选，材料走受控上传且 PDF 能力失败
   assert.match(filingWizard, /materialCreateKeys\[item\.key\]\)/)
   assert.match(filingWizard, /materialCreateKeys\[item\.key\] = ''/)
   assert.match(filingWizard, /credentials: 'omit'/)
-  assert.match(filingWizard, /target\.protocol !== 'https:'/)
-  assert.match(filingWizard, /对象存储或文件校验服务尚未配置/)
+  assert.match(filingWizard, /target\.origin !== window\.location\.origin/)
+  assert.match(filingWizard, /统一文件网关或文件校验服务尚未配置/)
   assert.match(filingWizard, /!filingExportAvailable/)
   assert.match(filingWizard, /当前运行环境尚未启用备案 PDF 导出/)
   assert.match(filingWizard, /<input type="file"/)

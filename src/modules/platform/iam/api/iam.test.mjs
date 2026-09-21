@@ -118,6 +118,21 @@ test('createEmployeesBatch sends Chinese organization and position names to the 
   })
 })
 
+test('createEmployeesBatch submits the original CSV as multipart for gateway validation', async () => {
+  let requested
+  globalThis.fetch = async (url, options) => {
+    requested = { url, options }
+    return jsonResponse({ data: { items: [], total: 0 } }, { status: 201 })
+  }
+  const file = new Blob(['姓名,组织,岗位\n李四,华东事业部,合同专员\n'], { type: 'text/csv' })
+  Object.defineProperty(file, 'name', { value: 'users.csv' })
+  await createEmployeesBatch([{ displayName: '李四', organizationName: '华东事业部', positionName: '合同专员', lineNo: 2 }], file)
+  assert.equal(requested.options.headers['Content-Type'], undefined)
+  assert.ok(requested.options.body instanceof FormData)
+  assert.equal(requested.options.body.get('file').name, 'users.csv')
+  assert.deepEqual(JSON.parse(requested.options.body.get('payload')).selected_lines, [2])
+})
+
 test('onboardEmployee uses the legacy sequence only when POST /employees is unavailable', async () => {
   const requests = []
   globalThis.fetch = async (url, options) => {
