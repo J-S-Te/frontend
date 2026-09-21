@@ -722,10 +722,10 @@ function commandKey(prefix) {
   return `${prefix}-${random}`.slice(0, 128)
 }
 
-function penetrationCommand(itemID, suffix, method, payload) {
+function penetrationCommand(itemID, suffix, method, payload, stableKey = '') {
   return request(`/service-items/${encodeURIComponent(itemID)}/penetration-work-package${suffix}`, {
     method,
-    headers: { 'Idempotency-Key': commandKey(`penetration-${String(itemID)}-${suffix || 'ensure'}`) },
+    headers: { 'Idempotency-Key': stableKey || commandKey(`penetration-${String(itemID)}-${suffix || 'ensure'}`) },
     body: JSON.stringify(payload),
   })
 }
@@ -734,32 +734,32 @@ export function getPenetrationWorkPackage(itemID) {
   return request(`/service-items/${encodeURIComponent(itemID)}/penetration-work-package`)
 }
 
-export function ensurePenetrationWorkPackage(itemID, expectedVersion) {
-  return penetrationCommand(itemID, '', 'POST', { expected_version: Number(expectedVersion) || 0 })
+export function ensurePenetrationWorkPackage(itemID, expectedVersion, idempotencyKey = '') {
+  return penetrationCommand(itemID, '', 'POST', { expected_version: Number(expectedVersion) || 0 }, idempotencyKey)
 }
 
-export function savePenetrationDecision(itemID, payload) {
-  return penetrationCommand(itemID, '/decision', 'PUT', payload)
+export function savePenetrationDecision(itemID, payload, idempotencyKey = '') {
+  return penetrationCommand(itemID, '/decision', 'PUT', payload, idempotencyKey)
 }
 
-export function savePenetrationPlan(itemID, payload) {
-  return penetrationCommand(itemID, '/plan', 'PUT', payload)
+export function savePenetrationPlan(itemID, payload, idempotencyKey = '') {
+  return penetrationCommand(itemID, '/plan', 'PUT', payload, idempotencyKey)
 }
 
-export function advancePenetrationExecution(itemID, payload) {
-  return penetrationCommand(itemID, '/execution', 'POST', payload)
+export function advancePenetrationExecution(itemID, payload, idempotencyKey = '') {
+  return penetrationCommand(itemID, '/execution', 'POST', payload, idempotencyKey)
 }
 
 export function listPenetrationReportRevisions(itemID) {
   return request(`/service-items/${encodeURIComponent(itemID)}/penetration-work-package/report-revisions`).then((value) => Array.isArray(value) ? value : [])
 }
 
-export function registerPenetrationReportArtifact(itemID, payload) {
-  return penetrationCommand(itemID, '/report-artifact', 'PUT', payload)
+export function registerPenetrationReportArtifact(itemID, payload, idempotencyKey = '') {
+  return penetrationCommand(itemID, '/report-artifact', 'PUT', payload, idempotencyKey)
 }
 
-export function advancePenetrationReport(itemID, payload) {
-  return penetrationCommand(itemID, '/report-status', 'POST', payload)
+export function advancePenetrationReport(itemID, payload, idempotencyKey = '') {
+  return penetrationCommand(itemID, '/report-status', 'POST', payload, idempotencyKey)
 }
 
 /**
@@ -799,6 +799,19 @@ export function startImplementationPreparation(itemID, payload) {
  */
 export function submitFieldRecord(itemID, payload) {
   return request(`/service-items/${encodeURIComponent(itemID)}/field-records`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+/**
+ * startFieldExecution 由项目经理确认实施准备完成，显式进入“实施中”。
+ * @param {string|number} itemID 服务项 ID。
+ * @param {{expected_version:number}} payload 乐观锁版本。
+ * @returns {Promise<object>} 最新状态。
+ */
+export function startFieldExecution(itemID, payload) {
+  return request(`/service-items/${encodeURIComponent(itemID)}/field-start`, {
     method: 'POST',
     body: JSON.stringify(payload),
   })

@@ -9,6 +9,7 @@ import EmptyHint from '@/modules/project_management/components/EmptyHint.vue'
 import FilterBar from '@/modules/project_management/components/FilterBar.vue'
 import KpiCard from '@/modules/project_management/components/KpiCard.vue'
 import PageHead from '@/modules/project_management/components/PageHead.vue'
+import PenetrationWorkPackageCard from '@/modules/project_management/components/PenetrationWorkPackageCard.vue'
 import ProgressCell from '@/modules/project_management/components/ProgressCell.vue'
 import RiskList from '@/modules/project_management/components/RiskList.vue'
 import SearchableSelect from '@/modules/project_management/components/SearchableSelect.vue'
@@ -69,6 +70,7 @@ import {
   decideReportCorrection,
   planImplementation,
   startImplementationPreparation,
+  startFieldExecution,
   submitFieldRecord,
   uploadServiceItemEvidence,
   registerReportArtifact,
@@ -1129,6 +1131,13 @@ const engineerSelection = computed({
   set: (values) => { operationForm.value.engineerIDs = values.join(',') },
 })
 const engineerOptions = computed(() => roleOptions(PROJECT_ROLE_CODES.engineer, engineerSelection.value))
+const penetrationEngineerOptions = computed(() => {
+  const selected = serviceItems.value.flatMap((item) => item.penetration_work_package?.engineer_ids || [])
+  const qualified = new Set(capabilities.value
+    .filter((item) => item.resource_type === 'PERSON' && (item.codes || []).some((code) => String(code).toUpperCase() === 'PENETRATION_TEST'))
+    .flatMap((item) => [item.user_id, item.resource_id]).filter(Boolean))
+  return roleOptions(PROJECT_ROLE_CODES.engineer, selected).filter((option) => qualified.has(option.id) || selected.includes(option.id))
+})
 // 工程师使用与团队负责人、项目经理一致的下拉样式：展开后逐项勾选，
 // 不要求用户按住 ⌘/Ctrl 做加选，选中结果仍写回逗号分隔的 ID 列表。
 // 设备不在任务分配中选取：设备清单在「实施准备」阶段登记。
@@ -1220,7 +1229,7 @@ const decompositionItems = computed(() => serviceItems.value.filter((item) => ['
 const workflowNodeEventTypes = new Set([
   'DECOMPOSITION_RETURNED', 'TEAM_ASSIGNED', 'EXECUTION_TEAM_ASSIGNED',
   'IMPLEMENTATION_PLANNED', 'IMPLEMENTATION_PLAN_REVOKED',
-  'PREPARATION_STARTED', 'PREPARATION_REVOKED', 'FIELD_RECORD_SUBMITTED',
+  'PREPARATION_STARTED', 'PREPARATION_REVOKED', 'FIELD_STARTED', 'FIELD_RECORD_SUBMITTED',
   'FIELD_COMPLETED', 'ROLLBACK_APPROVED', 'REPORT_STATUS_UPDATED',
 ])
 const latestWorkflowEventByItem = computed(() => {
@@ -1253,6 +1262,15 @@ const implementationItems = computed(() => serviceItems.value.filter((item) => {
 const implementationProjectCount = computed(() => new Set(implementationItems.value.map((item) => item.project_id)).size)
 const preparedImplementationCount = computed(() => implementationItems.value.filter((item) => item.status === '实施准备中').length)
 const fieldImplementationCount = computed(() => implementationItems.value.filter((item) => item.status === '实施中').length)
+const penetrationPackageStats = computed(() => {
+  const packages = serviceItems.value.map((item) => item.penetration_work_package).filter(Boolean)
+  return {
+    total: packages.length,
+    pending: packages.filter((item) => item.decision_status === 'PENDING').length,
+    active: packages.filter((item) => item.decision_status === 'REQUIRED' && item.execution_status !== 'COMPLETED').length,
+    completed: packages.filter((item) => item.execution_status === 'COMPLETED').length,
+  }
+})
 const exceptionItems = computed(() => serviceItems.value.filter((item) => item.status === '异常处理中' && projectAllowsNode(item, 'exceptions')))
 const exceptionItemIDs = computed(() => new Set(exceptionItems.value.map((item) => item.id)))
 const pendingDeviations = computed(() => deliveryEvents.value.filter((event) => event.type === 'DEVIATION_REPORTED' && exceptionItemIDs.value.has(event.service_item_id) && !reviewedDeviationIDs.value.has(event.payload?.deviation_id)))
@@ -2381,7 +2399,7 @@ function projectEvents(project) {
 function eventLabel(event) {
   // 事件名必须与后端 application/delivery.go 的常量逐字一致：曾把现场完成的事件名
   // 多写一层 IMPLEMENTATION 前缀，导致交付趋势/准时率按该名过滤时恒为空。
-  return ({ CONTRACT_ACTIVATED: '合同生效并生成项目', CONTRACT_STAMP_STATUS_SYNCED: '盖章合同状态已同步', DECOMPOSITION_ADJUSTED: '服务项拆解已调整', DECOMPOSITION_RETURNED: '服务项已退回拆解确认', TEAM_ASSIGNED: '团队负责人已分配', EXECUTION_TEAM_ASSIGNED: '项目经理及工程师已指派', IMPLEMENTATION_PLANNED: '现场实施计划已发布', PREPARATION_STARTED: '实施准备已发起', FIELD_RECORD_SUBMITTED: '现场原始记录已提交', FIELD_COMPLETED: '现场实施已完成', EQUIPMENT_RETURNED: '设备已归还', DEVIATION_REPORTED: '现场偏离已上报', DEVIATION_REVIEWED: '偏离评审已完成', SPECIAL_METHOD_REVIEWED: '特殊方法复核已完成', REPORT_STATUS_UPDATED: '报告阶段已推进', REPORT_CORRECTION_REQUESTED: '报告更正已申请', REPORT_CORRECTION_APPROVED: '报告更正已批准', REPORT_CORRECTION_REJECTED: '报告更正已驳回', WARNING_TRIGGERED: '预警规则已触发', AUTOMATION_TRIGGERED: '自动化动作已执行' })[event.type] || event.type
+  return ({ CONTRACT_ACTIVATED: '合同生效并生成项目', CONTRACT_STAMP_STATUS_SYNCED: '盖章合同状态已同步', DECOMPOSITION_ADJUSTED: '服务项拆解已调整', DECOMPOSITION_RETURNED: '服务项已退回拆解确认', TEAM_ASSIGNED: '团队负责人已分配', EXECUTION_TEAM_ASSIGNED: '项目经理及工程师已指派', IMPLEMENTATION_PLANNED: '现场实施计划已发布', PREPARATION_STARTED: '实施准备已发起', FIELD_STARTED: '现场测评已开始', FIELD_RECORD_SUBMITTED: '现场记录已提交', FIELD_COMPLETED: '现场测评已结束', EQUIPMENT_RETURNED: '设备已归还', DEVIATION_REPORTED: '现场偏离已上报', DEVIATION_REVIEWED: '偏离评审已完成', SPECIAL_METHOD_REVIEWED: '特殊方法复核已完成', REPORT_STATUS_UPDATED: '报告阶段已推进', REPORT_CORRECTION_REQUESTED: '报告更正已申请', REPORT_CORRECTION_APPROVED: '报告更正已批准', REPORT_CORRECTION_REJECTED: '报告更正已驳回', WARNING_TRIGGERED: '预警规则已触发', AUTOMATION_TRIGGERED: '自动化动作已执行' })[event.type] || event.type
 }
 
 function toggleRow(id) {
@@ -2515,6 +2533,24 @@ function fillOperationForm(item) {
   const personnel = planPersonnelFor(item, plan)
   operationForm.value = { ...operationForm.value, teamLeadID: item.team_lead_id || '', projectManagerID: item.project_manager_id || '', engineerIDs: (item.engineer_ids || []).join(','), plannedStart: toDateTimeLocal(item.planned_start || plan.planned_start), plannedEnd: toDateTimeLocal(item.planned_end || plan.planned_end), penetrationTestPlan: plan.penetration_test_plan || '', authDocNo: plan.auth_doc_no || '', authStart: toDateTimeLocal(plan.auth_start), authEnd: toDateTimeLocal(plan.auth_end), authScope: plan.auth_scope || '', testScope: plan.test_scope || '', testWindow: plan.test_window || '', emergencyContact: plan.emergency_contact || '', rollbackPlan: plan.rollback_plan || '', reviewComment: item.tech_review_comment || '', personnel, equipment: planEquipmentFor(plan), travelMode: '', travelReferenceEventID: '', noTravelReason: '', travelOrigin: '', travelDestination: '', travelDepartureDate: String(item.planned_start || plan.planned_start || '').slice(0, 10), travelReturnDate: String(item.planned_end || plan.planned_end || '').slice(0, 10), travelTransport: '', travelAccommodationNeed: '', travelTravelerIDs: personnel.map((row) => row.resourceID).filter(Boolean), comment: '' }
 }
+function isEmbeddedPenetrationItem(item) {
+  const category = String(item?.category || '').replace(/\s+/g, '')
+  return String(item?.test_mode || '').toUpperCase() !== 'PENETRATION' && (category.includes('等保') || category.includes('等级保护'))
+}
+function penetrationPackageLabel(item) {
+  const pkg = item?.penetration_work_package
+  if (!pkg) return '待进入实施计划确认'
+  if (pkg.decision_status === 'PENDING') return '待与客户确认'
+  if (pkg.decision_status === 'NOT_REQUIRED') return '不开展'
+  if (pkg.execution_status === 'COMPLETED') return `测试已完成 · 报告${({ NONE: '未开始', DRAFTING: '编制中', SUBMITTED: '待审核', APPROVED: '已审核', ISSUED: '已签发', ARCHIVED: '已归档' })[pkg.report_status] || pkg.report_status}`
+  return ({ NOT_STARTED: '确认开展 · 未开始', IN_PROGRESS: '测试中', CANCELLED: '已取消' })[pkg.execution_status] || '确认开展'
+}
+function updatePenetrationPackage(workPackage) {
+  const index = serviceItems.value.findIndex((item) => item.id === workPackage?.parent_service_item_id)
+  if (index < 0) return
+  serviceItems.value[index] = { ...serviceItems.value[index], penetration_work_package: workPackage }
+}
+function notifyFromPenetration({ message, type }) { showToast(message, type) }
 // 实施计划的人员与设备清单：已发布的计划用保存下来的快照回填；首次制定时按服务项已指派的
 // 团队与设备自动生成，业务用户只需调整使用时段或移除，不必手工重新挑一遍人和设备。
 // 实施计划的人员清单：已发布的计划用保存下来的快照回填；首次制定时按服务项已指派的
@@ -2722,15 +2758,16 @@ async function runOperation(kind) {
         equipment: form.equipment.map((row) => ({ resource_type: 'EQUIPMENT', resource_id: row.resourceID, window_start: row.windowStart, window_end: row.windowEnd, note: row.note })),
       })
       showToast('实施准备已发起')
+    } else if (kind === 'field-start') {
+      await startFieldExecution(item.id, { expected_version: Number(item.version) || 0 })
+      showToast('已进入实施中，可以提交现场记录')
     } else if (kind === 'field') {
-      // 坐标签到已删除：手工填写的经纬度没有任何证明力，服务端也不再保存。
-      // 现场记录（原始数据 / 环境条件）是进入"实施中"的真实动作。
       if (!String(form.rawData || '').trim() || !String(form.environment || '').trim()) { showToast('请填写现场原始数据与环境条件', 'warning'); return }
 	  if (!(form.fieldEvidenceFile instanceof File)) { showToast('请上传至少一份现场证据', 'warning'); return }
 	  const evidence = await uploadServiceItemEvidence(item.id, 'FIELD', form.fieldEvidenceFile)
 	  await submitFieldRecord(item.id, { expected_version: Number(item.version) || 0, raw_data: form.rawData, environment: form.environment, evidence_files: [evidence] })
 	  form.fieldEvidenceFile = null
-      showToast('现场记录已提交，服务项进入实施中')
+      showToast('现场记录已提交')
     } else if (kind === 'exception-report') {
 	  const evidenceFiles = form.deviationEvidenceFile instanceof File ? [await uploadServiceItemEvidence(item.id, 'DEVIATION', form.deviationEvidenceFile)] : []
 	  const result = await reportDeviation(item.id, { description: form.deviationDescription, severity: form.severity, evidence_files: evidenceFiles })
@@ -2741,7 +2778,7 @@ async function runOperation(kind) {
       showToast('偏离评审已完成')
     } else if (kind === 'complete') {
       await completeServiceItemField(item.id)
-      showToast('该服务项现场实施已完成，进入报告编制')
+      showToast('现场测评已结束，进入报告编制')
     }
     await loadWorkspace()
   } catch (error) {
@@ -3198,9 +3235,9 @@ onBeforeUnmount(() => {
               <button v-for="tab in detailTabs" :key="tab.key" type="button" class="pm-tab-pill" :class="{ active: detailTab === tab.key }" @click="detailTab = tab.key">{{ tab.label }}<span class="pm-tab-count">{{ tab.count }}</span></button>
             </section>
             <article v-if="detailTab === 'items'" class="pm-table-panel">
-              <div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>服务项编号</th><th>场所 / 批次</th><th>检测类别</th><th>体系</th><th>特殊方法</th><th>状态</th><th>报告</th><th>计划窗口</th><th></th></tr></thead><tbody>
-                <tr v-for="item in detailItems" :key="item.id"><td class="mono"><b>{{ item.id }}</b></td><td>{{ item.site }}<span class="pm-cell-sub">{{ item.batch }}</span></td><td>{{ item.category }}</td><td>{{ item.system || '—' }}</td><td><span class="pm-badge" :class="item.special === '是' ? '待确认' : 'neutral'">{{ item.special || '否' }}</span></td><td><span class="pm-badge" :class="statusTone(item.status)">{{ item.status }}</span></td><td>{{ item.report_status ? (reportStatusLabel[item.report_status] || item.report_status) : '—' }}</td><td>{{ item.planned_start ? `${String(item.planned_start).slice(0, 10)} ~ ${String(item.planned_end).slice(0, 10)}` : '待排期' }}</td><td><button class="pm-link" @click="navigate('implementation')">看板</button></td></tr>
-                <tr v-if="!detailItems.length"><td colspan="9" class="pm-empty-mini">该项目暂无服务项</td></tr>
+              <div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>服务项编号</th><th>场所 / 批次</th><th>检测类别</th><th>体系</th><th>特殊方法</th><th>状态</th><th>渗透专项</th><th>报告</th><th>计划窗口</th><th></th></tr></thead><tbody>
+                <tr v-for="item in detailItems" :key="item.id"><td class="mono"><b>{{ item.id }}</b></td><td>{{ item.site }}<span class="pm-cell-sub">{{ item.batch }}</span></td><td>{{ item.category }}</td><td>{{ item.system || '—' }}</td><td><span class="pm-badge" :class="item.special === '是' ? '待确认' : 'neutral'">{{ item.special || '否' }}</span></td><td><span class="pm-badge" :class="statusTone(item.status)">{{ item.status }}</span></td><td><span v-if="isEmbeddedPenetrationItem(item)" class="pm-badge" :class="item.penetration_work_package?.decision_status === 'REQUIRED' ? '待确认' : 'neutral'">{{ penetrationPackageLabel(item) }}</span><span v-else>—</span></td><td>{{ item.report_status ? (reportStatusLabel[item.report_status] || item.report_status) : '—' }}</td><td>{{ item.planned_start ? `${String(item.planned_start).slice(0, 10)} ~ ${String(item.planned_end).slice(0, 10)}` : '待排期' }}</td><td><button class="pm-link" @click="navigate('implementation')">看板</button></td></tr>
+                <tr v-if="!detailItems.length"><td colspan="10" class="pm-empty-mini">该项目暂无服务项</td></tr>
               </tbody></table></div>
             </article>
             <article v-if="detailTab === 'items' && detailGantt.length" class="pm-panel">
@@ -3218,6 +3255,9 @@ onBeforeUnmount(() => {
                 <tr v-if="!detailItems.some((row) => row.implementation_plan)"><td colspan="5" class="pm-empty-mini">暂无已发布的实施计划</td></tr>
               </tbody></table></div>
             </article>
+            <section v-if="detailTab === 'plan' && detailItems.some(isEmbeddedPenetrationItem)" class="pm-detail-penetration-list">
+              <PenetrationWorkPackageCard v-for="item in detailItems.filter(isEmbeddedPenetrationItem)" :key="item.id" :item="item" :session="session" :engineer-options="penetrationEngineerOptions" compact @updated="updatePenetrationPackage" @notify="notifyFromPenetration" />
+            </section>
             <article v-if="detailTab === 'events'" class="pm-panel">
               <header><div><p class="pm-panel-kicker">交付事件</p><h2>交付动态</h2></div><span>最近 {{ detailEvents.length }} 条</span></header>
               <div class="pm-timeline"><div v-for="event in detailEvents" :key="event.id"><i></i><b>{{ eventLabel(event) }}</b><p>{{ event.service_item_id || detailProject.id }} · 操作人 {{ personLabel(event.actor_user_id, '系统') }}</p><time>{{ formatDateTime(event.created_at) }}</time></div><div v-if="!detailEvents.length" class="pm-empty-mini">暂无交付动态</div></div>
@@ -3326,9 +3366,9 @@ onBeforeUnmount(() => {
         </template>
 
         <template v-else-if="activeSection === 'implementation'">
-          <section class="pm-board-summary"><div><strong>{{ implementationProjectCount }}</strong><span>当前节点项目</span></div><div><strong>{{ implementationItems.length }}</strong><span>当前节点服务项</span></div><div><strong>{{ preparedImplementationCount }}</strong><span>准备完成</span></div><div><strong>{{ fieldImplementationCount }}</strong><span>现场实施中</span></div></section>
+          <section class="pm-board-summary"><div><strong>{{ implementationProjectCount }}</strong><span>当前节点项目</span></div><div><strong>{{ implementationItems.length }}</strong><span>当前节点服务项</span></div><div><strong>{{ preparedImplementationCount }}</strong><span>准备完成</span></div><div><strong>{{ fieldImplementationCount }}</strong><span>现场实施中</span></div><div><strong>{{ penetrationPackageStats.total }}</strong><span>渗透专项（待确认 {{ penetrationPackageStats.pending }} / 进行中 {{ penetrationPackageStats.active }} / 完成 {{ penetrationPackageStats.completed }}）</span></div></section>
           <section class="pm-kanban"><article v-for="column in implementationKanbanColumns" :key="column.key"><header><div><i :class="column.color"></i><b>{{ column.key }}</b></div><span>{{ column.count }}</span></header><div class="pm-kanban-body"><button v-for="card in column.cards" :key="card.id" class="pm-kanban-card" :class="[column.color, { risk: card.risk }]" @click="openProject(card)"><b>{{ card.id }}</b><h3>{{ card.customer }}</h3><span class="pm-badge" :class="statusTone(card.status)">{{ card.status }}</span><div class="pm-inline-progress"><i :style="{ width: `${card.progress}%` }"></i></div><footer><span>{{ card.progress }}%</span><time>{{ card.due || '待排期' }}</time></footer></button><div v-if="!column.cards.length" class="pm-empty-mini">暂无当前节点项目</div></div></article></section>
-          <section class="pm-panel pm-operation-panel"><header><div><p class="pm-panel-kicker">现场实施</p><h2>现场记录与实施完成</h2></div></header><ServiceItemPicker :items="implementationItems" :selected-ids="selectedServiceItem ? [selectedServiceItem.id] : []" empty-text="暂无处于现场实施节点的服务项" @select="selectServiceItem" /><div v-if="selectedServiceItem && canExecuteField" class="pm-form pm-operation-form"><label><span>现场原始数据 <em>*</em></span><textarea v-model.trim="operationForm.rawData" rows="3" placeholder="记录现场实测数据与依据"></textarea></label><label><span>环境条件 <em>*</em></span><textarea v-model.trim="operationForm.environment" rows="3" placeholder="记录现场环境条件"></textarea></label><label><span>现场证据 <em>*</em></span><input type="file" accept="application/pdf,image/png,image/jpeg" @change="operationForm.fieldEvidenceFile = $event.target.files?.[0] || null" /><small>文件通过统一文件网关上传、校验并以 SHA-256 回执存证。</small></label><button class="pm-button primary" :disabled="saving" @click="runOperation('field')">提交现场记录</button></div><button v-if="selectedServiceItem && selectedServiceItem.status === '实施中' && canCompleteField" class="pm-button" :disabled="saving" @click="runOperation('complete')">确认该服务项现场完成</button><div v-else-if="!selectedServiceItem" class="pm-empty-mini">请先选择服务项</div></section>
+          <section class="pm-panel pm-operation-panel"><header><div><p class="pm-panel-kicker">现场实施</p><h2>现场测评与记录</h2></div></header><ServiceItemPicker :items="implementationItems" :selected-ids="selectedServiceItem ? [selectedServiceItem.id] : []" empty-text="暂无处于现场实施节点的服务项" @select="selectServiceItem" /><PenetrationWorkPackageCard v-if="selectedServiceItem && isEmbeddedPenetrationItem(selectedServiceItem)" :item="selectedServiceItem" :session="session" :engineer-options="penetrationEngineerOptions" @updated="updatePenetrationPackage" @notify="notifyFromPenetration" /><button v-if="selectedServiceItem && selectedServiceItem.status === '实施准备中' && canExecuteField" class="pm-button primary" :disabled="saving" @click="runOperation('field-start')">进入实施中</button><div v-if="selectedServiceItem && selectedServiceItem.status === '实施中' && canExecuteField" class="pm-form pm-operation-form"><label><span>现场原始数据 <em>*</em></span><textarea v-model.trim="operationForm.rawData" rows="3" placeholder="记录现场实测数据与依据"></textarea></label><label><span>环境条件 <em>*</em></span><textarea v-model.trim="operationForm.environment" rows="3" placeholder="记录现场环境条件"></textarea></label><label><span>现场证据 <em>*</em></span><input type="file" accept="application/pdf,image/png,image/jpeg" @change="operationForm.fieldEvidenceFile = $event.target.files?.[0] || null" /><small>文件通过统一文件网关上传、校验并以 SHA-256 回执存证。</small></label><button class="pm-button primary" :disabled="saving" @click="runOperation('field')">提交现场记录</button></div><button v-if="selectedServiceItem && selectedServiceItem.status === '实施中' && canCompleteField" class="pm-button" :disabled="saving" @click="runOperation('complete')">现场测评结束</button><div v-else-if="!selectedServiceItem" class="pm-empty-mini">请先选择服务项</div></section>
         </template>
 
         <template v-else-if="activeSection === 'equipment'">
@@ -3497,6 +3537,7 @@ onBeforeUnmount(() => {
           <section v-if="['allocation', 'inbox', 'planning', 'preparation', 'assignments', 'methods', 'exceptions', 'reports'].includes(activeSection)" class="pm-panel pm-operation-panel">
             <header><div><p class="pm-panel-kicker">现场操作</p><h2>服务项操作台</h2></div><span v-if="selectedServiceItem" class="pm-op-current">当前：{{ selectedServiceItem.id }} · <span class="pm-badge" :class="statusTone(selectedServiceItem.status)">{{ selectedServiceItem.status }}</span></span></header>
             <ServiceItemPicker v-if="activeSection === 'allocation'" :items="allocationItems" :selected-ids="selectedServiceItemIDs" multiple empty-text="暂无可分配服务项" hint="仅显示已完成拆解确认、当前处于待分配的项目；可多选批量分配。" @toggle="toggleServiceItem" /><ServiceItemPicker v-else :items="activeNodeItems" :selected-ids="selectedServiceItem ? [selectedServiceItem.id] : []" empty-text="当前节点暂无可操作服务项" @select="selectServiceItem" />
+            <PenetrationWorkPackageCard v-if="activeSection !== 'allocation' && selectedServiceItem && isEmbeddedPenetrationItem(selectedServiceItem)" :item="selectedServiceItem" :session="session" :engineer-options="penetrationEngineerOptions" :auto-ensure="activeSection === 'planning'" @updated="updatePenetrationPackage" @notify="notifyFromPenetration" />
             <div v-if="activeSection === 'allocation' && selectedServiceItems.length" class="pm-panel-actions">
               <button v-if="canManageDecomposition" type="button" class="pm-button" :disabled="saving" @click="returnSelectedToDecomposition">退回拆解确认</button>
               <button v-if="canRevokeExecution" type="button" class="pm-button" :disabled="saving" @click="revokeSelectedAssignment('execution')">撤销执行团队</button>
@@ -3545,7 +3586,7 @@ onBeforeUnmount(() => {
               <template v-else-if="activeSection === 'reports'">
                 <section class="pm-panel pm-stepper-panel"><header><div><p class="pm-panel-kicker">报告阶段</p><h2>报告阶段链</h2></div><span v-if="selectedServiceItem" class="pm-op-current">当前：<span class="pm-badge" :class="statusTone(reportStatusLabel[selectedServiceItem.report_status] || '未开始')">{{ reportStatusLabel[selectedServiceItem.report_status] || '未开始' }}</span></span></header><div class="pm-stepper"><template v-for="(step, index) in reportSteps" :key="step.phase"><div class="pm-step" :class="step.state"><span class="pm-step-num">{{ step.state === 'done' ? '✓' : index + 1 }}</span><span>{{ step.label }}</span></div><div v-if="index < reportSteps.length - 1" class="pm-step-line"></div></template></div></section>
                 <div class="pm-report-phase" v-if="selectedServiceItem?.report_status"><span>当前报告阶段</span><b class="pm-badge" :class="statusTone(reportStatusLabel[selectedServiceItem.report_status] || selectedServiceItem.report_status)">{{ reportStatusLabel[selectedServiceItem.report_status] || selectedServiceItem.report_status }}</b></div>
-                <div v-if="selectedServiceItem?.report_status === 'COMPILING' && can('project.report.prepare')" class="pm-form"><label><span>R{{ Number(selectedServiceItem.report_revision) || 0 }} 报告文件 <em>*</em></span><input type="file" accept="application/pdf" @change="operationForm.reportFile = $event.target.files?.[0] || null" /><small>上传后由统一文件网关校验并登记摘要，审核人与编制人必须不同。</small></label><button class="pm-button" :disabled="saving" @click="uploadCurrentReport">上传并登记报告</button></div>
+                <div v-if="selectedServiceItem?.report_status === 'COMPILING' && permissionSet.has('project.report.prepare')" class="pm-form"><label><span>R{{ Number(selectedServiceItem.report_revision) || 0 }} 报告文件 <em>*</em></span><input type="file" accept="application/pdf" @change="operationForm.reportFile = $event.target.files?.[0] || null" /><small>上传后由统一文件网关校验并登记摘要，审核人与编制人必须不同。</small></label><button class="pm-button" :disabled="saving" @click="uploadCurrentReport">上传并登记报告</button></div>
                 <section v-if="selectedReportCorrectionRequests.length" class="pm-panel pm-approval-panel">
                   <header><div><p class="pm-panel-kicker">报告更正</p><h2>待处理更正申请</h2></div><span>{{ selectedReportCorrectionRequests.length }} 项</span></header>
                   <div v-for="request in selectedReportCorrectionRequests" :key="request.id" class="pm-form">
