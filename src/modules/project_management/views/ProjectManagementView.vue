@@ -34,6 +34,7 @@ import {
   listEquipment,
   upsertEquipment,
   deleteEquipment,
+  importEquipment,
   listDeliveryEvents,
   listApplicationRoles,
   listRuleConfigurationCatalog,
@@ -451,6 +452,7 @@ const capabilityDialog = ref(null)
 const capabilityAutoID = ref(false)
 const importResult = ref(null)
 const qualificationFileInput = ref(null)
+const equipmentFileInput = ref(null)
 // 资质列表受标签页（全部/人员/设备）与类型、状态筛选共同约束；
 // 「体系与编码」「到期提醒」两个标签页使用各自的聚合视图，不走本筛选。
 const filteredCapabilities = computed(() => capabilities.value
@@ -868,56 +870,13 @@ function downloadDetectionCategories() {
   showToast(`已导出 ${detectionCategories.value.length} 条检测类别`)
 }
 
-// 逐行解析 CSV：识别表头、忽略空行，特殊方法/状态同时接受中文与枚举值。
-function parseDetectionCategoryCSV(text) {
-  const rows = []
-  const lines = text.replace(/\r\n?/g, '\n').split('\n').filter((line) => line.trim() !== '')
-  if (!lines.length) return rows
-  const parseLine = (line) => {
-    const cells = []
-    let current = ''
-    let quoted = false
-    for (let index = 0; index < line.length; index += 1) {
-      const char = line[index]
-      if (quoted) {
-        if (char === '"' && line[index + 1] === '"') { current += '"'; index += 1 }
-        else if (char === '"') quoted = false
-        else current += char
-      } else if (char === '"') quoted = true
-      else if (char === ',') { cells.push(current); current = '' }
-      else current += char
-    }
-    cells.push(current)
-    return cells.map((cell) => cell.trim())
-  }
-  const header = parseLine(lines[0])
-  const hasHeader = header.includes('检测类别')
-  const body = hasHeader ? lines.slice(1) : lines
-  const specialFromText = { 否: 'NO', 可标记: 'MARKABLE', 必为特殊方法: 'REQUIRED', NO: 'NO', MARKABLE: 'MARKABLE', REQUIRED: 'REQUIRED' }
-  for (const line of body) {
-    const cells = parseLine(line)
-    if (!cells.length || !cells[0]) continue
-    rows.push({
-      category: cells[0],
-      system_standard: cells[1] || '',
-      required_qualifications: cells[2] || '',
-      required_codes: cells[3] || '',
-      special_method: specialFromText[cells[4]] || 'NO',
-      enabled: (cells[5] || '启用') !== '停用',
-    })
-  }
-  return rows
-}
-
 async function importDetectionCategoryFile(event) {
   const file = event.target.files?.[0]
   event.target.value = ''
   if (!file) return
   saving.value = true
   try {
-    const rows = parseDetectionCategoryCSV(await file.text())
-    if (!rows.length) { showToast('CSV 里没有可导入的检测类别', 'warning'); return }
-    const result = await importDetectionCategories(rows)
+    const result = await importDetectionCategories(file)
     detectionCategories.value = await listDetectionCategories()
     showToast(result?.skipped ? `导入完成：成功 ${result.imported} 条，跳过 ${result.skipped} 条` : `导入完成：成功 ${result?.imported ?? 0} 条`)
     if (result?.errors?.length) splitConfigError.value = `导入跳过原因：${result.errors.slice(0, 3).join('；')}`
@@ -2129,6 +2088,18 @@ async function removeEquipment(item) {
     equipment.value = equipment.value.filter((row) => row.resource_id !== item.resource_id)
     showToast(`设备 ${item.resource_name || item.resource_id} 已删除`)
   } catch (error) { showToast(error?.message || '设备删除失败，请先确认设备未被实施计划占用', 'error') }
+  finally { saving.value = false }
+}
+async function importEquipmentFile(event) {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file) return
+  saving.value = true
+  try {
+    const result = await importEquipment(file)
+    await loadEquipment()
+    showToast(`设备导入完成：成功 ${result.imported || 0} 条${result.skipped ? `，跳过 ${result.skipped} 条` : ''}`, result.skipped ? 'warning' : 'success')
+  } catch (error) { showToast(error?.message || '设备 CSV 导入失败', 'error') }
   finally { saving.value = false }
 }
 
@@ -3357,10 +3328,11 @@ onBeforeUnmount(() => {
         <template v-else-if="activeSection === 'implementation'">
           <section class="pm-board-summary"><div><strong>{{ implementationProjectCount }}</strong><span>当前节点项目</span></div><div><strong>{{ implementationItems.length }}</strong><span>当前节点服务项</span></div><div><strong>{{ preparedImplementationCount }}</strong><span>准备完成</span></div><div><strong>{{ fieldImplementationCount }}</strong><span>现场实施中</span></div></section>
           <section class="pm-kanban"><article v-for="column in implementationKanbanColumns" :key="column.key"><header><div><i :class="column.color"></i><b>{{ column.key }}</b></div><span>{{ column.count }}</span></header><div class="pm-kanban-body"><button v-for="card in column.cards" :key="card.id" class="pm-kanban-card" :class="[column.color, { risk: card.risk }]" @click="openProject(card)"><b>{{ card.id }}</b><h3>{{ card.customer }}</h3><span class="pm-badge" :class="statusTone(card.status)">{{ card.status }}</span><div class="pm-inline-progress"><i :style="{ width: `${card.progress}%` }"></i></div><footer><span>{{ card.progress }}%</span><time>{{ card.due || '待排期' }}</time></footer></button><div v-if="!column.cards.length" class="pm-empty-mini">暂无当前节点项目</div></div></article></section>
-          <section class="pm-panel pm-operation-panel"><header><div><p class="pm-panel-kicker">现场实施</p><h2>现场记录与实施完成</h2></div></header><ServiceItemPicker :items="implementationItems" :selected-ids="selectedServiceItem ? [selectedServiceItem.id] : []" empty-text="暂无处于现场实施节点的服务项" @select="selectServiceItem" /><div v-if="selectedServiceItem && canExecuteField" class="pm-form pm-operation-form"><label><span>现场原始数据 <em>*</em></span><textarea v-model.trim="operationForm.rawData" rows="3" placeholder="记录现场实测数据与依据"></textarea></label><label><span>环境条件 <em>*</em></span><textarea v-model.trim="operationForm.environment" rows="3" placeholder="记录现场环境条件"></textarea></label><label><span>现场证据 <em>*</em></span><input type="file" accept="application/pdf,image/png,image/jpeg" @change="operationForm.fieldEvidenceFile = $event.target.files?.[0] || null" /><small>文件通过统一文件网关上传、扫描并以 SHA-256 回执存证。</small></label><button class="pm-button primary" :disabled="saving" @click="runOperation('field')">提交现场记录</button></div><button v-if="selectedServiceItem && selectedServiceItem.status === '实施中' && canCompleteField" class="pm-button" :disabled="saving" @click="runOperation('complete')">确认该服务项现场完成</button><div v-else-if="!selectedServiceItem" class="pm-empty-mini">请先选择服务项</div></section>
+          <section class="pm-panel pm-operation-panel"><header><div><p class="pm-panel-kicker">现场实施</p><h2>现场记录与实施完成</h2></div></header><ServiceItemPicker :items="implementationItems" :selected-ids="selectedServiceItem ? [selectedServiceItem.id] : []" empty-text="暂无处于现场实施节点的服务项" @select="selectServiceItem" /><div v-if="selectedServiceItem && canExecuteField" class="pm-form pm-operation-form"><label><span>现场原始数据 <em>*</em></span><textarea v-model.trim="operationForm.rawData" rows="3" placeholder="记录现场实测数据与依据"></textarea></label><label><span>环境条件 <em>*</em></span><textarea v-model.trim="operationForm.environment" rows="3" placeholder="记录现场环境条件"></textarea></label><label><span>现场证据 <em>*</em></span><input type="file" accept="application/pdf,image/png,image/jpeg" @change="operationForm.fieldEvidenceFile = $event.target.files?.[0] || null" /><small>文件通过统一文件网关上传、校验并以 SHA-256 回执存证。</small></label><button class="pm-button primary" :disabled="saving" @click="runOperation('field')">提交现场记录</button></div><button v-if="selectedServiceItem && selectedServiceItem.status === '实施中' && canCompleteField" class="pm-button" :disabled="saving" @click="runOperation('complete')">确认该服务项现场完成</button><div v-else-if="!selectedServiceItem" class="pm-empty-mini">请先选择服务项</div></section>
         </template>
 
         <template v-else-if="activeSection === 'equipment'">
+          <section v-if="canManageDevice" class="pm-panel"><header class="pm-section-toolbar"><div class="pm-panel-actions"><input ref="equipmentFileInput" class="pm-file-input" type="file" accept=".csv,text/csv" @change="importEquipmentFile" /><button class="pm-button" :disabled="saving" @click="equipmentFileInput.click()">导入设备能力 CSV</button></div><span>列：resource_type、resource_id、resource_name、codes、status、valid_from、valid_until</span></header></section>
           <section class="pm-panel pm-equipment-layout">
             <form v-if="canManageDevice" class="pm-form pm-equipment-form" @submit.prevent="saveEquipment">
               <label><span>设备编号 <em>*</em></span><input v-model.trim="equipmentForm.resourceID" required placeholder="例如 EQ-001" /></label>
@@ -3573,7 +3545,7 @@ onBeforeUnmount(() => {
               <template v-else-if="activeSection === 'reports'">
                 <section class="pm-panel pm-stepper-panel"><header><div><p class="pm-panel-kicker">报告阶段</p><h2>报告阶段链</h2></div><span v-if="selectedServiceItem" class="pm-op-current">当前：<span class="pm-badge" :class="statusTone(reportStatusLabel[selectedServiceItem.report_status] || '未开始')">{{ reportStatusLabel[selectedServiceItem.report_status] || '未开始' }}</span></span></header><div class="pm-stepper"><template v-for="(step, index) in reportSteps" :key="step.phase"><div class="pm-step" :class="step.state"><span class="pm-step-num">{{ step.state === 'done' ? '✓' : index + 1 }}</span><span>{{ step.label }}</span></div><div v-if="index < reportSteps.length - 1" class="pm-step-line"></div></template></div></section>
                 <div class="pm-report-phase" v-if="selectedServiceItem?.report_status"><span>当前报告阶段</span><b class="pm-badge" :class="statusTone(reportStatusLabel[selectedServiceItem.report_status] || selectedServiceItem.report_status)">{{ reportStatusLabel[selectedServiceItem.report_status] || selectedServiceItem.report_status }}</b></div>
-                <div v-if="selectedServiceItem?.report_status === 'COMPILING' && can('project.report.prepare')" class="pm-form"><label><span>R{{ Number(selectedServiceItem.report_revision) || 0 }} 报告文件 <em>*</em></span><input type="file" accept="application/pdf" @change="operationForm.reportFile = $event.target.files?.[0] || null" /><small>上传后由统一文件网关扫描并登记摘要，审核人与编制人必须不同。</small></label><button class="pm-button" :disabled="saving" @click="uploadCurrentReport">上传并登记报告</button></div>
+                <div v-if="selectedServiceItem?.report_status === 'COMPILING' && can('project.report.prepare')" class="pm-form"><label><span>R{{ Number(selectedServiceItem.report_revision) || 0 }} 报告文件 <em>*</em></span><input type="file" accept="application/pdf" @change="operationForm.reportFile = $event.target.files?.[0] || null" /><small>上传后由统一文件网关校验并登记摘要，审核人与编制人必须不同。</small></label><button class="pm-button" :disabled="saving" @click="uploadCurrentReport">上传并登记报告</button></div>
                 <section v-if="selectedReportCorrectionRequests.length" class="pm-panel pm-approval-panel">
                   <header><div><p class="pm-panel-kicker">报告更正</p><h2>待处理更正申请</h2></div><span>{{ selectedReportCorrectionRequests.length }} 项</span></header>
                   <div v-for="request in selectedReportCorrectionRequests" :key="request.id" class="pm-form">

@@ -27,6 +27,7 @@ const step = ref(1) // 1=上传, 2=预览, 3=结果
 const fileName = ref('')
 const fileSize = ref(0)
 const rawText = ref('')
+const selectedFile = ref(null)
 const parseError = ref('')
 const submitting = ref(false)
 const submitError = ref('')
@@ -113,6 +114,7 @@ async function ingestFile(file) {
   }
   fileName.value = file.name
   fileSize.value = file.size
+  selectedFile.value = file
   rawText.value = text
   rebuildRows()
   if (parseError.value) return
@@ -454,7 +456,7 @@ async function submit() {
       applicationRoles: row.applicationRoles,
       lineNo: row.lineNo,
     }))
-    const result = await createEmployeesBatch(payload)
+    const result = await createEmployeesBatch(payload, selectedFile.value)
     const created = Array.isArray(result?.items) ? result.items : []
     const createdByLineNo = new Map()
     for (const item of created) {
@@ -511,6 +513,7 @@ function restart() {
   step.value = 1
   rows.splice(0, rows.length)
   rawText.value = ''
+  selectedFile.value = null
   fileName.value = ''
   fileSize.value = 0
   parseError.value = ''

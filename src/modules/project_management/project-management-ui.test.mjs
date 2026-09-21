@@ -1346,18 +1346,14 @@ test('合同拆解规则配置按原型 PG-CFG-01 做成三段式，口径完全
   assert.match(source, /required_codes: detectionRequiredCodeSelection\.value\.join\(','\)/)
   assert.doesNotMatch(source, /v-model\.trim="categoryDialog\.required_codes"/)
   assert.match(source, /按该类别拆解出的服务项会带上这些人员资质编码，分配工程师时据此校验/)
-  // 导出/导入与原型页头一致：导出在浏览器侧生成 CSV，导入走批量接口并回显逐行原因。
+  // 导出/导入与原型页头一致：导入把原始 CSV 交给服务端和文件网关校验，浏览器不再自行解析后提交可篡改 JSON。
   assert.match(source, /@click="downloadDetectionCategories">导出</)
   assert.match(source, /@click="detectionCategoryFileInput\.click\(\)">导入</)
   assert.match(source, /async function importDetectionCategoryFile\(event\)/)
-  assert.match(source, /const rows = parseDetectionCategoryCSV\(await file\.text\(\)\)/)
-  assert.match(source, /const result = await importDetectionCategories\(rows\)/)
+  assert.match(source, /const result = await importDetectionCategories\(file\)/)
   assert.match(source, /导入跳过原因：\$\{result\.errors\.slice\(0, 3\)\.join\('；'\)\}/)
-  // CSV 解析必须容忍中文表头与中文枚举值。
-  assert.match(source, /const hasHeader = header\.includes\('检测类别'\)/)
-  assert.match(source, /否: 'NO', 可标记: 'MARKABLE', 必为特殊方法: 'REQUIRED'/)
-  assert.match(pmApiSource, /export function importDetectionCategories\(items\)/)
-  assert.match(pmApiSource, /request\('\/detection-categories\/import', \{ method: 'POST', body: JSON\.stringify\(\{ items \}\) \}\)/)
+  assert.match(pmApiSource, /export function importDetectionCategories\(file\)/)
+  assert.match(pmApiSource, /formData\.append\('file', file\)/)
   // 进入页签时按需加载，不影响其它工作区首屏。
   assert.match(source, /if \(section === 'split-rules'\) loadSplitConfig\(\)/)
 })

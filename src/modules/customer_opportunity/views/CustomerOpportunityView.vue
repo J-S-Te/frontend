@@ -3098,7 +3098,7 @@ onMounted(async () => {
       <p v-else-if="!opportunityAttachmentLoading" class="crm-note">暂无附件。</p>
       <div v-if="canUploadOpportunityAttachments" class="crm-attachment-upload">
         <input type="file" accept=".pdf,.png,.jpg,.jpeg,.docx,.xlsx,application/pdf,image/png,image/jpeg,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" :disabled="!opportunityAttachmentCapabilities?.upload_available || opportunityAttachmentLoading" @change="selectOpportunityAttachment">
-        <button type="button" :disabled="!opportunityAttachmentFile || !opportunityAttachmentCapabilities?.upload_available || opportunityAttachmentLoading" @click="uploadOpportunityAttachment">上传并扫描</button>
+        <button type="button" :disabled="!opportunityAttachmentFile || !opportunityAttachmentCapabilities?.upload_available || opportunityAttachmentLoading" @click="uploadOpportunityAttachment">上传并校验</button>
       </div>
     </aside>
     <aside class="crm-opportunity-external-panel" aria-label="外部报价投标状态">

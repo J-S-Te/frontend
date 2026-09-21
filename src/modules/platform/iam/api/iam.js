@@ -234,11 +234,9 @@ export function createUsersBatch(items) {
  * @returns {Promise<Object>} 返回批量创建及行号对应结果。
  * @throws {IamError} 组织或岗位无法解析、任一条数据无效或原子事务失败时抛出。
  */
-export function createEmployeesBatch(items) {
-  return request('/employees/batch', {
-    method: 'POST',
-    body: JSON.stringify({
-      items: items.map((item) => ({
+export function createEmployeesBatch(items, sourceFile = null) {
+  const payload = {
+    items: items.map((item) => ({
         display_name: item.displayName,
     email: item.email,
     mobile: item.mobile,
@@ -256,9 +254,17 @@ export function createEmployeesBatch(items) {
             ...(role.roleName ? { role_name: role.roleName } : {}),
           }))
           : [],
-      })),
-    }),
-  })
+    })),
+  }
+  if (sourceFile instanceof Blob) {
+    const form = new FormData()
+    form.append('file', sourceFile, sourceFile.name || 'iam-users.csv')
+    // multipart 导入时服务端以原始 CSV 为唯一事实来源；浏览器只提交用户在
+    // 预览页勾选的物理行号，不能用可篡改的 JSON 覆盖文件内容。
+    form.append('payload', JSON.stringify({ selected_lines: payload.items.map((item) => item.line_no) }))
+    return request('/employees/batch', { method: 'POST', body: form })
+  }
+  return request('/employees/batch', { method: 'POST', body: JSON.stringify(payload) })
 }
 
 
