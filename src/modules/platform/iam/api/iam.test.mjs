@@ -15,6 +15,8 @@ import {
   createUsersBatch,
   createEmployeesBatch,
   listUsers,
+  updateUser,
+  updateAccountStatus,
 } from './iam.js'
 
 const originalFetch = globalThis.fetch
@@ -56,6 +58,25 @@ test('createUser persists through the IAM API instead of mutating local-only row
     email: 'zhangsan@example.com',
     mobile: '13800000000',
     status: 'ACTIVE',
+  })
+})
+
+test('validity updates explicitly distinguish clearing a deadline from leaving it unchanged', async () => {
+  const requests = []
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url, options })
+    return jsonResponse({ data: { version: 2 } })
+  }
+
+  await updateUser({ userId: 'user-1', displayName: '张三', status: 'ACTIVE', version: 1, validUntil: null, updateValidity: true })
+  await updateAccountStatus({ accountId: 'account-1', status: 'ACTIVE', version: 1, validUntil: '2026-10-01T00:00:00Z', updateValidity: true })
+
+  assert.deepEqual(JSON.parse(requests[0].options.body), {
+    display_name: '张三', employee_no: '', email: '', status: 'ACTIVE', version: 1,
+    valid_until: null, update_validity: true,
+  })
+  assert.deepEqual(JSON.parse(requests[1].options.body), {
+    status: 'ACTIVE', version: 1, valid_until: '2026-10-01T00:00:00Z', update_validity: true,
   })
 })
 

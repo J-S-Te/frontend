@@ -34,9 +34,17 @@ RUN npm run build
 # 前端静态资源由 Nginx 提供，并将 API、OIDC 端点代理至后端 API 容器。
 FROM nginx:1.27-alpine
 
+RUN apk add --no-cache openssl \
+    && mkdir -p /etc/nginx/templates /etc/nginx/gateway-templates
+
 COPY nginx/default.conf /etc/nginx/conf.d/default.conf
+COPY nginx/gateway-http.conf.template /etc/nginx/gateway-templates/gateway-http.conf.template
+COPY nginx/gateway-https.conf.template /etc/nginx/gateway-templates/gateway-https.conf.template
+COPY nginx/gateway-draining.conf.template /etc/nginx/gateway-templates/gateway-draining.conf.template
+COPY nginx/05-select-public-transport.sh /docker-entrypoint.d/05-select-public-transport.sh
+RUN chmod 0755 /docker-entrypoint.d/05-select-public-transport.sh
 RUN mkdir -p /etc/nginx/portal-apps.d
 COPY nginx/portal-apps-locations.conf /etc/nginx/portal-apps.d/managed.conf
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-EXPOSE 80
+EXPOSE 80 443

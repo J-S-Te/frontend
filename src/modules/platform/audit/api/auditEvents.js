@@ -1,4 +1,4 @@
-import { createRequest } from '../../shared/api/request.js'
+import { API_BASE_URL, createRequest } from '../../shared/api/request.js'
 
 /**
  * AuditEventsError 与业务错误分类相关的错误类型定义。
@@ -109,6 +109,16 @@ export function createAuditExportJob({ keyword = '', applicationCode = '', envir
       occurred_to: occurredTo,
     }),
   })
+}
+
+/** 查询审计导出任务状态。 */
+export function getAuditExportJob(jobId) {
+  return request(`/audit/export-jobs/${encodeURIComponent(jobId)}`)
+}
+
+/** 返回同源、受会话保护的下载地址；服务端仍会再次执行租户和权限校验。 */
+export function auditExportDownloadURL(jobId) {
+  return `${API_BASE_URL}/audit/export-jobs/${encodeURIComponent(jobId)}/download`
 }
 
 /**

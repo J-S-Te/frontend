@@ -33,6 +33,23 @@ export const PLATFORM_SETTINGS_SECTION_PERMISSIONS = Object.freeze({
     'platform:locked-account:unlock',
   ]),
   dict: DICTIONARY_ENTRY_PERMISSIONS,
+  config: Object.freeze([
+    'platform:config-namespace:read',
+    'platform:config-namespace:create',
+    'platform:config-item:read',
+    'platform:config-item:create',
+    'platform:config-item:update',
+    'platform:config-release:publish',
+    'platform:config-release:read',
+    'platform:config:read',
+  ]),
+  jobs: Object.freeze([
+    'platform:async-job:read',
+    'platform:async-job:create',
+    'platform:async-job:cancel',
+    'platform:async-job:retry',
+    'platform:async-job:rerun',
+  ]),
   applications: Object.freeze([
     'platform:application:read',
     'platform:application:create',

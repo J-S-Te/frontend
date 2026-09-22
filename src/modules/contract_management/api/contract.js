@@ -11,7 +11,9 @@ import { attachStructuredContext } from '../../platform/shared/api/requestContex
 
 const CONTRACT_PUBLIC_PATH_PREFIX = (import.meta.env.VITE_CONTRACT_PUBLIC_PATH_PREFIX || '/contract_management').replace(/\/$/, '')
 const API_BASE_URL = (import.meta.env.VITE_CONTRACT_API_BASE_URL || `${CONTRACT_PUBLIC_PATH_PREFIX}/api/v1`).replace(/\/$/, '')
-const CUSTOMER_API_BASE_URL = (import.meta.env.VITE_CUSTOMER_API_BASE_URL || '/customer_management/api/v1').replace(/\/$/, '')
+// CRM 统一前端与后端都挂载在 /customer-opportunity。旧的 /customer_management
+// 从未在生产 Nginx 注册，命中 SPA fallback 后会以 200 HTML 返回，最终被误判为空客户列表。
+const CUSTOMER_API_BASE_URL = (import.meta.env.VITE_CUSTOMER_API_BASE_URL || '/customer-opportunity/api/v1').replace(/\/$/, '')
 
 let currentSession = null
 let sessionRequest = null
@@ -495,16 +497,32 @@ async function requestBusinessDirectory(baseURL, path, fallbackMessage, source) 
     }, { status: 0, code: 'NETWORK_ERROR', requestId: '', traceId: '' })
     throw requestError
   }
-  const body = await readBody(response)
-  if (!response.ok) {
-    const error = new Error(userSafeErrorMessage(body?.message) || fallbackMessage)
+  const contentType = String(response.headers.get('content-type') || '').toLowerCase()
+  const mediaType = contentType.split(';', 1)[0].trim()
+  const isJSON = mediaType.endsWith('/json') || mediaType.endsWith('+json')
+  let body
+  let invalidJSON = false
+  try {
+    body = await readBody(response)
+  } catch {
+    body = {}
+    invalidJSON = true
+  }
+  // 同源网关会将未知前端路径回退到 index.html 并返回 200。目录请求必须失败关闭，
+  // 否则 HTML 会被规范化为空数组，让用户误以为权限范围内没有业务数据。
+  if (!response.ok || !isJSON || invalidJSON) {
+    const error = new Error(response.ok ? fallbackMessage : (userSafeErrorMessage(body?.message) || fallbackMessage))
     error.status = response.status
-    error.code = body?.code
+    error.code = response.ok ? 'INVALID_DIRECTORY_RESPONSE' : body?.code
     attachStructuredContext(error, {
       subsystem: 'contract_management', feature: 'contract_directory', operation: 'GET', path, method: 'GET',
-      requestId: body?.request_id || '', traceId: body?.trace_id || body?.traceId || '', metadata: { source },
+      requestId: body?.request_id || '', traceId: body?.trace_id || body?.traceId || '', metadata: {
+        source,
+        invalidContentType: response.ok && !isJSON,
+        invalidJSON: response.ok && invalidJSON,
+      },
     }, {
-      status: response.status, code: body?.code, requestId: body?.request_id || '', traceId: body?.trace_id || body?.traceId || '',
+      status: response.status, code: error.code, requestId: body?.request_id || '', traceId: body?.trace_id || body?.traceId || '',
     })
     throw error
   }
@@ -550,50 +568,12 @@ export async function listMyOpportunities(params = {}) {
     page: String(Math.max(1, Number(params.page) || 1)),
     page_size: String(Math.min(100, Math.max(1, Number(params.page_size) || 50))),
   })
-  const requestContext = {
-    subsystem: 'contract_management',
-    feature: 'contract_opportunity_intake',
-    operation: 'GET',
-    path: `/opportunities?${search.toString()}`,
-    method: 'GET',
-  }
-  let response
-  try {
-    response = await fetch(`${CUSTOMER_API_BASE_URL}/opportunities?${search}`, {
-      credentials: 'include',
-      headers: { Accept: 'application/json' },
-    })
-  } catch (error) {
-    const requestError = new Error('读取可关联商机失败，请稍后重试。')
-    attachStructuredContext(requestError, {
-      ...requestContext,
-      metadata: { source: 'crm_opportunity_lookup' },
-    }, {
-      status: 0,
-      code: 'NETWORK_ERROR',
-      requestId: '',
-      traceId: '',
-    })
-    throw requestError
-  }
-  const body = await readBody(response)
-  if (!response.ok) {
-    const error = new Error(userSafeErrorMessage(body?.message) || '读取可关联商机失败，请稍后重试。')
-    attachStructuredContext(error, {
-      ...requestContext,
-      requestId: body?.request_id || '',
-      traceId: body?.trace_id || body?.traceId || '',
-      metadata: { source: 'crm_opportunity_lookup', tenantAware: true },
-    }, {
-      status: response.status,
-      code: body?.code,
-      requestId: body?.request_id || '',
-      traceId: body?.trace_id || body?.traceId || '',
-    })
-    error.status = response.status
-    throw error
-  }
-  const data = body?.data ?? body
+  const data = await requestBusinessDirectory(
+    CUSTOMER_API_BASE_URL,
+    `/opportunities?${search}`,
+    '读取可关联商机失败，请稍后重试。',
+    'crm_opportunity_lookup',
+  )
   if (Array.isArray(data)) return { items: data, page: 1, page_size: data.length, total: data.length, has_more: false }
   const items = Array.isArray(data?.items) ? data.items : []
   const page = Number(data?.page || params.page || 1)

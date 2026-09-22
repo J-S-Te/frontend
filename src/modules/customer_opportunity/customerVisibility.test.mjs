@@ -29,3 +29,12 @@ test('客户基础资料使用受控选项，并优先显示服务端返回的�
   assert.match(source, /owner\?\.owner_display_name/)
   assert.match(source, /负责人账号已失效/)
 })
+
+test('新建客户不要求创建原因，编辑客户仍要求更新原因', async () => {
+  const source = await readFile(viewPath, 'utf8')
+
+  assert.doesNotMatch(source, /创建原因/)
+  assert.match(source, /<label v-if="customerEditMode" class="console-form-item full"><span>更新原因 \*<\/span>/)
+  assert.match(source, /delete createPayload\.reason/)
+  assert.match(source, /owner_user_id: customerForm\.owner_user_id, owner_org_id: customerForm\.owner_org_id, reason: customerForm\.reason/)
+})

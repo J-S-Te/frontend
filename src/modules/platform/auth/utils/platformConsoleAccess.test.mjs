@@ -34,6 +34,6 @@ test('普通业务账号没有平台管理入口', () => {
 })
 
 test('通配权限可访问所有设置页签', () => {
-  assert.deepEqual(visiblePlatformSettingsSections(principal('*')), ['base', 'access', 'iam', 'personnel', 'notify', 'security', 'dict', 'applications'])
+  assert.deepEqual(visiblePlatformSettingsSections(principal('*')), ['base', 'access', 'iam', 'personnel', 'notify', 'security', 'dict', 'config', 'jobs', 'applications'])
   assert.deepEqual(platformConsoleLandingRoute(principal('*')), { name: 'settings', params: { section: 'base' } })
 })

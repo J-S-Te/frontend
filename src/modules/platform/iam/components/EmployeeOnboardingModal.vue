@@ -133,7 +133,11 @@ function validateUser() {
     if (Array.from(mobile).length > 32) throw new IamError('手机号不能超过 32 个字符。')
     if (!/^\+?\d+$/.test(mobile.replace(/[\s-]/g, ''))) throw new IamError('手机号只能包含数字、空格、连字符或开头的加号。')
   }
-  return { display_name: displayName, email, mobile, status: form.status || 'ACTIVE' }
+  const validUntil = form.user_validity_mode === 'TEMPORARY' ? resolveOnboardingExpiresAt(form.user_valid_until) : null
+  if (form.user_validity_mode === 'TEMPORARY' && (!validUntil || new Date(validUntil).getTime() <= Date.now())) {
+    throw new IamError('用户有效截止时间必须晚于当前时间。')
+  }
+  return { display_name: displayName, email, mobile, status: form.status || 'ACTIVE', valid_until: validUntil }
 }
 
 function validateAccount() {
@@ -307,6 +311,8 @@ async function submit() {
               <label class="console-form-item"><span>状态</span><select v-model="form.status"><option value="ACTIVE">启用</option><option value="DISABLED">停用</option></select></label>
               <label class="console-form-item"><span>邮箱</span><input v-model="form.email" type="email" placeholder="例如：zhang.san@example.com" /></label>
               <label class="console-form-item"><span>手机号</span><input v-model="form.mobile" maxlength="32" placeholder="例如：13800000000" /></label>
+              <label class="console-form-item"><span>用户有效期 *</span><select v-model="form.user_validity_mode"><option value="PERMANENT">长期有效</option><option value="TEMPORARY">指定截止时间</option></select></label>
+              <label v-if="form.user_validity_mode === 'TEMPORARY'" class="console-form-item"><span>用户有效截止时间 *</span><input v-model="form.user_valid_until" required type="datetime-local" /><small class="console-wizard-field-help">到期后该用户的全部账号和现有会话都会失效。</small></label>
             </div>
           </section>
 

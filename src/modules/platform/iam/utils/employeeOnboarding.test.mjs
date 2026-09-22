@@ -11,6 +11,7 @@ test('employee onboarding defaults to a one-day local account and an inheriting 
   assert.equal(form.create_account, true)
   assert.equal(form.create_membership, true)
   assert.equal(form.validity_mode, 'TEMPORARY')
+  assert.equal(form.user_validity_mode, 'PERMANENT')
   assert.equal(form.membership_type, 'PRIMARY')
   assert.equal(form.inherit_authorization, true)
   assert.match(form.valid_until, /^2026-07-31T/)
@@ -32,10 +33,24 @@ test('employee onboarding payload keeps optional account and membership absent w
       email: 'zhangsan@example.com',
       mobile: '13800000000',
       status: 'ACTIVE',
+      valid_until: null,
     },
     account: null,
     membership: null,
   })
+})
+
+test('employee onboarding payload carries an independent user validity deadline', () => {
+  const payload = buildEmployeeOnboardingPayload({
+    display_name: '王五',
+    status: 'ACTIVE',
+    user_validity_mode: 'TEMPORARY',
+    user_valid_until: '2026-10-01T08:30',
+    create_account: false,
+    create_membership: false,
+  })
+
+  assert.equal(payload.user.valid_until, new Date('2026-10-01T08:30').toISOString())
 })
 
 test('employee onboarding payload mirrors account and membership dates for the atomic API contract', () => {

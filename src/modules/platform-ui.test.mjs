@@ -16,6 +16,13 @@ test('基础平台入口页遵循克制且性能受控的 UniLab 视觉规范', 
 
   assert.doesNotMatch(`${login}\n${passwordChange}`, /brand-(?:grid|glow)/)
   assert.doesNotMatch(mainCSS, /\.brand-(?:grid|glow)|\.login-button[^}]*linear-gradient/s)
+  assert.match(login, />无法登录？<\/button>/)
+  assert.match(login, /记住账号（不保存密码）/)
+  assert.match(login, /大写锁定已开启/)
+  assert.match(login, /统一身份认证服务/)
+  assert.doesNotMatch(login, /安全服务运行中|WELCOME BACK|登 录/)
+  assert.match(mainCSS, /width:\s*clamp\(520px, 35vw, 680px\)/)
+  assert.match(mainCSS, /\.input-wrap input:-webkit-autofill/)
   assert.match(portal, /const particleCount = Math\.max\(16, Math\.min\(48,/)
   assert.match(portal, /document\.visibilityState === 'visible'/)
   assert.match(portal, /prefers-reduced-motion: reduce/)
