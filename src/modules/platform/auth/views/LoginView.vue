@@ -9,6 +9,7 @@ const account = ref(localStorage.getItem(STORAGE_KEY) || '')
 const password = ref('')
 const rememberAccount = ref(Boolean(account.value))
 const passwordVisible = ref(false)
+const capsLockOn = ref(false)
 const submitting = ref(false)
 const formError = ref('')
 const formSuccess = ref('')
@@ -148,6 +149,14 @@ function showAccountHelp() {
   formError.value = '请联系平台管理员重置密码；重置操作将记录到安全审计日志。'
 }
 
+function updateCapsLockState(event) {
+  capsLockOn.value = Boolean(event?.getModifierState?.('CapsLock'))
+}
+
+function clearCapsLockState() {
+  capsLockOn.value = false
+}
+
 </script>
 
 <template>
@@ -175,7 +184,7 @@ function showAccountHelp() {
           <span>安全、可控、可追溯</span>
         </h1>
         <p class="brand-description">
-          提供统一身份认证、细粒度权限控制、全链路安全审计与集中配置能力，支撑合同、项目、报销等业务系统快速接入。
+          提供统一身份认证、细粒度权限控制、全链路安全审计与集中配置能力，支撑各业务子系统统一接入与安全访问。
         </p>
 
         <ul class="capability-list" aria-label="平台核心能力">
@@ -183,7 +192,7 @@ function showAccountHelp() {
             <span class="capability-icon">
               <svg viewBox="0 0 24 24"><path d="M12 2 4.5 5.4v5.1c0 4.7 3.2 9 7.5 10.2 4.3-1.2 7.5-5.5 7.5-10.2V5.4L12 2Zm0 2.2 5.5 2.5v3.8c0 3.5-2.2 6.8-5.5 8-3.3-1.2-5.5-4.5-5.5-8V6.7L12 4.2Z" /></svg>
             </span>
-            <span><strong>统一身份</strong><small>一个账号访问多个业务系统</small></span>
+            <span><strong>统一身份</strong><small>一个账号访问已授权的业务系统</small></span>
           </li>
           <li>
             <span class="capability-icon">
@@ -195,28 +204,28 @@ function showAccountHelp() {
             <span class="capability-icon">
               <svg viewBox="0 0 24 24"><path d="M5 3h14a2 2 0 0 1 2 2v15a1 1 0 0 1-1.5.87L17 19.43l-2.5 1.44a1 1 0 0 1-1 0L11 19.43l-2.5 1.44a1 1 0 0 1-1 0L5 19.43l-1.5.87A1 1 0 0 1 2 19.43V6a3 3 0 0 1 3-3Zm0 2a1 1 0 0 0-1 1v11.7l.5-.28a1 1 0 0 1 1 0L8 18.86l2.5-1.44a1 1 0 0 1 1 0l2.5 1.44 2.5-1.44a1 1 0 0 1 1 0l1.5.87V5H5Zm2 3h10v2H7V8Zm0 4h7v2H7v-2Z" /></svg>
             </span>
-            <span><strong>审计与日志</strong><small>跨系统事件、操作与运行信息完整留痕</small></span>
+            <span><strong>安全审计</strong><small>关键访问与操作全程留痕</small></span>
           </li>
         </ul>
       </div>
 
       <footer class="brand-footer">
         <span>© {{ currentYear }} 基础能力平台</span>
-        <span class="brand-footer-status"><i></i>安全服务运行中</span>
+        <span class="brand-footer-status">统一身份认证服务</span>
       </footer>
     </section>
 
     <section class="form-panel" aria-label="用户登录">
       <div class="mobile-brand">
         <span class="mobile-logo">基</span>
-        <span>基础能力平台</span>
+        <span><strong>基础能力平台</strong><small>统一身份认证服务</small></span>
       </div>
 
       <div class="login-card">
         <header class="login-header">
-          <span class="login-kicker">WELCOME BACK</span>
-          <h2>欢迎回来</h2>
-          <p>请验证您的身份以继续访问平台</p>
+          <span class="login-kicker">统一身份认证</span>
+          <h2>登录基础能力平台</h2>
+          <p>验证身份后进入已授权的业务系统</p>
         </header>
         <form
           class="password-panel"
@@ -253,6 +262,10 @@ function showAccountHelp() {
                 autocomplete="current-password"
                 maxlength="128"
                 :disabled="submitting"
+                :aria-describedby="capsLockOn ? 'caps-lock-tip' : undefined"
+                @keydown="updateCapsLockState"
+                @keyup="updateCapsLockState"
+                @blur="clearCapsLockState"
               />
               <button
                 class="password-toggle"
@@ -265,14 +278,15 @@ function showAccountHelp() {
                 <svg v-else viewBox="0 0 24 24" aria-hidden="true"><path d="m3.3 2-1.4 1.4 3 3A12.7 12.7 0 0 0 1 12c1.7 4 6 7 11 7 1.8 0 3.5-.4 5-1l3.6 3.6 1.4-1.4L3.3 2ZM12 17c-3.8 0-7.2-2-8.8-5 .8-1.5 1.9-2.7 3.2-3.5l2.1 2.1A3.5 3.5 0 0 0 13.4 15l2 2c-1 .3-2.2.5-3.4.5V17Zm-1.6-4.5 2.1 2.1a1.6 1.6 0 0 1-2.1-2.1ZM12 7c3.8 0 7.2 2 8.8 5a9.5 9.5 0 0 1-2.1 2.8l1.4 1.4A12 12 0 0 0 23 12c-1.7-4-6-7-11-7-.8 0-1.6.1-2.4.2l1.7 1.7.7.1Zm.9 2.1 3 3a4 4 0 0 0-3-3Z" /></svg>
               </button>
             </div>
+            <p v-if="capsLockOn" id="caps-lock-tip" class="caps-lock-tip" role="status">大写锁定已开启</p>
           </div>
 
           <div class="form-options">
             <label class="remember-option">
               <input v-model="rememberAccount" type="checkbox" :disabled="submitting" />
-              <span>记住账号</span>
+              <span>记住账号（不保存密码）</span>
             </label>
-            <button type="button" class="text-button" @click="showAccountHelp">忘记密码？</button>
+            <button type="button" class="text-button" @click="showAccountHelp">无法登录？</button>
           </div>
 
           <p v-if="formError" class="form-message error" role="alert">
@@ -293,7 +307,7 @@ function showAccountHelp() {
 
           <button class="login-button" type="submit" :disabled="submitting">
             <span v-if="submitting" class="button-spinner" aria-hidden="true"></span>
-            <span>{{ submitting ? '正在验证…' : '登 录' }}</span>
+            <span>{{ submitting ? '正在验证…' : '登录' }}</span>
             <svg v-if="!submitting" viewBox="0 0 24 24" aria-hidden="true"><path d="m13 5-1.4 1.4 4.6 4.6H4v2h12.2l-4.6 4.6L13 19l7-7-7-7Z" /></svg>
           </button>
 

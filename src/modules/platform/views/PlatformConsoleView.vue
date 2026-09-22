@@ -7,6 +7,9 @@ import PersonnelChangeCenter from '@/modules/platform/iam/components/PersonnelCh
 import PublicAccessSettingsModule from '@/modules/platform/settings/components/PublicAccessSettingsModule.vue'
 import EmployeeOnboardingModal from '@/modules/platform/iam/components/EmployeeOnboardingModal.vue'
 import NotificationCenterModule from '@/modules/platform/notifications/components/NotificationCenterModule.vue'
+import ConfigurationCenterModule from '@/modules/platform/configuration/components/ConfigurationCenterModule.vue'
+import FileTaskOperationsModule from '@/modules/platform/files/components/FileTaskOperationsModule.vue'
+import { getUnreadCount, listInbox, markNotificationRead } from '@/modules/platform/notifications/api/notifications'
 import LoginSecurityModule from '@/modules/platform/security/components/LoginSecurityModule.vue'
 import DictionaryManagementModule from '@/modules/platform/dictionaries/components/DictionaryManagementModule.vue'
 import SubsystemOnboardingModule from '@/modules/platform/applications/components/SubsystemOnboardingModule.vue'
@@ -21,6 +24,8 @@ import {
   AuditEventsError,
   listAuditEvents,
   createAuditExportJob,
+  getAuditExportJob,
+  auditExportDownloadURL,
 } from '@/modules/platform/audit/api/auditEvents'
 import {
   auditActionCode,
@@ -81,6 +86,11 @@ const auditTotal = ref(0)
 const auditLoading = ref(false)
 const auditError = ref('')
 const auditExporting = ref(false)
+const auditExportJob = ref(null)
+const notificationMenuOpen = ref(false)
+const notificationMenuLoading = ref(false)
+const topbarNotifications = ref([])
+const topbarUnreadCount = ref(0)
 // 筛选器会在用户连续操作时触发多次请求；序号和 AbortController 共同保证旧响应
 // 不会覆盖最后一次查询结果，也避免无效请求继续占用浏览器与 API 连接。
 let auditRequestSequence = 0
@@ -182,6 +192,18 @@ const settingsTabs = [
     capabilities: ['字典定义', '字典项', '启停与排序'],
     permissions: PLATFORM_SETTINGS_SECTION_PERMISSIONS.dict,
   },
+  {
+    key: 'config', label: '配置中心', icon: 'settings', tone: 'cyan',
+    description: '维护应用配置草稿并发布不可变版本。',
+    capabilities: ['命名空间', '配置草稿', '版本发布'],
+    permissions: PLATFORM_SETTINGS_SECTION_PERMISSIONS.config,
+  },
+  {
+    key: 'jobs', label: '异步任务', icon: 'audit', tone: 'orange',
+    description: '查询、重试和重跑平台异步任务；业务文件仍在对应子系统中上传和下载。',
+    capabilities: ['任务查询', '失败重试', '取消与重跑'],
+    permissions: PLATFORM_SETTINGS_SECTION_PERMISSIONS.jobs,
+  },
 ]
 
 const settingsSectionKeys = new Set(settingsTabs.map((tab) => tab.key))
@@ -227,12 +249,6 @@ const activeSettingsTab = computed({
   },
 })
 
-const activeSettingsMeta = computed(() => {
-  const found = settingsTabs.find((tab) => tab.key === activeSettingsTab.value)
-  if (found) return found
-  // 兜底：可见 tab 里第一个；完全没有可见 tab 时返回 null（template v-if 拦截）。
-  return visibleSettingsTabs.value[0] || null
-})
 // 搜索无结果时不再继续展示被过滤掉的模块内容，避免导航与主体状态不一致。
 const hasActiveFilteredSettingsTab = computed(() => (
   filteredSettingsTabs.value.some((tab) => tab.key === activeSettingsTab.value)
@@ -275,15 +291,15 @@ const pagedAuditRecords = computed(() => filteredAuditRecords.value)
 
 const viewMeta = computed(() => {
   if (currentView.value === 'audit') {
-    return { title: '审计日志', crumb: '审计日志', description: 'AUD-001 · 审计事件、数据变更摘要与跨链路追溯' }
+    return { title: '审计日志', crumb: '审计日志', description: '审计事件、数据变更摘要与跨链路追溯' }
   }
   if (activeSettingsTab.value === 'iam') {
-    return { title: '系统设置', crumb: '系统设置', description: 'SYS-002 ~ SYS-004 · 身份、组织、角色与权限集中配置' }
+    return { title: '系统设置', crumb: '系统设置', description: '身份、组织、角色与权限集中配置' }
   }
   if (activeSettingsTab.value === 'security') {
     return { title: '系统设置', crumb: '系统设置', description: '登录策略、账户锁定与会话超时集中配置' }
   }
-  return { title: '系统设置', crumb: '系统设置', description: 'SYS-001 · 平台级参数、通知与安全策略集中配置' }
+  return { title: '系统设置', crumb: '系统设置', description: '平台级参数、通知与安全策略集中配置' }
 })
 
 function navigate(view) {
@@ -540,13 +556,50 @@ async function exportAuditRecords() {
       occurredFrom: bounds.from,
       occurredTo: bounds.to,
     })
+    auditExportJob.value = job || null
     const status = job?.status || '已接收'
-    showToast(`导出任务已提交（${status}），请稍后在“文件与任务”中查看结果。`)
+    showToast(`导出任务已提交（${status}），可在当前页面刷新状态并下载。`)
   } catch (error) {
     showToast(error.message || '提交导出任务失败。')
   } finally {
     auditExporting.value = false
   }
+}
+
+async function refreshAuditExportJob() {
+  if (!auditExportJob.value?.job_id) return
+  try { auditExportJob.value = await getAuditExportJob(auditExportJob.value.job_id) }
+  catch (error) { showToast(error.message || '查询导出任务状态失败。') }
+}
+
+function downloadAuditExport() {
+  if (auditExportJob.value?.status !== 'SUCCEEDED' || !auditExportJob.value?.job_id) return
+  window.location.assign(auditExportDownloadURL(auditExportJob.value.job_id))
+}
+
+async function loadTopbarNotifications() {
+  notificationMenuLoading.value = true
+  try {
+    const [count, page] = await Promise.all([getUnreadCount(), listInbox({ pageSize: 8, unreadOnly: true })])
+    topbarUnreadCount.value = Number(count?.unread_count || 0)
+    topbarNotifications.value = page?.items || []
+  } catch {
+    topbarUnreadCount.value = 0
+    topbarNotifications.value = []
+  } finally { notificationMenuLoading.value = false }
+}
+
+async function toggleNotificationMenu() {
+  notificationMenuOpen.value = !notificationMenuOpen.value
+  if (notificationMenuOpen.value) await loadTopbarNotifications()
+}
+
+async function openTopbarNotification(item) {
+  if (!item?.delivery_id) return
+  if (!item.read_at) await markNotificationRead(item.delivery_id).catch(() => null)
+  await loadTopbarNotifications()
+  const target = String(item.target_url || '')
+  if (target.startsWith('/') && !target.startsWith('//')) await router.push(target).catch(() => {})
 }
 
 async function logout() {
@@ -644,6 +697,7 @@ onMounted(async () => {
   if (canReadPlatformSettings.value) loadPlatformSettings()
   // 只有具备新增员工权限时才预热创建流程所需目录。
   if (hasPermission(IAM_PERMISSIONS.userCreate)) loadOnboardingReferences().catch(() => {})
+  loadTopbarNotifications().catch(() => {})
 })
 
 onBeforeUnmount(() => {
@@ -717,24 +771,25 @@ onBeforeUnmount(() => {
         <button class="console-menu-button" type="button" aria-label="打开导航菜单" @click="mobileMenuOpen = true"><ConsoleIcon name="menu" /></button>
         <div class="console-crumb"><span>基础能力平台</span><ConsoleIcon name="chevron" /><strong>{{ viewMeta.crumb }}</strong></div>
         <div class="console-topbar-actions">
-          <button class="console-icon-button" type="button" aria-label="通知" @click="showToast('暂无新的平台通知。')"><ConsoleIcon name="bell" /><i></i></button>
+          <div class="console-notification-menu">
+            <button class="console-icon-button" type="button" aria-label="通知" :aria-expanded="notificationMenuOpen" @click="toggleNotificationMenu"><ConsoleIcon name="bell" /><i v-if="topbarUnreadCount"></i><b v-if="topbarUnreadCount">{{ topbarUnreadCount > 99 ? '99+' : topbarUnreadCount }}</b></button>
+            <aside v-if="notificationMenuOpen" class="console-notification-popover"><header><strong>未读通知</strong><button type="button" @click="notificationMenuOpen = false">×</button></header><p v-if="notificationMenuLoading">正在加载…</p><p v-else-if="!topbarNotifications.length">暂无未读通知。</p><button v-for="item in topbarNotifications" v-else :key="item.delivery_id" class="console-notification-row" type="button" @click="openTopbarNotification(item)"><strong>{{ item.title }}</strong><span>{{ item.content }}</span></button><footer><button type="button" @click="activeSettingsTab = 'notify'; notificationMenuOpen = false">进入通知中心</button></footer></aside>
+          </div>
           <span class="console-topbar-avatar">{{ currentAccountAvatar }}</span>
         </div>
       </header>
 
       <section class="console-content">
-        <div class="console-page-head">
+        <div v-if="currentView === 'audit'" class="console-page-head">
           <div>
             <h1>{{ viewMeta.title }}</h1>
-            <span v-if="currentView === 'settings' && activeSettingsTab === 'base'" class="console-requirement-chip">{{ viewMeta.description }}</span>
-            <p v-else-if="viewMeta.description">{{ viewMeta.description }}</p>
-            <span v-if="currentView === 'audit'" class="console-requirement-chip">AUD-001 · 统一审计查询</span>
+            <p v-if="viewMeta.description">{{ viewMeta.description }}</p>
           </div>
           <button v-if="currentView === 'audit' && canExportAudit" class="console-button secondary" type="button" @click="exportAuditRecords"><ConsoleIcon name="export" />导出日志</button>
         </div>
 
         <section v-if="currentView === 'audit' && canViewAudit" class="audit-view" aria-label="审计日志列表">
-          <div class="audit-readonly-note"><ConsoleIcon name="info" /><span>审计事件与运行日志分离存储；本页用于查询 <code>audit_event</code> 及其变更摘要，运行日志、Trace、Metric 与告警请在“安全与可观测”中查看。</span></div>
+          <div class="audit-readonly-note"><ConsoleIcon name="info" /><span>审计事件与运行日志分离存储；本页查询 <code>audit_event</code> 及其变更摘要。运行日志、Trace、Metric 与告警由受限运维端点采集，当前控制台不提供不存在的跳转入口。</span></div>
           <div class="console-filter-bar audit-filter-bar">
             <label class="console-search-field">
               <ConsoleIcon name="search" />
@@ -756,6 +811,8 @@ onBeforeUnmount(() => {
             <span>审计事件为只读记录，不支持页面直接删除或归档。</span>
             <div><button v-if="canExportAudit" class="console-button secondary small" type="button" :disabled="auditExporting" @click="exportAuditRecords"><ConsoleIcon name="export" />导出筛选结果</button></div>
           </div>
+
+          <div v-if="auditExportJob" class="audit-readonly-note audit-export-status"><ConsoleIcon name="export" /><span>导出任务 <code>{{ auditExportJob.job_id }}</code>：{{ auditExportJob.status }}<template v-if="auditExportJob.error_message"> · {{ auditExportJob.error_message }}</template></span><button v-if="auditExportJob.status !== 'SUCCEEDED'" class="console-button ghost small" type="button" @click="refreshAuditExportJob">刷新状态</button><button v-else class="console-button primary small" type="button" @click="downloadAuditExport">下载导出文件</button></div>
 
           <div class="console-table-card audit-table-card">
             <div class="console-table-scroll">
@@ -839,17 +896,6 @@ onBeforeUnmount(() => {
             <p>请联系平台管理员授予对应模块的读取或管理权限；IAM 不要求额外授予 <code>platform:user:read</code>。</p>
           </div>
 
-          <div v-if="hasActiveFilteredSettingsTab && activeSettingsMeta" class="settings-active-summary" :class="activeSettingsMeta.tone">
-            <span class="settings-active-summary-icon"><ConsoleIcon :name="activeSettingsMeta.icon" /></span>
-            <div class="settings-active-summary-copy">
-              <strong>{{ activeSettingsMeta.label }}</strong>
-              <p>{{ activeSettingsMeta.description }}</p>
-            </div>
-            <div class="settings-active-capabilities" aria-label="当前模块功能">
-              <span v-for="capability in activeSettingsMeta.capabilities" :key="capability">{{ capability }}</span>
-            </div>
-          </div>
-
           <div v-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'base'" class="console-card settings-card">
             <div class="console-card-body">
               <h2>平台基础信息</h2>
@@ -876,6 +922,10 @@ onBeforeUnmount(() => {
 
 
           <DictionaryManagementModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'dict'" @toast="showToast" />
+
+          <ConfigurationCenterModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'config'" @toast="showToast" />
+
+          <FileTaskOperationsModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'jobs'" @toast="showToast" />
 
           <SubsystemOnboardingModule
             v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'applications'"

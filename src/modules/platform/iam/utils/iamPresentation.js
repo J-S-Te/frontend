@@ -66,6 +66,7 @@ export function detailRows(detail) {
     rows.push({ label: '邮箱', value: item.email || '—' })
     rows.push({ label: '手机号（脱敏）', value: item.mobile_masked || '—' })
     rows.push({ label: '状态', value: item.status || '—' })
+    rows.push({ label: '用户有效期', value: item.valid_until ? formatDateTime(item.valid_until) : '长期有效' })
     rows.push({ label: '更新时间', value: formatDateTime(item.updated_at) })
   } else if (kind === 'account') {
     rows.push({ label: '账号 ID', value: item.account_id })
@@ -74,6 +75,7 @@ export function detailRows(detail) {
     rows.push({ label: '账号类型', value: displayAccountType(item.account_type || 'HUMAN') })
     rows.push({ label: '认证方式', value: displayAuthSource(item.auth_source || 'LOCAL') })
     rows.push({ label: '状态', value: displayStatus(item.status) })
+    rows.push({ label: '账号有效期', value: item.valid_until ? formatDateTime(item.valid_until) : '长期有效' })
     rows.push({ label: '最近登录', value: formatDateTime(item.last_login_at) })
     rows.push({ label: '版本', value: item.version ?? 0 })
   } else if (kind === 'organization') {

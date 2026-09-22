@@ -77,9 +77,27 @@ export function submitPersonnelChange(changeId) {
   return request(`/personnel-changes/${encodeURIComponent(changeId)}/submit`, { method: 'POST', body: '{}' })
 }
 
+export function cancelPersonnelChange(changeId) {
+  return request(`/personnel-changes/${encodeURIComponent(changeId)}/cancel`, { method: 'POST', body: '{}' })
+}
+
 export function transitionPersonnelChange(changeId, toStatus, approvalReference = '') {
   return request(`/personnel-changes/${encodeURIComponent(changeId)}/transition`, {
     method: 'POST',
     body: JSON.stringify({ to_status: toStatus, approval_reference: approvalReference }),
+  })
+}
+
+export function listPersonnelHandoverItems(changeId) {
+  return request(`/personnel-changes/${encodeURIComponent(changeId)}/handover-items`).then((value) => ({
+    items: Array.isArray(value?.items) ? value.items : [],
+    total: Number(value?.total || 0),
+  }))
+}
+
+export function completePersonnelHandoverItem(changeId, itemId, targetUserId) {
+  return request(`/personnel-changes/${encodeURIComponent(changeId)}/handover-items/${encodeURIComponent(itemId)}/complete`, {
+    method: 'POST',
+    body: JSON.stringify({ target_user_id: targetUserId }),
   })
 }

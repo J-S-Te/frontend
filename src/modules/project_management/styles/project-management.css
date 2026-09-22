@@ -2057,3 +2057,20 @@
 
 /* 现场计划字段已从实施计划流程移除；保留选择器以兼容旧模板结构。 */
 .pm-operation-form label:has(textarea[placeholder="现场实施步骤和窗口"]) { display: none; }
+
+/* 现场移动作业：签到、记录、签名按需求流程分步，并显示本地离线队列。 */
+.pm-field-sync { display: flex; align-items: center; gap: var(--pm-sp-2); }
+.pm-field-workflow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--pm-sp-4); align-items: start; }
+.pm-field-step { display: grid; gap: var(--pm-sp-3); min-width: 0; padding: var(--pm-sp-4); border: 1px solid var(--pm-line); border-radius: var(--pm-r-lg); background: var(--pm-sunken); }
+.pm-field-step > header { display: flex; align-items: flex-start; gap: var(--pm-sp-3); }
+.pm-field-step > header > span { display: grid; place-items: center; flex: 0 0 30px; height: 30px; border-radius: var(--pm-r-full); background: var(--pm-primary); color: white; font-size: var(--pm-fs-nano); font-weight: var(--pm-fw-bold); }
+.pm-field-step > header div { display: grid; gap: 3px; }
+.pm-field-step > header small { color: var(--pm-muted); line-height: 1.45; }
+.pm-signature-pad { display: grid; gap: var(--pm-sp-2); }
+.pm-signature-head { display: flex; align-items: center; justify-content: space-between; gap: var(--pm-sp-2); color: var(--pm-body); font-size: var(--pm-fs-sm); }
+.pm-signature-head em { color: var(--pm-red-text); font-style: normal; }
+.pm-signature-pad canvas { width: 100%; height: 170px; border: 1px dashed var(--pm-line-strong); border-radius: var(--pm-r-sm); background: var(--pm-card); cursor: crosshair; touch-action: none; }
+.pm-signature-pad small { color: var(--pm-muted); line-height: 1.45; }
+.pm-field-incomplete { display: grid; gap: var(--pm-sp-2); margin-top: var(--pm-sp-3); max-width: 720px; color: var(--pm-text-secondary); }
+.pm-field-incomplete textarea { min-height: 68px; }
+@media(max-width:1100px){.pm-field-workflow{grid-template-columns:1fr}.pm-signature-pad canvas{height:150px}}

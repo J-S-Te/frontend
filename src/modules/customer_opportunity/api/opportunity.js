@@ -1,6 +1,16 @@
 import { request, requestAuthorizedFile, toQuery } from './client.js'
 
 export const listOpportunities = (params) => request(`/opportunities${toQuery(params)}`)
+export const listOpportunityCatalogItems = (kind, options = {}) => request(`/opportunity-catalog-items${toQuery({ kind, include_disabled: options.includeDisabled || undefined })}`)
+export const createOpportunityCatalogItem = (payload, idempotencyKey) => request('/opportunity-catalog-items', {
+  method: 'POST', body: JSON.stringify(payload), idempotent: true, idempotencyKey,
+})
+export const updateOpportunityCatalogItem = (id, payload) => request(`/opportunity-catalog-items/${encodeURIComponent(id)}`, {
+  method: 'PUT', body: JSON.stringify(payload), idempotent: true,
+})
+export const deleteOpportunityCatalogItem = (id, payload, idempotencyKey) => request(`/opportunity-catalog-items/${encodeURIComponent(id)}`, {
+  method: 'DELETE', body: JSON.stringify(payload), idempotent: true, idempotencyKey,
+})
 export const getOpportunityBoard = (params) => request(`/opportunities/board${toQuery(params)}`)
 export const getOpportunity = (id) => request(`/opportunities/${encodeURIComponent(id)}`)
 export const createOpportunity = (payload, idempotencyKey) => request('/opportunities', {

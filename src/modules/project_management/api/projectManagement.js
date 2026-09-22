@@ -791,7 +791,7 @@ export function startImplementationPreparation(itemID, payload) {
 }
 
 /**
- * submitFieldRecord 提交服务项现场记录；提交成功即代表该服务项进入"实施中"。
+ * submitFieldRecord 提交实施中服务项的现场记录。
  * @param {string|number} itemID 服务项 ID。
  * @param {Object} payload 现场记录负载。
  * @returns {Promise<object>} 提交结果。
@@ -799,6 +799,22 @@ export function startImplementationPreparation(itemID, payload) {
  */
 export function submitFieldRecord(itemID, payload) {
   return request(`/service-items/${encodeURIComponent(itemID)}/field-records`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+/** Persist a GPS/timestamp check-in. client_operation_id makes offline replay safe. */
+export function checkInField(itemID, payload) {
+  return request(`/service-items/${encodeURIComponent(itemID)}/field-check-ins`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+/** Bind an immutable signature receipt to the authenticated engineer and capture time. */
+export function captureFieldSignature(itemID, payload) {
+  return request(`/service-items/${encodeURIComponent(itemID)}/field-signatures`, {
     method: 'POST',
     body: JSON.stringify(payload),
   })
@@ -859,9 +875,10 @@ export function reviewDeviation(deviationID, payload) {
  * @returns {Promise<object>} 完成结果；服务项随后进入报告编制阶段。
  * @throws {Error} 会话失效、服务项不在"实施中"或权限不足时抛出。
  */
-export function completeServiceItemField(itemID) {
+export function completeServiceItemField(itemID, payload = {}) {
   return request(`/service-items/${encodeURIComponent(itemID)}/field-complete`, {
     method: 'POST',
+    body: JSON.stringify(payload),
   })
 }
 

@@ -6,7 +6,10 @@ const view = await readFile(new URL('./customer_opportunity/views/CustomerOpport
 const apiSource = await readFile(new URL('./customer_opportunity/api/presale.js', import.meta.url), 'utf8')
 const style = await readFile(new URL('./customer_opportunity/styles/customer-opportunity.css', import.meta.url), 'utf8')
 const approvalPanel = await readFile(new URL('./customer_opportunity/components/PresaleApprovalRulesPanel.vue', import.meta.url), 'utf8')
+const creditApprovalInbox = await readFile(new URL('./customer_opportunity/components/CreditApprovalInbox.vue', import.meta.url), 'utf8')
+const creditRuleSettings = await readFile(new URL('./customer_opportunity/components/CreditRuleSettingsPanel.vue', import.meta.url), 'utf8')
 const ownerSelector = await readFile(new URL('./customer_opportunity/components/OwnerSelector.vue', import.meta.url), 'utf8')
+const opportunityCatalogDialog = await readFile(new URL('./customer_opportunity/components/OpportunityCatalogDialog.vue', import.meta.url), 'utf8')
 const api = await import('./customer_opportunity/api/presale.js')
 const customer = await import('./customer_opportunity/api/customer.js')
 const client = await import('./customer_opportunity/api/client.js')
@@ -23,6 +26,24 @@ const { createMemberTermLoadState } = await import('./customer_opportunity/membe
 const { createPortalInviteRetryState } = await import('./customer_opportunity/portalInviteRetry.js')
 const { createPortalAccessDisableRetryState } = await import('./customer_opportunity/portalAccessDisableRetry.js')
 const { formatSignedContractCount } = await import('./customer_opportunity/signedContractCount.js')
+
+test('客户与商机页面不向业务用户展示需求追踪编号', () => {
+  assert.doesNotMatch(view, /console-requirement-chip/)
+  assert.doesNotMatch(view, /CM-001 ~ CM-004|BM-001 ~ BM-002|TS-001 ~ TS-010|CRM-NOTIFY-001/)
+  assert.doesNotMatch(creditApprovalInbox, /CM-003/)
+  assert.match(creditApprovalInbox, />销售总监工作台</)
+})
+
+test('信用规则管理使用状态摘要、参数卡和响应式配置操作区', () => {
+  assert.match(creditRuleSettings, /class="crm-panel crm-credit-rule-settings"/)
+  assert.match(creditRuleSettings, /class="crm-credit-rule-overview" :class="\{ disabled: !form\.enabled \}"/)
+  assert.match(creditRuleSettings, /class="crm-credit-rule-parameters"/)
+  assert.equal((creditRuleSettings.match(/class="crm-credit-rule-field"/g) || []).length, 4)
+  assert.match(creditRuleSettings, /role="switch" :aria-checked="form\.enabled"/)
+  assert.match(creditRuleSettings, /class="crm-credit-rule-footer"/)
+  assert.match(style, /\.crm-credit-rule-settings \{ width: min\(100%, 1120px\)/)
+  assert.match(style, /@media \(max-width: 760px\)[\s\S]*\.crm-credit-rule-grid \{ grid-template-columns: 1fr; \}/)
+})
 
 test('售前审批规则支持规则列表和编辑区折叠', () => {
   assert.match(approvalPanel, /const rulesExpanded = ref\(true\)/)
@@ -94,6 +115,15 @@ test('商机和售前核心表单统一使用大系统 console 弹窗规范', ()
   assert.doesNotMatch(view, /v-if="opportunityDialog" class="crm-modal"/)
   assert.doesNotMatch(view, /v-if="showReport" class="crm-modal"/)
   assert.doesNotMatch(view, /v-if="showAlertConfig" class="crm-modal"/)
+})
+
+test('售前申请详情使用摘要与双栏工作区并在窄屏回退单列', () => {
+  assert.match(view, /class="crm-presale-detail-heading"[\s\S]*class="crm-presale-status-badge"/)
+  assert.match(view, /class="crm-presale-detail-workspace"[\s\S]*class="crm-presale-detail-primary"[\s\S]*class="crm-presale-detail-activity"/)
+  assert.match(view, /class="crm-presale-detail-activity" aria-label="流程与工时记录"/)
+  assert.match(style, /\.crm-presale-detail-workspace \{ display: grid; grid-template-columns: minmax\(0, 1\.08fr\) minmax\(420px, \.92fr\)/)
+  assert.match(style, /\.crm-presale-detail-activity \{ position: sticky; top: 94px; \}/)
+  assert.match(style, /@media \(max-width: 820px\)[\s\S]*\.crm-presale-detail-workspace \{ grid-template-columns: 1fr;/)
 })
 
 test('确认导入成功后自动关闭客户 Excel 导入弹窗', () => {
@@ -565,16 +595,48 @@ test('新建商机从客户管理加载可见有效客户且不允许手填客�
   assert.equal(requests[0].url, '/customer-opportunity/api/v1/customers?keyword=%E7%A4%BA%E4%BE%8B%E5%AE%A2%E6%88%B7&status=ACTIVE&page=1&page_size=100&sort_by=name&sort_order=asc')
 })
 
-test('新建商机类型和来源使用受控勾选多选', () => {
-  assert.match(view, /const opportunityTypeOptions = Object\.freeze\(/)
-  assert.match(view, /const opportunitySourceOptions = Object\.freeze\(/)
+test('商机类型和来源使用租户目录、结构化 ID 与安全删除', async (t) => {
+  assert.match(view, /await Promise\.all\(\[listOpportunityCatalogItems\('TYPE'\), listOpportunityCatalogItems\('SOURCE'\)\]\)/)
+  assert.doesNotMatch(view, /const opportunityTypeOptions = Object\.freeze\(/)
+  assert.doesNotMatch(view, /const opportunitySourceOptions = Object\.freeze\(/)
   assert.match(view, /v-model="opportunityTypeSelections" type="checkbox"/)
   assert.match(view, /v-model="opportunitySourceSelections" type="checkbox"/)
+  assert.match(view, /opportunityForm\.type_ids = typeIDs/)
+  assert.match(view, /opportunityForm\.source_ids = sourceIDs/)
+  assert.match(view, /!item\.enabled && !opportunityTypeSelections\.includes/)
   assert.match(view, /crm-opportunity-check-list/)
   assert.match(view, /请至少选择一个商机类型和一个来源。/)
-  for (const value of ['等保审查', '密码应用安全性评估', '网络安全攻防演内容', '安全运维', '客户主动咨询', '公开招标', '内部转介']) {
-    assert.match(view, new RegExp(value))
-  }
+  assert.match(view, /canManageOpportunityCatalog/)
+  assert.match(opportunityCatalogDialog, /includeDisabled: true/)
+  assert.match(opportunityCatalogDialog, /CRM_OPPORTUNITY_CATALOG_IN_USE/)
+  assert.match(opportunityCatalogDialog, /Confirm & Auto Close/)
+  assert.match(opportunityCatalogDialog, /仅未被任何商机使用的配置可删除/)
+  assert.match(opportunityCatalogDialog, /const mutationKeys = new Map\(\)/)
+  assert.match(opportunityCatalogDialog, /mutationKey\(`DELETE:\$\{item\.id\}`/)
+  assert.match(opportunityCatalogDialog, /crm-catalog-create-panel/)
+  assert.match(opportunityCatalogDialog, /crm-catalog-summary/)
+  assert.match(opportunityCatalogDialog, /crm-catalog-item-index/)
+  assert.match(opportunityCatalogDialog, /统一维护商机创建时可选择的类型和来源/)
+  assert.match(style, /\.crm-catalog-tabs \{ display: grid; grid-template-columns: repeat\(2/)
+  assert.match(style, /\.crm-catalog-item:hover/)
+  assert.match(style, /@media \(max-width: 520px\)[\s\S]*\.crm-catalog-dialog/)
+
+  const originalFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = originalFetch })
+  const requests = []
+  globalThis.fetch = async (url, options) => { requests.push({ url, options }); return jsonResponse([]) }
+  await opportunity.listOpportunityCatalogItems('TYPE', { includeDisabled: true })
+  await opportunity.createOpportunityCatalogItem({ kind: 'TYPE', name: '自定义类型', sort_order: 30 }, 'catalog-create-key')
+  await opportunity.updateOpportunityCatalogItem(9, { name: '新名称', sort_order: 40, enabled: false, version: 2, reason: '停用' })
+  await opportunity.deleteOpportunityCatalogItem(9, { version: 3, reason: '删除' }, 'catalog-delete-key')
+  assert.deepEqual(requests.map((item) => item.url), [
+    '/customer-opportunity/api/v1/opportunity-catalog-items?kind=TYPE&include_disabled=true',
+    '/customer-opportunity/api/v1/opportunity-catalog-items',
+    '/customer-opportunity/api/v1/opportunity-catalog-items/9',
+    '/customer-opportunity/api/v1/opportunity-catalog-items/9',
+  ])
+  assert.equal(requests[1].options.headers['Idempotency-Key'], 'catalog-create-key')
+  assert.equal(requests[3].options.headers['Idempotency-Key'], 'catalog-delete-key')
 })
 
 test('客户沟通与商机维护调用实际生命周期路由并携带 CSRF', async (t) => {
@@ -1124,6 +1186,9 @@ test('TS-004 详情以权威操作接口和稳定游标驱动且安全展示时�
   for (const label of ['售前申请已创建', '任务状态已变更', '审批已处理', '已加入执行人', '已移出执行人', '已登记进度', '已登记工时']) assert.match(view, new RegExp(label))
   assert.match(view, /parsed\.protocol === 'https:'/)
   assert.match(view, /target="_blank" rel="noopener noreferrer"/)
+	assert.match(view, /class="crm-timeline-list" tabindex="0" aria-label="售前流程步骤，区域内可滚动"/)
+	assert.match(style, /\.crm-timeline-list \{[\s\S]*max-height: min\(52vh, 520px\);[\s\S]*overflow-y: auto;/)
+	assert.match(style, /\.crm-timeline-list:focus-visible/)
 	assert.match(view, /function usableOperationName\(snapshot, userId\)/)
 	assert.match(view, /value !== String\(userId \|\| ''\)\.trim\(\)/)
 	assert.match(view, /operationUserLabel\(item\).*usableOperationName\(item\?\.actor_name, item\?\.actor_id\).*ownerLabel\(item\?\.actor_id\)/)
@@ -1312,6 +1377,18 @@ test('新建售前申请需求说明只要求有内容且必填项显示星标',
   for (const label of ['关联商机 *', '支持方式 *', '紧急程度 *', '联系人 *', '联系电话 *', '预计开始 *', '预计结束 *']) {
     assert.match(view, new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
   }
+})
+
+test('新建售前申请使用分区式响应布局并保留完整提交动作', () => {
+  assert.match(view, /class="crm-presale-create-hero"[\s\S]*新建售前申请[\s\S]*关联商机[\s\S]*支持信息[\s\S]*时间安排/)
+  assert.match(view, /class="crm-presale-create-notice" role="status"/)
+  assert.match(view, /aria-labelledby="presale-create-opportunity-heading"/)
+  assert.match(view, /aria-labelledby="presale-create-support-heading"/)
+  assert.match(view, /aria-labelledby="presale-create-schedule-heading"/)
+  assert.match(view, /class="crm-presale-create-actions"[\s\S]*@click="closePresaleCreatePage">取消<[\s\S]*提交申请/)
+  assert.match(style, /\.crm-presale-create-page \{ width: min\(100%, 1040px\); margin: 0 auto; \}/)
+  assert.match(style, /\.crm-presale-create-section \{ display: grid; grid-template-columns: 190px minmax\(0, 1fr\)/)
+  assert.match(style, /@media \(max-width: 620px\)[\s\S]*\.crm-presale-create-fields \{ grid-template-columns: 1fr; \}/)
 })
 
 test('负责人列表与详情会按需补全人员目录名字', () => {

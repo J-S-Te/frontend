@@ -11,6 +11,8 @@ export function defaultEmployeeOnboardingForm(now = new Date()) {
     email: '',
     mobile: '',
     status: 'ACTIVE',
+    user_validity_mode: 'PERMANENT',
+    user_valid_until: defaultAccountValidUntil(now),
     create_account: true,
     account_name: '',
     initial_password: '',
@@ -47,6 +49,7 @@ export function buildEmployeeOnboardingPayload(form, { account, user } = {}) {
       email: optionalText(form?.email),
       mobile: optionalText(form?.mobile),
       status: form?.status || 'ACTIVE',
+      valid_until: form?.user_validity_mode === 'TEMPORARY' ? resolveOnboardingExpiresAt(form?.user_valid_until) : null,
     },
     account: createAccount
       ? (account || {

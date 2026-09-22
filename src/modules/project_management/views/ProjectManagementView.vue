@@ -14,7 +14,9 @@ import ProgressCell from '@/modules/project_management/components/ProgressCell.v
 import RiskList from '@/modules/project_management/components/RiskList.vue'
 import SearchableSelect from '@/modules/project_management/components/SearchableSelect.vue'
 import ServiceItemPicker from '@/modules/project_management/components/ServiceItemPicker.vue'
+import SignaturePad from '@/modules/project_management/components/SignaturePad.vue'
 import { implementationPlanReady, projectAllowsWorkflowNode } from '@/modules/project_management/workflowNode'
+import { countFieldOperations, listFieldOperations, removeFieldOperation, saveFieldOperation } from '@/modules/project_management/offlineFieldQueue'
 import { subsystemAccessMessage } from '@/modules/shared/authz/sessionCompatibility'
 import { closeSubsystemTabOrFallback } from '@/modules/shared/utils/returnToPortal'
 import {
@@ -71,6 +73,8 @@ import {
   planImplementation,
   startImplementationPreparation,
   startFieldExecution,
+  checkInField,
+  captureFieldSignature,
   submitFieldRecord,
   uploadServiceItemEvidence,
   registerReportArtifact,
@@ -465,7 +469,9 @@ const canManageResource = computed(() => Array.isArray(session.value?.permission
 // 权限码门控入口，设备此前没有门控，一旦设备模块对更多角色可见就会变成「能点必 403」。
 const canManageDevice = computed(() => Array.isArray(session.value?.permissions) && session.value.permissions.includes('project.device.manage'))
 const selectedServiceItemIDs = ref([])
-const operationForm = ref({ teamLeadID: '', projectManagerID: '', engineerIDs: '', plannedStart: '', plannedEnd: '', penetrationTestPlan: '', authDocNo: '', authStart: '', authEnd: '', authScope: '', testScope: '', testWindow: '', emergencyContact: '', rollbackPlan: '', reviewComment: '', personnel: [], equipment: [], travelMode: '', travelReferenceEventID: '', noTravelReason: '', travelOrigin: '', travelDestination: '', travelDepartureDate: '', travelReturnDate: '', travelTransport: '', travelAccommodationNeed: '', travelTravelerIDs: [], rawData: '', environment: '', fieldEvidenceFile: null, reportFile: null, reportCorrectionReason: '', reportCorrectionComment: '', deviationDescription: '', deviationEvidenceFile: null, severity: 'MEDIUM', decision: 'RELEASE', comment: '' })
+const operationForm = ref({ teamLeadID: '', projectManagerID: '', engineerIDs: '', plannedStart: '', plannedEnd: '', penetrationTestPlan: '', authDocNo: '', authStart: '', authEnd: '', authScope: '', testScope: '', testWindow: '', emergencyContact: '', rollbackPlan: '', reviewComment: '', personnel: [], equipment: [], travelMode: '', travelReferenceEventID: '', noTravelReason: '', travelOrigin: '', travelDestination: '', travelDepartureDate: '', travelReturnDate: '', travelTransport: '', travelAccommodationNeed: '', travelTravelerIDs: [], rawData: '', environment: '', fieldEvidenceFile: null, fieldSignatureFile: null, checkInDeviationReason: '', fieldIncompleteReason: '', reportFile: null, reportCorrectionReason: '', reportCorrectionComment: '', deviationDescription: '', deviationEvidenceFile: null, severity: 'MEDIUM', decision: 'RELEASE', comment: '' })
+const pendingFieldSyncCount = ref(0)
+const fieldSyncing = ref(false)
 const deviationSeverityOptions = Object.freeze([
   { value: 'LOW', label: '低' },
   { value: 'MEDIUM', label: '中' },
@@ -1189,6 +1195,16 @@ const selectedServiceItems = computed(() => {
   return candidates.filter((item) => selectedServiceItemIDs.value.includes(item.id))
 })
 const selectedServiceItem = computed(() => selectedServiceItems.value[0] || null)
+const selectedFieldEvidenceGaps = computed(() => {
+  const itemID = selectedServiceItem.value?.id
+  if (!itemID) return []
+  const types = new Set(deliveryEvents.value.filter((event) => event.service_item_id === itemID).map((event) => event.type))
+  return [
+    ['FIELD_CHECKED_IN', 'GPS 签到'],
+    ['FIELD_RECORD_SUBMITTED', '现场记录'],
+    ['FIELD_SIGNATURE_CAPTURED', '电子签名'],
+  ].filter(([type]) => !types.has(type)).map(([, label]) => label)
+})
 const travelExistingOptions = computed(() => {
   const projectID = selectedServiceItem.value?.project_id
   if (!projectID) return []
@@ -2685,6 +2701,86 @@ async function uploadCurrentReport() {
   finally { saving.value = false }
 }
 
+function newFieldOperationID(prefix) {
+  const random = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  return `${prefix}-${random}`
+}
+
+function fieldQueueOwner() {
+  const tenantID = String(session.value?.tenant_id || '').trim()
+  const userID = String(session.value?.user_id || '').trim()
+  return tenantID && userID ? `${tenantID}:${userID}` : ''
+}
+
+async function refreshFieldQueueCount() {
+  try { pendingFieldSyncCount.value = await countFieldOperations(fieldQueueOwner()) } catch { pendingFieldSyncCount.value = 0 }
+}
+
+async function persistAndSyncFieldOperation(operation) {
+  const ownerKey = fieldQueueOwner()
+  if (!ownerKey) throw new Error('当前登录身份不可用，无法安全保存离线作业')
+  await saveFieldOperation({ ...operation, ownerKey, createdAt: operation.createdAt || new Date().toISOString() })
+  await refreshFieldQueueCount()
+  if (!navigator.onLine) {
+    showToast('当前离线，现场作业已安全保存；联网后将自动补传。', 'warning')
+    return false
+  }
+  await flushFieldOperations(true)
+  return true
+}
+
+async function submitStoredFieldOperation(operation) {
+  if (!operation.ownerKey || operation.ownerKey !== fieldQueueOwner()) throw new Error('离线作业归属与当前账号不一致')
+  let current = operation
+  if (current.file && !current.artifact) {
+    const artifact = await uploadServiceItemEvidence(current.itemID, 'FIELD', current.file)
+    current = { ...current, artifact, file: null }
+    await saveFieldOperation(current)
+  }
+  const payload = { ...current.payload, client_operation_id: current.id, captured_at: current.capturedAt }
+  if (current.kind === 'check-in') return checkInField(current.itemID, payload)
+  if (current.kind === 'record') return submitFieldRecord(current.itemID, { ...payload, evidence_files: current.artifact ? [current.artifact] : [] })
+  if (current.kind === 'signature') return captureFieldSignature(current.itemID, { ...payload, signature_file: current.artifact })
+  throw new Error('未知的现场离线作业类型')
+}
+
+async function flushFieldOperations(announce = false) {
+  const ownerKey = fieldQueueOwner()
+  if (fieldSyncing.value || !navigator.onLine || !ownerKey) return
+  fieldSyncing.value = true
+  let synced = 0
+  try {
+    for (const operation of await listFieldOperations(ownerKey)) {
+      try {
+        await submitStoredFieldOperation(operation)
+        await removeFieldOperation(operation.id)
+        synced += 1
+      } catch (error) {
+        // 网络中断保留原始操作和文件；业务校验错误同样保留，避免静默丢失现场证据。
+        await saveFieldOperation({ ...operation, lastError: error?.message || '同步失败' })
+        if (announce) showToast(`现场作业尚未同步：${error?.message || '请稍后重试'}`, 'warning')
+        break
+      }
+    }
+  } finally {
+    fieldSyncing.value = false
+    await refreshFieldQueueCount()
+  }
+  if (synced) {
+    if (announce) showToast(`已同步 ${synced} 条现场作业`)
+    await loadWorkspace()
+  }
+}
+
+function currentPosition() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) { reject(new Error('当前设备不支持定位')); return }
+    navigator.geolocation.getCurrentPosition(resolve, () => reject(new Error('无法获取定位，请检查浏览器定位权限')), {
+      enableHighAccuracy: true, timeout: 15000, maximumAge: 30000,
+    })
+  })
+}
+
 async function runOperation(kind) {
   const item = selectedServiceItem.value
   const items = kind === 'allocation' ? selectedServiceItems.value : (item ? [item] : [])
@@ -2761,23 +2857,47 @@ async function runOperation(kind) {
     } else if (kind === 'field-start') {
       await startFieldExecution(item.id, { expected_version: Number(item.version) || 0 })
       showToast('已进入实施中，可以提交现场记录')
+    } else if (kind === 'field-check-in') {
+      const position = await currentPosition()
+      const operation = {
+        id: newFieldOperationID('checkin'), kind: 'check-in', itemID: item.id, capturedAt: new Date(position.timestamp || Date.now()).toISOString(),
+        payload: { latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy_meters: position.coords.accuracy, deviation_reason: form.checkInDeviationReason, expected_version: 0 },
+      }
+      await persistAndSyncFieldOperation(operation)
+      form.checkInDeviationReason = ''
     } else if (kind === 'field') {
       if (!String(form.rawData || '').trim() || !String(form.environment || '').trim()) { showToast('请填写现场原始数据与环境条件', 'warning'); return }
 	  if (!(form.fieldEvidenceFile instanceof File)) { showToast('请上传至少一份现场证据', 'warning'); return }
-	  const evidence = await uploadServiceItemEvidence(item.id, 'FIELD', form.fieldEvidenceFile)
-	  await submitFieldRecord(item.id, { expected_version: Number(item.version) || 0, raw_data: form.rawData, environment: form.environment, evidence_files: [evidence] })
+      await persistAndSyncFieldOperation({
+        id: newFieldOperationID('record'), kind: 'record', itemID: item.id, capturedAt: new Date().toISOString(), file: form.fieldEvidenceFile,
+        payload: { expected_version: 0, raw_data: form.rawData, environment: form.environment },
+      })
 	  form.fieldEvidenceFile = null
-      showToast('现场记录已提交')
+      form.rawData = ''
+      form.environment = ''
+    } else if (kind === 'field-signature') {
+      if (!(form.fieldSignatureFile instanceof File)) { showToast('请先完成电子签名', 'warning'); return }
+      await persistAndSyncFieldOperation({
+        id: newFieldOperationID('signature'), kind: 'signature', itemID: item.id, capturedAt: new Date().toISOString(), file: form.fieldSignatureFile,
+        payload: { expected_version: 0 },
+      })
+      form.fieldSignatureFile = null
     } else if (kind === 'exception-report') {
 	  const evidenceFiles = form.deviationEvidenceFile instanceof File ? [await uploadServiceItemEvidence(item.id, 'DEVIATION', form.deviationEvidenceFile)] : []
 	  const result = await reportDeviation(item.id, { description: form.deviationDescription, severity: form.severity, evidence_files: evidenceFiles })
 	  form.deviationEvidenceFile = null
       showToast(`偏离已上报：${result.deviation_id || '待评审'}`)
     } else if (kind === 'exception-review') {
+	  if (form.decision === 'TERMINATE' && !String(form.comment || '').trim()) { showToast('终止服务项时必须填写终止原因', 'warning'); return }
       await reviewDeviation(form.deviationID, { decision: form.decision, comment: form.comment })
       showToast('偏离评审已完成')
     } else if (kind === 'complete') {
-      await completeServiceItemField(item.id)
+      if (selectedFieldEvidenceGaps.value.length && !String(form.fieldIncompleteReason || '').trim()) {
+        showToast(`请先补齐${selectedFieldEvidenceGaps.value.join('、')}，或填写无法补齐的确认说明`, 'warning')
+        return
+      }
+      await completeServiceItemField(item.id, { incomplete_reason: String(form.fieldIncompleteReason || '').trim() })
+      form.fieldIncompleteReason = ''
       showToast('现场测评已结束，进入报告编制')
     }
     await loadWorkspace()
@@ -2997,14 +3117,21 @@ function onGlobalKeydown(event) {
   if (closeActiveOverlay()) event.preventDefault()
 }
 
+function onFieldOnline() { flushFieldOperations(true) }
+
 onMounted(loadWorkspace)
 onMounted(loadPersonnel)
 onMounted(refreshNotificationCount)
+watch(() => fieldQueueOwner(), (ownerKey) => {
+  pendingFieldSyncCount.value = 0
+  if (ownerKey) { refreshFieldQueueCount(); flushFieldOperations(false) }
+}, { immediate: true })
 onMounted(() => {
   document.addEventListener('click', closeMultiOnOutsideClick)
   document.addEventListener('keydown', onGlobalKeydown)
   document.addEventListener('visibilitychange', onMonitoringVisibility)
   window.addEventListener('focus', onMonitoringVisibility)
+  window.addEventListener('online', onFieldOnline)
 })
 // 进入资源分配/待办/指派栏目时刷新人员目录，保证新建或停用的平台账号能及时反映。
 watch(activeSection, (section) => {
@@ -3045,6 +3172,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('keydown', onGlobalKeydown)
   document.removeEventListener('visibilitychange', onMonitoringVisibility)
   window.removeEventListener('focus', onMonitoringVisibility)
+  window.removeEventListener('online', onFieldOnline)
 })
 </script>
 
@@ -3368,7 +3496,21 @@ onBeforeUnmount(() => {
         <template v-else-if="activeSection === 'implementation'">
           <section class="pm-board-summary"><div><strong>{{ implementationProjectCount }}</strong><span>当前节点项目</span></div><div><strong>{{ implementationItems.length }}</strong><span>当前节点服务项</span></div><div><strong>{{ preparedImplementationCount }}</strong><span>准备完成</span></div><div><strong>{{ fieldImplementationCount }}</strong><span>现场实施中</span></div><div><strong>{{ penetrationPackageStats.total }}</strong><span>渗透专项（待确认 {{ penetrationPackageStats.pending }} / 进行中 {{ penetrationPackageStats.active }} / 完成 {{ penetrationPackageStats.completed }}）</span></div></section>
           <section class="pm-kanban"><article v-for="column in implementationKanbanColumns" :key="column.key"><header><div><i :class="column.color"></i><b>{{ column.key }}</b></div><span>{{ column.count }}</span></header><div class="pm-kanban-body"><button v-for="card in column.cards" :key="card.id" class="pm-kanban-card" :class="[column.color, { risk: card.risk }]" @click="openProject(card)"><b>{{ card.id }}</b><h3>{{ card.customer }}</h3><span class="pm-badge" :class="statusTone(card.status)">{{ card.status }}</span><div class="pm-inline-progress"><i :style="{ width: `${card.progress}%` }"></i></div><footer><span>{{ card.progress }}%</span><time>{{ card.due || '待排期' }}</time></footer></button><div v-if="!column.cards.length" class="pm-empty-mini">暂无当前节点项目</div></div></article></section>
-          <section class="pm-panel pm-operation-panel"><header><div><p class="pm-panel-kicker">现场实施</p><h2>现场测评与记录</h2></div></header><ServiceItemPicker :items="implementationItems" :selected-ids="selectedServiceItem ? [selectedServiceItem.id] : []" empty-text="暂无处于现场实施节点的服务项" @select="selectServiceItem" /><PenetrationWorkPackageCard v-if="selectedServiceItem && isEmbeddedPenetrationItem(selectedServiceItem)" :item="selectedServiceItem" :session="session" :engineer-options="penetrationEngineerOptions" @updated="updatePenetrationPackage" @notify="notifyFromPenetration" /><button v-if="selectedServiceItem && selectedServiceItem.status === '实施准备中' && canExecuteField" class="pm-button primary" :disabled="saving" @click="runOperation('field-start')">进入实施中</button><div v-if="selectedServiceItem && selectedServiceItem.status === '实施中' && canExecuteField" class="pm-form pm-operation-form"><label><span>现场原始数据 <em>*</em></span><textarea v-model.trim="operationForm.rawData" rows="3" placeholder="记录现场实测数据与依据"></textarea></label><label><span>环境条件 <em>*</em></span><textarea v-model.trim="operationForm.environment" rows="3" placeholder="记录现场环境条件"></textarea></label><label><span>现场证据 <em>*</em></span><input type="file" accept="application/pdf,image/png,image/jpeg" @change="operationForm.fieldEvidenceFile = $event.target.files?.[0] || null" /><small>文件通过统一文件网关上传、校验并以 SHA-256 回执存证。</small></label><button class="pm-button primary" :disabled="saving" @click="runOperation('field')">提交现场记录</button></div><button v-if="selectedServiceItem && selectedServiceItem.status === '实施中' && canCompleteField" class="pm-button" :disabled="saving" @click="runOperation('complete')">现场测评结束</button><div v-else-if="!selectedServiceItem" class="pm-empty-mini">请先选择服务项</div></section>
+          <section class="pm-panel pm-operation-panel">
+            <header><div><p class="pm-panel-kicker">现场实施</p><h2>现场测评与记录</h2></div><div class="pm-field-sync"><span class="pm-badge" :class="pendingFieldSyncCount ? '关注' : 'normal'">待同步 {{ pendingFieldSyncCount }}</span><button v-if="pendingFieldSyncCount" type="button" class="pm-link" :disabled="fieldSyncing" @click="flushFieldOperations(true)">{{ fieldSyncing ? '同步中…' : '立即重试' }}</button></div></header>
+            <ServiceItemPicker :items="implementationItems" :selected-ids="selectedServiceItem ? [selectedServiceItem.id] : []" empty-text="暂无处于现场实施节点的服务项" @select="selectServiceItem" />
+            <PenetrationWorkPackageCard v-if="selectedServiceItem && isEmbeddedPenetrationItem(selectedServiceItem)" :item="selectedServiceItem" :session="session" :engineer-options="penetrationEngineerOptions" @updated="updatePenetrationPackage" @notify="notifyFromPenetration" />
+            <button v-if="selectedServiceItem && selectedServiceItem.status === '实施准备中' && canExecuteField" class="pm-button primary" :disabled="saving" @click="runOperation('field-start')">进入实施中</button>
+            <div v-if="selectedServiceItem && selectedServiceItem.status === '实施中' && canExecuteField" class="pm-field-workflow">
+              <section class="pm-field-step"><header><span>01</span><div><b>GPS 现场签到</b><small>记录设备定位、精度与采集时间；离线时安全排队。</small></div></header><label><span>偏离说明（定位与现场不一致时填写）</span><input v-model.trim="operationForm.checkInDeviationReason" placeholder="例如 客户临时安排在同园区备用机房" /></label><button class="pm-button primary" :disabled="saving" @click="runOperation('field-check-in')">获取定位并签到</button></section>
+              <section class="pm-field-step"><header><span>02</span><div><b>填写现场记录</b><small>原始数据、环境条件与文件回执绑定同一采集时间。</small></div></header><div class="pm-form pm-operation-form"><label><span>现场原始数据 <em>*</em></span><textarea v-model.trim="operationForm.rawData" rows="3" placeholder="记录现场实测数据与依据"></textarea></label><label><span>环境条件 <em>*</em></span><textarea v-model.trim="operationForm.environment" rows="3" placeholder="记录现场环境条件"></textarea></label><label><span>现场证据 <em>*</em></span><input type="file" accept="application/pdf,image/png,image/jpeg" @change="operationForm.fieldEvidenceFile = $event.target.files?.[0] || null" /><small>文件通过统一文件网关上传、校验并以 SHA-256 回执存证。</small></label><button class="pm-button primary" :disabled="saving" @click="runOperation('field')">保存现场记录</button></div></section>
+              <section class="pm-field-step"><header><span>03</span><div><b>电子签名</b><small>签名图像经文件网关存证，并绑定当前账号与时间戳。</small></div></header><SignaturePad @signed="operationForm.fieldSignatureFile = $event" @cleared="operationForm.fieldSignatureFile = null" /><button class="pm-button primary" :disabled="saving || !operationForm.fieldSignatureFile" @click="runOperation('field-signature')">提交电子签名</button></section>
+            </div>
+            <button v-if="selectedServiceItem && selectedServiceItem.status === '实施中' && canCompleteField" class="pm-button" :disabled="saving || pendingFieldSyncCount > 0" @click="runOperation('complete')">现场测评结束</button>
+            <label v-if="selectedServiceItem && selectedServiceItem.status === '实施中' && canCompleteField && selectedFieldEvidenceGaps.length" class="pm-field-incomplete"><span>缺项确认说明 <em>*</em></span><textarea v-model.trim="operationForm.fieldIncompleteReason" rows="2" :placeholder="`当前缺少：${selectedFieldEvidenceGaps.join('、')}。确实无法补齐时说明原因。`"></textarea></label>
+            <small v-if="pendingFieldSyncCount" class="pm-form-hint">仍有现场签到、记录或签名未同步，完成确认前请先联网补传。</small>
+            <div v-else-if="!selectedServiceItem" class="pm-empty-mini">请先选择服务项</div>
+          </section>
         </template>
 
         <template v-else-if="activeSection === 'equipment'">
@@ -3582,7 +3724,7 @@ onBeforeUnmount(() => {
                 </section>
                 <label><span>备注</span><textarea v-model.trim="operationForm.comment" rows="3"></textarea></label><button v-if="canPlanImplementation" class="pm-button primary" :disabled="saving" @click="runOperation('preparation')">发起实施准备</button>
               </template>
-              <template v-else-if="activeSection === 'exceptions'"><section v-if="exceptionFlow.length" class="pm-panel pm-approval-panel"><header><div><p class="pm-panel-kicker">复核流程</p><h2>异常处置流程 · {{ selectedDeviation?.payload?.deviation_id || '—' }}</h2></div><span>{{ pendingDeviations.length }} 项待评审</span></header><div class="pm-approval"><template v-for="(step, index) in exceptionFlow" :key="step.title"><div class="pm-approval-step" :class="step.state"><span class="pm-approval-dot">{{ step.state === 'done' ? '✓' : step.state === 'doing' ? '!' : '○' }}</span><div class="pm-approval-body"><b>{{ step.title }}</b><small>{{ step.when }}</small><em>{{ step.note }}</em></div></div><span v-if="index < exceptionFlow.length - 1" class="pm-approval-arrow">→</span></template></div></section><label><span>偏离描述</span><textarea v-model.trim="operationForm.deviationDescription" rows="3" placeholder="选择服务项后填写偏离内容"></textarea></label><label><span>偏离证据</span><input type="file" accept="application/pdf,image/png,image/jpeg" @change="operationForm.deviationEvidenceFile = $event.target.files?.[0] || null" /></label><div class="pm-field"><span>严重度</span><SearchableSelect v-model="operationForm.severity" :options="deviationSeverityOptions" placeholder="请选择严重度" search-placeholder="搜索严重度" aria-label="选择偏离严重度" /></div><button v-if="canReportDeviation" class="pm-button primary" :disabled="saving" @click="runOperation('exception-report')">上报偏离</button><label><span>评审偏离 ID</span><input v-model.trim="operationForm.deviationID" placeholder="DV-..." /></label><div class="pm-field"><span>评审决定</span><SearchableSelect v-model="operationForm.decision" :options="deviationDecisionOptions" placeholder="请选择评审决定" search-placeholder="搜索放行、重测或终止" aria-label="选择评审决定" /></div><button v-if="canReviewDeviation" class="pm-button" :disabled="saving" @click="runOperation('exception-review')">提交偏离评审</button></template>
+              <template v-else-if="activeSection === 'exceptions'"><section v-if="exceptionFlow.length" class="pm-panel pm-approval-panel"><header><div><p class="pm-panel-kicker">复核流程</p><h2>异常处置流程 · {{ selectedDeviation?.payload?.deviation_id || '—' }}</h2></div><span>{{ pendingDeviations.length }} 项待评审</span></header><div class="pm-approval"><template v-for="(step, index) in exceptionFlow" :key="step.title"><div class="pm-approval-step" :class="step.state"><span class="pm-approval-dot">{{ step.state === 'done' ? '✓' : step.state === 'doing' ? '!' : '○' }}</span><div class="pm-approval-body"><b>{{ step.title }}</b><small>{{ step.when }}</small><em>{{ step.note }}</em></div></div><span v-if="index < exceptionFlow.length - 1" class="pm-approval-arrow">→</span></template></div></section><label><span>偏离描述</span><textarea v-model.trim="operationForm.deviationDescription" rows="3" placeholder="选择服务项后填写偏离内容"></textarea></label><label><span>偏离证据</span><input type="file" accept="application/pdf,image/png,image/jpeg" @change="operationForm.deviationEvidenceFile = $event.target.files?.[0] || null" /></label><div class="pm-field"><span>严重度</span><SearchableSelect v-model="operationForm.severity" :options="deviationSeverityOptions" placeholder="请选择严重度" search-placeholder="搜索严重度" aria-label="选择偏离严重度" /></div><button v-if="canReportDeviation" class="pm-button primary" :disabled="saving" @click="runOperation('exception-report')">上报偏离</button><label><span>评审偏离 ID</span><input v-model.trim="operationForm.deviationID" placeholder="DV-..." /></label><div class="pm-field"><span>评审决定</span><SearchableSelect v-model="operationForm.decision" :options="deviationDecisionOptions" placeholder="请选择评审决定" search-placeholder="搜索放行、重测或终止" aria-label="选择评审决定" /></div><label><span>{{ operationForm.decision === 'TERMINATE' ? '终止原因 *' : '评审说明' }}</span><textarea v-model.trim="operationForm.comment" rows="3" :required="operationForm.decision === 'TERMINATE'" placeholder="说明放行、重测或终止依据"></textarea></label><button v-if="canReviewDeviation" class="pm-button" :disabled="saving" @click="runOperation('exception-review')">提交偏离评审</button></template>
               <template v-else-if="activeSection === 'reports'">
                 <section class="pm-panel pm-stepper-panel"><header><div><p class="pm-panel-kicker">报告阶段</p><h2>报告阶段链</h2></div><span v-if="selectedServiceItem" class="pm-op-current">当前：<span class="pm-badge" :class="statusTone(reportStatusLabel[selectedServiceItem.report_status] || '未开始')">{{ reportStatusLabel[selectedServiceItem.report_status] || '未开始' }}</span></span></header><div class="pm-stepper"><template v-for="(step, index) in reportSteps" :key="step.phase"><div class="pm-step" :class="step.state"><span class="pm-step-num">{{ step.state === 'done' ? '✓' : index + 1 }}</span><span>{{ step.label }}</span></div><div v-if="index < reportSteps.length - 1" class="pm-step-line"></div></template></div></section>
                 <div class="pm-report-phase" v-if="selectedServiceItem?.report_status"><span>当前报告阶段</span><b class="pm-badge" :class="statusTone(reportStatusLabel[selectedServiceItem.report_status] || selectedServiceItem.report_status)">{{ reportStatusLabel[selectedServiceItem.report_status] || selectedServiceItem.report_status }}</b></div>

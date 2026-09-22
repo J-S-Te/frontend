@@ -5,6 +5,7 @@ import { AuthError, logoutCurrentSession } from '@/modules/platform/auth/api/aut
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import { subsystemAccessMessage } from '@/modules/shared/authz/sessionCompatibility'
 import OwnerSelector from '../components/OwnerSelector.vue'
+import OpportunityCatalogDialog from '../components/OpportunityCatalogDialog.vue'
 import PresaleApprovalRulesPanel from '../components/PresaleApprovalRulesPanel.vue'
 import CustomerCreditPanel from '../components/CustomerCreditPanel.vue'
 import CreditApprovalInbox from '../components/CreditApprovalInbox.vue'
@@ -25,6 +26,7 @@ import { closeSubsystemTabOrFallback } from '@/modules/shared/utils/returnToPort
 import {
   changeOpportunityStage, completeOpportunityTerminalTodo, createOpportunity, createOpportunityFollowup,
   getOpportunity, getOpportunityBoard, getOpportunityExternalStatus, getOpportunityStageHistory, listOpportunities, listOpportunityFollowups,
+  listOpportunityCatalogItems,
   createQuotationLaunch, createBidLaunch,
   restoreOpportunity, updateOpportunity, voidOpportunity, changeOpportunityOwner,
   getOpportunityMembers, listOpportunityMemberTerms, replaceOpportunityMembers, listOpportunityStageAlerts,
@@ -66,15 +68,6 @@ const customerIndustryOptions = Object.freeze([
 const customerImportTemplateColumns = Object.freeze([
   ['客户名称', '示例科技有限公司'], ['统一社会信用代码', '913100001234567890'], ['客户类型', '企业'], ['行业', '软件'], ['区域', '华东'],
   ['负责人用户ID', '请填写负责人用户ID'], ['负责人组织ID', '请填写负责人组织ID'], ['登记联系人姓名', '张三'], ['登记联系人电话', '13800138000'], ['登记联系人邮箱', 'zhangsan@example.com'],
-])
-const opportunityTypeOptions = Object.freeze([
-  '等保审查', '密码应用安全性评估', '软件测试', '源代码审计', '渗透测试', '漏洞扫描',
-  'APP安全完整性', '在线测试', '安全系数', '网络安全风险评估', '缺口分析', '机房检测',
-  '网络安全检测服务', '安全培训', '安全性测试', '应急响应服务', '网络安全攻防演内容', '安全运维',
-])
-const opportunitySourceOptions = Object.freeze([
-  '客户主动咨询', '老客户复购/续约', '老客户转介绍', '公开招标', '销售开拓', '合作伙伴推荐',
-  '展会/活动', '政府/主管单位指派', '线上渠道', '内部转介',
 ])
 const presaleEligibleOpportunityStages = new Set(['初步接触', '需求沟通', '方案制定', '报价', '投标'])
 const presaleEligibilityMessage = '只能为处于跟进中的初步接触、需求沟通、方案制定、报价或投标阶段商机发起售前支持。商机阶段不会自动调整。'
@@ -180,6 +173,11 @@ const opportunityDialog = ref(false)
 const opportunityEditMode = ref(false)
 const opportunityTypeSelections = ref([])
 const opportunitySourceSelections = ref([])
+const opportunityTypeOptions = ref([])
+const opportunitySourceOptions = ref([])
+const opportunityCatalogLoading = ref(false)
+const opportunityCatalogError = ref('')
+const opportunityCatalogDialog = ref(false)
 const stageDialog = ref(false)
 const terminalDialog = ref(false)
 const followupDialog = ref(false)
@@ -404,6 +402,7 @@ const canViewSelectedPresaleContactPhone = computed(() =>
 const canTransferOpportunity = computed(() => (crmSession.value?.permissions || []).includes('opportunity.contract.transfer'))
 const canUpdateOpportunity = computed(() => (crmSession.value?.permissions || []).includes('opportunity.update'))
 const canManageOpportunityTeam = computed(() => (crmSession.value?.permissions || []).includes('opportunity.team.manage'))
+const canManageOpportunityCatalog = computed(() => (crmSession.value?.permissions || []).includes('opportunity.catalog.manage'))
 const canReadOpportunityAttachments = computed(() => (crmSession.value?.permissions || []).includes('opportunity.attachment.read'))
 const canUploadOpportunityAttachments = computed(() => (crmSession.value?.permissions || []).includes('opportunity.attachment.upload'))
 const canDownloadOpportunityAttachments = computed(() => (crmSession.value?.permissions || []).includes('opportunity.attachment.download'))
@@ -469,23 +468,51 @@ function projectProgressText(value) {
   return Number.isFinite(progress) && progress >= 0 && progress <= 100 ? `${progress}%` : '—'
 }
 function emptyOpportunity() {
-  return { name: '', customer_id: '', type: '', source: '', expected_amount: '', expected_sign_date: '', requirement_summary: '', system_count: 0, pain_points: '', competitor_info: '', owner_user_id: '', owner_org_id: '', reason: '' }
+  return { name: '', customer_id: '', type: '', source: '', type_ids: [], source_ids: [], expected_amount: '', expected_sign_date: '', requirement_summary: '', system_count: 0, pain_points: '', competitor_info: '', owner_user_id: '', owner_org_id: '', reason: '' }
 }
-function parseOpportunitySelections(value) {
-  return [...new Set(String(value || '').split('、').map((item) => item.trim()).filter(Boolean))]
+function mergeCatalogOptions(available, selected) {
+  const values = new Map((available || []).map((item) => [Number(item.id), item]))
+  for (const item of selected || []) values.set(Number(item.id), item)
+  return [...values.values()].sort((left, right) => Number(left.sort_order || 0) - Number(right.sort_order || 0) || Number(left.id) - Number(right.id))
+}
+const opportunityTypeSelectOptions = computed(() => mergeCatalogOptions(opportunityTypeOptions.value, opportunityEditMode.value ? selectedOpportunity.value?.types : []))
+const opportunitySourceSelectOptions = computed(() => mergeCatalogOptions(opportunitySourceOptions.value, opportunityEditMode.value ? selectedOpportunity.value?.sources : []))
+async function loadOpportunityCatalogOptions() {
+  opportunityCatalogLoading.value = true
+  opportunityCatalogError.value = ''
+  try {
+    const [types, sources] = await Promise.all([listOpportunityCatalogItems('TYPE'), listOpportunityCatalogItems('SOURCE')])
+    opportunityTypeOptions.value = Array.isArray(types) ? types : []
+    opportunitySourceOptions.value = Array.isArray(sources) ? sources : []
+    if (!opportunityTypeOptions.value.length || !opportunitySourceOptions.value.length) throw new Error('商机基础数据为空，请联系有权限的管理员配置。')
+  } catch (value) {
+    opportunityTypeOptions.value = []
+    opportunitySourceOptions.value = []
+    opportunityCatalogError.value = value?.message || '商机类型和来源加载失败。'
+  } finally {
+    opportunityCatalogLoading.value = false
+  }
+}
+function catalogSelectionIDs(structured, legacy, options) {
+  if (Array.isArray(structured) && structured.length) return [...new Set(structured.map((item) => Number(item.id)).filter(Boolean))]
+  const names = new Set(String(legacy || '').split('、').map((item) => item.trim()).filter(Boolean))
+  return options.filter((item) => names.has(item.name)).map((item) => Number(item.id))
 }
 function syncOpportunitySelections() {
-  opportunityForm.type = opportunityTypeSelections.value.join('、')
-  opportunityForm.source = opportunitySourceSelections.value.join('、')
+  const typeIDs = opportunityTypeSelections.value.map(Number)
+  const sourceIDs = opportunitySourceSelections.value.map(Number)
+  opportunityForm.type_ids = typeIDs
+  opportunityForm.source_ids = sourceIDs
+  opportunityForm.type = opportunityTypeSelectOptions.value.filter((item) => typeIDs.includes(Number(item.id))).map((item) => item.name).join('、')
+  opportunityForm.source = opportunitySourceSelectOptions.value.filter((item) => sourceIDs.includes(Number(item.id))).map((item) => item.name).join('、')
 }
-const opportunityTypeSelectOptions = computed(() => [...new Set([...opportunityTypeOptions, ...opportunityTypeSelections.value])])
-const opportunitySourceSelectOptions = computed(() => [...new Set([...opportunitySourceOptions, ...opportunitySourceSelections.value])])
 function resetMessages() { error.value = ''; notice.value = '' }
 function showError(value) {
   if (value?.code === 'CRM_PRESALE_OPPORTUNITY_NOT_ELIGIBLE') error.value = presaleEligibilityMessage
   else if (value?.status === 409) error.value = value.code === 'CRM_CUSTOMER_VOID_BLOCKED' ? '客户仍有关联中的商机、售前申请或门户邀请，暂不能作废。' : '数据状态或版本已变化，请刷新详情后重试。'
   else if (value?.code === 'CRM_OPPORTUNITY_NOT_FOUND') error.value = '关联商机不存在、已作废或不再属于当前账号的数据范围，请刷新商机列表后重新选择。'
   else if (value?.code === 'CRM_OPPORTUNITY_MEMBER_INVALID') error.value = '所选团队人员已停用或不再具有本应用授权，请重新从基础平台人员目录选择。'
+  else if (value?.code === 'CRM_OPPORTUNITY_CATALOG_INVALID') error.value = '商机类型或来源已失效，请重新选择后提交。'
   else if (value?.code === 'CRM_OWNER_DIRECTORY_UNAVAILABLE') error.value = '基础平台人员目录暂不可用，本次人员变更未保存。'
   else if (value?.code === 'INTEGRATION_CONTRACT_NOT_CONFIGURED') error.value = '合同归属校验服务尚未配置，合同类终态待办暂不能完成。'
   else error.value = subsystemAccessMessage(value, '操作失败，请稍后重试。')
@@ -975,10 +1002,11 @@ async function openNewOpportunity() {
   opportunityCustomerOptionsTotal.value = 0
   opportunityFormInitial = JSON.stringify(opportunityForm)
   opportunityDialog.value = true
-  await loadOpportunityCustomerOptions()
+  await Promise.all([loadOpportunityCustomerOptions(), loadOpportunityCatalogOptions()])
 }
-function editOpportunity() {
+async function editOpportunity() {
   const value = selectedOpportunity.value
+  await loadOpportunityCatalogOptions()
   Object.assign(opportunityForm, {
     name: value.name, customer_id: value.customer_id, type: value.type, source: value.source,
     expected_amount: value.expected_amount, expected_sign_date: value.expected_sign_date,
@@ -986,8 +1014,9 @@ function editOpportunity() {
     pain_points: value.pain_points || '', competitor_info: value.competitor_info || '',
     owner_user_id: value.owner_user_id, owner_org_id: selectedOpportunityOwnerOrgID.value, reason: '',
   })
-  opportunityTypeSelections.value = parseOpportunitySelections(value.type)
-  opportunitySourceSelections.value = parseOpportunitySelections(value.source)
+  opportunityTypeSelections.value = catalogSelectionIDs(value.types, value.type, opportunityTypeSelectOptions.value)
+  opportunitySourceSelections.value = catalogSelectionIDs(value.sources, value.source, opportunitySourceSelectOptions.value)
+  syncOpportunitySelections()
   opportunityEditMode.value = true
   opportunityFormInitial = JSON.stringify(opportunityForm)
   opportunityDialog.value = true
@@ -2251,6 +2280,7 @@ async function submitCustomer() {
         ...rawCustomerForm,
         contacts: rawCustomerForm.contacts.map((item) => ({ ...toRaw(item) })),
       }
+      delete createPayload.reason
       createPayload.contacts.forEach(({ id }, index) => { delete createPayload.contacts[index].id })
       createRetry = createMutationRetries.keyFor('customer', createPayload)
     }
@@ -2308,6 +2338,10 @@ function changeCustomerStatus(action) {
 }
 async function submitOpportunity() {
   syncOpportunitySelections()
+  if (opportunityCatalogLoading.value || opportunityCatalogError.value) {
+    error.value = opportunityCatalogError.value || '商机基础数据正在加载，请稍后提交。'
+    return
+  }
   if (!opportunityTypeSelections.value.length || !opportunitySourceSelections.value.length) {
     error.value = !opportunityTypeSelections.value.length && !opportunitySourceSelections.value.length
       ? '请至少选择一个商机类型和一个来源。'
@@ -2684,7 +2718,7 @@ onMounted(async () => {
         </div>
       </header>
       <section class="console-content crm-content">
-        <header class="console-page-head crm-page-head"><div><h1>{{ activeSection === 'presale' && presaleCreatePage ? '新建售前申请' : sectionTitle }}</h1><p>{{ activeSection === 'presale' && presaleCreatePage ? '填写售前支持需求，提交后进入两级审批流程' : activeSection === 'notifications' ? '包含当前用户的商机、售前与信用等级业务通知，不受 SELF / ORG / ALL 数据范围扩展' : activeSection === 'credit-approvals' ? '仅展示当前账号可审批的信用等级调整申请' : activeSection === 'credit-rules' ? '规则仅作用于后续回款事实，不会追溯重算历史记录' : '可见数据与可执行动作均由服务端权限和状态控制' }}</p><span class="console-requirement-chip">{{ activeSection === 'customers' ? 'CM-001 ~ CM-004' : activeSection === 'opportunities' ? 'BM-001 ~ BM-002' : activeSection === 'presale' ? 'TS-001 ~ TS-010' : ['credit-approvals', 'credit-rules'].includes(activeSection) ? 'CM-003' : 'CRM-NOTIFY-001' }}</span></div><div v-if="activeSection === 'presale'" class="crm-actions"><template v-if="presaleCreatePage"><button type="button" :disabled="presaleCreateLoading" @click="closePresaleCreatePage">← 返回申请列表</button><button class="primary" type="submit" form="presale-create-form" :disabled="presaleCreateLoading">{{ presaleCreateLoading ? '提交中…' : '提交申请' }}</button></template><template v-else><button v-if="canCreatePresale && presaleRequestSubmissionAvailable" class="primary" type="button" @click="openPresaleCreatePage">新建申请</button><button v-if="canReadPresaleReports" @click="openReports">投入报表</button><button @click="loadAlerts">未读预警 {{ alerts.length }}</button><button @click="openAlertConfig">预警规则</button></template></div><div v-if="activeSection === 'opportunities'" class="crm-actions"><button @click="loadStageAlerts">刷新阶段告警</button><button v-if="canConfigureStageAlerts" @click="openStageAlertRuleEditor">阶段告警规则</button></div></header>
+        <header class="console-page-head crm-page-head"><div><h1>{{ activeSection === 'presale' && presaleCreatePage ? '新建售前申请' : sectionTitle }}</h1><p>{{ activeSection === 'presale' && presaleCreatePage ? '填写售前支持需求，提交后进入两级审批流程' : activeSection === 'notifications' ? '包含当前用户的商机、售前与信用等级业务通知，不受 SELF / ORG / ALL 数据范围扩展' : activeSection === 'credit-approvals' ? '仅展示当前账号可审批的信用等级调整申请' : activeSection === 'credit-rules' ? '规则仅作用于后续回款事实，不会追溯重算历史记录' : '可见数据与可执行动作均由服务端权限和状态控制' }}</p></div><div v-if="activeSection === 'presale'" class="crm-actions"><template v-if="presaleCreatePage"><button type="button" :disabled="presaleCreateLoading" @click="closePresaleCreatePage">← 返回申请列表</button><button class="primary" type="submit" form="presale-create-form" :disabled="presaleCreateLoading">{{ presaleCreateLoading ? '提交中…' : '提交申请' }}</button></template><template v-else><button v-if="canCreatePresale && presaleRequestSubmissionAvailable" class="primary" type="button" @click="openPresaleCreatePage">新建申请</button><button v-if="canReadPresaleReports" @click="openReports">投入报表</button><button @click="loadAlerts">未读预警 {{ alerts.length }}</button><button @click="openAlertConfig">预警规则</button></template></div><div v-if="activeSection === 'opportunities'" class="crm-actions"><button v-if="canManageOpportunityCatalog" @click="opportunityCatalogDialog = true">基础数据配置</button><button @click="loadStageAlerts">刷新阶段告警</button><button v-if="canConfigureStageAlerts" @click="openStageAlertRuleEditor">阶段告警规则</button></div></header>
       <span v-if="activeSection === 'notifications'" class="sr-only">通知收件人固定为当前登录用户，不受 SELF / ORG / ALL 数据范围扩展；只包含发给当前用户的商机负责人和售前执行人通知</span>
       <p v-if="error" class="crm-alert error" role="alert">{{ error }}</p><p v-if="notice" class="crm-alert success" role="status">{{ notice }}</p><p v-if="runtimeCapabilitiesError" class="crm-alert warning" role="status">{{ runtimeCapabilitiesError }}</p>
       <section v-if="activeSection === 'customers'" class="crm-toolbar crm-customer-filters">
@@ -2708,23 +2742,58 @@ onMounted(async () => {
       <CreditApprovalInbox v-if="activeSection === 'credit-approvals'" :permissions="crmSession?.permissions || []" :roles="crmSession?.roles || []" />
       <CreditRuleSettingsPanel v-if="activeSection === 'credit-rules'" @notice="notice = $event" @error="error = $event" />
 
-      <section v-if="activeSection === 'customers'" class="crm-panel table-panel"><p v-if="loading">正在加载…</p><table v-else-if="customers.length && customerFilters.view === 'table'"><thead><tr><th>客户编号</th><th>客户名称</th><th>信用等级</th><th>类型</th><th>行业 / 区域</th><th>负责人</th><th>状态</th><th title="包含客户沟通记录和关联商机跟进记录">最近跟进（含商机）</th><th>商机金额汇总</th></tr></thead><tbody><tr v-for="item in customers" :key="item.id" @click="openCustomer(item.id)"><td>{{ item.customer_no }}</td><td>{{ item.name }}</td><td><span class="crm-credit-level crm-credit-level--inline" :class="`is-${String(item.credit_level || 'B').toLowerCase()}`">{{ creditLevelLabel(item.credit_level) }}</span></td><td>{{ item.customer_type }}</td><td>{{ item.industry }} / {{ item.region }}</td><td>{{ ownerLabel(item.owner_user_id) }}</td><td>{{ customerStatusText(item.status) }}</td><td>{{ formatDate(item.last_followup_at) }}</td><td>{{ formatAmount(item.opportunity_amount_sum) }}</td></tr></tbody></table><div v-else-if="customers.length" class="crm-customer-cards" :data-quick-filter="customerFilters.quick_filter"><button v-for="item in customers" :key="item.id" :data-status="item.status" @click="openCustomer(item.id)"><strong>{{ item.name }} <span class="crm-credit-level crm-credit-level--inline" :class="`is-${String(item.credit_level || 'B').toLowerCase()}`">{{ creditLevelLabel(item.credit_level) }}</span></strong><span>{{ item.customer_no }} · {{ customerStatusText(item.status) }}</span><span>{{ item.customer_type }} · {{ item.industry }} / {{ item.region }}</span><span>负责人：{{ ownerLabel(item.owner_user_id) }}</span><span>最近跟进（含商机）：{{ formatDate(item.last_followup_at) }}</span><span>商机金额汇总：{{ formatAmount(item.opportunity_amount_sum) }}</span></button></div><div v-else class="crm-empty">暂无符合条件的客户</div></section>
+      <section v-if="activeSection === 'customers'" class="crm-panel table-panel"><p v-if="loading">正在加载…</p><table v-else-if="customers.length && customerFilters.view === 'table'"><thead><tr><th>客户编号</th><th>客户名称</th><th>信用等级</th><th>类型</th><th>行业 / 区域</th><th>负责人</th><th>状态</th><th title="包含客户沟通记录和关联商机跟进记录">最近跟进（含商机）</th><th>商机金额汇总</th></tr></thead><tbody><tr v-for="item in customers" :key="item.id" @click="openCustomer(item.id)"><td>{{ item.customer_no }}</td><td>{{ item.name }}</td><td><span class="crm-credit-level crm-credit-level--inline" :class="`is-${String(item.credit_level || 'B').toLowerCase()}`">{{ creditLevelLabel(item.credit_level) }}</span></td><td>{{ item.customer_type }}</td><td>{{ item.industry }} / {{ item.region }}</td><td>{{ ownerLabel(item) }}</td><td>{{ customerStatusText(item.status) }}</td><td>{{ formatDate(item.last_followup_at) }}</td><td>{{ formatAmount(item.opportunity_amount_sum) }}</td></tr></tbody></table><div v-else-if="customers.length" class="crm-customer-cards" :data-quick-filter="customerFilters.quick_filter"><button v-for="item in customers" :key="item.id" :data-status="item.status" @click="openCustomer(item.id)"><strong>{{ item.name }} <span class="crm-credit-level crm-credit-level--inline" :class="`is-${String(item.credit_level || 'B').toLowerCase()}`">{{ creditLevelLabel(item.credit_level) }}</span></strong><span>{{ item.customer_no }} · {{ customerStatusText(item.status) }}</span><span>{{ item.customer_type }} · {{ item.industry }} / {{ item.region }}</span><span>负责人：{{ ownerLabel(item) }}</span><span>最近跟进（含商机）：{{ formatDate(item.last_followup_at) }}</span><span>商机金额汇总：{{ formatAmount(item.opportunity_amount_sum) }}</span></button></div><div v-else class="crm-empty">暂无符合条件的客户</div></section>
       <section v-if="activeSection === 'opportunities' && !boardMode" class="crm-panel table-panel"><p v-if="loading">正在加载…</p><table v-else-if="opportunities.length"><thead><tr><th>商机编号</th><th>名称</th><th>客户</th><th>预计金额</th><th>阶段</th><th>状态</th><th>已签约合同</th><th>终态待办</th></tr></thead><tbody><tr v-for="item in opportunities" :key="item.id" @click="openOpportunity(item.id)"><td>{{ item.opportunity_no }}</td><td>{{ item.name }}</td><td>{{ item.customer_name || `客户 #${item.customer_id}` }}</td><td>{{ formatAmount(item.expected_amount) }}</td><td>{{ item.current_stage }}</td><td>{{ opportunityStatusText(item.opp_status) }}</td><td>{{ formatSignedContractCount(item.signed_contract_count) }}</td><td>{{ terminalPendingText(item.terminal_pending_type) }}</td></tr></tbody></table><div v-else class="crm-empty">暂无符合条件的商机</div></section>
       <section v-if="activeSection === 'opportunities' && boardMode" class="crm-board crm-opportunity-board"><article v-for="column in board" :key="column.stage" class="crm-board-column" :data-stage="column.stage"><h2>{{ column.stage }} <small>{{ column.items?.length || 0 }}</small></h2><button v-for="item in column.items" :key="item.id" class="crm-board-card" @click="openOpportunity(item.id)"><strong>{{ item.name }}</strong><span>{{ item.opportunity_no }}</span><span>{{ formatAmount(item.expected_amount) }}</span><span>已签约合同 {{ formatSignedContractCount(item.signed_contract_count) }}</span></button></article></section>
       <section v-if="activeSection === 'opportunities'" class="crm-panel crm-stage-alerts"><div class="crm-panel-heading"><div><h2>阶段超时告警</h2><p class="crm-note">服务端个人列表当前返回已触发的未读/已读告警；待处理和已取消状态不会进入个人查询结果。</p></div><label class="check"><input v-model="stageAlertUnreadOnly" type="checkbox">仅看未读</label></div><p v-if="stageRuleForbidden" class="crm-alert error" role="alert">无阶段告警规则配置权限（403）；告警查询仍按现有权限执行。</p><div v-if="stageAlerts.length" class="crm-stage-alert-grid"><button v-for="item in stageAlerts" :key="item.id" @click="selectedStageAlert = item"><strong>{{ item.opportunity_no }}</strong><span>{{ item.stage }} · {{ stageAlertStatusText(item.status) }}</span><small>应提醒 {{ formatDate(item.due_at) }}</small></button></div><div v-else class="crm-empty compact">暂无{{ stageAlertUnreadOnly ? '未读' : '' }}阶段超时告警</div><p class="crm-status-legend"><span>待处理：Worker 尚未投递</span><span>已触发：站内告警已生成</span><span>已取消：阶段、终态、作废或负责人变化后失效</span></p></section>
       <section v-if="activeSection === 'presale' && alerts.length" class="crm-panel crm-alert-list"><h2>未读预警</h2><p class="crm-note">个人预警仅合并当前登录用户的内部人员身份，不随 SELF/ORG/ALL 数据范围扩大。</p><button v-for="item in alerts" :key="item.id" @click="readAlert(item)"><strong>{{ alertTypeText(item.alert_type) }}</strong><span>{{ item.request_no }} · 起算 {{ formatDate(item.basis_at) }} · 阈值 {{ formatDate(item.due_at) }}</span></button></section>
       <section v-if="activeSection === 'presale' && !presaleCreatePage"><section v-if="presaleView === 'list'" class="crm-panel table-panel"><h2>售前申请列表</h2><p class="crm-note">列表范围由角色决定；点击记录查看详情、工时和服务端允许的动作。</p><table v-if="presales.length"><thead><tr><th>申请编号</th><th>商机</th><th>申请人</th><th>状态</th><th>场地 / 紧急度</th><th>执行人</th><th>累计工时</th><th>期望结束</th><th>超时</th></tr></thead><tbody><tr v-for="item in presales" :key="presaleRequestID(item)" @click="openPresale(presaleRequestID(item))"><td>{{ item.request_no }}</td><td>{{ presaleOpportunityLabel(item) }}</td><td>{{ applicantLabel(item) }}</td><td>{{ requestStatusText(item.status) }}</td><td>{{ venueText(item.venue) }} / {{ urgencyText(item.urgency) }}</td><td>{{ assignees(item.current_assignees) }}</td><td>{{ item.total_work_hours }} 小时</td><td>{{ formatDate(item.expected_end) }}</td><td>{{ item.overdue ? '已超时' : '否' }}</td></tr></tbody></table><div v-else class="crm-empty">暂无可见申请</div><div class="crm-actions"><button type="button" :disabled="presalePage.number <= 1 || loading" @click="changePresalePage(presalePage.number - 1)">上一页</button><span>第 {{ presalePage.number }} 页，共 {{ presalePage.total }} 条</span><button type="button" :disabled="presalePage.number * presalePage.size >= presalePage.total || loading" @click="changePresalePage(presalePage.number + 1)">下一页</button></div></section><section v-else class="crm-panel crm-presale-board-panel"><div class="crm-panel-heading"><div><h2>售前状态看板</h2><p class="crm-note">只读看板，不支持拖拽改状态。每列最多显示服务端返回的 {{ presaleColumnLimit }} 条，列总数不受截断影响。</p></div></div><div class="crm-board crm-presale-board"><article v-for="column in presaleBoard" :key="column.status" class="crm-board-column" :data-status="column.status"><h2>{{ requestStatusText(column.status) }} <small>{{ column.total }}</small></h2><button v-for="item in column.items" :key="presaleRequestID(item)" type="button" class="crm-board-card" :aria-label="`打开售前申请 ${item.request_no}`" :disabled="!presaleRequestID(item)" @click="openPresale(presaleRequestID(item))"><strong>{{ item.request_no }}</strong><span>{{ presaleOpportunityLabel(item) }}</span><span>{{ applicantLabel(item) }} · {{ urgencyText(item.urgency) }}</span><span>{{ assignees(item.current_assignees) }}</span><span>{{ item.total_work_hours }} 小时 · {{ item.overdue ? '已超时' : '未超时' }}</span></button><p v-if="Number(column.total) > (column.items?.length || 0)" class="crm-note">另有 {{ Number(column.total) - (column.items?.length || 0) }} 条未在本列展示</p><p v-else-if="!column.items?.length" class="crm-empty compact">暂无任务</p></article></div></section></section>
       <section v-if="activeSection === 'presale' && presaleCreatePage" class="crm-presale-create-page">
-        <p class="crm-alert warning" role="status">仅可选择处于跟进中的初步接触、需求沟通、方案制定、报价或投标阶段商机；提交后进入两级审批流。售前申请不会自动调整商机阶段，现场支持必须填写服务地址。</p>
+        <header class="crm-presale-create-hero">
+          <div>
+            <p>售前技术支持</p>
+            <h2>新建售前申请</h2>
+            <span>关联跟进中的商机，补充支持需求并提交两级审批。</span>
+          </div>
+          <ol aria-label="申请填写步骤">
+            <li><b>1</b><span>关联商机</span></li>
+            <li><b>2</b><span>支持信息</span></li>
+            <li><b>3</b><span>时间安排</span></li>
+          </ol>
+        </header>
+        <div class="crm-presale-create-notice" role="status">
+          <strong>提交前说明</strong>
+          <span>仅可选择跟进中的初步接触、需求沟通、方案制定、报价或投标阶段商机；申请不会自动调整商机阶段，现场支持必须填写服务地址。</span>
+        </div>
         <form id="presale-create-form" class="crm-panel crm-presale-create-form" @submit.prevent="submitPresaleFromList">
-          <h2>售前技术支持申请</h2>
-          <section class="crm-business-picker">
-            <label>查找商机<input v-model.trim="presaleOpportunityKeyword" type="search" placeholder="商机编号或名称" @keyup.enter.prevent="loadPresaleOpportunityOptions"></label>
-            <button type="button" :disabled="presaleOpportunityOptionsLoading" @click="loadPresaleOpportunityOptions">{{ presaleOpportunityOptionsLoading ? '查询中…' : '查询商机' }}</button>
-            <label>关联商机 *<select v-model="presaleForm.opportunity_id" required :disabled="presaleOpportunityOptionsLoading || !presaleOpportunityOptions.length"><option value="" disabled>请选择商机</option><option v-for="opportunity in presaleOpportunityOptions" :key="opportunity.id" :value="String(opportunity.id)">{{ opportunity.name }}（{{ opportunity.opportunity_no }}）</option></select></label>
-            <small v-if="presaleOpportunityOptionsError" class="crm-alert error" role="alert">{{ presaleOpportunityOptionsError }}</small><small v-else-if="!presaleOpportunityOptionsLoading && !presaleOpportunityOptions.length" class="crm-note">暂无符合售前发起条件的商机。</small>
+          <section class="crm-presale-create-section" aria-labelledby="presale-create-opportunity-heading">
+            <header><b>01</b><div><h3 id="presale-create-opportunity-heading">关联商机</h3><p>选择本次售前支持对应的商机。</p></div></header>
+            <div class="crm-business-picker">
+              <label>查找商机<input v-model.trim="presaleOpportunityKeyword" type="search" placeholder="输入商机编号或名称" @keyup.enter.prevent="loadPresaleOpportunityOptions"></label>
+              <button type="button" :disabled="presaleOpportunityOptionsLoading" @click="loadPresaleOpportunityOptions">{{ presaleOpportunityOptionsLoading ? '查询中…' : '查询商机' }}</button>
+              <label>关联商机 *<select v-model="presaleForm.opportunity_id" required :disabled="presaleOpportunityOptionsLoading || !presaleOpportunityOptions.length"><option value="" disabled>请选择商机</option><option v-for="opportunity in presaleOpportunityOptions" :key="opportunity.id" :value="String(opportunity.id)">{{ opportunity.name }}（{{ opportunity.opportunity_no }}）</option></select></label>
+              <small v-if="presaleOpportunityOptionsError" class="crm-alert error" role="alert">{{ presaleOpportunityOptionsError }}</small><small v-else-if="!presaleOpportunityOptionsLoading && !presaleOpportunityOptions.length" class="crm-note">暂无符合售前发起条件的商机。</small>
+            </div>
           </section>
-          <div class="crm-presale-form-row"><label>支持方式 *<select v-model="presaleForm.venue" required><option value="REMOTE">远程</option><option value="ONSITE">现场</option></select></label><label>紧急程度 *<select v-model="presaleForm.urgency" required><option value="NORMAL">普通</option><option value="URGENT">紧急</option></select></label></div><label v-if="presaleForm.venue === 'ONSITE'">服务地址 *<input v-model.trim="presaleForm.service_address" required maxlength="500" placeholder="客户现场详细地址"></label><div class="crm-presale-form-row"><label>联系人 *<input v-model.trim="presaleForm.contact_name" required maxlength="100" placeholder="客户对接人姓名 / 部门"></label><label>联系电话 *<input v-model.trim="presaleForm.contact_phone" required maxlength="64" placeholder="客户对接人联系电话"></label></div><label>需求说明 *<textarea v-model.trim="presaleForm.description" required placeholder="请描述售前支持需求与背景"></textarea></label><div class="crm-presale-form-row"><label>预计开始 *<input v-model="presaleForm.expected_start" type="datetime-local" required></label><label>预计结束 *<input v-model="presaleForm.expected_end" type="datetime-local" required></label></div><div class="crm-actions"><button type="button" :disabled="presaleCreateLoading" @click="closePresaleCreatePage">取消</button><button class="primary" :disabled="presaleCreateLoading || !presaleForm.opportunity_id">{{ presaleCreateLoading ? '提交中…' : '提交申请' }}</button></div>
+          <section class="crm-presale-create-section" aria-labelledby="presale-create-support-heading">
+            <header><b>02</b><div><h3 id="presale-create-support-heading">支持信息</h3><p>说明支持方式、对接人和具体需求。</p></div></header>
+            <div class="crm-presale-create-fields">
+              <label>支持方式 *<select v-model="presaleForm.venue" required><option value="REMOTE">远程</option><option value="ONSITE">现场</option></select></label>
+              <label>紧急程度 *<select v-model="presaleForm.urgency" required><option value="NORMAL">普通</option><option value="URGENT">紧急</option></select></label>
+              <label v-if="presaleForm.venue === 'ONSITE'" class="full">服务地址 *<input v-model.trim="presaleForm.service_address" required maxlength="500" placeholder="客户现场详细地址"></label>
+              <label>联系人 *<input v-model.trim="presaleForm.contact_name" required maxlength="100" placeholder="客户对接人姓名 / 部门"></label>
+              <label>联系电话 *<input v-model.trim="presaleForm.contact_phone" required maxlength="64" placeholder="客户对接人联系电话"></label>
+              <label>需求说明 *<textarea v-model.trim="presaleForm.description" required rows="4" placeholder="请描述客户背景、期望支持内容和交付目标"></textarea></label>
+            </div>
+          </section>
+          <section class="crm-presale-create-section" aria-labelledby="presale-create-schedule-heading">
+            <header><b>03</b><div><h3 id="presale-create-schedule-heading">时间安排</h3><p>填写客户期望的支持时间范围。</p></div></header>
+            <div class="crm-presale-create-fields">
+              <label>预计开始 *<input v-model="presaleForm.expected_start" type="datetime-local" required></label>
+              <label>预计结束 *<input v-model="presaleForm.expected_end" type="datetime-local" required></label>
+            </div>
+          </section>
+          <footer class="crm-presale-create-actions"><p><span aria-hidden="true">*</span> 为必填项，提交后进入审批流程。</p><div class="crm-actions"><button type="button" :disabled="presaleCreateLoading" @click="closePresaleCreatePage">取消</button><button class="primary" :disabled="presaleCreateLoading || !presaleForm.opportunity_id">{{ presaleCreateLoading ? '提交中…' : '提交申请' }}</button></div></footer>
         </form>
       </section>
       </section>
@@ -2814,7 +2883,7 @@ onMounted(async () => {
             </div>
           </section>
           <button class="console-button ghost" type="button" @click="addCustomerContact">添加联系人</button>
-          <label class="console-form-item full"><span>{{ customerEditMode ? '更新原因' : '创建原因' }} *</span><textarea v-model="customerForm.reason" required maxlength="500" rows="3" placeholder="说明本次创建/更新客户的原因"></textarea></label>
+          <label v-if="customerEditMode" class="console-form-item full"><span>更新原因 *</span><textarea v-model="customerForm.reason" required maxlength="500" rows="3" placeholder="说明本次更新客户的原因"></textarea></label>
           <label class="console-form-item full crm-check-item"><span>授权覆盖名称查重</span><input v-model="customerForm.duplicate_override" type="checkbox"></label>
           <label v-if="customerForm.duplicate_override" class="console-form-item full"><span>覆盖原因 *</span><textarea v-model="customerForm.duplicate_override_reason" required maxlength="500" rows="2" placeholder="说明为什么允许与疑似重复客户并存"></textarea></label>
         </div>
@@ -2840,8 +2909,8 @@ onMounted(async () => {
             <select v-model="opportunityForm.customer_id" required :disabled="opportunityCustomerOptionsLoading || !opportunityCustomerOptions.length"><option value="" disabled>{{ opportunityCustomerOptionsLoading ? '正在加载客户…' : '请选择客户' }}</option><option v-for="customer in opportunityCustomerOptions" :key="customer.id" :value="String(customer.id)">{{ customer.name }}（{{ customer.customer_no }}）· {{ customer.industry }} / {{ customer.region }}</option></select>
             <small v-if="opportunityCustomerOptionsError" class="crm-alert error" role="alert">{{ opportunityCustomerOptionsError }}</small><small v-else-if="!opportunityCustomerOptionsLoading && !opportunityCustomerOptions.length" class="crm-note">暂无符合条件的有效客户，请先在客户管理中创建客户。</small><small v-else-if="opportunityCustomerOptionsTotal > opportunityCustomerOptions.length" class="crm-note">当前显示前 {{ opportunityCustomerOptions.length }} 条，请输入关键词缩小范围。</small>
           </div>
-          <fieldset class="console-form-item crm-opportunity-multi-field"><legend>商机类型 *（可多选）</legend><div class="crm-opportunity-check-list" aria-label="商机类型"><label v-for="item in opportunityTypeSelectOptions" :key="item" class="crm-opportunity-check-item"><input v-model="opportunityTypeSelections" type="checkbox" :value="item" @change="syncOpportunitySelections"><span>{{ item }}</span></label></div><small class="crm-note">已选择 {{ opportunityTypeSelections.length }} 项，点击复选框即可多选。</small></fieldset>
-          <fieldset class="console-form-item crm-opportunity-multi-field"><legend>来源 *（可多选）</legend><div class="crm-opportunity-check-list" aria-label="来源"><label v-for="item in opportunitySourceSelectOptions" :key="item" class="crm-opportunity-check-item"><input v-model="opportunitySourceSelections" type="checkbox" :value="item" @change="syncOpportunitySelections"><span>{{ item }}</span></label></div><small class="crm-note">已选择 {{ opportunitySourceSelections.length }} 项，点击复选框即可多选。</small></fieldset>
+          <fieldset class="console-form-item crm-opportunity-multi-field"><legend>商机类型 *（可多选）</legend><p v-if="opportunityCatalogLoading" class="crm-note">正在加载商机类型…</p><p v-else-if="opportunityCatalogError" class="crm-alert error" role="alert">{{ opportunityCatalogError }}</p><div v-else class="crm-opportunity-check-list" aria-label="商机类型"><label v-for="item in opportunityTypeSelectOptions" :key="item.id" class="crm-opportunity-check-item"><input v-model="opportunityTypeSelections" type="checkbox" :value="Number(item.id)" :disabled="!item.enabled && !opportunityTypeSelections.includes(Number(item.id))" @change="syncOpportunitySelections"><span>{{ item.name }}<small v-if="!item.enabled">（已停用）</small></span></label></div><small class="crm-note">已选择 {{ opportunityTypeSelections.length }} 项，停用项仅可在历史商机中保留。</small></fieldset>
+          <fieldset class="console-form-item crm-opportunity-multi-field"><legend>来源 *（可多选）</legend><p v-if="opportunityCatalogLoading" class="crm-note">正在加载商机来源…</p><p v-else-if="opportunityCatalogError" class="crm-alert error" role="alert">{{ opportunityCatalogError }}</p><div v-else class="crm-opportunity-check-list" aria-label="来源"><label v-for="item in opportunitySourceSelectOptions" :key="item.id" class="crm-opportunity-check-item"><input v-model="opportunitySourceSelections" type="checkbox" :value="Number(item.id)" :disabled="!item.enabled && !opportunitySourceSelections.includes(Number(item.id))" @change="syncOpportunitySelections"><span>{{ item.name }}<small v-if="!item.enabled">（已停用）</small></span></label></div><small class="crm-note">已选择 {{ opportunitySourceSelections.length }} 项，停用项仅可在历史商机中保留。</small></fieldset>
           <label class="console-form-item"><span>预计金额 *</span><input v-model="opportunityForm.expected_amount" required inputmode="decimal" autocomplete="off" placeholder="请输入预计金额"></label>
           <label class="console-form-item"><span>预计签单日期 *</span><input v-model="opportunityForm.expected_sign_date" type="date" required></label>
           <label class="console-form-item full"><span>需求摘要 *</span><textarea v-model="opportunityForm.requirement_summary" required rows="3" placeholder="请概述客户需求和项目范围"></textarea></label>
@@ -2851,9 +2920,10 @@ onMounted(async () => {
           <fieldset v-if="opportunityEditMode" class="crm-owner-selector crm-opportunity-owner" disabled><legend>负责人</legend><div class="console-form-grid"><label class="console-form-item"><span>负责人用户</span><input :value="ownerLabel(opportunityForm.owner_user_id)" readonly></label><label class="console-form-item"><span>负责人组织</span><input value="由基础平台组织目录确定" readonly></label></div><p class="crm-note">商机主档编辑不变更负责人，请使用详情中的“变更负责人”。</p></fieldset>
           <label v-if="opportunityEditMode" class="console-form-item full"><span>更新原因 *</span><textarea v-model="opportunityForm.reason" required maxlength="500" rows="3" placeholder="请说明本次更新原因"></textarea></label>
         </div>
-        <footer><button class="console-button ghost" type="button" :disabled="actionLoading" @click="closeOpportunityDialog">取消</button><button class="console-button primary" type="submit" :disabled="actionLoading">{{ actionLoading ? '提交中…' : opportunityEditMode ? '保存' : '创建' }}</button></footer>
+        <footer><button class="console-button ghost" type="button" :disabled="actionLoading" @click="closeOpportunityDialog">取消</button><button class="console-button primary" type="submit" :disabled="actionLoading || opportunityCatalogLoading || !!opportunityCatalogError">{{ actionLoading ? '提交中…' : opportunityEditMode ? '保存' : '创建' }}</button></footer>
       </form>
     </div>
+    <OpportunityCatalogDialog v-if="opportunityCatalogDialog" @close="opportunityCatalogDialog = false" @changed="loadOpportunityCatalogOptions" @notice="notice = $event" @error="error = $event" />
     <div v-if="selectedCustomer" class="crm-modal">
 <article class="crm-detail">
 <h2>{{ selectedCustomer.name }}</h2>
@@ -3203,7 +3273,7 @@ onMounted(async () => {
     <div v-if="selectedPresale" class="console-modal-backdrop" :class="{ nested: !!selectedOpportunity }" role="presentation" @click.self="closePresale">
       <article class="console-detail-modal crm-presale-console-detail" role="dialog" aria-modal="true" aria-label="售前申请详情">
         <header>
-          <div><p class="console-modal-eyebrow">售前申请详情</p><h2>{{ selectedPresale.request.request_no }}</h2></div>
+          <div class="crm-presale-detail-heading"><p class="console-modal-eyebrow">售前申请详情</p><div><h2>{{ selectedPresale.request.request_no }}</h2><span class="crm-presale-status-badge" :data-status="selectedPresale.request.status">{{ requestStatusText(selectedPresale.request.status) }}</span></div><small>关联商机 {{ selectedPresale.request.opportunity_no }} · {{ selectedPresale.overdue ? '当前已逾期' : '当前未逾期' }}</small></div>
           <button class="console-modal-close" type="button" aria-label="关闭售前申请详情" @click="closePresale"><ConsoleIcon name="close" /></button>
         </header>
         <div class="console-detail-grid crm-presale-summary">
@@ -3215,6 +3285,8 @@ onMounted(async () => {
           <div><span>累计工时</span><strong>{{ selectedPresale.total_work_hours }} 小时</strong></div>
           <div><span>是否逾期</span><strong>{{ selectedPresale.overdue ? '是' : '否' }}</strong></div>
         </div>
+        <div class="crm-presale-detail-workspace">
+          <div class="crm-presale-detail-primary">
         <section class="console-detail-section crm-presale-actions" aria-labelledby="presale-actions-heading">
           <h3 id="presale-actions-heading">可用操作</h3>
           <p v-if="presaleActionsLoading">正在向服务端确认可用操作…</p>
@@ -3238,8 +3310,12 @@ onMounted(async () => {
           <summary>登记工时</summary>
           <form class="console-form-grid" @submit.prevent="runPresale('worklog')"><label class="console-form-item"><span>开始 *</span><input v-model="operation.work_start" type="datetime-local" required></label><label class="console-form-item"><span>结束 *</span><input v-model="operation.work_end" type="datetime-local" required></label><label class="console-form-item"><span>单位</span><select v-model="operation.raw_unit"><option value="HOUR">小时</option><option value="PERSON_DAY">人天（1 人天 = 8 小时）</option></select></label><label class="console-form-item"><span>数值 *</span><input v-model.trim="operation.raw_value" required inputmode="decimal" pattern="(?:0|[1-9][0-9]{0,7})(?:\\.[0-9]{1,2})?"></label><label class="console-form-item full"><span>工作地点 *</span><input v-model.trim="operation.work_site_address" required maxlength="500"></label><label class="console-form-item"><span>工作内容</span><select v-model="operation.work_content"><option value="SOLUTION_DESIGN">方案设计</option><option value="TECH_EXCHANGE">技术交流</option><option value="POC_DEMO">POC 演示</option><option value="TECH_QA">技术答疑</option><option value="OTHER">其他</option></select></label><label class="console-form-item"><span>备注</span><input v-model.trim="operation.remark" maxlength="1000"></label><div class="crm-presale-form-actions"><button class="console-button primary" type="submit" :disabled="presaleMutationLoading">{{ presaleMutationLoading ? '提交中…' : '提交工时' }}</button></div></form>
         </details>
-        <section class="console-detail-section crm-presale-timeline" aria-labelledby="presale-timeline-heading"><div class="crm-subsection-heading"><div><h3 id="presale-timeline-heading">流程时间线</h3><p>按服务端稳定游标倒序展示，关键动作以步骤条呈现。</p></div><button class="console-button ghost small" type="button" :disabled="presaleTimelineLoading" @click="refreshPresaleTimeline(selectedPresale.request.id)">刷新</button></div><p v-if="presaleTimelineLoading && !presaleTimeline.length">正在加载流程记录…</p><p v-if="presaleTimelineError" class="crm-alert error" role="alert">{{ presaleTimelineError }}</p><ol v-if="presaleTimeline.length" class="crm-timeline-list" aria-label="售前流程步骤"><li v-for="item in presaleTimeline" :key="item.event_id" :class="`crm-timeline-step is-${timelineEventMeta(item.type).tone}`"><div class="crm-timeline-rail" aria-hidden="true"><span>{{ timelineEventMeta(item.type).icon }}</span></div><time :datetime="item.occurred_at"><strong>{{ formatDate(item.occurred_at) }}</strong><small>{{ timelineEventMeta(item.type).stage }}节点</small></time><article class="crm-timeline-card"><header><span class="crm-timeline-stage">{{ timelineEventMeta(item.type).stage }}</span><h4>{{ timelineEventText(item.type) }}</h4></header><div class="crm-timeline-meta"><span v-if="item.actor_name || item.actor_id">操作人：{{ operationUserLabel(item) }}</span><span v-if="item.type === 'STATUS_CHANGED'">{{ requestStatusText(item.from_status) }} <b>→</b> {{ requestStatusText(item.to_status) }}</span><span v-if="item.type === 'APPROVAL_DECIDED'">审批结果：{{ approvalResultText(item.result) }}</span><span v-if="item.type === 'ASSIGNEE_ADDED' || item.type === 'ASSIGNEE_REMOVED'">执行人：{{ operationSubjectLabel(item) }}</span><span v-if="item.progress_pct !== null && item.progress_pct !== undefined" class="crm-timeline-progress">进度 {{ item.progress_pct }}%</span><span v-if="item.work_hours" class="crm-timeline-hours">{{ workContentText(item.work_content) }} · {{ item.work_hours }} 小时</span></div><p v-if="item.content" class="crm-timeline-content">{{ item.content }}</p><a v-if="safeHTTPSURL(item.link_url)" :href="safeHTTPSURL(item.link_url)" target="_blank" rel="noopener noreferrer">打开参考链接 <span aria-hidden="true">↗</span></a></article></li></ol><p v-else-if="!presaleTimelineLoading && !presaleTimelineError" class="crm-empty compact">暂无流程记录</p><button v-if="presaleTimelineCursor" class="console-button ghost small" type="button" :disabled="presaleTimelineLoading" @click="loadMorePresaleTimeline">{{ presaleTimelineLoading ? '加载中…' : '加载更多' }}</button></section>
+          </div>
+          <aside class="crm-presale-detail-activity" aria-label="流程与工时记录">
+        <section class="console-detail-section crm-presale-timeline" aria-labelledby="presale-timeline-heading"><div class="crm-subsection-heading"><div><h3 id="presale-timeline-heading">流程时间线</h3><p>按服务端稳定游标倒序展示，关键动作以步骤条呈现。</p></div><button class="console-button ghost small" type="button" :disabled="presaleTimelineLoading" @click="refreshPresaleTimeline(selectedPresale.request.id)">刷新</button></div><p v-if="presaleTimelineLoading && !presaleTimeline.length">正在加载流程记录…</p><p v-if="presaleTimelineError" class="crm-alert error" role="alert">{{ presaleTimelineError }}</p><ol v-if="presaleTimeline.length" class="crm-timeline-list" tabindex="0" aria-label="售前流程步骤，区域内可滚动"><li v-for="item in presaleTimeline" :key="item.event_id" :class="`crm-timeline-step is-${timelineEventMeta(item.type).tone}`"><div class="crm-timeline-rail" aria-hidden="true"><span>{{ timelineEventMeta(item.type).icon }}</span></div><time :datetime="item.occurred_at"><strong>{{ formatDate(item.occurred_at) }}</strong><small>{{ timelineEventMeta(item.type).stage }}节点</small></time><article class="crm-timeline-card"><header><span class="crm-timeline-stage">{{ timelineEventMeta(item.type).stage }}</span><h4>{{ timelineEventText(item.type) }}</h4></header><div class="crm-timeline-meta"><span v-if="item.actor_name || item.actor_id">操作人：{{ operationUserLabel(item) }}</span><span v-if="item.type === 'STATUS_CHANGED'">{{ requestStatusText(item.from_status) }} <b>→</b> {{ requestStatusText(item.to_status) }}</span><span v-if="item.type === 'APPROVAL_DECIDED'">审批结果：{{ approvalResultText(item.result) }}</span><span v-if="item.type === 'ASSIGNEE_ADDED' || item.type === 'ASSIGNEE_REMOVED'">执行人：{{ operationSubjectLabel(item) }}</span><span v-if="item.progress_pct !== null && item.progress_pct !== undefined" class="crm-timeline-progress">进度 {{ item.progress_pct }}%</span><span v-if="item.work_hours" class="crm-timeline-hours">{{ workContentText(item.work_content) }} · {{ item.work_hours }} 小时</span></div><p v-if="item.content" class="crm-timeline-content">{{ item.content }}</p><a v-if="safeHTTPSURL(item.link_url)" :href="safeHTTPSURL(item.link_url)" target="_blank" rel="noopener noreferrer">打开参考链接 <span aria-hidden="true">↗</span></a></article></li></ol><p v-else-if="!presaleTimelineLoading && !presaleTimelineError" class="crm-empty compact">暂无流程记录</p><button v-if="presaleTimelineCursor" class="console-button ghost small" type="button" :disabled="presaleTimelineLoading" @click="loadMorePresaleTimeline">{{ presaleTimelineLoading ? '加载中…' : '加载更多' }}</button></section>
         <section class="console-detail-section crm-presale-worklogs"><h3>工时记录</h3><p v-if="!worklogs.length">暂无工时。</p><div v-for="item in worklogs" :key="item.id" class="crm-worklog"><span>{{ item.person_name || '未命名用户' }} · {{ item.work_hours }} 小时 · {{ pushStatusText(item.push_status) }}</span></div></section>
+          </aside>
+        </div>
         <footer><button class="console-button ghost" type="button" @click="closePresale">关闭</button></footer>
       </article>
     </div>

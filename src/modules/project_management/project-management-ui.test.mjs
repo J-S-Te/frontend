@@ -40,9 +40,11 @@ test('项目管理页面覆盖原型的五个业务域与核心交互', () => {
   assert.match(source, /onMounted\(loadWorkspace\)/)
   assert.match(source, /await confirmServiceItemsRequest\(ids\)/)
   assert.match(source, /await setRuleEnabled\(rule\.id, rule\.kind \|\| activeSection\.value, next\)/)
-  for (const operation of ['assignTeam', 'assignExecutionTeam', 'planImplementation', 'startImplementationPreparation', 'startFieldExecution', 'submitFieldRecord', 'reportDeviation', 'reviewDeviation', 'completeServiceItemField']) {
+  for (const operation of ['assignTeam', 'assignExecutionTeam', 'planImplementation', 'startImplementationPreparation', 'startFieldExecution', 'reportDeviation', 'reviewDeviation', 'completeServiceItemField']) {
     assert.match(source, new RegExp(`runOperation[\\s\\S]*${operation}`))
   }
+  // 现场记录先进入离线队列，再由统一同步器调用 API，不能退回直接提交。
+  assert.match(source, /submitStoredFieldOperation[\s\S]*submitFieldRecord/)
   assert.match(source, /asRFC3339\(form\.plannedStart\)/)
   assert.match(source, /service_items:/)
   assert.match(source, /listDeliveryEvents\(\)/)
@@ -1065,8 +1067,9 @@ test('每个写操作入口都按服务端同款权限码门控', () => {
   assert.match(source, /v-if="activeSection === 'decomposition' && canConfirmDecomposition"[^>]*@click="confirmDecomposition"/)
   assert.match(source, /v-if="canPlanImplementation" class="pm-button primary" :disabled="saving \|\| !!planningBlocked"/)
   assert.match(source, /selectedServiceItem\.status === '实施准备中' && canExecuteField" class="pm-button primary"[^>]*runOperation\('field-start'\)[^>]*>进入实施中</)
-  assert.match(source, /selectedServiceItem\.status === '实施中' && canExecuteField" class="pm-form pm-operation-form"/)
-  assert.match(source, /selectedServiceItem\.status === '实施中' && canCompleteField" class="pm-button" :disabled="saving" @click="runOperation\('complete'\)"/)
+  assert.match(source, /selectedServiceItem && selectedServiceItem\.status === '实施中' && canExecuteField" class="pm-field-workflow"/)
+  assert.match(source, /class="pm-form pm-operation-form"/)
+  assert.match(source, /selectedServiceItem\.status === '实施中' && canCompleteField" class="pm-button" :disabled="saving \|\| pendingFieldSyncCount > 0" @click="runOperation\('complete'\)"/)
   assert.match(source, />现场测评结束<\/button>/)
   assert.match(source, /v-if="canReportDeviation" class="pm-button primary" :disabled="saving" @click="runOperation\('exception-report'\)"/)
   assert.match(source, /v-if="canReviewDeviation" class="pm-button" :disabled="saving" @click="runOperation\('exception-review'\)"/)
@@ -1511,10 +1514,33 @@ test('状态字段统一为语义化胶囊标签（statusTone 单一映射）', 
 })
 
 test('现场证据通过统一文件网关上传并以回执提交', () => {
-  assert.match(source, /uploadServiceItemEvidence\(item\.id, 'FIELD', form\.fieldEvidenceFile\)/)
-  assert.match(source, /evidence_files: \[evidence\]/)
+  assert.match(source, /uploadServiceItemEvidence\(current\.itemID, 'FIELD', current\.file\)/)
+  assert.match(source, /evidence_files: current\.artifact \? \[current\.artifact\] : \[\]/)
+  assert.match(source, /saveFieldOperation\(current\)/)
   assert.match(source, /请上传至少一份现场证据/)
   assert.doesNotMatch(source, /evidence_urls: \[\]/)
+})
+
+test('现场实施支持 GPS、电子签名与可重放离线队列', async () => {
+  const offlineQueueSource = await readFile(new URL('./offlineFieldQueue.js', import.meta.url), 'utf8')
+  const signaturePadSource = await readFile(new URL('./components/SignaturePad.vue', import.meta.url), 'utf8')
+  assert.match(source, /navigator\.geolocation\.getCurrentPosition/)
+  assert.match(source, /newFieldOperationID\('checkin'\)/)
+  assert.match(source, /newFieldOperationID\('record'\)/)
+  assert.match(source, /newFieldOperationID\('signature'\)/)
+  assert.match(source, /client_operation_id: current\.id, captured_at: current\.capturedAt/)
+  assert.match(source, /pendingFieldSyncCount > 0/)
+  assert.match(source, /selectedFieldEvidenceGaps/)
+  assert.match(source, /incomplete_reason: String\(form\.fieldIncompleteReason \|\| ''\)\.trim\(\)/)
+  assert.match(source, /缺项确认说明/)
+  assert.match(source, /SignaturePad/)
+  assert.match(signaturePadSource, /canvas\.value\.toBlob/)
+  assert.match(offlineQueueSource, /indexedDB\.open/)
+  assert.match(offlineQueueSource, /createObjectStore\(STORE_NAME, \{ keyPath: 'id' \}\)/)
+  assert.match(offlineQueueSource, /createIndex\('ownerKey', 'ownerKey'/)
+  assert.match(source, /operation\.ownerKey !== fieldQueueOwner\(\)/)
+  assert.match(pmApiSource, /\/field-check-ins/)
+  assert.match(pmApiSource, /\/field-signatures/)
 })
 
 test('报告编制版本先上传网关文件再进入审核', () => {

@@ -1,0 +1,83 @@
+# HTTPS 模式只引用容器内固定只读挂载点；宿主机真实路径不会写进生成配置。
+server {
+    listen 80 default_server;
+    server_name ${PUBLIC_PLATFORM_HOST} ${PUBLIC_SSO_HOST};
+    return 308 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl default_server;
+    http2 on;
+    server_name ${PUBLIC_PLATFORM_HOST};
+    server_tokens off;
+    client_max_body_size 25m;
+
+    ssl_certificate /run/tls/platform.crt;
+    ssl_certificate_key /run/tls/platform.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_cache shared:platform_tls:10m;
+    ssl_session_timeout 1d;
+    add_header Strict-Transport-Security "max-age=300" always;
+
+    location /file-gateway/api/v2/ {
+        proxy_http_version 1.1;
+        proxy_request_buffering off;
+        proxy_buffering off;
+        proxy_read_timeout 10m;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_pass http://127.0.0.1:8088;
+    }
+
+    location ~ ^/api/v1/subsystem-(onboarding|update|retry|teardown)$ {
+        proxy_connect_timeout 30s;
+        proxy_send_timeout 960s;
+        proxy_read_timeout 960s;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_pass http://127.0.0.1:8088;
+    }
+
+    location / {
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_pass http://127.0.0.1:8088;
+    }
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${PUBLIC_SSO_HOST};
+    server_tokens off;
+
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    set $keycloak_backend keycloak:8080;
+
+    ssl_certificate /run/tls/sso.crt;
+    ssl_certificate_key /run/tls/sso.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_cache shared:sso_tls:10m;
+    ssl_session_timeout 1d;
+    add_header Strict-Transport-Security "max-age=300" always;
+
+    location / {
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_pass http://$keycloak_backend;
+    }
+}

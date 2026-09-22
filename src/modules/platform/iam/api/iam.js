@@ -80,10 +80,10 @@ export function listUsers({ page = 1, pageSize = 50, keyword = '', status = '' }
  * @returns {Promise<Object>} 返回新建的用户档案。
  * @throws {IamError} 用户数据无效、唯一字段冲突或操作无权限时抛出。
  */
-export function createUser({ displayName, email = null, mobile = null, status = 'ACTIVE' }) {
+export function createUser({ displayName, email = null, mobile = null, status = 'ACTIVE', validUntil }) {
   return request('/users', {
     method: 'POST',
-    body: JSON.stringify({ display_name: displayName, email, mobile, status }),
+    body: JSON.stringify({ display_name: displayName, email, mobile, status, ...(validUntil !== undefined ? { valid_until: validUntil } : {}) }),
   })
 }
 
@@ -146,6 +146,7 @@ export async function onboardEmployee({ user, account = null, membership = null 
     email: user?.email ?? null,
     mobile: user?.mobile ?? null,
     status: user?.status || 'ACTIVE',
+    validUntil: user?.valid_until ?? null,
   })
   const userId = userResult?.user_id || userResult?.id
   if (!userId) {
@@ -281,10 +282,10 @@ export function createEmployeesBatch(items, sourceFile = null) {
  * @returns {Promise<Object>} 返回更新后的用户档案。
  * @throws {IamError} 用户不存在、版本冲突、数据无效或操作无权限时抛出。
  */
-export function updateUser({ userId, displayName, employeeNo = '', email = '', mobile = '', status, version }) {
+export function updateUser({ userId, displayName, employeeNo = '', email = '', mobile, status, version, validUntil = null, updateValidity = false }) {
   return request(`/users/${encodeURIComponent(userId)}`, {
     method: 'PATCH',
-    body: JSON.stringify({ display_name: displayName, employee_no: employeeNo, email, mobile, status, version }),
+    body: JSON.stringify({ display_name: displayName, employee_no: employeeNo, email, status, version, ...(mobile !== undefined ? { mobile } : {}), ...(updateValidity ? { valid_until: validUntil, update_validity: true } : {}) }),
   })
 }
 
@@ -345,10 +346,10 @@ export function createLocalAccount({ userId, accountName, initialPassword, valid
  * @returns {Promise<Object>} 返回更新后的账号。
  * @throws {IamError} 账号不存在、状态转换无效、版本冲突或操作无权限时抛出。
  */
-export function updateAccountStatus({ accountId, status, version }) {
+export function updateAccountStatus({ accountId, status, version, validUntil = null, updateValidity = false }) {
   return request(`/accounts/${encodeURIComponent(accountId)}`, {
     method: 'PATCH',
-    body: JSON.stringify({ status, version }),
+    body: JSON.stringify({ status, version, ...(updateValidity ? { valid_until: validUntil, update_validity: true } : {}) }),
   })
 }
 

@@ -109,6 +109,8 @@ const activePanel = ref('users')
 const positionAuthorizationTemplates = ref(null)
 const batchImportVisible = ref(false)
 const detail = ref(null)
+const validityEditor = ref(null)
+const validitySaving = ref(false)
 const loading = reactive({ users: false, accounts: false, organizations: false, positions: false, memberships: false, positionAuthorizationTemplates: false })
 const errorMessage = ref('')
 const pageSize = 50
@@ -1562,6 +1564,69 @@ async function toggleAccountStatus(account) {
   }
 }
 
+function openValidityEditor(kind, item) {
+  const validUntil = item?.valid_until ? toDateTimeLocal(item.valid_until) : defaultAccountValidUntil()
+  validityEditor.value = {
+    kind,
+    item,
+    mode: item?.valid_until ? 'TEMPORARY' : 'PERMANENT',
+    valid_until: validUntil,
+  }
+}
+
+function closeValidityEditor() {
+  if (!validitySaving.value) validityEditor.value = null
+}
+
+async function saveValidity() {
+  const draft = validityEditor.value
+  if (!draft || validitySaving.value) return
+  const validUntil = draft.mode === 'PERMANENT' ? null : resolveExpiresAt(draft.valid_until)
+  if (draft.mode !== 'PERMANENT' && (!validUntil || new Date(validUntil).getTime() <= Date.now())) {
+    emitToast('有效截止时间必须晚于当前时间。')
+    return
+  }
+  const item = draft.item
+  const version = Number(item?.version)
+  if (!Number.isInteger(version) || version < 1) {
+    emitToast('版本信息无效，请刷新后重试。')
+    return
+  }
+  validitySaving.value = true
+  try {
+    let updated
+    if (draft.kind === 'user') {
+      updated = await updateUser({
+        userId: item.user_id,
+        displayName: item.display_name,
+        employeeNo: item.employee_no || '',
+        email: item.email || '',
+        mobile: undefined,
+        status: item.status,
+        version,
+        validUntil,
+        updateValidity: true,
+      })
+    } else {
+      updated = await updateAccountStatus({
+        accountId: item.account_id,
+        status: item.status,
+        version,
+        validUntil,
+        updateValidity: true,
+      })
+    }
+    Object.assign(item, updated)
+    if (detail.value?.item === item) detail.value.item = item
+    emitToast(`${draft.kind === 'user' ? '用户' : '账号'}有效期已更新。`)
+    validityEditor.value = null
+  } catch (error) {
+    emitToast(error?.message || '有效期更新失败。')
+  } finally {
+    validitySaving.value = false
+  }
+}
+
 // 密码重置始终以用户详情中选定的 account_id 为键；多账号用户必须逐个明确操作，
 // 不能仅凭姓名或 user_id 猜测目标登录账号。
 function openPasswordResetForAccount(account, userName = '') {
@@ -2212,7 +2277,7 @@ onBeforeUnmount(() => {
             <thead><tr><th>用户</th><th>工号</th><th>邮箱</th><th>手机号</th><th>状态</th><th>更新时间</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
             <tr v-if="loading.users"><td class="console-empty" colspan="7">正在读取用户…</td></tr>
             <tr v-else-if="!filteredUsers.length"><td class="console-empty" colspan="7">暂无用户记录。</td></tr>
-            <tr v-for="item in filteredUsers" :key="item.user_id"><td data-label="用户"><strong class="console-entity-name iam-table-truncate" :title="item.display_name || ''">{{ item.display_name }}</strong></td><td data-label="工号" class="console-mono iam-user-employee-cell"><span class="iam-table-truncate" :title="item.employee_no || ''">{{ item.employee_no || '—' }}</span></td><td data-label="邮箱" class="iam-user-email-cell"><span class="iam-table-truncate" :title="item.email || ''">{{ item.email || '—' }}</span></td><td data-label="手机号" class="console-mono iam-user-mobile-cell"><span class="iam-table-truncate" :title="item.mobile_masked || ''">{{ item.mobile_masked || '—' }}</span></td><td data-label="状态"><span class="console-badge" :class="(item.status || '').toUpperCase() === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(item.status) }}</span></td><td data-label="更新时间" class="console-mono iam-user-updated-cell"><span class="iam-table-truncate" :title="formatDateTime(item.updated_at)">{{ formatDateTime(item.updated_at) }}</span></td><td data-label="操作" class="console-actions-cell"><button class="console-text-button" type="button" @click="openDetail('user', item)">详情</button><button v-if="hasPermission(IAM_PERMISSIONS.userDelete)" class="console-text-button danger" type="button" @click="openUserDeletionDialog(item)">删除</button></td></tr>
+            <tr v-for="item in filteredUsers" :key="item.user_id"><td data-label="用户"><strong class="console-entity-name iam-table-truncate" :title="item.display_name || ''">{{ item.display_name }}</strong><small>{{ item.valid_until ? `有效至 ${formatDateTime(item.valid_until)}` : '长期有效' }}</small></td><td data-label="工号" class="console-mono iam-user-employee-cell"><span class="iam-table-truncate" :title="item.employee_no || ''">{{ item.employee_no || '—' }}</span></td><td data-label="邮箱" class="iam-user-email-cell"><span class="iam-table-truncate" :title="item.email || ''">{{ item.email || '—' }}</span></td><td data-label="手机号" class="console-mono iam-user-mobile-cell"><span class="iam-table-truncate" :title="item.mobile_masked || ''">{{ item.mobile_masked || '—' }}</span></td><td data-label="状态"><span class="console-badge" :class="(item.status || '').toUpperCase() === 'ACTIVE' && (!item.valid_until || new Date(item.valid_until).getTime() > Date.now()) ? 'status-active' : 'status-disabled'">{{ item.valid_until && new Date(item.valid_until).getTime() <= Date.now() ? '已过期' : displayStatus(item.status) }}</span></td><td data-label="更新时间" class="console-mono iam-user-updated-cell"><span class="iam-table-truncate" :title="formatDateTime(item.updated_at)">{{ formatDateTime(item.updated_at) }}</span></td><td data-label="操作" class="console-actions-cell"><button class="console-text-button" type="button" @click="openDetail('user', item)">详情</button><button v-if="hasPermission(IAM_PERMISSIONS.userUpdate)" class="console-text-button" type="button" @click="openValidityEditor('user', item)">有效期</button><button v-if="hasPermission(IAM_PERMISSIONS.userDelete)" class="console-text-button danger" type="button" @click="openUserDeletionDialog(item)">删除</button></td></tr>
           </tbody></table></div></div>
         </section>
 
@@ -2222,7 +2287,7 @@ onBeforeUnmount(() => {
             <thead><tr><th>登录账号</th><th>关联用户</th><th>认证方式</th><th>有效时间</th><th>状态</th><th>更新时间</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
             <tr v-if="loading.accounts"><td class="console-empty" data-empty="true" colspan="7">正在读取登录账号…</td></tr>
             <tr v-else-if="!filteredAccounts.length"><td class="console-empty" colspan="7">暂无登录账号记录。新增员工请使用统一流程；如用户档案已存在，可点击右上角“补建登录账号”。</td></tr>
-            <tr v-for="item in filteredAccounts" :key="item.account_id"><td data-label="登录账号"><div class="iam-account-identity"><span class="iam-account-avatar">{{ (item.account_name || '?').slice(0, 1).toUpperCase() }}</span><span><strong :title="item.account_name || ''">{{ item.account_name }}</strong></span></div></td><td data-label="关联用户"><span class="iam-linked-user" :title="`${item.user?.display_name || item.user?.name || '—'}${item.user_id ? `（${item.user_id}）` : ''}`"><ConsoleIcon name="user" /><span class="iam-linked-user-name">{{ item.user?.display_name || item.user?.name || '—' }}</span></span></td><td data-label="认证方式"><div class="iam-auth-tags"><span class="iam-type-tag">{{ displayLoginAccountType(item).split(' / ')[0] }}</span><span class="iam-source-tag">{{ displayLoginAccountType(item).split(' / ')[1] }}</span><span v-if="item.password_initialized === false" class="iam-source-tag">待初始化密码</span></div></td><td data-label="有效时间"><div class="iam-validity"><span class="iam-validity-chip" :class="item.valid_until ? 'is-temporary' : 'is-permanent'">{{ item.valid_until ? '临时账号' : '永久账号' }}</span><small>{{ item.valid_until ? formatDateTime(item.valid_until) : '长期有效' }}</small></div></td><td data-label="状态"><span class="console-badge" :class="effectiveAccountStatus(item) === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(effectiveAccountStatus(item)) }}</span></td><td data-label="更新时间" class="console-mono iam-account-updated">{{ formatDateTime(item.updated_at) }}</td><td data-label="操作" class="console-actions-cell iam-account-actions"><button class="console-text-button" type="button" @click="openDetail('account', item)">详情</button><button v-if="isAccountStatusManageable(effectiveAccountStatus(item)) && hasPermission(IAM_PERMISSIONS.accountUpdate)" class="console-text-button" :class="{ danger: effectiveAccountStatus(item) === 'ACTIVE' }" type="button" :disabled="updatingAccountId === item.account_id" @click="toggleAccountStatus(item)">{{ updatingAccountId === item.account_id ? '处理中…' : (effectiveAccountStatus(item) === 'ACTIVE' ? '停用' : '启用') }}</button></td></tr>
+            <tr v-for="item in filteredAccounts" :key="item.account_id"><td data-label="登录账号"><div class="iam-account-identity"><span class="iam-account-avatar">{{ (item.account_name || '?').slice(0, 1).toUpperCase() }}</span><span><strong :title="item.account_name || ''">{{ item.account_name }}</strong></span></div></td><td data-label="关联用户"><span class="iam-linked-user" :title="`${item.user?.display_name || item.user?.name || '—'}${item.user_id ? `（${item.user_id}）` : ''}`"><ConsoleIcon name="user" /><span class="iam-linked-user-name">{{ item.user?.display_name || item.user?.name || '—' }}</span></span></td><td data-label="认证方式"><div class="iam-auth-tags"><span class="iam-type-tag">{{ displayLoginAccountType(item).split(' / ')[0] }}</span><span class="iam-source-tag">{{ displayLoginAccountType(item).split(' / ')[1] }}</span><span v-if="item.password_initialized === false" class="iam-source-tag">待初始化密码</span></div></td><td data-label="有效时间"><div class="iam-validity"><span class="iam-validity-chip" :class="item.valid_until ? 'is-temporary' : 'is-permanent'">{{ item.valid_until ? '临时账号' : '永久账号' }}</span><small>{{ item.valid_until ? formatDateTime(item.valid_until) : '长期有效' }}</small></div></td><td data-label="状态"><span class="console-badge" :class="effectiveAccountStatus(item) === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(effectiveAccountStatus(item)) }}</span></td><td data-label="更新时间" class="console-mono iam-account-updated">{{ formatDateTime(item.updated_at) }}</td><td data-label="操作" class="console-actions-cell iam-account-actions"><button class="console-text-button" type="button" @click="openDetail('account', item)">详情</button><button v-if="hasPermission(IAM_PERMISSIONS.accountUpdate)" class="console-text-button" type="button" @click="openValidityEditor('account', item)">有效期</button><button v-if="isAccountStatusManageable(effectiveAccountStatus(item)) && hasPermission(IAM_PERMISSIONS.accountUpdate)" class="console-text-button" :class="{ danger: effectiveAccountStatus(item) === 'ACTIVE' }" type="button" :disabled="updatingAccountId === item.account_id" @click="toggleAccountStatus(item)">{{ updatingAccountId === item.account_id ? '处理中…' : (effectiveAccountStatus(item) === 'ACTIVE' ? '停用' : '启用') }}</button></td></tr>
           </tbody></table></div></div>
         </section>
 
@@ -2538,6 +2603,18 @@ onBeforeUnmount(() => {
       @completed="refreshAfterBatchImport"
       @toast="emitToast"
     />
+
+    <div v-if="validityEditor" class="iam-modal-backdrop" role="presentation" @click.self="closeValidityEditor">
+      <section class="iam-modal iam-editor-modal" role="dialog" aria-modal="true" aria-label="修改有效期">
+        <header><div><p>身份生命周期</p><h3>修改{{ validityEditor.kind === 'user' ? '用户' : '账号' }}有效期</h3></div><button class="console-modal-close" type="button" :disabled="validitySaving" @click="closeValidityEditor"><ConsoleIcon name="close" /></button></header>
+        <form class="iam-editor-form" @submit.prevent="saveValidity">
+          <p class="iam-form-alert full"><ConsoleIcon name="info" />用户到期会使其全部登录账号和现有会话失效；账号到期仅影响当前账号。恢复长期有效后可以重新登录，但不会恢复已经撤销的会话。</p>
+          <label class="full"><span>有效方式 *</span><select v-model="validityEditor.mode"><option value="PERMANENT">长期有效</option><option value="TEMPORARY">指定截止时间</option></select></label>
+          <label v-if="validityEditor.mode === 'TEMPORARY'" class="full"><span>有效截止时间 *</span><input v-model="validityEditor.valid_until" required type="datetime-local" /></label>
+          <div class="console-form-actions full"><button class="console-button ghost" type="button" :disabled="validitySaving" @click="closeValidityEditor">取消</button><button class="console-button primary" type="submit" :disabled="validitySaving">{{ validitySaving ? '保存中…' : '保存有效期' }}</button></div>
+        </form>
+      </section>
+    </div>
 
     <div v-if="editor" class="iam-modal-backdrop" role="presentation" @click.self="closeEditor">
       <section class="iam-modal iam-editor-modal" role="dialog" aria-modal="true" aria-label="新增身份授权配置">

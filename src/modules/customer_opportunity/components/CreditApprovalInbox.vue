@@ -42,7 +42,7 @@ onMounted(load)
   <section class="crm-panel crm-credit-approvals" aria-labelledby="credit-approval-heading">
     <div class="crm-credit-approval-header">
       <div>
-        <div class="crm-credit-approval-eyebrow">CM-003 · 销售总监工作台</div>
+        <div class="crm-credit-approval-eyebrow">销售总监工作台</div>
         <div class="crm-credit-approval-title-row">
           <h2 id="credit-approval-heading">信用审批待办</h2>
           <span class="crm-credit-approval-count">{{ items.length }} 条待处理</span>

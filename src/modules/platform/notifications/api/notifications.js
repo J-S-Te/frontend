@@ -43,3 +43,59 @@ export const markNotificationRead = (deliveryID) => request(`/notifications/inbo
 
 /** markAllNotificationsRead 一次性标记当前用户全部站内信为已读。 */
 export const markAllNotificationsRead = () => request('/notifications/inbox/read-all', { method: 'POST', body: '{}' })
+
+export const listNotificationTemplates = ({ page = 1, pageSize = 50 } = {}) => request(`/notifications/templates?page=${page}&page_size=${pageSize}`).then((result) => ({
+  ...result,
+  items: (result?.items || []).map((item) => ({
+    id: item.id || item.ID,
+    code: item.code || item.Code,
+    name: item.name || item.Name,
+    status: item.status || item.Status,
+    current_version: Number(item.current_version || item.CurrentVersion || 0),
+    version: Number(item.version || item.Version || 0),
+  })),
+}))
+
+export const createNotificationTemplate = (payload) => request('/notifications/templates', {
+  method: 'POST', body: JSON.stringify(payload),
+})
+
+export const createNotificationTemplateVersion = (templateID, payload) => request(`/notifications/templates/${encodeURIComponent(templateID)}/versions`, {
+  method: 'POST', body: JSON.stringify(payload),
+})
+
+export const changeNotificationTemplateStatus = (templateID, status, version) => request(`/notifications/templates/${encodeURIComponent(templateID)}/status`, {
+  method: 'PATCH', body: JSON.stringify({ status, version }),
+})
+
+export const listNotificationDeliveries = ({ page = 1, pageSize = 50, status = '' } = {}) => {
+  const query = new URLSearchParams({ page: String(page), page_size: String(pageSize) })
+  if (status) query.set('status', status)
+  return request(`/notifications/deliveries?${query}`).then((result) => ({
+    ...result,
+    items: (result?.items || []).map((item) => ({
+      id: item.id || item.ID,
+      recipient_user_id: item.recipient_user_id || item.RecipientUserID,
+      status: item.status || item.Status,
+      attempt_count: Number(item.attempt_count ?? item.AttemptCount ?? 0),
+      next_attempt_at: item.next_attempt_at || item.NextRetryAt || null,
+    })),
+  }))
+}
+
+export const retryFailedNotificationDeliveries = (limit = 20) => request(`/notifications/deliveries/retry-failed?limit=${encodeURIComponent(limit)}`, {
+  method: 'POST', body: '{}',
+})
+
+export const getNotificationSettings = () => request('/settings/notifications')
+
+export const updateNotificationSettings = ({ inboxEnabled, reminderFrequency, version }) => request('/settings/notifications', {
+  method: 'PUT',
+  body: JSON.stringify({
+    inbox_enabled: Boolean(inboxEnabled),
+    // No email provider/worker is deployed. Keep the compatibility field fail-closed.
+    email_enabled: false,
+    reminder_frequency: reminderFrequency,
+    version,
+  }),
+})
