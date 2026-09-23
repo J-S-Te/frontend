@@ -5,6 +5,17 @@ server {
     server_name ${PUBLIC_PLATFORM_HOST};
     client_max_body_size 25m;
 
+    # SEC-N9：不暴露 nginx 版本号。
+    server_tokens off;
+    # SEC-N9：网关层兜底通用 50x 错误页，避免依赖后端错误页，
+    # 也不向客户端回显默认错误页中的版本/调试信息。
+    error_page 500 502 503 504 /50x.html;
+    location = /50x.html {
+        internal;
+        root /usr/share/nginx/html;
+        default_type text/html;
+    }
+
     location /file-gateway/api/v2/ {
         proxy_http_version 1.1;
         proxy_request_buffering off;
@@ -44,6 +55,9 @@ server {
 server {
     listen 80;
     server_name ${PUBLIC_SSO_HOST};
+
+    # SEC-N9：不暴露 nginx 版本号。
+    server_tokens off;
 
     resolver 127.0.0.11 valid=10s ipv6=off;
     set $keycloak_backend keycloak:8080;

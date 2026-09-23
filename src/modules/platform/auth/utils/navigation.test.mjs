@@ -13,6 +13,24 @@ test('普通 return_to 只允许当前站点', () => {
   assert.equal(navigation.resolveSameOriginRedirect('javascript:alert(1)', origin), '/')
 })
 
+// SEC-X7：跨源回跳仅校验 scheme，必须留下浏览器端告警以便审计核对注册表。
+test('跨源回跳输出安全告警，同源跳转不告警 [SEC-X7]', () => {
+  const warnings = []
+  const originalWarn = console.warn
+  console.warn = (...args) => warnings.push(args.map(String).join(' '))
+  try {
+    navigation.resolveServerApprovedRedirect('https://business.example.com/home', origin)
+    assert.equal(warnings.length, 1)
+    assert.ok(warnings[0].includes('https://business.example.com/home'))
+
+    navigation.resolveServerApprovedRedirect('/console', origin)
+    navigation.resolveSameOriginRedirect('https://evil.example.com/x', origin)
+    assert.equal(warnings.length, 1, '同源解析与被拒目标不应产生额外告警')
+  } finally {
+    console.warn = originalWarn
+  }
+})
+
 test('服务端已登记登录目标允许 HTTPS 跨应用跳转', () => {
   assert.equal(
     navigation.resolveServerApprovedRedirect('https://business.example.com/home?from=platform', origin),

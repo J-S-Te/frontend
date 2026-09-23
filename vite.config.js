@@ -48,7 +48,26 @@ function apiProxy(target) {
   return {
     target,
     changeOrigin: true,
+    // SEC-N7：默认代理目标全是 http://127.0.0.1:*，secure 对其无影响；
+    // 仅当通过 VITE_*_PROXY_TARGET 显式指向“本地自签证书”的 https 后端时才需要
+    // 跳过证书校验。保留 false 只服务该本地自签场景，不要用于跨主机代理。
     secure: false,
+  }
+}
+
+// SEC-N7：dev/preview 默认只绑定回环地址，避免开发服务器把源码与 HMR 端口
+// 暴露到局域网（0.0.0.0 会让同网段任意主机访问未构建源码与代理通道）。
+// 需要临时开 LAN 联调时显式传 VITE_HOST=0.0.0.0；多个允许的 Host 头用逗号分隔。
+function devHostConfig(env) {
+  const allowedHosts = String(env.VITE_ALLOWED_HOSTS || '')
+    .split(',')
+    .map((host) => host.trim())
+    .filter(Boolean)
+  return {
+    host: env.VITE_HOST || '127.0.0.1',
+    // 补齐 allowedHosts：除回环地址外，只放行显式配置的主机名，
+    // 防止 DNS-rebinding / Host 头伪造让攻击者以合法来源打到开发服务器。
+    allowedHosts: ['localhost', '127.0.0.1', '[::1]', '.localhost', ...allowedHosts],
   }
 }
 
@@ -101,11 +120,13 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 5173,
       strictPort: true,
+      ...devHostConfig(env),
       proxy,
     },
     preview: {
       port: 4173,
       strictPort: true,
+      ...devHostConfig(env),
       proxy,
     },
     build: {

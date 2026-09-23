@@ -10,7 +10,16 @@ const router = useRouter()
 
 const fromPath = computed(() => {
   const raw = route.query.from
-  if (typeof raw === 'string' && raw && raw.startsWith('/')) return raw
+  // SEC-X8：from 来自 URL 查询参数，仅 startsWith('/') 会放过 //host（协议相对跳转）
+  // 与 /\host（浏览器把反斜杠按斜杠解析，同样成为 //host）。这里同时拒绝
+  // // 开头、含 :// 的绝对地址与含反斜杠的值，保证"原始请求"只可能是站内路径。
+  if (
+    typeof raw === 'string'
+    && raw.startsWith('/')
+    && !raw.startsWith('//')
+    && !raw.includes('://')
+    && !raw.includes('\\')
+  ) return raw
   return ''
 })
 

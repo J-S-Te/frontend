@@ -71,6 +71,34 @@ export function isValidTargetUri(value) {
   return isValidPortalPath(value) || isValidAbsoluteHttps(value)
 }
 
+// SEC-X2：window.open / location.replace 前的打开目标白名单。
+// 服务端下发的 publicURL / authenticationURL / launch_url 若直接交给浏览器导航，
+// javascript: / data: 会以当前页面源执行脚本（window.open('', '_blank') 后
+// location.replace('javascript:…') 尤其危险）；协议相对地址 //host 还会跳到任意源。
+// 规则：
+//   1) 先复用 isValidTargetUri——https 绝对地址或单斜杠相对路径直接放行；
+//   2) 其余值以 base 解析后必须是 http(s) 且与 base 同源（保留开发环境 http 与
+//      带 query 的静态认证入口等合法场景）；
+//   3) 其余（javascript:、data:、vbscript:、//跨源 host、跨源 http）一律拒绝。
+export function isSafeOpenTarget(value, base) {
+  if (isValidTargetUri(value)) return true
+  if (typeof value !== 'string' || value.trim() === '') return false
+  if (typeof base !== 'string' || base.trim() === '') return false
+  let baseUrl
+  try {
+    baseUrl = new URL(base)
+  } catch {
+    return false
+  }
+  try {
+    const url = new URL(value, baseUrl)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false
+    return url.origin === baseUrl.origin
+  } catch {
+    return false
+  }
+}
+
 export function targetUriValidationMessage(value) {
   const trimmed = typeof value === 'string' ? value.trim() : ''
   if (!trimmed) return '请填写批准跳转地址。'

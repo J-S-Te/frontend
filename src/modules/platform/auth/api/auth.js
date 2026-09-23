@@ -3,6 +3,7 @@ import { broadcastSessionEnded } from '../utils/sessionLifecycle.js'
 import { clearAuthorizationSnapshot } from '../utils/authorizationRefresh.js'
 import { normalizeAuthorizationSession } from '../../../shared/authz/sessionCompatibility.js'
 import { createApiRequestContext, attachStructuredContext } from '../../shared/api/requestContext.js'
+import { userSafeErrorMessage } from '../../shared/api/request.js'
 
 // Node 原生测试没有注入 Vite 的 import.meta.env，使用可选链回退到同源 API 前缀。
 const API_BASE_URL = (import.meta.env?.VITE_API_BASE_URL || '/api/v1').replace(/\/$/, '')
@@ -51,7 +52,13 @@ async function requestWithStructuredContext(path, options = {}, extra = {}) {
 
   const body = await readResponseBody(response)
   if (!response.ok) {
-    const message = body.message || body.msg || extra.failureMessage || '请求失败，请稍后重试。'
+    // SEC-X4：认证接口的错误会直接显示在登录页等未登录面上，message 必须先过
+    // userSafeErrorMessage 过滤（复用 contract 模块做法）；traceId 仅保留在错误对象
+    // 里供日志排查，任何未登录页面都不得把它拼进展示文本。
+    const message = userSafeErrorMessage(body.message)
+      || userSafeErrorMessage(body.msg)
+      || extra.failureMessage
+      || '请求失败，请稍后重试。'
     const requestError = new AuthError(message, {
       status: response.status,
       code: body.code || '',

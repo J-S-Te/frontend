@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { AuthError, logoutCurrentSession } from '@/modules/platform/auth/api/auth'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import ContractDocumentPreview from '@/modules/contract_management/components/ContractDocumentPreview.vue'
+import { validateRecipientPhoneNumber } from '@/modules/contract_management/utils/recipientPhone.js'
 import ContractReportsPanel from '@/modules/contract_management/components/ContractReportsPanel.vue'
 import {
   commandApproval,
@@ -139,7 +140,9 @@ const signingOperationBusy = ref(false)
 const signingKeyword = ref('')
 const signingMethodFilter = ref('')
 const signingStatusFilter = ref('')
-const signingShipmentForm = ref({ courier_number: '', recipient_name: '', recipient_address: '', mailed_at: '' })
+// C-ii（task-62）：recipient_phone 是后端寄送保存的必填字段（router.go 非空 + ≤20 rune），
+// 表单状态必须携带该键，否则保存请求恒被 422 拒绝。
+const signingShipmentForm = ref({ courier_number: '', recipient_name: '', recipient_phone: '', recipient_address: '', mailed_at: '' })
 const signingConfirmationForm = ref({ seal_verified: false, signature_verified: false, signed_at: '' })
 const adminDashboard = ref(null)
 const dashboardDetailKey = ref('')
@@ -646,6 +649,10 @@ function applySigningRecord(record, { preserveForms = false } = {}) {
   signingShipmentForm.value = {
     courier_number: selected.courier_number || '',
     recipient_name: selected.recipient_name || '',
+    // 回显语义（task-43 后读接口返回掩码 138****5678）：掩码绝不回填到输入框——
+    // 回填会让"未修改直接保存"把掩码当成新号码写回后端。输入保持为空由操作员
+    // 重新输入完整手机号，已保存的掩码只在表单下方作为提示展示（允许覆盖重填）。
+    recipient_phone: '',
     recipient_address: selected.recipient_address || '',
     mailed_at: selected.mailed_at ? String(selected.mailed_at).slice(0, 10) : '',
   }
@@ -682,6 +689,13 @@ async function refreshSelectedSigningRecord() {
 async function submitSigningShipment() {
   const contractID = selectedSigningRecord.value?.contract.recordId
   if (!contractID) return
+  // C-ii（task-62）：提交前先本地校验收件人手机号（非空、≤20 rune、数字格式），
+  // 让后端必填校验的失败在表单旁即时反馈，而不是落到 422 的通用文案。
+  const phoneError = validateRecipientPhoneNumber(signingShipmentForm.value.recipient_phone)
+  if (phoneError) {
+    showToast(phoneError)
+    return
+  }
   signingOperationBusy.value = true
   try {
     await saveSigningShipment(contractID, signingShipmentForm.value)
@@ -1986,10 +2000,10 @@ onBeforeUnmount(() => {
         <template v-else>
           <div class="contract-detail-highlight"><div><span>签署方</span><strong>{{ selectedSigningRecord.contract.customerName }}</strong></div><div><span>负责人</span><strong>{{ selectedSigningRecord.contract.owner }}</strong></div><div><span>到期日期</span><strong>{{ selectedSigningRecord.contract.endDate }}</strong></div></div>
           <section><div class="contract-section-title"><h3>合同文件</h3><div class="contract-inline-actions"><button v-if="can('contract.document.download')" class="contract-text-button" type="button" @click="downloadApprovedContract(selectedSigningRecord.contract, 'docx')">下载 DOCX</button><button v-if="can('contract.document.download')" class="contract-text-button" type="button" @click="downloadApprovedContract(selectedSigningRecord.contract, 'pdf')">下载 PDF</button><button v-if="selectedSigningRecord.returned_document_name && can('contract.document.download')" class="contract-text-button" type="button" @click="downloadApprovedContract(selectedSigningRecord.contract, 'stamped-pdf')">下载回传 PDF</button></div></div></section>
-          <section v-if="selectedSigningRecord.status === 'pending_shipment'"><h3>寄出登记</h3><form class="contract-form-grid" @submit.prevent="submitSigningShipment"><label><span>快递单号</span><input v-model.trim="signingShipmentForm.courier_number" required maxlength="80" /></label><label><span>收件人</span><input v-model.trim="signingShipmentForm.recipient_name" required maxlength="100" /></label><label class="contract-form-wide"><span>收件地址</span><input v-model.trim="signingShipmentForm.recipient_address" required maxlength="300" /></label><label><span>邮寄日期</span><input v-model="signingShipmentForm.mailed_at" required type="date" /></label><button v-if="can('contract.signing.manage')" class="contract-button primary contract-signing-submit" type="submit" :disabled="signingOperationBusy">{{ signingOperationBusy ? '正在保存…' : '确认寄出并开始跟踪' }}</button></form></section>
+          <section v-if="selectedSigningRecord.status === 'pending_shipment'"><h3>寄出登记</h3><form class="contract-form-grid" @submit.prevent="submitSigningShipment"><label><span>快递单号</span><input v-model.trim="signingShipmentForm.courier_number" required maxlength="80" /></label><label><span>收件人</span><input v-model.trim="signingShipmentForm.recipient_name" required maxlength="100" /></label><label class="contract-form-wide"><span>收件电话</span><input v-model.trim="signingShipmentForm.recipient_phone" required type="tel" inputmode="tel" maxlength="20" placeholder="请输入收件人手机号（必填）" /><small v-if="selectedSigningRecord.recipient_phone">已保存记录仅显示掩码 {{ selectedSigningRecord.recipient_phone }}；保存时请重新输入完整手机号，掩码不会被提交。</small></label><label class="contract-form-wide"><span>收件地址</span><input v-model.trim="signingShipmentForm.recipient_address" required maxlength="300" /></label><label><span>邮寄日期</span><input v-model="signingShipmentForm.mailed_at" required type="date" /></label><button v-if="can('contract.signing.manage')" class="contract-button primary contract-signing-submit" type="submit" :disabled="signingOperationBusy">{{ signingOperationBusy ? '正在保存…' : '确认寄出并开始跟踪' }}</button></form></section>
           <template v-else>
             <section><h3>回传进度</h3><div class="contract-detail-timeline contract-signing-timeline"><div class="done"><i>1</i><span><strong>合同寄出</strong><small>{{ formatDate(selectedSigningRecord.mailed_at) }}<br />{{ selectedSigningRecord.courier_number }}</small></span></div><div :class="selectedSigningRecord.customer_received_at ? 'done' : 'active'"><i>2</i><span><strong>客户签收</strong><small>{{ selectedSigningRecord.customer_received_at ? formatDateTime(selectedSigningRecord.customer_received_at) : '等待确认' }}</small></span></div><div :class="selectedSigningRecord.returned_at ? 'done' : selectedSigningRecord.customer_received_at ? 'active' : ''"><i>3</i><span><strong>合同回传</strong><small>{{ selectedSigningRecord.returned_at ? formatDateTime(selectedSigningRecord.returned_at) : '等待回传 PDF' }}</small></span></div><div :class="selectedSigningRecord.status === 'completed' ? 'done' : selectedSigningRecord.status === 'pending_review' ? 'active' : ''"><i>4</i><span><strong>人工核验</strong><small>{{ selectedSigningRecord.confirmed_at ? formatDateTime(selectedSigningRecord.confirmed_at) : '核验印章与签名' }}</small></span></div></div></section>
-            <section><h3>寄送与催办记录</h3><dl><div><dt>快递单号</dt><dd>{{ selectedSigningRecord.courier_number || '—' }}</dd></div><div><dt>邮寄日期</dt><dd>{{ formatDate(selectedSigningRecord.mailed_at) }}</dd></div><div><dt>收件人</dt><dd>{{ selectedSigningRecord.recipient_name || '—' }}</dd></div><div><dt>收件地址</dt><dd>{{ selectedSigningRecord.recipient_address || '—' }}</dd></div><div><dt>催办次数</dt><dd>{{ selectedSigningRecord.reminder_count || 0 }} 次</dd></div><div><dt>最近催办</dt><dd>{{ formatDateTime(selectedSigningRecord.last_reminded_at) }}</dd></div></dl><div v-if="selectedSigningRecord.status === 'in_return' && can('contract.signing.manage')" class="contract-signing-operations"><button v-if="!selectedSigningRecord.customer_received_at" class="contract-button secondary" type="button" :disabled="signingOperationBusy" @click="confirmCustomerReceived">确认客户已签收</button><button class="contract-button secondary" type="button" :disabled="signingOperationBusy" @click="sendSigningReminder">记录催办</button><label v-if="can('contract.stamped_pdf.upload')" class="contract-button primary">{{ stampedUploadBusyID ? '上传中…' : '上传回传 PDF' }}<input type="file" accept="application/pdf,.pdf" :disabled="Boolean(stampedUploadBusyID)" hidden @change="uploadStampedContract(selectedSigningRecord.contract, $event)" /></label></div></section>
+            <section><h3>寄送与催办记录</h3><dl><div><dt>快递单号</dt><dd>{{ selectedSigningRecord.courier_number || '—' }}</dd></div><div><dt>邮寄日期</dt><dd>{{ formatDate(selectedSigningRecord.mailed_at) }}</dd></div><div><dt>收件人</dt><dd>{{ selectedSigningRecord.recipient_name || '—' }}</dd></div><div><dt>收件电话</dt><dd>{{ selectedSigningRecord.recipient_phone || '—' }}</dd></div><div><dt>收件地址</dt><dd>{{ selectedSigningRecord.recipient_address || '—' }}</dd></div><div><dt>催办次数</dt><dd>{{ selectedSigningRecord.reminder_count || 0 }} 次</dd></div><div><dt>最近催办</dt><dd>{{ formatDateTime(selectedSigningRecord.last_reminded_at) }}</dd></div></dl><div v-if="selectedSigningRecord.status === 'in_return' && can('contract.signing.manage')" class="contract-signing-operations"><button v-if="!selectedSigningRecord.customer_received_at" class="contract-button secondary" type="button" :disabled="signingOperationBusy" @click="confirmCustomerReceived">确认客户已签收</button><button class="contract-button secondary" type="button" :disabled="signingOperationBusy" @click="sendSigningReminder">记录催办</button><label v-if="can('contract.stamped_pdf.upload')" class="contract-button primary">{{ stampedUploadBusyID ? '上传中…' : '上传回传 PDF' }}<input type="file" accept="application/pdf,.pdf" :disabled="Boolean(stampedUploadBusyID)" hidden @change="uploadStampedContract(selectedSigningRecord.contract, $event)" /></label></div></section>
             <section v-if="selectedSigningRecord.status === 'pending_review'"><h3>回传合同人工核验</h3><p class="contract-approval-summary">系统不自动判定合同内容。请合同专员打开回传 PDF，核对客户印章、签名及实际签署日期后确认。</p><form class="contract-signing-review" @submit.prevent="confirmSigningRecord"><label class="contract-check-label"><input v-model="signingConfirmationForm.seal_verified" type="checkbox" /><span>已核验客户印章完整有效</span></label><label class="contract-check-label"><input v-model="signingConfirmationForm.signature_verified" type="checkbox" /><span>已核验签名完整有效</span></label><label><span>实际签署日期</span><input v-model="signingConfirmationForm.signed_at" required type="date" /></label><button v-if="can('contract.signing.manage')" class="contract-button primary" type="submit" :disabled="signingOperationBusy || !signingConfirmationForm.seal_verified || !signingConfirmationForm.signature_verified || !signingConfirmationForm.signed_at">{{ signingOperationBusy ? '正在确认…' : '确认核验并完成签署' }}</button></form></section>
             <section v-else-if="selectedSigningRecord.status === 'completed'"><h3>签署结果</h3><dl><div><dt>签署日期</dt><dd>{{ formatDate(selectedSigningRecord.signed_at) }}</dd></div><div><dt>完成核验时间</dt><dd>{{ formatDateTime(selectedSigningRecord.confirmed_at) }}</dd></div><div><dt>客户印章</dt><dd>{{ selectedSigningRecord.seal_verified ? '已核验' : '未核验' }}</dd></div><div><dt>客户签名</dt><dd>{{ selectedSigningRecord.signature_verified ? '已核验' : '未核验' }}</dd></div></dl></section>
           </template>

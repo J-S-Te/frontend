@@ -23,6 +23,7 @@ import { customerAPIParams, customerFiltersFromQuery, customerFiltersToQuery } f
 import { presaleAPIParams, presaleStateFromQuery, presaleStateToQuery } from '../presaleQuery.js'
 import { createPresaleMutationRetryState } from '../presaleMutationRetry.js'
 import { closeSubsystemTabOrFallback } from '@/modules/shared/utils/returnToPortal'
+import { isSafeOpenTarget } from '@/modules/platform/login-targets/utils/targetUri.js'
 import {
   changeOpportunityStage, completeOpportunityTerminalTodo, createOpportunity, createOpportunityFollowup,
   getOpportunity, getOpportunityBoard, getOpportunityExternalStatus, getOpportunityStageHistory, listOpportunities, listOpportunityFollowups,
@@ -1732,6 +1733,13 @@ async function launchOpportunityExternal(type) {
     const result = type === '报价' ? await createQuotationLaunch(opportunityID) : await createBidLaunch(opportunityID)
     const target = new URL(result.launch_url)
     target.searchParams.set('context', result.context)
+    // SEC-X2：launch_url 由服务端签发，但打开前仍须过 scheme 白名单（复用
+    // login-targets 的 isValidTargetUri + 同源 http(s) 收敛），拦截 javascript:/data: 等
+    // 会以本页面源执行的伪 URL；拒绝时给出明确业务错误而不是静默失败。
+    if (!isSafeOpenTarget(target.toString(), window.location.origin)) {
+      opportunityLaunchError.value = '调起地址未通过安全校验，已阻止打开。'
+      return
+    }
     window.open(target.toString(), '_blank', 'noopener,noreferrer')
   } catch (value) {
     opportunityLaunchError.value = value?.code === 'INTEGRATION_QB_LAUNCH_NOT_CONFIGURED' ? '报价/投标调起尚未配置。' : (value?.message || '报价/投标调起失败。')

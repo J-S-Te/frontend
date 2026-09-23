@@ -51,7 +51,9 @@ async function submit() {
     await changeOwnPassword({ currentPassword: currentPassword.value, newPassword: newPassword.value })
     window.location.assign(loginURLAfterPasswordChange())
   } catch (value) {
-    error.value = `${value.message || '密码修改失败，请稍后重试。'}${value.traceId ? `（追踪号：${value.traceId}）` : ''}`
+    // SEC-X4：改密页与登录页同属认证流程界面，只展示经 userSafeErrorMessage 过滤的
+    // 本地化文案；追踪号等排障信息保留在错误对象与服务端日志中，不上屏。
+    error.value = value.message || '密码修改失败，请稍后重试。'
   } finally {
     submitting.value = false
   }
