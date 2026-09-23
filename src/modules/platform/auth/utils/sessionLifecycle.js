@@ -1,5 +1,6 @@
 // 与 auth.js 互相调用的生命周期协调器使用相对导入，避免 Node 测试环境依赖 Vite 别名。
 import { AuthError, logoutCurrentSession, recordSessionActivity, refreshCurrentSession } from '../api/auth.js'
+import { clearRememberedAccount } from './rememberedAccount.js'
 
 const SESSION_EVENT = 'platform-auth:session-ended'
 const SESSION_CHANNEL = 'basic-platform-auth'
@@ -21,6 +22,10 @@ function normalizeTimeout(value) {
 
 function notifySessionEnded(reason = 'logout') {
   if (!browserAvailable()) return
+  // SEC-X3：会话终结（显式登出/空闲超时/服务端撤销/跨标签页广播）是“记住的账号”
+  // 必须清除的统一漏斗——localStorage 无过期时间，登出后残留的明文账号在共享设备上
+  // 属于信息泄露。放在这里可同时覆盖本标签页事件与 BroadcastChannel 转发。
+  clearRememberedAccount()
   window.dispatchEvent(new CustomEvent(SESSION_EVENT, { detail: { reason } }))
 }
 

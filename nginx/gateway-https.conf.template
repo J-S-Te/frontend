@@ -17,7 +17,12 @@ server {
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_session_cache shared:platform_tls:10m;
     ssl_session_timeout 1d;
-    add_header Strict-Transport-Security "max-age=300" always;
+    # SEC-N9：HSTS 从 300 秒（5 分钟，形同虚设）提升为 1 年并覆盖子域。
+    # 启用前提（本模板已满足）：HSTS 只在 443 server 发出，HTTP 入口只做 308 跳转；
+    # includeSubDomains 要求 PUBLIC_PLATFORM_HOST 及其所有子域都稳定提供 HTTPS
+    # （同模板内的 SSO 主机已是 443）。若未来新增子域无法保证 HTTPS，
+    # 必须去掉 includeSubDomains，否则该子域将被浏览器强制 HTTPS。
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 
     location /file-gateway/api/v2/ {
         proxy_http_version 1.1;
@@ -69,7 +74,8 @@ server {
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_session_cache shared:sso_tls:10m;
     ssl_session_timeout 1d;
-    add_header Strict-Transport-Security "max-age=300" always;
+    # SEC-N9：与平台 443 入口一致，HSTS 1 年 + 子域（SSO 自身即 HTTPS，前提成立）。
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 
     location / {
         proxy_http_version 1.1;

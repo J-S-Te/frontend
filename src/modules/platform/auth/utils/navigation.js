@@ -50,6 +50,10 @@ export function resolveServerApprovedRedirect(candidate, origin = window.locatio
     if (target.protocol !== 'https:') {
       return DEFAULT_REDIRECT_PATH
     }
+    // SEC-X7：跨源回跳仅校验了 scheme（信任服务端登录目标注册表的登记结果）。
+    // 记录告警以便在注册表被误配/污染时，从浏览器端审计日志发现"登录后跳到非本站点"
+    // 的行为；如需进一步收紧，可在注册表侧维护允许的跨源域白名单后再改为直接拒绝。
+    console.warn('[security] 登录回跳解析为跨源 HTTPS 目标（仅校验 scheme，请与登录目标注册表核对）：', target.href)
     return target.href
   } catch {
     return DEFAULT_REDIRECT_PATH

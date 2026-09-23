@@ -2,10 +2,15 @@
 import { ref } from 'vue'
 import { loginWithPassword } from '@/modules/platform/auth/api/auth'
 import { resolveSameOriginRedirect, resolveServerApprovedRedirect } from '@/modules/platform/auth/utils/navigation'
+import { clearRememberedAccount, readRememberedAccount, writeRememberedAccount } from '@/modules/platform/auth/utils/rememberedAccount'
 
-const STORAGE_KEY = 'basic-platform.remembered-account'
 const LOGIN_SUCCESS_URL = import.meta.env.VITE_LOGIN_SUCCESS_URL || '/'
-const account = ref(localStorage.getItem(STORAGE_KEY) || '')
+// SEC-X3：被会话失效（401/超时/撤销，守卫统一带 reason=session-ended）带回登录页时，
+// 先清除再读取，本页与后续访问都不再回填上次账号；正常进入登录页仍保留回填体验。
+if (new URLSearchParams(window.location.search).get('reason') === 'session-ended') {
+  clearRememberedAccount()
+}
+const account = ref(readRememberedAccount())
 const password = ref('')
 const rememberAccount = ref(Boolean(account.value))
 const passwordVisible = ref(false)
@@ -104,9 +109,9 @@ async function performPasswordLogin(replaceExistingSession = false) {
     const data = result?.data || result
 
     if (rememberAccount.value) {
-      localStorage.setItem(STORAGE_KEY, account.value.trim())
+      writeRememberedAccount(account.value)
     } else {
-      localStorage.removeItem(STORAGE_KEY)
+      clearRememberedAccount()
     }
 
     formSuccess.value = replaceExistingSession
@@ -128,9 +133,11 @@ async function performPasswordLogin(replaceExistingSession = false) {
     const allowApprovedCrossOrigin = !data?.must_change_password && !oidcReturnTo
     window.setTimeout(() => redirectTopLevel(nextUrl, allowApprovedCrossOrigin), 450)
   } catch (error) {
-    const traceText = error.traceId ? `（追踪号：${error.traceId}）` : ''
     concurrentSessionDetected.value = error.code === 'AUTH_CONCURRENT_SESSION'
-    formError.value = `${error.message || '登录失败，请稍后重试。'}${traceText}`
+    // SEC-X4：登录页是未登录面，只展示经 userSafeErrorMessage 过滤的本地化文案；
+    // traceId / details.detail / next_action 等排障信息绝不拼进展示文本
+    //（message 已在 auth.js 请求管道里过滤）。
+    formError.value = error.message || '登录失败，请稍后重试。'
   } finally {
     submitting.value = false
   }

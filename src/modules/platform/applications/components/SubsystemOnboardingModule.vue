@@ -224,6 +224,20 @@ function productionTargetKey(target) {
   return `${target?.application_code || ''}/${target?.environment || ''}`
 }
 
+// isManagedRuntimeTarget 判断某个环境是否能交给子系统部署 Agent。基础平台应用自身由平台
+// 发布流程管理；生产模式下只有 subsystems.d 审核清单内的应用/环境允许部署，否则后端会
+// 因为缺少清单校验和而拒绝，页面不应主动提供这个必然失败的操作。
+function isManagedRuntimeTarget(environment) {
+  const application = selectedApplication.value
+  if (!application) return false
+  const code = String(application.code || '').trim().toLowerCase()
+  if (!code || code === 'platform' || code === 'basic_platform') return false
+  if (!isProductionProvisioning.value) return true
+  const environmentCode = String(environment?.environment || '').trim().toLowerCase()
+  return productionTargets.value.some((target) => String(target.application_code || '').toLowerCase() === code
+    && String(target.environment || '').toLowerCase() === environmentCode)
+}
+
 function applyProductionProvisioningPreset(preferredTarget = null) {
   const defaults = provisioningCapabilities.value?.defaults || {}
   const preferredCode = preferredTarget?.application_code || defaults.application_code
@@ -722,7 +736,7 @@ function openPurgeEnvironment(environment) {
 }
 
 function openRuntimeAdoption(environment) {
-  if (!environment || environmentStatus(environment) !== 'UNMANAGED' || !canManageRuntime.value || saving.value) return
+  if (!environment || environmentStatus(environment) !== 'UNMANAGED' || !canManageRuntime.value || !isManagedRuntimeTarget(environment) || saving.value) return
   pendingRuntimeAdoption.value = environment
   clearError()
 }
@@ -730,7 +744,7 @@ function openRuntimeAdoption(environment) {
 async function confirmRuntimeAdoption() {
   const application = selectedApplication.value
   const environment = pendingRuntimeAdoption.value
-  if (!application || !environment || environmentStatus(environment) !== 'UNMANAGED' || !canManageRuntime.value || saving.value) return
+  if (!application || !environment || environmentStatus(environment) !== 'UNMANAGED' || !canManageRuntime.value || !isManagedRuntimeTarget(environment) || saving.value) return
   saving.value = true
   clearError()
   try {
@@ -784,7 +798,7 @@ async function confirmDeleteEnvironment() {
   const application = selectedApplication.value
   const environment = pendingDeleteEnvironment.value
   const confirmationCode = `${application?.code || ''}/${environment?.environment || ''}`
-  if (!application || !environment || environmentDeleteConfirmation.value.trim() !== confirmationCode || !canDeleteEnvironment.value || !canManageRuntime.value || saving.value) return
+  if (!application || !environment || environmentDeleteConfirmation.value.trim() !== confirmationCode || !canDeleteEnvironment.value || !canManageRuntime.value || !isManagedRuntimeTarget(environment) || saving.value) return
   saving.value = true
   clearError()
   try {
@@ -811,7 +825,7 @@ async function confirmDeleteEnvironment() {
 
 async function reapplyEnvironment(environment, retry = false) {
   const application = selectedApplication.value
-  if (!application || !canManageRuntime.value || saving.value) return
+  if (!application || !canManageRuntime.value || !isManagedRuntimeTarget(environment) || saving.value) return
   saving.value = true
   clearError()
   try {
@@ -1199,8 +1213,9 @@ onMounted(() => {
               <section class="application-registry-zone runtime">
                 <header class="application-registry-zone-head"><h5>运行时与部署</h5></header>
                 <p v-if="environmentNextAction(environment)" class="application-registry-environment-guidance"><strong>处理建议：</strong>{{ environmentNextAction(environment) }}</p>
+                <p v-if="isProductionProvisioning && !isManagedRuntimeTarget(environment)" class="application-registry-environment-guidance"><strong>说明：</strong>该应用环境不在服务器 subsystems.d 审核清单中，不能通过子系统部署 Agent 更新运行时；基础平台应用请使用平台发布流程。</p>
                 <p v-if="environmentStatusError(environment)" class="application-registry-environment-guidance is-error"><strong>状态读取失败：</strong>{{ environmentStatusError(environment).message }}<span v-if="environmentStatusError(environment).nextAction">{{ environmentStatusError(environment).nextAction }}</span><button class="console-button ghost small" type="button" :disabled="environmentsLoading" @click.stop="loadEnvironments">重试查询</button></p>
-                <div class="application-registry-environment-actions"><button v-if="canUpdateEnvironment" class="console-button ghost small" type="button" @click.stop="openEnvironmentEditor(environment)"><ConsoleIcon name="settings" />设置</button><button v-if="canManageRuntime && environmentStatus(environment) === 'UNMANAGED'" class="console-button primary small" type="button" :disabled="saving" @click.stop="openRuntimeAdoption(environment)"><ConsoleIcon name="reset" />接管运行时</button><button v-if="canRetryRuntime && environmentStatus(environment) === 'PROVISION_FAILED'" class="console-button ghost small" type="button" :disabled="saving" @click.stop="reapplyEnvironment(environment, true)"><ConsoleIcon name="reset" />重试</button><button v-if="canManageRuntime && environmentStatus(environment) === 'READY'" class="console-button ghost small" type="button" :disabled="saving" @click.stop="reapplyEnvironment(environment)"><ConsoleIcon name="reset" />更新运行时</button><button v-if="canManageRuntime && environmentStatus(environment) === 'OFFBOARDED'" class="console-button primary small" type="button" :disabled="saving" @click.stop="reapplyEnvironment(environment)"><ConsoleIcon name="reset" />重新接入</button><button v-if="canDeleteEnvironment && environment.environment !== 'dev'" class="console-button danger small" type="button" @click.stop="openDeleteEnvironment(environment)"><ConsoleIcon name="close" />删除</button><button v-if="canDeleteEnvironment && environment.environment !== 'dev' && environmentStatus(environment) === 'OFFBOARDED'" class="console-button danger small" type="button" @click.stop="openPurgeEnvironment(environment)"><ConsoleIcon name="close" />永久清理</button></div>
+                <div class="application-registry-environment-actions"><button v-if="canUpdateEnvironment" class="console-button ghost small" type="button" @click.stop="openEnvironmentEditor(environment)"><ConsoleIcon name="settings" />设置</button><button v-if="canManageRuntime && environmentStatus(environment) === 'UNMANAGED' && isManagedRuntimeTarget(environment)" class="console-button primary small" type="button" :disabled="saving" @click.stop="openRuntimeAdoption(environment)"><ConsoleIcon name="reset" />接管运行时</button><button v-if="canRetryRuntime && environmentStatus(environment) === 'PROVISION_FAILED' && isManagedRuntimeTarget(environment)" class="console-button ghost small" type="button" :disabled="saving" @click.stop="reapplyEnvironment(environment, true)"><ConsoleIcon name="reset" />重试</button><button v-if="canManageRuntime && environmentStatus(environment) === 'READY' && isManagedRuntimeTarget(environment)" class="console-button ghost small" type="button" :disabled="saving" @click.stop="reapplyEnvironment(environment)"><ConsoleIcon name="reset" />更新运行时</button><button v-if="canManageRuntime && environmentStatus(environment) === 'OFFBOARDED' && isManagedRuntimeTarget(environment)" class="console-button primary small" type="button" :disabled="saving" @click.stop="reapplyEnvironment(environment)"><ConsoleIcon name="reset" />重新接入</button><button v-if="canDeleteEnvironment && environment.environment !== 'dev' && isManagedRuntimeTarget(environment)" class="console-button danger small" type="button" @click.stop="openDeleteEnvironment(environment)"><ConsoleIcon name="close" />删除</button><button v-if="canDeleteEnvironment && environment.environment !== 'dev' && environmentStatus(environment) === 'OFFBOARDED' && isManagedRuntimeTarget(environment)" class="console-button danger small" type="button" @click.stop="openPurgeEnvironment(environment)"><ConsoleIcon name="close" />永久清理</button></div>
               </section>
 
               <section class="application-registry-zone authentication">

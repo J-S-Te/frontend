@@ -15,6 +15,7 @@ import {
   canAccessPlatformConsole,
   platformConsoleLandingRoute,
 } from '@/modules/platform/auth/utils/platformConsoleAccess'
+import { isSafeOpenTarget } from '@/modules/platform/login-targets/utils/targetUri.js'
 import '@/modules/platform/styles/subsystem-portal.css'
 
 const router = useRouter()
@@ -265,6 +266,15 @@ async function logoutApplication() {
 function openSubsystemTarget(targetURL) {
   const target = String(targetURL || '').trim()
   if (!target) return false
+
+  // SEC-X2：target 可能来自服务端下发的 publicURL/authenticationURL，打开前必须通过
+  // scheme 白名单（复用 login-targets 的 isValidTargetUri + 同源 http(s) 收敛），
+  // 否则 javascript:/data: 会以门户源在下方 location.replace/assign 中执行。
+  if (!isSafeOpenTarget(target, window.location.origin)) {
+    console.warn('[security] 已拦截未通过白名单的子系统跳转地址：', target)
+    showToast('该入口地址未通过安全校验，已阻止打开。', 'deny')
+    return false
+  }
 
   let opened = null
   try {

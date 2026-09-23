@@ -41,6 +41,25 @@ test('contract specialists receive newly approved contracts through realtime sig
   assert.match(source, /stopSigningRealtime\(\)/)
 })
 
+// C-ii（task-62）：寄送保存的必填 recipient_phone 必须进入表单与 payload，
+// 且掩码回显只作提示、不回填输入框。
+test('shipment form carries recipient_phone and validates it before submit [C-ii]', () => {
+  // 表单状态与回填都携带必填键（两处 recipient_phone: ''：初始状态 + 打开详情回填）
+  assert.match(source, /signingShipmentForm = ref\(\{[^}]*recipient_phone: ''/)
+  assert.match(source, /recipient_phone: '',/)
+  // 掩码不回填：回填处保持空串，帮助文案说明掩码不会被提交
+  assert.match(source, /掩码不会被提交/)
+  // 模板输入与后端 JSON 键同名
+  assert.match(source, /v-model\.trim="signingShipmentForm\.recipient_phone"/)
+  assert.match(source, /placeholder="请输入收件人手机号（必填）"/)
+  assert.match(source, /maxlength="20"/)
+  // 提交前置本地校验，payload 直接携带表单（含 recipient_phone）
+  assert.match(source, /validateRecipientPhoneNumber\(signingShipmentForm\.value\.recipient_phone\)/)
+  assert.match(source, /saveSigningShipment\(contractID, signingShipmentForm\.value\)/)
+  // 详情页按掩码原样展示读接口返回值
+  assert.match(source, /\{\{ selectedSigningRecord\.recipient_phone \|\| '—' \}\}/)
+})
+
 test('realtime signing refresh does not overwrite shipment or verification forms being edited', () => {
   assert.match(source, /function applySigningRecord\(record, \{ preserveForms = false \} = \{\}\)/)
   assert.match(source, /if \(preserveForms\) return/)

@@ -16,7 +16,15 @@ const reason = computed(() => Object.values(SUBSYSTEM_ACCESS_REASON).includes(ro
 const presentation = computed(() => SUBSYSTEM_ACCESS_PRESENTATION[reason.value] || SUBSYSTEM_ACCESS_PRESENTATION.UNKNOWN)
 const fromPath = computed(() => {
   const value = typeof route.query.from === 'string' ? route.query.from : ''
-  return value.startsWith('/') && !value.startsWith('/access-error') ? value : ''
+  // SEC-X8：与 ForbiddenView 同规则——拒绝 //host（协议相对）、含 ::// 的绝对地址
+  // 与反斜杠伪装（/\host 浏览器按 //host 解析），from 只能是单斜杠开头的站内路径，
+  // 后续 retry()/loginURL() 才不会被用来导航到站外。
+  const isSameSitePath = value.startsWith('/')
+    && !value.startsWith('//')
+    && !value.includes('://')
+    && !value.includes('\\')
+    && !value.startsWith('/access-error')
+  return isSameSitePath ? value : ''
 })
 const errorCode = computed(() => typeof route.query.code === 'string' ? route.query.code : '')
 const errorStage = computed(() => typeof route.query.stage === 'string' ? route.query.stage : '')

@@ -16,6 +16,15 @@ test('CALLBACK_FAILED 走重新登录而不是重试', () => {
   assert.match(source, /SUBSYSTEM_ACCESS_REASON\.CALLBACK_FAILED/)
 })
 
+// SEC-X8：from 必须拒绝 //host、含 :// 的绝对地址与反斜杠伪装，retry()/loginURL()
+// 才不会被查询参数导航到站外。
+test('from 参数拒绝 //host、:// 绝对地址与反斜杠 [SEC-X8 回归]', () => {
+  assert.match(source, /value\.startsWith\('\/'\)/)
+  assert.match(source, /!value\.startsWith\('\/\/'\)/)
+  assert.match(source, /!value\.includes\('\:\/\/'\)/)
+  assert.match(source, /!value\.includes\('\\\\'\)/)
+})
+
 test('诊断面板渲染 stage / code / request_id', () => {
   assert.match(source, /errorStage/)
   assert.match(source, /query\.stage/)

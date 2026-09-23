@@ -79,7 +79,7 @@ import {
 import { loadAllCatalogPages } from '@/modules/platform/iam/utils/paginatedCatalog'
 import { buildUserAuthorizationOverview } from '@/modules/platform/iam/utils/userAuthorizationOverview'
 import { isCurrentAuthorizationRequest } from '@/modules/platform/iam/utils/requestVersion'
-import { copyTextToClipboard } from '@/modules/shared/utils/clipboard'
+import { copyTextToClipboard, scheduleSensitiveClipboardClear } from '@/modules/shared/utils/clipboard'
 import {
   hasAnyPermission,
   hasPermission,
@@ -1681,7 +1681,14 @@ async function confirmPasswordReset() {
 async function copyTemporaryPassword() {
   const value = temporaryPassword.value?.value
   if (!value) return
-  await copyText(value, { success: '临时密码已复制，请立即通过安全渠道交付。' })
+  const copied = await copyText(value, { success: '临时密码已复制，请立即通过安全渠道交付。' })
+  if (!copied) return
+  // SEC-X10：临时密码是敏感明文，复制成功后安排延时自动清除剪贴板；
+  // 非安全上下文（HTTP 回退复制）无法在复制之后回写剪贴板，降级为手动覆盖提示。
+  const { supported } = scheduleSensitiveClipboardClear(value)
+  if (!supported) {
+    emitToast('当前浏览器环境无法自动清除剪贴板，交付后请手动覆盖剪贴板内容。')
+  }
 }
 
 // 临时密码揭示状态：默认遮罩，避免屏幕共享/截屏/拼写补全等渠道意外泄露。

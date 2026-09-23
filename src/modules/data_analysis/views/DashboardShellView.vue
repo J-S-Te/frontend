@@ -156,6 +156,18 @@ async function loadDashboard(code) {
     const { token } = await getEmbedToken(code)
     if (requestVersion !== iframeRequestVersion || section.value !== code) return
     // 令牌单次消费：仅本次 iframe 加载使用
+    //
+    // SEC-X9（书面论证，保持现状）：一次性 embed token 置于 iframe URL 路径，权衡后可接受：
+    // 1) 单次消费——token 由 GET /embed/{code} 签发、/embed-proxy 端点一次性核销，
+    //    即使 URL 被浏览器历史、日志或 Referer 截获也无法重放；
+    // 2) no-referrer——下方 iframe 固定 referrerpolicy="no-referrer"，导航与子资源请求
+    //    都不携带来源 URL；
+    // 3) sandbox——iframe 仅 allow-scripts allow-forms allow-popups，无
+    //    allow-same-origin（被嵌内容视为不透明源，拿不到同源 Cookie）也无
+    //    allow-top-navigation（无法反向导航宿主页）；
+    // 4) 无法改 header/POST——iframe 文档加载是纯 GET 导航，浏览器不会为 <iframe src>
+    //    附加自定义请求头；迁移需要后端把 /embed-proxy 改为会话或一次性 Cookie 鉴权，
+    //    属后端写入范围（不在本任务 scope）。后端支持前维持 URL 传 token + 上述三层缓解。
     iframeSrc.value = `/data_analysis/api/v1/embed-proxy/${encodeURIComponent(token)}`
   } catch (err) {
     if (requestVersion !== iframeRequestVersion) return

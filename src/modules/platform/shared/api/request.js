@@ -10,6 +10,25 @@ const API_BASE_URL = (import.meta.env?.VITE_API_BASE_URL || '/api/v1').replace(/
 
 export { API_BASE_URL }
 
+/**
+ * userSafeErrorMessage 过滤可能泄露接口地址、追踪标识或服务端实现细节的错误信息。
+ *
+ * SEC-X4：复用 contract 模块 userSafeErrorMessage 的做法。未登录页与通用错误提示
+ * 只允许展示已本地化的安全文案；details.detail、next_action、trace/request_id 等
+ * 结构化排障字段仍原样保留在 error 对象上，供权限门控内的管理台与日志检索使用，
+ * 但绝不进入面向用户的 message 文本。
+ *
+ * @param {unknown} message 待筛选的错误信息。
+ * @returns {string} 可安全展示的文本；不安全或空文本返回空字符串。
+ */
+export function userSafeErrorMessage(message) {
+  const text = typeof message === 'string' ? message.trim() : ''
+  if (!text) return ''
+  // sql 用子串匹配（MySQL/SQLSTATE 等都命中）；其余词按整词匹配以减少误杀。
+  const exposesImplementation = /(https?:\/\/|\/api\/|next[_ -]?action|sql|\b(?:http|json|uuid|trace[_ -]?id|request[_ -]?id|stack|panic)\b)/i.test(text)
+  return exposesImplementation ? '' : text
+}
+
 /** 解析响应体：优先 JSON，非 JSON 退化为 { message: text }。 */
 export async function readBody(response) {
   const contentType = response.headers.get('content-type') || ''
@@ -82,7 +101,9 @@ export function createRequest({ ErrorClass, networkMessage, failureMessage, subs
     }
     const body = await readBody(response)
     if (!response.ok) {
-      const error = new ErrorClass(body?.message || body?.msg || failureMessage, {
+      // SEC-X4：message 是会被各页面直接展示的文本，必须先过安全过滤；
+      // details/nextAction/traceId 保持结构化字段供已鉴权管理台（权限门控内）展示排障。
+      const error = new ErrorClass(userSafeErrorMessage(body?.message) || userSafeErrorMessage(body?.msg) || failureMessage, {
         status: response.status,
         code: body?.code,
         traceId: body?.request_id || body?.trace_id || body?.traceId,
