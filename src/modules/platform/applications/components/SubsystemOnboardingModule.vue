@@ -30,6 +30,8 @@ import {
 } from '@/modules/platform/applications/api/applications'
 import { hasPermission } from '@/modules/platform/auth/utils/principal'
 import { applySubsystemOnboardingPreset, normalizeIntegratedSubsystemOnboarding, subsystemOnboardingPreset, validateIntegratedSubsystemOnboarding } from '@/modules/platform/applications/utils/subsystemPresets'
+import { visibleSubsystemEnvironments } from '@/modules/platform/applications/utils/subsystemEnvironmentVisibility'
+import { visibleSubsystemApplications } from '@/modules/platform/applications/utils/subsystemApplicationVisibility'
 
 const props = defineProps({
   canOnboard: { type: Boolean, default: false },
@@ -74,11 +76,14 @@ const purgeApprovalId = ref('')
 const purgeRetentionConfirmed = ref(false)
 const purgeOffboardedConfirmed = ref(false)
 const provisioningCapabilities = ref(null)
+const provisioningCapabilitiesResolved = ref(false)
+const provisioningCapabilitiesAvailable = ref(false)
 const applicationsLoaded = ref(false)
 const productionTargetInventoryReady = ref(false)
 const productionTargetInventoryLoading = ref(false)
 const productionTargetInventoryError = ref('')
 const registeredProductionTargetKeys = ref(new Set())
+const registeredProductionApplicationCodes = ref(new Set())
 const discoveredCandidates = ref([])
 const discoveryLoading = ref(false)
 
@@ -112,21 +117,28 @@ const canRetryRuntime = computed(() => canManageRuntime.value && hasPermission('
 const authenticationProviders = computed(() => Array.isArray(provisioningCapabilities.value?.authentication_providers)
   ? provisioningCapabilities.value.authentication_providers : [])
 
+const isProductionProvisioning = computed(() => provisioningCapabilities.value?.deployment_mode === 'production')
+const supportedApplicationCodes = computed(() => {
+  const supported = provisioningCapabilities.value?.supported_application_codes
+  return Array.isArray(supported) ? supported : []
+})
+const catalogApplications = computed(() => visibleSubsystemApplications(applications.value, {
+  capabilitiesResolved: provisioningCapabilitiesResolved.value,
+  capabilitiesAvailable: provisioningCapabilitiesAvailable.value,
+  production: isProductionProvisioning.value,
+  supportedApplicationCodes: supportedApplicationCodes.value,
+  registeredApplicationCodes: [...registeredProductionApplicationCodes.value],
+}))
 const filteredApplications = computed(() => {
   const keyword = applicationKeyword.value.trim().toLowerCase()
-  return applications.value.filter((item) => {
+  return catalogApplications.value.filter((item) => {
     if (applicationStatus.value && item.status !== applicationStatus.value) return false
     if (!keyword) return true
     return [item.code, item.name, item.description].some((value) => String(value || '').toLowerCase().includes(keyword))
   })
 })
-const selectedApplication = computed(() => applications.value.find((item) => item.application_id === selectedApplicationId.value) || null)
-const isProductionProvisioning = computed(() => provisioningCapabilities.value?.deployment_mode === 'production')
+const selectedApplication = computed(() => catalogApplications.value.find((item) => item.application_id === selectedApplicationId.value) || null)
 const automationUnavailable = computed(() => provisioningCapabilities.value?.automation_enabled === false)
-const supportedApplicationCodes = computed(() => {
-  const supported = provisioningCapabilities.value?.supported_application_codes
-  return Array.isArray(supported) ? supported : []
-})
 const productionTargets = computed(() => {
   const targets = provisioningCapabilities.value?.targets
   if (!Array.isArray(targets)) return []
@@ -378,6 +390,13 @@ function selectApplication(application) {
   showOnboard.value = false
 }
 
+function reconcileSelectedApplication(preferredApplicationId = selectedApplicationId.value) {
+  const items = catalogApplications.value
+  selectedApplicationId.value = items.some((item) => item.application_id === preferredApplicationId)
+    ? preferredApplicationId
+    : items[0]?.application_id || ''
+}
+
 async function loadApplications(preferredApplicationId = selectedApplicationId.value) {
   if (!canReadApplications.value) return
   loading.value = true
@@ -389,10 +408,7 @@ async function loadApplications(preferredApplicationId = selectedApplicationId.v
     const data = await listApplications({ page: 1, pageSize: 100, status: '' })
     const items = Array.isArray(data?.items) ? data.items : []
     applications.value = items
-    const nextId = items.some((item) => item.application_id === preferredApplicationId)
-      ? preferredApplicationId
-      : items[0]?.application_id || ''
-    selectedApplicationId.value = nextId
+    reconcileSelectedApplication(preferredApplicationId)
     applicationsLoaded.value = true
     await refreshProductionTargetInventory()
   } catch (error) {
@@ -414,6 +430,7 @@ async function refreshProductionTargetInventory() {
   productionTargetInventoryReady.value = false
   productionTargetInventoryError.value = ''
   registeredProductionTargetKeys.value = new Set()
+  registeredProductionApplicationCodes.value = new Set()
   if (!canReadEnvironments.value) {
     productionTargetInventoryError.value = '当前账号没有读取应用环境的权限，无法确认服务器接入目标是否已使用。'
     productionTargetInventoryLoading.value = false
@@ -422,14 +439,18 @@ async function refreshProductionTargetInventory() {
   try {
     const results = await Promise.allSettled(applications.value.map(async (application) => {
       const data = await listEnvironments({ applicationId: application.application_id, page: 1, pageSize: 100, status: '' })
-      return { application, environments: Array.isArray(data?.items) ? data.items : [] }
+      return { application, environments: visibleSubsystemEnvironments(data?.items) }
     }))
     if (results.some((result) => result.status !== 'fulfilled')) {
       productionTargetInventoryError.value = '暂时无法读取已接入环境，已隐藏服务器接入目标；请刷新后重试。'
       return
     }
     const registered = new Set()
+    const registeredApplications = new Set()
     results.forEach((result) => {
+      if (result.value.environments.length > 0) {
+        registeredApplications.add(String(result.value.application.code || '').trim().toLowerCase())
+      }
       result.value.environments.forEach((environment) => {
         registered.add(productionTargetKey({
           application_code: result.value.application.code,
@@ -438,7 +459,9 @@ async function refreshProductionTargetInventory() {
       })
     })
     registeredProductionTargetKeys.value = registered
+    registeredProductionApplicationCodes.value = registeredApplications
     productionTargetInventoryReady.value = true
+    reconcileSelectedApplication()
   } finally {
     productionTargetInventoryLoading.value = false
   }
@@ -448,14 +471,19 @@ async function loadProvisioningCapabilities() {
   if (!canReadApplications.value) return
   try {
     provisioningCapabilities.value = await getSubsystemCapabilities()
+    provisioningCapabilitiesAvailable.value = true
     if (provisioningCapabilities.value?.deployment_mode === 'production') {
       await refreshProductionTargetInventory()
       if (productionTargetInventoryReady.value) applyProductionProvisioningPreset()
     }
   } catch (error) {
     provisioningCapabilities.value = null
+    provisioningCapabilitiesAvailable.value = false
     productionTargetInventoryReady.value = false
     setError(error, '读取部署 Agent 能力失败；后端仍会执行最终安全校验。')
+  } finally {
+    provisioningCapabilitiesResolved.value = true
+    reconcileSelectedApplication()
   }
 }
 
@@ -482,7 +510,7 @@ async function loadEnvironments() {
 	keycloakProjectionFailures.value = []
   try {
     const data = await listEnvironments({ applicationId: application.application_id, page: 1, pageSize: 100, status: '' })
-    environments.value = Array.isArray(data?.items) ? data.items : []
+    environments.value = visibleSubsystemEnvironments(data?.items)
     selectedEnvironmentId.value = environments.value.some((item) => item.environment_id === selectedEnvironmentId.value)
       ? selectedEnvironmentId.value
       : environments.value[0]?.environment_id || ''
@@ -722,7 +750,33 @@ function openDeleteEnvironment(environment) {
   clearError()
 }
 
+async function offboardEnvironment(environment) {
+  const application = selectedApplication.value
+  const status = environmentStatus(environment)
+  if (!application || !environment || environment.environment === 'dev' || !canManageRuntime.value || !isManagedRuntimeTarget(environment) || saving.value) return
+  if (!['READY', 'PROVISION_FAILED', 'UNMANAGED'].includes(status)) {
+    setError(null, '只有运行中、失败或未接管的非 dev 环境可以执行退役。')
+    return
+  }
+  if (!window.confirm(`确认退役 ${application.code}/${environment.environment}？平台会停止该环境运行时并保留环境登记、配置与审计记录；之后可恢复接入，或另行删除和永久清理。`)) return
+  saving.value = true
+  clearError()
+  try {
+    await teardownSubsystem({ applicationCode: application.code, environment: environment.environment })
+    notify(`环境 ${application.code}/${environment.environment} 已退役；环境登记及保留数据未删除。`)
+    await loadEnvironments()
+  } catch (error) {
+    setError(error, '环境退役失败；平台保留了环境登记，可修复运行时后重试。')
+  } finally {
+    saving.value = false
+  }
+}
+
 function openPurgeEnvironment(environment) {
+  if (selectedApplication.value?.status !== 'RETIRED') {
+    setError(null, '彻底清理前需先退役整个系统；这样可以避免系统仍处于使用状态时销毁环境数据。')
+    return
+  }
   if (environment.environment === 'dev' || environmentStatus(environment) !== 'OFFBOARDED') {
     setError(null, '只有已下线的非 dev 环境才能永久清理。')
     return
@@ -770,7 +824,7 @@ async function confirmPurgeEnvironment() {
   const application = selectedApplication.value
   const environment = pendingPurgeEnvironment.value
   const confirmationCode = `PURGE/${application?.code || ''}/${environment?.environment || ''}`
-  if (!application || !environment || purgeConfirmation.value.trim() !== confirmationCode || !purgeApprovalId.value.trim() || !purgeRetentionConfirmed.value || !purgeOffboardedConfirmed.value || !canDeleteEnvironment.value || saving.value) return
+  if (!application || application.status !== 'RETIRED' || !environment || purgeConfirmation.value.trim() !== confirmationCode || !purgeApprovalId.value.trim() || !purgeRetentionConfirmed.value || !purgeOffboardedConfirmed.value || !canDeleteEnvironment.value || saving.value) return
   saving.value = true
   clearError()
   try {
@@ -1119,6 +1173,7 @@ const onboardingSteps = computed(() => {
 })
 
 watch(selectedApplicationId, () => { loadEnvironments() }, { immediate: true })
+watch(catalogApplications, () => { reconcileSelectedApplication() })
 watch(() => onboardForm.applicationCode, (applicationCode, previousCode) => {
   if (isProductionProvisioning.value) return
   applySubsystemOnboardingPreset(onboardForm, String(previousCode || '').trim().toLowerCase())
@@ -1215,7 +1270,7 @@ onMounted(() => {
                 <p v-if="environmentNextAction(environment)" class="application-registry-environment-guidance"><strong>处理建议：</strong>{{ environmentNextAction(environment) }}</p>
                 <p v-if="isProductionProvisioning && !isManagedRuntimeTarget(environment)" class="application-registry-environment-guidance"><strong>说明：</strong>该应用环境不在服务器 subsystems.d 审核清单中，不能通过子系统部署 Agent 更新运行时；基础平台应用请使用平台发布流程。</p>
                 <p v-if="environmentStatusError(environment)" class="application-registry-environment-guidance is-error"><strong>状态读取失败：</strong>{{ environmentStatusError(environment).message }}<span v-if="environmentStatusError(environment).nextAction">{{ environmentStatusError(environment).nextAction }}</span><button class="console-button ghost small" type="button" :disabled="environmentsLoading" @click.stop="loadEnvironments">重试查询</button></p>
-                <div class="application-registry-environment-actions"><button v-if="canUpdateEnvironment" class="console-button ghost small" type="button" @click.stop="openEnvironmentEditor(environment)"><ConsoleIcon name="settings" />设置</button><button v-if="canManageRuntime && environmentStatus(environment) === 'UNMANAGED' && isManagedRuntimeTarget(environment)" class="console-button primary small" type="button" :disabled="saving" @click.stop="openRuntimeAdoption(environment)"><ConsoleIcon name="reset" />接管运行时</button><button v-if="canRetryRuntime && environmentStatus(environment) === 'PROVISION_FAILED' && isManagedRuntimeTarget(environment)" class="console-button ghost small" type="button" :disabled="saving" @click.stop="reapplyEnvironment(environment, true)"><ConsoleIcon name="reset" />重试</button><button v-if="canManageRuntime && environmentStatus(environment) === 'READY' && isManagedRuntimeTarget(environment)" class="console-button ghost small" type="button" :disabled="saving" @click.stop="reapplyEnvironment(environment)"><ConsoleIcon name="reset" />更新运行时</button><button v-if="canManageRuntime && environmentStatus(environment) === 'OFFBOARDED' && isManagedRuntimeTarget(environment)" class="console-button primary small" type="button" :disabled="saving" @click.stop="reapplyEnvironment(environment)"><ConsoleIcon name="reset" />重新接入</button><button v-if="canDeleteEnvironment && environment.environment !== 'dev' && isManagedRuntimeTarget(environment)" class="console-button danger small" type="button" @click.stop="openDeleteEnvironment(environment)"><ConsoleIcon name="close" />删除</button><button v-if="canDeleteEnvironment && environment.environment !== 'dev' && environmentStatus(environment) === 'OFFBOARDED' && isManagedRuntimeTarget(environment)" class="console-button danger small" type="button" @click.stop="openPurgeEnvironment(environment)"><ConsoleIcon name="close" />永久清理</button></div>
+                <div class="application-registry-environment-actions"><button v-if="canUpdateEnvironment" class="console-button ghost small" type="button" @click.stop="openEnvironmentEditor(environment)"><ConsoleIcon name="settings" />设置</button><button v-if="canManageRuntime && environmentStatus(environment) === 'UNMANAGED' && isManagedRuntimeTarget(environment)" class="console-button primary small" type="button" :disabled="saving" @click.stop="openRuntimeAdoption(environment)"><ConsoleIcon name="reset" />接管运行时</button><button v-if="canRetryRuntime && environmentStatus(environment) === 'PROVISION_FAILED' && isManagedRuntimeTarget(environment)" class="console-button ghost small" type="button" :disabled="saving" @click.stop="reapplyEnvironment(environment, true)"><ConsoleIcon name="reset" />重试</button><button v-if="canManageRuntime && environmentStatus(environment) === 'READY' && isManagedRuntimeTarget(environment)" class="console-button ghost small" type="button" :disabled="saving" @click.stop="reapplyEnvironment(environment)"><ConsoleIcon name="reset" />更新运行时</button><button v-if="canManageRuntime && ['READY', 'PROVISION_FAILED', 'UNMANAGED'].includes(environmentStatus(environment)) && environment.environment !== 'dev' && isManagedRuntimeTarget(environment)" class="console-button danger small" type="button" :disabled="saving" @click.stop="offboardEnvironment(environment)"><ConsoleIcon name="close" />退役并保留记录</button><button v-if="canManageRuntime && environmentStatus(environment) === 'OFFBOARDED' && isManagedRuntimeTarget(environment)" class="console-button primary small" type="button" :disabled="saving" @click.stop="reapplyEnvironment(environment)"><ConsoleIcon name="reset" />重新接入</button><button v-if="canDeleteEnvironment && environment.environment !== 'dev' && isManagedRuntimeTarget(environment)" class="console-button danger small" type="button" @click.stop="openDeleteEnvironment(environment)"><ConsoleIcon name="close" />删除环境</button><button v-if="canDeleteEnvironment && environment.environment !== 'dev' && environmentStatus(environment) === 'OFFBOARDED' && isManagedRuntimeTarget(environment)" class="console-button danger small" type="button" @click.stop="openPurgeEnvironment(environment)"><ConsoleIcon name="close" />永久清理</button></div>
               </section>
 
               <section class="application-registry-zone authentication">
@@ -1245,7 +1300,7 @@ onMounted(() => {
           <section class="application-registry-switch-gates" aria-label="Keycloak 授权投影告警">
             <strong>授权投影告警与受控重放</strong>
             <p v-if="keycloakOperationsLoading">正在读取 FAILED 投影状态…</p>
-            <p v-else-if="keycloakProjectionAlert?.state === 'ALERT'">{{ keycloakProjectionAlert.summary }}（{{ keycloakProjectionAlert.failed_count }} 条）。FAILED 投影会阻断对应环境切换。</p>
+            <p v-else-if="keycloakProjectionAlert?.state === 'ACTIVE'">{{ keycloakProjectionAlert.summary }}（{{ keycloakProjectionAlert.failed_count }} 条）。FAILED 投影会阻断对应环境切换。</p>
             <p v-else>当前没有 FAILED 授权投影。</p>
             <ul v-if="keycloakProjectionFailures.length"><li v-for="failure in keycloakProjectionFailures" :key="failure.event_id"><span>FAILED</span><code>{{ failure.application_code }}/{{ failure.environment || '全局' }}</code> · {{ failure.error_code || 'KEYCLOAK_SYNC_FAILED' }}<small>{{ failure.error_message || '请查看平台与 Keycloak 日志后受控重放。' }}</small><button v-if="canManageRuntime" class="console-button ghost small" type="button" :disabled="saving" @click="replayProjectionFailure(failure)">受控重放</button></li></ul>
           </section>
@@ -1327,7 +1382,7 @@ onMounted(() => {
       <section class="application-registry-modal" role="dialog" aria-modal="true" aria-label="删除环境确认"><h3>删除环境 {{ selectedApplication.code }}/{{ pendingDeleteEnvironment.environment }}</h3><p>平台会先按受控 Agent 策略下线运行时，再删除环境记录及其派生登录目标和 OAuth Client。生产合同下线仅停止 API，保留数据库、备份和服务器运行配置以便恢复。</p><label class="console-form-item"><span>请输入确认码：{{ selectedApplication.code }}/{{ pendingDeleteEnvironment.environment }}</span><input v-model="environmentDeleteConfirmation" autocomplete="off" /></label><footer class="console-form-actions"><button class="console-button danger" type="button" :disabled="environmentDeleteConfirmation.trim() !== `${selectedApplication.code}/${pendingDeleteEnvironment.environment}` || saving" @click="confirmDeleteEnvironment">确认下线并删除控制面记录</button><button class="console-button ghost" type="button" @click="pendingDeleteEnvironment = null">取消</button></footer></section>
     </div>
     <div v-if="pendingPurgeEnvironment" class="application-registry-modal-backdrop" role="presentation" @click.self="pendingPurgeEnvironment = null">
-      <section class="application-registry-modal" role="dialog" aria-modal="true" aria-label="永久清理环境确认"><h3>永久清理 {{ selectedApplication.code }}/{{ pendingPurgeEnvironment.environment }}</h3><p class="application-registry-inline-warning">该操作不可恢复，将删除 OAuth 客户端、登录目标、服务凭据、配置命名空间和审计记录。请先确认数据保留审批已完成。</p><label class="console-form-item"><span>数据保留审批编号 *</span><input v-model="purgeApprovalId" autocomplete="off" placeholder="例如 RETENTION-APPROVAL-20260806-001" /></label><label class="console-form-item"><span>请输入确认码：PURGE/{{ selectedApplication.code }}/{{ pendingPurgeEnvironment.environment }}</span><input v-model="purgeConfirmation" autocomplete="off" /></label><label class="console-form-checkbox"><input v-model="purgeRetentionConfirmed" type="checkbox" />我确认审计记录可以永久删除</label><label class="console-form-checkbox"><input v-model="purgeOffboardedConfirmed" type="checkbox" />我确认该环境已经完成下线</label><footer class="console-form-actions"><button class="console-button danger" type="button" :disabled="purgeConfirmation.trim() !== `PURGE/${selectedApplication.code}/${pendingPurgeEnvironment.environment}` || !purgeApprovalId.trim() || !purgeRetentionConfirmed || !purgeOffboardedConfirmed || saving" @click="confirmPurgeEnvironment">确认永久清理</button><button class="console-button ghost" type="button" @click="pendingPurgeEnvironment = null">取消</button></footer></section>
+      <section class="application-registry-modal" role="dialog" aria-modal="true" aria-label="永久清理环境确认"><h3>永久清理 {{ selectedApplication.code }}/{{ pendingPurgeEnvironment.environment }}</h3><p class="application-registry-inline-warning">该操作不可恢复，将删除环境配置、服务凭据、登录目标和审计接收记录。请先退役整个系统，并在审计保留管理中完成该应用的 PURGE 清理任务；平台会校验任务真实存在且状态为已完成。业务数据库、备份和服务器持久化文件不在此操作范围内。</p><label class="console-form-item"><span>已完成的审计 PURGE 任务编号 *</span><input v-model="purgeApprovalId" autocomplete="off" placeholder="粘贴平台审计清理任务 ID" /></label><label class="console-form-item"><span>请输入确认码：PURGE/{{ selectedApplication.code }}/{{ pendingPurgeEnvironment.environment }}</span><input v-model="purgeConfirmation" autocomplete="off" /></label><label class="console-form-checkbox"><input v-model="purgeRetentionConfirmed" type="checkbox" />我确认审计保留任务已完成且可清理在线接收记录</label><label class="console-form-checkbox"><input v-model="purgeOffboardedConfirmed" type="checkbox" />我确认该环境已经完成下线</label><footer class="console-form-actions"><button class="console-button danger" type="button" :disabled="purgeConfirmation.trim() !== `PURGE/${selectedApplication.code}/${pendingPurgeEnvironment.environment}` || !purgeApprovalId.trim() || !purgeRetentionConfirmed || !purgeOffboardedConfirmed || saving" @click="confirmPurgeEnvironment">确认永久清理</button><button class="console-button ghost" type="button" @click="pendingPurgeEnvironment = null">取消</button></footer></section>
     </div>
     <div v-if="pendingRuntimeAdoption" class="application-registry-modal-backdrop" role="presentation" @click.self="pendingRuntimeAdoption = null">
       <section class="application-registry-modal" role="dialog" aria-modal="true" aria-label="接管运行时确认"><h3>接管 {{ selectedApplication.code }}/{{ pendingRuntimeAdoption.environment }} 运行时</h3><p>平台会核验当前服务、网关路由和 Worker 状态，并将已运行的环境纳入受控部署。此操作不会删除或格式化数据库、数据卷、环境目录、登录目标及现有业务数据。</p><footer class="console-form-actions"><button class="console-button primary" type="button" :disabled="saving" @click="confirmRuntimeAdoption">确认接管运行时</button><button class="console-button ghost" type="button" :disabled="saving" @click="pendingRuntimeAdoption = null">取消</button></footer></section>

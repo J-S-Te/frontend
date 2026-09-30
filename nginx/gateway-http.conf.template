@@ -16,7 +16,25 @@ server {
         default_type text/html;
     }
 
+    # 文件网关专用 50x 错误页（AUD-2026-023）：内容与 /50x.html 同源，仅日志脱敏
+    # （log_format file_gateway_noquery 定义于 default.conf，同 http 上下文）。
+    location = /fg_50x.html {
+        internal;
+        access_log /var/log/nginx/access.log file_gateway_noquery;
+        alias /usr/share/nginx/html/50x.html;
+        default_type text/html;
+    }
+
     location /file-gateway/api/v2/ {
+        # AUD-2026-023：下载票据经 URL 查询参数传递（?ticket=...），默认 access log 的
+        # $request 会把整条 query 写入日志。本 location 单独使用不含 query 的日志格式
+        # （log_format file_gateway_noquery 定义于 default.conf，同 http 上下文），仅作用
+        # 于文件网关路径；其余 location 仍沿用默认格式，不受影响。参数级排查依赖
+        # File Gateway 自身访问审计。
+        access_log /var/log/nginx/access.log file_gateway_noquery;
+        # 上游 5xx 若走服务器级 error_page（/50x.html）会以 main 格式把票据 query 记回
+        # 日志，故为文件网关单独指定脱敏错误页。
+        error_page 500 502 503 504 /fg_50x.html;
         proxy_http_version 1.1;
         proxy_request_buffering off;
         proxy_buffering off;

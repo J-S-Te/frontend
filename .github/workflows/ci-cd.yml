@@ -100,7 +100,7 @@ jobs:
           : "${DEPLOY_SSH_KEY:?missing DEPLOY_SSH_KEY}"
           : "${DEPLOY_KNOWN_HOSTS:?missing DEPLOY_KNOWN_HOSTS}"
           DEPLOY_PORT="${DEPLOY_PORT:-22}"
-          DEPLOY_PATH="${DEPLOY_PATH:-/opt/basic-platform}"
+          DEPLOY_PATH="${DEPLOY_PATH:-/opt/unified-identity-platform}"
           install -m 700 -d "$HOME/.ssh"
           printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/id_ed25519"
           chmod 600 "$HOME/.ssh/id_ed25519"

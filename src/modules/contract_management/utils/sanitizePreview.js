@@ -91,12 +91,25 @@ function escapeAttrValue(value) {
 
 // URL scheme 白名单：解码实体、剥离控制字符（浏览器解析 URL 时会去掉 tab/CR/LF 等）后
 // 再判断 scheme，防止 &#106;avascript: / javascript&colon; / java\nscript: 这类混淆绕过。
-function isSafeUrl(rawValue) {
+//
+// 协议相对 URL（// 开头，AUD-2026-033）继承页面协议，历史上无条件放行会留下"点击后跳转
+// 任意站点"的钓鱼导航面。收敛为：解析为 https:+rest 后与同源 origin 比较，仅同源放行；
+// origin 由调用方注入（默认浏览器 window.location.origin），取不到时 fail-closed 拒绝。
+// 绝对 http(s)/mailto/相对路径/锚点的行为保持不变。
+function isSafeUrl(rawValue, allowedOrigin) {
   const cleaned = decodeEntities(rawValue)
     .replace(/[\u0000-\u001F\u007F]/g, '')
     .trim()
+  if (cleaned.startsWith('//')) {
+    if (!allowedOrigin) return false // 非浏览器/测试环境无同源基准 → fail-closed
+    try {
+      return new URL('https:' + cleaned).origin === allowedOrigin
+    } catch {
+      return false
+    }
+  }
   const schemeMatch = /^([a-zA-Z][a-zA-Z0-9+.\-]*):/.exec(cleaned)
-  if (!schemeMatch) return true // 相对路径、锚点、协议相对(//) URL：与原实现一致放行（不可执行脚本）
+  if (!schemeMatch) return true // 相对路径、锚点：与原实现一致放行（不可执行脚本）
   return ['http', 'https', 'mailto'].includes(schemeMatch[1].toLowerCase())
 }
 
@@ -205,12 +218,34 @@ function sanitizeStyleContent(css) {
   return css.replace(/expression\s*\(|javascript:|vbscript:|-moz-binding|@import/gi, '')
 }
 
-function serializeStartTag(tag) {
+// 反向 tabnabbing 防护（AUD-2026-034）：带 target 属性的 <a> 自动补 rel="noopener noreferrer"。
+// 已有 rel 时在原值基础上合并去重、保留既有 token（rel token 不区分大小写，去重按小写比对）。
+function hardenRelAttrs(tagName, attrs) {
+  if (tagName !== 'a' || !attrs.some((attr) => attr.name === 'target')) return attrs
+  const required = ['noopener', 'noreferrer']
+  const rel = attrs.find((attr) => attr.name === 'rel')
+  if (!rel) {
+    return [...attrs, { name: 'rel', value: 'noopener noreferrer', hasValue: true }]
+  }
+  const tokens = rel.value.split(/\s+/).filter(Boolean)
+  const seen = new Set(tokens.map((token) => token.toLowerCase()))
+  for (const token of required) {
+    if (!seen.has(token)) {
+      tokens.push(token)
+      seen.add(token)
+    }
+  }
+  rel.value = tokens.join(' ')
+  rel.hasValue = true
+  return attrs
+}
+
+function serializeStartTag(tag, allowedOrigin) {
   let out = '<' + tag.name
-  for (const attr of tag.attrs) {
+  for (const attr of hardenRelAttrs(tag.name, tag.attrs)) {
     if (!isAllowedAttr(tag.name, attr.name)) continue
     if (URL_ATTRS.has(attr.name)) {
-      if (!isSafeUrl(attr.value)) continue
+      if (!isSafeUrl(attr.value, allowedOrigin)) continue
       out += ' ' + attr.name + '="' + escapeAttrValue(attr.value) + '"'
       continue
     }
@@ -226,8 +261,21 @@ function serializeStartTag(tag) {
   return out + '>'
 }
 
-export function sanitizePreviewHTML(raw) {
+// 同源基准（AUD-2026-033）：调用方可注入 origin（测试/SSR），否则浏览器取 window.location.origin；
+// 两者皆无（Node 测试等非浏览器环境）返回空串 → 协议相对 URL 一律拒绝（fail-closed）。
+function resolveAllowedOrigin(options) {
+  if (options && typeof options === 'object' && typeof options.origin === 'string') {
+    return options.origin
+  }
+  if (typeof window !== 'undefined' && window.location && typeof window.location.origin === 'string') {
+    return window.location.origin
+  }
+  return ''
+}
+
+export function sanitizePreviewHTML(raw, options) {
   if (typeof raw !== 'string') return ''
+  const allowedOrigin = resolveAllowedOrigin(options)
   const html = raw
   let i = 0
   let out = ''
@@ -295,7 +343,7 @@ export function sanitizePreviewHTML(raw) {
       }
       if (name === 'style' && !startTag.selfClosing) {
         // <style> 内容是 RAWTEXT：按原始文本截取到 </style>，单独做 CSS 净化。
-        out += serializeStartTag(startTag)
+        out += serializeStartTag(startTag, allowedOrigin)
         const closeMatch = /<\/style\s*>/i.exec(html.slice(i))
         if (!closeMatch) {
           out += sanitizeStyleContent(html.slice(i))
@@ -308,14 +356,14 @@ export function sanitizePreviewHTML(raw) {
         continue
       }
       if (VOID_TAGS.has(name)) {
-        out += serializeStartTag(startTag)
+        out += serializeStartTag(startTag, allowedOrigin)
         continue
       }
       if (startTag.selfClosing) {
-        out += serializeStartTag(startTag) + '</' + name + '>'
+        out += serializeStartTag(startTag, allowedOrigin) + '</' + name + '>'
         continue
       }
-      out += serializeStartTag(startTag)
+      out += serializeStartTag(startTag, allowedOrigin)
       openStack.push(name)
       continue
     }

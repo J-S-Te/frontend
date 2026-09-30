@@ -79,6 +79,14 @@ test('a feature permission denial is not reported as an application access denia
   assert.match(subsystemAccessMessage({ status: 403 }), /服务器拒绝了当前应用访问/)
 })
 
+test('an absent backend is unavailable rather than a login failure', () => {
+  for (const status of [502, 504]) {
+    assert.equal(shouldStartSubsystemLogin({ status }), false)
+    assert.equal(buildSubsystemAccessErrorRoute({ status }, '/contract_management').query.reason, SUBSYSTEM_ACCESS_REASON.DEPENDENCY_UNAVAILABLE)
+    assert.match(subsystemAccessMessage({ status }), /未部署、已停用/)
+  }
+})
+
 test('route query exposes stable diagnostics, not backend messages or scope decisions', () => {
   const route = buildSubsystemAccessErrorRoute({ status: 403, code: 'PORTAL_IDENTITY_NOT_PROVISIONED', requestID: 'req-1', message: 'internal detail' }, '/customer-portal')
   assert.deepEqual(route, {
