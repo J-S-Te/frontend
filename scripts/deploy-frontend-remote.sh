@@ -7,6 +7,7 @@ frontend_platform_ready() {
   local service container state
   [[ -f "$deploy_dir/docker-compose.yml" && -x "$deploy_dir/bin/deploy-service.sh" &&
      -f "$deploy_dir/bin/provisioner-config-refresh.sh" &&
+     -f "$deploy_dir/bin/check-frontend-network.sh" &&
      ! -e "$deploy_dir/runtime/.control-plane-reload-required" ]] || return 1
   for service in platform-api subsystem-provisioner; do
     container="$(docker ps -q --filter "label=com.docker.compose.project=$compose_project" \
@@ -15,6 +16,9 @@ frontend_platform_ready() {
     state="$(docker inspect -f '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' "$container")" || return 1
     [[ "$state" == 'running healthy' ]] || return 1
   done
+  # A healthy old API is insufficient: the chosen frontend address and the
+  # API's exact proxy allowlist must already agree with the live network.
+  bash "$deploy_dir/bin/check-frontend-network.sh" "$deploy_dir" "$compose_project" >/dev/null 2>&1 || return 1
 }
 
 wait_frontend_platform_ready() {
@@ -28,6 +32,9 @@ wait_frontend_platform_ready() {
     if ((SECONDS >= deadline)); then
       echo '平台发布前置条件未满足：需要统一编排资产，以及健康的 platform-api 和 subsystem-provisioner。' >&2
       echo '请先完成基础平台发布；若资产要求重载，执行 bin/deploy.sh reload-control-plane 后再发布前端。' >&2
+      if [[ -f "$deploy_dir/bin/check-frontend-network.sh" ]]; then
+        bash "$deploy_dir/bin/check-frontend-network.sh" "$deploy_dir" "$compose_project" >&2 || true
+      fi
       return 1
     fi
     echo '等待基础平台升级及控制面就绪，暂未切换前端镜像。'
