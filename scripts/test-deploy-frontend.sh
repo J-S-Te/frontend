@@ -38,4 +38,13 @@ sleep() { :; }
 FRONTEND_PLATFORM_WAIT_SECONDS=5
 wait_frontend_platform_ready >/dev/null
 [[ "$attempts" == 2 ]]
+# Exercise the real SSH execution mode: bash -s has no BASH_SOURCE[0].
+mkdir -p "$fixture/tools"
+printf 'COMPOSE_PROJECT_NAME=basic-platform-production\n' > "$fixture/.env"
+printf '#!/usr/bin/env bash\nif [[ "$1" == ps ]]; then echo container; else echo "running healthy"; fi\n' > "$fixture/tools/docker"
+printf '#!/usr/bin/env bash\n[[ "$1" == frontend && "$2" == fixture-image ]]\necho stdin-deploy-passed\n' > "$fixture/bin/deploy-service.sh"
+chmod +x "$fixture/tools/docker" "$fixture/bin/deploy-service.sh"
+result="$(PATH="$fixture/tools:$PATH" FRONTEND_PLATFORM_WAIT_SECONDS=0 bash -s -- "$fixture" fixture-image < "$(dirname -- "${BASH_SOURCE[0]}")/deploy-frontend-remote.sh")"
+[[ "$result" == stdin-deploy-passed ]]
 printf 'PASS: unhealthy/legacy/pending-reload rejection and readiness recovery\n'
+printf 'PASS: real bash -s stdin deployment entrypoint\n'

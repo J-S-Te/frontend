@@ -48,6 +48,6 @@ deploy_frontend_remote() {
   ./bin/deploy-service.sh frontend "$image_ref"
 }
 
-if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+if [[ -z "${BASH_SOURCE[0]:-}" || "${BASH_SOURCE[0]:-}" == "$0" ]]; then
   deploy_frontend_remote "$@"
 fi
