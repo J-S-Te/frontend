@@ -4,7 +4,14 @@ FROM node:22-alpine AS builder
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm ci
+ARG NPM_CONFIG_REGISTRY=https://registry.npmjs.org
+RUN set -eu; \
+    for attempt in 1 2 3 4 5; do \
+      if npm ci --registry "$NPM_CONFIG_REGISTRY"; then exit 0; fi; \
+      echo "npm dependency installation failed (attempt ${attempt}/5)" >&2; \
+      sleep $((attempt * 2)); \
+    done; \
+    exit 1
 
 COPY . ./
 
@@ -29,7 +36,10 @@ ENV VITE_CRM_API_BASE_URL=${VITE_CRM_API_BASE_URL}
 ENV VITE_CUSTOMER_PORTAL_PUBLIC_PATH_PREFIX=${VITE_CUSTOMER_PORTAL_PUBLIC_PATH_PREFIX}
 ENV VITE_CUSTOMER_PORTAL_API_BASE_URL=${VITE_CUSTOMER_PORTAL_API_BASE_URL}
 
-RUN npm run build
+# 离线前端包生成前先执行回归：包括生产接入页对已退役历史环境的过滤。
+# 测试失败时不得继续生成可交付镜像。
+RUN npm test \
+    && npm run build
 
 # 前端静态资源由 Nginx 提供，并将 API、OIDC 端点代理至后端 API 容器。
 FROM nginx:1.27-alpine
@@ -46,5 +56,7 @@ RUN chmod 0755 /docker-entrypoint.d/05-select-public-transport.sh
 RUN mkdir -p /etc/nginx/portal-apps.d
 COPY nginx/portal-apps-locations.conf /etc/nginx/portal-apps.d/managed.conf
 COPY --from=builder /app/dist /usr/share/nginx/html
+RUN find /usr/share/nginx/html -type d -exec chmod 0755 {} + \
+    && find /usr/share/nginx/html -type f -exec chmod 0644 {} +
 
 EXPOSE 80 443

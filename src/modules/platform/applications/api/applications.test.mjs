@@ -354,6 +354,14 @@ test('application access UI separates logical retirement, runtime teardown and p
   assert.match(onboardingModule, /dev 环境不能通过管理页面删除/)
 })
 
+test('environment retirement is a distinct runtime teardown that retains the registry record', () => {
+  assert.match(onboardingModule, /async function offboardEnvironment\(environment\)/)
+  assert.match(onboardingModule, /await teardownSubsystem\(\{ applicationCode: application\.code, environment: environment\.environment \}\)/)
+  assert.match(onboardingModule, /环境登记及保留数据未删除/)
+  assert.match(onboardingModule, /退役并保留记录/)
+  assert.match(onboardingModule, /canManageRuntime && \['READY', 'PROVISION_FAILED', 'UNMANAGED'\]/)
+})
+
 test('offboarded production environments expose controlled re-onboarding without duplicate registration', () => {
   assert.match(onboardingModule, /environmentStatus\(environment\) === 'OFFBOARDED'/)
   assert.match(onboardingModule, /environmentStatus\(environment\) === 'OFFBOARDED'[\s\S]*重新接入/)
@@ -551,6 +559,7 @@ test('environment cards partition directory, Keycloak authentication and runtime
   assert.match(onboardingModule, /回滚基础平台/)
   assert.match(onboardingModule, /开始 7 天观察/)
   assert.match(onboardingModule, /授权投影告警与受控重放/)
+  assert.match(onboardingModule, /keycloakProjectionAlert\?\.state === 'ACTIVE'/)
   assert.match(onboardingModule, /Realm/)
   assert.match(onboardingModule, /Claims 映射/)
   assert.match(onboardingModule, /认证提供方在环境卡片的“Keycloak 认证”分区中切换/)

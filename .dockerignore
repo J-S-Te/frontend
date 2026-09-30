@@ -1,7 +1,27 @@
-.git
-.gitignore
-node_modules
-dist
-coverage
-.env
-.env.*
+# The frontend build uses COPY . ., so use an allowlist. Local .env files,
+# certificates, reports, caches and any future unknown file never enter the
+# build context or BuildKit cache.
+**
+!Dockerfile
+!package.json
+!package-lock.json
+!index.html
+!login.html
+!vite.config.js
+!src/
+!src/**
+!public/
+!public/**
+!nginx/
+!nginx/**
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.p12
+**/*.jks
+**/*.bak
+**/*.backup
+**/*.dump
+**/dump*.sql
+**/.DS_Store

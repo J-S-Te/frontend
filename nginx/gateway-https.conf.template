@@ -2,6 +2,16 @@
 server {
     listen 80 default_server;
     server_name ${PUBLIC_PLATFORM_HOST} ${PUBLIC_SSO_HOST};
+
+    # AUD-2026-023：跳转服务器同样会以 $request 记录完整 query（含票据）——票据地址
+    # 若经 http 变体到达会先落在这里。为文件网关前缀声明同语义的 308 跳转 + 不含 query
+    # 的日志（log_format file_gateway_noquery 定义于 default.conf，同 http 上下文），
+    # 其余路径仍沿用服务器级 return，不受影响。
+    location /file-gateway/ {
+        access_log /var/log/nginx/access.log file_gateway_noquery;
+        return 308 https://$host$request_uri;
+    }
+
     return 308 https://$host$request_uri;
 }
 
@@ -25,6 +35,15 @@ server {
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 
     location /file-gateway/api/v2/ {
+        # AUD-2026-023：下载票据经 URL 查询参数传递（?ticket=...），默认 access log 的
+        # $request 会把整条 query 写入日志。本 location 单独使用不含 query 的日志格式
+        # （log_format file_gateway_noquery 定义于 default.conf，同 http 上下文），仅作用
+        # 于文件网关路径；其余 location 仍沿用默认格式，不受影响。参数级排查依赖
+        # File Gateway 自身访问审计。
+        # 本服务器未配置 error_page，nginx 自产的 5xx 不会内部跳转出本 location，
+        # 故无需专用错误页；若未来添加服务器级 error_page，必须同时为文件网关配置
+        # 脱敏错误页（参照 default.conf / gateway-http 的 /fg_50x.html）。
+        access_log /var/log/nginx/access.log file_gateway_noquery;
         proxy_http_version 1.1;
         proxy_request_buffering off;
         proxy_buffering off;

@@ -85,7 +85,7 @@ export function classifySubsystemAccessError(error = {}) {
   if (status === 403 || code === 'PORTAL_AUTHORIZATION_REQUIRED') {
     return { reason: SUBSYSTEM_ACCESS_REASON.FORBIDDEN, status, code }
   }
-  if (status === 503) {
+  if ([502, 503, 504].includes(status)) {
     return { reason: SUBSYSTEM_ACCESS_REASON.DEPENDENCY_UNAVAILABLE, status, code }
   }
   if (status === 401) {
@@ -128,8 +128,8 @@ export const SUBSYSTEM_ACCESS_PRESENTATION = Object.freeze({
     message: '身份认证已经完成，但服务器拒绝了当前应用访问。请联系管理员检查应用角色、权限目录和授权范围。',
   }),
   [SUBSYSTEM_ACCESS_REASON.DEPENDENCY_UNAVAILABLE]: Object.freeze({
-    title: '统一授权依赖暂时不可用',
-    message: 'Keycloak、统一授权上下文或目标子系统暂时不可用。服务器未在依赖故障时放宽权限，请稍后重试。',
+    title: '子系统或依赖服务暂时不可用',
+    message: '目标子系统可能未部署、已停用，或 Keycloak、统一授权上下文暂时不可用。请联系管理员确认部署状态，或稍后重试。',
   }),
   [SUBSYSTEM_ACCESS_REASON.IDENTITY_NOT_PROVISIONED]: Object.freeze({
     title: '客户门户身份尚未预配',

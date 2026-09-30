@@ -134,7 +134,7 @@ onMounted(loadSettings)
     <div class="console-card-body">
       <h2>对外访问</h2>
       <p class="console-card-hint">
-        配置统一前端对外公开地址（例如 http://47.111.20.119:8081）。留空表示仅本机
+        配置统一前端对外公开地址（例如 https://portal.example.com）。留空表示仅本机
         127.0.0.1 访问。保存后需点击“应用配置”，由部署 Agent 重写覆盖环境文件并重建容器。
       </p>
       <p v-if="loading" class="console-card-hint">正在读取配置…</p>
@@ -147,7 +147,7 @@ onMounted(loadSettings)
             v-model="form.publicOrigin"
             inputmode="url"
             :disabled="!canUpdate"
-            placeholder="留空 = 仅本机；例如 http://47.111.20.119:8081 或 https://portal.example.com"
+            placeholder="留空 = 仅本机；例如 https://portal.example.com"
             @input="errorMessage = ''"
           />
         </label>
