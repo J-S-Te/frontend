@@ -10,6 +10,7 @@ mkdir -p "$fixture/bin" "$fixture/runtime"
 : > "$fixture/bin/deploy-service.sh"
 chmod +x "$fixture/bin/deploy-service.sh"
 : > "$fixture/bin/provisioner-config-refresh.sh"
+printf '#!/usr/bin/env bash\n[[ "${FIXTURE_NETWORK_READY:-true}" == true ]]\n' > "$fixture/bin/check-frontend-network.sh"
 agent_state='restarting unhealthy'
 docker() {
   if [[ "$1" == ps ]]; then printf 'container\n'; return; fi
@@ -22,6 +23,17 @@ if wait_frontend_platform_ready 2>/dev/null; then
 fi
 agent_state='running healthy'
 wait_frontend_platform_ready
+FIXTURE_NETWORK_READY=false
+export FIXTURE_NETWORK_READY
+if wait_frontend_platform_ready 2>/dev/null; then
+  echo 'stale API proxy trust or invalid frontend network must block deployment' >&2; exit 1
+fi
+FIXTURE_NETWORK_READY=true
+mv "$fixture/bin/check-frontend-network.sh" "$fixture/bin/check-frontend-network.sh.saved"
+if wait_frontend_platform_ready 2>/dev/null; then
+  echo 'missing network compatibility asset must block deployment' >&2; exit 1
+fi
+mv "$fixture/bin/check-frontend-network.sh.saved" "$fixture/bin/check-frontend-network.sh"
 : > "$fixture/runtime/.control-plane-reload-required"
 if wait_frontend_platform_ready 2>/dev/null; then
   echo 'pending paired reload must block frontend deployment' >&2; exit 1
@@ -48,3 +60,4 @@ result="$(PATH="$fixture/tools:$PATH" FRONTEND_PLATFORM_WAIT_SECONDS=0 bash -s -
 [[ "$result" == stdin-deploy-passed ]]
 printf 'PASS: unhealthy/legacy/pending-reload rejection and readiness recovery\n'
 printf 'PASS: real bash -s stdin deployment entrypoint\n'
+printf 'PASS: network compatibility and effective API proxy trust gate\n'
