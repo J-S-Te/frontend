@@ -24,6 +24,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - name: Verify frontend deployment prerequisites
+        run: bash scripts/test-deploy-frontend.sh
       - run: npm run build
 
   image:
@@ -82,6 +84,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: test
     steps:
+      - uses: actions/checkout@v5
       - name: Deploy immutable frontend image
         shell: bash
         env:
@@ -92,7 +95,6 @@ jobs:
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
           DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
           IMAGE_REF: ${{ needs.image.outputs.image_ref }}
-          DEPLOY_RELAX_RUNTIME_PERM_CHECK: "true"
         run: |
           set -Eeuo pipefail
           : "${DEPLOY_HOST:?missing DEPLOY_HOST}"
@@ -105,7 +107,5 @@ jobs:
           printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/id_ed25519"
           chmod 600 "$HOME/.ssh/id_ed25519"
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
-          # 将前端专用的宽松权限开关显式传到远端进程。新版发布脚本不会读取或修改
-          # 子系统 runtime 文件；该开关仅兼容尚未更新发布资产的过渡服务器。
-          printf -v remote_command 'cd %q && DEPLOY_RELAX_RUNTIME_PERM_CHECK=true ./bin/deploy-service.sh frontend %q' "$DEPLOY_PATH" "$IMAGE_REF"
-          ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "$remote_command"
+          printf -v remote_command 'bash -s -- %q %q' "$DEPLOY_PATH" "$IMAGE_REF"
+          ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "$remote_command" < scripts/deploy-frontend-remote.sh
