@@ -1,5 +1,6 @@
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { pollDeployment } from '@/modules/platform/applications/utils/deploymentPolling.mjs'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import ApplicationLoginTargetModule from '@/modules/platform/login-targets/components/ApplicationLoginTargetModule.vue'
 import {
@@ -802,7 +803,7 @@ async function confirmRuntimeAdoption() {
   saving.value = true
   clearError()
   try {
-    await adoptSubsystemRuntime({
+    const result = await adoptSubsystemRuntime({
       applicationCode: application.code,
       environment: environment.environment,
       publicBaseUrl: environment.base_url || '',
@@ -811,8 +812,24 @@ async function confirmRuntimeAdoption() {
       issuerAlias: environment.issuer_alias || '',
     })
     pendingRuntimeAdoption.value = null
-    notify(`已提交 ${application.code}/${environment.environment} 的运行时接管；平台将核验服务健康状态后更新部署状态。`)
-    await loadEnvironments()
+    if (result?.status === 'UPDATING' || result?.status === 'PROVISIONING') {
+      notify('运行时接管已受理，正在后台执行；页面将跟踪进度。')
+      const finalStatus = await waitForDeploymentCompletion(application, environment.environment)
+      if (finalStatus === 'CANCELLED') return
+      if (finalStatus === 'READY') {
+        notify('运行时接管完成。')
+      } else if (finalStatus === 'PROVISION_FAILED') {
+        setError(null, '后台接管失败；请查看部署状态与下一步指引后重试。')
+      } else if (finalStatus === 'OFFBOARDED') {
+        notify('该环境已停用，停止跟踪接管进度。')
+      } else {
+        setError(null, '接管仍在后台执行；请稍后刷新状态查看结果。')
+      }
+      await loadEnvironments()
+    } else {
+      notify(`已提交 ${application.code}/${environment.environment} 的运行时接管；平台将核验服务健康状态后更新部署状态。`)
+      await loadEnvironments()
+    }
   } catch (error) {
     setError(error, '接管运行时失败；现有服务、数据库和数据卷均未删除。')
   } finally {
@@ -877,6 +894,30 @@ async function confirmDeleteEnvironment() {
   }
 }
 
+// 部署受理后的轮询参数：平台 202 受理后部署在服务端后台执行（不受浏览器刷新/断连影响），
+// 前端按固定间隔刷新环境状态直到终态；超时只提示手动刷新，后台部署不受影响。
+let deploymentObserver = null
+onBeforeUnmount(() => deploymentObserver?.abort())
+
+async function waitForDeploymentCompletion(application, environmentName) {
+  deploymentObserver?.abort()
+  const observer = new AbortController()
+  deploymentObserver = observer
+  try {
+    return await pollDeployment({
+      signal: observer.signal,
+      readStatus: () => getSubsystemStatus({ applicationCode: application.code, environment: environmentName }),
+      onStatus: (state) => {
+        if (selectedApplicationId.value === application.application_id) {
+          deploymentStates.value = { ...deploymentStates.value, [environmentName]: state }
+        }
+      },
+    })
+  } finally {
+    if (deploymentObserver === observer) deploymentObserver = null
+  }
+}
+
 async function reapplyEnvironment(environment, retry = false) {
   const application = selectedApplication.value
   if (!application || !canManageRuntime.value || !isManagedRuntimeTarget(environment) || saving.value) return
@@ -884,7 +925,7 @@ async function reapplyEnvironment(environment, retry = false) {
   clearError()
   try {
     const action = retry ? retrySubsystem : updateSubsystemRuntime
-    await action({
+    const result = await action({
       applicationCode: application.code,
       environment: environment.environment,
       publicBaseUrl: environment.base_url || '',
@@ -892,8 +933,24 @@ async function reapplyEnvironment(environment, retry = false) {
       pathPrefix: environment.path_prefix || '',
       issuerAlias: environment.issuer_alias || 'platform',
     })
-    notify(retry ? '部署失败环境已重新尝试。' : '子系统已重新部署。')
-    await loadEnvironments()
+    if (result?.status === 'UPDATING' || result?.status === 'PROVISIONING') {
+      notify('部署已受理，正在后台执行；页面将跟踪进度。')
+      const finalStatus = await waitForDeploymentCompletion(application, environment.environment)
+      if (finalStatus === 'CANCELLED') return
+      if (finalStatus === 'READY') {
+        notify(retry ? '重试部署完成。' : '子系统部署完成。')
+      } else if (finalStatus === 'PROVISION_FAILED') {
+        setError(null, '后台部署失败；请查看该环境的部署状态与下一步指引后重试。')
+      } else if (finalStatus === 'OFFBOARDED') {
+        notify('该环境已停用，停止跟踪部署进度。')
+      } else {
+        setError(null, '部署仍在后台执行；请稍后刷新状态查看结果。')
+      }
+      await loadEnvironments()
+    } else {
+      notify(retry ? '部署失败环境已重新尝试。' : '子系统已重新部署。')
+      await loadEnvironments()
+    }
   } catch (error) {
     setError(error, '部署 Agent 操作失败。')
   } finally {
@@ -1172,7 +1229,7 @@ const onboardingSteps = computed(() => {
   return { steps, completed, total: steps.length }
 })
 
-watch(selectedApplicationId, () => { loadEnvironments() }, { immediate: true })
+watch(selectedApplicationId, () => { deploymentObserver?.abort(); loadEnvironments() }, { immediate: true })
 watch(catalogApplications, () => { reconcileSelectedApplication() })
 watch(() => onboardForm.applicationCode, (applicationCode, previousCode) => {
   if (isProductionProvisioning.value) return
