@@ -170,7 +170,8 @@ async function openWorkflowAction(item) {
   if (status === 'PENDING_APPROVAL') {
     workflowAction.value = { item, kind: 'approval', toStatus: termination ? 'PENDING_HANDOVER' : 'SCHEDULED', title: '审批人员异动', prefix: '' }
   } else if (status === 'PENDING_HANDOVER') {
-    workflowAction.value = { item, kind: 'handover', toStatus: 'SCHEDULED', title: '确认交接完成并排期', prefix: 'HANDOVER-' }
+    // 交接凭据编号由服务端在排期时自动生成，操作者只选择接收人并确认。
+    workflowAction.value = { item, kind: 'handover', toStatus: 'SCHEDULED', title: '确认交接完成并排期', prefix: '', autoReference: true }
     workflowSaving.value = true
     try {
       if (!users.value.length) users.value = (await listUsers({ page: 1, pageSize: 100 })).items
@@ -235,9 +236,11 @@ async function confirmWorkflowAction() {
     await runImmediateExecution()
     return
   }
+  // 交接排期（autoReference）不要求手工凭据：服务端在排期时自动生成 HANDOVER- 编号。
+  const autoReference = Boolean(workflowAction.value?.autoReference)
   const reference = workflowReference.value.trim()
-  if (!reference) { error.value = '请填写审批或交接凭据编号'; return }
-  if (workflowAction.value?.prefix && !reference.toUpperCase().startsWith(workflowAction.value.prefix)) { error.value = `交接凭据必须以 ${workflowAction.value.prefix} 开头`; return }
+  if (!autoReference && !reference) { error.value = '请填写审批或交接凭据编号'; return }
+  if (!autoReference && workflowAction.value?.prefix && !reference.toUpperCase().startsWith(workflowAction.value.prefix)) { error.value = `凭据必须以 ${workflowAction.value.prefix} 开头`; return }
   workflowSaving.value = true; error.value = ''
   try {
     if (workflowAction.value?.kind === 'handover') {
@@ -246,8 +249,9 @@ async function confirmWorkflowAction() {
       if (!pending.length) { error.value = '没有可完成的责任交接项，请刷新后重试'; return }
       for (const item of pending) await completePersonnelHandoverItem(recordId(workflowAction.value.item), item.id, handoverTargetUserId.value)
     }
-    await transitionPersonnelChange(recordId(workflowAction.value.item), workflowAction.value.toStatus, reference)
-    emit('toast', `${workflowAction.value.title}成功`)
+    const result = await transitionPersonnelChange(recordId(workflowAction.value.item), workflowAction.value.toStatus, autoReference ? '' : reference)
+    const generatedReference = result?.handover_reference || result?.handoverReference || ''
+    emit('toast', autoReference ? `交接完成并已排期，交接凭据 ${generatedReference || '已由系统生成'}` : `${workflowAction.value.title}成功`)
     workflowAction.value = null; workflowReference.value = ''; handoverItems.value = []; handoverTargetUserId.value = ''
     await load()
   } catch (e) { error.value = e.message || '异动流程处理失败' }
@@ -379,8 +383,8 @@ onMounted(() => { if (canRead.value) load() })
   <div v-if="workflowAction" class="console-modal-backdrop" role="presentation" @click.self="closeWorkflowAction">
     <section class="console-detail-modal personnel-workflow-modal" role="dialog" aria-modal="true" :aria-label="workflowAction.title">
       <header><div><p class="console-modal-eyebrow">人员异动流程</p><h2>{{ workflowAction.title }}</h2><p>凭据将随状态流转留存，用于审批和交接审计。</p></div><button class="console-modal-close" type="button" :disabled="workflowSaving" @click="closeWorkflowAction">×</button></header>
-      <div class="console-modal-body"><p v-if="workflowAction.kind === 'cancel'" class="console-card-hint">取消后该异动单不可恢复，也不会在生效日期执行。</p><p v-else-if="workflowAction.kind === 'execute'" class="console-card-hint">立即执行会马上变更该人员的任职与权限，并注销其现有登录会话（含下游单点登录），对方需重新登录获取新身份；执行后不可撤销，请确认审批与交接均已完成。</p><template v-else><div v-if="workflowAction.kind === 'handover'" class="personnel-handover-panel"><label class="console-form-item"><span>责任接收人 *</span><select v-model="handoverTargetUserId"><option value="">请选择在职接收人</option><option v-for="user in users.filter((candidate) => String(candidate.status || '').toUpperCase() === 'ACTIVE' && String(candidate.id || candidate.user_id) !== String(workflowAction.item.user_id))" :key="user.id || user.user_id" :value="user.id || user.user_id">{{ userLabel(user) }}</option></select></label><ul class="personnel-handover-list"><li v-for="item in handoverItems" :key="item.id"><span>{{ item.system }} · {{ item.resource_type }}</span><strong>{{ item.status === 'COMPLETED' ? '已完成' : '待交接' }}</strong></li></ul><p class="console-card-hint">确认后系统先把全部待办责任交给接收人，全部成功后才允许排期离职。</p></div><label class="console-form-item"><span>{{ workflowAction.prefix ? '交接凭据编号' : '审批凭据或驳回原因' }} *</span><input v-model="workflowReference" :placeholder="workflowAction.prefix ? '例如 HANDOVER-20260918-001' : '通过时填写审批记录编号，驳回时填写原因'" /></label></template></div>
-      <footer class="console-form-actions"><button class="console-button ghost" type="button" :disabled="workflowSaving" @click="closeWorkflowAction">返回</button><button v-if="workflowAction.kind === 'approval'" class="console-button danger" type="button" :disabled="workflowSaving" @click="rejectWorkflowAction">驳回</button><button class="console-button primary" type="button" :disabled="workflowSaving" @click="confirmWorkflowAction">{{ workflowSaving ? '处理中…' : (workflowAction.kind === 'cancel' ? '确认取消' : (workflowAction.kind === 'execute' ? '确认立即执行' : (workflowAction.kind === 'approval' ? '通过' : '确认完成'))) }}</button></footer>
+      <div class="console-modal-body"><p v-if="workflowAction.kind === 'cancel'" class="console-card-hint">取消后该异动单不可恢复，也不会在生效日期执行。</p><p v-else-if="workflowAction.kind === 'execute'" class="console-card-hint">立即执行会马上变更该人员的任职与权限，并注销其现有登录会话（含下游单点登录），对方需重新登录获取新身份；执行后不可撤销，请确认审批与交接均已完成。</p><template v-else><div v-if="workflowAction.kind === 'handover'" class="personnel-handover-panel"><label class="console-form-item"><span>责任接收人 *</span><select v-model="handoverTargetUserId"><option value="">请选择在职接收人</option><option v-for="user in users.filter((candidate) => String(candidate.status || '').toUpperCase() === 'ACTIVE' && String(candidate.id || candidate.user_id) !== String(workflowAction.item.user_id))" :key="user.id || user.user_id" :value="user.id || user.user_id">{{ userLabel(user) }}</option></select></label><ul class="personnel-handover-list"><li v-for="item in handoverItems" :key="item.id"><span>{{ item.system }} · {{ item.resource_type }}</span><strong>{{ item.status === 'COMPLETED' ? '已完成' : '待交接' }}</strong></li></ul><p class="console-card-hint">确认后系统将全部待办责任一次性转移给接收人，全部成功后自动生成交接凭据并完成排期，无需手工填写编号。</p></div><label v-if="!workflowAction.autoReference" class="console-form-item"><span>{{ workflowAction.prefix ? '交接凭据编号' : '审批凭据或驳回原因' }} *</span><input v-model="workflowReference" :placeholder="workflowAction.prefix ? '例如 HANDOVER-20260918-001' : '通过时填写审批记录编号，驳回时填写原因'" /></label></template></div>
+      <footer class="console-form-actions"><button class="console-button ghost" type="button" :disabled="workflowSaving" @click="closeWorkflowAction">返回</button><button v-if="workflowAction.kind === 'approval'" class="console-button danger" type="button" :disabled="workflowSaving" @click="rejectWorkflowAction">驳回</button><button class="console-button primary" type="button" :disabled="workflowSaving" @click="confirmWorkflowAction">{{ workflowSaving ? '处理中…' : (workflowAction.kind === 'cancel' ? '确认取消' : (workflowAction.kind === 'execute' ? '确认立即执行' : (workflowAction.kind === 'handover' ? '完成交接并排期' : (workflowAction.kind === 'approval' ? '通过' : '确认完成')))) }}</button></footer>
     </section>
   </div>
   <div v-if="authorizationDetail" class="console-modal-backdrop" role="presentation" @click.self="closeAuthorization">
