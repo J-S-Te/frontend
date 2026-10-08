@@ -81,10 +81,10 @@ export function cancelPersonnelChange(changeId) {
   return request(`/personnel-changes/${encodeURIComponent(changeId)}/cancel`, { method: 'POST', body: '{}' })
 }
 
-export function transitionPersonnelChange(changeId, toStatus, approvalReference = '') {
+export function transitionPersonnelChange(changeId, toStatus, approvalReference = '', { immediate = false } = {}) {
   return request(`/personnel-changes/${encodeURIComponent(changeId)}/transition`, {
     method: 'POST',
-    body: JSON.stringify({ to_status: toStatus, approval_reference: approvalReference }),
+    body: JSON.stringify({ to_status: toStatus, approval_reference: approvalReference, immediate }),
   })
 }
 
