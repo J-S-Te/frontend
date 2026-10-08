@@ -46,7 +46,7 @@ test('template creation stays mandatory within template mode and external contra
   const templatePosition = source.indexOf('第一步：选择合同模板')
   const opportunityPosition = source.indexOf('关联商机（选填）', templatePosition)
   assert.ok(templatePosition > -1 && opportunityPosition > templatePosition)
-  assert.match(source, /v-model="newContract\.template_id" required/)
+  assert.match(source, /v-model="newContract\.template_id" :disabled="Boolean\(editingContract\)" required/)
   assert.match(source, /模板将生成合同正文，合同编号在审批通过后自动生成/)
   assert.match(source, /上传外部合同/)
   assert.match(source, /accept="\.docx,application\/vnd\.openxmlformats-officedocument\.wordprocessingml\.document"/)
@@ -54,7 +54,7 @@ test('template creation stays mandatory within template mode and external contra
 })
 
 test('template fields reuse the current user profile', () => {
-  assert.match(source, /<span>合同负责人<\/span><input :value="currentUserLabel" readonly/)
+  assert.match(source, /<span>合同负责人<\/span><input :value="editingContract \? editingContract.owner_display_name : currentUserLabel" readonly/)
   assert.match(source, /已根据当前登录用户自动填入/)
   assert.match(source, /buildTemplateValues\(/)
   assert.match(source, /当前用户已有信息会自动填入空白字段/)

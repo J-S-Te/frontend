@@ -608,6 +608,16 @@ export async function uploadContractTemplate({ name, file }) {
   })
 }
 
+// Replace the source without changing the template identity or saved contracts.
+export async function replaceContractTemplateSource(templateId, file) {
+  const form = new FormData()
+  form.append('file', file)
+  return request(`/contract-templates/${encodeURIComponent(templateId)}/source`, {
+    method: 'PUT',
+    body: form,
+  })
+}
+
 /**
  * updateContractTemplate 更新指定合同模板的元数据或状态。
  * @param {string|number} templateId 模板标识。
@@ -658,6 +668,17 @@ export async function previewContractTemplate(templateId, values) {
 export async function submitContract(contractId, payload = {}) {
   return request(`/contracts/${contractId}/submit-approval`, {
     method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function getContract(contractId) {
+  return request(`/contracts/${encodeURIComponent(contractId)}`)
+}
+
+export async function updateContractDraft(contractId, payload) {
+  return request(`/contracts/${encodeURIComponent(contractId)}/draft`, {
+    method: 'PUT',
     body: JSON.stringify(payload),
   })
 }

@@ -16,6 +16,7 @@ import {
   deleteContractTemplate,
   getApproval,
   getContractDashboard,
+  getContract,
   getContractSession,
   getSigningRecord,
   getOpportunityIntake,
@@ -39,8 +40,10 @@ import {
   recordSigningReminder,
   confirmSigning,
   updateApprovalRule,
+  updateContractDraft,
   updateContractTemplate,
   uploadContractTemplate,
+  replaceContractTemplateSource,
   uploadStampedContractPDF,
   approvedContractDownloadURL,
 } from '@/modules/contract_management/api/contract'
@@ -57,6 +60,8 @@ import {
   hasContractPermission,
 } from '@/modules/shared/authz/sys004'
 import { buildTemplateValues } from '@/modules/contract_management/utils/currentUserPrefill'
+import { canEditContractDraft, hydrateContractDraft, saveContractDraft } from '@/modules/contract_management/utils/contractDraft'
+import { isSystemContractNumberField, isContractAmountField, synchronizeContractTemplateValues } from '@/modules/contract_management/utils/systemTemplateFields'
 import { closeSubsystemTabOrFallback } from '@/modules/contract_management/utils/returnToPortal'
 import '@/modules/contract_management/styles/contract-management.css'
 
@@ -184,6 +189,8 @@ const ruleDialogOpen = ref(false)
 const templateUploadDialogOpen = ref(false)
 const templateUploading = ref(false)
 const templateUploadForm = ref({ name: '', file: null })
+const templateReplacementID = ref('')
+const templateUploadError = ref('')
 const templateEditDialogOpen = ref(false)
 const templateSaving = ref(false)
 const templateEditForm = ref({ id: '', name: '', number_format: 'HT-{YYYYMMDD}-{ID8}', fields: [] })
@@ -198,6 +205,10 @@ const externalContractFile = ref(null)
 const externalContractFileError = ref('')
 const externalContractFileInputKey = ref(0)
 const contractCreating = ref(false)
+const editingContract = ref(null)
+const draftEditLoading = ref(false)
+const draftEditError = ref('')
+const draftEditConflict = ref(false)
 const emptyServiceItem = () => ({ service_type: '', name: '', site: '', batch: '第一批次', category: '', requirement: '', test_mode: 'STANDARD', systems: [] })
 const emptyNewContract = () => ({
   opportunity_id: '', opportunity_name: '', customer_id: '', title: '', contract_type: '', amount: '', currency: 'CNY',
@@ -208,7 +219,7 @@ const emptyNewContract = () => ({
 const newContract = ref(emptyNewContract())
 
 const contractTypeOptions = ['直签', '三方']
-const serviceTypeOptions = ['等保测评', '商用密码应用安全性评估', '软件测试', '源代码审计', '渗透测试', '漏洞扫描', 'APP安全加固', '上线测试', '安全加固', '网络安全风险评估', '差距分析', '机房检测', '网络安全巡检服务', '安全培训', '安全性测试', '应急响应服务', '网络安全攻防演练', '安全运维']
+const serviceTypeOptions = ['等保测评', '商用密码应用安全性评估', '软件测试', '源代码审计', '渗透测试', '漏洞扫描', 'APP安全加固', '上线测试', '安全加固', '网络安全风险评估', '差距分析', '机房检测', '网络安全巡检服务', '安全培训', '安全性测试', '应急响应服务', '网络安全攻防演练', '安全运维', '模块开发', '技术咨询']
 const systemLevelOptions = ['一级', '二级', '三级', '四级']
 const opportunityPickerOpen = ref(false)
 const opportunityLoading = ref(false)
@@ -234,7 +245,8 @@ const canAddServiceItem = computed(() => newContract.value.service_items.length 
 const isExternalContractMode = computed(() => contractCreationMode.value === 'external')
 const canSaveNewContract = computed(() => {
   if (contractCreating.value) return false
-  return isExternalContractMode.value ? Boolean(externalContractFile.value) : Boolean(selectedContractTemplate.value)
+  if (draftEditConflict.value) return false
+  return isExternalContractMode.value ? Boolean(editingContract.value || externalContractFile.value) : Boolean(selectedContractTemplate.value)
 })
 
 const ruleFieldOptions = [
@@ -297,6 +309,7 @@ const navGroups = computed(() => (isAdmin.value ? adminNavGroupDefinitions : use
   .map((group) => ({ ...group, items: group.items.filter((item) => canAccessContractSection(session.value, item.key)) }))
   .filter((group) => group.items.length))
 const selectedContractTemplate = computed(() => contractTemplates.value.find((item) => item.id === newContract.value.template_id) || null)
+const editableContractTemplateFields = computed(() => (selectedContractTemplate.value?.fields || []).filter((field) => !isSystemContractNumberField(field)))
 
 const keyword = ref('')
 const statusFilter = ref('')
@@ -559,6 +572,7 @@ function normalizeContract(item) {
     inApproval: Boolean(item.in_approval),
     activeUnexpired: Boolean(item.active_unexpired),
     expired: Boolean(item.expired),
+    canEditDraft: canEditContractDraft(item),
   }
 }
 
@@ -591,6 +605,7 @@ function signingProgress(record) {
 }
 
 async function openContract(contract) {
+  termsIdentical.value = false
   selectedContract.value = contract
   selectedContractPreviewHTML.value = ''
   selectedContractPreviewError.value = ''
@@ -620,6 +635,7 @@ function closeContract() {
 }
 
 const lifecycleReasonLabels = {
+  'contract draft edited': '编辑合同草稿',
   'contract created': '创建合同',
   'submitted for approval': '提交合同审批',
   'all approval nodes passed': '全部审批节点已通过',
@@ -1167,6 +1183,7 @@ async function submitOpportunityIntakeReview() {
 
 function selectTemplateFile(event) {
   templateUploadForm.value.file = event.target.files?.[0] || null
+  templateUploadError.value = ''
 }
 
 function openTemplateUpload() {
@@ -1175,6 +1192,20 @@ function openTemplateUpload() {
     return
   }
   templateUploadForm.value = { name: '', file: null }
+  templateReplacementID.value = ''
+  templateUploadError.value = ''
+  templateUploadDialogOpen.value = true
+}
+
+function openTemplateReplacement(item) {
+  if (!isAdmin.value) {
+    showToast('只有超级管理员可以替换合同模板。')
+    return
+  }
+  if (!window.confirm(`替换“${item.name}”的 DOCX 模板文件？同名字段配置会保留，新字段需要重新核对；已生成合同的固化正文不变。`)) return
+  templateReplacementID.value = item.id
+  templateUploadForm.value = { name: item.name, file: null }
+  templateUploadError.value = ''
   templateUploadDialogOpen.value = true
 }
 
@@ -1187,19 +1218,30 @@ async function submitTemplateUpload() {
     showToast('请选择 DOCX 模板文件。')
     return
   }
+  const file = templateUploadForm.value.file
+  const mime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+  if (!file.name.toLowerCase().endsWith('.docx') || (file.type && file.type !== mime) || file.size <= 0 || file.size > 10 * 1024 * 1024) {
+    templateUploadError.value = '请选择不超过 10MB 的有效 DOCX 模板文件。'
+    return
+  }
+  templateUploadError.value = ''
   templateUploading.value = true
   try {
     // accept 仅改善文件选择体验；DOCX 类型、大小、压缩包结构和占位符仍必须由后端
     // 按不可信文件重新校验，页面只在服务端确认后刷新模板目录。
-    await uploadContractTemplate({
+    if (templateReplacementID.value) {
+      await replaceContractTemplateSource(templateReplacementID.value, file)
+    } else await uploadContractTemplate({
       name: templateUploadForm.value.name.trim(),
       file: templateUploadForm.value.file,
     })
     contractTemplates.value = await listContractTemplates()
+    if (newContract.value.template_id === templateReplacementID.value) selectContractTemplate()
     templateUploadDialogOpen.value = false
-    showToast('合同模板上传成功')
+    showToast(templateReplacementID.value ? '合同模板文件替换成功，请核对新增字段配置' : '合同模板上传成功')
   } catch (error) {
-    showToast(error?.message || '上传合同模板失败')
+    templateUploadError.value = error?.message || '上传合同模板失败'
+    showToast(templateUploadError.value)
   } finally {
     templateUploading.value = false
   }
@@ -1259,6 +1301,10 @@ async function removeTemplate(item) {
 }
 
 function openNewContract() {
+  termsIdentical.value = false
+  editingContract.value = null
+  draftEditError.value = ''
+  draftEditConflict.value = false
   newContract.value = emptyNewContract()
   contractCreationMode.value = 'template'
   externalContractFile.value = null
@@ -1269,7 +1315,42 @@ function openNewContract() {
   createDialogOpen.value = true
 }
 
+async function editContractDraft(contract) {
+  if (draftEditLoading.value || contractCreating.value) return
+  draftEditLoading.value = true
+  try {
+    const raw = await getContract(contract.recordId || contract.id)
+    const form = hydrateContractDraft(raw)
+    editingContract.value = raw
+    newContract.value = form
+    draftEditError.value = ''
+    draftEditConflict.value = false
+    contractCreationMode.value = raw.template_id ? 'template' : 'external'
+    externalContractFile.value = null
+    externalContractFileError.value = ''
+    templatePreviewHTML.value = ''
+    templatePreviewError.value = ''
+    closeContract()
+    createDialogOpen.value = true
+    if (!raw.template_id) void loadDetectionCategoryOptions()
+    else if (!selectedContractTemplate.value) draftEditError.value = '原合同模板已不可用，不能重新生成正文，请联系管理员恢复原模板。'
+  } catch (error) {
+    showToast(error?.message || '读取草稿失败')
+  } finally {
+    draftEditLoading.value = false
+  }
+}
+
+function closeDraftEditor() {
+  if (contractCreating.value) return
+  createDialogOpen.value = false
+  editingContract.value = null
+  draftEditError.value = ''
+  draftEditConflict.value = false
+}
+
 function selectContractCreationMode(mode) {
+  if (editingContract.value) return
   detectionCategoryRequestID += 1
   contractCreationMode.value = mode
   templatePreviewHTML.value = ''
@@ -1473,12 +1554,22 @@ function selectContractTemplate() {
   templatePreviewError.value = ''
 }
 
+function syncManagedTemplateValues() {
+  newContract.value.template_values = synchronizeContractTemplateValues(
+    selectedContractTemplate.value?.fields, newContract.value.template_values, newContract.value.amount,
+  )
+}
+
+watch(() => [newContract.value.amount, newContract.value.template_id], syncManagedTemplateValues)
+watch(newContract, () => { templatePreviewHTML.value = '' }, { deep: true })
+
 async function previewNewContract() {
   if (!selectedContractTemplate.value) {
     templatePreviewError.value = '请先选择合同模板。'
     return
   }
-  const missingField = (selectedContractTemplate.value.fields || []).find((field) => !String(newContract.value.template_values[field.name] ?? '').trim() && !field.default)
+  syncManagedTemplateValues()
+  const missingField = (selectedContractTemplate.value.fields || []).find((field) => !isSystemContractNumberField(field) && !String(newContract.value.template_values[field.name] ?? '').trim() && !field.default)
   if (missingField) {
     templatePreviewError.value = `请先填写“${missingField.label}”。`
     return
@@ -1526,6 +1617,7 @@ function buildNewContractPayload() {
     start_date: contractDateValue(newContract.value.start_date),
     end_date: contractDateValue(newContract.value.end_date),
     service_items: newContract.value.service_items.map((serviceItem) => ({
+      ...(editingContract.value && serviceItem.source_id ? { source_id: serviceItem.source_id } : {}),
       service_type: serviceItem.service_type,
       name: serviceItem.name.trim(),
       site: serviceItem.site.trim(),
@@ -1540,7 +1632,7 @@ function buildNewContractPayload() {
 }
 
 function validateExternalContract() {
-  if (!externalContractFile.value) throw new Error(externalContractFileError.value || '请选择不超过 10MB 的 DOCX 文件。')
+  if (!editingContract.value && !externalContractFile.value) throw new Error(externalContractFileError.value || '请选择不超过 10MB 的 DOCX 文件。')
   if (!newContract.value.customer_id) throw new Error('请选择 CRM 客户。')
   if (detectionCategoryLoading.value) throw new Error('检测类别目录正在加载，请稍后再试。')
   if (detectionCategoryError.value) throw new Error(detectionCategoryError.value)
@@ -1568,10 +1660,43 @@ async function refreshSelectedCRMAccess() {
   }
 }
 
-async function submitNewContract() {
+async function submitNewContract(event) {
+  if (contractCreating.value || draftEditConflict.value) return
   contractCreating.value = true
+  draftEditError.value = ''
+  const wasEditing = Boolean(editingContract.value)
   try {
+    syncManagedTemplateValues()
     const payload = buildNewContractPayload()
+    if (editingContract.value) {
+      if (isExternalContractMode.value) {
+        validateExternalContract()
+        await refreshSelectedCRMAccess()
+      } else {
+        if (!selectedContractTemplate.value) throw new Error('请先选择可用合同模板。')
+        payload.template_id = selectedContractTemplate.value.id
+        payload.template_values = { ...newContract.value.template_values }
+      }
+      const submit = event?.submitter?.dataset?.action === 'approval'
+      const result = await saveContractDraft({
+        contractId: editingContract.value.id, version: editingContract.value.version, payload,
+        updateDraft: updateContractDraft, submit,
+        submitApproval: (id, revision) => submitContract(id, { ...revision, terms_identical: termsIdentical.value }),
+        onSaved: (saved) => { editingContract.value = saved },
+      })
+      createDialogOpen.value = false
+      editingContract.value = null
+      if (result.approval) {
+        const pendingApproval = initializingApproval(result.approval, normalizeContract(result.saved))
+        initiatedApprovals.value = [pendingApproval, ...initiatedApprovals.value.filter((item) => item.id !== pendingApproval.id)]
+        approvalTab.value = 'initiated'
+        termsIdentical.value = false
+        await waitForInitiatedApproval(result.approval.approval_id)
+      }
+      await loadBusinessData()
+      showToast(submit ? '修改已保存，合同已发起审批' : '合同草稿修改已保存')
+      return
+    }
     if (isExternalContractMode.value) {
       validateExternalContract()
       // 提交前重新经过 CRM 浏览器鉴权，既给用户即时反馈，也刷新 CRM 的服务端授权快照；
@@ -1598,7 +1723,11 @@ async function submitNewContract() {
     // /contract-drafts 回传接口，也不能把合同创建 ID 当作转交事件 ID。
     showToast(isExternalContractMode.value ? '外部合同草稿已创建' : '合同草稿已创建')
   } catch (error) {
-    showToast(error?.message || '创建合同失败')
+    if (editingContract.value) {
+      draftEditConflict.value = error?.status === 409 || error?.requiresReload === true
+      draftEditError.value = `${error?.message || '保存或提交失败'}${draftEditConflict.value ? '。请重新载入最新草稿后再编辑，未自动覆盖当前修改。' : '。如保存已成功而审批失败，修改仍保留为草稿。'}`
+    }
+    showToast(error?.message || (wasEditing ? '编辑或提交失败，请检查最新合同状态' : '创建合同失败'))
   } finally {
     contractCreating.value = false
   }
@@ -1690,11 +1819,11 @@ function processApproval(action) {
 }
 
 async function submitSelectedContract() {
-  if (!selectedContract.value || selectedContract.value.status !== '草稿') return
+  if (!selectedContract.value?.canEditDraft || selectedContract.value.status !== '草稿') return
   submittingContract.value = true
   try {
     const submittedContract = selectedContract.value
-    const started = await submitContract(submittedContract.recordId, { terms_identical: termsIdentical.value })
+    const started = await submitContract(submittedContract.recordId, { terms_identical: termsIdentical.value, expected_version: submittedContract.version })
     const pendingApproval = initializingApproval(started, submittedContract)
     initiatedApprovals.value = [pendingApproval, ...initiatedApprovals.value.filter((item) => item.id !== pendingApproval.id)]
     approvalTab.value = 'initiated'
@@ -1949,7 +2078,7 @@ onBeforeUnmount(() => {
             <article v-for="(item, index) in contractTemplates" :key="item.id">
               <div class="contract-template-cover" :class="['', 'purple', 'green', 'orange'][index % 4]"><span><ConsoleIcon name="save" /></span><i>DOCX</i></div>
               <div class="contract-template-copy"><span class="contract-badge success"><i></i>可用</span><h3>{{ item.name }}</h3><p>{{ item.original_filename }}</p><p>编号格式：{{ item.number_format || 'HT-{YYYYMMDD}-{ID8}' }}</p><div><span>{{ item.fields?.length || 0 }} 个填写字段 · {{ item.fields?.filter((field) => field.locked).length || 0 }} 个管理员配置</span><span>{{ formatDate(item.created_at) }}</span></div></div>
-              <footer v-if="isAdmin" class="contract-template-actions"><button type="button" @click="editTemplate(item)">编辑</button><button class="danger" type="button" @click="removeTemplate(item)">删除</button></footer>
+              <footer v-if="isAdmin" class="contract-template-actions"><button type="button" @click="editTemplate(item)">编辑</button><button type="button" @click="openTemplateReplacement(item)">替换模板文件</button><button class="danger" type="button" @click="removeTemplate(item)">删除</button></footer>
             </article>
           </section>
           <div v-else class="contract-card contract-empty-state"><ConsoleIcon name="save" /><h3>暂无合同模板</h3><p>{{ isAdmin ? '点击右上角“上传模板”添加第一个 DOCX 模板。' : '超级管理员尚未上传合同模板。' }}</p></div>
@@ -2032,9 +2161,9 @@ onBeforeUnmount(() => {
         <header><div><span class="contract-badge" :class="statusTone(selectedContract.status)"><i></i>{{ selectedContract.status }}</span><h2>{{ selectedContract.name }}</h2><p>{{ selectedContract.id }}</p></div><button type="button" aria-label="关闭" @click="closeContract"><ConsoleIcon name="close" /></button></header>
         <div class="contract-detail-highlight"><div><span>合同金额</span><strong>{{ formatContractAmount(selectedContract) }}</strong></div><div><span>更新日期</span><strong>{{ selectedContract.updatedAt }}</strong></div><div><span>负责人姓名</span><strong>{{ selectedContract.owner }}</strong></div></div>
         <section><h3>基本信息</h3><dl><div><dt>合同类型</dt><dd>{{ selectedContract.type }}</dd></div><div><dt>服务类型</dt><dd>{{ selectedContract.serviceType }}</dd></div><div><dt>创建日期</dt><dd>{{ selectedContract.createdAt }}</dd></div><div><dt>到期日期</dt><dd>{{ selectedContract.endDate }}</dd></div></dl></section>
-        <section><h3>合同内容</h3><div v-if="selectedContractPreviewLoading" class="contract-modal-loading">正在读取格式化合同…</div><p v-else-if="selectedContractPreviewError" class="contract-session-error">{{ selectedContractPreviewError }}</p><ContractDocumentPreview v-else-if="selectedContractPreviewHTML" class="contract-saved-document-preview" title="合同正文预览" :html="selectedContractPreviewHTML" /><p v-else class="contract-approval-summary">{{ selectedContract.content || '未填写合同内容' }}</p><label v-if="selectedContract.status === '草稿' && can('contract.create')" class="contract-check-label"><input v-model="termsIdentical" type="checkbox" /><span>本合同条款与关联历史合同一致（参与审批规则匹配）</span></label></section>
+        <section><h3>合同内容</h3><div v-if="selectedContractPreviewLoading" class="contract-modal-loading">正在读取格式化合同…</div><p v-else-if="selectedContractPreviewError" class="contract-session-error">{{ selectedContractPreviewError }}</p><ContractDocumentPreview v-else-if="selectedContractPreviewHTML" class="contract-saved-document-preview" title="合同正文预览" :html="selectedContractPreviewHTML" /><p v-else class="contract-approval-summary">{{ selectedContract.content || '未填写合同内容' }}</p><label v-if="selectedContract.status === '草稿' && selectedContract.canEditDraft" class="contract-check-label"><input v-model="termsIdentical" type="checkbox" /><span>本合同条款与关联历史合同一致（参与审批规则匹配）</span></label></section>
         <section><h3>流转明细</h3><div v-if="selectedContractLifecycleLoading" class="contract-modal-loading">正在读取流转明细…</div><p v-else-if="selectedContractLifecycleError" class="contract-session-error">{{ selectedContractLifecycleError }}</p><div v-else-if="selectedContractLifecycle.length" class="contract-action-log"><div v-for="event in selectedContractLifecycle" :key="event.id"><strong>{{ contractStatusLabel(event.from_status) }} → {{ contractStatusLabel(event.to_status) }}</strong><span>{{ event.actor_user_id === 'SYSTEM' ? '系统' : displayNameFor(event.actor_user_id) }}</span><p>{{ lifecycleReason(event.reason) }} · {{ formatDateTime(event.occurred_at) }}</p></div></div><p v-else class="contract-approval-summary">暂无流转记录</p></section>
-        <footer><button class="contract-button secondary" type="button" @click="closeContract">关闭</button><button v-if="selectedContract.status === '草稿' && can('contract.create')" class="contract-button primary" type="button" :disabled="submittingContract" @click="submitSelectedContract">{{ submittingContract ? '正在提交…' : '提交审批' }}</button></footer>
+        <footer><button class="contract-button secondary" type="button" @click="closeContract">关闭</button><button v-if="selectedContract.canEditDraft" class="contract-button secondary" type="button" :disabled="draftEditLoading || submittingContract" @click="editContractDraft(selectedContract)">{{ draftEditLoading ? '正在读取…' : '返回上一步编辑' }}</button><button v-if="selectedContract.status === '草稿' && selectedContract.canEditDraft" class="contract-button primary" type="button" :disabled="submittingContract" @click="submitSelectedContract">{{ submittingContract ? '正在提交…' : '提交审批' }}</button></footer>
       </article>
     </div>
 
@@ -2044,23 +2173,25 @@ onBeforeUnmount(() => {
 
     <div v-if="ruleDialogOpen" class="contract-modal-mask" @click.self="ruleDialogOpen = false"><form class="contract-detail-modal contract-rule-modal" @submit.prevent="saveRule"><header><div><span class="contract-badge info">规则引擎</span><h2>{{ editingRuleId ? '编辑审批规则' : '新增审批规则' }}</h2><p>按优先级从高到低匹配，命中第一条规则后固化到审批实例。</p></div><button type="button" aria-label="关闭" @click="ruleDialogOpen = false"><ConsoleIcon name="close" /></button></header><section><div class="contract-form-grid"><label><span>规则名称</span><input v-model="ruleForm.name" required placeholder="例如：标准服务简化审批" /></label><label><span>优先级</span><input v-model.number="ruleForm.priority" required type="number" /></label><label><span>条件关系</span><select v-model="ruleForm.logical"><option value="and">全部满足（AND）</option><option value="or">任一满足（OR）</option></select></label><label class="contract-check-label"><input v-model="ruleForm.enabled" type="checkbox" /><span>保存后立即启用</span></label></div></section><section><div class="contract-section-title"><h3>触发条件</h3><button class="contract-text-button" type="button" @click="addRuleCondition">＋ 添加条件</button></div><div class="contract-rule-editor-list"><div v-for="(condition, index) in ruleForm.conditions" :key="index"><select v-model="condition.field" @change="condition.operator = conditionOperators(condition.field)[0].value; condition.value = conditionField(condition.field).kind === 'boolean' ? true : ''"><option v-for="field in ruleFieldOptions" :key="field.value" :value="field.value">{{ field.label }}</option></select><select v-model="condition.operator"><option v-for="operator in conditionOperators(condition.field)" :key="operator.value" :value="operator.value">{{ operator.label }}</option></select><select v-if="conditionField(condition.field).kind === 'boolean'" v-model="condition.value"><option :value="true">是</option><option :value="false">否</option></select><input v-else v-model="condition.value" required :type="conditionField(condition.field).kind === 'number' ? 'number' : 'text'" :placeholder="condition.operator === 'in' ? '多个值用逗号分隔' : '条件值'" /><button type="button" aria-label="删除条件" :disabled="ruleForm.conditions.length === 1" @click="ruleForm.conditions.splice(index, 1)">×</button></div></div></section><section><div class="contract-section-title"><h3>审批节点</h3><button class="contract-text-button" type="button" @click="addRuleNode">＋ 添加节点</button></div><div class="contract-rule-editor-list nodes"><div v-for="(node, index) in ruleForm.nodes" :key="index"><input v-model="node.name" required placeholder="节点名称" /><select v-model="node.role_code" required><option value="">请选择审批角色</option><option v-if="node.role_code && !contractRole(node.role_code)" :value="node.role_code">未识别角色</option><option v-for="role in CONTRACT_ROLE_DEFINITIONS" :key="role.code" :value="role.code">{{ role.name }}</option></select><select v-model="node.countersign" disabled><option value="any">或签（任一）</option></select><button type="button" aria-label="删除节点" :disabled="ruleForm.nodes.length === 1" @click="ruleForm.nodes.splice(index, 1)">×</button></div></div></section><footer><button class="contract-button secondary" type="button" @click="ruleDialogOpen = false">取消</button><button class="contract-button primary" type="submit" :disabled="ruleSaving">{{ ruleSaving ? '正在保存…' : '保存规则' }}</button></footer></form></div>
 
-    <div v-if="createDialogOpen" class="contract-modal-mask" @click.self="createDialogOpen = false">
-      <form class="contract-detail-modal contract-create-modal" @submit.prevent="submitNewContract">
-        <header><div><span class="contract-badge info">合同草稿</span><h2>新建合同</h2><p>可使用标准模板生成，也可上传不依赖模板的外部合同 DOCX</p></div><button type="button" aria-label="关闭" @click="createDialogOpen = false"><ConsoleIcon name="close" /></button></header>
+    <div v-if="createDialogOpen" class="contract-modal-mask" @click.self="closeDraftEditor">
+      <form class="contract-detail-modal contract-create-modal" @submit.prevent="submitNewContract($event)">
+        <header><div><span class="contract-badge info">合同草稿</span><h2>{{ editingContract ? '编辑合同草稿' : '新建合同' }}</h2><p>{{ editingContract ? '修改现有草稿；创建人、合同来源及数据范围保持不变' : '可使用标准模板生成，也可上传不依赖模板的外部合同 DOCX' }}</p></div><button type="button" aria-label="关闭" :disabled="contractCreating" @click="closeDraftEditor"><ConsoleIcon name="close" /></button></header>
         <section>
           <div class="contract-form-grid">
-            <div class="contract-form-wide contract-creation-mode" role="radiogroup" aria-label="合同创建方式"><button type="button" :class="{ active: contractCreationMode === 'template' }" role="radio" :aria-checked="contractCreationMode === 'template'" @click="selectContractCreationMode('template')"><strong>使用合同模板</strong><span>选择标准模板并填写模板字段</span></button><button type="button" :class="{ active: contractCreationMode === 'external' }" role="radio" :aria-checked="contractCreationMode === 'external'" @click="selectContractCreationMode('external')"><strong>上传外部合同</strong><span>上传未签署 DOCX，并补全结构化字段</span></button></div>
-            <label v-if="contractCreationMode === 'template'" class="contract-form-wide contract-template-first"><span>第一步：选择合同模板</span><select v-model="newContract.template_id" required @change="selectContractTemplate"><option value="" disabled>请选择用于新建合同的模板</option><option v-for="item in contractTemplates" :key="item.id" :value="item.id">{{ item.name }}（{{ item.fields?.length || 0 }} 个字段）</option></select><small>模板将生成合同正文，合同编号在审批通过后自动生成。</small></label>
-            <label v-else class="contract-form-wide contract-external-file"><span>第一步：上传外部合同 DOCX</span><input :key="externalContractFileInputKey" required type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" @change="selectExternalContractFile" /><small v-if="externalContractFile">已选择：{{ externalContractFile.name }}（{{ (externalContractFile.size / 1024 / 1024).toFixed(2) }}MB）</small><small v-else>仅支持未签署 DOCX，文件不能为空且不超过 10MB；服务端将继续校验文件结构和安全边界。</small><small v-if="externalContractFileError" class="contract-field-error" role="alert">{{ externalContractFileError }}</small></label>
+            <p v-if="editingContract && isExternalContractMode" class="contract-info-banner contract-form-wide">编辑结构化信息时保留原外部 DOCX，不替换合同文件；正文金额等条款如需改变，应创建与新文件一致的合同。</p>
+            <p v-if="draftEditError" class="contract-session-error contract-form-wide" role="alert">{{ draftEditError }} <button v-if="draftEditConflict" type="button" :disabled="contractCreating || draftEditLoading" @click="editContractDraft(editingContract)">重新载入草稿（放弃未保存修改）</button></p>
+            <div v-if="!editingContract" class="contract-form-wide contract-creation-mode" role="radiogroup" aria-label="合同创建方式"><button type="button" :class="{ active: contractCreationMode === 'template' }" role="radio" :aria-checked="contractCreationMode === 'template'" @click="selectContractCreationMode('template')"><strong>使用合同模板</strong><span>选择标准模板并填写模板字段</span></button><button type="button" :class="{ active: contractCreationMode === 'external' }" role="radio" :aria-checked="contractCreationMode === 'external'" @click="selectContractCreationMode('external')"><strong>上传外部合同</strong><span>上传未签署 DOCX，并补全结构化字段</span></button></div>
+            <label v-if="contractCreationMode === 'template'" class="contract-form-wide contract-template-first"><span>第一步：选择合同模板</span><select v-model="newContract.template_id" :disabled="Boolean(editingContract)" required @change="selectContractTemplate"><option value="" disabled>请选择用于新建合同的模板</option><option v-for="item in contractTemplates" :key="item.id" :value="item.id">{{ item.name }}（{{ item.fields?.length || 0 }} 个字段）</option></select><small>模板将生成合同正文，合同编号在审批通过后自动生成。</small></label>
+            <label v-else-if="!editingContract" class="contract-form-wide contract-external-file"><span>第一步：上传外部合同 DOCX</span><input :key="externalContractFileInputKey" required type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" @change="selectExternalContractFile" /><small v-if="externalContractFile">已选择：{{ externalContractFile.name }}（{{ (externalContractFile.size / 1024 / 1024).toFixed(2) }}MB）</small><small v-else>仅支持未签署 DOCX，文件不能为空且不超过 10MB；服务端将继续校验文件结构和安全边界。</small><small v-if="externalContractFileError" class="contract-field-error" role="alert">{{ externalContractFileError }}</small></label>
             <template v-if="selectedContractTemplate || isExternalContractMode">
               <label v-if="isExternalContractMode"><span>CRM 客户</span><div class="contract-opportunity-control"><button type="button" @click="openCustomerPicker">{{ newContract.customer_name || '点击选择权限范围内的客户' }}</button><button v-if="newContract.customer_id" type="button" aria-label="清除 CRM 客户" @click="clearCustomer">×</button></div><small>外部合同必须关联 CRM 客户，不能只输入客户名称</small></label>
               <label><span>关联商机（选填）</span><div class="contract-opportunity-control"><button type="button" :disabled="isExternalContractMode && !newContract.customer_id" @click="openOpportunityPicker">{{ newContract.opportunity_name || (isExternalContractMode && !newContract.customer_id ? '请先选择 CRM 客户' : (isExternalContractMode ? '点击选择该客户的商机' : '点击选择权限范围内的商机')) }}</button><button v-if="newContract.opportunity_id" type="button" aria-label="清除关联商机" @click="clearOpportunity">×</button></div><small>合同编号将在审批通过后自动生成</small></label>
               <label><span>合同名称</span><input v-model="newContract.title" required placeholder="请输入合同名称" /></label>
-              <label><span>合同负责人</span><input :value="currentUserLabel" readonly aria-readonly="true" /><small>已根据当前登录用户自动填入</small></label>
+              <label><span>合同负责人</span><input :value="editingContract ? editingContract.owner_display_name : currentUserLabel" readonly aria-readonly="true" /><small>{{ editingContract ? '保留原合同创建人，不随编辑人变更' : '已根据当前登录用户自动填入' }}</small></label>
               <label><span>合同类型</span><select v-model="newContract.contract_type" required><option value="" disabled>请选择合同类型</option><option v-for="item in contractTypeOptions" :key="item" :value="item">{{ item }}</option></select></label>
               <div class="contract-form-wide contract-service-items"><div class="contract-section-title"><div><h3>服务项</h3><p>外部合同的场所、批次和检测类别必须完整，合同生效后将用于项目拆解；最多 20 个服务项。</p></div><button class="contract-text-button" type="button" :disabled="!canAddServiceItem" @click="addServiceItem">＋ 增加服务项</button></div><p v-if="isExternalContractMode && detectionCategoryLoading" class="contract-service-directory-state">正在读取项目管理检测类别…</p><p v-else-if="isExternalContractMode && detectionCategoryError" class="contract-field-error" role="alert">{{ detectionCategoryError }} <button type="button" @click="loadDetectionCategoryOptions">重新加载</button></p><article v-for="(serviceItem, serviceIndex) in newContract.service_items" :key="serviceIndex" class="contract-service-item"><header><strong>服务项 {{ serviceIndex + 1 }}</strong><button type="button" :aria-label="`删除服务项 ${serviceIndex + 1}`" @click="removeServiceItem(serviceIndex)">×</button></header><label><span>服务类型</span><select v-model="serviceItem.service_type" required><option value="" disabled>请选择服务类型</option><option v-for="item in serviceTypeOptions" :key="item" :value="item">{{ item }}</option></select></label><label><span>服务名称</span><input v-model="serviceItem.name" placeholder="默认使用服务类型" /></label><label><span>实施场所</span><input v-model="serviceItem.site" :required="isExternalContractMode" placeholder="例如：上海总部" /></label><label><span>实施批次</span><input v-model="serviceItem.batch" :required="isExternalContractMode" placeholder="默认：第一批次" /></label><label><span>检测类别</span><select v-if="isExternalContractMode" v-model="serviceItem.category" required :disabled="detectionCategoryLoading || !detectionCategoryOptions.length"><option value="" disabled>{{ detectionCategoryLoading ? '正在加载检测类别' : (detectionCategoryError ? '目录加载失败，请点击上方重新加载' : '请选择检测类别') }}</option><option v-for="item in detectionCategoryOptions" :key="item.category" :value="item.category">{{ item.category }}</option></select><input v-else v-model="serviceItem.category" placeholder="默认使用服务类型" /></label><label><span>检测方式</span><select v-model="serviceItem.test_mode" required><option value="STANDARD">常规检测</option><option value="PENETRATION">渗透测试</option></select></label><label><span>体系 / 能力要求</span><input v-model="serviceItem.requirement" placeholder="例如：等保三级" /></label><section class="contract-system-information"><div class="contract-section-title"><div><h3>系统信息（选填）</h3><p>每个系统将形成可独立实施的服务来源，最多 15 个。</p></div><button class="contract-text-button" type="button" :disabled="!canAddSystemRow(serviceItem)" @click="addSystemRow(serviceItem)">＋ 增加系统信息</button></div><p v-if="!serviceItem.systems.length" class="contract-service-empty">尚未增加系统信息</p><div v-for="(system, systemIndex) in serviceItem.systems" :key="systemIndex" class="contract-system-row"><label><span>系统名称</span><input v-model="system.name" required maxlength="255" placeholder="请输入系统名称" /></label><label><span>系统等级</span><select v-model="system.level" required><option value="">请选择系统等级</option><option v-for="level in systemLevelOptions" :key="level" :value="level">{{ level }}</option></select></label><button type="button" aria-label="删除系统信息" @click="removeSystemRow(serviceItem, systemIndex)">×</button></div></section></article></div>
-              <label><span>合同金额</span><input v-model="newContract.amount" required type="number" min="0" step="0.01" placeholder="0.00" /></label>
-              <label><span>币种</span><input v-model="newContract.currency" required /></label>
+              <label><span>合同金额</span><input v-model="newContract.amount" :readonly="Boolean(editingContract && isExternalContractMode)" required type="number" min="0" step="0.01" placeholder="0.00" /><small v-if="editingContract && isExternalContractMode">原 DOCX 保持不变，金额不能单独修改</small></label>
+              <label><span>币种</span><input v-model="newContract.currency" :readonly="Boolean(editingContract && isExternalContractMode)" required /></label>
               <label><span>开始日期（选填）</span><input v-model="newContract.start_date" type="date" /></label>
               <label><span>结束日期（选填）</span><input v-model="newContract.end_date" type="date" :min="newContract.start_date || undefined" /></label>
               <label><span>客户名称</span><input v-model="newContract.customer_name" required :readonly="isExternalContractMode" :aria-readonly="isExternalContractMode ? 'true' : undefined" :placeholder="isExternalContractMode ? '请从 CRM 客户目录选择' : '请输入客户名称'" /></label>
@@ -2071,13 +2202,14 @@ onBeforeUnmount(() => {
           </div>
           <div v-if="selectedContractTemplate" class="contract-generated-form">
             <div class="contract-section-title"><div><h3>填写模板字段</h3><p>{{ selectedContractTemplate.original_filename }} · 姓名、账号、邮箱等当前用户已有信息会自动填入空白字段</p></div><button class="contract-button secondary small" type="button" :disabled="templatePreviewing" @click="previewNewContract">{{ templatePreviewing ? '正在生成预览…' : '预览合同' }}</button></div>
-            <div class="contract-template-field-grid"><label v-for="field in selectedContractTemplate.fields || []" :key="field.name" :title="field.locked && !isAdmin ? '此项已由管理员预设' : undefined"><span>{{ field.label }}</span><input v-model="newContract.template_values[field.name]" required :readonly="field.locked && !isAdmin" :class="{ 'is-admin-configured': field.locked && !isAdmin }" :title="field.locked && !isAdmin ? '此项已由管理员预设' : undefined" :placeholder="field.default ? `默认：${field.default}` : `请输入${field.label}`" /><small v-if="field.locked && !isAdmin">此项已由管理员预设</small></label></div>
+            <p v-if="selectedContractTemplate.fields?.some(isSystemContractNumberField)" class="contract-info-banner">正文合同编号由系统在审批通过后自动生成，不允许手工填写。</p>
+            <div class="contract-template-field-grid"><label v-for="field in editableContractTemplateFields" :key="field.name" :title="field.locked && !isAdmin ? '此项已由管理员预设' : undefined"><span>{{ field.label }}</span><input v-model="newContract.template_values[field.name]" required :readonly="isContractAmountField(field) || (field.locked && !isAdmin)" :class="{ 'is-admin-configured': field.locked && !isAdmin }" :title="field.locked && !isAdmin ? '此项已由管理员预设' : undefined" :placeholder="field.default ? `默认：${field.default}` : `请输入${field.label}`" /><small v-if="isContractAmountField(field)">自动使用上方合同金额；金额大写由服务端生成。</small><small v-else-if="field.locked && !isAdmin">此项已由管理员预设</small></label></div>
             <p v-if="templatePreviewError" class="contract-template-preview-error" role="alert">{{ templatePreviewError }}</p>
           </div>
           <p v-else-if="contractCreationMode === 'template'" class="contract-info-banner"><ConsoleIcon name="info" />请先选择合同模板，再填写合同、服务项和系统信息。</p>
           <ContractDocumentPreview v-if="templatePreviewHTML" ref="templatePreviewRef" closable :html="templatePreviewHTML" @close="templatePreviewHTML = ''" />
         </section>
-        <footer><button class="contract-button secondary" type="button" :disabled="contractCreating" @click="createDialogOpen = false">取消</button><button class="contract-button primary" type="submit" :disabled="!canSaveNewContract"><ConsoleIcon name="save" />{{ contractCreating ? '正在保存…' : (isExternalContractMode ? '上传并保存合同' : '生成并保存合同') }}</button></footer>
+        <footer><button class="contract-button secondary" type="button" :disabled="contractCreating" @click="closeDraftEditor">取消</button><button class="contract-button primary" type="submit" :disabled="!canSaveNewContract"><ConsoleIcon name="save" />{{ contractCreating ? '正在保存…' : (editingContract ? '保存为草稿' : (isExternalContractMode ? '上传并保存合同' : '生成并保存合同')) }}</button><button v-if="editingContract" class="contract-button primary" type="submit" data-action="approval" :disabled="!canSaveNewContract || !can('contract.create')">保存并发起审批</button></footer>
       </form>
     </div>
 
@@ -2085,7 +2217,7 @@ onBeforeUnmount(() => {
 
     <div v-if="opportunityPickerOpen" class="contract-modal-mask contract-opportunity-mask" @click.self="opportunityPickerOpen = false"><article class="contract-detail-modal contract-opportunity-modal"><header><div><span class="contract-badge info">客户与商机管理</span><h2>选择关联商机</h2><p>显示当前用户权限范围内的商机，检索由客户与商机管理服务端完成</p></div><button type="button" aria-label="关闭" @click="opportunityPickerOpen = false"><ConsoleIcon name="close" /></button></header><section><div class="contract-opportunity-search"><label><span>搜索商机</span><input v-model="opportunityKeyword" type="search" placeholder="商机名称 / 编号 / 客户名称" @keydown.enter.prevent="searchOpportunityOptions" /></label><button class="contract-button secondary" type="button" :disabled="opportunityLoading" @click="searchOpportunityOptions">搜索</button></div><p v-if="opportunityLoading" class="contract-modal-loading">正在读取商机…</p><p v-else-if="opportunityError" class="contract-session-error">{{ opportunityError }}</p><div v-else class="contract-opportunity-list"><button v-for="item in opportunityOptions" :key="item.id || item.opportunity_id" type="button" @click="selectOpportunity(item)"><strong>{{ item.name || item.title || item.opportunity_name }}</strong><span>{{ item.opportunity_no || item.code || item.opportunity_code || '—' }} · {{ item.customer_name || item.customer?.name || '未关联客户' }} · {{ item.current_stage || '阶段未知' }}</span></button><p v-if="!opportunityOptions.length" class="contract-empty">没有匹配的商机，请调整关键词后重试</p><button v-if="opportunityHasMore" class="contract-button secondary contract-opportunity-load-more" type="button" :disabled="opportunityLoading" @click="loadMoreOpportunityOptions">加载更多（已显示 {{ opportunityOptions.length }} / {{ opportunityTotal }}）</button></div></section><footer><button class="contract-button secondary" type="button" @click="opportunityPickerOpen = false">取消</button></footer></article></div>
 
-    <div v-if="templateUploadDialogOpen" class="contract-modal-mask" @click.self="templateUploadDialogOpen = false"><form class="contract-detail-modal contract-template-upload-modal" @submit.prevent="submitTemplateUpload"><header><div><span class="contract-badge info">超级管理员</span><h2>上传合同模板</h2><p>上传不超过 10MB 的 DOCX，模板中使用 <code v-pre>{{field_name:字段名称}}</code> 标记填写项。</p></div><button type="button" aria-label="关闭" @click="templateUploadDialogOpen = false"><ConsoleIcon name="close" /></button></header><section><div class="contract-form-grid"><label><span>模板名称</span><input v-model="templateUploadForm.name" required maxlength="160" placeholder="例如：标准服务合同" /></label><label><span>DOCX 文件</span><input required type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" @change="selectTemplateFile" /></label></div></section><footer><button class="contract-button secondary" type="button" :disabled="templateUploading" @click="templateUploadDialogOpen = false">取消</button><button class="contract-button primary" type="submit" :disabled="templateUploading">{{ templateUploading ? '正在上传…' : '上传模板' }}</button></footer></form></div>
+<div v-if="templateUploadDialogOpen" class="contract-modal-mask" @click.self="templateUploadDialogOpen = false"><form class="contract-detail-modal contract-template-upload-modal" @submit.prevent="submitTemplateUpload"><header><div><span class="contract-badge info">超级管理员</span><h2>{{ templateReplacementID ? '替换模板文件' : '上传合同模板' }}</h2><p><span v-if="templateReplacementID">保留模板标识和同名字段配置，已生成合同正文不变。请核对替换后的新字段。</span>上传不超过 10MB 的 DOCX，模板中使用 <code v-pre>{{field_name:字段名称}}</code> 标记填写项。</p></div><button type="button" aria-label="关闭" @click="templateUploadDialogOpen = false"><ConsoleIcon name="close" /></button></header><section><div class="contract-form-grid"><label><span>模板名称</span><input v-model="templateUploadForm.name" :readonly="Boolean(templateReplacementID)" required maxlength="160" placeholder="例如：标准服务合同" /></label><label><span>DOCX 文件</span><input required type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" @change="selectTemplateFile" /></label></div><p v-if="templateUploadError" class="contract-template-preview-error" role="alert">{{ templateUploadError }}</p></section><footer><button class="contract-button secondary" type="button" :disabled="templateUploading" @click="templateUploadDialogOpen = false">取消</button><button class="contract-button primary" type="submit" :disabled="templateUploading">{{ templateUploading ? '正在上传…' : (templateReplacementID ? '确认替换' : '上传模板') }}</button></footer></form></div>
 
     <div v-if="templateEditDialogOpen" class="contract-modal-mask" @click.self="templateEditDialogOpen = false"><form class="contract-detail-modal contract-template-edit-modal" @submit.prevent="saveTemplate"><header><div><span class="contract-badge info">超级管理员</span><h2>编辑合同模板</h2><p>可编辑合同编号格式，并将需要统一控制的合同信息设为管理员预设。</p></div><button type="button" aria-label="关闭" @click="templateEditDialogOpen = false"><ConsoleIcon name="close" /></button></header><section><div class="contract-template-base-fields"><label class="contract-template-name-field"><span>模板名称</span><input v-model="templateEditForm.name" required maxlength="160" /></label><label class="contract-template-name-field"><span>合同编号格式</span><input v-model="templateEditForm.number_format" required maxlength="160" placeholder="HT-{YYYYMMDD}-{ID8}" /><small>支持 {YYYYMMDD}、{YYYY}、{MM}、{DD}、{ID8}；必须包含 {ID8}</small></label></div><div class="contract-template-editor-list"><div v-for="field in templateEditForm.fields" :key="field.name" class="contract-template-editor-row"><label><span>显示名称</span><input v-model="field.label" required /></label><label><span>{{ field.locked ? '管理员预设值' : '默认值（可选）' }}</span><input v-model="field.default" :required="field.locked" :placeholder="field.locked ? '请输入固定值' : '新建合同时仍可修改'" /></label><label class="contract-check-label"><input v-model="field.locked" type="checkbox" /><span>由管理员预设</span></label></div><p v-if="!templateEditForm.fields.length" class="contract-session-error">该 DOCX 中没有可配置字段。</p></div></section><footer><button class="contract-button secondary" type="button" :disabled="templateSaving" @click="templateEditDialogOpen = false">取消</button><button class="contract-button primary" type="submit" :disabled="templateSaving">{{ templateSaving ? '正在保存…' : '保存模板' }}</button></footer></form></div>
 
