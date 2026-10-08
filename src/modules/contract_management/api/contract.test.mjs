@@ -32,6 +32,11 @@ test('contract template upload preserves browser multipart boundary', () => {
   assert.match(source, /request\('\/contract-templates',[\s\S]*method: 'POST',[\s\S]*body: form/)
 })
 
+test('template source replacement uploads multipart to the existing resource', () => {
+  assert.match(source, /replaceContractTemplateSource\(templateId, file\)[\s\S]*form\.append\('file', file\)/)
+  assert.match(source, /`\/contract-templates\/\$\{encodeURIComponent\(templateId\)\}\/source`[\s\S]*method: 'PUT',[\s\S]*body: form/)
+})
+
 test('contract template preview submits the generated field values', () => {
   assert.match(source, /previewContractTemplate\(templateId, values\)/)
   assert.match(source, /`\/contract-templates\/\$\{encodeURIComponent\(templateId\)\}\/preview`/)
@@ -52,6 +57,11 @@ test('saved contracts expose their formatted document preview', () => {
 test('contract details load the persisted lifecycle timeline', () => {
   assert.match(source, /listContractLifecycle\(contractId\)/)
   assert.match(source, /`\/contracts\/\$\{encodeURIComponent\(contractId\)\}\/lifecycle`/)
+})
+
+test('draft editing reads the current resource and PUTs the versioned existing draft', () => {
+  assert.match(source, /getContract\(contractId\)[\s\S]*request\(`\/contracts\/\$\{encodeURIComponent\(contractId\)\}`\)/)
+  assert.match(source, /updateContractDraft\(contractId, payload\)[\s\S]*\/draft`[\s\S]*method: 'PUT'[\s\S]*JSON.stringify\(payload\)/)
 })
 
 test('admin dashboard reads the tenant contract summary endpoint', () => {

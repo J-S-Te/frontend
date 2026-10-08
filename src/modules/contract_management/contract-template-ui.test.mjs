@@ -16,9 +16,17 @@ test('contract template page loads the real API and opens the upload dialog', ()
   assert.match(source, /@submit\.prevent="submitTemplateUpload"/)
 })
 
+test('template source replacement retains identity and explains existing contract integrity', () => {
+  assert.match(source, /@click="openTemplateReplacement\(item\)"/)
+  assert.match(source, /同名字段配置会保留[\s\S]*已生成合同的固化正文不变/)
+  assert.match(source, /replaceContractTemplateSource\(templateReplacementID\.value, file\)/)
+  assert.match(source, /templateUploadError"[\s\S]*role="alert"/)
+  assert.match(source, /newContract\.value\.template_id === templateReplacementID\.value\) selectContractTemplate/)
+})
+
 test('sales contract creation renders and submits template-generated fields', () => {
-  assert.match(source, /v-model="newContract\.template_id" required @change="selectContractTemplate"/)
-  assert.match(source, /v-for="field in selectedContractTemplate\.fields \|\| \[\]"/)
+  assert.match(source, /v-model="newContract\.template_id" :disabled="Boolean\(editingContract\)" required @change="selectContractTemplate"/)
+  assert.match(source, /v-for="field in editableContractTemplateFields"/)
   assert.match(source, /v-model="newContract\.template_values\[field\.name\]"/)
   assert.match(source, /previewContractTemplate\(selectedContractTemplate\.value\.id, newContract\.value\.template_values\)/)
   assert.match(source, /template_values: \{ \.\.\.newContract\.value\.template_values \}/)
@@ -30,7 +38,7 @@ test('admin can edit and delete templates while locked fields are read-only for 
   assert.match(source, /<footer v-if="isAdmin" class="contract-template-actions">[\s\S]*>编辑<[\s\S]*>删除</)
   assert.match(source, /updateContractTemplate\(templateEditForm\.value\.id/)
   assert.match(source, /deleteContractTemplate\(item\.id\)/)
-  assert.match(source, /:readonly="field\.locked && !isAdmin"/)
+  assert.match(source, /:readonly="isContractAmountField\(field\) \|\| \(field\.locked && !isAdmin\)"/)
   assert.match(source, /此项已由管理员预设/)
   assert.match(source, /:title="field\.locked && !isAdmin \? '此项已由管理员预设' : undefined"/)
 })
