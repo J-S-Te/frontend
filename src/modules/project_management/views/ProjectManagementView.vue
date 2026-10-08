@@ -11,6 +11,9 @@ import KpiCard from '@/modules/project_management/components/KpiCard.vue'
 import PageHead from '@/modules/project_management/components/PageHead.vue'
 import PenetrationWorkPackageCard from '@/modules/project_management/components/PenetrationWorkPackageCard.vue'
 import ProgressCell from '@/modules/project_management/components/ProgressCell.vue'
+import ProjectNotificationCenter from '@/modules/project_management/components/ProjectNotificationCenter.vue'
+import QualificationImportDialog from '@/modules/project_management/components/QualificationImportDialog.vue'
+import DetectionCategoryImportDialog from '@/modules/project_management/components/DetectionCategoryImportDialog.vue'
 import RiskList from '@/modules/project_management/components/RiskList.vue'
 import SearchableSelect from '@/modules/project_management/components/SearchableSelect.vue'
 import ServiceItemPicker from '@/modules/project_management/components/ServiceItemPicker.vue'
@@ -31,13 +34,11 @@ import {
   getProjectMonitoring,
   listCapabilities,
   upsertCapability,
-  importCapabilities,
   exportCapabilities,
   syncPersonnelIdentities,
   listEquipment,
   upsertEquipment,
   deleteEquipment,
-  importEquipment,
   listDeliveryEvents,
   listApplicationRoles,
   listRuleConfigurationCatalog,
@@ -50,7 +51,6 @@ import {
   deleteDetectionCategory,
   listSplitOverrides,
   saveSplitOverride,
-  importDetectionCategories,
   deleteSplitOverride,
   listServiceItems,
   listPersonnel,
@@ -109,6 +109,7 @@ const allNavGroups = [
   { label: '执行总览', items: [
     { key: 'dashboard', label: '项目执行总览', icon: 'dashboard' },
     { key: 'monitoring', label: '在途项目实时监控', icon: 'audit' },
+    { key: 'notifications', label: '个人通知中心', icon: 'bell' },
   ] },
   { label: '项目管理', items: [
     { key: 'projects', label: '项目列表', icon: 'account' },
@@ -137,6 +138,7 @@ const allNavGroups = [
 ]
 
 const pageMeta = {
+  notifications: ['个人通知中心', '查看发送给当前用户的统一站内信与业务提醒'],
   dashboard: ['项目执行总览', '全集团项目交付、资源与风险态势'],
   monitoring: ['在途项目 · 实时监控', '在途项目的里程碑、交付进度与资源状态'],
   projects: ['项目列表', '统一管理项目、合同来源、服务项及交付状态'],
@@ -457,8 +459,8 @@ const capabilityDialog = ref(null)
 // 资质工作台只新建/编辑人员资质；设备由「设备能力」统一维护。
 const capabilityAutoID = ref(false)
 const importResult = ref(null)
-const qualificationFileInput = ref(null)
-const equipmentFileInput = ref(null)
+const qualificationImportOpen = ref(false)
+const equipmentImportOpen = ref(false)
 // 资质列表受标签页（全部/人员/设备）与类型、状态筛选共同约束；
 // 「体系与编码」「到期提醒」两个标签页使用各自的聚合视图，不走本筛选。
 const filteredCapabilities = computed(() => capabilities.value
@@ -851,8 +853,8 @@ async function submitSplitPolicy() {
 }
 
 // 检测类别域 CSV 导出/导入：导出在浏览器侧生成（UTF-8 BOM，Excel 可直接打开），
-// 导入走批量接口并把逐行原因回显，避免整批失败。
-const detectionCategoryFileInput = ref(null)
+// 导入先由服务端预检，确认时重新校验勾选行。
+const detectionCategoryImportOpen = ref(false)
 const DETECTION_CATEGORY_HEADERS = ['检测类别', '默认体系要求', '必备资质（默认）', '必检能力码', '是否特殊方法', '状态']
 
 function csvCell(value) {
@@ -878,18 +880,11 @@ function downloadDetectionCategories() {
   showToast(`已导出 ${detectionCategories.value.length} 条检测类别`)
 }
 
-async function importDetectionCategoryFile(event) {
-  const file = event.target.files?.[0]
-  event.target.value = ''
-  if (!file) return
-  saving.value = true
+async function importDetectionCategoryFile(result) {
   try {
-    const result = await importDetectionCategories(file)
     detectionCategories.value = await listDetectionCategories()
-    showToast(result?.skipped ? `导入完成：成功 ${result.imported} 条，跳过 ${result.skipped} 条` : `导入完成：成功 ${result?.imported ?? 0} 条`)
-    if (result?.errors?.length) splitConfigError.value = `导入跳过原因：${result.errors.slice(0, 3).join('；')}`
-  } catch (error) { showToast(error?.message || 'CSV 导入失败', 'error') }
-  finally { saving.value = false }
+    showToast(`导入结果：成功 ${result.imported} 条，失败 ${result.skipped} 条`)
+  } catch (error) { showToast(`导入已完成，但类别目录刷新失败：${error?.message || '请手动刷新'}`, 'warning') }
 }
 
 function openCategoryDialog(item = null) {
@@ -2124,16 +2119,12 @@ async function removeEquipment(item) {
   } catch (error) { showToast(error?.message || '设备删除失败，请先确认设备未被实施计划占用', 'error') }
   finally { saving.value = false }
 }
-async function importEquipmentFile(event) {
-  const file = event.target.files?.[0]
-  event.target.value = ''
-  if (!file) return
+async function importEquipmentFile(result) {
   saving.value = true
+  showToast(`设备导入完成：成功 ${result.imported} 条${result.skipped ? `，失败 ${result.skipped} 条，请查看逐行结果` : ''}`, result.skipped ? 'warning' : 'success')
   try {
-    const result = await importEquipment(file)
     await loadEquipment()
-    showToast(`设备导入完成：成功 ${result.imported || 0} 条${result.skipped ? `，跳过 ${result.skipped} 条` : ''}`, result.skipped ? 'warning' : 'success')
-  } catch (error) { showToast(error?.message || '设备 CSV 导入失败', 'error') }
+  } catch (error) { showToast(`导入结果已保存，但台账刷新失败：${error?.message || '请刷新设备能力页面核对结果'}`, 'warning') }
   finally { saving.value = false }
 }
 
@@ -2196,18 +2187,12 @@ async function saveCapability() {
   finally { saving.value = false }
 }
 
-async function importQualificationFile(event) {
-  const file = event.target.files?.[0]
-  event.target.value = ''
-  if (!file) return
-  saving.value = true
+async function importQualificationFile(result) {
+  importResult.value = result
   try {
-    importResult.value = await importCapabilities(file)
     capabilities.value = await listCapabilities()
-    if (importResult.value.skipped > 0) showToast(`导入完成：成功 ${importResult.value.imported} 条，跳过 ${importResult.value.skipped} 条`)
-    else showToast(`导入完成：成功 ${importResult.value.imported} 条`)
-  } catch (error) { showToast(error?.message || 'CSV 导入失败', 'error') }
-  finally { saving.value = false }
+    showToast(`导入完成：成功 ${result.imported} 条，跳过 ${result.skipped} 条`)
+  } catch (error) { showToast(error?.message || '导入已完成，但台账刷新失败，请手动刷新', 'error') }
 }
 
 // 人员资质档案的身份必须回基础平台复核：本系统只知道"谁有资质"，
@@ -3220,14 +3205,15 @@ onBeforeUnmount(() => {
             <p v-else-if="notificationError" class="pm-notification-state danger">{{ notificationError }}</p>
             <button v-for="item in notificationItems" :key="item.delivery_id" :disabled="notificationActionID === item.delivery_id" @click="openNotification(item)"><i :class="item.category === 'DEVIATION_REPORTED' ? 'danger' : 'warning'"></i><span><b>{{ item.title }}</b><small>{{ item.content }}</small></span></button>
             <EmptyHint v-if="!notificationLoading && !notificationError && !notificationItems.length" message="暂无未读通知" />
+            <button v-if="navigation.sections.includes('notifications')" type="button" @click="closeNotifications(); navigate('notifications')">查看全部通知</button>
           </div>
         </Transition>
       </header>
 
       <div class="pm-page">
-        <PageHead eyebrow="项目运营" :title="currentMeta[0]" :description="`${currentMeta[1]} · 数据更新于 ${lastUpdatedLabel}`">
+        <PageHead eyebrow="项目运营" :title="currentMeta[0]" :description="activeSection === 'notifications' ? currentMeta[1] : `${currentMeta[1]} · 数据更新于 ${lastUpdatedLabel}`">
           <template #actions>
-            <button class="pm-button" :disabled="loading" @click="loadWorkspace"><ConsoleIcon name="reset" />{{ loading ? '加载中' : '刷新' }}</button>
+            <button v-if="activeSection !== 'notifications'" class="pm-button" :disabled="loading" @click="loadWorkspace"><ConsoleIcon name="reset" />{{ loading ? '加载中' : '刷新' }}</button>
             <button v-if="activeSection === 'projects'" class="pm-button" @click="exportProjects"><ConsoleIcon name="export" />导出</button>
             <button v-if="canManageActiveConfig && isVisibleConfigSection" class="pm-button primary" @click="openConfigCreate">{{ isStandardChangeSection ? '＋ 登记标准变更' : '＋ 新建规则' }}</button><button v-if="activeSection === 'projects' && canCreateProject" class="pm-button primary" @click="openCreateProject">＋ 新建项目</button>
             <button v-if="activeSection === 'decomposition' && canConfirmDecomposition" class="pm-button primary" :disabled="saving || !canConfirmCurrentDecomposition" @click="confirmDecomposition">{{ saving ? '提交中…' : '确认拆解' }}</button><button v-if="activeSection === 'decomposition' && canManageDecomposition" type="button" class="pm-button" :disabled="saving || !decompositionProject" @click="openDecompositionAdjust">调整拆解</button>
@@ -3240,7 +3226,8 @@ onBeforeUnmount(() => {
 
         <section v-if="['decomposition', 'allocation'].includes(activeSection) && missingStampedContractCount" class="pm-contract-warning"><ConsoleIcon name="info" /><div><b>{{ missingStampedContractCount }} 份合同尚未上传盖章合同</b><p>{{ activeSection === 'decomposition' ? '合同审批已完成，可继续核对并确认服务项拆解；该提示不阻断拆解确认。' : '服务项拆解已确认，可继续分配团队、人员及设备；上传盖章合同后提示将自动清除。' }}</p></div></section>
 
-        <template v-if="activeSection === 'dashboard'">
+        <ProjectNotificationCenter v-if="activeSection === 'notifications'" @read="refreshNotificationCount" />
+        <template v-else-if="activeSection === 'dashboard'">
           <section class="pm-kpis">
             <KpiCard label="全部项目" :value="dashboard.project_count" suffix="个" badge="实时" tone="primary" actionable @activate="navigate('projects')">
               <p class="pm-kpi-meta">已完成 <b>{{ doneProjectCount }}</b> · 风险 <b>{{ dashboard.risk_projects }}</b> · 待拆解 <b>{{ pendingDecompositionCount }}</b></p>
@@ -3514,7 +3501,7 @@ onBeforeUnmount(() => {
         </template>
 
         <template v-else-if="activeSection === 'equipment'">
-          <section v-if="canManageDevice" class="pm-panel"><header class="pm-section-toolbar"><div class="pm-panel-actions"><input ref="equipmentFileInput" class="pm-file-input" type="file" accept=".csv,text/csv" @change="importEquipmentFile" /><button class="pm-button" :disabled="saving" @click="equipmentFileInput.click()">导入设备能力 CSV</button></div><span>列：resource_type、resource_id、resource_name、codes、status、valid_from、valid_until</span></header></section>
+          <section v-if="canManageDevice" class="pm-panel"><header class="pm-section-toolbar"><div class="pm-panel-actions"><button class="pm-button" :disabled="saving" @click="equipmentImportOpen = true">导入设备能力 CSV</button></div><span>下载中文模板，先检测、再选择有效行导入；设备编号可留空自动生成</span></header></section>
           <section class="pm-panel pm-equipment-layout">
             <form v-if="canManageDevice" class="pm-form pm-equipment-form" @submit.prevent="saveEquipment">
               <label><span>设备编号 <em>*</em></span><input v-model.trim="equipmentForm.resourceID" required placeholder="例如 EQ-001" /></label>
@@ -3541,7 +3528,7 @@ onBeforeUnmount(() => {
           </section>
           <section class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>设备编号</th><th>设备名称</th><th>能力</th><th>检定有效期</th><th>状态</th><th>在位 / 使用范围</th><th>操作</th></tr></thead><tbody><tr v-for="item in equipment" :key="item.resource_id"><td class="mono">{{ item.resource_id }}</td><td><b>{{ item.resource_name }}</b></td><td><CodePills :codes="item.codes || []" /></td><td>{{ item.valid_until ? formatDateTime(item.valid_until) : '未设置' }}</td><td><span class="pm-badge" :class="statusTone(capabilityEffectiveStatus(item))">{{ capabilityStatusLabel(item) }}</span><small v-if="item.status_reason" class="pm-cell-sub">{{ item.status_reason }}</small></td><td><span class="pm-badge" :class="item.presence === 'OUT_OF_COMPANY' ? 'amber' : 'normal'">{{ equipmentPresenceLabel(item) }}</span><small v-if="item.borrowed_by" class="pm-cell-sub">{{ item.borrowed_by }} · {{ item.borrowed_window }}</small><small v-if="item.usage_scope === 'COMPANY_ONLY'" class="pm-form-hint">仅在公司使用 · 不可借出</small></td><td><button v-if="canManageDevice" class="pm-link" :disabled="saving" @click="editEquipment(item)">编辑 / 更新</button><button v-if="canManageDevice" class="pm-link danger" :disabled="saving" @click="removeEquipment(item)">删除</button><button v-if="item.presence === 'OUT_OF_COMPANY' && (canManageDevice || canPlanImplementation)" class="pm-link danger" :disabled="saving" @click="returnEquipment(item)">归还</button></td></tr></tbody></table></div><p v-if="equipmentError" class="pm-form-hint" role="alert">{{ equipmentError }}</p><div v-else-if="!equipment.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无设备</b><span>使用上方表单新增设备。</span></div></section>
         </template>
-        <template v-else-if="activeSection === 'qualifications'"><section class="pm-panel"><header class="pm-section-toolbar"><div class="pm-panel-actions"><input ref="qualificationFileInput" class="pm-file-input" type="file" accept=".csv,text/csv" @change="importQualificationFile" /><button class="pm-button" :disabled="saving" @click="downloadCapabilities">导出 CSV</button><template v-if="canManageResource"><button class="pm-button" :disabled="saving" @click="qualificationFileInput.click()">导入人员资质 CSV</button><button class="pm-button" :disabled="saving" @click="syncIdentities">同步人员状态</button><button class="pm-button primary" :disabled="saving" @click="openCapabilityDialog()">＋ 新建人员资质</button></template></div></header><div class="pm-qualification-filter"><section class="pm-sm-tabs pm-capability-tabs"><button v-for="tab in capabilityTabs" :key="tab.key" type="button" class="pm-tab-pill" :class="{ active: capabilityTab === tab.key }" @click="capabilityTab = tab.key">{{ tab.label }}<span class="pm-tab-count">{{ tab.count }}</span></button></section><label><span>资源类型</span><select v-model="capabilityTypeFilter" class="pm-filter-select"><option value="">全部</option><option value="PERSON">人员资质</option><option value="EQUIPMENT">设备能力（只读）</option></select></label><label><span>状态</span><select v-model="capabilityStatusFilter" class="pm-filter-select"><option value="">全部</option><option value="ACTIVE">有效</option><option value="EXPIRED">无效（已过期）</option><option value="NOT_YET_EFFECTIVE">未生效</option><option value="DISABLED">停用</option></select></label></div></section><section v-if="capabilityTab === 'codes'" class="pm-table-panel"><header><div><p class="pm-panel-kicker">资质矩阵</p><h2>体系与编码映射</h2></div><span>按能力台账聚合：编码 × 持有人员数 / 设备数</span></header><div class="pm-matrix-wrap"><table class="pm-matrix"><thead><tr><th>能力编码</th><th>人员</th><th>设备</th><th>覆盖合计</th></tr></thead><tbody><tr v-for="row in capabilityCodeRows" :key="row.code"><td><span class="pm-code-pill">{{ row.code }}</span></td><td><span class="pm-badge" :class="row.personCount ? 'normal' : 'neutral'">{{ row.personCount }} 人</span></td><td><span class="pm-badge" :class="row.equipmentCount ? 'normal' : 'neutral'">{{ row.equipmentCount }} 台</span></td><td class="num">{{ row.personCount + row.equipmentCount }}</td></tr><tr v-if="!capabilityCodeRows.length"><td colspan="4" class="pm-empty-mini">暂无能力编码，请在规则配置中心维护</td></tr></tbody></table></div></section>
+        <template v-else-if="activeSection === 'qualifications'"><section class="pm-panel"><header class="pm-section-toolbar"><div class="pm-panel-actions"><button class="pm-button" :disabled="saving" @click="downloadCapabilities">导出 CSV</button><template v-if="canManageResource"><button class="pm-button" :disabled="saving" @click="qualificationImportOpen = true">导入人员资质 CSV</button><button class="pm-button" :disabled="saving" @click="syncIdentities">同步人员状态</button><button class="pm-button primary" :disabled="saving" @click="openCapabilityDialog()">＋ 新建人员资质</button></template></div></header><div class="pm-qualification-filter"><section class="pm-sm-tabs pm-capability-tabs"><button v-for="tab in capabilityTabs" :key="tab.key" type="button" class="pm-tab-pill" :class="{ active: capabilityTab === tab.key }" @click="capabilityTab = tab.key">{{ tab.label }}<span class="pm-tab-count">{{ tab.count }}</span></button></section><label><span>资源类型</span><select v-model="capabilityTypeFilter" class="pm-filter-select"><option value="">全部</option><option value="PERSON">人员资质</option><option value="EQUIPMENT">设备能力（只读）</option></select></label><label><span>状态</span><select v-model="capabilityStatusFilter" class="pm-filter-select"><option value="">全部</option><option value="ACTIVE">有效</option><option value="EXPIRED">无效（已过期）</option><option value="NOT_YET_EFFECTIVE">未生效</option><option value="DISABLED">停用</option></select></label></div></section><section v-if="capabilityTab === 'codes'" class="pm-table-panel"><header><div><p class="pm-panel-kicker">资质矩阵</p><h2>体系与编码映射</h2></div><span>按能力台账聚合：编码 × 持有人员数 / 设备数</span></header><div class="pm-matrix-wrap"><table class="pm-matrix"><thead><tr><th>能力编码</th><th>人员</th><th>设备</th><th>覆盖合计</th></tr></thead><tbody><tr v-for="row in capabilityCodeRows" :key="row.code"><td><span class="pm-code-pill">{{ row.code }}</span></td><td><span class="pm-badge" :class="row.personCount ? 'normal' : 'neutral'">{{ row.personCount }} 人</span></td><td><span class="pm-badge" :class="row.equipmentCount ? 'normal' : 'neutral'">{{ row.equipmentCount }} 台</span></td><td class="num">{{ row.personCount + row.equipmentCount }}</td></tr><tr v-if="!capabilityCodeRows.length"><td colspan="4" class="pm-empty-mini">暂无能力编码，请在规则配置中心维护</td></tr></tbody></table></div></section>
           <section v-else-if="capabilityTab === 'expiry'" class="pm-table-panel"><header><div><p class="pm-panel-kicker danger">到期提醒</p><h2>设备检定到期提醒</h2></div><span>30 天内到期或已过期 · 按到期时间升序</span></header><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>设备编号</th><th>设备名称</th><th>能力编码</th><th>检定到期日</th><th>状态</th></tr></thead><tbody><tr v-for="item in expiringCapabilities" :key="item.resource_id" :class="{ risk: new Date(item.valid_until).getTime() <= Date.now() }"><td class="mono">{{ item.resource_id }}</td><td><b>{{ item.resource_name }}</b></td><td><CodePills :codes="item.codes || []" /></td><td :class="{ 'pm-text-danger': new Date(item.valid_until).getTime() <= Date.now() }">{{ item.valid_until.slice(0, 10) }}</td><td><span class="pm-badge" :class="new Date(item.valid_until).getTime() <= Date.now() ? '风险' : '关注'">{{ new Date(item.valid_until).getTime() <= Date.now() ? '已过期' : '即将到期' }}</span></td></tr><tr v-if="!expiringCapabilities.length"><td colspan="5" class="pm-empty-mini">30 天内没有到期的设备检定</td></tr></tbody></table></div></section>
           <section v-else class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>资源类型</th><th>编号</th><th>名称</th><th>资质 / 能力编码</th><th>有效期</th><th>使用范围</th><th>状态</th><th>人员状态</th><th></th></tr></thead><tbody><tr v-for="item in filteredCapabilities" :key="item.resource_id"><td><span class="pm-badge neutral">{{ item.resource_type === 'PERSON' ? '人员' : '设备' }}</span></td><td class="mono">{{ item.resource_id }}</td><td><b>{{ item.resource_name }}</b></td><td><CodePills :codes="item.codes || []" /></td><td>{{ item.valid_until ? (item.valid_from ? `${item.valid_from.slice(0, 10)} ~ ` : '') + item.valid_until.slice(0, 10) : '长期' }}</td><td><span v-if="item.resource_type === 'EQUIPMENT'" class="pm-badge" :class="item.usage_scope === 'COMPANY_ONLY' ? '关注' : 'neutral'">{{ item.usage_scope === 'COMPANY_ONLY' ? '仅在公司使用' : '可借出' }}</span><span v-else>—</span></td><td><span class="pm-badge" :class="statusTone(capabilityEffectiveStatus(item))">{{ capabilityStatusLabel(item) }}</span><small v-if="item.status_reason" class="pm-cell-sub">{{ item.status_reason }}</small></td><td><template v-if="item.resource_type === 'PERSON'"><span class="pm-badge" :class="statusTone(item.identity_status)">{{ identityStatusLabel(item.identity_status) }}</span></template><span v-else>—</span></td><td class="pm-col-actions"><button v-if="canManageResource && item.resource_type === 'PERSON'" class="pm-link" @click="openCapabilityDialog(item)">编辑人员资质</button><span v-else-if="item.resource_type === 'EQUIPMENT'" class="pm-cell-sub">请到设备能力维护</span></td></tr></tbody></table></div><div v-if="!filteredCapabilities.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无资质记录</b><span>点击「＋ 新建人员资质」或通过 CSV 导入添加人员资质。</span></div><footer v-if="importResult"><span role="status">导入完成：成功 {{ importResult.imported }} 条，跳过 {{ importResult.skipped }} 条。</span><span v-if="importResult.errors?.length"><small>{{ importResult.errors.slice(0, 3).join('；') }}{{ importResult.errors.length > 3 ? '…' : '' }}</small></span></footer></section>
           <div v-if="capabilityDialog" class="pm-overlay" @click.self="capabilityDialog = null">
@@ -3619,7 +3606,7 @@ onBeforeUnmount(() => {
             </section>
 
             <section id="split-category-section" class="pm-panel pm-split-card pm-split-anchor">
-              <header><div><p class="pm-panel-kicker">第 2 步 · 检测类别</p><h2>② 检测类别与人员要求</h2><p>为合同里的检测类别设置默认体系、人员资质和特殊方法要求，拆解后会自动带入服务项。</p></div><span class="pm-filter-count">启用 {{ activeDetectionCategoryCount }} / 共 {{ detectionCategories.length }} 类</span><div class="pm-panel-actions"><template v-if="canManageRules"><button type="button" class="pm-button" @click="downloadDetectionCategories">导出</button><button type="button" class="pm-button" :disabled="saving" @click="detectionCategoryFileInput.click()">导入</button><button type="button" class="pm-button primary" @click="openCategoryDialog()">＋ 新增类别</button><input ref="detectionCategoryFileInput" type="file" accept=".csv,text/csv" class="sr-only" @change="importDetectionCategoryFile" /></template></div></header>
+              <header><div><p class="pm-panel-kicker">第 2 步 · 检测类别</p><h2>② 检测类别与人员要求</h2><p>为合同里的检测类别设置默认体系、人员资质和特殊方法要求，拆解后会自动带入服务项。</p></div><span class="pm-filter-count">启用 {{ activeDetectionCategoryCount }} / 共 {{ detectionCategories.length }} 类</span><div class="pm-panel-actions"><template v-if="canManageRules"><button type="button" class="pm-button" @click="downloadDetectionCategories">导出</button><button type="button" class="pm-button" :disabled="saving" @click="detectionCategoryImportOpen = true">导入</button><button type="button" class="pm-button primary" @click="openCategoryDialog()">＋ 新增类别</button></template></div></header>
               <div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>检测类别</th><th>默认体系要求</th><th>必备资质（默认）</th><th>是否特殊方法</th><th>关联服务项</th><th>状态</th><th></th></tr></thead><tbody><tr v-for="item in detectionCategories" :key="item.category"><td><b>{{ item.category }}</b></td><td>{{ item.system_standard || '—' }}</td><td>{{ item.required_qualifications || '—' }}</td><td><span class="pm-badge" :class="specialMethodTone[item.special_method] || 'neutral'">{{ specialMethodLabel[item.special_method] || item.special_method }}</span></td><td>{{ item.service_item_count || 0 }} 项</td><td><span class="pm-badge" :class="item.enabled ? 'normal' : 'neutral'">{{ item.enabled ? '启用' : '停用' }}</span></td><td class="pm-split-actions"><button v-if="canManageRules" class="pm-link" @click="openCategoryDialog(item)">编辑</button><button v-if="canManageRules" class="pm-link pm-text-danger" :disabled="saving" @click="removeDetectionCategory(item)">删除</button></td></tr><tr v-if="!detectionCategories.length"><td colspan="7" class="pm-empty-mini">尚未配置检测类别域</td></tr></tbody></table></div>
             </section>
 
@@ -3756,6 +3743,9 @@ onBeforeUnmount(() => {
         </template>
       </div>
     </main>
+    <QualificationImportDialog v-if="qualificationImportOpen && canManageResource" :code-options="capabilityCodeOptions('PERSON').map((option) => ({ value: option.code, label: option.name }))" @close="qualificationImportOpen = false" @completed="importQualificationFile" />
+    <QualificationImportDialog v-if="equipmentImportOpen && canManageDevice" resource-type="EQUIPMENT" :code-options="capabilityCodeOptions('EQUIPMENT').map((option) => ({ value: option.code, label: option.name }))" @close="equipmentImportOpen = false" @completed="importEquipmentFile" />
+    <DetectionCategoryImportDialog v-if="detectionCategoryImportOpen && canManageRules" :code-options="capabilityCodeOptions('PERSON').map((option) => ({ value: option.code, label: option.name }))" @close="detectionCategoryImportOpen = false" @completed="importDetectionCategoryFile" />
 
     <div v-if="operationDetail" class="pm-overlay" @click.self="operationDetail = null"><aside class="pm-drawer"><header><div><span>{{ operationSectionLabel(operationDetail.section) }}</span><h2>{{ operationDetail.row.name }}</h2></div><button class="pm-icon-button" aria-label="关闭" @click="operationDetail = null"><ConsoleIcon name="close" /></button></header><div class="pm-drawer-body"><section class="pm-drawer-hero"><span class="pm-badge neutral">{{ operationDetail.row.state }}</span><p><template v-if="Array.isArray(operationDetail.row.detail)"><span v-if="!operationDetail.row.detail.length">—</span><span v-else class="pm-code-pills"><span v-for="code in operationDetail.row.detail" :key="code" class="pm-code-pill">{{ code }}</span></span></template><template v-else>{{ operationDetail.row.detail }}</template><span v-if="operationDetail.row.warning" class="pm-cell-warning">{{ operationDetail.row.warning }}</span></p><div class="pm-progress"><i :style="{ width: `${operationDetail.row.progress}%` }"></i></div><b>{{ operationDetail.row.progress }}% 已完成</b></section><dl><div v-for="field in operationDetailFields" :key="field.label"><dt>{{ field.label }}</dt><dd><template v-if="Array.isArray(field.value)"><span v-if="!field.value.length">—</span><span v-else class="pm-code-pills"><span v-for="code in field.value" :key="code" class="pm-code-pill">{{ code }}</span></span></template><template v-else>{{ field.value }}</template></dd></div></dl></div><footer><button class="pm-button" @click="operationDetail = null">关闭</button></footer></aside></div>
 

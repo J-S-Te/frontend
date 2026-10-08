@@ -24,7 +24,9 @@ test('opportunity selection fills customer context without calling an unsupporte
 })
 
 test('contract and service types are constrained selects', () => {
-  assert.match(source, /const contractTypeOptions = \['直签', '三方'\]/)
+  assert.match(source, /const fallbackContractTypeOptions = \['直签', '三方'\]/)
+  assert.match(source, /useDictionaryOptions\('CONTRACT_TYPE', \{ fallback: toDictionaryFallback\(fallbackContractTypeOptions\) \}\)/)
+  assert.match(source, /const contractTypeOptions = computed\(\(\) => contractTypeItems\.value\.map\(\(item\) => item\.value\)\)/)
   for (const value of ['等保测评', '商用密码应用安全性评估', 'APP安全加固', '网络安全攻防演练', '安全运维']) assert.match(source, new RegExp(value))
   assert.match(source, /<select v-model="newContract\.contract_type" required>/)
   assert.match(source, /<select v-model="serviceItem\.service_type" required>/)

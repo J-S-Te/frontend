@@ -1466,8 +1466,8 @@ test('通知目标只接受当前源的现有 CRM 商机或售前入口', () => 
   ]) assert.equal(parseNotificationTarget(target, 'https://crm.example'), null)
 })
 
-test('个人通知界面明确个人边界并通过路由查询打开真实详情', () => {
-  assert.match(view, /通知收件人固定为当前登录用户，不受 SELF \/ ORG \/ ALL 数据范围扩展/)
+test('个人通知去除冗余边界说明，保留权限检查和真实详情跳转', () => {
+  assert.doesNotMatch(view, /通知收件人固定为当前登录用户/)
   assert.match(view, /parseNotificationTarget\(item\.target_path/)
   assert.match(view, /route\.query\.opportunity_id/)
   assert.match(view, /await openOpportunity\(id\)/)
@@ -1476,7 +1476,7 @@ test('个人通知界面明确个人边界并通过路由查询打开真实详�
   assert.match(view, /requestedTab === 'credit'/)
   assert.match(view, /await openCustomerTab\('credit'\)/)
   assert.match(view, /canReadNotifications/)
-  assert.match(view, /只包含发给当前用户的商机负责人和售前执行人通知/)
+  assert.doesNotMatch(view, /只包含发给当前用户的商机负责人和售前执行人通知/)
   assert.match(view, /ASSIGNEE_ADDED/)
   assert.match(view, /ASSIGNEE_REMOVED/)
 })

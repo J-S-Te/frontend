@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { AuthError, logoutCurrentSession } from '@/modules/platform/auth/api/auth'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
+import { useDictionaryOptions } from '@/modules/platform/dictionaries/composables/useDictionaryOptions.js'
 import ContractDocumentPreview from '@/modules/contract_management/components/ContractDocumentPreview.vue'
 import { validateRecipientPhoneNumber } from '@/modules/contract_management/utils/recipientPhone.js'
 import ContractReportsPanel from '@/modules/contract_management/components/ContractReportsPanel.vue'
@@ -218,9 +219,18 @@ const emptyNewContract = () => ({
 })
 const newContract = ref(emptyNewContract())
 
-const contractTypeOptions = ['直签', '三方']
-const serviceTypeOptions = ['等保测评', '商用密码应用安全性评估', '软件测试', '源代码审计', '渗透测试', '漏洞扫描', 'APP安全加固', '上线测试', '安全加固', '网络安全风险评估', '差距分析', '机房检测', '网络安全巡检服务', '安全培训', '安全性测试', '应急响应服务', '网络安全攻防演练', '安全运维', '模块开发', '技术咨询']
-const systemLevelOptions = ['一级', '二级', '三级', '四级']
+// 合同类型、服务类型与系统等级由业务字典治理（平台控制台“字典管理”维护显示名与排序），
+// 字典取值即业务存储字符串；平台会话过期或字典未配置时回退内置清单，表单不中断。
+const fallbackContractTypeOptions = ['直签', '三方']
+const fallbackServiceTypeOptions = ['等保测评', '商用密码应用安全性评估', '软件测试', '源代码审计', '渗透测试', '漏洞扫描', 'APP安全加固', '上线测试', '安全加固', '网络安全风险评估', '差距分析', '机房检测', '网络安全巡检服务', '安全培训', '安全性测试', '应急响应服务', '网络安全攻防演练', '安全运维', '模块开发', '技术咨询']
+const fallbackSystemLevelOptions = ['一级', '二级', '三级', '四级']
+const toDictionaryFallback = (values) => values.map((value) => ({ value, label: value }))
+const { options: contractTypeItems } = useDictionaryOptions('CONTRACT_TYPE', { fallback: toDictionaryFallback(fallbackContractTypeOptions) })
+const { options: serviceTypeItems } = useDictionaryOptions('CONTRACT_SERVICE_TYPE', { fallback: toDictionaryFallback(fallbackServiceTypeOptions) })
+const { options: systemLevelItems } = useDictionaryOptions('CONTRACT_SYSTEM_LEVEL', { fallback: toDictionaryFallback(fallbackSystemLevelOptions) })
+const contractTypeOptions = computed(() => contractTypeItems.value.map((item) => item.value))
+const serviceTypeOptions = computed(() => serviceTypeItems.value.map((item) => item.value))
+const systemLevelOptions = computed(() => systemLevelItems.value.map((item) => item.value))
 const opportunityPickerOpen = ref(false)
 const opportunityLoading = ref(false)
 const opportunityError = ref('')

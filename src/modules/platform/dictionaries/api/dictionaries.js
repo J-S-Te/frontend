@@ -83,3 +83,22 @@ export function updateDictionaryItem({ dictionaryId, itemId, code, label, value,
     body: JSON.stringify({ code, label, value, sort_order: Number(sortOrder) || 0, status, version }),
   })
 }
+
+/** 物理删除字典并级联删除其全部字典项，响应携带被级联删除的条目数。 */
+export function deleteDictionary(dictionaryId) {
+  return request(dictionaryPath(dictionaryId), { method: 'DELETE' })
+}
+
+/** 物理删除单个字典项；已发布到业务的值建议停用而非删除。 */
+export function deleteDictionaryItem({ dictionaryId, itemId }) {
+  return request(itemPath(dictionaryId, itemId), { method: 'DELETE' })
+}
+
+/** 按字典编码读取启用字典项，供业务表单的选择控件消费；停用值不会返回。 */
+export function listActiveItemsByCode(dictionaryCode, query = {}) {
+  const path = `/dictionaries/code/${encodeURIComponent(dictionaryCode)}/items`
+  const search = new URLSearchParams()
+  if (query.page) search.set('page', String(query.page))
+  if (query.pageSize) search.set('page_size', String(query.pageSize))
+  return request(`${path}?${search.toString()}`)
+}
