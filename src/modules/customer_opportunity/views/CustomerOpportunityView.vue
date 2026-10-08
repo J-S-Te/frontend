@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref, toRaw, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { AuthError, logoutCurrentSession } from '@/modules/platform/auth/api/auth'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
+import { useDictionaryOptions } from '@/modules/platform/dictionaries/composables/useDictionaryOptions.js'
 import { subsystemAccessMessage } from '@/modules/shared/authz/sessionCompatibility'
 import OwnerSelector from '../components/OwnerSelector.vue'
 import OpportunityCatalogDialog from '../components/OpportunityCatalogDialog.vue'
@@ -62,10 +63,16 @@ import '../styles/customer-opportunity.css'
 const route = useRoute()
 const router = useRouter()
 const sections = new Set(['customers', 'opportunities', 'presale', 'notifications', 'credit-approvals', 'credit-rules'])
-const customerIndustryOptions = Object.freeze([
+// 客户行业由业务字典治理（平台控制台“字典管理”维护），取值即业务存储字符串；
+// 平台会话过期或字典未配置时回退内置清单，表单不中断。
+const fallbackCustomerIndustryOptions = Object.freeze([
   '金融', '政府', '医疗', '教育', '能源', '制造', '软件', '互联网', '通信',
   '物流', '交通', '建筑', '房地产', '零售', '服务', '其他',
 ])
+const { options: customerIndustryItems } = useDictionaryOptions('CUSTOMER_INDUSTRY', {
+  fallback: fallbackCustomerIndustryOptions.map((value) => ({ value, label: value })),
+})
+const customerIndustryOptions = computed(() => customerIndustryItems.value.map((item) => item.value))
 const customerImportTemplateColumns = Object.freeze([
   ['客户名称', '示例科技有限公司'], ['统一社会信用代码', '913100001234567890'], ['客户类型', '企业'], ['行业', '软件'], ['区域', '华东'],
   ['负责人用户ID', '请填写负责人用户ID'], ['负责人组织ID', '请填写负责人组织ID'], ['登记联系人姓名', '张三'], ['登记联系人电话', '13800138000'], ['登记联系人邮箱', 'zhangsan@example.com'],

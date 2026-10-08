@@ -5,6 +5,8 @@ import {
   DictionaryError,
   createDictionary,
   createDictionaryItem,
+  deleteDictionary,
+  deleteDictionaryItem,
   listDictionaries,
   listDictionaryItems,
   updateDictionary,
@@ -47,12 +49,21 @@ const itemSubmitting = ref(false)
 const itemFormError = ref('')
 const itemForm = reactive(emptyItemForm())
 
+// 删除是物理操作且不可恢复，必须经过显式确认弹窗；不用 window.confirm，
+// 避免 WebView 容器里静默失败。confirmAction 保存已绑定参数的执行函数。
+const confirmDialog = ref(null)
+const pendingDelete = ref(null)
+const deleting = ref(false)
+const confirmError = ref('')
+
 const canReadDictionaries = computed(() => hasPermission(DICTIONARY_PERMISSIONS.dictionaryRead))
 const canCreateDictionary = computed(() => hasPermission(DICTIONARY_PERMISSIONS.dictionaryCreate))
 const canUpdateDictionary = computed(() => hasPermission(DICTIONARY_PERMISSIONS.dictionaryUpdate))
+const canDeleteDictionary = computed(() => hasPermission(DICTIONARY_PERMISSIONS.dictionaryDelete))
 const canReadItems = computed(() => hasPermission(DICTIONARY_PERMISSIONS.itemRead))
 const canCreateItem = computed(() => hasPermission(DICTIONARY_PERMISSIONS.itemCreate))
 const canUpdateItem = computed(() => hasPermission(DICTIONARY_PERMISSIONS.itemUpdate))
+const canDeleteItem = computed(() => hasPermission(DICTIONARY_PERMISSIONS.itemDelete))
 const selectedDictionary = computed(() => dictionaries.value.find((entry) => dictionaryID(entry) === selectedDictionaryId.value) || null)
 // 停用父字典下的条目不会被运行时业务接口返回；管理页面也不应继续允许新增，
 // 否则会出现“保存成功但业务侧永远不可用”的误导状态。
@@ -367,6 +378,71 @@ async function submitItem() {
   }
 }
 
+function requestDeleteDictionary(dictionary) {
+  if (!canDeleteDictionary.value) return
+  confirmError.value = ''
+  confirmDialog.value = {
+    eyebrow: `字典 · ${dictionary.name}`,
+    title: '删除业务字典',
+    message: `将删除字典「${dictionary.name}（${dictionary.code}）」及其全部 ${dictionary.item_count || 0} 个字典项，删除后不可恢复。已在业务数据中出现的历史值建议改为停用。`,
+    confirmLabel: '删除字典',
+  }
+  pendingDelete.value = { type: 'dictionary', target: dictionary }
+}
+
+function requestDeleteItem(item) {
+  if (!canDeleteItem.value) return
+  confirmError.value = ''
+  confirmDialog.value = {
+    eyebrow: `字典项 · ${selectedDictionary.value?.name || ''}`,
+    title: '删除字典项',
+    message: `将删除字典项「${item.label}（${item.code}）」，删除后不可恢复。已发布到业务的取值建议改为停用。`,
+    confirmLabel: '删除字典项',
+  }
+  pendingDelete.value = { type: 'item', target: item }
+}
+
+function closeConfirmDialog() {
+  if (deleting.value) return
+  confirmDialog.value = null
+  pendingDelete.value = null
+  confirmError.value = ''
+}
+
+async function runConfirmedDelete() {
+  const pending = pendingDelete.value
+  if (!pending || deleting.value) return
+  deleting.value = true
+  confirmError.value = ''
+  try {
+    if (pending.type === 'dictionary') {
+      const result = await deleteDictionary(dictionaryID(pending.target))
+      const cascade = Number(result?.deleted_item_count || 0)
+      showToast(cascade > 0 ? `字典已删除，同时级联删除 ${cascade} 个字典项。` : '字典已删除。')
+    } else {
+      await deleteDictionaryItem({
+        dictionaryId: selectedDictionaryId.value,
+        itemId: itemID(pending.target),
+      })
+      showToast('字典项已删除。')
+    }
+    confirmDialog.value = null
+    pendingDelete.value = null
+    if (pending.type === 'item') {
+      await Promise.all([
+        canReadItems.value ? loadItems() : Promise.resolve(),
+        canReadDictionaries.value ? loadDictionaries() : Promise.resolve(),
+      ])
+    } else {
+      await loadDictionaries({ preserveSelection: false })
+    }
+  } catch (error) {
+    confirmError.value = userMessage(error, '删除失败，请稍后重试。')
+  } finally {
+    deleting.value = false
+  }
+}
+
 watch(selectedDictionaryId, () => {
   itemPage.value = 1
   itemKeyword.value = ''
@@ -433,7 +509,7 @@ watch(canReadDictionaries, (granted, previouslyGranted) => {
           <template v-if="selectedDictionary">
             <header class="dictionary-items-panel__head">
               <div><span>当前字典</span><h3>{{ selectedDictionary.name }}</h3><p><code>{{ selectedDictionary.code }}</code> · {{ selectedDictionary.description || '暂无说明' }}</p></div>
-              <div class="dictionary-header-actions"><button v-if="canUpdateDictionary" class="console-button ghost" type="button" @click="openEditDictionary(selectedDictionary)">编辑字典</button><button v-if="canCreateItem" class="console-button primary" type="button" :disabled="!canCreateSelectedItem" :title="canCreateSelectedItem ? '新增字典项' : '请先启用当前字典'" @click="openCreateItem">新增字典项</button></div>
+              <div class="dictionary-header-actions"><button v-if="canUpdateDictionary" class="console-button ghost" type="button" @click="openEditDictionary(selectedDictionary)">编辑字典</button><button v-if="canDeleteDictionary" class="console-button danger" type="button" @click="requestDeleteDictionary(selectedDictionary)">删除字典</button><button v-if="canCreateItem" class="console-button primary" type="button" :disabled="!canCreateSelectedItem" :title="canCreateSelectedItem ? '新增字典项' : '请先启用当前字典'" @click="openCreateItem">新增字典项</button></div>
             </header>
 
             <p v-if="selectedDictionary.status !== 'ACTIVE'" class="dictionary-module__warning" role="status">当前字典已停用，业务接口不会读取其中的字典项。请先点击“编辑字典”将状态改为“启用”，再新增字典项。</p>
@@ -455,7 +531,7 @@ watch(canReadDictionaries, (granted, previouslyGranted) => {
                   <tr v-for="item in items" v-else :key="itemID(item)">
                     <td><strong class="console-entity-name">{{ item.label }}</strong></td><td class="console-mono">{{ item.code }}</td><td class="console-mono">{{ item.value }}</td><td>{{ item.sort_order }}</td>
                     <td><span class="console-badge" :class="item.status === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ item.status === 'ACTIVE' ? '启用' : '停用' }}</span></td>
-                    <td>{{ formatDate(item.updated_at) }}</td><td class="console-actions-cell"><button v-if="canUpdateItem" class="console-text-button" type="button" @click="openEditItem(item)">编辑</button><span v-else>—</span></td>
+                    <td>{{ formatDate(item.updated_at) }}</td><td class="console-actions-cell"><button v-if="canUpdateItem" class="console-text-button" type="button" @click="openEditItem(item)">编辑</button><button v-if="canDeleteItem" class="console-text-button danger" type="button" @click="requestDeleteItem(item)">删除</button><span v-if="!canUpdateItem && !canDeleteItem">—</span></td>
                   </tr>
                 </tbody>
               </table>
@@ -495,6 +571,13 @@ watch(canReadDictionaries, (granted, previouslyGranted) => {
         <p v-if="itemFormError" class="dictionary-module__error dictionary-dialog__error" role="alert">{{ itemFormError }}</p>
         <footer><button class="console-button ghost" type="button" :disabled="itemSubmitting" @click="closeItemEditor">取消</button><button class="console-button primary" type="submit" :disabled="itemSubmitting"><ConsoleIcon name="save" />{{ itemSubmitting ? '保存中…' : '保存' }}</button></footer>
       </form>
+    </div>
+    <div v-if="confirmDialog" class="console-modal-backdrop" role="presentation" @click.self="closeConfirmDialog">
+      <div class="console-detail-modal dictionary-dialog" role="dialog" aria-modal="true" :aria-label="confirmDialog.title">
+        <header><div><p class="console-modal-eyebrow">{{ confirmDialog.eyebrow }}</p><h2>{{ confirmDialog.title }}</h2></div><button class="console-modal-close" type="button" aria-label="关闭" :disabled="deleting" @click="closeConfirmDialog"><ConsoleIcon name="close" /></button></header>
+        <div class="dictionary-dialog__body"><p class="dictionary-confirm-message">{{ confirmDialog.message }}</p><p v-if="confirmError" class="dictionary-module__error" role="alert">{{ confirmError }}</p></div>
+        <footer><button class="console-button ghost" type="button" :disabled="deleting" @click="closeConfirmDialog">取消</button><button class="console-button danger" type="button" :disabled="deleting" @click="runConfirmedDelete">{{ deleting ? '删除中…' : confirmDialog.confirmLabel }}</button></footer>
+      </div>
     </div>
   </section>
 </template>

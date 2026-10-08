@@ -6,6 +6,7 @@ import { getApplicationAccess } from '../api/authorization.js'
 import { listApplications } from '../../applications/api/applications.js'
 import ConsoleIcon from '../../shared/components/ConsoleIcon.vue'
 import { hasPermission } from '../../auth/utils/principal.js'
+import { useDictionaryOptions } from '../../dictionaries/composables/useDictionaryOptions.js'
 
 // 员工创建统一交由 PlatformConsoleView 持有的原子向导，人员异动中心只发起意图，
 // 避免这里重新实现用户、账号、任职和岗位授权的非原子流程。
@@ -33,12 +34,18 @@ const handoverTargetUserId = ref('')
 const filters = reactive({ status: '', type: '', keyword: '' })
 const form = reactive({ userId: '', type: 'TRANSFER', sourceMembershipId: '', targetOrgUnitId: '', targetPositionId: '', reason: '', effectiveDate: '', immediate: false })
 
-const typeOptions = [
+// 异动类型的取值集合是后端异动流程的协议值（下方 requires* 分支按它判定），
+// 字典只治理显示名称与排序；字典不可用（无权限/未配置/网络失败）时回退内置项，表单始终可用。
+const fallbackTypeOptions = [
   ['PROMOTION', '晋升'], ['DEMOTION', '降职'], ['TRANSFER', '调岗'], ['TERMINATION', '离职'], ['REHIRE', '复职'],
 ]
+const { options: dictionaryTypeOptions } = useDictionaryOptions('PERSONNEL_CHANGE_TYPE', {
+  fallback: fallbackTypeOptions.map(([value, label]) => ({ value, label })),
+})
+const typeOptions = computed(() => dictionaryTypeOptions.value.map(({ value, label }) => [value, label]))
 // 状态名称与后端统一状态机保持一致，页面操作不能自行派生或跳过阶段。
 const statusLabels = { DRAFT: '待提交', PENDING_APPROVAL: '待审批', PENDING_HANDOVER: '待交接', SCHEDULED: '待生效', EXECUTED: '已执行', REJECTED: '已驳回', CANCELLED: '已取消' }
-const typeLabel = (value) => typeOptions.find(([key]) => key === value)?.[1] || value || '—'
+const typeLabel = (value) => typeOptions.value.find(([key]) => key === value)?.[1] || value || '—'
 const requiresSourceMembership = computed(() => ['PROMOTION', 'DEMOTION', 'TRANSFER', 'TERMINATION'].includes(form.type))
 const requiresTargetAssignment = computed(() => ['PROMOTION', 'DEMOTION', 'TRANSFER', 'REHIRE'].includes(form.type))
 const canProcessApproval = computed(() => hasPermission('platform:user:update') && hasPermission('platform:approval:process'))

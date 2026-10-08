@@ -198,6 +198,9 @@
 .dictionary-items-panel__placeholder p { margin: 3px 0 0; font-size: 12px; line-height: 1.55; }
 .dictionary-module__empty span { font-size: 11px; line-height: 1.55; }
 
+.dictionary-confirm-message { margin: 0; font-size: 13px; line-height: 1.65; }
+.dictionary-confirm-message + .dictionary-module__error { margin-top: 10px; }
+
 .dictionary-module__error {
   margin: 12px;
   padding: 9px 11px;
