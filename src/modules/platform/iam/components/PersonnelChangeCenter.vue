@@ -31,7 +31,7 @@ const workflowSaving = ref(false)
 const handoverItems = ref([])
 const handoverTargetUserId = ref('')
 const filters = reactive({ status: '', type: '', keyword: '' })
-const form = reactive({ userId: '', type: 'TRANSFER', sourceMembershipId: '', targetOrgUnitId: '', targetPositionId: '', reason: '', effectiveDate: '' })
+const form = reactive({ userId: '', type: 'TRANSFER', sourceMembershipId: '', targetOrgUnitId: '', targetPositionId: '', reason: '', effectiveDate: '', immediate: false })
 
 const typeOptions = [
   ['PROMOTION', '晋升'], ['DEMOTION', '降职'], ['TRANSFER', '调岗'], ['TERMINATION', '离职'], ['REHIRE', '复职'],
@@ -109,7 +109,7 @@ async function refreshUserMemberships() {
   }
 }
 
-function resetForm() { Object.assign(form, { userId: '', type: 'TRANSFER', sourceMembershipId: '', targetOrgUnitId: '', targetPositionId: '', reason: '', effectiveDate: '' }); memberships.value = []; preview.value = null; personConfirmed.value = false }
+function resetForm() { Object.assign(form, { userId: '', type: 'TRANSFER', sourceMembershipId: '', targetOrgUnitId: '', targetPositionId: '', reason: '', effectiveDate: '', immediate: false }); memberships.value = []; preview.value = null; personConfirmed.value = false }
 function closeForm() { showForm.value = false; resetForm(); error.value = '' }
 
 const sourceMembershipOptions = computed(() => memberships.value.filter((item) => String(item.status || 'ACTIVE').toUpperCase() === 'ACTIVE'))
@@ -136,6 +136,8 @@ function onTargetOrganizationChange() {
 }
 
 function payload() {
+  // 立即生效以提交时刻作为生效时间；勾选后无需再填日期。
+  if (form.immediate) return { user_id: form.userId, change_type: form.type, source_membership_id: form.sourceMembershipId || null, target_org_unit_id: form.targetOrgUnitId || null, target_position_id: form.targetPositionId || null, reason: form.reason, effective_at: new Date().toISOString() }
   return { user_id: form.userId, change_type: form.type, source_membership_id: form.sourceMembershipId || null, target_org_unit_id: form.targetOrgUnitId || null, target_position_id: form.targetPositionId || null, reason: form.reason, effective_at: form.effectiveDate ? `${form.effectiveDate}T00:00:00+08:00` : null }
 }
 
@@ -146,7 +148,7 @@ async function loadPreview() {
 }
 
 async function save() {
-  if (!form.userId || !form.reason || !form.effectiveDate) { error.value = '请填写人员、原因和生效日期'; return }
+  if (!form.userId || !form.reason || (!form.immediate && !form.effectiveDate)) { error.value = '请填写人员、原因和生效日期（或勾选立即生效）'; return }
   if (requiresSourceMembership.value && !form.sourceMembershipId) { error.value = '晋升、降职、调岗和离职必须选择原任职'; return }
   if (requiresTargetAssignment.value && (!form.targetOrgUnitId || !form.targetPositionId)) { error.value = '晋升、降职、调岗和复职必须选择新组织和新岗位'; return }
   saving.value = true; error.value = ''
@@ -187,6 +189,24 @@ function openCancelAction(item) {
   workflowReference.value = ''
 }
 
+// 已排期异动的立即执行：仅豁免生效时间闸门，审批/离职交接闸门在排期前已通过，
+// 执行链路与定时执行完全一致（幂等锁定、不可变历史、完成通知）。
+function openImmediateAction(item) {
+  if (!canProcessApproval.value) return
+  workflowAction.value = { item, kind: 'execute', title: '立即执行人员异动' }
+}
+
+async function runImmediateExecution() {
+  workflowSaving.value = true; error.value = ''
+  try {
+    await transitionPersonnelChange(recordId(workflowAction.value.item), 'EXECUTED', '', { immediate: true })
+    emit('toast', '人员异动已立即生效')
+    workflowAction.value = null
+    await load()
+  } catch (e) { error.value = e.message || '立即执行失败' }
+  finally { workflowSaving.value = false }
+}
+
 async function runSubmit(item) {
   workflowSaving.value = true; error.value = ''
   try { await submitPersonnelChange(recordId(item)); emit('toast', '异动单已提交审批'); await load() }
@@ -209,6 +229,10 @@ async function confirmWorkflowAction() {
       await load()
     } catch (e) { error.value = e.message || '取消异动单失败' }
     finally { workflowSaving.value = false }
+    return
+  }
+  if (workflowAction.value?.kind === 'execute') {
+    await runImmediateExecution()
     return
   }
   const reference = workflowReference.value.trim()
@@ -307,7 +331,7 @@ function statusTone(value) {
 }
 const summaryCards = computed(() => [
   { key: 'total', label: '全部异动单', value: records.value.length, hint: '当前筛选范围', icon: 'organization', tone: 'violet' },
-  { key: 'scheduled', label: '待生效', value: records.value.filter((item) => item.status === 'SCHEDULED').length, hint: '按日期自动执行', icon: 'dashboard', tone: 'blue' },
+  { key: 'scheduled', label: '待生效', value: records.value.filter((item) => item.status === 'SCHEDULED').length, hint: '到生效日期自动执行，也可立即生效', icon: 'dashboard', tone: 'blue' },
   { key: 'executed', label: '已执行', value: records.value.filter((item) => item.status === 'EXECUTED').length, hint: '已完成变更', icon: 'save', tone: 'green' },
   { key: 'cancelled', label: '已取消', value: records.value.filter((item) => item.status === 'CANCELLED').length, hint: '已停止执行', icon: 'close', tone: 'orange' },
 ])
@@ -321,18 +345,18 @@ onMounted(() => { if (canRead.value) load() })
       <div class="personnel-change-hero">
         <div class="personnel-change-hero-copy">
           <div class="iam-section-kicker"><span class="personnel-change-kicker-icon"><ConsoleIcon name="organization" /></span>PERSONNEL LIFECYCLE</div>
-          <div><h2>人员异动中心</h2><p class="console-card-hint">由管理员统一配置员工入职、晋升、降职、调岗、离职和复职，按生效日期执行并保留权限变更轨迹。</p></div>
+          <div><h2>人员异动中心</h2><p class="console-card-hint">由管理员统一配置员工入职、晋升、降职、调岗、离职和复职，按生效日期执行（支持立即生效）并保留权限变更轨迹。</p></div>
         </div>
         <div class="personnel-change-heading-actions"><button v-if="canCreateEmployee" class="console-button secondary" type="button" @click="() => emit('employee-onboarding')"><ConsoleIcon name="user" />新增员工</button><button v-if="canUpdate" class="console-button primary" type="button" @click="openForm"><ConsoleIcon name="save" />新建异动单</button></div>
       </div>
       <div class="personnel-change-summary" aria-label="异动概览"><article v-for="card in summaryCards" :key="card.key" class="personnel-summary-card" :class="`tone-${card.tone}`"><span class="personnel-summary-icon"><ConsoleIcon :name="card.icon" /></span><div><span class="personnel-summary-label">{{ card.label }}</span><strong>{{ card.value }}</strong><small>{{ card.hint }}</small></div></article></div>
-      <div class="personnel-change-flow" aria-label="人员异动流程"><div class="personnel-flow-title"><strong>人员异动流程</strong><small>离职必须完成审批与交接，其他异动按账号权限进入审批或排期</small></div><ol><li><b>01</b><span>选择人员与任职</span></li><li><b>02</b><span>配置并校验异动</span></li><li><b>03</b><span>审批与离职交接</span></li><li><b>04</b><span>按期生效</span></li></ol></div>
+      <div class="personnel-change-flow" aria-label="人员异动流程"><div class="personnel-flow-title"><strong>人员异动流程</strong><small>离职必须完成审批与交接，其他异动按账号权限进入审批或排期</small></div><ol><li><b>01</b><span>选择人员与任职</span></li><li><b>02</b><span>配置并校验异动</span></li><li><b>03</b><span>审批与离职交接</span></li><li><b>04</b><span>按期或立即生效</span></li></ol></div>
       <div v-if="canRead" class="personnel-change-toolbar"><label class="personnel-change-search"><ConsoleIcon name="search" /><input v-model="filters.keyword" placeholder="搜索人员姓名、异动编号或审批凭据" @keyup.enter="load" /></label><label class="personnel-change-select"><span>类型</span><select v-model="filters.type" @change="load"><option value="">全部类型</option><option v-for="[key, label] in typeOptions" :key="key" :value="key">{{ label }}</option></select></label><label class="personnel-change-select"><span>状态</span><select v-model="filters.status" @change="load"><option value="">全部状态</option><option v-for="(label, key) in statusLabels" :key="key" :value="key">{{ label }}</option></select></label><button class="console-button secondary" type="button" :disabled="loading" @click="load"><ConsoleIcon name="reset" />刷新</button></div>
       <p v-if="error" class="login-target-module__error" role="alert">{{ error }}</p>
       <div v-if="!canRead" class="settings-empty"><span class="settings-empty-icon"><ConsoleIcon name="organization" /></span><h3>没有人员异动读取权限</h3><p>请联系平台管理员授予 platform:user:read 后再查看异动单。</p></div>
       <div v-else-if="loading" class="personnel-change-loading"><span class="personnel-loading-dot" />正在加载异动单…</div>
-      <div v-else-if="!visibleRecords.length" class="settings-empty"><span class="settings-empty-icon"><ConsoleIcon name="organization" /></span><h3>暂无人员异动配置</h3><p>管理员创建异动配置后，系统会按生效日期自动执行。</p></div>
-      <div v-else class="personnel-change-table-shell"><div class="personnel-change-table"><div class="personnel-change-row personnel-change-header"><span>人员</span><span>异动类型</span><span>组织 / 岗位变更</span><span>状态</span><span>生效日期</span><span>操作</span></div><div v-for="item in visibleRecords" :key="item.id || item.change_id" class="personnel-change-row"><span class="personnel-change-person"><span class="personnel-person-avatar">{{ userLabel(item).slice(0, 1) || '?' }}</span><span><strong>{{ userLabel(item) || '—' }}</strong><small class="console-mono">{{ item.user_id || item.userId || '人员信息' }}</small></span></span><span><span class="personnel-change-type">{{ typeLabel(item.change_type || item.type) }}</span><small class="personnel-change-code console-mono">{{ item.change_type || item.type || '—' }}</small></span><span class="personnel-change-move"><small>目标任职</small><strong>{{ targetAssignmentLabel(item) }}</strong></span><span><span class="console-badge" :class="statusTone(item.status)">{{ statusLabels[item.status] || item.status || '—' }}</span></span><span class="personnel-change-date">{{ item.effective_at || item.effective_date || '—' }}</span><span class="personnel-change-actions"><button class="console-button compact" type="button" @click="openAuthorization(item)">授权概览</button><button v-if="canUpdate && item.status === 'DRAFT'" class="console-button compact primary" type="button" :disabled="workflowSaving" @click="openWorkflowAction(item)">提交审批</button><button v-else-if="canProcessApproval && ['PENDING_APPROVAL', 'PENDING_HANDOVER'].includes(item.status)" class="console-button compact primary" type="button" :disabled="workflowSaving" @click="openWorkflowAction(item)">{{ item.status === 'PENDING_HANDOVER' ? '完成交接' : '审批处理' }}</button><button v-if="canUpdate && ['DRAFT', 'PENDING_APPROVAL', 'PENDING_HANDOVER', 'SCHEDULED'].includes(item.status)" class="console-button compact ghost" type="button" :disabled="workflowSaving" @click="openCancelAction(item)">取消</button></span></div></div></div>
+      <div v-else-if="!visibleRecords.length" class="settings-empty"><span class="settings-empty-icon"><ConsoleIcon name="organization" /></span><h3>暂无人员异动配置</h3><p>管理员创建异动配置后，系统会按生效日期自动执行，已排期异动也可由管理员立即执行。</p></div>
+      <div v-else class="personnel-change-table-shell"><div class="personnel-change-table"><div class="personnel-change-row personnel-change-header"><span>人员</span><span>异动类型</span><span>组织 / 岗位变更</span><span>状态</span><span>生效日期</span><span>操作</span></div><div v-for="item in visibleRecords" :key="item.id || item.change_id" class="personnel-change-row"><span class="personnel-change-person"><span class="personnel-person-avatar">{{ userLabel(item).slice(0, 1) || '?' }}</span><span><strong>{{ userLabel(item) || '—' }}</strong><small class="console-mono">{{ item.user_id || item.userId || '人员信息' }}</small></span></span><span><span class="personnel-change-type">{{ typeLabel(item.change_type || item.type) }}</span><small class="personnel-change-code console-mono">{{ item.change_type || item.type || '—' }}</small></span><span class="personnel-change-move"><small>目标任职</small><strong>{{ targetAssignmentLabel(item) }}</strong></span><span><span class="console-badge" :class="statusTone(item.status)">{{ statusLabels[item.status] || item.status || '—' }}</span></span><span class="personnel-change-date">{{ item.effective_at || item.effective_date || '—' }}</span><span class="personnel-change-actions"><button class="console-button compact" type="button" @click="openAuthorization(item)">授权概览</button><button v-if="canUpdate && item.status === 'DRAFT'" class="console-button compact primary" type="button" :disabled="workflowSaving" @click="openWorkflowAction(item)">提交审批</button><button v-else-if="canProcessApproval && ['PENDING_APPROVAL', 'PENDING_HANDOVER'].includes(item.status)" class="console-button compact primary" type="button" :disabled="workflowSaving" @click="openWorkflowAction(item)">{{ item.status === 'PENDING_HANDOVER' ? '完成交接' : '审批处理' }}</button><button v-if="canProcessApproval && item.status === 'SCHEDULED'" class="console-button compact primary" type="button" :disabled="workflowSaving" @click="openImmediateAction(item)">立即生效</button><button v-if="canUpdate && ['DRAFT', 'PENDING_APPROVAL', 'PENDING_HANDOVER', 'SCHEDULED'].includes(item.status)" class="console-button compact ghost" type="button" :disabled="workflowSaving" @click="openCancelAction(item)">取消</button></span></div></div></div>
     </div>
   </section>
   <div v-if="showForm" class="console-modal-backdrop" role="presentation" @click.self="closeForm">
@@ -344,7 +368,8 @@ onMounted(() => { if (canRead.value) load() })
         <label class="console-form-item"><span>原任职<span v-if="requiresSourceMembership"> *</span><em v-else>（复职可不填）</em></span><select v-model="form.sourceMembershipId" :disabled="!personConfirmed || membershipsLoading" :required="requiresSourceMembership"><option value="">{{ !personConfirmed ? '请先确认人员' : (membershipsLoading ? '正在读取任职…' : '请选择原组织 / 原岗位') }}</option><option v-for="item in sourceMembershipOptions" :key="item.membership_id || item.id" :value="item.membership_id || item.id">{{ membershipLabel(item) }}</option></select><div v-if="personConfirmed && sourceMembershipOptions.length" class="personnel-current-memberships"><span v-for="item in sourceMembershipOptions" :key="item.membership_id || item.id" class="personnel-current-membership">当前：{{ membershipLabel(item) }}</span></div><small>{{ requiresSourceMembership ? '必须选择属于该人员的有效任职关系。' : '复职按人员离职状态校验，不要求历史任职。' }}</small></label>
         <label class="console-form-item"><span>新组织<span v-if="requiresTargetAssignment"> *</span><em v-else>（离职不填）</em></span><select v-model="form.targetOrgUnitId" @change="onTargetOrganizationChange" :required="requiresTargetAssignment"><option value="">请选择目标组织</option><option v-for="item in organizations" :key="item.id || item.org_unit_id" :value="item.id || item.org_unit_id">{{ item.name }}</option></select></label>
         <label class="console-form-item"><span>新岗位<span v-if="requiresTargetAssignment"> *</span><em v-else>（离职不填）</em></span><select v-model="form.targetPositionId" :disabled="!form.targetOrgUnitId" :required="requiresTargetAssignment"><option value="">{{ form.targetOrgUnitId ? '请选择目标岗位' : '请先选择目标组织' }}</option><option v-for="item in targetPositionOptions" :key="item.id || item.position_id" :value="item.id || item.position_id">{{ item.name || item.position_name || item.code }}</option></select><small>{{ requiresTargetAssignment ? '只展示属于目标组织的有效岗位。' : '离职不需要填写目标组织和岗位。' }}</small></label>
-        <label class="console-form-item"><span>生效日期 *</span><input v-model="form.effectiveDate" type="date" /></label>
+        <label class="console-form-item"><span>生效日期 {{ form.immediate ? '' : '*' }}</span><input v-model="form.effectiveDate" type="date" :disabled="form.immediate" /></label>
+        <label class="console-form-item"><span>立即生效</span><input v-model="form.immediate" type="checkbox" /><small class="console-card-hint">勾选后以提交时刻作为生效时间，异动单排期后可立即执行</small></label>
         <label class="console-form-item full"><span>变更原因 *</span><textarea v-model="form.reason" rows="3" placeholder="填写业务原因、交接说明或复职依据" /></label>
       </div>
       <div class="personnel-preview"><div class="personnel-preview-heading"><div><strong>权限影响预览</strong><p>确认岗位与组织变化带来的角色新增、移除和保留范围。</p></div><button class="console-button secondary compact" type="button" :disabled="saving || !form.userId" @click="loadPreview"><ConsoleIcon name="audit" />{{ saving ? '计算中…' : '生成预览' }}</button></div><div v-if="preview" class="personnel-preview-grid"><div class="preview-added"><span>新增角色</span><strong>{{ (preview.added_roles || preview.added || []).length }} 项</strong></div><div class="preview-removed"><span>移除角色</span><strong>{{ (preview.removed_roles || preview.removed || []).length }} 项</strong></div><div class="preview-kept"><span>保留角色</span><strong>{{ (preview.kept_roles || preview.kept || []).length }} 项</strong></div></div><p v-else class="console-card-hint">保存前生成平台及子系统角色的新增、移除、保留清单。</p></div></div>
@@ -354,8 +379,8 @@ onMounted(() => { if (canRead.value) load() })
   <div v-if="workflowAction" class="console-modal-backdrop" role="presentation" @click.self="closeWorkflowAction">
     <section class="console-detail-modal personnel-workflow-modal" role="dialog" aria-modal="true" :aria-label="workflowAction.title">
       <header><div><p class="console-modal-eyebrow">人员异动流程</p><h2>{{ workflowAction.title }}</h2><p>凭据将随状态流转留存，用于审批和交接审计。</p></div><button class="console-modal-close" type="button" :disabled="workflowSaving" @click="closeWorkflowAction">×</button></header>
-      <div class="console-modal-body"><p v-if="workflowAction.kind === 'cancel'" class="console-card-hint">取消后该异动单不可恢复，也不会在生效日期执行。</p><template v-else><div v-if="workflowAction.kind === 'handover'" class="personnel-handover-panel"><label class="console-form-item"><span>责任接收人 *</span><select v-model="handoverTargetUserId"><option value="">请选择在职接收人</option><option v-for="user in users.filter((candidate) => String(candidate.status || '').toUpperCase() === 'ACTIVE' && String(candidate.id || candidate.user_id) !== String(workflowAction.item.user_id))" :key="user.id || user.user_id" :value="user.id || user.user_id">{{ userLabel(user) }}</option></select></label><ul class="personnel-handover-list"><li v-for="item in handoverItems" :key="item.id"><span>{{ item.system }} · {{ item.resource_type }}</span><strong>{{ item.status === 'COMPLETED' ? '已完成' : '待交接' }}</strong></li></ul><p class="console-card-hint">确认后系统先把全部待办责任交给接收人，全部成功后才允许排期离职。</p></div><label class="console-form-item"><span>{{ workflowAction.prefix ? '交接凭据编号' : '审批凭据或驳回原因' }} *</span><input v-model="workflowReference" :placeholder="workflowAction.prefix ? '例如 HANDOVER-20260918-001' : '通过时填写审批记录编号，驳回时填写原因'" /></label></template></div>
-      <footer class="console-form-actions"><button class="console-button ghost" type="button" :disabled="workflowSaving" @click="closeWorkflowAction">返回</button><button v-if="workflowAction.kind === 'approval'" class="console-button danger" type="button" :disabled="workflowSaving" @click="rejectWorkflowAction">驳回</button><button class="console-button primary" type="button" :disabled="workflowSaving" @click="confirmWorkflowAction">{{ workflowSaving ? '处理中…' : (workflowAction.kind === 'cancel' ? '确认取消' : (workflowAction.kind === 'approval' ? '通过' : '确认完成')) }}</button></footer>
+      <div class="console-modal-body"><p v-if="workflowAction.kind === 'cancel'" class="console-card-hint">取消后该异动单不可恢复，也不会在生效日期执行。</p><p v-else-if="workflowAction.kind === 'execute'" class="console-card-hint">立即执行会马上变更该人员的任职与权限（含离职的会话注销），不再等待生效日期。执行后不可撤销，请确认审批与交接均已完成。</p><template v-else><div v-if="workflowAction.kind === 'handover'" class="personnel-handover-panel"><label class="console-form-item"><span>责任接收人 *</span><select v-model="handoverTargetUserId"><option value="">请选择在职接收人</option><option v-for="user in users.filter((candidate) => String(candidate.status || '').toUpperCase() === 'ACTIVE' && String(candidate.id || candidate.user_id) !== String(workflowAction.item.user_id))" :key="user.id || user.user_id" :value="user.id || user.user_id">{{ userLabel(user) }}</option></select></label><ul class="personnel-handover-list"><li v-for="item in handoverItems" :key="item.id"><span>{{ item.system }} · {{ item.resource_type }}</span><strong>{{ item.status === 'COMPLETED' ? '已完成' : '待交接' }}</strong></li></ul><p class="console-card-hint">确认后系统先把全部待办责任交给接收人，全部成功后才允许排期离职。</p></div><label class="console-form-item"><span>{{ workflowAction.prefix ? '交接凭据编号' : '审批凭据或驳回原因' }} *</span><input v-model="workflowReference" :placeholder="workflowAction.prefix ? '例如 HANDOVER-20260918-001' : '通过时填写审批记录编号，驳回时填写原因'" /></label></template></div>
+      <footer class="console-form-actions"><button class="console-button ghost" type="button" :disabled="workflowSaving" @click="closeWorkflowAction">返回</button><button v-if="workflowAction.kind === 'approval'" class="console-button danger" type="button" :disabled="workflowSaving" @click="rejectWorkflowAction">驳回</button><button class="console-button primary" type="button" :disabled="workflowSaving" @click="confirmWorkflowAction">{{ workflowSaving ? '处理中…' : (workflowAction.kind === 'cancel' ? '确认取消' : (workflowAction.kind === 'execute' ? '确认立即执行' : (workflowAction.kind === 'approval' ? '通过' : '确认完成'))) }}</button></footer>
     </section>
   </div>
   <div v-if="authorizationDetail" class="console-modal-backdrop" role="presentation" @click.self="closeAuthorization">
