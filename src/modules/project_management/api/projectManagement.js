@@ -506,14 +506,26 @@ export function saveDetectionCategory(payload) {
 
 /**
  * importDetectionCategories 批量导入检测类别域（页面「导入」入口）。
- * @param {Array<object>} items 检测类别行（category 必填，其余可选）。
+ * @param {File} file 原始 CSV 文件。
+ * @param {number[]|null} selectedRows 预检通过且用户选择的文件行号。
  * @returns {Promise<{imported: number, skipped: number, errors?: string[]}>} 导入结果摘要。
  * @throws {Error} 无权限或网关返回非成功状态时抛出。
  */
-export function importDetectionCategories(file) {
+export function importDetectionCategories(file, selectedRows = null) {
   const formData = new FormData()
   formData.append('file', file)
+  if (Array.isArray(selectedRows)) formData.append('selected_rows', JSON.stringify(selectedRows))
   return request('/detection-categories/import', { method: 'POST', body: formData })
+}
+
+export function previewDetectionCategoriesImport(file) {
+  const formData = new FormData()
+  formData.append('file', file)
+  return request('/detection-categories/import/preview', { method: 'POST', body: formData })
+}
+
+export function downloadDetectionCategoryImportTemplate(example = false) {
+  return downloadImportTemplate(`/detection-categories/import/template${example ? '?example=true' : ''}`, example ? '检测类别导入填写示例.csv' : '检测类别导入模板.csv')
 }
 
 /**
@@ -919,10 +931,21 @@ export function deleteEquipment(resourceID) {
   return request(`/equipment/${encodeURIComponent(resourceID)}`, { method: 'DELETE' })
 }
 
-export function importEquipment(file) {
+export function importEquipment(file, selectedRows = null) {
   const formData = new FormData()
   formData.append('file', file)
+  if (Array.isArray(selectedRows)) formData.append('selected_rows', JSON.stringify(selectedRows))
   return request('/equipment/import', { method: 'POST', body: formData })
+}
+
+export function previewEquipmentImport(file) {
+  const formData = new FormData()
+  formData.append('file', file)
+  return request('/equipment/import/preview', { method: 'POST', body: formData })
+}
+
+export function downloadEquipmentImportTemplate() {
+  return downloadImportTemplate('/equipment/import/template', '设备能力导入模板.csv')
 }
 
 /**
@@ -942,11 +965,34 @@ export function upsertCapability(payload) {
  * @returns {Promise<{imported: number, skipped: number, errors?: string[]}>} 导入结果统计。
  * @throws {Error} 解析失败、权限不足或服务端异常时抛出。
  */
-export async function importCapabilities(file, resourceType = '') {
+export async function importCapabilities(file, resourceType = '', selectedRows = null) {
   const formData = new FormData()
   formData.append('file', file)
   if (resourceType) formData.append('resource_type', resourceType)
+  if (Array.isArray(selectedRows)) formData.append('selected_rows', JSON.stringify(selectedRows))
   return request('/capabilities/import', { method: 'POST', body: formData })
+}
+
+export async function previewCapabilitiesImport(file) {
+  const formData = new FormData()
+  formData.append('file', file)
+  return request('/capabilities/import/preview', { method: 'POST', body: formData })
+}
+
+export async function downloadCapabilityImportTemplate() {
+  return downloadImportTemplate('/capabilities/import/template', '人员资质导入模板.csv')
+}
+
+async function downloadImportTemplate(path, filename) {
+  const response = await fetch(`${API_BASE_URL}${path}`, { credentials: 'include', headers: { Accept: 'text/csv' } })
+  if (!response.ok) {
+    let message = `模板下载失败（HTTP ${response.status}）`
+    try { message = (await response.json())?.message || message } catch { /* retain HTTP status */ }
+    const error = new Error(message)
+    error.status = response.status
+    throw error
+  }
+  return { blob: await response.blob(), filename }
 }
 
 /**

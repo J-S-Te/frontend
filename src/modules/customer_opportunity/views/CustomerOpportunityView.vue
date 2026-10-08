@@ -75,7 +75,7 @@ const { options: customerIndustryItems } = useDictionaryOptions('CUSTOMER_INDUST
 const customerIndustryOptions = computed(() => customerIndustryItems.value.map((item) => item.value))
 const customerImportTemplateColumns = Object.freeze([
   ['客户名称', '示例科技有限公司'], ['统一社会信用代码', '913100001234567890'], ['客户类型', '企业'], ['行业', '软件'], ['区域', '华东'],
-  ['负责人用户ID', '请填写负责人用户ID'], ['负责人组织ID', '请填写负责人组织ID'], ['登记联系人姓名', '张三'], ['登记联系人电话', '13800138000'], ['登记联系人邮箱', 'zhangsan@example.com'],
+  ['登记联系人姓名', '张三'], ['登记联系人电话', '13800138000'], ['登记联系人邮箱', 'zhangsan@example.com'],
 ])
 const presaleEligibleOpportunityStages = new Set(['初步接触', '需求沟通', '方案制定', '报价', '投标'])
 const presaleEligibilityMessage = '只能为处于跟进中的初步接触、需求沟通、方案制定、报价或投标阶段商机发起售前支持。商机阶段不会自动调整。'
@@ -303,6 +303,10 @@ const presaleMutationLoadSequence = ref(0)
 const alerts = ref([])
 const alertRules = ref([])
 const showAlertConfig = ref(false)
+const alertConfigLoading = ref(false)
+const alertConfigError = ref('')
+const alertRuleSavingType = ref('')
+const canConfigurePresaleAlerts = computed(() => (crmSession.value?.permissions || []).includes('presale.alert.config'))
 const showReport = ref(false)
 const reportLoading = ref(false)
 const reportSummary = ref(null)
@@ -2276,12 +2280,35 @@ async function readAlert(item) {
   catch (value) { showError(value) }
 }
 async function openAlertConfig() {
-  try { alertRules.value = await listPresaleAlertRules() || []; showAlertConfig.value = true }
-  catch (value) { showError(value) }
+  if (!canConfigurePresaleAlerts.value || alertConfigLoading.value) return
+  showAlertConfig.value = true
+  alertConfigLoading.value = true
+  alertConfigError.value = ''
+  alertRules.value = []
+  try {
+    const rules = await listPresaleAlertRules()
+    if (!Array.isArray(rules) || !rules.length) throw new Error('预警规则目录为空，请确认 CRM 服务已更新后重新加载。')
+    alertRules.value = rules
+  } catch (value) {
+    alertConfigError.value = value?.message || '预警规则加载失败，请重试。'
+  } finally { alertConfigLoading.value = false }
 }
 async function saveAlertRule(rule) {
-  try { await updatePresaleAlertRule(rule.type, { threshold_hours: Number(rule.threshold_hours), enabled: rule.enabled, version: rule.config_version }); await openAlertConfig(); notice.value = '预警规则已更新，新版本只影响后续扫描。' }
-  catch (value) { showError(value) }
+  if (!canConfigurePresaleAlerts.value || alertRuleSavingType.value) return
+  const threshold = Number(rule.threshold_hours)
+  if (rule.threshold_hours === '' || rule.threshold_hours == null || !Number.isInteger(threshold) || threshold < 0 || threshold > 8760) {
+    alertConfigError.value = '阈值必须为 0–8760 之间的整数小时。'
+    return
+  }
+  alertRuleSavingType.value = rule.type
+  alertConfigError.value = ''
+  try {
+    await updatePresaleAlertRule(rule.type, { threshold_hours: threshold, enabled: rule.enabled, version: rule.version ?? rule.config_version })
+    await openAlertConfig()
+    notice.value = '预警规则已更新，新版本只影响后续扫描。'
+  } catch (value) {
+    alertConfigError.value = value?.status === 409 ? '规则已被其他管理员修改，请重新加载后再保存。' : value?.message || '预警规则保存失败，请重试。'
+  } finally { alertRuleSavingType.value = '' }
 }
 async function submitCustomer() {
   actionLoading.value = true; resetMessages()
@@ -2733,8 +2760,7 @@ onMounted(async () => {
         </div>
       </header>
       <section class="console-content crm-content">
-        <header class="console-page-head crm-page-head"><div><h1>{{ activeSection === 'presale' && presaleCreatePage ? '新建售前申请' : sectionTitle }}</h1><p>{{ activeSection === 'presale' && presaleCreatePage ? '填写售前支持需求，提交后进入两级审批流程' : activeSection === 'notifications' ? '包含当前用户的商机、售前与信用等级业务通知，不受 SELF / ORG / ALL 数据范围扩展' : activeSection === 'credit-approvals' ? '仅展示当前账号可审批的信用等级调整申请' : activeSection === 'credit-rules' ? '规则仅作用于后续回款事实，不会追溯重算历史记录' : '可见数据与可执行动作均由服务端权限和状态控制' }}</p></div><div v-if="activeSection === 'presale'" class="crm-actions"><template v-if="presaleCreatePage"><button type="button" :disabled="presaleCreateLoading" @click="closePresaleCreatePage">← 返回申请列表</button><button class="primary" type="submit" form="presale-create-form" :disabled="presaleCreateLoading">{{ presaleCreateLoading ? '提交中…' : '提交申请' }}</button></template><template v-else><button v-if="canCreatePresale && presaleRequestSubmissionAvailable" class="primary" type="button" @click="openPresaleCreatePage">新建申请</button><button v-if="canReadPresaleReports" @click="openReports">投入报表</button><button @click="loadAlerts">未读预警 {{ alerts.length }}</button><button @click="openAlertConfig">预警规则</button></template></div><div v-if="activeSection === 'opportunities'" class="crm-actions"><button v-if="canManageOpportunityCatalog" @click="opportunityCatalogDialog = true">基础数据配置</button><button @click="loadStageAlerts">刷新阶段告警</button><button v-if="canConfigureStageAlerts" @click="openStageAlertRuleEditor">阶段告警规则</button></div></header>
-      <span v-if="activeSection === 'notifications'" class="sr-only">通知收件人固定为当前登录用户，不受 SELF / ORG / ALL 数据范围扩展；只包含发给当前用户的商机负责人和售前执行人通知</span>
+        <header class="console-page-head crm-page-head"><div><h1>{{ activeSection === 'presale' && presaleCreatePage ? '新建售前申请' : sectionTitle }}</h1><p>{{ activeSection === 'presale' && presaleCreatePage ? '填写售前支持需求，提交后进入两级审批流程' : activeSection === 'notifications' ? '包含当前用户的商机、售前与信用等级业务通知，不受 SELF / ORG / ALL 数据范围扩展' : activeSection === 'credit-approvals' ? '仅展示当前账号可审批的信用等级调整申请' : activeSection === 'credit-rules' ? '规则仅作用于后续回款事实，不会追溯重算历史记录' : '可见数据与可执行动作均由服务端权限和状态控制' }}</p></div><div v-if="activeSection === 'presale'" class="crm-actions"><template v-if="presaleCreatePage"><button type="button" :disabled="presaleCreateLoading" @click="closePresaleCreatePage">← 返回申请列表</button><button class="primary" type="submit" form="presale-create-form" :disabled="presaleCreateLoading">{{ presaleCreateLoading ? '提交中…' : '提交申请' }}</button></template><template v-else><button v-if="canCreatePresale && presaleRequestSubmissionAvailable" class="primary" type="button" @click="openPresaleCreatePage">新建申请</button><button v-if="canReadPresaleReports" @click="openReports">投入报表</button><button @click="loadAlerts">未读预警 {{ alerts.length }}</button><button v-if="canConfigurePresaleAlerts" @click="openAlertConfig">预警规则</button></template></div><div v-if="activeSection === 'opportunities'" class="crm-actions"><button v-if="canManageOpportunityCatalog" @click="opportunityCatalogDialog = true">基础数据配置</button><button @click="loadStageAlerts">刷新阶段告警</button><button v-if="canConfigureStageAlerts" @click="openStageAlertRuleEditor">阶段告警规则</button></div></header>
       <p v-if="error" class="crm-alert error" role="alert">{{ error }}</p><p v-if="notice" class="crm-alert success" role="status">{{ notice }}</p><p v-if="runtimeCapabilitiesError" class="crm-alert warning" role="status">{{ runtimeCapabilitiesError }}</p>
       <section v-if="activeSection === 'customers'" class="crm-toolbar crm-customer-filters">
         <label>客户号 / 名称<input v-model.trim="customerFilters.keyword" @keyup.enter="loadCurrent"></label>
@@ -2821,12 +2847,14 @@ onMounted(async () => {
         </header>
         <div class="crm-alert-rules-dialog__body">
           <p class="console-card-hint">单位为小时。每次保存都会生成新版本，并且只影响后续扫描。</p>
-          <div class="console-setting-list">
+          <p v-if="alertConfigLoading" role="status">正在加载预警规则…</p>
+          <div v-if="alertConfigError" role="alert"><p>{{ alertConfigError }}</p><button type="button" :disabled="alertConfigLoading || !!alertRuleSavingType" @click="openAlertConfig">重新加载</button></div>
+          <div v-if="!alertConfigLoading" class="console-setting-list">
             <article v-for="rule in alertRules" :key="rule.type" class="console-setting-row crm-alert-rule">
-              <div class="crm-alert-rule__identity"><strong>{{ alertTypeText(rule.type) }}</strong><p>版本 {{ rule.config_version }} · 更新于 {{ formatDate(rule.updated_at) }}</p></div>
-              <label class="console-form-item crm-alert-rule__threshold"><span>阈值（小时）</span><input v-model.number="rule.threshold_hours" class="console-number-input" type="number" min="0" max="8760"></label>
-              <div class="crm-alert-rule__switch"><span>启用规则</span><button :class="['console-switch', { on: rule.enabled }]" type="button" :aria-pressed="rule.enabled" :aria-label="`${alertTypeText(rule.type)}${rule.enabled ? '已启用' : '已停用'}`" @click="rule.enabled = !rule.enabled"><i></i></button></div>
-              <button class="console-button primary small" type="button" @click="saveAlertRule(rule)">保存</button>
+              <div class="crm-alert-rule__identity"><strong>{{ alertTypeText(rule.type) }}</strong><p v-if="rule.configured === false">未配置 · 保存后生效，默认未启用</p><p v-else>版本 {{ rule.config_version }} · 更新于 {{ formatDate(rule.updated_at) }}</p></div>
+              <label class="console-form-item crm-alert-rule__threshold"><span>阈值（小时）</span><input v-model.number="rule.threshold_hours" :disabled="!!alertRuleSavingType" class="console-number-input" type="number" min="0" max="8760" step="1"></label>
+              <div class="crm-alert-rule__switch"><span>启用规则</span><button :disabled="!!alertRuleSavingType" :class="['console-switch', { on: rule.enabled }]" type="button" :aria-pressed="rule.enabled" :aria-label="`${alertTypeText(rule.type)}${rule.enabled ? '已启用' : '已停用'}`" @click="rule.enabled = !rule.enabled"><i></i></button></div>
+              <button class="console-button primary small" :disabled="!!alertRuleSavingType || alertConfigLoading" type="button" @click="saveAlertRule(rule)">{{ alertRuleSavingType === rule.type ? '保存中…' : '保存' }}</button>
             </article>
           </div>
         </div>
@@ -2908,7 +2936,7 @@ onMounted(async () => {
         </footer>
       </form>
     </div>
-    <div v-if="customerImportDialog" class="crm-modal" role="dialog" aria-modal="true"><form class="crm-import-wizard" @submit.prevent="previewImport"><h2>客户 Excel 导入</h2><p class="crm-note">第一步：上传 .xlsx 后由服务端先执行文件格式和内容结构校验，再进行固定表头和逐行预检。浏览器不会读取 Excel 内容，也不会保存文件或敏感字段。</p><template v-if="!customerImportPreview"><section class="crm-import-template" aria-labelledby="customer-import-template-title"><h3 id="customer-import-template-title">填写示例</h3><p class="crm-note">下载模板后，请将示例行替换为真实客户数据。负责人用户 ID 和负责人组织 ID 可通过“查找负责人”获取。</p><div class="crm-import-template-scroll"><table><thead><tr><th v-for="column in customerImportTemplateColumns" :key="column[0]">{{ column[0] }}</th></tr></thead><tbody><tr><td v-for="column in customerImportTemplateColumns" :key="column[0]">{{ column[1] }}</td></tr></tbody></table></div><button type="button" @click="downloadCustomerImportExample">下载 .xlsx 示例文件</button></section><label>Excel 文件<input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required @change="selectCustomerImportFile"></label><label>导入原因<textarea v-model.trim="customerImportForm.reason" required maxlength="500"></textarea></label><div class="crm-actions"><button type="button" @click="closeCustomerImport">取消</button><button class="primary" :disabled="actionLoading || !customerImportForm.file || !customerImportForm.reason">{{ actionLoading ? '服务端校验与预检中…' : '上传并预检' }}</button></div></template><template v-else><h3>第二步：服务端预检结果</h3><dl class="crm-import-summary"><dt>任务号</dt><dd>{{ customerImportPreview.job_no }}</dd><dt>状态</dt><dd>{{ customerImportPreview.status }}</dd><dt>总行数</dt><dd>{{ customerImportPreview.total_rows }}</dd><dt>可导入</dt><dd>{{ customerImportPreview.importable_rows }}</dd><dt>警告</dt><dd>{{ customerImportPreview.warning_rows }}</dd><dt>错误</dt><dd>{{ customerImportPreview.error_rows }}</dd><dt>预检过期时间</dt><dd>{{ formatDate(customerImportPreview.expires_at) }}</dd></dl><p class="crm-note">警告行和错误行本次均跳过；只有状态为“可导入”的行会提交。下表的信用代码、电话和邮箱均为服务端返回的脱敏值。</p><table v-if="customerImportPreview.rows?.length"><thead><tr><th>行号</th><th>状态</th><th>客户</th><th>信用代码（脱敏）</th><th>联系人</th><th>联系方式（脱敏）</th><th>问题</th></tr></thead><tbody><tr v-for="row in customerImportPreview.rows" :key="row.row_no"><td>{{ row.row_no }}</td><td>{{ importRowStatusText(row.status) }}</td><td>{{ row.name || '—' }}<br>{{ row.customer_type || '—' }} · {{ row.industry || '—' }} · {{ row.region || '—' }}</td><td>{{ row.unified_credit_code || '—' }}</td><td>{{ row.contact_name || '—' }}</td><td>{{ row.contact_phone || '—' }}<br>{{ row.contact_email || '—' }}</td><td><span v-if="!row.issues?.length">—</span><ul v-else><li v-for="issue in row.issues" :key="`${issue.column}-${issue.code}`">{{ issue.column }} · {{ issue.code }} · {{ issue.message }}</li></ul></td></tr></tbody></table><template v-if="!customerImportResult"><div class="crm-actions"><button type="button" @click="resetCustomerImportPreview">重新上传</button><button type="button" @click="downloadImportErrors">下载错误报告 CSV</button><button type="button" class="primary" :disabled="actionLoading || Number(customerImportPreview.importable_rows) === 0" @click="commitImport">{{ actionLoading ? '提交中…' : '第三步：确认导入可导入行' }}</button></div></template><template v-else><h3>第三步：导入结果</h3><dl class="crm-import-summary"><dt>状态</dt><dd>{{ customerImportResult.status }}</dd><dt>总行数</dt><dd>{{ customerImportResult.total_rows }}</dd><dt>成功</dt><dd>{{ customerImportResult.succeeded_rows }}</dd><dt>失败</dt><dd>{{ customerImportResult.failed_rows }}</dd><dt>跳过</dt><dd>{{ customerImportResult.skipped_rows }}</dd><dt>完成时间</dt><dd>{{ formatDate(customerImportResult.completed_at) }}</dd></dl><table v-if="customerImportResult.rows?.length"><thead><tr><th>行号</th><th>结果</th><th>客户编号</th><th>错误码</th><th>说明</th></tr></thead><tbody><tr v-for="row in customerImportResult.rows" :key="row.row_no"><td>{{ row.row_no }}</td><td>{{ importRowStatusText(row.status) }}</td><td>{{ row.customer_no || '—' }}</td><td>{{ row.error_code || '—' }}</td><td>{{ row.message || '—' }}</td></tr></tbody></table><div class="crm-actions"><button type="button" @click="downloadImportErrors">下载错误报告 CSV</button><button type="button" class="primary" @click="closeCustomerImport">完成</button></div></template></template></form></div>
+    <div v-if="customerImportDialog" class="crm-modal" role="dialog" aria-modal="true"><form class="crm-import-wizard" @submit.prevent="previewImport"><h2>客户 Excel 导入</h2><p class="crm-note">第一步：上传 .xlsx 后由服务端先执行文件格式和内容结构校验，再进行固定表头和逐行预检。浏览器不会读取 Excel 内容，也不会保存文件或敏感字段。</p><template v-if="!customerImportPreview"><section class="crm-import-template" aria-labelledby="customer-import-template-title"><h3 id="customer-import-template-title">填写示例</h3><p class="crm-note">下载模板后，请将示例行替换为真实客户数据，无需填写任何人员或组织 ID。新客户自动归当前导入人，所属组织由系统确认；如需交接给其他人员，请在导入后使用“变更负责人”。</p><div class="crm-import-template-scroll"><table><thead><tr><th v-for="column in customerImportTemplateColumns" :key="column[0]">{{ column[0] }}</th></tr></thead><tbody><tr><td v-for="column in customerImportTemplateColumns" :key="column[0]">{{ column[1] }}</td></tr></tbody></table></div><button type="button" @click="downloadCustomerImportExample">下载 .xlsx 示例文件</button></section><label>Excel 文件<input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required @change="selectCustomerImportFile"></label><label>导入原因<textarea v-model.trim="customerImportForm.reason" required maxlength="500"></textarea></label><div class="crm-actions"><button type="button" @click="closeCustomerImport">取消</button><button class="primary" :disabled="actionLoading || !customerImportForm.file || !customerImportForm.reason">{{ actionLoading ? '服务端校验与预检中…' : '上传并预检' }}</button></div></template><template v-else><h3>第二步：服务端预检结果</h3><dl class="crm-import-summary"><dt>任务号</dt><dd>{{ customerImportPreview.job_no }}</dd><dt>状态</dt><dd>{{ customerImportPreview.status }}</dd><dt>总行数</dt><dd>{{ customerImportPreview.total_rows }}</dd><dt>可导入</dt><dd>{{ customerImportPreview.importable_rows }}</dd><dt>警告</dt><dd>{{ customerImportPreview.warning_rows }}</dd><dt>错误</dt><dd>{{ customerImportPreview.error_rows }}</dd><dt>预检过期时间</dt><dd>{{ formatDate(customerImportPreview.expires_at) }}</dd></dl><p class="crm-note">警告行和错误行本次均跳过；只有状态为“可导入”的行会提交。下表的信用代码、电话和邮箱均为服务端返回的脱敏值。</p><table v-if="customerImportPreview.rows?.length"><thead><tr><th>行号</th><th>状态</th><th>客户</th><th>信用代码（脱敏）</th><th>负责人 / 所属组织</th><th>联系人</th><th>联系方式（脱敏）</th><th>问题</th></tr></thead><tbody><tr v-for="row in customerImportPreview.rows" :key="row.row_no"><td>{{ row.row_no }}</td><td>{{ importRowStatusText(row.status) }}</td><td>{{ row.name || '—' }}<br>{{ row.customer_type || '—' }} · {{ row.industry || '—' }} · {{ row.region || '—' }}</td><td>{{ row.unified_credit_code || '—' }}</td><td>{{ row.owner_display_name || '当前导入人' }}<br>{{ row.owner_org_name || '未确认组织' }}</td><td>{{ row.contact_name || '—' }}</td><td>{{ row.contact_phone || '—' }}<br>{{ row.contact_email || '—' }}</td><td><span v-if="!row.issues?.length">—</span><ul v-else><li v-for="issue in row.issues" :key="`${issue.column}-${issue.code}`">{{ issue.column }} · {{ issue.code }} · {{ issue.message }}</li></ul></td></tr></tbody></table><template v-if="!customerImportResult"><div class="crm-actions"><button type="button" @click="resetCustomerImportPreview">重新上传</button><button type="button" @click="downloadImportErrors">下载错误报告 CSV</button><button type="button" class="primary" :disabled="actionLoading || Number(customerImportPreview.importable_rows) === 0" @click="commitImport">{{ actionLoading ? '提交中…' : '第三步：确认导入可导入行' }}</button></div></template><template v-else><h3>第三步：导入结果</h3><dl class="crm-import-summary"><dt>状态</dt><dd>{{ customerImportResult.status }}</dd><dt>总行数</dt><dd>{{ customerImportResult.total_rows }}</dd><dt>成功</dt><dd>{{ customerImportResult.succeeded_rows }}</dd><dt>失败</dt><dd>{{ customerImportResult.failed_rows }}</dd><dt>跳过</dt><dd>{{ customerImportResult.skipped_rows }}</dd><dt>完成时间</dt><dd>{{ formatDate(customerImportResult.completed_at) }}</dd></dl><table v-if="customerImportResult.rows?.length"><thead><tr><th>行号</th><th>结果</th><th>客户编号</th><th>错误码</th><th>说明</th></tr></thead><tbody><tr v-for="row in customerImportResult.rows" :key="row.row_no"><td>{{ row.row_no }}</td><td>{{ importRowStatusText(row.status) }}</td><td>{{ row.customer_no || '—' }}</td><td>{{ row.error_code || '—' }}</td><td>{{ row.message || '—' }}</td></tr></tbody></table><div class="crm-actions"><button type="button" @click="downloadImportErrors">下载错误报告 CSV</button><button type="button" class="primary" @click="closeCustomerImport">完成</button></div></template></template></form></div>
     <div v-if="opportunityDialog" class="console-modal-backdrop" :class="{ nested: !!selectedOpportunity }" role="presentation" @click.self="closeOpportunityDialog">
       <form class="console-detail-modal crm-opportunity-dialog" role="dialog" aria-modal="true" :aria-label="opportunityEditMode ? '编辑商机' : '新建商机'" @submit.prevent="submitOpportunity">
         <header>

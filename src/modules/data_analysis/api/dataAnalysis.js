@@ -212,8 +212,20 @@ export function deleteAlertRule(id) { return request(`/alert-rules/${encodeURICo
  */
 export function getDictionary() { return request('/dictionary') }
 
-/** putDictionary 保存当前租户指标定义（仅管理员）。 */
-export function putDictionary(metrics) { return request('/dictionary', { method: 'PUT', body: JSON.stringify(metrics) }) }
+/** createDictionaryMetric 新建默认停用的指标口径。 */
+export function createDictionaryMetric(payload) { return request('/dictionary/metrics', { method: 'POST', body: JSON.stringify(payload) }) }
+
+/** updateDictionaryMetric 使用当前版本修改单个指标，编码不可变。 */
+export function updateDictionaryMetric(code, payload) { return request(`/dictionary/metrics/${encodeURIComponent(code)}`, { method: 'PUT', body: JSON.stringify(payload) }) }
+
+/** setDictionaryMetricEnabled 启停指标；未绑定计算能力的指标不可启用。 */
+export function setDictionaryMetricEnabled(code, enabled, version) { return request(`/dictionary/metrics/${encodeURIComponent(code)}/enabled`, { method: 'PATCH', body: JSON.stringify({ enabled, version }) }) }
+
+/** deleteDictionaryMetric 删除未被引用的自定义指标。 */
+export function deleteDictionaryMetric(code, version) { return request(`/dictionary/metrics/${encodeURIComponent(code)}`, { method: 'DELETE', body: JSON.stringify({ version }) }) }
+
+/** getDictionaryMetricVersions 查询单指标不可变版本历史。 */
+export function getDictionaryMetricVersions(code) { return request(`/dictionary/metrics/${encodeURIComponent(code)}/versions`) }
 
 /**
  * listSources 查询数据源同步接入状态。
