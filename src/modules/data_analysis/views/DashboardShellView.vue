@@ -15,6 +15,7 @@ import DictionaryView from "./DictionaryView.vue"
 import AdminSourcesView from "./AdminSourcesView.vue"
 import AlertRulesView from "./AlertRulesView.vue"
 import NativeDashboardView from "./NativeDashboardView.vue"
+import { isolatedEmbedUrl } from "../utils/embedOrigin.mjs"
 import "@/modules/data_analysis/styles/data-analysis.css"
 
 const route = useRoute()
@@ -153,22 +154,11 @@ async function loadDashboard(code) {
   iframeError.value = null
   iframeSrc.value = ""
   try {
-    const { token } = await getEmbedToken(code)
+    const { token, embed_url: embedUrl } = await getEmbedToken(code)
     if (requestVersion !== iframeRequestVersion || section.value !== code) return
-    // 令牌单次消费：仅本次 iframe 加载使用
-    //
-    // SEC-X9（书面论证，保持现状）：一次性 embed token 置于 iframe URL 路径，权衡后可接受：
-    // 1) 单次消费——token 由 GET /embed/{code} 签发、/embed-proxy 端点一次性核销，
-    //    即使 URL 被浏览器历史、日志或 Referer 截获也无法重放；
-    // 2) no-referrer——下方 iframe 固定 referrerpolicy="no-referrer"，导航与子资源请求
-    //    都不携带来源 URL；
-    // 3) sandbox——iframe 仅 allow-scripts allow-forms allow-popups，无
-    //    allow-same-origin（被嵌内容视为不透明源，拿不到同源 Cookie）也无
-    //    allow-top-navigation（无法反向导航宿主页）；
-    // 4) 无法改 header/POST——iframe 文档加载是纯 GET 导航，浏览器不会为 <iframe src>
-    //    附加自定义请求头；迁移需要后端把 /embed-proxy 改为会话或一次性 Cookie 鉴权，
-    //    属后端写入范围（不在本任务 scope）。后端支持前维持 URL 传 token + 上述三层缓解。
-    iframeSrc.value = `/data_analysis/api/v1/embed-proxy/${encodeURIComponent(token)}`
+    // Backend validates independent cookie domains; browser additionally
+    // rejects the platform host. Metabase storage is confined to that origin.
+    iframeSrc.value = isolatedEmbedUrl(embedUrl, token, window.location.origin)
   } catch (err) {
     if (requestVersion !== iframeRequestVersion) return
     iframeError.value = err?.code === "FORBIDDEN" ? "当前账号无权限查看该看板" : (err?.message || "看板加载失败")
@@ -396,7 +386,7 @@ onMounted(async () => {
             <div class="da-frame-stage">
               <LoadingState v-if="iframeLoading" title="看板加载中…" compact />
               <ErrorState v-else-if="iframeError" :error="iframeError" @retry="loadDashboard(DASHBOARD_CODES[section])" compact />
-              <iframe v-else :src="iframeSrc" class="da-iframe" :title="`${currentMeta[0]}嵌入看板`" sandbox="allow-scripts allow-forms allow-popups" referrerpolicy="no-referrer" />
+              <iframe v-else :src="iframeSrc" class="da-iframe" :title="`${currentMeta[0]}嵌入看板`" sandbox="allow-scripts allow-same-origin" referrerpolicy="no-referrer" />
             </div>
           </section>
         </template>

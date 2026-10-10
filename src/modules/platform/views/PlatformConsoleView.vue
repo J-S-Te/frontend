@@ -9,6 +9,7 @@ import EmployeeOnboardingModal from '@/modules/platform/iam/components/EmployeeO
 import NotificationCenterModule from '@/modules/platform/notifications/components/NotificationCenterModule.vue'
 import ConfigurationCenterModule from '@/modules/platform/configuration/components/ConfigurationCenterModule.vue'
 import FileTaskOperationsModule from '@/modules/platform/files/components/FileTaskOperationsModule.vue'
+import CommercialLicenseView from '@/modules/platform/features/licenses/CommercialLicenseView.vue'
 import { getUnreadCount, listInbox, markNotificationRead } from '@/modules/platform/notifications/api/notifications'
 import LoginSecurityModule from '@/modules/platform/security/components/LoginSecurityModule.vue'
 import DictionaryManagementModule from '@/modules/platform/dictionaries/components/DictionaryManagementModule.vue'
@@ -144,6 +145,12 @@ const subsystemOnboardingPermissions = Object.freeze([
 const canOnboardSubsystem = computed(() => subsystemOnboardingPermissions.every((permission) => hasPermission(permission)))
 
 const settingsTabs = [
+  {
+    key: 'licenses', label: '商业授权', icon: 'security', tone: 'blue',
+    description: '核对部署身份、导入签名许可证并追溯授权变更。',
+    capabilities: ['签发申请', '授权期限', '验签预览', '导入审计'],
+    permissions: PLATFORM_SETTINGS_SECTION_PERMISSIONS.licenses,
+  },
   {
     key: 'applications', label: '应用接入', icon: 'dashboard', tone: 'cyan',
     description: '新增、设置、更新或下线业务子系统，并维护统一登录部署边界。',
@@ -926,6 +933,7 @@ onBeforeUnmount(() => {
           <ConfigurationCenterModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'config'" @toast="showToast" />
 
           <FileTaskOperationsModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'jobs'" @toast="showToast" />
+          <CommercialLicenseView v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'licenses'" @toast="showToast" />
 
           <SubsystemOnboardingModule
             v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'applications'"

@@ -52,6 +52,9 @@ COPY nginx/gateway-http.conf.template /etc/nginx/gateway-templates/gateway-http.
 COPY nginx/gateway-https.conf.template /etc/nginx/gateway-templates/gateway-https.conf.template
 COPY nginx/gateway-draining.conf.template /etc/nginx/gateway-templates/gateway-draining.conf.template
 COPY nginx/05-select-public-transport.sh /docker-entrypoint.d/05-select-public-transport.sh
+COPY nginx/bi-embed.conf.template /etc/nginx/gateway-templates/bi-embed.conf.template
+COPY nginx/04-bi-embed.sh /docker-entrypoint.d/04-bi-embed.sh
+RUN chmod 0755 /docker-entrypoint.d/04-bi-embed.sh
 RUN chmod 0755 /docker-entrypoint.d/05-select-public-transport.sh
 RUN mkdir -p /etc/nginx/portal-apps.d
 COPY nginx/portal-apps-locations.conf /etc/nginx/portal-apps.d/managed.conf

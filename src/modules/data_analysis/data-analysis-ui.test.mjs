@@ -10,9 +10,9 @@ const api = await readFile(new URL('./api/dataAnalysis.js', import.meta.url), 'u
 
 test('看板 iframe 只经嵌入桥代理加载，不直连 Metabase', () => {
   assert.match(shell, /getEmbedToken\(code\)/)
-  assert.match(shell, /embed-proxy/)
+  assert.match(shell, /isolatedEmbedUrl\(embedUrl, token, window.location.origin\)/)
   assert.doesNotMatch(shell, /https?:\/\/.*metabase/i) // 无 Metabase 直连 URL
-  assert.match(shell, /sandbox="allow-scripts allow-forms allow-popups"/) // 无 allow-same-origin，iframe 内容视为 opaque origin
+  assert.match(shell, /sandbox="allow-scripts allow-same-origin"/) // Only independently isolated origin; no forms, popups or top navigation.
   assert.match(shell, /referrerpolicy="no-referrer"/)
 })
 
