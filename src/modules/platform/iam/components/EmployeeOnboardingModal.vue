@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { formatUserError } from '../../../shared/utils/userError.js'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import {
   IamError,
@@ -15,18 +16,26 @@ import {
   organizationSelectOptions,
   positionsForOrganization,
 } from '@/modules/platform/iam/utils/selectionCatalog'
+import { useRelatedDataInvalidation } from '@/modules/platform/shared/composables/useRelatedDataInvalidation'
+import { RELATED_DATA } from '@/modules/platform/shared/utils/relatedDataInvalidation'
 import OnboardingPrerequisiteStep from '@/modules/platform/iam/components/OnboardingPrerequisiteStep.vue'
 
 const props = defineProps({
   organizations: { type: Array, default: () => [] },
   positions: { type: Array, default: () => [] },
   applications: { type: Array, default: () => [] },
+  // 父组件当前正在重新读取组织 / 岗位 / 应用目录。加载结束前不允许继续录入，
+  // 避免用户在下拉里只看到过期目录却以为“目录里就是没有这个组织”。
+  referencesLoading: { type: Boolean, default: false },
+  // 目录读取失败时的用户可读原因。失败必须显式展示并提供重试，不能伪装成空目录。
+  referencesError: { type: String, default: '' },
   // onBeforeOpen 在 modal 挂载时同步触发。父组件可以在这里发起后台数据加载
   // (组织 / 岗位 / 应用目录)，但不应该 await —— modal 自身的步骤 0 会自行检查。
+  // 父组件对同一批目录的重复调用会按会话合并，因此这里不会再产生第二次网络请求。
   onBeforeOpen: { type: Function, default: null },
 })
 
-const emit = defineEmits(['close', 'completed', 'toast', 'refresh-prerequisites'])
+const emit = defineEmits(['close', 'completed', 'toast', 'refresh-prerequisites', 'retry-references'])
 
 const form = reactive(defaultEmployeeOnboardingForm())
 const saving = ref(false)
@@ -44,8 +53,8 @@ let previousBodyOverflow = ''
 const prereqRefreshKey = ref(0)
 
 onMounted(() => {
-  // The wizard has its own scroll container. Lock the page behind it so a wheel
-  // event at the modal edge cannot scroll the settings page underneath.
+  // 向导使用自己的滚动容器。锁定其后的页面，避免弹窗边缘的
+  // 滚轮事件滚动底层设置页面。
   previousBodyOverflow = document.body.style.overflow
   document.body.style.overflow = 'hidden'
   // 同步触发父级钩子；父级用它在挂载瞬间发起数据预加载。
@@ -82,6 +91,36 @@ watch(() => form.org_unit_id, () => {
     form.position_id = ''
   }
 })
+
+// 目录重新读取后只清理“确实已经失效”的选择，并说明原因；姓名、账号、有效期等
+// 已填写内容一律保留。加载进行中的空数组不代表失效，因此先跳过。
+const selectionNotice = ref('')
+
+function dropSelectionIfMissing(kind) {
+  if (props.referencesLoading) return
+  if (kind === 'organization') {
+    if (!form.org_unit_id) return
+    const stillVisible = organizationOptions.value.some((item) => String(item.option_id) === String(form.org_unit_id))
+    if (stillVisible) return
+    form.org_unit_id = ''
+    form.position_id = ''
+    selectionNotice.value = '原选组织已停用或不再对当前账号可见，已清除该组织与岗位选择；其余已填写内容保持不变。'
+    return
+  }
+  if (!form.position_id) return
+  const stillVisible = membershipPositions.value.some((item) => positionId(item) === String(form.position_id))
+  if (stillVisible) return
+  form.position_id = ''
+  selectionNotice.value = '原选岗位已停用或不再属于当前组织，已清除岗位选择；其余已填写内容保持不变。'
+}
+
+watch(() => props.organizations, () => dropSelectionIfMissing('organization'))
+watch(() => props.positions, () => dropSelectionIfMissing('position'))
+
+// 岗位授权模板或岗位映射变化后，已展示的“即将继承的应用角色”不再代表当前授权。
+useRelatedDataInvalidation(() => {
+  if (form.inherit_authorization && form.position_id) loadAuthorizationPreview()
+}, { kinds: [RELATED_DATA.AUTHORIZATION_TEMPLATES, RELATED_DATA.ROLE_CATALOG] })
 
 watch(
   () => [form.create_membership, form.position_id, form.inherit_authorization],
@@ -201,6 +240,17 @@ async function loadAuthorizationPreview() {
   }
 }
 
+function onboardingFailureMessage(error) {
+  const partial = error?.partialCompletion
+  if (partial?.userCreated === true) {
+    const completed = partial.accountCreated === true ? '员工档案和本地账号已创建' : '员工档案已创建'
+    const pending = partial.accountCreated === true || !form.create_account ? '任职关系' : '本地账号'
+    const reason = formatUserError(error.cause || error, { method: 'POST', fallback: '请联系管理员核对已有员工记录。' }).slice(0, 180)
+    return `${completed}；${pending}创建尚未确认完成。${reason}请先核对现有记录，勿重复新增员工。`
+  }
+  return formatUserError(error, { method: 'POST', fallback: '新增员工失败。' })
+}
+
 async function submit() {
   if (saving.value) return
   saving.value = true
@@ -220,7 +270,7 @@ async function submit() {
     emit('completed', result)
     emit('close')
   } catch (error) {
-    emit('toast', error instanceof IamError ? error.message : (error?.message || '新增员工失败。'))
+    emit('toast', onboardingFailureMessage(error))
   } finally {
     saving.value = false
   }
@@ -289,11 +339,14 @@ async function submit() {
           :organizations="organizations"
           :positions="positions"
           :applications="applications"
+          :references-loading="referencesLoading"
+          :references-error="referencesError"
           :refresh-key="prereqRefreshKey"
           @ready="prerequisitesReady = true"
           @not-ready="prerequisitesReady = false"
           @continue="handlePrerequisitesContinue"
           @refresh="handlePrerequisitesRefresh"
+          @retry-references="emit('retry-references')"
           @toast="(message) => emit('toast', message)"
         />
 
@@ -309,7 +362,7 @@ async function submit() {
             <div class="console-form-grid">
               <label class="console-form-item"><span>展示姓名 *</span><input v-model="form.display_name" required maxlength="100" placeholder="例如：张三" /></label>
               <label class="console-form-item"><span>状态</span><select v-model="form.status"><option value="ACTIVE">启用</option><option value="DISABLED">停用</option></select></label>
-              <label class="console-form-item"><span>邮箱</span><input v-model="form.email" type="email" placeholder="例如：zhang.san@example.com" /></label>
+              <label class="console-form-item"><span>邮箱</span><input v-model="form.email" type="email" placeholder="例如：zhang.san@example.com"  maxlength="320"/></label>
               <label class="console-form-item"><span>手机号</span><input v-model="form.mobile" maxlength="32" placeholder="例如：13800000000" /></label>
               <label class="console-form-item"><span>用户有效期 *</span><select v-model="form.user_validity_mode"><option value="PERMANENT">长期有效</option><option value="TEMPORARY">指定截止时间</option></select></label>
               <label v-if="form.user_validity_mode === 'TEMPORARY'" class="console-form-item"><span>用户有效截止时间 *</span><input v-model="form.user_valid_until" required type="datetime-local" /><small class="console-wizard-field-help">到期后该用户的全部账号和现有会话都会失效。</small></label>
@@ -341,6 +394,7 @@ async function submit() {
                 <p>必填。用户与人员通过任职关系一一对应；岗位是标准授权的来源。</p>
               </div>
             </div>
+            <p v-if="selectionNotice" class="console-wizard-empty error" role="alert">{{ selectionNotice }}</p>
             <div class="console-form-grid">
               <label class="console-form-item"><span>所属组织 *</span><select v-model="form.org_unit_id" required><option value="">请选择组织</option><option v-for="item in organizationOptions" :key="item.option_id" :value="item.option_id">{{ item.option_label }}</option></select></label>
               <label class="console-form-item"><span>岗位 *</span><select v-model="form.position_id" :disabled="!form.org_unit_id || !membershipPositions.length" required><option value="">{{ !form.org_unit_id ? '请先选择组织' : (membershipPositions.length ? '请选择岗位' : '当前组织暂无岗位') }}</option><option v-for="item in membershipPositions" :key="positionId(item)" :value="positionId(item)">{{ positionName(item) }}</option></select><small v-if="form.org_unit_id && !membershipPositions.length" class="console-wizard-field-help">当前组织暂无岗位，请先在“岗位”中创建。</small></label>

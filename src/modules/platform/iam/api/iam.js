@@ -1,4 +1,6 @@
 import { createRequest } from '../../shared/api/request.js'
+import { RELATED_DATA, publishRelatedDataChanged } from '../../shared/utils/relatedDataInvalidation.js'
+import { formatUserError } from '../../../shared/utils/userError.js'
 
 /**
  * IamError 表示 IAM 接口返回的结构化错误。
@@ -32,6 +34,20 @@ const request = createRequest({
   feature: 'iam',
 })
 
+/**
+ * 只有服务端确认写入成功后才发布关联数据失效；发布发生在写入之后、列表刷新之前，
+ * 因此刷新失败不会抹掉“已保存”的事实，也不会诱导调用方重复写入。
+ */
+function onWriteSuccess(promise, kinds) {
+  return promise.then((result) => {
+    publishRelatedDataChanged(kinds)
+    return result
+  })
+}
+
+const ORGANIZATION_WRITE_KINDS = [RELATED_DATA.ORGANIZATIONS, RELATED_DATA.POSITIONS, RELATED_DATA.MEMBERSHIPS]
+const POSITION_WRITE_KINDS = [RELATED_DATA.POSITIONS, RELATED_DATA.AUTHORIZATION_TEMPLATES]
+
 function pageQuery(parameters = {}) {
   const search = new URLSearchParams()
   Object.entries(parameters).forEach(([key, value]) => {
@@ -54,7 +70,7 @@ function normalize(value) {
   }
 }
 
-// --- Users ---
+// --- 用户 ---
 
 /**
  * listUsers 分页查询用户，并可按关键字和状态筛选。
@@ -81,10 +97,10 @@ export function listUsers({ page = 1, pageSize = 50, keyword = '', status = '' }
  * @throws {IamError} 用户数据无效、唯一字段冲突或操作无权限时抛出。
  */
 export function createUser({ displayName, email = null, mobile = null, status = 'ACTIVE', validUntil }) {
-  return request('/users', {
+  return onWriteSuccess(request('/users', {
     method: 'POST',
     body: JSON.stringify({ display_name: displayName, email, mobile, status, ...(validUntil !== undefined ? { valid_until: validUntil } : {}) }),
-  })
+  }), [RELATED_DATA.PEOPLE])
 }
 
 /**
@@ -97,10 +113,10 @@ export function createUser({ displayName, email = null, mobile = null, status = 
  * @throws {IamError} 任一入职数据无效、存在唯一性冲突或事务执行失败时抛出。
  */
 export function createEmployee({ user, account = null, membership = null }) {
-  return request('/employees', {
+  return onWriteSuccess(request('/employees', {
     method: 'POST',
     body: JSON.stringify({ user, account, membership }),
-  })
+  }), [RELATED_DATA.PEOPLE, RELATED_DATA.MEMBERSHIPS])
 }
 
 function employeeEndpointUnavailable(error) {
@@ -109,12 +125,12 @@ function employeeEndpointUnavailable(error) {
   return [404, 405, 501].includes(Number(error?.status))
 }
 
-function employeeOnboardingPartialError(message, error) {
-  return new IamError(message, {
-    status: error?.status,
-    code: error?.code,
-    traceId: error?.traceId,
-  })
+function employeeOnboardingPartialError(message, cause, accountCreated) {
+  const error = Object.assign(new IamError(message), cause)
+  error.message = `${message}${formatUserError(cause, { method: 'POST' })}`
+  error.cause = cause
+  error.partialCompletion = { userCreated: true, accountCreated, membershipCreated: false }
+  return error
 }
 
 /**
@@ -150,7 +166,9 @@ export async function onboardEmployee({ user, account = null, membership = null 
   })
   const userId = userResult?.user_id || userResult?.id
   if (!userId) {
-    throw new IamError('员工档案已创建，但服务端未返回用户 ID；未继续创建账号或任职关系。')
+    const error = new IamError('暂时无法确认员工档案创建结果；未继续创建账号或任职关系，请先核对员工列表，避免重复新增。', { code: 'INVALID_RESPONSE' })
+    error.request_method = 'POST'
+    throw error
   }
 
   let accountResult = null
@@ -164,8 +182,8 @@ export async function onboardEmployee({ user, account = null, membership = null 
       })
     } catch (error) {
       throw employeeOnboardingPartialError(
-        `员工档案已创建，但本地账号未创建。为避免重复账号，系统没有自动重试：${error?.message || '请在“登录账号”中补建。'}`,
-        error,
+        '员工档案已创建，但本地账号尚未确认创建成功；请先核对账号记录，避免重复提交。',
+        error, false,
       )
     }
   }
@@ -184,8 +202,8 @@ export async function onboardEmployee({ user, account = null, membership = null 
       })
     } catch (error) {
       throw employeeOnboardingPartialError(
-        `员工档案${account ? '和本地账号' : ''}已创建，但任职关系未创建。为避免重复写入，系统没有自动重试：${error?.message || '请在“任职关系”中补建。'}`,
-        error,
+        `员工档案${account ? '和本地账号' : ''}已创建，但任职关系尚未确认创建成功；请先核对任职记录，避免重复提交。`,
+        error, Boolean(account),
       )
     }
   }
@@ -208,7 +226,7 @@ export async function onboardEmployee({ user, account = null, membership = null 
  * @throws {IamError} 数量超限、任一条数据无效、存在冲突或原子事务失败时抛出。
  */
 export function createUsersBatch(items) {
-  return request('/users/batch', {
+  return onWriteSuccess(request('/users/batch', {
     method: 'POST',
     body: JSON.stringify({
       items: items.map((item) => ({
@@ -226,7 +244,7 @@ export function createUsersBatch(items) {
           : [],
       })),
     }),
-  })
+  }), [RELATED_DATA.PEOPLE])
 }
 
 /**
@@ -263,9 +281,9 @@ export function createEmployeesBatch(items, sourceFile = null) {
     // multipart 导入时服务端以原始 CSV 为唯一事实来源；浏览器只提交用户在
     // 预览页勾选的物理行号，不能用可篡改的 JSON 覆盖文件内容。
     form.append('payload', JSON.stringify({ selected_lines: payload.items.map((item) => item.line_no) }))
-    return request('/employees/batch', { method: 'POST', body: form })
+    return onWriteSuccess(request('/employees/batch', { method: 'POST', body: form }), [RELATED_DATA.PEOPLE, RELATED_DATA.MEMBERSHIPS])
   }
-  return request('/employees/batch', { method: 'POST', body: JSON.stringify(payload) })
+  return onWriteSuccess(request('/employees/batch', { method: 'POST', body: JSON.stringify(payload) }), [RELATED_DATA.PEOPLE, RELATED_DATA.MEMBERSHIPS])
 }
 
 
@@ -283,10 +301,10 @@ export function createEmployeesBatch(items, sourceFile = null) {
  * @throws {IamError} 用户不存在、版本冲突、数据无效或操作无权限时抛出。
  */
 export function updateUser({ userId, displayName, employeeNo = '', email = '', mobile, status, version, validUntil = null, updateValidity = false }) {
-  return request(`/users/${encodeURIComponent(userId)}`, {
+  return onWriteSuccess(request(`/users/${encodeURIComponent(userId)}`, {
     method: 'PATCH',
     body: JSON.stringify({ display_name: displayName, employee_no: employeeNo, email, status, version, ...(mobile !== undefined ? { mobile } : {}), ...(updateValidity ? { valid_until: validUntil, update_validity: true } : {}) }),
-  })
+  }), [RELATED_DATA.PEOPLE])
 }
 
 /**
@@ -298,13 +316,14 @@ export function updateUser({ userId, displayName, employeeNo = '', email = '', m
  * @throws {IamError} 用户不存在、版本冲突或不允许删除时抛出。
  */
 export function deleteUser({ userId, version }) {
-  return request(`/users/${encodeURIComponent(userId)}`, {
+  // 业务删除会原子停用账号、任职与活跃会话；人员目录和任职目录必须同时失效。
+  return onWriteSuccess(request(`/users/${encodeURIComponent(userId)}`, {
     method: 'DELETE',
     body: JSON.stringify({ version }),
-  })
+  }), [RELATED_DATA.PEOPLE, RELATED_DATA.MEMBERSHIPS])
 }
 
-// --- Accounts ---
+// --- 账号 ---
 
 /**
  * listAccounts 分页查询本地登录账号。
@@ -371,7 +390,7 @@ export function resetAccountPassword({ accountId, version }) {
   })
 }
 
-// --- Org Units ---
+// --- 组织单元 ---
 
 /**
  * listOrgUnits 分页查询组织单元。
@@ -397,10 +416,10 @@ export function listOrgUnits({ page = 1, pageSize = 100, keyword = '', status = 
  * @throws {IamError} 父组织不存在、名称冲突、数据无效或操作无权限时抛出。
  */
 export function createOrgUnit({ parentId = null, name, sortOrder = 0 }) {
-  return request('/org-units', {
+  return onWriteSuccess(request('/org-units', {
     method: 'POST',
     body: JSON.stringify({ parent_id: parentId, name, sort_order: sortOrder }),
-  })
+  }), ORGANIZATION_WRITE_KINDS)
 }
 
 /**
@@ -415,10 +434,10 @@ export function createOrgUnit({ parentId = null, name, sortOrder = 0 }) {
  * @throws {IamError} 组织不存在、层级形成循环、版本冲突或操作无权限时抛出。
  */
 export function updateOrgUnit({ orgUnitId, parentId = null, name, sortOrder = 0, version }) {
-  return request(`/org-units/${encodeURIComponent(orgUnitId)}`, {
+  return onWriteSuccess(request(`/org-units/${encodeURIComponent(orgUnitId)}`, {
     method: 'PATCH',
     body: JSON.stringify({ parent_id: parentId, name, sort_order: sortOrder, version }),
-  })
+  }), ORGANIZATION_WRITE_KINDS)
 }
 
 /**
@@ -430,13 +449,13 @@ export function updateOrgUnit({ orgUnitId, parentId = null, name, sortOrder = 0,
  * @throws {IamError} 组织不存在、仍有子组织或关联数据、版本冲突时抛出。
  */
 export function deleteOrgUnit({ orgUnitId, version }) {
-  return request(`/org-units/${encodeURIComponent(orgUnitId)}`, {
+  return onWriteSuccess(request(`/org-units/${encodeURIComponent(orgUnitId)}`, {
     method: 'DELETE',
     body: JSON.stringify({ version }),
-  })
+  }), ORGANIZATION_WRITE_KINDS)
 }
 
-// --- Positions ---
+// --- 岗位 ---
 
 /**
  * listPositions 分页查询岗位。
@@ -461,10 +480,10 @@ export function listPositions({ page = 1, pageSize = 100, keyword = '', status =
  * @throws {IamError} 组织不存在、岗位名称冲突、数据无效或操作无权限时抛出。
  */
 export function createPosition({ orgUnitId, name }) {
-  return request('/positions', {
+  return onWriteSuccess(request('/positions', {
     method: 'POST',
     body: JSON.stringify({ org_unit_id: orgUnitId, name }),
-  })
+  }), POSITION_WRITE_KINDS)
 }
 
 /**
@@ -476,13 +495,13 @@ export function createPosition({ orgUnitId, name }) {
  * @throws {IamError} 岗位不存在、仍有任职或授权模板关联、版本冲突时抛出。
  */
 export function deletePosition({ positionId, version }) {
-  return request(`/positions/${encodeURIComponent(positionId)}`, {
+  return onWriteSuccess(request(`/positions/${encodeURIComponent(positionId)}`, {
     method: 'DELETE',
     body: JSON.stringify({ version }),
-  })
+  }), POSITION_WRITE_KINDS)
 }
 
-// --- Memberships ---
+// --- 任职 ---
 
 /**
  * listMemberships 分页查询用户任职关系。
@@ -520,7 +539,7 @@ export function createMembership({
   effectiveTo = null,
   inheritAuthorization = true,
 }) {
-  return request('/memberships', {
+  return onWriteSuccess(request('/memberships', {
     method: 'POST',
     body: JSON.stringify({
       user_id: userId,
@@ -531,5 +550,5 @@ export function createMembership({
       effective_to: effectiveTo,
       inherit_authorization: inheritAuthorization !== false,
     }),
-  })
+  }), [RELATED_DATA.MEMBERSHIPS])
 }

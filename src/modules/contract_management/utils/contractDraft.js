@@ -1,5 +1,5 @@
-// Capability is calculated by the backend from tenant, role, ownership and state.
-// Do not infer edit rights from a display name or a broad list-read permission.
+// 操作能力由后端根据租户、角色、归属和状态计算。
+// 不得根据显示名称或宽泛的列表读取权限推导编辑权限。
 export function canEditContractDraft(contract) {
   return contract?.status === 'draft' && contract?.can_edit_draft === true
 }
@@ -16,6 +16,7 @@ export function hydrateContractDraft(contract) {
     customer_contact: value('customer_contact'), customer_phone: value('customer_phone'),
     amount: Number(contract.amount_minor || 0) / 100, currency: value('currency') || 'CNY',
     start_date: value('start_date').slice(0, 10), end_date: value('end_date').slice(0, 10),
+    payment_terms: (Array.isArray(contract.payment_terms) ? contract.payment_terms : []).map((term) => ({ installment_no: Number(term.installment_no), due_date: String(term.due_date || ''), amount: String(term.amount || '') })),
     template_id: value('template_id'), template_values: { ...(contract.template_values || {}) },
     service_items: items.map((item) => ({
       source_id: String(item.source_id || ''), service_type: String(item.service_type || ''),
@@ -33,8 +34,8 @@ export async function saveContractDraft({ contractId, version, payload, updateDr
   if (saved?.id !== contractId || !Number.isSafeInteger(saved.version) || saved.version <= version || saved.status !== 'draft') {
     throw Object.assign(new Error('保存结果不完整，请重新载入草稿确认最新状态，勿重复提交。'), { requiresReload: true })
   }
-  // Update the UI's version before submission: a failed submission must never
-  // cause a retry to overwrite the successfully saved revision with stale data.
+  // 提交前更新界面中的版本：提交失败后的重试
+  // 绝不能用旧数据覆盖已经成功保存的修订。
   onSaved(saved)
   const approval = submit ? await submitApproval(contractId, { expected_version: saved.version }) : null
   return { saved, approval }

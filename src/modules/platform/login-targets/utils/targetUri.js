@@ -1,7 +1,7 @@
 // 与平台后端 validLoginTargetURI（application/login_target.go）保持一致的校验：
 //   - 绝对地址：仅接受 https，且不允许 userinfo；
 //   - 相对路径：必须以单个 / 开头、无 //、无 query/fragment、仅允许安全字符，
-//     登录时由后端按应用环境的 Public BaseURL + PathPrefix 自动补全。
+//     登录时由后端按应用环境的 公开 BaseURL + PathPrefix 自动补全。
 const MAX_TARGET_URI_LENGTH = 2048
 const RELATIVE_ALLOWED_CHARS = new Set('/._~!+-'.split(''))
 

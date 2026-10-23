@@ -213,7 +213,7 @@
 .pm-shell .pm-multi-menu::-webkit-scrollbar-thumb { border-radius: 4px; background: var(--pm-line-strong); }
 
 /* ==========================================================================
-   §3 布局骨架 App Shell
+   §3 应用外壳布局骨架
    ========================================================================== */
 .pm-sidebar {
   position: fixed;

@@ -8,10 +8,10 @@ export function isPlatformApplication(application) {
   return platformApplicationCodes.has(normalizedCode(application?.code))
 }
 
-// Production delivery assets contain every reviewed subsystem manifest so a later incremental
-// package can be adopted without replacing the deployment scripts. That allow-list is broader
-// than the current delivery: only prepared targets (plus applications that already own a visible
-// environment) belong in the application registry UI.
+// 生产交付资源包含所有已审核子系统的清单，便于后续接入增量包，
+// 无需替换部署脚本。该允许列表的范围大于
+// 当前交付范围：应用注册界面仅应展示已准备就绪的目标，
+// 以及已经拥有可见环境的应用。
 export function visibleSubsystemApplications(applications, options = {}) {
   const items = Array.isArray(applications) ? applications : []
   if (!options.capabilitiesResolved || options.capabilitiesAvailable === false) {

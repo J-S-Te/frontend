@@ -1,5 +1,7 @@
 ## 证据
 
+> 历史视觉检查记录。本轮 2026-10-13 操作文档更新未重新执行此页面截图比对，以下环境限制和结论只代表原任务；当前业务操作参见 [CRM 手册](../sharedDocs/10_操作手册/客户与商机管理操作手册.md)。
+
 - 视觉基准：`/Users/yglf/GOPATH/src/Unified_Identity_Authentication_Platform/customer_and_opportunity/原型/客户与商机管理子系统-管理端（含售前技术支持）.html`，重点为 `presale-list` 和 `presale-request-create` 状态。
 - 实现文件：`/Users/yglf/GOPATH/src/Unified_Identity_Authentication_Platform/frontend/src/modules/customer_opportunity/views/CustomerOpportunityView.vue`。
 - 目标视口：响应式桌面 Web 应用，沿用 620 CSS px 移动端断点。

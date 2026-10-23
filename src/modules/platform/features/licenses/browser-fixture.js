@@ -1,5 +1,5 @@
-// Test-only browser fixture: no backend, credentials or license signing keys.
-// Not imported by the production app. Every fetch is intercepted locally.
+// 仅供测试的浏览器样例：不含后端、凭据或许可证签名密钥。
+// 生产应用不导入此文件，所有 fetch 请求均在本地拦截。
 import { createApp, ref, h } from 'vue'
 import RuntimeEnforcementView from './RuntimeEnforcementView.vue'
 import { dispatchAuthorizationRefreshed } from '../../auth/utils/authorizationRefresh.js'

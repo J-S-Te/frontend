@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
+import { formatUserError } from '../../shared/utils/userError.js'
 import SearchableSelect from './SearchableSelect.vue'
 import {
   advancePenetrationExecution,
@@ -58,7 +59,7 @@ function rfc3339(value) {
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? value : date.toISOString()
 }
-function notify(message, type = 'success') { emit('notify', { message, type }) }
+function notify(message, type = 'success') { emit('notify', { message: formatUserError(message, { fallback: '专项操作未完成，请核对当前状态后再操作。' }), type }) }
 function retryKey(name, payload) {
   const signature = JSON.stringify(payload)
   const current = retryCommands.get(name)
@@ -98,7 +99,7 @@ async function ensurePackage() {
     accept(await ensurePenetrationWorkPackage(props.item.id, props.item.version, key))
     commandSucceeded('ensure')
     notify('渗透测试专项已建立，请记录与客户确认的结论')
-  } catch (error) { notify(error?.message || '专项建立失败', 'error') }
+  } catch (error) { notify(formatUserError(error, { fallback: '专项建立失败' }), 'error') }
   finally { busy.value = false }
 }
 
@@ -117,7 +118,7 @@ async function submitDecision() {
     accept(await savePenetrationDecision(props.item.id, payload, retryKey('decision', payload)))
     commandSucceeded('decision')
     notify('客户沟通结论已保存')
-  } catch (error) { notify(error?.message || '沟通结论保存失败', 'error') }
+  } catch (error) { notify(formatUserError(error, { fallback: '沟通结论保存失败' }), 'error') }
   finally { busy.value = false }
 }
 
@@ -135,7 +136,7 @@ async function submitPlan() {
     accept(await savePenetrationPlan(props.item.id, payload, retryKey('plan', payload)))
     commandSucceeded('plan')
     notify('专项计划与授权信息已保存')
-  } catch (error) { notify(error?.message || '专项计划保存失败', 'error') }
+  } catch (error) { notify(formatUserError(error, { fallback: '专项计划保存失败' }), 'error') }
   finally { busy.value = false }
 }
 
@@ -152,7 +153,7 @@ async function execute(action) {
     accept(await advancePenetrationExecution(props.item.id, payload, retryKey(commandName, payload)))
     commandSucceeded(commandName)
     notify(action === 'START' ? '渗透测试已开始' : action === 'COMPLETE' ? '渗透测试已完成' : '专项已取消并归入不开展')
-  } catch (error) { notify(error?.message || '专项执行状态更新失败', 'error') }
+  } catch (error) { notify(formatUserError(error, { fallback: '专项执行状态更新失败' }), 'error') }
   finally { busy.value = false }
 }
 
@@ -167,7 +168,7 @@ async function uploadReport() {
     pendingReportArtifact.value = null
     reportFile.value = null
     notify('专项报告文件已登记')
-  } catch (error) { notify(error?.message || '专项报告上传失败', 'error') }
+  } catch (error) { notify(formatUserError(error, { fallback: '专项报告上传失败' }), 'error') }
   finally { busy.value = false }
 }
 
@@ -180,7 +181,7 @@ async function advanceReport() {
     accept(await advancePenetrationReport(props.item.id, payload, retryKey(commandName, payload)))
     commandSucceeded(commandName)
     notify(`专项报告已推进至${reportLabel.value}`)
-  } catch (error) { notify(error?.message || '专项报告推进失败', 'error') }
+  } catch (error) { notify(formatUserError(error, { fallback: '专项报告推进失败' }), 'error') }
   finally { busy.value = false }
 }
 
@@ -219,10 +220,10 @@ watch(workPackage, fillForms)
       <section v-if="canManage && (workPackage.decision_status !== 'REQUIRED' || workPackage.execution_status === 'NOT_STARTED')" class="pen-form">
         <h4>{{ workPackage.decision_status === 'PENDING' ? '记录客户沟通结论' : '变更开展结论' }}</h4>
         <div class="pen-choice"><label><input v-model="decision.status" type="radio" value="REQUIRED" />开展</label><label><input v-model="decision.status" type="radio" value="NOT_REQUIRED" />不开展</label></div>
-        <label><span>客户联系人 *</span><input v-model.trim="decision.customerContact" /></label>
+        <label><span>客户联系人 *</span><input v-model.trim="decision.customerContact"  maxlength="128"/></label>
         <label><span>沟通时间 *</span><input v-model="decision.communicatedAt" type="datetime-local" /></label>
-        <label class="wide"><span>沟通结论 *</span><textarea v-model.trim="decision.summary" rows="2"></textarea></label>
-        <label v-if="workPackage.decision_status !== 'PENDING' && workPackage.decision_status !== decision.status" class="wide"><span>结论变更原因 *</span><textarea v-model.trim="decision.changeReason" rows="2"></textarea></label>
+        <label class="wide"><span>沟通结论 *</span><textarea v-model.trim="decision.summary" rows="2" maxlength="2000"></textarea></label>
+        <label v-if="workPackage.decision_status !== 'PENDING' && workPackage.decision_status !== decision.status" class="wide"><span>结论变更原因 *</span><textarea v-model.trim="decision.changeReason" rows="2" maxlength="1000"></textarea></label>
         <button class="pm-button primary" type="button" :disabled="busy" @click="submitDecision">保存沟通结论</button>
       </section>
 
@@ -232,14 +233,14 @@ watch(workPackage, fillForms)
           <label><span>计划开始 *</span><input v-model="plan.plannedStart" type="datetime-local" /></label>
           <label><span>计划结束 *</span><input v-model="plan.plannedEnd" type="datetime-local" /></label>
           <div class="pen-field wide"><span>渗透测试工程师 *</span><SearchableSelect v-model="plan.engineerIDs" :options="engineerOptions" value-key="id" label-key="name" description-key="description" multiple placeholder="选择具备 PENETRATION_TEST 能力的工程师" search-placeholder="搜索工程师" /></div>
-          <label><span>授权书编号 *</span><input v-model.trim="plan.authDocNo" /></label>
+          <label><span>授权书编号 *</span><input v-model.trim="plan.authDocNo"  maxlength="128"/></label>
           <label><span>授权生效 *</span><input v-model="plan.authStart" type="datetime-local" /></label>
           <label><span>授权截止 *</span><input v-model="plan.authEnd" type="datetime-local" /></label>
-          <label class="wide"><span>授权范围 *</span><textarea v-model.trim="plan.authScope" rows="2" placeholder="多个边界使用逗号分隔"></textarea></label>
-          <label class="wide"><span>测试范围 *</span><textarea v-model.trim="plan.testScope" rows="2" placeholder="必须是授权范围的子集"></textarea></label>
-          <label><span>测试时间窗 *</span><input v-model.trim="plan.testWindow" placeholder="例如 00:00-06:00" /></label>
-          <label><span>应急联系人 *</span><input v-model.trim="plan.emergencyContact" placeholder="姓名 + 电话" /></label>
-          <label class="wide"><span>回滚方案 *</span><textarea v-model.trim="plan.rollbackPlan" rows="2"></textarea></label>
+          <label class="wide"><span>授权范围 *</span><textarea v-model.trim="plan.authScope" rows="2" placeholder="多个边界使用逗号分隔" maxlength="5000"></textarea></label>
+          <label class="wide"><span>测试范围 *</span><textarea v-model.trim="plan.testScope" rows="2" placeholder="必须是授权范围的子集" maxlength="5000"></textarea></label>
+          <label><span>测试时间窗 *</span><input v-model.trim="plan.testWindow" placeholder="例如 00:00-06:00"  maxlength="128"/></label>
+          <label><span>应急联系人 *</span><input v-model.trim="plan.emergencyContact" placeholder="姓名 + 电话"  maxlength="128"/></label>
+          <label class="wide"><span>回滚方案 *</span><textarea v-model.trim="plan.rollbackPlan" rows="2" maxlength="5000"></textarea></label>
           <button class="pm-button primary" type="button" :disabled="busy" @click="submitPlan">保存专项计划</button>
         </div>
         <dl v-else class="pen-summary details">
@@ -256,10 +257,10 @@ watch(workPackage, fillForms)
 
         <div v-if="!compact && canManage && ['NOT_STARTED', 'IN_PROGRESS'].includes(workPackage.execution_status)" class="pen-form cancellation">
           <h4>取消专项并归入不开展</h4>
-          <label><span>客户联系人 *</span><input v-model.trim="cancellation.customerContact" /></label>
+          <label><span>客户联系人 *</span><input v-model.trim="cancellation.customerContact"  maxlength="128"/></label>
           <label><span>沟通时间 *</span><input v-model="cancellation.communicatedAt" type="datetime-local" /></label>
-          <label class="wide"><span>最新沟通结论 *</span><textarea v-model.trim="cancellation.summary" rows="2"></textarea></label>
-          <label class="wide"><span>取消原因 *</span><textarea v-model.trim="cancellation.reason" rows="2"></textarea></label>
+          <label class="wide"><span>最新沟通结论 *</span><textarea v-model.trim="cancellation.summary" rows="2" maxlength="2000"></textarea></label>
+          <label class="wide"><span>取消原因 *</span><textarea v-model.trim="cancellation.reason" rows="2" maxlength="1000"></textarea></label>
           <button class="pm-button danger" type="button" :disabled="busy" @click="execute('CANCEL')">取消专项</button>
         </div>
       </section>

@@ -1,9 +1,11 @@
 <script setup>
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch, onBeforeUnmount } from 'vue'
 import { pinyin } from 'pinyin-pro'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
-import { IamError, createEmployeesBatch } from '@/modules/platform/iam/api/iam'
-import { parseApplicationRoles } from '@/modules/platform/iam/utils/batchUserImport.js'
+import { createEmployeesBatch } from '@/modules/platform/iam/api/iam'
+import { parseApplicationRoles, restoreRowSelection } from '@/modules/platform/iam/utils/batchUserImport.js'
+import { initialCredentialsForImport, initialCredentialsDocument, clearInitialCredentials } from '@/modules/platform/iam/utils/employeeInitialCredentials.js'
+import { formatUserError, userFieldErrors } from '../../../shared/utils/userError.js'
 
 // 上限与后端 POST /users/batch 的硬性约束保持一致：超过会一次性整体失败。
 const BATCH_LIMIT = 100
@@ -19,6 +21,9 @@ const STATUS_ALIASES = new Map([
 const props = defineProps({
   organizations: { type: Array, default: () => [] },
   positions: { type: Array, default: () => [] },
+  // 父组件正在重新读取组织 / 岗位目录，或读取失败。目录未确认前不能提交导入。
+  catalogsLoading: { type: Boolean, default: false },
+  catalogsError: { type: String, default: '' },
 })
 const emit = defineEmits(['close', 'completed', 'toast'])
 
@@ -32,6 +37,8 @@ const parseError = ref('')
 const submitting = ref(false)
 const submitError = ref('')
 const submitResult = ref(null) // { items: [], total, failed }
+const credentialsVisible = ref(false)
+onBeforeUnmount(() => clearInitialCredentials(submitResult.value))
 
 // 1-based 行号 → 行对象（包含原始单元格、解析结果、勾选状态、错误信息）。
 // 解析失败的单行只影响自身，不阻断其他行的预览 / 提交。
@@ -109,7 +116,7 @@ async function ingestFile(file) {
   try {
     text = await file.text()
   } catch (error) {
-    parseError.value = `读取文件失败：${error?.message || '未知错误'}`
+    parseError.value = formatUserError(error, { fallback: '读取文件失败，请重新选择文件。' })
     return
   }
   fileName.value = file.name
@@ -247,13 +254,8 @@ function importedAccountName(displayName) {
 }
 
 function formatBatchError(error) {
-  const issues = Array.isArray(error?.details?.issues) ? error.details.issues : []
-  if (!issues.length) return error?.message || '批量导入失败。'
-  return issues.map((issue) => {
-    const row = Number(issue?.row || 0) > 0 ? `第 ${issue.row} 行` : '本批次'
-    const field = issue?.field ? `（${issue.field}）` : ''
-    return `${row}${field}：${issue?.message || error.message}`
-  }).join('；')
+  const issues = userFieldErrors(error?.details)
+  return issues.length ? issues.map(issue => issue.message).join('；') : formatUserError(error, { fallback: '批量导入失败，请检查导入预检结果。' })
 }
 
 function rebuildRows() {
@@ -264,7 +266,7 @@ function rebuildRows() {
   try {
     records = parseCsv(rawText.value)
   } catch (error) {
-    parseError.value = `CSV 解析失败：${error?.message || '请检查文件格式'}`
+    parseError.value = formatUserError(error, { fallback: '文件内容无法解析，请使用下载的模板并检查格式。' })
     return
   }
   if (!records.length) {
@@ -320,6 +322,8 @@ function rebuildRows() {
     // 超过上限保留解析结果但阻止提交，避免一次性 500。
     parseError.value = `共解析出 ${rows.length} 行，超过单次 ${BATCH_LIMIT} 上限；请拆分文件后重试。`
   }
+  // 记录本次预览使用的目录签名，用于识别“预览后又有人改了组织 / 岗位”。
+  previewCatalogSignature.value = catalogsSignature()
 }
 
 function pickColumn(cells, index) {
@@ -431,9 +435,60 @@ function downloadSample() {
   URL.revokeObjectURL(url)
 }
 
+// ---- 目录一致性 ----
+//
+// 预览阶段的行校验依赖组织 / 岗位目录。目录在其他入口变化后，之前判定“合法”的行
+// 可能已经失效（组织改名或岗位停用）。这里用目录签名判断预览是否过期：过期后立即
+// 重新核验并按行号保留勾选，未确认目录时禁止提交；已选择的文件不会被清空。
+const catalogNotice = ref('')
+const previewCatalogSignature = ref('')
+
+function catalogsSignature() {
+  const organizations = props.organizations
+    .map((item) => `${organizationId(item)}:${getOrganizationName(item)}`)
+    .sort()
+    .join('|')
+  const positions = props.positions
+    .map((item) => `${positionId(item)}:${getPositionName(item)}:${positionOrganizationId(item)}`)
+    .sort()
+    .join('|')
+  return `${organizations}##${positions}`
+}
+
+const previewStale = computed(() => rows.length > 0 && previewCatalogSignature.value !== catalogsSignature())
+
+function revalidatePreview() {
+  if (!rows.length) return
+  // 只按行号恢复用户**当时的**勾选状态：重新解析会把合法行默认勾上，
+  // 若只做"补勾"而不取消，用户手动取消勾选的行会在目录变化后被重新勾上并提交。
+  const selectedLineNos = new Set(rows.filter((row) => row.selected).map((row) => row.lineNo))
+  rebuildRows()
+  restoreRowSelection(rows, selectedLineNos)
+  previewCatalogSignature.value = catalogsSignature()
+  catalogNotice.value = '组织或岗位目录已更新，已按最新目录重新核验预览；请确认勾选结果后再提交。'
+}
+
+watch(() => catalogsSignature(), () => {
+  if (step.value !== 2 || !rows.length) return
+  revalidatePreview()
+})
+
 // ---- 提交 ----
 async function submit() {
   if (submitting.value) return
+  if (props.catalogsLoading) {
+    submitError.value = '正在读取最新组织与岗位目录，请稍候再提交。'
+    return
+  }
+  if (props.catalogsError) {
+    submitError.value = `关联目录尚未确认：${props.catalogsError}`
+    return
+  }
+  if (previewStale.value) {
+    revalidatePreview()
+    submitError.value = '提交前发现组织或岗位目录已变化，已重新核验预览；请确认结果后再次提交。'
+    return
+  }
   const items = selectedValidRows.value
   if (!items.length) {
     submitError.value = '请至少勾选 1 行合法数据。'
@@ -477,17 +532,22 @@ async function submit() {
       }
     }
     const failedCount = items.filter((row) => row.submitStatus === 'failed').length
+    const initialCredentials = initialCredentialsForImport(result, created.length)
+    clearInitialCredentials(submitResult.value)
+    credentialsVisible.value = false
     submitResult.value = {
       createdCount: created.length,
       requestedCount: items.length,
       failedCount,
       failures: items.filter((row) => row.submitStatus === 'failed').map((row) => ({ lineNo: row.lineNo, message: row.submitMessage })),
+      initialCredentials: initialCredentials || [],
+      credentialsUnavailable: initialCredentials === null,
     }
     step.value = 3
     emit('toast', failedCount ? `批量导入返回异常：成功 ${created.length} 条，失败 ${failedCount} 条。` : `已批量创建 ${created.length} 位用户。`)
     if (!failedCount) emit('completed', { createdCount: created.length })
   } catch (error) {
-    submitError.value = error instanceof IamError ? formatBatchError(error) : (error?.message || '批量导入失败。')
+    submitError.value = formatBatchError(error)
     emit('toast', submitError.value)
   } finally {
     submitting.value = false
@@ -497,18 +557,23 @@ async function submit() {
 // ---- 关闭 ----
 function close() {
   if (submitting.value) return
+  clearInitialCredentials(submitResult.value)
+  credentialsVisible.value = false
   emit('close')
 }
 function onBackdropClick() {
-  if (!submitting.value) emit('close')
+  close()
 }
 function onKeydown(event) {
   if (event?.key === 'Escape' && !submitting.value) {
     event.stopPropagation()
-    emit('close')
+    close()
   }
 }
 function restart() {
+  if (submitting.value) return
+  clearInitialCredentials(submitResult.value)
+  credentialsVisible.value = false
   // 回到第一步重置
   step.value = 1
   rows.splice(0, rows.length)
@@ -520,6 +585,25 @@ function restart() {
   submitError.value = ''
   submitResult.value = null
   filterMode.value = 'all'
+  catalogNotice.value = ''
+  previewCatalogSignature.value = ''
+}
+
+function downloadInitialCredentials() {
+  const credentials = submitResult.value?.initialCredentials
+  if (!credentials?.length) return
+  const blob = new Blob([initialCredentialsDocument(credentials)], { type: 'application/json;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  try {
+    link.href = url
+    link.download = '员工初始登录凭据.json'
+    document.body.appendChild(link)
+    link.click()
+  } finally {
+    link.remove()
+    URL.revokeObjectURL(url)
+  }
 }
 
 function formatFileSize(bytes) {
@@ -602,6 +686,9 @@ function formatFileSize(bytes) {
 
       <!-- 步骤 2：预览 / 校验 -->
       <div v-else-if="step === 2" class="iam-batch-import-body">
+        <p v-if="catalogsLoading" class="iam-form-alert" role="status"><ConsoleIcon name="info" />正在读取最新组织与岗位目录…读取完成前不能提交导入，避免按过期目录校验行数据。</p>
+        <p v-else-if="catalogsError" class="iam-batch-import-error" role="alert">关联目录读取失败：{{ catalogsError }}。请回到“身份、组织与授权”页面重试读取后再导入。</p>
+        <p v-if="catalogNotice" class="iam-form-alert" role="status">{{ catalogNotice }}</p>
         <div class="iam-batch-import-summary">
           <div class="iam-batch-import-file">
             <span><ConsoleIcon name="download" /></span>
@@ -734,7 +821,23 @@ function formatFileSize(bytes) {
             <template v-if="submitResult.failedCount">，失败 {{ submitResult.failedCount }} 位，请检查结果列后重试。</template>
             <template v-else>。系统已自动创建用户名全拼账号、初始密码、员工编号、组织岗位任职、基础平台“普通用户”角色；CSV 中非空的应用角色按个人例外授权处理并更新授权版本。</template>
           </p>
-          <p class="iam-field-help">默认账号为姓名小写全拼，默认初始密码为 <code>!QAZxsw@1234</code>；首次登录必须修改密码，请在“登录账号”中核对账号状态。</p>
+          <p v-if="submitResult.credentialsUnavailable" class="iam-form-alert danger" role="alert">账号已创建，但响应未包含完整初始凭据。请在账号管理中重置密码，不要重复导入这些用户。</p>
+          <template v-else>
+            <p class="iam-field-help">每个账号使用独立的随机初始密码，首次登录必须修改。请在关闭页面前下载并安全交付凭据；关闭后无法从此结果页再次取得。</p>
+            <div class="iam-batch-credential-actions">
+              <button class="console-button ghost small" type="button" :aria-pressed="credentialsVisible" @click="credentialsVisible = !credentialsVisible">{{ credentialsVisible ? '隐藏初始密码' : '显示初始密码' }}</button>
+              <button class="console-button primary small" type="button" @click="downloadInitialCredentials">下载初始凭据</button>
+            </div>
+            <div class="iam-batch-import-table-wrap">
+              <table class="iam-batch-import-table">
+                <thead><tr><th>用户名</th><th>初始密码</th></tr></thead>
+                <tbody><tr v-for="credential in submitResult.initialCredentials" :key="credential.accountName">
+                  <td>{{ credential.accountName }}</td>
+                  <td><input :type="credentialsVisible ? 'text' : 'password'" :value="credential.initialPassword" readonly autocomplete="off" :aria-label="`${credential.accountName} 的初始密码`" /></td>
+                </tr></tbody>
+              </table>
+            </div>
+          </template>
         </div>
         <div v-else class="iam-batch-import-result">
           <span class="iam-batch-import-result-icon danger"><ConsoleIcon name="info" /></span>
@@ -755,7 +858,7 @@ function formatFileSize(bytes) {
           <button
             class="console-button primary"
             type="button"
-            :disabled="submitting || !selectedValidRows.length || rows.length > BATCH_LIMIT"
+            :disabled="submitting || !selectedValidRows.length || rows.length > BATCH_LIMIT || catalogsLoading || Boolean(catalogsError) || previewStale"
             @click="submit"
           >
             <ConsoleIcon name="save" />
@@ -1177,6 +1280,9 @@ function formatFileSize(bytes) {
 .iam-batch-import-result-icon.success { color: var(--ok-1, #047857); background: var(--ok-soft, #ecfdf5); }
 .iam-batch-import-result-icon.danger { color: var(--danger-1, #b91c1c); background: var(--danger-soft, #fef2f2); }
 .iam-batch-import-result h4 { margin: 2px 0 6px; color: var(--ink-1, #0a0f1c); font-size: 16px; }
+.iam-batch-credential-actions { display: flex; gap: 10px; flex-wrap: wrap; margin: 12px 0; }
+.iam-batch-import-result .iam-batch-import-table-wrap { width: 100%; }
+.iam-batch-import-result input[readonly] { width: min(260px, 100%); padding: 7px 10px; border: 1px solid var(--line-1, #dce5f1); border-radius: 6px; font-family: monospace; }
 .iam-batch-import-result .iam-form-alert { width: min(620px, 100%); justify-content: center; }
 .iam-batch-import-result .iam-form-alert.success {
   background: #f0fdf4;

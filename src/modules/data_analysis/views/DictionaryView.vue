@@ -5,6 +5,7 @@ import EmptyState from "@/modules/platform/shared/components/EmptyState.vue"
 import ErrorState from "@/modules/platform/shared/components/ErrorState.vue"
 import LoadingState from "@/modules/platform/shared/components/LoadingState.vue"
 import { getDictionary, createDictionaryMetric, updateDictionaryMetric, setDictionaryMetricEnabled, deleteDictionaryMetric, getDictionaryMetricVersions } from "../api/dataAnalysis"
+import { formatDataAnalysisError } from "../utils/errors.js"
 const props = defineProps({ permissions: { type: Array, default: () => [] } })
 const canManage = computed(() => props.permissions.includes("dictionary.manage"))
 const canWrite = computed(() => canManage.value && !!dictionary.value && !loading.value && !error.value && !saving.value)
@@ -41,7 +42,7 @@ async function load() {
     if (editing.value?.mode === "edit") editorError.value = "字典已刷新；请关闭并重新打开编辑，以使用最新版本。"
     toast.value = ""
   } catch (err) {
-    error.value = err?.message || "指标字典加载失败"
+    error.value = formatDataAnalysisError(err, { fallback: "指标字典加载失败，请稍后刷新。" })
   } finally {
     loading.value = false
   }
@@ -50,8 +51,8 @@ async function load() {
 onMounted(load)
 
 function failureMessage(err) {
-  if (err?.status === 409 || err?.code === "METRIC_VERSION_CONFLICT") return `${err?.message || "指标已被其他操作修改"}。请刷新指标字典后重试。`
-  return err?.message || "指标操作失败，请重试"
+  if (err?.status === 409 && !err?.code) return `${formatDataAnalysisError(err, { fallback: "指标状态已变化。" })}请刷新指标字典后重试。`
+  return formatDataAnalysisError(err, { fallback: "指标操作失败，请刷新字典确认结果后重试。" })
 }
 function openEditor(item = null) {
 	if (!canWrite.value || editing.value) return
@@ -109,7 +110,7 @@ async function openHistory(item) {
   try {
     const versions = await getDictionaryMetricVersions(item.code)
     if (request === historyRequest) history.value = { code: item.code, name: item.name, versions }
-  } catch (err) { if (request === historyRequest) historyError.value = err?.message || "版本历史加载失败" }
+  } catch (err) { if (request === historyRequest) historyError.value = formatDataAnalysisError(err, { fallback: "版本历史加载失败，请稍后刷新。" }) }
   finally { if (request === historyRequest) historyLoading.value = false }
 }
 function closeHistory() { historyRequest += 1; history.value = null; historyLoading.value = false }
@@ -134,13 +135,13 @@ function operationLabel(operation) { return ({ BASELINE: "原始口径", CREATE:
         <p v-if="!canManage">当前权限允许查阅口径和版本历史；维护需要 dictionary.manage 权限。</p>
       </aside>
       <div class="da-dict-metrics da-table-panel">
-        <div class="da-filters"><label><ConsoleIcon name="search" /><input v-model="keyword" placeholder="检索指标名称 / 看板 / 关键词" /></label><span>{{ filteredMetrics.length }} / {{ dictionary.metrics?.length || 0 }} 项指标</span><button class="da-button" :disabled="saving" @click="load">刷新</button><button v-if="canManage" class="da-button primary" :disabled="!canWrite" @click="openEditor()">新建指标</button></div>
+        <div class="da-filters"><label><ConsoleIcon name="search" /><input v-model="keyword" placeholder="检索指标名称 / 看板 / 关键词"  maxlength="100"/></label><span>{{ filteredMetrics.length }} / {{ dictionary.metrics?.length || 0 }} 项指标</span><button class="da-button" :disabled="saving" @click="load">刷新</button><button v-if="canManage" class="da-button primary" :disabled="!canWrite" @click="openEditor()">新建指标</button></div>
         <p v-if="toast" role="status" class="da-dict-message">{{ toast }}</p>
         <div class="da-table-scroll"><table class="da-table"><thead><tr><th>编码 / 版本</th><th>指标 / 来源</th><th>看板</th><th>业务定义</th><th>公式说明</th><th>数据源</th><th>周期</th><th>口径状态</th><th>启用状态</th><th>操作</th></tr></thead><tbody><tr v-for="item in filteredMetrics" :key="item.code"><td class="mono">{{ item.code }}<br />v{{ item.version }}</td><td><b>{{ item.name }}</b><br />{{ item.origin === 'BUILTIN' ? '内置' : '自定义' }}</td><td>{{ item.dashboard }}</td><td>{{ item.definition }}</td><td>{{ item.formula }}</td><td class="mono">{{ item.source }}</td><td>{{ item.period }}</td><td>{{ item.status }}</td><td><span class="da-badge" :class="item.enabled ? 'normal' : 'warning'">{{ item.enabled ? '已启用' : '已停用' }}</span><small v-if="!item.enabled && !item.can_enable" class="da-dict-hint">未绑定可用计算能力或口径不匹配，不能启用</small><small v-else class="da-dict-hint">{{ item.calculation_binding || '已绑定计算能力' }}</small></td><td><div class="da-dict-actions"><button class="da-button compact" @click="openHistory(item)">版本历史</button><template v-if="canManage"><button class="da-button compact" :disabled="!canWrite" @click="openEditor(item)">编辑</button><button class="da-button compact" :disabled="!canWrite || (!item.enabled && !item.can_enable)" @click="toggleMetric(item)">{{ item.enabled ? '停用' : '启用' }}</button><button v-if="item.origin === 'CUSTOM'" class="da-button compact" :disabled="!canWrite" @click="removeMetric(item)">删除</button></template></div></td></tr></tbody></table></div>
         <EmptyState v-if="filteredMetrics.length === 0" title="未找到匹配指标" />
       </div>
     </div>
-    <div v-if="editing" class="da-modal-backdrop" @click.self="closeEditor"><form class="da-modal" @submit.prevent="saveEditor"><header><b>{{ editing.mode === 'edit' ? '编辑指标口径' : '新建指标口径' }}</b><button type="button" class="da-icon-button" :disabled="saving" @click="closeEditor">×</button></header><p class="da-dict-meta">公式仅作为口径说明。新建指标保存后停用；计算绑定由服务端管理。</p><label>编码<input v-model="draft.code" :disabled="editing.mode === 'edit' || saving" required /></label><label>名称<input v-model="draft.name" :disabled="saving" required /></label><label>看板<input v-model="draft.dashboard" :disabled="saving" required /></label><label>业务定义<textarea v-model="draft.definition" :disabled="saving" required /></label><label>公式说明<textarea v-model="draft.formula" :disabled="saving" required /></label><label>数据源说明<input v-model="draft.source" :disabled="saving" required /></label><label>统计周期<input v-model="draft.period" :disabled="saving" required /></label><label>口径确认状态<input v-model="draft.status" :disabled="saving" list="metric-confirmation-status" maxlength="32" required /><datalist id="metric-confirmation-status"><option value="待确认" /><option value="已确认" /></datalist></label><p v-if="editorError" role="alert" class="da-dict-message">{{ editorError }}</p><footer><button type="button" class="da-button" :disabled="saving" @click="closeEditor">取消</button><button class="da-button primary" :disabled="!canWrite">{{ saving ? '保存中…' : '保存口径' }}</button></footer></form></div>
+    <div v-if="editing" class="da-modal-backdrop" @click.self="closeEditor"><form class="da-modal" @submit.prevent="saveEditor"><header><b>{{ editing.mode === 'edit' ? '编辑指标口径' : '新建指标口径' }}</b><button type="button" class="da-icon-button" :disabled="saving" @click="closeEditor">×</button></header><p class="da-dict-meta">公式仅作为口径说明。新建指标保存后停用；计算绑定由服务端管理。</p><label>编码<input v-model="draft.code" :disabled="editing.mode === 'edit' || saving" required  maxlength="64"/></label><label>名称<input v-model="draft.name" :disabled="saving" required  maxlength="128"/></label><label>看板<input v-model="draft.dashboard" :disabled="saving" required  maxlength="128"/></label><label>业务定义<textarea v-model="draft.definition" :disabled="saving" required  maxlength="512"/></label><label>公式说明<textarea v-model="draft.formula" :disabled="saving" required  maxlength="512"/></label><label>数据源说明<input v-model="draft.source" :disabled="saving" required  maxlength="255"/></label><label>统计周期<input v-model="draft.period" :disabled="saving" required  maxlength="64"/></label><label>口径确认状态<input v-model="draft.status" :disabled="saving" list="metric-confirmation-status" maxlength="32" required /><datalist id="metric-confirmation-status"><option value="待确认" /><option value="已确认" /></datalist></label><p v-if="editorError" role="alert" class="da-dict-message">{{ editorError }}</p><footer><button type="button" class="da-button" :disabled="saving" @click="closeEditor">取消</button><button class="da-button primary" :disabled="!canWrite">{{ saving ? '保存中…' : '保存口径' }}</button></footer></form></div>
     <div v-if="history" class="da-modal-backdrop" @click.self="closeHistory"><section class="da-modal da-dict-history"><header><b>{{ history.name }} · 版本历史</b><button type="button" class="da-icon-button" @click="closeHistory">×</button></header><p class="da-dict-meta">按版本从新到旧展示最近 200 条；更早版本仍保留在数据库中。</p><LoadingState v-if="historyLoading" title="版本历史加载中…" /><ErrorState v-else-if="historyError" :error="historyError" @retry="openHistory(history)" /><template v-else><article v-for="(entry, index) in history.versions" :key="`${entry.metric?.version}-${index}`" class="da-dict-history-entry"><h3>v{{ entry.metric.version }} · {{ operationLabel(entry.operation) }}</h3><p>{{ entry.created_at }} · 操作人 {{ entry.actor_id || '系统' }}</p><p>{{ entry.metric.name }} · {{ entry.metric.dashboard }} · {{ entry.metric.period }}</p><p>口径状态：{{ entry.metric.status }}；{{ entry.metric.enabled ? '已启用' : '已停用' }}</p><p>业务定义：{{ entry.metric.definition }}</p><p>公式说明：{{ entry.metric.formula }}</p><p>数据源说明：{{ entry.metric.source }}</p></article><EmptyState v-if="history.versions.length === 0" title="暂无持久化版本历史" /></template></section></div>
   </section>
 </template>

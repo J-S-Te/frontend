@@ -73,7 +73,7 @@ function relogin() {
       </dl>
       <div class="access-error-actions">
         <button v-if="canRetry" type="button" class="primary" @click="retry">重试访问</button>
-        <button v-if="canRelogin" type="button" class="primary" @click="relogin">重新发起 Keycloak 登录</button>
+        <button v-if="canRelogin" type="button" class="primary" @click="relogin">重新登录</button>
         <button type="button" class="ghost" @click="router.push({ name: 'portal' })">返回子系统门户</button>
       </div>
     </section>

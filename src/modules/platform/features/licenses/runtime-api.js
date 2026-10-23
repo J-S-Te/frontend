@@ -1,4 +1,5 @@
 import { createRequest } from '../../shared/api/request.js'
+import { formatUserError } from '../../../shared/utils/userError.js'
 
 export const RUNTIME_APPLICATIONS = Object.freeze([
   { code: 'contract_management', name: '合同管理' },
@@ -34,8 +35,8 @@ export function memberProgress(members = []) {
   return { total: members.length, ready: members.filter(member => runtimeTimestampPresent(member.ready_at)).length, acknowledged: members.filter(member => Number.isSafeInteger(member.issued_revision) && member.issued_revision > 0 && member.ack_revision === member.issued_revision && runtimeTimestampPresent(member.ack_at)).length }
 }
 export function createRuntimeState() { return { application: 'contract_management', snapshot: null, fresh: false, loading: false, busy: false, error: '', notRegistered: false, confirmed: false } }
-// Keep state injectable so the Vue reactive object and tests share the same
-// transitions. Server state, never ready-count arithmetic, decides activation.
+// 状态保持可注入，便于 Vue 响应式对象与测试共用
+// 同一套状态转换。激活由服务端状态决定，绝不根据就绪数量推算。
 export function createRuntimeController(state, options = {}) {
   const canRead = options.canRead || (() => false)
   const canManage = options.canManage || (() => false)
@@ -49,8 +50,8 @@ export function createRuntimeController(state, options = {}) {
     } catch (error) {
       if (application !== state.application) return
       state.fresh = false
-      if (error.status === 409 && error.code === 'LICENSE_RUNTIME_NOT_READY') { state.snapshot = null; state.notRegistered = true; state.error = '尚未受控登记。请先通过受控部署流程登记服务；此页面不会自动登记或冻结迁移资格。' }
-      else { state.error = error.message || '读取运行时执行状态失败，请重试。' }
+      if (error.status === 409 && error.code === 'LICENSE_RUNTIME_NOT_READY') { state.snapshot = null; state.notRegistered = true }
+      else { state.error = formatUserError(error, { fallback: '读取运行时执行状态失败，请重试。' }) }
     }
   }
   async function refresh() {
@@ -73,7 +74,7 @@ export function createRuntimeController(state, options = {}) {
     state.busy = true; state.error = ''; state.confirmed = false
     try { await activate(application, snapshot.revision); await read(application); options.onSuccess?.() }
     catch (error) {
-      state.error = error.message || '激活失败，状态已保留；请检查服务端指引后重试。'
+      state.error = formatUserError(error, { fallback: '暂时无法确认激活结果，请先刷新执行状态后核对，不要重复提交。' })
       if (error.status === 409) { const conflict = state.error; await read(application); if (!state.error || state.error === conflict) state.error = `${conflict} 已重新读取状态，请核对修订并重新确认。` }
     } finally { state.busy = false }
   }

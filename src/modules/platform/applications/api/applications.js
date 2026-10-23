@@ -1,4 +1,5 @@
 import { createRequest } from '../../shared/api/request.js'
+import { RELATED_DATA, publishRelatedDataChanged } from '../../shared/utils/relatedDataInvalidation.js'
 
 /**
  * ApplicationRegistryError 表示应用接入与运行时管理接口的结构化错误。
@@ -29,6 +30,21 @@ const request = createRequest({
   subsystem: 'platform',
   feature: 'applications',
 })
+/**
+ * 只有服务端确认写入成功后才发布关联数据失效；应用、环境或运行时状态改变后，
+ * 门户、登录目标和授权目标选择器必须重新读取，而不是继续使用打开页面时的快照。
+ */
+function onWriteSuccess(promise, kinds) {
+  return promise.then((result) => {
+    publishRelatedDataChanged(kinds)
+    return result
+  })
+}
+
+const APPLICATION_WRITE_KINDS = [RELATED_DATA.APPLICATIONS]
+const ENVIRONMENT_WRITE_KINDS = [RELATED_DATA.APPLICATIONS, RELATED_DATA.ENVIRONMENTS]
+const KEYCLOAK_CLIENT_WRITE_KINDS = [RELATED_DATA.APPLICATIONS, RELATED_DATA.ENVIRONMENTS, RELATED_DATA.ROLE_CATALOG]
+
 function pageQuery(parameters = {}) {
   const search = new URLSearchParams()
   Object.entries(parameters).forEach(([key, value]) => {
@@ -56,7 +72,7 @@ export function listApplications({ page = 1, pageSize = 100, status = 'ACTIVE', 
  * @throws {ApplicationRegistryError} 应用数据无效、编码冲突或操作无权限时抛出。
  */
 export function createApplication({ code, name, applicationType = 'web', description = null, status = 'ACTIVE' } = {}) {
-  return request('/applications', {
+  return onWriteSuccess(request('/applications', {
     method: 'POST',
     body: JSON.stringify({
       code,
@@ -65,7 +81,7 @@ export function createApplication({ code, name, applicationType = 'web', descrip
       description,
       status,
     }),
-  })
+  }), APPLICATION_WRITE_KINDS)
 }
 
 /**
@@ -78,7 +94,7 @@ export function updateApplication({ applicationId, name, applicationType = 'web'
   if (!applicationId || !String(name || '').trim() || !Number.isInteger(Number(version)) || Number(version) < 1) {
     throw new ApplicationRegistryError('applicationId、name 和有效 version 均不能为空。', { code: 'VALIDATION_ERROR' })
   }
-  return request(`/applications/${encodeURIComponent(applicationId)}`, {
+  return onWriteSuccess(request(`/applications/${encodeURIComponent(applicationId)}`, {
     method: 'PATCH',
     body: JSON.stringify({
       name: String(name).trim(),
@@ -90,7 +106,7 @@ export function updateApplication({ applicationId, name, applicationType = 'web'
       status,
       version: Number(version),
     }),
-  })
+  }), APPLICATION_WRITE_KINDS)
 }
 
 /**
@@ -109,13 +125,13 @@ export function deleteApplicationRegistration({ applicationId, version, confirma
   if (!normalizedApplicationId || !normalizedConfirmationCode || !Number.isInteger(normalizedVersion) || normalizedVersion < 1) {
     throw new ApplicationRegistryError('applicationId、version 和 confirmationCode 均不能为空。', { code: 'VALIDATION_ERROR' })
   }
-  return request(`/applications/${encodeURIComponent(normalizedApplicationId)}`, {
+  return onWriteSuccess(request(`/applications/${encodeURIComponent(normalizedApplicationId)}`, {
     method: 'DELETE',
     body: JSON.stringify({
       confirmation_code: normalizedConfirmationCode,
       version: normalizedVersion,
     }),
-  })
+  }), APPLICATION_WRITE_KINDS)
 }
 
 /**
@@ -139,7 +155,7 @@ export function listEnvironments({ applicationId, page = 1, pageSize = 50, statu
  */
 export function updateEnvironment({ applicationId, environmentId, baseUrl = null, upstreamUrl = null, pathPrefix = null, issuerAlias = null, metadata = {}, status = 'ACTIVE', version } = {}) {
   if (!applicationId || !environmentId) throw new ApplicationRegistryError('applicationId 和 environmentId 不能为空。', { code: 'VALIDATION_ERROR' })
-  return request(`/applications/${encodeURIComponent(applicationId)}/environments/${encodeURIComponent(environmentId)}`, {
+  return onWriteSuccess(request(`/applications/${encodeURIComponent(applicationId)}/environments/${encodeURIComponent(environmentId)}`, {
     method: 'PATCH',
     body: JSON.stringify({
       base_url: baseUrl,
@@ -150,7 +166,7 @@ export function updateEnvironment({ applicationId, environmentId, baseUrl = null
       status,
       version,
     }),
-  })
+  }), ENVIRONMENT_WRITE_KINDS)
 }
 
 /**
@@ -163,10 +179,10 @@ export function deleteEnvironment({ applicationId, environmentId, confirmationCo
   if (!applicationId || !environmentId || !String(confirmationCode || '').trim() || !Number.isInteger(Number(version)) || Number(version) < 1) {
     throw new ApplicationRegistryError('应用、环境、确认码和有效 version 均不能为空。', { code: 'VALIDATION_ERROR' })
   }
-  return request(`/applications/${encodeURIComponent(applicationId)}/environments/${encodeURIComponent(environmentId)}`, {
+  return onWriteSuccess(request(`/applications/${encodeURIComponent(applicationId)}/environments/${encodeURIComponent(environmentId)}`, {
     method: 'DELETE',
     body: JSON.stringify({ confirmation_code: String(confirmationCode).trim(), version: Number(version) }),
-  })
+  }), ENVIRONMENT_WRITE_KINDS)
 }
 
 /**
@@ -179,7 +195,7 @@ export function purgeEnvironment({ applicationId, environmentId, confirmationCod
   if (!applicationId || !environmentId || !String(confirmationCode || '').trim() || !String(retentionApprovalId || '').trim() || !retentionConfirmed || !offboardedConfirmed || !Number.isInteger(Number(version)) || Number(version) < 1) {
     throw new ApplicationRegistryError('应用、环境、确认码、审批编号、下线确认和有效 version 均不能为空。', { code: 'VALIDATION_ERROR' })
   }
-  return request(`/applications/${encodeURIComponent(applicationId)}/environments/${encodeURIComponent(environmentId)}/purge`, {
+  return onWriteSuccess(request(`/applications/${encodeURIComponent(applicationId)}/environments/${encodeURIComponent(environmentId)}/purge`, {
     method: 'POST',
     body: JSON.stringify({
       confirmation_code: String(confirmationCode).trim(),
@@ -188,7 +204,7 @@ export function purgeEnvironment({ applicationId, environmentId, confirmationCod
       offboarded_confirmed: true,
       version: Number(version),
     }),
-  })
+  }), ENVIRONMENT_WRITE_KINDS)
 }
 
 /**
@@ -207,7 +223,7 @@ export function registerSubsystemDirectory({
   pathPrefix = '',
   issuerAlias = '',
 } = {}) {
-  return request('/subsystem-directory', {
+  return onWriteSuccess(request('/subsystem-directory', {
     method: 'POST',
     body: JSON.stringify({
       application_code: applicationCode,
@@ -219,7 +235,7 @@ export function registerSubsystemDirectory({
       path_prefix: pathPrefix,
       ...(String(issuerAlias || '').trim() ? { issuer_alias: String(issuerAlias).trim() } : {}),
     }),
-  })
+  }), ENVIRONMENT_WRITE_KINDS)
 }
 
 /**
@@ -313,7 +329,7 @@ export function discoverSubsystemCandidates() {
  * @throws {ApplicationRegistryError} 接入记录不存在、当前状态不允许重试或部署 Agent 不可用时抛出。
  */
 export function retrySubsystem({ applicationCode, environment, publicBaseUrl = '', upstreamUrl = '', pathPrefix = '', issuerAlias = '' } = {}) {
-  return request('/subsystem-retry', {
+  return onWriteSuccess(request('/subsystem-retry', {
     method: 'POST',
     body: JSON.stringify({
       application_code: applicationCode,
@@ -323,7 +339,7 @@ export function retrySubsystem({ applicationCode, environment, publicBaseUrl = '
       ...(String(pathPrefix || '').trim() ? { path_prefix: String(pathPrefix).trim().replace(/\/$/, '') } : {}),
       ...(String(issuerAlias || '').trim() ? { issuer_alias: String(issuerAlias).trim().toLowerCase() } : {}),
     }),
-  })
+  }), ENVIRONMENT_WRITE_KINDS)
 }
 
 /**
@@ -334,7 +350,7 @@ export function retrySubsystem({ applicationCode, environment, publicBaseUrl = '
  * @throws {ApplicationRegistryError} 接管不受支持、运行时不健康、资源不存在或操作无权限时抛出。
  */
 export function adoptSubsystemRuntime({ applicationCode, environment, publicBaseUrl = '', upstreamUrl = '', pathPrefix = '', issuerAlias = '' } = {}) {
-  return request('/subsystem-adoption', {
+  return onWriteSuccess(request('/subsystem-adoption', {
     method: 'POST',
     body: JSON.stringify({
       application_code: applicationCode,
@@ -344,7 +360,7 @@ export function adoptSubsystemRuntime({ applicationCode, environment, publicBase
       ...(String(pathPrefix || '').trim() ? { path_prefix: String(pathPrefix).trim().replace(/\/$/, '') } : {}),
       ...(String(issuerAlias || '').trim() ? { issuer_alias: String(issuerAlias).trim().toLowerCase() } : {}),
     }),
-  })
+  }), ENVIRONMENT_WRITE_KINDS)
 }
 
 /**
@@ -354,7 +370,7 @@ export function adoptSubsystemRuntime({ applicationCode, environment, publicBase
  * @throws {ApplicationRegistryError} 配置无效、子系统不存在、部署失败或操作无权限时抛出。
  */
 export function updateSubsystemRuntime({ applicationCode, environment, publicBaseUrl = '', upstreamUrl = '', pathPrefix = '', issuerAlias = '' } = {}) {
-  return request('/subsystem-update', {
+  return onWriteSuccess(request('/subsystem-update', {
     method: 'POST',
     body: JSON.stringify({
       application_code: applicationCode,
@@ -364,7 +380,7 @@ export function updateSubsystemRuntime({ applicationCode, environment, publicBas
       ...(String(pathPrefix || '').trim() ? { path_prefix: String(pathPrefix).trim().replace(/\/$/, '') } : {}),
       ...(String(issuerAlias || '').trim() ? { issuer_alias: String(issuerAlias).trim().toLowerCase() } : {}),
     }),
-  })
+  }), ENVIRONMENT_WRITE_KINDS)
 }
 
 /**
@@ -374,7 +390,7 @@ export function updateSubsystemRuntime({ applicationCode, environment, publicBas
  * @throws {ApplicationRegistryError} 接入记录不存在、地址配置无效、Keycloak 拒绝同步或操作无权限时抛出。
  */
 export function syncKeycloakClient({ applicationCode, environment, publicBaseUrl, upstreamUrl, pathPrefix } = {}) {
-  return request('/keycloak-integration/sync', {
+  return onWriteSuccess(request('/keycloak-integration/sync', {
     method: 'POST',
     body: JSON.stringify({
       application_code: applicationCode,
@@ -383,7 +399,7 @@ export function syncKeycloakClient({ applicationCode, environment, publicBaseUrl
       upstream_url: String(upstreamUrl || '').trim().replace(/\/$/, ''),
       path_prefix: String(pathPrefix || '').trim().replace(/\/$/, ''),
     }),
-  })
+  }), KEYCLOAK_CLIENT_WRITE_KINDS)
 }
 
 /**
@@ -393,7 +409,7 @@ export function syncKeycloakClient({ applicationCode, environment, publicBaseUrl
  * @throws {ApplicationRegistryError} Keycloak 尚未就绪、观察期不满足、配置无效或切换失败时抛出。
  */
 export function switchToKeycloak({ applicationCode, environment, publicBaseUrl = '', upstreamUrl = '', pathPrefix = '' } = {}) {
-  return request('/keycloak-integration/switch', {
+  return onWriteSuccess(request('/keycloak-integration/switch', {
     method: 'POST',
     body: JSON.stringify({
       application_code: applicationCode,
@@ -402,7 +418,7 @@ export function switchToKeycloak({ applicationCode, environment, publicBaseUrl =
       ...(String(upstreamUrl || '').trim() ? { upstream_url: String(upstreamUrl).trim().replace(/\/$/, '') } : {}),
       ...(String(pathPrefix || '').trim() ? { path_prefix: String(pathPrefix).trim().replace(/\/$/, '') } : {}),
     }),
-  })
+  }), ENVIRONMENT_WRITE_KINDS)
 }
 
 /**
@@ -412,7 +428,7 @@ export function switchToKeycloak({ applicationCode, environment, publicBaseUrl =
  * @throws {ApplicationRegistryError} 子系统不存在、配置无效、回滚失败或操作无权限时抛出。
  */
 export function rollbackToPlatform({ applicationCode, environment, publicBaseUrl = '', upstreamUrl = '', pathPrefix = '' } = {}) {
-  return request('/keycloak-integration/rollback', {
+  return onWriteSuccess(request('/keycloak-integration/rollback', {
     method: 'POST',
     body: JSON.stringify({
       application_code: applicationCode,
@@ -421,7 +437,7 @@ export function rollbackToPlatform({ applicationCode, environment, publicBaseUrl
       ...(String(upstreamUrl || '').trim() ? { upstream_url: String(upstreamUrl).trim().replace(/\/$/, '') } : {}),
       ...(String(pathPrefix || '').trim() ? { path_prefix: String(pathPrefix).trim().replace(/\/$/, '') } : {}),
     }),
-  })
+  }), ENVIRONMENT_WRITE_KINDS)
 }
 
 /**
@@ -431,10 +447,10 @@ export function rollbackToPlatform({ applicationCode, environment, publicBaseUrl
  * @throws {ApplicationRegistryError} 子系统不存在、当前状态不允许清理、Agent 执行失败或操作无权限时抛出。
  */
 export function teardownSubsystem({ applicationCode, environment } = {}) {
-  return request('/subsystem-teardown', {
+  return onWriteSuccess(request('/subsystem-teardown', {
     method: 'POST',
     body: JSON.stringify({ application_code: applicationCode, environment }),
-  })
+  }), ENVIRONMENT_WRITE_KINDS)
 }
 
 /**
@@ -447,3 +463,86 @@ export function teardownSubsystem({ applicationCode, environment } = {}) {
 export function listPortalApplications({ environment = '' } = {}) {
   return request(`/portal/applications${pageQuery({ environment })}`)
 }
+
+// ============================ 统一接入向导（六个子系统共用入口）============================
+// 说明：动作（ONBOARD/ADOPT/UPDATE/RETRY）由服务端根据事实判定，页面只负责展示与确认；
+// 提交必须携带服务端返回的 preview_version，事实变化时服务端返回 409 并要求重新预览。
+const SUBSYSTEM_ACCESS_WRITE_KINDS = [RELATED_DATA.APPLICATIONS, RELATED_DATA.ENVIRONMENTS]
+
+/**
+ * previewSubsystemAccess 只读条件检查：不创建资源、不部署。
+ * @param {Object} options 目标定位（applicationCode/environment）。
+ * @returns {Promise<Object>} 服务端判定的动作、起始阶段、缺项、所需权限、变更摘要与 preview_version。
+ * @throws {ApplicationRegistryError} 目标不合法、会话无效或权限不足时抛出。
+ */
+export function previewSubsystemAccess({ applicationCode = '', environment = '' } = {}) {
+  return request('/subsystem-access/preview', {
+    method: 'POST',
+    body: JSON.stringify({ application_code: applicationCode, environment }),
+  })
+}
+
+/**
+ * submitSubsystemAccessOperation 确认执行：返回 202 与持久化操作 ID。
+ * @param {Object} options 目标、公开地址、认证提供方、初始管理员、preview_version 与幂等键。
+ * @returns {Promise<Object>} 包含 operation_id/action/stage/status/created 的结果。
+ * @throws {ApplicationRegistryError} 预览版本过期（409）、权限不足或参数不合法时抛出。
+ */
+export function submitSubsystemAccessOperation({
+  applicationCode = '', environment = '', publicOrigin = '', authProvider = '', initialAdminId = '',
+  previewVersion = '', idempotencyKey = '',
+} = {}) {
+  return onWriteSuccess(request('/subsystem-access/operations', {
+    method: 'POST',
+    body: JSON.stringify({
+      application_code: applicationCode,
+      environment,
+      ...(String(publicOrigin || '').trim() ? { public_origin: String(publicOrigin).trim().replace(/\/$/, '') } : {}),
+      ...(String(authProvider || '').trim() ? { auth_provider: String(authProvider).trim().toLowerCase() } : {}),
+      ...(String(initialAdminId || '').trim() ? { initial_admin_id: String(initialAdminId).trim() } : {}),
+      preview_version: previewVersion,
+      idempotency_key: idempotencyKey,
+    }),
+  }), SUBSYSTEM_ACCESS_WRITE_KINDS)
+}
+
+/**
+ * fetchSubsystemAccessOperation 查询单个操作（阶段与分项结果）。
+ * @param {string} operationId 操作 ID。
+ * @returns {Promise<Object>} 操作状态、阶段结果与仍需处理的条件。
+ * @throws {ApplicationRegistryError} 操作不存在或权限不足时抛出。
+ */
+export function fetchSubsystemAccessOperation(operationId) {
+  const identifier = encodeURIComponent(String(operationId || '').trim())
+  return request(`/subsystem-access/operations/${identifier}`)
+}
+
+/**
+ * findSubsystemAccessOperation 按目标定位当前操作（页面刷新或重新打开时使用）。
+ * @param {Object} options 目标定位（applicationCode/environment）。
+ * @returns {Promise<Object>} 目标最近一次操作；不存在时服务端返回 404。
+ * @throws {ApplicationRegistryError} 目标无操作记录或权限不足时抛出。
+ */
+export function findSubsystemAccessOperation({ applicationCode = '', environment = '' } = {}) {
+  const query = new URLSearchParams()
+  const code = String(applicationCode || '').trim()
+  const targetEnvironment = String(environment || '').trim().toLowerCase()
+  if (code) query.set('application_code', code)
+  if (targetEnvironment) query.set('environment', targetEnvironment)
+  const suffix = query.toString() ? `?${query.toString()}` : ''
+  return request(`/subsystem-access/operations${suffix}`)
+}
+
+/**
+ * resumeSubsystemAccessOperation 在条件补齐后继续：服务端会重新检查事实。
+ * @param {string} operationId 等待中或失败的操作 ID。
+ * @returns {Promise<Object>} 恢复检查后的操作状态与仍需处理的条件。
+ * @throws {ApplicationRegistryError} 操作状态不允许继续（409）或权限不足时抛出。
+ */
+export function resumeSubsystemAccessOperation(operationId) {
+  const identifier = encodeURIComponent(String(operationId || '').trim())
+  return onWriteSuccess(request(`/subsystem-access/operations/${identifier}/resume`, {
+    method: 'POST',
+  }), SUBSYSTEM_ACCESS_WRITE_KINDS)
+}
+

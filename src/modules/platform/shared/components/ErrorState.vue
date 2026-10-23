@@ -8,7 +8,9 @@
 //        <ErrorState title="会话读取失败" :error="loadError" @retry="loadMe" />
 //   3) 纯静态标题 + 自定义副标题：不传 error。
 //        <ErrorState title="看板加载失败" description="嵌入桥返回 502" @retry="reload" />
+import { computed } from 'vue'
 import ConsoleIcon from './ConsoleIcon.vue'
+import { formatUserError, userErrorDiagnostics } from '../../../shared/utils/userError.js'
 
 const props = defineProps({
   // error 既可以是字符串，也可以是 Error 对象，会自动取 message。
@@ -19,23 +21,20 @@ const props = defineProps({
   retryText: { type: String, default: '重新加载' },
   description: { type: String, default: '' },
   compact: { type: Boolean, default: false },
+  // 仅允许显式启用；登录页和公开页面不得暴露内部标识。
+  diagnostics: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['retry'])
 
-const message = (() => {
-  if (!props.error) return ''
-  if (typeof props.error === 'string') return props.error
-  if (props.error instanceof Error) return props.error.message || ''
-  if (typeof props.error === 'object' && 'message' in props.error) return String(props.error.message || '')
-  return ''
-})()
+const message = computed(() => props.error ? formatUserError(props.error, { fallback: props.description }) : '')
 
 // 仅当调用方未显式传 title（仍是默认「加载失败」）时，才把 error.message 顶到标题位置。
 // 显式传 title 意味着调用方要展示自己的分类标题，error.message 退到副标题。
-const useErrorAsTitle = props.title === '加载失败' && Boolean(message)
-const titleText = useErrorAsTitle ? message : props.title
-const descriptionText = useErrorAsTitle ? '' : (message || props.description)
+const useErrorAsTitle = computed(() => props.title === '加载失败' && Boolean(message.value))
+const titleText = computed(() => useErrorAsTitle.value ? message.value : formatUserError(props.title, { fallback: '加载失败' }))
+const descriptionText = computed(() => useErrorAsTitle.value ? '' : (message.value || (props.description ? formatUserError(props.description) : '')))
+const diagnostic = computed(() => props.diagnostics ? userErrorDiagnostics(props.error) : {})
 
 function onRetry() {
   emit('retry')
@@ -47,6 +46,11 @@ function onRetry() {
     <ConsoleIcon name="info" class="ui-state__icon" />
     <b class="ui-state__title">{{ titleText }}</b>
     <span v-if="descriptionText" class="ui-state__description">{{ descriptionText }}</span>
+    <details v-if="diagnostic.code || diagnostic.requestId" class="ui-state__diagnostics">
+      <summary>查看排查信息</summary>
+      <p v-if="diagnostic.code">错误代码：<code>{{ diagnostic.code }}</code></p>
+      <p v-if="diagnostic.requestId">追踪号：<code>{{ diagnostic.requestId }}</code></p>
+    </details>
     <slot>
       <button v-if="retry" type="button" class="ui-state__retry" @click="onRetry">{{ retryText }}</button>
     </slot>

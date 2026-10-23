@@ -3,12 +3,30 @@
 import { attachStructuredContext } from '../../platform/shared/api/requestContext.js'
 import { createApiRequestContext } from '../../platform/shared/api/requestContext.js'
 import { shouldStartSubsystemLogin } from '../../shared/authz/sessionCompatibility.js'
+import { formatDataAnalysisError } from '../utils/errors.js'
 
 const runtimeEnv = import.meta.env || {}
 const PUBLIC_PATH_PREFIX = (runtimeEnv.VITE_DATA_ANALYSIS_PUBLIC_PATH_PREFIX || '/data_analysis').replace(/\/$/, '')
 const API_BASE_URL = (runtimeEnv.VITE_DATA_ANALYSIS_API_BASE_URL || `${PUBLIC_PATH_PREFIX}/api/v1`).replace(/\/$/, '')
 
 let loginRedirectStarted = false
+
+function isRecord(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function validDataEnvelope(body, path, method) {
+  // response.OK 使用 {code:"OK", data:...}；兼容无 code 的旧版 data 信封。
+  if (!isRecord(body) || !Object.hasOwn(body, 'data')) return false
+  const data = body.data
+  const route = path.split('?')[0]
+  if (route === '/auth/me') return isRecord(data) && !!data.user_id && !!data.tenant_id && Array.isArray(data.permissions)
+  const listRoute = ['/alerts', '/alert-rules', '/admin/sources', '/dashboard/trend'].includes(route) || /^\/dictionary\/metrics\/[^/]+\/versions$/.test(route)
+  if (method === 'GET' && listRoute) return Array.isArray(data)
+  if (method === 'PUT' && route === '/alert-rules') return Array.isArray(data) && data.length > 0
+  if (method === 'DELETE') return isRecord(data) && data.deleted === true
+  return isRecord(data) && Object.keys(data).length > 0
+}
 
 /**
  * startDataAnalysisLogin 发起数据看板子系统登录流程。
@@ -46,14 +64,20 @@ async function request(path, options = {}) {
         ...(options.headers || {}),
       },
     })
-  } catch (error) {
-    const requestError = new Error('无法连接数据看板服务，请确认后端服务已启动。')
+  } catch (cause) {
+    const code = cause?.name === 'AbortError' || cause?.name === 'TimeoutError' ? 'REQUEST_TIMEOUT' : 'NETWORK_ERROR'
+    const requestError = new Error(method === 'GET'
+      ? formatDataAnalysisError(cause, { code, status: 0, method, fallback: '无法连接数据看板服务，请检查网络后重试。' })
+      : '连接中断，尚无法确认本次操作是否已生效。请先刷新列表核对结果，勿重复提交。')
+    requestError.status = 0
+    requestError.code = code
+    requestError.cause = cause
     attachStructuredContext(requestError, {
       ...context,
       metadata: { ...(context.metadata || {}), network: true },
     }, {
       status: 0,
-      code: 'NETWORK_ERROR',
+      code,
       requestId: '',
       traceId: '',
     })
@@ -61,33 +85,49 @@ async function request(path, options = {}) {
   }
 
   const contentType = response.headers.get('content-type') || ''
+  const requestId = response.headers.get('x-request-id') || ''
+  const traceId = response.headers.get('x-trace-id') || ''
   let body = {}
-  if (contentType.includes('application/json')) {
-    body = await response.json().catch(() => ({ message: `HTTP ${response.status}` }))
-  } else {
-    const text = await response.text().catch(() => '')
-    body = text ? { message: text } : {}
+  let parseCause = null
+  const isJSON = /\bapplication\/(?:[\w.-]+\+)?json\b/i.test(contentType)
+  if (isJSON) {
+    try { body = await response.json() } catch (cause) { parseCause = cause }
   }
-  if (!response.ok) {
-    const error = new Error(body?.message || `HTTP ${response.status}`)
+  const businessError = isRecord(body) && Object.hasOwn(body, 'code') && body.code !== 'OK'
+  if (!response.ok || businessError) {
+    const error = new Error(formatDataAnalysisError(body, { status: response.status, method, fallback: '数据看板服务暂时无法处理请求。' }))
+    error.details = body?.details
+    if (parseCause) error.cause = parseCause
     attachStructuredContext(error, {
       ...requestContext,
-      requestId: body?.request_id || '',
-      traceId: body?.trace_id || body?.traceId || '',
+      requestId: body?.request_id || requestId,
+      traceId: body?.trace_id || body?.traceId || traceId,
       metadata: { source: 'data_analysis_api' },
     }, {
       status: response.status,
       code: body?.code,
-      requestId: body?.request_id || '',
-      traceId: body?.trace_id || body?.traceId || '',
+      requestId: body?.request_id || requestId,
+      traceId: body?.trace_id || body?.traceId || traceId,
     })
     error.status = response.status
     error.code = body?.code
-    error.requestID = body?.request_id || ''
-    if (response.status === 401) startDataAnalysisLogin()
+    error.requestID = body?.request_id || requestId
+    if (shouldStartSubsystemLogin(error)) startDataAnalysisLogin()
     throw error
   }
-  return body?.data ?? body
+  // DELETE 的无内容成功兼容旧部署；创建／审批等必须收到实际业务结果。
+  if ((response.status === 204 || response.status === 205) && method === 'DELETE') return null
+  if (parseCause || !isJSON || !validDataEnvelope(body, path, method)) {
+    const error = new Error(method === 'GET'
+      ? '服务返回的数据格式异常，请刷新页面后重试；仍失败时请联系管理员。'
+      : '服务器已接受操作，但返回结果异常。请先刷新列表核对结果，勿重复提交。')
+    error.status = response.status
+    error.code = 'INVALID_RESPONSE'
+    error.cause = parseCause
+    attachStructuredContext(error, requestContext, { status: response.status, code: error.code, requestId, traceId })
+    throw error
+  }
+  return body.data
 }
 
 /**
@@ -143,6 +183,9 @@ export function getContractDashboardSummary() { return request('/dashboard/contr
  * @throws {Error} 查询失败抛出错误。
  */
 export function getProjectDashboardSummary() { return request('/dashboard/project') }
+
+export function getReportDashboardSummary() { return request('/dashboard/report') }
+export function getFinanceDashboardSummary() { return request('/dashboard/finance') }
 
 /** getContractDetails 查询合同下钻分页明细。 */
 export function getContractDetails(params = {}) { const query = new URLSearchParams(params).toString(); return request(`/dashboard/contracts${query ? `?${query}` : ''}`) }

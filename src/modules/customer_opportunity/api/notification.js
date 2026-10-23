@@ -1,8 +1,8 @@
 import { request, toQuery } from './client.js'
 
 /**
- * Reads only the authenticated user's CRM inbox. The backend intentionally
- * ignores opportunity SELF/ORG/ALL scope for this endpoint.
+ * 仅读取已认证用户的 CRM 收件箱。后端对此端点有意
+ * 忽略商机的 SELF/ORG/ALL 数据范围。
  */
 export const listNotifications = (params = {}) => request(`/notifications${toQuery(params)}`)
 

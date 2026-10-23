@@ -1,4 +1,5 @@
 <script setup>
+import { formatCRMError } from '../api/errorMessages.js'
 import { computed, onMounted, ref, watch } from 'vue'
 import { listOwnerDirectory } from '../api/ownerDirectory.js'
 
@@ -26,7 +27,7 @@ function platformUserName(user) {
 function errorMessage(value) {
   if (value?.status === 403) return '当前账号没有选择客户或商机负责人的权限。'
   if (value?.code === 'CRM_OWNER_DIRECTORY_UNAVAILABLE' || value?.status === 503) return '基础平台负责人目录尚未配置或暂不可用。'
-  return value?.message || '负责人目录加载失败。'
+  return formatCRMError(value, { fallback: '负责人目录加载失败。' })
 }
 
 function preferredOrganization(user, requestedOrganizationID = '') {
@@ -103,7 +104,7 @@ onMounted(initialize)
     <div class="crm-owner-search">
       <label>
         查找内部用户
-        <input v-model.trim="keyword" type="search" placeholder="输入姓名关键字" @keydown.enter.prevent="search">
+        <input v-model.trim="keyword" type="search" placeholder="输入姓名关键字" @keydown.enter.prevent="search" maxlength="100">
       </label>
       <button type="button" :disabled="loading" @click="search">{{ loading ? '查询中…' : '查询' }}</button>
       <button v-if="error" type="button" :disabled="loading" @click="initialize">重试</button>

@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { AuthError, getCurrentPrincipal, logoutCurrentSession } from '@/modules/platform/auth/api/auth'
 import { AUTHORIZATION_REFRESHED_EVENT } from '@/modules/platform/auth/utils/authorizationRefresh'
-import { ApplicationRegistryError, listPortalApplications } from '@/modules/platform/applications/api/applications'
+import { listPortalApplications } from '@/modules/platform/applications/api/applications'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import { buildPortalSubsystems } from '@/modules/registry/moduleRegistry.js'
 import {
@@ -16,6 +16,7 @@ import {
   platformConsoleLandingRoute,
 } from '@/modules/platform/auth/utils/platformConsoleAccess'
 import { isSafeOpenTarget } from '@/modules/platform/login-targets/utils/targetUri.js'
+import { formatUserError } from '../../shared/utils/userError.js'
 import '@/modules/platform/styles/subsystem-portal.css'
 
 const router = useRouter()
@@ -146,7 +147,7 @@ function syncSystemTheme(event) {
 }
 
 function showToast(message, type = 'enter') {
-  toast.value = { visible: true, message, type }
+  toast.value = { visible: true, message: formatUserError(message), type }
   window.clearTimeout(toastTimer)
   toastTimer = window.setTimeout(() => {
     toast.value.visible = false
@@ -167,9 +168,7 @@ async function loadPortalCatalog({ silent = false } = {}) {
   } catch (error) {
     if (!silent) {
       registeredSubsystems.value = []
-      subsystemCatalogError.value = error instanceof ApplicationRegistryError
-        ? error.message
-        : '无法加载已接入的子系统。'
+      subsystemCatalogError.value = formatUserError(error, { fallback: '无法加载已接入的子系统。' })
     }
     // 静默刷新失败时保留当前卡片，避免后台轮询抖动破坏已展示的门户。
   } finally {
@@ -216,7 +215,7 @@ async function loadCurrentPrincipal() {
       return
     }
 
-    showToast(error.message || '当前登录用户信息读取失败，请稍后重试。', 'deny')
+    showToast(formatUserError(error, { fallback: '当前登录用户信息读取失败，请稍后重试。' }), 'deny')
   } finally {
     isPrincipalLoading.value = false
   }
@@ -255,7 +254,7 @@ async function logoutApplication() {
       return
     }
 
-    showToast(error.message || '退出登录失败，请稍后重试。', 'deny')
+    showToast(formatUserError(error, { fallback: '退出登录失败，请稍后重试。' }), 'deny')
   } finally {
     isLoggingOut.value = false
   }

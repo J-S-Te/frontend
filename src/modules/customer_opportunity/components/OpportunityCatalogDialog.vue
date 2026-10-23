@@ -1,4 +1,5 @@
 <script setup>
+import { formatCRMError } from '../api/errorMessages.js'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { createIdempotencyKey } from '../api/client.js'
 import {
@@ -41,7 +42,7 @@ async function load() {
     items.value = Array.isArray(value) ? value : []
     syncDrafts(items.value)
   } catch (value) {
-    emit('error', value?.message || `${kindLabel.value}加载失败。`)
+    emit('error', formatCRMError(value, { fallback: `${kindLabel.value}加载失败。` }))
   } finally {
     loading.value = false
   }
@@ -68,7 +69,7 @@ async function createItem() {
     emit('changed')
     await load()
   } catch (value) {
-    emit('error', value?.code === 'CRM_OPPORTUNITY_CATALOG_DUPLICATE' ? '同名配置已存在。' : (value?.message || '新增失败。'))
+    emit('error', value?.code === 'CRM_OPPORTUNITY_CATALOG_DUPLICATE' ? '同名配置已存在。' : (formatCRMError(value, { fallback: '新增失败。' })))
     loading.value = false
   }
 }
@@ -86,7 +87,7 @@ async function saveItem(item, enabled = item.enabled) {
     emit('changed')
     await load()
   } catch (value) {
-    emit('error', value?.code === 'CRM_OPPORTUNITY_CATALOG_DUPLICATE' ? '同名配置已存在。' : (value?.message || '保存失败。'))
+    emit('error', value?.code === 'CRM_OPPORTUNITY_CATALOG_DUPLICATE' ? '同名配置已存在。' : (formatCRMError(value, { fallback: '保存失败。' })))
   } finally {
     savingID.value = 0
   }
@@ -112,7 +113,7 @@ async function confirmDelete() {
     deleteError.value = '删除原因不能为空。'
     return
   }
-  // Confirm & Auto Close：提交确认后先关闭二次确认层，结果回到配置窗口反馈。
+  // 确认后自动关闭：提交确认后先关闭二次确认层，结果回到配置窗口反馈。（测试锚点：Confirm & Auto Close）
   pendingDelete.value = null
   deleteError.value = ''
   savingID.value = item.id
@@ -130,7 +131,7 @@ async function confirmDelete() {
       const count = Number(value?.details?.reference_count || item.reference_count || 0)
       emit('error', `该配置已被 ${count} 个商机使用，不能删除，可改为停用。`)
     } else {
-      emit('error', value?.message || '删除失败。')
+      emit('error', formatCRMError(value, { fallback: '删除失败。' }))
     }
   } finally {
     savingID.value = 0

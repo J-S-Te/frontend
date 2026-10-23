@@ -34,7 +34,7 @@ test('successful signing confirmations close the detail dialog automatically', (
 
 test('contract specialists receive newly approved contracts through realtime signing synchronization', () => {
   assert.match(source, /activeSection\.value !== 'signing' \|\| document\.visibilityState !== 'visible'/)
-  assert.match(source, /const listRequest = listSigningRecords\(\{ limit: 200 \}\)/)
+  assert.match(source, /const listRequest = refreshSigningRecords\(\{ limit: Math\.max\(50, signingRecords\.value\.length\) \}\)/)
   assert.match(source, /scheduleSigningRealtime\(\)/)
   assert.match(source, /immediate \? 0 : 1000/)
   assert.match(source, /scheduleSigningRealtime\(\{ immediate: document\.visibilityState === 'visible' \}\)/)
@@ -64,4 +64,54 @@ test('realtime signing refresh does not overwrite shipment or verification forms
   assert.match(source, /function applySigningRecord\(record, \{ preserveForms = false \} = \{\}\)/)
   assert.match(source, /if \(preserveForms\) return/)
   assert.match(source, /applySigningRecord\(detailResult\.value, \{ preserveForms: true \}\)/)
+})
+test('signing detail responses are invalidated by sequence and cannot pin the loading state', () => {
+  assert.match(source, /let signingDetailSequence = 0/)
+  assert.match(source, /const isCurrent = \(\) => sequence === signingDetailSequence/)
+  assert.match(source, /finally \{\s*if \(isCurrent\(\)\) signingDetailLoading\.value = false/)
+  assert.match(source, /String\(detail\.contract\.id \|\| ''\) !== String\(contractID\)/)
+  assert.match(source, /String\(detail\?\.contract\?\.id \|\| ''\) !== String\(contractID\)/)
+  assert.match(source, /signingDetailSequence \+= 1/)
+  assert.match(source, /selectedSigningRecord\.value\?\.contract\.recordId === contractID\) closeSigningRecord\(\)/)
+})
+
+test('signing records are normalized exactly once before the detail dialog opens', () => {
+  assert.match(source, /import \{ cloneNormalizedSigningRecord, isNormalizedSigningRecord \}/)
+  assert.match(source, /isNormalizedSigningRecord\(record\) \? record : normalizeSigningRecord\(record\)/)
+  assert.match(source, /isNormalizedSigningRecord\(record\)[\s\S]{0,80}cloneNormalizedSigningRecord\(record\)[\s\S]{0,80}: normalizeSigningRecord\(record\)/)
+})
+
+test('signing confirmation carries the verified document version and hash', () => {
+  assert.match(source, /document_version: record\.document_version/)
+  assert.match(source, /content_sha256: record\.document_sha256/)
+  assert.match(source, /请先重新打开当前回传文件/)
+  assert.match(source, /expectedVersion: selectedSigningRecord\.value\?\.contract\.recordId === contract\.recordId/)
+  assert.match(api, /form\.append\('expected_version'/)
+  assert.match(api, /form\.append\('replacement_reason'/)
+  assert.match(source, /正式文件更换/)
+  assert.match(source, /replacementReason: replacement \? signingReplacementReason/)
+  assert.match(source, /rawStatus !== 'ARCHIVED'/)
+  assert.match(api, /盖章文件保存回执不完整/)
+  assert.match(api, /saved\.content_sha256/)
+  assert.match(source, /signingOpenedDocument/)
+  assert.match(source, /回传文件版本已变化/)
+})
+
+
+test('signing ledger filters and paginates through the server', () => {
+  assert.match(source, /async function refreshSigningRecords\(\{ append = false, limit = 50 \} = \{\}\)/)
+  assert.match(source, /keyword: signingKeyword\.value\.trim\(\)/)
+  assert.match(source, /status: signingStatusFilter\.value/)
+  assert.match(source, /offset: append \? signingRecords\.value\.length : 0/)
+  assert.match(source, /signingTotal\.value = Number\(page\.total \|\| items\.length\)/)
+  assert.match(source, /signingSummary\.value = page\.stats/)
+  assert.match(source, /watch\(\[signingKeyword, signingMethodFilter, signingStatusFilter\]/)
+  assert.match(source, /refreshSigningRecords\(\{ append: true \}\)/)
+  assert.match(api, /function contractPage\(data\)/)
+})
+
+test('template preview in-flight responses cannot repopulate a changed form', () => {
+  assert.match(source, /let templatePreviewSequence = 0/)
+  assert.match(source, /sequence !== templatePreviewSequence \|\| selectedContractTemplate\.value\?\.id !== templateID/)
+  assert.match(source, /previewContractTemplate\(templateID, values\)/)
 })

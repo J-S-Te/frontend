@@ -1,4 +1,5 @@
 <script setup>
+import { formatCRMError } from '../api/errorMessages.js'
 import { computed, onMounted, reactive, ref } from 'vue'
 import {
   createPresaleApprovalRule,
@@ -30,7 +31,9 @@ const form = reactive({
 const nodeTypes = [
   { value: 'APPROVAL', label: '审批' },
   { value: 'DEPARTMENT_ASSIGNMENT', label: '选择部门' },
-  { value: 'PERSON_ASSIGNMENT', label: '选择人员' },
+  { value: 'TEAM_LEAD_ASSIGNMENT', label: '选择团队负责人' },
+  { value: 'EXECUTOR_ASSIGNMENT', label: '选择执行人' },
+  { value: 'PERSON_ASSIGNMENT', label: '选择人员（历史一级）' },
 ]
 const roles = [
   { value: 'sales_director', label: '销售总监' },
@@ -53,7 +56,9 @@ function reset() {
       { id: 'sales-director', name: '销售总监审批', type: 'APPROVAL', role_code: 'sales_director' },
       { id: 'technical-director', name: '技术总监审批', type: 'APPROVAL', role_code: 'technical_director' },
       { id: 'department', name: '选择执行部门', type: 'DEPARTMENT_ASSIGNMENT', role_code: 'technical_director' },
-      { id: 'people', name: '选择执行人员', type: 'PERSON_ASSIGNMENT', role_code: 'technical_director' },
+      // 技术总监可以同时承担部门和团队负责人两个动作；执行人由被指派的负责人选择。
+      { id: 'team-lead', name: '选择团队负责人', type: 'TEAM_LEAD_ASSIGNMENT', role_code: 'technical_director' },
+      { id: 'executor', name: '选择执行人', type: 'EXECUTOR_ASSIGNMENT', role_code: 'team_lead' },
     ],
   })
   editing.value = null
@@ -71,7 +76,7 @@ async function load() {
     const activeRule = rules.value.find((rule) => String(rule.id) === String(activeRuleId.value))
     if (activeRule && !editing.value) edit(activeRule)
   } catch (loadError) {
-    error.value = loadError?.message || '规则加载失败'
+    error.value = formatCRMError(loadError, { fallback: '规则加载失败' })
   } finally {
     loading.value = false
   }
@@ -101,8 +106,52 @@ function addNode() {
   form.nodes.push({ id: `node-${Date.now()}`, name: '新节点', type: 'APPROVAL', role_code: 'team_lead' })
 }
 
+// 与服务端 ApprovalRule 校验保持一致，提前给出可执行的提示，
+// 避免落到 CRM_PRESALE_INVALID_INPUT 的通用文案上。
+function validateRule() {
+  if (!form.name.trim()) return '请填写规则名称。'
+  if (!form.nodes.length) return '至少需要一个审批节点。'
+  if (form.nodes.length > 10) return '审批节点最多 10 个。'
+  const first = form.nodes[0]
+  if (first.type !== 'APPROVAL') return '首审节点必须是「审批」类型。'
+  if (!first.role_code) return '首审节点必须选择审批角色。'
+  const seenIDs = new Set()
+  const assignmentTypes = new Set()
+  const roleActions = new Map()
+  const assignmentNodeTypes = new Set(['DEPARTMENT_ASSIGNMENT', 'TEAM_LEAD_ASSIGNMENT', 'EXECUTOR_ASSIGNMENT', 'PERSON_ASSIGNMENT'])
+  for (const node of form.nodes) {
+    if (!node.id || !String(node.name || '').trim()) return '每个节点都需要编号和名称。'
+    if (seenIDs.has(node.id)) return '节点编号重复，请删除或重命名重复节点。'
+    seenIDs.add(node.id)
+    if (assignmentNodeTypes.has(node.type)) {
+      if (!node.role_code) return '节点「' + node.name + '」必须选择执行角色。'
+      if (assignmentTypes.has(node.type)) return '同一种执行动作只能配置一次；技术总监可以同时承担选择部门和选择团队负责人。'
+      assignmentTypes.add(node.type)
+      if (!roleActions.has(node.role_code)) roleActions.set(node.role_code, new Set())
+      roleActions.get(node.role_code).add(node.type)
+    }
+  }
+  if (assignmentTypes.has('PERSON_ASSIGNMENT') && (assignmentTypes.has('TEAM_LEAD_ASSIGNMENT') || assignmentTypes.has('EXECUTOR_ASSIGNMENT'))) {
+    return '历史一级「选择人员」不能与两级执行指派节点混用。'
+  }
+  if (assignmentTypes.has('TEAM_LEAD_ASSIGNMENT') !== assignmentTypes.has('EXECUTOR_ASSIGNMENT') ||
+      (assignmentTypes.has('TEAM_LEAD_ASSIGNMENT') && !assignmentTypes.has('DEPARTMENT_ASSIGNMENT'))) {
+    return '两级执行指派必须同时配置「选择部门」「选择团队负责人」「选择执行人」。'
+  }
+  if (assignmentTypes.has('TEAM_LEAD_ASSIGNMENT')) {
+    const combined = Array.from(roleActions.values()).some((actions) => actions.has('DEPARTMENT_ASSIGNMENT') && actions.has('TEAM_LEAD_ASSIGNMENT'))
+    if (!combined) return '「选择部门」和「选择团队负责人」必须由同一角色承担。'
+  }
+  return ''
+}
+
 async function save() {
-  if (!canEdit.value || !form.name.trim() || !form.nodes.length) return
+  if (!canEdit.value) return
+  const problem = validateRule()
+  if (problem) {
+    error.value = problem
+    return
+  }
   saving.value = true
   error.value = ''
   try {
@@ -120,7 +169,12 @@ async function save() {
     reset()
     await load()
   } catch (saveError) {
-    error.value = saveError?.message || '规则保存失败'
+    error.value = formatCRMError(saveError, {
+      fallback: '规则保存失败',
+      ...(String(saveError?.code || '') === 'CRM_PRESALE_INVALID_INPUT'
+        ? { message: '审批规则不符合要求：请检查规则名称、节点数量（1-10）、首审节点是否为「审批」并选择角色，以及两级节点的动作类型、角色组合是否完整。' }
+        : {}),
+    })
   } finally {
     saving.value = false
   }
@@ -132,7 +186,7 @@ async function remove(rule) {
     await deletePresaleApprovalRule(rule.id, rule.version)
     await load()
   } catch (removeError) {
-    error.value = removeError?.message || '规则删除失败'
+    error.value = formatCRMError(removeError, { fallback: '规则删除失败' })
   }
 }
 
@@ -234,7 +288,7 @@ onMounted(() => {
         <div class="crm-approval-node-list">
           <div v-for="(node, index) in form.nodes" :key="node.id" class="crm-approval-node">
             <span class="crm-approval-node-index">{{ index + 1 }}</span>
-            <input v-model.trim="node.name" required placeholder="节点名称" :aria-label="`第 ${index + 1} 个节点名称`" />
+            <input v-model.trim="node.name" required placeholder="节点名称" :aria-label="`第 ${index + 1} 个节点名称`"  maxlength="128"/>
             <select v-model="node.type" :aria-label="`第 ${index + 1} 个节点类型`">
               <option v-for="item in nodeTypes" :key="item.value" :value="item.value">{{ item.label }}</option>
             </select>

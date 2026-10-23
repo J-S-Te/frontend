@@ -1,5 +1,5 @@
-// Defense in depth: never grant same-origin sandbox capabilities to a
-// platform-host frame, including a different port (cookies ignore ports).
+// 纵深防御：绝不给平台主机下的框架授予同源沙箱能力，
+// 即使端口不同也不允许，因为 Cookie 不区分端口。
 export function isolatedEmbedUrl(raw, token, parentOrigin) {
   const parent = new URL(parentOrigin)
   const embed = new URL(raw)

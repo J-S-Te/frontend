@@ -13,7 +13,7 @@ test('CRM login URL preserves the complete same-origin return path', () => {
 test('CRM auth session carries the unified authorization context fields', async (t) => {
   const originalFetch = globalThis.fetch
   t.after(() => { globalThis.fetch = originalFetch })
-  globalThis.fetch = async () => new Response(JSON.stringify({ data: {
+  globalThis.fetch = async () => new Response(JSON.stringify({ code: 'OK', data: {
     sub: 'identity-1', identity_id: 'identity-1', person_id: 'person-1',
     data_scopes: [{ scope_type: 'ORG', scope_id: 'org-1' }],
     authorization_revision: 12, catalog_version: 'crm-2026.08',
@@ -33,7 +33,7 @@ test('CRM GET requests bypass browser caches because customer visibility follows
   t.after(() => { globalThis.fetch = originalFetch })
   globalThis.fetch = async (_url, options) => {
     requestOptions = options
-    return new Response(JSON.stringify({ data: { items: [] } }), { status: 200, headers: { 'content-type': 'application/json' } })
+    return new Response(JSON.stringify({ code: 'OK', data: { items: [] } }), { status: 200, headers: { 'content-type': 'application/json' } })
   }
 
   await request('/customers?page=1&page_size=20')

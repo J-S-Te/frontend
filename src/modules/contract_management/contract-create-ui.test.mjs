@@ -18,7 +18,7 @@ test('new contracts select an optional permission-scoped opportunity and have no
 test('opportunity selection fills customer context without calling an unsupported CRM draft endpoint', () => {
   assert.match(source, /newContract\.value\.customer_id = String\(item\.customer_id/)
   assert.match(source, /newContract\.value\.customer_name = item\.customer_name/)
-  assert.match(source, /crm_customer_id: Number\(newContract\.value\.customer_id/)
+  assert.match(source, /crm_customer_id: Number\(form\.customer_id/)
   assert.doesNotMatch(source, /linkOpportunityContractDraft/)
   assert.doesNotMatch(api, /\/contract-drafts`/)
 })
@@ -39,7 +39,7 @@ test('service items own their system information and customer fields remain avai
   assert.match(source, /系统信息（选填）/)
   assert.match(source, /serviceItem\.systems\.length < 15/)
   assert.match(source, /v-for="\(system, systemIndex\) in serviceItem\.systems"/)
-  assert.match(source, /service_items: newContract\.value\.service_items\.map/)
+  assert.match(source, /service_items: form\.service_items\.map/)
   for (const level of ['一级', '二级', '三级', '四级']) assert.match(source, new RegExp(level))
   for (const label of ['客户名称', '客户地址', '客户联系人', '客户联系电话']) assert.match(source, new RegExp(`<span>${label}</span>`))
 })
@@ -60,4 +60,12 @@ test('template fields reuse the current user profile', () => {
   assert.match(source, /已根据当前登录用户自动填入/)
   assert.match(source, /buildTemplateValues\(/)
   assert.match(source, /当前用户已有信息会自动填入空白字段/)
+})
+test("opportunity linking is an inline select that preloads the permission-scoped list", () => {
+  // 旧交互：先点按钮再在弹层里选。需求：表单里直接下拉选择，无需额外打开一步。
+  assert.match(source, /<select v-model="newContract\.opportunity_id"/)
+  assert.doesNotMatch(source, /@click="openOpportunityPicker"/)
+  assert.doesNotMatch(source, /v-if="opportunityPickerOpen"/)
+  assert.match(source, /selectOpportunityById/)
+  assert.match(source, /await loadOpportunityOptions\(\)/)
 })

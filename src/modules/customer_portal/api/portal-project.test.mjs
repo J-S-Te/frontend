@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 function jsonResponse(data, status = 200) {
-  return new Response(JSON.stringify({ data }), { status, headers: { 'content-type': 'application/json' } })
+  return new Response(JSON.stringify({ code: 'OK', data }), { status, headers: { 'content-type': 'application/json' } })
 }
 
 test('Portal project API normalizes the complete detail snapshot and paged activities', async (t) => {

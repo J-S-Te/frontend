@@ -26,7 +26,7 @@ test('unregistered 409 is a visible not-ready condition, not an empty success or
   const state = createRuntimeState(); let activations = 0
   const view = controller(state, { get: async () => { throw new RuntimeEnforcementError('missing', { status: 409, code: 'LICENSE_RUNTIME_NOT_READY' }) }, activate: async () => { activations++ } })
   await view.refresh(); state.confirmed = true; await view.activateSelected()
-  assert.equal(state.notRegistered, true); assert.equal(state.snapshot, null); assert.match(state.error, /尚未受控登记/); assert.equal(activations, 0)
+  assert.equal(state.notRegistered, true); assert.equal(state.snapshot, null); assert.equal(state.error, '', '未登记是预期状态，不得渲染为错误'); assert.equal(activations, 0)
 })
 test('read and manage permissions plus explicit confirmation are independently enforced', async () => {
   const state = createRuntimeState(); let reads = 0; let writes = 0; let allowedRead = false; let allowedManage = false

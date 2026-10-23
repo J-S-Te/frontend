@@ -5,6 +5,7 @@
 // “独立可拆分模块”设计各自保留 client，不依赖本工具。
 
 import { attachStructuredContext } from './requestContext.js'
+import { formatUserError, safeUserMessage, userFieldErrors } from '../../../shared/utils/userError.js'
 
 const API_BASE_URL = (import.meta.env?.VITE_API_BASE_URL || '/api/v1').replace(/\/$/, '')
 
@@ -22,25 +23,28 @@ export { API_BASE_URL }
  * @returns {string} 可安全展示的文本；不安全或空文本返回空字符串。
  */
 export function userSafeErrorMessage(message) {
-  const text = typeof message === 'string' ? message.trim() : ''
-  if (!text) return ''
-  // sql 用子串匹配（MySQL/SQLSTATE 等都命中）；其余词按整词匹配以减少误杀。
-  const exposesImplementation = /(https?:\/\/|\/api\/|next[_ -]?action|sql|\b(?:http|json|uuid|trace[_ -]?id|request[_ -]?id|stack|panic)\b)/i.test(text)
-  return exposesImplementation ? '' : text
+  return safeUserMessage(message)
 }
 
-/** 解析响应体：优先 JSON，非 JSON 退化为 { message: text }。 */
+/** 错误页面不是 API 结果，绝不能将代理返回的 HTML 页面直接展示为提示。 */
 export async function readBody(response) {
-  const contentType = response.headers.get('content-type') || ''
-  if (contentType.includes('application/json')) {
+  if (response.status === 204 || response.status === 205) return {}
+  const contentType = (response.headers.get('content-type') || '').toLowerCase()
+  if (contentType.includes('application/json') || contentType.includes('+json')) {
     try {
-      return await response.json()
-    } catch {
-      return {}
+      const body = await response.json()
+      if (body && typeof body === 'object' && !Array.isArray(body)) return body
+    } catch (cause) {
+      if (!response.ok) return {}
+      const error = new Error('服务返回的信息无法识别。', { cause })
+      error.code = 'INVALID_RESPONSE'
+      throw error
     }
   }
-  const text = await response.text()
-  return text ? { message: text } : {}
+  if (!response.ok) return {}
+  const error = new Error('服务返回的信息无法识别。')
+  error.code = 'INVALID_RESPONSE'
+  throw error
 }
 
 /**
@@ -89,21 +93,34 @@ export function createRequest({ ErrorClass, networkMessage, failureMessage, subs
         },
       })
     } catch (error) {
-      const requestError = new ErrorClass(networkMessage, { code: 'NETWORK_ERROR', cause: error })
+      const code = error?.name === 'AbortError' ? 'REQUEST_ABORTED' : 'NETWORK_ERROR'
+      const requestError = new ErrorClass(formatUserError(error, { code, method, fallback: networkMessage }), { code, cause: error })
       attachStructuredContext(requestError, {
         ...requestContext,
         metadata: { ...(requestContext.metadata || {}), network: true },
       }, {
-        code: 'NETWORK_ERROR',
+        code,
         status: 0,
       })
       throw requestError
     }
-    const body = await readBody(response)
+    let body
+    try {
+      body = await readBody(response)
+      if (response.ok && ![204, 205].includes(response.status) && (!Object.hasOwn(body, 'data') || (body.code && body.code !== 'OK'))) {
+        const error = new Error('服务返回的信息无法识别。'); error.code = 'INVALID_RESPONSE'; throw error
+      }
+    } catch (cause) {
+      const code = 'INVALID_RESPONSE'
+      const error = new ErrorClass(formatUserError(cause, { code, method }), { status: response.status, code, cause })
+      attachStructuredContext(error, requestContext, { status: response.status, code })
+      throw error
+    }
     if (!response.ok) {
       // SEC-X4：message 是会被各页面直接展示的文本，必须先过安全过滤；
       // details/nextAction/traceId 保持结构化字段供已鉴权管理台（权限门控内）展示排障。
-      const error = new ErrorClass(userSafeErrorMessage(body?.message) || userSafeErrorMessage(body?.msg) || failureMessage, {
+      const safeFallback = userSafeErrorMessage(body?.message) || userSafeErrorMessage(body?.msg) || failureMessage
+      const error = new ErrorClass(formatUserError(body, { status: response.status, method, fallback: safeFallback }), {
         status: response.status,
         code: body?.code,
         traceId: body?.request_id || body?.trace_id || body?.traceId,
@@ -111,6 +128,9 @@ export function createRequest({ ErrorClass, networkMessage, failureMessage, subs
         nextAction: body?.details?.next_action,
         detail: body?.details?.detail,
       })
+      // 部分旧版 Error 类不含 details，调用方仍需要结构化字段问题。
+      error.details ??= body?.details || null
+      error.fieldErrors = [400, 422].includes(response.status) ? userFieldErrors(body?.details) : []
       attachStructuredContext(error, {
         ...requestContext,
         requestId: body?.request_id || '',

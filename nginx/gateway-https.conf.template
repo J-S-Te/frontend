@@ -1,4 +1,20 @@
 # HTTPS 模式只引用容器内固定只读挂载点；宿主机真实路径不会写进生成配置。
+
+# AUD-2026-023（补）：跳转服务器上的 server 级 return 在 nginx 的 server rewrite 阶段
+# 执行，早于 location 选择，所以 80 端口那个 location /file-gateway/ 里声明的脱敏
+# access_log 对这条 308 并不生效——票据 query 会以默认格式的 $request 落盘。
+# 这里在 http 上下文用 map 生成"按路径脱敏"的日志目标：文件网关前缀只记录 $uri，
+# 其余路径保持完整 $request_uri，跳转 Location 仍使用原始 $request_uri。
+map $uri $redirect_request_target {
+    default          $request_uri;
+    ~^/file-gateway/ $uri;
+}
+
+log_format redirect_no_ticket '$remote_addr - $remote_user [$time_local] '
+                              '"$request_method $redirect_request_target $server_protocol" '
+                              '$status $body_bytes_sent "$http_referer" '
+                              '"$http_user_agent" "$http_x_forwarded_for"';
+
 server {
     listen 80 default_server;
     server_name ${PUBLIC_PLATFORM_HOST} ${PUBLIC_SSO_HOST};
@@ -7,11 +23,14 @@ server {
     # 若经 http 变体到达会先落在这里。为文件网关前缀声明同语义的 308 跳转 + 不含 query
     # 的日志（log_format file_gateway_noquery 定义于 default.conf，同 http 上下文），
     # 其余路径仍沿用服务器级 return，不受影响。
+    # 服务器级 access_log 使用按路径脱敏的格式；这里的 location 保留显式意图，
+    # 但真正生效的是上面的 redirect_no_ticket（server 级 return 早于 location 选择）。
     location /file-gateway/ {
         access_log /var/log/nginx/access.log file_gateway_noquery;
         return 308 https://$host$request_uri;
     }
 
+    access_log /var/log/nginx/access.log redirect_no_ticket;
     return 308 https://$host$request_uri;
 }
 

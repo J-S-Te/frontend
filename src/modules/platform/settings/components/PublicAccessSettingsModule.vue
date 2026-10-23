@@ -2,12 +2,12 @@
 import { computed, onMounted, ref } from 'vue'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import {
-  AccessSettingsError,
   applyAccessSettings,
   getAccessSettings,
   updateAccessSettings,
 } from '@/modules/platform/settings/api/accessSettings'
 import { hasPermission } from '@/modules/platform/auth/utils/principal'
+import { formatUserError } from '../../../shared/utils/userError.js'
 
 const emit = defineEmits(['toast'])
 
@@ -38,11 +38,9 @@ function showToast(message) {
   emit('toast', message)
 }
 
-function readError(error) {
-  if (error instanceof AccessSettingsError && error.nextAction) {
-    return `${error.message}。${error.nextAction}`
-  }
-  return error instanceof AccessSettingsError ? error.message : '对外访问配置读取失败。'
+function readError(error, fallback = '对外访问配置读取失败。', method = 'GET') {
+  // nextAction 是诊断元数据，不是可信的用户文案或可执行指令。
+  return formatUserError(error, { fallback, method })
 }
 
 async function loadSettings() {
@@ -93,7 +91,7 @@ async function saveSettings() {
     })
     showToast('对外访问配置已保存，点击“应用配置”才会生效。')
   } catch (error) {
-    errorMessage.value = readError(error)
+    errorMessage.value = readError(error, '对外访问配置保存失败。', 'PUT')
   } finally {
     saving.value = false
   }
@@ -120,7 +118,7 @@ async function applySettings() {
     })
     showToast(target ? '对外访问配置已应用。' : '已恢复为仅本机访问。')
   } catch (error) {
-    errorMessage.value = readError(error)
+    errorMessage.value = readError(error, '对外访问配置应用失败。', 'POST')
   } finally {
     applying.value = false
   }
@@ -149,7 +147,7 @@ onMounted(loadSettings)
             :disabled="!canUpdate"
             placeholder="留空 = 仅本机；例如 https://portal.example.com"
             @input="errorMessage = ''"
-          />
+           maxlength="512"/>
         </label>
         <label class="console-form-item">
           <span>允许 HTTP 回调</span>

@@ -3,7 +3,8 @@ import { broadcastSessionEnded } from '../utils/sessionLifecycle.js'
 import { clearAuthorizationSnapshot } from '../utils/authorizationRefresh.js'
 import { normalizeAuthorizationSession } from '../../../shared/authz/sessionCompatibility.js'
 import { createApiRequestContext, attachStructuredContext } from '../../shared/api/requestContext.js'
-import { userSafeErrorMessage } from '../../shared/api/request.js'
+import { readBody } from '../../shared/api/request.js'
+import { formatUserError, userFieldErrors } from '../../../shared/utils/userError.js'
 
 // Node 原生测试没有注入 Vite 的 import.meta.env，使用可选链回退到同源 API 前缀。
 const API_BASE_URL = (import.meta.env?.VITE_API_BASE_URL || '/api/v1').replace(/\/$/, '')
@@ -22,6 +23,21 @@ function requestContext(path, options = {}, extra = {}) {
   })
 }
 
+function validAuthResult(path, body) {
+  if (body?.code !== 'OK' || !Object.hasOwn(body, 'data')) return false
+  const data = body.data
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return false
+  if (path === '/auth/login' || path === '/auth/token/refresh') {
+    return typeof data.expires_at === 'string' && Number.isFinite(Date.parse(data.expires_at))
+      && typeof data.redirect_url === 'string' && typeof data.must_change_password === 'boolean'
+  }
+  if (path === '/auth/me' || path === '/auth/activity') {
+    return ['tenant', 'user', 'account'].every(key => typeof data[key]?.id === 'string' && data[key].id.trim())
+  }
+  // 退出登录与修改密码可合法返回空数据对象。
+  return true
+}
+
 async function requestWithStructuredContext(path, options = {}, extra = {}) {
   const context = requestContext(path, options, extra)
   let response
@@ -37,33 +53,40 @@ async function requestWithStructuredContext(path, options = {}, extra = {}) {
       },
     })
   } catch (error) {
-    const requestError = new AuthError(extra.networkMessage || '网络不可达，暂时无法访问认证服务。', { code: 'NETWORK_ERROR', status: 0 })
+    const code = error?.name === 'AbortError' ? 'REQUEST_ABORTED' : 'NETWORK_ERROR'
+    const requestError = new AuthError(formatUserError(error, { code, method: options.method, fallback: extra.networkMessage || '网络不可达，暂时无法访问认证服务。' }), { code, status: 0 })
     attachStructuredContext(requestError, {
       ...context,
-      metadata: { ...(context.metadata || {}), network: true, rawError: String(error || '').slice(0, 120) },
+      metadata: { ...(context.metadata || {}), network: true },
     }, {
       status: 0,
-      code: 'NETWORK_ERROR',
+      code,
       requestId: '',
       traceId: '',
     })
     throw requestError
   }
 
-  const body = await readResponseBody(response)
+  let body
+  try { body = await readBody(response) }
+  catch (cause) {
+    const code = 'INVALID_RESPONSE'
+    const error = new AuthError(formatUserError(cause, { code, method: options.method }), { code, status: response.status })
+    attachStructuredContext(error, context, { code, status: response.status })
+    throw error
+  }
   if (!response.ok) {
     // SEC-X4：认证接口的错误会直接显示在登录页等未登录面上，message 必须先过
     // userSafeErrorMessage 过滤（复用 contract 模块做法）；traceId 仅保留在错误对象
     // 里供日志排查，任何未登录页面都不得把它拼进展示文本。
-    const message = userSafeErrorMessage(body.message)
-      || userSafeErrorMessage(body.msg)
-      || extra.failureMessage
-      || '请求失败，请稍后重试。'
+    const message = formatUserError(body, { status: response.status, method: options.method, operation: extra.operation, fallback: extra.failureMessage })
     const requestError = new AuthError(message, {
       status: response.status,
       code: body.code || '',
       traceId: body.request_id || body.trace_id || body.traceId || '',
+      details: body.details,
     })
+    requestError.fieldErrors = [400, 422].includes(response.status) ? userFieldErrors(body.details) : []
     attachStructuredContext(requestError, {
       ...context,
       requestId: body.request_id || '',
@@ -76,6 +99,22 @@ async function requestWithStructuredContext(path, options = {}, extra = {}) {
       traceId: body.trace_id || body.traceId || '',
     })
     throw requestError
+  }
+
+  // 代理返回 2xx 或将错误封装为 200 时，不得推进浏览器
+  // 会话世代号，也不得清除上一账号的授权快照。
+  if (!validAuthResult(path, body)) {
+    const code = 'INVALID_RESPONSE'
+    const error = new AuthError(formatUserError(body, { code, method: options.method }), {
+      code, status: response.status, details: body?.details,
+      traceId: body?.request_id || body?.trace_id || body?.traceId || '',
+    })
+    error.responseCode = body?.code || ''
+    attachStructuredContext(error, context, {
+      code, status: response.status, requestId: body?.request_id || '',
+      traceId: body?.trace_id || body?.traceId || '',
+    })
+    throw error
   }
 
   return body
@@ -102,25 +141,15 @@ export class AuthError extends Error {
     this.status = options.status || 0
     this.code = options.code || ''
     this.traceId = options.traceId || ''
+    this.details = options.details || null
   }
-}
-
-async function readResponseBody(response) {
-  const contentType = response.headers.get('content-type') || ''
-
-  if (contentType.includes('application/json')) {
-    return response.json()
-  }
-
-  const text = await response.text()
-  return text ? { message: text } : {}
 }
 
 /**
  * loginWithPassword 使用账号密码建立浏览器会话。
  *
  * 安全约定：
- * 1. 前端不持久化 access token/refresh token；
+ * 1. 前端不持久化 访问令牌／刷新令牌；
  * 2. 浏览器通过 HttpOnly、SameSite 及受配置控制的 Secure Cookie 接收会话，生产环境强制 Secure；
  * 3. 所有后续请求均携带 credentials: 'include'；
  *
@@ -267,10 +296,10 @@ export async function recordSessionActivity() {
 }
 
 /**
- * refreshCurrentSession renews the browser cookie only after the lifecycle has observed a
- * real user interaction. It must not be called by background authorization polling.
+ * refreshCurrentSession 仅在生命周期观察到真实用户交互后续期浏览器 Cookie，
+ * 后台授权轮询不得调用此函数。
  *
- * @returns {Promise<Object>} the refreshed session metadata.
+ * @returns {Promise<Object>} 续期后的会话元数据。
  */
 export async function refreshCurrentSession() {
   const body = await requestWithStructuredContext('/auth/token/refresh', {

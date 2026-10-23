@@ -17,3 +17,13 @@ test('原始请求只渲染经过校验的 fromPath', () => {
   assert.match(source, /原始请求：<code>\{\{ fromPath \}\}<\/code>/)
   assert.match(source, /const fromPath = computed/)
 })
+
+// 有效会话存在时，登录路由守卫会恢复会话并把用户送回门户；切号必须先结束会话。
+test('切换账号先结束当前会话，再进入登录页', () => {
+  assert.match(source, /import \{ logoutCurrentSession \} from '@\/modules\/platform\/auth\/api\/auth'/)
+  assert.match(source, /await logoutCurrentSession\(\)/)
+  assert.match(source, /clearAuthorizationSnapshot\(\)/)
+  assert.match(source, /router\.push\(\{ name: 'login', query: \{ reason: 'forbidden' \} \}\)/)
+  // 退出失败（会话已失效）也不能把用户卡在错误页。
+  assert.match(source, /catch \{\s*\n\s*\/\/ 退出失败通常意味着会话已失效/)
+})

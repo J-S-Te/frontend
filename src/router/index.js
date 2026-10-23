@@ -23,9 +23,9 @@ import {
   visiblePlatformSettingsSections,
 } from '@/modules/platform/auth/utils/platformConsoleAccess'
 
-// Business systems are large, independent route boundaries. Lazy loading keeps
-// the platform login and subsystem portal from downloading every business UI
-// before the user chooses a system.
+// 业务系统体量较大，且各自构成独立的路由边界。通过懒加载，
+// 平台登录页和子系统门户无需在用户选择系统前，
+// 就下载所有业务界面。
 const ContractManagementView = () => import('@/modules/contract_management/views/ContractManagementView.vue')
 const ProjectManagementView = () => import('@/modules/project_management/views/ProjectManagementView.vue')
 const SettlementView = () => import('@/modules/settlement/views/SettlementView.vue')
@@ -226,7 +226,7 @@ router.beforeEach(async (to) => {
   if (to.meta.requiresProjectSession) {
     try {
       // 项目系统持有独立 OIDC Cookie。这里只确认服务器已经建立项目会话；
-      // 具体 Permission 与 Data Scope 由项目 API 逐请求执行，浏览器不推导授权范围。
+      // 具体 权限与数据范围 由项目 API 逐请求执行，浏览器不推导授权范围。
       const session = await ensureProjectSession()
       if (!session) return false
       return true
@@ -251,15 +251,15 @@ router.beforeEach(async (to) => {
     try {
       return Boolean(await ensureCRMSession())
     } catch (error) {
-      // The CRM client starts its own OIDC redirect on 401. Other errors stay
-      // closed so a backend outage cannot fall through to the platform session.
+      // CRM 客户端在收到 401 时发起独立的 OIDC 跳转；其他错误保持拒绝状态，
+      // 避免后端故障时错误地回退到平台会话。
       return subsystemAccessFailure(error, to)
     }
   }
 
   if (to.meta.requiresDataAnalysisSession) {
     try {
-      // 看板系统持有独立 OIDC Cookie；Permission 与 Data Scope 由后端逐请求执行，
+      // 看板系统持有独立 OIDC Cookie；权限与数据范围 由后端逐请求执行，
       // 浏览器不推导授权范围（对齐 project 模式）。
       return Boolean(await ensureDataAnalysisSession())
     } catch (error) {

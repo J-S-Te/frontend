@@ -149,9 +149,54 @@ test('备案矩阵使用原生单选，材料走受控上传且 PDF 能力失败
   assert.match(filingWizard, /target\.origin !== window\.location\.origin/)
   assert.match(filingWizard, /统一文件网关或文件校验服务尚未配置/)
   assert.match(filingWizard, /!filingExportAvailable/)
-  assert.match(filingWizard, /当前运行环境尚未启用备案 PDF 导出/)
+  assert.match(filingWizard, /filingExportAvailable = computed\(\(\) => props\.capabilities\?\.filing_export\?\.available === true\)/)
+  assert.match(filingWizard, /:disabled="!filingExportAvailable \|\| exporting \|\| dirty \|\| busy"/)
+  assert.match(filingWizard, /当前运行环境尚未配置中文 PDF 渲染器/)
+  assert.match(filingWizard, /if \(exporting\.value \|\| dirty\.value \|\| !filingExportAvailable\.value \|\| !filing\.value\) return/)
+  assert.match(filingWizard, /await exportFilingPDF\(filing\.value\.id, filing\.value\.version\)/)
+  assert.match(filingWizard, /catch \(error\) \{ emit\('error', error\) \} finally \{ exporting\.value = false \}/)
+  assert.match(filingWizard, /本文件不等同于公安受理或备案凭证/)
   assert.match(filingWizard, /<input type="file"/)
   assert.doesNotMatch(filingWizard, /v-html/)
+})
+
+test('备案 PDF 导出使用版本化同源 POST、会话与 CSRF 并返回真实文件', async (t) => {
+  const originalFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = originalFetch })
+  let request
+  const pdf = '%PDF-1.7\nfiling-copy'
+  const controller = new AbortController()
+  globalThis.fetch = async (url, options) => {
+    request = { url, options }
+    return new Response(pdf, { headers: {
+      'content-type': 'application/pdf; charset=binary',
+      'content-disposition': 'attachment; filename="filing-copy.pdf"',
+    } })
+  }
+
+  const result = await portal.exportFilingPDF('FILE/1', 9, { signal: controller.signal })
+  assert.equal(request.url, '/customer-portal/api/v1/filings/FILE%2F1/exports')
+  assert.equal(request.options.method, 'POST')
+  assert.equal(request.options.credentials, 'include')
+  assert.equal(request.options.signal, controller.signal)
+  assert.equal(request.options.headers['X-CSRF-Token'], '1')
+  assert.equal(request.options.headers['Content-Type'], 'application/json')
+  assert.equal(request.options.headers.Accept, 'application/pdf, application/json')
+  assert.deepEqual(JSON.parse(request.options.body), { expected_version: 9 })
+  assert.equal(result.filename, 'filing-copy.pdf')
+  assert.equal(await result.blob.text(), pdf)
+})
+
+test('备案 PDF 导出拒绝非 PDF 成功响应并保留后端失败关闭错误', async (t) => {
+  const originalFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = originalFetch })
+  globalThis.fetch = async () => jsonResponse({ download_url: 'https://other.example/filing.pdf' })
+  await assert.rejects(portal.exportFilingPDF('FILE-1', 9), { status: 503, code: 'PORTAL_FILING_EXPORT_INVALID_RESPONSE' })
+
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    code: 'PORTAL_FILING_EXPORT_UNAVAILABLE', message: '备案 PDF 中文渲染依赖尚未配置',
+  }), { status: 503, headers: { 'content-type': 'application/json' } })
+  await assert.rejects(portal.exportFilingPDF('FILE-1', 9), { status: 503, code: 'PORTAL_FILING_EXPORT_UNAVAILABLE' })
 })
 
 test('备案入口按 filing.read 门禁，无权限时不挂载向导', () => {

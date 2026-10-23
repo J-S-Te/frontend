@@ -1,4 +1,5 @@
 import { createRequest } from '../../shared/api/request.js'
+import { RELATED_DATA, publishRelatedDataChanged } from '../../shared/utils/relatedDataInvalidation.js'
 import { AuthorizationError } from './authorization.js'
 
 
@@ -11,6 +12,17 @@ const request = createRequest({
   subsystem: 'platform',
   feature: 'position_authorization',
 })
+
+/**
+ * 模板、岗位映射和授权预览必须一起失效：预览结果是按岗位现算的，模板或映射改动后
+ * 旧预览不再代表当前授权。写入确认成功后才发布。
+ */
+function onTemplateWriteSuccess(promise) {
+  return promise.then((result) => {
+    publishRelatedDataChanged([RELATED_DATA.AUTHORIZATION_TEMPLATES])
+    return result
+  })
+}
 
 /**
  * listPositionAuthorizationTargets 查询可纳入岗位授权模板的应用与角色目标。
@@ -61,7 +73,7 @@ export function getPositionAuthorizationTemplate(templateId) {
 export function createPositionAuthorizationTemplate(payload = {}) {
   // 模板编码是服务端生成的安全标识。即使旧调用方仍传入 code，创建请求也不得携带它。
   const { code: _serverGeneratedCode, ...createPayload } = payload
-  return request('/position-authorization-templates', { method: 'POST', body: JSON.stringify(createPayload) })
+  return onTemplateWriteSuccess(request('/position-authorization-templates', { method: 'POST', body: JSON.stringify(createPayload) }))
 }
 
 /**
@@ -74,7 +86,7 @@ export function createPositionAuthorizationTemplate(payload = {}) {
 export function updatePositionAuthorizationTemplate(templateId, payload = {}) {
   // 编码创建后不可修改；避免旧调用方把展示字段回传给严格校验的服务端。
   const { code: _immutableCode, ...updatePayload } = payload
-  return request(`/position-authorization-templates/${encodeURIComponent(templateId)}`, { method: 'PATCH', body: JSON.stringify(updatePayload) })
+  return onTemplateWriteSuccess(request(`/position-authorization-templates/${encodeURIComponent(templateId)}`, { method: 'PATCH', body: JSON.stringify(updatePayload) }))
 }
 
 /**
@@ -86,7 +98,7 @@ export function updatePositionAuthorizationTemplate(templateId, payload = {}) {
  */
 export function deletePositionAuthorizationTemplate(templateId, version) {
   const search = new URLSearchParams({ version: String(version) })
-  return request(`/position-authorization-templates/${encodeURIComponent(templateId)}?${search.toString()}`, { method: 'DELETE' })
+  return onTemplateWriteSuccess(request(`/position-authorization-templates/${encodeURIComponent(templateId)}?${search.toString()}`, { method: 'DELETE' }))
 }
 
 /**
@@ -103,14 +115,15 @@ export function listPositionAuthorizationTemplateAssignments(positionId) {
  * replacePositionAuthorizationTemplateAssignments 整体替换指定岗位的授权模板分配。
  * @param {string} positionId 岗位标识。
  * @param {Array<Object>} assignments 新的模板分配列表。
- * @returns {Promise<Object>} 返回替换后的分配关系。
+ * @param {string} expectedRevision 本次读取返回的不透明岗位映射集合版本。
+ * @returns {Promise<Object>} 返回替换后的分配关系及新版本。
  * @throws {AuthorizationError} 岗位或模板不存在、分配数据无效或操作无权限时抛出。
  */
-export function replacePositionAuthorizationTemplateAssignments(positionId, assignments) {
-  return request(`/positions/${encodeURIComponent(positionId)}/authorization-templates`, {
+export function replacePositionAuthorizationTemplateAssignments(positionId, assignments, expectedRevision) {
+  return onTemplateWriteSuccess(request(`/positions/${encodeURIComponent(positionId)}/authorization-templates`, {
     method: 'PUT',
-    body: JSON.stringify({ assignments }),
-  })
+    body: JSON.stringify({ assignments, expected_revision: expectedRevision }),
+  }))
 }
 
 /**

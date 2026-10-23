@@ -4,12 +4,16 @@ import { useRoute, useRouter } from "vue-router";
 import { AuthError, logoutCurrentSession } from "@/modules/platform/auth/api/auth";
 import ConsoleIcon from "@/modules/platform/shared/components/ConsoleIcon.vue";
 import SettlementTimeline from "@/modules/settlement/components/SettlementTimeline.vue";
+import { canRequestRedFlush } from "@/modules/settlement/utils/invoiceStatus";
+import { formatSettlementError } from "../utils/errors.js";
 import { closeSubsystemTabOrFallback } from "@/modules/shared/utils/returnToPortal";
 import {
   approveInvoiceRequest,
+  recoverInvoiceFailure,
   approveInvoiceRedFlush,
   confirmReceivablePlan,
   createAgingReceivablesExport,
+  completeDunningAction as completeDunningActionAPI,
   createDunningPolicy,
   createInvoicedReceivablesExport,
   createInvoiceRequest,
@@ -17,6 +21,9 @@ import {
   createReceiptAllocation,
   downloadTaxInvoiceDocument,
   getDashboard,
+  getAgingSummary,
+  getDunningCoverage,
+  getDunningOverview,
   getSettlementSession,
   getInvoicedReceivablesTop10,
   getReportExport,
@@ -112,19 +119,29 @@ const money = (value, currency = "CNY") =>
     maximumFractionDigits: 0,
   }).format(amountOf(value));
 // KPI 简写：≥ 1 万用"万"，≥ 1 亿用"亿"，其余保留原值；保留 1 位小数。
-const formatSettlementAmount = (value) => {
+const formatSettlementAmount = (value, currency = "CNY") => {
   const amount = amountOf(value);
+  const code = currency || "CNY";
   if (Math.abs(amount) >= 1e8) {
-    return `¥${(amount / 1e8).toFixed(1)}亿`;
+    return `${code} ${(amount / 1e8).toFixed(1)}亿`;
   }
   if (Math.abs(amount) >= 1e4) {
-    return `¥${(amount / 1e4).toFixed(1)}万`;
+    return `${code} ${(amount / 1e4).toFixed(1)}万`;
   }
   return new Intl.NumberFormat("zh-CN", {
     style: "currency",
-    currency: "CNY",
+    currency: code,
     maximumFractionDigits: 0,
   }).format(amount);
+};
+const dashboardCurrencyTotals = (field, fallback) => {
+  const totals = Array.isArray(dashboard.value.currency_totals)
+    ? dashboard.value.currency_totals.filter((item) => item && item.currency)
+    : [];
+  if (!totals.length) return formatSettlementAmount(fallback);
+  return totals
+    .map((item) => `${item.currency} ${formatSettlementAmount(item[field], item.currency)}`)
+    .join(" · ");
 };
 const isCurrentMonth = (dateString) => {
   const date = new Date(dateString || "");
@@ -142,48 +159,52 @@ const dashboardKpis = computed(() => {
   return [
     {
       label: "应收总额（未结清）",
-      value: formatSettlementAmount(
+      value: dashboardCurrencyTotals(
+        "open_receivable",
         receivables.value.reduce(
           (total, item) => total + amountOf(item.open_amount),
           0,
         ),
       ),
-      note: `${dashboard.value.receivable_count || 0} 笔正式应收`,
+      note: `${dashboard.value.receivable_count || 0} 笔正式应收 · 按币种汇总`,
       tone: "blue",
     },
     {
       label: "本月已回款",
-      value: formatSettlementAmount(
+      value: dashboardCurrencyTotals(
+        "current_month_receipts",
         currentMonthReceipts.reduce(
           (total, item) => total + amountOf(item.amount),
           0,
         ),
       ),
-      note: `${currentMonthReceipts.length} 笔本月回款`,
+      note: "本月回款 · 服务端按币种汇总",
       tone: "green",
     },
     {
       label: "待开票金额",
-      value: formatSettlementAmount(
+      value: dashboardCurrencyTotals(
+        "pending_invoice",
         invoiceRequests.value
-          .filter((item) => item.status !== "ISSUED")
+          .filter((item) => ["SUBMITTED", "UNDER_REVIEW", "ISSUE_PENDING"].includes(item.status))
           .reduce(
             (total, item) => total + amountOf(item.amount_incl_tax),
             0,
           ),
       ),
-      note: `${dashboard.value.pending_invoice_count || 0} 笔待处理`,
+      note: `${dashboard.value.pending_invoice_count || 0} 笔待处理 · 按币种汇总`,
       tone: "orange",
     },
     {
       label: "逾期应收",
-      value: formatSettlementAmount(
+      value: dashboardCurrencyTotals(
+        "overdue",
         dunningCases.value.reduce(
           (total, item) => total + amountOf(item.open_amount),
           0,
         ),
       ),
-      note: `${dashboard.value.overdue_count || 0} 笔需要催收`,
+      note: `${dunningOverview.value.overdue_count ?? dashboard.value.overdue_count ?? 0} 笔需要催收 · 按币种汇总`,
       tone: "purple",
     },
   ];
@@ -279,32 +300,25 @@ const taskGroups = computed(() => [
       })),
   },
 ]);
-const agingBuckets = computed(() => {
-  const buckets = [
-    { label: "0–30 天", tone: "green", amount: 0, count: 0 },
-    { label: "31–60 天", tone: "blue", amount: 0, count: 0 },
-    { label: "61–90 天", tone: "orange", amount: 0, count: 0 },
-    { label: "90 天以上", tone: "red", amount: 0, count: 0 },
-  ];
-  const now = Date.now();
-  receivables.value.forEach((item) => {
-    const due = Date.parse(item.due_date || "");
-    const days = Number.isFinite(due)
-      ? Math.max(0, Math.floor((now - due) / 86400000))
-      : 0;
-    const index = days <= 30 ? 0 : days <= 60 ? 1 : days <= 90 ? 2 : 3;
-    if (amountOf(item.open_amount) > 0) {
-      buckets[index].amount += amountOf(item.open_amount);
-      buckets[index].count += 1;
-    }
-  });
-  const total = buckets.reduce((sum, item) => sum + item.amount, 0);
-  return buckets.map((item) => ({
-    ...item,
-    percent: total ? Math.round((item.amount / total) * 100) : 0,
+const agingRows = computed(() => {
+  const labels = { "0-30": "0–30 天", "31-60": "31–60 天", "61-90": "61–90 天", "90+": "90 天以上" };
+  const tones = { "0-30": "green", "31-60": "blue", "61-90": "orange", "90+": "red" };
+  const items = Array.isArray(agingSummary.value.items) ? agingSummary.value.items : [];
+  const totals = new Map();
+  items.forEach((item) => totals.set(item.currency, (totals.get(item.currency) || 0) + amountOf(item.amount)));
+  return items.map((item) => ({
+    key: `${item.currency}-${item.bucket}`,
+    label: `${labels[item.bucket] || item.bucket} · ${item.currency}`,
+    tone: tones[item.bucket] || "blue",
+    currency: item.currency,
+    bucket: item.bucket,
+    amount: item.amount,
+    count: item.count,
+    percent: totals.get(item.currency) ? Math.round((amountOf(item.amount) / totals.get(item.currency)) * 100) : 0,
   }));
 });
 const dunningKpis = computed(() => {
+  const overview = dunningOverview.value || {};
   const overdue = receivables.value.filter(
     (item) =>
       Date.parse(item.due_date || "") < Date.now() &&
@@ -312,39 +326,73 @@ const dunningKpis = computed(() => {
   );
   return [
     {
-      label: "应收总额",
-      value: formatSettlementAmount(
-        receivables.value.reduce(
-          (total, item) => total + amountOf(item.open_amount),
-          0,
-        ),
-      ),
-      note: "当前已加载应收",
+      label: "逾期金额",
+      value: Array.isArray(overview.currency_totals) && overview.currency_totals.length
+        ? overview.currency_totals
+            .map((item) => `${item.currency} ${formatSettlementAmount(item.overdue, item.currency)}`)
+            .join(" · ")
+        : formatSettlementAmount(
+            overview.overdue_amount ??
+              receivables.value.reduce(
+                (total, item) => total + amountOf(item.open_amount),
+                0,
+              ),
+          ),
+      note: "服务端全量逾期金额",
       tone: "blue",
     },
     {
       label: "逾期笔数",
-      value: `${overdue.length} 笔`,
+      value: `${overview.overdue_count ?? overdue.length} 笔`,
       note:
-        agingBuckets.value[3]?.amount > 0
+        agingRows.value.some((item) => item.bucket === "90+" && Number(item.amount) > 0)
           ? "含 90 天以上逾期"
           : "无 90 天以上逾期",
       tone: "orange",
     },
     {
       label: "已产生提醒",
-      value: `${dunningActions.value.length} 次`,
-      note: "按真实催收动作统计",
+      value: `${overview.action_count ?? dunningActions.value.length} 次`,
+      note: `${overview.pending_action_count ?? 0} 条待跟进`,
       tone: "green",
     },
     {
-      label: "已升级案件",
-      value: `${dunningCases.value.filter((item) => Number(item.level) > 0).length} 笔`,
-      note: "按当前催收案件升级级别",
+      label: "活跃案件",
+      value: `${overview.active_case_count ?? dunningCases.value.filter((item) => item.status === "ACTIVE").length} 笔`,
+      note: `${overview.escalated_case_count ?? 0} 笔已升级`,
       tone: "purple",
     },
   ];
 });
+const canCompleteDunningAction = (item) =>
+  item.status === "PENDING" &&
+  (item.recipient_user_id === settlementSession.value?.user_id ||
+    sessionPermissions.value.has("settlement.admin"));
+const dunningActionStatusLabel = (status) =>
+  ({ PENDING: "待跟进", COMPLETED: "已完成", CANCELLED: "已取消" })[status] || status;
+const dunningCaseStatusLabel = (status) =>
+  ({ ACTIVE: "跟进中", CLOSED: "已关闭" })[status] || status;
+async function completeDunningAction(item) {
+  const note = window.prompt("填写本次催收跟进结果（最多 500 字）。完成后该动作不再计入待办。");
+  if (note === null) return;
+  if (note.trim().length > 500) {
+    error.value = "催收跟进结果不能超过 500 字。";
+    return;
+  }
+  saving.value = true;
+  try {
+    await completeDunningActionAPI(item.id, {
+      version: Number(item.version),
+      note: note.trim(),
+    });
+    const refreshed = await load();
+    notify(refreshed ? "催收动作已完成。" : "催收动作已完成；页面刷新失败，请手动刷新确认。");
+  } catch (value) {
+    error.value = formatSettlementError(value, { fallback: "催收动作完成失败。" });
+  } finally {
+    saving.value = false;
+  }
+}
 const loading = ref(true),
   error = ref(""),
   saving = ref(false),
@@ -363,7 +411,10 @@ const dashboard = ref({}),
   dunningPolicies = ref([]),
   dunningRecipients = ref([]),
   dunningCases = ref([]),
-  dunningActions = ref([]);
+  dunningActions = ref([]),
+  dunningOverview = ref({}),
+  dunningCoverage = ref({ policies: [], gaps: [] }),
+  agingSummary = ref({ items: [] });
 const dunningRecipientsLoading = ref(false);
 const dunningRecipientsError = ref("");
 const exportJob = ref(null);
@@ -641,17 +692,22 @@ async function uploadInvoiceDocument(event) {
   saving.value = true;
   try {
     await uploadTaxInvoiceDocument(invoiceDetail.value.id, file);
-    notify("电子发票已通过文件网关归档。");
-    await load();
+    const refreshed = await load();
+    notify(refreshed ? "电子发票已通过文件网关归档。" : "电子发票已归档，但页面刷新失败。请刷新列表查看，勿重复上传。");
   } catch (cause) {
-    notify(cause.message || "电子发票上传失败。");
+    notify(formatSettlementError(cause, { fallback: "电子发票上传失败。" }));
   } finally {
     saving.value = false;
   }
 }
-function downloadInvoiceDocument(document) {
+async function downloadInvoiceDocument(document) {
   if (!invoiceDetail.value?.id || !document?.id) return;
-  downloadTaxInvoiceDocument(invoiceDetail.value.id, document.id);
+  try { await downloadTaxInvoiceDocument(invoiceDetail.value.id, document.id); }
+  catch (cause) { notify(formatSettlementError(cause, { fallback: "电子发票下载失败，请稍后重试。" })); }
+}
+async function downloadExport(id) {
+  try { await downloadReportExport(id); }
+  catch (cause) { notify(formatSettlementError(cause, { fallback: "报表下载失败，请稍后重试。" })); }
 }
 function submitRedFlush() {
   if (!redFlushForm.value.reason_detail.trim()) {
@@ -696,7 +752,7 @@ async function logoutSystem() {
       await router.replace({ name: "login", query: { reason: "session-ended" } });
       return;
     }
-    error.value = value?.message || "退出系统失败，请稍后重试。";
+    error.value = formatSettlementError(value, { fallback: "退出系统失败，请稍后重试。" });
   } finally {
     isLoggingOut.value = false;
   }
@@ -706,6 +762,38 @@ function notify(value) {
   window.setTimeout(() => {
     message.value = "";
   }, 3200);
+}
+const listPages = ref({});
+const pagedLists = [
+  [listReceivablePlans, plans, "应收计划"], [listReceivables, receivables, "正式应收"],
+  [listReceipts, receipts, "回款"], [listReceiptAllocations, allocations, "核销记录"],
+  [listInvoiceRequests, invoiceRequests, "开票申请"], [listTaxInvoices, taxInvoices, "已开发票"],
+  [listInvoiceEligibleReceivables, invoiceEligibleReceivables, "开票可用应收"],
+  [listDunningCases, dunningCases, "催收案件"], [listDunningActions, dunningActions, "催收动作"],
+  [listDunningPolicies, dunningPolicies, "催收策略"],
+];
+const sectionLists = {
+  receivables: [0, 1], receipts: [2, 1], allocations: [2, 1, 3],
+  invoices: [6, 4, 5], dunning: [1, 7, 8, 9], tasks: [0, 3, 4, 7],
+};
+const visibleListPages = computed(() => (sectionLists[active.value] || []).map((index) => ({
+  index, label: pagedLists[index][2], page: listPages.value[index] || 0, count: pagedLists[index][1].value.length,
+})));
+async function changeListPage(index, direction) {
+  listPages.value[index] = Math.max(0, (listPages.value[index] || 0) + direction);
+  await load();
+}
+async function reviewFailedInvoice(item) {
+  const reason = window.prompt("填写失败复核原因（5 至 1000 字）。仅对税控已明确失败的申请恢复审批；结果未知不能重试，复核不会立即开票。");
+  if (reason === null) return;
+  if (reason.trim().length < 5 || reason.trim().length > 1000) { error.value = "复核原因应为 5 到 1000 字"; return; }
+  if (!window.confirm("确认已核对原税控失败结果？恢复后仍需重新审核，旧开票尝试和失败记录会保留。")) return;
+  saving.value = true;
+  try {
+    await recoverInvoiceFailure(item.id, { version: item.version, reason: reason.trim() });
+    const refreshed = await load(); notify(refreshed ? "失败已复核，申请已恢复待审核；尚未重新开票。" : "失败已复核，尚未重新开票；页面刷新失败，请刷新列表查看。无需重复复核。");
+  } catch (value) { error.value = formatSettlementError(value, { fallback: "失败复核未完成。" }); }
+  finally { saving.value = false; }
 }
 function loadTargets(section) {
   const target = (loader, state, fallback) => [loader, state, fallback];
@@ -727,6 +815,9 @@ function loadTargets(section) {
         target(listInvoiceRequests, invoiceRequests, []),
         target(listDunningCases, dunningCases, []),
       );
+      if (can("settlement.dunning.manage")) {
+        add(target(getDunningOverview, dunningOverview, {}));
+      }
       break;
     case "receivables":
       add(target(listReceivablePlans, plans, []), target(listReceivables, receivables, []));
@@ -753,6 +844,9 @@ function loadTargets(section) {
         target(listReceivables, receivables, []),
         target(listDunningPolicies, dunningPolicies, []),
         target(listDunningRecipients, dunningRecipients, []),
+        target(getDunningOverview, dunningOverview, {}),
+        target(getAgingSummary, agingSummary, { items: [] }),
+        target(getDunningCoverage, dunningCoverage, { policies: [], gaps: [] }),
         target(listDunningCases, dunningCases, []),
         target(listDunningActions, dunningActions, []),
       );
@@ -785,20 +879,26 @@ async function load() {
     dunningRecipientsLoading.value = true;
     dunningRecipientsError.value = "";
   }
-  const results = await Promise.allSettled(targets.map(([loader]) => loader()));
+  const results = await Promise.allSettled(targets.map(([loader]) => {
+    const index = pagedLists.findIndex(([candidate]) => candidate === loader);
+    const offset = active.value === "dashboard" ? 0 : (listPages.value[index] || 0) * 50;
+    return index < 0 ? loader() : loader({ limit: 50, offset });
+  }));
   // 菜单快速切换时，旧页面请求可能晚于新页面返回。旧请求只能结束自身，
   // 不得覆盖当前页面的数据、错误和 loading 状态。
   if (generation !== loadGeneration) {
     if (active.value === "dunning") dunningRecipientsLoading.value = false;
-    return;
+    return false;
   }
   const failures = [];
   results.forEach((result, index) => {
     const [, target, fallback] = targets[index];
     if (result.status === "fulfilled") target.value = result.value ?? fallback;
     else {
-      const message = result.reason?.message || "部分数据加载失败";
+      const message = formatSettlementError(result.reason, { fallback: "部分数据加载失败，请稍后刷新。" });
       failures.push(message);
+      // 分页请求失败时，不得把上一页记录重新标记为新数据。
+      if (pagedLists.some(([, state]) => state === target)) target.value = fallback;
       // 人员候选项加载失败时单独提示，避免用户误以为可以手动填写任意账号。
       if (active.value === "dunning" && targets[index]?.[0] === listDunningRecipients) {
         dunningRecipientsError.value = message;
@@ -806,8 +906,9 @@ async function load() {
     }
   });
   if (active.value === "dunning") dunningRecipientsLoading.value = false;
-  if (failures.length === targets.length) error.value = failures[0];
+  if (failures.length) error.value = [...new Set(failures)].join("；");
   loading.value = false;
+  return failures.length === 0;
 }
 async function exportInvoicedReceivables() {
   return runReportExport(createInvoicedReceivablesExport, "CSV 已生成，可下载。");
@@ -817,15 +918,17 @@ async function exportAgingReceivables() {
 }
 async function runReportExport(createExport, successMessage) {
   saving.value = true;
+  let submitted = false;
   try {
     exportJob.value = await createExport();
+    submitted = true;
     for (let attempt = 0; attempt < 30; attempt += 1) {
       if (exportJob.value.status === "READY") {
         notify(successMessage);
         return;
       }
       if (exportJob.value.status === "FAILED") {
-        notify(exportJob.value.error_message || "报表生成失败，请重新发起。");
+        notify(formatSettlementError(exportJob.value.error_message, { fallback: "报表生成失败，请稍后重新发起；仍失败时请联系管理员。" }));
         return;
       }
       await new Promise((resolve) => window.setTimeout(resolve, 1000));
@@ -833,7 +936,9 @@ async function runReportExport(createExport, successMessage) {
     }
     notify("导出仍在后台生成，可稍后继续查询并下载。");
   } catch (cause) {
-    notify(cause.message || "导出任务提交失败");
+    notify(submitted
+      ? `导出任务已提交，但状态查询失败。请稍后查询当前任务，勿重复提交。${formatSettlementError(cause)}`
+      : formatSettlementError(cause, { fallback: "导出任务提交失败，请稍后重试。" }));
   } finally {
     saving.value = false;
   }
@@ -842,10 +947,10 @@ async function act(callback, success) {
   saving.value = true;
   try {
     await callback();
-    notify(success);
-    await load();
+    const refreshed = await load();
+    notify(refreshed ? success : `${success}页面刷新失败，请刷新列表核对结果，勿重复提交。`);
   } catch (cause) {
-    notify(cause.message || "操作失败。");
+    notify(formatSettlementError(cause, { fallback: "操作失败，请稍后重试。" }));
   } finally {
     saving.value = false;
   }
@@ -885,19 +990,26 @@ function submitPlanConfirmation() {
 }
 async function submitReceipt() {
   saving.value = true;
+  let registered = false;
   try {
     const result = await createReceipt(receiptForm.value);
-    receiptMatches.value = await listReceiptMatches(result.id);
-    receiptMatchFor.value = result.id;
+    registered = true;
     receiptComposerOpen.value = false;
+    receiptMatchFor.value = result.id;
+    receiptMatches.value = [];
+    receiptMatches.value = await listReceiptMatches(result.id);
     notify(
       receiptMatches.value.length
         ? `回款已登记，找到 ${receiptMatches.value.length} 条可核销应收。`
         : "回款已登记，暂未找到同客户、同币种的可核销应收。",
     );
-    await load();
+    const refreshed = await load();
+    if (!refreshed) notify("回款已登记，但页面刷新失败。请刷新回款列表核对结果，勿重复登记。");
   } catch (cause) {
-    notify(cause.message || "回款登记失败。");
+    if (registered) {
+      notify(`回款已登记，但可核销应收查询失败。请刷新回款列表继续核销，勿重复登记。${formatSettlementError(cause)}`);
+      await load();
+    } else notify(formatSettlementError(cause, { fallback: "回款登记失败，请稍后重试。" }));
   } finally {
     saving.value = false;
   }
@@ -1143,7 +1255,7 @@ watch(invoiceDetailID, load);
                 @click="
                   exportJob?.status === 'READY' &&
                   exportJob?.report_type === 'INVOICED_RECEIVABLES_CSV'
-                    ? downloadReportExport(exportJob.id)
+                    ? downloadExport(exportJob.id)
                     : exportInvoicedReceivables()
                 "
               >
@@ -1165,6 +1277,14 @@ watch(invoiceDetailID, load);
         <p v-if="error" class="settlement-error">{{ error }}</p>
         <p v-if="loading" class="settlement-loading">正在读取结算数据…</p>
         <template v-else>
+          <div v-if="visibleListPages.length" class="settlement-panel" aria-label="列表分页">
+            <p class="settlement-muted">以下筛选仅作用于当前页，每页最多 50 条；可按列表翻页查看历史记录。</p>
+            <div v-for="entry in visibleListPages" :key="entry.index" class="settlement-head-actions">
+              <span>{{ entry.label }} · 第 {{ entry.page + 1 }} 页 · {{ entry.count }} 条</span>
+              <button class="console-button secondary small" :disabled="loading || saving || entry.page === 0" @click="changeListPage(entry.index, -1)">上一页</button>
+              <button class="console-button secondary small" :disabled="loading || saving || entry.count < 50 || entry.page >= 2000" @click="changeListPage(entry.index, 1)">下一页</button>
+            </div>
+          </div>
           <section v-if="active === 'dashboard'" class="settlement-dashboard">
             <section class="settlement-cards">
               <article
@@ -1224,7 +1344,7 @@ watch(invoiceDetailID, load);
                   <div class="settlement-panel-head">
                     <div>
                       <h2>
-                        应收账款账龄分布 <small>按当前已加载应收估算</small>
+                        应收账款账龄分布 <small>服务端全量按币种聚合</small>
                       </h2>
                       <p>
                         按应收单到期日计算，用于辅助识别逾期风险；权威催收状态以催收中心为准。
@@ -1236,8 +1356,8 @@ watch(invoiceDetailID, load);
                   </div>
                   <div class="settlement-aging-list">
                     <div
-                      v-for="item in agingBuckets"
-                      :key="item.label"
+                      v-for="item in agingRows"
+                      :key="item.key"
                       class="settlement-aging-row"
                     >
                       <span>{{ item.label }}</span
@@ -1245,7 +1365,7 @@ watch(invoiceDetailID, load);
                         ><b
                           :class="`tone-${item.tone}`"
                           :style="{ width: `${item.percent}%` }" /></i
-                      ><strong>{{ formatSettlementAmount(item.amount) }}</strong
+                      ><strong>{{ formatSettlementAmount(item.amount, item.currency) }}</strong
                       ><em>{{ item.percent }}%</em>
                     </div>
                   </div>
@@ -1257,7 +1377,7 @@ watch(invoiceDetailID, load);
                     <h2>
                       已开票未回款应收 TOP10 <small>服务端权威排序</small>
                     </h2>
-                    <p>按剩余未回款金额排序，仅展示已进入开票流程的应收单。</p>
+                    <p>按币种内剩余未回款金额排序，仅展示已进入开票流程的应收单。</p>
                   </div>
                   <button
                     class="console-text-button"
@@ -1297,7 +1417,7 @@ watch(invoiceDetailID, load);
                         <td>{{ item.contract_no || "—" }}</td>
                         <td>{{ item.receivable_no }}</td>
                         <td class="settlement-money">
-                          {{ money(item.open_amount) }}
+                          {{ money(item.open_amount, item.currency) }}
                         </td>
                         <td>{{ receivableInvoiceStatusLabel(item.invoice_status) }}</td>
                       </tr>
@@ -1381,14 +1501,14 @@ watch(invoiceDetailID, load);
                     v-model.trim="planEditor.planned_amount"
                     inputmode="decimal"
                     required
-                /></label>
+                 maxlength="18"/></label>
                 <label class="wide"
                   ><span>调整原因</span
                   ><textarea
                     v-model.trim="planEditor.reason"
                     rows="3"
                     placeholder="如调整日期或金额，此项必填；原值将保留在审计记录中。"
-                  ></textarea>
+                   maxlength="500"></textarea>
                 </label>
                 <div class="settlement-operation-actions wide">
                   <button
@@ -1408,7 +1528,7 @@ watch(invoiceDetailID, load);
               <label
                 ><ConsoleIcon name="search" /><input
                   v-model.trim="planKeyword"
-                  placeholder="搜索合同号 / 客户 / 应收单号" /></label
+                  placeholder="搜索合同号 / 客户 / 应收单号"  maxlength="100"/></label
               ><select v-model="planConfirmationFilter">
                 <option value="">全部确认状态</option>
                 <option>待确认</option>
@@ -1595,7 +1715,7 @@ watch(invoiceDetailID, load);
                   v-model.trim="receiptForm.amount"
                   placeholder="金额"
                   required
-                /><input
+                 maxlength="18"/><input
                   v-model="receiptForm.receipt_date"
                   type="date"
                   required
@@ -1608,7 +1728,7 @@ watch(invoiceDetailID, load);
                   v-model.trim="receiptForm.bank_transaction_reference"
                   placeholder="银行凭证号"
                   required
-                /><button :disabled="saving">确认登记</button>
+                 maxlength="128"/><button :disabled="saving">确认登记</button>
               </form>
             </article>
             <article
@@ -1889,7 +2009,7 @@ watch(invoiceDetailID, load);
                   v-model.trim="allocationForm.amount"
                   placeholder="本次核销金额"
                   required
-                /><button :disabled="saving">确认核销</button>
+                 maxlength="18"/><button :disabled="saving">确认核销</button>
               </form>
             </article>
             <article
@@ -1927,7 +2047,7 @@ watch(invoiceDetailID, load);
                   v-model.trim="reversalForm.amount"
                   placeholder="冲销金额"
                   required
-                /><select v-model="reversalForm.reason_code" required>
+                 maxlength="18"/><select v-model="reversalForm.reason_code" required>
                   <option value="MATCH_ERROR">回款匹配错误</option>
                   <option value="CUSTOMER_CORRECTION">客户归属修正</option>
                   <option value="AMOUNT_ERROR">金额录入错误</option>
@@ -1938,7 +2058,7 @@ watch(invoiceDetailID, load);
                   v-model.trim="reversalForm.reason_detail"
                   placeholder="补充说明冲销原因"
                   required
-                /><button :disabled="saving">确认冲销</button>
+                 maxlength="500"/><button :disabled="saving">确认冲销</button>
               </form>
             </article>
           </section>
@@ -1974,7 +2094,7 @@ watch(invoiceDetailID, load);
                     上传电子发票</button
                   ><button
                     class="console-button secondary"
-                    :disabled="saving || invoiceDetail.status !== 'ISSUED' || (!!invoiceDetail.red_flush_request && !['REJECTED', 'FAILED'].includes(invoiceDetail.red_flush_request.status))"
+                    :disabled="saving || !canRequestRedFlush(invoiceDetail)"
                     @click="redFlushOpen = true"
                   >
                     发起红冲</button
@@ -2146,7 +2266,13 @@ watch(invoiceDetailID, load);
                   </dl>
                 </article>
                 <article class="settlement-panel settlement-detail-items">
-                  <h2>开票明细</h2>
+                  <h2>票面明细</h2>
+                  <p
+                    v-if="invoiceDetail.items_source === 'REQUEST'"
+                    class="settlement-muted"
+                  >
+                    该发票为历史人工登记，未留存票面明细，以下展示开票申请明细。
+                  </p>
                   <div class="settlement-table-scroll">
                     <table>
                       <thead>
@@ -2162,6 +2288,45 @@ watch(invoiceDetailID, load);
                       <tbody>
                         <tr
                           v-for="item in invoiceDetail.items"
+                          :key="item.line_no"
+                        >
+                          <td>{{ item.item_name }}</td>
+                          <td>{{ item.tax_classification_code }}</td>
+                          <td>{{ money(item.amount_excl_tax) }}</td>
+                          <td>{{ item.tax_rate_display }}</td>
+                          <td>{{ money(item.tax_amount) }}</td>
+                          <td>{{ money(item.amount_incl_tax) }}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </article>
+                <article
+                  v-if="
+                    invoiceDetail.items_source !== 'REQUEST' &&
+                    invoiceDetail.request_items?.length
+                  "
+                  class="settlement-panel settlement-detail-items"
+                >
+                  <h2>申请依据</h2>
+                  <p class="settlement-muted">
+                    以下为开票申请明细，仅用于与票面明细核对，不作为已开具票面。
+                  </p>
+                  <div class="settlement-table-scroll">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>项目</th>
+                          <th>税收分类编码</th>
+                          <th>不含税金额</th>
+                          <th>税率</th>
+                          <th>税额</th>
+                          <th>价税合计</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr
+                          v-for="item in invoiceDetail.request_items"
                           :key="item.line_no"
                         >
                           <td>{{ item.item_name }}</td>
@@ -2256,31 +2421,31 @@ watch(invoiceDetailID, load);
                   v-model.trim="invoiceForm.buyer_tax_no"
                   placeholder="购方税号"
                   required
-                /><input
+                 maxlength="64"/><input
                   v-model.trim="invoiceForm.item_name"
                   placeholder="项目名称"
                   required
-                /><input
+                 maxlength="255"/><input
                   v-model.trim="invoiceForm.tax_classification_code"
                   placeholder="税收分类编码"
                   required
-                /><input
+                 maxlength="64"/><input
                   v-model.trim="invoiceForm.amount_excl_tax"
                   placeholder="不含税金额"
                   required
-                /><input
+                 maxlength="18"/><input
                   v-model.trim="invoiceForm.tax_rate"
                   placeholder="税率，如 0.06"
                   required
-                /><input
+                 maxlength="10"/><input
                   v-model.trim="invoiceForm.tax_amount"
                   placeholder="税额"
                   required
-                /><input
+                 maxlength="18"/><input
                   v-model.trim="invoiceForm.amount_incl_tax"
                   placeholder="价税合计"
                   required
-                /><button :disabled="saving">提交申请</button>
+                 maxlength="18"/><button :disabled="saving">提交申请</button>
               </form>
             </article>
             <article
@@ -2306,7 +2471,7 @@ watch(invoiceDetailID, load);
                   v-model.trim="invoiceReview.reason"
                   rows="3"
                   placeholder="驳回时必填；审批通过时可填写审核说明。"
-                ></textarea>
+                 maxlength="500"></textarea>
               </label>
               <div class="settlement-operation-actions">
                 <button
@@ -2348,7 +2513,7 @@ watch(invoiceDetailID, load);
                     invoiceTab === 'requests'
                       ? '搜索申请号 / 合同号 / 购方'
                       : '搜索发票号码 / 合同号 / 购方'
-                  " /></label
+                  "  maxlength="100"/></label
               ><select v-model="invoiceStatusFilter">
                 <option value="">全部状态</option>
                 <option v-if="invoiceTab === 'requests'" value="SUBMITTED">
@@ -2404,6 +2569,9 @@ watch(invoiceDetailID, load);
                           :class="`tone-${invoiceStatusMeta(item.status).tone}`"
                           >{{ invoiceStatusMeta(item.status).label }}</span
                         >
+                        <p v-if="item.status === 'ISSUE_FAILED'" class="settlement-muted">
+                          {{ formatSettlementError({ code: item.failure_code, message: item.failure_message }, { fallback: "请核对税控回执后复核，禁止对结果未知的申请重开。" }) }}
+                        </p>
                       </td>
                       <td>
                         <button
@@ -2420,7 +2588,12 @@ watch(invoiceDetailID, load);
                           @click="manualIssue(item)"
                         >
                           登记发票</button
-                        ><span v-else class="settlement-muted">—</span>
+                        ><button
+                          v-else-if="item.status === 'ISSUE_FAILED' && can('settlement.invoice.approve')"
+                          class="console-button secondary small"
+                          :disabled="saving"
+                          @click="reviewFailedInvoice(item)"
+                        >失败复核</button><span v-else class="settlement-muted">—</span>
                       </td>
                     </tr>
                     <tr v-if="!visibleInvoiceRequests.length">
@@ -2503,7 +2676,7 @@ watch(invoiceDetailID, load);
                   @click="
                     exportJob?.status === 'READY' &&
                     exportJob?.report_type === 'AGING_RECEIVABLES_CSV'
-                      ? downloadReportExport(exportJob.id)
+                      ? downloadExport(exportJob.id)
                       : exportAgingReceivables()
                   "
                 >
@@ -2521,8 +2694,22 @@ watch(invoiceDetailID, load);
               </div>
             </div>
             <p class="settlement-detail-notice">
-              页面金额与笔数基于当前已加载应收的辅助统计；导出的账龄表由服务端重新查询当前租户全部未结清应收生成。
+              页面金额与笔数基于服务端全量催收汇总；导出的账龄表由服务端重新查询当前租户全部未结清应收生成。
             </p>
+            <p
+              v-if="Number(dunningOverview.uncovered_overdue_count || 0) > 0"
+              class="settlement-detail-notice"
+              role="status"
+            >
+              有 {{ dunningOverview.uncovered_overdue_count }} 笔逾期应收没有匹配的催收策略，请补充覆盖对应账龄区间的规则。
+            </p>
+            <div v-if="dunningCoverage.gaps.length" class="settlement-detail-notice" role="status">
+              <strong>策略覆盖巡检：</strong>
+              <span v-for="(gap, index) in dunningCoverage.gaps" :key="`${gap.from_days}-${gap.to_days}-${gap.open_ended}`">
+                {{ index ? '、' : '' }}{{ gap.open_ended ? `≥${gap.from_days} 天` : `${gap.from_days}–${gap.to_days} 天` }}
+              </span>
+              未配置启用策略；系统只提示，不自动生成策略。
+            </div>
             <section class="settlement-cards settlement-dunning-cards">
               <article
                 v-for="item in dunningKpis"
@@ -2582,6 +2769,49 @@ watch(invoiceDetailID, load);
             <article class="settlement-panel settlement-aging-report">
               <div class="settlement-panel-head">
                 <div>
+                  <h2>催收案件</h2>
+                  <p>按应收和策略版本建立；结清自动关闭，再次逾期会重新打开。</p>
+                </div>
+              </div>
+              <div class="settlement-table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>案件 ID</th>
+                      <th>应收单号</th>
+                      <th>客户</th>
+                      <th>逾期天数</th>
+                      <th>未结金额</th>
+                      <th>升级级别</th>
+                      <th>状态</th>
+                      <th>下次跟进</th>
+                      <th>当前负责人</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="item in dunningCases" :key="item.id">
+                      <td class="settlement-contract-cell">{{ item.id }}</td>
+                      <td>{{ item.receivable_no }}</td>
+                      <td>{{ item.customer_name }}</td>
+                      <td>{{ item.aging_days }} 天</td>
+                      <td class="settlement-money">{{ formatSettlementAmount(item.open_amount) }}</td>
+                      <td>{{ item.level || 0 }} 级</td>
+                      <td>
+                        <span class="settlement-badge" :class="`tone-${item.status === 'ACTIVE' ? 'warning' : 'info'}`">{{ dunningCaseStatusLabel(item.status) }}</span>
+                      </td>
+                      <td>{{ item.next_action_at || "—" }}</td>
+                      <td>{{ item.recipient_user_id || "—" }}</td>
+                    </tr>
+                    <tr v-if="!dunningCases.length">
+                      <td colspan="9" class="settlement-table-empty">暂无催收案件</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </article>
+            <article class="settlement-panel settlement-aging-report">
+              <div class="settlement-panel-head">
+                <div>
                   <h2>催收动作记录</h2>
                   <p>
                     仅展示已生成的真实催收动作；普通提醒留在本系统，高优先级事件由
@@ -2599,6 +2829,9 @@ watch(invoiceDetailID, load);
                       <th>创建时间</th>
                       <th>接收人</th>
                       <th>升级标记</th>
+                      <th>状态</th>
+                      <th>完成时间</th>
+                      <th>操作</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2610,14 +2843,27 @@ watch(invoiceDetailID, load);
                       <td>{{ item.recipient_user_id }}</td>
                       <td>
                         <span
-                          v-if="Number(item.escalation_level) > 0"
+                          v-if="Number(item.escalation_level) > 1"
                           class="settlement-badge tone-warning"
                           >已升级</span
                         ><span v-else class="settlement-muted">—</span>
                       </td>
+                      <td>
+                        <span class="settlement-badge" :class="`tone-${item.status === 'PENDING' ? 'warning' : item.status === 'COMPLETED' ? 'info' : 'danger'}`">{{ dunningActionStatusLabel(item.status) }}</span>
+                      </td>
+                      <td>{{ item.completed_at || "—" }}</td>
+                      <td>
+                        <button
+                          v-if="canCompleteDunningAction(item)"
+                          class="console-text-button"
+                          :disabled="saving"
+                          @click="completeDunningAction(item)"
+                        >完成跟进</button>
+                        <span v-else class="settlement-muted">—</span>
+                      </td>
                     </tr>
                     <tr v-if="!dunningActions.length">
-                      <td colspan="6" class="settlement-table-empty">
+                      <td colspan="9" class="settlement-table-empty">
                         暂无已生成的催收动作记录
                       </td>
                     </tr>
@@ -2648,7 +2894,7 @@ watch(invoiceDetailID, load);
                     v-model.trim="policyForm.name"
                     placeholder="例如：逾期 1–30 天销售跟进"
                     required
-                  />
+                   maxlength="255"/>
                   <small>方便团队识别这条提醒的适用场景。</small>
                 </label>
                 <div class="settlement-policy-field">

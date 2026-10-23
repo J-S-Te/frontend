@@ -1,4 +1,6 @@
-import { API_BASE_URL, createRequest } from '../../shared/api/request.js'
+import { API_BASE_URL, createRequest, readBody } from '../../shared/api/request.js'
+import { attachStructuredContext } from '../../shared/api/requestContext.js'
+import { formatUserError } from '../../../shared/utils/userError.js'
 
 /**
  * AuditEventsError 与业务错误分类相关的错误类型定义。
@@ -53,6 +55,9 @@ export async function listAuditEvents({
   actionCategory = '',
   result = '',
   riskLevel = '',
+  clientIp = '',
+  resourceId = '',
+  requestId = '',
   occurredFrom = '',
   occurredTo = '',
   signal,
@@ -66,6 +71,10 @@ export async function listAuditEvents({
     action_category: actionCategory,
     result,
     risk_level: riskLevel,
+    // 批次 3 查询维度：操作地址、对象、链路 ID。
+    client_ip: clientIp,
+    resource_id: resourceId,
+    request_id: requestId,
     occurred_from: occurredFrom,
     occurred_to: occurredTo,
   })
@@ -117,8 +126,49 @@ export function getAuditExportJob(jobId) {
 }
 
 /** 返回同源、受会话保护的下载地址；服务端仍会再次执行租户和权限校验。 */
+/**
+ * 拉取平台侧审计摄取健康度（批次 3）。
+ *
+ * 口径：平台已接收的审计事件（近期接收量、来源未采集数、最后接收时间），
+ * 用于发现上报停摆；不含各子系统本地 Outbox 的积压量。
+ */
+export async function getAuditIngestionHealth({ signal } = {}) {
+  return (await request('/audit/ingestion-health', { signal })) || {}
+}
+
 export function auditExportDownloadURL(jobId) {
   return `${API_BASE_URL}/audit/export-jobs/${encodeURIComponent(jobId)}/download`
+}
+
+/** 下载被拒绝时停留在当前页面，避免跳转至原始 JSON/HTML。 */
+export async function downloadAuditExportFile(jobId) {
+  const path = `/audit/export-jobs/${encodeURIComponent(jobId)}/download`
+  const context = { subsystem: 'platform', feature: 'audit_download', method: 'GET', operation: 'GET', path }
+  const failure = (body, status, code) => {
+    const error = new AuditEventsError(formatUserError(body, { status, code, fallback: '审计文件下载失败，请稍后重新下载。' }), { status, code: code || body?.code })
+    error.details = body?.details || null
+    return attachStructuredContext(error, context, { status, code: error.code, requestId: body?.request_id, traceId: body?.trace_id || body?.traceId })
+  }
+  let response
+  try { response = await fetch(auditExportDownloadURL(jobId), { credentials: 'include', cache: 'no-store', headers: { Accept: 'text/csv, application/octet-stream' } }) }
+  catch { throw failure(null, 0, 'NETWORK_ERROR') }
+  if (!response.ok) throw failure(await readBody(response), response.status)
+  const type = (response.headers.get('content-type') || '').split(';', 1)[0].trim().toLowerCase()
+  const disposition = response.headers.get('content-disposition') || ''
+  if (type !== 'text/csv' && !(type === 'application/octet-stream' && /^attachment\b/i.test(disposition))) throw failure(null, response.status, 'INVALID_DOWNLOAD_RESPONSE')
+  let blob
+  try { blob = await response.blob() }
+  catch { throw failure(null, response.status, 'NETWORK_ERROR') }
+  if (!blob.size) throw failure(null, response.status, 'INVALID_DOWNLOAD_RESPONSE')
+  const name = disposition.match(/filename\*=UTF-8''([^;]+)/i) || disposition.match(/filename="?([^";]+)/i)
+  let filename = 'audit-export.csv'
+  if (name) {
+    try {
+      const candidate = decodeURIComponent(name[1]).replace(/[\\/\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, '_').trim()
+      if (candidate.length <= 180 && /\.csv$/i.test(candidate)) filename = candidate
+    } catch { /* 文件名无效不影响已经接收的 CSV 数据。 */ }
+  }
+  return { blob, filename }
 }
 
 /**
@@ -127,7 +177,7 @@ export function auditExportDownloadURL(jobId) {
  * - 后端 risk_level 是 "LOW" / "MEDIUM" / "HIGH" / "CRITICAL"；前端显示中文标签。
  * - 后端 change_summary 是 []FieldChange 数组；前端展示是字符串。
  */
-function mapAuditEvent(event) {
+export function mapAuditEvent(event) {
   if (!event || typeof event !== 'object') return event
   const changeSummary = Array.isArray(event.change_summary)
     ? event.change_summary.map(formatFieldChange).filter(Boolean).join('；')
@@ -146,7 +196,13 @@ function mapAuditEvent(event) {
     action: event.action || '',
     method: event.method || '',
     path: event.path || '',
+    // 统一审计来源协议：列表默认展示"操作 IP"；登录 IP 与投递地址只在详情里展示，
+    // 三者含义不同，不能用一个字段互相顶替。
     ip: event.client_ip || '',
+    loginIp: event.login_ip || '',
+    ingestPeerIp: event.ingest_peer_ip || '',
+    ipSource: event.ip_source || '',
+    ipSourceLabel: ipSourceLabel(event.ip_source),
     userAgent: event.user_agent || '',
     requestId: event.request_id || '',
     traceId: event.trace_id || '',
@@ -160,6 +216,20 @@ function mapAuditEvent(event) {
     summary: event.summary || '',
     changeSummary,
   }
+}
+
+/**
+ * 地址来源标记翻译。历史记录是 LEGACY_RECORD，旧发布方是 LEGACY_PROTOCOL，
+ * 没有采集到地址时是 UNKNOWN——界面必须如实显示"未采集/来源未知"，不能猜。
+ */
+export function ipSourceLabel(source) {
+  return {
+    DIRECT: '直连采集',
+    TRUSTED_PROXY: '可信代理解析',
+    LEGACY_PROTOCOL: '旧协议上报',
+    LEGACY_RECORD: '历史记录（旧口径）',
+    UNKNOWN: '未采集／来源未知',
+  }[source] || '未采集／来源未知'
 }
 
 function formatFieldChange(change) {

@@ -722,7 +722,7 @@ test('发布实施计划在提交前拦截未完成的前置步骤', () => {
   assert.match(source, /请填写计划开始与计划结束时间/)
   assert.match(source, /计划结束时间必须晚于计划开始时间/)
   assert.doesNotMatch(source, /请填写现场计划/)
-  assert.doesNotMatch(source, /site_plan: form\.sitePlan/)
+  assert.match(source, /site_plan: form\.sitePlan/)
   assert.match(styles, /textarea\[placeholder="现场实施步骤和窗口"\]/)
   assert.match(source, /请补充渗透测试专项合规要素/)
   // 样式：amber 拦截 + red 冲突，均带描边与文案，不只靠颜色。
@@ -913,7 +913,9 @@ test('实施计划提交人员清单，设备清单在实施准备登记并校�
   assert.match(source, /class="pm-plan-window"/)
   // 已占用设备置灰并显示占用方与日期。
   assert.match(source, /function equipmentReservationLabel\(resourceID\)/)
-  assert.match(source, /listEquipmentReservations\(item\.id\)/)
+  assert.match(source, /listEquipmentReservations\(targetID\)/)
+  assert.match(source, /equipmentRequestVersion/)
+  assert.match(source, /workspaceRequestVersion/)
   assert.match(source, /已被占用/)
   assert.match(source, /pm-dialog-wide/)
 })
@@ -1040,7 +1042,7 @@ test('站点档案下线后新建项目直接使用实施场所文本', () => {
   assert.doesNotMatch(source, /实施场所必须与一个启用的站点档案名称一致/)
   assert.doesNotMatch(source, /const linkedSite =/)
   assert.doesNotMatch(source, /site_code: createForm\.value\.siteCode/)
-  assert.match(source, /<input v-model\.trim="createForm\.site" required placeholder="例如 杭州机房" \/>/)
+  assert.match(source, /<input v-model\.trim="createForm\.site" required placeholder="例如 杭州机房"  maxlength="255"\/>/)
   assert.match(source, /source_id: item\.source_id, site: createForm\.value\.site/)
   assert.doesNotMatch(source, /site_code: item\.site_code/)
 })
@@ -1397,7 +1399,7 @@ test('轻提示按结果切换语义色，错误不再是绿色对勾', () => {
   for (const tone of ['success', 'error', 'warning', 'info']) {
     assert.match(styles, new RegExp(`\\.pm-toast\\.${tone} span \\{ background: var\\(--pm-[a-z]+\\); \\}`))
   }
-  assert.match(source, /showToast\(error\?\.message \|\| '[^']*', 'error'\)/)
+  assert.match(source, /showToast\(formatUserError\(error, \{ fallback: '[^']*' \}\), 'error'\)/)
   assert.match(source, /, 'warning'\); return \}/)
 })
 

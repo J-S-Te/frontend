@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import vm from 'node:vm'
 import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc'
+import { formatDataAnalysisError } from './utils/errors.js'
 
 const source = await readFile(new URL('./views/DictionaryView.vue', import.meta.url), 'utf8')
 const script = source.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '')
@@ -10,6 +11,7 @@ const metric = (extra = {}) => ({ code: 'TEST_COUNT', name: '统计数量', dash
 function harness({ permissions = ['dictionary.manage'], get = async () => ({ metrics: [metric()] }), create, update, toggle, remove, versions, confirm = true } = {}) {
   const calls = { create: [], update: [], toggle: [], remove: [], versions: [], confirm: [] }
   const context = vm.createContext({ ref: (value) => ({ value }), computed: (getter) => ({ get value() { return getter() } }), defineProps: () => ({ permissions }), onMounted() {}, window: { confirm(message) { calls.confirm.push(message); return confirm } },
+    formatDataAnalysisError,
     getDictionary: get,
     createDictionaryMetric: async (payload) => { calls.create.push(payload); return create ? create(payload) : metric({ ...payload, enabled: false, version: 1 }) },
     updateDictionaryMetric: async (code, payload) => { calls.update.push({ code, payload }); return update ? update(code, payload) : metric({ ...payload, code, version: payload.version + 1 }) },

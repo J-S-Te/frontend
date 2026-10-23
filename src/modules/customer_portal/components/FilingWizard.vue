@@ -1,6 +1,7 @@
 <script setup>
+import { formatPortalError } from '../api/errorMessages.js'
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import { completeFilingMaterialUpload, createFiling, createFilingMaterialUpload, deleteFiling, getFiling, listFilings, saveFilingMatrix, saveFilingSection, submitFiling, validateFiling } from '../api/portal.js'
+import { completeFilingMaterialUpload, createFiling, createFilingMaterialUpload, deleteFiling, exportFilingPDF, getFiling, listFilings, saveFilingMatrix, saveFilingSection, submitFiling, validateFiling } from '../api/portal.js'
 
 const props = defineProps({ permissions: { type: Array, default: () => [] }, capabilities: { type: Object, default: () => ({}) }, projects: { type: Array, default: () => [] } })
 const emit = defineEmits(['error', 'notice'])
@@ -24,6 +25,20 @@ const createProjectId = ref('')
 const filing = ref(null)
 const currentStep = ref(0)
 const busy = ref(false)
+const exporting = ref(false)
+async function downloadFiling() {
+  if (exporting.value || dirty.value || !filingExportAvailable.value || !filing.value) return
+  exporting.value = true
+  try {
+    const result = await exportFilingPDF(filing.value.id, filing.value.version)
+    const url = URL.createObjectURL(result.blob)
+    try {
+      const anchor = document.createElement('a')
+      anchor.href = url; anchor.download = result.filename; anchor.click()
+    } finally { URL.revokeObjectURL(url) }
+    emit('notice', '备案资料 PDF 副本已下载；本文件不等同于公安受理或备案凭证。')
+  } catch (error) { emit('error', error) } finally { exporting.value = false }
+}
 const savingNow = ref(false)
 const validation = ref(null)
 const validationNotice = ref([])
@@ -172,8 +187,8 @@ async function uploadMaterial(item) {
   if (!materialUploadAvailable.value || !filing.value || readonly.value || !file || !code || materialBusy[item.key]) return
   materialBusy[item.key] = true; materialErrors[item.key] = ''
   try {
-    // Keep the create key while the selected file is unchanged. If the browser
-    // loses the create response, retrying recovers the same server-side grant
+    // 所选文件未变化时保留创建键。若浏览器
+    // 未收到创建响应，重试可恢复同一个服务端授权。
     // 同一文件的完成响应若丢失，继续使用服务端已有材料版本，不创建冲突的第二版。
     materialCreateKeys[item.key] ||= newKey()
     const grant = await createFilingMaterialUpload(filing.value.id, { material_code: code, file_name: file.name, mime_type: file.type, size_bytes: file.size, sha256: await fileSHA256(file) }, materialCreateKeys[item.key])
@@ -190,7 +205,7 @@ async function uploadMaterial(item) {
     await reloadCurrent()
     emit('notice', `${item.label}已上传并进入静态文件校验，文件校验通过前不能提交备案。`)
   } catch (error) {
-    materialErrors[item.key] = error?.code === 'PORTAL_FILING_MATERIAL_DEPENDENCY_UNAVAILABLE' ? '统一文件网关或文件校验服务尚未配置，上传已安全关闭。' : (error?.message || '材料上传失败。')
+    materialErrors[item.key] = error?.code === 'PORTAL_FILING_MATERIAL_DEPENDENCY_UNAVAILABLE' ? '统一文件网关或文件校验服务尚未配置，上传已安全关闭。' : (formatPortalError(error, { fallback: '材料上传失败。' }))
   } finally { materialBusy[item.key] = false }
 }
 function labelForStep(code) { return steps.find(item => item[0] === code)?.[1] || code }
@@ -229,7 +244,7 @@ function filingTitle(item) {
   return title || item.filing_no || '未命名备案'
 }
 function snapshotSection(code) {
-  // sectionData 是 Vue reactive Proxy，不能直接交给 structuredClone；备案字段
+  // sectionData 是 Vue 响应式代理，不能直接交给 structuredClone；备案字段
   // 只允许 JSON 值，用 JSON 快照隔离响应式代理，避免浏览器抛出 DataCloneError。
   return JSON.parse(JSON.stringify(sectionData[code]))
 }
@@ -348,7 +363,7 @@ async function saveNow(announce = true) {
     if (announce) emit('notice', `${labelForStep(code)}已暂存。`)
     return true
   } catch (_) {
-    // persistSection already emits the detailed error and updates the save state.
+    // persistSection 已展示详细错误并更新保存状态。
     return false
   } finally {
     savingNow.value = false
@@ -417,7 +432,7 @@ onUnmounted(() => clearTimeout(validationNoticeTimer))
       <p v-if="!busy && !filings.length">暂无备案记录。</p>
     </div>
     <template v-else>
-      <div class="filing-toolbar portal-card"><div><button type="button" class="link-button" @click="filing = null; loadList()">← 返回列表</button><h2>{{ filingTitle(filing) }}</h2><small>{{ statusText(filing.status) }} · 完成度 {{ filing.completion_pct }}%</small></div><div><button type="button" class="secondary" :disabled="currentCode !== 'MATERIALS' || readonly || !materialUploadAvailable" @click="currentStep = 4">上传材料</button><button type="button" class="secondary" :disabled="!filingExportAvailable" :title="filingExportAvailable ? '生成备案 PDF' : '当前运行环境尚未启用备案 PDF 导出'">生成 PDF{{ filingExportAvailable ? '' : '（未接通）' }}</button><button v-if="filing.status === 'DRAFT' && canDelete" type="button" class="secondary" :disabled="busy" @click="deleteDraft(filing)">删除草稿</button></div></div>
+      <div class="filing-toolbar portal-card"><div><button type="button" class="link-button" @click="filing = null; loadList()">← 返回列表</button><h2>{{ filingTitle(filing) }}</h2><small>{{ statusText(filing.status) }} · 完成度 {{ filing.completion_pct }}%</small></div><div><button type="button" class="secondary" :disabled="currentCode !== 'MATERIALS' || readonly || !materialUploadAvailable" @click="currentStep = 4">上传材料</button><button type="button" class="secondary" :disabled="!filingExportAvailable || exporting || dirty || busy" :title="filingExportAvailable ? '导出已保存备案资料副本（非公安备案凭证）；未保存时不可导出' : '当前运行环境尚未配置中文 PDF 渲染器'" @click="downloadFiling">{{ exporting ? '生成中…' : '生成 PDF' }}{{ filingExportAvailable ? '' : '（未配置）' }}</button><button v-if="filing.status === 'DRAFT' && canDelete" type="button" class="secondary" :disabled="busy" @click="deleteDraft(filing)">删除草稿</button></div></div>
       <p v-if="filing.status === 'WAITING_CONTRACT'" class="portal-warning">备案快照已在 Portal 内部锁定，尚未向公安机关提交；正式提交契约未配置时会保持此状态。后续将由服务人员与您联系办理，如需修改请联系您的服务人员。</p>
       <p v-else-if="filing.status === 'SUBMITTING'" class="portal-info">正在通过正式公安 Provider 提交；重复投递使用同一业务事件号，页面不能修改快照。</p>
       <p v-else-if="filing.status === 'SUBMISSION_FAILED'" class="portal-error">公安提交重试已耗尽，备案仍未确认提交，请联系管理员核对失败原因并恢复处理。</p>

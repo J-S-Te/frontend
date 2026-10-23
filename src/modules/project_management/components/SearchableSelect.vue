@@ -22,7 +22,7 @@ const props = defineProps({
   disabled: { type: Boolean, default: false },
   required: { type: Boolean, default: false },
   ariaLabel: { type: String, default: '下拉选择' },
-  // Teleport 会脱离弹窗 stacking context；弹窗内选择器可显式提升菜单层级。
+  // Teleport 会脱离弹窗 层叠上下文；弹窗内选择器可显式提升菜单层级。
   menuZIndex: { type: [String, Number], default: '' },
 })
 const emit = defineEmits(['update:modelValue', 'change'])
@@ -196,7 +196,7 @@ onBeforeUnmount(() => {
       >
         <label class="pm-search-select-search">
           <span class="pm-search-select-search-icon" aria-hidden="true"></span>
-          <input ref="searchInput" v-model="keyword" type="search" :placeholder="searchPlaceholder" :aria-label="searchPlaceholder" />
+          <input ref="searchInput" v-model="keyword" type="search" :placeholder="searchPlaceholder" :aria-label="searchPlaceholder"  maxlength="100"/>
         </label>
         <div class="pm-search-select-options" role="listbox" :aria-label="ariaLabel" :aria-multiselectable="multiple">
           <button

@@ -1,4 +1,5 @@
 <script setup>
+import { formatCRMError } from '../api/errorMessages.js'
 import { onMounted, reactive, ref } from 'vue'
 import { getCustomerCreditRuleSettings, updateCustomerCreditRuleSettings } from '../api/credit.js'
 
@@ -14,7 +15,7 @@ async function load() {
     const value = await getCustomerCreditRuleSettings()
     Object.assign(form, value || {})
     loaded.value = true
-  } catch (error) { emit('error', error?.message || '信用规则暂时无法加载。') }
+  } catch (error) { emit('error', formatCRMError(error, { fallback: '信用规则暂时无法加载。' })) }
   finally { loading.value = false }
 }
 async function save() {
@@ -28,7 +29,7 @@ async function save() {
     })
     Object.assign(form, value || {})
     emit('notice', '信用规则已保存；仅影响后续回款事件，不会重算历史记录。')
-  } catch (error) { emit('error', error?.message || '信用规则保存失败。') }
+  } catch (error) { emit('error', formatCRMError(error, { fallback: '信用规则保存失败。' })) }
   finally { saving.value = false }
 }
 function formatUpdatedAt(value) {

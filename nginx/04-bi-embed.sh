@@ -1,6 +1,6 @@
 #!/bin/sh
 set -eu
-# Empty means disabled. This listener is never the normal business gateway.
+# 配置为空时禁用此监听器；它不作为普通业务网关使用。
 origin="${BI_EMBED_PUBLIC_ORIGIN:-}"
 printf '%s\n' "map \$request_uri \$bi_frame_sources { default \"'self'\"; }" > /etc/nginx/conf.d/00-bi-frame-policy.conf
 [ -n "$origin" ] || exit 0

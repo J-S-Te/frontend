@@ -23,8 +23,8 @@ test('router preserves server-side access failure categories instead of swallowi
   assert.match(router, /name: 'subsystem_access_error'/)
   assert.match(router, /buildSubsystemAccessErrorRoute/)
   assert.match(router, /subsystemAccessFailure\(error, to\)/)
-  assert.match(compatibility, /客户门户身份尚未预配/)
-  assert.match(errorView, /重新发起 Keycloak 登录/)
+  assert.match(compatibility, /账号与客户的关联/)
+  assert.match(errorView, /@click="relogin">重新登录/)
   assert.match(errorView, /request_id/)
 })
 

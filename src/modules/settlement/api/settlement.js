@@ -1,4 +1,6 @@
 import { attachStructuredContext } from "@/modules/platform/shared/api/requestContext.js";
+import { listQuery } from "./pagination.js";
+import { formatSettlementError } from "../utils/errors.js";
 import { getCurrentPrincipal } from "@/modules/platform/auth/api/auth";
 import {
   normalizeAuthorizationSession,
@@ -7,10 +9,10 @@ import {
 } from "@/modules/shared/authz/sessionCompatibility.js";
 
 const PUBLIC_PATH_PREFIX = (
-  import.meta.env.VITE_SETTLEMENT_PUBLIC_PATH_PREFIX || "/settlement"
+  import.meta.env?.VITE_SETTLEMENT_PUBLIC_PATH_PREFIX || "/settlement"
 ).replace(/\/$/, "");
 const API_BASE_URL = (
-  import.meta.env.VITE_SETTLEMENT_API_BASE_URL || `${PUBLIC_PATH_PREFIX}/api/v1`
+  import.meta.env?.VITE_SETTLEMENT_API_BASE_URL || `${PUBLIC_PATH_PREFIX}/api/v1`
 ).replace(/\/$/, "");
 let session = null;
 let sessionPromise = null;
@@ -34,6 +36,22 @@ function beginLogin({ force = false } = {}) {
 function idempotencyKey() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
   return `settlement-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function isRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function validDataEnvelope(body, path, method) {
+  // httpapi.write 始终返回 {data: ...}；不能把网关的空对象／裸数组当作成功。
+  if (!isRecord(body) || !Object.hasOwn(body, "data")) return false;
+  const data = body.data;
+  const route = path.split("?")[0];
+  if (route === "/auth/me") return isRecord(data) && !!data.tenant_id && !!(data.user_id || data.identity_id) && Array.isArray(data.permissions);
+  if (method === "GET" && route === "/dunning/recipients") return Array.isArray(data) || (isRecord(data) && (Array.isArray(data.items) || (data.items === null && data.total === 0)));
+  const listRoutes = ["/receivable-plans", "/receivables", "/invoice-eligible-receivables", "/receipts", "/receipt-allocations", "/invoice-requests", "/tax-invoices", "/dunning/policies", "/dunning/cases", "/dunning/actions"];
+  if (method === "GET" && (listRoutes.includes(route) || /^\/receipts\/[^/]+\/matches$/.test(route))) return Array.isArray(data);
+  return isRecord(data) && Object.keys(data).length > 0;
 }
 
 async function request(path, options = {}) {
@@ -65,7 +83,12 @@ async function request(path, options = {}) {
       },
     });
   } catch (cause) {
-    const error = new Error("无法连接结算服务，请稍后重试。");
+    const code = cause?.name === "AbortError" || cause?.name === "TimeoutError" ? "REQUEST_TIMEOUT" : "NETWORK_ERROR";
+    const error = new Error(method === "GET"
+      ? formatSettlementError(cause, { code, status: 0, method, fallback: "无法连接结算服务，请检查网络后重试。" })
+      : "连接中断，尚无法确认本次操作是否已生效。请先刷新列表核对结果，勿重复提交。");
+    error.status = 0;
+    error.code = code;
     attachStructuredContext(
       error,
       {
@@ -76,21 +99,28 @@ async function request(path, options = {}) {
         method,
         metadata: { network: true },
       },
-      { status: 0, code: "NETWORK_ERROR" },
+      { status: 0, code },
     );
     error.cause = cause;
     throw error;
   }
-  const body = (response.headers.get("content-type") || "").includes(
-    "application/json",
-  )
-    ? await response.json()
-    : {};
-  if (!response.ok) {
-    const error = new Error(body?.message || "结算服务暂时无法处理请求。");
+  const requestID = response.headers.get("x-request-id") || "";
+  const traceID = response.headers.get("x-trace-id") || "";
+  const contentType = response.headers.get("content-type") || "";
+  let body = {};
+  let parseCause = null;
+  if (/\bapplication\/(?:[\w.-]+\+)?json\b/i.test(contentType)) {
+    try { body = await response.json(); } catch (cause) { parseCause = cause; }
+  }
+  const businessError = isRecord(body) && Object.hasOwn(body, "code") && body.code !== "OK";
+  if (!response.ok || businessError) {
+    const error = new Error(formatSettlementError(body, { status: response.status, method, fallback: "结算服务暂时无法处理请求。" }));
     error.status = response.status;
     error.code = body?.code;
-    error.requestID = body?.request_id || "";
+    error.details = body?.details;
+    error.requestID = body?.request_id || requestID;
+    error.traceId = body?.trace_id || body?.traceId || traceID;
+    if (parseCause) error.cause = parseCause;
     attachStructuredContext(
       error,
       {
@@ -100,7 +130,7 @@ async function request(path, options = {}) {
         path,
         method,
       },
-      { status: response.status, code: error.code, requestId: error.requestID },
+      { status: response.status, code: error.code, requestId: error.requestID, traceId: error.traceId },
     );
     if (shouldStartSubsystemLogin(error)) beginLogin();
     if (
@@ -113,8 +143,26 @@ async function request(path, options = {}) {
       retryKeys.delete(retryFingerprint);
     throw error;
   }
-  if (retryFingerprint) retryKeys.delete(retryFingerprint);
-  return body?.data ?? body;
+  if (options.responseType === "blob" && /attachment/i.test(response.headers.get("content-disposition") || "") && !/json|html/i.test(contentType)) {
+    try {
+      const blob = await response.blob();
+      if (blob.size) return { blob, disposition: response.headers.get("content-disposition") };
+    } catch (cause) { parseCause = cause; }
+  } else if (!parseCause && /\bapplication\/(?:[\w.-]+\+)?json\b/i.test(contentType) && options.responseType !== "blob" && validDataEnvelope(body, path, method)) {
+    if (retryFingerprint) retryKeys.delete(retryFingerprint);
+    return body.data;
+  }
+  // 2xx 后的损坏响应不能当成失败后重新执行，尤其是开票、回款等写入。
+  const invalid = new Error(method === "GET"
+    ? "服务返回的数据格式异常，请刷新页面后重试；仍失败时请联系管理员。"
+    : "服务器已接受操作，但返回结果异常。请先刷新列表核对结果，勿重复提交。");
+  invalid.status = response.status;
+  invalid.code = "INVALID_RESPONSE";
+  invalid.requestID = requestID;
+  invalid.traceId = traceID;
+  if (parseCause) invalid.cause = parseCause;
+  attachStructuredContext(invalid, { subsystem: "settlement", feature: "api", operation: method, path, method }, { status: response.status, code: invalid.code, requestId: requestID, traceId: traceID });
+  throw invalid;
 }
 
 export function clearSettlementSessionCache() {
@@ -200,23 +248,34 @@ export const createAgingReceivablesExport = () =>
   });
 export const getReportExport = (id) =>
   request(`/reports/exports/${encodeURIComponent(id)}`);
-export function downloadReportExport(id) {
-  window.location.assign(
-    `${API_BASE_URL}/reports/exports/${encodeURIComponent(id)}/download`,
-  );
+export const downloadReportExport = (id) => downloadFile(`/reports/exports/${encodeURIComponent(id)}/download`, "结算报表.csv");
+
+async function downloadFile(path, fallbackName) {
+  const { blob, disposition } = await request(path, { responseType: "blob" });
+  let fileName = fallbackName;
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(disposition || "");
+  const plain = /filename="([^\"]+)"|filename=([^;]+)/i.exec(disposition || "");
+  try { fileName = encoded ? decodeURIComponent(encoded[1]) : plain ? (plain[1] || plain[2]).trim() : fallbackName; } catch { fileName = fallbackName; }
+  fileName = fileName.replace(/[\\/\x00-\x1f\x7f]/g, "_").slice(0, 200) || fallbackName;
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  try { document.body.appendChild(anchor); anchor.click(); }
+  finally { anchor.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 60000); }
 }
-export const listReceivablePlans = () => request("/receivable-plans");
+export const listReceivablePlans = (page) => request(`/receivable-plans${listQuery(page)}`);
 export const confirmReceivablePlan = (id, payload) =>
   request(`/receivable-plans/${encodeURIComponent(id)}/confirm`, {
     method: "POST",
     body: JSON.stringify(payload),
     idempotent: true,
   });
-export const listReceivables = () => request("/receivables");
+export const listReceivables = (page) => request(`/receivables${listQuery(page)}`);
 // 仅返回服务端确认可用于开票的应收，避免前端自行判断合同和余额状态。
-export const listInvoiceEligibleReceivables = () =>
-  request("/invoice-eligible-receivables");
-export const listReceipts = () => request("/receipts");
+export const listInvoiceEligibleReceivables = (page) =>
+  request(`/invoice-eligible-receivables${listQuery(page)}`);
+export const listReceipts = (page) => request(`/receipts${listQuery(page)}`);
 export const listReceiptMatches = (id) =>
   request(`/receipts/${encodeURIComponent(id)}/matches`);
 export const createReceipt = (payload) =>
@@ -231,15 +290,19 @@ export const createReceiptAllocation = (payload) =>
     body: JSON.stringify(payload),
     idempotent: true,
   });
-export const listReceiptAllocations = () => request("/receipt-allocations");
+export const listReceiptAllocations = (page) => request(`/receipt-allocations${listQuery(page)}`);
 export const reverseReceiptAllocation = (id, payload) =>
   request(`/receipt-allocations/${encodeURIComponent(id)}/reverse`, {
     method: "POST",
     body: JSON.stringify(payload),
     idempotent: true,
   });
-export const listInvoiceRequests = () => request("/invoice-requests");
-export const listTaxInvoices = () => request("/tax-invoices");
+export const listInvoiceRequests = (page) => request(`/invoice-requests${listQuery(page)}`);
+export const listTaxInvoices = (page) => request(`/tax-invoices${listQuery(page)}`);
+export const recoverInvoiceFailure = (id, payload) =>
+  request(`/invoice-requests/${encodeURIComponent(id)}/recover-failure`, {
+    method: "POST", body: JSON.stringify(payload), idempotent: true,
+  });
 export const getTaxInvoice = (id) =>
   request(`/tax-invoices/${encodeURIComponent(id)}`);
 export const uploadTaxInvoiceDocument = (id, file) => {
@@ -253,11 +316,7 @@ export const uploadTaxInvoiceDocument = (id, file) => {
     idempotencyFingerprint: `${file.name}:${file.size}:${file.lastModified}`,
   });
 };
-export function downloadTaxInvoiceDocument(invoiceID, documentID) {
-  window.location.assign(
-    `${API_BASE_URL}/tax-invoices/${encodeURIComponent(invoiceID)}/documents/${encodeURIComponent(documentID)}/download`,
-  );
-}
+export const downloadTaxInvoiceDocument = (invoiceID, documentID) => downloadFile(`/tax-invoices/${encodeURIComponent(invoiceID)}/documents/${encodeURIComponent(documentID)}/download`, "电子发票");
 export const requestTaxInvoiceRedFlush = (id, payload) =>
   request(`/tax-invoices/${encodeURIComponent(id)}/red-flush`, {
     method: "POST",
@@ -300,19 +359,32 @@ export const registerManualInvoice = (id, payload) =>
     body: JSON.stringify(payload),
     idempotent: true,
   });
-export const listDunningPolicies = () => request("/dunning/policies");
+export const listDunningPolicies = (page) => request(`/dunning/policies${listQuery(page)}`);
 /**
  * listDunningRecipients 查询当前租户内同时具备结算系统权限和催收角色的有效人员。
  *
  * 人员筛选由结算服务端完成，前端只负责展示服务端返回的候选项，避免把无权限
  * 用户或其他租户的人员暴露到催收策略表单中。
  */
-export const listDunningRecipients = () => request("/dunning/recipients");
+export const listDunningRecipients = async () => {
+  const page = await request("/dunning/recipients");
+  // 人员接口返回分页对象，选择器消费人员数组；兼容旧版数组响应。
+  return Array.isArray(page) ? page : page.items || [];
+};
 export const createDunningPolicy = (payload) =>
   request("/dunning/policies", {
     method: "POST",
     body: JSON.stringify(payload),
     idempotent: true,
   });
-export const listDunningCases = () => request("/dunning/cases");
-export const listDunningActions = () => request("/dunning/actions");
+export const getDunningOverview = () => request("/dunning/overview");
+export const getAgingSummary = () => request("/reports/aging");
+export const getDunningCoverage = () => request("/dunning/coverage");
+export const listDunningCases = (page) => request(`/dunning/cases${listQuery(page)}`);
+export const listDunningActions = (page) => request(`/dunning/actions${listQuery(page)}`);
+export const completeDunningAction = (id, payload) =>
+  request(`/dunning/actions/${encodeURIComponent(id)}/complete`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+    idempotent: true,
+  });

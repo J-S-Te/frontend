@@ -1,4 +1,5 @@
 <script setup>
+import { formatCRMError } from '../api/errorMessages.js'
 import { onMounted, ref } from 'vue'
 import { approveCustomerCreditApplication, listPendingCustomerCreditApplications, rejectCustomerCreditApplication } from '../api/credit.js'
 import { createIdempotencyKey } from '../api/client.js'
@@ -10,13 +11,13 @@ const props = defineProps({
 })
 const items = ref([]); const loading = ref(false); const error = ref(''); const actionID = ref(''); const applicantNames = ref({})
 const CREDIT_APPROVAL_ROLES = new Set(['sales_director', 'crm_super_admin'])
-// Existing sessions can carry a signed approval role but miss the permission
-// added by a later catalog publication. Keep this allow-list explicit; do not
-// infer arbitrary permissions from arbitrary roles in the browser.
+// 现有会话可能携带已签名的审批角色，却缺少后续权限目录发布时
+// 新增的权限。保持允许列表显式声明；不要在浏览器中
+// 根据任意角色推导任意权限。
 const canApprove = () => props.permissions.includes('customer.credit.approve') || props.roles.some((role) => CREDIT_APPROVAL_ROLES.has(role))
 const applicationID = (item) => String(item?.id || item?.application_id || '').trim()
-// Use an explicit boolean instead of binding the ref object itself to the
-// native disabled attribute. All rows remain locked during one mutation.
+// 使用显式布尔值，避免将 ref 对象本身绑定到
+// 原生 disabled 属性。执行一次写操作期间锁定所有行。
 const actionInProgress = () => actionID.value !== ''
 function dateLabel(value) { return value ? new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : '—' }
 function rememberApplicantNames(users) { for (const user of users || []) { if (user?.user_id) applicantNames.value[user.user_id] = String(user.username || user.account_name || user.display_name || '').trim() || '未命名用户' } }
@@ -25,7 +26,7 @@ async function resolveApplicantNames(applicationItems) {
   const IDs = [...new Set(applicationItems.map((item) => item?.applicant_id).filter((id) => id && !applicantNames.value[id]))]
   await Promise.all(IDs.map(async (id) => { try { const result = await listOwnerDirectory({ user_id: id, page: 1, page_size: 1 }); rememberApplicantNames(result?.items || []) } catch { /* 目录不可用时显示通用名称，不向业务用户暴露内部 ID。 */ } }))
 }
-async function load() { loading.value = true; error.value = ''; try { const result = await listPendingCustomerCreditApplications({ page: 1, page_size: 50 }); items.value = Array.isArray(result?.items) ? result.items : Array.isArray(result) ? result : []; await resolveApplicantNames(items.value) } catch (value) { error.value = value?.status === 403 ? '当前账号无审批权限。' : value?.message || '待审批列表加载失败。' } finally { loading.value = false } }
+async function load() { loading.value = true; error.value = ''; try { const result = await listPendingCustomerCreditApplications({ page: 1, page_size: 50 }); items.value = Array.isArray(result?.items) ? result.items : Array.isArray(result) ? result : []; await resolveApplicantNames(items.value) } catch (value) { error.value = value?.status === 403 ? '当前账号无审批权限。' : formatCRMError(value, { fallback: '待审批列表加载失败。' }) } finally { loading.value = false } }
 async function decide(item, action) {
   if (!canApprove() || actionID.value) return
   const opinion = window.prompt(action === 'approve' ? '审批意见（可选）' : '驳回意见（必填）', '')
@@ -33,7 +34,7 @@ async function decide(item, action) {
   actionID.value = applicationID(item)
   if (!actionID.value) { error.value = '待办编号缺失，请刷新后重试。'; actionID.value = ''; return }
   if (!Number(item.version)) { error.value = '待办版本缺失，请刷新后重试。'; actionID.value = ''; return }
-  try { await (action === 'approve' ? approveCustomerCreditApplication(item.id || item.application_id, { opinion: opinion.trim(), version: item.version }, createIdempotencyKey()) : rejectCustomerCreditApplication(item.id || item.application_id, { opinion: opinion.trim(), version: item.version }, createIdempotencyKey())); await load() } catch (value) { error.value = value?.message || '审批操作失败，请刷新后重试。' } finally { actionID.value = '' }
+  try { await (action === 'approve' ? approveCustomerCreditApplication(item.id || item.application_id, { opinion: opinion.trim(), version: item.version }, createIdempotencyKey()) : rejectCustomerCreditApplication(item.id || item.application_id, { opinion: opinion.trim(), version: item.version }, createIdempotencyKey())); await load() } catch (value) { error.value = formatCRMError(value, { fallback: '审批操作失败，请刷新后重试。' }) } finally { actionID.value = '' }
 }
 onMounted(load)
 </script>

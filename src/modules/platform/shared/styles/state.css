@@ -54,6 +54,21 @@
   max-width: 480px;
 }
 
+.ui-state__diagnostics {
+  max-width: min(100%, 480px);
+  margin-top: 8px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.ui-state__diagnostics summary {
+  cursor: pointer;
+}
+
+.ui-state__diagnostics p {
+  margin: 6px 0;
+}
+
 .ui-state__retry {
   margin-top: 8px;
   min-height: 32px;

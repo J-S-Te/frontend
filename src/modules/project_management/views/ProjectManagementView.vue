@@ -1,5 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { formatUserError } from '../../shared/utils/userError.js'
+import { assignServiceItemTeams } from '../assignment.js'
 import { useRoute, useRouter } from 'vue-router'
 import { AuthError, logoutCurrentSession } from '@/modules/platform/auth/api/auth'
 import { getUnreadCount, listInbox as listNotificationInbox, markNotificationRead } from '@/modules/platform/notifications/api/notifications'
@@ -19,7 +21,7 @@ import SearchableSelect from '@/modules/project_management/components/Searchable
 import ServiceItemPicker from '@/modules/project_management/components/ServiceItemPicker.vue'
 import SignaturePad from '@/modules/project_management/components/SignaturePad.vue'
 import { implementationPlanReady, projectAllowsWorkflowNode } from '@/modules/project_management/workflowNode'
-import { countFieldOperations, listFieldOperations, removeFieldOperation, saveFieldOperation } from '@/modules/project_management/offlineFieldQueue'
+import { countFieldOperations, listFieldOperations, processFieldQueue, removeFieldOperation, saveFieldOperation } from '@/modules/project_management/offlineFieldQueue'
 import { subsystemAccessMessage } from '@/modules/shared/authz/sessionCompatibility'
 import { closeSubsystemTabOrFallback } from '@/modules/shared/utils/returnToPortal'
 import {
@@ -87,6 +89,7 @@ import {
   reviewSpecialMethod,
   updateReportStatus,
   listApprovedContracts,
+  listSupplementContracts,
   getApprovedContractServiceItems,
 } from '@/modules/project_management/api/projectManagement'
 import '@/modules/project_management/styles/project-management.css'
@@ -236,6 +239,7 @@ const saving = ref(false)
 const emptyCreateForm = () => ({ name: '', customer: '', contract: '', contractID: '', contractVersion: '', site: '' })
 const createForm = ref(emptyCreateForm())
 const approvedContracts = ref([])
+const approvedContractsError = ref('')
 const approvedContractServiceItems = ref([])
 const selectedContractServiceIDs = ref([])
 const contractServicesLoading = ref(false)
@@ -471,7 +475,9 @@ const canManageResource = computed(() => Array.isArray(session.value?.permission
 // 权限码门控入口，设备此前没有门控，一旦设备模块对更多角色可见就会变成「能点必 403」。
 const canManageDevice = computed(() => Array.isArray(session.value?.permissions) && session.value.permissions.includes('project.device.manage'))
 const selectedServiceItemIDs = ref([])
-const operationForm = ref({ teamLeadID: '', projectManagerID: '', engineerIDs: '', plannedStart: '', plannedEnd: '', penetrationTestPlan: '', authDocNo: '', authStart: '', authEnd: '', authScope: '', testScope: '', testWindow: '', emergencyContact: '', rollbackPlan: '', reviewComment: '', personnel: [], equipment: [], travelMode: '', travelReferenceEventID: '', noTravelReason: '', travelOrigin: '', travelDestination: '', travelDepartureDate: '', travelReturnDate: '', travelTransport: '', travelAccommodationNeed: '', travelTravelerIDs: [], rawData: '', environment: '', fieldEvidenceFile: null, fieldSignatureFile: null, checkInDeviationReason: '', fieldIncompleteReason: '', reportFile: null, reportCorrectionReason: '', reportCorrectionComment: '', deviationDescription: '', deviationEvidenceFile: null, severity: 'MEDIUM', decision: 'RELEASE', comment: '' })
+// 切换服务项时递增，用于强制重建签名画布（避免沿用上一项的签名图像）。
+const signaturePadKey = ref(0)
+const operationForm = ref({ teamLeadID: '', projectManagerID: '', engineerIDs: '', plannedStart: '', plannedEnd: '', sitePlan: '', penetrationTestPlan: '', authDocNo: '', authStart: '', authEnd: '', authScope: '', testScope: '', testWindow: '', emergencyContact: '', rollbackPlan: '', reviewComment: '', personnel: [], equipment: [], travelMode: '', travelReferenceEventID: '', noTravelReason: '', travelOrigin: '', travelDestination: '', travelDepartureDate: '', travelReturnDate: '', travelTransport: '', travelAccommodationNeed: '', travelTravelerIDs: [], rawData: '', environment: '', fieldEvidenceFile: null, fieldSignatureFile: null, checkInDeviationReason: '', fieldIncompleteReason: '', reportFile: null, reportCorrectionReason: '', reportCorrectionComment: '', deviationDescription: '', deviationEvidenceFile: null, severity: 'MEDIUM', decision: 'RELEASE', comment: '' })
 const pendingFieldSyncCount = ref(0)
 const fieldSyncing = ref(false)
 const deviationSeverityOptions = Object.freeze([
@@ -561,7 +567,7 @@ function loadApplicationRoles() {
   if (applicationRolesRequest) return applicationRolesRequest
   applicationRolesRequest = listApplicationRoles()
     .then((roles) => { applicationRoles.value = roles; applicationRolesError.value = ''; rules.value = rules.value.map(decorateRule) })
-    .catch((error) => { applicationRolesError.value = error?.message || '角色目录加载失败' })
+    .catch((error) => { applicationRolesError.value = formatUserError(error, { fallback: '角色目录加载失败' }) })
     .finally(() => { applicationRolesRequest = null })
   return applicationRolesRequest
 }
@@ -711,7 +717,7 @@ async function saveConfigRule() {
     applySavedRule(saved)
     configEditorOpen.value = false
     showToast(payload.kind === 'standards' ? (configForm.value.id ? '标准变更记录已保存' : '标准变更已登记，进入影响评估') : (configForm.value.id ? '配置已保存' : '配置已创建'))
-  } catch (error) { showToast(error?.message || '配置保存失败', 'error') }
+  } catch (error) { showToast(formatUserError(error, { fallback: '配置保存失败' }), 'error') }
   finally { saving.value = false }
 }
 
@@ -833,7 +839,7 @@ async function loadSplitConfig() {
     detectionCategories.value = categories
     splitOverrides.value = overrides
   } catch (error) {
-    splitConfigError.value = error?.message || '拆解规则配置加载失败'
+    splitConfigError.value = formatUserError(error, { fallback: '拆解规则配置加载失败' })
   } finally {
     splitConfigLoading.value = false
   }
@@ -848,7 +854,7 @@ async function submitSplitPolicy() {
     splitPolicy.value = await saveSplitPolicy(splitPolicy.value)
     splitPolicyBaseline.value = JSON.stringify(splitPolicy.value)
     showToast('默认分组规则已保存，对新合同的拆解生效')
-  } catch (error) { showToast(error?.message || '默认分组规则保存失败', 'error') }
+  } catch (error) { showToast(formatUserError(error, { fallback: '默认分组规则保存失败' }), 'error') }
   finally { splitPolicySaving.value = false }
 }
 
@@ -884,7 +890,7 @@ async function importDetectionCategoryFile(result) {
   try {
     detectionCategories.value = await listDetectionCategories()
     showToast(`导入结果：成功 ${result.imported} 条，失败 ${result.skipped} 条`)
-  } catch (error) { showToast(`导入已完成，但类别目录刷新失败：${error?.message || '请手动刷新'}`, 'warning') }
+  } catch (error) { showToast(`导入已完成，但类别目录刷新失败：${formatUserError(error, { fallback: '请手动刷新' })}`, 'warning') }
 }
 
 function openCategoryDialog(item = null) {
@@ -902,7 +908,7 @@ async function submitDetectionCategory() {
     categoryDialog.value = null
     detectionCategories.value = await listDetectionCategories()
     showToast('检测类别已保存')
-  } catch (error) { showToast(error?.message || '检测类别保存失败', 'error') }
+  } catch (error) { showToast(formatUserError(error, { fallback: '检测类别保存失败' }), 'error') }
   finally { saving.value = false }
 }
 
@@ -914,7 +920,7 @@ async function removeDetectionCategory(item) {
     await deleteDetectionCategory(item.category)
     detectionCategories.value = await listDetectionCategories()
     showToast(`检测类别「${item.category}」已删除`)
-  } catch (error) { showToast(error?.message || '检测类别删除失败', 'error') }
+  } catch (error) { showToast(formatUserError(error, { fallback: '检测类别删除失败' }), 'error') }
   finally { saving.value = false }
 }
 
@@ -980,7 +986,7 @@ async function submitSplitOverride() {
     overrideDialog.value = null
     splitOverrides.value = await listSplitOverrides()
     showToast('覆盖规则已保存')
-  } catch (error) { showToast(error?.message || '覆盖规则保存失败', 'error') }
+  } catch (error) { showToast(formatUserError(error, { fallback: '覆盖规则保存失败' }), 'error') }
   finally { saving.value = false }
 }
 
@@ -992,7 +998,7 @@ async function removeSplitOverride(item) {
     await deleteSplitOverride(item.id)
     splitOverrides.value = await listSplitOverrides()
     showToast(`覆盖规则「${item.name}」已删除`)
-  } catch (error) { showToast(error?.message || '覆盖规则删除失败', 'error') }
+  } catch (error) { showToast(formatUserError(error, { fallback: '覆盖规则删除失败' }), 'error') }
   finally { saving.value = false }
 }
 
@@ -1072,7 +1078,7 @@ async function loadPersonnel() {
   } catch (error) {
     if (sequence !== personnelRequestSequence.value) return
     personnelByRole.value = emptyPersonnelByRole()
-    personnelError.value = error?.message || '人员资质库加载失败'
+    personnelError.value = formatUserError(error, { fallback: '人员资质库加载失败' })
   } finally {
     if (sequence === personnelRequestSequence.value) personnelLoading.value = false
   }
@@ -1089,7 +1095,7 @@ async function loadCapabilityPersonnel() {
     rememberPersonnelNames(Object.fromEntries(capabilityPersonnel.value.map((person) => [person.id, person.name])))
   } catch (error) {
     capabilityPersonnel.value = []
-    capabilityPersonnelError.value = error?.message || '基础平台人员目录加载失败'
+    capabilityPersonnelError.value = formatUserError(error, { fallback: '基础平台人员目录加载失败' })
   } finally {
     capabilityPersonnelLoading.value = false
   }
@@ -1474,9 +1480,11 @@ const currentDecompositionItems = computed(() => decompositionItems.value.filter
 const decompositionProject = computed(() => projectByID.value.get(selectedDecompositionProjectID.value) || null)
 const supplementContractOptions = computed(() => {
   const project = decompositionProject.value
-  if (!project) return []
-  return approvedContracts.value.filter((contract) => {
-    if (!contract?.id || contract.id === project.contract_id) return false
+  if (!project || project.id !== adjustProjectID.value) return []
+  return supplementContracts.value.filter((contract) => {
+    if (!contract?.id || !contract.approval_passed || !['approved', 'active'].includes(String(contract.status).trim().toLowerCase())) return false
+    const originals = [project.contract_id, project.contract].map((value) => String(value || '').trim()).filter(Boolean)
+    if (originals.includes(contract.id) || originals.includes(contract.contract_number)) return false
     if (project.customer_id) return contract.customer_id === project.customer_id
     return Boolean(project.customer && contract.customer_name && project.customer.trim().toLocaleLowerCase() === contract.customer_name.trim().toLocaleLowerCase())
   })
@@ -1701,7 +1709,7 @@ async function loadMonitoring({ quiet = false } = {}) {
     if (monitorPage.value > monitoringTotalPages.value) { monitorPage.value = monitoringTotalPages.value; return loadMonitoring({ quiet }) }
     loadPersonnelNames()
   } catch (error) {
-    monitoringError.value = error?.message || '监控数据刷新失败'
+    monitoringError.value = formatUserError(error, { fallback: '监控数据刷新失败' })
   } finally {
     monitoringLoading.value = false
   }
@@ -1920,6 +1928,7 @@ const operationDetailFields = computed(() => {
 })
 
 async function loadWorkspace() {
+  const requestVersion = ++workspaceRequestVersion
   loading.value = true
   loadError.value = ''
   ruleConfigurationCatalogError.value = ''
@@ -1928,9 +1937,10 @@ async function loadWorkspace() {
     // 项目、服务项和规则共同构成当前工作区快照；三者全部成功后才一次性替换页面状态，
     // 防止新旧数据混用。接口层仍分别执行会话与资源权限校验。
     const [projectRows, itemRows, ruleRows, eventRows, capabilityRows, dashboardData, sessionData, navigationData, categoryRows, ruleCatalog] = await Promise.all([listProjects(), listServiceItems(), listRules(), listDeliveryEvents(), listCapabilities(), getDashboard(), getProjectSession(), getProjectNavigation(), listDetectionCategories(), listRuleConfigurationCatalog().catch((error) => {
-      ruleConfigurationCatalogError.value = error?.message || '规则目录加载失败'
+      ruleConfigurationCatalogError.value = formatUserError(error, { fallback: '规则目录加载失败' })
       return { automation_triggers: [], sla_statuses: [] }
     })])
+    if (requestVersion !== workspaceRequestVersion) return
     projects.value = projectRows
     serviceItems.value = itemRows.map((item) => ({ ...item, selected: ['待确认', '待复核'].includes(item.status) }))
     rules.value = ruleRows.map(decorateRule)
@@ -2013,28 +2023,33 @@ async function openCreateProject() {
     // 浏览器只调用项目后端；项目后端通过机器身份读取合同审批结果，避免要求业务管理员
     // 额外建立合同系统浏览器会话或持有合同读取权限。
     approvedContracts.value = await listApprovedContracts({ limit: 200 })
-    if (!approvedContracts.value.length) { showToast('当前没有尚未建立项目的已审批合同', 'warning'); return }
+    approvedContractsError.value = availableApprovedContracts.value.length ? '' : '当前没有尚未建立项目的已审批合同。每个合同只能建立一个项目（按合同身份判定，状态/版本变化不会释放重复建项）；如需新增范围请在「服务项拆解确认」中走补充协议调整。'
     createForm.value = emptyCreateForm()
     approvedContractServiceItems.value = []
     selectedContractServiceIDs.value = []
     contractServicesError.value = ''
+    // 没有可用合同时仍打开弹窗并说明原因，避免点击后只有短暂提示、看起来像“按钮不可用”。
     createOpen.value = true
   } catch (error) {
-    showToast(error?.message || '读取已审批合同失败，请稍后重试', error?.status === 503 ? 'warning' : 'error')
+    showToast(formatUserError(error, { fallback: '读取已审批合同失败，请稍后重试' }), error?.status === 503 ? 'warning' : 'error')
   }
 }
-// 后端会按租户全量项目过滤已使用合同；这里再基于当前列表做一层展示防护，避免刷新期间
-// 已出现于本页的合同短暂进入选择器。后端唯一约束和创建时 409 继续处理并发创建。
+// 后端按「租户 + 合同身份（合同 ID；历史空 ID 回退合同号）」过滤已建项合同；
+// 这里基于当前列表再做一层展示防护，避免刷新期间已出现于本页的合同短暂进入选择器。
+// 普通合同版本只用于展示/审计，不作为建项身份，状态变化不会释放重复建项。
 const builtContractKeys = computed(() => {
   const keys = new Set()
   for (const project of projects.value) {
-    if (project.contract) keys.add(`${project.contract}\u0000${project.contract_version || ''}`)
+    for (const value of [project.contract_id, project.contract]) {
+      const identity = String(value || '').trim()
+      if (identity) keys.add(identity)
+    }
   }
   return keys
 })
 
 const availableApprovedContracts = computed(() => approvedContracts.value.filter((contract) =>
-  !builtContractKeys.value.has(`${contract.contract_number || ''}\u0000${String(contract.version || '')}`)))
+  ![contract.id, contract.contract_number].some((value) => builtContractKeys.value.has(String(value || '').trim()))))
 
 function contractOptionLabel(contract) {
   return `${contract.contract_number} · ${contract.title} · ${contract.customer_name || '未填写客户'}`
@@ -2068,7 +2083,7 @@ async function selectApprovedContract(contract) {
     if (!catalog.service_items.length) contractServicesError.value = '该合同没有可关联的服务项，请先在合同管理系统中补全服务范围'
   } catch (error) {
     if (requestID !== contractServiceRequest) return
-    contractServicesError.value = error?.message || '读取合同服务范围失败，请稍后重试'
+    contractServicesError.value = formatUserError(error, { fallback: '读取合同服务范围失败，请稍后重试' })
     showToast(contractServicesError.value, 'error')
   } finally {
     if (requestID === contractServiceRequest) contractServicesLoading.value = false
@@ -2096,7 +2111,7 @@ async function returnEquipment(item) {
     await returnServiceItemEquipment(serviceItemID, item.resource_id)
     showToast(`设备 ${item.resource_name} 已归还`)
     await Promise.all([loadEquipment(), loadEquipmentReservations(selectedServiceItem.value)])
-  } catch (error) { showToast(error?.message || '归还失败，请稍后重试', 'error') }
+  } catch (error) { showToast(formatUserError(error, { fallback: '归还失败，请稍后重试' }), 'error') }
   finally { saving.value = false }
 }
 async function saveEquipment() {
@@ -2106,7 +2121,7 @@ async function saveEquipment() {
     const item = await upsertEquipment({ resource_id: equipmentForm.value.resourceID, resource_name: equipmentForm.value.resourceName, codes: [...equipmentCodeSelection.value], valid_from: equipmentForm.value.validFrom ? new Date(equipmentForm.value.validFrom).toISOString() : '', valid_until: equipmentForm.value.validUntil ? new Date(equipmentForm.value.validUntil).toISOString() : '', status: equipmentForm.value.status, usage_scope: equipmentForm.value.usageScope })
     equipment.value = [item, ...equipment.value.filter((row) => row.resource_id !== item.resource_id)]
     showToast('设备信息已保存')
-  } catch (error) { showToast(error?.message || '设备信息保存失败', 'error') }
+  } catch (error) { showToast(formatUserError(error, { fallback: '设备信息保存失败' }), 'error') }
   finally { saving.value = false }
 }
 async function removeEquipment(item) {
@@ -2116,7 +2131,7 @@ async function removeEquipment(item) {
     await deleteEquipment(item.resource_id)
     equipment.value = equipment.value.filter((row) => row.resource_id !== item.resource_id)
     showToast(`设备 ${item.resource_name || item.resource_id} 已删除`)
-  } catch (error) { showToast(error?.message || '设备删除失败，请先确认设备未被实施计划占用', 'error') }
+  } catch (error) { showToast(formatUserError(error, { fallback: '设备删除失败，请先确认设备未被实施计划占用' }), 'error') }
   finally { saving.value = false }
 }
 async function importEquipmentFile(result) {
@@ -2124,7 +2139,7 @@ async function importEquipmentFile(result) {
   showToast(`设备导入完成：成功 ${result.imported} 条${result.skipped ? `，失败 ${result.skipped} 条，请查看逐行结果` : ''}`, result.skipped ? 'warning' : 'success')
   try {
     await loadEquipment()
-  } catch (error) { showToast(`导入结果已保存，但台账刷新失败：${error?.message || '请刷新设备能力页面核对结果'}`, 'warning') }
+  } catch (error) { showToast(`导入结果已保存，但台账刷新失败：${formatUserError(error, { fallback: '请刷新设备能力页面核对结果' })}`, 'warning') }
   finally { saving.value = false }
 }
 
@@ -2183,16 +2198,16 @@ async function saveCapability() {
     capabilities.value = [saved, ...capabilities.value.filter((row) => !(row.resource_type === saved.resource_type && row.resource_id === saved.resource_id))]
     capabilityDialog.value = null
     showToast('人员资质已保存')
-  } catch (error) { showToast(error?.message || '资质保存失败', 'error') }
+  } catch (error) { showToast(formatUserError(error, { fallback: '资质保存失败' }), 'error') }
   finally { saving.value = false }
 }
 
 async function importQualificationFile(result) {
   importResult.value = result
+  showToast(`导入完成：成功 ${result.imported} 条，跳过 ${result.skipped} 条`)
   try {
     capabilities.value = await listCapabilities()
-    showToast(`导入完成：成功 ${result.imported} 条，跳过 ${result.skipped} 条`)
-  } catch (error) { showToast(error?.message || '导入已完成，但台账刷新失败，请手动刷新', 'error') }
+  } catch (error) { showToast(`导入已完成，但台账刷新失败。${formatUserError(error, { fallback: '请手动刷新核对结果，勿重复导入。' })}`, 'warning') }
 }
 
 // 人员资质档案的身份必须回基础平台复核：本系统只知道"谁有资质"，
@@ -2204,7 +2219,7 @@ async function syncIdentities() {
     await loadWorkspace()
     showToast(`人员状态已复核：在职 ${result.active} · 已离职/查无此人 ${result.missing} · 未关联 ${result.unlinked}${result.unverified ? ` · 目录未响应 ${result.unverified}` : ''}`)
   } catch (error) {
-    showToast(error?.message || '人员状态复核失败', 'error')
+    showToast(formatUserError(error, { fallback: '人员状态复核失败' }), 'error')
   } finally {
     saving.value = false
   }
@@ -2222,7 +2237,7 @@ async function downloadCapabilities() {
     link.remove()
     URL.revokeObjectURL(url)
     showToast('已开始导出 CSV')
-  } catch (error) { showToast(error?.message || 'CSV 导出失败', 'error') }
+  } catch (error) { showToast(formatUserError(error, { fallback: 'CSV 导出失败' }), 'error') }
 }
 
 function navigate(section) {
@@ -2319,7 +2334,7 @@ async function loadUnreadNotifications() {
     notificationCount.value = Number(unread?.unread_count || notificationItems.value.length)
   } catch (error) {
     notificationItems.value = []
-    notificationError.value = error?.message || '未读通知加载失败'
+    notificationError.value = formatUserError(error, { fallback: '未读通知加载失败' })
   } finally {
     notificationLoading.value = false
   }
@@ -2345,7 +2360,7 @@ async function openNotification(item) {
     closeNotifications()
     if (section) navigate(section)
   } catch (error) {
-    showToast(error?.message || '通知已读状态保存失败，请重试', 'error')
+    showToast(formatUserError(error, { fallback: '通知已读状态保存失败，请重试' }), 'error')
   } finally {
     notificationActionID.value = ''
   }
@@ -2372,7 +2387,7 @@ async function logoutSystem() {
       await router.replace({ name: 'login', query: { reason: 'session-ended' } })
       return
     }
-    showToast(error?.message || '退出系统失败，请稍后重试。', 'error')
+    showToast(formatUserError(error, { fallback: '退出系统失败，请稍后重试。' }), 'error')
   } finally {
     isLoggingOut.value = false
   }
@@ -2380,7 +2395,7 @@ async function logoutSystem() {
 
 // toast 带语义类型：success/error/warning/info，图标底色随类型切换（§18.11）。
 function showToast(message, type = 'success') {
-  toastMessage.value = message
+  toastMessage.value = formatUserError(message, { fallback: '操作未完成，请核对页面信息；仍失败时请联系管理员。' })
   toastType.value = type
   window.clearTimeout(toastTimer)
   toastTimer = window.setTimeout(() => { toastMessage.value = '' }, 2600)
@@ -2416,8 +2431,11 @@ async function confirmDecomposition() {
     const changed = await confirmServiceItemsRequest(ids)
     const byID = new Map(changed.map((item) => [item.id, item]))
     serviceItems.value = serviceItems.value.map((item) => byID.has(item.id) ? { ...byID.get(item.id), selected: false } : item)
+    // 确认拆解会推进**项目派生状态**（待拆解确认 → 待分配）。只更新服务项列表会让项目快照停在
+    // 旧节点，页面按项目节点过滤时下一步（分配）不可见，必须重新拉取工作区。
+    await loadWorkspace()
     showToast(`已确认 ${ids.length} 个服务项，任务已进入分配队列`)
-  } catch (error) { showToast(error?.message || '确认失败', 'error') }
+  } catch (error) { showToast(formatUserError(error, { fallback: '确认失败' }), 'error') }
   finally { saving.value = false }
 }
 
@@ -2425,6 +2443,9 @@ async function confirmDecomposition() {
 // 因此入口只在拆解阶段可用，成功后项目进入「补充协议处理中」。
 const adjustOpen = ref(false)
 const adjustForm = ref(emptyAdjustForm())
+const supplementContracts = ref([])
+const adjustProjectID = ref('')
+let adjustLoadVersion = 0
 function emptyAdjustItem() {
   return { sourceID: '', batch: '', site: '', category: '', system: '', systemLevel: '', requirement: '', testMode: 'STANDARD' }
 }
@@ -2433,15 +2454,23 @@ function emptyAdjustForm() {
 }
 async function openDecompositionAdjust() {
   if (!decompositionProject.value) { showToast('请先选择要调整拆解的项目', 'warning'); return }
+  const projectID = decompositionProject.value.id
+  const loadVersion = ++adjustLoadVersion
+  adjustOpen.value = false
+  supplementContracts.value = []
+  adjustProjectID.value = ''
   try {
     const [categories, contracts] = await Promise.all([
       listDetectionCategories(),
-      listApprovedContracts({ limit: 200 }),
+      listSupplementContracts(projectID, { limit: 200 }),
     ])
+    if (loadVersion !== adjustLoadVersion || decompositionProject.value?.id !== projectID) return
     detectionCategories.value = categories
-    approvedContracts.value = contracts
+    supplementContracts.value = contracts
+    adjustProjectID.value = projectID
   } catch (error) {
-    showToast(error?.message || '检测类别或已审批合同加载失败，暂时不能调整拆解', 'error')
+    if (loadVersion !== adjustLoadVersion || decompositionProject.value?.id !== projectID) return
+    showToast(formatUserError(error, { fallback: '检测类别或已审批合同加载失败，暂时不能调整拆解' }), 'error')
     return
   }
   if (!activeDetectionCategoryOptions.value.length) { showToast('没有启用的检测类别，请先在拆解规则中配置', 'warning'); return }
@@ -2457,6 +2486,7 @@ function removeAdjustItem(index) {
 async function submitDecompositionAdjust() {
   const project = decompositionProject.value
   if (!project) { showToast('请先选择要调整拆解的项目', 'warning'); return }
+  if (project.id !== adjustProjectID.value) { adjustOpen.value = false; showToast('项目已切换，请重新打开调整拆解', 'warning'); return }
   const items = adjustForm.value.items.map((row, index) => ({
     source_id: row.sourceID || `ADJUST-${String(index + 1).padStart(3, '0')}`,
     batch: row.batch, site: row.site, category: row.category, system: row.system,
@@ -2471,7 +2501,7 @@ async function submitDecompositionAdjust() {
     adjustOpen.value = false
     showToast('拆解已调整，项目进入补充协议处理中')
     await loadWorkspace()
-  } catch (error) { showToast(error?.message || '调整拆解失败', 'error') }
+  } catch (error) { showToast(formatUserError(error, { fallback: '调整拆解失败' }), 'error') }
   finally { saving.value = false }
 }
 
@@ -2482,7 +2512,7 @@ async function toggleRule(rule) {
     const updated = await setRuleEnabled(rule.id, rule.kind || activeSection.value, next)
     Object.assign(rule, updated)
     showToast(rule.kind === 'standards' ? (next ? '标准变更已恢复评估' : '标准变更评估已完成并归档') : (next ? '规则已启用' : '规则已停用'))
-  } catch (error) { showToast(error?.message || (rule.kind === 'standards' ? '标准变更状态更新失败' : '规则更新失败'), 'error') }
+  } catch (error) { showToast(formatUserError(error, { fallback: rule.kind === 'standards' ? '标准变更状态更新失败' : '规则更新失败' }), 'error') }
 }
 
 // 删除配置规则。停用开关是可逆操作，删除不可恢复，因此必须二次确认；kind 必填，
@@ -2497,7 +2527,7 @@ async function removeConfigRule(rule) {
     const index = rules.value.indexOf(rule)
     if (index >= 0) rules.value.splice(index, 1)
     showToast(`配置「${removed?.name || rule.name || rule.id}」已删除`)
-  } catch (error) { showToast(error?.message || '配置删除失败', 'error') }
+  } catch (error) { showToast(formatUserError(error, { fallback: '配置删除失败' }), 'error') }
   finally { saving.value = false }
 }
 
@@ -2530,9 +2560,21 @@ function selectServiceItem(item) {
   fillOperationForm(item)
 }
 function fillOperationForm(item) {
+  // 切换服务项时必须清掉仅属于上一项的草稿字段：报告文件、偏离实例与纠正说明。
+  // 否则在 A 选择材料后切到 B 再提交，会把 A 的文件挂到 B 上（服务端无法识别内容归属）。
+  signaturePadKey.value += 1
+  operationForm.value = {
+    ...operationForm.value,
+    // 条目级草稿一律清空：报告/偏离材料、现场证据与签名、原始数据与判断项。
+    reportFile: null, deviationID: '', reportCorrectionComment: '', reportCorrectionReason: '',
+    fieldEvidenceFile: null, fieldSignatureFile: null, deviationEvidenceFile: null,
+    rawData: '', environment: '', deviationDescription: '',
+    severity: 'MEDIUM', decision: 'RELEASE', comment: '',
+    checkInDeviationReason: '', fieldIncompleteReason: '',
+  }
   const plan = item.implementation_plan || {}
   const personnel = planPersonnelFor(item, plan)
-  operationForm.value = { ...operationForm.value, teamLeadID: item.team_lead_id || '', projectManagerID: item.project_manager_id || '', engineerIDs: (item.engineer_ids || []).join(','), plannedStart: toDateTimeLocal(item.planned_start || plan.planned_start), plannedEnd: toDateTimeLocal(item.planned_end || plan.planned_end), penetrationTestPlan: plan.penetration_test_plan || '', authDocNo: plan.auth_doc_no || '', authStart: toDateTimeLocal(plan.auth_start), authEnd: toDateTimeLocal(plan.auth_end), authScope: plan.auth_scope || '', testScope: plan.test_scope || '', testWindow: plan.test_window || '', emergencyContact: plan.emergency_contact || '', rollbackPlan: plan.rollback_plan || '', reviewComment: item.tech_review_comment || '', personnel, equipment: planEquipmentFor(plan), travelMode: '', travelReferenceEventID: '', noTravelReason: '', travelOrigin: '', travelDestination: '', travelDepartureDate: String(item.planned_start || plan.planned_start || '').slice(0, 10), travelReturnDate: String(item.planned_end || plan.planned_end || '').slice(0, 10), travelTransport: '', travelAccommodationNeed: '', travelTravelerIDs: personnel.map((row) => row.resourceID).filter(Boolean), comment: '' }
+  operationForm.value = { ...operationForm.value, teamLeadID: item.team_lead_id || '', projectManagerID: item.project_manager_id || '', engineerIDs: (item.engineer_ids || []).join(','), plannedStart: toDateTimeLocal(item.planned_start || plan.planned_start), plannedEnd: toDateTimeLocal(item.planned_end || plan.planned_end), sitePlan: plan.site_plan || '', penetrationTestPlan: plan.penetration_test_plan || '', authDocNo: plan.auth_doc_no || '', authStart: toDateTimeLocal(plan.auth_start), authEnd: toDateTimeLocal(plan.auth_end), authScope: plan.auth_scope || '', testScope: plan.test_scope || '', testWindow: plan.test_window || '', emergencyContact: plan.emergency_contact || '', rollbackPlan: plan.rollback_plan || '', reviewComment: item.tech_review_comment || '', personnel, equipment: planEquipmentFor(plan), travelMode: '', travelReferenceEventID: '', noTravelReason: '', travelOrigin: '', travelDestination: '', travelDepartureDate: String(item.planned_start || plan.planned_start || '').slice(0, 10), travelReturnDate: String(item.planned_end || plan.planned_end || '').slice(0, 10), travelTransport: '', travelAccommodationNeed: '', travelTravelerIDs: personnel.map((row) => row.resourceID).filter(Boolean), comment: '' }
 }
 function isEmbeddedPenetrationItem(item) {
   const category = String(item?.category || '').replace(/\s+/g, '')
@@ -2590,6 +2632,8 @@ function planResourceValidUntil(row) {
 }
 // 设备占用：实施准备阶段把已被其他服务项在同一时段占用的设备置灰，不允许重复选取。
 const equipmentReservations = ref([])
+let equipmentRequestVersion = 0
+let workspaceRequestVersion = 0
 const equipmentReservationByID = computed(() => {
   const map = new Map()
   for (const item of equipmentReservations.value) {
@@ -2598,10 +2642,17 @@ const equipmentReservationByID = computed(() => {
   return map
 })
 async function loadEquipmentReservations(item) {
-  if (!item?.id) { equipmentReservations.value = []; return }
+  const targetID = item?.id
+  const requestVersion = ++equipmentRequestVersion
+  if (!targetID) { equipmentReservations.value = []; return }
   try {
-    equipmentReservations.value = await listEquipmentReservations(item.id)
+    const rows = await listEquipmentReservations(targetID)
+    // 此前选中的服务项所返回的迟到响应，绝不能
+    // 覆盖当前服务项的设备可用情况。
+    if (requestVersion !== equipmentRequestVersion || selectedServiceItem.value?.id !== targetID) return
+    equipmentReservations.value = rows
   } catch {
+    if (requestVersion !== equipmentRequestVersion || selectedServiceItem.value?.id !== targetID) return
     // 占用信息拿不到时不阻断挑选，保存时服务端仍会硬拦重叠占用。
     equipmentReservations.value = []
   }
@@ -2682,7 +2733,7 @@ async function uploadCurrentReport() {
     operationForm.value.reportFile = null
     showToast(`R${Number(item.report_revision) || 0} 报告文件已登记，可提交审核`)
     await loadWorkspace()
-  } catch (error) { showToast(error?.message || '报告文件上传失败', 'error') }
+  } catch (error) { showToast(formatUserError(error, { fallback: '报告文件上传失败' }), 'error') }
   finally { saving.value = false }
 }
 
@@ -2714,12 +2765,17 @@ async function persistAndSyncFieldOperation(operation) {
   return true
 }
 
-async function submitStoredFieldOperation(operation) {
+// holder.current 始终指向已经带上最新上传回执的那份操作对象：
+// 失败时调用方必须用它回写，不能用循环里取到的旧快照，否则会覆盖回执，
+// 导致重试重新上传、同一 client_operation_id 对应不同载荷而被服务端拒绝。
+async function submitStoredFieldOperation(operation, holder = { current: operation }) {
   if (!operation.ownerKey || operation.ownerKey !== fieldQueueOwner()) throw new Error('离线作业归属与当前账号不一致')
   let current = operation
+  holder.current = current
   if (current.file && !current.artifact) {
     const artifact = await uploadServiceItemEvidence(current.itemID, 'FIELD', current.file)
     current = { ...current, artifact, file: null }
+    holder.current = current
     await saveFieldOperation(current)
   }
   const payload = { ...current.payload, client_operation_id: current.id, captured_at: current.capturedAt }
@@ -2734,18 +2790,19 @@ async function flushFieldOperations(announce = false) {
   if (fieldSyncing.value || !navigator.onLine || !ownerKey) return
   fieldSyncing.value = true
   let synced = 0
+  let failed = 0
   try {
-    for (const operation of await listFieldOperations(ownerKey)) {
-      try {
-        await submitStoredFieldOperation(operation)
-        await removeFieldOperation(operation.id)
-        synced += 1
-      } catch (error) {
-        // 网络中断保留原始操作和文件；业务校验错误同样保留，避免静默丢失现场证据。
-        await saveFieldOperation({ ...operation, lastError: error?.message || '同步失败' })
-        if (announce) showToast(`现场作业尚未同步：${error?.message || '请稍后重试'}`, 'warning')
-        break
-      }
+    const result = await processFieldQueue({
+      operations: await listFieldOperations(ownerKey),
+      submit: submitStoredFieldOperation,
+      remove: removeFieldOperation,
+      save: saveFieldOperation,
+      formatError: (error) => formatUserError(error, { fallback: '同步失败' }),
+    })
+    synced = result.synced
+    failed = result.failed
+    if (failed && announce) {
+      showToast(`有 ${failed} 条现场作业尚未同步；其余操作不受影响，可稍后重试。`, 'warning')
     }
   } finally {
     fieldSyncing.value = false
@@ -2771,15 +2828,19 @@ async function runOperation(kind) {
   const items = kind === 'allocation' ? selectedServiceItems.value : (item ? [item] : [])
   if (!items.length) { showToast(kind === 'allocation' ? '请至少选择一个服务项' : '当前没有可操作的服务项'); return }
   const form = operationForm.value
+  const completedAssignmentIDs = []
   saving.value = true
   try {
     if (kind === 'allocation') {
+      // 设备清单在「实施准备」阶段确定；此处只编排团队负责人和执行团队指派。
       for (const selected of items) {
-        if (!selected.team_lead_id) await assignTeam(selected.id, { team_lead_id: form.teamLeadID, expected_version: Number(selected.version) || 0 })
-        if (canExecutionAssign.value) {
-          // 设备清单在「实施准备」阶段确定，任务分配只指派执行团队。
-          await assignExecutionTeam(selected.id, { project_manager_id: form.projectManagerID, engineer_ids: selectedIDs(form.engineerIDs), expected_version: Number(selected.version) || 0 })
-        }
+        await assignServiceItemTeams({
+          item: selected, teamLeadID: form.teamLeadID, projectManagerID: form.projectManagerID,
+          engineerIDs: selectedIDs(form.engineerIDs), executionAllowed: canExecutionAssign.value,
+          assignTeam, assignExecutionTeam, listServiceItems,
+          onTeamAssigned: (id) => { selected.team_lead_id = id },
+        })
+        completedAssignmentIDs.push(selected.id)
       }
       showToast(canExecutionAssign.value ? `已批量保存 ${items.length} 个服务项并完成能力校验` : `已批量分配 ${items.length} 个服务项的团队负责人`)
     } else if (kind === 'planning') {
@@ -2801,7 +2862,7 @@ async function runOperation(kind) {
         if (!form.authStart || !form.authEnd) { showToast('请填写授权生效与授权截止时间', 'warning'); return }
         if (new Date(form.authEnd).getTime() <= new Date(form.authStart).getTime()) { showToast('授权截止时间必须晚于授权生效时间', 'warning'); return }
       }
-      await planImplementation(item.id, { expected_version: Number(item.version) || 0, planned_start: asRFC3339(form.plannedStart), planned_end: asRFC3339(form.plannedEnd), penetration_test_plan: form.penetrationTestPlan, auth_doc_no: form.authDocNo, auth_start: asRFC3339(form.authStart), auth_end: asRFC3339(form.authEnd), auth_scope: form.authScope, test_scope: form.testScope, test_window: form.testWindow, emergency_contact: form.emergencyContact, rollback_plan: form.rollbackPlan , personnel: form.personnel.map((row) => ({ resource_type: 'PERSON', resource_id: row.resourceID, window_start: row.windowStart, window_end: row.windowEnd, note: row.note })) })
+      await planImplementation(item.id, { expected_version: Number(item.version) || 0, planned_start: asRFC3339(form.plannedStart), planned_end: asRFC3339(form.plannedEnd), site_plan: form.sitePlan, penetration_test_plan: form.penetrationTestPlan, auth_doc_no: form.authDocNo, auth_start: asRFC3339(form.authStart), auth_end: asRFC3339(form.authEnd), auth_scope: form.authScope, test_scope: form.testScope, test_window: form.testWindow, emergency_contact: form.emergencyContact, rollback_plan: form.rollbackPlan , personnel: form.personnel.map((row) => ({ resource_type: 'PERSON', resource_id: row.resourceID, window_start: row.windowStart, window_end: row.windowEnd, note: row.note })) })
       showToast('实施计划已发布')
     } else if (kind === 'special-approve' || kind === 'special-reject') {
       await reviewSpecialMethod(item.id, { decision: kind === 'special-approve' ? 'APPROVED' : 'REJECTED', comment: form.reviewComment })
@@ -2881,15 +2942,33 @@ async function runOperation(kind) {
         showToast(`请先补齐${selectedFieldEvidenceGaps.value.join('、')}，或填写无法补齐的确认说明`, 'warning')
         return
       }
-      await completeServiceItemField(item.id, { incomplete_reason: String(form.fieldIncompleteReason || '').trim() })
+      await completeServiceItemField(item.id, { expected_version: Number(item.version) || 0, incomplete_reason: String(form.fieldIncompleteReason || '').trim() })
       form.fieldIncompleteReason = ''
       showToast('现场测评已结束，进入报告编制')
     }
     await loadWorkspace()
   } catch (error) {
-    showToast(error?.message || '操作失败', 'error')
+    const partialAssignment = kind === 'allocation' && (completedAssignmentIDs.length > 0 || error?.partialCompletion?.teamAssigned === true)
+    let message = formatUserError(error?.cause || error, { fallback: '操作未完成，请核对当前状态后继续。' })
+    // 为已完成事实预留提示长度，避免长业务原因被 Toast 的安全长度限制整体替换。
+    if (partialAssignment && message.length > 180) message = `${message.slice(0, 180)}…`
+    // 先根据已确认的提交事实拼结果，再交给 Toast 做文本安全处理；不能让原因的
+    // NETWORK_ERROR / TIMEOUT 分类把“负责人已成功分配”覆盖成整次操作结果未知。
+    if (kind === 'allocation' && error?.partialCompletion?.teamAssigned === true) {
+      message = `当前服务项的团队负责人已分配；执行团队分配未确认完成。${message}`
+    }
+    if (kind === 'allocation' && completedAssignmentIDs.length) {
+      const completed = new Set(completedAssignmentIDs)
+      selectedServiceItemIDs.value = selectedServiceItemIDs.value.filter((id) => !completed.has(id))
+      message = `本批次已确认完成 ${completedAssignmentIDs.length} / ${items.length} 个服务项的分配，已完成项已取消勾选，不会重复提交。${message}`
+    }
+    showToast(message, partialAssignment ? 'warning' : 'error')
     // 并发冲突：服务端已拒绝本次写入，重新拉取让用户看到最新版本后再决定怎么做。
-    if (error?.status === 409) await loadWorkspace()
+    // 批次前项已提交后，即使本项是 403 也必须刷新并保留部分完成事实。
+    if (error?.status === 409 || error?.requiresReload || partialAssignment) {
+      try { await loadWorkspace() }
+      catch { showToast(`${message}列表刷新未完成，请手动刷新核对，勿重复提交已完成项。`, 'warning') }
+    }
   }
   finally { saving.value = false }
 }
@@ -2913,7 +2992,7 @@ async function revokeSelectedAssignment(kind) {
     showToast(`已撤销 ${eligible.length} 个服务项的${kind === 'team' ? '团队负责人分配及下游执行团队' : '执行团队分配'}，历史记录已保留`)
     await loadWorkspace()
   } catch (error) {
-    showToast(error?.message || '撤销分配失败，请刷新后重试', 'error')
+    showToast(formatUserError(error, { fallback: '撤销分配失败，请刷新后重试' }), 'error')
   } finally { saving.value = false }
 }
 
@@ -2933,7 +3012,7 @@ async function returnSelectedToDecomposition() {
     selectedServiceItemIDs.value = []
     await loadWorkspace()
   } catch (error) {
-    showToast(error?.message || '退回拆解确认失败，请刷新后重试', 'error')
+    showToast(formatUserError(error, { fallback: '退回拆解确认失败，请刷新后重试' }), 'error')
     if (error?.status === 409) await loadWorkspace()
   } finally { saving.value = false }
 }
@@ -2960,7 +3039,7 @@ async function withdrawPendingRollback(request) {
     await withdrawRollback(request.service_item_id, request.id, { reason: String(reason).trim() })
     showToast('回退申请已撤回')
     await loadWorkspace()
-  } catch (error) { showToast(error?.message || '撤回失败，请刷新后重试', 'error') } finally { saving.value = false }
+  } catch (error) { showToast(formatUserError(error, { fallback: '撤回失败，请刷新后重试' }), 'error') } finally { saving.value = false }
 }
 async function revokeDeliveryPhase(kind) {
   const item = selectedServiceItem.value
@@ -2977,7 +3056,7 @@ async function revokeDeliveryPhase(kind) {
     else await revokePreparation(item.id, payload)
     showToast(kind === 'plan' ? '实施计划已撤销，已回到待分配' : '实施准备已撤销，设备预约已释放')
     await loadWorkspace()
-  } catch (error) { showToast(error?.message || '撤销失败，请刷新后重试', 'error') } finally { saving.value = false }
+  } catch (error) { showToast(formatUserError(error, { fallback: '撤销失败，请刷新后重试' }), 'error') } finally { saving.value = false }
 }
 async function submitRollbackRequest(kind) {
   const item = selectedServiceItem.value
@@ -2990,7 +3069,7 @@ async function submitRollbackRequest(kind) {
     await requestRollback(item.id, { kind, reason: String(reason).trim(), expected_version: Number(item.version) || 0 })
     showToast('回退申请已提交，等待技术总监或系统管理员审批')
     await loadWorkspace()
-  } catch (error) { showToast(error?.message || '回退申请失败', 'error') } finally { saving.value = false }
+  } catch (error) { showToast(formatUserError(error, { fallback: '回退申请失败' }), 'error') } finally { saving.value = false }
 }
 async function decidePendingRollback(request, decision) {
   const item = serviceItems.value.find((row) => row.id === request.service_item_id)
@@ -3003,7 +3082,7 @@ async function decidePendingRollback(request, decision) {
     await decideRollback(item.id, request.id, { decision, comment: String(comment).trim(), expected_version: Number(item.version) || 0 })
     showToast(decision === 'APPROVED' ? '回退申请已批准，服务项已按补偿规则回退' : '回退申请已驳回')
     await loadWorkspace()
-  } catch (error) { showToast(error?.message || '审批失败，请刷新后重试', 'error') } finally { saving.value = false }
+  } catch (error) { showToast(formatUserError(error, { fallback: '审批失败，请刷新后重试' }), 'error') } finally { saving.value = false }
 }
 
 async function submitReportCorrection() {
@@ -3018,7 +3097,7 @@ async function submitReportCorrection() {
     showToast('报告更正申请已提交，等待技术总监审批')
     await loadWorkspace()
   } catch (error) {
-    showToast(error?.message || '报告更正申请失败', 'error')
+    showToast(formatUserError(error, { fallback: '报告更正申请失败' }), 'error')
     if (error?.status === 409) await loadWorkspace()
   } finally { saving.value = false }
 }
@@ -3036,7 +3115,7 @@ async function decidePendingReportCorrection(request, decision) {
     showToast(decision === 'APPROVED' ? '报告更正已批准，已生成新版本待编制' : '报告更正申请已驳回')
     await loadWorkspace()
   } catch (error) {
-    showToast(error?.message || '报告更正审批失败', 'error')
+    showToast(formatUserError(error, { fallback: '报告更正审批失败' }), 'error')
     if (error?.status === 409) await loadWorkspace()
   } finally { saving.value = false }
 }
@@ -3063,7 +3142,7 @@ async function saveCreate() {
       approvedContractServiceItems.value = []
       selectedContractServiceIDs.value = []
     }
-  } catch (error) { showToast(error?.message || '保存失败', 'error') }
+  } catch (error) { showToast(formatUserError(error, { fallback: '保存失败' }), 'error') }
   finally { saving.value = false }
 }
 function exportProjects() {
@@ -3307,7 +3386,7 @@ onBeforeUnmount(() => {
             />
           </section>
           <FilterBar :count="filteredProjects.length" @reset="resetProjectFilters">
-            <label class="pm-search-input"><ConsoleIcon name="search" /><input v-model="keyword" placeholder="搜索项目名称 / 项目编号 / 客户名称 / 服务项" aria-label="搜索项目" /></label>
+            <label class="pm-search-input"><ConsoleIcon name="search" /><input v-model="keyword" placeholder="搜索项目名称 / 项目编号 / 客户名称 / 服务项" aria-label="搜索项目"  maxlength="100"/></label>
             <select v-model="statusFilter" class="pm-filter-select" aria-label="按状态筛选" @change="projectCardFilter = ''"><option value="">状态：全部</option><option v-for="node in projectStatusFilters" :key="node" :value="node">{{ node }}</option></select>
             <select v-model="categoryFilter" class="pm-filter-select" aria-label="按检测类别筛选"><option value="">检测类别：全部</option><option v-for="option in categoryOptions" :key="option" :value="option">{{ option }}</option></select>
             <select v-model="teamFilter" class="pm-filter-select" aria-label="按团队筛选"><option value="">团队：全部</option><option v-for="option in teamOptions" :key="option" :value="option">{{ option }}</option></select>
@@ -3436,7 +3515,7 @@ onBeforeUnmount(() => {
             <header class="pm-monitor-head">
               <div><p class="pm-panel-kicker">运营明细</p><h2>项目、里程碑、资源与 SLA</h2></div><span class="pm-filter-count">共 {{ monitoringSnapshot.total }} 条</span>
             </header>
-            <FilterBar variant="flat" @reset="resetMonitoringFilters"><label><ConsoleIcon name="search" /><input v-model="keyword" placeholder="搜索项目 / 客户 / 团队" /></label><select v-model="teamFilter" class="pm-filter-select" aria-label="按团队筛选"><option value="">团队：全部</option><option v-for="option in teamOptions" :key="option" :value="option">{{ option }}</option></select><select v-model="monitorCategory" class="pm-filter-select" aria-label="按检测类别筛选"><option value="">服务类别：全部</option><option v-for="option in categoryOptions" :key="option" :value="option">{{ option }}</option></select><select v-model="monitorProjectManager" class="pm-filter-select" aria-label="按项目经理筛选"><option value="">项目经理：全部</option><option v-for="option in projectManagerOptions" :key="option.id" :value="option.id">{{ option.name }}</option></select><label class="pm-filter-check"><input v-model="monitorSLAOnly" type="checkbox" /> SLA 预警</label><label class="pm-filter-check"><input v-model="monitorConflictOnly" type="checkbox" /> 资源冲突</label><label class="pm-filter-date">计划完成从 <input v-model="monitorDueFrom" type="date" /></label><label class="pm-filter-date">至 <input v-model="monitorDueTo" type="date" /></label></FilterBar>
+            <FilterBar variant="flat" @reset="resetMonitoringFilters"><label><ConsoleIcon name="search" /><input v-model="keyword" placeholder="搜索项目 / 客户 / 团队"  maxlength="100"/></label><select v-model="teamFilter" class="pm-filter-select" aria-label="按团队筛选"><option value="">团队：全部</option><option v-for="option in teamOptions" :key="option" :value="option">{{ option }}</option></select><select v-model="monitorCategory" class="pm-filter-select" aria-label="按检测类别筛选"><option value="">服务类别：全部</option><option v-for="option in categoryOptions" :key="option" :value="option">{{ option }}</option></select><select v-model="monitorProjectManager" class="pm-filter-select" aria-label="按项目经理筛选"><option value="">项目经理：全部</option><option v-for="option in projectManagerOptions" :key="option.id" :value="option.id">{{ option.name }}</option></select><label class="pm-filter-check"><input v-model="monitorSLAOnly" type="checkbox" /> SLA 预警</label><label class="pm-filter-check"><input v-model="monitorConflictOnly" type="checkbox" /> 资源冲突</label><label class="pm-filter-date">计划完成从 <input v-model="monitorDueFrom" type="date" /></label><label class="pm-filter-date">至 <input v-model="monitorDueTo" type="date" /></label></FilterBar>
             <div class="pm-table-scroll"><table class="pm-table pm-monitor-table"><thead><tr><th>项目 / 客户</th><th>当前 / 下一里程碑</th><th>服务项状态</th><th>资源</th><th>项目状态 / 进度</th><th>SLA / 冲突</th><th>计划完成</th><th>最近动态</th><th></th></tr></thead><tbody>
               <tr v-for="row in monitoringRows" :key="row.project.id" :class="{ risk: row.project.risk || row.sla_items?.length || row.resources?.conflict_items }"><td><button class="pm-project-link" @click="openProject(row.project)"><b>{{ row.project.id }}</b></button><span class="pm-cell-sub">{{ row.project.customer }}</span><span class="pm-cell-sub">{{ row.project.team || '未分配团队' }}</span></td><td><b>{{ row.milestone.current }}</b><span class="pm-cell-sub">下一节点：{{ row.milestone.next || '—' }}</span><div class="pm-inline-progress"><i :style="{ width: `${Math.round((row.milestone.done / row.milestone.total) * 100)}%` }"></i></div></td><td><span>{{ row.project.services }} 项</span><span class="pm-cell-sub">{{ monitoringServiceSummary(row) }}</span></td><td>{{ monitoringResourceSummary(row) }}<span v-if="row.resources?.conflict_items" class="pm-cell-warning">{{ row.resources.conflict_items }} 项冲突</span></td><td><span class="pm-badge" :class="statusTone(row.project.status)">{{ row.project.status }}</span><span class="pm-cell-sub">{{ monitoredStatusByProject(row.project.status) }}</span><ProgressCell :percent="row.project.progress" /></td><td><span class="pm-badge" :class="row.sla_items?.length ? '风险' : 'normal'">{{ monitoringSlaLabel(row) }}</span></td><td :class="{ 'pm-text-danger': row.sla_items?.some((item) => item.kind === 'PLAN_END_OVERDUE') }">{{ row.planned_end ? String(row.planned_end).slice(0, 10) : '待排期' }}</td><td><template v-if="row.latest_event"><b>{{ eventLabel(row.latest_event) }}</b><span class="pm-cell-sub">{{ personLabel(row.latest_event.actor_user_id, '系统') }} · {{ formatDateTime(row.latest_event.created_at) }}</span></template><span v-else>—</span></td><td class="pm-col-actions"><button class="pm-link" @click="openMonitoringAction(row)">前往当前节点</button><button class="pm-link" @click="openProjectTimeline(row.project)">时间线</button></td></tr>
               <tr v-if="!monitoringRows.length"><td colspan="9" class="pm-empty-mini">{{ monitoringLoading ? '正在同步监控快照…' : '暂无匹配的在途项目' }}</td></tr>
@@ -3489,12 +3568,12 @@ onBeforeUnmount(() => {
             <PenetrationWorkPackageCard v-if="selectedServiceItem && isEmbeddedPenetrationItem(selectedServiceItem)" :item="selectedServiceItem" :session="session" :engineer-options="penetrationEngineerOptions" @updated="updatePenetrationPackage" @notify="notifyFromPenetration" />
             <button v-if="selectedServiceItem && selectedServiceItem.status === '实施准备中' && canExecuteField" class="pm-button primary" :disabled="saving" @click="runOperation('field-start')">进入实施中</button>
             <div v-if="selectedServiceItem && selectedServiceItem.status === '实施中' && canExecuteField" class="pm-field-workflow">
-              <section class="pm-field-step"><header><span>01</span><div><b>GPS 现场签到</b><small>记录设备定位、精度与采集时间；离线时安全排队。</small></div></header><label><span>偏离说明（定位与现场不一致时填写）</span><input v-model.trim="operationForm.checkInDeviationReason" placeholder="例如 客户临时安排在同园区备用机房" /></label><button class="pm-button primary" :disabled="saving" @click="runOperation('field-check-in')">获取定位并签到</button></section>
-              <section class="pm-field-step"><header><span>02</span><div><b>填写现场记录</b><small>原始数据、环境条件与文件回执绑定同一采集时间。</small></div></header><div class="pm-form pm-operation-form"><label><span>现场原始数据 <em>*</em></span><textarea v-model.trim="operationForm.rawData" rows="3" placeholder="记录现场实测数据与依据"></textarea></label><label><span>环境条件 <em>*</em></span><textarea v-model.trim="operationForm.environment" rows="3" placeholder="记录现场环境条件"></textarea></label><label><span>现场证据 <em>*</em></span><input type="file" accept="application/pdf,image/png,image/jpeg" @change="operationForm.fieldEvidenceFile = $event.target.files?.[0] || null" /><small>文件通过统一文件网关上传、校验并以 SHA-256 回执存证。</small></label><button class="pm-button primary" :disabled="saving" @click="runOperation('field')">保存现场记录</button></div></section>
-              <section class="pm-field-step"><header><span>03</span><div><b>电子签名</b><small>签名图像经文件网关存证，并绑定当前账号与时间戳。</small></div></header><SignaturePad @signed="operationForm.fieldSignatureFile = $event" @cleared="operationForm.fieldSignatureFile = null" /><button class="pm-button primary" :disabled="saving || !operationForm.fieldSignatureFile" @click="runOperation('field-signature')">提交电子签名</button></section>
+              <section class="pm-field-step"><header><span>01</span><div><b>GPS 现场签到</b><small>记录设备定位、精度与采集时间；离线时安全排队。</small></div></header><label><span>偏离说明（定位与现场不一致时填写）</span><input v-model.trim="operationForm.checkInDeviationReason" placeholder="例如 客户临时安排在同园区备用机房"  maxlength="1000"/></label><button class="pm-button primary" :disabled="saving" @click="runOperation('field-check-in')">获取定位并签到</button></section>
+              <section class="pm-field-step"><header><span>02</span><div><b>填写现场记录</b><small>原始数据、环境条件与文件回执绑定同一采集时间。</small></div></header><div class="pm-form pm-operation-form"><label><span>现场原始数据 <em>*</em></span><textarea v-model.trim="operationForm.rawData" rows="3" placeholder="记录现场实测数据与依据" maxlength="2000"></textarea></label><label><span>环境条件 <em>*</em></span><textarea v-model.trim="operationForm.environment" rows="3" placeholder="记录现场环境条件" maxlength="500"></textarea></label><label><span>现场证据 <em>*</em></span><input type="file" accept="application/pdf,image/png,image/jpeg" @change="operationForm.fieldEvidenceFile = $event.target.files?.[0] || null" /><small>文件通过统一文件网关上传、校验并以 SHA-256 回执存证。</small></label><button class="pm-button primary" :disabled="saving" @click="runOperation('field')">保存现场记录</button></div></section>
+              <section class="pm-field-step"><header><span>03</span><div><b>电子签名</b><small>签名图像经文件网关存证，并绑定当前账号与时间戳。</small></div></header><SignaturePad :key="signaturePadKey" @signed="operationForm.fieldSignatureFile = $event" @cleared="operationForm.fieldSignatureFile = null" /><button class="pm-button primary" :disabled="saving || !operationForm.fieldSignatureFile" @click="runOperation('field-signature')">提交电子签名</button></section>
             </div>
             <button v-if="selectedServiceItem && selectedServiceItem.status === '实施中' && canCompleteField" class="pm-button" :disabled="saving || pendingFieldSyncCount > 0" @click="runOperation('complete')">现场测评结束</button>
-            <label v-if="selectedServiceItem && selectedServiceItem.status === '实施中' && canCompleteField && selectedFieldEvidenceGaps.length" class="pm-field-incomplete"><span>缺项确认说明 <em>*</em></span><textarea v-model.trim="operationForm.fieldIncompleteReason" rows="2" :placeholder="`当前缺少：${selectedFieldEvidenceGaps.join('、')}。确实无法补齐时说明原因。`"></textarea></label>
+            <label v-if="selectedServiceItem && selectedServiceItem.status === '实施中' && canCompleteField && selectedFieldEvidenceGaps.length" class="pm-field-incomplete"><span>缺项确认说明 <em>*</em></span><textarea v-model.trim="operationForm.fieldIncompleteReason" rows="2" :placeholder="`当前缺少：${selectedFieldEvidenceGaps.join('、')}。确实无法补齐时说明原因。`" maxlength="1000"></textarea></label>
             <small v-if="pendingFieldSyncCount" class="pm-form-hint">仍有现场签到、记录或签名未同步，完成确认前请先联网补传。</small>
             <div v-else-if="!selectedServiceItem" class="pm-empty-mini">请先选择服务项</div>
           </section>
@@ -3504,8 +3583,8 @@ onBeforeUnmount(() => {
           <section v-if="canManageDevice" class="pm-panel"><header class="pm-section-toolbar"><div class="pm-panel-actions"><button class="pm-button" :disabled="saving" @click="equipmentImportOpen = true">导入设备能力 CSV</button></div><span>下载中文模板，先检测、再选择有效行导入；设备编号可留空自动生成</span></header></section>
           <section class="pm-panel pm-equipment-layout">
             <form v-if="canManageDevice" class="pm-form pm-equipment-form" @submit.prevent="saveEquipment">
-              <label><span>设备编号 <em>*</em></span><input v-model.trim="equipmentForm.resourceID" required placeholder="例如 EQ-001" /></label>
-              <label><span>设备名称 <em>*</em></span><input v-model.trim="equipmentForm.resourceName" required placeholder="请输入设备名称" /></label>
+              <label><span>设备编号 <em>*</em></span><input v-model.trim="equipmentForm.resourceID" required placeholder="例如 EQ-001"  maxlength="64"/></label>
+              <label><span>设备名称 <em>*</em></span><input v-model.trim="equipmentForm.resourceName" required placeholder="请输入设备名称"  maxlength="128"/></label>
               <div class="pm-field pm-span-full">
                 <span>能力编码 <em>*</em></span>
                 <div class="pm-multi-dropdown" :class="{ open: openMulti === 'equipmentCodes' }">
@@ -3536,7 +3615,7 @@ onBeforeUnmount(() => {
               <header><div><span>人员资质</span><h2>{{ capabilityAutoID ? '新建人员资质' : '编辑人员资质' }}</h2></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="capabilityDialog = null"><ConsoleIcon name="close" /></button></header>
               <div class="pm-form">
                 <label><span>资源类型</span><input value="人员资质" readonly /></label>
-                <label><span>人员编号 <em>*</em></span><input v-model.trim="capabilityDialog.resource_id" :readonly="capabilityAutoID" required placeholder="系统自动生成" /><small v-if="capabilityAutoID" class="pm-form-hint">由系统自动生成（P-），无需手工填写</small></label>
+                <label><span>人员编号 <em>*</em></span><input v-model.trim="capabilityDialog.resource_id" :readonly="capabilityAutoID" required placeholder="系统自动生成"  maxlength="64"/><small v-if="capabilityAutoID" class="pm-form-hint">由系统自动生成（P-），无需手工填写</small></label>
                 <label><span>人员名称 <em>*</em></span><select v-model="capabilityDialog.user_id" :disabled="capabilityPersonnelLoading" required @change="onCapabilityPersonChange"><option value="">{{ capabilityPersonnelLoading ? '基础平台人员加载中…' : '请选择基础平台人员' }}</option><option v-for="person in capabilityPersonOptions" :key="person.id" :value="person.id">{{ person.name }}</option></select><small v-if="capabilityPersonnelError" class="pm-form-hint" role="alert">{{ capabilityPersonnelError }}</small></label>
                 <div class="pm-field pm-span-full">
                   <span>资质 / 能力编码 <em>*</em></span>
@@ -3621,9 +3700,9 @@ onBeforeUnmount(() => {
               <form class="pm-dialog" @submit.prevent="submitDetectionCategory">
                 <header><div><span>检测类别</span><h2>{{ categoryDialog.id ? '编辑检测类别' : '新增检测类别' }}</h2></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="categoryDialog = null"><ConsoleIcon name="close" /></button></header>
                 <div class="pm-form">
-                  <label><span>检测类别 <em>*</em></span><input v-model.trim="categoryDialog.category" required placeholder="例如 等保测评" /></label>
-                  <label><span>默认体系要求</span><input v-model.trim="categoryDialog.system_standard" placeholder="例如 等保 2.0 / ISO 9001" /></label>
-                  <label><span>必备资质（默认）</span><input v-model.trim="categoryDialog.required_qualifications" placeholder="例如 等级保护测评师（中级+）" /></label>
+                  <label><span>检测类别 <em>*</em></span><input v-model.trim="categoryDialog.category" required placeholder="例如 等保测评"  maxlength="128"/></label>
+                  <label><span>默认体系要求</span><input v-model.trim="categoryDialog.system_standard" placeholder="例如 等保 2.0 / ISO 9001"  maxlength="128"/></label>
+                  <label><span>必备资质（默认）</span><input v-model.trim="categoryDialog.required_qualifications" placeholder="例如 等级保护测评师（中级+）"  maxlength="255"/></label>
                   <div class="pm-field pm-span-full">
                     <span>必检人员能力码（默认）</span>
                     <div class="pm-multi-dropdown" :class="{ open: openMulti === 'detectionRequiredCodes' }">
@@ -3643,7 +3722,7 @@ onBeforeUnmount(() => {
               </form>
             </div>
 
-            <div v-if="overrideDialog" class="pm-overlay" @click.self="overrideDialog = null"><form class="pm-dialog pm-dialog-wide" @submit.prevent="submitSplitOverride"><header><div><span>覆盖规则</span><h2>{{ overrideDialog.id ? '编辑覆盖规则' : '新建覆盖规则' }}</h2><small class="pm-dialog-sub">只覆盖显式给出的设置，其余沿用默认分组规则；命中多条时取优先级最小的那条。</small></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="overrideDialog = null"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>规则名称 <em>*</em></span><input v-model.trim="overrideDialog.name" required placeholder="例如 金融行业批量合同" /></label><label><span>优先级 <em>*</em></span><input v-model.number="overrideDialog.priority" type="number" min="1" required /></label><label><span>客户名称包含</span><input v-model.trim="overrideDialog.match.customer_contains" placeholder="例如 银行 / 证券" /></label><label><span>合同号包含</span><input v-model.trim="overrideDialog.match.contract_contains" placeholder="例如 HT-2026" /></label><label><span>合同服务项数 ≤</span><input v-model.number="overrideDialog.match.max_service_items" type="number" min="0" /></label><label><span>覆盖分组维度 1</span><select v-model="overrideDialog.settings.dimension_primary"><option value="">不覆盖</option><option v-for="option in splitDimensionAnyOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label><span>覆盖分组维度 2</span><select v-model="overrideDialog.settings.dimension_secondary"><option value="">不覆盖</option><option v-for="option in splitDimensionAnyOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label><span>覆盖分组维度 3</span><select v-model="overrideDialog.settings.dimension_tertiary"><option value="">不覆盖</option><option v-for="option in splitDimensionAnyOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label><span>覆盖默认进入状态</span><select v-model="overrideDialog.settings.default_status"><option value="">不覆盖</option><option v-for="option in splitDefaultStatusOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label><span>覆盖缺规则处理</span><select v-model="overrideDialog.settings.missing_rule_action"><option value="">不覆盖</option><option v-for="option in splitMissingRuleOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label><span>状态</span><select v-model="overrideDialog.enabled"><option :value="true">启用</option><option :value="false">停用</option></select></label></div><footer><button type="button" class="pm-button" @click="overrideDialog = null">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : '保存' }}</button></footer></form></div>
+            <div v-if="overrideDialog" class="pm-overlay" @click.self="overrideDialog = null"><form class="pm-dialog pm-dialog-wide" @submit.prevent="submitSplitOverride"><header><div><span>覆盖规则</span><h2>{{ overrideDialog.id ? '编辑覆盖规则' : '新建覆盖规则' }}</h2><small class="pm-dialog-sub">只覆盖显式给出的设置，其余沿用默认分组规则；命中多条时取优先级最小的那条。</small></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="overrideDialog = null"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>规则名称 <em>*</em></span><input v-model.trim="overrideDialog.name" required placeholder="例如 金融行业批量合同"  maxlength="255"/></label><label><span>优先级 <em>*</em></span><input v-model.number="overrideDialog.priority" type="number" min="1" required /></label><label><span>客户名称包含</span><input v-model.trim="overrideDialog.match.customer_contains" placeholder="例如 银行 / 证券"  maxlength="255"/></label><label><span>合同号包含</span><input v-model.trim="overrideDialog.match.contract_contains" placeholder="例如 HT-2026"  maxlength="64"/></label><label><span>合同服务项数 ≤</span><input v-model.number="overrideDialog.match.max_service_items" type="number" min="0" /></label><label><span>覆盖分组维度 1</span><select v-model="overrideDialog.settings.dimension_primary"><option value="">不覆盖</option><option v-for="option in splitDimensionAnyOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label><span>覆盖分组维度 2</span><select v-model="overrideDialog.settings.dimension_secondary"><option value="">不覆盖</option><option v-for="option in splitDimensionAnyOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label><span>覆盖分组维度 3</span><select v-model="overrideDialog.settings.dimension_tertiary"><option value="">不覆盖</option><option v-for="option in splitDimensionAnyOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label><span>覆盖默认进入状态</span><select v-model="overrideDialog.settings.default_status"><option value="">不覆盖</option><option v-for="option in splitDefaultStatusOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label><span>覆盖缺规则处理</span><select v-model="overrideDialog.settings.missing_rule_action"><option value="">不覆盖</option><option v-for="option in splitMissingRuleOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label><span>状态</span><select v-model="overrideDialog.enabled"><option :value="true">启用</option><option :value="false">停用</option></select></label></div><footer><button type="button" class="pm-button" @click="overrideDialog = null">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : '保存' }}</button></footer></form></div>
           </template>
           <template v-else-if="isVisibleConfigSection">
           <section class="pm-kpi-row">
@@ -3662,7 +3741,7 @@ onBeforeUnmount(() => {
 
         <template v-else>
           <section class="pm-operational-stats"><article><span>{{ activeSection === 'allocation' ? '当前阶段服务项' : '待处理' }}</span><strong>{{ operationRows.length }}</strong><small>{{ activeSection === 'allocation' ? '含已分配、待补齐执行团队的服务项' : '来自当前工作区' }}</small></article><article><span>服务项总数</span><strong>{{ serviceItems.length }}</strong><small>以最新流程状态为准</small></article><article><span>已完成项目</span><strong>{{ completedProjectCount }}</strong><small>当前租户累计</small></article></section>
-          <section class="pm-filters"><label><ConsoleIcon name="search" /><input v-model="keyword" placeholder="搜索编号、项目或负责人" /></label><span>{{ operationRows.length }} 条结果</span></section>
+          <section class="pm-filters"><label><ConsoleIcon name="search" /><input v-model="keyword" placeholder="搜索编号、项目或负责人"  maxlength="100"/></label><span>{{ operationRows.length }} 条结果</span></section>
           <section v-if="['allocation', 'inbox', 'planning', 'preparation', 'assignments', 'methods', 'exceptions', 'reports'].includes(activeSection)" class="pm-panel pm-operation-panel">
             <header><div><p class="pm-panel-kicker">现场操作</p><h2>服务项操作台</h2></div><span v-if="selectedServiceItem" class="pm-op-current">当前：{{ selectedServiceItem.id }} · <span class="pm-badge" :class="statusTone(selectedServiceItem.status)">{{ selectedServiceItem.status }}</span></span></header>
             <ServiceItemPicker v-if="activeSection === 'allocation'" :items="allocationItems" :selected-ids="selectedServiceItemIDs" multiple empty-text="暂无可分配服务项" hint="仅显示已完成拆解确认、当前处于待分配的项目；可多选批量分配。" @toggle="toggleServiceItem" /><ServiceItemPicker v-else :items="activeNodeItems" :selected-ids="selectedServiceItem ? [selectedServiceItem.id] : []" empty-text="当前节点暂无可操作服务项" @select="selectServiceItem" />
@@ -3690,10 +3769,10 @@ onBeforeUnmount(() => {
                 <p v-if="selectedServiceItems.length" class="pm-form-hint pm-allocation-preview">影响预览：将为 {{ selectedServiceItems.length }} 个服务项{{ canExecutionAssign ? '写入团队负责人、项目经理与工程师并触发能力校验' : '写入团队负责人' }}；已选 {{ selectedServiceItems.map((item) => item.id).join('、') }}</p>
                 <button v-if="canSubmitAllocation" class="pm-button primary" :disabled="saving" @click="runOperation('allocation')">{{ saving ? '提交中…' : canExecutionAssign ? '保存分配并校验能力' : '分配团队负责人' }}</button>
               </template>
-              <template v-else-if="activeSection === 'planning'"><section v-if="operationSteps.length" class="pm-panel pm-stepper-panel"><div class="pm-stepper"><template v-for="(step, index) in operationSteps" :key="step.label"><div class="pm-step" :class="step.state"><span class="pm-step-num">{{ step.state === 'done' ? '✓' : index + 1 }}</span><span>{{ step.label }}</span></div><div v-if="index < operationSteps.length - 1" class="pm-step-line"></div></template></div></section><div v-if="planningBlocked" class="pm-blocker" :class="planningBlocked.tone" role="alert"><b>暂时不能发布实施计划</b><span>{{ planningBlocked.reason }}</span><button class="pm-button" type="button" @click="navigate('allocation')">前往任务分配</button></div><label><span>计划开始 <em>*</em></span><input v-model.trim="operationForm.plannedStart" type="datetime-local" /></label><label><span>计划结束 <em>*</em></span><input v-model.trim="operationForm.plannedEnd" type="datetime-local" /></label><label><span>现场计划 <em>*</em></span><textarea v-model.trim="operationForm.sitePlan" rows="3" placeholder="现场实施步骤和窗口"></textarea></label><template v-if="selectedServiceItem.test_mode === 'PENETRATION'"><label><span>渗透测试专项计划 <em>*</em></span><textarea v-model.trim="operationForm.penetrationTestPlan" rows="3"></textarea></label><fieldset class="pm-compliant-fieldset"><legend>专项合规要素（授权 / 白名单 / 时间窗 / 应急 / 回滚）</legend><label><span>授权书编号 <em>*</em></span><input v-model.trim="operationForm.authDocNo" required placeholder="例如 AUTH-2026-001" /></label><label><span>授权生效 <em>*</em></span><input v-model.trim="operationForm.authStart" type="datetime-local" required /></label><label><span>授权截止 <em>*</em></span><input v-model.trim="operationForm.authEnd" type="datetime-local" required /></label><label><span>授权范围 <em>*</em></span><input v-model.trim="operationForm.authScope" required placeholder="例如 内网段 10.0.0.0/8" /></label><label><span>计划测试范围 <em>*</em></span><input v-model.trim="operationForm.testScope" required placeholder="例如 关键业务系统 WEB 渗透" /></label><label><span>测试时间窗 <em>*</em></span><input v-model.trim="operationForm.testWindow" required placeholder="例如 00:00-06:00" /></label><label><span>应急联系人 <em>*</em></span><input v-model.trim="operationForm.emergencyContact" required placeholder="姓名 + 电话" /></label><label><span>回滚方案 <em>*</em></span><textarea v-model.trim="operationForm.rollbackPlan" rows="3" required></textarea></label></fieldset></template><section class="pm-plan-resources"><header><div><b>实施人员</b><small>资质编码取自「资质与能力」档案，人员不限制有效期；使用时段留空表示全程；设备清单在「实施准备」中登记</small></div></header><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>名称</th><th>规格 / 资质</th><th>有效期规则</th><th>使用时段</th><th>备注</th><th></th></tr></thead><tbody><tr v-for="(row, index) in operationForm.personnel" :key="row.resourceID"><td>{{ planResourceName(row) }}</td><td><CodePills :codes="planResourceCodes(row)" /></td><td>{{ planResourceValidUntil(row) }}</td><td><div class="pm-plan-window"><input v-model="row.windowStart" type="date" aria-label="使用时段开始" /><span>~</span><input v-model="row.windowEnd" type="date" aria-label="使用时段结束" /></div></td><td><input v-model.trim="row.note" placeholder="例如 备份" /></td><td><button type="button" class="pm-link danger" @click="removePlanPersonnel(index)">移除</button></td></tr><tr v-if="!operationForm.personnel.length"><td colspan="6" class="pm-empty-mini">请至少添加一名实施人员</td></tr></tbody></table></div></section><button v-if="canPlanImplementation" class="pm-button primary" :disabled="saving || !!planningBlocked" :title="planningBlocked ? planningBlocked.reason : ''" @click="runOperation('planning')">发布实施计划</button></template>
-              <template v-else-if="activeSection === 'methods'"><div class="pm-review-state"><span>复核状态</span><b class="pm-badge" :class="statusTone(item && reportTechReviewLabel(item.tech_review_status))">{{ item && reportTechReviewLabel(item.tech_review_status) }}</b></div><template v-if="item && ['PENDING', 'REJECTED'].includes(item.tech_review_status)"><label><span>复核意见</span><textarea v-model.trim="operationForm.reviewComment" rows="3" placeholder="填写风险说明或驳回原因"></textarea></label><div v-if="canReviewSpecialMethod" class="pm-form-row"><button class="pm-button primary" :disabled="saving" @click="runOperation('special-approve')">通过复核</button><button class="pm-button" :disabled="saving" @click="runOperation('special-reject')">驳回复核</button></div></template><template v-else-if="item && item.tech_review_status === 'APPROVED'"><p class="pm-form-hint">{{ item.tech_review_comment || '已通过复核，可发布实施计划' }}<span v-if="item.tech_reviewed_at"> · {{ formatDateTime(item.tech_reviewed_at) }} · {{ item.tech_reviewed_by }} </span></p></template><template v-else-if="item && item.tech_review_status === 'PENDING'"><p class="pm-form-hint">等待技术总监复核特殊方法。</p></template></template>
+              <template v-else-if="activeSection === 'planning'"><section v-if="operationSteps.length" class="pm-panel pm-stepper-panel"><div class="pm-stepper"><template v-for="(step, index) in operationSteps" :key="step.label"><div class="pm-step" :class="step.state"><span class="pm-step-num">{{ step.state === 'done' ? '✓' : index + 1 }}</span><span>{{ step.label }}</span></div><div v-if="index < operationSteps.length - 1" class="pm-step-line"></div></template></div></section><div v-if="planningBlocked" class="pm-blocker" :class="planningBlocked.tone" role="alert"><b>暂时不能发布实施计划</b><span>{{ planningBlocked.reason }}</span><button class="pm-button" type="button" @click="navigate('allocation')">前往任务分配</button></div><label><span>计划开始 <em>*</em></span><input v-model.trim="operationForm.plannedStart" type="datetime-local" /></label><label><span>计划结束 <em>*</em></span><input v-model.trim="operationForm.plannedEnd" type="datetime-local" /></label><label><span>现场计划</span><textarea v-model.trim="operationForm.sitePlan" rows="3" placeholder="现场实施步骤和窗口" maxlength="5000"></textarea></label><template v-if="selectedServiceItem.test_mode === 'PENETRATION'"><label><span>渗透测试专项计划 <em>*</em></span><textarea v-model.trim="operationForm.penetrationTestPlan" rows="3" maxlength="5000"></textarea></label><fieldset class="pm-compliant-fieldset"><legend>专项合规要素（授权 / 白名单 / 时间窗 / 应急 / 回滚）</legend><label><span>授权书编号 <em>*</em></span><input v-model.trim="operationForm.authDocNo" required placeholder="例如 AUTH-2026-001"  maxlength="128"/></label><label><span>授权生效 <em>*</em></span><input v-model.trim="operationForm.authStart" type="datetime-local" required /></label><label><span>授权截止 <em>*</em></span><input v-model.trim="operationForm.authEnd" type="datetime-local" required /></label><label><span>授权范围 <em>*</em></span><input v-model.trim="operationForm.authScope" required placeholder="例如 内网段 10.0.0.0/8"  maxlength="5000"/></label><label><span>计划测试范围 <em>*</em></span><input v-model.trim="operationForm.testScope" required placeholder="例如 关键业务系统 WEB 渗透"  maxlength="5000"/></label><label><span>测试时间窗 <em>*</em></span><input v-model.trim="operationForm.testWindow" required placeholder="例如 00:00-06:00"  maxlength="128"/></label><label><span>应急联系人 <em>*</em></span><input v-model.trim="operationForm.emergencyContact" required placeholder="姓名 + 电话"  maxlength="128"/></label><label><span>回滚方案 <em>*</em></span><textarea v-model.trim="operationForm.rollbackPlan" rows="3" required maxlength="5000"></textarea></label></fieldset></template><section class="pm-plan-resources"><header><div><b>实施人员</b><small>资质编码取自「资质与能力」档案，人员不限制有效期；使用时段留空表示全程；设备清单在「实施准备」中登记</small></div></header><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>名称</th><th>规格 / 资质</th><th>有效期规则</th><th>使用时段</th><th>备注</th><th></th></tr></thead><tbody><tr v-for="(row, index) in operationForm.personnel" :key="row.resourceID"><td>{{ planResourceName(row) }}</td><td><CodePills :codes="planResourceCodes(row)" /></td><td>{{ planResourceValidUntil(row) }}</td><td><div class="pm-plan-window"><input v-model="row.windowStart" type="date" aria-label="使用时段开始" /><span>~</span><input v-model="row.windowEnd" type="date" aria-label="使用时段结束" /></div></td><td><input v-model.trim="row.note" placeholder="例如 备份"  maxlength="500"/></td><td><button type="button" class="pm-link danger" @click="removePlanPersonnel(index)">移除</button></td></tr><tr v-if="!operationForm.personnel.length"><td colspan="6" class="pm-empty-mini">请至少添加一名实施人员</td></tr></tbody></table></div></section><button v-if="canPlanImplementation" class="pm-button primary" :disabled="saving || !!planningBlocked" :title="planningBlocked ? planningBlocked.reason : ''" @click="runOperation('planning')">发布实施计划</button></template>
+              <template v-else-if="activeSection === 'methods'"><div class="pm-review-state"><span>复核状态</span><b class="pm-badge" :class="statusTone(item && reportTechReviewLabel(item.tech_review_status))">{{ item && reportTechReviewLabel(item.tech_review_status) }}</b></div><template v-if="item && ['PENDING', 'REJECTED'].includes(item.tech_review_status)"><label><span>复核意见</span><textarea v-model.trim="operationForm.reviewComment" rows="3" placeholder="填写风险说明或驳回原因" maxlength="1000"></textarea></label><div v-if="canReviewSpecialMethod" class="pm-form-row"><button class="pm-button primary" :disabled="saving" @click="runOperation('special-approve')">通过复核</button><button class="pm-button" :disabled="saving" @click="runOperation('special-reject')">驳回复核</button></div></template><template v-else-if="item && item.tech_review_status === 'APPROVED'"><p class="pm-form-hint">{{ item.tech_review_comment || '已通过复核，可发布实施计划' }}<span v-if="item.tech_reviewed_at"> · {{ formatDateTime(item.tech_reviewed_at) }} · {{ item.tech_reviewed_by }} </span></p></template><template v-else-if="item && item.tech_review_status === 'PENDING'"><p class="pm-form-hint">等待技术总监复核特殊方法。</p></template></template>
               <template v-else-if="activeSection === 'preparation'">
-                <section class="pm-plan-resources"><header><div><b>设备清单（选填）</b><small>无需设备的项目可留空；选择设备后仍会校验有效档案、检定有效期、在位状态及占用冲突</small></div><button type="button" class="pm-button" @click="openEquipmentPicker">＋ 添加设备</button></header><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>设备</th><th>能力码</th><th>检定有效期</th><th>使用时段</th><th>备注</th><th></th></tr></thead><tbody><tr v-for="(row, index) in operationForm.equipment" :key="row.resourceID"><td>{{ planResourceName(row) }}</td><td><CodePills :codes="planResourceCodes(row)" /></td><td>{{ planResourceValidUntil(row) }}</td><td><div class="pm-plan-window"><input v-model="row.windowStart" type="date" aria-label="使用时段开始" /><span>~</span><input v-model="row.windowEnd" type="date" aria-label="使用时段结束" /></div></td><td><input v-model.trim="row.note" placeholder="例如 备用机" /></td><td><button type="button" class="pm-link danger" @click="removePlanEquipment(index)">移除</button></td></tr><tr v-if="!operationForm.equipment.length"><td colspan="6" class="pm-empty-mini">本服务项无需设备时可留空</td></tr></tbody></table></div></section>
+                <section class="pm-plan-resources"><header><div><b>设备清单（选填）</b><small>无需设备的项目可留空；选择设备后仍会校验有效档案、检定有效期、在位状态及占用冲突</small></div><button type="button" class="pm-button" @click="openEquipmentPicker">＋ 添加设备</button></header><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>设备</th><th>能力码</th><th>检定有效期</th><th>使用时段</th><th>备注</th><th></th></tr></thead><tbody><tr v-for="(row, index) in operationForm.equipment" :key="row.resourceID"><td>{{ planResourceName(row) }}</td><td><CodePills :codes="planResourceCodes(row)" /></td><td>{{ planResourceValidUntil(row) }}</td><td><div class="pm-plan-window"><input v-model="row.windowStart" type="date" aria-label="使用时段开始" /><span>~</span><input v-model="row.windowEnd" type="date" aria-label="使用时段结束" /></div></td><td><input v-model.trim="row.note" placeholder="例如 备用机"  maxlength="500"/></td><td><button type="button" class="pm-link danger" @click="removePlanEquipment(index)">移除</button></td></tr><tr v-if="!operationForm.equipment.length"><td colspan="6" class="pm-empty-mini">本服务项无需设备时可留空</td></tr></tbody></table></div></section>
                 <section class="pm-travel-arrangement">
                   <header class="pm-travel-head"><span class="pm-travel-head-icon" aria-hidden="true">行</span><div><b>行程安排 <em>*</em></b><small>按实际实施方式选择，行程编号由系统自动处理</small></div><span class="pm-travel-head-status">{{ operationForm.travelMode ? '已选择' : '待选择' }}</span></header>
                   <div class="pm-travel-mode" role="radiogroup" aria-label="行程安排方式">
@@ -3704,14 +3783,14 @@ onBeforeUnmount(() => {
                   <div v-if="!operationForm.travelMode" class="pm-travel-empty"><span aria-hidden="true">↑</span><div><b>请选择一种行程方式</b><small>选择后仅展示当前场景需要填写的内容</small></div></div>
                   <div v-else class="pm-travel-detail" :class="`mode-${operationForm.travelMode.toLowerCase()}`">
                     <div class="pm-travel-detail-title"><span>{{ operationForm.travelMode === 'NO_TRAVEL' ? '无需出差说明' : operationForm.travelMode === 'EXISTING' ? '选择已有行程' : '填写新行程信息' }}</span><small>{{ operationForm.travelMode === 'NO_TRAVEL' ? '原因将随实施准备记录留存' : operationForm.travelMode === 'EXISTING' ? '可按路线、日期或人员搜索' : '保存后由系统自动生成行程编号' }}</small></div>
-                    <label v-if="operationForm.travelMode === 'NO_TRAVEL'"><span>无需行程原因 <em>*</em></span><textarea v-model.trim="operationForm.noTravelReason" rows="2" placeholder="例如：客户现场位于本市，当日往返"></textarea></label>
+                    <label v-if="operationForm.travelMode === 'NO_TRAVEL'"><span>无需行程原因 <em>*</em></span><textarea v-model.trim="operationForm.noTravelReason" rows="2" placeholder="例如：客户现场位于本市，当日往返" maxlength="1000"></textarea></label>
                     <template v-else-if="operationForm.travelMode === 'EXISTING'"><SearchableSelect v-model="operationForm.travelReferenceEventID" :options="travelExistingOptions" value-key="id" label-key="label" description-key="description" placeholder="请选择本项目已有行程" search-placeholder="搜索路线、日期、人员或行程编号" empty-text="本项目暂无可关联行程，请选择新建行程申请" aria-label="选择已有行程" required /><p class="pm-travel-hint">列表只展示当前项目已登记的有效行程，不需要手工输入编号。</p></template>
-                    <template v-else-if="operationForm.travelMode === 'NEW'"><div v-if="operationForm.travelOrigin || operationForm.travelDestination" class="pm-travel-route-preview"><span>{{ operationForm.travelOrigin || '出发地' }}</span><i aria-hidden="true">→</i><span>{{ operationForm.travelDestination || '目的地' }}</span><small>{{ operationForm.travelDepartureDate || '待定' }} 至 {{ operationForm.travelReturnDate || '待定' }}</small></div><div class="pm-travel-grid"><label><span>出发地 <em>*</em></span><input v-model.trim="operationForm.travelOrigin" placeholder="例如：杭州" /></label><label><span>目的地 <em>*</em></span><input v-model.trim="operationForm.travelDestination" placeholder="例如：上海" /></label><label><span>出发日期 <em>*</em></span><input v-model="operationForm.travelDepartureDate" type="date" /></label><label><span>返回日期 <em>*</em></span><input v-model="operationForm.travelReturnDate" type="date" /></label><label><span>交通方式</span><input v-model.trim="operationForm.travelTransport" placeholder="例如：高铁" /></label><label><span>住宿需求</span><input v-model.trim="operationForm.travelAccommodationNeed" placeholder="例如：2 晚，单间" /></label></div><label><span>出行人员 <em>*</em></span><SearchableSelect v-model="operationForm.travelTravelerIDs" :options="travelTravelerOptions" value-key="id" label-key="name" description-key="description" placeholder="请选择出行人员（可多选）" search-placeholder="搜索已分配人员" empty-text="当前服务项尚未分配可出行人员" aria-label="选择出行人员" multiple required /></label></template>
+                    <template v-else-if="operationForm.travelMode === 'NEW'"><div v-if="operationForm.travelOrigin || operationForm.travelDestination" class="pm-travel-route-preview"><span>{{ operationForm.travelOrigin || '出发地' }}</span><i aria-hidden="true">→</i><span>{{ operationForm.travelDestination || '目的地' }}</span><small>{{ operationForm.travelDepartureDate || '待定' }} 至 {{ operationForm.travelReturnDate || '待定' }}</small></div><div class="pm-travel-grid"><label><span>出发地 <em>*</em></span><input v-model.trim="operationForm.travelOrigin" placeholder="例如：杭州"  maxlength="255"/></label><label><span>目的地 <em>*</em></span><input v-model.trim="operationForm.travelDestination" placeholder="例如：上海"  maxlength="255"/></label><label><span>出发日期 <em>*</em></span><input v-model="operationForm.travelDepartureDate" type="date" /></label><label><span>返回日期 <em>*</em></span><input v-model="operationForm.travelReturnDate" type="date" /></label><label><span>交通方式</span><input v-model.trim="operationForm.travelTransport" placeholder="例如：高铁"  maxlength="255"/></label><label><span>住宿需求</span><input v-model.trim="operationForm.travelAccommodationNeed" placeholder="例如：2 晚，单间"  maxlength="255"/></label></div><label><span>出行人员 <em>*</em></span><SearchableSelect v-model="operationForm.travelTravelerIDs" :options="travelTravelerOptions" value-key="id" label-key="name" description-key="description" placeholder="请选择出行人员（可多选）" search-placeholder="搜索已分配人员" empty-text="当前服务项尚未分配可出行人员" aria-label="选择出行人员" multiple required /></label></template>
                   </div>
                 </section>
-                <label><span>备注</span><textarea v-model.trim="operationForm.comment" rows="3"></textarea></label><button v-if="canPlanImplementation" class="pm-button primary" :disabled="saving" @click="runOperation('preparation')">发起实施准备</button>
+                <label><span>备注</span><textarea v-model.trim="operationForm.comment" rows="3" maxlength="1000"></textarea></label><button v-if="canPlanImplementation" class="pm-button primary" :disabled="saving" @click="runOperation('preparation')">发起实施准备</button>
               </template>
-              <template v-else-if="activeSection === 'exceptions'"><section v-if="exceptionFlow.length" class="pm-panel pm-approval-panel"><header><div><p class="pm-panel-kicker">复核流程</p><h2>异常处置流程 · {{ selectedDeviation?.payload?.deviation_id || '—' }}</h2></div><span>{{ pendingDeviations.length }} 项待评审</span></header><div class="pm-approval"><template v-for="(step, index) in exceptionFlow" :key="step.title"><div class="pm-approval-step" :class="step.state"><span class="pm-approval-dot">{{ step.state === 'done' ? '✓' : step.state === 'doing' ? '!' : '○' }}</span><div class="pm-approval-body"><b>{{ step.title }}</b><small>{{ step.when }}</small><em>{{ step.note }}</em></div></div><span v-if="index < exceptionFlow.length - 1" class="pm-approval-arrow">→</span></template></div></section><label><span>偏离描述</span><textarea v-model.trim="operationForm.deviationDescription" rows="3" placeholder="选择服务项后填写偏离内容"></textarea></label><label><span>偏离证据</span><input type="file" accept="application/pdf,image/png,image/jpeg" @change="operationForm.deviationEvidenceFile = $event.target.files?.[0] || null" /></label><div class="pm-field"><span>严重度</span><SearchableSelect v-model="operationForm.severity" :options="deviationSeverityOptions" placeholder="请选择严重度" search-placeholder="搜索严重度" aria-label="选择偏离严重度" /></div><button v-if="canReportDeviation" class="pm-button primary" :disabled="saving" @click="runOperation('exception-report')">上报偏离</button><label><span>评审偏离 ID</span><input v-model.trim="operationForm.deviationID" placeholder="DV-..." /></label><div class="pm-field"><span>评审决定</span><SearchableSelect v-model="operationForm.decision" :options="deviationDecisionOptions" placeholder="请选择评审决定" search-placeholder="搜索放行、重测或终止" aria-label="选择评审决定" /></div><label><span>{{ operationForm.decision === 'TERMINATE' ? '终止原因 *' : '评审说明' }}</span><textarea v-model.trim="operationForm.comment" rows="3" :required="operationForm.decision === 'TERMINATE'" placeholder="说明放行、重测或终止依据"></textarea></label><button v-if="canReviewDeviation" class="pm-button" :disabled="saving" @click="runOperation('exception-review')">提交偏离评审</button></template>
+              <template v-else-if="activeSection === 'exceptions'"><section v-if="exceptionFlow.length" class="pm-panel pm-approval-panel"><header><div><p class="pm-panel-kicker">复核流程</p><h2>异常处置流程 · {{ selectedDeviation?.payload?.deviation_id || '—' }}</h2></div><span>{{ pendingDeviations.length }} 项待评审</span></header><div class="pm-approval"><template v-for="(step, index) in exceptionFlow" :key="step.title"><div class="pm-approval-step" :class="step.state"><span class="pm-approval-dot">{{ step.state === 'done' ? '✓' : step.state === 'doing' ? '!' : '○' }}</span><div class="pm-approval-body"><b>{{ step.title }}</b><small>{{ step.when }}</small><em>{{ step.note }}</em></div></div><span v-if="index < exceptionFlow.length - 1" class="pm-approval-arrow">→</span></template></div></section><label><span>偏离描述</span><textarea v-model.trim="operationForm.deviationDescription" rows="3" placeholder="选择服务项后填写偏离内容" maxlength="1000"></textarea></label><label><span>偏离证据</span><input type="file" accept="application/pdf,image/png,image/jpeg" @change="operationForm.deviationEvidenceFile = $event.target.files?.[0] || null" /></label><div class="pm-field"><span>严重度</span><SearchableSelect v-model="operationForm.severity" :options="deviationSeverityOptions" placeholder="请选择严重度" search-placeholder="搜索严重度" aria-label="选择偏离严重度" /></div><button v-if="canReportDeviation" class="pm-button primary" :disabled="saving" @click="runOperation('exception-report')">上报偏离</button><label><span>评审偏离 ID</span><input v-model.trim="operationForm.deviationID" placeholder="DV-..."  maxlength="64"/></label><div class="pm-field"><span>评审决定</span><SearchableSelect v-model="operationForm.decision" :options="deviationDecisionOptions" placeholder="请选择评审决定" search-placeholder="搜索放行、重测或终止" aria-label="选择评审决定" /></div><label><span>{{ operationForm.decision === 'TERMINATE' ? '终止原因 *' : '评审说明' }}</span><textarea v-model.trim="operationForm.comment" rows="3" :required="operationForm.decision === 'TERMINATE'" placeholder="说明放行、重测或终止依据" maxlength="1000"></textarea></label><button v-if="canReviewDeviation" class="pm-button" :disabled="saving" @click="runOperation('exception-review')">提交偏离评审</button></template>
               <template v-else-if="activeSection === 'reports'">
                 <section class="pm-panel pm-stepper-panel"><header><div><p class="pm-panel-kicker">报告阶段</p><h2>报告阶段链</h2></div><span v-if="selectedServiceItem" class="pm-op-current">当前：<span class="pm-badge" :class="statusTone(reportStatusLabel[selectedServiceItem.report_status] || '未开始')">{{ reportStatusLabel[selectedServiceItem.report_status] || '未开始' }}</span></span></header><div class="pm-stepper"><template v-for="(step, index) in reportSteps" :key="step.phase"><div class="pm-step" :class="step.state"><span class="pm-step-num">{{ step.state === 'done' ? '✓' : index + 1 }}</span><span>{{ step.label }}</span></div><div v-if="index < reportSteps.length - 1" class="pm-step-line"></div></template></div></section>
                 <div class="pm-report-phase" v-if="selectedServiceItem?.report_status"><span>当前报告阶段</span><b class="pm-badge" :class="statusTone(reportStatusLabel[selectedServiceItem.report_status] || selectedServiceItem.report_status)">{{ reportStatusLabel[selectedServiceItem.report_status] || selectedServiceItem.report_status }}</b></div>
@@ -3721,14 +3800,14 @@ onBeforeUnmount(() => {
                   <div v-for="request in selectedReportCorrectionRequests" :key="request.id" class="pm-form">
                     <p class="pm-form-hint">R{{ Number(request.payload?.old_revision) || 0 }} · {{ request.payload?.reason }} · 申请人：{{ personLabel(request.actor_user_id, '未知') }}</p>
                     <template v-if="canApproveReportCorrection && request.actor_user_id !== session?.user_id">
-                      <label><span>审批意见 <em>*</em></span><textarea v-model.trim="operationForm.reportCorrectionComment" rows="2" placeholder="填写批准或驳回意见"></textarea></label>
+                      <label><span>审批意见 <em>*</em></span><textarea v-model.trim="operationForm.reportCorrectionComment" rows="2" placeholder="填写批准或驳回意见" maxlength="1000"></textarea></label>
                       <div class="pm-form-row"><button type="button" class="pm-button primary" :disabled="saving" @click="decidePendingReportCorrection(request, 'APPROVED')">批准更正</button><button type="button" class="pm-button danger" :disabled="saving" @click="decidePendingReportCorrection(request, 'REJECTED')">驳回申请</button></div>
                     </template>
                     <p v-else class="pm-form-hint">更正申请正在等待其他有审批权限的人员处理。</p>
                   </div>
                 </section>
                 <div v-if="canSubmitReportCorrection" class="pm-form">
-                  <label><span>报告更正原因 <em>*</em></span><textarea v-model.trim="operationForm.reportCorrectionReason" rows="3" placeholder="说明已签发或已归档报告需要更正的内容"></textarea><small>审批通过后旧版本作废并生成下一报告版本，需重新完成编制、审核、签发和归档。</small></label>
+                  <label><span>报告更正原因 <em>*</em></span><textarea v-model.trim="operationForm.reportCorrectionReason" rows="3" placeholder="说明已签发或已归档报告需要更正的内容" maxlength="1000"></textarea><small>审批通过后旧版本作废并生成下一报告版本，需重新完成编制、审核、签发和归档。</small></label>
                   <button type="button" class="pm-button" :disabled="saving" @click="submitReportCorrection">申请报告更正</button>
                 </div>
                 <button v-if="selectedServiceItem && reportPhaseNext[selectedServiceItem.report_status] && canAdvanceReportPhase(reportPhaseNext[selectedServiceItem.report_status])" class="pm-button primary" :disabled="saving" @click="runOperation('report-next')">推进至{{ reportStatusLabel[reportPhaseNext[selectedServiceItem.report_status]] }}</button>
@@ -3749,17 +3828,21 @@ onBeforeUnmount(() => {
 
     <div v-if="operationDetail" class="pm-overlay" @click.self="operationDetail = null"><aside class="pm-drawer"><header><div><span>{{ operationSectionLabel(operationDetail.section) }}</span><h2>{{ operationDetail.row.name }}</h2></div><button class="pm-icon-button" aria-label="关闭" @click="operationDetail = null"><ConsoleIcon name="close" /></button></header><div class="pm-drawer-body"><section class="pm-drawer-hero"><span class="pm-badge neutral">{{ operationDetail.row.state }}</span><p><template v-if="Array.isArray(operationDetail.row.detail)"><span v-if="!operationDetail.row.detail.length">—</span><span v-else class="pm-code-pills"><span v-for="code in operationDetail.row.detail" :key="code" class="pm-code-pill">{{ code }}</span></span></template><template v-else>{{ operationDetail.row.detail }}</template><span v-if="operationDetail.row.warning" class="pm-cell-warning">{{ operationDetail.row.warning }}</span></p><div class="pm-progress"><i :style="{ width: `${operationDetail.row.progress}%` }"></i></div><b>{{ operationDetail.row.progress }}% 已完成</b></section><dl><div v-for="field in operationDetailFields" :key="field.label"><dt>{{ field.label }}</dt><dd><template v-if="Array.isArray(field.value)"><span v-if="!field.value.length">—</span><span v-else class="pm-code-pills"><span v-for="code in field.value" :key="code" class="pm-code-pill">{{ code }}</span></span></template><template v-else>{{ field.value }}</template></dd></div></dl></div><footer><button class="pm-button" @click="operationDetail = null">关闭</button></footer></aside></div>
 
-    <div v-if="planEquipmentPickerOpen" class="pm-overlay" @click.self="planEquipmentPickerOpen = false"><aside class="pm-dialog pm-dialog-wide"><header><div><span>设备</span><h2>添加设备</h2><small class="pm-dialog-sub">只列设备目录中的有效设备；已被其他服务项占用、仅在公司使用或不在公司的设备不可选取。</small></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="planEquipmentPickerOpen = false"><ConsoleIcon name="close" /></button></header><div class="pm-dialog-body"><div class="pm-picker-search"><ConsoleIcon name="search" /><input v-model.trim="equipmentPickerKeyword" placeholder="搜索设备名称或能力码" /></div><div class="pm-table-scroll"><table class="pm-table pm-table-picker"><thead><tr><th>设备</th><th>能力码</th><th>检定有效期</th><th>状态</th><th class="pm-col-action">操作</th></tr></thead><tbody><tr v-for="item in planEquipmentFiltered" :key="item.resource_id"><td><b>{{ item.resource_name }}</b><small class="mono">{{ item.resource_id }}</small><small v-if="equipmentUnavailableReason(item)" class="pm-cell-sub pm-cell-danger">{{ equipmentUnavailableReason(item) }}</small></td><td><CodePills :codes="item.codes || []" /></td><td>{{ item.valid_until ? item.valid_until.slice(0, 10) : '长期' }}</td><td><span class="pm-badge" :class="equipmentPickerState(item).tone">{{ equipmentPickerState(item).label }}</span></td><td><button type="button" class="pm-link" :disabled="equipmentPickerState(item).disabled" @click="addPlanEquipment(item)">{{ equipmentPickerState(item).action }}</button></td></tr><tr v-if="!planEquipmentFiltered.length"><td colspan="5" class="pm-empty-mini">{{ equipmentPickerKeyword ? '没有匹配的设备，换个关键字试试' : '设备目录为空，请先在「资质与能力」或「设备能力维护」中登记设备' }}</td></tr></tbody></table></div></div><footer><span class="pm-dialog-footnote">已加入 {{ planEquipmentAddedCount }} 台 · 可选 {{ planEquipmentAddableCount }} 台</span><button type="button" class="pm-button" @click="planEquipmentPickerOpen = false">关闭</button></footer></aside></div>
+    <div v-if="planEquipmentPickerOpen" class="pm-overlay" @click.self="planEquipmentPickerOpen = false"><aside class="pm-dialog pm-dialog-wide"><header><div><span>设备</span><h2>添加设备</h2><small class="pm-dialog-sub">只列设备目录中的有效设备；已被其他服务项占用、仅在公司使用或不在公司的设备不可选取。</small></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="planEquipmentPickerOpen = false"><ConsoleIcon name="close" /></button></header><div class="pm-dialog-body"><div class="pm-picker-search"><ConsoleIcon name="search" /><input v-model.trim="equipmentPickerKeyword" placeholder="搜索设备名称或能力码"  maxlength="100"/></div><div class="pm-table-scroll"><table class="pm-table pm-table-picker"><thead><tr><th>设备</th><th>能力码</th><th>检定有效期</th><th>状态</th><th class="pm-col-action">操作</th></tr></thead><tbody><tr v-for="item in planEquipmentFiltered" :key="item.resource_id"><td><b>{{ item.resource_name }}</b><small class="mono">{{ item.resource_id }}</small><small v-if="equipmentUnavailableReason(item)" class="pm-cell-sub pm-cell-danger">{{ equipmentUnavailableReason(item) }}</small></td><td><CodePills :codes="item.codes || []" /></td><td>{{ item.valid_until ? item.valid_until.slice(0, 10) : '长期' }}</td><td><span class="pm-badge" :class="equipmentPickerState(item).tone">{{ equipmentPickerState(item).label }}</span></td><td><button type="button" class="pm-link" :disabled="equipmentPickerState(item).disabled" @click="addPlanEquipment(item)">{{ equipmentPickerState(item).action }}</button></td></tr><tr v-if="!planEquipmentFiltered.length"><td colspan="5" class="pm-empty-mini">{{ equipmentPickerKeyword ? '没有匹配的设备，换个关键字试试' : '设备目录为空，请先在「资质与能力」或「设备能力维护」中登记设备' }}</td></tr></tbody></table></div></div><footer><span class="pm-dialog-footnote">已加入 {{ planEquipmentAddedCount }} 台 · 可选 {{ planEquipmentAddableCount }} 台</span><button type="button" class="pm-button" @click="planEquipmentPickerOpen = false">关闭</button></footer></aside></div>
     <div v-if="createOpen" class="pm-overlay" @click.self="createOpen = false">
       <form class="pm-dialog pm-dialog-wide" @submit.prevent="saveCreate">
         <header><div><span>新建项目</span><h2>新建项目</h2><small class="pm-dialog-sub">选择已审批合同后，系统会自动读取合同服务范围；合同字段不可手工改写。</small></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="createOpen = false"><ConsoleIcon name="close" /></button></header>
         <div class="pm-form">
-          <label><span>名称 <em>*</em></span><input v-model.trim="createForm.name" required placeholder="请输入项目名称" /></label>
+          <div v-if="approvedContractsError" class="pm-contract-service-state error" role="alert">
+            {{ approvedContractsError }}
+            <a href="/contract_management/" target="_blank" rel="noopener">前往合同管理</a>
+          </div>
+          <label><span>名称 <em>*</em></span><input v-model.trim="createForm.name" required placeholder="请输入项目名称"  maxlength="255"/></label>
           <template v-if="activeSection === 'projects'">
             <label><span>已审批合同 <em>*</em></span><select v-model="createForm.contractID" required @change="selectApprovedContract(availableApprovedContracts.find((item) => item.id === createForm.contractID))"><option value="">请选择尚未建立项目的已审批合同</option><option v-for="contract in availableApprovedContracts" :key="contract.id" :value="contract.id">{{ contractOptionLabel(contract) }}</option></select></label>
             <label><span>客户</span><input :value="createForm.customer" readonly aria-readonly="true" /><small>选择合同后由合同管理系统自动带入</small></label>
             <label><span>合同编号</span><input :value="createForm.contract" readonly aria-readonly="true" /><small>以合同管理系统中的合同编号为准，不支持手工修改</small></label>
-            <label><span>实施场所 <em>*</em></span><input v-model.trim="createForm.site" required placeholder="例如 杭州机房" /><small>这是本项目的实施场所，将应用到本次选择的服务项。</small></label>
+            <label><span>实施场所 <em>*</em></span><input v-model.trim="createForm.site" required placeholder="例如 杭州机房"  maxlength="255"/><small>这是本项目的实施场所，将应用到本次选择的服务项。</small></label>
             <section class="pm-service-links pm-contract-services">
               <header><div><b>合同服务范围 <em>*</em></b><small>默认选择合同中的全部服务项；可搜索并取消本项目不包含的服务项。</small></div><span v-if="approvedContractServiceItems.length" class="pm-contract-service-count">已选 {{ selectedContractServiceIDs.length }} / {{ approvedContractServiceItems.length }} 项</span></header>
               <div v-if="contractServicesLoading" class="pm-contract-service-state">正在读取合同服务范围…</div>
@@ -3782,7 +3865,7 @@ onBeforeUnmount(() => {
       </form>
     </div>
 
-    <div v-if="adjustOpen" class="pm-overlay" @click.self="adjustOpen = false"><form class="pm-dialog pm-dialog-wide" @submit.prevent="submitDecompositionAdjust"><header><div><span>调整拆解</span><h2>调整拆解</h2><small class="pm-dialog-sub">目标项目：<b>{{ decompositionProject ? `${decompositionProject.id} · ${decompositionProject.name || decompositionProject.customer || ''}` : '未选择' }}</b> —— 提交后该项目的<b>全部</b>服务项会被这份清单替换并进入补充协议处理中；原服务项转为归档保留历史。</small></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="adjustOpen = false"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>调整原因 <em>*</em></span><input v-model.trim="adjustForm.reason" required placeholder="例如 客户追加两个系统" /></label><label><span>已审批补充协议 <em>*</em></span><select v-model="adjustForm.supplementContractID" required><option value="">请选择已审批补充协议</option><option v-for="contract in supplementContractOptions" :key="contract.id" :value="contract.id">{{ contractOptionLabel(contract) }}</option></select><small>只能选择当前客户已审批且不同于原合同的记录</small></label><section class="pm-service-links"><header><div><b>新的服务项清单</b><small>提交后该项目的全部服务项会被这份清单替换，并进入补充协议处理中</small></div><button type="button" class="pm-link" @click="addAdjustItem">＋ 增加一行</button></header><div v-for="(row, index) in adjustForm.items" :key="index" class="pm-adjust-item"><div class="pm-service-link-row"><input v-model.trim="row.batch" required placeholder="批次" /><input v-model.trim="row.site" required placeholder="场所" /><SearchableSelect v-model="row.category" :options="activeDetectionCategoryOptions" placeholder="请选择检测类别" search-placeholder="搜索检测类别" empty-text="没有启用的检测类别" aria-label="选择检测类别" menu-z-index="calc(var(--pm-z-modal, 50) + 1)" required /><button type="button" class="pm-icon-button" :aria-label="`删除第 ${index + 1} 行`" @click="removeAdjustItem(index)">×</button></div><div class="pm-service-link-row"><input v-model.trim="row.system" placeholder="系统名称" /><input v-model.trim="row.systemLevel" placeholder="系统等级" /><input v-model.trim="row.requirement" placeholder="技术要求" /><select v-model="row.testMode"><option value="STANDARD">标准方法</option><option value="PENETRATION">渗透测试</option></select></div></div></section></div><footer><button type="button" class="pm-button" @click="adjustOpen = false">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '提交中…' : '提交调整' }}</button></footer></form></div>
+    <div v-if="adjustOpen" class="pm-overlay" @click.self="adjustOpen = false"><form class="pm-dialog pm-dialog-wide" @submit.prevent="submitDecompositionAdjust"><header><div><span>调整拆解</span><h2>调整拆解</h2><small class="pm-dialog-sub">目标项目：<b>{{ decompositionProject ? `${decompositionProject.id} · ${decompositionProject.name || decompositionProject.customer || ''}` : '未选择' }}</b> —— 提交后该项目的<b>全部</b>服务项会被这份清单替换并进入补充协议处理中；原服务项转为归档保留历史。</small></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="adjustOpen = false"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>调整原因 <em>*</em></span><input v-model.trim="adjustForm.reason" required placeholder="例如 客户追加两个系统"  maxlength="1000"/></label><label><span>已审批补充协议 <em>*</em></span><select v-model="adjustForm.supplementContractID" required><option value="">请选择已审批补充协议</option><option v-for="contract in supplementContractOptions" :key="contract.id" :value="contract.id">{{ contractOptionLabel(contract) }}</option></select><small>只能选择当前客户已审批且不同于原合同的记录</small></label><section class="pm-service-links"><header><div><b>新的服务项清单</b><small>提交后该项目的全部服务项会被这份清单替换，并进入补充协议处理中</small></div><button type="button" class="pm-link" @click="addAdjustItem">＋ 增加一行</button></header><div v-for="(row, index) in adjustForm.items" :key="index" class="pm-adjust-item"><div class="pm-service-link-row"><input v-model.trim="row.batch" required placeholder="批次"  maxlength="64"/><input v-model.trim="row.site" required placeholder="场所"  maxlength="255"/><SearchableSelect v-model="row.category" :options="activeDetectionCategoryOptions" placeholder="请选择检测类别" search-placeholder="搜索检测类别" empty-text="没有启用的检测类别" aria-label="选择检测类别" menu-z-index="calc(var(--pm-z-modal, 50) + 1)" required /><button type="button" class="pm-icon-button" :aria-label="`删除第 ${index + 1} 行`" @click="removeAdjustItem(index)">×</button></div><div class="pm-service-link-row"><input v-model.trim="row.system" placeholder="系统名称"  maxlength="128"/><input v-model.trim="row.systemLevel" placeholder="系统等级"  maxlength="64"/><input v-model.trim="row.requirement" placeholder="技术要求"  maxlength="2000"/><select v-model="row.testMode"><option value="STANDARD">标准方法</option><option value="PENETRATION">渗透测试</option></select></div></div></section></div><footer><button type="button" class="pm-button" @click="adjustOpen = false">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '提交中…' : '提交调整' }}</button></footer></form></div>
 
     <div v-if="configEditorOpen" class="pm-overlay" @click.self="configEditorOpen = false">
       <form class="pm-dialog" @submit.prevent="saveConfigRule">
@@ -3793,7 +3876,7 @@ onBeforeUnmount(() => {
         <div class="pm-form">
           <label>
             <span>{{ activeConfigMeta.nameLabel || '配置名称' }} <em>*</em></span>
-            <input v-model.trim="configForm.name" required :placeholder="configNamePlaceholder()" />
+            <input v-model.trim="configForm.name" required :placeholder="configNamePlaceholder()"  maxlength="255"/>
             <small v-if="['warning-rules', 'automations', 'sla'].includes(activeSection)">选择生效条件后会自动生成，仍可按业务口径修改。</small>
           </label>
           <template v-for="field in activeConfigMeta.fields" :key="field.key">
@@ -3834,7 +3917,7 @@ onBeforeUnmount(() => {
             </label>
             <label v-else>
               <span>{{ field.label }} <em v-if="field.required">*</em></span>
-              <input v-model.trim="configForm[field.key]" :required="field.required" :readonly="configFieldDisabled(field)" :aria-readonly="configFieldDisabled(field)" :placeholder="field.placeholder || ''" />
+              <input v-model.trim="configForm[field.key]" :required="field.required" :readonly="configFieldDisabled(field)" :aria-readonly="configFieldDisabled(field)" :placeholder="field.placeholder || ''"  maxlength="2000"/>
               <small v-if="configFieldDisabled(field)">编码与类型创建后不可修改；如需变更，请停用原配置后新建。</small>
             </label>
           </template>

@@ -3,7 +3,7 @@ import { afterEach, test } from 'node:test'
 import { readFileSync } from 'node:fs'
 import { compileScript, compileTemplate, parse } from '@vue/compiler-sfc'
 import { MAX_LICENSE_BYTES, commitLicense, getLicenseEvents, getLicenseRequest, getLicenseStatus, initializeLicense, previewLicense, validateLicenseInput } from './api.js'
-import { licenseRows, previewCanCommit, riskyChange, statusRows } from './presentation.js'
+import { licenseRows, licensedOnly, previewCanCommit, riskyChange, statusRows } from './presentation.js'
 
 const originalFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = originalFetch })
@@ -42,6 +42,15 @@ test('display uses authoritative server statuses, including clock and integrity 
   assert.equal(rows.length, 6)
   assert.equal(rows.find(row => row.code === 'settlement').state, '时钟异常')
   assert.equal(rows.find(row => row.code === 'customer_portal').state, '校验异常')
+})
+test('current authorization panel keeps only licensed systems and hides unpurchased noise', () => {
+  const rows = statusRows({ systems: [{ code: 'customer_and_opportunity', status: 'VALID', kind: 'FULL', not_before: 10, expires_at: 99 }, { code: 'settlement', status: 'EXPIRED', kind: 'FULL', expires_at: 1 }] })
+  const visible = licensedOnly(rows)
+  assert.deepEqual(visible.map(row => row.code).sort(), ['customer_and_opportunity', 'settlement'])
+  assert.equal(visible.length, 2, '未购买/未授权的系统不得出现在当前授权面板')
+  assert.ok(visible.every(row => row.application), '每行都携带许可证内的应用条目')
+  const empty = licensedOnly(statusRows({ systems: [{ code: 'contract_management', status: 'NOT_PURCHASED' }] }))
+  assert.equal(empty.length, 0)
 })
 test('removed, shortened, delayed and downgraded grants require explicit confirmation', () => {
   for (const change of [{ kind: 'REMOVED' }, { kind: 'UPDATED', old: { expires_at: 100 }, new: { expires_at: 90 } }, { kind: 'UPDATED', old: { not_before: 20 }, new: { not_before: 30 } }, { kind: 'UPDATED', old: { kind: 'FULL' }, new: { kind: 'TRIAL' } }]) {

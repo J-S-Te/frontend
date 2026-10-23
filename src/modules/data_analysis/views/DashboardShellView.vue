@@ -2,20 +2,22 @@
 // 数据看板统一外壳（对齐 project_management 模式）：
 // 深色侧栏导航 + 顶栏 + 页面头，按 route.params.section 切换分区；
 // 总览、报告、财务看板经嵌入桥加载；合同、项目看板使用本地原生模型，避免空白 iframe。
-import { computed, onMounted, ref, watch } from "vue"
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import { AuthError, logoutCurrentSession } from "@/modules/platform/auth/api/auth"
 import ConsoleIcon from "@/modules/platform/shared/components/ConsoleIcon.vue"
 import ErrorState from "@/modules/platform/shared/components/ErrorState.vue"
 import LoadingState from "@/modules/platform/shared/components/LoadingState.vue"
 import { closeSubsystemTabOrFallback } from "@/modules/shared/utils/returnToPortal"
-import { getAuthMe, getEmbedToken, getContractDashboardSummary, getProjectDashboardSummary, getContractDetails, getDashboardTrend, getAlertSummary } from "../api/dataAnalysis"
+import { getAuthMe, getEmbedToken, getContractDashboardSummary, getProjectDashboardSummary, getReportDashboardSummary, getFinanceDashboardSummary, getContractDetails, getDashboardTrend, getAlertSummary } from "../api/dataAnalysis"
 import AlertsCenterView from "./AlertsCenterView.vue"
 import DictionaryView from "./DictionaryView.vue"
 import AdminSourcesView from "./AdminSourcesView.vue"
 import AlertRulesView from "./AlertRulesView.vue"
 import NativeDashboardView from "./NativeDashboardView.vue"
 import { isolatedEmbedUrl } from "../utils/embedOrigin.mjs"
+import { RELATED_DATA, subscribeRelatedDataChanges } from "@/modules/platform/shared/utils/relatedDataInvalidation.js"
+import { formatDataAnalysisError } from "../utils/errors.js"
 import "@/modules/data_analysis/styles/data-analysis.css"
 
 const route = useRoute()
@@ -111,6 +113,11 @@ const detailError = ref("")
 const statusFilter = ref("全部")
 let iframeRequestVersion = 0
 let summaryRequestVersion = 0
+let embedRenewTimer = null
+let embedExpiresAt = 0
+let relatedRefreshTimer = null
+let unsubscribeRelatedData = null
+const EMBED_RENEW_BEFORE_SECONDS = 30
 
 const currentMeta = computed(() => pageMeta[section.value] || pageMeta.overview)
 const currentUserName = computed(() => me.value?.display_name || "当前用户")
@@ -142,7 +149,7 @@ async function loadMe() {
   try {
     me.value = await getAuthMe()
   } catch (err) {
-    loadError.value = err?.message || "会话读取失败"
+    loadError.value = formatDataAnalysisError(err, { fallback: "会话读取失败，请稍后刷新。" })
   } finally {
     loading.value = false
   }
@@ -154,16 +161,53 @@ async function loadDashboard(code) {
   iframeError.value = null
   iframeSrc.value = ""
   try {
-    const { token, embed_url: embedUrl } = await getEmbedToken(code)
+    const { token, embed_url: embedUrl, expires_at: expiresAt } = await getEmbedToken(code)
     if (requestVersion !== iframeRequestVersion || section.value !== code) return
-    // Backend validates independent cookie domains; browser additionally
-    // rejects the platform host. Metabase storage is confined to that origin.
+    // 后端校验独立的 Cookie 域；浏览器额外
+    // 拒绝平台主机。Metabase 存储被限制在该源内。
     iframeSrc.value = isolatedEmbedUrl(embedUrl, token, window.location.origin)
+    scheduleEmbedRenewal(Number(expiresAt) || 0, code, requestVersion)
   } catch (err) {
     if (requestVersion !== iframeRequestVersion) return
-    iframeError.value = err?.code === "FORBIDDEN" ? "当前账号无权限查看该看板" : (err?.message || "看板加载失败")
+    iframeError.value = err?.code === "FORBIDDEN" ? "当前账号无权限查看该看板" : formatDataAnalysisError(err, { fallback: "看板加载失败，请稍后刷新。" })
   } finally {
     if (requestVersion === iframeRequestVersion) iframeLoading.value = false
+  }
+}
+
+function clearEmbedRenewal() {
+  if (embedRenewTimer) window.clearTimeout(embedRenewTimer)
+  embedRenewTimer = null
+  embedExpiresAt = 0
+}
+
+function scheduleEmbedRenewal(expiresAtSeconds, code, requestVersion) {
+  clearEmbedRenewal()
+  if (!expiresAtSeconds) return
+  embedExpiresAt = expiresAtSeconds
+  const delay = Math.max(5000, (expiresAtSeconds - Math.floor(Date.now() / 1000) - EMBED_RENEW_BEFORE_SECONDS) * 1000)
+  embedRenewTimer = window.setTimeout(() => {
+    // 仅为仍处于激活状态的嵌入区域重新签发令牌；令牌
+    // 仅可使用一次，不能原地续期。应重新加载，
+    // 避免 iframe 继续使用过期令牌交互。
+    if (requestVersion !== iframeRequestVersion || section.value !== code || !EMBEDDED_DASHBOARD_SECTIONS.includes(code)) return
+    if (document.visibilityState === "hidden") {
+      // 页签重新激活时由可见性监听器续期，
+      // 不要创建短周期的后台定时循环。
+      embedRenewTimer = null
+      return
+    }
+    loadDashboard(code)
+  }, delay)
+}
+
+function onVisibilityChange() {
+  if (document.visibilityState === "visible" && embedExpiresAt) {
+    const code = DASHBOARD_CODES[section.value]
+    if (code && EMBEDDED_DASHBOARD_SECTIONS.includes(section.value)) {
+      if (Math.floor(Date.now() / 1000) >= embedExpiresAt - EMBED_RENEW_BEFORE_SECONDS) loadDashboard(code)
+      else scheduleEmbedRenewal(embedExpiresAt, code, iframeRequestVersion)
+    }
   }
 }
 
@@ -198,13 +242,13 @@ async function loadSummary(code) {
     } catch (err) {
       if (requestVersion !== summaryRequestVersion) return
       overviewSummary.value = { contract: null, project: null }
-      summaryError.value = err?.message || "摘要加载失败"
+      summaryError.value = formatDataAnalysisError(err, { fallback: "摘要加载失败，请稍后刷新。" })
     } finally {
       if (requestVersion === summaryRequestVersion) summaryLoading.value = false
     }
     return
   }
-  if (!['contract', 'project'].includes(code)) {
+  if (!['contract', 'project', 'report', 'finance'].includes(code)) {
     summaryLoading.value = false
     summaryError.value = ""
     dashboardSummary.value = null
@@ -215,9 +259,8 @@ async function loadSummary(code) {
   summaryError.value = ""
   detailError.value = ""
   try {
-    const result = code === 'contract'
-      ? await getContractDashboardSummary()
-      : await getProjectDashboardSummary()
+    const loaders = { contract: getContractDashboardSummary, project: getProjectDashboardSummary, report: getReportDashboardSummary, finance: getFinanceDashboardSummary }
+    const result = await loaders[code]()
     if (requestVersion !== summaryRequestVersion || section.value !== code) return
     dashboardSummary.value = result
     if (code === 'contract') {
@@ -228,16 +271,25 @@ async function loadSummary(code) {
       } catch (err) {
         if (requestVersion !== summaryRequestVersion || section.value !== code) return
         contractDetails.value = { items: [], total: 0 }
-        detailError.value = `合同摘要已加载，但明细加载失败：${err?.message || '请稍后重试'}`
+        detailError.value = `合同摘要已加载，但明细加载失败：${formatDataAnalysisError(err, { fallback: '请稍后重试。' })}`
       }
     }
   } catch (err) {
     if (requestVersion !== summaryRequestVersion) return
     dashboardSummary.value = null
-    summaryError.value = err?.message || "摘要加载失败"
+    summaryError.value = formatDataAnalysisError(err, { fallback: "摘要加载失败，请稍后刷新。" })
   } finally {
     if (requestVersion === summaryRequestVersion) summaryLoading.value = false
   }
+}
+
+function scheduleRelatedRefresh() {
+  if (relatedRefreshTimer) window.clearTimeout(relatedRefreshTimer)
+  relatedRefreshTimer = window.setTimeout(async () => {
+    relatedRefreshTimer = null
+    await loadMe()
+    if (DASHBOARD_SECTIONS.includes(section.value)) await refreshCurrentDashboard()
+  }, 50)
 }
 
 async function refreshCurrentDashboard() {
@@ -268,7 +320,7 @@ async function logoutSystem() {
       await router.replace({ name: "login", query: { reason: "session-ended" } })
       return
     }
-    summaryError.value = error?.message || "退出系统失败，请稍后重试。"
+    summaryError.value = formatDataAnalysisError(error, { fallback: "退出系统失败，请稍后重试。" })
   } finally {
     isLoggingOut.value = false
   }
@@ -287,6 +339,7 @@ watch(() => section.value, (value) => {
     } else {
       // 离开嵌入看板时清理上一次令牌，避免业务摘要页残留旧 iframe 状态。
       iframeRequestVersion += 1
+      clearEmbedRenewal()
       iframeSrc.value = ""
       iframeError.value = null
       iframeLoading.value = false
@@ -300,6 +353,8 @@ watch(statusOptions, (options) => {
 })
 
 onMounted(async () => {
+  document.addEventListener("visibilitychange", onVisibilityChange)
+  unsubscribeRelatedData = subscribeRelatedDataChanges(scheduleRelatedRefresh, { kinds: [RELATED_DATA.ORGANIZATIONS, RELATED_DATA.POSITIONS, RELATED_DATA.MEMBERSHIPS, RELATED_DATA.ROLE_CATALOG] })
   await loadMe()
   if (DASHBOARD_SECTIONS.includes(section.value)) {
     if (!canViewDashboard(section.value)) {
@@ -313,6 +368,13 @@ onMounted(async () => {
     }
     await Promise.all(tasks)
   }
+})
+
+onBeforeUnmount(() => {
+  clearEmbedRenewal()
+  if (relatedRefreshTimer) window.clearTimeout(relatedRefreshTimer)
+  if (unsubscribeRelatedData) unsubscribeRelatedData()
+  document.removeEventListener("visibilitychange", onVisibilityChange)
 })
 </script>
 
@@ -365,13 +427,14 @@ onMounted(async () => {
         <ErrorState v-if="loadError" title="会话读取失败" :error="loadError" @retry="loadMe" />
 
         <template v-else-if="DASHBOARD_SECTIONS.includes(section)">
-          <LoadingState v-if="summaryLoading && ['contract', 'project'].includes(section)" title="摘要加载中…" compact />
-          <ErrorState v-else-if="summaryError && ['contract', 'project'].includes(section)" title="摘要加载失败" :error="summaryError" @retry="loadSummary(DASHBOARD_CODES[section])" compact />
+          <LoadingState v-if="summaryLoading && ['contract', 'project', 'report', 'finance'].includes(section)" title="摘要加载中…" compact />
+          <ErrorState v-else-if="summaryError && ['contract', 'project', 'report', 'finance'].includes(section)" title="摘要加载失败" :error="summaryError" @retry="loadSummary(DASHBOARD_CODES[section])" compact />
           <NativeDashboardView
             v-else-if="['overview', 'contract', 'project', 'report', 'finance'].includes(section)"
             :section="section"
             :contract-summary="section === 'overview' ? overviewSummary.contract : section === 'contract' ? dashboardSummary : null"
             :project-summary="section === 'overview' ? overviewSummary.project : section === 'project' ? dashboardSummary : null"
+            :business-summary="['report', 'finance'].includes(section) ? dashboardSummary : null"
             :contract-details="section === 'contract' ? contractDetails : { items: [], total: 0 }"
             :can-view-contract="canViewDashboard('contract')"
             :can-view-project="canViewDashboard('project')"

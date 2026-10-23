@@ -1,11 +1,13 @@
 <script setup>
 // 高保真模型的本地兜底视图：没有 Metabase 或业务摘要时，仍提供清晰的指标层级与数据状态。
 import { computed, ref, watch } from "vue"
+import { dashboardFreshnessItems, dashboardFreshnessStatus } from "../utils/freshness.js"
 
 const props = defineProps({
   section: { type: String, required: true },
   contractSummary: { type: Object, default: null },
   projectSummary: { type: Object, default: null },
+  businessSummary: { type: Object, default: null },
   contractDetails: { type: Object, default: () => ({ items: [], total: 0 }) },
   canViewContract: { type: Boolean, default: true },
   canViewProject: { type: Boolean, default: true },
@@ -36,7 +38,7 @@ const sectionMeta = {
   contract: { title: "合同看板", description: "合同签约、执行与回款全景" },
   project: { title: "项目执行看板", description: "项目交付、进度与质量全景" },
   report: { title: "报告与质量看板", description: "报告编制、复核与签发效率" },
-  finance: { title: "财务与经营看板", description: "收入、成本与利润口径分析" },
+  finance: { title: "财务与经营看板", description: "应收、已核销回款与账龄分析" },
 }
 
 const metric = (label, value, suffix = "", tone = "") => ({ label, value, suffix, tone })
@@ -70,7 +72,11 @@ function contractStatusLabel(value) {
   return CONTRACT_STATUS_LABELS[normalized] || String(value || "—")
 }
 
-const contractAmountWan = computed(() => numberValue(props.contractSummary?.total_amount_minor) / 1_000_000)
+const contractCurrencyItems = computed(() => Array.isArray(props.contractSummary?.currency_totals) ? props.contractSummary.currency_totals.filter((item) => item && item.currency) : [])
+const contractAmountWan = computed(() => {
+  const cny = contractCurrencyItems.value.find((item) => String(item.currency).toUpperCase() === "CNY")
+  return numberValue(cny ? cny.amount_minor : props.contractSummary?.total_amount_minor) / 1_000_000
+})
 const contractTargetRatio = computed(() => {
   if (contractTargetWan.value <= 0) return 0
   return contractAmountWan.value / contractTargetWan.value
@@ -83,31 +89,21 @@ const contractProgressLabel = computed(() => {
   return `完成 ${(contractTargetRatio.value * 100).toFixed(1)}%`
 })
 
-function formatSnapshotAt(value) {
-  if (!value) return "暂无快照"
-  const normalized = String(value).includes("T") ? String(value) : String(value).replace(" ", "T")
-  const date = new Date(normalized)
-  if (Number.isNaN(date.getTime())) return String(value)
-  return new Intl.DateTimeFormat("zh-CN", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(date)
-}
-
 const activeSummary = computed(() => {
   if (props.section === "contract") return props.contractSummary
   if (props.section === "project") return props.projectSummary
+  if (['report', 'finance'].includes(props.section)) return props.businessSummary
   return null
 })
 
 const summaryAvailable = computed(() => Boolean(activeSummary.value?.available))
+// 数据状态来自后端 freshness：源更新时间、同步时间和本次查询时间不互相替代。
+const summaryFreshness = computed(() => dashboardFreshnessStatus(activeSummary.value))
+const summaryFreshnessItems = computed(() => (summaryAvailable.value ? dashboardFreshnessItems(activeSummary.value) : []))
 const summaryStatusLabel = computed(() => {
   if (props.section === "overview") return "聚合快照"
-  return summaryAvailable.value ? `更新于 ${formatSnapshotAt(activeSummary.value?.snapshot_at)}` : "暂无聚合快照"
+  if (!summaryAvailable.value) return "暂无聚合快照"
+  return summaryFreshness.value.label
 })
 
 const contractStatusItems = computed(() => {
@@ -153,6 +149,12 @@ function trendWidth(value) {
   return `${Math.max(4, Math.round((numberValue(value) / maxTrendAmount.value) * 100))}%`
 }
 
+function trendCurrencyLabel(item) {
+  const totals = Array.isArray(item?.currency_totals) ? item.currency_totals.filter((row) => row && row.currency) : []
+  if (!totals.length) return `${formatAmountMinor(item?.contract_amount_minor)} 万元`
+  return totals.map((row) => `${row.currency} ${formatAmountMinor(row.amount_minor)} 万元`).join(" · ")
+}
+
 function alertWidth(value) {
   return `${Math.max(4, Math.round((numberValue(value) / maxAlertValue.value) * 100))}%`
 }
@@ -164,7 +166,11 @@ function metricsForSection() {
     const metrics = []
     if (props.canViewContract) {
       metrics.push(metric("合同总数", contract.available ? formatInteger(contract.total_contracts) : "—", "份"))
-      metrics.push(metric("合同金额", contract.available ? formatAmountMinor(contract.total_amount_minor) : "—", "万元"))
+      if (contractCurrencyItems.value.length) {
+        for (const item of contractCurrencyItems.value) metrics.push(metric(`合同金额 ${item.currency}`, formatAmountMinor(item.amount_minor), "万元"))
+      } else {
+        metrics.push(metric("合同金额", contract.available ? formatAmountMinor(contract.total_amount_minor) : "—", "万元"))
+      }
     }
     if (props.canViewProject) {
       metrics.push(metric("项目总数", project.available ? formatInteger(project.project_count) : "—", "个"))
@@ -175,8 +181,11 @@ function metricsForSection() {
     return metrics
   }
   if (props.section === "contract") {
+    const amountMetrics = contractCurrencyItems.value.length
+      ? contractCurrencyItems.value.map((item) => metric(`合同金额 ${item.currency}`, formatAmountMinor(item.amount_minor), "万元"))
+      : [metric("合同总金额", contract.available ? formatAmountMinor(contract.total_amount_minor) : "—", "万元")]
     return [
-      metric("合同总金额", contract.available ? formatAmountMinor(contract.total_amount_minor) : "—", "万元"),
+      ...amountMetrics,
       metric("合同总数", contract.available ? formatInteger(contract.total_contracts) : "—", "份"),
       metric("审批中", contract.available ? formatInteger(contract.approval_contracts) : "—", "份"),
       metric("履行中", contract.available ? formatInteger(contract.active_contracts) : "—", "份"),
@@ -192,10 +201,14 @@ function metricsForSection() {
     ]
   }
   if (props.section === "report") {
-    return [metric("报告周期 P50", "—", "天"), metric("首次通过率", "—", "%"), metric("未关闭投诉", "—", "项", "danger")]
+    const values = props.businessSummary?.available ? props.businessSummary.metrics || {} : {}
+    return [metric("报告周期 P50", values.cycle_p50_days == null ? "—" : Number(values.cycle_p50_days).toFixed(2), "天"), metric("有效报告版本", values.active_reports == null ? "—" : formatInteger(values.active_reports), "份"), metric("已复核／批准版本", values.reviewed_reports == null ? "—" : formatInteger(values.reviewed_reports), "份"), metric("作废版本", values.void_reports == null ? "—" : formatInteger(values.void_reports), "份", "danger")]
   }
-  return [metric("回款率", "—", "%"), metric("90 天以上应收", "—", "分", "danger"), metric("本月收入", "—", "分"), metric("部门成本", "—", "分")]
+  return currencyItems.value.flatMap(row => [metric(`${row.currency} 已核销回款率`, row.collection_rate == null ? "—" : Number(row.collection_rate).toFixed(2), "%"), metric(`${row.currency} 未清应收`, formatAmountMinor(row.open_minor), "万元"), metric(`${row.currency} 超期90天应收`, formatAmountMinor(row.over_90_minor), "万元", "danger"), metric(`${row.currency} 本月登记回款`, formatAmountMinor(row.month_receipts_minor), "万元")])
 }
+
+const currencyItems = computed(() => props.businessSummary?.available ? props.businessSummary?.metrics?.currencies || [] : [])
+const missingMetricLabels = { first_pass_rate: '首次通过率：缺少完整首轮审核结果记录', open_complaints: '投诉：尚无投诉数据源', recognized_income: '收入：尚无收入确认数据源', department_cost: '部门成本：尚无成本数据源' }
 </script>
 
 <template>
@@ -205,8 +218,19 @@ function metricsForSection() {
         <p class="da-panel-kicker">{{ sectionMeta[section].title }}</p>
         <h2>{{ sectionMeta[section].description }}</h2>
       </div>
-      <span class="da-badge neutral">数据状态：{{ summaryStatusLabel }}</span>
+      <span class="da-badge" :class="summaryFreshness.stale ? 'risk' : 'neutral'">{{ summaryStatusLabel }}</span>
     </div>
+
+    <aside v-if="summaryAvailable && summaryFreshness.present" class="da-native-freshness" :class="{ stale: summaryFreshness.stale }" role="status">
+      <div class="da-native-freshness-head">
+        <span class="da-badge" :class="summaryFreshness.stale ? 'risk' : 'normal'">{{ summaryFreshness.badge }}</span>
+        <p v-if="summaryFreshness.stale && summaryFreshness.reason">{{ summaryFreshness.reason }}</p>
+      </div>
+      <dl class="da-native-freshness-grid">
+        <template v-for="item in summaryFreshnessItems" :key="item.key"><dt>{{ item.label }}</dt><dd>{{ item.value }}</dd></template>
+      </dl>
+      <p class="da-native-freshness-note">源数据更新时间、最近成功同步时间与本次查询时间分别展示；本次查询时间不代表源数据更新时间。</p>
+    </aside>
 
     <div class="da-native-metrics">
       <article v-for="item in metricsForSection()" :key="item.label" class="da-native-metric" :class="item.tone">
@@ -235,7 +259,7 @@ function metricsForSection() {
           </div>
         </div>
         <div v-else class="da-native-empty"><span class="da-native-empty-icon">⌁</span><b>暂无状态快照</b><p>完成一次数据源同步后，这里会展示真实状态分布。</p></div>
-        <p v-if="summaryAvailable" class="da-native-note">当前筛选：{{ statusFilter }}；数据更新时间 {{ formatSnapshotAt(activeSummary?.snapshot_at) }}。</p>
+        <p v-if="summaryAvailable" class="da-native-note">当前筛选：{{ statusFilter }}；数据时间以「源数据更新 / 最近成功同步」为准，本次查询时间不冒充数据更新时间。</p>
       </article>
       <article class="da-native-panel">
         <header><b>数据口径说明</b><span>只读</span></header>
@@ -247,10 +271,27 @@ function metricsForSection() {
       </article>
     </div>
 
+    <div v-else-if="['report', 'finance'].includes(section)" class="da-native-columns">
+      <article class="da-native-panel">
+        <header><b>{{ section === 'report' ? '报告状态分布' : '分币种应收与回款' }}</b><span>真实来源快照</span></header>
+        <div v-if="businessSummary?.available" class="da-native-bars">
+          <template v-if="section === 'report'"><div v-for="(count, status) in businessSummary.metrics?.status_counts || {}" :key="status" class="da-native-bar-row"><span>{{ status }}</span><small>{{ formatInteger(count) }} 份</small></div></template>
+          <template v-else><div v-for="row in currencyItems" :key="row.currency" class="da-native-note">{{ row.currency }} 原始应收 {{ formatAmountMinor(row.original_minor) }} 万元，已核销回款 {{ formatAmountMinor(row.allocated_minor) }} 万元，未清 {{ formatAmountMinor(row.open_minor) }} 万元</div></template>
+          <p class="da-native-note">{{ businessSummary.basis }}</p>
+          <p v-if="section === 'finance' && !currencyItems.length" class="da-native-note">本次同步成功，当前租户尚无应收或回款记录。</p>
+        </div>
+        <div v-else class="da-native-empty"><b>尚无可用来源快照</b><p>需要配置该系统的受控只读数据源并完成一次同步；读取失败不会显示演示统计。</p></div>
+      </article>
+      <article class="da-native-panel">
+        <header><b>口径与数据边界</b><span>缺失来源不计为零</span></header>
+        <p v-for="code in businessSummary?.missing_metrics || (section === 'report' ? ['first_pass_rate', 'open_complaints'] : ['recognized_income', 'department_cost'])" :key="code" class="da-native-note">{{ missingMetricLabels[code] || code }}</p>
+        <p class="da-native-note">金额不跨币种相加；合同金额按来源币种展示。回款不冒充收入，作废版本不冒充投诉或审核失败。</p>
+      </article>
+    </div>
     <div v-else class="da-native-columns">
       <article class="da-native-panel">
         <header><b>{{ section === 'overview' ? '签约与项目趋势' : section === 'report' ? '质量效率分析' : '经营回款分析' }}</b><span>T+1 · 指标口径见字典</span></header>
-        <div v-if="section === 'overview' && trendItems.length" class="da-native-bars"><div v-for="item in trendItems" :key="item.period" class="da-native-bar-row"><span>{{ item.period }}</span><i><em :style="{ width: trendWidth(item.contract_amount_minor) }"></em></i><small>{{ formatAmountMinor(item.contract_amount_minor) }} 万元</small></div></div><div v-else class="da-native-empty"><span class="da-native-empty-icon">⌁</span><b>暂无趋势快照</b><p>完成合同与项目同步后，这里会展示真实月度趋势。</p></div>
+        <div v-if="section === 'overview' && trendItems.length" class="da-native-bars"><div v-for="item in trendItems" :key="item.period" class="da-native-bar-row"><span>{{ item.period }}</span><i><em :style="{ width: trendWidth(item.contract_amount_minor) }"></em></i><small>{{ trendCurrencyLabel(item) }}</small></div></div><div v-else class="da-native-empty"><span class="da-native-empty-icon">⌁</span><b>暂无趋势快照</b><p>完成合同与项目同步后，这里会展示真实月度趋势。</p></div>
       </article>
       <article class="da-native-panel">
         <header><b>{{ section === 'overview' ? '预警聚合' : section === 'report' ? '退回原因分布' : '应收账款账龄' }}</b><span>只读</span></header>
@@ -260,17 +301,17 @@ function metricsForSection() {
     <div v-if="section === 'contract' || section === 'project'" class="da-native-columns da-native-secondary">
       <article class="da-native-panel">
         <header><b>{{ section === 'contract' ? '商机→合同转化率漏斗' : '返工率（报告退回+现场重测）' }}</b><span>聚合级</span></header>
-        <div v-if="section === 'contract' && summaryAvailable && contractFunnelItems.some((item) => item.value > 0)" class="da-native-bars"><div v-for="item in contractFunnelItems" :key="item.label" class="da-native-bar-row"><span>{{ item.label }}</span><i><em :style="{ width: barWidth(item.value) }"></em></i><small>{{ formatInteger(item.value) }}</small></div></div><div v-else class="da-native-empty"><span class="da-native-empty-icon">⌁</span><b>暂无明细快照</b><p>同步商机与合同事实后展示转化漏斗。</p></div>
+        <div v-if="section === 'contract' && summaryAvailable && contractSummary?.conversion_available" class="da-native-bars"><div v-for="item in contractFunnelItems" :key="item.label" class="da-native-bar-row"><span>{{ item.label }}</span><i><em :style="{ width: barWidth(item.value) }"></em></i><small>{{ formatInteger(item.value) }}</small></div><p class="da-native-note">{{ contractSummary.conversion_basis }}</p></div><div v-else class="da-native-empty"><span class="da-native-empty-icon">⌁</span><b>暂无明细快照</b><p>同步商机与合同事实后展示转化漏斗。</p></div>
       </article>
       <article class="da-native-panel">
         <header><b>{{ section === 'contract' ? '折扣分析（区间分布）' : '人员 / 设备利用率（本月）' }}</b><span>只读</span></header>
         <div v-if="section === 'contract' && summaryAvailable && contractDiscountItems.length" class="da-native-bars"><div v-for="item in contractDiscountItems" :key="item.label" class="da-native-bar-row"><span>{{ item.label }}</span><i><em :style="{ width: barWidth(item.value) }"></em></i><small>{{ formatInteger(item.value) }}</small></div></div><div v-else class="da-native-empty"><span class="da-native-empty-icon">⌁</span><b>暂无折扣快照</b><p>当前合同数据未提供可计算的折扣区间。</p></div>
-        <p class="da-native-note">暂无可用快照，不使用演示数据填充业务指标。</p>
+        <p class="da-native-note">{{ contractSummary?.discount_unavailable_reason || '暂无可用快照，不使用演示数据填充业务指标。' }}</p>
       </article>
     </div>
     <div v-if="section === 'contract' || section === 'project'" class="da-native-panel da-native-table-panel">
       <header><b>{{ section === 'contract' ? '合同列表（下钻明细）' : '项目执行明细' }}</b><span>聚合级 · 不含敏感字段</span></header>
-      <div v-if="section === 'contract' && contractDetails.items?.length" class="da-native-detail-table"><table class="da-table"><thead><tr><th>合同编号</th><th>名称</th><th>状态</th><th>金额</th><th>到期日</th></tr></thead><tbody><tr v-for="item in contractDetails.items" :key="item.contract_number"><td class="mono">{{ item.contract_number }}</td><td>{{ item.title }}</td><td>{{ contractStatusLabel(item.status) }}</td><td>{{ formatAmountMinor(item.amount_minor) }} 万元</td><td>{{ item.end_date || '—' }}</td></tr></tbody></table><p class="da-native-note">共 {{ contractDetails.total }} 条，当前展示前 10 条</p></div><div v-else class="da-native-empty"><b>暂无明细数据</b><p>当前租户没有可展示的{{ section === 'contract' ? '合同' : '项目' }}记录。</p></div>
+      <div v-if="section === 'contract' && contractDetails.items?.length" class="da-native-detail-table"><table class="da-table"><thead><tr><th>合同编号</th><th>名称</th><th>状态</th><th>金额</th><th>币种</th><th>到期日</th></tr></thead><tbody><tr v-for="item in contractDetails.items" :key="item.contract_number"><td class="mono">{{ item.contract_number }}</td><td>{{ item.title }}</td><td>{{ contractStatusLabel(item.status) }}</td><td>{{ formatAmountMinor(item.amount_minor) }} 万元</td><td>{{ item.currency || '—' }}</td><td>{{ item.end_date || '—' }}</td></tr></tbody></table><p class="da-native-note">共 {{ contractDetails.total }} 条，当前展示前 10 条</p></div><div v-else class="da-native-empty"><b>暂无明细数据</b><p>当前租户没有可展示的{{ section === 'contract' ? '合同' : '项目' }}记录。</p></div>
     </div>
   </section>
 </template>

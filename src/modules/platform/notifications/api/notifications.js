@@ -83,9 +83,26 @@ export const listNotificationDeliveries = ({ page = 1, pageSize = 50, status = '
   }))
 }
 
-export const retryFailedNotificationDeliveries = (limit = 20) => request(`/notifications/deliveries/retry-failed?limit=${encodeURIComponent(limit)}`, {
-  method: 'POST', body: '{}',
-})
+/**
+ * retryFailedNotificationDeliveries 领取并重投本租户到期的失败投递。
+ * 权威路由：platform/internal/transport/http/router.go 的
+ * POST /notifications/deliveries/retry（limit 走查询串，服务端按正整数校验）。
+ * 返回领取/成功/失败三项计数，页面不得把"领取"当成全部投递成功。
+ */
+export const retryFailedNotificationDeliveries = (limit = 20) => {
+  const requested = Number(limit)
+  if (!Number.isInteger(requested) || requested <= 0) {
+    return Promise.reject(new NotificationError('limit 必须是正整数。', { code: 'VALIDATION_ERROR' }))
+  }
+  return request(`/notifications/deliveries/retry?limit=${encodeURIComponent(requested)}`, {
+    method: 'POST', body: '{}',
+  }).then((data) => ({
+    // 后端 RetryResult 默认按 Go 字段名序列化，这里同时兼容蛇形命名。
+    claimed: Number(data?.claimed ?? data?.Claimed ?? 0),
+    delivered: Number(data?.delivered ?? data?.Delivered ?? 0),
+    failed: Number(data?.failed ?? data?.Failed ?? 0),
+  }))
+}
 
 export const getNotificationSettings = () => request('/settings/notifications')
 
@@ -93,7 +110,7 @@ export const updateNotificationSettings = ({ inboxEnabled, reminderFrequency, ve
   method: 'PUT',
   body: JSON.stringify({
     inbox_enabled: Boolean(inboxEnabled),
-    // No email provider/worker is deployed. Keep the compatibility field fail-closed.
+    // 未部署邮件服务或工作进程，兼容字段保持失败关闭。
     email_enabled: false,
     reminder_frequency: reminderFrequency,
     version,
