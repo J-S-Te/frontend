@@ -16,6 +16,7 @@ import {
   createPosition,
   deletePosition,
   createMembership,
+  updateMembershipInheritance,
   createUser,
   createUsersBatch,
   createEmployeesBatch,
@@ -422,4 +423,41 @@ test('a failed write never claims the related catalogs are stale', async () => {
   assert.equal(relatedDataVersion(RELATED_DATA.POSITIONS), 0)
   assert.equal(relatedDataVersion(RELATED_DATA.MEMBERSHIPS), 0)
   resetRelatedDataInvalidation()
+})
+
+
+test('membership inheritance update preserves identity, validity and version in both directions', async () => {
+  const requests = []
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url, options })
+    return jsonResponse({ data: { membership_id: 'member / 1', version: 8 } })
+  }
+  const membership = { membership_id: 'member / 1', user: { id: 'user-1' }, org_unit: { id: 'org-1' }, position: { id: 'pos-1' }, membership_type: 'SECONDARY', status: 'ACTIVE', effective_from: '2026-10-01', effective_to: '2026-11-30', version: 7 }
+  const before = relatedDataVersion(RELATED_DATA.MEMBERSHIPS)
+  for (const enabled of [true, false]) {
+    const result = await updateMembershipInheritance(membership, enabled)
+    assert.equal(result.version, 8)
+  }
+  assert.equal(relatedDataVersion(RELATED_DATA.MEMBERSHIPS), before + 2)
+  assert.match(requests[0].url, /memberships\/member%20%2F%201$/)
+  for (const [index, enabled] of [true, false].entries()) {
+    assert.equal(requests[index].options.method, 'PATCH')
+    assert.deepEqual(JSON.parse(requests[index].options.body), { user_id: 'user-1', org_unit_id: 'org-1', position_id: 'pos-1', membership_type: 'SECONDARY', status: 'ACTIVE', effective_from: '2026-10-01', effective_to: '2026-11-30', inherit_authorization: enabled, version: 7 })
+  }
+})
+
+test('membership inheritance refuses missing version or nonboolean without a write', async () => {
+  globalThis.fetch = async () => { throw new Error('must not write') }
+  for (const [membership, enabled] of [[{}, true], [{ version: 0 }, false], [{ version: 1 }, 'false']]) {
+    await assert.rejects(async () => updateMembershipInheritance(membership, enabled), (e) => e instanceof IamError && e.status === 422)
+  }
+})
+
+test('membership inheritance failed writes keep related data version unchanged', async () => {
+  for (const status of [403, 404, 409, 500]) {
+    const before = relatedDataVersion(RELATED_DATA.MEMBERSHIPS)
+    globalThis.fetch = async () => jsonResponse({ code: 'ERROR', message: 'failure' }, { ok: false, status })
+    await assert.rejects(() => updateMembershipInheritance({ membership_id: 'm1', user: { id: 'u1' }, org_unit: { id: 'o1' }, position: { id: 'p1' }, membership_type: 'PRIMARY', status: 'ACTIVE', version: 1 }, true), (e) => e.status === status)
+    assert.equal(relatedDataVersion(RELATED_DATA.MEMBERSHIPS), before)
+  }
 })

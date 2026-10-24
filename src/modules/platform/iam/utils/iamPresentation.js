@@ -96,6 +96,7 @@ export function detailRows(detail) {
     rows.push({ label: '组织', value: item.org_unit?.name || item.org_unit_id || '—' })
     rows.push({ label: '岗位', value: item.position?.name || item.position_id || '—' })
     rows.push({ label: '任职类型', value: displayMembershipType(item.membership_type) })
+    rows.push({ label: '岗位授权继承', value: item.inherit_authorization === false ? '不继承' : '继承' })
     rows.push({ label: '生效方式', value: !item.effective_from && !item.effective_to ? '长期生效' : '短期生效' })
     rows.push({ label: '状态', value: item.status || '—' })
     rows.push({ label: '生效日期', value: item.effective_from || '—' })

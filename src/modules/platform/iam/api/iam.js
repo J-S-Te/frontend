@@ -552,3 +552,27 @@ export function createMembership({
     }),
   }), [RELATED_DATA.MEMBERSHIPS])
 }
+
+
+// 后端更新任职采用完整输入；仅切换继承时必须保留主体、时间窗与状态，
+// 并携带读取时的版本，避免用陈旧详情覆盖其他管理人员的变更。
+export async function updateMembershipInheritance(membership, inheritAuthorization) {
+  const id = membership?.membership_id || membership?.id
+  const userId = membership?.user?.id || membership?.user_id
+  const orgUnitId = membership?.org_unit?.id || membership?.org_unit_id
+  const positionId = membership?.position?.id || membership?.position_id
+  if (!id || !userId || !orgUnitId || !positionId || !membership?.membership_type || !membership?.status ||
+      !Number.isSafeInteger(membership?.version) || membership.version < 1 || typeof inheritAuthorization !== 'boolean') {
+    throw new IamError('任职信息不完整，请刷新列表后重新打开详情。', { status: 422 })
+  }
+  return onWriteSuccess(request(`/memberships/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      user_id: userId, org_unit_id: orgUnitId, position_id: positionId,
+      membership_type: membership.membership_type, status: membership.status,
+      effective_from: membership.effective_from ?? null,
+      effective_to: membership.effective_to ?? null,
+      inherit_authorization: inheritAuthorization, version: membership.version,
+    }),
+  }), [RELATED_DATA.MEMBERSHIPS])
+}
