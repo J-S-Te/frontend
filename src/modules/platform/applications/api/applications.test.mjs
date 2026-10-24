@@ -25,6 +25,11 @@ import {
   updateApplication,
   updateEnvironment,
   updateSubsystemRuntime,
+  previewSubsystemAccess,
+  submitSubsystemAccessOperation,
+  fetchSubsystemAccessOperation,
+  findSubsystemAccessOperation,
+  resumeSubsystemAccessOperation,
 } from './applications.js'
 import { readFile } from 'node:fs/promises'
 
@@ -369,8 +374,8 @@ test('offboarded production environments expose controlled re-onboarding without
   assert.match(onboardingModule, /updateSubsystemRuntime/)
 })
 
-// Execute the component's actual computed declarations so an unreachable branch
-// cannot pass merely because its source text still exists.
+// 执行组件真实的计算属性声明，避免不可达分支
+// 仅因源码文本仍然存在就通过测试。
 function onboardingComputed(name, nextName, bindings) {
   const start = onboardingModule.indexOf(`const ${name} = computed(`)
   const end = onboardingModule.indexOf(`const ${nextName} = `, start)
@@ -564,3 +569,89 @@ test('environment cards partition directory, Keycloak authentication and runtime
   assert.match(onboardingModule, /Claims 映射/)
   assert.match(onboardingModule, /认证提供方在环境卡片的“Keycloak 认证”分区中切换/)
 })
+
+// ---- 统一接入向导（步骤 4：API 客户端）--------------------------------------------
+
+test('previewSubsystemAccess posts the target and returns the server decision', async () => {
+  let requested
+  globalThis.fetch = async (url, options) => {
+    requested = { url, options }
+    return jsonResponse({ data: { action: 'ADOPT', next_stage: 'AUTH', preview_version: 'pv-1', missing: [] } })
+  }
+
+  const result = await previewSubsystemAccess({ applicationCode: 'settlement', environment: 'dev' })
+
+  assert.equal(requested.url, '/api/v1/subsystem-access/preview')
+  assert.equal(requested.options.method, 'POST')
+  assert.equal(requested.options.credentials, 'include')
+  assert.deepEqual(JSON.parse(requested.options.body), { application_code: 'settlement', environment: 'dev' })
+  assert.equal(result.preview_version, 'pv-1')
+})
+
+test('submitSubsystemAccessOperation sends the preview version and idempotency key', async () => {
+  let requested
+  globalThis.fetch = async (url, options) => {
+    requested = { url, options }
+    return jsonResponse({ data: { operation_id: '01SAOP000000000000000000001', created: true } }, { status: 202 })
+  }
+
+  const result = await submitSubsystemAccessOperation({
+    applicationCode: 'settlement', environment: 'dev', publicOrigin: 'https://settlement.example.com/',
+    authProvider: 'PLATFORM', initialAdminId: '01USR000000000000000000001',
+    previewVersion: 'pv-1', idempotencyKey: 'idem-1',
+  })
+
+  assert.equal(requested.url, '/api/v1/subsystem-access/operations')
+  assert.equal(requested.options.method, 'POST')
+  assert.deepEqual(JSON.parse(requested.options.body), {
+    application_code: 'settlement', environment: 'dev',
+    public_origin: 'https://settlement.example.com', auth_provider: 'platform',
+    initial_admin_id: '01USR000000000000000000001',
+    preview_version: 'pv-1', idempotency_key: 'idem-1',
+  })
+  assert.equal(result.operation_id, '01SAOP000000000000000000001')
+})
+
+test('submitSubsystemAccessOperation surfaces stale preview conflicts', async () => {
+  globalThis.fetch = async () => jsonResponse({
+    code: 'PLATFORM_CONFLICT', message: '预览已过期', request_id: 'trace-9',
+    details: { next_action: '重新执行条件检查' },
+  }, { ok: false, status: 409 })
+
+  await assert.rejects(
+    () => submitSubsystemAccessOperation({ applicationCode: 'settlement', environment: 'dev', previewVersion: 'pv-old', idempotencyKey: 'idem-2' }),
+    (error) => error instanceof ApplicationRegistryError
+      && error.status === 409
+      && error.nextAction === '重新执行条件检查',
+  )
+})
+
+test('operation reads use the operation id and target query', async () => {
+  const calls = []
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options })
+    return jsonResponse({ data: { operation_id: 'op-1', status: 'WAITING' } })
+  }
+
+  await fetchSubsystemAccessOperation('op-1')
+  await findSubsystemAccessOperation({ applicationCode: 'settlement', environment: 'DEV' })
+  await resumeSubsystemAccessOperation('op-1')
+
+  assert.equal(calls[0].url, '/api/v1/subsystem-access/operations/op-1')
+  assert.equal(calls[0].options.method, undefined)
+  assert.equal(calls[1].url, '/api/v1/subsystem-access/operations?application_code=settlement&environment=dev')
+  assert.equal(calls[2].url, '/api/v1/subsystem-access/operations/op-1/resume')
+  assert.equal(calls[2].options.method, 'POST')
+})
+
+test('operation reads encode the identifier to avoid path injection', async () => {
+  let requested
+  globalThis.fetch = async (url, options) => {
+    requested = { url, options }
+    return jsonResponse({ data: { operation_id: 'op' } })
+  }
+
+  await fetchSubsystemAccessOperation('../../environments/evil')
+  assert.equal(requested.url, '/api/v1/subsystem-access/operations/..%2F..%2Fenvironments%2Fevil')
+})
+

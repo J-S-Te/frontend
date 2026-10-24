@@ -8,7 +8,7 @@ function jsonResponse(body, status) {
 test('Portal session carries unified identity, scope and revision fields', async (t) => {
   const originalFetch = globalThis.fetch
   t.after(() => { globalThis.fetch = originalFetch })
-  globalThis.fetch = async () => jsonResponse({ data: {
+  globalThis.fetch = async () => jsonResponse({ code: 'OK', data: {
     sub: 'portal-identity', person_id: 'portal-person', data_scopes: [{ scope_type: 'SELF' }],
     authorization_revision: 9, catalog_version: 'portal-v9', permissions: ['project.read'],
   } }, 200)

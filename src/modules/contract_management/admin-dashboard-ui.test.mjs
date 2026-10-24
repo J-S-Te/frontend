@@ -19,7 +19,8 @@ test('admin metric cards open filtered contract details', () => {
   assert.match(source, /contract_detail_limited/)
 })
 
-test('admin dashboard resolves the full contract before opening DOCX preview', () => {
+test('admin dashboard opens the matching contract and requests persisted DOCX for every source', () => {
   assert.match(source, /function openDashboardContract\(contract\) \{[\s\S]*contracts\.value\.find\(\(item\) => item\.recordId === contract\.recordId\)[\s\S]*openContract/)
-  assert.match(source, /if \(contract\.templateId\) \{[\s\S]*previewContractDocument\(contract\.recordId\)/)
+  assert.match(source, /async function openContract\(contract\)[\s\S]*previewContractDocument\(contract\.recordId\)/)
+  assert.doesNotMatch(source, /if \(contract\.templateId\)/)
 })

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFile } from 'node:fs/promises'
+import { formatUserError } from '../shared/utils/userError.js'
 
 const view = await readFile(new URL('./views/ProjectManagementView.vue', import.meta.url), 'utf8')
 const inbox = await readFile(new URL('./components/ProjectNotificationCenter.vue', import.meta.url), 'utf8')
@@ -9,7 +10,7 @@ function mountInbox(api) {
   const ref = (value) => ({ value })
   const computed = (read) => ({ get value() { return read() } })
   const emitted = []
-  return new Function('ref', 'computed', 'onMounted', 'defineEmits', 'getNotification', 'listInbox', 'markNotificationRead', 'window', `${script}\nreturn { items, total, page, unreadOnly, loading, error, detail, projectTarget, load, open, changeFilter, changePage }`)(ref, computed, () => {}, () => (event) => emitted.push(event), api.getNotification, api.listInbox, api.markNotificationRead, { location: { origin: 'http://localhost:8081' } })
+  return new Function('formatUserError', 'ref', 'computed', 'onMounted', 'defineEmits', 'getNotification', 'listInbox', 'markNotificationRead', 'window', `${script}\nreturn { items, total, page, unreadOnly, loading, error, detail, projectTarget, load, open, changeFilter, changePage }`)(formatUserError, ref, computed, () => {}, () => (event) => emitted.push(event), api.getNotification, api.listInbox, api.markNotificationRead, { location: { origin: 'http://localhost:8081' } })
 }
 test('项目系统挂载个人通知页面并提供侧栏和铃铛入口', () => {
   assert.match(view, /key: 'notifications', label: '个人通知中心'/)

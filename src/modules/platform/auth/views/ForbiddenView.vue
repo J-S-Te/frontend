@@ -1,7 +1,9 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
+import { logoutCurrentSession } from '@/modules/platform/auth/api/auth'
+import { clearAuthorizationSnapshot } from '@/modules/platform/auth/utils/authorizationRefresh'
 
 // 路由守卫把无权访问的用户送来这里。`from` 是用户原本想去的路径，渲染时透出
 // 让用户知道为什么被拦下，也方便管理员复现问题。
@@ -31,7 +33,22 @@ function goPortal() {
   router.push({ name: 'portal' })
 }
 
-function goLogin() {
+const switching = ref(false)
+
+// 直接跳登录页不成立：HttpOnly Cookie 仍有效时，登录路由守卫会恢复既有会话并把
+// 用户送回门户，"切换账号"永远不会发生。必须先显式结束当前会话再进入登录页；
+// 会话已经失效时继续跳转，不把切号卡在错误页。
+async function goLogin() {
+  if (switching.value) return
+  switching.value = true
+  try {
+    await logoutCurrentSession()
+  } catch {
+    // 退出失败通常意味着会话已失效；仍然允许进入登录页重新登录。
+  } finally {
+    clearAuthorizationSnapshot()
+    switching.value = false
+  }
   router.push({ name: 'login', query: { reason: 'forbidden' } })
 }
 </script>
@@ -53,8 +70,8 @@ function goLogin() {
         <button type="button" class="forbidden-button primary" @click="goPortal">
           返回子系统门户
         </button>
-        <button type="button" class="forbidden-button ghost" @click="goLogin">
-          切换账号
+        <button type="button" class="forbidden-button ghost" :disabled="switching" @click="goLogin">
+          {{ switching ? '正在退出…' : '切换账号' }}
         </button>
       </div>
     </div>

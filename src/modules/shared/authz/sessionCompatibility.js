@@ -4,7 +4,7 @@ export const SUBSYSTEM_ACCESS_REASON = Object.freeze({
   DEPENDENCY_UNAVAILABLE: 'DEPENDENCY_UNAVAILABLE',
   IDENTITY_NOT_PROVISIONED: 'IDENTITY_NOT_PROVISIONED',
   OIDC_CLAIMS_INVALID: 'OIDC_CLAIMS_INVALID',
-  // 子系统 OIDC 回调阶段失败（state 失效 / token exchange / id_token 校验 / authorization_context
+  // 子系统 OIDC 回调阶段失败（state 失效 / 令牌交换 / id_token 校验 / authorization_context
   // 无法解析等）。后端在每个失败点都会带着 stage 跳到 /access-error?reason=CALLBACK_FAILED。
   CALLBACK_FAILED: 'CALLBACK_FAILED',
   UNKNOWN: 'UNKNOWN',
@@ -23,12 +23,11 @@ function firstString(...values) {
 }
 
 /**
- * Normalize the rolling `/auth/me` contract without deriving authorization in the browser.
+ * 规范化滚动更新中的 `/auth/me` 契约，不在浏览器推导授权。
  *
- * Detailed permissions and data scopes are server-owned. The frontend only carries the
- * server response for display and request context; it never expands, merges or interprets
- * scope rules. Legacy fields remain on the returned object through the object spread, but
- * no new field is derived from role_config_hash.
+ * 详细权限和数据范围由服务端管理。前端仅携带服务端响应，用于展示与请求上下文；
+ * 不扩展、合并或解释范围规则。对象展开会保留返回对象中的旧字段，
+ * 但不从 role_config_hash 推导任何新字段。
  */
 export function normalizeAuthorizationSession(value = {}) {
   const source = value && typeof value === 'object' ? value : {}
@@ -70,7 +69,7 @@ function isOIDCClaimsFailure(code, message) {
     || /OIDC (?:authorization )?claims (?:are )?(?:not valid|invalid)/i.test(message)
 }
 
-/** Keep authentication, authorization, dependency and provisioning failures distinct. */
+/** 明确区分认证、授权、依赖和配置供给失败。 */
 export function classifySubsystemAccessError(error = {}) {
   const status = Number(error?.status || 0)
   const code = errorCode(error)
@@ -121,27 +120,27 @@ export function buildSubsystemAccessErrorRoute(error, from = '') {
 export const SUBSYSTEM_ACCESS_PRESENTATION = Object.freeze({
   [SUBSYSTEM_ACCESS_REASON.UNAUTHENTICATED]: Object.freeze({
     title: '登录状态已失效',
-    message: '当前子系统会话已失效，请重新完成 Keycloak 登录。',
+    message: '当前登录状态已过期，请重新登录后继续操作。',
   }),
   [SUBSYSTEM_ACCESS_REASON.FORBIDDEN]: Object.freeze({
     title: '当前账号未获得访问权限',
-    message: '身份认证已经完成，但服务器拒绝了当前应用访问。请联系管理员检查应用角色、权限目录和授权范围。',
+    message: '你已登录，但尚未获得此系统或相关数据的访问权限，请联系管理员确认账号权限和数据范围。',
   }),
   [SUBSYSTEM_ACCESS_REASON.DEPENDENCY_UNAVAILABLE]: Object.freeze({
     title: '子系统或依赖服务暂时不可用',
-    message: '目标子系统可能未部署、已停用，或 Keycloak、统一授权上下文暂时不可用。请联系管理员确认部署状态，或稍后重试。',
+    message: '目标系统暂时无法访问，可能尚未部署、已停用或服务异常。请稍后重试；仍失败时请联系管理员检查运行状态。',
   }),
   [SUBSYSTEM_ACCESS_REASON.IDENTITY_NOT_PROVISIONED]: Object.freeze({
-    title: '客户门户身份尚未预配',
-    message: '统一认证和应用授权已完成，但当前账号尚未绑定客户门户身份。请联系客户服务人员完成客户映射。',
+    title: '当前账号尚未关联客户',
+    message: '当前账号还不能进入客户门户，请联系客户服务人员完成账号与客户的关联。',
   }),
   [SUBSYSTEM_ACCESS_REASON.OIDC_CLAIMS_INVALID]: Object.freeze({
-    title: 'OIDC 登录响应校验失败',
-    message: '服务器未接受本次 Keycloak 登录响应。请重新发起登录；若仍失败，请管理员检查 Client、回调地址和 Claims 映射。',
+    title: '登录信息未通过校验',
+    message: '本次登录信息与应用配置不一致，请重新登录；仍失败时请联系管理员检查应用接入配置。',
   }),
   [SUBSYSTEM_ACCESS_REASON.CALLBACK_FAILED]: Object.freeze({
-    title: '子系统登录回调未能完成',
-    message: '子系统服务端在处理 Keycloak 回调时未能完成校验或权限解析。请点击「重新发起 Keycloak 登录」重新走一次登录流程；若再次失败，请把页面下方的「错误阶段 / 追踪号」一并提供给管理员，由后端按 stage 定位（常见 stage：login_state / token_exchange / id_token / authorization_context）。',
+    title: '暂时未能完成系统登录',
+    message: '进入目标系统时未能完成身份确认，请点击「重新登录」再试；若仍失败，请把下方排查信息提供给管理员。',
   }),
   [SUBSYSTEM_ACCESS_REASON.UNKNOWN]: Object.freeze({
     title: '暂时无法进入子系统',
@@ -150,11 +149,10 @@ export const SUBSYSTEM_ACCESS_PRESENTATION = Object.freeze({
 })
 
 /**
- * A subsystem feature permission denial (`PM_FORBIDDEN`, `SETTLEMENT_FORBIDDEN`, ...) is a
- * different fact from "this account may not access the application at all"
- * (`PORTAL_AUTHORIZATION_REQUIRED`, `*_AUTHORIZATION_DENIED`). Both arrive as 403, but telling
- * a user with a working session that "the server rejected this application" sends them to the
- * wrong place: they only lack one feature role.
+ * 子系统功能权限被拒绝（`PM_FORBIDDEN`、`SETTLEMENT_FORBIDDEN` 等）与
+ * 账号完全无权访问应用（`PORTAL_AUTHORIZATION_REQUIRED`、`*_AUTHORIZATION_DENIED`）
+ * 是不同情况。二者均返回 403；若用户会话有效却只缺少某个功能角色，
+ * 提示“服务器拒绝此应用”会将用户引向错误的处理方向。
  */
 function isFeaturePermissionDenial(code) {
   return /_FORBIDDEN$/.test(code) && !/AUTHORIZATION/.test(code)

@@ -17,6 +17,7 @@ function normalizeAssignees(values) {
     .map((item) => ({
       person_id: String(item?.person_id || '').trim(),
       role: String(item?.role || '').trim(),
+      ...(item?.department_id ? { department_id: String(item.department_id).trim() } : {}),
     }))
     .sort((left, right) => compareUnicodeCodePoints(left.person_id, right.person_id) || compareUnicodeCodePoints(left.role, right.role))
 }
@@ -59,10 +60,30 @@ export function normalizePresaleMutationPayload(operation, payload) {
       version: normalizedVersion(payload?.version),
     }
   }
-  if (operation === 'assignment') {
+  if (operation === 'assignment' || operation === 'executor_assignment') {
     return {
       assignees: normalizeAssignees(payload?.assignees),
       change_reason: String(payload?.change_reason || '').trim(),
+      version: normalizedVersion(payload?.version),
+    }
+  }
+  if (operation === 'department') {
+    return {
+      department_id: String(payload?.department_id || '').trim(),
+      team_lead_person_id: String(payload?.team_lead_person_id || '').trim(),
+      version: normalizedVersion(payload?.version),
+    }
+  }
+  if (operation === 'executing_takeover') {
+    return {
+      team_lead_person_id: String(payload?.team_lead_person_id || '').trim(),
+      reason: String(payload?.reason || '').trim(),
+      version: normalizedVersion(payload?.version),
+    }
+  }
+  if (operation === 'executor_rejection') {
+    return {
+      reason: String(payload?.reason || '').trim(),
       version: normalizedVersion(payload?.version),
     }
   }

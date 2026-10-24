@@ -36,6 +36,13 @@ test('approval center continuously synchronizes visible workflow state and confi
   assert.match(source, /操作已受理，流程仍在处理，状态将自动更新/)
 })
 
+test('approval history distinguishes missing snapshots and exposes controlled recovery', () => {
+  assert.match(source, /approvalDetail\.snapshot_available === false/)
+  assert.match(source, /未保存提交快照/)
+  assert.match(source, /await recoverApproval\(target\.id\)/)
+  assert.match(source, />修复审批状态</)
+})
+
 test('approval center presents workflow statuses in Chinese', () => {
   assert.match(source, /running: '审批中'/)
   assert.match(source, /rejected: '已驳回'/)
@@ -59,4 +66,6 @@ test('add-sign candidates are limited to users with contract approval permission
   assert.match(source, /!assigned\.has\(user\.user_id\)/)
   assert.match(source, /v-for="user in approvalTargetUsers"/)
   assert.match(source, /请选择具有合同审批权限的人员/)
+  assert.match(source, /state_unavailable/)
+  assert.match(source, /审批工作流历史已不可查询/)
 })

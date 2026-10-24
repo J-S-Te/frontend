@@ -807,6 +807,11 @@
   --crm-status-border: #bfdbfe;
   --crm-status-surface: #eff6ff;
 }
+.crm-presale-board .crm-board-column[data-status='PENDING_EXECUTION_ASSIGNMENT'] {
+  --crm-status-accent: #0891b2;
+  --crm-status-border: #a5f3fc;
+  --crm-status-surface: #ecfeff;
+}
 .crm-presale-board .crm-board-column[data-status='EXECUTING'] {
   --crm-status-accent: #8b5cf6;
   --crm-status-border: #ddd6fe;
@@ -862,7 +867,7 @@
 .crm-board-card strong { color: var(--crm-text); font-size: 13px; }
 .crm-board-card span { color: var(--crm-muted); font-size: 11px; white-space: normal; }
 
-/* CRM follows the shared platform shell but has a denser operational workspace. */
+/* CRM 沿用共享的平台外壳，但采用更紧凑的业务操作布局。 */
 .crm-quick-filters button,
 .crm-customer-tabs button {
   min-height: 32px !important;
@@ -1290,6 +1295,7 @@
 .crm-engineer__identity { display: grid; min-width: 0; gap: 2px; }
 .crm-engineer__identity strong { overflow: hidden; color: #0f172a; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
 .crm-engineer__identity small { overflow: hidden; color: #64748b; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.crm-engineer__role { max-width: 112px; padding: 4px 6px; border: 1px solid #cbd5e1; border-radius: 7px; background: #fff; color: #334155; font-size: 12px; }
 .crm-engineer em { padding: 3px 7px; border-radius: 999px; background: #f1f5f9; color: #64748b; font-size: 11px; font-style: normal; }
 .crm-engineer.selected em { background: #dbeafe; color: #1d4ed8; font-weight: 700; }
 .crm-engineer-picker__legacy { display: grid; gap: 8px; margin-top: 14px; padding: 12px 14px; border: 1px solid #fcd34d; border-radius: 12px; background: #fffbeb; }
@@ -1337,6 +1343,7 @@
 .crm-presale-detail-heading > div { display: flex; align-items: center; gap: 10px; }
 .crm-presale-detail-heading > small { display: block; margin-top: 6px; color: #64748b; font-size: 12px; }
 .crm-presale-status-badge { display: inline-flex; align-items: center; min-height: 24px; padding: 2px 9px; color: #1d4ed8; border: 1px solid #bfdbfe; border-radius: 999px; background: #eff6ff; font-size: 11px; font-weight: 750; }
+.crm-presale-status-badge[data-status="PENDING_EXECUTION_ASSIGNMENT"] { color: #0e7490; border-color: #a5f3fc; background: #ecfeff; }
 .crm-presale-status-badge[data-status="EXECUTING"],
 .crm-presale-status-badge[data-status="COMPLETED"] { color: #047857; border-color: #a7f3d0; background: #ecfdf5; }
 .crm-presale-status-badge[data-status="REJECTED"],

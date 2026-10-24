@@ -204,10 +204,16 @@
 .contract-external-file>span { color:#166534 !important; font-size:11px !important; }
 .contract-external-file input[type=file] { height:auto; padding:9px 10px; background:#fff; }
 .contract-form-grid label>small { color: var(--cm-muted); font-size: 9px; }
+.contract-app label:has(input[required]) > span::after,
+.contract-app label:has(select[required]) > span::after,
+.contract-app label:has(textarea[required]) > span::after,
+.contract-app .is-required > span::after { content: " *"; color: var(--cm-red); font-weight: 700; }
+.contract-form-required-hint { margin: 0; padding: 9px 12px; color: var(--cm-secondary); font-size: 12px; border: 1px solid #dbeafe; border-radius: 8px; background: #f8fbff; }
+.contract-form-required-hint strong { color: var(--cm-red); }
 .contract-form-grid .contract-field-error { color:var(--cm-red); }
 .contract-opportunity-control { display:flex; gap:6px; }
-.contract-opportunity-control>button:first-child { height:36px; min-width:0; flex:1; overflow:hidden; padding:0 10px; color:var(--cm-secondary); text-align:left; text-overflow:ellipsis; white-space:nowrap; cursor:pointer; border:1px solid var(--cm-border); border-radius:7px; background:#fff; }
-.contract-opportunity-control>button:first-child:disabled { color:var(--cm-placeholder); cursor:not-allowed; background:#f8fafc; }
+.contract-opportunity-control>select { height:36px; min-width:0; flex:1; padding:0 10px; color:var(--cm-secondary); cursor:pointer; border:1px solid var(--cm-border); border-radius:7px; background:#fff; }
+.contract-opportunity-control>select:disabled { color:var(--cm-placeholder); cursor:not-allowed; background:#f8fafc; }
 .contract-opportunity-control>button:last-child { width:36px; color:var(--cm-red); cursor:pointer; border-radius:7px; background:var(--cm-red-soft); }
 .contract-service-items { padding:14px; border:1px solid var(--cm-border); border-radius:9px; background:#f8fafc; }
 .contract-service-items>.contract-section-title h3 { margin:0; font-size:12px; }
@@ -311,9 +317,9 @@
 @media (max-width: 640px){.contract-sign-stats-four,.contract-signing-review{grid-template-columns:1fr}.contract-signing-operations>*{flex:1}.contract-signing-timeline>div{min-width:145px}}
 
 /* ==========================================================================
-   UniLab v1.0 design-system alignment
-   Scope all rules to the contract subsystem so the unified portal and other
-   business applications retain their own visual language.
+   UniLab v1.0 设计系统对齐
+   所有规则仅作用于合同子系统，确保统一门户与其他
+   业务应用保留各自的视觉风格。
    ========================================================================== */
 .contract-app {
   --cm-primary-border: #bfdbfe;
@@ -582,3 +588,6 @@
   .contract-stat-grid,
   .contract-admin-stat-grid { grid-template-columns: 1fr; }
 }
+.contract-payment-term-row { display: grid; grid-template-columns: 100px 1fr 1fr auto; gap: 12px; align-items: end; margin: 12px 0; }
+.contract-payment-summary { margin: 20px 0; }
+@media (max-width: 640px) { .contract-payment-term-row { grid-template-columns: 1fr 1fr; } }

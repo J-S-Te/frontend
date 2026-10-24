@@ -21,8 +21,10 @@ test('contract pages use business language instead of exposing integration statu
 
 test('request failures never fall back to an HTTP status string', () => {
   assert.doesNotMatch(apiSource, /`HTTP \$\{response\.status\}`/)
-  assert.match(apiSource, /userSafeErrorMessage\(body\?\.message\)/)
-  assert.match(apiSource, /操作失败，请稍后重试。/)
+  assert.match(apiSource, /formatUserError\(body,/)
+  assert.match(apiSource, /合同操作未完成，请稍后重试。/)
+  assert.match(apiSource, /error\.requestID = requestId/)
+  assert.match(apiSource, /error\.fieldErrors = body\?\.field_errors/)
 })
 
 test('partial loading failures are limited to related business pages', () => {

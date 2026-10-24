@@ -226,3 +226,14 @@ test('generic application access never serializes custom business permissions', 
     roles: [{ role_code: 'sales', scope_type: 'APPLICATION' }],
   })
 })
+
+test('manual management collection preserves scheduled and repeated-code scopes separately from effective access', async () => {
+  const { normalizeApplicationAccess } = await import('./authorization.js')
+  const current = { code: 'B', scope_type: 'APPLICATION', grant_origin: 'MANUAL' }
+  const scheduled = { code: 'A', scope_type: 'ENVIRONMENT', environment_code: 'prod', grant_origin: 'MANUAL', valid_from: '2030-01-02T03:04:05.123Z', valid_until: '2031-02-03T04:05:06.789Z' }
+  const anotherScope = { ...scheduled, environment_code: 'test' }
+  const access = normalizeApplicationAccess({ roles: [current], direct_roles: [current], inherited_roles: [], manual_roles: [current, scheduled, anotherScope] })
+  assert.deepEqual(access.roles, [current])
+  assert.deepEqual(access.direct_roles, [current])
+  assert.deepEqual(access.manual_roles, [current, scheduled, anotherScope])
+})

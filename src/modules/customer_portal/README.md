@@ -8,7 +8,7 @@ API 基地址默认是 `/customer-portal/api/v1`，可用 `VITE_CUSTOMER_PORTAL_
 ## 已实现
 
 - 启动读取 `/auth/me`，401 跳转 Portal `/auth/login`。
-- 登录会话建立后只读取一次 `/capabilities`。该接口仅返回四项运行能力的 `available/mode/reason_code`，不返回 Provider URL、OAuth Client、scope 或 secret，也不执行远端网络探测；读取失败时报告下载、备案材料上传等依赖型动作保持关闭，最终仍以后端动作接口为权威。
+- 登录会话建立后只读取一次 `/capabilities`。该接口返回稳定的运行能力项（当前包括报告申请、项目导出、报告下载、材料上传、备案导出和CRM人工核验模式）的 `available/mode/reason_code`，不返回 Provider URL、OAuth Client、scope 或 secret，也不执行远端网络探测；读取失败时报告下载、备案材料上传等依赖型动作保持关闭，最终仍以后端动作接口为权威。
 - 项目列表、项目详情和活动时间线界面/API 客户端；详情展示项目快照的总体进度、当前阶段、预计结束、延期、源更新时间、Portal 同步时间、里程碑、团队及脱敏联系方式。
 - 项目详情、分页动态和服务评价使用独立加载/失败状态；`project.read` 可单独打开详情，评价 403 或服务失败不会遮蔽项目数据，评价提交按钮另受 `evaluation.create` 控制。
 - `project.export` 独立控制异步项目 PDF；页面按项目隔离重试键和已受理任务。站内联系项目经理仅在权威 `manager_portal_account_id` 已同步且当前账号具备 `project.message.read/send` 时开放；姓名和脱敏联系方式不构成投递身份。客户打开最新消息窗口后，仅将服务端返回且真实投递给本账号的最新经理消息推进为已读；回执失败不隐藏已经成功加载的消息。
@@ -28,7 +28,7 @@ API 基地址默认是 `/customer-portal/api/v1`，可用 `VITE_CUSTOMER_PORTAL_
 
 ## 本地基础平台接入
 
-统一 Docker 已提供独立 `portal-mysql`、`portal-migrate`、`portal-api` 和 Nginx 路由。首次不存在 `customer_portal/dev` 时，在 `platform` 目录执行：
+统一Docker已有独立portal-mysql、portal-migrate、portal-api与Nginx路由。当前迁移计划为Portal39文件至000119；000119补请求审计client_ip/ip_source，缺列会使请求与探针503，网关可能502。先按受控升级流程核对schema，不能关闭审计恢复可用性。首次不存在 `customer_portal/dev` 时，在 `platform` 目录执行：
 
 ```bash
 bash scripts/subsystem.sh onboard \
@@ -44,8 +44,18 @@ bash scripts/subsystem.sh onboard \
 
 ## 外部依赖与未实现项
 
-Portal 已由独立 `cmd/portal-server` 启动，`internal/portalbootstrap` 构造账号、项目、报告 Service 并注册 `/customer-portal` 路由；统一前端的 Router 和模块清单已登记，本地 MySQL、OIDC Client、权限目录和 CRM 邀请链路由部署 Agent 自动配置。项目、报告、对象存储、扫描和公安等业务 Provider 仍按各自能力独立联调，缺失时相关按钮失败关闭，不影响 OIDC 登录和基础门户查询。
+Portal 已由独立 `cmd/portal-server` 启动，`internal/portalbootstrap` 构造账号、项目、报告 Service 并注册 `/customer-portal` 路由；统一前端的 Router 和模块清单已登记，本地 MySQL、OIDC Client、权限目录和 CRM 邀请链路由部署 Agent 自动配置。项目源、报告投递/摄取与文件/安全适配按各自能力联调；公安不是当前门户用户直接调用的业务入口，缺失时相关按钮失败关闭，不影响 OIDC 登录和基础门户查询。
 
-备案前端只实现后端固定 schema 中已确认的 2025 字段子集，不宣称是官方完整模板。材料步骤已接受控上传会话、对象直传、完成核验和扫描状态，只有 `CLEAN` 的不可变对象版本才能锁定备案；正式对象存储/扫描 Provider 未配置时后端返回 503。锁定后状态为 `WAITING_CONTRACT`，明确不代表已向公安提交；备案 PDF/export 和公安提交仍失败关闭。管理员解锁只在机器接口，不出现在外部客户 UI。
+备案前端只实现后端固定 schema 中已确认的 2025 字段子集，不宣称是官方完整模板。材料步骤已接受控上传会话、对象直传、完成核验和扫描状态，只有 `CLEAN` 的不可变对象版本才能锁定备案；当前bootstrap可选HTTP网关或本地存储与静态校验器；缺失时503。锁定后WAITING_CONTRACT不代表向公安提交。备案PDF已接真实渲染器，配置PDF目录与CJK字体后开放，缺失仍503；导出为系统字段，未声明官方完整模板。公安提交保持CRM_MANUAL_REVIEW边界。管理员解锁只在机器接口，不出现在外部客户 UI。
 
-反馈附件可信上传/文件校验、独立客服运营工作台、外部管理层通知和站内联系项目经理尚未完成。项目 PDF 异步导出及受控下载已实现，但仍需部署 CJK 字体/pdfcpu 配置并完成真实 MySQL、浏览器 E2E 和性能验收。报告安全授权与前端下载链路已接入，但真实文件下载仍依赖可信对象读取、信封解密和风险策略的生产适配；依赖未配置时后端返回 503，前端失败关闭。评价只认项目快照权威 `COMPLETED` 状态；低分内部待办和最小样本 5 的匿名机器统计已实现，但 `evaluation.create/read`、`portal.evaluation.read` 仍需基础平台登记，管理层目录与外部消息不在本前端伪造。反馈处理已提供独立 `portal.feedback.manage` 机器接口和内部超时待办投影，仍需基础平台登记该 scope 并由最终归属的内部处理系统联调。IP 属地需要可信 GeoIP/网关来源，当前留空；平台级账号状态、密码、MFA、账号恢复与全局登录失败明细归属基础平台，Portal 不复制这些能力。
+反馈附件可信上传/文件校验、独立客服运营工作台与外部管理层通知仍缺；站内联系项目经理的会话/消息/已读链已实现，须有权威经理账号及读/发权限，不能继续列为未实现。项目 PDF 异步导出及受控下载已实现，但仍需部署 CJK 字体/pdfcpu 配置并完成真实 MySQL、浏览器 E2E 和性能验收。报告授权及下载链已实现；bootstrap可按完整配置注入AES-GCM私有存储、审计风险策略、CRM身份查询与逐页PDF水印。仅本地reader不足，缺依赖时capability关闭，半配置拒绝启动；真实下载及外部服务仍需验收。评价只认项目快照权威 `COMPLETED` 状态；低分内部待办和最小样本 5 的匿名机器统计已实现，但 `evaluation.create/read`、`portal.evaluation.read` 仍需基础平台登记，管理层目录与外部消息不在本前端伪造。反馈处理已提供独立 `portal.feedback.manage` 机器接口和内部超时待办投影，仍需基础平台登记该 scope 并由最终归属的内部处理系统联调。IP 属地需要可信 GeoIP/网关来源，当前留空；平台级账号状态、密码、MFA、账号恢复与全局登录失败明细归属基础平台，Portal 不复制这些能力。
+
+## 当前操作说明（2026-10-22）
+
+用户入口见 [客户自助门户操作手册](../../../../sharedDocs/10_操作手册/客户自助门户操作手册.md)。登录后导航是我的项目、电子报告、等保备案、客户反馈和账号安全；当前不应按原型编造独立工作台统计或自注册页面。内部portal_super_admin会话不绑定客户，显示管理提示，不自动加载所有客户资源。
+
+我的项目读取本地快照，000118已持久账号权限模式：新预配/已有绑定历史账号为ISOLATED，最后ACTIVE绑定撤销后为空集；仅无模式旧账号保留客户范围兼容，不按当前是否有绑定决定回退。报告当前版本作废或换版会撤销旧授权；不能用旧grant恢复旧版本。备案提交只证明WAITING_CONTRACT本地快照/outbox/锁定，不证明CRM人工队列或公安已收到。
+
+备案材料仅PDF/PNG/JPEG、20MiB；不能套用商机附件DOCX/XLSX白名单。账号密码初始化、重置和MFA均属平台身份能力；门户不存密码。完整依据及原陈述纠正见 [核验记录](../../../../.ai/modules/operation-docs-crm-20261013.md)。本轮仅静态核验，没有浏览器E2E或部署可用性结论。
+
+当前生产清单的Portal运行服务为portal-api、portal-report-worker、portal-invite-compensation-worker；项目同步、项目导出与反馈SLA命令不因存在就视为已部署。报告Worker默认仅摄取，不发布新申请投递心跳；申请能力READY需要显式完整模式和真实外部回执。源码依据见[本轮文档报告](../../../../.ai/qa/docs-code-sync-20261022/agents/crm-contract-report.json)。

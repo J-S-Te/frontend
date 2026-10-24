@@ -5,6 +5,7 @@ import {
   shouldStartSubsystemLogin,
 } from '../../shared/authz/sessionCompatibility.js'
 import { attachStructuredContext } from '../../platform/shared/api/requestContext.js'
+import { formatUserError } from '../../shared/utils/userError.js'
 
 const runtimeEnv = import.meta.env || {}
 const PUBLIC_PATH_PREFIX = (runtimeEnv.VITE_PROJECT_PUBLIC_PATH_PREFIX || '/project_management').replace(/\/$/, '')
@@ -22,8 +23,46 @@ function startProjectLogin({ force = false } = {}) {
   window.location.replace(`${PUBLIC_PATH_PREFIX}/auth/login${prompt}`)
 }
 
+function projectRequestError(body, response, context, { code, fallback, outcomeUnknown = false } = {}) {
+  const status = response?.status || 0
+  const requestId = body?.request_id || body?.requestId || response?.headers?.get('x-request-id') || ''
+  const traceId = body?.trace_id || body?.traceId || response?.headers?.get('x-trace-id') || ''
+  const error = new Error(formatUserError(body, { status, code: code || body?.code, method: context.method, details: body?.details ?? body?.field_errors ?? body?.fieldErrors, fallback }))
+  error.status = status
+  error.code = code || body?.code || ''
+  error.requestID = requestId
+  error.details = body?.details ?? null
+  error.fieldErrors = body?.field_errors ?? body?.fieldErrors ?? body?.details?.fields ?? null
+  if (outcomeUnknown) {
+    error.outcomeUnknown = true
+    error.message = '尚未确认本次操作结果，请先刷新相关列表核对状态，不要重复提交；仍无法确认时请联系管理员。'
+  }
+  attachStructuredContext(error, {
+    ...context, tenantId: String(body?.tenant_id || ''), requestId, traceId,
+    metadata: { source: 'project_api', outcomeUnknown },
+  }, { status, code: error.code, requestId, traceId })
+  return error
+}
+
+async function readProjectBody(response) {
+  if (response.status === 204 || response.status === 205) return null
+  const mediaType = (response.headers.get('content-type') || '').split(';', 1)[0].trim().toLowerCase()
+  if (mediaType.endsWith('/json') || mediaType.endsWith('+json')) return response.json()
+  const message = await response.text()
+  return message ? { message } : {}
+}
+
+function handleProjectAuthentication(error, response) {
+  if (response.status === 401) {
+    if (!error.code) error.code = 'PROJECT_UNAUTHENTICATED'
+    if (shouldStartSubsystemLogin(error)) startProjectLogin()
+  }
+  return error
+}
+
 async function request(path, options = {}) {
   const method = String(options.method || 'GET').toUpperCase()
+  const isMutation = !['GET', 'HEAD', 'OPTIONS'].includes(method)
   const requestContext = {
     subsystem: 'project_management',
     feature: 'project_api',
@@ -43,47 +82,31 @@ async function request(path, options = {}) {
         ...(options.headers || {}),
       },
     })
-  } catch (error) {
-    const requestError = new Error('无法连接项目管理服务，请稍后重试。')
-    attachStructuredContext(requestError, {
-      ...requestContext,
-      metadata: { ...requestContext, network: true, rawError: String(error || '').slice(0, 160) },
-    }, {
-      status: 0,
-      code: 'NETWORK_ERROR',
-      requestId: '',
-      traceId: '',
+  } catch {
+    throw projectRequestError(null, null, requestContext, {
+      code: 'NETWORK_ERROR', fallback: '无法连接项目管理服务，请检查网络后重试。', outcomeUnknown: isMutation,
     })
-    throw requestError
   }
-  const contentType = response.headers.get('content-type') || ''
-  const body = contentType.includes('application/json') ? await response.json() : { message: await response.text() }
+  let body
+  let invalidBody = false
+  try { body = await readProjectBody(response) } catch { invalidBody = true }
+  const mediaType = (response.headers.get('content-type') || '').split(';', 1)[0].trim().toLowerCase()
+  const isJSON = mediaType.endsWith('/json') || mediaType.endsWith('+json')
+  // 网关误回 200 HTML、损坏响应或错误 envelope 都不能变成成功写入或“空列表”。
+  const hasData = body && typeof body === 'object' && !Array.isArray(body) && Object.hasOwn(body, 'data')
+  if (response.ok && ![204, 205].includes(response.status) && (!isJSON || invalidBody || !hasData)) {
+    throw projectRequestError(null, response, requestContext, {
+      code: 'INVALID_PROJECT_RESPONSE', fallback: '项目服务返回的数据格式异常，请刷新页面；仍无法操作时请联系管理员检查前后端版本。', outcomeUnknown: isMutation,
+    })
+  }
   if (!response.ok) {
-    const error = new Error(body?.message || `HTTP ${response.status}`)
-    attachStructuredContext(error, {
-      ...requestContext,
-      tenantId: String(body?.tenant_id || ''),
-      requestId: body?.request_id || '',
-      traceId: body?.trace_id || body?.traceId || '',
-      metadata: { source: 'project_api' },
-    }, {
-      status: response.status,
-      code: body?.code,
-      requestId: body?.request_id || '',
-      traceId: body?.trace_id || body?.traceId || '',
+    const error = projectRequestError(body, response, requestContext, {
+      fallback: '项目操作未完成，请稍后重试。',
+      outcomeUnknown: isMutation && ([408, 502, 504].includes(response.status) || body?.code === 'PM_SERVICE_TIMEOUT'),
     })
-    error.status = response.status
-    error.code = body?.code
-    error.requestID = body?.request_id || ''
-    error.details = body?.details || null
-    if (response.status === 401) {
-      if (!error.code) error.code = 'PROJECT_UNAUTHENTICATED'
-      if (shouldStartSubsystemLogin(error)) startProjectLogin()
-      throw error
-    }
-    throw error
+    throw handleProjectAuthentication(error, response)
   }
-  return body?.data ?? body
+  return body?.data ?? null
 }
 
 /**
@@ -203,7 +226,7 @@ export async function listProjects(params = {}) {
   return unwrapPage(data).items
 }
 
-/** Return one server-owned, role-scoped in-flight monitoring snapshot. */
+/** 返回一份由服务端生成、按角色限定范围的进行中监控快照。 */
 export async function getProjectMonitoring(params = {}) {
   const query = { ...params }
   if (query.q === undefined && query.keyword !== undefined) query.q = query.keyword
@@ -250,6 +273,12 @@ export async function getApprovedContractServiceItems(contractID) {
     contract_version: Number(data?.contract_version || 0),
     service_items: Array.isArray(data?.service_items) ? data.service_items : [],
   }
+}
+
+export async function listSupplementContracts(projectID, params = {}) {
+  const query = new URLSearchParams(params)
+  const data = await request(`/projects/${encodeURIComponent(projectID)}/supplement-contracts${query.toString() ? `?${query}` : ''}`)
+  return Array.isArray(data) ? data : []
 }
 
 /**
@@ -816,7 +845,7 @@ export function submitFieldRecord(itemID, payload) {
   })
 }
 
-/** Persist a GPS/timestamp check-in. client_operation_id makes offline replay safe. */
+/** 持久化 GPS 与时间戳签到；client_operation_id 确保离线重放安全。 */
 export function checkInField(itemID, payload) {
   return request(`/service-items/${encodeURIComponent(itemID)}/field-check-ins`, {
     method: 'POST',
@@ -824,7 +853,7 @@ export function checkInField(itemID, payload) {
   })
 }
 
-/** Bind an immutable signature receipt to the authenticated engineer and capture time. */
+/** 将不可变的签名回执绑定到已认证工程师及采集时间。 */
 export function captureFieldSignature(itemID, payload) {
   return request(`/service-items/${encodeURIComponent(itemID)}/field-signatures`, {
     method: 'POST',
@@ -983,15 +1012,28 @@ export async function downloadCapabilityImportTemplate() {
   return downloadImportTemplate('/capabilities/import/template', '人员资质导入模板.csv')
 }
 
-async function downloadImportTemplate(path, filename) {
-  const response = await fetch(`${API_BASE_URL}${path}`, { credentials: 'include', headers: { Accept: 'text/csv' } })
-  if (!response.ok) {
-    let message = `模板下载失败（HTTP ${response.status}）`
-    try { message = (await response.json())?.message || message } catch { /* retain HTTP status */ }
-    const error = new Error(message)
-    error.status = response.status
-    throw error
+async function requestProjectCSV(path) {
+  const context = { subsystem: 'project_management', feature: 'project_download', operation: 'GET', path, method: 'GET' }
+  let response
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, { credentials: 'include', headers: { Accept: 'text/csv' } })
+  } catch {
+    throw projectRequestError(null, null, context, { code: 'NETWORK_ERROR', fallback: '下载未完成，请检查网络后重新下载。' })
   }
+  if (!response.ok) {
+    let body
+    try { body = await readProjectBody(response) } catch { /* HTTP 状态及响应头仍用于诊断和登录处理。 */ }
+    throw handleProjectAuthentication(projectRequestError(body, response, context, { fallback: '文件下载未完成，请稍后重试。' }), response)
+  }
+  const mediaType = (response.headers.get('content-type') || '').split(';', 1)[0].trim().toLowerCase()
+  if (mediaType !== 'text/csv') {
+    throw projectRequestError(null, response, context, { code: 'INVALID_DOWNLOAD_RESPONSE', fallback: '下载服务返回的文件格式异常，请联系管理员检查文件下载配置。' })
+  }
+  return response
+}
+
+async function downloadImportTemplate(path, filename) {
+  const response = await requestProjectCSV(path)
   return { blob: await response.blob(), filename }
 }
 
@@ -1003,20 +1045,7 @@ async function downloadImportTemplate(path, filename) {
  */
 export async function exportCapabilities(resourceType = '') {
   const query = resourceType ? `?resource_type=${encodeURIComponent(resourceType)}` : ''
-  const response = await fetch(`${API_BASE_URL}/capabilities/export${query}`, {
-    credentials: 'include',
-    headers: { Accept: '*/*' },
-  })
-  if (!response.ok) {
-    let message = `HTTP ${response.status}`
-    try {
-      const parsed = await response.json()
-      message = parsed?.message || message
-    } catch { /* 保持默认提示 */ }
-    const error = new Error(message)
-    error.status = response.status
-    throw error
-  }
+  const response = await requestProjectCSV(`/capabilities/export${query}`)
   const disposition = response.headers.get('content-disposition') || ''
   let filename = `capabilities-${new Date().toISOString().slice(0, 10)}.csv`
   const match = disposition.match(/filename\*?=(?:UTF-8''|")?([^";]+)/i)

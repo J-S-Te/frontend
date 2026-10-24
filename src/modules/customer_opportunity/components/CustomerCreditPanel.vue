@@ -1,4 +1,5 @@
 <script setup>
+import { formatCRMError } from '../api/errorMessages.js'
 import { computed, onMounted, ref, watch } from 'vue'
 import { createIdempotencyKey } from '../api/client.js'
 import {
@@ -37,7 +38,7 @@ const customerID = computed(() => props.customer?.id)
 const isApprovalView = computed(() => props.approvals || props.standalone)
 const currentLevel = computed(() => credit.value?.credit_level || props.customer?.credit_level || 'B')
 const risk = computed(() => ['C', 'D'].includes(currentLevel.value))
-// 发起调整是销售创建人权限；审批角色即使拥有同名 catalog permission，也只能处理待办。
+// 发起调整是销售创建人权限；审批角色即使拥有同名 目录权限，也只能处理待办。
 const canApplyPermission = computed(() => props.canApply === true)
 
 async function loadCustomerCredit() {
@@ -48,13 +49,13 @@ async function loadCustomerCredit() {
       getCustomerCredit(customerID.value), listCustomerCreditHistory(customerID.value, { page: 1, page_size: 20 }), listCustomerCreditPayments(customerID.value, { page: 1, page_size: 20 }),
     ])
     credit.value = summary; history.value = unwrapItems(changes); payments.value = unwrapItems(records); await resolveOperatorNames(history.value)
-  } catch (value) { emit('error', value?.message || '信用信息暂时无法加载。') }
+  } catch (value) { emit('error', formatCRMError(value, { fallback: '信用信息暂时无法加载。' })) }
   finally { loading.value = false }
 }
 async function loadApprovals() {
   loading.value = true
   try { applications.value = unwrapItems(await listPendingCustomerCreditApplications({ page: 1, page_size: 50 })) }
-  catch (value) { emit('error', value?.message || '信用审批待办暂时无法加载。') }
+  catch (value) { emit('error', formatCRMError(value, { fallback: '信用审批待办暂时无法加载。' })) }
   finally { loading.value = false }
 }
 function openApply() { form.value = { target_level: '', reason: '' }; showForm.value = true }
@@ -66,7 +67,7 @@ async function submitApply() {
   try {
     await createCustomerCreditApplication(customerID.value, { target_level: form.value.target_level, reason: form.value.reason.trim() }, createIdempotencyKey())
     showForm.value = false; emit('notice', '信用等级调整申请已提交。'); emit('updated'); await loadCustomerCredit()
-  } catch (value) { emit('error', value?.message || '信用等级调整申请提交失败。') }
+  } catch (value) { emit('error', formatCRMError(value, { fallback: '信用等级调整申请提交失败。' })) }
   finally { submitting.value = false }
 }
 function openDecision(item, action) { decision.value = { item, action }; decisionOpinion.value = '' }
@@ -78,7 +79,7 @@ async function submitDecision() {
     const fn = decision.value.action === 'approve' ? approveCustomerCreditApplication : rejectCustomerCreditApplication
     await fn(decision.value.item.id, { opinion: decisionOpinion.value.trim(), version: decision.value.item.version }, createIdempotencyKey())
     decision.value = null; emit('notice', '审批操作已完成。'); await loadApprovals()
-  } catch (value) { emit('error', value?.message || '审批操作失败。') }
+  } catch (value) { emit('error', formatCRMError(value, { fallback: '审批操作失败。' })) }
   finally { submitting.value = false }
 }
 watch(customerID, loadCustomerCredit, { immediate: true }); onMounted(() => { if (isApprovalView.value) loadApprovals() })
@@ -97,7 +98,7 @@ watch(customerID, loadCustomerCredit, { immediate: true }); onMounted(() => { if
       <details open><summary>等级变更历史</summary><p v-if="!history.length" class="crm-empty compact">暂无变更记录</p><ul v-else><li v-for="item in history" :key="item.id"><strong>{{ levelLabel(item.from_level) }} → {{ levelLabel(item.to_level || item.credit_level) }}</strong> · {{ sourceLabel(item.source || item.change_source) }} · {{ item.reason || item.rule_result || '—' }}<small>操作人：{{ operatorLabel(item) }} · {{ formatCreditDate(item.occurred_at) }}<template v-if="item.payment_id"> · 回款号：{{ item.payment_id }}</template><template v-if="item.application_id"> · 申请单：#{{ item.application_id }}</template></small></li></ul></details>
       <details><summary>回款评估记录</summary><p v-if="!payments.length" class="crm-empty compact">暂无回款评估记录</p><ul v-else><li v-for="item in payments" :key="item.id"><strong>{{ item.payment_id || item.receipt_id }}</strong> · {{ item.evaluation || item.evaluation_result || item.result || '未参与评估' }} · 宽限期 {{ item.grace_days ?? item.grace_days_applied ?? '—' }} 天<small>合同：{{ item.contract_no || '—' }} · 期次：{{ item.period_no || '—' }} · 应收 {{ item.due_amount || '—' }}（{{ item.due_date || '—' }}）· 实收 {{ item.paid_amount || '—' }}（{{ item.paid_date || '—' }}）<template v-if="item.ignore_reason"> · 忽略原因：{{ item.ignore_reason }}</template></small></li></ul></details>
     </template>
-    <form v-if="showForm" class="crm-credit-apply-form" @submit.prevent="submitApply"><h3>申请调整信用等级</h3><label>目标等级<select v-model="form.target_level" required><option value="" disabled>请选择</option><option v-for="item in levels" :key="item" :value="item" :disabled="item === currentLevel">{{ levelLabel(item) }}</option></select></label><label>调整原因<textarea v-model.trim="form.reason" required rows="4"></textarea></label><div class="crm-actions"><button type="button" @click="showForm = false">取消</button><button type="submit" class="primary" :disabled="submitting">{{ submitting ? '提交中…' : '提交申请' }}</button></div></form>
+    <form v-if="showForm" class="crm-credit-apply-form" @submit.prevent="submitApply"><h3>申请调整信用等级</h3><label>目标等级<select v-model="form.target_level" required><option value="" disabled>请选择</option><option v-for="item in levels" :key="item" :value="item" :disabled="item === currentLevel">{{ levelLabel(item) }}</option></select></label><label>调整原因<textarea v-model.trim="form.reason" required rows="4" maxlength="500"></textarea></label><div class="crm-actions"><button type="button" @click="showForm = false">取消</button><button type="submit" class="primary" :disabled="submitting">{{ submitting ? '提交中…' : '提交申请' }}</button></div></form>
   </section>
-  <div v-if="decision" class="crm-credit-decision"><h3>{{ decision.action === 'approve' ? '通过信用调整' : '驳回信用调整' }}</h3><p>{{ decision.item.customer_name || `客户 #${decision.item.customer_id}` }}：{{ levelLabel(decision.item.from_level) }} → {{ levelLabel(decision.item.target_level) }}</p><label>{{ decision.action === 'approve' ? '审批意见（选填）' : '驳回意见（必填）' }}<textarea v-model.trim="decisionOpinion" rows="3"></textarea></label><div class="crm-actions"><button type="button" @click="decision = null">取消</button><button type="button" :class="decision.action === 'approve' ? 'primary' : 'danger'" :disabled="submitting" @click="submitDecision">确认{{ decision.action === 'approve' ? '通过' : '驳回' }}</button></div></div>
+  <div v-if="decision" class="crm-credit-decision"><h3>{{ decision.action === 'approve' ? '通过信用调整' : '驳回信用调整' }}</h3><p>{{ decision.item.customer_name || `客户 #${decision.item.customer_id}` }}：{{ levelLabel(decision.item.from_level) }} → {{ levelLabel(decision.item.target_level) }}</p><label>{{ decision.action === 'approve' ? '审批意见（选填）' : '驳回意见（必填）' }}<textarea v-model.trim="decisionOpinion" rows="3" maxlength="500"></textarea></label><div class="crm-actions"><button type="button" @click="decision = null">取消</button><button type="button" :class="decision.action === 'approve' ? 'primary' : 'danger'" :disabled="submitting" @click="submitDecision">确认{{ decision.action === 'approve' ? '通过' : '驳回' }}</button></div></div>
 </template>

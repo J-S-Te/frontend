@@ -1,6 +1,7 @@
 import { normalizeAuthorizationSession, shouldStartSubsystemLogin } from '../../shared/authz/sessionCompatibility.js'
 import { attachStructuredContext } from '../../platform/shared/api/requestContext.js'
 import { logoutCurrentSession } from '../../platform/auth/api/auth.js'
+import { formatPortalError } from './errorMessages.js'
 
 const PUBLIC_PATH_PREFIX = (import.meta.env?.VITE_CUSTOMER_PORTAL_PUBLIC_PATH_PREFIX || '/customer-portal').replace(/\/$/, '')
 const API_BASE_URL = (import.meta.env?.VITE_CUSTOMER_PORTAL_API_BASE_URL || `${PUBLIC_PATH_PREFIX}/api/v1`).replace(/\/$/, '')
@@ -10,12 +11,67 @@ let redirectStarted = false
 
 /**
  * PortalAPIError 表示客户门户 API 调用失败，并保留后端错误与追踪信息。
- * @param {string} message 错误信息。
- * @param {{status?: number, code?: string, requestID?: string, details?: unknown}} [context={}] 后端错误上下文。
+ * @param {string|Error} message 错误信息。
+ * @param {{status?: number, code?: string, requestID?: string, details?: unknown, method?: string}} [context={}] 后端错误上下文。
  */
 export class PortalAPIError extends Error {
-  constructor(message, { status = 0, code = '', requestID = '', details = null } = {}) {
-    super(message); this.name = 'PortalAPIError'; this.status = status; this.code = code; this.requestID = requestID; this.details = details
+  constructor(message, { status = 0, code = '', requestID = '', details = null, method = 'GET' } = {}) {
+    super(formatPortalError(message, { status, code, details, method })); this.name = 'PortalAPIError'; this.status = status; this.code = code; this.requestID = requestID; this.details = details
+  }
+}
+
+function cancellationError(cause, requestContext = {}) {
+  const method = (requestContext.method || 'GET').toUpperCase()
+  if (requestContext.preserveAbort || ['GET', 'HEAD', 'OPTIONS'].includes(method)) return cause
+  const error = new PortalAPIError(cause, { code: 'REQUEST_ABORTED', method })
+  error.name = 'AbortError'
+  error.cause = cause
+  attachStructuredContext(error, { subsystem: 'customer_portal', feature: 'portal_api', ...requestContext, method, metadata: { source: 'portal_cancelled_write' } }, { status: 0, code: error.code })
+  return error
+}
+
+async function fetchPortal(url, options, requestContext = {}) {
+  try {
+    return await fetch(url, options)
+  } catch (cause) {
+    if (cause?.name === 'AbortError') throw cancellationError(cause, { ...requestContext, method: options?.method || 'GET' })
+    const error = new PortalAPIError(cause, { code: 'PORTAL_NETWORK_ERROR', method: options?.method || 'GET' })
+    error.cause = cause
+    attachStructuredContext(error, { subsystem: 'customer_portal', feature: 'portal_api', operation: options?.method || 'GET', method: options?.method || 'GET', metadata: { source: 'portal_network' } }, { status: 0, code: error.code })
+    throw error
+  }
+}
+
+function invalidResponse(response, requestContext = {}, body) {
+  const method = requestContext.method || 'GET'
+  const error = new PortalAPIError('', { status: response.status, code: 'PORTAL_RESPONSE_INVALID', requestID: body?.request_id || response.headers.get('x-request-id') || '', details: body?.details, method })
+  if (typeof body?.code === 'string' && /^[A-Z][A-Z0-9_]{0,95}$/.test(body.code)) error.responseCode = body.code
+  const traceId = body?.trace_id || body?.traceId || ''
+  attachStructuredContext(error, { subsystem: 'customer_portal', feature: 'portal_api', ...requestContext, method, traceId, metadata: { source: 'portal_response', responseCode: error.responseCode || '' } }, { status: error.status, code: error.code, requestId: error.requestID, traceId })
+  return error
+}
+
+async function readResponse(response, requestContext) {
+  if (response.status === 204 || response.status === 205) return {}
+  const contentType = (response.headers.get('content-type') || '').split(';', 1)[0].trim().toLowerCase()
+  if (contentType === 'application/json' || contentType.endsWith('+json')) {
+    let body
+    try {
+      body = await response.json()
+    } catch (error) {
+      if (error?.name === 'AbortError') throw cancellationError(error, requestContext)
+      if (response.ok) throw invalidResponse(response, requestContext)
+      return {}
+    }
+    // 门户的 /auth/me 和业务端点共用后端 Envelope 响应封装。
+    if (response.ok && (!body || typeof body !== 'object' || Array.isArray(body) || body.code !== 'OK' || !Object.hasOwn(body, 'data'))) throw invalidResponse(response, requestContext, body)
+    return body
+  }
+  if (response.ok) throw invalidResponse(response, requestContext)
+  try { return { message: await response.text() } }
+  catch (error) {
+    if (error?.name === 'AbortError') throw cancellationError(error, requestContext)
+    throw error
   }
 }
 /**
@@ -37,7 +93,7 @@ function beginLogin() {
  * @param {RequestInit} [options={}] Fetch 请求配置。
  * @returns {Promise<unknown>} 优先返回响应 data 字段，否则返回完整响应体。
  * @throws {PortalAPIError} 服务端返回非成功状态时抛出；会话失效时同时启动登录跳转。
- * @throws {TypeError} 网络连接或 Fetch 调用失败时抛出。
+ * @throws {PortalAPIError} 网络失败时抛出结构化错误；主动取消仍保留 AbortError。
  */
 async function request(path, options = {}) {
   const method = (options.method || 'GET').toUpperCase()
@@ -50,20 +106,14 @@ async function request(path, options = {}) {
     method,
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetchPortal(`${API_BASE_URL}${path}`, {
     ...options, credentials: 'include',
     // 固定 CSRF 标记只声明这是受控前端写请求，后端仍需结合 Origin 和会话校验。
     headers: { Accept: 'application/json', ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...(requiresCSRF ? { 'X-CSRF-Token': '1' } : {}), ...(options.headers || {}) },
-  })
-  const contentType = response.headers.get('content-type') || ''
-  let body
-  if (contentType.includes('application/json')) {
-    try { body = await response.json() } catch { body = {} }
-  } else {
-    body = { message: await response.text() }
-  }
+  }, requestContext)
+  const body = await readResponse(response, requestContext)
   if (!response.ok) {
-    const error = new PortalAPIError(body?.message || `HTTP ${response.status}`, { status: response.status, code: body?.code, requestID: body?.request_id, details: body?.details })
+    const error = new PortalAPIError(body?.message || `HTTP ${response.status}`, { status: response.status, code: body?.code, requestID: body?.request_id, details: body?.details, method })
     attachStructuredContext(error, {
       ...requestContext,
       requestId: body?.request_id || '',
@@ -78,7 +128,7 @@ async function request(path, options = {}) {
     if (shouldStartSubsystemLogin(error)) beginLogin()
     throw error
   }
-  return body?.data ?? body
+  return response.status === 204 || response.status === 205 ? {} : body.data
 }
 /**
  * query 将非空参数编码为带问号的 URL 查询串。
@@ -464,7 +514,8 @@ export async function downloadProjectExport(id, { signal } = {}) {
     method: 'POST', credentials: 'include', signal,
     headers: { Accept: 'application/pdf, application/json', 'X-CSRF-Token': '1', 'X-Project-Export-Download-Token': token },
   }).catch((error) => {
-    const downloadError = new PortalAPIError('下载项目导出失败：网络不可达。', { status: 0, code: 'PORTAL_PROJECT_EXPORT_NETWORK_ERROR' })
+    if (error?.name === 'AbortError') throw error
+    const downloadError = new PortalAPIError(error, { status: 0, code: 'PORTAL_PROJECT_EXPORT_NETWORK_ERROR', method: 'POST' })
     attachStructuredContext(downloadError, {
       subsystem: 'customer_portal',
       feature: 'project_export',
@@ -474,7 +525,6 @@ export async function downloadProjectExport(id, { signal } = {}) {
       metadata: {
         export_id: exportID,
         source: 'project_export',
-        rawError: String(error || '').slice(0, 120),
       },
     }, {
       status: 0,
@@ -589,11 +639,7 @@ function safePDFFileName(disposition) {
  * @returns {Promise<PortalAPIError>} 可由调用方抛出的门户错误。
  */
 async function reportDownloadError(response) {
-  const contentType = response.headers.get('content-type') || ''
-  let body = {}
-  if (contentType.toLowerCase().includes('application/json')) {
-    try { body = await response.json() } catch { body = {} }
-  }
+  const body = await readResponse(response, { method: 'POST', feature: 'portal_report' })
   let responsePath = String(response?.url || '')
   if (responsePath) {
     try {
@@ -603,7 +649,7 @@ async function reportDownloadError(response) {
       responsePath = ''
     }
   }
-  const error = new PortalAPIError(body?.message || `HTTP ${response.status}`, { status: response.status, code: body?.code, requestID: body?.request_id, details: body?.details })
+  const error = new PortalAPIError(body?.message || `HTTP ${response.status}`, { status: response.status, code: body?.code, requestID: body?.request_id, details: body?.details, method: 'POST' })
   attachStructuredContext(error, {
     subsystem: 'customer_portal',
     feature: 'portal_report',
@@ -662,7 +708,8 @@ export async function downloadIssuedReport(id, { idempotencyKey = key(), signal 
       'X-Report-Download-Token': downloadToken,
     },
   }).catch((error) => {
-    const downloadError = new PortalAPIError('下载项目报表失败：网络不可达。', { status: 0, code: 'PORTAL_REPORT_DOWNLOAD_NETWORK_ERROR' })
+    if (error?.name === 'AbortError') throw error
+    const downloadError = new PortalAPIError(error, { status: 0, code: 'PORTAL_REPORT_DOWNLOAD_NETWORK_ERROR', method: 'POST' })
     attachStructuredContext(downloadError, {
       subsystem: 'customer_portal',
       feature: 'report_download',
@@ -672,7 +719,6 @@ export async function downloadIssuedReport(id, { idempotencyKey = key(), signal 
       metadata: {
         report_id: reportID,
         source: 'report_download',
-        rawError: String(error || '').slice(0, 120),
       },
     }, {
       status: 0,
@@ -822,6 +868,19 @@ export const createFiling = (payload, idempotencyKey = key()) => request('/filin
  * @throws {Error} 网络失败或服务端返回非成功状态时抛出。
  */
 export const getFiling = (id) => request(`/filings/${encodeURIComponent(id)}`)
+
+export async function exportFilingPDF(id, expectedVersion, { signal } = {}) {
+  const response = await fetchPortal(`${API_BASE_URL}/filings/${encodeURIComponent(id)}/exports`, {
+    method: 'POST', credentials: 'include', signal,
+    headers: { 'Content-Type': 'application/json', Accept: 'application/pdf, application/json', 'X-CSRF-Token': '1' },
+    body: JSON.stringify({ expected_version: expectedVersion }),
+  }, { method: 'POST', path: `/filings/${encodeURIComponent(id)}/exports`, preserveAbort: true })
+  if (!response.ok) throw await reportDownloadError(response)
+  if ((response.headers.get('content-type') || '').split(';', 1)[0].trim().toLowerCase() !== 'application/pdf') {
+    throw new PortalAPIError('备案导出响应不是 PDF。', { status: 503, code: 'PORTAL_FILING_EXPORT_INVALID_RESPONSE' })
+  }
+  return { blob: await response.blob(), filename: safePDFFileName(response.headers.get('content-disposition')) }
+}
 
 /**
  * saveFilingSection 保存备案的指定表单分区。

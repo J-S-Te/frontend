@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
-const jsonResponse = (data, status = 200) => new Response(JSON.stringify({ data }), { status, headers: { 'content-type': 'application/json' } })
+const jsonResponse = (data, status = 200) => new Response(JSON.stringify({ code: 'OK', data }), { status, headers: { 'content-type': 'application/json' } })
 
 test('project message API encodes opaque IDs and binds idempotency headers', async (t) => {
   const originalFetch = globalThis.fetch

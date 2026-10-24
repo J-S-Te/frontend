@@ -11,15 +11,27 @@ function pause(ms, signal) {
   })
 }
 
-// Cancelling the UI observer never cancels the server-side deployment job.
+// 默认终端状态：遗留部署状态机的终态（保持既有行为不变）。
+const DEFAULT_TERMINAL_STATUSES = ['READY', 'PROVISION_FAILED', 'OFFBOARDED']
+
+// 取消界面观察不会取消服务端部署任务。
+// 统一接入向导按操作 ID 轮询时传入 terminalStatuses: ['SUCCEEDED', 'FAILED', 'WAITING']
+// 与 immediate: true（进入页面立即读一次，不必先等一个间隔）。
 export async function pollDeployment({ readStatus, onStatus, signal, intervalMs = 4000,
-  timeoutMs = 20 * 60 * 1000, now = Date.now, wait = pause }) {
+  timeoutMs = 20 * 60 * 1000, now = Date.now, wait = pause,
+  terminalStatuses = DEFAULT_TERMINAL_STATUSES, immediate = false }) {
   const deadline = now() + timeoutMs
+  const terminals = Array.isArray(terminalStatuses) && terminalStatuses.length > 0
+    ? terminalStatuses : DEFAULT_TERMINAL_STATUSES
+  let firstRead = !immediate
   while (now() < deadline) {
     if (signal?.aborted) return 'CANCELLED'
-    await wait(Math.min(intervalMs, deadline - now()), signal)
-    if (signal?.aborted) return 'CANCELLED'
-    if (now() >= deadline) break
+    if (firstRead) {
+      await wait(Math.min(intervalMs, deadline - now()), signal)
+      if (signal?.aborted) return 'CANCELLED'
+      if (now() >= deadline) break
+    }
+    firstRead = true
     let state
     try {
       state = await readStatus()
@@ -29,7 +41,7 @@ export async function pollDeployment({ readStatus, onStatus, signal, intervalMs 
     }
     if (signal?.aborted) return 'CANCELLED'
     onStatus?.(state)
-    if (['READY', 'PROVISION_FAILED', 'OFFBOARDED'].includes(state?.status)) return state.status
+    if (terminals.includes(state?.status)) return state.status
   }
   return 'TIMEOUT'
 }

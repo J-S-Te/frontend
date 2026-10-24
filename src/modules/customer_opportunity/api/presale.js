@@ -1,4 +1,4 @@
-import { request, toQuery } from './client.js'
+import { request, requestBlob, toQuery } from './client.js'
 
 export const listPresaleRequests = (params) => request(`/presale/requests${toQuery(params)}`)
 export const getPresaleBoard = (params) => request(`/presale/board${toQuery(params)}`)
@@ -23,8 +23,17 @@ export const getApprovalHistory = (id) => request(`/presale/requests/${encodeURI
 export const replaceAssignments = (id, payload, idempotencyKey) => request(`/presale/requests/${encodeURIComponent(id)}/assignments`, {
   method: 'PUT', body: JSON.stringify(payload), idempotent: true, idempotencyKey,
 })
-export const selectPresaleExecutionDepartment = (id, payload) => request(`/presale/requests/${encodeURIComponent(id)}/execution-department`, {
-  method: 'PUT', body: JSON.stringify(payload), idempotent: true,
+export const takeOverExecutingTeamLead = (id, payload, idempotencyKey) => request(`/presale/requests/${encodeURIComponent(id)}/execution-takeover`, {
+  method: 'PUT', body: JSON.stringify(payload), idempotent: true, idempotencyKey,
+})
+export const replaceExecutorAssignments = (id, payload, idempotencyKey) => request(`/presale/requests/${encodeURIComponent(id)}/executor-assignments`, {
+  method: 'PUT', body: JSON.stringify(payload), idempotent: true, idempotencyKey,
+})
+export const rejectExecutorAssignment = (id, payload, idempotencyKey) => request(`/presale/requests/${encodeURIComponent(id)}/executor-assignment-rejection`, {
+  method: 'POST', body: JSON.stringify(payload), idempotent: true, idempotencyKey,
+})
+export const selectPresaleExecutionDepartment = (id, payload, idempotencyKey) => request(`/presale/requests/${encodeURIComponent(id)}/execution-department`, {
+  method: 'PUT', body: JSON.stringify(payload), idempotent: true, idempotencyKey,
 })
 export const getAssignments = (id) => request(`/presale/requests/${encodeURIComponent(id)}/assignments`)
 export const listPresaleExecutionDepartments = () => request('/presale/execution-departments')
@@ -61,6 +70,6 @@ export const getPresaleReportSummary = (params) => request(`/presale/reports/sum
 export const getPresaleReportTrend = (params) => request(`/presale/reports/trend${toQuery(params)}`)
 export const getPresaleReportDistribution = (params) => request(`/presale/reports/distribution${toQuery(params)}`)
 export const getPresaleReportFilterOptions = (params) => request(`/presale/reports/filter-options${toQuery(params)}`)
-export const requestPresaleReportExport = (payload) => request('/presale/reports/exports', {
-  method: 'POST', body: JSON.stringify(payload), idempotent: true,
+export const requestPresaleReportExport = (payload) => requestBlob('/presale/reports/exports', {
+  method: 'POST', body: JSON.stringify(payload),
 })

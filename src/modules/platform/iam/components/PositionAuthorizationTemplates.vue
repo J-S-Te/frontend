@@ -1,8 +1,8 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
+import { formatUserError } from '../../../shared/utils/userError.js'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import RoleMultiSelect from './RoleMultiSelect.vue'
-import { AuthorizationError } from '@/modules/platform/iam/api/authorization'
 import {
   assignableActiveCatalogRoles,
   catalogMaxEffectiveRoles,
@@ -14,6 +14,8 @@ import { positionAuthorizationTargetCatalog } from '@/modules/platform/iam/utils
 import { hasPermission } from '@/modules/platform/auth/utils/principal'
 import { IAM_PERMISSIONS } from '@/modules/platform/iam/utils/iamPermissions'
 import { inspectPositionTemplateDuplicates } from '@/modules/platform/iam/utils/positionAuthorizationDuplicates'
+import { useRelatedDataInvalidation } from '@/modules/platform/shared/composables/useRelatedDataInvalidation'
+import { RELATED_DATA } from '@/modules/platform/shared/utils/relatedDataInvalidation'
 import {
   authorizationPositionGroupLabel,
   authorizationPositionOptionLabel,
@@ -42,6 +44,8 @@ const positions = ref([])
 const applications = ref([])
 const selectedPositionId = ref('')
 const assignedTemplateIds = ref([])
+// 保存原始映射时间窗；勾选集合不能承载每条映射的有效期。
+const assignedTemplateEntries = ref([])
 const duplicateCheckResult = ref(null)
 const templatePage = ref(1)
 const templatePageSize = 6
@@ -49,6 +53,15 @@ const editingTemplateId = ref('')
 const editingTemplateVersion = ref(0)
 // 通用确认弹窗。不用 window.confirm 是为了避免在 WebView 容器里静默失败。
 const confirmDialog = ref(null)
+// 目录重新读取后只清理确实失效的岗位选择并说明原因，不影响编辑器中已填写的模板内容。
+const selectionNotice = ref('')
+// 当前已加载完成的岗位及其加载状态：只有加载完成的当前岗位才允许保存映射。
+const assignmentsLoading = ref(false)
+const loadedAssignmentsPositionId = ref('')
+// 不透明集合版本必须与读取到的岗位和条目一起更新，不能用新的 GET 给旧草稿补版本。
+const assignmentsRevision = ref('')
+const assignmentsNotice = ref('')
+const savingAssignments = ref(false)
 function openConfirm({ title, description, confirmText = '确认', danger = false, onConfirm }) {
   confirmDialog.value = { title, description, confirmText, danger, busy: false, onConfirm }
 }
@@ -77,6 +90,7 @@ const editorPreviewLoading = ref(false)
 const editorPreviewUnavailable = ref(false)
 const positionPreviewRef = ref(null)
 let editorPreviewRequest = 0
+let previewRequest = 0
 const emptySubsystemRole = () => ({
   application_id: '',
   role_ids: [],
@@ -172,12 +186,16 @@ function templateEditorForm(template) {
     const scopeId = templateRoleScopeId(role)
     const roleIdValue = resolved.role_id
     if (!applicationIdValue || !roleIdValue) return
-    const key = `${applicationIdValue}|${scopeType}|${scopeId}`
+    const validFrom = role.valid_from ?? null
+    const validUntil = role.valid_until ?? null
+    const key = JSON.stringify([applicationIdValue, scopeType, scopeId, validFrom, validUntil])
     const group = groups.get(key) || {
       application_id: applicationIdValue,
       role_ids: [],
       scope_type: scopeType,
       scope_id: scopeId,
+      valid_from: validFrom,
+      valid_until: validUntil,
     }
     if (!group.role_ids.includes(roleIdValue)) group.role_ids.push(roleIdValue)
     groups.set(key, group)
@@ -188,6 +206,10 @@ function templateEditorForm(template) {
     platform_role_ids: primary?.role_ids || [],
     platform_scope_type: primary?.scope_type || 'TENANT',
     platform_scope_id: primary?.scope_id || '',
+    platform_valid_from: primary?.valid_from ?? null,
+    platform_valid_until: primary?.valid_until ?? null,
+    valid_from: template?.valid_from ?? null,
+    valid_until: template?.valid_until ?? null,
     additional_roles: additional,
   }
 }
@@ -238,34 +260,79 @@ async function load() {
       failures.push(targetResult.reason)
     }
     if (!selectedPositionId.value && positions.value.length) selectedPositionId.value = positionId(positions.value[0])
+    if (selectedPositionId.value && !positions.value.some((item) => positionId(item) === selectedPositionId.value)) {
+      // 岗位已停用或不再可见：清除选择并说明原因，避免继续显示该岗位的授权预览。
+      selectionNotice.value = '原选岗位已停用或不再对当前账号可见，已清除岗位选择；请重新选择岗位后再查看授权预览。'
+      selectedPositionId.value = ''
+      assignedTemplateIds.value = []
+      preview.value = null
+      editorPreview.value = null
+    }
     if (selectedPositionId.value) await loadAssignments()
     if (failures.length) {
       const error = failures[0]
-      emit('toast', error instanceof AuthorizationError ? error.message : (error?.message || '部分岗位授权数据读取失败，请检查当前账号权限。'))
+      emit('toast', formatUserError(error, { fallback: '部分岗位授权数据读取失败，请检查当前账号权限。' }))
     }
   } finally {
     loading.value = false
   }
 }
 
+// 岗位切换会连续触发多次读取：上一次岗位的绑定可能在切换之后才返回。若不校验，
+// A 岗位的模板会被填进已切到 B 的勾选状态，随后"保存岗位映射"就把 A 的模板写给 B。
+// 序号 + 岗位 ID 双重校验保证只有当前岗位的响应可以回写，加载完成前也不允许保存。
+let assignmentsRequestSeq = 0
+
 async function loadAssignments() {
   duplicateCheckResult.value = null
-  if (!canReadAuthorization.value) return
-  if (!selectedPositionId.value) {
+  const seq = ++assignmentsRequestSeq
+  assignmentsLoading.value = false
+  loadedAssignmentsPositionId.value = ''
+  assignmentsRevision.value = ''
+  assignmentsNotice.value = ''
+  const positionId = String(selectedPositionId.value || '')
+  // 岗位一切换就使旧预览失效，无需等待新映射请求完成。
+  previewRequest += 1
+  editorPreviewRequest += 1
+  preview.value = null
+  editorPreview.value = null
+  editorPreviewLoading.value = false
+  editorPreviewUnavailable.value = false
+  assignedTemplateEntries.value = []
+  if (!positionId || !canReadAuthorization.value) {
+    assignmentsLoading.value = false
+    loadedAssignmentsPositionId.value = ''
     assignedTemplateIds.value = []
     preview.value = null
     editorPreview.value = null
     editorPreviewUnavailable.value = false
     return
   }
+  assignmentsLoading.value = true
+  loadedAssignmentsPositionId.value = ''
+  assignedTemplateIds.value = []
   try {
-    const data = await listPositionAuthorizationTemplateAssignments(selectedPositionId.value)
-    assignedTemplateIds.value = items(data).filter((item) => String(item?.status || '').toUpperCase() === 'ACTIVE').map((item) => item.template?.template_id || item.template_id)
+    const data = await listPositionAuthorizationTemplateAssignments(positionId)
+    if (!isCurrentAssignmentsRequest(seq, positionId)) return
+    assignedTemplateEntries.value = items(data).filter((item) => String(item?.status || '').toUpperCase() === 'ACTIVE')
+    assignedTemplateIds.value = assignedTemplateEntries.value.map((item) => item.template?.template_id || item.template_id)
+    loadedAssignmentsPositionId.value = positionId
+    assignmentsRevision.value = typeof data?.revision === 'string' && data.revision.trim() ? data.revision : ''
+    if (!assignmentsRevision.value) assignmentsNotice.value = '未能读取岗位映射版本，请重新加载岗位映射后核对再保存。'
     // 页面级 preview 与编辑器挂载预览共用同一接口，并行拉取避免遮挡主流程。
     await Promise.all([loadPreview(), loadEditorPreview()])
   } catch (error) {
-    emit('toast', error instanceof AuthorizationError ? error.message : (error?.message || '读取岗位授权配置失败。'))
+    if (!isCurrentAssignmentsRequest(seq, positionId)) return
+    loadedAssignmentsPositionId.value = ''
+    assignmentsRevision.value = ''
+    emit('toast', formatUserError(error, { fallback: '读取岗位授权配置失败。' }))
+  } finally {
+    if (seq === assignmentsRequestSeq) assignmentsLoading.value = false
   }
+}
+
+function isCurrentAssignmentsRequest(seq, positionId) {
+  return seq === assignmentsRequestSeq && positionId === String(selectedPositionId.value || '')
 }
 
 function onApplicationChange(row) { row.role_ids = [] }
@@ -294,7 +361,7 @@ async function editTemplate(template) {
     try {
       fullTemplate = await getPositionAuthorizationTemplate(templateId(template))
     } catch (error) {
-      emit('toast', error instanceof AuthorizationError ? error.message : (error?.message || '读取模板授权明细失败。'))
+      emit('toast', formatUserError(error, { fallback: '读取模板授权明细失败。' }))
       return
     } finally {
       saving.value = false
@@ -328,6 +395,8 @@ async function createTemplate() {
       scope_id: form.value.platform_scope_type === 'ENVIRONMENT'
         ? String(form.value.platform_scope_id || '').trim()
         : '',
+      valid_from: form.value.platform_valid_from ?? null,
+      valid_until: form.value.platform_valid_until ?? null,
     })
   })
   form.value.additional_roles.forEach((row) => {
@@ -338,6 +407,8 @@ async function createTemplate() {
         role_id: roleIdValue,
         scope_type: row.scope_type || 'TENANT',
         scope_id: row.scope_type === 'ENVIRONMENT' ? String(row.scope_id || '').trim() : '',
+        valid_from: row.valid_from ?? null,
+        valid_until: row.valid_until ?? null,
       })
     })
   })
@@ -351,6 +422,8 @@ async function createTemplate() {
       name,
       description: String(form.value.description || '').trim(),
       status: 'ACTIVE',
+      valid_from: form.value.valid_from ?? null,
+      valid_until: form.value.valid_until ?? null,
       roles,
     }
     if (editingTemplateId.value) {
@@ -363,24 +436,64 @@ async function createTemplate() {
     resetTemplateForm()
     await load()
   } catch (error) {
-    emit('toast', error instanceof AuthorizationError ? error.message : (error?.message || '创建岗位授权模板失败。'))
+    emit('toast', formatUserError(error, { fallback: '创建岗位授权模板失败。' }))
   } finally {
     saving.value = false
   }
 }
 
 async function saveAssignments() {
-  if (!canManageAuthorization.value) return
-  if (!selectedPositionId.value) return
+  if (!canManageAuthorization.value || saving.value) return
+  const positionId = String(selectedPositionId.value || '')
+  if (!positionId) return
+  // 目录尚未确认或仍停留在上一个岗位时不允许保存：勾选状态可能属于另一个岗位。
+  if (assignmentsLoading.value || loadedAssignmentsPositionId.value !== positionId) {
+    emit('toast', '正在读取该岗位的现有模板映射，请等待加载完成后再保存。')
+    return
+  }
+  const expectedRevision = assignmentsRevision.value
+  if (!expectedRevision) {
+    emit('toast', assignmentsNotice.value || '未能读取岗位映射版本，请重新加载岗位映射后核对再保存。')
+    return
+  }
+  const seq = assignmentsRequestSeq
   saving.value = true
+  savingAssignments.value = true
   try {
-    await replacePositionAuthorizationTemplateAssignments(selectedPositionId.value, assignedTemplateIds.value.map((template_id) => ({ template_id, status: 'ACTIVE' })))
+    const assignments = assignedTemplateIds.value.map((template_id) => {
+      const existing = assignedTemplateEntries.value.find((item) => (item.template?.template_id || item.template_id) === template_id)
+      return { template_id, status: 'ACTIVE', valid_from: existing?.valid_from ?? null, valid_until: existing?.valid_until ?? null }
+    })
+    const data = await replacePositionAuthorizationTemplateAssignments(positionId, assignments, expectedRevision)
+    if (!isCurrentAssignmentsRequest(seq, positionId)) return
+    // 只接收本次 PUT 的原子快照；重读可能已包含别人的下一次改动。
+    const revision = typeof data?.revision === 'string' && data.revision.trim() ? data.revision : ''
+    assignmentsRevision.value = ''
+    if (!Array.isArray(data?.items) || !revision) {
+      assignmentsNotice.value = '岗位映射已保存，但未能读取保存后的版本，请重新加载岗位映射后核对。'
+      emit('toast', assignmentsNotice.value)
+      return
+    }
+    assignedTemplateEntries.value = data.items.filter((item) => String(item?.status || '').toUpperCase() === 'ACTIVE')
+    assignedTemplateIds.value = assignedTemplateEntries.value.map((item) => item.template?.template_id || item.template_id)
+    assignmentsRevision.value = revision
+    assignmentsNotice.value = ''
     await Promise.all([loadPreview(), loadEditorPreview()])
+    if (!isCurrentAssignmentsRequest(seq, positionId)) return
     runAssignmentDuplicateCheck(false)
     emit('toast', '标准岗位授权模板映射已保存；有效任职关系将动态继承这些角色。')
   } catch (error) {
-    emit('toast', error instanceof AuthorizationError ? error.message : (error?.message || '保存岗位授权配置失败。'))
+    if (!isCurrentAssignmentsRequest(seq, positionId)) return
+    const message = formatUserError(error, { fallback: '保存岗位授权配置失败。' })
+    if (Number(error?.status) === 409) {
+      assignmentsRevision.value = ''
+      assignmentsNotice.value = `${message} 当前草稿已保留，请重新加载岗位映射后核对再保存。`
+      emit('toast', assignmentsNotice.value)
+    } else {
+      emit('toast', message)
+    }
   } finally {
+    savingAssignments.value = false
     saving.value = false
   }
 }
@@ -407,32 +520,45 @@ function duplicateScopeLabel(item) {
 }
 
 async function loadPreview() {
-  if (!selectedPositionId.value) return
-  try { preview.value = await previewPositionAuthorization({ position_id: selectedPositionId.value, inherit_authorization: true }) } catch { preview.value = null }
+  const requestId = ++previewRequest
+  const positionId = String(selectedPositionId.value || '')
+  preview.value = null
+  if (!positionId) return
+  const isCurrent = () => requestId === previewRequest && positionId === String(selectedPositionId.value || '')
+  try {
+    const result = await previewPositionAuthorization({ position_id: positionId, inherit_authorization: true })
+    if (isCurrent()) preview.value = result
+  } catch {
+    if (isCurrent()) preview.value = null
+  }
 }
 
 // 后端 preview 接口是 position 级别（不是 template / user 级别），因此编辑器内的"挂载预览"
 // 只能展示"该岗位当前已分配模板将产生的角色与 CONFLICT"，不能直接模拟"未保存草稿"的影响。
 // 在面板文案中明确说明这一限制，并在模板保存后引导用户到"将模板应用到岗位"完成分配。
 async function loadEditorPreview() {
-  if (!selectedPositionId.value) {
+  const requestId = ++editorPreviewRequest
+  const positionId = String(selectedPositionId.value || '')
+  const isCurrent = () => requestId === editorPreviewRequest && positionId === String(selectedPositionId.value || '')
+  editorPreview.value = null
+  if (!positionId) {
+    editorPreviewLoading.value = false
     editorPreview.value = null
     editorPreviewUnavailable.value = false
     return
   }
-  const requestId = ++editorPreviewRequest
   editorPreviewLoading.value = true
   editorPreviewUnavailable.value = false
   try {
-    const result = await previewPositionAuthorization({ position_id: selectedPositionId.value, inherit_authorization: true })
-    if (requestId !== editorPreviewRequest) return
+    const result = await previewPositionAuthorization({ position_id: positionId, inherit_authorization: true })
+    if (!isCurrent()) return
     editorPreview.value = result
   } catch {
-    if (requestId !== editorPreviewRequest) return
+    if (!isCurrent()) return
     editorPreview.value = null
     editorPreviewUnavailable.value = true
   } finally {
-    if (requestId === editorPreviewRequest) editorPreviewLoading.value = false
+    if (isCurrent()) editorPreviewLoading.value = false
   }
 }
 
@@ -450,7 +576,7 @@ async function deleteTemplate(template) {
         emit('toast', '岗位授权模板已删除，相关岗位继承授权已撤销。')
         await load()
       } catch (error) {
-        emit('toast', error instanceof AuthorizationError ? error.message : (error?.message || '删除岗位授权模板失败。'))
+        emit('toast', formatUserError(error, { fallback: '删除岗位授权模板失败。' }))
         return false
       } finally {
         closeConfirm()
@@ -495,6 +621,25 @@ function scrollToPositionPreview() {
   window.setTimeout(() => target.classList.remove('is-flash'), 1600)
 }
 
+// 岗位目录、授权模板、岗位映射或角色目录在其他入口变更后，立即重新读取目录与预览；
+// 预览是按岗位现算的，目录变化后旧预览不再代表当前授权。
+function handleRelatedAuthorizationChange(event) {
+  if (event.type === 'session') return
+  if (!canReadAuthorization.value) return
+  // API 成功会同步发布通知：本次映射保存直接使用 PUT 快照；冲突草稿等显式重载。
+  if (savingAssignments.value || assignmentsNotice.value) return
+  selectionNotice.value = ''
+  load()
+}
+useRelatedDataInvalidation(handleRelatedAuthorizationChange, {
+  kinds: [
+    RELATED_DATA.POSITIONS,
+    RELATED_DATA.AUTHORIZATION_TEMPLATES,
+    RELATED_DATA.ROLE_CATALOG,
+    RELATED_DATA.APPLICATIONS,
+  ],
+})
+
 watch(selectedPositionId, loadAssignments)
 watch(assignedTemplateIds, () => { duplicateCheckResult.value = null }, { deep: true })
 defineExpose({ reload: load })
@@ -517,12 +662,12 @@ onMounted(() => {
         <span class="iam-standard-authorization-badge">标准授权</span>
       </header>
       <div class="iam-template-grid">
-        <label><span>模板名称 *</span><input v-model="form.name" placeholder="例如 销售人员授权模板" /></label>
-        <label class="full"><span>说明</span><input v-model="form.description" placeholder="说明适用岗位和授权范围" /></label>
+        <label><span>模板名称 *</span><input v-model="form.name" placeholder="例如 销售人员授权模板"  maxlength="128"/></label>
+        <label class="full"><span>说明</span><input v-model="form.description" placeholder="说明适用岗位和授权范围"  maxlength="1000"/></label>
       </div>
       <div class="iam-template-guidance">
         <ConsoleIcon name="info" />
-        <p>{{ isEditingTemplate ? '以下内容已从岗位映射中的现有模板回填。可直接调整已授权的应用、子系统和角色，保存后更新原模板，不会创建重复模板。' : '模板可选择一个应用并多选角色，也可追加多个子系统及其多个角色。下拉框同时展示基础平台和所有已同步子系统，角色目录由各应用维护并只读同步，保存时按稳定角色 ID 写入。' }}</p>
+        <p>{{ isEditingTemplate ? '以下内容已从现有模板回填。可调整应用和角色，保存时保留模板及各组角色原有效期；本页面不编辑日期。' : '模板可选择一个应用并多选角色，也可追加多个子系统及其多个角色。下拉框同时展示基础平台和所有已同步子系统，角色目录由各应用维护并只读同步，保存时按稳定角色 ID 写入。' }}</p>
       </div>
       <div v-if="isEditingTemplate" class="iam-template-editing-notice">
         <ConsoleIcon name="edit" />
@@ -543,7 +688,7 @@ onMounted(() => {
               :max-effective-roles="maxEffectiveRolesFor(form.platform_application_id)"
             />
             <select v-model="form.platform_scope_type"><option value="TENANT">租户范围</option><option value="ENVIRONMENT">环境范围</option></select>
-            <input v-if="form.platform_scope_type === 'ENVIRONMENT'" v-model="form.platform_scope_id" placeholder="环境 ID" />
+            <input v-if="form.platform_scope_type === 'ENVIRONMENT'" v-model="form.platform_scope_id" placeholder="环境 ID"  maxlength="128"/>
           </div>
           <div
             v-for="(row, index) in form.additional_roles"
@@ -565,7 +710,7 @@ onMounted(() => {
               empty-text="请先选择已同步应用"
             />
             <select v-model="row.scope_type"><option value="TENANT">租户范围</option><option value="ENVIRONMENT">环境范围</option></select>
-            <input v-if="row.scope_type === 'ENVIRONMENT'" v-model="row.scope_id" placeholder="环境 ID" />
+            <input v-if="row.scope_type === 'ENVIRONMENT'" v-model="row.scope_id" placeholder="环境 ID"  maxlength="128"/>
             <button class="console-text-button danger" type="button" @click="removeAdditionalRoleGroup(index)">移除</button>
           </div>
           <button class="console-button ghost small iam-template-add-role-button" type="button" @click="addAdditionalRoleGroup">
@@ -653,10 +798,15 @@ onMounted(() => {
               </optgroup>
             </select>
           </label>
-          <button class="console-button ghost small" type="button" :disabled="!selectedPositionId || loading" @click="runAssignmentDuplicateCheck(true)"><ConsoleIcon name="search" />一键查重</button>
-          <button v-if="canManageAuthorization" class="console-button primary small" type="button" :disabled="saving || !selectedPositionId" @click="saveAssignments"><ConsoleIcon name="save" />保存岗位映射</button>
+          <button class="console-button ghost small" type="button" :disabled="!selectedPositionId || loading || assignmentsLoading" @click="runAssignmentDuplicateCheck(true)"><ConsoleIcon name="search" />一键查重</button>
+          <button v-if="canManageAuthorization" class="console-button primary small" type="button" :disabled="saving || !selectedPositionId || assignmentsLoading || !assignmentsRevision || loadedAssignmentsPositionId !== String(selectedPositionId || '')" @click="saveAssignments"><ConsoleIcon name="save" />{{ assignmentsLoading ? '读取中…' : '保存岗位映射' }}</button>
         </div>
       </header>
+      <p v-if="selectionNotice" class="login-target-module__error" role="alert">{{ selectionNotice }}</p>
+      <p v-if="assignmentsNotice" class="login-target-module__error" role="alert">
+        {{ assignmentsNotice }}
+        <button class="console-text-button" type="button" :disabled="saving || assignmentsLoading" @click="loadAssignments">重新加载岗位映射</button>
+      </p>
       <p v-if="selectedPosition" class="iam-field-help">{{ positionName(selectedPosition) }} 的有效任职关系会动态继承下列标准模板；任职勾选“参与岗位授权继承”后才会生效。个人、岗位和组织的例外授权不会被模板覆盖或删除。</p>
       <section
         v-if="duplicateCheckResult"

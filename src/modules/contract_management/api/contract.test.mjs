@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-// The source module depends on Vite's import.meta.env and browser navigation, so these focused
-// source assertions protect the contract that every API request—not only /auth/me—handles 401.
+// 源模块依赖 Vite 的 import.meta.env 和浏览器导航，因此这些针对性的
+// 源码断言用于确保每个 API 请求都处理 401，而不只是 /auth/me。
 const source = await import('node:fs/promises').then(({ readFile }) => readFile(new URL('./contract.js', import.meta.url), 'utf8'))
 
 test('contract API starts one shared OIDC redirect only for an expired session', () => {

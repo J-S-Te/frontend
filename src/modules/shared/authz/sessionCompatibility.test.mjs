@@ -54,17 +54,17 @@ test('access failures remain distinct and only plain 401 starts login', () => {
   assert.equal(classifySubsystemAccessError({ status: 401, code: 'CRM_OIDC_INVALID_CLAIMS' }).reason, SUBSYSTEM_ACCESS_REASON.OIDC_CLAIMS_INVALID)
   assert.equal(shouldStartSubsystemLogin({ status: 401, code: 'COMMON_UNAUTHENTICATED' }), true)
   assert.equal(shouldStartSubsystemLogin({ status: 401, code: 'PORTAL_OIDC_INVALID_CLAIMS' }), false)
-  assert.match(subsystemAccessMessage({ status: 403 }), /身份认证已经完成/)
-  assert.match(subsystemAccessMessage({ status: 503 }), /统一授权上下文/)
+  assert.match(subsystemAccessMessage({ status: 403 }), /已登录.*访问权限.*管理员/)
+  assert.match(subsystemAccessMessage({ status: 503 }), /暂时无法访问.*管理员/)
   assert.equal(
     subsystemAccessMessage({ status: 503, code: 'CON_APPROVAL_WORKFLOW_UNAVAILABLE', message: '审批流程服务暂时不可用，请稍后重试' }),
     '审批流程服务暂时不可用，请稍后重试',
   )
   assert.match(
     subsystemAccessMessage({ status: 503, code: 'AUTH_DEPENDENCY_UNAVAILABLE', message: '身份或授权服务暂时不可用' }),
-    /统一授权上下文/,
+    /暂时无法访问.*管理员/,
   )
-  assert.match(subsystemAccessMessage({ status: 403, code: 'PORTAL_IDENTITY_NOT_PROVISIONED' }), /客户门户身份/)
+  assert.match(subsystemAccessMessage({ status: 403, code: 'PORTAL_IDENTITY_NOT_PROVISIONED' }), /客户门户.*账号与客户的关联/)
 })
 
 test('a feature permission denial is not reported as an application access denial', () => {
@@ -74,9 +74,10 @@ test('a feature permission denial is not reported as an application access denia
     const message = subsystemAccessMessage({ status: 403, code })
     assert.match(message, /没有访问该功能的权限/, `${code} should report a feature permission gap`)
     assert.doesNotMatch(message, /服务器拒绝了当前应用访问/, `${code} must not claim the application is denied`)
+    assert.doesNotMatch(message, /尚未获得此系统/, `${code} must remain distinct from an application access denial`)
   }
-  assert.match(subsystemAccessMessage({ status: 403, code: 'PORTAL_AUTHORIZATION_REQUIRED' }), /服务器拒绝了当前应用访问/)
-  assert.match(subsystemAccessMessage({ status: 403 }), /服务器拒绝了当前应用访问/)
+  assert.match(subsystemAccessMessage({ status: 403, code: 'PORTAL_AUTHORIZATION_REQUIRED' }), /尚未获得此系统.*访问权限/)
+  assert.match(subsystemAccessMessage({ status: 403 }), /尚未获得此系统.*访问权限/)
 })
 
 test('an absent backend is unavailable rather than a login failure', () => {

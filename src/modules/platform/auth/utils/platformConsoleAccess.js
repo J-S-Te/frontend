@@ -65,6 +65,7 @@ export const PLATFORM_SETTINGS_SECTION_PERMISSIONS = Object.freeze({
     'platform:oauth-client:disable',
 	'platform:role-binding:update',
   ]),
+  licenses: Object.freeze(['platform:license:read']),
 })
 
 export const PLATFORM_SETTINGS_SECTION_KEYS = Object.freeze(Object.keys(PLATFORM_SETTINGS_SECTION_PERMISSIONS))

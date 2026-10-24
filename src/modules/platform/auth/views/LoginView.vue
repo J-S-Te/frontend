@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { loginWithPassword } from '@/modules/platform/auth/api/auth'
 import { resolveSameOriginRedirect, resolveServerApprovedRedirect } from '@/modules/platform/auth/utils/navigation'
 import { clearRememberedAccount, readRememberedAccount, writeRememberedAccount } from '@/modules/platform/auth/utils/rememberedAccount'
+import { formatUserError } from '../../../shared/utils/userError.js'
 
 const LOGIN_SUCCESS_URL = import.meta.env.VITE_LOGIN_SUCCESS_URL || '/'
 // SEC-X3：被会话失效（401/超时/撤销，守卫统一带 reason=session-ended）带回登录页时，
@@ -133,11 +134,11 @@ async function performPasswordLogin(replaceExistingSession = false) {
     const allowApprovedCrossOrigin = !data?.must_change_password && !oidcReturnTo
     window.setTimeout(() => redirectTopLevel(nextUrl, allowApprovedCrossOrigin), 450)
   } catch (error) {
-    concurrentSessionDetected.value = error.code === 'AUTH_CONCURRENT_SESSION'
+    concurrentSessionDetected.value = error?.code === 'AUTH_CONCURRENT_SESSION'
     // SEC-X4：登录页是未登录面，只展示经 userSafeErrorMessage 过滤的本地化文案；
     // traceId / details.detail / next_action 等排障信息绝不拼进展示文本
     //（message 已在 auth.js 请求管道里过滤）。
-    formError.value = error.message || '登录失败，请稍后重试。'
+    formError.value = formatUserError(error, { fallback: '登录失败，请稍后重试。' })
   } finally {
     submitting.value = false
   }

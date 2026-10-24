@@ -10,7 +10,7 @@
 //    属性名都会被识别为独立属性），再按白名单重新序列化：
 //    - 标签白名单：只输出排版所需静态标签，script/svg/math/form 等危险元素连同内容整体丢弃；
 //    - 属性白名单：on* 事件属性、srcdoc、formaction、xlink:href 等永不在白名单内；
-//    - URL scheme 白名单：href/src 解码 HTML 实体并剥离控制字符后仅允许 http/https/mailto/相对路径；
+//    - URL 协议 白名单：href/src 解码 HTML 实体并剥离控制字符后仅允许 http/https/mailto/相对路径；
 //    任何"解析器看不见"的写法都不可能出现在输出里，失败方向一律 fail-closed（丢弃剩余输入）。
 // 3) 不引入 DOMPurify：本仓库测试在 Node（无 DOMParser/document）下用 node --test 运行，
 //    引入 DOMPurify 还需连带 jsdom 等依赖与联网安装；自实现词法解析 + 白名单可离线、可审计，
@@ -24,7 +24,7 @@ const BLOCKED_TAGS = new Set([
   'track', 'frameset', 'frame', 'noscript', 'template',
 ])
 
-// HTML void 元素：没有结束标签，遇到时只丢弃起始标签本身（否则会误删后续正文）。
+// HTML 空元素：没有结束标签，遇到时只丢弃起始标签本身（否则会误删后续正文）。
 const VOID_TAGS = new Set([
   'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta',
   'param', 'source', 'track', 'wbr', 'frame',
@@ -89,7 +89,7 @@ function escapeAttrValue(value) {
     .replace(/&(?![a-zA-Z][a-zA-Z0-9]*;|#\d+;|#x[0-9a-fA-F]+;)/gi, '&amp;')
 }
 
-// URL scheme 白名单：解码实体、剥离控制字符（浏览器解析 URL 时会去掉 tab/CR/LF 等）后
+// URL 协议 白名单：解码实体、剥离控制字符（浏览器解析 URL 时会去掉 tab/CR/LF 等）后
 // 再判断 scheme，防止 &#106;avascript: / javascript&colon; / java\nscript: 这类混淆绕过。
 //
 // 协议相对 URL（// 开头，AUD-2026-033）继承页面协议，历史上无条件放行会留下"点击后跳转
@@ -128,7 +128,7 @@ function isAllowedAttr(tag, attrName) {
   return Boolean(extra) && extra.includes(attrName)
 }
 
-// 形如 HTML5 "data state / before attribute name" 的起始标签解析。
+// 按 HTML5 的“数据状态／属性名前状态”解析起始标签。
 // 关键点：属性之间不要求空白分隔——"值"onerror=、/onerror= 都会被识别为独立属性名，
 // 与浏览器行为一致，这正是旧正则沙箱被绕过的根因。
 function parseStartTag(html, start) {
@@ -307,7 +307,7 @@ export function sanitizePreviewHTML(raw, options) {
     if (next === '/') {
       const afterSlash = html[lt + 2]
       if (!afterSlash || !/[a-zA-Z]/.test(afterSlash)) {
-        //  "</>"、"</ x>" 等：对齐浏览器的 bogus comment 语义，丢弃到下一个 ">"（而非整段）。
+        //  "</>"、"</ x>" 等：对齐浏览器的 伪注释语义，丢弃到下一个 ">"（而非整段）。
         const end = html.indexOf('>', lt + 2)
         i = end < 0 ? html.length : end + 1
         continue

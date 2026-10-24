@@ -20,7 +20,9 @@ export const listNamespaces = ({ page = 1, pageSize = 100 } = {}) => request(`/c
 export const createNamespace = (payload) => request('/config/namespaces', { method: 'POST', body: JSON.stringify(payload) })
 export const listConfigItems = ({ page = 1, pageSize = 100, namespaceId = '' } = {}) => {
   const query = new URLSearchParams({ page: String(page), page_size: String(pageSize) })
-  if (namespaceId) query.set('namespace_id', namespaceId)
+  // 服务端契约（平台接口规范 ConfigNamespaceFilter）只读取 filter[namespace_id]；
+  // 发送裸 namespace_id 会被忽略，选择命名空间后仍返回租户内其他命名空间的配置。
+  if (namespaceId) query.set('filter[namespace_id]', namespaceId)
   return request(`/config/items?${query}`)
 }
 export const createConfigItem = (payload) => request('/config/items', { method: 'POST', body: JSON.stringify(payload) })

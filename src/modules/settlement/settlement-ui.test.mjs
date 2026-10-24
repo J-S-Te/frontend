@@ -21,6 +21,9 @@ test('Settlement view exposes the first-phase financial workflow without mock re
   assert.match(source, /待财务复核/)
   assert.match(source, /match_confidence: match\.score/)
   assert.match(source, /原发票在收到有效税控回执前仍保持已开具状态/)
+  assert.match(source, /items_source/)
+  assert.match(source, /request_items/)
+  assert.match(source, /申请依据/)
   assert.match(source, /receiptCustomers/)
   assert.match(source, /collectionStatusLabel/)
   assert.match(source, /receivableInvoiceStatusLabel/)
@@ -44,6 +47,13 @@ test('Settlement view exposes the first-phase financial workflow without mock re
   assert.match(source, /dashboardKpis/)
   assert.match(source, /workItems/)
   assert.match(source, /agingBuckets/)
+  assert.match(source, /getDunningOverview/)
+  assert.match(source, /completeDunningAction/)
+  assert.match(source, /dunningOverview/)
+  assert.match(source, /getAgingSummary/)
+  assert.match(source, /agingRows/)
+  assert.match(source, /getDunningCoverage/)
+  assert.match(source, /策略覆盖巡检/)
   assert.match(source, /loadGeneration/)
   assert.match(source, /generation !== loadGeneration/)
   assert.doesNotMatch(source, /示例客户|mockReceivable|演示数据/)
@@ -56,22 +66,24 @@ test('Settlement view ships Phase A/B/C UI optimization helpers and components',
     new URL('./components/SettlementTimeline.vue', import.meta.url),
     'utf8',
   )
-  // Phase B: KPI amount shortener + 本月 filter
+  // 阶段 B：KPI 金额缩写与本月筛选。
   assert.match(view, /formatSettlementAmount/)
   assert.match(view, /isCurrentMonth/)
   assert.match(view, /currentMonthReceipts/)
-  assert.match(view, /\$\{currentMonthReceipts\.length\} 笔本月回款/)
-  // Phase B.1: dashboardKpis + dunningKpis both use the shortener
-  assert.match(view, /value: formatSettlementAmount\(\s*\n?\s*receivables\.value\.reduce/)
-  // Phase C: SettlementTimeline component + invoice timeline wiring
+  assert.match(view, /本月回款 · 服务端按币种汇总/)
+  assert.match(view, /dashboardCurrencyTotals/)
+  // 阶段 B.1：dashboardKpis 与 dunningKpis 均使用金额缩写函数。
+  assert.match(view, /dashboardCurrencyTotals\(\s*\n?\s*"open_receivable"/)
+  assert.match(view, /currency_totals/)
+  // 阶段 C：SettlementTimeline 组件与发票时间线接线。
   assert.match(view, /import SettlementTimeline/)
   assert.match(view, /<SettlementTimeline :events="invoiceTimelineEvents"/)
   assert.match(timeline, /settlement-timeline-event/)
   assert.match(timeline, /tone-(success|warning|danger|info|purple)/)
-  // Phase C.6: 我的待办 section rebuilt as grouped task list
+  // 阶段 C.6：将“我的待办”区域重构为分组任务列表。
   assert.match(view, /taskGroups/)
   assert.match(view, /settlement-task-item/)
-  // Phase A: CSS variables + interactive micro-states
+  // 阶段 A：CSS 变量与交互细节状态。
   assert.match(css, /var\(--green, #16a34a\)/)
   assert.match(css, /var\(--orange, #d97706\)/)
   assert.match(css, /var\(--red, #dc2626\)/)

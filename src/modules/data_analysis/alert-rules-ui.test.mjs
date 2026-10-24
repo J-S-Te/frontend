@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import vm from 'node:vm'
+import { formatDataAnalysisError } from './utils/errors.js'
 
 const source = await readFile(new URL('./views/AlertRulesView.vue', import.meta.url), 'utf8')
 const script = source.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '')
@@ -10,6 +11,7 @@ const existing = () => ({ id: 42, version: 3, created_at: '2026-10-01', rule_cod
 function harness({ permissions = ['alert.manage'], get = async () => [existing()], put, remove, confirm = true } = {}) {
   const calls = { put: [], remove: [], confirm: [] }
   const context = vm.createContext({
+    formatDataAnalysisError,
     ref: (value) => ({ value }),
     computed: (getter) => ({ get value() { return getter() } }),
     defineProps: () => ({ permissions }),
@@ -97,7 +99,7 @@ test('failed toggle preserves saved state and version conflicts require refresh'
   assert.equal(rule.enabled, false)
   assert.equal(ui.rules.value[0], rule)
   assert.equal(ui.saving.value, false)
-  assert.match(ui.toast.value, /刷新规则后重试/)
+  assert.match(ui.toast.value, /刷新规则后重新编辑/)
   assert.equal(calls.put.length, 1)
 })
 

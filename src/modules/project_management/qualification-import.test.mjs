@@ -1,18 +1,28 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFile } from 'node:fs/promises'
+import { formatUserError } from '../shared/utils/userError.js'
 
 const dialog = await readFile(new URL('./components/QualificationImportDialog.vue', import.meta.url), 'utf8')
 const api = await readFile(new URL('./api/projectManagement.js', import.meta.url), 'utf8')
 function mount(apiCalls, resourceType = 'PERSON') {
   const script = dialog.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '')
   const events = []
-  const state = new Function('computed', 'ref', 'defineProps', 'defineEmits', 'downloadCapabilityImportTemplate', 'previewCapabilitiesImport', 'importCapabilities', 'downloadEquipmentImportTemplate', 'previewEquipmentImport', 'importEquipment', `${script}\nreturn { file, preview, result, selected, busy, error, readyRows, selectedCount, pick, inspect, commit, reset, dateLabel }`)(
-    (read) => ({ get value() { return read() } }), (value) => ({ value }), () => ({ codeOptions: [], resourceType }), () => (...args) => events.push(args), apiCalls.download, apiCalls.preview, apiCalls.commit, apiCalls.equipmentDownload, apiCalls.equipmentPreview, apiCalls.equipmentCommit,
+  const state = new Function('formatUserError', 'computed', 'ref', 'defineProps', 'defineEmits', 'downloadCapabilityImportTemplate', 'previewCapabilitiesImport', 'importCapabilities', 'downloadEquipmentImportTemplate', 'previewEquipmentImport', 'importEquipment', `${script}\nreturn { file, preview, result, selected, busy, error, readyRows, selectedCount, pick, inspect, commit, reset, dateLabel, importMessage }`)(
+    formatUserError, (read) => ({ get value() { return read() } }), (value) => ({ value }), () => ({ codeOptions: [], resourceType }), () => (...args) => events.push(args), apiCalls.download, apiCalls.preview, apiCalls.commit, apiCalls.equipmentDownload, apiCalls.equipmentPreview, apiCalls.equipmentCommit,
   )
   return { ...state, events }
 }
 const workbook = { name: '人员资质.csv', size: 100 }
+test('导入错误和逐行说明过滤内部实现，保留可操作的中文原因', async () => {
+  const state = mount({ preview: async () => { throw new Error('SQLSTATE HY000: INSERT INTO credentials') } })
+  state.file.value = workbook
+  await state.inspect()
+  assert.match(state.error.value, /导入检测失败/)
+  assert.doesNotMatch(state.error.value, /SQLSTATE|credentials/)
+  assert.equal(state.importMessage('所选资质编码已停用，请重新选择'), '所选资质编码已停用，请重新选择')
+  assert.doesNotMatch(state.importMessage('panic: duplicate key in credential_table'), /panic|credential_table/)
+})
 test('设备未设置检定日期不显示 Go 零值年份', () => {
   const state = mount({}, 'EQUIPMENT')
   assert.equal(state.dateLabel('0001-01-01T00:00:00Z'), '不限')

@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import { formatUserError } from '../../shared/utils/userError.js'
 import { getNotification, listInbox, markNotificationRead } from '@/modules/platform/notifications/api/notifications'
 
 const emit = defineEmits(['read'])
@@ -10,8 +11,8 @@ let loadSequence = 0
 const pages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
 const formatDate = (value) => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '—'
 
-// Notification targets are optional. Never convert arbitrary URLs/categories
-// into project routes or bypass the target page's own authorization checks.
+// 通知目标为可选项。绝不能将任意 URL 或类别
+// 转换为项目路由，也不能绕过目标页面自身的授权校验。
 const projectTarget = computed(() => {
   if (!detail.value?.target_url) return ''
   try {
@@ -35,7 +36,7 @@ async function load() {
   } catch (value) {
     if (sequence !== loadSequence) return
     items.value = []
-    error.value = value?.message || '个人通知加载失败，请重试。'
+    error.value = formatUserError(value, { fallback: '个人通知加载失败，请重试。' })
   } finally { if (sequence === loadSequence) loading.value = false }
 }
 function changeFilter() { page.value = 1; detail.value = null; load() }
@@ -53,7 +54,7 @@ async function open(item) {
       emit('read')
       await load()
     }
-  } catch (value) { error.value = value?.message || '通知读取失败，请重试。' }
+  } catch (value) { error.value = formatUserError(value, { fallback: '通知读取失败，请重试。' }) }
   finally { actionID.value = '' }
 }
 onMounted(load)

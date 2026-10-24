@@ -1714,7 +1714,7 @@
   opacity: .45;
 }
 
-/* Design-system refinements: clear hierarchy, state-first color, and traceability. */
+/* 设计系统细化：层次清晰、颜色优先表达状态，并保留可追溯性。 */
 .console-page-head>div:first-child {
   min-width: 0;
 }
@@ -2166,7 +2166,7 @@
 }
 
 /* =========================================================================
-   Wizard modal（员工入职等 5 步流程）
+   向导弹窗（员工入职等 5 步流程）
    - 继承 .console-detail-modal 视觉，仅放大宽度
    - stepper / section / status / tag / prereq 都是为这个 modal 服务
    ========================================================================= */

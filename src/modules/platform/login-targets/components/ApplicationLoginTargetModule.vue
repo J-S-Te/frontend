@@ -2,13 +2,15 @@
 import { computed, reactive, ref, watch } from 'vue'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import {
-  ApplicationLoginTargetError,
   createApplicationLoginTarget,
   listApplicationLoginTargets,
   updateApplicationLoginTarget,
 } from '@/modules/platform/login-targets/api/loginTargets'
 import { hasPermission } from '@/modules/platform/auth/utils/principal'
 import { targetUriValidationMessage } from '@/modules/platform/login-targets/utils/targetUri'
+import { useRelatedDataInvalidation } from '@/modules/platform/shared/composables/useRelatedDataInvalidation'
+import { RELATED_DATA } from '@/modules/platform/shared/utils/relatedDataInvalidation'
+import { formatUserError } from '../../../shared/utils/userError.js'
 import '@/modules/platform/login-targets/styles/application-login-target.css'
 
 const props = defineProps({
@@ -137,7 +139,7 @@ async function loadTargets() {
       await loadTargets()
     }
   } catch (error) {
-    errorMessage.value = error instanceof ApplicationLoginTargetError ? error.message : '读取登录目标失败。'
+    errorMessage.value = formatUserError(error, { fallback: '读取登录目标失败。' })
   } finally {
     loading.value = false
   }
@@ -152,6 +154,7 @@ async function submitEditor() {
 
   submitting.value = true
   errorMessage.value = ''
+  let saved = false
   try {
     if (editingTarget.value) {
       // version 来自打开编辑器时的服务端快照。发生并发更新时由后端拒绝覆盖，页面提示
@@ -177,17 +180,17 @@ async function submitEditor() {
       })
       showToast('登录目标已创建。')
     }
-    closeEditor()
-    await loadTargets()
+    saved = true
   } catch (error) {
-    if (error instanceof ApplicationLoginTargetError && error.code === 'VERSION_CONFLICT') {
-      errorMessage.value = '该目标已被其他管理员更新，请刷新列表后再提交。'
-    } else {
-      errorMessage.value = error instanceof ApplicationLoginTargetError ? error.message : '保存登录目标失败。'
-    }
+    errorMessage.value = formatUserError(error, { fallback: '保存登录目标失败。', method: editingTarget.value ? 'PATCH' : 'POST' })
   } finally {
     submitting.value = false
   }
+  if (!saved) return
+  // 保存成功后先结束提交状态再关闭窗口：closeEditor 自身带 submitting 闸门，
+  // 在原 try 内调用会被它拦住，导致窗口不关闭、表单不重置。
+  closeEditor()
+  await loadTargets()
 }
 
 function setPage(nextPage) {
@@ -200,6 +203,13 @@ watch(
   () => { loadTargets() },
   { immediate: true },
 )
+
+// 应用或环境在别处被更新（含门户落地地址变化）后重新读取登录目标；当前页有未保存
+// 编辑时只刷新列表，不覆盖正在填写的表单内容。
+useRelatedDataInvalidation((event) => {
+  if (event.type === 'session') return
+  loadTargets()
+}, { kinds: [RELATED_DATA.APPLICATIONS, RELATED_DATA.ENVIRONMENTS] })
 </script>
 
 <template>

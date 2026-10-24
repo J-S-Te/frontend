@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Run on the deployment host. Platform assets and its Agent must be upgraded
-# before a parallel frontend release can refresh the shared release pointer.
+# 在部署主机上执行。并行发布前端前，须先升级平台部署资产与 Agent，
+# 再刷新共享发布指针。
 frontend_platform_ready() {
   local service container state
   [[ -f "$deploy_dir/docker-compose.yml" && -x "$deploy_dir/bin/deploy-service.sh" &&
@@ -16,8 +16,8 @@ frontend_platform_ready() {
     state="$(docker inspect -f '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' "$container")" || return 1
     [[ "$state" == 'running healthy' ]] || return 1
   done
-  # A healthy old API is insufficient: the chosen frontend address and the
-  # API's exact proxy allowlist must already agree with the live network.
+  # 旧版 API 健康不足以证明可发布：所选前端地址及 API 的精确代理允许列表
+  # 须与当前实际网络一致。
   bash "$deploy_dir/bin/check-frontend-network.sh" "$deploy_dir" "$compose_project" >/dev/null 2>&1 || return 1
 }
 

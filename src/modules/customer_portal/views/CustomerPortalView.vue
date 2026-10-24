@@ -1,4 +1,5 @@
 <script setup>
+import { formatPortalError } from '../api/errorMessages.js'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
@@ -125,7 +126,7 @@ function onDialogKeydown(event) {
 }
 function formatDate(value) { if (!value) return '—'; const date = new Date(value); return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(date) }
 function formatDay(value) { if (!value) return '—'; const date = new Date(value); return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium' }).format(date) }
-function fail(value) { error.value = subsystemAccessMessage(value) }
+function fail(value) { error.value = formatPortalError(value, { message: subsystemAccessMessage(value) }) }
 function feedbackType(value) { return ({ OBJECTION: '异议', COMPLAINT: '投诉', SUGGESTION: '建议' })[value] || value }
 function feedbackStatus(value) { return ({ SUBMITTED: '已提交', ACCEPTED: '已受理', PROCESSING: '处理中', NEED_CUSTOMER_INFO: '待客户补充', RESOLVED: '已解决', CLOSED: '已关闭', REJECTED: '无效反馈' })[value] || value }
 function projectStatus(value) { return ({ NOT_STARTED: '未开始', IN_PROGRESS: '进行中', COMPLETED: '已完成', SUSPENDED: '已暂停', CANCELLED: '已取消' })[value] || value || '—' }
@@ -165,7 +166,7 @@ async function load() {
     if (!capabilitiesLoaded) {
       capabilitiesLoaded = true
       // 能力状态不可确认时继续保持失败关闭。
-      try { capabilities.value = await getPortalCapabilities() } catch { /* Keep dependency-backed actions closed. */ }
+      try { capabilities.value = await getPortalCapabilities() } catch { /* 依赖不可用时，保持相关操作关闭。（测试锚点：Keep dependency-backed actions closed） */ }
     }
     if (section.value === 'projects' && hasPermission('project.read')) {
       const value = await listProjects({ page: 1, page_size: 20 })
@@ -186,13 +187,13 @@ async function load() {
       feedbackPage.value = 1
       feedbackTotal.value = Number(value?.total || feedbacks.value.length)
       if (hasPermission('project.read') && !projects.value.length) {
-        try { const pv = await listProjects({ page: 1, page_size: 100 }); projects.value = pv?.items || [] } catch { /* keep empty */ }
+        try { const pv = await listProjects({ page: 1, page_size: 100 }); projects.value = pv?.items || [] } catch { /* 保持为空。 */ }
       }
     }
     else if (section.value === 'security' && hasPermission('account.security.manage')) { const [security, sessions] = await Promise.all([getAccountSecurity(), listAccountSessions()]); accountSecurity.value = security; accountSessions.value = sessions?.items || [] }
     else if (section.value === 'filings' && hasPermission('filing.read') && hasPermission('project.read') && !projects.value.length) {
       // 供备案新建时选择关联项目；读取失败不影响备案主流程。
-      try { const value = await listProjects({ page: 1, page_size: 100 }); projects.value = value?.items || [] } catch { /* keep empty */ }
+      try { const value = await listProjects({ page: 1, page_size: 100 }); projects.value = value?.items || [] } catch { /* 保持为空。 */ }
     }
   } catch (value) { fail(value) } finally { loading.value = false }
 }
@@ -218,7 +219,7 @@ async function loadMoreReports() {
     reports.value = [...reports.value, ...(value?.items || [])]
     reportPage.value = next
     reportTotal.value = Number(value?.total || reports.value.length)
-  } catch (value) { reportListError.value = value?.message || '更多报告记录暂时无法加载' }
+  } catch (value) { reportListError.value = formatPortalError(value, { fallback: '更多报告记录暂时无法加载' }) }
   finally { reportListLoading.value = false }
 }
 async function loadMoreFeedbacks() {
@@ -253,7 +254,7 @@ async function loadReportWorkspace() {
         reportTotal.value = Number(value?.total || reports.value.length)
       }
     }).catch((value) => {
-      if (generation === reportLoadGeneration && section.value === 'reports') reportListError.value = value?.message || '报告申请记录暂时无法加载'
+      if (generation === reportLoadGeneration && section.value === 'reports') reportListError.value = formatPortalError(value, { fallback: '报告申请记录暂时无法加载' })
     }).finally(() => {
       if (generation === reportLoadGeneration && section.value === 'reports') reportListLoading.value = false
     }))
@@ -284,7 +285,7 @@ async function loadReportWorkspace() {
     requests.push(listProjects({ page: 1, page_size: 100 }).then((value) => {
       if (generation === reportLoadGeneration && section.value === 'reports') reportProjects.value = value?.items || []
     }).catch((value) => {
-      if (generation === reportLoadGeneration && section.value === 'reports') reportProjectsError.value = value?.message || '可申请项目暂时无法加载'
+      if (generation === reportLoadGeneration && section.value === 'reports') reportProjectsError.value = formatPortalError(value, { fallback: '可申请项目暂时无法加载' })
     }).finally(() => {
       if (generation === reportLoadGeneration && section.value === 'reports') reportProjectsLoading.value = false
     }))
@@ -301,7 +302,7 @@ async function loadProjectActivities(projectId, page, generation = projectReques
     activityPage.value = value?.page || page
     activityTotal.value = value?.total || 0
   } catch (value) {
-    if (generation === projectRequestGeneration) activityError.value = value?.message || '项目动态暂时无法加载'
+    if (generation === projectRequestGeneration) activityError.value = formatPortalError(value, { fallback: '项目动态暂时无法加载' })
   } finally {
     if (generation === projectRequestGeneration) activityLoading.value = false
   }
@@ -321,7 +322,7 @@ async function loadProjectEvaluation(projectId, generation = projectRequestGener
       if (generation === projectRequestGeneration) evaluation.value = detail
     }
   } catch (value) {
-    if (generation === projectRequestGeneration) evaluationError.value = value?.message || '服务评价暂时无法加载'
+    if (generation === projectRequestGeneration) evaluationError.value = formatPortalError(value, { fallback: '服务评价暂时无法加载' })
   } finally {
     if (generation === projectRequestGeneration) evaluationLoading.value = false
   }
@@ -346,7 +347,7 @@ async function openProject(item) {
     const detail = await getProject(item.project_id)
     if (generation === projectRequestGeneration) selectedProject.value = detail
   } catch (value) {
-    if (generation === projectRequestGeneration) projectDetailError.value = value?.message || '项目详情暂时无法加载'
+    if (generation === projectRequestGeneration) projectDetailError.value = formatPortalError(value, { fallback: '项目详情暂时无法加载' })
   } finally {
     if (generation === projectRequestGeneration) projectDetailLoading.value = false
   }
@@ -369,7 +370,7 @@ async function openProjectConversation() {
       projectConversationRetryKeys.delete(projectId)
       projectConversation.value = { conversation: created, messages: { items: [], page_size: 100, total: 0, has_more: false, next_before: '' } }
     }
-  } catch (value) { projectMessageError.value = value?.message || '项目站内会话暂时无法加载' }
+  } catch (value) { projectMessageError.value = formatPortalError(value, { fallback: '项目站内会话暂时无法加载' }) }
   finally { projectMessageLoading.value = false }
 }
 async function acknowledgeVisibleManagerMessages(detail) {
@@ -385,7 +386,7 @@ async function acknowledgeVisibleManagerMessages(detail) {
       projectConversation.value = { ...projectConversation.value, read_state: state }
     }
   } catch (value) {
-    if (generation === projectMessageReadGeneration) projectMessageError.value = value?.message || '消息已显示，但已读状态同步失败'
+    if (generation === projectMessageReadGeneration) projectMessageError.value = formatPortalError(value, { fallback: '消息已显示，但已读状态同步失败' })
   }
 }
 async function loadOlderProjectMessages() {
@@ -400,7 +401,7 @@ async function loadOlderProjectMessages() {
     projectConversation.value = { ...older, messages: { ...older.messages, total: messages.total, items: [...(older.messages?.items || []), ...(messages.items || [])] } }
     await nextTick()
     await acknowledgeVisibleManagerMessages(older)
-  } catch (value) { projectMessageError.value = value?.message || '更早消息暂时无法加载' }
+  } catch (value) { projectMessageError.value = formatPortalError(value, { fallback: '更早消息暂时无法加载' }) }
   finally { projectMessageOlderLoading.value = false }
 }
 async function sendManagerMessage() {
@@ -414,7 +415,7 @@ async function sendManagerMessage() {
   try {
     projectConversation.value = await sendProjectConversationMessage(conversationId, content, retryKey)
     projectMessageRetryKeys.delete(fingerprint); projectMessageContent.value = ''
-  } catch (value) { projectMessageError.value = value?.message || '消息发送失败，请使用原内容重试' }
+  } catch (value) { projectMessageError.value = formatPortalError(value, { fallback: '消息发送失败，请使用原内容重试' }) }
   finally { projectMessageLoading.value = false }
 }
 function changeActivityPage(page) {
@@ -457,7 +458,7 @@ async function exportProjectPDF() {
     try { anchor.href = url; anchor.download = file.fileName; anchor.click() } finally { URL.revokeObjectURL(url) }
     projectExportJobs.delete(projectId)
   } catch (value) {
-    if (value?.name !== 'AbortError' && generation === projectExportGeneration && selectedProject.value?.snapshot?.project_id === projectId) projectExportError.value = value?.message || '项目 PDF 导出失败'
+    if (value?.name !== 'AbortError' && generation === projectExportGeneration && selectedProject.value?.snapshot?.project_id === projectId) projectExportError.value = formatPortalError(value, { fallback: '项目 PDF 导出失败' })
   } finally {
     if (generation === projectExportGeneration) { projectExportLoading.value = false; projectExportController = null }
   }
@@ -486,7 +487,7 @@ async function openReport(item) {
   } catch (value) {
     if (generation === reportDetailGeneration) {
       selectedReport.value = null
-      reportDetailError.value = value?.message || '报告详情暂时无法加载'
+      reportDetailError.value = formatPortalError(value, { fallback: '报告详情暂时无法加载' })
     }
   } finally {
     if (generation === reportDetailGeneration) reportDetailLoading.value = false
@@ -500,7 +501,7 @@ async function openReportNotification(item) {
     reportNotificationUnreadCount.value = Math.max(0, reportNotificationUnreadCount.value - (item.status === 'UNREAD' ? 1 : 0))
     await openReport({ id: item.request_id, request_no: item.request_no })
   } catch (value) {
-    reportListError.value = value?.message || '报告通知暂时无法打开'
+    reportListError.value = formatPortalError(value, { fallback: '报告通知暂时无法打开' })
   }
 }
 function cancelReportDownload() {
@@ -531,7 +532,7 @@ function reportDownloadFailure(value) {
   if (value?.status === 410) return '下载授权已过期或撤销，请重新申请授权。'
   if (value?.status === 423) return '下载授权已冻结，请联系服务人员复核。'
   if (value?.status === 503) return '安全下载服务暂时不可用，请稍后重试。'
-  return value?.message || '报告下载失败，请重新点击下载。'
+  return formatPortalError(value, { fallback: '报告下载失败，请重新点击下载。' })
 }
 async function downloadReportFile() {
   const report = selectedReport.value
@@ -590,7 +591,7 @@ async function submitReport() {
   } catch (value) {
     reportSubmitError.value = value?.status === 409 || value?.code === 'PORTAL_REPORT_IDEMPOTENCY_CONFLICT'
       ? '提交发生冲突：该重试标识已用于另一份申请，请检查表单内容后重新提交。'
-      : value?.message || '报告申请提交失败，可直接重试；相同内容将复用本次提交标识。'
+      : formatPortalError(value, { fallback: '报告申请提交失败，可直接重试；相同内容将复用本次提交标识。' })
   } finally { reportSubmitting.value = false }
 }
 function validContact(value) {
@@ -607,7 +608,7 @@ async function submitFeedback() {
     Object.assign(feedbackForm, { type: 'COMPLAINT', title: '', description: '', project_id: '', expected_contact: '' })
     notice.value = '反馈已提交，我们将在 24 小时内首次响应。'
     if (hasPermission('feedback.read')) await load()
-  } catch (value) { feedbackSubmitError.value = value?.message || '反馈提交失败，请稍后重试。' }
+  } catch (value) { feedbackSubmitError.value = formatPortalError(value, { fallback: '反馈提交失败，请稍后重试。' }) }
 }
 async function openFeedback(item) { if (!hasPermission('feedback.read')) return; try { selectedFeedback.value = await getFeedback(item.id) } catch (value) { fail(value) } }
 async function replyFeedback() { if (!hasPermission('feedback.reply') || !feedbackReply.value.trim() || !selectedFeedback.value) return; try { selectedFeedback.value = await addFeedbackMessage(selectedFeedback.value.feedback.id, feedbackReply.value); feedbackReply.value = ''; notice.value = '补充内容已提交。' } catch (value) { fail(value) } }
@@ -705,7 +706,7 @@ onBeforeUnmount(() => {
       <section v-if="section === 'feedback' && canUseFeedback && feedbackNotifications.length" class="portal-card feedback-notifications"><h2>反馈通知（{{ feedbackNotificationUnreadCount }} 条未读）</h2><button v-for="item in feedbackNotifications" :key="item.id" type="button" class="feedback-row" @click="openFeedbackNotification(item)"><span><strong>{{ item.title }}</strong><small>{{ item.body }}</small><small>{{ formatDate(item.created_at) }}</small></span><em>查看反馈</em></button></section>
       <template v-else-if="section === 'projects' && hasPermission('project.read')"><div class="portal-title"><h1>我的项目</h1><p>项目数据以最近一次同步快照为准</p></div><section v-if="projects.length" class="project-list"><button v-for="item in projects" :key="item.project_id" type="button" @click="openProject(item)"><div><h2>{{ item.project_name || '未命名项目' }}</h2><p>{{ item.contract_no || '无合同编号' }} · {{ item.current_stage || '阶段未同步' }}</p></div><strong>{{ item.progress_pct ?? 0 }}%</strong><progress :value="item.progress_pct ?? 0" max="100"></progress><small>数据更新：{{ formatDate(item.source_updated_at) }}<template v-if="item.delayed"> · 已延期</template></small></button></section><nav v-if="projects.length && projects.length < projectTotal" class="project-pagination" aria-label="项目加载更多"><button type="button" :disabled="loading" @click="loadMoreProjects">加载更多项目</button><span>已显示 {{ projects.length }} / {{ projectTotal }} 个</span></nav><div v-else class="portal-empty">暂无可查看的项目</div></template>
       <div v-else-if="section === 'projects'" class="portal-empty">{{ serviceUnavailableText('project_enabled', '当前账号没有项目读取权限。如需开通，请联系您的服务人员。') }}</div>
-      <template v-else-if="section === 'reports' && (hasPermission('report.read') || hasPermission('report.request'))"><div class="portal-title"><h1>电子报告</h1><p>申请审批与状态变更均由 Portal 服务端可靠跟踪</p></div><section v-if="hasPermission('report.read') && reportRiskAlerts.length" class="portal-card" aria-live="polite"><h2>下载安全提醒</h2><div v-for="item in reportRiskAlerts" :key="item.alert_id" class="report-row"><span><strong>{{ item.request_no || `报告 #${item.request_id}` }} 的下载授权已冻结</strong><small>{{ item.report_type }} · {{ formatDate(item.detected_at) }}</small><small>风险编号：{{ item.risk_code }}；服务人员复核前请勿反复尝试。</small><small>如需协助，请通过「客户反馈」提交或联系您的服务人员。</small><button type="button" class="secondary small" @click="navigate('feedback')">去反馈</button></span></div></section><section v-if="hasPermission('report.read') && reportNotifications.length" class="portal-card"><h2>报告通知（{{ reportNotificationUnreadCount }} 条未读）</h2><button v-for="item in reportNotifications" :key="item.id" class="report-row" type="button" @click="openReportNotification(item)"><span><strong>{{ item.request_no }} 已发放</strong><small>{{ item.report_type }} · {{ formatDate(item.created_at) }}</small></span><em>查看报告</em></button></section><div class="portal-columns"><form v-if="hasPermission('report.request')" class="portal-card" @submit.prevent="submitReport"><h2>申请报告</h2><p v-if="reportProjectsError" class="portal-error" role="alert">{{ reportProjectsError }}</p><label>项目<select v-model="reportForm.project_id" :disabled="reportProjectsLoading || !hasPermission('project.read')" required><option value="">{{ reportProjectsLoading ? '正在加载项目…' : '请选择当前客户项目' }}</option><option v-for="item in reportProjects" :key="item.project_id" :value="item.project_id">{{ item.project_name || '未命名项目' }}（{{ item.contract_no || item.project_id }}）</option></select></label><p v-if="!hasPermission('project.read')" class="portal-warning">缺少 project.read，无法读取当前客户项目，报告申请已暂停。</p><p v-else-if="!reportProjectsLoading && !reportProjects.length && !reportProjectsError" class="portal-warning">暂无可申请报告的项目。</p><label>报告类型<select v-model="reportForm.report_type" required><option value="">请选择报告类型</option><option v-for="type in reportTypeOptions" :key="type" :value="type">{{ type }}</option></select></label><label v-if="reportForm.report_type === '其他'">自定义报告类型<input v-model.trim="reportCustomType" maxlength="64" required></label><label>申请原因<textarea v-model.trim="reportForm.reason" maxlength="2000" required></textarea></label><label>接收邮箱<input v-model.trim="reportForm.receive_email" type="email" required placeholder="用于接收报告发放通知"></label><p v-if="!capabilityAvailable('report_request_submission')" class="portal-warning">{{ capabilityReason('report_request_submission') }}</p><p v-if="reportSubmitError" class="portal-error" role="alert">{{ reportSubmitError }}</p><button :disabled="reportSubmitting || reportProjectsLoading || !hasPermission('project.read') || !reportProjects.length || !capabilityAvailable('report_request_submission')">{{ reportSubmitting ? '正在提交…' : '提交申请' }}</button></form><section v-else class="portal-card"><h2>申请报告</h2><p class="portal-empty">当前账号没有报告申请权限。</p></section><section class="portal-card"><h2>申请记录</h2><p v-if="!hasPermission('report.read')" class="portal-empty">当前账号没有报告读取权限。</p><p v-else-if="reportListError" class="portal-error" role="alert">{{ reportListError }}</p><p v-else-if="reportListLoading">正在加载申请记录…</p><template v-else><button v-for="item in reports" :key="item.id" class="report-row" type="button" @click="openReport(item)"><span><strong>{{ item.request_no || `申请 #${item.id}` }}</strong><small>{{ item.report_type }} · {{ reportStatus(item.status) }}</small><small>提交于 {{ formatDate(item.submitted_at) }}</small></span><em>查看详情</em></button><p v-if="!reports.length" class="project-empty">暂无报告申请</p><nav v-else-if="reports.length < reportTotal" class="project-pagination" aria-label="报告申请加载更多"><button type="button" :disabled="reportListLoading" @click="loadMoreReports">加载更多申请</button><span>已显示 {{ reports.length }} / {{ reportTotal }} 条</span></nav></template></section></div></template>
+      <template v-else-if="section === 'reports' && (hasPermission('report.read') || hasPermission('report.request'))"><div class="portal-title"><h1>电子报告</h1><p>申请审批与状态变更均由 Portal 服务端可靠跟踪</p></div><section v-if="hasPermission('report.read') && reportRiskAlerts.length" class="portal-card" aria-live="polite"><h2>下载安全提醒</h2><div v-for="item in reportRiskAlerts" :key="item.alert_id" class="report-row"><span><strong>{{ item.request_no || `报告 #${item.request_id}` }} 的下载授权已冻结</strong><small>{{ item.report_type }} · {{ formatDate(item.detected_at) }}</small><small>风险编号：{{ item.risk_code }}；服务人员复核前请勿反复尝试。</small><small>如需协助，请通过「客户反馈」提交或联系您的服务人员。</small><button type="button" class="secondary small" @click="navigate('feedback')">去反馈</button></span></div></section><section v-if="hasPermission('report.read') && reportNotifications.length" class="portal-card"><h2>报告通知（{{ reportNotificationUnreadCount }} 条未读）</h2><button v-for="item in reportNotifications" :key="item.id" class="report-row" type="button" @click="openReportNotification(item)"><span><strong>{{ item.request_no }} 已发放</strong><small>{{ item.report_type }} · {{ formatDate(item.created_at) }}</small></span><em>查看报告</em></button></section><div class="portal-columns"><form v-if="hasPermission('report.request')" class="portal-card" @submit.prevent="submitReport"><h2>申请报告</h2><p v-if="reportProjectsError" class="portal-error" role="alert">{{ reportProjectsError }}</p><label>项目<select v-model="reportForm.project_id" :disabled="reportProjectsLoading || !hasPermission('project.read')" required><option value="">{{ reportProjectsLoading ? '正在加载项目…' : '请选择当前客户项目' }}</option><option v-for="item in reportProjects" :key="item.project_id" :value="item.project_id">{{ item.project_name || '未命名项目' }}（{{ item.contract_no || item.project_id }}）</option></select></label><p v-if="!hasPermission('project.read')" class="portal-warning">缺少 project.read，无法读取当前客户项目，报告申请已暂停。</p><p v-else-if="!reportProjectsLoading && !reportProjects.length && !reportProjectsError" class="portal-warning">暂无可申请报告的项目。</p><label>报告类型<select v-model="reportForm.report_type" required><option value="">请选择报告类型</option><option v-for="type in reportTypeOptions" :key="type" :value="type">{{ type }}</option></select></label><label v-if="reportForm.report_type === '其他'">自定义报告类型<input v-model.trim="reportCustomType" maxlength="64" required></label><label>申请原因<textarea v-model.trim="reportForm.reason" maxlength="2000" required></textarea></label><label>接收邮箱<input v-model.trim="reportForm.receive_email" type="email" required maxlength="320" placeholder="用于接收报告发放通知"></label><p v-if="!capabilityAvailable('report_request_submission')" class="portal-warning">{{ capabilityReason('report_request_submission') }}</p><p v-if="reportSubmitError" class="portal-error" role="alert">{{ reportSubmitError }}</p><button :disabled="reportSubmitting || reportProjectsLoading || !hasPermission('project.read') || !reportProjects.length || !capabilityAvailable('report_request_submission')">{{ reportSubmitting ? '正在提交…' : '提交申请' }}</button></form><section v-else class="portal-card"><h2>申请报告</h2><p class="portal-empty">当前账号没有报告申请权限。</p></section><section class="portal-card"><h2>申请记录</h2><p v-if="!hasPermission('report.read')" class="portal-empty">当前账号没有报告读取权限。</p><p v-else-if="reportListError" class="portal-error" role="alert">{{ reportListError }}</p><p v-else-if="reportListLoading">正在加载申请记录…</p><template v-else><button v-for="item in reports" :key="item.id" class="report-row" type="button" @click="openReport(item)"><span><strong>{{ item.request_no || `申请 #${item.id}` }}</strong><small>{{ item.report_type }} · {{ reportStatus(item.status) }}</small><small>提交于 {{ formatDate(item.submitted_at) }}</small></span><em>查看详情</em></button><p v-if="!reports.length" class="project-empty">暂无报告申请</p><nav v-else-if="reports.length < reportTotal" class="project-pagination" aria-label="报告申请加载更多"><button type="button" :disabled="reportListLoading" @click="loadMoreReports">加载更多申请</button><span>已显示 {{ reports.length }} / {{ reportTotal }} 条</span></nav></template></section></div></template>
       <div v-else-if="section === 'reports'" class="portal-empty">{{ serviceUnavailableText('report_enabled', '当前账号没有报告读取或申请权限。如需开通，请联系您的服务人员。') }}</div>
       <FilingWizard v-else-if="section === 'filings' && hasPermission('filing.read')" :permissions="permissions" :capabilities="capabilities" :projects="projects" @error="childError" @notice="childNotice" />
       <div v-else-if="section === 'filings'" class="portal-empty">{{ serviceUnavailableText('filing_enabled', '当前账号没有备案读取权限。如需开通，请联系您的服务人员。') }}</div>

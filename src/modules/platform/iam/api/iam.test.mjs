@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict'
 import { afterEach, test } from 'node:test'
 import {
+  RELATED_DATA,
+  relatedDataVersion,
+  resetRelatedDataInvalidation,
+} from '../../shared/utils/relatedDataInvalidation.js'
+import {
   IamError,
   createLocalAccount,
   createEmployee,
@@ -345,7 +350,13 @@ test('IAM API converts malformed JSON error bodies into a stable IamError', asyn
 
   await assert.rejects(
     listUsers(),
-    (error) => error instanceof IamError && error.status === 502 && error.message === 'IAM 请求失败。',
+    (error) => {
+      assert.ok(error instanceof IamError)
+      assert.equal(error.status, 502)
+      assert.equal(error.message, '服务暂时无法完成请求，请稍后重新加载；仍失败时请联系管理员。')
+      assert.doesNotMatch(error.message, /SyntaxError|Unexpected end|JSON input/)
+      return true
+    },
   )
 })
 
@@ -362,4 +373,53 @@ test('deletePosition uses the versioned logical-delete API contract', async () =
   assert.equal(requested.url, '/api/v1/positions/position%20%2F%201')
   assert.equal(requested.options.method, 'DELETE')
   assert.deepEqual(JSON.parse(requested.options.body), { version: 4 })
+})
+
+test('a confirmed organization write invalidates the organization, position and membership catalogs', async () => {
+  resetRelatedDataInvalidation()
+  globalThis.fetch = async () => jsonResponse({ data: { org_unit_id: 'org-1', name: '研发中心' } })
+
+  await createOrgUnit({ name: '研发中心' })
+
+  assert.equal(relatedDataVersion(RELATED_DATA.ORGANIZATIONS), 1)
+  assert.equal(relatedDataVersion(RELATED_DATA.POSITIONS), 1)
+  assert.equal(relatedDataVersion(RELATED_DATA.MEMBERSHIPS), 1)
+  assert.equal(relatedDataVersion(RELATED_DATA.PEOPLE), 0)
+  resetRelatedDataInvalidation()
+})
+
+test('a confirmed position write invalidates the position catalog and the authorization template preview', async () => {
+  resetRelatedDataInvalidation()
+  globalThis.fetch = async () => jsonResponse({ data: { position_id: 'position-1' } })
+
+  await createPosition({ orgUnitId: 'org-1', name: '研发经理' })
+
+  assert.equal(relatedDataVersion(RELATED_DATA.POSITIONS), 1)
+  assert.equal(relatedDataVersion(RELATED_DATA.AUTHORIZATION_TEMPLATES), 1)
+  assert.equal(relatedDataVersion(RELATED_DATA.ORGANIZATIONS), 0)
+  resetRelatedDataInvalidation()
+})
+
+test('employee, user and membership writes invalidate the people and membership directories', async () => {
+  resetRelatedDataInvalidation()
+  globalThis.fetch = async () => jsonResponse({ data: { user_id: 'user-1' } })
+
+  await createUser({ displayName: '张三' })
+  await createMembership({ userId: 'user-1', orgUnitId: 'org-1', positionId: 'position-1' })
+
+  assert.equal(relatedDataVersion(RELATED_DATA.PEOPLE), 1)
+  assert.equal(relatedDataVersion(RELATED_DATA.MEMBERSHIPS), 1)
+  resetRelatedDataInvalidation()
+})
+
+test('a failed write never claims the related catalogs are stale', async () => {
+  resetRelatedDataInvalidation()
+  globalThis.fetch = async () => jsonResponse({ code: 'IAM_CONFLICT', message: '组织名称已存在' }, { ok: false, status: 409 })
+
+  await assert.rejects(() => createOrgUnit({ name: '研发中心' }))
+
+  assert.equal(relatedDataVersion(RELATED_DATA.ORGANIZATIONS), 0)
+  assert.equal(relatedDataVersion(RELATED_DATA.POSITIONS), 0)
+  assert.equal(relatedDataVersion(RELATED_DATA.MEMBERSHIPS), 0)
+  resetRelatedDataInvalidation()
 })

@@ -31,7 +31,7 @@ function choose(item) {
     <div class="pm-picker-toolbar">
       <label class="pm-picker-search">
         <ConsoleIcon name="search" />
-        <input v-model="keyword" type="search" placeholder="搜索服务项编号 / 场所 / 检测类别" />
+        <input v-model="keyword" type="search" placeholder="搜索服务项编号 / 场所 / 检测类别"  maxlength="100"/>
       </label>
       <span class="pm-picker-count">{{ filteredItems.length }} / {{ items.length }} 项</span>
     </div>

@@ -2,13 +2,13 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import {
-  SecurityError,
   getLoginPolicy,
   listLockedAccounts,
   unlockAccount,
   updateLoginPolicy,
 } from '@/modules/platform/security/api/security'
 import { hasPermission, useCurrentPrincipal } from '@/modules/platform/auth/utils/principal'
+import { formatUserError } from '../../../shared/utils/userError.js'
 import '@/modules/platform/security/styles/login-security.css'
 
 const emit = defineEmits(['toast'])
@@ -52,7 +52,7 @@ async function loadLoginPolicy() {
       loginPolicy.version = Number(data.version || 0)
     }
   } catch (error) {
-    policyError.value = error instanceof SecurityError ? error.message : '读取登录策略失败。'
+    policyError.value = formatUserError(error, { fallback: '读取登录策略失败。' })
   } finally {
     policyLoading.value = false
   }
@@ -74,7 +74,7 @@ async function saveLoginPolicy() {
     if (data) loginPolicy.version = Number(data.version || loginPolicy.version)
     emitToast('登录安全策略已保存。')
   } catch (error) {
-    policyError.value = error instanceof SecurityError ? error.message : '保存登录策略失败。'
+    policyError.value = formatUserError(error, { fallback: '保存登录策略失败。', method: 'PUT' })
   } finally {
     policySaving.value = false
   }
@@ -88,7 +88,7 @@ async function loadLockedAccounts() {
     const data = await listLockedAccounts({ page: 1, pageSize: 100 })
     lockedAccounts.value = data.items
   } catch (error) {
-    lockedError.value = error instanceof SecurityError ? error.message : '读取锁定账号失败。'
+    lockedError.value = formatUserError(error, { fallback: '读取锁定账号失败。' })
     lockedAccounts.value = []
   } finally {
     lockedLoading.value = false
@@ -103,7 +103,7 @@ async function handleUnlockAccount(account) {
     lockedAccounts.value = lockedAccounts.value.filter((item) => item.account_id !== account.account_id)
     emitToast(`已解锁账号 ${account.account_name || account.account_id}。`)
   } catch (error) {
-    emitToast(error.message || '解锁失败。')
+    emitToast(formatUserError(error, { fallback: '解锁失败。', method: 'POST' }))
   }
 }
 

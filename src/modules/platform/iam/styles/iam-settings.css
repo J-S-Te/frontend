@@ -1,5 +1,5 @@
 /* =========================================================================
-   IAM Settings · Design System
+   IAM 设置 · 设计系统
    -------------------------------------------------------------------------
    重写说明（2026-07-30）：
    1. 引入 token：颜色/间距/圆角/阴影/字号/缓动统一收敛
@@ -376,7 +376,7 @@
 .iam-panel-nav button.active svg { color: var(--brand-2); }
 
 /* 侧边 nav 工作流阶段标题（P2）：基础数据 / 人员 / 授权。
-   字号比 panel button（13.5px）小半号但带 uppercase，弱化但不消失。
+   字号比 面板按钮（13.5px）小半号但使用大写转换，弱化但不消失。
    颜色用 --ink-4 弱化；不抢眼；底部 1px 极弱分隔线，把每个阶段的子 panel 视觉收口。 */
 .iam-panel-group + .iam-panel-group { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line-2); }
 .iam-panel-group-title {
@@ -2349,7 +2349,7 @@
 @media (max-width: 760px) { .iam-application-scope-grid, .iam-application-validity-grid { grid-template-columns: 1fr; } }
 
 /* =========================================================================
-   岗位授权模板（Position Authorization Templates）
+   岗位授权模板
    ========================================================================= */
 .iam-position-authorization { display: grid; gap: 20px; }
 
@@ -2866,7 +2866,7 @@
 }
 
 /* =========================================================================
-   授权层级（Authorization Layers）
+   授权层级
    ========================================================================= */
 .iam-standard-authorization-badge {
   display: inline-flex;
@@ -2939,7 +2939,7 @@
 }
 
 /* =========================================================================
-   员工入职引导（Employee Onboarding Modal）
+   员工入职引导
    ========================================================================= */
 .iam-employee-onboarding-modal { width: min(860px, 100%); }
 .iam-employee-onboarding-form { gap: var(--s-4); }

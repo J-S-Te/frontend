@@ -7,6 +7,7 @@ import EmptyState from "@/modules/platform/shared/components/EmptyState.vue"
 import ErrorState from "@/modules/platform/shared/components/ErrorState.vue"
 import LoadingState from "@/modules/platform/shared/components/LoadingState.vue"
 import { deleteAlertRule, getAlertRules, putAlertRules } from "../api/dataAnalysis"
+import { formatDataAnalysisError } from "../utils/errors.js"
 
 const props = defineProps({ permissions: { type: Array, default: () => [] } })
 
@@ -40,9 +41,7 @@ function showToast(message) {
 }
 
 function mutationError(err, fallback) {
-  return err?.code === "RULE_VERSION_CONFLICT"
-    ? "规则已被其他用户修改，请刷新规则后重试"
-    : err?.message || fallback
+  return formatDataAnalysisError(err, { fallback })
 }
 
 async function load() {
@@ -53,7 +52,7 @@ async function load() {
   try {
     rules.value = await getAlertRules()
   } catch (err) {
-    error.value = err?.message || "预警规则加载失败"
+    error.value = formatDataAnalysisError(err, { fallback: "预警规则加载失败，请稍后刷新。" })
   } finally {
     loadPending = false
     loading.value = false
@@ -154,7 +153,7 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
 <template>
   <section>
     <div class="da-filters">
-      <label><ConsoleIcon name="search" /><input v-model="keyword" placeholder="搜索规则编码 / 名称 / 数据源" /></label>
+      <label><ConsoleIcon name="search" /><input v-model="keyword" placeholder="搜索规则编码 / 名称 / 数据源"  maxlength="100"/></label>
       <span>{{ filteredRules.length }} 条规则</span>
       <button class="da-button" :disabled="loading || saving || !!editing" @click="load">刷新规则</button>
       <button v-if="canManage" class="da-button" :disabled="!canCreate || !!editing" @click="openEditor()"><ConsoleIcon name="plus" />新建规则</button>

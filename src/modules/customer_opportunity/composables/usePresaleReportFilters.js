@@ -1,7 +1,7 @@
 /**
- * Report filter option loading and dependent-filter validation.
- * The report uses worklog participation as its source of truth, so this
- * loader is intentionally separate from the presale-list filter options.
+ * 加载报表筛选选项并校验筛选项依赖。
+ * 报表以工作日志参与记录为事实来源，因此此加载器
+ * 有意与售前列表的筛选选项分离。
  */
 export function createPresaleReportFilters({
   showReport,

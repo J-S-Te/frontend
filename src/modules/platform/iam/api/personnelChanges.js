@@ -92,7 +92,12 @@ export function listPersonnelHandoverItems(changeId) {
   return request(`/personnel-changes/${encodeURIComponent(changeId)}/handover-items`).then((value) => ({
     items: Array.isArray(value?.items) ? value.items : [],
     total: Number(value?.total || 0),
+    ...(typeof value?.cross_system_enabled === 'boolean' ? { cross_system_enabled: value.cross_system_enabled } : {}),
   }))
+}
+
+export function retryPersonnelHandover(changeId) {
+  return request(`/personnel-changes/${encodeURIComponent(changeId)}/handover/retry`, { method: 'POST', body: '{}' })
 }
 
 export function completePersonnelHandoverItem(changeId, itemId, targetUserId) {

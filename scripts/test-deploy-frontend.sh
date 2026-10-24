@@ -50,7 +50,7 @@ sleep() { :; }
 FRONTEND_PLATFORM_WAIT_SECONDS=5
 wait_frontend_platform_ready >/dev/null
 [[ "$attempts" == 2 ]]
-# Exercise the real SSH execution mode: bash -s has no BASH_SOURCE[0].
+# 验证实际 SSH 执行方式：bash -s 模式下不存在 BASH_SOURCE[0]。
 mkdir -p "$fixture/tools"
 printf 'COMPOSE_PROJECT_NAME=basic-platform-production\n' > "$fixture/.env"
 printf '#!/usr/bin/env bash\nif [[ "$1" == ps ]]; then echo container; else echo "running healthy"; fi\n' > "$fixture/tools/docker"

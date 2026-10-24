@@ -127,7 +127,7 @@ test('资质能力更新、CSV 导入导出使用后端接口，上传不携带 
   assert.match(source, /request\('\/capabilities', \{ method: 'PUT', body: JSON\.stringify\(payload\) \}\)/)
   assert.match(source, /formData\.append\('file', file\)/)
   assert.match(source, /request\('\/capabilities\/import', \{ method: 'POST', body: formData \}\)/)
-  assert.match(source, /fetch\(`\$\{API_BASE_URL\}\/capabilities\/export/)
+  assert.match(source, /requestProjectCSV\(`\/capabilities\/export\$\{query\}`\)/)
   assert.match(source, /filename\*?=\(?:UTF-8''|"\)\?\(\[\^";\]\+\)/i)
   assert.match(source, /return \{ blob: await response\.blob\(\), filename \}/)
 })

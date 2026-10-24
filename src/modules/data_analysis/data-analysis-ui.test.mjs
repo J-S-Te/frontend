@@ -2,18 +2,25 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
+import { parse, compileTemplate } from '@vue/compiler-sfc'
 
 const shell = await readFile(new URL('./views/DashboardShellView.vue', import.meta.url), 'utf8')
 const native = await readFile(new URL('./views/NativeDashboardView.vue', import.meta.url), 'utf8')
 const alerts = await readFile(new URL('./views/AlertsCenterView.vue', import.meta.url), 'utf8')
 const api = await readFile(new URL('./api/dataAnalysis.js', import.meta.url), 'utf8')
+const freshness = await readFile(new URL('./utils/freshness.js', import.meta.url), 'utf8')
 
 test('看板 iframe 只经嵌入桥代理加载，不直连 Metabase', () => {
   assert.match(shell, /getEmbedToken\(code\)/)
-  assert.match(shell, /embed-proxy/)
+  assert.match(shell, /isolatedEmbedUrl\(embedUrl, token, window.location.origin\)/)
   assert.doesNotMatch(shell, /https?:\/\/.*metabase/i) // 无 Metabase 直连 URL
-  assert.match(shell, /sandbox="allow-scripts allow-forms allow-popups"/) // 无 allow-same-origin，iframe 内容视为 opaque origin
+  assert.match(shell, /sandbox="allow-scripts allow-same-origin"/) // 仅允许独立隔离的源；不允许表单、弹窗或顶层导航。
   assert.match(shell, /referrerpolicy="no-referrer"/)
+  assert.match(shell, /expires_at: expiresAt/)
+  assert.match(shell, /scheduleEmbedRenewal/)
+  assert.match(shell, /visibilitychange/)
+  assert.match(shell, /subscribeRelatedDataChanges/)
+  assert.match(shell, /RELATED_DATA\.ORGANIZATIONS/)
 })
 
 test('看板 code 映射覆盖经营总览与 4 张业务看板', () => {
@@ -23,7 +30,9 @@ test('看板 code 映射覆盖经营总览与 4 张业务看板', () => {
 })
 
 test('预警中心实现 OPEN→ACK→CLOSED 闭环并按严重度排序', () => {
-  assert.match(alerts, /getAlerts\(\{ sort: 'severity,due_date', direction: 'desc,asc' \}\)/)
+  assert.match(alerts, /getAlerts\(\{ page: page\.value, page_size: pageSize, severity: severityFilter\.value, status: statusFilter\.value \}\)/)
+  assert.match(alerts, /getAlertSummary\(\)/)
+  assert.match(alerts, /changePage\(page \+ 1\)/)
   assert.match(alerts, /item\.status === 'OPEN'/)
   assert.match(alerts, /@click="onAck\(item\.id\)"/)
   assert.match(alerts, /@click="onClose\(item\.id\)"/)
@@ -40,8 +49,8 @@ test('API 客户端使用看板子系统前缀与 HttpOnly Cookie 会话', () =>
 })
 
 test('401 由 API 客户端触发 OIDC 登录跳转（fail-closed）', () => {
-  assert.match(api, /response\.status === 401/)
-  assert.match(api, /if \(response\.status === 401\) startDataAnalysisLogin\(\)/)
+  assert.match(api, /if \(shouldStartSubsystemLogin\(error\)\) startDataAnalysisLogin\(\)/)
+  assert.doesNotMatch(api, /if \(response\.status === 401\) startDataAnalysisLogin\(\)/)
 })
 
 test('接口路径与设计方案 §9 一致', () => {
@@ -67,8 +76,32 @@ test('合同和项目看板展示聚合库最新摘要', () => {
     assert.match(native, new RegExp(`project(?:Summary)?[^\\n]*${field}|project\\.${field}`))
   }
   assert.match(native, /formatAmountMinor/)
-  assert.match(native, /formatSnapshotAt/)
+  assert.match(native, /currency_totals/)
+  assert.match(native, /dashboardFreshnessItems/)
+  assert.match(native, /dashboardFreshnessStatus/)
+  assert.match(native, /trendCurrencyLabel/)
   assert.match(native, /barWidth\(item\.value\)/)
+})
+
+test('NativeDashboardView 模板可编译，时间口径面板可用于真实渲染', () => {
+  const { descriptor, errors } = parse(native, { filename: 'NativeDashboardView.vue' })
+  assert.deepEqual(errors, [])
+  const compiled = compileTemplate({ source: descriptor.template.content, filename: 'NativeDashboardView.vue', id: 'native-dashboard' })
+  assert.deepEqual(compiled.errors, [])
+})
+
+test('数析时间口径区分源更新、同步与查询时间并标记陈旧数据', () => {
+  assert.match(native, /summaryFreshnessItems/)
+  assert.match(native, /summaryFreshness\.stale/)
+  assert.match(native, /summaryFreshness\.badge/)
+  assert.match(freshness, /数据可能已过期/)
+  assert.match(native, /本次查询时间不代表源数据更新时间/)
+  assert.doesNotMatch(native, /数据更新时间 \{\{/)
+  assert.match(freshness, /label: '源数据更新'/)
+  assert.match(freshness, /label: '最近成功同步'/)
+  assert.match(freshness, /label: '本次查询计算'/)
+  assert.match(freshness, /staleReason/)
+  assert.match(freshness, /legacySnapshotAt/)
 })
 
 test('经营总览无预警权限时静默跳过可选预警摘要', () => {

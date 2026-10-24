@@ -27,6 +27,20 @@ const { createPortalInviteRetryState } = await import('./customer_opportunity/po
 const { createPortalAccessDisableRetryState } = await import('./customer_opportunity/portalAccessDisableRetry.js')
 const { formatSignedContractCount } = await import('./customer_opportunity/signedContractCount.js')
 
+test('售前执行人与团队负责人候选按职责请求平台资格目录', async () => {
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
+  const calls = []
+  const listOwnerDirectory = async (query) => { calls.push(query); return { items: [], total: 0 } }
+  const engineerBody = view.slice(view.indexOf('async function loadEngineerDirectory() {') + 'async function loadEngineerDirectory() {'.length, view.indexOf('\nasync function openEngineerPicker()'))
+  await new AsyncFunction('engineerDirectoryLoading', 'engineerQuery', 'engineerDirectory', 'listOwnerDirectory', 'showError', 'platformUserName', engineerBody.slice(0, engineerBody.lastIndexOf('}')))({ value: false }, { keyword: '张', department: '' }, { value: [] }, listOwnerDirectory, (err) => { throw err }, () => '')
+  const leadBody = view.slice(view.indexOf('async function loadTeamLeadCandidates() {') + 'async function loadTeamLeadCandidates() {'.length, view.indexOf('\nasync function saveExecutionDepartment()'))
+  await new AsyncFunction('selectedExecutionDepartmentID', 'teamLeadDirectorySequence', 'teamLeadCandidates', 'teamLeadDirectoryLoading', 'listOwnerDirectory', 'showError', 'platformUserName', leadBody.slice(0, leadBody.lastIndexOf('}')))({ value: 'org-1' }, { value: 0 }, { value: [] }, { value: false }, listOwnerDirectory, (err) => { throw err }, () => '')
+  assert.deepEqual(calls, [
+    { keyword: '张', assignment_duty: 'EXECUTOR', page: 1, page_size: 50 },
+    { assignment_duty: 'TEAM_LEAD', page: 1, page_size: 50 },
+  ])
+})
+
 test('客户与商机页面不向业务用户展示需求追踪编号', () => {
   assert.doesNotMatch(view, /console-requirement-chip/)
   assert.doesNotMatch(view, /CM-001 ~ CM-004|BM-001 ~ BM-002|TS-001 ~ TS-010|CRM-NOTIFY-001/)
@@ -55,11 +69,47 @@ test('售前审批规则支持规则列表和编辑区折叠', () => {
   assert.match(style, /\.crm-approval-collapse-button/)
 })
 
-test('技术总监可作为人员指派节点负责人，完成审批后展示指派入口', () => {
-  assert.match(approvalPanel, /type: 'PERSON_ASSIGNMENT', role_code: 'technical_director'/)
-  assert.match(view, /\['APPROVED_PENDING_ASSIGNMENT', 'EXECUTING'\]\.includes\(request\?\.status\)/)
-  assert.match(view, /technical_director: \['technical_director', 'technical_lead'\]/)
-  assert.match(view, /request\?\.assignment_action !== action/)
+test('审批规则保存前本地校验，避免落到售前申请的通用错误文案', () => {
+  assert.match(approvalPanel, /function validateRule\(\)/)
+  assert.match(approvalPanel, /同一种执行动作只能配置一次/)
+  assert.match(approvalPanel, /两级执行指派必须同时配置/)
+  assert.match(approvalPanel, /const problem = validateRule\(\)/)
+  assert.match(approvalPanel, /CRM_PRESALE_INVALID_INPUT/)
+})
+
+test('技术总监可同时承担部门与团队负责人并进入两级执行指派', () => {
+  assert.match(approvalPanel, /type: 'DEPARTMENT_ASSIGNMENT', role_code: 'technical_director'/)
+  assert.match(approvalPanel, /type: 'TEAM_LEAD_ASSIGNMENT', role_code: 'technical_director'/)
+  assert.match(approvalPanel, /type: 'EXECUTOR_ASSIGNMENT', role_code: 'team_lead'/)
+  assert.match(view, /PENDING_EXECUTION_ASSIGNMENT/)
+  assert.match(view, /function canConfigureTwoLevelAssignment/)
+  assert.match(view, /function canAssignPresaleExecutors/)
+  assert.match(view, /function canRejectPresaleExecutionAssignment/)
+  assert.match(view, /function selectedAssignmentActions/)
+  assert.match(view, /replaceExecutorAssignments/)
+  assert.match(view, /rejectExecutorAssignment/)
+  assert.match(view, /selectedTeamLeadPersonID/)
+  assert.match(view, /teamLeadDirectorySequence/)
+  assert.match(view, /loadTeamLeadCandidates/)
+  assert.match(view, /crm-engineer__role/)
+  assert.match(view, /option value="project_manager">项目经理/)
+  assert.match(view, /保存部门与负责人/)
+  assert.match(view, /拒绝执行指派/)
+  assert.match(view, /canTakeoverExecutingTeamLead/)
+  assert.match(view, /current_assignees.*team_lead/)
+  assert.match(view, /takeOverExecutingTeamLead/)
+  assert.match(view, /接管负责人/)
+})
+
+test('两级执行指派展示新状态、团队负责人和通知/超时文案', () => {
+  assert.match(view, /PENDING_EXECUTION_ASSIGNMENT: '待执行指派'/)
+  assert.match(view, /<span>团队负责人<\/span>/)
+  assert.match(view, /PRESALE_EXECUTOR_ASSIGNMENT_PENDING/)
+  assert.match(view, /PRESALE_EXECUTION_ASSIGNMENT_REJECTED/)
+  assert.match(view, /PRESALE_TEAM_LEAD_INVALID/)
+  assert.match(view, /EXECUTION_ASSIGNMENT_OVERDUE: '待团队负责人指派超时'/)
+  assert.match(view, /@change="onExecutionDepartmentChange"/)
+  assert.match(view, /v-model="selectedTeamLeadPersonID"/)
 })
 
 test('客户与商机管理复用基础平台壳层、图标导航和响应式规范', () => {
@@ -539,7 +589,7 @@ test('商机阶段看板按推进程度设置独立背景色且不影响售前�
 test('售前状态看板按流程状态设置独立背景色', () => {
   assert.match(view, /class="crm-board crm-presale-board"/)
   assert.match(view, /:data-status="column\.status"/)
-  for (const status of ['APPROVAL_STARTING', 'PENDING_APPROVAL', 'APPROVED_PENDING_ASSIGNMENT', 'EXECUTING', 'COMPLETED', 'REJECTED', 'CANCELLED']) {
+  for (const status of ['APPROVAL_STARTING', 'PENDING_APPROVAL', 'APPROVED_PENDING_ASSIGNMENT', 'PENDING_EXECUTION_ASSIGNMENT', 'EXECUTING', 'COMPLETED', 'REJECTED', 'CANCELLED']) {
     assert.match(style, new RegExp(`\\.crm-presale-board \\.crm-board-column\\[data-status='${status}'\\]`))
   }
   assert.match(style, /\.crm-presale-board \.crm-board-column\s*\{[\s\S]*background:\s*linear-gradient/)
@@ -931,6 +981,7 @@ test('TS-007 URL 状态可复现且不会向后端发送授权 scope', () => {
   assert.equal(restored.page, 3)
   assert.equal(restored.columnLimit, 40)
   assert.equal(restored.filters.status, 'EXECUTING')
+  assert.equal(presaleStateFromQuery({ status: 'PENDING_EXECUTION_ASSIGNMENT' }).filters.status, 'PENDING_EXECUTION_ASSIGNMENT')
   const query = presaleStateToQuery(restored.filters, restored.view, restored.page, restored.pageSize, restored.columnLimit)
   assert.equal(query.scope, undefined)
   assert.equal(query.presale_view, 'board')
@@ -984,16 +1035,28 @@ test('TS-002/003/004 写 API 允许调用方显式复用幂等键', async (t) =>
 
   await api.submitApprovalAction(7, { action: 'PASS', comment: '', version: 3 }, 'approval-retry-key')
   await api.replaceAssignments(7, { assignees: [{ person_id: 'p-1', role: 'project_manager' }], change_reason: '调整', version: 3 }, 'assignment-retry-key')
+  await api.selectPresaleExecutionDepartment(7, { department_id: 'org-1', team_lead_person_id: 'lead-1', version: 3 }, 'department-retry-key')
+  await api.replaceExecutorAssignments(7, { assignees: [{ person_id: 'p-1', role: 'project_manager' }], change_reason: '执行人', version: 4 }, 'executor-retry-key')
+  await api.rejectExecutorAssignment(7, { reason: '无可用资源', version: 4 }, 'rejection-retry-key')
+  await api.takeOverExecutingTeamLead(7, { team_lead_person_id: 'lead-2', reason: '原负责人失效', version: 5 }, 'takeover-retry-key')
   await api.cancelPresaleRequest(7, { reason: '需求取消', version: 3 }, 'cancel-retry-key')
 
   assert.deepEqual(requests.map((item) => item.options.headers['Idempotency-Key']), [
     'approval-retry-key',
     'assignment-retry-key',
+    'department-retry-key',
+    'executor-retry-key',
+    'rejection-retry-key',
+    'takeover-retry-key',
     'cancel-retry-key',
   ])
   assert.deepEqual(requests.map((item) => item.url), [
     '/customer-opportunity/api/v1/presale/requests/7/approval-actions',
     '/customer-opportunity/api/v1/presale/requests/7/assignments',
+    '/customer-opportunity/api/v1/presale/requests/7/execution-department',
+    '/customer-opportunity/api/v1/presale/requests/7/executor-assignments',
+    '/customer-opportunity/api/v1/presale/requests/7/executor-assignment-rejection',
+    '/customer-opportunity/api/v1/presale/requests/7/execution-takeover',
     '/customer-opportunity/api/v1/presale/requests/7/cancel',
   ])
 })
@@ -1042,8 +1105,16 @@ test('TS-002/003/004 失败重试键绑定任务与规范化载荷且仅成功�
 
   const approval = retries.keyFor('approval', 9, { action: ' pass ', comment: ' 同意 ', version: 5 })
   const cancellation = retries.keyFor('cancel', 9, { reason: ' 取消 ', version: 5 })
+  const department = retries.keyFor('department', 9, { department_id: ' org-1 ', team_lead_person_id: ' lead-1 ', version: 5 })
+  const executor = retries.keyFor('executor_assignment', 9, { assignees: [{ person_id: ' p-1 ', role: 'project_manager' }], change_reason: ' 执行人 ', version: 5 })
+  const rejection = retries.keyFor('executor_rejection', 9, { reason: ' 无资源 ', version: 5 })
+  const takeover = retries.keyFor('executing_takeover', 9, { team_lead_person_id: ' lead-2 ', reason: ' 原负责人失效 ', version: 5 })
   assert.deepEqual(approval.payload, { action: 'PASS', comment: '同意', version: 5 })
   assert.deepEqual(cancellation.payload, { reason: '取消', version: 5 })
+  assert.deepEqual(department.payload, { department_id: 'org-1', team_lead_person_id: 'lead-1', version: 5 })
+  assert.deepEqual(executor.payload, { assignees: [{ person_id: 'p-1', role: 'project_manager' }], change_reason: '执行人', version: 5 })
+  assert.deepEqual(rejection.payload, { reason: '无资源', version: 5 })
+  assert.deepEqual(takeover.payload, { team_lead_person_id: 'lead-2', reason: '原负责人失效', version: 5 })
   assert.notEqual(approval.key, cancellation.key)
 
   retries.confirmSuccess('approval', 9, approval.key)
@@ -1132,12 +1203,16 @@ test('TS 写操作页面只在 prompt 与业务校验后分配内存重试键', 
   assert.doesNotMatch(view, /改派原因必填/)
   assert.match(view, /const opportunityID = Number\(presaleForm\.opportunity_id\)/)
   assert.match(view, /presaleMutationRetries\.keyFor\('create', opportunityID/)
-  assert.match(view, /presaleMutationRetries\.keyFor\('assignment', id/)
+  assert.match(view, /presaleMutationRetries\.keyFor\(operationName, id/)
+  assert.match(view, /presaleMutationRetries\.keyFor\('department', id/)
+  assert.match(view, /presaleMutationRetries\.keyFor\('executor_rejection', id/)
   assert.match(view, /presaleMutationRetries\.keyFor\('cancel', id/)
   assert.match(view, /presaleMutationRetries\.keyFor\('worklog', id/)
   assert.match(view, /presaleMutationRetries\.markAttempted\('worklog', id, retry\.key\)/)
   assert.match(view, /addWorklog\(id, retry\.payload, retry\.key\)/)
-  assert.match(view, /presaleMutationRetries\.confirmSuccess\('assignment', id, retry\.key\)/)
+  assert.match(view, /presaleMutationRetries\.confirmSuccess\(operationName, id, retry\.key\)/)
+  assert.match(view, /presaleMutationRetries\.confirmSuccess\('department', id, retry\.key\)/)
+  assert.match(view, /presaleMutationRetries\.confirmSuccess\('executor_rejection', id, retry\.key\)/)
   assert.match(view, /presaleMutationRetries\.confirmSuccess\('cancel', id, retry\.key\)/)
   assert.match(view, /presaleMutationRetries\.confirmSuccess\('create', opportunityID, retry\.key\)/)
   assert.match(view, /presaleMutationRetries\.confirmSuccess\('worklog', id, retry\.key\)/)
@@ -1303,7 +1378,11 @@ test('售前投入报表提供筛选、KPI、图形和等价数值表', () => {
   assert.doesNotMatch(view, /PMS 最终成功率/)
   assert.match(view, /趋势数值表（UTC 日）/)
   assert.match(view, /分布数值表/)
-  assert.match(view, /异步导出尚未接通对象存储与导出 Worker/)
+  assert.match(view, /runtimeCapability\('presale_report_export'\)\.available/)
+  assert.match(view, /if \(!presaleReportExportAvailable\.value\) \{[\s\S]*?售前报表导出当前不可用[\s\S]*?return\s*\}/)
+  assert.match(view, /URL\.createObjectURL\(result\.blob\)/)
+  assert.match(view, /anchor\.download = result\.filename \|\| 'presale-report\.csv'/)
+  assert.match(view, /finally \{ URL\.revokeObjectURL\(url\) \}/)
 })
 
 test('售前投入报表按归属组织刷新参与人员和商机选项', () => {
@@ -1312,19 +1391,28 @@ test('售前投入报表按归属组织刷新参与人员和商机选项', () =>
   assert.match(view, /reportFilters\.person_id = ''[\s\S]*reportFilters\.opportunity_id = ''[\s\S]*loadReportFilterOptions\(\)/)
 })
 
-test('售前投入报表调用真实三类查询和失败关闭的导出路由', async (t) => {
+test('售前投入报表调用真实三类查询并按同步 CSV 契约下载', async (t) => {
   const originalFetch = globalThis.fetch
   t.after(() => { globalThis.fetch = originalFetch })
   const requests = []
+  const csv = 'section,metric,value\nsummary,total_hours,12\n'
   globalThis.fetch = async (url, options = {}) => {
     requests.push({ url, options })
+    if (url.endsWith('/reports/exports')) {
+      return new Response(csv, {
+        status: 200,
+        headers: { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': 'attachment; filename="presale-report.csv"' },
+      })
+    }
     return jsonResponse([])
   }
   const params = { from: '2026-08-01T00:00:00Z', to: '2026-09-01T00:00:00Z', dimension: 'PERSON' }
   await api.getPresaleReportSummary(params)
   await api.getPresaleReportTrend(params)
   await api.getPresaleReportDistribution(params)
-  await api.requestPresaleReportExport(params)
+  const downloaded = await api.requestPresaleReportExport(params)
+  assert.equal(downloaded.filename, 'presale-report.csv')
+  assert.equal(await downloaded.blob.text(), csv)
   assert.deepEqual(requests.map((item) => item.url), [
     '/customer-opportunity/api/v1/presale/reports/summary?from=2026-08-01T00%3A00%3A00Z&to=2026-09-01T00%3A00%3A00Z&dimension=PERSON',
     '/customer-opportunity/api/v1/presale/reports/trend?from=2026-08-01T00%3A00%3A00Z&to=2026-09-01T00%3A00%3A00Z&dimension=PERSON',
@@ -1333,6 +1421,27 @@ test('售前投入报表调用真实三类查询和失败关闭的导出路由',
   ])
   assert.equal(requests[3].options.method, 'POST')
   assert.equal(requests[3].options.headers['X-CSRF-Token'], '1')
+  assert.equal(requests[3].options.credentials, 'include')
+  assert.equal(requests[3].options.headers['Content-Type'], 'application/json')
+  assert.deepEqual(JSON.parse(requests[3].options.body), params)
+})
+
+test('售前 CSV 导出拒绝成功状态中的 JSON/HTML 响应并保留权限错误', async (t) => {
+  const originalFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = originalFetch })
+  const params = { from: '2026-08-01T00:00:00Z', to: '2026-09-01T00:00:00Z', dimension: 'PERSON' }
+  for (const contentType of ['application/json', 'text/html']) {
+    globalThis.fetch = async () => new Response('unexpected non-CSV response', {
+      status: 200, headers: { 'content-type': contentType },
+    })
+    await assert.rejects(api.requestPresaleReportExport(params), (error) =>
+      error instanceof client.CRMAPIError && error.code === 'CRM_DOWNLOAD_CONTENT_TYPE_INVALID')
+  }
+  globalThis.fetch = async () => new Response(JSON.stringify({ code: 'CRM_PERMISSION_DENIED', message: '无报表导出权限', request_id: 'export-denied' }), {
+    status: 403, headers: { 'content-type': 'application/json' },
+  })
+  await assert.rejects(api.requestPresaleReportExport(params), (error) =>
+    error instanceof client.CRMAPIError && error.status === 403 && error.code === 'CRM_PERMISSION_DENIED' && error.requestID === 'export-denied')
 })
 
 test('商机负责人和团队维护均使用基础平台人员目录', () => {
@@ -1368,12 +1477,12 @@ test('客户与商机关联操作使用业务选择器而不是手填 ID', () =>
   assert.doesNotMatch(view, /<span>商机 ID<\/span><input/)
 })
 
-test('新建售前申请需求说明只要求有内容且必填项显示星标', () => {
+test('新建售前申请需求说明有长度上限且必填项显示星标', () => {
   assert.match(view, /if \(!presaleForm\.description\.trim\(\)\) \{ error\.value = '需求说明不能为空/)
   assert.match(view, /<label>需求说明 \*<textarea v-model\.trim="presaleForm\.description"[^>]*required/)
   assert.match(view, /<span>需求说明 \*<\/span><textarea v-model\.trim="presaleForm\.description"[^>]*required/)
   assert.doesNotMatch(view, /presaleForm\.description" minlength=/)
-  assert.doesNotMatch(view, /presaleForm\.description"[^>]*maxlength=/)
+  assert.match(view, /presaleForm\.description"[^>]*maxlength="10000"/)
   for (const label of ['关联商机 *', '支持方式 *', '紧急程度 *', '联系人 *', '联系电话 *', '预计开始 *', '预计结束 *']) {
     assert.match(view, new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
   }

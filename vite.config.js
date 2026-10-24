@@ -4,15 +4,15 @@ import vue from '@vitejs/plugin-vue'
 
 // 前后端联调说明：
 //   1. 本地启动后端（cd ../platform && go run ./cmd/api）监听 8080。
-//   2. 前端 vite dev server 监听 5173，把基础平台 /api/v1/* 反代到后端 8080。
+//   2. 前端 Vite 开发服务器 监听 5173，把基础平台 /api/v1/* 反代到后端 8080。
 //   3. 如果需要指向已部署的环境，把 API_BASE_URL 改成绝对 URL（必须带 https/http 协议），
 //      此时浏览器会直接走跨域请求，需后端 CORS 放行；本地联调时不要设置。
 const DEFAULT_API_PROXY_TARGET = 'http://127.0.0.1:8080'
 const DEFAULT_CONTRACT_API_PROXY_TARGET = 'http://127.0.0.1:8081'
 const DEFAULT_PROJECT_API_PROXY_TARGET = 'http://127.0.0.1:8082'
 const DEFAULT_SETTLEMENT_API_PROXY_TARGET = 'http://127.0.0.1:8085'
-// customer-api is kept inside the local Compose network. The local Vite server
-// reaches it through the loopback-only port published by compose.local.yaml.
+// customer-api 保留在本地 Compose 网络内。本地 Vite 服务器
+// 通过 compose.local.yaml 仅向回环地址发布的端口访问它。
 const DEFAULT_CUSTOMER_OPPORTUNITY_PROXY_TARGET = 'http://127.0.0.1:18083'
 const DEFAULT_CUSTOMER_PORTAL_PROXY_TARGET = 'http://127.0.0.1:8091'
 const DEFAULT_DATA_ANALYSIS_PROXY_TARGET = 'http://127.0.0.1:8080'
@@ -100,12 +100,12 @@ export default defineConfig(({ mode }) => {
       rewrite: (requestPath) => requestPath.replace(/^\/settlement/, ''),
     }
   }
-  // CRM and the external-customer Portal are independent services and both
-  // retain their public path prefix at the backend boundary.
+  // CRM 与外部客户门户是独立服务，二者在后端边界
+  // 均保留各自的公开路径前缀。
   proxy['/customer-opportunity'] = apiProxy(customerOpportunityProxyTarget)
   proxy['/customer-portal'] = apiProxy(customerPortalProxyTarget)
   // 数据分析后端自身保留 /data_analysis 前缀；只代理会话、API 和健康检查，
-  // 页面路径继续交给 Vite 的 SPA fallback，避免开发服务器把 Vue 页面转发给 API。
+  // 页面路径继续交给 Vite 的 SPA 回退逻辑，避免开发服务器把 Vue 页面转发给 API。
   for (const path of DATA_ANALYSIS_BACKEND_PATHS) {
     proxy[path] = apiProxy(dataAnalysisProxyTarget)
   }

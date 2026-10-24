@@ -1,5 +1,6 @@
 import { normalizeAuthorizationSession, principalIdentityID, shouldStartSubsystemLogin } from '../../shared/authz/sessionCompatibility.js'
 import { attachStructuredContext } from '../../platform/shared/api/requestContext.js'
+import { formatCRMError } from './errorMessages.js'
 
 const PUBLIC_PATH_PREFIX = (import.meta.env?.VITE_CRM_PUBLIC_PATH_PREFIX || '/customer-opportunity').replace(/\/$/, '')
 const API_BASE_URL = (import.meta.env?.VITE_CRM_API_BASE_URL || `${PUBLIC_PATH_PREFIX}/api/v1`).replace(/\/$/, '')
@@ -18,12 +19,12 @@ export function buildCRMLoginURL(location = window.location) {
 
 /**
  * CRMAPIError 表示 CRM API 调用失败，并保留状态码、业务代码和请求追踪信息。
- * @param {string} message 错误信息。
- * @param {{status?: number, code?: string, requestID?: string, details?: unknown}} [context={}] 后端错误上下文。
+ * @param {string|Error} message 错误信息。
+ * @param {{status?: number, code?: string, requestID?: string, details?: unknown, method?: string}} [context={}] 后端错误上下文。
  */
 export class CRMAPIError extends Error {
-  constructor(message, { status = 0, code = '', requestID = '', details = null } = {}) {
-    super(message)
+  constructor(message, { status = 0, code = '', requestID = '', details = null, method = 'GET' } = {}) {
+    super(formatCRMError(message, { status, code, details, method }))
     this.name = 'CRMAPIError'
     this.status = status
     this.code = code
@@ -73,19 +74,65 @@ async function getPlatformPrincipalForSessionCheck() {
 /**
  * readResponse 按响应媒体类型解析 JSON 或文本响应体。
  * @param {Response} response Fetch 响应。
- * @returns {Promise<unknown>} 已解析数据；无效 JSON 安全降级为空对象。
+ * @returns {Promise<unknown>} 已解析数据；无效成功响应抛错，不能冒充已保存。
  */
-async function readResponse(response) {
-  const contentType = response.headers.get('content-type') || ''
-  if (contentType.includes('application/json')) {
+async function readResponse(response, requestContext) {
+  if (response.status === 204 || response.status === 205) return {}
+  const contentType = (response.headers.get('content-type') || '').split(';', 1)[0].trim().toLowerCase()
+  if (contentType === 'application/json' || contentType.endsWith('+json')) {
+    let body
     try {
-      return await response.json()
-    } catch {
+      body = await response.json()
+    } catch (error) {
+      if (error?.name === 'AbortError') throw cancellationError(error, requestContext)
+      if (response.ok) throw invalidResponse(response, requestContext)
       return {}
     }
+    // CRM 业务 API（包括 /auth/me）使用 response.Envelope。错误码
+    // 或无关 JSON 对象绝不能作为写操作成功的确认。
+    if (response.ok && (!body || typeof body !== 'object' || Array.isArray(body) || body.code !== 'OK' || !Object.hasOwn(body, 'data'))) throw invalidResponse(response, requestContext, body)
+    return body
   }
-  const text = await response.text()
-  return text ? { message: text } : {}
+  if (response.ok) throw invalidResponse(response, requestContext)
+  try {
+    const text = await response.text()
+    return text ? { message: text } : {}
+  } catch (error) {
+    if (error?.name === 'AbortError') throw cancellationError(error, requestContext)
+    throw error
+  }
+}
+
+function invalidResponse(response, requestContext = {}, body) {
+  const method = requestContext.method || 'GET'
+  const error = new CRMAPIError('', { status: response.status, code: 'CRM_RESPONSE_INVALID', requestID: body?.request_id || response.headers.get('x-request-id') || '', details: body?.details, method })
+  if (typeof body?.code === 'string' && /^[A-Z][A-Z0-9_]{0,95}$/.test(body.code)) error.responseCode = body.code
+  const traceId = body?.trace_id || body?.traceId || ''
+  attachStructuredContext(error, { subsystem: 'customer_opportunity', feature: 'crm_api', ...requestContext, method, traceId, metadata: { source: 'crm_response', responseCode: error.responseCode || '' } }, { status: error.status, code: error.code, requestId: error.requestID, traceId })
+  return error
+}
+
+function cancellationError(cause, requestContext = {}) {
+  const method = (requestContext.method || 'GET').toUpperCase()
+  if (['GET', 'HEAD', 'OPTIONS'].includes(method)) return cause
+  const error = new CRMAPIError(cause, { code: 'REQUEST_ABORTED', method })
+  error.name = 'AbortError'
+  error.cause = cause
+  attachStructuredContext(error, { subsystem: 'customer_opportunity', feature: 'crm_api', ...requestContext, method, metadata: { source: 'crm_cancelled_write' } }, { status: 0, code: error.code })
+  return error
+}
+
+async function fetchCRM(url, options, requestContext = {}) {
+  try {
+    return await fetch(url, options)
+  } catch (cause) {
+    // 取消操作必须能够与业务请求失败区分。
+    if (cause?.name === 'AbortError') throw cancellationError(cause, { ...requestContext, method: options?.method || 'GET' })
+    const error = new CRMAPIError(cause, { code: 'CRM_NETWORK_ERROR', method: options?.method || 'GET' })
+    error.cause = cause
+    attachStructuredContext(error, { subsystem: 'customer_opportunity', feature: 'crm_api', operation: options?.method || 'GET', method: options?.method || 'GET', metadata: { source: 'crm_network' } }, { status: 0, code: error.code })
+    throw error
+  }
 }
 
 /**
@@ -103,7 +150,7 @@ export function createIdempotencyKey() {
  * @param {RequestInit & {idempotent?: boolean, idempotencyKey?: string}} [options={}] Fetch 配置及幂等选项。
  * @returns {Promise<unknown>} 优先返回响应 data 字段，否则返回完整响应体。
  * @throws {CRMAPIError} 服务端返回非成功状态时抛出；会话失效时同时启动登录跳转。
- * @throws {TypeError} 网络连接或 Fetch 调用失败时抛出。
+ * @throws {CRMAPIError} 网络连接失败时抛出结构化错误；主动取消仍保留 AbortError。
  */
 export async function request(path, options = {}) {
   const method = (options.method || 'GET').toUpperCase()
@@ -117,7 +164,7 @@ export async function request(path, options = {}) {
     method,
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetchCRM(`${API_BASE_URL}${path}`, {
     credentials: 'include',
     ...options,
     // CRM 查询结果受当前登录身份、租户和服务端数据范围约束。禁止浏览器复用
@@ -132,10 +179,11 @@ export async function request(path, options = {}) {
       ...(options.idempotent ? { 'Idempotency-Key': options.idempotencyKey || createIdempotencyKey() } : {}),
       ...(options.headers || {}),
     },
-  })
-  const body = await readResponse(response)
+  }, requestContext)
+  const body = await readResponse(response, requestContext)
   if (!response.ok) {
     const error = new CRMAPIError(body?.message || `HTTP ${response.status}`, {
+      method,
       status: response.status,
       code: body?.code,
       requestID: body?.request_id,
@@ -155,7 +203,7 @@ export async function request(path, options = {}) {
     if (shouldStartSubsystemLogin(error)) redirectToLogin()
     throw error
   }
-  return body?.data ?? body
+  return response.status === 204 || response.status === 205 ? {} : body.data
 }
 
 /**
@@ -164,11 +212,11 @@ export async function request(path, options = {}) {
  * @param {RequestInit} [options={}] Fetch 请求选项。
  * @returns {Promise<{blob: Blob, filename: string}>} CSV 二进制数据与清理后的文件名。
  * @throws {CRMAPIError} 服务端返回非成功状态，或成功响应的媒体类型不是 CSV 时抛出。
- * @throws {TypeError} 网络连接或 Fetch 调用失败时抛出。
+ * @throws {CRMAPIError} 网络连接失败时抛出结构化错误；主动取消仍保留 AbortError。
  */
 export async function requestBlob(path, options = {}) {
 	const method = String(options.method || 'GET').toUpperCase()
-	const response = await fetch(`${API_BASE_URL}${path}`, {
+	const response = await fetchCRM(`${API_BASE_URL}${path}`, {
 		credentials: 'include',
 		...options,
 		headers: {
@@ -177,10 +225,11 @@ export async function requestBlob(path, options = {}) {
 			...(method !== 'GET' ? { 'X-CSRF-Token': '1' } : {}),
 			...(options.headers || {}),
 		},
-	})
+	}, { method, path, feature: 'crm_export' })
   if (!response.ok) {
-    const body = await readResponse(response)
+    const body = await readResponse(response, { method, path, feature: 'crm_export' })
     const error = new CRMAPIError(body?.message || `HTTP ${response.status}`, {
+      method,
       status: response.status,
       code: body?.code,
       requestID: body?.request_id,
@@ -205,14 +254,14 @@ export async function requestBlob(path, options = {}) {
     throw error
   }
   const contentType = response.headers.get('content-type') || ''
-  if (!contentType.toLowerCase().includes('text/csv')) {
+  if (contentType.split(';', 1)[0].trim().toLowerCase() !== 'text/csv') {
     const contentTypeError = new CRMAPIError('下载响应不是受支持的 CSV 文件。', { status: response.status, code: 'CRM_DOWNLOAD_CONTENT_TYPE_INVALID' })
     attachStructuredContext(contentTypeError, {
       subsystem: 'customer_opportunity',
       feature: 'crm_export',
-      operation: 'GET',
+      operation: method,
       path,
-      method: 'GET',
+      method,
       metadata: {
         source: 'crm_blob',
         actualContentType: contentType,
@@ -244,12 +293,12 @@ export async function requestBlob(path, options = {}) {
  * @param {string} [fallbackFilename='download.bin'] 响应未提供安全文件名时使用的回退名称。
  * @returns {Promise<{blob: Blob, filename: string, contentType: string}>} 文件数据、安全文件名和规范化媒体类型。
  * @throws {CRMAPIError} 服务端返回非成功状态，或成功响应的媒体类型不在白名单时抛出。
- * @throws {TypeError} 网络连接或 Fetch 调用失败时抛出。
+ * @throws {CRMAPIError} 网络连接失败时抛出结构化错误；主动取消仍保留 AbortError。
  */
 export async function requestAuthorizedFile(path, allowedMediaTypes, fallbackFilename = 'download.bin') {
-  const response = await fetch(`${API_BASE_URL}${path}`, { credentials: 'include', headers: { Accept: [...allowedMediaTypes, 'application/json'].join(', ') } })
+  const response = await fetchCRM(`${API_BASE_URL}${path}`, { credentials: 'include', headers: { Accept: [...allowedMediaTypes, 'application/json'].join(', ') } }, { method: 'GET', path, feature: 'crm_export' })
   if (!response.ok) {
-    const body = await readResponse(response)
+    const body = await readResponse(response, { method: 'GET', path, feature: 'crm_export' })
     const error = new CRMAPIError(body?.message || `HTTP ${response.status}`, { status: response.status, code: body?.code, requestID: body?.request_id, details: body?.details })
     attachStructuredContext(error, {
       subsystem: 'customer_opportunity',

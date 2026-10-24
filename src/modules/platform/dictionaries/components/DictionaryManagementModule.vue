@@ -2,7 +2,6 @@
 import { computed, reactive, ref, watch } from 'vue'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import {
-  DictionaryError,
   createDictionary,
   createDictionaryItem,
   deleteDictionary,
@@ -14,6 +13,7 @@ import {
 } from '@/modules/platform/dictionaries/api/dictionaries'
 import { hasPermission } from '@/modules/platform/auth/utils/principal'
 import { DICTIONARY_PERMISSIONS } from '@/modules/platform/dictionaries/utils/dictionaryPermissions'
+import { formatUserError } from '../../../shared/utils/userError.js'
 import '@/modules/platform/dictionaries/styles/dictionary-management.css'
 
 const emit = defineEmits(['toast'])
@@ -105,13 +105,8 @@ function formatDate(value) {
   return date.toLocaleString('zh-CN', { hour12: false })
 }
 
-function userMessage(error, fallback) {
-  if (!(error instanceof DictionaryError)) return fallback
-  if (error.status === 403) return '当前账号没有字典管理权限。'
-  if (error.status === 409 && error.code === 'VERSION_CONFLICT') return '数据已被其他管理员修改，请刷新后重试。'
-  if (error.status === 409) return '编码已经存在，或当前数据状态不允许该操作。'
-  if (error.status === 422) return '参数不符合要求，请检查编码、名称和状态。'
-  return error.message || fallback
+function userMessage(error, fallback, method) {
+  return formatUserError(error, { fallback, method })
 }
 
 function showToast(message) {
@@ -297,7 +292,7 @@ async function submitDictionary() {
     showToast(`字典已${dictionaryForm.version ? '更新' : '创建'}。`)
     Object.assign(dictionaryForm, emptyDictionaryForm())
   } catch (error) {
-    dictionaryFormError.value = userMessage(error, '保存字典失败。')
+    dictionaryFormError.value = userMessage(error, '保存字典失败。', editingDictionary.value ? 'PATCH' : 'POST')
   } finally {
     dictionarySubmitting.value = false
   }
@@ -372,7 +367,7 @@ async function submitItem() {
     showToast(`字典项已${action}。`)
     Object.assign(itemForm, emptyItemForm())
   } catch (error) {
-    itemFormError.value = userMessage(error, '保存字典项失败。')
+    itemFormError.value = userMessage(error, '保存字典项失败。', editingItem.value ? 'PATCH' : 'POST')
   } finally {
     itemSubmitting.value = false
   }
@@ -437,7 +432,7 @@ async function runConfirmedDelete() {
       await loadDictionaries({ preserveSelection: false })
     }
   } catch (error) {
-    confirmError.value = userMessage(error, '删除失败，请稍后重试。')
+    confirmError.value = userMessage(error, '删除失败，请稍后重试。', 'DELETE')
   } finally {
     deleting.value = false
   }

@@ -5,6 +5,7 @@ import {
   dispatchAuthorizationRefreshed,
   principalFingerprint,
 } from '@/modules/platform/auth/utils/authorizationRefresh'
+import { setRelatedDataSessionScope } from '@/modules/platform/shared/utils/relatedDataInvalidation'
 import { checkAnyPermission, checkPermission } from '@/modules/platform/auth/utils/permissions'
 
 // 单一来源的当前认证主体缓存。所有需要按权限控制 UI 的组件都应使用
@@ -19,6 +20,17 @@ let cacheGeneration = 0
 function applyPrincipal(next) {
   principal.value = next
   lastFingerprint.value = principalFingerprint(next)
+  // 关联目录缓存按会话隔离：换号、换租户或退出时推进世代，让旧会话的在途响应失效。
+  setRelatedDataSessionScope(principalScope(next))
+}
+
+/** 会话范围只使用租户与用户标识，不包含权限、角色或任何凭据。 */
+function principalScope(next) {
+  if (!next || typeof next !== 'object') return ''
+  const tenant = String(next.tenant?.id || '').trim()
+  const user = String(next.user?.id || '').trim()
+  if (!tenant && !user) return ''
+  return `${tenant}|${user}`
 }
 
 if (typeof window !== 'undefined') {
@@ -49,6 +61,7 @@ async function refreshPrincipal({ force = false } = {}) {
       if (requestedGeneration === cacheGeneration) {
         principal.value = null
         lastFingerprint.value = ''
+        setRelatedDataSessionScope('')
       }
       throw error
     } finally {
@@ -63,6 +76,7 @@ function resetPrincipal() {
   cacheGeneration += 1
   principal.value = null
   lastFingerprint.value = ''
+  setRelatedDataSessionScope('')
 }
 
 export function useCurrentPrincipal() {

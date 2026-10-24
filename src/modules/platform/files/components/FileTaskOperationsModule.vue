@@ -3,13 +3,13 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { hasPermission } from '@/modules/platform/auth/utils/principal'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import {
-  FileTaskError,
   cancelAsyncJob,
   createAsyncJob,
   listAsyncJobs,
   rerunAsyncJob,
   retryAsyncJob,
 } from '@/modules/platform/files/api/fileTasks'
+import { formatUserError } from '../../../shared/utils/userError.js'
 import '@/modules/platform/files/styles/file-task-operations.css'
 
 const emit = defineEmits(['toast'])
@@ -36,7 +36,11 @@ function toast(message) { emit('toast', message) }
 function formatDate(value) { const date = new Date(value); return value && !Number.isNaN(date.getTime()) ? date.toLocaleString('zh-CN', { hour12: false }) : '—' }
 function statusClass(status) { return `filetask-status--${String(status || '').toLowerCase()}` }
 function statusText(status) { return ({ PENDING: '等待执行', RUNNING: '执行中', SUCCEEDED: '已成功', FAILED: '执行失败', DEAD: '已终止', CANCELLED: '已取消' })[status] || '未知状态' }
-function normalizeError(error, fallback) { return error instanceof FileTaskError ? error.message : fallback }
+function normalizeError(error, fallback, method) { return formatUserError(error, { fallback, method }) }
+function jobFailureMessage(job) {
+  if (!job.last_error_message && !job.last_error_code) return '—'
+  return formatUserError({ code: job.last_error_code, message: job.last_error_message }, { fallback: '任务执行未完成，请联系管理员核对处理记录。' })
+}
 
 async function loadJobs() {
   if (!canRead.value) return
@@ -55,7 +59,7 @@ async function createJob() {
   try {
     const job = await createAsyncJob({ applicationId: jobForm.applicationId.trim(), jobType: jobForm.jobType.trim(), aggregateType: jobForm.aggregateType.trim(), aggregateId: jobForm.aggregateId.trim(), payload, priority: Number(jobForm.priority), maxAttempts: Number(jobForm.maxAttempts) })
     toast(`异步任务 ${job.job_id || ''} 已创建。`); await loadJobs()
-  } catch (error) { errorMessage.value = normalizeError(error, '创建异步任务失败。') }
+  } catch (error) { errorMessage.value = normalizeError(error, '创建异步任务失败。', 'POST') }
 }
 
 async function operateJob(job, operation) {
@@ -67,7 +71,7 @@ async function operateJob(job, operation) {
     if (operation === 'retry') await retryAsyncJob(job.job_id)
     if (operation === 'rerun') await rerunAsyncJob(job.job_id)
     toast(operation === 'cancel' ? '任务已取消。' : operation === 'retry' ? '任务已重新入队。' : '已创建新的重跑任务。'); await loadJobs()
-  } catch (error) { errorMessage.value = normalizeError(error, '任务操作失败。') } finally { actionJobId.value = '' }
+  } catch (error) { errorMessage.value = normalizeError(error, '任务操作失败。', 'POST') } finally { actionJobId.value = '' }
 }
 
 function changePage(next) { page.value = Math.min(Math.max(next, 1), totalPages.value); loadJobs() }
@@ -80,7 +84,7 @@ onMounted(loadJobs)
     <p v-if="errorMessage" class="filetask-module__error">{{ errorMessage }}</p>
     <article class="filetask-guide" aria-label="功能边界说明"><div><strong>业务人员</strong><span>在客户、合同、项目或结算页面完成文件操作。</span></div><div><strong>任务运维</strong><span>在这里查询失败原因，并按状态执行取消、重试或重跑。</span></div><div><strong>文件网关</strong><span>自动完成流式存储、静态校验、业务绑定和受控下载。</span></div></article>
     <p v-if="!canRead" class="filetask-module__empty">当前账号没有异步任务查看权限。</p>
-    <article v-if="canCreate" class="filetask-card filetask-card--job-create"><header><ConsoleIcon name="info" /><div><h3>创建运维任务</h3><p>仅供熟悉 Worker 契约的管理员使用。任务类型必须已有对应 Worker；负载不得包含密码、Token、客户端密钥或原始文件内容。</p></div></header><div class="filetask-form-grid"><label><span>应用 ID</span><input v-model="jobForm.applicationId" placeholder="可选" /></label><label><span>任务类型</span><input v-model="jobForm.jobType" placeholder="例如 REPORT_EXPORT" /></label><label><span>聚合类型</span><input v-model="jobForm.aggregateType" placeholder="可选" /></label><label><span>聚合 ID</span><input v-model="jobForm.aggregateId" placeholder="可选" /></label><label><span>优先级</span><input v-model.number="jobForm.priority" type="number" /></label><label><span>最大尝试次数</span><input v-model.number="jobForm.maxAttempts" type="number" min="1" max="100" /></label></div><label><span>JSON 负载</span><textarea v-model="jobForm.payloadText" rows="5" spellcheck="false" /></label><div class="filetask-card__actions"><button class="console-button primary" type="button" @click="createJob">创建任务</button></div></article>
-    <article v-if="canRead" class="filetask-card filetask-card--jobs"><header class="filetask-jobs__header"><div><h3>任务运营查询</h3><p>等待、失败或已终止任务可以取消；失败任务可重试，终态任务可创建新的重跑记录。</p></div><div class="filetask-jobs__filters"><select v-model="filters.status" @change="page = 1; loadJobs()"><option value="">全部状态</option><option value="PENDING">等待执行</option><option value="RUNNING">执行中</option><option value="SUCCEEDED">已成功</option><option value="FAILED">执行失败</option><option value="DEAD">已终止</option><option value="CANCELLED">已取消</option></select><input v-model="filters.jobType" placeholder="任务类型" @keyup.enter="page = 1; loadJobs()" /><button class="console-button ghost small" type="button" @click="page = 1; loadJobs()">查询</button></div></header><div class="filetask-table-wrap"><table class="console-data-table filetask-table"><thead><tr><th>任务 ID</th><th>类型</th><th>状态</th><th>尝试</th><th>可执行时间</th><th>错误摘要</th><th>操作</th></tr></thead><tbody><tr v-if="loading"><td colspan="7">正在加载…</td></tr><tr v-else-if="!jobs.length"><td colspan="7">暂无任务记录。</td></tr><tr v-for="job in jobs" :key="job.job_id"><td><code>{{ job.job_id }}</code></td><td>{{ job.job_type }}</td><td><span class="filetask-status" :class="statusClass(job.status)">{{ statusText(job.status) }}</span></td><td>{{ job.attempts }}/{{ job.max_attempts }}</td><td>{{ formatDate(job.available_at) }}</td><td>{{ job.last_error_message || '—' }}</td><td class="filetask-table__actions"><button v-if="canCancel && ['PENDING','FAILED','DEAD'].includes(job.status)" class="console-button ghost small" type="button" :disabled="Boolean(actionJobId)" @click="operateJob(job, 'cancel')">取消</button><button v-if="canRetry && ['FAILED','DEAD'].includes(job.status)" class="console-button ghost small" type="button" :disabled="Boolean(actionJobId)" @click="operateJob(job, 'retry')">重试</button><button v-if="canRerun && ['SUCCEEDED','FAILED','DEAD','CANCELLED'].includes(job.status)" class="console-button ghost small" type="button" :disabled="Boolean(actionJobId)" @click="operateJob(job, 'rerun')">重跑</button><span v-if="!canCancel && !canRetry && !canRerun">—</span></td></tr></tbody></table></div><footer class="filetask-pagination"><span>共 {{ total }} 条</span><span><button class="console-button ghost small" type="button" :disabled="page <= 1" @click="changePage(page - 1)">上一页</button><strong>{{ page }} / {{ totalPages }}</strong><button class="console-button ghost small" type="button" :disabled="page >= totalPages" @click="changePage(page + 1)">下一页</button></span></footer></article>
+    <article v-if="canCreate" class="filetask-card filetask-card--job-create"><header><ConsoleIcon name="info" /><div><h3>创建运维任务</h3><p>仅供熟悉 Worker 契约的管理员使用。任务类型必须已有对应 Worker；负载不得包含密码、Token、客户端密钥或原始文件内容。</p></div></header><div class="filetask-form-grid"><label><span>应用 ID</span><input v-model="jobForm.applicationId" placeholder="可选"  maxlength="128"/></label><label><span>任务类型</span><input v-model="jobForm.jobType" placeholder="例如 REPORT_EXPORT"  maxlength="64"/></label><label><span>聚合类型</span><input v-model="jobForm.aggregateType" placeholder="可选"  maxlength="64"/></label><label><span>聚合 ID</span><input v-model="jobForm.aggregateId" placeholder="可选"  maxlength="128"/></label><label><span>优先级</span><input v-model.number="jobForm.priority" type="number" /></label><label><span>最大尝试次数</span><input v-model.number="jobForm.maxAttempts" type="number" min="1" max="100" /></label></div><label><span>JSON 负载</span><textarea v-model="jobForm.payloadText" rows="5" spellcheck="false"  maxlength="20000"/></label><div class="filetask-card__actions"><button class="console-button primary" type="button" @click="createJob">创建任务</button></div></article>
+    <article v-if="canRead" class="filetask-card filetask-card--jobs"><header class="filetask-jobs__header"><div><h3>任务运营查询</h3><p>等待、失败或已终止任务可以取消；失败任务可重试，终态任务可创建新的重跑记录。</p></div><div class="filetask-jobs__filters"><select v-model="filters.status" @change="page = 1; loadJobs()"><option value="">全部状态</option><option value="PENDING">等待执行</option><option value="RUNNING">执行中</option><option value="SUCCEEDED">已成功</option><option value="FAILED">执行失败</option><option value="DEAD">已终止</option><option value="CANCELLED">已取消</option></select><input v-model="filters.jobType" placeholder="任务类型" @keyup.enter="page = 1; loadJobs()"  maxlength="100"/><button class="console-button ghost small" type="button" @click="page = 1; loadJobs()">查询</button></div></header><div class="filetask-table-wrap"><table class="console-data-table filetask-table"><thead><tr><th>任务 ID</th><th>类型</th><th>状态</th><th>尝试</th><th>可执行时间</th><th>错误摘要</th><th>操作</th></tr></thead><tbody><tr v-if="loading"><td colspan="7">正在加载…</td></tr><tr v-else-if="!jobs.length"><td colspan="7">暂无任务记录。</td></tr><tr v-for="job in jobs" :key="job.job_id"><td><code>{{ job.job_id }}</code></td><td>{{ job.job_type }}</td><td><span class="filetask-status" :class="statusClass(job.status)">{{ statusText(job.status) }}</span></td><td>{{ job.attempts }}/{{ job.max_attempts }}</td><td>{{ formatDate(job.available_at) }}</td><td>{{ jobFailureMessage(job) }}</td><td class="filetask-table__actions"><button v-if="canCancel && ['PENDING','FAILED','DEAD'].includes(job.status)" class="console-button ghost small" type="button" :disabled="Boolean(actionJobId)" @click="operateJob(job, 'cancel')">取消</button><button v-if="canRetry && ['FAILED','DEAD'].includes(job.status)" class="console-button ghost small" type="button" :disabled="Boolean(actionJobId)" @click="operateJob(job, 'retry')">重试</button><button v-if="canRerun && ['SUCCEEDED','FAILED','DEAD','CANCELLED'].includes(job.status)" class="console-button ghost small" type="button" :disabled="Boolean(actionJobId)" @click="operateJob(job, 'rerun')">重跑</button><span v-if="!canCancel && !canRetry && !canRerun">—</span></td></tr></tbody></table></div><footer class="filetask-pagination"><span>共 {{ total }} 条</span><span><button class="console-button ghost small" type="button" :disabled="page <= 1" @click="changePage(page - 1)">上一页</button><strong>{{ page }} / {{ totalPages }}</strong><button class="console-button ghost small" type="button" :disabled="page >= totalPages" @click="changePage(page + 1)">下一页</button></span></footer></article>
   </section>
 </template>

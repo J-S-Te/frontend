@@ -297,6 +297,14 @@
 .da-native-bar-row em { display: block; width: 0; height: 100%; border-radius: inherit; background: #2563eb; }
 .da-native-bar-row small { text-align: right; color: var(--da-muted, #64748b); }
 .da-native-note { margin: 14px 0 0; padding: 8px 10px; border: 1px solid #dbeafe; border-radius: 8px; color: #475569; background: #eff6ff; font-size: 11px; }
+.da-native-freshness { display: grid; gap: 8px; margin-bottom: 12px; padding: 10px 12px; border: 1px solid #dbeafe; border-radius: 10px; background: #f8fbff; }
+.da-native-freshness.stale { border-color: #fecaca; background: #fff6f6; }
+.da-native-freshness-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.da-native-freshness-head p { margin: 0; color: #9f2d2d; font-size: 12px; }
+.da-native-freshness-grid { display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 0; }
+.da-native-freshness-grid dt { color: var(--da-muted, #64748b); font-size: 11px; }
+.da-native-freshness-grid dd { margin: 0 0 0 4px; color: var(--da-ink, #0f172a); font-size: 12px; font-weight: 600; }
+.da-native-freshness-note { margin: 0; color: var(--da-muted, #64748b); font-size: 11px; }
 .da-native-inline-error { margin: 12px 0 0; padding: 10px 12px; color: #9f2d2d; background: #fff1f0; border: 1px solid #ffc9c5; border-radius: 8px; font-size: 13px; }
 .da-native-secondary { margin-top: 12px; }
 .da-native-table-panel { margin-top: 12px; min-height: 176px; }

@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue'
+import { formatUserError } from '../../shared/utils/userError.js'
 import { downloadCapabilityImportTemplate, previewCapabilitiesImport, importCapabilities, downloadEquipmentImportTemplate, previewEquipmentImport, importEquipment } from '@/modules/project_management/api/projectManagement'
 
 const props = defineProps({ codeOptions: { type: Array, default: () => [] }, resourceType: { type: String, default: 'PERSON', validator: (value) => ['PERSON', 'EQUIPMENT'].includes(value) } })
@@ -9,6 +10,7 @@ function dateLabel(value) { return !value || String(value).startsWith('0001-01-0
 const emit = defineEmits(['close', 'completed'])
 const file = ref(null), preview = ref(null), result = ref(null), selected = ref([])
 const busy = ref(false), error = ref(''), filter = ref('all')
+function importMessage(value) { return formatUserError(value, { fallback: '请核对本行内容；如无法确认，请联系管理员。' }) }
 const visibleRows = computed(() => (preview.value?.rows || []).filter((row) => filter.value === 'all' || (filter.value === 'valid' ? row.status === 'READY' : row.status !== 'READY')))
 const readyRows = computed(() => (preview.value?.rows || []).filter((row) => row.status === 'READY'))
 const selectedCount = computed(() => readyRows.value.filter((row) => selected.value.includes(row.row_no)).length)
@@ -29,7 +31,7 @@ async function download() {
     url = URL.createObjectURL(value.blob)
     const link = document.createElement('a')
     link.href = url; link.download = value.filename; link.click()
-  } catch (value) { error.value = value?.message || '模板下载失败。' }
+  } catch (value) { error.value = formatUserError(value, { fallback: '模板下载失败。' }) }
   finally { if (url) URL.revokeObjectURL(url); busy.value = false }
 }
 async function inspect() {
@@ -42,7 +44,7 @@ async function inspect() {
     preview.value = value
     filter.value = 'all'
     selectAll()
-  } catch (value) { error.value = value?.message || '导入检测失败，请重试。' }
+  } catch (value) { error.value = formatUserError(value, { fallback: '导入检测失败，请重试。' }) }
   finally { busy.value = false }
 }
 async function commit() {
@@ -54,7 +56,7 @@ async function commit() {
     if (!Number.isInteger(value?.imported) || !Number.isInteger(value?.skipped) || !Array.isArray(value?.rows)) throw new Error('导入结果响应异常，请先核对台账再重试。')
     result.value = value
     emit('completed', result.value)
-  } catch (value) { error.value = value?.message || '导入失败，请核对台账后重试。' }
+  } catch (value) { error.value = formatUserError(value, { fallback: '导入失败，请核对台账后重试。' }) }
   finally { busy.value = false }
 }
 </script>
@@ -74,9 +76,9 @@ async function commit() {
         <template v-else-if="!result">
           <h3>第二步：检测结果</h3><p>共 {{ preview.total }} 行 · 可导入 {{ preview.valid }} 行 · 问题 {{ preview.invalid }} 行 · 已选 {{ selectedCount }} 行</p><p v-if="isEquipment">确认时服务端会重新核验设备、编码、检定日期和使用范围；更新行将替换对应设备的信息，请核对后选择。日期或范围留空的含义以检测结果为准。</p><p v-else>确认时服务端会重新核验人员、编码及台账；更新行将替换该档案的资质编码和状态，请核对后选择。</p>
           <div class="pm-actions"><select v-model="filter" aria-label="筛选检测结果"><option value="all">全部行</option><option value="valid">可导入</option><option value="invalid">问题行</option></select><button class="pm-button" :disabled="busy" @click="selectAll">选择全部有效行</button><button class="pm-button" :disabled="busy" @click="selected = []">清空选择</button></div>
-          <div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>选择</th><th>文件行号</th><th>{{ isEquipment ? '设备 / 编号' : '人员 / 组织' }}</th><th>{{ isEquipment ? '能力编码' : '资质编码' }}</th><th v-if="isEquipment">检定日期 / 使用范围</th><th>检测结果</th><th>说明</th></tr></thead><tbody><tr v-for="row in visibleRows" :key="row.row_no"><td><input v-model="selected" type="checkbox" :value="row.row_no" :disabled="busy || row.status !== 'READY'" :aria-label="`选择第 ${row.row_no} 行`"></td><td>{{ row.row_no }}</td><td>{{ row.resource_name }}<br>{{ isEquipment ? (row.capability?.resource_id || '确认时生成') : (row.organization_name || '—') }}</td><td>{{ (row.capability?.codes || []).join('；') }}</td><td v-if="isEquipment">{{ dateLabel(row.capability?.valid_from) }} ~ {{ dateLabel(row.capability?.valid_until) }}<br>{{ row.capability?.usage_scope === 'COMPANY_ONLY' ? '仅在公司使用' : '可借出' }}</td><td>{{ row.status === 'READY' ? (row.action === 'UPDATE' ? '可更新' : '可导入') : '不通过' }}</td><td>{{ [...(row.errors || []), ...(row.warnings || [])].join('；') || '校验通过' }}</td></tr></tbody></table></div>
+          <div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>选择</th><th>文件行号</th><th>{{ isEquipment ? '设备 / 编号' : '人员 / 组织' }}</th><th>{{ isEquipment ? '能力编码' : '资质编码' }}</th><th v-if="isEquipment">检定日期 / 使用范围</th><th>检测结果</th><th>说明</th></tr></thead><tbody><tr v-for="row in visibleRows" :key="row.row_no"><td><input v-model="selected" type="checkbox" :value="row.row_no" :disabled="busy || row.status !== 'READY'" :aria-label="`选择第 ${row.row_no} 行`"></td><td>{{ row.row_no }}</td><td>{{ row.resource_name }}<br>{{ isEquipment ? (row.capability?.resource_id || '确认时生成') : (row.organization_name || '—') }}</td><td>{{ (row.capability?.codes || []).join('；') }}</td><td v-if="isEquipment">{{ dateLabel(row.capability?.valid_from) }} ~ {{ dateLabel(row.capability?.valid_until) }}<br>{{ row.capability?.usage_scope === 'COMPANY_ONLY' ? '仅在公司使用' : '可借出' }}</td><td>{{ row.status === 'READY' ? (row.action === 'UPDATE' ? '可更新' : '可导入') : '不通过' }}</td><td>{{ [...(row.errors || []), ...(row.warnings || [])].map(importMessage).join('；') || '校验通过' }}</td></tr></tbody></table></div>
         </template>
-        <template v-else><h3>第三步：导入结果</h3><p role="status">已选行：成功 {{ result.imported }} 行 · 失败 {{ result.skipped }} 行；未选行不导入。</p><ul v-if="result.errors?.length"><li v-for="(message, index) in result.errors" :key="index">{{ message }}</li></ul><div v-if="result.rows?.length" class="pm-table-scroll"><table class="pm-table"><thead><tr><th>文件行号</th><th>结果</th><th>说明</th></tr></thead><tbody><tr v-for="row in result.rows" :key="row.row_no"><td>{{ row.row_no }}</td><td>{{ row.status === 'IMPORTED' ? '成功' : row.status === 'FAILED' ? '失败' : '跳过' }}</td><td>{{ row.message || '—' }}</td></tr></tbody></table></div></template>
+        <template v-else><h3>第三步：导入结果</h3><p role="status">已选行：成功 {{ result.imported }} 行 · 失败 {{ result.skipped }} 行；未选行不导入。</p><ul v-if="result.errors?.length"><li v-for="(message, index) in result.errors" :key="index">{{ importMessage(message) }}</li></ul><div v-if="result.rows?.length" class="pm-table-scroll"><table class="pm-table"><thead><tr><th>文件行号</th><th>结果</th><th>说明</th></tr></thead><tbody><tr v-for="row in result.rows" :key="row.row_no"><td>{{ row.row_no }}</td><td>{{ row.status === 'IMPORTED' ? '成功' : row.status === 'FAILED' ? '失败' : '跳过' }}</td><td>{{ row.message ? importMessage(row.message) : '—' }}</td></tr></tbody></table></div></template>
       </div>
       <footer><button class="pm-button" :disabled="busy" @click="emit('close')">{{ result ? '完成' : '取消' }}</button><button v-if="preview && !result" class="pm-button" :disabled="busy" @click="reset">返回重新上传</button><button v-if="!preview" class="pm-button primary" :disabled="busy || !file" @click="inspect">{{ busy ? '检测中…' : '上传并检测' }}</button><button v-else-if="!result" class="pm-button primary" :disabled="busy || !selectedCount" @click="commit">{{ busy ? '导入中…' : `确认导入 ${selectedCount} 行` }}</button></footer>
     </section>

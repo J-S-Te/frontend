@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { formatUserError } from '../../../shared/utils/userError.js'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import PositionAuthorizationTemplates from '@/modules/platform/iam/components/PositionAuthorizationTemplates.vue'
 import BatchUserImportDialog from '@/modules/platform/iam/components/BatchUserImportDialog.vue'
@@ -77,6 +78,9 @@ import {
   groupMembershipsByOrganization,
 } from '@/modules/platform/iam/utils/membershipGroups'
 import { loadAllCatalogPages } from '@/modules/platform/iam/utils/paginatedCatalog'
+import { toCsvText } from '@/modules/platform/iam/utils/csvExport'
+import { useRelatedDataInvalidation } from '@/modules/platform/shared/composables/useRelatedDataInvalidation'
+import { RELATED_DATA } from '@/modules/platform/shared/utils/relatedDataInvalidation'
 import { buildUserAuthorizationOverview } from '@/modules/platform/iam/utils/userAuthorizationOverview'
 import { isCurrentAuthorizationRequest } from '@/modules/platform/iam/utils/requestVersion'
 import { copyTextToClipboard, scheduleSensitiveClipboardClear } from '@/modules/shared/utils/clipboard'
@@ -93,11 +97,11 @@ import {
 import '@/modules/platform/iam/styles/iam-settings.css'
 
 const props = defineProps({
-  // EmployeeOnboardingModal is owned by PlatformConsoleView, so its successful
-  // completion must explicitly invalidate the IAM lists mounted here.
+  // EmployeeOnboardingModal 由 PlatformConsoleView 管理，因此成功完成后
+  // 必须显式使此处已挂载的 IAM 列表失效。
   refreshKey: { type: Number, default: 0 },
 })
-const emit = defineEmits(['toast', 'employee-onboarding'])
+const emit = defineEmits(['toast', 'employee-onboarding', 'personnel-change'])
 
 // 当前登录用户的权限集合（来自 /auth/me 的 permission_codes 字段）。
 // 路由级守卫已在 router/index.js 完成认证；这里只用于按权限隐藏高危按钮。
@@ -238,6 +242,7 @@ const authorizationDraft = reactive({
   validity_mode: 'PERMANENT',
   valid_from: '',
   valid_until: '',
+  apply_to_existing: false,
 })
 
 const selectedApplication = computed(() => applications.value.find((item) => item.code === selectedApplicationCode.value) || null)
@@ -677,6 +682,7 @@ function resetApplicationAuthorizationState() {
   authorizationDraft.validity_mode = 'PERMANENT'
   authorizationDraft.valid_from = ''
   authorizationDraft.valid_until = ''
+  authorizationDraft.apply_to_existing = false
 }
 
 function toDateTimeLocal(value) {
@@ -706,19 +712,25 @@ function roleAuthorizationSignature(role) {
   ].join('|')
 }
 
-// 草稿里勾选的每个角色都映射到原始 direct_role 的 signature。只有当用户当前
-// 真正打算提交 2+ 个不同 signature 的角色时才视为冲突——避免"打开详情"就触发。
+// 不同时间窗可原样往返；这里只提示差异，只有显式统一设置才覆盖已有配置。
 const authorizationHasMixedRoleSettings = computed(() => {
-  const signatureByCode = new Map()
-  applicationManualRoles.value.forEach((role) => {
-    signatureByCode.set(roleCode(role), roleAuthorizationSignature(role))
+  const selected = new Set(authorizationDraft.role_codes)
+  return new Set(applicationManualRoles.value.filter((role) => selected.has(roleCode(role)))
+    .map(roleAuthorizationSignature)).size > 1
+})
+
+// 后端拒绝同码多条输入；保留历史数据并明确要求管理员选择清理或统一，不能静默折叠。
+const authorizationHasRepeatedManualRoles = computed(() => {
+  if (authorizationDraft.apply_to_existing) return false
+  const selected = new Set(authorizationDraft.role_codes)
+  const seen = new Set()
+  return applicationManualRoles.value.some((role) => {
+    const code = roleCode(role)
+    if (!selected.has(code)) return false
+    if (seen.has(code)) return true
+    seen.add(code)
+    return false
   })
-  const signatures = new Set()
-  authorizationDraft.role_codes.forEach((code) => {
-    const sig = signatureByCode.get(code)
-    if (sig) signatures.add(sig)
-  })
-  return signatures.size > 1
 })
 
 const authorizationEnvironmentOptions = computed(() => applicationEnvironments.value
@@ -729,6 +741,7 @@ const authorizationEnvironmentOptions = computed(() => applicationEnvironments.v
   .filter((environment) => environment.code))
 
 function applyAuthorizationSettings(roles) {
+  authorizationDraft.apply_to_existing = false
   const firstRole = roles.find((role) => role && typeof role === 'object')
   const scopeType = normalizeScopeType(firstRole?.scope_type)
   authorizationDraft.scope_type = scopeType
@@ -880,7 +893,7 @@ async function loadApplicationsForSubject() {
   } catch (error) {
     if (!isCurrentRequest()) return null
     applications.value = []
-    applicationAccessError.value = error?.message || '读取应用列表失败。'
+    applicationAccessError.value = formatUserError(error, { fallback: '读取应用列表失败。' })
     return null
   } finally {
     if (isCurrentRequest()) applicationsLoading.value = false
@@ -927,6 +940,7 @@ async function loadApplicationAuthorization(applicationCode = selectedApplicatio
   authorizationDraft.validity_mode = 'PERMANENT'
   authorizationDraft.valid_from = ''
   authorizationDraft.valid_until = ''
+  authorizationDraft.apply_to_existing = false
   applicationEnvironments.value = []
   applicationAccessError.value = ''
   authorizationCatalogLoading.value = true
@@ -939,7 +953,7 @@ async function loadApplicationAuthorization(applicationCode = selectedApplicatio
     } catch (error) {
       if (isCurrentRequest()) {
         applicationEnvironments.value = []
-        applicationAccessError.value = error?.message || '读取应用环境失败。'
+        applicationAccessError.value = formatUserError(error, { fallback: '读取应用环境失败。' })
       }
     } finally {
       if (isCurrentRequest()) applicationEnvironmentsLoading.value = false
@@ -949,7 +963,7 @@ async function loadApplicationAuthorization(applicationCode = selectedApplicatio
       const catalog = await getApplicationAuthorizationCatalog(application.application_id || application.id)
       if (isCurrentRequest()) authorizationCatalog.value = catalog
     } catch (error) {
-      if (isCurrentRequest()) applicationAccessError.value = error instanceof AuthorizationError ? error.message : (error?.message || '读取应用角色目录失败。')
+      if (isCurrentRequest()) applicationAccessError.value = formatUserError(error, { fallback: '读取应用角色目录失败。' })
     } finally {
       if (isCurrentRequest()) authorizationCatalogLoading.value = false
     }
@@ -967,7 +981,7 @@ async function loadApplicationAuthorization(applicationCode = selectedApplicatio
       }
     }
   } catch (error) {
-    if (isCurrentRequest()) applicationAccessError.value = error instanceof AuthorizationError ? error.message : (error?.message || '读取应用访问授权失败。')
+    if (isCurrentRequest()) applicationAccessError.value = formatUserError(error, { fallback: '读取应用访问授权失败。' })
   } finally {
     if (isCurrentRequest()) {
       authorizationCatalogLoading.value = false
@@ -1001,13 +1015,19 @@ function applicationAccessPayload() {
   const validFrom = authorizationDraft.validity_mode === 'RANGE' ? toRFC3339(authorizationDraft.valid_from) : null
   const validUntil = authorizationDraft.validity_mode === 'RANGE' ? toRFC3339(authorizationDraft.valid_until) : null
   return {
-    roles: validCodes.map((roleCode) => ({
-      role_code: roleCode,
-      scope_type: scopeType,
-      environment_code: environmentCode,
-      valid_from: validFrom,
-      valid_until: validUntil,
-    })),
+    roles: validCodes.flatMap((code) => {
+      const existing = applicationManualRoles.value.filter((role) => roleCode(role) === code)
+      if (existing.length && !authorizationDraft.apply_to_existing) {
+        return existing.map((role) => ({
+          role_code: code,
+          scope_type: normalizeScopeType(role.scope_type),
+          environment_code: normalizeScopeType(role.scope_type) === 'ENVIRONMENT' ? role.environment_code : null,
+          valid_from: role.valid_from ?? null,
+          valid_until: role.valid_until ?? null,
+        }))
+      }
+      return [{ role_code: code, scope_type: scopeType, environment_code: environmentCode, valid_from: validFrom, valid_until: validUntil }]
+    }),
   }
 }
 
@@ -1038,10 +1058,8 @@ async function saveApplicationAccess() {
     applicationAccessError.value = `当前勾选了 ${authorizationSelectedDirectRoleCount.value} 个例外角色，超过该应用允许的最大有效角色数（${authorizationMaxEffectiveRoles.value} 个）。请取消多余角色后再保存。`
     return
   }
-  // 阻断：草稿里同时存在 2+ 个不同 scope/有效期 signature 的角色。
-  // 直接保存会把所有角色统一成同一组 scope/有效期，其余配置会被静默抹平。
-  if (authorizationHasMixedRoleSettings.value) {
-    applicationAccessError.value = '当前勾选的角色包含不同的授权范围或有效期组合，保存会按当前统一设置替换全部角色。请在“标准继承授权（只读）”中删除冲突来源，或取消多余角色后重新提交。'
+  if (authorizationHasRepeatedManualRoles.value) {
+    applicationAccessError.value = '当前同一角色含有多条人工授权，服务端不支持同时替换。请取消该角色以撤销全部人工条目，或勾选“将当前范围/有效期统一应用到已有角色”后保存。原有授权尚未改变。'
     return
   }
   // 阻断：草稿里包含不再处于 ACTIVE 目录的角色；要求用户显式确认这些角色会被撤销。
@@ -1079,15 +1097,30 @@ async function performSaveApplicationAccess() {
   }
   applicationAccessSaving.value = true
   applicationAccessError.value = ''
+  // 保存期间用户可能关闭 A 的详情并打开 B。写入本身以请求发起时的主体为准（服务端不会串人），
+  // 但响应回到浏览器时必须再校验一次当前主体：否则 A 的角色会被写进 B 的草稿，接着一次
+  // 普通保存就会把 A 的角色提交给 B。
+  const requestIdentity = { version: applicationAuthorizationRequestSeq.value, subjectId, subjectType, applicationCode }
+  const isCurrentSubject = () => isCurrentAuthorizationRequest(requestIdentity, {
+    version: applicationAuthorizationRequestSeq.value,
+    subjectId: authorizationSubjectId.value,
+    subjectType: authorizationSubjectType.value,
+    applicationCode: selectedApplicationCode.value,
+  })
   try {
     const access = subjectType === 'USER'
       ? await updateApplicationAccess(subjectId, applicationCode, applicationAccessPayload())
       : await updateSubjectApplicationAccess(subjectType, subjectId, applicationCode, applicationAccessPayload())
+    if (!isCurrentSubject()) {
+      // 保存已成功，但不回填草稿：当前草稿属于另一个主体。
+      emitToast('授权已保存；当前已切换到其他主体，本次结果不会覆盖当前草稿。')
+      return true
+    }
     applyApplicationAccess(access)
     emitToast(`${authorizationEntryLayerInfo.value.title}已保存。${subjectType === 'USER' ? '基础平台会在下一次请求立即按最新权限校验；已打开页面会自动刷新授权状态。' : '相关用户会按最新授权重新计算继承角色。'}`)
     return true
   } catch (error) {
-    applicationAccessError.value = error instanceof AuthorizationError ? error.message : (error?.message || '保存应用访问授权失败。')
+    if (isCurrentSubject()) applicationAccessError.value = formatUserError(error, { fallback: '保存应用访问授权失败。' })
     return false
   } finally {
     applicationAccessSaving.value = false
@@ -1124,7 +1157,7 @@ async function revokeApplicationAccess() {
           ? '个人例外授权已撤销；组织或岗位继承的标准授权仍然有效。'
           : `${authorizationEntryLayerInfo.value.title}已撤销。`)
       } catch (error) {
-        applicationAccessError.value = error instanceof AuthorizationError ? error.message : (error?.message || '撤销应用访问失败。')
+        applicationAccessError.value = formatUserError(error, { fallback: '撤销应用访问失败。' })
         return false
       } finally {
         applicationAccessRevoking.value = false
@@ -1151,17 +1184,9 @@ async function copyText(value, { success = '已复制' } = {}) {
   }
 }
 
-function escapeCsvCell(value) {
-  if (value === null || value === undefined) return ''
-  const text = String(value)
-  if (/[",\n\r]/.test(text)) {
-    return `"${text.replace(/"/g, '""')}"`
-  }
-  return text
-}
-
 function downloadCsv(filename, headers, rows) {
-  const csv = [headers.map(escapeCsvCell).join(','), ...rows.map((row) => row.map(escapeCsvCell).join(','))].join('\r\n')
+  // 转义统一由 utils/csvExport.js 负责：结构转义 + 公式前缀中和。
+  const csv = toCsvText(headers, rows)
   // 加 BOM 让 Excel 识别 UTF-8。
   const blob = new Blob(['\ufeff', csv], { type: 'text/csv;charset=utf-8;' })
   const url = URL.createObjectURL(blob)
@@ -1293,7 +1318,8 @@ async function safeCall(kind, fn) {
   try {
     return await fn()
   } catch (error) {
-    errorMessage.value = error instanceof IamError || error instanceof AuthorizationError ? error.message : `${kind} 加载失败。`
+    const label = panels.find((item) => item.key === kind)?.label || '相关数据'
+    errorMessage.value = formatUserError(error, { fallback: `${label}加载失败，请稍后重试。` })
     return null
   } finally {
     loading[kind] = false
@@ -1520,9 +1546,9 @@ watch(activePanel, () => {
 
 watch(() => props.refreshKey, (current, previous) => {
   if (!current || current === previous) return
-  // A successful employee onboarding changes three lists and all five summary
-  // totals. Invalidate every visible IAM list together, while each loader's
-  // request sequence still prevents an older response from winning a race.
+  // 员工入职成功会改变三个列表和全部五个汇总数量。
+  // 同时使所有可见 IAM 列表失效；各加载器自身的
+  // 请求序号仍用于防止旧响应在竞态中覆盖新结果。
   detail.value = null
   Object.keys(requestSeq).forEach((key) => { requestSeq[key] += 1 })
   reloadVisiblePanels()
@@ -1558,7 +1584,7 @@ async function toggleAccountStatus(account) {
     Object.assign(account, updated)
     emitToast(`账号已${next === 'ACTIVE' ? '启用' : '停用'}。`)
   } catch (error) {
-    emitToast(error.message || '账号状态更新失败。')
+    emitToast(formatUserError(error, { fallback: '账号状态更新失败。' }))
   } finally {
     updatingAccountId.value = ''
   }
@@ -1621,7 +1647,7 @@ async function saveValidity() {
     emitToast(`${draft.kind === 'user' ? '用户' : '账号'}有效期已更新。`)
     validityEditor.value = null
   } catch (error) {
-    emitToast(error?.message || '有效期更新失败。')
+    emitToast(formatUserError(error, { fallback: '有效期更新失败。' }))
   } finally {
     validitySaving.value = false
   }
@@ -1651,6 +1677,7 @@ async function confirmPasswordReset() {
   const account = selectedPasswordResetAccount.value
   if (!account?.account_id || resettingPassword.value) return
   const initializing = account.password_initialized === false
+  let passwordResetConfirmed = false
 
   resettingPassword.value = true
   try {
@@ -1665,6 +1692,7 @@ async function confirmPasswordReset() {
       value: result.temporary_password,
       initialized: initializing,
     }
+    passwordResetConfirmed = true
     const userId = detail.value?.kind === 'user' ? detail.value.item?.user_id : ''
     await Promise.all([
       loadAccounts(),
@@ -1672,7 +1700,10 @@ async function confirmPasswordReset() {
     ])
     emitToast(initializing ? '登录密码已初始化，请立即复制并通过安全渠道交付。' : '密码已重置，请立即复制临时密码并通过安全渠道交付。')
   } catch (error) {
-    emitToast(error instanceof IamError ? error.message : (error?.message || '密码重置失败。'))
+    const reason = formatUserError(error, { fallback: '请刷新账号列表核对状态。' }).slice(0, 180)
+    emitToast(passwordResetConfirmed
+      ? `密码已${initializing ? '初始化' : '重置'}，但账号列表未刷新。${reason}请先安全交付当前一次性临时密码，勿重复重置。`
+      : formatUserError(error, { fallback: '密码重置失败。' }))
   } finally {
     resettingPassword.value = false
   }
@@ -1732,29 +1763,26 @@ async function confirmUserDeletion() {
     await Promise.all([loadUsers(), loadAccounts(), loadMemberships()])
     emitToast(`用户 ${user.display_name || user.user_id} 已删除，关联登录账号和任职关系已同步删除。`)
   } catch (error) {
-    emitToast(error instanceof IamError ? error.message : (error?.message || '删除用户失败。'))
+    emitToast(formatUserError(error, { fallback: '删除用户失败。' }))
   } finally {
     deletingUser.value = false
   }
 }
 
-async function terminateEmployee(user) {
+// 离职不能走「直接 PATCH 用户为 DISABLED」的旁路：
+// 该路径会立刻停用账号、凭据、任职和会话，绕过异动审批与责任交接，而且请求携带的
+// mobile:"" 会把手机号密文与摘要写成 NULL。这里改为把员工带到人员异动中心发起离职申请，
+// 由既有的审批与交接链路执行；查询与目录刷新沿用异动中心自己的逻辑。
+function terminateEmployee(user) {
   if (!user?.user_id || (user.status || '').toUpperCase() !== 'ACTIVE') return
   openConfirm({
-    title: '确认办理离职',
-    description: `确认办理 ${user.display_name || user.user_id} 的离职吗？账号、任职和会话将被停用，历史保留。`,
-    confirmText: '确认办理',
+    title: '离职必须通过人员异动中心办理',
+    description: `离职会停用 ${user.display_name || user.user_id} 的账号、凭据、任职和登录会话，必须经过异动审批与责任交接。确认后将前往「人员异动中心」为该员工创建离职申请。`,
+    confirmText: '前往人员异动中心',
     danger: true,
     onConfirm: async () => {
-      try {
-        await updateUser({ userId: user.user_id, displayName: user.display_name, employeeNo: user.employee_no || '', email: user.email || '', mobile: '', status: 'DISABLED', version: user.version })
-        await Promise.all([loadUsers(), loadAccounts(), loadMemberships()])
-        emitToast(`${user.display_name || user.user_id} 已办理离职。`)
-        return true
-      } catch (error) {
-        emitToast(error instanceof IamError ? error.message : (error?.message || '办理离职失败。'))
-        return false
-      }
+      emit('personnel-change', { user_id: user.user_id, display_name: user.display_name })
+      return true
     },
   })
 }
@@ -1805,7 +1833,7 @@ async function removeOrganization(organization) {
         await Promise.all([loadOrganizations(), loadPositions(), loadMemberships()])
         emitToast(`组织 ${organization.name} 已删除，相关岗位和任职关系已停用。`)
       } catch (error) {
-        emitToast(error instanceof IamError ? error.message : (error?.message || '删除组织失败。'))
+        emitToast(formatUserError(error, { fallback: '删除组织失败。' }))
         return false
       } finally {
         deletingOrganizationId.value = ''
@@ -1837,7 +1865,7 @@ async function removePosition(position) {
         await Promise.all([loadPositions(), loadMemberships()])
         emitToast(`岗位 ${position.name || positionId} 已删除，相关任职关系和岗位继承授权已停用。`)
       } catch (error) {
-        emitToast(error instanceof IamError ? error.message : (error?.message || '删除岗位失败。'))
+        emitToast(formatUserError(error, { fallback: '删除岗位失败。' }))
         return false
       } finally {
         deletingPositionId.value = ''
@@ -1930,20 +1958,105 @@ function openEditor(kind) {
     return
   }
   Object.keys(form).forEach((key) => delete form[key])
+  editorSelectionNotice.value = ''
   initialPasswordVisible.value = false
   Object.assign(form, editorTemplates[kind]())
   editor.value = { kind, label: editorLabels[kind] }
 
-  if (['account', 'membership'].includes(kind) && !users.value.length) loadUsers()
-  if (kind === 'position' && !organizations.value.length) loadOrganizations()
+  loadEditorReferences(kind)
+}
+
+// 关联编辑器打开时重新读取它依赖的目录。
+//
+// 旧实现按“数组为空才加载”复用内存目录：在别处新建的组织或岗位不会出现在下拉里，
+// 用户只能整页刷新。这里改为每次打开都重新读取；读取有明确状态，失败时显示错误并
+// 提供重试，而不是把失败伪装成“没有这个组织 / 岗位”。
+const editorReferencesError = ref('')
+// 关联编辑器（新增账号 / 新增任职）使用完整用户目录：面板列表是"当前页 + 当前筛选"，
+// 直接复用会让管理员只能选到这一页的 50 人。这里逐页读取与面板筛选无关的完整目录。
+const editorUsers = ref([])
+
+function loadEditorReferences(kind) {
+  editorReferencesError.value = ''
+  const loads = []
+  if (['account', 'membership', 'user'].includes(kind)) loads.push(loadEditorUserDirectory())
+  if (kind === 'position' || kind === 'membership') loads.push(loadOrganizations())
   if (kind === 'membership') {
-    const referenceLoads = []
-    if (!organizations.value.length) referenceLoads.push(loadOrganizations())
-    if (!positions.value.length) referenceLoads.push(loadPositions())
+    loads.push(loadPositions())
     selectDefaultMembershipOrganization()
-    if (referenceLoads.length) Promise.all(referenceLoads).then(selectDefaultMembershipOrganization)
+  }
+  if (!loads.length) return
+  // 面板读取用 safeCall 把失败写进 errorMessage 而不抛出；这里只汇报本次读取新增的失败，
+  // 不会把其他面板的历史错误显示成编辑器错误。
+  const previousError = errorMessage.value
+  Promise.all(loads)
+    .then(() => {
+      if (errorMessage.value && errorMessage.value !== previousError) editorReferencesError.value = errorMessage.value
+      dropInvalidEditorSelections()
+      if (kind === 'membership') selectDefaultMembershipOrganization()
+    })
+    .catch((error) => {
+      editorReferencesError.value = formatUserError(error, { fallback: '关联目录读取失败，请重试。' })
+    })
+}
+
+// 目录重新读取后只清理确实失效的选择，并说明原因；其他已填写字段一律保留。
+const editorSelectionNotice = ref('')
+
+function dropInvalidEditorSelections() {
+  const kind = editor.value?.kind
+  if (kind === 'membership') {
+    const organizationId = String(form.org_unit_id || '')
+    if (organizationId && !organizations.value.some((item) => String(item.org_unit_id || item.id || '') === organizationId)) {
+      form.org_unit_id = ''
+      form.position_id = ''
+      editorSelectionNotice.value = '原选组织已停用或不再对当前账号可见，已清除组织与岗位选择；其余已填写内容保持不变。'
+      return
+    }
+    const selectedPositionId = String(form.position_id || '')
+    if (selectedPositionId && !membershipPositions.value.some((item) => String(item.position_id || item.id || '') === selectedPositionId)) {
+      form.position_id = ''
+      editorSelectionNotice.value = '原选岗位已停用或不再属于所选组织，已清除岗位选择；其余已填写内容保持不变。'
+    }
+    return
+  }
+  if (kind === 'account') {
+    const selectedUserId = String(form.user_id || '')
+    if (selectedUserId && !users.value.some((item) => String(item.user_id || item.id || '') === selectedUserId)) {
+      form.user_id = ''
+      editorSelectionNotice.value = '原选关联用户已停用或不再可见，已清除关联用户；其余已填写内容保持不变。'
+    }
   }
 }
+
+// 逐页读取完整用户目录供编辑器选择；失败时保留上一次可用值并报错，不伪装成空目录。
+let editorUsersRequestSeq = 0
+
+async function loadEditorUserDirectory() {
+  const seq = ++editorUsersRequestSeq
+  try {
+    const items = await loadAllCatalogPages(
+      listUsers,
+      { pageSize: 100 },
+      (item) => item?.user_id || item?.id,
+    )
+    if (seq !== editorUsersRequestSeq) return
+    editorUsers.value = items
+  } catch (error) {
+    if (seq !== editorUsersRequestSeq) return
+    throw error
+  }
+}
+
+// 编辑器依赖目录的读取状态：用于展示“读取中 / 读取失败”，避免空下拉被误读为无数据。
+const editorReferenceKeys = computed(() => {
+  const kind = editor.value?.kind
+  if (kind === 'membership') return ['users', 'organizations', 'positions']
+  if (kind === 'account' || kind === 'user') return ['users']
+  if (kind === 'position') return ['organizations']
+  return []
+})
+const editorReferencesLoading = computed(() => editorReferenceKeys.value.some((key) => loading[key]))
 
 function openEditorForActivePanel() {
   const kind = panelToKind[activePanel.value]
@@ -1958,7 +2071,9 @@ function openEmployeeOnboarding() {
 
 // 批量导入在后端事务中同时创建用户和主任职关系，因此提交成功后刷新关联列表。
 async function refreshAfterBatchImport() {
-  await Promise.all([loadUsers(), loadMemberships(), loadPositions(), loadOrganizations()])
+  // 人员与任职目录由 iam API 的失效通知统一触发重载；账号目录不在通知范围内，
+  // 批量导入会生成账号，因此这里额外确认一次。
+  await loadAccounts()
 }
 
 function closeEditor() {
@@ -2077,7 +2192,15 @@ async function saveEditor() {
         })
       } catch (accountError) {
         await Promise.all([loadUsers(), loadAccounts()])
-        throw new IamError(`用户已创建，但登录账号创建失败：${accountError?.message || '请在“登录账号”页面补建账号。'}`, { status: accountError?.status, code: accountError?.code })
+        const partialError = new IamError('用户已创建，但登录账号创建尚未确认完成。', {
+          status: accountError?.status, code: accountError?.code, traceId: accountError?.traceId,
+          details: accountError?.details, cause: accountError,
+        })
+        partialError.partialCompletion = { userCreated: true, accountCreated: false }
+        partialError.context = accountError?.context
+        partialError.requestID = accountError?.requestID || accountError?.requestId || ''
+        partialError.request_method = accountError?.request_method
+        throw partialError
       }
       successMessage = `用户 ${result?.display_name || form.display_name} 与登录账号 ${accountInput.accountName} 已创建。`
       await Promise.all([loadUsers(), loadAccounts()])
@@ -2116,7 +2239,8 @@ async function saveEditor() {
         result = await createOrgUnit(payload)
         successMessage = `组织 ${result?.name || form.name} 已创建，编码 ${result?.code || '已由系统生成'}。`
       }
-      await Promise.all([loadOrganizations(), loadPositions(), loadMemberships()])
+      // 组织写入会同时影响组织、岗位与任职目录；失效通知由 iam API 在写入确认后发布，
+      // 本组件与兄弟组件通过统一订阅重新读取，不再只刷新自身列表。
     } else if (kind === 'position') {
       if (!form.org_unit_id || !form.name) throw new IamError('请选择组织并填写岗位名称。')
       result = await createPosition({
@@ -2124,7 +2248,6 @@ async function saveEditor() {
         name: String(form.name).trim(),
       })
       successMessage = `岗位 ${result?.name || form.name} 已创建，编码 ${result?.code || '已由系统生成'}。`
-      await loadPositions()
     } else if (kind === 'membership') {
       if (!form.user_id || !form.org_unit_id || !form.position_id) throw new IamError('请选择用户、组织和岗位。')
       const positionMatchesOrganization = membershipPositions.value.some(
@@ -2148,7 +2271,6 @@ async function saveEditor() {
         inheritAuthorization: form.inherit_authorization !== false,
       })
       successMessage = `任职关系 ${result?.membership_id || ''} 已创建（${shortTerm ? '短期' : '长期'}生效）。`
-      await loadMemberships()
     } else {
       throw new IamError('未实现的编辑类型。')
     }
@@ -2157,8 +2279,11 @@ async function saveEditor() {
   } catch (error) {
     if (kind === 'membership' && error instanceof IamError && error.status === 404) {
       emitToast('所选用户、组织或岗位已失效，或者岗位不属于所选组织。请刷新数据后重新选择。')
+    } else if (error?.partialCompletion?.userCreated === true) {
+      const reason = formatUserError(error.cause || error, { method: 'POST', fallback: '请核对现有用户及账号记录。' }).slice(0, 180)
+      emitToast(`用户已创建，但登录账号创建尚未确认完成。${reason}请先在“登录账号”页面核对后补建，勿重复新增用户。`)
     } else {
-      emitToast(error instanceof IamError || error instanceof AuthorizationError ? error.message : (error?.message || '保存失败。'))
+      emitToast(formatUserError(error, { fallback: '保存失败。' }))
     }
   } finally {
     saving.value = false
@@ -2184,6 +2309,31 @@ function onGlobalKeydown(event) {
     closeEditor()
   }
 }
+
+// 关联数据失效订阅：本组件与其他管理入口（人员异动中心、员工入职向导、应用接入）
+// 写入组织 / 岗位 / 人员 / 任职后，立即重载对应面板，不再要求整页刷新。
+// 面板读取保留原有权限判断和请求序号保护，无读取权限的账号不会因此产生越权请求。
+useRelatedDataInvalidation((event) => {
+  if (event.type === 'session') return
+  const kinds = new Set(event.kinds)
+  if (kinds.has(RELATED_DATA.ORGANIZATIONS)) {
+    loadOrganizations()
+    loadPositions()
+    loadMemberships()
+  } else if (kinds.has(RELATED_DATA.POSITIONS)) {
+    loadPositions()
+    loadMemberships()
+  }
+  if (kinds.has(RELATED_DATA.PEOPLE)) loadUsers()
+  if (kinds.has(RELATED_DATA.MEMBERSHIPS)) loadMemberships()
+}, {
+  kinds: [
+    RELATED_DATA.ORGANIZATIONS,
+    RELATED_DATA.POSITIONS,
+    RELATED_DATA.PEOPLE,
+    RELATED_DATA.MEMBERSHIPS,
+  ],
+})
 
 onMounted(async () => {
   if (typeof window !== 'undefined') {
@@ -2279,7 +2429,7 @@ onBeforeUnmount(() => {
         <p v-else-if="activePanel === 'memberships'" class="iam-panel-policy-note"><ConsoleIcon name="info" /><span><strong>任职连接人员与职责：</strong>开启“参与岗位授权继承”后，用户会动态获得该岗位授权模板中的标准角色。</span></p>
 
         <section v-if="activePanel === 'users' && canReadActivePanel" class="iam-table-section">
-          <div class="iam-filter-row iam-user-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="panelFilters.users" type="search" placeholder="姓名 / 工号 / 邮箱 / 状态" /></label><div class="iam-user-list-controls"><label>每页<select v-model.number="userPageSize" aria-label="用户列表每页条数" @change="changeUserPageSize"><option :value="20">20</option><option :value="50">50</option><option :value="100">100</option></select> 条</label><span>本页 {{ filteredUsers.length }} 位 / 共 {{ pagination.users.total }} 位</span></div></div>
+          <div class="iam-filter-row iam-user-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="panelFilters.users" type="search" placeholder="姓名 / 工号 / 邮箱 / 状态"  maxlength="100"/></label><div class="iam-user-list-controls"><label>每页<select v-model.number="userPageSize" aria-label="用户列表每页条数" @change="changeUserPageSize"><option :value="20">20</option><option :value="50">50</option><option :value="100">100</option></select> 条</label><span>本页 {{ filteredUsers.length }} 位 / 共 {{ pagination.users.total }} 位</span></div></div>
           <div class="console-table-card iam-user-table-card"><div class="console-table-scroll"><table class="console-data-table iam-data-table iam-user-table">
             <thead><tr><th>用户</th><th>工号</th><th>邮箱</th><th>手机号</th><th>状态</th><th>更新时间</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
             <tr v-if="loading.users"><td class="console-empty" colspan="7">正在读取用户…</td></tr>
@@ -2289,7 +2439,7 @@ onBeforeUnmount(() => {
         </section>
 
         <section v-else-if="activePanel === 'accounts' && canReadActivePanel" class="iam-table-section iam-accounts-panel">
-          <div class="iam-filter-row iam-account-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="panelFilters.accounts" type="search" placeholder="搜索账号、用户 ID 或状态" /></label><span>{{ filteredAccounts.length }} / 共 {{ pagination.accounts.total }} 个账号</span></div>
+          <div class="iam-filter-row iam-account-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="panelFilters.accounts" type="search" placeholder="搜索账号、用户 ID 或状态"  maxlength="100"/></label><span>{{ filteredAccounts.length }} / 共 {{ pagination.accounts.total }} 个账号</span></div>
           <div class="console-table-card iam-account-table-card"><div class="console-table-scroll"><table class="console-data-table iam-data-table iam-account-table">
             <thead><tr><th>登录账号</th><th>关联用户</th><th>认证方式</th><th>有效时间</th><th>状态</th><th>更新时间</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
             <tr v-if="loading.accounts"><td class="console-empty" data-empty="true" colspan="7">正在读取登录账号…</td></tr>
@@ -2299,7 +2449,7 @@ onBeforeUnmount(() => {
         </section>
 
         <section v-else-if="activePanel === 'organizations' && canReadActivePanel" class="iam-table-section iam-organizations-panel">
-          <div class="iam-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="panelFilters.organizations" type="search" placeholder="搜索组织名称或编码" /></label><span>{{ filteredOrganizations.length }} / 共 {{ pagination.organizations.total }} 个组织</span></div>
+          <div class="iam-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="panelFilters.organizations" type="search" placeholder="搜索组织名称或编码"  maxlength="100"/></label><span>{{ filteredOrganizations.length }} / 共 {{ pagination.organizations.total }} 个组织</span></div>
           <p v-if="pagination.organizations.serverPagingSupported === false" class="iam-server-limit-note">未能读取全部组织数据，当前树可能不完整。请检查组织列表接口是否能继续翻页。</p>
           <OrgUnitTree
             :organizations="organizations"
@@ -2318,7 +2468,7 @@ onBeforeUnmount(() => {
         </section>
 
         <section v-else-if="activePanel === 'positions' && canReadActivePanel" class="iam-table-section iam-positions-panel">
-          <div class="iam-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="panelFilters.positions" type="search" placeholder="搜索岗位名称、编码或所属组织" /></label><span>{{ filteredPositions.length }} / 共 {{ pagination.positions.total }} 个岗位</span></div>
+          <div class="iam-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="panelFilters.positions" type="search" placeholder="搜索岗位名称、编码或所属组织"  maxlength="100"/></label><span>{{ filteredPositions.length }} / 共 {{ pagination.positions.total }} 个岗位</span></div>
           <p v-if="pagination.positions.serverPagingSupported === false" class="iam-server-limit-note">未能读取全部岗位数据，当前分组可能不完整。请检查岗位列表接口是否能继续翻页。</p>
           <PositionGroups
             :positions="positions"
@@ -2337,7 +2487,7 @@ onBeforeUnmount(() => {
         <PositionAuthorizationTemplates v-else-if="activePanel === 'positionAuthorizationTemplates' && canReadActivePanel" ref="positionAuthorizationTemplates" @toast="emitToast" />
 
         <section v-else-if="activePanel === 'memberships' && canReadActivePanel" class="iam-table-section iam-memberships-panel">
-          <div class="iam-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="panelFilters.memberships" type="search" placeholder="搜索用户、组织或岗位" /></label><span>{{ filteredMemberships.length }} / 共 {{ pagination.memberships.total }} 条任职关系</span></div>
+          <div class="iam-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="panelFilters.memberships" type="search" placeholder="搜索用户、组织或岗位"  maxlength="100"/></label><span>{{ filteredMemberships.length }} / 共 {{ pagination.memberships.total }} 条任职关系</span></div>
           <p v-if="pagination.memberships.serverPagingSupported === false" class="iam-server-limit-note">未能读取全部任职关系，当前组织分组可能不完整。请检查任职列表接口是否能继续翻页。</p>
           <MembershipGroups
             :memberships="memberships"
@@ -2488,7 +2638,13 @@ onBeforeUnmount(() => {
                 <label><span>例外授权有效期 *</span><select v-model="authorizationDraft.validity_mode" :disabled="applicationAccessSaving || applicationAccessRevoking" @change="onAuthorizationValidityChange"><option value="PERMANENT">长期有效</option><option value="RANGE">指定有效期</option></select></label>
               </div>
               <div v-if="isUserAuthorizationSubject && authorizationDraft.validity_mode === 'RANGE'" class="iam-application-validity-grid"><label><span>生效时间</span><input v-model="authorizationDraft.valid_from" type="datetime-local" :disabled="applicationAccessSaving || applicationAccessRevoking" /></label><label><span>失效时间</span><input v-model="authorizationDraft.valid_until" type="datetime-local" :disabled="applicationAccessSaving || applicationAccessRevoking" /></label></div>
-              <p v-if="isUserAuthorizationSubject && authorizationHasMixedRoleSettings" class="iam-field-help iam-application-scope-warning">当前勾选的角色包含不同的授权范围或有效期组合，<strong>保存已被阻断</strong>。请取消多余角色，或切换到“整个应用 + 长期有效”并重新勾选。</p>
+              <label v-if="isUserAuthorizationSubject" class="iam-checkbox-field"><input v-model="authorizationDraft.apply_to_existing" type="checkbox" :disabled="applicationAccessSaving || applicationAccessRevoking" /><span>将当前范围/有效期统一应用到已有角色</span></label>
+              <p v-if="isUserAuthorizationSubject" class="iam-field-help">默认保留已勾选角色的原范围和有效期（含未来生效授权）；当前表单设置仅用于新增角色。取消某个角色会撤销该角色的全部人工条目。</p>
+              <p v-if="isUserAuthorizationSubject && authorizationHasMixedRoleSettings && !authorizationDraft.apply_to_existing" class="iam-field-help iam-application-scope-warning">当前角色具有不同范围或有效期，保存时将逐条保留。</p>
+              <div v-if="isUserAuthorizationSubject && applicationManualRoles.length" class="iam-application-permission-block">
+                <div class="iam-application-permission-head"><strong>现有人工分配（含未来生效）</strong><span>{{ applicationManualRoles.length }} 条</span></div>
+                <div class="iam-application-role-list"><div v-for="(role, index) in applicationManualRoles" :key="`${roleCode(role)}-manual-${index}`" class="iam-application-role-option"><span class="iam-application-role-copy"><strong>{{ applicationRoleName(role) }}</strong><small>范围：{{ authorizationScopeText(role) }}</small><small>有效期：{{ authorizationValidityText(role) }}</small></span></div></div>
+              </div>
               <p v-if="authorizationCatalogLoading || applicationAccessLoading" class="iam-empty-inline">正在读取应用角色与当前授权…</p>
               <template v-else>
                 <div v-if="isLegacyStructuralAuthorizationSubject" class="iam-application-permission-block">
@@ -2606,6 +2762,8 @@ onBeforeUnmount(() => {
       v-if="batchImportVisible"
       :organizations="organizations"
       :positions="positions"
+      :catalogs-loading="loading.organizations || loading.positions"
+      :catalogs-error="errorMessage"
       @close="batchImportVisible = false"
       @completed="refreshAfterBatchImport"
       @toast="emitToast"
@@ -2627,10 +2785,16 @@ onBeforeUnmount(() => {
       <section class="iam-modal iam-editor-modal" role="dialog" aria-modal="true" aria-label="新增身份授权配置">
         <header><div><p>{{ editor.mode === 'edit' ? '编辑' : '新增' }}</p><h3>{{ editor.mode === 'edit' ? '编辑' : '新增' }} {{ editor.label }}</h3></div><button class="console-modal-close" type="button" aria-label="关闭表单" :disabled="saving" @click="closeEditor"><ConsoleIcon name="close" /></button></header>
         <form class="iam-editor-form" @submit.prevent="saveEditor">
+          <p v-if="editorReferencesLoading" class="iam-form-alert full" role="status"><ConsoleIcon name="info" />正在读取最新关联目录…读取完成前请勿提交，避免选到已停用的组织或岗位。</p>
+          <p v-else-if="editorReferencesError" class="iam-form-alert full" role="alert">
+            {{ editorReferencesError }}
+            <button class="console-button ghost small" type="button" @click="loadEditorReferences(editor.kind)"><ConsoleIcon name="reset" />重试读取</button>
+          </p>
+          <p v-if="editorSelectionNotice" class="iam-form-alert full" role="alert">{{ editorSelectionNotice }}</p>
           <template v-if="editor.kind === 'user'">
             <p class="iam-form-alert"><ConsoleIcon name="info" />员工编号由后端自动生成；本次会同时创建该用户的本地登录账号。</p>
             <label><span>展示姓名 *</span><input v-model="form.display_name" required maxlength="100" placeholder="例如：张三" /></label>
-            <label><span>邮箱</span><input v-model="form.email" type="email" placeholder="例如：zhang.san@example.com" /></label>
+            <label><span>邮箱</span><input v-model="form.email" type="email" placeholder="例如：zhang.san@example.com"  maxlength="320"/></label>
             <label><span>手机号</span><input v-model="form.mobile" maxlength="32" placeholder="例如：13800000000" /></label>
             <label><span>状态</span><select v-model="form.status"><option value="ACTIVE">启用</option><option value="DISABLED">停用</option></select></label>
             <label><span>登录账号 *</span><input v-model="form.account_name" required minlength="3" maxlength="64" placeholder="例如：zhang.san" /><small class="iam-field-help">账号必须唯一，以字母或数字开头。</small></label>
@@ -2640,7 +2804,7 @@ onBeforeUnmount(() => {
           </template>
           <template v-else-if="editor.kind === 'user-batch'">
             <p class="iam-form-alert"><ConsoleIcon name="info" />每行一位用户，格式为“姓名,邮箱,手机号”；邮箱和手机号可留空，一次最多 100 位。批量创建仅建立用户档案；登录账号请在“登录账号”中按需创建。</p>
-            <label class="full"><span>用户数据 *</span><textarea v-model="form.rows" required rows="10" placeholder="张三,zhang.san@example.com,13800000000&#10;李四,,13900000000&#10;王五"></textarea></label>
+            <label class="full"><span>用户数据 *</span><textarea v-model="form.rows" required rows="10" placeholder="张三,zhang.san@example.com,13800000000&#10;李四,,13900000000&#10;王五" maxlength="20000"></textarea></label>
             <label><span>统一状态</span><select v-model="form.status"><option value="ACTIVE">启用</option><option value="DISABLED">停用</option></select></label>
             <p class="iam-field-help full">员工编号由后端逐条自动生成，每位用户都会自动绑定“普通用户”角色。</p>
           </template>
@@ -2654,7 +2818,7 @@ onBeforeUnmount(() => {
             <label class="iam-account-field"><span>关联用户 *</span>
               <select v-model="form.user_id" required>
                 <option value="">请选择用户</option>
-                <option v-for="item in users" :key="item.user_id" :value="item.user_id">{{ item.display_name }}（{{ item.employee_no || item.user_id }}）</option>
+                <option v-for="item in editorUsers" :key="item.user_id" :value="item.user_id">{{ item.display_name }}（{{ item.employee_no || item.user_id }}）</option>
               </select>
               <small class="iam-field-help">一个账号只关联一位用户，避免使用名称进行关联。</small>
             </label>
@@ -2664,7 +2828,7 @@ onBeforeUnmount(() => {
             <label v-if="form.validity_mode === 'TEMPORARY'" class="full iam-account-expiry-field"><span>有效截止时间 *</span><input v-model="form.valid_until" type="datetime-local" required /><small class="iam-field-help">到期后，账号将无法继续登录；请选择晚于当前时间的日期和时间。</small></label>
           </template>
           <template v-else-if="editor.kind === 'organization'">
-            <label><span>组织名称 *</span><input v-model="form.name" required /></label>
+            <label><span>组织名称 *</span><input v-model="form.name" required  maxlength="100"/></label>
             <label><span>组织编码</span><input value="提交后由系统自动生成" disabled /><small class="iam-field-help">编码由后端统一生成，创建后可在组织列表和详情中查看。</small></label>
             <label><span>上级组织（留空为根）</span><select v-model="form.parent_id"><option value="">无（根组织）</option><option v-for="item in organizationParentOptions" :key="item.org_unit_id" :value="item.org_unit_id">{{ item.name }} · {{ item.code }}</option></select><small class="iam-field-help">编辑时不会显示当前组织及其下级，避免形成循环层级。</small></label>
             <label><span>显示顺序</span><input v-model.number="form.sort_order" type="number" min="0" step="10" /><small class="iam-field-help">数字越小，在同一上级组织下越靠前；建议使用 10、20、30，便于后续插入。</small></label>
@@ -2672,10 +2836,10 @@ onBeforeUnmount(() => {
           <template v-else-if="editor.kind === 'position'">
             <label><span>所属组织 *</span><select v-model="form.org_unit_id" required><option value="">请选择组织</option><option v-for="item in organizations" :key="item.org_unit_id" :value="item.org_unit_id">{{ item.name }} · {{ item.code }}</option></select></label>
             <label><span>岗位编码</span><input value="提交后由系统自动生成" disabled /><small class="iam-field-help">编码由后端统一生成，格式为 POS-&lt;ULID&gt;，创建后可在岗位列表和详情中查看。</small></label>
-            <label><span>岗位名称 *</span><input v-model="form.name" required placeholder="例如：研发经理" /></label>
+            <label><span>岗位名称 *</span><input v-model="form.name" required placeholder="例如：研发经理"  maxlength="100"/></label>
           </template>
           <template v-else-if="editor.kind === 'membership'">
-            <label><span>用户 *</span><select v-model="form.user_id" required><option value="">请选择用户</option><option v-for="item in users" :key="item.user_id" :value="item.user_id">{{ item.display_name }} · {{ item.employee_no || item.user_id }}</option></select></label>
+            <label><span>用户 *</span><select v-model="form.user_id" required><option value="">请选择用户</option><option v-for="item in editorUsers" :key="item.user_id" :value="item.user_id">{{ item.display_name }} · {{ item.employee_no || item.user_id }}</option></select></label>
             <label><span>组织 *</span><select v-model="form.org_unit_id" required><option value="">请选择组织</option><option v-for="item in membershipOrganizations" :key="item.org_unit_id || item.id" :value="item.org_unit_id || item.id">{{ item.name }} · {{ item.position_count }} 个岗位</option></select><small class="iam-field-help">系统会默认选择一个已有岗位的组织；切换组织后只能选择该组织下的岗位。</small></label>
             <label><span>岗位 *</span><select v-model="form.position_id" :disabled="!form.org_unit_id || !membershipPositions.length" required><option value="">{{ !form.org_unit_id ? '请先选择组织' : (membershipPositions.length ? '请选择岗位' : '当前组织暂无岗位') }}</option><option v-for="item in membershipPositions" :key="item.position_id || item.id" :value="item.position_id || item.id">{{ item.name }}</option></select><small v-if="form.org_unit_id && !membershipPositions.length" class="iam-field-help">当前组织下暂无可用岗位，请先在“岗位”页面为该组织新增岗位。</small></label>
             <label><span>任职类型 *</span><select v-model="form.membership_type"><option value="PRIMARY">主组织</option><option value="SECONDARY">次组织 / 兼岗</option></select></label>

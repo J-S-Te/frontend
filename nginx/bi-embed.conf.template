@@ -1,0 +1,25 @@
+server {
+    listen 8082;
+    server_name ${BI_EMBED_HOST};
+    # Capabilities occur in the URL; never retain them in access/error logs.
+    access_log off;
+    error_log /dev/null;
+    if ($http_host != "${BI_EMBED_AUTHORITY}") { return 403; }
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    location ~ "^/data_analysis/api/v1/embed-proxy/[a-f0-9]{64}(/.*)?$" {
+        limit_except GET { deny all; }
+        set $bi_backend http://data-analysis-api:8080;
+        proxy_pass $bi_backend$request_uri;
+        proxy_set_header Host "${BI_EMBED_AUTHORITY}";
+        proxy_set_header Cookie "";
+        proxy_set_header Authorization "";
+        proxy_set_header X-Forwarded-Host "${BI_EMBED_AUTHORITY}";
+        proxy_set_header X-Forwarded-Proto "${BI_EMBED_SCHEME}";
+        proxy_hide_header Set-Cookie;
+        proxy_read_timeout 120s;
+        add_header Referrer-Policy no-referrer always;
+        add_header Cache-Control no-store always;
+        add_header X-Content-Type-Options nosniff always;
+    }
+    location / { return 404; }
+}

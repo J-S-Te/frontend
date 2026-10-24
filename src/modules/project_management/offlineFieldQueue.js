@@ -49,3 +49,27 @@ export async function countFieldOperations(ownerKey) {
   const count = await transaction('readonly', (store) => store.index('ownerKey').count(ownerKey))
   return Number(count || 0)
 }
+
+/**
+ * 逐项隔离失败，处理排队的离线现场操作列表。
+ * `submit(operation, holder)` 必须在文件上传成功后推进 `holder.current`，
+ * 以便事件请求失败后复用已有产物重试，避免重复上传同一证据。
+ *
+ * @returns {Promise<{synced:number, failed:number}>}
+ */
+export async function processFieldQueue({ operations, submit, remove, save, formatError = (error) => String(error?.message || error || '同步失败') }) {
+  let synced = 0
+  let failed = 0
+  for (const operation of Array.isArray(operations) ? operations : []) {
+    const holder = { current: operation }
+    try {
+      await submit(operation, holder)
+      await remove(operation.id)
+      synced += 1
+    } catch (error) {
+      failed += 1
+      await save({ ...holder.current, lastError: formatError(error) })
+    }
+  }
+  return { synced, failed }
+}

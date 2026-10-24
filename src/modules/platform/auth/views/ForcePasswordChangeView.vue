@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { changeOwnPassword } from '@/modules/platform/auth/api/auth'
 import { resolveSameOriginRedirect } from '@/modules/platform/auth/utils/navigation'
+import { formatUserError } from '../../../shared/utils/userError.js'
 
 const currentPassword = ref('')
 const newPassword = ref('')
@@ -53,7 +54,7 @@ async function submit() {
   } catch (value) {
     // SEC-X4：改密页与登录页同属认证流程界面，只展示经 userSafeErrorMessage 过滤的
     // 本地化文案；追踪号等排障信息保留在错误对象与服务端日志中，不上屏。
-    error.value = value.message || '密码修改失败，请稍后重试。'
+    error.value = formatUserError(value, { fallback: '密码修改失败，请稍后重试。' })
   } finally {
     submitting.value = false
   }
@@ -89,9 +90,9 @@ async function submit() {
         <p>管理员为你设置了初始密码或重置了账户密码。修改完成后需要重新登录，才能进入基础能力平台。</p>
         </header>
         <form class="force-password-form" novalidate @submit.prevent="submit">
-          <div class="field-group"><label for="current-password">当前密码</label><div class="input-wrap"><input id="current-password" v-model="currentPassword" type="password" autocomplete="current-password" required /></div></div>
-          <div class="field-group"><label for="new-password">新密码</label><div class="input-wrap"><input id="new-password" v-model="newPassword" type="password" autocomplete="new-password" minlength="8" required /></div></div>
-          <div class="field-group"><label for="confirm-password">确认新密码</label><div class="input-wrap"><input id="confirm-password" v-model="confirmPassword" type="password" autocomplete="new-password" minlength="8" required /></div></div>
+          <div class="field-group"><label for="current-password">当前密码</label><div class="input-wrap"><input id="current-password" v-model="currentPassword" type="password" autocomplete="current-password" required  maxlength="128"/></div></div>
+          <div class="field-group"><label for="new-password">新密码</label><div class="input-wrap"><input id="new-password" v-model="newPassword" type="password" autocomplete="new-password" minlength="8" required  maxlength="128"/></div></div>
+          <div class="field-group"><label for="confirm-password">确认新密码</label><div class="input-wrap"><input id="confirm-password" v-model="confirmPassword" type="password" autocomplete="new-password" minlength="8" required  maxlength="128"/></div></div>
           <div class="password-policy" aria-live="polite">
             <strong>密码设置要求</strong>
             <span>新密码需要同时满足以下规则：</span>

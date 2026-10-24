@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFile } from 'node:fs/promises'
+import { formatUserError } from '../shared/utils/userError.js'
 
 const dialog = await readFile(new URL('./components/DetectionCategoryImportDialog.vue', import.meta.url), 'utf8')
 const api = await readFile(new URL('./api/projectManagement.js', import.meta.url), 'utf8')
@@ -8,12 +9,22 @@ const view = await readFile(new URL('./views/ProjectManagementView.vue', import.
 function mount(calls = {}) {
   const script = dialog.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '')
   const events = []
-  const state = new Function('computed', 'ref', 'defineProps', 'defineEmits', 'downloadDetectionCategoryImportTemplate', 'previewDetectionCategoriesImport', 'importDetectionCategories', `${script}\nreturn { file, preview, result, selected, busy, error, filter, visibleRows, selectedCount, pick, inspect, commit, reset, selectAll }`)(
-    (read) => ({ get value() { return read() } }), (value) => ({ value }), () => ({ codeOptions: [] }), () => (...args) => events.push(args), calls.download, calls.preview, calls.commit,
+  const state = new Function('formatUserError', 'computed', 'ref', 'defineProps', 'defineEmits', 'downloadDetectionCategoryImportTemplate', 'previewDetectionCategoriesImport', 'importDetectionCategories', `${script}\nreturn { file, preview, result, selected, busy, error, filter, visibleRows, selectedCount, pick, inspect, commit, reset, selectAll, importMessage }`)(
+    formatUserError, (read) => ({ get value() { return read() } }), (value) => ({ value }), () => ({ codeOptions: [] }), () => (...args) => events.push(args), calls.download, calls.preview, calls.commit,
   )
   return { ...state, events }
 }
 const file = { name: '检测类别.csv', size: 200 }
+test('类别导入的错误与逐行结果不会把网关页面或内部异常展示给用户', async () => {
+  const state = mount({ preview: async () => { throw new Error('<html>gateway error</html>') } })
+  state.file.value = file
+  await state.inspect()
+  assert.equal(state.preview.value, null)
+  assert.match(state.error.value, /导入检测失败/)
+  assert.doesNotMatch(state.error.value, /<html>/)
+  assert.equal(state.importMessage('检测类别重复，请修改本行'), '检测类别重复，请修改本行')
+  assert.doesNotMatch(state.importMessage('SQLSTATE 23000: duplicate key'), /SQLSTATE|duplicate/)
+})
 test('检测类别导入提供空白模板与可替换示例，沿用六列表头和人员编码', () => {
   assert.match(dialog, /下载空白导入模板/)
   assert.match(dialog, /下载填写示例/)

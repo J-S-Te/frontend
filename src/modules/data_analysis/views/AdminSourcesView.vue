@@ -7,6 +7,7 @@ import EmptyState from "@/modules/platform/shared/components/EmptyState.vue"
 import ErrorState from "@/modules/platform/shared/components/ErrorState.vue"
 import LoadingState from "@/modules/platform/shared/components/LoadingState.vue"
 import { listSources, triggerAllSources, triggerSource } from "../api/dataAnalysis"
+import { formatDataAnalysisError } from "../utils/errors.js"
 
 const props = defineProps({ permissions: { type: Array, default: () => [] } })
 
@@ -53,10 +54,12 @@ async function load() {
   try {
     sources.value = await listSources()
   } catch (err) {
-    error.value = err?.message || "数据源状态加载失败"
+    error.value = formatDataAnalysisError(err, { fallback: "数据源状态加载失败，请稍后刷新。" })
+    return false
   } finally {
     loading.value = false
   }
+  return true
 }
 
 async function onTrigger(id) {
@@ -66,9 +69,9 @@ async function onTrigger(id) {
   try {
     const result = await triggerSource(id)
     notice.value = result?.note || `数据源 ${id} 已触发同步`
-    await load()
+    if (!await load()) error.value = "同步任务已入队，但数据源列表刷新失败。请稍后刷新查看进度，无需重复触发。"
   } catch (err) {
-    error.value = err?.message || "触发同步失败"
+    error.value = formatDataAnalysisError(err, { fallback: "触发同步失败，请稍后重试。" })
   } finally {
     triggering.value = null
   }
@@ -82,9 +85,9 @@ async function onTriggerAll() {
   try {
     const result = await triggerAllSources()
     notice.value = `${result?.note || "批量同步已入队"}：${result?.queued || 0} 个已入队，${result?.skipped || 0} 个跳过（未启用或已有任务）`
-    await load()
+    if (!await load()) error.value = "批量同步任务已入队，但数据源列表刷新失败。请稍后刷新查看进度，无需重复触发。"
   } catch (err) {
-    error.value = err?.message || "批量触发同步失败"
+    error.value = formatDataAnalysisError(err, { fallback: "批量触发同步失败，请稍后重试。" })
   } finally {
     triggeringAll.value = false
   }
@@ -97,7 +100,7 @@ onMounted(load)
   <section>
     <div v-if="notice" class="da-filters" style="border-color:#bfe7d7;background:#f0fcf7;color:#177457">{{ notice }}</div>
     <div class="da-filters">
-      <label><ConsoleIcon name="search" /><input v-model="keyword" placeholder="搜索子系统 / 库 / 主机" /></label>
+      <label><ConsoleIcon name="search" /><input v-model="keyword" placeholder="搜索子系统 / 库 / 主机"  maxlength="100"/></label>
       <button class="da-button ghost" :disabled="loading" @click="load"><ConsoleIcon name="reset" />刷新</button>
       <button class="da-button primary" :disabled="!canTrigger || loading || triggeringAll || triggering" @click="onTriggerAll"><ConsoleIcon name="reset" />{{ triggeringAll ? '同步入队中…' : '一键同步全部' }}</button>
       <span>{{ filteredSources.length }} 个数据源</span>
@@ -117,7 +120,7 @@ onMounted(load)
               <td><span class="da-badge" :class="s.enabled ? 'normal' : 'neutral'">{{ s.enabled ? '已启用' : '已停用' }}</span></td>
               <td>{{ s.last_run_at || '—' }}</td>
               <td><span class="da-badge" :class="statusTone(s.last_status)">{{ statusLabel(s.last_status) }}</span></td>
-              <td><small>{{ s.last_error || '—' }}</small></td>
+              <td><small>{{ s.last_error ? formatDataAnalysisError(s.last_error, { fallback: '同步执行失败，请联系管理员检查数据源和同步任务。' }) : '—' }}</small></td>
               <td><button class="da-button ghost" :disabled="!canTrigger || triggering === s.id" @click="onTrigger(s.id)">{{ triggering === s.id ? '触发中…' : '触发同步' }}</button></td>
             </tr>
           </tbody>

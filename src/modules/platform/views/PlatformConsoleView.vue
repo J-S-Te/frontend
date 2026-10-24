@@ -9,10 +9,12 @@ import EmployeeOnboardingModal from '@/modules/platform/iam/components/EmployeeO
 import NotificationCenterModule from '@/modules/platform/notifications/components/NotificationCenterModule.vue'
 import ConfigurationCenterModule from '@/modules/platform/configuration/components/ConfigurationCenterModule.vue'
 import FileTaskOperationsModule from '@/modules/platform/files/components/FileTaskOperationsModule.vue'
+import CommercialLicenseView from '@/modules/platform/features/licenses/CommercialLicenseView.vue'
 import { getUnreadCount, listInbox, markNotificationRead } from '@/modules/platform/notifications/api/notifications'
 import LoginSecurityModule from '@/modules/platform/security/components/LoginSecurityModule.vue'
 import DictionaryManagementModule from '@/modules/platform/dictionaries/components/DictionaryManagementModule.vue'
 import SubsystemOnboardingModule from '@/modules/platform/applications/components/SubsystemOnboardingModule.vue'
+import SubsystemAccessWizard from '@/modules/platform/applications/components/SubsystemAccessWizard.vue'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import {
   listApplications,
@@ -21,11 +23,11 @@ import {
 import { listOrgUnits, listPositions } from '@/modules/platform/iam/api/iam'
 import { loadAllCatalogPages } from '@/modules/platform/iam/utils/paginatedCatalog'
 import {
-  AuditEventsError,
   listAuditEvents,
+  getAuditIngestionHealth,
   createAuditExportJob,
   getAuditExportJob,
-  auditExportDownloadURL,
+  downloadAuditExportFile,
 } from '@/modules/platform/audit/api/auditEvents'
 import {
   auditActionCode,
@@ -42,7 +44,6 @@ import {
   AUDIT_RISK_LABELS,
 } from '@/modules/platform/audit/utils/auditDictionaries'
 import {
-  PlatformSettingsError,
   getPlatformSettings,
   updatePlatformSettings,
 } from '@/modules/platform/settings/api/platformSettings'
@@ -58,6 +59,12 @@ import {
 } from '@/modules/platform/auth/utils/platformConsoleAccess'
 import { closeSubsystemTabOrFallback } from '@/modules/shared/utils/returnToPortal'
 import { IAM_PERMISSIONS } from '@/modules/platform/iam/utils/iamPermissions'
+import { useRelatedDataInvalidation } from '@/modules/platform/shared/composables/useRelatedDataInvalidation'
+import {
+  RELATED_DATA,
+  loadRelatedDataSafely,
+} from '@/modules/platform/shared/utils/relatedDataInvalidation'
+import { formatUserError } from '../../shared/utils/userError.js'
 import '@/modules/platform/styles/console.css'
 import '@/modules/platform/styles/settings-showcase.css'
 
@@ -72,6 +79,10 @@ const mobileMenuOpen = ref(false)
 const isLoggingOut = ref(false)
 const toastMessage = ref('')
 const auditKeyword = ref('')
+// 批次 3：按操作地址、对象、链路 ID 精确检索。
+const auditClientIP = ref('')
+const auditResourceID = ref('')
+const auditRequestID = ref('')
 const auditType = ref('')
 const auditRisk = ref('')
 const auditApplication = ref('')
@@ -83,9 +94,13 @@ const auditPageSize = 20
 const auditDetail = ref(null)
 const auditRecords = ref([])
 const auditTotal = ref(0)
+// 批次 3：平台侧摄取健康度（口径：平台已接收事件，不含子系统本地 Outbox 积压）。
+const auditHealth = ref(null)
+const auditHealthError = ref('')
 const auditLoading = ref(false)
 const auditError = ref('')
 const auditExporting = ref(false)
+const auditDownloading = ref(false)
 const auditExportJob = ref(null)
 const notificationMenuOpen = ref(false)
 const notificationMenuLoading = ref(false)
@@ -106,6 +121,8 @@ const showEmployeeOnboarding = ref(false)
 const onboardingOrganizations = ref([])
 const onboardingPositions = ref([])
 const iamRefreshKey = ref(0)
+// 从用户详情「办理离职」跳转到人员异动中心时携带的人员；异动中心渲染后消费并清空。
+const pendingPersonnelChangeUserId = ref('')
 
 const { principal, refreshPrincipal } = useCurrentPrincipal()
 
@@ -143,9 +160,27 @@ const subsystemOnboardingPermissions = Object.freeze([
 ])
 const canOnboardSubsystem = computed(() => subsystemOnboardingPermissions.every((permission) => hasPermission(permission)))
 
+// 统一接入向导：选项来自当前目录与环境快照；提交权限按动作由服务端最终校验。
+const subsystemAccessApplications = computed(() => (Array.isArray(applications.value) ? applications.value : [])
+  .map((item) => ({ code: String(item?.code || item?.application_code || '').trim(), name: String(item?.name || '').trim() }))
+  .filter((item) => item.code))
+const subsystemAccessEnvironments = computed(() => {
+  const values = (Array.isArray(environments.value) ? environments.value : [])
+    .map((item) => String(item?.environment_code || item?.environment || '').trim().toLowerCase())
+    .filter(Boolean)
+  return [...new Set(values)]
+})
+const canSubmitSubsystemAccess = computed(() => hasPermission('platform:application:update') || canOnboardSubsystem.value)
+
 const settingsTabs = [
   {
-    key: 'applications', label: '应用接入', icon: 'dashboard', tone: 'cyan',
+    key: 'licenses', label: '商业授权', icon: 'security', tone: 'blue',
+    description: '核对部署身份、导入签名许可证并追溯授权变更。',
+    capabilities: ['签发申请', '授权期限', '验签预览', '导入审计'],
+    permissions: PLATFORM_SETTINGS_SECTION_PERMISSIONS.licenses,
+  },
+  {
+    key: 'applications', label: '应用目录', icon: 'dashboard', tone: 'cyan',
     description: '新增、设置、更新或下线业务子系统，并维护统一登录部署边界。',
     capabilities: ['新增接入', '应用设置', '环境更新', '登录目标', '安全下线'],
     permissions: PLATFORM_SETTINGS_SECTION_PERMISSIONS.applications,
@@ -320,7 +355,7 @@ function goToPortal() {
 }
 
 function showToast(message) {
-  toastMessage.value = message
+  toastMessage.value = formatUserError(message)
   if (toastTimer) {
     window.clearTimeout(toastTimer)
   }
@@ -339,7 +374,7 @@ async function loadPlatformSettings() {
       Object.assign(settings, payload)
     }
   } catch (error) {
-    settingsError.value = error instanceof PlatformSettingsError ? error.message : '读取平台设置失败。'
+    settingsError.value = formatUserError(error, { fallback: '读取平台设置失败。' })
   } finally {
     settingsLoading.value = false
   }
@@ -360,7 +395,7 @@ async function saveSettings() {
     if (payload) Object.assign(settings, payload)
     showToast('平台基础设置已保存。')
   } catch (error) {
-    settingsError.value = error instanceof PlatformSettingsError ? error.message : '保存平台设置失败。'
+    settingsError.value = formatUserError(error, { fallback: '保存平台设置失败。' })
   } finally {
     settingsSaving.value = false
   }
@@ -379,12 +414,17 @@ async function loadApplications() {
     return
   }
   try {
-    const data = await listApplications({ page: 1, pageSize: 100, status: 'ACTIVE' })
-    applications.value = data.items || []
+    // 逐页读取完整应用目录：审计筛选和员工向导的应用前置检查都依赖这份列表，
+    // 只取第一页会让第 101 个之后的应用静默消失。
+    applications.value = await loadAllCatalogPages(
+      listApplications,
+      { pageSize: 100, status: 'ACTIVE' },
+      (item) => item?.application_id || item?.id || item?.code,
+    )
   } catch (error) {
     applications.value = []
     if (error && error.code !== 'NETWORK_ERROR') {
-      showToast(error.message || '读取应用列表失败。')
+      showToast(formatUserError(error, { fallback: '读取应用列表失败。' }))
     }
   }
 }
@@ -407,44 +447,75 @@ async function loadEnvironments(applicationCode) {
   }
 }
 
-// 「新增员工」入口的预加载逻辑：先并发拉取组织 / 岗位 / 应用，缓存到本地。
-// 失败时仍允许打开 modal —— modal 自己的前置检查会处理缺失项的快速补齐。
-async function loadOnboardingReferences() {
-  if (!hasPermission(IAM_PERMISSIONS.userCreate)) return
-  const tasks = []
-  if (!onboardingOrganizations.value.length) {
-    tasks.push(
-      loadAllCatalogPages(
-        listOrgUnits,
-        { pageSize: 100, status: 'ACTIVE' },
-        (item) => item?.org_unit_id || item?.id,
-      )
-        .then((items) => { onboardingOrganizations.value = items })
-        .catch((error) => { console.error('loadOnboardingReferences: listOrgUnits failed', error) }),
-    )
+// 「新增员工」入口的预加载目录：组织 / 岗位 / 应用。
+//
+// 这里刻意不做“数组非空就永久复用”：员工弹窗打开过一次之后，管理员仍可能在
+// 其他页面新增组织或岗位，永久缓存会让向导一直看不到新数据。每次打开都重新读取，
+// 同一时刻的重复调用按会话与类别合并；读取失败保留上一次可用值并单独提示重试。
+const onboardingReferencesLoading = ref(false)
+const onboardingReferencesError = ref('')
+let onboardingReferencesSequence = 0
+
+function onboardingReferenceKey(item, ...keys) {
+  for (const key of keys) {
+    const value = String(item?.[key] || '').trim()
+    if (value) return value
   }
-  if (!onboardingPositions.value.length) {
-    tasks.push(
-      loadAllCatalogPages(
-        listPositions,
-        { pageSize: 100, status: 'ACTIVE' },
-        (item) => item?.position_id || item?.id,
-      )
-        .then((items) => { onboardingPositions.value = items })
-        .catch((error) => { console.error('loadOnboardingReferences: listPositions failed', error) }),
-    )
-  }
-  if (!applications.value.length) {
-    tasks.push(loadApplications())
-  }
-  if (tasks.length) await Promise.all(tasks)
+  return ''
 }
 
-async function openEmployeeOnboarding() {
+async function loadOnboardingReferences() {
   if (!hasPermission(IAM_PERMISSIONS.userCreate)) return
-  // 先触发预加载再开 modal —— 前置检查组件依赖这些 prop 的实时长度。
-  await loadOnboardingReferences()
+  const sequence = ++onboardingReferencesSequence
+  onboardingReferencesLoading.value = true
+  onboardingReferencesError.value = ''
+  const failures = []
+  // loadRelatedDataSafely 负责“同一时刻合并重复读取、失败可重试、会话切换后丢弃迟到响应”，
+  // 以及“写入已确认后不把写入前在途的旧目录当成最新目录”。
+  const fetchCatalog = async (key, loader, assign, label, kinds) => {
+    const result = await loadRelatedDataSafely(key, loader, { kinds })
+    if (result.stale) return
+    if (result.error) {
+      failures.push(`${label}：${formatUserError(result.error, { method: 'GET', fallback: `${label}暂时无法读取。` }).slice(0, 120)}`)
+      console.error(`loadOnboardingReferences: ${label} failed`, result.error)
+      return
+    }
+    assign(result.items || [])
+  }
+  await Promise.all([
+    fetchCatalog(
+      'console:onboarding:organizations',
+      () => loadAllCatalogPages(listOrgUnits, { pageSize: 100, status: 'ACTIVE' }, (item) => onboardingReferenceKey(item, 'org_unit_id', 'id')),
+      (items) => { onboardingOrganizations.value = items },
+      '组织目录',
+      [RELATED_DATA.ORGANIZATIONS],
+    ),
+    fetchCatalog(
+      'console:onboarding:positions',
+      () => loadAllCatalogPages(listPositions, { pageSize: 100, status: 'ACTIVE' }, (item) => onboardingReferenceKey(item, 'position_id', 'id')),
+      (items) => { onboardingPositions.value = items },
+      '岗位目录',
+      [RELATED_DATA.POSITIONS],
+    ),
+    fetchCatalog(
+      'console:onboarding:applications',
+      () => loadAllCatalogPages(listApplications, { pageSize: 100, status: 'ACTIVE' }, (item) => onboardingReferenceKey(item, 'application_id', 'id', 'code')),
+      (items) => { applications.value = items },
+      '应用目录',
+      [RELATED_DATA.APPLICATIONS, RELATED_DATA.ENVIRONMENTS],
+    ),
+  ])
+  // 只有最后一次发起的读取才能结束加载状态；旧调用不能覆盖新调用的结果。
+  if (sequence !== onboardingReferencesSequence) return
+  onboardingReferencesError.value = failures.join('；')
+  onboardingReferencesLoading.value = false
+}
+
+function openEmployeeOnboarding() {
+  if (!hasPermission(IAM_PERMISSIONS.userCreate)) return
+  // 先打开弹窗（内部展示明确的加载状态），再后台读取当前目录；不阻塞在网络上。
   showEmployeeOnboarding.value = true
+  loadOnboardingReferences().catch(() => {})
 }
 
 function closeEmployeeOnboarding() {
@@ -452,10 +523,16 @@ function closeEmployeeOnboarding() {
 }
 
 async function refreshOnboardingReferences() {
-  // 前置检查"快速补齐"成功后会被 modal 回调，重新拉一次确保 wizard 表单拿到最新值。
-  onboardingOrganizations.value = []
-  onboardingPositions.value = []
+  // 前置检查“快速补齐”成功后由弹窗回调：强制重新读取，确认新组织 / 岗位确实进入目录。
   await loadOnboardingReferences()
+}
+
+// 用户详情里的离职入口不再直接改用户状态，而是交给人员异动中心的离职申请流程。
+function openPersonnelChangeForUser(user) {
+  const userId = String(user?.user_id || user?.id || '').trim()
+  if (!userId) return
+  pendingPersonnelChangeUserId.value = userId
+  activeSettingsTab.value = 'personnel'
 }
 
 function handleEmployeeOnboardingCompleted() {
@@ -464,6 +541,17 @@ function handleEmployeeOnboardingCompleted() {
   // 及顶部统计在当前页面立即重新读取，而不必整页刷新。
   iamRefreshKey.value += 1
   loadOnboardingReferences().catch(() => {})
+}
+
+async function loadAuditHealth() {
+  auditHealthError.value = ''
+  try {
+    auditHealth.value = await getAuditIngestionHealth()
+  } catch (error) {
+    // 健康度是辅助信息：失败不影响审计列表本身。
+    auditHealth.value = null
+    auditHealthError.value = formatUserError(error)
+  }
 }
 
 async function loadAuditEvents() {
@@ -480,6 +568,9 @@ async function loadAuditEvents() {
       page: auditPage.value,
       pageSize: auditPageSize,
       keyword: auditKeyword.value.trim(),
+      clientIp: auditClientIP.value.trim(),
+      resourceId: auditResourceID.value.trim(),
+      requestId: auditRequestID.value.trim(),
       applicationCode: auditApplication.value,
       environmentCode: auditEnvironment.value,
       actionCategory: auditType.value,
@@ -499,7 +590,7 @@ async function loadAuditEvents() {
     }
   } catch (error) {
     if (requestController.signal.aborted || requestSequence !== auditRequestSequence) return
-    auditError.value = error instanceof AuditEventsError ? error.message : '读取审计事件失败。'
+    auditError.value = formatUserError(error, { fallback: '读取审计事件失败。' })
     auditRecords.value = []
     auditTotal.value = 0
   } finally {
@@ -560,7 +651,7 @@ async function exportAuditRecords() {
     const status = job?.status || '已接收'
     showToast(`导出任务已提交（${status}），可在当前页面刷新状态并下载。`)
   } catch (error) {
-    showToast(error.message || '提交导出任务失败。')
+    showToast(formatUserError(error, { fallback: '提交导出任务失败。' }))
   } finally {
     auditExporting.value = false
   }
@@ -569,12 +660,21 @@ async function exportAuditRecords() {
 async function refreshAuditExportJob() {
   if (!auditExportJob.value?.job_id) return
   try { auditExportJob.value = await getAuditExportJob(auditExportJob.value.job_id) }
-  catch (error) { showToast(error.message || '查询导出任务状态失败。') }
+  catch (error) { showToast(formatUserError(error, { fallback: '查询导出任务状态失败。' })) }
 }
 
-function downloadAuditExport() {
-  if (auditExportJob.value?.status !== 'SUCCEEDED' || !auditExportJob.value?.job_id) return
-  window.location.assign(auditExportDownloadURL(auditExportJob.value.job_id))
+async function downloadAuditExport() {
+  if (auditDownloading.value || auditExportJob.value?.status !== 'SUCCEEDED' || !auditExportJob.value?.job_id) return
+  auditDownloading.value = true
+  try {
+    const { blob, filename } = await downloadAuditExportFile(auditExportJob.value.job_id)
+    const url = URL.createObjectURL(blob)
+    try {
+      const anchor = document.createElement('a')
+      anchor.href = url; anchor.download = filename; anchor.click()
+    } finally { window.setTimeout(() => URL.revokeObjectURL(url), 1000) }
+  } catch (error) { showToast(formatUserError(error, { fallback: '审计文件下载失败，请稍后重新下载。' })) }
+  finally { auditDownloading.value = false }
 }
 
 async function loadTopbarNotifications() {
@@ -615,10 +715,19 @@ async function logout() {
       await router.replace({ name: 'login', query: { reason: 'session-ended' } })
       return
     }
-    showToast(error.message || '退出登录失败，请稍后重试。')
+    showToast(formatUserError(error, { fallback: '退出登录失败，请稍后重试。' }))
   } finally {
     isLoggingOut.value = false
   }
+}
+
+// 直接打开 /audit 时 currentView 从初始值起就是 'audit'，不会触发"变化"；
+// 因此这里既要处理视图切换，也要在权限就绪后补一次首次查询（见 principal 监听）。
+function loadAuditViewOnce() {
+  if (currentView.value !== 'audit' || !canViewAudit.value) return
+  if (canReadApplications.value && !applications.value.length) loadApplications()
+  loadAuditEvents()
+  loadAuditHealth()
 }
 
 watch(currentView, (view) => {
@@ -626,10 +735,7 @@ watch(currentView, (view) => {
     // 搜索只属于当前设置页会话，离开后清空，避免返回时隐藏设置模块。
     settingsTabKeyword.value = ''
   }
-  if (view === 'audit' && canViewAudit.value) {
-    if (canReadApplications.value && !applications.value.length) loadApplications()
-    loadAuditEvents()
-  }
+  loadAuditViewOnce()
 })
 
 watch(filteredSettingsTabs, (tabs) => {
@@ -687,8 +793,39 @@ watch(principal, (current) => {
         ? { name: 'settings', params: { section: firstSection } }
         : canViewAudit.value ? { name: 'audit' } : { name: 'portal' })
     }
+    return
   }
+  // 权限在挂载后才就绪：直接打开审计路由时在这里发起首次查询，避免空列表。
+  loadAuditViewOnce()
 })
+
+// 关联数据失效订阅：本页面自己或兄弟组件（IAM 设置、人员异动中心、应用接入）写入
+// 组织 / 岗位 / 人员 / 任职 / 应用后，立即重新读取员工向导依赖的目录，无需整页刷新。
+useRelatedDataInvalidation((event) => {
+  if (event.type === 'session') return
+  // 应用 / 环境变化影响审计筛选与向导前置检查，按应用读取权限单独刷新。
+  if (event.kinds.includes(RELATED_DATA.APPLICATIONS) || event.kinds.includes(RELATED_DATA.ENVIRONMENTS)) {
+    loadApplications()
+  }
+  if (!hasPermission(IAM_PERMISSIONS.userCreate)) return
+  loadOnboardingReferences().catch(() => {})
+}, {
+  kinds: [
+    RELATED_DATA.ORGANIZATIONS,
+    RELATED_DATA.POSITIONS,
+    RELATED_DATA.PEOPLE,
+    RELATED_DATA.MEMBERSHIPS,
+    RELATED_DATA.APPLICATIONS,
+  ],
+})
+
+// 其他标签页或其他管理员的改动不会推送；窗口重新获得焦点时重新校验一次，
+// 让“切回来就能看到新组织 / 新岗位”，而不是要求用户整页刷新。
+function refreshOnboardingReferencesOnFocus() {
+  if (!showEmployeeOnboarding.value) return
+  if (!hasPermission(IAM_PERMISSIONS.userCreate)) return
+  loadOnboardingReferences().catch(() => {})
+}
 
 onMounted(async () => {
   // 拉取 principal，让 IAM 操作按钮的权限判断立即生效；后端仍执行最终鉴权。
@@ -698,12 +835,14 @@ onMounted(async () => {
   // 只有具备新增员工权限时才预热创建流程所需目录。
   if (hasPermission(IAM_PERMISSIONS.userCreate)) loadOnboardingReferences().catch(() => {})
   loadTopbarNotifications().catch(() => {})
+  window.addEventListener('focus', refreshOnboardingReferencesOnFocus)
 })
 
 onBeforeUnmount(() => {
   auditRequestSequence += 1
   auditRequestController?.abort()
   auditRequestController = null
+  window.removeEventListener('focus', refreshOnboardingReferencesOnFocus)
   if (toastTimer) {
     window.clearTimeout(toastTimer)
   }
@@ -790,10 +929,19 @@ onBeforeUnmount(() => {
 
         <section v-if="currentView === 'audit' && canViewAudit" class="audit-view" aria-label="审计日志列表">
           <div class="audit-readonly-note"><ConsoleIcon name="info" /><span>审计事件与运行日志分离存储；本页查询 <code>audit_event</code> 及其变更摘要。运行日志、Trace、Metric 与告警由受限运维端点采集，当前控制台不提供不存在的跳转入口。</span></div>
+          <div v-if="auditHealth" class="audit-health-card" data-testid="audit-health-card">
+            <strong>审计摄取健康（平台侧）</strong>
+            <span>近 24 小时接收 {{ auditHealth.recent_events ?? 0 }} 条 / 累计 {{ auditHealth.total_events ?? 0 }} 条</span>
+            <span>来源未采集 {{ auditHealth.unknown_provenance ?? 0 }} 条</span>
+            <span v-if="auditHealth.last_received_at">最后接收 {{ formatAuditTime(auditHealth.last_received_at) }}</span>
+            <span v-if="auditHealth.oldest_unknown_at">最老未采集 {{ formatAuditTime(auditHealth.oldest_unknown_at) }}</span>
+            <small>口径：平台已接收的审计事件；子系统本地 Outbox 积压不在本卡片内。</small>
+          </div>
+          <div v-else-if="auditHealthError" class="audit-readonly-note"><ConsoleIcon name="info" /><span>审计摄取健康度暂不可用：{{ auditHealthError }}</span></div>
           <div class="console-filter-bar audit-filter-bar">
             <label class="console-search-field">
               <ConsoleIcon name="search" />
-              <input v-model="auditKeyword" type="search" placeholder="操作人 / 操作 / 资源 / 请求路径 / Request ID / Trace ID…" />
+              <input v-model="auditKeyword" type="search" placeholder="操作人 / 操作 / 资源 / 请求路径 / Request ID / Trace ID…"  maxlength="100"/>
             </label>
             <label class="console-select-field"><select v-model="auditApplication" aria-label="应用"><option value="">全部应用</option><option v-for="app in applications" :key="app.application_id" :value="app.code">{{ app.name || app.code }}</option></select></label>
             <label class="console-select-field"><select v-model="auditEnvironment" :disabled="!auditApplication" aria-label="环境"><option value="">全部环境</option><option v-for="env in environments" :key="env.environment_id" :value="env.environment_code || env.environment">{{ env.environment_code || env.environment }}</option></select></label>
@@ -812,7 +960,7 @@ onBeforeUnmount(() => {
             <div><button v-if="canExportAudit" class="console-button secondary small" type="button" :disabled="auditExporting" @click="exportAuditRecords"><ConsoleIcon name="export" />导出筛选结果</button></div>
           </div>
 
-          <div v-if="auditExportJob" class="audit-readonly-note audit-export-status"><ConsoleIcon name="export" /><span>导出任务 <code>{{ auditExportJob.job_id }}</code>：{{ auditExportJob.status }}<template v-if="auditExportJob.error_message"> · {{ auditExportJob.error_message }}</template></span><button v-if="auditExportJob.status !== 'SUCCEEDED'" class="console-button ghost small" type="button" @click="refreshAuditExportJob">刷新状态</button><button v-else class="console-button primary small" type="button" @click="downloadAuditExport">下载导出文件</button></div>
+          <div v-if="auditExportJob" class="audit-readonly-note audit-export-status"><ConsoleIcon name="export" /><span>导出任务 <code>{{ auditExportJob.job_id }}</code>：{{ auditExportJob.status }}<template v-if="auditExportJob.error_message"> · {{ formatUserError({ message: auditExportJob.error_message, code: auditExportJob.error_code }) }}</template></span><button v-if="auditExportJob.status !== 'SUCCEEDED'" class="console-button ghost small" type="button" @click="refreshAuditExportJob">刷新状态</button><button v-else class="console-button primary small" type="button" :disabled="auditDownloading" @click="downloadAuditExport">{{ auditDownloading ? '下载中…' : '下载导出文件' }}</button></div>
 
           <div class="console-table-card audit-table-card">
             <div class="console-table-scroll">
@@ -832,7 +980,7 @@ onBeforeUnmount(() => {
                     <td data-label="应用 / 环境"><strong>{{ record.application || '—' }}</strong><span class="console-entity-meta">{{ record.environment || '—' }}</span></td>
                     <td data-label="资源对象"><strong>{{ record.object || record.resource || '—' }}</strong><span class="console-entity-meta">{{ record.resource }}</span></td>
                     <td data-label="方法 / 路径"><span class="audit-method">{{ record.method || '—' }}</span><span class="console-entity-meta console-mono">{{ record.path || '—' }}</span></td>
-                    <td class="console-mono" data-label="客户端 IP">{{ record.ip || '—' }}</td>
+                    <td class="console-mono" data-label="操作 IP">{{ record.ip || '—' }}</td>
                     <td data-label="状态"><span class="console-badge audit-result-badge" :class="auditResultTone(record.result)">{{ auditResultLabel(record) }}</span><span v-if="auditHttpStatusLabel(record.statusCode)" class="console-entity-meta audit-status-code">{{ auditHttpStatusLabel(record.statusCode) }}</span></td>
                     <td data-label="风险"><span class="console-badge" :class="`risk-${record.risk}`">{{ auditRiskLabel(record) }}</span></td>
                     <td class="console-actions-cell" data-label="操作"><button class="console-text-button" type="button" @click="openAuditDetail(record)">详情</button></td>
@@ -862,7 +1010,7 @@ onBeforeUnmount(() => {
                 type="search"
                 placeholder="搜索设置模块（按名称 / 描述 / 功能）"
                 aria-label="搜索设置模块"
-              />
+               maxlength="100"/>
               <button
                 v-if="settingsTabKeyword"
                 type="button"
@@ -903,8 +1051,8 @@ onBeforeUnmount(() => {
               <p v-if="settingsLoading" class="console-card-hint">正在读取平台设置…</p>
               <p v-else-if="settingsError" class="login-target-module__error" role="alert">{{ settingsError }}</p>
               <div v-if="canReadPlatformSettings" class="console-form-grid">
-                <label class="console-form-item"><span>平台名称</span><input v-model="settings.organizationName" :disabled="settingsLoading || !canUpdatePlatformSettings" /></label>
-                <label class="console-form-item"><span>平台简称</span><input v-model="settings.organizationAlias" :disabled="settingsLoading || !canUpdatePlatformSettings" /></label>
+                <label class="console-form-item"><span>平台名称</span><input v-model="settings.organizationName" :disabled="settingsLoading || !canUpdatePlatformSettings"  maxlength="128"/></label>
+                <label class="console-form-item"><span>平台简称</span><input v-model="settings.organizationAlias" :disabled="settingsLoading || !canUpdatePlatformSettings"  maxlength="64"/></label>
               </div>
               <div v-if="canReadPlatformSettings" class="console-form-actions"><button v-if="canUpdatePlatformSettings" class="console-button primary" type="button" :disabled="settingsSaving" @click="saveSettings"><ConsoleIcon name="save" />{{ settingsSaving ? '保存中…' : '保存设置' }}</button><button class="console-button ghost" type="button" :disabled="settingsLoading" @click="resetSettings">重新读取</button></div>
             </div>
@@ -912,9 +1060,9 @@ onBeforeUnmount(() => {
 
           <PublicAccessSettingsModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'access'" @toast="showToast" />
 
-          <IamSettingsModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'iam'" :refresh-key="iamRefreshKey" @toast="showToast" @employee-onboarding="openEmployeeOnboarding" />
+          <IamSettingsModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'iam'" :refresh-key="iamRefreshKey" @toast="showToast" @employee-onboarding="openEmployeeOnboarding" @personnel-change="openPersonnelChangeForUser" />
 
-          <PersonnelChangeCenter v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'personnel'" @toast="showToast" @employee-onboarding="openEmployeeOnboarding" />
+          <PersonnelChangeCenter v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'personnel'" :prefill-user-id="pendingPersonnelChangeUserId" @toast="showToast" @employee-onboarding="openEmployeeOnboarding" @prefill-consumed="pendingPersonnelChangeUserId = ''" />
 
           <NotificationCenterModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'notify'" @toast="showToast" />
 
@@ -926,13 +1074,26 @@ onBeforeUnmount(() => {
           <ConfigurationCenterModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'config'" @toast="showToast" />
 
           <FileTaskOperationsModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'jobs'" @toast="showToast" />
+          <CommercialLicenseView v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'licenses'" @toast="showToast" />
 
-          <SubsystemOnboardingModule
-            v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'applications'"
-            :can-onboard="canOnboardSubsystem"
-            @toast="showToast"
-            @completed="loadApplications"
-          />
+          <template v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'applications'">
+            <SubsystemOnboardingModule
+              :can-onboard="canOnboardSubsystem"
+              @toast="showToast"
+              @completed="loadApplications"
+            >
+              <template #header-actions>
+                <SubsystemAccessWizard
+                  :can-preview="canReadApplications"
+                  :can-submit="canSubmitSubsystemAccess"
+                  :applications="subsystemAccessApplications"
+                  :environments="subsystemAccessEnvironments"
+                  @toast="showToast"
+                  @completed="loadApplications"
+                />
+              </template>
+            </SubsystemOnboardingModule>
+          </template>
         </section>
       </section>
     </main>
@@ -946,7 +1107,10 @@ onBeforeUnmount(() => {
           <div><span>应用 / 环境</span><strong>{{ auditDetail.application || '—' }} / {{ auditDetail.environment || '—' }}</strong></div>
           <div><span>操作结果</span><strong class="audit-detail-result-wrap"><span class="console-badge audit-result-badge" :class="auditResultTone(auditDetail.result)">{{ auditResultLabel(auditDetail) }}</span><small v-if="auditResultMeta(auditDetail)">{{ auditResultMeta(auditDetail) }}</small></strong></div>
           <div><span>HTTP 请求</span><strong>{{ auditDetail.method || '—' }} {{ auditDetail.path || '—' }}</strong></div>
-          <div><span>客户端</span><strong>{{ auditDetail.ip || '—' }}</strong></div>
+          <div><span>登录 IP</span><strong>{{ auditDetail.loginIp || '—' }}</strong></div>
+          <div><span>操作 IP</span><strong>{{ auditDetail.ip || '—' }}</strong></div>
+          <div><span>投递地址</span><strong>{{ auditDetail.ingestPeerIp || '—' }}</strong></div>
+          <div><span>地址来源</span><strong>{{ auditDetail.ipSourceLabel }}</strong></div>
           <div><span>Request ID</span><strong class="console-mono">{{ auditDetail.requestId || '—' }}</strong></div>
           <div><span>Trace ID</span><strong class="console-mono">{{ auditDetail.traceId || '—' }}</strong></div>
           <div><span>Correlation ID</span><strong class="console-mono">{{ auditDetail.correlationId || '—' }}</strong></div>
@@ -963,10 +1127,13 @@ onBeforeUnmount(() => {
       :organizations="onboardingOrganizations"
       :positions="onboardingPositions"
       :applications="applications"
+      :references-loading="onboardingReferencesLoading"
+      :references-error="onboardingReferencesError"
       :on-before-open="() => loadOnboardingReferences()"
       @close="closeEmployeeOnboarding"
       @completed="handleEmployeeOnboardingCompleted"
       @refresh-prerequisites="refreshOnboardingReferences"
+      @retry-references="loadOnboardingReferences"
       @toast="showToast"
     />
 
