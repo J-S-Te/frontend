@@ -26,6 +26,7 @@ import {
   IamError,
   createLocalAccount,
   createMembership,
+  updateMembershipInheritance,
   createOrgUnit,
   deleteOrgUnit,
   createPosition,
@@ -113,6 +114,10 @@ const activePanel = ref('users')
 const positionAuthorizationTemplates = ref(null)
 const batchImportVisible = ref(false)
 const detail = ref(null)
+const membershipInheritanceDraft = ref(true)
+const membershipInheritanceSaving = ref(false)
+const membershipInheritanceError = ref('')
+const membershipInheritanceConflict = ref(false)
 const validityEditor = ref(null)
 const validitySaving = ref(false)
 const loading = reactive({ users: false, accounts: false, organizations: false, positions: false, memberships: false, positionAuthorizationTemplates: false })
@@ -753,6 +758,9 @@ function applyAuthorizationSettings(roles) {
 
 
 async function openDetail(kind, item) {
+  membershipInheritanceDraft.value = item?.inherit_authorization !== false
+  membershipInheritanceError.value = ''
+  membershipInheritanceConflict.value = false
   const detailRequestId = ++detailAuthorizationRequestSeq.value
   resetApplicationAuthorizationState()
   resetUserAuthorizationPreview()
@@ -781,6 +789,31 @@ async function loadAuthorizationOverview(userId, detailRequestId = detailAuthori
     if (detailRequestId === detailAuthorizationRequestSeq.value) authorizationOverviewUnavailable.value = true
   } finally {
     if (detailRequestId === detailAuthorizationRequestSeq.value) authorizationOverviewLoading.value = false
+  }
+}
+
+async function saveMembershipInheritance() {
+  const target = detail.value
+  if (target?.kind !== 'membership' || membershipInheritanceSaving.value || membershipInheritanceConflict.value ||
+      !hasPermission(IAM_PERMISSIONS.membershipUpdate)) return
+  if (membershipInheritanceDraft.value === (target.item.inherit_authorization !== false)) return
+  membershipInheritanceSaving.value = true
+  membershipInheritanceError.value = ''
+  try {
+    const updated = await updateMembershipInheritance(target.item, membershipInheritanceDraft.value)
+    if (detail.value !== target) return
+    target.item = { ...target.item, ...updated }
+    membershipInheritanceDraft.value = target.item.inherit_authorization !== false
+    emitToast('岗位授权继承设置已保存。')
+    await loadMemberships()
+  } catch (error) {
+    if (detail.value !== target) return
+    membershipInheritanceConflict.value = error?.status === 409 || error?.status === 404
+    membershipInheritanceError.value = membershipInheritanceConflict.value
+      ? '任职已被修改或不可用。请重新读取列表，打开详情核对后再保存。'
+      : formatUserError(error, '岗位授权继承设置保存失败。')
+  } finally {
+    membershipInheritanceSaving.value = false
   }
 }
 
@@ -2523,6 +2556,15 @@ onBeforeUnmount(() => {
             <div><span>{{ row.label }}</span><strong>{{ row.value }}</strong></div>
           </template>
         </div>
+        <section v-if="detail.kind === 'membership'" class="iam-detail-section">
+          <div class="iam-detail-section-head"><div><h4>岗位授权继承</h4><p>开启后，此任职参与岗位模板角色的授权计算；关闭后，此任职不再提供继承授权。个人单独授权按原规则保留。</p></div></div>
+          <label class="iam-checkbox-field"><input v-model="membershipInheritanceDraft" type="checkbox" :disabled="!hasPermission(IAM_PERMISSIONS.membershipUpdate) || membershipInheritanceSaving || membershipInheritanceConflict" /><span>参与岗位授权继承</span></label>
+          <p class="iam-field-help">实际生效范围受岗位模板、任职及各层有效期限制；开启时由服务端检查可委派权限。</p>
+          <p v-if="!hasPermission(IAM_PERMISSIONS.membershipUpdate)" class="iam-field-help">当前账号没有修改任职关系的权限。</p>
+          <p v-if="membershipInheritanceError" role="alert">{{ membershipInheritanceError }}</p>
+          <button v-if="hasPermission(IAM_PERMISSIONS.membershipUpdate)" class="console-button primary small" type="button" :disabled="membershipInheritanceSaving || membershipInheritanceConflict || membershipInheritanceDraft === (detail.item.inherit_authorization !== false)" @click="saveMembershipInheritance">{{ membershipInheritanceSaving ? '保存中…' : '保存继承设置' }}</button>
+          <button v-if="membershipInheritanceConflict" class="console-button small" type="button" @click="closeDetail(); loadMemberships()">重新读取列表</button>
+        </section>
         <section v-if="isUserAuthorizationSubject" class="iam-detail-section iam-user-account-section">
           <div class="iam-detail-section-head"><div><h4>登录账号与口令</h4><p>用户名用于登录基础平台；密码初始化与重置统一在用户详情中办理。</p></div></div>
           <p v-if="authorizationOverviewLoading" class="iam-empty-inline">正在读取登录账号…</p>
