@@ -6,6 +6,7 @@ import { ref } from 'vue'
 import { formatUserError } from '../../shared/utils/userError.js'
 import { attachStructuredContext } from '../../platform/shared/api/requestContext.js'
 import { normalizeAuthorizationSession, principalIdentityID, shouldStartSubsystemLogin } from '../../shared/authz/sessionCompatibility.js'
+import { asRFC3339, toDateTimeLocal, planPersonnelFor, planEquipmentFor, isEmbeddedPenetrationItem } from '../projectDisplay.js'
 
 const view = await readFile(new URL('./ProjectManagementView.vue', import.meta.url), 'utf8')
 const api = (await readFile(new URL('../api/projectManagement.js', import.meta.url), 'utf8'))
@@ -27,7 +28,10 @@ function workspace({ status = 200 } = {}) {
     normalizeAuthorizationSession, principalIdentityID, shouldStartSubsystemLogin,
     selectedServiceItem: ref(null), selectedServiceItems: ref([]),
     planningBlocked: ref(null), signaturePadKey: ref(0), saving: ref(false),
+    asRFC3339, toDateTimeLocal, planPersonnelFor, planEquipmentFor, isEmbeddedPenetrationItem,
     loadWorkspace: async () => { refreshes++ },
+    // 写成功后的工作区刷新统一走 refreshAfterWrite（保存/刷新分离）。
+    refreshAfterWrite: async () => { refreshes++ },
     showToast: (message, tone) => toasts.push({ message, tone }),
     fetch: async (url, options) => {
       requests.push({ url, ...options, payload: JSON.parse(options.body) })
@@ -41,9 +45,7 @@ function workspace({ status = 200 } = {}) {
   const init = view.slice(initStart, view.indexOf('\n', initStart))
   vm.runInNewContext([
     api, init,
-    section('function asRFC3339(', 'function identityStatusLabel('),
-    section('function fillOperationForm(item)', 'function isEmbeddedPenetrationItem('),
-    section('function planPersonnelFor(', 'function planResourceName('),
+    section('function fillOperationForm(item)', 'function updatePenetrationPackage('),
     section('async function runOperation(kind)', 'async function revokeSelectedAssignment('),
     'this.form = operationForm; this.fill = fillOperationForm; this.run = runOperation;',
   ].join('\n'), context)

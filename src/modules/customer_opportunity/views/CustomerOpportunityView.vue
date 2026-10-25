@@ -24,6 +24,7 @@ import {
 import { customerAPIParams, customerFiltersFromQuery, customerFiltersToQuery } from '../customerQuery.js'
 import { presaleAPIParams, presaleStateFromQuery, presaleStateToQuery } from '../presaleQuery.js'
 import { createPresaleMutationRetryState } from '../presaleMutationRetry.js'
+import { createRequestScope } from '@/modules/platform/shared/composables/requestScope'
 import { closeSubsystemTabOrFallback } from '@/modules/shared/utils/returnToPortal'
 import { isSafeOpenTarget } from '@/modules/platform/login-targets/utils/targetUri.js'
 import {
@@ -45,6 +46,67 @@ import { createAttachmentUploadRetryState } from '../attachmentUploadRetry.js'
 import { createMemberTermLoadState } from '../memberTermLoadState.js'
 import { createPortalInviteRetryState, validatePortalInviteResult } from '../portalInviteRetry.js'
 import { createPortalAccessDisableRetryState } from '../portalAccessDisableRetry.js'
+import {
+  CREDIT_APPLICATION_ROLES,
+  CREDIT_APPROVAL_ROLES,
+  actionText,
+  alertTypeText,
+  approvalResultText,
+  assignees,
+  catalogSelectionIDs,
+  creditLevelLabel,
+  crmRoleNames,
+  customerImportTemplateColumns,
+  customerRegionSuggestions,
+  customerStatusOptions,
+  customerStatusText,
+  customerTypeSuggestions,
+  defaultReportFilters,
+  emptyCustomer,
+  emptyInformationSystem,
+  emptyOpportunity,
+  emptyStakeholder,
+  fallbackCustomerIndustryOptions,
+  filingStatusText,
+  formatAmount,
+  formatDate,
+  formatDateTimeLocal,
+  hasCreditApprovalAccess,
+  importRowStatusText,
+  influenceText,
+  isPresaleEligibleOpportunity,
+  mergeCatalogOptions,
+  normalizeReportRows,
+  normalizeReportSummary,
+  opportunityStageOptions,
+  opportunityStatusOptions,
+  opportunityStatusText,
+  platformUserName,
+  portalInviteStatusText,
+  presaleEligibilityMessage,
+  presaleEligibleOpportunityStages,
+  presaleOpportunityLabel,
+  presaleOptionText,
+  presaleRequestID,
+  projectProgressText,
+  projectStatusText,
+  protectionLevelText,
+  pushStatusText,
+  reportDateParam,
+  requestStatusText,
+  safeHTTPSURL,
+  stableQuery,
+  stageAlertStatusText,
+  terminalPendingText,
+  timelineEventMeta,
+  timelineEventText,
+  urgencyText,
+  usableOperationName,
+  venueText,
+  workContentText,
+} from '@/modules/customer_opportunity/crmDisplay'
+import StageAlertDetailModal from '@/modules/customer_opportunity/components/StageAlertDetailModal.vue'
+import { useOpportunityCustomerDirectory } from '../composables/useOpportunityCustomerDirectory.js'
 import { createPresaleReportFilters } from '../composables/usePresaleReportFilters.js'
 import { getNotificationUnreadCount, listNotifications, markNotificationRead } from '../api/notification.js'
 import { listOwnerDirectory } from '../api/ownerDirectory.js'
@@ -64,25 +126,10 @@ import '../styles/customer-opportunity.css'
 const route = useRoute()
 const router = useRouter()
 const sections = new Set(['customers', 'opportunities', 'presale', 'notifications', 'credit-approvals', 'credit-rules'])
-// 客户行业由业务字典治理（平台控制台“字典管理”维护），取值即业务存储字符串；
-// 平台会话过期或字典未配置时回退内置清单，表单不中断。
-const fallbackCustomerIndustryOptions = Object.freeze([
-  '金融', '政府', '医疗', '教育', '能源', '制造', '软件', '互联网', '通信',
-  '物流', '交通', '建筑', '房地产', '零售', '服务', '其他',
-])
 const { options: customerIndustryItems } = useDictionaryOptions('CUSTOMER_INDUSTRY', {
   fallback: fallbackCustomerIndustryOptions.map((value) => ({ value, label: value })),
 })
 const customerIndustryOptions = computed(() => customerIndustryItems.value.map((item) => item.value))
-const customerImportTemplateColumns = Object.freeze([
-  ['客户名称', '示例科技有限公司'], ['统一社会信用代码', '913100001234567890'], ['客户类型', '企业'], ['行业', '软件'], ['区域', '华东'],
-  ['登记联系人姓名', '张三'], ['登记联系人电话', '13800138000'], ['登记联系人邮箱', 'zhangsan@example.com'],
-])
-const presaleEligibleOpportunityStages = new Set(['初步接触', '需求沟通', '方案制定', '报价', '投标'])
-const presaleEligibilityMessage = '只能为处于跟进中的初步接触、需求沟通、方案制定、报价或投标阶段商机发起售前支持。商机阶段不会自动调整。'
-function isPresaleEligibleOpportunity(opportunity) {
-  return opportunity?.opp_status === 'FOLLOWING' && presaleEligibleOpportunityStages.has(opportunity?.current_stage)
-}
 const activeSection = computed(() => sections.has(route.params.section) ? route.params.section : 'customers')
 const sectionTitle = computed(() => ({ customers: '客户管理', opportunities: '商机管理', presale: '售前技术支持', notifications: '个人通知中心', 'credit-approvals': '信用审批待办', 'credit-rules': '信用规则管理' })[activeSection.value])
 const mobileMenuOpen = ref(false)
@@ -92,12 +139,15 @@ const actionLoading = ref(false)
 const error = ref('')
 const notice = ref('')
 const customers = ref([])
-const opportunityCustomerOptions = ref([])
-const opportunityCustomerOptionsLoading = ref(false)
-const opportunityCustomerOptionsError = ref('')
-const opportunityCustomerOptionsTotal = ref(0)
-const opportunityCustomerKeyword = ref('')
-const opportunityCustomerOptionsLoadSequence = ref(0)
+const {
+  opportunityCustomerOptions, opportunityCustomerOptionsLoading, opportunityCustomerOptionsError,
+  opportunityCustomerOptionsTotal, opportunityCustomerKeyword, loadOpportunityCustomerOptions,
+} = useOpportunityCustomerDirectory({
+  listCustomers, formatCRMError,
+  isDialogOpen: () => opportunityEditMode.value,
+  selectedCustomerID: () => opportunityForm.customer_id,
+  clearSelectedCustomer: () => { opportunityForm.customer_id = '' },
+})
 const customerOwnerKeyword = ref('')
 const customerOwnerOptions = ref([])
 const customerOwnerOptionsLoading = ref(false)
@@ -309,6 +359,17 @@ const presaleMutationLoading = ref(false)
 const presaleCreateLoading = ref(false)
 const presaleMutationContextSequence = ref(0)
 const presaleMutationLoadSequence = ref(0)
+// 售前请求作用域（R04/R05）：每条读取链独立实例，begin 的 contextKey 含当前申请 ID
+// 或查询条件；切换申请/关闭详情时 invalidate，组件卸载由 requestScope 自动失效，
+// 迟到响应不再覆盖新上下文，也不会在卸载后回写组件状态。
+const presaleDetailScope = createRequestScope()
+const presaleActionsScope = createRequestScope()
+const presaleTimelineScope = createRequestScope()
+const presaleContactPhoneScope = createRequestScope()
+const presaleInspectorScope = createRequestScope()
+const presaleListScope = createRequestScope()
+const presaleFilterOptionsScope = createRequestScope()
+const presaleCreateOptionsScope = createRequestScope()
 const alerts = ref([])
 const alertRules = ref([])
 const showAlertConfig = ref(false)
@@ -355,19 +416,6 @@ async function onReportOrganizationChange() {
   await loadReportFilterOptions()
 }
 const crmSession = ref(null)
-const crmRoleNames = Object.freeze({
-  sales: '销售人员',
-  sales_director: '销售总监',
-  crm_super_admin: '客户与商机超级管理员',
-  technical_director: '技术总监',
-  team_lead: '团队负责人',
-  technician: '技术人员',
-  // 历史授权/指派记录仍可能带旧编码，但页面统一显示合并后的角色名称。
-  implementation_engineer: '技术人员',
-  technical_lead: '技术总监',
-  customer_admin: '客户管理员',
-  auditor: '审计员',
-})
 const currentUserLabel = computed(() => String(crmSession.value?.username || crmSession.value?.account_name || crmSession.value?.display_name || '').trim() || '当前用户')
 const currentUserInitial = computed(() => {
   const label = currentUserLabel.value
@@ -393,13 +441,9 @@ const canReadOpportunities = computed(() => (crmSession.value?.permissions || []
 const canReadPresales = computed(() => (crmSession.value?.permissions || []).includes('presale.read'))
 const canReadCustomers = computed(() => (crmSession.value?.permissions || []).includes('customer.read'))
 const canReadCredit = computed(() => (crmSession.value?.permissions || []).includes('customer.credit.read'))
-const CREDIT_APPLICATION_ROLES = new Set(['sales'])
 const canApplyCredit = computed(() => (crmSession.value?.permissions || []).includes('customer.credit.apply') && (crmSession.value?.roles || []).some((role) => CREDIT_APPLICATION_ROLES.has(role)) && !(crmSession.value?.roles || []).some((role) => CREDIT_APPROVAL_ROLES.has(role)))
-const CREDIT_APPROVAL_ROLES = new Set(['sales_director', 'crm_super_admin'])
-const hasCreditApprovalAccess = (session) => (session?.permissions || []).includes('customer.credit.approve') || (session?.roles || []).some((role) => CREDIT_APPROVAL_ROLES.has(role))
 const canApproveCredit = computed(() => hasCreditApprovalAccess(crmSession.value))
 const canManageCreditRules = computed(() => (crmSession.value?.permissions || []).includes('customer.credit.rule.manage'))
-const creditLevelLabel = (value) => ({ A: 'A · 优秀', B: 'B · 良好', C: 'C · 关注', D: 'D · 差' })[String(value || 'B').toUpperCase()] || 'B · 良好'
 const canReadNotifications = computed(() => canReadOpportunities.value || canReadPresales.value)
 const canConfigureStageAlerts = computed(() => (crmSession.value?.permissions || []).includes('opportunity.alert.config'))
 const canManagePresaleApprovalRules = computed(() => (crmSession.value?.permissions || []).includes('presale.approval_rule.manage'))
@@ -459,43 +503,7 @@ const qbLaunchQuotationAvailable = computed(() => runtimeCapability('qb_launch_q
 const qbLaunchBidAvailable = computed(() => runtimeCapability('qb_launch_bid').available)
 const qbActiveQueryMode = computed(() => runtimeCapability('qb_active_query').mode)
 
-function defaultReportFilters() {
-  const now = new Date()
-  const start = new Date(now.getFullYear(), now.getMonth(), 1)
-  const end = new Date(now.getFullYear(), now.getMonth() + 1, 1)
-  return { from: formatDateTimeLocal(start), to: formatDateTimeLocal(end), organization_id: '', person_id: '', opportunity_id: '', dimension: 'PERSON' }
-}
-function formatDateTimeLocal(value) {
-  const pad = (part) => String(part).padStart(2, '0')
-  return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}T${pad(value.getHours())}:${pad(value.getMinutes())}`
-}
 
-function emptyCustomer() {
-  return { name: '', unified_credit_code: '', customer_type: '', industry: '', region: '', owner_user_id: '', owner_org_id: '', reason: '', duplicate_override: false, duplicate_override_reason: '', contacts: [{ id: 0, name: '', phone: '', email: '', is_registration: true }] }
-}
-function emptyStakeholder() {
-  return { id: 0, name: '', role_title: '', influence: 'MEDIUM', relationship_summary: '', phone: '', email: '', replace_phone: false, replace_email: false }
-}
-function emptyInformationSystem() {
-  return { name: '', protection_level: 'LEVEL_2', application_scenario: '', filing_no: '', grading_date: '', filing_status: 'NOT_FILED' }
-}
-function influenceText(value) { return ({ LOW: '低', MEDIUM: '中', HIGH: '高' })[value] || value }
-function protectionLevelText(value) { return ({ LEVEL_1: '一级', LEVEL_2: '二级', LEVEL_3: '三级', LEVEL_4: '四级', LEVEL_5: '五级' })[value] || value }
-function filingStatusText(value) { return ({ NOT_FILED: '未备案', FILING: '备案中', FILED: '已备案' })[value] || value }
-function importRowStatusText(value) { return ({ READY: '可导入', WARNING: '警告（本次跳过）', ERROR: '错误', IMPORTED: '已导入', FAILED: '导入失败' })[value] || value }
-function projectStatusText(value) { return ({ PLANNED: '计划中', IN_PROGRESS: '进行中', ON_HOLD: '已暂停', COMPLETED: '已完成', CANCELLED: '已取消' })[value] || value || '—' }
-function projectProgressText(value) {
-  const progress = Number(value)
-  return Number.isFinite(progress) && progress >= 0 && progress <= 100 ? `${progress}%` : '—'
-}
-function emptyOpportunity() {
-  return { name: '', customer_id: '', type: '', source: '', type_ids: [], source_ids: [], expected_amount: '', expected_sign_date: '', requirement_summary: '', system_count: 0, pain_points: '', competitor_info: '', owner_user_id: '', owner_org_id: '', reason: '' }
-}
-function mergeCatalogOptions(available, selected) {
-  const values = new Map((available || []).map((item) => [Number(item.id), item]))
-  for (const item of selected || []) values.set(Number(item.id), item)
-  return [...values.values()].sort((left, right) => Number(left.sort_order || 0) - Number(right.sort_order || 0) || Number(left.id) - Number(right.id))
-}
 const opportunityTypeSelectOptions = computed(() => mergeCatalogOptions(opportunityTypeOptions.value, opportunityEditMode.value ? selectedOpportunity.value?.types : []))
 const opportunitySourceSelectOptions = computed(() => mergeCatalogOptions(opportunitySourceOptions.value, opportunityEditMode.value ? selectedOpportunity.value?.sources : []))
 async function loadOpportunityCatalogOptions() {
@@ -513,11 +521,6 @@ async function loadOpportunityCatalogOptions() {
   } finally {
     opportunityCatalogLoading.value = false
   }
-}
-function catalogSelectionIDs(structured, legacy, options) {
-  if (Array.isArray(structured) && structured.length) return [...new Set(structured.map((item) => Number(item.id)).filter(Boolean))]
-  const names = new Set(String(legacy || '').split('、').map((item) => item.trim()).filter(Boolean))
-  return options.filter((item) => names.has(item.name)).map((item) => Number(item.id))
 }
 function syncOpportunitySelections() {
   const typeIDs = opportunityTypeSelections.value.map(Number)
@@ -543,14 +546,6 @@ function showError(value) {
   }
   else if (value?.code === 'INTEGRATION_CONTRACT_NOT_CONFIGURED') error.value = '合同归属校验服务尚未配置，合同类终态待办暂不能完成。'
   else error.value = formatCRMError(value, { message: subsystemAccessMessage(value, '操作失败，请稍后重试。') })
-}
-function formatDate(value) {
-  if (!value) return '—'
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(date)
-}
-function portalInviteStatusText(value) {
-  return ({ PENDING: '待激活', USED: '已使用', EXPIRED: '已过期', REVOKED: '已撤销' })[value] || value || '尚未生成'
 }
 const portalRegistrationContact = computed(() => {
   const contacts = customerContacts.value.length ? customerContacts.value : (selectedCustomer.value?.contacts || [])
@@ -584,9 +579,6 @@ async function logoutSystem() {
     isLoggingOut.value = false
   }
 }
-function assignees(value) { return (value || []).map((item) => item.person_name || '未命名执行人').join('、') || '未指派' }
-// 指派接口采用全量替换语义；以当前指派为基线计算差异，可让已停用或不在本次目录结果中的人员
-// 被明确保留或移出，避免一次目录筛选把仍有效的既有指派静默删除。
 const assignmentDiff = computed(() => {
   const current = new Set((selectedPresale.value?.current_assignees || []).map((item) => item.person_id))
   const target = new Set(selectedEngineerIDs.value)
@@ -598,29 +590,7 @@ const unavailableCurrentAssignees = computed(() => {
   const visible = new Set(engineerDirectory.value.map((item) => item.person_id))
   return (selectedPresale.value?.current_assignees || []).filter((item) => !visible.has(item.person_id))
 })
-function customerStatusText(value) {
-  return ({ ACTIVE: '有效', VOID: '已作废', MERGED: '已合并' })[value] || value || '—'
-}
-function opportunityStatusText(value) {
-  return ({ FOLLOWING: '跟进中', CLOSED: '已关闭', VOID: '已作废' })[value] || value || '—'
-}
-function terminalPendingText(value) {
-  return value === 'CONTRACT' ? '待关联合同' : value === 'LOST_REASON' ? '待补失败原因' : '无'
-}
-function formatAmount(value) {
-  const number = typeof value === 'number' ? value : Number(String(value ?? '').replace(/,/g, ''))
-  if (!Number.isFinite(number)) return '—'
-  return new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(number)
-}
-const customerTypeSuggestions = Object.freeze(['业主', '三方', '集成商', '代理商', '渠道', '其他'])
-const customerRegionSuggestions = Object.freeze(['华北', '华东', '华南', '华中', '西南', '西北', '东北', '海外', '其他'])
-const customerStatusOptions = Object.freeze([{ value: 'ACTIVE', label: '有效' }, { value: 'VOID', label: '已作废' }, { value: 'MERGED', label: '已合并' }])
-const opportunityStatusOptions = Object.freeze([{ value: 'FOLLOWING', label: '跟进中' }, { value: 'CLOSED', label: '已关闭' }, { value: 'VOID', label: '已作废' }])
-const opportunityStageOptions = Object.freeze(['初步接触', '需求沟通', '方案制定', '报价', '投标', '已签约', '失败'])
 const ownerDirectoryNames = ref({})
-function platformUserName(item) {
-  return String(item?.display_name || item?.username || item?.account_name || '').trim() || '未命名用户'
-}
 function rememberOwnerDirectory(items) {
   for (const item of items || []) {
     const name = platformUserName(item)
@@ -638,12 +608,6 @@ function ownerLabel(owner) {
   const userId = typeof owner === 'object' ? owner?.owner_user_id : owner
   const displayName = typeof owner === 'object' ? owner?.owner_display_name : ''
   return String(displayName || '').trim() || ownerDirectoryNames.value[userId] || '负责人账号已失效'
-}
-// 历史数据和旧审批回调可能把内部 user_id 误写进“姓名快照”。这类值不能优先于
-// 基础平台目录，否则时间线会在目录已成功解析后仍向业务用户暴露内部 ID。
-function usableOperationName(snapshot, userId) {
-  const value = String(snapshot || '').trim()
-  return value && value !== String(userId || '').trim() ? value : ''
 }
 function operationUserLabel(item) { return usableOperationName(item?.actor_name, item?.actor_id) || ownerLabel(item?.actor_id) }
 function operationSubjectLabel(item) { return usableOperationName(item?.subject_name, item?.subject_id) || ownerLabel(item?.subject_id) }
@@ -691,93 +655,11 @@ async function confirmReasonDialog() {
   reasonDialogError.value = ''
   if (onSubmit) await onSubmit(reason)
 }
-function requestStatusText(value) {
-  return ({ APPROVAL_STARTING: '审批发起中', PENDING_APPROVAL: '待审批', APPROVED_PENDING_ASSIGNMENT: '审批通过，待指派', PENDING_EXECUTION_ASSIGNMENT: '待执行指派', EXECUTING: '执行中', COMPLETED: '已完成', REJECTED: '已驳回', CANCELLED: '已取消' })[value] || '未知状态'
-}
-function venueText(value) { return ({ REMOTE: '远程', ONSITE: '现场' })[value] || '未知场地' }
-function urgencyText(value) { return ({ NORMAL: '普通', URGENT: '紧急' })[value] || '未知级别' }
-function presaleOpportunityLabel(item) {
-  const name = String(item?.opportunity_name || '').trim()
-  const number = String(item?.opportunity_no || '').trim()
-  if (name && number) return `${name}（${number}）`
-  return name || number || '—'
-}
-// 看板和列表都应使用服务端返回的申请主键；兼容旧版接口曾返回 request_id 的响应，
-// 避免卡片点击时把 undefined 传给详情接口而表现为“点击无反应”。
-function presaleRequestID(item) {
-  return item?.id ?? item?.request_id ?? item?.request?.id ?? ''
-}
 function applicantLabel(item) {
   return String(item?.applicant_name || '').trim() || ownerLabel(item?.applicant_id)
 }
 function presalePersonOptionLabel(item) {
   return String(item?.label || '').trim() || ownerLabel(item?.value)
-}
-function pushStatusText(value) {
-  return ({ PENDING: '历史待处理', SENDING: '历史处理中', SUCCESS: '已记录', RETRY_WAIT: '历史待重试', DEAD_LETTER: '历史异常' })[value] || '未知状态'
-}
-function presaleOptionText(group, item) {
-  if (group === 'statuses') return requestStatusText(item.value)
-  if (group === 'venues') return venueText(item.value)
-  if (group === 'urgencies') return urgencyText(item.value)
-  if (group === 'push_statuses') return pushStatusText(item.value)
-  return item.label || item.value
-}
-function actionText(value) {
-  return ({ APPROVE: '通过审批', REJECT: '驳回审批', ASSIGN: '指派执行人', ADD_PROGRESS: '登记进度', ADD_WORKLOG: '登记工时', COMPLETE: '结束进度', CANCEL: '取消申请' })[value] || '未知操作'
-}
-function timelineEventText(value) {
-  return ({ REQUEST_CREATED: '售前申请已创建', STATUS_CHANGED: '任务状态已变更', APPROVAL_DECIDED: '审批已处理', ASSIGNEE_ADDED: '已加入执行人', ASSIGNEE_REMOVED: '已移出执行人', PROGRESS_ADDED: '已登记进度', WORKLOG_ADDED: '已登记工时' })[value] || '流程记录'
-}
-function timelineEventMeta(value) {
-  return ({
-    REQUEST_CREATED: { icon: '建', stage: '发起', tone: 'created' },
-    STATUS_CHANGED: { icon: '流', stage: '流转', tone: 'status' },
-    APPROVAL_DECIDED: { icon: '审', stage: '审批', tone: 'approval' },
-    ASSIGNEE_ADDED: { icon: '人', stage: '指派', tone: 'assignment' },
-    ASSIGNEE_REMOVED: { icon: '人', stage: '调整', tone: 'assignment' },
-    PROGRESS_ADDED: { icon: '进', stage: '进度', tone: 'progress' },
-    WORKLOG_ADDED: { icon: '时', stage: '工时', tone: 'worklog' },
-  })[value] || { icon: '记', stage: '记录', tone: 'default' }
-}
-function approvalResultText(value) {
-  return ({ PASS: '通过', APPROVED: '通过', REJECT: '驳回', REJECTED: '驳回' })[value] || '已处理'
-}
-function workContentText(value) {
-  return ({ SOLUTION_DESIGN: '方案设计', TECH_EXCHANGE: '技术交流', POC_DEMO: 'POC 演示', TECH_QA: '技术答疑', OTHER: '其他' })[value] || '其他工作'
-}
-function safeHTTPSURL(value) {
-  try {
-    const parsed = new URL(value)
-    return parsed.protocol === 'https:' ? parsed.href : ''
-  } catch { return '' }
-}
-function alertTypeText(type) { return ({ APPROVAL_NODE_1_OVERDUE: '节点 1 审批超时', APPROVAL_NODE_2_OVERDUE: '节点 2 审批超时', ASSIGNMENT_OVERDUE: '待指派超时', EXECUTION_ASSIGNMENT_OVERDUE: '待团队负责人指派超时', EXECUTION_DUE_SOON: '执行截止提前提醒', EXECUTION_OVERDUE: '执行超期' })[type] || type }
-function stageAlertStatusText(status) {
-  return ({ PENDING: '待处理', UNREAD: '已触发（未读）', READ: '已触发（已读）', CANCELLED: '已取消' })[status] || status
-}
-function reportDateParam(value) {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) throw new Error('请输入有效的报表时间范围。')
-  return date.toISOString()
-}
-function normalizeReportSummary(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  return {
-    work_hours: value.work_hours ?? '0.00',
-    participant_count: value.participant_count ?? 0,
-    auto_completed_task_count: value.auto_completed_task_count ?? 0,
-    opportunity_coverage_rate_percent: value.opportunity_coverage_rate_percent ?? '0.00',
-    covered_opportunity_count: value.covered_opportunity_count ?? 0,
-    active_opportunity_count: value.active_opportunity_count ?? 0,
-  }
-}
-function normalizeReportRows(value) {
-  if (Array.isArray(value)) return value
-  // 兼容网关/旧接口将数组包在 items 或 data 中的响应，避免渲染阶段对非数组调用 map/length 导致白页。
-  if (Array.isArray(value?.items)) return value.items
-  if (Array.isArray(value?.data)) return value.data
-  return []
 }
 function reportParams() {
   return {
@@ -908,30 +790,6 @@ async function downloadCustomerImportExample() {
     window.setTimeout(() => URL.revokeObjectURL(objectURL), 0)
   } catch (value) { showCustomerImportError(value) }
 }
-async function loadOpportunityCustomerOptions() {
-  const sequence = ++opportunityCustomerOptionsLoadSequence.value
-  opportunityCustomerOptionsLoading.value = true
-  opportunityCustomerOptionsError.value = ''
-  try {
-    const result = await listCustomers({
-      keyword: opportunityCustomerKeyword.value.trim(), status: 'ACTIVE',
-      page: 1, page_size: 100, sort_by: 'name', sort_order: 'asc',
-    })
-    if (sequence !== opportunityCustomerOptionsLoadSequence.value || opportunityEditMode.value) return
-    opportunityCustomerOptions.value = result?.items || []
-    opportunityCustomerOptionsTotal.value = Number(result?.total || 0)
-    if (opportunityForm.customer_id && !opportunityCustomerOptions.value.some((item) => String(item.id) === String(opportunityForm.customer_id))) {
-      opportunityForm.customer_id = ''
-    }
-  } catch (value) {
-    if (sequence !== opportunityCustomerOptionsLoadSequence.value) return
-    opportunityCustomerOptions.value = []
-    opportunityCustomerOptionsTotal.value = 0
-    opportunityCustomerOptionsError.value = formatCRMError(value, { fallback: '客户列表加载失败，请稍后重试。' })
-  } finally {
-    if (sequence === opportunityCustomerOptionsLoadSequence.value) opportunityCustomerOptionsLoading.value = false
-  }
-}
 
 function directoryErrorMessage(value) {
   if (value?.status === 403) return '当前账号没有读取平台人员目录的权限。'
@@ -987,22 +845,23 @@ async function loadCustomerMergeOptions() {
 
 async function loadPresaleOpportunityOptions() {
   const sequence = ++presaleOpportunityOptionsLoadSequence.value
+  const ticket = presaleCreateOptionsScope.begin(`PRESALE_CREATE_OPTIONS:${presaleOpportunityKeyword.value.trim()}`)
   presaleOpportunityOptionsLoading.value = true
   presaleOpportunityOptionsError.value = ''
   try {
     const result = await listOpportunities({ keyword: presaleOpportunityKeyword.value.trim(), page: 1, page_size: 100, sort_by: 'updated_at', sort_order: 'desc' })
-    if (sequence !== presaleOpportunityOptionsLoadSequence.value || !presaleCreatePage.value) return
+    if (sequence !== presaleOpportunityOptionsLoadSequence.value || !presaleCreatePage.value || !presaleCreateOptionsScope.isCurrent(ticket)) return
     presaleOpportunityOptions.value = (result?.items || []).filter(isPresaleEligibleOpportunity)
     presaleOpportunityOptionsTotal.value = presaleOpportunityOptions.value.length
     if (presaleForm.opportunity_id && !presaleOpportunityOptions.value.some((item) => String(item.id) === String(presaleForm.opportunity_id))) {
       presaleForm.opportunity_id = ''
     }
   } catch (value) {
-    if (sequence !== presaleOpportunityOptionsLoadSequence.value) return
+    if (sequence !== presaleOpportunityOptionsLoadSequence.value || !presaleCreateOptionsScope.isCurrent(ticket)) return
     presaleOpportunityOptions.value = []; presaleOpportunityOptionsTotal.value = 0
     presaleOpportunityOptionsError.value = formatCRMError(value, { fallback: '可关联商机加载失败，请稍后重试。' })
   } finally {
-    if (sequence === presaleOpportunityOptionsLoadSequence.value) presaleOpportunityOptionsLoading.value = false
+    if (sequence === presaleOpportunityOptionsLoadSequence.value && presaleCreateOptionsScope.isCurrent(ticket)) presaleOpportunityOptionsLoading.value = false
   }
 }
 
@@ -1075,12 +934,15 @@ function removeCustomerContact(index) {
   }
 }
 
-async function loadCurrent() {
+// reportError=false 供写操作成功后的刷新链使用：读取失败只向调用方返回 false，
+// 由调用方给出“已保存，最新数据读取失败”类准确提示，不误报为操作失败。
+async function loadCurrent({ reportError = true } = {}) {
   // 切换栏目或筛选时旧请求不会被主动取消，因此用递增序号与栏目快照共同判定
   // 响应归属。只有当前栏目最新一次请求可以写入列表和 loading 状态。
   const sequence = ++currentLoadSequence.value
   const section = activeSection.value
   loading.value = true; error.value = ''
+  let loaded = false
   try {
     if (section === 'customers') {
 	  // 客户可见范围由服务端按当前身份重新计算。开始新查询时先清空旧结果，
@@ -1108,17 +970,19 @@ async function loadCurrent() {
       await syncPresaleURL()
       if (sequence !== currentLoadSequence.value || activeSection.value !== section) return
       const params = presaleAPIParams(presaleFilters)
+      // 请求作用域票据绑定当前视图/分页/筛选：翻页、改筛选或重查后，旧列表响应整体失效。
+      const listTicket = presaleListScope.begin(`PRESALE_LIST:${presaleView.value}:${presalePage.number}:${presalePage.size}:${stableQuery(params)}`)
       if (presaleView.value === 'board') {
         presaleBoard.value = []
         const result = await getPresaleBoard({ ...params, column_limit: presaleColumnLimit.value })
-        if (sequence !== currentLoadSequence.value || activeSection.value !== section) return
+        if (sequence !== currentLoadSequence.value || activeSection.value !== section || !presaleListScope.isCurrent(listTicket)) return
         presaleBoard.value = result?.columns || []
         presaleColumnLimit.value = Number(result?.column_limit || presaleColumnLimit.value)
         presales.value = []; presalePage.total = 0
       } else {
         presales.value = []; presalePage.total = 0
         const result = await listPresaleRequests({ ...params, page: presalePage.number, page_size: presalePage.size })
-        if (sequence !== currentLoadSequence.value || activeSection.value !== section) return
+        if (sequence !== currentLoadSequence.value || activeSection.value !== section || !presaleListScope.isCurrent(listTicket)) return
         presales.value = result?.items || []
         void resolveOwnerNames(presales.value.flatMap((item) => [item.applicant_id, ...(item.current_assignees || []).map((assignee) => assignee.person_id)]))
         presalePage.number = Number(result?.page || presalePage.number)
@@ -1132,16 +996,15 @@ async function loadCurrent() {
     } else if (section === 'notifications') {
       await loadNotifications()
     }
+    loaded = true
   } catch (value) {
-    if (sequence === currentLoadSequence.value && activeSection.value === section) showError(value)
+    if (reportError && sequence === currentLoadSequence.value && activeSection.value === section) showError(value)
   } finally {
     if (sequence === currentLoadSequence.value) loading.value = false
   }
+  return loaded
 }
 
-function stableQuery(value) {
-  return JSON.stringify(Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right))))
-}
 
 async function syncPresaleURL() {
   const query = presaleStateToQuery(presaleFilters, presaleView.value, presalePage.number, presalePage.size, presaleColumnLimit.value)
@@ -1151,17 +1014,18 @@ async function syncPresaleURL() {
 
 async function loadPresaleFilterOptions(params = presaleAPIParams(presaleFilters)) {
   const sequence = ++presaleFilterOptionsLoadSequence.value
+  const ticket = presaleFilterOptionsScope.begin(`PRESALE_FILTER_OPTIONS:${stableQuery(params)}`)
   presaleFilterOptionsError.value = ''
   try {
     const value = await getPresaleFilterOptions(params)
-    if (sequence !== presaleFilterOptionsLoadSequence.value || activeSection.value !== 'presale') return
+    if (sequence !== presaleFilterOptionsLoadSequence.value || activeSection.value !== 'presale' || !presaleFilterOptionsScope.isCurrent(ticket)) return
     presaleFilterOptions.value = {
       opportunities: value?.opportunities || [], applicants: value?.applicants || [], assignees: value?.assignees || [],
       statuses: value?.statuses || [], venues: value?.venues || [], urgencies: value?.urgencies || [],
       push_statuses: value?.push_statuses || [], truncated: Boolean(value?.truncated),
     }
   } catch {
-    if (sequence !== presaleFilterOptionsLoadSequence.value || activeSection.value !== 'presale') return
+    if (sequence !== presaleFilterOptionsLoadSequence.value || activeSection.value !== 'presale' || !presaleFilterOptionsScope.isCurrent(ticket)) return
     // 筛选项由服务端按当前数据范围裁剪；加载失败必须清空旧选项，不能沿用可能已过期或越界的目录快照。
     presaleFilterOptions.value = { opportunities: [], applicants: [], assignees: [], statuses: [], venues: [], urgencies: [], push_statuses: [], truncated: false }
     presaleFilterOptionsError.value = '可用筛选项暂时无法加载，已清空选项且不会展示未授权人员或商机。'
@@ -1200,6 +1064,7 @@ function closePresaleCreatePage() {
   if (presaleCreateLoading.value) return
   if (!confirmDiscardIfDirty(presaleFormDirty.value)) return
   presaleOpportunityOptionsLoadSequence.value += 1
+  presaleCreateOptionsScope.invalidate()
   presaleCreatePage.value = false
   presaleReopenRequest.value = null
   presaleFormInitial = ''
@@ -1213,7 +1078,10 @@ async function submitPresaleFromList() {
   closePresaleCreatePage()
   notice.value = '售前申请已提交，已返回申请列表。'
   presalePage.number = 1
-  await loadCurrent()
+  // 任务 B：受理已成功；列表刷新失败只提示读取失败，不误报为提交失败。
+  if (!(await loadCurrent({ reportError: false }))) {
+    error.value = '售前申请已提交，但最新列表读取失败，请刷新列表核对结果。'
+  }
 }
 
 async function changePresalePage(nextPage) {
@@ -2097,50 +1965,53 @@ async function submitTeam() {
     teamDialog.value = false; notice.value = '当前商机团队已替换，历史变更已写审计。'; await openOpportunity(selectedOpportunity.value.id); await loadCurrent()
   } catch (value) { showError(value) }
 }
-async function loadPresaleCore(id, { clearResult = true } = {}) {
+async function loadPresaleCore(id, { clearResult = true, reportError = true } = {}) {
   const sequence = ++presaleDetailLoadSequence.value
+  const ticket = presaleDetailScope.begin(`PRESALE_REQUEST:${id}`)
   try {
     const [detail, logs] = await Promise.all([getPresaleRequest(id), listWorklogs(id)])
-    if (sequence !== presaleDetailLoadSequence.value) return false
+    if (sequence !== presaleDetailLoadSequence.value || !presaleDetailScope.isCurrent(ticket)) return false
     selectedPresale.value = detail; worklogs.value = logs || []; operation.worklog_id = logs?.[0]?.id ? String(logs[0].id) : ''
     if (clearResult) presaleResult.value = null
     return true
   } catch (value) {
-    if (sequence === presaleDetailLoadSequence.value) showError(value)
+    if (reportError && sequence === presaleDetailLoadSequence.value && presaleDetailScope.isCurrent(ticket)) showError(value)
     return false
   }
 }
 async function refreshPresaleActions(id) {
   const sequence = ++presaleActionsLoadSequence.value
+  const ticket = presaleActionsScope.begin(`PRESALE_REQUEST:${id}`)
   presaleActionsLoading.value = true; presaleActionsError.value = ''
   try {
     const value = await getPresaleAvailableActions(id)
-    if (sequence !== presaleActionsLoadSequence.value || Number(selectedPresale.value?.request?.id) !== Number(id)) return
+    if (sequence !== presaleActionsLoadSequence.value || !presaleActionsScope.isCurrent(ticket) || Number(selectedPresale.value?.request?.id) !== Number(id)) return
     presaleAvailableActions.value = value
   } catch {
-    if (sequence !== presaleActionsLoadSequence.value || Number(selectedPresale.value?.request?.id) !== Number(id)) return
+    if (sequence !== presaleActionsLoadSequence.value || !presaleActionsScope.isCurrent(ticket) || Number(selectedPresale.value?.request?.id) !== Number(id)) return
     // 权威动作接口失败时关闭全部写按钮，不回退使用详情中可能已经过期的动作快照。
     // 失败时关闭全部写操作控件，明确不使用 detail.available_actions 兜底。（测试锚点：detail.available_actions is intentionally not used as a fallback）
     presaleAvailableActions.value = null
     presaleActionsError.value = '可用操作暂时无法加载，已安全关闭操作入口。'
   } finally {
-    if (sequence === presaleActionsLoadSequence.value) presaleActionsLoading.value = false
+    if (sequence === presaleActionsLoadSequence.value && presaleActionsScope.isCurrent(ticket)) presaleActionsLoading.value = false
   }
 }
 async function refreshPresaleTimeline(id) {
   const sequence = ++presaleTimelineLoadSequence.value
+  const ticket = presaleTimelineScope.begin(`PRESALE_REQUEST:${id}`)
   presaleTimeline.value = []; presaleTimelineCursor.value = ''; presaleTimelineError.value = ''; presaleTimelineLoading.value = true
   try {
     const value = await getPresaleTimeline(id, { limit: 20 })
-    if (sequence !== presaleTimelineLoadSequence.value || Number(selectedPresale.value?.request?.id) !== Number(id)) return
+    if (sequence !== presaleTimelineLoadSequence.value || !presaleTimelineScope.isCurrent(ticket) || Number(selectedPresale.value?.request?.id) !== Number(id)) return
     presaleTimeline.value = value?.items || []
     void resolveOwnerNames(presaleTimeline.value.flatMap((item) => [item.actor_id, item.subject_id]))
     presaleTimelineCursor.value = value?.next_cursor || ''
   } catch {
-    if (sequence !== presaleTimelineLoadSequence.value || Number(selectedPresale.value?.request?.id) !== Number(id)) return
+    if (sequence !== presaleTimelineLoadSequence.value || !presaleTimelineScope.isCurrent(ticket) || Number(selectedPresale.value?.request?.id) !== Number(id)) return
     presaleTimelineError.value = '流程时间线暂时无法加载，任务详情和操作区不受影响。'
   } finally {
-    if (sequence === presaleTimelineLoadSequence.value) presaleTimelineLoading.value = false
+    if (sequence === presaleTimelineLoadSequence.value && presaleTimelineScope.isCurrent(ticket)) presaleTimelineLoading.value = false
   }
 }
 async function loadMorePresaleTimeline() {
@@ -2148,25 +2019,36 @@ async function loadMorePresaleTimeline() {
   const cursor = presaleTimelineCursor.value
   if (!id || !cursor || presaleTimelineLoading.value) return
   const sequence = ++presaleTimelineLoadSequence.value
+  const ticket = presaleTimelineScope.begin(`PRESALE_REQUEST:${id}`)
   presaleTimelineLoading.value = true; presaleTimelineError.value = ''
   try {
     const value = await getPresaleTimeline(id, { cursor, limit: 20 })
-    if (sequence !== presaleTimelineLoadSequence.value || Number(selectedPresale.value?.request?.id) !== Number(id)) return
+    if (sequence !== presaleTimelineLoadSequence.value || !presaleTimelineScope.isCurrent(ticket) || Number(selectedPresale.value?.request?.id) !== Number(id)) return
     // 稳定游标的分页边界仍可能重复返回末条事件，按事件 ID 去重后再追加，保持时间线只读且无重复。
     const known = new Set(presaleTimeline.value.map((item) => item.event_id))
     presaleTimeline.value = [...presaleTimeline.value, ...(value?.items || []).filter((item) => !known.has(item.event_id))]
     void resolveOwnerNames((value?.items || []).flatMap((item) => [item.actor_id, item.subject_id]))
     presaleTimelineCursor.value = value?.next_cursor || ''
   } catch {
-    if (sequence !== presaleTimelineLoadSequence.value || Number(selectedPresale.value?.request?.id) !== Number(id)) return
+    if (sequence !== presaleTimelineLoadSequence.value || !presaleTimelineScope.isCurrent(ticket) || Number(selectedPresale.value?.request?.id) !== Number(id)) return
     presaleTimelineError.value = '更多流程记录加载失败，可稍后重试。'
   } finally {
-    if (sequence === presaleTimelineLoadSequence.value) presaleTimelineLoading.value = false
+    if (sequence === presaleTimelineLoadSequence.value && presaleTimelineScope.isCurrent(ticket)) presaleTimelineLoading.value = false
   }
 }
-async function openPresale(id, { clearResult = true } = {}) {
+// 切换/关闭申请时统一作废详情链在途请求：详情、可用动作、时间线、联系电话和
+// 指派/审批历史读写的迟到响应都不能进入新上下文（R04）；组件卸载由 requestScope 兜底（R05）。
+function invalidatePresaleDetailRequests() {
+  presaleDetailScope.invalidate()
+  presaleActionsScope.invalidate()
+  presaleTimelineScope.invalidate()
+  presaleContactPhoneScope.invalidate()
+  presaleInspectorScope.invalidate()
+}
+async function openPresale(id, { clearResult = true, reportError = true } = {}) {
   // 切换任务前统一作废详情、动作、时间线和敏感电话请求；迟到响应不能覆盖新任务，
   // 已解密的联系电话也只在当前详情生命周期内保留。
+  invalidatePresaleDetailRequests()
   presaleMutationContextSequence.value++
   presaleMutationLoadSequence.value++
   presaleMutationLoading.value = false
@@ -2181,12 +2063,14 @@ async function openPresale(id, { clearResult = true } = {}) {
   progressSubmissionKey.value = ''; progressSubmissionSignature.value = ''
   selectedExecutionDepartmentID.value = ''; selectedTeamLeadPersonID.value = ''
   teamLeadCandidates.value = []; teamLeadDirectoryLoading.value = false; teamLeadDirectorySequence.value += 1
-  const loaded = await loadPresaleCore(id, { clearResult })
-  if (!loaded) return
+  const loaded = await loadPresaleCore(id, { clearResult, reportError })
+  if (!loaded) return false
   void refreshPresaleActions(id)
   void refreshPresaleTimeline(id)
+  return true
 }
 function closePresale() {
+  invalidatePresaleDetailRequests()
   presaleMutationContextSequence.value++
   presaleMutationLoadSequence.value++
   presaleMutationLoading.value = false
@@ -2202,39 +2086,48 @@ function closePresale() {
 async function loadPresaleInspector(panel) {
   const id = selectedPresale.value?.request?.id
   if (!id || presaleInspectorLoading.value) return
+  // 指派记录/审批历史此前缺少响应归属校验：切换或关闭申请后，在途响应仍会把旧申请的
+  // 数据回写进新详情。票据绑定当前申请 ID，openPresale/closePresale 已整体失效旧票据。
+  const ticket = presaleInspectorScope.begin(`PRESALE_REQUEST:${id}:${panel}`)
   presaleInspectorPanel.value = panel
   presaleInspectorLoading.value = true
   presaleInspectorError.value = ''
   try {
     if (panel === 'assignments') {
-      presaleAssignments.value = await getAssignments(id) || []
+      const result = (await getAssignments(id)) || []
+      if (!presaleInspectorScope.isCurrent(ticket)) return
+      presaleAssignments.value = result
       void resolveOwnerNames(presaleAssignments.value.flatMap((item) => [item.assignee_id, item.assigned_by]))
     } else {
-      presaleApprovalHistory.value = await getApprovalHistory(id) || []
+      const result = (await getApprovalHistory(id)) || []
+      if (!presaleInspectorScope.isCurrent(ticket)) return
+      presaleApprovalHistory.value = result
       void resolveOwnerNames(presaleApprovalHistory.value.map((item) => item.approver_id))
     }
   } catch (value) {
+    if (!presaleInspectorScope.isCurrent(ticket)) return
     presaleInspectorError.value = formatCRMError(value, { message: subsystemAccessMessage(value, panel === 'assignments' ? '指派记录暂时无法加载，请稍后重试。' : '审批历史暂时无法加载，请稍后重试。') })
   } finally {
-    presaleInspectorLoading.value = false
+    if (presaleInspectorScope.isCurrent(ticket)) presaleInspectorLoading.value = false
   }
 }
 async function viewPresaleContactPhone() {
   const id = selectedPresale.value?.request?.id
   if (!id || !canViewSelectedPresaleContactPhone.value || presaleContactPhoneLoading.value) return
   const sequence = ++presaleContactPhoneLoadSequence.value
+  const ticket = presaleContactPhoneScope.begin(`PRESALE_REQUEST:${id}`)
   presaleContactPhone.value = ''; presaleContactPhoneError.value = ''; presaleContactPhoneLoading.value = true
   try {
     const value = await getPresaleContactPhone(id)
-    if (sequence !== presaleContactPhoneLoadSequence.value || Number(selectedPresale.value?.request?.id) !== Number(id)) return
+    if (sequence !== presaleContactPhoneLoadSequence.value || !presaleContactPhoneScope.isCurrent(ticket) || Number(selectedPresale.value?.request?.id) !== Number(id)) return
     presaleContactPhone.value = value?.contact_phone || ''
     if (!presaleContactPhone.value) presaleContactPhoneError.value = '联系电话暂时无法查看。'
   } catch {
-    if (sequence === presaleContactPhoneLoadSequence.value && Number(selectedPresale.value?.request?.id) === Number(id)) {
+    if (sequence === presaleContactPhoneLoadSequence.value && presaleContactPhoneScope.isCurrent(ticket) && Number(selectedPresale.value?.request?.id) === Number(id)) {
       presaleContactPhoneError.value = '联系电话查看失败，未展示敏感信息。'
     }
   } finally {
-    if (sequence === presaleContactPhoneLoadSequence.value) presaleContactPhoneLoading.value = false
+    if (sequence === presaleContactPhoneLoadSequence.value && presaleContactPhoneScope.isCurrent(ticket)) presaleContactPhoneLoading.value = false
   }
 }
 async function loadEngineerDirectory() {
@@ -2293,6 +2186,23 @@ function openTakeoverDialog() {
   takeoverOpen.value = true
   if (selectedExecutionDepartmentID.value) void loadTeamLeadCandidates()
 }
+// 任务 B（保存/刷新分离）：售前写操作 HTTP 200 即已保存；其后详情/可用动作/列表刷新
+// 失败只说明展示未更新，统一给出“已保存，最新数据读取失败”的准确提示——不回退写操作
+// 结果，也不把读取失败误报为操作失败。读失败经 reportError=false 静默上抛，避免内层
+// showError 用通用失败文案覆盖成功提示。
+async function refreshAfterPresaleWrite(id, savedMessage = '操作已保存，但最新数据读取失败，请刷新详情核对结果。') {
+  let refreshed = true
+  try {
+    const loaded = await loadPresaleCore(id, { clearResult: false, reportError: false })
+    if (loaded) await Promise.all([refreshPresaleActions(id), refreshPresaleTimeline(id)])
+    else refreshed = false
+    if (!(await loadCurrent({ reportError: false }))) refreshed = false
+    if (selectedOpportunity.value) await loadOpportunityPresales(opportunityPresalePage.number)
+  } catch {
+    refreshed = false
+  }
+  if (!refreshed) error.value = savedMessage
+}
 async function submitTakeover() {
   const id = selectedPresale.value?.request?.id
   const version = Number(selectedPresale.value?.request?.version)
@@ -2311,9 +2221,8 @@ async function submitTakeover() {
     presaleResult.value = result
     takeoverOpen.value = false
     notice.value = '已完成执行中负责人接管。'
-    const loaded = await loadPresaleCore(id, { clearResult: false })
-    if (loaded) await Promise.all([refreshPresaleActions(id), refreshPresaleTimeline(id)])
-    await loadCurrent()
+    // 写入已成功；其后刷新失败由 refreshAfterPresaleWrite 给出准确提示，不落入下方“操作失败”。
+    await refreshAfterPresaleWrite(id)
   } catch (value) {
     if (mutationToken === presaleMutationLoadSequence.value) showError(value)
   } finally {
@@ -2389,7 +2298,8 @@ async function loadTeamLeadCandidates() {
 }
 async function saveExecutionDepartment() {
   const id = selectedPresale.value?.request?.id
-  if (!id || !selectedExecutionDepartmentID.value) return
+  // 任务 D：保存进行中禁止重复提交（按钮禁用之外的第二道防线）。
+  if (!id || !selectedExecutionDepartmentID.value || departmentSaving.value) return
   const twoLevel = canConfigureTwoLevelAssignment()
   if (twoLevel && !selectedTeamLeadPersonID.value) {
     error.value = '请选择团队负责人后再保存。'
@@ -2413,7 +2323,9 @@ async function saveExecutionDepartment() {
     presaleMutationRetries.confirmSuccess('department', id, retry.key)
     selectedTeamLeadPersonID.value = ''
     teamLeadCandidates.value = []
-    await openPresale(id, { clearResult: false })
+    // 任务 B：部门保存已成功（HTTP 200）；其后详情刷新失败只提示读取失败，不误报为保存失败。
+    const loaded = await openPresale(id, { clearResult: false, reportError: false })
+    if (!loaded) error.value = '已保存，但最新数据读取失败，请刷新详情核对结果。'
   } catch (value) {
     showError(value)
   } finally { departmentSaving.value = false }
@@ -2433,9 +2345,8 @@ async function submitPresaleExecutionRejection(reason) {
     if (!isCurrentMutation()) return
     presaleResult.value = result
     notice.value = '已拒绝执行指派，申请已退回待指派。'
-    const loaded = await loadPresaleCore(id, { clearResult: false })
-    if (loaded) await Promise.all([refreshPresaleActions(id), refreshPresaleTimeline(id)])
-    await loadCurrent()
+    // 写入已成功；其后刷新失败由 refreshAfterPresaleWrite 给出准确提示，不落入下方“操作失败”。
+    await refreshAfterPresaleWrite(id)
   } catch (value) {
     if (mutationToken === presaleMutationLoadSequence.value) showError(value)
   } finally {
@@ -2679,8 +2590,13 @@ async function submitPresale({ openDetail = true, refreshList = true } = {}) {
       notice.value = `申请 ${presaleReopenRequest.value.request_no} 已重新发起审批，申请 ID 保持不变。`
       presaleReopenRequest.value = null
       presaleCreatePage.value = false
-      if (refreshList) await loadCurrent()
-      if (openDetail) await openPresale(reopened.id)
+      // 任务 B：重开已成功（HTTP 200）；其后列表/详情刷新失败只提示读取失败，不误报为提交失败。
+      if (refreshList && !(await loadCurrent({ reportError: false }))) {
+        error.value = '申请已重新发起，但最新数据读取失败，请刷新列表核对结果。'
+      }
+      if (openDetail && !(await openPresale(reopened.id, { reportError: false }))) {
+        error.value = '申请已重新发起，但详情读取失败，请从申请列表查看进度。'
+      }
       return reopened
     }
     // 内部流程可能已提交但响应在网络中丢失；同一规范化命令复用幂等键，
@@ -2694,8 +2610,13 @@ async function submitPresale({ openDetail = true, refreshList = true } = {}) {
     const value = await createPresaleRequest(retry.payload, retry.key)
     presaleMutationRetries.confirmSuccess('create', opportunityID, retry.key)
     notice.value = '售前申请已提交；商机阶段保持不变。'
-    if (refreshList) await loadCurrent()
-    if (openDetail) await openPresale(value.id)
+    // 任务 B：受理已成功（HTTP 200）；其后列表/详情刷新失败只提示读取失败，不误报为提交失败。
+    if (refreshList && !(await loadCurrent({ reportError: false }))) {
+      error.value = '售前申请已提交，但最新数据读取失败，请刷新列表核对结果。'
+    }
+    if (openDetail && !(await openPresale(value.id, { reportError: false }))) {
+      error.value = '售前申请已提交，但详情读取失败，请从申请列表查看进度。'
+    }
     return value
   } catch (value) { showError(value); return null }
   finally { presaleCreateLoading.value = false }
@@ -2760,10 +2681,8 @@ async function submitPresaleDecision(action, id, version, comment) {
       presaleResult.value = result
     }
     notice.value = '操作完成。'
-    const loaded = await loadPresaleCore(id, { clearResult: false })
-    if (loaded) await Promise.all([refreshPresaleActions(id), refreshPresaleTimeline(id)])
-    await loadCurrent()
-    if (selectedOpportunity.value) await loadOpportunityPresales(opportunityPresalePage.number)
+    // 任务 B：审批决定已保存；其后刷新失败由 refreshAfterPresaleWrite 给出准确提示。
+    await refreshAfterPresaleWrite(id)
   } catch (value) {
     if (mutationToken === presaleMutationLoadSequence.value) showError(value)
   } finally {
@@ -2841,10 +2760,8 @@ async function runPresale(action) {
     }
     notice.value = '操作完成。'
     if (refreshActions.has(action)) {
-      const loaded = await loadPresaleCore(id, { clearResult: false })
-      if (loaded) await Promise.all([refreshPresaleActions(id), refreshPresaleTimeline(id)])
-      await loadCurrent()
-      if (selectedOpportunity.value) await loadOpportunityPresales(opportunityPresalePage.number)
+      // 任务 B：指派/进度/工时写入已成功；其后刷新失败由 refreshAfterPresaleWrite 给出准确提示。
+      await refreshAfterPresaleWrite(id)
     }
   } catch (value) {
     if (!mutationToken || isCurrentMutation()) showError(value)
@@ -2876,10 +2793,8 @@ async function submitPresaleComplete(id, version, reason) {
     if (mutationContext !== presaleMutationContextSequence.value || Number(selectedPresale.value?.request?.id) !== Number(id)) return
     presaleResult.value = result
     notice.value = '售前支持流程已完成。'
-    const loaded = await loadPresaleCore(id, { clearResult: false })
-    if (loaded) await Promise.all([refreshPresaleActions(id), refreshPresaleTimeline(id)])
-    await loadCurrent()
-    if (selectedOpportunity.value) await loadOpportunityPresales(opportunityPresalePage.number)
+    // 任务 B：结束进度已保存；其后刷新失败由 refreshAfterPresaleWrite 给出准确提示。
+    await refreshAfterPresaleWrite(id)
   } catch (value) {
     if (mutationToken === presaleMutationLoadSequence.value) showError(value)
   } finally {
@@ -3069,7 +2984,12 @@ onMounted(async () => {
         <footer><p>规则变更即时生效，超时告警由后台任务按规则扫描生成。</p><button class="console-button ghost" type="button" @click="showStageAlertRules = false">关闭</button></footer>
       </section>
     </div>
-    <div v-if="selectedStageAlert" class="crm-modal"><article><h2>阶段超时告警详情</h2><dl><dt>商机编号</dt><dd>{{ selectedStageAlert.opportunity_no }}</dd><dt>阶段</dt><dd>{{ selectedStageAlert.stage }}</dd><dt>状态</dt><dd>{{ stageAlertStatusText(selectedStageAlert.status) }}</dd><dt>阶段起算</dt><dd>{{ formatDate(selectedStageAlert.basis_at) }}</dd><dt>应提醒时间</dt><dd>{{ formatDate(selectedStageAlert.due_at) }}</dd><dt>阈值版本</dt><dd>{{ selectedStageAlert.threshold_version }}</dd><dt>触发时间</dt><dd>{{ formatDate(selectedStageAlert.sent_at) }}</dd><dt>已读时间</dt><dd>{{ formatDate(selectedStageAlert.read_at) }}</dd></dl><div class="crm-actions"><button @click="selectedStageAlert = null">关闭</button><button class="primary" @click="openStageAlertOpportunity(selectedStageAlert)">{{ selectedStageAlert.status === 'UNREAD' ? '标为已读并打开商机' : '打开商机' }}</button></div></article></div>
+    <StageAlertDetailModal
+      v-if="selectedStageAlert"
+      :alert="selectedStageAlert"
+      @close="selectedStageAlert = null"
+      @open="openStageAlertOpportunity(selectedStageAlert)"
+    />
     <div v-if="showReport" class="console-modal-backdrop" role="presentation" @click.self="showReport = false">
       <article class="console-detail-modal crm-report-dialog" role="dialog" aria-modal="true" aria-label="售前投入报表">
         <header>

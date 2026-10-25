@@ -3,6 +3,8 @@ import test from 'node:test'
 import { readFile } from 'node:fs/promises'
 
 const view = await readFile(new URL('./customer_opportunity/views/CustomerOpportunityView.vue', import.meta.url), 'utf8')
+const displaySource = await readFile(new URL('./customer_opportunity/crmDisplay.js', import.meta.url), 'utf8')
+const stageAlertSource = await readFile(new URL('./customer_opportunity/components/StageAlertDetailModal.vue', import.meta.url), 'utf8')
 const apiSource = await readFile(new URL('./customer_opportunity/api/presale.js', import.meta.url), 'utf8')
 const style = await readFile(new URL('./customer_opportunity/styles/customer-opportunity.css', import.meta.url), 'utf8')
 const approvalPanel = await readFile(new URL('./customer_opportunity/components/PresaleApprovalRulesPanel.vue', import.meta.url), 'utf8')
@@ -102,12 +104,12 @@ test('技术总监可同时承担部门与团队负责人并进入两级执行�
 })
 
 test('两级执行指派展示新状态、团队负责人和通知/超时文案', () => {
-  assert.match(view, /PENDING_EXECUTION_ASSIGNMENT: '待执行指派'/)
+  assert.match(displaySource, /PENDING_EXECUTION_ASSIGNMENT: '待执行指派'/)
   assert.match(view, /<span>团队负责人<\/span>/)
   assert.match(view, /PRESALE_EXECUTOR_ASSIGNMENT_PENDING/)
   assert.match(view, /PRESALE_EXECUTION_ASSIGNMENT_REJECTED/)
   assert.match(view, /PRESALE_TEAM_LEAD_INVALID/)
-  assert.match(view, /EXECUTION_ASSIGNMENT_OVERDUE: '待团队负责人指派超时'/)
+  assert.match(displaySource, /EXECUTION_ASSIGNMENT_OVERDUE: '待团队负责人指派超时'/)
   assert.match(view, /@change="onExecutionDepartmentChange"/)
   assert.match(view, /v-model="selectedTeamLeadPersonID"/)
 })
@@ -622,7 +624,7 @@ test('客户表单支持删除联系人且始终至少保留一个登记联系�
 
 test('客户新建表单的行业使用受控下拉菜单并兼容历史值', () => {
   for (const industry of ['金融', '政府', '医疗', '教育', '能源', '制造', '软件', '互联网', '通信', '物流', '交通', '建筑', '房地产', '零售', '服务', '其他']) {
-    assert.match(view, new RegExp(`'${industry}'`))
+    assert.match(displaySource, new RegExp(`'${industry}'`))
   }
   assert.match(view, /<span>行业 \*<\/span><select v-model="customerForm\.industry" required>/)
   assert.match(view, /<option value="" disabled>请选择行业<\/option>/)
@@ -922,8 +924,8 @@ test('售前列表、详情与工时查询不再依赖手工 ID 操作台', asyn
 })
 
 test('售前列表与状态看板展示商机名称并保留商机编号', () => {
-  assert.match(view, /function presaleOpportunityLabel\(item\)[\s\S]*opportunity_name/)
-  assert.match(view, /function presaleRequestID\(item\)[\s\S]*request_id/)
+  assert.match(displaySource, /function presaleOpportunityLabel\(item\)[\s\S]*opportunity_name/)
+  assert.match(displaySource, /function presaleRequestID\(item\)[\s\S]*request_id/)
   assert.match(view, /<td>\{\{ presaleOpportunityLabel\(item\) \}\}<\/td>/)
   assert.match(view, /<span>\{\{ presaleOpportunityLabel\(item\) \}\}<\/span>/)
   assert.match(view, /class="crm-board-card"[^>]*@click="openPresale\(presaleRequestID\(item\)\)"/)
@@ -944,7 +946,7 @@ test('TS-001 售前列表通过受控按钮进入独立创建视图并在取消�
 test('驳回或取消的售前重新审批后刷新列表和状态看板', () => {
 	assert.match(view, /reopenPresaleRequest\(presaleReopenRequest\.value\.id, presaleReopenRequest\.value\.version, \{/)
 	assert.match(view, /presaleReopenRequest\.value = \{ id: request\.id, version: request\.version/)
-	assert.match(view, /const reopened = await reopenPresaleRequest\([\s\S]*contact_phone: presaleForm\.contact_phone[\s\S]*expected_start: expectedStart\.toISOString\(\)[\s\S]*await loadCurrent\(\)[\s\S]*await openPresale\(reopened\.id\)/)
+	assert.match(view, /const reopened = await reopenPresaleRequest\([\s\S]*contact_phone: presaleForm\.contact_phone[\s\S]*expected_start: expectedStart\.toISOString\(\)[\s\S]*await loadCurrent\(\{ reportError: false \}\)[\s\S]*await openPresale\(reopened\.id, \{ reportError: false \}\)/)
 })
 
 test('客户最近跟进明确包含商机记录且商机历史可进入详情', () => {
@@ -1258,14 +1260,14 @@ test('TS-004 详情以权威操作接口和稳定游标驱动且安全展示时�
   assert.match(view, /known = new Set\(presaleTimeline\.value\.map\(\(item\) => item\.event_id\)\)/)
   assert.match(view, /服务端未授权该操作或操作状态已变化/)
   assert.match(view, /await Promise\.all\(\[refreshPresaleActions\(id\), refreshPresaleTimeline\(id\)\]\)/)
-  for (const label of ['售前申请已创建', '任务状态已变更', '审批已处理', '已加入执行人', '已移出执行人', '已登记进度', '已登记工时']) assert.match(view, new RegExp(label))
-  assert.match(view, /parsed\.protocol === 'https:'/)
+  for (const label of ['售前申请已创建', '任务状态已变更', '审批已处理', '已加入执行人', '已移出执行人', '已登记进度', '已登记工时']) assert.match(displaySource, new RegExp(label))
+  assert.match(displaySource, /parsed\.protocol === 'https:'/)
   assert.match(view, /target="_blank" rel="noopener noreferrer"/)
 	assert.match(view, /class="crm-timeline-list" tabindex="0" aria-label="售前流程步骤，区域内可滚动"/)
 	assert.match(style, /\.crm-timeline-list \{[\s\S]*max-height: min\(52vh, 520px\);[\s\S]*overflow-y: auto;/)
 	assert.match(style, /\.crm-timeline-list:focus-visible/)
-	assert.match(view, /function usableOperationName\(snapshot, userId\)/)
-	assert.match(view, /value !== String\(userId \|\| ''\)\.trim\(\)/)
+	assert.match(displaySource, /function usableOperationName\(snapshot, userId\)/)
+	assert.match(displaySource, /value !== String\(userId \|\| ''\)\.trim\(\)/)
 	assert.match(view, /operationUserLabel\(item\).*usableOperationName\(item\?\.actor_name, item\?\.actor_id\).*ownerLabel\(item\?\.actor_id\)/)
 	assert.doesNotMatch(view, /v-html/)
 	assert.match(view, /progressSubmissionSignature\.value !== progressSignature/)
@@ -1299,9 +1301,9 @@ test('TS-010 关联查询调用真实路由和分页参数', async (t) => {
 
 test('TS-010 从商机发起申请锁定机会且提交后只刷新面板不改阶段', () => {
   assert.match(view, /presale\.create/)
-  assert.match(view, /const presaleEligibleOpportunityStages = new Set\(\['初步接触', '需求沟通', '方案制定', '报价', '投标'\]\)/)
-  assert.match(view, /function isPresaleEligibleOpportunity\(opportunity\)/)
-  assert.match(view, /opportunity\?\.opp_status === 'FOLLOWING'/)
+  assert.match(displaySource, /const presaleEligibleOpportunityStages = new Set\(\['初步接触', '需求沟通', '方案制定', '报价', '投标'\]\)/)
+  assert.match(displaySource, /function isPresaleEligibleOpportunity\(opportunity\)/)
+  assert.match(displaySource, /opportunity\?\.opp_status === 'FOLLOWING'/)
   assert.match(view, /filter\(isPresaleEligibleOpportunity\)/)
   assert.match(view, /aria-haspopup="dialog"[\s\S]*@click="openOpportunityPresaleCreate"/)
   assert.match(view, /opportunity_id: String\(selectedOpportunity\.value\.id\)/)
@@ -1319,7 +1321,7 @@ test('TS-010 从商机发起申请锁定机会且提交后只刷新面板不改�
   assert.match(view, /await loadOpportunityPresales\(1\)/)
   assert.match(view, /售前申请已提交；商机阶段保持不变/)
   assert.match(view, /CRM_PRESALE_OPPORTUNITY_NOT_ELIGIBLE/)
-  assert.match(view, /商机阶段不会自动调整/)
+  assert.match(displaySource, /商机阶段不会自动调整/)
   assert.doesNotMatch(view, /submitOpportunityPresale[\s\S]{0,1000}changeOpportunityStage/)
 })
 
@@ -1368,9 +1370,9 @@ test('售前超时预警接入规则、未读、已读和聚合标记界面', ()
 
 test('售前投入报表提供筛选、KPI、图形和等价数值表', () => {
   assert.match(view, /getPresaleReportSummary/)
-  assert.match(view, /function reportDateParam\(value\)/)
-  assert.match(view, /function normalizeReportSummary\(value\)/)
-  assert.match(view, /function normalizeReportRows\(value\)/)
+  assert.match(displaySource, /function reportDateParam\(value\)/)
+  assert.match(displaySource, /function normalizeReportSummary\(value\)/)
+  assert.match(displaySource, /function normalizeReportRows\(value\)/)
   assert.match(view, /reportDistribution\.value = normalizeReportRows\(distribution\)/)
   assert.match(view, /投入小时/)
   assert.match(view, /商机覆盖率/)
@@ -1614,13 +1616,13 @@ test('阶段告警 API 对接真实列表、已读和规则路由及数据版本
 })
 
 test('阶段告警界面展示详情、状态语义和权限关闭行为', () => {
-  for (const label of ['待处理', '已触发（未读）', '已触发（已读）', '已取消']) assert.match(view, new RegExp(label.replace(/[（）]/g, '.')))
+  for (const label of ['待处理', '已触发（未读）', '已触发（已读）', '已取消']) assert.match(displaySource, new RegExp(label.replace(/[（）]/g, '.')))
   assert.match(view, /服务端个人列表当前返回已触发的未读\/已读告警/)
   assert.match(view, /canConfigureStageAlerts/)
   assert.match(view, /value\?\.status === 403/)
   assert.match(view, /version: Number\(rule\.version\)/)
-  assert.match(view, /阶段起算/)
-  assert.match(view, /阈值版本/)
+  assert.match(stageAlertSource, /阶段起算/)
+  assert.match(stageAlertSource, /阈值版本/)
 })
 
 test('从详情打开的编辑弹窗叠在详情之上，不被遮住', () => {

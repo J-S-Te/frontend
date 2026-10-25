@@ -1,12 +1,19 @@
 <script setup>
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { formatUserError } from '../../../shared/utils/userError.js'
+import { createFormSnapshot, hasUnsavedChanges } from '../../../shared/utils/unsavedChanges.js'
+import { useConfirmDialog } from '../../../shared/composables/useConfirmDialog.js'
+import ConfirmDialog from '../../../shared/components/ConfirmDialog.vue'
+import { useFormDraft } from '../../../shared/composables/useFormDraft.js'
+import { useDialogFocusTrap } from '../../../shared/composables/useDialogFocusTrap.js'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import {
   IamError,
   onboardEmployee,
 } from '@/modules/platform/iam/api/iam'
 import { previewPositionAuthorization } from '@/modules/platform/iam/api/positionAuthorization'
+import { optionalText } from '@/modules/platform/iam/utils/userInputValidation'
+import { useCurrentPrincipal } from '@/modules/platform/auth/utils/principal'
 import {
   buildEmployeeOnboardingPayload,
   defaultEmployeeOnboardingForm,
@@ -38,7 +45,21 @@ const props = defineProps({
 const emit = defineEmits(['close', 'completed', 'toast', 'refresh-prerequisites', 'retry-references'])
 
 const form = reactive(defaultEmployeeOnboardingForm())
+const onboardingDialogElement = ref(null)
+useDialogFocusTrap({ active: ref(true), container: onboardingDialogElement, initialFocus: 'input:not([type="hidden"]), select, textarea' })
+// 入职草稿按会话主体（租户+用户）隔离：他人或未识别主体不得恢复；登出统一清除。
+const onboardingPrincipal = useCurrentPrincipal().principal
+const draftRecovery = useFormDraft({
+  key: 'uip:employee-onboarding-draft',
+  form,
+  // 初始密码绝不能写入浏览器存储；恢复草稿后必须重新输入。
+  exclude: ['initial_password'],
+  principal: onboardingPrincipal,
+})
 const saving = ref(false)
+const onboardingFieldError = ref(null)
+let formInitialSnapshot = ''
+const { dialog: confirmDialog, askConfirm, accept: acceptConfirm, cancel: cancelConfirm } = useConfirmDialog()
 const initialPasswordVisible = ref(false)
 const authorizationPreview = ref(null)
 const authorizationPreviewLoading = ref(false)
@@ -53,6 +74,7 @@ let previousBodyOverflow = ''
 const prereqRefreshKey = ref(0)
 
 onMounted(() => {
+  formInitialSnapshot = createFormSnapshot(form)
   // 向导使用自己的滚动容器。锁定其后的页面，避免弹窗边缘的
   // 滚轮事件滚动底层设置页面。
   previousBodyOverflow = document.body.style.overflow
@@ -128,8 +150,20 @@ watch(
   { immediate: true },
 )
 
-function close() {
-  if (!saving.value) emit('close')
+async function close() {
+  if (saving.value) return
+  if (hasUnsavedChanges(formInitialSnapshot, form)) {
+    const ok = await askConfirm({
+      title: '放弃新增员工？',
+      description: '当前入职向导已有填写内容，关闭后这些内容不会保留。',
+      confirmText: '放弃填写',
+      cancelText: '继续填写',
+      danger: true,
+    })
+    if (!ok) return
+  }
+  draftRecovery.clear()
+  emit('close')
 }
 
 function handlePrerequisitesContinue() {
@@ -154,27 +188,30 @@ function goToStep(step) {
   }
 }
 
-function optionalText(value) {
-  const normalized = String(value ?? '').trim()
-  return normalized || null
+// optionalText 已并入 utils/userInputValidation.js（与本组件原实现逐字相同）。
+
+function fieldValidationError(field, message) {
+  const error = new IamError(message)
+  error.field = field
+  return error
 }
 
 function validateUser() {
   const displayName = String(form.display_name ?? '').trim()
-  if (!displayName) throw new IamError('请填写员工姓名。')
-  if (Array.from(displayName).length > 100) throw new IamError('员工姓名不能超过 100 个字符。')
+  if (!displayName) throw fieldValidationError('display_name', '请填写员工姓名。')
+  if (Array.from(displayName).length > 100) throw fieldValidationError('display_name', '员工姓名不能超过 100 个字符。')
 
   const email = optionalText(form.email)
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new IamError('邮箱格式不正确。')
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw fieldValidationError('email', '邮箱格式不正确。')
 
   const mobile = optionalText(form.mobile)
   if (mobile) {
-    if (Array.from(mobile).length > 32) throw new IamError('手机号不能超过 32 个字符。')
-    if (!/^\+?\d+$/.test(mobile.replace(/[\s-]/g, ''))) throw new IamError('手机号只能包含数字、空格、连字符或开头的加号。')
+    if (Array.from(mobile).length > 32) throw fieldValidationError('mobile', '手机号不能超过 32 个字符。')
+    if (!/^\+?\d+$/.test(mobile.replace(/[\s-]/g, ''))) throw fieldValidationError('mobile', '手机号只能包含数字、空格、连字符或开头的加号。')
   }
   const validUntil = form.user_validity_mode === 'TEMPORARY' ? resolveOnboardingExpiresAt(form.user_valid_until) : null
   if (form.user_validity_mode === 'TEMPORARY' && (!validUntil || new Date(validUntil).getTime() <= Date.now())) {
-    throw new IamError('用户有效截止时间必须晚于当前时间。')
+    throw fieldValidationError('user_valid_until', '用户有效截止时间必须晚于当前时间。')
   }
   return { display_name: displayName, email, mobile, status: form.status || 'ACTIVE', valid_until: validUntil }
 }
@@ -183,33 +220,33 @@ function validateAccount() {
   if (!form.create_account) return null
   const accountName = String(form.account_name ?? '').trim()
   if (Array.from(accountName).length < 3 || Array.from(accountName).length > 64) {
-    throw new IamError('账号名长度必须为 3–64 个字符。')
+    throw fieldValidationError('account_name', '账号名长度必须为 3–64 个字符。')
   }
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(accountName)) {
-    throw new IamError('账号名必须以字母或数字开头，且只能包含字母、数字、点、下划线和连字符。')
+    throw fieldValidationError('account_name', '账号名必须以字母或数字开头，且只能包含字母、数字、点、下划线和连字符。')
   }
 
   const password = String(form.initial_password ?? '')
-  if (Array.from(password).length < 8 || Array.from(password).length > 128) throw new IamError('初始密码长度必须为 8–128 个字符。')
-  if (/\s/.test(password)) throw new IamError('初始密码不能包含空白字符。')
+  if (Array.from(password).length < 8 || Array.from(password).length > 128) throw fieldValidationError('initial_password', '初始密码长度必须为 8–128 个字符。')
+  if (/\s/.test(password)) throw fieldValidationError('initial_password', '初始密码不能包含空白字符。')
   if (!/[A-Z]/.test(password) || !/[a-z]/.test(password) || !/\d/.test(password) || !/[^A-Za-z0-9]/.test(password)) {
-    throw new IamError('初始密码必须同时包含大写字母、小写字母、数字和特殊字符。')
+    throw fieldValidationError('initial_password', '初始密码必须同时包含大写字母、小写字母、数字和特殊字符。')
   }
 
   const validUntil = form.validity_mode === 'PERMANENT' ? null : resolveOnboardingExpiresAt(form.valid_until)
   if (form.validity_mode !== 'PERMANENT' && (!validUntil || new Date(validUntil).getTime() <= Date.now())) {
-    throw new IamError('临时账号的有效截止时间必须晚于当前时间。')
+    throw fieldValidationError('valid_until', '临时账号的有效截止时间必须晚于当前时间。')
   }
   return { account_name: accountName, initial_password: password, valid_until: validUntil }
 }
 
 function validateMembership() {
-  if (!form.org_unit_id || !form.position_id) throw new IamError('请选择员工所属组织和岗位，用户必须对应一条任职关系。')
-  if (!membershipPositions.value.some((item) => positionId(item) === form.position_id)) throw new IamError('请选择当前组织下的岗位。')
+  if (!form.org_unit_id || !form.position_id) throw fieldValidationError('org_unit_id', '请选择员工所属组织和岗位，用户必须对应一条任职关系。')
+  if (!membershipPositions.value.some((item) => positionId(item) === form.position_id)) throw fieldValidationError('position_id', '请选择当前组织下的岗位。')
 
   const isShortTerm = form.membership_validity_mode === 'SHORT_TERM'
-  if (isShortTerm && (!form.effective_from || !form.effective_to)) throw new IamError('短期任职必须同时填写生效日期和失效日期。')
-  if (isShortTerm && form.effective_from > form.effective_to) throw new IamError('生效日期不能晚于失效日期。')
+  if (isShortTerm && (!form.effective_from || !form.effective_to)) throw fieldValidationError('effective_from', '短期任职必须同时填写生效日期和失效日期。')
+  if (isShortTerm && form.effective_from > form.effective_to) throw fieldValidationError('effective_to', '生效日期不能晚于失效日期。')
 
   return {
     org_unit_id: form.org_unit_id,
@@ -267,10 +304,16 @@ async function submit() {
     const extras = [account ? '本地账号' : '', membership ? '任职关系' : ''].filter(Boolean)
     const compatibilityMode = result?.onboarding_mode === 'COMPATIBILITY'
     emit('toast', `${displayName} 已创建${extras.length ? `，并已建立${extras.join('、')}` : ''}。${compatibilityMode ? '后端原子创建接口尚不可用，已按兼容路径完成：用户 → 账号 → 任职关系。' : ''}`)
+    draftRecovery.clear()
     emit('completed', result)
     emit('close')
   } catch (error) {
+    onboardingFieldError.value = error?.field ? { field: error.field, message: error.message } : null
     emit('toast', onboardingFailureMessage(error))
+    if (error?.field) {
+      await nextTick()
+      document.querySelector(`[data-onboarding-field="${error.field}"]`)?.focus()
+    }
   } finally {
     saving.value = false
   }
@@ -279,7 +322,7 @@ async function submit() {
 
 <template>
   <div class="console-modal-backdrop" role="presentation" @click.self="close">
-    <section class="console-detail-modal console-wizard-modal personnel-workbench-modal" role="dialog" aria-modal="true" aria-label="新增员工">
+    <section ref="onboardingDialogElement" class="console-detail-modal console-wizard-modal personnel-workbench-modal" role="dialog" aria-modal="true" aria-label="新增员工" @keydown.esc.prevent="close">
       <header class="personnel-workbench-header">
         <div>
           <p class="console-modal-eyebrow"><span class="personnel-workbench-eyebrow-icon"><ConsoleIcon name="organization" /></span>人员工作台 · 入职向导</p>
@@ -290,6 +333,15 @@ async function submit() {
       </header>
 
       <form class="console-wizard-body" @submit.prevent="submit">
+        <div v-if="draftRecovery.hasDraft.value" class="console-form-error onboarding-draft-recovery" role="status">
+          <span>发现上次未完成的入职草稿。初始密码不会保存，恢复后需要重新填写。</span>
+          <button type="button" @click="draftRecovery.restore()">恢复草稿</button>
+          <button type="button" @click="draftRecovery.discard()">忽略</button>
+        </div>
+        <p v-if="onboardingFieldError" class="console-form-error onboarding-field-error" role="alert">
+          {{ onboardingFieldError.message }}
+          <button type="button" @click="onboardingFieldError = null">关闭</button>
+        </p>
         <div class="settings-active-summary personnel-workbench-summary">
           <span class="settings-active-summary-icon"><ConsoleIcon name="info" /></span>
           <div class="settings-active-summary-copy">
@@ -360,12 +412,12 @@ async function submit() {
               </div>
             </div>
             <div class="console-form-grid">
-              <label class="console-form-item"><span>展示姓名 *</span><input v-model="form.display_name" required maxlength="100" placeholder="例如：张三" /></label>
+              <label class="console-form-item"><span>展示姓名 *</span><input v-model="form.display_name" data-onboarding-field="display_name" required maxlength="100" placeholder="例如：张三" /></label>
               <label class="console-form-item"><span>状态</span><select v-model="form.status"><option value="ACTIVE">启用</option><option value="DISABLED">停用</option></select></label>
-              <label class="console-form-item"><span>邮箱</span><input v-model="form.email" type="email" placeholder="例如：zhang.san@example.com"  maxlength="320"/></label>
-              <label class="console-form-item"><span>手机号</span><input v-model="form.mobile" maxlength="32" placeholder="例如：13800000000" /></label>
+              <label class="console-form-item"><span>邮箱</span><input v-model="form.email" data-onboarding-field="email" type="email" placeholder="例如：zhang.san@example.com"  maxlength="320"/></label>
+              <label class="console-form-item"><span>手机号</span><input v-model="form.mobile" data-onboarding-field="mobile" maxlength="32" placeholder="例如：13800000000" /></label>
               <label class="console-form-item"><span>用户有效期 *</span><select v-model="form.user_validity_mode"><option value="PERMANENT">长期有效</option><option value="TEMPORARY">指定截止时间</option></select></label>
-              <label v-if="form.user_validity_mode === 'TEMPORARY'" class="console-form-item"><span>用户有效截止时间 *</span><input v-model="form.user_valid_until" required type="datetime-local" /><small class="console-wizard-field-help">到期后该用户的全部账号和现有会话都会失效。</small></label>
+              <label v-if="form.user_validity_mode === 'TEMPORARY'" class="console-form-item"><span>用户有效截止时间 *</span><input v-model="form.user_valid_until" data-onboarding-field="user_valid_until" required type="datetime-local" /><small class="console-wizard-field-help">到期后该用户的全部账号和现有会话都会失效。</small></label>
             </div>
           </section>
 
@@ -379,10 +431,10 @@ async function submit() {
               <label class="console-wizard-toggle"><input v-model="form.create_account" type="checkbox" /><span>同时创建</span></label>
             </div>
             <div v-if="form.create_account" class="console-form-grid">
-              <label class="console-form-item"><span>登录账号 *</span><input v-model="form.account_name" required minlength="3" maxlength="64" placeholder="例如：zhang.san" /><small class="console-wizard-field-help">账号必须唯一，以字母或数字开头。</small></label>
-              <label class="console-form-item"><span>初始密码 *</span><div class="console-password-field"><input v-model="form.initial_password" :type="initialPasswordVisible ? 'text' : 'password'" required minlength="8" maxlength="128" autocomplete="new-password" /><button class="console-password-toggle" type="button" :aria-label="initialPasswordVisible ? '隐藏密码' : '显示密码'" @click="initialPasswordVisible = !initialPasswordVisible"><ConsoleIcon :name="initialPasswordVisible ? 'eye-off' : 'eye'" /></button></div></label>
+              <label class="console-form-item"><span>登录账号 *</span><input v-model="form.account_name" data-onboarding-field="account_name" required minlength="3" maxlength="64" placeholder="例如：zhang.san" /><small class="console-wizard-field-help">账号必须唯一，以字母或数字开头。</small></label>
+              <label class="console-form-item"><span>初始密码 *</span><div class="console-password-field"><input v-model="form.initial_password" data-onboarding-field="initial_password" :type="initialPasswordVisible ? 'text' : 'password'" required minlength="8" maxlength="128" autocomplete="new-password" /><button class="console-password-toggle" type="button" :aria-label="initialPasswordVisible ? '隐藏密码' : '显示密码'" @click="initialPasswordVisible = !initialPasswordVisible"><ConsoleIcon :name="initialPasswordVisible ? 'eye-off' : 'eye'" /></button></div></label>
               <label class="console-form-item"><span>账号有效期 *</span><select v-model="form.validity_mode"><option value="TEMPORARY">临时（默认 1 天）</option><option value="PERMANENT">永久</option></select></label>
-              <label v-if="form.validity_mode !== 'PERMANENT'" class="console-form-item"><span>有效截止时间 *</span><input v-model="form.valid_until" required type="datetime-local" /><small class="console-wizard-field-help">到期后账号不能登录。</small></label>
+              <label v-if="form.validity_mode !== 'PERMANENT'" class="console-form-item"><span>有效截止时间 *</span><input v-model="form.valid_until" data-onboarding-field="valid_until" required type="datetime-local" /><small class="console-wizard-field-help">到期后账号不能登录。</small></label>
             </div>
           </section>
 
@@ -396,12 +448,12 @@ async function submit() {
             </div>
             <p v-if="selectionNotice" class="console-wizard-empty error" role="alert">{{ selectionNotice }}</p>
             <div class="console-form-grid">
-              <label class="console-form-item"><span>所属组织 *</span><select v-model="form.org_unit_id" required><option value="">请选择组织</option><option v-for="item in organizationOptions" :key="item.option_id" :value="item.option_id">{{ item.option_label }}</option></select></label>
-              <label class="console-form-item"><span>岗位 *</span><select v-model="form.position_id" :disabled="!form.org_unit_id || !membershipPositions.length" required><option value="">{{ !form.org_unit_id ? '请先选择组织' : (membershipPositions.length ? '请选择岗位' : '当前组织暂无岗位') }}</option><option v-for="item in membershipPositions" :key="positionId(item)" :value="positionId(item)">{{ positionName(item) }}</option></select><small v-if="form.org_unit_id && !membershipPositions.length" class="console-wizard-field-help">当前组织暂无岗位，请先在“岗位”中创建。</small></label>
+              <label class="console-form-item"><span>所属组织 *</span><select v-model="form.org_unit_id" data-onboarding-field="org_unit_id" required><option value="">请选择组织</option><option v-for="item in organizationOptions" :key="item.option_id" :value="item.option_id">{{ item.option_label }}</option></select></label>
+              <label class="console-form-item"><span>岗位 *</span><select v-model="form.position_id" data-onboarding-field="position_id" :disabled="!form.org_unit_id || !membershipPositions.length" required><option value="">{{ !form.org_unit_id ? '请先选择组织' : (membershipPositions.length ? '请选择岗位' : '当前组织暂无岗位') }}</option><option v-for="item in membershipPositions" :key="positionId(item)" :value="positionId(item)">{{ positionName(item) }}</option></select><small v-if="form.org_unit_id && !membershipPositions.length" class="console-wizard-field-help">当前组织暂无岗位，请先在“岗位”中创建。</small></label>
               <label class="console-form-item"><span>任职类型 *</span><select v-model="form.membership_type"><option value="PRIMARY">主组织</option><option value="SECONDARY">次组织 / 兼岗</option></select></label>
               <label class="console-form-item"><span>生效方式 *</span><select v-model="form.membership_validity_mode"><option value="LONG_TERM">长期生效</option><option value="SHORT_TERM">短期生效</option></select></label>
-              <label v-if="form.membership_validity_mode === 'SHORT_TERM'" class="console-form-item"><span>生效日期 *</span><input v-model="form.effective_from" required type="date" /></label>
-              <label v-if="form.membership_validity_mode === 'SHORT_TERM'" class="console-form-item"><span>失效日期 *</span><input v-model="form.effective_to" required type="date" /></label>
+              <label v-if="form.membership_validity_mode === 'SHORT_TERM'" class="console-form-item"><span>生效日期 *</span><input v-model="form.effective_from" data-onboarding-field="effective_from" required type="date" /></label>
+              <label v-if="form.membership_validity_mode === 'SHORT_TERM'" class="console-form-item"><span>失效日期 *</span><input v-model="form.effective_to" data-onboarding-field="effective_to" required type="date" /></label>
               <label class="console-wizard-checkbox console-form-item full"><input v-model="form.inherit_authorization" type="checkbox" /><div><span>参与岗位授权继承</span><small class="console-wizard-field-help">关闭不会删除或影响日后设置的个人手工例外授权。</small></div></label>
             </div>
           </section>
@@ -437,6 +489,17 @@ async function submit() {
         </div>
       </form>
     </section>
+
+    <ConfirmDialog
+      v-if="confirmDialog"
+      :title="confirmDialog.title"
+      :description="confirmDialog.description"
+      :confirm-text="confirmDialog.confirmText"
+      :cancel-text="confirmDialog.cancelText"
+      :danger="confirmDialog.danger"
+      @confirm="acceptConfirm"
+      @cancel="cancelConfirm"
+    />
   </div>
 </template>
 
@@ -445,6 +508,7 @@ async function submit() {
 .personnel-workbench-header { position: relative; overflow: hidden; padding: 1.45rem 1.75rem 1.3rem; background: linear-gradient(135deg, #f7faff 0%, #edf4ff 100%); border-bottom: 1px solid #e1eaf5; }
 .personnel-workbench-header::after { position: absolute; right: -3rem; bottom: -4.5rem; width: 13rem; height: 13rem; content: ''; border: 1.5rem solid rgba(110, 145, 220, .08); border-radius: var(--radius-pill); }
 .personnel-workbench-header > div { position: relative; z-index: 1; }
+.personnel-workbench-header .console-modal-close { position: relative; z-index: 2; }
 .personnel-workbench-header h2 { margin-top: .35rem; font-size: 22px; letter-spacing: -.02em; }
 .personnel-workbench-header-hint { margin: .4rem 0 0; color: var(--muted, #71829b); font-size: 12.5px; line-height: 1.5; }
 .personnel-workbench-eyebrow-icon { display: inline-grid; place-items: center; width: 1.35rem; height: 1.35rem; margin-right: .35rem; color: #4b70ca; background: #dfeaff; border-radius: .4rem; vertical-align: middle; }

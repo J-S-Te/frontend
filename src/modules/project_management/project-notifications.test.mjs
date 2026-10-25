@@ -5,6 +5,7 @@ import { formatUserError } from '../shared/utils/userError.js'
 
 const view = await readFile(new URL('./views/ProjectManagementView.vue', import.meta.url), 'utf8')
 const inbox = await readFile(new URL('./components/ProjectNotificationCenter.vue', import.meta.url), 'utf8')
+const popover = await readFile(new URL('./components/ProjectNotificationPopover.vue', import.meta.url), 'utf8')
 function mountInbox(api) {
   const script = inbox.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '')
   const ref = (value) => ({ value })
@@ -15,7 +16,7 @@ function mountInbox(api) {
 test('项目系统挂载个人通知页面并提供侧栏和铃铛入口', () => {
   assert.match(view, /key: 'notifications', label: '个人通知中心'/)
   assert.match(view, /ProjectNotificationCenter v-if="activeSection === 'notifications'"/)
-  assert.match(view, /查看全部通知/)
+  assert.match(popover, /查看全部通知/)
 })
 
 test('通知列表请求携带当前页和未读筛选，并显示服务端分页总数', async () => {

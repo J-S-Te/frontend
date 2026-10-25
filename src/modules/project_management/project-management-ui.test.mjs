@@ -4,6 +4,10 @@ import { readFile } from 'node:fs/promises'
 import projectManagementModule from './module.js'
 
 const source = await readFile(new URL('./views/ProjectManagementView.vue', import.meta.url), 'utf8')
+const drawerSource = await readFile(new URL('./components/OperationDetailDrawer.vue', import.meta.url), 'utf8')
+const popoverSource = await readFile(new URL('./components/ProjectNotificationPopover.vue', import.meta.url), 'utf8')
+const notificationSource = await readFile(new URL('./composables/useProjectNotifications.js', import.meta.url), 'utf8')
+const displaySource = await readFile(new URL('./projectDisplay.js', import.meta.url), 'utf8')
 const styles = await readFile(new URL('./styles/project-management.css', import.meta.url), 'utf8')
 const pickerSource = await readFile(new URL('./components/ServiceItemPicker.vue', import.meta.url), 'utf8')
 const searchableSelectSource = await readFile(new URL('./components/SearchableSelect.vue', import.meta.url), 'utf8')
@@ -36,7 +40,7 @@ test('项目管理页面覆盖原型的五个业务域与核心交互', () => {
   assert.match(source, /function confirmDecomposition\(\)/)
   assert.match(source, /function exportProjects\(\)/)
   assert.match(source, /class="pm-kanban"/)
-  assert.match(source, /class="pm-drawer"/)
+  assert.match(drawerSource, /class="pm-drawer"/)
   assert.match(source, /onMounted\(loadWorkspace\)/)
   assert.match(source, /await confirmServiceItemsRequest\(ids\)/)
   assert.match(source, /await setRuleEnabled\(rule\.id, rule\.kind \|\| activeSection\.value, next\)/)
@@ -57,7 +61,7 @@ test('等保附属渗透测试以专项卡片呈现且不混入服务项统计',
   assert.match(source, /penetrationPackageStats/)
   assert.match(source, /渗透专项（待确认/)
   assert.match(source, /penetration_work_package/)
-  assert.match(source, /String\(item\?\.test_mode \|\| ''\)\.toUpperCase\(\) !== 'PENETRATION'/)
+  assert.match(displaySource, /String\(item\?\.test_mode \|\| ''\)\.toUpperCase\(\) !== 'PENETRATION'/)
   assert.match(penetrationWorkPackageSource, /不计入服务项与结算/)
   assert.match(penetrationWorkPackageSource, /decision_status/)
   assert.match(penetrationWorkPackageSource, /execution_status/)
@@ -228,7 +232,8 @@ test('顶栏右上角只剩通知铃铛与账号头像，账号名与退出入�
   assert.match(source, /const names = new Map\(applicationRoles\.value\.map\(\(role\) => \[role\.code, role\.name\]\)\)/)
   assert.match(source, /new Set\(roles\.map\(\(role\) => names\.get\(role\) \|\| role\)\.filter\(Boolean\)\)\]\.join\('、'\) \|\| '未分配角色'/)
   // 目录是静态清单：随工作区加载预热（不 await，失败只影响副标题文案，不阻塞首屏）。
-  const loadWorkspaceBody = source.match(/async function loadWorkspace\(\)[\s\S]*?\n\}/)
+  // 写后随动刷新经 reportError=false 走保存/刷新分离（refreshAfterWrite）。
+  const loadWorkspaceBody = source.match(/async function loadWorkspace\(\{ reportError = true \} = \{\}\)[\s\S]*?\n\}/)
   assert.ok(loadWorkspaceBody, '工作区加载函数应存在')
   assert.match(loadWorkspaceBody[0], /^\s*loadApplicationRoles\(\)$/m)
   // 样式：新头像/账号行存在，旧顶栏用户块彻底移除（避免留下死规则）。
@@ -243,25 +248,25 @@ test('顶栏右上角只剩通知铃铛与账号头像，账号名与退出入�
 })
 
 test('通知铃铛显示业务待办并在五秒后带动画收起', () => {
-  assert.match(source, /function toggleNotifications\(\) \{/)
-  assert.match(source, /notificationAutoCloseTimer = window\.setTimeout\(closeNotifications, 5000\)/)
-  assert.match(source, /window\.clearTimeout\(notificationAutoCloseTimer\)/)
+  assert.match(notificationSource, /function toggleNotifications\(\) \{/)
+  assert.match(notificationSource, /notificationAutoCloseTimer = window\.setTimeout\(closeNotifications, 5000\)/)
+  assert.match(notificationSource, /window\.clearTimeout\(notificationAutoCloseTimer\)/)
   assert.match(source, /@click="toggleNotifications"/)
   assert.match(source, /<Transition name="pm-notification-pop">/)
-  assert.match(source, /<b>业务待办<\/b>/)
-  assert.match(source, /id="project-notifications" class="pm-notifications" role="status" aria-live="polite"/)
+  assert.match(popoverSource, /<b>业务待办<\/b>/)
+  assert.match(popoverSource, /id="project-notifications" class="pm-notifications" role="status" aria-live="polite"/)
   assert.match(styles, /\.pm-notification-pop-enter-active,[\s\S]*?transition: opacity \.2s ease, transform \.2s ease;/)
   assert.match(styles, /\.pm-notification-pop-enter-from,[\s\S]*?transform: translateY\(-8px\) scale\(\.98\);/)
 })
 
 test('通知铃铛只读取未点击事件，点击后持久化已读并立即移除', () => {
   assert.match(notificationApiSource, /if \(unreadOnly\) query\.set\('unread_only', 'true'\)/)
-  assert.match(source, /listNotificationInbox\(\{ page: 1, pageSize: 20, unreadOnly: true \}\)/)
-  assert.match(source, /notificationItems\.value = \(inbox\?\.items \|\| \[\]\)\.filter\(\(item\) => !item\.read_at\)/)
-  assert.match(source, /await markNotificationRead\(deliveryID\)/)
-  assert.match(source, /notificationItems\.value = notificationItems\.value\.filter\(\(entry\) => entry\.delivery_id !== deliveryID\)/)
-  assert.match(source, /notificationCount\.value = Math\.max\(0, notificationCount\.value - 1\)/)
-  assert.match(source, /message="暂无未读通知"/)
+  assert.match(notificationSource, /listNotificationInbox\(\{ page: 1, pageSize: 20, unreadOnly: true \}\)/)
+  assert.match(notificationSource, /notificationItems\.value = \(inbox\?\.items \|\| \[\]\)\.filter\(\(item\) => !item\.read_at\)/)
+  assert.match(notificationSource, /await markNotificationRead\(deliveryID\)/)
+  assert.match(notificationSource, /notificationItems\.value = notificationItems\.value\.filter\(\(entry\) => entry\.delivery_id !== deliveryID\)/)
+  assert.match(notificationSource, /notificationCount\.value = Math\.max\(0, notificationCount\.value - 1\)/)
+  assert.match(popoverSource, /message="暂无未读通知"/)
   assert.doesNotMatch(source, /pendingDeviations\.length \+ decompositionItems\.value\.length \+ inboxItems\.value\.length/)
   assert.match(styles, /\.pm-notifications \{[\s\S]*?max-height: min\(520px,[\s\S]*?overflow-y: auto;/)
 })
@@ -403,7 +408,7 @@ test('待分配服务项可按拆解管理权限退回拆解确认', () => {
   assert.match(source, /请输入退回拆解确认的原因/)
   assert.match(source, /returnServiceItemToDecomposition\(item\.id, \{ reason: String\(reason\)\.trim\(\), expected_version: Number\(item\.version\) \|\| 0 \}\)/)
   assert.match(source, /v-if="canManageDecomposition"[^>]*@click="returnSelectedToDecomposition"[^>]*>退回拆解确认/)
-  assert.match(source, /DECOMPOSITION_RETURNED: '服务项已退回拆解确认'/)
+  assert.match(displaySource, /DECOMPOSITION_RETURNED: '服务项已退回拆解确认'/)
   assert.match(pmApiSource, /service-items\/\$\{encodeURIComponent\(itemID\)\}\/decomposition-return/)
 })
 
@@ -445,9 +450,9 @@ test('所有业务节点只展示当前归属项目并在回退后清除原节�
 })
 
 test('独立人员查询区已移除，三个下拉按对应角色读取完整人员资质库', () => {
-  assert.match(source, /teamLead: 'team_lead'/)
-  assert.match(source, /projectManager: 'project_manager'/)
-  assert.match(source, /engineer: 'engineer'/)
+  assert.match(displaySource, /teamLead: 'team_lead'/)
+  assert.match(displaySource, /projectManager: 'project_manager'/)
+  assert.match(displaySource, /engineer: 'engineer'/)
   const assignmentPersonnelLoader = source.match(/async function loadPersonnel\(\) \{[\s\S]*?\n\}\n\n\/\/ 人员资质只能/)
   assert.ok(assignmentPersonnelLoader, '缺少任务分配人员资质加载函数')
   assert.match(assignmentPersonnelLoader[0], /role_code: roleCode/)
@@ -500,7 +505,7 @@ test('操作台各区块的查看按钮真实打开详情抽屉而不是只提�
   assert.match(source, /function openOperationDetail\(/)
   assert.match(source, /const operationDetailFields = computed/)
   assert.match(source, /@click="openOperationDetail\(row\)"/)
-  assert.match(source, /operationSectionLabel\(operationDetail\.section\)/)
+  assert.match(drawerSource, /operationSectionLabel\(detail\.section\)/)
   assert.doesNotMatch(source, /@click="showToast\(`已打开：\$\{row\.name\}`\)"/)
 })
 
@@ -733,7 +738,7 @@ test('发布实施计划在提交前拦截未完成的前置步骤', () => {
 test('实施计划的时间在 RFC3339 与 datetime-local 之间正确往返', () => {
   // 后端存 RFC3339(UTC)，<input type="datetime-local"> 只接受本地 YYYY-MM-DDTHH:mm。
   // 直接把 ISO 串塞进输入框会被浏览器判为非法值并显示为空，再次编辑已有计划时时间会"丢失"。
-  assert.match(source, /function toDateTimeLocal\(value\)/)
+  assert.match(displaySource, /function toDateTimeLocal\(value\)/)
   assert.match(source, /plannedStart: toDateTimeLocal\(item\.planned_start \|\| plan\.planned_start\)/)
   assert.match(source, /plannedEnd: toDateTimeLocal\(item\.planned_end \|\| plan\.planned_end\)/)
   assert.match(source, /authStart: toDateTimeLocal\(plan\.auth_start\)/)
@@ -896,8 +901,8 @@ test('项目列表卡片按角色职责展示并使用服务端裁剪后的统�
 test('实施计划提交人员清单，设备清单在实施准备登记并校验占用', () => {
   // 计划只提交人员：设备与使用时段随实施准备提交。
   assert.match(source, /personnel: form\.personnel\.map\(\(row\) => \(\{ resource_type: 'PERSON', resource_id: row\.resourceID, window_start: row\.windowStart, window_end: row\.windowEnd, note: row\.note \}\)\)/)
-  assert.match(source, /function planPersonnelFor\(/)
-  assert.match(source, /function planPersonnelRows\(/)
+  assert.match(displaySource, /function planPersonnelFor\(/)
+  assert.match(displaySource, /function planPersonnelRows\(/)
   // 至少一名人员与服务端同口径，先给即时提示。
   assert.match(source, /if \(!personRows\.length\) \{ showToast\('请至少添加一名实施人员', 'warning'\); return \}/)
   // 实施准备：设备清单选填；无需设备时可直接提交，选择设备后仍提交并校验使用时段。
@@ -905,7 +910,7 @@ test('实施计划提交人员清单，设备清单在实施准备登记并校�
   assert.match(source, /设备清单（选填）/)
   assert.match(source, /本服务项无需设备时可留空/)
   assert.match(source, /equipment: form\.equipment\.map\(\(row\) => \(\{ resource_type: 'EQUIPMENT', resource_id: row\.resourceID, window_start: row\.windowStart, window_end: row\.windowEnd, note: row\.note \}\)\)/)
-  assert.match(source, /function planEquipmentFor\(/)
+  assert.match(displaySource, /function planEquipmentFor\(/)
   // 添加设备只能从设备目录挑选，不调用设备维护接口（设备档案由设备管理员维护）。
   assert.match(source, /function addPlanEquipment\(equipmentItem\)/)
   assert.match(source, /const planEquipmentFiltered = computed/)
@@ -914,8 +919,9 @@ test('实施计划提交人员清单，设备清单在实施准备登记并校�
   // 已占用设备置灰并显示占用方与日期。
   assert.match(source, /function equipmentReservationLabel\(resourceID\)/)
   assert.match(source, /listEquipmentReservations\(targetID\)/)
-  assert.match(source, /equipmentRequestVersion/)
-  assert.match(source, /workspaceRequestVersion/)
+  // 设备占用与工作区读取已迁移到 requestScope：票据 key 含服务项标识，迟到响应不回写。
+  assert.match(source, /reservationScope\.begin\(`RESERVATIONS:\$\{targetID\}`\)/)
+  assert.match(source, /workspaceScope\.begin\('WORKSPACE'\)/)
   assert.match(source, /已被占用/)
   assert.match(source, /pm-dialog-wide/)
 })
@@ -925,8 +931,8 @@ test('设备在位状态与使用范围在设备能力维护中维护，借出�
   assert.match(source, /usage_scope: equipmentForm\.value\.usageScope/)
   assert.match(source, /<option value="COMPANY_ONLY">仅在公司使用（不可借出）<\/option>/)
   // 在位状态由占用时段派生，列表显示借出中的占用方与时段，并提供归还。
-  assert.match(source, /function equipmentPresenceLabel\(item\)/)
-  assert.match(source, /不在公司（借出中）/)
+  assert.match(displaySource, /function equipmentPresenceLabel\(item\)/)
+  assert.match(displaySource, /不在公司（借出中）/)
   assert.match(source, /async function returnEquipment\(item\)/)
   assert.match(source, /returnServiceItemEquipment\(serviceItemID, item\.resource_id\)/)
   // 选择器按原因置灰：仅在公司使用 > 当前不在公司 > 时段已被占用。
@@ -1015,7 +1021,7 @@ test('人员资质档案展示并复核基础平台身份状态', () => {
   assert.match(source, /^\s+syncPersonnelIdentities,$/m)
   assert.match(source, /async function syncIdentities\(\)/)
   assert.match(source, /const result = await syncPersonnelIdentities\(\)/)
-  assert.match(source, /function identityStatusLabel\(status\)/)
+  assert.match(displaySource, /function identityStatusLabel\(status\)/)
   assert.match(source, /已离职\/查无此人/)
   assert.match(source, /@click="syncIdentities"/)
   assert.match(source, /<th>人员状态<\/th>/)
@@ -1098,7 +1104,7 @@ test('交付事件名与后端常量逐字一致', () => {
   // 后端只发 FIELD_COMPLETED；曾写成 FIELD_IMPLEMENTATION_COMPLETED，导致趋势图恒空。
   assert.match(source, /event\.type === 'FIELD_COMPLETED'/)
   assert.doesNotMatch(source, /FIELD_IMPLEMENTATION_COMPLETED/)
-  assert.match(source, /FIELD_COMPLETED: '现场测评已结束'/)
+  assert.match(displaySource, /FIELD_COMPLETED: '现场测评已结束'/)
 })
 
 test('拆解调整入口按 project.decomposition.manage 门控并调用真实接口', () => {
@@ -1158,8 +1164,8 @@ test('字段级权限的角色是服务端目录驱动的多选下拉，多选�
   assert.doesNotMatch(source, /key: 'role_code', label: '角色', field: 'text'/)
   assert.match(source, /v-if="field\.field === 'roles'" class="pm-field pm-span-full"/)
   // 默认多选：新建时选中值为数组，不要求按住 ⌘/Ctrl 加选。
-  assert.match(source, /function defaultConfigFieldValue\(field\)/)
-  assert.match(source, /if \(field\.field === 'roles' \|\| field\.field === 'automation-roles'\) return \[\]/)
+  assert.match(displaySource, /function defaultConfigFieldValue\(field\)/)
+  assert.match(displaySource, /if \(field\.field === 'roles' \|\| field\.field === 'automation-roles'\) return \[\]/)
   assert.match(source, /<SearchableSelect v-model="configForm\.role_codes" :options="configRoleOptions" value-key="code" label-key="name"/)
   assert.match(source, /placeholder="请选择角色（可多选）" search-placeholder="搜索角色名称或编码"/)
   assert.match(source, /aria-label="选择字段级权限角色" menu-z-index="calc\(var\(--pm-z-modal, 50\) \+ 1\)" multiple required/)
@@ -1184,8 +1190,8 @@ test('字段级权限的角色是服务端目录驱动的多选下拉，多选�
 test('字段级权限列表和矩阵将角色、字段与访问级别显示为中文', () => {
   const permissionMeta = source.slice(source.indexOf("{ kind: 'permissions'"), source.indexOf("{ kind: 'sla'"))
   assert.match(permissionMeta, /columns: \[\{ key: 'role_label', label: '角色' \}, \{ key: 'field_label', label: '字段' \}, \{ key: 'access_level_label', label: '访问级别' \}\]/)
-  assert.match(source, /const fieldPermissionFieldLabel = Object\.freeze\(Object\.fromEntries\(fieldPermissionFieldOptions\.map/)
-  assert.match(source, /const fieldPermissionAccessLevelLabel = Object\.freeze\(\{ hidden: '隐藏', edit: '可编辑', view: '只读' \}\)/)
+  assert.match(displaySource, /const fieldPermissionFieldLabel = Object\.freeze\(Object\.fromEntries\(fieldPermissionFieldOptions\.map/)
+  assert.match(displaySource, /const fieldPermissionAccessLevelLabel = Object\.freeze\(\{ hidden: '隐藏', edit: '可编辑', view: '只读' \}\)/)
   assert.match(source, /role_label: applicationRoleLabel\(rule\.role_code\)/)
   assert.match(source, /field_label: permissionFieldLabel\(rule\.field_name\)/)
   assert.match(source, /access_level_label: fieldPermissionAccessLevelLabel\[rule\.access_level\]/)
@@ -1199,9 +1205,9 @@ test('字段级权限只能从有效字段白名单选择且仅开放真实生�
     'batch', 'site', 'requirement', 'system', 'system_level', 'special', 'test_mode',
     'source_service_id', 'team_lead_id', 'project_manager_id', 'engineer_ids',
   ]
-  assert.match(source, /const fieldPermissionFieldOptions = Object\.freeze\(\[/)
+  assert.match(displaySource, /const fieldPermissionFieldOptions = Object\.freeze\(\[/)
   for (const field of supportedFields) {
-    assert.match(source, new RegExp(`\\{ value: '${field}', label:`), `missing field permission option ${field}`)
+    assert.match(displaySource, new RegExp(`\\{ value: '${field}', label:`), `missing field permission option ${field}`)
   }
   assert.match(source, /key: 'field_name', label: '字段', field: 'permission-field', required: true, options: fieldPermissionFieldOptions/)
   assert.match(source, /field\.field === 'permission-field'/)
@@ -1212,7 +1218,7 @@ test('字段级权限只能从有效字段白名单选择且仅开放真实生�
   const permissionMeta = source.slice(source.indexOf("{ kind: 'permissions'"), source.indexOf("{ kind: 'sla'"))
   assert.match(permissionMeta, /options: \[\{ value: 'hidden', label: '隐藏（接口返回 \*\*\*）' \}\]/)
   assert.doesNotMatch(permissionMeta, /value: 'view'|value: 'edit'/)
-  assert.match(source, /if \(field\.key === 'access_level'\) return 'hidden'/)
+  assert.match(displaySource, /if \(field\.key === 'access_level'\) return 'hidden'/)
   assert.match(source, /configForm\.value\.access_level = 'hidden'/)
 })
 
@@ -1274,7 +1280,7 @@ test('系统配置的规则可以删除：二次确认、按 kind 定位、删�
   // 以前配置规则只能新建/编辑/启停，配置错了或重复堆积无法清理。
   assert.match(source, /async function removeConfigRule\(rule\)/)
   // 停用开关本身可逆，删除不可恢复：必须先确认，且提示可逆替代手段。
-  assert.match(source, /window\.confirm\(`确认删除配置「\$\{rule\.name \|\| rule\.id\}」？删除后无法恢复，如需临时停用请使用状态开关。`\)/)
+  assert.match(source, /askConfirm\(\{[\s\S]*确认删除配置「\$\{rule\.name \|\| rule\.id\}」？删除后无法恢复，如需临时停用请使用状态开关。/)
   // kind 必填：六套配置表主键各自自增，只按 id 删会命中别的配置类型。
   assert.match(source, /const kind = rule\.kind \|\| activeSection\.value/)
   assert.match(source, /await deleteRule\(rule\.id, kind\)/)
@@ -1350,11 +1356,11 @@ test('合同拆解规则配置按原型 PG-CFG-01 做成三段式，口径完全
   assert.match(source, /\{\{ overrideSettingsText\(item\) \}\}/)
   // 维度与特殊方法的取值必须与后端常量一致（写错会被服务端判非法取值）。
   for (const value of ["'batch'", "'site'", "'customer'", "'contract'", "'category'", "'system_standard'", "'test_mode'", "'HUMAN_CONFIRM'", "'DEFAULT_RULE'", "'REQUIRED'", "'MARKABLE'"]) {
-    assert.ok(source.includes(value), `缺少取值 ${value}`)
+    assert.ok(source.includes(value) || displaySource.includes(value), `缺少取值 ${value}`)
   }
   // 空字符串代表"不覆盖"：提交前必须剔除，否则服务端会判非法维度取值。
-  assert.match(source, /function compactOverrideSettings\(settings\)/)
-  assert.match(source, /function compactOverrideMatch\(match\)/)
+  assert.match(displaySource, /function compactOverrideSettings\(settings\)/)
+  assert.match(displaySource, /function compactOverrideMatch\(match\)/)
   // 配置读写走独立接口，页面不再让用户手填适用范围。
   for (const fn of ['getSplitPolicy', 'saveSplitPolicy', 'listDetectionCategories', 'saveDetectionCategory', 'deleteDetectionCategory', 'listSplitOverrides', 'saveSplitOverride', 'deleteSplitOverride']) {
     assert.ok(pmApiSource.includes(fn), `API 客户端缺少 ${fn}`)
@@ -1386,7 +1392,7 @@ test('新建项目只显示尚未建立项目的已审批合同', () => {
   // 后端按租户全量项目过滤，前端再按当前列表防护；已使用合同不能以禁用项继续出现。
   assert.match(source, /const builtContractKeys = computed\(\(\) => \{/)
   assert.match(source, /const availableApprovedContracts = computed\(\(\) => approvedContracts\.value\.filter/)
-  assert.match(source, /function contractOptionLabel\(contract\) \{/)
+  assert.match(displaySource, /function contractOptionLabel\(contract\) \{/)
   assert.doesNotMatch(source, /function contractOptionDisabled\(contract\)/)
   assert.doesNotMatch(source, /（已建项目/)
   assert.match(source, /请选择尚未建立项目的已审批合同/)
@@ -1493,8 +1499,8 @@ test('样式表修掉信息提示、卡片角标与残留样式三处缺陷', ()
 
 test('状态字段统一为语义化胶囊标签（statusTone 单一映射）', () => {
   // 映射表覆盖项目/服务项/报告/复核/台账全部状态，未命中回退 neutral。
-  assert.match(source, /const statusToneMap = \{/)
-  assert.match(source, /function statusTone\(status\) \{ return statusToneMap\[String\(status \?\? ''\)\.trim\(\)\] \|\| 'neutral' \}/)
+  assert.match(displaySource, /const statusToneMap = \{/)
+  assert.match(displaySource, /function statusTone\(status\) \{ return statusToneMap\[String\(status \?\? ''\)\.trim\(\)\] \|\| 'neutral' \}/)
   // 原先恒为灰底的 neutral 状态徽章全部改为语义色调。
   assert.doesNotMatch(source, /<span class="pm-badge neutral">\{\{ (card|project)\.status \}\}<\/span>/)
   assert.match(source, /:class="statusTone\(project\.status\)"/)
@@ -1560,7 +1566,7 @@ test('已签发或归档报告支持受控更正申请与职责分离审批', ()
   assert.match(source, /await requestReportCorrection\(item\.id, \{ reason, expected_version: Number\(item\.version\) \|\| 0 \}\)/)
   assert.match(source, /request\.actor_user_id === session\.value\?\.user_id/)
   assert.match(source, /await decideReportCorrection\(item\.id, request\.id, \{ decision, comment, expected_version: Number\(item\.version\) \|\| 0 \}\)/)
-  assert.match(source, /REPORT_CORRECTION_REQUESTED: '报告更正已申请'/)
+  assert.match(displaySource, /REPORT_CORRECTION_REQUESTED: '报告更正已申请'/)
   assert.match(source, /批准更正/)
   assert.match(source, /审批通过后旧版本作废并生成下一报告版本/)
   assert.match(pmApiSource, /export function requestReportCorrection\(itemID, payload\)/)
@@ -1568,9 +1574,9 @@ test('已签发或归档报告支持受控更正申请与职责分离审批', ()
 })
 
 test('过期设备展示派生无效状态且检测类别使用受控域', () => {
-  assert.match(source, /function capabilityEffectiveStatus\(item\)/)
-  assert.match(source, /EXPIRED: '无效'/)
-  assert.match(source, /NOT_YET_EFFECTIVE: '未生效'/)
+  assert.match(displaySource, /function capabilityEffectiveStatus\(item\)/)
+  assert.match(displaySource, /EXPIRED: '无效'/)
+  assert.match(displaySource, /NOT_YET_EFFECTIVE: '未生效'/)
   assert.match(source, /capabilityEffectiveStatus\(item\) === capabilityStatusFilter\.value/)
   assert.match(source, /const activeDetectionCategoryOptions = computed/)
   assert.match(source, /const categoryOptions = computed\(\(\) => activeDetectionCategoryOptions\.value/)
@@ -1581,7 +1587,10 @@ test('过期设备展示派生无效状态且检测类别使用受控域', () =>
 
 test('在途监控使用服务端快照、自动刷新、真分页和节点下钻', () => {
   assert.match(source, /monitoringSnapshot = ref\(\{ items: \[\], recent_events: \[\], status_counts:/)
-  assert.match(source, /await getProjectMonitoring\(monitoringParams\(\)\)/)
+  // 快照读取按查询条件持有 requestScope 票据，旧筛选迟到响应不回写（见 monitoringScope）。
+  assert.match(source, /const params = monitoringParams\(\)/)
+  assert.match(source, /await getProjectMonitoring\(params\)/)
+  assert.match(source, /monitoringScope\.begin\(`MONITOR:\$\{JSON\.stringify\(params\)\}`\)/)
   assert.match(source, /window\.setInterval\([\s\S]*15000\)/)
   assert.match(source, /document\.addEventListener\('visibilitychange', onMonitoringVisibility\)/)
   assert.match(source, /window\.addEventListener\('focus', onMonitoringVisibility\)/)

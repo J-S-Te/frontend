@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFile } from 'node:fs/promises'
 import vm from 'node:vm'
+import { createRequestScope } from '../../platform/shared/composables/requestScope.js'
 
 const view = await readFile(new URL('./ProjectManagementView.vue', import.meta.url), 'utf8')
 const body = view.slice(view.indexOf('async function openDecompositionAdjust()'), view.indexOf('function addAdjustItem()'))
@@ -11,7 +12,7 @@ function context() {
     adjustProjectID: { value: '' }, supplementContracts: { value: [] },
     approvedContracts: { value: [] }, detectionCategories: { value: [] },
     activeDetectionCategoryOptions: { value: ['等保'] }, supplementContractOptions: { value: [{ id: 'SUP' }] },
-    adjustForm: { value: {} }, adjustOpen: { value: false }, adjustLoadVersion: 0,
+    adjustForm: { value: {} }, adjustOpen: { value: false }, adjustScope: createRequestScope(), saving: { value: false },
     emptyAdjustForm: () => ({ reason: '', supplementContractID: '' }),
     showToast: () => {}, formatUserError: () => 'error', listDetectionCategories: async () => ['等保'],
     // 自动创建成功后，旧的待建项目目录为空。

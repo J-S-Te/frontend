@@ -3,9 +3,10 @@ import test from 'node:test'
 import { readFile } from 'node:fs/promises'
 
 const view = await readFile(new URL('./views/CustomerOpportunityView.vue', import.meta.url), 'utf8')
+const display = await readFile(new URL('./crmDisplay.js', import.meta.url), 'utf8')
 
 test('客户导入模板只展示业务字段，不要求人员或组织 ID', () => {
-  const columns = view.match(/const customerImportTemplateColumns = Object\.freeze\(\[([\s\S]*?)\]\)/)?.[1]
+  const columns = display.match(/const customerImportTemplateColumns = Object\.freeze\(\[([\s\S]*?)\]\)/)?.[1]
   assert.ok(columns)
   assert.equal((columns.match(/\['/g) || []).length, 8)
   assert.doesNotMatch(columns, /负责人用户ID|负责人组织ID/)

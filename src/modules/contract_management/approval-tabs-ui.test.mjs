@@ -3,6 +3,8 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 const source = await readFile(new URL('./views/ContractManagementView.vue', import.meta.url), 'utf8')
+const displaySource = await readFile(new URL('./utils/contractDisplay.js', import.meta.url), 'utf8')
+const approvalDetailSource = await readFile(new URL('./composables/useApprovalDetail.js', import.meta.url), 'utf8')
 
 test('approval center switches between tasks and initiated approvals', () => {
   assert.match(source, /const approvalTab = ref\('tasks'\)/)
@@ -28,12 +30,12 @@ test('approval center continuously synchronizes visible workflow state and confi
   assert.match(source, /immediate \? 0 : 1000/)
   assert.match(source, /document\.addEventListener\('visibilitychange'/)
   assert.match(source, /document\.removeEventListener\('visibilitychange'/)
-  assert.match(source, /const accepted = await commandApproval/)
-  assert.match(source, /waitForApprovalCommand\(accepted\.command_id, action, target\.id\)/)
-  assert.match(source, /detail\?\.actions\?\.some\(\(item\) => item\.command_id === commandID\)/)
+  assert.match(approvalDetailSource, /const accepted = await commandApproval/)
+  assert.match(approvalDetailSource, /waitForApprovalCommand\(accepted\.command_id, action, target\.id\)/)
+  assert.match(approvalDetailSource, /detail\?\.actions\?\.some\(\(item\) => item\.command_id === commandID\)/)
   assert.match(source, /const currentTask = approvals\.value\.find/)
   assert.match(source, /selectedApproval\.value = \{ \.\.\.selectedApproval\.value, \.\.\.currentTask \}/)
-  assert.match(source, /操作已受理，流程仍在处理，状态将自动更新/)
+  assert.match(approvalDetailSource, /操作已受理，流程仍在处理，状态将自动更新/)
 })
 
 test('approval history distinguishes missing snapshots and exposes controlled recovery', () => {
@@ -44,20 +46,20 @@ test('approval history distinguishes missing snapshots and exposes controlled re
 })
 
 test('approval center presents workflow statuses in Chinese', () => {
-  assert.match(source, /running: '审批中'/)
-  assert.match(source, /rejected: '已驳回'/)
-  assert.match(source, /withdrawn: '已撤回'/)
-  assert.match(source, /active: '处理中'/)
-  assert.match(source, /skipped: '已跳过'/)
+  assert.match(displaySource, /running: '审批中'/)
+  assert.match(displaySource, /rejected: '已驳回'/)
+  assert.match(displaySource, /withdrawn: '已撤回'/)
+  assert.match(displaySource, /active: '处理中'/)
+  assert.match(displaySource, /skipped: '已跳过'/)
   assert.match(source, /approvalStatusLabel\(approval\.status\)/)
   assert.match(source, /approvalStatusLabel\(runtime\.status\)/)
   assert.match(source, /contractStatusLabel\(approvalDetail\.meta\.from_status\)/)
 })
 
 test('pending assigned approvals are viewable but cannot be processed early', () => {
-  assert.match(source, /const requiresActiveTask = \['approve', 'reject', 'sign', 'transfer', 'return'\]\.includes\(action\)/)
-  assert.match(source, /can\('approval\.process'\) && selectedApproval\.value\?\.status === 'active'/)
-  assert.match(source, /该审批尚未流转到当前节点，暂时只能查看/)
+  assert.match(approvalDetailSource, /const requiresActiveTask = \['approve', 'reject', 'sign', 'transfer', 'return'\]\.includes\(action\)/)
+  assert.match(approvalDetailSource, /can\('approval\.process'\) && selectedApproval\.value\?\.status === 'active'/)
+  assert.match(approvalDetailSource, /该审批尚未流转到当前节点，暂时只能查看/)
 })
 
 test('add-sign candidates are limited to users with contract approval permission', () => {

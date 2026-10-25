@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { formatUserError } from '../../../shared/utils/userError.js'
+import { useConfirmAction } from '@/modules/platform/shared/composables/useConfirmAction.js'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import RoleMultiSelect from './RoleMultiSelect.vue'
 import {
@@ -51,8 +52,8 @@ const templatePage = ref(1)
 const templatePageSize = 6
 const editingTemplateId = ref('')
 const editingTemplateVersion = ref(0)
-// 通用确认弹窗。不用 window.confirm 是为了避免在 WebView 容器里静默失败。
-const confirmDialog = ref(null)
+// 通用确认弹窗（回调式，复用 useConfirmAction；未传 onCancel 时空闲关闭无副作用）。
+const { dialog: confirmDialog, openConfirm, closeConfirm, runConfirm } = useConfirmAction()
 // 目录重新读取后只清理确实失效的岗位选择并说明原因，不影响编辑器中已填写的模板内容。
 const selectionNotice = ref('')
 // 当前已加载完成的岗位及其加载状态：只有加载完成的当前岗位才允许保存映射。
@@ -62,26 +63,6 @@ const loadedAssignmentsPositionId = ref('')
 const assignmentsRevision = ref('')
 const assignmentsNotice = ref('')
 const savingAssignments = ref(false)
-function openConfirm({ title, description, confirmText = '确认', danger = false, onConfirm }) {
-  confirmDialog.value = { title, description, confirmText, danger, busy: false, onConfirm }
-}
-function closeConfirm() {
-  if (confirmDialog.value?.busy) return
-  confirmDialog.value = null
-}
-async function runConfirm() {
-  const dialog = confirmDialog.value
-  if (!dialog || dialog.busy) return
-  dialog.busy = true
-  try {
-    const completed = await dialog.onConfirm()
-    if (completed !== false && confirmDialog.value === dialog) confirmDialog.value = null
-  } catch {
-    // 业务回调负责展示错误提示；异常时保留弹窗，避免误判为成功。
-  } finally {
-    if (confirmDialog.value === dialog) dialog.busy = false
-  }
-}
 const preview = ref(null)
 // 编辑器内的"挂载预览"独立 state：与下方页面级 `preview` 共享同一接口，但保留专属 loading / unavailable 态，
 // 以便在模板编辑卡片内独立显示骨架、错误与刷新按钮，而不影响已有的"授权预览与影响分析"卡片渲染。

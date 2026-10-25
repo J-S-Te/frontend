@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
+import { createRequestScope } from '../platform/shared/composables/requestScope.js'
+import { useApprovalDetail } from './composables/useApprovalDetail.js'
 
 const view = await readFile(new URL('./views/ContractManagementView.vue', import.meta.url), 'utf8')
 const ref = (value = '') => ({ value })
@@ -55,14 +57,19 @@ test('legacy text-only contracts gracefully retain text when the server reports 
 })
 
 function approvalDetails({ getApproval = async () => ({ contract: { template_id: '' } }), preview }) {
-  const refs = {
-    selectedApproval: ref(null), approvalDetail: ref(null), approvalContractPreviewHTML: ref(), approvalContractPreviewError: ref(),
-    approvalComment: ref(), approvalTargetUser: ref(), approvalTargetNode: ref(), approvalDetailLoading: ref(false), approvalContractPreviewLoading: ref(false),
-  }
-  const code = view.slice(view.indexOf('async function openApproval(approval)'), view.indexOf('\nasync function executeApprovalCommand'))
-  const methods = new Function(...Object.keys(refs), 'getApproval', 'previewApprovalContract', 'showToast',
-    `let approvalDetailSequence = 0; ${code}; return { openApproval, closeApproval };`)(...Object.values(refs), getApproval, preview, (message) => { throw new Error(message) })
-  return { ...methods, ...refs }
+  // 详情弹窗状态与编排已迁 useApprovalDetail；这里直接调用真实 composable，
+  // 注入与视图一致的网络/提示依赖（showToast 失败即抛，保持原装载器的严格语义）。
+  const composable = useApprovalDetail({
+    getApproval,
+    previewApprovalContract: preview,
+    commandApproval: async () => assert.fail('unexpected command in this test'),
+    can: () => true,
+    session: ref({}),
+    showToast: (message) => { throw new Error(message) },
+    formatUserError: (error, options) => options?.fallback || error.message,
+    refreshApprovalRealtime: async () => {},
+  })
+  return { ...composable }
 }
 
 test('approvals preview external DOCX and ignore responses after closing the detail', async () => {

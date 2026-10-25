@@ -105,3 +105,24 @@ export function organizationDescendantIds(tree = [], organizationIdValue = '') {
   if (target) collect(target.children || [])
   return descendants
 }
+
+// 组织导出上下文：为每个组织节点建立 id → 父名/全路径/深度的映射，
+// 供导出处理器把平铺行还原成层级可读文案。自 IamSettingsModule 内联实现逐字迁移。
+export function buildOrganizationExportContext(organizations = []) {
+  const context = new Map()
+  const visit = (nodes, parentPath = []) => {
+    for (const node of nodes) {
+      const id = String(node.org_unit_id || node.id || '')
+      if (!id) continue
+      const name = node.name || node.code || id
+      context.set(id, {
+        parentName: parentPath.length ? parentPath[parentPath.length - 1] : '',
+        path: [...parentPath, name].join(' / '),
+        depth: parentPath.length,
+      })
+      visit(node.children || [], [...parentPath, name])
+    }
+  }
+  visit(buildOrganizationTree(organizations))
+  return context
+}

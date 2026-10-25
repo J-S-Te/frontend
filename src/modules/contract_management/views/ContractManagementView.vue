@@ -1,7 +1,18 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { formatUserError } from '../../shared/utils/userError.js'
-import { useRoute, useRouter } from 'vue-router'
+import { createFormSnapshot, hasUnsavedChanges } from '../../shared/utils/unsavedChanges.js'
+import { useConfirmDialog } from '../../shared/composables/useConfirmDialog.js'
+import { createRequestScope } from '../../platform/shared/composables/requestScope.js'
+import { useBeforeUnloadGuard } from '../../shared/composables/useBeforeUnloadGuard.js'
+import { useUrlFilterState } from '../../shared/composables/useUrlFilterState.js'
+import { useDialogFocusTrap } from '../../shared/composables/useDialogFocusTrap.js'
+import ConfirmDialog from '../../shared/components/ConfirmDialog.vue'
+import OperationResultBanner from '../../shared/components/OperationResultBanner.vue'
+import OperationInboxPanel from '../../shared/components/OperationInboxPanel.vue'
+import { usePersistentResult } from '../../shared/composables/usePersistentResult.js'
+import { useOperationInbox } from '../../shared/composables/useOperationInbox.js'
+import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { AuthError, logoutCurrentSession } from '@/modules/platform/auth/api/auth'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import { useDictionaryOptions } from '@/modules/platform/dictionaries/composables/useDictionaryOptions.js'
@@ -67,13 +78,37 @@ import {
   hasContractPermission,
 } from '@/modules/shared/authz/sys004'
 import { buildTemplateValues } from '@/modules/contract_management/utils/currentUserPrefill'
+import {
+  approvalActionLabels,
+  approvalKindLabel,
+  approvalKindLabels,
+  approvalNodeStatusLabels,
+  approvalNotificationTitle,
+  approvalStatusLabel,
+  approvalStatusLabels,
+  emptyNewContract,
+  emptyRuleForm,
+  emptyServiceItem,
+  fallbackContractTypeOptions,
+  fallbackServiceTypeOptions,
+  fallbackSystemLevelOptions,
+  groupCurrencyTotals,
+  numericOperators,
+  roleLabel,
+  ruleFieldOptions,
+  statusLabels,
+  textOperators,
+  toDictionaryFallback,
+} from '@/modules/contract_management/utils/contractDisplay'
+import ContractNotificationPanel from '@/modules/contract_management/components/ContractNotificationPanel.vue'
+import { useApprovalDetail } from '@/modules/contract_management/composables/useApprovalDetail'
 import { canEditContractDraft, hydrateContractDraft, saveContractDraft } from '@/modules/contract_management/utils/contractDraft'
 import { normalizePaymentTerms, paymentAmountMinor } from '@/modules/contract_management/utils/paymentTerms'
 import { contractSystemLevels, externalContractTypes, isContractDOCXFile, validateContractForm } from '@/modules/contract_management/utils/contractPayload'
 import { approvalAmountInput, approvalAmountMinor, copyRuleExpression, ruleExpressionSummary } from '@/modules/contract_management/utils/approvalRule'
 import PaymentTermsSummary from '@/modules/contract_management/components/PaymentTermsSummary.vue'
 import { isSystemContractNumberField, isContractAmountField, synchronizeContractTemplateValues } from '@/modules/contract_management/utils/systemTemplateFields'
-import { closeSubsystemTabOrFallback } from '@/modules/contract_management/utils/returnToPortal'
+import { closeSubsystemTabOrFallback } from '@/modules/shared/utils/returnToPortal'
 import '@/modules/contract_management/styles/contract-management.css'
 
 const route = useRoute()
@@ -221,15 +256,6 @@ const opportunityIntakeReviewBlocked = ref(false)
 let opportunityIntakeLoadSequence = 0
 let opportunityIntakeDetailSequence = 0
 const businessDataLoading = ref(false)
-const approvalComment = ref('')
-const approvalDetail = ref(null)
-const approvalDetailLoading = ref(false)
-const approvalContractPreviewHTML = ref('')
-const approvalContractPreviewLoading = ref(false)
-const approvalContractPreviewError = ref('')
-const approvalCommandBusy = ref(false)
-const approvalTargetUser = ref('')
-const approvalTargetNode = ref('')
 const termsIdentical = ref(false)
 const submittingContract = ref(false)
 const ruleDialogOpen = ref(false)
@@ -255,16 +281,43 @@ const contractCreating = ref(false)
 const editingContract = ref(null)
 const draftEditLoading = ref(false)
 const draftEditError = ref('')
+const draftErrorElement = ref(null)
 const draftEditConflict = ref(false)
-const emptyServiceItem = () => ({ service_type: '', name: '', site: '', batch: '第一批次', category: '', requirement: '', test_mode: 'STANDARD', systems: [] })
-const emptyNewContract = () => ({
-  opportunity_id: '', opportunity_name: '', customer_id: '', title: '', contract_type: '', amount: '', currency: 'CNY',
-  customer_name: '', customer_address: '', customer_contact: '', customer_phone: '',
-  start_date: '', end_date: '',
-  payment_terms: [],
-  service_items: [emptyServiceItem()], template_id: '', template_values: {},
-})
 const newContract = ref(emptyNewContract())
+const draftInitialSnapshot = ref('')
+const draftInitialHadFile = ref(false)
+const { dialog: confirmDialog, askConfirm, accept: acceptConfirm, cancel: cancelConfirm } = useConfirmDialog()
+// 会话作用域持久化：以合同会话主体（tenant_id + identity_id，getContractSession
+// 经 normalizeAuthorizationSession 提供）隔离操作结果与操作记录；主体未就绪时仅内存态。
+const contractPrincipal = computed(() => session.value)
+const { result: contractResult, save: saveContractResult, clear: clearContractResult } = usePersistentResult('uip:last-contract-creation', { principal: contractPrincipal })
+const createDialogElement = ref(null)
+const createDialogOpen = ref(false)
+const { push: pushOperationRecord } = useOperationInbox({ principal: contractPrincipal })
+
+function markDraftClean() {
+  draftInitialSnapshot.value = createFormSnapshot(newContract.value)
+  draftInitialHadFile.value = Boolean(externalContractFile.value)
+}
+
+function draftHasUnsavedChanges() {
+  return hasUnsavedChanges(draftInitialSnapshot.value, newContract.value) ||
+    Boolean(externalContractFile.value) !== draftInitialHadFile.value
+}
+
+useBeforeUnloadGuard(computed(() => createDialogOpen.value && !contractCreating.value && draftHasUnsavedChanges()))
+useDialogFocusTrap({ active: computed(() => createDialogOpen.value), container: createDialogElement, initialFocus: 'input:not([type="hidden"]), select, textarea' })
+
+onBeforeRouteLeave(async () => {
+  if (contractCreating.value || !createDialogOpen.value || !draftHasUnsavedChanges()) return true
+  return await askConfirm({
+    title: '离开合同编辑？',
+    description: '合同表单还有未保存的修改，离开当前页面后这些内容不会保留。',
+    confirmText: '离开并放弃',
+    cancelText: '留在当前页',
+    danger: true,
+  })
+})
 const paymentPlanError = computed(() => {
   try { normalizePaymentTerms(newContract.value.payment_terms, newContract.value.amount, newContract.value.currency); return '' }
   catch (error) { return formatUserError(error, { fallback: '付款计划未通过校验，请核对金额、分期与日期。' }) }
@@ -277,12 +330,6 @@ function addPaymentTerm() {
   newContract.value.payment_terms.push({ installment_no: next, due_date: '', amount: '' })
 }
 
-// 合同类型、服务类型与系统等级由业务字典治理（平台控制台“字典管理”维护显示名与排序），
-// 字典取值即业务存储字符串；平台会话过期或字典未配置时回退内置清单，表单不中断。
-const fallbackContractTypeOptions = ['直签', '三方']
-const fallbackServiceTypeOptions = ['等保测评', '商用密码应用安全性评估', '软件测试', '源代码审计', '渗透测试', '漏洞扫描', 'APP安全加固', '上线测试', '安全加固', '网络安全风险评估', '差距分析', '机房检测', '网络安全巡检服务', '安全培训', '安全性测试', '应急响应服务', '网络安全攻防演练', '安全运维', '模块开发', '技术咨询']
-const fallbackSystemLevelOptions = ['一级', '二级', '三级', '四级']
-const toDictionaryFallback = (values) => values.map((value) => ({ value, label: value }))
 const { options: contractTypeItems } = useDictionaryOptions('CONTRACT_TYPE', { fallback: toDictionaryFallback(fallbackContractTypeOptions) })
 const { options: serviceTypeItems } = useDictionaryOptions('CONTRACT_SERVICE_TYPE', { fallback: toDictionaryFallback(fallbackServiceTypeOptions) })
 const { options: systemLevelItems } = useDictionaryOptions('CONTRACT_SYSTEM_LEVEL', { fallback: toDictionaryFallback(fallbackSystemLevelOptions) })
@@ -318,41 +365,9 @@ const canSaveNewContract = computed(() => {
   return isExternalContractMode.value ? Boolean(editingContract.value || externalContractFile.value) : Boolean(selectedContractTemplate.value)
 })
 
-const ruleFieldOptions = [
-  { value: 'amount_minor', label: '合同金额（元）', kind: 'number' },
-  { value: 'service_type', label: '服务类型', kind: 'text' },
-  { value: 'customer_credit_level', label: '客户信用等级', kind: 'text' },
-  { value: 'contract_type', label: '合同类型', kind: 'text' },
-  { value: 'terms_identical', label: '条款一致', kind: 'boolean' },
-]
-const numericOperators = [
-  { value: 'eq', label: '等于' }, { value: 'ne', label: '不等于' },
-  { value: 'gt', label: '大于' }, { value: 'gte', label: '大于等于' },
-  { value: 'lt', label: '小于' }, { value: 'lte', label: '小于等于' },
-]
-const textOperators = [
-  { value: 'eq', label: '等于' }, { value: 'ne', label: '不等于' }, { value: 'in', label: '包含于（逗号分隔）' },
-]
 
-function emptyRuleForm() {
-  return {
-    name: '',
-    priority: 0,
-    enabled: true,
-    logical: 'and',
-    conditions: [{ field: 'amount_minor', operator: 'lte', value: '' }],
-    expressionReadonly: false,
-    originalExpression: null,
-    nodes: [{ id: 'sales-director', name: '销售总监审批', role_code: 'sales_director', countersign: 'any' }],
-    version: 0,
-  }
-}
 const ruleForm = ref(emptyRuleForm())
 
-function roleLabel(roleCode) {
-  if (!roleCode) return '未分配角色'
-  return contractRole(roleCode)?.name || '未识别角色'
-}
 
 const currentUserLabel = computed(() => session.value?.display_name || session.value?.user_name || '当前用户')
 const currentRoleLabel = computed(() => {
@@ -385,6 +400,14 @@ const editableContractTemplateFields = computed(() => (selectedContractTemplate.
 const keyword = ref('')
 const statusFilter = ref('')
 const typeFilter = ref('')
+let contractListScrollY = 0
+
+useUrlFilterState({
+  route,
+  router,
+  fields: { keyword, status: statusFilter, type: typeFilter },
+  onRestore: () => { loadBusinessData() },
+})
 const mobileMenuOpen = ref(false)
 const selectedContract = ref(null)
 const selectedContractPreviewHTML = ref('')
@@ -393,8 +416,6 @@ const selectedContractPreviewError = ref('')
 const selectedContractLifecycle = ref([])
 const selectedContractLifecycleLoading = ref(false)
 const selectedContractLifecycleError = ref('')
-const selectedApproval = ref(null)
-const createDialogOpen = ref(false)
 const notificationOpen = ref(false)
 const toast = ref('')
 const isLoggingOut = ref(false)
@@ -404,9 +425,23 @@ let approvalRealtimeBusy = false
 let signingRealtimeTimer = 0
 let signingRealtimeBusy = false
 let contractDetailSequence = 0
-let approvalDetailSequence = 0
-let signingDetailSequence = 0
 let templatePreviewSequence = 0
+// 审批/签署链路读取作用域（任务 C）：contextKey 绑定业务对象，切换对象或关闭弹窗时
+// 整体失效在途响应，组件卸载经 onScopeDispose 自动作废；票据变量只保存当前那次读取。
+const {
+  approvalDetailScope, selectedApproval, approvalDetail, approvalDetailLoading,
+  approvalContractPreviewHTML, approvalContractPreviewLoading, approvalContractPreviewError,
+  approvalComment, approvalTargetUser, approvalTargetNode, approvalCommandBusy,
+  openApproval, closeApproval, executeApprovalCommand,
+} = useApprovalDetail({
+  getApproval, previewApprovalContract, commandApproval, can, session, showToast, formatUserError,
+  refreshApprovalRealtime,
+})
+const approvalRealtimeScope = createRequestScope()
+const signingDetailScope = createRequestScope()
+let signingDetailTicket = null
+const signingLedgerScope = createRequestScope()
+const signingRealtimeScope = createRequestScope()
 
 const activeSection = computed(() => {
   const section = typeof route.params.section === 'string' ? route.params.section : 'dashboard'
@@ -447,17 +482,6 @@ const signingStats = computed(() => {
   }
 })
 
-function groupCurrencyTotals(items) {
-  const grouped = new Map()
-  for (const item of items || []) {
-    const currency = /^[A-Z]{3}$/.test(item?.currency || '') ? item.currency : 'CNY'
-    const current = grouped.get(currency) || { currency, amountMinor: 0, contracts: 0 }
-    current.amountMinor += Number(item?.amount_minor || 0)
-    current.contracts += 1
-    grouped.set(currency, current)
-  }
-  return [...grouped.values()].sort((left, right) => left.currency.localeCompare(right.currency))
-}
 const personalCurrencyTotals = computed(() => groupCurrencyTotals(contracts.value.map((item) => ({ currency: item.currency, amount_minor: Math.round(item.amount * 100) }))))
 const dashboardCurrencyTotals = computed(() => {
   const totals = adminDashboard.value?.currency_totals
@@ -531,7 +555,7 @@ async function resetFilters() {
 function showToast(message) {
   toast.value = formatUserError(message, { fallback: '操作未完成，请核对页面信息；仍失败时请联系管理员。' })
   window.clearTimeout(toastTimer)
-  toastTimer = window.setTimeout(() => { toast.value = '' }, 2600)
+  toastTimer = window.setTimeout(() => { toast.value = '' }, 5200)
 }
 
 function openDashboardDetail(key) {
@@ -561,62 +585,13 @@ function exportContracts() {
   showToast(`已导出 ${rows.length} 条合同记录`)
 }
 
-const statusLabels = {
-  draft: '草稿',
-  pending: '审批中',
-  approved: '已批准',
-  active: '已生效',
-  in_progress: '履约中',
-  pending_pay: '待付款',
-  completed: '已完成',
-  terminated: '已终止',
-  archived: '已归档',
-}
 
-const approvalStatusLabels = {
-  running: '审批中',
-  approved: '已通过',
-  rejected: '已驳回',
-  withdrawn: '已撤回',
-  expired: '已过期',
-  failed: '已失败',
-}
 
-const approvalNodeStatusLabels = {
-  pending: '待处理',
-  active: '处理中',
-  approved: '已通过',
-  rejected: '已驳回',
-  skipped: '已跳过',
-}
 
-const approvalKindLabels = {
-  contract_approval: '合同提交审批',
-  status_change: '合同状态变更',
-}
 
-const approvalActionLabels = {
-  approve: '同意',
-  reject: '驳回',
-  add_sign: '加签',
-  transfer: '转交',
-  return: '退回',
-  withdraw: '撤回',
-  urge: '催办',
-  comment: '发表评论',
-}
 
-function approvalStatusLabel(status) {
-  return approvalStatusLabels[status] || approvalNodeStatusLabels[status] || status || '—'
-}
 
-function approvalKindLabel(kind) {
-  return approvalKindLabels[kind] || '合同审批'
-}
 
-function approvalNotificationTitle(approval) {
-  return `${approval.type || '合同审批'}已流转至${approval.step || '当前节点'}`
-}
 
 function approvalActionLabel(action) {
   return approvalActionLabels[action] || '审批处理'
@@ -707,6 +682,7 @@ function signingProgress(record) {
 }
 
 async function openContract(contract) {
+  if (!selectedContract.value && typeof window !== 'undefined') contractListScrollY = window.scrollY || 0
   const sequence = ++contractDetailSequence
   const isCurrent = () => sequence === contractDetailSequence && selectedContract.value?.recordId === contract.recordId
   termsIdentical.value = false
@@ -738,6 +714,11 @@ function closeContract() {
   selectedContractPreviewError.value = ''
   selectedContractLifecycle.value = []
   selectedContractLifecycleError.value = ''
+  nextTick(() => {
+    if (typeof window !== 'undefined' && contractListScrollY >= 0) {
+      window.scrollTo({ top: contractListScrollY, behavior: 'auto' })
+    }
+  })
 }
 
 const lifecycleReasonLabels = {
@@ -775,6 +756,10 @@ async function refreshSigningRecords({ append = false, limit = 50 } = {}) {
   if (append && !signingHasMore.value) return
   if (append) signingLoadingMore.value = true
   else signingLedgerLoading.value = true
+  // 筛选防抖、“加载更多”与实时同步可能交错返回：以请求作用域票据为准，只采纳最后一次
+  // 读取。旧筛选的迟到响应不得覆盖新筛选数据，其 finally 也不得关闭新请求的加载态。
+  const ticket = signingLedgerScope.begin(`SIGNING_LEDGER:${append ? 'more' : 'page'}:${signingKeyword.value.trim()}:${signingStatusFilter.value}:${signingMethodFilter.value}`)
+  const isCurrent = () => signingLedgerScope.isCurrent(ticket)
   try {
     const page = await listSigningRecords({
       limit,
@@ -783,14 +768,17 @@ async function refreshSigningRecords({ append = false, limit = 50 } = {}) {
       status: signingStatusFilter.value,
       method: signingMethodFilter.value,
     })
+    if (!isCurrent()) return
     const items = (page.items || []).map(normalizeSigningRecord)
     signingRecords.value = append ? [...signingRecords.value, ...items] : items
     signingTotal.value = Number(page.total || items.length)
     signingHasMore.value = Boolean(page.has_more)
     signingSummary.value = page.stats && typeof page.stats === 'object' ? page.stats : null
   } finally {
-    signingLedgerLoading.value = false
-    signingLoadingMore.value = false
+    if (isCurrent()) {
+      signingLedgerLoading.value = false
+      signingLoadingMore.value = false
+    }
   }
 }
 
@@ -839,10 +827,11 @@ async function openSigningRecord(record) {
     showToast('签署记录缺少合同标识，请刷新签署台账后重试')
     return
   }
-  const sequence = ++signingDetailSequence
-  // 是否仍是本次打开只由请求序号决定：选中记录在详情回填后可能换对象，
+  const ticket = signingDetailScope.begin(`SIGNING_RECORD:${contractID}`)
+  signingDetailTicket = ticket
+  // 是否仍是本次打开只由请求作用域票据决定：选中记录在详情回填后可能换对象，
   // 用 recordId 参与判断会让“归一化前后标识不同”变成永久加载。
-  const isCurrent = () => sequence === signingDetailSequence
+  const isCurrent = () => signingDetailScope.isCurrent(ticket)
   signingDetailLoading.value = true
   signingReplacementReason.value = ''
   applySigningRecord(opened)
@@ -871,7 +860,8 @@ async function openSigningRecord(record) {
 
 function closeSigningRecord() {
   // 使在途详情请求失效，关闭后旧响应不得重新打开弹窗。
-  signingDetailSequence += 1
+  signingDetailScope.invalidate()
+  signingDetailTicket = null
   selectedSigningRecord.value = null
   signingDetailLoading.value = false
   signingReplacementReason.value = ''
@@ -880,9 +870,10 @@ function closeSigningRecord() {
 async function refreshSelectedSigningRecord() {
   const contractID = selectedSigningRecord.value?.contract.recordId
   if (!contractID) return
-  const sequence = signingDetailSequence
+  const ticket = signingDetailScope.begin(`SIGNING_RECORD:${contractID}`)
+  signingDetailTicket = ticket
   const detail = await getSigningRecord(contractID)
-  if (sequence !== signingDetailSequence || selectedSigningRecord.value?.contract.recordId !== contractID) return
+  if (!signingDetailScope.isCurrent(ticket) || selectedSigningRecord.value?.contract.recordId !== contractID) return
   // 详情必须与当前合同一致，不能把另一份合同写进已打开的弹窗。
   if (String(detail?.contract?.id || '') !== String(contractID)) return
   applySigningRecord(detail)
@@ -890,6 +881,7 @@ async function refreshSelectedSigningRecord() {
 }
 
 async function submitSigningShipment() {
+  if (signingOperationBusy.value) return
   const contractID = selectedSigningRecord.value?.contract.recordId
   if (!contractID) return
   // C-ii（task-62）：提交前先本地校验收件人手机号（非空、≤20 rune、数字格式），
@@ -917,6 +909,7 @@ async function submitSigningShipment() {
 }
 
 async function confirmCustomerReceived() {
+  if (signingOperationBusy.value) return
   const contractID = selectedSigningRecord.value?.contract.recordId
   if (!contractID) return
   signingOperationBusy.value = true
@@ -937,13 +930,20 @@ async function confirmCustomerReceived() {
 }
 
 async function sendSigningReminder() {
+  if (signingOperationBusy.value) return
   const contractID = selectedSigningRecord.value?.contract.recordId
   if (!contractID) return
   signingOperationBusy.value = true
   try {
     await recordSigningReminder(contractID)
-    await refreshSelectedSigningRecord()
+    // 催办已保存（HTTP 200）：随后的详情/台账刷新失败不得误报为“保存催办记录失败”，
+    // 也不得回退已保存的催办结果。
     showToast('催办记录已保存')
+    try {
+      await refreshSelectedSigningRecord()
+    } catch {
+      showToast('催办记录已保存，但签署记录刷新失败，请手动刷新核对')
+    }
   } catch (error) {
     showToast(formatUserError(error, { fallback: '保存催办记录失败' }))
   } finally {
@@ -952,6 +952,7 @@ async function sendSigningReminder() {
 }
 
 async function confirmSigningRecord() {
+  if (signingOperationBusy.value) return
   const record = selectedSigningRecord.value
   const contractID = record?.contract.recordId
   if (!contractID) return
@@ -989,6 +990,7 @@ async function uploadStampedContract(contract, event, { replacement = false } = 
   const file = event.target.files?.[0]
   event.target.value = ''
   if (!file) return
+  if (stampedUploadBusyID.value) return
   if (replacement && !signingReplacementReason.value.trim()) {
     showToast('正式更换盖章文件必须填写原因。')
     return
@@ -1006,9 +1008,15 @@ async function uploadStampedContract(contract, event, { replacement = false } = 
       replacementReason: replacement ? signingReplacementReason.value.trim() : '',
     })
     if (replacement) signingReplacementReason.value = ''
-    if (selectedSigningRecord.value?.contract.recordId === contract.recordId) await refreshSelectedSigningRecord()
-    else await refreshSigningRecords()
+    // 盖章文件已上传（HTTP 200）：随后的详情/台账刷新失败不得误报为“上传盖章合同失败”，
+    // 只提醒手动刷新核对最新文件版本，避免凭旧版本继续核验或再次上传。
     showToast(replacement ? '新版本盖章文件已上传，需重新核验签署' : '回传合同 PDF 已上传，等待人工核验')
+    try {
+      if (selectedSigningRecord.value?.contract.recordId === contract.recordId) await refreshSelectedSigningRecord()
+      else await refreshSigningRecords()
+    } catch {
+      showToast('盖章文件已上传，但签署记录刷新失败，请手动刷新核对最新文件版本')
+    }
   } catch (error) {
     showToast(formatUserError(error, { fallback: '上传盖章合同失败' }))
   } finally {
@@ -1061,31 +1069,14 @@ async function waitForInitiatedApproval(approvalID) {
   return false
 }
 
-function approvalCommandIsDurable(detail, commandID, action) {
-  if (!detail?.actions?.some((item) => item.command_id === commandID)) return false
-  if (action === 'approve' && detail.state?.status === 'approved') return detail.contract?.status === 'active'
-  if (['reject', 'withdraw'].includes(action)) return detail.contract?.status === 'draft'
-  return true
-}
 
-async function waitForApprovalCommand(commandID, action, approvalID) {
-  const delays = [0, 150, 300, 500, 800, 1200, 1800]
-  for (const delay of delays) {
-    if (delay) await new Promise((resolve) => window.setTimeout(resolve, delay))
-    try {
-      const detail = await getApproval(approvalID)
-      if (selectedApproval.value?.id === approvalID) approvalDetail.value = detail
-      if (approvalCommandIsDurable(detail, commandID, action)) return true
-    } catch {
-      // Temporal 已受理命令时继续等待数据库活动提交，最终以服务端快照为准。
-    }
-  }
-  return false
-}
 
 async function refreshApprovalRealtime() {
   if (approvalRealtimeBusy || !session.value || activeSection.value !== 'approvals' || document.visibilityState !== 'visible') return
   approvalRealtimeBusy = true
+  // 轮询读取的作用域票据：组件卸载（onScopeDispose）后迟到的列表/待办/详情响应不得再回写组件状态。
+  const ticket = approvalRealtimeScope.begin('APPROVAL_REALTIME')
+  const isCurrent = () => approvalRealtimeScope.isCurrent(ticket)
   try {
     const initiatedRequest = listApprovals({ limit: 200 })
     const taskRequest = can('approval.process') ? listApprovalTasks({ limit: 200 }) : Promise.resolve([])
@@ -1093,8 +1084,8 @@ async function refreshApprovalRealtime() {
       ? getApproval(selectedApproval.value.id)
       : Promise.resolve(null)
     const [initiatedResult, taskResult, detailResult] = await Promise.allSettled([initiatedRequest, taskRequest, detailRequest])
-    if (initiatedResult.status === 'fulfilled') setInitiatedApprovals(initiatedResult.value)
-    if (taskResult.status === 'fulfilled') {
+    if (isCurrent() && initiatedResult.status === 'fulfilled') setInitiatedApprovals(initiatedResult.value)
+    if (isCurrent() && taskResult.status === 'fulfilled') {
       approvals.value = taskResult.value.map(normalizeApproval)
       if (selectedApproval.value && can('approval.process')) {
         const currentTask = approvals.value.find((item) => item.id === selectedApproval.value.id)
@@ -1102,7 +1093,7 @@ async function refreshApprovalRealtime() {
         else if (['active', 'pending'].includes(selectedApproval.value.status)) selectedApproval.value = { ...selectedApproval.value, status: 'pending' }
       }
     }
-    if (detailResult.status === 'fulfilled' && detailResult.value && selectedApproval.value?.id === detailResult.value.meta?.id) {
+    if (isCurrent() && detailResult.status === 'fulfilled' && detailResult.value && selectedApproval.value?.id === detailResult.value.meta?.id) {
       approvalDetail.value = detailResult.value
       if (Number.isInteger(detailResult.value.state?.current_node_index)) {
         selectedApproval.value = { ...selectedApproval.value, step: `第 ${detailResult.value.state.current_node_index + 1} 节点` }
@@ -1135,17 +1126,22 @@ function handleApprovalVisibilityChange() {
 async function refreshSigningRealtime() {
   if (signingRealtimeBusy || !session.value || activeSection.value !== 'signing' || document.visibilityState !== 'visible') return
   signingRealtimeBusy = true
+  // 轮询读取的作用域票据：组件卸载（onScopeDispose）后迟到的台账/详情响应不得再回写或提示。
+  const ticket = signingRealtimeScope.begin('SIGNING_REALTIME')
+  const isCurrent = () => signingRealtimeScope.isCurrent(ticket)
   try {
     const detailContractID = selectedSigningRecord.value?.contract.recordId || ''
-    const detailSequence = signingDetailSequence
+    // 实时刷新不开启新票据（避免顶掉在途的详情打开请求），只校验打开时的票据仍然有效：
+    // 关闭弹窗、切换记录或组件卸载都会让旧票据失效，迟到详情不再回写表单。
+    const detailTicket = signingDetailTicket
     // 实时刷新保持当前已加载条数，避免把用户“加载更多”的结果重置回第一页。
     const listRequest = refreshSigningRecords({ limit: Math.max(50, signingRecords.value.length) })
     const detailRequest = detailContractID && !signingOperationBusy.value
       ? getSigningRecord(detailContractID)
       : Promise.resolve(null)
     const [listResult, detailResult] = await Promise.allSettled([listRequest, detailRequest])
-    if (listResult.status === 'rejected') showToast(formatUserError(listResult.reason, { fallback: '刷新签署台账失败' }))
-    if (detailResult.status === 'fulfilled' && detailResult.value && detailSequence === signingDetailSequence &&
+    if (isCurrent() && listResult.status === 'rejected') showToast(formatUserError(listResult.reason, { fallback: '刷新签署台账失败' }))
+    if (isCurrent() && detailResult.status === 'fulfilled' && detailResult.value && signingDetailScope.isCurrent(detailTicket) &&
       selectedSigningRecord.value?.contract.recordId === detailContractID && detailResult.value.contract?.id === detailContractID) {
       applySigningRecord(detailResult.value, { preserveForms: true })
     }
@@ -1415,12 +1411,18 @@ function openTemplateUpload() {
   templateUploadDialogOpen.value = true
 }
 
-function openTemplateReplacement(item) {
+async function openTemplateReplacement(item) {
   if (!isAdmin.value) {
     showToast('只有超级管理员可以替换合同模板。')
     return
   }
-  if (!window.confirm(`替换“${item.name}”的 DOCX 模板文件？同名字段配置会保留，新字段需要重新核对；已生成合同的固化正文不变。`)) return
+  const ok = await askConfirm({
+    title: '替换合同模板文件？',
+    description: `将替换“${item.name}”的 DOCX 模板文件。同名字段配置会保留，新字段需要重新核对；已生成合同的固化正文不变。`,
+    confirmText: '选择新文件',
+    cancelText: '取消',
+  })
+  if (!ok) return
   templateReplacementID.value = item.id
   templateUploadForm.value = { name: item.name, file: null }
   templateUploadError.value = ''
@@ -1512,7 +1514,14 @@ async function saveTemplate() {
 }
 
 async function removeTemplate(item) {
-  if (!window.confirm(`确定删除合同模板“${item.name}”吗？已生成的合同不受影响。`)) return
+  const ok = await askConfirm({
+    title: '删除合同模板？',
+    description: `确定删除合同模板“${item.name}”吗？已生成的合同不受影响，但删除后不能再使用该模板创建新合同。`,
+    confirmText: '删除模板',
+    cancelText: '取消',
+    danger: true,
+  })
+  if (!ok) return
   try {
     await deleteContractTemplate(item.id)
     contractTemplates.value = contractTemplates.value.filter((template) => template.id !== item.id)
@@ -1534,6 +1543,14 @@ function openNewContract() {
   draftEditError.value = ''
   draftEditConflict.value = false
   newContract.value = emptyNewContract()
+  // 从商机/客户等外部入口进入时，只带入用户明确提供的对象标识和名称；
+  // 金额、服务项、模板和日期仍由用户在合同中核对填写，不静默猜测。
+  const contextCustomerId = String(route.query.customer_id || route.query.customerId || '').trim()
+  const contextOpportunityId = String(route.query.opportunity_id || route.query.opportunityId || '').trim()
+  if (contextCustomerId) newContract.value.customer_id = contextCustomerId
+  if (contextCustomerId && route.query.customer_name) newContract.value.customer_name = String(route.query.customer_name)
+  if (contextOpportunityId) newContract.value.opportunity_id = contextOpportunityId
+  if (contextOpportunityId && route.query.opportunity_name) newContract.value.opportunity_name = String(route.query.opportunity_name)
   contractCreationMode.value = 'template'
   externalContractFile.value = null
   externalContractFileError.value = ''
@@ -1541,6 +1558,7 @@ function openNewContract() {
   templatePreviewHTML.value = ''
   templatePreviewError.value = ''
   createDialogOpen.value = true
+  markDraftClean()
 }
 
 async function editContractDraft(contract) {
@@ -1560,6 +1578,7 @@ async function editContractDraft(contract) {
     templatePreviewError.value = ''
     closeContract()
     createDialogOpen.value = true
+    markDraftClean()
     if (!raw.template_id) void loadDetectionCategoryOptions()
     else if (!selectedContractTemplate.value) draftEditError.value = '原合同模板已不可用，不能重新生成正文，请联系管理员恢复原模板。'
   } catch (error) {
@@ -1569,12 +1588,28 @@ async function editContractDraft(contract) {
   }
 }
 
-function closeDraftEditor() {
-  if (contractCreating.value) return
+function closeDraftEditorNow() {
   createDialogOpen.value = false
   editingContract.value = null
   draftEditError.value = ''
   draftEditConflict.value = false
+  draftInitialSnapshot.value = ''
+  draftInitialHadFile.value = false
+}
+
+async function closeDraftEditor() {
+  if (contractCreating.value) return
+  if (draftHasUnsavedChanges()) {
+    const ok = await askConfirm({
+      title: '放弃未保存的合同内容？',
+      description: '当前合同表单还有未保存的修改，放弃后这些内容不会保留。建议先保存为草稿。',
+      confirmText: '放弃修改',
+      cancelText: '继续编辑',
+      danger: true,
+    })
+    if (!ok) return
+  }
+  closeDraftEditorNow()
 }
 
 function selectContractCreationMode(mode) {
@@ -1960,16 +1995,17 @@ async function submitNewContract(event) {
       showToast(submit ? '修改已保存，合同已发起审批' : '合同草稿修改已保存')
       return
     }
+    let createdContract
     if (externalSnapshot) {
       validateExternalContract(formSnapshot, fileSnapshot, { editing: false })
       // 提交前重新经过 CRM 浏览器鉴权，既给用户即时反馈，也刷新 CRM 的服务端授权快照；
       // 合同后端随后仍会使用机器接口再次校验，不能把此前端检查当作安全边界。
       await refreshSelectedCRMAccess(formSnapshot)
-      await createExternalContract(fileSnapshot, payload)
+      createdContract = await createExternalContract(fileSnapshot, payload)
     } else {
       if (!templateSnapshot) throw new Error('请先选择合同模板。')
       if (shouldRefreshCRM()) await refreshSelectedCRMAccess(formSnapshot)
-      await createContract({
+      createdContract = await createContract({
         ...payload,
         template_id: templateSnapshot.id,
         template_values: { ...formSnapshot.template_values },
@@ -1986,6 +2022,16 @@ async function submitNewContract(event) {
     // /opportunities/:id/contract-transfer 发起，不能在这里调用不存在的
     // /contract-drafts 回传接口，也不能把合同创建 ID 当作转交事件 ID。
     showToast(externalSnapshot ? '外部合同草稿已创建' : '合同草稿已创建')
+    const saved = createdContract?.contract || createdContract?.data || createdContract || {}
+    const record = {
+      title: externalSnapshot ? '外部合同草稿已创建' : '合同草稿已创建',
+      message: `${saved.title || formSnapshot.title || '合同'} 已保存为草稿，可继续补充内容或发起审批。`,
+      reference: saved.contract_no || saved.contractNo || saved.contract_id || saved.id || '',
+      nextAction: '核对客户、金额、服务项与付款计划后再发起审批；审批通过后才会生成正式合同编号。',
+      module: '合同管理',
+    }
+    saveContractResult(record)
+    pushOperationRecord(record)
   } catch (error) {
     if (error?.crmLoginRequired) recordCRMDirectoryError(error)
     if (editingContract.value) {
@@ -1995,101 +2041,20 @@ async function submitNewContract(event) {
       draftEditError.value = formatUserError(error, { fallback: '创建合同失败，请检查表单后重试。' })
     }
     showToast(draftEditError.value || formatUserError(error, { fallback: wasEditing ? '编辑或提交失败，请检查最新合同状态' : '创建合同失败' }))
+    nextTick(() => {
+      draftErrorElement.value?.focus()
+      const firstInvalid = typeof document !== 'undefined'
+        ? document.querySelector('.contract-create-modal input:invalid, .contract-create-modal select:invalid, .contract-create-modal textarea:invalid')
+        : null
+      firstInvalid?.focus()
+    })
   } finally {
     contractCreating.value = false
   }
 }
 
-async function openApproval(approval) {
-  const sequence = ++approvalDetailSequence
-  const isCurrent = () => sequence === approvalDetailSequence && selectedApproval.value?.id === approval.id
-  // 审批状态与格式化正文分别读取：正文预览失败只降级为原始合同内容，不会把审批
-  // 详情误判为不可用，也不会改变服务端的待办状态。
-  selectedApproval.value = approval
-  approvalDetail.value = null
-  approvalContractPreviewHTML.value = ''
-  approvalContractPreviewError.value = ''
-  approvalComment.value = ''
-  approvalTargetUser.value = ''
-  approvalTargetNode.value = ''
-  approvalDetailLoading.value = true
-  try {
-    const detail = await getApproval(approval.id)
-    if (!isCurrent()) return
-    approvalDetail.value = detail
-    approvalDetailLoading.value = false
-    if (approvalDetail.value?.contract) {
-      approvalContractPreviewLoading.value = true
-      try {
-        const result = await previewApprovalContract(approval.id)
-        if (!isCurrent()) return
-        approvalContractPreviewHTML.value = result?.html || ''
-        if (!approvalContractPreviewHTML.value) approvalContractPreviewError.value = '该合同没有可预览的正文内容。'
-      } catch (error) {
-        if (isCurrent() && error?.code !== 'CON_DOCUMENT_NOT_FOUND') approvalContractPreviewError.value = formatUserError(error, { fallback: '读取格式化合同失败' })
-      } finally {
-        if (isCurrent()) approvalContractPreviewLoading.value = false
-      }
-    }
-  } catch (error) {
-    if (isCurrent()) showToast(formatUserError(error, { fallback: '读取审批详情失败' }))
-  } finally {
-    if (isCurrent()) approvalDetailLoading.value = false
-  }
-}
 
-function closeApproval() {
-  approvalDetailSequence += 1
-  selectedApproval.value = null
-  approvalDetail.value = null
-  approvalContractPreviewHTML.value = ''
-  approvalContractPreviewError.value = ''
-  approvalContractPreviewLoading.value = false
-}
 
-async function executeApprovalCommand(action, payload = {}, { close = false } = {}) {
-  if (approvalDetail.value?.state_unavailable) {
-    showToast('审批工作流历史已不可查询，当前仅可查看提交快照', 'warning')
-    return
-  }
-  // 本地判断用于收窄按钮入口并校验必填原因；待办归属、当前节点、角色和状态版本仍由
-  // 命令接口按当前登录主体重新验证，不能把已打开的详情快照当作授权凭据。
-  const isApplicant = approvalDetail.value?.meta?.applicant_user_id === session.value?.user_id
-  const requiresActiveTask = ['approve', 'reject', 'sign', 'transfer', 'return'].includes(action)
-  const allowed = requiresActiveTask
-    ? can('approval.process') && selectedApproval.value?.status === 'active'
-    : action === 'comments'
-      ? can('approval.view') || can('approval.process') || isApplicant
-      : action === 'urge'
-        ? can('approval.manage') || isApplicant
-        : action === 'withdraw' && isApplicant
-  if (!allowed) {
-    showToast(requiresActiveTask && selectedApproval.value?.status === 'pending'
-      ? '该审批尚未流转到当前节点，暂时只能查看。'
-      : '当前用户无权执行此审批操作。')
-    return
-  }
-  if (['reject', 'sign', 'transfer', 'return', 'withdraw'].includes(action) && !approvalComment.value.trim()) {
-    showToast('该操作必须填写审批意见或原因。')
-    return
-  }
-  const target = selectedApproval.value
-  if (!target) return
-  approvalCommandBusy.value = true
-  try {
-    const accepted = await commandApproval(target.id, action, { comment: approvalComment.value.trim(), ...payload })
-    const durable = await waitForApprovalCommand(accepted.command_id, action, target.id)
-    if (close && durable) closeApproval()
-    await refreshApprovalRealtime()
-    const labels = { approve: '审批已通过', reject: '审批已驳回', comments: '评论已提交', urge: '催办已发送', sign: '加签请求已提交', transfer: '转交请求已提交', return: '退回请求已提交', withdraw: '审批已撤回' }
-    showToast(durable ? (labels[action] || '操作已完成') : '操作已受理，流程仍在处理，状态将自动更新')
-    approvalComment.value = ''
-  } catch (error) {
-    showToast(formatUserError(error, { fallback: '处理审批失败' }))
-  } finally {
-    approvalCommandBusy.value = false
-  }
-}
 
 function processApproval(action) {
   return executeApprovalCommand(action, {}, { close: true })
@@ -2098,6 +2063,7 @@ function processApproval(action) {
 // 工作流已停止但审批仍为 running 时的管理端收口入口；服务端会再次确认工作流
 // 状态和持久化运行状态，运行中的审批不会被误收口。
 async function repairApprovalState() {
+  if (approvalCommandBusy.value) return
   const target = selectedApproval.value
   if (!target) return
   approvalCommandBusy.value = true
@@ -2113,6 +2079,7 @@ async function repairApprovalState() {
 }
 
 async function submitSelectedContract() {
+  if (submittingContract.value) return
   if (!selectedContract.value?.canEditDraft || selectedContract.value.status !== '草稿') return
   submittingContract.value = true
   try {
@@ -2233,7 +2200,14 @@ async function toggleRule(rule) {
 }
 
 async function removeRule(rule) {
-  if (!window.confirm(`确定删除审批规则“${rule.name}”吗？`)) return
+  const ok = await askConfirm({
+    title: '删除审批规则？',
+    description: `确定删除审批规则“${rule.name}”吗？删除后新的合同将不再匹配该规则，请先确认没有进行中的审批依赖它。`,
+    confirmText: '删除规则',
+    cancelText: '取消',
+    danger: true,
+  })
+  if (!ok) return
   try {
     await deleteApprovalRule(rule.id, rule.version)
     await loadBusinessData()
@@ -2325,22 +2299,31 @@ onBeforeUnmount(() => {
     </aside>
 
     <main class="contract-main">
+      <OperationResultBanner
+        v-if="contractResult"
+        :title="contractResult.title"
+        :message="contractResult.message"
+        :reference="contractResult.reference"
+        :next-action="contractResult.nextAction"
+        :saved-at="contractResult.savedAt"
+        @dismiss="clearContractResult"
+      />
       <header class="contract-topbar">
         <button class="contract-menu-button" type="button" aria-label="打开菜单" @click="mobileMenuOpen = true"><ConsoleIcon name="menu" /></button>
         <div class="contract-breadcrumb"><span>合同管理系统</span><ConsoleIcon name="chevron" /><strong>{{ pageMeta.title }}</strong></div>
         <label class="contract-global-search"><ConsoleIcon name="search" /><input v-model="keyword" type="search" maxlength="100" autocomplete="off" placeholder="搜索合同编号 / 名称 / 类型…" @change="loadBusinessData" /></label>
         <div class="contract-topbar-actions">
+          <OperationInboxPanel />
           <button class="contract-icon-button" type="button" aria-label="通知" @click="notificationOpen = !notificationOpen"><ConsoleIcon name="bell" /><i></i></button>
           <span class="contract-topbar-avatar">{{ currentUserInitial }}</span>
         </div>
-        <div v-if="notificationOpen" class="contract-notification-panel">
-          <header><strong>通知中心</strong><span>{{ approvals.length }} 项待办</span></header>
-          <template v-if="can('approval.process') && approvals.length">
-            <button v-for="approval in approvals.slice(0, 5)" :key="approval.id" type="button" @click="openApproval(approval)"><i class="warning"></i><span><strong>{{ approvalNotificationTitle(approval) }}</strong><small>事件：流程流转 · 当前节点：{{ approval.step }} · 状态：{{ approvalStatusLabel(approval.status) }}</small><small>点击查看并处理</small></span></button>
-            <button v-if="approvals.length > 5" type="button" @click="navigate('approvals')"><i class="info"></i><span><strong>查看全部待处理事件</strong><small>还有 {{ approvals.length - 5 }} 项审批待办</small></span></button>
-          </template>
-          <p v-else class="contract-notification-empty">当前没有待处理流程事件。</p>
-        </div>
+        <ContractNotificationPanel
+          v-if="notificationOpen"
+          :approvals="approvals"
+          :can-process="can('approval.process')"
+          @open-approval="openApproval"
+          @view-all="navigate('approvals')"
+        />
       </header>
 
       <section class="contract-content">
@@ -2496,13 +2479,13 @@ onBeforeUnmount(() => {
     <div v-if="ruleDialogOpen" class="contract-modal-mask" @click.self="ruleDialogOpen = false"><form class="contract-detail-modal contract-rule-modal" @submit.prevent="saveRule"><header><div><span class="contract-badge info">规则引擎</span><h2>{{ editingRuleId ? '编辑审批规则' : '新增审批规则' }}</h2><p>按优先级从高到低匹配，命中第一条规则后固化到审批实例。</p></div><button type="button" aria-label="关闭" @click="ruleDialogOpen = false"><ConsoleIcon name="close" /></button></header><section><div class="contract-form-grid"><label><span>规则名称</span><input v-model="ruleForm.name" required maxlength="128" autocomplete="off" placeholder="例如：标准服务简化审批" /></label><label><span>优先级</span><input v-model.number="ruleForm.priority" required type="number" min="0" max="9999" step="1" /></label><label><span>条件关系</span><select v-model="ruleForm.logical" :disabled="ruleForm.expressionReadonly"><option value="and">全部满足（AND）</option><option value="or">任一满足（OR）</option></select></label><label class="contract-check-label"><input v-model="ruleForm.enabled" type="checkbox" /><span>保存后立即启用</span></label></div></section><section v-if="ruleForm.expressionReadonly"><h3>触发条件（只读）</h3><p class="contract-info-banner">此规则包含嵌套条件组，当前表单完整保留原条件，不修改或展开为平铺条件；可修改规则基本信息和审批节点。</p><p>{{ ruleConditionSummary({ expression: ruleForm.originalExpression }) }}</p></section><section v-else><div class="contract-section-title"><h3>触发条件</h3><button class="contract-text-button" type="button" @click="addRuleCondition">＋ 添加条件</button></div><div class="contract-rule-editor-list"><div v-for="(condition, index) in ruleForm.conditions" :key="index"><select v-model="condition.field" @change="condition.operator = conditionOperators(condition.field)[0].value; condition.value = conditionField(condition.field).kind === 'boolean' ? true : ''"><option v-for="field in ruleFieldOptions" :key="field.value" :value="field.value">{{ field.label }}</option></select><select v-model="condition.operator"><option v-for="operator in conditionOperators(condition.field)" :key="operator.value" :value="operator.value">{{ operator.label }}</option></select><select v-if="conditionField(condition.field).kind === 'boolean'" v-model="condition.value"><option :value="true">是</option><option :value="false">否</option></select><input v-else v-model="condition.value" required maxlength="1000" :type="conditionField(condition.field).kind === 'number' ? 'number' : 'text'" :step="conditionField(condition.field).kind === 'number' ? '0.01' : undefined" :placeholder="condition.operator === 'in' ? '多个值用逗号分隔' : '条件值'" /><button type="button" aria-label="删除条件" :disabled="ruleForm.conditions.length === 1" @click="ruleForm.conditions.splice(index, 1)">×</button></div></div></section><section><div class="contract-section-title"><h3>审批节点</h3><button class="contract-text-button" type="button" @click="addRuleNode">＋ 添加节点</button></div><div class="contract-rule-editor-list nodes"><div v-for="(node, index) in ruleForm.nodes" :key="index"><input v-model="node.name" required maxlength="128" autocomplete="off" placeholder="节点名称" /><select v-model="node.role_code" required><option value="">请选择审批角色</option><option v-if="node.role_code && !contractRole(node.role_code)" :value="node.role_code">未识别角色</option><option v-for="role in CONTRACT_ROLE_DEFINITIONS" :key="role.code" :value="role.code">{{ role.name }}</option></select><select v-model="node.countersign" disabled><option value="any">或签（任一）</option></select><button type="button" aria-label="删除节点" :disabled="ruleForm.nodes.length === 1" @click="ruleForm.nodes.splice(index, 1)">×</button></div></div></section><footer><button class="contract-button secondary" type="button" @click="ruleDialogOpen = false">取消</button><button class="contract-button primary" type="submit" :disabled="ruleSaving">{{ ruleSaving ? '正在保存…' : '保存规则' }}</button></footer></form></div>
 
     <div v-if="createDialogOpen" class="contract-modal-mask" @click.self="closeDraftEditor">
-      <form class="contract-detail-modal contract-create-modal" @submit.prevent="submitNewContract($event)">
+      <form ref="createDialogElement" class="contract-detail-modal contract-create-modal" role="dialog" aria-modal="true" aria-label="合同草稿" @keydown.esc.prevent="closeDraftEditor" @submit.prevent="submitNewContract($event)">
         <header><div><span class="contract-badge info">合同草稿</span><h2>{{ editingContract ? '编辑合同草稿' : '新建合同' }}</h2><p>{{ editingContract ? '修改现有草稿；创建人、合同来源及数据范围保持不变' : '可使用标准模板生成，也可上传不依赖模板的外部合同 DOCX' }}</p></div><button type="button" aria-label="关闭" :disabled="contractCreating" @click="closeDraftEditor"><ConsoleIcon name="close" /></button></header>
         <section>
           <div class="contract-form-grid">
             <p class="contract-form-wide contract-form-required-hint">带 <strong>*</strong> 的为必填项；输入框按字段类型限制长度、格式和数值范围。</p>
             <p v-if="editingContract && isExternalContractMode" class="contract-info-banner contract-form-wide">编辑结构化信息时保留原外部 DOCX，不替换合同文件；正文金额等条款如需改变，应创建与新文件一致的合同。</p>
-            <p v-if="draftEditError" class="contract-session-error contract-form-wide" role="alert">{{ draftEditError }} <button v-if="draftEditConflict" type="button" :disabled="contractCreating || draftEditLoading" @click="editContractDraft(editingContract)">重新载入草稿（放弃未保存修改）</button></p>
+            <p v-if="draftEditError" ref="draftErrorElement" tabindex="-1" class="contract-session-error contract-form-wide" role="alert">{{ draftEditError }} <button v-if="draftEditConflict" type="button" :disabled="contractCreating || draftEditLoading" @click="editContractDraft(editingContract)">重新载入草稿（放弃未保存修改）</button></p>
             <div v-if="crmConnectionRequired" class="contract-session-error contract-form-wide" role="status"><p>{{ crmConnectionMessage }}</p><button class="contract-button secondary" type="button" @click="connectCRM">连接 CRM</button></div>
             <div v-if="!editingContract" class="contract-form-wide contract-creation-mode" role="radiogroup" aria-label="合同创建方式"><button type="button" :class="{ active: contractCreationMode === 'template' }" role="radio" :aria-checked="contractCreationMode === 'template'" @click="selectContractCreationMode('template')"><strong>使用合同模板</strong><span>选择标准模板并填写模板字段</span></button><button type="button" :class="{ active: contractCreationMode === 'external' }" role="radio" :aria-checked="contractCreationMode === 'external'" @click="selectContractCreationMode('external')"><strong>上传外部合同</strong><span>上传未签署 DOCX，并补全结构化字段</span></button></div>
             <label v-if="contractCreationMode === 'template'" class="contract-form-wide contract-template-first"><span>第一步：选择合同模板</span><select v-model="newContract.template_id" :disabled="Boolean(editingContract)" required @change="selectContractTemplate"><option value="" disabled>请选择用于新建合同的模板</option><option v-for="item in contractTemplates" :key="item.id" :value="item.id">{{ item.name }}（{{ item.fields?.length || 0 }} 个字段）</option></select><small>模板将生成合同正文，合同编号在审批通过后自动生成。</small></label>
@@ -2554,6 +2537,17 @@ onBeforeUnmount(() => {
 <div v-if="templateUploadDialogOpen" class="contract-modal-mask" @click.self="templateUploadDialogOpen = false"><form class="contract-detail-modal contract-template-upload-modal" @submit.prevent="submitTemplateUpload"><header><div><span class="contract-badge info">超级管理员</span><h2>{{ templateReplacementID ? '替换模板文件' : '上传合同模板' }}</h2><p><span v-if="templateReplacementID">保留模板标识和同名字段配置，已生成合同正文不变。请核对替换后的新字段。</span>上传不超过 10MB 的 DOCX，模板中使用 <code v-pre>{{field_name:字段名称}}</code> 标记填写项。</p></div><button type="button" aria-label="关闭" @click="templateUploadDialogOpen = false"><ConsoleIcon name="close" /></button></header><section><div class="contract-form-grid"><label><span>模板名称</span><input v-model="templateUploadForm.name" :readonly="Boolean(templateReplacementID)" required maxlength="160" placeholder="例如：标准服务合同" /></label><label><span>DOCX 文件</span><input required type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" @change="selectTemplateFile" /></label></div><p v-if="templateUploadError" class="contract-template-preview-error" role="alert">{{ templateUploadError }}</p></section><footer><button class="contract-button secondary" type="button" :disabled="templateUploading" @click="templateUploadDialogOpen = false">取消</button><button class="contract-button primary" type="submit" :disabled="templateUploading">{{ templateUploading ? '正在上传…' : (templateReplacementID ? '确认替换' : '上传模板') }}</button></footer></form></div>
 
     <div v-if="templateEditDialogOpen" class="contract-modal-mask" @click.self="templateEditDialogOpen = false"><form class="contract-detail-modal contract-template-edit-modal" @submit.prevent="saveTemplate"><header><div><span class="contract-badge info">超级管理员</span><h2>编辑合同模板</h2><p>可编辑合同编号格式，并将需要统一控制的合同信息设为管理员预设。</p></div><button type="button" aria-label="关闭" @click="templateEditDialogOpen = false"><ConsoleIcon name="close" /></button></header><section><div class="contract-template-base-fields"><label class="contract-template-name-field"><span>模板名称</span><input v-model="templateEditForm.name" required maxlength="160" /></label><label class="contract-template-name-field"><span>合同编号格式</span><input v-model="templateEditForm.number_format" required maxlength="160" placeholder="HT-{YYYYMMDD}-{ID8}" /><small>支持 {YYYYMMDD}、{YYYY}、{MM}、{DD}、{ID8}；必须包含 {ID8}</small></label></div><div class="contract-template-editor-list"><div v-for="field in templateEditForm.fields" :key="field.name" class="contract-template-editor-row"><label><span>显示名称</span><input v-model="field.label" required maxlength="160" /></label><label><span>{{ field.locked ? '管理员预设值' : '默认值（可选）' }}</span><input v-model="field.default" :required="field.locked" maxlength="1000" :placeholder="field.locked ? '请输入固定值' : '新建合同时仍可修改'" /></label><label class="contract-check-label"><input v-model="field.locked" type="checkbox" /><span>由管理员预设</span></label></div><p v-if="!templateEditForm.fields.length" class="contract-session-error">该 DOCX 中没有可配置字段。</p></div></section><footer><button class="contract-button secondary" type="button" :disabled="templateSaving" @click="templateEditDialogOpen = false">取消</button><button class="contract-button primary" type="submit" :disabled="templateSaving">{{ templateSaving ? '正在保存…' : '保存模板' }}</button></footer></form></div>
+
+    <ConfirmDialog
+      v-if="confirmDialog"
+      :title="confirmDialog.title"
+      :description="confirmDialog.description"
+      :confirm-text="confirmDialog.confirmText"
+      :cancel-text="confirmDialog.cancelText"
+      :danger="confirmDialog.danger"
+      @confirm="acceptConfirm"
+      @cancel="cancelConfirm"
+    />
 
     <Transition name="contract-toast"><div v-if="toast" class="contract-toast"><ConsoleIcon name="save" />{{ toast }}</div></Transition>
   </div>

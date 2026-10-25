@@ -9,7 +9,7 @@ const view = await readFile(new URL('./ProjectManagementView.vue', import.meta.u
 test('切换服务项会清空条目级草稿并重建签名画布', () => {
   const start = view.indexOf('function fillOperationForm(item) {')
   assert.ok(start > 0, '缺少 fillOperationForm')
-  const end = view.indexOf('function isEmbeddedPenetrationItem', start)
+  const end = view.indexOf('function updatePenetrationPackage', start)
   assert.ok(end > start, 'fillOperationForm 边界无法定位')
   const body = view.slice(start, end)
 

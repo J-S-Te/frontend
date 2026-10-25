@@ -21,6 +21,7 @@ const iamSettings = source('../components/IamSettingsModule.vue')
 const changeCenter = source('../components/PersonnelChangeCenter.vue')
 const authorizationTemplates = source('../components/PositionAuthorizationTemplates.vue')
 const batchImport = source('../components/BatchUserImportDialog.vue')
+const identityEditorModal = source('../components/IdentityEditorModal.vue')
 const iamApi = source('../api/iam.js')
 const positionAuthorizationApi = source('../api/positionAuthorization.js')
 const applicationsApi = source('../../applications/api/applications.js')
@@ -82,7 +83,11 @@ test('IAM 关联编辑器打开时重新校验目录，并订阅其他入口的�
   assert.doesNotMatch(iamSettings, /if \(\['account', 'membership'\]\.includes\(kind\) && !users\.value\.length\) loadUsers\(\)/)
   assert.doesNotMatch(iamSettings, /if \(kind === 'position' && !organizations\.value\.length\) loadOrganizations\(\)/)
   assert.match(iamSettings, /function loadEditorReferences\(kind\)/)
-  assert.match(iamSettings, /正在读取最新关联目录/)
+  // 提示文案随统一编辑弹窗迁移到 IdentityEditorModal.vue；父组件负责状态与传参。
+  assert.match(iamSettings, /:references-loading="editorReferencesLoading"/)
+  assert.match(iamSettings, /:references-error="editorReferencesError"/)
+  assert.match(iamSettings, /:selection-notice="editorSelectionNotice"/)
+  assert.match(identityEditorModal, /正在读取最新关联目录/)
   assert.match(iamSettings, /useRelatedDataInvalidation\(/)
   assert.match(iamSettings, /:catalogs-loading="loading\.organizations \|\| loading\.positions"/)
   // 目录重新读取后只清理确实失效的选择，不重置其他表单内容。
@@ -105,7 +110,9 @@ test('新增账号 / 任职的用户选择器使用完整用户目录而不是�
   assert.match(iamSettings, /loadAllCatalogPages\(\s*listUsers/)
   // 编辑器下拉只能引用完整目录；引用面板分页列表会退回"只能选到这一页"。
   assert.doesNotMatch(iamSettings, /<option v-for="item in users"/)
-  assert.match(iamSettings, /<option v-for="item in editorUsers"/)
+  // 编辑器下拉随弹窗迁移到 IdentityEditorModal.vue；父组件把完整目录经 users 属性传入。
+  assert.match(iamSettings, /:users="editorUsers"/)
+  assert.match(identityEditorModal, /<option v-for="item in users"/)
 })
 
 test('岗位授权模板订阅岗位 / 模板 / 角色目录变化并清理失效岗位选择', () => {

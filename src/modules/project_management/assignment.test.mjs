@@ -15,10 +15,10 @@ function allocationPage(items, { assignTeam = async () => {}, assignExecutionTea
   const selectedServiceItems = { get value() { return items.filter(row => state.selectedServiceItemIDs.value.includes(row.id)) } }
   const selectedServiceItem = { get value() { return selectedServiceItems.value[0] || null } }
   const operation = viewSource.slice(viewSource.indexOf('async function runOperation(kind)'), viewSource.indexOf('\nasync function revokeSelectedAssignment('))
-  const toast = viewSource.slice(viewSource.indexOf('function showToast(message'), viewSource.indexOf('\nfunction formatDateTime('))
+  const toast = viewSource.slice(viewSource.indexOf('function showToast(message'), viewSource.indexOf('\nfunction projectEvents('))
   let refreshCount = 0
-  const run = new Function(...Object.keys(state), 'selectedServiceItems', 'selectedServiceItem', 'formatUserError', 'assignServiceItemTeams', 'assignTeam', 'assignExecutionTeam', 'listServiceItems', 'selectedIDs', 'loadWorkspace', 'window',
-    `let toastTimer; ${toast}; ${operation}; return runOperation;`)(...Object.values(state), selectedServiceItems, selectedServiceItem, formatUserError, assignServiceItemTeams, assignTeam, assignExecutionTeam, listServiceItems, text => text.split(','), async () => { refreshCount++; await refreshed() }, { clearTimeout: () => {}, setTimeout: () => 1 })
+  const run = new Function(...Object.keys(state), 'selectedServiceItems', 'selectedServiceItem', 'formatUserError', 'assignServiceItemTeams', 'assignTeam', 'assignExecutionTeam', 'listServiceItems', 'selectedIDs', 'loadWorkspace', 'refreshAfterWrite', 'window',
+    `let toastTimer; ${toast}; ${operation}; return runOperation;`)(...Object.values(state), selectedServiceItems, selectedServiceItem, formatUserError, assignServiceItemTeams, assignTeam, assignExecutionTeam, listServiceItems, text => text.split(','), async () => { refreshCount++; await refreshed() }, async () => { refreshCount++; await refreshed() }, { clearTimeout: () => {}, setTimeout: () => 1 })
   return { ...state, run, refreshCount: () => refreshCount }
 }
 
@@ -121,7 +121,7 @@ test('操作台调用权威版本编排并在部分完成后刷新，不再复�
   const operation = source.slice(source.indexOf('async function runOperation(kind)'), source.indexOf('\nasync function revokeSelectedAssignment('))
   assert.match(operation, /await assignServiceItemTeams\(/)
   assert.match(operation, /onTeamAssigned: \(id\) => \{ selected\.team_lead_id = id \}/)
-  assert.match(operation, /if \(error\?\.status === 409 \|\| error\?\.requiresReload \|\| partialAssignment\) \{\s*try \{ await loadWorkspace\(\)/)
+  assert.match(operation, /if \(error\?\.status === 409 \|\| error\?\.requiresReload \|\| partialAssignment\) \{\s*try \{ await loadWorkspace\(\{ reportError: false \}\)/)
   assert.doesNotMatch(operation, /await assignExecutionTeam\(selected.id/)
 })
 

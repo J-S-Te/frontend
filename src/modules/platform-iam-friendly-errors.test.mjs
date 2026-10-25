@@ -58,9 +58,9 @@ test('IAM 前置检查保留精确中文业务拒绝及结构化字段定位', a
 function onboarding(onboardEmployee) {
   const source = sources.EmployeeOnboardingModal
   const code = source.slice(source.indexOf('function onboardingFailureMessage('), source.indexOf('</script>'))
-  const state = { saving: ref(false), form: { create_account: true }, events: [] }
-  const run = new Function('formatUserError', 'form', 'saving', 'emit', 'validateUser', 'validateAccount', 'validateMembership', 'buildEmployeeOnboardingPayload', 'onboardEmployee',
-    `${code}; return submit;`)(formatUserError, state.form, state.saving, (...args) => state.events.push(args), () => ({ display_name: '测试员工' }), () => ({ account_name: 'test-account', initial_password: 'Test-fixture-only-1!' }), () => ({ org_unit_id: 'org-1', position_id: 'position-1', inherit_authorization: true }), (_form, { user, account }) => ({ user, account }), onboardEmployee)
+  const state = { saving: ref(false), form: { create_account: true }, events: [], onboardingFieldError: ref(null) }
+  const run = new Function('formatUserError', 'form', 'saving', 'emit', 'validateUser', 'validateAccount', 'validateMembership', 'buildEmployeeOnboardingPayload', 'onboardEmployee', 'onboardingFieldError', 'nextTick', 'document', 'draftRecovery',
+    `${code}; return submit;`)(formatUserError, state.form, state.saving, (...args) => state.events.push(args), () => ({ display_name: '测试员工' }), () => ({ account_name: 'test-account', initial_password: 'Test-fixture-only-1!' }), () => ({ org_unit_id: 'org-1', position_id: 'position-1', inherit_authorization: true }), (_form, { user, account }) => ({ user, account }), onboardEmployee, state.onboardingFieldError, (fn) => fn?.(), { querySelector: () => null }, { clear: () => {} })
   return { ...state, run }
 }
 

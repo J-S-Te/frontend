@@ -6,6 +6,11 @@ import { attachStructuredContext } from '../platform/shared/api/requestContext.j
 import { normalizeAuthorizationSession, principalIdentityID, shouldStartSubsystemLogin } from '../shared/authz/sessionCompatibility.js'
 import { listQuery } from './api/pagination.js'
 import { formatSettlementError } from './utils/errors.js'
+import { useSettlementActions } from './composables/useSettlementActions.js'
+
+// useSettlementActions 在 Node 域执行，notify 的 3.2 秒自动清除需要 window.setTimeout 桩。
+globalThis.window = { setTimeout() {} }
+import { createRequestScope } from '../platform/shared/composables/requestScope.js'
 
 const source = await readFile(new URL('./api/settlement.js', import.meta.url), 'utf8')
 function harness(fetcher) {
@@ -198,6 +203,9 @@ async function viewHarness(overrides = {}) {
     ref: value => ({ value }), computed: getter => ({ get value() { return getter() } }), watch() {},
     useRoute: () => ({ params: { section: 'receipts' }, query: {} }), useRouter: () => ({ push() {}, replace() {} }),
     window: { setTimeout() {}, confirm: () => false }, formatSettlementError, ...bindings,
+    createRequestScope,
+    useSettlementActions,
+    useConfirmDialog: () => ({ dialog: { value: null }, askConfirm: async () => true, accept() {}, cancel() {} }),
     getSettlementSession: async () => ({}), ...overrides,
   })
   vm.runInContext(`${script}\nglobalThis.ui = { submitReceipt, act, message, receiptComposerOpen, receiptMatchFor, receiptMatches, error };`, context)

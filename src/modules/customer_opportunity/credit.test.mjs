@@ -4,6 +4,7 @@ import test from 'node:test'
 
 const root = new URL('./', import.meta.url)
 const read = (path) => fs.readFileSync(new URL(path, root), 'utf8')
+const displaySource = read('./crmDisplay.js')
 
 test('信用等级 API 覆盖客户查询、申请和审批动作，并对写操作启用幂等键', () => {
   const source = read('./api/credit.js')
@@ -87,6 +88,6 @@ test('客户信用调整表单不会静默吞掉校验结果，并以表单提�
   assert.match(panel, /<button type="submit" class="primary" :disabled="submitting">/)
   assert.match(panel, /createCustomerCreditApplication\(customerID\.value, \{ target_level: form\.value\.target_level, reason: form\.value\.reason\.trim\(\) \}, createIdempotencyKey\(\)\)/)
   assert.match(view, /:can-apply="canApplyCredit"/)
-  assert.match(view, /CREDIT_APPLICATION_ROLES = new Set\(\['sales'\]\)/)
+  assert.match(displaySource, /CREDIT_APPLICATION_ROLES = new Set\(\['sales'\]\)/)
   assert.match(panel, /canApplyPermission = computed\(\(\) => props\.canApply === true\)/)
 })

@@ -1,17 +1,24 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { formatUserError } from '../../shared/utils/userError.js'
+import { createRequestScope } from '../../platform/shared/composables/requestScope.js'
+import { useConfirmDialog } from '../../shared/composables/useConfirmDialog.js'
+import { useUrlFilterState } from '../../shared/composables/useUrlFilterState.js'
+import ConfirmDialog from '../../shared/components/ConfirmDialog.vue'
 import { assignServiceItemTeams } from '../assignment.js'
 import { useRoute, useRouter } from 'vue-router'
 import { AuthError, logoutCurrentSession } from '@/modules/platform/auth/api/auth'
 import { getUnreadCount, listInbox as listNotificationInbox, markNotificationRead } from '@/modules/platform/notifications/api/notifications'
+import { useProjectNotifications } from '@/modules/project_management/composables/useProjectNotifications'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import CodePills from '@/modules/project_management/components/CodePills.vue'
 import EmptyHint from '@/modules/project_management/components/EmptyHint.vue'
+import ProjectNotificationPopover from '@/modules/project_management/components/ProjectNotificationPopover.vue'
 import FilterBar from '@/modules/project_management/components/FilterBar.vue'
 import KpiCard from '@/modules/project_management/components/KpiCard.vue'
 import PageHead from '@/modules/project_management/components/PageHead.vue'
 import PenetrationWorkPackageCard from '@/modules/project_management/components/PenetrationWorkPackageCard.vue'
+import OperationDetailDrawer from '@/modules/project_management/components/OperationDetailDrawer.vue'
 import ProgressCell from '@/modules/project_management/components/ProgressCell.vue'
 import ProjectNotificationCenter from '@/modules/project_management/components/ProjectNotificationCenter.vue'
 import QualificationImportDialog from '@/modules/project_management/components/QualificationImportDialog.vue'
@@ -22,6 +29,64 @@ import ServiceItemPicker from '@/modules/project_management/components/ServiceIt
 import SignaturePad from '@/modules/project_management/components/SignaturePad.vue'
 import { implementationPlanReady, projectAllowsWorkflowNode } from '@/modules/project_management/workflowNode'
 import { countFieldOperations, listFieldOperations, processFieldQueue, removeFieldOperation, saveFieldOperation } from '@/modules/project_management/offlineFieldQueue'
+import {
+  PROJECT_ROLE_CODES,
+  asRFC3339,
+  capabilityCodeKey,
+  capabilityEffectiveStatus,
+  capabilityStatusLabel,
+  compactOverrideMatch,
+  compactOverrideSettings,
+  conflictStatusLabel,
+  contractOptionLabel,
+  csvCell,
+  dateKey,
+  defaultConfigFieldValue,
+  emptyAdjustForm,
+  emptyAdjustItem,
+  equipmentPresenceLabel,
+  eventLabel,
+  fieldPermissionAccessLevelLabel,
+  fieldPermissionFieldLabel,
+  fieldPermissionFieldOptions,
+  formatDateTime,
+  ganttTone,
+  identityStatusLabel,
+  isEmbeddedPenetrationItem,
+  isoWeekOf,
+  monitoringResourceSummary,
+  monitoringServiceSummary,
+  monitoringSlaLabel,
+  multiSummary,
+  newFieldOperationID,
+  operationSectionLabel,
+  overrideMatchText,
+  overrideSettingsText,
+  penetrationPackageLabel,
+  permissionFieldLabel,
+  planEquipmentFor,
+  planPersonnelFor,
+  planPersonnelRows,
+  reportTechReviewLabel,
+  selectedIDs,
+  slaDueLabel,
+  specialMethodLabel,
+  specialMethodOptions,
+  specialMethodTone,
+  splitDefaultStatusOptions,
+  splitDimensionAnyOptions,
+  splitDimensionLabel,
+  splitDimensionPrimaryOptions,
+  splitDimensionSecondaryOptions,
+  splitDimensionText,
+  splitMissingRuleOptions,
+  splitMissingRuleText,
+  startOfWeek,
+  statusTone,
+  statusToneMap,
+  toDateTimeLocal,
+  toggleCodeSelection,
+} from '@/modules/project_management/projectDisplay'
 import { subsystemAccessMessage } from '@/modules/shared/authz/sessionCompatibility'
 import { closeSubsystemTabOrFallback } from '@/modules/shared/utils/returnToPortal'
 import {
@@ -93,6 +158,8 @@ import {
   getApprovedContractServiceItems,
 } from '@/modules/project_management/api/projectManagement'
 import '@/modules/project_management/styles/project-management.css'
+
+const { dialog: confirmDialog, askConfirm, accept: acceptConfirm, cancel: cancelConfirm } = useConfirmDialog()
 
 const route = useRoute()
 const router = useRouter()
@@ -221,15 +288,18 @@ const statusFilter = ref('')
 const categoryFilter = ref('')
 const teamFilter = ref('')
 const projectCardFilter = ref('')
+
+useUrlFilterState({
+  route,
+  router,
+  fields: { keyword, status: statusFilter, category: categoryFilter, team: teamFilter, card: projectCardFilter },
+})
 const selectedRows = ref([])
 const createOpen = ref(false)
-const notificationOpen = ref(false)
-const notificationItems = ref([])
-const notificationCount = ref(0)
-const notificationLoading = ref(false)
-const notificationError = ref('')
-const notificationActionID = ref('')
-let notificationAutoCloseTimer = 0
+const {
+  notificationOpen, notificationItems, notificationCount, notificationLoading, notificationError, notificationActionID,
+  closeNotifications, refreshNotificationCount, openNotification, toggleNotifications, disposeNotifications,
+} = useProjectNotifications({ getUnreadCount, listNotificationInbox, markNotificationRead, formatUserError, navigate, showToast })
 const toastMessage = ref('')
 const toastType = ref('success')
 const isLoggingOut = ref(false)
@@ -326,25 +396,6 @@ const averageProgress = computed(() => {
   const raw = projects.value.length ? projects.value.reduce((sum, p) => sum + (p.progress || 0), 0) / projects.value.length : 0
   return Math.round(raw)
 })
-function startOfWeek(date) {
-  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate())
-  d.setDate(d.getDate() - ((d.getDay() + 6) % 7))
-  d.setHours(0, 0, 0, 0)
-  return d
-}
-function dateKey(date) {
-  const pad = (n) => String(n).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
-}
-function isoWeekOf(date) {
-  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))
-  const dayNum = (d.getUTCDay() + 6) % 7
-  d.setUTCDate(d.getUTCDate() - dayNum + 3)
-  const firstThursday = d.getTime()
-  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7) + 3)
-  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1))
-  return Math.ceil(((firstThursday - yearStart) / 86400000 + 1) / 7)
-}
 const completedDeliveryEvents = computed(() => deliveryEvents.value.filter((event) => event.type === 'FIELD_COMPLETED'))
 const weeklyDeliveryTrend = computed(() => {
   const monday = startOfWeek(new Date())
@@ -420,23 +471,6 @@ const monitoredProjects = computed(() => {
     return matchKeyword && (!teamFilter.value || p.team === teamFilter.value)
   })
 })
-// 服务项状态色调：取自服务项自身状态，供状态分布表的徽标复用。
-// 状态字段统一胶囊语义映射：所有状态渲染统一经 statusTone 取色调，
-// 语义与 V1.1 原型 crm-badge 对齐（待处理=amber、推进=violet、进行=blue、完成=green、异常=red、停用=gray）。
-const statusToneMap = {
-  待拆解确认: 'amber', 待确认: 'amber', 待复核: 'amber', 待处理: 'amber', 待评审: 'amber', PENDING: 'amber', 实施中: 'amber',
-  待分配: 'blue', 已分配: 'blue', 已审核: 'blue', 已签发: 'blue', 计划已发布: 'blue', REVIEWED: 'blue', ISSUED: 'blue',
-  待实施: 'violet', 实施准备中: 'violet', 编制中: 'violet', 报告编制: 'violet', 准备中: 'violet', COMPILING: 'violet',
-  异常处理中: '风险', 已终止: '风险', 已驳回: '风险', REJECTED: '风险', MISSING: '风险', EXPIRED: '风险', 无效: '风险', CONFLICT: '风险', 能力冲突: '风险', 排期冲突: '风险', 阻断: '风险', TERMINATE: '风险',
-  现场实施完成: 'green', 已完成: 'green', 已归档: 'green', ARCHIVED: 'green',
-  已通过: 'normal', APPROVED: 'normal', PASSED: 'normal', 校验通过: 'normal', 启用: 'normal', 有效: 'normal', ACTIVE: 'normal', 在公司: 'normal',
-  停用: 'neutral', DISABLED: 'neutral', 未生效: 'amber', NOT_YET_EFFECTIVE: 'amber', 未提交: 'neutral', 待校验: 'neutral', 待排期: 'neutral', '不在公司（借出中）': 'amber',
-}
-function statusTone(status) { return statusToneMap[String(status ?? '').trim()] || 'neutral' }
-function capabilityEffectiveStatus(item) { return item?.effective_status || item?.status || 'DISABLED' }
-function capabilityStatusLabel(item) {
-  return ({ ACTIVE: '有效', DISABLED: '停用', EXPIRED: '无效', NOT_YET_EFFECTIVE: '未生效' })[capabilityEffectiveStatus(item)] || capabilityEffectiveStatus(item)
-}
 function resetProjectFilters() { keyword.value = ''; statusFilter.value = ''; categoryFilter.value = ''; teamFilter.value = ''; projectCardFilter.value = '' }
 
 const serviceItems = ref([])
@@ -491,29 +525,6 @@ const deviationDecisionOptions = Object.freeze([
   { value: 'TERMINATE', label: '终止' },
 ])
 
-// 各套真实配置表的列与编辑字段元数据。
-const fieldPermissionFieldOptions = Object.freeze([
-  { value: 'name', label: '项目名称', description: '项目主档' },
-  { value: 'customer', label: '客户名称', description: '项目主档、设备预约记录' },
-  { value: 'contract', label: '合同编号', description: '项目主档' },
-  { value: 'category', label: '检测类别', description: '项目主档、服务项及事件快照' },
-  { value: 'team', label: '执行团队', description: '项目主档' },
-  { value: 'manager', label: '项目经理（项目展示）', description: '项目主档展示字段' },
-  { value: 'due', label: '计划完成时间', description: '项目主档' },
-  { value: 'batch', label: '批次', description: '服务项及事件快照' },
-  { value: 'site', label: '实施场所', description: '服务项、SLA 超期记录及事件快照' },
-  { value: 'requirement', label: '技术要求', description: '服务项及事件快照' },
-  { value: 'system', label: '系统名称', description: '服务项及事件快照' },
-  { value: 'system_level', label: '系统等级', description: '服务项及事件快照' },
-  { value: 'special', label: '特殊方法标记', description: '服务项及事件快照' },
-  { value: 'test_mode', label: '测试模式', description: '服务项及事件快照' },
-  { value: 'source_service_id', label: '合同服务项来源编号', description: '服务项及事件快照' },
-  { value: 'team_lead_id', label: '团队负责人', description: '服务项指派关系及事件快照' },
-  { value: 'project_manager_id', label: '项目经理（服务项指派）', description: '服务项指派关系及事件快照' },
-  { value: 'engineer_ids', label: '工程师名单', description: '服务项指派关系及事件快照' },
-])
-const fieldPermissionFieldLabel = Object.freeze(Object.fromEntries(fieldPermissionFieldOptions.map((option) => [option.value, option.label])))
-const fieldPermissionAccessLevelLabel = Object.freeze({ hidden: '隐藏', edit: '可编辑', view: '只读' })
 const warningRuleCheckTypeOptions = Object.freeze([
   { value: '资质能力冲突', label: '资质能力冲突', description: '人员或设备缺少有效资质 / 能力记录' },
   { value: '能力缺失', label: '能力缺失', description: '人员或设备未覆盖服务项要求的能力编码' },
@@ -583,17 +594,6 @@ const configRoleOptions = computed(() => {
   }
   return options
 })
-function defaultConfigFieldValue(field) {
-  if (field.field === 'roles' || field.field === 'automation-roles') return []
-  if (field.key === 'access_level') return 'hidden'
-  if (field.field === 'positive-integer') return '1'
-  if (field.field === 'number') {
-    if (field.key === 'deadline_hours') return 24
-    if (field.key === 'remind_hours') return 4
-    return field.min || 0
-  }
-  return ''
-}
 function configNamePlaceholder() {
   if (activeSection.value === 'standards') return '例如检测方法国家标准版本更新'
   return ['warning-rules', 'automations', 'sla'].includes(activeSection.value) ? '选择生效条件后自动生成，可按需修改' : `请输入${activeConfigMeta.value.nameLabel || '配置名称'}`
@@ -745,38 +745,6 @@ const categoryDialog = ref(null)
 const overrideDialog = ref(null)
 const splitPolicyBaseline = ref('')
 
-// 维度取值与原型一致：维度 1 取清单/项目侧字段，维度 2/3 另可含服务项属性。
-const splitDimensionPrimaryOptions = [
-  { value: 'batch', label: '批次（默认）' },
-  { value: 'site', label: '场所' },
-  { value: 'customer', label: '客户' },
-  { value: 'contract', label: '合同' },
-]
-const splitDimensionSecondaryOptions = [
-  { value: 'category', label: '检测类别（默认）' },
-  { value: 'system_standard', label: '体系要求' },
-  { value: 'test_mode', label: '方法类型' },
-]
-const splitDimensionAnyOptions = [...splitDimensionPrimaryOptions, ...splitDimensionSecondaryOptions]
-const splitDefaultStatusOptions = [
-  { value: '待确认', label: '待确认（默认，业务员确认后→待分配）' },
-  { value: '待分配', label: '待分配（跳过确认）' },
-]
-const splitMissingRuleOptions = [
-  { value: 'HUMAN_CONFIRM', label: '标记「待人工确认」并通知业务管理员（默认）' },
-  { value: 'DEFAULT_RULE', label: '按默认规则生成' },
-  { value: 'SILENT', label: '按默认规则生成（不通知，不推荐）' },
-]
-const specialMethodOptions = [
-  { value: 'NO', label: '否' },
-  { value: 'MARKABLE', label: '可标记' },
-  { value: 'REQUIRED', label: '必为特殊方法' },
-]
-const specialMethodTone = { NO: 'neutral', MARKABLE: 'violet', REQUIRED: 'violet' }
-const specialMethodLabel = Object.fromEntries(specialMethodOptions.map((option) => [option.value, option.label]))
-const splitDimensionLabel = Object.fromEntries(splitDimensionAnyOptions.map((option) => [option.value, option.label.replace(/（默认）$/, '')]))
-function splitDimensionText(value) { return splitDimensionLabel[value] || value || '—' }
-function splitMissingRuleText(value) { return splitMissingRuleOptions.find((option) => option.value === value)?.label.replace(/（默认）|（不通知，不推荐）/, '') || value }
 
 const activeDetectionCategoryCount = computed(() => detectionCategories.value.filter((item) => item.enabled).length)
 const activeSplitOverrideCount = computed(() => splitOverrides.value.filter((item) => item.enabled).length)
@@ -863,10 +831,6 @@ async function submitSplitPolicy() {
 const detectionCategoryImportOpen = ref(false)
 const DETECTION_CATEGORY_HEADERS = ['检测类别', '默认体系要求', '必备资质（默认）', '必检能力码', '是否特殊方法', '状态']
 
-function csvCell(value) {
-  const text = String(value ?? '')
-  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
-}
 
 function downloadDetectionCategories() {
   const lines = [DETECTION_CATEGORY_HEADERS.join(',')]
@@ -914,7 +878,14 @@ async function submitDetectionCategory() {
 
 async function removeDetectionCategory(item) {
   if (saving.value) return
-  if (!window.confirm(`确认删除检测类别「${item.category}」？仍被服务项引用的类别不能删除，可改为禁用。`)) return
+  const ok = await askConfirm({
+    title: '删除检测类别？',
+    description: `确认删除检测类别「${item.category}」？仍被服务项引用的类别不能删除，可改为禁用。`,
+    confirmText: '删除类别',
+    cancelText: '取消',
+    danger: true,
+  })
+  if (!ok) return
   saving.value = true
   try {
     await deleteDetectionCategory(item.category)
@@ -930,49 +901,8 @@ function openOverrideDialog(item = null) {
     : { name: '', match: { customer_contains: '', contract_contains: '', max_service_items: 0 }, settings: {}, priority: 100, enabled: true }
 }
 
-function overrideMatchText(item) {
-  const parts = []
-  if (item.match_conditions?.customer_contains) parts.push(`客户名称包含 ${item.match_conditions.customer_contains}`)
-  if (item.match_conditions?.contract_contains) parts.push(`合同号包含 ${item.match_conditions.contract_contains}`)
-  if (item.match_conditions?.max_service_items) parts.push(`合同服务项数 ≤ ${item.match_conditions.max_service_items}`)
-  if (item.match_conditions?.min_service_items) parts.push(`合同服务项数 ≥ ${item.match_conditions.min_service_items}`)
-  if ((item.match_conditions?.categories || []).length) parts.push(`检测类别包含 ${item.match_conditions.categories.join(' / ')}`)
-  return parts.join(' 且 ') || '—'
-}
 
-function overrideSettingsText(item) {
-  const settings = item.override_settings || {}
-  const parts = []
-  const dims = [settings.dimension_primary, settings.dimension_secondary, settings.dimension_tertiary].filter(Boolean)
-  if (dims.length) parts.push(`分组维度 = ${dims.map(splitDimensionText).join(' + ')}`)
-  if (settings.default_status) parts.push(`默认进入状态 = ${settings.default_status}`)
-  if (settings.generate_requirement_summary === false) parts.push('技术要求摘要留空人工填写')
-  if (settings.generate_requirement_summary === true) parts.push('生成技术要求摘要')
-  if (settings.requirement_summary_locked === true) parts.push('技术要求摘要锁定')
-  if (settings.missing_rule_action) parts.push(`缺规则处理 = ${splitMissingRuleText(settings.missing_rule_action)}`)
-  if (settings.scope_change_detection === false) parts.push('范围变更检测关闭')
-  return parts.join('；') || '—'
-}
 
-// 空字符串代表"不覆盖"，必须从载荷里剔除：服务端把非 null 的空串当成非法维度取值。
-function compactOverrideSettings(settings) {
-  const compact = {}
-  for (const [key, value] of Object.entries(settings || {})) {
-    if (value === undefined || value === null || value === '') continue
-    compact[key] = value
-  }
-  return compact
-}
-
-function compactOverrideMatch(match) {
-  const compact = {}
-  for (const [key, value] of Object.entries(match || {})) {
-    if (value === undefined || value === null || value === '') continue
-    if (Array.isArray(value) && !value.length) continue
-    compact[key] = value
-  }
-  return compact
-}
 
 async function submitSplitOverride() {
   if (!overrideDialog.value) return
@@ -992,7 +922,14 @@ async function submitSplitOverride() {
 
 async function removeSplitOverride(item) {
   if (saving.value) return
-  if (!window.confirm(`确认删除覆盖规则「${item.name}」？删除后该合同将回到默认分组规则。`)) return
+  const ok = await askConfirm({
+    title: '删除覆盖规则？',
+    description: `确认删除覆盖规则「${item.name}」？删除后该合同将回到默认分组规则。`,
+    confirmText: '删除规则',
+    cancelText: '取消',
+    danger: true,
+  })
+  if (!ok) return
   saving.value = true
   try {
     await deleteSplitOverride(item.id)
@@ -1005,40 +942,31 @@ async function removeSplitOverride(item) {
 const reportStatusLabel = { NONE: '待编制', COMPILING: '编制中', REVIEWED: '已审核', ISSUED: '已签发', ARCHIVED: '已归档' }
 // SLA 口径标签与剩余/超期文案：与后端 domain.SlaKind* 常量对齐。
 const slaKindLabel = { PLAN_END_OVERDUE: '计划完成超期', STATUS_DEADLINE_OVERDUE: '状态停留超期', STATUS_DEADLINE_APPROACHING: '状态临近超期' }
-function slaDueLabel(item) {
-  const hours = Number(item.overdue_hours || 0)
-  if (item.kind === 'STATUS_DEADLINE_APPROACHING') return `剩余 ${hours} 小时`
-  return `已超期 ${hours} 小时`
-}
 const reportStatusRank = { COMPILING: 1, REVIEWED: 2, ISSUED: 3, ARCHIVED: 4 }
 const reportPhaseNext = { NONE: 'COMPILING', COMPILING: 'REVIEWED', REVIEWED: 'ISSUED', ISSUED: 'ARCHIVED' }
 const reportItems = computed(() => serviceItems.value.filter((item) => {
   const projectStatus = projectByID.value.get(item.project_id)?.status
   return ['现场实施完成', '报告编制', '已完成'].includes(projectStatus) && (item.status === '现场实施完成' || (item.report_status && item.report_status !== 'NONE'))
 }))
-const reportTechReviewLabel = (status) => ({ NONE: '未提交', PENDING: '待复核', APPROVED: '已通过', REJECTED: '已驳回' }[status] || '未提交')
 const personnelLoading = ref(false)
 const personnelError = ref('')
 const capabilityPersonnel = ref([])
 const capabilityPersonnelLoading = ref(false)
 const capabilityPersonnelError = ref('')
-const personnelRequestSequence = ref(0)
+const personnelScope = createRequestScope()
 
-// 分配候选必须同时满足：项目人员资质有效、平台身份有效、具备对应项目角色。
-// 人员日期不限制派工；基础平台目录仍只用于新建资质时选择身份主体。
-const PROJECT_ROLE_CODES = Object.freeze({ teamLead: 'team_lead', projectManager: 'project_manager', engineer: 'engineer' })
 
 const emptyPersonnelByRole = () => ({ [PROJECT_ROLE_CODES.teamLead]: [], [PROJECT_ROLE_CODES.projectManager]: [], [PROJECT_ROLE_CODES.engineer]: [] })
 const personnelByRole = ref(emptyPersonnelByRole())
 
 async function loadPersonnel() {
-  const sequence = ++personnelRequestSequence.value
-  personnelLoading.value = true
-  personnelError.value = ''
   // 项目经理/工程师只在具备 project.execution.assign 的表单里出现。
   const roles = canExecutionAssign.value
     ? [PROJECT_ROLE_CODES.teamLead, PROJECT_ROLE_CODES.projectManager, PROJECT_ROLE_CODES.engineer]
     : [PROJECT_ROLE_CODES.teamLead]
+  const ticket = personnelScope.begin(`PERSONNEL:${roles.join('+')}`)
+  personnelLoading.value = true
+  personnelError.value = ''
   try {
     const rolePages = await Promise.all(roles.map(async (roleCode) => {
       // 浏览器内做模糊匹配，因此分别加载对应角色的全部资质候选。
@@ -1050,7 +978,7 @@ async function loadPersonnel() {
         : []
       return { roleCode, pages: [firstPage, ...remainingPages] }
     }))
-    if (sequence !== personnelRequestSequence.value) return
+    if (!personnelScope.isCurrent(ticket)) return
     const byRole = emptyPersonnelByRole()
     const names = {}
     for (const { roleCode, pages } of rolePages) {
@@ -1076,11 +1004,11 @@ async function loadPersonnel() {
     personnelByRole.value = byRole
     rememberPersonnelNames(names)
   } catch (error) {
-    if (sequence !== personnelRequestSequence.value) return
+    if (!personnelScope.isCurrent(ticket)) return
     personnelByRole.value = emptyPersonnelByRole()
     personnelError.value = formatUserError(error, { fallback: '人员资质库加载失败' })
   } finally {
-    if (sequence === personnelRequestSequence.value) personnelLoading.value = false
+    if (personnelScope.isCurrent(ticket)) personnelLoading.value = false
   }
 }
 
@@ -1153,13 +1081,6 @@ const openMulti = ref('')
 // 与设备选择器的"禁用原因"、ServiceItemPicker 的 listbox 语义同源）。
 const multiActiveIndex = ref(-1)
 function toggleMulti(kind) { openMulti.value = openMulti.value === kind ? '' : kind }
-// 人员的选中值是 ID、角色的选中值是角色码，因此选项命中键可指定（默认 id）。
-function multiSummary(values, options, placeholder, key = 'id') {
-  const names = (values || []).map((value) => options.find((option) => option[key] === value)?.name || value)
-  if (!names.length) return placeholder
-  if (names.length <= 2) return names.join('、')
-  return `${names.slice(0, 2).join('、')} 等 ${names.length} 项`
-}
 function closeMultiOnOutsideClick(event) {
   if (!(event.target instanceof Element) || !event.target.closest('.pm-multi-dropdown')) openMulti.value = ''
 }
@@ -1530,10 +1451,6 @@ function applicationRoleLabel(roleCode) {
   const code = String(roleCode || '').trim()
   return applicationRoles.value.find((role) => role.code === code)?.name || code || '—'
 }
-function permissionFieldLabel(fieldName) {
-  const name = String(fieldName || '').trim()
-  return fieldPermissionFieldLabel[name] || name || '—'
-}
 function decorateRule(rule) {
   return {
     ...rule,
@@ -1550,7 +1467,6 @@ const visibleRules = computed(() => rules.value.filter((rule) => rule.kind === a
 // 已停用或已删除但仍被历史档案引用的编码会补回到选项并显式标记，
 // 避免编辑其他字段时把历史编码静默丢失。
 const capabilityCodeCatalog = computed(() => rules.value.filter((rule) => rule.kind === 'capability-codes' && String(rule.scope || '').trim()))
-function capabilityCodeKey(code) { return String(code || '').trim().toUpperCase() }
 function canonicalCapabilityCodes(resourceType, codes) {
   const configured = new Map(capabilityCodeCatalog.value
     .filter((rule) => rule.check_type === resourceType && rule.enabled)
@@ -1599,13 +1515,6 @@ const detectionRequiredCodeSelection = computed({
 const detectionRequiredCodeOptions = computed(() => capabilityCodeOptions('PERSON', detectionRequiredCodeSelection.value))
 function hasActiveCapabilityCodes(resourceType) {
   return capabilityCodeCatalog.value.some((rule) => rule.check_type === resourceType && rule.enabled)
-}
-function toggleCodeSelection(selection, update, code) {
-  const selected = new Map(selection.map((value) => [capabilityCodeKey(value), value]))
-  const key = capabilityCodeKey(code)
-  if (selected.has(key)) selected.delete(key)
-  else selected.set(key, code)
-  update([...selected.values()])
 }
 function toggleEquipmentCode(code) { toggleCodeSelection(equipmentCodeSelection.value, (values) => { equipmentCodeSelection.value = values }, code) }
 function toggleDetectionRequiredCode(code) { toggleCodeSelection(detectionRequiredCodeSelection.value, (values) => { detectionRequiredCodeSelection.value = values }, code) }
@@ -1665,6 +1574,7 @@ const monitorDueFrom = ref('')
 const monitorDueTo = ref('')
 let monitoringPollTimer = 0
 let monitoringFilterTimer = 0
+const monitoringScope = createRequestScope()
 const monitorFilterTabs = computed(() => [
   { key: '', label: '全部' },
   { key: 'risk', label: '风险' },
@@ -1703,15 +1613,22 @@ function monitoringParams() {
 async function loadMonitoring({ quiet = false } = {}) {
   if (activeSection.value !== 'monitoring') return
   if (!quiet) monitoringLoading.value = true
+  // 票据 key 含完整查询条件：轮询、筛选或翻页并发时只采纳最后一次请求，
+  // 旧筛选的迟到响应不得覆盖新快照，其 finally 也不得关闭新请求的加载态。
+  const params = monitoringParams()
+  const ticket = monitoringScope.begin(`MONITOR:${JSON.stringify(params)}`)
   try {
-    monitoringSnapshot.value = await getProjectMonitoring(monitoringParams())
+    const snapshot = await getProjectMonitoring(params)
+    if (!monitoringScope.isCurrent(ticket)) return
+    monitoringSnapshot.value = snapshot
     monitoringError.value = ''
     if (monitorPage.value > monitoringTotalPages.value) { monitorPage.value = monitoringTotalPages.value; return loadMonitoring({ quiet }) }
     loadPersonnelNames()
   } catch (error) {
+    if (!monitoringScope.isCurrent(ticket)) return
     monitoringError.value = formatUserError(error, { fallback: '监控数据刷新失败' })
   } finally {
-    monitoringLoading.value = false
+    if (monitoringScope.isCurrent(ticket)) monitoringLoading.value = false
   }
 }
 function scheduleMonitoringPoll() {
@@ -1731,21 +1648,6 @@ function changeMonitoringPage(page) {
   const next = Math.min(Math.max(1, page), monitoringTotalPages.value)
   if (next === monitorPage.value) return
   monitorPage.value = next
-}
-function monitoringServiceSummary(row) {
-  return Object.entries(row.service_status_counts || {}).map(([status, count]) => `${status} ${count}`).join(' · ') || '无服务项'
-}
-function monitoringResourceSummary(row) {
-  const resource = row.resources || {}
-  const equipmentRisk = resource.expired_equipment ? ` · 过期 ${resource.expired_equipment}` : ''
-  const released = resource.released_equipment ? ` · 已释放 ${resource.released_equipment}` : ''
-  return `负责人 ${resource.project_managers || 0} · 工程师 ${resource.engineers || 0} · 设备 ${resource.equipment || 0}${equipmentRisk}${released}`
-}
-function monitoringSlaLabel(row) {
-  const items = row.sla_items || []
-  if (!items.length) return '正常'
-  const overdue = items.filter((item) => item.kind !== 'STATUS_DEADLINE_APPROACHING')
-  return overdue.length ? `超期 ${Math.max(...overdue.map((item) => Number(item.overdue_hours || 0)))}h` : `临近 ${items.length} 项`
 }
 function openMonitoringAction(row) {
   if (row.action_section) navigate(row.action_section)
@@ -1827,13 +1729,8 @@ const permissionMatrix = computed(() => {
 })
 const permissionLevelLabel = fieldPermissionAccessLevelLabel
 const permissionLevelTone = { hidden: '风险', edit: '关注', view: 'normal' }
-
 const operationDetail = ref(null)
-const operationSectionLabel = (section) => ({
-  allocation: '任务分配', inbox: '实施收件箱', planning: '现场实施计划制定', preparation: '实施准备',
-  assignments: '匹配校验与冲突预警', methods: '特殊方法复核待办', qualifications: '资质与能力管理',
-  exceptions: '偏离评审', reports: '报告与收尾', monitoring: '执行总览',
-}[section] || '事项详情')
+
 function openOperationDetail(row) {
   const section = activeSection.value
   let record = null
@@ -1927,8 +1824,12 @@ const operationDetailFields = computed(() => {
   return []
 })
 
-async function loadWorkspace() {
-  const requestVersion = ++workspaceRequestVersion
+// 写操作后的随动刷新统一走 refreshAfterWrite：loadWorkspace 仅在默认（reportError=true）
+// 时把失败写入页面错误区；reportError=false 用于写后刷新——静默上抛，由调用方以
+// “已保存，但最新数据读取失败”的准确文案提示，不把整个工作区替换成错误页。
+const workspaceScope = createRequestScope()
+async function loadWorkspace({ reportError = true } = {}) {
+  const ticket = workspaceScope.begin('WORKSPACE')
   loading.value = true
   loadError.value = ''
   ruleConfigurationCatalogError.value = ''
@@ -1940,7 +1841,7 @@ async function loadWorkspace() {
       ruleConfigurationCatalogError.value = formatUserError(error, { fallback: '规则目录加载失败' })
       return { automation_triggers: [], sla_statuses: [] }
     })])
-    if (requestVersion !== workspaceRequestVersion) return
+    if (!workspaceScope.isCurrent(ticket)) return
     projects.value = projectRows
     serviceItems.value = itemRows.map((item) => ({ ...item, selected: ['待确认', '待复核'].includes(item.status) }))
     rules.value = ruleRows.map(decorateRule)
@@ -1964,9 +1865,14 @@ async function loadWorkspace() {
     lastUpdatedAt.value = new Date()
     loaded = true
   } catch (error) {
+    // 迟到的旧请求失败不得代表当前上下文报错；写后随动刷新（reportError=false）静默上抛，
+    // 由 refreshAfterWrite 用准确文案上报，不误报为操作失败。
+    if (!workspaceScope.isCurrent(ticket)) return
+    if (!reportError) throw error
     loadError.value = subsystemAccessMessage(error, '项目管理数据加载失败。')
   } finally {
-    loading.value = false
+    // 只有仍持有当前票据的请求才能结束 loading，避免旧请求的 finally 关闭新请求的加载态。
+    if (workspaceScope.isCurrent(ticket)) loading.value = false
   }
   // 设备目录只作为表单下拉选项，属于辅助数据：单独加载并容忍失败，
   // 避免某一个下拉数据源不可用就把整个工作区替换成错误页。
@@ -1979,6 +1885,17 @@ async function loadWorkspace() {
     } catch {
       slaOverdueItems.value = []
     }
+  }
+}
+
+// 任务 B：计划/现场/报告的写操作 HTTP 2xx 即已保存。随后的工作区刷新失败只提示
+// “已保存，但最新数据读取失败”，不误报为操作失败、不回退任何已提交结果，也不自动重发写请求；
+// 页面保留旧快照，由用户手动刷新核对。
+async function refreshAfterWrite() {
+  try {
+    await loadWorkspace({ reportError: false })
+  } catch {
+    showToast('已保存，但最新数据读取失败；请稍后点击刷新核对，勿凭旧页面重复提交。', 'warning')
   }
 }
 
@@ -2051,9 +1968,6 @@ const builtContractKeys = computed(() => {
 const availableApprovedContracts = computed(() => approvedContracts.value.filter((contract) =>
   ![contract.id, contract.contract_number].some((value) => builtContractKeys.value.has(String(value || '').trim()))))
 
-function contractOptionLabel(contract) {
-  return `${contract.contract_number} · ${contract.title} · ${contract.customer_name || '未填写客户'}`
-}
 
 async function selectApprovedContract(contract) {
   const requestID = ++contractServiceRequest
@@ -2089,10 +2003,6 @@ async function selectApprovedContract(contract) {
     if (requestID === contractServiceRequest) contractServicesLoading.value = false
   }
 }
-// 设备在位状态由占用时段派生：借出中显示占用方与时段，否则显示在公司。
-function equipmentPresenceLabel(item) {
-  return item.presence === 'OUT_OF_COMPANY' ? '不在公司（借出中）' : '在公司'
-}
 function editEquipment(item) {
   const codes = canonicalCapabilityCodes('EQUIPMENT', item.codes || [])
   equipmentForm.value = {
@@ -2125,7 +2035,15 @@ async function saveEquipment() {
   finally { saving.value = false }
 }
 async function removeEquipment(item) {
-  if (!item?.resource_id || !window.confirm(`确定删除设备「${item.resource_name || item.resource_id}」吗？已归还或已完成项目中的历史设备快照不会受影响。`)) return
+  if (!item?.resource_id) return
+  const ok = await askConfirm({
+    title: '删除设备？',
+    description: `确定删除设备「${item.resource_name || item.resource_id}」吗？已归还或已完成项目中的历史设备快照不会受影响。`,
+    confirmText: '删除设备',
+    cancelText: '取消',
+    danger: true,
+  })
+  if (!ok) return
   saving.value = true
   try {
     await deleteEquipment(item.resource_id)
@@ -2240,7 +2158,12 @@ async function downloadCapabilities() {
   } catch (error) { showToast(formatUserError(error, { fallback: 'CSV 导出失败' }), 'error') }
 }
 
+let projectListScrollY = 0
+
 function navigate(section) {
+  if (section === 'projects' && typeof window !== 'undefined') {
+    nextTick(() => window.scrollTo({ top: projectListScrollY, behavior: 'auto' }))
+  }
   router.push({ name: 'project_management', params: { section } })
   mobileMenuOpen.value = false
   // 拆解规则配置来自独立接口：切到该页签时按需加载，避免影响其它工作区的首屏。
@@ -2251,6 +2174,7 @@ function navigate(section) {
 // 通过 query.project 携带项目编号，可直接深链与刷新恢复。
 function openProject(project) {
   if (!project) return
+  if (typeof window !== 'undefined') projectListScrollY = window.scrollY || 0
   router.push({ name: 'project_management', params: { section: 'project_detail' }, query: { project: project.id } })
 }
 function openProjectTimeline(project) {
@@ -2265,6 +2189,13 @@ const detailItems = computed(() => detailProject.value ? serviceItems.value.filt
 const detailEvents = computed(() => detailProject.value ? projectEvents(detailProject.value) : [])
 const detailPendingDeviations = computed(() => pendingDeviations.value.filter((event) => detailItems.value.some((item) => item.id === event.service_item_id)))
 const detailTab = ref('items')
+const detailTabKeys = new Set(['items', 'plan', 'events', 'exceptions'])
+useUrlFilterState({
+  route,
+  router,
+  fields: { tab: detailTab },
+  normalize: (value, name) => name === 'tab' && !detailTabKeys.has(value) ? 'items' : value,
+})
 const detailTabs = computed(() => [
   { key: 'items', label: '服务项拆解', count: detailItems.value.length },
   { key: 'plan', label: '实施计划', count: detailItems.value.filter((item) => item.implementation_plan).length },
@@ -2291,13 +2222,6 @@ const detailGantt = computed(() => {
     }
   })
 })
-function ganttTone(status) {
-  if (['异常处理中', '已终止'].includes(status)) return 'red'
-  if (['现场实施完成', '报告编制', '已完成'].includes(status)) return 'green'
-  if (['实施中', '实施准备中'].includes(status)) return 'amber'
-  if (['待拆解确认', '待分配'].includes(status)) return 'gray'
-  return ''
-}
 
 function returnToUnifiedPortal() {
   mobileMenuOpen.value = false
@@ -2305,77 +2229,6 @@ function returnToUnifiedPortal() {
   closeSubsystemTabOrFallback(window, () => router.replace({ name: 'portal' }))
 }
 
-function closeNotifications() {
-  window.clearTimeout(notificationAutoCloseTimer)
-  notificationAutoCloseTimer = 0
-  notificationOpen.value = false
-}
-
-async function refreshNotificationCount() {
-  try {
-    const result = await getUnreadCount()
-    notificationCount.value = Number(result?.unread_count || 0)
-  } catch {
-    // 通知是辅助能力，平台暂不可用时不阻断项目工作区。
-    notificationCount.value = 0
-  }
-}
-
-async function loadUnreadNotifications() {
-  notificationLoading.value = true
-  notificationError.value = ''
-  try {
-    const [inbox, unread] = await Promise.all([
-      listNotificationInbox({ page: 1, pageSize: 20, unreadOnly: true }),
-      getUnreadCount(),
-    ])
-    // unread_only 由服务端按当前用户和 read_at 过滤；前端再过滤一次用于兼容滚动升级。
-    notificationItems.value = (inbox?.items || []).filter((item) => !item.read_at)
-    notificationCount.value = Number(unread?.unread_count || notificationItems.value.length)
-  } catch (error) {
-    notificationItems.value = []
-    notificationError.value = formatUserError(error, { fallback: '未读通知加载失败' })
-  } finally {
-    notificationLoading.value = false
-  }
-}
-
-function notificationSection(item) {
-  const category = String(item?.category || '').toUpperCase()
-  if (category === 'DEVIATION_REPORTED') return 'exceptions'
-  if (category === 'SPLIT_RULE_MISSING') return 'decomposition'
-  if (['TEAM_ASSIGNED', 'EXECUTION_TEAM_ASSIGNED'].includes(category)) return 'inbox'
-  return ''
-}
-
-async function openNotification(item) {
-  const deliveryID = String(item?.delivery_id || '')
-  if (!deliveryID || notificationActionID.value) return
-  notificationActionID.value = deliveryID
-  try {
-    await markNotificationRead(deliveryID)
-    notificationItems.value = notificationItems.value.filter((entry) => entry.delivery_id !== deliveryID)
-    notificationCount.value = Math.max(0, notificationCount.value - 1)
-    const section = notificationSection(item)
-    closeNotifications()
-    if (section) navigate(section)
-  } catch (error) {
-    showToast(formatUserError(error, { fallback: '通知已读状态保存失败，请重试' }), 'error')
-  } finally {
-    notificationActionID.value = ''
-  }
-}
-
-function toggleNotifications() {
-  if (notificationOpen.value) {
-    closeNotifications()
-    return
-  }
-  notificationOpen.value = true
-  loadUnreadNotifications()
-  window.clearTimeout(notificationAutoCloseTimer)
-  notificationAutoCloseTimer = window.setTimeout(closeNotifications, 5000)
-}
 async function logoutSystem() {
   if (isLoggingOut.value) return
   isLoggingOut.value = true
@@ -2398,30 +2251,21 @@ function showToast(message, type = 'success') {
   toastMessage.value = formatUserError(message, { fallback: '操作未完成，请核对页面信息；仍失败时请联系管理员。' })
   toastType.value = type
   window.clearTimeout(toastTimer)
-  toastTimer = window.setTimeout(() => { toastMessage.value = '' }, 2600)
+  toastTimer = window.setTimeout(() => { toastMessage.value = '' }, 5200)
 }
 
-function formatDateTime(value) {
-  if (!value) return '—'
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString()
-}
 
 function projectEvents(project) {
   const itemIDs = new Set(serviceItems.value.filter((item) => item.project_id === project.id).map((item) => item.id))
   return deliveryEvents.value.filter((event) => event.project_id === project.id || itemIDs.has(event.service_item_id)).slice(0, 5)
 }
 
-function eventLabel(event) {
-  // 事件名必须与后端 application/delivery.go 的常量逐字一致：曾把现场完成的事件名
-  // 多写一层 IMPLEMENTATION 前缀，导致交付趋势/准时率按该名过滤时恒为空。
-  return ({ CONTRACT_ACTIVATED: '合同生效并生成项目', CONTRACT_STAMP_STATUS_SYNCED: '盖章合同状态已同步', DECOMPOSITION_ADJUSTED: '服务项拆解已调整', DECOMPOSITION_RETURNED: '服务项已退回拆解确认', TEAM_ASSIGNED: '团队负责人已分配', EXECUTION_TEAM_ASSIGNED: '项目经理及工程师已指派', IMPLEMENTATION_PLANNED: '现场实施计划已发布', PREPARATION_STARTED: '实施准备已发起', FIELD_STARTED: '现场测评已开始', FIELD_RECORD_SUBMITTED: '现场记录已提交', FIELD_COMPLETED: '现场测评已结束', EQUIPMENT_RETURNED: '设备已归还', DEVIATION_REPORTED: '现场偏离已上报', DEVIATION_REVIEWED: '偏离评审已完成', SPECIAL_METHOD_REVIEWED: '特殊方法复核已完成', REPORT_STATUS_UPDATED: '报告阶段已推进', REPORT_CORRECTION_REQUESTED: '报告更正已申请', REPORT_CORRECTION_APPROVED: '报告更正已批准', REPORT_CORRECTION_REJECTED: '报告更正已驳回', WARNING_TRIGGERED: '预警规则已触发', AUTOMATION_TRIGGERED: '自动化动作已执行' })[event.type] || event.type
-}
 
 function toggleRow(id) {
   selectedRows.value = selectedRows.value.includes(id) ? selectedRows.value.filter((item) => item !== id) : [...selectedRows.value, id]
 }
 async function confirmDecomposition() {
+  if (saving.value) return
   const ids = currentDecompositionItems.value.filter((item) => item.selected).map((item) => item.id)
   if (!ids.length) { showToast('请至少选择一个服务项', 'warning'); return }
   saving.value = true
@@ -2433,8 +2277,8 @@ async function confirmDecomposition() {
     serviceItems.value = serviceItems.value.map((item) => byID.has(item.id) ? { ...byID.get(item.id), selected: false } : item)
     // 确认拆解会推进**项目派生状态**（待拆解确认 → 待分配）。只更新服务项列表会让项目快照停在
     // 旧节点，页面按项目节点过滤时下一步（分配）不可见，必须重新拉取工作区。
-    await loadWorkspace()
     showToast(`已确认 ${ids.length} 个服务项，任务已进入分配队列`)
+    await refreshAfterWrite()
   } catch (error) { showToast(formatUserError(error, { fallback: '确认失败' }), 'error') }
   finally { saving.value = false }
 }
@@ -2445,17 +2289,11 @@ const adjustOpen = ref(false)
 const adjustForm = ref(emptyAdjustForm())
 const supplementContracts = ref([])
 const adjustProjectID = ref('')
-let adjustLoadVersion = 0
-function emptyAdjustItem() {
-  return { sourceID: '', batch: '', site: '', category: '', system: '', systemLevel: '', requirement: '', testMode: 'STANDARD' }
-}
-function emptyAdjustForm() {
-  return { reason: '', supplementContractID: '', items: [emptyAdjustItem()] }
-}
+const adjustScope = createRequestScope()
 async function openDecompositionAdjust() {
   if (!decompositionProject.value) { showToast('请先选择要调整拆解的项目', 'warning'); return }
   const projectID = decompositionProject.value.id
-  const loadVersion = ++adjustLoadVersion
+  const ticket = adjustScope.begin(`ADJUST:${projectID}`)
   adjustOpen.value = false
   supplementContracts.value = []
   adjustProjectID.value = ''
@@ -2464,12 +2302,12 @@ async function openDecompositionAdjust() {
       listDetectionCategories(),
       listSupplementContracts(projectID, { limit: 200 }),
     ])
-    if (loadVersion !== adjustLoadVersion || decompositionProject.value?.id !== projectID) return
+    if (!adjustScope.isCurrent(ticket) || decompositionProject.value?.id !== projectID) return
     detectionCategories.value = categories
     supplementContracts.value = contracts
     adjustProjectID.value = projectID
   } catch (error) {
-    if (loadVersion !== adjustLoadVersion || decompositionProject.value?.id !== projectID) return
+    if (!adjustScope.isCurrent(ticket) || decompositionProject.value?.id !== projectID) return
     showToast(formatUserError(error, { fallback: '检测类别或已审批合同加载失败，暂时不能调整拆解' }), 'error')
     return
   }
@@ -2484,6 +2322,7 @@ function removeAdjustItem(index) {
   else adjustForm.value.items.splice(index, 1)
 }
 async function submitDecompositionAdjust() {
+  if (saving.value) return
   const project = decompositionProject.value
   if (!project) { showToast('请先选择要调整拆解的项目', 'warning'); return }
   if (project.id !== adjustProjectID.value) { adjustOpen.value = false; showToast('项目已切换，请重新打开调整拆解', 'warning'); return }
@@ -2500,7 +2339,7 @@ async function submitDecompositionAdjust() {
     await adjustDecomposition(project.id, { reason: adjustForm.value.reason, supplement_contract_id: adjustForm.value.supplementContractID, items })
     adjustOpen.value = false
     showToast('拆解已调整，项目进入补充协议处理中')
-    await loadWorkspace()
+    await refreshAfterWrite()
   } catch (error) { showToast(formatUserError(error, { fallback: '调整拆解失败' }), 'error') }
   finally { saving.value = false }
 }
@@ -2520,7 +2359,14 @@ async function toggleRule(rule) {
 async function removeConfigRule(rule) {
   if (saving.value) return
   const kind = rule.kind || activeSection.value
-  if (!window.confirm(`确认删除配置「${rule.name || rule.id}」？删除后无法恢复，如需临时停用请使用状态开关。`)) return
+  const ok = await askConfirm({
+    title: '删除配置规则？',
+    description: `确认删除配置「${rule.name || rule.id}」？删除后无法恢复，如需临时停用请使用状态开关。`,
+    confirmText: '删除配置',
+    cancelText: '取消',
+    danger: true,
+  })
+  if (!ok) return
   saving.value = true
   try {
     const removed = await deleteRule(rule.id, kind)
@@ -2531,29 +2377,7 @@ async function removeConfigRule(rule) {
   finally { saving.value = false }
 }
 
-function selectedIDs(value) { return String(value || '').split(/[\s,，]+/).map((item) => item.trim()).filter(Boolean) }
-function asRFC3339(value) { if (!value) return ''; const date = new Date(value); return Number.isNaN(date.getTime()) ? value : date.toISOString() }
-// 后端保存 RFC3339（UTC），而 <input type="datetime-local"> 只接受本地时间的 YYYY-MM-DDTHH:mm。
-// 直接把 ISO 串塞进输入框会被浏览器判为非法值并显示为空，导致再次编辑已有计划时时间"丢失"。
-function toDateTimeLocal(value) {
-  if (!value) return ''
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ''
-  const pad = (part) => String(part).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
-}
-// identityStatusLabel 把身份复核结果翻译成用户能读懂的状态。
-function identityStatusLabel(status) {
-  if (status === 'ACTIVE') return '在职'
-  if (status === 'MISSING') return '已离职/查无此人'
-  return '未关联平台账号'
-}
 
-function conflictStatusLabel(status) {
-  if (status === 'PASSED') return '校验通过'
-  if (status === 'CONFLICT') return '存在冲突'
-  return '尚未校验'
-}
 function selectServiceItem(item) {
   if (!item) return
   selectedServiceItemIDs.value = [item.id]
@@ -2576,47 +2400,12 @@ function fillOperationForm(item) {
   const personnel = planPersonnelFor(item, plan)
   operationForm.value = { ...operationForm.value, teamLeadID: item.team_lead_id || '', projectManagerID: item.project_manager_id || '', engineerIDs: (item.engineer_ids || []).join(','), plannedStart: toDateTimeLocal(item.planned_start || plan.planned_start), plannedEnd: toDateTimeLocal(item.planned_end || plan.planned_end), sitePlan: plan.site_plan || '', penetrationTestPlan: plan.penetration_test_plan || '', authDocNo: plan.auth_doc_no || '', authStart: toDateTimeLocal(plan.auth_start), authEnd: toDateTimeLocal(plan.auth_end), authScope: plan.auth_scope || '', testScope: plan.test_scope || '', testWindow: plan.test_window || '', emergencyContact: plan.emergency_contact || '', rollbackPlan: plan.rollback_plan || '', reviewComment: item.tech_review_comment || '', personnel, equipment: planEquipmentFor(plan), travelMode: '', travelReferenceEventID: '', noTravelReason: '', travelOrigin: '', travelDestination: '', travelDepartureDate: String(item.planned_start || plan.planned_start || '').slice(0, 10), travelReturnDate: String(item.planned_end || plan.planned_end || '').slice(0, 10), travelTransport: '', travelAccommodationNeed: '', travelTravelerIDs: personnel.map((row) => row.resourceID).filter(Boolean), comment: '' }
 }
-function isEmbeddedPenetrationItem(item) {
-  const category = String(item?.category || '').replace(/\s+/g, '')
-  return String(item?.test_mode || '').toUpperCase() !== 'PENETRATION' && (category.includes('等保') || category.includes('等级保护'))
-}
-function penetrationPackageLabel(item) {
-  const pkg = item?.penetration_work_package
-  if (!pkg) return '待进入实施计划确认'
-  if (pkg.decision_status === 'PENDING') return '待与客户确认'
-  if (pkg.decision_status === 'NOT_REQUIRED') return '不开展'
-  if (pkg.execution_status === 'COMPLETED') return `测试已完成 · 报告${({ NONE: '未开始', DRAFTING: '编制中', SUBMITTED: '待审核', APPROVED: '已审核', ISSUED: '已签发', ARCHIVED: '已归档' })[pkg.report_status] || pkg.report_status}`
-  return ({ NOT_STARTED: '确认开展 · 未开始', IN_PROGRESS: '测试中', CANCELLED: '已取消' })[pkg.execution_status] || '确认开展'
-}
 function updatePenetrationPackage(workPackage) {
   const index = serviceItems.value.findIndex((item) => item.id === workPackage?.parent_service_item_id)
   if (index < 0) return
   serviceItems.value[index] = { ...serviceItems.value[index], penetration_work_package: workPackage }
 }
 function notifyFromPenetration({ message, type }) { showToast(message, type) }
-// 实施计划的人员与设备清单：已发布的计划用保存下来的快照回填；首次制定时按服务项已指派的
-// 团队与设备自动生成，业务用户只需调整使用时段或移除，不必手工重新挑一遍人和设备。
-// 实施计划的人员清单：已发布的计划用保存下来的快照回填；首次制定时按服务项已指派的
-// 团队自动生成，业务用户只需调整使用时段或移除。设备清单在「实施准备」阶段维护。
-function planPersonnelFor(item, plan) {
-  const saved = Array.isArray(plan.personnel) ? plan.personnel : []
-  if (saved.length) {
-    return saved.map((row) => ({ resourceType: 'PERSON', resourceID: row.resource_id, windowStart: row.window_start || '', windowEnd: row.window_end || '', note: row.note || '' }))
-  }
-  return planPersonnelRows(item)
-}
-// 已指派的执行团队默认全员参与；团队负责人同样计入，避免计划里出现"没有负责人"的空档。
-function planPersonnelRows(item) {
-  const personIDs = [item.team_lead_id, item.project_manager_id, ...(item.engineer_ids || [])].filter(Boolean)
-  return [...new Set(personIDs)].map((id) => ({ resourceType: 'PERSON', resourceID: id, windowStart: '', windowEnd: '', note: '' }))
-}
-// 实施准备的设备清单：已登记的回填快照，未登记时留空由用户在准备阶段挑选。
-function planEquipmentFor(plan) {
-  const saved = Array.isArray(plan.equipment) ? plan.equipment : []
-  return saved.map((row) => ({ resourceType: 'EQUIPMENT', resourceID: row.resource_id, windowStart: row.window_start || '', windowEnd: row.window_end || '', note: row.note || '' }))
-}
-// 清单行展示的名称/资质/有效期：优先取当前能力档案，档案缺失时回落到人员姓名缓存，
-// 避免已停用资源在表单里显示成空白。
 function planResourceName(row) {
   const capability = capabilities.value.find((item) => item.resource_id === row.resourceID || (item.resource_type === 'PERSON' && item.user_id === row.resourceID))
   return capability?.resource_name || personnelNameByID.value.get(row.resourceID) || row.resourceID || '未命名资源'
@@ -2632,8 +2421,9 @@ function planResourceValidUntil(row) {
 }
 // 设备占用：实施准备阶段把已被其他服务项在同一时段占用的设备置灰，不允许重复选取。
 const equipmentReservations = ref([])
-let equipmentRequestVersion = 0
-let workspaceRequestVersion = 0
+// 计划/准备链读取的作用域：设备占用按服务项隔离，工作区快照全局一份；
+// 组件卸载时 requestScope 经 onScopeDispose 自动失效在途响应。
+const reservationScope = createRequestScope()
 const equipmentReservationByID = computed(() => {
   const map = new Map()
   for (const item of equipmentReservations.value) {
@@ -2643,16 +2433,16 @@ const equipmentReservationByID = computed(() => {
 })
 async function loadEquipmentReservations(item) {
   const targetID = item?.id
-  const requestVersion = ++equipmentRequestVersion
-  if (!targetID) { equipmentReservations.value = []; return }
+  if (!targetID) { reservationScope.invalidate(); equipmentReservations.value = []; return }
+  const ticket = reservationScope.begin(`RESERVATIONS:${targetID}`)
   try {
     const rows = await listEquipmentReservations(targetID)
     // 此前选中的服务项所返回的迟到响应，绝不能
     // 覆盖当前服务项的设备可用情况。
-    if (requestVersion !== equipmentRequestVersion || selectedServiceItem.value?.id !== targetID) return
+    if (!reservationScope.isCurrent(ticket) || selectedServiceItem.value?.id !== targetID) return
     equipmentReservations.value = rows
   } catch {
-    if (requestVersion !== equipmentRequestVersion || selectedServiceItem.value?.id !== targetID) return
+    if (!reservationScope.isCurrent(ticket) || selectedServiceItem.value?.id !== targetID) return
     // 占用信息拿不到时不阻断挑选，保存时服务端仍会硬拦重叠占用。
     equipmentReservations.value = []
   }
@@ -2723,6 +2513,7 @@ function toggleServiceItem(item) {
   if (selectedServiceItems.value.length === 1) fillOperationForm(selectedServiceItems.value[0])
 }
 async function uploadCurrentReport() {
+  if (saving.value) return
   const item = selectedServiceItem.value
   const file = operationForm.value.reportFile
   if (!item || item.report_status !== 'COMPILING' || !(file instanceof File)) { showToast('请选择当前编制版本的 PDF 报告', 'warning'); return }
@@ -2732,15 +2523,11 @@ async function uploadCurrentReport() {
     await registerReportArtifact(item.id, Number(item.report_revision) || 0, artifact)
     operationForm.value.reportFile = null
     showToast(`R${Number(item.report_revision) || 0} 报告文件已登记，可提交审核`)
-    await loadWorkspace()
+    await refreshAfterWrite()
   } catch (error) { showToast(formatUserError(error, { fallback: '报告文件上传失败' }), 'error') }
   finally { saving.value = false }
 }
 
-function newFieldOperationID(prefix) {
-  const random = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`
-  return `${prefix}-${random}`
-}
 
 function fieldQueueOwner() {
   const tenantID = String(session.value?.tenant_id || '').trim()
@@ -2761,7 +2548,13 @@ async function persistAndSyncFieldOperation(operation) {
     showToast('当前离线，现场作业已安全保存；联网后将自动补传。', 'warning')
     return false
   }
-  await flushFieldOperations(true)
+  try {
+    await flushFieldOperations(true)
+  } catch (error) {
+    // 本地队列已落盘（client_operation_id 幂等）：同步阶段异常不得说成“操作未完成”，
+    // 也不得让用户以为记录丢失而重复录入；联网或手动“立即重试”都会继续补传。
+    showToast(`现场作业已安全保存到本地队列，但自动同步未完成：${formatUserError(error, { fallback: '请稍后点击立即重试' })}`, 'warning')
+  }
   return true
 }
 
@@ -2810,7 +2603,7 @@ async function flushFieldOperations(announce = false) {
   }
   if (synced) {
     if (announce) showToast(`已同步 ${synced} 条现场作业`)
-    await loadWorkspace()
+    await refreshAfterWrite()
   }
 }
 
@@ -2824,6 +2617,7 @@ function currentPosition() {
 }
 
 async function runOperation(kind) {
+  if (saving.value) return
   const item = selectedServiceItem.value
   const items = kind === 'allocation' ? selectedServiceItems.value : (item ? [item] : [])
   if (!items.length) { showToast(kind === 'allocation' ? '请至少选择一个服务项' : '当前没有可操作的服务项'); return }
@@ -2946,7 +2740,7 @@ async function runOperation(kind) {
       form.fieldIncompleteReason = ''
       showToast('现场测评已结束，进入报告编制')
     }
-    await loadWorkspace()
+    await refreshAfterWrite()
   } catch (error) {
     const partialAssignment = kind === 'allocation' && (completedAssignmentIDs.length > 0 || error?.partialCompletion?.teamAssigned === true)
     let message = formatUserError(error?.cause || error, { fallback: '操作未完成，请核对当前状态后继续。' })
@@ -2964,9 +2758,10 @@ async function runOperation(kind) {
     }
     showToast(message, partialAssignment ? 'warning' : 'error')
     // 并发冲突：服务端已拒绝本次写入，重新拉取让用户看到最新版本后再决定怎么做。
-    // 批次前项已提交后，即使本项是 403 也必须刷新并保留部分完成事实。
+    // 批次前项已提交后，即使本项是 403 也必须刷新并保留部分完成事实；
+    // 恢复刷新失败时静默上抛，由下方 catch 提示“列表刷新未完成”，不误报写操作结果。
     if (error?.status === 409 || error?.requiresReload || partialAssignment) {
-      try { await loadWorkspace() }
+      try { await loadWorkspace({ reportError: false }) }
       catch { showToast(`${message}列表刷新未完成，请手动刷新核对，勿重复提交已完成项。`, 'warning') }
     }
   }
@@ -3031,6 +2826,7 @@ const canSubmitReportCorrection = computed(() => canRequestReportCorrection.valu
   && ['ISSUED', 'ARCHIVED'].includes(selectedServiceItem.value?.report_status)
   && selectedReportCorrectionRequests.value.length === 0)
 async function withdrawPendingRollback(request) {
+  if (saving.value) return
   const reason = window.prompt('请输入撤回原因：')
   if (reason === null) return
   if (!String(reason).trim()) { showToast('撤回原因不能为空', 'warning'); return }
@@ -3038,10 +2834,11 @@ async function withdrawPendingRollback(request) {
   try {
     await withdrawRollback(request.service_item_id, request.id, { reason: String(reason).trim() })
     showToast('回退申请已撤回')
-    await loadWorkspace()
+    await refreshAfterWrite()
   } catch (error) { showToast(formatUserError(error, { fallback: '撤回失败，请刷新后重试' }), 'error') } finally { saving.value = false }
 }
 async function revokeDeliveryPhase(kind) {
+  if (saving.value) return
   const item = selectedServiceItem.value
   if (!item) { showToast('请先选择服务项', 'warning'); return }
   const expectedStatus = kind === 'plan' ? '待实施' : '实施准备中'
@@ -3055,10 +2852,11 @@ async function revokeDeliveryPhase(kind) {
     if (kind === 'plan') await revokeImplementationPlan(item.id, payload)
     else await revokePreparation(item.id, payload)
     showToast(kind === 'plan' ? '实施计划已撤销，已回到待分配' : '实施准备已撤销，设备预约已释放')
-    await loadWorkspace()
+    await refreshAfterWrite()
   } catch (error) { showToast(formatUserError(error, { fallback: '撤销失败，请刷新后重试' }), 'error') } finally { saving.value = false }
 }
 async function submitRollbackRequest(kind) {
+  if (saving.value) return
   const item = selectedServiceItem.value
   if (!item) { showToast('请先选择服务项', 'warning'); return }
   const reason = window.prompt(`请输入${kind === 'FIELD_TO_PREPARATION' ? '现场实施回退' : '报告返工'}申请原因：`)
@@ -3068,10 +2866,11 @@ async function submitRollbackRequest(kind) {
   try {
     await requestRollback(item.id, { kind, reason: String(reason).trim(), expected_version: Number(item.version) || 0 })
     showToast('回退申请已提交，等待技术总监或系统管理员审批')
-    await loadWorkspace()
+    await refreshAfterWrite()
   } catch (error) { showToast(formatUserError(error, { fallback: '回退申请失败' }), 'error') } finally { saving.value = false }
 }
 async function decidePendingRollback(request, decision) {
+  if (saving.value) return
   const item = serviceItems.value.find((row) => row.id === request.service_item_id)
   if (!item) { showToast('服务项已不可见，无法审批', 'warning'); return }
   const comment = window.prompt(`请输入${decision === 'APPROVED' ? '批准' : '驳回'}意见：`)
@@ -3081,11 +2880,12 @@ async function decidePendingRollback(request, decision) {
   try {
     await decideRollback(item.id, request.id, { decision, comment: String(comment).trim(), expected_version: Number(item.version) || 0 })
     showToast(decision === 'APPROVED' ? '回退申请已批准，服务项已按补偿规则回退' : '回退申请已驳回')
-    await loadWorkspace()
+    await refreshAfterWrite()
   } catch (error) { showToast(formatUserError(error, { fallback: '审批失败，请刷新后重试' }), 'error') } finally { saving.value = false }
 }
 
 async function submitReportCorrection() {
+  if (saving.value) return
   const item = selectedServiceItem.value
   const reason = String(operationForm.value.reportCorrectionReason || '').trim()
   if (!item || !canSubmitReportCorrection.value) { showToast('当前报告不能申请更正', 'warning'); return }
@@ -3095,7 +2895,7 @@ async function submitReportCorrection() {
     await requestReportCorrection(item.id, { reason, expected_version: Number(item.version) || 0 })
     operationForm.value.reportCorrectionReason = ''
     showToast('报告更正申请已提交，等待技术总监审批')
-    await loadWorkspace()
+    await refreshAfterWrite()
   } catch (error) {
     showToast(formatUserError(error, { fallback: '报告更正申请失败' }), 'error')
     if (error?.status === 409) await loadWorkspace()
@@ -3103,6 +2903,7 @@ async function submitReportCorrection() {
 }
 
 async function decidePendingReportCorrection(request, decision) {
+  if (saving.value) return
   const item = itemByID.value.get(request.service_item_id)
   const comment = String(operationForm.value.reportCorrectionComment || '').trim()
   if (!item) { showToast('服务项已不可见，无法审批', 'warning'); return }
@@ -3113,7 +2914,7 @@ async function decidePendingReportCorrection(request, decision) {
     await decideReportCorrection(item.id, request.id, { decision, comment, expected_version: Number(item.version) || 0 })
     operationForm.value.reportCorrectionComment = ''
     showToast(decision === 'APPROVED' ? '报告更正已批准，已生成新版本待编制' : '报告更正申请已驳回')
-    await loadWorkspace()
+    await refreshAfterWrite()
   } catch (error) {
     showToast(formatUserError(error, { fallback: '报告更正审批失败' }), 'error')
     if (error?.status === 409) await loadWorkspace()
@@ -3229,7 +3030,7 @@ watch(canExecutionAssign, (allowed) => {
 })
 onBeforeUnmount(() => {
   window.clearTimeout(toastTimer)
-  window.clearTimeout(notificationAutoCloseTimer)
+  disposeNotifications()
   window.clearTimeout(monitoringFilterTimer)
   window.clearInterval(monitoringPollTimer)
   document.removeEventListener('click', closeMultiOnOutsideClick)
@@ -3278,14 +3079,17 @@ onBeforeUnmount(() => {
           <span class="pm-topbar-avatar" aria-hidden="true">{{ currentUserInitial }}</span>
         </div>
         <Transition name="pm-notification-pop">
-          <div v-if="notificationOpen" id="project-notifications" class="pm-notifications" role="status" aria-live="polite">
-            <div class="pm-popover-head"><b>业务待办</b><span>{{ notificationCount }} 条</span></div>
-            <p v-if="notificationLoading" class="pm-notification-state">正在加载未读通知…</p>
-            <p v-else-if="notificationError" class="pm-notification-state danger">{{ notificationError }}</p>
-            <button v-for="item in notificationItems" :key="item.delivery_id" :disabled="notificationActionID === item.delivery_id" @click="openNotification(item)"><i :class="item.category === 'DEVIATION_REPORTED' ? 'danger' : 'warning'"></i><span><b>{{ item.title }}</b><small>{{ item.content }}</small></span></button>
-            <EmptyHint v-if="!notificationLoading && !notificationError && !notificationItems.length" message="暂无未读通知" />
-            <button v-if="navigation.sections.includes('notifications')" type="button" @click="closeNotifications(); navigate('notifications')">查看全部通知</button>
-          </div>
+          <ProjectNotificationPopover
+            v-if="notificationOpen"
+            :count="notificationCount"
+            :loading="notificationLoading"
+            :error="notificationError"
+            :items="notificationItems"
+            :action-id="notificationActionID"
+            :show-view-all="navigation.sections.includes('notifications')"
+            @open-item="openNotification"
+            @view-all="closeNotifications(); navigate('notifications')"
+          />
         </Transition>
       </header>
 
@@ -3826,7 +3630,12 @@ onBeforeUnmount(() => {
     <QualificationImportDialog v-if="equipmentImportOpen && canManageDevice" resource-type="EQUIPMENT" :code-options="capabilityCodeOptions('EQUIPMENT').map((option) => ({ value: option.code, label: option.name }))" @close="equipmentImportOpen = false" @completed="importEquipmentFile" />
     <DetectionCategoryImportDialog v-if="detectionCategoryImportOpen && canManageRules" :code-options="capabilityCodeOptions('PERSON').map((option) => ({ value: option.code, label: option.name }))" @close="detectionCategoryImportOpen = false" @completed="importDetectionCategoryFile" />
 
-    <div v-if="operationDetail" class="pm-overlay" @click.self="operationDetail = null"><aside class="pm-drawer"><header><div><span>{{ operationSectionLabel(operationDetail.section) }}</span><h2>{{ operationDetail.row.name }}</h2></div><button class="pm-icon-button" aria-label="关闭" @click="operationDetail = null"><ConsoleIcon name="close" /></button></header><div class="pm-drawer-body"><section class="pm-drawer-hero"><span class="pm-badge neutral">{{ operationDetail.row.state }}</span><p><template v-if="Array.isArray(operationDetail.row.detail)"><span v-if="!operationDetail.row.detail.length">—</span><span v-else class="pm-code-pills"><span v-for="code in operationDetail.row.detail" :key="code" class="pm-code-pill">{{ code }}</span></span></template><template v-else>{{ operationDetail.row.detail }}</template><span v-if="operationDetail.row.warning" class="pm-cell-warning">{{ operationDetail.row.warning }}</span></p><div class="pm-progress"><i :style="{ width: `${operationDetail.row.progress}%` }"></i></div><b>{{ operationDetail.row.progress }}% 已完成</b></section><dl><div v-for="field in operationDetailFields" :key="field.label"><dt>{{ field.label }}</dt><dd><template v-if="Array.isArray(field.value)"><span v-if="!field.value.length">—</span><span v-else class="pm-code-pills"><span v-for="code in field.value" :key="code" class="pm-code-pill">{{ code }}</span></span></template><template v-else>{{ field.value }}</template></dd></div></dl></div><footer><button class="pm-button" @click="operationDetail = null">关闭</button></footer></aside></div>
+    <OperationDetailDrawer
+      v-if="operationDetail"
+      :detail="operationDetail"
+      :fields="operationDetailFields"
+      @close="operationDetail = null"
+    />
 
     <div v-if="planEquipmentPickerOpen" class="pm-overlay" @click.self="planEquipmentPickerOpen = false"><aside class="pm-dialog pm-dialog-wide"><header><div><span>设备</span><h2>添加设备</h2><small class="pm-dialog-sub">只列设备目录中的有效设备；已被其他服务项占用、仅在公司使用或不在公司的设备不可选取。</small></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="planEquipmentPickerOpen = false"><ConsoleIcon name="close" /></button></header><div class="pm-dialog-body"><div class="pm-picker-search"><ConsoleIcon name="search" /><input v-model.trim="equipmentPickerKeyword" placeholder="搜索设备名称或能力码"  maxlength="100"/></div><div class="pm-table-scroll"><table class="pm-table pm-table-picker"><thead><tr><th>设备</th><th>能力码</th><th>检定有效期</th><th>状态</th><th class="pm-col-action">操作</th></tr></thead><tbody><tr v-for="item in planEquipmentFiltered" :key="item.resource_id"><td><b>{{ item.resource_name }}</b><small class="mono">{{ item.resource_id }}</small><small v-if="equipmentUnavailableReason(item)" class="pm-cell-sub pm-cell-danger">{{ equipmentUnavailableReason(item) }}</small></td><td><CodePills :codes="item.codes || []" /></td><td>{{ item.valid_until ? item.valid_until.slice(0, 10) : '长期' }}</td><td><span class="pm-badge" :class="equipmentPickerState(item).tone">{{ equipmentPickerState(item).label }}</span></td><td><button type="button" class="pm-link" :disabled="equipmentPickerState(item).disabled" @click="addPlanEquipment(item)">{{ equipmentPickerState(item).action }}</button></td></tr><tr v-if="!planEquipmentFiltered.length"><td colspan="5" class="pm-empty-mini">{{ equipmentPickerKeyword ? '没有匹配的设备，换个关键字试试' : '设备目录为空，请先在「资质与能力」或「设备能力维护」中登记设备' }}</td></tr></tbody></table></div></div><footer><span class="pm-dialog-footnote">已加入 {{ planEquipmentAddedCount }} 台 · 可选 {{ planEquipmentAddableCount }} 台</span><button type="button" class="pm-button" @click="planEquipmentPickerOpen = false">关闭</button></footer></aside></div>
     <div v-if="createOpen" class="pm-overlay" @click.self="createOpen = false">
@@ -3926,6 +3735,17 @@ onBeforeUnmount(() => {
         <footer><button type="button" class="pm-button" @click="configEditorOpen = false">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : '保存' }}</button></footer>
       </form>
     </div>
+    <ConfirmDialog
+      v-if="confirmDialog"
+      :title="confirmDialog.title"
+      :description="confirmDialog.description"
+      :confirm-text="confirmDialog.confirmText"
+      :cancel-text="confirmDialog.cancelText"
+      :danger="confirmDialog.danger"
+      @confirm="acceptConfirm"
+      @cancel="cancelConfirm"
+    />
+
     <Transition name="pm-toast"><div v-if="toastMessage" class="pm-toast" :class="toastType" role="status"><span>{{ toastType === 'error' ? '✕' : toastType === 'warning' ? '⚠' : toastType === 'info' ? 'ℹ' : '✓' }}</span>{{ toastMessage }}</div></Transition>
   </div>
 </template>

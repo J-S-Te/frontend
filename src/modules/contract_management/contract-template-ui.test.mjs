@@ -3,6 +3,7 @@ import test from 'node:test'
 import { readFile } from 'node:fs/promises'
 
 const source = await readFile(new URL('./views/ContractManagementView.vue', import.meta.url), 'utf8')
+const approvalDetailSource = await readFile(new URL('./composables/useApprovalDetail.js', import.meta.url), 'utf8')
 
 test('contract template upload button is gated only by the admin role', () => {
   assert.match(source, /roleCodes\.includes\('admin'\) \|\| session\.value\?\.role\?\.code === 'admin'/)
@@ -64,7 +65,7 @@ test('contract detail shows persisted lifecycle transitions', () => {
 
 test('approval progress renders its template contract with document formatting', () => {
   assert.match(source, /listOpportunityIntakes,\s*previewApprovalContract,\s*previewContractTemplate,/)
-  assert.match(source, /previewApprovalContract\(approval\.id\)/)
+  assert.match(approvalDetailSource, /previewApprovalContract\(approval\.id\)/)
   assert.match(source, /v-else-if="approvalContractPreviewHTML"/)
   assert.match(source, /ContractDocumentPreview[^>]*:html="approvalContractPreviewHTML"/)
 })

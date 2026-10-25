@@ -2,11 +2,35 @@
 import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { AuthError, logoutCurrentSession } from "@/modules/platform/auth/api/auth";
+import { createRequestScope } from "@/modules/platform/shared/composables/requestScope.js";
 import ConsoleIcon from "@/modules/platform/shared/components/ConsoleIcon.vue";
+import RedFlushDialog from "@/modules/settlement/components/RedFlushDialog.vue";
 import SettlementTimeline from "@/modules/settlement/components/SettlementTimeline.vue";
+import {
+  allocationStatusMeta,
+  amountOf,
+  collectionStatusLabel,
+  confirmationState,
+  dueState,
+  dunningActionStatusLabel,
+  dunningCaseStatusLabel,
+  formatSettlementAmount,
+  invoiceStatusMeta,
+  invoiceTypeLabel,
+  isCurrentMonth,
+  issueChannelLabel,
+  money,
+  receiptStatusMeta,
+  receivableInvoiceStatusLabel,
+  redFlushStatusLabel,
+} from "@/modules/settlement/utils/settlementDisplay";
+import { useSettlementActions } from "@/modules/settlement/composables/useSettlementActions";
 import { canRequestRedFlush } from "@/modules/settlement/utils/invoiceStatus";
 import { formatSettlementError } from "../utils/errors.js";
 import { closeSubsystemTabOrFallback } from "@/modules/shared/utils/returnToPortal";
+import { useConfirmDialog } from "@/modules/shared/composables/useConfirmDialog.js";
+import ConfirmDialog from "@/modules/shared/components/ConfirmDialog.vue";
+import PromptDialog from "@/modules/shared/components/PromptDialog.vue";
 import {
   approveInvoiceRequest,
   recoverInvoiceFailure,
@@ -51,6 +75,8 @@ import {
 import "@/modules/platform/styles/console.css";
 import "@/modules/settlement/styles/settlement.css";
 
+const { dialog: confirmDialog, askConfirm, accept: acceptConfirm, cancel: cancelConfirm } = useConfirmDialog();
+const reviewFailureDialog = ref(null);
 const route = useRoute(),
   router = useRouter();
 const settlementSession = ref({});
@@ -111,29 +137,6 @@ const title = computed(
 const invoiceDetailID = computed(() =>
   active.value === "invoices" ? String(route.query.invoice_id || "") : "",
 );
-const amountOf = (value) => Number.parseFloat(value) || 0;
-const money = (value, currency = "CNY") =>
-  new Intl.NumberFormat("zh-CN", {
-    style: "currency",
-    currency: currency || "CNY",
-    maximumFractionDigits: 0,
-  }).format(amountOf(value));
-// KPI 简写：≥ 1 万用"万"，≥ 1 亿用"亿"，其余保留原值；保留 1 位小数。
-const formatSettlementAmount = (value, currency = "CNY") => {
-  const amount = amountOf(value);
-  const code = currency || "CNY";
-  if (Math.abs(amount) >= 1e8) {
-    return `${code} ${(amount / 1e8).toFixed(1)}亿`;
-  }
-  if (Math.abs(amount) >= 1e4) {
-    return `${code} ${(amount / 1e4).toFixed(1)}万`;
-  }
-  return new Intl.NumberFormat("zh-CN", {
-    style: "currency",
-    currency: code,
-    maximumFractionDigits: 0,
-  }).format(amount);
-};
 const dashboardCurrencyTotals = (field, fallback) => {
   const totals = Array.isArray(dashboard.value.currency_totals)
     ? dashboard.value.currency_totals.filter((item) => item && item.currency)
@@ -142,15 +145,6 @@ const dashboardCurrencyTotals = (field, fallback) => {
   return totals
     .map((item) => `${item.currency} ${formatSettlementAmount(item[field], item.currency)}`)
     .join(" · ");
-};
-const isCurrentMonth = (dateString) => {
-  const date = new Date(dateString || "");
-  if (Number.isNaN(date.getTime())) return false;
-  const now = new Date();
-  return (
-    date.getFullYear() === now.getFullYear() &&
-    date.getMonth() === now.getMonth()
-  );
 };
 const dashboardKpis = computed(() => {
   const currentMonthReceipts = receipts.value.filter((item) =>
@@ -368,11 +362,8 @@ const canCompleteDunningAction = (item) =>
   item.status === "PENDING" &&
   (item.recipient_user_id === settlementSession.value?.user_id ||
     sessionPermissions.value.has("settlement.admin"));
-const dunningActionStatusLabel = (status) =>
-  ({ PENDING: "待跟进", COMPLETED: "已完成", CANCELLED: "已取消" })[status] || status;
-const dunningCaseStatusLabel = (status) =>
-  ({ ACTIVE: "跟进中", CLOSED: "已关闭" })[status] || status;
 async function completeDunningAction(item) {
+  if (saving.value) return;
   const note = window.prompt("填写本次催收跟进结果（最多 500 字）。完成后该动作不再计入待办。");
   if (note === null) return;
   if (note.trim().length > 500) {
@@ -395,9 +386,9 @@ async function completeDunningAction(item) {
 }
 const loading = ref(true),
   error = ref(""),
-  saving = ref(false),
-  message = ref(""),
   isLoggingOut = ref(false);
+
+const { message, saving, notify, act } = useSettlementActions({ load, formatSettlementError });
 const dashboard = ref({}),
   plans = ref([]),
   receivables = ref([]),
@@ -421,7 +412,9 @@ const exportJob = ref(null);
 const invoiceDocumentInput = ref(null);
 const redFlushOpen = ref(false);
 const redFlushForm = ref({ reason_code: "INVOICE_ERROR", reason_detail: "" });
-let loadGeneration = 0;
+// 读取作用域：每次 load() 开启新票据并整体失效旧请求，菜单快速切换时旧页面响应
+// 只能结束自身；组件卸载经 onScopeDispose 自动作废，迟到响应不再回写（任务 C）。
+const settlementScope = createRequestScope();
 const invoiceTab = ref("requests"),
   invoiceComposerOpen = ref(false),
   invoiceReviewOpen = ref(false),
@@ -515,19 +508,6 @@ const policyRecipientAccount = computed({
 function go(section) {
   router.push({ name: "settlement", params: { section } });
 }
-function dueState(dueDate) {
-  const due = Date.parse(dueDate || "");
-  if (!Number.isFinite(due)) return { label: "待确认", tone: "gray" };
-  const days = Math.ceil((due - Date.now()) / 86400000);
-  if (days < 0) return { label: "逾期", tone: "danger" };
-  if (days <= 7) return { label: "即将到期", tone: "warning" };
-  return { label: "未到期", tone: "info" };
-}
-function confirmationState(value) {
-  return value === "CONFIRMED"
-    ? { label: "已确认", tone: "success" }
-    : { label: "待确认", tone: "warning" };
-}
 const visiblePlans = computed(() =>
   plans.value.filter((item) => {
     const keyword = planKeyword.value.trim().toLowerCase();
@@ -551,39 +531,6 @@ function resetPlanFilters() {
   planConfirmationFilter.value = "";
   planMaturityFilter.value = "";
 }
-const invoiceStatusMeta = (value) =>
-  ({
-    SUBMITTED: { label: "待审核", tone: "warning" },
-    ISSUE_PENDING: { label: "待开具", tone: "info" },
-    ISSUE_UNKNOWN: { label: "结果待对账", tone: "warning" },
-    ISSUE_FAILED: { label: "开具失败", tone: "danger" },
-    ISSUED: { label: "已开票", tone: "success" },
-    REJECTED: { label: "已驳回", tone: "danger" },
-  })[value] || { label: value || "未知", tone: "gray" };
-const collectionStatusLabel = (value) =>
-  ({ UNPAID: "未回款", PARTIALLY_SETTLED: "部分回款", SETTLED: "已结清" })[
-    value
-  ] || "未知";
-const receivableInvoiceStatusLabel = (value) =>
-  ({
-    NOT_INVOICED: "未开票",
-    PARTIALLY_INVOICED: "部分开票",
-    FULLY_INVOICED: "已全部开票",
-  })[value] || "未知";
-const invoiceTypeLabel = (value) =>
-  ({
-    ELECTRONIC_NORMAL: "电子普通发票",
-    ELECTRONIC_SPECIAL: "电子专用发票",
-    PAPER_NORMAL: "纸质普通发票",
-    PAPER_SPECIAL: "纸质专用发票",
-  })[value] || "其他发票";
-const issueChannelLabel = (value) =>
-  ({ MANUAL: "人工登记", TAX_ADAPTER: "税控直连" })[value] || "其他渠道";
-const redFlushStatusLabel = (value) =>
-  ({ SUBMITTED: "待财务复核", ISSUE_PENDING: "待税控开具", ISSUE_UNKNOWN: "结果待对账", RED_FLUSHED: "已红冲", REJECTED: "已驳回", ISSUE_FAILED: "红冲失败" })[
-    value
-  ] || "未知";
-// 发票详情 · 留痕时间线事件：仅基于当前发票已暴露的字段拼装，不引入额外后端接口。
 const invoiceTimelineEvents = computed(() => {
   const detail = invoiceDetail.value;
   if (!detail) return [];
@@ -626,20 +573,6 @@ const invoiceTimelineEvents = computed(() => {
   }
   return events;
 });
-const receiptStatusMeta = (item) =>
-  ({
-    AVAILABLE: { label: "待核销", tone: "purple" },
-    PARTIALLY_ALLOCATED: { label: "部分核销", tone: "info" },
-    FULLY_ALLOCATED: { label: "已核销", tone: "success" },
-  })[item.status] || { label: item.status || "未知", tone: "gray" };
-const allocationStatusMeta = (value) =>
-  value === "CONFIRMED"
-    ? { label: "已核销", tone: "success" }
-    : value === "PARTIALLY_REVERSED"
-      ? { label: "部分冲销", tone: "warning" }
-      : value === "REVERSED"
-        ? { label: "已冲销", tone: "danger" }
-        : { label: "状态待确认", tone: "gray" };
 const visibleInvoiceRequests = computed(() =>
   invoiceRequests.value.filter((item) => {
     const keyword = invoiceKeyword.value.trim().toLowerCase();
@@ -689,6 +622,7 @@ async function uploadInvoiceDocument(event) {
   const file = event.target.files?.[0];
   event.target.value = "";
   if (!file || !invoiceDetail.value?.id) return;
+  if (saving.value) return;
   saving.value = true;
   try {
     await uploadTaxInvoiceDocument(invoiceDetail.value.id, file);
@@ -757,12 +691,6 @@ async function logoutSystem() {
     isLoggingOut.value = false;
   }
 }
-function notify(value) {
-  message.value = value;
-  window.setTimeout(() => {
-    message.value = "";
-  }, 3200);
-}
 const listPages = ref({});
 const pagedLists = [
   [listReceivablePlans, plans, "应收计划"], [listReceivables, receivables, "正式应收"],
@@ -783,17 +711,35 @@ async function changeListPage(index, direction) {
   listPages.value[index] = Math.max(0, (listPages.value[index] || 0) + direction);
   await load();
 }
-async function reviewFailedInvoice(item) {
-  const reason = window.prompt("填写失败复核原因（5 至 1000 字）。仅对税控已明确失败的申请恢复审批；结果未知不能重试，复核不会立即开票。");
-  if (reason === null) return;
-  if (reason.trim().length < 5 || reason.trim().length > 1000) { error.value = "复核原因应为 5 到 1000 字"; return; }
-  if (!window.confirm("确认已核对原税控失败结果？恢复后仍需重新审核，旧开票尝试和失败记录会保留。")) return;
+function openReviewFailure(item) {
+  if (!item || saving.value) return;
+  reviewFailureDialog.value = { item, reason: "", error: "" };
+}
+
+function closeReviewFailure() {
+  if (!saving.value) reviewFailureDialog.value = null;
+}
+
+async function submitReviewFailure(reason) {
+  const dialog = reviewFailureDialog.value;
+  if (!dialog || saving.value) return;
+  const normalized = String(reason || "").trim();
+  if (normalized.length < 5 || normalized.length > 1000) {
+    dialog.error = "复核原因应为 5 到 1000 字。";
+    return;
+  }
   saving.value = true;
+  dialog.error = "";
   try {
-    await recoverInvoiceFailure(item.id, { version: item.version, reason: reason.trim() });
-    const refreshed = await load(); notify(refreshed ? "失败已复核，申请已恢复待审核；尚未重新开票。" : "失败已复核，尚未重新开票；页面刷新失败，请刷新列表查看。无需重复复核。");
-  } catch (value) { error.value = formatSettlementError(value, { fallback: "失败复核未完成。" }); }
-  finally { saving.value = false; }
+    await recoverInvoiceFailure(dialog.item.id, { version: dialog.item.version, reason: normalized });
+    reviewFailureDialog.value = null;
+    const refreshed = await load();
+    notify(refreshed ? "失败已复核，申请已恢复待审核；尚未重新开票。" : "失败已复核，尚未重新开票；页面刷新失败，请刷新列表查看。无需重复复核。");
+  } catch (value) {
+    dialog.error = formatSettlementError(value, { fallback: "失败复核未完成。" });
+  } finally {
+    saving.value = false;
+  }
 }
 function loadTargets(section) {
   const target = (loader, state, fallback) => [loader, state, fallback];
@@ -871,7 +817,8 @@ function loadTargets(section) {
   return targets;
 }
 async function load() {
-  const generation = ++loadGeneration;
+  const ticket = settlementScope.begin(`SETTLEMENT_SECTION:${active.value}`);
+  const isCurrent = () => settlementScope.isCurrent(ticket);
   loading.value = true;
   error.value = "";
   const targets = loadTargets(active.value);
@@ -881,12 +828,12 @@ async function load() {
   }
   const results = await Promise.allSettled(targets.map(([loader]) => {
     const index = pagedLists.findIndex(([candidate]) => candidate === loader);
-    const offset = active.value === "dashboard" ? 0 : (listPages.value[index] || 0) * 50;
+    const offset = active.value === "dunning" ? 0 : (listPages.value[index] || 0) * 50;
     return index < 0 ? loader() : loader({ limit: 50, offset });
   }));
   // 菜单快速切换时，旧页面请求可能晚于新页面返回。旧请求只能结束自身，
-  // 不得覆盖当前页面的数据、错误和 loading 状态。
-  if (generation !== loadGeneration) {
+  // 不得覆盖当前页面的数据、错误和 loading 状态；组件卸载后同样丢弃。
+  if (!isCurrent()) {
     if (active.value === "dunning") dunningRecipientsLoading.value = false;
     return false;
   }
@@ -917,6 +864,7 @@ async function exportAgingReceivables() {
   return runReportExport(createAgingReceivablesExport, "账龄表已生成，可下载。");
 }
 async function runReportExport(createExport, successMessage) {
+  if (saving.value) return;
   saving.value = true;
   let submitted = false;
   try {
@@ -939,18 +887,6 @@ async function runReportExport(createExport, successMessage) {
     notify(submitted
       ? `导出任务已提交，但状态查询失败。请稍后查询当前任务，勿重复提交。${formatSettlementError(cause)}`
       : formatSettlementError(cause, { fallback: "导出任务提交失败，请稍后重试。" }));
-  } finally {
-    saving.value = false;
-  }
-}
-async function act(callback, success) {
-  saving.value = true;
-  try {
-    await callback();
-    const refreshed = await load();
-    notify(refreshed ? success : `${success}页面刷新失败，请刷新列表核对结果，勿重复提交。`);
-  } catch (cause) {
-    notify(formatSettlementError(cause, { fallback: "操作失败，请稍后重试。" }));
   } finally {
     saving.value = false;
   }
@@ -989,6 +925,7 @@ function submitPlanConfirmation() {
   }, "应收计划已确认，并已生成正式应收。");
 }
 async function submitReceipt() {
+  if (saving.value) return;
   saving.value = true;
   let registered = false;
   try {
@@ -2135,58 +2072,13 @@ watch(invoiceDetailID, load);
                   通过并提交税控
                 </button>
               </div>
-              <article
+              <RedFlushDialog
                 v-if="redFlushOpen"
-                class="settlement-panel settlement-operation-card"
-              >
-                <div class="settlement-panel-head">
-                  <div>
-                    <h2>发起红冲申请</h2>
-                    <p>申请先由财务复核，通过后才提交税控，最终结果以税控回执为准。</p>
-                  </div>
-                  <button
-                    class="console-text-button"
-                    @click="redFlushOpen = false"
-                  >
-                    取消
-                  </button>
-                </div>
-                <form
-                  class="settlement-operation-form"
-                  @submit.prevent="submitRedFlush"
-                >
-                  <label
-                    ><span>红冲原因类型</span
-                    ><select v-model="redFlushForm.reason_code" required>
-                      <option value="INVOICE_ERROR">开票信息错误</option>
-                      <option value="CONTRACT_CHANGE">合同变更</option>
-                      <option value="RETURN_OR_DISCOUNT">退货或折让</option>
-                      <option value="OTHER">其他</option>
-                    </select></label
-                  >
-                  <label class="wide"
-                    ><span>具体原因</span
-                    ><textarea
-                      v-model.trim="redFlushForm.reason_detail"
-                      rows="3"
-                      maxlength="500"
-                      required
-                    ></textarea>
-                  </label>
-                  <div class="settlement-operation-actions wide">
-                    <button
-                      type="button"
-                      class="console-button secondary"
-                      @click="redFlushOpen = false"
-                    >
-                      取消
-                    </button>
-                    <button class="console-button danger" :disabled="saving">
-                      提交红冲申请
-                    </button>
-                  </div>
-                </form>
-              </article>
+                :form="redFlushForm"
+                :saving="saving"
+                @cancel="redFlushOpen = false"
+                @submit="submitRedFlush"
+              />
               <div class="settlement-detail-kpis">
                 <article class="tone-blue">
                   <span>发票号码</span><b>{{ invoiceDetail.invoice_no }}</b>
@@ -2592,7 +2484,7 @@ watch(invoiceDetailID, load);
                           v-else-if="item.status === 'ISSUE_FAILED' && can('settlement.invoice.approve')"
                           class="console-button secondary small"
                           :disabled="saving"
-                          @click="reviewFailedInvoice(item)"
+                          @click="openReviewFailure(item)"
                         >失败复核</button><span v-else class="settlement-muted">—</span>
                       </td>
                     </tr>
@@ -3035,5 +2927,31 @@ watch(invoiceDetailID, load);
         </template>
       </div>
     </section>
+      <PromptDialog
+      v-if="reviewFailureDialog"
+      title="复核税控失败结果"
+      description="仅对税控已明确失败的申请恢复审批；结果未知不能重试，复核不会立即开票。恢复后仍需重新审核，旧开票尝试和失败记录会保留。"
+      label="复核原因（5 至 1000 字）"
+      placeholder="请写明已核对的原税控失败结果和恢复依据"
+      confirm-text="确认复核"
+      cancel-text="取消"
+      :minlength="5"
+      :maxlength="1000"
+      :busy="saving"
+      :error="reviewFailureDialog.error"
+      @confirm="submitReviewFailure"
+      @cancel="closeReviewFailure"
+    />
+
+    <ConfirmDialog
+      v-if="confirmDialog"
+      :title="confirmDialog.title"
+      :description="confirmDialog.description"
+      :confirm-text="confirmDialog.confirmText"
+      :cancel-text="confirmDialog.cancelText"
+      :danger="confirmDialog.danger"
+      @confirm="acceptConfirm"
+      @cancel="cancelConfirm"
+    />
   </main>
 </template>

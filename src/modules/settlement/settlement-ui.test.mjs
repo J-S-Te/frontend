@@ -54,8 +54,8 @@ test('Settlement view exposes the first-phase financial workflow without mock re
   assert.match(source, /agingRows/)
   assert.match(source, /getDunningCoverage/)
   assert.match(source, /策略覆盖巡检/)
-  assert.match(source, /loadGeneration/)
-  assert.match(source, /generation !== loadGeneration/)
+  assert.match(source, /settlementScope\.begin\(/)
+  assert.match(source, /settlementScope\.isCurrent\(ticket\)/)
   assert.doesNotMatch(source, /示例客户|mockReceivable|演示数据/)
 })
 
