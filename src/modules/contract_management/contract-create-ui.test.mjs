@@ -3,6 +3,7 @@ import test from 'node:test'
 import { readFile } from 'node:fs/promises'
 
 const source = await readFile(new URL('./views/ContractManagementView.vue', import.meta.url), 'utf8')
+const displaySource = await readFile(new URL('./utils/contractDisplay.js', import.meta.url), 'utf8')
 const api = await readFile(new URL('./api/contract.js', import.meta.url), 'utf8')
 
 test('new contracts select an optional permission-scoped opportunity and have no manual number', () => {
@@ -24,23 +25,23 @@ test('opportunity selection fills customer context without calling an unsupporte
 })
 
 test('contract and service types are constrained selects', () => {
-  assert.match(source, /const fallbackContractTypeOptions = \['直签', '三方'\]/)
+  assert.match(displaySource, /const fallbackContractTypeOptions = \['直签', '三方'\]/)
   assert.match(source, /useDictionaryOptions\('CONTRACT_TYPE', \{ fallback: toDictionaryFallback\(fallbackContractTypeOptions\) \}\)/)
   assert.match(source, /const contractTypeOptions = computed\(\(\) => contractTypeItems\.value\.map\(\(item\) => item\.value\)\)/)
-  for (const value of ['等保测评', '商用密码应用安全性评估', 'APP安全加固', '网络安全攻防演练', '安全运维']) assert.match(source, new RegExp(value))
+  for (const value of ['等保测评', '商用密码应用安全性评估', 'APP安全加固', '网络安全攻防演练', '安全运维']) assert.match(displaySource, new RegExp(value))
   assert.match(source, /<select v-model="newContract\.contract_type" required>/)
   assert.match(source, /<select v-model="serviceItem\.service_type" required>/)
 })
 
 test('service items own their system information and customer fields remain available', () => {
-  assert.match(source, /service_items: \[emptyServiceItem\(\)\]/)
+  assert.match(displaySource, /service_items: \[emptyServiceItem\(\)\]/)
   assert.match(source, /newContract\.value\.service_items\.length < 20/)
   assert.match(source, /v-for="\(serviceItem, serviceIndex\) in newContract\.service_items"/)
   assert.match(source, /系统信息（选填）/)
   assert.match(source, /serviceItem\.systems\.length < 15/)
   assert.match(source, /v-for="\(system, systemIndex\) in serviceItem\.systems"/)
   assert.match(source, /service_items: form\.service_items\.map/)
-  for (const level of ['一级', '二级', '三级', '四级']) assert.match(source, new RegExp(level))
+  for (const level of ['一级', '二级', '三级', '四级']) assert.match(displaySource, new RegExp(level))
   for (const label of ['客户名称', '客户地址', '客户联系人', '客户联系电话']) assert.match(source, new RegExp(`<span>${label}</span>`))
 })
 

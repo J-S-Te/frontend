@@ -3,6 +3,7 @@ import test from 'node:test'
 import { readFile } from 'node:fs/promises'
 
 const source = await readFile(new URL('./views/ContractManagementView.vue', import.meta.url), 'utf8')
+const displaySource = await readFile(new URL('./utils/contractDisplay.js', import.meta.url), 'utf8')
 const api = await readFile(new URL('./api/contract.js', import.meta.url), 'utf8')
 const payload = await readFile(new URL('./utils/contractPayload.js', import.meta.url), 'utf8')
 
@@ -56,7 +57,7 @@ test('existing contract dates and structured payment plans are submitted togethe
 })
 
 test('external project decomposition fields are required while template mode stays compatible', () => {
-  assert.match(source, /batch: '第一批次'/)
+  assert.match(displaySource, /batch: '第一批次'/)
   assert.match(source, /if \(!serviceItem\.batch\.trim\(\)\) serviceItem\.batch = '第一批次'/)
   assert.match(source, /v-model="serviceItem\.site" :required="isExternalContractMode"/)
   assert.match(source, /v-model="serviceItem\.batch" :required="isExternalContractMode"/)
