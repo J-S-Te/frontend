@@ -34,6 +34,10 @@ const CREDENTIAL_ENCRYPTION_MODE = (typeof import.meta.env === 'undefined'
 
 const CREDENTIAL_API_BASE = (import.meta.env?.VITE_API_BASE_URL || '/api/v1').replace(/\/+$/, '')
 
+export function credentialResponseData(result) {
+  return result?.body?.data
+}
+
 export function credentialAPIURL(path) {
   const value = String(path || '')
   if (/^(?:https?:)?\/\//.test(value) || value.startsWith('/api/') || value.startsWith(CREDENTIAL_API_BASE)) return value
@@ -43,7 +47,7 @@ export function credentialAPIURL(path) {
 async function credentialRequest(path, purpose, payload, resourceId = '') {
   try {
     const result = await postCredentialJSON({ url: credentialAPIURL(path), purpose, resourceId, body: payload })
-    return result.body
+    return credentialResponseData(result)
   } catch (error) {
     if (error instanceof CredentialProtocolError) {
       throw new IamError(formatUserError(error, { fallback: '凭据加密请求失败，请刷新页面后重试。' }), { code: error.code, status: error.status || 0 })
@@ -55,7 +59,7 @@ async function credentialRequest(path, purpose, payload, resourceId = '') {
 async function credentialMultipart(path, payloadForm) {
   try {
     const result = await postCredentialFormData({ url: credentialAPIURL(path), purpose: 'CREATE_EMPLOYEES_BATCH', formData: payloadForm })
-    return result.body
+    return credentialResponseData(result)
   } catch (error) {
     if (error instanceof CredentialProtocolError) {
       throw new IamError(formatUserError(error, { fallback: '批量导入凭据加密请求失败，请刷新页面后重试。' }), { code: error.code, status: error.status || 0 })

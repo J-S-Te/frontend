@@ -21,6 +21,7 @@ import {
   createUsersBatch,
   createEmployeesBatch,
   credentialAPIURL,
+  credentialResponseData,
   listUsers,
   updateUser,
   updateAccountStatus,
@@ -469,4 +470,10 @@ test('credential API paths are prefixed exactly once for IAM endpoints', () => {
   assert.equal(credentialAPIURL('/accounts/abc/password/reset'), '/api/v1/accounts/abc/password/reset')
   assert.equal(credentialAPIURL('/api/v1/employees'), '/api/v1/employees')
   assert.equal(credentialAPIURL('https://platform.example/api/v1/employees'), 'https://platform.example/api/v1/employees')
+})
+
+
+test('encrypted IAM responses unwrap the business data envelope', () => {
+  assert.deepEqual(credentialResponseData({ body: { code: 'OK', data: { temporary_password: 'once' } } }), { temporary_password: 'once' })
+  assert.equal(credentialResponseData({ body: null }), undefined)
 })
