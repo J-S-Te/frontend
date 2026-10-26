@@ -1,4 +1,5 @@
 <script setup>
+import { loginUsername } from "@/modules/shared/loginUsername.mjs"
 import OperationToast from '@/modules/shared/components/OperationToast.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { formatUserError } from '../../shared/utils/userError.js'
@@ -1231,7 +1232,7 @@ const activeNodeItems = computed(() => ({
 const penetrationPending = computed(() => serviceItems.value.filter((item) => item.test_mode === 'PENETRATION' && !item.planned_start))
 const activeServiceCount = computed(() => serviceItems.value.filter((item) => !['现场实施完成', '已完成', '已终止'].includes(item.status)).length)
 const completedProjectCount = computed(() => projects.value.filter((project) => project.status === projectStatusCompleted).length)
-const currentUserName = computed(() => session.value?.display_name || session.value?.user_name || '当前用户')
+const currentUserName = computed(() => loginUsername(session.value))
 // 与客户与商机系统的账号行保持一致：首字头像 + 账号名 + 角色名。
 // 角色名取服务端角色目录，目录未就绪或请求失败时退回角色码，不出现空白副标题。
 const currentUserInitial = computed(() => {

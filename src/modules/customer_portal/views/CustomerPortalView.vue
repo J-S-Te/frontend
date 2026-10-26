@@ -1,4 +1,5 @@
 <script setup>
+import { loginUsername } from "@/modules/shared/loginUsername.mjs"
 import OperationToast from '@/modules/shared/components/OperationToast.vue'
 import { formatPortalError } from '../api/errorMessages.js'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
@@ -69,8 +70,9 @@ const feedbackSubmitError = ref('')
 const feedbackContactError = ref('')
 const section = computed(() => ['reports', 'filings', 'feedback', 'security'].includes(route.params.section) ? route.params.section : 'projects')
 const sectionTitle = computed(() => ({ projects: '我的项目', reports: '电子报告', filings: '等保备案', feedback: '客户反馈', security: '账号安全' })[section.value] || '客户自助门户')
+const currentLoginUsername = computed(() => loginUsername(session.value))
 const accountInitial = computed(() => {
-  const label = accountSecurity.value?.account_identifier || '当前客户'
+  const label = currentLoginUsername.value
   return label.trim().slice(0, 1).toUpperCase() || '客'
 })
 const permissions = computed(() => session.value?.permissions || [])
@@ -709,7 +711,7 @@ onBeforeUnmount(() => {
       <div class="console-sidebar-note"><ConsoleIcon name="shield" /><span>统一身份认证已生效，菜单与操作由服务端权限控制。</span></div>
       <div class="console-sidebar-user subsystem-sidebar-user">
         <span class="console-avatar" aria-hidden="true">{{ accountInitial }}</span>
-        <span class="console-user-copy"><strong :title="accountSecurity?.account_identifier || '当前客户'">{{ accountSecurity?.account_identifier || '当前客户' }}</strong><small>Portal 会话</small></span>
+        <span class="console-user-copy"><strong :title="currentLoginUsername">{{ currentLoginUsername }}</strong><small>Portal 会话</small></span>
         <button class="console-logout" type="button" aria-label="结束门户会话" title="结束门户会话" @click="logoutPortal"><ConsoleIcon name="logout" /></button>
       </div>
     </aside>

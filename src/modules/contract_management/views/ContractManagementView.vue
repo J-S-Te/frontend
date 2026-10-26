@@ -1,4 +1,5 @@
 <script setup>
+import { loginUsername } from "@/modules/shared/loginUsername.mjs"
 import OperationToast from '@/modules/shared/components/OperationToast.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { formatUserError } from '../../shared/utils/userError.js'
@@ -376,7 +377,8 @@ const currentRoleLabel = computed(() => {
   const labels = [...new Set(roleCodes.map(roleLabel))]
   return labels.length ? labels.join('、') : session.value?.role?.name || '未分配角色'
 })
-const currentUserInitial = computed(() => currentUserLabel.value.slice(0, 1).toUpperCase())
+const currentLoginUsername = computed(() => loginUsername(session.value))
+const currentUserInitial = computed(() => currentLoginUsername.value.slice(0, 1).toUpperCase())
 const userDirectory = computed(() => Array.isArray(session.value?.user_directory) ? session.value.user_directory : [])
 const approvalTargetUsers = computed(() => {
   const currentIndex = approvalDetail.value?.state?.current_node_index
@@ -2284,7 +2286,7 @@ onBeforeUnmount(() => {
           <button type="button" @click="returnToUnifiedPortal"><ConsoleIcon name="dashboard" /><span>返回子系统门户</span></button>
         </section>
       </nav>
-      <div class="contract-sidebar-user subsystem-sidebar-user"><span class="contract-avatar">{{ currentUserInitial }}</span><span><strong :title="currentUserLabel">{{ currentUserLabel }}</strong><small :title="currentRoleLabel">{{ currentRoleLabel }}</small></span><button type="button" :disabled="isLoggingOut" aria-label="退出应用系统" @click="logoutSystem"><ConsoleIcon name="logout" /></button></div>
+      <div class="contract-sidebar-user subsystem-sidebar-user"><span class="contract-avatar">{{ currentUserInitial }}</span><span><strong :title="currentLoginUsername">{{ currentLoginUsername }}</strong><small :title="currentRoleLabel">{{ currentRoleLabel }}</small></span><button type="button" :disabled="isLoggingOut" aria-label="退出应用系统" @click="logoutSystem"><ConsoleIcon name="logout" /></button></div>
     </aside>
 
     <main class="contract-main">

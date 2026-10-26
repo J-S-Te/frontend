@@ -1,4 +1,5 @@
 <script setup>
+import { loginUsername } from "@/modules/shared/loginUsername.mjs"
 // 数据看板统一外壳（对齐 project_management 模式）：
 // 深色侧栏导航 + 顶栏 + 页面头，按 route.params.section 切换分区；
 // 总览、报告、财务看板经嵌入桥加载；合同、项目看板使用本地原生模型，避免空白 iframe。
@@ -122,7 +123,7 @@ let unsubscribeRelatedData = null
 const EMBED_RENEW_BEFORE_SECONDS = 30
 
 const currentMeta = computed(() => pageMeta[section.value] || pageMeta.overview)
-const currentUserName = computed(() => me.value?.display_name || "当前用户")
+const currentUserName = computed(() => loginUsername(me.value))
 const currentUserRole = computed(() => {
   const roles = (me.value?.roles || []).map((role) => ROLE_LABELS[role] || role)
   return roles.join(" / ") || "看板用户"

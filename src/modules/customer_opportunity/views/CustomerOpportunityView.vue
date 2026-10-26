@@ -1,4 +1,5 @@
 <script setup>
+import { loginUsername } from "@/modules/shared/loginUsername.mjs"
 import OperationToast from '@/modules/shared/components/OperationToast.vue'
 import { useConfirmDialog } from '@/modules/shared/composables/useConfirmDialog.js'
 import ConfirmDialog from '@/modules/shared/components/ConfirmDialog.vue'
@@ -423,7 +424,7 @@ async function onReportOrganizationChange() {
   await loadReportFilterOptions()
 }
 const crmSession = ref(null)
-const currentUserLabel = computed(() => String(crmSession.value?.username || crmSession.value?.account_name || crmSession.value?.display_name || '').trim() || '当前用户')
+const currentUserLabel = computed(() => loginUsername(crmSession.value))
 const currentUserInitial = computed(() => {
   const label = currentUserLabel.value
   return /^[\x00-\x7F]+$/.test(label) ? label.slice(0, 2).toUpperCase() : Array.from(label)[0] || '用'

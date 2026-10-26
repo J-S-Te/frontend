@@ -1,4 +1,5 @@
 <script setup>
+import { loginUsername } from "@/modules/shared/loginUsername.mjs"
 import OperationToast from '@/modules/shared/components/OperationToast.vue'
 import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
@@ -78,22 +79,9 @@ const { dialog: confirmDialog, askConfirm, accept: acceptConfirm, cancel: cancel
 const route = useRoute(),
   router = useRouter();
 const settlementSession = ref({});
-const sessionDisplayName = computed(() =>
-  String(
-    settlementSession.value?.name ||
-      settlementSession.value?.preferred_username ||
-      settlementSession.value?.user_id ||
-      "结算用户",
-  ),
-);
-const sessionAccount = computed(() =>
-  String(
-    settlementSession.value?.preferred_username ||
-      settlementSession.value?.user_id ||
-      "统一认证用户",
-  ),
-);
-const sessionAvatar = computed(() => sessionDisplayName.value.slice(0, 1) || "结");
+const sessionDisplayName = computed(() => loginUsername(settlementSession.value));
+const sessionAccount = computed(() => "当前登录账号");
+const sessionAvatar = computed(() => sessionDisplayName.value.slice(0, 1).toUpperCase() || "结");
 const sessionPermissions = computed(
   () => new Set(settlementSession.value?.permissions || []),
 );
