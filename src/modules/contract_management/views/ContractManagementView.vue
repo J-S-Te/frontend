@@ -1,4 +1,5 @@
 <script setup>
+import OperationToast from '@/modules/shared/components/OperationToast.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { formatUserError } from '../../shared/utils/userError.js'
 import { createFormSnapshot, hasUnsavedChanges } from '../../shared/utils/unsavedChanges.js'
@@ -101,6 +102,7 @@ import {
   toDictionaryFallback,
 } from '@/modules/contract_management/utils/contractDisplay'
 import ContractNotificationPanel from '@/modules/contract_management/components/ContractNotificationPanel.vue'
+import { useSigningLedger } from '@/modules/contract_management/composables/useSigningLedger'
 import { useApprovalDetail } from '@/modules/contract_management/composables/useApprovalDetail'
 import { canEditContractDraft, hydrateContractDraft, saveContractDraft } from '@/modules/contract_management/utils/contractDraft'
 import { normalizePaymentTerms, paymentAmountMinor } from '@/modules/contract_management/utils/paymentTerms'
@@ -210,21 +212,18 @@ const userNavGroupDefinitions = [
 ]
 
 const contracts = ref([])
-const signingRecords = ref([])
 const stampedUploadBusyID = ref('')
+const {
+  signingRecords, signingKeyword, signingMethodFilter, signingStatusFilter,
+  signingTotal, signingHasMore, signingSummary, signingLedgerLoading, signingLoadingMore,
+  signingLedgerScope, refreshSigningRecords,
+} = useSigningLedger({ normalizeSigningRecord, session, showToast, formatUserError })
+
 const selectedSigningRecord = ref(null)
 const signingOpenedDocument = ref({ version: 0, sha256: '' })
 const signingDetailLoading = ref(false)
 const signingOperationBusy = ref(false)
 const contractDownloadBusy = ref(false)
-const signingKeyword = ref('')
-const signingMethodFilter = ref('')
-const signingStatusFilter = ref('')
-const signingTotal = ref(0)
-const signingHasMore = ref(false)
-const signingSummary = ref(null)
-const signingLedgerLoading = ref(false)
-const signingLoadingMore = ref(false)
 let signingFilterTimer = 0
 // C-ii（task-62）：recipient_phone 是后端寄送保存的必填字段（router.go 非空 + ≤20 rune），
 // 表单状态必须携带该键，否则保存请求恒被 422 拒绝。
@@ -440,7 +439,6 @@ const {
 const approvalRealtimeScope = createRequestScope()
 const signingDetailScope = createRequestScope()
 let signingDetailTicket = null
-const signingLedgerScope = createRequestScope()
 const signingRealtimeScope = createRequestScope()
 
 const activeSection = computed(() => {
@@ -623,6 +621,24 @@ function formatDateTime(value) {
   }).format(date)
 }
 
+
+const ACTIVE_CONTRACT_STATUSES = new Set(['ACTIVE', 'IN_PROGRESS', 'PENDING_PAY'])
+
+function isExpiredContract(item) {
+  if (item?.expired === true) return true
+  const rawStatus = String(item?.status || '').toUpperCase()
+  if (!ACTIVE_CONTRACT_STATUSES.has(rawStatus) || !item?.end_date) return false
+  const end = new Date(item.end_date)
+  if (Number.isNaN(end.getTime())) return false
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  return end.getTime() < today.getTime()
+}
+
+function contractDisplayStatus(contract) {
+  return contract?.expired ? '已过期' : (contract?.status || '—')
+}
+
 function normalizeContract(item) {
   return {
     recordId: item.id,
@@ -641,14 +657,15 @@ function normalizeContract(item) {
     endDate: formatDate(item.end_date),
     endAt: item.end_date || '',
     status: contractStatusLabel(item.status),
+    displayStatus: isExpiredContract(item) ? '已过期' : contractStatusLabel(item.status),
     rawStatus: String(item.status || '').toUpperCase(),
     version: item.version,
     content: item.content || '',
     templateId: item.template_id || '',
     customerCreditLevel: item.customer_credit_level || '未填写',
     inApproval: Boolean(item.in_approval),
-    activeUnexpired: Boolean(item.active_unexpired),
-    expired: Boolean(item.expired),
+    activeUnexpired: Boolean(item.active_unexpired) || (ACTIVE_CONTRACT_STATUSES.has(String(item.status || '').toUpperCase()) && !isExpiredContract(item)),
+    expired: isExpiredContract(item),
     canEditDraft: canEditContractDraft(item),
   }
 }
@@ -752,35 +769,6 @@ async function downloadApprovedContract(contract, format) {
   }
 }
 
-async function refreshSigningRecords({ append = false, limit = 50 } = {}) {
-  if (append && !signingHasMore.value) return
-  if (append) signingLoadingMore.value = true
-  else signingLedgerLoading.value = true
-  // 筛选防抖、“加载更多”与实时同步可能交错返回：以请求作用域票据为准，只采纳最后一次
-  // 读取。旧筛选的迟到响应不得覆盖新筛选数据，其 finally 也不得关闭新请求的加载态。
-  const ticket = signingLedgerScope.begin(`SIGNING_LEDGER:${append ? 'more' : 'page'}:${signingKeyword.value.trim()}:${signingStatusFilter.value}:${signingMethodFilter.value}`)
-  const isCurrent = () => signingLedgerScope.isCurrent(ticket)
-  try {
-    const page = await listSigningRecords({
-      limit,
-      offset: append ? signingRecords.value.length : 0,
-      keyword: signingKeyword.value.trim(),
-      status: signingStatusFilter.value,
-      method: signingMethodFilter.value,
-    })
-    if (!isCurrent()) return
-    const items = (page.items || []).map(normalizeSigningRecord)
-    signingRecords.value = append ? [...signingRecords.value, ...items] : items
-    signingTotal.value = Number(page.total || items.length)
-    signingHasMore.value = Boolean(page.has_more)
-    signingSummary.value = page.stats && typeof page.stats === 'object' ? page.stats : null
-  } finally {
-    if (isCurrent()) {
-      signingLedgerLoading.value = false
-      signingLoadingMore.value = false
-    }
-  }
-}
 
 watch([signingKeyword, signingMethodFilter, signingStatusFilter], () => {
   if (!session.value) return
@@ -2218,6 +2206,7 @@ async function removeRule(rule) {
 }
 
 function statusTone(status) {
+  if (status === '已过期') return 'danger'
   if (['已生效', '已完成', '已签署', '已归档', '成交'].includes(status)) return 'success'
   if (['审批中', '执行中', '履约中', '在跟'].includes(status)) return 'info'
   if (['待签署', '待付款', '待对方签署', '待我方盖章'].includes(status)) return 'warning'
@@ -2295,7 +2284,7 @@ onBeforeUnmount(() => {
           <button type="button" @click="returnToUnifiedPortal"><ConsoleIcon name="dashboard" /><span>返回子系统门户</span></button>
         </section>
       </nav>
-      <div class="contract-sidebar-user"><span class="contract-avatar">{{ currentUserInitial }}</span><span><strong>{{ currentUserLabel }}</strong><small>{{ currentRoleLabel }}</small></span><button type="button" :disabled="isLoggingOut" aria-label="退出应用系统" @click="logoutSystem"><ConsoleIcon name="logout" /></button></div>
+      <div class="contract-sidebar-user subsystem-sidebar-user"><span class="contract-avatar">{{ currentUserInitial }}</span><span><strong :title="currentUserLabel">{{ currentUserLabel }}</strong><small :title="currentRoleLabel">{{ currentRoleLabel }}</small></span><button type="button" :disabled="isLoggingOut" aria-label="退出应用系统" @click="logoutSystem"><ConsoleIcon name="logout" /></button></div>
     </aside>
 
     <main class="contract-main">
@@ -2373,7 +2362,7 @@ onBeforeUnmount(() => {
 
         <template v-else-if="activeSection === 'contracts'">
           <div class="contract-filter-bar"><label class="contract-search-field"><ConsoleIcon name="search" /><input v-model="keyword" type="search" maxlength="100" autocomplete="off" placeholder="合同编号 / 名称 / 类型" @change="loadBusinessData" /></label><button class="contract-button ghost small" type="button" @click="resetFilters"><ConsoleIcon name="reset" />重置</button><button class="contract-button primary small" type="button" @click="loadBusinessData"><ConsoleIcon name="reset" />刷新</button></div>
-          <div class="contract-table-card"><div class="contract-table-scroll"><table class="contract-data-table contract-ledger-table"><thead><tr><th>合同编号 / 名称</th><th>合同类型</th><th>服务类型</th><th>合同金额</th><th>负责人姓名</th><th>创建日期</th><th>到期日期</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="contract in filteredContracts" :key="contract.recordId"><td><button class="contract-entity-link" type="button" @click="openContract(contract)"><strong>{{ contract.name }}</strong><small>{{ contract.id }}</small></button></td><td>{{ contract.type }}</td><td>{{ contract.serviceType }}</td><td class="amount">{{ formatContractAmount(contract) }}</td><td>{{ contract.owner }}</td><td>{{ contract.createdAt }}</td><td>{{ contract.endDate }}</td><td><span class="contract-badge" :class="statusTone(contract.status)"><i></i>{{ contract.status }}</span></td><td><button class="contract-text-button" type="button" @click="openContract(contract)">详情</button></td></tr><tr v-if="!filteredContracts.length"><td colspan="9" class="contract-empty">当前没有可查看的合同</td></tr></tbody></table></div><footer class="contract-table-footer"><span>共 {{ filteredContracts.length }} 条合同记录</span></footer></div>
+          <div class="contract-table-card"><div class="contract-table-scroll"><table class="contract-data-table contract-ledger-table"><thead><tr><th>合同编号 / 名称</th><th>合同类型</th><th>服务类型</th><th>合同金额</th><th>负责人姓名</th><th>创建日期</th><th>到期日期</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="contract in filteredContracts" :key="contract.recordId"><td><button class="contract-entity-link" type="button" @click="openContract(contract)"><strong>{{ contract.name }}</strong><small>{{ contract.id }}</small></button></td><td>{{ contract.type }}</td><td>{{ contract.serviceType }}</td><td class="amount">{{ formatContractAmount(contract) }}</td><td>{{ contract.owner }}</td><td>{{ contract.createdAt }}</td><td>{{ contract.endDate }}</td><td><span class="contract-badge" :class="statusTone(contract.displayStatus)"><i></i>{{ contract.displayStatus }}</span></td><td><button class="contract-text-button" type="button" @click="openContract(contract)">详情</button></td></tr><tr v-if="!filteredContracts.length"><td colspan="9" class="contract-empty">当前没有可查看的合同</td></tr></tbody></table></div><footer class="contract-table-footer"><span>共 {{ filteredContracts.length }} 条合同记录</span></footer></div>
         </template>
 
         <template v-else-if="activeSection === 'templates'">
@@ -2462,7 +2451,7 @@ onBeforeUnmount(() => {
 
     <div v-if="selectedContract" class="contract-modal-mask" @click.self="closeContract">
       <article class="contract-detail-modal contract-document-modal">
-        <header><div><span class="contract-badge" :class="statusTone(selectedContract.status)"><i></i>{{ selectedContract.status }}</span><h2>{{ selectedContract.name }}</h2><p>{{ selectedContract.id }}</p></div><button type="button" aria-label="关闭" @click="closeContract"><ConsoleIcon name="close" /></button></header>
+        <header><div><span class="contract-badge" :class="statusTone(selectedContract.displayStatus)"><i></i>{{ selectedContract.displayStatus }}</span><h2>{{ selectedContract.name }}</h2><p>{{ selectedContract.id }}</p></div><button type="button" aria-label="关闭" @click="closeContract"><ConsoleIcon name="close" /></button></header>
         <PaymentTermsSummary :terms="selectedContract.paymentTerms" :currency="selectedContract.currency" />
         <div class="contract-detail-highlight"><div><span>合同金额</span><strong>{{ formatContractAmount(selectedContract) }}</strong></div><div><span>更新日期</span><strong>{{ selectedContract.updatedAt }}</strong></div><div><span>负责人姓名</span><strong>{{ selectedContract.owner }}</strong></div></div>
         <section><h3>基本信息</h3><dl><div><dt>合同类型</dt><dd>{{ selectedContract.type }}</dd></div><div><dt>服务类型</dt><dd>{{ selectedContract.serviceType }}</dd></div><div><dt>创建日期</dt><dd>{{ selectedContract.createdAt }}</dd></div><div><dt>到期日期</dt><dd>{{ selectedContract.endDate }}</dd></div></dl></section>
@@ -2472,7 +2461,7 @@ onBeforeUnmount(() => {
       </article>
     </div>
 
-    <div v-if="dashboardDetailKey" class="contract-modal-mask" @click.self="dashboardDetailKey = ''"><article class="contract-detail-modal contract-dashboard-detail-modal"><header><div><span class="contract-badge info">企业合同统计</span><h2>{{ dashboardDetailMeta.title }}</h2><p>{{ dashboardDetailMeta.value }} · 数据范围为当前企业</p></div><button type="button" aria-label="关闭" @click="dashboardDetailKey = ''"><ConsoleIcon name="close" /></button></header><section><p v-if="adminDashboard?.contract_detail_limited" class="contract-info-banner"><ConsoleIcon name="info" />明细仅展示最近更新的 200 份合同，卡片统计值为企业全部合同的精确结果。</p><div class="contract-table-scroll"><table class="contract-data-table contract-dashboard-detail-table"><thead><tr><th>合同编号 / 名称</th><th>金额</th><th>负责人</th><th>到期日期</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="contract in dashboardDetailContracts" :key="contract.recordId"><td><strong>{{ contract.name }}</strong><span class="block mono">{{ contract.id }}</span></td><td class="amount">{{ formatContractAmount(contract) }}</td><td>{{ contract.owner }}</td><td>{{ contract.endDate }}</td><td><span class="contract-badge" :class="statusTone(contract.status)"><i></i>{{ contract.status }}</span></td><td><button class="contract-text-button" type="button" @click="openDashboardContract(contract)">查看详情</button></td></tr><tr v-if="!dashboardDetailContracts.length"><td colspan="6" class="contract-empty">当前分类暂无合同</td></tr></tbody></table></div></section><footer><button class="contract-button secondary" type="button" @click="dashboardDetailKey = ''">关闭</button></footer></article></div>
+    <div v-if="dashboardDetailKey" class="contract-modal-mask" @click.self="dashboardDetailKey = ''"><article class="contract-detail-modal contract-dashboard-detail-modal"><header><div><span class="contract-badge info">企业合同统计</span><h2>{{ dashboardDetailMeta.title }}</h2><p>{{ dashboardDetailMeta.value }} · 数据范围为当前企业</p></div><button type="button" aria-label="关闭" @click="dashboardDetailKey = ''"><ConsoleIcon name="close" /></button></header><section><p v-if="adminDashboard?.contract_detail_limited" class="contract-info-banner"><ConsoleIcon name="info" />明细仅展示最近更新的 200 份合同，卡片统计值为企业全部合同的精确结果。</p><div class="contract-table-scroll"><table class="contract-data-table contract-dashboard-detail-table"><thead><tr><th>合同编号 / 名称</th><th>金额</th><th>负责人</th><th>到期日期</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="contract in dashboardDetailContracts" :key="contract.recordId"><td><strong>{{ contract.name }}</strong><span class="block mono">{{ contract.id }}</span></td><td class="amount">{{ formatContractAmount(contract) }}</td><td>{{ contract.owner }}</td><td>{{ contract.endDate }}</td><td><span class="contract-badge" :class="statusTone(contract.displayStatus)"><i></i>{{ contract.displayStatus }}</span></td><td><button class="contract-text-button" type="button" @click="openDashboardContract(contract)">查看详情</button></td></tr><tr v-if="!dashboardDetailContracts.length"><td colspan="6" class="contract-empty">当前分类暂无合同</td></tr></tbody></table></div></section><footer><button class="contract-button secondary" type="button" @click="dashboardDetailKey = ''">关闭</button></footer></article></div>
 
     <div v-if="selectedApproval" class="contract-modal-mask" @click.self="closeApproval"><article class="contract-detail-modal contract-approval-modal"><header><div><span class="contract-badge" :class="approvalStatusTone(approvalDetail?.state?.status || selectedApproval.status)"><i></i>{{ approvalStatusLabel(approvalDetail?.state?.status || selectedApproval.status) }}</span><h2>{{ approvalDetail?.contract?.title || '合同审批' }}</h2><p>{{ selectedApproval.type }} · {{ selectedApproval.submittedAt }}</p></div><button type="button" aria-label="关闭" @click="closeApproval"><ConsoleIcon name="close" /></button></header><div v-if="approvalDetailLoading" class="contract-modal-loading">正在加载审批内容与流程记录…</div><template v-else-if="approvalDetail"><p v-if="approvalDetail.snapshot_available === false" class="contract-info-banner"><ConsoleIcon name="info" />该审批创建于历史版本，未保存提交快照；以下展示当前合同，可能与审批时内容不一致。</p><p v-if="approvalDetail.state_unavailable" class="contract-info-banner"><ConsoleIcon name="info" />审批工作流历史已不可查询；以下展示提交时的不可变快照，流程操作已停用。</p><PaymentTermsSummary :terms="approvalDetail.contract.payment_terms || []" :currency="approvalDetail.contract.currency" /><div class="contract-detail-highlight"><div><span>合同金额</span><strong>{{ formatMinorAmount(approvalDetail.contract.amount_minor, approvalDetail.contract.currency) }}</strong></div><div><span>申请人姓名</span><strong>{{ displayNameFor(approvalDetail.meta.applicant_user_id, approvalDetail.meta.applicant_display_name) }}</strong></div><div><span>当前节点</span><strong>{{ selectedApproval.step }}</strong></div></div><section><h3>审批事项</h3><dl><div><dt>合同编号</dt><dd>{{ approvalDetail.contract.contract_number }}</dd></div><div><dt>合同类型</dt><dd>{{ approvalDetail.contract.contract_type }}</dd></div><div><dt>服务类型</dt><dd>{{ approvalDetail.contract.service_type }}</dd></div><div><dt>审批流程</dt><dd>{{ approvalDetail.meta.rule_id ? '已匹配配置流程' : '系统默认流程' }}</dd></div><div><dt>状态变更</dt><dd>{{ contractStatusLabel(approvalDetail.meta.from_status) }} → {{ contractStatusLabel(approvalDetail.meta.target_status) }}</dd></div><div><dt>申请原因</dt><dd>{{ approvalDetail.meta.reason || '合同提交审批' }}</dd></div></dl></section><section><h3>合同正文</h3><div v-if="approvalContractPreviewLoading" class="contract-modal-loading">正在读取格式化合同…</div><p v-else-if="approvalContractPreviewError" class="contract-session-error">{{ approvalContractPreviewError }}</p><ContractDocumentPreview v-else-if="approvalContractPreviewHTML" class="contract-saved-document-preview" title="审批合同预览" :html="approvalContractPreviewHTML" /><p v-else class="contract-approval-summary">{{ approvalDetail.contract.content || '未填写合同内容' }}</p></section><section><h3>审批流程</h3><div class="contract-detail-timeline"><div v-for="(runtime, index) in approvalDetail.state.nodes || []" :key="runtime.node.id" :class="{ done: runtime.status === 'approved', active: runtime.status === 'active' }"><i>{{ index + 1 }}</i><span><strong>{{ runtime.node.name }}</strong><small>{{ roleLabel(runtime.node.role_code) }} · {{ approvalStatusLabel(runtime.status) }}</small></span></div></div></section><section v-if="approvalDetail.actions?.length"><h3>处理记录</h3><div class="contract-action-log"><div v-for="action in approvalDetail.actions" :key="action.id"><strong>{{ approvalActionLabel(action.action) }}</strong><span>{{ displayNameFor(action.actor_user_id, action.actor_display_name) }}</span><p>{{ action.comment || '无备注' }} · {{ formatDate(action.occurred_at) }}</p></div></div></section><section><label class="contract-comment-label">审批意见 / 评论<textarea v-model="approvalComment" maxlength="2000" placeholder="驳回、加签、转交、退回和撤回时必须填写原因"></textarea></label><div v-if="can('approval.process')" class="contract-advanced-actions"><label><span>加签 / 转交用户</span><select v-model="approvalTargetUser"><option value="">{{ approvalTargetUsers.length ? '请选择具有合同审批权限的人员' : '没有其他可用审批人员' }}</option><option v-for="user in approvalTargetUsers" :key="user.user_id" :value="user.user_id">{{ user.display_name }}</option></select></label><button class="contract-button secondary small" type="button" :disabled="!approvalTargetUser || approvalCommandBusy" @click="executeApprovalCommand('sign', { target_user_ids: [approvalTargetUser], countersign: 'all' })">加签</button><button class="contract-button secondary small" type="button" :disabled="!approvalTargetUser || approvalCommandBusy" @click="executeApprovalCommand('transfer', { target_user_ids: [approvalTargetUser] })">转交</button><label><span>退回至</span><select v-model="approvalTargetNode"><option value="">请选择已通过节点</option><option v-for="runtime in (approvalDetail.state.nodes || []).filter((item) => item.status === 'approved')" :key="runtime.node.id" :value="runtime.node.id">{{ runtime.node.name }}</option></select></label><button class="contract-button secondary small" type="button" :disabled="!approvalTargetNode || approvalCommandBusy" @click="executeApprovalCommand('return', { target_node_id: approvalTargetNode })">退回</button></div></section></template><footer><button v-if="can('approval.process')" class="contract-button danger" type="button" :disabled="approvalCommandBusy" @click="processApproval('reject')">驳回</button><button class="contract-button secondary" type="button" :disabled="approvalCommandBusy || !approvalComment.trim()" @click="executeApprovalCommand('comments')">发表评论</button><button v-if="can('approval.manage')" class="contract-button secondary" type="button" :disabled="approvalCommandBusy" @click="repairApprovalState">修复审批状态</button><button v-if="can('approval.manage') || approvalDetail?.meta?.applicant_user_id === session?.user_id" class="contract-button secondary" type="button" :disabled="approvalCommandBusy" @click="executeApprovalCommand('urge')">催办</button><button v-if="approvalDetail?.meta?.applicant_user_id === session?.user_id" class="contract-button secondary" type="button" :disabled="approvalCommandBusy" @click="executeApprovalCommand('withdraw', {}, { close: true })">撤回</button><button v-if="can('approval.process')" class="contract-button primary" type="button" :disabled="approvalCommandBusy" @click="processApproval('approve')"><ConsoleIcon name="save" />同意</button></footer></article></div>
 
@@ -2549,6 +2538,6 @@ onBeforeUnmount(() => {
       @cancel="cancelConfirm"
     />
 
-    <Transition name="contract-toast"><div v-if="toast" class="contract-toast"><ConsoleIcon name="save" />{{ toast }}</div></Transition>
+    <OperationToast :message="toast" />
   </div>
 </template>

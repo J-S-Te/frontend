@@ -20,9 +20,9 @@ defineEmits(['activate'])
     :class="tone"
     @click="actionable && $emit('activate')"
   >
-    <div class="pm-kpi-label"><span>{{ label }}</span><em v-if="badge">{{ badge }}</em></div>
+    <div class="pm-kpi-label"><span :title="label">{{ label }}</span><em v-if="badge">{{ badge }}</em></div>
     <strong class="pm-kpi-value">{{ value }}<small v-if="suffix">{{ suffix }}</small></strong>
-    <p v-if="meta" class="pm-kpi-meta">{{ meta }}</p>
+    <p v-if="meta" class="pm-kpi-meta" :title="meta">{{ meta }}</p>
     <slot />
   </component>
 </template>

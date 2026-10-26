@@ -1,6 +1,8 @@
 import { createRequest } from '../../shared/api/request.js'
 import { RELATED_DATA, publishRelatedDataChanged } from '../../shared/utils/relatedDataInvalidation.js'
 import { formatUserError } from '../../../shared/utils/userError.js'
+import { postCredentialJSON, postCredentialFormData } from '../../../shared/credential/credentialRequest.js'
+import { CredentialProtocolError } from '../../../shared/credential/credentialProtocol.js'
 
 /**
  * IamError 表示 IAM 接口返回的结构化错误。
@@ -25,6 +27,42 @@ export class IamError extends Error {
 }
 
 
+
+const CREDENTIAL_ENCRYPTION_MODE = (typeof import.meta.env === 'undefined'
+  ? 'disabled'
+  : (import.meta.env?.VITE_CREDENTIAL_ENCRYPTION_MODE || 'required'))
+
+const CREDENTIAL_API_BASE = (import.meta.env?.VITE_API_BASE_URL || '/api/v1').replace(/\/+$/, '')
+
+export function credentialAPIURL(path) {
+  const value = String(path || '')
+  if (/^(?:https?:)?\/\//.test(value) || value.startsWith('/api/') || value.startsWith(CREDENTIAL_API_BASE)) return value
+  return `${CREDENTIAL_API_BASE}${value.startsWith('/') ? value : `/${value}`}`
+}
+
+async function credentialRequest(path, purpose, payload, resourceId = '') {
+  try {
+    const result = await postCredentialJSON({ url: credentialAPIURL(path), purpose, resourceId, body: payload })
+    return result.body
+  } catch (error) {
+    if (error instanceof CredentialProtocolError) {
+      throw new IamError(formatUserError(error, { fallback: '凭据加密请求失败，请刷新页面后重试。' }), { code: error.code, status: error.status || 0 })
+    }
+    throw error
+  }
+}
+
+async function credentialMultipart(path, payloadForm) {
+  try {
+    const result = await postCredentialFormData({ url: credentialAPIURL(path), purpose: 'CREATE_EMPLOYEES_BATCH', formData: payloadForm })
+    return result.body
+  } catch (error) {
+    if (error instanceof CredentialProtocolError) {
+      throw new IamError(formatUserError(error, { fallback: '批量导入凭据加密请求失败，请刷新页面后重试。' }), { code: error.code, status: error.status || 0 })
+    }
+    throw error
+  }
+}
 
 const request = createRequest({
   ErrorClass: IamError,
@@ -112,11 +150,14 @@ export function createUser({ displayName, email = null, mobile = null, status = 
  * @returns {Promise<Object>} 返回原子创建的员工结果。
  * @throws {IamError} 任一入职数据无效、存在唯一性冲突或事务执行失败时抛出。
  */
-export function createEmployee({ user, account = null, membership = null }) {
-  return onWriteSuccess(request('/employees', {
-    method: 'POST',
-    body: JSON.stringify({ user, account, membership }),
-  }), [RELATED_DATA.PEOPLE, RELATED_DATA.MEMBERSHIPS])
+export async function createEmployee({ user, account = null, membership = null }) {
+  const payload = { user, account, membership }
+  return onWriteSuccess(
+    CREDENTIAL_ENCRYPTION_MODE === 'disabled'
+      ? request('/employees', { method: 'POST', body: JSON.stringify(payload) })
+      : credentialRequest('/employees', 'CREATE_EMPLOYEE', payload),
+    [RELATED_DATA.PEOPLE, RELATED_DATA.MEMBERSHIPS],
+  )
 }
 
 function employeeEndpointUnavailable(error) {
@@ -253,7 +294,7 @@ export function createUsersBatch(items) {
  * @returns {Promise<Object>} 返回批量创建及行号对应结果。
  * @throws {IamError} 组织或岗位无法解析、任一条数据无效或原子事务失败时抛出。
  */
-export function createEmployeesBatch(items, sourceFile = null) {
+export async function createEmployeesBatch(items, sourceFile = null) {
   const payload = {
     items: items.map((item) => ({
         display_name: item.displayName,
@@ -281,9 +322,19 @@ export function createEmployeesBatch(items, sourceFile = null) {
     // multipart 导入时服务端以原始 CSV 为唯一事实来源；浏览器只提交用户在
     // 预览页勾选的物理行号，不能用可篡改的 JSON 覆盖文件内容。
     form.append('payload', JSON.stringify({ selected_lines: payload.items.map((item) => item.line_no) }))
-    return onWriteSuccess(request('/employees/batch', { method: 'POST', body: form }), [RELATED_DATA.PEOPLE, RELATED_DATA.MEMBERSHIPS])
+    return onWriteSuccess(
+      CREDENTIAL_ENCRYPTION_MODE === 'disabled'
+        ? request('/employees/batch', { method: 'POST', body: form })
+        : credentialMultipart('/employees/batch', form),
+      [RELATED_DATA.PEOPLE, RELATED_DATA.MEMBERSHIPS],
+    )
   }
-  return onWriteSuccess(request('/employees/batch', { method: 'POST', body: JSON.stringify(payload) }), [RELATED_DATA.PEOPLE, RELATED_DATA.MEMBERSHIPS])
+  return onWriteSuccess(
+    CREDENTIAL_ENCRYPTION_MODE === 'disabled'
+      ? request('/employees/batch', { method: 'POST', body: JSON.stringify(payload) })
+      : credentialRequest('/employees/batch', 'CREATE_EMPLOYEES_BATCH', payload),
+    [RELATED_DATA.PEOPLE, RELATED_DATA.MEMBERSHIPS],
+  )
 }
 
 
@@ -349,11 +400,26 @@ export function listAccounts({ page = 1, pageSize = 50, keyword = '', status = '
  * @returns {Promise<Object>} 返回新建的本地账号。
  * @throws {IamError} 用户不存在、账号名冲突、密码不合规或操作无权限时抛出。
  */
-export function createLocalAccount({ userId, accountName, initialPassword, validUntil = null }) {
-  return request('/accounts', {
-    method: 'POST',
-    body: JSON.stringify({ user_id: userId, account_name: accountName, initial_password: initialPassword, valid_until: validUntil }),
-  })
+export async function createLocalAccount({ userId, accountName, initialPassword, validUntil = null }) {
+  const payload = { user_id: userId, account_name: accountName, initial_password: initialPassword, valid_until: validUntil }
+  if (CREDENTIAL_ENCRYPTION_MODE === 'disabled') {
+    return request('/accounts', { method: 'POST', body: JSON.stringify(payload) })
+  }
+  return credentialRequest('/accounts', 'CREATE_ACCOUNT', payload)
+}
+
+/**
+ * initializeAccountPassword 初始化账号的本地登录密码。
+ * @param {Object} options 初始化参数。
+ * @returns {Promise<Object>} 返回更新后的账号。
+ */
+export async function initializeAccountPassword({ accountId, password, version }) {
+  const path = `/accounts/${encodeURIComponent(accountId)}/password/initialize`
+  const payload = { password, version }
+  if (CREDENTIAL_ENCRYPTION_MODE === 'disabled') {
+    return request(path, { method: 'POST', body: JSON.stringify(payload) })
+  }
+  return credentialRequest(path, 'INITIALIZE_PASSWORD', payload, accountId)
 }
 
 /**
@@ -383,11 +449,12 @@ export function updateAccountStatus({ accountId, status, version, validUntil = n
  * @returns {Promise<Object>} 返回密码重置结果及一次性凭据。
  * @throws {IamError} 账号不存在、版本冲突、账号状态不允许重置或操作无权限时抛出。
  */
-export function resetAccountPassword({ accountId, version }) {
-  return request(`/accounts/${encodeURIComponent(accountId)}/password/reset`, {
-    method: 'POST',
-    body: JSON.stringify({ version }),
-  })
+export async function resetAccountPassword({ accountId, version }) {
+  const path = `/accounts/${encodeURIComponent(accountId)}/password/reset`
+  if (CREDENTIAL_ENCRYPTION_MODE === 'disabled') {
+    return request(path, { method: 'POST', body: JSON.stringify({ version }) })
+  }
+  return credentialRequest(path, 'RESET_PASSWORD', { version }, accountId)
 }
 
 // --- 组织单元 ---

@@ -4,6 +4,8 @@ import { readFile } from 'node:fs/promises'
 
 const view = await readFile(new URL('./customer_opportunity/views/CustomerOpportunityView.vue', import.meta.url), 'utf8')
 const displaySource = await readFile(new URL('./customer_opportunity/crmDisplay.js', import.meta.url), 'utf8')
+const presaleData = await readFile(new URL('./customer_opportunity/composables/usePresaleReportData.js', import.meta.url), 'utf8')
+const importWizard = await readFile(new URL('./customer_opportunity/composables/useCustomerImportWizard.js', import.meta.url), 'utf8')
 const stageAlertSource = await readFile(new URL('./customer_opportunity/components/StageAlertDetailModal.vue', import.meta.url), 'utf8')
 const apiSource = await readFile(new URL('./customer_opportunity/api/presale.js', import.meta.url), 'utf8')
 const style = await readFile(new URL('./customer_opportunity/styles/customer-opportunity.css', import.meta.url), 'utf8')
@@ -179,8 +181,10 @@ test('售前申请详情使用摘要与双栏工作区并在窄屏回退单列',
 })
 
 test('确认导入成功后自动关闭客户 Excel 导入弹窗', () => {
-  assert.match(view, /const result = await commitCustomerImport\([\s\S]{0,420}closeCustomerImport\(\)[\s\S]{0,80}await loadCurrent\(\)/)
-  assert.doesNotMatch(view, /customerImportResult\.value = await commitCustomerImport/)
+  // 提交编排已随导入向导域迁入 useCustomerImportWizard.js，断言按归属指向 composable 源。
+  assert.match(importWizard, /const result = await commitCustomerImport\([\s\S]{0,420}closeCustomerImport\(\)[\s\S]{0,80}await loadCurrent\(\)/)
+  assert.doesNotMatch(importWizard, /customerImportResult\.value = await commitCustomerImport/)
+  assert.match(view, /useCustomerImportWizard\(\{/)
 })
 
 test('负责人通过基础平台授权目录选择用户及其有效组织', async (t) => {
@@ -850,15 +854,17 @@ test('CM-001 Excel 导入权限、三阶段和失败关闭语义已接入', () =
   assert.match(view, /浏览器不会读取 Excel 内容，也不会保存文件或敏感字段/)
   for (const field of ['total_rows', 'importable_rows', 'warning_rows', 'error_rows', 'succeeded_rows', 'failed_rows', 'skipped_rows']) assert.match(view, new RegExp(field))
   assert.match(view, /Number\(customerImportPreview\.importable_rows\) === 0/)
-  assert.match(view, /CRM_CUSTOMER_IMPORT_SCANNER_UNAVAILABLE/)
-  assert.match(view, /预检已过期或状态发生变化，请重新上传文件预检/)
+  // 错误码映射、过期文案与 ObjectURL 下载编排已随导入向导域迁入 useCustomerImportWizard.js。
+  assert.match(importWizard, /CRM_CUSTOMER_IMPORT_SCANNER_UNAVAILABLE/)
+  assert.match(importWizard, /预检已过期或状态发生变化，请重新上传文件预检/)
   assert.match(view, /填写示例/)
   assert.match(view, /customerImportTemplateColumns/)
   assert.match(view, /下载 \.xlsx 示例文件/)
   assert.match(view, /downloadCustomerImportExample/)
-  assert.match(view, /URL\.createObjectURL\(blob\)/)
-  assert.match(view, /URL\.revokeObjectURL\(objectURL\)/)
+  assert.match(importWizard, /URL\.createObjectURL\(blob\)/)
+  assert.match(importWizard, /URL\.revokeObjectURL\(objectURL\)/)
   assert.doesNotMatch(view, /FileReader|readAsArrayBuffer|xlsx\.read|localStorage|sessionStorage|v-html/)
+  assert.doesNotMatch(importWizard, /FileReader|readAsArrayBuffer|xlsx\.read|localStorage|sessionStorage|v-html/)
 })
 
 test('CM-001 Excel 导入 API 严格使用真实 multipart、模板下载、版本提交和 CSV 路由', async (t) => {
@@ -1334,10 +1340,11 @@ test('客户导入提交可显式复用同一内存幂等键', async (t) => {
   await customer.commitCustomerImport('JOB-9', { version: 1 }, 'import-key-1')
   await customer.commitCustomerImport('JOB-10', { version: 1 }, 'import-key-2')
   assert.deepEqual(requests.map((item) => item.options.headers['Idempotency-Key']), ['import-key-1', 'import-key-1', 'import-key-2'])
-  assert.match(view, /customerImportCommitKey\.value = createIdempotencyKey\(\)/)
-  assert.match(view, /commitCustomerImport\(preview\.job_no, \{ version: Number\(preview\.version\) \}, customerImportCommitKey\.value\)/)
-  assert.match(view, /resetCustomerImportPreview/)
+  assert.match(importWizard, /customerImportCommitKey\.value = createIdempotencyKey\(\)/)
+  assert.match(importWizard, /commitCustomerImport\(preview\.job_no, \{ version: Number\(preview\.version\) \}, customerImportCommitKey\.value\)/)
+  assert.match(importWizard, /resetCustomerImportPreview/)
   assert.doesNotMatch(view, /localStorage|sessionStorage/)
+  assert.doesNotMatch(importWizard, /localStorage|sessionStorage/)
 })
 
 test('已废弃的 PMS 人员接口不再暴露，售前人员统一来自基础平台目录', () => {
@@ -1373,7 +1380,7 @@ test('售前投入报表提供筛选、KPI、图形和等价数值表', () => {
   assert.match(displaySource, /function reportDateParam\(value\)/)
   assert.match(displaySource, /function normalizeReportSummary\(value\)/)
   assert.match(displaySource, /function normalizeReportRows\(value\)/)
-  assert.match(view, /reportDistribution\.value = normalizeReportRows\(distribution\)/)
+  assert.match(presaleData, /reportDistribution\.value = normalizeReportRows\(distribution\)/)
   assert.match(view, /投入小时/)
   assert.match(view, /商机覆盖率/)
   assert.match(view, /自动完成任务/)
@@ -1381,10 +1388,10 @@ test('售前投入报表提供筛选、KPI、图形和等价数值表', () => {
   assert.match(view, /趋势数值表（UTC 日）/)
   assert.match(view, /分布数值表/)
   assert.match(view, /runtimeCapability\('presale_report_export'\)\.available/)
-  assert.match(view, /if \(!presaleReportExportAvailable\.value\) \{[\s\S]*?售前报表导出当前不可用[\s\S]*?return\s*\}/)
-  assert.match(view, /URL\.createObjectURL\(result\.blob\)/)
-  assert.match(view, /anchor\.download = result\.filename \|\| 'presale-report\.csv'/)
-  assert.match(view, /finally \{ URL\.revokeObjectURL\(url\) \}/)
+  assert.match(presaleData, /if \(!presaleReportExportAvailable\.value\) \{[\s\S]*?售前报表导出当前不可用[\s\S]*?return\s*\}/)
+  assert.match(presaleData, /URL\.createObjectURL\(result\.blob\)/)
+  assert.match(presaleData, /anchor\.download = result\.filename \|\| 'presale-report\.csv'/)
+  assert.match(presaleData, /finally \{ URL\.revokeObjectURL\(url\) \}/)
 })
 
 test('售前投入报表按归属组织刷新参与人员和商机选项', () => {

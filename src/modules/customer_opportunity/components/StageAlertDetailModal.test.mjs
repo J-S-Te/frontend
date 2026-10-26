@@ -7,6 +7,9 @@ import * as Vue from 'vue'
 import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc'
 import { renderToString } from '@vue/server-renderer'
 
+// Golden 按北京时间录制；固定测试时区，避免 Docker UTC 与开发机输出不同。
+process.env.TZ = 'Asia/Shanghai'
+
 const SRC = new URL('../../../', import.meta.url).pathname
 
 async function resolveDependency(fromFile, specifier) {

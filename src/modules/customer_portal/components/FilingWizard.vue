@@ -1,10 +1,13 @@
 <script setup>
 import { formatPortalError } from '../api/errorMessages.js'
+import { useConfirmDialog } from '@/modules/shared/composables/useConfirmDialog.js'
+import ConfirmDialog from '@/modules/shared/components/ConfirmDialog.vue'
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { completeFilingMaterialUpload, createFiling, createFilingMaterialUpload, deleteFiling, exportFilingPDF, getFiling, listFilings, saveFilingMatrix, saveFilingSection, submitFiling, validateFiling } from '../api/portal.js'
 
 const props = defineProps({ permissions: { type: Array, default: () => [] }, capabilities: { type: Object, default: () => ({}) }, projects: { type: Array, default: () => [] } })
 const emit = defineEmits(['error', 'notice'])
+const { dialog: confirmDialog, askConfirm, accept: acceptConfirm, cancel: cancelConfirm } = useConfirmDialog()
 
 const steps = Object.freeze([
   ['ORGANIZATION', '单位基本情况'], ['CLASSIFIED_OBJECT', '定级对象情况'], ['CLASSIFICATION', '定级情况'],
@@ -299,7 +302,14 @@ async function startFiling() {
 }
 async function deleteDraft(item) {
   if (!canDelete.value || item.status !== 'DRAFT' || busy.value) return
-  if (!window.confirm(`确认删除备案草稿 ${item.filing_no}？删除后草稿内容与材料声明不可恢复。`)) return
+  const ok = await askConfirm({
+    title: '删除备案草稿？',
+    description: `确认删除备案草稿 ${item.filing_no}？删除后草稿内容与材料声明不可恢复。`,
+    confirmText: '删除草稿',
+    cancelText: '取消',
+    danger: true,
+  })
+  if (!ok) return
   busy.value = true
   try { await deleteFiling(item.id); emit('notice', `备案草稿 ${item.filing_no} 已删除。`); filing.value = null; await loadList() }
   catch (error) { emit('error', error) }
@@ -408,7 +418,14 @@ async function confirmSubmit() {
   try {
     validation.value = await validateFiling(filing.value.id)
     if (!validation.value.valid) { showValidationNotice(validation.value.issues); return }
-    if (!window.confirm('确认提交并在 Portal 内部锁定？提交后客户不能继续修改；这不代表已经向公安机关提交。')) return
+    const confirmed = await askConfirm({
+      title: '提交并锁定备案？',
+      description: '提交后客户不能继续修改。此操作只锁定 Portal 内部备案快照，不代表已经向公安机关提交。',
+      confirmText: '提交并锁定',
+      cancelText: '继续编辑',
+      danger: true,
+    })
+    if (!confirmed) return
     // 校验通过到锁定完成之间若响应丢失，必须复用同一提交键，避免生成两个备案快照。
     submitIdempotencyKey ||= newKey()
     filing.value = await submitFiling(filing.value.id, { expected_version: filing.value.version }, submitIdempotencyKey)
@@ -420,7 +437,14 @@ async function confirmSubmit() {
 }
 
 onMounted(loadList)
-onUnmounted(() => clearTimeout(validationNoticeTimer))
+onUnmounted(() => {
+  clearTimeout(validationNoticeTimer)
+  // 卸载必须清干净动态资源：残留的 beforeunload 监听会让用户在已离开备案页后
+  // 刷新时误弹系统级离开确认；未触发的自动暂存定时器会对已卸载组件继续发请求。
+  window.removeEventListener('beforeunload', beforeUnloadGuard)
+  for (const timer of saveTimers.values()) clearTimeout(timer)
+  saveTimers.clear()
+})
 </script>
 
 <template>
@@ -468,5 +492,17 @@ onUnmounted(() => clearTimeout(validationNoticeTimer))
       </section>
       <section v-if="validation" class="portal-card filing-validation" :class="validation.valid ? 'is-valid' : 'is-invalid'" aria-live="polite"><header class="filing-validation-heading"><div><span class="filing-validation-eyebrow">备案完整性检查</span><h2>服务端全量校验</h2></div><span class="filing-validation-badge">{{ validation.valid ? '校验通过' : '待处理' }}</span></header><div v-if="validation.valid" class="filing-validation-summary"><span class="filing-validation-icon">✓</span><div><strong>全部校验通过</strong><p>7 个流程与 2 张等级矩阵均符合提交要求。</p></div></div><template v-else><div class="filing-validation-summary"><span class="filing-validation-icon">!</span><div><strong>发现 {{ validation.issues?.length || 0 }} 项待处理问题</strong><p>请根据下方提示完善备案信息后再提交。</p></div></div><ol><li v-for="issue in validation.issues || []" :key="`${issue.path}-${issue.code}`">{{ issueLabel(issue) }}</li></ol></template></section>
     </template>
+    <!-- 确认弹窗必须挂在根级公共区：列表删除草稿、详情删除与提交锁定共用它；
+         放进任何条件分支（如新建备案工具栏）会让其余场景的 askConfirm 永远挂起。 -->
+    <ConfirmDialog
+      v-if="confirmDialog"
+      :title="confirmDialog.title"
+      :description="confirmDialog.description"
+      :confirm-text="confirmDialog.confirmText"
+      :cancel-text="confirmDialog.cancelText"
+      :danger="confirmDialog.danger"
+      @confirm="acceptConfirm"
+      @cancel="cancelConfirm"
+    />
   </section>
 </template>

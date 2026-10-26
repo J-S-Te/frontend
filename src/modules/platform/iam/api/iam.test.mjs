@@ -20,6 +20,7 @@ import {
   createUser,
   createUsersBatch,
   createEmployeesBatch,
+  credentialAPIURL,
   listUsers,
   updateUser,
   updateAccountStatus,
@@ -460,4 +461,12 @@ test('membership inheritance failed writes keep related data version unchanged',
     await assert.rejects(() => updateMembershipInheritance({ membership_id: 'm1', user: { id: 'u1' }, org_unit: { id: 'o1' }, position: { id: 'p1' }, membership_type: 'PRIMARY', status: 'ACTIVE', version: 1 }, true), (e) => e.status === status)
     assert.equal(relatedDataVersion(RELATED_DATA.MEMBERSHIPS), before)
   }
+})
+
+test('credential API paths are prefixed exactly once for IAM endpoints', () => {
+  assert.equal(credentialAPIURL('/employees'), '/api/v1/employees')
+  assert.equal(credentialAPIURL('/employees/batch'), '/api/v1/employees/batch')
+  assert.equal(credentialAPIURL('/accounts/abc/password/reset'), '/api/v1/accounts/abc/password/reset')
+  assert.equal(credentialAPIURL('/api/v1/employees'), '/api/v1/employees')
+  assert.equal(credentialAPIURL('https://platform.example/api/v1/employees'), 'https://platform.example/api/v1/employees')
 })

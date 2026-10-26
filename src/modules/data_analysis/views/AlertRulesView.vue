@@ -1,7 +1,10 @@
 <script setup>
+import OperationToast from '@/modules/shared/components/OperationToast.vue'
 // 预警规则配置（P-10，alert.manage）：阈值参数暂存于看板配置库，
 // 由后端整表替换并写入审计；所有写操作串行，成功后才更新已保存状态。
 import { computed, onBeforeUnmount, onMounted, ref } from "vue"
+import { useConfirmDialog } from "@/modules/shared/composables/useConfirmDialog.js"
+import ConfirmDialog from "@/modules/shared/components/ConfirmDialog.vue"
 import ConsoleIcon from "@/modules/platform/shared/components/ConsoleIcon.vue"
 import EmptyState from "@/modules/platform/shared/components/EmptyState.vue"
 import ErrorState from "@/modules/platform/shared/components/ErrorState.vue"
@@ -15,9 +18,11 @@ const rules = ref([])
 const loading = ref(true)
 const error = ref(null)
 const saving = ref(false)
+const { dialog: confirmDialog, askConfirm, accept: acceptConfirm, cancel: cancelConfirm } = useConfirmDialog()
 const toast = ref("")
 const editing = ref(null)
 const draft = ref(null)
+let editorInitialSnapshot = ""
 const keyword = ref("")
 let toastTimer = 0
 let loadPending = false
@@ -37,7 +42,7 @@ const SEVERITY_LABELS = { HIGH: "高", MEDIUM: "中", LOW: "低" }
 function showToast(message) {
   toast.value = message
   window.clearTimeout(toastTimer)
-  toastTimer = window.setTimeout(() => { toast.value = "" }, 2600)
+  toastTimer = window.setTimeout(() => { toast.value = "" }, 5200)
 }
 
 function mutationError(err, fallback) {
@@ -80,12 +85,19 @@ function openEditor(rule = null) {
   draft.value = rule
     ? { ...rule, threshold_json: rule.threshold_json || '{"days":30}' }
     : { rule_code: "CONTRACT_EXPIRY", name: "合同到期提醒", source_fct: "dim_contract", severity: "MEDIUM", enabled: false, threshold_json: '{"days":30}' }
+  editorInitialSnapshot = JSON.stringify(draft.value)
 }
 
-function closeEditor() {
-  if (saving.value) return
+async function closeEditor() {
+  if (saving.value || !editing.value || confirmDialog.value) return
+  const current = draft.value
+  if (editorInitialSnapshot !== JSON.stringify(draft.value)) {
+    const discard = await askConfirm({ title: '放弃预警规则编辑？', description: '当前表单有未保存的修改，放弃后不会保留。', confirmText: '放弃修改', cancelText: '继续编辑', danger: true })
+    if (!discard || saving.value || draft.value !== current) return
+  }
   editing.value = null
   draft.value = null
+  editorInitialSnapshot = ""
 }
 
 function draftThresholdDays() {
@@ -133,7 +145,15 @@ async function saveEditor() {
 }
 
 async function removeRule(rule) {
-  if (!canWrite.value || editing.value || !rules.value.includes(rule) || !window.confirm(`确认删除规则“${rule.name || rule.rule_code}”吗？已有历史预警的规则只能停用。`)) return
+  if (!canWrite.value || editing.value || !rules.value.includes(rule)) return
+  const ok = await askConfirm({
+    title: '删除预警规则？',
+    description: `确认删除规则“${rule.name || rule.rule_code}”吗？已有历史预警的规则只能停用。`,
+    confirmText: '删除规则',
+    cancelText: '取消',
+    danger: true,
+  })
+  if (!ok) return
   saving.value = true
   try {
     await deleteAlertRule(rule.id)
@@ -196,6 +216,17 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
       </form>
     </div>
 
-    <Transition name="da-toast"><div v-if="toast" class="da-toast"><span>✓</span>{{ toast }}</div></Transition>
+    <ConfirmDialog
+      v-if="confirmDialog"
+      :title="confirmDialog.title"
+      :description="confirmDialog.description"
+      :confirm-text="confirmDialog.confirmText"
+      :cancel-text="confirmDialog.cancelText"
+      :danger="confirmDialog.danger"
+      @confirm="acceptConfirm"
+      @cancel="cancelConfirm"
+    />
+
+    <OperationToast :message="toast" />
   </section>
 </template>

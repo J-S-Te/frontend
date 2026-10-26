@@ -5,9 +5,14 @@ import { normalizeAuthorizationSession } from '../../../shared/authz/sessionComp
 import { createApiRequestContext, attachStructuredContext } from '../../shared/api/requestContext.js'
 import { readBody } from '../../shared/api/request.js'
 import { formatUserError, userFieldErrors } from '../../../shared/utils/userError.js'
+import { postCredentialJSON } from '../../../shared/credential/credentialRequest.js'
+import { CredentialProtocolError } from '../../../shared/credential/credentialProtocol.js'
 
 // Node 原生测试没有注入 Vite 的 import.meta.env，使用可选链回退到同源 API 前缀。
 const API_BASE_URL = (import.meta.env?.VITE_API_BASE_URL || '/api/v1').replace(/\/$/, '')
+const CREDENTIAL_ENCRYPTION_MODE = (typeof import.meta.env === 'undefined'
+  ? 'disabled'
+  : (import.meta.env?.VITE_CREDENTIAL_ENCRYPTION_MODE || 'required'))
 let browserSessionGeneration = 0
 
 function requestContext(path, options = {}, extra = {}) {
@@ -145,6 +150,30 @@ export class AuthError extends Error {
   }
 }
 
+function credentialError(error, fallback) {
+  if (error instanceof CredentialProtocolError) {
+    return new AuthError(formatUserError(error, { fallback }), { code: error.code, status: error.status || 0 })
+  }
+  return error
+}
+
+async function encryptedCredentialRequest(path, purpose, payload, headers = {}) {
+  try {
+    const result = await postCredentialJSON({
+      url: `${API_BASE_URL}${path}`,
+      purpose,
+      body: payload,
+      headers,
+    })
+    if (!result.body || !validAuthResult(path, result.body)) {
+      throw new AuthError('认证服务返回了无法识别的结果。', { code: 'INVALID_RESPONSE', status: result.status })
+    }
+    return result.body
+  } catch (error) {
+    throw credentialError(error, '凭据加密请求失败，请刷新页面后重试。')
+  }
+}
+
 /**
  * loginWithPassword 使用账号密码建立浏览器会话。
  *
@@ -171,23 +200,26 @@ export async function loginWithPassword({
   loginTargetCode = '',
   replaceExistingSession = false,
 }) {
-  const body = await requestWithStructuredContext('/auth/login', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({
-      account,
-      password,
-      login_type: 'password',
-      ...(applicationId ? { application_id: applicationId } : {}),
-      ...(environmentId ? { environment_id: environmentId } : {}),
-      ...(loginTargetCode ? { login_target_code: loginTargetCode } : {}),
-      ...(replaceExistingSession ? { replace_existing_session: true } : {}),
-    }),
-  }, {
-    operation: 'LOGIN',
-    failureMessage: '账号或密码错误，请重新输入。',
-    networkMessage: '无法连接登录服务，请确认后端服务已启动。',
-  })
+  const loginPayload = {
+    account,
+    password,
+    login_type: 'password',
+    ...(applicationId ? { application_id: applicationId } : {}),
+    ...(environmentId ? { environment_id: environmentId } : {}),
+    ...(loginTargetCode ? { login_target_code: loginTargetCode } : {}),
+    ...(replaceExistingSession ? { replace_existing_session: true } : {}),
+  }
+  const body = CREDENTIAL_ENCRYPTION_MODE === 'disabled'
+    ? await requestWithStructuredContext('/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(loginPayload),
+    }, {
+      operation: 'LOGIN',
+      failureMessage: '账号或密码错误，请重新输入。',
+      networkMessage: '无法连接登录服务，请确认后端服务已启动。',
+    })
+    : await encryptedCredentialRequest('/auth/login', 'LOGIN', loginPayload)
 
   // 登录响应中的 Set-Cookie 已切换浏览器身份；顶层跳转发生前先清除旧账号 UI 快照。
   advanceBrowserSessionGeneration()
@@ -208,19 +240,22 @@ export async function loginWithPassword({
  * @throws {AuthError} 当前密码错误、新密码不合规或认证服务不可用时抛出。
  */
 export async function changeOwnPassword({ currentPassword, newPassword }) {
-  const body = await requestWithStructuredContext('/auth/password/change', {
-    method: 'POST',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-      'X-CSRF-Token': '1',
-    },
-    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
-  }, {
-    operation: 'CHANGE_PASSWORD',
-    failureMessage: '密码修改失败，请检查当前密码和新密码。',
-    networkMessage: '无法连接密码修改服务，请稍后重试。',
-  })
+  const passwordPayload = { current_password: currentPassword, new_password: newPassword }
+  const body = CREDENTIAL_ENCRYPTION_MODE === 'disabled'
+    ? await requestWithStructuredContext('/auth/password/change', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': '1',
+      },
+      body: JSON.stringify(passwordPayload),
+    }, {
+      operation: 'CHANGE_PASSWORD',
+      failureMessage: '密码修改失败，请检查当前密码和新密码。',
+      networkMessage: '无法连接密码修改服务，请稍后重试。',
+    })
+    : await encryptedCredentialRequest('/auth/password/change', 'CHANGE_PASSWORD', passwordPayload, { 'X-CSRF-Token': '1' })
   advanceBrowserSessionGeneration()
   return body
 }

@@ -134,6 +134,7 @@ test('normalizeApplicationAccess preserves explicit manual roles and role source
 
   assert.deepEqual(access.direct_roles.map((role) => role.code), ['sales', 'sales_director'])
   assert.deepEqual(access.manual_roles.map((role) => role.code), ['sales'])
+  assert.equal(access.manual_roles_complete, true)
   assert.equal(access.manual_roles[0].grant_origin, 'MANUAL')
   assert.equal(access.manual_roles[0].source_kind, 'DIRECT')
   assert.equal(access.direct_roles[1].grant_origin, 'TEMPLATE')
@@ -160,6 +161,7 @@ test('normalizeApplicationAccess keeps source-less legacy roles editable as dire
 
   assert.deepEqual(access.direct_roles.map((role) => role.code), ['sales', 'audit_admin'])
   assert.deepEqual(access.inherited_roles, [])
+  assert.equal(access.manual_roles_complete, false)
 })
 
 test('subject application access APIs use the generic subject endpoint and only submit the supplied direct roles', async () => {
@@ -225,6 +227,36 @@ test('generic application access never serializes custom business permissions', 
   assert.deepEqual(requestBody, {
     roles: [{ role_code: 'sales', scope_type: 'APPLICATION' }],
   })
+})
+
+test('edit revision rides PUT body and DELETE query only when the caller holds one', async () => {
+  const requests = []
+  globalThis.fetch = async (url, options = {}) => {
+    requests.push({ url, options })
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: () => 'application/json' },
+      json: async () => ({ data: { roles: [], edit_revision: 'v1:' + 'a'.repeat(64) } }),
+      text: async () => '',
+    }
+  }
+
+  const { deleteApplicationAccess, updateApplicationAccess } = await import('./authorization.js')
+
+  // 兼容旧调用：不传条件时请求体保持 { roles } 原样。
+  await updateApplicationAccess('user / 1', 'contract_management', { roles: [] })
+  assert.equal(requests[0].url, '/api/v1/users/user%20%2F%201/applications/contract_management/access')
+  assert.deepEqual(JSON.parse(requests[0].options.body), { roles: [] })
+  await deleteApplicationAccess('user / 1', 'contract_management')
+  assert.ok(!requests[1].url.includes('expected_revision'), '未持有版本时不得凭空携带条件')
+
+  // 新契约：非空 expectedRevision 时 PUT 带请求体字段，DELETE 带编码后的查询参数。
+  await updateApplicationAccess('user / 1', 'contract_management', { roles: [], expectedRevision: 'v1:' + 'a'.repeat(64) })
+  assert.deepEqual(JSON.parse(requests[2].options.body), { roles: [], expected_revision: `v1:${'a'.repeat(64)}` })
+  await deleteApplicationAccess('user / 1', 'contract_management', { expectedRevision: 'v1:rev / 2' })
+  assert.equal(requests[3].url, '/api/v1/users/user%20%2F%201/applications/contract_management/access?expected_revision=v1%3Arev%20%2F%202')
+  assert.equal(requests[3].options.method, 'DELETE')
 })
 
 test('manual management collection preserves scheduled and repeated-code scopes separately from effective access', async () => {

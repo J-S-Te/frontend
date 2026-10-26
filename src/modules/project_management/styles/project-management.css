@@ -1385,28 +1385,11 @@
 /* ==========================================================================
    §14 轻提示 Toast
    ========================================================================== */
-.pm-toast {
-  position: fixed;
-  bottom: var(--pm-sp-6);
-  left: 50%;
-  z-index: var(--pm-z-toast);
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: var(--pm-sp-3) var(--pm-sp-4);
-  border-radius: var(--pm-r-md);
-  background: var(--pm-ink);
-  color: #fff;
-  font-size: var(--pm-fs-sm);
-  box-shadow: var(--pm-shadow-toast);
-  transform: translateX(-50%);
-}
 
-.pm-toast span { width: 18px; height: 18px; display: grid; place-items: center; border-radius: 50%; background: var(--pm-green); color: #fff; font-size: var(--pm-fs-nano); }
-.pm-toast-enter-active,
-.pm-toast-leave-active { transition: opacity var(--pm-t-slow), transform var(--pm-t-slow); }
-.pm-toast-enter-from,
-.pm-toast-leave-to { opacity: 0; transform: translate(-50%, var(--pm-sp-2)); }
+
+
+
+
 
 /* ==========================================================================
    §15 反馈状态：空态 / 冲突 / 警告
@@ -1637,7 +1620,7 @@
 @media (max-width: 640px) {
   .pm-topbar { min-height: 56px; padding-inline: var(--pm-sp-3); }
   .pm-page { padding: var(--pm-sp-4) var(--pm-sp-3) var(--pm-sp-6); }
-  .pm-toast { bottom: var(--pm-sp-4); }
+
   .pm-source-card { gap: var(--pm-sp-3); padding: var(--pm-sp-4); }
   .pm-source-card h2 { font-size: var(--pm-fs-ui); }
   .pm-source-actions { align-items: stretch; flex-direction: column; }
@@ -1956,10 +1939,10 @@
 .pm-tab-count { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; margin-left: 6px; padding: 0 5px; border-radius: var(--pm-r-full); background: var(--pm-primary-soft); color: var(--pm-blue-text); font-size: var(--pm-fs-nano); font-weight: var(--pm-fw-semibold); }
 
 /* 18.11 轻提示语义色：图标底色随结果切换，错误不再是绿色对勾 */
-.pm-toast.success span { background: var(--pm-green); }
-.pm-toast.error span { background: var(--pm-red); }
-.pm-toast.warning span { background: var(--pm-amber); }
-.pm-toast.info span { background: var(--pm-sky); }
+
+
+
+
 
 @media (max-width: 900px) {
   .pm-approval-step { min-width: 160px; }

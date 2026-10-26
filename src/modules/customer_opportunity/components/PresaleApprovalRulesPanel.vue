@@ -1,5 +1,6 @@
 <script setup>
 import { formatCRMError } from '../api/errorMessages.js'
+import { createRequestScope } from '@/modules/platform/shared/composables/requestScope'
 import { computed, onMounted, reactive, ref } from 'vue'
 import {
   createPresaleApprovalRule,
@@ -12,7 +13,11 @@ const props = defineProps({ isAdmin: { type: Boolean, default: false } })
 const rules = ref([])
 const loading = ref(false)
 const saving = ref(false)
+const deletingRuleId = ref('')
 const error = ref('')
+// 规则读取请求作用域：重复读取只采纳最后一次；组件卸载后在途响应整体失效，
+// 不会回写已销毁组件的状态（R04/R05）。
+const rulesScope = createRequestScope()
 const editing = ref(null)
 const activeRuleId = ref('')
 const rulesExpanded = ref(true)
@@ -65,21 +70,28 @@ function reset() {
   activeRuleId.value = ''
 }
 
-async function load() {
+// reportError=false 供保存/删除成功后的重读使用：读取失败只返回 false，由调用方
+// 给出“已保存，最新列表读取失败”的准确提示，不误报为保存/删除失败。
+async function load({ reportError = true } = {}) {
+  const ticket = rulesScope.begin('PRESALE_APPROVAL_RULES')
   loading.value = true
   error.value = ''
+  let loaded = false
   try {
     const result = await listPresaleApprovalRules()
+    if (!rulesScope.isCurrent(ticket)) return false
     rules.value = result?.data || result || []
     if (!activeRuleId.value && rules.value.length) activeRuleId.value = String(rules.value[0].id)
     if (activeRuleId.value && !rules.value.some((rule) => String(rule.id) === String(activeRuleId.value))) activeRuleId.value = rules.value[0] ? String(rules.value[0].id) : ''
     const activeRule = rules.value.find((rule) => String(rule.id) === String(activeRuleId.value))
     if (activeRule && !editing.value) edit(activeRule)
+    loaded = true
   } catch (loadError) {
-    error.value = formatCRMError(loadError, { fallback: '规则加载失败' })
+    if (reportError && rulesScope.isCurrent(ticket)) error.value = formatCRMError(loadError, { fallback: '规则加载失败' })
   } finally {
-    loading.value = false
+    if (rulesScope.isCurrent(ticket)) loading.value = false
   }
+  return loaded
 }
 
 function edit(rule) {
@@ -146,7 +158,7 @@ function validateRule() {
 }
 
 async function save() {
-  if (!canEdit.value) return
+  if (!canEdit.value || saving.value) return
   const problem = validateRule()
   if (problem) {
     error.value = problem
@@ -154,6 +166,7 @@ async function save() {
   }
   saving.value = true
   error.value = ''
+  let saved = false
   try {
     const payload = JSON.parse(JSON.stringify(form))
     delete payload.id
@@ -166,9 +179,9 @@ async function save() {
     } else {
       await createPresaleApprovalRule(payload)
     }
-    reset()
-    await load()
+    saved = true
   } catch (saveError) {
+    // 保存失败：保留草稿与当前编辑状态，走既有错误区域，不自动重发。
     error.value = formatCRMError(saveError, {
       fallback: '规则保存失败',
       ...(String(saveError?.code || '') === 'CRM_PRESALE_INVALID_INPUT'
@@ -178,15 +191,33 @@ async function save() {
   } finally {
     saving.value = false
   }
+  if (!saved) return
+  reset()
+  // 任务 B（保存/刷新分离）：规则已保存（HTTP 200）；其后列表重读失败只说明展示未更新，
+  // 不得报成“规则保存失败”，也不回退刚保存的结果。
+  if (!(await load({ reportError: false }))) {
+    error.value = '规则已保存，但最新列表读取失败，请刷新页面核对。'
+  }
 }
 
 async function remove(rule) {
   if (!canEdit.value || !window.confirm(`确认删除规则“${rule.name}”？`)) return
+  // 任务 D：删除进行中禁止重复提交（确认弹窗之外的第二道防线）。
+  if (deletingRuleId.value) return
+  let removed = false
+  deletingRuleId.value = String(rule.id)
   try {
     await deletePresaleApprovalRule(rule.id, rule.version)
-    await load()
+    removed = true
   } catch (removeError) {
     error.value = formatCRMError(removeError, { fallback: '规则删除失败' })
+  } finally {
+    deletingRuleId.value = ''
+  }
+  if (!removed) return
+  // 任务 B：规则已删除（HTTP 200）；其后列表重读失败只说明展示未更新，不误报为删除失败。
+  if (!(await load({ reportError: false }))) {
+    error.value = '规则已删除，但最新列表读取失败，请刷新页面核对。'
   }
 }
 

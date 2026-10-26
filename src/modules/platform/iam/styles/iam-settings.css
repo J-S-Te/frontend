@@ -882,6 +882,10 @@
   color: var(--ink-3);
   font-size: 11.5px;
 }
+.iam-detail-technical { margin: 16px 28px 0; border: 1px solid var(--line-1); border-radius: var(--r-2); background: var(--bg-soft); }
+.iam-detail-technical > summary { padding: 12px 16px; color: var(--ink-2); font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.iam-detail-technical .iam-detail-grid { margin: 0; border: 0; border-top: 1px solid var(--line-1); border-radius: 0; }
+.iam-detail-technical .iam-technical-value { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
 .iam-detail-grid strong {
   display: block;
   overflow-wrap: anywhere;
@@ -2230,9 +2234,8 @@
 }
 
 /* =========================================================================
-   用户详情弹窗「有效授权总览」（P4）：三类来源的角色汇总卡片。
-   视觉与 iam-application-access 保持一致；不依赖 applicationAccess，按
-   previewPositionAuthorization({ user_id }) 拉取的全用户快照渲染。
+   用户详情弹窗「有效授权总览」（2026-10-25）：按应用展示授权结果，
+   展开后按角色查看每条来源；不跨来源合并环境、范围或有效期。
    ========================================================================= */
 .iam-effective-authorization-overview {
   padding: 18px 20px;
@@ -2240,72 +2243,134 @@
   border-radius: var(--r-3);
   background: var(--brand-soft);
 }
-.iam-effective-authorization-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--s-3);
-}
-.iam-effective-authorization-card {
-  display: grid;
-  gap: var(--s-2);
+.iam-authorization-overview-body { display: grid; gap: var(--s-3); min-width: 0; }
+.iam-authorization-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 12px;
   min-width: 0;
-  padding: 14px;
+  color: var(--ink-3);
+  font-size: 11.5px;
+}
+.iam-authorization-summary strong { color: var(--ink-1); font-size: 12.5px; font-weight: 600; }
+.iam-authorization-application-list { display: grid; gap: 8px; min-width: 0; }
+.iam-authorization-application-row {
+  min-width: 0;
+  overflow: hidden;
   border: 1px solid var(--line-1);
   border-radius: var(--r-2);
   background: var(--surface);
 }
-.iam-effective-authorization-head {
-  display: flex;
+.iam-authorization-application-row.is-conflict { border-color: var(--danger-line); }
+.iam-authorization-application-row.is-error { border-color: var(--danger-line); }
+.iam-authorization-application-row.is-unknown { border-color: var(--warn-line); }
+.iam-authorization-application-main {
+  display: grid;
+  grid-template-columns: minmax(140px, 1.1fr) minmax(180px, 2fr) auto auto;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--s-2);
+  gap: 10px 14px;
+  min-width: 0;
+  padding: 12px 14px;
 }
-.iam-effective-authorization-head strong { color: var(--ink-1); font-size: 12.5px; font-weight: 600; }
-.iam-effective-authorization-head span {
+.iam-authorization-application-name { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; min-width: 0; }
+.iam-authorization-application-name strong { color: var(--ink-1); font-size: 12.5px; font-weight: 600; overflow-wrap: anywhere; }
+.iam-authorization-application-name code { color: var(--ink-3); font-size: 11px; overflow-wrap: anywhere; }
+.iam-authorization-role-summary { min-width: 0; color: var(--ink-2); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+.iam-authorization-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 64px;
   padding: 3px 9px;
-  color: var(--brand-1);
+  color: var(--ink-2);
   font-size: 11px;
   font-weight: 600;
+  white-space: nowrap;
   border-radius: 999px;
-  background: var(--brand-soft);
+  background: var(--bg-soft);
 }
-.iam-effective-authorization-list {
+.iam-authorization-status.is-granted { color: var(--ok-1); background: var(--ok-soft); }
+.iam-authorization-status.is-conflict { color: var(--danger-1); background: var(--danger-soft); }
+.iam-authorization-status.is-error { color: var(--danger-1); background: var(--danger-soft); }
+.iam-authorization-status.is-unknown { color: var(--warn-1); background: var(--warn-soft); }
+.iam-authorization-status.is-loading { color: var(--ink-3); background: var(--bg-soft); }
+.iam-authorization-application-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.iam-authorization-application-actions .console-button { padding: 5px 10px; font-size: 11.5px; }
+.iam-authorization-error {
+  margin: 0;
+  padding: 0 14px 12px;
+  color: var(--danger-1);
+  font-size: 11.5px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.iam-authorization-application-detail {
+  display: grid;
+  gap: 10px;
+  padding: 0 14px 14px;
+  border-top: 1px solid var(--line-1);
+}
+.iam-authorization-conflict {
+  margin: 10px 0 0;
+  padding: 9px 11px;
+  color: var(--danger-1);
+  font-size: 11.5px;
+  line-height: 1.55;
+  border: 1px solid var(--danger-line);
+  border-radius: var(--r-2);
+  background: var(--danger-soft);
+  overflow-wrap: anywhere;
+}
+.iam-authorization-role-group { display: grid; gap: 7px; min-width: 0; padding-top: 4px; }
+.iam-authorization-role-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; min-width: 0; }
+.iam-authorization-role-head strong { color: var(--ink-1); font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
+.iam-authorization-role-head code { color: var(--ink-3); font-size: 11px; overflow-wrap: anywhere; }
+.iam-authorization-diagnostic { color: var(--warn-1); font-size: 11px; }
+.iam-authorization-source-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.iam-authorization-source {
   display: grid;
   gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.iam-effective-authorization-list li {
-  display: grid;
-  gap: 3px;
   min-width: 0;
   padding: 9px 10px;
   border: 1px solid var(--line-1);
   border-radius: var(--r-2);
   background: var(--bg-soft);
 }
-.iam-effective-authorization-app {
+.iam-authorization-source-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; min-width: 0; }
+.iam-authorization-source-label {
+  padding: 2px 7px;
   color: var(--brand-1);
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 600;
+  border-radius: 999px;
+  background: var(--brand-soft);
 }
-.iam-effective-authorization-role {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  min-width: 0;
+.iam-authorization-source-head strong { color: var(--ink-2); font-size: 11.5px; font-weight: 600; overflow-wrap: anywhere; }
+.iam-authorization-source-meta { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; }
+.iam-authorization-source-meta > div { display: flex; gap: 5px; min-width: 0; }
+.iam-authorization-source-meta dt { color: var(--ink-3); font-size: 11px; }
+.iam-authorization-source-meta dd { margin: 0; color: var(--ink-2); font-size: 11px; overflow-wrap: anywhere; }
+.iam-authorization-technical { min-width: 0; }
+.iam-authorization-technical summary { color: var(--ink-3); font-size: 11px; cursor: pointer; }
+.iam-authorization-technical dl { display: grid; gap: 3px; margin: 7px 0; }
+.iam-authorization-technical dl > div { display: flex; gap: 6px; min-width: 0; }
+.iam-authorization-technical dt { flex: 0 0 auto; color: var(--ink-3); font-size: 10.5px; }
+.iam-authorization-technical dd { min-width: 0; margin: 0; }
+.iam-authorization-technical code { color: var(--ink-2); font-size: 10.5px; overflow-wrap: anywhere; }
+.iam-authorization-help { color: var(--ink-3); font-size: 11.5px; line-height: 1.6; }
+.iam-authorization-help summary { color: var(--ink-2); font-weight: 600; cursor: pointer; }
+.iam-authorization-help p { margin: 7px 0 0; }
+@media (max-width: 900px) {
+  .iam-authorization-application-main { grid-template-columns: minmax(0, 1fr) auto; }
+  .iam-authorization-role-summary { grid-column: 1 / -1; grid-row: 2; }
+  .iam-authorization-application-actions { grid-column: 2; grid-row: 1; }
 }
-.iam-effective-authorization-role strong { color: var(--ink-1); font-size: 12.5px; font-weight: 600; }
-.iam-effective-authorization-role code { color: var(--ink-3); font-size: 11px; }
-.iam-effective-authorization-list small {
-  color: var(--ink-3);
-  font-size: 11px;
-  line-height: 1.4;
-  overflow-wrap: anywhere;
-}
-@media (max-width: 760px) {
-  .iam-effective-authorization-grid { grid-template-columns: 1fr; }
+@media (max-width: 560px) {
+  .iam-authorization-application-main { grid-template-columns: minmax(0, 1fr); }
+  .iam-authorization-status { justify-self: start; }
+  .iam-authorization-application-actions { grid-column: auto; grid-row: auto; justify-content: flex-start; }
+  .iam-authorization-role-summary { grid-column: auto; grid-row: auto; }
 }
 
 .iam-application-scope-grid,
@@ -3247,3 +3312,307 @@
 
 /* 角色码 / 权限码 / 应用编码等 mono 长串统一断词（此前 code 漏加） */
 .iam-settings code { overflow-wrap: anywhere; word-break: break-all; }
+
+
+/* 个人例外授权：单角色列表、编辑与窄屏记录卡片 */
+.iam-personal-exception {
+  display: grid;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-2);
+  background: #fff;
+}
+
+.iam-personal-exception-head,
+.iam-personal-exception-editor-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.iam-personal-exception-head h4,
+.iam-personal-exception-editor-head h4 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+
+.iam-personal-exception-head p,
+.iam-personal-exception-editor-head p {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.iam-personal-exception-application {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.iam-personal-exception-application label,
+.iam-personal-exception-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.iam-personal-exception-application label {
+  grid-template-columns: auto minmax(180px, 320px);
+  align-items: center;
+}
+
+.iam-personal-exception-application select,
+.iam-personal-exception-field input,
+.iam-personal-exception-field select {
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-1);
+  background: #fff;
+  color: var(--ink-1);
+  font: inherit;
+}
+
+.iam-personal-exception-field > span {
+  color: var(--ink-2);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.iam-personal-exception-field small,
+.iam-personal-exception-head small {
+  color: var(--ink-3);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.iam-personal-exception-dirty,
+.iam-personal-exception-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border: 1px solid var(--line-1);
+  border-radius: 999px;
+  background: var(--bg-2);
+  color: var(--ink-2);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.iam-personal-exception-dirty,
+.iam-personal-exception-tag.is-warning {
+  border-color: var(--warning-line, #e7c46b);
+  background: var(--warning-bg, #fff8e6);
+  color: var(--warning-ink, #8a5a00);
+}
+
+.iam-personal-exception-tag.is-danger {
+  border-color: var(--danger-line, #e6b4b4);
+  background: var(--danger-bg, #fff1f1);
+  color: var(--danger-ink, #9b2c2c);
+}
+
+.iam-personal-exception-tag.is-pending {
+  border-color: var(--info-line, #b9d1ea);
+  background: var(--info-bg, #eef7ff);
+  color: var(--info-ink, #225a8a);
+}
+
+.iam-personal-exception-warning,
+.iam-personal-exception-error,
+.iam-personal-exception-warning.iam-field-help {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--warning-line, #e7c46b);
+  border-radius: var(--r-1);
+  background: var(--warning-bg, #fff8e6);
+  color: var(--warning-ink, #8a5a00);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.iam-personal-exception-error,
+.iam-personal-exception-field .iam-personal-exception-error {
+  color: var(--danger-ink, #9b2c2c);
+  font-size: 12px;
+}
+
+.iam-personal-exception-error-block {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--danger-line, #e6b4b4);
+  border-radius: var(--r-1);
+  background: var(--danger-bg, #fff1f1);
+}
+
+.iam-personal-exception-error-block p { margin: 0; color: var(--danger-ink, #9b2c2c); }
+
+.iam-personal-exception-editor-wrap { display: grid; gap: 12px; }
+
+.iam-personal-exception-confirm {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--danger-line, #e6b4b4);
+  border-radius: var(--r-1);
+  background: var(--danger-bg, #fff1f1);
+}
+
+.iam-personal-exception-confirm p { margin: 0; color: var(--danger-ink, #9b2c2c); }
+.iam-personal-exception-confirm > div { display: flex; justify-content: flex-end; gap: 8px; }
+
+.iam-personal-exception-anomalies {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--warning-line, #e7c46b);
+  border-radius: var(--r-1);
+  background: var(--warning-bg, #fff8e6);
+}
+
+.iam-personal-exception-anomalies h5 { margin: 0; color: var(--warning-ink, #8a5a00); }
+
+.iam-personal-exception-anomaly {
+  display: grid;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--warning-line, #e7c46b);
+}
+
+.iam-personal-exception-anomaly > div:first-child { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.iam-personal-exception-anomaly p { margin: 0; color: var(--ink-2); font-size: 13px; }
+.iam-personal-exception-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.iam-personal-exception-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 12px;
+  color: var(--ink-3);
+  font-size: 13px;
+}
+
+.iam-personal-exception-summary strong { color: var(--ink-1); font-size: 14px; }
+
+.iam-personal-exception-list { display: grid; gap: 10px; }
+
+.iam-personal-exception-group {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-2);
+  background: #fff;
+}
+
+.iam-personal-exception-group > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.iam-personal-exception-role { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.iam-personal-exception-role strong { overflow-wrap: anywhere; }
+
+.iam-personal-exception-records { display: grid; gap: 6px; }
+
+.iam-personal-exception-record {
+  display: grid;
+  grid-template-columns: minmax(130px, 1fr) minmax(190px, 1.4fr) minmax(100px, auto);
+  gap: 10px;
+  align-items: baseline;
+  min-height: 40px;
+  padding: 8px 10px;
+  border-radius: var(--r-1);
+  background: var(--bg-2);
+  font-size: 13px;
+}
+
+.iam-personal-exception-col-scope,
+.iam-personal-exception-col-validity { color: var(--ink-2); overflow-wrap: anywhere; }
+.iam-personal-exception-col-status { color: var(--ink-3); white-space: nowrap; }
+.iam-personal-exception-col-status.is-active { color: var(--success-ink, #1f7a4c); }
+.iam-personal-exception-col-status.is-pending { color: var(--info-ink, #225a8a); }
+.iam-personal-exception-col-status.is-expired { color: var(--danger-ink, #9b2c2c); }
+
+.iam-personal-exception-tech { color: var(--ink-3); font-size: 12px; }
+.iam-personal-exception-tech summary { cursor: pointer; }
+.iam-personal-exception-tech p { margin: 6px 0 0; }
+
+.iam-personal-exception-inherited {
+  padding: 10px 12px;
+  border: 1px dashed var(--line-1);
+  border-radius: var(--r-1);
+  background: var(--bg-2);
+  font-size: 13px;
+}
+
+.iam-personal-exception-inherited summary { cursor: pointer; color: var(--ink-2); }
+.iam-personal-exception-inherited summary span { margin-left: 8px; color: var(--ink-3); font-size: 12px; }
+.iam-personal-exception-inherited-group { display: grid; gap: 4px; margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line-2); }
+.iam-personal-exception-inherited-group div { color: var(--ink-3); }
+
+.iam-personal-exception-more { display: flex; justify-content: flex-end; }
+
+.iam-personal-exception-editor {
+  display: grid;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-2);
+  background: #fff;
+}
+
+.iam-personal-exception-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.iam-personal-exception-field input:focus-visible,
+.iam-personal-exception-field select:focus-visible,
+.iam-personal-exception-application select:focus-visible,
+.iam-personal-exception button:focus-visible {
+  outline: 2px solid var(--focus, #2f6fed);
+  outline-offset: 2px;
+}
+
+.iam-personal-exception-impact {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-1);
+  background: var(--bg-2);
+}
+
+.iam-personal-exception-impact h5 { margin: 0; font-size: 13px; }
+.iam-personal-exception-impact dl { display: grid; gap: 6px; margin: 0; }
+.iam-personal-exception-impact dl > div { display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: 10px; }
+.iam-personal-exception-impact dt { color: var(--ink-3); font-size: 12px; }
+.iam-personal-exception-impact dd { margin: 0; color: var(--ink-2); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.iam-personal-exception-warnings { margin: 0; padding-left: 18px; color: var(--warning-ink, #8a5a00); font-size: 13px; line-height: 1.7; }
+.iam-personal-exception-blockers { padding: 10px 12px; border: 1px solid var(--danger-line, #e6b4b4); border-radius: var(--r-1); background: var(--danger-bg, #fff1f1); color: var(--danger-ink, #9b2c2c); font-size: 13px; }
+.iam-personal-exception-blockers ul { margin: 6px 0 0; padding-left: 18px; }
+.iam-personal-exception-editor-foot { display: flex; justify-content: flex-end; gap: 8px; }
+
+@media (max-width: 720px) {
+  .iam-personal-exception { padding: 12px; }
+  .iam-personal-exception-head,
+  .iam-personal-exception-editor-head,
+  .iam-personal-exception-group > header { display: grid; }
+  .iam-personal-exception-application label { grid-template-columns: 1fr; }
+  .iam-personal-exception-editor-grid { grid-template-columns: 1fr; }
+  .iam-personal-exception-record { grid-template-columns: 1fr; gap: 4px; min-height: 0; }
+  .iam-personal-exception-col-status { white-space: normal; }
+  .iam-personal-exception-actions { justify-content: flex-start; }
+  .iam-personal-exception-impact dl > div { grid-template-columns: 1fr; gap: 2px; }
+  .iam-personal-exception-more { justify-content: stretch; }
+}

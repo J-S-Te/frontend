@@ -12,6 +12,14 @@ export function effectiveAccountStatus(account, now = Date.now()) {
   return status
 }
 
+export function effectiveUserStatus(user, now = Date.now()) {
+  const status = String(user?.status || '').toUpperCase()
+  if (status !== 'ACTIVE') return status
+  const validUntil = Date.parse(user?.valid_until || '')
+  if (Number.isFinite(validUntil) && validUntil <= now) return 'EXPIRED'
+  return status
+}
+
 export function displayAccountType(type) {
   return ({ HUMAN: '个人账号', SERVICE: '服务账号' }[type] || type || '—')
 }
@@ -55,7 +63,7 @@ export function detailTitle(detail) {
   return ''
 }
 
-export function detailRows(detail) {
+export function detailRows(detail, now = Date.now()) {
   if (!detail) return []
   const { kind, item } = detail
   if (!item) return []
@@ -65,7 +73,7 @@ export function detailRows(detail) {
     rows.push({ label: '工号', value: item.employee_no || '—' })
     rows.push({ label: '邮箱', value: item.email || '—' })
     rows.push({ label: '手机号（脱敏）', value: item.mobile_masked || '—' })
-    rows.push({ label: '状态', value: item.status || '—' })
+    rows.push({ label: '状态', value: displayStatus(effectiveUserStatus(item, now)) })
     rows.push({ label: '用户有效期', value: item.valid_until ? formatDateTime(item.valid_until) : '长期有效' })
     rows.push({ label: '更新时间', value: formatDateTime(item.updated_at) })
   } else if (kind === 'account') {
@@ -74,7 +82,8 @@ export function detailRows(detail) {
     rows.push({ label: '关联用户 ID', value: item.user_id || '—' })
     rows.push({ label: '账号类型', value: displayAccountType(item.account_type || 'HUMAN') })
     rows.push({ label: '认证方式', value: displayAuthSource(item.auth_source || 'LOCAL') })
-    rows.push({ label: '状态', value: displayStatus(item.status) })
+    rows.push({ label: '状态', value: displayStatus(effectiveAccountStatus(item, now)) })
+    if (item.locked_until) rows.push({ label: '锁定至', value: formatDateTime(item.locked_until) })
     rows.push({ label: '账号有效期', value: item.valid_until ? formatDateTime(item.valid_until) : '长期有效' })
     rows.push({ label: '最近登录', value: formatDateTime(item.last_login_at) })
     rows.push({ label: '版本', value: item.version ?? 0 })
@@ -129,4 +138,18 @@ export function detailRows(detail) {
     rows.push({ label: '状态', value: item.status || '—' })
   }
   return rows
+}
+
+// 详情页默认先展示业务字段；长 ID、版本和父级引用属于排障信息，折叠后仍可复制核对。
+export function isTechnicalDetailRow(row) {
+  const label = String(row?.label || '').trim()
+  return label === '版本' || /(?:^|\s)ID$/.test(label)
+}
+
+export function primaryDetailRows(detail) {
+  return detailRows(detail).filter((row) => !isTechnicalDetailRow(row))
+}
+
+export function technicalDetailRows(detail) {
+  return detailRows(detail).filter(isTechnicalDetailRow)
 }

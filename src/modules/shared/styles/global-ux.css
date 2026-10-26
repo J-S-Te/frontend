@@ -1,0 +1,153 @@
+/* Cross-module accessibility and compact-screen polish. Component-level rules
+   keep their own layout; this only fills gaps that were invisible at 100%. */
+:where(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+:where(h1, h2, h3, h4, section, article) { scroll-margin-top: 72px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (max-width: 1366px) {
+  .console-topbar-actions,
+  .contract-topbar-actions,
+  .pm-topbar-actions { gap: 4px; }
+  .operation-result { margin-bottom: 12px; }
+}
+
+@media (max-width: 560px) {
+  .operation-result { align-items: flex-start; }
+  .operation-result dl { flex-direction: column; gap: 4px; }
+}
+
+/* 1366×768 and 125%/150% zoom commonly produce a ~600–700px CSS viewport. */
+@media (max-width: 1366px) {
+  .pm-table th,
+  .pm-table td,
+  .contract-data-table th,
+  .contract-data-table td,
+  .da-table th,
+  .da-table td { padding-top: 9px; padding-bottom: 9px; }
+}
+
+@media (max-height: 760px) {
+  .contract-detail-modal,
+  .console-detail-modal,
+  .iam-modal {
+    max-height: calc(100vh - 24px);
+    overflow-y: auto;
+  }
+}
+
+/* 文本边界：卡片允许收缩；说明保留完整文字并在边界内换行。
+   不对表格、操作按钮或全部元素应用截断，避免隐藏业务值与操作入口。 */
+:is(.iam-summary-card, .so-summary-card, .personnel-summary-card, .pm-kpi, .crm-kpi,
+    .contract-sign-stats > *, .pm-operational-stats > article, .pm-overview-metrics > *,
+    .runtime-metrics > *, .iam-person-summary-grid > div, .iam-batch-import-stats > *,
+    .contract-stat-grid > *, .settlement-detail-kpis > article,
+    .da-native-metric, .portal-card) {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow-wrap: anywhere;
+}
+:is(.iam-summary-card, .so-summary-card, .personnel-summary-card, .pm-kpi, .crm-kpi,
+    .contract-sign-stats > *, .pm-operational-stats > article, .pm-overview-metrics > *,
+    .runtime-metrics > *, .iam-person-summary-grid > div, .iam-batch-import-stats > *,
+    .contract-stat-grid > *, .settlement-detail-kpis > article,
+    .da-native-metric, .portal-card) > :is(div, p, strong, b, em, small) {
+  min-width: 0;
+  max-width: 100%;
+}
+:is(.iam-summary-card, .so-summary-card, .personnel-summary-card, .pm-kpi, .crm-kpi,
+    .contract-sign-stats > *, .pm-operational-stats > article, .pm-overview-metrics > *,
+    .runtime-metrics > *, .iam-person-summary-grid > div, .iam-batch-import-stats > *,
+    .contract-stat-grid > *, .settlement-detail-kpis > article,
+    .da-native-metric, .portal-card) :is(p, small, em, strong, b, h1, h2, h3) {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+:is(.console-page-head, .contract-page-head, .pm-page-head, .portal-title,
+    .da-native-heading, .filing-toolbar) > div {
+  min-width: 0;
+}
+:is(.console-page-head, .contract-page-head, .pm-page-head, .portal-title,
+    .da-native-heading, .filing-toolbar) :is(h1, h2, h3, p, small) {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+:is(.iam-field-help, .iam-form-alert, .crm-note, .crm-alert,
+    .contract-info-banner, .da-modal-help, .portal-warning,
+    .shared-confirm-description, .shared-prompt-description) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.iam-tree-toolbar-metrics {
+  min-width: 0;
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+
+/* Dialog text is untrusted in length: preserve full business values and keep
+   close/action buttons outside the shrinking text column. Tables retain their
+   own horizontal scrolling instead of globally truncating cells. */
+:is(.iam-modal, .crm-detail, .contract-detail-modal, .pm-dialog, .da-modal,
+    .portal-dialog > article, .settlement-modal) :is(h1, h2, h3, p, dd, label) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+:is(.iam-modal, .crm-detail, .contract-detail-modal, .pm-dialog, .da-modal,
+    .portal-dialog > article, .settlement-modal) > header > div {
+  min-width: 0;
+}
+:is(.iam-modal, .crm-detail, .contract-detail-modal, .pm-dialog, .da-modal,
+    .portal-dialog > article, .settlement-modal) > header > button {
+  flex: 0 0 auto;
+}
+
+/* One footer contract for all six subsystem sidebars. Repeated class specificity
+   keeps lazy-loaded subsystem styles from changing these shared dimensions. */
+.subsystem-sidebar-user.subsystem-sidebar-user {
+  display: flex; align-items: center; gap: 10px; flex: 0 0 auto;
+  box-sizing: border-box; width: 100%; min-width: 0; min-height: 72px;
+  margin-top: auto; padding: 12px 16px;
+  border-top: 1px solid rgba(255, 255, 255, .06); background: #1e293b;
+}
+.subsystem-sidebar-user.subsystem-sidebar-user > span:first-child {
+  display: grid; place-items: center; flex: 0 0 36px;
+  box-sizing: border-box; width: 36px; height: 36px; border-radius: 50%;
+  background: linear-gradient(135deg, #6366f1, #7c3aed);
+  color: #fff; font: 600 14px/1 system-ui, sans-serif;
+}
+.subsystem-sidebar-user.subsystem-sidebar-user > span:nth-child(2) {
+  display: grid; gap: 2px; flex: 1 1 0; min-width: 0;
+}
+.subsystem-sidebar-user.subsystem-sidebar-user :is(strong, small) {
+  display: block; min-width: 0; max-width: 100%; margin: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: inherit; line-height: 1.4;
+}
+.subsystem-sidebar-user.subsystem-sidebar-user strong { color: #f8fafc; font-size: 13px; font-weight: 600; }
+.subsystem-sidebar-user.subsystem-sidebar-user small { color: #94a3b8; font-size: 11px; font-weight: 400; }
+.subsystem-sidebar-user.subsystem-sidebar-user > button {
+  display: grid; place-items: center; flex: 0 0 32px; box-sizing: border-box;
+  width: 32px; height: 32px; margin: 0; padding: 0;
+  border: 0; border-radius: 6px; background: transparent; color: #94a3b8; cursor: pointer;
+}
+.subsystem-sidebar-user.subsystem-sidebar-user > button:hover { background: rgba(255,255,255,.08); color: #fff; }
+.subsystem-sidebar-user.subsystem-sidebar-user > button:disabled { cursor: wait; opacity: .55; }
+.subsystem-sidebar-user.subsystem-sidebar-user > button svg { width: 16px; height: 16px; }
+@media (max-width: 980px) {
+  .settlement-sidebar .subsystem-sidebar-user.subsystem-sidebar-user { flex-direction: column; gap: 8px; padding: 12px 8px; }
+  .settlement-sidebar .subsystem-sidebar-user.subsystem-sidebar-user > span:nth-child(2) { display: none; }
+  .settlement-sidebar .subsystem-sidebar-user.subsystem-sidebar-user > button { flex-basis: 32px; }
+}

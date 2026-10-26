@@ -42,6 +42,7 @@ function formatAmount(amount, currency = 'CNY') {
 }
 
 function statusTone(status) {
+  if (status === '已过期') return 'danger'
   if (['已生效', '履约中', '已完成', '已归档'].includes(status)) return 'success'
   if (status === '审批中') return 'info'
   if (status === '待付款') return 'warning'
@@ -147,7 +148,7 @@ function statusTone(status) {
             <td>{{ contract.endDate }}</td>
             <td>{{ contract.createdAt }}</td>
             <td>{{ contract.updatedAt }}</td>
-            <td><span class="contract-badge" :class="statusTone(contract.status)"><i></i>{{ contract.status }}</span>
+            <td><span class="contract-badge" :class="statusTone(contract.displayStatus)"><i></i>{{ contract.displayStatus }}</span>
             </td>
             <td><span class="contract-report-content">{{ contract.content || '未填写' }}</span></td>
             <td><button class="contract-text-button" type="button"

@@ -5,6 +5,7 @@ import { formatUserError } from './shared/utils/userError.js'
 import { onboardEmployee as realOnboardEmployee, IamError as ApiIamError } from './platform/iam/api/iam.js'
 
 const names = ['OnboardingPrerequisiteStep', 'EmployeeOnboardingModal', 'PositionAuthorizationTemplates', 'IamSettingsModule']
+const passwordResetSource = await readFile(new URL('./platform/iam/composables/useIamPasswordReset.js', import.meta.url), 'utf8')
 const sources = Object.fromEntries(await Promise.all(names.map(async name => [name, await readFile(new URL(`./platform/iam/components/${name}.vue`, import.meta.url), 'utf8')])))
 const ref = value => ({ value })
 const computed = read => ({ get value() { return read() } })
@@ -153,11 +154,16 @@ test('真实入职 API 的 404 降级链路在账号／任职超时或网络中�
   } finally { globalThis.fetch = originalFetch }
 })
 
-function iamFunction(start, end, state, dependencies) {
-  const source = sources.IamSettingsModule
+function iamFunction(start, end, state, dependencies, { source = sources.IamSettingsModule } = {}) {
   const code = source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)))
   return new Function(...Object.keys(state), ...Object.keys(dependencies), `${code}; return ${start.match(/function (\w+)/)[1]};`)(...Object.values(state), ...Object.values(dependencies))
 }
+
+function passwordResetFunction(start, end, state, dependencies) {
+  return iamFunction(start, end, state, dependencies, { source: passwordResetSource })
+}
+
+const SCHEDULE_SENSITIVE_CLEAR_STUB = { scheduleSensitiveClipboardClear: () => ({ supported: false }) }
 
 test('IAM 列表加载异常使用中文面板名，原错误诊断未被转换器改写', async () => {
   const state = { loading: { users: false }, errorMessage: ref(''), panels: [{ key: 'users', label: '用户' }] }
@@ -173,7 +179,7 @@ test('IAM 列表加载异常使用中文面板名，原错误诊断未被转换�
 test('账号密码重置后列表刷新失败明确保留成功事实与一次性凭据，不鼓励重复重置', async () => {
   const state = { selectedPasswordResetAccount: ref({ account_id: 'account-1', account_name: 'test-user', password_initialized: true, version: 1 }), resettingPassword: ref(false), passwordResetDialog: ref({}), temporaryPassword: ref(null), detail: ref(null), detailAuthorizationRequestSeq: ref(0) }
   const messages = []
-  const run = iamFunction('async function confirmPasswordReset(', '\nasync function copyTemporaryPassword(', state, { formatUserError, IamError, emitToast: message => messages.push(formatUserError(message)), resetAccountPassword: async () => ({ account_id: 'account-1', temporary_password: 'Test-fixture-only-2!' }), loadAccounts: async () => { throw new Error('SQLSTATE password=internal-only') }, loadAuthorizationOverview: async () => {} })
+  const run = passwordResetFunction('async function confirmPasswordReset(', '\nasync function copyTemporaryPassword(', state, { formatUserError, IamError, emitToast: message => messages.push(formatUserError(message)), resetAccountPassword: async () => ({ account_id: 'account-1', temporary_password: 'Test-fixture-only-2!' }), loadAccounts: async () => { throw new Error('SQLSTATE password=internal-only') }, loadAuthorizationOverview: async () => {}, copyText: async () => true, ...SCHEDULE_SENSITIVE_CLEAR_STUB })
   await run()
   assert.equal(state.temporaryPassword.value.value, 'Test-fixture-only-2!')
   assert.equal(state.passwordResetDialog.value, null)
@@ -186,7 +192,7 @@ test('密码重置请求失败即使已有旧临时凭据，也不虚构本次�
   const previous = { value: 'Test-fixture-old-only!' }
   const state = { selectedPasswordResetAccount: ref({ account_id: 'account-1', password_initialized: true }), resettingPassword: ref(false), passwordResetDialog: ref({}), temporaryPassword: ref(previous), detail: ref(null), detailAuthorizationRequestSeq: ref(0) }
   const messages = []
-  const run = iamFunction('async function confirmPasswordReset(', '\nasync function copyTemporaryPassword(', state, { formatUserError, IamError, emitToast: text => messages.push(text), resetAccountPassword: async () => { throw failure('当前账号不允许重置密码。', { status: 403 }) }, loadAccounts: async () => assert.fail('no refresh after refusal'), loadAuthorizationOverview: async () => {} })
+  const run = passwordResetFunction('async function confirmPasswordReset(', '\nasync function copyTemporaryPassword(', state, { formatUserError, IamError, emitToast: text => messages.push(text), resetAccountPassword: async () => { throw failure('当前账号不允许重置密码。', { status: 403 }) }, loadAccounts: async () => assert.fail('no refresh after refusal'), loadAuthorizationOverview: async () => {}, copyText: async () => true, ...SCHEDULE_SENSITIVE_CLEAR_STUB })
   await run()
   assert.equal(state.temporaryPassword.value, previous)
   assert.equal(messages[0], '当前账号不允许重置密码。')

@@ -12,14 +12,15 @@ function source(relativePath) {
 }
 
 const iamSettings = source('../components/IamSettingsModule.vue')
+const userDeletion = source('../composables/useIamUserDeletion.js')
 const changeCenter = source('../components/PersonnelChangeCenter.vue')
 const consoleView = source('../../views/PlatformConsoleView.vue')
 
 test('用户详情不再直接停用用户来办理离职', () => {
   assert.doesNotMatch(iamSettings, /mobile: '', status: 'DISABLED'/)
   assert.doesNotMatch(iamSettings, /title: '确认办理离职'/)
-  assert.match(iamSettings, /emit\('personnel-change'/)
-  assert.match(iamSettings, /离职必须通过人员异动中心办理/)
+  assert.match(userDeletion, /emit\('personnel-change'/)
+  assert.match(userDeletion, /离职必须通过人员异动中心办理/)
 })
 
 test('人员异动中心接收预填人员并创建离职申请', () => {

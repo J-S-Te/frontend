@@ -18,6 +18,7 @@ import NativeDashboardView from "./NativeDashboardView.vue"
 import { isolatedEmbedUrl } from "../utils/embedOrigin.mjs"
 import { RELATED_DATA, subscribeRelatedDataChanges } from "@/modules/platform/shared/utils/relatedDataInvalidation.js"
 import { formatDataAnalysisError } from "../utils/errors.js"
+import { useUrlFilterState } from "@/modules/shared/composables/useUrlFilterState.js"
 import "@/modules/data_analysis/styles/data-analysis.css"
 
 const route = useRoute()
@@ -111,6 +112,7 @@ const summaryLoading = ref(false)
 const summaryError = ref("")
 const detailError = ref("")
 const statusFilter = ref("全部")
+useUrlFilterState({ route, router, fields: { status: statusFilter } })
 let iframeRequestVersion = 0
 let summaryRequestVersion = 0
 let embedRenewTimer = null
@@ -398,9 +400,9 @@ onBeforeUnmount(() => {
           <button class="da-nav-item" type="button" @click="returnToUnifiedPortal"><ConsoleIcon name="dashboard" /><span>返回子系统门户</span></button>
         </div>
       </nav>
-      <div class="da-sidebar-user">
+      <div class="da-sidebar-user subsystem-sidebar-user">
         <span class="da-avatar">{{ currentUserInitial }}</span>
-        <span class="da-sidebar-user-copy"><strong>{{ currentUserName }}</strong><small>{{ currentUserRole }}</small></span>
+        <span class="da-sidebar-user-copy"><strong :title="currentUserName">{{ currentUserName }}</strong><small :title="currentUserRole">{{ currentUserRole }}</small></span>
         <button type="button" :disabled="isLoggingOut" aria-label="退出应用系统" @click="logoutSystem"><ConsoleIcon name="logout" /></button>
       </div>
     </aside>

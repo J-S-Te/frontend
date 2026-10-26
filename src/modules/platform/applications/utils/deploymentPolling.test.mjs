@@ -47,7 +47,7 @@ const { descriptor, errors } = parse(await readFile(filename, 'utf8'), { filenam
 assert.deepEqual(errors, [])
 const script = compileScript(descriptor, { id: 'deployment-failure-guidance' })
 const methodNames = ['readableGuidance', 'setError', 'clearError', 'textValue', 'notify',
-  'waitForDeploymentCompletion', 'setDeploymentFailure', 'reapplyEnvironment', 'confirmRuntimeAdoption']
+  'waitForDeploymentCompletion', 'setDeploymentFailure', 'setDeploymentTrackingError', 'reapplyEnvironment', 'confirmRuntimeAdoption']
 const methods = script.scriptSetupAst.filter(node => node.type === 'FunctionDeclaration' && methodNames.includes(node.id.name))
 assert.equal(methods.length, methodNames.length)
 const source = methods.map(node => descriptor.scriptSetup.content.slice(node.start, node.end)).join('\n')
@@ -60,6 +60,8 @@ function onboardingFlow({ states = [], switchApplication = false, observer = pol
   const state = {
     selectedApplication: ref(application), selectedApplicationId: ref(application.application_id),
     canManageRuntime: ref(true), saving: ref(false), deploymentStates: ref({}),
+    // 轮询回写的归属校验依赖组件 setup 中的环境列表（与真实作用域一致）。
+    environments: ref([]),
     pendingRuntimeAdoption: ref(environment),
     ...Object.fromEntries(['errorMessage', 'errorNextAction', 'errorDetail', 'errorTraceId', 'errorCode', 'errorRecovery'].map(key => [key, ref('')])),
   }

@@ -945,9 +945,12 @@
 
 .console-toast {
   position: fixed;
-  z-index: 60;
+  /* Above IAM dialogs (80) and shared confirmations (10000). */
+  z-index: 12000;
   right: 24px;
-  bottom: 24px;
+  top: max(24px, env(safe-area-inset-top));
+  pointer-events: none;
+  overflow-wrap: anywhere;
   display: flex;
   align-items: flex-start;
   gap: 9px;
@@ -1125,7 +1128,7 @@
 
   .console-toast {
     right: 16px;
-    bottom: 16px;
+    top: max(16px, env(safe-area-inset-top));
   }
 }
 
@@ -1771,7 +1774,6 @@
 }
 
 .console-toast {
-  z-index: 60;
   border-radius: 10px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, .25);
 }

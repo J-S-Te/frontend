@@ -7,6 +7,12 @@ import { normalizeAuthorizationSession, principalIdentityID, shouldStartSubsyste
 import { listQuery } from './api/pagination.js'
 import { formatSettlementError } from './utils/errors.js'
 import { useSettlementActions } from './composables/useSettlementActions.js'
+import { useReceiptAllocation } from './composables/useReceiptAllocation.js'
+import { useInvoiceDetail } from './composables/useInvoiceDetail.js'
+import { useReportExport } from './composables/useReportExport.js'
+import { useReceivablePlans } from './composables/useReceivablePlans.js'
+import { useReceiptRegistration } from './composables/useReceiptRegistration.js'
+import { useInvoiceRequests } from './composables/useInvoiceRequests.js'
 
 // useSettlementActions 在 Node 域执行，notify 的 3.2 秒自动清除需要 window.setTimeout 桩。
 globalThis.window = { setTimeout() {} }
@@ -205,7 +211,14 @@ async function viewHarness(overrides = {}) {
     window: { setTimeout() {}, confirm: () => false }, formatSettlementError, ...bindings,
     createRequestScope,
     useSettlementActions,
+    useReceiptAllocation,
+    useInvoiceDetail,
+    useReportExport,
+    useReceivablePlans,
+    useReceiptRegistration,
+    useInvoiceRequests,
     useConfirmDialog: () => ({ dialog: { value: null }, askConfirm: async () => true, accept() {}, cancel() {} }),
+    useDunningCenter: () => ({ policyForm: { value: { recipient_rule: '' } }, dunningActionDialog: { value: null } }),
     getSettlementSession: async () => ({}), ...overrides,
   })
   vm.runInContext(`${script}\nglobalThis.ui = { submitReceipt, act, message, receiptComposerOpen, receiptMatchFor, receiptMatches, error };`, context)

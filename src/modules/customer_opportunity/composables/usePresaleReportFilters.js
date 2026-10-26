@@ -4,9 +4,11 @@
  * 有意与售前列表的筛选选项分离。
  */
 export function createPresaleReportFilters({
-  showReport,
+  showReport = null,
+  isReportOpen = null,
   reportFilters,
-  reportParams,
+  reportParams = null,
+  getReportParams = null,
   reportFilterOptions,
   reportFilterOptionsLoading,
   reportFilterOptionsError,
@@ -19,6 +21,8 @@ export function createPresaleReportFilters({
   const directoryPageSize = 50
   const directoryMaxPages = 200
   const loadGuard = createLatestRequestGuard()
+  const currentReportParams = () => typeof getReportParams === 'function' ? getReportParams() : reportParams()
+  const reportOpen = () => typeof isReportOpen === 'function' ? Boolean(isReportOpen()) : Boolean(showReport?.value)
 
   async function loadOwnerDirectory() {
     const firstPage = await listOwnerDirectory({ page: 1, page_size: directoryPageSize })
@@ -44,10 +48,10 @@ export function createPresaleReportFilters({
     reportFilterOptionsError.value = ''
     try {
       const [filterOptions, directoryUsers] = await Promise.all([
-        getPresaleReportFilterOptions({ ...reportParams(), dimension: undefined }),
+        getPresaleReportFilterOptions({ ...currentReportParams(), dimension: undefined }),
         loadOwnerDirectory(),
       ])
-      if (!loadGuard.isCurrent(requestGeneration) || !showReport.value) return
+      if (!loadGuard.isCurrent(requestGeneration) || !reportOpen()) return
       rememberOwnerDirectory(directoryUsers)
       reportFilterOptions.value = {
         opportunities: filterOptions?.opportunities || [],
@@ -62,7 +66,7 @@ export function createPresaleReportFilters({
       if (reportFilters.person_id && !reportFilterOptions.value.assignees.some((item) => item.value === reportFilters.person_id)) reportFilters.person_id = ''
       if (reportFilters.opportunity_id && !reportFilterOptions.value.opportunities.some((item) => String(item.value) === String(reportFilters.opportunity_id))) reportFilters.opportunity_id = ''
     } catch (value) {
-      if (loadGuard.isCurrent(requestGeneration) && showReport.value) reportFilterOptionsError.value = directoryErrorMessage(value)
+      if (loadGuard.isCurrent(requestGeneration) && reportOpen()) reportFilterOptionsError.value = directoryErrorMessage(value)
     } finally {
       if (loadGuard.isCurrent(requestGeneration)) reportFilterOptionsLoading.value = false
     }

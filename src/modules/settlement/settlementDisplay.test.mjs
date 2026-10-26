@@ -3,6 +3,7 @@ import test from 'node:test'
 import {
   allocationStatusMeta,
   amountOf,
+  buildInvoiceTimelineEvents,
   collectionStatusLabel,
   confirmationState,
   dunningActionStatusLabel,
@@ -82,4 +83,39 @@ test('核销单与分配状态元数据', () => {
   assert.equal(receiptStatusMeta({ status: 'Z' }).tone, 'gray')
   assert.deepEqual(allocationStatusMeta('CONFIRMED'), { label: '已核销', tone: 'success' })
   assert.equal(allocationStatusMeta('REVERSED').label, '已冲销')
+})
+
+test('发票详情时间线：按申请号 / 开票日期 / 红冲申请拼装事件，色调与文案随状态变化', () => {
+  assert.deepEqual(buildInvoiceTimelineEvents(null), [])
+  assert.deepEqual(buildInvoiceTimelineEvents({}), [])
+  assert.deepEqual(buildInvoiceTimelineEvents({ request_no: 'R1' }), [
+    { tone: 'info', title: '提交开票申请', detail: '申请号 R1 · 合同 —' },
+  ])
+
+  const manual = buildInvoiceTimelineEvents({
+    request_no: 'R1', contract_no: 'C1', issue_date: '2026-10-01', issued_by_channel: 'MANUAL',
+  })
+  assert.equal(manual.length, 2)
+  assert.equal(manual[0].detail, '申请号 R1 · 合同 C1')
+  assert.deepEqual(manual[1], { tone: 'success', title: '开票完成', timestamp: '2026-10-01', detail: '人工登记发票并回填台账' })
+  assert.equal(
+    buildInvoiceTimelineEvents({ issue_date: '2026-10-01', issued_by_channel: 'TAX_ADAPTER' })[0].detail,
+    '税控回执已写入台账',
+  )
+
+  const rejected = buildInvoiceTimelineEvents({
+    red_flush_request: { status: 'REJECTED', created_at: 't1', updated_at: 't2', review_reason: '金额不符', reason_code: 'INVOICE_ERROR' },
+  })
+  assert.deepEqual(rejected, [{ tone: 'danger', title: '红冲申请 · 已驳回', timestamp: 't1', detail: '复核意见：金额不符' }])
+
+  const pending = buildInvoiceTimelineEvents({
+    red_flush_request: { status: 'SUBMITTED', updated_at: 't2', reason_code: 'INVOICE_ERROR', reason_detail: '税号错误' },
+  })
+  assert.deepEqual(pending, [{ tone: 'warning', title: '红冲申请 · 待财务复核', timestamp: 't2', detail: '原因：INVOICE_ERROR · 税号错误' }])
+
+  const completed = buildInvoiceTimelineEvents({ red_flush_request: { status: 'COMPLETED', reason_code: 'X' } })
+  assert.equal(completed[0].tone, 'success')
+  assert.equal(completed[0].timestamp, '', 'created_at/updated_at 均缺失时时间戳为空串')
+  assert.equal(completed[0].detail, '原因：X', '无 reason_detail 时不追加分隔符')
+  assert.equal(buildInvoiceTimelineEvents({ red_flush_request: { status: 'FAILED', reason_code: 'X' } })[0].tone, 'danger')
 })

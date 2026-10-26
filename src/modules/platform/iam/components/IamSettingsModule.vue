@@ -7,6 +7,10 @@ import { useBeforeUnloadGuard } from '../../../shared/composables/useBeforeUnloa
 import { useUrlFilterState } from '../../../shared/composables/useUrlFilterState.js'
 import { useDialogFocusTrap } from '../../../shared/composables/useDialogFocusTrap.js'
 import { useConfirmAction } from '@/modules/platform/shared/composables/useConfirmAction.js'
+import { useIamValidityEditor } from '@/modules/platform/iam/composables/useIamValidityEditor'
+import { useIamUserDeletion } from '@/modules/platform/iam/composables/useIamUserDeletion'
+import { useIamUserAuthorizationPreview } from '@/modules/platform/iam/composables/useIamUserAuthorizationPreview'
+import { useIamPasswordReset } from '@/modules/platform/iam/composables/useIamPasswordReset'
 import { useOrganizationDirectory } from '@/modules/platform/iam/composables/useOrganizationDirectory.js'
 import { includesFilter } from '@/modules/platform/iam/utils/listFilter'
 import {
@@ -35,6 +39,7 @@ import {
   technicalDetailRows,
   displayLoginAccountType,
   effectiveAccountStatus,
+  effectiveUserStatus,
   displayMembershipType,
   displayStatus,
   formatDateTime,
@@ -82,7 +87,6 @@ import {
   assignableActiveCatalogRoles,
   catalogLastSyncedAt as readCatalogLastSyncedAt,
   catalogMaxEffectiveRoles,
-  catalogRolePermissions,
   catalogRoles,
   catalogSyncText as authorizationCatalogSyncText,
   catalogVersion,
@@ -90,6 +94,7 @@ import {
   isCatalogSynchronized,
 } from '@/modules/platform/iam/utils/applicationAuthorizationCatalog'
 import { authorizationEntryLayer, duplicatedInheritedRoleCodes } from '@/modules/platform/iam/utils/authorizationEntryLayer'
+import { applicationDisplayName, authorizationScopeText, authorizationSourceName, authorizationSourceTypeName, authorizationValidityText, normalizeScopeType, permissionCode, roleAuthorizationSignature, roleCode, rolePermissionCodes, rolePermissionsFor, toDateTimeLocal, toRFC3339, uniqueValues } from '@/modules/platform/iam/utils/authorizationHelpers'
 import {
   buildOrganizationTree,
   organizationDescendantIds,
@@ -142,8 +147,6 @@ const membershipInheritanceDraft = ref(true)
 const membershipInheritanceSaving = ref(false)
 const membershipInheritanceError = ref('')
 const membershipInheritanceConflict = ref(false)
-const validityEditor = ref(null)
-const validitySaving = ref(false)
 const loading = reactive({ users: false, accounts: false, organizations: false, positions: false, memberships: false, positionAuthorizationTemplates: false })
 const errorMessage = ref('')
 const pageSize = 50
@@ -163,11 +166,6 @@ const accounts = ref([])
 // organizations 由 useOrganizationDirectory 持有（见 safeCall 之后的解构）。
 const memberships = ref([])
 const positions = ref([])
-const passwordResetDialog = ref(null)
-const temporaryPassword = ref(null)
-const userDeletionDialog = ref(null)
-const resettingPassword = ref(false)
-const deletingUser = ref(false)
 const deletingPositionId = ref('')
 const deletingOrganizationId = ref('')
 const updatingAccountId = ref('')
@@ -206,16 +204,9 @@ const applicationEnvironments = ref([])
 const applicationEnvironmentsLoading = ref(false)
 // 用户详情弹窗内的“有效授权总览”卡片：逐个读取已接入应用的用户访问快照，
 // 再按应用和来源合并展示；任一应用失败不会阻塞个人例外授权的维护。
-const userAuthorizationPreview = ref(null)
-const userAuthorizationPreviewLoading = ref(false)
-const userAuthorizationPreviewUnavailable = ref(false)
-const userAuthorizationPreviewErrorCount = ref(0)
 // 保留每个目标应用的原始读取结果（成功/失败/加载中），使失败应用仍单独成行。
-const userAuthorizationPreviewEntries = ref([])
 // 初始总览读取的完整应用集合（包含基础平台本身），供全量刷新复用，避免刷新后丢行。
-const userAuthorizationPreviewTargetApplications = ref([])
 // 每个应用的重试序号：同一应用连续重试时，只允许最后一次响应回写。
-const userAuthorizationPreviewRetryVersions = new Map()
 // 用户详情的个人例外授权默认收起；只有显式展开或点击某应用的“管理个人例外”才显示。
 const applicationAccessExpanded = ref(false)
 // 已加载草稿的指纹；用于切换应用时保护未保存修改，不改变后端保存语义。
@@ -473,10 +464,10 @@ const groupCountLabel = computed(() => {
 })
 
 const metrics = computed(() => [
-  { panelKey: 'users', label: '有效用户', value: pagination.users.total, note: '服务端分页总数 /api/v1/users', icon: 'user', tone: 'blue' },
-  { panelKey: 'accounts', label: '登录账号', value: pagination.accounts.total, note: '服务端分页总数（含未删除用户的停用账号）/api/v1/accounts', icon: 'account', tone: 'violet' },
-  { panelKey: 'organizations', label: '有效组织', value: pagination.organizations.total, note: '服务端分页总数 /api/v1/org-units', icon: 'organization', tone: 'green' },
-  { panelKey: 'memberships', label: '任职关系', value: pagination.memberships.total, note: '服务端分页总数 /api/v1/memberships', icon: 'link', tone: 'orange' },
+  { panelKey: 'users', label: '有效用户', value: pagination.users.total, note: '用户目录总数', icon: 'user', tone: 'blue' },
+  { panelKey: 'accounts', label: '登录账号', value: pagination.accounts.total, note: '含停用账号', description: '账号总数包含未删除用户的启用与停用账号', icon: 'account', tone: 'violet' },
+  { panelKey: 'organizations', label: '有效组织', value: pagination.organizations.total, note: '组织目录总数', icon: 'organization', tone: 'green' },
+  { panelKey: 'memberships', label: '任职关系', value: pagination.memberships.total, note: '任职记录总数', icon: 'link', tone: 'orange' },
 ].filter((metric) => canAccessPanel(panels.find((item) => item.key === metric.panelKey))))
 
 // includesFilter 已提取到 utils/listFilter.js，供各面板过滤计算共用。
@@ -510,11 +501,6 @@ const filteredMemberships = computed(() => filteredMembershipsFromGroups(groupMe
   panelFilters.memberships,
 )))
 
-const selectedPasswordResetAccount = computed(() => {
-  const dialog = passwordResetDialog.value
-  if (!dialog) return null
-  return dialog.accounts.find((account) => account.account_id === dialog.accountId) || null
-})
 
 function emitToast(message) {
   emit('toast', message)
@@ -525,33 +511,12 @@ function selectPanel(key) {
   detail.value = null
 }
 
-function uniqueValues(values) {
-  return [...new Set(values.filter((value) => String(value || '').trim()).map((value) => String(value).trim()))].sort()
-}
-
-function roleCode(role) {
-  return typeof role === 'string' ? role : role?.code || role?.role_code || ''
-}
-
-function permissionCode(permission) {
-  if (typeof permission === 'string') return permission
-  return permission?.code || permission?.permission_code || ''
-}
-
 function permissionName(permission) {
   if (typeof permission === 'string') {
     const catalogPermission = authorizationCatalog.value?.permissions?.find((item) => item.code === permission)
     return catalogPermission?.name || permission
   }
   return permission?.name || permission?.code || permission?.permission_code || '未命名权限'
-}
-
-function rolePermissionsFor(role) {
-  return catalogRolePermissions(role)
-}
-
-function rolePermissionCodes(role) {
-  return uniqueValues(rolePermissionsFor(role).map((permission) => permissionCode(permission)))
 }
 
 
@@ -604,36 +569,6 @@ function onExceptionRoleToggle(code, event) {
   })
 }
 
-function authorizationSourceTypeName(role) {
-  const type = String(role?.source_type || '').toUpperCase()
-  if (type === 'ORG_UNIT') return '组织单元'
-  if (type === 'POSITION') return '岗位'
-  if (type === 'USER') return '用户直接授权'
-  return type || '未知来源'
-}
-
-function authorizationSourceName(role) {
-  return role?.source_name || role?.source_id || '—'
-}
-
-function authorizationScopeText(role) {
-  if (normalizeScopeType(role?.scope_type) === 'ENVIRONMENT') {
-    return `指定环境：${role?.environment_code || '未指定'}`
-  }
-  return '整个应用'
-}
-
-function authorizationValidityText(role) {
-  if (!role?.valid_from && !role?.valid_until) return '长期有效'
-  const start = role?.valid_from ? formatDateTime(role.valid_from) : '立即生效'
-  const end = role?.valid_until ? formatDateTime(role.valid_until) : '长期有效'
-  return `${start} 至 ${end}`
-}
-
-function applicationDisplayName(application) {
-  return application?.name || application?.display_name || application?.code || '未命名应用'
-}
-
 function resetApplicationAuthorizationState() {
   applicationsRequestSeq.value += 1
   applicationAuthorizationRequestSeq.value += 1
@@ -661,33 +596,6 @@ function resetApplicationAuthorizationState() {
   authorizationDraft.valid_from = ''
   authorizationDraft.valid_until = ''
   authorizationDraft.apply_to_existing = false
-}
-
-function toDateTimeLocal(value) {
-  if (!value) return ''
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ''
-  const pad = (number) => String(number).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
-}
-
-function toRFC3339(value) {
-  if (!value) return null
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? null : date.toISOString()
-}
-
-function normalizeScopeType(value) {
-  return String(value || '').toUpperCase() === 'ENVIRONMENT' ? 'ENVIRONMENT' : 'APPLICATION'
-}
-
-function roleAuthorizationSignature(role) {
-  return [
-    normalizeScopeType(role?.scope_type),
-    String(role?.environment_code || ''),
-    String(role?.valid_from || ''),
-    String(role?.valid_until || ''),
-  ].join('|')
 }
 
 // 不同时间窗可原样往返；这里只提示差异，只有显式统一设置才覆盖已有配置。
@@ -807,110 +715,15 @@ function closeDetail() {
   })
 }
 
-async function loadUserAuthorizationPreview(userId, targetApplications = applications.value, detailRequestId = detailAuthorizationRequestSeq.value) {
-  // 按应用读取后端已经计算好的用户有效授权。岗位模板预览接口只接受 position_id，
-  // 不能拿 user_id 代替；这里必须使用真实的用户应用访问接口做跨应用聚合。
-  userAuthorizationPreview.value = null
-  userAuthorizationPreviewUnavailable.value = false
-  userAuthorizationPreviewErrorCount.value = 0
-  const isCurrentRequest = () => detailRequestId === detailAuthorizationRequestSeq.value
-    && detail.value?.kind === 'user'
-    && String(detail.value?.item?.user_id || '') === String(userId || '')
-  if (!userId) {
-    userAuthorizationPreviewLoading.value = false
-    userAuthorizationPreviewUnavailable.value = true
-    return
-  }
-  if (!Array.isArray(targetApplications)) {
-    userAuthorizationPreviewLoading.value = false
-    userAuthorizationPreviewUnavailable.value = true
-    return
-  }
-  if (isCurrentRequest()) userAuthorizationPreviewTargetApplications.value = [...targetApplications]
-  userAuthorizationPreviewLoading.value = true
-  userAuthorizationPreviewEntries.value = []
-  userAuthorizationPreviewRetryVersions.clear()
-  userAuthorizationPreview.value = null
-  userAuthorizationPreviewErrorCount.value = 0
-  try {
-    const entries = await Promise.all((Array.isArray(targetApplications) ? targetApplications : []).map(async (application) => {
-      try {
-        return { application, access: await getApplicationAccess(userId, application.code) }
-      } catch (error) {
-        return { application, error: formatUserError(error, { fallback: '读取应用授权失败。' }) }
-      }
-    }))
-    if (!isCurrentRequest()) return
-    userAuthorizationPreviewEntries.value = entries
-    applyUserAuthorizationPreviewEntries(entries)
-    userAuthorizationPreviewUnavailable.value = entries.length > 0 && entries.every((entry) => entry.error)
-  } catch (_error) {
-    if (isCurrentRequest()) userAuthorizationPreviewUnavailable.value = true
-  } finally {
-    if (isCurrentRequest()) userAuthorizationPreviewLoading.value = false
-  }
-}
 
-function applyUserAuthorizationPreviewEntries(entries) {
-  userAuthorizationPreview.value = buildUserAuthorizationOverview(entries)
-  userAuthorizationPreviewErrorCount.value = entries.filter((entry) => entry.error).length
-}
-
-async function retryUserAuthorizationPreview(applicationCode, { silent = false } = {}) {
-  const code = String(applicationCode || '').trim()
-  const userId = detail.value?.kind === 'user' ? detail.value?.item?.user_id : ''
-  if (!code || !userId) return
-  const entries = userAuthorizationPreviewEntries.value
-  const index = entries.findIndex((entry) => String(entry?.application?.code || '').trim() === code)
-  if (index < 0 || entries[index].loading) return
-  const application = entries[index].application
-  const retryVersion = (userAuthorizationPreviewRetryVersions.get(code) || 0) + 1
-  userAuthorizationPreviewRetryVersions.set(code, retryVersion)
-  const next = silent
-    ? entries.map((entry) => ({ ...entry }))
-    : entries.map((entry, entryIndex) => entryIndex === index ? { application, loading: true } : entry)
-  if (!silent) {
-    userAuthorizationPreviewEntries.value = next
-    applyUserAuthorizationPreviewEntries(next)
-  }
-  const requestId = detailAuthorizationRequestSeq.value
-  const isCurrentRequest = () => requestId === detailAuthorizationRequestSeq.value &&
-    userAuthorizationPreviewRetryVersions.get(code) === retryVersion &&
-    detail.value?.kind === 'user' && detail.value?.item?.user_id === userId
-  try {
-    const access = await getApplicationAccess(userId, code)
-    if (!isCurrentRequest()) return
-    next[index] = { application, access }
-  } catch (error) {
-    if (!isCurrentRequest()) return
-    next[index] = { application, error: formatUserError(error, { fallback: '读取应用授权失败。' }) }
-  } finally {
-    if (isCurrentRequest()) {
-      userAuthorizationPreviewEntries.value = next
-      applyUserAuthorizationPreviewEntries(next)
-      userAuthorizationPreviewUnavailable.value = next.length > 0 && next.every((entry) => entry.error)
-    }
-  }
-}
-
-async function refreshUserAuthorizationPreview() {
-  const userId = detail.value?.kind === 'user' ? detail.value?.item?.user_id : ''
-  const targets = userAuthorizationPreviewTargetApplications.value.length
-    ? userAuthorizationPreviewTargetApplications.value
-    : applications.value
-  if (!userId || !canReadApplicationAuthorization.value || !targets.length || userAuthorizationPreviewLoading.value) return
-  await loadUserAuthorizationPreview(userId, targets, detailAuthorizationRequestSeq.value)
-}
-
-function resetUserAuthorizationPreview() {
-  userAuthorizationPreview.value = null
-  userAuthorizationPreviewLoading.value = false
-  userAuthorizationPreviewUnavailable.value = false
-  userAuthorizationPreviewErrorCount.value = 0
-  userAuthorizationPreviewEntries.value = []
-  userAuthorizationPreviewTargetApplications.value = []
-  userAuthorizationPreviewRetryVersions.clear()
-}
+const {
+  userAuthorizationPreview, userAuthorizationPreviewLoading, userAuthorizationPreviewUnavailable,
+  userAuthorizationPreviewErrorCount, userAuthorizationPreviewEntries, userAuthorizationPreviewTargetApplications,
+  loadUserAuthorizationPreview, retryUserAuthorizationPreview, refreshUserAuthorizationPreview,
+  resetUserAuthorizationPreview,
+} = useIamUserAuthorizationPreview({
+  detail, detailAuthorizationRequestSeq, applications, canReadApplicationAuthorization,
+})
 
 function applyApplicationAccess(access) {
   applicationAccess.value = access || null
@@ -1910,202 +1723,30 @@ async function toggleAccountStatus(account) {
   }
 }
 
-function openValidityEditor(kind, item) {
-  const validUntil = item?.valid_until ? toDateTimeLocal(item.valid_until) : defaultAccountValidUntil()
-  validityEditor.value = {
-    kind,
-    item,
-    mode: item?.valid_until ? 'TEMPORARY' : 'PERMANENT',
-    valid_until: validUntil,
-  }
-}
 
-function closeValidityEditor() {
-  if (!validitySaving.value) validityEditor.value = null
-}
 
-async function saveValidity() {
-  const draft = validityEditor.value
-  if (!draft || validitySaving.value) return
-  const validUntil = draft.mode === 'PERMANENT' ? null : resolveExpiresAt(draft.valid_until)
-  if (draft.mode !== 'PERMANENT' && (!validUntil || new Date(validUntil).getTime() <= Date.now())) {
-    emitToast('有效截止时间必须晚于当前时间。')
-    return
-  }
-  const item = draft.item
-  const version = Number(item?.version)
-  if (!Number.isInteger(version) || version < 1) {
-    emitToast('版本信息无效，请刷新后重试。')
-    return
-  }
-  validitySaving.value = true
-  try {
-    let updated
-    if (draft.kind === 'user') {
-      updated = await updateUser({
-        userId: item.user_id,
-        displayName: item.display_name,
-        employeeNo: item.employee_no || '',
-        email: item.email || '',
-        mobile: undefined,
-        status: item.status,
-        version,
-        validUntil,
-        updateValidity: true,
-      })
-    } else {
-      updated = await updateAccountStatus({
-        accountId: item.account_id,
-        status: item.status,
-        version,
-        validUntil,
-        updateValidity: true,
-      })
-    }
-    Object.assign(item, updated)
-    if (detail.value?.item === item) detail.value.item = item
-    emitToast(`${draft.kind === 'user' ? '用户' : '账号'}有效期已更新。`)
-    validityEditor.value = null
-  } catch (error) {
-    emitToast(formatUserError(error, { fallback: '有效期更新失败。' }))
-  } finally {
-    validitySaving.value = false
-  }
-}
 
-// 密码重置始终以用户详情中选定的 account_id 为键；多账号用户必须逐个明确操作，
-// 不能仅凭姓名或 user_id 猜测目标登录账号。
-function openPasswordResetForAccount(account, userName = '') {
-  if (!account?.account_id) {
-    emitToast('未找到可重置密码的登录账号。')
-    return
-  }
-  passwordResetDialog.value = { accountId: account.account_id, accounts: [account], userName, initialize: account.password_initialized === false }
-}
+const {
+  passwordResetDialog, temporaryPassword, resettingPassword, temporaryPasswordVisible,
+  selectedPasswordResetAccount,
+  openPasswordResetForAccount, openPasswordResetFromUserDetail, closePasswordResetDialog,
+  confirmPasswordReset, copyTemporaryPassword, revealTemporaryPassword, hideTemporaryPassword,
+  closeTemporaryPassword,
+} = useIamPasswordReset({
+  detail, detailAuthorizationRequestSeq, isUserAuthorizationSubject,
+  loadAccounts, loadAuthorizationOverview, copyText, emitToast,
+})
 
-function openPasswordResetFromUserDetail(account) {
-  if (!isUserAuthorizationSubject.value) return
-  openPasswordResetForAccount(account, detail.value?.item?.display_name || detail.value?.item?.name || '')
-}
+const { validityEditor, validitySaving, openValidityEditor, closeValidityEditor, saveValidity } = useIamValidityEditor({
+  detail, toDateTimeLocal, emitToast, formatUserError,
+})
 
-function closePasswordResetDialog() {
-  if (resettingPassword.value) return
-  passwordResetDialog.value = null
-}
+const {
+  userDeletionDialog, deletingUser, openUserDeletionDialog, closeUserDeletionDialog, confirmUserDeletion, terminateEmployee,
+} = useIamUserDeletion({
+  detail, closeDetail, loadUsers, loadAccounts, loadMemberships, openConfirm, emitToast, formatUserError, emit,
+})
 
-async function confirmPasswordReset() {
-  const account = selectedPasswordResetAccount.value
-  if (!account?.account_id || resettingPassword.value) return
-  const initializing = account.password_initialized === false
-  let passwordResetConfirmed = false
-
-  resettingPassword.value = true
-  try {
-    const result = await resetAccountPassword({ accountId: account.account_id, version: account.version || 0 })
-    if (!result?.temporary_password) {
-      throw new IamError('后端未返回一次性临时密码，无法安全完成密码重置。')
-    }
-    passwordResetDialog.value = null
-    temporaryPassword.value = {
-      accountId: result.account_id || account.account_id,
-      accountName: account.account_name || account.account_id,
-      value: result.temporary_password,
-      initialized: initializing,
-    }
-    passwordResetConfirmed = true
-    const userId = detail.value?.kind === 'user' ? detail.value.item?.user_id : ''
-    await Promise.all([
-      loadAccounts(),
-      userId ? loadAuthorizationOverview(userId, detailAuthorizationRequestSeq.value) : Promise.resolve(),
-    ])
-    emitToast(initializing ? '登录密码已初始化，请立即复制并通过安全渠道交付。' : '密码已重置，请立即复制临时密码并通过安全渠道交付。')
-  } catch (error) {
-    const reason = formatUserError(error, { fallback: '请刷新账号列表核对状态。' }).slice(0, 180)
-    emitToast(passwordResetConfirmed
-      ? `密码已${initializing ? '初始化' : '重置'}，但账号列表未刷新。${reason}请先安全交付当前一次性临时密码，勿重复重置。`
-      : formatUserError(error, { fallback: '密码重置失败。' }))
-  } finally {
-    resettingPassword.value = false
-  }
-}
-
-async function copyTemporaryPassword() {
-  const value = temporaryPassword.value?.value
-  if (!value) return
-  const copied = await copyText(value, { success: '临时密码已复制，请立即通过安全渠道交付。' })
-  if (!copied) return
-  // SEC-X10：临时密码是敏感明文，复制成功后安排延时自动清除剪贴板；
-  // 非安全上下文（HTTP 回退复制）无法在复制之后回写剪贴板，降级为手动覆盖提示。
-  const { supported } = scheduleSensitiveClipboardClear(value)
-  if (!supported) {
-    emitToast('当前浏览器环境无法自动清除剪贴板，交付后请手动覆盖剪贴板内容。')
-  }
-}
-
-// 临时密码揭示状态：默认遮罩，避免屏幕共享/截屏/拼写补全等渠道意外泄露。
-const temporaryPasswordVisible = ref(false)
-function revealTemporaryPassword() {
-  if (!temporaryPassword.value?.value) return
-  temporaryPasswordVisible.value = true
-}
-function hideTemporaryPassword() {
-  temporaryPasswordVisible.value = false
-}
-
-// 关闭弹窗会清除浏览器内存中的明文；此页面无法再次查看，未复制时只能由管理员重新发起重置。
-function closeTemporaryPassword() {
-  temporaryPassword.value = null
-  temporaryPasswordVisible.value = false
-}
-
-function openUserDeletionDialog(user) {
-  if (!user?.user_id) {
-    emitToast('未找到要删除的用户。')
-    return
-  }
-  userDeletionDialog.value = user
-}
-
-function closeUserDeletionDialog() {
-  if (deletingUser.value) return
-  userDeletionDialog.value = null
-}
-
-async function confirmUserDeletion() {
-  const user = userDeletionDialog.value
-  if (!user?.user_id || deletingUser.value) return
-
-  deletingUser.value = true
-  try {
-    await deleteUser({ userId: user.user_id, version: user.version || 0 })
-    userDeletionDialog.value = null
-    if (detail.value?.kind === 'user' && detail.value.item?.user_id === user.user_id) closeDetail()
-    await Promise.all([loadUsers(), loadAccounts(), loadMemberships()])
-    emitToast(`用户 ${user.display_name || user.user_id} 已删除，关联登录账号和任职关系已同步删除。`)
-  } catch (error) {
-    emitToast(formatUserError(error, { fallback: '删除用户失败。' }))
-  } finally {
-    deletingUser.value = false
-  }
-}
-
-// 离职不能走「直接 PATCH 用户为 DISABLED」的旁路：
-// 该路径会立刻停用账号、凭据、任职和会话，绕过异动审批与责任交接，而且请求携带的
-// mobile:"" 会把手机号密文与摘要写成 NULL。这里改为把员工带到人员异动中心发起离职申请，
-// 由既有的审批与交接链路执行；查询与目录刷新沿用异动中心自己的逻辑。
-function terminateEmployee(user) {
-  if (!user?.user_id || (user.status || '').toUpperCase() !== 'ACTIVE') return
-  openConfirm({
-    title: '离职必须通过人员异动中心办理',
-    description: `离职会停用 ${user.display_name || user.user_id} 的账号、凭据、任职和登录会话，必须经过异动审批与责任交接。确认后将前往「人员异动中心」为该员工创建离职申请。`,
-    confirmText: '前往人员异动中心',
-    danger: true,
-    onConfirm: async () => {
-      emit('personnel-change', { user_id: user.user_id, display_name: user.display_name })
-      return true
-    },
-  })
-}
 
 async function openOrganizationEditor(organization) {
   if (!organization?.org_unit_id) return
@@ -2203,6 +1844,7 @@ const editor = ref(null) // { kind, label }
 const editorModal = ref(null)
 // 编辑器表单位于 IdentityEditorModal 子组件；焦点陷阱容器经子组件 expose 的 form 元素获取。
 const editorElement = computed(() => editorModal.value?.formEl ?? null)
+const confirmElement = ref(null)
 const form = reactive({})
 const editorInitialSnapshot = ref('')
 const saving = ref(false)
@@ -2212,7 +1854,9 @@ function markEditorClean() {
 }
 
 useBeforeUnloadGuard(computed(() => Boolean(editor.value) && hasUnsavedChanges(editorInitialSnapshot.value, form)))
-useDialogFocusTrap({ active: computed(() => Boolean(editor.value)), container: editorElement, initialFocus: 'input:not([type="hidden"]), select, textarea' })
+useDialogFocusTrap({ active: computed(() => Boolean(editor.value) && !confirmDialog.value), container: editorElement, initialFocus: 'input:not([type="hidden"]), select, textarea' })
+// 二次确认必须接管键盘焦点，防止 Tab 回到下层未保存的表单。
+useDialogFocusTrap({ active: computed(() => Boolean(confirmDialog.value)), container: confirmElement })
 
 onBeforeRouteLeave(() => {
   if (!editor.value) return true
@@ -2665,7 +2309,7 @@ onBeforeUnmount(() => {
     <div class="iam-summary-grid">
       <article v-for="metric in metrics" :key="metric.label" class="iam-summary-card" :class="metric.tone">
         <span class="iam-summary-icon"><ConsoleIcon :name="metric.icon" /></span>
-        <div><small>{{ metric.label }}</small><strong>{{ metric.value }}</strong><p>{{ metric.note }}</p></div>
+        <div><small>{{ metric.label }}</small><strong>{{ metric.value }}</strong><p :title="metric.description || metric.note">{{ metric.note }}</p></div>
       </article>
     </div>
 
@@ -2804,7 +2448,7 @@ onBeforeUnmount(() => {
         <div v-if="isUserAuthorizationSubject" class="iam-user-detail-hero">
           <span class="iam-user-detail-avatar">{{ String(detail.item?.display_name || detail.item?.name || '?').trim().slice(0, 1) }}</span>
           <div class="iam-user-detail-identity">
-            <div class="iam-user-detail-name-row"><h4>{{ detail.item?.display_name || detail.item?.name || '未命名用户' }}</h4><span class="console-badge" :class="String(detail.item?.status || '').toUpperCase() === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(detail.item?.status) }}</span></div>
+            <div class="iam-user-detail-name-row"><h4>{{ detail.item?.display_name || detail.item?.name || '未命名用户' }}</h4><span class="console-badge" :class="effectiveUserStatus(detail.item) === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(effectiveUserStatus(detail.item)) }}</span></div>
             <p><span>{{ detail.item?.employee_no || '未生成员工编号' }}</span><i /> <span>{{ detail.item?.email || '未填写邮箱' }}</span></p>
           </div>
           <div class="iam-user-detail-hero-note"><ConsoleIcon name="link" /><span>人员主档案<br /><small>任职关系统一维护</small></span></div>
@@ -3065,20 +2709,6 @@ onBeforeUnmount(() => {
       </section>
     </div>
 
-    <!-- 通用危险/重要操作确认弹窗。替代所有 window.confirm，避免 WebView 下静默失败。 -->
-    <div v-if="confirmDialog" class="iam-modal-backdrop" role="presentation" @click.self="closeConfirm" @keydown.esc="closeConfirm">
-      <section class="iam-modal iam-confirm-modal" role="dialog" aria-modal="true" :aria-label="confirmDialog.title" @keydown.esc="closeConfirm">
-        <header><div><p>{{ confirmDialog.danger ? '危险操作' : '请确认' }}</p><h3>{{ confirmDialog.title }}</h3></div><button class="console-modal-close" type="button" :aria-label="`关闭${confirmDialog.title}`" :disabled="confirmDialog.busy" @click="closeConfirm"><ConsoleIcon name="close" /></button></header>
-        <div class="iam-confirm-body">
-          <p style="white-space: pre-line;">{{ confirmDialog.description }}</p>
-        </div>
-        <footer>
-          <button class="console-button ghost" type="button" :disabled="confirmDialog.busy" @click="closeConfirm">{{ confirmDialog.cancelText }}</button>
-          <button :class="['console-button', confirmDialog.danger ? 'iam-danger-button' : 'primary']" type="button" :disabled="confirmDialog.busy" @click="runConfirm">{{ confirmDialog.confirmText }}</button>
-        </footer>
-      </section>
-    </div>
-
     <BatchUserImportDialog
       v-if="batchImportVisible"
       :organizations="organizations"
@@ -3120,5 +2750,19 @@ onBeforeUnmount(() => {
       @save="saveEditor"
       @reload-references="loadEditorReferences(editor.kind)"
     />
+    <!-- 通用危险/重要操作确认弹窗。替代所有 window.confirm，避免 WebView 下静默失败。 -->
+    <div v-if="confirmDialog" class="iam-modal-backdrop" role="presentation" @click.self="closeConfirm" @keydown.esc.stop="closeConfirm">
+      <section ref="confirmElement" class="iam-modal iam-confirm-modal" role="dialog" aria-modal="true" :aria-label="confirmDialog.title" @keydown.esc.stop="closeConfirm">
+        <header><div><p>{{ confirmDialog.danger ? '危险操作' : '请确认' }}</p><h3>{{ confirmDialog.title }}</h3></div><button class="console-modal-close" type="button" :aria-label="`关闭${confirmDialog.title}`" :disabled="confirmDialog.busy" @click="closeConfirm"><ConsoleIcon name="close" /></button></header>
+        <div class="iam-confirm-body">
+          <p style="white-space: pre-line;">{{ confirmDialog.description }}</p>
+        </div>
+        <footer>
+          <button class="console-button ghost" type="button" :disabled="confirmDialog.busy" @click="closeConfirm">{{ confirmDialog.cancelText }}</button>
+          <button :class="['console-button', confirmDialog.danger ? 'iam-danger-button' : 'primary']" type="button" :disabled="confirmDialog.busy" @click="runConfirm">{{ confirmDialog.confirmText }}</button>
+        </footer>
+      </section>
+    </div>
+
   </section>
 </template>

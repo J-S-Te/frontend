@@ -5,7 +5,8 @@ import vm from 'node:vm'
 import { createRequestScope } from '../../platform/shared/composables/requestScope.js'
 
 const view = await readFile(new URL('./ProjectManagementView.vue', import.meta.url), 'utf8')
-const body = view.slice(view.indexOf('async function openDecompositionAdjust()'), view.indexOf('function addAdjustItem()'))
+const adjustSource = await readFile(new URL('../composables/useDecompositionAdjust.js', import.meta.url), 'utf8')
+const body = adjustSource.slice(adjustSource.indexOf('async function openDecompositionAdjust()'), adjustSource.indexOf('function addAdjustItem()'))
 function context() {
   return {
     decompositionProject: { value: { id: 'PJ-1' } },
@@ -68,14 +69,14 @@ test('补充协议选项复核历史原编号、客户及审批状态，并绑�
 })
 
 test('项目切换后不能提交旧项目补充协议草稿', async () => {
-  const start = view.indexOf('async function submitDecompositionAdjust()')
-  const end = view.indexOf('async function toggleRule(', start)
+  const start = adjustSource.indexOf('async function submitDecompositionAdjust()')
+  const end = adjustSource.indexOf('  return {', start)
   const c = context()
   let writes = 0
   c.adjustProjectID.value = 'PJ-OLD'
   c.adjustOpen.value = true
   c.adjustDecomposition = async () => { writes++ }
-  await vm.runInNewContext(`${view.slice(start, end)}; submitDecompositionAdjust()`, c)
+  await vm.runInNewContext(`${adjustSource.slice(start, end)}; submitDecompositionAdjust()`, c)
   assert.equal(writes, 0)
   assert.equal(c.adjustOpen.value, false)
 })

@@ -325,6 +325,14 @@ router.beforeEach(async (to) => {
 
 router.afterEach((to) => {
   document.title = `${to.meta.title || '基础能力平台'} · 基础能力平台`
+  // 键盘/读屏用户在路由切换后从主要内容重新开始，而不是停留在侧栏触发按钮上。
+  window.requestAnimationFrame(() => {
+    const main = document.querySelector('main')
+    if (!main) return
+    if (!main.id) main.id = 'main-content'
+    main.setAttribute('tabindex', '-1')
+    main.focus({ preventScroll: true })
+  })
 })
 
 export default router

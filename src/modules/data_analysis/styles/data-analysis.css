@@ -201,10 +201,10 @@
 .da-empty b { color: var(--da-body); font-size: 13.5px; }
 .da-empty span { font-size: 12px; }
 .da-empty-mini { padding: 30px 10px; color: var(--da-faint); text-align: center; font-size: 12px; }
-.da-toast { position: fixed; z-index: 60; bottom: 24px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-radius: 10px; background: #0f172a; color: #fff; font-size: 13px; font-weight: 500; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
-.da-toast span { width: 18px; height: 18px; display: grid; place-items: center; border-radius: 50%; background: var(--da-green); color: #fff; font-size: 11px; }
-.da-toast-enter-active, .da-toast-leave-active { transition: .2s ease; }
-.da-toast-enter-from, .da-toast-leave-to { opacity: 0; transform: translate(-50%, 8px); }
+
+
+
+
 
 /* —— 响应式 —— */
 @media (max-width: 900px) {
@@ -231,7 +231,7 @@
   .da-filters { flex-wrap: wrap; }
   .da-filters label { width: 100%; }
   .da-button { min-height: 44px; }
-  .da-toast { bottom: 16px; }
+
 }
 
 @media (prefers-reduced-motion: reduce) {

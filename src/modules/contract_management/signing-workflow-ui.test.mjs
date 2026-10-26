@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises'
 
 const source = await readFile(new URL('./views/ContractManagementView.vue', import.meta.url), 'utf8')
 const api = await readFile(new URL('./api/contract.js', import.meta.url), 'utf8')
+const ledgerSource = await readFile(new URL('./composables/useSigningLedger.js', import.meta.url), 'utf8')
 
 test('signing ledger keeps the current UI system and exposes prototype workflow filters and metrics', () => {
   for (const text of ['已完成签署', '签署进行中', '本月完成', '已失效', '全部签署方式', '全部状态']) {
@@ -65,13 +66,13 @@ test('realtime signing refresh does not overwrite shipment or verification forms
   assert.match(source, /if \(preserveForms\) return/)
   assert.match(source, /applySigningRecord\(detailResult\.value, \{ preserveForms: true \}\)/)
 })
-test('signing detail responses are invalidated by sequence and cannot pin the loading state', () => {
-  assert.match(source, /let signingDetailSequence = 0/)
-  assert.match(source, /const isCurrent = \(\) => sequence === signingDetailSequence/)
+test('signing detail responses are invalidated by request scope and cannot pin the loading state', () => {
+  assert.match(source, /const signingDetailScope = createRequestScope\(\)/)
+  assert.match(source, /const isCurrent = \(\) => signingDetailScope\.isCurrent\(ticket\)/)
   assert.match(source, /finally \{\s*if \(isCurrent\(\)\) signingDetailLoading\.value = false/)
   assert.match(source, /String\(detail\.contract\.id \|\| ''\) !== String\(contractID\)/)
   assert.match(source, /String\(detail\?\.contract\?\.id \|\| ''\) !== String\(contractID\)/)
-  assert.match(source, /signingDetailSequence \+= 1/)
+  assert.match(source, /signingDetailScope\.invalidate\(\)/)
   assert.match(source, /selectedSigningRecord\.value\?\.contract\.recordId === contractID\) closeSigningRecord\(\)/)
 })
 
@@ -99,12 +100,12 @@ test('signing confirmation carries the verified document version and hash', () =
 
 
 test('signing ledger filters and paginates through the server', () => {
-  assert.match(source, /async function refreshSigningRecords\(\{ append = false, limit = 50 \} = \{\}\)/)
-  assert.match(source, /keyword: signingKeyword\.value\.trim\(\)/)
-  assert.match(source, /status: signingStatusFilter\.value/)
-  assert.match(source, /offset: append \? signingRecords\.value\.length : 0/)
-  assert.match(source, /signingTotal\.value = Number\(page\.total \|\| items\.length\)/)
-  assert.match(source, /signingSummary\.value = page\.stats/)
+  assert.match(ledgerSource, /async function refreshSigningRecords\(\{ append = false, limit = 50 \} = \{\}\)/)
+  assert.match(ledgerSource, /keyword: signingKeyword\.value\.trim\(\)/)
+  assert.match(ledgerSource, /status: signingStatusFilter\.value/)
+  assert.match(ledgerSource, /offset: append \? signingRecords\.value\.length : 0/)
+  assert.match(ledgerSource, /signingTotal\.value = Number\(page\.total \|\| items\.length\)/)
+  assert.match(ledgerSource, /signingSummary\.value = page\.stats/)
   assert.match(source, /watch\(\[signingKeyword, signingMethodFilter, signingStatusFilter\]/)
   assert.match(source, /refreshSigningRecords\(\{ append: true \}\)/)
   assert.match(api, /function contractPage\(data\)/)

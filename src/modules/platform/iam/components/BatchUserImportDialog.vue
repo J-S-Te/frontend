@@ -2,6 +2,8 @@
 import { computed, reactive, ref, watch, onBeforeUnmount } from 'vue'
 import { pinyin } from 'pinyin-pro'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
+import ConfirmDialog from '../../../shared/components/ConfirmDialog.vue'
+import { useConfirmDialog } from '../../../shared/composables/useConfirmDialog.js'
 import { createEmployeesBatch } from '@/modules/platform/iam/api/iam'
 import { parseApplicationRoles, restoreRowSelection } from '@/modules/platform/iam/utils/batchUserImport.js'
 import { initialCredentialsForImport, initialCredentialsDocument, clearInitialCredentials } from '@/modules/platform/iam/utils/employeeInitialCredentials.js'
@@ -29,6 +31,7 @@ const emit = defineEmits(['close', 'completed', 'toast'])
 
 // ---- wizard 状态 ----
 const step = ref(1) // 1=上传, 2=预览, 3=结果
+const { dialog: closeConfirm, askConfirm, accept: acceptClose, cancel: cancelClose } = useConfirmDialog()
 const fileName = ref('')
 const fileSize = ref(0)
 const rawText = ref('')
@@ -555,19 +558,32 @@ async function submit() {
 }
 
 // ---- 关闭 ----
-function close() {
+async function close() {
   if (submitting.value) return
+  if (step.value >= 2) {
+    const credentialsPending = step.value === 3 && submitResult.value?.initialCredentials?.length
+    const ok = await askConfirm({
+      title: credentialsPending ? '关闭并放弃初始凭据？' : '关闭导入？',
+      description: credentialsPending
+        ? '初始密码只显示这一次，关闭后无法从系统再次查看。请先下载初始凭据，确认无误后再关闭。'
+        : '当前导入还没有完成。关闭后本次已选择或填写的内容不会保留。',
+      confirmText: credentialsPending ? '仍然关闭' : '放弃导入',
+      cancelText: credentialsPending ? '返回查看凭据' : '继续导入',
+      danger: true,
+    })
+    if (!ok) return
+  }
   clearInitialCredentials(submitResult.value)
   credentialsVisible.value = false
   emit('close')
 }
-function onBackdropClick() {
-  close()
+async function onBackdropClick() {
+  await close()
 }
-function onKeydown(event) {
+async function onKeydown(event) {
   if (event?.key === 'Escape' && !submitting.value) {
     event.stopPropagation()
-    close()
+    await close()
   }
 }
 function restart() {
@@ -871,6 +887,16 @@ function formatFileSize(bytes) {
         </template>
       </footer>
     </section>
+    <ConfirmDialog
+      v-if="closeConfirm"
+      :title="closeConfirm.title"
+      :description="closeConfirm.description"
+      :confirm-text="closeConfirm.confirmText"
+      :cancel-text="closeConfirm.cancelText"
+      :danger="closeConfirm.danger"
+      @confirm="acceptClose"
+      @cancel="cancelClose"
+    />
   </div>
 </template>
 

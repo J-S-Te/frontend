@@ -26,6 +26,7 @@ function fixture(result) {
     catalogNotice: { value: '' },
     previewCatalogSignature: { value: '' },
     IamError: class IamError extends Error {}, formatBatchError: () => 'fixture-error',
+    closeConfirm: { value: null }, askConfirm: async () => true, acceptClose: () => {}, cancelClose: () => {},
     initialCredentialsForImport, initialCredentialsDocument, clearInitialCredentials,
     rows: [], rawText: { value: '' }, fileName: { value: '' }, fileSize: { value: 0 }, parseError: { value: '' }, filterMode: { value: 'all' },
   }
@@ -83,8 +84,8 @@ test('close, backdrop, escape and restart erase held result secrets', async () =
     await controller.submit()
     const held = state.submitResult.value.initialCredentials[0]
     state.credentialsVisible.value = true
-    if (action === 'escape') controller.onKeydown({ key: 'Escape', stopPropagation() {} })
-    else controller[action]()
+    if (action === 'escape') await controller.onKeydown({ key: 'Escape', stopPropagation() {} })
+    else await controller[action]()
     assert.equal(held.initialPassword, '')
     assert.equal(state.credentialsVisible.value, false)
     assert.ok(!state.submitResult.value || state.submitResult.value.initialCredentials.length === 0)

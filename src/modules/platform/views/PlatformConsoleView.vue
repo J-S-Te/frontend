@@ -16,6 +16,10 @@ import DictionaryManagementModule from '@/modules/platform/dictionaries/componen
 import SubsystemOnboardingModule from '@/modules/platform/applications/components/SubsystemOnboardingModule.vue'
 import SubsystemAccessWizard from '@/modules/platform/applications/components/SubsystemAccessWizard.vue'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
+import OperationResultBanner from '@/modules/shared/components/OperationResultBanner.vue'
+import OperationInboxPanel from '@/modules/shared/components/OperationInboxPanel.vue'
+import { usePersistentResult } from '@/modules/shared/composables/usePersistentResult.js'
+import { useOperationInbox } from '@/modules/shared/composables/useOperationInbox.js'
 import {
   listApplications,
   listEnvironments,
@@ -83,6 +87,10 @@ const auditKeyword = ref('')
 const auditClientIP = ref('')
 const auditResourceID = ref('')
 const auditRequestID = ref('')
+const auditCorrelationID = ref('')
+const auditEventID = ref('')
+const auditActorID = ref('')
+const auditLoginIP = ref('')
 const auditType = ref('')
 const auditRisk = ref('')
 const auditApplication = ref('')
@@ -361,7 +369,7 @@ function showToast(message) {
   }
   toastTimer = window.setTimeout(() => {
     toastMessage.value = ''
-  }, 2600)
+  }, 5200)
 }
 
 async function loadPlatformSettings() {
@@ -535,12 +543,38 @@ function openPersonnelChangeForUser(user) {
   activeSettingsTab.value = 'personnel'
 }
 
-function handleEmployeeOnboardingCompleted() {
+// 会话作用域持久化：操作结果/操作记录按租户+用户隔离，登出统一清除。
+const { result: onboardingResult, save: saveOnboardingResult, clear: clearOnboardingResult } = usePersistentResult('uip:last-employee-onboarding', { principal })
+const { push: pushOperationRecord } = useOperationInbox({ principal })
+const iamInitialPanel = ref('')
+
+function openPositionAuthorizationFromOnboarding() {
+  activeSettingsTab.value = 'iam'
+  iamInitialPanel.value = 'positionAuthorizationTemplates'
+}
+
+function openServerTaskCenter() {
+  activeSettingsTab.value = 'jobs'
+}
+
+function handleEmployeeOnboardingCompleted(result) {
   // 新增员工成功后刷新缓存，让下一次打开 modal 时看到刚建好的组织 / 岗位。
   // IAM 列表组件与员工 modal 是兄弟组件，递增 key 让用户、账号、任职关系
   // 及顶部统计在当前页面立即重新读取，而不必整页刷新。
   iamRefreshKey.value += 1
   loadOnboardingReferences().catch(() => {})
+  const user = result?.user || result || {}
+  const displayName = user.display_name || user.displayName || result?.display_name || '新员工'
+  const reference = user.employee_no || user.employeeNo || user.user_id || result?.user_id || ''
+  const record = {
+    title: '员工已创建',
+    message: `${displayName} 的档案、登录账号或任职关系已按提交结果创建。`,
+    reference,
+    nextAction: '请核对账号状态与岗位授权继承结果；首次登录后按提示修改初始密码。',
+    module: '基础平台',
+  }
+  saveOnboardingResult(record)
+  pushOperationRecord(record)
 }
 
 async function loadAuditHealth() {
@@ -571,6 +605,10 @@ async function loadAuditEvents() {
       clientIp: auditClientIP.value.trim(),
       resourceId: auditResourceID.value.trim(),
       requestId: auditRequestID.value.trim(),
+      correlationId: auditCorrelationID.value.trim(),
+      eventId: auditEventID.value.trim(),
+      actorId: auditActorID.value.trim(),
+      loginIp: auditLoginIP.value.trim(),
       applicationCode: auditApplication.value,
       environmentCode: auditEnvironment.value,
       actionCategory: auditType.value,
@@ -608,6 +646,10 @@ function resetAuditFilters() {
   auditApplication.value = ''
   auditEnvironment.value = ''
   auditResult.value = ''
+  auditEventID.value = ''
+  auditActorID.value = ''
+  auditCorrelationID.value = ''
+  auditLoginIP.value = ''
   auditTimeRange.value = '7d'
   auditPage.value = 1
   loadEnvironments('')
@@ -626,6 +668,20 @@ function changeAuditPage(nextPage) {
 
 function openAuditDetail(record) {
   auditDetail.value = record
+}
+
+/**
+ * 从详情跳到"相关事件"：只设置过滤条件，不拼 URL、不带任何越权参数；
+ * 后端仍按当前租户与应用权限过滤。
+ */
+function filterRelatedAudit(field, value) {
+  const trimmed = String(value || '').trim()
+  if (!trimmed) return
+  if (field === 'requestId') auditRequestID.value = trimmed
+  if (field === 'correlationId') auditCorrelationID.value = trimmed
+  auditPage.value = 1
+  closeAuditDetail()
+  loadAuditEvents()
 }
 
 function closeAuditDetail() {
@@ -906,10 +962,22 @@ onBeforeUnmount(() => {
     </aside>
 
     <main class="console-main">
+      <OperationResultBanner
+        v-if="onboardingResult"
+        :title="onboardingResult.title"
+        :message="onboardingResult.message"
+        :reference="onboardingResult.reference"
+        :next-action="onboardingResult.nextAction"
+        :saved-at="onboardingResult.savedAt"
+        action-text="查看岗位授权模板"
+        @action="openPositionAuthorizationFromOnboarding"
+        @dismiss="clearOnboardingResult"
+      />
       <header class="console-topbar">
         <button class="console-menu-button" type="button" aria-label="打开导航菜单" @click="mobileMenuOpen = true"><ConsoleIcon name="menu" /></button>
         <div class="console-crumb"><span>基础能力平台</span><ConsoleIcon name="chevron" /><strong>{{ viewMeta.crumb }}</strong></div>
         <div class="console-topbar-actions">
+          <OperationInboxPanel server-tasks @open-server-tasks="openServerTaskCenter" />
           <div class="console-notification-menu">
             <button class="console-icon-button" type="button" aria-label="通知" :aria-expanded="notificationMenuOpen" @click="toggleNotificationMenu"><ConsoleIcon name="bell" /><i v-if="topbarUnreadCount"></i><b v-if="topbarUnreadCount">{{ topbarUnreadCount > 99 ? '99+' : topbarUnreadCount }}</b></button>
             <aside v-if="notificationMenuOpen" class="console-notification-popover"><header><strong>未读通知</strong><button type="button" @click="notificationMenuOpen = false">×</button></header><p v-if="notificationMenuLoading">正在加载…</p><p v-else-if="!topbarNotifications.length">暂无未读通知。</p><button v-for="item in topbarNotifications" v-else :key="item.delivery_id" class="console-notification-row" type="button" @click="openTopbarNotification(item)"><strong>{{ item.title }}</strong><span>{{ item.content }}</span></button><footer><button type="button" @click="activeSettingsTab = 'notify'; notificationMenuOpen = false">进入通知中心</button></footer></aside>
@@ -949,6 +1017,10 @@ onBeforeUnmount(() => {
             <label class="console-select-field"><select v-model="auditRisk" aria-label="风险等级"><option value="">全部风险</option><option v-for="option in AUDIT_RISK_OPTIONS" :key="option" :value="option">{{ option }}</option></select></label>
             <label class="console-select-field"><select v-model="auditResult" aria-label="操作结果"><option value="">全部结果</option><option v-for="option in AUDIT_RESULT_OPTIONS" :key="option" :value="option">{{ option }}</option></select></label>
             <label class="console-select-field"><select v-model="auditTimeRange" aria-label="时间范围"><option value="24h">最近 24 小时</option><option value="7d">最近 7 天</option><option value="30d">最近 30 天</option></select></label>
+            <label class="console-search-field audit-advanced-field"><input v-model="auditEventID" type="search" placeholder="事件 ID" maxlength="64" aria-label="按事件 ID 精确检索"/></label>
+            <label class="console-search-field audit-advanced-field"><input v-model="auditActorID" type="search" placeholder="操作者 ID" maxlength="64" aria-label="按稳定操作者 ID 精确检索"/></label>
+            <label class="console-search-field audit-advanced-field"><input v-model="auditCorrelationID" type="search" placeholder="关联 ID" maxlength="64" aria-label="按业务关联 ID 精确检索"/></label>
+            <label class="console-search-field audit-advanced-field"><input v-model="auditLoginIP" type="search" placeholder="登录 IP" maxlength="45" aria-label="按登录 IP 精确检索"/></label>
             <button class="console-button primary small" type="button" :disabled="auditLoading" @click="applyAuditFilters">查询</button>
             <button class="console-button ghost small" type="button" :disabled="auditLoading" @click="resetAuditFilters"><ConsoleIcon name="reset" />重置</button>
           </div>
@@ -1060,7 +1132,8 @@ onBeforeUnmount(() => {
 
           <PublicAccessSettingsModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'access'" @toast="showToast" />
 
-          <IamSettingsModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'iam'" :refresh-key="iamRefreshKey" @toast="showToast" @employee-onboarding="openEmployeeOnboarding" @personnel-change="openPersonnelChangeForUser" />
+          <IamSettingsModule
+        :initial-panel="iamInitialPanel" v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'iam'" :refresh-key="iamRefreshKey" @toast="showToast" @employee-onboarding="openEmployeeOnboarding" @personnel-change="openPersonnelChangeForUser" />
 
           <PersonnelChangeCenter v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'personnel'" :prefill-user-id="pendingPersonnelChangeUserId" @toast="showToast" @employee-onboarding="openEmployeeOnboarding" @prefill-consumed="pendingPersonnelChangeUserId = ''" />
 
@@ -1101,22 +1174,47 @@ onBeforeUnmount(() => {
     <div v-if="auditDetail" class="console-modal-backdrop" role="presentation" @click.self="closeAuditDetail">
       <section class="console-detail-modal audit-detail-modal" role="dialog" aria-modal="true" aria-label="审计事件详情">
         <header><div><p class="console-modal-eyebrow">AUDIT EVENT · {{ auditDetail.id }}</p><h2>{{ auditDetail.object || auditDetail.resource || '审计事件' }}</h2></div><button class="console-modal-close" type="button" aria-label="关闭审计事件详情" @click="closeAuditDetail"><ConsoleIcon name="close" /></button></header>
-        <div class="audit-detail-grid">
-          <div><span>发生时间</span><strong>{{ formatAuditTime(auditDetail.time) }}</strong></div>
-          <div><span>操作人</span><strong>{{ auditDetail.operator || '—' }}</strong></div>
-          <div><span>应用 / 环境</span><strong>{{ auditDetail.application || '—' }} / {{ auditDetail.environment || '—' }}</strong></div>
-          <div><span>操作结果</span><strong class="audit-detail-result-wrap"><span class="console-badge audit-result-badge" :class="auditResultTone(auditDetail.result)">{{ auditResultLabel(auditDetail) }}</span><small v-if="auditResultMeta(auditDetail)">{{ auditResultMeta(auditDetail) }}</small></strong></div>
-          <div><span>HTTP 请求</span><strong>{{ auditDetail.method || '—' }} {{ auditDetail.path || '—' }}</strong></div>
-          <div><span>登录 IP</span><strong>{{ auditDetail.loginIp || '—' }}</strong></div>
-          <div><span>操作 IP</span><strong>{{ auditDetail.ip || '—' }}</strong></div>
-          <div><span>投递地址</span><strong>{{ auditDetail.ingestPeerIp || '—' }}</strong></div>
-          <div><span>地址来源</span><strong>{{ auditDetail.ipSourceLabel }}</strong></div>
-          <div><span>Request ID</span><strong class="console-mono">{{ auditDetail.requestId || '—' }}</strong></div>
-          <div><span>Trace ID</span><strong class="console-mono">{{ auditDetail.traceId || '—' }}</strong></div>
-          <div><span>Correlation ID</span><strong class="console-mono">{{ auditDetail.correlationId || '—' }}</strong></div>
-          <div><span>User Agent</span><strong>{{ auditDetail.userAgent || '—' }}</strong></div>
+        <div class="audit-detail-sections">
+          <section class="audit-detail-section"><h3>事件概览</h3><div class="audit-detail-grid">
+            <div><span>动作</span><strong class="console-mono">{{ auditDetail.action || '—' }}</strong></div>
+            <div><span>结果</span><strong class="audit-detail-result-wrap"><span class="console-badge audit-result-badge" :class="auditResultTone(auditDetail.result)">{{ auditResultLabel(auditDetail) }}</span><small v-if="auditResultMeta(auditDetail)">{{ auditResultMeta(auditDetail) }}</small></strong></div>
+            <div><span>风险等级</span><strong>{{ auditDetail.riskLabel || '—' }}</strong></div>
+            <div><span>业务发生时间</span><strong>{{ formatAuditTime(auditDetail.time) }}</strong></div>
+            <div><span>平台接收时间</span><strong>{{ auditDetail.receivedAt ? formatAuditTime(auditDetail.receivedAt) : '历史记录无此字段' }}</strong></div>
+            <div><span>应用 / 环境</span><strong>{{ auditDetail.application || '—' }} / {{ auditDetail.environment || '—' }}</strong></div>
+            <div><span>HTTP 请求</span><strong>{{ auditDetail.method || '—' }} {{ auditDetail.path || '—' }}</strong></div>
+          </div></section>
+          <section class="audit-detail-section"><h3>操作者</h3><div class="audit-detail-grid">
+            <div><span>名称快照</span><strong>{{ auditDetail.operator || '—' }}</strong></div>
+            <div><span>稳定身份</span><strong class="console-mono">{{ auditDetail.actorId || '历史记录无此字段' }}</strong></div>
+            <div><span>主体类型</span><strong>{{ auditDetail.actorTypeLabel }}</strong></div>
+          </div></section>
+          <section class="audit-detail-section"><h3>业务对象</h3><div class="audit-detail-grid">
+            <div><span>对象类型</span><strong>{{ auditDetail.resource || '—' }}</strong></div>
+            <div><span>对象名称</span><strong>{{ auditDetail.object || '—' }}</strong></div>
+            <div><span>对象 ID</span><strong class="console-mono">{{ auditDetail.businessId || auditDetail.resourceId || '—' }}</strong></div>
+          </div></section>
+          <section class="audit-detail-section"><h3>来源地址</h3><div class="audit-detail-grid">
+            <div><span>登录 IP</span><strong>{{ auditDetail.loginIp || '未采集' }}</strong></div>
+            <div><span>登录地址来源</span><strong>{{ auditDetail.loginIpSourceLabel }}</strong></div>
+            <div><span>操作 IP</span><strong>{{ auditDetail.ip || '未采集' }}</strong></div>
+            <div><span>操作地址来源</span><strong>{{ auditDetail.ipSourceLabel }}</strong></div>
+            <div><span>投递端地址</span><strong>{{ auditDetail.ingestPeerIp || '未采集' }}</strong></div>
+            <div><span>User Agent</span><strong>{{ auditDetail.userAgent || '未采集' }}</strong></div>
+          </div><small>登录 IP 创建会话时固定，操作 IP 每次请求重新解析，投递地址只表示谁送来审计；三者不可互相替代。</small></section>
+          <section class="audit-detail-section"><h3>处理与关联</h3><div class="audit-detail-grid">
+            <div><span>原因代码</span><strong class="console-mono">{{ auditDetail.reasonCode || auditDetail.detail || '—' }}</strong></div>
+            <div><span>Request ID</span><strong class="console-mono">{{ auditDetail.requestId || '—' }}</strong></div>
+            <div><span>Trace ID</span><strong class="console-mono">{{ auditDetail.traceId || '—' }}</strong></div>
+            <div><span>Correlation ID</span><strong class="console-mono">{{ auditDetail.correlationId || '—' }}</strong></div>
+          </div></section>
         </div>
-        <section class="audit-detail-section"><h3>事件说明</h3><p>{{ auditDetail.summary || '无附加说明。' }}</p><small v-if="auditDetail.detail">原因代码：{{ auditDetail.detail }}</small></section>
+        <section class="audit-detail-section"><h3>事件说明</h3><p>{{ auditDetail.summary || '无附加说明。' }}</p><small v-if="auditDetail.reasonCode || auditDetail.detail">原因代码：{{ auditDetail.reasonCode || auditDetail.detail }}</small></section>
+        <section class="audit-detail-section"><h3>关联事件</h3><p class="audit-link-row">
+          <button v-if="auditDetail.requestId" class="console-button ghost" type="button" @click="filterRelatedAudit('requestId', auditDetail.requestId)">同一请求（{{ auditDetail.requestId }}）</button>
+          <button v-if="auditDetail.correlationId" class="console-button ghost" type="button" @click="filterRelatedAudit('correlationId', auditDetail.correlationId)">同一业务关联（{{ auditDetail.correlationId }}）</button>
+          <span v-if="!auditDetail.requestId && !auditDetail.correlationId">该事件没有可追溯的关联 ID。</span>
+        </p><small>关联检索沿用当前列表过滤条件，不会绕过租户与应用权限。</small></section>
         <section class="audit-detail-section"><h3>数据变更摘要</h3><p>{{ auditDetail.changeSummary || '无字段变更。' }}</p><small>字段变更保存在当前审计事件中，敏感值按脱敏和最小化原则展示。</small></section>
         <footer><button class="console-button ghost" type="button" @click="closeAuditDetail">关闭</button></footer>
       </section>
@@ -1138,6 +1236,8 @@ onBeforeUnmount(() => {
     />
 
     <button v-if="mobileMenuOpen" class="console-menu-mask" type="button" aria-label="关闭导航遮罩" @click="mobileMenuOpen = false"></button>
-    <div v-if="toastMessage" class="console-toast" role="status"><ConsoleIcon name="info" /><span>{{ toastMessage }}</span></div>
+    <Teleport to="body">
+      <div v-if="toastMessage" class="console-toast" role="status" aria-live="polite" aria-atomic="true"><ConsoleIcon name="info" /><span>{{ toastMessage }}</span></div>
+    </Teleport>
   </div>
 </template>

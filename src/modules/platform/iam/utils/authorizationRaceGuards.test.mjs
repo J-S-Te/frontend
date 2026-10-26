@@ -3,8 +3,10 @@ import test from 'node:test'
 import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 import { isCurrentAuthorizationRequest } from './requestVersion.js'
+import { AuthorizationError } from '../api/authorization.js'
 import { replacePositionAuthorizationTemplateAssignments } from '../api/positionAuthorization.js'
 import { RELATED_DATA, publishRelatedDataChanged, subscribeRelatedDataChanges } from '../../shared/utils/relatedDataInvalidation.js'
+import { roleCode, toRFC3339, normalizeScopeType } from './authorizationHelpers.js'
 
 const ref = (value) => ({ value })
 const plain = (value) => JSON.parse(JSON.stringify(value))
@@ -24,16 +26,22 @@ function deferred() {
 }
 function saveHarness() {
   const pending = deferred()
-  const applied = [], toasts = []
+  const applied = [], toasts = [], submitted = []
   const context = {
     authorizationSubjectId: ref('A'), authorizationSubjectType: ref('USER'), selectedApplicationCode: ref('app'),
     applicationAccessSaving: ref(false), applicationAccessError: ref(''), applicationAuthorizationRequestSeq: ref(3),
+    // GET/PUT 响应回填的编辑快照版本；保存时必须原样作为 expectedRevision 提交。
+    applicationAccessEditRevision: ref(`v1:${'a'.repeat(64)}`),
     authorizationEntryLayerInfo: ref({ title: '个人例外授权' }), isCurrentAuthorizationRequest,
-    updateApplicationAccess: () => pending.promise, applicationAccessPayload: () => ({ roles: [] }),
+    AuthorizationError,
+    userAuthorizationPreview: ref(null),
+    updateApplicationAccess: (_userId, _code, payload) => { submitted.push(payload); return pending.promise }, applicationAccessPayload: () => ({ roles: [] }),
     applyApplicationAccess: (access) => applied.push(access), emitToast: (message) => toasts.push(message),
     formatUserError: (error) => error.message,
   }
-  return { context, pending, applied, toasts, ...functions('IamSettingsModule', ['performSaveApplicationAccess'], context) }
+  return { context, pending, applied, toasts, submitted, ...functions('IamSettingsModule', ['performSaveApplicationAccess', 'isApplicationAccessRevisionConflict'], context,
+    // 组件 setup 顶层的并发冲突消息常量在函数体外，切片提取不到；此处按同一原文补声明。
+    `const APPLICATION_ACCESS_REVISION_CONFLICT_MESSAGE = '应用授权已被其他管理员修改，请刷新读取最新授权后重试。';`) }
 }
 
 test('同主体正常保存回填服务器的授权结果并结束保存状态', async () => {
@@ -183,8 +191,9 @@ function payloadHarness(manualRoles) {
   const context = {
     authorizationDraft: { role_codes: ['A', 'B'], scope_type: 'APPLICATION', environment_code: '', validity_mode: 'PERMANENT', valid_from: '', valid_until: '', apply_to_existing: false },
     applicationManualRoles: ref(manualRoles), authorizationRoleOptions: ref([{ code: 'A' }, { code: 'B' }]),
+    roleCode, toRFC3339, normalizeScopeType, // 已迁 authorizationHelpers.js（治理批次 4）；真实实现直接注入
   }
-  return { ...functions('IamSettingsModule', ['roleCode', 'toRFC3339', 'normalizeScopeType', 'applicationAccessPayload'], context), context }
+  return { ...functions('IamSettingsModule', ['applicationAccessPayload'], context), context }
 }
 test('新增B默认保留未来A的范围和毫秒精度有效期', () => {
   const h = payloadHarness([{ code: 'A', scope_type: 'ENVIRONMENT', environment_code: 'prod', valid_from: from, valid_until: until }])
@@ -227,6 +236,29 @@ test('切换主体后旧保存失败不污染当前主体错误状态', async ()
   h.pending.reject(new Error('A保存失败'))
   assert.equal(await saving, false)
   assert.equal(h.context.applicationAccessError.value, 'B自己的错误')
+})
+
+test('保存提交读取时的快照版本，命中409版本冲突时保留草稿并展示后端消息原文', async () => {
+  const h = saveHarness()
+  const conflict = new AuthorizationError('应用授权已被其他管理员修改，请刷新读取最新授权后重试。', { status: 409, code: 'APPLICATION_ACCESS_REVISION_CONFLICT' })
+  const saving = h.performSaveApplicationAccess()
+  assert.deepEqual(plain(h.submitted), [{ roles: [], expectedRevision: `v1:${'a'.repeat(64)}` }], 'PUT 必须携带 GET 快照版本作为并发条件')
+  h.pending.reject(conflict)
+  assert.equal(await saving, false)
+  assert.equal(h.context.applicationAccessError.value, '应用授权已被其他管理员修改，请刷新读取最新授权后重试。')
+  assert.equal(h.applied.length, 0, '冲突时不得回填服务器状态，草稿保持管理员当前输入')
+  assert.equal(h.toasts.length, 0, '冲突走错误区域，不宣称保存成功')
+  assert.equal(h.context.applicationAccessSaving.value, false)
+})
+
+test('其他409不冒充版本冲突，仍按保存失败处理且不回填', async () => {
+  const h = saveHarness()
+  const other409 = new AuthorizationError('记录状态已变化，请刷新后重试。', { status: 409, code: 'SOME_OTHER_CONFLICT' })
+  const saving = h.performSaveApplicationAccess()
+  h.pending.reject(other409)
+  assert.equal(await saving, false)
+  assert.equal(h.context.applicationAccessError.value, other409.message)
+  assert.equal(h.applied.length, 0)
 })
 
 function selectionComputed(name, context) {

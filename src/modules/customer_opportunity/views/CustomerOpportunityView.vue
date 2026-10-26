@@ -1,4 +1,7 @@
 <script setup>
+import OperationToast from '@/modules/shared/components/OperationToast.vue'
+import { useConfirmDialog } from '@/modules/shared/composables/useConfirmDialog.js'
+import ConfirmDialog from '@/modules/shared/components/ConfirmDialog.vue'
 import { formatCRMError } from '../api/errorMessages.js'
 import { computed, onMounted, reactive, ref, toRaw, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -106,7 +109,9 @@ import {
   workContentText,
 } from '@/modules/customer_opportunity/crmDisplay'
 import StageAlertDetailModal from '@/modules/customer_opportunity/components/StageAlertDetailModal.vue'
+import { usePresaleReportData } from '@/modules/customer_opportunity/composables/usePresaleReportData'
 import { useOpportunityCustomerDirectory } from '../composables/useOpportunityCustomerDirectory.js'
+import { useCustomerImportWizard } from '../composables/useCustomerImportWizard.js'
 import { createPresaleReportFilters } from '../composables/usePresaleReportFilters.js'
 import { getNotificationUnreadCount, listNotifications, markNotificationRead } from '../api/notification.js'
 import { listOwnerDirectory } from '../api/ownerDirectory.js'
@@ -234,7 +239,6 @@ const customerTabErrors = reactive({})
 const customerTabLoaded = reactive({})
 const worklogs = ref([])
 const customerDialog = ref(false)
-const customerImportDialog = ref(false)
 const customerEditMode = ref(false)
 const opportunityDialog = ref(false)
 const opportunityEditMode = ref(false)
@@ -271,16 +275,21 @@ let presaleFormInitial = ''
 const customerFormDirty = computed(() => customerFormInitial !== '' && JSON.stringify(customerForm) !== customerFormInitial)
 const opportunityFormDirty = computed(() => opportunityFormInitial !== '' && JSON.stringify(opportunityForm) !== opportunityFormInitial)
 const presaleFormDirty = computed(() => presaleFormInitial !== '' && JSON.stringify(presaleForm) !== presaleFormInitial)
-function confirmDiscardIfDirty(dirty) { return !dirty || window.confirm('当前修改尚未保存，确定放弃吗？') }
-function closeCustomerDialog() {
+const { dialog: confirmDialog, askConfirm, accept: acceptConfirm, cancel: cancelConfirm } = useConfirmDialog()
+async function confirmDiscardIfDirty(dirty) {
+  if (!dirty) return true
+  if (confirmDialog.value) return false
+  return await askConfirm({ title: '放弃未保存的修改？', description: '当前修改尚未保存，放弃后这些内容不会保留。', confirmText: '放弃修改', cancelText: '继续编辑', danger: true })
+}
+async function closeCustomerDialog() {
   if (actionLoading.value) return
-  if (!confirmDiscardIfDirty(customerFormDirty.value)) return
+  if (!(await confirmDiscardIfDirty(customerFormDirty.value)) || actionLoading.value) return
   customerDialog.value = false
   customerFormInitial = ''
 }
-function closeOpportunityDialog() {
+async function closeOpportunityDialog() {
   if (actionLoading.value) return
-  if (!confirmDiscardIfDirty(opportunityFormDirty.value)) return
+  if (!(await confirmDiscardIfDirty(opportunityFormDirty.value)) || actionLoading.value) return
   opportunityDialog.value = false
   opportunityFormInitial = ''
 }
@@ -295,10 +304,14 @@ const customerMergeOptionsLoading = ref(false)
 const customerMergeOptionsError = ref('')
 const customerMergeOptionsTotal = ref(0)
 const customerMergeOptionsLoadSequence = ref(0)
-const customerImportForm = reactive({ file: null, reason: '' })
-const customerImportPreview = ref(null)
-const customerImportResult = ref(null)
-const customerImportCommitKey = ref('')
+const {
+  customerImportDialog, customerImportForm, customerImportPreview, customerImportResult, customerImportScanAvailable,
+  openCustomerImport, resetCustomerImportPreview, closeCustomerImport, selectCustomerImportFile,
+  previewImport, commitImport, downloadImportErrors, downloadCustomerImportExample,
+} = useCustomerImportWizard({
+  error, notice, actionLoading, resetMessages, showError, loadCurrent, runtimeCapability, createIdempotencyKey,
+  previewCustomerImport, commitCustomerImport, downloadCustomerImportErrors, downloadCustomerImportTemplate,
+})
 const customerStakeholderForm = reactive({ reason: '', items: [] })
 const customerSystemForm = reactive({ reason: '', items: [] })
 const ownerForm = reactive({ owner_user_id: '', owner_org_id: '', reason: '' })
@@ -377,12 +390,6 @@ const alertConfigLoading = ref(false)
 const alertConfigError = ref('')
 const alertRuleSavingType = ref('')
 const canConfigurePresaleAlerts = computed(() => (crmSession.value?.permissions || []).includes('presale.alert.config'))
-const showReport = ref(false)
-const reportLoading = ref(false)
-const reportSummary = ref(null)
-const reportError = ref('')
-const reportTrend = ref([])
-const reportDistribution = ref([])
 const reportFilters = reactive(defaultReportFilters())
 const reportOrganizationOptions = ref([])
 const reportFilterOptions = ref({ opportunities: [], assignees: [] })
@@ -391,9 +398,9 @@ const reportFilterOptionsError = ref('')
 const {
   load: loadPresaleReportFilterOptions,
 } = createPresaleReportFilters({
-  showReport,
+  isReportOpen: () => showReport.value,
   reportFilters,
-  reportParams,
+  getReportParams: () => reportParams(),
   reportFilterOptions,
   reportFilterOptionsLoading,
   reportFilterOptionsError,
@@ -494,7 +501,6 @@ async function refreshRuntimeCapabilities() {
 const portalModuleAvailable = computed(() => runtimeCapability('portal_account_provision').available || runtimeCapability('portal_access_disable').available)
 const portalProvisionAvailable = computed(() => runtimeCapability('portal_account_provision').available)
 const portalDisableAvailable = computed(() => runtimeCapability('portal_access_disable').available)
-const customerImportScanAvailable = computed(() => runtimeCapability('customer_import_scan').available)
 const customerExportAvailable = computed(() => runtimeCapability('customer_export').available)
 const presaleReportExportAvailable = computed(() => runtimeCapability('presale_report_export').available)
 const canReadPresaleReports = computed(() => (crmSession.value?.permissions || []).includes('presale.report'))
@@ -551,10 +557,10 @@ const portalRegistrationContact = computed(() => {
   const contacts = customerContacts.value.length ? customerContacts.value : (selectedCustomer.value?.contacts || [])
   return contacts.find((item) => item.is_registration) || null
 })
-function navigate(section) {
+async function navigate(section) {
   const allowed = { customers: canReadCustomers.value, opportunities: canReadOpportunities.value, presale: canReadPresales.value, notifications: canReadNotifications.value, 'credit-approvals': canApproveCredit.value, 'credit-rules': canManageCreditRules.value }
   if (!allowed[section]) return
-  if (activeSection.value === 'presale' && presaleCreatePage.value && !confirmDiscardIfDirty(presaleFormDirty.value)) return
+  if (activeSection.value === 'presale' && presaleCreatePage.value && !(await confirmDiscardIfDirty(presaleFormDirty.value))) return
   mobileMenuOpen.value = false
   return router.push({ name: 'customer_opportunity', params: { section } })
 }
@@ -661,134 +667,28 @@ function applicantLabel(item) {
 function presalePersonOptionLabel(item) {
   return String(item?.label || '').trim() || ownerLabel(item?.value)
 }
-function reportParams() {
-  return {
-    from: reportDateParam(reportFilters.from), to: reportDateParam(reportFilters.to),
-    organization_id: reportFilters.organization_id, person_id: reportFilters.person_id,
-    opportunity_id: reportFilters.opportunity_id, dimension: reportFilters.dimension,
-  }
-}
-function reportBarWidth(value) {
-  const maximum = Math.max(0, ...reportDistribution.value.map((item) => Number(item.work_hours || 0)))
-  return maximum > 0 ? `${Math.max(2, Number(value || 0) / maximum * 100)}%` : '0%'
-}
+
 async function openReports() {
   showReport.value = true
   reportError.value = ''
   await loadReportFilterOptions()
   await loadReports()
 }
-async function loadReports() {
-  reportLoading.value = true; resetMessages()
-  try {
-    const params = reportParams()
-    if (new Date(params.to) <= new Date(params.from)) {
-      throw new Error('结束时间必须晚于开始时间。')
-    }
-    const [summary, trend, distribution] = await Promise.all([getPresaleReportSummary(params), getPresaleReportTrend(params), getPresaleReportDistribution(params)])
-    reportSummary.value = normalizeReportSummary(summary)
-    reportTrend.value = normalizeReportRows(trend)
-    reportDistribution.value = normalizeReportRows(distribution)
-  } catch (value) { reportError.value = formatCRMError(value, { fallback: '投入报表加载失败' }) } finally { reportLoading.value = false }
-}
-async function exportReport() {
-  if (!presaleReportExportAvailable.value) {
-    error.value = '售前报表导出当前不可用，请刷新页面或联系管理员。'
-    return
-  }
-  try {
-    const payload = reportParams()
-    const result = await requestPresaleReportExport({ ...payload, opportunity_id: payload.opportunity_id ? Number(payload.opportunity_id) : 0 })
-    const url = URL.createObjectURL(result.blob)
-    try {
-      const anchor = document.createElement('a')
-      anchor.href = url; anchor.download = result.filename || 'presale-report.csv'; anchor.click()
-    } finally { URL.revokeObjectURL(url) }
-    notice.value = '售前投入报表 CSV 已生成并下载，包含汇总、趋势及所选维度分布。'
-  } catch (value) {
-    showError(value)
-  }
-}
+
+const {
+  showReport, reportLoading, reportSummary, reportError, reportTrend, reportDistribution,
+  reportParams, reportBarWidth, loadReports, exportReport,
+} = usePresaleReportData({
+  reportFilters, resetMessages, showError, notice, error, formatCRMError, presaleReportExportAvailable,
+  getPresaleReportSummary, getPresaleReportTrend, getPresaleReportDistribution, requestPresaleReportExport,
+  loadReportFilterOptions,
+})
+
 function openNewCustomer() {
   Object.assign(customerForm, emptyCustomer())
   customerEditMode.value = false
   customerFormInitial = JSON.stringify(customerForm)
   customerDialog.value = true
-}
-function openCustomerImport() {
-  if (!customerImportScanAvailable.value) {
-    error.value = '客户导入代码安全校验当前不可用，入口已安全关闭。'
-    return
-  }
-  Object.assign(customerImportForm, { file: null, reason: '' })
-  customerImportPreview.value = null; customerImportResult.value = null; customerImportCommitKey.value = ''
-  customerImportDialog.value = true
-}
-function resetCustomerImportPreview() {
-  customerImportPreview.value = null; customerImportResult.value = null; customerImportCommitKey.value = ''
-  customerImportForm.file = null
-}
-function closeCustomerImport() {
-  resetCustomerImportPreview(); customerImportForm.reason = ''; customerImportDialog.value = false
-}
-function selectCustomerImportFile(event) {
-  const file = event.target.files?.[0] || null
-  customerImportForm.file = file?.name?.toLowerCase().endsWith('.xlsx') ? file : null
-  if (file && !customerImportForm.file) error.value = '只接受 .xlsx 文件，请重新选择。'
-}
-function showCustomerImportError(value) {
-  if (value?.code === 'CRM_CUSTOMER_IMPORT_SCANNER_UNAVAILABLE') error.value = '客户导入代码安全校验当前不可用，暂不能预检。'
-  else if (value?.code === 'CRM_CUSTOMER_IMPORT_FILE_REJECTED') error.value = '文件未通过服务端代码安全校验，已拒绝预检。'
-  else if (value?.code === 'CRM_CUSTOMER_IMPORT_FILE_INVALID') error.value = 'Excel 文件格式、表头或内容不符合导入规范。'
-  else if (value?.code === 'CRM_CUSTOMER_IMPORT_JOB_EXPIRED' || value?.code === 'CRM_CUSTOMER_IMPORT_JOB_CONFLICT' || value?.code === 'COMMON_VERSION_CONFLICT' || value?.status === 409) {
-    error.value = '导入预检已过期或状态发生变化，请重新上传文件预检。'
-    customerImportPreview.value = null
-  } else showError(value)
-}
-async function previewImport() {
-  if (!customerImportForm.file || !customerImportForm.reason.trim()) return
-  actionLoading.value = true; resetMessages()
-  try {
-    customerImportPreview.value = await previewCustomerImport({ file: customerImportForm.file, reason: customerImportForm.reason.trim() })
-    customerImportResult.value = null
-    customerImportCommitKey.value = createIdempotencyKey()
-    // 服务端接受文件并生成预检任务后，浏览器不再解析或持久保存工作簿内容。
-    customerImportForm.file = null
-  } catch (value) { showCustomerImportError(value) } finally { actionLoading.value = false }
-}
-async function commitImport() {
-  const preview = customerImportPreview.value
-  if (!preview || Number(preview.importable_rows) <= 0) return
-  actionLoading.value = true; resetMessages()
-  try {
-    if (!customerImportCommitKey.value) customerImportCommitKey.value = createIdempotencyKey()
-    const result = await commitCustomerImport(preview.job_no, { version: Number(preview.version) }, customerImportCommitKey.value)
-    notice.value = `客户导入完成：成功 ${result.succeeded_rows || 0} 行，失败 ${result.failed_rows || 0} 行，跳过 ${result.skipped_rows || 0} 行。`
-    closeCustomerImport()
-    await loadCurrent()
-  } catch (value) { showCustomerImportError(value) } finally { actionLoading.value = false }
-}
-async function downloadImportErrors() {
-  const jobNo = customerImportResult.value?.job_no || customerImportPreview.value?.job_no
-  if (!jobNo) return
-  try {
-    const { blob, filename } = await downloadCustomerImportErrors(jobNo)
-    const objectURL = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = objectURL; link.download = filename
-    document.body.appendChild(link); link.click(); link.remove()
-    window.setTimeout(() => URL.revokeObjectURL(objectURL), 0)
-  } catch (value) { showCustomerImportError(value) }
-}
-async function downloadCustomerImportExample() {
-  try {
-    const { blob, filename } = await downloadCustomerImportTemplate()
-    const objectURL = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = objectURL; link.download = filename
-    document.body.appendChild(link); link.click(); link.remove()
-    window.setTimeout(() => URL.revokeObjectURL(objectURL), 0)
-  } catch (value) { showCustomerImportError(value) }
 }
 
 function directoryErrorMessage(value) {
@@ -1060,9 +960,9 @@ async function openPresaleCreatePage() {
   await loadPresaleOpportunityOptions()
 }
 
-function closePresaleCreatePage() {
+async function closePresaleCreatePage() {
   if (presaleCreateLoading.value) return
-  if (!confirmDiscardIfDirty(presaleFormDirty.value)) return
+  if (!(await confirmDiscardIfDirty(presaleFormDirty.value)) || presaleCreateLoading.value) return
   presaleOpportunityOptionsLoadSequence.value += 1
   presaleCreateOptionsScope.invalidate()
   presaleCreatePage.value = false
@@ -1075,7 +975,7 @@ async function submitPresaleFromList() {
   const value = await submitPresale({ openDetail: false, refreshList: false })
   if (!value) return
   presaleFormInitial = JSON.stringify(presaleForm)
-  closePresaleCreatePage()
+  await closePresaleCreatePage()
   notice.value = '售前申请已提交，已返回申请列表。'
   presalePage.number = 1
   // 任务 B：受理已成功；列表刷新失败只提示读取失败，不误报为提交失败。
@@ -2860,7 +2760,7 @@ onMounted(async () => {
         <button class="console-nav-item" type="button" @click="navigatePlatform"><ConsoleIcon name="dashboard" /><span>返回子系统门户</span></button>
       </nav>
       <div class="console-sidebar-note"><ConsoleIcon name="shield" /><span>统一身份认证已生效，菜单与操作由服务端权限控制。</span></div>
-      <div class="console-sidebar-user">
+      <div class="console-sidebar-user subsystem-sidebar-user">
         <span class="console-avatar" aria-hidden="true">{{ currentUserInitial }}</span>
         <span class="console-user-copy"><strong :title="currentUserLabel">{{ currentUserLabel }}</strong><small :title="currentRoleLabel">{{ currentRoleLabel }}</small></span>
         <button class="console-logout" type="button" :disabled="isLoggingOut" aria-label="退出应用系统" @click="logoutSystem"><ConsoleIcon name="logout" /></button>
@@ -2877,7 +2777,7 @@ onMounted(async () => {
       </header>
       <section class="console-content crm-content">
         <header class="console-page-head crm-page-head"><div><h1>{{ activeSection === 'presale' && presaleCreatePage ? '新建售前申请' : sectionTitle }}</h1><p>{{ activeSection === 'presale' && presaleCreatePage ? '填写售前支持需求，提交后进入两级审批流程' : activeSection === 'notifications' ? '包含当前用户的商机、售前与信用等级业务通知，不受 SELF / ORG / ALL 数据范围扩展' : activeSection === 'credit-approvals' ? '仅展示当前账号可审批的信用等级调整申请' : activeSection === 'credit-rules' ? '规则仅作用于后续回款事实，不会追溯重算历史记录' : '可见数据与可执行动作均由服务端权限和状态控制' }}</p></div><div v-if="activeSection === 'presale'" class="crm-actions"><template v-if="presaleCreatePage"><button type="button" :disabled="presaleCreateLoading" @click="closePresaleCreatePage">← 返回申请列表</button><button class="primary" type="submit" form="presale-create-form" :disabled="presaleCreateLoading">{{ presaleCreateLoading ? '提交中…' : '提交申请' }}</button></template><template v-else><button v-if="canCreatePresale && presaleRequestSubmissionAvailable" class="primary" type="button" @click="openPresaleCreatePage">新建申请</button><button v-if="canReadPresaleReports" @click="openReports">投入报表</button><button @click="loadAlerts">未读预警 {{ alerts.length }}</button><button v-if="canConfigurePresaleAlerts" @click="openAlertConfig">预警规则</button></template></div><div v-if="activeSection === 'opportunities'" class="crm-actions"><button v-if="canManageOpportunityCatalog" @click="opportunityCatalogDialog = true">基础数据配置</button><button @click="loadStageAlerts">刷新阶段告警</button><button v-if="canConfigureStageAlerts" @click="openStageAlertRuleEditor">阶段告警规则</button></div></header>
-      <p v-if="error" class="crm-alert error" role="alert">{{ error }}</p><p v-if="notice" class="crm-alert success" role="status">{{ notice }}</p><p v-if="runtimeCapabilitiesError" class="crm-alert warning" role="status">{{ runtimeCapabilitiesError }}</p>
+      <OperationToast :message="error || notice" :tone="error ? 'error' : 'success'" /><p v-if="runtimeCapabilitiesError" class="crm-alert warning" role="status">{{ runtimeCapabilitiesError }}</p>
       <section v-if="activeSection === 'customers'" class="crm-toolbar crm-customer-filters">
         <label>客户号 / 名称<input v-model.trim="customerFilters.keyword" @keyup.enter="loadCurrent" maxlength="100"></label>
         <label>类型<input v-model.trim="customerFilters.type" list="customer-type-options" placeholder="业主 / 三方 等" maxlength="64"></label><datalist id="customer-type-options"><option v-for="item in customerTypeSuggestions" :key="item" :value="item"></option></datalist><label>行业<select v-model="customerFilters.industry"><option value="">全部行业</option><option v-for="item in customerIndustryOptions" :key="item" :value="item">{{ item }}</option></select></label><label>区域<input v-model.trim="customerFilters.region" list="customer-region-options" placeholder="华北 / 华南 等" maxlength="64"></label><datalist id="customer-region-options"><option v-for="item in customerRegionSuggestions" :key="item" :value="item"></option></datalist>
@@ -3501,5 +3401,15 @@ onMounted(async () => {
         <div class="crm-actions"><button type="button" :disabled="actionLoading" @click="closeReasonDialog">取消</button><button class="primary" type="submit" :disabled="actionLoading">{{ reasonDialog.confirmText }}</button></div>
       </form>
     </div>
+    <ConfirmDialog
+      v-if="confirmDialog"
+      :title="confirmDialog.title"
+      :description="confirmDialog.description"
+      :confirm-text="confirmDialog.confirmText"
+      :cancel-text="confirmDialog.cancelText"
+      :danger="confirmDialog.danger"
+      @confirm="acceptConfirm"
+      @cancel="cancelConfirm"
+    />
   </div>
 </template>

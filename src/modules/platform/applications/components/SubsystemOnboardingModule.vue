@@ -34,6 +34,7 @@ import { applySubsystemOnboardingPreset, normalizeIntegratedSubsystemOnboarding,
 import { visibleSubsystemEnvironments } from '@/modules/platform/applications/utils/subsystemEnvironmentVisibility'
 import { visibleSubsystemApplications } from '@/modules/platform/applications/utils/subsystemApplicationVisibility'
 import { useRelatedDataInvalidation } from '@/modules/platform/shared/composables/useRelatedDataInvalidation'
+import { createRequestScope } from '@/modules/platform/shared/composables/requestScope'
 import { loadAllCatalogPages } from '@/modules/platform/iam/utils/paginatedCatalog'
 import { RELATED_DATA } from '@/modules/platform/shared/utils/relatedDataInvalidation'
 import { formatUserError, safeUserMessage, userErrorDiagnostics } from '../../../shared/utils/userError.js'
@@ -58,8 +59,10 @@ const selectedApplicationId = ref('')
 const environments = ref([])
 const environmentsLoading = ref(false)
 const selectedEnvironmentId = ref('')
-// 环境加载的请求序号：切换应用后，较慢的旧响应不能覆盖新应用的环境列表。
-const environmentRequestSeq = ref(0)
+// 环境读取链的请求作用域（R04/R05）：每次加载 begin 新票据（contextKey 含当前应用），
+// 数据/错误回写与 finally 清理前先 isCurrent 校验——同一应用重复读取只采纳最后一次，
+// 切换应用后旧请求整体作废；组件卸载由 requestScope 内部的 onScopeDispose 自动兜底。
+const environmentRequestScope = createRequestScope()
 // 环境卡片内按职责分区（目录入口 / 运行时 / 认证），不再用平级工作区切换；
 // 认证区默认折叠，避免单个环境卡片承载过多信息。登记向导用两步收敛新增接入。
 const expandedAuthentication = ref({})
@@ -534,8 +537,10 @@ async function loadProvisioningCapabilities() {
 
 async function loadEnvironments() {
 	const application = selectedApplication.value
-	// 每次加载递增；旧请求返回时序号已变，直接丢弃，避免"A 的响应覆盖 B 的页面"。
-	const requestSeq = ++environmentRequestSeq.value
+	// 每次加载开启新票据：同一应用的重复读取丢弃前一次结果；切换应用后旧请求整体作废，
+	// 避免“A 的响应覆盖 B 的页面”，也避免旧请求的 finally 关闭新应用的 loading。
+	const scopeTicket = environmentRequestScope.begin(`ENV:${application?.application_id || ''}`)
+	const isCurrentRequest = () => environmentRequestScope.isCurrent(scopeTicket)
   if (!application?.application_id || !canReadEnvironments.value) {
     environments.value = []
     selectedEnvironmentId.value = ''
@@ -557,7 +562,7 @@ async function loadEnvironments() {
 	keycloakProjectionFailures.value = []
   try {
     const data = await listEnvironments({ applicationId: application.application_id, page: 1, pageSize: 100, status: '' })
-    if (requestSeq !== environmentRequestSeq.value) return
+    if (!isCurrentRequest()) return
     environments.value = visibleSubsystemEnvironments(data?.items)
     selectedEnvironmentId.value = environments.value.some((item) => item.environment_id === selectedEnvironmentId.value)
       ? selectedEnvironmentId.value
@@ -568,7 +573,7 @@ async function loadEnvironments() {
       environment.environment,
       await getSubsystemStatus({ applicationCode: application.code, environment: environment.environment }),
     ]))
-    if (requestSeq !== environmentRequestSeq.value) return
+    if (!isCurrentRequest()) return
     deploymentStates.value = Object.fromEntries(states
       .filter((result) => result.status === 'fulfilled' && result.value[1]?.status)
       .map((result) => result.value))
@@ -582,19 +587,26 @@ async function loadEnvironments() {
       environment.environment_id,
       await getKeycloakIntegrationStatus({ applicationCode: application.code, environment: environment.environment }),
     ]))
+    // 集成状态同样只允许当前票据回写：否则切换应用后，旧应用的集成摘要会污染新应用卡片。
+    if (!isCurrentRequest()) return
     keycloakSwitchStates.value = Object.fromEntries(integrationStates
       .filter((result) => result.status === 'fulfilled' && result.value[1] && typeof result.value[1] === 'object')
       .map((result) => result.value))
-		await loadKeycloakProjectionOperations(application.code)
+		await loadKeycloakProjectionOperations(application.code, isCurrentRequest)
   } catch (error) {
+    // 过期请求的错误不得覆盖新应用的页面状态（R04）。
+    if (!isCurrentRequest()) return
     environments.value = []
     setError(error, '读取应用环境失败。')
   } finally {
-    environmentsLoading.value = false
+    // 旧请求的 finally 不得关闭新请求的 loading（R05）。
+    if (isCurrentRequest()) environmentsLoading.value = false
   }
 }
 
-async function loadKeycloakProjectionOperations(applicationCode = selectedApplication.value?.code) {
+// isCurrentRequest 由调用链（loadEnvironments）传入：切换应用后，旧应用的投影告警与
+// 失败列表不得写回页面；单独调用时保持既有行为。
+async function loadKeycloakProjectionOperations(applicationCode = selectedApplication.value?.code, isCurrentRequest = () => true) {
   if (!applicationCode || !canReadApplications.value) return
   keycloakOperationsLoading.value = true
   try {
@@ -602,16 +614,18 @@ async function loadKeycloakProjectionOperations(applicationCode = selectedApplic
       getKeycloakProjectionAlerts(),
       listKeycloakProjectionFailures({ applicationCode, page: 1, pageSize: 50 }),
     ])
+    if (!isCurrentRequest()) return
     keycloakProjectionAlert.value = alert && typeof alert === 'object' ? alert : null
     keycloakProjectionFailures.value = Array.isArray(failures?.items) ? failures.items : []
   } catch (error) {
     // 即使旧版平台 API 尚未部署操作扩展，
     // 状态端点仍然可用。不应因此让整个页面
     // 失败或隐藏应用环境。
+    if (!isCurrentRequest()) return
     keycloakProjectionAlert.value = null
     keycloakProjectionFailures.value = []
   } finally {
-    keycloakOperationsLoading.value = false
+    if (isCurrentRequest()) keycloakOperationsLoading.value = false
   }
 }
 
@@ -859,7 +873,16 @@ async function confirmRuntimeAdoption() {
     pendingRuntimeAdoption.value = null
     if (result?.status === 'UPDATING' || result?.status === 'PROVISIONING') {
       notify('运行时接管已受理，正在后台执行；页面将跟踪进度。')
-      const { status: finalStatus, state: finalState } = await waitForDeploymentCompletion(application, environment.environment)
+      // 受理成功后进度轮询失败不属于接管操作失败：只提示状态查询暂时不可用，
+      // 不重复发起接管请求（接管已在服务端后台执行）。
+      let pollResult
+      try {
+        pollResult = await waitForDeploymentCompletion(application, environment.environment)
+      } catch (pollError) {
+        setDeploymentTrackingError('运行时接管')
+        return
+      }
+      const { status: finalStatus, state: finalState } = pollResult
       if (finalStatus === 'CANCELLED') return
       if (finalStatus === 'READY') {
         notify('运行时接管完成。')
@@ -955,7 +978,10 @@ async function waitForDeploymentCompletion(application, environmentName) {
       readStatus: () => getSubsystemStatus({ applicationCode: application.code, environment: environmentName }),
       onStatus: (state) => {
         finalState = state
-        if (selectedApplicationId.value === application.application_id) {
+        // 归属校验：除仍在同一应用外，该环境还必须在当前环境列表中，避免轮询在
+        // 环境列表重新读取/切换之后把旧状态重新写回新链路。
+        if (selectedApplicationId.value === application.application_id
+          && environments.value.some((item) => item.environment === environmentName)) {
           deploymentStates.value = { ...deploymentStates.value, [environmentName]: state }
         }
       },
@@ -969,6 +995,14 @@ async function waitForDeploymentCompletion(application, environmentName) {
 function setDeploymentFailure(state, fallback) {
   setError(null, readableGuidance(state?.last_error, fallback))
   errorNextAction.value = readableGuidance(state?.next_action, '请查看该环境的部署状态；仍失败时请联系管理员核对后重试。')
+}
+
+// 受理与结果分离（R01 同族）：UPDATING/PROVISIONING 表示服务端已受理异步部署，受理之后
+// 的进度轮询失败只说明状态查询暂时不可用，不是部署操作失败。这里只做准确提示，
+// 不得重复发起部署请求，也不得套用“操作失败”文案诱导用户再次操作。
+function setDeploymentTrackingError(acceptedText) {
+  setError(null, `${acceptedText}已受理，正在后台执行；部署状态暂时查询失败，请稍后刷新重试。`)
+  errorNextAction.value = '请稍后刷新状态核对部署进度；无需重复发起部署操作。'
 }
 
 async function reapplyEnvironment(environment, retry = false) {
@@ -988,7 +1022,16 @@ async function reapplyEnvironment(environment, retry = false) {
     })
     if (result?.status === 'UPDATING' || result?.status === 'PROVISIONING') {
       notify('部署已受理，正在后台执行；页面将跟踪进度。')
-      const { status: finalStatus, state: finalState } = await waitForDeploymentCompletion(application, environment.environment)
+      // 受理成功后进度轮询失败不属于操作失败：只提示状态查询暂时不可用，
+      // 不重复发起部署请求（部署已在服务端后台执行）。
+      let pollResult
+      try {
+        pollResult = await waitForDeploymentCompletion(application, environment.environment)
+      } catch (pollError) {
+        setDeploymentTrackingError('部署')
+        return
+      }
+      const { status: finalStatus, state: finalState } = pollResult
       if (finalStatus === 'CANCELLED') return
       if (finalStatus === 'READY') {
         notify(retry ? '重试部署完成；后续更新与重试请使用「接入向导」。' : '子系统部署完成；后续更新与重试请使用「接入向导」。')

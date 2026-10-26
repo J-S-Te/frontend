@@ -58,6 +58,10 @@ export async function listAuditEvents({
   clientIp = '',
   resourceId = '',
   requestId = '',
+  correlationId = '',
+  eventId = '',
+  actorId = '',
+  loginIp = '',
   occurredFrom = '',
   occurredTo = '',
   signal,
@@ -75,6 +79,10 @@ export async function listAuditEvents({
     client_ip: clientIp,
     resource_id: resourceId,
     request_id: requestId,
+    correlation_id: correlationId,
+    event_id: eventId,
+    actor_id: actorId,
+    login_ip: loginIp,
     occurred_from: occurredFrom,
     occurred_to: occurredTo,
   })
@@ -186,6 +194,16 @@ export function mapAuditEvent(event) {
     id: event.event_id,
     time: event.occurred_at,
     operator: event.operator_display_name || '',
+    // 稳定身份：名称会变、用户会重名，追溯必须能拿到 ID 与主体类型。
+    actorId: event.actor_id || '',
+    actorType: event.actor_type || '',
+    actorTypeLabel: actorTypeLabel(event.actor_type),
+    reasonCode: event.reason_code || '',
+    businessId: event.business_id || '',
+    receivedAt: event.received_at || '',
+    // 登录地址来源独立于当前请求来源，历史事件为空时如实显示。
+    loginIpSource: event.login_ip_source || '',
+    loginIpSourceLabel: event.login_ip_source ? ipSourceLabel(event.login_ip_source) : '历史记录无此字段',
     type: event.action_type || event.action || '',
     application: event.application_name || event.application_code || '',
     applicationCode: event.application_code || '',
@@ -193,6 +211,7 @@ export function mapAuditEvent(event) {
     environmentCode: event.environment_code || '',
     object: event.resource_name || event.resource_type || '',
     resource: event.resource_type || '',
+    resourceId: event.resource_id || '',
     action: event.action || '',
     method: event.method || '',
     path: event.path || '',
@@ -222,6 +241,15 @@ export function mapAuditEvent(event) {
  * 地址来源标记翻译。历史记录是 LEGACY_RECORD，旧发布方是 LEGACY_PROTOCOL，
  * 没有采集到地址时是 UNKNOWN——界面必须如实显示"未采集/来源未知"，不能猜。
  */
+/** 主体类型：机器与系统事件不能显示成人工操作。 */
+export function actorTypeLabel(type) {
+  return {
+    USER: '人工操作',
+    MACHINE: '机器调用',
+    SYSTEM: '系统自动执行',
+  }[String(type || '').toUpperCase()] || '未标注主体类型'
+}
+
 export function ipSourceLabel(source) {
   return {
     DIRECT: '直连采集',

@@ -1,5 +1,8 @@
 <script setup>
+import OperationToast from '@/modules/shared/components/OperationToast.vue'
 import { computed, onMounted, ref } from "vue"
+import { useConfirmDialog } from "@/modules/shared/composables/useConfirmDialog.js"
+import ConfirmDialog from "@/modules/shared/components/ConfirmDialog.vue"
 import ConsoleIcon from "@/modules/platform/shared/components/ConsoleIcon.vue"
 import EmptyState from "@/modules/platform/shared/components/EmptyState.vue"
 import ErrorState from "@/modules/platform/shared/components/ErrorState.vue"
@@ -11,8 +14,10 @@ const canManage = computed(() => props.permissions.includes("dictionary.manage")
 const canWrite = computed(() => canManage.value && !!dictionary.value && !loading.value && !error.value && !saving.value)
 const editing = ref(null)
 const draft = ref({})
+let editorInitialSnapshot = ""
 const saving = ref(false)
 const editorError = ref("")
+const { dialog: confirmDialog, askConfirm, accept: acceptConfirm, cancel: cancelConfirm } = useConfirmDialog()
 const toast = ref("")
 const history = ref(null)
 const historyLoading = ref(false)
@@ -58,9 +63,20 @@ function openEditor(item = null) {
 	if (!canWrite.value || editing.value) return
   editing.value = { mode: item ? "edit" : "create", code: item?.code, version: item?.version ?? 0 }
   draft.value = item ? Object.fromEntries(["code", ...fields].map((key) => [key, item[key] || ""])) : { code: "", name: "", dashboard: "合同看板", definition: "", formula: "", source: "", period: "月", status: "待确认" }
+  editorInitialSnapshot = JSON.stringify(draft.value)
   editorError.value = ""
 }
-function closeEditor() { if (!saving.value) { editing.value = null; editorError.value = "" } }
+async function closeEditor() {
+  if (saving.value || !editing.value || confirmDialog.value) return
+  const current = editing.value
+  if (editorInitialSnapshot !== JSON.stringify(draft.value)) {
+    const discard = await askConfirm({ title: '放弃指标编辑？', description: '当前表单有未保存的修改，放弃后不会保留。', confirmText: '放弃修改', cancelText: '继续编辑', danger: true })
+    if (!discard || saving.value || editing.value !== current) return
+  }
+  editing.value = null
+  editorInitialSnapshot = ""
+  editorError.value = ""
+}
 function replaceMetric(metric) {
   dictionary.value = { ...dictionary.value, metrics: [...dictionary.value.metrics.filter((item) => item.code !== metric.code), metric].sort((a, b) => a.code.localeCompare(b.code)) }
 }
@@ -92,7 +108,14 @@ async function toggleMetric(item) {
 }
 async function removeMetric(item) {
   if (!canWrite.value || editing.value || item.origin !== "CUSTOM") return
-  if (!window.confirm(`确认删除指标“${item.name}”（${item.code}）？已被引用的指标不能删除，可选择停用。版本历史将保留。`)) return
+  const ok = await askConfirm({
+    title: '删除指标？',
+    description: `确认删除指标“${item.name}”（${item.code}）？已被引用的指标不能删除，可选择停用。版本历史将保留。`,
+    confirmText: '删除指标',
+    cancelText: '取消',
+    danger: true,
+  })
+  if (!ok) return
   saving.value = true
   toast.value = ""
   try {
@@ -136,14 +159,25 @@ function operationLabel(operation) { return ({ BASELINE: "原始口径", CREATE:
       </aside>
       <div class="da-dict-metrics da-table-panel">
         <div class="da-filters"><label><ConsoleIcon name="search" /><input v-model="keyword" placeholder="检索指标名称 / 看板 / 关键词"  maxlength="100"/></label><span>{{ filteredMetrics.length }} / {{ dictionary.metrics?.length || 0 }} 项指标</span><button class="da-button" :disabled="saving" @click="load">刷新</button><button v-if="canManage" class="da-button primary" :disabled="!canWrite" @click="openEditor()">新建指标</button></div>
-        <p v-if="toast" role="status" class="da-dict-message">{{ toast }}</p>
-        <div class="da-table-scroll"><table class="da-table"><thead><tr><th>编码 / 版本</th><th>指标 / 来源</th><th>看板</th><th>业务定义</th><th>公式说明</th><th>数据源</th><th>周期</th><th>口径状态</th><th>启用状态</th><th>操作</th></tr></thead><tbody><tr v-for="item in filteredMetrics" :key="item.code"><td class="mono">{{ item.code }}<br />v{{ item.version }}</td><td><b>{{ item.name }}</b><br />{{ item.origin === 'BUILTIN' ? '内置' : '自定义' }}</td><td>{{ item.dashboard }}</td><td>{{ item.definition }}</td><td>{{ item.formula }}</td><td class="mono">{{ item.source }}</td><td>{{ item.period }}</td><td>{{ item.status }}</td><td><span class="da-badge" :class="item.enabled ? 'normal' : 'warning'">{{ item.enabled ? '已启用' : '已停用' }}</span><small v-if="!item.enabled && !item.can_enable" class="da-dict-hint">未绑定可用计算能力或口径不匹配，不能启用</small><small v-else class="da-dict-hint">{{ item.calculation_binding || '已绑定计算能力' }}</small></td><td><div class="da-dict-actions"><button class="da-button compact" @click="openHistory(item)">版本历史</button><template v-if="canManage"><button class="da-button compact" :disabled="!canWrite" @click="openEditor(item)">编辑</button><button class="da-button compact" :disabled="!canWrite || (!item.enabled && !item.can_enable)" @click="toggleMetric(item)">{{ item.enabled ? '停用' : '启用' }}</button><button v-if="item.origin === 'CUSTOM'" class="da-button compact" :disabled="!canWrite" @click="removeMetric(item)">删除</button></template></div></td></tr></tbody></table></div>
+        <OperationToast :message="toast" />
+        <div class="da-table-scroll"><table class="da-table"><thead><tr><th>编码 / 版本</th><th>指标 / 来源</th><th>看板</th><th>业务定义</th><th>公式说明</th><th>数据源</th><th>周期</th><th>口径状态</th><th>启用状态</th><th>操作</th></tr></thead><tbody><tr v-for="item in filteredMetrics" :key="item.code"><td class="mono">{{ item.code }}<br />v{{ item.version }}</td><td><b>{{ item.name }}</b><br />{{ item.origin === 'BUILTIN' ? '内置' : '自定义' }}</td><td>{{ item.dashboard }}</td><td>{{ item.definition }}</td><td>{{ item.formula }}</td><td class="mono">{{ item.source }}</td><td>{{ item.period }}</td><td>{{ item.status }}</td><td><span class="da-badge" :class="item.enabled ? 'normal' : 'warning'">{{ item.enabled ? '已启用' : '已停用' }}</span><small v-if="!item.enabled && !item.can_enable" class="da-dict-hint">未绑定可用计算能力或口径不匹配，不能启用</small><small v-else class="da-dict-hint">{{ item.calculation_binding || '已绑定计算能力' }}</small></td><td><div class="da-dict-actions"><button class="da-button compact" @click="openHistory(item)">版本历史</button><template v-if="canManage"><button class="da-button compact" :disabled="!canWrite" @click="openEditor(item)">编辑</button><button class="da-button compact" :disabled="!canWrite || (!item.enabled && !item.can_enable)" @click="toggleMetric(item)">{{ item.enabled ? '停用' : '启用' }}</button><button v-if="item.origin === 'CUSTOM'" class="da-button compact" :disabled="!canWrite" @click="removeMetric(item)">删除</button>
+</template></div></td></tr></tbody></table></div>
         <EmptyState v-if="filteredMetrics.length === 0" title="未找到匹配指标" />
       </div>
     </div>
     <div v-if="editing" class="da-modal-backdrop" @click.self="closeEditor"><form class="da-modal" @submit.prevent="saveEditor"><header><b>{{ editing.mode === 'edit' ? '编辑指标口径' : '新建指标口径' }}</b><button type="button" class="da-icon-button" :disabled="saving" @click="closeEditor">×</button></header><p class="da-dict-meta">公式仅作为口径说明。新建指标保存后停用；计算绑定由服务端管理。</p><label>编码<input v-model="draft.code" :disabled="editing.mode === 'edit' || saving" required  maxlength="64"/></label><label>名称<input v-model="draft.name" :disabled="saving" required  maxlength="128"/></label><label>看板<input v-model="draft.dashboard" :disabled="saving" required  maxlength="128"/></label><label>业务定义<textarea v-model="draft.definition" :disabled="saving" required  maxlength="512"/></label><label>公式说明<textarea v-model="draft.formula" :disabled="saving" required  maxlength="512"/></label><label>数据源说明<input v-model="draft.source" :disabled="saving" required  maxlength="255"/></label><label>统计周期<input v-model="draft.period" :disabled="saving" required  maxlength="64"/></label><label>口径确认状态<input v-model="draft.status" :disabled="saving" list="metric-confirmation-status" maxlength="32" required /><datalist id="metric-confirmation-status"><option value="待确认" /><option value="已确认" /></datalist></label><p v-if="editorError" role="alert" class="da-dict-message">{{ editorError }}</p><footer><button type="button" class="da-button" :disabled="saving" @click="closeEditor">取消</button><button class="da-button primary" :disabled="!canWrite">{{ saving ? '保存中…' : '保存口径' }}</button></footer></form></div>
     <div v-if="history" class="da-modal-backdrop" @click.self="closeHistory"><section class="da-modal da-dict-history"><header><b>{{ history.name }} · 版本历史</b><button type="button" class="da-icon-button" @click="closeHistory">×</button></header><p class="da-dict-meta">按版本从新到旧展示最近 200 条；更早版本仍保留在数据库中。</p><LoadingState v-if="historyLoading" title="版本历史加载中…" /><ErrorState v-else-if="historyError" :error="historyError" @retry="openHistory(history)" /><template v-else><article v-for="(entry, index) in history.versions" :key="`${entry.metric?.version}-${index}`" class="da-dict-history-entry"><h3>v{{ entry.metric.version }} · {{ operationLabel(entry.operation) }}</h3><p>{{ entry.created_at }} · 操作人 {{ entry.actor_id || '系统' }}</p><p>{{ entry.metric.name }} · {{ entry.metric.dashboard }} · {{ entry.metric.period }}</p><p>口径状态：{{ entry.metric.status }}；{{ entry.metric.enabled ? '已启用' : '已停用' }}</p><p>业务定义：{{ entry.metric.definition }}</p><p>公式说明：{{ entry.metric.formula }}</p><p>数据源说明：{{ entry.metric.source }}</p></article><EmptyState v-if="history.versions.length === 0" title="暂无持久化版本历史" /></template></section></div>
   </section>
+  <ConfirmDialog
+    v-if="confirmDialog"
+    :title="confirmDialog.title"
+    :description="confirmDialog.description"
+    :confirm-text="confirmDialog.confirmText"
+    :cancel-text="confirmDialog.cancelText"
+    :danger="confirmDialog.danger"
+    @confirm="acceptConfirm"
+    @cancel="cancelConfirm"
+  />
 </template>
 
 <style scoped>

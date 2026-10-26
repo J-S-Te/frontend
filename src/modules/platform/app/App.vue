@@ -112,5 +112,11 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
+  <a class="skip-link" href="#main-content">跳到主要内容</a>
   <RouterView />
 </template>
+
+<style scoped>
+.skip-link { position: fixed; top: 8px; left: 8px; z-index: 11000; transform: translateY(-160%); padding: 8px 12px; border-radius: 6px; background: #1d4ed8; color: #fff; font-size: 13px; text-decoration: none; }
+.skip-link:focus-visible { transform: translateY(0); }
+</style>

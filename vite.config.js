@@ -139,6 +139,9 @@ export default defineConfig(({ mode }) => {
           // 第三方运行时单独缓存，避免平台主入口随业务代码变更整体失效，
           // 同时把首屏主包控制在构建告警阈值以内。
           manualChunks(id) {
+            // Keep the credential crypto library out of the eager vendor chunk;
+            // it is dynamically imported only when an encrypted credential route runs.
+            if (id.includes('/node_modules/node-forge/')) return 'credential-forge'
             if (id.includes('/node_modules/')) return 'vendor'
             return undefined
           },

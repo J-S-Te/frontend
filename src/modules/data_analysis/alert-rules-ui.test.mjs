@@ -12,6 +12,7 @@ function harness({ permissions = ['alert.manage'], get = async () => [existing()
   const calls = { put: [], remove: [], confirm: [] }
   const context = vm.createContext({
     formatDataAnalysisError,
+    useConfirmDialog: () => ({ dialog: { value: null }, askConfirm: async ({ description }) => { calls.confirm.push(description); return confirm }, accept() {}, cancel() {} }),
     ref: (value) => ({ value }),
     computed: (getter) => ({ get value() { return getter() } }),
     defineProps: () => ({ permissions }),
@@ -156,4 +157,33 @@ test('deletion requires confirmation and history rejection keeps the rule visibl
   await success.ui.load()
   await success.ui.removeRule(success.ui.rules.value[0])
   assert.equal(success.ui.rules.value.length, 0)
+})
+
+for (const confirm of [false, true]) {
+  test(`编辑后关闭：确认放弃=${confirm}，草稿保护与零写入`, async () => {
+    const { ui, calls } = harness({ confirm })
+    await ui.load()
+    ui.openEditor(ui.rules.value[0])
+    ui.draft.value.name = '未保存的新名称'
+    await ui.closeEditor()
+    assert.equal(calls.confirm.length, 1)
+    assert.equal(Boolean(ui.editing.value), !confirm)
+    if (!confirm) assert.equal(ui.draft.value.name, '未保存的新名称')
+    assert.equal(calls.put.length, 0)
+  })
+}
+test('未修改直接关闭；保存中保留表单且不询问放弃', async () => {
+  const { ui, calls } = harness()
+  await ui.load()
+  const item = ui.rules.value[0]
+  ui.openEditor(item)
+  await ui.closeEditor()
+  assert.equal(ui.editing.value, null)
+  assert.equal(calls.confirm.length, 0)
+  ui.openEditor(item)
+  ui.draft.value.name = '未保存'
+  ui.saving.value = true
+  await ui.closeEditor()
+  assert.ok(ui.editing.value)
+  assert.equal(calls.confirm.length, 0)
 })

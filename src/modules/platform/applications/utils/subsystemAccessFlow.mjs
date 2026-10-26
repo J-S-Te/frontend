@@ -131,7 +131,12 @@ export function markApplicationScope(applications, capabilityCodes) {
   if (codes.length === 0) {
     return list.map((item) => ({ ...item, inScope: null }))
   }
-  return list.map((item) => ({
+  const known = new Set(list.map((item) => String(item?.code || '').trim().toLowerCase()))
+  const candidates = [...list]
+  for (const code of new Set(codes)) {
+    if (!known.has(code)) candidates.push({ code, name: code })
+  }
+  return candidates.map((item) => ({
     ...item,
     inScope: codes.includes(String(item?.code || '').trim().toLowerCase()),
   }))

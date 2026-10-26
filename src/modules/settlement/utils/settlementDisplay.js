@@ -97,6 +97,47 @@ export const redFlushStatusLabel = (value) =>
     value
   ] || "未知";
 // 发票详情 · 留痕时间线事件：仅基于当前发票已暴露的字段拼装，不引入额外后端接口。
+export function buildInvoiceTimelineEvents(detail) {
+  if (!detail) return [];
+  const events = [];
+  if (detail.request_no) {
+    events.push({
+      tone: "info",
+      title: "提交开票申请",
+      detail: `申请号 ${detail.request_no} · 合同 ${detail.contract_no || "—"}`,
+    });
+  }
+  if (detail.issue_date) {
+    events.push({
+      tone: "success",
+      title: "开票完成",
+      timestamp: detail.issue_date,
+      detail:
+        detail.issued_by_channel === "MANUAL"
+          ? "人工登记发票并回填台账"
+          : "税控回执已写入台账",
+    });
+  }
+  const flush = detail.red_flush_request;
+  if (flush) {
+    const status = redFlushStatusLabel(flush.status);
+    const reviewTone =
+      flush.status === "REJECTED" || flush.status === "FAILED"
+        ? "danger"
+        : flush.status === "COMPLETED"
+          ? "success"
+          : "warning";
+    events.push({
+      tone: reviewTone,
+      title: `红冲申请 · ${status}`,
+      timestamp: flush.created_at || flush.updated_at || "",
+      detail: flush.review_reason
+        ? `复核意见：${flush.review_reason}`
+        : `原因：${flush.reason_code}${flush.reason_detail ? ` · ${flush.reason_detail}` : ""}`,
+    });
+  }
+  return events;
+}
 
 export const receiptStatusMeta = (item) =>
   ({

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFile } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import projectManagementModule from './module.js'
 
 const source = await readFile(new URL('./views/ProjectManagementView.vue', import.meta.url), 'utf8')
@@ -12,7 +13,9 @@ const styles = await readFile(new URL('./styles/project-management.css', import.
 const pickerSource = await readFile(new URL('./components/ServiceItemPicker.vue', import.meta.url), 'utf8')
 const searchableSelectSource = await readFile(new URL('./components/SearchableSelect.vue', import.meta.url), 'utf8')
 const penetrationWorkPackageSource = await readFile(new URL('./components/PenetrationWorkPackageCard.vue', import.meta.url), 'utf8')
+const monitoringSource = await readFile(new URL('./composables/useProjectMonitoring.js', import.meta.url), 'utf8')
 const filterBarSource = await readFile(new URL('./components/FilterBar.vue', import.meta.url), 'utf8')
+const adjustSource = await readFile(new URL('./composables/useDecompositionAdjust.js', import.meta.url), 'utf8')
 const sharedComponentSources = await Promise.all([
   'CodePills.vue',
   'EmptyHint.vue',
@@ -223,7 +226,7 @@ test('顶栏右上角只剩通知铃铛与账号头像，账号名与退出入�
   assert.doesNotMatch(topTools[1], /class="pm-user"/)
   assert.doesNotMatch(topTools[1], /logoutSystem|currentUserName|currentUserRoleLabel/)
   // 账号行落在侧栏底部，结构与客户与商机系统一致：头像 + 账号名 + 角色名 + 退出按钮。
-  assert.match(source, /<div class="pm-sidebar-user">\s*<span class="pm-avatar" aria-hidden="true">\{\{ currentUserInitial \}\}<\/span>\s*<span class="pm-user-copy"><strong :title="currentUserName">\{\{ currentUserName \}\}<\/strong><small :title="currentUserRoleLabel">\{\{ currentUserRoleLabel \}\}<\/small><\/span>\s*<button class="pm-logout" type="button" :disabled="isLoggingOut" aria-label="退出应用系统" @click="logoutSystem"><ConsoleIcon name="logout" \/><\/button>\s*<\/div>/)
+  assert.match(source, /<div class="pm-sidebar-user subsystem-sidebar-user">\s*<span class="pm-avatar" aria-hidden="true">\{\{ currentUserInitial \}\}<\/span>\s*<span class="pm-user-copy"><strong :title="currentUserName">\{\{ currentUserName \}\}<\/strong><small :title="currentUserRoleLabel">\{\{ currentUserRoleLabel \}\}<\/small><\/span>\s*<button class="pm-logout" type="button" :disabled="isLoggingOut" aria-label="退出应用系统" @click="logoutSystem"><ConsoleIcon name="logout" \/><\/button>\s*<\/div>/)
   // 账号行必须是侧栏的最后一个元素（离开侧栏之前），否则又会被顶栏那类信息挤上去。
   assert.match(source, /<button class="pm-logout"[\s\S]*?<\/div>\s*<\/aside>/)
   // 角色名取服务端角色目录（不硬编码角色码），目录未就绪时退回角色码，不出现空白。
@@ -1112,16 +1115,16 @@ test('拆解调整入口按 project.decomposition.manage 门控并调用真实�
   // 拆解调整能力完全埋没；入口必须与能力一起补齐，并按同一权限码门控。
   assert.ok(source.includes("canManageDecomposition = computed(() => permissionSet.value.has('project.decomposition.manage'))"))
   assert.match(source, /v-if="activeSection === 'decomposition' && canManageDecomposition"[^>]*@click="openDecompositionAdjust"/)
-  assert.match(source, /await adjustDecomposition\(project\.id, \{ reason: adjustForm\.value\.reason, supplement_contract_id: adjustForm\.value\.supplementContractID, items \}\)/)
-  assert.match(source, /showToast\('拆解已调整，项目进入补充协议处理中'\)/)
-  assert.match(source, /const \[categories, contracts\] = await Promise\.all/)
+  assert.match(adjustSource, /await adjustDecomposition\(project\.id, \{ reason: adjustForm\.value\.reason, supplement_contract_id: adjustForm\.value\.supplementContractID, items \}\)/)
+  assert.match(adjustSource, /showToast\('拆解已调整，项目进入补充协议处理中'\)/)
+  assert.match(adjustSource, /const \[categories, contracts\] = await Promise\.all/)
   assert.match(source, /v-for="contract in supplementContractOptions"[^>]*:value="contract\.id"/)
   assert.doesNotMatch(source, /<input v-model\.trim="adjustForm\.supplementContractID"/)
   assert.match(source, /只能选择当前客户已审批且不同于原合同的记录/)
   // 一次提交会替换该项目的全部服务项，对话框必须显示将被替换的目标项目，避免误操作。
   assert.match(source, /目标项目：<b>\{\{ decompositionProject \?/)
   // 服务端在同一事务里替换全部服务项，提交前必须校验前端必填项。
-  assert.match(source, /每个服务项都要填写场所、批次与检测类别/)
+  assert.match(adjustSource, /每个服务项都要填写场所、批次与检测类别/)
   // API 客户端必须走真实端点而不是本地模拟。
   assert.match(pmApiSource, /export function adjustDecomposition\(projectID, payload\)/)
   assert.match(pmApiSource, /decomposition-adjustments/)
@@ -1401,10 +1404,11 @@ test('新建项目只显示尚未建立项目的已审批合同', () => {
 
 test('轻提示按结果切换语义色，错误不再是绿色对勾', () => {
   assert.match(source, /function showToast\(message, type = 'success'\)/)
-  assert.match(source, /:class="toastType"/)
-  for (const tone of ['success', 'error', 'warning', 'info']) {
-    assert.match(styles, new RegExp(`\\.pm-toast\\.${tone} span \\{ background: var\\(--pm-[a-z]+\\); \\}`))
-  }
+  assert.match(source, /<OperationToast :message="toastMessage" :tone="toastType"/)
+  const toast = readFileSync(new URL('../shared/components/OperationToast.vue', import.meta.url), 'utf8')
+  assert.match(toast, /tone === 'error' \? '✕'/)
+  assert.match(toast, /\.shared-operation-toast\.error/)
+  assert.match(toast, /\.shared-operation-toast\.warning/)
   assert.match(source, /showToast\(formatUserError\(error, \{ fallback: '[^']*' \}\), 'error'\)/)
   assert.match(source, /, 'warning'\); return \}/)
 })
@@ -1430,10 +1434,10 @@ test('按 V1.1 原型还原：详情页、步骤条、审批流、状态分布�
   assert.match(styles, /\.pm-approval \{/)
   assert.match(styles, /@keyframes pm-approval-pulse/)
   // 监控页状态分布条与胶囊筛选（口径为派生状态，不使用已删除字段）。
-  assert.match(source, /const monitoredStatusMix = computed/)
+  assert.match(monitoringSource, /const monitoredStatusMix = computed/)
   assert.match(source, /class="pm-statusbar"/)
   assert.match(styles, /\.pm-statusbar \{/)
-  assert.match(source, /const monitorFilter = ref\(''\)/)
+  assert.match(monitoringSource, /const monitorFilter = ref\(''\)/)
   // 字段级权限矩阵（原型 matrix）。
   assert.match(source, /const permissionMatrix = computed/)
   assert.match(source, /class="pm-matrix"/)
@@ -1586,14 +1590,14 @@ test('过期设备展示派生无效状态且检测类别使用受控域', () =>
 })
 
 test('在途监控使用服务端快照、自动刷新、真分页和节点下钻', () => {
-  assert.match(source, /monitoringSnapshot = ref\(\{ items: \[\], recent_events: \[\], status_counts:/)
+  assert.match(monitoringSource, /monitoringSnapshot = ref\(\{ items: \[\], recent_events: \[\], status_counts:/)
   // 快照读取按查询条件持有 requestScope 票据，旧筛选迟到响应不回写（见 monitoringScope）。
-  assert.match(source, /const params = monitoringParams\(\)/)
-  assert.match(source, /await getProjectMonitoring\(params\)/)
-  assert.match(source, /monitoringScope\.begin\(`MONITOR:\$\{JSON\.stringify\(params\)\}`\)/)
-  assert.match(source, /window\.setInterval\([\s\S]*15000\)/)
-  assert.match(source, /document\.addEventListener\('visibilitychange', onMonitoringVisibility\)/)
-  assert.match(source, /window\.addEventListener\('focus', onMonitoringVisibility\)/)
+  assert.match(monitoringSource, /const params = monitoringParams\(\)/)
+  assert.match(monitoringSource, /await getProjectMonitoring\(params\)/)
+  assert.match(monitoringSource, /monitoringScope\.begin\(`MONITOR:\$\{JSON\.stringify\(params\)\}`\)/)
+  assert.match(monitoringSource, /window\.setInterval\([\s\S]*15000\)/)
+  assert.match(monitoringSource, /document\.addEventListener\('visibilitychange', onMonitoringVisibility\)/)
+  assert.match(monitoringSource, /window\.addEventListener\('focus', onMonitoringVisibility\)/)
   assert.match(source, /changeMonitoringPage\(monitorPage - 1\)/)
   assert.match(source, /changeMonitoringPage\(monitorPage \+ 1\)/)
   assert.doesNotMatch(source, /<button class="pm-pg" disabled>‹<\/button><button class="pm-pg active">1<\/button>/)

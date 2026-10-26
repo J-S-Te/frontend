@@ -149,7 +149,7 @@ test('监控读取切换筛选后：旧筛选迟到响应不回写快照，也�
       return Math.max(1, Math.ceil((context.monitoringSnapshot.value.total || 0) / context.monitorPageSize.value))
     },
   }
-  const { loadMonitoring } = functions('./ProjectManagementView.vue', ['loadMonitoring'], context)
+  const { loadMonitoring } = functions('../composables/useProjectMonitoring.js', ['loadMonitoring'], context)
   const slow = loadMonitoring()
   await until(() => pending.length === 1)
   context.monitorCategory.value = '软件产品' // 触发新查询条件

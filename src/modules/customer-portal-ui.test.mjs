@@ -78,7 +78,7 @@ test('备案向导具备七步、权限门禁、冲突停止、全量校验与�
   for (const code of ['ORGANIZATION', 'CLASSIFIED_OBJECT', 'CLASSIFICATION', 'NEW_TECHNOLOGY', 'MATERIALS', 'DATA_INVENTORY', 'CLASSIFICATION_REPORT']) assert.match(filingWizard, new RegExp(code))
   for (const permission of ['filing.create', 'filing.update', 'filing.submit', 'filing.delete']) assert.match(filingWizard, new RegExp(permission.replace('.', '\\.')))
   assert.match(filingWizard, /item\.status === 'DRAFT' && canDelete/)
-  assert.match(filingWizard, /window\.confirm\(`确认删除备案草稿/)
+  assert.match(filingWizard, /askConfirm\(\{[\s\S]*确认删除备案草稿/)
   assert.match(filingWizard, /item\.unit_name/)
   assert.match(filingWizard, /item\.system_name/)
   assert.match(filingWizard, /function filingTitle\(item\)/)

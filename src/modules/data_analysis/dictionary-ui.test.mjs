@@ -12,6 +12,7 @@ function harness({ permissions = ['dictionary.manage'], get = async () => ({ met
   const calls = { create: [], update: [], toggle: [], remove: [], versions: [], confirm: [] }
   const context = vm.createContext({ ref: (value) => ({ value }), computed: (getter) => ({ get value() { return getter() } }), defineProps: () => ({ permissions }), onMounted() {}, window: { confirm(message) { calls.confirm.push(message); return confirm } },
     formatDataAnalysisError,
+    useConfirmDialog: () => ({ dialog: { value: null }, askConfirm: async ({ description }) => { calls.confirm.push(description); return confirm }, accept() {}, cancel() {} }),
     getDictionary: get,
     createDictionaryMetric: async (payload) => { calls.create.push(payload); return create ? create(payload) : metric({ ...payload, enabled: false, version: 1 }) },
     updateDictionaryMetric: async (code, payload) => { calls.update.push({ code, payload }); return update ? update(code, payload) : metric({ ...payload, code, version: payload.version + 1 }) },
@@ -188,4 +189,33 @@ test('dictionary API routes encode code and pass version on all changes', async 
   assert.deepEqual(JSON.parse(calls[3].options.body), { enabled: false, version: 0 })
   assert.deepEqual(JSON.parse(calls[4].options.body), { version: 4 })
   assert.doesNotMatch(relevant, /putDictionary/)
+})
+
+for (const confirm of [false, true]) {
+  test(`编辑后关闭：确认放弃=${confirm}，草稿保护与零写入`, async () => {
+    const { ui, calls } = harness({ confirm })
+    await ui.load()
+    ui.openEditor(ui.dictionary.value.metrics[0])
+    ui.draft.value.name = '未保存的新名称'
+    await ui.closeEditor()
+    assert.equal(calls.confirm.length, 1)
+    assert.equal(Boolean(ui.editing.value), !confirm)
+    if (!confirm) assert.equal(ui.draft.value.name, '未保存的新名称')
+    assert.equal(calls.update.length, 0)
+  })
+}
+test('未修改直接关闭；保存中保留表单且不询问放弃', async () => {
+  const { ui, calls } = harness()
+  await ui.load()
+  const item = ui.dictionary.value.metrics[0]
+  ui.openEditor(item)
+  await ui.closeEditor()
+  assert.equal(ui.editing.value, null)
+  assert.equal(calls.confirm.length, 0)
+  ui.openEditor(item)
+  ui.draft.value.name = '未保存'
+  ui.saving.value = true
+  await ui.closeEditor()
+  assert.ok(ui.editing.value)
+  assert.equal(calls.confirm.length, 0)
 })

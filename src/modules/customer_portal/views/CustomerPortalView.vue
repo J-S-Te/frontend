@@ -1,4 +1,5 @@
 <script setup>
+import OperationToast from '@/modules/shared/components/OperationToast.vue'
 import { formatPortalError } from '../api/errorMessages.js'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -7,6 +8,7 @@ import { subsystemAccessMessage } from '@/modules/shared/authz/sessionCompatibil
 import { closeSubsystemTabOrFallback } from '@/modules/shared/utils/returnToPortal'
 import { acknowledgeSecurityEvent, addFeedbackMessage, closeFeedback, createFeedback, createIdempotencyKey, createProjectConversation, createProjectExport, createReportRequest, downloadIssuedReport, downloadProjectExport, getAccountSecurity, getEvaluation, getEvaluationEligibility, getFeedback, getFeedbackNotificationUnreadCount, getPortalCapabilities, getPortalSession, getProject, getProjectConversation, getProjectExport, getReportRequest, getReportNotificationUnreadCount, listAccountSessions, listFeedbackNotifications, listFeedbacks, listProjectActivities, listProjects, listReportNotifications, listReportRequests, listReportRiskAlerts, logoutPortal, readFeedbackNotification, readProjectConversationMessages, readReportNotification, reportRequestFingerprint, revokeAccountSession, sendProjectConversationMessage, submitEvaluation } from '../api/portal.js'
 import FilingWizard from '../components/FilingWizard.vue'
+import { useUrlFilterState } from '@/modules/shared/composables/useUrlFilterState.js'
 import '@/modules/platform/styles/console.css'
 import '../styles/customer-portal.css'
 import '../styles/project-export.css'
@@ -43,6 +45,25 @@ const projectTotal = ref(0)
 const reportPage = ref(1)
 const reportTotal = ref(0)
 const feedbackPage = ref(1)
+
+const pageNumber = (value) => Math.max(1, Number.parseInt(value, 10) || 1)
+async function restorePageTarget() {
+  const target = pageNumber(route.query[section.value === 'projects' ? 'project_page' : section.value === 'reports' ? 'report_page' : 'feedback_page'])
+  if (section.value === 'projects') {
+    while (projectPage.value < target && projectPage.value * 20 < projectTotal.value) await loadMoreProjects()
+  } else if (section.value === 'reports') {
+    while (reportPage.value < target && reportPage.value * 20 < reportTotal.value) await loadMoreReports()
+  } else if (section.value === 'feedback') {
+    while (feedbackPage.value < target && feedbackPage.value * 20 < feedbackTotal.value) await loadMoreFeedbacks()
+  }
+}
+useUrlFilterState({
+  route,
+  router,
+  fields: { project_page: projectPage, report_page: reportPage, feedback_page: feedbackPage },
+  parse: pageNumber,
+  onRestore: () => { void load().then(restorePageTarget) },
+})
 const feedbackTotal = ref(0)
 const feedbackSubmitError = ref('')
 const feedbackContactError = ref('')
@@ -644,7 +665,7 @@ watch(section, () => {
   selectedReport.value = null
   error.value = ''
   notice.value = ''
-  void load()
+  void load().then(restorePageTarget)
 })
 watch(anyDialogOpen, async (open) => {
   document.body.style.overflow = open ? 'hidden' : ''
@@ -656,7 +677,7 @@ watch(anyDialogOpen, async (open) => {
     window.removeEventListener('keydown', onDialogKeydown)
   }
 })
-onMounted(load)
+onMounted(async () => { await load(); await restorePageTarget() })
 onBeforeUnmount(() => {
   cancelReportDownload()
   projectExportController?.abort()
@@ -686,7 +707,7 @@ onBeforeUnmount(() => {
         <button class="console-nav-item" type="button" @click="returnToUnifiedPortal"><ConsoleIcon name="dashboard" /><span>返回子系统门户</span></button>
       </nav>
       <div class="console-sidebar-note"><ConsoleIcon name="shield" /><span>统一身份认证已生效，菜单与操作由服务端权限控制。</span></div>
-      <div class="console-sidebar-user">
+      <div class="console-sidebar-user subsystem-sidebar-user">
         <span class="console-avatar" aria-hidden="true">{{ accountInitial }}</span>
         <span class="console-user-copy"><strong :title="accountSecurity?.account_identifier || '当前客户'">{{ accountSecurity?.account_identifier || '当前客户' }}</strong><small>Portal 会话</small></span>
         <button class="console-logout" type="button" aria-label="结束门户会话" title="结束门户会话" @click="logoutPortal"><ConsoleIcon name="logout" /></button>
@@ -702,7 +723,7 @@ onBeforeUnmount(() => {
       </header>
       <section class="console-content portal-content">
       <template v-if="isPortalSuperAdmin"><div class="portal-title"><h1>客户门户管理</h1><p>当前为内部超级管理员会话，未绑定任何客户身份。</p></div><section class="portal-card"><h2>安全访问规则</h2><p>客户项目、报告、备案和反馈始终按客户边界隔离。管理员需要在受控的客户上下文中查看或处理具体客户数据，系统会记录操作人、目标客户、原因和审计记录。</p><p class="portal-info">当前可通过“客户与商机管理 → 客户详情 → 门户访问”完成客户开通、邀请、撤销和禁用。客户侧自助页面不会以管理员身份直接加载，避免误操作或跨客户数据泄露。</p></section></template><template v-else>
-      <p class="portal-info" role="status">登录、会话、项目查询、报告申请和等保备案草稿均已接入门户服务；客户反馈与账号安全也使用 Portal 服务端会话。项目快照和已发放报告支持短效受控 PDF 下载；备案材料已接入受控上传与文件校验状态，文件网关未配置时失败关闭，备案 PDF 和公安提交仍未接通。</p><p v-if="error" class="portal-error" role="alert">{{ error }}</p><p v-if="notice" class="portal-success" role="status">{{ notice }}</p><p v-if="loading">正在加载…</p>
+      <p class="portal-info" role="status">登录、会话、项目查询、报告申请和等保备案草稿均已接入门户服务；客户反馈与账号安全也使用 Portal 服务端会话。项目快照和已发放报告支持短效受控 PDF 下载；备案材料已接入受控上传与文件校验状态，文件网关未配置时失败关闭，备案 PDF 和公安提交仍未接通。</p><OperationToast :message="error || notice" :tone="error ? 'error' : 'success'" /><p v-if="loading">正在加载…</p>
       <section v-if="section === 'feedback' && canUseFeedback && feedbackNotifications.length" class="portal-card feedback-notifications"><h2>反馈通知（{{ feedbackNotificationUnreadCount }} 条未读）</h2><button v-for="item in feedbackNotifications" :key="item.id" type="button" class="feedback-row" @click="openFeedbackNotification(item)"><span><strong>{{ item.title }}</strong><small>{{ item.body }}</small><small>{{ formatDate(item.created_at) }}</small></span><em>查看反馈</em></button></section>
       <template v-else-if="section === 'projects' && hasPermission('project.read')"><div class="portal-title"><h1>我的项目</h1><p>项目数据以最近一次同步快照为准</p></div><section v-if="projects.length" class="project-list"><button v-for="item in projects" :key="item.project_id" type="button" @click="openProject(item)"><div><h2>{{ item.project_name || '未命名项目' }}</h2><p>{{ item.contract_no || '无合同编号' }} · {{ item.current_stage || '阶段未同步' }}</p></div><strong>{{ item.progress_pct ?? 0 }}%</strong><progress :value="item.progress_pct ?? 0" max="100"></progress><small>数据更新：{{ formatDate(item.source_updated_at) }}<template v-if="item.delayed"> · 已延期</template></small></button></section><nav v-if="projects.length && projects.length < projectTotal" class="project-pagination" aria-label="项目加载更多"><button type="button" :disabled="loading" @click="loadMoreProjects">加载更多项目</button><span>已显示 {{ projects.length }} / {{ projectTotal }} 个</span></nav><div v-else class="portal-empty">暂无可查看的项目</div></template>
       <div v-else-if="section === 'projects'" class="portal-empty">{{ serviceUnavailableText('project_enabled', '当前账号没有项目读取权限。如需开通，请联系您的服务人员。') }}</div>

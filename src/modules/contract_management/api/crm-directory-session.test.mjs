@@ -50,10 +50,11 @@ function view(api, overrides = {}) {
   for (const kind of ['customer', 'opportunity']) {
     for (const [name, initial] of Object.entries({ Page: 0, Total: 0, HasMore: false, PickerOpen: true, Keyword: '甲', Error: '', Loading: false, Options: [] })) state[kind + name] = ref(initial)
   }
-  const deps = { ...state, ...api, formatUserError, showToast: () => {}, syncManagedTemplateValues: () => {},
+  const deps = { ...state, ...api, formatUserError, showToast: () => {}, nextTick: (fn) => fn?.(), draftErrorElement: { value: null }, syncManagedTemplateValues: () => {},
     buildNewContractPayload: form => ({ title: form.title, crm_customer_id: Number(form.customer_id || 0), payment_terms: form.payment_terms || [] }),
     validateExternalContract: () => {}, refreshSelectedCRMAccess: async () => {}, createExternalContract: async () => {},
     createContract: async () => {}, loadBusinessData: async () => {},
+    saveContractResult: () => {}, pushOperationRecord: () => {},
     emptyNewContract: () => ({ title: '', customer_id: '', payment_terms: [], service_items: [] }),
     ...overrides }
   const handlers = new Function(...Object.keys(deps), `${callbackSource}; return { ${callbacks.join(',')} };`)(...Object.values(deps))

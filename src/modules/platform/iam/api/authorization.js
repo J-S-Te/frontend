@@ -83,6 +83,10 @@ export function normalizeApplicationAccess(value, directSourceType = 'USER') {
   const hasDirectRoles = Array.isArray(value.direct_roles)
   const hasInheritedRoles = Array.isArray(value.inherited_roles)
   const hasManualRoles = Array.isArray(value.manual_roles)
+  // 管理集合是否由服务端显式返回。不能把 normalizeApplicationAccess 之后补出的
+  // manual_roles 当成完整快照，否则兼容推导会被误用于覆盖写入。该字段只是前端适配标志，
+  // 不声称服务端已有同名持久化字段。
+  const manualRolesComplete = hasManualRoles
   const hasSourceMetadata = roles.some(roleHasSourceMetadata)
 
   const directRoles = hasDirectRoles
@@ -105,6 +109,7 @@ export function normalizeApplicationAccess(value, directSourceType = 'USER') {
     direct_roles: directRoles,
     inherited_roles: inheritedRoles,
     manual_roles: manualRoles,
+    manual_roles_complete: manualRolesComplete,
   }
 }
 
@@ -150,13 +155,19 @@ export function getAuthorizationOverview(userId) {
  * @param {string} applicationCode 应用编码。
  * @param {Object} [options] 替换参数。
  * @param {Array<Object>} [options.roles] 包含 role_code、scope_type 和可选有效期的完整角色集合。
- * @returns {Promise<Object|null>} 返回标准化的有效授权。
- * @throws {AuthorizationError} 用户、应用或角色不存在，作用域无效或操作无权限时抛出。
+ * @param {string} [options.expectedRevision] 同路径 GET 响应返回的 edit_revision 一致快照版本。
+ *   非空时作为 expected_revision 携带；版本陈旧时服务端返回 409
+ *   APPLICATION_ACCESS_REVISION_CONFLICT，调用方必须展示后端消息并保留草稿，不得自动重提。
+ * @returns {Promise<Object|null>} 返回标准化的有效授权（含写入后的新 edit_revision）。
+ * @throws {AuthorizationError} 用户、应用或角色不存在，作用域无效、版本冲突或操作无权限时抛出。
  */
-export function updateApplicationAccess(userId, applicationCode, { roles = [] } = {}) {
+export function updateApplicationAccess(userId, applicationCode, { roles = [], expectedRevision = '' } = {}) {
+  const body = { roles }
+  const revision = String(expectedRevision || '').trim()
+  if (revision) body.expected_revision = revision
   return request(`/users/${encodeURIComponent(userId)}/applications/${encodeURIComponent(applicationCode)}/access`, {
     method: 'PUT',
-    body: JSON.stringify({ roles }),
+    body: JSON.stringify(body),
   }).then(normalizeApplicationAccess)
 }
 
@@ -164,11 +175,17 @@ export function updateApplicationAccess(userId, applicationCode, { roles = [] } 
  * deleteApplicationAccess 撤销用户在指定应用下的全部直接访问授权。
  * @param {string} userId 用户标识。
  * @param {string} applicationCode 应用编码。
+ * @param {Object} [options] 撤销参数。
+ * @param {string} [options.expectedRevision] 同路径 GET 响应返回的 edit_revision 一致快照版本。
+ *   非空时以查询参数 expected_revision 携带（DELETE 无请求体）；版本陈旧时服务端返回 409
+ *   APPLICATION_ACCESS_REVISION_CONFLICT。
  * @returns {Promise<Object>} 返回撤销结果。
- * @throws {AuthorizationError} 用户或应用不存在、授权不可撤销或操作无权限时抛出。
+ * @throws {AuthorizationError} 用户或应用不存在、授权不可撤销、版本冲突或操作无权限时抛出。
  */
-export function deleteApplicationAccess(userId, applicationCode) {
-  return request(`/users/${encodeURIComponent(userId)}/applications/${encodeURIComponent(applicationCode)}/access`, {
+export function deleteApplicationAccess(userId, applicationCode, { expectedRevision = '' } = {}) {
+  const revision = String(expectedRevision || '').trim()
+  const query = revision ? `?expected_revision=${encodeURIComponent(revision)}` : ''
+  return request(`/users/${encodeURIComponent(userId)}/applications/${encodeURIComponent(applicationCode)}/access${query}`, {
     method: 'DELETE',
   })
 }

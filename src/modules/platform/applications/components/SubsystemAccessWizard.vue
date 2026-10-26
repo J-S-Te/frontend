@@ -97,8 +97,8 @@ function clearError() {
 
 function reportError(error, fallback) {
   const formatted = formatUserError(error, { fallback })
-  errorText.value = formatted.message || fallback
-  errorNextAction.value = formatted.nextAction || ''
+  errorText.value = formatted || fallback
+  errorNextAction.value = ''
   errorDiagnostics.value = userErrorDiagnostics(error)
 }
 
@@ -227,9 +227,11 @@ async function resumeOperation() {
   try {
     const payload = await resumeSubsystemAccessOperation(operationId)
     applyOperationPayload(payload)
-    if (['SUCCEEDED', 'RUNNING', 'PENDING'].includes(String(payload?.status || '').toUpperCase())) {
-      await watchOperation(operationId)
+    let finalStatus = String(payload?.status || '').toUpperCase()
+    if (['RUNNING', 'PENDING'].includes(finalStatus)) {
+      finalStatus = await watchOperation(operationId)
     }
+    if (finalStatus === 'SUCCEEDED') emit('completed')
   } catch (error) {
     reportError(error, '恢复检查失败，请稍后重试。')
   } finally {
@@ -244,9 +246,11 @@ async function reconnectTarget() {
   try {
     const payload = await findSubsystemAccessOperation({ applicationCode: form.applicationCode, environment: form.environment })
     applyOperationPayload(payload)
-    if (!['SUCCEEDED', 'FAILED', 'WAITING'].includes(String(payload?.status || '').toUpperCase())) {
-      await watchOperation(payload?.operation_id)
+    let finalStatus = String(payload?.status || '').toUpperCase()
+    if (!['SUCCEEDED', 'FAILED', 'WAITING'].includes(finalStatus)) {
+      finalStatus = await watchOperation(payload?.operation_id)
     }
+    if (finalStatus === 'SUCCEEDED') emit('completed')
   } catch (error) {
     // 404 = 该目标还没有任何接入操作，这是正常状态而不是错误：给出提示但不报错。
     if (isNotFoundError(error)) {

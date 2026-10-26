@@ -1,4 +1,5 @@
 <script setup>
+import OperationToast from '@/modules/shared/components/OperationToast.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { formatUserError } from '../../shared/utils/userError.js'
 import { createRequestScope } from '../../platform/shared/composables/requestScope.js'
@@ -9,6 +10,8 @@ import { assignServiceItemTeams } from '../assignment.js'
 import { useRoute, useRouter } from 'vue-router'
 import { AuthError, logoutCurrentSession } from '@/modules/platform/auth/api/auth'
 import { getUnreadCount, listInbox as listNotificationInbox, markNotificationRead } from '@/modules/platform/notifications/api/notifications'
+import { useDecompositionAdjust } from '@/modules/project_management/composables/useDecompositionAdjust'
+import { useProjectMonitoring } from '@/modules/project_management/composables/useProjectMonitoring'
 import { useProjectNotifications } from '@/modules/project_management/composables/useProjectNotifications'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import CodePills from '@/modules/project_management/components/CodePills.vue'
@@ -1558,101 +1561,14 @@ const reportSteps = computed(() => {
   ].map((step, index) => ({ ...step, state: index + 1 < current ? 'done' : index + 1 === current ? 'doing' : 'idle' }))
 })
 
-// 监控页（PG-DASH-02）使用独立的服务端快照：项目、服务项、SLA 和事件在
-// 同一授权范围内聚合。页面只提交筛选/分页，不再用普通项目列表重建“在途”口径。
-const monitorFilter = ref('')
-const monitoringSnapshot = ref({ items: [], recent_events: [], status_counts: {}, categories: [], teams: [], project_manager_ids: [], total: 0, page: 1, page_size: 20, server_time: '', snapshot_version: '' })
-const monitoringLoading = ref(false)
-const monitoringError = ref('')
-const monitorPage = ref(1)
-const monitorPageSize = ref(20)
-const monitorCategory = ref('')
-const monitorProjectManager = ref('')
-const monitorSLAOnly = ref(false)
-const monitorConflictOnly = ref(false)
-const monitorDueFrom = ref('')
-const monitorDueTo = ref('')
-let monitoringPollTimer = 0
-let monitoringFilterTimer = 0
-const monitoringScope = createRequestScope()
-const monitorFilterTabs = computed(() => [
-  { key: '', label: '全部' },
-  { key: 'risk', label: '风险' },
-  { key: '实施中', label: '实施中' },
-  { key: '报告编制', label: '报告编制' },
-])
-const monitoredStatusMix = computed(() => {
-  const buckets = [
-    { key: '推进中', tone: 'var(--pm-green)', statuses: ['待拆解确认', '待分配', '待实施', '实施准备中'] },
-    { key: '实施中', tone: 'var(--pm-primary)', statuses: ['实施中'] },
-    { key: '异常处理', tone: 'var(--pm-red)', statuses: ['异常处理中'] },
-    { key: '收尾归档', tone: 'var(--pm-violet)', statuses: ['现场实施完成', '报告编制'] },
-    { key: '已终止', tone: 'var(--pm-gray)', statuses: ['已终止'] },
-  ]
-  const counts = monitoringSnapshot.value.status_counts || {}
-  const total = monitoringSnapshot.value.total || 1
-  return buckets.map((bucket) => {
-    const count = bucket.statuses.reduce((sum, status) => sum + Number(counts[status] || 0), 0)
-    return { ...bucket, count, pct: Math.round((count / total) * 100) }
-  }).filter((bucket) => bucket.count)
-})
-const monitoredStatusByProject = (status) => monitoredStatusMix.value.find((bucket) => bucket.statuses.includes(status))?.key || status
-const monitoringRows = computed(() => monitoringSnapshot.value.items || [])
-const monitoringTotalPages = computed(() => Math.max(1, Math.ceil(monitoringSnapshot.value.total / monitorPageSize.value)))
-const monitoringUpdatedLabel = computed(() => monitoringSnapshot.value.server_time ? formatDateTime(monitoringSnapshot.value.server_time) : '尚未同步')
-const monitoringLagSeconds = computed(() => monitoringSnapshot.value.server_time ? Math.max(0, Math.round((Date.now() - new Date(monitoringSnapshot.value.server_time).getTime()) / 1000)) : null)
-
-function monitoringParams() {
-  return {
-    page: monitorPage.value, page_size: monitorPageSize.value, keyword: keyword.value.trim(), team: teamFilter.value,
-    category: monitorCategory.value, project_manager_id: monitorProjectManager.value,
-    risk: monitorFilter.value === 'risk', status: ['risk', ''].includes(monitorFilter.value) ? '' : monitorFilter.value,
-    sla: monitorSLAOnly.value, conflict: monitorConflictOnly.value, due_from: monitorDueFrom.value, due_to: monitorDueTo.value,
-  }
-}
-async function loadMonitoring({ quiet = false } = {}) {
-  if (activeSection.value !== 'monitoring') return
-  if (!quiet) monitoringLoading.value = true
-  // 票据 key 含完整查询条件：轮询、筛选或翻页并发时只采纳最后一次请求，
-  // 旧筛选的迟到响应不得覆盖新快照，其 finally 也不得关闭新请求的加载态。
-  const params = monitoringParams()
-  const ticket = monitoringScope.begin(`MONITOR:${JSON.stringify(params)}`)
-  try {
-    const snapshot = await getProjectMonitoring(params)
-    if (!monitoringScope.isCurrent(ticket)) return
-    monitoringSnapshot.value = snapshot
-    monitoringError.value = ''
-    if (monitorPage.value > monitoringTotalPages.value) { monitorPage.value = monitoringTotalPages.value; return loadMonitoring({ quiet }) }
-    loadPersonnelNames()
-  } catch (error) {
-    if (!monitoringScope.isCurrent(ticket)) return
-    monitoringError.value = formatUserError(error, { fallback: '监控数据刷新失败' })
-  } finally {
-    if (monitoringScope.isCurrent(ticket)) monitoringLoading.value = false
-  }
-}
-function scheduleMonitoringPoll() {
-  window.clearInterval(monitoringPollTimer)
-  if (activeSection.value === 'monitoring') monitoringPollTimer = window.setInterval(() => {
-    if (!document.hidden) loadMonitoring({ quiet: true })
-  }, 15000)
-}
-function onMonitoringVisibility() {
-  if (activeSection.value === 'monitoring' && !document.hidden) loadMonitoring({ quiet: true })
-}
-function resetMonitoringFilters() {
-  keyword.value = ''; teamFilter.value = ''; monitorFilter.value = ''; monitorCategory.value = ''; monitorProjectManager.value = ''
-  monitorSLAOnly.value = false; monitorConflictOnly.value = false; monitorDueFrom.value = ''; monitorDueTo.value = ''; monitorPage.value = 1
-}
-function changeMonitoringPage(page) {
-  const next = Math.min(Math.max(1, page), monitoringTotalPages.value)
-  if (next === monitorPage.value) return
-  monitorPage.value = next
-}
-function openMonitoringAction(row) {
-  if (row.action_section) navigate(row.action_section)
-  else openProject(row.project)
-}
+const {
+  monitorFilter, monitoringSnapshot, monitoringLoading, monitoringError, monitorPage, monitorPageSize,
+  monitorCategory, monitorProjectManager, monitorSLAOnly, monitorConflictOnly, monitorDueFrom, monitorDueTo,
+  monitorFilterTabs, monitoredStatusMix, monitoredStatusByProject, monitoringRows, monitoringTotalPages,
+  monitoringUpdatedLabel, monitoringLagSeconds,
+  monitoringParams, loadMonitoring, scheduleMonitoringPoll, onMonitoringVisibility,
+  resetMonitoringFilters, changeMonitoringPage, openMonitoringAction,
+} = useProjectMonitoring({ activeSection, keyword, teamFilter, loadPersonnelNames, navigate, openProject })
 
 // 资质与能力（PG-RES-06）：全部 / 人员 / 设备 / 体系与编码 / 到期提醒 标签页。
 const capabilityTab = ref('all')
@@ -2285,64 +2201,14 @@ async function confirmDecomposition() {
 
 // 调整拆解：服务端在同一事务里替换该项目的全部服务项并要求所有项仍处于待确认/待复核，
 // 因此入口只在拆解阶段可用，成功后项目进入「补充协议处理中」。
-const adjustOpen = ref(false)
-const adjustForm = ref(emptyAdjustForm())
-const supplementContracts = ref([])
-const adjustProjectID = ref('')
-const adjustScope = createRequestScope()
-async function openDecompositionAdjust() {
-  if (!decompositionProject.value) { showToast('请先选择要调整拆解的项目', 'warning'); return }
-  const projectID = decompositionProject.value.id
-  const ticket = adjustScope.begin(`ADJUST:${projectID}`)
-  adjustOpen.value = false
-  supplementContracts.value = []
-  adjustProjectID.value = ''
-  try {
-    const [categories, contracts] = await Promise.all([
-      listDetectionCategories(),
-      listSupplementContracts(projectID, { limit: 200 }),
-    ])
-    if (!adjustScope.isCurrent(ticket) || decompositionProject.value?.id !== projectID) return
-    detectionCategories.value = categories
-    supplementContracts.value = contracts
-    adjustProjectID.value = projectID
-  } catch (error) {
-    if (!adjustScope.isCurrent(ticket) || decompositionProject.value?.id !== projectID) return
-    showToast(formatUserError(error, { fallback: '检测类别或已审批合同加载失败，暂时不能调整拆解' }), 'error')
-    return
-  }
-  if (!activeDetectionCategoryOptions.value.length) { showToast('没有启用的检测类别，请先在拆解规则中配置', 'warning'); return }
-  if (!supplementContractOptions.value.length) { showToast('当前客户没有可用的已审批补充协议', 'warning'); return }
-  adjustForm.value = emptyAdjustForm()
-  adjustOpen.value = true
-}
-function addAdjustItem() { adjustForm.value.items.push(emptyAdjustItem()) }
-function removeAdjustItem(index) {
-  if (adjustForm.value.items.length === 1) adjustForm.value.items[0] = emptyAdjustItem()
-  else adjustForm.value.items.splice(index, 1)
-}
-async function submitDecompositionAdjust() {
-  if (saving.value) return
-  const project = decompositionProject.value
-  if (!project) { showToast('请先选择要调整拆解的项目', 'warning'); return }
-  if (project.id !== adjustProjectID.value) { adjustOpen.value = false; showToast('项目已切换，请重新打开调整拆解', 'warning'); return }
-  const items = adjustForm.value.items.map((row, index) => ({
-    source_id: row.sourceID || `ADJUST-${String(index + 1).padStart(3, '0')}`,
-    batch: row.batch, site: row.site, category: row.category, system: row.system,
-    system_level: row.systemLevel, requirement: row.requirement, test_mode: row.testMode,
-  }))
-  if (items.some((row) => !row.site || !row.batch || !row.category)) {
-    showToast('每个服务项都要填写场所、批次与检测类别'); return
-  }
-  saving.value = true
-  try {
-    await adjustDecomposition(project.id, { reason: adjustForm.value.reason, supplement_contract_id: adjustForm.value.supplementContractID, items })
-    adjustOpen.value = false
-    showToast('拆解已调整，项目进入补充协议处理中')
-    await refreshAfterWrite()
-  } catch (error) { showToast(formatUserError(error, { fallback: '调整拆解失败' }), 'error') }
-  finally { saving.value = false }
-}
+
+const {
+  adjustOpen, adjustForm, supplementContracts, adjustProjectID,
+  openDecompositionAdjust, addAdjustItem, removeAdjustItem, submitDecompositionAdjust,
+} = useDecompositionAdjust({
+  decompositionProject, detectionCategories, activeDetectionCategoryOptions, supplementContractOptions,
+  saving, showToast, formatUserError, refreshAfterWrite,
+})
 
 async function toggleRule(rule) {
   const next = !rule.enabled
@@ -2979,6 +2845,8 @@ function closeActiveOverlay() {
 
 function onGlobalKeydown(event) {
   if (event.key !== 'Escape') return
+  if (event.defaultPrevented) return
+  if (document.body?.dataset?.confirmDialogOpen === 'true') return
   if (closeActiveOverlay()) event.preventDefault()
 }
 
@@ -2994,24 +2862,13 @@ watch(() => fieldQueueOwner(), (ownerKey) => {
 onMounted(() => {
   document.addEventListener('click', closeMultiOnOutsideClick)
   document.addEventListener('keydown', onGlobalKeydown)
-  document.addEventListener('visibilitychange', onMonitoringVisibility)
-  window.addEventListener('focus', onMonitoringVisibility)
   window.addEventListener('online', onFieldOnline)
 })
 // 进入资源分配/待办/指派栏目时刷新人员目录，保证新建或停用的平台账号能及时反映。
 watch(activeSection, (section) => {
   if (['allocation', 'inbox', 'assignments', 'monitoring'].includes(section)) loadPersonnel()
   if (section === 'preparation') loadEquipmentReservations(selectedServiceItem.value)
-  if (section === 'monitoring') loadMonitoring()
-  scheduleMonitoringPoll()
 })
-watch([keyword, teamFilter, monitorFilter, monitorCategory, monitorProjectManager, monitorSLAOnly, monitorConflictOnly, monitorDueFrom, monitorDueTo], () => {
-  if (activeSection.value !== 'monitoring') return
-  monitorPage.value = 1
-  window.clearTimeout(monitoringFilterTimer)
-  monitoringFilterTimer = window.setTimeout(() => loadMonitoring(), 250)
-})
-watch(monitorPage, () => loadMonitoring())
 // 刷新或切换节点后，立即清除已经不属于当前节点的选择，避免回退项目残留操作按钮。
 watch([activeSection, activeNodeItems], ([section, items]) => {
   if (!['allocation', 'inbox', 'planning', 'preparation', 'assignments', 'methods', 'exceptions', 'reports', 'implementation'].includes(section)) return
@@ -3031,12 +2888,8 @@ watch(canExecutionAssign, (allowed) => {
 onBeforeUnmount(() => {
   window.clearTimeout(toastTimer)
   disposeNotifications()
-  window.clearTimeout(monitoringFilterTimer)
-  window.clearInterval(monitoringPollTimer)
   document.removeEventListener('click', closeMultiOnOutsideClick)
   document.removeEventListener('keydown', onGlobalKeydown)
-  document.removeEventListener('visibilitychange', onMonitoringVisibility)
-  window.removeEventListener('focus', onMonitoringVisibility)
   window.removeEventListener('online', onFieldOnline)
 })
 </script>
@@ -3062,7 +2915,7 @@ onBeforeUnmount(() => {
           <button class="pm-nav-item" type="button" @click="returnToUnifiedPortal"><ConsoleIcon name="dashboard" /><span>返回子系统门户</span></button>
         </div>
       </nav>
-      <div class="pm-sidebar-user">
+      <div class="pm-sidebar-user subsystem-sidebar-user">
         <span class="pm-avatar" aria-hidden="true">{{ currentUserInitial }}</span>
         <span class="pm-user-copy"><strong :title="currentUserName">{{ currentUserName }}</strong><small :title="currentUserRoleLabel">{{ currentUserRoleLabel }}</small></span>
         <button class="pm-logout" type="button" :disabled="isLoggingOut" aria-label="退出应用系统" @click="logoutSystem"><ConsoleIcon name="logout" /></button>
@@ -3746,6 +3599,6 @@ onBeforeUnmount(() => {
       @cancel="cancelConfirm"
     />
 
-    <Transition name="pm-toast"><div v-if="toastMessage" class="pm-toast" :class="toastType" role="status"><span>{{ toastType === 'error' ? '✕' : toastType === 'warning' ? '⚠' : toastType === 'info' ? 'ℹ' : '✓' }}</span>{{ toastMessage }}</div></Transition>
+    <OperationToast :message="toastMessage" :tone="toastType" />
   </div>
 </template>

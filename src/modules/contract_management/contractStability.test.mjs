@@ -119,7 +119,7 @@ test('签署台账筛选切换后：旧筛选迟到响应不覆盖新筛选数�
     listSigningRecords: () => new Promise((resolve, reject) => pending.push({ resolve, reject })),
     normalizeSigningRecord: (item) => item,
   }
-  const { refreshSigningRecords } = functions('./views/ContractManagementView.vue', ['refreshSigningRecords'], context)
+  const { refreshSigningRecords } = functions('./composables/useSigningLedger.js', ['refreshSigningRecords'], context)
   const slow = refreshSigningRecords()
   await until(() => pending.length === 1)
   context.signingKeyword.value = '新筛选'

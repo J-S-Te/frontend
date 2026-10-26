@@ -1,30 +1,31 @@
 <script setup>
+import OperationToast from '@/modules/shared/components/OperationToast.vue'
 import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { AuthError, logoutCurrentSession } from "@/modules/platform/auth/api/auth";
 import { createRequestScope } from "@/modules/platform/shared/composables/requestScope.js";
 import ConsoleIcon from "@/modules/platform/shared/components/ConsoleIcon.vue";
-import RedFlushDialog from "@/modules/settlement/components/RedFlushDialog.vue";
-import SettlementTimeline from "@/modules/settlement/components/SettlementTimeline.vue";
+import SettlementInvoiceDetailPanel from "@/modules/settlement/components/SettlementInvoiceDetailPanel.vue";
+import SettlementAllocationsPanel from "@/modules/settlement/components/SettlementAllocationsPanel.vue";
+import SettlementReceiptsPanel from "@/modules/settlement/components/SettlementReceiptsPanel.vue";
+import SettlementReceivablesPanel from "@/modules/settlement/components/SettlementReceivablesPanel.vue";
+import SettlementDashboardPanel from "@/modules/settlement/components/SettlementDashboardPanel.vue";
+import SettlementTasksPanel from "@/modules/settlement/components/SettlementTasksPanel.vue";
+import DunningCenterPanel from "@/modules/settlement/components/DunningCenterPanel.vue";
+import SettlementInvoiceListPanel from "@/modules/settlement/components/SettlementInvoiceListPanel.vue";
 import {
-  allocationStatusMeta,
   amountOf,
-  collectionStatusLabel,
-  confirmationState,
-  dueState,
-  dunningActionStatusLabel,
-  dunningCaseStatusLabel,
   formatSettlementAmount,
-  invoiceStatusMeta,
-  invoiceTypeLabel,
   isCurrentMonth,
-  issueChannelLabel,
-  money,
-  receiptStatusMeta,
-  receivableInvoiceStatusLabel,
-  redFlushStatusLabel,
 } from "@/modules/settlement/utils/settlementDisplay";
 import { useSettlementActions } from "@/modules/settlement/composables/useSettlementActions";
+import { useDunningCenter } from "@/modules/settlement/composables/useDunningCenter";
+import { useReceiptAllocation } from "@/modules/settlement/composables/useReceiptAllocation";
+import { useInvoiceDetail } from "@/modules/settlement/composables/useInvoiceDetail";
+import { useReportExport } from "@/modules/settlement/composables/useReportExport";
+import { useReceivablePlans } from "@/modules/settlement/composables/useReceivablePlans";
+import { useReceiptRegistration } from "@/modules/settlement/composables/useReceiptRegistration";
+import { useInvoiceRequests } from "@/modules/settlement/composables/useInvoiceRequests";
 import { canRequestRedFlush } from "@/modules/settlement/utils/invoiceStatus";
 import { formatSettlementError } from "../utils/errors.js";
 import { closeSubsystemTabOrFallback } from "@/modules/shared/utils/returnToPortal";
@@ -37,8 +38,6 @@ import {
   approveInvoiceRedFlush,
   confirmReceivablePlan,
   createAgingReceivablesExport,
-  completeDunningAction as completeDunningActionAPI,
-  createDunningPolicy,
   createInvoicedReceivablesExport,
   createInvoiceRequest,
   createReceipt,
@@ -76,7 +75,6 @@ import "@/modules/platform/styles/console.css";
 import "@/modules/settlement/styles/settlement.css";
 
 const { dialog: confirmDialog, askConfirm, accept: acceptConfirm, cancel: cancelConfirm } = useConfirmDialog();
-const reviewFailureDialog = ref(null);
 const route = useRoute(),
   router = useRouter();
 const settlementSession = ref({});
@@ -133,9 +131,6 @@ const active = computed(() =>
 );
 const title = computed(
   () => sections.find(([key]) => key === active.value)?.[1] || "结算总览",
-);
-const invoiceDetailID = computed(() =>
-  active.value === "invoices" ? String(route.query.invoice_id || "") : "",
 );
 const dashboardCurrencyTotals = (field, fallback) => {
   const totals = Array.isArray(dashboard.value.currency_totals)
@@ -358,37 +353,36 @@ const dunningKpis = computed(() => {
     },
   ];
 });
-const canCompleteDunningAction = (item) =>
-  item.status === "PENDING" &&
-  (item.recipient_user_id === settlementSession.value?.user_id ||
-    sessionPermissions.value.has("settlement.admin"));
-async function completeDunningAction(item) {
-  if (saving.value) return;
-  const note = window.prompt("填写本次催收跟进结果（最多 500 字）。完成后该动作不再计入待办。");
-  if (note === null) return;
-  if (note.trim().length > 500) {
-    error.value = "催收跟进结果不能超过 500 字。";
-    return;
-  }
-  saving.value = true;
-  try {
-    await completeDunningActionAPI(item.id, {
-      version: Number(item.version),
-      note: note.trim(),
-    });
-    const refreshed = await load();
-    notify(refreshed ? "催收动作已完成。" : "催收动作已完成；页面刷新失败，请手动刷新确认。");
-  } catch (value) {
-    error.value = formatSettlementError(value, { fallback: "催收动作完成失败。" });
-  } finally {
-    saving.value = false;
-  }
-}
 const loading = ref(true),
   error = ref(""),
   isLoggingOut = ref(false);
 
 const { message, saving, notify, act } = useSettlementActions({ load, formatSettlementError });
+const {
+  dunningPolicies,
+  dunningRecipients,
+  dunningCases,
+  dunningActions,
+  dunningOverview,
+  dunningCoverage,
+  dunningRecipientsLoading,
+  dunningRecipientsError,
+  policyForm,
+  dunningActionDialog,
+  canCompleteDunningAction,
+  completeDunningAction,
+  cancelDunningAction,
+  confirmDunningAction,
+  submitPolicy,
+} = useDunningCenter({
+  saving,
+  notify,
+  load,
+  act,
+  formatSettlementError,
+  settlementSession,
+  sessionPermissions,
+});
 const dashboard = ref({}),
   plans = ref([]),
   receivables = ref([]),
@@ -397,280 +391,120 @@ const dashboard = ref({}),
   allocations = ref([]),
   invoiceRequests = ref([]),
   taxInvoices = ref([]),
-  invoiceDetail = ref(null),
   invoicedReceivableTop10 = ref({ items: [] }),
-  dunningPolicies = ref([]),
-  dunningRecipients = ref([]),
-  dunningCases = ref([]),
-  dunningActions = ref([]),
-  dunningOverview = ref({}),
-  dunningCoverage = ref({ policies: [], gaps: [] }),
   agingSummary = ref({ items: [] });
-const dunningRecipientsLoading = ref(false);
-const dunningRecipientsError = ref("");
-const exportJob = ref(null);
-const invoiceDocumentInput = ref(null);
-const redFlushOpen = ref(false);
-const redFlushForm = ref({ reason_code: "INVOICE_ERROR", reason_detail: "" });
+const { exportJob, exportInvoicedReceivables, exportAgingReceivables, downloadExport } = useReportExport({
+  saving,
+  notify,
+  formatSettlementError,
+  createInvoicedReceivablesExport,
+  createAgingReceivablesExport,
+  getReportExport,
+  downloadReportExport,
+});
+const {
+  invoiceDetailID,
+  invoiceDetail,
+  redFlushOpen,
+  redFlushForm,
+  invoiceTimelineEvents,
+  openInvoiceDetail,
+  closeInvoiceDetail,
+  uploadInvoiceDocument,
+  downloadInvoiceDocument,
+  submitRedFlush,
+  reviewRedFlush,
+} = useInvoiceDetail({
+  route,
+  router,
+  active,
+  saving,
+  notify,
+  act,
+  load,
+  formatSettlementError,
+  uploadTaxInvoiceDocument,
+  downloadTaxInvoiceDocument,
+  requestTaxInvoiceRedFlush,
+  approveInvoiceRedFlush,
+  rejectInvoiceRedFlush,
+});
 // 读取作用域：每次 load() 开启新票据并整体失效旧请求，菜单快速切换时旧页面响应
 // 只能结束自身；组件卸载经 onScopeDispose 自动作废，迟到响应不再回写（任务 C）。
 const settlementScope = createRequestScope();
-const invoiceTab = ref("requests"),
-  invoiceComposerOpen = ref(false),
-  invoiceReviewOpen = ref(false),
-  invoiceKeyword = ref(""),
-  invoiceStatusFilter = ref("");
-const allocationTab = ref("receipts"),
-  receiptComposerOpen = ref(false),
-  allocationComposerOpen = ref(false),
-  reversalComposerOpen = ref(false);
-const planKeyword = ref(""),
-  planEditorOpen = ref(false),
-  planConfirmationFilter = ref(""),
-  planMaturityFilter = ref("");
-const planEditor = ref({
-  id: "",
-  version: 0,
-  contract_no: "",
-  customer_name: "",
-  due_date: "",
-  planned_amount: "",
-  original_due_date: "",
-  original_planned_amount: "",
-  reason: "",
+const {
+  reviewFailureDialog,
+  invoiceTab,
+  invoiceComposerOpen,
+  invoiceReviewOpen,
+  invoiceKeyword,
+  invoiceStatusFilter,
+  invoiceReview,
+  invoiceForm,
+  visibleInvoiceRequests,
+  visibleTaxInvoices,
+  resetInvoiceFilters,
+  openReviewFailure,
+  closeReviewFailure,
+  submitReviewFailure,
+  submitInvoice,
+  approveInvoice,
+  submitInvoiceReview,
+  manualIssue,
+} = useInvoiceRequests({
+  invoiceRequests,
+  taxInvoices,
+  invoiceEligibleReceivables,
+  saving,
+  notify,
+  act,
+  load,
+  formatSettlementError,
+  createInvoiceRequest,
+  approveInvoiceRequest,
+  rejectInvoiceRequest,
+  registerManualInvoice,
+  recoverInvoiceFailure,
 });
-const invoiceReview = ref({ id: "", version: 0, request_no: "", reason: "" });
-const receiptMatches = ref([]);
-const receiptMatchFor = ref("");
-const receiptForm = ref({
-  customer_id: "",
-  customer_name: "",
-  amount: "",
-  currency: "CNY",
-  receipt_date: new Date().toISOString().slice(0, 10),
-  payment_method: "TRANSFER",
-  bank_transaction_reference: "",
+const {
+  receiptComposerOpen,
+  receiptMatches,
+  receiptMatchFor,
+  receiptForm,
+  receiptCustomers,
+  submitReceipt,
+  syncReceiptCustomer,
+} = useReceiptRegistration({
+  receivables,
+  saving,
+  notify,
+  load,
+  formatSettlementError,
+  createReceipt,
+  listReceiptMatches,
 });
-const receiptCustomers = computed(() => {
-  const values = new Map();
-  receivables.value.forEach((item) => {
-    if (item.customer_id && !values.has(item.customer_id)) {
-      values.set(item.customer_id, {
-        id: item.customer_id,
-        name: item.customer_name || item.customer_id,
-      });
-    }
-  });
-  return [...values.values()].sort((left, right) =>
-    left.name.localeCompare(right.name, "zh-CN"),
-  );
-});
-const allocationForm = ref({
-  receipt_id: "",
-  receivable_id: "",
-  amount: "",
-  match_mode: "MANUAL",
-  match_confidence: 0,
-});
-const reversalForm = ref({
-  allocation_id: "",
-  amount: "",
-  reason_code: "MATCH_ERROR",
-  reason_detail: "",
-});
-const invoiceForm = ref({
-  receivable_id: "",
-  invoice_type: "ELECTRONIC_NORMAL",
-  buyer_tax_no: "",
-  item_name: "服务费",
-  tax_classification_code: "",
-  amount_excl_tax: "",
-  tax_rate: "0.06",
-  tax_amount: "",
-  amount_incl_tax: "",
-});
-const policyForm = ref({
-  name: "逾期升级提醒",
-  aging_from_days: 1,
-  aging_to_days: 30,
-  action_type: "REMIND",
-  recipient_rule: "USER:",
-  channel: "LOCAL",
-  repeat_interval_days: 7,
-  priority: "NORMAL",
-});
-const policyRecipientAccount = computed({
-  get: () => policyForm.value.recipient_rule.replace(/^USER:/, ""),
-  set: (value) => {
-    policyForm.value.recipient_rule = `USER:${String(value || "").trim()}`;
-  },
-});
+const {
+  allocationTab,
+  allocationComposerOpen,
+  reversalComposerOpen,
+  allocationForm,
+  reversalForm,
+  submitAllocation,
+  submitReversal,
+} = useReceiptAllocation({ act, createReceiptAllocation, reverseReceiptAllocation });
+const {
+  planKeyword,
+  planEditorOpen,
+  planConfirmationFilter,
+  planMaturityFilter,
+  planEditor,
+  visiblePlans,
+  resetPlanFilters,
+  confirmPlan,
+  submitPlanConfirmation,
+} = useReceivablePlans({ plans, notify, act, confirmReceivablePlan });
 function go(section) {
   router.push({ name: "settlement", params: { section } });
-}
-const visiblePlans = computed(() =>
-  plans.value.filter((item) => {
-    const keyword = planKeyword.value.trim().toLowerCase();
-    const confirmation = confirmationState(item.status);
-    const maturity = dueState(item.due_date);
-    return (
-      (!keyword ||
-        [item.contract_no, item.customer_name, item.id]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase()
-          .includes(keyword)) &&
-      (!planConfirmationFilter.value ||
-        confirmation.label === planConfirmationFilter.value) &&
-      (!planMaturityFilter.value || maturity.label === planMaturityFilter.value)
-    );
-  }),
-);
-function resetPlanFilters() {
-  planKeyword.value = "";
-  planConfirmationFilter.value = "";
-  planMaturityFilter.value = "";
-}
-const invoiceTimelineEvents = computed(() => {
-  const detail = invoiceDetail.value;
-  if (!detail) return [];
-  const events = [];
-  if (detail.request_no) {
-    events.push({
-      tone: "info",
-      title: "提交开票申请",
-      detail: `申请号 ${detail.request_no} · 合同 ${detail.contract_no || "—"}`,
-    });
-  }
-  if (detail.issue_date) {
-    events.push({
-      tone: "success",
-      title: "开票完成",
-      timestamp: detail.issue_date,
-      detail:
-        detail.issued_by_channel === "MANUAL"
-          ? "人工登记发票并回填台账"
-          : "税控回执已写入台账",
-    });
-  }
-  const flush = detail.red_flush_request;
-  if (flush) {
-    const status = redFlushStatusLabel(flush.status);
-    const reviewTone =
-      flush.status === "REJECTED" || flush.status === "FAILED"
-        ? "danger"
-        : flush.status === "COMPLETED"
-          ? "success"
-          : "warning";
-    events.push({
-      tone: reviewTone,
-      title: `红冲申请 · ${status}`,
-      timestamp: flush.created_at || flush.updated_at || "",
-      detail: flush.review_reason
-        ? `复核意见：${flush.review_reason}`
-        : `原因：${flush.reason_code}${flush.reason_detail ? ` · ${flush.reason_detail}` : ""}`,
-    });
-  }
-  return events;
-});
-const visibleInvoiceRequests = computed(() =>
-  invoiceRequests.value.filter((item) => {
-    const keyword = invoiceKeyword.value.trim().toLowerCase();
-    return (
-      (!keyword ||
-        [item.request_no, item.contract_no, item.buyer_name]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase()
-          .includes(keyword)) &&
-      (!invoiceStatusFilter.value || item.status === invoiceStatusFilter.value)
-    );
-  }),
-);
-const visibleTaxInvoices = computed(() =>
-  taxInvoices.value.filter((item) => {
-    const keyword = invoiceKeyword.value.trim().toLowerCase();
-    return (
-      (!keyword ||
-        [item.invoice_no, item.invoice_code, item.contract_no, item.buyer_name]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase()
-          .includes(keyword)) &&
-      (!invoiceStatusFilter.value || item.status === invoiceStatusFilter.value)
-    );
-  }),
-);
-function resetInvoiceFilters() {
-  invoiceKeyword.value = "";
-  invoiceStatusFilter.value = "";
-}
-function openInvoiceDetail(item) {
-  router.push({
-    name: "settlement",
-    params: { section: "invoices" },
-    query: { invoice_id: item.id },
-  });
-}
-function closeInvoiceDetail() {
-  router.push({ name: "settlement", params: { section: "invoices" } });
-}
-function chooseInvoiceDocument() {
-  invoiceDocumentInput.value?.click();
-}
-async function uploadInvoiceDocument(event) {
-  const file = event.target.files?.[0];
-  event.target.value = "";
-  if (!file || !invoiceDetail.value?.id) return;
-  if (saving.value) return;
-  saving.value = true;
-  try {
-    await uploadTaxInvoiceDocument(invoiceDetail.value.id, file);
-    const refreshed = await load();
-    notify(refreshed ? "电子发票已通过文件网关归档。" : "电子发票已归档，但页面刷新失败。请刷新列表查看，勿重复上传。");
-  } catch (cause) {
-    notify(formatSettlementError(cause, { fallback: "电子发票上传失败。" }));
-  } finally {
-    saving.value = false;
-  }
-}
-async function downloadInvoiceDocument(document) {
-  if (!invoiceDetail.value?.id || !document?.id) return;
-  try { await downloadTaxInvoiceDocument(invoiceDetail.value.id, document.id); }
-  catch (cause) { notify(formatSettlementError(cause, { fallback: "电子发票下载失败，请稍后重试。" })); }
-}
-async function downloadExport(id) {
-  try { await downloadReportExport(id); }
-  catch (cause) { notify(formatSettlementError(cause, { fallback: "报表下载失败，请稍后重试。" })); }
-}
-function submitRedFlush() {
-  if (!redFlushForm.value.reason_detail.trim()) {
-    notify("发起红冲必须填写具体原因。");
-    return;
-  }
-  return act(async () => {
-    await requestTaxInvoiceRedFlush(invoiceDetail.value.id, {
-      reason_code: redFlushForm.value.reason_code,
-      reason_detail: redFlushForm.value.reason_detail.trim(),
-    });
-    redFlushOpen.value = false;
-  }, "红冲申请已提交，等待财务复核；原发票仍保持已开具状态。");
-}
-function reviewRedFlush(approve) {
-  const request = invoiceDetail.value?.red_flush_request;
-  if (!request) return;
-  let reason = "";
-  if (!approve) {
-    reason = window.prompt("请输入红冲驳回原因：", "");
-    if (!reason?.trim()) return;
-  }
-  return act(async () => {
-    if (approve) {
-      await approveInvoiceRedFlush(request.id, request.version);
-    } else {
-      await rejectInvoiceRedFlush(request.id, request.version, reason.trim());
-    }
-  }, approve ? "红冲申请已通过复核，等待税控处理。" : "红冲申请已驳回。");
 }
 function back() {
   closeSubsystemTabOrFallback(window, () => router.replace({ name: "portal" }));
@@ -710,36 +544,6 @@ const visibleListPages = computed(() => (sectionLists[active.value] || []).map((
 async function changeListPage(index, direction) {
   listPages.value[index] = Math.max(0, (listPages.value[index] || 0) + direction);
   await load();
-}
-function openReviewFailure(item) {
-  if (!item || saving.value) return;
-  reviewFailureDialog.value = { item, reason: "", error: "" };
-}
-
-function closeReviewFailure() {
-  if (!saving.value) reviewFailureDialog.value = null;
-}
-
-async function submitReviewFailure(reason) {
-  const dialog = reviewFailureDialog.value;
-  if (!dialog || saving.value) return;
-  const normalized = String(reason || "").trim();
-  if (normalized.length < 5 || normalized.length > 1000) {
-    dialog.error = "复核原因应为 5 到 1000 字。";
-    return;
-  }
-  saving.value = true;
-  dialog.error = "";
-  try {
-    await recoverInvoiceFailure(dialog.item.id, { version: dialog.item.version, reason: normalized });
-    reviewFailureDialog.value = null;
-    const refreshed = await load();
-    notify(refreshed ? "失败已复核，申请已恢复待审核；尚未重新开票。" : "失败已复核，尚未重新开票；页面刷新失败，请刷新列表查看。无需重复复核。");
-  } catch (value) {
-    dialog.error = formatSettlementError(value, { fallback: "失败复核未完成。" });
-  } finally {
-    saving.value = false;
-  }
 }
 function loadTargets(section) {
   const target = (loader, state, fallback) => [loader, state, fallback];
@@ -857,106 +661,6 @@ async function load() {
   loading.value = false;
   return failures.length === 0;
 }
-async function exportInvoicedReceivables() {
-  return runReportExport(createInvoicedReceivablesExport, "CSV 已生成，可下载。");
-}
-async function exportAgingReceivables() {
-  return runReportExport(createAgingReceivablesExport, "账龄表已生成，可下载。");
-}
-async function runReportExport(createExport, successMessage) {
-  if (saving.value) return;
-  saving.value = true;
-  let submitted = false;
-  try {
-    exportJob.value = await createExport();
-    submitted = true;
-    for (let attempt = 0; attempt < 30; attempt += 1) {
-      if (exportJob.value.status === "READY") {
-        notify(successMessage);
-        return;
-      }
-      if (exportJob.value.status === "FAILED") {
-        notify(formatSettlementError(exportJob.value.error_message, { fallback: "报表生成失败，请稍后重新发起；仍失败时请联系管理员。" }));
-        return;
-      }
-      await new Promise((resolve) => window.setTimeout(resolve, 1000));
-      exportJob.value = await getReportExport(exportJob.value.id);
-    }
-    notify("导出仍在后台生成，可稍后继续查询并下载。");
-  } catch (cause) {
-    notify(submitted
-      ? `导出任务已提交，但状态查询失败。请稍后查询当前任务，勿重复提交。${formatSettlementError(cause)}`
-      : formatSettlementError(cause, { fallback: "导出任务提交失败，请稍后重试。" }));
-  } finally {
-    saving.value = false;
-  }
-}
-function confirmPlan(plan) {
-  planEditor.value = {
-    id: plan.id,
-    version: plan.version,
-    contract_no: plan.contract_no || "",
-    customer_name: plan.customer_name || "",
-    due_date: plan.due_date || "",
-    planned_amount: plan.planned_amount || "",
-    original_due_date: plan.due_date || "",
-    original_planned_amount: plan.planned_amount || "",
-    reason: "",
-  };
-  planEditorOpen.value = true;
-}
-function submitPlanConfirmation() {
-  const changed =
-    planEditor.value.due_date !== planEditor.value.original_due_date ||
-    String(planEditor.value.planned_amount) !==
-      String(planEditor.value.original_planned_amount);
-  if (changed && !planEditor.value.reason.trim()) {
-    notify("调整计划收款日或金额时必须填写调整原因。");
-    return;
-  }
-  return act(async () => {
-    await confirmReceivablePlan(planEditor.value.id, {
-      version: planEditor.value.version,
-      due_date: planEditor.value.due_date,
-      planned_amount: planEditor.value.planned_amount,
-      reason: planEditor.value.reason.trim(),
-    });
-    planEditorOpen.value = false;
-  }, "应收计划已确认，并已生成正式应收。");
-}
-async function submitReceipt() {
-  if (saving.value) return;
-  saving.value = true;
-  let registered = false;
-  try {
-    const result = await createReceipt(receiptForm.value);
-    registered = true;
-    receiptComposerOpen.value = false;
-    receiptMatchFor.value = result.id;
-    receiptMatches.value = [];
-    receiptMatches.value = await listReceiptMatches(result.id);
-    notify(
-      receiptMatches.value.length
-        ? `回款已登记，找到 ${receiptMatches.value.length} 条可核销应收。`
-        : "回款已登记，暂未找到同客户、同币种的可核销应收。",
-    );
-    const refreshed = await load();
-    if (!refreshed) notify("回款已登记，但页面刷新失败。请刷新回款列表核对结果，勿重复登记。");
-  } catch (cause) {
-    if (registered) {
-      notify(`回款已登记，但可核销应收查询失败。请刷新回款列表继续核销，勿重复登记。${formatSettlementError(cause)}`);
-      await load();
-    } else notify(formatSettlementError(cause, { fallback: "回款登记失败，请稍后重试。" }));
-  } finally {
-    saving.value = false;
-  }
-}
-function syncReceiptCustomer() {
-  const customer = receiptCustomers.value.find(
-    (item) => item.id === receiptForm.value.customer_id,
-  );
-  receiptForm.value.customer_name = customer?.name || "";
-}
 async function selectReceiptMatch(match) {
   allocationForm.value = {
     receipt_id: receiptMatchFor.value,
@@ -968,121 +672,7 @@ async function selectReceiptMatch(match) {
   await router.push({ name: "settlement", params: { section: "allocations" } });
   allocationComposerOpen.value = true;
 }
-function submitAllocation() {
-  return act(async () => {
-    await createReceiptAllocation(allocationForm.value);
-    allocationComposerOpen.value = false;
-    allocationTab.value = "allocations";
-  }, "核销分配已确认。");
-}
-function submitReversal() {
-  return act(async () => {
-    await reverseReceiptAllocation(reversalForm.value.allocation_id, {
-      amount: reversalForm.value.amount,
-      reason_code: reversalForm.value.reason_code,
-      reason_detail: reversalForm.value.reason_detail,
-    });
-    reversalComposerOpen.value = false;
-  }, "核销冲销已完成，余额投影已恢复。");
-}
-function submitInvoice() {
-  const receivable = invoiceEligibleReceivables.value.find(
-    (item) => item.id === invoiceForm.value.receivable_id,
-  );
-  if (!receivable) {
-    notify("请选择应收单。");
-    return;
-  }
-  const form = invoiceForm.value;
-  return act(async () => {
-    await createInvoiceRequest({
-      contract_snapshot_id: receivable.contract_snapshot_id,
-      buyer_profile: {
-        customer_id: receivable.customer_id,
-        name: receivable.customer_name,
-        tax_no: form.buyer_tax_no,
-      },
-      invoice_type: form.invoice_type,
-      items: [
-        {
-          item_name: form.item_name,
-          tax_classification_code: form.tax_classification_code,
-          specification: "",
-          unit: "项",
-          quantity: "1",
-          unit_price_excl_tax: form.amount_excl_tax,
-          amount_excl_tax: form.amount_excl_tax,
-          tax_rate: form.tax_rate,
-          tax_amount: form.tax_amount,
-          amount_incl_tax: form.amount_incl_tax,
-        },
-      ],
-      allocations: [
-        { receivable_id: receivable.id, reserved_amount: form.amount_incl_tax },
-      ],
-    });
-    invoiceComposerOpen.value = false;
-  }, "开票申请已提交并锁定可开票余额。");
-}
-function approveInvoice(item) {
-  invoiceReview.value = {
-    id: item.id,
-    version: item.version,
-    request_no: item.request_no,
-    reason: "",
-  };
-  invoiceReviewOpen.value = true;
-}
-function submitInvoiceReview(decision) {
-  if (decision === "reject" && !invoiceReview.value.reason.trim()) {
-    notify("驳回开票申请时必须填写驳回原因。");
-    return;
-  }
-  return act(
-    async () => {
-      if (decision === "approve") {
-        await approveInvoiceRequest(
-          invoiceReview.value.id,
-          invoiceReview.value.version,
-        );
-      } else {
-        await rejectInvoiceRequest(
-          invoiceReview.value.id,
-          invoiceReview.value.version,
-          invoiceReview.value.reason.trim(),
-        );
-      }
-      invoiceReviewOpen.value = false;
-    },
-    decision === "approve"
-      ? "开票申请已批准，已进入配置的开具流程。"
-      : "开票申请已驳回，锁定的可开票余额已释放。",
-  );
-}
-function manualIssue(item) {
-  const invoice_code = window.prompt("请输入发票代码");
-  if (!invoice_code) return;
-  const invoice_no = window.prompt("请输入发票号码");
-  if (!invoice_no) return;
-  const issue_date = window.prompt(
-    "请输入开票日期（YYYY-MM-DD）",
-    new Date().toISOString().slice(0, 10),
-  );
-  if (!issue_date) return;
-  return act(
-    () =>
-      registerManualInvoice(item.id, {
-        invoice_code,
-        invoice_no,
-        issue_date,
-        seller_profile: {},
-      }),
-    "发票已登记，应收开票金额已同步更新。",
-  );
-}
-function submitPolicy() {
-  return act(() => createDunningPolicy(policyForm.value), "催收策略已创建。");
-}
+
 watch(
   active,
   (section) => {
@@ -1124,10 +714,10 @@ watch(invoiceDetailID, load);
           <ConsoleIcon name="dashboard" /><span>返回子系统门户</span>
         </button>
       </nav>
-      <div class="settlement-sidebar-footer">
+      <div class="settlement-sidebar-footer subsystem-sidebar-user">
         <span class="settlement-sidebar-avatar" aria-hidden="true">{{ sessionAvatar }}</span>
         <span class="settlement-sidebar-user-copy">
-          <strong>{{ sessionDisplayName }}</strong><small>{{ sessionAccount }}</small>
+          <strong :title="sessionDisplayName">{{ sessionDisplayName }}</strong><small :title="sessionAccount">{{ sessionAccount }}</small>
         </span>
         <button
           class="settlement-sidebar-logout"
@@ -1210,7 +800,7 @@ watch(invoiceDetailID, load);
             >
           </div>
         </div>
-        <p v-if="message" class="settlement-message">{{ message }}</p>
+        <OperationToast :message="message" />
         <p v-if="error" class="settlement-error">{{ error }}</p>
         <p v-if="loading" class="settlement-loading">正在读取结算数据…</p>
         <template v-else>
@@ -1222,1708 +812,123 @@ watch(invoiceDetailID, load);
               <button class="console-button secondary small" :disabled="loading || saving || entry.count < 50 || entry.page >= 2000" @click="changeListPage(entry.index, 1)">下一页</button>
             </div>
           </div>
-          <section v-if="active === 'dashboard'" class="settlement-dashboard">
-            <section class="settlement-cards">
-              <article
-                v-for="item in dashboardKpis"
-                :key="item.label"
-                :class="`tone-${item.tone}`"
-              >
-                <span>{{ item.label }}</span
-                ><b>{{ item.value }}</b
-                ><small>{{ item.note }}</small>
-              </article>
-            </section>
-            <section class="settlement-dashboard-grid">
-              <div>
-                <article class="settlement-panel settlement-workbench">
-                  <div class="settlement-panel-head">
-                    <div>
-                      <h2>待办事项 <small>需我处理</small></h2>
-                      <p>
-                        收款计划、开票审核和核销任务按真实业务状态自动汇总。
-                      </p>
-                    </div>
-                    <button class="console-text-button" @click="go('tasks')">
-                      查看全部
-                    </button>
-                  </div>
-                  <div v-if="workItems.length" class="settlement-todo-list">
-                    <div
-                      v-for="item in workItems"
-                      :key="item.section"
-                      class="settlement-todo"
-                    >
-                      <span
-                        class="settlement-todo-icon"
-                        :class="`tone-${item.tone}`"
-                        ><ConsoleIcon :name="item.icon"
-                      /></span>
-                      <div>
-                        <strong>{{ item.title }}</strong>
-                        <p>{{ item.description }}</p>
-                      </div>
-                      <button
-                        class="console-text-button"
-                        @click="go(item.section)"
-                      >
-                        {{ item.action }}
-                      </button>
-                    </div>
-                  </div>
-                  <div v-else class="settlement-empty">
-                    <ConsoleIcon name="organization" /><strong
-                      >当前没有待处理事项</strong
-                    ><span>应收确认、开票审批和催收任务将自动汇总。</span>
-                  </div>
-                </article>
-                <article class="settlement-panel settlement-aging">
-                  <div class="settlement-panel-head">
-                    <div>
-                      <h2>
-                        应收账款账龄分布 <small>服务端全量按币种聚合</small>
-                      </h2>
-                      <p>
-                        按应收单到期日计算，用于辅助识别逾期风险；权威催收状态以催收中心为准。
-                      </p>
-                    </div>
-                    <button class="console-text-button" @click="go('dunning')">
-                      查看催收
-                    </button>
-                  </div>
-                  <div class="settlement-aging-list">
-                    <div
-                      v-for="item in agingRows"
-                      :key="item.key"
-                      class="settlement-aging-row"
-                    >
-                      <span>{{ item.label }}</span
-                      ><i
-                        ><b
-                          :class="`tone-${item.tone}`"
-                          :style="{ width: `${item.percent}%` }" /></i
-                      ><strong>{{ formatSettlementAmount(item.amount, item.currency) }}</strong
-                      ><em>{{ item.percent }}%</em>
-                    </div>
-                  </div>
-                </article>
-              </div>
-              <article class="settlement-panel settlement-top10">
-                <div class="settlement-panel-head">
-                  <div>
-                    <h2>
-                      已开票未回款应收 TOP10 <small>服务端权威排序</small>
-                    </h2>
-                    <p>按币种内剩余未回款金额排序，仅展示已进入开票流程的应收单。</p>
-                  </div>
-                  <button
-                    class="console-text-button"
-                    @click="go('receivables')"
-                  >
-                    查看应收
-                  </button>
-                </div>
-                <div
-                  v-if="invoicedReceivableTop10.items?.length"
-                  class="settlement-table-scroll"
-                >
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>#</th>
-                        <th>客户</th>
-                        <th>合同</th>
-                        <th>应收单</th>
-                        <th>未回款金额</th>
-                        <th>状态</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr
-                        v-for="(item, index) in invoicedReceivableTop10.items"
-                        :key="item.id"
-                      >
-                        <td>
-                          <span
-                            class="settlement-rank"
-                            :class="{ top: index < 3 }"
-                            >{{ index + 1 }}</span
-                          >
-                        </td>
-                        <td>{{ item.customer_name }}</td>
-                        <td>{{ item.contract_no || "—" }}</td>
-                        <td>{{ item.receivable_no }}</td>
-                        <td class="settlement-money">
-                          {{ money(item.open_amount, item.currency) }}
-                        </td>
-                        <td>{{ receivableInvoiceStatusLabel(item.invoice_status) }}</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-                <div v-else class="settlement-empty">
-                  <ConsoleIcon name="account" /><strong
-                    >暂无开票未回款应收</strong
-                  ><span>开票申请进入流程后，将按未回款金额自动排序展示。</span>
-                </div>
-              </article>
-              <article class="settlement-panel settlement-guide">
-                <h2>业务快捷入口</h2>
-                <p>从应收、回款、核销到开票，形成完整且可追溯的资金闭环。</p>
-                <div>
-                  <button class="console-button" @click="go('receivables')">
-                    查看应收</button
-                  ><button
-                    class="console-button secondary"
-                    @click="go('invoices')"
-                  >
-                    发起开票</button
-                  ><button
-                    class="console-button secondary"
-                    @click="go('receipts')"
-                  >
-                    登记回款
-                  </button>
-                </div>
-              </article>
-            </section>
-          </section>
-          <section
+          <SettlementDashboardPanel
+            v-if="active === 'dashboard'"
+            :dashboard-kpis="dashboardKpis"
+            :work-items="workItems"
+            :aging-rows="agingRows"
+            :invoiced-receivable-top10="invoicedReceivableTop10"
+            @navigate="go"
+          />
+          <SettlementReceivablesPanel
             v-else-if="active === 'receivables'"
-            class="settlement-receivables"
-          >
-            <div class="settlement-section-head">
-              <div>
-                <p>
-                  合同生效后按付款节点自动生成应收计划，确认后纳入应收与催收口径。
-                </p>
-              </div>
-              <div>
-                <button class="console-button secondary" @click="load">
-                  <ConsoleIcon name="reset" />刷新
-                </button>
-              </div>
-            </div>
-            <article
-              v-if="planEditorOpen"
-              class="settlement-panel settlement-operation-card"
-            >
-              <div class="settlement-panel-head">
-                <div>
-                  <h2>收款计划确认</h2>
-                  <p>
-                    {{ planEditor.contract_no || "未关联合同" }} ·
-                    {{ planEditor.customer_name || "未命名客户" }}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  class="console-text-button"
-                  @click="planEditorOpen = false"
-                >
-                  取消
-                </button>
-              </div>
-              <form
-                class="settlement-operation-form"
-                @submit.prevent="submitPlanConfirmation"
-              >
-                <label
-                  ><span>计划收款日</span
-                  ><input v-model="planEditor.due_date" type="date" required
-                /></label>
-                <label
-                  ><span>计划金额</span
-                  ><input
-                    v-model.trim="planEditor.planned_amount"
-                    inputmode="decimal"
-                    required
-                 maxlength="18"/></label>
-                <label class="wide"
-                  ><span>调整原因</span
-                  ><textarea
-                    v-model.trim="planEditor.reason"
-                    rows="3"
-                    placeholder="如调整日期或金额，此项必填；原值将保留在审计记录中。"
-                   maxlength="500"></textarea>
-                </label>
-                <div class="settlement-operation-actions wide">
-                  <button
-                    type="button"
-                    class="console-button secondary"
-                    @click="planEditorOpen = false"
-                  >
-                    取消
-                  </button>
-                  <button class="console-button" :disabled="saving">
-                    确认并生成应收
-                  </button>
-                </div>
-              </form>
-            </article>
-            <div class="settlement-filter-bar">
-              <label
-                ><ConsoleIcon name="search" /><input
-                  v-model.trim="planKeyword"
-                  placeholder="搜索合同号 / 客户 / 应收单号"  maxlength="100"/></label
-              ><select v-model="planConfirmationFilter">
-                <option value="">全部确认状态</option>
-                <option>待确认</option>
-                <option>已确认</option></select
-              ><select v-model="planMaturityFilter">
-                <option value="">全部状态</option>
-                <option>未到期</option>
-                <option>即将到期</option>
-                <option>逾期</option></select
-              ><button
-                class="console-button secondary"
-                @click="resetPlanFilters"
-              >
-                重置
-              </button>
-            </div>
-            <article class="settlement-panel settlement-plan-table">
-              <div class="settlement-table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>合同编号</th>
-                      <th>客户</th>
-                      <th>期次</th>
-                      <th>计划收款日</th>
-                      <th>计划金额</th>
-                      <th>确认状态</th>
-                      <th>状态</th>
-                      <th>操作</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="plan in visiblePlans" :key="plan.id">
-                      <td class="settlement-contract-cell">
-                        {{ plan.contract_no || "—" }}
-                      </td>
-                      <td>{{ plan.customer_name || "—" }}</td>
-                      <td>第 {{ plan.installment_no || "—" }} 期</td>
-                      <td>{{ plan.due_date }}</td>
-                      <td class="settlement-money">
-                        {{ money(plan.planned_amount) }}
-                      </td>
-                      <td>
-                        <span
-                          class="settlement-badge"
-                          :class="`tone-${confirmationState(plan.status).tone}`"
-                          >{{ confirmationState(plan.status).label }}</span
-                        >
-                      </td>
-                      <td>
-                        <span
-                          class="settlement-badge"
-                          :class="`tone-${dueState(plan.due_date).tone}`"
-                          >{{ dueState(plan.due_date).label }}</span
-                        >
-                      </td>
-                      <td>
-                        <button
-                          v-if="plan.status === 'PENDING_CONFIRMATION'"
-                          class="console-button secondary small"
-                          :disabled="saving"
-                          @click="confirmPlan(plan)"
-                        >
-                          确认</button
-                        ><span v-else class="settlement-muted">—</span>
-                      </td>
-                    </tr>
-                    <tr v-if="!visiblePlans.length">
-                      <td colspan="8" class="settlement-table-empty">
-                        暂无匹配的应收计划
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </article>
-            <article class="settlement-panel settlement-formal-receivables">
-              <div class="settlement-panel-head">
-                <div>
-                  <h2>正式应收 <small>已确认计划自动生成</small></h2>
-                  <p>确认后的应收单可用于开票、回款、核销与账龄催收。</p>
-                </div>
-              </div>
-              <div class="settlement-table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>应收单号</th>
-                      <th>合同编号</th>
-                      <th>客户</th>
-                      <th>到期日</th>
-                      <th>应收金额</th>
-                      <th>未收余额</th>
-                      <th>收款状态</th>
-                      <th>开票状态</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="item in receivables" :key="item.id">
-                      <td class="settlement-contract-cell">
-                        {{ item.receivable_no }}
-                      </td>
-                      <td>{{ item.contract_no || "—" }}</td>
-                      <td>{{ item.customer_name }}</td>
-                      <td>{{ item.due_date }}</td>
-                      <td class="settlement-money">
-                        {{ money(item.original_amount) }}
-                      </td>
-                      <td class="settlement-money">
-                        {{ money(item.open_amount) }}
-                      </td>
-                      <td>{{ collectionStatusLabel(item.collection_status) }}</td>
-                      <td>{{ receivableInvoiceStatusLabel(item.invoice_status) }}</td>
-                    </tr>
-                    <tr v-if="!receivables.length">
-                      <td colspan="8" class="settlement-table-empty">
-                        暂无正式应收，确认收款计划后将在此展示。
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </article>
-          </section>
-          <section
+            :visible-plans="visiblePlans"
+            :receivables="receivables"
+            :saving="saving"
+            :plan-editor="planEditor"
+            v-model:plan-editor-open="planEditorOpen"
+            v-model:plan-keyword="planKeyword"
+            v-model:plan-confirmation-filter="planConfirmationFilter"
+            v-model:plan-maturity-filter="planMaturityFilter"
+            @reload="load"
+            @submit-plan="submitPlanConfirmation"
+            @reset-filters="resetPlanFilters"
+            @confirm-plan="confirmPlan"
+          />
+          <SettlementReceiptsPanel
             v-else-if="active === 'receipts'"
-            class="settlement-allocations"
-          >
-            <div class="settlement-section-head">
-              <div>
-                <p>
-                  会计录入回款，系统按客户、合同与金额匹配生成核销单，确认后生效。
-                </p>
-              </div>
-              <div>
-                <button class="console-button secondary" @click="load">
-                  <ConsoleIcon name="reset" />刷新</button
-                ><button
-                  v-if="can('settlement.invoice.request')"
-                  class="console-button"
-                  @click="receiptComposerOpen = true"
-                >
-                  <ConsoleIcon name="save" />登记回款
-                </button>
-              </div>
-            </div>
-            <article
-              v-if="receiptComposerOpen"
-              class="settlement-panel settlement-invoice-composer"
-            >
-              <div class="settlement-panel-head">
-                <div>
-                  <h2>登记回款</h2>
-                  <p>银行凭证号用于回款去重与后续审计追溯。</p>
-                </div>
-                <button
-                  class="console-text-button"
-                  @click="receiptComposerOpen = false"
-                >
-                  收起
-                </button>
-              </div>
-              <form class="settlement-form" @submit.prevent="submitReceipt">
-                <select
-                  v-model="receiptForm.customer_id"
-                  required
-                  @change="syncReceiptCustomer"
-                >
-                  <option value="" disabled>
-                    {{
-                      receiptCustomers.length
-                        ? "选择回款客户"
-                        : "暂无正式应收客户"
-                    }}
-                  </option>
-                  <option
-                    v-for="customer in receiptCustomers"
-                    :key="customer.id"
-                    :value="customer.id"
-                  >
-                    {{ customer.name }}
-                  </option></select
-                ><input
-                  v-model.trim="receiptForm.amount"
-                  placeholder="金额"
-                  required
-                 maxlength="18"/><input
-                  v-model="receiptForm.receipt_date"
-                  type="date"
-                  required
-                /><select v-model="receiptForm.payment_method">
-                  <option value="TRANSFER">电汇</option>
-                  <option value="BANK_ACCEPTANCE">银行承兑</option>
-                  <option value="CHEQUE">支票</option>
-                  <option value="CASH">现金</option></select
-                ><input
-                  v-model.trim="receiptForm.bank_transaction_reference"
-                  placeholder="银行凭证号"
-                  required
-                 maxlength="128"/><button :disabled="saving">确认登记</button>
-              </form>
-            </article>
-            <article
-              v-if="receiptMatchFor"
-              class="settlement-panel settlement-match-panel"
-            >
-              <div class="settlement-panel-head">
-                <div>
-                  <h2>回款匹配建议</h2>
-                  <p>仅展示同租户、同客户、同币种且仍有余额的正式应收。</p>
-                </div>
-                <button
-                  class="console-text-button"
-                  @click="receiptMatchFor = ''; receiptMatches = []"
-                >
-                  关闭
-                </button>
-              </div>
-              <div v-if="receiptMatches.length" class="settlement-match-list">
-                <button
-                  v-for="match in receiptMatches"
-                  :key="match.receivable_id"
-                  type="button"
-                  @click="selectReceiptMatch(match)"
-                >
-                  <span
-                    ><strong>{{ match.receivable_no }}</strong
-                    ><small
-                      >{{ match.contract_no || "未关联合同" }} · 到期
-                      {{ match.due_date }}</small
-                    ></span
-                  ><span
-                    ><strong>{{ money(match.suggested_amount) }}</strong
-                    ><small>匹配度 {{ match.score }}</small></span
-                  >
-                </button>
-              </div>
-              <div v-else class="settlement-empty compact">
-                暂无可匹配应收，可在核销页手动选择。
-              </div>
-            </article>
-            <article class="settlement-panel settlement-invoice-table">
-              <div class="settlement-table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>回款号</th>
-                      <th>客户</th>
-                      <th>金额</th>
-                      <th>回款日期</th>
-                      <th>方式</th>
-                      <th>银行凭证号</th>
-                      <th>状态</th>
-                      <th>操作</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="item in receipts" :key="item.id">
-                      <td class="settlement-contract-cell">
-                        {{ item.receipt_no }}
-                      </td>
-                      <td>{{ item.customer_name }}</td>
-                      <td class="settlement-money">
-                        {{ money(item.amount, item.currency) }}
-                      </td>
-                      <td>{{ item.receipt_date }}</td>
-                      <td>
-                        {{
-                          item.payment_method === "TRANSFER"
-                            ? "电汇"
-                            : item.payment_method === "BANK_ACCEPTANCE"
-                              ? "银行承兑"
-                              : item.payment_method === "CHEQUE"
-                                ? "支票"
-                                : item.payment_method === "CASH"
-                                  ? "现金"
-                                  : item.payment_method
-                        }}
-                      </td>
-                      <td>{{ item.bank_transaction_reference }}</td>
-                      <td>
-                        <span
-                          class="settlement-badge"
-                          :class="`tone-${receiptStatusMeta(item).tone}`"
-                          >{{ receiptStatusMeta(item).label }}</span
-                        >
-                      </td>
-                      <td>
-                        <button
-                          v-if="amountOf(item.unallocated_amount) > 0"
-                          class="console-text-button"
-                          @click="go('allocations')"
-                        >
-                          发起核销</button
-                        ><button
-                          v-else
-                          class="console-text-button"
-                          @click="go('allocations')"
-                        >
-                          查看核销结果
-                        </button>
-                      </td>
-                    </tr>
-                    <tr v-if="!receipts.length">
-                      <td colspan="8" class="settlement-table-empty">
-                        暂无回款记录
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </article>
-          </section>
-          <section
+            :receipts="receipts"
+            :receipt-customers="receiptCustomers"
+            :saving="saving"
+            :receipt-form="receiptForm"
+            :can="can"
+            v-model:receipt-composer-open="receiptComposerOpen"
+            v-model:receipt-match-for="receiptMatchFor"
+            v-model:receipt-matches="receiptMatches"
+            @reload="load"
+            @submit-receipt="submitReceipt"
+            @sync-customer="syncReceiptCustomer"
+            @select-match="selectReceiptMatch"
+            @navigate="go"
+          />
+          <SettlementAllocationsPanel
             v-else-if="active === 'allocations'"
-            class="settlement-allocations"
-          >
-            <div class="settlement-section-head">
-              <div>
-                <p>
-                  管理回款与应收的核销关系；如发现匹配错误，可按原核销单发起冲销并恢复余额。
-                </p>
-              </div>
-              <div>
-                <button class="console-button secondary" @click="load">
-                  <ConsoleIcon name="reset" />刷新</button
-                ><button
-                  class="console-button"
-                  @click="allocationComposerOpen = true"
-                >
-                  <ConsoleIcon name="save" />发起核销
-                </button>
-              </div>
-            </div>
-            <div class="settlement-tabs">
-              <button
-                :class="{ active: allocationTab === 'allocations' }"
-                @click="allocationTab = 'allocations'"
-              >
-                全部核销单
-              </button>
-              <button
-                :class="{ active: allocationTab === 'reversals' }"
-                @click="allocationTab = 'reversals'"
-              >
-                已冲销核销单
-              </button>
-            </div>
-            <article class="settlement-panel settlement-invoice-table">
-              <div class="settlement-table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>核销单号</th>
-                      <th>回款号</th>
-                      <th>应收单号</th>
-                      <th>金额</th>
-                      <th>币种</th>
-                      <th>确认时间</th>
-                      <th>状态</th>
-                      <th>操作</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr
-                      v-for="item in allocations.filter((row) =>
-                        allocationTab === 'reversals'
-                          ? row.status === 'REVERSED'
-                          : row.status !== 'REVERSED',
-                      )"
-                      :key="item.id"
-                    >
-                      <td class="settlement-contract-cell">
-                        {{ item.allocation_no }}
-                      </td>
-                      <td>{{ item.receipt_no }}</td>
-                      <td>{{ item.receivable_no }}</td>
-                      <td class="settlement-money">
-                        {{ money(item.amount, item.currency) }}
-                      </td>
-                      <td>{{ item.currency }}</td>
-                      <td>{{ item.confirmed_at }}</td>
-                      <td>
-                        <span
-                          class="settlement-badge"
-                          :class="`tone-${allocationStatusMeta(item.status).tone}`"
-                          >{{ allocationStatusMeta(item.status).label }}</span
-                        >
-                      </td>
-                      <td>
-                        <button
-                          v-if="
-                            allocationTab === 'allocations' &&
-                            ['CONFIRMED', 'PARTIALLY_REVERSED'].includes(
-                              item.status,
-                            )
-                          "
-                          class="console-text-button"
-                          @click="
-                            reversalForm.allocation_id = item.id;
-                            reversalComposerOpen = true;
-                          "
-                        >
-                          冲销
-                        </button>
-                        <span v-else class="settlement-muted">
-                          {{
-                            item.status === "REVERSED" ? "余额已全部恢复" : "—"
-                          }}
-                        </span>
-                      </td>
-                    </tr>
-                    <tr
-                      v-if="
-                        !allocations.some((row) =>
-                          allocationTab === 'reversals'
-                            ? row.status === 'REVERSED'
-                            : row.status !== 'REVERSED',
-                        )
-                      "
-                    >
-                      <td colspan="8" class="settlement-table-empty">
-                        {{
-                          allocationTab === "reversals"
-                            ? "暂无已冲销核销单"
-                            : "暂无已确认的核销单"
-                        }}
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </article>
-            <article
-              v-if="allocationComposerOpen"
-              class="settlement-panel settlement-invoice-composer"
-            >
-              <div class="settlement-panel-head">
-                <div>
-                  <h2>发起核销</h2>
-                  <p>
-                    请选择一笔尚有余额的回款和应收，系统将校验客户、币种与金额。
-                  </p>
-                </div>
-                <button
-                  class="console-text-button"
-                  @click="allocationComposerOpen = false"
-                >
-                  收起
-                </button>
-              </div>
-              <form class="settlement-form" @submit.prevent="submitAllocation">
-                <select v-model="allocationForm.receipt_id" required>
-                  <option value="">选择待核销回款</option>
-                  <option
-                    v-for="item in receipts.filter(
-                      (row) => amountOf(row.unallocated_amount) > 0,
-                    )"
-                    :key="item.id"
-                    :value="item.id"
-                  >
-                    {{ item.receipt_no }} · {{ item.customer_name }} ·
-                    {{ money(item.unallocated_amount, item.currency) }}
-                  </option></select
-                ><select v-model="allocationForm.receivable_id" required>
-                  <option value="">选择待核销应收</option>
-                  <option
-                    v-for="item in receivables.filter(
-                      (row) => amountOf(row.open_amount) > 0,
-                    )"
-                    :key="item.id"
-                    :value="item.id"
-                  >
-                    {{ item.receivable_no }} · {{ item.customer_name }} ·
-                    {{ money(item.open_amount, item.currency) }}
-                  </option></select
-                ><input
-                  v-model.trim="allocationForm.amount"
-                  placeholder="本次核销金额"
-                  required
-                 maxlength="18"/><button :disabled="saving">确认核销</button>
-              </form>
-            </article>
-            <article
-              v-if="reversalComposerOpen"
-              class="settlement-panel settlement-invoice-composer"
-            >
-              <div class="settlement-panel-head">
-                <div>
-                  <h2>确认冲销</h2>
-                  <p>
-                    冲销后会恢复原回款的未分配余额和应收未收余额，请确认后提交。
-                  </p>
-                </div>
-                <button
-                  class="console-text-button"
-                  @click="reversalComposerOpen = false"
-                >
-                  收起
-                </button>
-              </div>
-              <form class="settlement-form" @submit.prevent="submitReversal">
-                <select v-model="reversalForm.allocation_id" required>
-                  <option value="">选择需要冲销的核销单</option>
-                  <option
-                    v-for="item in allocations.filter((row) =>
-                      ['CONFIRMED', 'PARTIALLY_REVERSED'].includes(row.status),
-                    )"
-                    :key="item.id"
-                    :value="item.id"
-                  >
-                    {{ item.allocation_no }} ·
-                    {{ money(item.amount, item.currency) }}
-                  </option></select
-                ><input
-                  v-model.trim="reversalForm.amount"
-                  placeholder="冲销金额"
-                  required
-                 maxlength="18"/><select v-model="reversalForm.reason_code" required>
-                  <option value="MATCH_ERROR">回款匹配错误</option>
-                  <option value="CUSTOMER_CORRECTION">客户归属修正</option>
-                  <option value="AMOUNT_ERROR">金额录入错误</option>
-                  <option value="DUPLICATE_ALLOCATION">重复核销</option>
-                  <option value="OTHER">其他原因</option>
-                </select>
-                <input
-                  v-model.trim="reversalForm.reason_detail"
-                  placeholder="补充说明冲销原因"
-                  required
-                 maxlength="500"/><button :disabled="saving">确认冲销</button>
-              </form>
-            </article>
-          </section>
-          <section
+            :allocations="allocations"
+            :receipts="receipts"
+            :receivables="receivables"
+            :saving="saving"
+            :allocation-form="allocationForm"
+            :reversal-form="reversalForm"
+            v-model:allocation-tab="allocationTab"
+            v-model:allocation-composer-open="allocationComposerOpen"
+            v-model:reversal-composer-open="reversalComposerOpen"
+            @reload="load"
+            @submit-allocation="submitAllocation"
+            @submit-reversal="submitReversal"
+          />
+          <SettlementInvoiceDetailPanel
             v-else-if="active === 'invoices' && invoiceDetailID"
-            class="settlement-invoices"
-          >
-            <div v-if="invoiceDetail" class="settlement-invoice-detail">
-              <button
-                class="console-text-button settlement-back-link"
-                @click="closeInvoiceDetail"
-              >
-                ‹ 返回发票台账
-              </button>
-              <div class="settlement-section-head">
-                <div>
-                  <h2>发票详情</h2>
-                  <p>电子发票交付与红冲管理</p>
-                </div>
-                <div>
-                  <input
-                    ref="invoiceDocumentInput"
-                    class="settlement-visually-hidden"
-                    type="file"
-                    accept=".pdf,.ofd,.xml,.png,.jpg,.jpeg"
-                    @change="uploadInvoiceDocument"
-                  />
-                  <button
-                    class="console-button secondary"
-                    :disabled="saving"
-                    @click="chooseInvoiceDocument"
-                  >
-                    上传电子发票</button
-                  ><button
-                    class="console-button secondary"
-                    :disabled="saving || !canRequestRedFlush(invoiceDetail)"
-                    @click="redFlushOpen = true"
-                  >
-                    发起红冲</button
-                  ><button
-                    class="console-button"
-                    :disabled="!invoiceDetail.documents?.length"
-                    @click="downloadInvoiceDocument(invoiceDetail.documents?.[0])"
-                  >
-                    下载电子发票
-                  </button>
-                </div>
-              </div>
-              <p
-                v-if="invoiceDetail.red_flush_request"
-                class="settlement-detail-notice"
-              >
-                红冲申请状态：{{ redFlushStatusLabel(invoiceDetail.red_flush_request.status) }}；原发票在收到有效税控回执前仍保持已开具状态。
-                <template v-if="invoiceDetail.red_flush_request.review_reason">
-                  驳回原因：{{ invoiceDetail.red_flush_request.review_reason }}。
-                </template>
-              </p>
-              <div
-                v-if="invoiceDetail.red_flush_request?.can_review"
-                class="settlement-operation-actions"
-              >
-                <button
-                  class="console-button secondary"
-                  :disabled="saving"
-                  @click="reviewRedFlush(false)"
-                >
-                  驳回红冲
-                </button>
-                <button
-                  class="console-button danger"
-                  :disabled="saving"
-                  @click="reviewRedFlush(true)"
-                >
-                  通过并提交税控
-                </button>
-              </div>
-              <RedFlushDialog
-                v-if="redFlushOpen"
-                :form="redFlushForm"
-                :saving="saving"
-                @cancel="redFlushOpen = false"
-                @submit="submitRedFlush"
-              />
-              <div class="settlement-detail-kpis">
-                <article class="tone-blue">
-                  <span>发票号码</span><b>{{ invoiceDetail.invoice_no }}</b>
-                </article>
-                <article class="tone-green">
-                  <span>价税合计</span
-                  ><b>{{ money(invoiceDetail.amount_incl_tax) }}</b>
-                </article>
-                <article class="tone-purple">
-                  <span>状态</span
-                  ><b>{{ invoiceStatusMeta(invoiceDetail.status).label }}</b>
-                </article>
-              </div>
-              <div class="settlement-detail-grid">
-                <article class="settlement-panel">
-                  <h2>发票信息</h2>
-                  <dl class="settlement-detail-list">
-                    <div>
-                      <dt>发票类型</dt>
-                      <dd>{{ invoiceTypeLabel(invoiceDetail.invoice_type) }}</dd>
-                    </div>
-                    <div>
-                      <dt>开票日期</dt>
-                      <dd>{{ invoiceDetail.issue_date }}</dd>
-                    </div>
-                    <div>
-                      <dt>发票代码</dt>
-                      <dd>{{ invoiceDetail.invoice_code }}</dd>
-                    </div>
-                    <div>
-                      <dt>不含税金额</dt>
-                      <dd>{{ money(invoiceDetail.amount_excl_tax) }}</dd>
-                    </div>
-                    <div>
-                      <dt>税额</dt>
-                      <dd>{{ money(invoiceDetail.tax_amount) }}</dd>
-                    </div>
-                    <div>
-                      <dt>开具渠道</dt>
-                      <dd>{{ issueChannelLabel(invoiceDetail.issued_by_channel) }}</dd>
-                    </div>
-                  </dl>
-                </article>
-                <article class="settlement-panel">
-                  <h2>购方信息</h2>
-                  <dl class="settlement-detail-list">
-                    <div>
-                      <dt>购方名称</dt>
-                      <dd>{{ invoiceDetail.buyer_name || "—" }}</dd>
-                    </div>
-                    <div>
-                      <dt>纳税人识别号</dt>
-                      <dd>{{ invoiceDetail.buyer_tax_no_masked || "—" }}</dd>
-                    </div>
-                    <div>
-                      <dt>关联合同</dt>
-                      <dd>{{ invoiceDetail.contract_no || "—" }}</dd>
-                    </div>
-                    <div>
-                      <dt>关联申请</dt>
-                      <dd>{{ invoiceDetail.request_no || "—" }}</dd>
-                    </div>
-                    <div>
-                      <dt>电子票附件</dt>
-                      <dd v-if="invoiceDetail.documents?.length">
-                        <button
-                          v-for="document in invoiceDetail.documents"
-                          :key="document.id"
-                          class="console-text-button settlement-document-link"
-                          @click="downloadInvoiceDocument(document)"
-                        >
-                          {{ document.original_name }}
-                        </button>
-                      </dd>
-                      <dd v-else>尚未归档</dd>
-                    </div>
-                  </dl>
-                </article>
-                <article class="settlement-panel settlement-detail-items">
-                  <h2>票面明细</h2>
-                  <p
-                    v-if="invoiceDetail.items_source === 'REQUEST'"
-                    class="settlement-muted"
-                  >
-                    该发票为历史人工登记，未留存票面明细，以下展示开票申请明细。
-                  </p>
-                  <div class="settlement-table-scroll">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>项目</th>
-                          <th>税收分类编码</th>
-                          <th>不含税金额</th>
-                          <th>税率</th>
-                          <th>税额</th>
-                          <th>价税合计</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr
-                          v-for="item in invoiceDetail.items"
-                          :key="item.line_no"
-                        >
-                          <td>{{ item.item_name }}</td>
-                          <td>{{ item.tax_classification_code }}</td>
-                          <td>{{ money(item.amount_excl_tax) }}</td>
-                          <td>{{ item.tax_rate_display }}</td>
-                          <td>{{ money(item.tax_amount) }}</td>
-                          <td>{{ money(item.amount_incl_tax) }}</td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-                </article>
-                <article
-                  v-if="
-                    invoiceDetail.items_source !== 'REQUEST' &&
-                    invoiceDetail.request_items?.length
-                  "
-                  class="settlement-panel settlement-detail-items"
-                >
-                  <h2>申请依据</h2>
-                  <p class="settlement-muted">
-                    以下为开票申请明细，仅用于与票面明细核对，不作为已开具票面。
-                  </p>
-                  <div class="settlement-table-scroll">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>项目</th>
-                          <th>税收分类编码</th>
-                          <th>不含税金额</th>
-                          <th>税率</th>
-                          <th>税额</th>
-                          <th>价税合计</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr
-                          v-for="item in invoiceDetail.request_items"
-                          :key="item.line_no"
-                        >
-                          <td>{{ item.item_name }}</td>
-                          <td>{{ item.tax_classification_code }}</td>
-                          <td>{{ money(item.amount_excl_tax) }}</td>
-                          <td>{{ item.tax_rate_display }}</td>
-                          <td>{{ money(item.tax_amount) }}</td>
-                          <td>{{ money(item.amount_incl_tax) }}</td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-                </article>
-                <article class="settlement-panel">
-                  <h2>开票记录</h2>
-                  <SettlementTimeline :events="invoiceTimelineEvents" empty-hint="暂无开票相关留痕。" />
-                  <p v-if="invoiceDetail.red_flush_request" class="settlement-timeline-hint">
-                    红冲流程中，原发票在收到有效税控回执前仍保持已开具状态。
-                  </p>
-                </article>
-              </div>
-            </div>
-            <div v-else class="settlement-empty">
-              <ConsoleIcon name="account" /><strong>未找到发票详情</strong
-              ><span>该发票可能不存在，或当前账号无权访问。</span
-              ><button
-                class="console-button secondary"
-                @click="closeInvoiceDetail"
-              >
-                返回发票台账
-              </button>
-            </div>
-          </section>
-          <section
+            :invoice-detail="invoiceDetail"
+            :saving="saving"
+            :red-flush-form="redFlushForm"
+            :invoice-timeline-events="invoiceTimelineEvents"
+            v-model:red-flush-open="redFlushOpen"
+            @close-detail="closeInvoiceDetail"
+            @upload-document="uploadInvoiceDocument"
+            @download-document="downloadInvoiceDocument"
+            @review-red-flush="reviewRedFlush"
+            @submit-red-flush="submitRedFlush"
+          />
+          <SettlementInvoiceListPanel
             v-else-if="active === 'invoices'"
-            class="settlement-invoices"
-          >
-            <div class="settlement-section-head">
-              <div>
-                <p>关联合同发起开票申请，财务审核通过后驱动税控开票并回填。</p>
-              </div>
-              <div>
-                <button class="console-button secondary" @click="load">
-                  <ConsoleIcon name="reset" />刷新</button
-                ><button
-                  class="console-button"
-                  @click="invoiceComposerOpen = true"
-                >
-                  <ConsoleIcon name="account" />发起开票申请
-                </button>
-              </div>
-            </div>
-            <article
-              v-if="invoiceComposerOpen"
-              class="settlement-panel settlement-invoice-composer"
-            >
-              <div class="settlement-panel-head">
-                <div>
-                  <h2>发起开票申请</h2>
-                  <p>
-                    申请提交后将锁定对应应收的可开票余额，提交人不能审批本人申请。
-                  </p>
-                </div>
-                <button
-                  class="console-text-button"
-                  type="button"
-                  @click="invoiceComposerOpen = false"
-                >
-                  收起
-                </button>
-              </div>
-              <form class="settlement-form" @submit.prevent="submitInvoice">
-                <select v-model="invoiceForm.receivable_id" required>
-                  <option value="" disabled>
-                    {{
-                      invoiceEligibleReceivables.length
-                        ? "选择可开票应收"
-                        : "暂无可开票应收，请先确认应收计划"
-                    }}
-                  </option>
-                  <option
-                    v-for="item in invoiceEligibleReceivables"
-                    :key="item.id"
-                    :value="item.id"
-                  >
-                    {{ item.receivable_no }} ·
-                    {{ item.contract_no || "未关联合同" }} ·
-                    {{ item.customer_name }} ·
-                    {{ money(item.invoiceable_amount, item.currency) }}
-                  </option></select
-                ><input
-                  v-model.trim="invoiceForm.buyer_tax_no"
-                  placeholder="购方税号"
-                  required
-                 maxlength="64"/><input
-                  v-model.trim="invoiceForm.item_name"
-                  placeholder="项目名称"
-                  required
-                 maxlength="255"/><input
-                  v-model.trim="invoiceForm.tax_classification_code"
-                  placeholder="税收分类编码"
-                  required
-                 maxlength="64"/><input
-                  v-model.trim="invoiceForm.amount_excl_tax"
-                  placeholder="不含税金额"
-                  required
-                 maxlength="18"/><input
-                  v-model.trim="invoiceForm.tax_rate"
-                  placeholder="税率，如 0.06"
-                  required
-                 maxlength="10"/><input
-                  v-model.trim="invoiceForm.tax_amount"
-                  placeholder="税额"
-                  required
-                 maxlength="18"/><input
-                  v-model.trim="invoiceForm.amount_incl_tax"
-                  placeholder="价税合计"
-                  required
-                 maxlength="18"/><button :disabled="saving">提交申请</button>
-              </form>
-            </article>
-            <article
-              v-if="invoiceReviewOpen"
-              class="settlement-panel settlement-operation-card"
-            >
-              <div class="settlement-panel-head">
-                <div>
-                  <h2>审核开票申请</h2>
-                  <p>申请号 {{ invoiceReview.request_no }}</p>
-                </div>
-                <button
-                  type="button"
-                  class="console-text-button"
-                  @click="invoiceReviewOpen = false"
-                >
-                  取消
-                </button>
-              </div>
-              <label class="settlement-review-reason"
-                ><span>审核意见 / 驳回原因</span
-                ><textarea
-                  v-model.trim="invoiceReview.reason"
-                  rows="3"
-                  placeholder="驳回时必填；审批通过时可填写审核说明。"
-                 maxlength="500"></textarea>
-              </label>
-              <div class="settlement-operation-actions">
-                <button
-                  type="button"
-                  class="console-button danger"
-                  :disabled="saving"
-                  @click="submitInvoiceReview('reject')"
-                >
-                  驳回申请
-                </button>
-                <button
-                  type="button"
-                  class="console-button"
-                  :disabled="saving"
-                  @click="submitInvoiceReview('approve')"
-                >
-                  审批通过
-                </button>
-              </div>
-            </article>
-            <div class="settlement-tabs" role="tablist" aria-label="开票数据">
-              <button
-                :class="{ active: invoiceTab === 'requests' }"
-                @click="invoiceTab = 'requests'"
-              >
-                开票申请</button
-              ><button
-                :class="{ active: invoiceTab === 'ledger' }"
-                @click="invoiceTab = 'ledger'"
-              >
-                发票台账
-              </button>
-            </div>
-            <div class="settlement-filter-bar settlement-invoice-filters">
-              <label
-                ><ConsoleIcon name="search" /><input
-                  v-model.trim="invoiceKeyword"
-                  :placeholder="
-                    invoiceTab === 'requests'
-                      ? '搜索申请号 / 合同号 / 购方'
-                      : '搜索发票号码 / 合同号 / 购方'
-                  "  maxlength="100"/></label
-              ><select v-model="invoiceStatusFilter">
-                <option value="">全部状态</option>
-                <option v-if="invoiceTab === 'requests'" value="SUBMITTED">
-                  待审核
-                </option>
-                <option v-if="invoiceTab === 'requests'" value="ISSUE_PENDING">
-                  待开具
-                </option>
-                <option v-if="invoiceTab === 'requests'" value="REJECTED">
-                  已驳回
-                </option>
-                <option value="ISSUED">已开票</option></select
-              ><button
-                class="console-button secondary"
-                @click="resetInvoiceFilters"
-              >
-                重置
-              </button>
-            </div>
-            <article
-              v-if="invoiceTab === 'requests'"
-              class="settlement-panel settlement-invoice-table"
-            >
-              <div class="settlement-table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>申请号</th>
-                      <th>合同号</th>
-                      <th>购方名称</th>
-                      <th>税号</th>
-                      <th>金额</th>
-                      <th>税率</th>
-                      <th>状态</th>
-                      <th>操作</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="item in visibleInvoiceRequests" :key="item.id">
-                      <td class="settlement-contract-cell">
-                        {{ item.request_no }}
-                      </td>
-                      <td>{{ item.contract_no || "—" }}</td>
-                      <td>{{ item.buyer_name || "—" }}</td>
-                      <td>{{ item.buyer_tax_no_masked || "—" }}</td>
-                      <td class="settlement-money">
-                        {{ money(item.amount_incl_tax) }}
-                      </td>
-                      <td>{{ item.tax_rate_display || "—" }}</td>
-                      <td>
-                        <span
-                          class="settlement-badge"
-                          :class="`tone-${invoiceStatusMeta(item.status).tone}`"
-                          >{{ invoiceStatusMeta(item.status).label }}</span
-                        >
-                        <p v-if="item.status === 'ISSUE_FAILED'" class="settlement-muted">
-                          {{ formatSettlementError({ code: item.failure_code, message: item.failure_message }, { fallback: "请核对税控回执后复核，禁止对结果未知的申请重开。" }) }}
-                        </p>
-                      </td>
-                      <td>
-                        <button
-                          v-if="item.status === 'SUBMITTED' && can('settlement.invoice.approve')"
-                          class="console-button small"
-                          :disabled="saving"
-                          @click="approveInvoice(item)"
-                        >
-                          审核</button
-                        ><button
-                          v-else-if="item.status === 'ISSUE_PENDING' && item.issue_channel === 'MANUAL' && can('settlement.invoice.issue')"
-                          class="console-button secondary small"
-                          :disabled="saving"
-                          @click="manualIssue(item)"
-                        >
-                          登记发票</button
-                        ><button
-                          v-else-if="item.status === 'ISSUE_FAILED' && can('settlement.invoice.approve')"
-                          class="console-button secondary small"
-                          :disabled="saving"
-                          @click="openReviewFailure(item)"
-                        >失败复核</button><span v-else class="settlement-muted">—</span>
-                      </td>
-                    </tr>
-                    <tr v-if="!visibleInvoiceRequests.length">
-                      <td colspan="8" class="settlement-table-empty">
-                        暂无匹配的开票申请
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </article>
-            <article v-else class="settlement-panel settlement-invoice-table">
-              <div class="settlement-table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>发票号码</th>
-                      <th>发票代码</th>
-                      <th>合同号</th>
-                      <th>购方名称</th>
-                      <th>开票日期</th>
-                      <th>价税合计</th>
-                      <th>类型</th>
-                      <th>状态</th>
-                      <th>红冲流程</th>
-                      <th>操作</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="item in visibleTaxInvoices" :key="item.id">
-                      <td class="settlement-contract-cell">
-                        {{ item.invoice_no }}
-                      </td>
-                      <td>{{ item.invoice_code }}</td>
-                      <td>{{ item.contract_no || "—" }}</td>
-                      <td>{{ item.buyer_name || "—" }}</td>
-                      <td>{{ item.issue_date }}</td>
-                      <td class="settlement-money">
-                        {{ money(item.amount_incl_tax) }}
-                      </td>
-                      <td>{{ invoiceTypeLabel(item.invoice_type) }}</td>
-                      <td>
-                        <span
-                          class="settlement-badge"
-                          :class="`tone-${invoiceStatusMeta(item.status).tone}`"
-                          >{{ invoiceStatusMeta(item.status).label }}</span
-                        >
-                      </td>
-                      <td>{{ item.red_flush_status ? redFlushStatusLabel(item.red_flush_status) : "—" }}</td>
-                      <td>
-                        <button
-                          class="console-text-button"
-                          @click="openInvoiceDetail(item)"
-                        >
-                          查看
-                        </button>
-                      </td>
-                    </tr>
-                    <tr v-if="!visibleTaxInvoices.length">
-                      <td colspan="10" class="settlement-table-empty">
-                        暂无匹配的发票台账记录
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </article>
-          </section>
-          <section v-else-if="active === 'dunning'" class="settlement-dunning">
-            <div class="settlement-section-head">
-              <div>
-                <p>
-                  按账龄区间识别未结清应收；逾期提醒和升级状态以催收案件与动作记录为准。
-                </p>
-              </div>
-              <div>
-                <button
-                  class="console-button secondary"
-                  :disabled="saving"
-                  @click="
-                    exportJob?.status === 'READY' &&
-                    exportJob?.report_type === 'AGING_RECEIVABLES_CSV'
-                      ? downloadExport(exportJob.id)
-                      : exportAgingReceivables()
-                  "
-                >
-                  {{
-                    exportJob?.status === "READY" &&
-                    exportJob?.report_type === "AGING_RECEIVABLES_CSV"
-                      ? "下载账龄表"
-                      : saving
-                        ? "生成账龄表中…"
-                        : "导出账龄表"
-                  }}</button
-                ><button class="console-button secondary" @click="load">
-                  <ConsoleIcon name="reset" />刷新
-                </button>
-              </div>
-            </div>
-            <p class="settlement-detail-notice">
-              页面金额与笔数基于服务端全量催收汇总；导出的账龄表由服务端重新查询当前租户全部未结清应收生成。
-            </p>
-            <p
-              v-if="Number(dunningOverview.uncovered_overdue_count || 0) > 0"
-              class="settlement-detail-notice"
-              role="status"
-            >
-              有 {{ dunningOverview.uncovered_overdue_count }} 笔逾期应收没有匹配的催收策略，请补充覆盖对应账龄区间的规则。
-            </p>
-            <div v-if="dunningCoverage.gaps.length" class="settlement-detail-notice" role="status">
-              <strong>策略覆盖巡检：</strong>
-              <span v-for="(gap, index) in dunningCoverage.gaps" :key="`${gap.from_days}-${gap.to_days}-${gap.open_ended}`">
-                {{ index ? '、' : '' }}{{ gap.open_ended ? `≥${gap.from_days} 天` : `${gap.from_days}–${gap.to_days} 天` }}
-              </span>
-              未配置启用策略；系统只提示，不自动生成策略。
-            </div>
-            <section class="settlement-cards settlement-dunning-cards">
-              <article
-                v-for="item in dunningKpis"
-                :key="item.label"
-                :class="`tone-${item.tone}`"
-              >
-                <span>{{ item.label }}</span
-                ><b>{{ item.value }}</b
-                ><small>{{ item.note }}</small>
-              </article>
-            </section>
-            <article class="settlement-panel settlement-aging-report">
-              <div class="settlement-panel-head">
-                <div>
-                  <h2>账龄区间报表</h2>
-                  <p>当前已加载未结清应收的账龄辅助统计。</p>
-                </div>
-                <span class="settlement-muted">单位：元</span>
-              </div>
-              <div class="settlement-table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>账龄区间</th>
-                      <th>金额</th>
-                      <th>占比</th>
-                      <th>笔数</th>
-                      <th>状态</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="(item, index) in agingBuckets" :key="item.label">
-                      <td>{{ item.label }}</td>
-                      <td class="settlement-money">{{ formatSettlementAmount(item.amount) }}</td>
-                      <td>{{ item.percent }}%</td>
-                      <td>{{ item.count }}</td>
-                      <td>
-                        <span
-                          class="settlement-badge"
-                          :class="`tone-${index === 0 ? 'info' : index === 1 ? 'info' : index === 2 ? 'warning' : 'danger'}`"
-                          >{{
-                            index === 0
-                              ? "正常"
-                              : index === 1
-                                ? "关注"
-                                : index === 2
-                                  ? "预警"
-                                  : "逾期"
-                          }}</span
-                        >
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </article>
-            <article class="settlement-panel settlement-aging-report">
-              <div class="settlement-panel-head">
-                <div>
-                  <h2>催收案件</h2>
-                  <p>按应收和策略版本建立；结清自动关闭，再次逾期会重新打开。</p>
-                </div>
-              </div>
-              <div class="settlement-table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>案件 ID</th>
-                      <th>应收单号</th>
-                      <th>客户</th>
-                      <th>逾期天数</th>
-                      <th>未结金额</th>
-                      <th>升级级别</th>
-                      <th>状态</th>
-                      <th>下次跟进</th>
-                      <th>当前负责人</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="item in dunningCases" :key="item.id">
-                      <td class="settlement-contract-cell">{{ item.id }}</td>
-                      <td>{{ item.receivable_no }}</td>
-                      <td>{{ item.customer_name }}</td>
-                      <td>{{ item.aging_days }} 天</td>
-                      <td class="settlement-money">{{ formatSettlementAmount(item.open_amount) }}</td>
-                      <td>{{ item.level || 0 }} 级</td>
-                      <td>
-                        <span class="settlement-badge" :class="`tone-${item.status === 'ACTIVE' ? 'warning' : 'info'}`">{{ dunningCaseStatusLabel(item.status) }}</span>
-                      </td>
-                      <td>{{ item.next_action_at || "—" }}</td>
-                      <td>{{ item.recipient_user_id || "—" }}</td>
-                    </tr>
-                    <tr v-if="!dunningCases.length">
-                      <td colspan="9" class="settlement-table-empty">暂无催收案件</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </article>
-            <article class="settlement-panel settlement-aging-report">
-              <div class="settlement-panel-head">
-                <div>
-                  <h2>催收动作记录</h2>
-                  <p>
-                    仅展示已生成的真实催收动作；普通提醒留在本系统，高优先级事件由
-                    Outbox 异步投递基础平台。
-                  </p>
-                </div>
-              </div>
-              <div class="settlement-table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>记录 ID</th>
-                      <th>应收单号</th>
-                      <th>渠道</th>
-                      <th>创建时间</th>
-                      <th>接收人</th>
-                      <th>升级标记</th>
-                      <th>状态</th>
-                      <th>完成时间</th>
-                      <th>操作</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="item in dunningActions" :key="item.id">
-                      <td class="settlement-contract-cell">{{ item.id }}</td>
-                      <td>{{ item.receivable_no }}</td>
-                      <td>{{ item.channel }}</td>
-                      <td>{{ item.created_at }}</td>
-                      <td>{{ item.recipient_user_id }}</td>
-                      <td>
-                        <span
-                          v-if="Number(item.escalation_level) > 1"
-                          class="settlement-badge tone-warning"
-                          >已升级</span
-                        ><span v-else class="settlement-muted">—</span>
-                      </td>
-                      <td>
-                        <span class="settlement-badge" :class="`tone-${item.status === 'PENDING' ? 'warning' : item.status === 'COMPLETED' ? 'info' : 'danger'}`">{{ dunningActionStatusLabel(item.status) }}</span>
-                      </td>
-                      <td>{{ item.completed_at || "—" }}</td>
-                      <td>
-                        <button
-                          v-if="canCompleteDunningAction(item)"
-                          class="console-text-button"
-                          :disabled="saving"
-                          @click="completeDunningAction(item)"
-                        >完成跟进</button>
-                        <span v-else class="settlement-muted">—</span>
-                      </td>
-                    </tr>
-                    <tr v-if="!dunningActions.length">
-                      <td colspan="9" class="settlement-table-empty">
-                        暂无已生成的催收动作记录
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </article>
-            <details class="settlement-panel settlement-policy-settings">
-              <summary>
-                <span>逾期提醒规则</span
-                ><small>仅催收专员和管理员可新建或查看策略</small>
-              </summary>
-              <div class="settlement-policy-intro">
-                <ConsoleIcon name="bell" />
-                <p>
-                  系统每天检查未结清应收；逾期进入指定范围后，将创建内部跟进提醒并通知指定业务人员，不会向客户直接发送消息。
-                </p>
-              </div>
-              <form
-                class="settlement-policy-form"
-                @submit.prevent="submitPolicy"
-              >
-                <label
-                  class="settlement-policy-field settlement-policy-field-wide"
-                >
-                  <span>策略名称</span>
-                  <input
-                    v-model.trim="policyForm.name"
-                    placeholder="例如：逾期 1–30 天销售跟进"
-                    required
-                   maxlength="255"/>
-                  <small>方便团队识别这条提醒的适用场景。</small>
-                </label>
-                <div class="settlement-policy-field">
-                  <span>逾期多久开始提醒</span>
-                  <div class="settlement-policy-range">
-                    <input
-                      v-model.number="policyForm.aging_from_days"
-                      type="number"
-                      min="1"
-                      required
-                    />
-                    <b>至</b>
-                    <input
-                      v-model.number="policyForm.aging_to_days"
-                      type="number"
-                      min="1"
-                      required
-                    />
-                    <em>天</em>
-                  </div>
-                  <small>例如 1 至 30 天，表示从逾期第 1 天起提醒。</small>
-                </div>
-                <label class="settlement-policy-field">
-                  <span>提醒哪位业务人员</span>
-                  <select
-                    v-model="policyRecipientAccount"
-                    :disabled="dunningRecipientsLoading || !dunningRecipients.length"
-                    required
-                  >
-                    <option value="">
-                      {{ dunningRecipientsLoading ? "正在读取催收人员…" : "请选择催收业务人员" }}
-                    </option>
-                    <option
-                      v-for="item in dunningRecipients"
-                      :key="item.user_id || item.id"
-                      :value="item.user_id || item.id"
-                    >
-                      {{ item.display_name || item.username || item.user_id || item.id }}
-                      <template v-if="item.username || item.account">
-                        · {{ item.username || item.account }}
-                      </template>
-                    </option>
-                  </select>
-                  <small v-if="dunningRecipientsError" class="settlement-field-error">
-                    {{ dunningRecipientsError }}
-                    <button type="button" class="console-text-button" @click="load">重新加载</button>
-                  </small>
-                  <small v-else-if="!dunningRecipientsLoading && !dunningRecipients.length">
-                    当前没有同时具备本系统权限和催收角色的有效人员，请先在基础平台配置。
-                  </small>
-                  <small v-else>仅展示当前租户内拥有结算权限且属于催收角色的有效人员。</small>
-                </label>
-                <label class="settlement-policy-field">
-                  <span>下次跟进提醒间隔</span>
-                  <select v-model.number="policyForm.repeat_interval_days">
-                    <option :value="1">每天提醒一次</option>
-                    <option :value="3">每 3 天提醒一次</option>
-                    <option :value="7">每周提醒一次</option>
-                    <option :value="14">每两周提醒一次</option>
-                  </select>
-                  <small
-                    >用于安排后续跟进时间，避免同一笔应收被过度打扰。</small
-                  >
-                </label>
-                <label class="settlement-policy-field">
-                  <span>提醒级别</span>
-                  <select v-model="policyForm.priority">
-                    <option value="NORMAL">普通提醒</option>
-                    <option value="HIGH">重点关注</option>
-                    <option value="CRITICAL">紧急升级</option>
-                  </select>
-                  <small>重点和紧急提醒会自动同步基础平台通知中心。</small>
-                </label>
-                <label class="settlement-policy-field">
-                  <span>提醒范围</span>
-                  <select v-model="policyForm.channel">
-                    <option value="LOCAL">仅在结算系统内提醒</option>
-                    <option value="PLATFORM">同步到基础平台通知中心</option>
-                  </select>
-                  <small
-                    >普通跟进建议仅在系统内提醒；重点和紧急提醒仍会同步基础平台。</small
-                  >
-                </label>
-                <div class="settlement-policy-submit">
-                  <span>保存后立即启用，并保留操作审计记录。</span>
-                  <button :disabled="saving">
-                    <ConsoleIcon name="save" />保存并启用规则
-                  </button>
-                </div>
-              </form>
-            </details>
-          </section>
-          <section v-else class="settlement-tasks">
-            <div class="settlement-section-head">
-              <div>
-                <p>
-                  按真实业务状态聚合的待办任务；点击「去处理」可直接跳到相关页面。
-                </p>
-              </div>
-              <div>
-                <button class="console-button secondary" @click="load">
-                  <ConsoleIcon name="reset" />刷新
-                </button>
-              </div>
-            </div>
-            <article
-                v-for="group in taskGroups"
-                :key="group.key"
-                class="settlement-panel settlement-task-group"
-              >
-                <div class="settlement-panel-head">
-                  <div>
-                    <h2>{{ group.label }}</h2>
-                    <p>{{ group.description }}</p>
-                  </div>
-                  <span class="settlement-task-count">{{ group.items.length }} 项</span>
-                </div>
-                <div v-if="group.items.length" class="settlement-task-list">
-                  <button
-                    v-for="item in group.items.slice(0, 8)"
-                    :key="item.key"
-                    type="button"
-                    class="settlement-task-item"
-                    @click="go(group.section)"
-                  >
-                    <span class="settlement-task-id">{{ item.label }}</span>
-                    <span class="settlement-task-meta">{{ item.meta }}</span>
-                  </button>
-                  <p v-if="group.items.length > 8" class="settlement-task-more">
-                    还有 {{ group.items.length - 8 }} 项未展示，进入「{{ group.action }}」查看全部。
-                  </p>
-                </div>
-                <div v-else class="settlement-empty compact">
-                  当前没有待办，{{ group.doneHint }}
-                </div>
-              </article>
-          </section>
+            :visible-invoice-requests="visibleInvoiceRequests"
+            :visible-tax-invoices="visibleTaxInvoices"
+            :invoice-eligible-receivables="invoiceEligibleReceivables"
+            :saving="saving"
+            :invoice-form="invoiceForm"
+            :invoice-review="invoiceReview"
+            :can="can"
+            v-model:invoice-tab="invoiceTab"
+            v-model:invoice-composer-open="invoiceComposerOpen"
+            v-model:invoice-review-open="invoiceReviewOpen"
+            v-model:invoice-keyword="invoiceKeyword"
+            v-model:invoice-status-filter="invoiceStatusFilter"
+            @reload="load"
+            @submit-invoice="submitInvoice"
+            @submit-review="submitInvoiceReview"
+            @reset-filters="resetInvoiceFilters"
+            @approve="approveInvoice"
+            @manual-issue="manualIssue"
+            @review-failure="openReviewFailure"
+            @open-detail="openInvoiceDetail"
+          />
+          <DunningCenterPanel
+            v-else-if="active === 'dunning'"
+            :saving="saving"
+            :export-job="exportJob"
+            :dunning-overview="dunningOverview"
+            :dunning-coverage="dunningCoverage"
+            :dunning-kpis="dunningKpis"
+            :aging-rows="agingRows"
+            :dunning-cases="dunningCases"
+            :dunning-actions="dunningActions"
+            :dunning-recipients="dunningRecipients"
+            :dunning-recipients-loading="dunningRecipientsLoading"
+            :dunning-recipients-error="dunningRecipientsError"
+            :policy-form="policyForm"
+            :can-complete-dunning-action="canCompleteDunningAction"
+            @export-aging="exportAgingReceivables"
+            @download-export="downloadExport"
+            @reload="load"
+            @complete-action="completeDunningAction"
+            @submit-policy="submitPolicy"
+          />
+          <SettlementTasksPanel
+            v-else
+            :task-groups="taskGroups"
+            @navigate="go"
+            @reload="load"
+          />
         </template>
       </div>
     </section>
@@ -2941,6 +946,21 @@ watch(invoiceDetailID, load);
       :error="reviewFailureDialog.error"
       @confirm="submitReviewFailure"
       @cancel="closeReviewFailure"
+    />
+
+    <PromptDialog
+      v-if="dunningActionDialog"
+      title="完成催收跟进"
+      description="填写本次催收跟进结果。完成后该动作不再计入待办。"
+      label="跟进结果（最多 500 字）"
+      placeholder="例如：已电话提醒客户承诺本周付款"
+      confirm-text="完成跟进"
+      cancel-text="取消"
+      :maxlength="500"
+      :busy="saving"
+      :error="dunningActionDialog.error"
+      @confirm="confirmDunningAction"
+      @cancel="cancelDunningAction"
     />
 
     <ConfirmDialog

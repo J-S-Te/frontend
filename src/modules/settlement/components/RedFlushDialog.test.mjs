@@ -40,6 +40,14 @@ async function loadSfc(file) {
       imports[spec.local.name] = spec.type === 'ImportDefaultSpecifier' ? (dependency.default ?? dependency) : dependency[spec.imported.name]
     }
   }
+  // compileScript 会为 defineModel 等宏注入 `import { useModel as _useModel } from 'vue'`；
+  // 这些不在原始 AST 中，须从 Vue 补齐，否则下方剥掉 import 后帮助函数未定义。
+  for (const match of script.content.matchAll(/import \{([^}]+)\} from ['"]vue['"]/g)) {
+    for (const part of match[1].split(',')) {
+      const [imported, local = imported] = part.trim().split(/\s+as\s+/)
+      if (imported && !(local in imports)) imports[local] = Vue[imported]
+    }
+  }
   const component = new Function(...Object.keys(imports), script.content
     .replace(/^import\s[\s\S]*?from ['"][^'"]+['"]\n/gm, '')
     .replace('export default', 'return'))(...Object.values(imports))
