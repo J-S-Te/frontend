@@ -146,6 +146,19 @@ test('看板按权限控制角色可见分区并标示数据范围', () => {
   assert.match(shell, /Promise\.allSettled/)
 })
 
+test('权限管理的子视图都接收会话 permissions，指标字典保留维护入口', () => {
+  // 回归：2026-08-18 的只读字典版本挂载 DictionaryView 时未传 permissions，
+  // 2026-10-08 给组件增加 dictionary.manage 编辑能力后外壳未同步传参，
+  // 导致具备维护权限的管理员也看不到新建/编辑/启停/删除入口。
+  for (const view of ['AlertsCenterView', 'DictionaryView', 'AdminSourcesView', 'AlertRulesView']) {
+    assert.match(
+      shell,
+      new RegExp(`<${view}\\b[^>]*\\s:permissions="permissions"`),
+      `${view} 挂载时必须传入当前会话 permissions`,
+    )
+  }
+})
+
 test('摘要无快照时仍展示合同指标卡，不依赖 Metabase 嵌入内容', () => {
   assert.match(native, /暂无(?:可用|明细)?快照/)
   assert.match(shell, /dashboardSummary/)

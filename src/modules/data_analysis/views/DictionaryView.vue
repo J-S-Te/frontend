@@ -9,6 +9,7 @@ import ErrorState from "@/modules/platform/shared/components/ErrorState.vue"
 import LoadingState from "@/modules/platform/shared/components/LoadingState.vue"
 import { getDictionary, createDictionaryMetric, updateDictionaryMetric, setDictionaryMetricEnabled, deleteDictionaryMetric, getDictionaryMetricVersions } from "../api/dataAnalysis"
 import { formatDataAnalysisError } from "../utils/errors.js"
+import { enableableMetricLabels, metricEnableBlockText } from "../utils/metricEnable.js"
 const props = defineProps({ permissions: { type: Array, default: () => [] } })
 const canManage = computed(() => props.permissions.includes("dictionary.manage"))
 const canWrite = computed(() => canManage.value && !!dictionary.value && !loading.value && !error.value && !saving.value)
@@ -36,6 +37,10 @@ const filteredMetrics = computed(() => {
   const query = keyword.value.trim().toLowerCase()
   if (!query) return items
   return items.filter((item) => [item.code, item.name, item.dashboard, item.definition, item.source].join(" ").toLowerCase().includes(query))
+})
+const enableableMetricSummary = computed(() => {
+  const labels = enableableMetricLabels(dictionary.value?.metrics || [])
+  return labels.length ? labels.join("、") : "暂无"
 })
 
 async function load() {
@@ -155,12 +160,13 @@ function operationLabel(operation) { return ({ BASELINE: "原始口径", CREATE:
         <h2>口径与计算说明</h2>
         <p>公式是业务口径说明，不作为 SQL 或可执行表达式运行。新建指标默认停用，未绑定计算能力的自定义指标不可启用。</p>
         <p>“已确认”表示口径已确认，与启用开关独立。启用要求口径已确认且匹配后台受控计算能力；字典开关不改写既有统计结果，也不会自动为自定义指标创建计算任务或将历史报表绑定到新版本。</p>
+        <p>当前具备受控计算能力的指标：{{ enableableMetricSummary }}；新建或修订口径不会自动创建计算能力。</p>
         <p v-if="!canManage">当前权限允许查阅口径和版本历史；维护需要 dictionary.manage 权限。</p>
       </aside>
       <div class="da-dict-metrics da-table-panel">
         <div class="da-filters"><label><ConsoleIcon name="search" /><input v-model="keyword" placeholder="检索指标名称 / 看板 / 关键词"  maxlength="100"/></label><span>{{ filteredMetrics.length }} / {{ dictionary.metrics?.length || 0 }} 项指标</span><button class="da-button" :disabled="saving" @click="load">刷新</button><button v-if="canManage" class="da-button primary" :disabled="!canWrite" @click="openEditor()">新建指标</button></div>
         <OperationToast :message="toast" />
-        <div class="da-table-scroll"><table class="da-table"><thead><tr><th>编码 / 版本</th><th>指标 / 来源</th><th>看板</th><th>业务定义</th><th>公式说明</th><th>数据源</th><th>周期</th><th>口径状态</th><th>启用状态</th><th>操作</th></tr></thead><tbody><tr v-for="item in filteredMetrics" :key="item.code"><td class="mono">{{ item.code }}<br />v{{ item.version }}</td><td><b>{{ item.name }}</b><br />{{ item.origin === 'BUILTIN' ? '内置' : '自定义' }}</td><td>{{ item.dashboard }}</td><td>{{ item.definition }}</td><td>{{ item.formula }}</td><td class="mono">{{ item.source }}</td><td>{{ item.period }}</td><td>{{ item.status }}</td><td><span class="da-badge" :class="item.enabled ? 'normal' : 'warning'">{{ item.enabled ? '已启用' : '已停用' }}</span><small v-if="!item.enabled && !item.can_enable" class="da-dict-hint">未绑定可用计算能力或口径不匹配，不能启用</small><small v-else class="da-dict-hint">{{ item.calculation_binding || '已绑定计算能力' }}</small></td><td><div class="da-dict-actions"><button class="da-button compact" @click="openHistory(item)">版本历史</button><template v-if="canManage"><button class="da-button compact" :disabled="!canWrite" @click="openEditor(item)">编辑</button><button class="da-button compact" :disabled="!canWrite || (!item.enabled && !item.can_enable)" @click="toggleMetric(item)">{{ item.enabled ? '停用' : '启用' }}</button><button v-if="item.origin === 'CUSTOM'" class="da-button compact" :disabled="!canWrite" @click="removeMetric(item)">删除</button>
+        <div class="da-table-scroll"><table class="da-table"><thead><tr><th>编码 / 版本</th><th>指标 / 来源</th><th>看板</th><th>业务定义</th><th>公式说明</th><th>数据源</th><th>周期</th><th>口径状态</th><th>启用状态</th><th>操作</th></tr></thead><tbody><tr v-for="item in filteredMetrics" :key="item.code"><td class="mono">{{ item.code }}<br />v{{ item.version }}</td><td><b>{{ item.name }}</b><br />{{ item.origin === 'BUILTIN' ? '内置' : '自定义' }}</td><td>{{ item.dashboard }}</td><td>{{ item.definition }}</td><td>{{ item.formula }}</td><td class="mono">{{ item.source }}</td><td>{{ item.period }}</td><td>{{ item.status }}</td><td><span class="da-badge" :class="item.enabled ? 'normal' : 'warning'">{{ item.enabled ? '已启用' : '已停用' }}</span><small v-if="!item.enabled && !item.can_enable" class="da-dict-hint">{{ metricEnableBlockText(item) }}</small><small v-else class="da-dict-hint">{{ item.calculation_binding || '已绑定计算能力' }}</small></td><td><div class="da-dict-actions"><button class="da-button compact" @click="openHistory(item)">版本历史</button><template v-if="canManage"><button class="da-button compact" :disabled="!canWrite" @click="openEditor(item)">编辑</button><button class="da-button compact" :disabled="!canWrite || (!item.enabled && !item.can_enable)" :title="item.enabled || item.can_enable ? '' : metricEnableBlockText(item)" @click="toggleMetric(item)">{{ item.enabled ? '停用' : '启用' }}</button><button v-if="item.origin === 'CUSTOM'" class="da-button compact" :disabled="!canWrite" @click="removeMetric(item)">删除</button>
 </template></div></td></tr></tbody></table></div>
         <EmptyState v-if="filteredMetrics.length === 0" title="未找到匹配指标" />
       </div>

@@ -29,6 +29,14 @@ test('dictionary component script and template compile', () => {
   const compiled = compileScript(descriptor, { id: 'dictionary' })
   assert.deepEqual(compileTemplate({ source: descriptor.template.content, filename: 'DictionaryView.vue', id: 'dictionary', compilerOptions: { bindingMetadata: compiled.bindings } }).errors, [])
 })
+test('不可启用原因来自后端字段并带按钮说明，可启用清单动态汇总', () => {
+  assert.match(source, /import { enableableMetricLabels, metricEnableBlockText } from "\.\.\/utils\/metricEnable\.js"/)
+  assert.match(source, /\{\{ metricEnableBlockText\(item\) \}\}/)
+  assert.match(source, /:title="item\.enabled \|\| item\.can_enable \? '' : metricEnableBlockText\(item\)"/)
+  assert.match(source, /\{\{ enableableMetricSummary \}\}/)
+  assert.doesNotMatch(source, /未绑定可用计算能力或口径不匹配，不能启用/)
+})
+
 test('management uses dictionary.manage; admin alone cannot mutate and read errors block writes', async () => {
   const writable = harness()
   await writable.ui.load()
