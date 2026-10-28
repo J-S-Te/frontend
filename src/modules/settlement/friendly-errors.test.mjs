@@ -1,4 +1,5 @@
 import test from 'node:test'
+import { allowedSections, permissionCheck, canLoad } from './utils/capabilities.js'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import vm from 'node:vm'
@@ -209,7 +210,7 @@ async function viewHarness(overrides = {}) {
     ref: value => ({ value }), computed: getter => ({ get value() { return getter() } }), watch() {},
     useRoute: () => ({ params: { section: 'receipts' }, query: {} }), useRouter: () => ({ push() {}, replace() {} }),
     window: { setTimeout() {}, confirm: () => false }, formatSettlementError, ...bindings,
-    createRequestScope,
+    createRequestScope, allowedSections, permissionCheck, canLoad,
     useSettlementActions,
     useReceiptAllocation,
     useInvoiceDetail,
@@ -218,10 +219,10 @@ async function viewHarness(overrides = {}) {
     useReceiptRegistration,
     useInvoiceRequests,
     useConfirmDialog: () => ({ dialog: { value: null }, askConfirm: async () => true, accept() {}, cancel() {} }),
-    useDunningCenter: () => ({ policyForm: { value: { recipient_rule: '' } }, dunningActionDialog: { value: null } }),
-    getSettlementSession: async () => ({}), ...overrides,
+    useDunningCenter: () => ({ dunningCases: { value: [] }, dunningActions: { value: [] }, dunningPolicies: { value: [] }, dunningRecipients: { value: [] }, dunningOverview: { value: {} }, dunningCoverage: { value: {} }, policyForm: { value: { recipient_rule: '' } }, dunningActionDialog: { value: null } }),
+    getSettlementSession: async () => ({permissions:["settlement.receipt.record","settlement.receivable.read","settlement.allocation.confirm"]}), ...overrides,
   })
-  vm.runInContext(`${script}\nglobalThis.ui = { submitReceipt, act, message, receiptComposerOpen, receiptMatchFor, receiptMatches, error };`, context)
+  vm.runInContext(`${script}\nsettlementSession.value = { permissions: ["settlement.receipt.record", "settlement.allocation.confirm", "settlement.receivable.read"] };\nglobalThis.ui = { submitReceipt, act, message, receiptComposerOpen, receiptMatchFor, receiptMatches, error };`, context)
   return context.ui
 }
 

@@ -82,6 +82,6 @@ test('valid license never claims business activation or disconnected implementat
 })
 test('runtime overview stays mounted before license initialization instead of hiding facts', () => {
   const source = readFileSync(new URL('./CommercialLicenseView.vue', import.meta.url), 'utf8')
-  assert.match(source, /<RuntimeEnforcementView @toast=/)
+  assert.match(source, /<RuntimeEnforcementView[^>]*@toast=/)
   assert.doesNotMatch(source, /RuntimeEnforcementView[^\n>]*v-if=/)
 })

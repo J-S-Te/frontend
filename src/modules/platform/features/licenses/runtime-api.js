@@ -27,14 +27,26 @@ export function validateEnforcementSnapshot(data, application) {
   return data
 }
 export const getRuntimeEnforcement = application => request(applicationPath(application)).then(data => validateEnforcementSnapshot(data, application))
-export function activateRuntimeEnforcement(application, revision) {
+// activateRuntimeEnforcement 用途：提交明确确认的执行修订与可选许可修订。
+// 参数：application 为系统，revision 为执行修订，licenseRevision 为用户看到的许可修订。
+// 返回值：返回受理结果；修订非法或请求失败时抛出错误。
+export function activateRuntimeEnforcement(application, revision, licenseRevision) {
   if (!Number.isSafeInteger(revision) || revision < 0) throw new RuntimeEnforcementError('执行状态修订无效，请先刷新。')
-  return request(`${applicationPath(application)}/activation`, { method: 'POST', body: JSON.stringify({ expected_revision: revision }) })
+  const body = { expected_revision: revision }
+  if (licenseRevision !== undefined) {
+    if (!Number.isSafeInteger(licenseRevision) || licenseRevision < 0) throw new RuntimeEnforcementError('许可修订无效，请重新读取。')
+    body.expected_license_revision = licenseRevision
+  }
+  return request(`${applicationPath(application)}/activation`, { method: 'POST', body: JSON.stringify(body) })
 }
 export const runtimeStateName = state => ({ PENDING_ENFORCEMENT: '待激活', APPLYING: '正在应用', ENFORCED: '已强制执行' })[state] || '未知状态'
 export const runtimeTimestampPresent = value => Boolean(value && value !== '0001-01-01T00:00:00Z')
+// memberProgress 用途：只统计服务端确认的新鲜 READY 与当前修订 ACK。
+// 参数：members 为服务端成员事实；旧协议没有确认标记时按未核验处理。
+// 返回值：返回总数、已准备数及已确认数。
 export function memberProgress(members = []) {
-  return { total: members.length, ready: members.filter(member => runtimeTimestampPresent(member.ready_at)).length, acknowledged: members.filter(member => Number.isSafeInteger(member.issued_revision) && member.issued_revision > 0 && member.ack_revision === member.issued_revision && runtimeTimestampPresent(member.ack_at)).length }
+ return { total: members.length, ready: members.filter(m=>m.ready_fresh===true).length,
+  acknowledged:members.filter(m=>m.ack_current===true && m.issued_revision>0 && m.ack_revision===m.issued_revision).length }
 }
 
 // P1 只读概览契约：GET /licenses/enforcement/{application}/overview。
@@ -58,6 +70,9 @@ const isTimestamp = value => typeof value === 'string' && RFC3339.test(value)
 const isNullableTimestamp = value => value === null || isTimestamp(value)
 const invalidOverview = () => new RuntimeEnforcementError(OVERVIEW_INVALID_MESSAGE, { code: 'INVALID_OVERVIEW_RESPONSE' })
 
+// validateEnforcementOverview 用途：校验服务端概览及可选激活资格，异常时禁止提交。
+// 参数：data 为概览数据，application 为当前选择的系统。
+// 返回值：返回有效概览；不符合契约时抛出错误。
 export function validateEnforcementOverview(data, application) {
   if (!isRecord(data) || data.application !== application || typeof data.environment !== 'string') throw invalidOverview()
   const { license, runtime, registration, enforcement } = data
@@ -68,6 +83,7 @@ export function validateEnforcementOverview(data, application) {
   for (const member of enforcement.members) {
     if (!isRecord(member) || typeof member.service_id !== 'string' || !member.service_id.trim() || !isCount(member.issued_revision) || !isCount(member.ack_revision) || !isNullableTimestamp(member.ready_at) || !isNullableTimestamp(member.ack_at)) throw invalidOverview()
   }
+  if (data.activation !== undefined) validateActivationFacts(data.activation, enforcement.members.length)
   if (!Array.isArray(data.blocking_reasons) || !data.blocking_reasons.every(code => typeof code === 'string' && RECORD_CODE.test(code))) throw invalidOverview()
   if (!Array.isArray(data.allowed_actions) || !data.allowed_actions.every(code => typeof code === 'string' && RECORD_CODE.test(code))) throw invalidOverview()
   if (data.preparation_operation !== null && data.preparation_operation !== undefined) throw invalidOverview()
@@ -89,8 +105,11 @@ const BLOCKING_REASON_NAMES = Object.freeze({
   LICENSE_NOT_EFFECTIVE: '商业授权尚未生效',
   LICENSE_STATE_INVALID: '许可证状态异常',
   RUNTIME_NOT_REGISTERED: '运行组件尚未登记',
+  LICENSE_NOT_VALID: '当前商业授权不满足激活条件',
+  RUNTIME_MEMBERS_MISSING: '尚无登记组件',
+  RUNTIME_READY_STALE: '部分组件尚未就绪或准备信号已过期',
 })
-const ALLOWED_ACTION_NAMES = Object.freeze({ IMPORT_LICENSE: '导入或续期商业授权' })
+const ALLOWED_ACTION_NAMES = Object.freeze({ IMPORT_LICENSE: '导入或续期商业授权', OPEN_ACCESS_WIZARD: '检查接入与运行许可接线' })
 export const licenseStatusName = status => LICENSE_STATUS_NAMES[status] || '状态未知'
 export const runtimeStatusName = status => RUNTIME_STATUS_NAMES[status] || '状态未知'
 export const registrationStatusName = status => REGISTRATION_STATUS_NAMES[status] || '状态未知'
@@ -111,7 +130,10 @@ export const overviewIsUnregistered = overview => Boolean(overview) && overview.
 // 只有已登记且非 ENFORCED 才显示原激活区域；UNREGISTERED/ENFORCED 一律不显示。
 export const overviewActivationVisible = overview => overviewIsRegistered(overview) && overview.enforcement.status !== 'ENFORCED'
 // 可提交激活还需要服务端处于可推进状态；UNKNOWN 等状态只展示事实，不允许提交。
-export const overviewActivationReady = overview => overviewIsRegistered(overview) && (overview.enforcement.status === 'PENDING_ENFORCEMENT' || overview.enforcement.status === 'APPLYING')
+// overviewActivationReady 用途：只接受后端明确给出的初次激活资格。
+// 参数：overview 为最近一次概览。
+// 返回值：返回是否可发起激活；等待中只允许核对进度。
+export const overviewActivationReady = overview => overviewIsRegistered(overview) && overview.license.status === 'VALID' && overview.enforcement.status === 'PENDING_ENFORCEMENT' && overview.activation?.can_activate === true && overview.activation.status === 'READY'
 export const overviewImportSuggested = overview => Boolean(overview) && overview.allowed_actions.includes('IMPORT_LICENSE')
 export const overviewBlockingReasons = (overview = null) => (overview?.blocking_reasons || []).map(code => ({ code, name: blockingReasonName(code) }))
 export const overviewAllowedActions = (overview = null) => (overview?.allowed_actions || []).map(code => ({ code, name: allowedActionName(code) }))
@@ -146,8 +168,42 @@ function legacySnapshotOverview(snapshot, application) {
   }
 }
 
+// validateActivationFacts 用途：校验新增激活投影，异常字段不能用于发起写操作。
+// 参数：facts 为激活事实，memberCount 为成员数。
+// 返回值：无；不合法时抛出概览错误。
+function validateActivationFacts(facts, memberCount) {
+ if (!isRecord(facts) || typeof facts.can_activate !== 'boolean' || !['NOT_READY','READY','APPLYING','STALLED','ENFORCED','UNAVAILABLE'].includes(facts.status) ||
+  !isCount(facts.total_count) || facts.total_count!==memberCount || !isCount(facts.ready_count) || !isCount(facts.acknowledged_count) || facts.ready_count>memberCount || facts.acknowledged_count>memberCount ||
+  !Array.isArray(facts.waiting_service_ids) || !facts.waiting_service_ids.every(id=>typeof id==='string'&&id) || !isNullableTimestamp(facts.waiting_since) || !isCount(facts.wait_seconds) ||
+  !Array.isArray(facts.blocking_reasons) || !facts.blocking_reasons.every(code=>typeof code==='string'&&RECORD_CODE.test(code))) throw invalidOverview()
+ if (facts.can_activate && (facts.status!=='READY' || memberCount===0 || facts.ready_count!==memberCount || facts.blocking_reasons.length)) throw invalidOverview()
+}
+
+// activationConfirmationKey 用途：把用户确认绑定到应用、环境、许可与执行修订。
+// 参数：overview 为服务端概览。
+// 返回值：返回稳定指纹；没有概览时返回空值。
+function activationConfirmationKey(overview) {
+  if (!overview) return ''
+  return JSON.stringify([
+    overview.application, overview.environment, overview.license, overview.registration,
+    overview.enforcement.revision, overview.enforcement.members.map(member => member.service_id).sort(),
+  ])
+}
+
+// runtimeAccessEnvironment 用途：把受控环境别名转换为接入向导支持的环境码。
+// 参数：environment 为服务端环境。
+// 返回值：返回已知环境码；未知值返回空字符串，不猜测目标。
+export function runtimeAccessEnvironment(environment) {
+  const normalized = String(environment || '').trim().toLowerCase()
+  const code = ({ production: 'prod', development: 'dev', testing: 'test' })[normalized] || normalized
+  return ['dev', 'test', 'staging', 'prod'].includes(code) ? code : ''
+}
+
 // 与 Vue 响应式对象和测试共用同一套状态：overview 是主状态，旧快照不再由本页面读取。
 export function createRuntimeState() { return { application: 'contract_management', overview: null, fresh: false, loading: false, busy: false, error: '', confirmed: false } }
+// createRuntimeController 用途：管理概览刷新、确认绑定、轮询和单次激活。
+// 参数：state 为页面状态，options 为权限、接口、计时器等依赖。
+// 返回值：返回读取、选择、激活、失效与释放方法。
 export function createRuntimeController(state, options = {}) {
   const canRead = options.canRead || (() => false)
   const canManage = options.canManage || (() => false)
@@ -170,10 +226,21 @@ export function createRuntimeController(state, options = {}) {
     if (disposed || !pollingActive || pollTimer !== null || pageHidden()) return
     pollTimer = setIntervalFn(poll, pollIntervalMs)
   }
+  // onVisibilityChange 用途：隐藏时撤销旧确认，恢复可见时立即重新核对事实。
+  // 参数：无。
+  // 返回值：无。
   function onVisibilityChange() {
     if (!pollingActive || disposed) return
-    if (pageHidden()) clearPollTimer()
-    else ensurePollTimer()
+    if (pageHidden()) {
+      clearPollTimer()
+      state.confirmed = false
+      state.fresh = false
+      generation += 1
+      state.loading = false
+    } else {
+      ensurePollTimer()
+      if (!state.busy && canRead()) void readNow()
+    }
   }
   function bindVisibility() {
     if (visibilityBound || !doc || typeof doc.addEventListener !== 'function') return
@@ -186,12 +253,16 @@ export function createRuntimeController(state, options = {}) {
     visibilityBound = false
   }
   function stale(application, turn) { return turn !== generation || application !== state.application }
+  // read 用途：读取事实并在确认材料变化时撤销旧确认。
+  // 参数：application 为系统，turn 为当前读取世代。
+  // 返回值：异步完成读取；错误写入页面状态。
   async function read(application, turn) {
     try {
       const overview = validateEnforcementOverview(await getOverview(application), application)
       if (stale(application, turn)) return
+      if (activationConfirmationKey(state.overview)!==activationConfirmationKey(overview) || !overviewActivationReady(overview)) state.confirmed=false
       state.overview = overview
-      state.fresh = true
+      state.fresh = !pageHidden()
       if (readFailure) { state.error = ''; readFailure = false }
     } catch (error) {
       if (stale(application, turn)) return
@@ -228,9 +299,12 @@ export function createRuntimeController(state, options = {}) {
     state.loading = false
     await readNow()
   }
+  // activateSelected 用途：按已确认的许可与执行双修订提交一次激活。
+  // 参数：无。
+  // 返回值：异步完成；错误留在状态中，不自动重试写请求。
   async function activateSelected() {
     const overview = state.overview
-    if (!canRead() || !canManage() || !state.confirmed || !state.fresh || !overview || overview.application !== state.application || !overviewActivationReady(overview) || state.loading || state.busy) return
+    if (!canRead() || !canManage() || !state.confirmed || !state.fresh || !overview || overview.application !== state.application || !overviewActivationReady(overview) || state.loading || state.busy) { state.confirmed=false; return }
     const application = state.application
     const revision = overview.enforcement.revision
     state.busy = true
@@ -238,7 +312,7 @@ export function createRuntimeController(state, options = {}) {
     state.error = ''
     readFailure = false
     try {
-      await activate(application, revision)
+      await activate(application, revision, overview.license.revision)
       await readNow()
       options.onSuccess?.()
     } catch (error) {
@@ -250,10 +324,23 @@ export function createRuntimeController(state, options = {}) {
       }
     } finally { state.busy = false }
   }
+  // poll 用途：可见页面后台刷新，同一份确认材料保留勾选，变化时由读取撤销。
+  // 参数：无。
+  // 返回值：无。
   function poll() {
     if (disposed || !pollingActive || pageHidden() || !canRead() || state.loading || state.busy) return
-    // 后台轮询不重置用户已勾选的确认项，也不清除非读取类错误。
+    // 后台轮询仅在确认材料未变时保留勾选，不清除非读取类错误。
     void readNow()
+  }
+  // invalidate 用途：许可证导入或初始化后立即撤销旧确认并读取新事实。
+  // 参数：无。
+  // 返回值：返回刷新任务；执行中则只撤销旧确认。
+  function invalidate() {
+    state.confirmed = false
+    state.fresh = false
+    generation += 1
+    state.loading = false
+    if (!state.busy && canRead() && !disposed) return readNow()
   }
   function startPolling() {
     if (disposed) return
@@ -263,5 +350,5 @@ export function createRuntimeController(state, options = {}) {
   }
   function stopPolling() { pollingActive = false; clearPollTimer() }
   function dispose() { if (disposed) return; disposed = true; stopPolling(); unbindVisibility(); generation += 1 }
-  return { refresh, select, activateSelected, startPolling, stopPolling, dispose }
+  return { refresh, select, activateSelected, invalidate, startPolling, stopPolling, dispose }
 }

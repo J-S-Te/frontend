@@ -9,7 +9,11 @@ import { computed, ref } from "vue";
  * 注入项与组件内同名标识一一对应：receivables/saving/notify/load/formatSettlementError/createReceipt/listReceiptMatches；
  * 不直接导入 API 模块。
  */
+// 用途：组织回款登记、客户选择与授权范围内的核销建议。
+// 参数：依赖对象含当前能力、可见应收、写入与刷新方法。
+// 返回值：回款状态和操作函数。
 export function useReceiptRegistration({
+  can = () => false,
   receivables,
   saving,
   notify,
@@ -45,8 +49,11 @@ export function useReceiptRegistration({
     );
   });
 
+  // 用途：登记真实回款并仅在具备核销能力时读取匹配建议。
+  // 参数：无；读取当前回款表单。
+  // 返回值：提交及刷新完成的 Promise。
   async function submitReceipt() {
-    if (saving.value) return;
+    if (!can("settlement.receipt.record") || saving.value) return;
     saving.value = true;
     let registered = false;
     try {
@@ -55,6 +62,12 @@ export function useReceiptRegistration({
       receiptComposerOpen.value = false;
       receiptMatchFor.value = result.id;
       receiptMatches.value = [];
+      if (!can("settlement.allocation.confirm")) {
+        notify("回款已登记。");
+        const refreshed = await load();
+        if (!refreshed) notify("回款已登记，但页面刷新失败。请刷新列表核对结果，勿重复登记。");
+        return;
+      }
       receiptMatches.value = await listReceiptMatches(result.id);
       notify(
         receiptMatches.value.length

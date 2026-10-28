@@ -220,7 +220,7 @@ const CASES = {
 const materialize = ({ __fn = {}, ...data }) => ({ ...data, ...Object.fromEntries(Object.entries(__fn).map(([key, src]) => [key, new Function(`return (${src})`)()])) })
 
 const component = await loadSfc(new URL('./SettlementAllocationsPanel.vue', import.meta.url).pathname)
-const render = (name) => renderToString(Vue.createSSRApp({ render: () => Vue.h(component, materialize(CASES[name])) }))
+const render = (name) => renderToString(Vue.createSSRApp({ render: () => Vue.h(component, { can: () => true, ...materialize(CASES[name]) }) }))
 
 test("核销面板复现提取前 golden：核销页签、无单据空态、两个编辑器关闭", async () => {
   assert.equal(await render("allocationsTabEmpty"), GOLDENS["allocationsTabEmpty"])
@@ -249,4 +249,11 @@ test("核销面板：提交以事件回传，页签与编辑器开关以 defineM
   assert.doesNotMatch(source, /submitReversal/)
   assert.doesNotMatch(source, /active ===/)
   assert.doesNotMatch(source, /window\.prompt/)
+})
+
+// 角色补齐改变写动作边界，显式拒绝能力时即使弹层模型已打开也必须隐藏写入口。
+test('SettlementAllocationsPanel：权限撤销后关闭写表单及操作入口', async () => {
+  const html = await renderToString(Vue.createSSRApp({ render: () => Vue.h(component,
+    { ...materialize(CASES['reversalsTabComposersOpen']), can: () => false }) }))
+  assert.doesNotMatch(html, /发起核销|确认冲销/)
 })

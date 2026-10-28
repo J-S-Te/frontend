@@ -70,6 +70,8 @@ test('核销写入失败：按操作失败提示，不触发刷新链也不宣�
 function loadHarness() {
   const context = {
     ref, createRequestScope, formatSettlementError,
+    settlementSession: ref({}), getSettlementSession: async () => ({}), canLoad: () => true, can: () => true, invoiceDetail: ref(null),
+    route: { params: { section: 'receivables' } }, router: { replace: async () => {} },
     settlementScope: createRequestScope(),
     active: ref('receivables'),
     loading: ref(false),
@@ -94,6 +96,7 @@ test('菜单快速切换后：旧 section 的迟到响应不得覆盖新 section
   const slow = load()
   await until(() => loaded === 1)
   context.active.value = 'invoices'
+  context.route.params.section = 'invoices'
   context.targets = [[() => { loaded++; return second.promise }, targetNew, []]]
   const fast = load()
   await until(() => loaded === 2)

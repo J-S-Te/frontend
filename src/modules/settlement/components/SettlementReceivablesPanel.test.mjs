@@ -182,7 +182,7 @@ const CASES = {
 const materialize = ({ __fn = {}, ...data }) => ({ ...data, ...Object.fromEntries(Object.entries(__fn).map(([key, src]) => [key, new Function(`return (${src})`)()])) })
 
 const component = await loadSfc(new URL('./SettlementReceivablesPanel.vue', import.meta.url).pathname)
-const render = (name) => renderToString(Vue.createSSRApp({ render: () => Vue.h(component, materialize(CASES[name])) }))
+const render = (name) => renderToString(Vue.createSSRApp({ render: () => Vue.h(component, { can: () => true, ...materialize(CASES[name]) }) }))
 
 test("应收面板复现提取前 golden：编辑器关闭、无计划、无应收、筛选为空", async () => {
   assert.equal(await render("closedEmpty"), GOLDENS["closedEmpty"])
@@ -213,4 +213,11 @@ test("应收面板：动作以事件回传，编辑器开关与筛选以 defineM
   assert.doesNotMatch(source, /submitPlanConfirmation/)
   assert.doesNotMatch(source, /active ===/)
   assert.doesNotMatch(source, /window\.prompt/)
+})
+
+// 角色补齐改变写动作边界，显式拒绝能力时即使弹层模型已打开也必须隐藏写入口。
+test('SettlementReceivablesPanel：权限撤销后关闭写表单及操作入口', async () => {
+  const html = await renderToString(Vue.createSSRApp({ render: () => Vue.h(component,
+    { ...materialize(CASES['editorOpenPopulated']), can: () => false }) }))
+  assert.doesNotMatch(html, /确认并生成应收/)
 })

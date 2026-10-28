@@ -191,7 +191,7 @@ const CASES = {
 const materialize = ({ __fn = {}, ...data }) => ({ ...data, ...Object.fromEntries(Object.entries(__fn).map(([key, src]) => [key, new Function(`return (${src})`)()])) })
 
 const component = await loadSfc(new URL('./SettlementInvoiceDetailPanel.vue', import.meta.url).pathname)
-const render = (name) => renderToString(Vue.createSSRApp({ render: () => Vue.h(component, materialize(CASES[name])) }))
+const render = (name) => renderToString(Vue.createSSRApp({ render: () => Vue.h(component, { can: () => true, ...materialize(CASES[name]) }) }))
 
 test("开票详情面板复现提取前 golden：无详情数据（整区空渲染）", async () => {
   assert.equal(await render("noDetail"), GOLDENS["noDetail"])
@@ -223,4 +223,17 @@ test("开票详情面板：关闭/上传/下载/复核/提交红冲以事件回�
   assert.doesNotMatch(source, /reviewRedFlush/)
   assert.doesNotMatch(source, /submitRedFlush/)
   assert.doesNotMatch(source, /active ===/)
+})
+
+// 角色补齐改变写动作边界，显式拒绝能力时即使弹层模型已打开也必须隐藏写入口。
+test('SettlementInvoiceDetailPanel：权限撤销后关闭写表单及操作入口', async () => {
+  const html = await renderToString(Vue.createSSRApp({ render: () => Vue.h(component,
+    { ...materialize(CASES['detailIssuedRedFlushReview']), can: () => false }) }))
+  assert.doesNotMatch(html, /上传电子发票|发起红冲|通过并提交税控/)
+})
+test('销售申请能力不能展示需要开具权限的红冲入口', async () => {
+  const html = await renderToString(Vue.createSSRApp({ render: () => Vue.h(component,
+    { ...CASES.detailIssuedRedFlushReview,
+      can: permission => ['settlement.invoice.read', 'settlement.invoice.request'].includes(permission) }) }))
+  assert.doesNotMatch(html, />\s*发起红冲\s*</)
 })

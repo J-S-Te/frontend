@@ -33,7 +33,7 @@ const originalFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = originalFetch })
 
 const CHECKED_AT = '2026-10-27T05:54:38Z'
-const READY_MEMBER = Object.freeze({ service_id: 'contract-api', ready_at: '2026-10-27T05:50:00Z', issued_revision: 7, ack_revision: 7, ack_at: '2026-10-27T05:51:00Z' })
+const READY_MEMBER = Object.freeze({ ready_fresh:true, ack_current:true, service_id: 'contract-api', ready_at: '2026-10-27T05:50:00Z', issued_revision: 7, ack_revision: 7, ack_at: '2026-10-27T05:51:00Z' })
 const snapshot = (revision = 3, application = 'contract_management', state = 'PENDING_ENFORCEMENT') => ({ application, state, revision, migration_eligible: false, members: [] })
 // P1 overview 样例：默认未登记 + 商业授权有效 + 运行观察未接入。
 const overview = (overrides = {}) => ({
@@ -52,6 +52,7 @@ const overview = (overrides = {}) => ({
 const registeredOverview = (overrides = {}) => overview({
   registration: { status: 'REGISTERED', member_count: 1, catalog_version: 1 },
   enforcement: { status: 'PENDING_ENFORCEMENT', revision: 7, deployment_revision: 42, snapshot_current: true, members: [READY_MEMBER] },
+  activation:{can_activate:true,status:'READY',total_count:1,ready_count:1,acknowledged_count:1,waiting_service_ids:[],waiting_since:null,wait_seconds:0,blocking_reasons:[]},
   blocking_reasons: [],
   ...overrides,
 })
@@ -148,11 +149,11 @@ test('legacy injected snapshot getter remains readable for existing controller c
   assert.equal(state.error, '')
   state.confirmed = true
   await view.activateSelected()
-  assert.match(state.error, /确认操作结果.*核对.*避免重复提交/)
+  assert.equal(state.error, '')
   assert.doesNotMatch(state.error, /socket|private_value/)
   assert.equal(state.confirmed, false)
   await view.activateSelected()
-  assert.equal(writes, 1)
+  assert.equal(writes, 0, '旧快照缺少激活资格，不能发起写操作')
 })
 
 test('unregistered overview stays visible as three facts and never auto-enrolls', async () => {
@@ -221,7 +222,7 @@ test('registered non-enforced systems expose activation with the enforcement rev
   assert.equal(overviewActivationReady(pending), true)
   const applying = registeredOverview({ enforcement: { ...registeredOverview().enforcement, status: 'APPLYING' } })
   assert.equal(overviewActivationVisible(applying), true)
-  assert.equal(overviewActivationReady(applying), true)
+  assert.equal(overviewActivationReady(applying), false, 'APPLYING只核对进度，不重复发起激活')
   const unknown = registeredOverview({ enforcement: { ...registeredOverview().enforcement, status: 'UNKNOWN' } })
   assert.equal(overviewActivationVisible(unknown), true, '已登记且非 ENFORCED 仍显示激活区域')
   assert.equal(overviewActivationReady(unknown), false, '执行状态未知时不允许提交激活')
@@ -291,7 +292,7 @@ test('overview polls every 15 seconds only while visible, preserving confirmatio
     document: doc,
     setInterval: timers.setInterval,
     clearInterval: timers.clearInterval,
-    getOverview: async application => { reads++; return overview({ application }) },
+    getOverview: async application => { reads++; return registeredOverview({ application }) },
   })
   view.startPolling()
   assert.equal(RUNTIME_POLL_INTERVAL_MS, 15000)
@@ -304,7 +305,7 @@ test('overview polls every 15 seconds only while visible, preserving confirmatio
   state.confirmed = true
   await timers.tick()
   assert.equal(reads, 2)
-  assert.equal(state.confirmed, true, '后台轮询不得重置用户确认项')
+  assert.equal(state.confirmed, true, '相同确认材料的轮询保留勾选')
 
   doc.visibilityState = 'hidden'
   doc.dispatch()
@@ -314,8 +315,9 @@ test('overview polls every 15 seconds only while visible, preserving confirmatio
   doc.visibilityState = 'visible'
   doc.dispatch()
   assert.equal(timers.intervals.length, 1, '页面恢复可见后继续轮询')
-  await timers.tick()
-  assert.equal(reads, 3)
+  await new Promise(resolve=>setImmediate(resolve))
+  assert.equal(reads, 3, '恢复可见立即读取，不等下个定时器')
+  assert.equal(state.confirmed,false)
   view.dispose()
   assert.equal(timers.intervals.length, 0)
   assert.equal(doc.listenerCount, 0)
@@ -465,4 +467,71 @@ test('runtime Vue component compiles and continuously renders the three facts wi
   assert.doesNotMatch(source, /state\.snapshot/)
   assert.doesNotMatch(source, /state\.notRegistered/)
   assert.doesNotMatch(source, /v-if="initialized"/)
+})
+
+test('activation confirmation is revoked when the execution or license revision changes', async () => {
+ const state=createRuntimeState()
+ let next=registeredOverview({activation:{can_activate:true,status:'READY',total_count:1,ready_count:1,acknowledged_count:1,waiting_service_ids:[],waiting_since:null,wait_seconds:0,blocking_reasons:[]}})
+ const timers=fakeTimers()
+ const c=controller(state,{getOverview:async()=>next,setInterval:timers.setInterval,clearInterval:timers.clearInterval})
+ try {
+  await c.refresh();state.confirmed=true;c.startPolling()
+  next={...next,enforcement:{...next.enforcement,revision:8}}
+  await timers.tick();await new Promise(resolve=>setImmediate(resolve))
+  assert.equal(state.confirmed,false)
+ } finally { c.dispose() }
+})
+
+test('expired authorization and stale runtime cannot be submitted as activation-ready', () => {
+ const ready={can_activate:false,status:'NOT_READY',total_count:1,ready_count:0,acknowledged_count:0,waiting_service_ids:['contract-api'],waiting_since:null,wait_seconds:0,blocking_reasons:['LICENSE_NOT_VALID','RUNTIME_READY_STALE']}
+ assert.equal(overviewActivationReady(registeredOverview({license:{status:'EXPIRED'},activation:ready})),false)
+ assert.deepEqual(memberProgress([{...READY_MEMBER,ready_fresh:false,ack_current:false}]),{total:1,ready:0,acknowledged:0})
+})
+
+test('activation request transmits the license revision bound to the confirmed overview', async () => {
+ const requests=[]
+ globalThis.fetch=async(url,options)=>{requests.push(JSON.parse(options.body));return response({applying:true})}
+ await activateRuntimeEnforcement('contract_management',7,42)
+ assert.equal(requests[0].expected_license_revision,42)
+})
+
+test('license-only changes and import invalidation revoke prior activation confirmation', async () => {
+  const state = createRuntimeState()
+  let next = registeredOverview()
+  const timers = fakeTimers()
+  const view = controller(state, { getOverview: async () => next, setInterval: timers.setInterval, clearInterval: timers.clearInterval })
+  try {
+    await view.refresh()
+    view.startPolling()
+    state.confirmed = true
+    next = { ...next, license: { ...next.license, revision: 4 } }
+    await timers.tick()
+    await new Promise(resolve => setImmediate(resolve))
+    assert.equal(state.confirmed, false)
+    state.confirmed = true
+    await view.invalidate()
+    assert.equal(state.confirmed, false)
+    assert.equal(state.fresh, true)
+  } finally { view.dispose() }
+})
+
+test('initial activation does not require ACK of the revision that will only be issued after activation', () => {
+  const value = registeredOverview()
+  value.enforcement.members = [{ ...READY_MEMBER, ack_current: false, issued_revision: 0, ack_revision: 0 }]
+  value.activation.acknowledged_count = 0
+  assert.equal(overviewActivationReady(validateEnforcementOverview(value, value.application)), true)
+})
+
+test('APPLYING is read-only progress even if a stale checkbox is programmatically set', async () => {
+  const state = createRuntimeState()
+  let writes = 0
+  const value = registeredOverview()
+  value.enforcement.status = 'APPLYING'
+  value.activation = { ...value.activation, can_activate: false, status: 'APPLYING' }
+  const view = controller(state, { getOverview: async () => value, activate: async () => { writes++ } })
+  await view.refresh()
+  state.confirmed = true
+  await view.activateSelected()
+  assert.equal(writes, 0)
+  assert.equal(state.confirmed, false)
 })

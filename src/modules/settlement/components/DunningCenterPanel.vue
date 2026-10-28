@@ -9,6 +9,7 @@ import { dunningActionStatusLabel, dunningCaseStatusLabel, formatSettlementAmoun
 // 动作以事件回传父级：export-aging / download-export(id) / reload / complete-action(item) / submit-policy。
 // 完成跟进的 PromptDialog 仍由父级与其他弹窗并列挂载。
 const props = defineProps({
+  can: { type: Function, default: () => false },
   saving: { type: Boolean, default: false },
   exportJob: { type: Object, default: null },
   dunningOverview: { type: Object, default: () => ({}) },
@@ -42,6 +43,7 @@ const policyRecipientAccount = computed({
       </div>
       <div>
         <button
+          v-if="can('settlement.report.export')"
           class="console-button secondary"
           :disabled="saving"
           @click="
@@ -64,24 +66,24 @@ const policyRecipientAccount = computed({
         </button>
       </div>
     </div>
-    <p class="settlement-detail-notice">
+    <p v-if="can('settlement.dunning.manage')" class="settlement-detail-notice">
       页面金额与笔数基于服务端全量催收汇总；导出的账龄表由服务端重新查询当前租户全部未结清应收生成。
     </p>
     <p
-      v-if="Number(dunningOverview.uncovered_overdue_count || 0) > 0"
+      v-if="can('settlement.dunning.manage') && Number(dunningOverview.uncovered_overdue_count || 0) > 0"
       class="settlement-detail-notice"
       role="status"
     >
       有 {{ dunningOverview.uncovered_overdue_count }} 笔逾期应收没有匹配的催收策略，请补充覆盖对应账龄区间的规则。
     </p>
-    <div v-if="dunningCoverage.gaps.length" class="settlement-detail-notice" role="status">
+    <div v-if="can('settlement.dunning.manage') && dunningCoverage.gaps.length" class="settlement-detail-notice" role="status">
       <strong>策略覆盖巡检：</strong>
       <span v-for="(gap, index) in dunningCoverage.gaps" :key="`${gap.from_days}-${gap.to_days}-${gap.open_ended}`">
         {{ index ? '、' : '' }}{{ gap.open_ended ? `≥${gap.from_days} 天` : `${gap.from_days}–${gap.to_days} 天` }}
       </span>
       未配置启用策略；系统只提示，不自动生成策略。
     </div>
-    <section class="settlement-cards settlement-dunning-cards">
+    <section v-if="can('settlement.dunning.manage')" class="settlement-cards settlement-dunning-cards">
       <article
         v-for="item in dunningKpis"
         :key="item.label"
@@ -92,7 +94,7 @@ const policyRecipientAccount = computed({
         ><small>{{ item.note }}</small>
       </article>
     </section>
-    <article class="settlement-panel settlement-aging-report">
+    <article v-if="can('settlement.report.read')" class="settlement-panel settlement-aging-report">
       <div class="settlement-panel-head">
         <div>
           <h2>账龄区间报表</h2>
@@ -242,7 +244,7 @@ const policyRecipientAccount = computed({
         </table>
       </div>
     </article>
-    <details class="settlement-panel settlement-policy-settings">
+    <details v-if="can('settlement.dunning.manage')" class="settlement-panel settlement-policy-settings">
       <summary>
         <span>逾期提醒规则</span
         ><small>仅催收专员和管理员可新建或查看策略</small>

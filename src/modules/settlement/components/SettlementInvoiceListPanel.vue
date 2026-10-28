@@ -22,7 +22,7 @@ const invoiceComposerOpen = defineModel('invoiceComposerOpen')
 const invoiceReviewOpen = defineModel('invoiceReviewOpen')
 const invoiceKeyword = defineModel('invoiceKeyword')
 const invoiceStatusFilter = defineModel('invoiceStatusFilter')
-defineEmits(['reload','submit-invoice','submit-review','reset-filters','approve','manual-issue','review-failure','open-detail'])
+defineEmits(['reload','submit-invoice','submit-review','reset-filters','approve','manual-issue','review-failure','open-detail','special-review'])
 </script>
 
 <template>
@@ -38,6 +38,7 @@ defineEmits(['reload','submit-invoice','submit-review','reset-filters','approve'
           <ConsoleIcon name="reset" />刷新</button
         ><button
           class="console-button"
+          v-if="can('settlement.invoice.request')"
           @click="invoiceComposerOpen = true"
         >
           <ConsoleIcon name="account" />发起开票申请
@@ -45,7 +46,7 @@ defineEmits(['reload','submit-invoice','submit-review','reset-filters','approve'
       </div>
     </div>
     <article
-      v-if="invoiceComposerOpen"
+      v-if="invoiceComposerOpen && can('settlement.invoice.request')"
       class="settlement-panel settlement-invoice-composer"
     >
       <div class="settlement-panel-head">
@@ -110,11 +111,11 @@ defineEmits(['reload','submit-invoice','submit-review','reset-filters','approve'
           v-model.trim="invoiceForm.amount_incl_tax"
           placeholder="价税合计"
           required
-         maxlength="18"/><button :disabled="saving">提交申请</button>
+         maxlength="18"/><textarea v-model.trim="invoiceForm.special_reason" maxlength="1000" placeholder="特殊事项或折扣原因（填写后需总监加签）"></textarea><button :disabled="saving">提交申请</button>
       </form>
     </article>
     <article
-      v-if="invoiceReviewOpen"
+      v-if="invoiceReviewOpen && can('settlement.invoice.approve')"
       class="settlement-panel settlement-operation-card"
     >
       <div class="settlement-panel-head">
@@ -181,6 +182,7 @@ defineEmits(['reload','submit-invoice','submit-review','reset-filters','approve'
           "  maxlength="100"/></label
       ><select v-model="invoiceStatusFilter">
         <option value="">全部状态</option>
+        <option v-if="invoiceTab === 'requests'" value="SPECIAL_REVIEW">待总监加签</option>
         <option v-if="invoiceTab === 'requests'" value="SUBMITTED">
           待审核
         </option>
@@ -239,6 +241,8 @@ defineEmits(['reload','submit-invoice','submit-review','reset-filters','approve'
                 </p>
               </td>
               <td>
+                <button v-if="item.status === 'SPECIAL_REVIEW' && can('settlement.invoice.special_approve')"
+                  class="console-button small" :disabled="saving" @click="$emit('special-review', item)">总监加签</button>
                 <button
                   v-if="item.status === 'SUBMITTED' && can('settlement.invoice.approve')"
                   class="console-button small"

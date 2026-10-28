@@ -314,7 +314,7 @@ onMounted(load)
     </template>
     <p v-else role="alert" class="license-alert">无商业授权查看权限。</p>
     <!-- P1：运行时授权概览始终挂载，未登记/未初始化时也持续显示三项事实，不再整块隐藏。 -->
-    <RuntimeEnforcementView @toast="emit('toast', $event)" />
+    <RuntimeEnforcementView :license-revision="status?.revision || 0" @toast="emit('toast', $event)" />
   </section>
 </template>
 

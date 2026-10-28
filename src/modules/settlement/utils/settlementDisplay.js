@@ -61,6 +61,7 @@ export function confirmationState(value) {
 
 export const invoiceStatusMeta = (value) =>
   ({
+    SPECIAL_REVIEW: { label: "待总监加签", tone: "warning" },
     SUBMITTED: { label: "待审核", tone: "warning" },
     ISSUE_PENDING: { label: "待开具", tone: "info" },
     ISSUE_UNKNOWN: { label: "结果待对账", tone: "warning" },

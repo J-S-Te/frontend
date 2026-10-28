@@ -1,10 +1,12 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, watch } from 'vue'
 import { hasPermission } from '../../auth/utils/principal.js'
+import SubsystemAccessWizard from '../../applications/components/SubsystemAccessWizard.vue'
 import { formatLicenseTime } from './presentation.js'
 import {
   RUNTIME_APPLICATIONS,
   RUNTIME_POLL_INTERVAL_MS,
+  blockingReasonName,
   createRuntimeController,
   createRuntimeState,
   enforcementStatusName,
@@ -21,13 +23,20 @@ import {
   overviewIsUnregistered,
   registrationStatusName,
   runtimeObservationName,
-  runtimeTimestampPresent,
+  runtimeAccessEnvironment,
   runtimeTone,
 } from './runtime-api.js'
 
+const props = defineProps({ licenseRevision: { type: Number, default: 0 } })
 const emit = defineEmits(['toast'])
 const canRead = computed(() => hasPermission('platform:license:read'))
 const canManage = computed(() => hasPermission('platform:license:manage'))
+const canPreviewAccess = computed(() => hasPermission('platform:application:read'))
+const canSubmitAccess = computed(() => {
+ const update=['platform:application:update','platform:application-environment:update','platform:application-login-target:update','platform:oauth-client:disable']
+ const onboard=['platform:application:create','platform:application-environment:create','platform:application-login-target:create','platform:oauth-client:create','platform:role-binding:update']
+ return update.every(hasPermission)||onboard.every(hasPermission)
+})
 const state = reactive(createRuntimeState())
 // 15 秒可见轮询、隐藏暂停、切换系统/卸载丢弃迟到响应都由控制器统一处理。
 const controller = createRuntimeController(state, { canRead: () => canRead.value, canManage: () => canManage.value, onSuccess: () => emit('toast', '激活请求已处理，请以服务端执行状态与服务确认记录为准。') })
@@ -39,7 +48,11 @@ const unregistered = computed(() => overviewIsUnregistered(overview.value))
 const progress = computed(() => memberProgress(overview.value?.enforcement.members))
 const activationVisible = computed(() => overviewActivationVisible(overview.value))
 const activationReady = computed(() => overviewActivationReady(overview.value))
-const canActivate = computed(() => canManage.value && state.confirmed && state.fresh && activationReady.value && !state.loading && !state.busy)
+const applying = computed(() => overview.value?.enforcement.status === 'APPLYING')
+const canActivate = computed(() => canManage.value && state.fresh && (applying.value || (state.confirmed && activationReady.value)) && !state.loading && !state.busy)
+const accessEnvironment = computed(() => runtimeAccessEnvironment(overview.value?.environment))
+const accessSuggested = computed(() => overview.value?.allowed_actions.includes('OPEN_ACCESS_WIZARD'))
+const activationReasons = computed(() => (overview.value?.activation?.blocking_reasons || []).map(code => blockingReasonName(code)))
 const blockingReasons = computed(() => overviewBlockingReasons(overview.value))
 const allowedActions = computed(() => overviewAllowedActions(overview.value))
 const importSuggested = computed(() => overviewImportSuggested(overview.value))
@@ -51,9 +64,14 @@ const runtimeHint = computed(() => {
   if (runtime.status === 'UNKNOWN') return runtime.message || '运行观察暂不可用；未知不等于已停止。'
   return runtime.message || '运行观察可用；运行中不代表已授权。'
 })
-const snapshotLabel = computed(() => overview.value?.enforcement.snapshot_current ? '当前快照已同步' : '快照未同步或待核验')
+const snapshotLabel = computed(() => overview.value?.enforcement.snapshot_current ? '当前授权内容一致；组件确认以各行当前修订为准' : '授权内容尚待同步或核验')
 const acknowledged = member => memberProgress([member]).acknowledged === 1
 const time = value => formatLicenseTime(value)
+// handleActivationAction 用途：初次激活显式提交，进行中只读取进度。
+// 参数：无。
+// 返回值：返回对应异步操作，不重复创建登记或激活任务。
+function handleActivationAction() { return applying.value ? controller.refresh() : controller.activateSelected() }
+watch(() => props.licenseRevision, () => controller.invalidate())
 onMounted(() => { controller.refresh(); controller.startPolling() })
 onBeforeUnmount(() => controller.dispose())
 </script>
@@ -97,7 +115,7 @@ onBeforeUnmount(() => controller.dispose())
             <div class="runtime-fact">
               <dt class="runtime-label">商业授权</dt>
               <dd>
-                <strong class="runtime-fact-value" :data-tone="licenseTone(overview.license.status)">{{ licenseStatusName(overview.license.status) }}</strong>
+                <strong class="runtime-fact-value" :data-tone="licenseTone(overview.license.status)">{{ overview.license.initialized === false ? '未初始化部署实例' : licenseStatusName(overview.license.status) }}</strong>
                 <span class="runtime-hint">许可证版本 {{ overview.license.version }} · 状态修订 {{ overview.license.revision }}</span>
                 <span class="runtime-hint">生效 {{ time(overview.license.not_before) }} · 到期 {{ time(overview.license.expires_at) }}</span>
                 <span class="runtime-hint">许可证有效不代表已强制执行。</span>
@@ -121,8 +139,14 @@ onBeforeUnmount(() => controller.dispose())
           <ul v-if="blockingReasons.length" class="runtime-reason-list">
             <li v-for="reason in blockingReasons" :key="reason.code"><span class="runtime-badge" data-tone="pending">{{ reason.name }}</span><code class="runtime-reason-code">{{ reason.code }}</code></li>
           </ul>
-          <p v-if="importSuggested" class="runtime-note">需要导入或续期商业授权；请使用上方商业授权导入入口，本页只读，不提供准备动作。</p>
-          <p v-else-if="allowedActions.length" class="runtime-note">可执行操作：{{ allowedActions.map(action => action.name).join('、') }}；请在商业授权区域完成，本页不新增按钮。</p>
+          <p v-if="importSuggested" class="runtime-note">需要导入或续期商业授权；请使用上方商业授权导入入口，请先完成授权处理，再检查接入与运行许可接线。</p>
+          <p v-else-if="allowedActions.length" class="runtime-note">可执行操作：{{ allowedActions.map(action => action.name).join('、') }}。接入操作仍需正常权限、预览和人工确认。</p>
+          <SubsystemAccessWizard v-if="accessSuggested && canManage && canPreviewAccess && accessEnvironment"
+            :key="state.application + ':' + accessEnvironment" :can-preview="canPreviewAccess" :can-submit="canSubmitAccess"
+            :applications="RUNTIME_APPLICATIONS" :default-application-code="state.application"
+            :default-environment="accessEnvironment" :reconnect-on-open="true" trigger-label="检查接入与许可接线"
+            @toast="emit('toast', $event)" @completed="controller.invalidate()" />
+          <p v-if="accessSuggested && !canPreviewAccess" class="runtime-note">需要应用查看权限才能核对接入任务，请联系应用管理员。</p>
         </div>
 
         <div v-if="unregistered" class="runtime-card runtime-unregistered">
@@ -142,7 +166,7 @@ onBeforeUnmount(() => controller.dispose())
               <thead><tr><th scope="col">服务</th><th scope="col">准备状态</th><th scope="col">下发 / 确认修订</th><th scope="col">确认时间</th></tr></thead>
               <tbody><tr v-for="member in overview.enforcement.members" :key="member.service_id">
                 <td data-label="服务"><div class="runtime-service-name">{{ member.service_id }}</div></td>
-                <td data-label="准备状态"><span class="runtime-badge" :data-tone="runtimeTimestampPresent(member.ready_at) ? 'success' : 'muted'">{{ runtimeTimestampPresent(member.ready_at) ? '已准备' : '待准备' }}</span><span class="runtime-cell-note" :title="member.ready_at">{{ time(member.ready_at) }}</span></td>
+                <td data-label="准备状态"><span class="runtime-badge" :data-tone="member.ready_fresh === true ? 'success' : 'muted'">{{ member.ready_fresh === true ? '已准备' : '待准备' }}</span><span class="runtime-cell-note" :title="member.ready_at">{{ time(member.ready_at) }}</span></td>
                 <td data-label="下发 / 确认修订"><span class="runtime-revision">{{ member.issued_revision }}<span>/</span>{{ member.ack_revision }}</span><span class="runtime-cell-note" :class="{ 'runtime-confirmed': acknowledged(member) }">{{ acknowledged(member) ? '已确认当前修订' : '待确认当前修订' }}</span></td>
                 <td data-label="确认时间"><span class="runtime-timestamp" :title="member.ack_at">{{ time(member.ack_at) }}</span></td>
               </tr></tbody>
@@ -154,12 +178,14 @@ onBeforeUnmount(() => controller.dispose())
         <template v-if="activationVisible">
           <div v-if="canManage" class="runtime-card runtime-activation">
             <div>
-              <h4>{{ overview.enforcement.status === 'APPLYING' ? '重试应用' : '发起激活' }}</h4>
-              <p class="runtime-note">服务端将核对商业授权、部署、覆盖与服务确认情况。失败后可按指引修复并重试。</p>
-              <p v-if="!activationReady" class="runtime-note">运行时执行状态为{{ enforcementStatusName(overview.enforcement.status) }}，请等待服务端更新可推进状态后再发起激活。</p>
-              <label class="runtime-confirm"><input v-model="state.confirmed" type="checkbox" :disabled="state.loading || state.busy || !activationReady" /><span>我已核对当前系统与执行修订，确认请求启用运行时授权限制</span></label>
+              <h4>{{ applying ? '核对激活进度' : '发起激活' }}</h4>
+              <p class="runtime-note">服务端将核对商业授权、部署、覆盖与服务确认情况。接入完成与激活状态分别记录，等待确认不会撤销已完成的技术接入。</p>
+              <p v-if="!activationReady && !applying" class="runtime-note">{{ activationReasons.length ? activationReasons.join('；') : '当前服务未提供可激活资格，请先刷新或同步升级控制面。' }}</p>
+              <p v-if="applying" class="runtime-note">当前修订已等待 {{ overview.activation?.wait_seconds || 0 }} 秒；尚未确认：{{ overview.activation?.waiting_service_ids?.join('、') || '等待最终状态收口' }}。</p>
+              <p v-if="overview.activation?.status === 'STALLED'" class="runtime-note">当前修订已等待超过 5 分钟，请检查上述组件的运行状态、许可接线和连通性；核对进度不会自动修复或重复部署。</p>
+              <label class="runtime-confirm"><input v-model="state.confirmed" type="checkbox" :disabled="state.loading || state.busy || !activationReady || applying" /><span>我已核对当前系统与执行修订，确认请求启用运行时授权限制</span></label>
             </div>
-            <button class="runtime-button runtime-button-primary" :disabled="!canActivate" @click="controller.activateSelected">{{ state.busy ? '处理中…' : overview.enforcement.status === 'APPLYING' ? '确认重试激活' : '确认激活' }}<span aria-hidden="true">→</span></button>
+            <button class="runtime-button runtime-button-primary" :disabled="!canActivate" @click="handleActivationAction">{{ state.busy ? '处理中…' : applying ? '核对激活进度' : '确认激活' }}<span aria-hidden="true">→</span></button>
           </div>
           <p v-else class="runtime-note runtime-readonly">仅查看；需要商业授权管理权限才能发起激活。</p>
         </template>
