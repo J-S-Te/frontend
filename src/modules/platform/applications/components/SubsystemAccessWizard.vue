@@ -29,13 +29,22 @@ const props = defineProps({
   variant: { type: String, default: 'button' },
   applications: { type: Array, default: () => [] },
   defaultEnvironment: { type: String, default: 'dev' },
+  defaultApplicationCode: { type: String, default: '' },
+  triggerLabel: { type: String, default: '接入向导' },
+  reconnectOnOpen: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['toast', 'completed'])
 
 // 常驻页面只保留一个入口按钮；点击后在弹层里使用向导（避免占用页面主区域）。
 const wizardOpen = ref(false)
-const openWizard = () => { wizardOpen.value = true }
+// openWizard 用途：打开既有向导，可只读恢复当前目标的持久任务。
+// 参数：无。
+// 返回值：无；首次检查或执行仍由用户显式触发。
+function openWizard() {
+  wizardOpen.value = true
+  if (props.reconnectOnOpen && form.applicationCode && form.environment) void reconnectTarget()
+}
 const closeWizard = () => { wizardOpen.value = false }
 
 // 平台已知的默认值：公开地址取控制台自身的 origin（子系统公开地址即平台公开地址 + 路径前缀），
@@ -43,7 +52,7 @@ const closeWizard = () => { wizardOpen.value = false }
 const platformDefaultOrigin = typeof window !== 'undefined' && window.location ? window.location.origin : ''
 
 const form = reactive({
-  applicationCode: '',
+  applicationCode: props.defaultApplicationCode,
   environment: props.defaultEnvironment || 'dev',
   publicOrigin: platformDefaultOrigin,
   authProvider: 'platform',
@@ -287,7 +296,7 @@ function resetFlow() {
     :class="variant === 'nav' ? 'console-nav-item' : 'subsystem-access-wizard__trigger'"
     @click="openWizard"
   >
-    <span>接入向导</span>
+    <span>{{ triggerLabel }}</span>
   </button>
 
   <div v-if="wizardOpen" class="subsystem-access-wizard__overlay" @click.self="closeWizard">

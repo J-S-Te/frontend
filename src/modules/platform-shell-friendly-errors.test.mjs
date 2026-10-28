@@ -54,7 +54,17 @@ test('runtime authorization controller keeps failures readable without bypassing
   let writes = 0
   const controller = createRuntimeController(state, {
     canRead: () => true, canManage: () => true,
-    get: async application => ({ application, state: 'PENDING_ENFORCEMENT', revision: 3, members: [] }),
+    getOverview: async application => ({
+      application, environment: 'prod',
+      license: { status: 'VALID', revision: 3, version: 1, not_before: 0, expires_at: 4102444800 },
+      runtime: { status: 'UNKNOWN', available: false, checked_at: '2026-10-27T00:00:00Z' },
+      registration: { status: 'REGISTERED', member_count: 1, catalog_version: 1 },
+      enforcement: { status: 'PENDING_ENFORCEMENT', revision: 3, deployment_revision: 3, snapshot_current: false,
+        members: [{ service_id: 'contract-api', ready_at: null, ack_at: null, issued_revision: 0, ack_revision: 0 }] },
+      activation: { can_activate: true, status: 'READY', total_count: 1, ready_count: 1, acknowledged_count: 0,
+        waiting_service_ids: ['contract-api'], waiting_since: null, wait_seconds: 0, blocking_reasons: [] },
+      preparation_operation: null, blocking_reasons: [], allowed_actions: [], checked_at: '2026-10-27T00:00:00Z',
+    }),
     activate: async () => { writes++; throw Object.assign(new Error('socket private_value'), { code: 'NETWORK_ERROR', request_method: 'POST' }) },
   })
   await controller.refresh()

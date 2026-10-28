@@ -458,7 +458,7 @@ onBeforeUnmount(() => {
         </template>
 
         <AlertsCenterView v-else-if="section === 'alerts'" :permissions="permissions" />
-        <DictionaryView v-else-if="section === 'dictionary'" />
+        <DictionaryView v-else-if="section === 'dictionary'" :permissions="permissions" />
         <AdminSourcesView v-else-if="section === 'admin/sources'" :permissions="permissions" />
         <AlertRulesView v-else-if="section === 'admin/rules'" :permissions="permissions" />
       </div>

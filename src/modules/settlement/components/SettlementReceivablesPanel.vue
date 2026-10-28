@@ -8,6 +8,7 @@ import { collectionStatusLabel, confirmationState, dueState, money, receivableIn
 // 编辑器开关与三路筛选为双向原始值，以 defineModel 承接模板内的 v-model 与直接赋值（父级 v-model:xxx 绑定 composable 的 ref）；
 // 刷新 / 提交确认 / 重置筛选 / 发起确认以事件回传。
 defineProps({
+  can: { type: Function, default: () => false },
   visiblePlans: { type: Array, required: true },
   receivables: { type: Array, required: true },
   saving: { type: Boolean, default: false },
@@ -37,7 +38,7 @@ defineEmits(['reload','submit-plan','reset-filters','confirm-plan'])
       </div>
     </div>
     <article
-      v-if="planEditorOpen"
+      v-if="planEditorOpen && can('settlement.receivable.confirm')"
       class="settlement-panel settlement-operation-card"
     >
       <div class="settlement-panel-head">
@@ -156,7 +157,7 @@ defineEmits(['reload','submit-plan','reset-filters','confirm-plan'])
               </td>
               <td>
                 <button
-                  v-if="plan.status === 'PENDING_CONFIRMATION'"
+                  v-if="plan.status === 'PENDING_CONFIRMATION' && can('settlement.receivable.confirm')"
                   class="console-button secondary small"
                   :disabled="saving"
                   @click="$emit('confirm-plan', plan)"

@@ -1,5 +1,8 @@
 <script setup>
 import { loginUsername } from "@/modules/shared/loginUsername.mjs"
+import { agingDisplayRows } from "../utils/agingDisplay.js";
+import { allowedSections, permissionCheck, canLoad } from "../utils/capabilities.js";
+import SettlementRolePanel from "../components/SettlementRolePanel.vue";
 import OperationToast from '@/modules/shared/components/OperationToast.vue'
 import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
@@ -35,6 +38,7 @@ import ConfirmDialog from "@/modules/shared/components/ConfirmDialog.vue";
 import PromptDialog from "@/modules/shared/components/PromptDialog.vue";
 import {
   approveInvoiceRequest,
+  saveRoleResource,
   recoverInvoiceFailure,
   approveInvoiceRedFlush,
   confirmReceivablePlan,
@@ -85,9 +89,8 @@ const sessionAvatar = computed(() => sessionDisplayName.value.slice(0, 1).toUppe
 const sessionPermissions = computed(
   () => new Set(settlementSession.value?.permissions || []),
 );
-const can = (permission) =>
-  sessionPermissions.value.has("settlement.admin") ||
-  sessionPermissions.value.has(permission);
+const can = (permission) => permissionCheck(settlementSession.value)(permission);
+const allowed = computed(() => allowedSections(settlementSession.value));
 const sections = [
   ["dashboard", "结算总览", "dashboard"],
   ["receivables", "应收计划与应收单", "audit"],
@@ -96,12 +99,15 @@ const sections = [
   ["allocations", "核销与冲销", "reset"],
   ["dunning", "账龄与催收", "bell"],
   ["tasks", "我的待办", "organization"],
+  ["collaboration", "项目协作", "organization"],
+  ["finance", "差异与会计凭证", "save"],
+  ["settings", "结算设置", "reset"],
 ];
 const navigationGroups = [
   { label: "工作台", keys: ["dashboard", "tasks"] },
   {
     label: "结算管理",
-    keys: ["receivables", "invoices", "receipts", "allocations", "dunning"],
+    keys: ["receivables", "invoices", "receipts", "allocations", "dunning", "collaboration", "finance", "settings"],
   },
 ];
 const navigationSections = computed(() =>
@@ -109,14 +115,11 @@ const navigationSections = computed(() =>
     ...group,
     items: group.keys
       .map((key) => sections.find((item) => item[0] === key))
-      .filter(Boolean),
+      .filter((item) => item && allowed.value.includes(item[0])),
   })),
 );
-const active = computed(() =>
-  sections.some(([key]) => key === route.params.section)
-    ? route.params.section
-    : "dashboard",
-);
+const active = computed(() => allowed.value.includes(route.params.section)
+  ? route.params.section : allowed.value[0] || "");
 const title = computed(
   () => sections.find(([key]) => key === active.value)?.[1] || "结算总览",
 );
@@ -239,7 +242,7 @@ const taskGroups = computed(() => [
     action: "开票管理",
     doneHint: "当前没有待审批的开票申请。",
     items: invoiceRequests.value
-      .filter((item) => item.status === "SUBMITTED")
+      .filter((item) => (item.status === "SUBMITTED" && can("settlement.invoice.approve")) || (item.status === "SPECIAL_REVIEW" && can("settlement.invoice.special_approve")))
       .map((item) => ({
         key: `inv-${item.id}`,
         label: item.request_no,
@@ -276,24 +279,8 @@ const taskGroups = computed(() => [
         meta: `剩余 ${formatSettlementAmount(item.open_amount)} · 逾期 ${item.level || 0} 级`,
       })),
   },
-]);
-const agingRows = computed(() => {
-  const labels = { "0-30": "0–30 天", "31-60": "31–60 天", "61-90": "61–90 天", "90+": "90 天以上" };
-  const tones = { "0-30": "green", "31-60": "blue", "61-90": "orange", "90+": "red" };
-  const items = Array.isArray(agingSummary.value.items) ? agingSummary.value.items : [];
-  const totals = new Map();
-  items.forEach((item) => totals.set(item.currency, (totals.get(item.currency) || 0) + amountOf(item.amount)));
-  return items.map((item) => ({
-    key: `${item.currency}-${item.bucket}`,
-    label: `${labels[item.bucket] || item.bucket} · ${item.currency}`,
-    tone: tones[item.bucket] || "blue",
-    currency: item.currency,
-    bucket: item.bucket,
-    amount: item.amount,
-    count: item.count,
-    percent: totals.get(item.currency) ? Math.round((amountOf(item.amount) / totals.get(item.currency)) * 100) : 0,
-  }));
-});
+].filter((group) => ({ plans: can("settlement.receivable.confirm"), invoices: can("settlement.invoice.approve") || can("settlement.invoice.special_approve"), allocations: can("settlement.allocation.confirm"), dunning: can("settlement.dunning.feedback") || can("settlement.dunning.manage") })[group.key]));
+const agingRows = computed(() => agingDisplayRows(agingSummary.value.items, agingSummary.value.aging_days));
 const dunningKpis = computed(() => {
   const overview = dunningOverview.value || {};
   const overdue = receivables.value.filter(
@@ -322,9 +309,9 @@ const dunningKpis = computed(() => {
       label: "逾期笔数",
       value: `${overview.overdue_count ?? overdue.length} 笔`,
       note:
-        agingRows.value.some((item) => item.bucket === "90+" && Number(item.amount) > 0)
-          ? "含 90 天以上逾期"
-          : "无 90 天以上逾期",
+        agingRows.value.some((item) => item.isOldestBucket && amountOf(item.amount) > 0)
+          ? "含最末账龄档逾期"
+          : "最末账龄档暂无逾期",
       tone: "orange",
     },
     {
@@ -463,6 +450,7 @@ const {
   submitReceipt,
   syncReceiptCustomer,
 } = useReceiptRegistration({
+  can,
   receivables,
   saving,
   notify,
@@ -491,12 +479,40 @@ const {
   confirmPlan,
   submitPlanConfirmation,
 } = useReceivablePlans({ plans, notify, act, confirmReceivablePlan });
-function go(section) {
-  router.push({ name: "settlement", params: { section } });
+// 用途：打开特殊开票加签弹窗，普通财务审核通过后才可操作。
+// 参数：item 为服务端待加签申请。
+// 返回值：无。
+function reviewSpecialInvoice(item) {
+  if (can("settlement.invoice.special_approve") && item.status === "SPECIAL_REVIEW") specialReview.value = { item, reason: "" };
 }
+const specialReview = ref(null);
+// 用途：执行总监加签或驳回，保持服务端版本和自审限制。
+// 参数：approved 表示是否批准。
+// 返回值：提交及刷新完成的 Promise。
+async function submitSpecialReview(approved) {
+  const dialog = specialReview.value;
+  if (!dialog || !can("settlement.invoice.special_approve")) return;
+  if (!approved && !dialog.reason.trim()) { notify("驳回原因必填。"); return; }
+  await act(async () => {
+    await saveRoleResource(`/invoice-requests/${encodeURIComponent(dialog.item.id)}/${approved ? "special-approve" : "special-reject"}`, { version: dialog.item.version, reason: dialog.reason });
+    specialReview.value = null;
+  }, approved ? "总监加签已通过。" : "特殊开票已驳回。");
+}
+// 用途：跳转至当前会话可用页面。
+// 参数：section 为目标页面代码。
+// 返回值：无。
+function go(section) {
+  if (allowed.value.includes(section)) router.push({ name: "settlement", params: { section } });
+}
+// 用途：返回统一门户。
+// 参数：无。
+// 返回值：无。
 function back() {
   closeSubsystemTabOrFallback(window, () => router.replace({ name: "portal" }));
 }
+// 用途：结束当前登录会话。
+// 参数：无。
+// 返回值：退出与导航完成的 Promise。
 async function logoutSystem() {
   if (isLoggingOut.value) return;
   isLoggingOut.value = true;
@@ -524,20 +540,46 @@ const pagedLists = [
 ];
 const sectionLists = {
   receivables: [0, 1], receipts: [2, 1], allocations: [2, 1, 3],
-  invoices: [6, 4, 5], dunning: [1, 7, 8, 9], tasks: [0, 3, 4, 7],
+  invoices: [6, 4, 5], dunning: [1, 7, 8, 9], tasks: [0, 3, 4, 7], finance: [2],
 };
-const visibleListPages = computed(() => (sectionLists[active.value] || []).map((index) => ({
+const visibleListPages = computed(() => (sectionLists[active.value] || []).filter((index) => canLoad(pagedLists[index][0].name, can)).map((index) => ({
   index, label: pagedLists[index][2], page: listPages.value[index] || 0, count: pagedLists[index][1].value.length,
 })));
+// 用途：切换已授权列表的页码。
+// 参数：index 为列表索引；direction 为翻页方向。
+// 返回值：刷新完成的 Promise。
 async function changeListPage(index, direction) {
   listPages.value[index] = Math.max(0, (listPages.value[index] || 0) + direction);
   await load();
 }
+// 用途：计划写入后刷新父列表及正式应收，保留子表单和成功提示。
+// 参数：无；沿用当前页面的列表页码与服务端权限。
+// 返回值：是否刷新成功；离开页面或请求失败返回 false。
+async function refreshRolePlans() {
+  if (active.value !== "receivables" || !can("settlement.receivable.read")) return false;
+  const ticket = settlementScope.begin("SETTLEMENT_PLANS_SAVED");
+  try {
+    const [updatedPlans, updatedReceivables] = await Promise.all([
+      listReceivablePlans({ limit: 50, offset: (listPages.value[0] || 0) * 50 }),
+      listReceivables({ limit: 50, offset: (listPages.value[1] || 0) * 50 }),
+    ]);
+    if (!settlementScope.isCurrent(ticket)) return false;
+    plans.value = updatedPlans;
+    receivables.value = updatedReceivables;
+    return true;
+  } catch (value) {
+    if (settlementScope.isCurrent(ticket)) error.value = formatSettlementError(value);
+    return false;
+  }
+}
+// 用途：组装当前页面有权读取的接口。
+// 参数：section 为当前页面。
+// 返回值：已过滤的读取任务数组。
 function loadTargets(section) {
   const target = (loader, state, fallback) => [loader, state, fallback];
   const targets = [];
   const add = (...items) => targets.push(...items);
-  add(target(getSettlementSession, settlementSession, {}));
+
 
   switch (section) {
     case "dashboard":
@@ -546,16 +588,14 @@ function loadTargets(section) {
         target(getInvoicedReceivablesTop10, invoicedReceivableTop10, {
           items: [],
         }),
-        target(listReceivablePlans, plans, []),
-        target(listReceivables, receivables, []),
-        target(listReceipts, receipts, []),
-        target(listReceiptAllocations, allocations, []),
-        target(listInvoiceRequests, invoiceRequests, []),
-        target(listDunningCases, dunningCases, []),
+        target(getAgingSummary, agingSummary, { items: [] }),
       );
       if (can("settlement.dunning.manage")) {
         add(target(getDunningOverview, dunningOverview, {}));
       }
+      break;
+    case "finance":
+      if (can("settlement.difference.manage")) add(target(listReceipts, receipts, []));
       break;
     case "receivables":
       add(target(listReceivablePlans, plans, []), target(listReceivables, receivables, []));
@@ -606,13 +646,42 @@ function loadTargets(section) {
   } else {
     invoiceDetail.value = null;
   }
-  return targets;
+  return targets.filter(([loader]) => canLoad(loader.name, can) ||
+    (section === "invoices" && invoiceDetailID.value && can("settlement.invoice.read") && loader.name === ""));
 }
+// 用途：先刷新会话能力再加载当前页面数据。
+// 参数：无。
+// 返回值：读取是否成功的 Promise。
 async function load() {
   const ticket = settlementScope.begin(`SETTLEMENT_SECTION:${active.value}`);
   const isCurrent = () => settlementScope.isCurrent(ticket);
   loading.value = true;
   error.value = "";
+  try {
+    const session = await getSettlementSession({ force: true });
+    if (!isCurrent()) return false;
+    settlementSession.value = session;
+    for (const [loader, state] of pagedLists) {
+      if (!canLoad(loader.name, can)) state.value = [];
+    }
+  } catch (value) {
+    if (!isCurrent()) return false;
+    settlementSession.value = {};
+    for (const [, state] of pagedLists) state.value = [];
+    invoiceDetail.value = null;
+    error.value = formatSettlementError(value, { fallback: "读取结算权限失败，请重试。" });
+    loading.value = false;
+    return false;
+  }
+  if (!active.value) {
+    error.value = "当前账号没有可用的结算能力，请联系管理员配置角色。";
+    loading.value = false;
+    return false;
+  }
+  if (route.params.section !== active.value) {
+    await router.replace({ name: "settlement", params: { section: active.value } });
+    return false;
+  }
   const targets = loadTargets(active.value);
   if (active.value === "dunning") {
     dunningRecipientsLoading.value = true;
@@ -625,10 +694,7 @@ async function load() {
   }));
   // 菜单快速切换时，旧页面请求可能晚于新页面返回。旧请求只能结束自身，
   // 不得覆盖当前页面的数据、错误和 loading 状态；组件卸载后同样丢弃。
-  if (!isCurrent()) {
-    if (active.value === "dunning") dunningRecipientsLoading.value = false;
-    return false;
-  }
+  if (!isCurrent()) return false;
   const failures = [];
   results.forEach((result, index) => {
     const [, target, fallback] = targets[index];
@@ -649,6 +715,9 @@ async function load() {
   loading.value = false;
   return failures.length === 0;
 }
+// 用途：选择回款匹配建议进入核销。
+// 参数：match 为服务端匹配建议。
+// 返回值：导航完成的 Promise。
 async function selectReceiptMatch(match) {
   allocationForm.value = {
     receipt_id: receiptMatchFor.value,
@@ -662,7 +731,7 @@ async function selectReceiptMatch(match) {
 }
 
 watch(
-  active,
+  () => route.params.section,
   (section) => {
     if (section === "receipts") allocationTab.value = "receipts";
     if (section === "allocations") allocationTab.value = "allocations";
@@ -728,6 +797,7 @@ watch(invoiceDetailID, load);
           <button
             class="settlement-topbar-icon"
             type="button"
+            v-if="allowed.includes('tasks')"
             title="我的待办"
             aria-label="我的待办"
             @click="go('tasks')"
@@ -749,7 +819,7 @@ watch(invoiceDetailID, load);
             type="button"
             :title="sessionDisplayName"
             :aria-label="sessionDisplayName"
-            @click="go('tasks')"
+            @click="allowed.includes('tasks') && go('tasks')"
           >
             {{ sessionAvatar }}
           </button>
@@ -765,6 +835,7 @@ watch(invoiceDetailID, load);
             <span class="settlement-environment">统一认证已接入</span
             ><template v-if="active === 'dashboard'"
               ><button
+                v-if="can('settlement.report.export')"
                 class="console-button secondary"
                 :disabled="saving"
                 @click="
@@ -782,33 +853,46 @@ watch(invoiceDetailID, load);
                       ? "生成报表中…"
                       : "导出报表"
                 }}</button
-              ><button class="console-button" @click="go('invoices')">
+              ><button v-if="can('settlement.invoice.request')" class="console-button" @click="go('invoices')">
                 <ConsoleIcon name="account" />发起开票
               </button></template
             >
           </div>
         </div>
+        <article v-if="specialReview && can('settlement.invoice.special_approve')" class="settlement-panel" role="dialog" aria-label="总监特殊开票加签">
+          <h2>总监特殊开票加签 · {{ specialReview.item.request_no }}</h2>
+          <p>特殊原因：{{ specialReview.item.special_reason || '金额超过普通授权阈值' }}</p>
+          <textarea v-model.trim="specialReview.reason" maxlength="1000" placeholder="驳回原因必填" />
+          <button :disabled="saving" @click="submitSpecialReview(true)">加签通过</button>
+          <button :disabled="saving" @click="submitSpecialReview(false)">驳回申请</button>
+          <button :disabled="saving" @click="specialReview = null">取消</button>
+        </article>
         <OperationToast :message="message" />
         <p v-if="error" class="settlement-error">{{ error }}</p>
         <p v-if="loading" class="settlement-loading">正在读取结算数据…</p>
-        <template v-else>
+        <template v-else-if="active">
           <div v-if="visibleListPages.length" class="settlement-panel" aria-label="列表分页">
             <p class="settlement-muted">以下筛选仅作用于当前页，每页最多 50 条；可按列表翻页查看历史记录。</p>
             <div v-for="entry in visibleListPages" :key="entry.index" class="settlement-head-actions">
               <span>{{ entry.label }} · 第 {{ entry.page + 1 }} 页 · {{ entry.count }} 条</span>
-              <button class="console-button secondary small" :disabled="loading || saving || entry.page === 0" @click="changeListPage(entry.index, -1)">上一页</button>
-              <button class="console-button secondary small" :disabled="loading || saving || entry.count < 50 || entry.page >= 2000" @click="changeListPage(entry.index, 1)">下一页</button>
+              <button class="console-button secondary small" :aria-label="`${entry.label}上一页`" :disabled="loading || saving || entry.page === 0" @click="changeListPage(entry.index, -1)">上一页</button>
+              <button class="console-button secondary small" :aria-label="`${entry.label}下一页`" :disabled="loading || saving || entry.count < 50 || entry.page >= 2000" @click="changeListPage(entry.index, 1)">下一页</button>
             </div>
           </div>
+          <SettlementRolePanel v-if="active === 'receivables' && (can('settlement.receivable.create') || can('settlement.receivable.adjust'))"
+            section="plans" :can="can" :plans="plans" :refresh-plans="refreshRolePlans" />
+          <SettlementRolePanel v-if="active === 'receipts' && can('settlement.receipt.read')"
+            section="documents" :can="can" :receipts="receipts" />
           <SettlementDashboardPanel
             v-if="active === 'dashboard'"
             :dashboard-kpis="dashboardKpis"
-            :work-items="workItems"
+            :work-items="[]"
             :aging-rows="agingRows"
             :invoiced-receivable-top10="invoicedReceivableTop10"
             @navigate="go"
           />
           <SettlementReceivablesPanel
+            :can="can"
             v-else-if="active === 'receivables'"
             :visible-plans="visiblePlans"
             :receivables="receivables"
@@ -819,9 +903,9 @@ watch(invoiceDetailID, load);
             v-model:plan-confirmation-filter="planConfirmationFilter"
             v-model:plan-maturity-filter="planMaturityFilter"
             @reload="load"
-            @submit-plan="submitPlanConfirmation"
+            @submit-plan="can('settlement.receivable.confirm') && submitPlanConfirmation()"
             @reset-filters="resetPlanFilters"
-            @confirm-plan="confirmPlan"
+            @confirm-plan="can('settlement.receivable.confirm') && confirmPlan($event)"
           />
           <SettlementReceiptsPanel
             v-else-if="active === 'receipts'"
@@ -840,6 +924,7 @@ watch(invoiceDetailID, load);
             @navigate="go"
           />
           <SettlementAllocationsPanel
+            :can="can"
             v-else-if="active === 'allocations'"
             :allocations="allocations"
             :receipts="receipts"
@@ -851,10 +936,11 @@ watch(invoiceDetailID, load);
             v-model:allocation-composer-open="allocationComposerOpen"
             v-model:reversal-composer-open="reversalComposerOpen"
             @reload="load"
-            @submit-allocation="submitAllocation"
-            @submit-reversal="submitReversal"
+            @submit-allocation="can('settlement.allocation.confirm') && submitAllocation()"
+            @submit-reversal="can('settlement.allocation.reverse') && submitReversal()"
           />
           <SettlementInvoiceDetailPanel
+            :can="can"
             v-else-if="active === 'invoices' && invoiceDetailID"
             :invoice-detail="invoiceDetail"
             :saving="saving"
@@ -885,12 +971,14 @@ watch(invoiceDetailID, load);
             @submit-invoice="submitInvoice"
             @submit-review="submitInvoiceReview"
             @reset-filters="resetInvoiceFilters"
+            @special-review="reviewSpecialInvoice"
             @approve="approveInvoice"
             @manual-issue="manualIssue"
             @review-failure="openReviewFailure"
             @open-detail="openInvoiceDetail"
           />
           <DunningCenterPanel
+            :can="can"
             v-else-if="active === 'dunning'"
             :saving="saving"
             :export-job="exportJob"
@@ -911,8 +999,12 @@ watch(invoiceDetailID, load);
             @complete-action="completeDunningAction"
             @submit-policy="submitPolicy"
           />
+          <SettlementRolePanel
+            v-else-if="['settings','collaboration','finance'].includes(active)"
+            :key="active" :section="active" :can="can" :receipts="receipts"
+          />
           <SettlementTasksPanel
-            v-else
+            v-else-if="active === 'tasks'"
             :task-groups="taskGroups"
             @navigate="go"
             @reload="load"

@@ -17,7 +17,7 @@ test('Settlement view exposes the first-phase financial workflow without mock re
   assert.match(source, /registerManualInvoice/)
   // 开票管理区模板已提取为 SettlementInvoiceListPanel.vue（golden 逐字节锁定），动作权限与人工渠道分支断言随之指向组件源。
   assert.match(invoiceListPanel, /item\.issue_channel === 'MANUAL'/)
-  assert.match(receiptsPanel, /can\('settlement\.invoice\.request'\)/)
+  assert.match(receiptsPanel, /can\('settlement\.receipt\.record'\)/)
   assert.match(source, /<SettlementReceiptsPanel[\s\S]{0,600}:can="can"/)
   assert.match(invoiceListPanel, /can\('settlement\.invoice\.approve'\)/)
   assert.match(invoiceListPanel, /can\('settlement\.invoice\.issue'\)/)

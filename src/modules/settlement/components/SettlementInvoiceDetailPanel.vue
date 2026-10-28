@@ -12,6 +12,7 @@ import { invoiceStatusMeta, invoiceTypeLabel, issueChannelLabel, money, redFlush
 // 电子发票文件输入（模板 ref）与其选择动作迁入本组件（DOM 归持有者），上传 / 下载 / 关闭详情 / 红冲复核 / 提交红冲以事件回传父级；
 // RedFlushDialog 与 SettlementTimeline 子组件在此渲染。
 defineProps({
+  can: { type: Function, default: () => false },
   invoiceDetail: { type: Object, default: null },
   saving: { type: Boolean, default: false },
   redFlushForm: { type: Object, required: true },
@@ -20,6 +21,9 @@ defineProps({
 const redFlushOpen = defineModel('redFlushOpen')
 defineEmits(['close-detail','upload-document','download-document','review-red-flush','submit-red-flush'])
 const invoiceDocumentInput = ref(null)
+// 用途：打开电子发票文件选择框。
+// 参数：无。
+// 返回值：无。
 function chooseInvoiceDocument() {
   invoiceDocumentInput.value?.click()
 }
@@ -52,12 +56,14 @@ function chooseInvoiceDocument() {
           <button
             class="console-button secondary"
             :disabled="saving"
+            v-if="can('settlement.invoice.issue')"
             @click="chooseInvoiceDocument"
           >
             上传电子发票</button
           ><button
             class="console-button secondary"
             :disabled="saving || !canRequestRedFlush(invoiceDetail)"
+            v-if="can('settlement.invoice.issue')"
             @click="redFlushOpen = true"
           >
             发起红冲</button
@@ -80,7 +86,7 @@ function chooseInvoiceDocument() {
         </template>
       </p>
       <div
-        v-if="invoiceDetail.red_flush_request?.can_review"
+        v-if="invoiceDetail.red_flush_request?.can_review && can('settlement.invoice.approve')"
         class="settlement-operation-actions"
       >
         <button

@@ -6,6 +6,7 @@ import { useReceiptRegistration } from './useReceiptRegistration.js'
 function harness({ receivables = [], created = { id: 'RCPT-1' }, matches = [], refreshed = true, createError = null, matchError = null } = {}) {
   const calls = { create: [], matches: [], load: 0, notify: [] }
   const deps = {
+    can: () => true,
     receivables: ref(receivables),
     saving: ref(false),
     notify: (value) => calls.notify.push(value),
@@ -89,4 +90,13 @@ test('submitReceipt：登记成功但匹配查询失败 → 保留"已登记"事
   await busy.submitReceipt()
   assert.equal(busy.calls.create.length, 0)
   assert.equal(busy.deps.saving.value, true)
+})
+test('仅登记回款能力不请求核销匹配建议', async () => {
+  const h = harness()
+  h.deps.can = permission => permission === 'settlement.receipt.record'
+  const ui = useReceiptRegistration(h.deps)
+  await ui.submitReceipt()
+  assert.equal(h.calls.create.length, 1)
+  assert.equal(h.calls.matches.length, 0)
+  assert.match(h.calls.notify.at(-1), /回款已登记/)
 })

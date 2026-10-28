@@ -390,7 +390,7 @@ const CASES = {
 const canComplete = (item) => item.status === 'PENDING'
 
 const component = await loadSfc(new URL('./DunningCenterPanel.vue', import.meta.url).pathname)
-const render = (name) => renderToString(Vue.createSSRApp({ render: () => Vue.h(component, { ...CASES[name], canCompleteDunningAction: canComplete }) }))
+const render = (name) => renderToString(Vue.createSSRApp({ render: () => Vue.h(component, { can: () => true, ...CASES[name], canCompleteDunningAction: canComplete }) }))
 
 test('催收面板复现提取前 golden：空数据（导出按钮、空表行、默认策略表单）', async () => {
   assert.equal(await render('empty'), GOLDENS.empty)
@@ -418,4 +418,11 @@ test('催收面板以事件与父级交互，收件人账号 USER: 前缀联动�
   assert.match(source, /props\.policyForm\.recipient_rule = `USER:\$\{String\(value \|\| ''\)\.trim\(\)\}`/)
   assert.match(source, /v-model="policyRecipientAccount"/)
   assert.doesNotMatch(source, /agingBuckets|window\.prompt|active ===/)
+})
+
+// 角色补齐改变写动作边界，显式拒绝能力时即使弹层模型已打开也必须隐藏写入口。
+test('DunningCenterPanel：权限撤销后关闭写表单及操作入口', async () => {
+  const html = await renderToString(Vue.createSSRApp({ render: () => Vue.h(component,
+    { ...CASES['populated'], can: () => false, canCompleteDunningAction: () => false }) }))
+  assert.doesNotMatch(html, /settlement-policy-form|导出账龄表|下载账龄表/)
 })

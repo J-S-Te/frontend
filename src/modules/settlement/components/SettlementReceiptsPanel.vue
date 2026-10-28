@@ -34,7 +34,7 @@ defineEmits(['reload','submit-receipt','sync-customer','select-match','navigate'
         <button class="console-button secondary" @click="$emit('reload')">
           <ConsoleIcon name="reset" />刷新</button
         ><button
-          v-if="can('settlement.invoice.request')"
+          v-if="can('settlement.receipt.record')"
           class="console-button"
           @click="receiptComposerOpen = true"
         >
@@ -43,7 +43,7 @@ defineEmits(['reload','submit-receipt','sync-customer','select-match','navigate'
       </div>
     </div>
     <article
-      v-if="receiptComposerOpen"
+      v-if="receiptComposerOpen && can('settlement.receipt.record')"
       class="settlement-panel settlement-invoice-composer"
     >
       <div class="settlement-panel-head">
@@ -185,13 +185,13 @@ defineEmits(['reload','submit-receipt','sync-customer','select-match','navigate'
               </td>
               <td>
                 <button
-                  v-if="amountOf(item.unallocated_amount) > 0"
+                  v-if="amountOf(item.unallocated_amount) > 0 && can('settlement.allocation.confirm')"
                   class="console-text-button"
                   @click="$emit('navigate', 'allocations')"
                 >
                   发起核销</button
                 ><button
-                  v-else
+                  v-else-if="can('settlement.allocation.read') || can('settlement.allocation.confirm') || can('settlement.allocation.reverse')"
                   class="console-text-button"
                   @click="$emit('navigate', 'allocations')"
                 >

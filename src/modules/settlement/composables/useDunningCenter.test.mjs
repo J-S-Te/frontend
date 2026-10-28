@@ -14,7 +14,7 @@ const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, ''
 // vm 另一 realm 生成的数组/对象原型不同，严格 deepEqual 会判原型不等；比较前归一化为纯数据。
 const plain = (value) => JSON.parse(JSON.stringify(value))
 
-function harness({ refreshed = true, failure = null, session = {}, permissions = [] } = {}) {
+function harness({ refreshed = true, failure = null, session = {}, permissions = ['settlement.dunning.feedback'] } = {}) {
   const calls = { complete: [], load: 0, notify: [], act: [], policy: [] }
   const context = vm.createContext({
     ref, computed,

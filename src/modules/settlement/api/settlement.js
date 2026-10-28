@@ -42,6 +42,9 @@ function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+// 用途：验证业务响应的数据外壳与资源类型。
+// 参数：body 为响应；path 为资源路径；method 为请求方法。
+// 返回值：响应是否符合当前协议。
 function validDataEnvelope(body, path, method) {
   // httpapi.write 始终返回 {data: ...}；不能把网关的空对象／裸数组当作成功。
   if (!isRecord(body) || !Object.hasOwn(body, "data")) return false;
@@ -49,7 +52,7 @@ function validDataEnvelope(body, path, method) {
   const route = path.split("?")[0];
   if (route === "/auth/me") return isRecord(data) && !!data.tenant_id && !!(data.user_id || data.identity_id) && Array.isArray(data.permissions);
   if (method === "GET" && route === "/dunning/recipients") return Array.isArray(data) || (isRecord(data) && (Array.isArray(data.items) || (data.items === null && data.total === 0)));
-  const listRoutes = ["/receivable-plans", "/receivables", "/invoice-eligible-receivables", "/receipts", "/receipt-allocations", "/invoice-requests", "/tax-invoices", "/dunning/policies", "/dunning/cases", "/dunning/actions"];
+  const listRoutes = ["/project-candidates", "/project-assignments", "/contract-references", "/receivable-plans", "/receivables", "/invoice-eligible-receivables", "/receipts", "/receipt-allocations", "/invoice-requests", "/tax-invoices", "/dunning/policies", "/dunning/cases", "/dunning/actions"];
   if (method === "GET" && (listRoutes.includes(route) || /^\/receipts\/[^/]+\/matches$/.test(route))) return Array.isArray(data);
   return isRecord(data) && Object.keys(data).length > 0;
 }
@@ -388,3 +391,22 @@ export const completeDunningAction = (id, payload) =>
     body: JSON.stringify(payload),
     idempotent: true,
   });
+
+// 用途：读取角色补齐流程的业务资源，复用现有鉴权与错误协议。
+// 参数：path 为结算 API 内的资源路径。
+// 返回值：服务端业务结果；网络或授权失败时抛出错误。
+export function getRoleResource(path) {
+  return request(path);
+}
+// 用途：提交设置、协作、计划、加签及会计流程，保留请求幂等语义。
+// 参数：path 为资源路径；payload 为业务字段；method 为写入方法。
+// 返回值：服务端业务结果；失败时抛出带追踪信息的错误。
+export function saveRoleResource(path, payload, method = 'POST') {
+  return request(path, { method, body: JSON.stringify(payload), idempotent: true });
+}
+// 用途：下载已授权的回单影像。
+// 参数：receiptID 为回款编号；documentID 为服务端返回的文件编号。
+// 返回值：下载完成的 Promise；授权或文件失败时拒绝。
+export function downloadReceiptDocument(receiptID, documentID) {
+  return downloadFile(`/receipts/${encodeURIComponent(receiptID)}/documents/${encodeURIComponent(documentID)}/download`, '回单影像');
+}

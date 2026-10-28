@@ -10,6 +10,9 @@ import { computed, ref } from "vue";
  * formatSettlementError + createInvoiceRequest/approveInvoiceRequest/rejectInvoiceRequest/registerManualInvoice/
  * recoverInvoiceFailure；不直接导入 API 模块。
  */
+// 用途：组织开票申请、复核及人工开票交互。
+// 参数：依赖对象含可见应收、API、保存状态与通知方法。
+// 返回值：开票交互状态及操作函数。
 export function useInvoiceRequests({
   invoiceRequests,
   taxInvoices,
@@ -34,6 +37,7 @@ export function useInvoiceRequests({
   const invoiceReview = ref({ id: "", version: 0, request_no: "", reason: "" });
   const invoiceForm = ref({
     receivable_id: "",
+    special_reason: "",
     invoice_type: "ELECTRONIC_NORMAL",
     buyer_tax_no: "",
     item_name: "服务费",
@@ -106,6 +110,9 @@ export function useInvoiceRequests({
     }
   }
 
+  // 用途：按可见应收提交开票申请及特殊事项原因。
+  // 参数：无；读取当前表单。
+  // 返回值：写入及刷新完成的 Promise 或空值。
   function submitInvoice() {
     const receivable = invoiceEligibleReceivables.value.find(
       (item) => item.id === invoiceForm.value.receivable_id,
@@ -124,6 +131,7 @@ export function useInvoiceRequests({
           tax_no: form.buyer_tax_no,
         },
         invoice_type: form.invoice_type,
+        special_reason: form.special_reason || "",
         items: [
           {
             item_name: form.item_name,

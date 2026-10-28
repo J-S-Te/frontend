@@ -113,6 +113,7 @@ test('submitInvoice：未选可开票应收只提示；选中后按应收组装�
     contract_snapshot_id: 'SNAP-1',
     buyer_profile: { customer_id: 'C1', name: '甲公司', tax_no: '91110000MA' },
     invoice_type: 'ELECTRONIC_NORMAL',
+    special_reason: '',
     items: [{
       item_name: '测评服务', tax_classification_code: '3040201', specification: '', unit: '项', quantity: '1',
       unit_price_excl_tax: '10000', amount_excl_tax: '10000', tax_rate: '0.06', tax_amount: '600', amount_incl_tax: '10600',

@@ -80,3 +80,8 @@ test('valid license never claims business activation or disconnected implementat
   assert.match(source, /运行时登记与执行确认状态为准/)
   assert.doesNotMatch(source, /业务系统的运行时授权检查尚未接入/)
 })
+test('runtime overview stays mounted before license initialization instead of hiding facts', () => {
+  const source = readFileSync(new URL('./CommercialLicenseView.vue', import.meta.url), 'utf8')
+  assert.match(source, /<RuntimeEnforcementView[^>]*@toast=/)
+  assert.doesNotMatch(source, /RuntimeEnforcementView[^\n>]*v-if=/)
+})

@@ -8,6 +8,7 @@ import { allocationStatusMeta, amountOf, money } from '@/modules/settlement/util
 // 页签与两个编辑器开关为双向原始值（defineModel），模板内直接赋值与「预填冲销表单后打开」的原语义原样保留；
 // 刷新 / 提交核销 / 提交冲销以事件回传。
 defineProps({
+  can: { type: Function, default: () => false },
   allocations: { type: Array, required: true },
   receipts: { type: Array, default: () => [] },
   receivables: { type: Array, default: () => [] },
@@ -36,6 +37,7 @@ defineEmits(['reload','submit-allocation','submit-reversal'])
           <ConsoleIcon name="reset" />刷新</button
         ><button
           class="console-button"
+          v-if="can('settlement.allocation.confirm')"
           @click="allocationComposerOpen = true"
         >
           <ConsoleIcon name="save" />发起核销
@@ -100,7 +102,7 @@ defineEmits(['reload','submit-allocation','submit-reversal'])
               <td>
                 <button
                   v-if="
-                    allocationTab === 'allocations' &&
+                    can('settlement.allocation.reverse') && allocationTab === 'allocations' &&
                     ['CONFIRMED', 'PARTIALLY_REVERSED'].includes(
                       item.status,
                     )
@@ -142,7 +144,7 @@ defineEmits(['reload','submit-allocation','submit-reversal'])
       </div>
     </article>
     <article
-      v-if="allocationComposerOpen"
+      v-if="allocationComposerOpen && can('settlement.allocation.confirm')"
       class="settlement-panel settlement-invoice-composer"
     >
       <div class="settlement-panel-head">
@@ -192,7 +194,7 @@ defineEmits(['reload','submit-allocation','submit-reversal'])
       </form>
     </article>
     <article
-      v-if="reversalComposerOpen"
+      v-if="reversalComposerOpen && can('settlement.allocation.reverse')"
       class="settlement-panel settlement-invoice-composer"
     >
       <div class="settlement-panel-head">

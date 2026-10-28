@@ -17,6 +17,9 @@ import {
  * settlementSession/sessionPermissions；act 仅用于 submitPolicy（与原视图一致），
  * 完成跟进的写路径保留独立主干以把失败提示留在弹窗内联 error，不并入 act。
  */
+// 用途：组织个人催收跟进与策略管理状态。
+// 参数：依赖对象含会话、能力及业务操作。
+// 返回值：催收状态与操作函数。
 export function useDunningCenter({
   saving,
   notify,
@@ -45,8 +48,12 @@ export function useDunningCenter({
     priority: "NORMAL",
   });
   const dunningActionDialog = ref(null);
+  // 用途：限制个人反馈为有反馈能力的待处理收件人或管理员。
+  // 参数：item 为服务端催收动作记录。
+  // 返回值：当前会话是否可以完成跟进。
   const canCompleteDunningAction = (item) =>
     item.status === "PENDING" &&
+    (sessionPermissions.value.has("settlement.dunning.feedback") || sessionPermissions.value.has("settlement.dunning.manage") || sessionPermissions.value.has("settlement.admin")) &&
     (item.recipient_user_id === settlementSession.value?.user_id ||
       sessionPermissions.value.has("settlement.admin"));
   function completeDunningAction(item) {
