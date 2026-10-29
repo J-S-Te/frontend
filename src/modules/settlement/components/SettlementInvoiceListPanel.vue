@@ -1,6 +1,8 @@
 <script setup>
+import { nextTick, ref, watch } from 'vue'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import { formatSettlementError } from '@/modules/settlement/utils/errors.js'
+import { INVOICE_REQUEST_FIELDS, validateForm, firstInvalidField, retainVisibleErrors } from '@/modules/settlement/utils/formFeedback.js'
 import { invoiceStatusMeta, invoiceTypeLabel, money, redFlushStatusLabel } from '@/modules/settlement/utils/settlementDisplay'
 
 // 「开票管理」区面板（治理批次 5 结算·第三步，模板自 SettlementView.vue 逐字提取；提取前片段 SSR golden 归档于
@@ -8,7 +10,8 @@ import { invoiceStatusMeta, invoiceTypeLabel, money, redFlushStatusLabel } from 
 // 申请 / 台账两路可见列表、可开票应收、保存态为只读 prop；invoiceForm / invoiceReview 由父级持有、表单按属性直改；can 为权限谓词 prop；
 // 页签、申请编辑器与审核弹层开关、关键字与状态筛选为双向原始值（defineModel），模板内 v-model 与直接赋值原样保留；
 // 刷新 / 提交申请 / 审核决定 / 重置筛选 / 批准 / 人工登记 / 失败复核 / 打开详情以事件回传父级。失败原因展示沿用 formatSettlementError。
-defineProps({
+// 提交申请前先按 utils/formFeedback.js 做应用级必填/金额/税率校验（novalidate 关闭原生气泡）：失败时字段红框 + 中文文案并聚焦首个错误字段，通过后才 emit submit-invoice；父级写接口不变。
+const props = defineProps({
   visibleInvoiceRequests: { type: Array, required: true },
   visibleTaxInvoices: { type: Array, required: true },
   invoiceEligibleReceivables: { type: Array, required: true },
@@ -17,12 +20,36 @@ defineProps({
   invoiceReview: { type: Object, required: true },
   can: { type: Function, required: true },
 })
+const emit = defineEmits(['reload','submit-invoice','submit-review','reset-filters','approve','manual-issue','review-failure','open-detail','special-review'])
 const invoiceTab = defineModel('invoiceTab')
 const invoiceComposerOpen = defineModel('invoiceComposerOpen')
 const invoiceReviewOpen = defineModel('invoiceReviewOpen')
 const invoiceKeyword = defineModel('invoiceKeyword')
 const invoiceStatusFilter = defineModel('invoiceStatusFilter')
-defineEmits(['reload','submit-invoice','submit-review','reset-filters','approve','manual-issue','review-failure','open-detail','special-review'])
+// 表单反馈：关闭原生 required 气泡后由应用层给出字段级提示并聚焦首个错误字段（DEF-03）。
+const invoiceErrors = ref({})
+const invoiceFormElement = ref(null)
+// 用途：提交前校验开票申请必填与金额/税率格式，校验不通过时不通知父级写入。
+// 参数：无；读取父级持有的 invoiceForm。
+// 返回值：无；通过后 emit submit-invoice。
+async function submitInvoiceForm() {
+  invoiceErrors.value = validateForm(INVOICE_REQUEST_FIELDS, props.invoiceForm)
+  const first = firstInvalidField(INVOICE_REQUEST_FIELDS, invoiceErrors.value)
+  if (first) {
+    await nextTick()
+    invoiceFormElement.value?.querySelector('[name="' + first.key + '"]')?.focus()
+    return
+  }
+  emit('submit-invoice')
+}
+// 用途：用户修正字段后只保留仍失败的旧错误；关闭编辑器时清空反馈。
+// 参数：无。
+// 返回值：无。
+watch(() => props.invoiceForm, () => {
+  if (!Object.keys(invoiceErrors.value).length) return
+  invoiceErrors.value = retainVisibleErrors(INVOICE_REQUEST_FIELDS, props.invoiceForm, invoiceErrors.value)
+}, { deep: true })
+watch(invoiceComposerOpen, (open) => { if (!open) invoiceErrors.value = {} })
 </script>
 
 <template>
@@ -64,54 +91,167 @@ defineEmits(['reload','submit-invoice','submit-review','reset-filters','approve'
           收起
         </button>
       </div>
-      <form class="settlement-form" @submit.prevent="$emit('submit-invoice')">
-        <select v-model="invoiceForm.receivable_id" required>
-          <option value="" disabled>
-            {{
-              invoiceEligibleReceivables.length
-                ? "选择可开票应收"
-                : "暂无可开票应收，请先确认应收计划"
-            }}
-          </option>
-          <option
-            v-for="item in invoiceEligibleReceivables"
-            :key="item.id"
-            :value="item.id"
+      <form ref="invoiceFormElement" class="settlement-form" novalidate @submit.prevent="submitInvoiceForm">
+        <div class="settlement-field">
+          <select
+            v-model="invoiceForm.receivable_id"
+            name="receivable_id"
+            :aria-invalid="invoiceErrors.receivable_id ? 'true' : null"
+            :aria-describedby="invoiceErrors.receivable_id ? 'invoice-receivable-error' : null"
+            required
           >
-            {{ item.receivable_no }} ·
-            {{ item.contract_no || "未关联合同" }} ·
-            {{ item.customer_name }} ·
-            {{ money(item.invoiceable_amount, item.currency) }}
-          </option></select
-        ><input
-          v-model.trim="invoiceForm.buyer_tax_no"
-          placeholder="购方税号"
-          required
-         maxlength="64"/><input
-          v-model.trim="invoiceForm.item_name"
-          placeholder="项目名称"
-          required
-         maxlength="255"/><input
-          v-model.trim="invoiceForm.tax_classification_code"
-          placeholder="税收分类编码"
-          required
-         maxlength="64"/><input
-          v-model.trim="invoiceForm.amount_excl_tax"
-          placeholder="不含税金额"
-          required
-         maxlength="18"/><input
-          v-model.trim="invoiceForm.tax_rate"
-          placeholder="税率，如 0.06"
-          required
-         maxlength="10"/><input
-          v-model.trim="invoiceForm.tax_amount"
-          placeholder="税额"
-          required
-         maxlength="18"/><input
-          v-model.trim="invoiceForm.amount_incl_tax"
-          placeholder="价税合计"
-          required
-         maxlength="18"/><textarea v-model.trim="invoiceForm.special_reason" maxlength="1000" placeholder="特殊事项或折扣原因（填写后需总监加签）"></textarea><button :disabled="saving">提交申请</button>
+            <option value="" disabled>
+              {{
+                invoiceEligibleReceivables.length
+                  ? "选择可开票应收"
+                  : "暂无可开票应收，请先确认应收计划"
+              }}
+            </option>
+            <option
+              v-for="item in invoiceEligibleReceivables"
+              :key="item.id"
+              :value="item.id"
+            >
+              {{ item.receivable_no }} ·
+              {{ item.contract_no || "未关联合同" }} ·
+              {{ item.customer_name }} ·
+              {{ money(item.invoiceable_amount, item.currency) }}
+            </option>
+          </select>
+          <small
+            v-if="invoiceErrors.receivable_id"
+            id="invoice-receivable-error"
+            class="settlement-field-error"
+            role="alert"
+          >{{ invoiceErrors.receivable_id }}</small>
+        </div>
+        <div class="settlement-field">
+          <input
+            v-model.trim="invoiceForm.buyer_tax_no"
+            name="buyer_tax_no"
+            placeholder="购方税号"
+            aria-label="购方税号"
+            required
+            maxlength="64"
+            :aria-invalid="invoiceErrors.buyer_tax_no ? 'true' : null"
+            :aria-describedby="invoiceErrors.buyer_tax_no ? 'invoice-buyer-tax-no-error' : null"
+          />
+          <small
+            v-if="invoiceErrors.buyer_tax_no"
+            id="invoice-buyer-tax-no-error"
+            class="settlement-field-error"
+            role="alert"
+          >{{ invoiceErrors.buyer_tax_no }}</small>
+        </div>
+        <div class="settlement-field">
+          <input
+            v-model.trim="invoiceForm.item_name"
+            name="item_name"
+            placeholder="项目名称"
+            aria-label="项目名称"
+            required
+            maxlength="255"
+            :aria-invalid="invoiceErrors.item_name ? 'true' : null"
+            :aria-describedby="invoiceErrors.item_name ? 'invoice-item-name-error' : null"
+          />
+          <small
+            v-if="invoiceErrors.item_name"
+            id="invoice-item-name-error"
+            class="settlement-field-error"
+            role="alert"
+          >{{ invoiceErrors.item_name }}</small>
+        </div>
+        <div class="settlement-field">
+          <input
+            v-model.trim="invoiceForm.tax_classification_code"
+            name="tax_classification_code"
+            placeholder="税收分类编码"
+            aria-label="税收分类编码"
+            required
+            maxlength="64"
+            :aria-invalid="invoiceErrors.tax_classification_code ? 'true' : null"
+            :aria-describedby="invoiceErrors.tax_classification_code ? 'invoice-tax-code-error' : null"
+          />
+          <small
+            v-if="invoiceErrors.tax_classification_code"
+            id="invoice-tax-code-error"
+            class="settlement-field-error"
+            role="alert"
+          >{{ invoiceErrors.tax_classification_code }}</small>
+        </div>
+        <div class="settlement-field">
+          <input
+            v-model.trim="invoiceForm.amount_excl_tax"
+            name="amount_excl_tax"
+            placeholder="不含税金额"
+            aria-label="不含税金额"
+            required
+            maxlength="18"
+            :aria-invalid="invoiceErrors.amount_excl_tax ? 'true' : null"
+            :aria-describedby="invoiceErrors.amount_excl_tax ? 'invoice-amount-excl-tax-error' : null"
+          />
+          <small
+            v-if="invoiceErrors.amount_excl_tax"
+            id="invoice-amount-excl-tax-error"
+            class="settlement-field-error"
+            role="alert"
+          >{{ invoiceErrors.amount_excl_tax }}</small>
+        </div>
+        <div class="settlement-field">
+          <input
+            v-model.trim="invoiceForm.tax_rate"
+            name="tax_rate"
+            placeholder="税率，如 0.06"
+            aria-label="税率"
+            required
+            maxlength="10"
+            :aria-invalid="invoiceErrors.tax_rate ? 'true' : null"
+            :aria-describedby="invoiceErrors.tax_rate ? 'invoice-tax-rate-error' : null"
+          />
+          <small
+            v-if="invoiceErrors.tax_rate"
+            id="invoice-tax-rate-error"
+            class="settlement-field-error"
+            role="alert"
+          >{{ invoiceErrors.tax_rate }}</small>
+        </div>
+        <div class="settlement-field">
+          <input
+            v-model.trim="invoiceForm.tax_amount"
+            name="tax_amount"
+            placeholder="税额"
+            aria-label="税额"
+            required
+            maxlength="18"
+            :aria-invalid="invoiceErrors.tax_amount ? 'true' : null"
+            :aria-describedby="invoiceErrors.tax_amount ? 'invoice-tax-amount-error' : null"
+          />
+          <small
+            v-if="invoiceErrors.tax_amount"
+            id="invoice-tax-amount-error"
+            class="settlement-field-error"
+            role="alert"
+          >{{ invoiceErrors.tax_amount }}</small>
+        </div>
+        <div class="settlement-field">
+          <input
+            v-model.trim="invoiceForm.amount_incl_tax"
+            name="amount_incl_tax"
+            placeholder="价税合计"
+            aria-label="价税合计"
+            required
+            maxlength="18"
+            :aria-invalid="invoiceErrors.amount_incl_tax ? 'true' : null"
+            :aria-describedby="invoiceErrors.amount_incl_tax ? 'invoice-amount-incl-tax-error' : null"
+          />
+          <small
+            v-if="invoiceErrors.amount_incl_tax"
+            id="invoice-amount-incl-tax-error"
+            class="settlement-field-error"
+            role="alert"
+          >{{ invoiceErrors.amount_incl_tax }}</small>
+        </div>
+        <textarea v-model.trim="invoiceForm.special_reason" maxlength="1000" placeholder="特殊事项或折扣原因（填写后需总监加签）"></textarea><button :disabled="saving">提交申请</button>
       </form>
     </article>
     <article
