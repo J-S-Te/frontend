@@ -421,6 +421,24 @@
   outline: 0;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
+.settlement-form .settlement-field {
+  display: grid;
+  gap: 4px;
+}
+.settlement-form .settlement-field-error {
+  color: #b91c1c;
+  font-size: 12px;
+  line-height: 1.5;
+}
+/* DEF-01/02/03：提交前必填校验的字段红框；与原生 required 气泡解耦，由 novalidate + 应用级提示驱动。 */
+.settlement-form [aria-invalid="true"] {
+  border-color: #dc2626;
+  background: #fff5f5;
+}
+.settlement-form [aria-invalid="true"]:focus {
+  border-color: #dc2626;
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.15);
+}
 .settlement-form button,
 .settlement-panel button:not(.console-text-button) {
   color: #fff;

@@ -119,3 +119,118 @@ test('Settlement view ships Phase A/B/C UI optimization helpers and components',
   assert.match(css, /translateY\(-2px\)/)
   assert.match(css, /translateY\(-1px\)/)
 })
+
+// DEF-01/02/03 回归：人工计划/受控调整与开票申请在提交前必须给出应用级字段反馈；
+// 仅依赖原生 required 时浏览器气泡会抢先阻断提交，页面表现为“点击无反应”。
+// 字段定义与文案由 utils/formFeedback.test.mjs 锁定；此处锁定组件接线：
+// novalidate → 纯函数校验 → aria-invalid 红框 + 字段错误文案 + 聚焦首个错误 → 通过后才写入或 emit。
+test('结算人工计划与开票申请提交前给出应用级必填反馈并聚焦首个错误字段', async () => {
+  const rolePanel = await readFile(new URL('./components/SettlementRolePanel.vue', import.meta.url), 'utf8')
+  const invoicePanel = await readFile(new URL('./components/SettlementInvoiceListPanel.vue', import.meta.url), 'utf8')
+  const handler = (source, name) => {
+    const start = source.indexOf('async function ' + name + '(')
+    assert.ok(start >= 0, name)
+    return source.slice(start, source.indexOf('\n}', start) + 2)
+  }
+  for (const [name, source] of [['SettlementRolePanel', rolePanel], ['SettlementInvoiceListPanel', invoicePanel]]) {
+    assert.match(source, /novalidate/, name + ': 原生 required 气泡必须关闭')
+    assert.ok(source.includes('formFeedback.js'), name + ': 校验逻辑来自纯函数模块')
+    assert.match(source, /:aria-invalid=/, name + ': 字段标红语义')
+    assert.ok(source.includes('settlement-field-error'), name + ': 字段级错误文案')
+    assert.match(source, /required/, name + ': 保留 required 语义属性')
+    assert.ok(source.includes('firstInvalidField'), name + ': 首个错误定位')
+    assert.ok(source.includes('.focus()'), name + ': 聚焦第一个错误字段')
+  }
+  // 创建计划：合同、期次、收款日、金额、原因五个字段都有错误映射；校验先于写入。
+  for (const key of ['contract_snapshot_id', 'installment_no', 'due_date', 'planned_amount', 'reason']) {
+    assert.ok(rolePanel.includes('planErrors.' + key), 'planErrors.' + key)
+  }
+  const createHandler = handler(rolePanel, 'submitPlanCreate')
+  assert.ok(createHandler.includes('validateForm(PLAN_CREATE_FIELDS'), '创建计划提交前校验')
+  assert.ok(createHandler.indexOf('validateForm(') < createHandler.indexOf("save('/receivable-plans'"), '校验先于写入')
+  assert.match(createHandler, /return false/, '校验失败必须返回且不写入')
+  assert.ok(rolePanel.includes('@submit.prevent="submitPlanCreate"'), '创建计划提交入口走校验包装')
+  assert.ok(rolePanel.includes('@submit.prevent="submitPlanAdjust"'), '提交调整提交入口走校验包装')
+  // 提交调整：计划、收款日、金额、原因四个字段都有错误映射；校验先于写入。
+  for (const key of ['id', 'due_date', 'planned_amount', 'reason']) {
+    assert.ok(rolePanel.includes('adjustErrors.' + key), 'adjustErrors.' + key)
+  }
+  const adjustHandler = handler(rolePanel, 'submitPlanAdjust')
+  assert.ok(adjustHandler.includes('validateForm(PLAN_ADJUST_FIELDS'), '提交调整前校验')
+  assert.ok(adjustHandler.indexOf('validateForm(') < adjustHandler.indexOf('/adjust'), '校验先于写入')
+  // 合同候选为空的可诊断说明（DEF-04 可达性），不放宽数据范围。
+  assert.ok(rolePanel.includes('仅显示本人负责且财务已生效的合同'), '合同候选空态说明')
+  assert.ok(rolePanel.includes('合同→结算同步与责任人归属'), '合同候选空态排查指引')
+  // 开票申请：应收/税号/项目名称/税收分类编码/不含税金额/税率/税额/价税合计八项。
+  for (const key of ['receivable_id', 'buyer_tax_no', 'item_name', 'tax_classification_code', 'amount_excl_tax', 'tax_rate', 'tax_amount', 'amount_incl_tax']) {
+    assert.ok(invoicePanel.includes('invoiceErrors.' + key), 'invoiceErrors.' + key)
+  }
+  const invoiceHandler = handler(invoicePanel, 'submitInvoiceForm')
+  assert.ok(invoiceHandler.includes('validateForm(INVOICE_REQUEST_FIELDS'), '开票申请提交前校验')
+  assert.ok(invoiceHandler.indexOf('validateForm(') < invoiceHandler.indexOf("emit('submit-invoice')"), '校验先于 emit')
+  assert.ok(invoiceHandler.indexOf('return') < invoiceHandler.indexOf("emit('submit-invoice')"), '校验失败必须返回且不 emit')
+  assert.doesNotMatch(invoicePanel, /@submit\.prevent="\$emit\('submit-invoice'\)"/, '提交入口不允许绕过校验直接 emit')
+})
+
+// 行为级证据：在 vm 隔离环境执行组件内真实提交处理函数（聚焦函数用桩替换 nextTick/DOM），
+// 证明 DEF-01/02/03 的核心要求——校验不通过不写入/不 emit，修正后才走原写入链路。
+test('校验失败时人工计划与开票申请都不进入写入链路，修正后放行', async () => {
+  const vm = await import('node:vm')
+  const feedback = await import('./utils/formFeedback.js')
+  const rolePanelSource = await readFile(new URL('./components/SettlementRolePanel.vue', import.meta.url), 'utf8')
+  const invoicePanelSource = await readFile(new URL('./components/SettlementInvoiceListPanel.vue', import.meta.url), 'utf8')
+  const extract = (source, name) => {
+    const start = source.indexOf('async function ' + name + '(')
+    assert.ok(start >= 0, name)
+    return source.slice(start, source.indexOf('\n}', start) + 2)
+  }
+  const planFunctions = extract(rolePanelSource, 'focusFirstInvalid') + '\n' + extract(rolePanelSource, 'submitPlanCreate')
+  const writes = []
+  const planContext = {
+    saving: { value: false },
+    plan: { value: { contract_snapshot_id: '', installment_no: 1, due_date: '', planned_amount: '', reason: '' } },
+    planErrors: { value: {} },
+    planForm: { value: null },
+    PLAN_CREATE_FIELDS: feedback.PLAN_CREATE_FIELDS,
+    validateForm: feedback.validateForm,
+    firstInvalidField: feedback.firstInvalidField,
+    nextTick: async () => {},
+    save: async (...args) => { writes.push(args); return true },
+  }
+  const { submitPlanCreate } = vm.runInNewContext(planFunctions + '\n({ submitPlanCreate })', planContext)
+  assert.equal(await submitPlanCreate(), false, '缺合同/收款日/金额/原因时不得写入')
+  assert.deepEqual(writes, [], '校验失败不得调用 save')
+  assert.equal(planContext.planErrors.value.contract_snapshot_id, '请选择合同。')
+  assert.equal(planContext.planErrors.value.due_date, '请选择收款日。')
+  assert.equal(planContext.planErrors.value.planned_amount, '请填写金额。')
+  assert.equal(planContext.planErrors.value.reason, '请填写原因。')
+  planContext.plan.value = { contract_snapshot_id: 'CS-1', installment_no: 1, due_date: '2026-11-30', planned_amount: '100000', reason: '测试计划' }
+  assert.equal(await submitPlanCreate(), true, '合法表单必须继续原写入链路')
+  assert.equal(writes.length, 1, '校验通过后只调用一次 save')
+  assert.equal(writes[0][0], '/receivable-plans')
+  assert.deepEqual(planContext.planErrors.value, {})
+
+  const invoiceFunctions = extract(invoicePanelSource, 'submitInvoiceForm')
+  const events = []
+  const invoiceContext = {
+    props: {
+      invoiceForm: { receivable_id: '', buyer_tax_no: '', item_name: '服务费', tax_classification_code: '', amount_excl_tax: '', tax_rate: '0.06', tax_amount: '', amount_incl_tax: '' },
+    },
+    invoiceErrors: { value: {} },
+    invoiceFormElement: { value: null },
+    INVOICE_REQUEST_FIELDS: feedback.INVOICE_REQUEST_FIELDS,
+    validateForm: feedback.validateForm,
+    firstInvalidField: feedback.firstInvalidField,
+    nextTick: async () => {},
+    emit: (event) => events.push(event),
+  }
+  const { submitInvoiceForm } = vm.runInNewContext(invoiceFunctions + '\n({ submitInvoiceForm })', invoiceContext)
+  await submitInvoiceForm()
+  assert.deepEqual(events, [], '必填缺失时不得 emit submit-invoice')
+  assert.equal(invoiceContext.invoiceErrors.value.receivable_id, '请选择可开票应收。')
+  assert.equal(invoiceContext.invoiceErrors.value.amount_incl_tax, '请填写价税合计。')
+  invoiceContext.props.invoiceForm = { receivable_id: 'AR-1', buyer_tax_no: '91110000MA', item_name: '测评服务', tax_classification_code: '3040201', amount_excl_tax: '10000', tax_rate: '0.06', tax_amount: '600', amount_incl_tax: '10600' }
+  await submitInvoiceForm()
+  assert.deepEqual(events, ['submit-invoice'], '合法表单必须 emit submit-invoice')
+  assert.deepEqual(invoiceContext.invoiceErrors.value, {})
+})

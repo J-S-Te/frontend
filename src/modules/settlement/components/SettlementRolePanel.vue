@@ -1,7 +1,8 @@
 <script setup>
-import { computed, ref, watch, onScopeDispose } from 'vue'
+import { computed, ref, watch, onScopeDispose, nextTick } from 'vue'
 import { getRoleResource, saveRoleResource, downloadReceiptDocument } from '../api/settlement'
 import { formatSettlementError } from '../utils/errors.js'
+import { PLAN_CREATE_FIELDS, PLAN_ADJUST_FIELDS, validateForm, firstInvalidField, retainVisibleErrors } from '../utils/formFeedback.js'
 const props = defineProps({
   section: { type: String, required: true }, can: { type: Function, required: true },
   plans: { type: Array, default: () => [] }, receipts: { type: Array, default: () => [] },
@@ -17,6 +18,9 @@ const mapping = ref({ project_id: '', version: 0, note: '' })
 const assignment = ref({ project_id: '', user_id: '', active: true, version: 0 })
 const plan = ref({ contract_snapshot_id: '', installment_no: 1, due_date: '', planned_amount: '', reason: '' })
 const adjustment = ref({ id: '', version: 0, due_date: '', planned_amount: '', reason: '' })
+// 表单反馈：关闭原生 required 气泡后由应用层给出字段级提示并聚焦首个错误字段（DEF-01/02）。
+const planErrors = ref({}), adjustErrors = ref({})
+const planForm = ref(null), adjustmentForm = ref(null)
 const difference = ref({ receipt_id: '', kind: 'UNKNOWN', amount: '', reason: '' })
 const resolution = ref({ id: '', version: 0, resolution: 'CARRY_FORWARD', reason: '' })
 const refund = ref({ id: '', version: 0, reference: '', completed_at: '', reason: '' })
@@ -140,6 +144,45 @@ async function save(path, payload, method = 'POST') {
   } catch (value) { error.value = formatSettlementError(value); return false }
   finally { saving.value = false }
 }
+// 用途：提交校验失败时聚焦首个错误字段；字段 DOM 顺序与字段定义顺序一致。
+// 参数：fields 字段定义；errors 字段错误映射；form 表单元素引用。
+// 返回值：校验是否通过；失败时已聚焦并返回 false。
+async function focusFirstInvalid(fields, errors, form) {
+  const first = firstInvalidField(fields, errors.value)
+  if (!first) return true
+  await nextTick()
+  form.value?.querySelector('[name="' + first.key + '"]')?.focus()
+  return false
+}
+// 用途：创建人工收款计划前校验必填与期次/金额格式，校验不通过时不写入。
+// 参数：无；读取当前计划表单。
+// 返回值：写入是否成功；校验失败返回 false 且不调用 save。
+async function submitPlanCreate() {
+  if (saving.value) return false
+  planErrors.value = validateForm(PLAN_CREATE_FIELDS, plan.value)
+  if (!(await focusFirstInvalid(PLAN_CREATE_FIELDS, planErrors, planForm))) return false
+  return save('/receivable-plans', plan.value)
+}
+// 用途：提交受控调整前校验计划/收款日/金额/原因，校验不通过时不写入。
+// 参数：无；读取当前调整表单。
+// 返回值：写入是否成功；校验失败返回 false 且不调用 save。
+async function submitPlanAdjust() {
+  if (saving.value) return false
+  adjustErrors.value = validateForm(PLAN_ADJUST_FIELDS, adjustment.value)
+  if (!(await focusFirstInvalid(PLAN_ADJUST_FIELDS, adjustErrors, adjustmentForm))) return false
+  return save('/receivable-plans/' + encodeURIComponent(adjustment.value.id) + '/adjust', adjustment.value)
+}
+// 用途：用户修正字段后只保留仍失败的旧错误，红框与文案随输入即时消失。
+// 参数：fields 字段定义；form 表单值引用；errors 字段错误引用。
+// 返回值：无。
+function watchResolvedErrors(fields, form, errors) {
+  watch(form, () => {
+    if (!Object.keys(errors.value).length) return
+    errors.value = retainVisibleErrors(fields, form.value, errors.value)
+  }, { deep: true })
+}
+watchResolvedErrors(PLAN_CREATE_FIELDS, plan, planErrors)
+watchResolvedErrors(PLAN_ADJUST_FIELDS, adjustment, adjustErrors)
 // 用途：将可见计划的版本及原值带入受控调整表单。
 // 参数：无；读取用户选择的计划编号。
 // 返回值：无。
@@ -350,33 +393,56 @@ watch(() => props.section, load, { immediate: true })
     </template>
     <template v-else-if="section === 'plans'">
       <h2>人工计划与受控调整</h2>
-      <form v-if="can('settlement.receivable.create')" class="settlement-form" @submit.prevent="save('/receivable-plans', plan)">
-        <select v-model="plan.contract_snapshot_id" required>
-      <option value="">选择可见合同</option>
-      <option v-for="item in references" :key="item.id" :value="item.id">{{ item.contract_no }} · {{ item.customer_name }}</option>
-      </select>
-        <label>期次<input v-model.number="plan.installment_no" type="number" min="1" required />
-      </label>
-      <label>收款日<input v-model="plan.due_date" type="date" required />
-      </label>
-      <label>金额<input v-model.trim="plan.planned_amount" inputmode="decimal" maxlength="18" required />
-      </label>
-      <label>原因<input v-model.trim="plan.reason" maxlength="500" required />
-      </label>
-      <button :disabled="saving">创建计划</button>
+      <p v-if="can('settlement.receivable.create') && !references.length && resourcePages.references === 0" class="settlement-muted settlement-contract-empty" data-testid="contract-references-empty">
+        合同候选为空：仅显示本人负责且财务已生效的合同；若合同已生效仍未显示，请核对合同→结算同步与责任人归属（不会放宽数据范围）。
+      </p>
+      <form v-if="can('settlement.receivable.create')" ref="planForm" class="settlement-form" novalidate @submit.prevent="submitPlanCreate">
+        <label class="settlement-field">合同
+          <select v-model="plan.contract_snapshot_id" name="contract_snapshot_id" :aria-invalid="planErrors.contract_snapshot_id ? 'true' : null" :aria-describedby="planErrors.contract_snapshot_id ? 'plan-contract-error' : null" required>
+            <option value="">选择可见合同</option>
+            <option v-for="item in references" :key="item.id" :value="item.id">{{ item.contract_no }} · {{ item.customer_name }}</option>
+          </select>
+          <small v-if="planErrors.contract_snapshot_id" id="plan-contract-error" class="settlement-field-error" role="alert">{{ planErrors.contract_snapshot_id }}</small>
+        </label>
+        <label class="settlement-field">期次
+          <input v-model.number="plan.installment_no" name="installment_no" type="number" min="1" :aria-invalid="planErrors.installment_no ? 'true' : null" :aria-describedby="planErrors.installment_no ? 'plan-installment-error' : null" required />
+          <small v-if="planErrors.installment_no" id="plan-installment-error" class="settlement-field-error" role="alert">{{ planErrors.installment_no }}</small>
+        </label>
+        <label class="settlement-field">收款日
+          <input v-model="plan.due_date" name="due_date" type="date" :aria-invalid="planErrors.due_date ? 'true' : null" :aria-describedby="planErrors.due_date ? 'plan-due-date-error' : null" required />
+          <small v-if="planErrors.due_date" id="plan-due-date-error" class="settlement-field-error" role="alert">{{ planErrors.due_date }}</small>
+        </label>
+        <label class="settlement-field">金额
+          <input v-model.trim="plan.planned_amount" name="planned_amount" inputmode="decimal" maxlength="18" :aria-invalid="planErrors.planned_amount ? 'true' : null" :aria-describedby="planErrors.planned_amount ? 'plan-amount-error' : null" required />
+          <small v-if="planErrors.planned_amount" id="plan-amount-error" class="settlement-field-error" role="alert">{{ planErrors.planned_amount }}</small>
+        </label>
+        <label class="settlement-field">原因
+          <input v-model.trim="plan.reason" name="reason" maxlength="500" :aria-invalid="planErrors.reason ? 'true' : null" :aria-describedby="planErrors.reason ? 'plan-reason-error' : null" required />
+          <small v-if="planErrors.reason" id="plan-reason-error" class="settlement-field-error" role="alert">{{ planErrors.reason }}</small>
+        </label>
+        <button :disabled="saving">创建计划</button>
       </form>
-      <form v-if="can('settlement.receivable.adjust')" class="settlement-form" @submit.prevent="save(`/receivable-plans/${encodeURIComponent(adjustment.id)}/adjust`, adjustment)">
-        <select v-model="adjustment.id" required @change="selectPlan">
-      <option value="">选择计划</option>
-      <option v-for="item in plans" :key="item.id" :value="item.id">{{ item.contract_no }} · 第{{ item.installment_no }}期</option>
-      </select>
-      <label>收款日<input v-model="adjustment.due_date" type="date" required />
-      </label>
-      <label>金额<input v-model.trim="adjustment.planned_amount" inputmode="decimal" maxlength="18" required />
-      </label>
-      <label>调整原因<input v-model.trim="adjustment.reason" maxlength="500" required />
-      </label>
-      <button :disabled="saving">提交调整</button>
+      <form v-if="can('settlement.receivable.adjust')" ref="adjustmentForm" class="settlement-form" novalidate @submit.prevent="submitPlanAdjust">
+        <label class="settlement-field">计划
+          <select v-model="adjustment.id" name="id" :aria-invalid="adjustErrors.id ? 'true' : null" :aria-describedby="adjustErrors.id ? 'adjust-plan-error' : null" required @change="selectPlan">
+            <option value="">选择计划</option>
+            <option v-for="item in plans" :key="item.id" :value="item.id">{{ item.contract_no }} · 第{{ item.installment_no }}期</option>
+          </select>
+          <small v-if="adjustErrors.id" id="adjust-plan-error" class="settlement-field-error" role="alert">{{ adjustErrors.id }}</small>
+        </label>
+        <label class="settlement-field">收款日
+          <input v-model="adjustment.due_date" name="due_date" type="date" :aria-invalid="adjustErrors.due_date ? 'true' : null" :aria-describedby="adjustErrors.due_date ? 'adjust-due-date-error' : null" required />
+          <small v-if="adjustErrors.due_date" id="adjust-due-date-error" class="settlement-field-error" role="alert">{{ adjustErrors.due_date }}</small>
+        </label>
+        <label class="settlement-field">金额
+          <input v-model.trim="adjustment.planned_amount" name="planned_amount" inputmode="decimal" maxlength="18" :aria-invalid="adjustErrors.planned_amount ? 'true' : null" :aria-describedby="adjustErrors.planned_amount ? 'adjust-amount-error' : null" required />
+          <small v-if="adjustErrors.planned_amount" id="adjust-amount-error" class="settlement-field-error" role="alert">{{ adjustErrors.planned_amount }}</small>
+        </label>
+        <label class="settlement-field">调整原因
+          <input v-model.trim="adjustment.reason" name="reason" maxlength="500" :aria-invalid="adjustErrors.reason ? 'true' : null" :aria-describedby="adjustErrors.reason ? 'adjust-reason-error' : null" required />
+          <small v-if="adjustErrors.reason" id="adjust-reason-error" class="settlement-field-error" role="alert">{{ adjustErrors.reason }}</small>
+        </label>
+        <button :disabled="saving">提交调整</button>
       </form>
     </template>
     <template v-else-if="section === 'finance'">
