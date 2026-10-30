@@ -2,14 +2,9 @@ import { createRequestScope } from '../../platform/shared/composables/requestSco
 import { ref } from 'vue'
 
 /**
- * 审批中心详情弹窗的状态与动作编排（治理批次 3 合同页第二步）。
- * 收编：详情/正文预览状态、审批意见与加签转交目标、命令互斥、请求作用域守卫，
- * 以及 openApproval / closeApproval / waitForApprovalCommand / executeApprovalCommand
- * / approvalCommandIsDurable（函数体逐字迁移；refreshApprovalRealtime 轮询属页面加载编排，
- * 经注入回调接入）。
- *
- * 注入项与组件内同名标识一一对应：getApproval/previewApprovalContract/commandApproval/
- * can/session/showToast/formatUserError/refreshApprovalRealtime；不直接导入 API 模块。
+ * useApprovalDetail 管理审批详情、快照文档和受理命令状态。
+ * 参数：依赖提供详情/预览/命令读取，权限与会话，提示/错误格式化及实时刷新回调。
+ * 返回值：详情和PDF/HTML预览引用、请求作用域及审批动作方法。
  */
 export function useApprovalDetail({ getApproval, previewApprovalContract, commandApproval, can, session, showToast, formatUserError, refreshApprovalRealtime }) {
   const approvalDetailScope = createRequestScope()
@@ -17,6 +12,7 @@ export function useApprovalDetail({ getApproval, previewApprovalContract, comman
   const approvalDetail = ref(null)
   const approvalDetailLoading = ref(false)
   const approvalContractPreviewHTML = ref('')
+  const approvalContractPreviewPDF = ref(null)
   const approvalContractPreviewLoading = ref(false)
   const approvalContractPreviewError = ref('')
   const approvalCommandBusy = ref(false)
@@ -70,6 +66,11 @@ async function executeApprovalCommand(action, payload = {}, { close = false } = 
   }
 }
 
+/**
+ * closeApproval 关闭审批详情并失效旧文档描述。
+ * 参数：无。
+ * 返回值：无。
+ */
 function closeApproval() {
   // 使在途详情/正文预览请求失效，关闭后旧响应不得回填弹窗。
   approvalDetailScope.invalidate()
@@ -77,10 +78,16 @@ function closeApproval() {
   selectedApproval.value = null
   approvalDetail.value = null
   approvalContractPreviewHTML.value = ''
+  approvalContractPreviewPDF.value = null
   approvalContractPreviewError.value = ''
   approvalContractPreviewLoading.value = false
 }
 
+/**
+ * openApproval 读取审批详情及不可变文档预览。
+ * 参数：approval为选中的审批记录。
+ * 返回值：Promise<void>；迟到响应不回填其他详情。
+ */
 async function openApproval(approval) {
   const ticket = approvalDetailScope.begin(`APPROVAL:${approval.id}`)
   approvalDetailTicket = ticket
@@ -90,6 +97,7 @@ async function openApproval(approval) {
   selectedApproval.value = approval
   approvalDetail.value = null
   approvalContractPreviewHTML.value = ''
+  approvalContractPreviewPDF.value = null
   approvalContractPreviewError.value = ''
   approvalComment.value = ''
   approvalTargetUser.value = ''
@@ -105,8 +113,9 @@ async function openApproval(approval) {
       try {
         const result = await previewApprovalContract(approval.id)
         if (!isCurrent()) return
+        approvalContractPreviewPDF.value = result?.format === 'PDF' ? result : null
         approvalContractPreviewHTML.value = result?.html || ''
-        if (!approvalContractPreviewHTML.value) approvalContractPreviewError.value = '该合同没有可预览的正文内容。'
+        if (!approvalContractPreviewHTML.value && !approvalContractPreviewPDF.value) approvalContractPreviewError.value = '该合同没有可预览的正文内容。'
       } catch (error) {
         if (isCurrent() && error?.code !== 'CON_DOCUMENT_NOT_FOUND') approvalContractPreviewError.value = formatUserError(error, { fallback: '读取格式化合同失败' })
       } finally {
@@ -144,7 +153,7 @@ function approvalCommandIsDurable(detail, commandID, action) {
 
   return {
     approvalDetailScope, selectedApproval, approvalDetail, approvalDetailLoading,
-    approvalContractPreviewHTML, approvalContractPreviewLoading, approvalContractPreviewError,
+    approvalContractPreviewHTML, approvalContractPreviewPDF, approvalContractPreviewLoading, approvalContractPreviewError,
     approvalComment, approvalTargetUser, approvalTargetNode, approvalCommandBusy,
     openApproval, closeApproval, executeApprovalCommand,
   };

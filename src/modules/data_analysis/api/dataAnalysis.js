@@ -291,3 +291,10 @@ export function triggerSource(id) { return request(`/admin/sources/${encodeURICo
  * @throws {Error} 批量入队失败时抛出。
  */
 export function triggerAllSources() { return request('/admin/sources/trigger-all', { method: 'POST' }) }
+
+/**
+ * getContractImportHistory 查询独立历史统计与逐轮发布状态。
+ * 参数：无；授权范围由服务端会话确定。
+ * 返回值：Promise<Object>，缺失或失败状态原样保留，读取失败抛错。
+ */
+export function getContractImportHistory() { return request('/dashboard/contract-import-history') }

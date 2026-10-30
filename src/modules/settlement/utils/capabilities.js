@@ -10,6 +10,7 @@ const sectionPermissions = {
   collaboration: ['settlement.collaboration.read', 'settlement.collaboration.manage'],
   finance: ['settlement.difference.manage', 'settlement.voucher.manage'],
   settings: ['settlement.settings.manage'],
+  imports: ['settlement.import.reconcile'],
 }
 const loaderPermissions = {
   getDashboard: ['settlement.report.read'], getAgingSummary: ['settlement.report.read'],

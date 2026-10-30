@@ -410,3 +410,39 @@ export function saveRoleResource(path, payload, method = 'POST') {
 export function downloadReceiptDocument(receiptID, documentID) {
   return downloadFile(`/receipts/${encodeURIComponent(receiptID)}/documents/${encodeURIComponent(documentID)}/download`, '回单影像');
 }
+
+// 用途：读取受导入权限保护的暂存快照列表。
+// 参数：offset为50条一页的偏移，不携带租户或范围覆盖参数。
+// 返回值：服务器权威暂存列表。
+export function listContractImports(offset = 0) {
+  return request(`/settlement/contract-imports?limit=50&offset=${Math.max(0, Number(offset) || 0)}`);
+}
+
+// 用途：读取本地暂存状态和逐笔恢复映射。
+// 参数：id为当前快照；offset为事实分页偏移，facts表示读取事实页。
+// 返回值：真实状态或映射页，不将PREPARED当作放行。
+export function getContractImport(id, { facts = false, offset = 0 } = {}) {
+  return request(`/settlement/contract-imports/${encodeURIComponent(id)}${facts ? `/facts?limit=50&offset=${Math.max(0, Number(offset) || 0)}` : ''}`);
+}
+
+// 用途：生成财务本地核对凭证并记录当前用户批准的信用决定。
+// 参数：id为暂存快照，payload含预期余额/到账/票额、币种、信用选择及理由。
+// 返回值：版本化本地核对凭证；不直接解除HOLD。
+export function reconcileContractImport(id, payload) {
+  return request(`/settlement/contract-imports/${encodeURIComponent(id)}/reconcile`, { method: 'POST', body: JSON.stringify(payload), idempotent: true });
+}
+
+// 用途：生成或查询完整暂存对账导出。
+// 参数：id为暂存快照，exportID为空时新建，否则读取持久任务。
+// 返回值：SUCCEEDED/FAILED/PENDING及真实条数金额。
+export function contractImportExport(id, exportID = '') {
+  const prefix = `/settlement/contract-imports/${encodeURIComponent(id)}/exports`;
+  return exportID ? request(`${prefix}/${encodeURIComponent(exportID)}`) : request(prefix, { method: 'POST', body: JSON.stringify({}), idempotent: true });
+}
+
+// 用途：下载已完成的完整暂存对账CSV。
+// 参数：id为暂存快照，exportID为服务器返回的成功导出身份。
+// 返回值：下载操作Promise；错误不生成空文件。
+export function downloadContractImportExport(id, exportID) {
+  return downloadFile(`/settlement/contract-imports/${encodeURIComponent(id)}/exports/${encodeURIComponent(exportID)}/download`, '历史合同财务对账.csv');
+}

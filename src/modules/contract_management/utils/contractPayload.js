@@ -16,6 +16,24 @@ export function isContractDOCXFile(file) {
     && ['', 'application/octet-stream', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'].includes(file.type || ''))
 }
 
+/**
+ * validateContractSourceFile 校验外部原件格式及客户端体积边界。
+ * 参数：file为选中文件，options.pdfEnabled为服务端明确开放的PDF能力。
+ * 返回值：规范格式和最大字节数；未开放、错类型或越界时抛出中文错误。
+ */
+export function validateContractSourceFile(file, { pdfEnabled = false } = {}) {
+  if (!file || typeof file.name !== 'string') throw new Error('请选择外部合同原件。')
+  const pdf = file.name.toLowerCase().endsWith('.pdf')
+  if (pdf && !pdfEnabled) throw new Error('外部 PDF 上传尚未开启。')
+  if (pdf ? !['', 'application/pdf', 'application/octet-stream'].includes(file.type || '') : !isContractDOCXFile(file)) {
+    throw new Error('文件类型与 DOCX/PDF 格式不一致。')
+  }
+  const maximum = (pdf ? 20 : 10) * 1024 * 1024
+  if (!Number.isFinite(file.size) || file.size <= 0) throw new Error('合同原件不能为空。')
+  if (file.size > maximum) throw new Error(`${pdf ? 'PDF' : 'DOCX'} 文件不能超过 ${pdf ? 20 : 10}MB。`)
+  return { format: pdf ? 'PDF' : 'DOCX', maxBytes: maximum }
+}
+
 function validateOptionalDate(value, label) {
   if (!value) return
   const text = String(value)

@@ -14,6 +14,7 @@ import SettlementAllocationsPanel from "@/modules/settlement/components/Settleme
 import SettlementReceiptsPanel from "@/modules/settlement/components/SettlementReceiptsPanel.vue";
 import SettlementReceivablesPanel from "@/modules/settlement/components/SettlementReceivablesPanel.vue";
 import SettlementDashboardPanel from "@/modules/settlement/components/SettlementDashboardPanel.vue";
+import SettlementContractImportPanel from "@/modules/settlement/components/SettlementContractImportPanel.vue";
 import SettlementTasksPanel from "@/modules/settlement/components/SettlementTasksPanel.vue";
 import DunningCenterPanel from "@/modules/settlement/components/DunningCenterPanel.vue";
 import SettlementInvoiceListPanel from "@/modules/settlement/components/SettlementInvoiceListPanel.vue";
@@ -101,13 +102,14 @@ const sections = [
   ["tasks", "我的待办", "organization"],
   ["collaboration", "项目协作", "organization"],
   ["finance", "差异与会计凭证", "save"],
+  ["imports", "历史合同财务恢复", "save"],
   ["settings", "结算设置", "reset"],
 ];
 const navigationGroups = [
   { label: "工作台", keys: ["dashboard", "tasks"] },
   {
     label: "结算管理",
-    keys: ["receivables", "invoices", "receipts", "allocations", "dunning", "collaboration", "finance", "settings"],
+    keys: ["receivables", "invoices", "receipts", "allocations", "dunning", "collaboration", "finance", "imports", "settings"],
   },
 ];
 const navigationSections = computed(() =>
@@ -871,6 +873,7 @@ watch(invoiceDetailID, load);
         <p v-if="error" class="settlement-error">{{ error }}</p>
         <p v-if="loading" class="settlement-loading">正在读取结算数据…</p>
         <template v-else-if="active">
+          <SettlementContractImportPanel v-if="active === 'imports' && can('settlement.import.reconcile')" :can="can" :initial-snapshot-id="String(route.query.import_snapshot || '')" />
           <div v-if="visibleListPages.length" class="settlement-panel" aria-label="列表分页">
             <p class="settlement-muted">以下筛选仅作用于当前页，每页最多 50 条；可按列表翻页查看历史记录。</p>
             <div v-for="entry in visibleListPages" :key="entry.index" class="settlement-head-actions">

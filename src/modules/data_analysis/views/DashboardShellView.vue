@@ -16,6 +16,7 @@ import DictionaryView from "./DictionaryView.vue"
 import AdminSourcesView from "./AdminSourcesView.vue"
 import AlertRulesView from "./AlertRulesView.vue"
 import NativeDashboardView from "./NativeDashboardView.vue"
+import ContractImportHistoryPanel from "../components/ContractImportHistoryPanel.vue"
 import { isolatedEmbedUrl } from "../utils/embedOrigin.mjs"
 import { RELATED_DATA, subscribeRelatedDataChanges } from "@/modules/platform/shared/utils/relatedDataInvalidation.js"
 import { formatDataAnalysisError } from "../utils/errors.js"
@@ -445,6 +446,7 @@ onBeforeUnmount(() => {
             :trend="section === 'overview' ? dashboardTrend : []"
             :alert-summary="section === 'overview' ? alertSummary : null"
           />
+          <ContractImportHistoryPanel v-if="section === 'contract' && canViewDashboard('contract')" />
           <p v-if="summaryError && section === 'overview'" class="da-native-inline-error" role="alert">{{ summaryError }}</p>
           <p v-if="detailError && section === 'contract'" class="da-native-inline-error" role="alert">{{ detailError }}</p>
           <section v-if="EMBEDDED_DASHBOARD_SECTIONS.includes(section)" class="da-frame-panel">

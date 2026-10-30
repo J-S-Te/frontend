@@ -177,6 +177,7 @@ test('切换审批后：旧审批详情迟到响应不得覆盖新审批，也�
     approvalDetail: ref(null),
     approvalDetailLoading: ref(false),
     approvalContractPreviewHTML: ref(''),
+    approvalContractPreviewPDF: ref(null),
     approvalContractPreviewError: ref(''),
     approvalContractPreviewLoading: ref(false),
     approvalComment: ref(''), approvalTargetUser: ref(''), approvalTargetNode: ref(''),

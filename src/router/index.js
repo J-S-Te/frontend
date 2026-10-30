@@ -33,7 +33,7 @@ const CustomerOpportunityView = () => import('@/modules/customer_opportunity/vie
 const CustomerPortalView = () => import('@/modules/customer_portal/views/CustomerPortalView.vue')
 const DataAnalysisView = () => import('@/modules/data_analysis/views/DashboardShellView.vue')
 
-const contractSections = ['dashboard', 'intakes', 'customers', 'contracts', 'templates', 'approvals', 'rules', 'signing', 'reports']
+const contractSections = ['dashboard', 'intakes', 'customers', 'contracts', 'imports', 'templates', 'approvals', 'rules', 'signing', 'reports']
 
 // 路由守卫与设置页签共享同一份权限模块键，新增设置模块时不会出现
 // “页面已展示、点击却被守卫重定向”的双份白名单漂移。

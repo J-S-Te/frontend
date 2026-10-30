@@ -73,7 +73,7 @@ test('sales can track initiated approvals but cannot configure rules', () => {
 })
 
 test('contract admin can access every contract module section', () => {
-  const admin = { role: { code: 'admin' }, permissions: ['contract.read', 'opportunity_intake.read'] }
+  const admin = { role: { code: 'admin' }, permissions: ['contract.read', 'opportunity_intake.read', 'contract.import.preview'] }
   for (const section of Object.keys(CONTRACT_SECTION_PERMISSIONS)) {
     assert.equal(canAccessContractSection(admin, section), true, section)
   }
@@ -82,4 +82,15 @@ test('contract admin can access every contract module section', () => {
 test('opportunity intake queue requires its dedicated backend permission even for a named admin role', () => {
   assert.equal(canAccessContractSection({ role: { code: 'admin' }, permissions: ['contract.read'] }, 'intakes'), false)
   assert.equal(canAccessContractSection({ role: { code: 'audit_admin' }, permissions: ['opportunity_intake.read'] }, 'intakes'), true)
+})
+
+test('import-only reviewers and operators can enter the dedicated import workspace without ordinary read permission', () => {
+  for (const permission of ['contract.import.preview', 'contract.import.commit', 'contract.import.approve', 'contract.import.release']) {
+    const session = {roles:['delegated_import_role'],permissions:[permission]}
+    assert.equal(canAccessContractSection(session, 'imports'), true, permission)
+    assert.equal(canAccessContractSection(session, 'contracts'), false, permission)
+  }
+  for (const roles of [['admin'],['sales_director'],[]]) {
+    assert.equal(canAccessContractSection({roles,permissions:['contract.read']}, 'imports'), false)
+  }
 })
