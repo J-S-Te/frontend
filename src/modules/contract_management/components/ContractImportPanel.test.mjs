@@ -44,6 +44,32 @@ test('NORMAL preview retains its ordinary commit entry', async()=>{
   assert.doesNotMatch(html,/冻结清单、建立历史记录并提交独立确认/)
 })
 
+test('explicit project validation rejection offers same-command retry while unknown results stay blocked', async()=>{
+  const panel = importPanelHarness('CONTINUE_LIVE')
+  panel.batch.state = 'PARTIAL'
+  panel.batch.confirmation = {state:'APPROVED',roles:[],approved_roles:[]}
+  panel.batch.items[0].confirmed = true
+  panel.batch.items[0].targets = [{target:'PROJECT',phase:'RELEASE',state:'BLOCKED',version:5,
+    recipient_http_status:422,recipient_code:'IMPORT_VALIDATION_FAILED'}]
+  panel.state.batch.value = structuredClone(panel.batch)
+  assert.match(await panel.html(), /核对项目参数和负责人后重试同一命令/)
+  for (const [status,code] of [[0,''],[200,''],[409,'IMPORT_IDEMPOTENCY_CONFLICT'],[422,'IMPORT_POLICY_UNSUPPORTED']]) {
+    panel.state.batch.value.items[0].targets[0].recipient_http_status = status
+    panel.state.batch.value.items[0].targets[0].recipient_code = code
+    assert.doesNotMatch(await panel.html(), /核对项目参数和负责人后重试同一命令/)
+  }
+})
+
+test('completed target shows its receipt without a stale previous wait error', async()=>{
+  const panel = importPanelHarness('ARCHIVE_ONLY')
+  panel.batch.items[0].confirmed = true
+  panel.batch.items[0].targets = [{target:'REPORT',state:'COMPLETE',receipt_id:'import-62',error_code:'IMPORT_TARGET_WAITING'}]
+  panel.state.batch.value = structuredClone(panel.batch)
+  const html = await panel.html()
+  assert.match(html,/import-62/)
+  assert.doesNotMatch(html,/IMPORT_TARGET_WAITING/)
+})
+
 test('unknown approval response keeps command key and original expected version across refreshes',async()=>{
   let writes=0
   const panel=importPanelHarness('ARCHIVE_ONLY',(batch,action)=>{

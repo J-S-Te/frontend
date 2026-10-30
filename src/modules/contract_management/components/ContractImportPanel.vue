@@ -199,6 +199,17 @@ async function release(entry, target, phase = 'RELEASE') {
 }
 
 /**
+ * canRetryProjectRejection 只为项目端明确参数拒绝显示同命令恢复入口。
+ * 参数：target为服务端持久目标及真实拒绝分类。
+ * 返回值：是否可提出重试；权限、版本及冻结基线仍由服务端强制核验。
+ */
+function canRetryProjectRejection(target) {
+  return target.target === 'PROJECT' && target.phase === 'RELEASE'
+    && target.state === 'BLOCKED' && target.recipient_http_status === 422
+    && target.recipient_code === 'IMPORT_VALIDATION_FAILED'
+}
+
+/**
  * viewSource 读取受批次及冻结受派权限保护的同一原件描述。
  * 参数：entry为当前批次项。
  * 返回值：Promise<void>；迟到描述不会显示到另一批次。
@@ -276,11 +287,13 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; cle
           <p>项目政策 {{ entry.item.policy_options.project_mode }}；财务政策 {{ entry.item.policy_options.finance_mode }}；报表政策 {{ entry.item.policy_options.report_mode }}。</p>
           <p v-if="entry.item.policy_options.finance_mode === 'EVIDENCE_ONLY'">仅保存原财务证明，未在结算重建财务台账，不能将此项解释为结算已核验零余额。</p>
           <div v-for="target in entry.targets" :key="target.target">
-            <strong>{{ targetLabels[target.target] }}</strong>：{{ stateLabels[target.state] || target.state }}<span v-if="target.error_code"> · {{ target.error_code }}</span>
+            <strong>{{ targetLabels[target.target] }}</strong>：{{ stateLabels[target.state] || target.state }}<span v-if="target.error_code && target.state !== 'COMPLETE'"> · {{ target.error_code }}</span>
             <span v-if="target.receipt_id"> · 实际回执 {{ target.receipt_id }}</span>
             <p v-if="target.state === 'BLOCKED' && target.recipient_http_status === 409 && target.recipient_code === 'SETTLEMENT_CONFLICT'">接收方已明确拒绝旧放行。财务须先重新对账；再次申请会严格核对新凭证、政策与责任，并保留旧命令记录。来源或政策不一致仍阻断。</p>
-            <template v-if="canRelease && entry.confirmed && !['COMPLETE','NOT_APPLICABLE'].includes(target.state) && (target.state !== 'BLOCKED' || (target.target === 'FINANCE' && target.phase === 'RELEASE' && target.recipient_http_status === 409 && target.recipient_code === 'SETTLEMENT_CONFLICT'))">
+            <p v-if="canRetryProjectRejection(target)">项目端明确拒绝参数或负责人。请核对项目负责人在目标环境的有效授权及冻结字段；恢复仅重试原命令，不修改已确认基线。</p>
+            <template v-if="canRelease && entry.confirmed && !['COMPLETE','NOT_APPLICABLE'].includes(target.state) && (target.state !== 'BLOCKED' || canRetryProjectRejection(target) || (target.target === 'FINANCE' && target.phase === 'RELEASE' && target.recipient_http_status === 409 && target.recipient_code === 'SETTLEMENT_CONFLICT'))">
               <button v-if="target.target === 'FINANCE' && !target.receipt_id" type="button" :disabled="busy" @click="release(entry, target, 'PREPARE')">建立／恢复财务HOLD暂存</button>
+              <button v-else-if="canRetryProjectRejection(target)" type="button" :disabled="busy" @click="release(entry, target)">核对项目参数和负责人后重试同一命令</button>
               <button v-else type="button" :disabled="busy" @click="release(entry, target)">{{ target.target === 'FINANCE' ? (target.state === 'BLOCKED' ? '重新核对并申请财务放行' : '核验对账和责任后申请财务放行') : target.target === 'REPORT' ? '申请／查询真实数析应用' : '申请／恢复项目绑定' }}</button>
             </template>
             <a v-if="target.target === 'FINANCE' && target.receipt_id" :href="`/settlement/imports?import_snapshot=${encodeURIComponent(target.receipt_id)}`">前往财务恢复工作台</a>

@@ -201,16 +201,19 @@ test('settlement module translations keep precise Chinese and shared write-timeo
   assert.doesNotMatch(timeout, /币种不同/)
 })
 
+// viewHarness 为真实结算视图提供完整模块绑定并验证错误及未知结果语义。
+// 参数：overrides为本用例明确替换的接口或依赖。
+// 返回值：视图实际操作状态；不访问真实结算服务。
 async function viewHarness(overrides = {}) {
   const component = await readFile(new URL('./views/SettlementView.vue', import.meta.url), 'utf8')
-  const apiNames = component.match(/import \{([^}]+)\} from "@\/modules\/settlement\/api\/settlement";/)[1].split(',').map(value => value.trim()).filter(value => /^[A-Za-z]+$/.test(value))
+  const apiNames = component.match(/import \{([^}]+)\} from "@\/modules\/settlement\/api\/settlement";/)[1].split(',').map(value => value.trim()).filter(value => /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(value))
   const bindings = Object.fromEntries(apiNames.map(name => [name, async () => []]))
   const script = component.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import[\s\S]*?;\n/gm, '')
   const context = vm.createContext({
     ref: value => ({ value }), computed: getter => ({ get value() { return getter() } }), watch() {},
     useRoute: () => ({ params: { section: 'receipts' }, query: {} }), useRouter: () => ({ push() {}, replace() {} }),
     window: { setTimeout() {}, confirm: () => false }, formatSettlementError, ...bindings,
-    createRequestScope, allowedSections, permissionCheck, canLoad,
+    createRequestScope, allowedSections, permissionCheck, canLoad, canLoadKey: canLoad,
     useSettlementActions,
     useReceiptAllocation,
     useInvoiceDetail,
