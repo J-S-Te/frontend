@@ -478,14 +478,18 @@ function validateFinalRecords(records, { catalog, environments, now, max }) {
   return blockers
 }
 
+// operationValues 将操作草稿转换为可序列化的授权记录，保留内部角色校验字段。
+// 参数：operation为指定目标角色、环境及有效时间的编辑操作。
+// 返回值：角色校验编码和规范记录字段；未指定时间返回null。
 function operationValues(operation) {
   const values = operation?.values || {}
   return {
     roleCode: String(values.roleCode || operation?.targetRoleCode || '').trim(),
-    scopeType: scopeTypeOf(values),
-    environmentCode: scopeTypeOf(values) === ENVIRONMENT ? String(values.environmentCode || '').trim() || null : null,
-    validFrom: normalizeTime(values.validFrom),
-    validUntil: normalizeTime(values.validUntil),
+    scope_type: scopeTypeOf(values),
+    environment_code: scopeTypeOf(values) === ENVIRONMENT
+      ? String(values.environmentCode || '').trim() || null : null,
+    valid_from: normalizeTime(values.validFrom),
+    valid_until: normalizeTime(values.validUntil),
   }
 }
 

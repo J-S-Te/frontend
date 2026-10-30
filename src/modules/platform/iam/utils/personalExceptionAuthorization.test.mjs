@@ -38,6 +38,44 @@ const access = {
   ],
 }
 
+test('新增环境限时授权完整保留提交目标的环境和时间', () => {
+  const result = buildPersonalExceptionPayload({
+    snapshot: { access, catalog, environments }, catalog, now,
+    operation: { type: 'create', values: {
+      roleCode: 'new', scopeType: 'ENVIRONMENT', environmentCode: 'prod',
+      validFrom: from, validUntil: until,
+    } },
+  })
+  assert.deepEqual(result.roles.find((role) => role.role_code === 'new'), {
+    role_code: 'new', scope_type: 'ENVIRONMENT', environment_code: 'prod',
+    valid_from: from, valid_until: until,
+  })
+})
+
+test('新增应用限时与修改环境限时均不能静默扩大成长期授权', () => {
+  for (const operation of [
+    { type: 'create', values: {
+      roleCode: 'new', scopeType: 'APPLICATION', validFrom: from, validUntil: until,
+    } },
+    { type: 'update', targetRoleCode: 'sales', values: {
+      roleCode: 'sales', scopeType: 'ENVIRONMENT', environmentCode: 'test',
+      validFrom: from, validUntil: until,
+    } },
+  ]) {
+    const result = buildPersonalExceptionPayload({
+      snapshot: { access, catalog, environments }, operation, catalog, now,
+    })
+    const target = result.roles.find((role) => role.role_code === operation.values.roleCode)
+    assert.equal(target.valid_from, from)
+    assert.equal(target.valid_until, until)
+    assert.equal(target.environment_code, operation.values.environmentCode ?? null)
+    assert.deepEqual(result.roles.find((role) => role.role_code === 'audit'), {
+      role_code: 'audit', scope_type: 'APPLICATION', environment_code: null,
+      valid_from: null, valid_until: null,
+    })
+  }
+})
+
 test('默认新增草稿为指定时间、立即生效、结束必填；修改草稿保留原始毫秒时间', () => {
   const create = createPersonalExceptionDraft({ mode: 'create' })
   assert.equal(create.validityMode, 'RANGE')
