@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import { createRequestScope } from '../platform/shared/composables/requestScope.js'
 import { useApprovalDetail } from './composables/useApprovalDetail.js'
+import { nextTick } from 'vue'
 
 const view = await readFile(new URL('./views/ContractManagementView.vue', import.meta.url), 'utf8')
 const ref = (value = '') => ({ value })
@@ -13,14 +14,17 @@ const deferred = () => {
   return { promise, resolve, reject }
 }
 
+// contractDetails 将真实详情编排接入可控读取和Vue调度器。
+// 参数：preview及lifecycle为网络边界读取函数。
+// 返回值：真实详情方法及对应响应状态引用。
 function contractDetails({ preview, lifecycle = async () => [] }) {
   const refs = {
-    termsIdentical: ref(false), selectedContract: ref(null), selectedContractPreviewHTML: ref(), selectedContractPreviewError: ref(),
+    termsIdentical: ref(false), selectedContract: ref(null), selectedContractPreviewHTML: ref(), selectedContractPreviewPDF: ref(null), selectedContractPreviewError: ref(),
     selectedContractPreviewLoading: ref(false), selectedContractLifecycle: ref([]), selectedContractLifecycleError: ref(), selectedContractLifecycleLoading: ref(false),
   }
   const code = view.slice(view.indexOf('async function openContract(contract)'), view.indexOf('\nconst lifecycleReasonLabels'))
-  const methods = new Function(...Object.keys(refs), 'previewContractDocument', 'listContractLifecycle',
-    `let contractDetailSequence = 0; ${code}; return { openContract, closeContract };`)(...Object.values(refs), preview, lifecycle)
+  const methods = new Function(...Object.keys(refs), 'previewContractDocument', 'listContractLifecycle', 'nextTick',
+    `let contractDetailSequence = 0; ${code}; return { openContract, closeContract };`)(...Object.values(refs), preview, lifecycle, nextTick)
   return { ...methods, ...refs }
 }
 
@@ -56,6 +60,16 @@ test('legacy text-only contracts gracefully retain text when the server reports 
   assert.equal(details.selectedContract.value.content, '旧正文')
 })
 
+test('PDF合同详情保留受鉴权原件描述并在关闭后清空', async () => {
+  const descriptor = { format: 'PDF', media_type: 'application/pdf', source_path: '/contracts/pdf-1/source' }
+  const details = contractDetails({ preview: async () => descriptor })
+  await details.openContract({ recordId: 'pdf-1' })
+  assert.deepEqual(details.selectedContractPreviewPDF.value, descriptor)
+  assert.equal(details.selectedContractPreviewHTML.value, '')
+  details.closeContract()
+  assert.equal(details.selectedContractPreviewPDF.value, null)
+})
+
 function approvalDetails({ getApproval = async () => ({ contract: { template_id: '' } }), preview }) {
   // 详情弹窗状态与编排已迁 useApprovalDetail；这里直接调用真实 composable，
   // 注入与视图一致的网络/提示依赖（showToast 失败即抛，保持原装载器的严格语义）。
@@ -71,6 +85,14 @@ function approvalDetails({ getApproval = async () => ({ contract: { template_id:
   })
   return { ...composable }
 }
+
+test('PDF审批预览使用快照描述而不误报正文为空', async () => {
+  const descriptor = { format: 'PDF', source_path: '/approvals/approval-1/contract-source' }
+  const details = approvalDetails({ preview: async () => descriptor })
+  await details.openApproval({ id: 'approval-1' })
+  assert.equal(details.approvalContractPreviewError.value, '')
+  assert.deepEqual(details.approvalContractPreviewPDF.value, descriptor)
+})
 
 test('approvals preview external DOCX and ignore responses after closing the detail', async () => {
   const preview = deferred()

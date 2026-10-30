@@ -24,6 +24,7 @@ export const CONTRACT_SECTION_PERMISSIONS = Object.freeze({
   dashboard: ['dashboard'],
   customers: ['customer.read'],
   contracts: ['contract.read'],
+  imports: ['contract.import.preview', 'contract.import.commit', 'contract.import.approve', 'contract.import.release'],
   intakes: ['opportunity_intake.read'],
   templates: ['contract_template.read', 'contract_template.manage'],
   approvals: ['approval.view', 'approval.process', 'contract.create'],
@@ -34,12 +35,18 @@ export const CONTRACT_SECTION_PERMISSIONS = Object.freeze({
   reports: ['dashboard'],
 })
 
+/**
+ * canAccessContractSection 按现有权限决定菜单和路由入口，导入入口不扩大普通读取。
+ * 参数：session为可信会话投影，section为目标业务分区。
+ * 返回值：是否可进入分区，实际业务范围仍由服务端逐请求复核。
+ */
 export function canAccessContractSection(session, section) {
   const roleCodes = new Set([
     ...(Array.isArray(session?.roles) ? session.roles : []),
     session?.role?.code,
   ].filter(Boolean))
   // 签单接收队列是独立的跨系统高敏边界，不能仅凭前端角色名称放行。
+  if (section === 'imports') return CONTRACT_SECTION_PERMISSIONS.imports.some(permission => hasContractPermission(session, permission))
   if (section === 'intakes') return hasContractPermission(session, 'opportunity_intake.read')
   if (roleCodes.has('admin')) {
     return Object.hasOwn(CONTRACT_SECTION_PERMISSIONS, section)

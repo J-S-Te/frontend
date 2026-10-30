@@ -10,6 +10,7 @@ import {
 import { attachStructuredContext } from '../../platform/shared/api/requestContext.js'
 import { formatUserError } from '../../shared/utils/userError.js'
 import { externalContractMetadata } from '../utils/contractPayload.js'
+import { sourceSHA256 } from '../utils/sourceIntegrity.js'
 
 const CONTRACT_PUBLIC_PATH_PREFIX = (import.meta.env.VITE_CONTRACT_PUBLIC_PATH_PREFIX || '/contract_management').replace(/\/$/, '')
 const API_BASE_URL = (import.meta.env.VITE_CONTRACT_API_BASE_URL || `${CONTRACT_PUBLIC_PATH_PREFIX}/api/v1`).replace(/\/$/, '')
@@ -878,6 +879,107 @@ export async function updateContractDraft(contractId, payload) {
  */
 export async function previewContractDocument(contractId) {
   return request(`/contracts/${encodeURIComponent(contractId)}/preview`)
+}
+
+/**
+ * getContractSourceCapabilities 获取当前服务端开放的原件接入能力。
+ * 参数：无；使用当前合同会话。
+ * 返回值：经契约校验的能力及体积限制；不可用时抛出错误，不默认开启PDF。
+ */
+export async function getContractSourceCapabilities() {
+  return request('/contract-source-capabilities', { validateData: (data) => data &&
+    typeof data.pdf_enabled === 'boolean' && data.max_docx_bytes === 10 * 1024 * 1024 &&
+    data.max_pdf_bytes === 20 * 1024 * 1024 })
+}
+
+/**
+ * contractImportRequest 调用受控批次操作并保留未知写入结果语义。
+ * 参数：action为固定操作，id为批次ID，payload为DTO或FormData，key为提交幂等键。
+ * 返回值：服务器权威台账或结构化错误。
+ */
+export async function contractImportRequest(action, id = '', payload, key = '') {
+  const methods = { create: 'POST', get: 'GET', files: 'POST', manifest: 'PUT', preview: 'POST', commit: 'POST', pause: 'POST', resume: 'POST', 'submit-confirmation': 'POST', 'confirmation-actions': 'POST' }
+  if (!methods[action] || (action !== 'create' && !/^[0-9A-HJKMNP-TV-Z]{26}$/.test(id))) throw new Error('批次操作或编号不合法。')
+  const suffix = action === 'create' ? '' : `/${id}${action === 'get' ? '' : `/${action}`}`
+  const options = { method: methods[action], headers: key ? { 'Idempotency-Key': key } : {} }
+  if (payload !== undefined) options.body = payload instanceof FormData ? payload : JSON.stringify(payload)
+  return request(`/contract-import-batches${suffix}`, options)
+}
+
+/**
+ * listContractImportBatches 查询本人批次及当前真正受派的历史确认任务。
+ * 参数：offset为有界列表的偏移。
+ * 返回值：服务器按当前权限过滤的台账页。
+ */
+export function listContractImportBatches(offset = 0) {
+  return request(`/contract-import-batches?limit=50&offset=${Math.max(0, Number(offset) || 0)}`)
+}
+
+/**
+ * releaseContractImportItem 申请独立目标放行，不从浏览器自报审批或财务核对结果。
+ * 参数：itemID为单项ID，payload为目标、服务端读取版本及明确阶段。
+ * 返回值：真实目标状态；受理不代表业务完成。
+ */
+export function releaseContractImportItem(itemID, payload) {
+  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/.test(itemID) || !['PROJECT', 'FINANCE', 'REPORT'].includes(payload?.target)) throw new Error('导入单项或放行目标不合法。')
+  return request(`/contract-import-items/${itemID}/release`, { method: 'POST', body: JSON.stringify(payload) })
+}
+
+/**
+ * importItemSourceURL 生成只允许当前应用批次原件的受控下载地址。
+ * 参数：batchID及itemID为服务器分配的不透明身份。
+ * 返回值：同源下载URL；无效身份失败关闭。
+ */
+export function importItemSourceURL(batchID, itemID) {
+  if (![batchID, itemID].every(id => /^[0-9A-HJKMNP-TV-Z]{26}$/.test(id))) throw new Error('批次原件标识不合法。')
+  return `${API_BASE_URL}/contract-import-batches/${batchID}/items/${itemID}/source`
+}
+
+/**
+ * getImportItemDocumentDescriptor 读取当前受派权限下的冻结原件描述。
+ * 参数：batchID及itemID为已授权批次及单项。
+ * 返回值：不含文件字节的描述；后端同时执行持久访问审计。
+ */
+export function getImportItemDocumentDescriptor(batchID, itemID) {
+  importItemSourceURL(batchID, itemID)
+  return request(`/contract-import-batches/${batchID}/items/${itemID}/document-descriptor`)
+}
+
+/**
+ * fetchContractPDFSource 获取受鉴权及审计保护的当前PDF或审批原件。
+ * 参数：sourcePath仅允许本应用原件路径，options提供取消信号及可选权威哈希。
+ * 返回值：非空PDF Blob；路径、鉴权、内容类型、传输或哈希异常时抛出错误。
+ */
+export async function fetchContractPDFSource(sourcePath, { signal, expectedSHA256 } = {}) {
+  if (!/^\/(?:contracts\/[A-Za-z0-9_-]{1,128}\/source|approvals\/[A-Za-z0-9_-]{1,128}\/contract-source|contract-import-batches\/[A-Za-z0-9_-]{1,128}\/items\/[A-Za-z0-9_-]{1,128}\/source)$/.test(sourcePath || '')) {
+    throw new Error('合同原件地址不符合受控路径要求。')
+  }
+  const context = { subsystem: 'contract_management', feature: 'contract_source', method: 'GET', path: sourcePath }
+  let response
+  try { response = await fetch(`${API_BASE_URL}${sourcePath}`, { credentials: 'include', signal, headers: { Accept: 'application/pdf' } }) }
+  catch (error) {
+    if (signal?.aborted) throw error
+    throw contractRequestError(null, null, context, { code: 'NETWORK_ERROR', fallback: 'PDF 原件读取中断，请重试。' })
+  }
+  if (!response.ok) {
+    let body
+    try { body = await readBody(response) } catch { /* 保留状态和请求追踪信息。 */ }
+    throw contractRequestError(body, response, context, { fallback: 'PDF 原件暂时无法读取，请核对会话和权限。' })
+  }
+  const media = (response.headers.get('content-type') || '').split(';', 1)[0].trim().toLowerCase()
+  if (media !== 'application/pdf' || Number(response.headers.get('content-length')) > 20 * 1024 * 1024) {
+    throw new Error('PDF 原件响应格式或大小异常。')
+  }
+  const blob = await response.blob()
+  if (!blob.size || blob.size > 20 * 1024 * 1024 || await blob.slice(0, 5).text() !== '%PDF-') {
+    throw new Error('PDF 原件内容格式或大小异常。')
+  }
+  if (expectedSHA256) {
+    if (!/^[a-f0-9]{64}$/.test(expectedSHA256)) throw new Error('PDF 原件完整性校验不可用。')
+    const actual = await sourceSHA256(blob)
+    if (actual !== expectedSHA256) throw new Error('PDF 原件校验不一致，请重新读取合同。')
+  }
+  return blob
 }
 
 /**

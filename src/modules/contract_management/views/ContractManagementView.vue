@@ -19,6 +19,8 @@ import { AuthError, logoutCurrentSession } from '@/modules/platform/auth/api/aut
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import { useDictionaryOptions } from '@/modules/platform/dictionaries/composables/useDictionaryOptions.js'
 import ContractDocumentPreview from '@/modules/contract_management/components/ContractDocumentPreview.vue'
+import ContractPDFPreview from '@/modules/contract_management/components/ContractPDFPreview.vue'
+import ContractImportPanel from '@/modules/contract_management/components/ContractImportPanel.vue'
 import { validateRecipientPhoneNumber } from '@/modules/contract_management/utils/recipientPhone.js'
 import { cloneNormalizedSigningRecord, isNormalizedSigningRecord } from '@/modules/contract_management/utils/signingRecord.js'
 import ContractReportsPanel from '@/modules/contract_management/components/ContractReportsPanel.vue'
@@ -53,6 +55,7 @@ import {
   previewContractTemplate,
   recoverApproval,
   previewContractDocument,
+  getContractSourceCapabilities,
   submitContract,
   reviewOpportunityIntake,
   saveSigningShipment,
@@ -107,7 +110,7 @@ import { useSigningLedger } from '@/modules/contract_management/composables/useS
 import { useApprovalDetail } from '@/modules/contract_management/composables/useApprovalDetail'
 import { canEditContractDraft, hydrateContractDraft, saveContractDraft } from '@/modules/contract_management/utils/contractDraft'
 import { normalizePaymentTerms, paymentAmountMinor } from '@/modules/contract_management/utils/paymentTerms'
-import { contractSystemLevels, externalContractTypes, isContractDOCXFile, validateContractForm } from '@/modules/contract_management/utils/contractPayload'
+import { contractSystemLevels, externalContractTypes, isContractDOCXFile, validateContractSourceFile, validateContractForm } from '@/modules/contract_management/utils/contractPayload'
 import { approvalAmountInput, approvalAmountMinor, copyRuleExpression, ruleExpressionSummary } from '@/modules/contract_management/utils/approvalRule'
 import PaymentTermsSummary from '@/modules/contract_management/components/PaymentTermsSummary.vue'
 import { isSystemContractNumberField, isContractAmountField, synchronizeContractTemplateValues } from '@/modules/contract_management/utils/systemTemplateFields'
@@ -152,6 +155,7 @@ const sectionMeta = {
   intakes: { title: '签单关联核对', description: '人工核对 CRM 签单上下文与既有合同引用，不创建合同' },
   customers: { title: '客户查询', description: '查询客户主数据与历史合作情况' },
   contracts: { title: '合同台账', description: '统一管理合同版本、状态、金额与关键日期' },
+  imports: { title: '合同批量导入', description: '查询批次、处理受派确认与各子系统接续' },
   templates: { title: '合同模板', description: '标准模板、适用范围与版本管理' },
   approvals: { title: '审批中心', description: '集中处理合同审批与状态变更待办' },
   rules: { title: '审批规则', description: '按合同类型与金额配置审批流程' },
@@ -169,6 +173,7 @@ const adminNavGroupDefinitions = [
     items: [
       { key: 'intakes', label: '签单关联核对', icon: 'audit' },
       { key: 'contracts', label: '合同台账', icon: 'account' },
+      { key: 'imports', label: '合同批量导入', icon: 'save' },
       { key: 'approvals', label: '审批中心', icon: 'audit' },
     ],
   },
@@ -198,6 +203,7 @@ const userNavGroupDefinitions = [
     items: [
       { key: 'intakes', label: '签单关联核对', icon: 'audit' },
       { key: 'contracts', label: '合同台账', icon: 'account' },
+      { key: 'imports', label: '合同批量导入', icon: 'save' },
       { key: 'templates', label: '合同模板', icon: 'save' },
       { key: 'signing', label: '签署台账', icon: 'shield' },
     ],
@@ -412,6 +418,8 @@ useUrlFilterState({
 const mobileMenuOpen = ref(false)
 const selectedContract = ref(null)
 const selectedContractPreviewHTML = ref('')
+const selectedContractPreviewPDF = ref(null)
+const contractSourceCapabilities = ref({ pdf_enabled: false })
 const selectedContractPreviewLoading = ref(false)
 const selectedContractPreviewError = ref('')
 const selectedContractLifecycle = ref([])
@@ -431,7 +439,7 @@ let templatePreviewSequence = 0
 // 整体失效在途响应，组件卸载经 onScopeDispose 自动作废；票据变量只保存当前那次读取。
 const {
   approvalDetailScope, selectedApproval, approvalDetail, approvalDetailLoading,
-  approvalContractPreviewHTML, approvalContractPreviewLoading, approvalContractPreviewError,
+  approvalContractPreviewHTML, approvalContractPreviewPDF, approvalContractPreviewLoading, approvalContractPreviewError,
   approvalComment, approvalTargetUser, approvalTargetNode, approvalCommandBusy,
   openApproval, closeApproval, executeApprovalCommand,
 } = useApprovalDetail({
@@ -641,9 +649,15 @@ function contractDisplayStatus(contract) {
   return contract?.expired ? '已过期' : (contract?.status || '—')
 }
 
+/**
+ * normalizeContract 转换合同展示字段并保留文档类型。
+ * 参数：item为后端合同数据。
+ * 返回值：台账展示记录，普通旧合同按DOCX兼容。
+ */
 function normalizeContract(item) {
   return {
     recordId: item.id,
+    documentFormat: item.document_format || 'DOCX',
     id: item.contract_number || '审批通过后生成',
     name: item.title || '未命名合同',
     type: item.contract_type || '—',
@@ -700,6 +714,11 @@ function signingProgress(record) {
   return 20
 }
 
+/**
+ * openContract 按请求代次加载合同、流转和原件描述。
+ * 参数：contract为当前选择的台账记录。
+ * 返回值：Promise<void>；错误仅更新仍在显示的对应合同。
+ */
 async function openContract(contract) {
   if (!selectedContract.value && typeof window !== 'undefined') contractListScrollY = window.scrollY || 0
   const sequence = ++contractDetailSequence
@@ -707,6 +726,7 @@ async function openContract(contract) {
   termsIdentical.value = false
   selectedContract.value = contract
   selectedContractPreviewHTML.value = ''
+  selectedContractPreviewPDF.value = null
   selectedContractPreviewError.value = ''
   selectedContractLifecycle.value = []
   selectedContractLifecycleError.value = ''
@@ -718,7 +738,11 @@ async function openContract(contract) {
   // 模板合同和外部 DOCX 上传均使用已持久化的文档。
   selectedContractPreviewLoading.value = true
   requests.push(previewContractDocument(contract.recordId)
-    .then((result) => { if (isCurrent()) selectedContractPreviewHTML.value = result?.html || '' })
+    .then((result) => {
+      if (!isCurrent()) return
+      selectedContractPreviewPDF.value = result?.format === 'PDF' ? result : null
+      selectedContractPreviewHTML.value = result?.html || ''
+    })
     .catch((error) => {
       if (isCurrent() && error?.code !== 'CON_DOCUMENT_NOT_FOUND') selectedContractPreviewError.value = formatUserError(error, { fallback: '读取格式化合同失败' })
     })
@@ -726,10 +750,16 @@ async function openContract(contract) {
   await Promise.all(requests)
 }
 
+/**
+ * closeContract 关闭详情并失效在途文档响应。
+ * 参数：无。
+ * 返回值：无；清空原件描述并恢复列表位置。
+ */
 function closeContract() {
   contractDetailSequence += 1
   selectedContract.value = null
   selectedContractPreviewHTML.value = ''
+  selectedContractPreviewPDF.value = null
   selectedContractPreviewError.value = ''
   selectedContractLifecycle.value = []
   selectedContractLifecycleError.value = ''
@@ -1695,11 +1725,26 @@ function clearCustomer() {
   newContract.value.opportunity_name = ''
 }
 
+/**
+ * selectExternalContractFile 根据已开放能力选择DOCX或PDF。
+ * 参数：event为文件选择事件。
+ * 返回值：无；合法原件保留，类型或体积错误显示提示。
+ */
 function selectExternalContractFile(event) {
   const file = event.target.files?.[0] || null
   externalContractFile.value = null
   externalContractFileError.value = ''
   if (!file) return
+  if (file.name?.toLowerCase().endsWith('.pdf')) {
+    try {
+      validateContractSourceFile(file, { pdfEnabled: contractSourceCapabilities.value.pdf_enabled === true })
+      externalContractFile.value = file
+    } catch (error) {
+      externalContractFileError.value = error.message
+      event.target.value = ''
+    }
+    return
+  }
   if (!isContractDOCXFile(file)) {
     externalContractFileError.value = '仅支持有效的 DOCX 文件。'
     event.target.value = ''
@@ -2242,9 +2287,20 @@ watch(activeSection, () => {
   scheduleSigningRealtime({ immediate: true })
 }, { immediate: true })
 
+/**
+ * loadContractSourceCapabilities 读取源文件能力，失败保持PDF入口关闭。
+ * 参数：无；使用当前合同会话请求。
+ * 返回值：Promise<void>；失败不阻断既有DOCX及台账能力。
+ */
+async function loadContractSourceCapabilities() {
+  try { contractSourceCapabilities.value = await getContractSourceCapabilities() }
+  catch { contractSourceCapabilities.value = { pdf_enabled: false } }
+}
+
 onMounted(async () => {
   try {
     session.value = await getContractSession()
+    void loadContractSourceCapabilities()
     await loadBusinessData()
     document.addEventListener('visibilitychange', handleApprovalVisibilityChange)
     scheduleApprovalRealtime({ immediate: true })
@@ -2330,6 +2386,14 @@ onBeforeUnmount(() => {
             <button v-if="['dashboard', 'contracts'].includes(activeSection) && can('contract.create')" class="contract-button primary" type="button" @click="openNewContract">＋ 新建合同</button>
           </div>
         </header>
+
+        <ContractImportPanel v-if="['contracts', 'imports'].includes(activeSection) && (can('contract.import.preview') || can('contract.import.commit') || can('contract.import.approve') || can('contract.import.release'))"
+          :enabled="contractSourceCapabilities.batch_enabled === true"
+          :pdf-enabled="contractSourceCapabilities.pdf_enabled === true"
+          :can-preview="can('contract.import.preview')" :can-commit="can('contract.import.commit')"
+          :can-approve="can('contract.import.approve')" :can-release="can('contract.import.release')"
+          :actor-id="session?.identity_id || session?.user_id || ''" :initial-batch-id="String(route.query.import_batch || '')"
+          :supported-modes="contractSourceCapabilities.supported_modes || ['NORMAL']" />
 
         <template v-if="activeSection === 'dashboard'">
           <section class="contract-welcome"><div><span>已安全登录</span><h2>您好，{{ currentUserLabel }}</h2><p>当前角色：<b>{{ currentRoleLabel }}</b>。您可以使用当前角色已授权的合同功能。</p></div><button v-if="can('approval.process')" type="button" @click="navigate('approvals')">查看我的审批流程 <ConsoleIcon name="chevron" /></button></section>
@@ -2422,7 +2486,7 @@ onBeforeUnmount(() => {
         <div v-if="signingDetailLoading" class="contract-modal-loading">正在读取签署详情…</div>
         <template v-else>
           <div class="contract-detail-highlight"><div><span>签署方</span><strong>{{ selectedSigningRecord.contract.customerName }}</strong></div><div><span>负责人</span><strong>{{ selectedSigningRecord.contract.owner }}</strong></div><div><span>到期日期</span><strong>{{ selectedSigningRecord.contract.endDate }}</strong></div></div>
-          <section><div class="contract-section-title"><h3>合同文件</h3><div class="contract-inline-actions"><button v-if="can('contract.document.download')" class="contract-text-button" type="button" :disabled="contractDownloadBusy" @click="downloadApprovedContract(selectedSigningRecord.contract, 'docx')">下载 DOCX</button><button v-if="can('contract.document.download')" class="contract-text-button" type="button" :disabled="contractDownloadBusy" @click="downloadApprovedContract(selectedSigningRecord.contract, 'pdf')">下载 PDF</button><button v-if="selectedSigningRecord.returned_document_name && can('contract.document.download')" class="contract-text-button" type="button" :disabled="contractDownloadBusy" @click="downloadApprovedContract(selectedSigningRecord.contract, 'stamped-pdf')">下载回传 PDF</button></div></div></section>
+          <section><div class="contract-section-title"><h3>合同文件</h3><div class="contract-inline-actions"><button v-if="can('contract.document.download') && selectedSigningRecord.contract.documentFormat !== 'PDF'" class="contract-text-button" type="button" :disabled="contractDownloadBusy" @click="downloadApprovedContract(selectedSigningRecord.contract, 'docx')">下载 DOCX</button><button v-if="can('contract.document.download')" class="contract-text-button" type="button" :disabled="contractDownloadBusy" @click="downloadApprovedContract(selectedSigningRecord.contract, 'pdf')">下载 PDF</button><button v-if="selectedSigningRecord.returned_document_name && can('contract.document.download')" class="contract-text-button" type="button" :disabled="contractDownloadBusy" @click="downloadApprovedContract(selectedSigningRecord.contract, 'stamped-pdf')">下载回传 PDF</button></div></div></section>
           <section v-if="selectedSigningRecord.status === 'pending_shipment'"><h3>寄出登记</h3><form class="contract-form-grid" @submit.prevent="submitSigningShipment"><label><span>快递单号</span><input v-model.trim="signingShipmentForm.courier_number" required maxlength="80" /></label><label><span>收件人</span><input v-model.trim="signingShipmentForm.recipient_name" required maxlength="100" /></label><label class="contract-form-wide"><span>收件电话</span><input v-model.trim="signingShipmentForm.recipient_phone" required type="tel" inputmode="tel" maxlength="20" placeholder="请输入收件人手机号（必填）" /><small v-if="selectedSigningRecord.recipient_phone">已保存记录仅显示掩码 {{ selectedSigningRecord.recipient_phone }}；保存时请重新输入完整手机号，掩码不会被提交。</small></label><label class="contract-form-wide"><span>收件地址</span><input v-model.trim="signingShipmentForm.recipient_address" required maxlength="300" /></label><label><span>邮寄日期</span><input v-model="signingShipmentForm.mailed_at" required type="date" min="1000-01-01" max="9999-12-31" /></label><button v-if="can('contract.signing.manage')" class="contract-button primary contract-signing-submit" type="submit" :disabled="signingOperationBusy">{{ signingOperationBusy ? '正在保存…' : '确认寄出并开始跟踪' }}</button></form></section>
           <template v-else>
             <section><h3>回传进度</h3><div class="contract-detail-timeline contract-signing-timeline"><div class="done"><i>1</i><span><strong>合同寄出</strong><small>{{ formatDate(selectedSigningRecord.mailed_at) }}<br />{{ selectedSigningRecord.courier_number }}</small></span></div><div :class="selectedSigningRecord.customer_received_at ? 'done' : 'active'"><i>2</i><span><strong>客户签收</strong><small>{{ selectedSigningRecord.customer_received_at ? formatDateTime(selectedSigningRecord.customer_received_at) : '等待确认' }}</small></span></div><div :class="selectedSigningRecord.returned_at ? 'done' : selectedSigningRecord.customer_received_at ? 'active' : ''"><i>3</i><span><strong>合同回传</strong><small>{{ selectedSigningRecord.returned_at ? formatDateTime(selectedSigningRecord.returned_at) : '等待回传 PDF' }}</small></span></div><div :class="selectedSigningRecord.status === 'completed' ? 'done' : selectedSigningRecord.status === 'pending_review' ? 'active' : ''"><i>4</i><span><strong>人工核验</strong><small>{{ selectedSigningRecord.confirmed_at ? formatDateTime(selectedSigningRecord.confirmed_at) : '核验印章与签名' }}</small></span></div></div></section>
@@ -2457,7 +2521,7 @@ onBeforeUnmount(() => {
         <PaymentTermsSummary :terms="selectedContract.paymentTerms" :currency="selectedContract.currency" />
         <div class="contract-detail-highlight"><div><span>合同金额</span><strong>{{ formatContractAmount(selectedContract) }}</strong></div><div><span>更新日期</span><strong>{{ selectedContract.updatedAt }}</strong></div><div><span>负责人姓名</span><strong>{{ selectedContract.owner }}</strong></div></div>
         <section><h3>基本信息</h3><dl><div><dt>合同类型</dt><dd>{{ selectedContract.type }}</dd></div><div><dt>服务类型</dt><dd>{{ selectedContract.serviceType }}</dd></div><div><dt>创建日期</dt><dd>{{ selectedContract.createdAt }}</dd></div><div><dt>到期日期</dt><dd>{{ selectedContract.endDate }}</dd></div></dl></section>
-        <section><h3>合同内容</h3><div v-if="selectedContractPreviewLoading" class="contract-modal-loading">正在读取格式化合同…</div><p v-else-if="selectedContractPreviewError" class="contract-session-error">{{ selectedContractPreviewError }}</p><ContractDocumentPreview v-else-if="selectedContractPreviewHTML" class="contract-saved-document-preview" title="合同正文预览" :html="selectedContractPreviewHTML" /><p v-else class="contract-approval-summary">{{ selectedContract.content || '未填写合同内容' }}</p><label v-if="selectedContract.status === '草稿' && selectedContract.canEditDraft" class="contract-check-label"><input v-model="termsIdentical" type="checkbox" /><span>本合同条款与关联历史合同一致（参与审批规则匹配）</span></label></section>
+        <section><h3>合同内容</h3><div v-if="selectedContractPreviewLoading" class="contract-modal-loading">正在读取格式化合同…</div><p v-else-if="selectedContractPreviewError" class="contract-session-error">{{ selectedContractPreviewError }}</p><ContractPDFPreview v-else-if="selectedContractPreviewPDF" :descriptor="selectedContractPreviewPDF" title="合同 PDF 原件" /><ContractDocumentPreview v-else-if="selectedContractPreviewHTML" class="contract-saved-document-preview" title="合同正文预览" :html="selectedContractPreviewHTML" /><p v-else class="contract-approval-summary">{{ selectedContract.content || '未填写合同内容' }}</p><label v-if="selectedContract.status === '草稿' && selectedContract.canEditDraft" class="contract-check-label"><input v-model="termsIdentical" type="checkbox" /><span>本合同条款与关联历史合同一致（参与审批规则匹配）</span></label></section>
         <section><h3>流转明细</h3><div v-if="selectedContractLifecycleLoading" class="contract-modal-loading">正在读取流转明细…</div><p v-else-if="selectedContractLifecycleError" class="contract-session-error">{{ selectedContractLifecycleError }}</p><div v-else-if="selectedContractLifecycle.length" class="contract-action-log"><div v-for="event in selectedContractLifecycle" :key="event.id"><strong>{{ contractStatusLabel(event.from_status) }} → {{ contractStatusLabel(event.to_status) }}</strong><span>{{ event.actor_user_id === 'SYSTEM' ? '系统' : displayNameFor(event.actor_user_id) }}</span><p>{{ lifecycleReason(event.reason) }} · {{ formatDateTime(event.occurred_at) }}</p></div></div><p v-else class="contract-approval-summary">暂无流转记录</p></section>
         <footer><button class="contract-button secondary" type="button" @click="closeContract">关闭</button><button v-if="selectedContract.canEditDraft" class="contract-button secondary" type="button" :disabled="draftEditLoading || submittingContract" @click="editContractDraft(selectedContract)">{{ draftEditLoading ? '正在读取…' : '返回上一步编辑' }}</button><button v-if="selectedContract.status === '草稿' && selectedContract.canEditDraft" class="contract-button primary" type="button" :disabled="submittingContract" @click="submitSelectedContract">{{ submittingContract ? '正在提交…' : '提交审批' }}</button></footer>
       </article>
@@ -2465,7 +2529,7 @@ onBeforeUnmount(() => {
 
     <div v-if="dashboardDetailKey" class="contract-modal-mask" @click.self="dashboardDetailKey = ''"><article class="contract-detail-modal contract-dashboard-detail-modal"><header><div><span class="contract-badge info">企业合同统计</span><h2>{{ dashboardDetailMeta.title }}</h2><p>{{ dashboardDetailMeta.value }} · 数据范围为当前企业</p></div><button type="button" aria-label="关闭" @click="dashboardDetailKey = ''"><ConsoleIcon name="close" /></button></header><section><p v-if="adminDashboard?.contract_detail_limited" class="contract-info-banner"><ConsoleIcon name="info" />明细仅展示最近更新的 200 份合同，卡片统计值为企业全部合同的精确结果。</p><div class="contract-table-scroll"><table class="contract-data-table contract-dashboard-detail-table"><thead><tr><th>合同编号 / 名称</th><th>金额</th><th>负责人</th><th>到期日期</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="contract in dashboardDetailContracts" :key="contract.recordId"><td><strong>{{ contract.name }}</strong><span class="block mono">{{ contract.id }}</span></td><td class="amount">{{ formatContractAmount(contract) }}</td><td>{{ contract.owner }}</td><td>{{ contract.endDate }}</td><td><span class="contract-badge" :class="statusTone(contract.displayStatus)"><i></i>{{ contract.displayStatus }}</span></td><td><button class="contract-text-button" type="button" @click="openDashboardContract(contract)">查看详情</button></td></tr><tr v-if="!dashboardDetailContracts.length"><td colspan="6" class="contract-empty">当前分类暂无合同</td></tr></tbody></table></div></section><footer><button class="contract-button secondary" type="button" @click="dashboardDetailKey = ''">关闭</button></footer></article></div>
 
-    <div v-if="selectedApproval" class="contract-modal-mask" @click.self="closeApproval"><article class="contract-detail-modal contract-approval-modal"><header><div><span class="contract-badge" :class="approvalStatusTone(approvalDetail?.state?.status || selectedApproval.status)"><i></i>{{ approvalStatusLabel(approvalDetail?.state?.status || selectedApproval.status) }}</span><h2>{{ approvalDetail?.contract?.title || '合同审批' }}</h2><p>{{ selectedApproval.type }} · {{ selectedApproval.submittedAt }}</p></div><button type="button" aria-label="关闭" @click="closeApproval"><ConsoleIcon name="close" /></button></header><div v-if="approvalDetailLoading" class="contract-modal-loading">正在加载审批内容与流程记录…</div><template v-else-if="approvalDetail"><p v-if="approvalDetail.snapshot_available === false" class="contract-info-banner"><ConsoleIcon name="info" />该审批创建于历史版本，未保存提交快照；以下展示当前合同，可能与审批时内容不一致。</p><p v-if="approvalDetail.state_unavailable" class="contract-info-banner"><ConsoleIcon name="info" />审批工作流历史已不可查询；以下展示提交时的不可变快照，流程操作已停用。</p><PaymentTermsSummary :terms="approvalDetail.contract.payment_terms || []" :currency="approvalDetail.contract.currency" /><div class="contract-detail-highlight"><div><span>合同金额</span><strong>{{ formatMinorAmount(approvalDetail.contract.amount_minor, approvalDetail.contract.currency) }}</strong></div><div><span>申请人姓名</span><strong>{{ displayNameFor(approvalDetail.meta.applicant_user_id, approvalDetail.meta.applicant_display_name) }}</strong></div><div><span>当前节点</span><strong>{{ selectedApproval.step }}</strong></div></div><section><h3>审批事项</h3><dl><div><dt>合同编号</dt><dd>{{ approvalDetail.contract.contract_number }}</dd></div><div><dt>合同类型</dt><dd>{{ approvalDetail.contract.contract_type }}</dd></div><div><dt>服务类型</dt><dd>{{ approvalDetail.contract.service_type }}</dd></div><div><dt>审批流程</dt><dd>{{ approvalDetail.meta.rule_id ? '已匹配配置流程' : '系统默认流程' }}</dd></div><div><dt>状态变更</dt><dd>{{ contractStatusLabel(approvalDetail.meta.from_status) }} → {{ contractStatusLabel(approvalDetail.meta.target_status) }}</dd></div><div><dt>申请原因</dt><dd>{{ approvalDetail.meta.reason || '合同提交审批' }}</dd></div></dl></section><section><h3>合同正文</h3><div v-if="approvalContractPreviewLoading" class="contract-modal-loading">正在读取格式化合同…</div><p v-else-if="approvalContractPreviewError" class="contract-session-error">{{ approvalContractPreviewError }}</p><ContractDocumentPreview v-else-if="approvalContractPreviewHTML" class="contract-saved-document-preview" title="审批合同预览" :html="approvalContractPreviewHTML" /><p v-else class="contract-approval-summary">{{ approvalDetail.contract.content || '未填写合同内容' }}</p></section><section><h3>审批流程</h3><div class="contract-detail-timeline"><div v-for="(runtime, index) in approvalDetail.state.nodes || []" :key="runtime.node.id" :class="{ done: runtime.status === 'approved', active: runtime.status === 'active' }"><i>{{ index + 1 }}</i><span><strong>{{ runtime.node.name }}</strong><small>{{ roleLabel(runtime.node.role_code) }} · {{ approvalStatusLabel(runtime.status) }}</small></span></div></div></section><section v-if="approvalDetail.actions?.length"><h3>处理记录</h3><div class="contract-action-log"><div v-for="action in approvalDetail.actions" :key="action.id"><strong>{{ approvalActionLabel(action.action) }}</strong><span>{{ displayNameFor(action.actor_user_id, action.actor_display_name) }}</span><p>{{ action.comment || '无备注' }} · {{ formatDate(action.occurred_at) }}</p></div></div></section><section><label class="contract-comment-label">审批意见 / 评论<textarea v-model="approvalComment" maxlength="2000" placeholder="驳回、加签、转交、退回和撤回时必须填写原因"></textarea></label><div v-if="can('approval.process')" class="contract-advanced-actions"><label><span>加签 / 转交用户</span><select v-model="approvalTargetUser"><option value="">{{ approvalTargetUsers.length ? '请选择具有合同审批权限的人员' : '没有其他可用审批人员' }}</option><option v-for="user in approvalTargetUsers" :key="user.user_id" :value="user.user_id">{{ user.display_name }}</option></select></label><button class="contract-button secondary small" type="button" :disabled="!approvalTargetUser || approvalCommandBusy" @click="executeApprovalCommand('sign', { target_user_ids: [approvalTargetUser], countersign: 'all' })">加签</button><button class="contract-button secondary small" type="button" :disabled="!approvalTargetUser || approvalCommandBusy" @click="executeApprovalCommand('transfer', { target_user_ids: [approvalTargetUser] })">转交</button><label><span>退回至</span><select v-model="approvalTargetNode"><option value="">请选择已通过节点</option><option v-for="runtime in (approvalDetail.state.nodes || []).filter((item) => item.status === 'approved')" :key="runtime.node.id" :value="runtime.node.id">{{ runtime.node.name }}</option></select></label><button class="contract-button secondary small" type="button" :disabled="!approvalTargetNode || approvalCommandBusy" @click="executeApprovalCommand('return', { target_node_id: approvalTargetNode })">退回</button></div></section></template><footer><button v-if="can('approval.process')" class="contract-button danger" type="button" :disabled="approvalCommandBusy" @click="processApproval('reject')">驳回</button><button class="contract-button secondary" type="button" :disabled="approvalCommandBusy || !approvalComment.trim()" @click="executeApprovalCommand('comments')">发表评论</button><button v-if="can('approval.manage')" class="contract-button secondary" type="button" :disabled="approvalCommandBusy" @click="repairApprovalState">修复审批状态</button><button v-if="can('approval.manage') || approvalDetail?.meta?.applicant_user_id === session?.user_id" class="contract-button secondary" type="button" :disabled="approvalCommandBusy" @click="executeApprovalCommand('urge')">催办</button><button v-if="approvalDetail?.meta?.applicant_user_id === session?.user_id" class="contract-button secondary" type="button" :disabled="approvalCommandBusy" @click="executeApprovalCommand('withdraw', {}, { close: true })">撤回</button><button v-if="can('approval.process')" class="contract-button primary" type="button" :disabled="approvalCommandBusy" @click="processApproval('approve')"><ConsoleIcon name="save" />同意</button></footer></article></div>
+    <div v-if="selectedApproval" class="contract-modal-mask" @click.self="closeApproval"><article class="contract-detail-modal contract-approval-modal"><header><div><span class="contract-badge" :class="approvalStatusTone(approvalDetail?.state?.status || selectedApproval.status)"><i></i>{{ approvalStatusLabel(approvalDetail?.state?.status || selectedApproval.status) }}</span><h2>{{ approvalDetail?.contract?.title || '合同审批' }}</h2><p>{{ selectedApproval.type }} · {{ selectedApproval.submittedAt }}</p></div><button type="button" aria-label="关闭" @click="closeApproval"><ConsoleIcon name="close" /></button></header><div v-if="approvalDetailLoading" class="contract-modal-loading">正在加载审批内容与流程记录…</div><template v-else-if="approvalDetail"><p v-if="approvalDetail.snapshot_available === false" class="contract-info-banner"><ConsoleIcon name="info" />该审批创建于历史版本，未保存提交快照；以下展示当前合同，可能与审批时内容不一致。</p><p v-if="approvalDetail.state_unavailable" class="contract-info-banner"><ConsoleIcon name="info" />审批工作流历史已不可查询；以下展示提交时的不可变快照，流程操作已停用。</p><PaymentTermsSummary :terms="approvalDetail.contract.payment_terms || []" :currency="approvalDetail.contract.currency" /><div class="contract-detail-highlight"><div><span>合同金额</span><strong>{{ formatMinorAmount(approvalDetail.contract.amount_minor, approvalDetail.contract.currency) }}</strong></div><div><span>申请人姓名</span><strong>{{ displayNameFor(approvalDetail.meta.applicant_user_id, approvalDetail.meta.applicant_display_name) }}</strong></div><div><span>当前节点</span><strong>{{ selectedApproval.step }}</strong></div></div><section><h3>审批事项</h3><dl><div><dt>合同编号</dt><dd>{{ approvalDetail.contract.contract_number }}</dd></div><div><dt>合同类型</dt><dd>{{ approvalDetail.contract.contract_type }}</dd></div><div><dt>服务类型</dt><dd>{{ approvalDetail.contract.service_type }}</dd></div><div><dt>审批流程</dt><dd>{{ approvalDetail.meta.rule_id ? '已匹配配置流程' : '系统默认流程' }}</dd></div><div><dt>状态变更</dt><dd>{{ contractStatusLabel(approvalDetail.meta.from_status) }} → {{ contractStatusLabel(approvalDetail.meta.target_status) }}</dd></div><div><dt>申请原因</dt><dd>{{ approvalDetail.meta.reason || '合同提交审批' }}</dd></div></dl></section><section><h3>合同正文</h3><div v-if="approvalContractPreviewLoading" class="contract-modal-loading">正在读取格式化合同…</div><p v-else-if="approvalContractPreviewError" class="contract-session-error">{{ approvalContractPreviewError }}</p><ContractPDFPreview v-else-if="approvalContractPreviewPDF" :descriptor="approvalContractPreviewPDF" title="审批 PDF 快照" /><ContractDocumentPreview v-else-if="approvalContractPreviewHTML" class="contract-saved-document-preview" title="审批合同预览" :html="approvalContractPreviewHTML" /><p v-else class="contract-approval-summary">{{ approvalDetail.contract.content || '未填写合同内容' }}</p></section><section><h3>审批流程</h3><div class="contract-detail-timeline"><div v-for="(runtime, index) in approvalDetail.state.nodes || []" :key="runtime.node.id" :class="{ done: runtime.status === 'approved', active: runtime.status === 'active' }"><i>{{ index + 1 }}</i><span><strong>{{ runtime.node.name }}</strong><small>{{ roleLabel(runtime.node.role_code) }} · {{ approvalStatusLabel(runtime.status) }}</small></span></div></div></section><section v-if="approvalDetail.actions?.length"><h3>处理记录</h3><div class="contract-action-log"><div v-for="action in approvalDetail.actions" :key="action.id"><strong>{{ approvalActionLabel(action.action) }}</strong><span>{{ displayNameFor(action.actor_user_id, action.actor_display_name) }}</span><p>{{ action.comment || '无备注' }} · {{ formatDate(action.occurred_at) }}</p></div></div></section><section><label class="contract-comment-label">审批意见 / 评论<textarea v-model="approvalComment" maxlength="2000" placeholder="驳回、加签、转交、退回和撤回时必须填写原因"></textarea></label><div v-if="can('approval.process')" class="contract-advanced-actions"><label><span>加签 / 转交用户</span><select v-model="approvalTargetUser"><option value="">{{ approvalTargetUsers.length ? '请选择具有合同审批权限的人员' : '没有其他可用审批人员' }}</option><option v-for="user in approvalTargetUsers" :key="user.user_id" :value="user.user_id">{{ user.display_name }}</option></select></label><button class="contract-button secondary small" type="button" :disabled="!approvalTargetUser || approvalCommandBusy" @click="executeApprovalCommand('sign', { target_user_ids: [approvalTargetUser], countersign: 'all' })">加签</button><button class="contract-button secondary small" type="button" :disabled="!approvalTargetUser || approvalCommandBusy" @click="executeApprovalCommand('transfer', { target_user_ids: [approvalTargetUser] })">转交</button><label><span>退回至</span><select v-model="approvalTargetNode"><option value="">请选择已通过节点</option><option v-for="runtime in (approvalDetail.state.nodes || []).filter((item) => item.status === 'approved')" :key="runtime.node.id" :value="runtime.node.id">{{ runtime.node.name }}</option></select></label><button class="contract-button secondary small" type="button" :disabled="!approvalTargetNode || approvalCommandBusy" @click="executeApprovalCommand('return', { target_node_id: approvalTargetNode })">退回</button></div></section></template><footer><button v-if="can('approval.process')" class="contract-button danger" type="button" :disabled="approvalCommandBusy" @click="processApproval('reject')">驳回</button><button class="contract-button secondary" type="button" :disabled="approvalCommandBusy || !approvalComment.trim()" @click="executeApprovalCommand('comments')">发表评论</button><button v-if="can('approval.manage')" class="contract-button secondary" type="button" :disabled="approvalCommandBusy" @click="repairApprovalState">修复审批状态</button><button v-if="can('approval.manage') || approvalDetail?.meta?.applicant_user_id === session?.user_id" class="contract-button secondary" type="button" :disabled="approvalCommandBusy" @click="executeApprovalCommand('urge')">催办</button><button v-if="approvalDetail?.meta?.applicant_user_id === session?.user_id" class="contract-button secondary" type="button" :disabled="approvalCommandBusy" @click="executeApprovalCommand('withdraw', {}, { close: true })">撤回</button><button v-if="can('approval.process')" class="contract-button primary" type="button" :disabled="approvalCommandBusy" @click="processApproval('approve')"><ConsoleIcon name="save" />同意</button></footer></article></div>
 
     <div v-if="ruleDialogOpen" class="contract-modal-mask" @click.self="ruleDialogOpen = false"><form class="contract-detail-modal contract-rule-modal" @submit.prevent="saveRule"><header><div><span class="contract-badge info">规则引擎</span><h2>{{ editingRuleId ? '编辑审批规则' : '新增审批规则' }}</h2><p>按优先级从高到低匹配，命中第一条规则后固化到审批实例。</p></div><button type="button" aria-label="关闭" @click="ruleDialogOpen = false"><ConsoleIcon name="close" /></button></header><section><div class="contract-form-grid"><label><span>规则名称</span><input v-model="ruleForm.name" required maxlength="128" autocomplete="off" placeholder="例如：标准服务简化审批" /></label><label><span>优先级</span><input v-model.number="ruleForm.priority" required type="number" min="0" max="9999" step="1" /></label><label><span>条件关系</span><select v-model="ruleForm.logical" :disabled="ruleForm.expressionReadonly"><option value="and">全部满足（AND）</option><option value="or">任一满足（OR）</option></select></label><label class="contract-check-label"><input v-model="ruleForm.enabled" type="checkbox" /><span>保存后立即启用</span></label></div></section><section v-if="ruleForm.expressionReadonly"><h3>触发条件（只读）</h3><p class="contract-info-banner">此规则包含嵌套条件组，当前表单完整保留原条件，不修改或展开为平铺条件；可修改规则基本信息和审批节点。</p><p>{{ ruleConditionSummary({ expression: ruleForm.originalExpression }) }}</p></section><section v-else><div class="contract-section-title"><h3>触发条件</h3><button class="contract-text-button" type="button" @click="addRuleCondition">＋ 添加条件</button></div><div class="contract-rule-editor-list"><div v-for="(condition, index) in ruleForm.conditions" :key="index"><select v-model="condition.field" @change="condition.operator = conditionOperators(condition.field)[0].value; condition.value = conditionField(condition.field).kind === 'boolean' ? true : ''"><option v-for="field in ruleFieldOptions" :key="field.value" :value="field.value">{{ field.label }}</option></select><select v-model="condition.operator"><option v-for="operator in conditionOperators(condition.field)" :key="operator.value" :value="operator.value">{{ operator.label }}</option></select><select v-if="conditionField(condition.field).kind === 'boolean'" v-model="condition.value"><option :value="true">是</option><option :value="false">否</option></select><input v-else v-model="condition.value" required maxlength="1000" :type="conditionField(condition.field).kind === 'number' ? 'number' : 'text'" :step="conditionField(condition.field).kind === 'number' ? '0.01' : undefined" :placeholder="condition.operator === 'in' ? '多个值用逗号分隔' : '条件值'" /><button type="button" aria-label="删除条件" :disabled="ruleForm.conditions.length === 1" @click="ruleForm.conditions.splice(index, 1)">×</button></div></div></section><section><div class="contract-section-title"><h3>审批节点</h3><button class="contract-text-button" type="button" @click="addRuleNode">＋ 添加节点</button></div><div class="contract-rule-editor-list nodes"><div v-for="(node, index) in ruleForm.nodes" :key="index"><input v-model="node.name" required maxlength="128" autocomplete="off" placeholder="节点名称" /><select v-model="node.role_code" required><option value="">请选择审批角色</option><option v-if="node.role_code && !contractRole(node.role_code)" :value="node.role_code">未识别角色</option><option v-for="role in CONTRACT_ROLE_DEFINITIONS" :key="role.code" :value="role.code">{{ role.name }}</option></select><select v-model="node.countersign" disabled><option value="any">或签（任一）</option></select><button type="button" aria-label="删除节点" :disabled="ruleForm.nodes.length === 1" @click="ruleForm.nodes.splice(index, 1)">×</button></div></div></section><footer><button class="contract-button secondary" type="button" @click="ruleDialogOpen = false">取消</button><button class="contract-button primary" type="submit" :disabled="ruleSaving">{{ ruleSaving ? '正在保存…' : '保存规则' }}</button></footer></form></div>
 
@@ -2480,7 +2544,7 @@ onBeforeUnmount(() => {
             <div v-if="crmConnectionRequired" class="contract-session-error contract-form-wide" role="status"><p>{{ crmConnectionMessage }}</p><button class="contract-button secondary" type="button" @click="connectCRM">连接 CRM</button></div>
             <div v-if="!editingContract" class="contract-form-wide contract-creation-mode" role="radiogroup" aria-label="合同创建方式"><button type="button" :class="{ active: contractCreationMode === 'template' }" role="radio" :aria-checked="contractCreationMode === 'template'" @click="selectContractCreationMode('template')"><strong>使用合同模板</strong><span>选择标准模板并填写模板字段</span></button><button type="button" :class="{ active: contractCreationMode === 'external' }" role="radio" :aria-checked="contractCreationMode === 'external'" @click="selectContractCreationMode('external')"><strong>上传外部合同</strong><span>上传未签署 DOCX，并补全结构化字段</span></button></div>
             <label v-if="contractCreationMode === 'template'" class="contract-form-wide contract-template-first"><span>第一步：选择合同模板</span><select v-model="newContract.template_id" :disabled="Boolean(editingContract)" required @change="selectContractTemplate"><option value="" disabled>请选择用于新建合同的模板</option><option v-for="item in contractTemplates" :key="item.id" :value="item.id">{{ item.name }}（{{ item.fields?.length || 0 }} 个字段）</option></select><small>模板将生成合同正文，合同编号在审批通过后自动生成。</small></label>
-            <label v-else-if="!editingContract" class="contract-form-wide contract-external-file"><span>第一步：上传外部合同 DOCX</span><input :key="externalContractFileInputKey" required type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" @change="selectExternalContractFile" /><small v-if="externalContractFile">已选择：{{ externalContractFile.name }}（{{ (externalContractFile.size / 1024 / 1024).toFixed(2) }}MB）</small><small v-else>仅支持未签署 DOCX，文件不能为空且不超过 10MB；服务端将继续校验文件结构和安全边界。</small><small v-if="externalContractFileError" class="contract-field-error" role="alert">{{ externalContractFileError }}</small></label>
+            <label v-else-if="!editingContract" class="contract-form-wide contract-external-file"><span>第一步：上传外部合同原件</span><input :key="externalContractFileInputKey" required type="file" :accept="contractSourceCapabilities.pdf_enabled ? '.docx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document' : '.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document'" @change="selectExternalContractFile" /><small v-if="externalContractFile">已选择：{{ externalContractFile.name }}（{{ (externalContractFile.size / 1024 / 1024).toFixed(2) }}MB）</small><small v-else>{{ contractSourceCapabilities.pdf_enabled ? '支持 DOCX（≤10MB）或 PDF（≤20MB）；PDF原件不改写，字段需另行填写。' : '支持 DOCX（≤10MB）；当前服务端未开放PDF源文件上传。' }}</small><small v-if="externalContractFileError" class="contract-field-error" role="alert">{{ externalContractFileError }}</small></label>
             <template v-if="selectedContractTemplate || isExternalContractMode">
               <label v-if="isExternalContractMode || newContract.payment_terms.length || newContract.customer_id" :class="{ 'is-required': isExternalContractMode || newContract.payment_terms.length > 0 }"><span>CRM 客户</span><div class="contract-opportunity-control"><button type="button" @click="openCustomerPicker">{{ newContract.customer_name || '点击选择权限范围内的客户' }}</button><button v-if="newContract.customer_id" type="button" aria-label="清除 CRM 客户" @click="clearCustomer">×</button></div><small>外部合同及付款计划须关联 CRM 客户，不能只输入客户名称</small></label>
               <label><span>关联商机（选填）</span><div class="contract-opportunity-control"><select v-model="newContract.opportunity_id" :disabled="isExternalContractMode && !newContract.customer_id" @change="selectOpportunityById"><option value="">{{ opportunityLoading ? '正在读取商机…' : (opportunityOptions.length ? '不关联商机' : (isExternalContractMode && !newContract.customer_id ? '请先选择 CRM 客户' : '暂无可关联商机')) }}</option><option v-for="item in opportunityOptions" :key="item.id || item.opportunity_id" :value="String(item.id || item.opportunity_id || '')">{{ item.name || item.title || item.opportunity_name || '未命名商机' }}（{{ item.opportunity_no || item.code || '—' }}）</option></select><button v-if="newContract.opportunity_id" type="button" aria-label="清除关联商机" @click="clearOpportunity">×</button></div><small>合同编号将在审批通过后自动生成</small></label>
@@ -2488,7 +2552,7 @@ onBeforeUnmount(() => {
               <label><span>合同负责人</span><input :value="editingContract ? editingContract.owner_display_name : currentUserLabel" readonly aria-readonly="true" /><small>{{ editingContract ? '保留原合同创建人，不随编辑人变更' : '已根据当前登录用户自动填入' }}</small></label>
               <label><span>合同类型</span><select v-model="newContract.contract_type" required><option value="" disabled>请选择合同类型</option><option v-for="item in availableContractTypeOptions" :key="item" :value="item">{{ item }}</option></select></label>
               <div class="contract-form-wide contract-service-items"><div class="contract-section-title"><div><h3>服务项</h3><p>外部合同的场所、批次和检测类别必须完整，合同生效后将用于项目拆解；最多 20 个服务项。</p></div><button class="contract-text-button" type="button" :disabled="!canAddServiceItem" @click="addServiceItem">＋ 增加服务项</button></div><p v-if="isExternalContractMode && detectionCategoryLoading" class="contract-service-directory-state">正在读取项目管理检测类别…</p><p v-else-if="isExternalContractMode && detectionCategoryError" class="contract-field-error" role="alert">{{ detectionCategoryError }} <button type="button" @click="loadDetectionCategoryOptions">重新加载</button></p><article v-for="(serviceItem, serviceIndex) in newContract.service_items" :key="serviceIndex" class="contract-service-item"><header><strong>服务项 {{ serviceIndex + 1 }}</strong><button type="button" :aria-label="`删除服务项 ${serviceIndex + 1}`" @click="removeServiceItem(serviceIndex)">×</button></header><label><span>服务类型</span><select v-model="serviceItem.service_type" required><option value="" disabled>请选择服务类型</option><option v-for="item in serviceTypeOptions" :key="item" :value="item">{{ item }}</option></select></label><label><span>服务名称</span><input v-model="serviceItem.name" maxlength="255" placeholder="默认使用服务类型" /></label><label><span>实施场所</span><input v-model="serviceItem.site" :required="isExternalContractMode" maxlength="255" placeholder="例如：上海总部" /></label><label><span>实施批次</span><input v-model="serviceItem.batch" :required="isExternalContractMode" maxlength="120" placeholder="默认：第一批次" /></label><label><span>检测类别</span><select v-if="isExternalContractMode" v-model="serviceItem.category" required :disabled="detectionCategoryLoading || !detectionCategoryOptions.length"><option value="" disabled>{{ detectionCategoryLoading ? '正在加载检测类别' : (detectionCategoryError ? '目录加载失败，请点击上方重新加载' : '请选择检测类别') }}</option><option v-for="item in detectionCategoryOptions" :key="item.category" :value="item.category">{{ item.category }}</option></select><input v-else v-model="serviceItem.category" maxlength="120" placeholder="默认使用服务类型" /></label><label><span>检测方式</span><select v-model="serviceItem.test_mode" required><option value="STANDARD">常规检测</option><option value="PENETRATION">渗透测试</option></select></label><label><span>体系 / 能力要求</span><input v-model="serviceItem.requirement" maxlength="1000" placeholder="例如：等保三级" /></label><section class="contract-system-information"><div class="contract-section-title"><div><h3>系统信息（选填）</h3><p>每个系统将形成可独立实施的服务来源，最多 15 个。</p></div><button class="contract-text-button" type="button" :disabled="!canAddSystemRow(serviceItem)" @click="addSystemRow(serviceItem)">＋ 增加系统信息</button></div><p v-if="!serviceItem.systems.length" class="contract-service-empty">尚未增加系统信息</p><div v-for="(system, systemIndex) in serviceItem.systems" :key="systemIndex" class="contract-system-row"><label><span>系统名称</span><input v-model="system.name" required maxlength="255" placeholder="请输入系统名称" /></label><label><span>系统等级</span><select v-model="system.level" required><option value="">请选择系统等级</option><option v-for="level in systemLevelOptions" :key="level" :value="level">{{ level }}</option></select></label><button type="button" aria-label="删除系统信息" @click="removeSystemRow(serviceItem, systemIndex)">×</button></div></section></article></div>
-              <label><span>合同金额</span><input v-model="newContract.amount" :readonly="Boolean(editingContract && isExternalContractMode)" required type="number" :min="isExternalContractMode ? 0.01 : 0" max="90071992547409.91" step="0.01" placeholder="0.00" /><small v-if="editingContract && isExternalContractMode">原 DOCX 保持不变，金额不能单独修改</small></label>
+              <label><span>合同金额</span><input v-model="newContract.amount" :readonly="Boolean(editingContract && isExternalContractMode)" required type="number" :min="isExternalContractMode ? 0.01 : 0" max="90071992547409.91" step="0.01" placeholder="0.00" /><small v-if="editingContract && isExternalContractMode">原件保持不变，金额不能单独修改</small></label>
               <label><span>币种</span><input v-model="newContract.currency" :readonly="Boolean(editingContract && isExternalContractMode)" required maxlength="3" pattern="[A-Za-z]{3}" autocomplete="off" /></label>
               <section class="contract-form-wide contract-payment-plan">
                 <div class="contract-section-title"><div><h3>付款计划</h3><p>分期使用合同币种，合计须等于合同金额；审批开始后冻结。旧合同未维护的分期不会自动补造。</p></div><button class="contract-text-button" type="button" :disabled="newContract.payment_terms.length >= 100" @click="addPaymentTerm">＋ 增加分期</button></div>
