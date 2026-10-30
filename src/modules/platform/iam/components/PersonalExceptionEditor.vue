@@ -68,7 +68,14 @@ const originalText = computed(() => {
   return records.map((role) => scopeTextOf(role) + '；' + validityTextOf(role)).join(' / ')
 })
 const newText = computed(() => {
-  const role = { ...resolved.value, role_code: props.draft.roleCode }
+  const draft = resolved.value
+  const role = {
+    role_code: draft.roleCode,
+    scope_type: draft.scopeType,
+    environment_code: draft.environmentCode,
+    valid_from: draft.validFrom,
+    valid_until: draft.validUntil,
+  }
   return scopeTextOf(role) + '；' + validityTextOf(role)
 })
 const impactWarnings = computed(() => {
