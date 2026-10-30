@@ -21,6 +21,8 @@ import {
 } from '../utils/subsystemAccessFlow.mjs'
 import { formatUserError, userErrorDiagnostics } from '../../../shared/utils/userError.js'
 import SubsystemAccessProgress from './SubsystemAccessProgress.vue'
+import SubsystemAccessRecoveryPanel from './SubsystemAccessRecoveryPanel.vue'
+import { isManualRecoveryCandidate } from '../utils/subsystemAccessRecovery.mjs'
 
 const props = defineProps({
   canPreview: { type: Boolean, default: false },
@@ -226,6 +228,33 @@ async function confirmAndSubmit() {
   } finally {
     busy.value = false
   }
+}
+
+/**
+ * acceptManualRecovery 接收原操作的明确失败收口，不发出部署成功事件。
+ * 参数：value为服务端确认的原任务终止结果。
+ * 返回值：无，后续部署仍由操作者显式继续。
+ */
+function acceptManualRecovery(value) {
+  if (value?.operation_id !== operation.value?.operation_id || value?.status !== 'FAILED'
+    || value?.error_code !== 'OPERATOR_ABANDONED') return
+  applyOperationPayload(value)
+  emit('toast', { type: 'success', message: '原代次已终止为失败；请显式继续恢复。' })
+}
+
+/**
+ * refreshManualRecoveryOperation 查询固定原操作，避免未知响应后重复终止或部署。
+ * 参数：id为待核对的原操作号。
+ * 返回值：Promise<void>；失败保留可见错误。
+ */
+async function refreshManualRecoveryOperation(id) {
+  if (busy.value || id !== operation.value?.operation_id) return
+  clearError(); busy.value = true
+  try {
+    const value = await fetchSubsystemAccessOperation(id)
+    if (operation.value?.operation_id === id) applyOperationPayload(value)
+  } catch (failure) { reportError(failure, '查询原操作失败，请稍后核对。') }
+  finally { busy.value = false }
 }
 
 async function resumeOperation() {
@@ -494,6 +523,12 @@ function resetFlow() {
       :missing="missing"
       :busy="busy"
       @resume="resumeOperation"
+    />
+    <SubsystemAccessRecoveryPanel
+      v-if="canSubmit && isManualRecoveryCandidate(operation)"
+      :operation-id="operation.operation_id"
+      @resolved="acceptManualRecovery"
+      @refresh="refreshManualRecoveryOperation"
     />
     </section>
   </div>
