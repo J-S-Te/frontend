@@ -19,6 +19,7 @@ const loaderPermissions = {
   listReceipts: ['settlement.receipt.read', 'settlement.receipt.record'],
   listReceiptAllocations: ['settlement.allocation.read', 'settlement.allocation.confirm', 'settlement.allocation.reverse'],
   listInvoiceRequests: ['settlement.invoice.read'], listTaxInvoices: ['settlement.invoice.read'],
+  getTaxInvoice: ['settlement.invoice.read'],
   listInvoiceEligibleReceivables: ['settlement.invoice.request'],
   listDunningCases: ['settlement.dunning.read', 'settlement.dunning.manage'],
   listDunningActions: ['settlement.dunning.read', 'settlement.dunning.manage'],

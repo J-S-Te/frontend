@@ -1,7 +1,7 @@
 <script setup>
 import { loginUsername } from "@/modules/shared/loginUsername.mjs"
 import { agingDisplayRows } from "../utils/agingDisplay.js";
-import { allowedSections, permissionCheck, canLoad } from "../utils/capabilities.js";
+import { allowedSections, permissionCheck, canLoad as canLoadKey } from "../utils/capabilities.js";
 import SettlementRolePanel from "../components/SettlementRolePanel.vue";
 import OperationToast from '@/modules/shared/components/OperationToast.vue'
 import { computed, ref, watch } from "vue";
@@ -91,6 +91,19 @@ const sessionPermissions = computed(
   () => new Set(settlementSession.value?.permissions || []),
 );
 const can = (permission) => permissionCheck(settlementSession.value)(permission);
+const loaderKeys = new Map(Object.entries({
+  getDashboard, getAgingSummary, getInvoicedReceivablesTop10,
+  getDunningOverview, getDunningCoverage, listReceivablePlans, listReceivables,
+  listReceipts, listReceiptAllocations, listInvoiceRequests, listTaxInvoices,
+  listInvoiceEligibleReceivables, listDunningCases, listDunningActions,
+  listDunningPolicies, listDunningRecipients, getTaxInvoice,
+}).map(([key, loader]) => [loader, key]));
+// canLoad 以稳定接口身份核对当前能力，避免生产压缩改变函数名后静默清空数据。
+// 参数：loader为实际接口函数，权限取当前服务端会话。
+// 返回值：仅已登记且当前拥有对应能力的读取函数允许加载。
+function canLoad(loader) {
+  return canLoadKey(loaderKeys.get(loader), can);
+}
 const allowed = computed(() => allowedSections(settlementSession.value));
 const sections = [
   ["dashboard", "结算总览", "dashboard"],
@@ -544,7 +557,7 @@ const sectionLists = {
   receivables: [0, 1], receipts: [2, 1], allocations: [2, 1, 3],
   invoices: [6, 4, 5], dunning: [1, 7, 8, 9], tasks: [0, 3, 4, 7], finance: [2],
 };
-const visibleListPages = computed(() => (sectionLists[active.value] || []).filter((index) => canLoad(pagedLists[index][0].name, can)).map((index) => ({
+const visibleListPages = computed(() => (sectionLists[active.value] || []).filter((index) => canLoad(pagedLists[index][0])).map((index) => ({
   index, label: pagedLists[index][2], page: listPages.value[index] || 0, count: pagedLists[index][1].value.length,
 })));
 // 用途：切换已授权列表的页码。
@@ -578,7 +591,8 @@ async function refreshRolePlans() {
 // 参数：section 为当前页面。
 // 返回值：已过滤的读取任务数组。
 function loadTargets(section) {
-  const target = (loader, state, fallback) => [loader, state, fallback];
+  const target = (loader, state, fallback, capabilityLoader = loader) =>
+    [loader, state, fallback, capabilityLoader];
   const targets = [];
   const add = (...items) => targets.push(...items);
 
@@ -644,12 +658,11 @@ function loadTargets(section) {
   }
 
   if (section === "invoices" && invoiceDetailID.value) {
-    targets.push(target(() => getTaxInvoice(invoiceDetailID.value), invoiceDetail, null));
+    targets.push(target(() => getTaxInvoice(invoiceDetailID.value), invoiceDetail, null, getTaxInvoice));
   } else {
     invoiceDetail.value = null;
   }
-  return targets.filter(([loader]) => canLoad(loader.name, can) ||
-    (section === "invoices" && invoiceDetailID.value && can("settlement.invoice.read") && loader.name === ""));
+  return targets.filter(([, , , capabilityLoader]) => canLoad(capabilityLoader));
 }
 // 用途：先刷新会话能力再加载当前页面数据。
 // 参数：无。
@@ -664,7 +677,7 @@ async function load() {
     if (!isCurrent()) return false;
     settlementSession.value = session;
     for (const [loader, state] of pagedLists) {
-      if (!canLoad(loader.name, can)) state.value = [];
+      if (!canLoad(loader)) state.value = [];
     }
   } catch (value) {
     if (!isCurrent()) return false;
