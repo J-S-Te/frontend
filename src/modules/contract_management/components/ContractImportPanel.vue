@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { contractImportRequest, listContractImportBatches, releaseContractImportItem,
-  getImportItemDocumentDescriptor, importItemSourceURL } from '../api/contract.js'
+  getImportItemDocumentDescriptor, importItemSourceURL, openContractCRMLogin } from '../api/contract.js'
 import ContractPDFPreview from './ContractPDFPreview.vue'
 import { prepareImportManifest, formatImportMinor } from '../utils/contractImport.js'
 import { validateContractSourceFile } from '../utils/contractPayload.js'
@@ -12,6 +12,7 @@ const props = defineProps({ enabled: Boolean, pdfEnabled: Boolean, canPreview: {
   supportedModes: { type: Array, default: () => ['NORMAL'] } })
 const text = ref(''), files = ref([]), batch = ref(null), batchID = ref(''), lookupID = ref(props.initialBatchId)
 const busy = ref(false), error = ref(''), commitKey = ref(''), sourceSelectionVersion = ref(0)
+const crmConnectionMessage = ref('')
 const batches = ref([]), listOffset = ref(0), listNextOffset = ref(null), listHasMore = ref(false), listLimitReached = ref(false), document = ref(null), confirmationAttempt = ref(null), actionAttempt = ref(null)
 const listBusy = ref(false), listError = ref('')
 let timer = null, generation = 0, disposed = false
@@ -21,6 +22,9 @@ const modeLabels = { NORMAL: '普通新合同', ARCHIVE_ONLY: '历史存档', CO
 const targetLabels = { PROJECT: '项目接续', FINANCE: '财务接续', REPORT: '数析同步' }
 const stateLabels = { WAITING_RELEASE: '待申请放行', WAITING: '等待依赖满足', QUEUED: '等待执行', RUNNING: '正在核对执行', HOLD: '暂未放行', PREPARING: '正在建立财务暂存', PREPARED: '财务已暂存，待恢复对账', READY: '核对就绪，尚未放行', RELEASE_REQUESTED: '放行已申请，等待实际应用', COMPLETE: '已完成', COMPLETED: '已完成', NOT_APPLICABLE: '不建立此类业务', FAILED: '执行失败，可核对恢复', BLOCKED: '需要处理阻塞', NEEDS_REVIEW: '合同版本变化，需核对', CORRECTION_REQUIRED: '已建单基线需要业务更正', CREATED: '记录已创建，正在完成文件引用', PENDING: '待处理', APPROVED: '确认通过', STARTING: '正在启动独立确认', REJECTED: '确认驳回', WITHDRAWN: '确认撤回', EXPIRED: '确认已超时' }
 const historyItems = computed(() => (batch.value?.items || []).filter(entry => entry.item.mode !== 'NORMAL'))
+const issueLabels = { IMPORT_CRM_SESSION_REQUIRED: 'CRM 当前账号授权上下文缺失或已过期，请连接 CRM 后重新预检。' }
+const crmConnectionRequired = computed(() => props.canPreview && (batch.value?.items || [])
+  .some(entry => (entry.issues || []).some(issue => issue.code === 'IMPORT_CRM_SESSION_REQUIRED')))
 const canVote = computed(() => props.canApprove && batch.value?.confirmation?.state === 'PENDING'
   && !(batch.value.confirmation.commands || []).some(command => command.actor_id === props.actorId && ['APPROVE','REJECT'].includes(command.action))
   && Object.entries(batch.value.confirmation.assignees || {}).some(([role, ids]) => Array.isArray(ids) && ids.includes(props.actorId) && !(batch.value.confirmation.approved_roles || []).includes(role)))
@@ -40,6 +44,7 @@ async function refresh(id = lookupID.value.trim(), { fromWrite = false } = {}) {
     batch.value = result
     const switched = batchID.value !== result.batch_id
     if (switched) {
+      crmConnectionMessage.value = ''
       documentGeneration++; document.value = null; text.value = ''; files.value = []; sourceSelectionVersion.value++
       commitKey.value = ''; confirmationAttempt.value = null; actionAttempt.value = null
     }
@@ -67,6 +72,19 @@ function startNewBatch() {
   text.value = ''; files.value = []; sourceSelectionVersion.value++
   document.value = null; commitKey.value = ''; error.value = ''
   confirmationAttempt.value = null; actionAttempt.value = null
+  crmConnectionMessage.value = ''
+}
+
+/**
+ * connectCRM 从明确授权错误进入既有正常登录，保留原批次及未保存输入。
+ * 参数：无；仅当前具有预检权限且没有写请求的操作者可以发起。
+ * 返回值：无；提示返回后重新预检，不自动上传、建单、提交或放行。
+ */
+function connectCRM() {
+  if (busy.value || disposed || !crmConnectionRequired.value) return
+  crmConnectionMessage.value = openContractCRMLogin()
+    ? '已打开 CRM，请用同一账号登录并查询客户，返回后点击重新预检；原批次及原件保留。'
+    : '无法打开 CRM 登录页，请允许浏览器弹出窗口后再点击连接 CRM。'
 }
 
 /**
@@ -77,6 +95,7 @@ function startNewBatch() {
 async function preview() {
   generation++; clearTimeout(timer)
   busy.value = true; error.value = ''
+  crmConnectionMessage.value = ''
   try {
     if (batch.value?.operation_id && !['PAUSED', 'PARTIAL', 'DRAFT', 'BLOCKED', 'PREVIEWED'].includes(batch.value.state)) throw new Error('请先暂停批次并查询结果，只有未建单项可修订。')
     const prepared = prepareImportManifest(text.value, files.value, batch.value?.sources || [], props.supportedModes)
@@ -263,8 +282,13 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; cle
     <template v-if="batch">
       <p role="status">批次 {{ batch.batch_id }} · 第 {{ batch.revision }} 版 · {{ labels[batch.state] || batch.state }}</p>
       <p v-if="batch.operation_id">操作号：{{ batch.operation_id }}。请保留批次号，重新登录或刷新页面后可查询恢复。</p>
+      <p v-if="crmConnectionRequired" role="alert">
+        CRM 当前账号授权上下文缺失或已过期，请先连接 CRM，再重新预检当前批次。
+        <button type="button" :disabled="busy" @click="connectCRM">连接 CRM</button>
+        <span v-if="crmConnectionMessage" role="status">{{ crmConnectionMessage }}</span>
+      </p>
       <div class="contract-import-scroll"><table><thead><tr><th>单项</th><th>来源业务键</th><th>状态／合同ID</th><th>字段及错误</th></tr></thead><tbody>
-        <tr v-for="entry in batch.items" :key="entry.id"><td>{{ entry.item.item_key }} · {{ modeLabels[entry.item.mode] }}<br /><small>原件：{{ batch.sources.find(source => source.file_ref === entry.item.source_file_ref)?.filename }}<br />{{ entry.item.source_file_ref }}</small><button v-if="entry.contract_id" type="button" :disabled="busy" @click="viewSource(entry)">查看冻结原件</button></td><td>{{ entry.item.external_record_id }}<p>纸面编号：{{ entry.item.metadata.external_paper_number || '未提供' }}</p><p v-if="entry.item.history_evidence">声明签署日：{{ entry.item.history_evidence.declared_signed_date || '未声明' }}<br />原终态／履约态：{{ entry.item.history_evidence.historical_status }}</p></td><td>{{ stateLabels[entry.state] || entry.state }}<br />{{ entry.contract_id || '尚未建单' }}<p v-if="entry.normalized_metadata">权威客户：{{ entry.normalized_metadata.customer_name }}<br />客户ID：{{ entry.normalized_metadata.crm_customer_id }}<br />规范金额：{{ entry.normalized_metadata.currency }} {{ formatImportMinor(entry.normalized_metadata.amount_minor) }}</p><p v-if="entry.item.metadata.customer_name !== entry.normalized_metadata?.customer_name">清单客户声明：{{ entry.item.metadata.customer_name }}</p></td><td><p v-for="issue in entry.issues" :key="issue.field_path + issue.code">{{ issue.field_path }}：{{ issue.code }}{{ issue.retryable ? '（可恢复）' : '' }}</p></td></tr>
+        <tr v-for="entry in batch.items" :key="entry.id"><td>{{ entry.item.item_key }} · {{ modeLabels[entry.item.mode] }}<br /><small>原件：{{ batch.sources.find(source => source.file_ref === entry.item.source_file_ref)?.filename }}<br />{{ entry.item.source_file_ref }}</small><button v-if="entry.contract_id" type="button" :disabled="busy" @click="viewSource(entry)">查看冻结原件</button></td><td>{{ entry.item.external_record_id }}<p>纸面编号：{{ entry.item.metadata.external_paper_number || '未提供' }}</p><p v-if="entry.item.history_evidence">声明签署日：{{ entry.item.history_evidence.declared_signed_date || '未声明' }}<br />原终态／履约态：{{ entry.item.history_evidence.historical_status }}</p></td><td>{{ stateLabels[entry.state] || entry.state }}<br />{{ entry.contract_id || '尚未建单' }}<p v-if="entry.normalized_metadata">权威客户：{{ entry.normalized_metadata.customer_name }}<br />客户ID：{{ entry.normalized_metadata.crm_customer_id }}<br />规范金额：{{ entry.normalized_metadata.currency }} {{ formatImportMinor(entry.normalized_metadata.amount_minor) }}</p><p v-if="entry.item.metadata.customer_name !== entry.normalized_metadata?.customer_name">清单客户声明：{{ entry.item.metadata.customer_name }}</p></td><td><p v-for="issue in entry.issues" :key="issue.field_path + issue.code">{{ issue.field_path }}：{{ issueLabels[issue.code] || issue.code }}{{ issue.retryable ? '（可恢复）' : '' }}</p></td></tr>
       </tbody></table></div>
       <p v-if="batch.state === 'PREVIEWED'">预计创建 {{ batch.items.filter(entry => !entry.contract_id).length }} 份记录；本次不免审生效。普通模式之后逐份审批；历史模式之后独立确认，再分别放行项目、财务和报表。</p>
       <p v-if="!batch.can_commit">当前身份可查看此批次；提交和恢复须由具有导入提交权限的批次创建人执行。</p>

@@ -8,16 +8,17 @@ import { ensureStableReviewAttempt } from '../utils/opportunityIntakeReview.js'
 import { prepareImportManifest, formatImportMinor } from '../utils/contractImport.js'
 
 // importPanelHarness 编译实际导入面板并替换受控外部接口以验证模式及未知结果。
-// 参数：mode为测试模式，request为接口响应替身。
+// 参数：mode为测试模式，request/listResponse替代外部接口，crmLogin替代正常登录窗口。
 // 返回值：实际setup状态、组件渲染器和请求记录；不冒充真实服务验收。
-function importPanelHarness(mode, request, listResponse = () => ({items:[],has_more:false,next_offset:null})) {
+function importPanelHarness(mode, request, listResponse = () => ({items:[],has_more:false,next_offset:null}), crmLogin = () => true) {
   const calls = [], delays = [], listCalls = [], timers = []
-  const props = {enabled:true,pdfEnabled:true,canPreview:true,canCommit:true,canApprove:true,canRelease:true,actorId:'actor',initialBatchId:'',supportedModes:['NORMAL','ARCHIVE_ONLY']}
+  const props = Vue.reactive({enabled:true,pdfEnabled:true,canPreview:true,canCommit:true,canApprove:true,canRelease:true,actorId:'actor',initialBatchId:'',supportedModes:['NORMAL','ARCHIVE_ONLY']})
   const batch = {batch_id:'batch-A',version:11,revision:1,preview_token:'preview',state:'PREVIEWED',can_commit:true,source_system:'legacy',sources:[],items:[{id:'item-A',item:{mode,item_key:'one',external_record_id:'old-1',source_file_ref:'file-ref',metadata:{customer_name:'历史客户'},policy_options:{project_mode:'NONE',finance_mode:'NONE',report_mode:'ARCHIVE_SEPARATE'}},state:'READY',issues:[]}]}
   const deps = {computed:Vue.computed,ref:Vue.ref,onMounted(){},onBeforeUnmount(){},setTimeout(callback,delay){delays.push(delay);timers.push(callback);return 0},clearTimeout(){},ContractPDFPreview:{render(){return null}},
     contractImportRequest:async (...args)=> {calls.push(args);return request ? request(batch,...args) : structuredClone(batch)},
     listContractImportBatches:async(offset)=>{listCalls.push(offset);return listResponse(offset)},releaseContractImportItem:async()=>({}),getImportItemDocumentDescriptor:async()=>({}),importItemSourceURL:()=>'',
-    prepareImportManifest,formatImportMinor,validateContractSourceFile(){},ensureStableReviewAttempt}
+    prepareImportManifest,formatImportMinor,validateContractSourceFile(){},ensureStableReviewAttempt,
+    openContractCRMLogin:crmLogin}
   const {descriptor}=parse(readFileSync(new URL('./ContractImportPanel.vue',import.meta.url),'utf8'))
   const script=compileScript(descriptor,{id:'import-panel-test'})
   const component=new Function(...Object.keys(deps),script.content.replace(/^import\s[\s\S]*?from ['"][^'"]+['"]\n/gm,'').replace('export default','return'))(...Object.values(deps))
@@ -26,7 +27,7 @@ function importPanelHarness(mode, request, listResponse = () => ({items:[],has_m
   const render=new Function('Vue',template.code.replace(/import \{([^}]+)\} from "vue"/g,(_,names)=>`const { ${names.replace(/ as /g,': ')} } = Vue`).replace('export function render','return function render'))(Vue)
   const state=component.setup(props,{expose(){}})
   state.batch.value=structuredClone(batch);state.batchID.value=batch.batch_id;state.lookupID.value=batch.batch_id
-  return {state,batch,calls,delays,listCalls,timers,html:()=>renderToString(Vue.createSSRApp({render:()=>render({},[],props,Vue.proxyRefs(state),{}, {})}))}
+  return {state,props,batch,calls,delays,listCalls,timers,html:()=>renderToString(Vue.createSSRApp({render:()=>render({},[],props,Vue.proxyRefs(state),{}, {})}))}
 }
 
 test('historical PREVIEWED renders the direct confirmation entry before any contract exists', async()=>{
@@ -42,6 +43,42 @@ test('NORMAL preview retains its ordinary commit entry', async()=>{
   const html=await importPanelHarness('NORMAL').html()
   assert.match(html,/确认冻结清单并创建草稿<\/button>/)
   assert.doesNotMatch(html,/冻结清单、建立历史记录并提交独立确认/)
+})
+
+test('missing CRM context offers normal login while preserving the batch, source and unsaved manifest', async()=>{
+  let opens=0
+  const panel=importPanelHarness('NORMAL',null,undefined,()=>{opens++;return true})
+  panel.state.batch.value.items[0].issues=[{field_path:'metadata.crm_customer_id',code:'IMPORT_CRM_SESSION_REQUIRED',retryable:true}]
+  panel.state.batch.value.state='BLOCKED'
+  panel.state.text.value='unsaved manifest';panel.state.files.value=[{name:'one.pdf'}]
+  const html=await panel.html()
+  assert.match(html,/连接 CRM/)
+  assert.match(html,/授权上下文.*缺失|授权上下文.*过期/)
+  panel.state.connectCRM()
+  assert.equal(opens,1)
+  assert.equal(panel.state.batchID.value,'batch-A')
+  assert.equal(panel.state.text.value,'unsaved manifest')
+  assert.deepEqual(panel.state.files.value,[{name:'one.pdf'}])
+  assert.equal(panel.calls.length,0,'登录动作不得自动建单、提交或重复预检')
+  assert.match(panel.state.crmConnectionMessage.value,/重新预检/)
+})
+
+test('CRM reconnect is unavailable without preview permission and reports blocked popups', async()=>{
+  let opens=0
+  const panel=importPanelHarness('NORMAL',null,undefined,()=>{opens++;return false})
+  panel.state.batch.value.items[0].issues=[{field_path:'metadata.crm_customer_id',code:'IMPORT_CRM_SESSION_REQUIRED'}]
+  panel.state.connectCRM()
+  assert.match(panel.state.crmConnectionMessage.value,/弹出窗口/)
+  panel.state.crmConnectionMessage.value=''
+  panel.props.canPreview=false
+  assert.doesNotMatch(await panel.html(),/连接 CRM<\/button>/)
+  panel.state.connectCRM()
+  assert.equal(opens,1,'无预检权限不能触发重连')
+  panel.props.canPreview=true
+  panel.state.batch.value.items[0].issues=[{field_path:'metadata.crm_customer_id',code:'IMPORT_VALIDATION_FAILED'}]
+  assert.doesNotMatch(await panel.html(),/连接 CRM<\/button>/)
+  panel.state.connectCRM()
+  assert.equal(opens,1,'非上下文错误不能随意触发重连')
 })
 
 test('explicit project validation rejection offers same-command retry while unknown results stay blocked', async()=>{
