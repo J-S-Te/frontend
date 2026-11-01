@@ -58,8 +58,16 @@ async function loadLoginPolicy() {
   }
 }
 
+// saveLoginPolicy 校验并保存基础平台统一登录策略，拒绝执行器不支持的空闲窗口。
+// 参数：无；读取当前表单及乐观锁版本。
+// 返回值：保存结果的 Promise；越界输入保留表单并显示错误。
 async function saveLoginPolicy() {
   if (!canReadPolicy.value || !canUpdatePolicy.value || policySaving.value) return
+  const idleSeconds = Number(loginPolicy.idleTimeoutSeconds)
+  if (!Number.isInteger(idleSeconds) || idleSeconds < 60 || idleSeconds > 1800) {
+    policyError.value = '无操作退出须为 60 至 1800 秒，最多 30 分钟。'
+    return
+  }
   policySaving.value = true
   policyError.value = ''
   try {
@@ -142,7 +150,7 @@ onMounted(async () => {
           <label><span>最大失败次数</span><input v-model.number="loginPolicy.maxFailedAttempts" type="number" min="1" max="20" :disabled="policyLoading || !canUpdatePolicy" /><small>达到阈值后锁定账号</small></label>
           <label><span>锁定时长（秒）</span><input v-model.number="loginPolicy.lockoutDurationSeconds" type="number" min="60" :disabled="policyLoading || !canUpdatePolicy" /><small>{{ formatDuration(loginPolicy.lockoutDurationSeconds) }}</small></label>
           <label><span>失败记录重置（秒）</span><input v-model.number="loginPolicy.failureResetWindowSeconds" type="number" min="60" :disabled="policyLoading || !canUpdatePolicy" /><small>{{ formatDuration(loginPolicy.failureResetWindowSeconds) }}</small></label>
-          <label><span>无操作退出（秒）</span><input v-model.number="loginPolicy.idleTimeoutSeconds" type="number" min="60" max="86400" :disabled="policyLoading || !canUpdatePolicy" /><small>{{ formatDuration(loginPolicy.idleTimeoutSeconds) }}无操作后退出所有应用系统</small></label>
+          <label><span>无操作退出（秒）</span><input v-model.number="loginPolicy.idleTimeoutSeconds" type="number" min="60" max="1800" :disabled="policyLoading || !canUpdatePolicy" /><small>{{ formatDuration(loginPolicy.idleTimeoutSeconds) }}无操作后退出所有应用系统；最多 30 分钟</small></label>
         </div>
         <footer><button v-if="canUpdatePolicy" class="console-button primary" type="button" :disabled="policySaving" @click="saveLoginPolicy"><ConsoleIcon name="save" />{{ policySaving ? '保存中…' : '保存安全策略' }}</button><button class="console-button ghost" type="button" :disabled="policyLoading" @click="loadLoginPolicy">重新读取</button></footer>
       </article>

@@ -132,7 +132,7 @@ test('asynchronous task action and stored failure summaries use the same safe pr
 test('login security failures do not remove locked accounts or announce successful writes', async () => {
   const account = { account_id: 'account-1' }
   const messages = []
-  const state = { canReadPolicy: ref(true), canUpdatePolicy: ref(true), canReadLockedAccounts: ref(true), canUnlockAccount: ref(true), policyLoading: ref(false), policySaving: ref(false), policyError: ref(''), lockedLoading: ref(false), lockedError: ref(''), lockedAccounts: ref([account]), loginPolicy: { version: 1 } }
+  const state = { canReadPolicy: ref(true), canUpdatePolicy: ref(true), canReadLockedAccounts: ref(true), canUnlockAccount: ref(true), policyLoading: ref(false), policySaving: ref(false), policyError: ref(''), lockedLoading: ref(false), lockedError: ref(''), lockedAccounts: ref([account]), loginPolicy: { version: 1, idleTimeoutSeconds: 1800 } }
   const ui = methods('security', ['loadLoginPolicy', 'saveLoginPolicy', 'loadLockedAccounts', 'handleUnlockAccount'], { ...state,
     getLoginPolicy: async () => { throw new Error('<html>private proxy page</html>') },
     updateLoginPolicy: async () => { throw Object.assign(new Error('Failed to fetch'), { code: 'NETWORK_ERROR' }) },
@@ -160,5 +160,22 @@ test('login target editor retains exact rejection and uncertain-write messages i
     if (error.status === 403) assert.equal(state.errorMessage.value, error.message)
     else assert.match(state.errorMessage.value, /核对.*重复提交/)
     assert.equal(state.submitting.value, false)
+  }
+})
+
+
+test('login policy keeps invalid idle values local and never submits them', async () => {
+  for (const idle of [59, 1801, 3600, NaN, 60.5]) {
+    let calls = 0
+    const state = { canReadPolicy: ref(true), canUpdatePolicy: ref(true),
+      policySaving: ref(false), policyError: ref(''), loginPolicy: { version: 1, idleTimeoutSeconds: idle } }
+    const ui = methods('security', ['saveLoginPolicy'], { ...state,
+      updateLoginPolicy: async () => { calls += 1 }, emitToast: () => { throw new Error('unexpected success') },
+    })
+    await ui.saveLoginPolicy()
+    assert.equal(calls, 0)
+    assert.equal(state.policySaving.value, false)
+    assert.match(state.policyError.value, /60 至 1800 秒/)
+    assert.ok(Object.is(state.loginPolicy.idleTimeoutSeconds, idle), 'invalid input must stay visible')
   }
 })
