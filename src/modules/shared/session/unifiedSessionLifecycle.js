@@ -36,7 +36,10 @@ function validateContext(context) {
 // 返回值：路由切换、只读校准、嵌入交互和销毁接口。
 export function createUnifiedSessionLifecycle({ read, activity, onEnded, onError,
   onIdentityChanged, windowRef = globalThis.window, documentRef = globalThis.document,
-  clock = { now: () => performance.now(), setTimeout, clearTimeout } }) {
+  clock = { now: () => performance.now(),
+    // 浏览器原生定时器要求 Window 接收者，不能转存后作为 clock 的方法调用。
+    setTimeout: (callback, delay) => globalThis.setTimeout(callback, delay),
+    clearTimeout: handle => globalThis.clearTimeout(handle) } }) {
   let target = null
   let context = null
   let generation = 0

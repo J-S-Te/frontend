@@ -2,6 +2,30 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createUnifiedSessionLifecycle } from './unifiedSessionLifecycle.js'
 
+test('default timers preserve the native Window receiver through stop and route changes', async t => {
+  const h = harness()
+  let scheduled = 0
+  let cleared = 0
+  t.mock.method(globalThis, 'setTimeout', function () {
+    assert.equal(this, globalThis, 'native setTimeout requires its Window receiver')
+    scheduled += 1
+    return scheduled
+  })
+  t.mock.method(globalThis, 'clearTimeout', function () {
+    assert.equal(this, globalThis, 'native clearTimeout requires its Window receiver')
+    cleared += 1
+  })
+  const lifecycle = createUnifiedSessionLifecycle({
+    read: async () => ({ ...h.context }), activity: async () => ({ ...h.context }),
+  })
+  lifecycle.stop()
+  await lifecycle.setTarget({ key: 'platform' })
+  assert.ok(scheduled >= 2, 'request deadline and read-only probe must both be scheduled')
+  lifecycle.destroy()
+  h.lifecycle.destroy()
+  assert.ok(cleared >= 4, 'stop, request cleanup and destroy must release timers')
+})
+
 // harness 构造可控单调时钟与页面事件，用真实协调器验证活动来源和异步边界。
 // 参数：overrides为各用例注入的状态或活动服务。
 // 返回值：协调器、事件入口、定时推进器及实际调用记录。
