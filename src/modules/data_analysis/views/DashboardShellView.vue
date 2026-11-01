@@ -3,7 +3,7 @@ import { loginUsername } from "@/modules/shared/loginUsername.mjs"
 // 数据看板统一外壳（对齐 project_management 模式）：
 // 深色侧栏导航 + 顶栏 + 页面头，按 route.params.section 切换分区；
 // 总览、报告、财务看板经嵌入桥加载；合同、项目看板使用本地原生模型，避免空白 iframe。
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import { AuthError, logoutCurrentSession } from "@/modules/platform/auth/api/auth"
 import ConsoleIcon from "@/modules/platform/shared/components/ConsoleIcon.vue"
@@ -18,6 +18,7 @@ import AlertRulesView from "./AlertRulesView.vue"
 import NativeDashboardView from "./NativeDashboardView.vue"
 import ContractImportHistoryPanel from "../components/ContractImportHistoryPanel.vue"
 import { isolatedEmbedUrl } from "../utils/embedOrigin.mjs"
+import { createEmbedSessionActivity } from "../utils/embedSessionActivity.js"
 import { RELATED_DATA, subscribeRelatedDataChanges } from "@/modules/platform/shared/utils/relatedDataInvalidation.js"
 import { formatDataAnalysisError } from "../utils/errors.js"
 import { useUrlFilterState } from "@/modules/shared/composables/useUrlFilterState.js"
@@ -103,6 +104,11 @@ const loading = ref(true)
 const loadError = ref("")
 const mobileMenuOpen = ref(false)
 const iframeSrc = ref("")
+const embedFrame = ref(null)
+const recordEmbeddedActivity = inject('central-session-record-activity', null)
+const embedActivity = createEmbedSessionActivity({ getFrame: () => embedFrame.value,
+  getURL: () => iframeSrc.value, onActivity: recordEmbeddedActivity })
+watch(iframeSrc, embedActivity.reset, { flush: 'sync' })
 const iframeLoading = ref(false)
 const iframeError = ref(null)
 const dashboardSummary = ref(null)
@@ -375,6 +381,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  embedActivity.destroy()
   clearEmbedRenewal()
   if (relatedRefreshTimer) window.clearTimeout(relatedRefreshTimer)
   if (unsubscribeRelatedData) unsubscribeRelatedData()
@@ -454,7 +461,7 @@ onBeforeUnmount(() => {
             <div class="da-frame-stage">
               <LoadingState v-if="iframeLoading" title="看板加载中…" compact />
               <ErrorState v-else-if="iframeError" :error="iframeError" @retry="loadDashboard(DASHBOARD_CODES[section])" compact />
-              <iframe v-else :src="iframeSrc" class="da-iframe" :title="`${currentMeta[0]}嵌入看板`" sandbox="allow-scripts allow-same-origin" referrerpolicy="no-referrer" />
+              <iframe v-else ref="embedFrame" :src="iframeSrc" class="da-iframe" :title="`${currentMeta[0]}嵌入看板`" sandbox="allow-scripts allow-same-origin" referrerpolicy="no-referrer" @load="embedActivity.initialize($event.target)" />
             </div>
           </section>
         </template>
