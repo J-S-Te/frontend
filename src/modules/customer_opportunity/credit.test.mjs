@@ -58,14 +58,25 @@ test('信用审批待办清空后将 null 或非数组响应归一化为空列�
   assert.match(inbox, /Array\.isArray\(result\?\.items\) \? result\.items : Array\.isArray\(result\) \? result : \[\]/)
 })
 
-test('客户信用历史将 ISO 时间格式化为年月日时分秒', () => {
+test('客户信用历史按北京口径格式化为年月日时分秒（24 小时制）', () => {
   const panel = read('./components/CustomerCreditPanel.vue')
   assert.match(panel, /formatCreditDate\(value\)/)
-  assert.match(panel, /hour12: true/)
-  assert.match(panel, /\$\{parts\.year\}-\$\{parts\.month\}-\$\{parts\.day\} \$\{parts\.dayPeriod\}\$\{parts\.hour\}:\$\{parts\.minute\}:\$\{parts\.second\}/)
+  assert.match(panel, /formatBusinessDateTime\(value, \{ seconds: true \}\)/)
+  assert.doesNotMatch(panel, /hour12: true/)
+  assert.doesNotMatch(panel, /dayPeriod/)
   assert.doesNotMatch(panel, /format\(date\)\.replace\(\/\\\//)
   assert.match(panel, /item\.from_level\).*item\.to_level/)
   assert.match(panel, /formatCreditDate\(item\.occurred_at\)/)
+})
+
+test('信用审批待办与规则更新时间按北京口径展示，不再用浏览器本地时区', () => {
+  const inbox = read('./components/CreditApprovalInbox.vue')
+  const settings = read('./components/CreditRuleSettingsPanel.vue')
+  assert.match(inbox, /formatBusinessDateTime\(value\) \|\| '—'/)
+  assert.doesNotMatch(inbox, /new Intl\.DateTimeFormat\('zh-CN', \{ dateStyle: 'medium', timeStyle: 'short' \}\)/)
+  assert.match(settings, /formatBusinessDateTime\(value\) \|\| '更新时间未知'/)
+  assert.doesNotMatch(settings, /toLocaleString\('zh-CN'/)
+  assert.doesNotMatch(settings, /hour12: false/)
 })
 
 test('客户信用历史将来源编码和操作人转换为业务展示值', () => {

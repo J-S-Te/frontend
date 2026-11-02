@@ -2,6 +2,7 @@
 import { formatCRMError } from '../api/errorMessages.js'
 import { onMounted, reactive, ref } from 'vue'
 import { getCustomerCreditRuleSettings, updateCustomerCreditRuleSettings } from '../api/credit.js'
+import { formatBusinessDateTime } from '@/modules/shared/utils/businessTime.js'
 
 const emit = defineEmits(['notice', 'error'])
 const loading = ref(false)
@@ -32,10 +33,10 @@ async function save() {
   } catch (error) { emit('error', formatCRMError(error, { fallback: '信用规则保存失败。' })) }
   finally { saving.value = false }
 }
+// 规则更新时间按北京口径展示，24 小时制；缺失与非法取值分别给出原有占位文案。
 function formatUpdatedAt(value) {
   if (!value) return '尚无更新记录'
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? '更新时间未知' : date.toLocaleString('zh-CN', { hour12: false })
+  return formatBusinessDateTime(value) || '更新时间未知'
 }
 onMounted(load)
 </script>

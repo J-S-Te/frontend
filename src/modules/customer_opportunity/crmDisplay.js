@@ -1,6 +1,15 @@
 // CRM 页面的展示层纯函数与常量：由 CustomerOpportunityView.vue 批次 3 第一步逐字迁移，
 // 行为契约由 crmDisplay.test.mjs 固化；页面通过 import 继续以原绑定名使用。
 
+// 业务时间一律走共享的北京口径工具：后端返回 RFC3339（UTC），浏览器时区五花八门，
+// 直接 slice 或 toLocaleString 会取出 UTC 日历日 / 宿主机本地时间，导致跨零点显示错位。
+import {
+  businessWallClockToInstant,
+  currentBusinessMonthRange,
+  formatBusinessDate,
+  formatBusinessDateTime,
+} from '../shared/utils/businessTime.js'
+
 // 客户行业由业务字典治理（平台控制台“字典管理”维护），取值即业务存储字符串；
 // 平台会话过期或字典未配置时回退内置清单，表单不中断。
 export const fallbackCustomerIndustryOptions = Object.freeze([
@@ -53,11 +62,26 @@ export const creditLevelLabel = (value) => ({ A: 'A · 优秀', B: 'B · 良好'
 
 export const hasCreditApprovalAccess = (session) => (session?.permissions || []).includes('customer.credit.approve') || (session?.roles || []).some((role) => CREDIT_APPROVAL_ROLES.has(role))
 
+// 日历日 +1 天：只对 'YYYY-MM-DD' 做 UTC 日历运算（Date.UTC 自动跨月跨年），
+// 不把纯日期当成瞬间，因此不会因浏览器时区把边界日平移掉。
+function nextCalendarDay(isoDate) {
+  const [year, month, day] = String(isoDate || '').split('-').map(Number)
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return ''
+  const next = new Date(Date.UTC(year, month - 1, day + 1))
+  const pad = (part) => String(part).padStart(2, '0')
+  return `${next.getUTCFullYear()}-${pad(next.getUTCMonth() + 1)}-${pad(next.getUTCDate())}`
+}
+
+// 报表默认区间：北京当前自然月，沿用“结束不含”的既有语义——
+// [本月 1 日 00:00, 下月 1 日 00:00) 的北京墙钟，提交时由 reportDateParam 换算成瞬间。
 export function defaultReportFilters() {
-  const now = new Date()
-  const start = new Date(now.getFullYear(), now.getMonth(), 1)
-  const end = new Date(now.getFullYear(), now.getMonth() + 1, 1)
-  return { from: formatDateTimeLocal(start), to: formatDateTimeLocal(end), organization_id: '', person_id: '', opportunity_id: '', dimension: 'PERSON' }
+  const range = currentBusinessMonthRange()
+  const end = range.to ? nextCalendarDay(range.to) : ''
+  return {
+    from: range.from ? `${range.from}T00:00` : '',
+    to: end ? `${end}T00:00` : '',
+    organization_id: '', person_id: '', opportunity_id: '', dimension: 'PERSON',
+  }
 }
 
 export function formatDateTimeLocal(value) {
@@ -108,10 +132,15 @@ export function catalogSelectionIDs(structured, legacy, options) {
   return options.filter((item) => names.has(item.name)).map((item) => Number(item.id))
 }
 
+// 统一按北京口径展示（24 小时制）；纯日期串表示日历日，原样展示、不补 00:00、不做时区平移。
+// 非法取值保留原始串，避免把用户/后端给的异常值静默显示成空。
+const PLAIN_BUSINESS_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
 export function formatDate(value) {
   if (!value) return '—'
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(date)
+  const text = String(value).trim()
+  const formatted = PLAIN_BUSINESS_DATE_RE.test(text) ? formatBusinessDate(text) : formatBusinessDateTime(text)
+  return formatted || text
 }
 
 export function portalInviteStatusText(value) {
@@ -227,10 +256,12 @@ export function stageAlertStatusText(status) {
   return ({ PENDING: '待处理', UNREAD: '已触发（未读）', READ: '已触发（已读）', CANCELLED: '已取消' })[status] || status
 }
 
+// 报表时间范围来自 <input type="datetime-local">，按业务口径视为北京墙钟再换算成瞬间；
+// 与 defaultReportFilters 生成的北京墙钟默认值对称，浏览器时区不参与解释。
 export function reportDateParam(value) {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) throw new Error('请输入有效的报表时间范围。')
-  return date.toISOString()
+  const instant = businessWallClockToInstant(value)
+  if (!instant) throw new Error('请输入有效的报表时间范围。')
+  return instant
 }
 
 export function normalizeReportSummary(value) {

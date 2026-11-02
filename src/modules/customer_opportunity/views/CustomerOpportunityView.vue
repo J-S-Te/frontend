@@ -30,6 +30,9 @@ import { presaleAPIParams, presaleStateFromQuery, presaleStateToQuery } from '..
 import { createPresaleMutationRetryState } from '../presaleMutationRetry.js'
 import { createRequestScope } from '@/modules/platform/shared/composables/requestScope'
 import { closeSubsystemTabOrFallback } from '@/modules/shared/utils/returnToPortal'
+// 业务时间统一按北京时间：datetime-local 回填用北京墙钟，提交再按北京墙钟换回瞬间，
+// 两端严格互逆，避免浏览器时区把同一个期望开始时间静默改掉。
+import { businessWallClockToInstant, instantToBusinessWallClock } from '@/modules/shared/utils/businessTime.js'
 import { isSafeOpenTarget } from '@/modules/platform/login-targets/utils/targetUri.js'
 import {
   changeOpportunityStage, completeOpportunityTerminalTodo, createOpportunity, createOpportunityFollowup,
@@ -1623,8 +1626,8 @@ async function reopenPresaleApproval() {
   Object.assign(presaleForm, {
     opportunity_id: String(request.opportunity_id || ''), venue: request.venue || 'REMOTE', service_address: request.service_address || '',
     contact_name: request.contact_name || '', contact_phone: '', description: request.description || '',
-    expected_start: request.expected_start ? new Date(request.expected_start).toISOString().slice(0, 16) : '',
-    expected_end: request.expected_end ? new Date(request.expected_end).toISOString().slice(0, 16) : '', urgency: request.urgency || 'NORMAL',
+    expected_start: instantToBusinessWallClock(request.expected_start),
+    expected_end: instantToBusinessWallClock(request.expected_end), urgency: request.urgency || 'NORMAL',
   })
   selectedPresale.value = null
   presaleCreatePage.value = true
@@ -2442,17 +2445,22 @@ async function submitTerminal() {
     terminalDialog.value = false; notice.value = '终态待办已补全。'; await openOpportunity(selectedOpportunity.value.id); await loadCurrent()
   } catch (value) { showError(value) }
 }
+// 跟进/沟通时间与工时起止都是只有“提交”没有“回填”的 datetime-local：
+// 值本身没有时区信息，必须按北京墙钟解释再换算成瞬间（与售前申请、报表时间边界同一口径），
+// 否则浏览器时区不是 UTC 时提交的时刻会被静默平移。非法墙钟换算出 Invalid Date，
+// 仍由 toISOString() 抛错进入外层 catch，与原实现一致地走统一错误提示。
+function followupInstant(wallClock) { return new Date(businessWallClockToInstant(wallClock)).toISOString() }
 async function submitFollowup() {
   try {
-    const payload = { type: followupForm.type, content: followupForm.content, followed_at: new Date(followupForm.followed_at).toISOString() }
-    if (followupForm.next_follow_at) payload.next_follow_at = new Date(followupForm.next_follow_at).toISOString()
+    const payload = { type: followupForm.type, content: followupForm.content, followed_at: followupInstant(followupForm.followed_at) }
+    if (followupForm.next_follow_at) payload.next_follow_at = followupInstant(followupForm.next_follow_at)
     await createOpportunityFollowup(selectedOpportunity.value.id, payload); followupDialog.value = false; notice.value = '跟进记录已添加。'; await openOpportunity(selectedOpportunity.value.id)
   } catch (value) { showError(value) }
 }
 async function submitCustomerFollowup() {
   try {
-    const payload = { type: customerFollowupForm.type, content: customerFollowupForm.content, followed_at: new Date(customerFollowupForm.followed_at).toISOString() }
-    if (customerFollowupForm.next_follow_at) payload.next_follow_at = new Date(customerFollowupForm.next_follow_at).toISOString()
+    const payload = { type: customerFollowupForm.type, content: customerFollowupForm.content, followed_at: followupInstant(customerFollowupForm.followed_at) }
+    if (customerFollowupForm.next_follow_at) payload.next_follow_at = followupInstant(customerFollowupForm.next_follow_at)
     await createCustomerFollowup(selectedCustomer.value.id, payload); customerFollowupDialog.value = false; notice.value = '客户沟通记录已添加。'; await openCustomer(selectedCustomer.value.id); await loadCurrent()
   } catch (value) { showError(value) }
 }
@@ -2471,8 +2479,10 @@ async function submitPresale({ openDetail = true, refreshList = true } = {}) {
   if (presaleForm.venue === 'ONSITE' && !presaleForm.service_address.trim()) { error.value = '现场支持必须填写服务地址。'; return null }
   const opportunityID = Number(presaleForm.opportunity_id)
   if (!Number.isSafeInteger(opportunityID) || opportunityID <= 0) { error.value = '请选择有效的关联商机。'; return null }
-  const expectedStart = new Date(presaleForm.expected_start)
-  const expectedEnd = new Date(presaleForm.expected_end)
+  // datetime-local 里的取值按北京墙钟解释再换算成瞬间，与回填的 instantToBusinessWallClock 严格互逆；
+  // 非法墙钟返回空串，交给下面原有的校验提示，不会静默改成别的时刻。
+  const expectedStart = new Date(businessWallClockToInstant(presaleForm.expected_start))
+  const expectedEnd = new Date(businessWallClockToInstant(presaleForm.expected_end))
   if (Number.isNaN(expectedStart.getTime()) || Number.isNaN(expectedEnd.getTime())) { error.value = '请填写有效的预计开始和结束时间。'; return null }
   if (expectedEnd <= expectedStart) { error.value = '预计结束时间必须晚于预计开始时间。'; return null }
   presaleCreateLoading.value = true
@@ -2502,11 +2512,12 @@ async function submitPresale({ openDetail = true, refreshList = true } = {}) {
     }
     // 内部流程可能已提交但响应在网络中丢失；同一规范化命令复用幂等键，
     // 直到服务端明确成功才清除，避免重复创建申请。
+    // 载荷只带瞬间（UTC），不再把浏览器本地解释的墙钟交给重试键规范化。
     const retry = presaleMutationRetries.keyFor('create', opportunityID, {
       ...presaleForm,
       opportunity_id: opportunityID,
-      expected_start: presaleForm.expected_start,
-      expected_end: presaleForm.expected_end,
+      expected_start: expectedStart.toISOString(),
+      expected_end: expectedEnd.toISOString(),
     })
     const value = await createPresaleRequest(retry.payload, retry.key)
     presaleMutationRetries.confirmSuccess('create', opportunityID, retry.key)
@@ -2647,8 +2658,9 @@ async function runPresale(action) {
       }
     }
     if (action === 'worklog') {
-      const workStart = new Date(operation.work_start)
-      const workEnd = new Date(operation.work_end)
+      // 工时起止同样是 datetime-local 墙钟：按北京墙钟解释，避免浏览器本地时区平移工时。
+      const workStart = new Date(businessWallClockToInstant(operation.work_start))
+      const workEnd = new Date(businessWallClockToInstant(operation.work_end))
       if (Number.isNaN(workStart.getTime()) || Number.isNaN(workEnd.getTime())) { error.value = '请填写有效的开始和结束时间。'; return }
       if (!(workEnd > workStart)) { error.value = '结束时间必须晚于开始时间。'; return }
       if (!String(operation.raw_value || '').trim() || !String(operation.work_site_address || '').trim()) { error.value = '请填写工时数值和工作地点。'; return }

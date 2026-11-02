@@ -55,9 +55,11 @@ async function loadSfc(file) {
 // golden 为提取前 ProjectManagementView.vue 操作详情抽屉片段的 SSR 渲染结果（批次 3 第三步采集），
 // golden 为提取前 CustomerOpportunityView.vue 阶段超时告警详情弹窗片段的 SSR 渲染结果
 // （批次 3 CRM 第三步采集）；提取后本组件必须逐字节复现同一 DOM。
+// 时间展示已统一为北京口径 24 小时制（formatBusinessDateTime，'YYYY-MM-DD HH:mm'），
+// 时区仍固定 Asia/Shanghai，故 golden 仅更新格式、不改时刻语义。
 const GOLDENS = {
-  "unread": "<div class=\"crm-modal\"><article><h2>阶段超时告警详情</h2><dl><dt>商机编号</dt><dd>OPP-2026-001</dd><dt>阶段</dt><dd>STAGE_PRESALE_1</dd><dt>状态</dt><dd>已触发（未读）</dd><dt>阶段起算</dt><dd>2026年10月20日 16:00</dd><dt>应提醒时间</dt><dd>2026年10月27日 16:00</dd><dt>阈值版本</dt><dd>v3</dd><dt>触发时间</dt><dd>2026年10月27日 17:00</dd><dt>已读时间</dt><dd>—</dd></dl><div class=\"crm-actions\"><button>关闭</button><button class=\"primary\">标为已读并打开商机</button></div></article></div>",
-  "read": "<div class=\"crm-modal\"><article><h2>阶段超时告警详情</h2><dl><dt>商机编号</dt><dd>OPP-2026-002</dd><dt>阶段</dt><dd>STAGE_PRESALE_2</dd><dt>状态</dt><dd>已触发（已读）</dd><dt>阶段起算</dt><dd>2026年10月18日 16:00</dd><dt>应提醒时间</dt><dd>2026年10月25日 16:00</dd><dt>阈值版本</dt><dd>v2</dd><dt>触发时间</dt><dd>2026年10月25日 17:00</dd><dt>已读时间</dt><dd>2026年10月25日 18:00</dd></dl><div class=\"crm-actions\"><button>关闭</button><button class=\"primary\">打开商机</button></div></article></div>",
+  "unread": "<div class=\"crm-modal\"><article><h2>阶段超时告警详情</h2><dl><dt>商机编号</dt><dd>OPP-2026-001</dd><dt>阶段</dt><dd>STAGE_PRESALE_1</dd><dt>状态</dt><dd>已触发（未读）</dd><dt>阶段起算</dt><dd>2026-10-20 16:00</dd><dt>应提醒时间</dt><dd>2026-10-27 16:00</dd><dt>阈值版本</dt><dd>v3</dd><dt>触发时间</dt><dd>2026-10-27 17:00</dd><dt>已读时间</dt><dd>—</dd></dl><div class=\"crm-actions\"><button>关闭</button><button class=\"primary\">标为已读并打开商机</button></div></article></div>",
+  "read": "<div class=\"crm-modal\"><article><h2>阶段超时告警详情</h2><dl><dt>商机编号</dt><dd>OPP-2026-002</dd><dt>阶段</dt><dd>STAGE_PRESALE_2</dd><dt>状态</dt><dd>已触发（已读）</dd><dt>阶段起算</dt><dd>2026-10-18 16:00</dd><dt>应提醒时间</dt><dd>2026-10-25 16:00</dd><dt>阈值版本</dt><dd>v2</dd><dt>触发时间</dt><dd>2026-10-25 17:00</dd><dt>已读时间</dt><dd>2026-10-25 18:00</dd></dl><div class=\"crm-actions\"><button>关闭</button><button class=\"primary\">打开商机</button></div></article></div>",
   "sparse": "<div class=\"crm-modal\"><article><h2>阶段超时告警详情</h2><dl><dt>商机编号</dt><dd>OPP-2026-003</dd><dt>阶段</dt><dd>STAGE_PRESALE_3</dd><dt>状态</dt><dd>已取消</dd><dt>阶段起算</dt><dd>—</dd><dt>应提醒时间</dt><dd>—</dd><dt>阈值版本</dt><dd></dd><dt>触发时间</dt><dd>—</dd><dt>已读时间</dt><dd>—</dd></dl><div class=\"crm-actions\"><button>关闭</button><button class=\"primary\">打开商机</button></div></article></div>"
 }
 const CASES = {
