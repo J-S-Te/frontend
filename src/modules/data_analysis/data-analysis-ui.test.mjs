@@ -49,7 +49,7 @@ test('API 客户端使用看板子系统前缀与 HttpOnly Cookie 会话', () =>
 })
 
 test('401 由 API 客户端触发 OIDC 登录跳转（fail-closed）', () => {
-  assert.match(api, /if \(shouldStartSubsystemLogin\(error\)\) startDataAnalysisLogin\(\)/)
+  assert.match(api, /if \(!suppressLoginRedirect && shouldStartSubsystemLogin\(error\)\) startDataAnalysisLogin\(\)/)
   assert.doesNotMatch(api, /if \(response\.status === 401\) startDataAnalysisLogin\(\)/)
 })
 
