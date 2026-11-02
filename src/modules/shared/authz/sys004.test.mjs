@@ -73,10 +73,17 @@ test('sales can track initiated approvals but cannot configure rules', () => {
 })
 
 test('contract admin can access every contract module section', () => {
-  const admin = { role: { code: 'admin' }, permissions: ['contract.read', 'opportunity_intake.read', 'contract.import.preview'] }
+  const admin = { role: { code: 'admin' }, permissions: ['contract.read', 'opportunity_intake.read', 'contract.import.preview', 'approval.manage'] }
   for (const section of Object.keys(CONTRACT_SECTION_PERMISSIONS)) {
     assert.equal(canAccessContractSection(admin, section), true, section)
   }
+})
+
+test('integration outbox entry follows the backend approval.manage permission', () => {
+  assert.equal(canAccessContractSection({ role: { code: 'admin' }, permissions: ['contract.read'] }, 'outbox'), false)
+  assert.equal(canAccessContractSection({ roles: ['sales_director'], permissions: ['approval.manage'] }, 'outbox'), true)
+  assert.equal(canAccessContractSection({ roles: ['sales'], permissions: ['contract.read'] }, 'outbox'), false)
+  assert.equal(canAccessContractSection({ roles: ['contract_specialist'], permissions: ['approval.manage'] }, 'outbox'), true)
 })
 
 test('opportunity intake queue requires its dedicated backend permission even for a named admin role', () => {

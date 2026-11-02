@@ -17,6 +17,9 @@ function onDocumentClick(event) {
 function onKeydown(event) {
   if (event.key === 'Escape' && open.value) close()
 }
+// record.savedAt 是本机写入收件箱时的本地时刻（useOperationInbox 缺省用 new Date().toISOString()），
+// 属于“本浏览器会话内的操作记录时间”，不是业务时刻；保留浏览器本地展示，
+// 不折算成北京业务时间（业务时间口径见 shared/utils/businessTime.js）。
 function timeLabel(value) {
   if (!value) return ''
   const date = new Date(value)

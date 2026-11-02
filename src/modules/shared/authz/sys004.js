@@ -33,6 +33,8 @@ export const CONTRACT_SECTION_PERMISSIONS = Object.freeze({
   // 仅持有 contract.approved.read 的跨系统角色（例如项目侧「合同导入只读」）不应看到该菜单。
   signing: ['contract.signing.manage'],
   reports: ['dashboard'],
+  // 集成死信是投递运维入口，与后端一致只由 approval.manage 把守。
+  outbox: ['approval.manage'],
 })
 
 /**
@@ -48,6 +50,8 @@ export function canAccessContractSection(session, section) {
   // 签单接收队列是独立的跨系统高敏边界，不能仅凭前端角色名称放行。
   if (section === 'imports') return CONTRACT_SECTION_PERMISSIONS.imports.some(permission => hasContractPermission(session, permission))
   if (section === 'intakes') return hasContractPermission(session, 'opportunity_intake.read')
+  // 后端对列表和重试都要求 approval.manage；菜单不能因角色名称绕过该权限。
+  if (section === 'outbox') return hasContractPermission(session, 'approval.manage')
   if (roleCodes.has('admin')) {
     return Object.hasOwn(CONTRACT_SECTION_PERMISSIONS, section)
   }

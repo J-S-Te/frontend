@@ -9,6 +9,9 @@ defineProps({
 })
 const emit = defineEmits(['dismiss', 'action'])
 
+// savedAt 由本机在记录操作结果时生成（usePersistentResult 缺省写入 new Date().toISOString()），
+// 表示“本机本次操作完成时间”，不是后端下发的业务时刻；因此按浏览器本地时间展示，
+// 不折算成北京业务时间（业务时间口径见 shared/utils/businessTime.js）。
 function timeLabel(value) {
   if (!value) return ''
   const date = new Date(value)
