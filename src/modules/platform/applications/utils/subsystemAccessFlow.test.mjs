@@ -3,9 +3,12 @@ import test from 'node:test'
 import { readFile } from 'node:fs/promises'
 import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc'
 import {
+  SUBSYSTEM_ACCESS_BLOCKING_MISSING_CODES,
   SUBSYSTEM_ACCESS_STEPS,
   actionLabel,
+  blockingMissingItems,
   canConfirmPreview,
+  confirmBlockedReason,
   isResumableOperation,
   isTerminalOperationStatus,
   markApplicationScope,
@@ -132,6 +135,45 @@ test('确认条件：无预览版本、缺少权限或已一致时不可确认',
   assert.equal(canConfirmPreview({ preview_version: 'pv-1', display_only: true }), false)
   assert.equal(canConfirmPreview({ preview_version: '' }), false)
   assert.equal(canConfirmPreview({ preview_version: 'pv-1', missing_permissions: ['platform:application:update'] }), false)
+})
+
+// 缺批准/授权/镜像不能只是展示项：预览里仍在的阻塞缺项必须禁用确认按钮（服务端也会 409）。
+test('阻塞类缺项未清时不可确认，并给出可读原因', () => {
+  assert.deepEqual([...SUBSYSTEM_ACCESS_BLOCKING_MISSING_CODES],
+    ['OUT_OF_SCOPE', 'RUNTIME_APPROVAL_MISSING', 'LICENSE_MISSING', 'IMAGES_MISSING', 'IMAGES_UNVERIFIED'])
+
+  const licenseMissing = {
+    preview_version: 'pv-1',
+    missing: [{ Code: 'LICENSE_MISSING', Message: '缺少商业授权', NextAction: '在「商业授权」完成初始化并导入签发产物' }],
+  }
+  assert.equal(canConfirmPreview(licenseMissing), false)
+  const reason = confirmBlockedReason(licenseMissing)
+  assert.match(reason, /缺少商业授权/)
+  assert.match(reason, /下一步：在「商业授权」完成初始化并导入签发产物/)
+
+  for (const code of ['RUNTIME_APPROVAL_MISSING', 'IMAGES_MISSING', 'IMAGES_UNVERIFIED', 'OUT_OF_SCOPE']) {
+    const preview = { preview_version: 'pv-1', missing: [{ code, message: code }] }
+    assert.equal(canConfirmPreview(preview), false, `${code} 必须拦住确认`)
+    assert.deepEqual(blockingMissingItems(preview.missing).map((item) => item.code), [code])
+    assert.notEqual(confirmBlockedReason(preview), '')
+  }
+
+  // 无缺项 → 可确认，且没有阻塞原因。
+  const clean = { preview_version: 'pv-1', missing: [] }
+  assert.equal(canConfirmPreview(clean), true)
+  assert.equal(confirmBlockedReason(clean), '')
+  assert.deepEqual(blockingMissingItems(undefined), [])
+})
+
+// 认证观察期不误拦：观察期由 worker 返回 WAITING，确认后仍应受理。
+test('仅认证观察期未结束时仍可确认', () => {
+  const preview = {
+    preview_version: 'pv-1',
+    missing: [{ Code: 'AUTH_OBSERVATION_PENDING', Message: '认证观察期未结束', NextAction: '等待观察期结束' }],
+  }
+  assert.equal(canConfirmPreview(preview), true)
+  assert.equal(confirmBlockedReason(preview), '')
+  assert.deepEqual(blockingMissingItems(preview.missing), [])
 })
 
 test('U15：结果区按分项展示，且不宣称"业务可用"', async () => {

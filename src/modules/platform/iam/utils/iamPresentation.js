@@ -1,3 +1,5 @@
+import { formatBusinessDateTime } from '../../../shared/utils/businessTime.js'
+
 export function displayStatus(status) {
   return ({ ACTIVE: '启用', DISABLED: '停用', LOCKED: '已锁定', EXPIRED: '已失效' }[status] || status || '—')
 }
@@ -42,10 +44,10 @@ export function displayMembershipType(type) {
   return ({ PRIMARY: '主组织', PART_TIME: '兼岗', SECONDARY: '次组织 / 兼岗' }[type] || type || '—')
 }
 
+// 业务时间统一按北京时间（UTC+8）、24 小时制展示，不跟随浏览器时区。
 export function formatDateTime(value) {
   if (!value) return '—'
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false })
+  return formatBusinessDateTime(value) || value
 }
 
 export function detailTitle(detail) {

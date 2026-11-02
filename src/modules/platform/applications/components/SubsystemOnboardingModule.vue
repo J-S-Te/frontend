@@ -38,6 +38,7 @@ import { createRequestScope } from '@/modules/platform/shared/composables/reques
 import { loadAllCatalogPages } from '@/modules/platform/iam/utils/paginatedCatalog'
 import { RELATED_DATA } from '@/modules/platform/shared/utils/relatedDataInvalidation'
 import { formatUserError, safeUserMessage, userErrorDiagnostics } from '../../../shared/utils/userError.js'
+import { formatBusinessDateTime } from '@/modules/shared/utils/businessTime.js'
 
 const props = defineProps({
   canOnboard: { type: Boolean, default: false },
@@ -1112,10 +1113,12 @@ function keycloakRollbackAvailable(environment) {
   return new Date(state.rollback_deadline_at).getTime() >= Date.now()
 }
 
+// 切换时间线、回滚截止等展示时间是业务时间，统一按北京时间（UTC+8）、24 小时制展示。
+// 注意：上方 keycloakRollbackAvailable 是绝对时刻比较（epoch 毫秒 ≥ Date.now()），
+// 与展示时区无关，故不在这里做墙钟换算。
 function dateTime(value) {
   if (!value) return '—'
-  const parsed = new Date(value)
-  return Number.isNaN(parsed.getTime()) ? '—' : parsed.toLocaleString('zh-CN', { hour12: false })
+  return formatBusinessDateTime(value) || '—'
 }
 
 function keycloakRedirectURI(environment) {

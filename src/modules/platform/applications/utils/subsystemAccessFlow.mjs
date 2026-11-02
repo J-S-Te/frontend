@@ -108,16 +108,47 @@ export function subsystemAccessStepIndex({ applicationCode = '', environment = '
   return 0
 }
 
+// 提交会真实派发部署，因此预览里的阻塞类缺项必须拦住确认按钮；
+// 认证观察期（AUTH_OBSERVATION_PENDING）不阻塞：服务端 worker 会如实返回 WAITING。
+export const SUBSYSTEM_ACCESS_BLOCKING_MISSING_CODES = Object.freeze([
+  'OUT_OF_SCOPE',
+  'RUNTIME_APPROVAL_MISSING',
+  'LICENSE_MISSING',
+  'IMAGES_MISSING',
+  'IMAGES_UNVERIFIED',
+])
+
+// 从预览缺项中筛出阻塞类缺项（归一化后按 code 比较，兼容服务端两种字段大小写）。
+export function blockingMissingItems(list) {
+  const blocking = new Set(SUBSYSTEM_ACCESS_BLOCKING_MISSING_CODES)
+  return missingItems(list).filter((item) => blocking.has(String(item.code || '').toUpperCase()))
+}
+
+// confirmBlockedReason 返回"为什么不能确认"的可读原因；空串表示可以提交。
+// 与 canConfirmPreview 共用同一判定顺序，避免按钮状态与提示文案不一致。
+export function confirmBlockedReason(preview) {
+  if (!preview || typeof preview !== 'object') return '请先完成条件检查'
+  if (preview.display_only) return '目标已接入且配置一致，无需重复操作'
+  const version = String(preview.preview_version || '').trim()
+  if (!version) return '缺少预览版本，请重新检查条件后再确认'
+  // 执行入口为"既有受控更新入口"时，统一入口不能提交（否则必然失败）：页面只展示提示。
+  if (String(preview.execution_path || '').trim().toLowerCase() === 'legacy') {
+    return '本次动作需由既有受控入口执行，统一入口不能提交'
+  }
+  const blocking = blockingMissingItems(preview.missing)
+  if (blocking.length > 0) {
+    const reasons = blocking.map((item) => item.message || item.code).filter(Boolean).join('、')
+    const steps = [...new Set(blocking.map((item) => item.nextAction).filter(Boolean))]
+    return `仍有阻塞缺项：${reasons}${steps.length ? `。下一步：${steps.join('；')}` : ''}`
+  }
+  const missingPermissions = Array.isArray(preview.missing_permissions) ? preview.missing_permissions : []
+  if (missingPermissions.length > 0) return `当前账号缺少权限：${missingPermissions.join('、')}`
+  return ''
+}
+
 // 提交前必须满足的条件（页面据此禁用确认按钮，最终仍由服务端校验）。
 export function canConfirmPreview(preview) {
-  if (!preview || typeof preview !== 'object') return false
-  if (preview.display_only) return false
-  const version = String(preview.preview_version || '').trim()
-  if (!version) return false
-  // 执行入口为"既有受控更新入口"时，统一入口不能提交（否则必然失败）：页面只展示提示。
-  if (String(preview.execution_path || '').trim().toLowerCase() === 'legacy') return false
-  const missingPermissions = Array.isArray(preview.missing_permissions) ? preview.missing_permissions : []
-  return missingPermissions.length === 0
+  return confirmBlockedReason(preview) === ''
 }
 
 // 候选系统按服务端清单标注范围：

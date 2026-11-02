@@ -1,3 +1,5 @@
+import { formatBusinessDateTime } from '../../../shared/utils/businessTime.js'
+
 export const LICENSE_SYSTEMS = [
   { code: 'customer_and_opportunity', name: '客户与商机' },
   { code: 'customer_portal', name: '客户门户' },
@@ -55,6 +57,7 @@ const LICENSE_EVENT_NAMES = {
 export const licenseEventName = kind => LICENSE_EVENT_NAMES[kind] || kind || '未知事件'
 
 // 许可证有效期使用 Unix 秒时间戳；事件 created_at 使用 Go 的 RFC3339 时间戳。
+// 展示口径统一走共享业务时间（北京时间 UTC+8），与审计日志页同一入口，避免同屏两个页签差 8 小时。
 export function formatLicenseTime(value) {
   if (value == null || value === '' || value === 0 || typeof value === 'boolean') return '—'
   let date
@@ -68,5 +71,7 @@ export function formatLicenseTime(value) {
     date = new Date(value)
   } else return '—'
   if (!Number.isFinite(date.getTime())) return '—'
-  return date.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+  // 事件与有效期都要秒级精度：共享入口的 seconds 选项保持改动前的展示粒度，
+  // 时区口径由该模块固定为北京时间，不再依赖调用方浏览器时区。
+  return formatBusinessDateTime(date, { seconds: true }) || '—'
 }

@@ -11,24 +11,29 @@ export function permissionCode(permission) {
   return permission?.code || permission?.permission_code || ''
 }
 
+// 授权有效期的回填/提交必须成对且同一口径：一律按北京墙钟解释，
+// 否则 UTC 浏览器下每保存一次就会把有效期平移 8 小时（与售前 expected_start 同一类缺陷）。
 export function toDateTimeLocal(value) {
   if (!value) return ''
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ''
-  const pad = (number) => String(number).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+  return instantToBusinessWallClock(value)
 }
 
 export function toRFC3339(value) {
-  if (!value) return null
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? null : date.toISOString()
+  const text = String(value || '').trim()
+  if (!text) return null
+  // 已带 Z/偏移的值本身是绝对时刻，直接解析；否则按北京墙钟换算，避免二次平移。
+  if (/(?:Z|[+-]\d{2}:\d{2})$/.test(text)) {
+    const parsed = new Date(text)
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString()
+  }
+  return businessWallClockToInstant(text) || null
 }
 
 export function normalizeScopeType(value) {
   return String(value || '').toUpperCase() === 'ENVIRONMENT' ? 'ENVIRONMENT' : 'APPLICATION'
 }
 
+import { businessWallClockToInstant, instantToBusinessWallClock } from '../../../shared/utils/businessTime.js'
 import { catalogRolePermissions } from './applicationAuthorizationCatalog.js'
 import { formatDateTime } from './iamPresentation.js'
 

@@ -9,6 +9,7 @@ import {
 } from '@/modules/platform/security/api/security'
 import { hasPermission, useCurrentPrincipal } from '@/modules/platform/auth/utils/principal'
 import { formatUserError } from '../../../shared/utils/userError.js'
+import { formatBusinessDateTime } from '@/modules/shared/utils/businessTime.js'
 import '@/modules/platform/security/styles/login-security.css'
 
 const emit = defineEmits(['toast'])
@@ -32,10 +33,10 @@ function emitToast(message) {
   emit('toast', message)
 }
 
+// 锁定/解锁时间是业务时间，统一按北京时间（UTC+8）、24 小时制展示。
 function formatDateTime(value) {
   if (!value) return '—'
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false })
+  return formatBusinessDateTime(value) || value
 }
 
 async function loadLoginPolicy() {
