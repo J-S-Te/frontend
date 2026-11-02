@@ -2,6 +2,7 @@
 import { formatPortalError } from '../api/errorMessages.js'
 import { useConfirmDialog } from '@/modules/shared/composables/useConfirmDialog.js'
 import ConfirmDialog from '@/modules/shared/components/ConfirmDialog.vue'
+import { formatBusinessDateTime } from '@/modules/shared/utils/businessTime.js'
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { completeFilingMaterialUpload, createFiling, createFilingMaterialUpload, deleteFiling, exportFilingPDF, getFiling, listFilings, saveFilingMatrix, saveFilingSection, submitFiling, validateFiling } from '../api/portal.js'
 
@@ -452,7 +453,7 @@ onUnmounted(() => {
     <div class="portal-title"><h1 id="filing-title">等保备案信息</h1></div>
     <div v-if="!filing" class="portal-card filing-list">
       <div class="filing-toolbar"><h2>我的备案</h2><div v-if="canCreate" class="filing-create"><button v-if="!creating" type="button" class="primary" :disabled="busy" @click="creating = true">新建备案</button><template v-else><label>关联项目（可选）<select v-model="createProjectId"><option value="">不关联项目</option><option v-for="item in projects" :key="item.project_id" :value="item.project_id">{{ item.project_name || '未命名项目' }}（{{ item.contract_no || item.project_id }}）</option></select></label><button type="button" class="primary" :disabled="busy" @click="startFiling">确认创建</button><button type="button" class="secondary" :disabled="busy" @click="creating = false">取消</button></template></div></div>
-      <div v-for="item in filings" :key="item.id" class="filing-list-row"><button type="button" class="filing-list-open" @click="openFiling(item.id)"><span><strong>{{ filingTitle(item) }}</strong><small>更新于 {{ new Date(item.updated_at).toLocaleString('zh-CN') }}</small></span><em>{{ statusText(item.status) }}</em></button><button v-if="item.status === 'DRAFT' && canDelete" type="button" class="secondary filing-list-delete" :disabled="busy" @click="deleteDraft(item)">删除草稿</button></div>
+      <div v-for="item in filings" :key="item.id" class="filing-list-row"><button type="button" class="filing-list-open" @click="openFiling(item.id)"><span><strong>{{ filingTitle(item) }}</strong><small>更新于 {{ formatBusinessDateTime(item.updated_at) || '—' }}</small></span><em>{{ statusText(item.status) }}</em></button><button v-if="item.status === 'DRAFT' && canDelete" type="button" class="secondary filing-list-delete" :disabled="busy" @click="deleteDraft(item)">删除草稿</button></div>
       <p v-if="!busy && !filings.length">暂无备案记录。</p>
     </div>
     <template v-else>
