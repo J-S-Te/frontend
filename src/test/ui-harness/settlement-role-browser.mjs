@@ -128,22 +128,25 @@ try {
     assert.equal(await page.getByRole('button', { name: '发起开票申请', exact: true }).count(), 0)
     assert.equal(requests.some(item => /\/invoice-eligible-receivables|\/receipts|\/accounting-vouchers/.test(item.path)), false)
   })
+  // SET-04 计划覆盖守卫：夹具合同的合同金额与计划合计均为 100.00，差额阈值默认 5%。
+  // 销售账号没有 settlement.finance.override，因此改到阈值外（如 80，差额 20%）会被服务端以 409 拒绝；
+  // 这里改用阈值内金额 96.00（差额 4%、降幅 4%），仍然是"销售调整本人可见计划并核对落库"的同一断言语义。
   await check('sales-adjust-repeat', 'sales', 'receivables', async page => {
     assert.equal(await page.getByRole('button', { name: '差异与会计凭证', exact: true }).count(), 0)
     const form = page.locator('form').filter({ has: page.getByRole('button', { name: '提交调整', exact: true }) })
     await form.locator('select').selectOption(fixture.data.plan_id)
-    await form.getByLabel('金额', { exact: true }).fill('80')
-    await form.getByLabel('调整原因', { exact: true }).fill('隔离浏览器调整80')
+    await form.getByLabel('金额', { exact: true }).fill('96')
+    await form.getByLabel('调整原因', { exact: true }).fill('隔离浏览器调整96')
     await submit(page, '提交调整', `/receivable-plans/${fixture.data.plan_id}/adjust`)
     await page.waitForFunction(() => {
       const amount = document.querySelector('.settlement-receivables .settlement-money')
-      return amount && Number(amount.textContent.replace(/[^0-9.-]/g, '')) === 80
+      return amount && Number(amount.textContent.replace(/[^0-9.-]/g, '')) === 96
     }, null, { timeout: 3000 })
     const first = (await readResource(page, '/receivable-plans')).find(item => item.id === fixture.data.plan_id)
-    assert.equal(Number(first.planned_amount), 80)
+    assert.equal(Number(first.planned_amount), 96)
     const nextForm = page.locator('form').filter({ has: page.getByRole('button', { name: '提交调整', exact: true }) })
     await nextForm.locator('select').selectOption(fixture.data.plan_id)
-    await nextForm.getByLabel('调整原因', { exact: true }).fill('隔离浏览器再次保存80')
+    await nextForm.getByLabel('调整原因', { exact: true }).fill('隔离浏览器再次保存96')
     await submit(page, '提交调整', `/receivable-plans/${fixture.data.plan_id}/adjust`)
     const second = (await readResource(page, '/receivable-plans')).find(item => item.id === fixture.data.plan_id)
     assert.ok(second.version > first.version, '第二次调整必须使用刷新后的当前版本')
@@ -232,11 +235,13 @@ try {
       assert.match(await form.locator('select').inputValue(), new RegExp(fixture.data.old_snapshot_id))
       await form.getByLabel('期次', { exact: true }).fill('1')
       await form.getByLabel('收款日', { exact: true }).fill('2099-12-10')
-      await form.getByLabel('金额', { exact: true }).fill('10')
+      // SET-04：历史合同金额 100.00 且暂无计划，新建 10.00 会让合同差额达到 90%（阈值 5%）而被 409 拒绝；
+      // 销售账号无 settlement.finance.override，这里改为阈值内金额 96.00，保留"翻页后仍能按当前合同建计划"的断言。
+      await form.getByLabel('金额', { exact: true }).fill('96')
       await form.getByLabel('原因', { exact: true }).fill('历史合同翻页创建计划')
       const created = await submit(page, '创建计划', '/receivable-plans')
       const stored = (await readResource(page, '/receivable-plans')).find(item => item.id === created.id)
-      assert.equal(Number(stored.planned_amount), 10)
+      assert.equal(Number(stored.planned_amount), 96)
       await controls.getByRole('button', { name: '上一页', exact: true }).click()
       await page.waitForFunction(() => !document.querySelector('.role-panel-loading'))
       assert.equal(await form.locator('select').inputValue(), '')
