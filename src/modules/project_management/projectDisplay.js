@@ -1,6 +1,11 @@
 // 项目管理页面的展示层纯函数与常量：由 ProjectManagementView.vue 批次 3 第一步逐字迁移，
 // 行为契约由 projectDisplay.test.mjs 固化；页面通过 import 继续以原绑定名使用。
 
+// 业务时间一律走共享的北京口径工具：后端返回 RFC3339（UTC），浏览器时区五花八门，
+// 直接 slice 或 toLocaleString 会取出 UTC 日历日 / 宿主机本地时间，导致跨零点显示错位。
+import { businessWallClockToInstant, formatBusinessDateTime, instantToBusinessWallClock } from '../shared/utils/businessTime.js'
+import { escapeCsvCell } from '../platform/iam/utils/csvExport.js'
+
 export function startOfWeek(date) {
   const d = new Date(date.getFullYear(), date.getMonth(), date.getDate())
   d.setDate(d.getDate() - ((d.getDay() + 6) % 7))
@@ -23,26 +28,27 @@ export function isoWeekOf(date) {
   return Math.ceil(((firstThursday - yearStart) / 86400000 + 1) / 7)
 }
 
+// 统一按北京口径展示：同一行里的时间不能一半是 UTC 日历日、一半是浏览器本地时间。
 export function formatDateTime(value) {
   if (!value) return '—'
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString()
+  return formatBusinessDateTime(value) || String(value)
 }
 
 export function selectedIDs(value) { return String(value || '').split(/[\s,，]+/).map((item) => item.trim()).filter(Boolean) }
 
-export function asRFC3339(value) { if (!value) return ''; const date = new Date(value); return Number.isNaN(date.getTime()) ? value : date.toISOString() }
 // 后端保存 RFC3339（UTC），而 <input type="datetime-local"> 只接受本地时间的 YYYY-MM-DDTHH:mm。
 // 直接把 ISO 串塞进输入框会被浏览器判为非法值并显示为空，导致再次编辑已有计划时时间"丢失"。
-
-// 后端保存 RFC3339（UTC），而 <input type="datetime-local"> 只接受本地时间的 YYYY-MM-DDTHH:mm。
-// 直接把 ISO 串塞进输入框会被浏览器判为非法值并显示为空，导致再次编辑已有计划时时间"丢失"。
+// 回填口径固定为北京墙钟（与提交侧 datetimeLocalToInstant 严格互为逆运算），不跟随浏览器时区。
 export function toDateTimeLocal(value) {
   if (!value) return ''
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ''
-  const pad = (part) => String(part).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+  return instantToBusinessWallClock(value)
+}
+
+// 提交侧：datetime-local 里的取值按北京墙钟解释，再换算成 RFC3339（UTC）交给后端。
+// 与 toDateTimeLocal 对称——同一个瞬间回填后再提交必须完全一致，不受浏览器时区影响。
+export function datetimeLocalToInstant(value) {
+  if (!value) return ''
+  return businessWallClockToInstant(value)
 }
 // identityStatusLabel 把身份复核结果翻译成用户能读懂的状态。
 
@@ -190,9 +196,10 @@ export function splitDimensionText(value) { return splitDimensionLabel[value] ||
 
 export function splitMissingRuleText(value) { return splitMissingRuleOptions.find((option) => option.value === value)?.label.replace(/（默认）|（不通知，不推荐）/, '') || value }
 
+// CSV 单元格转义：委托给平台统一实现，结构转义与公式前缀中和（= + - @ 及 TAB/CR 开头）
+// 只维护一份，避免各导出入口行为漂移；纯数字（含负数）不加前缀，保持数值语义。
 export function csvCell(value) {
-  const text = String(value ?? '')
-  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
+  return escapeCsvCell(value)
 }
 
 export function overrideMatchText(item) {

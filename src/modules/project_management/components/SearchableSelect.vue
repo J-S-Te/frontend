@@ -24,8 +24,14 @@ const props = defineProps({
   ariaLabel: { type: String, default: '下拉选择' },
   // Teleport 会脱离弹窗 层叠上下文；弹窗内选择器可显式提升菜单层级。
   menuZIndex: { type: [String, Number], default: '' },
+  // BIZ-XAPI-09：远程模式下选项由父组件按关键字分页拉取，组件只负责
+  // 显示、键盘导航和"加载更多"，不再做本地过滤（否则会把服务端已收窄的
+  // 结果再按当前输入过滤一次）。默认 false，既有调用点行为不变。
+  remote: { type: Boolean, default: false },
+  loading: { type: Boolean, default: false },
+  hasMore: { type: Boolean, default: false },
 })
-const emit = defineEmits(['update:modelValue', 'change'])
+const emit = defineEmits(['update:modelValue', 'change', 'search', 'load-more'])
 
 const root = ref(null)
 const trigger = ref(null)
@@ -53,7 +59,9 @@ const triggerLabel = computed(() => {
   if (!props.multiple || labels.length <= 2) return labels.join('、')
   return `${labels.slice(0, 2).join('、')} 等 ${labels.length} 项`
 })
-const filteredOptions = computed(() => filterSearchableOptions(props.options, keyword.value))
+const filteredOptions = computed(() => (props.remote
+  ? props.options
+  : filterSearchableOptions(props.options, keyword.value)))
 
 function optionKey(option) {
   return String(optionValue(option))
@@ -144,6 +152,15 @@ function onKeydown(event) {
     if (option) choose(option)
   }
 }
+// 远程模式把输入丢给父组件（父组件负责防抖与请求合并），组件不发请求。
+function onSearchInput() {
+  if (!props.remote) return
+  emit('search', keyword.value)
+}
+function loadMore() {
+  if (!props.remote || !props.hasMore || props.loading) return
+  emit('load-more')
+}
 function onOutsidePointerDown(event) {
   if (!root.value?.contains(event.target) && !menu.value?.contains(event.target)) hide()
 }
@@ -196,7 +213,7 @@ onBeforeUnmount(() => {
       >
         <label class="pm-search-select-search">
           <span class="pm-search-select-search-icon" aria-hidden="true"></span>
-          <input ref="searchInput" v-model="keyword" type="search" :placeholder="searchPlaceholder" :aria-label="searchPlaceholder"  maxlength="100"/>
+          <input ref="searchInput" v-model="keyword" type="search" :placeholder="searchPlaceholder" :aria-label="searchPlaceholder"  maxlength="100" @input="onSearchInput"/>
         </label>
         <div class="pm-search-select-options" role="listbox" :aria-label="ariaLabel" :aria-multiselectable="multiple">
           <button
@@ -214,7 +231,15 @@ onBeforeUnmount(() => {
             <span class="pm-search-select-check" aria-hidden="true">{{ isSelected(option) ? '✓' : '' }}</span>
             <span><b>{{ optionLabel(option) }}</b><small v-if="optionDescription(option)">{{ optionDescription(option) }}</small></span>
           </button>
-          <p v-if="!filteredOptions.length" class="pm-search-select-empty">{{ emptyText }}</p>
+          <p v-if="remote && loading && !filteredOptions.length" class="pm-search-select-empty">正在搜索…</p>
+          <p v-else-if="!filteredOptions.length" class="pm-search-select-empty">{{ emptyText }}</p>
+          <button
+            v-if="remote && hasMore"
+            type="button"
+            class="pm-search-select-more"
+            :disabled="loading"
+            @click="loadMore"
+          >{{ loading ? '加载中…' : '加载更多' }}</button>
         </div>
       </div>
     </Teleport>
@@ -255,6 +280,8 @@ onBeforeUnmount(() => {
 .multiple .pm-search-select-check { border-radius: 4px; }
 .pm-search-select-option.selected .pm-search-select-check { border-color: var(--pm-primary, #1f5eff); background: var(--pm-primary, #1f5eff); color: #fff; }
 .pm-search-select-empty { margin: 0; padding: 16px 10px; color: var(--pm-muted, #64748b); text-align: center; }
+.pm-search-select-more { width: 100%; margin-top: 6px; padding: 8px 10px; border: 1px dashed var(--pm-line); border-radius: var(--pm-r-sm); background: transparent; color: var(--pm-primary, #1f5eff); cursor: pointer; font: inherit; }
+.pm-search-select-more:disabled { color: var(--pm-muted, #64748b); cursor: progress; }
 .pm-search-select-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
 .pm-search-select-chips > span { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; border-radius: 999px; background: color-mix(in srgb, var(--pm-primary, #1f5eff) 10%, transparent); color: var(--pm-primary, #1f5eff); font-size: 12px; }
 .pm-search-select-chips button { padding: 0; border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 16px; line-height: 1; }

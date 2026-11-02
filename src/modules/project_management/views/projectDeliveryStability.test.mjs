@@ -57,6 +57,9 @@ function workspaceContext({ listProjects = async () => [] } = {}) {
     getProjectNavigation: async () => ({ sections: ['projects'], default_section: 'projects' }),
     listDetectionCategories: async () => [], listRuleConfigurationCatalog: async () => ({ automation_triggers: [], sla_statuses: [] }),
     loadApplicationRoles: () => {}, loadSplitConfig: async () => {}, loadEquipment: async () => {}, loadPersonnelNames: async () => {},
+    // BIZ-PROJECT-06：工作区刷新后会重新拉取服务端缺项判定；该读取不属于本用例的断言范围，
+    // 注入成功桩，避免把"判定读取"混进工作区请求作用域的断言。
+    refreshSelectedFieldEvidence: async () => {},
     listSlaOverdue: async () => [],
     showToast: (message, type) => toasts.push({ message, type }),
   }
@@ -203,7 +206,7 @@ test('runOperation 在写操作进行中再次触发时直接返回，不重复�
     planningBlocked: ref(null),
     showToast: () => assert.fail('进行中重复触发不得给出任何提示或提交'),
     planImplementation: () => { planCalls++ },
-    asRFC3339: (value) => value,
+    datetimeLocalToInstant: (value) => value,
     selectedIDs: (value) => String(value || '').split(',').filter(Boolean),
     formatUserError,
   }

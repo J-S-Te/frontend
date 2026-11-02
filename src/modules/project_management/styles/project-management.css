@@ -1453,6 +1453,58 @@
 .pm-contract-warning b { display: block; margin-bottom: 3px; color: var(--pm-amber-text); font-size: var(--pm-fs-sm); font-weight: var(--pm-fw-semibold); }
 .pm-contract-warning p { margin: 0; font-size: var(--pm-fs-hint); line-height: var(--pm-lh-loose); }
 
+/* 补充协议关账：处理中状态与受控出口。
+   关账会把当前范围指纹钉成新基准，因此用左侧琥珀强调条和浅暖底把它与普通信息条
+   区分开；动作按钮保持次级层级，不与「确认拆解」争主按钮。 */
+.pm-supplement-closure {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--pm-sp-3);
+  margin-bottom: 14px;
+  padding: var(--pm-sp-4) var(--pm-sp-5);
+  border: 1px solid var(--pm-line);
+  border-left: 4px solid var(--pm-amber);
+  border-radius: var(--pm-r-lg);
+  background: linear-gradient(135deg, var(--pm-amber-soft), var(--pm-card) 78%);
+  box-shadow: var(--pm-shadow);
+}
+.pm-supplement-closure > svg { flex: 0 0 20px; width: 20px; height: 20px; margin-top: 2px; color: var(--pm-amber-text); }
+.pm-supplement-closure > div { flex: 1 1 auto; min-width: 0; }
+.pm-supplement-closure b { display: block; margin-bottom: 3px; color: var(--pm-amber-text); font-size: var(--pm-fs-sm); font-weight: var(--pm-fw-semibold); }
+.pm-supplement-closure p { margin: 0; color: var(--pm-body); font-size: var(--pm-fs-hint); line-height: var(--pm-lh-loose); }
+.pm-supplement-closure-locked { margin-top: 6px !important; color: var(--pm-red-text) !important; font-weight: var(--pm-fw-semibold); }
+.pm-supplement-closure > .pm-button { flex: none; align-self: center; }
+
+.pm-supplement-closure-context {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--pm-line);
+  border-radius: var(--pm-r-md);
+  background: var(--pm-sunken);
+}
+.pm-supplement-closure-context div { min-width: 0; padding: var(--pm-sp-2) var(--pm-sp-3); border-right: 1px solid var(--pm-line); }
+.pm-supplement-closure-context div:last-child { border-right: 0; }
+.pm-supplement-closure-context dt { margin-bottom: 2px; color: var(--pm-muted); font-size: var(--pm-fs-label); font-weight: var(--pm-fw-medium); }
+.pm-supplement-closure-context dd { margin: 0; color: var(--pm-ink); font-size: var(--pm-fs-sm); font-weight: var(--pm-fw-semibold); overflow-wrap: anywhere; word-break: break-word; }
+
+.pm-supplement-closure-state { margin: 0; padding: var(--pm-sp-3) var(--pm-sp-4); border-radius: var(--pm-r-sm); background: var(--pm-sunken); color: var(--pm-body); font-size: var(--pm-fs-hint); line-height: var(--pm-lh-loose); }
+.pm-supplement-closure-state.error { border: 1px solid var(--pm-red-text); background: var(--pm-red-soft); color: var(--pm-red-text); }
+.pm-supplement-closure-state.error .pm-link { margin-left: var(--pm-sp-2); }
+
+.pm-supplement-closure-notice { margin: 0; padding: var(--pm-sp-3) var(--pm-sp-4); border: 1px dashed var(--pm-amber); border-radius: var(--pm-r-md); background: var(--pm-amber-soft); }
+.pm-supplement-closure-notice b { display: block; margin-bottom: 4px; color: var(--pm-amber-text); font-size: var(--pm-fs-sm); }
+.pm-supplement-closure-notice p { margin: 0; color: var(--pm-amber-text); font-size: var(--pm-fs-hint); line-height: var(--pm-lh-loose); }
+
+@media (max-width: 700px) {
+  .pm-supplement-closure { flex-wrap: wrap; }
+  .pm-supplement-closure > div { flex-basis: calc(100% - 32px); }
+  .pm-supplement-closure > .pm-button { width: 100%; }
+  .pm-supplement-closure-context div { border-right: 0; border-bottom: 1px solid var(--pm-line); }
+}
+
 /* ==========================================================================
    §16 业务区块
    ========================================================================== */

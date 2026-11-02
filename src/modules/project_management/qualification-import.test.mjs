@@ -2,14 +2,15 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFile } from 'node:fs/promises'
 import { formatUserError } from '../shared/utils/userError.js'
+import { formatBusinessDate } from '../shared/utils/businessTime.js'
 
 const dialog = await readFile(new URL('./components/QualificationImportDialog.vue', import.meta.url), 'utf8')
 const api = await readFile(new URL('./api/projectManagement.js', import.meta.url), 'utf8')
 function mount(apiCalls, resourceType = 'PERSON') {
   const script = dialog.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '')
   const events = []
-  const state = new Function('formatUserError', 'computed', 'ref', 'defineProps', 'defineEmits', 'downloadCapabilityImportTemplate', 'previewCapabilitiesImport', 'importCapabilities', 'downloadEquipmentImportTemplate', 'previewEquipmentImport', 'importEquipment', `${script}\nreturn { file, preview, result, selected, busy, error, readyRows, selectedCount, pick, inspect, commit, reset, dateLabel, importMessage }`)(
-    formatUserError, (read) => ({ get value() { return read() } }), (value) => ({ value }), () => ({ codeOptions: [], resourceType }), () => (...args) => events.push(args), apiCalls.download, apiCalls.preview, apiCalls.commit, apiCalls.equipmentDownload, apiCalls.equipmentPreview, apiCalls.equipmentCommit,
+  const state = new Function('formatUserError', 'computed', 'ref', 'defineProps', 'defineEmits', 'downloadCapabilityImportTemplate', 'previewCapabilitiesImport', 'importCapabilities', 'downloadEquipmentImportTemplate', 'previewEquipmentImport', 'importEquipment', 'formatBusinessDate', `${script}\nreturn { file, preview, result, selected, busy, error, readyRows, selectedCount, pick, inspect, commit, reset, dateLabel, importMessage }`)(
+    formatUserError, (read) => ({ get value() { return read() } }), (value) => ({ value }), () => ({ codeOptions: [], resourceType }), () => (...args) => events.push(args), apiCalls.download, apiCalls.preview, apiCalls.commit, apiCalls.equipmentDownload, apiCalls.equipmentPreview, apiCalls.equipmentCommit, formatBusinessDate,
   )
   return { ...state, events }
 }

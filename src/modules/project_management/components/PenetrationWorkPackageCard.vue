@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { formatUserError } from '../../shared/utils/userError.js'
+import { businessWallClockToInstant, formatBusinessDateTime, instantToBusinessWallClock } from '../../shared/utils/businessTime.js'
 import SearchableSelect from './SearchableSelect.vue'
 import {
   advancePenetrationExecution,
@@ -48,16 +49,14 @@ const reportLabel = computed(() => ({ NONE: '未开始', DRAFTING: '编制中', 
 const reportActionLabel = computed(() => ({ DRAFTING: '开始编制', SUBMITTED: '提交审核', APPROVED: '审核通过', ISSUED: '签发报告', ARCHIVED: '归档报告' })[reportNext.value] || '')
 
 function localDate(value) {
+  // 回填按北京墙钟（与下方 rfc3339 互为逆运算），不跟随浏览器时区。
   if (!value) return ''
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ''
-  const pad = (part) => String(part).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+  return instantToBusinessWallClock(value)
 }
 function rfc3339(value) {
+  // 提交侧：datetime-local 取值按北京墙钟解释再换算为 UTC 瞬间。
   if (!value) return ''
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : date.toISOString()
+  return businessWallClockToInstant(value)
 }
 function notify(message, type = 'success') { emit('notify', { message: formatUserError(message, { fallback: '专项操作未完成，请核对当前状态后再操作。' }), type }) }
 function retryKey(name, payload) {
@@ -211,7 +210,7 @@ watch(workPackage, fillForms)
     <template v-else>
       <dl class="pen-summary">
         <div><dt>客户联系人</dt><dd>{{ workPackage.customer_contact || '待确认' }}</dd></div>
-        <div><dt>沟通时间</dt><dd>{{ workPackage.communicated_at ? new Date(workPackage.communicated_at).toLocaleString() : '待确认' }}</dd></div>
+        <div><dt>沟通时间</dt><dd>{{ workPackage.communicated_at ? formatBusinessDateTime(workPackage.communicated_at) : '待确认' }}</dd></div>
         <div><dt>专项工程师</dt><dd>{{ (workPackage.engineer_ids || []).length ? `${workPackage.engineer_ids.length} 人` : '待指派' }}</dd></div>
         <div><dt>版本</dt><dd>v{{ workPackage.version }}</dd></div>
       </dl>
@@ -244,7 +243,7 @@ watch(workPackage, fillForms)
           <button class="pm-button primary" type="button" :disabled="busy" @click="submitPlan">保存专项计划</button>
         </div>
         <dl v-else class="pen-summary details">
-          <div><dt>计划窗口</dt><dd>{{ workPackage.planned_start ? `${new Date(workPackage.planned_start).toLocaleString()} 至 ${new Date(workPackage.planned_end).toLocaleString()}` : '待制定' }}</dd></div>
+          <div><dt>计划窗口</dt><dd>{{ workPackage.planned_start ? `${formatBusinessDateTime(workPackage.planned_start)} 至 ${formatBusinessDateTime(workPackage.planned_end)}` : '待制定' }}</dd></div>
           <div><dt>授权范围</dt><dd>{{ workPackage.auth_scope || '待补充' }}</dd></div>
           <div><dt>测试范围</dt><dd>{{ workPackage.test_scope || '待补充' }}</dd></div>
           <div><dt>应急 / 回滚</dt><dd>{{ workPackage.emergency_contact || '待补充' }} / {{ workPackage.rollback_plan || '待补充' }}</dd></div>

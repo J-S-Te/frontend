@@ -52,7 +52,8 @@ test('项目管理页面覆盖原型的五个业务域与核心交互', () => {
   }
   // 现场记录先进入离线队列，再由统一同步器调用 API，不能退回直接提交。
   assert.match(source, /submitStoredFieldOperation[\s\S]*submitFieldRecord/)
-  assert.match(source, /asRFC3339\(form\.plannedStart\)/)
+  // 提交侧必须按北京墙钟换算（datetimeLocalToInstant），不能回退到浏览器本地时区。
+  assert.match(source, /datetimeLocalToInstant\(form\.plannedStart\)/)
   assert.match(source, /service_items:/)
   assert.match(source, /listDeliveryEvents\(\)/)
   assert.match(source, /listCapabilities\(\)/)
@@ -819,7 +820,8 @@ test('项目页通过项目后端机器集成读取已审批合同', () => {
   // 浏览器只持有项目会话；合同系统鉴权由项目后端的机器身份完成。
   assert.match(pmApiSource, /export async function listApprovedContracts\(params = \{\}\)/)
   assert.match(pmApiSource, /request\(`\/approved-contracts\$\{search \? `\?\$\{search\}` : ''\}`\)/)
-  assert.match(source, /listApprovedContracts\(\{ limit: 200 \}\)/)
+  // BIZ-XAPI-09：选择器走服务端关键字搜索 + 游标分页，不再一次拉 200 条。
+  assert.match(source, /searchApprovedContractOptions\(\{ keyword, afterId: afterID, limit: APPROVED_CONTRACT_OPTION_LIMIT \}\)/)
   assert.match(pmApiSource, /export async function getApprovedContractServiceItems\(contractID\)/)
   assert.match(source, /getApprovedContractServiceItems\(contract\.id\)/)
   assert.doesNotMatch(source, /suppressLoginRedirect/)
@@ -854,7 +856,7 @@ test('新建项目合同编号由合同管理系统自动带入且提交时不�
 })
 
 test('新建项目不依赖合同系统浏览器会话', () => {
-  assert.match(source, /listApprovedContracts,[\s\S]*from '@\/modules\/project_management\/api\/projectManagement'/)
+  assert.match(source, /searchApprovedContractOptions,[\s\S]*from '@\/modules\/project_management\/api\/projectManagement'/)
   assert.doesNotMatch(source, /modules\/contract_management\/api\/contract/)
   assert.doesNotMatch(source, /当前合同系统会话或权限不可用/)
   assert.doesNotMatch(source, /openContractAuthorizationInNewTab/)
@@ -1081,7 +1083,8 @@ test('每个写操作入口都按服务端同款权限码门控', () => {
   assert.match(source, /selectedServiceItem\.status === '实施准备中' && canExecuteField" class="pm-button primary"[^>]*runOperation\('field-start'\)[^>]*>进入实施中</)
   assert.match(source, /selectedServiceItem && selectedServiceItem\.status === '实施中' && canExecuteField" class="pm-field-workflow"/)
   assert.match(source, /class="pm-form pm-operation-form"/)
-  assert.match(source, /selectedServiceItem\.status === '实施中' && canCompleteField" class="pm-button" :disabled="saving \|\| pendingFieldSyncCount > 0" @click="runOperation\('complete'\)"/)
+  // BIZ-PROJECT-06：完成按钮除"待同步"外还必须受服务端缺项判定约束（判定未知即禁用）。
+  assert.match(source, /selectedServiceItem\.status === '实施中' && canCompleteField" class="pm-button" :disabled="saving \|\| pendingFieldSyncCount > 0 \|\| fieldEvidenceBlocksCompletion" @click="runOperation\('complete'\)"/)
   assert.match(source, />现场测评结束<\/button>/)
   assert.match(source, /v-if="canReportDeviation" class="pm-button primary" :disabled="saving" @click="runOperation\('exception-report'\)"/)
   assert.match(source, /v-if="canReviewDeviation" class="pm-button" :disabled="saving" @click="runOperation\('exception-review'\)"/)
@@ -1357,6 +1360,10 @@ test('合同拆解规则配置按原型 PG-CFG-01 做成三段式，口径完全
   assert.match(source, /数字越小优先级越高，命中第一条后停止继续匹配/)
   assert.match(source, /\{\{ overrideMatchText\(item\) \}\}/)
   assert.match(source, /\{\{ overrideSettingsText\(item\) \}\}/)
+  // 合同编号改成系统级规则后，「合同号包含」仍是子串匹配，示例与说明不能继续引导旧编号格式。
+  assert.match(source, /placeholder="例如 GTSR-"  maxlength="64"\/><small>按合同编号子串匹配/)
+  assert.match(source, /如果合同编号规则或前缀调整过，需要回来核对这条规则还能不能命中合同/)
+  assert.doesNotMatch(source, /例如 HT-2026/)
   // 维度与特殊方法的取值必须与后端常量一致（写错会被服务端判非法取值）。
   for (const value of ["'batch'", "'site'", "'customer'", "'contract'", "'category'", "'system_standard'", "'test_mode'", "'HUMAN_CONFIRM'", "'DEFAULT_RULE'", "'REQUIRED'", "'MARKABLE'"]) {
     assert.ok(source.includes(value) || displaySource.includes(value), `缺少取值 ${value}`)
@@ -1399,7 +1406,11 @@ test('新建项目只显示尚未建立项目的已审批合同', () => {
   assert.doesNotMatch(source, /function contractOptionDisabled\(contract\)/)
   assert.doesNotMatch(source, /（已建项目/)
   assert.match(source, /请选择尚未建立项目的已审批合同/)
-  assert.match(source, /<option v-for="contract in availableApprovedContracts" :key="contract\.id" :value="contract\.id">\{\{ contractOptionLabel\(contract\) \}\}<\/option>/)
+  // 选择器选项由可用合同映射而来，已建项合同既不会出现在服务端结果里，
+  // 也不会出现在前端兜底过滤后的选项池里。
+  assert.match(source, /label: contractOptionLabel\(contract\)/)
+  assert.match(source, /:options="approvedContractOptions"/)
+  assert.match(source, /remote :loading="approvedContractSearchLoading" :has-more="Boolean\(approvedContractSearchNextAfterID\)"/)
 })
 
 test('轻提示按结果切换语义色，错误不再是绿色对勾', () => {
@@ -1614,4 +1625,28 @@ test('最近交付事件默认折叠并保留展开后的时间线下钻', () =>
   assert.match(source, /<h2>最近交付事件<\/h2>[\s\S]*\{\{ monitoringSnapshot\.recent_events\.length \}\} 条 · 点击展开/)
   assert.match(source, /<div class="pm-timeline"><button v-for="event in monitoringSnapshot\.recent_events"/)
   assert.match(source, /@click="openProjectTimeline\(\{ id: event\.project_id \}\)"/)
+})
+
+test('现场缺项判定由服务端证据接口驱动（BIZ-PROJECT-06）', () => {
+  const fieldEvidenceSource = readFileSync(new URL('./fieldEvidence.js', import.meta.url), 'utf8')
+  // 判定口径来自服务端接口，不再从 deliveryEvents（租户最近 500 条窗口）里挑事件。
+  assert.match(source, /getServiceItemFieldEvidence/)
+  assert.match(source, /fieldEvidenceSnapshot/)
+  assert.match(source, /resolveFieldEvidenceVerdict\(/)
+  assert.doesNotMatch(source, /deliveryEvents\.value\.filter\(\(event\) => event\.service_item_id === itemID\)/)
+  assert.doesNotMatch(source, /'FIELD_CHECKED_IN', 'GPS 签到'/)
+  // 选中服务项即失效旧判定并重新读取；写后刷新与排队同步后同样重新读取。
+  assert.match(source, /function selectServiceItem\(item\) \{\n  if \(!item\) return\n  selectedServiceItemIDs\.value = \[item\.id\]\n  fillOperationForm\(item\)\n[\s\S]*?refreshSelectedFieldEvidence\(\)/)
+  assert.match(source, /await refreshSelectedFieldEvidence\(\)/)
+  // 拉取失败/待同步 → 未知 → fail-closed 拒绝完成（未知不等于齐全）。
+  assert.match(source, /if \(fieldEvidenceBlocksCompletion\.value\) \{[\s\S]*?return\n/)
+  assert.match(source, /:disabled="saving \|\| pendingFieldSyncCount > 0 \|\| fieldEvidenceBlocksCompletion"/)
+  assert.match(source, /selectedFieldEvidenceStatus === FIELD_EVIDENCE_STATUS_UNKNOWN/)
+  assert.match(source, /fieldEvidenceReasonMismatch\(selectedFieldEvidence\.value, form\.fieldIncompleteReason\)/)
+  // 缺项说明与已具备证据明细都用服务端 gaps/evidence 展示。
+  assert.match(source, /const selectedFieldEvidenceGaps = computed\(\(\) => selectedFieldEvidence\.value\.missing\)/)
+  assert.match(source, /selectedFieldEvidenceEvidenceSummary/)
+  assert.match(fieldEvidenceSource, /export const FIELD_EVIDENCE_STATUS_UNKNOWN = 'unknown'/)
+  assert.match(pmApiSource, /export async function getServiceItemFieldEvidence\(itemID\)/)
+  assert.match(pmApiSource, /\/field-evidence`\)/)
 })

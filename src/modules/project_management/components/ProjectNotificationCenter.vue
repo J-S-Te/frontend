@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { formatUserError } from '../../shared/utils/userError.js'
+import { formatBusinessDateTime } from '../../shared/utils/businessTime.js'
 import { getNotification, listInbox, markNotificationRead } from '@/modules/platform/notifications/api/notifications'
 
 const emit = defineEmits(['read'])
@@ -9,7 +10,7 @@ const loading = ref(false), error = ref(''), detail = ref(null), actionID = ref(
 const pageSize = 20
 let loadSequence = 0
 const pages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
-const formatDate = (value) => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '—'
+const formatDate = (value) => value ? (formatBusinessDateTime(value) || '—') : '—'
 
 // 通知目标为可选项。绝不能将任意 URL 或类别
 // 转换为项目路由，也不能绕过目标页面自身的授权校验。

@@ -4,9 +4,10 @@ import test from 'node:test'
 import vm from 'node:vm'
 import { ref } from 'vue'
 import { formatUserError } from '../../shared/utils/userError.js'
+import { formatBusinessDate } from '../../shared/utils/businessTime.js'
 import { attachStructuredContext } from '../../platform/shared/api/requestContext.js'
 import { normalizeAuthorizationSession, principalIdentityID, shouldStartSubsystemLogin } from '../../shared/authz/sessionCompatibility.js'
-import { asRFC3339, toDateTimeLocal, planPersonnelFor, planEquipmentFor, isEmbeddedPenetrationItem } from '../projectDisplay.js'
+import { datetimeLocalToInstant, toDateTimeLocal, planPersonnelFor, planEquipmentFor, isEmbeddedPenetrationItem } from '../projectDisplay.js'
 
 const view = await readFile(new URL('./ProjectManagementView.vue', import.meta.url), 'utf8')
 const api = (await readFile(new URL('../api/projectManagement.js', import.meta.url), 'utf8'))
@@ -28,7 +29,8 @@ function workspace({ status = 200 } = {}) {
     normalizeAuthorizationSession, principalIdentityID, shouldStartSubsystemLogin,
     selectedServiceItem: ref(null), selectedServiceItems: ref([]),
     planningBlocked: ref(null), signaturePadKey: ref(0), saving: ref(false),
-    asRFC3339, toDateTimeLocal, planPersonnelFor, planEquipmentFor, isEmbeddedPenetrationItem,
+    datetimeLocalToInstant, toDateTimeLocal, planPersonnelFor, planEquipmentFor, isEmbeddedPenetrationItem,
+    formatBusinessDate,
     loadWorkspace: async () => { refreshes++ },
     // 写成功后的工作区刷新统一走 refreshAfterWrite（保存/刷新分离）。
     refreshAfterWrite: async () => { refreshes++ },
@@ -106,7 +108,8 @@ test('发布普通实施计划的实际 JSON 包含现场计划及原有版本�
   assert.equal(request.credentials, 'include')
   assert.equal(request.payload.site_plan, '现场核对\n步骤包含 "引号" 与 <标签>，按原文本保存。')
   assert.equal(request.payload.expected_version, 7)
-  assert.equal(request.payload.planned_start, new Date('2026-10-22T09:00').toISOString())
+  // datetime-local 里的 09:00 是北京墙钟，等价 UTC 01:00；不能按宿主机本地时区解释。
+  assert.equal(request.payload.planned_start, '2026-10-22T01:00:00.000Z')
   assert.deepEqual(request.payload.personnel, [
     { resource_type: 'PERSON', resource_id: 'lead-1', window_start: '', window_end: '', note: '' },
     { resource_type: 'PERSON', resource_id: 'manager-1', window_start: '', window_end: '', note: '' },

@@ -6,6 +6,7 @@ import {
 } from '../../shared/authz/sessionCompatibility.js'
 import { attachStructuredContext } from '../../platform/shared/api/requestContext.js'
 import { formatUserError } from '../../shared/utils/userError.js'
+import { todayBusinessDate } from '../../shared/utils/businessTime.js'
 
 const runtimeEnv = import.meta.env || {}
 const PUBLIC_PATH_PREFIX = (runtimeEnv.VITE_PROJECT_PUBLIC_PATH_PREFIX || '/project_management').replace(/\/$/, '')
@@ -14,7 +15,7 @@ let currentSession = null
 let sessionRequest = null
 let loginRedirectStarted = false
 
-function startProjectLogin({ force = false } = {}) {
+export function startProjectLogin({ force = false } = {}) {
   // 并发请求共享一次登录跳转，并在跳转前清空旧主体缓存。
   if (loginRedirectStarted) return
   loginRedirectStarted = true
@@ -104,6 +105,7 @@ async function request(path, options = {}) {
       fallback: '项目操作未完成，请稍后重试。',
       outcomeUnknown: isMutation && ([408, 502, 504].includes(response.status) || body?.code === 'PM_SERVICE_TIMEOUT'),
     })
+    if (options.suppressLoginRedirect) throw error
     throw handleProjectAuthentication(error, response)
   }
   return body?.data ?? null
@@ -122,12 +124,32 @@ export function clearProjectSessionCache() { currentSession = null; sessionReque
  * @returns {Promise<object>} 项目会话对象。
  * @throws {Error} 网络不可达、鉴权失效或服务端返回非成功状态时抛出。
  */
-export async function getProjectSession({ force = false } = {}) {
+export async function getProjectSession({ force = false, suppressLoginRedirect = false } = {}) {
   // 合并同一时刻的 /auth/me 请求，防止多个组件各自读取并提交不同时间点的会话。
   if (!force && currentSession) return currentSession
   if (!force && sessionRequest) return sessionRequest
-  sessionRequest = request('/auth/me').then((session) => { currentSession = normalizeAuthorizationSession(session); return currentSession }).finally(() => { sessionRequest = null })
+  sessionRequest = request('/auth/me', { suppressLoginRedirect }).then((session) => { currentSession = normalizeAuthorizationSession(session); return currentSession }).finally(() => { sessionRequest = null })
   return sessionRequest
+}
+
+/**
+ * probeProjectSession 只读读取项目会话及服务端权威空闲窗口；401 不自行跳转。
+ * @returns {Promise<object>} 规范化会话（含 idle_timeout_seconds/idle_remaining_ms）。
+ */
+export async function probeProjectSession() {
+  return getProjectSession({ force: true, suppressLoginRedirect: true })
+}
+
+/**
+ * recordProjectSessionActivity 上报真实用户操作，滑动项目子系统会话空闲窗口。
+ * @returns {Promise<unknown>} 服务端权威空闲窗口。
+ */
+export async function recordProjectSessionActivity() {
+  return request('/auth/activity', {
+    method: 'POST',
+    suppressLoginRedirect: true,
+    headers: { Accept: 'application/json', 'X-CSRF-Token': '1' },
+  })
 }
 
 export async function getProjectNavigation() {
@@ -261,6 +283,26 @@ export async function listApprovedContracts(params = {}) {
 }
 
 /**
+ * searchApprovedContractOptions 按关键字跨游标页搜索可建项的已审批合同（BIZ-XAPI-09）。
+ * 服务端会先按审批通过 + 普通来源过滤，再排除当前租户已建项的合同；
+ * 返回值只含项目建项所需的合同摘要，不含合同正文、金额或附件。
+ * @param {{keyword?: string, afterId?: string, limit?: number}} [params={}] 搜索参数。
+ * @returns {Promise<{contracts: Array<object>, next_after_id: string}>} 本页合同与下一页游标。
+ */
+export async function searchApprovedContractOptions({ keyword = '', afterId = '', limit = 50 } = {}) {
+  const search = new URLSearchParams()
+  const trimmedKeyword = String(keyword || '').trim()
+  if (trimmedKeyword) search.set('keyword', trimmedKeyword)
+  if (afterId) search.set('after_id', afterId)
+  if (limit) search.set('limit', String(limit))
+  const data = await request(`/approved-contract-options${search.toString() ? `?${search}` : ''}`)
+  return {
+    contracts: Array.isArray(data?.contracts) ? data.contracts : [],
+    next_after_id: String(data?.next_after_id || ''),
+  }
+}
+
+/**
  * getApprovedContractServiceItems 读取一份已审批合同可关联的权威服务范围。
  * 返回值只包含项目创建所需的结构化服务项，不包含合同正文、金额或附件。
  * @param {string} contractID 合同管理系统合同 ID。
@@ -279,6 +321,19 @@ export async function listSupplementContracts(projectID, params = {}) {
   const query = new URLSearchParams(params)
   const data = await request(`/projects/${encodeURIComponent(projectID)}/supplement-contracts${query.toString() ? `?${query}` : ''}`)
   return Array.isArray(data) ? data : []
+}
+
+/**
+ * closeSupplement 关闭项目的补充协议分支（BIZ-PROJECT-04）。
+ * 服务端要求 project.decomposition.manage：项目必须处于补充协议处理中，补充协议
+ * 必须已审批且同客户，原因必填；成功后项目以当前范围指纹为新基准并回读状态。
+ * @param {string|number} projectID 项目 ID。
+ * @param {{supplement_contract_id: string, reason: string}} payload 已审批补充协议与关账原因。
+ * @returns {Promise<{status?: string}>} 服务端回读的项目状态。
+ * @throws {Error} 403 无权限、409 状态不满足、422 校验失败或依赖不可用时抛出。
+ */
+export function closeSupplement(projectID, payload) {
+  return request(`/projects/${encodeURIComponent(projectID)}/supplement-closure`, { method: 'POST', body: JSON.stringify(payload) })
 }
 
 /**
@@ -924,6 +979,18 @@ export function completeServiceItemField(itemID, payload = {}) {
 }
 
 /**
+ * getServiceItemFieldEvidence 读取服务项的现场证据完整性判定（BIZ-PROJECT-06）。
+ * 判定由服务端按该服务项的完整事件流计算，前端不再用"租户最近 500 条事件"的窗口推导缺项。
+ * @param {string|number} itemID 服务项 ID。
+ * @returns {Promise<object|null>} {service_item_id, gaps, missing, evidence, evidence_complete, state, gate_policy}；无内容时为 null。
+ * @throws {Error} 会话失效、无读权限、越权或判定不可用（事件超限/核验能力不可用）时抛出。
+ */
+export async function getServiceItemFieldEvidence(itemID) {
+  const data = await request(`/service-items/${encodeURIComponent(itemID)}/field-evidence`)
+  return data && typeof data === 'object' ? data : null
+}
+
+/**
  * listDeliveryEvents 查询交付事件。
  * @param {string|number} [projectID=''] 项目 ID，可空表示全量。
  * @returns {Promise<Array<object>>} 交付事件列表。
@@ -1047,7 +1114,7 @@ export async function exportCapabilities(resourceType = '') {
   const query = resourceType ? `?resource_type=${encodeURIComponent(resourceType)}` : ''
   const response = await requestProjectCSV(`/capabilities/export${query}`)
   const disposition = response.headers.get('content-disposition') || ''
-  let filename = `capabilities-${new Date().toISOString().slice(0, 10)}.csv`
+  let filename = `capabilities-${todayBusinessDate()}.csv`
   const match = disposition.match(/filename\*?=(?:UTF-8''|")?([^";]+)/i)
   if (match) filename = match[1].replace(/^"|"$/g, '')
   return { blob: await response.blob(), filename }

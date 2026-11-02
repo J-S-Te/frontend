@@ -10,7 +10,7 @@ const nginxSource = await readFile(new URL('../../../../nginx/default.conf', imp
 test('项目管理客户端使用独立同源 API 和 Cookie 会话', () => {
   assert.match(source, /VITE_PROJECT_API_BASE_URL/)
   assert.match(source, /credentials: 'include'/)
-  assert.match(source, /request\('\/auth\/me'\)/)
+  assert.match(source, /request\('\/auth\/me'/)
 })
 
 test('角色目录来自服务端接口并按 code 归一化，缺名回退为角色码', () => {
@@ -182,4 +182,11 @@ test('前端 API 不再暴露已下线的站点档案维护接口', () => {
   assert.doesNotMatch(source, /export function upsertSite/)
   assert.doesNotMatch(source, /export function deleteSite/)
   assert.doesNotMatch(source, /request\(['"`]\/sites/)
+})
+
+test('现场证据判定读取走上游服务端接口（BIZ-PROJECT-06）', () => {
+  // 缺项判定必须问后端要（按服务项完整事件流），前端不能再用 delivery-events 窗口自己算。
+  assert.match(source, /export async function getServiceItemFieldEvidence\(itemID\)/)
+  assert.match(source, /const data = await request\(`\/service-items\/\$\{encodeURIComponent\(itemID\)\}\/field-evidence`\)/)
+  assert.match(source, /return data && typeof data === 'object' \? data : null/)
 })
