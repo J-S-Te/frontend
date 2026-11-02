@@ -1,13 +1,11 @@
 <script setup>
-import { computed, onBeforeUnmount, watch } from 'vue'
+import { onBeforeUnmount, provide, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { AuthError, getCurrentPrincipal } from '@/modules/platform/auth/api/auth'
 import { createSessionLifecycle } from '@/modules/platform/auth/utils/sessionLifecycle'
-import { createSubsystemSessionLifecycle } from '@/modules/shared/session/subsystemSessionLifecycle'
-import { getContractSession, recordContractSessionActivity, startContractLogin } from '@/modules/contract_management/api/contract'
-import { probeCRMSession, recordCRMSessionActivity, startCRMLogin } from '@/modules/customer_opportunity/api/client'
-import { probeProjectSession, recordProjectSessionActivity, startProjectLogin } from '@/modules/project_management/api/projectManagement'
-import { probeDataAnalysisSession, recordDataAnalysisSessionActivity, startDataAnalysisLogin } from '@/modules/data_analysis/api/dataAnalysis'
+import { createUnifiedSessionLifecycle } from '@/modules/shared/session/unifiedSessionLifecycle'
+import { createSessionTransport, sessionTargetForRoute } from '@/modules/shared/session/sessionTransport'
+import { clearSessionScopedStorage } from '@/modules/shared/utils/sessionScopedStorage'
 import { createPlatformSessionSynchronizer } from '@/modules/platform/auth/utils/platformSessionSynchronizer'
 import {
   AUTHORIZATION_REFRESH_INTERVAL_MS,
@@ -18,84 +16,57 @@ import {
 
 const route = useRoute()
 const router = useRouter()
-
-// 业务子系统（合同/CRM/项目/数析）使用各自独立的 HttpOnly 会话。统一在这里按当前路由
-// 启用对应子系统的“空闲窗口 + 绝对上限”生命周期：鼠标/键盘等真实操作节流上报本系统
-// 活动接口；前端只在服务端剩余窗口为 0 或会话失效时回本系统登录页。
-const subsystemSessionAdapters = Object.freeze({
-  contract: Object.freeze({
-    probe: () => getContractSession({ force: true, suppressLoginRedirect: true }),
-    touch: recordContractSessionActivity,
-    login: () => startContractLogin(),
-  }),
-  crm: Object.freeze({
-    probe: probeCRMSession,
-    touch: recordCRMSessionActivity,
-    login: () => startCRMLogin(),
-  }),
-  project: Object.freeze({
-    probe: probeProjectSession,
-    touch: recordProjectSessionActivity,
-    login: () => startProjectLogin(),
-  }),
-  dataAnalysis: Object.freeze({
-    probe: probeDataAnalysisSession,
-    touch: recordDataAnalysisSessionActivity,
-    login: () => startDataAnalysisLogin(),
-  }),
-})
-
-const activeSubsystemAdapter = { current: null }
-const subsystemLifecycle = createSubsystemSessionLifecycle({
-  touch: () => activeSubsystemAdapter.current?.touch?.(),
-  probe: () => activeSubsystemAdapter.current?.probe?.(),
-  onIdle: () => { activeSubsystemAdapter.current?.login?.() },
-})
-const subsystemSessionAdapter = computed(() => {
-  const meta = route.meta || {}
-  if (meta.requiresContractSession) return subsystemSessionAdapters.contract
-  if (meta.requiresCRMSession) return subsystemSessionAdapters.crm
-  if (meta.requiresProjectSession) return subsystemSessionAdapters.project
-  if (meta.requiresDataAnalysisSession) return subsystemSessionAdapters.dataAnalysis
-  return null
-})
-let subsystemActivation = 0
-
-async function synchronizeSubsystemSession(adapter) {
-  const generation = ++subsystemActivation
-  subsystemLifecycle.stop()
-  activeSubsystemAdapter.current = adapter
-  if (!adapter) return
-  try {
-    const session = await adapter.probe()
-    if (generation !== subsystemActivation || !session) return
-    const idleSeconds = Number(session?.idle_timeout_seconds)
-    const remaining = Number(session?.idle_remaining_ms)
-    subsystemLifecycle.start({
-      idleTimeoutSeconds: Number.isFinite(idleSeconds) && idleSeconds >= 60 ? idleSeconds : 30 * 60,
-      idleRemainingMs: Number.isFinite(remaining) && remaining > 0 ? remaining : undefined,
-    })
-  } catch (error) {
-    if (generation !== subsystemActivation) return
-    // 页面恢复/计时器跨后台时可能先于业务请求发现会话已失效：探测 401 时直接回本系统登录。
-    if (Number(error?.status) === 401) adapter.login?.()
-  }
-}
-// 根组件统一维护受保护页面的会话生命周期。子页面只消费授权快照，不各自启动
-// 定时器，避免并发的 /auth/me 响应以不同顺序覆盖当前账号权限。
-const lifecycle = createSessionLifecycle({
-  onSessionEnded: () => {
+const transport = createSessionTransport()
+// 一个路由只使用一个活动时钟；独立Cookie、业务权限和客户边界仍由各自后端检查。
+const lifecycle = createUnifiedSessionLifecycle({
+  read: transport.read,
+  activity: transport.activity,
+  onEnded: (_reason, target) => {
     clearAuthorizationSnapshot()
-    if (route.name !== 'login') {
+    clearSessionScopedStorage()
+    if (target.key !== 'Platform') {
+      window.location.replace(`${target.loginURL}?return_to=${encodeURIComponent(route.fullPath)}`)
+    } else if (route.name !== 'login') {
       void router.replace({ name: 'login', query: { reason: 'session-ended' } })
     }
   },
+  onIdentityChanged: () => {
+    clearAuthorizationSnapshot()
+    clearSessionScopedStorage()
+    window.location.reload()
+  },
 })
+provide('central-session-record-activity', lifecycle.recordEmbeddedActivity)
+// 滚动发布期间未启用中央管理的旧平台仍使用原实现；两种模式互斥，启用由平台响应决定。
+let platformSessionMode = ''
+let legacyLifecycle = null
+
+// synchronizePlatformLifecycle 根据平台已验证响应选择生命周期，不用前端配置决定策略。
+// 参数：principal为平台当前主体及可选中央上下文。
+// 返回值：无；后台权限刷新不会重置已启动的空闲计时。
+function synchronizePlatformLifecycle(principal) {
+  if (principal.session_context) {
+    legacyLifecycle?.stop()
+    platformSessionMode = 'central'
+    void lifecycle.setTarget(sessionTargetForRoute(route.meta))
+  } else if (platformSessionMode !== 'legacy') {
+    lifecycle.stop()
+    legacyLifecycle ||= createSessionLifecycle({ onSessionEnded: () => {
+      clearAuthorizationSnapshot()
+      void router.replace({ name: 'login', query: { reason: 'session-ended' } })
+    } })
+    platformSessionMode = 'legacy'
+    legacyLifecycle.start(principal)
+  }
+}
 
 let loading = false
 let authorizationRefreshTimer = 0
 let latestPrincipalFingerprint = ''
 
+// stopAuthorizationRefresh 停止平台权限快照轮询。
+// 参数：无。
+// 返回值：无。
 function stopAuthorizationRefresh() {
   if (authorizationRefreshTimer) {
     window.clearInterval(authorizationRefreshTimer)
@@ -103,6 +74,9 @@ function stopAuthorizationRefresh() {
   }
 }
 
+// refreshAuthorizationSnapshot 只读刷新平台权限，不作为会话交互。
+// 参数：无。
+// 返回值：权限校验完成的Promise。
 async function refreshAuthorizationSnapshot() {
   if (loading || route.meta.requiresPlatformSession !== true) return
   loading = true
@@ -113,6 +87,9 @@ async function refreshAuthorizationSnapshot() {
   }
 }
 
+// startAuthorizationRefresh 启动当前平台页面的权限核对。
+// 参数：无。
+// 返回值：无。
 function startAuthorizationRefresh() {
   stopAuthorizationRefresh()
   authorizationRefreshTimer = window.setInterval(() => {
@@ -120,18 +97,23 @@ function startAuthorizationRefresh() {
   }, AUTHORIZATION_REFRESH_INTERVAL_MS)
 }
 
+// onPageVisible 在平台页面恢复可见时只读检查权限。
+// 参数：无。
+// 返回值：无。
 function onPageVisible() {
   if (document.visibilityState === 'visible') {
     void refreshAuthorizationSnapshot()
-    // 页面重新可见时立即校准子系统空闲窗口；隐藏期间浏览器会节流本地计时器。
-    subsystemLifecycle.refresh()
   }
 }
 
+// deactivatePlatformSession 退出平台路由时清理平台菜单，保留业务入口的会话时钟。
+// 参数：无。
+// 返回值：无。
 function deactivatePlatformSession() {
   // 进入登录页等公开路由时立即清空内存授权，账号切换期间绝不保留上一账号的菜单。
-  lifecycle.stop()
   stopAuthorizationRefresh()
+  platformSessionMode = ''
+  legacyLifecycle?.stop()
   latestPrincipalFingerprint = ''
   clearAuthorizationSnapshot()
 }
@@ -139,7 +121,7 @@ function deactivatePlatformSession() {
 const platformSessions = createPlatformSessionSynchronizer({
   loadPrincipal: getCurrentPrincipal,
   activate(principal) {
-    lifecycle.start(principal)
+    synchronizePlatformLifecycle(principal)
     latestPrincipalFingerprint = principalFingerprint(principal)
     dispatchAuthorizationRefreshed(principal)
     startAuthorizationRefresh()
@@ -151,6 +133,7 @@ const platformSessions = createPlatformSessionSynchronizer({
     }
   },
   onRefresh(principal) {
+    synchronizePlatformLifecycle(principal)
     const nextFingerprint = principalFingerprint(principal)
     // 指纹只包含租户、主体、角色和权限；展示字段变化不会被误判为授权变更。
     // 即使指纹未变仍广播最新主体，门户应用目录等派生授权会自行重新拉取。
@@ -167,29 +150,42 @@ const platformSessions = createPlatformSessionSynchronizer({
   },
 })
 
-// 合同、CRM 和客户门户各自维护独立 OIDC Cookie。根组件只管理基础平台页面，
-// 避免每个子系统标签页的本地空闲计时器注销所有标签共享的平台 SSO 会话。
+// 平台权限快照只在平台路由读取；会话期限则始终使用当前入口代理的中央状态。
 watch(() => route.meta.requiresPlatformSession === true, platformSessions.synchronize, { immediate: true })
-watch(subsystemSessionAdapter, (adapter) => {
-  if (!adapter) {
-    subsystemActivation += 1
-    activeSubsystemAdapter.current = null
-    subsystemLifecycle.stop()
-    return
-  }
-  void synchronizeSubsystemSession(adapter)
+watch(() => sessionTargetForRoute(route.meta)?.key, () => {
+  const target = sessionTargetForRoute(route.meta)
+  if (target?.key !== 'Platform') void lifecycle.setTarget(target)
+  else if (platformSessionMode !== 'central') lifecycle.stop()
 }, { immediate: true })
+
+// onExternalSessionEnd 仅对用户显式全局退出清理界面；其他失效信号先核对当前入口。
+// 参数：event为同源退出通知。
+// 返回值：无。
+function onExternalSessionEnd(event) {
+  const reason = event?.detail?.reason || event?.data?.reason
+  if (reason !== 'manual-logout' && reason !== 'logout') { void lifecycle.probe(); return }
+  lifecycle.stop()
+  legacyLifecycle?.stop()
+  clearAuthorizationSnapshot()
+  clearSessionScopedStorage()
+  if (route.name !== 'login') void router.replace({ name: 'login', query: { reason: 'logout' } })
+}
+const sessionChannel = typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel('basic-platform-auth')
+if (sessionChannel) sessionChannel.onmessage = event => {
+  if (event.data?.type === 'session-ended') onExternalSessionEnd(event)
+}
+window.addEventListener('platform-auth:session-ended', onExternalSessionEnd)
 // 标签页重新获得可见性或焦点时立即校验，缩短后台期间账号禁用、会话撤销或权限降级的生效延迟。
 window.addEventListener('visibilitychange', onPageVisible)
 window.addEventListener('focus', onPageVisible)
 onBeforeUnmount(() => {
-  subsystemActivation += 1
-  activeSubsystemAdapter.current = null
-  subsystemLifecycle.destroy()
   stopAuthorizationRefresh()
   window.removeEventListener('visibilitychange', onPageVisible)
   window.removeEventListener('focus', onPageVisible)
+  window.removeEventListener('platform-auth:session-ended', onExternalSessionEnd)
+  sessionChannel?.close()
   lifecycle.destroy()
+  legacyLifecycle?.destroy()
 })
 </script>
 
