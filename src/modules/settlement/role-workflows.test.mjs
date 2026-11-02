@@ -2,6 +2,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
+import { businessWallClockToInstant } from '../shared/utils/businessTime.js'
+import { formatSettlementError } from './utils/errors.js'
 const source = readFileSync(new URL('./views/SettlementView.vue',import.meta.url),'utf8')
 // 用途：提取真实视图中的读取编排函数用于隔离执行。
 // 参数：name 为待测函数名。
@@ -205,6 +207,8 @@ test('退款完成时间转为UTC并仅提交事实，拒绝后保留草稿而�
     refund: { value: { id: 'D/1', version: 3, reference: 'BANK-001', completed_at: '2026-10-28T09:15:00+08:00', reason: '核对线下凭证' } },
     error: { value: '' },
     save: async (...args) => { calls.push(args); return accepted },
+    // 退款完成时间按北京墙钟换算成瞬间，与面板侧同一实现。
+    businessWallClockToInstant,
   }
   const { confirmRefund } = panelFunctions(['confirmRefund'], c)
   assert.equal(await confirmRefund(), false)
@@ -277,4 +281,42 @@ test('目标分页成功而其他资源失败时清空整批结果，不能将�
   assert.equal(c.differences.value.length, 0)
   assert.equal(c.writeoffs.value.length, 0)
   assert.match(c.error.value, /凭证查询不可用/)
+})
+
+// SET-04：计划新建 / 调整被服务端 409 拒绝时，面板必须把 path 交给统一错误翻译，
+// 从而带上"合计不得超过合同金额 + 差额超阈值需财务 override + 不自动重试"的说明；
+// 其他资源的冲突仍保持原来的通用文案。
+test('计划写入 409 显示差额超阈值与 override 提示，且不自动重试', async () => {
+  let writes = 0, loads = 0
+  const c = {
+    props: { section: 'plans', refreshPlans: async () => { loads++; return true } },
+    saving: { value: false }, error: { value: '' }, notice: { value: '' },
+    saveRoleResource: async () => { writes++; throw Object.assign(new Error('conflict'), { status: 409, code: 'SETTLEMENT_CONFLICT' }) },
+    load: async () => { loads++; return true },
+    formatSettlementError,
+  }
+  const { save } = panelFunctions(['save'], c)
+  assert.equal(await save('/receivable-plans', { contract_snapshot_id: 'S1', planned_amount: '10' }), false)
+  assert.match(c.error.value, /数据已被修改或当前状态不允许此操作/)
+  assert.match(c.error.value, /计划合计不得超过合同金额/)
+  assert.match(c.error.value, /settlement\.finance\.override/)
+  assert.match(c.error.value, /不会自动重试/)
+  assert.equal(writes, 1, '冲突后不得自动重试写入')
+  assert.equal(loads, 0, '冲突后不得刷新或宣称成功')
+  assert.equal(c.notice.value, '')
+  assert.equal(c.saving.value, false)
+
+  const other = {
+    props: { section: 'finance' }, saving: { value: false }, error: { value: '' }, notice: { value: '' },
+    saveRoleResource: async () => { throw Object.assign(new Error('conflict'), { status: 409, code: 'SETTLEMENT_CONFLICT' }) },
+    load: async () => true, formatSettlementError,
+  }
+  const { save: saveOther } = panelFunctions(['save'], other)
+  assert.equal(await saveOther('/receipt-differences/D/resolve', { id: 'D', version: 2 }), false)
+  assert.doesNotMatch(other.error.value, /override/)
+})
+
+test('计划面板提供差额超阈值与 override 的可见说明来源', () => {
+  assert.match(panelSource, /formatSettlementError\(value, \{ path \}\)/)
+  assert.doesNotMatch(panelSource, /计划覆盖差额超过阈值/, '前端不得伪造服务端未返回的具体差额数值')
 })

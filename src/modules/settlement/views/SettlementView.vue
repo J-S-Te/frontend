@@ -13,14 +13,18 @@ import SettlementInvoiceDetailPanel from "@/modules/settlement/components/Settle
 import SettlementAllocationsPanel from "@/modules/settlement/components/SettlementAllocationsPanel.vue";
 import SettlementReceiptsPanel from "@/modules/settlement/components/SettlementReceiptsPanel.vue";
 import SettlementReceivablesPanel from "@/modules/settlement/components/SettlementReceivablesPanel.vue";
+import SettlementPlanCoveragePanel from "@/modules/settlement/components/SettlementPlanCoveragePanel.vue";
 import SettlementDashboardPanel from "@/modules/settlement/components/SettlementDashboardPanel.vue";
 import SettlementContractImportPanel from "@/modules/settlement/components/SettlementContractImportPanel.vue";
+// 合同财务修订工单：差异在结算侧落库后，财务在「差异与会计凭证」分区查看逐期差异并人工关单。
+import ContractRevisionHoldPanel from "@/modules/settlement/components/ContractRevisionHoldPanel.vue";
 import SettlementTasksPanel from "@/modules/settlement/components/SettlementTasksPanel.vue";
 import DunningCenterPanel from "@/modules/settlement/components/DunningCenterPanel.vue";
 import SettlementInvoiceListPanel from "@/modules/settlement/components/SettlementInvoiceListPanel.vue";
 import {
   amountOf,
   formatSettlementAmount,
+  isBusinessOverdue,
   isCurrentMonth,
 } from "@/modules/settlement/utils/settlementDisplay";
 import { useSettlementActions } from "@/modules/settlement/composables/useSettlementActions";
@@ -41,6 +45,8 @@ import {
   approveInvoiceRequest,
   saveRoleResource,
   recoverInvoiceFailure,
+  cancelInvoiceRequest,
+  getPlanCoverage,
   approveInvoiceRedFlush,
   confirmReceivablePlan,
   createAgingReceivablesExport,
@@ -93,7 +99,7 @@ const sessionPermissions = computed(
 const can = (permission) => permissionCheck(settlementSession.value)(permission);
 const loaderKeys = new Map(Object.entries({
   getDashboard, getAgingSummary, getInvoicedReceivablesTop10,
-  getDunningOverview, getDunningCoverage, listReceivablePlans, listReceivables,
+  getDunningOverview, getDunningCoverage, listReceivablePlans, listReceivables, getPlanCoverage,
   listReceipts, listReceiptAllocations, listInvoiceRequests, listTaxInvoices,
   listInvoiceEligibleReceivables, listDunningCases, listDunningActions,
   listDunningPolicies, listDunningRecipients, getTaxInvoice,
@@ -298,9 +304,11 @@ const taskGroups = computed(() => [
 const agingRows = computed(() => agingDisplayRows(agingSummary.value.items, agingSummary.value.aging_days));
 const dunningKpis = computed(() => {
   const overview = dunningOverview.value || {};
+  // 逾期按北京日历日判定：到期当天不算逾期，次日起才算。
+  // 原有 Date.parse(due_date) < Date.now() 把纯日期当 UTC 零点，北京到期日 08:00 起就会误计逾期。
   const overdue = receivables.value.filter(
     (item) =>
-      Date.parse(item.due_date || "") < Date.now() &&
+      isBusinessOverdue(item.due_date) &&
       amountOf(item.open_amount) > 0,
   );
   return [
@@ -382,7 +390,12 @@ const dashboard = ref({}),
   invoiceRequests = ref([]),
   taxInvoices = ref([]),
   invoicedReceivableTop10 = ref({ items: [] }),
-  agingSummary = ref({ items: [] });
+  agingSummary = ref({ items: [] }),
+  // SET-04 计划差额视图（GET /plan-coverage 返回 { items }）；仅应收区读取，超阈值不自动重试。
+  planCoverage = ref({ items: [] });
+const planCoverageItems = computed(() =>
+  Array.isArray(planCoverage.value?.items) ? planCoverage.value.items : [],
+);
 const { exportJob, exportInvoicedReceivables, exportAgingReceivables, downloadExport } = useReportExport({
   saving,
   notify,
@@ -424,6 +437,7 @@ const {
 const settlementScope = createRequestScope();
 const {
   reviewFailureDialog,
+  cancelDialog,
   invoiceTab,
   invoiceComposerOpen,
   invoiceReviewOpen,
@@ -437,6 +451,9 @@ const {
   openReviewFailure,
   closeReviewFailure,
   submitReviewFailure,
+  openCancelInvoice,
+  closeCancelInvoice,
+  submitCancelInvoice,
   submitInvoice,
   approveInvoice,
   submitInvoiceReview,
@@ -453,6 +470,7 @@ const {
   createInvoiceRequest,
   approveInvoiceRequest,
   rejectInvoiceRequest,
+  cancelInvoiceRequest,
   registerManualInvoice,
   recoverInvoiceFailure,
 });
@@ -614,7 +632,11 @@ function loadTargets(section) {
       if (can("settlement.difference.manage")) add(target(listReceipts, receipts, []));
       break;
     case "receivables":
-      add(target(listReceivablePlans, plans, []), target(listReceivables, receivables, []));
+      add(
+        target(listReceivablePlans, plans, []),
+        target(listReceivables, receivables, []),
+        target(getPlanCoverage, planCoverage, { items: [] }),
+      );
       break;
     case "receipts":
       add(target(listReceipts, receipts, []), target(listReceivables, receivables, []));
@@ -886,6 +908,12 @@ watch(invoiceDetailID, load);
         <p v-if="error" class="settlement-error">{{ error }}</p>
         <p v-if="loading" class="settlement-loading">正在读取结算数据…</p>
         <template v-else-if="active">
+          <SettlementPlanCoveragePanel
+            v-if="active === 'receivables' && can('settlement.receivable.read')"
+            :can="can"
+            :coverage-items="planCoverageItems"
+            @reload="load"
+          />
           <SettlementContractImportPanel v-if="active === 'imports' && can('settlement.import.reconcile')" :can="can" :initial-snapshot-id="String(route.query.import_snapshot || '')" />
           <div v-if="visibleListPages.length" class="settlement-panel" aria-label="列表分页">
             <p class="settlement-muted">以下筛选仅作用于当前页，每页最多 50 条；可按列表翻页查看历史记录。</p>
@@ -899,6 +927,11 @@ watch(invoiceDetailID, load);
             section="plans" :can="can" :plans="plans" :refresh-plans="refreshRolePlans" />
           <SettlementRolePanel v-if="active === 'receipts' && can('settlement.receipt.read')"
             section="documents" :can="can" :receipts="receipts" />
+          <ContractRevisionHoldPanel
+            v-if="active === 'finance' && can('settlement.revision.read')"
+            :can="can"
+            :initial-contract-ref="String(route.query.contract_ref || '')"
+          />
           <SettlementDashboardPanel
             v-if="active === 'dashboard'"
             :dashboard-kpis="dashboardKpis"
@@ -978,6 +1011,7 @@ watch(invoiceDetailID, load);
             :invoice-form="invoiceForm"
             :invoice-review="invoiceReview"
             :can="can"
+            :current-user-id="String(settlementSession.identity_id || '')"
             v-model:invoice-tab="invoiceTab"
             v-model:invoice-composer-open="invoiceComposerOpen"
             v-model:invoice-review-open="invoiceReviewOpen"
@@ -992,6 +1026,7 @@ watch(invoiceDetailID, load);
             @manual-issue="manualIssue"
             @review-failure="openReviewFailure"
             @open-detail="openInvoiceDetail"
+            @cancel-invoice="openCancelInvoice"
           />
           <DunningCenterPanel
             :can="can"
@@ -1042,6 +1077,22 @@ watch(invoiceDetailID, load);
       :error="reviewFailureDialog.error"
       @confirm="submitReviewFailure"
       @cancel="closeReviewFailure"
+    />
+
+    <PromptDialog
+      v-if="cancelDialog"
+      title="作废开票申请（释放额度）"
+      description="只有仍在待开具或已明确失败、且税控从未受理的申请可以作废。作废会把申请置为已作废并释放未开票的额度预留；结果未知或已被受理的申请必须改为对账或红冲，页面不会自动重试。"
+      label="作废原因（5 至 1000 字）"
+      placeholder="请写明核对依据，例如：税控命令已死信、开票尝试从未被受理"
+      confirm-text="确认作废"
+      cancel-text="取消"
+      :minlength="5"
+      :maxlength="1000"
+      :busy="saving"
+      :error="cancelDialog.error"
+      @confirm="submitCancelInvoice"
+      @cancel="closeCancelInvoice"
     />
 
     <PromptDialog

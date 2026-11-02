@@ -4,6 +4,7 @@ import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import { formatSettlementError } from '@/modules/settlement/utils/errors.js'
 import { INVOICE_REQUEST_FIELDS, validateForm, firstInvalidField, retainVisibleErrors } from '@/modules/settlement/utils/formFeedback.js'
 import { invoiceStatusMeta, invoiceTypeLabel, money, redFlushStatusLabel } from '@/modules/settlement/utils/settlementDisplay'
+import { canCancelInvoiceRequest } from '@/modules/settlement/utils/invoiceStatus'
 
 // 「开票管理」区面板（治理批次 5 结算·第三步，模板自 SettlementView.vue 逐字提取；提取前片段 SSR golden 归档于
 // .ai/qa/closure-20261025/goldens-settlement-panels/SettlementInvoiceListPanel/）。
@@ -19,8 +20,10 @@ const props = defineProps({
   invoiceForm: { type: Object, required: true },
   invoiceReview: { type: Object, required: true },
   can: { type: Function, required: true },
+  // 当前会话用户标识：用于按服务端"申请人不能作废本人申请"规则隐藏作废入口，未知时传空串。
+  currentUserId: { type: String, default: '' },
 })
-const emit = defineEmits(['reload','submit-invoice','submit-review','reset-filters','approve','manual-issue','review-failure','open-detail','special-review'])
+const emit = defineEmits(['reload','submit-invoice','submit-review','reset-filters','approve','manual-issue','review-failure','open-detail','special-review','cancel-invoice'])
 const invoiceTab = defineModel('invoiceTab')
 const invoiceComposerOpen = defineModel('invoiceComposerOpen')
 const invoiceReviewOpen = defineModel('invoiceReviewOpen')
@@ -50,6 +53,26 @@ watch(() => props.invoiceForm, () => {
   invoiceErrors.value = retainVisibleErrors(INVOICE_REQUEST_FIELDS, props.invoiceForm, invoiceErrors.value)
 }, { deep: true })
 watch(invoiceComposerOpen, (open) => { if (!open) invoiceErrors.value = {} })
+
+// 用途：判断当前行是否显示"作废（释放额度）"入口（SET-06）。
+// 参数：item 为服务端开票申请。
+// 返回值：状态允许（待开具 / 开具失败）且非本人申请、且具备开票开具权限时为 true。
+// 只按状态与权限显示：结果待对账、已开票、已驳回等状态即使有权限也不出现作废入口。
+function showsCancelInvoice(item) {
+  return props.can('settlement.invoice.issue') && canCancelInvoiceRequest(item, props.currentUserId)
+}
+// 用途：判断操作列是否已有动作，决定是否保留占位符，避免出现"—"与作废按钮并排。
+// 参数：item 为服务端开票申请。
+// 返回值：存在任一行内动作时为 true。分支条件须与模板中的 v-if / v-else-if 保持一致。
+function hasInvoiceRowAction(item) {
+  return (
+    (item.status === 'SPECIAL_REVIEW' && props.can('settlement.invoice.special_approve')) ||
+    (item.status === 'SUBMITTED' && props.can('settlement.invoice.approve')) ||
+    (item.status === 'ISSUE_PENDING' && item.issue_channel === 'MANUAL' && props.can('settlement.invoice.issue')) ||
+    (item.status === 'ISSUE_FAILED' && props.can('settlement.invoice.approve')) ||
+    showsCancelInvoice(item)
+  )
+}
 </script>
 
 <template>
@@ -332,6 +355,9 @@ watch(invoiceComposerOpen, (open) => { if (!open) invoiceErrors.value = {} })
         <option v-if="invoiceTab === 'requests'" value="REJECTED">
           已驳回
         </option>
+        <option v-if="invoiceTab === 'requests'" value="CANCELLED">
+          已作废
+        </option>
         <option value="ISSUED">已开票</option></select
       ><button
         class="console-button secondary"
@@ -379,6 +405,9 @@ watch(invoiceComposerOpen, (open) => { if (!open) invoiceErrors.value = {} })
                 <p v-if="item.status === 'ISSUE_FAILED'" class="settlement-muted">
                   {{ formatSettlementError({ code: item.failure_code, message: item.failure_message }, { fallback: "请核对税控回执后复核，禁止对结果未知的申请重开。" }) }}
                 </p>
+                <p v-if="item.status === 'CANCELLED' && item.rejection_reason" class="settlement-muted">
+                  作废原因：{{ item.rejection_reason }}
+                </p>
               </td>
               <td>
                 <button v-if="item.status === 'SPECIAL_REVIEW' && can('settlement.invoice.special_approve')"
@@ -402,7 +431,14 @@ watch(invoiceComposerOpen, (open) => { if (!open) invoiceErrors.value = {} })
                   class="console-button secondary small"
                   :disabled="saving"
                   @click="$emit('review-failure', item)"
-                >失败复核</button><span v-else class="settlement-muted">—</span>
+                >失败复核</button
+                ><button
+                  v-if="showsCancelInvoice(item)"
+                  class="console-button danger small"
+                  :disabled="saving"
+                  @click="$emit('cancel-invoice', item)"
+                >作废（释放额度）</button
+                ><span v-if="!hasInvoiceRowAction(item)" class="settlement-muted">—</span>
               </td>
             </tr>
             <tr v-if="!visibleInvoiceRequests.length">

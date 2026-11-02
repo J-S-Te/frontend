@@ -21,9 +21,10 @@ function viewFunction(name) {
 function targetHarness(loaders, permissions) {
   const context = {canLoad,canLoadKey:canLoad,can:permission => permissions.includes(permission),
     invoiceDetailID:{value:''},invoiceDetail:{value:null},plans:{value:[]},receivables:{value:[]},
+    planCoverage:{value:{items:[]}},
     invoiceEligibleReceivables:{value:[]},invoiceRequests:{value:[]},taxInvoices:{value:[]}}
   for (const name of ['getDashboard','getAgingSummary','getInvoicedReceivablesTop10','getDunningOverview',
-    'getDunningCoverage','listReceivablePlans','listReceivables','listReceipts','listReceiptAllocations',
+    'getDunningCoverage','listReceivablePlans','listReceivables','getPlanCoverage','listReceipts','listReceiptAllocations',
     'listInvoiceRequests','listTaxInvoices','listInvoiceEligibleReceivables','listDunningCases',
     'listDunningActions','listDunningPolicies','listDunningRecipients','getTaxInvoice']) context[name] = () => []
   Object.assign(context,loaders)
@@ -34,13 +35,15 @@ function targetHarness(loaders, permissions) {
 }
 
 test('production-minified loader identities retain exact receivable permissions',async()=>{
-  const compiled = await transform('const listReceivablePlans=()=>[];const listReceivables=()=>[];export{listReceivablePlans,listReceivables};',{format:'esm',minify:true})
+  const compiled = await transform('const listReceivablePlans=()=>[];const listReceivables=()=>[];const getPlanCoverage=()=>[];export{listReceivablePlans,listReceivables,getPlanCoverage};',{format:'esm',minify:true})
   const loaders = await import(`data:text/javascript,${encodeURIComponent(compiled.code)}`)
   assert.notEqual(loaders.listReceivablePlans.name,'listReceivablePlans')
   const allowed = targetHarness(loaders,['settlement.receivable.read']).loadTargets('receivables')
-  assert.equal(allowed.length,2,'authorized production readers were silently filtered')
+  // SET-04 追加 getPlanCoverage（计划差额只读视图），仍须按同一 receivable.read 能力放行。
+  assert.equal(allowed.length,3,'authorized production readers were silently filtered')
   assert.equal(allowed[0][0],loaders.listReceivablePlans)
   assert.equal(allowed[1][0],loaders.listReceivables)
+  assert.equal(allowed[2][0],loaders.getPlanCoverage)
   assert.equal(targetHarness(loaders,[]).loadTargets('receivables').length,0)
 })
 

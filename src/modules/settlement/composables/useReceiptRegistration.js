@@ -1,4 +1,5 @@
 import { computed, ref } from "vue";
+import { todayBusinessDate } from "../../shared/utils/businessTime.js";
 
 /**
  * 回款登记域（治理批次 5 结算，自 SettlementView.vue 逐字迁移）。
@@ -30,7 +31,7 @@ export function useReceiptRegistration({
     customer_name: "",
     amount: "",
     currency: "CNY",
-    receipt_date: new Date().toISOString().slice(0, 10),
+    receipt_date: todayBusinessDate(),
     payment_method: "TRANSFER",
     bank_transaction_reference: "",
   });

@@ -234,3 +234,12 @@ test('校验失败时人工计划与开票申请都不进入写入链路，修�
   assert.deepEqual(events, ['submit-invoice'], '合法表单必须 emit submit-invoice')
   assert.deepEqual(invoiceContext.invoiceErrors.value, {})
 })
+
+test('催收 KPI 的逾期统计按北京日历日判定，不再把纯日期当 UTC 零点', async () => {
+  const view = await readFile(new URL('./views/SettlementView.vue', import.meta.url), 'utf8')
+  // 回归锁定：Date.parse(due_date) < Date.now() 会让北京用户在到期日 08:00 起就被计入逾期，
+  // 与同页 dueState（到期当天不判逾期）矛盾；现统一走 isBusinessOverdue（北京日历日比较）。
+  assert.match(view, /isBusinessOverdue\(item\.due_date\)/)
+  assert.doesNotMatch(view, /Date\.parse\(item\.due_date \|\| ""\) < Date\.now\(\)/)
+  assert.match(view, /isBusinessOverdue,\n  isCurrentMonth,/)
+})

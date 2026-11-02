@@ -1,5 +1,6 @@
 import { attachStructuredContext } from "@/modules/platform/shared/api/requestContext.js";
 import { listQuery } from "./pagination.js";
+import { revisionHoldQuery } from "../utils/revisionHold.js";
 import { formatSettlementError } from "../utils/errors.js";
 import { getCurrentPrincipal } from "@/modules/platform/auth/api/auth";
 import {
@@ -275,6 +276,13 @@ export const confirmReceivablePlan = (id, payload) =>
     idempotent: true,
   });
 export const listReceivables = (page) => request(`/receivables${listQuery(page)}`);
+// 用途：读取"合同金额对计划合计"的只读差额视图（SET-04）。
+// 参数：contractSnapshotID 为空时读取可见范围内全部差额合同。
+// 返回值：{ items: [{ contract_no, contract_amount, plan_total, gap, gap_percent, exceeds_threshold, triggered, contract_event_plan }] }。
+export const getPlanCoverage = (contractSnapshotID = "") => {
+  const snapshot = String(contractSnapshotID || "").trim();
+  return request(`/plan-coverage${snapshot ? `?contract_snapshot_id=${encodeURIComponent(snapshot)}` : ""}`);
+};
 // 仅返回服务端确认可用于开票的应收，避免前端自行判断合同和余额状态。
 export const listInvoiceEligibleReceivables = (page) =>
   request(`/invoice-eligible-receivables${listQuery(page)}`);
@@ -354,6 +362,15 @@ export const rejectInvoiceRequest = (id, version, reason) =>
   request(`/invoice-requests/${encodeURIComponent(id)}/reject`, {
     method: "POST",
     body: JSON.stringify({ version, reason }),
+    idempotent: true,
+  });
+// 用途：作废确定未被税控受理的开票申请并释放未开票的额度预留（SET-06）。
+// 参数：id 为开票申请；payload 含当前 version 与 5–1000 字作废原因。
+// 返回值：服务端确认的作废结果；调用方不得据本地推断改状态，须以刷新后的列表为准。
+export const cancelInvoiceRequest = (id, payload) =>
+  request(`/invoice-requests/${encodeURIComponent(id)}/cancel`, {
+    method: "POST",
+    body: JSON.stringify(payload),
     idempotent: true,
   });
 export const registerManualInvoice = (id, payload) =>
@@ -445,4 +462,25 @@ export function contractImportExport(id, exportID = '') {
 // 返回值：下载操作Promise；错误不生成空文件。
 export function downloadContractImportExport(id, exportID) {
   return downloadFile(`/settlement/contract-imports/${encodeURIComponent(id)}/exports/${encodeURIComponent(exportID)}/download`, '历史合同财务对账.csv');
+}
+
+// 用途：读取合同财务修订工单分页，差异只展示服务端算好的 diff。
+// 参数：status 为空不限状态；contractRef 同时匹配源合同ID与合同编号；
+//       limit 1..100、offset 0..100000 由 revisionHoldQuery 前置校验。
+// 返回值：{items,limit,offset} 服务端工单页；越权、只读许可期或参数越界时抛出已归一化的错误。
+export function listContractRevisionHolds({ status = 'PENDING_REVIEW', contractRef = '', limit = 50, offset = 0 } = {}) {
+  return request(`/contract-revision-holds${revisionHoldQuery({ status, contractRef, limit, offset })}`);
+}
+
+// 用途：财务完成调整或红冲后人工关闭修订工单。
+// 参数：id为工单标识；reason为5–500字关单说明，同原因重放由服务端按幂等成功处理。
+// 返回值：{id,status,resolution_reason} 服务端确认结果；调用方以刷新后的列表为准。
+export function resolveContractRevisionHold(id, reason) {
+  const holdID = String(id ?? '').trim();
+  if (!holdID) throw new Error('修订工单标识缺失，请刷新列表后重新选择。');
+  return request(`/contract-revision-holds/${encodeURIComponent(holdID)}/resolve`, {
+    method: 'POST',
+    body: JSON.stringify({ reason: String(reason ?? '').trim() }),
+    idempotent: true,
+  });
 }
