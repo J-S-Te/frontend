@@ -1,3 +1,5 @@
+import { formatBusinessDate } from '../../shared/utils/businessTime.js'
+
 // 操作能力由后端根据租户、角色、归属和状态计算。
 // 不得根据显示名称或宽泛的列表读取权限推导编辑权限。
 export function canEditContractDraft(contract) {
@@ -15,7 +17,7 @@ export function hydrateContractDraft(contract) {
     customer_name: value('customer_name'), customer_address: value('customer_address'),
     customer_contact: value('customer_contact'), customer_phone: value('customer_phone'),
     amount: Number(contract.amount_minor || 0) / 100, currency: value('currency') || 'CNY',
-    start_date: value('start_date').slice(0, 10), end_date: value('end_date').slice(0, 10),
+    start_date: formatBusinessDate(value('start_date')), end_date: formatBusinessDate(value('end_date')),
     payment_terms: (Array.isArray(contract.payment_terms) ? contract.payment_terms : []).map((term) => ({ installment_no: Number(term.installment_no), due_date: String(term.due_date || ''), amount: String(term.amount || '') })),
     template_id: value('template_id'), template_values: { ...(contract.template_values || {}) },
     service_items: items.map((item) => ({

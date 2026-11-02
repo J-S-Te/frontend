@@ -48,3 +48,13 @@ test('all free-text contract inputs have a length or numeric bound', () => {
   })
   assert.deepEqual(violations, [], `inputs without compliance limits: ${violations.join('\n')}`)
 })
+
+test('CRM customer selector stays full width and only the clear button is narrow', () => {
+  // 回归：曾用 :last-child 给“清除 ×”固定 36px，导致未选客户时唯一的选择按钮被压成竖条。
+  assert.doesNotMatch(css, /\.contract-opportunity-control>button:last-child/)
+  assert.match(css, /\.contract-opportunity-control>\.contract-opportunity-select\s*\{[^}]*flex:1/)
+  assert.match(css, /\.contract-opportunity-control>\.contract-opportunity-clear\s*\{[^}]*width:36px/)
+  assert.match(source, /class="contract-opportunity-select" type="button" @click="openCustomerPicker"/)
+  assert.match(source, /class="contract-opportunity-clear" type="button" aria-label="清除 CRM 客户"/)
+  assert.match(source, /class="contract-opportunity-clear" type="button" aria-label="清除关联商机"/)
+})

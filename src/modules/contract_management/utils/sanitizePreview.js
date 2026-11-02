@@ -18,10 +18,13 @@
 
 // 危险元素：连同内容一起丢弃（对齐旧 BLOCKED_* 语义，另补 template——其内容对渲染不可见，
 // 保留只会给解析器制造歧义）。
+// F-04：style 由白名单移入屏蔽集——<style> 是文档级 CSS 执行面（可选择器+url()/@import 引外链、
+// 可与 nginx 的 style-src 'unsafe-inline' 叠加放大），服务端预览只用内联 style 属性，不需要它；
+// 移入屏蔽集才能连同 CSS 原文一起丢弃，否则标签被剥离后选择器文本会以正文形式泄露。
 const BLOCKED_TAGS = new Set([
   'script', 'iframe', 'object', 'embed', 'link', 'meta', 'form', 'input', 'button',
   'select', 'textarea', 'svg', 'math', 'base', 'applet', 'audio', 'video', 'source',
-  'track', 'frameset', 'frame', 'noscript', 'template',
+  'track', 'frameset', 'frame', 'noscript', 'template', 'style',
 ])
 
 // HTML 空元素：没有结束标签，遇到时只丢弃起始标签本身（否则会误删后续正文）。
@@ -40,7 +43,7 @@ const ALLOWED_TAGS = new Set([
   'li', 'main', 'mark', 'ol', 'p', 'pre', 'q', 'rp', 'rt', 'ruby', 's', 'samp',
   'section', 'small', 'span', 'strike', 'strong', 'sub', 'summary', 'sup', 'table',
   'tbody', 'td', 'tfoot', 'th', 'thead', 'time', 'tr', 'tt', 'u', 'ul', 'var',
-  'wbr', 'img', 'style',
+  'wbr', 'img',
 ])
 
 // 通用属性白名单（所有允许标签共享）：纯排版/语义属性，均无脚本执行能力。
@@ -212,12 +215,6 @@ function skipBlockedElement(html, from, name) {
   return html.length
 }
 
-function sanitizeStyleContent(css) {
-  // <style> 内容按 RAWTEXT 原样保留（服务端预览用内联样式排版），仅剥离可执行/外链构造。
-  // CSS 没有实体解码，直接对原文做替换即可。
-  return css.replace(/expression\s*\(|javascript:|vbscript:|-moz-binding|@import/gi, '')
-}
-
 // 反向 tabnabbing 防护（AUD-2026-034）：带 target 属性的 <a> 自动补 rel="noopener noreferrer"。
 // 已有 rel 时在原值基础上合并去重、保留既有 token（rel token 不区分大小写，去重按小写比对）。
 function hardenRelAttrs(tagName, attrs) {
@@ -340,20 +337,6 @@ export function sanitizePreviewHTML(raw, options) {
       }
       if (!ALLOWED_TAGS.has(name)) {
         continue // 未知标签：丢标签、留内容（内容仍会经过同样的白名单流水线）
-      }
-      if (name === 'style' && !startTag.selfClosing) {
-        // <style> 内容是 RAWTEXT：按原始文本截取到 </style>，单独做 CSS 净化。
-        out += serializeStartTag(startTag, allowedOrigin)
-        const closeMatch = /<\/style\s*>/i.exec(html.slice(i))
-        if (!closeMatch) {
-          out += sanitizeStyleContent(html.slice(i))
-          i = html.length
-          continue
-        }
-        out += sanitizeStyleContent(html.slice(i, i + closeMatch.index))
-        i = i + closeMatch.index + closeMatch[0].length
-        out += '</style>'
-        continue
       }
       if (VOID_TAGS.has(name)) {
         out += serializeStartTag(startTag, allowedOrigin)

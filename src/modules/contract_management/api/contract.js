@@ -42,7 +42,7 @@ export class ContractAuthError extends Error {
  * startContractLogin 清理会话缓存并发起合同子系统登录；并发调用只允许首次跳转生效。
  * @returns {void}
  */
-function startContractLogin({ force = false } = {}) {
+export function startContractLogin({ force = false } = {}) {
   if (loginRedirectStarted) return
   loginRedirectStarted = true
   clearContractSessionCache()
@@ -686,22 +686,49 @@ export async function ensureContractCRMDirectorySession() {
     throw error
   }
   if (contractIdentity !== principalIdentityID(crmSession) || contractSession.tenant_id !== crmSession.tenant_id) {
-    const error = new Error('CRM 当前账号或租户与合同不一致，请点击“连接 CRM”使用合同当前账号重新登录，再返回重试搜索。当前合同表单会保留。')
-    error.code = 'CRM_IDENTITY_MISMATCH'
-    error.status = 409
-    error.crmLoginRequired = true
-    error.crmForceLogin = true
-    throw error
+    throw crmIdentityMismatchError()
   }
 }
 
-/** 必须在用户点击事件内同步调用；先断开 opener，再进入正规同源 SSO。 */
+/**
+ * crmIdentityMismatchError 构造“CRM 会话与合同账号不一致”的强制重新登录错误。
+ * @returns {Error} 带 crmLoginRequired/crmForceLogin 标记的错误。
+ */
+function crmIdentityMismatchError() {
+  const error = new Error('CRM 当前账号或租户与合同不一致，请点击“连接 CRM”使用合同当前账号重新登录，再返回重试搜索。当前合同表单会保留。')
+  error.code = 'CRM_IDENTITY_MISMATCH'
+  error.status = 409
+  error.crmLoginRequired = true
+  error.crmForceLogin = true
+  return error
+}
+
+/**
+ * contractCRMLoginPath 计算 CRM 同源登录入口；自定义挂载前缀时仍以 /api/v1 反推。
+ * @param {{force?: boolean, returnTo?: string}} [options={}] force 强制重新登录；returnTo 登录完成落地页。
+ * @returns {string} 同源站内登录路径；挂载前缀不安全时返回空字符串。
+ */
+function contractCRMLoginPath({ force = false, returnTo = '' } = {}) {
+  const base = new URL(CUSTOMER_API_BASE_URL, window.location.origin)
+  if (base.origin !== window.location.origin || !base.pathname.endsWith('/api/v1') || base.search || base.hash) return ''
+  const query = new URLSearchParams()
+  if (force) query.set('prompt', 'login')
+  if (returnTo) query.set('return_to', returnTo)
+  const search = query.toString()
+  return `${base.pathname.slice(0, -'/api/v1'.length)}/auth/login${search ? `?${search}` : ''}`
+}
+
+/**
+ * openContractCRMLogin 必须在用户点击事件内同步调用；先断开 opener，再进入正规同源 SSO。
+ * 登录完成后由 CRM 自关闭落地页收起辅助标签页，合同页通过轮询自动继续。
+ * @param {{force?: boolean}} [options={}] force 为 true 时要求 CRM 强制重新登录。
+ * @returns {boolean} 是否成功发起打开动作（被浏览器拦截时返回 false）。
+ */
 export function openContractCRMLogin({ force = false } = {}) {
   let tab
   try {
-    const base = new URL(CUSTOMER_API_BASE_URL, window.location.origin)
-    if (base.origin !== window.location.origin || !base.pathname.endsWith('/api/v1') || base.search || base.hash) return false
-    const path = `${base.pathname.slice(0, -'/api/v1'.length)}/auth/login${force ? '?prompt=login' : ''}`
+    const path = contractCRMLoginPath({ force, returnTo: contractCRMLoginReturnPath() })
+    if (!path) return false
     // 直接用 noopener 打开会令成功打开也返回 null，无法准确判断弹窗拦截。
     tab = window.open('about:blank', '_blank')
     if (!tab) return false
@@ -712,6 +739,69 @@ export function openContractCRMLogin({ force = false } = {}) {
     try { tab?.close() } catch { /* 关闭失败仍按无法发起登录报告。 */ }
     return false
   }
+}
+
+/**
+ * contractCRMLoginReturnPath 返回 CRM 登录完成后的自关闭落地页，避免辅助标签页残留。
+ * @returns {string} 与 CRM 挂载前缀一致的站内路径。
+ */
+function contractCRMLoginReturnPath() {
+  const base = new URL(CUSTOMER_API_BASE_URL, window.location.origin)
+  if (base.origin !== window.location.origin || !base.pathname.endsWith('/api/v1')) return ''
+  return `${base.pathname.slice(0, -'/api/v1'.length)}/tab-close`
+}
+
+/**
+ * waitForContractCRMDirectorySession 轮询 CRM 会话，直到用户完成登录或超时/取消。
+ * 只在持有有效合同会话时调用；401 继续等待，身份或租户不一致立即失败关闭。
+ * @param {{timeoutMs?: number, intervalMs?: number, isCancelled?: () => boolean}} [options={}]
+ * @returns {Promise<boolean>} 登录完成返回 true；取消或超时返回 false。
+ * @throws {Error} 合同身份无法核对、CRM 账号不一致或非登录类错误时抛出。
+ */
+export async function waitForContractCRMDirectorySession({ timeoutMs = 120000, intervalMs = 1000, isCancelled = () => false } = {}) {
+  const contractSession = await getContractSession({ force: true, suppressLoginRedirect: true })
+  const contractIdentity = principalIdentityID(contractSession)
+  if (!contractIdentity || !resourceID(contractSession.tenant_id)) {
+    const error = new Error('无法核对合同当前账号，请确认合同登录状态后重试。当前合同表单会保留。')
+    error.code = 'CONTRACT_IDENTITY_UNVERIFIED'
+    throw error
+  }
+  const deadline = Date.now() + Math.max(0, Number(timeoutMs) || 0)
+  const wait = Math.max(100, Number(intervalMs) || 1000)
+  for (;;) {
+    if (isCancelled()) return false
+    try {
+      const crmSession = await requestBusinessDirectory(CUSTOMER_API_BASE_URL, '/auth/me', '无法核对 CRM 登录状态，请稍后重试。', 'crm_session_check', {
+        requireEnvelope: true,
+        validateData: (data) => resourceObject(data) && resourceID(data.user_id) && resourceID(data.tenant_id),
+      })
+      if (contractIdentity !== principalIdentityID(crmSession) || contractSession.tenant_id !== crmSession.tenant_id) {
+        throw crmIdentityMismatchError()
+      }
+      return true
+    } catch (error) {
+      if (!error?.crmLoginRequired) throw error
+      // 账号/租户不一致不会因继续等待而恢复，必须让用户用合同当前账号强制重登。
+      if (error.crmForceLogin) throw error
+    }
+    const remaining = deadline - Date.now()
+    if (remaining <= 0) return false
+    await new Promise((resolve) => setTimeout(resolve, Math.min(wait, remaining)))
+  }
+}
+
+/**
+ * recordContractSessionActivity 上报一次真实用户操作，用于滑动合同子系统会话空闲窗口。
+ * 只有鼠标/键盘/滚动/触摸事件会触发；业务请求与后台轮询不得调用。
+ * @returns {Promise<Record<string, unknown>>} 服务端权威空闲窗口。
+ * @throws {Error} 会话失效或服务端拒绝时抛出。
+ */
+export async function recordContractSessionActivity() {
+  return request('/auth/activity', {
+    method: 'POST',
+    suppressLoginRedirect: true,
+    headers: { Accept: 'application/json', 'X-CSRF-Token': '1' },
+  })
 }
 
 /** 读取当前账号数据范围内的有效 CRM 客户，作为合同客户权威选择项。 */
@@ -840,6 +930,42 @@ export async function previewContractTemplate(templateId, values) {
   return request(`/contract-templates/${encodeURIComponent(templateId)}/preview`, {
     method: 'POST',
     body: JSON.stringify({ values }),
+  })
+}
+
+// 系统级合同编号规则的响应校验：缺字段或枚举越界一律视为协议错误，
+// 不能把不完整的规则当成“未配置”继续展示或保存。
+const CONTRACT_NUMBER_YEAR_SEGMENT_VALUES = ['NONE', 'YY', 'YYYY']
+
+function contractNumberRuleResource(value) {
+  return resourceObject(value)
+    && typeof value.prefix === 'string'
+    && CONTRACT_NUMBER_YEAR_SEGMENT_VALUES.includes(value.year_segment)
+    && Number.isSafeInteger(value.seq_width) && value.seq_width >= 1 && value.seq_width <= 9
+    && typeof value.suffix === 'string'
+    && typeof value.sample === 'string'
+}
+
+/**
+ * getContractNumberRule 读取系统级合同编号规则，包含后端给出的下一号示例与年度流水用量。
+ * @returns {Promise<Record<string, unknown>>} 编号规则；响应结构不符时抛错。
+ * @throws {Error} 会话失效、网络失败、服务端返回非成功状态或响应结构异常时抛出。
+ */
+export async function getContractNumberRule() {
+  return request('/contract-number-rule', { validateData: contractNumberRuleResource })
+}
+
+/**
+ * updateContractNumberRule 全量保存系统级合同编号规则，只提交四个可编辑字段。
+ * @param {{prefix: string, year_segment: string, seq_width: number, suffix: string}} payload 编号规则。
+ * @returns {Promise<Record<string, unknown>>} 保存后的编号规则。
+ * @throws {Error} 网络失败、校验失败（422）、响应结构异常或服务端拒绝请求时抛出。
+ */
+export async function updateContractNumberRule(payload) {
+  return request('/contract-number-rule', {
+    method: 'PUT',
+    body: JSON.stringify(payload || {}),
+    validateData: contractNumberRuleResource,
   })
 }
 
@@ -1100,5 +1226,63 @@ export async function updateApprovalRule(ruleId, payload) {
 export async function deleteApprovalRule(ruleId, version) {
   return request(`/approval-rules/${ruleId}?version=${encodeURIComponent(version)}`, {
     method: 'DELETE',
+  })
+}
+
+// 集成死信（Outbox）运维：四类出站边只允许使用后端受管枚举，
+// 浏览器不拼接表名，也不把未知 kind 发送到服务端。
+const INTEGRATION_OUTBOX_KINDS = ['financial', 'responsibility', 'project', 'link']
+
+function integrationOutboxKind(kind) {
+  if (!INTEGRATION_OUTBOX_KINDS.includes(kind)) throw new Error('集成死信类型不合法。')
+  return kind
+}
+
+// 死信条目必须字段完整：缺字段时失败关闭，无法确认的列表不能当作“暂无死信”。
+function integrationOutboxItemResource(value) {
+  return resourceObject(value)
+    && resourceID(value.id)
+    && INTEGRATION_OUTBOX_KINDS.includes(value.kind)
+    && resourceID(value.event)
+    && typeof value.aggregate_id === 'string'
+    && Number.isSafeInteger(value.attempts) && value.attempts >= 0
+    && typeof value.last_error === 'string'
+    && resourceID(value.created_at)
+    && resourceID(value.updated_at)
+}
+
+/**
+ * listFailedIntegrationOutboxEvents 读取指定队列当前处于 dead 状态的事件。
+ * @param {string} kind 受管队列：financial、responsibility、project 或 link。
+ * @param {{limit?: number}} [options={}] limit 为服务端上限内的读取条数。
+ * @returns {Promise<Array<unknown>>} 死信列表；响应结构不符时抛错。
+ * @throws {Error} 会话失效、网络失败、服务端拒绝或响应结构异常时抛出。
+ */
+export async function listFailedIntegrationOutboxEvents(kind, { limit = 100 } = {}) {
+  const queue = integrationOutboxKind(kind)
+  const size = Math.min(200, Math.max(1, Number(limit) || 100))
+  const search = new URLSearchParams({ kind: queue, limit: String(size) }).toString()
+  const data = await request(`/integration-outbox/failed?${search}`, {
+    validateData: (value) => collectionPage(value) && Array.isArray(value.items)
+      && value.items.every(integrationOutboxItemResource),
+  })
+  return data.items
+}
+
+/**
+ * retryFailedIntegrationOutboxEvent 把一条 dead 事件重置为待投递；是否送达仍由后台投递决定。
+ * @param {string} kind 受管队列。
+ * @param {string|number} id 死信事件标识。
+ * @returns {Promise<Record<string, unknown>>} 服务端重置回执；结构不符时抛错。
+ * @throws {Error} 参数不合法、会话失效、网络失败、服务端拒绝或响应结构异常时抛出。
+ */
+export async function retryFailedIntegrationOutboxEvent(kind, id) {
+  const queue = integrationOutboxKind(kind)
+  const eventID = String(id ?? '').trim()
+  if (!resourceID(eventID) || eventID.length > 64) throw new Error('集成死信标识不合法，无法重试。')
+  return request(`/integration-outbox/failed/${queue}/${encodeURIComponent(eventID)}/retry`, {
+    method: 'POST',
+    validateData: (data) => resourceObject(data) && data.id === eventID
+      && data.kind === queue && data.status === 'retry',
   })
 }

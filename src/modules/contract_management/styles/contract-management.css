@@ -155,6 +155,7 @@
 
 @media (prefers-reduced-motion: reduce){.contract-app *{scroll-behavior:auto!important;transition-duration:.01ms!important}}
 .contract-session-error { padding: 10px 12px; margin: 0 0 16px; color: #b91c1c; font-size: 12px; border: 1px solid #fecaca; border-radius: 8px; background: #fef2f2; }
+.contract-session-info { padding: 10px 12px; margin: 0 0 16px; color: #1e3a8a; font-size: 12px; border: 1px solid #bfdbfe; border-radius: 8px; background: #eff6ff; }
 .contract-button:disabled { cursor: not-allowed; opacity: .55; }
 .contract-text-button.danger { color: var(--cm-red); }
 .contract-intake-table td:first-child strong,.contract-intake-table td:first-child small { display: block; }
@@ -211,10 +212,15 @@
 .contract-form-required-hint { margin: 0; padding: 9px 12px; color: var(--cm-secondary); font-size: 12px; border: 1px solid #dbeafe; border-radius: 8px; background: #f8fbff; }
 .contract-form-required-hint strong { color: var(--cm-red); }
 .contract-form-grid .contract-field-error { color:var(--cm-red); }
-.contract-opportunity-control { display:flex; gap:6px; }
+.contract-opportunity-control { display:flex; min-width:0; gap:6px; }
 .contract-opportunity-control>select { height:36px; min-width:0; flex:1; padding:0 10px; color:var(--cm-secondary); cursor:pointer; border:1px solid var(--cm-border); border-radius:7px; background:#fff; }
 .contract-opportunity-control>select:disabled { color:var(--cm-placeholder); cursor:not-allowed; background:#f8fafc; }
-.contract-opportunity-control>button:last-child { width:36px; color:var(--cm-red); cursor:pointer; border-radius:7px; background:var(--cm-red-soft); }
+/* 客户选择按钮独占剩余宽度；只有带明确清除类的 × 按钮才使用 36px 固定宽度，
+ * 不能再用 :last-child 命中“当前唯一按钮”，否则未选客户时选择入口会被压成竖条。 */
+.contract-opportunity-control>.contract-opportunity-select { min-width:0; flex:1; height:36px; padding:0 10px; overflow-wrap:anywhere; color:var(--cm-secondary); text-align:left; cursor:pointer; border:1px solid var(--cm-border); border-radius:7px; background:#fff; }
+.contract-opportunity-control>.contract-opportunity-select:hover { border-color:#93c5fd; background:#f8fbff; }
+.contract-opportunity-control>.contract-opportunity-select:focus-visible { outline:0; border-color:#93c5fd; box-shadow:0 0 0 3px rgba(37,99,235,.07); }
+.contract-opportunity-control>.contract-opportunity-clear { width:36px; flex:0 0 36px; color:var(--cm-red); cursor:pointer; border-radius:7px; background:var(--cm-red-soft); }
 .contract-service-items { padding:14px; border:1px solid var(--cm-border); border-radius:9px; background:#f8fafc; }
 .contract-service-items>.contract-section-title h3 { margin:0; font-size:12px; }
 .contract-service-items>.contract-section-title p { margin:4px 0 0; color:var(--cm-muted); font-size:9px; }
@@ -581,3 +587,38 @@
 .contract-payment-term-row { display: grid; grid-template-columns: 100px 1fr 1fr auto; gap: 12px; align-items: end; margin: 12px 0; }
 .contract-payment-summary { margin: 20px 0; }
 @media (max-width: 640px) { .contract-payment-term-row { grid-template-columns: 1fr 1fr; } }
+
+/* 系统级合同编号规则：表单在左、预览在右，预览只是一行等宽数字加少量说明，不做色块堆叠。 */
+.contract-number-rule { margin-top: 4px; padding-bottom: 18px; }
+.contract-number-rule > header { align-items: center; }
+.contract-number-rule-state { margin: 0; padding: 16px 20px; color: var(--cm-muted); font-size: 11px; }
+.contract-number-rule-error { margin: 14px 20px 0; }
+.contract-number-rule-body { display: grid; grid-template-columns: minmax(0,1.35fr) minmax(240px,.9fr); gap: 16px; padding: 16px 20px 0; }
+.contract-number-rule-form { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
+.contract-number-rule-form label { display: flex; min-width: 0; flex-direction: column; gap: 6px; }
+.contract-number-rule-form label > span { color: var(--cm-secondary); font-size: 10px; font-weight: 600; }
+.contract-number-rule-form input,
+.contract-number-rule-form select { height: 36px; min-width: 0; padding: 0 10px; color: var(--cm-text); font-size: 11px; outline: 0; border: 1px solid var(--cm-border); border-radius: 7px; background: #fff; }
+.contract-number-rule-form input:focus,
+.contract-number-rule-form select:focus { border-color: #93c5fd; box-shadow: 0 0 0 3px rgba(37,99,235,.07); }
+.contract-number-rule-form input[readonly],
+.contract-number-rule-form select:disabled { color: var(--cm-secondary); cursor: not-allowed; border-color: #dbe3ee; background: #f1f5f9; }
+.contract-number-rule-form input.is-invalid { border-color: #fecaca; background: #fef2f2; }
+.contract-number-rule-form label > small { color: var(--cm-muted); font-size: 9px; font-weight: 400; line-height: 1.5; }
+.contract-number-rule-form > p,
+.contract-number-rule-form > .contract-number-rule-actions { grid-column: 1/-1; }
+.contract-number-rule-form > p { margin: 0; }
+.contract-number-rule-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.contract-number-rule-actions > small { color: var(--cm-muted); font-size: 9px; }
+.contract-number-rule-retry { margin: 10px 0 16px; padding: 0 20px; }
+.contract-number-rule-preview { display: flex; min-width: 0; flex-direction: column; padding: 14px 16px; border: 1px solid #dbeafe; border-radius: 9px; background: #f8fbff; }
+.contract-number-rule-preview > span { color: var(--cm-muted); font-size: 10px; }
+.contract-number-rule-preview > strong { margin: 8px 0 6px; overflow-wrap: anywhere; color: #1e3a8a; font-family: ui-monospace,SFMono-Regular,Menlo,monospace; font-size: 19px; letter-spacing: .04em; }
+.contract-number-rule-preview > small { color: var(--cm-muted); font-size: 9px; line-height: 1.6; }
+.contract-number-rule-warning { margin: 10px 0 0; padding: 7px 9px; color: #b45309; font-size: 9px; line-height: 1.6; border: 1px solid #fde68a; border-radius: 6px; background: #fffbeb; }
+.contract-number-rule-usage { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; padding-top: 10px; border-top: 1px dashed #bfdbfe; }
+.contract-number-rule-usage strong { color: var(--cm-text); font-size: 11px; }
+.contract-number-rule-usage span,
+.contract-number-rule-usage em { overflow-wrap: anywhere; color: var(--cm-muted); font-size: 9px; font-style: normal; line-height: 1.6; }
+@media (max-width: 980px) { .contract-number-rule-body { grid-template-columns: 1fr; } }
+@media (max-width: 640px) { .contract-number-rule-form { grid-template-columns: 1fr; } }

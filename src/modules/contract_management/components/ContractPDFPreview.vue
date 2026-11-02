@@ -51,6 +51,12 @@ onBeforeUnmount(() => {
     <header><strong>{{ title }}</strong><a v-if="objectURL" :href="objectURL" :download="descriptor.filename || '合同原件.pdf'">下载原件</a></header>
     <p v-if="loading" role="status">正在读取 PDF 原件…</p>
     <p v-else-if="error" role="alert">{{ error }} <button type="button" @click="loadSource">重试</button></p>
+    <!-- F-05 未解决（已实测，待裁决）：本 iframe 目前无法加 sandbox。Chrome 禁止在 sandboxed frame
+         内加载内置 PDF 查看器，空 sandbox、allow-same-origin、allow-scripts 等组合实测均返回
+         net::ERR_BLOCKED_BY_CLIENT（chrome-error 页），预览会直接失效；<embed>/<object> 又被
+         nginx CSP 的 object-src 'none' 拦截。故保留原生查看器，残余风险由 api 层兜底：
+         fetchContractPDFSource 已校验 Content-Type 与 %PDF 魔数，非 PDF 字节不会进入 blob。
+         若后续要求必须 sandbox，需改用 pdf.js 之类渲染器（须放开脚本，属架构决策）。 -->
     <iframe v-else-if="objectURL" :src="objectURL" :title="title" />
     <p class="contract-pdf-preview__note">显示上传的原始 PDF；无文本扫描件不提供全文检索，原件上传不代表签署核验完成。</p>
   </section>
