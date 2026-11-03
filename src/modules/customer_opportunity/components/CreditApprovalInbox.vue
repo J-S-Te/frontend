@@ -4,6 +4,7 @@ import { onMounted, ref } from 'vue'
 import { approveCustomerCreditApplication, listPendingCustomerCreditApplications, rejectCustomerCreditApplication } from '../api/credit.js'
 import { createIdempotencyKey } from '../api/client.js'
 import { listOwnerDirectory } from '../api/ownerDirectory.js'
+import { formatBusinessDateTime } from '@/modules/shared/utils/businessTime.js'
 
 const props = defineProps({
   permissions: { type: Array, default: () => [] },
@@ -19,7 +20,8 @@ const applicationID = (item) => String(item?.id || item?.application_id || '').t
 // 使用显式布尔值，避免将 ref 对象本身绑定到
 // 原生 disabled 属性。执行一次写操作期间锁定所有行。
 const actionInProgress = () => actionID.value !== ''
-function dateLabel(value) { return value ? new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : '—' }
+// 审批时间按北京口径展示，24 小时制；非法取值保留破折号占位。
+function dateLabel(value) { return value ? (formatBusinessDateTime(value) || '—') : '—' }
 function rememberApplicantNames(users) { for (const user of users || []) { if (user?.user_id) applicantNames.value[user.user_id] = String(user.username || user.account_name || user.display_name || '').trim() || '未命名用户' } }
 function applicantLabel(item) { const id = String(item?.applicant_id || '').trim(); const snapshot = String(item?.applicant_name || '').trim(); return (snapshot && snapshot !== id ? snapshot : '') || applicantNames.value[id] || '未命名用户' }
 async function resolveApplicantNames(applicationItems) {

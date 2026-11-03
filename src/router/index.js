@@ -30,10 +30,11 @@ const ContractManagementView = () => import('@/modules/contract_management/views
 const ProjectManagementView = () => import('@/modules/project_management/views/ProjectManagementView.vue')
 const SettlementView = () => import('@/modules/settlement/views/SettlementView.vue')
 const CustomerOpportunityView = () => import('@/modules/customer_opportunity/views/CustomerOpportunityView.vue')
+const CRMLoginCompleteView = () => import('@/modules/customer_opportunity/views/CRMLoginCompleteView.vue')
 const CustomerPortalView = () => import('@/modules/customer_portal/views/CustomerPortalView.vue')
 const DataAnalysisView = () => import('@/modules/data_analysis/views/DashboardShellView.vue')
 
-const contractSections = ['dashboard', 'intakes', 'customers', 'contracts', 'imports', 'templates', 'approvals', 'rules', 'signing', 'reports']
+const contractSections = ['dashboard', 'intakes', 'customers', 'contracts', 'imports', 'templates', 'approvals', 'rules', 'signing', 'reports', 'outbox']
 
 // 路由守卫与设置页签共享同一份权限模块键，新增设置模块时不会出现
 // “页面已展示、点击却被守卫重定向”的双份白名单漂移。
@@ -130,6 +131,14 @@ const router = createRouter({
       name: 'settlement',
       component: SettlementView,
       meta: { title: '结算与开票管理', requiresAuth: true, requiresSettlementSession: true },
+    },
+    {
+      // CRM 登录辅助标签页的自关闭落地页；只由 /auth/login 的 return_to 指向，不提供业务数据。
+      // 必须放在通用 section 路由之前，否则会被当作 CRM 业务分区。
+      path: '/customer-opportunity/tab-close',
+      name: 'customer_opportunity_tab_close',
+      component: CRMLoginCompleteView,
+      meta: { title: 'CRM 登录完成' },
     },
     {
       path: '/customer-opportunity/:section?',

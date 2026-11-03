@@ -40,6 +40,8 @@ export function startDataAnalysisLogin() {
 
 async function request(path, options = {}) {
   const method = (options.method || 'GET').toUpperCase()
+  // suppressLoginRedirect 供会话空闲探测使用：401 由生命周期统一收口。
+  const suppressLoginRedirect = options.suppressLoginRedirect === true
   const requestContext = {
     subsystem: 'data_analysis',
     feature: 'dashboard_api',
@@ -112,7 +114,7 @@ async function request(path, options = {}) {
     error.status = response.status
     error.code = body?.code
     error.requestID = body?.request_id || requestId
-    if (shouldStartSubsystemLogin(error)) startDataAnalysisLogin()
+    if (!suppressLoginRedirect && shouldStartSubsystemLogin(error)) startDataAnalysisLogin()
     throw error
   }
   // DELETE 的无内容成功兼容旧部署；创建／审批等必须收到实际业务结果。
@@ -137,6 +139,22 @@ async function request(path, options = {}) {
  */
 export function getAuthMe() {
   return request('/auth/me')
+}
+
+/**
+ * probeDataAnalysisSession 只读读取数据看板会话及服务端权威空闲窗口；401 不自行跳转。
+ * @returns {Promise<any>} 会话结果（含 idle_timeout_seconds/idle_remaining_ms）。
+ */
+export function probeDataAnalysisSession() {
+  return request('/auth/me', { suppressLoginRedirect: true })
+}
+
+/**
+ * recordDataAnalysisSessionActivity 上报真实用户操作，滑动数据看板会话空闲窗口。
+ * @returns {Promise<any>} 服务端权威空闲窗口。
+ */
+export function recordDataAnalysisSessionActivity() {
+  return request('/auth/activity', { method: 'POST', suppressLoginRedirect: true })
 }
 
 /**

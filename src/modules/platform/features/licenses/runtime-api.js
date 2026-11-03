@@ -108,6 +108,7 @@ const BLOCKING_REASON_NAMES = Object.freeze({
   LICENSE_NOT_VALID: '当前商业授权不满足激活条件',
   RUNTIME_MEMBERS_MISSING: '尚无登记组件',
   RUNTIME_READY_STALE: '部分组件尚未就绪或准备信号已过期',
+  RUNTIME_ACK_STALE: '部分组件授权确认未跟上当前快照',
 })
 const ALLOWED_ACTION_NAMES = Object.freeze({ IMPORT_LICENSE: '导入或续期商业授权', OPEN_ACCESS_WIZARD: '检查接入与运行许可接线' })
 export const licenseStatusName = status => LICENSE_STATUS_NAMES[status] || '状态未知'

@@ -2,14 +2,15 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   PROJECT_ROLE_CODES,
-  asRFC3339,
   capabilityCodeKey,
   compactOverrideMatch,
   compactOverrideSettings,
   csvCell,
+  datetimeLocalToInstant,
   defaultConfigFieldValue,
   emptyAdjustForm,
   eventLabel,
+  formatDateTime,
   monitoringSlaLabel,
   multiSummary,
   planEquipmentFor,
@@ -27,13 +28,33 @@ import {
 } from './projectDisplay.js'
 
 test('时间换算在 RFC3339 与 datetime-local 之间正确往返', () => {
-  assert.equal(asRFC3339(''), '')
-  assert.equal(asRFC3339('2026-10-22T09:00'), new Date('2026-10-22T09:00').toISOString())
-  assert.equal(asRFC3339('不是时间'), '不是时间')
   const local = toDateTimeLocal('2026-10-22T01:00:00Z')
   assert.match(local, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/)
-  assert.equal(new Date(`${local}:00`).getTime(), Date.UTC(2026, 9, 22, 1, 0))
+  // 业务墙钟固定为北京时间（UTC+8），与宿主机时区无关：镜像构建在 UTC 容器内执行，
+  // 不能再用 new Date(localString) 依赖运行时本地时区来解释这个字符串。
+  assert.equal(local, '2026-10-22T09:00')
+  assert.equal(datetimeLocalToInstant(local), '2026-10-22T01:00:00.000Z')
   assert.equal(toDateTimeLocal(''), '')
+  assert.equal(toDateTimeLocal('不是时间'), '')
+})
+
+test('datetime-local 回填与提交按北京墙钟严格对称（UTC+8，不受宿主机时区影响）', () => {
+  // 北京凌晨窗口：UTC 还是前一天，但业务日历日与墙钟都必须是北京这一侧。
+  assert.equal(toDateTimeLocal('2026-10-21T16:30:00Z'), '2026-10-22T00:30')
+  assert.equal(datetimeLocalToInstant('2026-10-22T00:30'), '2026-10-21T16:30:00.000Z')
+  assert.equal(datetimeLocalToInstant(toDateTimeLocal('2026-10-21T16:30:00Z')), '2026-10-21T16:30:00.000Z')
+  for (const instant of ['2026-01-01T00:00:00.000Z', '2026-10-21T15:59:00.000Z', '2026-10-21T16:00:00.000Z', '2026-12-31T23:59:00.000Z']) {
+    assert.equal(datetimeLocalToInstant(toDateTimeLocal(instant)), instant, `${instant} 往返必须一致`)
+  }
+  assert.equal(datetimeLocalToInstant(''), '')
+  assert.equal(datetimeLocalToInstant('不是时间'), '')
+})
+
+test('formatDateTime 统一按北京口径展示，非法入参回退原文', () => {
+  assert.equal(formatDateTime('2026-10-21T16:30:00Z'), '2026-10-22 00:30')
+  assert.equal(formatDateTime(''), '—')
+  assert.equal(formatDateTime(null), '—')
+  assert.equal(formatDateTime('不是时间'), '不是时间')
 })
 
 test('周边日期工具输出周一锚点、日期键与 ISO 周数', () => {
@@ -80,6 +101,24 @@ test('CSV 单元格对逗号、引号与换行加引号转义', () => {
   assert.equal(csvCell('say "hi"'), '"say ""hi"""')
   assert.equal(csvCell('line\nbreak'), '"line\nbreak"')
   assert.equal(csvCell(null), '')
+})
+
+// F-03：项目 CSV 导出复用平台 csvExport 的公式前缀中和，避免姓名/备注等自由文本在
+// Excel/LibreOffice 中被当作公式执行；纯数字（含负数）保持数值语义不加前缀。
+test('CSV 单元格中和公式前缀并豁免纯数字 [F-03 回归]', () => {
+  assert.equal(csvCell('=1+2'), "'=1+2")
+  assert.equal(csvCell('+SUM(A1)'), "'+SUM(A1)")
+  assert.equal(csvCell('-2+3'), "'-2+3")
+  assert.equal(csvCell('@cmd'), "'@cmd")
+  assert.equal(csvCell('\tpayload'), "'\tpayload")
+  // 回车同时命中断行结构转义：加引号后再净化为文本。
+  assert.equal(csvCell('\rpayload'), `"'\rpayload"`)
+  assert.equal(csvCell('-100'), '-100')
+  assert.equal(csvCell('42'), '42')
+  assert.equal(csvCell('0.5'), '0.5')
+  assert.equal(csvCell('张三'), '张三')
+  assert.equal(csvCell('检测类别'), '检测类别')
+  assert.equal(csvCell('=a,b'), '"\'=a,b"')
 })
 
 test('多选摘要：空回落占位、两项内逐个列出、更多则收敛计数', () => {

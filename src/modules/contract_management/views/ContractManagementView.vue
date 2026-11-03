@@ -22,8 +22,19 @@ import ContractDocumentPreview from '@/modules/contract_management/components/Co
 import ContractPDFPreview from '@/modules/contract_management/components/ContractPDFPreview.vue'
 import ContractImportPanel from '@/modules/contract_management/components/ContractImportPanel.vue'
 import { validateRecipientPhoneNumber } from '@/modules/contract_management/utils/recipientPhone.js'
+import { escapeCsvCell } from '@/modules/platform/iam/utils/csvExport.js'
+import {
+  ACTIVE_CONTRACT_STATUSES,
+  formatContractDate,
+  formatContractDateTime,
+  isContractExpired,
+  isInBusinessMonth,
+  isPastBusinessDay,
+} from '@/modules/contract_management/utils/contractBusinessTime.js'
+import { formatBusinessDate } from '../../shared/utils/businessTime.js'
 import { cloneNormalizedSigningRecord, isNormalizedSigningRecord } from '@/modules/contract_management/utils/signingRecord.js'
 import ContractReportsPanel from '@/modules/contract_management/components/ContractReportsPanel.vue'
+import ContractNumberRulePanel from '@/modules/contract_management/components/ContractNumberRulePanel.vue'
 import {
   commandApproval,
   ContractAuthError,
@@ -38,6 +49,7 @@ import {
   getContractSession,
   ensureContractCRMDirectorySession,
   openContractCRMLogin,
+  waitForContractCRMDirectorySession,
   getSigningRecord,
   getOpportunityIntake,
   listApprovals,
@@ -106,6 +118,7 @@ import {
   toDictionaryFallback,
 } from '@/modules/contract_management/utils/contractDisplay'
 import ContractNotificationPanel from '@/modules/contract_management/components/ContractNotificationPanel.vue'
+import ContractIntegrationOutboxPanel from '@/modules/contract_management/components/ContractIntegrationOutboxPanel.vue'
 import { useSigningLedger } from '@/modules/contract_management/composables/useSigningLedger'
 import { useApprovalDetail } from '@/modules/contract_management/composables/useApprovalDetail'
 import { canEditContractDraft, hydrateContractDraft, saveContractDraft } from '@/modules/contract_management/utils/contractDraft'
@@ -125,6 +138,12 @@ const businessDataErrors = ref({})
 const crmConnectionRequired = ref(false)
 const crmForceLogin = ref(false)
 const crmConnectionMessage = ref('')
+// CRM 目录会话状态：unknown 探测中、ready 可用、required 需要用户走一次同源 SSO。
+const crmSessionState = ref('unknown')
+const crmConnecting = ref(false)
+// 连接代次用于让关闭弹窗/重新连接后的旧轮询结果失效；不与业务数据混用。
+const crmConnectAttempt = ref(0)
+const crmAutoConnectAttempted = ref(false)
 
 function recordCRMDirectoryError(error) {
   crmConnectionRequired.value = Boolean(error?.crmLoginRequired)
@@ -132,22 +151,115 @@ function recordCRMDirectoryError(error) {
   crmConnectionMessage.value = formatUserError(error, { fallback: '无法读取 CRM 目录，请稍后重试。' })
 }
 
+/** markCRMDirectoryReady 记录 CRM 目录会话已可用，并清空登录提示；不推导权限。 */
+function markCRMDirectoryReady() {
+  crmSessionState.value = 'ready'
+  crmConnectionRequired.value = false
+  crmForceLogin.value = false
+  crmConnectionMessage.value = ''
+  crmAutoConnectAttempted.value = false
+}
+
+/**
+ * resetCRMDirectoryConnection 重置一轮表单的 CRM 连接状态。
+ * 递增尝试代次会让仍在进行的登录轮询自动失效，避免旧结果串入新表单。
+ * @returns {void}
+ */
+function resetCRMDirectoryConnection() {
+  crmConnectAttempt.value += 1
+  crmSessionState.value = 'unknown'
+  crmConnecting.value = false
+  crmConnectionRequired.value = false
+  crmForceLogin.value = false
+  crmConnectionMessage.value = ''
+  crmAutoConnectAttempted.value = false
+}
+
+/**
+ * probeCRMDirectorySession 静默探测 CRM 会话；只记录状态，不在表单上直接弹红字。
+ * 用户真正检索客户/商机时再按状态自动发起同源登录。
+ * @returns {Promise<void>}
+ */
+async function probeCRMDirectorySession() {
+  const attempt = crmConnectAttempt.value
+  try {
+    await ensureContractCRMDirectorySession()
+    if (attempt !== crmConnectAttempt.value) return
+    markCRMDirectoryReady()
+    await loadOpportunityOptionsIfNeeded()
+  } catch (error) {
+    if (attempt !== crmConnectAttempt.value) return
+    if (error?.crmLoginRequired) {
+      crmSessionState.value = 'required'
+      crmForceLogin.value = Boolean(error.crmForceLogin)
+    }
+  }
+}
+
 async function checkCRMDirectorySession() {
   try {
     await ensureContractCRMDirectorySession()
-    crmConnectionRequired.value = false
-    crmForceLogin.value = false
-    crmConnectionMessage.value = ''
+    markCRMDirectoryReady()
   } catch (error) {
     recordCRMDirectoryError(error)
     throw error
   }
 }
 
+/** connectCRM 在用户点击事件内打开 CRM 同源 SSO，登录完成后自动继续当前操作。 */
 function connectCRM() {
-  crmConnectionMessage.value = openContractCRMLogin({ force: crmForceLogin.value })
-    ? '已打开 CRM 登录标签页。请使用合同当前账号完成登录，然后返回点击“搜索”重试；当前合同表单会保留。'
-    : '无法打开 CRM 登录标签页，请允许浏览器弹出窗口后再次点击“连接 CRM”。当前合同表单会保留。'
+  return startCRMDirectoryConnection({ automatic: false })
+}
+
+/**
+ * startCRMDirectoryConnection 打开 CRM 登录标签页并在后台轮询会话。
+ * 必须在用户点击/聚焦事件内同步调用，否则会被浏览器判定为弹窗拦截。
+ * @param {{automatic?: boolean}} [options={}] automatic 表示由客户选择自动触发。
+ * @returns {boolean} 是否成功发起登录。
+ */
+function startCRMDirectoryConnection({ automatic = false } = {}) {
+  if (crmConnecting.value) return true
+  if (!openContractCRMLogin({ force: crmForceLogin.value })) {
+    crmConnectionRequired.value = true
+    crmConnectionMessage.value = '无法打开 CRM 登录标签页，请允许浏览器弹出窗口后再次点击“连接 CRM”。当前合同表单会保留。'
+    return false
+  }
+  const attempt = ++crmConnectAttempt.value
+  crmConnecting.value = true
+  crmAutoConnectAttempted.value = true
+  crmConnectionRequired.value = true
+  crmConnectionMessage.value = automatic
+    ? '已自动打开 CRM 登录标签页，完成登录后本页会自动继续。当前合同表单会保留。'
+    : '已打开 CRM 登录标签页，完成登录后本页会自动继续。当前合同表单会保留。'
+  void completeCRMDirectoryConnection(attempt)
+  return true
+}
+
+/**
+ * completeCRMDirectoryConnection 轮询 CRM 会话；成功后按需自动刷新客户/商机目录。
+ * @param {number} attempt 发起时的连接代次。
+ * @returns {Promise<void>}
+ */
+async function completeCRMDirectoryConnection(attempt) {
+  try {
+    const connected = await waitForContractCRMDirectorySession({
+      isCancelled: () => attempt !== crmConnectAttempt.value,
+    })
+    if (attempt !== crmConnectAttempt.value) return
+    if (!connected) {
+      crmConnectionMessage.value = 'CRM 登录尚未完成，请在新标签页完成登录后点击“连接 CRM”重试；当前合同表单会保留。'
+      return
+    }
+    markCRMDirectoryReady()
+    if (customerPickerOpen.value) await loadCustomerOptions({ sessionVerified: true })
+    if (isExternalContractMode.value || newContract.value.customer_id) await loadOpportunityOptionsIfNeeded({ force: true })
+    showToast('已连接 CRM，客户与商机目录已刷新')
+  } catch (error) {
+    if (attempt !== crmConnectAttempt.value) return
+    recordCRMDirectoryError(error)
+  } finally {
+    if (attempt === crmConnectAttempt.value) crmConnecting.value = false
+  }
 }
 
 const sectionMeta = {
@@ -161,6 +273,7 @@ const sectionMeta = {
   rules: { title: '审批规则', description: '按合同类型与金额配置审批流程' },
   signing: { title: '签署台账', description: '跟踪盖章、签署、归档与到期情况' },
   reports: { title: '统计报表', description: '洞察签约规模、结构与履约趋势' },
+  outbox: { title: '集成死信', description: '查看四类 Outbox 投递失败事件，人工重置重试并核对最后错误' },
 }
 
 const adminNavGroupDefinitions = [
@@ -190,6 +303,7 @@ const adminNavGroupDefinitions = [
       { key: 'rules', label: '审批规则', icon: 'organization' },
     ],
   },
+  { label: '运维/集成', items: [{ key: 'outbox', label: '集成死信', icon: 'reset' }] },
   { label: '统计查看', items: [{ key: 'reports', label: '统计报表', icon: 'dashboard' }] },
 ]
 
@@ -215,6 +329,7 @@ const userNavGroupDefinitions = [
       { key: 'rules', label: '审批规则', icon: 'organization' },
     ],
   },
+  { label: '运维/集成', items: [{ key: 'outbox', label: '集成死信', icon: 'reset' }] },
   { label: '数据分析', items: [{ key: 'reports', label: '统计报表', icon: 'dashboard' }] },
 ]
 
@@ -478,14 +593,11 @@ const signingStats = computed(() => {
       expired: Number(signingSummary.value.expired || 0),
     }
   }
-  const now = new Date()
+  // “本月盖章数”按北京自然月统计：浏览器可能不在东八区，用本地月份会在月初/月末漏算或错算。
   return {
     completed: signingRecords.value.filter((item) => item.status === 'completed').length,
     processing: signingRecords.value.filter((item) => ['pending_shipment', 'in_return', 'pending_review'].includes(item.status) && !isSigningExpired(item)).length,
-    monthly: signingRecords.value.filter((item) => {
-      const confirmed = item.confirmed_at ? new Date(item.confirmed_at) : null
-      return confirmed && confirmed.getFullYear() === now.getFullYear() && confirmed.getMonth() === now.getMonth()
-    }).length,
+    monthly: signingRecords.value.filter((item) => isInBusinessMonth(item.confirmed_at)).length,
     expired: signingRecords.value.filter(isSigningExpired).length,
   }
 })
@@ -581,8 +693,9 @@ function openReportContract(contract) {
 
 function exportContracts() {
   const rows = filteredContracts.value.map((item) => [item.id, item.name, item.type, item.serviceType, item.amount, item.owner, item.status])
+  // 单元格转义统一交给 utils/csvExport.js：结构转义 + 公式前缀中和（= + - @ 与 TAB/CR 开头）。
   const csv = [['合同编号', '合同名称', '合同类型', '服务类型', '金额', '负责人姓名', '状态'], ...rows]
-    .map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(','))
+    .map((row) => row.map(escapeCsvCell).join(','))
     .join('\n')
   const url = URL.createObjectURL(new Blob([`\ufeff${csv}`], { type: 'text/csv;charset=utf-8' }))
   const anchor = document.createElement('a')
@@ -617,33 +730,13 @@ function approvalStatusTone(status) {
   return 'neutral'
 }
 
-function formatDate(value) {
-  if (!value) return '—'
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? String(value) : new Intl.DateTimeFormat('zh-CN').format(date)
-}
-
-function formatDateTime(value) {
-  if (!value) return '—'
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? String(value) : new Intl.DateTimeFormat('zh-CN', {
-    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
-  }).format(date)
-}
+// 展示口径统一为北京业务时间：纯日期串（start_date/end_date 等日历日）原样返回不平移，
+// 时间戳折算成北京日期；浏览器不在东八区也不会把凌晨的记录显示成前一天。
+// 具体实现见 utils/contractBusinessTime.js，便于直接单测展示口径。
+const formatDate = formatContractDate
+const formatDateTime = formatContractDateTime
 
 
-const ACTIVE_CONTRACT_STATUSES = new Set(['ACTIVE', 'IN_PROGRESS', 'PENDING_PAY'])
-
-function isExpiredContract(item) {
-  if (item?.expired === true) return true
-  const rawStatus = String(item?.status || '').toUpperCase()
-  if (!ACTIVE_CONTRACT_STATUSES.has(rawStatus) || !item?.end_date) return false
-  const end = new Date(item.end_date)
-  if (Number.isNaN(end.getTime())) return false
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  return end.getTime() < today.getTime()
-}
 
 function contractDisplayStatus(contract) {
   return contract?.expired ? '已过期' : (contract?.status || '—')
@@ -673,15 +766,15 @@ function normalizeContract(item) {
     endDate: formatDate(item.end_date),
     endAt: item.end_date || '',
     status: contractStatusLabel(item.status),
-    displayStatus: isExpiredContract(item) ? '已过期' : contractStatusLabel(item.status),
+    displayStatus: isContractExpired(item) ? '已过期' : contractStatusLabel(item.status),
     rawStatus: String(item.status || '').toUpperCase(),
     version: item.version,
     content: item.content || '',
     templateId: item.template_id || '',
     customerCreditLevel: item.customer_credit_level || '未填写',
     inApproval: Boolean(item.in_approval),
-    activeUnexpired: Boolean(item.active_unexpired) || (ACTIVE_CONTRACT_STATUSES.has(String(item.status || '').toUpperCase()) && !isExpiredContract(item)),
-    expired: isExpiredContract(item),
+    activeUnexpired: Boolean(item.active_unexpired) || (ACTIVE_CONTRACT_STATUSES.has(String(item.status || '').toUpperCase()) && !isContractExpired(item)),
+    expired: isContractExpired(item),
     canEditDraft: canEditContractDraft(item),
   }
 }
@@ -690,10 +783,13 @@ function normalizeSigningRecord(item) {
   return { ...item, contract: normalizeContract(item.contract || {}) }
 }
 
+// 签署台账失效判定与合同台账、后端筛选（`end_date < 今天`）统一：
+// end_date 是纯日期，按北京日历日比较——到期当天仍有效，次日起算失效。
+// 旧实现直接拿 end_date 的绝对时刻与当前时刻比较：end_date 被解析成 UTC 零点（北京当天 08:00），
+// 导致到期当天 08:00 起就显示“已失效”，而同一行的后端“已失效”筛选此时还查不到它。
 function isSigningExpired(record) {
   if (record.status === 'completed' || !record.contract?.endAt) return false
-  const end = new Date(record.contract.endAt)
-  return !Number.isNaN(end.getTime()) && end.getTime() < Date.now()
+  return isPastBusinessDay(record.contract.endAt)
 }
 
 function signingDisplayStatus(record) {
@@ -828,12 +924,13 @@ function applySigningRecord(record, { preserveForms = false } = {}) {
     // 重新输入完整手机号，已保存的掩码只在表单下方作为提示展示（允许覆盖重填）。
     recipient_phone: '',
     recipient_address: selected.recipient_address || '',
-    mailed_at: selected.mailed_at ? String(selected.mailed_at).slice(0, 10) : '',
+    // mailed_at 是纯日期字段（构造上就是 UTC 零点），formatBusinessDate 对纯日期原样返回不平移。
+    mailed_at: formatBusinessDate(selected.mailed_at),
   }
   signingConfirmationForm.value = {
     seal_verified: Boolean(selected.seal_verified),
     signature_verified: Boolean(selected.signature_verified),
-    signed_at: selected.signed_at ? String(selected.signed_at).slice(0, 10) : '',
+    signed_at: formatBusinessDate(selected.signed_at),
   }
 }
 
@@ -1578,6 +1675,8 @@ function openNewContract() {
   templatePreviewHTML.value = ''
   templatePreviewError.value = ''
   createDialogOpen.value = true
+  resetCRMDirectoryConnection()
+  void probeCRMDirectorySession()
   markDraftClean()
 }
 
@@ -1598,6 +1697,8 @@ async function editContractDraft(contract) {
     templatePreviewError.value = ''
     closeContract()
     createDialogOpen.value = true
+    resetCRMDirectoryConnection()
+    void probeCRMDirectorySession()
     markDraftClean()
     if (!raw.template_id) void loadDetectionCategoryOptions()
     else if (!selectedContractTemplate.value) draftEditError.value = '原合同模板已不可用，不能重新生成正文，请联系管理员恢复原模板。'
@@ -1670,14 +1771,46 @@ async function loadDetectionCategoryOptions() {
   }
 }
 
-async function loadCustomerOptions({ reset = true } = {}) {
+/**
+ * ensureCRMDirectorySessionForAction 在用户主动检索目录前确认 CRM 会话。
+ * 401 只记录“需要连接”状态，由调用方保留表单并给出自动连接入口；
+ * 权限、依赖与网络错误仍显式提示，不伪装成登录失效。
+ * @param {(error: Error) => void} onError 非登录类错误的展示回调。
+ * @returns {Promise<boolean>} 会话是否可用于目录检索。
+ */
+async function ensureCRMDirectorySessionForAction(onError) {
+  try {
+    await ensureContractCRMDirectorySession()
+    markCRMDirectoryReady()
+    return true
+  } catch (error) {
+    if (!error?.crmLoginRequired) {
+      recordCRMDirectoryError(error)
+      onError(error)
+      return false
+    }
+    crmSessionState.value = 'required'
+    crmForceLogin.value = Boolean(error.crmForceLogin)
+    crmConnectionRequired.value = true
+    if (!crmConnecting.value) {
+      crmConnectionMessage.value = crmAutoConnectAttempted.value
+        ? 'CRM 登录尚未完成，请点击“连接 CRM”完成登录后重试。当前合同表单会保留。'
+        : '需要连接 CRM 后才能读取权限范围内的数据，请点击“连接 CRM”完成登录。当前合同表单会保留。'
+    }
+    return false
+  }
+}
+
+async function loadCustomerOptions({ reset = true, sessionVerified = false } = {}) {
   if (customerLoading.value) return
   const page = reset ? 1 : customerPage.value + 1
   customerPickerOpen.value = true
   customerError.value = ''
   customerLoading.value = true
   try {
-    await checkCRMDirectorySession()
+    if (!sessionVerified && !(await ensureCRMDirectorySessionForAction((error) => {
+      customerError.value = formatUserError(error, { fallback: '读取可关联客户失败，请稍后重试。' })
+    }))) return
     const result = await listMyCustomers({ keyword: customerKeyword.value, page, page_size: 50 })
     customerPage.value = result.page
     customerTotal.value = result.total
@@ -1694,7 +1827,10 @@ async function loadCustomerOptions({ reset = true } = {}) {
 async function openCustomerPicker() {
   customerKeyword.value = ''
   customerOptions.value = []
-  await loadCustomerOptions()
+  customerPickerOpen.value = true
+  // 已知需要登录时必须在点击事件内同步打开登录页；登录完成后由轮询自动加载客户。
+  if (crmSessionState.value === 'required' && !crmConnecting.value && startCRMDirectoryConnection({ automatic: true })) return
+  await loadCustomerOptions({ sessionVerified: crmSessionState.value === 'ready' })
 }
 
 async function searchCustomerOptions() {
@@ -1763,13 +1899,15 @@ function selectExternalContractFile(event) {
   externalContractFile.value = file
 }
 
-async function loadOpportunityOptions({ reset = true } = {}) {
+async function loadOpportunityOptions({ reset = true, sessionVerified = false } = {}) {
   if (opportunityLoading.value) return
   const page = reset ? 1 : opportunityPage.value + 1
   opportunityError.value = ''
   opportunityLoading.value = true
   try {
-    await checkCRMDirectorySession()
+    if (!sessionVerified && !(await ensureCRMDirectorySessionForAction((error) => {
+      opportunityError.value = formatUserError(error, { fallback: '读取可关联商机失败，请稍后重试。' })
+    }))) return
     const result = await listMyOpportunities({ keyword: opportunityKeyword.value, page, page_size: 50 })
     opportunityPage.value = result.page
     opportunityTotal.value = result.total
@@ -1786,7 +1924,29 @@ async function loadOpportunityOptions({ reset = true } = {}) {
   }
 }
 
-// 表单展开时自动加载可关联商机，用户直接在下拉框里选择，无需先打开弹层再搜索。
+/**
+ * loadOpportunityOptionsIfNeeded 仅在 CRM 会话就绪时预载可关联商机；
+ * 未连接时保持静默，用户聚焦商机下拉或完成自动连接后再加载。
+ * @param {{force?: boolean}} [options={}] force 为 true 时即使已有选项也重新加载。
+ * @returns {Promise<void>}
+ */
+async function loadOpportunityOptionsIfNeeded({ force = false } = {}) {
+  if (crmSessionState.value !== 'ready') return
+  if (!isExternalContractMode.value && !selectedContractTemplate.value) return
+  if (!force && opportunityOptions.value.length) return
+  if (opportunityLoading.value) return
+  opportunityKeyword.value = isExternalContractMode.value ? newContract.value.customer_name : ''
+  await loadOpportunityOptions({ sessionVerified: true })
+}
+
+/** ensureOpportunityOptions 用户展开商机下拉时按需加载；已知未连接 CRM 时自动发起同源登录。 */
+function ensureOpportunityOptions() {
+  if (opportunityLoading.value || opportunityOptions.value.length) return
+  if (crmSessionState.value === 'required' && !crmConnecting.value && startCRMDirectoryConnection({ automatic: true })) return
+  void loadOpportunityOptions()
+}
+
+// 表单展开时，CRM 会话已就绪则自动加载可关联商机，用户可直接在下拉框里选择。
 async function selectOpportunityById(event) {
   const id = String(event?.target?.value || '')
   if (!id) {
@@ -1800,13 +1960,8 @@ async function selectOpportunityById(event) {
 watch([selectedContractTemplate, isExternalContractMode], async ([template, external]) => {
   if ((!template && !external) || opportunityOptions.value.length) return
   opportunityKeyword.value = external ? newContract.value.customer_name : ''
-  await loadOpportunityOptions()
-})
-
-watch(() => newContract.value.customer_id, async () => {
-  if (!isExternalContractMode.value) return
-  opportunityKeyword.value = newContract.value.customer_name
-  await loadOpportunityOptions()
+  // 只有 CRM 会话可用时才在后台预载；未连接时点击“CRM 客户”或商机下拉会自动登录。
+  if (crmSessionState.value === 'ready') await loadOpportunityOptions()
 })
 
 function selectOpportunity(item) {
@@ -1864,6 +2019,10 @@ function syncManagedTemplateValues() {
   )
 }
 
+watch(createDialogOpen, (open) => {
+  // 弹窗关闭即失效在途登录轮询，避免登录标签页完成后回填已关闭的表单。
+  if (!open) resetCRMDirectoryConnection()
+})
 watch(() => [newContract.value.amount, newContract.value.template_id], syncManagedTemplateValues)
 watch(newContract, () => {
   // 表单变化立即让在途预览失效，旧响应不得回填到新表单。
@@ -2312,6 +2471,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  resetCRMDirectoryConnection()
   window.clearTimeout(toastTimer)
   window.clearTimeout(signingFilterTimer)
   stopApprovalRealtime()
@@ -2435,11 +2595,16 @@ onBeforeUnmount(() => {
           <section v-if="contractTemplates.length" class="contract-template-grid">
             <article v-for="(item, index) in contractTemplates" :key="item.id">
               <div class="contract-template-cover" :class="['', 'purple', 'green', 'orange'][index % 4]"><span><ConsoleIcon name="save" /></span><i>DOCX</i></div>
-              <div class="contract-template-copy"><span class="contract-badge success"><i></i>可用</span><h3>{{ item.name }}</h3><p>{{ item.original_filename }}</p><p>编号格式：{{ item.number_format || 'HT-{YYYYMMDD}-{ID8}' }}</p><div><span>{{ item.fields?.length || 0 }} 个填写字段 · {{ item.fields?.filter((field) => field.locked).length || 0 }} 个管理员配置</span><span>{{ formatDate(item.created_at) }}</span></div></div>
+              <div class="contract-template-copy"><span class="contract-badge success"><i></i>可用</span><h3>{{ item.name }}</h3><p>{{ item.original_filename }}</p><p>历史编号格式：{{ item.number_format || 'HT-{YYYYMMDD}-{ID8}' }}（不参与新编号）</p><div><span>{{ item.fields?.length || 0 }} 个填写字段 · {{ item.fields?.filter((field) => field.locked).length || 0 }} 个管理员配置</span><span>{{ formatDate(item.created_at) }}</span></div></div>
               <footer v-if="isAdmin" class="contract-template-actions"><button type="button" @click="editTemplate(item)">编辑</button><button type="button" @click="openTemplateReplacement(item)">替换模板文件</button><button class="danger" type="button" @click="removeTemplate(item)">删除</button></footer>
             </article>
           </section>
           <div v-else class="contract-card contract-empty-state"><ConsoleIcon name="save" /><h3>暂无合同模板</h3><p>{{ isAdmin ? '点击右上角“上传模板”添加第一个 DOCX 模板。' : '超级管理员尚未上传合同模板。' }}</p></div>
+          <h2 class="contract-subsection-title">系统合同编号规则</h2>
+          <!-- 编号规则与模板同属配置管理：进入本区域才挂载并读取，不占首屏请求。
+               可编辑性绑定专用高权权限码 contract.number_rule.manage：规则是全系统单行配置，
+               合同 admin 角色不能凭 isAdmin 拿到写入能力，非高权用户仍可只读查看。 -->
+          <ContractNumberRulePanel v-if="isAdmin || can('contract.read')" :can-manage="can('contract.number_rule.manage')" @notify="showToast" />
         </template>
 
         <template v-else-if="activeSection === 'approvals'">
@@ -2472,6 +2637,10 @@ onBeforeUnmount(() => {
             <button class="contract-button primary small" type="button" @click="refreshSigningRecords"><ConsoleIcon name="reset" />刷新</button>
           </div>
           <div class="contract-table-card"><div class="contract-table-scroll"><table class="contract-data-table contract-signing-table"><thead><tr><th>合同编号 / 名称</th><th>签署方</th><th>签署方式</th><th>签署进度</th><th>当前状态</th><th>签署日期</th><th>到期日期</th><th>操作</th></tr></thead><tbody><tr v-for="record in filteredSigningRecords" :key="record.contract.recordId"><td><button class="contract-entity-link" type="button" @click="openSigningRecord(record)"><strong>{{ record.contract.name }}</strong><small>{{ record.contract.id }}</small></button></td><td>{{ record.contract.customerName }}</td><td>纸质签署</td><td><div class="contract-progress"><i><b :style="{ width: `${signingProgress(record)}%` }"></b></i><span>{{ signingProgress(record) }}%</span></div></td><td><span class="contract-badge" :class="signingDisplayStatus(record).tone"><i></i>{{ signingDisplayStatus(record).label }}</span></td><td>{{ formatDate(record.signed_at) }}</td><td>{{ record.contract.endDate }}</td><td><button class="contract-text-button" type="button" @click="openSigningRecord(record)">{{ record.status === 'pending_shipment' ? '登记寄出' : record.status === 'completed' ? '查看详情' : '回传跟踪' }}</button></td></tr><tr v-if="!filteredSigningRecords.length"><td colspan="8" class="contract-empty">当前没有符合条件的签署记录</td></tr></tbody></table></div><footer class="contract-table-footer"><span v-if="signingLedgerLoading">正在加载签署记录…</span><span v-else>共 {{ signingTotal }} 条签署记录，已加载 {{ signingRecords.length }} 条</span><button v-if="signingHasMore" class="contract-button secondary small" type="button" :disabled="signingLoadingMore" @click="refreshSigningRecords({ append: true })">{{ signingLoadingMore ? '加载中…' : '加载更多' }}</button></footer></div>
+        </template>
+
+        <template v-else-if="activeSection === 'outbox'">
+          <ContractIntegrationOutboxPanel :can-manage="can('approval.manage')" @notify="showToast" />
         </template>
 
         <template v-else-if="activeSection === 'reports'">
@@ -2541,13 +2710,13 @@ onBeforeUnmount(() => {
             <p class="contract-form-wide contract-form-required-hint">带 <strong>*</strong> 的为必填项；输入框按字段类型限制长度、格式和数值范围。</p>
             <p v-if="editingContract && isExternalContractMode" class="contract-info-banner contract-form-wide">编辑结构化信息时保留原外部 DOCX，不替换合同文件；正文金额等条款如需改变，应创建与新文件一致的合同。</p>
             <p v-if="draftEditError" ref="draftErrorElement" tabindex="-1" class="contract-session-error contract-form-wide" role="alert">{{ draftEditError }} <button v-if="draftEditConflict" type="button" :disabled="contractCreating || draftEditLoading" @click="editContractDraft(editingContract)">重新载入草稿（放弃未保存修改）</button></p>
-            <div v-if="crmConnectionRequired" class="contract-session-error contract-form-wide" role="status"><p>{{ crmConnectionMessage }}</p><button class="contract-button secondary" type="button" @click="connectCRM">连接 CRM</button></div>
+            <div v-if="crmConnectionRequired && !crmConnecting && !customerPickerOpen" class="contract-session-error contract-form-wide" role="status"><p>{{ crmConnectionMessage }}</p><button class="contract-button secondary" type="button" @click="connectCRM">连接 CRM</button></div>
             <div v-if="!editingContract" class="contract-form-wide contract-creation-mode" role="radiogroup" aria-label="合同创建方式"><button type="button" :class="{ active: contractCreationMode === 'template' }" role="radio" :aria-checked="contractCreationMode === 'template'" @click="selectContractCreationMode('template')"><strong>使用合同模板</strong><span>选择标准模板并填写模板字段</span></button><button type="button" :class="{ active: contractCreationMode === 'external' }" role="radio" :aria-checked="contractCreationMode === 'external'" @click="selectContractCreationMode('external')"><strong>上传外部合同</strong><span>上传未签署 DOCX，并补全结构化字段</span></button></div>
             <label v-if="contractCreationMode === 'template'" class="contract-form-wide contract-template-first"><span>第一步：选择合同模板</span><select v-model="newContract.template_id" :disabled="Boolean(editingContract)" required @change="selectContractTemplate"><option value="" disabled>请选择用于新建合同的模板</option><option v-for="item in contractTemplates" :key="item.id" :value="item.id">{{ item.name }}（{{ item.fields?.length || 0 }} 个字段）</option></select><small>模板将生成合同正文，合同编号在审批通过后自动生成。</small></label>
             <label v-else-if="!editingContract" class="contract-form-wide contract-external-file"><span>第一步：上传外部合同原件</span><input :key="externalContractFileInputKey" required type="file" :accept="contractSourceCapabilities.pdf_enabled ? '.docx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document' : '.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document'" @change="selectExternalContractFile" /><small v-if="externalContractFile">已选择：{{ externalContractFile.name }}（{{ (externalContractFile.size / 1024 / 1024).toFixed(2) }}MB）</small><small v-else>{{ contractSourceCapabilities.pdf_enabled ? '支持 DOCX（≤10MB）或 PDF（≤20MB）；PDF原件不改写，字段需另行填写。' : '支持 DOCX（≤10MB）；当前服务端未开放PDF源文件上传。' }}</small><small v-if="externalContractFileError" class="contract-field-error" role="alert">{{ externalContractFileError }}</small></label>
             <template v-if="selectedContractTemplate || isExternalContractMode">
-              <label v-if="isExternalContractMode || newContract.payment_terms.length || newContract.customer_id" :class="{ 'is-required': isExternalContractMode || newContract.payment_terms.length > 0 }"><span>CRM 客户</span><div class="contract-opportunity-control"><button type="button" @click="openCustomerPicker">{{ newContract.customer_name || '点击选择权限范围内的客户' }}</button><button v-if="newContract.customer_id" type="button" aria-label="清除 CRM 客户" @click="clearCustomer">×</button></div><small>外部合同及付款计划须关联 CRM 客户，不能只输入客户名称</small></label>
-              <label><span>关联商机（选填）</span><div class="contract-opportunity-control"><select v-model="newContract.opportunity_id" :disabled="isExternalContractMode && !newContract.customer_id" @change="selectOpportunityById"><option value="">{{ opportunityLoading ? '正在读取商机…' : (opportunityOptions.length ? '不关联商机' : (isExternalContractMode && !newContract.customer_id ? '请先选择 CRM 客户' : '暂无可关联商机')) }}</option><option v-for="item in opportunityOptions" :key="item.id || item.opportunity_id" :value="String(item.id || item.opportunity_id || '')">{{ item.name || item.title || item.opportunity_name || '未命名商机' }}（{{ item.opportunity_no || item.code || '—' }}）</option></select><button v-if="newContract.opportunity_id" type="button" aria-label="清除关联商机" @click="clearOpportunity">×</button></div><small>合同编号将在审批通过后自动生成</small></label>
+              <label v-if="isExternalContractMode || newContract.payment_terms.length || newContract.customer_id" :class="{ 'is-required': isExternalContractMode || newContract.payment_terms.length > 0 }"><span>CRM 客户</span><div class="contract-opportunity-control"><button class="contract-opportunity-select" type="button" @click="openCustomerPicker">{{ newContract.customer_name || '点击选择权限范围内的客户' }}</button><button v-if="newContract.customer_id" class="contract-opportunity-clear" type="button" aria-label="清除 CRM 客户" @click="clearCustomer">×</button></div><small>外部合同及付款计划须关联 CRM 客户，不能只输入客户名称</small></label>
+              <label><span>关联商机（选填）</span><div class="contract-opportunity-control"><select v-model="newContract.opportunity_id" :disabled="isExternalContractMode && !newContract.customer_id" @focus="ensureOpportunityOptions" @change="selectOpportunityById"><option value="">{{ opportunityLoading ? '正在读取商机…' : (opportunityOptions.length ? '不关联商机' : (isExternalContractMode && !newContract.customer_id ? '请先选择 CRM 客户' : '暂无可关联商机')) }}</option><option v-for="item in opportunityOptions" :key="item.id || item.opportunity_id" :value="String(item.id || item.opportunity_id || '')">{{ item.name || item.title || item.opportunity_name || '未命名商机' }}（{{ item.opportunity_no || item.code || '—' }}）</option></select><button v-if="newContract.opportunity_id" class="contract-opportunity-clear" type="button" aria-label="清除关联商机" @click="clearOpportunity">×</button></div><small>合同编号将在审批通过后自动生成</small></label>
               <label><span>合同名称</span><input v-model="newContract.title" required maxlength="255" autocomplete="off" placeholder="请输入合同名称" /></label>
               <label><span>合同负责人</span><input :value="editingContract ? editingContract.owner_display_name : currentUserLabel" readonly aria-readonly="true" /><small>{{ editingContract ? '保留原合同创建人，不随编辑人变更' : '已根据当前登录用户自动填入' }}</small></label>
               <label><span>合同类型</span><select v-model="newContract.contract_type" required><option value="" disabled>请选择合同类型</option><option v-for="item in availableContractTypeOptions" :key="item" :value="item">{{ item }}</option></select></label>
@@ -2586,12 +2755,12 @@ onBeforeUnmount(() => {
       </form>
     </div>
 
-    <div v-if="customerPickerOpen" class="contract-modal-mask contract-opportunity-mask" @click.self="customerPickerOpen = false"><article class="contract-detail-modal contract-opportunity-modal"><header><div><span class="contract-badge info">客户主数据</span><h2>选择 CRM 客户</h2><p>仅显示当前账号权限范围内的有效客户</p></div><button type="button" aria-label="关闭" @click="customerPickerOpen = false"><ConsoleIcon name="close" /></button></header><section><div v-if="crmConnectionRequired" class="contract-session-error contract-form-wide" role="status"><p>{{ crmConnectionMessage }}</p><button class="contract-button secondary" type="button" @click="connectCRM">连接 CRM</button></div><div class="contract-opportunity-search"><label><span>搜索客户</span><input v-model="customerKeyword" type="search" maxlength="100" autocomplete="off" placeholder="客户名称 / 客户编号" @keydown.enter.prevent="searchCustomerOptions" /></label><button class="contract-button secondary" type="button" :disabled="customerLoading" @click="searchCustomerOptions">搜索</button></div><p v-if="customerLoading" class="contract-modal-loading">正在读取客户…</p><p v-else-if="customerError" class="contract-session-error">{{ customerError }}</p><div v-else class="contract-opportunity-list"><button v-for="item in customerOptions" :key="item.id || item.customer_id" type="button" @click="selectCustomer(item)"><strong>{{ item.name || item.customer_name }}</strong><span>{{ item.customer_no || '—' }} · {{ item.industry || '行业未填写' }} / {{ item.region || '区域未填写' }}</span></button><p v-if="!customerOptions.length" class="contract-empty">没有匹配的有效客户，请调整关键词后重试</p><button v-if="customerHasMore" class="contract-button secondary contract-opportunity-load-more" type="button" :disabled="customerLoading" @click="loadMoreCustomerOptions">加载更多（已显示 {{ customerOptions.length }} / {{ customerTotal }}）</button></div></section><footer><button class="contract-button secondary" type="button" @click="customerPickerOpen = false">取消</button></footer></article></div>
+    <div v-if="customerPickerOpen" class="contract-modal-mask contract-opportunity-mask" @click.self="customerPickerOpen = false"><article class="contract-detail-modal contract-opportunity-modal"><header><div><span class="contract-badge info">客户主数据</span><h2>选择 CRM 客户</h2><p>仅显示当前账号权限范围内的有效客户</p></div><button type="button" aria-label="关闭" @click="customerPickerOpen = false"><ConsoleIcon name="close" /></button></header><section><div v-if="crmConnectionRequired" class="contract-form-wide" :class="crmConnecting ? 'contract-session-info' : 'contract-session-error'" role="status"><p v-if="crmConnecting">正在连接 CRM，完成后将自动加载客户列表…</p><p v-else>{{ crmConnectionMessage }}</p><button v-if="!crmConnecting" class="contract-button secondary" type="button" @click="connectCRM">连接 CRM</button></div><div class="contract-opportunity-search"><label><span>搜索客户</span><input v-model="customerKeyword" type="search" maxlength="100" autocomplete="off" placeholder="客户名称 / 客户编号" @keydown.enter.prevent="searchCustomerOptions" /></label><button class="contract-button secondary" type="button" :disabled="customerLoading" @click="searchCustomerOptions">搜索</button></div><p v-if="customerLoading" class="contract-modal-loading">正在读取客户…</p><p v-else-if="crmConnecting" class="contract-modal-loading">正在连接 CRM，完成后将自动加载客户列表…</p><p v-else-if="customerError" class="contract-session-error">{{ customerError }}</p><div v-else class="contract-opportunity-list"><button v-for="item in customerOptions" :key="item.id || item.customer_id" type="button" @click="selectCustomer(item)"><strong>{{ item.name || item.customer_name }}</strong><span>{{ item.customer_no || '—' }} · {{ item.industry || '行业未填写' }} / {{ item.region || '区域未填写' }}</span></button><p v-if="!customerOptions.length" class="contract-empty">没有匹配的有效客户，请调整关键词后重试</p><button v-if="customerHasMore" class="contract-button secondary contract-opportunity-load-more" type="button" :disabled="customerLoading" @click="loadMoreCustomerOptions">加载更多（已显示 {{ customerOptions.length }} / {{ customerTotal }}）</button></div></section><footer><button class="contract-button secondary" type="button" @click="customerPickerOpen = false">取消</button></footer></article></div>
 
 
 <div v-if="templateUploadDialogOpen" class="contract-modal-mask" @click.self="templateUploadDialogOpen = false"><form class="contract-detail-modal contract-template-upload-modal" @submit.prevent="submitTemplateUpload"><header><div><span class="contract-badge info">超级管理员</span><h2>{{ templateReplacementID ? '替换模板文件' : '上传合同模板' }}</h2><p><span v-if="templateReplacementID">保留模板标识和同名字段配置，已生成合同正文不变。请核对替换后的新字段。</span>上传不超过 10MB 的 DOCX，模板中使用 <code v-pre>{{field_name:字段名称}}</code> 标记填写项。</p></div><button type="button" aria-label="关闭" @click="templateUploadDialogOpen = false"><ConsoleIcon name="close" /></button></header><section><div class="contract-form-grid"><label><span>模板名称</span><input v-model="templateUploadForm.name" :readonly="Boolean(templateReplacementID)" required maxlength="160" placeholder="例如：标准服务合同" /></label><label><span>DOCX 文件</span><input required type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" @change="selectTemplateFile" /></label></div><p v-if="templateUploadError" class="contract-template-preview-error" role="alert">{{ templateUploadError }}</p></section><footer><button class="contract-button secondary" type="button" :disabled="templateUploading" @click="templateUploadDialogOpen = false">取消</button><button class="contract-button primary" type="submit" :disabled="templateUploading">{{ templateUploading ? '正在上传…' : (templateReplacementID ? '确认替换' : '上传模板') }}</button></footer></form></div>
 
-    <div v-if="templateEditDialogOpen" class="contract-modal-mask" @click.self="templateEditDialogOpen = false"><form class="contract-detail-modal contract-template-edit-modal" @submit.prevent="saveTemplate"><header><div><span class="contract-badge info">超级管理员</span><h2>编辑合同模板</h2><p>可编辑合同编号格式，并将需要统一控制的合同信息设为管理员预设。</p></div><button type="button" aria-label="关闭" @click="templateEditDialogOpen = false"><ConsoleIcon name="close" /></button></header><section><div class="contract-template-base-fields"><label class="contract-template-name-field"><span>模板名称</span><input v-model="templateEditForm.name" required maxlength="160" /></label><label class="contract-template-name-field"><span>合同编号格式</span><input v-model="templateEditForm.number_format" required maxlength="160" placeholder="HT-{YYYYMMDD}-{ID8}" /><small>支持 {YYYYMMDD}、{YYYY}、{MM}、{DD}、{ID8}；必须包含 {ID8}</small></label></div><div class="contract-template-editor-list"><div v-for="field in templateEditForm.fields" :key="field.name" class="contract-template-editor-row"><label><span>显示名称</span><input v-model="field.label" required maxlength="160" /></label><label><span>{{ field.locked ? '管理员预设值' : '默认值（可选）' }}</span><input v-model="field.default" :required="field.locked" maxlength="1000" :placeholder="field.locked ? '请输入固定值' : '新建合同时仍可修改'" /></label><label class="contract-check-label"><input v-model="field.locked" type="checkbox" /><span>由管理员预设</span></label></div><p v-if="!templateEditForm.fields.length" class="contract-session-error">该 DOCX 中没有可配置字段。</p></div></section><footer><button class="contract-button secondary" type="button" :disabled="templateSaving" @click="templateEditDialogOpen = false">取消</button><button class="contract-button primary" type="submit" :disabled="templateSaving">{{ templateSaving ? '正在保存…' : '保存模板' }}</button></footer></form></div>
+    <div v-if="templateEditDialogOpen" class="contract-modal-mask" @click.self="templateEditDialogOpen = false"><form class="contract-detail-modal contract-template-edit-modal" @submit.prevent="saveTemplate"><header><div><span class="contract-badge info">超级管理员</span><h2>编辑合同模板</h2><p>可将需要统一控制的合同信息设为管理员预设；合同编号由系统级编号规则生成，格式字段仅作只读展示。</p></div><button type="button" aria-label="关闭" @click="templateEditDialogOpen = false"><ConsoleIcon name="close" /></button></header><section><div class="contract-template-base-fields"><label class="contract-template-name-field"><span>模板名称</span><input v-model="templateEditForm.name" required maxlength="160" /></label><label class="contract-template-name-field"><span>合同编号格式（只读）</span><input :value="templateEditForm.number_format" readonly maxlength="160" /><small>实际合同编号由系统级编号规则生成；此格式只保留用于展示历史/旧规则，修改后不会影响新合同编号。</small></label></div><div class="contract-template-editor-list"><div v-for="field in templateEditForm.fields" :key="field.name" class="contract-template-editor-row"><label><span>显示名称</span><input v-model="field.label" required maxlength="160" /></label><label><span>{{ field.locked ? '管理员预设值' : '默认值（可选）' }}</span><input v-model="field.default" :required="field.locked" maxlength="1000" :placeholder="field.locked ? '请输入固定值' : '新建合同时仍可修改'" /></label><label class="contract-check-label"><input v-model="field.locked" type="checkbox" /><span>由管理员预设</span></label></div><p v-if="!templateEditForm.fields.length" class="contract-session-error">该 DOCX 中没有可配置字段。</p></div></section><footer><button class="contract-button secondary" type="button" :disabled="templateSaving" @click="templateEditDialogOpen = false">取消</button><button class="contract-button primary" type="submit" :disabled="templateSaving">{{ templateSaving ? '正在保存…' : '保存模板' }}</button></footer></form></div>
 
     <ConfirmDialog
       v-if="confirmDialog"

@@ -69,6 +69,7 @@ import {
   loadRelatedDataSafely,
 } from '@/modules/platform/shared/utils/relatedDataInvalidation'
 import { formatUserError } from '../../shared/utils/userError.js'
+import { formatBusinessDateTime } from '@/modules/shared/utils/businessTime.js'
 import '@/modules/platform/styles/console.css'
 import '@/modules/platform/styles/settings-showcase.css'
 
@@ -318,11 +319,11 @@ function rangeBounds(range) {
   return { from: from.toISOString(), to: now.toISOString() }
 }
 
+// 审计时间与商业授权页共用业务时间入口（北京时间 UTC+8、24 小时制）。
+// 之前这里用浏览器时区，服务器跑 UTC 且运维用 UTC 浏览器时，同一事件会比授权页早 8 小时。
 function formatAuditTime(value) {
   if (!value) return '—'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString('zh-CN', { hour12: false })
+  return formatBusinessDateTime(value, { seconds: true }) || String(value)
 }
 
 const filteredAuditRecords = computed(() => auditRecords.value)

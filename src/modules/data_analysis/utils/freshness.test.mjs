@@ -101,8 +101,10 @@ test('旧响应缺少 freshness 时只把 snapshot_at 当作快照时间，不�
 })
 
 test('时间格式化兼容 RFC3339 与 MySQL 文本，非法值原样返回', () => {
-  assert.match(formatDashboardTimestamp('2026-10-22T09:45:00Z'), /2026/)
-  assert.match(formatDashboardTimestamp('2026-10-22 09:45:00.000'), /2026/)
+  // 统一北京业务时间：UTC 2025-12-31T16:30Z = 北京 2026-01-01 00:30
+  assert.equal(formatDashboardTimestamp('2025-12-31T16:30:00Z'), '2026-01-01 00:30')
+  // 无时区标记的 MySQL DATETIME 按 UTC 墙钟解释（后端契约），不得按浏览器本地时间猜测
+  assert.equal(formatDashboardTimestamp('2025-12-31 16:30:00.000'), '2026-01-01 00:30')
   assert.equal(formatDashboardTimestamp('not-a-time'), 'not-a-time')
   assert.equal(formatDashboardTimestamp(''), '')
   assert.equal(formatDashboardTimestamp(null), '')

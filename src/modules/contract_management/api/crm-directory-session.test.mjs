@@ -11,7 +11,12 @@ const apiSource = await readFile(new URL('./contract.js', import.meta.url), 'utf
 const viewSource = await readFile(new URL('../views/ContractManagementView.vue', import.meta.url), 'utf8')
 const script = parseSFC(viewSource).descriptor.scriptSetup.content
 const ast = parse(script, { sourceType: 'module' })
-const callbacks = ['recordCRMDirectoryError', 'checkCRMDirectorySession', 'connectCRM', 'loadCustomerOptions', 'loadOpportunityOptions', 'refreshSelectedCRMAccess', 'submitNewContract']
+const callbacks = [
+  'recordCRMDirectoryError', 'markCRMDirectoryReady', 'resetCRMDirectoryConnection', 'probeCRMDirectorySession',
+  'checkCRMDirectorySession', 'connectCRM', 'startCRMDirectoryConnection', 'completeCRMDirectoryConnection',
+  'ensureCRMDirectorySessionForAction', 'loadCustomerOptions', 'openCustomerPicker', 'loadOpportunityOptions',
+  'loadOpportunityOptionsIfNeeded', 'ensureOpportunityOptions', 'refreshSelectedCRMAccess', 'submitNewContract',
+]
 const callbackSource = ast.program.body.filter(node => node.type === 'FunctionDeclaration' && callbacks.includes(node.id.name))
   .map(node => script.slice(node.start, node.end)).join('\n')
 
@@ -19,7 +24,7 @@ function client(env = {}) {
   const source = apiSource.replace(/^import\s[\s\S]*?from ['"][^'"]+['"]\n/gm, '')
     .replaceAll('import.meta.env', `(${JSON.stringify(env)})`).replace(/^export /gm, '')
   return new Function('formatUserError', 'attachStructuredContext', 'normalizeAuthorizationSession', 'principalIdentityID', 'shouldStartSubsystemLogin', 'subsystemAccessMessage',
-    `${source}; return { ensureContractCRMDirectorySession, openContractCRMLogin, listMyCustomers, listMyOpportunities, ContractAuthError };`)(
+    `${source}; return { ensureContractCRMDirectorySession, openContractCRMLogin, waitForContractCRMDirectorySession, listMyCustomers, listMyOpportunities, ContractAuthError };`)(
     formatUserError, attachStructuredContext, normalizeAuthorizationSession, principalIdentityID, shouldStartSubsystemLogin, subsystemAccessMessage)
 }
 
@@ -42,6 +47,7 @@ function view(api, overrides = {}) {
   const ref = value => ({ value })
   const state = {
     crmConnectionRequired: ref(false), crmForceLogin: ref(false), crmConnectionMessage: ref(''),
+    crmSessionState: ref('unknown'), crmConnecting: ref(false), crmConnectAttempt: ref(0), crmAutoConnectAttempted: ref(false),
     newContract: ref({ title: '未保存合同', customer_id: '7', customer_name: '客户甲', opportunity_id: '', amount: '123.45', payment_terms: [], service_items: [{ name: '未保存服务' }] }),
     externalContractFile: ref(new Blob(['original docx'])), externalContractFileError: ref(''), externalContractFileInputKey: ref(0), isExternalContractMode: ref(true),
     selectedContractTemplate: ref({ id: 'template-a', fields: [] }), templatePreviewHTML: ref(''), createDialogOpen: ref(true),
@@ -50,7 +56,7 @@ function view(api, overrides = {}) {
   for (const kind of ['customer', 'opportunity']) {
     for (const [name, initial] of Object.entries({ Page: 0, Total: 0, HasMore: false, PickerOpen: true, Keyword: '甲', Error: '', Loading: false, Options: [] })) state[kind + name] = ref(initial)
   }
-  const deps = { ...state, ...api, formatUserError, showToast: () => {}, nextTick: (fn) => fn?.(), draftErrorElement: { value: null }, syncManagedTemplateValues: () => {},
+  const deps = { ...state, ...api, waitForContractCRMDirectorySession: async () => true, formatUserError, showToast: () => {}, nextTick: (fn) => fn?.(), draftErrorElement: { value: null }, syncManagedTemplateValues: () => {},
     buildNewContractPayload: form => ({ title: form.title, crm_customer_id: Number(form.customer_id || 0), payment_terms: form.payment_terms || [] }),
     validateExternalContract: () => {}, refreshSelectedCRMAccess: async () => {}, createExternalContract: async () => {},
     createContract: async () => {}, loadBusinessData: async () => {},
@@ -98,7 +104,8 @@ test('different CRM account or tenant blocks directory reads and requests forced
       await ui.loadCustomerOptions()
       assert.equal(ui.crmConnectionRequired.value, true)
       assert.equal(ui.crmForceLogin.value, true)
-      assert.match(ui.customerError.value, /账号或租户.*不一致/)
+      assert.equal(ui.crmSessionState.value, 'required')
+      assert.match(ui.crmConnectionMessage.value, /连接 CRM/)
       assert.equal(calls.length, 2)
       assert.equal(ui.customerOptions.value.length, 0)
     })
@@ -149,33 +156,77 @@ test('403 permission, 503 dependency and network errors remain distinct and neve
   }
 })
 
-test('missing CRM session preserves form and file, click works without UI session, retry succeeds for both pickers', async () => {
+test('clicking CRM customer auto-opens same-origin SSO and loads customers after login without losing the form', async () => {
+  let opens = 0, connected = false
+  const paths = []
+  const tab = { opener: 'original', location: { replace(path) { assert.equal(tab.opener, null); paths.push(path) } } }
+  await browser(async url => {
+    if (url.startsWith('/contract_management/')) return response(200, contractSession)
+    if (!connected) return response(401, null, 'COMMON_UNAUTHENTICATED')
+    return response(200, url.endsWith('/auth/me') ? crmSession : { items: [{ id: '7', customer_id: '7', name: '客户甲' }], total: 1, page: 1, page_size: 50 })
+  }, async ({ redirects }) => {
+    const ui = view(client(), {
+      waitForContractCRMDirectorySession: async ({ isCancelled }) => {
+        await new Promise(resolve => setTimeout(resolve, 2))
+        connected = true
+        return !isCancelled?.()
+      },
+    })
+    const form = ui.newContract.value, file = ui.externalContractFile.value
+    ui.crmSessionState.value = 'required'
+    ui.crmForceLogin.value = true
+    await ui.openCustomerPicker()
+    await new Promise(resolve => setTimeout(resolve, 20))
+    assert.equal(opens, 1)
+    assert.match(paths[0], /^\/customer-opportunity\/auth\/login\?prompt=login&return_to=/)
+    assert.match(decodeURIComponent(paths[0]), /return_to=\/customer-opportunity\/tab-close/)
+    assert.equal(ui.crmConnectionRequired.value, false)
+    assert.equal(ui.crmSessionState.value, 'ready')
+    assert.equal(ui.customerOptions.value.length, 1)
+    assert.equal(ui.customerPickerOpen.value, true)
+    assert.equal(ui.newContract.value, form)
+    assert.equal(form.title, '未保存合同')
+    assert.equal(form.amount, '123.45')
+    assert.equal(ui.externalContractFile.value, file)
+    assert.deepEqual(redirects, [])
+  }, () => { opens += 1; return tab })
+})
+
+test('missing CRM session keeps the form until the user connects; manual retry loads the directory', async () => {
   for (const kind of ['Customer', 'Opportunity']) {
     let connected = false, opens = 0
-    const tab = { opener: 'original', location: { replace(path) { assert.equal(tab.opener, null); assert.equal(path, '/customer-opportunity/auth/login') } } }
+    const tab = { opener: 'original', location: { replace(path) { assert.equal(tab.opener, null); assert.equal(path, '/customer-opportunity/auth/login?return_to=%2Fcustomer-opportunity%2Ftab-close') } } }
     await browser(async url => {
       if (url.startsWith('/contract_management/')) return response(200, contractSession)
       if (!connected) return response(401, null, 'COMMON_UNAUTHENTICATED')
       return response(200, url.endsWith('/auth/me') ? crmSession : { items: [{ id: '7', customer_id: '7', name: '客户甲' }], total: 1, page: 1, page_size: 50 })
     }, async ({ calls, redirects }) => {
-      const ui = view(client()), form = ui.newContract.value, file = ui.externalContractFile.value
+      const ui = view(client(), {
+        waitForContractCRMDirectorySession: async ({ isCancelled }) => {
+          await new Promise(resolve => setTimeout(resolve, 2))
+          connected = true
+          return !isCancelled?.()
+        },
+      })
+      const form = ui.newContract.value, file = ui.externalContractFile.value
       await ui[`load${kind}Options`]()
-      assert.equal(ui.crmConnectionRequired.value, true)
+      assert.equal(ui.crmSessionState.value, 'required')
+      assert.equal(ui.crmConnecting.value, false)
       assert.equal(opens, 0)
       ui.connectCRM()
       assert.equal(opens, 1)
-      assert.match(ui.crmConnectionMessage.value, /返回点击“搜索”/)
-      assert.equal(calls.length, 2) // 点击后进入 SSO；不轮询，也不在后台重试目录查询。
-      connected = true
-      await ui[`load${kind}Options`]()
+      assert.equal(ui.crmConnecting.value, true)
+      await new Promise(resolve => setTimeout(resolve, 20))
       assert.equal(ui.crmConnectionRequired.value, false)
+      assert.equal(ui.crmSessionState.value, 'ready')
+      assert.equal(ui.crmConnecting.value, false)
       assert.equal(ui[kind.toLowerCase() + 'Options'].value.length, 1)
       assert.equal(ui.newContract.value, form)
       assert.equal(form.title, '未保存合同')
       assert.equal(form.amount, '123.45')
       assert.equal(ui.externalContractFile.value, file)
       assert.deepEqual(redirects, [])
-    }, () => { opens++; return tab })
+    }, () => { opens += 1; return tab })
   }
 })
 
@@ -184,7 +235,8 @@ test('popup blocked or throwing shows Chinese guidance and retains form', async 
     await browser(async () => { throw new Error('unexpected fetch') }, async () => {
       const ui = view(client()), form = ui.newContract.value
       ui.connectCRM()
-      assert.match(ui.crmConnectionMessage.value, /允许浏览器弹出窗口.*再次点击/)
+      assert.equal(ui.crmConnecting.value, false)
+      assert.match(ui.crmConnectionMessage.value, /无法打开 CRM 登录标签页.*允许浏览器弹出窗口.*连接 CRM/)
       assert.equal(ui.newContract.value, form)
     }, open)
   }
@@ -196,7 +248,10 @@ test('login is same-origin, custom mounted prefix is supported and mismatch uses
   await browser(async () => { throw new Error('unexpected fetch') }, async () => {
     assert.equal(client().openContractCRMLogin({ force: true }), true)
     assert.equal(client({ VITE_CUSTOMER_API_BASE_URL: '/crm/api/v1' }).openContractCRMLogin(), true)
-    assert.deepEqual(paths, ['/customer-opportunity/auth/login?prompt=login', '/crm/auth/login'])
+    assert.deepEqual(paths, [
+      '/customer-opportunity/auth/login?prompt=login&return_to=%2Fcustomer-opportunity%2Ftab-close',
+      '/crm/auth/login?return_to=%2Fcrm%2Ftab-close',
+    ])
     for (const base of ['https://external.example/api/v1', '//external.example/api/v1', '/crm/unknown', '/crm/api/v1?x=1', '/crm/api/v1#hash']) {
       assert.equal(client({ VITE_CUSTOMER_API_BASE_URL: base }).openContractCRMLogin(), false)
     }
@@ -285,4 +340,61 @@ test('compiled opportunity import executes the real picker without an unbound AP
     assert.equal(calls.length, 3)
     assert.match(calls[2].url, /^\/customer-opportunity\/api\/v1\/opportunities\?/)
   })
+})
+
+test('waitForContractCRMDirectorySession polls the CRM session until login completes', async () => {
+  let checks = 0
+  await browser(async url => {
+    if (url.startsWith('/contract_management/')) return response(200, contractSession)
+    checks += 1
+    if (checks < 3) return response(401, null, 'COMMON_UNAUTHENTICATED')
+    return response(200, crmSession)
+  }, async ({ calls }) => {
+    const connected = await client().waitForContractCRMDirectorySession({ timeoutMs: 2000, intervalMs: 1 })
+    assert.equal(connected, true)
+    assert.deepEqual(calls.map(call => call.url), [
+      '/contract_management/api/v1/auth/me',
+      '/customer-opportunity/api/v1/auth/me',
+      '/customer-opportunity/api/v1/auth/me',
+      '/customer-opportunity/api/v1/auth/me',
+    ])
+  })
+})
+
+test('waitForContractCRMDirectorySession times out without inventing a session and stops when cancelled', async () => {
+  await browser(async url => url.startsWith('/contract_management/') ? response(200, contractSession) : response(401, null, 'COMMON_UNAUTHENTICATED'), async () => {
+    assert.equal(await client().waitForContractCRMDirectorySession({ timeoutMs: 20, intervalMs: 5 }), false)
+    let calls = 0
+    const connected = await client().waitForContractCRMDirectorySession({
+      timeoutMs: 2000, intervalMs: 1, isCancelled: () => { calls += 1; return true },
+    })
+    assert.equal(connected, false)
+    assert.equal(calls, 1)
+  })
+})
+
+test('waitForContractCRMDirectorySession fails closed on account mismatch, 403 and contract identity loss', async () => {
+  await browser(async url => url.startsWith('/contract_management/') ? response(200, contractSession) : response(200, { ...crmSession, user_id: 'identity-b' }), async () => {
+    await assert.rejects(client().waitForContractCRMDirectorySession({ timeoutMs: 2000, intervalMs: 1 }), error => {
+      assert.equal(error.code, 'CRM_IDENTITY_MISMATCH')
+      assert.equal(error.crmForceLogin, true)
+      return true
+    })
+  })
+  await browser(async url => url.startsWith('/contract_management/') ? response(200, contractSession) : response(403, null, 'COMMON_FORBIDDEN'), async () => {
+    await assert.rejects(client().waitForContractCRMDirectorySession({ timeoutMs: 2000, intervalMs: 1 }), error => error.status === 403 && !error.crmLoginRequired)
+  })
+  await browser(async () => response(200, { tenant_id: 'tenant-a' }), async () => {
+    await assert.rejects(client().waitForContractCRMDirectorySession({ timeoutMs: 2000, intervalMs: 1 }), error => error.code === 'CONTRACT_IDENTITY_UNVERIFIED')
+  })
+})
+
+test('CRM login helper tab lands on a self-closing same-origin page', async () => {
+  const routerSource = await readFile(new URL('../../../router/index.js', import.meta.url), 'utf8')
+  const closeView = await readFile(new URL('../../customer_opportunity/views/CRMLoginCompleteView.vue', import.meta.url), 'utf8')
+  assert.match(routerSource, /path: '\/customer-opportunity\/tab-close'/)
+  assert.match(routerSource, /name: 'customer_opportunity_tab_close'/)
+  assert.ok(routerSource.indexOf("path: '/customer-opportunity/tab-close'") < routerSource.indexOf("path: '/customer-opportunity/:section?'"))
+  assert.match(closeView, /window\.close\(\)/)
+  assert.match(closeView, /CRM 登录已完成/)
 })

@@ -14,6 +14,7 @@ import {
 import { hasPermission } from '@/modules/platform/auth/utils/principal'
 import { DICTIONARY_PERMISSIONS } from '@/modules/platform/dictionaries/utils/dictionaryPermissions'
 import { formatUserError } from '../../../shared/utils/userError.js'
+import { formatBusinessDateTime } from '@/modules/shared/utils/businessTime.js'
 import '@/modules/platform/dictionaries/styles/dictionary-management.css'
 
 const emit = defineEmits(['toast'])
@@ -102,7 +103,8 @@ function formatDate(value) {
   const date = new Date(value)
   // Go time.Time 的零值会被序列化为 0001-01-01；这不是可供管理员使用的更新时间。
   if (Number.isNaN(date.getTime()) || date.getUTCFullYear() <= 1) return '—'
-  return date.toLocaleString('zh-CN', { hour12: false })
+  // 更新时间是业务时间，统一按北京时间（UTC+8）、24 小时制展示。
+  return formatBusinessDateTime(value) || '—'
 }
 
 function userMessage(error, fallback, method) {

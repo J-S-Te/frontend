@@ -151,3 +151,44 @@ test('无 target 的 <a> 不注入 rel [AUD-2026-034 回归]', () => {
   const html = '<a href="/x">本窗口</a>'
   assert.equal(sanitizePreviewHTML(html), html)
 })
+
+// ---- F-04 回归：<style> 不在白名单内，标签与 CSS 原文一起丢弃（不得以正文文本泄露） ----
+test('<style> 标签与其 CSS 内容整体丢弃 [F-04 回归]', () => {
+  const html = '<div><style>body{background:url(https://evil.example/x)} .a{color:red}</style><p style="color:red">正文</p></div>'
+  const out = sanitizePreviewHTML(html)
+  assert.ok(!/<style/i.test(out), '<style> 标签必须被移除: ' + out)
+  assert.ok(!out.includes('background:url'), 'CSS 内容不得作为文本泄露: ' + out)
+  assert.ok(!out.includes('color:red}'), 'CSS 规则不得作为文本泄露: ' + out)
+  assert.ok(out.includes('<p style="color:red">正文</p>'), '内联 style 属性必须保留: ' + out)
+  assert.ok(out.includes('正文'))
+})
+
+test('<style> 的大小写变体、属性与媒体查询同样丢弃 [F-04 回归]', () => {
+  const payloads = [
+    '<p>前</p><STYLE>p{color:red}</STYLE><p>后</p>',
+    '<p>前</p><style type="text/css" media="all">p{color:red}</style><p>后</p>',
+    '<p>前</p><style>@import url("https://evil.example/a.css");p{color:red}</style><p>后</p>',
+    '<p>前</p><style>\n.a{background:url(javascript:alert(1))}\n</style><p>后</p>',
+  ]
+  for (const payload of payloads) {
+    const out = sanitizePreviewHTML(payload)
+    assert.ok(!/<style/i.test(out), 'style 标签必须被移除: ' + out)
+    assert.ok(!out.includes('color:red') && !out.includes('@import') && !out.includes('javascript:'), 'CSS 内容不得残留: ' + out)
+    assert.ok(out.includes('前') && out.includes('后'), '正文必须保留: ' + out)
+  }
+})
+
+test('未闭合 <style> 丢到结尾而不是把 CSS 当正文输出 [F-04 回归]', () => {
+  const out = sanitizePreviewHTML('<p>前</p><style>p{color:red}')
+  assert.ok(!out.includes('color:red'), 'CSS 内容不得残留: ' + out)
+  assert.ok(!/<style/i.test(out), 'style 标签必须被移除: ' + out)
+  assert.ok(out.includes('前'))
+})
+
+test('普通内联 style 属性仍按原有规则净化并保留 [F-04 回归]', () => {
+  const kept = sanitizePreviewHTML('<td style="border:1px solid #ccc;text-align:right">金额</td>')
+  assert.equal(kept, '<td style="border:1px solid #ccc;text-align:right">金额</td>')
+  const dropped = sanitizePreviewHTML('<p style="background:url(javascript:alert(1))">x</p>')
+  assert.ok(!dropped.includes('javascript:'), '可执行 style 值必须丢弃: ' + dropped)
+  assert.ok(!dropped.includes('style='), '整条 style 属性应被丢弃: ' + dropped)
+})

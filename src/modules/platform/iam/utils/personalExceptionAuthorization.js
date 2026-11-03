@@ -12,6 +12,11 @@ import {
   isAssignableActiveCatalogRole,
   isCatalogSynchronized,
 } from './applicationAuthorizationCatalog.js'
+import {
+  businessWallClockToInstant,
+  formatBusinessDateTime,
+  instantToBusinessWallClock,
+} from '../../../shared/utils/businessTime.js'
 
 export class PersonalExceptionValidationError extends Error {
   constructor(message, { fieldErrors = {}, blockers = [], warnings = [] } = {}) {
@@ -62,20 +67,27 @@ export function toRFC3339(value) {
   return Number.isNaN(date.getTime()) ? null : date.toISOString()
 }
 
+/**
+ * 授权有效期回填：瞬间 → 北京墙钟 'YYYY-MM-DDTHH:mm'，用于 datetime-local 输入框。
+ * 提交时必须配对使用 fromDateTimeLocal（同一业务时区反算），否则浏览器时区不同会平移有效期。
+ */
 export function toDateTimeLocal(value) {
   if (!value) return ''
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ''
-  const pad = (number) => String(number).padStart(2, '0')
-  return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate())
-    + 'T' + pad(date.getHours()) + ':' + pad(date.getMinutes())
+  return instantToBusinessWallClock(value)
+}
+
+/**
+ * 提交时 datetime-local 输入 → 带 Z 的 RFC3339；与 toDateTimeLocal 严格对称，
+ * 输入框里的墙钟按北京时间解释，不按浏览器时区。
+ */
+export function fromDateTimeLocal(value) {
+  if (!value) return null
+  return businessWallClockToInstant(String(value)) || null
 }
 
 export function formatPersonalExceptionTime(value) {
   if (!value) return ''
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return String(value)
-  return date.toLocaleString('zh-CN', { hour12: false })
+  return formatBusinessDateTime(value) || String(value)
 }
 
 export function validityStateOf(role, now = new Date()) {
@@ -306,12 +318,14 @@ export function createPersonalExceptionDraft({ mode = 'create', group = null } =
 
 /** 把 datetime-local 输入解析为提交用 RFC3339；未触碰的字段保留原始时间字符串。 */
 export function resolvePersonalExceptionDraft(draft) {
+  // 输入框里的墙钟是业务时间（北京时间），必须用与回填对称的 fromDateTimeLocal 反算，
+  // 否则 UTC 浏览器下有效期会整体平移 8 小时。
   const start = draft?.startMode === 'IMMEDIATE'
     ? null
-    : (draft?.validFromTouched ? toRFC3339(draft.validFromInput) : normalizeTime(draft?.validFrom))
+    : (draft?.validFromTouched ? fromDateTimeLocal(draft.validFromInput) : normalizeTime(draft?.validFrom))
   const end = draft?.validityMode === VALIDITY_PERMANENT
     ? null
-    : (draft?.validUntilTouched ? toRFC3339(draft.validUntilInput) : normalizeTime(draft?.validUntil))
+    : (draft?.validUntilTouched ? fromDateTimeLocal(draft.validUntilInput) : normalizeTime(draft?.validUntil))
   return {
     ...draft,
     validFrom: start,

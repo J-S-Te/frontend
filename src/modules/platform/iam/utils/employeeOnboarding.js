@@ -1,9 +1,7 @@
-export function defaultAccountValidUntil(now = new Date()) {
-  // datetime-local 不带时区：先按本地偏移转换，默认值才能正确表示“当前时间后 24 小时”。
-  const date = new Date(now.getTime() + 24 * 60 * 60 * 1000)
-  const localOffset = date.getTimezoneOffset() * 60 * 1000
-  return new Date(date.getTime() - localOffset).toISOString().slice(0, 16)
-}
+// 与 userInputValidation 共用同一份实现，避免两处口径分叉。
+// 注意：`export { x } from` 只重导出、不建本地绑定，本文件内部调用必须显式 import。
+import { defaultAccountValidUntil } from './userInputValidation.js'
+export { defaultAccountValidUntil }
 
 export function defaultEmployeeOnboardingForm(now = new Date()) {
   return {

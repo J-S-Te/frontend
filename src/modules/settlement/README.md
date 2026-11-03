@@ -51,3 +51,20 @@ npm run build
 - `SettlementRolePanel.vue` 提供设置、人工计划/受控调整、项目人员分配及映射说明、回款差异处置、凭证本地生成/回传重试、回单文件归档及下载。项目查询使用权威精确 ID，有效助理来自平台候选；依赖失败不造候选。助理仅维护已分配项目说明，不能改变权威合同/客户归属或自增范围。
 - 开票申请包含特殊事项原因；`SPECIAL_REVIEW` 有独立总监加签/驳回入口和待办，保留版本及服务端自审限制。ERP 未配置时展示服务端 `NOT_CONFIGURED`，退款意向明确为待执行，不显示银行成功。
 - 本轮本地验证入口及真实结果见 `.ai/qa/settlement-role-completion-20261028/frontend-report.md`。真实浏览器、业务环境与外部 ERP/税控/文件网关验收由总任务分别报告；未部署。
+
+## 2026-10-30 计划差额与作废释放额度（SET-04 / SET-06）
+
+- 计划差额：应收区只读读取服务端 `GET /plan-coverage`（返回 `{ items }`，字段 `contract_amount` / `plan_total` / `gap` / `gap_percent` / `exceeds_threshold` / `triggered` / `contract_event_plan`），由 `SettlementPlanCoveragePanel.vue` 展示合同金额、计划合计、差额、差额比例与判定。读取能力与计划台账同为 `settlement.receivable.read`，不扩大数据范围；面板只读、不含写入控件。
+- 超阈值处置：`exceeds_threshold` 为真时提示需要结算财务 override 权限（`settlement.finance.override`），并按当前会话是否具备该权限给出不同文案；两者都申明页面不会自动重试保存。计划新建 / 调整被服务端 409 拒绝时，`SettlementRolePanel` 把请求路径交给 `formatSettlementError`，追加"计划合计不得超过合同金额 + 差额超阈值需财务 override + 不自动重试"的说明，其他资源的冲突文案保持原样（服务端只返回通用冲突码，不返回具体差额）。
+- 作废（释放额度）：仅 `ISSUE_PENDING` / `ISSUE_FAILED` 且非本人申请的行显示"作废（释放额度）"入口（隐藏规则见 `utils/invoiceStatus.js` 的 `canCancelInvoiceRequest`），点击后以 `PromptDialog` 采集 5–1000 字原因再确认，调用 `POST /invoice-requests/{id}/cancel`（body 为 `version` + `reason`，带 `Idempotency-Key`）。写入成功后才关窗并刷新，**不做乐观更新**；403 / 409 / 连接中断分别提示"无权作废""状态已变化、税控命令在途或结果未知、额度未释放""结果未知、勿重复提交"。前端目前没有结算税控死信面板，作废入口位于开票申请行（台账无待开具申请可作废）。
+- 状态语义：`CANCELLED` → 已作废（终态、非失败，附作废原因）、`ABANDONED` → 已放弃开具（失败语义）、`RED_FLUSHED` → 已红冲、`UNDER_REVIEW` → 审核中；未识别状态降级为失败色调并保留原始代码，不显示空白。
+- 浏览器 E2E 夹具（`src/test/ui-harness/settlement-role-browser.mjs`）按 SET-04 收敛金额：销售账号无 override 权限，合同金额 100.00 下把计划调整 / 新建金额从 80 / 10 改为阈值内的 96（差额 4%、降幅 4%），断言语义不变（仍以真实写响应与服务端回读金额为准）。该用例需 `SETTLEMENT_ROLE_BROWSER=1` 和隔离 MySQL 与 Chrome，本地未运行。
+
+
+## 2026-11-01 合同财务修订工单（差异关单）
+
+- 入口：结算「差异与会计凭证」分区（`active === 'finance'`）内挂载 `components/ContractRevisionHoldPanel.vue`，`v-if` 要求 `settlement.revision.read`；不新增顶层导航。`utils/capabilities.js` 的 `finance` 分区允许仅持有 `settlement.revision.read` 的账号进入，其余子区块仍按各自能力判断，可写范围不变。
+- 列表：`GET /contract-revision-holds`，`status` 为空/`PENDING_REVIEW`/`RESOLVED`，`contract_ref` 同时匹配源合同 ID 与合同编号，`limit` 1–100（页面固定 50）、`offset` 0–100000；越界与未知状态由 `utils/revisionHold.js` 的 `revisionHoldQuery` 在发请求前拦截。每行展示合同编号与 ID、`from→to` 版本、逐期差异摘要（`AMOUNT_CHANGED` / `DUE_DATE_CHANGED` / `AMOUNT_AND_DUE_DATE_CHANGED` / `REMOVED` + 已回款核销/已核销/已开票/已预占非零事实）、`hold_reason` 释义与北京时间 `created_at`；`<details>` 展开逐期明细，不做 JSON dump。
+- 关单：每行按钮打开 shared `PromptDialog`（5–500 字，按字符数校验），`POST /contract-revision-holds/{id}/resolve`（body `{reason}`，带 `X-CSRF-Token` 与按 reason 复用的 `Idempotency-Key`）。提交中禁止重复提交与关闭弹窗；成功后才关窗并刷新列表，不做乐观更新。409 提示"已被处理或说明不一致、不自动重试"，403 `COMMERCIAL_LICENSE_DENIED` 提示"许可只读期不可操作"，404 提示"工单不存在或不在可见范围"。列表为空态、`role="status"` 读取中、`role="alert"` 错误三态齐备。
+- 权限：无 `settlement.revision.read` 不渲染入口也不发请求；仅缺 `settlement.revision.resolve` 时列表可见但关单按钮禁用并给出禁用原因（`aria-describedby` + 可见提示）。两个能力都只认专用权限，不再要求 `settlement.receivable.read` / `settlement.receivable.adjust`。
+- 后端契约对齐说明：`ListContractRevisionHoldsPage` 与 HTTP 层同源，只要求 `settlement.revision.read`；`ResolveContractRevisionHold` 与 HTTP 层同源，只要求 `settlement.revision.resolve`。前端因此对列表、关单分别只判各自专用权限，403 文案只点名缺失的那一项；工单 `diff` 与列表项未返回币种，页面只展示金额数值、不臆造币种符号。关单原因长度后端按字符（rune）判定 5–500，与前端"5–500 字"同口径。

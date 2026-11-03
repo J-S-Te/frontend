@@ -25,6 +25,9 @@ const validationMessages = {
   "match_confidence must be between 1 and 100 for suggested matches": "推荐匹配信息已失效，请重新查询可核销应收后再提交。",
   "currency mismatch": "回款与应收的币种不同，不能进行核销，请重新选择。",
   "receipt and receivable customers differ": "回款与应收不属于同一客户，不能进行核销，请重新选择。",
+  // SET-06 作废（释放额度）：服务端 compose 的中文校验原因，按原文翻译成可执行提示。
+  "作废原因应为 5 到 1000 字，且必须提供当前版本与幂等键": "作废原因应为 5 到 1000 字，且需携带当前版本；请刷新页面后重新提交。",
+  "申请人不能作废自己的开票申请": "申请人不能作废自己的开票申请，请由其他具备开票开具权限的财务人员执行。",
 };
 
 const requiredFields = {
@@ -34,6 +37,12 @@ const requiredFields = {
 };
 
 export function formatSettlementError(input, options = {}) {
+  const message = settlementMessage(input, options);
+  const hint = planAdjustConflictHint(input, options);
+  return hint ? `${message}${hint}` : message;
+}
+
+function settlementMessage(input, options = {}) {
   const code = String(options.code || input?.code || "");
   const raw = String(options.message || input?.message || (typeof input === "string" ? input : ""));
   const details = options.details ?? input?.details;
@@ -48,4 +57,17 @@ export function formatSettlementError(input, options = {}) {
     return formatUserError(input, { ...options, message: "当前记录可能已被处理、版本已更新或可用余额不足。请刷新列表，核对状态和余额后再操作。" });
   }
   return formatUserError(input, options);
+}
+
+// 用途：计划新建 / 受控调整被服务端 409 拒绝时，补充"合计上限 + 差额超阈值需财务 override"的可执行说明（SET-04）。
+// 参数：input 为服务端错误；options 同 formatSettlementError，需带 path，status 取 options 或错误本身。
+// 返回值：附加说明；非计划写入路径或非冲突时为空字符串，其他模块文案完全不受影响。
+function planAdjustConflictHint(input, options = {}) {
+  const path = String(options.path || "");
+  if (!/^\/receivable-plans(?:[/?]|$)/.test(path)) return "";
+  const status = Number(options.status || input?.status || 0);
+  const code = String(options.code || input?.code || "");
+  if (status !== 409 && code !== "SETTLEMENT_CONFLICT") return "";
+  // 服务端只返回通用冲突码，不返回具体差额；因此这里给出确定可执行的处置路径，并申明不自动重试。
+  return "计划合计不得超过合同金额；若合计差额或单期降幅超过阈值，需要结算财务负责人（settlement.finance.override）override 权限后由该账号重新提交。页面不会自动重试保存，请先在“计划差额（合同金额对计划合计）”核对本次改动。";
 }

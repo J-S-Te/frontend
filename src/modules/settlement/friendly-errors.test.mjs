@@ -33,7 +33,7 @@ function harness(fetcher) {
     document: { body: { appendChild() {} }, createElement: () => ({ click() { calls.downloads.push({ href: this.href, download: this.download }) }, remove() {} }) },
   })
   const script = source.replace(/^import[\s\S]*?;\n/gm, '').replace(/import\.meta\.env\?/g, '({})?').replace(/^export /gm, '')
-  vm.runInContext(`${script}\nglobalThis.api = { getDashboard, getSettlementSession, listReceipts, listDunningRecipients, createReceipt, createInvoiceRequest, recoverInvoiceFailure, downloadReportExport, downloadTaxInvoiceDocument };`, context)
+  vm.runInContext(`${script}\nglobalThis.api = { getDashboard, getSettlementSession, listReceipts, listDunningRecipients, createReceipt, createInvoiceRequest, recoverInvoiceFailure, cancelInvoiceRequest, getPlanCoverage, downloadReportExport, downloadTaxInvoiceDocument };`, context)
   return { api: context.api, calls, setFetch: (fn) => { context.fetch = fn } }
 }
 const json = (body, status = 200, headers = {}) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } })
@@ -249,4 +249,73 @@ test('completed financial operation remains successful when subsequent page refr
   assert.match(ui.message.value, /核销分配已确认.*页面刷新失败.*勿重复提交/)
   assert.doesNotMatch(ui.message.value, /操作失败|database/)
   assert.ok(ui.error.value)
+})
+
+// SET-06 作废（释放额度）：请求必须带幂等键与 version+reason，且 2xx 后才视为已作废。
+test('作废请求带幂等键与当前版本，2xx 前不返回成功', async () => {
+  const seen = []
+  const { api } = harness(async (url, options) => {
+    seen.push({ url, method: options.method, body: options.body, key: options.headers['Idempotency-Key'] })
+    return json({ data: { id: 'REQ-1', status: 'CANCELLED', version: 4 } })
+  })
+  const result = await api.cancelInvoiceRequest('REQ-1', { version: 3, reason: '税控命令已死信，开票尝试从未被受理' })
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), { id: 'REQ-1', status: 'CANCELLED', version: 4 })
+  assert.equal(seen[0].url.endsWith('/api/v1/invoice-requests/REQ-1/cancel'), true)
+  assert.equal(seen[0].method, 'POST')
+  assert.deepEqual(JSON.parse(seen[0].body), { version: 3, reason: '税控命令已死信，开票尝试从未被受理' })
+  assert.match(seen[0].key, /idempotent-/)
+
+  // 409 / 403 不得被当成已作废：调用方必须看到失败并按状态给出提示。
+  for (const [status, code] of [[409, 'SETTLEMENT_CONFLICT'], [403, 'SETTLEMENT_FORBIDDEN']]) {
+    const failed = harness(async () => json({ code, message: status === 409 ? '记录已变化、重复或余额不足' : '当前用户无权执行此操作' }, status))
+    await assert.rejects(failed.api.cancelInvoiceRequest('REQ-1', { version: 3, reason: '核对后作废' }), (error) => {
+      assert.equal(error.status, status)
+      assert.equal(error.code, code)
+      return true
+    })
+  }
+})
+
+// SET-04 计划差额：GET /plan-coverage 的 {items: [...]} 外壳必须被接受，空列表不得判成响应损坏。
+test('计划差额读取接受 items 外壳与空列表，单合同查询带快照参数', async () => {
+  const urls = []
+  const items = [{ contract_snapshot_id: 'S1', contract_no: 'HT-1', contract_amount: '100.00', plan_total: '94.50', gap: '5.50', gap_percent: '5.50', exceeds_threshold: true, triggered: ['COVERAGE_GAP'], contract_event_plan: true }]
+  const { api } = harness(async (url) => {
+    urls.push(url)
+    return json({ data: { items: url.includes('contract_snapshot_id') ? items : [] } })
+  })
+  assert.deepEqual(JSON.parse(JSON.stringify(await api.getPlanCoverage())), { items: [] })
+  assert.deepEqual(JSON.parse(JSON.stringify(await api.getPlanCoverage('S 1'))), { items })
+  assert.equal(urls[0].endsWith('/api/v1/plan-coverage'), true)
+  assert.equal(urls[1].endsWith('/api/v1/plan-coverage?contract_snapshot_id=S%201'), true)
+})
+
+// SET-04 计划写入被 409 拒绝时，前端需补充"合计上限 + 差额超阈值需财务 override"的处置说明，
+// 且该说明只在计划路径出现，其他资源的冲突文案保持原样。
+test('计划写入 409 追加 override 提示，其他资源与成功路径不受影响', () => {
+  const conflict = { code: 'SETTLEMENT_CONFLICT', message: '记录已变化、重复或余额不足', status: 409 }
+  for (const path of ['/receivable-plans', '/receivable-plans/plan-1/adjust']) {
+    const message = formatSettlementError(conflict, { path })
+    assert.match(message, /当前记录可能已被处理/)
+    assert.match(message, /计划合计不得超过合同金额/)
+    assert.match(message, /settlement\.finance\.override/)
+    assert.match(message, /不会自动重试/)
+  }
+  const unaffected = formatSettlementError(conflict)
+  assert.doesNotMatch(unaffected, /settlement\.finance\.override/)
+  // 计划路径的非冲突错误（例如必填校验 400）不追加 override 说明。
+  const invalid = formatSettlementError({ code: 'SETTLEMENT_INVALID_REQUEST', message: 'invalid input: planned_amount is required', status: 400 }, { path: '/receivable-plans' })
+  assert.doesNotMatch(invalid, /override/)
+})
+
+// SET-06 作废的 400 校验原因翻译成可执行中文，不透出服务端原文与内部字段名。
+test('作废校验原因给出可执行提示', () => {
+  assert.equal(
+    formatSettlementError({ code: 'SETTLEMENT_INVALID_REQUEST', message: 'invalid input: 作废原因应为 5 到 1000 字，且必须提供当前版本与幂等键', status: 400 }),
+    '作废原因应为 5 到 1000 字，且需携带当前版本；请刷新页面后重新提交。',
+  )
+  assert.equal(
+    formatSettlementError({ code: 'SETTLEMENT_INVALID_REQUEST', message: 'invalid input: 申请人不能作废自己的开票申请', status: 400 }),
+    '申请人不能作废自己的开票申请，请由其他具备开票开具权限的财务人员执行。',
+  )
 })

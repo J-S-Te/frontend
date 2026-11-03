@@ -1,6 +1,8 @@
 // 数据看板时间口径：source_updated_at（源业务数据最后更新）、
 // synced_at（最近一次成功同步或持久快照写入）、computed_at（本次查询计算）
 // 是三个独立事实，展示层不得把 computed_at 标成“数据更新时间”。
+import { formatBusinessDateTime } from '../../shared/utils/businessTime.js'
+
 const STATUS_LABELS = Object.freeze({
   SUCCESS: '同步正常',
   FAILED: '同步失败',
@@ -15,25 +17,18 @@ function text(value) {
 }
 
 /**
- * formatDashboardTimestamp 按本地时区展示后端时间戳。
- * 兼容 RFC3339（带 Z）与 MySQL DATETIME 文本；无法解析时原样返回，不伪造时间。
+ * formatDashboardTimestamp 按北京业务时间展示后端时间戳（与全站统一口径）。
+ * 后端契约始终是 RFC3339（带 Z）；若出现无时区的 MySQL DATETIME 文本，按 UTC 墙钟解释
+ * （DSN loc=UTC 的存储口径），绝不按浏览器本地时间猜测。无法解析时原样返回，不伪造时间。
  * @param {unknown} value 后端时间字段。
  * @returns {string} 展示文本；空值返回空字符串。
  */
 export function formatDashboardTimestamp(value) {
   const raw = text(value)
   if (!raw) return ''
-  const normalized = raw.includes('T') ? raw : raw.replace(' ', 'T')
-  const date = new Date(normalized)
-  if (Number.isNaN(date.getTime())) return raw
-  return new Intl.DateTimeFormat('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(date)
+  const hasZone = /(?:Z|[+-]\d{2}:\d{2})$/.test(raw)
+  const instant = hasZone ? raw : `${raw.replace(' ', 'T')}Z`
+  return formatBusinessDateTime(instant) || raw
 }
 
 /**

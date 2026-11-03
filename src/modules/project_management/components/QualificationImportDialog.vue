@@ -1,12 +1,13 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { formatUserError } from '../../shared/utils/userError.js'
+import { formatBusinessDate } from '@/modules/shared/utils/businessTime.js'
 import { downloadCapabilityImportTemplate, previewCapabilitiesImport, importCapabilities, downloadEquipmentImportTemplate, previewEquipmentImport, importEquipment } from '@/modules/project_management/api/projectManagement'
 
 const props = defineProps({ codeOptions: { type: Array, default: () => [] }, resourceType: { type: String, default: 'PERSON', validator: (value) => ['PERSON', 'EQUIPMENT'].includes(value) } })
 const isEquipment = computed(() => props.resourceType === 'EQUIPMENT')
 const resourceLabel = computed(() => isEquipment.value ? '设备能力' : '人员资质')
-function dateLabel(value) { return !value || String(value).startsWith('0001-01-01') ? '不限' : String(value).slice(0, 10) }
+function dateLabel(value) { if (!value || String(value).startsWith('0001-01-01')) return '不限'; return formatBusinessDate(value) || String(value).slice(0, 10) }
 const emit = defineEmits(['close', 'completed'])
 const file = ref(null), preview = ref(null), result = ref(null), selected = ref([])
 const busy = ref(false), error = ref(''), filter = ref('all')

@@ -48,8 +48,10 @@ test('optionalText, resolveExpiresAt and defaultAccountValidUntil keep original 
   assert.equal(resolveExpiresAt(''), null)
   assert.equal(resolveExpiresAt('not-a-date'), null)
   assert.equal(resolveExpiresAt('2026-01-02T03:04:05Z'), '2026-01-02T03:04:05.000Z')
-  const value = defaultAccountValidUntil()
-  assert.match(value, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/)
+  // 固定时刻：UTC 2025-12-31T16:00Z +24h = UTC 2026-01-01T16:00Z = 北京 2026-01-02 00:00
+  assert.equal(defaultAccountValidUntil(new Date('2025-12-31T16:00:00Z')), '2026-01-02T00:00')
+  // 北京墙钟口径：UTC 2025-12-31T16:30Z（北京 2026-01-01 00:30）+24h → 北京 2026-01-02 00:30
+  assert.equal(defaultAccountValidUntil(new Date('2025-12-31T16:30:00Z')), '2026-01-02T00:30')
 })
 
 function IamErrorWith(message) {

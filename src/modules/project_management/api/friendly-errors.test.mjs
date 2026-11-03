@@ -4,13 +4,14 @@ import test from 'node:test'
 import { formatUserError } from '../../shared/utils/userError.js'
 import { attachStructuredContext } from '../../platform/shared/api/requestContext.js'
 import { normalizeAuthorizationSession, principalIdentityID, shouldStartSubsystemLogin } from '../../shared/authz/sessionCompatibility.js'
+import { todayBusinessDate } from '../../shared/utils/businessTime.js'
 
 const source = (await readFile(new URL('./projectManagement.js', import.meta.url), 'utf8'))
   .replace(/^import\s[\s\S]*?from ['"][^'"]+['"]\n/gm, '')
   .replaceAll('import.meta.env', '({})').replace(/^export /gm, '')
 function client() {
-  return new Function('formatUserError', 'attachStructuredContext', 'normalizeAuthorizationSession', 'principalIdentityID', 'shouldStartSubsystemLogin',
-    `${source}; return { request, downloadCapabilityImportTemplate, downloadEquipmentImportTemplate, downloadDetectionCategoryImportTemplate, exportCapabilities };`)(formatUserError, attachStructuredContext, normalizeAuthorizationSession, principalIdentityID, shouldStartSubsystemLogin)
+  return new Function('formatUserError', 'attachStructuredContext', 'normalizeAuthorizationSession', 'principalIdentityID', 'shouldStartSubsystemLogin', 'todayBusinessDate',
+    `${source}; return { request, downloadCapabilityImportTemplate, downloadEquipmentImportTemplate, downloadDetectionCategoryImportTemplate, exportCapabilities };`)(formatUserError, attachStructuredContext, normalizeAuthorizationSession, principalIdentityID, shouldStartSubsystemLogin, todayBusinessDate)
 }
 async function withFetch(fetcher, run) {
   const originalFetch = globalThis.fetch, originalWindow = globalThis.window

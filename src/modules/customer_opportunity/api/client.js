@@ -154,6 +154,9 @@ export function createIdempotencyKey() {
  */
 export async function request(path, options = {}) {
   const method = (options.method || 'GET').toUpperCase()
+  // suppressLoginRedirect 供会话空闲探测使用：401 交给生命周期统一结束本页，
+  // 避免探测请求各自触发重定向或重定向风暴。
+  const suppressLoginRedirect = options.suppressLoginRedirect === true
   const requiresCSRF = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)
   const hasFormDataBody = typeof FormData !== 'undefined' && options.body instanceof FormData
   const requestContext = {
@@ -200,7 +203,7 @@ export async function request(path, options = {}) {
       requestId: body?.request_id || '',
       traceId: body?.trace_id || body?.traceId || '',
     })
-    if (shouldStartSubsystemLogin(error)) redirectToLogin()
+    if (!suppressLoginRedirect && shouldStartSubsystemLogin(error)) redirectToLogin()
     throw error
   }
   return response.status === 204 || response.status === 205 ? {} : body.data
@@ -387,6 +390,28 @@ export async function ensureCRMSession() {
 }
 
 export const getCRMSession = async () => normalizeAuthorizationSession(await request('/auth/me'))
+
+/**
+ * startCRMLogin 发起 CRM 子系统登录（会话空闲到期时由前端生命周期调用）。
+ * @returns {void}
+ */
+export function startCRMLogin() { redirectToLogin() }
+
+/**
+ * probeCRMSession 只读读取 CRM 会话及服务端权威空闲窗口；401 不自行跳转。
+ * @returns {Promise<Record<string, unknown>>} 规范化会话（含 idle_timeout_seconds/idle_remaining_ms）。
+ */
+export async function probeCRMSession() {
+  return normalizeAuthorizationSession(await request('/auth/me', { suppressLoginRedirect: true }))
+}
+
+/**
+ * recordCRMSessionActivity 上报真实用户操作，滑动 CRM 会话空闲窗口。
+ * @returns {Promise<Record<string, unknown>>} 服务端权威空闲窗口。
+ */
+export async function recordCRMSessionActivity() {
+  return request('/auth/activity', { method: 'POST', suppressLoginRedirect: true })
+}
 
 /**
  * getCRMRuntimeCapabilities 获取非敏感集成就绪状态，仅用于界面能力提示，不作为授权依据。

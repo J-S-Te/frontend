@@ -12,6 +12,12 @@ test('Settlement API keeps a dedicated same-origin API and OIDC session boundary
   assert.match(source, /retryKeys\.get\(retryFingerprint\)/)
   assert.match(source, /registerManualInvoice/)
   assert.match(source, /rejectInvoiceRequest/)
+  // SET-06 作废（释放额度）与 SET-04 计划差额只读视图必须走同一 API 边界与幂等头。
+  assert.match(source, /export const cancelInvoiceRequest = \(id, payload\) =>/)
+  assert.match(source, /\/invoice-requests\/\$\{encodeURIComponent\(id\)\}\/cancel/)
+  assert.match(source, /export const getPlanCoverage = \(contractSnapshotID = ""\) =>/)
+  assert.match(source, /\/plan-coverage\$\{snapshot \? `\?contract_snapshot_id=/)
+  assert.match(source, /contract_snapshot_id=\$\{encodeURIComponent\(snapshot\)\}/)
   assert.match(source, /listReceiptMatches/)
   assert.match(source, /uploadTaxInvoiceDocument/)
   assert.match(source, /downloadTaxInvoiceDocument/)

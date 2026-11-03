@@ -1,6 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
+import vm from 'node:vm'
 import * as Vue from 'vue'
 import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc'
 import { renderToString } from '@vue/server-renderer'
@@ -27,19 +29,20 @@ const scopeMessage = '当前数据范围无法读取此统计；报告与财务�
 
 // 验证生产模板与 ErrorState 渲染，不挂载外壳的会话或网络
 // 生命周期，也不替换其错误分支逻辑。
-async function renderSummary(section, summaryError) {
+async function renderSummary(section, summaryError, overrides = {}) {
   const noop = () => {}
   const app = Vue.createSSRApp({
     render,
     setup: () => ({
       section, summaryError, summaryLoading: false, loadError: '', mobileMenuOpen: false,
       currentMeta: ['业务看板', '统计'], currentUserInitial: '测', currentUserName: '测试', currentUserRole: '总监',
-      dataScopeLabel: '管辖团队', navGroups: [], statusOptions: [], statusFilter: '全部', isLoggingOut: false,
+      dataScopeLabel: '管辖团队', scopeModeLabel: '团队', scopeEmptyHint: '', navGroups: [], statusOptions: [], statusFilter: '全部', isLoggingOut: false,
       DASHBOARD_SECTIONS: sections, DASHBOARD_CODES: Object.fromEntries(sections.map(value => [value, value])),
       EMBEDDED_DASHBOARD_SECTIONS: [], iframeLoading: false,
       overviewSummary: {}, dashboardSummary: null, contractDetails: {}, dashboardTrend: [], alertSummary: null, detailError: '',
       hasPermission: () => true, canViewDashboard: () => true,
       navigate: noop, returnToUnifiedPortal: noop, logoutSystem: noop, refreshCurrentDashboard: noop, loadMe: noop, loadSummary: noop,
+      ...overrides,
     }),
   })
   app.component('ConsoleIcon', icon)
@@ -67,4 +70,71 @@ test('authorized report and finance summaries do not display a stale scope error
     assert.ok(!html.includes(scopeMessage))
     assert.doesNotMatch(html, /role="alert"/)
   }
+})
+
+// —— DATA-09：当前数据范围标签与空范围提示 ——
+const shellSource = readFileSync(new URL('./views/DashboardShellView.vue', import.meta.url), 'utf8')
+
+// 用途：执行视图里真实的数据范围 computed，验证标签与空范围判定。
+// 参数：meValue 为 /auth/me 返回值；返回值：范围相关 ref（访问时重新计算，不做缓存）。
+function scopeState(meValue) {
+  const start = shellSource.indexOf('const SCOPE_MODE_LABELS = {')
+  const hintStart = shellSource.indexOf('const scopeEmptyHint = computed')
+  assert.ok(start >= 0 && hintStart > start, '外壳必须保留数据范围标签与空范围提示')
+  const end = shellSource.indexOf('\n', hintStart) + 1
+  const block = shellSource.slice(start, end)
+  return vm.runInNewContext(
+    `${block}\n;({ scopeMode, scopeModeLabel, scopeCollectionEmpty, scopeEmptyHint })`,
+    { me: { value: meValue }, computed: (fn) => ({ get value() { return fn() } }) },
+  )
+}
+
+test('scope_mode 映射为团队/组织/个人/全租户标签', () => {
+  assert.equal(scopeState({ scope_mode: 'TEAM' }).scopeModeLabel.value, '团队')
+  assert.equal(scopeState({ scope_mode: 'ORG' }).scopeModeLabel.value, '组织')
+  assert.equal(scopeState({ scope_mode: 'SELF' }).scopeModeLabel.value, '个人')
+  assert.equal(scopeState({ scope_mode: 'TENANT' }).scopeModeLabel.value, '全租户')
+  // 小写与多余空格同样识别。
+  assert.equal(scopeState({ scope_mode: ' team ' }).scopeModeLabel.value, '团队')
+})
+
+test('会话未暴露 scope_mode 时不猜测范围，也不提示可能无数据', () => {
+  for (const meValue of [null, {}, { roles: ['tech_director'] }, { scope_mode: 'UNKNOWN_MODE' }]) {
+    const state = scopeState(meValue)
+    assert.equal(state.scopeModeLabel.value, '', '未知或缺失的范围模式不得显示标签')
+    assert.equal(state.scopeCollectionEmpty.value, false)
+    assert.equal(state.scopeEmptyHint.value, '')
+  }
+})
+
+test('仅当范围集合明确为空时提示可能无数据，字段未上线不误报', () => {
+  // 明确返回空数组：团队/组织视角都提示可能无数据。
+  assert.equal(scopeState({ scope_mode: 'TEAM', team_ids: [] }).scopeCollectionEmpty.value, true)
+  assert.match(scopeState({ scope_mode: 'TEAM', team_ids: [] }).scopeEmptyHint.value, /可能看不到任何数据/)
+  assert.match(scopeState({ scope_mode: 'TEAM', team_ids: [] }).scopeEmptyHint.value, /不代表系统故障/)
+  assert.equal(scopeState({ scope_mode: 'ORG', organization_ids: [], team_ids: [] }).scopeCollectionEmpty.value, true)
+  assert.equal(scopeState({ scope_mode: 'NONE' }).scopeCollectionEmpty.value, true)
+  // 有范围、全租户、个人范围都不是“空范围”。
+  assert.equal(scopeState({ scope_mode: 'TEAM', team_ids: ['t1'] }).scopeEmptyHint.value, '')
+  assert.equal(scopeState({ scope_mode: 'ORG', organization_ids: ['o1'] }).scopeEmptyHint.value, '')
+  assert.equal(scopeState({ scope_mode: 'TENANT' }).scopeEmptyHint.value, '')
+  assert.equal(scopeState({ scope_mode: 'SELF' }).scopeEmptyHint.value, '')
+  // 字段未上线（undefined）不能当成空集合，否则会把接口未就绪误判成系统故障。
+  assert.equal(scopeState({ scope_mode: 'TEAM' }).scopeEmptyHint.value, '')
+  // ORG 视角的授权是组织与团队范围的并集：已返回的集合全部为空时才提示，任一非空即不提示。
+  assert.match(scopeState({ scope_mode: 'ORG', organization_ids: [] }).scopeEmptyHint.value, /可能看不到任何数据/)
+  assert.equal(scopeState({ scope_mode: 'ORG', organization_ids: [], team_ids: ['t1'] }).scopeEmptyHint.value, '')
+})
+
+test('范围标签与空范围提示以非错误样式渲染', async () => {
+  const hint = '当前账号的数据范围集合为空，看板可能看不到任何数据；这不代表系统故障，请联系管理员补齐团队/组织授权。'
+  const withScope = await renderSummary('overview', '', { scopeModeLabel: '团队', scopeEmptyHint: hint })
+  assert.ok(withScope.includes('数据范围：团队'), '页面头必须显示当前数据范围标签')
+  assert.ok(withScope.includes(hint), '空范围时必须提示可能无数据')
+  assert.match(withScope, /role="status"/, '范围提示是状态说明，不用 alert 语义')
+  assert.match(withScope, /class="da-native-note"/)
+  const withoutScope = await renderSummary('overview', '', { scopeModeLabel: '', scopeEmptyHint: '' })
+  assert.ok(!withoutScope.includes(hint))
+  assert.doesNotMatch(withoutScope, /数据范围：/)
+  assert.doesNotMatch(withoutScope, /role="status"/)
 })

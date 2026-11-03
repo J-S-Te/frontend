@@ -1,3 +1,6 @@
+// 客户列表的日期过滤边界按北京墙钟换算：'YYYY-MM-DD' 是北京日历日，不是浏览器本地的瞬间。
+import { businessWallClockToInstant } from '../shared/utils/businessTime.js'
+
 export const CUSTOMER_QUICK_FILTERS = new Set(['', 'KEY', 'NEW', 'WON', 'FOLLOWUP_DUE'])
 export const CUSTOMER_CREDIT_LEVELS = new Set(['', 'A', 'B', 'C', 'D'])
 export const CUSTOMER_SORT_FIELDS = new Set(['updated_at', 'created_at', 'name', 'last_followup_at', 'opportunity_amount_sum'])
@@ -29,15 +32,21 @@ export function customerFiltersToQuery(filters, page, pageSize) {
 export function customerAPIParams(filters, page, pageSize) {
   const result = { ...customerFiltersToQuery(filters, page, pageSize) }
   delete result.view
-  for (const key of ['created_from', 'last_followup_from']) if (result[key]) result[key] = localDateStart(result[key])
-  // “结束日期”转换为次日零点并作为不含上界，避免 23:59:59 精度差异漏掉记录。
-  for (const key of ['created_to', 'last_followup_to']) if (result[key]) result[key] = localDateNextStart(result[key])
+  // 日期过滤是纯日期（type="date"），代表北京日历日而不是瞬间：
+  // 起点取该日北京零点，结束取次日北京零点并作为不含上界，
+  // 这样发给后端的 UTC 半开区间与用户在北京看到的日历日一致（浏览器时区不参与解释）。
+  for (const key of ['created_from', 'last_followup_from']) if (result[key]) result[key] = businessDayStart(result[key]) || result[key]
+  for (const key of ['created_to', 'last_followup_to']) if (result[key]) result[key] = businessNextDayStart(result[key]) || result[key]
   return result
 }
 
-function localDateStart(value) { return new Date(`${value}T00:00:00`).toISOString() }
-function localDateNextStart(value) {
-  const date = new Date(`${value}T00:00:00`)
-  date.setDate(date.getDate() + 1)
-  return date.toISOString()
+// 北京墙钟 'YYYY-MM-DDTHH:mm' → 瞬间；非法值返回 ''，由调用方保留原值交给服务端校验。
+function businessDayStart(value) { return businessWallClockToInstant(`${String(value).trim()}T00:00`) }
+
+// 下一个北京日历日的零点（不含上界）：北京 1991 年后无夏令时、偏移恒为 +8，
+// 因此“该日北京零点 + 24h”就是次日北京零点；起点非法时返回 '' 由调用方保留原值。
+function businessNextDayStart(value) {
+  const start = Date.parse(businessDayStart(value))
+  if (!Number.isFinite(start)) return ''
+  return new Date(start + 86400000).toISOString()
 }

@@ -206,6 +206,7 @@ test('invalid license facts expose blocking reasons and import action without im
   ])
   assert.equal(blockingReasonName('LICENSE_MISSING'), '缺少商业授权')
   assert.equal(blockingReasonName('LICENSE_NOT_EFFECTIVE'), '商业授权尚未生效')
+  assert.equal(blockingReasonName('RUNTIME_ACK_STALE'), '部分组件授权确认未跟上当前快照')
   assert.equal(blockingReasonName('UNKNOWN_CODE'), '其他阻塞原因，请联系授权管理员核对')
   assert.equal(allowedActionName('IMPORT_LICENSE'), '导入或续期商业授权')
   assert.equal(licenseStatusName('NO_LICENSE'), '未导入许可证')

@@ -7,6 +7,7 @@ import {
   assignees,
   catalogSelectionIDs,
   creditLevelLabel,
+  defaultReportFilters,
   emptyCustomer,
   emptyOpportunity,
   formatAmount,
@@ -20,6 +21,7 @@ import {
   presaleOpportunityLabel,
   presaleRequestID,
   protectionLevelText,
+  reportDateParam,
   safeHTTPSURL,
   stableQuery,
   terminalPendingText,
@@ -28,6 +30,7 @@ import {
   urgencyText,
   venueText,
 } from './crmDisplay.js'
+import { currentBusinessMonthRange } from '../shared/utils/businessTime.js'
 
 test('商机售前资格只认跟进中的五个售前阶段（current_stage）', () => {
   for (const stage of ['初步接触', '需求沟通', '方案制定', '报价', '投标']) {
@@ -68,11 +71,31 @@ test('金额格式化为人民币两位小数，非法输入回落破折号', ()
   assert.equal(terminalPendingText('OTHER'), '无')
 })
 
-test('日期格式化：Date 对象转 datetime-local 字符串，字符串转中文中等日期', () => {
+test('日期格式化：Date 对象转 datetime-local 字符串，时间戳按北京口径 24 小时制展示', () => {
   assert.equal(formatDateTimeLocal(new Date(2026, 9, 22, 9, 5)), '2026-10-22T09:05')
   assert.equal(formatDate(''), '—')
-  assert.equal(formatDate('not-a-date'), 'not-a-date')
-  assert.ok(formatDate('2026-10-25T10:00:00Z').length > 0)
+  assert.equal(formatDate('not-a-date'), 'not-a-date', '非法取值保留原始串，不静默显示为空')
+  // 2026-10-25T16:30:00Z = 北京 2026-10-26 00:30：展示必须按北京墙钟，不能落到 UTC 日历日前一天。
+  assert.equal(formatDate('2026-10-25T16:30:00Z'), '2026-10-26 00:30')
+  // 纯日期是日历日：原样展示，不补 00:00、不做时区平移。
+  assert.equal(formatDate('2026-10-25'), '2026-10-25')
+})
+
+test('售前报表默认区间取北京当前自然月，结束边界为下月 1 日 00:00（不含）', () => {
+  const range = currentBusinessMonthRange()
+  const filters = defaultReportFilters()
+  assert.equal(filters.from, `${range.from}T00:00`)
+  const [year, month, day] = range.to.split('-').map(Number)
+  const nextMonth = new Date(Date.UTC(year, month - 1, day + 1))
+  const pad = (part) => String(part).padStart(2, '0')
+  const expectedEnd = `${nextMonth.getUTCFullYear()}-${pad(nextMonth.getUTCMonth() + 1)}-${pad(nextMonth.getUTCDate())}`
+  assert.equal(filters.to, `${expectedEnd}T00:00`)
+  assert.equal(filters.dimension, 'PERSON')
+  // 提交侧与默认值对称：北京墙钟 → 瞬间，同一区间往返不变。
+  assert.equal(reportDateParam(filters.from), new Date(`${range.from}T00:00:00+08:00`).toISOString())
+  assert.equal(reportDateParam(filters.to), new Date(`${expectedEnd}T00:00:00+08:00`).toISOString())
+  assert.throws(() => reportDateParam(''), /请输入有效的报表时间范围/)
+  assert.throws(() => reportDateParam('not-a-date'), /请输入有效的报表时间范围/)
 })
 
 test('售前申请标识与商机标签：主键优先、旧字段兜底、名称与编号组合', () => {

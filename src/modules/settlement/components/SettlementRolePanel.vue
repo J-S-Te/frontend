@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, watch, onScopeDispose, nextTick } from 'vue'
 import { getRoleResource, saveRoleResource, downloadReceiptDocument } from '../api/settlement'
+import { businessWallClockToInstant } from '@/modules/shared/utils/businessTime.js'
 import { formatSettlementError } from '../utils/errors.js'
 import { PLAN_CREATE_FIELDS, PLAN_ADJUST_FIELDS, validateForm, firstInvalidField, retainVisibleErrors } from '../utils/formFeedback.js'
 const props = defineProps({
@@ -141,7 +142,9 @@ async function save(path, payload, method = 'POST') {
     }
     notice.value = `操作已保存${result.status === 'NOT_CONFIGURED' ? '；ERP 未配置，凭证尚未回传' : ''}。${refreshed && plansRefreshed ? '' : '刷新失败，请刷新核对，勿重复提交。'}`
     return true
-  } catch (value) { error.value = formatSettlementError(value); return false }
+  // 计划新建 / 调整的 409 需指明"合计上限 + 差额超阈值需财务 override"，并申明不自动重试；
+  // 提示由 utils/errors.js 按 path 追加，其他资源的冲突文案保持不变。
+  } catch (value) { error.value = formatSettlementError(value, { path }); return false }
   finally { saving.value = false }
 }
 // 用途：提交校验失败时聚焦首个错误字段；字段 DOM 顺序与字段定义顺序一致。
@@ -208,7 +211,11 @@ function selectRefund() {
 // 参数：无；凭证、当地完成时间和原因来自必填表单。
 // 返回值：写入是否成功；不调用银行退款。
 async function confirmRefund() {
-  const completed = new Date(refund.value.completed_at)
+  // 退款完成时间是业务时刻：datetime-local 提交的是北京墙钟，需先换算成瞬间；
+  // 若值本身已带 Z/偏移（例如回填或外部传入），直接按瞬间解析，避免二次平移。
+  const completedText = String(refund.value.completed_at || '').trim()
+  const completedISO = /(?:Z|[+-]\d{2}:\d{2})$/.test(completedText) ? completedText : businessWallClockToInstant(completedText)
+  const completed = new Date(completedISO || Number.NaN)
   if (!refund.value.version || Number.isNaN(completed.getTime())) {
     error.value = '请选择待确认退款并填写有效的完成时间。'
     return false

@@ -28,6 +28,72 @@ const canManage = computed(() => props.permissions.includes("alert.manage"))
 const SEVERITY_LABELS = { HIGH: "高", MEDIUM: "中", LOW: "低" }
 const STATUS_LABELS = { OPEN: "待受理", ACK: "处理中", CLOSED: "已关闭" }
 
+// 关闭原因（DATA-07）：后端 closed_reason 可能尚未上线，缺失时不显示任何标签。
+// 自动关闭与人工关闭必须区分：自动关闭说明条件已消失/目标离开窗口，人工关闭说明有人处理过。
+// 未知 closed_reason 原样展示后端原文，不得用笼统的占位文案替代。
+const CLOSED_REASON_LABELS = {
+  AUTO_CONDITION_CLEARED: "自动关闭：条件消失",
+  AUTO_WINDOW_EXIT: "自动关闭：离开窗口（历史）",
+  MANUAL: "人工关闭",
+}
+// 后端字段可能尚未上线：兼容 snake_case / camelCase / PascalCase，读取不到即视为缺失。
+const ALERT_FIELD_ALIASES = {
+  closedReason: ["closed_reason", "closedReason", "ClosedReason"],
+  reopenCount: ["reopen_count", "reopenCount", "ReopenCount"],
+  acknowledgedAt: ["acknowledged_at", "acknowledgedAt", "AcknowledgedAt", "acked_at", "ackedAt"],
+  acknowledgedBy: ["acknowledged_by", "acknowledgedBy", "AcknowledgedBy", "acked_by", "ackedBy"],
+}
+// 用途：按别名读取可选字段，undefined/null/空串一律视为未提供。
+// 参数：item 为预警记录；key 为 ALERT_FIELD_ALIASES 的键。
+// 返回值：首个有值的字段值，缺失返回 undefined。
+function alertField(item, key) {
+  if (!item || typeof item !== "object") return undefined
+  for (const name of ALERT_FIELD_ALIASES[key] || []) {
+    const value = item[name]
+    if (value === undefined || value === null) continue
+    if (typeof value === "string" && value.trim() === "") continue
+    return value
+  }
+  return undefined
+}
+// 用途：把 closed_reason 码值转成中文说明；未知码值保留原文。
+// 参数：item 为预警记录；返回空串表示无需展示。
+function closedReasonText(item) {
+  const raw = alertField(item, "closedReason")
+  if (raw === undefined) return ""
+  const text = String(raw).trim()
+  if (!text) return ""
+  return CLOSED_REASON_LABELS[text.toUpperCase()] || `关闭原因：${text}`
+}
+// 用途：复开次数说明；0/缺失/非数字时不显示。
+function reopenCountText(item) {
+  const count = Number(alertField(item, "reopenCount"))
+  return Number.isFinite(count) && count > 0 ? `已复开 ${count} 次` : ""
+}
+// 用途：ACK 的确认人/时间说明，任一字段缺失只显示存在的那个，不输出空标签。
+function ackNotes(item) {
+  const notes = []
+  const by = alertField(item, "acknowledgedBy")
+  const at = alertField(item, "acknowledgedAt")
+  if (by !== undefined) notes.push(`确认人：${String(by).trim()}`)
+  if (at !== undefined) notes.push(`确认时间：${String(at).trim()}`)
+  return notes
+}
+// 用途：拼装状态列补充说明（确认信息 / 关闭原因 / 复开次数）。
+// 参数：item 为预警记录（字段可缺失）；返回字符串数组，空数组表示不渲染。
+function alertStatusNotes(item) {
+  const notes = []
+  const status = item?.status
+  if (status === "ACK" || status === "CLOSED") notes.push(...ackNotes(item))
+  if (status === "CLOSED") {
+    const reason = closedReasonText(item)
+    if (reason) notes.push(reason)
+  }
+  const reopen = reopenCountText(item)
+  if (reopen) notes.push(reopen)
+  return notes
+}
+
 const filteredAlerts = computed(() => {
   const query = keyword.value.trim().toLowerCase()
   return alerts.value.filter((item) => {
@@ -52,7 +118,9 @@ async function load() {
       getAlerts({ page: page.value, page_size: pageSize, severity: severityFilter.value, status: statusFilter.value }),
       getAlertSummary(),
     ])
-    alerts.value = Array.isArray(result) ? result : (result?.items || [])
+    const items = Array.isArray(result) ? result : (result?.items || [])
+    // 状态列补充说明在加载时算好，模板只做渲染，避免每帧重复解析字段。
+    alerts.value = items.map((item) => (item && typeof item === "object" ? { ...item, statusNotes: alertStatusNotes(item) } : item))
     total.value = Array.isArray(result) ? result.length : Number(result?.total || 0)
     if (aggregate && typeof aggregate === "object") summary.value = aggregate
   } catch (err) {
@@ -135,6 +203,7 @@ onMounted(load)
             <span class="da-badge neutral">{{ SEVERITY_LABELS[String(item.severity).toUpperCase()] || item.severity }}</span>
           </div>
           <div class="da-alert-meta">{{ item.alert_type }} · 规则 {{ item.rule_code || '—' }} · 对象 {{ item.target_ref || '—' }} · 到期 {{ item.due_date || '无期限' }}</div>
+          <div v-if="item.statusNotes?.length" class="da-alert-meta da-alert-status">{{ item.statusNotes.join(' · ') }}</div>
         </div>
         <div class="da-alert-actions">
           <button v-if="item.status === 'OPEN'" class="da-button" :disabled="acting === item.id" @click="onAck(item.id)">{{ acting === item.id ? '处理中…' : '受理' }}</button>

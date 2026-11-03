@@ -194,3 +194,25 @@ test('Portal report download source does not persist or disclose the plaintext c
   assert.doesNotMatch(downloadSource, /localStorage|sessionStorage|console\.|window\.location|download_url/)
   assert.doesNotMatch(downloadSource, /body:\s*JSON\.stringify\([^)]*downloadToken/)
 })
+
+test('Portal report view surfaces delivery terminal failure and only re-applies with a fresh idempotency key', async () => {
+  const view = await readFile(new URL('../views/CustomerPortalView.vue', import.meta.url), 'utf8')
+  // 新终态必须可读，且未知状态（旧前端升级前的枚举漂移）降级为失败提示而不是空白或原始枚举。
+  assert.match(view, /SUBMISSION_FAILED: '投递失败，未受理'/)
+  assert.match(view, /\|\| \(value \? '状态异常，处理失败' : '—'\)/)
+  assert.match(view, /selectedReport\.status === 'SUBMISSION_FAILED'/)
+  assert.match(view, /canReapplyFailedReport\(selectedReport\)/)
+  assert.match(view, /重新提交/)
+  assert.match(view, /reportNotificationTitle\(item\)/)
+  assert.match(view, /REPORT_SUBMISSION_FAILED: '投递失败'/)
+  const reapply = view.slice(view.indexOf('function reapplyFailedReport'), view.indexOf('async function submitReport'))
+  assert.ok(reapply.length > 0, 'reapply handler must exist')
+  // 申请终态不能复用旧幂等键：清空重试键与指纹，提交时生成新键；邮箱密文无法回填明文。
+  assert.match(reapply, /reportRetryFingerprint = ''/)
+  assert.match(reapply, /reportRetryKey = ''/)
+  assert.match(reapply, /reportForm\.receive_email = ''/)
+  assert.match(reapply, /closeReport\(\)/)
+  assert.doesNotMatch(reapply, /createReportRequest\(/)
+  // 死信终态不得被下载分支当作已发放。
+  assert.match(view, /selectedReport\.status === 'SUBMISSION_FAILED'[^]*?没有可下载的报告/)
+})

@@ -2,13 +2,14 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { ref } from 'vue'
 import { useInvoiceRequests } from './useInvoiceRequests.js'
+import { todayBusinessDate } from '../../shared/utils/businessTime.js'
 
 // manualIssue 三次 window.prompt（逐字迁移的遗留）：桩按顺序返回答案并记录默认值。
 const prompt = { answers: [], defaults: [] }
 globalThis.window = { prompt: (_message, fallback) => { prompt.defaults.push(fallback); return prompt.answers.shift() } }
 
-function harness({ requests = [], invoices = [], eligible = [], refreshed = true, failure = null } = {}) {
-  const calls = { create: [], approve: [], reject: [], manual: [], recover: [], load: 0, notify: [], act: [] }
+function harness({ requests = [], invoices = [], eligible = [], refreshed = true, failure = null, cancelFailure = null } = {}) {
+  const calls = { create: [], approve: [], reject: [], cancel: [], manual: [], recover: [], load: 0, notify: [], act: [] }
   const deps = {
     invoiceRequests: ref(requests),
     taxInvoices: ref(invoices),
@@ -21,6 +22,7 @@ function harness({ requests = [], invoices = [], eligible = [], refreshed = true
     createInvoiceRequest: async (payload) => { calls.create.push(payload); if (failure) throw failure },
     approveInvoiceRequest: async (id, version) => { calls.approve.push({ id, version }); if (failure) throw failure },
     rejectInvoiceRequest: async (id, version, reason) => { calls.reject.push({ id, version, reason }); if (failure) throw failure },
+    cancelInvoiceRequest: async (id, body) => { calls.cancel.push({ id, body }); if (cancelFailure) throw cancelFailure },
     registerManualInvoice: async (id, body) => { calls.manual.push({ id, body }); if (failure) throw failure },
     recoverInvoiceFailure: async (id, body) => { calls.recover.push({ id, body }); if (failure) throw failure },
   }
@@ -162,6 +164,78 @@ test('manualIssue：三步 prompt 任一取消即放弃；全部填写后按申�
   prompt.answers = ['CODE-1', 'NO-9', '2026-10-26']
   await h.manualIssue({ id: 'R1' })
   assert.deepEqual(h.calls.manual, [{ id: 'R1', body: { invoice_code: 'CODE-1', invoice_no: 'NO-9', issue_date: '2026-10-26', seller_profile: {} } }])
-  assert.equal(prompt.defaults.at(-1), new Date().toISOString().slice(0, 10), '开票日期默认今天')
+  assert.equal(prompt.defaults.at(-1), todayBusinessDate(), '开票日期默认北京“今天”')
+  assert.match(prompt.defaults.at(-1), /^\d{4}-\d{2}-\d{2}$/, '纯日期字段不带时间与时区后缀')
   assert.deepEqual(h.calls.act, ['发票已登记，应收开票金额已同步更新。'])
+})
+
+// SET-06 作废（释放额度）：只在状态允许时进入，原因 5–1000 字，成功后以刷新结果为准，失败保留弹窗。
+test('作废弹窗：状态不允许 / 保存中不打开；打开后 5–1000 字原因校验；不做乐观更新', async () => {
+  const h = harness({ requests: [{ id: 'R1', version: 4, status: 'ISSUE_FAILED' }] })
+  h.deps.saving.value = true
+  h.openCancelInvoice({ id: 'R1', version: 4, status: 'ISSUE_FAILED' })
+  assert.equal(h.cancelDialog.value, null, '进行中不得打开作废弹窗')
+  h.deps.saving.value = false
+  // 结果未知 / 已开票等状态即使被调用也不得进入：放行作废等于放行重复开票。
+  for (const status of ['ISSUE_UNKNOWN', 'ISSUED', 'SUBMITTED', 'REJECTED', '']) {
+    h.openCancelInvoice({ id: 'R1', version: 4, status })
+    assert.equal(h.cancelDialog.value, null, status)
+  }
+  assert.match(h.calls.notify.at(-1), /只有待开具或开具失败的申请可以作废/)
+  assert.equal(h.calls.cancel.length, 0)
+
+  h.openCancelInvoice({ id: 'R1', version: 4, status: 'ISSUE_FAILED' })
+  assert.equal(h.cancelDialog.value.error, '')
+  h.deps.saving.value = true
+  h.closeCancelInvoice()
+  assert.notEqual(h.cancelDialog.value, null, '进行中不得关闭')
+  h.deps.saving.value = false
+
+  await h.submitCancelInvoice('太短')
+  assert.equal(h.cancelDialog.value.error, '作废原因应为 5 到 1000 字。')
+  await h.submitCancelInvoice('x'.repeat(1001))
+  assert.equal(h.cancelDialog.value.error, '作废原因应为 5 到 1000 字。')
+  assert.equal(h.calls.cancel.length, 0)
+
+  h.calls.notify.length = 0
+  const before = JSON.parse(JSON.stringify(h.deps.invoiceRequests.value))
+  await h.submitCancelInvoice('  税控命令已死信，开票尝试从未被受理  ')
+  assert.deepEqual(h.calls.cancel, [{ id: 'R1', body: { version: 4, reason: '税控命令已死信，开票尝试从未被受理' } }])
+  assert.equal(h.cancelDialog.value, null)
+  assert.equal(h.calls.load, 1, '成功后必须刷新，不以本地推断改状态')
+  assert.deepEqual(h.deps.invoiceRequests.value, before, '不得乐观更新列表状态')
+  assert.deepEqual(h.calls.notify, ['开票申请已作废，未开票的额度预留已释放；请核对可开票余额。'])
+  assert.equal(h.deps.saving.value, false)
+
+  const stale = harness({ refreshed: false })
+  stale.openCancelInvoice({ id: 'R1', version: 4, status: 'ISSUE_PENDING' })
+  await stale.submitCancelInvoice('原因足够长了')
+  assert.deepEqual(stale.calls.notify, ['开票申请已作废，但页面刷新失败，请刷新列表核对状态与可用额度；无需重复提交。'])
+
+  h.closeCancelInvoice()
+  assert.equal(h.cancelDialog.value, null)
+})
+
+test('作废失败：403 / 409 / 连接中断给出明确提示并保留弹窗，不刷新不报成功', async () => {
+  const cases = [
+    [403, /当前账号无权作废该开票申请/],
+    [409, /作废被拒绝.*额度未释放.*禁止重复提交/],
+    [0, /连接中断.*勿重复提交/],
+  ]
+  for (const [status, expected] of cases) {
+    const failure = Object.assign(new Error('rejected'), { status, code: status === 409 ? 'SETTLEMENT_CONFLICT' : 'SETTLEMENT_FORBIDDEN' })
+    const h = harness({ cancelFailure: failure })
+    h.openCancelInvoice({ id: 'R1', version: 3, status: 'ISSUE_FAILED' })
+    await h.submitCancelInvoice('核对税控回执后作废')
+    assert.notEqual(h.cancelDialog.value, null, '失败不得关闭弹窗')
+    assert.match(h.cancelDialog.value.error, expected, String(status))
+    assert.equal(h.calls.load, 0, '失败不得刷新或宣称成功')
+    assert.deepEqual(h.calls.notify, [], '失败不得提示成功')
+    assert.equal(h.deps.saving.value, false)
+  }
+  // 其余错误（例如原因格式、申请人回避等 400）走统一错误翻译。
+  const other = harness({ cancelFailure: Object.assign(new Error('x'), { status: 400, code: 'E_CANCEL' }) })
+  other.openCancelInvoice({ id: 'R1', version: 3, status: 'ISSUE_FAILED' })
+  await other.submitCancelInvoice('核对税控回执后作废')
+  assert.match(other.cancelDialog.value.error, /作废未完成，额度未释放。\|E_CANCEL/)
 })

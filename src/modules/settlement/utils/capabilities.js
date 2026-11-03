@@ -8,7 +8,9 @@ const sectionPermissions = {
   tasks: ['settlement.receivable.confirm', 'settlement.invoice.approve',
     'settlement.invoice.special_approve', 'settlement.dunning.feedback'],
   collaboration: ['settlement.collaboration.read', 'settlement.collaboration.manage'],
-  finance: ['settlement.difference.manage', 'settlement.voucher.manage'],
+  // 合同财务修订工单与差异记录同属财务处置入口：仅有修订工单读取能力时也能进入该分区，
+  // 其余子区块仍按各自能力判断，不会因此扩大可写范围。
+  finance: ['settlement.difference.manage', 'settlement.voucher.manage', 'settlement.revision.read'],
   settings: ['settlement.settings.manage'],
   imports: ['settlement.import.reconcile'],
 }
@@ -16,6 +18,8 @@ const loaderPermissions = {
   getDashboard: ['settlement.report.read'], getAgingSummary: ['settlement.report.read'],
   getInvoicedReceivablesTop10: ['settlement.report.read'],
   listReceivablePlans: ['settlement.receivable.read'], listReceivables: ['settlement.receivable.read'],
+  // SET-04 计划差额只读视图与计划台账同一读取能力，不额外扩大数据范围。
+  getPlanCoverage: ['settlement.receivable.read'],
   listReceipts: ['settlement.receipt.read', 'settlement.receipt.record'],
   listReceiptAllocations: ['settlement.allocation.read', 'settlement.allocation.confirm', 'settlement.allocation.reverse'],
   listInvoiceRequests: ['settlement.invoice.read'], listTaxInvoices: ['settlement.invoice.read'],

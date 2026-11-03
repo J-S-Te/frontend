@@ -33,7 +33,8 @@ test('人员选项可按姓名、资质编号和资质编码搜索', () => {
 })
 
 test('统一组件具备单选、多选、搜索、键盘和无障碍语义', () => {
-  assert.match(component, /defineEmits\(\['update:modelValue', 'change'\]\)/)
+  // BIZ-XAPI-09：新增远程搜索/加载更多事件，默认本地过滤行为不变。
+  assert.match(component, /defineEmits\(\['update:modelValue', 'change', 'search', 'load-more'\]\)/)
   assert.match(component, /filterSearchableOptions\(props\.options, keyword\.value\)/)
   assert.match(component, /role="combobox"/)
   assert.match(component, /role="listbox"/)

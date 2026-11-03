@@ -44,10 +44,13 @@ test('admin can edit and delete templates while locked fields are read-only for 
   assert.match(source, /:title="field\.locked && !isAdmin \? '此项已由管理员预设' : undefined"/)
 })
 
-test('admin can edit the automatic contract number format on a template', () => {
-  assert.match(source, /v-model="templateEditForm\.number_format"/)
+test('template number format is read-only and defers to the system-level number rule', () => {
+  // 实际编号由系统级规则生成，模板里的格式只保留用于展示历史/旧规则。
+  assert.doesNotMatch(source, /v-model="templateEditForm\.number_format"/)
+  assert.match(source, /:value="templateEditForm\.number_format" readonly/)
+  assert.match(source, /实际合同编号由系统级编号规则生成/)
+  // 只读展示不改存储：保存模板时仍回传既有格式，避免清空历史配置。
   assert.match(source, /number_format: templateEditForm\.value\.number_format\.trim\(\)/)
-  assert.match(source, /必须包含 \{ID8\}/)
 })
 
 test('saved template contracts render formatted HTML instead of plain text', () => {

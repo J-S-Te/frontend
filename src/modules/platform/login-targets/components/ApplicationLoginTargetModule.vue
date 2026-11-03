@@ -11,6 +11,7 @@ import { targetUriValidationMessage } from '@/modules/platform/login-targets/uti
 import { useRelatedDataInvalidation } from '@/modules/platform/shared/composables/useRelatedDataInvalidation'
 import { RELATED_DATA } from '@/modules/platform/shared/utils/relatedDataInvalidation'
 import { formatUserError } from '../../../shared/utils/userError.js'
+import { formatBusinessDateTime } from '@/modules/shared/utils/businessTime.js'
 import '@/modules/platform/login-targets/styles/application-login-target.css'
 
 const props = defineProps({
@@ -96,10 +97,10 @@ function closeEditor() {
   resetForm()
 }
 
+// 登录目标更新时间是业务时间，统一按北京时间（UTC+8）、24 小时制展示。
 function formatDate(value) {
   if (!value) return '—'
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false })
+  return formatBusinessDateTime(value) || value
 }
 
 function normalizedList(payload) {

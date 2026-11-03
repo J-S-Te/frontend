@@ -8,6 +8,7 @@ import {
   rejectCustomerCreditApplication,
 } from '../api/credit.js'
 import { listOwnerDirectory } from '../api/ownerDirectory.js'
+import { formatBusinessDateTime } from '@/modules/shared/utils/businessTime.js'
 
 const props = defineProps({ customer: { type: Object, default: null }, approvals: { type: Boolean, default: false }, standalone: { type: Boolean, default: false }, canApply: { type: Boolean, default: false }, permissions: { type: Array, default: () => [] } })
 const emit = defineEmits(['notice', 'error', 'updated'])
@@ -23,15 +24,10 @@ async function resolveOperatorNames(historyItems) {
   const IDs = [...new Set(historyItems.map((item) => item?.operator_id).filter((id) => id && id !== 'system' && !operatorNames.value[id]))]
   await Promise.all(IDs.map(async (id) => { try { const result = await listOwnerDirectory({ user_id: id, page: 1, page_size: 1 }); rememberOperatorNames(result?.items || []) } catch { /* 目录不可用时不向业务用户暴露内部操作人 ID。 */ } }))
 }
+// 信用历史按北京口径展示，统一 24 小时制并保留秒级精度（信用变更时间用于审计核对）。
 function formatCreditDate(value) {
   if (!value) return '—'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return '—'
-  const parts = new Intl.DateTimeFormat('zh-CN', {
-    year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true,
-  }).formatToParts(date).reduce((result, part) => ({ ...result, [part.type]: part.value }), {})
-  return `${parts.year}-${parts.month}-${parts.day} ${parts.dayPeriod}${parts.hour}:${parts.minute}:${parts.second}`
+  return formatBusinessDateTime(value, { seconds: true }) || '—'
 }
 function operatorLabel(item) { const id = String(item?.operator_id || '').trim(); return !id || id === 'system' ? '系统' : operatorNames.value[id] || '未命名用户' }
 const customerID = computed(() => props.customer?.id)

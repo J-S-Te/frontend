@@ -1,12 +1,14 @@
 import { IamError } from '../api/iam.js'
+import { instantToBusinessWallClock } from '../../../shared/utils/businessTime.js'
 
 // 从 IamSettingsModule 提取的输入校验与规范化纯函数（治理批次 2 第一步）。
 // 行为契约与提取前逐字一致：所有校验失败抛 IamError，中文文案保持原样。
 
-export function defaultAccountValidUntil() {
-  const date = new Date(Date.now() + 24 * 60 * 60 * 1000)
-  const localOffset = date.getTimezoneOffset() * 60 * 1000
-  return new Date(date.getTime() - localOffset).toISOString().slice(0, 16)
+// 账号有效期默认值：当前时间 +24 小时，用北京墙钟表示（与提交侧 resolveExpiresAt
+// 的北京口径对称）。旧实现按浏览器本地墙钟，UTC 浏览器下默认值会偏 8 小时，
+// 保存后又按北京解释，导致有效期整体偏移。
+export function defaultAccountValidUntil(now = new Date()) {
+  return instantToBusinessWallClock(new Date(now.getTime() + 24 * 60 * 60 * 1000))
 }
 
 export function resolveExpiresAt(value) {

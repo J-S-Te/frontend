@@ -1,3 +1,5 @@
+import { businessWallClockToInstant } from '../shared/utils/businessTime.js'
+
 const PRESALE_STATUSES = new Set([
   'APPROVAL_STARTING', 'PENDING_APPROVAL', 'APPROVED_PENDING_ASSIGNMENT', 'PENDING_EXECUTION_ASSIGNMENT', 'EXECUTING',
   'COMPLETED', 'REJECTED', 'CANCELLED',
@@ -76,8 +78,10 @@ export function presaleStateToQuery(filters, view, page, pageSize, columnLimit) 
 }
 
 /**
- * 浏览器 datetime-local 没有时区信息，发送前按当前本地时区解析并转换为
+ * 浏览器 datetime-local 没有时区信息，按业务口径解释为北京墙钟，发送前换算为
  * RFC3339 UTC；无效日期不发送，由此保持与服务端时间边界契约一致。
+ * 与回填侧（instantToBusinessWallClock 写回输入框 / URL 原样保存）严格对称：
+ * 同一个时刻回填后再提交必须完全一致，不受浏览器时区影响。
  */
 export function presaleAPIParams(filters) {
   const result = {}
@@ -86,8 +90,8 @@ export function presaleAPIParams(filters) {
   }
   for (const key of ['created_from', 'created_to', 'expected_from', 'expected_to']) {
     if (!filters[key]) continue
-    const value = new Date(filters[key])
-    if (!Number.isNaN(value.getTime())) result[key] = value.toISOString()
+    const value = businessWallClockToInstant(filters[key])
+    if (value) result[key] = value
   }
   return result
 }

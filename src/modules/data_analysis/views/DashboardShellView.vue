@@ -144,6 +144,38 @@ const dataScopeLabel = computed(() => {
   const role = (me.value?.roles || []).find((item) => ROLE_SCOPE_LABELS[item])
   return ROLE_SCOPE_LABELS[role] || "当前授权数据范围"
 })
+// 数据范围（DATA-09）：优先读会话的 scope_mode（后端 /auth/me 可能尚未返回该字段），
+// 未返回时只保留上面的角色口径标签，不猜测范围。
+const SCOPE_MODE_LABELS = { TENANT: "全租户", ORG: "组织", TEAM: "团队", SELF: "个人", NONE: "无可用范围" }
+// 用途：按别名读取 /auth/me 的可选数据范围字段。
+// 参数：source 为会话对象；names 为候选字段名；返回值缺失时为 undefined。
+function readScopeField(source, names) {
+  if (!source || typeof source !== "object") return undefined
+  for (const name of names) {
+    const value = source[name]
+    if (value !== undefined && value !== null) return value
+  }
+  return undefined
+}
+const scopeMode = computed(() => {
+  const raw = readScopeField(me.value, ["scope_mode", "scopeMode", "ScopeMode"])
+  const mode = typeof raw === "string" ? raw.trim().toUpperCase() : ""
+  return Object.hasOwn(SCOPE_MODE_LABELS, mode) ? mode : ""
+})
+const scopeModeLabel = computed(() => SCOPE_MODE_LABELS[scopeMode.value] || "")
+// 空范围提示只在“确实拿到范围集合且集合为空”时出现：字段缺失代表后端尚未上线，
+// 据此提示“无数据”会把接口未就绪误判成系统故障；因此仅对明确为空的数组触发。
+const scopeCollectionEmpty = computed(() => {
+  const mode = scopeMode.value
+  if (!mode) return false
+  if (mode === "NONE") return true
+  if (mode === "TENANT" || mode === "SELF") return false
+  const teamIDs = readScopeField(me.value, ["team_ids", "teamIds", "TeamIDs"])
+  const orgIDs = readScopeField(me.value, ["organization_ids", "organizationIds", "OrganizationIDs"])
+  const collections = (mode === "TEAM" ? [teamIDs] : [orgIDs, teamIDs]).filter((value) => Array.isArray(value))
+  return collections.length > 0 && collections.every((value) => value.length === 0)
+})
+const scopeEmptyHint = computed(() => (scopeCollectionEmpty.value ? "当前账号的数据范围集合为空，看板可能看不到任何数据；这不代表系统故障，请联系管理员补齐团队/组织授权。" : ""))
 const statusOptions = computed(() => {
   if (section.value === "contract") return ["全部", "审批中", "履行中", "已到期"]
   if (section.value !== "project") return []
@@ -426,7 +458,7 @@ onBeforeUnmount(() => {
 
       <div class="da-page">
         <section class="da-page-head">
-          <div><p class="da-eyebrow">DATA INTELLIGENCE</p><h1>{{ currentMeta[0] }}</h1><p>{{ currentMeta[1] }} · {{ dataScopeLabel }}</p></div>
+          <div><p class="da-eyebrow">DATA INTELLIGENCE</p><h1>{{ currentMeta[0] }}</h1><p>{{ currentMeta[1] }} · {{ dataScopeLabel }} <span v-if="scopeModeLabel" class="da-badge neutral">数据范围：{{ scopeModeLabel }}</span></p></div>
           <div v-if="statusOptions.length" class="da-page-filters" aria-label="看板筛选条件">
             <label>状态<select v-model="statusFilter"><option v-for="option in statusOptions" :key="option" :value="option">{{ option }}</option></select></label>
           </div>
@@ -434,6 +466,8 @@ onBeforeUnmount(() => {
             <button v-if="DASHBOARD_SECTIONS.includes(section)" class="da-button" :disabled="iframeLoading || summaryLoading" @click="refreshCurrentDashboard"><ConsoleIcon name="reset" />{{ iframeLoading || summaryLoading ? '加载中' : '刷新看板' }}</button>
           </div>
         </section>
+
+        <p v-if="scopeEmptyHint" class="da-native-note" role="status">{{ scopeEmptyHint }}</p>
 
         <ErrorState v-if="loadError" title="会话读取失败" :error="loadError" @retry="loadMe" />
 

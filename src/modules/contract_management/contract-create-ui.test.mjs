@@ -70,3 +70,17 @@ test("opportunity linking is an inline select that preloads the permission-scope
   assert.match(source, /selectOpportunityById/)
   assert.match(source, /await loadOpportunityOptions\(\)/)
 })
+
+test('new contract dialog probes the CRM session silently and connects automatically', () => {
+  const probe = source.slice(source.indexOf('async function probeCRMDirectorySession'), source.indexOf('async function checkCRMDirectorySession'))
+  assert.ok(probe.length > 0, 'probeCRMDirectorySession missing')
+  // 打开表单时只记录状态，不把“未连接 CRM”直接渲染成红色错误。
+  assert.doesNotMatch(probe, /recordCRMDirectoryError/)
+  assert.doesNotMatch(probe, /crmConnectionMessage\.value = '无法/)
+  assert.match(probe, /crmSessionState\.value = 'required'/)
+  assert.match(source, /void probeCRMDirectorySession\(\)/)
+  assert.match(source, /openContractCRMLogin\(\{ force: crmForceLogin\.value \}\)/)
+  assert.match(source, /waitForContractCRMDirectorySession/)
+  assert.match(source, /if \(crmSessionState\.value === 'required' && !crmConnecting\.value && startCRMDirectoryConnection/)
+  assert.match(source, /@focus="ensureOpportunityOptions"/)
+})

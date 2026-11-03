@@ -1,16 +1,19 @@
 import { computed, ref } from "vue";
+import { todayBusinessDate } from "../../shared/utils/businessTime.js";
+import { CANCELLABLE_INVOICE_STATUSES } from "../utils/invoiceStatus.js";
 
 /**
  * 开票申请域（治理批次 5 结算，自 SettlementView.vue 逐字迁移）。
  * 收编：开票区页签、申请编辑器 / 审核弹窗开关、关键字 + 状态筛选与重置、申请列表 / 已开发票两路可见派生、
  * 开票申请提交（按所选可开票应收组装买方 / 明细 / 余额锁定）、审核（批准 / 驳回须填原因）、
  * 人工登记发票（manualIssue 三次 window.prompt 逐字保留，行为修复另行授权）、
- * 开票失败复核弹窗（5–1000 字校验、弹窗内联 error、成功后刷新并说明尚未重新开票）。
+ * 开票失败复核弹窗（5–1000 字校验、弹窗内联 error、成功后刷新并说明尚未重新开票）、
+ * 作废（释放额度）弹窗（SET-06：仅待开具 / 开具失败可作废，5–1000 字原因，成功后以刷新结果为准，不做乐观更新）。
  * 注入项与组件内同名标识一一对应：invoiceRequests/taxInvoices/invoiceEligibleReceivables/saving/notify/act/load/
- * formatSettlementError + createInvoiceRequest/approveInvoiceRequest/rejectInvoiceRequest/registerManualInvoice/
- * recoverInvoiceFailure；不直接导入 API 模块。
+ * formatSettlementError + createInvoiceRequest/approveInvoiceRequest/rejectInvoiceRequest/cancelInvoiceRequest/
+ * registerManualInvoice/recoverInvoiceFailure；不直接导入 API 模块。
  */
-// 用途：组织开票申请、复核及人工开票交互。
+// 用途：组织开票申请、复核、作废及人工开票交互。
 // 参数：依赖对象含可见应收、API、保存状态与通知方法。
 // 返回值：开票交互状态及操作函数。
 export function useInvoiceRequests({
@@ -25,10 +28,12 @@ export function useInvoiceRequests({
   createInvoiceRequest,
   approveInvoiceRequest,
   rejectInvoiceRequest,
+  cancelInvoiceRequest,
   registerManualInvoice,
   recoverInvoiceFailure,
 }) {
   const reviewFailureDialog = ref(null);
+  const cancelDialog = ref(null);
   const invoiceTab = ref("requests");
   const invoiceComposerOpen = ref(false);
   const invoiceReviewOpen = ref(false);
@@ -195,7 +200,8 @@ export function useInvoiceRequests({
     if (!invoice_no) return;
     const issue_date = window.prompt(
       "请输入开票日期（YYYY-MM-DD）",
-      new Date().toISOString().slice(0, 10),
+      // 纯日期按北京日历日取“今天”：toISOString 取的是 UTC 日历日，北京 00:00–08:00 会差一天。
+      todayBusinessDate(),
     );
     if (!issue_date) return;
     return act(
@@ -210,8 +216,62 @@ export function useInvoiceRequests({
     );
   }
 
+  // 用途：把作废失败翻译成可执行提示；不得把未生效的作废说成成功。
+  // 参数：cause 为写入失败原因。
+  // 返回值：中文提示；403 / 409 / 连接中断单独说明，其余走统一错误翻译。
+  function cancelFailureMessage(cause) {
+    const status = Number(cause?.status || 0);
+    if (status === 403) return "当前账号无权作废该开票申请（需要开票开具权限，且申请人不能作废本人申请）；额度未释放。";
+    // 409 覆盖：版本已变、申请状态不允许、税控命令仍在投递或已被重投、尝试可能已被受理、结果未知。
+    if (status === 409) return "作废被拒绝：申请状态已变化、税控命令仍在投递或税控结果未知。请先核对税控结果，额度未释放，禁止重复提交。";
+    if (status === 0) return "连接中断，尚无法确认作废是否生效；请刷新列表核对状态与可用额度，勿重复提交。";
+    return formatSettlementError(cause, { fallback: "作废未完成，额度未释放。" });
+  }
+
+  // 用途：打开作废（释放额度）弹窗；只有确定未被税控受理的状态可进入。
+  // 参数：item 为服务端开票申请。
+  // 返回值：无；状态不允许时只提示，不打开弹窗。
+  function openCancelInvoice(item) {
+    if (!item || saving.value) return;
+    if (!CANCELLABLE_INVOICE_STATUSES.includes(String(item.status || ""))) {
+      notify("只有待开具或开具失败的申请可以作废并释放额度；结果待对账、已开票的申请禁止作废，请先对账或走红冲。");
+      return;
+    }
+    cancelDialog.value = { item, error: "" };
+  }
+  function closeCancelInvoice() {
+    if (!saving.value) cancelDialog.value = null;
+  }
+  // 用途：提交作废请求并释放未开票额度；失败保留弹窗与已填原因，成功后才关窗并刷新。
+  // 参数：reason 为用户填写的作废原因（5–1000 字）。
+  // 返回值：提交完成的 Promise；不做乐观更新，状态一律取刷新后的服务端结果。
+  async function submitCancelInvoice(reason) {
+    const dialog = cancelDialog.value;
+    if (!dialog || saving.value) return;
+    const normalized = String(reason || "").trim();
+    if (normalized.length < 5 || normalized.length > 1000) {
+      dialog.error = "作废原因应为 5 到 1000 字。";
+      return;
+    }
+    saving.value = true;
+    dialog.error = "";
+    try {
+      await cancelInvoiceRequest(dialog.item.id, { version: dialog.item.version, reason: normalized });
+      cancelDialog.value = null;
+      const refreshed = await load();
+      notify(refreshed
+        ? "开票申请已作废，未开票的额度预留已释放；请核对可开票余额。"
+        : "开票申请已作废，但页面刷新失败，请刷新列表核对状态与可用额度；无需重复提交。");
+    } catch (value) {
+      dialog.error = cancelFailureMessage(value);
+    } finally {
+      saving.value = false;
+    }
+  }
+
   return {
     reviewFailureDialog,
+    cancelDialog,
     invoiceTab,
     invoiceComposerOpen,
     invoiceReviewOpen,
@@ -225,6 +285,9 @@ export function useInvoiceRequests({
     openReviewFailure,
     closeReviewFailure,
     submitReviewFailure,
+    openCancelInvoice,
+    closeCancelInvoice,
+    submitCancelInvoice,
     submitInvoice,
     approveInvoice,
     submitInvoiceReview,

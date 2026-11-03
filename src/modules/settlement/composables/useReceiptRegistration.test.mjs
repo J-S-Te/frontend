@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { ref } from 'vue'
 import { useReceiptRegistration } from './useReceiptRegistration.js'
+import { todayBusinessDate } from '../../shared/utils/businessTime.js'
 
 function harness({ receivables = [], created = { id: 'RCPT-1' }, matches = [], refreshed = true, createError = null, matchError = null } = {}) {
   const calls = { create: [], matches: [], load: 0, notify: [] }
@@ -40,14 +41,15 @@ test('receiptCustomers 自正式应收按客户去重、名称缺省回落为 ID
   assert.equal(h.receiptForm.value.customer_name, '', '选中项不存在时清空名称')
 })
 
-test('初始表单：币种 CNY、转账、回款日期默认今天', () => {
+test('初始表单：币种 CNY、转账、回款日期默认北京今天', () => {
   const h = harness()
   assert.equal(h.receiptComposerOpen.value, false)
   assert.equal(h.receiptMatchFor.value, '')
   assert.deepEqual(h.receiptMatches.value, [])
   assert.equal(h.receiptForm.value.currency, 'CNY')
   assert.equal(h.receiptForm.value.payment_method, 'TRANSFER')
-  assert.equal(h.receiptForm.value.receipt_date, new Date().toISOString().slice(0, 10))
+  assert.equal(h.receiptForm.value.receipt_date, todayBusinessDate(), '回款日是纯日期，按北京日历日取今天')
+  assert.match(h.receiptForm.value.receipt_date, /^\d{4}-\d{2}-\d{2}$/)
 })
 
 test('submitReceipt 成功：提交表单对象、关编辑器、记录回款 ID 并拉取匹配建议，按条数提示后刷新；无建议与刷新失败各有文案', async () => {

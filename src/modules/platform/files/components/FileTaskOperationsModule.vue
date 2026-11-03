@@ -10,6 +10,7 @@ import {
   retryAsyncJob,
 } from '@/modules/platform/files/api/fileTasks'
 import { formatUserError } from '../../../shared/utils/userError.js'
+import { formatBusinessDateTime } from '@/modules/shared/utils/businessTime.js'
 import '@/modules/platform/files/styles/file-task-operations.css'
 
 const emit = defineEmits(['toast'])
@@ -33,7 +34,8 @@ const canRetry = computed(() => hasPermission('platform:async-job:retry'))
 const canRerun = computed(() => hasPermission('platform:async-job:rerun'))
 
 function toast(message) { emit('toast', message) }
-function formatDate(value) { const date = new Date(value); return value && !Number.isNaN(date.getTime()) ? date.toLocaleString('zh-CN', { hour12: false }) : '—' }
+// 任务时间统一按北京时间（UTC+8）、24 小时制展示，不跟随浏览器时区。
+function formatDate(value) { if (!value) return '—'; return formatBusinessDateTime(value) || '—' }
 function statusClass(status) { return `filetask-status--${String(status || '').toLowerCase()}` }
 function statusText(status) { return ({ PENDING: '等待执行', RUNNING: '执行中', SUCCEEDED: '已成功', FAILED: '执行失败', DEAD: '已终止', CANCELLED: '已取消' })[status] || '未知状态' }
 function normalizeError(error, fallback, method) { return formatUserError(error, { fallback, method }) }

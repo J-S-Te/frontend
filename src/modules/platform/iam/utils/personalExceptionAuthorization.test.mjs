@@ -6,11 +6,14 @@ import {
   createPersonalExceptionDraft,
   diffPersonalExceptionAssignments,
   formatPersonalExceptionTime,
+  fromDateTimeLocal,
   hasPersonalExceptionDraftChanges,
   resolvePersonalExceptionDraft,
   roleCodeOf,
+  toDateTimeLocal,
   validatePersonalExceptionDraft,
 } from './personalExceptionAuthorization.js'
+import { instantToBusinessWallClock } from '../../../shared/utils/businessTime.js'
 
 const now = new Date('2026-10-20T00:00:00.000Z')
 const from = '2030-01-02T03:04:05.123Z'
@@ -102,8 +105,30 @@ test('未触碰的开始/结束时间保留原始字符串，触碰后才用输�
 
   const touched = { ...draft, validFromTouched: true, validFromInput: '2030-02-03T04:05', validUntilTouched: true, validUntilInput: '2031-03-04T05:06' }
   const resolved = resolvePersonalExceptionDraft(touched)
-  assert.equal(new Date(resolved.validFrom).getTime(), new Date('2030-02-03T04:05:00').getTime())
-  assert.equal(new Date(resolved.validUntil).getTime(), new Date('2031-03-04T05:06:00').getTime())
+  // 输入框墙钟按北京时间解释：04:05（北京）= 前一日 20:05Z，与浏览器时区无关。
+  assert.equal(resolved.validFrom, '2030-02-02T20:05:00.000Z')
+  assert.equal(resolved.validUntil, '2031-03-03T21:06:00.000Z')
+})
+
+test('个人例外授权有效期墙钟往返对称，不受浏览器时区影响', () => {
+  // datetime-local 只到分钟，往返用例取分钟整点，断言回填与提交严格对称。
+  const instants = [
+    '2025-12-31T16:30:00.000Z',
+    '2026-10-20T00:00:00.000Z',
+    '2030-01-02T03:04:00.000Z',
+    '2031-02-03T04:05:00.000Z',
+  ]
+  for (const instant of instants) {
+    const wallClock = toDateTimeLocal(instant)
+    assert.equal(wallClock, instantToBusinessWallClock(instant))
+    assert.equal(fromDateTimeLocal(wallClock), new Date(instant).toISOString(), instant)
+  }
+  // 北京时间零点跨日回填：UTC 前一日 16:30Z 必须显示为次年 00:30。
+  assert.equal(toDateTimeLocal('2025-12-31T16:30:00.000Z'), '2026-01-01T00:30')
+  // 非法输入不产生可提交值，避免把浏览器本地解释静默写进有效期。
+  assert.equal(fromDateTimeLocal(''), null)
+  assert.equal(fromDateTimeLocal('not-a-time'), null)
+  assert.equal(toDateTimeLocal('not-a-time'), '')
 })
 
 test('列表按角色分组，区分重复、停用、到期和继承来源', () => {
