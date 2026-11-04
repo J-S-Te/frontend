@@ -61,7 +61,7 @@
 
 .iam-person-summary-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(145px, 100%), 1fr));
   gap: 10px;
   margin-top: 12px;
 }

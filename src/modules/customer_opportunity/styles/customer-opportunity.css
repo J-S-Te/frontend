@@ -38,6 +38,8 @@
 .crm-modal button,
 .crm-opportunity-side-rail button {
   display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
   min-height: 36px;
   align-items: center;
   justify-content: center;
@@ -48,7 +50,7 @@
   font-size: 13px;
   font-weight: 500;
   line-height: 1.25;
-  white-space: nowrap;
+  white-space: normal;
   cursor: pointer;
   border: 1px solid var(--crm-border, #e4ecfc);
   border-radius: 8px;
@@ -953,7 +955,7 @@
 }
 .crm-customer-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
   gap: 12px;
   padding: 16px;
 }
@@ -1005,7 +1007,7 @@
 .crm-customer-cards strong { color: var(--crm-text); overflow-wrap: anywhere; word-break: break-word; }
 .crm-customer-cards span { color: var(--crm-muted); font-size: 12px; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
 .crm-customer-filters,
-.crm-presale-filters { grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); }
+.crm-presale-filters { grid-template-columns: repeat(auto-fit, minmax(min(145px, 100%), 1fr)); }
 .crm-customer-tabs { margin-top: 12px; }
 .crm-profile-list,
 .crm-inbox-list { display: grid; gap: 10px; }
@@ -1047,7 +1049,7 @@
 
 .crm-stage-alert-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(235px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(235px, 100%), 1fr));
   gap: 10px;
 }
 .crm-stage-alert-grid button { display: grid !important; min-width: 0; gap: 5px !important; justify-items: start !important; text-align: left; }

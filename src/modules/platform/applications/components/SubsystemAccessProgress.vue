@@ -49,7 +49,9 @@ const canResume = computed(() => (status.value === 'WAITING' || status.value ===
       证据引用：{{ operation.result_ref }}
     </p>
 
-    <table v-if="rows.length" class="subsystem-access-progress__stages">
+    <div v-if="rows.length" class="subsystem-access-progress__table-scroll"
+      role="region" aria-label="接入阶段明细" tabindex="0">
+    <table class="subsystem-access-progress__stages">
       <caption class="subsystem-access-progress__caption">阶段结果（分项）</caption>
       <thead>
         <tr><th scope="col">阶段</th><th scope="col">状态</th><th scope="col">尝试</th><th scope="col">证据／错误</th></tr>
@@ -67,6 +69,7 @@ const canResume = computed(() => (status.value === 'WAITING' || status.value ===
         </tr>
       </tbody>
     </table>
+    </div>
 
     <div v-if="pending.length" class="subsystem-access-progress__pending">
       <h4>仍需处理</h4>
@@ -90,3 +93,47 @@ const canResume = computed(() => (status.value === 'WAITING' || status.value ===
     </button>
   </section>
 </template>
+
+<style scoped>
+.subsystem-access-progress {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+  overflow-wrap: anywhere;
+}
+.subsystem-access-progress > *,
+.subsystem-access-progress__header > div { min-width: 0; }
+.subsystem-access-progress__header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+}
+.subsystem-access-progress__eyebrow,
+.subsystem-access-progress__title,
+.subsystem-access-progress__evidence,
+.subsystem-access-progress__error { margin: 0; }
+.subsystem-access-progress__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr));
+  gap: 8px;
+  margin: 0;
+}
+.subsystem-access-progress__facts > div { min-width: 0; }
+.subsystem-access-progress__facts dd { margin: 4px 0 0; }
+.subsystem-access-progress__table-scroll { max-width: 100%; overflow-x: auto; }
+.subsystem-access-progress__stages {
+  width: 100%;
+  min-width: 480px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.subsystem-access-progress__stages :is(th, td) {
+  padding: 8px;
+  border-bottom: 1px solid #e2e8f0;
+  text-align: left;
+  vertical-align: top;
+}
+/* 阶段、状态和次数保留短列，长证据在末列换行或局部滚动。 */
+.subsystem-access-progress__stages :is(th, td):nth-child(-n + 3) { white-space: nowrap; }
+</style>

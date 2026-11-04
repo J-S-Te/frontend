@@ -1477,7 +1477,7 @@
 
 .pm-supplement-closure-context {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr));
   gap: 0;
   margin: 0;
   overflow: hidden;
@@ -1845,7 +1845,7 @@
 .pm-kpi .pm-kpi-trend.up { color: var(--pm-green-text); }
 .pm-kpi .pm-kpi-trend.down { color: var(--pm-red-text); }
 .pm-kpi .pm-kpi-trend.flat { color: var(--pm-gray-text); }
-.pm-kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--pm-gap-grid); }
+.pm-kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: var(--pm-gap-grid); }
 
 /* 项目列表卡片数量由角色决定。这里用可换行 flex 而不是 auto-fit 网格：
    既能限制首行的合理列数，也能让不足一整行的末行均匀铺满，避免 7+1 孤卡。 */
@@ -1983,7 +1983,7 @@
 .pm-chip .pm-chip-x:hover { background: var(--pm-primary-border); }
 
 /* 18.10 详情页布局（原型 PG-PRJ-02：摘要卡 + 计数标签页 + 甘特/时间线） */
-.pm-detail-summary { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: var(--pm-sp-3) var(--pm-sp-4); }
+.pm-detail-summary { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(210px, 100%), 1fr)); gap: var(--pm-sp-3) var(--pm-sp-4); }
 .pm-detail-summary div { min-width: 0; }
 .pm-detail-summary dt { margin-bottom: 2px; color: var(--pm-muted); font-size: var(--pm-fs-label); font-weight: var(--pm-fw-medium); }
 .pm-detail-summary dd { margin: 0; color: var(--pm-ink); font-size: var(--pm-fs-ui); font-weight: var(--pm-fw-semibold); }
