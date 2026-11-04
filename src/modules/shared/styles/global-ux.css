@@ -7,6 +7,77 @@
 
 :where(h1, h2, h3, h4, section, article) { scroll-margin-top: 72px; }
 
+/* 内容长度不是布局宽度：提供断行机会，保留控件值和预格式文本。 */
+body { overflow-wrap: anywhere; }
+fieldset { min-inline-size: 0; }
+:where(input, select, textarea) { min-width: 0; max-width: 100%; }
+:where(pre) { min-width: 0; max-width: 100%; overflow: auto; }
+
+/* Grid/Flex默认的最小内容宽度会被长选项、编号或表格放大。
+   约束内容轨道及其子项，宽表格仍保留原有列宽并在自己的容器内滚动。 */
+:is(.console-content, .contract-content, .pm-page, .crm-content, .portal-content,
+    .settlement-content, .da-page, .console-card, .contract-card, .pm-panel,
+    .crm-panel, .portal-card, .settlement-panel, .da-panel, .da-native-panel) {
+  min-width: 0;
+  max-width: 100%;
+}
+:is(.console-content, .contract-content, .pm-page, .crm-content, .portal-content,
+    .settlement-content, .da-page, .console-card, .contract-card, .pm-panel,
+    .crm-panel, .portal-card, .settlement-panel, .da-panel, .da-native-panel) > :not(table) {
+  min-width: 0;
+  max-width: 100%;
+}
+:is(.console-content, .contract-content, .pm-page, .crm-content, .portal-content,
+    .settlement-content, .da-page) :is(form, fieldset, label, input, select, textarea) {
+  min-width: 0;
+  max-width: 100%;
+}
+:is(.console-form-grid, .contract-form-grid, .pm-form-grid) > * { min-width: 0; }
+:is(.console-table-scroll, .contract-table-scroll, .pm-table-scroll,
+    .settlement-table-scroll, .da-table-scroll) { min-width: 0; max-width: 100%; }
+
+:is(.console-page-head, .contract-page-head, .pm-page-head, .crm-page-head,
+    .portal-title, .settlement-panel-head, .da-page-head) {
+  min-width: 0;
+  flex-wrap: wrap;
+}
+:is(.console-page-head, .contract-page-head, .pm-page-head, .crm-page-head,
+    .portal-title, .settlement-panel-head, .da-page-head) > div { min-width: 0; }
+:is(.console-button, .contract-button, .pm-button, .da-button),
+:is(.console-content, .contract-content, .pm-page, .crm-content, .portal-content,
+    .settlement-content, .da-page)
+  :is(button.console-button, a.console-button, button.contract-button, button.pm-button, button.da-button) {
+  min-width: 0;
+  max-width: 100%;
+  height: auto;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* 弹窗保持在视口内，内容纵向滚动，标题和表单允许收缩。 */
+:is(.console-modal, .console-detail-modal, .iam-modal, .crm-detail,
+    .contract-detail-modal, .pm-dialog, .da-modal, .portal-dialog > article,
+    .settlement-modal, .shared-confirm, .shared-prompt) {
+  min-width: 0;
+  min-height: 0;
+  max-width: 100%;
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+:is(.console-modal, .console-detail-modal, .iam-modal, .crm-detail,
+    .contract-detail-modal, .pm-dialog, .da-modal, .portal-dialog > article,
+    .settlement-modal, .shared-confirm, .shared-prompt) > :not(table) { min-width: 0; }
+:is(.console-modal, .console-detail-modal, .iam-modal, .crm-detail,
+    .contract-detail-modal, .pm-dialog, .da-modal, .portal-dialog > article,
+    .settlement-modal, .shared-confirm, .shared-prompt) :is(input, select, textarea, fieldset) {
+  min-width: 0;
+  max-width: 100%;
+}
+:is(.console-modal, .console-detail-modal, .iam-modal, .crm-detail,
+    .contract-detail-modal, .pm-dialog, .da-modal, .portal-dialog > article,
+    .settlement-modal, .shared-confirm, .shared-prompt) > footer { flex-wrap: wrap; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;

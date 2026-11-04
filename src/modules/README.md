@@ -56,3 +56,11 @@
 各模块保留实际响应协议，共享 `shared/utils/userError.js` 只转安全提示并保留原 status/code/details/请求标识。平台、合同、CRM、门户和 BI 采用成功信封，项目/结算采用各自 data 信封；合法空内容、会话失效、无权限、接入配置失败和写入结果未知必须分别处理。多步写入通过结构化 partialCompletion 保留已确认事实，不能根据中文报错猜成功或自动重复提交。具体约束见[前端错误上下文](../../../.ai/modules/frontend-errors.md)。
 
 `npm test` 由 `src/test/run-tests.mjs` 递归发现项目自有 `*.test.mjs`，不再依赖少量显式 glob；可用 `node src/test/run-tests.mjs --list` 只读检查发现清单。文档同步仅核对入口，不把历史测试数字当作本轮通过。
+
+## 长内容与布局边界（2026-11-03）
+
+所有模块通过主入口共享 `shared/styles/global-ux.css` 的内容边界规则：普通长文字、URL和编号可断行；Grid/Flex内容区、字段集和原生控件允许收缩。输入值不被修改，预格式文本保留缩进并局部滚动，宽表格使用所属滚动容器，不能用页面级裁剪掩盖越界。
+
+新增自适应卡片网格时，固定最小列宽还须受实际容器宽度限制，例如 `repeat(auto-fit, minmax(min(220px, 100%), 1fr))`。弹窗内容应受视口高度约束并纵向滚动，标题允许收缩，关闭按钮保留自身位置。
+
+`npm run test:layout` 在隔离Chrome中验证七个模块的实际样式、紧凑网格及真实接入向导和确认框；覆盖320～1440像素视口、首次直达仅加载本模块依赖、以及多模块样式的两种加载顺序。请求均在浏览器内以合成响应处理，不访问业务API或数据库，不能替代真实业务验收。默认使用本机Chrome，也可通过 `CHROMIUM_PATH` 指定已有浏览器；不自动安装依赖。结果保存在工程 `.ai/qa/responsive-boundaries-20261103/` 下，可用 `LAYOUT_RUN_LABEL` 指定本次证据标签。

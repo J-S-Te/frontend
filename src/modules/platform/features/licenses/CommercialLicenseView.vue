@@ -330,14 +330,14 @@ onMounted(load)
 .license-card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
 .license-card h3, .license-card h4 { margin: 0; font-size: 16px; }
 
-.license-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; }
+.license-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr)); gap: 14px; }
 .license-stat { background: var(--surface, #fff); border: 1px solid var(--border-color, #e2e8f0); border-radius: 14px; padding: 16px 18px; display: grid; gap: 4px; }
 .license-stat-label { font-size: 12px; color: var(--text-secondary, #64748b); }
 .license-stat-value { font-size: 22px; line-height: 1.2; }
 .license-stat-hint { font-size: 12px; color: var(--text-secondary, #64748b); }
 
 .binding-card { display: grid; gap: 12px; }
-.license-binding-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin: 0; }
+.license-binding-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: 12px; margin: 0; }
 .license-binding-grid dt { font-size: 12px; color: var(--text-secondary, #64748b); margin-bottom: 2px; }
 .license-binding-grid dd { margin: 0; overflow-wrap: anywhere; font-weight: 600; }
 
@@ -370,7 +370,7 @@ onMounted(load)
 label { display: block; margin: 6px 0; font-size: 13px; color: var(--text-secondary, #475569); }
 input:not([type="checkbox"]), textarea { display: block; width: min(100%, 640px); margin-top: 4px; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 8px; box-sizing: border-box; font-size: 14px; background: #fff; }
 textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
-.license-field-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.license-field-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 12px; }
 
 .license-btn { padding: 8px 16px; border: 1px solid #b9c6d8; border-radius: 8px; background: #fff; cursor: pointer; font-size: 14px; transition: background .15s; }
 .license-btn:hover:not(:disabled) { background: #f1f5f9; }
