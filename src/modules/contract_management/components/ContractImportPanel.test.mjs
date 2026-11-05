@@ -12,19 +12,23 @@ import { applyContractExcelCustomerLookup, blockingContractExcelIssues, buildCon
   contractExcelTemplateHeaders, matchContractExcelRecordsToFiles, parseContractExcelWorkbook,
   summarizeContractExcelImport } from '../utils/contractExcelImport.js'
 import { paymentAmountMinor } from '../utils/paymentTerms.js'
+import { contractImportErrorRows, contractImportErrorsCsv } from '../utils/contractImportErrors.js'
 import { fallbackServiceTypeOptions } from '../utils/contractDisplay.js'
 import { externalContractTypes, contractSystemLevels } from '../utils/contractPayload.js'
+import { importRowSourceForm, applyImportRowSourceForm } from '../utils/localImportSourceBridge.js'
 
 // importPanelHarness 编译实际导入面板并替换受控外部接口以验证模式及未知结果。
 // 参数：mode为测试模式，request/listResponse替代外部接口，crmLogin替代正常登录窗口。
 // 返回值：实际setup状态、组件渲染器和请求记录；不冒充真实服务验收。
 function importPanelHarness(mode, request, listResponse = () => ({items:[],has_more:false,next_offset:null}), crmLogin = () => true,
   excelReader = async () => { throw new Error('Excel reader not configured') },
-  customerResponse = async () => ({items:[],page:1,page_size:20,total:0,has_more:false})) {
-  const calls = [], delays = [], listCalls = [], timers = []
-  const props = Vue.reactive({enabled:true,pdfEnabled:true,canPreview:true,canCommit:true,canApprove:true,canRelease:true,actorId:'actor',initialBatchId:'',supportedModes:['NORMAL','ARCHIVE_ONLY']})
+  customerResponse = async () => ({items:[],page:1,page_size:20,total:0,has_more:false}),
+  sourceCapabilities = {}) {
+  const calls = [], delays = [], listCalls = [], timers = [], directoryCalls = []
+  const props = Vue.reactive({enabled:true,pdfEnabled:true,canPreview:true,canCommit:true,canApprove:true,canRelease:true,actorId:'actor',initialBatchId:'',supportedModes:['NORMAL','ARCHIVE_ONLY'],sourceCapabilities})
   const batch = {batch_id:'batch-A',version:11,revision:1,preview_token:'preview',state:'PREVIEWED',can_commit:true,source_system:'legacy',sources:[],items:[{id:'item-A',item:{mode,item_key:'one',external_record_id:'old-1',source_file_ref:'file-ref',metadata:{customer_name:'历史客户'},policy_options:{project_mode:'NONE',finance_mode:'NONE',report_mode:'ARCHIVE_SEPARATE'}},state:'READY',issues:[]}]}
-  const deps = {computed:Vue.computed,ref:Vue.ref,nextTick:Vue.nextTick,onMounted(){},onBeforeUnmount(){},setTimeout(callback,delay){delays.push(delay);timers.push(callback);return 0},clearTimeout(){},ContractPDFPreview:{render(){return null}},
+  const deps = {computed:Vue.computed,ref:Vue.ref,watch:Vue.watch,nextTick:Vue.nextTick,onMounted(){},onBeforeUnmount(){},setTimeout(callback,delay){delays.push(delay);timers.push(callback);return 0},clearTimeout(){},ContractPDFPreview:{render(){return null}},
+    LocalContractSourcePicker:{render(){return null}},importRowSourceForm,applyImportRowSourceForm,
     contractImportRequest:async (...args)=> {calls.push(args);return request ? request(batch,...args) : structuredClone(batch)},
     listContractImportBatches:async(offset)=>{listCalls.push(offset);return listResponse(offset)},releaseContractImportItem:async()=>({}),getImportItemDocumentDescriptor:async()=>({}),importItemSourceURL:()=>'',
     prepareImportManifest,formatImportMinor,validateContractSourceFile(){},ensureStableReviewAttempt,
@@ -34,10 +38,11 @@ function importPanelHarness(mode, request, listResponse = () => ({items:[],has_m
     parseContractExcelWorkbook,summarizeContractExcelImport,contractExcelMaximumBytes:5*1024*1024,contractExcelTemplateURL:'/contract-import-template.xlsx',
     readContractExcelWorkbook:excelReader,
     paymentAmountMinor,fallbackServiceTypeOptions,externalContractTypes,contractSystemLevels,
+    contractImportErrorRows,contractImportErrorsCsv,
     useDictionaryOptions:()=>({options:Vue.ref(fallbackServiceTypeOptions),loading:Vue.ref(false)}),
     listMyCustomers:customerResponse,
     ensureContractCRMDirectorySession:async()=>{},
-    listContractDetectionCategories:async()=>[{category:'等保测评'},{category:'软件测试'}]}
+    listContractDetectionCategories:async()=>{directoryCalls.push('project');return [{category:'等保测评'},{category:'软件测试'}]}}
   const {descriptor}=parse(readFileSync(new URL('./ContractImportPanel.vue',import.meta.url),'utf8'))
   const script=compileScript(descriptor,{id:'import-panel-test'})
   const component=new Function(...Object.keys(deps),script.content.replace(/^import\s[\s\S]*?from ['"][^'"]+['"]\n/gm,'').replace('export default','return'))(...Object.values(deps))
@@ -46,8 +51,41 @@ function importPanelHarness(mode, request, listResponse = () => ({items:[],has_m
   const render=new Function('Vue',template.code.replace(/import \{([^}]+)\} from "vue"/g,(_,names)=>`const { ${names.replace(/ as /g,': ')} } = Vue`).replace('export function render','return function render'))(Vue)
   const state=component.setup(props,{expose(){}})
   state.batch.value=structuredClone(batch);state.batchID.value=batch.batch_id;state.lookupID.value=batch.batch_id
-  return {state,props,batch,calls,delays,listCalls,timers,html:()=>renderToString(Vue.createSSRApp({render:()=>render({},[],props,Vue.proxyRefs(state),{}, {})}))}
+  return {state,props,batch,calls,delays,listCalls,timers,directoryCalls,html:()=>renderToString(Vue.createSSRApp({render:()=>render({},[],props,Vue.proxyRefs(state),{}, {})}))}
 }
+
+test('LOCAL普通导入抽屉保留来源版本、无需CRM/项目目录，实际生成清单不丢引用', async () => {
+  let customerCalls = 0
+  const panel = importPanelHarness('NORMAL', undefined, undefined, undefined, undefined,
+    async () => { customerCalls++; return { items: [] } },
+    { counterparty_source: 'local', category_source: 'local' })
+  assert.equal(panel.state.normalEntryMode.value, 'manual')
+  const row = createImportFormRow({ fileName: 'local.pdf', key: 'local-1', externalRecordId: 'LOCAL-1' })
+  Object.assign(row, { title: '合成合同', contractType: '直签', amount: '100.00' })
+  row.serviceItems = [{ ...emptyImportServiceItem(), serviceType: '软件测试', site: '合成现场', batch: '第一批' }]
+  panel.state.formRows.value = [row]
+  panel.state.files.value = [{ name: 'local.pdf', type: 'application/pdf', size: 64 }]
+  panel.state.openRow(row)
+  const form = importRowSourceForm(row)
+  Object.assign(form, { counterparty_source: 'LOCAL', local_counterparty_id: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+    counterparty_version: 2, customer_name: '合成单位', category_source: 'LOCAL' })
+  Object.assign(form.service_items[0], { category: '软件测试', category_id: '01ARZ3NDEKTSV4RRFFQ69G5FAW', category_version: 3 })
+  panel.state.updateDrawerSource(form)
+  await panel.state.loadCustomers(row)
+  await panel.state.ensureDetectionCategories()
+  assert.equal(customerCalls, 0)
+  assert.equal(panel.directoryCalls.length, 0)
+  panel.state.regenerateJSON()
+  const metadata = JSON.parse(panel.state.text.value).items[0].metadata
+  assert.equal(metadata.counterparty_source, 'LOCAL')
+  assert.equal(metadata.crm_customer_id, 0)
+  assert.equal(metadata.counterparty_version, 2)
+  assert.equal(metadata.service_items[0].category_version, 3)
+  const html = await panel.html()
+  assert.doesNotMatch(html, /id="contract-import-row-customer-id"/)
+  panel.state.selectNormalEntryMode('excel')
+  assert.equal(panel.state.normalEntryMode.value, 'manual')
+})
 
 test('historical PREVIEWED renders the direct confirmation entry before any contract exists', async()=>{
   const panel=importPanelHarness('ARCHIVE_ONLY')
@@ -501,6 +539,79 @@ test('重新预检沿用已暂存原件，不重复上传且保留表单修订',
   assert.deepEqual(panel.calls.filter(row => row[0] === 'files').map(row => row[1]), ['batch-C'])
 })
 
+test('原件上传被服务端拒绝时透出具体原因、原因码与文件名，并保留批次查询提示', async () => {
+  let created
+  const panel = importPanelHarness('NORMAL', (original, action) => {
+    if (action === 'create') {
+      created = { ...structuredClone(original), batch_id: 'batch-D', version: 30, revision: 1, state: 'DRAFT', items: [], sources: [], source_system: 'manual' }
+      return created
+    }
+    if (action === 'files') {
+      // 与 contract.js 一致：message 是已本地化的具体原因，details 保留原因码与文件名。
+      const failure = new Error('PDF图片像素或渲染内存超出接入上限')
+      failure.status = 422
+      failure.code = 'IMPORT_SOURCE_REJECTED'
+      failure.details = { reason_code: 'PDF_IMAGE_BUDGET_EXCEEDED', file_name: 'GTSR-261122.pdf' }
+      throw failure
+    }
+    return structuredClone(created || original)
+  })
+  panel.state.batch.value = null
+  panel.state.batchID.value = ''
+  panel.state.formRows.value = [normalRow({ fileName: 'GTSR-261122.pdf' })]
+  panel.state.files.value = [new File(['PDF fixture'], 'GTSR-261122.pdf', { type: 'application/pdf' })]
+  await panel.state.preview()
+  assert.match(panel.state.error.value, /PDF图片像素或渲染内存超出接入上限/)
+  assert.match(panel.state.error.value, /GTSR-261122\.pdf/)
+  assert.match(panel.state.error.value, /PDF_IMAGE_BUDGET_EXCEEDED/)
+  assert.match(panel.state.error.value, /批次已保留，请先查询状态/)
+  assert.doesNotMatch(panel.state.error.value, /请检查必填项、选择项和格式/)
+})
+
+test('PDF 校验繁忙（503）提示稍后重试，不引导用户改动已填数据', async () => {
+  let created
+  const panel = importPanelHarness('NORMAL', (original, action) => {
+    if (action === 'create') {
+      created = { ...structuredClone(original), batch_id: 'batch-E', version: 40, revision: 1, state: 'DRAFT', items: [], sources: [], source_system: 'manual' }
+      return created
+    }
+    if (action === 'files') {
+      const failure = new Error('PDF 校验繁忙，请稍后重试。')
+      failure.status = 503
+      failure.code = 'IMPORT_SOURCE_BUSY'
+      failure.details = { reason_code: 'IMPORT_SOURCE_BUSY' }
+      throw failure
+    }
+    return structuredClone(created || original)
+  })
+  panel.state.batch.value = null
+  panel.state.batchID.value = ''
+  panel.state.formRows.value = [normalRow({ fileName: 'GTSR-261122.pdf' })]
+  panel.state.files.value = [new File(['PDF fixture'], 'GTSR-261122.pdf', { type: 'application/pdf' })]
+  await panel.state.preview()
+  assert.match(panel.state.error.value, /PDF 校验繁忙/)
+  assert.match(panel.state.error.value, /稍后直接重新预检/)
+  assert.match(panel.state.error.value, /已填数据无需修改/)
+  assert.match(panel.state.error.value, /IMPORT_SOURCE_BUSY/)
+  assert.doesNotMatch(panel.state.error.value, /请检查必填项|重新填写|刷新页面/)
+})
+
+test('原件未就绪时不发任何请求，直接给出可定位的中文错误', async () => {
+  const panel = importPanelHarness('NORMAL')
+  panel.state.batch.value = null
+  panel.state.batchID.value = ''
+  panel.state.jsonAuthoritative.value = true
+  panel.state.text.value = JSON.stringify({ schema_version: 1, source_system: 'manual', items: [{ mode: 'NORMAL', item_key: 'one', external_record_id: 'HT-2024-001' }] })
+  // 普通对象 stub：没有字符串 name，不能被塞进 FormData 变成 "undefined"。
+  panel.state.files.value = [{ size: 64 }]
+  await panel.state.preview()
+  assert.equal(panel.calls.length, 0, '原件未就绪不得建批次、上传或提交清单')
+  assert.match(panel.state.error.value, /原件未就绪/)
+  assert.match(panel.state.error.value, /请重新选择原件后再预检/)
+  assert.match(panel.state.error.value, /one/)
+  assert.doesNotMatch(panel.state.error.value, /undefined/)
+})
+
 test('查询已保存普通批次会反填表单行，预检问题保持可见', async () => {
   const panel = importPanelHarness('NORMAL', () => JSON.parse(JSON.stringify(panel.state.batch.value)))
   panel.state.batch.value = structuredClone(panel.batch)
@@ -685,3 +796,20 @@ test('Excel 直填的检测类别不在目录时提前发现问题并由预检�
   assert.match(panel.state.error.value, /检测类别|服务类型/)
   assert.equal(panel.calls.filter(([action]) => ['create', 'files', 'manifest', 'preview'].includes(action)).length, 0, '目录字段问题不得先发写请求')
 })
+
+test('预检问题与批次错误提供下载错误报告入口，无问题时按钮禁用', async () => {
+  const panel = importPanelHarness('NORMAL')
+  assert.equal(panel.state.importErrorReportRows.value.length, 0)
+  const disabledHtml = await panel.html()
+  assert.match(disabledHtml, /下载错误报告 CSV/)
+  assert.match(disabledHtml, /disabled[^>]*>下载错误报告 CSV/)
+
+  panel.state.batch.value.items[0].issues = [{ field_path: 'metadata.title', code: 'REQUIRED', retryable: true }]
+  assert.equal(panel.state.importErrorReportRows.value.length, 1)
+  const enabledHtml = await panel.html()
+  assert.doesNotMatch(enabledHtml, /disabled[^>]*>下载错误报告 CSV/)
+
+  panel.state.error.value = '批次查询失败，请保留批次号'
+  assert.equal(panel.state.importErrorReportRows.value.length, 2)
+})
+

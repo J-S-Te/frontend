@@ -117,4 +117,12 @@ defineProps({
   font-size: 13px;
   text-align: center;
 }
+
+/* 深色主题：时间轴节点的白芯圆点与下沉底片；浅色声明未改。 */
+[data-theme="dark"] .settlement-timeline-dot {
+  background: var(--surface-card);
+}
+[data-theme="dark"] .settlement-timeline-detail {
+  background: var(--surface-muted);
+}
 </style>

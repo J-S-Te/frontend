@@ -11,13 +11,16 @@ import { buildOrganizationExportRows } from '../utils/treeExport.js'
  *
  * 注入项与组件内同名标识一一对应：canReadPanel/panels/requestSeq/pagination/
  * safeCall/panelFilters/listOrgUnits；不直接导入 API 模块，保持可独立测试。
+ * panelErrors / errorMessage 是可选注入：给了才把「组织目录读取失败」留给面板三态，
+ * 没给时保持原有 silent 行为（既有单测不传这两项）。
  */
-export function useOrganizationDirectory({ canReadPanel, panels, requestSeq, pagination, safeCall, panelFilters, listOrgUnits }) {
+export function useOrganizationDirectory({ canReadPanel, panels, requestSeq, pagination, safeCall, panelFilters, listOrgUnits, panelErrors, errorMessage }) {
   const organizations = ref([])
 
   async function loadOrganizations() {
     if (!canReadPanel(panels.find((item) => item.key === 'organizations'))) return
     const seq = ++requestSeq.organizations
+    if (panelErrors) panelErrors.organizations = ''
     // 树结构必须同时拥有父节点和子节点。按后端允许的最大页长读取全部授权可见组织，
     // 搜索留在前端执行，避免服务端关键字过滤后只返回子节点而丢失其祖先上下文。
     const treePageSize = 100
@@ -52,6 +55,10 @@ export function useOrganizationDirectory({ canReadPanel, panels, requestSeq, pag
       pagination.organizations.total = data.total
       pagination.organizations.serverPagingSupported = data.items.length >= data.total
       organizations.value = data.items
+    } else if (panelErrors) {
+      // 读取失败：把面板自己的失败原因交给列表三态（带重试），而不是退回「暂无组织记录」。
+      // 序号校验已通过，迟到的旧请求不会覆盖新请求的失败/成功状态。
+      panelErrors.organizations = errorMessage ? errorMessage.value : ''
     }
   }
 

@@ -6,7 +6,7 @@ import { registerDialogLayer, removeDialogLayer, isTopDialogLayer, focusTopDialo
 const props = defineProps({
   title: { type: String, required: true },
   description: { type: String, default: '' },
-  confirmText: { type: String, default: '确认' },
+  confirmText: { type: String, required: true },
   cancelText: { type: String, default: '取消' },
   danger: { type: Boolean, default: false },
   busy: { type: Boolean, default: false },
@@ -132,4 +132,30 @@ onBeforeUnmount(() => {
 .shared-confirm header > button { flex: 0 0 auto; }
 .shared-confirm footer button { white-space: normal; overflow-wrap: anywhere; min-width: 0; }
 @media (max-width: 520px) { .shared-confirm { max-height: calc(100dvh - 24px); } }
+
+/* 深色主题：共享确认弹窗的白卡、遮罩与深浅墨色；浅色声明未改。 */
+[data-theme="dark"] .shared-confirm-mask {
+  background: var(--overlay-scrim);
+}
+[data-theme="dark"] .shared-confirm {
+  background: var(--surface-card);
+  box-shadow: var(--shadow-modal);
+}
+[data-theme="dark"] .shared-confirm header p {
+  color: var(--danger-text);
+}
+[data-theme="dark"] .shared-confirm header h3 {
+  color: var(--text);
+}
+[data-theme="dark"] .shared-confirm-close {
+  color: var(--text-muted);
+}
+[data-theme="dark"] .shared-confirm-description {
+  color: var(--text-secondary);
+}
+[data-theme="dark"] .shared-confirm-button.secondary {
+  color: var(--text-secondary);
+  border-color: var(--border);
+  background: var(--surface-raised);
+}
 </style>

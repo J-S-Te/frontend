@@ -190,7 +190,7 @@ defineEmits(['reload','submit-allocation','submit-reversal'])
           v-model.trim="allocationForm.amount"
           placeholder="本次核销金额"
           required
-         maxlength="18"/><button :disabled="saving">确认核销</button>
+         maxlength="18"/><button :disabled="saving">确认回款核销</button>
       </form>
     </article>
     <article
@@ -239,7 +239,7 @@ defineEmits(['reload','submit-allocation','submit-reversal'])
           v-model.trim="reversalForm.reason_detail"
           placeholder="补充说明冲销原因"
           required
-         maxlength="500"/><button :disabled="saving">确认冲销</button>
+         maxlength="500"/><button :disabled="saving">冲销核销单</button>
       </form>
     </article>
   </section>

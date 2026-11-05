@@ -1,5 +1,5 @@
 <script setup>
-import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
+import ConsoleIcon from '@/modules/shared/components/ConsoleIcon.vue'
 
 // 「我的待办」区面板（治理批次 5 结算·第三步，模板自 SettlementView.vue 逐字提取；提取前片段 SSR golden 归档于
 // .ai/qa/closure-20261025/goldens-settlement-panels/SettlementTasksPanel/）。分组任务由父级 taskGroups 计算属性注入；

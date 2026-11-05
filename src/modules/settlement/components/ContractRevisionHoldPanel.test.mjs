@@ -100,6 +100,8 @@ function buildPanel({ list, resolve, can = fullPermissions(READ, RESOLVE, ADJUST
     onBeforeUnmount: (callback) => hooks.unmounted.push(callback),
     PromptDialog: PromptDialogStub,
     ConsoleIcon: { render: () => null },
+    // 分页条是共享组件：harness 只注入外部依赖，这里给一个渲染为空的桩（契约由 shared/pagination-bar.test.mjs 覆盖）。
+    PaginationBar: { props: ['label', 'prevText', 'nextText', 'page', 'count', 'pageSize', 'hasMore', 'loading', 'disabled'], render: () => null },
     listContractRevisionHolds: async (params) => {
       calls.list.push(params)
       return list ? list(params) : { items: [] }

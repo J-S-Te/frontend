@@ -116,6 +116,9 @@ export function formatUserError(input, options = {}) {
   if (/(?:^|_)(?:(?:INVALID|UNEXPECTED|MALFORMED)_(?:[A-Z]+_)?RESPONSE|RESPONSE_(?:INVALID|UNEXPECTED)|INVALID_ENVELOPE)$/.test(code)) return writing ? `服务返回的信息无法识别，${WRITE_UNKNOWN}` : '服务返回的信息无法识别，请刷新页面后重试；仍失败时请联系管理员。'
   if ([400, 422].includes(status) || /(?:VALIDATION|INVALID_JSON|INVALID_REQUEST|INVALID_BODY)/.test(code)) {
     if (['unknown_field', 'invalid_type', 'invalid_json', 'malformed_json'].includes(details?.reason) || /unknown field|cannot unmarshal|unexpected end of json|invalid character/i.test(text) || code === 'PM_INVALID_JSON') return CONTRACT_MISMATCH
+    // 服务端已给出具体业务原因、并在 details 带结构化 reason_code 时，直接透出原因本身，不能被字段标签折叠成通用文案。
+    const reasonCode = typeof details?.reason_code === 'string' ? details.reason_code.trim() : ''
+    if (reasonCode && safe && !GENERIC_MESSAGES.test(safe)) return safe
     const fields = userFieldErrors(details)
     if (fields.length) return fields.map(row => row.message).join(' ')
     // 旧版 Gin 校验器在消息中返回结构体字段与标签的诊断信息。

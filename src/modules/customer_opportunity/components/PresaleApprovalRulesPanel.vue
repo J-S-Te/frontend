@@ -2,6 +2,8 @@
 import { formatCRMError } from '../api/errorMessages.js'
 import { createRequestScope } from '@/modules/platform/shared/composables/requestScope'
 import { computed, onMounted, reactive, ref } from 'vue'
+import ConfirmDialog from '@/modules/shared/components/ConfirmDialog.vue'
+import { useConfirmDialog } from '@/modules/shared/composables/useConfirmDialog.js'
 import {
   createPresaleApprovalRule,
   deletePresaleApprovalRule,
@@ -15,6 +17,7 @@ const loading = ref(false)
 const saving = ref(false)
 const deletingRuleId = ref('')
 const error = ref('')
+const { dialog: confirmDialog, askConfirm, accept: acceptConfirm, cancel: cancelConfirm } = useConfirmDialog()
 // 规则读取请求作用域：重复读取只采纳最后一次；组件卸载后在途响应整体失效，
 // 不会回写已销毁组件的状态（R04/R05）。
 const rulesScope = createRequestScope()
@@ -200,14 +203,24 @@ async function save() {
   }
 }
 
+// 用途：确认删除指定售前规则，确认后复核权限、忙锁与规则版本。
+// 参数：rule 为用户选择删除的售前审批规则。
+// 返回值：无；取消或状态变化不删除，失败保留错误提示。
 async function remove(rule) {
-  if (!canEdit.value || !window.confirm(`确认删除规则“${rule.name}”？`)) return
-  // 任务 D：删除进行中禁止重复提交（确认弹窗之外的第二道防线）。
-  if (deletingRuleId.value) return
+  if (!canEdit.value || deletingRuleId.value || saving.value) return
+  const id = rule.id
+  const version = rule.version
+  const confirmed = await askConfirm({
+    title: '删除售前审批规则', description: `确认删除规则“${rule.name}”？`,
+    confirmText: '删除审批规则', cancelText: '保留规则', danger: true,
+  })
+  if (!confirmed || !canEdit.value || deletingRuleId.value || saving.value) return
+  const current = rules.value.find((item) => String(item.id) === String(id))
+  if (!current || current.version !== version || rule.id !== id) return
   let removed = false
-  deletingRuleId.value = String(rule.id)
+  deletingRuleId.value = String(id)
   try {
-    await deletePresaleApprovalRule(rule.id, rule.version)
+    await deletePresaleApprovalRule(id, version)
     removed = true
   } catch (removeError) {
     error.value = formatCRMError(removeError, { fallback: '规则删除失败' })
@@ -332,10 +345,11 @@ onMounted(() => {
         <div class="crm-approval-form-footer">
           <span class="crm-note">保存后将用于新提交的售前申请。</span>
           <button class="console-button primary" type="submit" :disabled="saving">
-            {{ saving ? '保存中…' : (editing ? '保存修改' : '创建规则') }}
+            {{ saving ? '保存中…' : (editing ? '保存审批规则' : '创建审批规则') }}
           </button>
         </div>
       </div>
     </form>
   </section>
+  <ConfirmDialog v-if="confirmDialog" v-bind="confirmDialog" @confirm="acceptConfirm" @cancel="cancelConfirm" />
 </template>

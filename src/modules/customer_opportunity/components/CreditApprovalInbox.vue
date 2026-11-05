@@ -5,12 +5,15 @@ import { approveCustomerCreditApplication, listPendingCustomerCreditApplications
 import { createIdempotencyKey } from '../api/client.js'
 import { listOwnerDirectory } from '../api/ownerDirectory.js'
 import { formatBusinessDateTime } from '@/modules/shared/utils/businessTime.js'
+import PromptDialog from '@/modules/shared/components/PromptDialog.vue'
+import { usePromptDialog } from '@/modules/shared/composables/usePromptDialog.js'
 
 const props = defineProps({
   permissions: { type: Array, default: () => [] },
   roles: { type: Array, default: () => [] },
 })
 const items = ref([]); const loading = ref(false); const error = ref(''); const actionID = ref(''); const applicantNames = ref({})
+const { dialog: promptDialog, askPrompt, accept: acceptPrompt, cancel: cancelPrompt } = usePromptDialog()
 const CREDIT_APPROVAL_ROLES = new Set(['sales_director', 'crm_super_admin'])
 // 现有会话可能携带已签名的审批角色，却缺少后续权限目录发布时
 // 新增的权限。保持允许列表显式声明；不要在浏览器中
@@ -29,14 +32,35 @@ async function resolveApplicantNames(applicationItems) {
   await Promise.all(IDs.map(async (id) => { try { const result = await listOwnerDirectory({ user_id: id, page: 1, page_size: 1 }); rememberApplicantNames(result?.items || []) } catch { /* 目录不可用时显示通用名称，不向业务用户暴露内部 ID。 */ } }))
 }
 async function load() { loading.value = true; error.value = ''; try { const result = await listPendingCustomerCreditApplications({ page: 1, page_size: 50 }); items.value = Array.isArray(result?.items) ? result.items : Array.isArray(result) ? result : []; await resolveApplicantNames(items.value) } catch (value) { error.value = value?.status === 403 ? '当前账号无审批权限。' : formatCRMError(value, { fallback: '待审批列表加载失败。' }) } finally { loading.value = false } }
+// 用途：收集审批意见，在弹窗结束后复核申请版本和权限再提交信用审批。
+// 参数：item 为待审批申请，action 为通过或驳回动作。
+// 返回值：无；取消或状态变化不提交，失败写入错误提示。
 async function decide(item, action) {
   if (!canApprove() || actionID.value) return
-  const opinion = window.prompt(action === 'approve' ? '审批意见（可选）' : '驳回意见（必填）', '')
-  if (opinion === null || (action === 'reject' && opinion.trim().length < 2)) return
-  actionID.value = applicationID(item)
-  if (!actionID.value) { error.value = '待办编号缺失，请刷新后重试。'; actionID.value = ''; return }
-  if (!Number(item.version)) { error.value = '待办版本缺失，请刷新后重试。'; actionID.value = ''; return }
-  try { await (action === 'approve' ? approveCustomerCreditApplication(item.id || item.application_id, { opinion: opinion.trim(), version: item.version }, createIdempotencyKey()) : rejectCustomerCreditApplication(item.id || item.application_id, { opinion: opinion.trim(), version: item.version }, createIdempotencyKey())); await load() } catch (value) { error.value = formatCRMError(value, { fallback: '审批操作失败，请刷新后重试。' }) } finally { actionID.value = '' }
+  const id = applicationID(item)
+  const requestID = item.id || item.application_id
+  const version = Number(item.version)
+  if (!id) { error.value = '待办编号缺失，请刷新后重试。'; return }
+  if (!version) { error.value = '待办版本缺失，请刷新后重试。'; return }
+  const approving = action === 'approve'
+  const opinion = await askPrompt({
+    title: approving ? '通过信用调整' : '驳回信用调整',
+    label: approving ? '审批意见（选填）' : '驳回意见（至少两个字）',
+    confirmText: approving ? '通过信用调整' : '驳回信用调整',
+    minlength: approving ? 0 : 2, maxlength: 500, danger: !approving,
+  })
+  if (opinion === null || !canApprove() || actionID.value) return
+  const current = items.value.find((value) => applicationID(value) === id)
+  if (!current || Number(current.version) !== version || applicationID(item) !== id) return
+  if ((!approving && opinion.trim().length < 2) || opinion.trim().length > 500) return
+  actionID.value = id
+  try {
+    const submit = approving ? approveCustomerCreditApplication : rejectCustomerCreditApplication
+    await submit(requestID, { opinion: opinion.trim(), version }, createIdempotencyKey())
+    await load()
+  } catch (value) {
+    error.value = formatCRMError(value, { fallback: '审批操作失败，请刷新后重试。' })
+  } finally { actionID.value = '' }
 }
 onMounted(load)
 </script>
@@ -77,10 +101,11 @@ onMounted(load)
           <small class="crm-credit-applicant">申请人：{{ applicantLabel(item) }}</small>
         </div>
         <div v-if="canApprove()" class="crm-credit-approval-actions">
-          <button type="button" class="primary" :disabled="actionInProgress()" @click="decide(item, 'approve')">通过</button>
-          <button type="button" class="danger" :disabled="actionInProgress()" @click="decide(item, 'reject')">驳回</button>
+          <button type="button" class="primary" :disabled="actionInProgress()" @click="decide(item, 'approve')">通过信用调整</button>
+          <button type="button" class="danger" :disabled="actionInProgress()" @click="decide(item, 'reject')">驳回信用调整</button>
         </div>
       </article>
     </div>
   </section>
+  <PromptDialog v-if="promptDialog" v-bind="promptDialog" @confirm="acceptPrompt" @cancel="cancelPrompt" />
 </template>

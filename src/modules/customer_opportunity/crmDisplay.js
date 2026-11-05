@@ -38,6 +38,8 @@ export const crmRoleNames = Object.freeze({
   technical_lead: '技术总监',
   customer_admin: '客户管理员',
   auditor: '审计员',
+  // 后端新增的客户全量查看员：只读全量客户数据，页面按后端角色码展示中文名。
+  customer_all_viewer: '客户全量查看员',
 })
 
 export const CREDIT_APPLICATION_ROLES = new Set(['sales'])
@@ -159,8 +161,12 @@ export function opportunityStatusText(value) {
   return ({ FOLLOWING: '跟进中', CLOSED: '已关闭', VOID: '已作废' })[value] || value || '—'
 }
 
+// 用途：展示实际终态待办类型，区分合同验真与本地赢单证据。
+// 参数：value为服务端保存的待办类型。
+// 返回值：对应中文标签；未知或空值保持旧版缺省文案。
 export function terminalPendingText(value) {
-  return value === 'CONTRACT' ? '待关联合同' : value === 'LOST_REASON' ? '待补失败原因' : '无'
+  return ({ CONTRACT: '待关联合同', LOST_REASON: '待补失败原因',
+    WIN_EVIDENCE: '待补赢单依据', NONE: '无' })[value] || '无'
 }
 
 export function formatAmount(value) {

@@ -1,7 +1,18 @@
 <script setup>
 // 高保真模型的本地兜底视图：没有 Metabase 或业务摘要时，仍提供清晰的指标层级与数据状态。
-import { computed, ref, watch } from "vue"
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
+import ConsoleIcon from "@/modules/shared/components/ConsoleIcon.vue"
 import { dashboardFreshnessItems, dashboardFreshnessStatus } from "../utils/freshness.js"
+import {
+  PROJECT_CARD_KEYS,
+  cardHiddenStorageKey,
+  metricColumnCount,
+  normalizeHiddenCardKeys,
+  readHiddenCardKeys,
+  reportStageCount,
+  visibleDashboardCards,
+  writeHiddenCardKeys,
+} from "../utils/dashboardCardVisibility.js"
 
 const props = defineProps({
   section: { type: String, required: true },
@@ -14,6 +25,9 @@ const props = defineProps({
   statusFilter: { type: String, default: "全部" },
   trend: { type: Array, default: () => [] },
   alertSummary: { type: Object, default: null },
+  // 指标卡显示偏好按「租户 + 用户」隔离；身份未就绪时只保留内存态，不写本地存储。
+  tenantId: { type: [String, Number], default: "" },
+  userId: { type: [String, Number], default: "" },
 })
 
 // 合同目标仅作为当前浏览器的展示配置保存；真实合同金额始终来自后端聚合快照。
@@ -33,6 +47,102 @@ watch(contractTargetWan, (value) => {
   }
 })
 
+// —— 项目分区指标卡的显示/隐藏偏好 ——
+// 纯展示偏好：开关只影响渲染，不改数据请求与口径；默认全部可见，允许全部隐藏后一键恢复。
+// 键按「租户 + 用户」隔离，未知 key 与跨分区 key 在读写时丢弃。
+const projectCardHiddenKeys = ref([])
+const cardSettingsOpen = ref(false)
+const cardSettingsRoot = ref(null)
+const cardSettingsTrigger = ref(null)
+const cardSettingsPanel = ref(null)
+
+function browserStorage() {
+  try {
+    return globalThis.localStorage || null
+  } catch {
+    return null
+  }
+}
+
+// 用途：按当前身份读取偏好；身份未就绪时只裁剪不属于本分区的 key，保留本次内存选择。
+function applyStoredCardHiddenKeys() {
+  if (!cardHiddenStorageKey(props.tenantId, props.userId)) {
+    projectCardHiddenKeys.value = normalizeHiddenCardKeys(projectCardHiddenKeys.value, PROJECT_CARD_KEYS)
+    return
+  }
+  projectCardHiddenKeys.value = readHiddenCardKeys(browserStorage(), props.tenantId, props.userId, PROJECT_CARD_KEYS)
+}
+watch([() => props.tenantId, () => props.userId], applyStoredCardHiddenKeys, { immediate: true })
+
+// 用途：写入隐藏集合并即时生效；无身份时写入函数返回 false，只保留内存态。
+function applyProjectCardHiddenKeys(keys) {
+  const normalized = normalizeHiddenCardKeys(keys, PROJECT_CARD_KEYS)
+  projectCardHiddenKeys.value = normalized
+  writeHiddenCardKeys(browserStorage(), props.tenantId, props.userId, normalized, PROJECT_CARD_KEYS)
+}
+
+function isProjectCardVisible(key) {
+  return !projectCardHiddenKeys.value.includes(String(key ?? ""))
+}
+
+// 开关使用原生 button，Enter/Space 由浏览器派发 click，无需额外 keydown（避免二次切换）。
+function toggleProjectCard(key) {
+  const value = String(key ?? "").trim()
+  if (!PROJECT_CARD_KEYS.includes(value)) return
+  applyProjectCardHiddenKeys(projectCardHiddenKeys.value.includes(value)
+    ? projectCardHiddenKeys.value.filter((item) => item !== value)
+    : [...projectCardHiddenKeys.value, value])
+}
+
+function resetProjectCards() {
+  applyProjectCardHiddenKeys([])
+}
+
+// 设置面板的焦点管理：打开后聚焦第一个开关，关闭时把焦点还给触发按钮。
+function openCardSettings() {
+  cardSettingsOpen.value = !cardSettingsOpen.value
+  if (!cardSettingsOpen.value) return
+  nextTick(() => {
+    const firstSwitch = cardSettingsPanel.value?.querySelector('[role="switch"]')
+    ;(firstSwitch || cardSettingsTrigger.value)?.focus()
+  })
+}
+
+function dismissCardSettings({ restoreFocus = false } = {}) {
+  if (!cardSettingsOpen.value) return false
+  const panel = cardSettingsPanel.value
+  const focusInside = Boolean(panel && typeof document !== "undefined" && panel.contains(document.activeElement))
+  cardSettingsOpen.value = false
+  if (restoreFocus || focusInside) cardSettingsTrigger.value?.focus()
+  return true
+}
+
+// 点击面板与触发按钮以外的区域关闭；触发按钮在 root 内，不会误关。
+function onCardSettingsOutsideClick(event) {
+  if (!cardSettingsOpen.value) return
+  const root = cardSettingsRoot.value
+  if (root && event.target instanceof Node && root.contains(event.target)) return
+  dismissCardSettings()
+}
+
+function onCardSettingsKeydown(event) {
+  if (!cardSettingsOpen.value) return
+  if (event.key !== "Escape") return
+  event.stopPropagation()
+  dismissCardSettings({ restoreFocus: true })
+}
+
+onMounted(() => {
+  document.addEventListener("click", onCardSettingsOutsideClick)
+  document.addEventListener("keydown", onCardSettingsKeydown)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener("click", onCardSettingsOutsideClick)
+  document.removeEventListener("keydown", onCardSettingsKeydown)
+})
+// 切换看板分区时收起面板，避免再次进入项目分区时残留展开态。
+watch(() => props.section, () => { if (cardSettingsOpen.value) dismissCardSettings() })
+
 const sectionMeta = {
   overview: { title: "经营总览", description: "集团经营指标与目标达成态势" },
   contract: { title: "合同看板", description: "合同签约、执行与回款全景" },
@@ -41,7 +151,7 @@ const sectionMeta = {
   finance: { title: "财务与经营看板", description: "应收、已核销回款与账龄分析" },
 }
 
-const metric = (label, value, suffix = "", tone = "") => ({ label, value, suffix, tone })
+const metric = (label, value, suffix = "", tone = "", extra = {}) => ({ label, value, suffix, tone, key: extra.key || "", meta: extra.meta || "" })
 
 function numberValue(value) {
   const parsed = Number(value)
@@ -159,6 +269,9 @@ function alertWidth(value) {
   return `${Math.max(4, Math.round((numberValue(value) / maxAlertValue.value) * 100))}%`
 }
 
+// 用途：按可用的真实摘要构造当前看板指标，并标明财务回款事实期间。
+// 参数：无，读取当前视图传入的摘要与权限可见状态。
+// 返回值：可展示的指标；缺失值继续使用不可用标记。
 function metricsForSection() {
   const contract = props.contractSummary || {}
   const project = props.projectSummary || {}
@@ -177,6 +290,12 @@ function metricsForSection() {
       metrics.push(metric("进行中项目", project.available ? formatInteger(project.in_flight_projects) : "—", "个"))
       metrics.push(metric("风险项目", project.available ? formatInteger(project.risk_projects) : "—", "个", "danger"))
       metrics.push(metric("服务项", project.available ? formatInteger(project.service_items) : "—", "项"))
+      // 与项目分区同卡的「整改中项目」：口径一致，缺失快照时显示未采集而不是 0。
+      const rectifying = reportStageCount(project.report_stage_counts, "RECTIFYING")
+      metrics.push(metric("整改中项目", rectifying.available ? formatInteger(rectifying.value) : "—", "个", "warn", {
+        key: "rectifying",
+        meta: rectifying.available ? "报告整改阶段" : "未采集",
+      }))
     }
     return metrics
   }
@@ -193,20 +312,39 @@ function metricsForSection() {
     ]
   }
   if (props.section === "project") {
+    // 整改中是报告的独立阶段（与项目状态正交）：只读后端聚合快照的 RECTIFYING 计数，
+    // 旧快照没有 report_stage_counts 时显示「—」+「未采集」，不用 0 冒充未知。
+    const rectifying = reportStageCount(project.report_stage_counts, "RECTIFYING")
     return [
-      metric("项目总数", project.available ? formatInteger(project.project_count) : "—", "个"),
-      metric("进行中项目", project.available ? formatInteger(project.in_flight_projects) : "—", "个"),
-      metric("风险项目", project.available ? formatInteger(project.risk_projects) : "—", "个", "danger"),
-      metric("服务项", project.available ? formatInteger(project.service_items) : "—", "项"),
+      metric("项目总数", project.available ? formatInteger(project.project_count) : "—", "个", "", { key: "project_total" }),
+      metric("进行中项目", project.available ? formatInteger(project.in_flight_projects) : "—", "个", "", { key: "in_flight" }),
+      metric("风险项目", project.available ? formatInteger(project.risk_projects) : "—", "个", "danger", { key: "risk" }),
+      metric("服务项", project.available ? formatInteger(project.service_items) : "—", "项", "", { key: "service_items" }),
+      metric("整改中项目", rectifying.available ? formatInteger(rectifying.value) : "—", "个", "warn", {
+        key: "rectifying",
+        meta: rectifying.available ? "报告整改阶段" : "未采集",
+      }),
     ]
   }
   if (props.section === "report") {
     const values = props.businessSummary?.available ? props.businessSummary.metrics || {} : {}
     return [metric("报告周期 P50", values.cycle_p50_days == null ? "—" : Number(values.cycle_p50_days).toFixed(2), "天"), metric("有效报告版本", values.active_reports == null ? "—" : formatInteger(values.active_reports), "份"), metric("已复核／批准版本", values.reviewed_reports == null ? "—" : formatInteger(values.reviewed_reports), "份"), metric("作废版本", values.void_reports == null ? "—" : formatInteger(values.void_reports), "份", "danger")]
   }
-  return currencyItems.value.flatMap(row => [metric(`${row.currency} 已核销回款率`, row.collection_rate == null ? "—" : Number(row.collection_rate).toFixed(2), "%"), metric(`${row.currency} 未清应收`, formatAmountMinor(row.open_minor), "万元"), metric(`${row.currency} 超期90天应收`, formatAmountMinor(row.over_90_minor), "万元", "danger"), metric(`${row.currency} 本月登记回款`, formatAmountMinor(row.month_receipts_minor), "万元")])
+  return currencyItems.value.flatMap(row => [metric(`${row.currency} 已核销回款率`, row.collection_rate == null ? "—" : Number(row.collection_rate).toFixed(2), "%"), metric(`${row.currency} 未清应收`, formatAmountMinor(row.open_minor), "万元"), metric(`${row.currency} 超期90天应收`, formatAmountMinor(row.over_90_minor), "万元", "danger"), metric(`${row.currency} ${financeReceiptLabel.value}`, formatAmountMinor(row.month_receipts_minor), "万元")])
 }
 
+// 项目分区按隐藏偏好过滤卡片；其他分区保持既有全部展示，不做重排。
+const sectionMetrics = computed(() => metricsForSection())
+const projectVisibleMetrics = computed(() => visibleDashboardCards(sectionMetrics.value, projectCardHiddenKeys.value))
+const displayedMetrics = computed(() => (props.section === "project" ? projectVisibleMetrics.value : sectionMetrics.value))
+const allProjectCardsHidden = computed(() => props.section === "project" && sectionMetrics.value.length > 0 && projectVisibleMetrics.value.length === 0)
+// 列数跟随可见卡片数变化，隐藏后不留下空列；全隐藏时网格不渲染，列数类仍保持合法。
+const metricsColumnsClass = computed(() => (props.section === "project" ? `da-native-metrics-cols-${metricColumnCount(displayedMetrics.value.length)}` : ""))
+
+const financeReceiptLabel = computed(() => {
+  const month = String(props.businessSummary?.metrics?.month || "")
+  return /^\d{4}-(0[1-9]|1[0-2])$/.test(month) ? `${month}登记回款` : "本月登记回款"
+})
 const currencyItems = computed(() => props.businessSummary?.available ? props.businessSummary?.metrics?.currencies || [] : [])
 const missingMetricLabels = { first_pass_rate: '首次通过率：缺少完整首轮审核结果记录', open_complaints: '投诉：尚无投诉数据源', recognized_income: '收入：尚无收入确认数据源', department_cost: '部门成本：尚无成本数据源' }
 </script>
@@ -232,10 +370,55 @@ const missingMetricLabels = { first_pass_rate: '首次通过率：缺少完整�
       <p class="da-native-freshness-note">源数据更新时间、最近成功同步时间与本次查询时间分别展示；本次查询时间不代表源数据更新时间。</p>
     </aside>
 
-    <div class="da-native-metrics">
-      <article v-for="item in metricsForSection()" :key="item.label" class="da-native-metric" :class="item.tone">
+    <div v-if="section === 'project'" class="da-native-metrics-toolbar">
+      <div ref="cardSettingsRoot" class="da-native-card-settings">
+        <button
+          ref="cardSettingsTrigger"
+          type="button"
+          class="da-native-card-settings-trigger"
+          aria-haspopup="dialog"
+          :aria-expanded="cardSettingsOpen"
+          aria-controls="da-project-card-settings"
+          @click="openCardSettings"
+        >
+          <ConsoleIcon name="settings" /><span>指标卡设置</span><em>{{ displayedMetrics.length }}/{{ sectionMetrics.length }}</em>
+        </button>
+        <div
+          v-if="cardSettingsOpen"
+          id="da-project-card-settings"
+          ref="cardSettingsPanel"
+          class="da-native-card-settings-panel"
+          role="dialog"
+          aria-label="指标卡显示设置"
+        >
+          <div class="da-native-card-settings-head"><b>指标卡显示</b><span>默认全部显示</span></div>
+          <ul class="da-native-card-settings-list">
+            <li v-for="card in sectionMetrics" :key="card.key">
+              <button
+                type="button"
+                class="da-native-card-switch"
+                role="switch"
+                :aria-checked="isProjectCardVisible(card.key)"
+                @click="toggleProjectCard(card.key)"
+              >
+                <span class="da-native-card-switch-text"><b>{{ card.label }}</b><small>{{ card.meta || '项目指标' }}</small></span>
+                <span class="da-native-card-switch-track" aria-hidden="true"><i></i></span>
+              </button>
+            </li>
+          </ul>
+          <div class="da-native-card-settings-foot">
+            <span>{{ allProjectCardsHidden ? '已隐藏全部指标卡' : `已隐藏 ${projectCardHiddenKeys.length} 张` }}</span>
+            <button type="button" class="da-native-card-settings-reset" :disabled="!projectCardHiddenKeys.length" @click="resetProjectCards">恢复默认</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="!allProjectCardsHidden" class="da-native-metrics" :class="metricsColumnsClass" role="group" :aria-label="`本分区指标卡，共 ${displayedMetrics.length} 项`">
+      <article v-for="item in displayedMetrics" :key="item.key || item.label" class="da-native-metric" :class="item.tone">
         <span>{{ item.label }}</span>
         <strong>{{ item.value }}</strong><small>{{ item.suffix }}</small>
+        <p v-if="item.meta" class="da-native-metric-meta">{{ item.meta }}</p>
         <template v-if="section === 'contract' && item.label === '合同总金额' && contractSummary?.available">
           <div class="da-contract-target-row">
             <label for="contract-target">目标</label>
@@ -249,6 +432,10 @@ const missingMetricLabels = { first_pass_rate: '首次通过率：缺少完整�
         </template>
       </article>
     </div>
+    <p v-if="allProjectCardsHidden" class="da-native-metrics-empty" role="status">
+      <span>已隐藏全部指标卡</span>
+      <button type="button" class="da-native-card-settings-reset" @click="resetProjectCards">恢复默认</button>
+    </p>
 
     <div v-if="section === 'contract' || section === 'project'" class="da-native-columns">
       <article class="da-native-panel">
@@ -278,9 +465,9 @@ const missingMetricLabels = { first_pass_rate: '首次通过率：缺少完整�
           <template v-if="section === 'report'"><div v-for="(count, status) in businessSummary.metrics?.status_counts || {}" :key="status" class="da-native-bar-row"><span>{{ status }}</span><small>{{ formatInteger(count) }} 份</small></div></template>
           <template v-else><div v-for="row in currencyItems" :key="row.currency" class="da-native-note">{{ row.currency }} 原始应收 {{ formatAmountMinor(row.original_minor) }} 万元，已核销回款 {{ formatAmountMinor(row.allocated_minor) }} 万元，未清 {{ formatAmountMinor(row.open_minor) }} 万元</div></template>
           <p class="da-native-note">{{ businessSummary.basis }}</p>
-          <p v-if="section === 'finance' && !currencyItems.length" class="da-native-note">本次同步成功，当前租户尚无应收或回款记录。</p>
+          <p v-if="section === 'finance' && !currencyItems.length" class="da-native-note">当前来源快照可用，当前租户尚无应收或回款记录。</p>
         </div>
-        <div v-else class="da-native-empty"><b>尚无可用来源快照</b><p>需要配置该系统的受控只读数据源并完成一次同步；读取失败不会显示演示统计。</p></div>
+        <div v-else class="da-native-empty"><b>尚无可用来源快照</b><p>{{ businessSummary?.basis || "需要配置该系统的受控只读数据源并完成一次同步；读取失败不会显示演示统计。" }}</p></div>
       </article>
       <article class="da-native-panel">
         <header><b>口径与数据边界</b><span>缺失来源不计为零</span></header>

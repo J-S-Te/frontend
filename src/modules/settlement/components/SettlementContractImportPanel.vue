@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import PaginationBar from '@/modules/shared/components/PaginationBar.vue'
 import { listContractImports, getContractImport, reconcileContractImport, contractImportExport,
   downloadContractImportExport, confirmReceivablePlan, createReceipt, createReceiptAllocation } from '../api/settlement.js'
 
@@ -143,6 +144,16 @@ async function changeFactsPage(delta) {
   finally { if (!disposed) busy.value = false }
 }
 
+// 用途：按目标页码切换暂存快照列表（接口为 limit/offset 分页，不返回总数）。
+// 参数：target 为 1 起始的目标页。
+// 返回值：读取完成的 Promise。
+function changeSnapshotPage(target) {
+  const next = Math.max(0, Math.trunc(Number(target) || 1) - 1)
+  if (next === page.value) return undefined
+  page.value = next
+  return loadList()
+}
+
 onMounted(async () => { await loadList(); if (props.initialSnapshotId) await openSnapshot(props.initialSnapshotId) })
 onBeforeUnmount(() => { disposed = true; generation++ })
 </script>
@@ -156,8 +167,15 @@ onBeforeUnmount(() => { disposed = true; generation++ })
     <button type="button" :disabled="busy || !queryID" @click="openSnapshot(queryID)">查询／刷新当前快照</button>
     <button type="button" :disabled="busy" @click="loadList">刷新暂存列表</button>
     <div class="import-record-list"><button v-for="item in rows" :key="item.contract_snapshot_id" type="button" :disabled="busy" @click="openSnapshot(item.contract_snapshot_id)">{{ item.source_contract_no || item.contract_snapshot_id }} · {{ item.state }} · {{ item.migration_state }}</button></div>
-    <button type="button" :disabled="busy || page === 0" @click="page--; loadList()">上一页</button>
-    <button type="button" :disabled="busy || rows.length < 50" @click="page++; loadList()">下一页</button>
+    <PaginationBar
+      class="settlement-head-actions"
+      label="历史合同暂存快照分页"
+      :page="page + 1"
+      :count="rows.length"
+      :page-size="50"
+      :disabled="busy"
+      @change="changeSnapshotPage"
+    />
     <p v-if="busy" role="status">正在读取或保存，请保留页面核对结果…</p>
     <p v-if="error" role="alert" class="settlement-error">{{ error }}</p>
     <p v-if="notice" role="status">{{ notice }}</p>

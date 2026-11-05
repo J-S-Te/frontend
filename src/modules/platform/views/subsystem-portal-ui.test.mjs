@@ -50,16 +50,31 @@ test('门户支持浅色、深色和跟随系统三态主题并持久化用户�
   assert.match(source, /:aria-pressed="themeMode === option\.value"/)
 })
 
-test('门户在桌面端按卡片数量自适应一屏并在超过九项时分页', () => {
+test('门户在桌面端按卡片数量自适应一屏，分页交给统一 PaginationBar', () => {
   assert.match(source, /portalGridForCount/)
   assert.match(source, /portalPageItems/)
   assert.match(source, /const visibleSubsystems = computed/)
   assert.match(source, /v-for="\(subsystem, index\) in visibleSubsystems"/)
   assert.match(source, /:data-density="portalGrid\.density"/)
   assert.match(source, /--portal-grid-max-width/)
-  assert.match(source, /v-if="portalTotalPages > 1"/)
-  assert.match(source, /aria-label="上一页"/)
-  assert.match(source, /aria-label="下一页"/)
+  // 分页由 shared/components/PaginationBar.vue 接管：页码 / 总量 / 每页条数都要真的传进去，
+  // 翻页仍走原来的 changePortalPage（它负责把页码夹在有效范围内）。
+  assert.match(source, /import PaginationBar from '@\/modules\/shared\/components\/PaginationBar\.vue'/)
+  assert.match(source, /<PaginationBar[\s\S]{0,300}label="子系统分页"/)
+  assert.match(source, /<PaginationBar[\s\S]{0,400}:page="portalPage"/)
+  assert.match(source, /:total="subsystems\.length"/)
+  assert.match(source, /:page-size="PORTAL_PAGE_SIZE"/)
+  assert.match(source, /@change="changePortalPage"/)
+  // 自绘的分页箭头按钮与「第 N / M 页」计数器必须消失。
+  assert.doesNotMatch(source, /aria-label="上一页"/)
+  assert.doesNotMatch(source, /aria-label="下一页"/)
+  assert.doesNotMatch(source, /第 \{\{ portalPage \}\} \/ \{\{ portalTotalPages \}\} 页/)
+  assert.doesNotMatch(source, /v-if="portalTotalPages > 1"/)
+  // 门户不再给共享分页条自绘按钮样式，只保留居中位置并桥接门户 token（深色/浅色都走 token）。
+  assert.doesNotMatch(styles, /\.subsystem-portal__pagination button/)
+  assert.match(styles, /\.subsystem-portal__pagination \{[^}]*(justify-content: center)/)
+  assert.match(styles, /--border: var\(--portal-border\)/)
+  assert.match(styles, /--text-muted: var\(--portal-text-muted\)/)
   assert.match(styles, /height:\s*100dvh/)
   assert.match(styles, /grid-template-columns:\s*repeat\(var\(--portal-columns, 3\), minmax\(0, 1fr\)\)/)
   assert.match(styles, /grid-template-rows:\s*repeat\(var\(--portal-rows, 2\), minmax\(0, 1fr\)\)/)

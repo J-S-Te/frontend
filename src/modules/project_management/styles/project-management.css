@@ -1001,22 +1001,9 @@
 .pm-status-panel .pm-table td { cursor: pointer; }
 .pm-status-panel .pm-table tbody tr:hover { background: var(--pm-primary-soft); }
 
-.pm-pagination { display: flex; align-items: center; gap: var(--pm-sp-1); }
-.pm-pg {
-  min-width: var(--pm-h-control);
-  height: var(--pm-h-control);
-  padding: 0 7px;
-  border: 1px solid var(--pm-line);
-  border-radius: var(--pm-r-xs);
-  background: var(--pm-card);
-  color: var(--pm-body);
-  font-size: var(--pm-fs-label);
-  line-height: 1;
-}
-
-.pm-pg:hover:not(:disabled) { border-color: var(--pm-primary-border); color: var(--pm-blue-text); }
-.pm-pg.active { border-color: var(--pm-primary); background: var(--pm-primary); color: #fff; font-weight: var(--pm-fw-semibold); }
-.pm-pg:disabled { opacity: .45; }
+/* 项目表与在途监控的分页条统一使用 shared/components/PaginationBar.vue（.ui-pager），
+   模块侧不再保留 .pm-pagination / .pm-pg 两套私有分页样式。 */
+.pm-table-footer .ui-pager { flex: 0 0 auto; }
 
 .pm-project-link { display: flex; flex-direction: column; gap: 3px; padding: 0; border: 0; background: transparent; color: var(--pm-body); text-align: left; }
 .pm-project-link b { color: var(--pm-blue-text); overflow-wrap: anywhere; word-break: break-word; }
@@ -1055,6 +1042,10 @@
 .pm-badge.amber { background: var(--pm-amber-soft); color: var(--pm-amber-text); }
 .pm-badge.blue { background: var(--pm-sky-soft); color: var(--pm-sky-text); }
 .pm-badge.green { background: var(--pm-green-soft); color: var(--pm-green-text); }
+
+/* 状态与报告阶段并排展示：窄屏自动换行，不挤压进度与操作列。 */
+.pm-badge-stack { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; vertical-align: middle; }
+.pm-kanban-card .pm-badge-stack { align-self: flex-start; }
 
 .pm-cell-warning {
   display: block;
@@ -1436,6 +1427,10 @@
 .pm-alert.info i { background: var(--pm-sky); }
 .pm-alert.info b { color: var(--pm-sky-text); }
 
+/* 表内联错误条：监控快照与报告阶段筛选先用它保留上一份可用数据，再说明失败原因。 */
+.pm-inline-alert { display: flex; align-items: flex-start; gap: 8px; margin: 0 0 var(--pm-sp-3); padding: 9px var(--pm-sp-3); border: 1.5px solid transparent; border-radius: var(--pm-r-sm); font-size: var(--pm-fs-hint); line-height: var(--pm-lh-loose); }
+.pm-inline-alert.danger { border-color: var(--pm-red); background: var(--pm-red-soft); color: var(--pm-red-text); }
+
 .pm-contract-warning {
   display: flex;
   align-items: flex-start;
@@ -1631,7 +1626,9 @@
 }
 
 @media (max-width: 900px) {
-  .pm-sidebar { transform: translateX(-100%); transition: transform var(--pm-t-slow) ease; }
+  /* 窄屏侧栏是抽屉：必须高于同层遮罩 .pm-menu-mask（--pm-z-mask），否则遮罩按 DOM
+     顺序盖住侧栏，打开菜单后侧栏条目不可点击。遮罩层值保持不变，点击空白仍可关闭。 */
+  .pm-sidebar { transform: translateX(-100%); transition: transform var(--pm-t-slow) ease; z-index: var(--pm-z-drawer); }
   .pm-sidebar.open { transform: translateX(0); }
   .pm-menu-mask { position: fixed; inset: 0; z-index: var(--pm-z-mask); background: rgba(15, 23, 42, .5); }
   .pm-main { margin-left: 0; }
@@ -1716,7 +1713,7 @@
   .pm-shell { --pm-h-control: 44px; --pm-h-button: 44px; }
   .pm-nav-item { min-height: 44px; }
   .pm-tab-pill,
-  .pm-pg,
+  .pm-shell .ui-pager__button,
   .pm-icon-button,
   .pm-logout,
   .pm-multi-option,
@@ -1858,12 +1855,108 @@
 .pm-project-kpi-columns-5 > .pm-kpi { flex-basis: calc(20% - 12.8px); }
 .pm-project-kpi-grid > button.pm-kpi { cursor: pointer; }
 
+/* 18.1.1 指标卡显示设置：轻量入口 + 开关面板，沿用 KPI 卡片的白底 / 细描边 / 同色焦点环。
+   面板默认贴右展开，窄屏改为整行宽度，避免在手机上溢出视口。 */
+.pm-project-kpi { display: flex; flex-direction: column; gap: var(--pm-sp-2); }
+.pm-kpi-settings { position: relative; display: flex; justify-content: flex-end; }
+.pm-kpi-settings-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--pm-line);
+  border-radius: var(--pm-r-full);
+  background: var(--pm-card);
+  color: var(--pm-body);
+  font-size: var(--pm-fs-hint);
+  font-weight: var(--pm-fw-semibold);
+  box-shadow: var(--pm-shadow);
+  transition: border-color var(--pm-t-base), background var(--pm-t-base), color var(--pm-t-base);
+}
+.pm-kpi-settings-trigger svg { width: 14px; height: 14px; flex: none; }
+.pm-kpi-settings-trigger:hover { border-color: var(--pm-line-strong); background: var(--pm-sunken); color: var(--pm-ink); }
+.pm-kpi-settings-trigger[aria-expanded="true"] { border-color: var(--pm-primary-border); background: var(--pm-primary-soft); color: var(--pm-blue-text); }
+.pm-kpi-settings-trigger em {
+  padding: 1px 7px;
+  border-radius: var(--pm-r-full);
+  background: var(--pm-sunken);
+  color: var(--pm-muted);
+  font-size: var(--pm-fs-nano);
+  font-style: normal;
+  font-weight: var(--pm-fw-semibold);
+  font-variant-numeric: tabular-nums;
+}
+.pm-kpi-settings-trigger[aria-expanded="true"] em { background: var(--pm-card); color: var(--pm-blue-text); }
+
+.pm-kpi-settings-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: var(--pm-z-dropdown);
+  width: min(342px, calc(100vw - 32px));
+  max-height: min(420px, 60vh);
+  overflow: auto;
+  padding: var(--pm-sp-3);
+  border: 1px solid var(--pm-line);
+  border-radius: var(--pm-r-lg);
+  background: var(--pm-card);
+  box-shadow: var(--pm-shadow-pop);
+}
+.pm-kpi-settings-head { display: flex; flex-direction: column; gap: 2px; padding: 0 2px var(--pm-sp-2); border-bottom: 1px solid var(--pm-line-soft); }
+.pm-kpi-settings-head b { color: var(--pm-ink); font-size: var(--pm-fs-label); font-weight: var(--pm-fw-semibold); }
+.pm-kpi-settings-head span { color: var(--pm-muted); font-size: var(--pm-fs-nano); }
+.pm-kpi-settings-list { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: var(--pm-sp-2) 0; list-style: none; }
+.pm-kpi-switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--pm-sp-3);
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: var(--pm-r-sm);
+  background: transparent;
+  color: var(--pm-body);
+  text-align: left;
+  cursor: pointer;
+}
+.pm-kpi-switch:hover { background: var(--pm-sunken); }
+.pm-kpi-switch:focus-visible { outline: 2px solid var(--pm-primary); outline-offset: 1px; }
+.pm-kpi-switch-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.pm-kpi-switch-text b { color: var(--pm-ink); font-size: var(--pm-fs-sm); font-weight: var(--pm-fw-medium); }
+.pm-kpi-switch-text small { overflow: hidden; color: var(--pm-muted); font-size: var(--pm-fs-nano); text-overflow: ellipsis; white-space: nowrap; }
+.pm-kpi-switch-track { position: relative; flex: none; width: 30px; height: 18px; border-radius: var(--pm-r-full); background: var(--pm-line-strong); transition: background var(--pm-t-base); }
+.pm-kpi-switch-track i { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: var(--pm-r-full); background: var(--pm-card); box-shadow: 0 1px 2px rgba(15, 23, 42, .2); transition: transform var(--pm-t-base); }
+.pm-kpi-switch[aria-checked="true"] .pm-kpi-switch-track { background: var(--pm-primary); }
+.pm-kpi-switch[aria-checked="true"] .pm-kpi-switch-track i { transform: translateX(12px); }
+.pm-kpi-settings-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--pm-sp-2); padding-top: var(--pm-sp-2); border-top: 1px solid var(--pm-line-soft); color: var(--pm-muted); font-size: var(--pm-fs-nano); }
+.pm-kpi-settings-reset {
+  padding: 4px 10px;
+  border: 1px solid var(--pm-line);
+  border-radius: var(--pm-r-full);
+  background: var(--pm-card);
+  color: var(--pm-blue-text);
+  font-size: var(--pm-fs-hint);
+  font-weight: var(--pm-fw-semibold);
+}
+.pm-kpi-settings-reset:hover:not(:disabled) { border-color: var(--pm-primary-border); background: var(--pm-primary-soft); }
+.pm-kpi-settings-reset:disabled { color: var(--pm-faint); cursor: not-allowed; }
+.pm-kpi-hidden-empty { display: flex; align-items: center; gap: var(--pm-sp-2); margin: 0; padding: var(--pm-sp-4); border: 1px dashed var(--pm-line-strong); border-radius: var(--pm-r-lg); background: var(--pm-card); color: var(--pm-muted); font-size: var(--pm-fs-hint); }
+.pm-kpi-hidden-empty svg { width: 16px; height: 16px; flex: none; }
+.pm-kpi-hidden-empty span { margin-right: auto; }
+
+
 @media (max-width: 1280px) {
   .pm-project-kpi-columns-5 > .pm-kpi { flex-basis: calc(33.333333% - 10.666667px); }
 }
 
 @media (max-width: 760px) {
   .pm-project-kpi-grid > .pm-kpi { flex-basis: calc(50% - 8px); }
+  /* 窄屏设置面板改为整行宽度，不再贴右绝对定位，避免超出视口。 */
+  .pm-kpi-settings { justify-content: stretch; }
+  .pm-kpi-settings-trigger { justify-content: center; width: 100%; }
+  .pm-kpi-settings-panel { left: 0; right: 0; width: auto; max-height: 50vh; }
 }
 
 @media (max-width: 520px) {
@@ -2109,3 +2202,108 @@
 .pm-field-incomplete { display: grid; gap: var(--pm-sp-2); margin-top: var(--pm-sp-3); max-width: 720px; color: var(--pm-text-secondary); }
 .pm-field-incomplete textarea { min-height: 68px; }
 @media(max-width:1100px){.pm-field-workflow{grid-template-columns:1fr}.pm-signature-pad canvas{height:150px}}
+
+/* ==========================================================================
+   深色主题（UniLab v1.0 §1 令牌层的第二套取值）
+   --------------------------------------------------------------------------
+   项目管理系统所有组件只引用 --pm-* 令牌，所以换肤只在这一层完成：
+   深色下把令牌重新指向 main.css 的深色 token。这里不出现任何新的十六进制颜色，
+   调色板仍然只有 UniLab 的六语义色与中性墨色（规范 §1 的约束不变）。
+   ========================================================================== */
+.pm-shell[data-theme="dark"],
+[data-theme="dark"] .pm-shell {
+  --pm-primary-ink: var(--primary-ink);
+  --pm-primary-soft: var(--primary-soft);
+  --pm-primary-border: var(--primary-border);
+  --pm-focus-ring: rgba(125, 180, 255, .28);
+
+  --pm-ink: var(--text);
+  --pm-body: var(--text-secondary);
+  --pm-muted: var(--text-muted);
+  --pm-faint: var(--text-faint);
+
+  --pm-content: var(--surface-content);
+  --pm-card: var(--surface-card);
+  --pm-sunken: var(--surface-muted);
+  --pm-soft: var(--surface-muted);
+
+  --pm-line: var(--border);
+  --pm-line-soft: var(--line-soft);
+  --pm-line-strong: var(--line-strong);
+
+  --pm-sidebar: var(--sidebar);
+  --pm-sidebar-hover: var(--sidebar-hover);
+  --pm-sidebar-active: var(--sidebar-hover);
+  --pm-sidebar-label: var(--sidebar-label);
+  --pm-sidebar-dot: var(--sidebar-dot);
+
+  --pm-green-soft: var(--success-soft);
+  --pm-green-text: var(--success-text);
+  --pm-amber-soft: var(--warning-soft);
+  --pm-amber-text: var(--warning-text);
+  --pm-red-soft: var(--danger-soft);
+  --pm-red-text: var(--danger-text);
+  --pm-sky-soft: var(--sky-soft);
+  --pm-sky-text: var(--sky-ink);
+  --pm-violet-soft: var(--violet-soft);
+  --pm-violet-text: var(--violet-ink);
+  --pm-gray-soft: var(--chip-neutral);
+  --pm-gray-text: var(--text-secondary);
+  --pm-blue-text: var(--primary-ink);
+
+  --pm-shadow: 0 1px 2px rgba(0, 0, 0, .45), 0 4px 16px rgba(0, 0, 0, .35);
+  --pm-shadow-pop: 0 1px 3px rgba(0, 0, 0, .5), 0 8px 24px rgba(0, 0, 0, .45);
+  --pm-shadow-drawer: -8px 0 30px rgba(0, 0, 0, .55);
+  --pm-shadow-toast: 0 10px 30px rgba(0, 0, 0, .6);
+  --pm-shadow-modal: 0 20px 60px rgba(0, 0, 0, .68);
+}
+
+/* 表单控件在深色下统一用输入底色，避免白底输入框贴在深色卡片上。 */
+[data-theme="dark"] .pm-shell :is(
+    input:not([type="checkbox"]):not([type="radio"]),
+    select, textarea, .pm-input) {
+  background: var(--surface-input);
+  border-color: var(--pm-line);
+  color: var(--pm-ink);
+}
+
+[data-theme="dark"] .pm-shell :is(input, textarea)::placeholder {
+  color: var(--text-dim);
+}
+
+[data-theme="dark"] .pm-shell :is(input, select, textarea):focus {
+  background: var(--surface-input);
+}
+
+/* 半透明白底的分段切换器在深色下会发灰，改成半透明卡片底。 */
+[data-theme="dark"] .pm-decomposition-switcher {
+  background: rgba(17, 26, 44, .72);
+}
+
+/* 深色下遮罩加深，弹窗/抽屉靠阴影与描边分层。 */
+[data-theme="dark"] .pm-shell :is(.pm-modal-mask, .pm-drawer-mask, .pm-dialog-mask) {
+  background: var(--overlay-scrim);
+}
+
+[data-theme="dark"] .pm-shell :is(.pm-dialog, .pm-modal, .pm-drawer, .pm-popover, .pm-notifications) {
+  box-shadow: var(--pm-shadow-modal);
+}
+
+/* 深色下表格斑马纹与悬停层级：与浅色同样的三档底色顺序。 */
+[data-theme="dark"] .pm-shell .pm-table tbody tr:nth-child(even) {
+  background: var(--surface-stripe);
+}
+
+[data-theme="dark"] .pm-shell .pm-table tbody tr:hover {
+  background: var(--surface-hover);
+}
+
+[data-theme="dark"] .pm-shell .pm-table th {
+  background: var(--surface-head);
+}
+
+/* 侧栏在深色下比页面更深，用户区与品牌区继续沿用侧栏色。 */
+[data-theme="dark"] .pm-shell :is(.pm-sidebar-user, .pm-sidebar-footer) {
+  background: var(--pm-sidebar-hover);
+  border-top-color: var(--sidebar-border);
+}

@@ -1,4 +1,5 @@
 import { computed, reactive, ref } from 'vue'
+import { customerImportErrorRows, customerImportErrorsCsv } from '../customerImportErrors.js'
 
 /**
  * 客户 Excel 导入向导域（治理批次 5 CRM，自 CustomerOpportunityView.vue 逐字迁移）。
@@ -9,11 +10,12 @@ import { computed, reactive, ref } from 'vue'
  *
  * 注入项与组件内同名标识一一对应：error/notice/actionLoading/resetMessages/showError/
  * loadCurrent/runtimeCapability/createIdempotencyKey/previewCustomerImport/commitCustomerImport/
- * downloadCustomerImportErrors/downloadCustomerImportTemplate；不直接导入 API 模块，保持可独立测试。
+ * downloadCustomerImportTemplate；不直接导入 API 模块，保持可独立测试。
+ * 错误报告 CSV 完全由预检/结果行在浏览器生成，不再调用服务端错误下载接口。
  */
 export function useCustomerImportWizard({
   error, notice, actionLoading, resetMessages, showError, loadCurrent, runtimeCapability, createIdempotencyKey,
-  previewCustomerImport, commitCustomerImport, downloadCustomerImportErrors, downloadCustomerImportTemplate,
+  previewCustomerImport, commitCustomerImport, downloadCustomerImportTemplate,
 }) {
   const customerImportDialog = ref(false)
   const customerImportForm = reactive({ file: null, reason: '' })
@@ -21,6 +23,7 @@ export function useCustomerImportWizard({
   const customerImportResult = ref(null)
   const customerImportCommitKey = ref('')
   const customerImportScanAvailable = computed(() => runtimeCapability('customer_import_scan').available)
+  const customerImportErrorReportRows = computed(() => customerImportErrorRows(customerImportPreview.value, customerImportResult.value))
 
   function openCustomerImport() {
     if (!customerImportScanAvailable.value) {
@@ -75,14 +78,14 @@ export function useCustomerImportWizard({
       await loadCurrent()
     } catch (value) { showCustomerImportError(value) } finally { actionLoading.value = false }
   }
-  async function downloadImportErrors() {
-    const jobNo = customerImportResult.value?.job_no || customerImportPreview.value?.job_no
-    if (!jobNo) return
+  function downloadImportErrors() {
+    if (!customerImportErrorReportRows.value.length) return
     try {
-      const { blob, filename } = await downloadCustomerImportErrors(jobNo)
+      const csv = customerImportErrorsCsv(customerImportPreview.value, customerImportResult.value)
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
       const objectURL = URL.createObjectURL(blob)
       const link = document.createElement('a')
-      link.href = objectURL; link.download = filename
+      link.href = objectURL; link.download = '客户导入错误.csv'
       document.body.appendChild(link); link.click(); link.remove()
       window.setTimeout(() => URL.revokeObjectURL(objectURL), 0)
     } catch (value) { showCustomerImportError(value) }
@@ -105,6 +108,7 @@ export function useCustomerImportWizard({
     customerImportResult,
     customerImportCommitKey,
     customerImportScanAvailable,
+    customerImportErrorReportRows,
     openCustomerImport,
     resetCustomerImportPreview,
     closeCustomerImport,

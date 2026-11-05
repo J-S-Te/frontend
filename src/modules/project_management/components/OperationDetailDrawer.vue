@@ -1,7 +1,7 @@
 <script setup>
 // 操作详情抽屉：只读详情网格（治理批次 3 第三步，模板自 ProjectManagementView.vue 逐字迁移）。
 // fields 由父组件的 operationDetailFields 计算注入；DOM 由快照测试对提取前 golden 逐字节锁定。
-import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
+import ConsoleIcon from '@/modules/shared/components/ConsoleIcon.vue'
 import { operationSectionLabel } from '@/modules/project_management/projectDisplay'
 
 defineProps({

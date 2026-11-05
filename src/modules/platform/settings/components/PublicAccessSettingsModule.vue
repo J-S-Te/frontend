@@ -9,7 +9,11 @@ import {
 import { hasPermission } from '@/modules/platform/auth/utils/principal'
 import { formatUserError } from '../../../shared/utils/userError.js'
 
+import ConfirmDialog from '@/modules/shared/components/ConfirmDialog.vue'
+import { useConfirmDialog } from '@/modules/shared/composables/useConfirmDialog.js'
+
 const emit = defineEmits(['toast'])
+const { dialog: confirmDialog, askConfirm, accept, cancel } = useConfirmDialog()
 
 const canRead = computed(() => hasPermission('platform:settings:read'))
 const canUpdate = computed(() => hasPermission('platform:settings:update'))
@@ -21,7 +25,7 @@ const errorMessage = ref('')
 const savedSettings = ref(null)
 const form = ref({ publicOrigin: '', allowInsecureHTTPRedirect: false, version: 0 })
 
-const isPublic = computed(() => form.value.publicOrigin.trim() !== '')
+const isPublic = computed(() => Boolean(savedSettings.value?.publicOrigin?.trim()))
 const derivedInsecureHTTP = computed(() => {
   const origin = form.value.publicOrigin.trim()
   if (!origin) return false
@@ -97,13 +101,24 @@ async function saveSettings() {
   }
 }
 
+// applySettings 在用户核对已保存配置后申请受控应用。
+// 参数：无。
+// 返回值：异步处理结果；取消、权限变化或保存版本变化时不执行应用。
 async function applySettings() {
-  if (!canUpdate.value || applying.value) return
-  const target = form.value.publicOrigin.trim()
+  if (!canUpdate.value || applying.value || saving.value || !savedSettings.value) return
+  const settings = savedSettings.value
+  const target = (settings.publicOrigin || '').trim()
   const message = target
     ? `确定应用对外访问地址 ${normalizePublicOrigin(target)} 吗？会重建 api、contract-api、customer-api 和 frontend 容器，期间访问可能短暂中断。`
     : '确定恢复为“仅本机访问（127.0.0.1）”吗？会删除临时覆盖文件并重建相关容器。'
-  if (!window.confirm(message)) return
+  const confirmed = await askConfirm({
+    title: target ? '应用访问配置？' : '恢复仅本机访问？',
+    description: message,
+    confirmText: target ? '应用访问配置' : '恢复仅本机访问',
+    cancelText: '取消',
+  })
+  if (!confirmed || !canUpdate.value || applying.value || saving.value) return
+  if (savedSettings.value?.version !== settings.version) return
   applying.value = true
   errorMessage.value = ''
   try {
@@ -162,8 +177,8 @@ onMounted(loadSettings)
         <button v-if="canUpdate" class="console-button primary" type="button" :disabled="saving" @click="saveSettings">
           <ConsoleIcon name="save" />{{ saving ? '保存中…' : '保存配置' }}
         </button>
-        <button v-if="canUpdate" class="console-button primary" type="button" :disabled="applying || saving" @click="applySettings">
-          <ConsoleIcon name="refresh" />{{ applying ? '应用中…' : isPublic ? '应用配置' : '恢复本机访问' }}
+        <button v-if="canUpdate" class="console-button primary" type="button" :disabled="applying || saving || !savedSettings" @click="applySettings">
+          <ConsoleIcon name="refresh" />{{ applying ? '应用中…' : isPublic ? '应用访问配置' : '恢复仅本机访问' }}
         </button>
         <button class="console-button ghost" type="button" :disabled="loading || saving" @click="loadSettings">重新读取</button>
       </div>
@@ -172,6 +187,7 @@ onMounted(loadSettings)
         当前已保存：{{ savedSettings.publicOrigin || '仅本机访问' }}（版本 {{ savedSettings.version }}）
       </p>
     </div>
+    <ConfirmDialog v-if="confirmDialog" v-bind="confirmDialog" @confirm="accept" @cancel="cancel" />
   </div>
 </template>
 

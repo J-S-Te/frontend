@@ -7,6 +7,8 @@ import {
 import { attachStructuredContext } from '../../platform/shared/api/requestContext.js'
 import { formatUserError } from '../../shared/utils/userError.js'
 import { todayBusinessDate } from '../../shared/utils/businessTime.js'
+import { safeDownloadFilename } from '../../shared/utils/contentDisposition.js'
+import { DOWNLOAD_TIMEOUT_MESSAGE, downloadRequestSignal } from '../../shared/utils/downloadTimeout.js'
 
 const runtimeEnv = import.meta.env || {}
 const PUBLIC_PATH_PREFIX = (runtimeEnv.VITE_PROJECT_PUBLIC_PATH_PREFIX || '/project_management').replace(/\/$/, '')
@@ -233,6 +235,9 @@ function unwrapPage(data) {
 /**
  * listProjects 按前端约定参数查询项目列表，并在返回非数组时兜底为空列表。
  *
+ * 支持 `report_stage` 查询参数（NONE/RECTIFYING/COMPILING/REVIEWED/ISSUED/ARCHIVED）：
+ * 参数原样下发给服务端做筛选与合法性校验，前端不对已加载列表做二次全量过滤。
+ *
  * @param {Record<string, string|number|boolean>} [params={}] 查询条件。支持 keyword 兼容映射为 q。
  * @returns {Promise<Array<object>>} 项目列表。
  * @throws {Error} 会话失效、鉴权失败或网关返回非成功状态时抛出。
@@ -259,6 +264,8 @@ export async function getProjectMonitoring(params = {}) {
     items: Array.isArray(data?.items) ? data.items : [],
     recent_events: Array.isArray(data?.recent_events) ? data.recent_events : [],
     status_counts: data?.status_counts || {},
+    // 报告阶段是独立维度：旧后端不返回该字段时保持空对象，分桶按 0 处理。
+    report_stage_counts: data?.report_stage_counts || {},
     categories: Array.isArray(data?.categories) ? data.categories : [],
     teams: Array.isArray(data?.teams) ? data.teams : [],
     project_manager_ids: Array.isArray(data?.project_manager_ids) ? data.project_manager_ids : [],
@@ -339,7 +346,8 @@ export function closeSupplement(projectID, payload) {
 /**
  * listProjectsPage 分页查询项目列表，返回 items 与 total 供分页控件渲染。
  * 状态过滤发生在服务端的派生态上，因此 total 是"筛选后的总数"。
- * @param {Record<string, string|number|boolean>} [params={}] 查询条件，含 page / page_size。
+ * `report_stage` 与状态筛选一样原样下发，由服务端决定组合口径。
+ * @param {Record<string, string|number|boolean>} [params={}] 查询条件，含 page / page_size / report_stage。
  * @returns {Promise<{items: Array<object>, total: number}>} 当前页与筛选后的总数。
  * @throws {Error} 会话失效、鉴权失败或分页参数不合法时抛出。
  */
@@ -590,16 +598,19 @@ export function saveDetectionCategory(payload) {
 
 /**
  * importDetectionCategories 批量导入检测类别域（页面「导入」入口）。
+ * 确认导入必须携带 Idempotency-Key：服务端按「租户 + 键」保证重试不重复写入，
+ * 同键不同内容返回 409；缺失或非法键返回 400。
  * @param {File} file 原始 CSV 文件。
  * @param {number[]|null} selectedRows 预检通过且用户选择的文件行号。
+ * @param {string} idempotencyKey 由文件与选中行推导的稳定幂等键。
  * @returns {Promise<{imported: number, skipped: number, errors?: string[]}>} 导入结果摘要。
- * @throws {Error} 无权限或网关返回非成功状态时抛出。
+ * @throws {Error} 无权限、幂等键冲突或网关返回非成功状态时抛出。
  */
-export function importDetectionCategories(file, selectedRows = null) {
+export function importDetectionCategories(file, selectedRows = null, idempotencyKey = '') {
   const formData = new FormData()
   formData.append('file', file)
   if (Array.isArray(selectedRows)) formData.append('selected_rows', JSON.stringify(selectedRows))
-  return request('/detection-categories/import', { method: 'POST', body: formData })
+  return request('/detection-categories/import', { method: 'POST', body: formData, headers: importIdempotencyHeaders(idempotencyKey) })
 }
 
 export function previewDetectionCategoriesImport(file) {
@@ -702,11 +713,9 @@ export function reviewSpecialMethod(itemID, payload) {
 }
 
 /**
- * updateReportStatus 推进服务项报告状态（编制中→已审核→已签发→已归档）。
- * @param {string|number} itemID 服务项 ID。
- * @param {string} phase 目标阶段（COMPILING / REVIEWED / ISSUED / ARCHIVED）。
- * @returns {Promise<object>} 更新结果。
- * @throws {Error} 状态不允许、无权限或目标阶段非法时抛出。
+ * updateReportStatus 用途：依次推进整改中→编制中→已审核→已签发→已归档。
+ * 参数：itemID 为服务项 ID，phase 为目标阶段，expectedVersion 为当前服务项版本。
+ * 返回值：更新结果 Promise；跳级、无权限、版本冲突或阶段非法时抛出错误。
  */
 export function updateReportStatus(itemID, phase, expectedVersion) {
   // expectedVersion 为服务端返回的服务项版本：带上它，服务端在探测到"我基于的是旧版本"时
@@ -1027,11 +1036,19 @@ export function deleteEquipment(resourceID) {
   return request(`/equipment/${encodeURIComponent(resourceID)}`, { method: 'DELETE' })
 }
 
-export function importEquipment(file, selectedRows = null) {
+/**
+ * importEquipment 以 CSV 批量导入设备能力。
+ * @param {File} file 原始 CSV 文件。
+ * @param {number[]|null} selectedRows 本次确认的文件行号。
+ * @param {string} idempotencyKey 由文件与选中行推导的稳定幂等键。
+ * @returns {Promise<{imported: number, skipped: number, rows: object[]}>} 导入结果。
+ * @throws {Error} 无权限、幂等键冲突或网关返回非成功状态时抛出。
+ */
+export function importEquipment(file, selectedRows = null, idempotencyKey = '') {
   const formData = new FormData()
   formData.append('file', file)
   if (Array.isArray(selectedRows)) formData.append('selected_rows', JSON.stringify(selectedRows))
-  return request('/equipment/import', { method: 'POST', body: formData })
+  return request('/equipment/import', { method: 'POST', body: formData, headers: importIdempotencyHeaders(idempotencyKey) })
 }
 
 export function previewEquipmentImport(file) {
@@ -1042,6 +1059,13 @@ export function previewEquipmentImport(file) {
 
 export function downloadEquipmentImportTemplate() {
   return downloadImportTemplate('/equipment/import/template', '设备能力导入模板.csv')
+}
+
+// importIdempotencyHeaders 只在确实拿到幂等键时发送请求头：缺失时让服务端按 400 失败关闭，
+// 不用空字符串冒充有效键。
+function importIdempotencyHeaders(idempotencyKey) {
+  const key = typeof idempotencyKey === 'string' ? idempotencyKey.trim() : ''
+  return key ? { 'Idempotency-Key': key } : {}
 }
 
 /**
@@ -1056,17 +1080,21 @@ export function upsertCapability(payload) {
 
 /**
  * importCapabilities 以 CSV 批量导入能力记录。
+ * 确认导入必须携带 Idempotency-Key：服务端按「租户 + 键」保证重试不重复写入，
+ * 同键不同内容返回 409；缺失或非法键返回 400。
  * @param {File} file 待上传的 CSV 文件。
  * @param {string} [resourceType=''] 目标资源类型，可空表示两类均可。
+ * @param {number[]|null} selectedRows 本次确认的文件行号。
+ * @param {string} idempotencyKey 由文件与选中行推导的稳定幂等键。
  * @returns {Promise<{imported: number, skipped: number, errors?: string[]}>} 导入结果统计。
- * @throws {Error} 解析失败、权限不足或服务端异常时抛出。
+ * @throws {Error} 解析失败、权限不足、幂等键冲突或服务端异常时抛出。
  */
-export async function importCapabilities(file, resourceType = '', selectedRows = null) {
+export async function importCapabilities(file, resourceType = '', selectedRows = null, idempotencyKey = '') {
   const formData = new FormData()
   formData.append('file', file)
   if (resourceType) formData.append('resource_type', resourceType)
   if (Array.isArray(selectedRows)) formData.append('selected_rows', JSON.stringify(selectedRows))
-  return request('/capabilities/import', { method: 'POST', body: formData })
+  return request('/capabilities/import', { method: 'POST', body: formData, headers: importIdempotencyHeaders(idempotencyKey) })
 }
 
 export async function previewCapabilitiesImport(file) {
@@ -1079,12 +1107,15 @@ export async function downloadCapabilityImportTemplate() {
   return downloadImportTemplate('/capabilities/import/template', '人员资质导入模板.csv')
 }
 
-async function requestProjectCSV(path) {
+async function requestProjectCSV(path, fallbackFilename) {
   const context = { subsystem: 'project_management', feature: 'project_download', operation: 'GET', path, method: 'GET' }
+  // 导出与模板下载共用本函数；只在这里附加超时 signal，上传仍保持原有不设硬超时。
+  const downloadAbort = downloadRequestSignal()
   let response
   try {
-    response = await fetch(`${API_BASE_URL}${path}`, { credentials: 'include', headers: { Accept: 'text/csv' } })
-  } catch {
+    response = await fetch(`${API_BASE_URL}${path}`, { credentials: 'include', signal: downloadAbort.signal, headers: { Accept: 'text/csv' } })
+  } catch (cause) {
+    if (downloadAbort.timedOut()) throw downloadTimeoutError(cause, context)
     throw projectRequestError(null, null, context, { code: 'NETWORK_ERROR', fallback: '下载未完成，请检查网络后重新下载。' })
   }
   if (!response.ok) {
@@ -1096,12 +1127,42 @@ async function requestProjectCSV(path) {
   if (mediaType !== 'text/csv') {
     throw projectRequestError(null, response, context, { code: 'INVALID_DOWNLOAD_RESPONSE', fallback: '下载服务返回的文件格式异常，请联系管理员检查文件下载配置。' })
   }
-  return response
+  const filename = safeDownloadFilename(response.headers.get('content-disposition'), fallbackFilename, { extensions: ['.csv'] })
+  return { response, filename, downloadAbort }
+}
+
+/**
+ * downloadTimeoutError 把本端下载超时转换为项目模块可读错误，保持既有错误字段结构。
+ * @param {unknown} cause 底层中断原因。
+ * @param {Record<string, unknown>} context 下载请求上下文。
+ * @returns {Error} 带下载超时错误码的结构化错误。
+ */
+function downloadTimeoutError(cause, context) {
+  const error = projectRequestError(null, null, context, { code: 'DOWNLOAD_TIMEOUT', fallback: DOWNLOAD_TIMEOUT_MESSAGE })
+  error.message = DOWNLOAD_TIMEOUT_MESSAGE
+  error.cause = cause
+  return error
+}
+
+/**
+ * readDownloadBlob 读取下载响应体；超时发生在读取阶段时同样转换为可读超时错误。
+ * @param {Response} response 下载响应。
+ * @param {{timedOut: () => boolean}} downloadAbort 下载超时归因。
+ * @param {Record<string, unknown>} context 下载请求上下文。
+ * @returns {Promise<Blob>} 完整响应体。
+ */
+async function readDownloadBlob(response, downloadAbort, context) {
+  try {
+    return await response.blob()
+  } catch (cause) {
+    if (downloadAbort.timedOut()) throw downloadTimeoutError(cause, context)
+    throw projectRequestError(null, response, context, { code: 'NETWORK_ERROR', fallback: '文件下载中断，请检查网络后重新下载。' })
+  }
 }
 
 async function downloadImportTemplate(path, filename) {
-  const response = await requestProjectCSV(path)
-  return { blob: await response.blob(), filename }
+  const { response, downloadAbort } = await requestProjectCSV(path)
+  return { blob: await readDownloadBlob(response, downloadAbort, { subsystem: 'project_management', feature: 'project_download', operation: 'GET', path, method: 'GET' }), filename }
 }
 
 /**
@@ -1112,10 +1173,49 @@ async function downloadImportTemplate(path, filename) {
  */
 export async function exportCapabilities(resourceType = '') {
   const query = resourceType ? `?resource_type=${encodeURIComponent(resourceType)}` : ''
-  const response = await requestProjectCSV(`/capabilities/export${query}`)
-  const disposition = response.headers.get('content-disposition') || ''
-  let filename = `capabilities-${todayBusinessDate()}.csv`
-  const match = disposition.match(/filename\*?=(?:UTF-8''|")?([^";]+)/i)
-  if (match) filename = match[1].replace(/^"|"$/g, '')
-  return { blob: await response.blob(), filename }
+  const fallbackFilename = `capabilities-${todayBusinessDate()}.csv`
+  const path = `/capabilities/export${query}`
+  const { response, filename, downloadAbort } = await requestProjectCSV(`/capabilities/export${query}`, fallbackFilename)
+  return { blob: await readDownloadBlob(response, downloadAbort, { subsystem: 'project_management', feature: 'project_download', operation: 'GET', path, method: 'GET' }), filename }
+}
+// 用途：读取当前环境显式开放的项目创建来源。
+// 参数：无。
+// 返回值：包含native_enabled的能力响应；失败时抛出HTTP错误。
+export function getProjectCreationCapabilities() {
+  return request('/project-creation-capabilities')
+}
+
+// 用途：按本地委托创建原生项目及待确认服务范围。
+// 参数：payload为稳定source_id、本地单位和服务项，来源必须为NATIVE。
+// 返回值：创建或相同请求重放的项目；校验、权限和幂等冲突时抛出错误。
+export function createNativeProject(payload) {
+  return request('/native-projects', { method: 'POST', body: JSON.stringify(payload) })
+}
+
+// 用途：读取原生项目的当前权威范围及审批历史。
+// 参数：id 为真实项目主键。
+// 返回值：服务端范围状态；认证和错误沿用现有transport。
+export function getNativeProjectScope(id) {
+  return request(`/projects/${encodeURIComponent(id)}/native-scope`)
+}
+
+// 用途：以明确操作号提交完整本地范围提案。
+// 参数：id 为项目主键，payload 为版本和冻结范围。
+// 返回值：真实持久提案或明确错误。
+export function requestNativeProjectScope(id, payload) {
+  return request(`/projects/${encodeURIComponent(id)}/native-scope-changes`, { method: 'POST', body: JSON.stringify(payload) })
+}
+
+// 用途：执行不同人的本地范围单级审批。
+// 参数：id/changeID 为真实坐标，payload 为原操作号、版本及决定。
+// 返回值：真实最终提案；未知结果沿原transport标记。
+export function decideNativeProjectScope(id, changeID, payload) {
+  return request(`/projects/${encodeURIComponent(id)}/native-scope-changes/${encodeURIComponent(changeID)}/decision`, { method: 'POST', body: JSON.stringify(payload) })
+}
+
+// 用途：由原申请人撤回本地待审批范围。
+// 参数：id/changeID 为真实坐标，payload 为原操作号和撤回意见。
+// 返回值：真实撤回回执或授权及状态错误。
+export function withdrawNativeProjectScope(id, changeID, payload) {
+  return request(`/projects/${encodeURIComponent(id)}/native-scope-changes/${encodeURIComponent(changeID)}/withdraw`, { method: 'POST', body: JSON.stringify(payload) })
 }

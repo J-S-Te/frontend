@@ -29,9 +29,13 @@ test('各子系统从各自认证会话取账号，客户门户不再使用账�
     const source = await readFile(new URL(`../${module}/views/${view}.vue`, import.meta.url), 'utf8')
     assert.ok(source.includes(`loginUsername(${session}.value)`), path)
     if (module === 'customer_portal') {
-      const footer = source.slice(source.indexOf('class="console-sidebar-user subsystem-sidebar-user"'), source.indexOf('</aside>'))
-      assert.match(footer, /currentLoginUsername/)
-      assert.doesNotMatch(footer, /accountSecurity/)
+      // 侧栏用户区已交给共享外壳 AppShell.vue：视图不再手写
+      // <div class="console-sidebar-user subsystem-sidebar-user">…</aside>（原断言按这一段切片），
+      // 账号来源改由 <AppShell> 的 user-name 绑定表达。语义不变：
+      // 侧栏只显示登录账号，不得换成账号安全页的脱敏主体标识。
+      const shellCall = source.slice(source.indexOf('<AppShell'), source.indexOf('>', source.indexOf('<AppShell')) + 1)
+      assert.match(shellCall, /:user-name="currentLoginUsername"/)
+      assert.doesNotMatch(shellCall, /accountSecurity/)
     }
   }
 })

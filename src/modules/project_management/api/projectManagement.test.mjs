@@ -111,6 +111,9 @@ test('项目列表将 keyword 兼容转换为后端实际读取的 q 参数', ()
   assert.match(source, /if \(query\.q === undefined && query\.keyword !== undefined\) query\.q = query\.keyword/)
   assert.match(source, /delete query\.keyword/)
   assert.match(source, /new URLSearchParams\(Object\.entries\(query\)/)
+  // report_stage 是列表/监控的独立维度：原样随查询串下发，由服务端筛选并做非法值 422 校验。
+  assert.match(source, /支持 `report_stage` 查询参数/)
+  assert.match(source, /report_stage_counts: data\?\.report_stage_counts \|\| \{\}/)
 })
 
 test('已审批合同通过项目后端同源接口读取', () => {
@@ -126,10 +129,15 @@ test('资质能力更新、CSV 导入导出使用后端接口，上传不携带 
   assert.match(source, /options\.body && !\(options\.body instanceof FormData\)/)
   assert.match(source, /request\('\/capabilities', \{ method: 'PUT', body: JSON\.stringify\(payload\) \}\)/)
   assert.match(source, /formData\.append\('file', file\)/)
-  assert.match(source, /request\('\/capabilities\/import', \{ method: 'POST', body: formData \}\)/)
-  assert.match(source, /requestProjectCSV\(`\/capabilities\/export\$\{query\}`\)/)
-  assert.match(source, /filename\*?=\(?:UTF-8''|"\)\?\(\[\^";\]\+\)/i)
-  assert.match(source, /return \{ blob: await response\.blob\(\), filename \}/)
+  // 确认导入必须带幂等键：请求头由文件与选中行推导，缺失时不冒充有效键。
+  assert.match(source, /request\('\/capabilities\/import', \{ method: 'POST', body: formData, headers: importIdempotencyHeaders\(idempotencyKey\) \}\)/)
+  assert.match(source, /requestProjectCSV\(`\/capabilities\/export\$\{query\}`, fallbackFilename\)/)
+  assert.match(source, /safeDownloadFilename\(response\.headers\.get\('content-disposition'\), fallbackFilename, \{ extensions: \['\.csv'\] \}\)/)
+  // 下载/模板请求必须带超时 signal，响应体读取阶段的中断同样按超时转换。
+  assert.match(source, /const downloadAbort = downloadRequestSignal\(\)/)
+  assert.match(source, /signal: downloadAbort\.signal, headers: \{ Accept: 'text\/csv' \}/)
+  assert.match(source, /return \{ blob: await readDownloadBlob\(response, downloadAbort, /)
+  assert.doesNotMatch(source, /filename\*?=\(?:UTF-8''|"\)\?\(\[\^";\]\+\)/i)
 })
 
 test('人员姓名批量解析走独立端点，并对 user_id 去重后编码', () => {
@@ -174,7 +182,7 @@ test('列表接口统一解包分页 envelope，未分页时拿到完整集合',
 test('实时监控读取独立服务端快照并保留分页与版本元数据', () => {
   assert.match(source, /export async function getProjectMonitoring\(params = \{\}\)/)
   assert.match(source, /request\(`\/projects-monitoring\$\{search \? `\?\$\{search\}` : ''\}`\)/)
-  for (const field of ['recent_events', 'status_counts', 'server_time', 'snapshot_version']) assert.match(source, new RegExp(field))
+  for (const field of ['recent_events', 'status_counts', 'report_stage_counts', 'server_time', 'snapshot_version']) assert.match(source, new RegExp(field))
 })
 
 test('前端 API 不再暴露已下线的站点档案维护接口', () => {

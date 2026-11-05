@@ -152,7 +152,11 @@ onBeforeUnmount(releasePreview)
 </template>
 
 <style scoped>
-.contract-pdf-preview { border: 1px solid #d9e1ec; border-radius: 8px; overflow: hidden; }
+/* 深色主题：外框/工具条走 token；PDF 画布与页面是文档内容（白纸），保持原色。 */
+.contract-pdf-preview { border: 1px solid var(--border-soft, #d9e1ec); border-radius: 8px; overflow: hidden; }
+/* 工具条浅色底是 #f5f7fb，与 --surface-muted 的浅色值（#f8fafc）不同：
+   不能写成 var(--surface-muted, #f5f7fb)（token 在浅色已定义，回退不生效），
+   这里浅色保留字面量，深色在同文件末尾的 [data-theme="dark"] 规则里覆盖。 */
 .contract-pdf-preview header {
   display: flex; justify-content: space-between; gap: 12px; padding: 12px; background: #f5f7fb;
 }
@@ -164,5 +168,8 @@ onBeforeUnmount(releasePreview)
 }
 .contract-pdf-preview canvas { display: block; margin: 12px auto; background: white; }
 .contract-pdf-preview p { padding: 10px 12px; margin: 0; }
-.contract-pdf-preview__note { color: #64748b; font-size: 12px; }
+.contract-pdf-preview__note { color: var(--text-muted, #64748b); font-size: 12px; }
+
+/* 深色主题：只覆盖工具条底色（浅色值 #f5f7fb 保留在上面，逐像素不变）。 */
+[data-theme="dark"] .contract-pdf-preview header { background: var(--surface-muted); }
 </style>

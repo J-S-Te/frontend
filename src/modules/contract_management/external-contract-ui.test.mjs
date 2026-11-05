@@ -61,6 +61,6 @@ test('external project decomposition fields are required while template mode sta
   assert.match(source, /if \(!serviceItem\.batch\.trim\(\)\) serviceItem\.batch = '第一批次'/)
   assert.match(source, /v-model="serviceItem\.site" :required="isExternalContractMode"/)
   assert.match(source, /v-model="serviceItem\.batch" :required="isExternalContractMode"/)
-  assert.match(source, /v-if="isExternalContractMode" v-model="serviceItem\.category" required/)
-  assert.match(source, /v-else v-model="serviceItem\.category" maxlength="120" placeholder="默认使用服务类型"/)
+  assert.match(source, /v-if="isExternalContractMode && !localContractCategories" v-model="serviceItem\.category" required/)
+  assert.match(source, /v-else v-model="serviceItem\.category" :readonly="localContractCategories" maxlength="120" :placeholder="localContractCategories \? '请在本地目录中选择类别' : '默认使用服务类型'"/)
 })

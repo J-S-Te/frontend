@@ -111,7 +111,7 @@ test('auth accepts real session contracts, retains account-switch guard and reje
 })
 
 test('ErrorState reacts to prop updates and hides diagnostics unless explicitly requested', () => {
-  const filename = new URL('./platform/shared/components/ErrorState.vue', import.meta.url)
+  const filename = new URL('./shared/components/ErrorState.vue', import.meta.url)
   const source = readFileSync(filename, 'utf8')
   const { descriptor, errors } = parse(source, { filename: filename.pathname })
   assert.deepEqual(errors, [])

@@ -1,5 +1,5 @@
 <script setup>
-import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
+import ConsoleIcon from '@/modules/shared/components/ConsoleIcon.vue'
 import { formatSettlementAmount, money, receivableInvoiceStatusLabel } from '@/modules/settlement/utils/settlementDisplay'
 
 // 结算总览区面板（治理批次 5 结算·第三步，模板自 SettlementView.vue 逐字提取；提取前片段 SSR golden 归档于

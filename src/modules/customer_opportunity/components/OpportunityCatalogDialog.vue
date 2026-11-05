@@ -182,17 +182,17 @@ onMounted(load)
                 <div class="crm-catalog-fields"><label><span>名称</span><input v-model="drafts[item.id].name" maxlength="64"></label><label><span>排序</span><input v-model.number="drafts[item.id].sort_order" type="number" min="0" inputmode="numeric"></label></div>
                 <div class="crm-catalog-meta"><span :class="['crm-catalog-status', item.enabled ? 'enabled' : 'disabled']"><i aria-hidden="true"></i>{{ item.enabled ? '已启用' : '已停用' }}</span><span>已关联 {{ item.reference_count }} 个商机</span><span>版本 {{ item.version }}</span></div>
               </div>
-              <div class="crm-catalog-actions"><button class="crm-catalog-save" type="button" :disabled="savingID === item.id" @click="saveItem(item)">{{ savingID === item.id ? '保存中…' : '保存' }}</button><button type="button" :disabled="savingID === item.id" @click="saveItem(item, !item.enabled)">{{ item.enabled ? '停用' : '启用' }}</button><button class="danger" type="button" :disabled="savingID === item.id" @click="askDelete(item)">删除</button></div>
+              <div class="crm-catalog-actions"><button class="crm-catalog-save" type="button" :disabled="savingID === item.id" @click="saveItem(item)">{{ savingID === item.id ? '保存中…' : '保存配置' }}</button><button type="button" :disabled="savingID === item.id" @click="saveItem(item, !item.enabled)">{{ item.enabled ? '停用' : '启用' }}</button><button class="danger" type="button" :disabled="savingID === item.id" @click="askDelete(item)">删除</button></div>
               <p v-if="blockedItemID === item.id" class="crm-alert warning">该配置已被商机引用，不能删除。可使用“停用”保留历史数据。</p>
             </article>
             <div v-if="!items.length" class="crm-catalog-empty"><span aria-hidden="true">＋</span><strong>暂无{{ kindLabel }}配置</strong><p>请在上方填写名称和显示顺序后新增。</p></div>
           </div>
         </section>
       </div>
-      <footer class="crm-catalog-footer"><p><span aria-hidden="true">i</span>仅未被商机引用的配置可以永久删除</p><button class="console-button ghost" type="button" @click="emit('close')">完成</button></footer>
+      <footer class="crm-catalog-footer"><p><span aria-hidden="true">i</span>仅未被商机引用的配置可以永久删除</p><button class="console-button ghost" type="button" @click="emit('close')">关闭目录</button></footer>
     </article>
     <div v-if="pendingDelete" class="crm-modal nested crm-catalog-delete-confirm" role="dialog" aria-modal="true" aria-labelledby="crm-catalog-delete-title">
-      <form @submit.prevent="confirmDelete"><h2 id="crm-catalog-delete-title">删除“{{ pendingDelete.name }}”</h2><p class="crm-note">仅未被任何商机使用的配置可删除。已使用配置应改为停用，历史商机不会被修改。</p><label>删除原因 *<textarea v-model.trim="deleteReason" required maxlength="500" rows="3"></textarea></label><p v-if="deleteError" class="crm-alert error" role="alert">{{ deleteError }}</p><div class="crm-actions"><button type="button" @click="closeDeleteConfirm">取消</button><button class="danger" type="submit">确认删除</button></div></form>
+      <form @submit.prevent="confirmDelete"><h2 id="crm-catalog-delete-title">删除“{{ pendingDelete.name }}”</h2><p class="crm-note">仅未被任何商机使用的配置可删除。已使用配置应改为停用，历史商机不会被修改。</p><label>删除原因 *<textarea v-model.trim="deleteReason" required maxlength="500" rows="3"></textarea></label><p v-if="deleteError" class="crm-alert error" role="alert">{{ deleteError }}</p><div class="crm-actions"><button type="button" @click="closeDeleteConfirm">取消</button><button class="danger" type="submit">删除配置</button></div></form>
     </div>
   </div>
 </template>

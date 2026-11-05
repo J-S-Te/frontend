@@ -263,6 +263,23 @@
 .subsystem-portal__title-group > p:last-child { margin: 12px 0 0; color: var(--portal-text-muted); font-size: 16px; letter-spacing: .08em; }
 .subsystem-portal__catalog-status { margin: var(--space-8) 0 0; padding: var(--space-3) var(--space-4); color: var(--portal-text-secondary); border: 1px solid var(--portal-border); border-radius: var(--radius-md); background: var(--portal-panel); font-size: var(--fs-body); text-align: center; }
 .subsystem-portal__catalog-status.is-error { color: var(--portal-danger); border-color: rgba(251, 113, 133, .3); background: var(--portal-danger-soft); }
+/* 目录读取失败时的就地重试：颜色全部走 --portal-* token，浅色 / 深色主题共用一份规则。 */
+.subsystem-portal__catalog-retry {
+  min-height: 30px;
+  margin-left: var(--space-3);
+  padding: 2px var(--space-4);
+  color: var(--portal-text);
+  cursor: pointer;
+  border: 1px solid var(--portal-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--portal-surface-soft);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  transition: border-color var(--duration-fast) ease, background var(--duration-fast) ease;
+}
+.subsystem-portal__catalog-retry:hover,
+.subsystem-portal__catalog-retry:focus-visible { border-color: var(--portal-primary); outline: none; background: var(--portal-primary-soft); }
+.subsystem-portal__catalog-retry:disabled { cursor: wait; opacity: .65; }
 
 .subsystem-portal__cards {
   display: grid;
@@ -334,33 +351,25 @@
 }
 .subsystem-portal__cards[data-density='compact'] .subsystem-card__action { margin-top: var(--space-2); font-size: var(--fs-sm); }
 
+/* 分页统一交给 shared/components/PaginationBar.vue（.ui-pager）：门户不再自绘图标按钮，
+   这里只保留门户内的居中位置。共享分页条读取 main.css 的全局 token，而门户把 data-theme
+   写在 <main> 上，因此必须把门户自己的 --portal-* token 桥接到这些共享变量上，
+   深色 / 浅色都按 token 生效，不引入任何裸颜色。 */
+.subsystem-portal {
+  --border: var(--portal-border);
+  --surface-card: var(--portal-panel);
+  --text: var(--portal-text);
+  --text-muted: var(--portal-text-muted);
+  --text-faint: var(--portal-text-faint);
+  --primary: var(--portal-primary);
+  --primary-soft: var(--portal-primary-soft);
+}
+
 .subsystem-portal__pagination {
-  display: flex;
-  min-height: 34px;
   flex: 0 0 auto;
-  align-items: center;
   justify-content: center;
-  gap: var(--space-3);
   margin-top: var(--space-3);
-  color: var(--portal-text-muted);
-  font-size: var(--fs-sm);
 }
-.subsystem-portal__pagination button {
-  display: grid;
-  width: 32px;
-  height: 32px;
-  place-items: center;
-  color: var(--portal-primary-strong);
-  cursor: pointer;
-  border: 1px solid var(--portal-border);
-  border-radius: 9px;
-  background: var(--portal-panel);
-}
-.subsystem-portal__pagination button:hover,
-.subsystem-portal__pagination button:focus-visible { border-color: var(--portal-primary-border); outline: none; }
-.subsystem-portal__pagination button:disabled { color: var(--portal-text-faint); cursor: not-allowed; opacity: .45; }
-.subsystem-portal__pagination button svg { width: 15px; height: 15px; }
-.subsystem-portal__pagination button:first-child svg { transform: rotate(180deg); }
 
 .subsystem-portal__footer { position: relative; z-index: 1; display: flex; flex: 0 0 auto; justify-content: space-between; gap: var(--space-4); padding: 0 clamp(24px, 3vw, 52px) 24px; color: var(--portal-text-faint); font-size: var(--fs-sm); }
 .subsystem-portal__footer-note { margin-right: auto; }

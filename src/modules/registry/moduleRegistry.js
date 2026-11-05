@@ -1,51 +1,34 @@
-import platformModule from '../platform/module.js'
-import projectManagementModule from '../project_management/module.js'
-import settlementModule from '../settlement/module.js'
-import contractManagementModule from '../contract_management/module.js'
-import customerOpportunityModule from '../customer_opportunity/module.js'
-import customerPortalModule from '../customer_portal/module.js'
-import dataAnalysisModule from '../data_analysis/module.js'
+import { frontendModules, unavailablePrefixes } from './compiledModules.js'
+import { portalPublicURL } from './moduleAvailability.js'
 
-/**
- * 前端模块清单。
- *
- * 这里登记的是“代码模块”，不是“已接入子系统”。业务子系统是否能在
- * 门户显示，必须以后端 GET /api/v1/portal/applications 的返回结果为准。
- * 这样可以避免仅提交一个前端目录就绕过租户边界、状态校验和接入流程。
- */
-export const frontendModules = Object.freeze([
-  platformModule,
-  projectManagementModule,
-  settlementModule,
-  contractManagementModule,
-  customerOpportunityModule,
-  customerPortalModule,
-  dataAnalysisModule,
-])
+export { frontendModules }
 
+// normalizeCode 统一后端登记编码的比较口径。
+// 参数：value 为原始应用编码。
+// 返回值：去除空白后的英文小写编码。
 function normalizeCode(value) {
   return String(value || '').trim().toLowerCase()
 }
 
+// moduleCodes 汇集前端模块主编码和历史别名。
+// 参数：moduleDefinition 为已编译的模块定义。
+// 返回值：规范化后的可匹配编码列表。
 function moduleCodes(moduleDefinition) {
   return [moduleDefinition.code, ...(moduleDefinition.aliases || [])].map(normalizeCode)
 }
 
-/** 根据后端应用编码查找同名前端模块，用于补充图标和默认文案。 */
+// findFrontendModule 根据登记编码查找已编译前端模块。
+// 参数：applicationCode 为后端应用编码或历史别名。
+// 返回值：匹配模块；未编译或未知应用返回 null。
 export function findFrontendModule(applicationCode) {
   const normalizedCode = normalizeCode(applicationCode)
   if (!normalizedCode) return null
   return frontendModules.find((moduleDefinition) => moduleCodes(moduleDefinition).includes(normalizedCode)) || null
 }
 
-/**
- * 把后端门户应用目录转换为卡片数据。
- *
- * - 内置平台卡片始终显示；
- * - 业务卡片只来自后端已登记、已启用且对当前租户可见的目录；
- * - 后端名称、描述和 public_url 是运行时真值；
- * - 本地模块清单只提供缺省展示信息，不能自行制造可访问卡片。
- */
+// buildPortalSubsystems 将后端可见目录映射为门户入口，保留投影门禁。
+// 参数：registeredApplications 为后端应用；options 控制平台卡片是否显示。
+// 返回值：已登记应用卡片；未编译的本地入口保持不可访问。
 export function buildPortalSubsystems(registeredApplications = [], { includeBuiltInPlatform = true } = {}) {
   const builtInModules = frontendModules
     .filter((moduleDefinition) => moduleDefinition.builtIn)
@@ -96,6 +79,10 @@ export function buildPortalSubsystems(registeredApplications = [], { includeBuil
       const applicationID = application?.application_id || code || 'application'
       const environmentID = application?.environment_id || application?.environment || 'environment'
       const projectionStatus = String(application?.projection_status || '').trim().toUpperCase()
+      const publicURL = moduleDefinition?.route ? '' : portalPublicURL(
+        application?.public_url, unavailablePrefixes,
+      )
+      const locallyUnavailable = !moduleDefinition && Boolean(application?.public_url) && !publicURL
       const projectionReady = application?.projection_ready !== false && application?.allowed !== false
       return {
         key: `registered-${applicationID}-${environmentID}`,
@@ -105,14 +92,14 @@ export function buildPortalSubsystems(registeredApplications = [], { includeBuil
         // 不向终端用户暴露 dev、test、staging、prod 等部署信息。
         description: application?.description || moduleDefinition?.description || '已接入统一身份平台的业务应用',
         icon: moduleDefinition?.icon || 'dashboard',
-        allowed: projectionReady,
+        allowed: projectionReady && !locallyUnavailable,
         projectionStatus,
         projectionNextAction: String(application?.projection_next_action || '').trim(),
         authenticationURL: moduleDefinition?.authenticationURL || '',
         // 已随统一前端构建的模块直接使用 Vue Router；只有没有本地模块的
         // 独立子系统才使用后端登记的 public_url。
         route: moduleDefinition?.route,
-        publicURL: moduleDefinition?.route ? '' : (application?.public_url || ''),
+        publicURL,
         source: 'application-registry',
       }
     })

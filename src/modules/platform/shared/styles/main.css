@@ -64,6 +64,149 @@
   --duration-base: 200ms;
 }
 
+/* ==========================================================================
+   深色主题 token（唯一来源）
+   --------------------------------------------------------------------------
+   · 浅色不在这里重复声明：上面 :root 的取值就是浅色，深色只做覆盖，
+     因此浅色渲染结果与改造前逐像素一致。
+   · 以 data-theme 写在 <html> 上（门户主题开关 → localStorage →
+     composables/useDocumentTheme.js → documentElement），只有该属性为 dark 时生效。
+   · 一部分 token 只在这里定义（--surface-tint / --border-soft / --text-dim …）。
+     使用处写成 var(--token, <原来的浅色字面量>)：浅色下 token 未定义，
+     浏览器回退到原字面量，天然零回归；深色下拿到这里的值。
+   ========================================================================== */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  color: var(--text);
+  background: #0a1120;
+
+  /* 品牌色：--primary 保持 #2563eb 作为按钮底色（白字 5.2:1），
+     深色底上的链接/强调文字改用 --primary-ink（提亮，保证 ≥4.5:1）。 */
+  --primary: #2563eb;
+  --primary-dark: #1d4ed8;
+  --primary-light: #60a5fa;
+  --primary-ink: #7db4ff;
+  --primary-ink-strong: #a6c9ff;
+  --primary-soft: #14233d;
+  --primary-border: #2c4470;
+
+  /* 墨色四级 */
+  --text: #e7eef9;
+  --text-secondary: #bccbe0;
+  --text-muted: #93a6bf;
+  --text-faint: #7e8ea6; /* 仅装饰：禁止承载正文 */
+  --text-strong: #f2f6fd;
+  --text-dim: #8a9cb4;
+  --text-on-brand: #cfe2ff;
+  --text-on-success: #a7f0c5;
+  --text-on-warning: #f7d79b;
+  --text-on-danger: #ffc4c4;
+
+  /* 表面：页面 < 下沉 < 卡片 < 抬起，保持浅色时的层次顺序 */
+  --surface-content: #0a1120;
+  --surface-card: #111a2c;
+  --surface-muted: #0d1626;
+  --surface-head: #0f1929;
+  --surface-stripe: #0e1828;
+  --surface-input: #0c1424;
+  --surface-hover: #182338;
+  --surface-tint: #14203a;
+  --surface-raised: #16213a;
+
+  /* 描边 */
+  --border: #22304a;
+  --line-soft: #1a2437;
+  --line-strong: #2f4059;
+  --border-soft: #1e2b41;
+  --border-brand: #2b4270;
+  --border-brand-strong: #3c5a92;
+  --success-border: #1f4a37;
+  --warning-border: #5a4320;
+  --danger-border: #5c2630;
+  --border-sky: #1e4a63;
+  --border-violet: #382c5e;
+
+  /* 中性 / 品牌色浅底（浅色时是 #e2e8f0 / #dbeafe 这类灰蓝底片） */
+  --chip-neutral: #23304a;
+  --chip-neutral-strong: #2b3a54;
+  --chip-brand: #1c2f52;
+
+  /* 外壳侧栏：比页面更深，保证侧栏与内容区分层 */
+  --sidebar: #070d18;
+  --sidebar-hover: #131d31;
+  --sidebar-text: #c7d4e6;
+  --sidebar-label: #8fa2bb;
+  --sidebar-dot: #2a3a54;
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+
+  /* 语义色：色相不变，只把浅底换成深底、文字换成提亮档。
+     纯色 fill（--success/--warning/--danger）与浅色保持同一值：
+     它们承载白字，改成更亮的色反而会掉对比度。 */
+  --success-text: #4ade80;
+  --success-soft: #0e2a1f;
+  --success-soft-strong: #123222;
+  --warning-text: #fbbf24;
+  --warning-soft: #2b2111;
+  --warning-soft-strong: #33270f;
+  --danger-text: #f87171;
+  --danger-strong: #b91c1c;
+  --danger-ink: #f87171;
+  --danger-soft: #2c1418;
+  --danger-soft-strong: #3a1a20;
+  --sky-soft: #0e2637;
+  --sky-ink: #7dd3fc;
+  --violet-soft: #1f1a3d;
+  --violet-ink: #c4b5fd;
+  --control-accent: #60a5fa;
+
+  /* 只在此处（深色）定义的“墨色”补充档：--danger-ink / --warning-ink /
+     --success-ink / --info-ink 都没有浅色定义。使用处写成
+     var(--x-ink, <浅色原字面量>)：浅色下回退到原字面量（逐像素不变），
+     深色下换成提亮档。它们服务于浅色里用更深一档墨色（比 --*-text 更深）
+     表达强调的场景，直接用 --*-text 会把浅色值一起改掉。 */
+  --warning-ink: #fbbf24;
+  --success-ink: #4ade80;
+  --info-ink: #7dd3fc;
+
+  /* 阴影在深色底上要更重才看得出层级 */
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.45);
+  --shadow-raised: 0 10px 28px rgba(0, 0, 0, 0.5);
+  --shadow-popover: 0 18px 44px rgba(0, 0, 0, 0.58);
+  --shadow-modal: 0 28px 68px rgba(0, 0, 0, 0.66);
+
+  /* 遮罩、滚动条、表格右缘渐隐、焦点环 */
+  --overlay-scrim: rgba(3, 7, 16, 0.72);
+  --scrollbar-thumb: #2c3c56;
+  --scrollbar-thumb-hover: #3f5375;
+  --table-scroll-edge: rgba(148, 163, 184, 0.22);
+  --focus-ring: rgba(125, 180, 255, 0.55);
+
+  /* 统一三态（state.css 通过 var(--ui-state-*, fallback) 读取） */
+  --ui-state-title: var(--text);
+  --ui-state-muted: var(--text-muted);
+  --ui-state-faint: var(--text-faint);
+  --ui-state-retry-border: var(--border);
+  --ui-state-spinner-track: #1e3054;
+  --ui-state-spinner-active: var(--primary-ink);
+}
+
+/* 深色下焦点环必须比浅色更亮，否则在深底上不可见；只改颜色，宽度/偏移沿用各模块。 */
+:root[data-theme="dark"] :is(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline-color: var(--focus-ring);
+}
+
+/* 深色下的统一三态：state.css 的重试按钮底色是字面量 #fff，这里按 token 覆盖。 */
+:root[data-theme="dark"] .ui-state__retry {
+  background: var(--surface-raised);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+:root[data-theme="dark"] .ui-state__retry:hover {
+  color: var(--primary-ink);
+  border-color: var(--primary-ink);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -1048,4 +1191,166 @@ button {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* ==========================================================================
+   登录 / 强制改密页的深色表现
+   --------------------------------------------------------------------------
+   登录页是平台外壳的一部分，深色偏好下不应留白底岛。左侧品牌面板本来就是深色，
+   这里只把表单侧、控件、提示条切换到深色 token；二维码框保持白底（扫码识别率）。
+   ========================================================================== */
+:root[data-theme="dark"] .login-page {
+  background: var(--surface-content);
+}
+
+:root[data-theme="dark"] .form-panel {
+  background: var(--surface-card);
+  box-shadow: -20px 0 50px rgba(0, 0, 0, 0.45);
+}
+
+:root[data-theme="dark"] .login-kicker,
+:root[data-theme="dark"] .text-button,
+:root[data-theme="dark"] .qr-refresh {
+  color: var(--primary-ink);
+}
+
+:root[data-theme="dark"] .login-tabs {
+  background: var(--surface-muted);
+}
+
+:root[data-theme="dark"] .login-tab {
+  color: var(--text-muted);
+}
+
+:root[data-theme="dark"] .login-tab:hover {
+  color: var(--primary-ink);
+}
+
+:root[data-theme="dark"] .login-tab.active {
+  background: var(--surface-raised);
+  box-shadow: 0 2px 9px rgba(0, 0, 0, 0.35);
+}
+
+:root[data-theme="dark"] .field-group label,
+:root[data-theme="dark"] .qr-tenant-field label {
+  color: var(--text-secondary);
+}
+
+:root[data-theme="dark"] .input-wrap input,
+:root[data-theme="dark"] .qr-tenant-field input {
+  background: var(--surface-input);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+:root[data-theme="dark"] .input-wrap input::placeholder,
+:root[data-theme="dark"] .qr-tenant-field input::placeholder {
+  color: var(--text-dim);
+}
+
+:root[data-theme="dark"] .input-wrap input:hover:not(:disabled),
+:root[data-theme="dark"] .qr-tenant-field input:hover:not(:disabled) {
+  border-color: var(--line-strong);
+}
+
+:root[data-theme="dark"] .input-wrap input:-webkit-autofill,
+:root[data-theme="dark"] .input-wrap input:-webkit-autofill:hover,
+:root[data-theme="dark"] .input-wrap input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--text);
+  box-shadow: 0 0 0 1000px var(--surface-input) inset;
+}
+
+:root[data-theme="dark"] .input-wrap input:disabled,
+:root[data-theme="dark"] .qr-tenant-field input:disabled {
+  background: var(--surface-muted);
+  color: var(--text-faint);
+}
+
+:root[data-theme="dark"] .input-wrap input:focus,
+:root[data-theme="dark"] .qr-tenant-field input:focus {
+  border-color: var(--primary-ink);
+  box-shadow: 0 0 0 3px rgba(125, 180, 255, 0.18);
+}
+
+:root[data-theme="dark"] .password-toggle {
+  color: var(--text-muted);
+}
+
+:root[data-theme="dark"] .password-toggle:hover {
+  color: var(--primary-ink);
+  background: var(--primary-soft);
+}
+
+:root[data-theme="dark"] .password-policy {
+  color: var(--text-secondary);
+  border-color: var(--border-brand);
+  background: var(--surface-tint);
+}
+
+:root[data-theme="dark"] .password-policy strong {
+  color: var(--text-on-brand);
+}
+
+:root[data-theme="dark"] .form-message.error {
+  color: var(--danger-text);
+  background: var(--danger-soft);
+}
+
+:root[data-theme="dark"] .form-message.success {
+  color: var(--success-text);
+  background: var(--success-soft);
+}
+
+:root[data-theme="dark"] .session-takeover {
+  border-color: var(--warning-border);
+  background: var(--warning-soft);
+}
+
+:root[data-theme="dark"] .session-takeover p {
+  color: var(--text-on-warning);
+}
+
+:root[data-theme="dark"] .session-takeover button {
+  background: var(--surface-raised);
+  border-color: var(--warning-text);
+  color: var(--text-on-warning);
+}
+
+:root[data-theme="dark"] .security-tip {
+  color: var(--text-on-success);
+  border-color: var(--success-border);
+  background: var(--success-soft);
+}
+
+:root[data-theme="dark"] .contact-line,
+:root[data-theme="dark"] .qr-tenant-field p,
+:root[data-theme="dark"] .qr-note,
+:root[data-theme="dark"] .form-footer {
+  color: var(--text-dim);
+}
+
+:root[data-theme="dark"] .qr-state span {
+  color: var(--text-faint);
+}
+
+:root[data-theme="dark"] .qr-shell {
+  box-shadow: 0 9px 28px rgba(0, 0, 0, 0.45);
+}
+
+:root[data-theme="dark"] .qr-spinner {
+  border-color: var(--primary-border);
+  border-top-color: var(--primary-ink);
+}
+
+:root[data-theme="dark"] .form-footer i {
+  background: var(--line-strong);
+}
+
+:root[data-theme="dark"] .remember-option input {
+  accent-color: var(--primary-ink);
+}
+
+:root[data-theme="dark"] .mobile-brand,
+:root[data-theme="dark"] .mobile-brand small {
+  color: var(--text);
 }

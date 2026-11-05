@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref, watch, onScopeDispose, nextTick } from 'vue'
+import PaginationBar from '@/modules/shared/components/PaginationBar.vue'
 import { getRoleResource, saveRoleResource, downloadReceiptDocument } from '../api/settlement'
 import { businessWallClockToInstant } from '@/modules/shared/utils/businessTime.js'
 import { formatSettlementError } from '../utils/errors.js'
@@ -70,6 +71,14 @@ function clearResourceSelection(key) {
 // 用途：按资源独立翻页，避免一次读取所有历史财务数据。
 // 参数：key 为资源键，direction 为前后翻页步长。
 // 返回值：读取是否成功；失败还原页码并保留错误提示。
+// 用途：按目标页码翻页（统一分页条只给目标页，方向在这里换算）。
+// 参数：key 为资源列表键；target 为 1 起始的目标页。
+// 返回值：刷新完成的 Promise。
+function changeResourcePageTo(key, target) {
+  const direction = Math.max(0, Math.trunc(Number(target) || 1) - 1) - (resourcePages.value[key] || 0)
+  if (!direction) return Promise.resolve(true)
+  return changeResourcePage(key, direction)
+}
 async function changeResourcePage(key, direction) {
   if (loading.value || saving.value) return false
   const previous = resourcePages.value[key]
@@ -587,10 +596,18 @@ watch(() => props.section, load, { immediate: true })
       <p v-for="item in documents" :key="item.id">{{ item.original_name }} · {{ item.status }} <button @click="downloadDocument(item)">下载</button>
       </p>
     </template>
-    <div v-for="entry in visibleResourcePages" :key="entry.key" role="group" :aria-label="`${entry.label}分页`" class="settlement-head-actions">
-      <span>{{ entry.label }} · 第 {{ entry.page + 1 }} 页 · 本页 {{ entry.count }} 条</span>
-      <button :disabled="saving || loading || entry.page === 0" @click="changeResourcePage(entry.key, -1)">上一页</button>
-      <button :disabled="saving || loading || entry.count < 50 || entry.page >= 2000" @click="changeResourcePage(entry.key, 1)">下一页</button>
+    <div v-for="entry in visibleResourcePages" :key="entry.key" class="settlement-head-actions">
+      <span>{{ entry.label }}</span>
+      <PaginationBar
+        :label="`${entry.label}分页`"
+        :page="entry.page + 1"
+        :count="entry.count"
+        :page-size="50"
+        :has-more="entry.count >= 50 && entry.page < 1999"
+        :loading="loading"
+        :disabled="saving"
+        @change="target => changeResourcePageTo(entry.key, target)"
+      />
       <button :disabled="saving || loading" @click="load">刷新</button>
     </div>
   </section>

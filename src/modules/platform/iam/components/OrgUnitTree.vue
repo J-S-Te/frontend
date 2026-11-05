@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
+import ListState from '@/modules/shared/components/ListState.vue'
 import {
   buildOrganizationTree,
   filterOrganizationTree,
@@ -12,13 +13,15 @@ const props = defineProps({
   organizations: { type: Array, default: () => [] },
   keyword: { type: String, default: '' },
   loading: { type: Boolean, default: false },
+  // 组织目录读取失败原因：交给 ListState 渲染可重试的错误态，不能退化成「暂无组织记录」。
+  error: { type: [String, Object, Error], default: '' },
   canCreate: { type: Boolean, default: false },
   canUpdate: { type: Boolean, default: false },
   canDelete: { type: Boolean, default: false },
   deletingId: { type: String, default: '' },
 })
 
-const emit = defineEmits(['copy-id', 'create-child', 'detail', 'edit', 'remove'])
+const emit = defineEmits(['copy-id', 'create-child', 'detail', 'edit', 'remove', 'retry'])
 
 const collapsedIds = ref(new Set())
 const initialized = ref(false)
@@ -32,6 +35,10 @@ const completeTree = computed(() => buildOrganizationTree(props.organizations))
 const displayedTree = computed(() => filterOrganizationTree(completeTree.value, props.keyword))
 const effectiveCollapsedIds = computed(() => String(props.keyword || '').trim() ? new Set() : collapsedIds.value)
 const visibleNodes = computed(() => flattenOrganizationTree(displayedTree.value, effectiveCollapsedIds.value))
+// 三态闸门：加载中 > 读取失败（可重试）> 空。失败必须排在空之前，否则失败的组织目录
+// 会被渲染成「暂无组织记录」，用户会以为组织被清空而不是请求失败。
+const treeListState = computed(() => props.loading || Boolean(props.error) || !visibleNodes.value.length)
+const emptyTitle = computed(() => (String(props.keyword || '').trim() ? '没有匹配的组织单元。' : '暂无组织记录。'))
 const activeOrganizationCount = computed(() => props.organizations.filter((item) => String(item?.status || '').toUpperCase() === 'ACTIVE').length)
 const organizationById = computed(() => new Map(props.organizations.map((item) => [organizationId(item), item])))
 const branchIds = computed(() => new Set(
@@ -124,8 +131,16 @@ function handleNodeKeydown(event, item, index) {
     </header>
 
     <div ref="treeElement" class="iam-organization-tree" role="tree" aria-label="组织单元树">
-      <p v-if="loading" class="iam-organization-tree-empty">正在读取完整组织架构…</p>
-      <p v-else-if="!visibleNodes.length" class="iam-organization-tree-empty">{{ keyword ? '没有匹配的组织单元。' : '暂无组织记录。' }}</p>
+      <ListState
+        v-if="treeListState"
+        :loading="loading"
+        :error="error"
+        error-title="组织目录加载失败"
+        loading-title="正在读取完整组织架构…"
+        :empty-title="emptyTitle"
+        compact
+        @retry="emit('retry')"
+      />
       <template v-else>
         <article
           v-for="(item, index) in visibleNodes"

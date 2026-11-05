@@ -6,6 +6,7 @@ import ConfirmDialog from '../../../shared/components/ConfirmDialog.vue'
 import { useConfirmDialog } from '../../../shared/composables/useConfirmDialog.js'
 import { createEmployeesBatch } from '@/modules/platform/iam/api/iam'
 import { parseApplicationRoles, restoreRowSelection } from '@/modules/platform/iam/utils/batchUserImport.js'
+import { importIssuesFromError, batchImportIssueCsv, IMPORT_ISSUE_CSV_FILENAME } from '@/modules/platform/iam/utils/batchImportIssues.js'
 import { initialCredentialsForImport, initialCredentialsDocument, clearInitialCredentials } from '@/modules/platform/iam/utils/employeeInitialCredentials.js'
 import { formatUserError, userFieldErrors } from '../../../shared/utils/userError.js'
 
@@ -39,6 +40,11 @@ const selectedFile = ref(null)
 const parseError = ref('')
 const submitting = ref(false)
 const submitError = ref('')
+// 服务端 422 的逐行问题清单（details.issues）。整批导入是原子的，出现任何一条都表示
+// 本次没有写入；保留完整清单供页面展示和下载错误报告，而不是只显示第一条。
+const submitIssues = ref([])
+const ISSUE_PREVIEW_LIMIT = 20
+const visibleSubmitIssues = computed(() => submitIssues.value.slice(0, ISSUE_PREVIEW_LIMIT))
 const submitResult = ref(null) // { items: [], total, failed }
 const credentialsVisible = ref(false)
 onBeforeUnmount(() => clearInitialCredentials(submitResult.value))
@@ -118,6 +124,8 @@ async function ingestFile(file) {
   let text = ''
   try {
     text = await file.text()
+    // 无表头 CSV 的首列也会带 BOM；解析前统一去掉，避免姓名首字符变成 U+FEFF。
+    text = text.replace(/^\uFEFF/, '')
   } catch (error) {
     parseError.value = formatUserError(error, { fallback: '读取文件失败，请重新选择文件。' })
     return
@@ -502,6 +510,7 @@ async function submit() {
     return
   }
   submitError.value = ''
+  submitIssues.value = []
   submitting.value = true
   try {
     const payload = items.map((row) => ({
@@ -550,7 +559,13 @@ async function submit() {
     emit('toast', failedCount ? `批量导入返回异常：成功 ${created.length} 条，失败 ${failedCount} 条。` : `已批量创建 ${created.length} 位用户。`)
     if (!failedCount) emit('completed', { createdCount: created.length })
   } catch (error) {
-    submitError.value = formatBatchError(error)
+    // 422 batchValidation 会带回整批逐行问题：保留完整清单，页面上展示可读摘要，
+    // 并允许下载错误报告后按行修正 CSV。整批原子语义不变——这些行一条都没有写入。
+    const issues = importIssuesFromError(error)
+    submitIssues.value = issues
+    submitError.value = issues.length
+      ? `本次导入未写入任何数据：服务端返回 ${issues.length} 条问题，请按行修正后重新导入（可下载错误报告）。`
+      : formatBatchError(error)
     emit('toast', submitError.value)
   } finally {
     submitting.value = false
@@ -599,10 +614,30 @@ function restart() {
   fileSize.value = 0
   parseError.value = ''
   submitError.value = ''
+  submitIssues.value = []
   submitResult.value = null
   filterMode.value = 'all'
   catalogNotice.value = ''
   previewCatalogSignature.value = ''
+}
+
+// 错误报告：UTF-8 BOM + CRLF + 公式前缀中和（见 iam/utils/batchImportIssues.js），
+// 下载后可直接用 Excel 按“行号”对照 CSV 修正。无 issues 时按钮禁用，这里再做一次
+// 兜底返回，避免下载空文件冒充“有报告”。
+function downloadIssueReport() {
+  if (!submitIssues.value.length) return
+  const blob = new Blob([batchImportIssueCsv(submitIssues.value)], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  try {
+    link.href = url
+    link.download = IMPORT_ISSUE_CSV_FILENAME
+    document.body.appendChild(link)
+    link.click()
+  } finally {
+    link.remove()
+    URL.revokeObjectURL(url)
+  }
 }
 
 function downloadInitialCredentials() {
@@ -751,6 +786,35 @@ function formatFileSize(bytes) {
 
         <div v-if="parseError" class="iam-batch-import-error" role="alert">{{ parseError }}</div>
 
+        <!-- 提交失败的整批逐行问题：一行一条，可下载完整错误报告按行修正 CSV。 -->
+        <div v-if="submitError" class="iam-batch-import-error iam-batch-import-submit-error" role="alert">
+          <div class="iam-batch-import-submit-error-head">
+            <ConsoleIcon name="info" />
+            <p>{{ submitError }}</p>
+          </div>
+          <div v-if="submitIssues.length" class="iam-batch-import-issue-report">
+            <ul class="iam-batch-import-issue-list">
+              <li v-for="issue in visibleSubmitIssues" :key="`${issue.row}-${issue.field}-${issue.code}-${issue.message}`">
+                <span class="issue-row">{{ issue.row > 0 ? `第 ${issue.row} 行` : '整批问题' }}</span>
+                <span v-if="issue.field" class="issue-field">{{ issue.field }}</span>
+                <span class="issue-message">{{ issue.message || issue.code }}</span>
+              </li>
+            </ul>
+            <small v-if="submitIssues.length > ISSUE_PREVIEW_LIMIT">仅显示前 {{ ISSUE_PREVIEW_LIMIT }} 条，共 {{ submitIssues.length }} 条；完整清单请下载错误报告。</small>
+          </div>
+          <div class="iam-batch-import-issue-actions">
+            <button
+              class="console-button ghost small"
+              type="button"
+              :disabled="!submitIssues.length"
+              @click="downloadIssueReport"
+            >
+              <ConsoleIcon name="download" />下载错误报告 CSV
+            </button>
+            <small v-if="!submitIssues.length">服务端未返回逐行问题，当前没有可下载的错误清单。</small>
+          </div>
+        </div>
+
         <div class="iam-batch-import-table-wrap">
           <table class="iam-batch-import-table">
             <thead>
@@ -883,7 +947,7 @@ function formatFileSize(bytes) {
         </template>
         <template v-else>
           <button class="console-button ghost" type="button" @click="restart">再导一批</button>
-          <button class="console-button primary" type="button" @click="close">完成</button>
+          <button class="console-button primary" type="button" @click="close">关闭导入结果</button>
         </template>
       </footer>
     </section>
@@ -1080,6 +1144,39 @@ function formatFileSize(bytes) {
   border-radius: 10px;
   font-size: 13px;
 }
+
+.iam-batch-import-submit-error { display: flex; flex-direction: column; gap: 10px; }
+.iam-batch-import-submit-error-head { display: flex; align-items: flex-start; gap: 8px; }
+.iam-batch-import-submit-error-head svg { width: 16px; height: 16px; flex: 0 0 auto; margin-top: 2px; }
+.iam-batch-import-submit-error-head p { margin: 0; line-height: 1.55; }
+.iam-batch-import-issue-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  overflow: auto;
+}
+.iam-batch-import-issue-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  padding: 6px 9px;
+  border-radius: 8px;
+  background: var(--surface-raised, #fff);
+  border: 1px solid var(--danger-border, #fecaca);
+  color: var(--ink-2, #374151);
+  font-size: 12px;
+}
+.iam-batch-import-issue-list .issue-row { flex: 0 0 auto; font-weight: 600; color: var(--danger-text, #b91c1c); }
+.iam-batch-import-issue-list .issue-field { flex: 0 0 auto; color: var(--ink-3, #6b7280); }
+.iam-batch-import-issue-list .issue-message { flex: 1 1 220px; min-width: 0; overflow-wrap: anywhere; }
+.iam-batch-import-issue-report small { display: block; margin-top: 6px; color: var(--ink-3, #6b7280); font-size: 11.5px; }
+.iam-batch-import-issue-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.iam-batch-import-issue-actions small { color: var(--ink-3, #6b7280); font-size: 11.5px; }
 
 .iam-batch-import-sample {
   display: flex;
@@ -1353,5 +1450,171 @@ function formatFileSize(bytes) {
   .iam-batch-import-steps li span { display: none; }
   .iam-batch-import-toolbar-left,
   .iam-batch-import-toolbar-right { width: 100%; }
+}
+
+/* ==========================================================================
+   深色主题：本弹窗的局部 token 层（--ink-* / --line-* / --bg-soft / --ok-*）
+   在 .iam-settings 里是浅色取值；这里只补 [data-theme="dark"] 覆盖，
+   浅色声明一行未改，深色下重映射到 main.css 的共享 token。
+   ========================================================================== */
+[data-theme="dark"] .iam-batch-import-modal {
+  --ink-1: var(--text);
+  --ink-2: var(--text-secondary);
+  --ink-3: var(--text-muted);
+  --ink-4: var(--text-faint);
+  --line-1: var(--border);
+  --line-2: var(--line-soft);
+  --bg-soft: var(--surface-muted);
+  --brand-soft: var(--primary-soft);
+  --ok-1: var(--success-text);
+  --ok-soft: var(--success-soft);
+  --danger-1: var(--danger-text);
+  border-color: var(--border);
+  background: var(--surface-card);
+}
+[data-theme="dark"] .iam-batch-import-modal > header {
+  background: linear-gradient(135deg, var(--surface-card) 0%, var(--surface-tint) 72%, var(--surface-tint) 100%);
+}
+[data-theme="dark"] .iam-batch-import-steps {
+  border-bottom-color: var(--border);
+  background: var(--surface-card);
+}
+[data-theme="dark"] .iam-batch-import-steps li:not(:last-child)::after {
+  background: var(--border);
+}
+[data-theme="dark"] .iam-batch-import-steps li.done:not(:last-child)::after {
+  background: var(--primary-border);
+}
+[data-theme="dark"] .iam-batch-import-steps li b {
+  border-color: var(--border);
+  background: var(--surface-muted);
+  color: var(--text-muted);
+}
+[data-theme="dark"] .iam-batch-import-steps li.done b {
+  color: var(--primary-ink);
+  border-color: var(--border-brand);
+  background: var(--chip-brand);
+}
+[data-theme="dark"] .iam-batch-import-steps li.active {
+  color: var(--text);
+}
+[data-theme="dark"] .iam-batch-import-guide {
+  color: var(--text-secondary);
+  border-color: var(--border-brand);
+  background: var(--surface-muted);
+}
+[data-theme="dark"] .iam-batch-import-dropzone {
+  border-color: var(--border-brand-strong);
+  background: linear-gradient(180deg, var(--surface-muted) 0%, var(--surface-card) 100%);
+}
+[data-theme="dark"] .iam-batch-import-upload-icon {
+  border-color: var(--border);
+  background: var(--surface-raised);
+  box-shadow: none;
+}
+[data-theme="dark"] .iam-batch-import-dropzone code {
+  border-color: var(--border);
+  background: var(--surface-raised);
+}
+[data-theme="dark"] .iam-batch-import-dropzone small b {
+  color: var(--primary-ink);
+}
+[data-theme="dark"] .iam-batch-import-error {
+  border-color: var(--danger-border);
+  color: var(--danger-text);
+}
+[data-theme="dark"] .iam-batch-import-sample {
+  border-color: var(--border);
+  background: var(--surface-muted);
+}
+[data-theme="dark"] .iam-batch-import-summary {
+  border-color: var(--border);
+  background: linear-gradient(135deg, var(--surface-muted), var(--surface-card));
+}
+[data-theme="dark"] .iam-batch-import-file > span {
+  border-color: var(--border);
+  background: var(--surface-raised);
+}
+[data-theme="dark"] .iam-batch-import-stats .stat {
+  border-color: var(--border);
+  background: var(--surface-raised);
+}
+[data-theme="dark"] .iam-batch-import-stats .stat.valid b {
+  color: var(--success-text);
+}
+[data-theme="dark"] .iam-batch-import-stats .stat.invalid b {
+  color: var(--danger-text);
+}
+[data-theme="dark"] .iam-batch-import-stats .stat.selected b {
+  color: var(--primary-ink);
+}
+[data-theme="dark"] .iam-batch-import-role-notice {
+  color: var(--text-secondary);
+  border-color: var(--border-brand);
+  background: var(--surface-muted);
+}
+[data-theme="dark"] .iam-batch-import-filter select {
+  border-color: var(--border);
+  background: var(--surface-input);
+}
+[data-theme="dark"] .iam-batch-import-table-wrap {
+  border-color: var(--border);
+  box-shadow: none;
+}
+[data-theme="dark"] .iam-batch-import-table thead th {
+  border-bottom-color: var(--border);
+  background: var(--surface-head);
+}
+[data-theme="dark"] .iam-batch-import-table tbody td {
+  border-bottom-color: var(--line-soft);
+}
+[data-theme="dark"] .iam-batch-import-table tbody tr:hover:not(.invalid):not(.failed) {
+  background: var(--surface-hover);
+}
+[data-theme="dark"] .iam-batch-import-table tbody tr.invalid,
+[data-theme="dark"] .iam-batch-import-table tbody tr.failed {
+  background: var(--danger-soft);
+}
+[data-theme="dark"] .iam-batch-import-table tbody tr.success {
+  background: var(--success-soft);
+}
+[data-theme="dark"] .iam-batch-import-table .role-inherited {
+  color: var(--primary-ink);
+}
+[data-theme="dark"] .iam-batch-import-table .role-source {
+  color: var(--text-muted);
+}
+[data-theme="dark"] .iam-batch-import-table .badge.ok {
+  background: var(--success-soft-strong);
+  color: var(--success-text);
+}
+[data-theme="dark"] .iam-batch-import-table .badge.bad {
+  background: var(--danger-soft-strong);
+  color: var(--danger-text);
+}
+[data-theme="dark"] .iam-batch-import-result-icon.success {
+  background: var(--success-soft-strong);
+}
+[data-theme="dark"] .iam-batch-import-result-icon.danger {
+  background: var(--danger-soft-strong);
+}
+[data-theme="dark"] .iam-batch-import-result input[readonly] {
+  border-color: var(--border);
+  background: var(--surface-input);
+  color: var(--text);
+}
+[data-theme="dark"] .iam-batch-import-result .iam-form-alert.success {
+  background: var(--success-soft);
+  border-color: var(--success-border);
+  color: var(--text-on-success);
+}
+[data-theme="dark"] .iam-batch-import-result .iam-form-alert.danger {
+  background: var(--danger-soft);
+  border-color: var(--danger-border);
+  color: var(--text-on-danger);
+}
+[data-theme="dark"] .iam-batch-import-modal > footer {
+  border-top: 1px solid var(--border);
+  background: var(--surface-card);
 }
 </style>

@@ -10,7 +10,7 @@ test('项目页接入补充协议关账能力与受控入口依赖', () => {
   assert.match(view, /import \{ supplementClosureAvailability \} from '@\/modules\/project_management\/supplementClosure\.js'/)
   assert.match(view, /import SupplementClosureDialog from '@\/modules\/project_management\/components\/SupplementClosureDialog\.vue'/)
   assert.match(view, /closeSupplement,\n/)
-  assert.match(view, /useSupplementClosure\(\{\n  closeSupplement, listSupplementContracts, formatUserError, showToast, refreshAfterWrite, askConfirm,\n\}\)/)
+  assert.match(view, /useSupplementClosure\(\{\n  closeSupplement, listSupplementContracts, formatUserError, showToast, refreshAfterWrite, askConfirm,\n  closureAllowed: \(project\) => !saving\.value && supplementClosureAvailability\(project, permissionSet\.value\)\.allowed,\n\}\)/)
 })
 
 test('入口可见性只由 supplement_status 与拆解管理权限共同决定', () => {

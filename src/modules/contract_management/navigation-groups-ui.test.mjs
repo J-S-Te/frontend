@@ -19,12 +19,18 @@ test('navigation selects role-specific groups and removes unavailable or empty g
   assert.match(source, /\.filter\(\(group\) => group\.items\.length\)/)
 })
 
-test('contract navigation does not expose the customer lookup entry', () => {
+// 行为有意变更（客户查询建设中）：旧断言要求侧边栏完全隐藏客户查询入口，导致该页只能
+// 手敲 URL 进入、看起来像坏页。产品决定改为如实暴露入口并标注“建设中”。
+test('contract navigation exposes the customer lookup entry with a building marker', () => {
   const navigationDefinitions = source.slice(
     source.indexOf('const adminNavGroupDefinitions'),
     source.indexOf('const contracts = ref([])'),
   )
-  assert.doesNotMatch(navigationDefinitions, /key: 'customers'|label: '客户查询'/)
+  const adminGroup = navigationDefinitions.slice(0, navigationDefinitions.indexOf('const userNavGroupDefinitions'))
+  const userGroup = navigationDefinitions.slice(navigationDefinitions.indexOf('const userNavGroupDefinitions'))
+  assert.match(adminGroup, /\{ key: 'customers', label: '客户查询', icon: 'user', badge: '建设中' \}/)
+  assert.match(userGroup, /\{ key: 'customers', label: '客户查询', icon: 'user', badge: '建设中' \}/)
+  assert.match(source, /<i v-if="item\.badge">\{\{ item\.badge \}\}<\/i>/)
 })
 
 test('contract navigation returns to the portal while the user control revokes the application session', () => {

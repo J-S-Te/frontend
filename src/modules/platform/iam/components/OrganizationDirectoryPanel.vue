@@ -10,13 +10,15 @@ defineProps({
   panelFilters: { type: Object, required: true },
   pagination: { type: Object, required: true },
   loading: { type: Object, required: true },
+  // 组织目录读取失败原因（按面板保留），由 OrgUnitTree 交给 ListState 渲染可重试错误态。
+  error: { type: [String, Object, Error], default: '' },
   deletingOrganizationId: { type: String, default: '' },
   canCreate: { type: Boolean, default: false },
   canUpdate: { type: Boolean, default: false },
   canDelete: { type: Boolean, default: false },
 })
 
-defineEmits(['copy-id', 'create-child', 'detail', 'edit', 'remove'])
+defineEmits(['copy-id', 'create-child', 'detail', 'edit', 'remove', 'retry'])
 </script>
 
 <template>
@@ -27,6 +29,7 @@ defineEmits(['copy-id', 'create-child', 'detail', 'edit', 'remove'])
       :organizations="organizations"
       :keyword="panelFilters.organizations"
       :loading="loading.organizations"
+      :error="error"
       :can-create="canCreate"
       :can-update="canUpdate"
       :can-delete="canDelete"
@@ -36,6 +39,7 @@ defineEmits(['copy-id', 'create-child', 'detail', 'edit', 'remove'])
 @detail="(item) => $emit('detail', item)"
 @edit="$emit('edit', $event)"
 @remove="$emit('remove', $event)"
+@retry="$emit('retry')"
     />
   </section>
 </template>

@@ -3,6 +3,7 @@ import { formatPortalError } from '../api/errorMessages.js'
 import { useConfirmDialog } from '@/modules/shared/composables/useConfirmDialog.js'
 import ConfirmDialog from '@/modules/shared/components/ConfirmDialog.vue'
 import { formatBusinessDateTime } from '@/modules/shared/utils/businessTime.js'
+import { validateFilingMaterialFile } from '../utils/filingMaterialValidation.js'
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { completeFilingMaterialUpload, createFiling, createFilingMaterialUpload, deleteFiling, exportFilingPDF, getFiling, listFilings, saveFilingMatrix, saveFilingSection, submitFiling, validateFiling } from '../api/portal.js'
 
@@ -178,6 +179,17 @@ function beforeUnloadGuard(event) {
 function materialStatusText(value) { return ({ PENDING_UPLOAD: '等待上传', FINALIZING: '正在核验文件', SCANNING: '文件校验中', CLEAN: '文件校验通过', REJECTED: '检测到风险，已拒绝', SCAN_FAILED: '文件校验失败，禁止提交' })[value] || '未上传' }
 function selectMaterialFile(fieldKey, event) {
   const file = event.target.files?.[0] || null
+  // 选择即校验：与界面文案一致的上限 20 MiB、PDF/PNG/JPG 类型；
+  // 不合规立即提示并放弃该文件，后续不会创建上传会话，也不会发起直传。
+  const verdict = file ? validateFilingMaterialFile(file) : { ok: true }
+  if (!verdict.ok) {
+    event.target.value = ''
+    materialFileSignatures[fieldKey] = ''
+    materialCreateKeys[fieldKey] = ''
+    materialFiles[fieldKey] = null
+    materialErrors[fieldKey] = verdict.message
+    return
+  }
   const signature = file ? `${file.name}\u0000${file.type}\u0000${file.size}\u0000${file.lastModified}` : ''
   if (materialFileSignatures[fieldKey] !== signature) materialCreateKeys[fieldKey] = ''
   materialFileSignatures[fieldKey] = signature
@@ -189,6 +201,15 @@ async function uploadMaterial(item) {
   const file = materialFiles[item.key]
   const code = materialCodeByField[item.key]
   if (!materialUploadAvailable.value || !filing.value || readonly.value || !file || !code || materialBusy[item.key]) return
+  // 上传前再校验一次（选择后文件可能已被替换）：不通过时不创建上传会话、不计算摘要、不发网络请求。
+  const verdict = validateFilingMaterialFile(file)
+  if (!verdict.ok) {
+    materialFiles[item.key] = null
+    materialFileSignatures[item.key] = ''
+    materialCreateKeys[item.key] = ''
+    materialErrors[item.key] = verdict.message
+    return
+  }
   materialBusy[item.key] = true; materialErrors[item.key] = ''
   try {
     // 所选文件未变化时保留创建键。若浏览器
@@ -452,7 +473,7 @@ onUnmounted(() => {
   <section class="filing-workspace" aria-labelledby="filing-title">
     <div class="portal-title"><h1 id="filing-title">等保备案信息</h1></div>
     <div v-if="!filing" class="portal-card filing-list">
-      <div class="filing-toolbar"><h2>我的备案</h2><div v-if="canCreate" class="filing-create"><button v-if="!creating" type="button" class="primary" :disabled="busy" @click="creating = true">新建备案</button><template v-else><label>关联项目（可选）<select v-model="createProjectId"><option value="">不关联项目</option><option v-for="item in projects" :key="item.project_id" :value="item.project_id">{{ item.project_name || '未命名项目' }}（{{ item.contract_no || item.project_id }}）</option></select></label><button type="button" class="primary" :disabled="busy" @click="startFiling">确认创建</button><button type="button" class="secondary" :disabled="busy" @click="creating = false">取消</button></template></div></div>
+      <div class="filing-toolbar"><h2>我的备案</h2><div v-if="canCreate" class="filing-create"><button v-if="!creating" type="button" class="primary" :disabled="busy" @click="creating = true">新建备案</button><template v-else><label>关联项目（可选）<select v-model="createProjectId"><option value="">不关联项目</option><option v-for="item in projects" :key="item.project_id" :value="item.project_id">{{ item.project_name || '未命名项目' }}（{{ item.contract_no || item.project_id }}）</option></select></label><button type="button" class="primary" :disabled="busy" @click="startFiling">创建备案草稿</button><button type="button" class="secondary" :disabled="busy" @click="creating = false">取消</button></template></div></div>
       <div v-for="item in filings" :key="item.id" class="filing-list-row"><button type="button" class="filing-list-open" @click="openFiling(item.id)"><span><strong>{{ filingTitle(item) }}</strong><small>更新于 {{ formatBusinessDateTime(item.updated_at) || '—' }}</small></span><em>{{ statusText(item.status) }}</em></button><button v-if="item.status === 'DRAFT' && canDelete" type="button" class="secondary filing-list-delete" :disabled="busy" @click="deleteDraft(item)">删除草稿</button></div>
       <p v-if="!busy && !filings.length">暂无备案记录。</p>
     </div>
@@ -489,7 +510,7 @@ onUnmounted(() => {
           <h3>等级矩阵</h3><p>每张矩阵只能选择一个单元格；再次选择当前项可以撤销。原生单选控件支持 Tab、方向键和空格键。</p>
           <fieldset v-for="(title, matrixCode) in { BUSINESS_INFORMATION: '业务信息安全矩阵', SYSTEM_SERVICE: '系统服务安全矩阵' }" :key="matrixCode" :disabled="readonly"><legend>{{ title }}</legend><div class="filing-matrix-scroll"><table><thead><tr><th scope="col">受侵害客体</th><th v-for="column in matrixColumns" :key="column[0]" scope="col">{{ column[1] }}</th></tr></thead><tbody><tr v-for="row in matrixRows" :key="row[0]"><th scope="row">{{ row[1] }}</th><td v-for="column in matrixColumns" :key="column[0]"><label><input type="radio" :name="`matrix-${matrixCode}`" :checked="matrices[matrixCode].selected && matrices[matrixCode].row_code === row[0] && matrices[matrixCode].column_code === column[0]" :disabled="readonly" @change="chooseMatrix(matrixCode, row[0], column[0])"><span>{{ matrices[matrixCode].selected && matrices[matrixCode].row_code === row[0] && matrices[matrixCode].column_code === column[0] ? '已选择' : `${row[1]} / ${column[1]}` }}</span></label></td></tr></tbody></table></div><button v-if="matrices[matrixCode].selected" type="button" :disabled="readonly" @click="chooseMatrix(matrixCode, matrices[matrixCode].row_code, matrices[matrixCode].column_code)">撤销当前选择</button></fieldset>
         </section>
-        <footer><button type="button" class="secondary" :disabled="currentStep === 0" @click="currentStep--">上一步</button><button type="button" class="secondary" :disabled="readonly || savingNow" @click="saveNow()">{{ savingNow ? '暂存中…' : '立即暂存' }}</button><button v-if="currentStep < 6" type="button" class="primary" :disabled="savingNow" @click="nextStep">下一步</button><template v-else><button type="button" class="secondary" @click="runValidation">全量校验</button><button v-if="canSubmit" type="button" class="primary" :disabled="readonly" @click="confirmSubmit">确认提交并锁定</button></template></footer><p v-if="currentStep === 6 && !policeSubmissionAvailable" class="portal-warning">本操作只锁定 Portal 内部备案快照；正式公安提交契约尚未启用，不会显示为已向公安提交。</p>
+        <footer><button type="button" class="secondary" :disabled="currentStep === 0" @click="currentStep--">上一步</button><button type="button" class="secondary" :disabled="readonly || savingNow" @click="saveNow()">{{ savingNow ? '暂存中…' : '立即暂存' }}</button><button v-if="currentStep < 6" type="button" class="primary" :disabled="savingNow" @click="nextStep">下一步</button><template v-else><button type="button" class="secondary" @click="runValidation">全量校验</button><button v-if="canSubmit" type="button" class="primary" :disabled="readonly" @click="confirmSubmit">提交并锁定备案</button></template></footer><p v-if="currentStep === 6 && !policeSubmissionAvailable" class="portal-warning">本操作只锁定 Portal 内部备案快照；正式公安提交契约尚未启用，不会显示为已向公安提交。</p>
       </section>
       <section v-if="validation" class="portal-card filing-validation" :class="validation.valid ? 'is-valid' : 'is-invalid'" aria-live="polite"><header class="filing-validation-heading"><div><span class="filing-validation-eyebrow">备案完整性检查</span><h2>服务端全量校验</h2></div><span class="filing-validation-badge">{{ validation.valid ? '校验通过' : '待处理' }}</span></header><div v-if="validation.valid" class="filing-validation-summary"><span class="filing-validation-icon">✓</span><div><strong>全部校验通过</strong><p>7 个流程与 2 张等级矩阵均符合提交要求。</p></div></div><template v-else><div class="filing-validation-summary"><span class="filing-validation-icon">!</span><div><strong>发现 {{ validation.issues?.length || 0 }} 项待处理问题</strong><p>请根据下方提示完善备案信息后再提交。</p></div></div><ol><li v-for="issue in validation.issues || []" :key="`${issue.path}-${issue.code}`">{{ issueLabel(issue) }}</li></ol></template></section>
     </template>

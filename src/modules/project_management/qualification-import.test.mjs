@@ -3,14 +3,16 @@ import test from 'node:test'
 import { readFile } from 'node:fs/promises'
 import { formatUserError } from '../shared/utils/userError.js'
 import { formatBusinessDate } from '../shared/utils/businessTime.js'
+import { projectImportErrorRows, projectImportErrorsCsv } from './importErrors.js'
+import { importIdempotencyKey } from './importIdempotency.js'
 
 const dialog = await readFile(new URL('./components/QualificationImportDialog.vue', import.meta.url), 'utf8')
 const api = await readFile(new URL('./api/projectManagement.js', import.meta.url), 'utf8')
 function mount(apiCalls, resourceType = 'PERSON') {
   const script = dialog.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '')
   const events = []
-  const state = new Function('formatUserError', 'computed', 'ref', 'defineProps', 'defineEmits', 'downloadCapabilityImportTemplate', 'previewCapabilitiesImport', 'importCapabilities', 'downloadEquipmentImportTemplate', 'previewEquipmentImport', 'importEquipment', 'formatBusinessDate', `${script}\nreturn { file, preview, result, selected, busy, error, readyRows, selectedCount, pick, inspect, commit, reset, dateLabel, importMessage }`)(
-    formatUserError, (read) => ({ get value() { return read() } }), (value) => ({ value }), () => ({ codeOptions: [], resourceType }), () => (...args) => events.push(args), apiCalls.download, apiCalls.preview, apiCalls.commit, apiCalls.equipmentDownload, apiCalls.equipmentPreview, apiCalls.equipmentCommit, formatBusinessDate,
+  const state = new Function('formatUserError', 'computed', 'ref', 'defineProps', 'defineEmits', 'downloadCapabilityImportTemplate', 'previewCapabilitiesImport', 'importCapabilities', 'downloadEquipmentImportTemplate', 'previewEquipmentImport', 'importEquipment', 'importIdempotencyKey', 'formatBusinessDate', 'projectImportErrorRows', 'projectImportErrorsCsv', `${script}\nreturn { file, preview, result, selected, busy, error, readyRows, selectedCount, pick, inspect, commit, reset, dateLabel, importMessage, errorReportRows, canDownloadErrors, downloadErrorReport }`)(
+    formatUserError, (read) => ({ get value() { return read() } }), (value) => ({ value }), () => ({ codeOptions: [], resourceType }), () => (...args) => events.push(args), apiCalls.download, apiCalls.preview, apiCalls.commit, apiCalls.equipmentDownload, apiCalls.equipmentPreview, apiCalls.equipmentCommit, importIdempotencyKey, formatBusinessDate, projectImportErrorRows, projectImportErrorsCsv,
   )
   return { ...state, events }
 }
@@ -60,7 +62,10 @@ test('设备确认只发原文件和有效物理行号，逐行失败仍可展�
   state.selected.value = [2, 3]
   await state.commit()
   await state.commit()
-  assert.deepEqual(commands, [[workbook, [2]]])
+  assert.equal(commands.length, 1)
+  assert.equal(commands[0][0], workbook)
+  assert.deepEqual(commands[0][1], [2])
+  assert.match(commands[0][2], /^pm-import-equipment-[0-9a-f]{16}$/)
   assert.equal(state.result.value.rows[0].status, 'FAILED')
   assert.equal(state.events[0][0], 'completed')
 })
@@ -112,7 +117,10 @@ test('确认只提交勾选的合法行，成功后禁止重复提交', async ()
   await state.commit()
   await state.commit()
   assert.equal(commands.length, 1)
-  assert.deepEqual(commands[0], [workbook, 'PERSON', [2]])
+  assert.equal(commands[0][0], workbook)
+  assert.equal(commands[0][1], 'PERSON')
+  assert.deepEqual(commands[0][2], [2])
+  assert.match(commands[0][3], /^pm-import-capability-[0-9a-f]{16}$/)
   assert.equal(state.events[0][0], 'completed')
 })
 test('空文件、非CSV、超限文件在上传前拒绝，网络失败不进入成功步骤', async () => {
@@ -135,4 +143,56 @@ test('预检和确认请求使用原始文件、物理行号且不伪造内部�
   assert.match(api, /\/capabilities\/import\/template/)
   assert.doesNotMatch(dialog, /formData\.append\('user_id'|v-html/)
   assert.match(dialog, /无需填写用户 ID/)
+})
+test('人员/设备导入错误报告按钮覆盖预检与结果阶段，无错误行时禁用', () => {
+  const state = mount({})
+  assert.match(dialog, /下载错误报告 CSV/)
+  assert.match(dialog, /:disabled="busy \|\| !canDownloadErrors"/)
+  assert.equal(state.canDownloadErrors.value, false)
+  state.preview.value = { rows: [{ row_no: 2, status: 'READY' }] }
+  assert.equal(state.canDownloadErrors.value, false)
+  state.preview.value = { rows: [{ row_no: 2, status: 'READY' }, { row_no: 3, status: 'INVALID', errors: ['人员不唯一'] }] }
+  assert.equal(state.canDownloadErrors.value, true)
+  assert.equal(state.errorReportRows.value.length, 1)
+  state.result.value = { imported: 1, skipped: 1, rows: [{ row_no: 3, status: 'FAILED', message: '占用冲突' }] }
+  assert.equal(state.errorReportRows.value.length, 1)
+  assert.match(dialog, /errorReportSource = computed\(\(\) => result\.value \|\| preview\.value\)/)
+})
+
+
+test('失败重试复用同一幂等键，改选行或换文件后换键', async () => {
+  const commands = []
+  const state = mount({ commit: async (...args) => { commands.push(args); throw new Error('网络中断') } })
+  state.file.value = workbook
+  state.preview.value = { rows: [{ row_no: 2, status: 'READY' }, { row_no: 3, status: 'READY' }] }
+  state.selected.value = [2, 3]
+  await state.commit()
+  await state.commit()
+  assert.equal(commands.length, 2)
+  assert.equal(commands[0][3], commands[1][3])
+  assert.match(commands[0][3], /^pm-import-capability-[0-9a-f]{16}$/)
+  state.selected.value = [2]
+  await state.commit()
+  assert.notEqual(commands[2][3], commands[0][3])
+  state.file.value = { ...workbook, lastModified: 123 }
+  await state.commit()
+  assert.notEqual(commands[3][3], commands[2][3])
+})
+
+test('设备确认使用 equipment 作用域的幂等键，同一文件同一选择复用', async () => {
+  const commands = []
+  const state = mount({ equipmentCommit: async (...args) => { commands.push(args); throw new Error('网络中断') } }, 'EQUIPMENT')
+  state.file.value = workbook
+  state.preview.value = { rows: [{ row_no: 2, status: 'READY', action: 'CREATE' }] }
+  state.selected.value = [2]
+  await state.commit()
+  await state.commit()
+  assert.equal(commands.length, 2)
+  assert.equal(commands[0][2], commands[1][2])
+  assert.match(commands[0][2], /^pm-import-equipment-[0-9a-f]{16}$/)
+  state.selected.value = []
+  state.preview.value = { rows: [{ row_no: 2, status: 'READY', action: 'CREATE' }, { row_no: 3, status: 'READY', action: 'CREATE' }] }
+  state.selected.value = [2, 3]
+  await state.commit()
+  assert.notEqual(commands[2][2], commands[0][2])
 })

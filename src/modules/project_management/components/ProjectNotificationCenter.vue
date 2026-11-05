@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { formatUserError } from '../../shared/utils/userError.js'
 import { formatBusinessDateTime } from '../../shared/utils/businessTime.js'
 import { getNotification, listInbox, markNotificationRead } from '@/modules/platform/notifications/api/notifications'
+import PaginationBar from '@/modules/shared/components/PaginationBar.vue'
 
 const emit = defineEmits(['read'])
 const items = ref([]), total = ref(0), page = ref(1), unreadOnly = ref(false)
@@ -69,7 +70,7 @@ onMounted(load)
     <template v-else-if="!error">
       <p v-if="!items.length" class="pm-personal-empty">{{ unreadOnly ? '暂无未读通知' : '暂无个人通知' }}</p>
       <div v-else class="pm-personal-list"><button v-for="item in items" :key="item.delivery_id" type="button" :class="{ unread: !item.read_at }" :disabled="!!actionID" @click="open(item)"><span class="pm-personal-title">{{ item.title }}<small>{{ item.read_at ? '已读' : '未读' }}</small></span><span class="pm-personal-content">{{ item.content }}</span><time>{{ formatDate(item.delivered_at) }}</time></button></div>
-      <footer class="pm-personal-pagination"><span>共 {{ total }} 条 · 第 {{ page }} / {{ pages }} 页</span><div class="pm-actions"><button class="pm-button" :disabled="page <= 1 || !!actionID" @click="changePage(page - 1)">上一页</button><button class="pm-button" :disabled="page >= pages || !!actionID" @click="changePage(page + 1)">下一页</button></div></footer>
+      <PaginationBar class="pm-personal-pagination" label="个人通知分页" :page="page" :total="total" :page-size="pageSize" :loading="loading" :disabled="!!actionID" @change="changePage" />
     </template>
     <aside v-if="detail" class="pm-personal-detail" aria-label="通知详情"><header><h3>{{ detail.title }}</h3><button type="button" class="pm-button" @click="detail = null">关闭详情</button></header><p>{{ detail.content }}</p><small>送达时间：{{ formatDate(detail.delivered_at) }}</small><a v-if="projectTarget" class="pm-button" :href="projectTarget">查看项目关联内容</a></aside>
   </section>

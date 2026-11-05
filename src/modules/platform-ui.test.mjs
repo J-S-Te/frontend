@@ -35,7 +35,15 @@ test('基础平台入口页遵循克制且性能受控的 UniLab 视觉规范', 
   assert.match(portalCSS, /height:\s*100dvh/)
   assert.match(portalCSS, /--portal-grid-max-height/)
   assert.match(portal, /visibleSubsystems/)
-  assert.match(portal, /portalTotalPages > 1/)
+  // 门户分页统一交给 shared/components/PaginationBar.vue：不再自绘「上一页 / 下一页」，
+  // 这里锁新接线（页码 / 总数 / 每页条数 / @change 真的传进共享分页条）。
+  assert.match(portal, /import PaginationBar from '@\/modules\/shared\/components\/PaginationBar\.vue'/)
+  assert.match(portal, /<PaginationBar[\s\S]{0,300}label="子系统分页"/)
+  assert.match(portal, /:page="portalPage"/)
+  assert.match(portal, /:total="subsystems\.length"/)
+  assert.match(portal, /:page-size="PORTAL_PAGE_SIZE"/)
+  assert.match(portal, /@change="changePortalPage"/)
+  assert.doesNotMatch(portal, /aria-label="上一页"/)
   assert.doesNotMatch(portalCSS, /backdrop-filter/)
 })
 

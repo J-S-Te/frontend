@@ -145,11 +145,7 @@
   width: 82px;
 }
 
-.login-target-module__state {
-  padding: 42px 16px;
-  color: #64748b;
-  text-align: center;
-}
+/* 加载 / 失败 / 空三态的表格行占位已由 shared/components/ListState.vue 接管（.ui-state）。 */
 
 .login-target-status {
   display: inline-flex;
@@ -172,15 +168,11 @@
   color: #64748b;
 }
 
+/* 分页统一交给 shared/components/PaginationBar.vue（.ui-pager）：这里只负责页脚对齐。 */
 .login-target-module__pagination {
-  color: #64748b;
-  font-size: 13px;
-}
-
-.login-target-module__pagination > div {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  justify-content: flex-end;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
 }
 
 .login-target-module__error {
@@ -257,8 +249,8 @@
     justify-content: center;
   }
 
-  .login-target-module__pagination > div {
-    justify-content: space-between;
+  .login-target-module__pagination {
+    align-items: flex-start;
   }
 
   .login-target-dialog-backdrop {

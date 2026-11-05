@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from 'vue'
-import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
+import ConsoleIcon from '@/modules/shared/components/ConsoleIcon.vue'
 import { contractOptionLabel } from '../projectDisplay'
 
 const props = defineProps({

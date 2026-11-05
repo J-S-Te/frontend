@@ -3,6 +3,8 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { formatUserError } from '../../../shared/utils/userError.js'
 import { useConfirmAction } from '@/modules/platform/shared/composables/useConfirmAction.js'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
+import ListState from '@/modules/shared/components/ListState.vue'
+import PaginationBar from '@/modules/shared/components/PaginationBar.vue'
 import RoleMultiSelect from './RoleMultiSelect.vue'
 import {
   assignableActiveCatalogRoles,
@@ -45,6 +47,8 @@ const positions = ref([])
 const applications = ref([])
 const selectedPositionId = ref('')
 const assignedTemplateIds = ref([])
+// 模板列表读取失败：用独立错误位驱动三态闸门与重试，不再只靠一次性 toast。
+const templatesError = ref('')
 // 保存原始映射时间窗；勾选集合不能承载每条映射的有效期。
 const assignedTemplateEntries = ref([])
 const duplicateCheckResult = ref(null)
@@ -201,6 +205,8 @@ const pagedActiveTemplates = computed(() => {
   const start = (templatePage.value - 1) * templatePageSize
   return activeTemplates.value.slice(start, start + templatePageSize)
 })
+// 三态闸门：模板读取失败时必须显示可重试的错误，不能退化成「暂无可用授权模板」。
+const templateListState = computed(() => loading.value || Boolean(templatesError.value) || !activeTemplates.value.length)
 const positionGroups = computed(() => groupAuthorizationPositions(positions.value))
 
 function setTemplatePage(page) {
@@ -214,6 +220,7 @@ watch(activeTemplates, () => {
 async function load() {
   if (!canReadAuthorization.value) return
   loading.value = true
+  templatesError.value = ''
   try {
     // 专用目标端点同时返回稳定平台角色 ID 和编辑器所需的授权目录就绪状态。这里不能调用
     // 更宽泛的应用目录 API：角色绑定管理员可能合理地没有 platform:application:read。
@@ -224,7 +231,11 @@ async function load() {
     ])
     const failures = []
     if (templateResult.status === 'fulfilled') templates.value = items(templateResult.value)
-    else failures.push(templateResult.reason)
+    else {
+      // 模板本身读不到时列表必然为空：把失败原因落到三态闸门，避免显示成「暂无授权模板」。
+      templatesError.value = formatUserError(templateResult.reason, { fallback: '授权模板加载失败，请重试。' })
+      failures.push(templateResult.reason)
+    }
     if (positionResult.status === 'fulfilled') positions.value = items(positionResult.value)
     else failures.push(positionResult.reason)
     if (targetResult.status === 'fulfilled') {
@@ -543,12 +554,15 @@ async function loadEditorPreview() {
   }
 }
 
+// deleteTemplate 核对岗位授权模板删除及继承授权撤销影响。
+// 参数：template 为目标模板及其版本。
+// 返回值：异步准备结果；确认后删除，失败保留错误提示。
 async function deleteTemplate(template) {
   if (!canManageAuthorization.value) return
   openConfirm({
     title: '确认删除岗位授权模板',
     description: `确认删除岗位授权模板“${template.name}”吗？\n\n删除后：\n1. 该模板不再出现在岗位映射列表；\n2. 该模板生成的岗位角色授权将被撤销；\n3. 用户、岗位或组织的手工授权不会被删除；\n4. 授权和审计历史仍会保留。`,
-    confirmText: '确认删除',
+    confirmText: '删除授权模板',
     danger: true,
     onConfirm: async () => {
       try {
@@ -813,8 +827,15 @@ onMounted(() => {
         <p v-if="duplicateCheckResult.empty_templates.length" class="iam-template-duplicate-note">以下模板没有可参与查重的有效角色：{{ duplicateCheckResult.empty_templates.map((item) => item.template_name).join('、') }}</p>
         <p v-if="duplicateCheckResult.missing_template_ids.length" class="iam-template-duplicate-note">有 {{ duplicateCheckResult.missing_template_ids.length }} 个已选模板已不在当前目录，请刷新页面后重新选择。</p>
       </section>
-      <div v-if="loading" class="console-empty">正在读取模板…</div>
-      <div v-else-if="!activeTemplates.length" class="console-empty">暂无可用授权模板，请先创建模板。</div>
+      <ListState
+        v-if="templateListState"
+        :loading="loading"
+        :error="templatesError"
+        error-title="授权模板加载失败"
+        empty-title="暂无可用授权模板，请先创建模板。"
+        compact
+        @retry="load"
+      />
       <div v-else class="iam-template-assignment-list">
         <div v-for="template in pagedActiveTemplates" :key="templateId(template)" class="iam-template-assignment-row">
           <label class="iam-template-assignment">
@@ -832,14 +853,15 @@ onMounted(() => {
           <div v-if="canManageAuthorization" class="iam-template-row-actions"><button class="console-text-button" type="button" :disabled="saving" @click="editTemplate(template)">编辑</button><button class="console-text-button danger iam-template-delete" type="button" :disabled="saving" @click="deleteTemplate(template)">删除模板</button></div>
         </div>
       </div>
-      <nav v-if="activeTemplates.length > templatePageSize" class="iam-template-pagination" aria-label="授权模板分页">
-        <span>共 {{ activeTemplates.length }} 个模板</span>
-        <div class="iam-template-pagination-controls">
-          <button class="console-button ghost small" type="button" :disabled="templatePage === 1" @click="setTemplatePage(templatePage - 1)">上一页</button>
-          <span>第 {{ templatePage }} / {{ templatePageCount }} 页</span>
-          <button class="console-button ghost small" type="button" :disabled="templatePage === templatePageCount" @click="setTemplatePage(templatePage + 1)">下一页</button>
-        </div>
-      </nav>
+      <PaginationBar
+        v-if="!templatesError"
+        class="iam-template-pagination"
+        label="授权模板分页"
+        :page="templatePage"
+        :total="activeTemplates.length"
+        :page-size="templatePageSize"
+        @change="setTemplatePage"
+      />
     </div>
 
     <div v-if="preview" ref="positionPreviewRef" class="console-table-card iam-authorization-preview"><h4>授权预览与影响分析</h4><p v-if="preview.conflicts?.length" class="login-target-module__error">{{ preview.conflicts.join('；') }}</p><p v-else class="iam-field-help">以下为该岗位模板产生的角色；用户同时有多个有效任职时，实际权限是全部有效来源的并集。</p><ul><li v-for="role in preview.roles || []" :key="`${role.template_id}-${role.role_id}`"><strong>{{ role.application_name || role.application_code }}</strong> / {{ role.role_name || role.role_code }} <small>来源：{{ role.template_name }}</small></li><li v-if="!(preview.roles || []).length">当前岗位没有从模板获得有效应用角色。</li></ul></div>

@@ -4,14 +4,15 @@ import test from 'node:test'
 import { formatUserError } from '../../shared/utils/userError.js'
 import { attachStructuredContext } from '../../platform/shared/api/requestContext.js'
 import { normalizeAuthorizationSession, principalIdentityID, shouldStartSubsystemLogin, subsystemAccessMessage } from '../../shared/authz/sessionCompatibility.js'
+import { DOWNLOAD_TIMEOUT_MESSAGE, downloadRequestSignal } from '../../shared/utils/downloadTimeout.js'
 
 const source = (await readFile(new URL('./contract.js', import.meta.url), 'utf8'))
   .replace(/^import\s[\s\S]*?from ['"][^'"]+['"]\n/gm, '')
   .replaceAll('import.meta.env', '({})').replace(/^export /gm, '')
 
 function client() {
-  return new Function('formatUserError', 'attachStructuredContext', 'normalizeAuthorizationSession', 'principalIdentityID', 'shouldStartSubsystemLogin', 'subsystemAccessMessage',
-    `${source}; return { request, requestBusinessDirectory, ContractAuthError, downloadContractFile };`)(formatUserError, attachStructuredContext, normalizeAuthorizationSession, principalIdentityID, shouldStartSubsystemLogin, subsystemAccessMessage)
+  return new Function('formatUserError', 'attachStructuredContext', 'normalizeAuthorizationSession', 'principalIdentityID', 'shouldStartSubsystemLogin', 'subsystemAccessMessage', 'downloadRequestSignal', 'DOWNLOAD_TIMEOUT_MESSAGE',
+    `${source}; return { request, requestBusinessDirectory, ContractAuthError, downloadContractFile };`)(formatUserError, attachStructuredContext, normalizeAuthorizationSession, principalIdentityID, shouldStartSubsystemLogin, subsystemAccessMessage, downloadRequestSignal, DOWNLOAD_TIMEOUT_MESSAGE)
 }
 
 async function withFetch(fetcher, run) {
@@ -162,4 +163,37 @@ test('合同文件流保留受控下载路径、格式和安全文件名，拒�
   await withFetch(async () => new Response('', { headers: { 'content-type': 'application/pdf' } }), async () => {
     await assert.rejects(client().downloadContractFile('one', 'pdf'), error => error.code === 'INVALID_DOWNLOAD_RESPONSE')
   })
+})
+
+test('合同下载请求带下载超时 signal，超时转换为可读错误', async () => {
+  let downloadOptions
+  await withFetch(async (url, options) => {
+    downloadOptions = options
+    return new Response('%PDF-1.7\nok', { headers: { 'content-type': 'application/pdf' } })
+  }, async () => {
+    await client().downloadContractFile('one', 'pdf')
+  })
+  assert.ok(downloadOptions.signal, '合同下载必须携带超时 signal')
+  assert.equal(downloadOptions.signal.aborted, false)
+
+  const originalTimeout = globalThis.AbortSignal.timeout
+  try {
+    globalThis.AbortSignal.timeout = () => originalTimeout(5)
+    await withFetch((url, options) => new Promise((resolve, reject) => {
+      if (options.signal.aborted) {
+        // 与真实 fetch 一致：signal 已中止时立即拒绝，避免超时先触发导致 Promise 永挂。
+        reject(options.signal.reason)
+        return
+      }
+      options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true })
+    }), async () => {
+      await assert.rejects(client().downloadContractFile('one', 'pdf'), (error) => {
+        assert.equal(error.code, 'CONTRACT_DOWNLOAD_TIMEOUT')
+        assert.equal(error.message, '下载超时，请重试。')
+        return true
+      })
+    })
+  } finally {
+    globalThis.AbortSignal.timeout = originalTimeout
+  }
 })

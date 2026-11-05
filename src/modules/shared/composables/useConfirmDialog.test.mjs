@@ -36,7 +36,7 @@ test('host scope disposal settles a pending askConfirm as cancelled', async () =
   scope.run(() => {
     controller = useConfirmDialog()
   })
-  const pending = controller.askConfirm({ title: '删除' })
+  const pending = controller.askConfirm({ title: '删除', confirmText: '删除记录' })
   assert.ok(controller.dialog.value, '确认弹窗状态已挂起')
   scope.stop() // 模拟宿主组件销毁
   assert.equal(await pending, false, '未决确认必须以取消收场而不是永挂')
@@ -51,4 +51,18 @@ test('scope disposal without a pending request is a no-op', () => {
   })
   scope.stop()
   assert.equal(controller.dialog.value, null)
+})
+
+
+test('confirmation requires an explicit action and preserves a pending decision on invalid input', async () => {
+  const scope = effectScope()
+  const controller = scope.run(() => useConfirmDialog())
+  const pending = controller.askConfirm({ title: '删除记录', confirmText: '删除记录' })
+  for (const confirmText of [undefined, '', '确认', '确定', '是', '否']) {
+    assert.throws(() => controller.askConfirm({ title: '删除记录', confirmText }), /操作结果/)
+  }
+  assert.equal(controller.dialog.value.confirmText, '删除记录')
+  controller.cancel()
+  assert.equal(await pending, false)
+  scope.stop()
 })

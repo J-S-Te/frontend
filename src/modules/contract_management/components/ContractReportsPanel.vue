@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue'
-import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
+import ConsoleIcon from '@/modules/shared/components/ConsoleIcon.vue'
 
 const props = defineProps({
   contracts: { type: Array, default: () => [] },
@@ -231,7 +231,7 @@ function statusTone(status) {
   height: 5px;
   overflow: hidden;
   border-radius: 4px;
-  background: #e2e8f0
+  background: var(--border, #e2e8f0)
 }
 
 .contract-report-breakdowns li i b {
@@ -253,7 +253,7 @@ function statusTone(status) {
   font-size: 10px;
   border: 1px solid var(--cm-border);
   border-radius: 6px;
-  background: #fff
+  background: var(--surface-input, #fff)
 }
 
 .contract-report-detail-table {

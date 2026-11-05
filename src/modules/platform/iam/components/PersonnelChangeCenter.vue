@@ -532,7 +532,7 @@ onMounted(() => { if (canRead.value) load() })
       <div v-if="!canRead" class="settings-empty"><span class="settings-empty-icon"><ConsoleIcon name="organization" /></span><h3>没有人员异动读取权限</h3><p>请联系平台管理员授予 platform:user:read 后再查看异动单。</p></div>
       <div v-else-if="loading" class="personnel-change-loading"><span class="personnel-loading-dot" />正在加载异动单…</div>
       <div v-else-if="!visibleRecords.length" class="settings-empty"><span class="settings-empty-icon"><ConsoleIcon name="organization" /></span><template v-if="error"><h3>异动信息暂时无法展示</h3><p>请处理上方提示后刷新，当前不能确认是否存在异动单。</p></template><template v-else><h3>暂无人员异动配置</h3><p>管理员创建异动配置后，系统会按生效日期自动执行，已排期异动也可由管理员立即执行。</p></template></div>
-      <div v-else class="personnel-change-table-shell"><div class="personnel-change-table"><div class="personnel-change-row personnel-change-header"><span>人员</span><span>异动类型</span><span>组织 / 岗位变更</span><span>状态</span><span>生效日期</span><span>操作</span></div><div v-for="item in visibleRecords" :key="item.id || item.change_id" class="personnel-change-row"><span class="personnel-change-person"><span class="personnel-person-avatar">{{ userLabel(item).slice(0, 1) || '?' }}</span><span><strong>{{ userLabel(item) || '—' }}</strong><small class="console-mono">{{ item.user_id || item.userId || '人员信息' }}</small></span></span><span><span class="personnel-change-type">{{ typeLabel(item.change_type || item.type) }}</span><small class="personnel-change-code console-mono">{{ item.change_type || item.type || '—' }}</small></span><span class="personnel-change-move"><small>目标任职</small><strong>{{ targetAssignmentLabel(item) }}</strong></span><span><span class="console-badge" :class="statusTone(item.status)">{{ statusLabels[item.status] || item.status || '—' }}</span></span><span class="personnel-change-date">{{ item.effective_at || item.effective_date || '—' }}</span><span class="personnel-change-actions"><button class="console-button compact" type="button" @click="openAuthorization(item)">授权概览</button><button v-if="canUpdate && item.status === 'DRAFT'" class="console-button compact primary" type="button" :disabled="workflowSaving" @click="openWorkflowAction(item)">提交审批</button><button v-else-if="canProcessApproval && ['PENDING_APPROVAL', 'PENDING_HANDOVER'].includes(item.status)" class="console-button compact primary" type="button" :disabled="workflowSaving" @click="openWorkflowAction(item)">{{ item.status === 'PENDING_HANDOVER' ? '完成交接' : '审批处理' }}</button><button v-if="canProcessApproval && item.status === 'SCHEDULED'" class="console-button compact primary" type="button" :disabled="workflowSaving" @click="openImmediateAction(item)">立即生效</button><button v-if="canUpdate && ['DRAFT', 'PENDING_APPROVAL', 'PENDING_HANDOVER', 'SCHEDULED'].includes(item.status)" class="console-button compact ghost" type="button" :disabled="workflowSaving" @click="openCancelAction(item)">取消</button></span></div></div></div>
+      <div v-else class="personnel-change-table-shell"><div class="personnel-change-table"><div class="personnel-change-row personnel-change-header"><span>人员</span><span>异动类型</span><span>组织 / 岗位变更</span><span>状态</span><span>生效日期</span><span>操作</span></div><div v-for="item in visibleRecords" :key="item.id || item.change_id" class="personnel-change-row"><span class="personnel-change-person"><span class="personnel-person-avatar">{{ userLabel(item).slice(0, 1) || '?' }}</span><span><strong>{{ userLabel(item) || '—' }}</strong><small class="console-mono">{{ item.user_id || item.userId || '人员信息' }}</small></span></span><span><span class="personnel-change-type">{{ typeLabel(item.change_type || item.type) }}</span><small class="personnel-change-code console-mono">{{ item.change_type || item.type || '—' }}</small></span><span class="personnel-change-move"><small>目标任职</small><strong>{{ targetAssignmentLabel(item) }}</strong></span><span><span class="console-badge" :class="statusTone(item.status)">{{ statusLabels[item.status] || item.status || '—' }}</span></span><span class="personnel-change-date">{{ item.effective_at || item.effective_date || '—' }}</span><span class="personnel-change-actions"><button class="console-button compact" type="button" @click="openAuthorization(item)">授权概览</button><button v-if="canUpdate && item.status === 'DRAFT'" class="console-button compact primary" type="button" :disabled="workflowSaving" @click="openWorkflowAction(item)">提交审批</button><button v-else-if="canProcessApproval && ['PENDING_APPROVAL', 'PENDING_HANDOVER'].includes(item.status)" class="console-button compact primary" type="button" :disabled="workflowSaving" @click="openWorkflowAction(item)">{{ item.status === 'PENDING_HANDOVER' ? '完成交接' : '审批处理' }}</button><button v-if="canProcessApproval && item.status === 'SCHEDULED'" class="console-button compact primary" type="button" :disabled="workflowSaving" @click="openImmediateAction(item)">立即生效</button><button v-if="canUpdate && ['DRAFT', 'PENDING_APPROVAL', 'PENDING_HANDOVER', 'SCHEDULED'].includes(item.status)" class="console-button compact ghost" type="button" :disabled="workflowSaving" @click="openCancelAction(item)">取消异动单</button></span></div></div></div>
     </div>
   </section>
   <div v-if="showForm" class="console-modal-backdrop" role="presentation" @click.self="closeForm">
@@ -563,7 +563,7 @@ onMounted(() => { if (canRead.value) load() })
     <section class="console-detail-modal personnel-workflow-modal" role="dialog" aria-modal="true" :aria-label="workflowAction.title">
       <header><div><p class="console-modal-eyebrow">人员异动流程</p><h2>{{ workflowAction.title }}</h2><p>凭据将随状态流转留存，用于审批和交接审计。</p></div><button class="console-modal-close" type="button" :disabled="workflowSaving" @click="closeWorkflowAction">×</button></header>
       <div class="console-modal-body"><p v-if="error" class="login-target-module__error" role="alert">{{ error }}</p><p v-if="workflowAction.kind === 'cancel'" class="console-card-hint">取消后该异动单不可恢复，也不会在生效日期执行。</p><p v-else-if="workflowAction.kind === 'execute'" class="console-card-hint">立即执行会马上变更该人员的任职与权限，并注销其现有登录会话（含下游单点登录），对方需重新登录获取新身份；执行后不可撤销，请确认审批与交接均已完成。</p><template v-else><div v-if="workflowAction.kind === 'handover'" class="personnel-handover-panel"><label v-if="!handoverNothingPending" class="console-form-item"><span>责任接收人 *</span><select v-model="handoverTargetUserId"><option value="">请选择在职接收人</option><option v-for="user in users.filter((candidate) => String(candidate.status || '').toUpperCase() === 'ACTIVE' && String(candidate.id || candidate.user_id) !== String(workflowAction.item.user_id))" :key="user.id || user.user_id" :value="user.id || user.user_id">{{ userLabel(user) }}</option></select></label><ul class="personnel-handover-list"><li v-for="item in handoverItems" :key="item.id"><span>{{ item.system }} · {{ item.resource_type }}</span><strong>{{ handoverStatusLabel(item) }}</strong><small v-if="item.next_retry_at">下次重试：{{ item.next_retry_at }}</small><small v-if="item.last_error_code">{{ item.last_error_code }}</small></li></ul><p v-if="handoverNothingPending" class="console-card-hint" role="status">责任交接项已全部完成，可直接点击「完成交接并排期」重试排期；系统会核对权威交接状态，不会重复写入已完成项。</p><p class="console-card-hint">本地责任由管理员确认；远端责任按机器协议转移并核对回执，全部成功后才允许排期离职，并自动生成交接凭据，无需手工填写编号；排期未成功时可直接重试，已完成项不会重复提交。</p></div><label v-if="!workflowAction.autoReference" class="console-form-item"><span>{{ workflowAction.prefix ? '交接凭据编号' : '审批凭据或驳回原因' }} *</span><input v-model="workflowReference" :placeholder="workflowAction.prefix ? '例如 HANDOVER-20260918-001' : '通过时填写审批记录编号，驳回时填写原因'"  maxlength="128"/></label></template></div>
-      <footer class="console-form-actions"><button class="console-button ghost" type="button" :disabled="workflowSaving" @click="closeWorkflowAction">返回</button><button v-if="workflowAction.kind === 'approval'" class="console-button danger" type="button" :disabled="workflowSaving" @click="rejectWorkflowAction">驳回</button><button class="console-button primary" type="button" :disabled="workflowSaving" @click="confirmWorkflowAction">{{ workflowSaving ? '处理中…' : (workflowAction.kind === 'cancel' ? '确认取消' : (workflowAction.kind === 'execute' ? '确认立即执行' : (workflowAction.kind === 'handover' ? '完成交接并排期' : (workflowAction.kind === 'approval' ? '通过' : '确认完成')))) }}</button></footer>
+      <footer class="console-form-actions"><button class="console-button ghost" type="button" :disabled="workflowSaving" @click="closeWorkflowAction">返回</button><button v-if="workflowAction.kind === 'approval'" class="console-button danger" type="button" :disabled="workflowSaving" @click="rejectWorkflowAction">驳回</button><button class="console-button primary" type="button" :disabled="workflowSaving" @click="confirmWorkflowAction">{{ workflowSaving ? '处理中…' : (workflowAction.kind === 'cancel' ? '取消异动单' : (workflowAction.kind === 'execute' ? '立即执行异动' : (workflowAction.kind === 'handover' ? '完成交接并排期' : (workflowAction.kind === 'approval' ? '通过' : '确认完成')))) }}</button></footer>
     </section>
   </div>
   <div v-if="authorizationDetail" class="console-modal-backdrop" role="presentation" @click.self="closeAuthorization">
@@ -585,61 +585,61 @@ onMounted(() => { if (canRead.value) load() })
 
 <style scoped>
 .personnel-change-center > .console-card-body { padding: 0; }
-.personnel-change-hero { display: flex; justify-content: space-between; gap: 2rem; padding: 1.75rem 1.9rem 1.55rem; background: linear-gradient(135deg, #f8fbff 0%, #eef5ff 100%); border-bottom: 1px solid var(--line-soft, #e5edf7); }
+.personnel-change-hero { display: flex; justify-content: space-between; gap: 2rem; padding: 1.75rem 1.9rem 1.55rem; background: linear-gradient(135deg, #f8fbff 0%, #eef5ff 100%); border-bottom: 1px solid #e5edf7; }
 .personnel-change-hero-copy { display: grid; gap: .75rem; min-width: 0; }
-.personnel-change-hero h2 { margin: 0; color: var(--text, #18253a); font-size: 22px; letter-spacing: -.02em; }
+.personnel-change-hero h2 { margin: 0; color: #18253a; font-size: 22px; letter-spacing: -.02em; }
 .personnel-change-hero p { max-width: 720px; margin: .45rem 0 0; line-height: 1.65; }
 .iam-section-kicker { display: inline-flex; align-items: center; gap: .5rem; color: var(--muted, #6f8098); font-size: 11.5px; font-weight: 750; letter-spacing: .12em; }
 .personnel-change-kicker-icon { display: inline-grid; place-items: center; width: 1.65rem; height: 1.65rem; color: #496fd0; background: #dfe9ff; border-radius: .55rem; }
 .personnel-change-heading-actions { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; align-self: center; }
 .personnel-change-heading-actions .console-button { white-space: nowrap; }
-.personnel-handover-panel { display: grid; gap: .8rem; margin-bottom: .9rem; padding: .9rem; border: 1px solid var(--line-soft, #e5edf7); border-radius: .75rem; background: var(--sunken, #f8fafc); }
+.personnel-handover-panel { display: grid; gap: .8rem; margin-bottom: .9rem; padding: .9rem; border: 1px solid #e5edf7; border-radius: .75rem; background: var(--sunken, #f8fafc); }
 .personnel-handover-list { display: grid; gap: .45rem; margin: 0; padding: 0; list-style: none; }
 .personnel-handover-list li { display: flex; justify-content: space-between; gap: 1rem; padding: .55rem .65rem; color: var(--secondary, #52647d); background: var(--card, #fff); border-radius: .55rem; }
 .personnel-handover-list strong { color: #a15c16; font-size: 12px; }
 .personnel-change-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .85rem; padding: 1.25rem 1.9rem; }
-.personnel-summary-card { display: flex; align-items: center; gap: .8rem; min-width: 0; padding: 1rem 1.05rem; border: 1px solid var(--line-soft, #e5edf7); border-radius: .8rem; background: var(--card, #fff); box-shadow: 0 4px 16px rgba(44, 71, 120, .045); }
+.personnel-summary-card { display: flex; align-items: center; gap: .8rem; min-width: 0; padding: 1rem 1.05rem; border: 1px solid #e5edf7; border-radius: .8rem; background: var(--card, #fff); box-shadow: 0 4px 16px rgba(44, 71, 120, .045); }
 .personnel-summary-icon { display: grid; flex: 0 0 auto; place-items: center; width: 2.35rem; height: 2.35rem; border-radius: .7rem; }
 .personnel-summary-card > div { display: grid; gap: .12rem; min-width: 0; }
 .personnel-summary-label, .personnel-summary-card small { color: var(--muted, #71829b); font-size: 12.5px; }
-.personnel-summary-card strong { color: var(--text, #18253a); font-size: 22px; line-height: 1.1; }
+.personnel-summary-card strong { color: #18253a; font-size: 22px; line-height: 1.1; }
 .personnel-summary-card.tone-violet .personnel-summary-icon { color: #6e52c7; background: #eee9ff; }
 .personnel-summary-card.tone-orange .personnel-summary-icon { color: #bd6b19; background: #fff0dc; }
 .personnel-summary-card.tone-blue .personnel-summary-icon { color: #3c70c9; background: #e4efff; }
 .personnel-summary-card.tone-green .personnel-summary-icon { color: #25835a; background: #e2f6eb; }
-.personnel-change-flow { margin: 0 1.9rem 1.2rem; padding: 1rem 1.1rem; border: 1px solid var(--line-soft, #e5edf7); border-radius: .8rem; background: var(--sunken, #f8fafc); }
+.personnel-change-flow { margin: 0 1.9rem 1.2rem; padding: 1rem 1.1rem; border: 1px solid #e5edf7; border-radius: .8rem; background: var(--sunken, #f8fafc); }
 .personnel-flow-title { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; margin-bottom: .8rem; }
-.personnel-flow-title strong { color: var(--text, #263650); font-size: 14px; }
+.personnel-flow-title strong { color: #263650; font-size: 14px; }
 .personnel-flow-title small { color: var(--muted, #71829b); }
 .personnel-change-flow ol { display: grid; grid-template-columns: repeat(4, 1fr); gap: .75rem; margin: 0; padding: 0; list-style: none; }
 .personnel-change-flow li { display: flex; align-items: center; gap: .55rem; color: var(--secondary, #52647d); font-size: 13px; }
 .personnel-change-flow li:not(:last-child)::after { content: '→'; margin-left: auto; color: #a8b8cc; }
 .personnel-change-flow b { display: grid; place-items: center; width: 1.65rem; height: 1.65rem; color: #496fd0; background: #e4edff; border-radius: var(--radius-pill); font-size: 11px; }
-.personnel-change-toolbar { display: flex; align-items: end; gap: .65rem; margin: 0 1.9rem 1rem; padding: .75rem; border: 1px solid var(--line-soft, #e5edf7); border-radius: .75rem; background: var(--card, #fff); }
+.personnel-change-toolbar { display: flex; align-items: end; gap: .65rem; margin: 0 1.9rem 1rem; padding: .75rem; border: 1px solid #e5edf7; border-radius: .75rem; background: var(--card, #fff); }
 .personnel-change-search, .personnel-change-select { display: grid; gap: .28rem; }
 .personnel-change-search { position: relative; flex: 1 1 20rem; }
 .personnel-change-search > svg { position: absolute; left: .75rem; bottom: .65rem; color: var(--muted, #71829b); }
 .personnel-change-search input { padding-left: 2.2rem; }
 .personnel-change-select { flex: 0 1 10rem; }
 .personnel-change-select span { color: var(--muted, #71829b); font-size: 11.5px; }
-.personnel-change-toolbar input, .personnel-change-toolbar select { width: 100%; min-height: 2.25rem; border: 1px solid var(--line-soft, #dce6f2); border-radius: .5rem; background: var(--sunken, #f8fafc); }
+.personnel-change-toolbar input, .personnel-change-toolbar select { width: 100%; min-height: 2.25rem; border: 1px solid #dce6f2; border-radius: .5rem; background: var(--sunken, #f8fafc); }
 .personnel-change-toolbar input:focus, .personnel-change-toolbar select:focus { border-color: #7da3e8; box-shadow: 0 0 0 3px rgba(83, 129, 211, .12); outline: 0; }
 .personnel-change-toolbar .console-button { min-height: 2.25rem; white-space: nowrap; }
 .personnel-change-loading { display: flex; align-items: center; justify-content: center; gap: .55rem; min-height: 12rem; margin: 0 1.9rem 1.9rem; color: var(--muted, #71829b); }
 .personnel-loading-dot { width: .55rem; height: .55rem; border-radius: var(--radius-pill); background: #6e91dc; box-shadow: .85rem 0 #b8c9ea, 1.7rem 0 #e0e8f7; margin-right: 1.7rem; }
-.personnel-change-center > .console-card-body > .settings-empty { margin: 0 1.9rem 1.9rem; border: 1px dashed var(--line-strong, #ccd8e8); border-radius: .8rem; }
-.personnel-change-table-shell { margin: 0 1.9rem 1.9rem; overflow: hidden; border: 1px solid var(--line-soft, #e0e8f2); border-radius: .8rem; background: var(--card, #fff); }
+.personnel-change-center > .console-card-body > .settings-empty { margin: 0 1.9rem 1.9rem; border: 1px dashed #ccd8e8; border-radius: .8rem; }
+.personnel-change-table-shell { margin: 0 1.9rem 1.9rem; overflow: hidden; border: 1px solid #e0e8f2; border-radius: .8rem; background: var(--card, #fff); }
 .personnel-change-table { overflow-x: auto; }
-.personnel-change-row { display: grid; grid-template-columns: 1.25fr .95fr 1.55fr .85fr 1.1fr 1.55fr; gap: .8rem; align-items: center; min-width: 920px; padding: .85rem 1rem; border-top: 1px solid var(--line-soft, #edf1f7); }
+.personnel-change-row { display: grid; grid-template-columns: 1.25fr .95fr 1.55fr .85fr 1.1fr 1.55fr; gap: .8rem; align-items: center; min-width: 920px; padding: .85rem 1rem; border-top: 1px solid #edf1f7; }
 .personnel-change-row:first-child { border-top: 0; }
 .personnel-change-header { color: var(--muted, #71829b); background: var(--sunken, #f8fafc); font-size: 11.5px; font-weight: 700; }
 .personnel-change-row:not(.personnel-change-header):hover { background: #fbfdff; }
 .personnel-change-person, .personnel-change-person > span:last-child, .personnel-change-move { display: grid; gap: .18rem; min-width: 0; }
 .personnel-change-person { display: flex; align-items: center; gap: .65rem; }
 .personnel-person-avatar { display: grid; flex: 0 0 auto; place-items: center; width: 2rem; height: 2rem; color: #496fd0; background: #e4edff; border-radius: .65rem; font-weight: 750; }
-.personnel-change-person strong, .personnel-change-move strong { overflow: hidden; color: var(--text, #263650); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.personnel-change-person strong, .personnel-change-move strong { overflow: hidden; color: #263650; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .personnel-change-person small, .personnel-change-move small, .personnel-change-code { color: var(--muted, #8190a5); font-size: 11.5px; }
-.personnel-change-type { color: var(--text, #34445d); font-weight: 650; }
+.personnel-change-type { color: #34445d; font-weight: 650; }
 .personnel-change-date { color: var(--secondary, #52647d); font-size: 13px; }
 .personnel-change-actions { display: flex; gap: .4rem; flex-wrap: wrap; }
 .compact { min-height: 2rem; padding: .35rem .68rem; font-size: 11.5px; }
@@ -650,11 +650,11 @@ onMounted(() => { if (canRead.value) load() })
 .console-badge.status-executed { color: #20764e; background: #e0f5e9; }
 .console-badge.status-rejected { color: #b34a4a; background: #ffebeb; }
 .personnel-change-modal { display: flex; width: min(860px, 100%); max-height: min(820px, calc(100vh - 40px)); flex-direction: column; overflow: hidden; border: 1px solid #dce7f5; box-shadow: 0 24px 70px rgba(28, 54, 98, .2); }
-.personnel-change-modal-header { position: relative; display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; overflow: hidden; padding: 1.45rem 1.75rem 1.25rem; background: linear-gradient(135deg, #f8fbff 0%, #edf4ff 100%); border-bottom: 1px solid var(--line-soft, #e5edf7); }
+.personnel-change-modal-header { position: relative; display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; overflow: hidden; padding: 1.45rem 1.75rem 1.25rem; background: linear-gradient(135deg, #f8fbff 0%, #edf4ff 100%); border-bottom: 1px solid #e5edf7; }
 .personnel-change-modal-header::after { position: absolute; right: -4rem; bottom: -6rem; width: 15rem; height: 15rem; pointer-events: none; content: ''; border: 1.5rem solid rgba(110, 145, 220, .08); border-radius: var(--radius-pill); }
 .personnel-change-modal-header .console-modal-close { position: relative; z-index: 2; flex: 0 0 auto; }
 .personnel-change-modal-header > div { position: relative; z-index: 1; }
-.personnel-change-modal-header h2 { margin: .35rem 0 0; color: var(--text, #18253a); font-size: 22px; letter-spacing: -.02em; }
+.personnel-change-modal-header h2 { margin: .35rem 0 0; color: #18253a; font-size: 22px; letter-spacing: -.02em; }
 .personnel-change-modal-header p:not(.console-modal-eyebrow) { margin: .4rem 0 0; color: var(--muted, #71829b); font-size: 12.5px; line-height: 1.5; }
 .personnel-modal-eyebrow-icon { display: inline-grid; place-items: center; width: 1.35rem; height: 1.35rem; margin-right: .35rem; color: #496fd0; background: #dfe9ff; border-radius: .4rem; vertical-align: middle; }
 .personnel-modal-eyebrow-icon svg { width: .8rem; height: .8rem; }
@@ -663,8 +663,8 @@ onMounted(() => { if (canRead.value) load() })
 .personnel-change-form-intro-icon { display: grid; flex: 0 0 auto; place-items: center; width: 1.9rem; height: 1.9rem; color: #4b70ca; background: #e3edff; border-radius: .55rem; }
 .personnel-change-form-intro strong { color: #2d4f91; font-size: 13px; }
 .personnel-change-form-intro p { margin: .18rem 0 0; color: var(--muted, #71829b); font-size: 11.5px; line-height: 1.5; }
-.personnel-change-form-grid { padding: 1rem; border: 1px solid var(--line-soft, #e5edf7); border-radius: .75rem; background: #fff; }
-.personnel-change-form-grid .console-form-item > span { color: var(--text, #34445d); font-weight: 650; }
+.personnel-change-form-grid { padding: 1rem; border: 1px solid #e5edf7; border-radius: .75rem; background: #fff; }
+.personnel-change-form-grid .console-form-item > span { color: #34445d; font-weight: 650; }
 .personnel-user-picker-row { display: flex; align-items: stretch; gap: .5rem; }
 .personnel-user-picker-row select { flex: 1 1 auto; min-width: 0; }
 .personnel-user-picker-row .console-button { flex: 0 0 auto; white-space: nowrap; }
@@ -676,23 +676,23 @@ onMounted(() => { if (canRead.value) load() })
 .personnel-preview { margin-top: 1rem; padding: 1rem; border: 1px solid #dce8f7; border-radius: .75rem; background: linear-gradient(135deg, #f8fbff, #f3f7fd); }
 .personnel-preview-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .personnel-preview-heading > div { min-width: 0; }
-.personnel-preview-heading strong { color: var(--text, #263650); font-size: 14px; }
+.personnel-preview-heading strong { color: #263650; font-size: 14px; }
 .personnel-preview-heading p { margin: .25rem 0 0; color: var(--muted, #71829b); font-size: 11.5px; }
 .personnel-preview-heading .console-button { display: inline-flex; align-items: center; gap: .35rem; white-space: nowrap; }
 .personnel-preview-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: .65rem; margin-top: .8rem; }
-.personnel-preview-grid > div { padding: .75rem; border: 1px solid var(--line-soft, #e5edf7); border-radius: .55rem; background: var(--card, #fff); }
+.personnel-preview-grid > div { padding: .75rem; border: 1px solid #e5edf7; border-radius: .55rem; background: var(--card, #fff); }
 .personnel-preview-grid span { display: block; color: var(--muted, #71829b); font-size: 12.5px; }
-.personnel-preview-grid strong { display: block; margin-top: .25rem; color: var(--text, #263650); font-size: 16px; }
+.personnel-preview-grid strong { display: block; margin-top: .25rem; color: #263650; font-size: 16px; }
 .personnel-preview-grid .preview-added { border-top: 3px solid #49a978; }
 .personnel-preview-grid .preview-added strong { color: #25835a; }
 .personnel-preview-grid .preview-removed { border-top: 3px solid #db7777; }
 .personnel-preview-grid .preview-removed strong { color: #b34a4a; }
 .personnel-preview-grid .preview-kept { border-top: 3px solid #7094d6; }
 .personnel-preview-grid .preview-kept strong { color: #3c70c9; }
-.personnel-change-modal > .console-form-actions { position: relative; z-index: 2; flex: 0 0 auto; margin: 0; padding: .9rem 1.75rem; border-top: 1px solid var(--line-soft, #e5edf7); background: rgba(255, 255, 255, .98); box-shadow: 0 -4px 14px rgba(28, 54, 98, .06); }
+.personnel-change-modal > .console-form-actions { position: relative; z-index: 2; flex: 0 0 auto; margin: 0; padding: .9rem 1.75rem; border-top: 1px solid #e5edf7; background: rgba(255, 255, 255, .98); box-shadow: 0 -4px 14px rgba(28, 54, 98, .06); }
 .personnel-authorization-modal { max-width: 900px; }
 .personnel-authorization-list { display: grid; gap: .7rem; max-height: 55vh; overflow: auto; }
-.personnel-authorization-card { padding: 1rem; border: 1px solid var(--line-soft, #e0e8f2); border-radius: .75rem; background: var(--card, #fff); }
+.personnel-authorization-card { padding: 1rem; border: 1px solid #e0e8f2; border-radius: .75rem; background: var(--card, #fff); }
 .personnel-authorization-card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
 .personnel-authorization-card-head strong, .personnel-authorization-card-head small { display: block; }
 .personnel-authorization-card-head small { margin-top: .2rem; color: var(--muted, #71829b); }
@@ -729,5 +729,166 @@ onMounted(() => { if (canRead.value) load() })
   .personnel-preview-heading .console-button { justify-content: center; }
   .personnel-change-modal > .console-form-actions { flex-direction: column-reverse; }
   .personnel-change-modal > .console-form-actions .console-button { width: 100%; justify-content: center; }
+}
+
+/* ==========================================================================
+   深色主题：本组件写死的浅色卡面、图标底、渐变与墨色
+   --------------------------------------------------------------------------
+   只新增 [data-theme="dark"] 规则，上面的浅色声明一行未改，因此浅色渲染
+   与改造前逐像素一致；深色下取值全部来自 main.css 的共享 token。
+   ========================================================================== */
+[data-theme="dark"] .personnel-change-hero {
+  background: linear-gradient(135deg, var(--surface-card) 0%, var(--surface-tint) 100%);
+  border-bottom-color: var(--border);
+}
+[data-theme="dark"] .personnel-change-kicker-icon,
+[data-theme="dark"] .personnel-change-flow b,
+[data-theme="dark"] .personnel-person-avatar,
+[data-theme="dark"] .personnel-modal-eyebrow-icon {
+  color: var(--primary-ink);
+  background: var(--chip-brand);
+}
+[data-theme="dark"] .personnel-summary-card.tone-violet .personnel-summary-icon {
+  color: var(--violet-ink);
+  background: var(--violet-soft);
+}
+[data-theme="dark"] .personnel-summary-card.tone-orange .personnel-summary-icon {
+  color: var(--warning-text);
+  background: var(--warning-soft);
+}
+[data-theme="dark"] .personnel-summary-card.tone-blue .personnel-summary-icon {
+  color: var(--primary-ink);
+  background: var(--chip-brand);
+}
+[data-theme="dark"] .personnel-summary-card.tone-green .personnel-summary-icon {
+  color: var(--success-text);
+  background: var(--success-soft);
+}
+[data-theme="dark"] .personnel-handover-panel {
+  border-color: var(--border);
+  background: var(--surface-muted);
+}
+[data-theme="dark"] .personnel-handover-list strong {
+  color: var(--warning-text);
+}
+[data-theme="dark"] .personnel-change-row:not(.personnel-change-header):hover {
+  background: var(--surface-hover);
+}
+[data-theme="dark"] .console-badge.status-draft,
+[data-theme="dark"] .console-badge.status-neutral,
+[data-theme="dark"] .console-badge.status-cancelled {
+  color: var(--text-muted);
+  background: var(--chip-neutral);
+}
+[data-theme="dark"] .console-badge.status-pending {
+  color: var(--warning-text);
+  background: var(--warning-soft);
+}
+[data-theme="dark"] .console-badge.status-handover {
+  color: var(--violet-ink);
+  background: var(--violet-soft);
+}
+[data-theme="dark"] .console-badge.status-scheduled {
+  color: var(--primary-ink);
+  background: var(--chip-brand);
+}
+[data-theme="dark"] .console-badge.status-executed {
+  color: var(--success-text);
+  background: var(--success-soft);
+}
+[data-theme="dark"] .console-badge.status-rejected {
+  color: var(--danger-text);
+  background: var(--danger-soft);
+}
+[data-theme="dark"] .personnel-change-modal {
+  border-color: var(--border);
+  box-shadow: var(--shadow-modal);
+}
+[data-theme="dark"] .personnel-change-modal-header {
+  background: linear-gradient(135deg, var(--surface-card) 0%, var(--surface-tint) 100%);
+  border-bottom-color: var(--border);
+}
+[data-theme="dark"] .personnel-change-form-intro,
+[data-theme="dark"] .personnel-preview {
+  border-color: var(--border-brand);
+  background: linear-gradient(135deg, var(--surface-card), var(--surface-tint));
+}
+[data-theme="dark"] .personnel-change-form-intro-icon {
+  color: var(--primary-ink);
+  background: var(--chip-brand);
+}
+[data-theme="dark"] .personnel-change-form-intro strong {
+  color: var(--primary-ink-strong);
+}
+[data-theme="dark"] .personnel-change-form-grid {
+  border-color: var(--border);
+  background: var(--surface-card);
+}
+[data-theme="dark"] .personnel-current-membership {
+  color: var(--primary-ink-strong);
+  border-color: var(--border-brand);
+  background: var(--chip-brand);
+}
+[data-theme="dark"] .personnel-preview-grid .preview-added {
+  border-top-color: var(--success);
+}
+[data-theme="dark"] .personnel-preview-grid .preview-added strong {
+  color: var(--success-text);
+}
+[data-theme="dark"] .personnel-preview-grid .preview-removed {
+  border-top-color: var(--danger);
+}
+[data-theme="dark"] .personnel-preview-grid .preview-removed strong {
+  color: var(--danger-text);
+}
+[data-theme="dark"] .personnel-preview-grid .preview-kept {
+  border-top-color: var(--primary-light);
+}
+[data-theme="dark"] .personnel-preview-grid .preview-kept strong {
+  color: var(--primary-ink);
+}
+[data-theme="dark"] .personnel-change-modal > .console-form-actions {
+  border-top-color: var(--border);
+  background: var(--surface-card);
+}
+[data-theme="dark"] .personnel-authorization-card {
+  border-color: var(--border);
+}
+
+/* ==========================================================================
+   深色主题：浅色字面量与 token 浅色取值不一致的声明
+   --------------------------------------------------------------------------
+   --text 的浅色是 #0f172a、--line-soft 的浅色是 #edf0f5、--line-strong 的浅色
+   是 #cbd5e1，而本组件正文/描边的浅色原值是 #18253a / #263650 / #34445d /
+   #e5edf7 / #e0e8f2 / #dce6f2 / #edf1f7 / #ccd8e8。写成 var(--token, 字面量)
+   时 token 在浅色已定义、回退不生效，浅色会被 token 顶掉。所以浅色恢复原字面量，
+   深色在这里补同名覆盖，取值仍是原来的深色 token（深色渲染不变）。
+   ========================================================================== */
+[data-theme="dark"] .personnel-change-hero h2,
+[data-theme="dark"] .personnel-summary-card strong,
+[data-theme="dark"] .personnel-flow-title strong,
+[data-theme="dark"] .personnel-change-person strong,
+[data-theme="dark"] .personnel-change-move strong,
+[data-theme="dark"] .personnel-change-type,
+[data-theme="dark"] .personnel-change-modal-header h2,
+[data-theme="dark"] .personnel-change-form-grid .console-form-item > span,
+[data-theme="dark"] .personnel-preview-heading strong,
+[data-theme="dark"] .personnel-preview-grid strong {
+  color: var(--text);
+}
+[data-theme="dark"] .personnel-summary-card,
+[data-theme="dark"] .personnel-change-flow,
+[data-theme="dark"] .personnel-change-toolbar,
+[data-theme="dark"] .personnel-change-toolbar input,
+[data-theme="dark"] .personnel-change-toolbar select,
+[data-theme="dark"] .personnel-change-table-shell,
+[data-theme="dark"] .personnel-preview-grid > div {
+  border-color: var(--line-soft);
+}
+[data-theme="dark"] .personnel-change-row {
+  border-top-color: var(--line-soft);
+}
+[data-theme="dark"] .personnel-change-center > .console-card-body > .settings-empty {
+  border-color: var(--line-strong);
 }
 </style>

@@ -15,11 +15,64 @@ function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
+// 用途：校验标准财务来源的完整发布状态，禁止把任意JSON视为成功回执。
+// 参数：data为状态或发布响应，allowUnpublished允许合法的未发布状态。
+// 返回值：来源、版本、批次和指纹相互一致时返回true。
+function validStandardPublication(data, allowUnpublished) {
+  if (!isRecord(data) || data.source_code !== 'standard-finance'
+    || !Number.isSafeInteger(data.version) || data.version < 0
+    || typeof data.replayed !== 'boolean') return false
+  if (data.version === 0) {
+    return allowUnpublished && data.published === false && data.batch_id === ''
+      && data.digest === '' && data.published_at === null
+  }
+  return data.published === true && typeof data.batch_id === 'string'
+    && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/.test(data.batch_id)
+    && /^[a-f0-9]{64}$/.test(data.digest) && typeof data.published_at === 'string'
+    && Number.isFinite(Date.parse(data.published_at))
+}
+
+// 用途：校验预览用于确认的版本指纹及分币种金额，缺指标不能显示为零。
+// 参数：data为服务端标准事实预览。
+// 返回值：预览包含可安全展示的金额和版本时返回true。
+function validStandardPreview(data) {
+  if (!isRecord(data) || data.schema_version !== 1 || typeof data.batch_id !== 'string'
+    || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/.test(data.batch_id)
+    || !/^[a-f0-9]{64}$/.test(data.digest)
+    || !Number.isSafeInteger(data.expected_version) || data.expected_version < 0
+    || !Number.isInteger(data.row_count) || data.row_count < 0 || data.row_count > 1000
+    || data.snapshot?.available !== true || !Array.isArray(data.snapshot?.metrics?.currencies)) {
+    return false
+  }
+  const rows = data.snapshot.metrics.currencies
+  // 非空事实必有币种汇总；缺失指标不能按合法的空来源呈现为零。
+  if (data.row_count > 0 && rows.length === 0) return false
+  if (!rows.every(isRecord)) return false
+  if (rows.length > data.row_count || new Set(rows.map((row) => row.currency)).size !== rows.length) return false
+  return rows.every((row) => isRecord(row) && /^[A-Z]{3}$/.test(row.currency)
+    && ['original_minor', 'allocated_minor', 'open_minor', 'over_90_minor', 'month_receipts_minor']
+      .every((key) => Number.isSafeInteger(row[key]) && row[key] >= 0)
+    && row.allocated_minor <= row.original_minor
+    && row.open_minor === row.original_minor - row.allocated_minor
+    && row.over_90_minor <= row.open_minor
+    && (row.collection_rate === null || (typeof row.collection_rate === 'number'
+      && Number.isFinite(row.collection_rate) && row.collection_rate >= 0 && row.collection_rate <= 100)))
+}
+
+// 用途：按现有接口契约检查数据响应，写操作缺真实回执时拒绝确认成功。
+// 参数：body为响应信封，path为业务路径，method为HTTP方法。
+// 返回值：符合当前或受支持旧信封返回true，否则触发结果异常处理。
 function validDataEnvelope(body, path, method) {
   // response.OK 使用 {code:"OK", data:...}；兼容无 code 的旧版 data 信封。
   if (!isRecord(body) || !Object.hasOwn(body, 'data')) return false
   const data = body.data
   const route = path.split('?')[0]
+  if (route === '/admin/standard-finance/publish') return validStandardPublication(data, false)
+  if (route === '/admin/standard-finance/status') {
+    return isRecord(data) && ['standard', 'integration'].includes(data.selected_source)
+      && validStandardPublication(data.publication, true)
+  }
+  if (route === '/admin/standard-finance/preview') return validStandardPreview(data)
   if (route === '/auth/me') return isRecord(data) && !!data.user_id && !!data.tenant_id && Array.isArray(data.permissions)
   const listRoute = ['/alerts', '/alert-rules', '/admin/sources', '/dashboard/trend'].includes(route) || /^\/dictionary\/metrics\/[^/]+\/versions$/.test(route)
   if (method === 'GET' && listRoute) return Array.isArray(data)
@@ -130,6 +183,13 @@ async function request(path, options = {}) {
     throw error
   }
   return body.data
+}
+
+// 用途：读取受认证会话中的嵌入能力，兼容未提供此字段的旧服务。
+// 参数：session 为 /auth/me 返回的当前会话信息。
+// 返回值：仅显式关闭时为 false；旧服务缺失字段时维持嵌入行为。
+export function isDashboardEmbedEnabled(session) {
+  return session?.capabilities?.dashboard_embed_enabled !== false
 }
 
 /**
@@ -316,3 +376,31 @@ export function triggerAllSources() { return request('/admin/sources/trigger-all
  * 返回值：Promise<Object>，缺失或失败状态原样保留，读取失败抛错。
  */
 export function getContractImportHistory() { return request('/dashboard/contract-import-history') }
+
+// 用途：读取标准财务事实模板及字段业务说明。
+// 参数：无。
+// 返回值：模板对象；认证、权限或来源异常时抛出错误。
+export function getStandardFinanceTemplate() {
+  return request('/admin/standard-finance/template')
+}
+
+// 用途：读取当前财务来源与标准事实发布状态。
+// 参数：无。
+// 返回值：来源和当前批次版本；依赖异常时抛出错误。
+export function getStandardFinanceStatus() {
+  return request('/admin/standard-finance/status')
+}
+
+// 用途：校验完整标准事实文件并取得可核对的财务指标预览。
+// 参数：document 为完整财务事实文件，不含客户端租户信息。
+// 返回值：指纹、当前版本及计算指标；非法事实或依赖异常时抛出错误。
+export function previewStandardFinance(document) {
+  return request('/admin/standard-finance/preview', { method: 'POST', body: JSON.stringify(document) })
+}
+
+// 用途：以预览绑定和来源版本原子发布完整标准财务事实。
+// 参数：payload 为完整文件、预览指纹和预期来源版本。
+// 返回值：权威发布回执；冲突、许可或依赖异常时抛出错误。
+export function publishStandardFinance(payload) {
+  return request('/admin/standard-finance/publish', { method: 'POST', body: JSON.stringify(payload) })
+}

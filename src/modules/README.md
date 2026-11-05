@@ -64,3 +64,7 @@
 新增自适应卡片网格时，固定最小列宽还须受实际容器宽度限制，例如 `repeat(auto-fit, minmax(min(220px, 100%), 1fr))`。弹窗内容应受视口高度约束并纵向滚动，标题允许收缩，关闭按钮保留自身位置。
 
 `npm run test:layout` 在隔离Chrome中验证七个模块的实际样式、紧凑网格及真实接入向导和确认框；覆盖320～1440像素视口、首次直达仅加载本模块依赖、以及多模块样式的两种加载顺序。请求均在浏览器内以合成响应处理，不访问业务API或数据库，不能替代真实业务验收。默认使用本机Chrome，也可通过 `CHROMIUM_PATH` 指定已有浏览器；不自动安装依赖。结果保存在工程 `.ai/qa/responsive-boundaries-20261103/` 下，可用 `LAYOUT_RUN_LABEL` 指定本次证据标签。
+
+## 发行模块选择（VITE_ENABLED_MODULES）
+
+`src/modules/registry/compiledModules.js` 是构建期生成的模块入口，`build/moduleSelection.mjs` 的 Vite 插件在构建时按 `VITE_ENABLED_MODULES` 在内存中替换它：`all`（默认全量）、`none`（仅平台）、或逗号分隔的模块编码（`platform` 始终保留）。未选模块的路由不注册、视图不参与编译；未选模块代码若被引用，构建直接失败。产物附带 `frontend-modules.json` 记录本次启用与编译清单。CI 通过 `npm run verify:modules` 用真实构建验证 `none`、单模块与两模块组合。业务模块不得反向引用 `platform` 内部实现；公共 UI/工具以 `src/modules/shared/` 为权威来源（ConsoleIcon 已收敛，platform 侧仅保留兼容薄壳）。

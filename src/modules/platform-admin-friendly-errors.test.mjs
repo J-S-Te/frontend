@@ -52,10 +52,10 @@ test('public access does not append a server command and preserves precise busin
 
 test('public access save and apply failures retain uncertain-write guidance without success notifications', async () => {
   for (const operation of ['saveSettings', 'applySettings']) {
-    const state = { canUpdate: ref(true), saving: ref(false), applying: ref(false), errorMessage: ref(''), savedSettings: ref(null), form: ref({ publicOrigin: '', version: 1, allowInsecureHTTPRedirect: false }), derivedInsecureHTTP: ref(false) }
+    const state = { canUpdate: ref(true), saving: ref(false), applying: ref(false), errorMessage: ref(''), savedSettings: ref({ publicOrigin: '', version: 1 }), form: ref({ publicOrigin: '', version: 1, allowInsecureHTTPRedirect: false }), derivedInsecureHTTP: ref(false) }
     const writes = []
     const api = async () => { writes.push(operation); throw Object.assign(new Error('Failed to fetch'), { code: 'NETWORK_ERROR' }) }
-    const run = methods('access', ['readError', 'normalizePublicOrigin', operation], { ...state, updateAccessSettings: api, applyAccessSettings: api, showToast: () => assert.fail('a failed write cannot announce success'), window: { confirm: () => true } })
+    const run = methods('access', ['readError', 'normalizePublicOrigin', operation], { ...state, updateAccessSettings: api, applyAccessSettings: api, showToast: () => assert.fail('a failed write cannot announce success'), askConfirm: async () => true })
     await run[operation]()
     assert.equal(writes.length, 1)
     assert.match(state.errorMessage.value, /核对.*重复提交/)

@@ -3,9 +3,7 @@
   --settlement-blue-dark: #1d4ed8;
   min-height: 100vh;
 }
-.settlement-sidebar {
-  width: 248px;
-}
+/* 侧栏宽度由共享 console.css 负责（桌面 248px，≤820px 抽屉 272px），模块不再覆盖。 */
 .settlement-sidebar .console-brand-mark svg {
   width: 20px;
   height: 20px;
@@ -18,7 +16,7 @@
   padding: 14px 16px;
   margin-top: auto;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
-  background: #0f172a;
+  background: var(--sidebar, #0f172a);
 }
 .settlement-sidebar-avatar {
   display: grid;
@@ -44,7 +42,7 @@
   font-weight: 700;
 }
 .settlement-sidebar-user-copy small {
-  color: #94a3b8;
+  color: var(--text-faint, #94a3b8);
   font-size: 13px;
 }
 .settlement-sidebar-logout {
@@ -53,7 +51,7 @@
   height: 34px;
   padding: 0;
   place-items: center;
-  color: #718096;
+  color: var(--text-dim, #718096);
   cursor: pointer;
   border: 0;
   border-radius: 8px;
@@ -61,16 +59,20 @@
 }
 .settlement-sidebar-logout:hover {
   color: #fff;
-  background: #1e293b;
+  background: var(--sidebar-hover, #1e293b);
 }
 .settlement-sidebar-logout svg {
   width: 21px;
   height: 21px;
 }
+/* 主区偏移与抽屉行为统一交给共享 console.css（≤820px 侧栏离屏、主区 margin-left 归零）；
+   结算模块不再自建 64px 图标栏，避免 620–820px 出现无导航的空白条。 */
 .settlement-main {
   min-width: 0;
-  margin-left: 248px;
 }
+/* 顶栏有三个子元素（汉堡按钮 / 面包屑 / 操作区）：只靠 space-between 会把面包屑挤到中间。
+   与 console.css 的 .console-topbar-actions 一致，用 margin-left:auto 把操作区顶到右缘，
+   面包屑因此始终贴着左侧汉堡按钮。 */
 .settlement-topbar {
   justify-content: space-between;
 }
@@ -78,6 +80,7 @@
   display: flex;
   align-items: center;
   gap: 12px;
+  margin-left: auto;
 }
 .settlement-topbar-icon,
 .settlement-topbar-avatar {
@@ -89,14 +92,14 @@
   place-items: center;
   color: var(--secondary, #475569);
   cursor: pointer;
-  border: 1px solid #dbe7fb;
+  border: 1px solid var(--border-soft, #dbe7fb);
   border-radius: 12px;
-  background: #fff;
+  background: var(--surface-card, #fff);
 }
 .settlement-topbar-icon:hover {
   color: var(--p, #2563eb);
-  border-color: #93c5fd;
-  background: #f8fbff;
+  border-color: var(--border-brand-strong, #93c5fd);
+  background: var(--surface-tint, #f8fbff);
 }
 .settlement-topbar-icon:disabled {
   cursor: wait;
@@ -114,7 +117,7 @@
   height: 7px;
   border: 2px solid #fff;
   border-radius: 50%;
-  background: #dc2626;
+  background: var(--danger, #dc2626);
 }
 .settlement-topbar-avatar {
   color: #fff;
@@ -159,7 +162,7 @@
 .settlement-panel {
   border: 1px solid var(--border, #e2e8f0);
   border-radius: 10px;
-  background: #fff;
+  background: var(--surface-card, #fff);
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
 }
 .settlement-cards article {
@@ -221,6 +224,33 @@
 .settlement-panel {
   padding: 20px 22px;
   margin-bottom: 18px;
+}
+
+/* 列表自己的分页页脚（components/SettlementListPager.vue）：
+   贴在对应列表面板下方，一行一个列表，标签说明这一对按钮在给哪张表翻页。
+   只引用 main.css 两个主题都有的 token，深色下自动跟随。 */
+.settlement-list-pager {
+  display: grid;
+  gap: 8px;
+  margin-top: -10px;
+  padding: 12px 22px;
+}
+.settlement-list-pager-hint {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.settlement-list-pager-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.settlement-list-pager-label {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
 }
 .settlement-panel h2 {
   margin: 0 0 6px;
@@ -284,8 +314,8 @@
   height: 36px;
   place-items: center;
   border-radius: 10px;
-  background: #eff6ff;
-  color: #2563eb;
+  background: var(--primary-soft, #eff6ff);
+  color: var(--primary-ink, #2563eb);
 }
 .settlement-todo-icon svg {
   width: 18px;
@@ -413,7 +443,7 @@
   font-size: 13px;
   border: 1px solid var(--border, #e2e8f0);
   border-radius: 7px;
-  background: #fff;
+  background: var(--surface-card, #fff);
 }
 .settlement-form input:focus,
 .settlement-form select:focus {
@@ -426,17 +456,17 @@
   gap: 4px;
 }
 .settlement-form .settlement-field-error {
-  color: #b91c1c;
+  color: var(--danger-text, #b91c1c);
   font-size: 12px;
   line-height: 1.5;
 }
 /* DEF-01/02/03：提交前必填校验的字段红框；与原生 required 气泡解耦，由 novalidate + 应用级提示驱动。 */
 .settlement-form [aria-invalid="true"] {
-  border-color: #dc2626;
-  background: #fff5f5;
+  border-color: var(--danger, #dc2626);
+  background: var(--danger-soft-strong, #fff5f5);
 }
 .settlement-form [aria-invalid="true"]:focus {
-  border-color: #dc2626;
+  border-color: var(--danger, #dc2626);
   box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.15);
 }
 .settlement-form button,
@@ -487,8 +517,8 @@
   display: flex;
   gap: 10px;
   padding: 15px 20px;
-  color: #1d4ed8;
-  background: #eff6ff;
+  color: var(--primary-ink-strong, #1d4ed8);
+  background: var(--primary-soft, #eff6ff);
 }
 .settlement-policy-intro svg {
   width: 18px;
@@ -527,7 +557,7 @@
   font-weight: 400;
   border: 1px solid var(--border, #e2e8f0);
   border-radius: 8px;
-  background: #fff;
+  background: var(--surface-card, #fff);
 }
 .settlement-policy-field small {
   color: var(--muted, #64748b);
@@ -584,40 +614,23 @@
   border-radius: 8px;
 }
 .settlement-loading {
-  color: #1d4ed8;
-  border-color: #bfdbfe;
-  background: #eff6ff;
+  color: var(--primary-ink-strong, #1d4ed8);
+  border-color: var(--primary-border, #bfdbfe);
+  background: var(--primary-soft, #eff6ff);
 }
 .settlement-error {
-  color: #b91c1c;
-  border-color: #fecaca;
-  background: #fef2f2;
+  color: var(--danger-text, #b91c1c);
+  border-color: var(--danger-border, #fecaca);
+  background: var(--danger-soft, #fef2f2);
 }
 .settlement-message {
-  color: #15803d;
-  border-color: #c7f0d6;
-  background: #ecfdf5;
+  color: var(--success-text, #15803d);
+  border-color: var(--success-border, #c7f0d6);
+  background: var(--success-soft, #ecfdf5);
 }
 @media (max-width: 980px) {
-  .settlement-sidebar {
-    width: 64px;
-  }
-  .settlement-sidebar .console-brand-copy,
-  .settlement-sidebar .console-nav-label,
-  .settlement-sidebar .console-nav-item span {
-    display: none;
-  }
-  .settlement-sidebar .console-brand {
-    justify-content: center;
-    padding: 0;
-  }
-  .settlement-sidebar .console-nav-item {
-    justify-content: center;
-    padding: 0;
-  }
-  .settlement-main {
-    margin-left: 64px;
-  }
+  /* 侧栏宽度/主区偏移已由共享 console.css 统一：≤820px 侧栏为完整 272px 抽屉。
+     这里只保留内容区栅格的收敛，不再隐藏导航文案或改主区偏移。 */
   .settlement-cards {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -634,12 +647,6 @@
   }
 }
 @media (max-width: 620px) {
-  .settlement-sidebar {
-    display: none;
-  }
-  .settlement-main {
-    margin-left: 0;
-  }
   .settlement-content {
     padding: 20px 14px 28px;
   }
@@ -716,11 +723,11 @@
 .settlement-detail-notice {
   margin: -6px 0 18px !important;
   padding: 10px 13px;
-  color: #1d4ed8 !important;
+  color: var(--primary-ink-strong, #1d4ed8) !important;
   font-size: 12px !important;
-  border: 1px solid #bfdbfe;
+  border: 1px solid var(--primary-border, #bfdbfe);
   border-radius: 8px;
-  background: #eff6ff;
+  background: var(--primary-soft, #eff6ff);
 }
 .settlement-detail-kpis {
   display: grid;
@@ -733,7 +740,7 @@
   padding: 22px;
   border: 1px solid var(--border, #e2e8f0);
   border-radius: 12px;
-  background: #fff;
+  background: var(--surface-card, #fff);
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
 }
 .settlement-detail-kpis span {
@@ -749,7 +756,7 @@
   line-height: 1.1;
 }
 .settlement-detail-kpis .tone-blue {
-  border-left: 6px solid #2563eb;
+  border-left: 6px solid var(--primary-ink, #2563eb);
 }
 .settlement-detail-kpis .tone-green {
   border-left: 6px solid #059669;
@@ -792,7 +799,7 @@
 .settlement-timeline {
   margin-top: 16px;
   padding-left: 18px;
-  border-left: 2px solid #dbeafe;
+  border-left: 2px solid var(--border-brand, #dbeafe);
 }
 .settlement-timeline > div {
   position: relative;
@@ -810,7 +817,7 @@
   content: "";
   border: 4px solid #059669;
   border-radius: 50%;
-  background: #fff;
+  background: var(--surface-card, #fff);
 }
 .settlement-timeline strong {
   font-size: 14px;
@@ -869,8 +876,8 @@
   background: var(--bg, #f1f5f9);
 }
 .settlement-rank.top {
-  color: #b91c1c;
-  background: #fef2f2;
+  color: var(--danger-text, #b91c1c);
+  background: var(--danger-soft, #fef2f2);
 }
 .settlement-money {
   font-variant-numeric: tabular-nums;
@@ -947,7 +954,7 @@
   font-size: 13px;
   border: 1px solid var(--border, #e2e8f0);
   border-radius: 8px;
-  background: #fff;
+  background: var(--surface-card, #fff);
 }
 .settlement-filter-bar input {
   width: 100%;
@@ -984,7 +991,7 @@
 }
 .settlement-plan-table tbody tr:hover,
 .settlement-formal-receivables tbody tr:hover {
-  background: #fafcff;
+  background: var(--surface-tint, #fafcff);
 }
 .settlement-contract-cell {
   color: var(--p, #2563eb);
@@ -1001,23 +1008,23 @@
 }
 .settlement-badge.tone-success {
   color: #059669;
-  background: #ecfdf5;
+  background: var(--success-soft, #ecfdf5);
 }
 .settlement-badge.tone-warning {
   color: #d97706;
-  background: #fef3c7;
+  background: var(--warning-soft, #fef3c7);
 }
 .settlement-badge.tone-info {
-  color: #2563eb;
-  background: #eff6ff;
+  color: var(--primary-ink, #2563eb);
+  background: var(--primary-soft, #eff6ff);
 }
 .settlement-badge.tone-danger {
-  color: #dc2626;
-  background: #fef2f2;
+  color: var(--danger-ink, #dc2626);
+  background: var(--danger-soft, #fef2f2);
 }
 .settlement-badge.tone-gray {
-  color: #64748b;
-  background: #f1f5f9;
+  color: var(--text-muted, #64748b);
+  background: var(--surface-content, #f1f5f9);
 }
 .settlement-table-empty {
   padding: 42px !important;
@@ -1097,8 +1104,8 @@
   background: var(--p, #2563eb);
 }
 .settlement-invoice-composer {
-  border-color: #bfdbfe;
-  background: #fbfdff;
+  border-color: var(--primary-border, #bfdbfe);
+  background: var(--surface-tint, #fbfdff);
 }
 .settlement-invoice-composer .settlement-form {
   margin: 18px 0 0;
@@ -1120,7 +1127,7 @@
   background: var(--sunken, #f8fafc);
 }
 .settlement-invoice-table tbody tr:hover {
-  background: #fafcff;
+  background: var(--surface-tint, #fafcff);
 }
 .settlement-invoice-table .console-button.small {
   min-height: 34px;
@@ -1128,13 +1135,13 @@
 }
 .settlement-invoice-table .console-button.secondary {
   color: var(--p, #2563eb);
-  border-color: #bfdbfe;
-  background: #fff;
+  border-color: var(--primary-border, #bfdbfe);
+  background: var(--surface-card, #fff);
 }
 .settlement-operation-card,
 .settlement-match-panel {
-  border-color: #bfdbfe;
-  background: linear-gradient(180deg, #fbfdff, #fff);
+  border-color: var(--primary-border, #bfdbfe);
+  background: linear-gradient(180deg, var(--surface-tint, #fbfdff), var(--surface-card, #fff));
 }
 .settlement-operation-form {
   display: grid;
@@ -1164,7 +1171,7 @@
   font-weight: 400;
   border: 1px solid var(--border, #e2e8f0);
   border-radius: 8px;
-  background: #fff;
+  background: var(--surface-card, #fff);
   resize: vertical;
 }
 .settlement-operation-form input:focus,
@@ -1189,12 +1196,12 @@
 }
 .settlement-operation-actions .console-button.danger {
   color: #fff;
-  border-color: #dc2626;
-  background: #dc2626;
+  border-color: var(--danger, #dc2626);
+  background: var(--danger, #dc2626);
 }
 .settlement-operation-actions .console-button.danger:hover:not(:disabled) {
-  border-color: #b91c1c;
-  background: #b91c1c;
+  border-color: var(--danger-strong, #b91c1c);
+  background: var(--danger-strong, #b91c1c);
 }
 .settlement-match-list {
   display: grid;
@@ -1210,12 +1217,12 @@
   padding: 12px 14px !important;
   color: var(--text, #0f172a) !important;
   text-align: left;
-  border-color: #dbeafe !important;
-  background: #f8fbff !important;
+  border-color: var(--border-brand, #dbeafe) !important;
+  background: var(--surface-tint, #f8fbff) !important;
 }
 .settlement-match-list > button:hover {
-  border-color: #93c5fd !important;
-  background: #eff6ff !important;
+  border-color: var(--border-brand-strong, #93c5fd) !important;
+  background: var(--primary-soft, #eff6ff) !important;
 }
 .settlement-match-list span {
   display: grid;
@@ -1285,7 +1292,7 @@
 }
 .settlement-task-item:hover {
   border-color: var(--p, #2563eb);
-  background: #fff;
+  background: var(--surface-card, #fff);
   transform: translateY(-1px);
 }
 .settlement-task-id {
@@ -1332,7 +1339,7 @@
   transition: background .15s ease;
 }
 .settlement-panel table tbody tr:hover {
-  background: #fafcff;
+  background: var(--surface-tint, #fafcff);
 }
 @media (max-width: 620px) {
   .settlement-invoices .settlement-section-head > div:last-child {
@@ -1367,4 +1374,51 @@
   .settlement-match-list span:last-child {
     text-align: left;
   }
+}
+
+/* ==========================================================================
+   深色主题
+   --------------------------------------------------------------------------
+   结算页挂在 .console-page 外壳上，卡片/表格/按钮已经跟随 main.css 的深色 token；
+   这里补三类：品牌蓝别名、浅色渐变卡面、浅色阴影与焦点环。
+   ========================================================================== */
+[data-theme="dark"] .settlement-shell {
+  --settlement-blue: var(--primary-ink);
+  --settlement-blue-dark: var(--primary-ink-strong);
+}
+
+/* 浅色下这两块是 #fbfdff→#fff 的渐变卡，深色下换成"品牌浅底 → 卡片"的柔和渐变。 */
+[data-theme="dark"] .settlement-operation-card,
+[data-theme="dark"] .settlement-match-panel {
+  border-color: var(--primary-border);
+  background: linear-gradient(180deg, var(--surface-tint), var(--surface-card));
+}
+
+[data-theme="dark"] .settlement-operation-form :is(input, select, textarea):focus,
+[data-theme="dark"] .settlement-review-reason textarea:focus {
+  border-color: var(--primary-ink);
+  box-shadow: 0 0 0 3px rgba(125, 180, 255, 0.18);
+}
+
+[data-theme="dark"] .settlement-shell :is(.settlement-panel, .settlement-topbar-icon) {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+[data-theme="dark"] .settlement-topbar-icon:hover {
+  background: var(--surface-hover);
+}
+
+/* 侧栏底部用户区与侧栏同层。 */
+[data-theme="dark"] .settlement-sidebar-footer {
+  background: var(--sidebar-hover);
+  border-top-color: var(--sidebar-border);
+}
+
+/* 结算徽章：浅色用 #059669 / #d97706 作小字号文字，深色下换成提亮档。 */
+[data-theme="dark"] .settlement-badge.tone-success {
+  color: var(--success-text);
+}
+
+[data-theme="dark"] .settlement-badge.tone-warning {
+  color: var(--warning-text);
 }

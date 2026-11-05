@@ -6,7 +6,7 @@
  * 本文件负责把表单行变成既有 prepareImportManifest 能校验的清单，并给出逐字段中文错误。
  * 不在这里做网络请求，也不放宽服务端校验。
  */
-import { externalContractTypes, contractSystemLevels } from './contractPayload.js'
+import { externalContractTypes, contractSystemLevels, localContractReferencePayload } from './contractPayload.js'
 import { paymentAmountMinor, normalizePaymentTerms } from './paymentTerms.js'
 import { formatImportMinor } from './contractImport.js'
 
@@ -27,7 +27,8 @@ function asText(value) {
 }
 
 /**
- * emptyImportServiceItem 生成一条空白服务项；检测方式默认常规检测，批次默认第一批次。
+ * emptyImportServiceItem 生成空白服务项，身份仅在明确选择或恢复时赋值。
+ * 参数：无。
  * 返回值：不含身份字段的服务项行。
  */
 export function emptyImportServiceItem() {
@@ -52,6 +53,7 @@ export function createImportFormRow({ fileName = '', key = '', externalRecordId 
     opportunityId: '',
     opportunityName: '',
     crmCustomerId: '',
+    counterpartySource: '', localCounterpartyId: '', counterpartyVersion: 0, categorySource: '',
     customerName: '',
     customerAddress: '',
     customerContact: '',
@@ -92,7 +94,7 @@ export function importRowsFromItems(entries = [], sources = []) {
   return (Array.isArray(entries) ? entries : [])
     .filter((entry) => entry?.item?.mode === 'NORMAL')
     .map((entry) => {
-      const item = entry.item, metadata = item.metadata || {}
+      const item = entry.item, metadata = item.metadata || {}, normalized = entry.normalized_metadata || {}
       const source = (Array.isArray(sources) ? sources : []).find((row) => row.file_ref === item.source_file_ref)
       const row = createImportFormRow({
         fileName: source?.filename || item.source_file_ref || '',
@@ -103,6 +105,10 @@ export function importRowsFromItems(entries = [], sources = []) {
       row.contractType = asText(metadata.contract_type)
       row.opportunityId = asText(metadata.opportunity_id)
       row.opportunityName = asText(metadata.opportunity_name)
+      row.counterpartySource = asText(metadata.counterparty_source || normalized.counterparty_source)
+      row.localCounterpartyId = asText(metadata.local_counterparty_id || normalized.local_counterparty_id)
+      row.counterpartyVersion = metadata.counterparty_version ?? normalized.counterparty_version ?? 0
+      row.categorySource = asText(metadata.category_source || normalized.category_source)
       row.crmCustomerId = metadata.crm_customer_id ? String(metadata.crm_customer_id) : ''
       row.customerName = asText(metadata.customer_name)
       row.customerAddress = asText(metadata.customer_address)
@@ -120,7 +126,10 @@ export function importRowsFromItems(entries = [], sources = []) {
         due_date: asText(term.due_date),
         amount: asText(term.amount),
       }))
-      const serviceItems = (Array.isArray(metadata.service_items) ? metadata.service_items : []).map((service) => ({
+      const serviceItems = (Array.isArray(metadata.service_items) ? metadata.service_items : []).map((service, index) => ({
+        sourceId: asText(service.source_id || normalized.service_items?.[index]?.source_id),
+        categoryId: asText(service.category_id || normalized.service_items?.[index]?.category_id),
+        categoryVersion: service.category_version ?? normalized.service_items?.[index]?.category_version ?? 0,
         serviceType: asText(service.service_type),
         name: asText(service.name),
         site: asText(service.site),
@@ -203,11 +212,16 @@ export function validateImportFormRows(rows, { files = [], sources = [], mode = 
     else if (seenExternalRecordIds.has(externalRecordId)) add('externalRecordId', 'DUPLICATE_EXTERNAL_RECORD_ID', externalRecordIdMessage)
     else seenExternalRecordIds.set(externalRecordId, index)
 
+    const localParty = row.counterpartySource === 'LOCAL'
+    if (row.counterpartySource && !['LOCAL', 'CRM'].includes(row.counterpartySource)) add('counterpartySource', 'UNSUPPORTED_ENUM', `${label}：交易对方来源无效。`)
     const customerId = asText(row.crmCustomerId)
-    if (!customerId) add('crmCustomerId', 'REQUIRED', `${label}：请填写 CRM 客户编号，或从 CRM 客户目录选择。`)
-    else if (!/^[1-9]\d*$/.test(customerId) || !Number.isSafeInteger(Number(customerId))) {
-      add('crmCustomerId', 'INVALID', `${label}：CRM 客户编号无效或超出可安全提交的范围，请重新选择。`)
-    }
+    if (localParty) {
+      if (!/^[0-9A-HJKMNP-TV-Z]{26}$/.test(asText(row.localCounterpartyId))) add('localCounterpartyId', 'LOCAL_REFERENCE_INVALID', `${label}：请选择有效本地交易对方。`)
+      if (!Number.isSafeInteger(row.counterpartyVersion) || row.counterpartyVersion < 1) add('counterpartyVersion', 'LOCAL_REFERENCE_INVALID', `${label}：请重新读取本地交易对方版本。`)
+      if (customerId || asText(row.opportunityId) || asText(row.opportunityName)) add('counterpartySource', 'LOCAL_REFERENCE_INVALID', `${label}：本地来源不能混用CRM客户或商机。`)
+    } else if (!customerId) add('crmCustomerId', 'REQUIRED', `${label}：请填写 CRM 客户编号，或从 CRM 客户目录选择。`)
+    else if (!/^[1-9]\d*$/.test(customerId) || !Number.isSafeInteger(Number(customerId))) add('crmCustomerId', 'INVALID', `${label}：CRM 客户编号无效或超出可安全提交的范围，请重新选择。`)
+    if (row.categorySource && !['LOCAL', 'PROJECT'].includes(row.categorySource)) add('categorySource', 'UNSUPPORTED_ENUM', `${label}：类别来源无效。`)
     if (!asText(row.customerName)) add('customerName', 'REQUIRED', `${label}：请填写客户名称。`)
 
     let amountOK = false
@@ -238,6 +252,11 @@ export function validateImportFormRows(rows, { files = [], sources = [], mode = 
     if (!serviceItems.length || serviceItems.length > 20) add('serviceItems', 'ITEM_COUNT_INVALID', `${label}：请维护 1 至 20 个服务项。`)
     serviceItems.forEach((service, serviceIndex) => {
       const prefix = `serviceItems.${serviceIndex}`
+      if (row.categorySource === 'LOCAL') {
+        if (!/^[0-9A-HJKMNP-TV-Z]{26}$/.test(asText(service.categoryId))) add(`${prefix}.categoryId`, 'LOCAL_REFERENCE_INVALID', `${label}：请选择服务项 ${serviceIndex + 1} 的有效本地类别。`)
+        if (!Number.isSafeInteger(service.categoryVersion) || service.categoryVersion < 1) add(`${prefix}.categoryVersion`, 'LOCAL_REFERENCE_INVALID', `${label}：请重新读取服务项 ${serviceIndex + 1} 的类别版本。`)
+      } else if (service.categoryId || service.categoryVersion) add('categorySource', 'LOCAL_REFERENCE_INVALID', `${label}：本地类别引用须明确选择本地来源。`)
+
       for (const [field, fieldLabel] of [['serviceType', '服务类型'], ['site', '实施场所'], ['batch', '实施批次'], ['category', '检测类别'], ['testMode', '检测方式']]) {
         if (!asText(service[field])) add(`${prefix}.${field}`, 'REQUIRED', `${label}：服务项 ${serviceIndex + 1} 请填写${fieldLabel}。`)
       }
@@ -265,8 +284,13 @@ export function validateImportFormRows(rows, { files = [], sources = [], mode = 
   return issues
 }
 
+// 用途：按正式服务项白名单转换字段，保持原服务项与本地类别身份分离。
+// 参数：service为普通导入表单服务项。
+// 返回值：不添加空身份字段的服务项DTO。
 function buildImportServiceItem(service) {
   return {
+    ...(asText(service.sourceId) ? { source_id: asText(service.sourceId) } : {}),
+    ...(asText(service.categoryId) ? { category_id: asText(service.categoryId), category_version: service.categoryVersion } : {}),
     service_type: asText(service.serviceType),
     name: asText(service.name),
     site: asText(service.site),
@@ -278,6 +302,9 @@ function buildImportServiceItem(service) {
   }
 }
 
+// 用途：构建普通合同导入元数据，LOCAL引用不转换成CRM身份。
+// 参数：row为已通过逐字段校验的NORMAL表单行。
+// 返回值：保留旧缺省字段语义的正式元数据。
 function buildImportMetadata(row) {
   const currency = asText(row.currency).toUpperCase()
   const serviceItems = (Array.isArray(row.serviceItems) ? row.serviceItems : []).map(buildImportServiceItem)
@@ -302,6 +329,7 @@ function buildImportMetadata(row) {
     external_paper_number: asText(row.externalPaperNumber),
     content: asText(row.content),
     service_items: serviceItems,
+    ...localContractReferencePayload({ counterparty_source: row.counterpartySource, local_counterparty_id: row.localCounterpartyId, counterparty_version: row.counterpartyVersion, category_source: row.categorySource, customer_id: row.crmCustomerId, opportunity_id: row.opportunityId, opportunity_name: row.opportunityName, service_items: serviceItems }),
   }
 }
 
@@ -338,6 +366,10 @@ const importMetadataFieldLabels = {
   'metadata.opportunity_id': '商机编号',
   'metadata.opportunity_name': '商机名称',
   'metadata.crm_customer_id': 'CRM 客户编号',
+  'metadata.counterparty_source': '交易对方来源',
+  'metadata.local_counterparty_id': '本地交易对方',
+  'metadata.counterparty_version': '交易对方目录版本',
+  'metadata.category_source': '类别来源',
   'metadata.customer_name': '客户名称',
   'metadata.customer_address': '客户地址',
   'metadata.customer_contact': '客户联系人',
@@ -355,7 +387,7 @@ const importMetadataFieldLabels = {
 
 const importServiceFieldLabels = {
   service_type: '服务类型', name: '服务名称', site: '实施场所', batch: '实施批次',
-  category: '检测类别', test_mode: '检测方式', requirement: '体系 / 能力要求', systems: '系统信息',
+  category: '检测类别', category_id: '本地类别', category_version: '类别版本', test_mode: '检测方式', requirement: '体系 / 能力要求', systems: '系统信息',
 }
 
 /**

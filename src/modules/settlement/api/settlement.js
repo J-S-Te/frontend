@@ -2,6 +2,7 @@ import { attachStructuredContext } from "@/modules/platform/shared/api/requestCo
 import { listQuery } from "./pagination.js";
 import { revisionHoldQuery } from "../utils/revisionHold.js";
 import { formatSettlementError } from "../utils/errors.js";
+import { DOWNLOAD_TIMEOUT_MESSAGE, downloadRequestSignal } from "@/modules/shared/utils/downloadTimeout.js";
 import { getCurrentPrincipal } from "@/modules/platform/auth/api/auth";
 import {
   normalizeAuthorizationSession,
@@ -58,7 +59,10 @@ function validDataEnvelope(body, path, method) {
   return isRecord(data) && Object.keys(data).length > 0;
 }
 
-async function request(path, options = {}) {
+// 用途：统一发送结算业务请求并保留会话、CSRF、幂等与未知写入结果语义。
+// 参数：path为结算相对路径，options为方法、载荷、幂等及错误处理选项。
+// 返回值：经接口契约校验的响应数据；认证、业务或传输错误抛出结构化异常。
+export async function request(path, options = {}) {
   const method = String(options.method || "GET").toUpperCase();
   const multipart =
     typeof FormData !== "undefined" && options.body instanceof FormData;
@@ -151,7 +155,12 @@ async function request(path, options = {}) {
     try {
       const blob = await response.blob();
       if (blob.size) return { blob, disposition: response.headers.get("content-disposition") };
-    } catch (cause) { parseCause = cause; }
+    } catch (cause) {
+      // 超时可能发生在下载响应体读取阶段；此时必须给出可重试的超时提示，
+      // 不能降级成“数据格式异常”或当作成功。
+      if (cause?.name === "AbortError" || cause?.name === "TimeoutError") throw settlementDownloadTimeoutError(cause, path, method);
+      parseCause = cause;
+    }
   } else if (!parseCause && /\bapplication\/(?:[\w.-]+\+)?json\b/i.test(contentType) && options.responseType !== "blob" && validDataEnvelope(body, path, method)) {
     if (retryFingerprint) retryKeys.delete(retryFingerprint);
     return body.data;
@@ -167,6 +176,22 @@ async function request(path, options = {}) {
   if (parseCause) invalid.cause = parseCause;
   attachStructuredContext(invalid, { subsystem: "settlement", feature: "api", operation: method, path, method }, { status: response.status, code: invalid.code, requestId: requestID, traceId: traceID });
   throw invalid;
+}
+
+// 用途：下载响应体读取阶段被超时中断时，转换成可重试的可读错误。
+// 参数：cause 为中断原因；path 为下载路径；method 为请求方法。
+// 返回值：带 REQUEST_TIMEOUT 码与结构化上下文的错误。
+function settlementDownloadTimeoutError(cause, path, method) {
+  const error = new Error(DOWNLOAD_TIMEOUT_MESSAGE);
+  error.status = 0;
+  error.code = "REQUEST_TIMEOUT";
+  error.cause = cause;
+  attachStructuredContext(
+    error,
+    { subsystem: "settlement", feature: "download", operation: method, path, method, metadata: { timeout: true } },
+    { status: 0, code: error.code },
+  );
+  return error;
 }
 
 export function clearSettlementSessionCache() {
@@ -255,7 +280,9 @@ export const getReportExport = (id) =>
 export const downloadReportExport = (id) => downloadFile(`/reports/exports/${encodeURIComponent(id)}/download`, "结算报表.csv");
 
 async function downloadFile(path, fallbackName) {
-  const { blob, disposition } = await request(path, { responseType: "blob" });
+  // 报表、发票、回单、对账 CSV 等下载统一附加超时 signal；上传不经过此函数。
+  const downloadAbort = downloadRequestSignal();
+  const { blob, disposition } = await request(path, { responseType: "blob", signal: downloadAbort.signal });
   let fileName = fallbackName;
   const encoded = /filename\*=UTF-8''([^;]+)/i.exec(disposition || "");
   const plain = /filename="([^\"]+)"|filename=([^;]+)/i.exec(disposition || "");

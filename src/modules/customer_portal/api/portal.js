@@ -1,5 +1,7 @@
 import { normalizeAuthorizationSession, shouldStartSubsystemLogin } from '../../shared/authz/sessionCompatibility.js'
 import { attachStructuredContext } from '../../platform/shared/api/requestContext.js'
+import { safeDownloadFilename } from '../../shared/utils/contentDisposition.js'
+import { DOWNLOAD_TIMEOUT_MESSAGE, downloadRequestSignal, isAbortError } from '../../shared/utils/downloadTimeout.js'
 import { logoutCurrentSession } from '../../platform/auth/api/auth.js'
 import { formatPortalError } from './errorMessages.js'
 
@@ -95,7 +97,7 @@ function beginLogin() {
  * @throws {PortalAPIError} 服务端返回非成功状态时抛出；会话失效时同时启动登录跳转。
  * @throws {PortalAPIError} 网络失败时抛出结构化错误；主动取消仍保留 AbortError。
  */
-async function request(path, options = {}) {
+export async function request(path, options = {}) {
   const method = (options.method || 'GET').toUpperCase()
   const requiresCSRF = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)
   const requestContext = {
@@ -109,7 +111,7 @@ async function request(path, options = {}) {
   const response = await fetchPortal(`${API_BASE_URL}${path}`, {
     ...options, credentials: 'include',
     // 固定 CSRF 标记只声明这是受控前端写请求，后端仍需结合 Origin 和会话校验。
-    headers: { Accept: 'application/json', ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...(requiresCSRF ? { 'X-CSRF-Token': '1' } : {}), ...(options.headers || {}) },
+    headers: { Accept: 'application/json', ...(options.body && !(typeof FormData !== 'undefined' && options.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}), ...(requiresCSRF ? { 'X-CSRF-Token': '1' } : {}), ...(options.headers || {}) },
   }, requestContext)
   const body = await readResponse(response, requestContext)
   if (!response.ok) {
@@ -308,15 +310,14 @@ function customerCapabilities(value = {}) {
     evaluation_enabled: value?.evaluation_enabled !== false,
   }
 }
-/**
- * getPortalCapabilities 获取并规范化客户门户的集成能力与客户级功能开关。
- * @returns {Promise<Record<string, unknown>>} 规范化后的门户能力集合。
- * @throws {PortalAPIError} 会话失效或服务端返回非成功状态时抛出。
- * @throws {TypeError} 网络连接失败时抛出。
+/** getPortalCapabilities 规范化原能力及严格目录模式，未知来源不启用本地入口。
+ * 参数：无。
+ * 返回值：门户能力；缺失或未知目录模式兼容crm，真实请求失败仍抛错。
  */
 export async function getPortalCapabilities() {
   const value = await request('/capabilities')
   return {
+    customer_directory_mode: value?.customer_directory_mode === 'local' ? 'local' : 'crm',
     report_request_submission: capability(value?.report_request_submission),
     project_export: capability(value?.project_export),
     report_download: capability(value?.report_download),
@@ -510,11 +511,22 @@ export async function downloadProjectExport(id, { signal } = {}) {
     }, { status: 503, code: 'PORTAL_PROJECT_EXPORT_NOT_READY' })
     throw error
   }
+  // 调用方 signal 用于取消旧下载；与下载超时合并，避免下载无限等待且不覆盖取消语义。
+  const downloadAbort = downloadRequestSignal(signal)
+  const downloadContext = {
+    feature: 'project_export',
+    path: `/project-exports/${exportID}/downloads`,
+    code: 'PORTAL_PROJECT_EXPORT_DOWNLOAD_TIMEOUT',
+    metadata: { export_id: exportID, source: 'project_export' },
+  }
   const response = await fetch(`${API_BASE_URL}/project-exports/${exportID}/downloads`, {
-    method: 'POST', credentials: 'include', signal,
+    method: 'POST', credentials: 'include', signal: downloadAbort.signal,
     headers: { Accept: 'application/pdf, application/json', 'X-CSRF-Token': '1', 'X-Project-Export-Download-Token': token },
   }).catch((error) => {
-    if (error?.name === 'AbortError') throw error
+    if (downloadAbort.cancelled()) throw error
+    if (downloadAbort.timedOut()) throw downloadTimeoutError(error, downloadContext)
+    // 无法归因到本端 signal 的 AbortError（例如浏览器取消）保持既有取消语义。
+    if (isAbortError(error)) throw error
     const downloadError = new PortalAPIError(error, { status: 0, code: 'PORTAL_PROJECT_EXPORT_NETWORK_ERROR', method: 'POST' })
     attachStructuredContext(downloadError, {
       subsystem: 'customer_portal',
@@ -535,7 +547,7 @@ export async function downloadProjectExport(id, { signal } = {}) {
     throw downloadError
   })
   if (!response.ok) throw await reportDownloadError(response)
-  const blob = await response.blob()
+  const blob = await readDownloadBlob(response, downloadAbort, downloadContext)
   if (blob.type && blob.type !== 'application/pdf') {
     const error = new PortalAPIError('项目导出文件类型无效。', { status: 503, code: 'PORTAL_PROJECT_EXPORT_INVALID_FILE' })
     attachStructuredContext(error, {
@@ -622,15 +634,7 @@ export const listReportRiskAlerts = (params) => request(`/report-risk-alerts${qu
  * @returns {string} 清除路径与控制字符后的 PDF 文件名；无效时返回 report.pdf。
  */
 function safePDFFileName(disposition) {
-  const matched = String(disposition || '').match(/filename\*?=(?:UTF-8''|\")?([^;\"]+)/i)
-  let value = 'report.pdf'
-  if (matched) {
-    try { value = decodeURIComponent(matched[1].replace(/\"/g, '').trim()) }
-    catch { value = 'report.pdf' }
-  }
-  value = value.replace(/[\\/\u0000-\u001f\u007f]/g, '_').trim().slice(0, 160)
-  if (!value || value === '.' || value === '..' || value.startsWith('.') || !value.toLowerCase().endsWith('.pdf')) return 'report.pdf'
-  return value
+  return safeDownloadFilename(disposition, 'report.pdf', { extensions: ['.pdf'] })
 }
 
 /**
@@ -670,6 +674,46 @@ async function reportDownloadError(response) {
 }
 
 /**
+ * downloadTimeoutError 把本端下载超时转换为可读的门户错误，并保留既有结构化上下文。
+ * 仅在 downloadRequestSignal 归因为超时时使用；调用方 signal 的 abort 属于用户取消，
+ * 仍按既有 AbortError 语义原样抛出。
+ * @param {unknown} cause 底层中断原因。
+ * @param {{feature: string, path: string, code: string, metadata?: Record<string, unknown>}} context 下载上下文。
+ * @returns {PortalAPIError} 可展示的下载超时错误。
+ */
+function downloadTimeoutError(cause, context) {
+  const error = new PortalAPIError(DOWNLOAD_TIMEOUT_MESSAGE, { status: 0, code: context.code, method: 'POST' })
+  error.message = DOWNLOAD_TIMEOUT_MESSAGE
+  error.cause = cause
+  attachStructuredContext(error, {
+    subsystem: 'customer_portal',
+    feature: context.feature,
+    operation: 'POST',
+    path: context.path,
+    method: 'POST',
+    metadata: { ...(context.metadata || {}), timeout: true },
+  }, { status: 0, code: context.code })
+  return error
+}
+
+/**
+ * readDownloadBlob 读取下载响应体；超时发生在读取阶段时同样转换为可读超时错误。
+ * @param {Response} response 下载响应。
+ * @param {{cancelled: () => boolean, timedOut: () => boolean}} downloadAbort 下载中断归因。
+ * @param {{feature: string, path: string, code: string, metadata?: Record<string, unknown>}} context 下载上下文。
+ * @returns {Promise<Blob>} 完整响应体。
+ */
+async function readDownloadBlob(response, downloadAbort, context) {
+  try {
+    return await response.blob()
+  } catch (cause) {
+    if (downloadAbort.cancelled()) throw cause
+    if (downloadAbort.timedOut()) throw downloadTimeoutError(cause, context)
+    throw cause
+  }
+}
+
+/**
  * downloadIssuedReport 领取短效授权并立即通过同源请求头下载已签发报告 PDF。
  * @param {string|number} id 已签发报告标识。
  * @param {{idempotencyKey?: string, signal?: AbortSignal}} [options={}] 幂等键与请求取消配置。
@@ -698,17 +742,28 @@ export async function downloadIssuedReport(id, { idempotencyKey = key(), signal 
     throw error
   }
 
+  // 调用方 signal 用于取消旧下载；与下载超时合并，避免报告下载无限等待且不覆盖取消语义。
+  const downloadAbort = downloadRequestSignal(signal)
+  const downloadContext = {
+    feature: 'report_download',
+    path: `/reports/${reportID}/downloads`,
+    code: 'PORTAL_REPORT_DOWNLOAD_TIMEOUT',
+    metadata: { report_id: reportID, source: 'report_download' },
+  }
   const response = await fetch(`${API_BASE_URL}/reports/${reportID}/downloads`, {
     method: 'POST',
     credentials: 'include',
-    signal,
+    signal: downloadAbort.signal,
     headers: {
       Accept: 'application/pdf, application/json',
       'X-CSRF-Token': '1',
       'X-Report-Download-Token': downloadToken,
     },
   }).catch((error) => {
-    if (error?.name === 'AbortError') throw error
+    if (downloadAbort.cancelled()) throw error
+    if (downloadAbort.timedOut()) throw downloadTimeoutError(error, downloadContext)
+    // 无法归因到本端 signal 的 AbortError（例如浏览器取消）保持既有取消语义。
+    if (isAbortError(error)) throw error
     const downloadError = new PortalAPIError(error, { status: 0, code: 'PORTAL_REPORT_DOWNLOAD_NETWORK_ERROR', method: 'POST' })
     attachStructuredContext(downloadError, {
       subsystem: 'customer_portal',
@@ -743,7 +798,7 @@ export async function downloadIssuedReport(id, { idempotencyKey = key(), signal 
     throw error
   }
   return {
-    blob: await response.blob(),
+    blob: await readDownloadBlob(response, downloadAbort, downloadContext),
     filename: safePDFFileName(response.headers.get('content-disposition')),
     expires_at: grant?.expires_at,
   }
@@ -870,16 +925,33 @@ export const createFiling = (payload, idempotencyKey = key()) => request('/filin
 export const getFiling = (id) => request(`/filings/${encodeURIComponent(id)}`)
 
 export async function exportFilingPDF(id, expectedVersion, { signal } = {}) {
-  const response = await fetchPortal(`${API_BASE_URL}/filings/${encodeURIComponent(id)}/exports`, {
-    method: 'POST', credentials: 'include', signal,
-    headers: { 'Content-Type': 'application/json', Accept: 'application/pdf, application/json', 'X-CSRF-Token': '1' },
-    body: JSON.stringify({ expected_version: expectedVersion }),
-  }, { method: 'POST', path: `/filings/${encodeURIComponent(id)}/exports`, preserveAbort: true })
+  // 调用方 signal 用于取消旧导出；与下载超时合并，避免备案导出无限等待且不覆盖取消语义。
+  const downloadAbort = downloadRequestSignal(signal)
+  const downloadContext = {
+    feature: 'filing_export',
+    path: `/filings/${encodeURIComponent(id)}/exports`,
+    code: 'PORTAL_FILING_EXPORT_TIMEOUT',
+    metadata: { filing_id: encodeURIComponent(id), source: 'filing_export' },
+  }
+  let response
+  try {
+    response = await fetchPortal(`${API_BASE_URL}/filings/${encodeURIComponent(id)}/exports`, {
+      method: 'POST', credentials: 'include', signal: downloadAbort.signal,
+      headers: { 'Content-Type': 'application/json', Accept: 'application/pdf, application/json', 'X-CSRF-Token': '1' },
+      body: JSON.stringify({ expected_version: expectedVersion }),
+    }, { method: 'POST', path: `/filings/${encodeURIComponent(id)}/exports`, preserveAbort: true })
+  } catch (error) {
+    if (downloadAbort.cancelled()) throw error
+    if (downloadAbort.timedOut()) throw downloadTimeoutError(error, downloadContext)
+    // 无法归因到本端 signal 的 AbortError（例如浏览器取消）保持既有取消语义。
+    if (isAbortError(error)) throw error
+    throw error
+  }
   if (!response.ok) throw await reportDownloadError(response)
   if ((response.headers.get('content-type') || '').split(';', 1)[0].trim().toLowerCase() !== 'application/pdf') {
     throw new PortalAPIError('备案导出响应不是 PDF。', { status: 503, code: 'PORTAL_FILING_EXPORT_INVALID_RESPONSE' })
   }
-  return { blob: await response.blob(), filename: safePDFFileName(response.headers.get('content-disposition')) }
+  return { blob: await readDownloadBlob(response, downloadAbort, downloadContext), filename: safePDFFileName(response.headers.get('content-disposition')) }
 }
 
 /**

@@ -93,5 +93,10 @@ test('timeline is bounded, collapsed by default, and retains existing database p
   assert.match(source, /grid-template-columns: minmax\(0, 1fr\) auto/)
   assert.doesNotMatch(source, /grid-template-columns: 14px 1fr auto/)
   assert.match(source, /license-event-meta[^}]*white-space: nowrap/)
-  assert.match(source, /loadEvents\(events\.page \+ 1\)/)
+  // 数据库分页保持不变，但翻页入口已由手写「上一页 / 下一页」改为共享分页条（@change 直接带目标页）。
+  assert.match(source, /<PaginationBar[\s\S]{0,400}@change="loadEvents"/)
+  assert.match(source, /:page="events\.page"/)
+  assert.match(source, /:total="events\.total"/)
+  assert.doesNotMatch(source, />上一页<\/button>/)
+  assert.doesNotMatch(source, />下一页<\/button>/)
 })

@@ -16,3 +16,13 @@ test('审计视图有统一的首次加载入口，且在被路由直接打开�
   const watcherBody = principalWatcher.slice(0, principalWatcher.indexOf('\n})'))
   assert.match(watcherBody, /loadAuditViewOnce\(\)/)
 })
+
+// 审计导出下载一次性票据：页面先申请票据，再带票据请求文件；下载按钮只在票据成功后才会取字节。
+test('审计下载编排先申请一次性票据再兑换文件', () => {
+  const downloader = consoleView.slice(consoleView.indexOf('async function downloadAuditExport()'))
+  const body = downloader.slice(0, downloader.indexOf('\n}\n'))
+  assert.match(body, /createAuditExportDownloadTicket\(/)
+  assert.match(body, /downloadAuditExportFile\([^)]*\{\s*ticket/)
+  // 对象 URL 必须在用完后释放，避免一次性票据下载的 blob 泄漏。
+  assert.match(body, /URL\.revokeObjectURL\(url\)/)
+})
