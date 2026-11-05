@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import PromptDialog from '@/modules/shared/components/PromptDialog.vue'
+import PaginationBar from '@/modules/shared/components/PaginationBar.vue'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import { listContractRevisionHolds, resolveContractRevisionHold } from '../api/settlement.js'
 import {
@@ -165,6 +166,15 @@ function closeResolve() {
  * 参数：value 为弹窗里的关单说明。
  * 返回值：Promise<void>。
  */
+// goToPage 把分页条的目标页码换算成既有 changePage 的相对步数：
+// 只允许“上一页”或“下一页”一步（与服务端 offset 语义一致，避免跳页造成空窗）。
+async function goToPage(target) {
+  const next = Math.max(1, Math.trunc(Number(target) || 1)) - 1
+  if (next === pageIndex.value) return
+  if (next > pageIndex.value && !hasPageAfter.value) return
+  await changePage(next - pageIndex.value)
+}
+
 async function submitResolve(value) {
   if (resolveBusy.value || !resolveDialog.value) return
   const checked = validateRevisionHoldReason(value)
@@ -394,7 +404,7 @@ onBeforeUnmount(() => {
                 :aria-describedby="canResolve ? undefined : 'settlement-revision-holds-resolve-hint'"
                 @click="openResolve(row.item)"
               >
-                关单
+                关闭修订工单
               </button>
               <span v-else class="settlement-muted">已关单</span>
             </td>
@@ -407,27 +417,18 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-if="rows.length || hasPageBefore" class="revision-holds-pagination">
-      <span class="settlement-muted">
-        第 {{ pageIndex + 1 }} 页 · 本页 {{ rows.length }} 条 · 每页最多 {{ limit }} 条
-      </span>
-      <button
-        type="button"
-        class="console-button secondary small"
-        aria-label="修订工单上一页"
-        :disabled="loading || !hasPageBefore"
-        @click="changePage(-1)"
-      >
-        上一页
-      </button>
-      <button
-        type="button"
-        class="console-button secondary small"
-        aria-label="修订工单下一页"
-        :disabled="loading || !hasPageAfter"
-        @click="changePage(1)"
-      >
-        下一页
-      </button>
+      <span class="settlement-muted">每页最多 {{ limit }} 条</span>
+      <PaginationBar
+        label="修订工单分页"
+        prev-text="上一页"
+        next-text="下一页"
+        :page="pageIndex + 1"
+        :count="rows.length"
+        :page-size="limit"
+        :has-more="hasPageAfter"
+        :loading="loading"
+        @change="goToPage"
+      />
     </div>
 
     <PromptDialog
@@ -436,7 +437,7 @@ onBeforeUnmount(() => {
       :description="`确认修订工单 ${resolveDialog.contractNo || resolveDialog.id}（合同版本 ${resolveDialog.versionText}）已完成逐期调整或红冲。关单只关闭人工复核工单，不会自动改写任何收款计划或票据。`"
       :label="`关单说明（${REVISION_HOLD_REASON_MIN} 至 ${REVISION_HOLD_REASON_MAX} 字）`"
       placeholder="请写明已完成的处理，例如：第 2 期已按修订金额调整并红冲原发票"
-      confirm-text="确认关单"
+      confirm-text="关闭修订工单"
       cancel-text="取消"
       :minlength="REVISION_HOLD_REASON_MIN"
       :maxlength="REVISION_HOLD_REASON_MAX"
@@ -552,5 +553,16 @@ onBeforeUnmount(() => {
   .revision-holds-pagination {
     justify-content: flex-start;
   }
+}
+
+/* 深色主题：差异清单墨色、明细表底片与预警小胶囊；浅色声明未改。 */
+[data-theme="dark"] .revision-holds-diff-list {
+  color: var(--text-secondary);
+}
+[data-theme="dark"] .revision-holds-detail-table {
+  background: var(--surface-muted);
+}
+[data-theme="dark"] .revision-holds-fact {
+  color: var(--warning-text);
 }
 </style>

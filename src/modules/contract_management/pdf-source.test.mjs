@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFile } from 'node:fs/promises'
 import { validateContractSourceFile } from './utils/contractPayload.js'
+import { DOWNLOAD_TIMEOUT_MESSAGE, downloadRequestSignal } from '../shared/utils/downloadTimeout.js'
 
 // pdfClient 加载实际客户端实现并替换构建期导入。
 // 参数：无；测试仅替换浏览器网络边界。
@@ -10,7 +11,7 @@ async function pdfClient() {
   const source = (await readFile(new URL('./api/contract.js', import.meta.url), 'utf8'))
     .replace(/^import\s[\s\S]*?from ['"][^'"]+['"]\n/gm, '')
     .replaceAll('import.meta.env', '({})').replace(/^export /gm, '')
-  return new Function(`${source}; return { fetchContractPDFSource };`)()
+  return new Function('downloadRequestSignal', 'DOWNLOAD_TIMEOUT_MESSAGE', `${source}; return { fetchContractPDFSource };`)(downloadRequestSignal, DOWNLOAD_TIMEOUT_MESSAGE)
 }
 
 test('PDF选择仅在能力开放后允许且DOCX仍保留10MiB边界', () => {
@@ -41,5 +42,20 @@ test('PDF原件请求限定本应用受鉴权路径并拒绝HTML伪成功', asyn
     assert.equal(calls, 1)
     globalThis.fetch = async () => new Response('<html>login</html>', { headers: { 'content-type': 'text/html' } })
     await assert.rejects(client.fetchContractPDFSource('/contracts/contract-1/source'), /格式|PDF/)
+  } finally { globalThis.fetch = originalFetch }
+})
+
+test('PDF原件读取请求携带下载超时 signal', async () => {
+  const client = await pdfClient()
+  const originalFetch = globalThis.fetch
+  let requestOptions
+  globalThis.fetch = async (_url, options) => {
+    requestOptions = options
+    return new Response('%PDF-1.4\n%%EOF', { headers: { 'content-type': 'application/pdf' } })
+  }
+  try {
+    await client.fetchContractPDFSource('/contracts/contract-1/source')
+    assert.ok(requestOptions.signal, 'PDF 预览源读取必须携带下载超时 signal')
+    assert.equal(requestOptions.signal.aborted, false)
   } finally { globalThis.fetch = originalFetch }
 })

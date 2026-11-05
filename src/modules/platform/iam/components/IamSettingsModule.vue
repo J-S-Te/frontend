@@ -22,6 +22,8 @@ import {
   validateUserInput,
 } from '@/modules/platform/iam/utils/userInputValidation'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
+import ListState from '@/modules/shared/components/ListState.vue'
+import PaginationBar from '@/modules/shared/components/PaginationBar.vue'
 import PositionAuthorizationTemplates from '@/modules/platform/iam/components/PositionAuthorizationTemplates.vue'
 import BatchUserImportDialog from '@/modules/platform/iam/components/BatchUserImportDialog.vue'
 import AuthorizationEntryGuidance from '@/modules/platform/iam/components/AuthorizationEntryGuidance.vue'
@@ -149,6 +151,10 @@ const membershipInheritanceError = ref('')
 const membershipInheritanceConflict = ref(false)
 const loading = reactive({ users: false, accounts: false, organizations: false, positions: false, memberships: false, positionAuthorizationTemplates: false })
 const errorMessage = ref('')
+// 用户 / 账号两个表格各自的读取失败原因（safeCall 统一写 errorMessage，这里按面板留一份）。
+// 列表三态用它渲染可重试的错误态，不能因为某个面板读取失败就把表格标签成「暂无…」。
+// 组织 / 岗位 / 任职三个面板同理：失败原因由各自的子面板交给 ListState，失败仍有重试。
+const panelErrors = reactive({ users: '', accounts: '', organizations: '', positions: '', memberships: '' })
 const pageSize = 50
 const userPageSize = ref(50)
 const pagination = reactive({
@@ -676,6 +682,15 @@ async function loadAuthorizationOverview(userId, detailRequestId = detailAuthori
   }
 }
 
+// 用户详情里「登录账号 / 人员状态摘要」读取失败后的就地重试：只重发这两块共用的
+// 只读汇总请求（getAuthorizationOverview），不重读应用目录、有效授权总览或列表，
+// 因此一次重试不会带出无关请求。
+function retryAuthorizationOverview() {
+  const userId = detail.value?.item?.user_id || ''
+  if (!userId || authorizationOverviewLoading.value) return
+  loadAuthorizationOverview(userId)
+}
+
 async function saveMembershipInheritance() {
   const target = detail.value
   if (target?.kind !== 'membership' || membershipInheritanceSaving.value || membershipInheritanceConflict.value ||
@@ -1154,7 +1169,10 @@ async function refreshPersonalExceptionOverview(applicationCode) {
 // 第一阶段沿用完整集合 PUT，并以打开编辑器/最后一次成功读取时的 edit_revision 作为
 // 乐观并发条件：并发修改返回 409 时保留草稿，由管理员刷新后重试，而不是静默覆盖。
 // 前端预读/脏检查只能发现部分变化，不能替代这个服务端版本条件。
-function performPersonalExceptionSave({ payload, summary, title = '确认保存个人例外授权', confirmText = '确认保存', danger = false }) {
+// performPersonalExceptionSave 核对个人例外授权变更后保存。
+// 参数：配置包含授权载荷、影响摘要、标题、动作文字和危险状态。
+// 返回值：无；具体异步保存由确认回调执行，错误保留在页面。
+function performPersonalExceptionSave({ payload, summary, title = '确认保存个人例外授权', confirmText = '保存个人例外授权', danger = false }) {
   const subjectId = authorizationSubjectId.value
   const subjectType = authorizationSubjectType.value
   const applicationCode = selectedApplicationCode.value
@@ -1209,16 +1227,22 @@ function savePersonalException({ payload, summary } = {}) {
   performPersonalExceptionSave({ payload, summary })
 }
 
+// revokePersonalExceptionRole 发起单项个人例外角色撤销。
+// 参数：配置包含撤销后的授权载荷及影响摘要。
+// 返回值：无；等待用户明确确认后保存撤销。
 function revokePersonalExceptionRole({ payload, summary } = {}) {
   performPersonalExceptionSave({
     payload,
     summary,
     title: '确认撤销角色个人例外',
-    confirmText: '确认撤销',
+    confirmText: '撤销个人例外',
     danger: true,
   })
 }
 
+// revokeAllPersonalExceptions 核对并撤销当前应用全部个人例外。
+// 参数：配置包含例外数量 count 和继承来源数量 inheritedCount。
+// 返回值：无；撤销失败时保留受控错误。
 function revokeAllPersonalExceptions({ count = 0, inheritedCount = 0 } = {}) {
   const subjectId = authorizationSubjectId.value
   const subjectType = authorizationSubjectType.value
@@ -1230,7 +1254,7 @@ function revokeAllPersonalExceptions({ count = 0, inheritedCount = 0 } = {}) {
   openConfirm({
     title: '确认撤销全部个人例外',
     description: '将撤销“' + applicationDisplayName(selectedApplication.value) + '”下该用户的 ' + count + ' 项个人例外（包含待生效记录）。\n\n' + inheritedNote,
-    confirmText: '确认全部撤销',
+    confirmText: '撤销全部个人例外',
     danger: true,
     onConfirm: async () => {
       if (applicationAccessRevoking.value) return false
@@ -1270,6 +1294,9 @@ function revokeAllPersonalExceptions({ count = 0, inheritedCount = 0 } = {}) {
   })
 }
 
+// revokeApplicationAccess 核对当前主体的个人例外或历史直绑清理。
+// 参数：无。
+// 返回值：异步准备结果；具体写入由用户确认触发。
 async function revokeApplicationAccess() {
   const subjectId = authorizationSubjectId.value
   const subjectType = authorizationSubjectType.value
@@ -1284,7 +1311,7 @@ async function revokeApplicationAccess() {
   openConfirm({
     title: isLegacyStructuralAuthorizationSubject.value ? '确认清理历史直绑' : '确认撤销个人例外',
     description: `确认${isLegacyStructuralAuthorizationSubject.value ? '清理' : '撤销'}${authorizationSubjectLabel.value}“${subjectName}”在“${applicationDisplayName(selectedApplication.value)}”下的${isLegacyStructuralAuthorizationSubject.value ? '历史直绑' : '个人例外'}吗？\n\n${inheritedNote}`,
-    confirmText: isLegacyStructuralAuthorizationSubject.value ? '确认清理' : '确认撤销',
+    confirmText: isLegacyStructuralAuthorizationSubject.value ? '清理历史直绑' : '撤销个人例外',
     danger: true,
     onConfirm: async () => {
       if (applicationAccessRevoking.value) return
@@ -1505,14 +1532,17 @@ const {
   filteredOrganizations,
   organizationExportRows,
   organizationExportContext,
-} = useOrganizationDirectory({ canReadPanel, panels, requestSeq, pagination, safeCall, panelFilters, listOrgUnits })
+} = useOrganizationDirectory({ canReadPanel, panels, requestSeq, pagination, safeCall, panelFilters, listOrgUnits, panelErrors, errorMessage })
 
 async function loadUsers(page = pagination.users.page) {
   if (!canReadPanel(panels.find((item) => item.key === 'users'))) return
   const seq = ++requestSeq.users
+  panelErrors.users = ''
   const data = await safeCall('users', () => listUsers({ page, pageSize: userPageSize.value, keyword: panelFilters.users, status: 'ACTIVE' }))
   if (seq !== requestSeq.users) return
   if (data) updatePage('users', data, users)
+  // 读取失败：把面板自己的失败原因交给列表三态（带重试），而不是退回「暂无用户记录」。
+  else panelErrors.users = errorMessage.value
 }
 
 function changeUserPageSize() {
@@ -1525,14 +1555,17 @@ function changeUserPageSize() {
 async function loadAccounts(page = pagination.accounts.page) {
   if (!canReadPanel(panels.find((item) => item.key === 'accounts'))) return
   const seq = ++requestSeq.accounts
+  panelErrors.accounts = ''
   const data = await safeCall('accounts', () => listAccounts({ page, pageSize, keyword: panelFilters.accounts }))
   if (seq !== requestSeq.accounts) return
   if (data) updatePage('accounts', data, accounts)
+  else panelErrors.accounts = errorMessage.value
 }
 
 async function loadPositions() {
   if (!canReadPanel(panels.find((item) => item.key === 'positions'))) return
   const seq = ++requestSeq.positions
+  panelErrors.positions = ''
   // 分组必须拥有同一组织下的全部岗位。按后端最大页长读取全部授权可见岗位，搜索在
   // 前端同时匹配岗位与组织名称，避免同一组织被服务端分页拆成多个不完整分组。
   const groupedPageSize = 100
@@ -1567,12 +1600,16 @@ async function loadPositions() {
     pagination.positions.total = data.total
     pagination.positions.serverPagingSupported = data.items.length >= data.total
     positions.value = data.items
+  } else {
+    // 读取失败：把失败原因交给岗位面板的三态闸门（带重试），而不是退回「暂无组织和岗位记录」。
+    panelErrors.positions = errorMessage.value
   }
 }
 
 async function loadMemberships() {
   if (!canReadPanel(panels.find((item) => item.key === 'memberships'))) return
   const seq = ++requestSeq.memberships
+  panelErrors.memberships = ''
   // 组织分组不能只基于当前分页，否则同一组织会被拆分且数量失真。逐页读取完整的
   // 授权可见任职目录，按稳定 ID 去重；关键字留在前端匹配以保留完整组织上下文。
   const groupedPageSize = 100
@@ -1607,6 +1644,9 @@ async function loadMemberships() {
     pagination.memberships.total = data.total
     pagination.memberships.serverPagingSupported = data.items.length >= data.total
     memberships.value = data.items
+  } else {
+    // 读取失败：把失败原因交给任职面板的三态闸门（带重试），而不是退回「暂无任职关系」。
+    panelErrors.memberships = errorMessage.value
   }
 }
 
@@ -1657,6 +1697,15 @@ function goToPage(key, page) {
 const activePagination = computed(() => pagination[activePanel.value] || null)
 const activeServerPagingUnavailable = computed(() => activePagination.value?.serverPagingSupported === false)
 const activeLoading = computed(() => loading[activePanel.value])
+// 用户 / 账号列表的三态闸门：加载中、读取失败、没有记录都交给 ListState，
+// 失败时一定渲染带重试的错误态，而不是「暂无用户记录 / 暂无登录账号记录」。
+const usersListState = computed(() => loading.users || Boolean(panelErrors.users) || !filteredUsers.value.length)
+const accountsListState = computed(() => loading.accounts || Boolean(panelErrors.accounts) || !filteredAccounts.value.length)
+// 组织 / 岗位历史直绑面板的「可授权应用」列表：失败时 applications 会被清空，
+// 若先渲染空态文案就会把读取失败掩盖成「当前没有可授权的应用」。
+// 因此空列表一律走三态闸门，由 :error 决定渲染失败（带重试）还是空态；
+// 应用列表已读到、只是后续授权读取失败时仍保留表单与原有错误横幅，不被闸门吞掉。
+const subjectApplicationsListState = computed(() => applicationsLoading.value || !applications.value.length)
 
 let filterTimer
 
@@ -1776,6 +1825,9 @@ function openPositionEditorForOrganization(group) {
   markEditorClean()
 }
 
+// removeOrganization 核对删除组织及关联任职停用影响。
+// 参数：organization 为目标组织和版本。
+// 返回值：异步准备结果；确认后删除，失败展示原因。
 async function removeOrganization(organization) {
   if (!organization?.org_unit_id || deletingOrganizationId.value) return
   const version = Number(organization.version)
@@ -1786,7 +1838,7 @@ async function removeOrganization(organization) {
   openConfirm({
     title: '确认删除组织',
     description: `确认删除组织“${organization.name}”吗？其岗位和任职关系将一并停用，且当前操作不可恢复。`,
-    confirmText: '确认删除',
+    confirmText: '删除组织',
     danger: true,
     onConfirm: async () => {
       if (deletingOrganizationId.value) return
@@ -1807,6 +1859,9 @@ async function removeOrganization(organization) {
   })
 }
 
+// removePosition 核对删除岗位及继承授权失效影响。
+// 参数：position 为目标岗位和版本。
+// 返回值：异步准备结果；确认后删除，失败展示原因。
 async function removePosition(position) {
   const positionId = position?.position_id || position?.id
   if (!positionId || deletingPositionId.value) return
@@ -1818,7 +1873,7 @@ async function removePosition(position) {
   openConfirm({
     title: '确认删除岗位',
     description: `确认删除岗位“${position.name}”吗？\n\n删除后：\n1. 岗位将被停用并从可选岗位中移除；\n2. 关联的有效任职关系将一并停用；\n3. 该岗位继承的应用角色将失效；\n4. 历史记录仍会保留。`,
-    confirmText: '确认删除',
+    confirmText: '删除岗位',
     danger: true,
     onConfirm: async () => {
       if (deletingPositionId.value) return
@@ -2368,20 +2423,16 @@ onBeforeUnmount(() => {
 
         <section v-if="activePanel === 'users' && canReadActivePanel" class="iam-table-section">
           <div class="iam-filter-row iam-user-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="panelFilters.users" type="search" placeholder="姓名 / 工号 / 邮箱 / 状态"  maxlength="100"/></label><div class="iam-user-list-controls"><label>每页<select v-model.number="userPageSize" aria-label="用户列表每页条数" @change="changeUserPageSize"><option :value="20">20</option><option :value="50">50</option><option :value="100">100</option></select> 条</label><span>本页 {{ filteredUsers.length }} 位 / 共 {{ pagination.users.total }} 位</span></div></div>
-          <div class="console-table-card iam-user-table-card"><div class="console-table-scroll"><table class="console-data-table iam-data-table iam-user-table">
+          <div class="console-table-card iam-user-table-card"><ListState v-if="usersListState" :loading="loading.users" :error="panelErrors.users" error-title="用户列表加载失败" empty-title="暂无用户记录。" compact @retry="loadUsers()" /><div v-else class="console-table-scroll"><table class="console-data-table iam-data-table iam-user-table">
             <thead><tr><th>用户</th><th>工号</th><th>邮箱</th><th>手机号</th><th>状态</th><th>更新时间</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
-            <tr v-if="loading.users"><td class="console-empty" colspan="7">正在读取用户…</td></tr>
-            <tr v-else-if="!filteredUsers.length"><td class="console-empty" colspan="7">暂无用户记录。</td></tr>
             <tr v-for="item in filteredUsers" :key="item.user_id"><td data-label="用户"><strong class="console-entity-name iam-table-truncate" :title="item.display_name || ''">{{ item.display_name }}</strong><small>{{ item.valid_until ? `有效至 ${formatDateTime(item.valid_until)}` : '长期有效' }}</small></td><td data-label="工号" class="console-mono iam-user-employee-cell"><span class="iam-table-truncate" :title="item.employee_no || ''">{{ item.employee_no || '—' }}</span></td><td data-label="邮箱" class="iam-user-email-cell"><span class="iam-table-truncate" :title="item.email || ''">{{ item.email || '—' }}</span></td><td data-label="手机号" class="console-mono iam-user-mobile-cell"><span class="iam-table-truncate" :title="item.mobile_masked || ''">{{ item.mobile_masked || '—' }}</span></td><td data-label="状态"><span class="console-badge" :class="(item.status || '').toUpperCase() === 'ACTIVE' && (!item.valid_until || new Date(item.valid_until).getTime() > Date.now()) ? 'status-active' : 'status-disabled'">{{ item.valid_until && new Date(item.valid_until).getTime() <= Date.now() ? '已过期' : displayStatus(item.status) }}</span></td><td data-label="更新时间" class="console-mono iam-user-updated-cell"><span class="iam-table-truncate" :title="formatDateTime(item.updated_at)">{{ formatDateTime(item.updated_at) }}</span></td><td data-label="操作" class="console-actions-cell"><button class="console-text-button" type="button" @click="openDetail('user', item)">详情</button><button v-if="hasPermission(IAM_PERMISSIONS.userUpdate)" class="console-text-button" type="button" @click="openValidityEditor('user', item)">有效期</button><button v-if="hasPermission(IAM_PERMISSIONS.userDelete)" class="console-text-button danger" type="button" @click="openUserDeletionDialog(item)">删除</button></td></tr>
           </tbody></table></div></div>
         </section>
 
         <section v-else-if="activePanel === 'accounts' && canReadActivePanel" class="iam-table-section iam-accounts-panel">
           <div class="iam-filter-row iam-account-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="panelFilters.accounts" type="search" placeholder="搜索账号、用户 ID 或状态"  maxlength="100"/></label><span>{{ filteredAccounts.length }} / 共 {{ pagination.accounts.total }} 个账号</span></div>
-          <div class="console-table-card iam-account-table-card"><div class="console-table-scroll"><table class="console-data-table iam-data-table iam-account-table">
+          <div class="console-table-card iam-account-table-card"><ListState v-if="accountsListState" :loading="loading.accounts" :error="panelErrors.accounts" error-title="登录账号列表加载失败" empty-title="暂无登录账号记录。" empty-description="新增员工请使用统一流程；如用户档案已存在，可点击右上角“补建登录账号”。" compact @retry="loadAccounts()" /><div v-else class="console-table-scroll"><table class="console-data-table iam-data-table iam-account-table">
             <thead><tr><th>登录账号</th><th>关联用户</th><th>认证方式</th><th>有效时间</th><th>状态</th><th>更新时间</th><th class="console-actions-cell">操作</th></tr></thead><tbody>
-            <tr v-if="loading.accounts"><td class="console-empty" data-empty="true" colspan="7">正在读取登录账号…</td></tr>
-            <tr v-else-if="!filteredAccounts.length"><td class="console-empty" colspan="7">暂无登录账号记录。新增员工请使用统一流程；如用户档案已存在，可点击右上角“补建登录账号”。</td></tr>
             <tr v-for="item in filteredAccounts" :key="item.account_id"><td data-label="登录账号"><div class="iam-account-identity"><span class="iam-account-avatar">{{ (item.account_name || '?').slice(0, 1).toUpperCase() }}</span><span><strong :title="item.account_name || ''">{{ item.account_name }}</strong></span></div></td><td data-label="关联用户"><span class="iam-linked-user" :title="`${item.user?.display_name || item.user?.name || '—'}${item.user_id ? `（${item.user_id}）` : ''}`"><ConsoleIcon name="user" /><span class="iam-linked-user-name">{{ item.user?.display_name || item.user?.name || '—' }}</span></span></td><td data-label="认证方式"><div class="iam-auth-tags"><span class="iam-type-tag">{{ displayLoginAccountType(item).split(' / ')[0] }}</span><span class="iam-source-tag">{{ displayLoginAccountType(item).split(' / ')[1] }}</span><span v-if="item.password_initialized === false" class="iam-source-tag">待初始化密码</span></div></td><td data-label="有效时间"><div class="iam-validity"><span class="iam-validity-chip" :class="item.valid_until ? 'is-temporary' : 'is-permanent'">{{ item.valid_until ? '临时账号' : '永久账号' }}</span><small>{{ item.valid_until ? formatDateTime(item.valid_until) : '长期有效' }}</small></div></td><td data-label="状态"><span class="console-badge" :class="effectiveAccountStatus(item) === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ displayStatus(effectiveAccountStatus(item)) }}</span></td><td data-label="更新时间" class="console-mono iam-account-updated">{{ formatDateTime(item.updated_at) }}</td><td data-label="操作" class="console-actions-cell iam-account-actions"><button class="console-text-button" type="button" @click="openDetail('account', item)">详情</button><button v-if="hasPermission(IAM_PERMISSIONS.accountUpdate)" class="console-text-button" type="button" @click="openValidityEditor('account', item)">有效期</button><button v-if="isAccountStatusManageable(effectiveAccountStatus(item)) && hasPermission(IAM_PERMISSIONS.accountUpdate)" class="console-text-button" :class="{ danger: effectiveAccountStatus(item) === 'ACTIVE' }" type="button" :disabled="updatingAccountId === item.account_id" @click="toggleAccountStatus(item)">{{ updatingAccountId === item.account_id ? '处理中…' : (effectiveAccountStatus(item) === 'ACTIVE' ? '停用' : '启用') }}</button></td></tr>
           </tbody></table></div></div>
         </section>
@@ -2393,6 +2444,7 @@ onBeforeUnmount(() => {
           :panel-filters="panelFilters"
           :pagination="pagination"
           :loading="loading"
+          :error="panelErrors.organizations"
           :deleting-organization-id="deletingOrganizationId"
           :can-create="hasPermission(IAM_PERMISSIONS.organizationCreate)"
           :can-update="hasPermission(IAM_PERMISSIONS.organizationUpdate)"
@@ -2402,6 +2454,7 @@ onBeforeUnmount(() => {
           @detail="(item) => openDetail('organization', item)"
           @edit="openOrganizationEditor"
           @remove="removeOrganization"
+          @retry="loadOrganizations()"
         />
         <section v-else-if="activePanel === 'positions' && canReadActivePanel" class="iam-table-section iam-positions-panel">
           <div class="iam-filter-row"><label class="console-search-field"><ConsoleIcon name="search" /><input v-model="panelFilters.positions" type="search" placeholder="搜索岗位名称、编码或所属组织"  maxlength="100"/></label><span>{{ filteredPositions.length }} / 共 {{ pagination.positions.total }} 个岗位</span></div>
@@ -2411,12 +2464,14 @@ onBeforeUnmount(() => {
             :organizations="organizations"
             :keyword="panelFilters.positions"
             :loading="loading.positions"
+            :error="panelErrors.positions"
             :can-create="hasPermission(IAM_PERMISSIONS.positionCreate)"
             :can-delete="hasPermission(IAM_PERMISSIONS.positionDelete)"
             :deleting-id="deletingPositionId"
             @create="openPositionEditorForOrganization"
             @detail="(item) => openDetail('position', item)"
             @remove="removePosition"
+            @retry="loadPositions()"
           />
         </section>
 
@@ -2430,15 +2485,22 @@ onBeforeUnmount(() => {
             :organizations="organizations"
             :keyword="panelFilters.memberships"
             :loading="loading.memberships"
+            :error="panelErrors.memberships"
             @detail="(item) => openDetail('membership', item)"
+            @retry="loadMemberships()"
           />
         </section>
 
-        <nav v-if="activePagination && activePagination.total > activePagination.pageSize && !activeServerPagingUnavailable" class="iam-pagination" aria-label="列表分页">
-          <button class="console-button ghost small" type="button" :disabled="activePagination.page <= 1" @click="goToPage(activePanel, activePagination.page - 1)">上一页</button>
-          <span>第 {{ activePagination.page }} / {{ pageTotal(activePanel) }} 页，共 {{ activePagination.total }} 条</span>
-          <button class="console-button ghost small" type="button" :disabled="activePagination.page >= pageTotal(activePanel)" @click="goToPage(activePanel, activePagination.page + 1)">下一页</button>
-        </nav>
+        <PaginationBar
+          v-if="activePagination && !activeServerPagingUnavailable"
+          class="iam-pagination"
+          label="身份与组织列表分页"
+          :page="activePagination.page"
+          :total="activePagination.total"
+          :page-size="activePagination.pageSize"
+          :loading="Boolean(activeLoading)"
+          @change="(next) => goToPage(activePanel, next)"
+        />
       </section>
     </div>
 
@@ -2479,7 +2541,7 @@ onBeforeUnmount(() => {
         <section v-if="isUserAuthorizationSubject" class="iam-detail-section iam-user-account-section">
           <div class="iam-detail-section-head"><div><h4>登录账号与口令</h4><p>用户名用于登录基础平台；密码初始化与重置统一在用户详情中办理。</p></div></div>
           <p v-if="authorizationOverviewLoading" class="iam-empty-inline">正在读取登录账号…</p>
-          <p v-else-if="authorizationOverviewUnavailable" class="iam-empty-inline">登录账号暂不可用，请稍后重试。</p>
+          <p v-else-if="authorizationOverviewUnavailable" class="iam-empty-inline" role="alert">登录账号暂不可用，请稍后重试。<button class="console-button ghost small" type="button" :disabled="authorizationOverviewLoading" @click="retryAuthorizationOverview"><ConsoleIcon name="reset" />重试</button></p>
           <p v-else-if="!authorizationOverview?.accounts.length" class="iam-empty-inline">该用户尚未关联登录账号，请先在“登录账号”页面补建账号。</p>
           <div v-else class="iam-user-account-list">
             <article v-for="account in authorizationOverview.accounts" :key="account.account_id" class="iam-user-account-card">
@@ -2493,7 +2555,7 @@ onBeforeUnmount(() => {
         <section v-if="isUserAuthorizationSubject" class="iam-detail-section iam-person-authorization-summary">
           <div class="iam-detail-section-head"><div><h4>人员状态与交接摘要</h4><p>账号、任职、待处理异动、业务交接和 Keycloak 同步状态均来自基础平台只读汇总接口。</p></div></div>
           <p v-if="authorizationOverviewLoading" class="iam-empty-inline">正在读取人员状态摘要…</p>
-          <p v-else-if="authorizationOverviewUnavailable" class="iam-empty-inline">人员状态摘要暂不可用，不影响下方授权维护，请稍后重试。</p>
+          <p v-else-if="authorizationOverviewUnavailable" class="iam-empty-inline" role="alert">人员状态摘要暂不可用，不影响下方授权维护，请稍后重试。<button class="console-button ghost small" type="button" :disabled="authorizationOverviewLoading" @click="retryAuthorizationOverview"><ConsoleIcon name="reset" />重试</button></p>
           <div v-else-if="authorizationOverview" class="iam-person-summary-grid">
             <div><span>登录账号</span><strong>{{ authorizationOverview.accounts.length }} 个</strong><small>{{ authorizationOverview.accounts.filter((item) => String(item.status || '').toUpperCase() === 'ACTIVE').length }} 个启用</small></div>
             <div><span>有效任职</span><strong>{{ authorizationOverview.memberships.filter((item) => String(item.status || '').toUpperCase() === 'ACTIVE').length }} 个</strong><small>历史任职 {{ authorizationOverview.memberships.length }} 个</small></div>
@@ -2569,10 +2631,16 @@ onBeforeUnmount(() => {
             </p>
           </template>
           <template v-else>
-          <p v-if="applicationsLoading" class="iam-empty-inline">正在读取应用列表…</p>
-          <template v-else-if="!applications.length">
-            <p class="iam-empty-inline">当前没有可授权的应用。</p>
-          </template>
+          <ListState
+            v-if="subjectApplicationsListState"
+            :loading="applicationsLoading"
+            :error="applicationAccessError"
+            error-title="可授权应用加载失败"
+            loading-title="正在读取应用列表…"
+            empty-title="当前没有可授权的应用。"
+            compact
+            @retry="loadApplicationsForSubject()"
+          />
           <template v-else>
             <p v-if="applicationAccessError" class="login-target-module__error" role="alert">{{ applicationAccessError }}</p>
             <div v-if="hasApplicationAuthorizationConflict" class="login-target-module__error" role="alert">
@@ -2684,7 +2752,7 @@ onBeforeUnmount(() => {
           <label v-if="passwordResetDialog.accounts.length > 1"><span>关联登录账号</span><select v-model="passwordResetDialog.accountId"><option v-for="account in passwordResetDialog.accounts" :key="account.account_id" :value="account.account_id">{{ account.account_name || account.account_id }}（{{ account.account_id }}）</option></select></label>
           <dl v-if="selectedPasswordResetAccount" class="iam-confirm-summary"><div><dt>登录账号</dt><dd>{{ selectedPasswordResetAccount.account_name || selectedPasswordResetAccount.account_id }}</dd></div><div><dt>账号 ID</dt><dd class="console-mono">{{ selectedPasswordResetAccount.account_id }}</dd></div><div v-if="passwordResetDialog.userName"><dt>关联用户</dt><dd>{{ passwordResetDialog.userName }}</dd></div></dl>
         </div>
-        <footer><button class="console-button ghost" type="button" :disabled="resettingPassword" @click="closePasswordResetDialog">取消</button><button class="console-button primary" type="button" :disabled="!selectedPasswordResetAccount || resettingPassword" @click="confirmPasswordReset">{{ resettingPassword ? (selectedPasswordResetAccount?.password_initialized === false ? '正在初始化…' : '正在重置…') : (selectedPasswordResetAccount?.password_initialized === false ? '确认初始化' : '确认重置') }}</button></footer>
+        <footer><button class="console-button ghost" type="button" :disabled="resettingPassword" @click="closePasswordResetDialog">取消</button><button class="console-button primary" type="button" :disabled="!selectedPasswordResetAccount || resettingPassword" @click="confirmPasswordReset">{{ resettingPassword ? (selectedPasswordResetAccount?.password_initialized === false ? '正在初始化…' : '正在重置…') : (selectedPasswordResetAccount?.password_initialized === false ? '初始化密码' : '重置密码') }}</button></footer>
       </section>
     </div>
 
@@ -2705,7 +2773,7 @@ onBeforeUnmount(() => {
       <section class="iam-modal iam-confirm-modal" role="dialog" aria-modal="true" aria-label="确认删除用户">
         <header><div><p>危险操作</p><h3>确认删除用户</h3></div><button class="console-modal-close" type="button" aria-label="关闭删除用户确认" :disabled="deletingUser" @click="closeUserDeletionDialog"><ConsoleIcon name="close" /></button></header>
         <div class="iam-confirm-body"><p>确认删除用户 <strong>{{ userDeletionDialog.display_name || userDeletionDialog.user_id }}</strong> 吗？该操作不可恢复；关联登录账号和任职关系将同步删除，当前登录会话也会立即失效。</p><dl class="iam-confirm-summary"><div><dt>用户 ID</dt><dd class="console-mono">{{ userDeletionDialog.user_id }}</dd></div><div><dt>当前版本</dt><dd>{{ userDeletionDialog.version ?? 0 }}</dd></div></dl></div>
-        <footer><button class="console-button ghost" type="button" :disabled="deletingUser" @click="closeUserDeletionDialog">取消</button><button class="console-button iam-danger-button" type="button" :disabled="deletingUser" @click="confirmUserDeletion">{{ deletingUser ? '正在删除…' : '确认删除' }}</button></footer>
+        <footer><button class="console-button ghost" type="button" :disabled="deletingUser" @click="closeUserDeletionDialog">取消</button><button class="console-button iam-danger-button" type="button" :disabled="deletingUser" @click="confirmUserDeletion">{{ deletingUser ? '正在删除…' : '删除用户' }}</button></footer>
       </section>
     </div>
 

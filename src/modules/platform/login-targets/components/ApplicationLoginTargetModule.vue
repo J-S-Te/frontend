@@ -12,6 +12,8 @@ import { useRelatedDataInvalidation } from '@/modules/platform/shared/composable
 import { RELATED_DATA } from '@/modules/platform/shared/utils/relatedDataInvalidation'
 import { formatUserError } from '../../../shared/utils/userError.js'
 import { formatBusinessDateTime } from '@/modules/shared/utils/businessTime.js'
+import ListState from '@/modules/shared/components/ListState.vue'
+import PaginationBar from '@/modules/shared/components/PaginationBar.vue'
 import '@/modules/platform/login-targets/styles/application-login-target.css'
 
 const props = defineProps({
@@ -26,6 +28,8 @@ const emit = defineEmits(['toast'])
 const loading = ref(false)
 const submitting = ref(false)
 const errorMessage = ref('')
+// 读取失败与保存失败分开：读取失败走列表三态（带重试），不能显示成「尚未登记登录目标」。
+const listError = ref('')
 const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
@@ -40,6 +44,8 @@ const hasBoundary = computed(() => Boolean(props.applicationId && props.environm
 const canCreateTarget = computed(() => hasPermission('platform:application-login-target:create'))
 const canUpdateTarget = computed(() => hasPermission('platform:application-login-target:update'))
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
+// 加载中 / 读取失败 / 没有登记记录 由 ListState 统一接管，表格只在有数据时渲染。
+const listState = computed(() => loading.value || Boolean(listError.value) || !targets.value.length)
 const heading = computed(() => {
   const labels = [props.applicationName, props.environmentName].filter(Boolean)
   return labels.length ? `${labels.join(' / ')} 的登录目标` : '跨应用统一登录目标'
@@ -122,6 +128,7 @@ async function loadTargets() {
 
   loading.value = true
   errorMessage.value = ''
+  listError.value = ''
   try {
     const data = await listApplicationLoginTargets({
       applicationId: props.applicationId,
@@ -140,7 +147,7 @@ async function loadTargets() {
       await loadTargets()
     }
   } catch (error) {
-    errorMessage.value = formatUserError(error, { fallback: '读取登录目标失败。' })
+    listError.value = formatUserError(error, { fallback: '读取登录目标失败。' })
   } finally {
     loading.value = false
   }
@@ -256,7 +263,16 @@ useRelatedDataInvalidation((event) => {
 
       <p v-if="errorMessage" class="login-target-module__error" role="alert">{{ errorMessage }}</p>
 
-      <div class="console-table-card login-target-module__table-card">
+      <ListState
+        v-if="listState"
+        :loading="loading"
+        :error="listError"
+        error-title="登录目标加载失败"
+        empty-title="当前应用环境尚未登记登录目标。"
+        compact
+        @retry="loadTargets"
+      />
+      <div v-else class="console-table-card login-target-module__table-card">
         <div class="console-table-scroll">
           <table class="console-data-table login-target-module__table">
             <thead>
@@ -270,12 +286,6 @@ useRelatedDataInvalidation((event) => {
               </tr>
             </thead>
             <tbody>
-              <tr v-if="loading">
-                <td colspan="6" class="login-target-module__state">正在读取登录目标…</td>
-              </tr>
-              <tr v-else-if="!targets.length">
-                <td colspan="6" class="login-target-module__state">当前应用环境尚未登记登录目标。</td>
-              </tr>
               <tr v-for="target in targets" :key="targetID(target)">
                 <td><code>{{ target.target_code }}</code></td>
                 <td>{{ target.name }}</td>
@@ -290,12 +300,7 @@ useRelatedDataInvalidation((event) => {
       </div>
 
       <footer class="login-target-module__pagination">
-        <span>共 {{ total }} 条</span>
-        <div>
-          <button class="console-button ghost small" type="button" :disabled="page <= 1 || loading" @click="setPage(page - 1)">上一页</button>
-          <span>{{ page }} / {{ totalPages }}</span>
-          <button class="console-button ghost small" type="button" :disabled="page >= totalPages || loading" @click="setPage(page + 1)">下一页</button>
-        </div>
+        <PaginationBar label="登录目标分页" :page="page" :total="total" :page-size="pageSize" :loading="loading" @change="setPage" />
       </footer>
     </template>
 
@@ -335,7 +340,7 @@ useRelatedDataInvalidation((event) => {
         <p v-if="errorMessage" class="login-target-module__error" role="alert">{{ errorMessage }}</p>
         <footer>
           <button class="console-button ghost" type="button" :disabled="submitting" @click="closeEditor">取消</button>
-          <button class="console-button primary" type="submit" :disabled="submitting">{{ submitting ? '保存中…' : '保存' }}</button>
+          <button class="console-button primary" type="submit" :disabled="submitting">{{ submitting ? '保存中…' : '保存登录目标' }}</button>
         </footer>
       </form>
     </div>

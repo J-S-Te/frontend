@@ -4,13 +4,18 @@ import { ref } from 'vue'
 import { useInvoiceRequests } from './useInvoiceRequests.js'
 import { todayBusinessDate } from '../../shared/utils/businessTime.js'
 
-// manualIssue 三次 window.prompt（逐字迁移的遗留）：桩按顺序返回答案并记录默认值。
-const prompt = { answers: [], defaults: [] }
-globalThis.window = { prompt: (_message, fallback) => { prompt.defaults.push(fallback); return prompt.answers.shift() } }
+// 原生输入框仅作旧行为对照；新流程必须调用注入的应用内表单。
+globalThis.window = { prompt: () => null }
 
-function harness({ requests = [], invoices = [], eligible = [], refreshed = true, failure = null, cancelFailure = null } = {}) {
-  const calls = { create: [], approve: [], reject: [], cancel: [], manual: [], recover: [], load: 0, notify: [], act: [] }
+// 用途：建立隔离的结算交互依赖，记录提交与应用内表单请求。
+// 参数：测试场景指定可见数据、表单结果及依赖失败。
+// 返回值：真实 composable 状态、注入依赖与调用记录。
+function harness({ requests = [], invoices = [], eligible = [], refreshed = true, failure = null, cancelFailure = null, promptAnswer = null } = {}) {
+  const calls = { create: [], approve: [], reject: [], cancel: [], manual: [], recover: [], prompts: [], load: 0, notify: [], act: [] }
   const deps = {
+    can: () => true,
+    askPrompt: async (options) => { calls.prompts.push(options); return promptAnswer },
+    active: ref("invoices"),
     invoiceRequests: ref(requests),
     taxInvoices: ref(invoices),
     invoiceEligibleReceivables: ref(eligible),
@@ -150,23 +155,72 @@ test('审核：approveInvoice 装载审核项并打开；驳回必须填原因�
   assert.equal(h.calls.act.at(-1), '开票申请已驳回，锁定的可开票余额已释放。')
 })
 
-test('manualIssue：三步 prompt 任一取消即放弃；全部填写后按申请 ID 登记并带空 seller_profile；日期 prompt 默认今天', async () => {
-  const h = harness()
-  prompt.answers = ['', 'x', 'y']
-  await h.manualIssue({ id: 'R1' })
-  prompt.answers = ['CODE', null, 'y']
-  await h.manualIssue({ id: 'R1' })
-  prompt.answers = ['CODE', 'NO', '']
-  await h.manualIssue({ id: 'R1' })
-  assert.equal(h.calls.manual.length, 0, '任一步取消或留空都不得登记')
+test('manualIssue：单次表单取消不登记；完整提交只登记原申请并保留北京日期默认值', async () => {
+  const item = { id: 'R1', version: 2, status: 'ISSUE_PENDING', issue_channel: 'MANUAL' }
+  const cancelled = harness({ requests: [item] })
+  await cancelled.manualIssue(item)
+  assert.equal(cancelled.calls.manual.length, 0)
+  assert.equal(cancelled.calls.prompts.length, 1)
+  const options = cancelled.calls.prompts[0]
+  assert.equal(options.confirmText, '登记发票')
+  assert.deepEqual(options.fields.map(({ name, type, required }) => ({ name, type, required })), [
+    { name: 'invoice_code', type: 'text', required: true },
+    { name: 'invoice_no', type: 'text', required: true },
+    { name: 'issue_date', type: 'date', required: true },
+  ])
+  assert.equal(options.fields[2].initialValue, todayBusinessDate())
 
-  prompt.defaults.length = 0
-  prompt.answers = ['CODE-1', 'NO-9', '2026-10-26']
-  await h.manualIssue({ id: 'R1' })
-  assert.deepEqual(h.calls.manual, [{ id: 'R1', body: { invoice_code: 'CODE-1', invoice_no: 'NO-9', issue_date: '2026-10-26', seller_profile: {} } }])
-  assert.equal(prompt.defaults.at(-1), todayBusinessDate(), '开票日期默认北京“今天”')
-  assert.match(prompt.defaults.at(-1), /^\d{4}-\d{2}-\d{2}$/, '纯日期字段不带时间与时区后缀')
-  assert.deepEqual(h.calls.act, ['发票已登记，应收开票金额已同步更新。'])
+  const completed = harness({ requests: [item], promptAnswer: {
+    invoice_code: ' CODE-1 ', invoice_no: ' NO-9 ', issue_date: '2026-10-26',
+  } })
+  await completed.manualIssue(item)
+  assert.deepEqual(completed.calls.manual, [{ id: 'R1', body: {
+    invoice_code: 'CODE-1', invoice_no: 'NO-9', issue_date: '2026-10-26', seller_profile: {},
+  } }])
+  assert.deepEqual(completed.calls.act, ['发票已登记，应收开票金额已同步更新。'])
+})
+
+test('manualIssue：等待表单时单飞，版本、状态、权限、忙锁变化和不完整输入均不登记', async () => {
+  const item = { id: 'R1', version: 2, status: 'ISSUE_PENDING', issue_channel: 'MANUAL' }
+  const answer = { invoice_code: 'CODE', invoice_no: 'NO', issue_date: '2026-10-26' }
+  for (const mutate of [
+    (h) => { h.deps.invoiceRequests.value[0].version++ },
+    (h) => { h.deps.invoiceRequests.value[0].status = 'ISSUED' },
+    (h) => { h.deps.invoiceRequests.value = [] },
+    (h) => { h.deps.invoiceRequests.value[0].issue_channel = "TAX_ADAPTER" },
+    (h) => { h.deps.active.value = "receipts" },
+    (h) => { h.deps.can = null },
+    (h) => { h.deps.saving.value = true },
+  ]) {
+    const h = harness({ requests: [{ ...item }] })
+    let resolve
+    let allowed = true
+    h.deps.can = () => allowed
+    // composable 注入后由闭包反映实时权限变化。
+    const api = useInvoiceRequests({ ...h.deps, can: () => allowed,
+      askPrompt: () => new Promise((done) => { resolve = done }),
+    })
+    const pending = api.manualIssue(h.deps.invoiceRequests.value[0])
+    await api.manualIssue(h.deps.invoiceRequests.value[0])
+    assert.equal(h.calls.manual.length, 0)
+    mutate(h)
+    if (h.deps.can === null) allowed = false
+    resolve(answer)
+    await pending
+    assert.equal(h.calls.manual.length, 0, '表单等待期间条件变化必须阻止登记')
+  }
+  for (const invalid of [
+    { ...answer, invoice_code: '  ' }, { ...answer, invoice_no: '' },
+    { ...answer, issue_date: '' }, { ...answer, issue_date: '2026-02-30' },
+  ]) {
+    const h = harness({ requests: [{ ...item }], promptAnswer: invalid })
+    await h.manualIssue(h.deps.invoiceRequests.value[0])
+    assert.equal(h.calls.manual.length, 0)
+  }
+  const denied = harness({ requests: [item] })
+  const api = useInvoiceRequests({ ...denied.deps, can: () => false })
+  await api.manualIssue(item)
+  assert.equal(denied.calls.prompts.length, 0)
 })
 
 // SET-06 作废（释放额度）：只在状态允许时进入，原因 5–1000 字，成功后以刷新结果为准，失败保留弹窗。

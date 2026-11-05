@@ -94,7 +94,7 @@ function chooseInvoiceDocument() {
           :disabled="saving"
           @click="$emit('review-red-flush', false)"
         >
-          驳回红冲
+          驳回红冲申请
         </button>
         <button
           class="console-button danger"

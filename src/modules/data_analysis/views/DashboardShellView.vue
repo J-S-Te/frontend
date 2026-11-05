@@ -2,7 +2,7 @@
 import { loginUsername } from "@/modules/shared/loginUsername.mjs"
 // 数据看板统一外壳（对齐 project_management 模式）：
 // 深色侧栏导航 + 顶栏 + 页面头，按 route.params.section 切换分区；
-// 总览、报告、财务看板经嵌入桥加载；合同、项目看板使用本地原生模型，避免空白 iframe。
+// 启用嵌入时总览、报告、财务看板经嵌入桥加载；合同、项目看板使用本地原生模型，避免空白 iframe。
 import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import { AuthError, logoutCurrentSession } from "@/modules/platform/auth/api/auth"
@@ -10,7 +10,7 @@ import ConsoleIcon from "@/modules/platform/shared/components/ConsoleIcon.vue"
 import ErrorState from "@/modules/platform/shared/components/ErrorState.vue"
 import LoadingState from "@/modules/platform/shared/components/LoadingState.vue"
 import { closeSubsystemTabOrFallback } from "@/modules/shared/utils/returnToPortal"
-import { getAuthMe, getEmbedToken, getContractDashboardSummary, getProjectDashboardSummary, getReportDashboardSummary, getFinanceDashboardSummary, getContractDetails, getDashboardTrend, getAlertSummary } from "../api/dataAnalysis"
+import { isDashboardEmbedEnabled, getAuthMe, getEmbedToken, getContractDashboardSummary, getProjectDashboardSummary, getReportDashboardSummary, getFinanceDashboardSummary, getContractDetails, getDashboardTrend, getAlertSummary } from "../api/dataAnalysis"
 import AlertsCenterView from "./AlertsCenterView.vue"
 import DictionaryView from "./DictionaryView.vue"
 import AdminSourcesView from "./AdminSourcesView.vue"
@@ -60,7 +60,7 @@ const ROLE_LABELS = {
   finance_manager: "财务经理",
   dashboard_admin: "看板系统管理员",
 }
-// 合同、项目看板只展示聚合库摘要；其余看板仍通过统一嵌入桥加载。
+// 五种看板均保留原生摘要；总览、报告、财务按服务端能力附加嵌入区域。
 const EMBEDDED_DASHBOARD_SECTIONS = DASHBOARD_SECTIONS.filter((code) => !['contract', 'project'].includes(code))
 const KNOWN_SECTIONS = [...DASHBOARD_SECTIONS, "alerts", "dictionary", "admin/sources", "admin/rules"]
 
@@ -100,9 +100,26 @@ const section = computed(() => {
 })
 
 const me = ref(null)
+const dashboardEmbedEnabled = computed(() => !!me.value && isDashboardEmbedEnabled(me.value))
 const loading = ref(true)
 const loadError = ref("")
 const mobileMenuOpen = ref(false)
+// 侧栏的稳定 id 由模板给出（aria-controls 指向它）；menuButton 是抽屉收起后焦点的落脚点。
+const menuButton = ref(null)
+
+// closeMenuOnEscape 处理文档级 Escape：只在抽屉打开时收起，收起后把焦点交还汉堡按钮，
+// 键盘用户不会掉进已隐藏的侧栏。
+// 参数：event 为 keydown 事件。返回值：无。
+function closeMenuOnEscape(event) {
+  if (event.key !== "Escape" && event.key !== "Esc") return
+  if (!mobileMenuOpen.value) return
+  // 弹窗（确认框 / 指标卡设置等）先处理同一个 Escape：抽屉既不抢按键，也不抢焦点。
+  if (event.defaultPrevented) return
+  if (document.body?.dataset?.confirmDialogOpen === "true") return
+  if (document.querySelector('[role="dialog"]')) return
+  mobileMenuOpen.value = false
+  menuButton.value?.focus?.()
+}
 const iframeSrc = ref("")
 const embedFrame = ref(null)
 const recordEmbeddedActivity = inject('central-session-record-activity', null)
@@ -128,6 +145,16 @@ let embedExpiresAt = 0
 let relatedRefreshTimer = null
 let unsubscribeRelatedData = null
 const EMBED_RENEW_BEFORE_SECONDS = 30
+
+// 服务端切换到原生模式后清理旧能力，防止在途响应恢复旧 iframe。
+watch(dashboardEmbedEnabled, (enabled) => {
+  if (enabled) return
+  iframeRequestVersion += 1
+  clearEmbedRenewal()
+  iframeSrc.value = ""
+  iframeError.value = null
+  iframeLoading.value = false
+})
 
 const currentMeta = computed(() => pageMeta[section.value] || pageMeta.overview)
 const currentUserName = computed(() => loginUsername(me.value))
@@ -197,7 +224,11 @@ async function loadMe() {
   }
 }
 
+// 用途：按服务端能力加载隔离嵌入看板，原生模式不签发令牌。
+// 参数：code 为当前可见看板代码。
+// 返回值：无；加载失败写入页面错误状态。
 async function loadDashboard(code) {
+  if (!dashboardEmbedEnabled.value) return
   const requestVersion = ++iframeRequestVersion
   iframeLoading.value = true
   iframeError.value = null
@@ -223,6 +254,9 @@ function clearEmbedRenewal() {
   embedExpiresAt = 0
 }
 
+// 用途：在当前嵌入能力到期前安排安全重签。
+// 参数：expiresAtSeconds 为期限，code 为看板，requestVersion 为请求版本。
+// 返回值：无；原生模式及旧请求不会续签。
 function scheduleEmbedRenewal(expiresAtSeconds, code, requestVersion) {
   clearEmbedRenewal()
   if (!expiresAtSeconds) return
@@ -232,7 +266,8 @@ function scheduleEmbedRenewal(expiresAtSeconds, code, requestVersion) {
     // 仅为仍处于激活状态的嵌入区域重新签发令牌；令牌
     // 仅可使用一次，不能原地续期。应重新加载，
     // 避免 iframe 继续使用过期令牌交互。
-    if (requestVersion !== iframeRequestVersion || section.value !== code || !EMBEDDED_DASHBOARD_SECTIONS.includes(code)) return
+    if (requestVersion !== iframeRequestVersion || section.value !== code) return
+    if (!dashboardEmbedEnabled.value || !EMBEDDED_DASHBOARD_SECTIONS.includes(code)) return
     if (document.visibilityState === "hidden") {
       // 页签重新激活时由可见性监听器续期，
       // 不要创建短周期的后台定时循环。
@@ -243,10 +278,13 @@ function scheduleEmbedRenewal(expiresAtSeconds, code, requestVersion) {
   }, delay)
 }
 
+// 用途：页签恢复可见时按当前能力检查嵌入期限。
+// 参数：无。
+// 返回值：无；原生模式不发起嵌入请求。
 function onVisibilityChange() {
   if (document.visibilityState === "visible" && embedExpiresAt) {
     const code = DASHBOARD_CODES[section.value]
-    if (code && EMBEDDED_DASHBOARD_SECTIONS.includes(section.value)) {
+    if (code && dashboardEmbedEnabled.value && EMBEDDED_DASHBOARD_SECTIONS.includes(section.value)) {
       if (Math.floor(Date.now() / 1000) >= embedExpiresAt - EMBED_RENEW_BEFORE_SECONDS) loadDashboard(code)
       else scheduleEmbedRenewal(embedExpiresAt, code, iframeRequestVersion)
     }
@@ -334,11 +372,14 @@ function scheduleRelatedRefresh() {
   }, 50)
 }
 
+// 用途：刷新当前原生摘要并按服务端能力附加嵌入刷新。
+// 参数：无。
+// 返回值：无；摘要与嵌入分别保留各自错误状态。
 async function refreshCurrentDashboard() {
   const code = DASHBOARD_CODES[section.value]
   if (!code) return
   const tasks = [loadSummary(code)]
-  if (EMBEDDED_DASHBOARD_SECTIONS.includes(section.value)) tasks.push(loadDashboard(code))
+  if (dashboardEmbedEnabled.value && EMBEDDED_DASHBOARD_SECTIONS.includes(section.value)) tasks.push(loadDashboard(code))
   await Promise.all(tasks)
 }
 
@@ -376,7 +417,7 @@ watch(() => section.value, (value) => {
       if (fallback) router.replace({ name: "data_analysis", params: { section: fallback } })
       return
     }
-    if (EMBEDDED_DASHBOARD_SECTIONS.includes(value)) {
+    if (dashboardEmbedEnabled.value && EMBEDDED_DASHBOARD_SECTIONS.includes(value)) {
       loadDashboard(DASHBOARD_CODES[value])
     } else {
       // 离开嵌入看板时清理上一次令牌，避免业务摘要页残留旧 iframe 状态。
@@ -396,6 +437,8 @@ watch(statusOptions, (options) => {
 
 onMounted(async () => {
   document.addEventListener("visibilitychange", onVisibilityChange)
+  // 抽屉的 Escape 必须挂在 document 上：焦点在遮罩或侧栏里时事件不会冒泡到外壳根节点。
+  document.addEventListener("keydown", closeMenuOnEscape)
   unsubscribeRelatedData = subscribeRelatedDataChanges(scheduleRelatedRefresh, { kinds: [RELATED_DATA.ORGANIZATIONS, RELATED_DATA.POSITIONS, RELATED_DATA.MEMBERSHIPS, RELATED_DATA.ROLE_CATALOG] })
   await loadMe()
   if (DASHBOARD_SECTIONS.includes(section.value)) {
@@ -405,7 +448,7 @@ onMounted(async () => {
       return
     }
     const tasks = [loadSummary(DASHBOARD_CODES[section.value])]
-    if (EMBEDDED_DASHBOARD_SECTIONS.includes(section.value)) {
+    if (dashboardEmbedEnabled.value && EMBEDDED_DASHBOARD_SECTIONS.includes(section.value)) {
       tasks.unshift(loadDashboard(DASHBOARD_CODES[section.value]))
     }
     await Promise.all(tasks)
@@ -418,12 +461,14 @@ onBeforeUnmount(() => {
   if (relatedRefreshTimer) window.clearTimeout(relatedRefreshTimer)
   if (unsubscribeRelatedData) unsubscribeRelatedData()
   document.removeEventListener("visibilitychange", onVisibilityChange)
+  // 模块切走后不再持有 Escape 监听，避免去动已经卸载的抽屉状态。
+  document.removeEventListener("keydown", closeMenuOnEscape)
 })
 </script>
 
 <template>
   <div class="console-page da-shell">
-    <aside class="da-sidebar" :class="{ open: mobileMenuOpen }">
+    <aside id="da-sidebar" class="da-sidebar" :class="{ open: mobileMenuOpen }">
       <div class="da-brand">
         <span class="da-brand-mark"><ConsoleIcon name="logo" /></span>
         <span><b>数据看板与统计分析</b><small>DATA INTELLIGENCE</small></span>
@@ -449,9 +494,9 @@ onBeforeUnmount(() => {
     </aside>
     <div v-if="mobileMenuOpen" class="da-menu-mask" @click="mobileMenuOpen = false"></div>
 
-    <main class="da-main">
+    <main id="main-content" class="da-main" tabindex="-1">
       <header class="da-topbar">
-        <button class="da-icon-button da-menu-button" aria-label="打开菜单" @click="mobileMenuOpen = true"><ConsoleIcon name="menu" /></button>
+        <button ref="menuButton" class="da-icon-button da-menu-button" aria-label="打开菜单" :aria-expanded="mobileMenuOpen ? 'true' : 'false'" aria-controls="da-sidebar" @click="mobileMenuOpen = true"><ConsoleIcon name="menu" /></button>
         <div class="da-breadcrumb"><span>数据看板与统计分析</span><ConsoleIcon name="chevron" /><strong>{{ currentMeta[0] }}</strong></div>
         <div class="da-top-tools"><span class="da-topbar-avatar">{{ currentUserInitial }}</span></div>
       </header>
@@ -484,13 +529,15 @@ onBeforeUnmount(() => {
             :can-view-contract="canViewDashboard('contract')"
             :can-view-project="canViewDashboard('project')"
     :status-filter="statusFilter"
+            :tenant-id="me?.tenant_id"
+            :user-id="me?.user_id"
             :trend="section === 'overview' ? dashboardTrend : []"
             :alert-summary="section === 'overview' ? alertSummary : null"
           />
           <ContractImportHistoryPanel v-if="section === 'contract' && canViewDashboard('contract')" />
           <p v-if="summaryError && section === 'overview'" class="da-native-inline-error" role="alert">{{ summaryError }}</p>
           <p v-if="detailError && section === 'contract'" class="da-native-inline-error" role="alert">{{ detailError }}</p>
-          <section v-if="EMBEDDED_DASHBOARD_SECTIONS.includes(section)" class="da-frame-panel">
+          <section v-if="dashboardEmbedEnabled && EMBEDDED_DASHBOARD_SECTIONS.includes(section)" class="da-frame-panel">
             <header class="da-frame-head"><div><p>EMBEDDED DASHBOARD</p><b>{{ currentMeta[0] }}</b></div><span>经统一嵌入桥加载 · 数据实时刷新</span></header>
             <div class="da-frame-stage">
               <LoadingState v-if="iframeLoading" title="看板加载中…" compact />

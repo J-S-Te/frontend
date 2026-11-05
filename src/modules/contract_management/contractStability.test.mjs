@@ -57,11 +57,14 @@ test('催办写入成功但签署记录刷新失败：提示已保存与刷新�
 test('盖章文件上传成功但刷新失败：提示已上传并提醒核对版本，不误报上传失败', async () => {
   const pending = deferred()
   const toasts = []
+  const signingDetailScope = createRequestScope()
   const context = {
     ref, formatUserError,
+    signingDetailScope, signingDetailTicket: signingDetailScope.begin('SIGNING_RECORD:CT-7'),
     stampedUploadBusyID: ref(''),
     signingReplacementReason: ref(''),
     signingOpenedDocument: ref({ version: 2, sha256: 'doc-hash' }),
+    signingConfirmationForm: ref({ seal_verified: false, signature_verified: false, signed_at: '' }),
     selectedSigningRecord: ref({ contract: { recordId: 'CT-7' }, document_version: 2 }),
     uploadStampedContractPDF: () => pending.promise,
     refreshSelectedSigningRecord: async () => { throw new Error('刷新失败') },
@@ -71,7 +74,7 @@ test('盖章文件上传成功但刷新失败：提示已上传并提醒核对�
   const { uploadStampedContract } = functions('./views/ContractManagementView.vue', ['uploadStampedContract'], context)
   const event = { target: { files: [{ name: 'stamped.pdf' }], value: 'kept' } }
   const saving = uploadStampedContract({ recordId: 'CT-7' }, event)
-  pending.resolve({ document_version: 3 })
+  pending.resolve({ version: 3, content_sha256: 'a'.repeat(64) })
   await saving
   assert.match(toasts.at(-1), /盖章文件已上传/)
   assert.match(toasts.at(-1), /刷新失败.*手动刷新/)
@@ -84,8 +87,10 @@ test('盖章文件上传失败：按操作失败提示，不宣称已上传也�
   const pending = deferred()
   const toasts = []
   let refreshes = 0
+  const signingDetailScope = createRequestScope()
   const context = {
     ref, formatUserError,
+    signingDetailScope, signingDetailTicket: signingDetailScope.begin('SIGNING_RECORD:CT-7'),
     stampedUploadBusyID: ref(''),
     signingReplacementReason: ref('旧原因'),
     signingOpenedDocument: ref({ version: 2, sha256: 'doc-hash' }),

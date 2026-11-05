@@ -64,11 +64,19 @@ test('contract reads and writes reject HTML 200, malformed JSON and missing succ
 test('contract envelopes retain lists, null legacy lists, mutation results and JSON media parameters', async () => {
   for (const type of ['application/json; charset=utf-8', 'application/vnd.contract+json']) {
     await withResponse('{"code":"OK","data":[{"id":"one"}]}', type, async () => {
-      assert.deepEqual(await api.listContracts(), [{ id: 'one' }])
+      // 滚动发布兼容：旧版 GET /contracts 的裸数组降级成“单页、total=已加载条数”。
+      assert.deepEqual(await api.listContracts(), { items: [{ id: 'one' }], total: 1, page: 1, page_size: 1 })
     })
   }
   await withResponse('{"code":"OK","data":null}', 'application/json', async () => {
-    assert.deepEqual(await api.listContracts(), [])
+    assert.deepEqual(await api.listContracts(), { items: [], total: 0, page: 1, page_size: 0 })
+  })
+  await withResponse('{"code":"OK","data":{"items":[{"id":"two"}],"total":41,"page":2,"page_size":20}}', 'application/json', async () => {
+    // 新协议：服务端分页信封带真实总数，前端不得用本页行数冒充 total。
+    assert.deepEqual(await api.listContracts({ page: 2, page_size: 20 }), { items: [{ id: 'two' }], total: 41, page: 2, page_size: 20 })
+  })
+  await withResponse('{"code":"OK","data":{"items":[],"total":0,"page":1,"page_size":20}}', 'application/json', async () => {
+    assert.deepEqual(await api.listContracts({ page: 1, page_size: 20 }), { items: [], total: 0, page: 1, page_size: 20 })
   })
   await withResponse('{"code":"OK","data":{"id":"one","version":1,"status":"draft"}}', 'application/json', async () => {
     assert.deepEqual(await api.createContract({ title: '测试' }), { id: 'one', version: 1, status: 'draft' })

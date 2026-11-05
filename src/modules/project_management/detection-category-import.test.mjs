@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFile } from 'node:fs/promises'
 import { formatUserError } from '../shared/utils/userError.js'
+import { projectImportErrorRows, projectImportErrorsCsv } from './importErrors.js'
+import { importIdempotencyKey } from './importIdempotency.js'
 
 const dialog = await readFile(new URL('./components/DetectionCategoryImportDialog.vue', import.meta.url), 'utf8')
 const api = await readFile(new URL('./api/projectManagement.js', import.meta.url), 'utf8')
@@ -9,8 +11,8 @@ const view = await readFile(new URL('./views/ProjectManagementView.vue', import.
 function mount(calls = {}) {
   const script = dialog.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '')
   const events = []
-  const state = new Function('formatUserError', 'computed', 'ref', 'defineProps', 'defineEmits', 'downloadDetectionCategoryImportTemplate', 'previewDetectionCategoriesImport', 'importDetectionCategories', `${script}\nreturn { file, preview, result, selected, busy, error, filter, visibleRows, selectedCount, pick, inspect, commit, reset, selectAll, importMessage }`)(
-    formatUserError, (read) => ({ get value() { return read() } }), (value) => ({ value }), () => ({ codeOptions: [] }), () => (...args) => events.push(args), calls.download, calls.preview, calls.commit,
+  const state = new Function('formatUserError', 'computed', 'ref', 'defineProps', 'defineEmits', 'downloadDetectionCategoryImportTemplate', 'previewDetectionCategoriesImport', 'importDetectionCategories', 'importIdempotencyKey', 'projectImportErrorRows', 'projectImportErrorsCsv', `${script}\nreturn { file, preview, result, selected, busy, error, filter, visibleRows, selectedCount, pick, inspect, commit, reset, selectAll, importMessage, errorReportRows, canDownloadErrors, downloadErrorReport }`)(
+    formatUserError, (read) => ({ get value() { return read() } }), (value) => ({ value }), () => ({ codeOptions: [] }), () => (...args) => events.push(args), calls.download, calls.preview, calls.commit, importIdempotencyKey, projectImportErrorRows, projectImportErrorsCsv,
   )
   return { ...state, events }
 }
@@ -56,7 +58,10 @@ test('确认重新提交原文件和有效物理行号，逐行结果展示且�
   state.preview.value = { rows: [{ row_no: 2, status: 'READY' }, { row_no: 3, status: 'INVALID' }] }
   state.selected.value = [2, 3]
   await state.commit(); await state.commit()
-  assert.deepEqual(commands, [[file, [2]]])
+  assert.equal(commands.length, 1)
+  assert.equal(commands[0][0], file)
+  assert.deepEqual(commands[0][1], [2])
+  assert.match(commands[0][2], /^pm-import-detection-category-[0-9a-f]{16}$/)
   assert.equal(state.events[0][0], 'completed')
   assert.equal(state.result.value.rows[0].status, 'IMPORTED')
 })
@@ -94,4 +99,35 @@ test('确认请求处理中重复点击被阻止，逐行失败正常交付结�
   await pending
   assert.equal(state.result.value.rows[0].status, 'FAILED')
   assert.equal(state.events.length, 1)
+})
+test('检测类别导入错误报告按钮按非成功行启用，结果阶段优先使用结果数据', () => {
+  const state = mount()
+  assert.match(dialog, /下载错误报告 CSV/)
+  assert.match(dialog, /:disabled="busy \|\| !canDownloadErrors"/)
+  assert.equal(state.canDownloadErrors.value, false)
+  state.preview.value = { rows: [{ row_no: 2, status: 'READY' }, { row_no: 3, status: 'INVALID', errors: ['重复类别'] }] }
+  assert.equal(state.canDownloadErrors.value, true)
+  assert.equal(state.errorReportRows.value.length, 1)
+  state.result.value = { imported: 1, skipped: 0, rows: [{ row_no: 2, status: 'IMPORTED' }] }
+  assert.equal(state.canDownloadErrors.value, false)
+  assert.match(dialog, /检测类别导入错误\.csv/)
+})
+
+test('失败重试复用同一幂等键，改选行或换文件后换键', async () => {
+  const commands = []
+  const state = mount({ commit: async (...args) => { commands.push(args); throw new Error('网络中断') } })
+  state.file.value = file
+  state.preview.value = { rows: [{ row_no: 2, status: 'READY' }, { row_no: 3, status: 'READY' }] }
+  state.selected.value = [2, 3]
+  await state.commit()
+  await state.commit()
+  assert.equal(commands.length, 2)
+  assert.equal(commands[0][2], commands[1][2])
+  assert.match(commands[0][2], /^pm-import-detection-category-[0-9a-f]{16}$/)
+  state.selected.value = [2]
+  await state.commit()
+  assert.notEqual(commands[2][2], commands[0][2])
+  state.file.value = { ...file, lastModified: 123 }
+  await state.commit()
+  assert.notEqual(commands[3][2], commands[2][2])
 })

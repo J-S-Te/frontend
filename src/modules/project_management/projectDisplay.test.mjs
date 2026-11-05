@@ -11,11 +11,16 @@ import {
   emptyAdjustForm,
   eventLabel,
   formatDateTime,
+  monitoringFilterQuery,
   monitoringSlaLabel,
+  monitoringStatusBuckets,
   multiSummary,
   planEquipmentFor,
   planPersonnelFor,
   planPersonnelRows,
+  projectReportStageLabel,
+  reportStageLabel,
+  reportStatusLabel,
   selectedIDs,
   slaDueLabel,
   startOfWeek,
@@ -72,11 +77,86 @@ test('selectedIDs 兼容中英文分隔符并丢弃空白项', () => {
 
 test('statusTone 提供统一的语义胶囊色调，未知状态回落 neutral', () => {
   assert.equal(statusTone('实施中'), 'amber')
+  assert.equal(statusTone('整改中'), 'amber')
+  assert.equal(statusTone('RECTIFYING'), 'amber')
   assert.equal(statusTone('已签发'), 'blue')
   assert.equal(statusTone('已完成'), 'green')
   assert.equal(statusTone('REJECTED'), '风险')
   assert.equal(statusTone('未知状态'), 'neutral')
   assert.equal(statusTone(' 待处理 '), 'amber')
+})
+
+test('报告阶段中文词表唯一，旧后端缺字段时返回空串', () => {
+  assert.deepEqual({ ...reportStageLabel }, {
+    NONE: '待整改',
+    RECTIFYING: '整改中',
+    COMPILING: '编制中',
+    REVIEWED: '已审核',
+    ISSUED: '已签发',
+    ARCHIVED: '已归档',
+  })
+  // 服务项报告状态与项目报告阶段共用同一份中文词表，避免两处文案漂移。
+  assert.equal(reportStatusLabel, reportStageLabel)
+  assert.equal(projectReportStageLabel({ report_stage: 'RECTIFYING' }), '整改中')
+  assert.equal(projectReportStageLabel({ report_stage: 'NONE' }), '待整改')
+  assert.equal(projectReportStageLabel({ report_stage: 'ARCHIVED' }), '已归档')
+  // 旧后端没有 report_stage、空串或未知码都不显示，也不能从项目状态自行推断。
+  assert.equal(projectReportStageLabel({}), '')
+  assert.equal(projectReportStageLabel({ report_stage: '' }), '')
+  assert.equal(projectReportStageLabel({ report_stage: '   ' }), '')
+  assert.equal(projectReportStageLabel({ report_stage: 'UNKNOWN' }), '')
+  assert.equal(projectReportStageLabel(null), '')
+})
+
+test('监控页签把 report_stage 前缀解析为互斥查询参数', () => {
+  assert.deepEqual(monitoringFilterQuery('report_stage:RECTIFYING'), { status: '', report_stage: 'RECTIFYING' })
+  assert.deepEqual(monitoringFilterQuery('report_stage:COMPILING'), { status: '', report_stage: 'COMPILING' })
+  // 普通页签继续按派生状态过滤；风险与全部不带状态。
+  assert.deepEqual(monitoringFilterQuery('实施中'), { status: '实施中' })
+  assert.deepEqual(monitoringFilterQuery('报告编制'), { status: '报告编制' })
+  assert.deepEqual(monitoringFilterQuery('risk'), { status: '' })
+  assert.deepEqual(monitoringFilterQuery(''), { status: '' })
+})
+
+test('监控状态分桶：整改中单独计数并从收尾归档扣除，旧快照缺字段不报错', () => {
+  // 报告编制 10 个里有 3 个待整改 + 4 个整改中，收尾归档必须只保留剩下的 3 个，
+  // 否则同一项目会在“整改中”和“收尾归档”里各算一次。
+  const mix = monitoringStatusBuckets({
+    total: 15,
+    status_counts: { 现场实施完成: 5, 报告编制: 10 },
+    report_stage_counts: { NONE: 3, RECTIFYING: 4, COMPILING: 3 },
+  })
+  const byKey = Object.fromEntries(mix.map((bucket) => [bucket.key, bucket]))
+  assert.equal(byKey['整改中'].count, 7)
+  assert.equal(byKey['收尾归档'].count, 8)
+  assert.equal(byKey['整改中'].tone, 'var(--pm-amber)')
+  // 15 个项目的分桶互不重叠，合计必须回到快照总数。
+  assert.equal(mix.reduce((sum, bucket) => sum + bucket.count, 0), 15)
+
+  // 旧后端快照没有 report_stage_counts：不出现整改中分桶，收尾归档保持原口径。
+  const legacy = monitoringStatusBuckets({
+    total: 15,
+    status_counts: { 现场实施完成: 5, 报告编制: 10 },
+  })
+  const legacyKeys = legacy.map((bucket) => bucket.key)
+  assert.equal(legacyKeys.includes('整改中'), false)
+  assert.equal(legacy.find((bucket) => bucket.key === '收尾归档').count, 15)
+
+  // 扣除后不能出现负数；完全被整改中覆盖时收尾归档分桶直接隐藏。
+  const covered = monitoringStatusBuckets({
+    total: 5,
+    status_counts: { 报告编制: 2 },
+    report_stage_counts: { NONE: 2, RECTIFYING: 3 },
+  })
+  assert.equal(covered.find((bucket) => bucket.key === '收尾归档'), undefined)
+  assert.equal(covered.find((bucket) => bucket.key === '整改中').count, 5)
+
+  // 缺字段、空对象或非法计数都按 0 处理，不抛错。
+  assert.deepEqual(monitoringStatusBuckets(), [])
+  assert.deepEqual(monitoringStatusBuckets({}), [])
+  assert.deepEqual(monitoringStatusBuckets(null), [])
+  const malformed = monitoringStatusBuckets({ status_counts: { 实施中: '2' }, report_stage_counts: { RECTIFYING: null } })
+  assert.equal(malformed.find((bucket) => bucket.key === '实施中').count, 2)
 })
 
 test('能力生效状态与编码键统一大写并容忍空白', () => {

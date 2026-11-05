@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
+import { stat } from 'node:fs/promises'
 import test from 'node:test'
+import { fileURLToPath } from 'node:url'
 
 const rendererModule = await import('./contractPDFRenderer.js').catch(() => ({}))
 
@@ -75,6 +77,32 @@ test('PDF仅从已校验字节加载且关闭脚本求值与外部资源自动�
   await h.renderer.destroy()
 })
 
+test('图像解码上限与画布像素预算解耦且扫描件解码器走同源资源', async () => {
+  const h = harness()
+  await h.renderer.load(new Uint8Array([1]))
+  const options = h.events.find(event => event.type === 'load').options
+  assert.equal(typeof rendererModule.MAX_IMAGE_PIXELS, 'number')
+  assert.ok(rendererModule.MAX_IMAGE_PIXELS >= 48 << 20,
+    '单图解码上限必须覆盖A4@600dpi（约34.8MP），不能沿用4MP画布预算')
+  assert.notEqual(options.maxImageSize, 4_000_000)
+  assert.equal(options.maxImageSize, rendererModule.MAX_IMAGE_PIXELS)
+  assert.equal(typeof options.wasmUrl, 'string')
+  assert.equal(options.wasmUrl, rendererModule.WASM_ASSET_BASE)
+  assert.ok(options.wasmUrl.endsWith('pdfjs-wasm/'))
+  assert.equal(options.useWasm, false)
+  await h.renderer.destroy()
+})
+
+test('扫描件解码器资源随public目录发布且非空', async () => {
+  const names = ['jbig2_nowasm_fallback.js', 'openjpeg_nowasm_fallback.js']
+  for (const name of names) {
+    const file = fileURLToPath(new URL(`../../../../public/pdfjs-wasm/${name}`, import.meta.url))
+    const stats = await stat(file)
+    assert.ok(stats.isFile() && stats.size > 0,
+      `public/pdfjs-wasm/${name} 缺失或为空，打包后扫描件解码会失败`)
+  }
+})
+
 test('高分屏和异常大页面绘制始终限制像素预算且禁用交互注释', async () => {
   const h = harness()
   await h.renderer.load(new Uint8Array([1]))
@@ -132,4 +160,48 @@ test('非法页码或视口不得调用绘制，渲染错误必须向调用方�
   h.page.render = () => ({ promise: Promise.reject(new Error('PDF绘制失败')), cancel() {} })
   await assert.rejects(h.renderer.render(1, 1, 1), /PDF绘制失败/)
   await h.renderer.destroy()
+})
+
+// 引擎改为首次预览才动态下载后，注入入口变成 Promise<task>；
+// 控制器必须等它落地再登记任务，且在等待期间被取代时回收该任务。
+test('懒加载引擎返回Promise<task>时按代次加载，销毁时回收任务', async () => {
+  const canvas = { width: 0, height: 0, style: {}, getContext: () => ({}) }
+  const document = { numPages: 2, getPage: async () => ({}) }
+  const events = []
+  let resolveTask
+  const renderer = rendererModule.createContractPDFRenderer({
+    canvas,
+    loadDocument: () => new Promise((resolve) => { resolveTask = resolve }),
+  })
+  const loading = renderer.load(new Uint8Array([1]))
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(typeof resolveTask, 'function', '打开预览前不得调用引擎加载入口')
+  resolveTask({
+    promise: Promise.resolve(document),
+    destroy: async () => { events.push('document-destroy') },
+  })
+  assert.equal(await loading, 2)
+  await renderer.destroy()
+  assert.deepEqual(events, ['document-destroy'])
+})
+
+test('引擎下载期间预览被关闭时立即销毁该任务且不返回页数', async () => {
+  const canvas = { width: 0, height: 0, style: {}, getContext: () => ({}) }
+  const events = []
+  let resolveTask
+  const renderer = rendererModule.createContractPDFRenderer({
+    canvas,
+    loadDocument: () => new Promise((resolve) => { resolveTask = resolve }),
+  })
+  const loading = renderer.load(new Uint8Array([1]))
+  await new Promise(resolve => setImmediate(resolve))
+  const destroying = renderer.destroy()
+  resolveTask({
+    promise: Promise.resolve({ numPages: 1 }),
+    destroy: async () => { events.push('document-destroy') },
+  })
+  assert.equal(await loading, null)
+  await destroying
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(events, ['document-destroy'])
 })

@@ -8,12 +8,20 @@ import { ref } from "vue";
  */
 export function useSettlementActions({ load, formatSettlementError }) {
   const message = ref("");
+  // 写操作返回的**业务编号**（回款号、开票申请号等）。提示必须是短暂的，
+  // 但编号不能跟着 3.2 秒一起消失——OperationToast 会把它渲染成可复制的一行。
+  const messageReference = ref("");
   const saving = ref(false);
 
-function notify(value) {
+// 用途：展示一条操作提示，并在有业务编号时一起展示。
+// 参数：value 为提示文案；reference 为业务编号（可省略）。
+// 返回值：无。
+function notify(value, reference = "") {
   message.value = value;
+  messageReference.value = reference ? String(reference) : "";
   window.setTimeout(() => {
     message.value = "";
+    messageReference.value = "";
   }, 3200);
 }
 
@@ -31,5 +39,5 @@ async function act(callback, success) {
   }
 }
 
-  return { message, saving, notify, act };
+  return { message, messageReference, saving, notify, act };
 }

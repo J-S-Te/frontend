@@ -1,4 +1,5 @@
 <script setup>
+import { computed } from 'vue'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import { collectionStatusLabel, confirmationState, dueState, money, receivableInvoiceStatusLabel } from '@/modules/settlement/utils/settlementDisplay'
 
@@ -7,7 +8,7 @@ import { collectionStatusLabel, confirmationState, dueState, money, receivableIn
 // 可见计划 / 正式应收 / 保存态为只读 prop；planEditor 由父级持有、表单按属性直改；
 // 编辑器开关与三路筛选为双向原始值，以 defineModel 承接模板内的 v-model 与直接赋值（父级 v-model:xxx 绑定 composable 的 ref）；
 // 刷新 / 提交确认 / 重置筛选 / 发起确认以事件回传。
-defineProps({
+const props = defineProps({
   can: { type: Function, default: () => false },
   visiblePlans: { type: Array, required: true },
   receivables: { type: Array, required: true },
@@ -19,6 +20,19 @@ const planKeyword = defineModel('planKeyword')
 const planConfirmationFilter = defineModel('planConfirmationFilter')
 const planMaturityFilter = defineModel('planMaturityFilter')
 defineEmits(['reload','submit-plan','reset-filters','confirm-plan'])
+const hasLocalFinancialBasis = computed(() =>
+  [...props.visiblePlans, ...props.receivables, props.planEditor]
+    .some(item => item?.basis_type === 'LOCAL_FINANCIAL'))
+
+// 用途：按真实来源显示本地财务依据编号或原合同号，不伪造合同身份。
+// 参数：item为计划、应收或确认编辑器，fallback为旧合同无编号的原提示。
+// 返回值：可直接由Vue转义的来源文本，缺少本地编号时明确待核验。
+function financialSourceLabel(item, fallback = '—') {
+  if (item?.basis_type === 'LOCAL_FINANCIAL') {
+    return `本地财务依据 · ${item.local_document_no || '编号待核验'}`
+  }
+  return item?.contract_no || fallback
+}
 </script>
 
 <template>
@@ -28,7 +42,7 @@ defineEmits(['reload','submit-plan','reset-filters','confirm-plan'])
     <div class="settlement-section-head">
       <div>
         <p>
-          合同生效后按付款节点自动生成应收计划，确认后纳入应收与催收口径。
+          {{ hasLocalFinancialBasis ? ' 合同或本地财务依据按付款节点形成应收计划，确认后纳入应收与催收口径。 ' : ' 合同生效后按付款节点自动生成应收计划，确认后纳入应收与催收口径。 ' }}
         </p>
       </div>
       <div>
@@ -45,7 +59,7 @@ defineEmits(['reload','submit-plan','reset-filters','confirm-plan'])
         <div>
           <h2>收款计划确认</h2>
           <p>
-            {{ planEditor.contract_no || "未关联合同" }} ·
+            {{ financialSourceLabel(planEditor, '未关联合同') }} ·
             {{ planEditor.customer_name || "未命名客户" }}
           </p>
         </div>
@@ -120,7 +134,7 @@ defineEmits(['reload','submit-plan','reset-filters','confirm-plan'])
         <table>
           <thead>
             <tr>
-              <th>合同编号</th>
+              <th>{{ hasLocalFinancialBasis ? '财务依据 / 合同' : '合同编号' }}</th>
               <th>客户</th>
               <th>期次</th>
               <th>计划收款日</th>
@@ -133,7 +147,7 @@ defineEmits(['reload','submit-plan','reset-filters','confirm-plan'])
           <tbody>
             <tr v-for="plan in visiblePlans" :key="plan.id">
               <td class="settlement-contract-cell">
-                {{ plan.contract_no || "—" }}
+                {{ financialSourceLabel(plan) }}
               </td>
               <td>{{ plan.customer_name || "—" }}</td>
               <td>第 {{ plan.installment_no || "—" }} 期</td>
@@ -162,7 +176,7 @@ defineEmits(['reload','submit-plan','reset-filters','confirm-plan'])
                   :disabled="saving"
                   @click="$emit('confirm-plan', plan)"
                 >
-                  确认</button
+                  核对应收计划</button
                 ><span v-else class="settlement-muted">—</span>
               </td>
             </tr>
@@ -187,7 +201,7 @@ defineEmits(['reload','submit-plan','reset-filters','confirm-plan'])
           <thead>
             <tr>
               <th>应收单号</th>
-              <th>合同编号</th>
+              <th>{{ hasLocalFinancialBasis ? '财务依据 / 合同' : '合同编号' }}</th>
               <th>客户</th>
               <th>到期日</th>
               <th>应收金额</th>
@@ -201,7 +215,7 @@ defineEmits(['reload','submit-plan','reset-filters','confirm-plan'])
               <td class="settlement-contract-cell">
                 {{ item.receivable_no }}
               </td>
-              <td>{{ item.contract_no || "—" }}</td>
+              <td>{{ financialSourceLabel(item) }}</td>
               <td>{{ item.customer_name }}</td>
               <td>{{ item.due_date }}</td>
               <td class="settlement-money">

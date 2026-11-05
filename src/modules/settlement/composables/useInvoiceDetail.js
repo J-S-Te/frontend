@@ -1,17 +1,24 @@
 import { computed, ref } from "vue";
 import { buildInvoiceTimelineEvents } from "../utils/settlementDisplay.js";
+import { validateInvoiceDocumentFile } from "../utils/invoiceDocumentValidation.js";
 
 /**
  * 发票详情域（治理批次 5 结算，自 SettlementView.vue 逐字迁移）。
  * 收编：详情路由标识（仅开票管理区读取 invoice_id）、详情数据与留痕时间线、电子发票上传 / 下载
- * （文件输入句柄与选择动作归 SettlementInvoiceDetailPanel 组件持有）、红冲申请表单与提交、红冲复核（通过 / 驳回）。
+ * （文件输入句柄与选择动作归 SettlementInvoiceDetailPanel 组件持有；上传前按 accept 白名单与后端 10 MiB
+ * 上限做本地校验，不合规只提示不调用上传接口）、红冲申请表单与提交、红冲复核（通过 / 驳回）。
  * 仍属视图：loadTargets 按 invoiceDetailID 装载或清空 invoiceDetail、watch(invoiceDetailID, load)、
- * manualIssue（开票申请级动作）。reviewRedFlush 驳回原因沿用 window.prompt（逐字保留，行为修复另行授权）。
+ * manualIssue（开票申请级动作）。reviewRedFlush 驳回原因由应用内表单收集。
  * 注入项与组件内同名标识一一对应：route/router/active/saving/notify/act/load/formatSettlementError +
  * uploadTaxInvoiceDocument/downloadTaxInvoiceDocument/requestTaxInvoiceRedFlush/approveInvoiceRedFlush/
  * rejectInvoiceRedFlush；不直接导入 API 模块，保持可独立测试。
  */
+// 用途：组织发票详情、归档与红冲交互。
+// 参数：依赖对象含当前路由、能力、保存状态、表单及业务接口。
+// 返回值：详情状态与操作函数。
 export function useInvoiceDetail({
+  can = () => false,
+  askPrompt,
   route,
   router,
   active,
@@ -26,6 +33,7 @@ export function useInvoiceDetail({
   approveInvoiceRedFlush,
   rejectInvoiceRedFlush,
 }) {
+  let reviewPromptPending = false;
   const invoiceDetailID = computed(() =>
     active.value === "invoices" ? String(route.query.invoice_id || "") : "",
   );
@@ -49,6 +57,10 @@ export function useInvoiceDetail({
     event.target.value = "";
     if (!file || !invoiceDetail.value?.id) return;
     if (saving.value) return;
+    // 上传前本地校验扩展名/类型与 10 MiB 上限：不合规直接提示，不调用上传接口，
+    // 因而不会触发 FormData 构造，字段顺序保持 API 层原样。
+    const verdict = validateInvoiceDocumentFile(file);
+    if (!verdict.ok) { notify(verdict.message); return; }
     saving.value = true;
     try {
       await uploadTaxInvoiceDocument(invoiceDetail.value.id, file);
@@ -78,19 +90,46 @@ export function useInvoiceDetail({
       redFlushOpen.value = false;
     }, "红冲申请已提交，等待财务复核；原发票仍保持已开具状态。");
   }
-  function reviewRedFlush(approve) {
+  // 用途：复核表单等待后的发票和红冲申请，避免对已变化的对象执行审核。
+  // 参数：target 为打开表单时的详情路由、发票标识、红冲申请标识、版本与状态。
+  // 返回值：当前对象仍可审核、具有权限且无保存任务时为 true。
+  function canReviewRedFlush(target) {
+    const current = invoiceDetail.value?.red_flush_request;
+    return !saving.value && active.value === "invoices" && can("settlement.invoice.approve")
+      && invoiceDetailID.value === target.routeID
+      && invoiceDetail.value?.id === target.invoiceID && current?.id === target.id
+      && current?.version === target.version && current?.status === target.status
+      && current?.can_review === true;
+  }
+
+  // 用途：通过红冲复核，或填写理由后驳回原红冲申请。
+  // 参数：approve 为 true 时通过，为 false 时打开驳回理由表单。
+  // 返回值：审核完成的 Promise；取消、对象变化或无权限时不提交。
+  async function reviewRedFlush(approve) {
     const request = invoiceDetail.value?.red_flush_request;
-    if (!request) return;
+    if (!request || reviewPromptPending) return;
+    const target = { invoiceID: invoiceDetail.value.id, routeID: invoiceDetailID.value,
+      id: request.id,
+      version: request.version, status: request.status };
+    if (!canReviewRedFlush(target)) return;
     let reason = "";
     if (!approve) {
-      reason = window.prompt("请输入红冲驳回原因：", "");
-      if (!reason?.trim()) return;
+      reviewPromptPending = true;
+      try {
+        reason = await askPrompt({
+          title: "驳回红冲申请", confirmText: "驳回红冲申请",
+          label: "驳回原因", initialValue: "", minlength: 1, maxlength: 500, danger: true,
+        });
+      } finally {
+        reviewPromptPending = false;
+      }
+      if (!reason?.trim() || !canReviewRedFlush(target)) return;
     }
     return act(async () => {
       if (approve) {
-        await approveInvoiceRedFlush(request.id, request.version);
+        await approveInvoiceRedFlush(target.id, target.version);
       } else {
-        await rejectInvoiceRedFlush(request.id, request.version, reason.trim());
+        await rejectInvoiceRedFlush(target.id, target.version, reason.trim());
       }
     }, approve ? "红冲申请已通过复核，等待税控处理。" : "红冲申请已驳回。");
   }

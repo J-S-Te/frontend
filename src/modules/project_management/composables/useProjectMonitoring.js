@@ -2,7 +2,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { createRequestScope } from '@/modules/platform/shared/composables/requestScope'
 import { getProjectMonitoring } from '@/modules/project_management/api/projectManagement'
 import { formatUserError } from '@/modules/shared/utils/userError.js'
-import { formatDateTime } from '@/modules/project_management/projectDisplay'
+import { formatDateTime, monitoringFilterQuery, monitoringStatusBuckets } from '@/modules/project_management/projectDisplay'
 
 /**
  * 在途项目实时监控域（治理批次 4 项目，自 ProjectManagementView.vue 逐字迁移）。
@@ -15,7 +15,7 @@ export function useProjectMonitoring({ activeSection, keyword, teamFilter, loadP
 // 监控页（PG-DASH-02）使用独立的服务端快照：项目、服务项、SLA 和事件在
 // 同一授权范围内聚合。页面只提交筛选/分页，不再用普通项目列表重建“在途”口径。
 const monitorFilter = ref('')
-const monitoringSnapshot = ref({ items: [], recent_events: [], status_counts: {}, categories: [], teams: [], project_manager_ids: [], total: 0, page: 1, page_size: 20, server_time: '', snapshot_version: '' })
+const monitoringSnapshot = ref({ items: [], recent_events: [], status_counts: {}, report_stage_counts: {}, categories: [], teams: [], project_manager_ids: [], total: 0, page: 1, page_size: 20, server_time: '', snapshot_version: '' })
 const monitoringLoading = ref(false)
 const monitoringError = ref('')
 const monitorPage = ref(1)
@@ -34,23 +34,15 @@ const monitorFilterTabs = computed(() => [
   { key: 'risk', label: '风险' },
   { key: '实施中', label: '实施中' },
   { key: '报告编制', label: '报告编制' },
+  // 报告阶段是正交维度：选中后只按 report_stage 查询，不叠加派生状态。
+  { key: 'report_stage:RECTIFYING', label: '整改中' },
 ])
-const monitoredStatusMix = computed(() => {
-  const buckets = [
-    { key: '推进中', tone: 'var(--pm-green)', statuses: ['待拆解确认', '待分配', '待实施', '实施准备中'] },
-    { key: '实施中', tone: 'var(--pm-primary)', statuses: ['实施中'] },
-    { key: '异常处理', tone: 'var(--pm-red)', statuses: ['异常处理中'] },
-    { key: '收尾归档', tone: 'var(--pm-violet)', statuses: ['现场实施完成', '报告编制'] },
-    { key: '已终止', tone: 'var(--pm-gray)', statuses: ['已终止'] },
-  ]
-  const counts = monitoringSnapshot.value.status_counts || {}
-  const total = monitoringSnapshot.value.total || 1
-  return buckets.map((bucket) => {
-    const count = bucket.statuses.reduce((sum, status) => sum + Number(counts[status] || 0), 0)
-    return { ...bucket, count, pct: Math.round((count / total) * 100) }
-  }).filter((bucket) => bucket.count)
-})
-const monitoredStatusByProject = (status) => monitoredStatusMix.value.find((bucket) => bucket.statuses.includes(status))?.key || status
+const monitoredStatusMix = computed(() => monitoringStatusBuckets(monitoringSnapshot.value))
+const monitoredStatusByProject = (project) => {
+  // 旧快照没有 report_stage：退回按派生状态分桶，行为与改造前一致。
+  if (['NONE', 'RECTIFYING'].includes(project?.report_stage)) return '整改中'
+  return monitoredStatusMix.value.find((bucket) => bucket.statuses?.includes(project?.status))?.key || project?.status || ''
+}
 const monitoringRows = computed(() => monitoringSnapshot.value.items || [])
 const monitoringTotalPages = computed(() => Math.max(1, Math.ceil(monitoringSnapshot.value.total / monitorPageSize.value)))
 const monitoringUpdatedLabel = computed(() => monitoringSnapshot.value.server_time ? formatDateTime(monitoringSnapshot.value.server_time) : '尚未同步')
@@ -60,7 +52,8 @@ function monitoringParams() {
   return {
     page: monitorPage.value, page_size: monitorPageSize.value, keyword: keyword.value.trim(), team: teamFilter.value,
     category: monitorCategory.value, project_manager_id: monitorProjectManager.value,
-    risk: monitorFilter.value === 'risk', status: ['risk', ''].includes(monitorFilter.value) ? '' : monitorFilter.value,
+    risk: monitorFilter.value === 'risk',
+    ...monitoringFilterQuery(monitorFilter.value),
     sla: monitorSLAOnly.value, conflict: monitorConflictOnly.value, due_from: monitorDueFrom.value, due_to: monitorDueTo.value,
   }
 }

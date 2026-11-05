@@ -132,4 +132,45 @@ h1 { margin: 0; font-size: 22px; }
 .access-error-actions button { padding: 10px 18px; border-radius: 8px; cursor: pointer; font: inherit; }
 .access-error-actions .primary { border: 1px solid #2563eb; background: #2563eb; color: white; }
 .access-error-actions .ghost { border: 1px solid #cbd5e1; background: white; color: #334155; }
+
+/* ==========================================================================
+   深色主题：子系统暂不可用页
+   --------------------------------------------------------------------------
+   只新增 [data-theme="dark"] 规则，浅色声明一行未改，浅色逐像素一致。
+   ========================================================================== */
+[data-theme="dark"] .access-error-page {
+  color: var(--text);
+  background: linear-gradient(145deg, var(--surface-content), var(--surface-muted));
+}
+[data-theme="dark"] .access-error-card {
+  border-color: var(--border);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-modal);
+}
+[data-theme="dark"] .access-error-icon {
+  color: var(--primary-ink);
+  background: var(--chip-brand);
+}
+[data-theme="dark"] .access-error-eyebrow {
+  color: var(--primary-ink);
+}
+[data-theme="dark"] .access-error-message {
+  color: var(--text-secondary);
+}
+[data-theme="dark"] .access-error-diagnostics {
+  background: var(--surface-muted);
+}
+[data-theme="dark"] .access-error-diagnostics dt {
+  color: var(--text-muted);
+}
+[data-theme="dark"] .access-error-actions .primary {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--text-strong);
+}
+[data-theme="dark"] .access-error-actions .ghost {
+  color: var(--text-secondary);
+  border-color: var(--border);
+  background: var(--surface-raised);
+}
 </style>

@@ -1,19 +1,13 @@
-const SYSTEMS = [
-  ['Platform', 'VITE_API_BASE_URL', '/api/v1'],
-  ['Contract', 'VITE_CONTRACT_PUBLIC_PATH_PREFIX', '/contract_management'],
-  ['Project', 'VITE_PROJECT_PUBLIC_PATH_PREFIX', '/project_management'],
-  ['Settlement', 'VITE_SETTLEMENT_PUBLIC_PATH_PREFIX', '/settlement'],
-  ['CRM', 'VITE_CRM_PUBLIC_PATH_PREFIX', '/customer-opportunity'],
-  ['Portal', 'VITE_CUSTOMER_PORTAL_PUBLIC_PATH_PREFIX', '/customer-portal'],
-  ['DataAnalysis', 'VITE_DATA_ANALYSIS_PUBLIC_PATH_PREFIX', '/data_analysis'],
-]
+import { sessionSystems as SYSTEMS } from '../../registry/compiledModules.js'
 
 // sessionTargetForRoute 按明确的路由认证边界选择入口，不以平台Cookie代替子系统Cookie。
 // 参数：meta为路由元信息，environment为构建时公开路径配置。
 // 返回值：该入口的状态、活动和登录地址；公开页面返回null，冲突配置抛错。
 export function sessionTargetForRoute(meta, environment = import.meta.env || {}) {
+  const declared = Object.keys(meta || {}).filter((name) =>
+    /^requires.+Session$/.test(name) && meta[name] === true)
+  if (declared.length > 1) throw new Error('路由存在冲突的会话入口')
   const matched = SYSTEMS.filter(([name]) => meta?.[`requires${name}Session`] === true)
-  if (matched.length > 1) throw new Error('路由存在冲突的会话入口')
   if (!matched.length) return null
   const [key, setting, fallback] = matched[0]
   const prefix = String(environment[setting] || fallback).replace(/\/+$/, '')

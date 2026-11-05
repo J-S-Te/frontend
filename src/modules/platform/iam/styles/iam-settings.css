@@ -225,7 +225,7 @@
   counter-reset: management-flow;
   border: 1px solid var(--line-1);
   border-radius: var(--r-3);
-  background: rgba(255, 255, 255, 0.78);
+  background: var(--surface-raised, rgba(255, 255, 255, 0.78));
 }
 .iam-management-flow li {
   position: relative;
@@ -318,7 +318,7 @@
   white-space: nowrap;
 }
 .iam-summary-card.blue .iam-summary-icon   { color: var(--brand-1);   background: var(--brand-soft); }
-.iam-summary-card.violet .iam-summary-icon { color: #6d28d9;          background: #f5f3ff; }
+.iam-summary-card.violet .iam-summary-icon { color: var(--violet-ink, #6d28d9);          background: var(--violet-soft, #f5f3ff); }
 .iam-summary-card.green .iam-summary-icon  { color: var(--ok-1);      background: var(--ok-soft); }
 .iam-summary-card.orange .iam-summary-icon { color: var(--warn-1);    background: var(--warn-soft); }
 
@@ -514,7 +514,7 @@
   background: var(--brand-soft);
 }
 .iam-card-icon svg { width: 18px; height: 18px; }
-.iam-overview-card.organization .iam-card-icon { color: #6d28d9; background: #f5f3ff; }
+.iam-overview-card.organization .iam-card-icon { color: var(--violet-ink, #6d28d9); background: var(--violet-soft, #f5f3ff); }
 .iam-overview-card.authorization .iam-card-icon { color: var(--ok-1); background: var(--ok-soft); }
 .iam-card-heading h4 { margin: 0; color: var(--ink-1); font-size: 14px; font-weight: 600; }
 .iam-card-heading p { margin: 3px 0 0; color: var(--ink-4); font-size: 11.5px; }
@@ -682,7 +682,7 @@
   background: var(--bg-soft);
   border: 1px solid var(--line-2);
 }
-.iam-source-tag { color: #6d28d9; background: #f5f3ff; border-color: #f5f3ff; }
+.iam-source-tag { color: var(--violet-ink, #6d28d9); background: var(--violet-soft, #f5f3ff); border-color: var(--violet-soft, #f5f3ff); }
 .iam-scope-tag { color: var(--brand-1); background: var(--brand-soft); border-color: var(--brand-line); }
 .iam-identity-cell { display: grid; gap: 2px; }
 .iam-identity-cell b { color: var(--ink-1); font-size: 12px; font-weight: 600; }
@@ -798,7 +798,8 @@
 .iam-user-detail-modal {
   width: min(1120px, calc(100vw - 40px));
   max-height: min(92vh, 980px);
-  background: #f8fafc;
+  /* 缺陷 B：浅色 #f8fafc 与 --surface-muted 的浅色值相同，直接走 token。 */
+  background: var(--bg-soft);
 }
 .iam-user-detail-modal > header {
   background: var(--surface);
@@ -809,7 +810,7 @@
   gap: 16px;
   margin: 20px 28px 0;
   padding: 20px 22px;
-  border: 1px solid #dbeafe;
+  border: 1px solid var(--border-brand, #dbeafe);
   border-radius: 14px;
   background: var(--brand-soft);
   box-shadow: 0 8px 24px rgba(30, 64, 175, 0.06);
@@ -820,19 +821,19 @@
   width: 56px;
   height: 56px;
   place-items: center;
-  color: #1d4ed8;
+  color: var(--primary-ink-strong, #1d4ed8);
   font-size: 22px;
   font-weight: 700;
-  border: 4px solid #dbeafe;
+  border: 4px solid var(--border-brand, #dbeafe);
   border-radius: var(--radius-pill);
-  background: #ffffff;
+  background: var(--surface);
 }
 .iam-user-detail-identity { min-width: 0; flex: 1; }
 .iam-user-detail-name-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
 .iam-user-detail-name-row h4 { margin: 0; color: var(--ink-1); font-size: 16px; }
 .iam-user-detail-identity p { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; margin: 7px 0 0; color: var(--ink-3); font-size: 12px; }
 .iam-user-detail-identity p i { width: 3px; height: 3px; border-radius: var(--radius-pill); background: var(--ink-4); }
-.iam-user-detail-hero-note { display: flex; align-items: center; gap: 8px; padding-left: 18px; color: #2563eb; font-size: 12px; line-height: 1.5; border-left: 1px solid #bfdbfe; }
+.iam-user-detail-hero-note { display: flex; align-items: center; gap: 8px; padding-left: 18px; color: var(--primary-ink, #2563eb); font-size: 12px; line-height: 1.5; border-left: 1px solid var(--brand-line, #bfdbfe); }
 .iam-user-detail-hero-note small { color: var(--ink-3); font-size: 11px; }
 .iam-user-detail-modal .iam-detail-grid { margin-top: 16px; background: var(--surface); }
 .iam-user-detail-modal .iam-detail-section { padding: 18px 20px; margin-top: 16px; border: 1px solid var(--line-1); border-radius: 14px; background: var(--surface); }
@@ -1187,7 +1188,7 @@
 }
 .iam-one-time-warning { color: var(--warn-1); }
 .iam-danger-text-button { color: var(--danger-1); }
-.iam-danger-text-button:hover { color: #b91c1c; }
+.iam-danger-text-button:hover { color: var(--danger-1); }
 .iam-danger-button {
   color: #fff;
   border-color: var(--danger-1);
@@ -1266,7 +1267,7 @@
 .iam-organization-tree-toolbar span { color: var(--ink-4); font-size: 11.5px; }
 .iam-organization-tree-toolbar-actions { display: flex; gap: var(--s-2); }
 .iam-tree-toolbar-metrics { display: flex; gap: 8px; margin-left: auto; }
-.iam-tree-toolbar-metrics span { padding: 5px 8px; color: var(--ink-3); font-size: 11px; border: 1px solid var(--line-2); border-radius: 999px; background: rgba(255,255,255,.72); white-space: nowrap; }
+.iam-tree-toolbar-metrics span { padding: 5px 8px; color: var(--ink-3); font-size: 11px; border: 1px solid var(--line-2); border-radius: 999px; background: var(--surface-raised, rgba(255,255,255,.72)); white-space: nowrap; }
 .iam-tree-toolbar-metrics b { color: var(--brand-1); font-size: 12px; }
 .iam-organization-tree { min-height: 96px; }
 .iam-organization-tree-empty {
@@ -1417,7 +1418,7 @@
 .iam-position-groups-empty { margin: 0; padding: 34px 20px; color: var(--ink-4); font-size: 12.5px; text-align: center; }
 .iam-position-tree-node + .iam-position-tree-node { border-top: 1px solid var(--line-2); }
 .iam-position-tree-node { --position-tree-indent: calc(var(--tree-depth, 0) * 24px); }
-.iam-position-tree-node.is-unresolved { background: #fef3c7; }
+.iam-position-tree-node.is-unresolved { background: var(--warn-soft); }
 .iam-position-group-head {
   display: grid;
   grid-template-columns: 24px 34px minmax(0, 1fr) auto;
@@ -1427,7 +1428,7 @@
   padding: 13px 16px 13px calc(16px + var(--position-tree-indent, 0px));
   color: inherit;
   text-align: left;
-  background: #f8fafc;
+  background: var(--bg-soft);
 }
 .iam-position-group-head:hover { background: var(--brand-soft); }
 .iam-position-group-chevron,
@@ -1477,9 +1478,9 @@
   height: 29px;
   flex: 0 0 29px;
   place-items: center;
-  color: #6d28d9;
+  color: var(--violet-ink, #6d28d9);
   border-radius: var(--r-2);
-  background: #f5f3ff;
+  background: var(--violet-soft, #f5f3ff);
 }
 .iam-position-group-role-icon svg { width: 14px; height: 14px; }
 .iam-position-group-identity > span:last-child { min-width: 0; }
@@ -1542,7 +1543,7 @@
 .iam-membership-groups-toolbar-actions { display: flex; gap: var(--s-2); }
 .iam-membership-groups-empty { margin: 0; padding: 34px 20px; color: var(--ink-4); font-size: 12.5px; text-align: center; }
 .iam-membership-group + .iam-membership-group { border-top: 1px solid var(--line-2); }
-.iam-membership-group.is-unresolved { background: #fef3c7; }
+.iam-membership-group.is-unresolved { background: var(--warn-soft); }
 .iam-membership-group-head {
   display: grid;
   grid-template-columns: 24px 34px minmax(0, 1fr) auto;
@@ -1554,7 +1555,7 @@
   text-align: left;
   cursor: pointer;
   border: 0;
-  background: #f8fafc;
+  background: var(--bg-soft);
 }
 .iam-membership-group-head:hover { background: var(--brand-soft); }
 .iam-membership-group-head:focus-visible { outline: 2px solid var(--brand-2); outline-offset: -2px; }
@@ -1572,9 +1573,9 @@
   width: 34px;
   height: 34px;
   place-items: center;
-  color: #b45309;
+  color: var(--warn-1);
   border-radius: var(--r-2);
-  background: #fef3c7;
+  background: var(--warn-soft);
 }
 .iam-membership-group-icon svg { width: 17px; height: 17px; }
 .iam-membership-group-name { min-width: 0; }
@@ -1584,15 +1585,15 @@
 .iam-membership-group-name small { margin-top: 3px; color: var(--ink-4); font-size: 11px; }
 .iam-membership-group-count {
   padding: 4px 9px;
-  color: #b45309;
+  color: var(--warn-1);
   font-size: 11px;
   font-weight: 600;
   border-radius: 999px;
-  background: #fef3c7;
+  background: var(--warn-soft);
 }
 .iam-membership-group-body { background: var(--surface); }
 .iam-group-load-more { display: block; width: calc(100% - 32px); margin: 10px 16px 14px; padding: 9px 12px; color: var(--brand-1); font-size: 12px; font-weight: 700; text-align: center; cursor: pointer; border: 1px dashed var(--brand-line); border-radius: 8px; background: var(--brand-soft); }
-.iam-group-load-more:hover { border-style: solid; background: #eaf2ff; }
+.iam-group-load-more:hover { border-style: solid; background: var(--surface-hover, #eaf2ff); }
 .iam-membership-group-row {
   display: grid;
   grid-template-columns: minmax(190px, 1fr) minmax(140px, 0.75fr) 88px 138px minmax(145px, 0.75fr) 54px;
@@ -1649,7 +1650,7 @@
   white-space: nowrap;
 }
 .iam-membership-type.is-primary { color: var(--brand-1); border-color: var(--brand-line); background: var(--brand-soft); }
-.iam-membership-type.is-secondary { color: #6d28d9; border-color: #ddd6fe; background: #f5f3ff; }
+.iam-membership-type.is-secondary { color: var(--violet-ink, #6d28d9); border-color: var(--border-violet, #ddd6fe); background: var(--violet-soft, #f5f3ff); }
 .iam-membership-group-actions { display: flex; justify-content: flex-end; white-space: nowrap; }
 
 @media (max-width: 1080px) {
@@ -1909,7 +1910,7 @@
   border-radius: var(--r-2);
   background: var(--warn-soft);
 }
-.iam-account-expiry-field input { border-color: #fcd34d; background: var(--surface); }
+.iam-account-expiry-field input { border-color: var(--warning-border, #fcd34d); background: var(--surface); }
 
 @media (max-width: 760px) {
   .iam-account-editor-intro { grid-template-columns: 40px minmax(0, 1fr); }
@@ -2164,10 +2165,10 @@
 }
 .iam-contract-compatibility-note {
   padding: 9px 12px;
-  color: #b45309;
-  border: 1px solid #fcd34d;
+  color: var(--warn-1);
+  border: 1px solid var(--warning-border, #fcd34d);
   border-radius: var(--r-2);
-  background: #fef3c7;
+  background: var(--warn-soft);
 }
 .iam-application-permission-block {
   display: grid;
@@ -2194,7 +2195,7 @@
   font-size: 11px;
   font-weight: 600;
   border-radius: 999px;
-  background: #ecfdf5;
+  background: var(--ok-soft);
 }
 .iam-application-permission-tags {
   display: flex;
@@ -2218,8 +2219,8 @@
   background: var(--surface);
 }
 .console-button.danger:hover:not(:disabled) {
-  color: #b91c1c;
-  border-color: #fecaca;
+  color: var(--danger-1);
+  border-color: var(--danger-line);
   background: var(--danger-soft);
 }
 @media (max-width: 760px) {
@@ -2722,9 +2723,8 @@
 .iam-template-role-tags { display: flex; gap: 5px; min-width: 0; overflow: hidden; }
 .iam-template-role-tags em { max-width: 260px; padding: 2px 7px; overflow: hidden; color: var(--ink-2); border: 1px solid var(--line-2); border-radius: 999px; background: var(--bg-soft); text-overflow: ellipsis; white-space: nowrap; }
 .iam-template-role-tags em.is-more { flex: 0 0 auto; color: var(--brand-1); background: var(--brand-soft); border-color: var(--brand-line); }
-.iam-template-pagination { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; padding-top: 12px; color: var(--ink-3); border-top: 1px solid var(--line-2); font-size: 11px; }
-.iam-template-pagination-controls { display: flex; align-items: center; gap: 9px; }
-.iam-template-pagination-controls .console-button { min-width: 58px; }
+/* 分页统一交给 shared/components/PaginationBar.vue（.ui-pager）：这里只保留模板列表页脚的分隔线与对齐。 */
+.iam-template-pagination { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 14px; padding-top: 12px; color: var(--ink-3); border-top: 1px solid var(--line-2); font-size: 11px; }
 .iam-template-delete { white-space: nowrap; }
 .iam-authorization-preview ul {
   display: grid;
@@ -2915,8 +2915,7 @@
   .iam-template-grid,
   .iam-template-role-row,
   .iam-template-assignment-row { grid-template-columns: 1fr; }
-  .iam-template-pagination { align-items: stretch; flex-direction: column; }
-  .iam-template-pagination-controls { justify-content: space-between; }
+  .iam-template-pagination { align-items: flex-start; justify-content: flex-start; }
   .iam-template-delete { justify-self: end; }
   .iam-template-editor > footer { justify-content: stretch; }
   .iam-template-editor > footer .console-button,
@@ -2994,9 +2993,9 @@
 .iam-authorization-layer-duplicate {
   padding: 9px 12px;
   color: var(--warn-1);
-  border: 1px solid #fcd34d;
+  border: 1px solid var(--warning-border, #fcd34d);
   border-radius: var(--r-2);
-  background: #fef3c7;
+  background: var(--warn-soft);
 }
 .iam-authorization-layer-readonly { color: var(--ink-3); }
 @media (max-width: 620px) {
@@ -3146,7 +3145,7 @@
   opacity: 0.85;
   background: var(--danger-soft);
 }
-.iam-application-role-option.is-unavailable strong { color: #b91c1c; }
+.iam-application-role-option.is-unavailable strong { color: var(--danger-1); }
 .iam-application-role-option.is-unavailable .iam-application-role-status { color: var(--danger-1); }
 
 /* 临时密码遮罩态：与揭示态视觉上一致，避免吸引复制。 */
@@ -3183,18 +3182,18 @@
   .iam-data-table tbody tr {
     margin-bottom: 12px;
     padding: 12px 14px;
-    background: #fff;
+    background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 8px;
     box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
   }
-  .iam-data-table tbody tr:hover { background: #fff; }
+  .iam-data-table tbody tr:hover { background: var(--surface); }
   .iam-data-table td {
     display: flex;
     gap: 10px;
     align-items: baseline;
     padding: 6px 0;
-    border-bottom: 1px dashed #eef2f7;
+    border-bottom: 1px dashed var(--border-soft, #eef2f7);
   }
   .iam-data-table td:last-child { border-bottom: none; }
   .iam-data-table td::before {
@@ -3270,7 +3269,7 @@
     padding: 11px 13px;
     border: 1px solid var(--line-1);
     border-radius: var(--r-2);
-    background: #fff;
+    background: var(--surface);
     box-shadow: var(--sh-1);
   }
   .iam-user-table td,
@@ -3321,7 +3320,8 @@
   padding: 16px;
   border: 1px solid var(--line-1);
   border-radius: var(--r-2);
-  background: #fff;
+  /* 缺陷 B：浅色 #fff 与 --surface-card 的浅色值相同，直接走 token。 */
+  background: var(--surface);
 }
 
 .iam-personal-exception-head,
@@ -3373,7 +3373,7 @@
   padding: 6px 10px;
   border: 1px solid var(--line-1);
   border-radius: var(--r-1);
-  background: #fff;
+  background: var(--surface-input, #fff);
   color: var(--ink-1);
   font: inherit;
 }
@@ -3508,7 +3508,7 @@
   padding: 12px;
   border: 1px solid var(--line-1);
   border-radius: var(--r-2);
-  background: #fff;
+  background: var(--surface);
 }
 
 .iam-personal-exception-group > header {
@@ -3567,7 +3567,7 @@
   padding: 16px;
   border: 1px solid var(--line-1);
   border-radius: var(--r-2);
-  background: #fff;
+  background: var(--surface);
 }
 
 .iam-personal-exception-editor-grid {
@@ -3615,4 +3615,39 @@
   .iam-personal-exception-actions { justify-content: flex-start; }
   .iam-personal-exception-impact dl > div { grid-template-columns: 1fr; gap: 2px; }
   .iam-personal-exception-more { justify-content: stretch; }
+}
+
+/* =========================================================================
+   深色主题
+   -------------------------------------------------------------------------
+   本文件其余部分只写浅色值（token 定义在 .iam-settings 上），深色表面已经
+   通过 var(--token, <浅色原字面量>) 就地别名（--surface / --bg-soft /
+   --surface-input / --surface-raised / --violet-soft / --warn-soft / --ok-soft …），
+   这里只补一件 token 别名做不到的事：把模块语义墨色（--ok-1 / --warn-1 /
+   --danger-1 及它们的 soft / line）改指向平台深色档——它们在浅色是深绿/深棕/
+   深红，留在深底上只有 1.2–2.6:1。
+   浅色渲染不受影响：浅色值仍然来自上面 .iam-settings 里的字面量。
+   选择器用 :root[data-theme="dark"] .iam-settings（0-2-1）保证不依赖打包顺序。
+   ========================================================================= */
+:root[data-theme="dark"] .iam-settings {
+  --ok-1: var(--success-text);
+  --warn-1: var(--warning-text);
+  --danger-1: var(--danger-text);
+  --ok-soft: var(--success-soft);
+  --warn-soft: var(--warning-soft);
+  --ok-line: var(--success-border);
+  --warn-line: var(--warning-border);
+  --danger-line: var(--danger-border);
+  /* 模块沿用了平台同名 token（--danger-soft），这里再写 var(--danger-soft)
+     会变成自引用循环，因此显式复制 main.css 深色档的取值。 */
+  --danger-soft: #2c1418;
+
+  /* 个人例外授权面板里一批“只有 fallback、没有定义”的模块 token：浅色靠 fallback
+     画出 #fff1f1 / #fff8e6 / #eef7ff 这类浅底，深色下会变成白块。这里只补深色
+     取值，浅色仍走 fallback，渲染不变。 */
+  --danger-bg: var(--danger-soft);
+  --warning-bg: var(--warning-soft);
+  --warning-line: var(--warning-border);
+  --info-bg: var(--sky-soft);
+  --info-line: var(--border-sky);
 }

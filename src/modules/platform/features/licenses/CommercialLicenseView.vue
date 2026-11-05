@@ -5,6 +5,8 @@ import { hasPermission } from '../../auth/utils/principal.js'
 import { MAX_LICENSE_BYTES, commitLicense, getLicenseEvents, getLicenseRequest, getLicenseStatus, initializeLicense, previewLicense, validateLicenseInput } from './api.js'
 import { formatLicenseTime, licenseEventName, licensedOnly, licenseRows, previewCanCommit, riskyChange, statusRows, systemName } from './presentation.js'
 import { formatUserError } from '../../../shared/utils/userError.js'
+import ListState from '@/modules/shared/components/ListState.vue'
+import PaginationBar from '@/modules/shared/components/PaginationBar.vue'
 
 const emit = defineEmits(['toast'])
 const canRead = computed(() => hasPermission('platform:license:read'))
@@ -16,8 +18,12 @@ const errorMessage = ref('')
 const eventsError = ref('')
 const events = ref({ items: [], total: 0, page: 1 })
 const eventsLoading = ref(false)
+// 事件分页沿用服务端 page 参数；每页 20 条与后端默认一致，供 PaginationBar 推导末页。
+const eventPageSize = 20
 const eventsExpanded = ref(false)
 const visibleEvents = computed(() => eventsExpanded.value ? events.value.items : events.value.items.slice(0, 5))
+// 三态闸门：加载中 / 加载失败 / 没有事件都交给 ListState，失败时绝不渲染成「暂无授权事件」。
+const eventsListState = computed(() => eventsLoading.value || Boolean(eventsError.value) || !events.value.items.length)
 const customerID = ref('')
 const environment = ref('')
 const raw = ref('')
@@ -287,9 +293,16 @@ onMounted(load)
         <!-- 授权事件 -->
         <div class="license-card">
           <div class="license-card-head"><h3>授权事件</h3><span class="license-chip">共 {{ events.total }} 条</span></div>
-          <p v-if="eventsLoading" role="status" class="license-muted">正在读取事件…</p>
-          <div v-if="eventsError" class="license-alert" role="alert">{{ eventsError }} <button class="license-btn subtle" :disabled="eventsLoading" @click="loadEvents(events.page)">重试</button></div>
-          <ul v-else-if="events.items.length" id="license-event-list" class="license-timeline" :class="{ expanded: eventsExpanded }" tabindex="0" aria-label="授权事件列表">
+          <ListState
+            v-if="eventsListState"
+            :loading="eventsLoading"
+            :error="eventsError"
+            error-title="授权事件加载失败"
+            empty-title="暂无授权事件。"
+            compact
+            @retry="loadEvents(events.page)"
+          />
+          <ul v-else id="license-event-list" class="license-timeline" :class="{ expanded: eventsExpanded }" tabindex="0" aria-label="授权事件列表">
             <li v-for="event in visibleEvents" :key="event.id">
               <span class="license-timeline-dot" aria-hidden="true"></span>
               <div class="license-event-content">
@@ -299,16 +312,20 @@ onMounted(load)
               <time class="license-event-time">{{ formatLicenseTime(event.created_at) }}</time>
             </li>
           </ul>
-          <p v-else-if="!eventsLoading && !eventsError" class="license-muted">暂无授权事件。</p>
           <div v-if="!eventsError && events.items.length > 5" class="license-event-toggle">
             <span class="license-muted">本页显示 {{ visibleEvents.length }} / {{ events.items.length }} 条</span>
             <button class="license-btn subtle" :aria-expanded="eventsExpanded" aria-controls="license-event-list" @click="eventsExpanded = !eventsExpanded">{{ eventsExpanded ? '收起' : '展开本页全部' }}</button>
           </div>
-          <div v-if="events.items.length" class="license-pagination">
-            <button class="license-btn subtle" :disabled="eventsLoading || events.page <= 1" @click="loadEvents(events.page - 1)">上一页</button>
-            <span class="license-muted">第 {{ events.page }} 页 / 共 {{ Math.max(1, Math.ceil(events.total / 20)) }} 页</span>
-            <button class="license-btn subtle" :disabled="eventsLoading || events.page * 20 >= events.total" @click="loadEvents(events.page + 1)">下一页</button>
-          </div>
+          <PaginationBar
+            v-if="!eventsError"
+            class="license-pagination"
+            label="授权事件分页"
+            :page="events.page"
+            :total="events.total"
+            :page-size="eventPageSize"
+            :loading="eventsLoading"
+            @change="loadEvents"
+          />
         </div>
       </template>
     </template>
@@ -322,8 +339,8 @@ onMounted(load)
 .license-page { display: grid; gap: 20px; color: var(--text-primary, #1f2d3d); }
 .license-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
 .license-header h2 { margin: 0 0 6px; font-size: 22px; }
-.license-header p { margin: 0; color: var(--text-secondary, #64748b); font-size: 13px; }
-.license-muted { color: var(--text-secondary, #64748b); font-size: 13px; margin: 4px 0; }
+.license-header p { margin: 0; color: #64748b; font-size: 13px; }
+.license-muted { color: #64748b; font-size: 13px; margin: 4px 0; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; overflow-wrap: anywhere; }
 
 .license-card { background: var(--surface, #fff); border: 1px solid var(--border-color, #e2e8f0); border-radius: 14px; padding: 20px 22px; box-shadow: 0 1px 2px rgba(15, 23, 42, .04); }
@@ -332,13 +349,13 @@ onMounted(load)
 
 .license-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr)); gap: 14px; }
 .license-stat { background: var(--surface, #fff); border: 1px solid var(--border-color, #e2e8f0); border-radius: 14px; padding: 16px 18px; display: grid; gap: 4px; }
-.license-stat-label { font-size: 12px; color: var(--text-secondary, #64748b); }
+.license-stat-label { font-size: 12px; color: #64748b; }
 .license-stat-value { font-size: 22px; line-height: 1.2; }
-.license-stat-hint { font-size: 12px; color: var(--text-secondary, #64748b); }
+.license-stat-hint { font-size: 12px; color: #64748b; }
 
 .binding-card { display: grid; gap: 12px; }
 .license-binding-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: 12px; margin: 0; }
-.license-binding-grid dt { font-size: 12px; color: var(--text-secondary, #64748b); margin-bottom: 2px; }
+.license-binding-grid dt { font-size: 12px; color: var(--text-secondary, #475569); margin-bottom: 2px; }
 .license-binding-grid dd { margin: 0; overflow-wrap: anywhere; font-weight: 600; }
 
 .license-systems { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
@@ -350,7 +367,7 @@ onMounted(load)
 .license-systems.compact .license-system { grid-template-columns: 1fr auto; align-items: center; padding: 10px 14px; }
 .license-system-main { display: flex; align-items: center; gap: 10px; }
 .license-system-meta { display: flex; flex-wrap: wrap; gap: 18px; margin: 0; }
-.license-system-meta dt { font-size: 12px; color: var(--text-secondary, #64748b); display: inline; margin-right: 4px; }
+.license-system-meta dt { font-size: 12px; color: #64748b; display: inline; margin-right: 4px; }
 .license-system-meta dd { display: inline; margin: 0; font-size: 13px; }
 .license-expiry { justify-self: end; font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px; }
 .license-expiry[data-tone="ok"] { color: #15803d; background: #f0fdf4; }
@@ -363,7 +380,7 @@ onMounted(load)
 .license-badge[data-tone="info"] { color: #1d4ed8; background: #eff6ff; }
 .license-badge[data-tone="expired"] { color: #b91c1c; background: #fef2f2; }
 .license-badge[data-tone="muted"] { color: #64748b; background: #f1f5f9; }
-.license-chip { font-size: 12px; color: var(--text-secondary, #64748b); background: #f1f5f9; border-radius: 999px; padding: 3px 10px; }
+.license-chip { font-size: 12px; color: #64748b; background: #f1f5f9; border-radius: 999px; padding: 3px 10px; }
 .license-chip.info { color: #1d4ed8; background: #eff6ff; }
 
 .import-card { display: grid; gap: 8px; }
@@ -398,9 +415,9 @@ textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow
 .license-event-content { min-width: 0; padding-top: 6px; }
 .license-event-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
 .license-event-heading strong { min-width: 0; max-width: 100%; font-size: 13px; line-height: 1.5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.license-event-meta { font-size: 12px; color: var(--text-secondary, #64748b); white-space: nowrap; }
-.license-event-code { display: block; margin-top: 3px; font-size: 11px; line-height: 1.5; color: var(--text-secondary, #64748b); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.license-event-time { font-size: 12px; color: var(--text-secondary, #64748b); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.license-event-meta { font-size: 12px; color: #64748b; white-space: nowrap; }
+.license-event-code { display: block; margin-top: 3px; font-size: 11px; line-height: 1.5; color: #64748b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.license-event-time { font-size: 12px; color: #64748b; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .license-event-toggle { display: flex; gap: 12px; align-items: center; justify-content: space-between; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-color, #e2e8f0); }
 .license-event-toggle .license-muted { font-size: 12px; }
 .license-pagination { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 10px; }
@@ -409,5 +426,114 @@ textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow
   .license-card { padding: 14px; }
   .license-timeline li { grid-template-columns: minmax(0, 1fr); gap: 4px; }
   .license-event-time { padding-bottom: 4px; }
+}
+
+/* ==========================================================================
+   深色主题：许可管理页
+   --------------------------------------------------------------------------
+   本页把卡片/描边/文字写成 var(--surface, #fff) 这类“别名未定义 + 浅色
+   fallback”，深色下别名依旧 undefined，因此整页仍是白卡。这里只在深色补
+   别名 → main.css 共享 token 的映射，并逐条覆盖剩下的浅色字面量；浅色声明
+   一行未改（浅色下别名依旧未定义，取原 fallback，逐像素一致）。
+   ========================================================================== */
+[data-theme="dark"] .license-page {
+  --surface: var(--surface-card);
+  --surface-2: var(--surface-muted);
+  --border-color: var(--border);
+  --text-primary: var(--text);
+}
+/* 次要文字的浅色原值是 #64748b，而 --text-secondary 的浅色取值是 #475569：
+   写成 var(--text-secondary, #64748b) 时浅色会被 token 的取值顶掉（token 在浅色
+   已定义，回退不生效）。所以浅色恢复原字面量，深色在这里补同名覆盖，取值仍是
+   深色 --text-secondary，深色渲染不变。 */
+[data-theme="dark"] .license-header p,
+[data-theme="dark"] .license-muted,
+[data-theme="dark"] .license-stat-label,
+[data-theme="dark"] .license-stat-hint,
+[data-theme="dark"] .license-binding-grid dt,
+[data-theme="dark"] .license-system-meta dt,
+[data-theme="dark"] .license-chip,
+[data-theme="dark"] .license-event-meta,
+[data-theme="dark"] .license-event-code,
+[data-theme="dark"] .license-event-time {
+  color: var(--text-secondary);
+}
+[data-theme="dark"] .license-card,
+[data-theme="dark"] .license-stat {
+  box-shadow: var(--shadow-card);
+}
+[data-theme="dark"] .license-expiry[data-tone="ok"],
+[data-theme="dark"] .license-badge[data-tone="ok"] {
+  color: var(--success-text);
+  background: var(--success-soft);
+}
+[data-theme="dark"] .license-expiry[data-tone="soon"] {
+  color: var(--warning-text);
+  background: var(--warning-soft);
+}
+[data-theme="dark"] .license-expiry[data-tone="expired"],
+[data-theme="dark"] .license-badge[data-tone="expired"] {
+  color: var(--danger-text);
+  background: var(--danger-soft);
+}
+[data-theme="dark"] .license-expiry[data-tone="muted"],
+[data-theme="dark"] .license-badge[data-tone="muted"] {
+  color: var(--text-muted);
+  background: var(--chip-neutral);
+}
+[data-theme="dark"] .license-badge[data-tone="info"] {
+  color: var(--primary-ink);
+  background: var(--chip-brand);
+}
+[data-theme="dark"] .license-chip {
+  background: var(--chip-neutral);
+}
+[data-theme="dark"] .license-chip.info {
+  color: var(--primary-ink);
+  background: var(--chip-brand);
+}
+[data-theme="dark"] input:not([type="checkbox"]),
+[data-theme="dark"] textarea {
+  border-color: var(--border);
+  background: var(--surface-input);
+  color: var(--text);
+}
+[data-theme="dark"] .license-btn {
+  border-color: var(--line-strong);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+}
+[data-theme="dark"] .license-btn:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+[data-theme="dark"] .license-btn.primary {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--text-strong);
+}
+[data-theme="dark"] .license-btn.primary:hover:not(:disabled) {
+  background: var(--primary-dark);
+}
+[data-theme="dark"] .license-changes li {
+  background: var(--surface-muted);
+}
+[data-theme="dark"] .license-changes li.risky {
+  color: var(--text-on-danger);
+  background: var(--danger-soft);
+}
+[data-theme="dark"] .license-changes em {
+  color: var(--warning-text);
+}
+[data-theme="dark"] .license-risk {
+  color: var(--danger-text);
+  background: var(--danger-soft);
+}
+[data-theme="dark"] .license-alert {
+  color: var(--danger-text);
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+}
+[data-theme="dark"] .license-timeline:focus-visible {
+  outline-color: var(--focus-ring);
 }
 </style>

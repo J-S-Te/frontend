@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue'
-import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
+import ConsoleIcon from '@/modules/shared/components/ConsoleIcon.vue'
 
 const props = defineProps({
   items: { type: Array, default: () => [] },

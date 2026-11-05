@@ -11,7 +11,9 @@ function panelHarness(overrides = {}) {
   const calls = []
   const data = { contract_snapshot_id: 'snapshot-A', snapshot_version: 1, customer_id: 'customer-A', customer_name: '客户甲',
     currency: 'CNY', plans: [], expected_facts: [{source_system: 'old', fact_type: 'RECEIPT', external_fact_id: 'receipt-1'}] }
-  const deps = { ref, computed, onMounted() {}, onBeforeUnmount() {},
+  // 组件新增了对统一分页条（PaginationBar）的依赖：harness 只替换外部 API 与生命周期，
+  // 这里补一个同名占位，保持「编译真实脚本、隔离副作用」的既有做法。
+  const deps = { ref, computed, onMounted() {}, onBeforeUnmount() {}, PaginationBar: { name: 'PaginationBar', props: {} },
     listContractImports: async () => ({items: []}),
     getContractImport: async (id, query) => { calls.push(['query', id, query]); return query?.facts ? {items: [], total: 0} : data },
     createReceipt: async payload => {calls.push(['receipt', payload]); return {id: 'local-receipt'}},

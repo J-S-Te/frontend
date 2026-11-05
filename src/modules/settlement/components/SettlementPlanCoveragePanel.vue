@@ -1,5 +1,5 @@
 <script setup>
-import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
+import ConsoleIcon from '@/modules/shared/components/ConsoleIcon.vue'
 import { money } from '@/modules/settlement/utils/settlementDisplay'
 import { planCoverageGapLabel, planCoverageHint, planCoverageStateMeta, planCoverageTriggerLabels } from '@/modules/settlement/utils/planCoverage'
 

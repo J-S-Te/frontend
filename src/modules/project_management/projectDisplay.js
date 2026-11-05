@@ -62,6 +62,7 @@ export function newFieldOperationID(prefix) {
 // 语义与 V1.1 原型 crm-badge 对齐（待处理=amber、推进=violet、进行=blue、完成=green、异常=red、停用=gray）。
 export const statusToneMap = {
   待拆解确认: 'amber', 待确认: 'amber', 待复核: 'amber', 待处理: 'amber', 待评审: 'amber', PENDING: 'amber', 实施中: 'amber',
+  整改中: 'amber', RECTIFYING: 'amber',
   待分配: 'blue', 已分配: 'blue', 已审核: 'blue', 已签发: 'blue', 计划已发布: 'blue', REVIEWED: 'blue', ISSUED: 'blue',
   待实施: 'violet', 实施准备中: 'violet', 编制中: 'violet', 报告编制: 'violet', 准备中: 'violet', COMPILING: 'violet',
   异常处理中: '风险', 已终止: '风险', 已驳回: '风险', REJECTED: '风险', MISSING: '风险', EXPIRED: '风险', 无效: '风险', CONFLICT: '风险', 能力冲突: '风险', 排期冲突: '风险', 阻断: '风险', TERMINATE: '风险',
@@ -71,6 +72,24 @@ export const statusToneMap = {
 }
 
 export function statusTone(status) { return statusToneMap[String(status ?? '').trim()] || 'neutral' }
+
+// 报告阶段（项目级 report_stage）与服务项报告状态共用同一套码值，
+// 中文词表只维护这一份，页面不再各自复制。
+export const reportStageLabel = Object.freeze({
+  NONE: '待整改',
+  RECTIFYING: '整改中',
+  COMPILING: '编制中',
+  REVIEWED: '已审核',
+  ISSUED: '已签发',
+  ARCHIVED: '已归档',
+})
+
+// 项目列表、看板与监控都通过这个函数取报告阶段文案：字段缺失或空值一律返回空串，
+// 旧后端不返回 report_stage 时界面保持原样，前端不根据其它状态自行推断阶段。
+export function projectReportStageLabel(project) {
+  const stage = String(project?.report_stage ?? '').trim()
+  return stage ? reportStageLabel[stage] || '' : ''
+}
 
 export function capabilityEffectiveStatus(item) { return item?.effective_status || item?.status || 'DISABLED' }
 
@@ -110,6 +129,9 @@ export function permissionFieldLabel(fieldName) {
 }
 
 export const reportTechReviewLabel = (status) => ({ NONE: '未提交', PENDING: '待复核', APPROVED: '已通过', REJECTED: '已驳回' }[status] || '未提交')
+
+// 服务项报告状态与项目报告阶段码值同源，沿用同一中文词表，避免两处文案漂移。
+export const reportStatusLabel = reportStageLabel
 
 // identityStatusLabel 把身份复核结果翻译成用户能读懂的状态。
 export function identityStatusLabel(status) {
@@ -286,6 +308,43 @@ export function monitoringSlaLabel(row) {
   if (!items.length) return '正常'
   const overdue = items.filter((item) => item.kind !== 'STATUS_DEADLINE_APPROACHING')
   return overdue.length ? `超期 ${Math.max(...overdue.map((item) => Number(item.overdue_hours || 0)))}h` : `临近 ${items.length} 项`
+}
+
+// 监控页签把 report_stage:RECTIFYING 这样的复合键解析成列表/快照共用的查询参数；
+// 普通页签仍按服务端派生状态过滤。report_stage 与状态筛选互斥，不能同时下发。
+export function monitoringFilterQuery(filter) {
+  const value = String(filter || '').trim()
+  if (value.startsWith('report_stage:')) {
+    return { status: '', report_stage: value.slice('report_stage:'.length) }
+  }
+  return { status: ['risk', ''].includes(value) ? '' : value }
+}
+
+// 监控状态分桶：整改中按报告阶段单独成桶，并从收尾归档里等量扣除，
+// 避免同一项目既算“报告编制”又算“整改中”造成重复计数。
+// 旧快照没有 report_stage_counts 时按 0 处理，分桶结果与改造前保持一致。
+export function monitoringStatusBuckets(snapshot = {}) {
+  const counts = snapshot?.status_counts || {}
+  const stageCounts = snapshot?.report_stage_counts || {}
+  const asCount = (value) => Number(value || 0) || 0
+  const rectifying = asCount(stageCounts.NONE) + asCount(stageCounts.RECTIFYING)
+  const closing = asCount(counts['现场实施完成']) + asCount(counts['报告编制'])
+  const buckets = [
+    { key: '推进中', tone: 'var(--pm-green)', statuses: ['待拆解确认', '待分配', '待实施', '实施准备中'] },
+    { key: '实施中', tone: 'var(--pm-primary)', statuses: ['实施中'] },
+    { key: '异常处理', tone: 'var(--pm-red)', statuses: ['异常处理中'] },
+    { key: '整改中', tone: 'var(--pm-amber)', statuses: [], count: rectifying },
+    { key: '收尾归档', tone: 'var(--pm-violet)', statuses: ['现场实施完成', '报告编制'], count: Math.max(0, closing - rectifying) },
+    { key: '已终止', tone: 'var(--pm-gray)', statuses: ['已终止'] },
+  ]
+  const total = asCount(snapshot?.total) || 1
+  return buckets
+    .map((bucket) => ({
+      ...bucket,
+      count: bucket.count ?? bucket.statuses.reduce((sum, status) => sum + asCount(counts[status]), 0),
+    }))
+    .map((bucket) => ({ ...bucket, pct: Math.round((bucket.count / total) * 100) }))
+    .filter((bucket) => bucket.count)
 }
 
 // 实施计划的人员与设备清单：已发布的计划用保存下来的快照回填；首次制定时按服务项已指派的

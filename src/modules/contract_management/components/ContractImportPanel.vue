@@ -1,9 +1,12 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { contractImportRequest, listContractImportBatches, releaseContractImportItem,
   getImportItemDocumentDescriptor, importItemSourceURL, openContractCRMLogin,
   listMyCustomers, ensureContractCRMDirectorySession, listContractDetectionCategories } from '../api/contract.js'
 import ContractPDFPreview from './ContractPDFPreview.vue'
+import LocalContractSourcePicker from './LocalContractSourcePicker.vue'
+import { importRowSourceForm, applyImportRowSourceForm } from '../utils/localImportSourceBridge.js'
+import { contractImportErrorRows, contractImportErrorsCsv } from '../utils/contractImportErrors.js'
 import { prepareImportManifest, formatImportMinor } from '../utils/contractImport.js'
 import { buildImportManifestFromRows, createImportFormRow, emptyImportServiceItem,
   importFieldLabel, importRowsFromItems, validateImportFormRows } from '../utils/contractImportForm.js'
@@ -18,7 +21,8 @@ import { ensureStableReviewAttempt } from '../utils/opportunityIntakeReview.js'
 
 const props = defineProps({ enabled: Boolean, pdfEnabled: Boolean, canPreview: { type: Boolean, default: true }, canCommit: Boolean,
   canApprove: Boolean, canRelease: Boolean, actorId: { type: String, default: '' }, initialBatchId: { type: String, default: '' },
-  supportedModes: { type: Array, default: () => ['NORMAL'] } })
+  supportedModes: { type: Array, default: () => ['NORMAL'] },
+  sourceCapabilities: { type: Object, default: () => ({}) } })
 const text = ref(''), files = ref([]), batch = ref(null), batchID = ref(''), lookupID = ref(props.initialBatchId)
 const busy = ref(false), error = ref(''), commitKey = ref(''), sourceSelectionVersion = ref(0)
 const crmConnectionMessage = ref('')
@@ -66,6 +70,39 @@ const isNormalEntry = computed(() => entryMode.value === 'NORMAL')
 const usesJsonManifest = computed(() => !isNormalEntry.value || jsonAuthoritative.value)
 const modeLocked = computed(() => Boolean(batch.value?.items?.length))
 const drawerRow = computed(() => formRows.value.find((row) => row.key === drawerRowKey.value) || null)
+const drawerSourceError = ref('')
+const localImportSources = computed(() => props.sourceCapabilities?.counterparty_source === 'local'
+  || props.sourceCapabilities?.category_source === 'local')
+const drawerSourceForm = computed(() => importRowSourceForm(drawerRow.value))
+const drawerSourceCapabilities = computed(() => {
+  const row = drawerRow.value
+  const restored = (batch.value?.items || []).some((entry) => entry.item?.item_key === row?.key)
+  return { ...props.sourceCapabilities,
+    counterparty_source: row?.counterpartySource === 'LOCAL' ? 'local'
+      : row?.counterpartySource === 'CRM' || row?.crmCustomerId || restored ? 'crm'
+        : props.sourceCapabilities?.counterparty_source,
+    category_source: row?.categorySource === 'LOCAL' ? 'local'
+      : row?.categorySource === 'PROJECT' || restored ? 'project'
+        : props.sourceCapabilities?.category_source,
+  }
+})
+const drawerLocalCounterparty = computed(() => drawerSourceCapabilities.value.counterparty_source === 'local')
+const drawerLocalCategories = computed(() => drawerSourceCapabilities.value.category_source === 'local')
+watch(localImportSources, (local) => {
+  if (local && !excelFile.value && !formRows.value.length && !batch.value?.items?.length) {
+    normalEntryMode.value = 'manual'
+  }
+}, { immediate: true })
+
+// 用途：将抽屉来源选择合回当前普通行，不改变原件、金额或服务项身份。
+// 参数：form为来源选择器发出的同一行完整引用。
+// 返回值：无；错位或失效结果保留原行并显示错误。
+function updateDrawerSource(form) {
+  if (busy.value || !drawerRow.value) return
+  drawerSourceError.value = ''
+  try { Object.assign(drawerRow.value, applyImportRowSourceForm(drawerRow.value, form)) }
+  catch (failure) { drawerSourceError.value = failure.message }
+}
 // 批次恢复后 files 已清空，但已暂存原件仍可用文件名参与匹配；不能因此丢掉当前批次的可继续编辑能力。
 const excelSourceFiles = computed(() => {
   if (files.value.length) return files.value
@@ -107,6 +144,7 @@ const crmConnectionRequired = computed(() => props.canPreview && (batch.value?.i
 const canVote = computed(() => props.canApprove && batch.value?.confirmation?.state === 'PENDING'
   && !(batch.value.confirmation.commands || []).some(command => command.actor_id === props.actorId && ['APPROVE','REJECT'].includes(command.action))
   && Object.entries(batch.value.confirmation.assignees || {}).some(([role, ids]) => Array.isArray(ids) && ids.includes(props.actorId) && !(batch.value.confirmation.approved_roles || []).includes(role)))
+const importErrorReportRows = computed(() => contractImportErrorRows(batch.value?.items || [], error.value, { issueLabels, fieldLabel: importFieldLabel }))
 
 /**
  * syncRowBatchState 只把服务端逐项状态和问题映射回当前表单行，不覆盖用户未保存字段。
@@ -435,6 +473,10 @@ async function applyExcelImport() {
  */
 function selectNormalEntryMode(value) {
   if (busy.value || !isNormalEntry.value || !['excel', 'manual'].includes(value)) return
+  if (value === 'excel' && localImportSources.value) {
+    error.value = '本地来源请使用逐份表单选择目录引用，可一次上传多份原件后批量预检。'
+    return
+  }
   // 模式切换必须作废在途 Excel 响应，否则迟到结果会覆盖手动行或另一模式的编辑。
   excelGeneration++
   excelBusy.value = false
@@ -601,7 +643,7 @@ function selectEntryMode(modeValue) {
   fileMessage.value = ''
   advancedMessage.value = ''
   if (modeValue === 'NORMAL') {
-    if (!wasNormal) normalEntryMode.value = 'excel'
+    if (!wasNormal) normalEntryMode.value = localImportSources.value ? 'manual' : 'excel'
     if (normalEntryMode.value === 'manual') {
       const existing = new Set(formRows.value.map((row) => row.fileName))
       const missing = files.value.filter((file) => !existing.has(file.name)).map((file) => {
@@ -666,6 +708,7 @@ function openRow(row, event) {
   customerOptions.value = []
   customerError.value = ''
   customerCrmRequired.value = false
+  drawerSourceError.value = ''
   void ensureDetectionCategories()
   nextTick(() => drawerRef.value?.focus?.())
 }
@@ -698,6 +741,7 @@ function onDrawerKeydown(event) {
  * 返回值：Promise<void>；失败保留可重试提示，不阻断已保存值编辑。
  */
 async function ensureDetectionCategories(force = false) {
+  if (drawerLocalCategories.value) return
   if (!isNormalEntry.value || detectionCategoryLoading.value) return
   if (!force && detectionCategoriesLoaded) return
   detectionCategoryLoading.value = true
@@ -723,6 +767,7 @@ async function ensureDetectionCategories(force = false) {
  * 返回值：Promise<void>；登录缺失时保留表单并给出连接入口。
  */
 async function loadCustomers(row) {
+  if (row?.counterpartySource === 'LOCAL' || drawerLocalCounterparty.value) return
   if (customerLoading.value || busy.value) return
   customerLoading.value = true
   customerError.value = ''
@@ -797,7 +842,7 @@ async function refresh(id = lookupID.value.trim(), { fromWrite = false } = {}) {
       documentGeneration++; document.value = null; text.value = ''; files.value = []; sourceSelectionVersion.value++
       commitKey.value = ''; confirmationAttempt.value = null; actionAttempt.value = null
       formRows.value = []; fileMessage.value = ''; advancedMessage.value = ''; jsonAuthoritative.value = false; drawerRowKey.value = ''; drawerReturnFocus = null
-      resetExcelState(); normalEntryMode.value = 'excel'
+      resetExcelState(); normalEntryMode.value = localImportSources.value ? 'manual' : 'excel'
     }
     batchID.value = result.batch_id
     if (switched || lookupID.value.trim() === result.batch_id) lookupID.value = result.batch_id
@@ -832,7 +877,7 @@ function startNewBatch() {
   crmConnectionMessage.value = ''
   formRows.value = []; jsonAuthoritative.value = false; fileMessage.value = ''; advancedMessage.value = ''
   drawerRowKey.value = ''; drawerReturnFocus = null; customerOptions.value = []; customerError.value = ''; customerCrmRequired.value = false
-  normalEntryMode.value = 'excel'; resetExcelState()
+  normalEntryMode.value = localImportSources.value ? 'manual' : 'excel'; resetExcelState()
   entryMode.value = props.supportedModes.includes('NORMAL') ? 'NORMAL' : (props.supportedModes[0] || 'NORMAL')
 }
 
@@ -847,6 +892,25 @@ function connectCRM(force = false) {
   crmConnectionMessage.value = openContractCRMLogin()
     ? '已打开 CRM，请用同一账号登录并查询客户，返回后点击重新预检；原批次及原件保留。'
     : '无法打开 CRM 登录页，请允许浏览器弹出窗口后再点击连接 CRM。'
+}
+
+/**
+ * importSourceErrorMessage 把原件准入拒绝还原成可定位的具体原因。
+ * 参数：failure为contractImportRequest抛出的错误，含message、code、status与details。
+ * 返回值：中文提示；有reason_code时附原因码，原件准入拒绝附文件名，繁忙拒绝明确可重试。
+ */
+function importSourceErrorMessage(failure) {
+  const details = failure && typeof failure.details === 'object' && failure.details !== null ? failure.details : {}
+  const reasonCode = typeof details.reason_code === 'string' ? details.reason_code.trim() : ''
+  const fileName = typeof details.file_name === 'string' ? details.file_name.trim().slice(0, 160) : ''
+  const message = typeof failure?.message === 'string' ? failure.message.trim() : ''
+  const reason = reasonCode ? `（原因码 ${reasonCode}）` : ''
+  // 503/IMPORT_SOURCE_BUSY 是PDF校验并发繁忙，原样重试即可，不能提示用户改动已填数据。
+  if (failure?.code === 'IMPORT_SOURCE_BUSY' || reasonCode === 'IMPORT_SOURCE_BUSY') {
+    return `${message || 'PDF 校验繁忙，请稍后重试。'} 已填数据无需修改，稍后直接重新预检${reason}。`
+  }
+  if (!reasonCode) return `${message || '原件未通过校验，请核对原件格式和文件名后重试。'}${fileName ? `（原件「${fileName}」）` : ''}`
+  return `${fileName ? `原件「${fileName}」未通过校验：` : ''}${message || '原件未通过校验，请核对原件格式和文件名后重试。'}${reason}`
 }
 
 /**
@@ -883,6 +947,15 @@ async function preview() {
     }
     const prepared = prepareImportManifest(text.value, files.value, batch.value?.sources || [], props.supportedModes)
     for (const file of files.value) validateContractSourceFile(file, { pdfEnabled: props.pdfEnabled })
+    // 上传前兜底：映射缺失或不是带 name 的对象时立刻失败，绝不把 undefined 塞进 FormData（会被序列化成 "undefined" 发出去）。
+    for (const item of prepared.manifest.items) {
+      if (prepared.stagedByKey.has(item.item_key)) continue
+      const pending = prepared.filesByName.get(item.source_file_ref)
+      if (!pending || typeof pending.name !== 'string' || !pending.name.trim()) {
+        const label = typeof item.source_file_ref === 'string' && item.source_file_ref.trim() ? item.source_file_ref.trim().slice(0, 120) : item.item_key
+        throw new Error(`原件未就绪：${label}，请重新选择原件后再预检。`)
+      }
+    }
     if (!batch.value) {
       const created = await contractImportRequest('create', '', { schema_version: 1, source_system: prepared.manifest.source_system })
       batch.value = created; batchID.value = created.batch_id; lookupID.value = created.batch_id
@@ -911,7 +984,7 @@ async function preview() {
       if (batchID.value) await refresh(batchID.value, { fromWrite: true })
     } else {
       if (batchID.value) await refresh(batchID.value, { fromWrite: true })
-      error.value = `${failure.message}${batchID.value ? ' 批次已保留，请先查询状态。' : ''}`
+      error.value = `${importSourceErrorMessage(failure)}${batchID.value ? ' 批次已保留，请先查询状态。' : ''}`
     }
   } finally { busy.value = false }
 }
@@ -1043,6 +1116,25 @@ async function viewSource(entry) {
  */
 function closeSource() { documentGeneration++; document.value = null }
 
+/**
+ * downloadImportErrorReport 只根据当前批次已返回的逐项问题和可见批次错误生成 CSV。
+ * 参数：无；不发起网络请求，不补造错误。
+ * 返回值：无；无问题项时按钮禁用，下载后立即回收 Object URL。
+ */
+function downloadImportErrorReport() {
+  if (!importErrorReportRows.value.length) return
+  let url = ''
+  try {
+    const csv = contractImportErrorsCsv(batch.value?.items || [], error.value, { issueLabels, fieldLabel: importFieldLabel })
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+    url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url; link.download = '合同导入错误.csv'
+    document.body.appendChild(link); link.click(); link.remove()
+  } catch (failure) { error.value = failure?.message || '错误报告生成失败，请稍后重试。' }
+  finally { if (url) URL.revokeObjectURL(url) }
+}
+
 onMounted(() => { if (props.initialBatchId) refresh(props.initialBatchId) })
 
 onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; excelGeneration++; clearTimeout(timer) })
@@ -1078,9 +1170,10 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
       <section v-if="isNormalEntry" aria-label="普通新合同导入表单">
         <fieldset class="contract-import-normal-modes" :disabled="busy">
           <legend>详情填写方式</legend>
-          <label><input type="radio" name="contract-import-normal-mode" value="excel" :checked="normalEntryMode === 'excel'" @change="selectNormalEntryMode('excel')" /> Excel 批量导入（推荐）</label>
+          <label v-if="!localImportSources"><input type="radio" name="contract-import-normal-mode" value="excel" :checked="normalEntryMode === 'excel'" @change="selectNormalEntryMode('excel')" /> Excel 批量导入（推荐）</label>
           <label><input type="radio" name="contract-import-normal-mode" value="manual" :checked="normalEntryMode === 'manual'" @change="selectNormalEntryMode('manual')" /> 手动逐份填写</label>
         </fieldset>
+        <p v-if="localImportSources" class="contract-import-hint">本地来源使用逐份表单选择真实目录引用；可以一次上传多份原件并批量预检，历史清单不自动转换来源。</p>
         <template v-if="normalEntryMode === 'excel'">
           <p>第一步选择 PDF 原件（可多选），第二步选择填写好合同详情的 Excel。PDF 文件名去掉扩展名必须与 Excel「合同明细」的合同编号完全一致；系统按合同编号一一对应写入「编辑详情」，缺 PDF、缺 Excel 行、重复编号都会在下面列出并阻止预检。</p>
           <div class="contract-import-dropzone" @dragover.prevent @drop.prevent="dropFiles">
@@ -1128,7 +1221,7 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
               <tr v-for="(row, index) in formRows" :key="row.key">
                 <td><strong>{{ row.fileName }}</strong><small class="block">{{ rowStaged(row) ? '重新预检沿用当前批次已暂存原件' : (batch ? '新原件，预检时上传' : '尚未上传') }}</small><small class="block" :class="hasExternalRecordId(row) ? '' : 'contract-import-error-text'">来源业务键：{{ row.externalRecordId || '未填写（请在「编辑详情」补填）' }}</small></td>
                 <td>{{ row.title || '未填写' }}</td>
-                <td>{{ row.customerName || '未填写' }}<small v-if="row.crmCustomerId" class="block">ID {{ row.crmCustomerId }}</small><small v-if="row.normalized" class="block">预检权威：{{ row.normalized.customer_name }} / {{ row.normalized.crm_customer_id }}</small><small v-if="normalizedCustomerDiff(row)" class="contract-import-error-text block">与预检客户不一致，请以 CRM 目录为准</small></td>
+                <td>{{ row.customerName || '未填写' }}<small v-if="row.crmCustomerId" class="block">ID {{ row.crmCustomerId }}</small><small v-if="row.normalized" class="block">预检权威：{{ row.normalized.customer_name }} / {{ row.normalized.crm_customer_id }}</small><small v-if="normalizedCustomerDiff(row)" class="contract-import-error-text block">与预检客户不一致，请以权威目录为准</small></td>
                 <td class="amount">{{ row.amount || '未填写' }}<small v-if="row.contractId" class="block">合同 {{ row.contractId }}</small></td>
                 <td>{{ row.currency }}</td>
                 <td>{{ row.startDate || '—' }}</td>
@@ -1181,6 +1274,7 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
       <div class="contract-import-scroll"><table class="contract-data-table"><thead><tr><th>单项</th><th>来源业务键</th><th>状态／合同ID</th><th>字段及错误</th></tr></thead><tbody>
         <tr v-for="entry in batch.items" :key="entry.id"><td>{{ entry.item.item_key }} · {{ modeLabels[entry.item.mode] }}<br /><small>原件：{{ batch.sources.find(source => source.file_ref === entry.item.source_file_ref)?.filename }}<br />{{ entry.item.source_file_ref }}</small><button v-if="entry.contract_id" class="contract-text-button" type="button" :disabled="busy" @click="viewSource(entry)">查看冻结原件</button></td><td>{{ entry.item.external_record_id }}<p>纸面编号：{{ entry.item.metadata.external_paper_number || '未提供' }}</p><p v-if="entry.item.history_evidence">声明签署日：{{ entry.item.history_evidence.declared_signed_date || '未声明' }}<br />原终态／履约态：{{ entry.item.history_evidence.historical_status }}</p></td><td>{{ stateLabels[entry.state] || entry.state }}<br />{{ entry.contract_id || '尚未建单' }}<p v-if="entry.normalized_metadata">权威客户：{{ entry.normalized_metadata.customer_name }}<br />客户ID：{{ entry.normalized_metadata.crm_customer_id }}<br />规范金额：{{ entry.normalized_metadata.currency }} {{ formatImportMinor(entry.normalized_metadata.amount_minor) }}</p><p v-if="entry.item.metadata.customer_name !== entry.normalized_metadata?.customer_name">清单客户声明：{{ entry.item.metadata.customer_name }}</p></td><td><template v-for="issue in entry.issues" :key="issue.field_path + issue.code"><p class="contract-import-issue" role="alert">{{ importFieldLabel(issue.field_path) }}：{{ issueLabels[issue.code] || issue.code }}{{ issue.retryable ? '（可恢复）' : '' }}</p></template><p v-if="!entry.issues?.length">无</p></td></tr>
       </tbody></table></div>
+      <p><button class="contract-button secondary small" type="button" :disabled="busy || !importErrorReportRows.length" aria-label="下载合同批量导入错误报告 CSV" @click="downloadImportErrorReport">下载错误报告 CSV</button></p>
       <p v-if="batch.state === 'PREVIEWED'">预计创建 {{ batch.items.filter(entry => !entry.contract_id).length }} 份记录；本次不免审生效。普通模式之后逐份审批；历史模式之后独立确认，再分别放行项目、财务和报表。</p>
       <p v-if="!batch.can_commit">当前身份可查看此批次；提交和恢复须由具有导入提交权限的批次创建人执行。</p>
       <button v-if="batch.state === 'PREVIEWED' && !historyItems.length && canCommit && batch.can_commit" type="button" :disabled="busy" @click="commit">确认冻结清单并创建草稿</button>
@@ -1245,21 +1339,23 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
             <label><span>开始日期（选填）</span><input v-model="drawerRow.startDate" type="date" min="0001-01-01" max="9999-12-31" :aria-invalid="rowIssue(drawerRow, 'startDate') ? 'true' : undefined" /><small v-if="rowIssue(drawerRow, 'startDate')" class="contract-field-error" role="alert">{{ rowIssue(drawerRow, 'startDate').message }}</small></label>
             <label><span>结束日期（选填）</span><input v-model="drawerRow.endDate" type="date" :min="drawerRow.startDate || '0001-01-01'" max="9999-12-31" :aria-invalid="rowIssue(drawerRow, 'endDate') ? 'true' : undefined" /><small v-if="rowIssue(drawerRow, 'endDate')" class="contract-field-error" role="alert">{{ rowIssue(drawerRow, 'endDate').message }}</small></label>
             <label><span>外部纸面编号（选填）</span><input v-model="drawerRow.externalPaperNumber" maxlength="128" /><small v-if="rowIssue(drawerRow, 'externalPaperNumber')" class="contract-field-error" role="alert">{{ rowIssue(drawerRow, 'externalPaperNumber').message }}</small></label>
-            <label><span>CRM 客户编号</span><input id="contract-import-row-customer-id" v-model="drawerRow.crmCustomerId" inputmode="numeric" maxlength="20" required :aria-invalid="rowIssue(drawerRow, 'crmCustomerId') ? 'true' : undefined" /><small v-if="rowIssue(drawerRow, 'crmCustomerId')" class="contract-field-error" role="alert">{{ rowIssue(drawerRow, 'crmCustomerId').message }}</small></label>
-            <label><span>客户名称</span><input id="contract-import-row-customer-name" v-model="drawerRow.customerName" maxlength="255" required :aria-invalid="rowIssue(drawerRow, 'customerName') ? 'true' : undefined" /><small v-if="rowIssue(drawerRow, 'customerName')" class="contract-field-error" role="alert">{{ rowIssue(drawerRow, 'customerName').message }}</small></label>
+            <LocalContractSourcePicker class="contract-form-wide" :model-value="drawerSourceForm" :capabilities="drawerSourceCapabilities" :disabled="busy" @update:model-value="updateDrawerSource" />
+            <p v-if="drawerSourceError" class="contract-field-error contract-form-wide" role="alert">{{ drawerSourceError }}</p>
+            <label v-if="!drawerLocalCounterparty"><span>CRM 客户编号</span><input id="contract-import-row-customer-id" v-model="drawerRow.crmCustomerId" inputmode="numeric" maxlength="20" required :aria-invalid="rowIssue(drawerRow, 'crmCustomerId') ? 'true' : undefined" /><small v-if="rowIssue(drawerRow, 'crmCustomerId')" class="contract-field-error" role="alert">{{ rowIssue(drawerRow, 'crmCustomerId').message }}</small></label>
+            <label><span>客户名称</span><input id="contract-import-row-customer-name" v-model="drawerRow.customerName" :readonly="drawerLocalCounterparty" maxlength="255" required :aria-invalid="rowIssue(drawerRow, 'customerName') ? 'true' : undefined" /><small v-if="rowIssue(drawerRow, 'customerName')" class="contract-field-error" role="alert">{{ rowIssue(drawerRow, 'customerName').message }}</small></label>
             <label><span>客户联系人（选填）</span><input v-model="drawerRow.customerContact" maxlength="128" /></label>
             <label><span>客户联系电话（选填）</span><input v-model="drawerRow.customerPhone" type="tel" inputmode="tel" maxlength="64" /></label>
             <label class="contract-form-wide"><span>客户地址（选填）</span><input v-model="drawerRow.customerAddress" maxlength="500" /></label>
-            <p v-if="drawerRow.normalized" class="contract-form-wide contract-import-hint">预检权威客户：{{ drawerRow.normalized.customer_name }}（ID {{ drawerRow.normalized.crm_customer_id }}）<span v-if="normalizedCustomerDiff(drawerRow)"> · 与当前填写不一致，请以 CRM 目录为准</span></p>
-            <div class="contract-form-wide contract-import-customer-picker">
+            <p v-if="drawerRow.normalized" class="contract-form-wide contract-import-hint">预检权威客户：{{ drawerRow.normalized.customer_name }}（{{ drawerRow.normalized.counterparty_source === 'LOCAL' ? '本地引用' : 'CRM ID' }} {{ drawerRow.normalized.local_counterparty_id || drawerRow.normalized.crm_customer_id }}）<span v-if="normalizedCustomerDiff(drawerRow)"> · 与当前填写不一致，请以权威目录为准</span></p>
+            <div v-if="!drawerLocalCounterparty" class="contract-form-wide contract-import-customer-picker">
               <button class="contract-button secondary small" type="button" :disabled="busy || customerLoading" @click="loadCustomers(drawerRow)">{{ customerLoading ? '正在读取客户…' : '从 CRM 选择客户' }}</button>
               <span>仅读取当前账号 CRM 权限范围内的有效客户；客户名称与编号以 CRM 目录为准。</span>
               <p v-if="customerCrmRequired" role="alert">CRM 登录状态未建立或已失效。{{ crmConnectionMessage || '请连接 CRM 后重试。' }} <button class="contract-text-button" type="button" :disabled="busy" @click="connectCRM(true)">连接 CRM</button></p>
               <p v-else-if="customerError" role="alert">{{ customerError }}</p>
               <ul v-if="customerOptions.length"><li v-for="item in customerOptions" :key="item.id || item.customer_id"><button class="contract-text-button" type="button" @click="selectCustomer(drawerRow, item)"><strong>{{ item.name || item.customer_name }}</strong><span>{{ item.customer_no || item.id || item.customer_id }}</span></button></li></ul>
             </div>
-            <label><span>商机编号（选填）</span><input v-model="drawerRow.opportunityId" maxlength="128" /><small v-if="rowIssue(drawerRow, 'opportunityId')" class="contract-field-error" role="alert">{{ rowIssue(drawerRow, 'opportunityId').message }}</small></label>
-            <label><span>商机名称（选填）</span><input v-model="drawerRow.opportunityName" maxlength="255" /><small>商机编号和名称须同时填写，或都留空。</small></label>
+            <label v-if="!drawerLocalCounterparty"><span>商机编号（选填）</span><input v-model="drawerRow.opportunityId" maxlength="128" /><small v-if="rowIssue(drawerRow, 'opportunityId')" class="contract-field-error" role="alert">{{ rowIssue(drawerRow, 'opportunityId').message }}</small></label>
+            <label v-if="!drawerLocalCounterparty"><span>商机名称（选填）</span><input v-model="drawerRow.opportunityName" maxlength="255" /><small>商机编号和名称须同时填写，或都留空。</small></label>
             <label><span>客户信用等级（选填）</span><input v-model="drawerRow.customerCreditLevel" maxlength="64" /></label>
 
             <div class="contract-form-wide contract-service-items">
@@ -1274,7 +1370,7 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
                   <label><span>服务名称（选填）</span><input v-model="service.name" maxlength="255" placeholder="默认使用服务类型" /></label>
                   <label><span>实施场所</span><input v-model="service.site" maxlength="255" required placeholder="例如：上海总部" /><small v-if="rowIssue(drawerRow, `serviceItems.${serviceIndex}.site`)" class="contract-field-error" role="alert">{{ rowIssue(drawerRow, `serviceItems.${serviceIndex}.site`).message }}</small></label>
                   <label><span>实施批次</span><input v-model="service.batch" maxlength="120" required placeholder="例如：第一批次" /><small v-if="rowIssue(drawerRow, `serviceItems.${serviceIndex}.batch`)" class="contract-field-error" role="alert">{{ rowIssue(drawerRow, `serviceItems.${serviceIndex}.batch`).message }}</small></label>
-                  <label><span>检测类别</span><select v-model="service.category" required :disabled="detectionCategoryLoading || !detectionCategoryOptions.length" :aria-invalid="rowIssue(drawerRow, `serviceItems.${serviceIndex}.category`) ? 'true' : undefined"><option value="" disabled>{{ detectionCategoryLoading ? '正在加载检测类别' : (detectionCategoryError ? '目录加载失败，请先重新加载' : '请选择检测类别') }}</option><option v-if="service.category && !detectionCategoryOptions.some(option => option.category === service.category)" :value="service.category">{{ service.category }}（原清单值）</option><option v-for="option in detectionCategoryOptions" :key="option.category" :value="option.category">{{ option.category }}</option></select><small v-if="rowIssue(drawerRow, `serviceItems.${serviceIndex}.category`)" class="contract-field-error" role="alert">{{ rowIssue(drawerRow, `serviceItems.${serviceIndex}.category`).message }}</small></label>
+                  <label><span>检测类别</span><select v-if="!drawerLocalCategories" v-model="service.category" required :disabled="detectionCategoryLoading || !detectionCategoryOptions.length" :aria-invalid="rowIssue(drawerRow, `serviceItems.${serviceIndex}.category`) ? 'true' : undefined"><option value="" disabled>{{ detectionCategoryLoading ? '正在加载检测类别' : (detectionCategoryError ? '目录加载失败，请先重新加载' : '请选择检测类别') }}</option><option v-if="service.category && !detectionCategoryOptions.some(option => option.category === service.category)" :value="service.category">{{ service.category }}（原清单值）</option><option v-for="option in detectionCategoryOptions" :key="option.category" :value="option.category">{{ option.category }}</option></select><input v-else :value="service.category" readonly placeholder="请在本地目录选择器中选择类别" /><small v-if="rowIssue(drawerRow, `serviceItems.${serviceIndex}.category`)" class="contract-field-error" role="alert">{{ rowIssue(drawerRow, `serviceItems.${serviceIndex}.category`).message }}</small></label>
                   <label><span>检测方式</span><select v-model="service.testMode" required><option value="STANDARD">常规检测</option><option value="PENETRATION">渗透测试</option></select><small v-if="rowIssue(drawerRow, `serviceItems.${serviceIndex}.testMode`)" class="contract-field-error" role="alert">{{ rowIssue(drawerRow, `serviceItems.${serviceIndex}.testMode`).message }}</small></label>
                   <label class="contract-form-wide"><span>体系 / 能力要求（选填）</span><input v-model="service.requirement" maxlength="1000" placeholder="例如：等保三级" /></label>
                 </div>
@@ -1305,14 +1401,16 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
             <label class="contract-form-wide"><span>合同正文（选填，纯文本说明）</span><textarea v-model="drawerRow.content" maxlength="20000" rows="3" placeholder="可留空；外部原件正文以所选 PDF/DOCX 为准，不从文本猜测合同条款。" /></label>
           </div>
         </section>
-        <footer><button class="contract-button secondary" type="button" :disabled="busy" @click="closeDrawer">完成</button></footer>
+        <footer><button class="contract-button secondary" type="button" :disabled="busy" @click="closeDrawer">关闭导入结果</button></footer>
       </article>
     </div>
   </details>
 </template>
 
 <style scoped>
-.contract-import-panel { padding: 16px; margin-block: 16px; border: 1px solid #cbd5e1; border-radius: 8px; background: white; }
+/* 深色主题：结构性表面 / 墨色 / 描边一律写成 var(--token, 原字面量)。
+   token 在浅色下未定义或取值与原字面量相同，浅色渲染不变；深色下取 main.css 的值。 */
+.contract-import-panel { padding: 16px; margin-block: 16px; border: 1px solid var(--line-strong, #cbd5e1); border-radius: 8px; background: var(--surface-card, #fff); }
 .contract-import-panel label { display: block; margin-block: 12px; }
 .contract-import-panel textarea { display: block; width: 100%; box-sizing: border-box; }
 .contract-import-panel input { max-width: 100%; }
@@ -1321,53 +1419,53 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
 .contract-import-scroll { overflow-x: auto; }
 .contract-import-panel th,.contract-import-panel td { padding: 8px; text-align: left; vertical-align: top; }
 .contract-import-task-list { display: flex; flex-wrap: wrap; }
-.contract-import-targets { padding: 12px; border-block-start: 1px solid #d9e1ec; }
+.contract-import-targets { padding: 12px; border-block-start: 1px solid var(--border-soft, #d9e1ec); }
 .contract-import-targets div { margin-block: 8px; }
-.contract-import-mode { display: flex; flex-wrap: wrap; gap: 14px; margin-block: 12px; padding: 12px; border: 1px solid #cbd5e1; border-radius: 8px; }
+.contract-import-mode { display: flex; flex-wrap: wrap; gap: 14px; margin-block: 12px; padding: 12px; border: 1px solid var(--line-strong, #cbd5e1); border-radius: 8px; }
 .contract-import-mode legend { padding-inline: 4px; font-weight: 600; }
 .contract-import-mode label { display: inline-flex; align-items: center; gap: 6px; margin: 0; }
 .contract-import-mode input { margin: 0; }
-.contract-import-normal-modes { display: flex; flex-wrap: wrap; gap: 14px; margin-block: 12px; padding: 12px; border: 1px solid #cbd5e1; border-radius: 8px; }
+.contract-import-normal-modes { display: flex; flex-wrap: wrap; gap: 14px; margin-block: 12px; padding: 12px; border: 1px solid var(--line-strong, #cbd5e1); border-radius: 8px; }
 .contract-import-normal-modes legend { padding-inline: 4px; font-weight: 600; }
 .contract-import-normal-modes label { display: inline-flex; align-items: center; gap: 6px; margin: 0; }
 .contract-import-normal-modes input { margin: 0; }
-.contract-import-excel-summary { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-block: 10px; padding: 10px 12px; color: #0f172a; font-size: 12px; border: 1px solid #bfdbfe; border-radius: 8px; background: #eff6ff; }
-.contract-import-excel-issues { margin-block: 10px; padding: 10px 12px; color: #7f1d1d; font-size: 12px; border: 1px solid #fecaca; border-radius: 8px; background: #fef2f2; }
+.contract-import-excel-summary { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-block: 10px; padding: 10px 12px; color: var(--text, #0f172a); font-size: 12px; border: 1px solid var(--primary-border, #bfdbfe); border-radius: 8px; background: var(--primary-soft, #eff6ff); }
+.contract-import-excel-issues { margin-block: 10px; padding: 10px 12px; color: var(--danger-ink, #7f1d1d); font-size: 12px; border: 1px solid var(--danger-border, #fecaca); border-radius: 8px; background: var(--danger-soft, #fef2f2); }
 .contract-import-excel-issues p { margin-block: 0 6px; }
 .contract-import-excel-issues ul { max-height: 220px; margin: 0; padding-inline-start: 20px; overflow: auto; }
 .contract-import-excel-issues li { margin-block: 3px; overflow-wrap: anywhere; }
-.contract-import-hint { color: #475569; font-size: 12px; }
-.contract-import-warning { padding: 10px 12px; color: #92400e; font-size: 12px; border: 1px solid #fcd34d; border-radius: 8px; background: #fffbeb; }
-.contract-import-error { color: #b91c1c; font-size: 12px; }
-.contract-import-error-text { color: #b91c1c; font-size: 12px; }
-.contract-import-issue { margin: 0 0 6px; color: #b91c1c; font-size: 12px; }
+.contract-import-hint { color: var(--text-secondary, #475569); font-size: 12px; }
+.contract-import-warning { padding: 10px 12px; color: var(--warning-ink, #92400e); font-size: 12px; border: 1px solid var(--warning-border, #fcd34d); border-radius: 8px; background: var(--warning-soft-strong, #fffbeb); }
+.contract-import-error { color: var(--danger-text, #b91c1c); font-size: 12px; }
+.contract-import-error-text { color: var(--danger-text, #b91c1c); font-size: 12px; }
+.contract-import-issue { margin: 0 0 6px; color: var(--danger-text, #b91c1c); font-size: 12px; }
 .contract-import-rows { min-width: 1080px; }
-.contract-import-dropzone { margin-block: 12px; padding: 14px; border: 1px dashed #93c5fd; border-radius: 9px; background: #f8fbff; }
+.contract-import-dropzone { margin-block: 12px; padding: 14px; border: 1px dashed var(--border-brand-strong, #93c5fd); border-radius: 9px; background: var(--surface-tint, #f8fbff); }
 .contract-import-dropzone label { margin: 0 0 8px; }
-.contract-import-advanced { margin-block: 14px; padding: 12px; border: 1px dashed #cbd5e1; border-radius: 8px; }
+.contract-import-advanced { margin-block: 14px; padding: 12px; border: 1px dashed var(--line-strong, #cbd5e1); border-radius: 8px; }
 .contract-import-advanced summary { cursor: pointer; font-weight: 600; }
-.contract-import-advanced textarea[readonly] { background: #f8fafc; }
+.contract-import-advanced textarea[readonly] { background: var(--surface-muted, #f8fafc); }
 .contract-import-check { display: flex; align-items: flex-start; gap: 8px; }
 .contract-import-check input { margin-top: 3px; }
 .contract-import-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
-.contract-import-actions span { color: #475569; font-size: 12px; }
+.contract-import-actions span { color: var(--text-secondary, #475569); font-size: 12px; }
 .contract-import-file-list { padding-inline-start: 20px; font-size: 12px; }
 .contract-import-file-list li { margin-block: 4px; }
 .contract-import-drawer { width: min(1020px, 100%); }
-.contract-import-drawer label { display: flex; flex-direction: column; gap: 7px; margin: 0; color: #475569; font-size: 12px; font-weight: 600; }
-.contract-import-drawer label > small { color: #64748b; font-size: 11px; font-weight: 400; }
+.contract-import-drawer label { display: flex; flex-direction: column; gap: 7px; margin: 0; color: var(--text-secondary, #475569); font-size: 12px; font-weight: 600; }
+.contract-import-drawer label > small { color: var(--text-muted, #64748b); font-size: 11px; font-weight: 400; }
 .contract-import-drawer input:not([type=checkbox]),.contract-import-drawer select,.contract-import-drawer textarea { width: 100%; box-sizing: border-box; }
-.contract-import-drawer textarea { min-height: 76px; padding: 9px 10px; color: #0f172a; font-size: 12px; line-height: 1.6; resize: vertical; outline: 0; border: 1px solid #e2e8f0; border-radius: 7px; }
-.contract-import-drawer textarea:focus { border-color: #93c5fd; box-shadow: 0 0 0 3px rgba(37,99,235,.07); }
+.contract-import-drawer textarea { min-height: 76px; padding: 9px 10px; color: var(--text, #0f172a); font-size: 12px; line-height: 1.6; resize: vertical; outline: 0; border: 1px solid var(--border, #e2e8f0); border-radius: 7px; }
+.contract-import-drawer textarea:focus { border-color: var(--border-brand-strong, #93c5fd); box-shadow: 0 0 0 3px rgba(37,99,235,.07); }
 .contract-import-drawer button { margin: 0; }
 .contract-import-drawer > header > button,.contract-import-drawer .contract-service-item > header > button { width: 30px; height: 30px; padding: 0; }
 .contract-import-drawer .contract-system-row > button { height: 36px; padding: 0; }
 .contract-import-drawer .contract-form-grid { gap: 12px; }
-.contract-import-customer-picker { padding: 12px; border: 1px solid #dbe3ee; border-radius: 9px; background: #f8fafc; }
-.contract-import-customer-picker > span { color: #475569; font-size: 12px; }
+.contract-import-customer-picker { padding: 12px; border: 1px solid var(--border-soft, #dbe3ee); border-radius: 9px; background: var(--surface-muted, #f8fafc); }
+.contract-import-customer-picker > span { color: var(--text-secondary, #475569); font-size: 12px; }
 .contract-import-customer-picker ul { display: grid; gap: 4px; max-height: 190px; margin: 8px 0 0; padding: 0; overflow: auto; list-style: none; }
-.contract-import-customer-picker li button { display: flex; width: 100%; justify-content: space-between; gap: 10px; padding: 8px 10px; text-align: left; border-radius: 7px; background: white; }
-.contract-import-customer-picker li button:hover { background: #eff6ff; }
-.contract-import-customer-picker li span { color: #64748b; font-size: 11px; }
+.contract-import-customer-picker li button { display: flex; width: 100%; justify-content: space-between; gap: 10px; padding: 8px 10px; text-align: left; border-radius: 7px; background: var(--surface-raised, #fff); }
+.contract-import-customer-picker li button:hover { background: var(--primary-soft, #eff6ff); }
+.contract-import-customer-picker li span { color: var(--text-muted, #64748b); font-size: 11px; }
 @media (max-width: 720px) { .contract-import-drawer { width: 100%; } .contract-import-mode { flex-direction: column; } }
 </style>

@@ -1,16 +1,20 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { ref } from 'vue'
+import { reactive, ref } from 'vue'
 import { useInvoiceDetail } from './useInvoiceDetail.js'
 
-// reviewRedFlush 驳回原因沿用 window.prompt（逐字迁移的遗留）；用例按需改写返回值。
-const prompt = { answer: null, calls: 0 }
-globalThis.window = { prompt: () => { prompt.calls++; return prompt.answer } }
+// 原生输入框仅作旧行为对照；新流程必须调用注入的应用内表单。
+globalThis.window = { prompt: () => null }
 
-function harness({ section = 'invoices', query = {}, refreshed = true, failure = null } = {}) {
-  const calls = { push: [], upload: [], download: [], redFlush: [], approve: [], reject: [], load: 0, notify: [], act: [] }
+// 用途：建立隔离的结算交互依赖，记录提交与应用内表单请求。
+// 参数：测试场景指定可见数据、表单结果及依赖失败。
+// 返回值：真实 composable 状态、注入依赖与调用记录。
+function harness({ section = 'invoices', query = {}, refreshed = true, failure = null, promptAnswer = null } = {}) {
+  const calls = { push: [], upload: [], download: [], redFlush: [], approve: [], reject: [], prompts: [], load: 0, notify: [], act: [] }
   const deps = {
-    route: { query },
+    can: () => true,
+    askPrompt: async (options) => { calls.prompts.push(options); return promptAnswer },
+    route: reactive({ query }),
     router: { push: (target) => calls.push.push(target) },
     active: ref(section),
     saving: ref(false),
@@ -98,6 +102,25 @@ test('uploadInvoiceDocument 成功：按详情 ID 上传、刷新并提示；刷
   assert.equal(failed.deps.saving.value, false)
 })
 
+test('uploadInvoiceDocument：超过 10 MiB 或类型不符时只提示，不调用上传接口也不进入保存态', async () => {
+  const h = harness()
+  h.invoiceDetail.value = { id: 'INV-1' }
+  const oversized = { name: 'invoice.pdf', type: 'application/pdf', size: 10 * 1024 * 1024 + 1 }
+  await h.uploadInvoiceDocument(fileEvent(oversized))
+  assert.equal(h.calls.upload.length, 0, '超限文件不发起上传（不构造 FormData）')
+  assert.equal(h.deps.saving.value, false, '本地校验失败不占用保存态')
+  assert.match(h.calls.notify[0], /电子发票不能超过 10 MiB/)
+
+  const wrongType = { name: 'invoice.exe', type: '', size: 1024 }
+  await h.uploadInvoiceDocument(fileEvent(wrongType))
+  assert.equal(h.calls.upload.length, 0, '类型不符不发起上传')
+  assert.match(h.calls.notify[1], /电子发票类型不受支持，仅允许 PDF、OFD、XML、PNG、JPG。/)
+
+  const allowed = { name: 'invoice.ofd', type: '', size: 2 * 1024 * 1024 }
+  await h.uploadInvoiceDocument(fileEvent(allowed))
+  assert.deepEqual(h.calls.upload, [{ id: 'INV-1', file: allowed }], '合规文件仍按原路径上传')
+})
+
 test('downloadInvoiceDocument：详情与文档 ID 缺一不请求；失败提示格式化文案', async () => {
   const h = harness()
   await h.downloadInvoiceDocument({ id: 'D1' })
@@ -143,27 +166,49 @@ test('submitRedFlush 接口失败：弹窗保持打开（关闭位于 await 之�
   assert.deepEqual(h.calls.act, ['fail:服务端拒绝'])
 })
 
-test('reviewRedFlush：无红冲申请静默；通过走 approve(id, version)；驳回经 prompt 取原因，空原因/取消不提交', async () => {
-  const none = harness()
-  none.invoiceDetail.value = { id: 'INV-1' }
-  await none.reviewRedFlush(true)
-  assert.equal(none.calls.approve.length, 0)
-
-  const h = harness()
-  h.invoiceDetail.value = { id: 'INV-1', red_flush_request: { id: 'RF-1', version: 3 } }
+test('reviewRedFlush：通过直接复核，驳回单表单必填原因，取消不提交', async () => {
+  const h = harness({ promptAnswer: '  金额不符  ' })
+  await h.reviewRedFlush(true)
+  assert.equal(h.calls.approve.length, 0)
+  h.invoiceDetail.value = { id: 'INV-1', red_flush_request: {
+    id: 'RF-1', version: 3, status: 'SUBMITTED', can_review: true,
+  } }
   await h.reviewRedFlush(true)
   assert.deepEqual(h.calls.approve, [{ id: 'RF-1', version: 3 }])
-  assert.deepEqual(h.calls.act, ['红冲申请已通过复核，等待税控处理。'])
-  assert.equal(prompt.calls, 0, '通过复核不得弹 prompt')
-
-  prompt.answer = null
-  await h.reviewRedFlush(false)
-  prompt.answer = '   '
-  await h.reviewRedFlush(false)
-  assert.equal(h.calls.reject.length, 0, '取消或空白原因不得驳回')
-
-  prompt.answer = '  金额不符  '
+  assert.equal(h.calls.prompts.length, 0)
   await h.reviewRedFlush(false)
   assert.deepEqual(h.calls.reject, [{ id: 'RF-1', version: 3, reason: '金额不符' }])
-  assert.deepEqual(h.calls.act.at(-1), '红冲申请已驳回。')
+  assert.equal(h.calls.prompts[0].confirmText, '驳回红冲申请')
+  for (const promptAnswer of [null, '   ']) {
+    const cancelled = harness({ promptAnswer })
+    cancelled.invoiceDetail.value = h.invoiceDetail.value
+    await cancelled.reviewRedFlush(false)
+    assert.equal(cancelled.calls.reject.length, 0)
+  }
+})
+
+test('reviewRedFlush：等待理由时禁止重复，切换发票、版本或权限变化和保存中均不提交', async () => {
+  for (const mutation of ['invoice', 'version', 'permission', 'saving', 'section', 'reviewable', 'route']) {
+    const h = harness()
+    let resolve
+    let allowed = true
+    const api = useInvoiceDetail({ ...h.deps, can: () => allowed,
+      askPrompt: () => new Promise((done) => { resolve = done }),
+    })
+    api.invoiceDetail.value = { id: 'INV-1', red_flush_request: {
+      id: 'RF-1', version: 3, status: 'SUBMITTED', can_review: true,
+    } }
+    const pending = api.reviewRedFlush(false)
+    await api.reviewRedFlush(false)
+    if (mutation === 'invoice') api.invoiceDetail.value.id = 'INV-2'
+    if (mutation === 'version') api.invoiceDetail.value.red_flush_request.version++
+    if (mutation === 'permission') allowed = false
+    if (mutation === 'saving') h.deps.saving.value = true
+    if (mutation === 'route') h.deps.route.query.invoice_id = 'INV-2'
+    if (mutation === 'section') h.deps.active.value = 'receipts'
+    if (mutation === 'reviewable') api.invoiceDetail.value.red_flush_request.can_review = false
+    resolve('原因已核对')
+    await pending
+    assert.equal(h.calls.reject.length, 0, mutation)
+  }
 })

@@ -103,7 +103,7 @@ defineExpose({ formEl })
         <p class="iam-form-alert"><ConsoleIcon name="info" />提交后由 Go API 写入 MySQL，并生成审计事件。</p>
         <footer>
           <button class="console-button ghost" type="button" :disabled="saving" @click="$emit('close')">取消</button>
-          <button class="console-button primary" type="submit" :disabled="saving"><ConsoleIcon name="save" />{{ saving ? '保存中…' : '保存' }}</button>
+          <button class="console-button primary" type="submit" :disabled="saving"><ConsoleIcon name="save" />{{ saving ? '保存中…' : ({ user: '保存用户', 'user-batch': '批量创建用户', account: '保存登录账号', organization: '保存组织', position: '保存岗位', membership: '保存任职' }[editor.kind] || '保存身份信息') }}</button>
         </footer>
       </form>
     </section>

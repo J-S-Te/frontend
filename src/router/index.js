@@ -6,12 +6,7 @@ import SubsystemAccessErrorView from '@/modules/platform/auth/views/SubsystemAcc
 import PlatformConsoleView from '@/modules/platform/views/PlatformConsoleView.vue'
 import SubsystemPortalView from '@/modules/platform/views/SubsystemPortalView.vue'
 import { AuthError, getCurrentPrincipal } from '@/modules/platform/auth/api/auth'
-import { ensureContractSession } from '@/modules/contract_management/api/contract'
-import { ensureProjectSession } from '@/modules/project_management/api/projectManagement'
-import { ensureSettlementSession } from '@/modules/settlement/api/settlement'
-import { ensureCRMSession } from '@/modules/customer_opportunity/api/client'
-import { ensurePortalSession } from '@/modules/customer_portal/api/portal'
-import { ensureDataAnalysisSession } from '@/modules/data_analysis/api/dataAnalysis'
+import { businessViews, sessionLoaders } from '@/modules/registry/compiledModules.js'
 import { canAccessContractSection } from '@/modules/shared/authz/sys004'
 import { buildSubsystemAccessErrorRoute } from '@/modules/shared/authz/sessionCompatibility'
 import { dispatchAuthorizationRefreshed } from '@/modules/platform/auth/utils/authorizationRefresh'
@@ -23,16 +18,13 @@ import {
   visiblePlatformSettingsSections,
 } from '@/modules/platform/auth/utils/platformConsoleAccess'
 
-// 业务系统体量较大，且各自构成独立的路由边界。通过懒加载，
-// 平台登录页和子系统门户无需在用户选择系统前，
-// 就下载所有业务界面。
-const ContractManagementView = () => import('@/modules/contract_management/views/ContractManagementView.vue')
-const ProjectManagementView = () => import('@/modules/project_management/views/ProjectManagementView.vue')
-const SettlementView = () => import('@/modules/settlement/views/SettlementView.vue')
-const CustomerOpportunityView = () => import('@/modules/customer_opportunity/views/CustomerOpportunityView.vue')
-const CRMLoginCompleteView = () => import('@/modules/customer_opportunity/views/CRMLoginCompleteView.vue')
-const CustomerPortalView = () => import('@/modules/customer_portal/views/CustomerPortalView.vue')
-const DataAnalysisView = () => import('@/modules/data_analysis/views/DashboardShellView.vue')
+// 编译入口只导入已选业务，未编译视图不会登记为可访问路由。
+const { ContractManagementView, ProjectManagementView, SettlementView,
+  CustomerOpportunityView, CRMLoginCompleteView, CustomerPortalView,
+  DataAnalysisView } = businessViews
+const { Contract: ensureContractSession, Project: ensureProjectSession,
+  Settlement: ensureSettlementSession, CRM: ensureCRMSession,
+  Portal: ensurePortalSession, DataAnalysis: ensureDataAnalysisSession } = sessionLoaders
 
 const contractSections = ['dashboard', 'intakes', 'customers', 'contracts', 'imports', 'templates', 'approvals', 'rules', 'signing', 'reports', 'outbox']
 
@@ -40,16 +32,25 @@ const contractSections = ['dashboard', 'intakes', 'customers', 'contracts', 'imp
 // “页面已展示、点击却被守卫重定向”的双份白名单漂移。
 const settingsSections = new Set(PLATFORM_SETTINGS_SECTION_KEYS)
 
+// normalizeSettingsSection 统一平台设置页签键。
+// 参数：section 为请求的设置页签。
+// 返回值：有效页签；未知页签回落到身份管理。
 function normalizeSettingsSection(section) {
   return settingsSections.has(section) ? section : 'iam'
 }
 
+// subsystemAccessFailure 保留服务端拒绝访问的错误分类。
+// 参数：error 为认证错误，to 为目标路由。
+// 返回值：错误页面路由或拒绝导航。
 function subsystemAccessFailure(error, to) {
   return buildSubsystemAccessErrorRoute(error, to.fullPath) || false
 }
 
 const router = createRouter({
   history: createWebHistory(),
+  // scrollBehavior 在导航后恢复页面顶部。
+  // 参数：无。
+  // 返回值：页面顶部滚动位置。
   scrollBehavior() {
     return { top: 0 }
   },
@@ -164,7 +165,7 @@ const router = createRouter({
       path: '/:pathMatch(.*)*',
       redirect: { name: 'portal' },
     },
-  ],
+  ].filter((route) => route.redirect || route.component),
 })
 
 router.beforeEach(async (to) => {

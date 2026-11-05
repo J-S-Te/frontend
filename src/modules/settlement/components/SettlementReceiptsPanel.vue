@@ -95,7 +95,7 @@ defineEmits(['reload','submit-receipt','sync-customer','select-match','navigate'
           v-model.trim="receiptForm.bank_transaction_reference"
           placeholder="银行凭证号"
           required
-         maxlength="128"/><button :disabled="saving">确认登记</button>
+         maxlength="128"/><button :disabled="saving">登记回款</button>
       </form>
     </article>
     <article

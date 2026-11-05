@@ -46,4 +46,20 @@ onMounted(() => {
   background: #2563eb;
 }
 .crm-login-complete button:hover { background: #1d4ed8; }
+
+/* 深色主题：登录完成页的浅灰底与墨色；浅色声明未改。 */
+[data-theme="dark"] .crm-login-complete {
+  color: var(--text);
+  background: var(--surface-content);
+}
+[data-theme="dark"] .crm-login-complete p {
+  color: var(--text-secondary);
+}
+[data-theme="dark"] .crm-login-complete button {
+  color: var(--text-strong);
+  background: var(--primary);
+}
+[data-theme="dark"] .crm-login-complete button:hover {
+  background: var(--primary-dark);
+}
 </style>

@@ -54,10 +54,15 @@ test('Settlement view exposes the first-phase financial workflow without mock re
   assert.match(source, /reason: "session-ended"/)
   assert.match(source, /:disabled="isLoggingOut"/)
   assert.match(source, /modules\/platform\/styles\/console\.css/)
-  assert.match(source, /console-page settlement-shell/)
-  assert.match(source, /console-sidebar settlement-sidebar/)
-  assert.match(source, /console-topbar settlement-topbar/)
-  assert.match(source, /console-content settlement-content/)
+  // 壳层骨架已迁到 shared/components/AppShell.vue：原来锁的是手写骨架里的
+  // `console-page settlement-shell` 这类相邻字面量，现在改成「<AppShell> + 皮肤类名 prop」，
+  // 视觉与类名归属不变（console-* 基类由外壳渲染，settlement-* 皮肤仍挂同一批元素）。
+  assert.match(source, /<AppShell[\s\S]{0,600}page-class="settlement-shell"/)
+  assert.match(source, /sidebar-class="settlement-sidebar"/)
+  assert.match(source, /topbar-class="settlement-topbar"/)
+  assert.match(source, /content-class="settlement-content"/)
+  assert.match(source, /import AppShell from "@\/modules\/shared\/components\/AppShell\.vue"/)
+  assert.doesNotMatch(source, /<main[\s>]/, '主区由共享外壳渲染，视图不再自建 <main>')
   assert.match(source, /navigationGroups/)
   assert.match(source, /dashboardKpis/)
   assert.match(source, /workItems/)

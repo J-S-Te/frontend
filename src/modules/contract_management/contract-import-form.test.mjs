@@ -206,3 +206,23 @@ test('预检字段路径转为业务可读中文，未知路径保留原文', ()
   assert.equal(importFieldLabel('metadata.service_items[2].systems[1].level'), '服务项 3 · 系统 2 · 系统等级')
   assert.equal(importFieldLabel('metadata.unknown_field'), 'metadata.unknown_field')
 })
+
+test('NORMAL表单LOCAL引用可生成并恢复，版本与原source_id身份不丢失', () => {
+  const row = validRow({ crmCustomerId: '', counterpartySource: 'LOCAL', localCounterpartyId: '01J00000000000000000000001', counterpartyVersion: 2, categorySource: 'LOCAL', serviceItems: [serviceItem({ sourceId: 'original-service', categoryId: '01J00000000000000000000002', categoryVersion: 3 })] })
+  assert.deepEqual(validateImportFormRows([row]), [])
+  const manifest = buildImportManifestFromRows([row])
+  const metadata = manifest.items[0].metadata
+  assert.equal(metadata.counterparty_source, 'LOCAL')
+  assert.equal(metadata.local_counterparty_id, row.localCounterpartyId)
+  assert.equal(metadata.crm_customer_id, 0)
+  assert.equal(metadata.service_items[0].category_version, 3)
+  assert.equal(metadata.service_items[0].source_id, 'original-service')
+  const restored = importRowsFromItems([{ item: manifest.items[0], normalized_metadata: metadata }])[0]
+  assert.equal(restored.counterpartySource, 'LOCAL')
+  assert.equal(restored.counterpartyVersion, 2)
+  assert.equal(restored.serviceItems[0].sourceId, 'original-service')
+  assert.equal(restored.serviceItems[0].categoryId, '01J00000000000000000000002')
+  const legacy = buildImportManifestFromRows([validRow()]).items[0].metadata
+  assert.equal(Object.hasOwn(legacy, 'counterparty_source'), false)
+  assert.equal(Object.hasOwn(legacy.service_items[0], 'category_id'), false)
+})

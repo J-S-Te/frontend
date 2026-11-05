@@ -13,8 +13,8 @@ globalThis.document = {
 }
 globalThis.window = { setTimeout: (handler) => { handler(); return 1 } }
 
-function harness({ scanAvailable = true, preview = null, commit = null, failure = null, errorsFile = null, templateFile = null } = {}) {
-  const calls = { preview: [], commit: [], errors: [], template: 0, resetMessages: 0, showError: [], loadCurrent: 0, keys: 0 }
+function harness({ scanAvailable = true, preview = null, commit = null, failure = null, templateFile = null } = {}) {
+  const calls = { preview: [], commit: [], template: 0, resetMessages: 0, showError: [], loadCurrent: 0, keys: 0 }
   const deps = {
     error: ref(''),
     notice: ref(''),
@@ -26,7 +26,6 @@ function harness({ scanAvailable = true, preview = null, commit = null, failure 
     createIdempotencyKey: () => `key-${++calls.keys}`,
     previewCustomerImport: async (payload) => { calls.preview.push(payload); if (failure) throw failure; return preview },
     commitCustomerImport: async (jobNo, body, key) => { calls.commit.push({ jobNo, body, key }); if (failure) throw failure; return commit },
-    downloadCustomerImportErrors: async (jobNo) => { calls.errors.push(jobNo); if (failure) throw failure; return errorsFile },
     downloadCustomerImportTemplate: async () => { calls.template++; if (failure) throw failure; return templateFile },
   }
   return { deps, calls, ...useCustomerImportWizard(deps) }
@@ -149,25 +148,32 @@ test('commitImport：幂等键缺失时现场生成；提交失败按导入文�
   assert.equal(failed.deps.actionLoading.value, false)
 })
 
-test('downloadImportErrors：无任务号不请求；优先提交结果的 job_no，其次预检的；触发锚点下载并回收 ObjectURL', async () => {
+test('downloadImportErrors：无错误行不下载；用预检/结果已有行生成中文 CSV，不请求服务端', async () => {
   dom.links.length = 0; dom.created.length = 0; dom.revoked.length = 0
-  const blob = { size: 3 }
-  const h = harness({ errorsFile: { blob, filename: 'errors.xlsx' } })
-  await h.downloadImportErrors()
-  assert.equal(h.calls.errors.length, 0)
+  const h = harness()
+  h.downloadImportErrors()
+  assert.equal(dom.links.length, 0)
 
-  h.customerImportPreview.value = { job_no: 'PREVIEW' }
-  await h.downloadImportErrors()
-  h.customerImportResult.value = { job_no: 'RESULT' }
-  await h.downloadImportErrors()
-  assert.deepEqual(h.calls.errors, ['PREVIEW', 'RESULT'])
+  h.customerImportPreview.value = { job_no: 'PREVIEW', rows: [{ row_no: 2, status: 'ERROR', name: '错误客户', issues: [{ column: '客户名称', code: 'REQUIRED', message: '必填字段为空' }] }] }
+  assert.equal(h.customerImportErrorReportRows.value.length, 1)
+  h.downloadImportErrors()
+  assert.equal(dom.links.length, 1)
+  assert.equal(dom.links[0].download, '客户导入错误.csv')
+  const previewCsv = await dom.created[0].blob.text()
+  const previewBytes = new Uint8Array(await dom.created[0].blob.arrayBuffer())
+  assert.deepEqual([...previewBytes.slice(0, 3)], [0xEF, 0xBB, 0xBF])
+  assert.ok(previewCsv.includes('行号,状态,客户,问题'))
+  assert.ok(previewCsv.includes('错误客户'))
+  assert.deepEqual(dom.revoked, ['blob:0'])
+
+  h.customerImportResult.value = { job_no: 'RESULT', rows: [{ row_no: 3, status: 'FAILED', customer_no: 'C-3', error_code: 'OWNER_SELECTION_INVALID', message: '当前导入人已失效' }] }
+  h.downloadImportErrors()
   assert.equal(dom.links.length, 2)
-  assert.equal(dom.links[1].href, 'blob:1')
-  assert.equal(dom.links[1].download, 'errors.xlsx')
-  assert.equal(dom.links[1].clicked, 1)
-  assert.equal(dom.links[1].removed, 1)
+  assert.equal(dom.links[1].download, '客户导入错误.csv')
+  const resultCsv = await dom.created[1].blob.text()
+  assert.ok(resultCsv.includes('C-3'))
+  assert.ok(resultCsv.includes('OWNER_SELECTION_INVALID'))
   assert.deepEqual(dom.revoked, ['blob:0', 'blob:1'])
-  assert.equal(dom.created[0].blob, blob)
 })
 
 test('downloadCustomerImportExample：下载模板；下载类失败走导入错误映射', async () => {
@@ -181,9 +187,8 @@ test('downloadCustomerImportExample：下载模板；下载类失败走导入错
   const failed = harness({ failure: { code: 'CRM_CUSTOMER_IMPORT_SCANNER_UNAVAILABLE' } })
   await failed.downloadCustomerImportExample()
   assert.equal(failed.deps.error.value, '客户导入代码安全校验当前不可用，暂不能预检。')
-  failed.customerImportPreview.value = { job_no: 'J' }
-  await failed.downloadImportErrors()
-  assert.equal(failed.calls.errors.length, 1)
+  failed.customerImportPreview.value = { job_no: 'J', rows: [{ row_no: 2, status: 'ERROR', name: '客户', issues: [] }] }
+  failed.downloadImportErrors()
   assert.equal(failed.deps.error.value, '客户导入代码安全校验当前不可用，暂不能预检。')
 })
 

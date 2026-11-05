@@ -3,10 +3,10 @@ import OperationToast from '@/modules/shared/components/OperationToast.vue'
 import { computed, onMounted, ref } from "vue"
 import { useConfirmDialog } from "@/modules/shared/composables/useConfirmDialog.js"
 import ConfirmDialog from "@/modules/shared/components/ConfirmDialog.vue"
-import ConsoleIcon from "@/modules/platform/shared/components/ConsoleIcon.vue"
-import EmptyState from "@/modules/platform/shared/components/EmptyState.vue"
-import ErrorState from "@/modules/platform/shared/components/ErrorState.vue"
-import LoadingState from "@/modules/platform/shared/components/LoadingState.vue"
+import ConsoleIcon from "@/modules/shared/components/ConsoleIcon.vue"
+import EmptyState from "@/modules/shared/components/EmptyState.vue"
+import ErrorState from "@/modules/shared/components/ErrorState.vue"
+import LoadingState from "@/modules/shared/components/LoadingState.vue"
 import { getDictionary, createDictionaryMetric, updateDictionaryMetric, setDictionaryMetricEnabled, deleteDictionaryMetric, getDictionaryMetricVersions } from "../api/dataAnalysis"
 import { formatDataAnalysisError } from "../utils/errors.js"
 import { enableableMetricLabels, metricEnableBlockText } from "../utils/metricEnable.js"
@@ -194,4 +194,17 @@ function operationLabel(operation) { return ({ BASELINE: "原始口径", CREATE:
 .da-dict-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .da-dict-history { max-height: 85vh; overflow: auto; }
 .da-dict-history-entry { border-bottom: 1px solid #e2e8f0; padding: 12px 0; overflow-wrap: anywhere; }
+
+/* 深色主题：字典页的说明文字、口径提示条与分隔线；浅色声明未改。 */
+[data-theme="dark"] .da-dict-meta,
+[data-theme="dark"] .da-dict-hint {
+  color: var(--text-muted);
+}
+[data-theme="dark"] .da-dict-message {
+  background: var(--warning-soft);
+  color: var(--text-on-warning);
+}
+[data-theme="dark"] .da-dict-history-entry {
+  border-bottom-color: var(--border);
+}
 </style>

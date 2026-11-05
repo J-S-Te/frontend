@@ -13,9 +13,23 @@ import {
   dispatchAuthorizationRefreshed,
   principalFingerprint,
 } from '@/modules/platform/auth/utils/authorizationRefresh'
+import { installDocumentThemeSync, syncDocumentTheme } from '@/modules/platform/shared/composables/useDocumentTheme'
+import { installTableScrollAffordance } from '@/modules/shared/composables/useTableScrollAffordance'
 
 const route = useRoute()
 const router = useRouter()
+
+// 主题偏好的唯一来源是门户主题开关写入的 localStorage 键；这里只把它投射为
+// <html data-theme>，六个业务外壳用同一份 [data-theme="dark"] 覆盖生效。
+const disposeDocumentTheme = installDocumentThemeSync()
+// 宽表格的边缘提示只有一个实现：滚动容器父元素上的覆盖层 + 滚动状态 class。
+// 挂载期只加 class / CSS 变量，不改业务 DOM，因此不影响各模块的 SSR golden。
+const disposeTableScrollAffordance = installTableScrollAffordance()
+// 从门户跳进业务模块时立即对齐主题：同标签页切换偏好不会触发 storage 事件，
+// 路由变化是这条路径上最可靠的重读时机。
+watch(() => route.fullPath, () => {
+  syncDocumentTheme()
+})
 const transport = createSessionTransport()
 // 一个路由只使用一个活动时钟；独立Cookie、业务权限和客户边界仍由各自后端检查。
 const lifecycle = createUnifiedSessionLifecycle({
@@ -179,6 +193,8 @@ window.addEventListener('platform-auth:session-ended', onExternalSessionEnd)
 window.addEventListener('visibilitychange', onPageVisible)
 window.addEventListener('focus', onPageVisible)
 onBeforeUnmount(() => {
+  disposeDocumentTheme()
+  disposeTableScrollAffordance()
   stopAuthorizationRefresh()
   window.removeEventListener('visibilitychange', onPageVisible)
   window.removeEventListener('focus', onPageVisible)

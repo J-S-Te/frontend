@@ -2,7 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import { parse, compileTemplate } from '@vue/compiler-sfc'
+import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc'
 
 const shell = await readFile(new URL('./views/DashboardShellView.vue', import.meta.url), 'utf8')
 const native = await readFile(new URL('./views/NativeDashboardView.vue', import.meta.url), 'utf8')
@@ -32,7 +32,11 @@ test('看板 code 映射覆盖经营总览与 4 张业务看板', () => {
 test('预警中心实现 OPEN→ACK→CLOSED 闭环并按严重度排序', () => {
   assert.match(alerts, /getAlerts\(\{ page: page\.value, page_size: pageSize, severity: severityFilter\.value, status: statusFilter\.value \}\)/)
   assert.match(alerts, /getAlertSummary\(\)/)
-  assert.match(alerts, /changePage\(page \+ 1\)/)
+  // 翻页不再由视图手写「上一页 / 下一页」按钮：页码与禁用语义交给 shared/components/PaginationBar.vue。
+  assert.match(alerts, /import PaginationBar from "@\/modules\/shared\/components\/PaginationBar\.vue"/)
+  assert.match(alerts, /<PaginationBar label="预警列表分页" :page="page" :total="total" :page-size="pageSize" :loading="loading" @change="changePage" \/>/)
+  assert.doesNotMatch(alerts, />上一页<\/button>/)
+  assert.doesNotMatch(alerts, />下一页<\/button>/)
   assert.match(alerts, /item\.status === 'OPEN'/)
   assert.match(alerts, /@click="onAck\(item\.id\)"/)
   assert.match(alerts, /@click="onClose\(item\.id\)"/)
@@ -75,6 +79,10 @@ test('合同和项目看板展示聚合库最新摘要', () => {
   for (const field of ['project_count', 'in_flight_projects', 'risk_projects', 'service_items', 'status_counts']) {
     assert.match(native, new RegExp(`project(?:Summary)?[^\\n]*${field}|project\\.${field}`))
   }
+  // 项目分区新增「整改中项目」卡：只读后端可选字段 report_stage_counts，缺失时显示未采集。
+  assert.match(native, /report_stage_counts/)
+  assert.match(native, /整改中项目/)
+  assert.match(native, /未采集/)
   assert.match(native, /formatAmountMinor/)
   assert.match(native, /currency_totals/)
   assert.match(native, /dashboardFreshnessItems/)
@@ -86,7 +94,10 @@ test('合同和项目看板展示聚合库最新摘要', () => {
 test('NativeDashboardView 模板可编译，时间口径面板可用于真实渲染', () => {
   const { descriptor, errors } = parse(native, { filename: 'NativeDashboardView.vue' })
   assert.deepEqual(errors, [])
-  const compiled = compileTemplate({ source: descriptor.template.content, filename: 'NativeDashboardView.vue', id: 'native-dashboard' })
+  // 指标卡开关接入了更多响应式状态：脚本也要能编译，避免模板能过、脚本语法坏掉。
+  const script = compileScript(descriptor, { id: 'native-dashboard' })
+  assert.ok(script.content.includes('setup('))
+  const compiled = compileTemplate({ source: descriptor.template.content, filename: 'NativeDashboardView.vue', id: 'native-dashboard', compilerOptions: { bindingMetadata: script.bindings } })
   assert.deepEqual(compiled.errors, [])
 })
 
@@ -167,8 +178,8 @@ test('摘要无快照时仍展示合同指标卡，不依赖 Metabase 嵌入内�
 test('合同和项目页面不申请或渲染嵌入看板', () => {
   assert.match(shell, /EMBEDDED_DASHBOARD_SECTIONS = DASHBOARD_SECTIONS\.filter/) 
   assert.match(shell, /!\['contract', 'project'\]\.includes\(code\)/)
-  assert.match(shell, /if \(EMBEDDED_DASHBOARD_SECTIONS\.includes\(value\)\)/)
-  assert.match(shell, /v-if="EMBEDDED_DASHBOARD_SECTIONS\.includes\(section\)" class="da-frame-panel"/)
+  assert.match(shell, /if \(dashboardEmbedEnabled\.value && EMBEDDED_DASHBOARD_SECTIONS\.includes\(value\)\)/)
+  assert.match(shell, /v-if="dashboardEmbedEnabled && EMBEDDED_DASHBOARD_SECTIONS\.includes\(section\)" class="da-frame-panel"/)
   assert.match(shell, /v-if="DASHBOARD_SECTIONS\.includes\(section\)" class="da-button"/)
 })
 

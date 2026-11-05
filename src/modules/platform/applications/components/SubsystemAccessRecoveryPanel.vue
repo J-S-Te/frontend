@@ -138,4 +138,35 @@ async function submitDecision() {
 .manual-recovery__confirm { display: flex; align-items: flex-start; gap: 8px; margin: 12px 0; }
 .manual-recovery .manual-recovery__terminate { color: #8f2929; border-color: #d99898; }
 .manual-recovery__error { color: #9f2222; }
+
+/* 深色主题：人工恢复面板的暖白底、浅描边与警示墨色；浅色声明未改。 */
+[data-theme="dark"] .manual-recovery {
+  color: var(--text);
+  border-color: var(--warning-border);
+  background: var(--warning-soft);
+}
+[data-theme="dark"] .manual-recovery button {
+  border-color: var(--border);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+}
+[data-theme="dark"] .manual-recovery button:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+[data-theme="dark"] .manual-recovery th,
+[data-theme="dark"] .manual-recovery td {
+  border-color: var(--border);
+}
+[data-theme="dark"] .manual-recovery textarea {
+  border-color: var(--border);
+  background: var(--surface-input);
+  color: var(--text);
+}
+[data-theme="dark"] .manual-recovery .manual-recovery__terminate {
+  color: var(--danger-text);
+  border-color: var(--danger-border);
+}
+[data-theme="dark"] .manual-recovery__error {
+  color: var(--danger-text);
+}
 </style>

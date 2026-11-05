@@ -40,6 +40,14 @@ import { RELATED_DATA } from '@/modules/platform/shared/utils/relatedDataInvalid
 import { formatUserError, safeUserMessage, userErrorDiagnostics } from '../../../shared/utils/userError.js'
 import { formatBusinessDateTime } from '@/modules/shared/utils/businessTime.js'
 
+import ConfirmDialog from '@/modules/shared/components/ConfirmDialog.vue'
+import PromptDialog from '@/modules/shared/components/PromptDialog.vue'
+import { useConfirmDialog } from '@/modules/shared/composables/useConfirmDialog.js'
+import { usePromptDialog } from '@/modules/shared/composables/usePromptDialog.js'
+
+const { dialog: confirmDialog, askConfirm, accept, cancel } = useConfirmDialog()
+const { dialog: promptDialog, askPrompt, accept: acceptPrompt, cancel: cancelPrompt } = usePromptDialog()
+
 const props = defineProps({
   canOnboard: { type: Boolean, default: false },
 })
@@ -811,6 +819,9 @@ function openDeleteEnvironment(environment) {
   clearError()
 }
 
+// offboardEnvironment 在明确确认后退役原选定环境。
+// 参数：environment 为待停止运行时的非开发环境。
+// 返回值：异步处理结果；取消、权限或上下文变化时不发出退役请求。
 async function offboardEnvironment(environment) {
   const application = selectedApplication.value
   const status = environmentStatus(environment)
@@ -819,7 +830,18 @@ async function offboardEnvironment(environment) {
     setError(null, '只有运行中、失败或未接管的非 dev 环境可以执行退役。')
     return
   }
-  if (!window.confirm(`确认退役 ${application.code}/${environment.environment}？平台会停止该环境运行时并保留环境登记、配置与审计记录；之后可恢复接入，或另行删除和永久清理。`)) return
+  const applicationCode = application.code
+  const environmentName = environment.environment
+  const confirmed = await askConfirm({
+    title: '退役环境？',
+    description: `将停止 ${applicationCode}/${environmentName} 的运行时，保留环境登记、配置与审计记录；之后可恢复接入。`,
+    confirmText: '退役环境', cancelText: '取消', danger: true,
+  })
+  if (!confirmed || saving.value || !canManageRuntime.value) return
+  if (selectedApplication.value?.code !== applicationCode
+    || environment.environment !== environmentName
+    || !isManagedRuntimeTarget(environment)
+    || !['READY', 'PROVISION_FAILED', 'UNMANAGED'].includes(environmentStatus(environment))) return
   saving.value = true
   clearError()
   try {
@@ -1236,19 +1258,33 @@ async function beginKeycloakObservation(environment) {
   }
 }
 
+// replayProjectionFailure 核对事件标识与处置原因后请求受控重放。
+// 参数：failure 为待重放的授权投影失败事件。
+// 返回值：异步处理结果；取消、校验失败或权限变化时不投递。
 async function replayProjectionFailure(failure) {
-  if (!failure?.event_id || saving.value) return
-  const reason = window.prompt(`请填写重放 ${failure.event_id} 的处置原因（至少 6 个字符）。`)
-  if (!reason) return
-  const confirmation = window.prompt(`为避免误操作，请输入完整事件 ID：${failure.event_id}`)
-  if (confirmation !== failure.event_id) {
-    notify('未完成事件 ID 确认，未执行重放。')
+  if (!failure?.event_id || saving.value || !canManageRuntime.value) return
+  const eventId = failure.event_id
+  const applicationCode = selectedApplication.value?.code
+  const input = await askPrompt({
+    title: '重放授权投影', confirmText: '加入重放队列',
+    description: `事件 ${eventId} 将交给后台重新处理；加入队列不代表处理完成。`,
+    fields: [
+      { name: 'reason', label: '处置原因', type: 'textarea', required: true, minlength: 6 },
+      { name: 'confirmation', label: `完整事件 ID：${eventId}`, required: true },
+    ],
+  })
+  if (!input || saving.value || !canManageRuntime.value) return
+  if (selectedApplication.value?.code !== applicationCode || failure.event_id !== eventId) return
+  if (input.confirmation !== eventId || input.reason.trim().length < 6) {
+    notify('未完成事件 ID 和处置原因确认，未执行重放。')
     return
   }
   saving.value = true
   clearError()
   try {
-    const result = await replayKeycloakProjectionFailure({ eventId: failure.event_id, confirmation, reason })
+    const result = await replayKeycloakProjectionFailure({
+      eventId, confirmation: input.confirmation, reason: input.reason.trim(),
+    })
     notify(result?.already_pending ? '该投影已在等待处理，无需重复投递。' : '投影已进入受控重放队列，请等待 Worker 处理。')
     await loadEnvironments()
   } catch (error) {
@@ -1544,18 +1580,20 @@ onMounted(() => {
     </div>
 
     <div v-if="pendingDeleteApplication" class="application-registry-modal-backdrop" role="presentation" @click.self="pendingDeleteApplication = null">
-      <section class="application-registry-modal" role="dialog" aria-modal="true" aria-label="退役应用确认"><h3>退役应用「{{ pendingDeleteApplication.name || pendingDeleteApplication.code }}」</h3><p>这是逻辑退役，不会物理删除环境、OAuth Client、登录目标和审计历史；门户将停止展示该应用。若还需停止容器和清理网关，请先逐个删除非 dev 环境，并按运维流程处理受保护的 dev 环境。</p><label class="console-form-item"><span>请输入应用编码确认：{{ pendingDeleteApplication.code }}</span><input v-model="deleteConfirmation" autocomplete="off"  maxlength="128"/></label><footer class="console-form-actions"><button class="console-button danger" type="button" :disabled="deleteConfirmation.trim() !== pendingDeleteApplication.code || saving" @click="confirmDeleteApplication">确认退役</button><button class="console-button ghost" type="button" @click="pendingDeleteApplication = null">取消</button></footer></section>
+      <section class="application-registry-modal" role="dialog" aria-modal="true" aria-label="退役应用确认"><h3>退役应用「{{ pendingDeleteApplication.name || pendingDeleteApplication.code }}」</h3><p>这是逻辑退役，不会物理删除环境、OAuth Client、登录目标和审计历史；门户将停止展示该应用。若还需停止容器和清理网关，请先逐个删除非 dev 环境，并按运维流程处理受保护的 dev 环境。</p><label class="console-form-item"><span>请输入应用编码确认：{{ pendingDeleteApplication.code }}</span><input v-model="deleteConfirmation" autocomplete="off"  maxlength="128"/></label><footer class="console-form-actions"><button class="console-button danger" type="button" :disabled="deleteConfirmation.trim() !== pendingDeleteApplication.code || saving" @click="confirmDeleteApplication">退役应用</button><button class="console-button ghost" type="button" @click="pendingDeleteApplication = null">取消</button></footer></section>
     </div>
 
     <div v-if="pendingDeleteEnvironment" class="application-registry-modal-backdrop" role="presentation" @click.self="pendingDeleteEnvironment = null">
-      <section class="application-registry-modal" role="dialog" aria-modal="true" aria-label="删除环境确认"><h3>删除环境 {{ selectedApplication.code }}/{{ pendingDeleteEnvironment.environment }}</h3><p>平台会先按受控 Agent 策略下线运行时，再删除环境记录及其派生登录目标和 OAuth Client。生产合同下线仅停止 API，保留数据库、备份和服务器运行配置以便恢复。</p><label class="console-form-item"><span>请输入确认码：{{ selectedApplication.code }}/{{ pendingDeleteEnvironment.environment }}</span><input v-model="environmentDeleteConfirmation" autocomplete="off"  maxlength="128"/></label><footer class="console-form-actions"><button class="console-button danger" type="button" :disabled="environmentDeleteConfirmation.trim() !== `${selectedApplication.code}/${pendingDeleteEnvironment.environment}` || saving" @click="confirmDeleteEnvironment">确认下线并删除控制面记录</button><button class="console-button ghost" type="button" @click="pendingDeleteEnvironment = null">取消</button></footer></section>
+      <section class="application-registry-modal" role="dialog" aria-modal="true" aria-label="删除环境确认"><h3>删除环境 {{ selectedApplication.code }}/{{ pendingDeleteEnvironment.environment }}</h3><p>平台会先按受控 Agent 策略下线运行时，再删除环境记录及其派生登录目标和 OAuth Client。生产合同下线仅停止 API，保留数据库、备份和服务器运行配置以便恢复。</p><label class="console-form-item"><span>请输入确认码：{{ selectedApplication.code }}/{{ pendingDeleteEnvironment.environment }}</span><input v-model="environmentDeleteConfirmation" autocomplete="off"  maxlength="128"/></label><footer class="console-form-actions"><button class="console-button danger" type="button" :disabled="environmentDeleteConfirmation.trim() !== `${selectedApplication.code}/${pendingDeleteEnvironment.environment}` || saving" @click="confirmDeleteEnvironment">下线并删除环境登记</button><button class="console-button ghost" type="button" @click="pendingDeleteEnvironment = null">取消</button></footer></section>
     </div>
     <div v-if="pendingPurgeEnvironment" class="application-registry-modal-backdrop" role="presentation" @click.self="pendingPurgeEnvironment = null">
-      <section class="application-registry-modal" role="dialog" aria-modal="true" aria-label="永久清理环境确认"><h3>永久清理 {{ selectedApplication.code }}/{{ pendingPurgeEnvironment.environment }}</h3><p class="application-registry-inline-warning">该操作不可恢复，将删除环境配置、服务凭据、登录目标和审计接收记录。请先退役整个系统，并在审计保留管理中完成该应用的 PURGE 清理任务；平台会校验任务真实存在且状态为已完成。业务数据库、备份和服务器持久化文件不在此操作范围内。</p><label class="console-form-item"><span>已完成的审计 PURGE 任务编号 *</span><input v-model="purgeApprovalId" autocomplete="off" placeholder="粘贴平台审计清理任务 ID"  maxlength="128"/></label><label class="console-form-item"><span>请输入确认码：PURGE/{{ selectedApplication.code }}/{{ pendingPurgeEnvironment.environment }}</span><input v-model="purgeConfirmation" autocomplete="off"  maxlength="128"/></label><label class="console-form-checkbox"><input v-model="purgeRetentionConfirmed" type="checkbox" />我确认审计保留任务已完成且可清理在线接收记录</label><label class="console-form-checkbox"><input v-model="purgeOffboardedConfirmed" type="checkbox" />我确认该环境已经完成下线</label><footer class="console-form-actions"><button class="console-button danger" type="button" :disabled="purgeConfirmation.trim() !== `PURGE/${selectedApplication.code}/${pendingPurgeEnvironment.environment}` || !purgeApprovalId.trim() || !purgeRetentionConfirmed || !purgeOffboardedConfirmed || saving" @click="confirmPurgeEnvironment">确认永久清理</button><button class="console-button ghost" type="button" @click="pendingPurgeEnvironment = null">取消</button></footer></section>
+      <section class="application-registry-modal" role="dialog" aria-modal="true" aria-label="永久清理环境确认"><h3>永久清理 {{ selectedApplication.code }}/{{ pendingPurgeEnvironment.environment }}</h3><p class="application-registry-inline-warning">该操作不可恢复，将删除环境配置、服务凭据、登录目标和审计接收记录。请先退役整个系统，并在审计保留管理中完成该应用的 PURGE 清理任务；平台会校验任务真实存在且状态为已完成。业务数据库、备份和服务器持久化文件不在此操作范围内。</p><label class="console-form-item"><span>已完成的审计 PURGE 任务编号 *</span><input v-model="purgeApprovalId" autocomplete="off" placeholder="粘贴平台审计清理任务 ID"  maxlength="128"/></label><label class="console-form-item"><span>请输入确认码：PURGE/{{ selectedApplication.code }}/{{ pendingPurgeEnvironment.environment }}</span><input v-model="purgeConfirmation" autocomplete="off"  maxlength="128"/></label><label class="console-form-checkbox"><input v-model="purgeRetentionConfirmed" type="checkbox" />我确认审计保留任务已完成且可清理在线接收记录</label><label class="console-form-checkbox"><input v-model="purgeOffboardedConfirmed" type="checkbox" />我确认该环境已经完成下线</label><footer class="console-form-actions"><button class="console-button danger" type="button" :disabled="purgeConfirmation.trim() !== `PURGE/${selectedApplication.code}/${pendingPurgeEnvironment.environment}` || !purgeApprovalId.trim() || !purgeRetentionConfirmed || !purgeOffboardedConfirmed || saving" @click="confirmPurgeEnvironment">永久清理环境</button><button class="console-button ghost" type="button" @click="pendingPurgeEnvironment = null">取消</button></footer></section>
     </div>
     <div v-if="pendingRuntimeAdoption" class="application-registry-modal-backdrop" role="presentation" @click.self="pendingRuntimeAdoption = null">
-      <section class="application-registry-modal" role="dialog" aria-modal="true" aria-label="接管运行时确认"><h3>接管 {{ selectedApplication.code }}/{{ pendingRuntimeAdoption.environment }} 运行时</h3><p>平台会核验当前服务、网关路由和 Worker 状态，并将已运行的环境纳入受控部署。此操作不会删除或格式化数据库、数据卷、环境目录、登录目标及现有业务数据。</p><footer class="console-form-actions"><button class="console-button primary" type="button" :disabled="saving" @click="confirmRuntimeAdoption">确认接管运行时</button><button class="console-button ghost" type="button" :disabled="saving" @click="pendingRuntimeAdoption = null">取消</button></footer></section>
+      <section class="application-registry-modal" role="dialog" aria-modal="true" aria-label="接管运行时确认"><h3>接管 {{ selectedApplication.code }}/{{ pendingRuntimeAdoption.environment }} 运行时</h3><p>平台会核验当前服务、网关路由和 Worker 状态，并将已运行的环境纳入受控部署。此操作不会删除或格式化数据库、数据卷、环境目录、登录目标及现有业务数据。</p><footer class="console-form-actions"><button class="console-button primary" type="button" :disabled="saving" @click="confirmRuntimeAdoption">接管运行时</button><button class="console-button ghost" type="button" :disabled="saving" @click="pendingRuntimeAdoption = null">取消</button></footer></section>
     </div>
+    <ConfirmDialog v-if="confirmDialog" v-bind="confirmDialog" @confirm="accept" @cancel="cancel" />
+    <PromptDialog v-if="promptDialog" v-bind="promptDialog" @confirm="acceptPrompt" @cancel="cancelPrompt" />
   </section>
 </template>
 
@@ -1706,4 +1744,267 @@ onMounted(() => {
 .application-registry-wizard-close:hover { background: #e2e8f0; }
 .application-registry-inline-note { margin: 10px 0 0; color: #475569; font-size: 12px; line-height: 1.6; }
 
+/* ==========================================================================
+   深色主题：接入向导里写死的浅蓝底、白卡片、浅描边与墨色
+   --------------------------------------------------------------------------
+   只新增 [data-theme="dark"] 规则，上面浅色声明一行未改，浅色逐像素一致；
+   深色取值全部复用 main.css 的共享 token（不引入新的十六进制颜色）。
+   ========================================================================== */
+[data-theme="dark"] .application-registry-header p,
+[data-theme="dark"] .application-registry-panel-head p,
+[data-theme="dark"] .application-registry-section-title small,
+[data-theme="dark"] .application-registry-discovery > div > small,
+[data-theme="dark"] .application-registry-discovery article span,
+[data-theme="dark"] .application-registry-discovery article small,
+[data-theme="dark"] .application-registry-list-state,
+[data-theme="dark"] .application-registry-detail-head p,
+[data-theme="dark"] .application-registry-environment-main small,
+[data-theme="dark"] .application-registry-environment-uri small,
+[data-theme="dark"] .application-registry-auth-details dt,
+[data-theme="dark"] .application-registry-zone-hint,
+[data-theme="dark"] .application-registry-progress li,
+[data-theme="dark"] .application-registry-progress > small {
+  color: var(--text-muted);
+}
+[data-theme="dark"] .application-registry-workspaces {
+  border-color: var(--border);
+  background: var(--surface-muted);
+}
+[data-theme="dark"] .application-registry-workspaces button {
+  color: var(--text-secondary);
+}
+[data-theme="dark"] .application-registry-workspaces button:hover {
+  color: var(--primary-ink);
+  background: var(--surface-hover);
+}
+[data-theme="dark"] .application-registry-workspaces button.is-active {
+  color: var(--primary-ink);
+  background: var(--surface-raised);
+}
+[data-theme="dark"] .application-registry-eyebrow {
+  color: var(--primary-ink);
+}
+[data-theme="dark"] .application-registry-onboard,
+[data-theme="dark"] .application-registry-editor {
+  border-color: var(--border-brand);
+  background: var(--surface-muted);
+}
+[data-theme="dark"] .application-registry-target-empty {
+  color: var(--text-muted);
+  border-color: var(--border);
+  background: var(--surface-muted);
+}
+[data-theme="dark"] .application-registry-target-empty strong {
+  color: var(--text-secondary);
+}
+[data-theme="dark"] .application-registry-discovery {
+  border-color: var(--border-violet);
+  background: linear-gradient(135deg, var(--surface-muted), var(--surface-card));
+}
+[data-theme="dark"] .application-registry-discovery article {
+  border-color: var(--border);
+  background: var(--surface-card);
+}
+[data-theme="dark"] .application-registry-discovery article strong,
+[data-theme="dark"] .application-registry-detail-head h3,
+[data-theme="dark"] .application-registry-environment-main strong,
+[data-theme="dark"] .application-registry-auth-details dd,
+[data-theme="dark"] .application-registry-panel-head h4,
+[data-theme="dark"] .application-registry-sidebar-head strong,
+[data-theme="dark"] .application-registry-modal h3 {
+  color: var(--text);
+}
+[data-theme="dark"] .application-registry-error {
+  color: var(--danger-text);
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+}
+[data-theme="dark"] .application-registry-error span,
+[data-theme="dark"] .application-registry-error small {
+  color: var(--text-on-danger);
+}
+[data-theme="dark"] .application-registry-error-detail {
+  color: var(--text-on-danger);
+  border-color: var(--danger-border);
+  background: var(--surface-input);
+}
+[data-theme="dark"] .application-registry-environment-guidance,
+[data-theme="dark"] .application-registry-inline-warning {
+  color: var(--warning-text);
+}
+[data-theme="dark"] .application-registry-environment-guidance.is-error,
+[data-theme="dark"] .application-registry-environment-guidance.is-error span {
+  color: var(--danger-text);
+}
+[data-theme="dark"] .application-registry-sidebar {
+  border-color: var(--border);
+  background: var(--surface-muted);
+}
+[data-theme="dark"] .application-registry-filters input,
+[data-theme="dark"] .application-registry-filters select {
+  border-color: var(--border);
+  background: var(--surface-input);
+  color: var(--text);
+}
+[data-theme="dark"] .application-registry-list-item {
+  color: var(--text-secondary);
+}
+[data-theme="dark"] .application-registry-list-item:hover,
+[data-theme="dark"] .application-registry-list-item.is-selected {
+  background: var(--surface-hover);
+}
+[data-theme="dark"] .application-registry-app-icon {
+  color: var(--primary-ink);
+  background: var(--chip-brand);
+}
+[data-theme="dark"] .application-registry-list-copy small {
+  color: var(--text-faint);
+}
+[data-theme="dark"] .application-registry-status.is-active,
+[data-theme="dark"] .application-registry-status.is-ready {
+  color: var(--success-text);
+  background: var(--success-soft);
+}
+[data-theme="dark"] .application-registry-status.is-draft,
+[data-theme="dark"] .application-registry-status.is-provisioning,
+[data-theme="dark"] .application-registry-status.is-updating {
+  color: var(--primary-ink);
+  background: var(--chip-brand);
+}
+[data-theme="dark"] .application-registry-status.is-disabled,
+[data-theme="dark"] .application-registry-status.is-suspended,
+[data-theme="dark"] .application-registry-status.is-offboarded {
+  color: var(--text-muted);
+  background: var(--chip-neutral);
+}
+[data-theme="dark"] .application-registry-status.is-retired,
+[data-theme="dark"] .application-registry-status.is-provision-failed {
+  color: var(--danger-text);
+  background: var(--danger-soft);
+}
+[data-theme="dark"] .application-registry-status.is-draining {
+  color: var(--warning-text);
+  background: var(--warning-soft);
+}
+[data-theme="dark"] .application-registry-detail-head {
+  border-bottom-color: var(--border);
+}
+[data-theme="dark"] .application-registry-environment {
+  border-color: var(--border);
+  background: var(--surface-card);
+}
+[data-theme="dark"] .application-registry-environment:hover,
+[data-theme="dark"] .application-registry-environment.is-selected {
+  border-color: var(--primary-border);
+  box-shadow: 0 0 0 2px var(--primary-soft);
+}
+[data-theme="dark"] .application-registry-environment.authentication:hover {
+  border-color: var(--border);
+}
+[data-theme="dark"] .application-registry-environment-uri {
+  color: var(--text-secondary);
+}
+[data-theme="dark"] .application-registry-auth-details {
+  border-color: var(--border-brand);
+  background: var(--surface-muted);
+}
+[data-theme="dark"] .application-registry-switch-gates {
+  border-color: var(--warning-border);
+  background: var(--warning-soft);
+  color: var(--text-on-warning);
+}
+[data-theme="dark"] .application-registry-switch-gates li span {
+  color: var(--warning-text);
+}
+[data-theme="dark"] .application-registry-switch-gates li.is-passed span {
+  color: var(--success-text);
+}
+[data-theme="dark"] .application-registry-switch-gates li small {
+  color: var(--text-on-warning);
+}
+[data-theme="dark"] .application-registry-empty {
+  color: var(--text-faint);
+}
+[data-theme="dark"] .application-registry-empty strong {
+  color: var(--text-secondary);
+}
+[data-theme="dark"] .application-registry-modal-backdrop {
+  background: var(--overlay-scrim);
+}
+[data-theme="dark"] .application-registry-modal {
+  background: var(--surface-card);
+  box-shadow: var(--shadow-modal);
+}
+[data-theme="dark"] .application-registry-modal p {
+  color: var(--text-muted);
+}
+[data-theme="dark"] .console-button.danger {
+  color: var(--danger-text);
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+}
+[data-theme="dark"] .application-registry-progress li::after {
+  background: var(--border);
+}
+[data-theme="dark"] .application-registry-progress li i {
+  color: var(--text-muted);
+  border-color: var(--line-strong);
+  background: var(--surface-muted);
+}
+[data-theme="dark"] .application-registry-progress li.is-done {
+  color: var(--success-text);
+}
+[data-theme="dark"] .application-registry-progress li.is-done i {
+  color: var(--text-strong);
+  border-color: var(--success);
+  background: var(--success);
+}
+[data-theme="dark"] .application-registry-progress li.is-current {
+  color: var(--primary-ink);
+}
+[data-theme="dark"] .application-registry-progress li.is-current i {
+  color: var(--text-strong);
+  border-color: var(--primary);
+  background: var(--primary);
+}
+[data-theme="dark"] .application-registry-environment-main {
+  border-bottom-color: var(--border);
+}
+[data-theme="dark"] .application-registry-zone {
+  border-top-color: var(--border);
+}
+[data-theme="dark"] .application-registry-zone-head h5 {
+  color: var(--text-secondary);
+}
+[data-theme="dark"] .application-registry-zone-toggle {
+  color: var(--primary-ink);
+  background: var(--chip-brand);
+}
+[data-theme="dark"] .application-registry-zone-toggle:hover {
+  background: var(--surface-hover);
+}
+[data-theme="dark"] .application-registry-provider.is-platform {
+  color: var(--text-secondary);
+  background: var(--chip-neutral);
+}
+[data-theme="dark"] .application-registry-provider.is-keycloak {
+  color: var(--violet-ink);
+  background: var(--violet-soft);
+}
+[data-theme="dark"] .application-registry-auth-summary {
+  color: var(--text-muted);
+}
+[data-theme="dark"] .application-registry-auth-summary span:nth-child(2) {
+  color: var(--warning-text);
+}
+[data-theme="dark"] .application-registry-wizard-close {
+  background: var(--surface-raised);
+  color: var(--text-muted);
+}
+[data-theme="dark"] .application-registry-wizard-close:hover {
+  background: var(--surface-hover);
+}
+[data-theme="dark"] .application-registry-inline-note {
+  color: var(--text-secondary);
+}
 </style>

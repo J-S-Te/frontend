@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { ipSourceLabel, mapAuditEvent } from './auditEvents.js'
+import { downloadAuditExportFile, ipSourceLabel, mapAuditEvent } from './auditEvents.js'
 
 // 统一审计来源协议：列表默认展示"操作 IP"，详情分别展示登录 IP、操作 IP、投递地址和来源标记。
 // 三者含义不同，不能互相顶替；缺失时必须显式标为"未采集／来源未知"。
@@ -91,4 +91,47 @@ test('对象 ID 与对象类型分别映射', () => {
   assert.equal(mapped.resource, 'contract')
   assert.equal(mapped.resourceId, 'CON-1')
   assert.equal(mapAuditEvent({ event_id: 'evt-6' }).resourceId, '')
+})
+
+test('审计导出下载携带下载超时 signal，超时转换为可读错误', async (t) => {
+  const originalFetch = globalThis.fetch
+  const originalTimeout = globalThis.AbortSignal.timeout
+  t.after(() => { globalThis.fetch = originalFetch; globalThis.AbortSignal.timeout = originalTimeout })
+  let fileRequestOptions
+  globalThis.fetch = async (url, options) => {
+    // 第一步申请一次性票据，第二步才兑换文件字节；两步共用同一个超时 signal。
+    if (String(url).endsWith('/download-tickets')) {
+      return new Response(JSON.stringify({ code: 'OK', message: 'ok', request_id: '', data: { ticket: 'ticket-fixture', download_url: String(url), expires_at: '2026-01-01T00:02:00Z' } }), { headers: { 'content-type': 'application/json' } })
+    }
+    fileRequestOptions = options
+    return new Response('a,b\n1,2', { headers: { 'content-type': 'text/csv', 'content-disposition': 'attachment; filename="audit.csv"' } })
+  }
+
+  const result = await downloadAuditExportFile('job-1')
+  assert.ok(fileRequestOptions.signal, '审计导出下载必须携带超时 signal')
+  assert.equal(fileRequestOptions.signal.aborted, false)
+  assert.equal(fileRequestOptions.headers['X-Audit-Export-Ticket'], 'ticket-fixture')
+  assert.equal(result.filename, 'audit.csv')
+
+  // 用「已中止」的 signal 触发超时分支：真实 5ms 定时器在 CI 上是 unref 的，
+  // 事件循环可能在定时器触发前就排空，导致用例偶发 cancelled（Promise 永挂）。
+  globalThis.AbortSignal.timeout = () => {
+    const controller = new AbortController()
+    controller.abort(new DOMException('download timeout', 'TimeoutError'))
+    return controller.signal
+  }
+  globalThis.fetch = (_url, options) => new Promise((resolve, reject) => {
+    if (options.signal.aborted) {
+      // 与真实 fetch 一致：signal 已中止时立即拒绝，避免超时先触发导致 Promise 永挂。
+      reject(options.signal.reason)
+      return
+    }
+    options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true })
+  })
+  // 票据申请阶段超时同样给可重试提示，而不是伪装成网络错误或成功。
+  await assert.rejects(downloadAuditExportFile('job-1'), (error) => {
+    assert.equal(error.code, 'AUDIT_DOWNLOAD_TIMEOUT')
+    assert.equal(error.message, '下载超时，请重试。')
+    return true
+  })
 })

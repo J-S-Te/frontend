@@ -1,5 +1,7 @@
 import { normalizeAuthorizationSession, principalIdentityID, shouldStartSubsystemLogin } from '../../shared/authz/sessionCompatibility.js'
 import { attachStructuredContext } from '../../platform/shared/api/requestContext.js'
+import { safeDownloadFilename } from '../../shared/utils/contentDisposition.js'
+import { DOWNLOAD_TIMEOUT_MESSAGE, downloadRequestSignal } from '../../shared/utils/downloadTimeout.js'
 import { formatCRMError } from './errorMessages.js'
 
 const PUBLIC_PATH_PREFIX = (import.meta.env?.VITE_CRM_PUBLIC_PATH_PREFIX || '/customer-opportunity').replace(/\/$/, '')
@@ -136,6 +138,29 @@ async function fetchCRM(url, options, requestContext = {}) {
 }
 
 /**
+ * downloadTimeoutError 把本端超时 signal 触发的中断转换为可读的下载错误。
+ * 仅在 downloadRequestSignal 归因为超时时使用；调用方 signal 的 abort 属于用户取消，
+ * 仍按既有 AbortError 语义原样抛出。
+ * @param {unknown} cause 底层中断原因。
+ * @param {{method: string, path: string, feature: string}} context 下载请求上下文。
+ * @returns {CRMAPIError} 带下载超时错误码的结构化错误。
+ */
+function downloadTimeoutError(cause, context) {
+  const error = new CRMAPIError(DOWNLOAD_TIMEOUT_MESSAGE, { code: 'CRM_DOWNLOAD_TIMEOUT', method: context.method })
+  error.message = DOWNLOAD_TIMEOUT_MESSAGE
+  error.cause = cause
+  attachStructuredContext(error, {
+    subsystem: 'customer_opportunity',
+    feature: context.feature,
+    operation: context.method,
+    path: context.path,
+    method: context.method,
+    metadata: { source: 'crm_download_timeout' },
+  }, { status: 0, code: error.code })
+  return error
+}
+
+/**
  * createIdempotencyKey 生成写操作幂等键；优先使用浏览器安全随机 UUID。
  * @returns {string} 当前页面进程内新生成的幂等键。
  */
@@ -219,16 +244,26 @@ export async function request(path, options = {}) {
  */
 export async function requestBlob(path, options = {}) {
 	const method = String(options.method || 'GET').toUpperCase()
-	const response = await fetchCRM(`${API_BASE_URL}${path}`, {
-		credentials: 'include',
-		...options,
-		headers: {
-			Accept: 'text/csv, application/json',
-			...(options.body ? { 'Content-Type': 'application/json' } : {}),
-			...(method !== 'GET' ? { 'X-CSRF-Token': '1' } : {}),
-			...(options.headers || {}),
-		},
-	}, { method, path, feature: 'crm_export' })
+	// 下载/模板请求：调用方取消信号与下载超时合并，既不覆盖调用方取消，也避免永久挂起。
+	const downloadAbort = downloadRequestSignal(options.signal)
+	let response
+	try {
+		response = await fetchCRM(`${API_BASE_URL}${path}`, {
+			credentials: 'include',
+			...options,
+			signal: downloadAbort.signal,
+			headers: {
+				Accept: 'text/csv, application/json',
+				...(options.body ? { 'Content-Type': 'application/json' } : {}),
+				...(method !== 'GET' ? { 'X-CSRF-Token': '1' } : {}),
+				...(options.headers || {}),
+			},
+		}, { method, path, feature: 'crm_export' })
+	} catch (cause) {
+		if (downloadAbort.cancelled()) throw cause
+		if (downloadAbort.timedOut()) throw downloadTimeoutError(cause, { method, path, feature: 'crm_export' })
+		throw cause
+	}
   if (!response.ok) {
     const body = await readResponse(response, { method, path, feature: 'crm_export' })
     const error = new CRMAPIError(body?.message || `HTTP ${response.status}`, {
@@ -275,18 +310,21 @@ export async function requestBlob(path, options = {}) {
     })
     throw contentTypeError
   }
-  const disposition = response.headers.get('content-disposition') || ''
-  const matched = disposition.match(/filename\*?=(?:UTF-8''|")?([^;"]+)/i)
-  let filename = 'customer-import-errors.csv'
-  if (matched) {
-    try { filename = decodeURIComponent(matched[1].replace(/"/g, '').trim()) }
-    // 非法百分号编码不能阻止文件下载，统一回退到受控文件名。
-    catch { filename = 'customer-import-errors.csv' }
+  const filename = safeDownloadFilename(
+    response.headers.get('content-disposition'),
+    'customer-import-errors.csv',
+    { extensions: ['.csv'] },
+  )
+  let blob
+  try {
+    blob = await response.blob()
+  } catch (cause) {
+    // 超时可能发生在响应体读取阶段，不能把半途中断当成传输成功。
+    if (downloadAbort.cancelled()) throw cause
+    if (downloadAbort.timedOut()) throw downloadTimeoutError(cause, { method, path, feature: 'crm_export' })
+    throw cause
   }
-  // 清除路径分隔符和控制字符，防止服务端文件名影响浏览器保存路径。
-  filename = filename.replace(/[\\/\u0000-\u001f\u007f]/g, '_').slice(0, 160)
-  if (!filename || filename === '.' || filename === '..' || filename.startsWith('.') || !filename.toLowerCase().endsWith('.csv')) filename = 'customer-import-errors.csv'
-  return { blob: await response.blob(), filename }
+  return { blob, filename }
 }
 
 /**
@@ -294,12 +332,22 @@ export async function requestBlob(path, options = {}) {
  * @param {string} path 相对于 CRM API 根路径的下载地址。
  * @param {Set<string>} allowedMediaTypes 允许的小写 MIME 类型集合。
  * @param {string} [fallbackFilename='download.bin'] 响应未提供安全文件名时使用的回退名称。
+ * @param {{signal?: AbortSignal}} [options={}] 调用方取消信号；与下载超时合并，不覆盖取消语义。
  * @returns {Promise<{blob: Blob, filename: string, contentType: string}>} 文件数据、安全文件名和规范化媒体类型。
  * @throws {CRMAPIError} 服务端返回非成功状态，或成功响应的媒体类型不在白名单时抛出。
- * @throws {CRMAPIError} 网络连接失败时抛出结构化错误；主动取消仍保留 AbortError。
+ * @throws {CRMAPIError} 网络连接失败或下载超时时抛出结构化错误；主动取消仍保留 AbortError。
  */
-export async function requestAuthorizedFile(path, allowedMediaTypes, fallbackFilename = 'download.bin') {
-  const response = await fetchCRM(`${API_BASE_URL}${path}`, { credentials: 'include', headers: { Accept: [...allowedMediaTypes, 'application/json'].join(', ') } }, { method: 'GET', path, feature: 'crm_export' })
+export async function requestAuthorizedFile(path, allowedMediaTypes, fallbackFilename = 'download.bin', { signal } = {}) {
+  // 调用方取消信号与下载超时合并，避免模板/附件下载永久挂起。
+  const downloadAbort = downloadRequestSignal(signal)
+  let response
+  try {
+    response = await fetchCRM(`${API_BASE_URL}${path}`, { credentials: 'include', signal: downloadAbort.signal, headers: { Accept: [...allowedMediaTypes, 'application/json'].join(', ') } }, { method: 'GET', path, feature: 'crm_export' })
+  } catch (cause) {
+    if (downloadAbort.cancelled()) throw cause
+    if (downloadAbort.timedOut()) throw downloadTimeoutError(cause, { method: 'GET', path, feature: 'crm_export' })
+    throw cause
+  }
   if (!response.ok) {
     const body = await readResponse(response, { method: 'GET', path, feature: 'crm_export' })
     const error = new CRMAPIError(body?.message || `HTTP ${response.status}`, { status: response.status, code: body?.code, requestID: body?.request_id, details: body?.details })
@@ -340,14 +388,16 @@ export async function requestAuthorizedFile(path, allowedMediaTypes, fallbackFil
     })
     throw downloadTypeError
   }
-  const disposition = response.headers.get('content-disposition') || ''
-  const matched = disposition.match(/filename\*?=(?:UTF-8''|")?([^;"]+)/i)
-  let filename = fallbackFilename
-  // Content-Disposition 解码失败时使用调用方提供的受控文件名。
-  if (matched) { try { filename = decodeURIComponent(matched[1].replace(/"/g, '').trim()) } catch { filename = fallbackFilename } }
-  filename = filename.replace(/[\\/\u0000-\u001f\u007f]/g, '_').slice(0, 160)
-  if (!filename || filename === '.' || filename === '..' || filename.startsWith('.')) filename = fallbackFilename
-  return { blob: await response.blob(), filename, contentType }
+  const filename = safeDownloadFilename(response.headers.get('content-disposition'), fallbackFilename)
+  let blob
+  try {
+    blob = await response.blob()
+  } catch (cause) {
+    if (downloadAbort.cancelled()) throw cause
+    if (downloadAbort.timedOut()) throw downloadTimeoutError(cause, { method: 'GET', path, feature: 'crm_export' })
+    throw cause
+  }
+  return { blob, filename, contentType }
 }
 
 /**

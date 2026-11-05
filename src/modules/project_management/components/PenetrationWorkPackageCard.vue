@@ -278,4 +278,16 @@ watch(workPackage, fillForms)
 
 <style scoped>
 .pen-package{margin:18px 0;padding:20px;border:1px solid #c9dcf6;border-radius:16px;background:linear-gradient(145deg,#f7fbff,#fff);box-shadow:0 8px 24px #1d4ed80d}.pen-package>header,.pen-stage-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.pen-package h3,.pen-package h4{margin:3px 0 0;color:#172033}.pen-package header small{color:#64748b}.pen-statuses{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px}.pen-statuses span,.pen-stage-head span{padding:5px 9px;border-radius:999px;background:#e8f1ff;color:#1d4ed8;font-size:12px}.pen-empty,.pen-note{color:#64748b}.pen-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:16px 0}.pen-summary div{padding:10px;border-radius:10px;background:#f3f7fc}.pen-summary dt{font-size:12px;color:#64748b}.pen-summary dd{margin:5px 0 0;color:#172033;overflow-wrap:anywhere}.pen-summary.details{grid-template-columns:repeat(2,minmax(0,1fr))}.pen-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:16px;padding:16px;border-radius:12px;background:#f5f8fc}.pen-form h4,.pen-form .wide,.pen-form>.pm-button,.pen-choice{grid-column:1/-1}.pen-form label,.pen-field{display:grid;gap:6px;color:#44516a;font-size:13px}.pen-form input,.pen-form textarea{box-sizing:border-box;width:100%;padding:9px 11px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;color:#172033}.pen-choice{display:flex;gap:20px}.pen-choice label{display:flex;grid-template-columns:auto 1fr;align-items:center}.pen-choice input{width:auto}.pen-stage{margin-top:18px;padding-top:16px;border-top:1px solid #dde7f2}.pen-actions,.pen-upload{display:flex;align-items:center;gap:10px;margin-top:14px}.cancellation{border:1px solid #fecaca;background:#fff7f7}.compact .pen-form{display:none}.compact{padding:16px}.compact .pen-summary{grid-template-columns:repeat(2,minmax(0,1fr))}@media(max-width:860px){.pen-summary,.pen-summary.details,.pen-form{grid-template-columns:1fr}.pen-package>header{display:grid}.pen-statuses{justify-content:flex-start}}
+
+/* 深色主题：渗透工作包卡片写死的浅蓝底、白输入框与墨色；浅色声明未改。 */
+[data-theme="dark"] .pen-package{border-color:var(--border);background:linear-gradient(145deg,var(--surface-tint),var(--surface-card));box-shadow:var(--shadow-raised)}
+[data-theme="dark"] .pen-package h3,[data-theme="dark"] .pen-package h4,[data-theme="dark"] .pen-summary dd{color:var(--text)}
+[data-theme="dark"] .pen-package header small,[data-theme="dark"] .pen-empty,[data-theme="dark"] .pen-note,[data-theme="dark"] .pen-summary dt{color:var(--text-muted)}
+[data-theme="dark"] .pen-statuses span,[data-theme="dark"] .pen-stage-head span{background:var(--chip-brand);color:var(--primary-ink-strong)}
+[data-theme="dark"] .pen-summary div{background:var(--surface-muted)}
+[data-theme="dark"] .pen-form{background:var(--surface-muted)}
+[data-theme="dark"] .pen-form label,[data-theme="dark"] .pen-field{color:var(--text-secondary)}
+[data-theme="dark"] .pen-form input,[data-theme="dark"] .pen-form textarea{border-color:var(--border);background:var(--surface-input);color:var(--text)}
+[data-theme="dark"] .pen-stage{border-top-color:var(--border)}
+[data-theme="dark"] .cancellation{border-color:var(--danger-border);background:var(--danger-soft)}
 </style>
