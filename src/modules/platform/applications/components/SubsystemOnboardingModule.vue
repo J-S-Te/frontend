@@ -578,10 +578,21 @@ async function loadEnvironments() {
       : environments.value[0]?.environment_id || ''
     // 环境目录是控制面配置，部署状态来自 Agent。单个 Agent 状态查询失败不应抹掉
     // 其他环境，使用 allSettled 保留成功结果并回退到环境自身状态。
-    const states = await Promise.allSettled(environments.value.map(async (environment) => [
-      environment.environment,
-      await getSubsystemStatus({ applicationCode: application.code, environment: environment.environment }),
-    ]))
+    // 部署状态与 Keycloak 集成状态互不依赖：两轮合并为一次并发，避免“第一个
+    // 环境的 Agent 查询串行等完，才开始查 Keycloak 集成”的双倍等待。
+    const [states, integrationStates] = await Promise.all([
+      Promise.allSettled(environments.value.map(async (environment) => [
+        environment.environment,
+        await getSubsystemStatus({ applicationCode: application.code, environment: environment.environment }),
+      ])),
+      // Keycloak 集成是独立且持久化的控制平面。在此加载
+      // 可避免浏览器刷新后，将已同步的
+      // 客户端降级为不区分环境的全局提供方摘要。
+      Promise.allSettled(environments.value.map(async (environment) => [
+        environment.environment_id,
+        await getKeycloakIntegrationStatus({ applicationCode: application.code, environment: environment.environment }),
+      ])),
+    ])
     if (!isCurrentRequest()) return
     deploymentStates.value = Object.fromEntries(states
       .filter((result) => result.status === 'fulfilled' && result.value[1]?.status)
@@ -589,15 +600,7 @@ async function loadEnvironments() {
     deploymentStatusErrors.value = Object.fromEntries(states
       .map((result, index) => result.status === 'rejected' ? [environments.value[index].environment, deploymentStatusError(result.reason)] : null)
       .filter(Boolean))
-    // Keycloak 集成是独立且持久化的控制平面。在此加载
-    // 可避免浏览器刷新后，将已同步的
-    // 客户端降级为不区分环境的全局提供方摘要。
-    const integrationStates = await Promise.allSettled(environments.value.map(async (environment) => [
-      environment.environment_id,
-      await getKeycloakIntegrationStatus({ applicationCode: application.code, environment: environment.environment }),
-    ]))
     // 集成状态同样只允许当前票据回写：否则切换应用后，旧应用的集成摘要会污染新应用卡片。
-    if (!isCurrentRequest()) return
     keycloakSwitchStates.value = Object.fromEntries(integrationStates
       .filter((result) => result.status === 'fulfilled' && result.value[1] && typeof result.value[1] === 'object')
       .map((result) => result.value))

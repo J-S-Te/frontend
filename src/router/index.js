@@ -3,8 +3,6 @@ import LoginView from '@/modules/platform/auth/views/LoginView.vue'
 import ForcePasswordChangeView from '@/modules/platform/auth/views/ForcePasswordChangeView.vue'
 import ForbiddenView from '@/modules/platform/auth/views/ForbiddenView.vue'
 import SubsystemAccessErrorView from '@/modules/platform/auth/views/SubsystemAccessErrorView.vue'
-import PlatformConsoleView from '@/modules/platform/views/PlatformConsoleView.vue'
-import SubsystemPortalView from '@/modules/platform/views/SubsystemPortalView.vue'
 import { AuthError, getCurrentPrincipal } from '@/modules/platform/auth/api/auth'
 import { businessViews, sessionLoaders } from '@/modules/registry/compiledModules.js'
 import { canAccessContractSection } from '@/modules/shared/authz/sys004'
@@ -17,6 +15,12 @@ import {
   PLATFORM_SETTINGS_SECTION_KEYS,
   visiblePlatformSettingsSections,
 } from '@/modules/platform/auth/utils/platformConsoleAccess'
+
+// 平台控制台与子系统门户体积很大（控制台单文件 700KB+），静态 import 会把它们全部
+// 并入首屏 main chunk。改为动态 import 后 Vite 会切出独立 chunk：登录页/子系统页首屏
+// 不再下载与本路由无关的控制台代码，进入 /settings、/audit、/portal 时才按需加载。
+const PlatformConsoleView = () => import('@/modules/platform/views/PlatformConsoleView.vue')
+const SubsystemPortalView = () => import('@/modules/platform/views/SubsystemPortalView.vue')
 
 // 编译入口只导入已选业务，未编译视图不会登记为可访问路由。
 const { ContractManagementView, ProjectManagementView, SettlementView,

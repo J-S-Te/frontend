@@ -6,6 +6,9 @@ export const AUTHORIZATION_REFRESHED_EVENT = 'platform-auth:authorization-refres
 
 export const AUTHORIZATION_REFRESH_INTERVAL_MS = 15 * 1000
 
+// 快照清空订阅者集合：登录、退出、换号与会话失效都会走到 clearAuthorizationSnapshot。
+const snapshotClearedListeners = new Set()
+
 export function principalFingerprint(principal) {
   if (!principal || typeof principal !== 'object') return ''
 
@@ -41,5 +44,25 @@ export function dispatchAuthorizationRefreshed(principal, { changed = false } = 
  * HttpOnly Cookie 仍完全归服务端管理；此事件只防止登录、退出跳转期间组件继续展示上一账号。
  */
 export function clearAuthorizationSnapshot() {
+  // 账号切换/退出/会话失效时，各模块的身份缓存必须与授权快照一起作废，
+  // 否则换号后仍可能读到上一账号的主体。
+  for (const listener of snapshotClearedListeners) {
+    try {
+      listener()
+    } catch {
+      // 单个订阅者失败不得阻断其余订阅者与事件派发。
+    }
+  }
   dispatchAuthorizationRefreshed(null)
+}
+
+/**
+ * onAuthorizationSnapshotCleared 订阅“内存身份快照被清空”。
+ * @param {Function} listener 快照清空时同步执行的回调。
+ * @returns {Function} 取消订阅的函数。
+ */
+export function onAuthorizationSnapshotCleared(listener) {
+  if (typeof listener !== 'function') return () => {}
+  snapshotClearedListeners.add(listener)
+  return () => snapshotClearedListeners.delete(listener)
 }

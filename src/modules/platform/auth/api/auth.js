@@ -1,6 +1,6 @@
 // 使用相对路径，确保该纯 API 模块既能被 Vite 解析，也能被 Node 原生测试运行器直接加载。
 import { broadcastSessionEnded } from '../utils/sessionLifecycle.js'
-import { clearAuthorizationSnapshot } from '../utils/authorizationRefresh.js'
+import { clearAuthorizationSnapshot, onAuthorizationSnapshotCleared } from '../utils/authorizationRefresh.js'
 import { normalizeAuthorizationSession } from '../../../shared/authz/sessionCompatibility.js'
 import { createApiRequestContext, attachStructuredContext } from '../../shared/api/requestContext.js'
 import { readBody } from '../../shared/api/request.js'
@@ -14,6 +14,45 @@ const CREDENTIAL_ENCRYPTION_MODE = (typeof import.meta.env === 'undefined'
   ? 'disabled'
   : (import.meta.env?.VITE_CREDENTIAL_ENCRYPTION_MODE || 'required'))
 let browserSessionGeneration = 0
+
+// `/auth/me` 结果缓存与单飞（in-flight 复用）。
+// 首屏一次导航会同时被路由守卫、App 会话同步、门户组件各读一次主体，无缓存时
+// 会并发发出多份完全相同的请求并串行阻塞导航。这里只做两件低风险的事：
+//   1. 单飞：同一时刻只允许一个 `/auth/me` 在途，其余调用方复用同一个 Promise；
+//   2. 短 TTL：成功结果缓存 PRINCIPAL_CACHE_TTL_MS，失败绝不缓存。
+// 缓存键包含 browserSessionGeneration：登录、改密、退出会推进世代号并清空缓存，
+// 旧世代的结果不会被后续调用读到。
+const PRINCIPAL_CACHE_TTL_MS = 5000
+let principalCache = null
+let principalInFlight = null
+// 缓存世代号只增不减：快照被清空后，仍在途的旧请求即使成功也不回写缓存。
+let principalCacheEpoch = 0
+
+// clearPrincipalCache 清空 `/auth/me` 缓存与在途请求登记。
+// 参数：无。
+// 返回值：无。
+function clearPrincipalCache() {
+  principalCache = null
+  principalInFlight = null
+  principalCacheEpoch += 1
+}
+
+// 换号、退出或会话失效都会清空内存授权快照；`/auth/me` 短缓存必须同时作废，
+// 否则登录界面恢复会话或下一次导航可能仍读到上一账号的主体。
+onAuthorizationSnapshotCleared(clearPrincipalCache)
+
+/**
+ * invalidateCurrentPrincipalCache 主动作废 `/auth/me` 短缓存与在途请求登记。
+ *
+ * 常规会话边界（登录、改密、退出、换号、会话失效）已由 clearAuthorizationSnapshot
+ * 自动触发，调用方通常不需要它；该导出只用于“服务端会话可能在浏览器未知的情况下
+ * 变化”之后需要立刻重读主体的场景，以及单元测试之间的隔离。
+ *
+ * @returns {void}
+ */
+export function invalidateCurrentPrincipalCache() {
+  clearPrincipalCache()
+}
 
 function requestContext(path, options = {}, extra = {}) {
   const method = String(options.method || 'GET').toUpperCase()
@@ -129,6 +168,8 @@ function advanceBrowserSessionGeneration() {
   // generation 是浏览器内的账号切换栅栏：切换 Cookie 后，旧 /auth/me 请求即使晚到
   // 也不能重新写回上一账号的权限快照。
   browserSessionGeneration += 1
+  // 账号切换后 `/auth/me` 的旧缓存与旧在途请求都属于上一身份，必须同时作废。
+  clearPrincipalCache()
   clearAuthorizationSnapshot()
 }
 
@@ -266,11 +307,48 @@ export async function changeOwnPassword({ currentPassword, newPassword }) {
  * 服务端从 HttpOnly 会话 Cookie 中验证 JWT 和已持久化的会话状态；前端只消费
  * `/auth/me` 返回的最小身份信息，不在浏览器存储中保存令牌。
  *
+ * 为消除首屏重复请求，本函数附加两项内部优化（不改变失败语义）：
+ * 1. 单飞：同一世代下同一时刻只有一个 `/auth/me` 在途，并发调用复用同一个 Promise；
+ * 2. 短 TTL：成功结果缓存 PRINCIPAL_CACHE_TTL_MS，失败结果一律不缓存。
+ * 登录、改密、退出会推进 browserSessionGeneration 并清空缓存，因此换号后不会读到
+ * 上一账号的主体。
+ *
  * @returns {Promise<Object>} 返回兼容处理后的当前用户及授权会话。
  * @throws {AuthError} 会话失效、请求期间账号发生切换或认证服务不可用时抛出。
  */
 export async function getCurrentPrincipal() {
-  const requestedGeneration = browserSessionGeneration
+  const generation = browserSessionGeneration
+  if (principalCache && principalCache.generation === generation && principalCache.expiresAt > Date.now()) {
+    return principalCache.value
+  }
+  // 复用同一世代的在途请求，避免守卫、App 同步、门户组件各自发一份 `/auth/me`。
+  if (principalInFlight && principalInFlight.generation === generation) {
+    return principalInFlight.promise
+  }
+
+  const promise = fetchCurrentPrincipal(generation)
+  const epoch = principalCacheEpoch
+  principalInFlight = { generation, promise }
+  try {
+    const principal = await promise
+    // 只有成功、世代未变且期间没有清空过快照时才写入缓存；失败路径直接抛出，绝不缓存。
+    if (generation === browserSessionGeneration && epoch === principalCacheEpoch) {
+      principalCache = { value: principal, expiresAt: Date.now() + PRINCIPAL_CACHE_TTL_MS, generation }
+    }
+    return principal
+  } finally {
+    // 只有自己登记的请求才撤销登记，避免清空后被新请求覆盖时误删。
+    if (principalInFlight?.promise === promise) principalInFlight = null
+  }
+}
+
+/**
+ * fetchCurrentPrincipal 执行单次 `/auth/me` 读取并校验会话世代。
+ * @param {number} requestedGeneration 发起请求时的浏览器会话世代号。
+ * @returns {Promise<Object>} 规范化后的当前主体。
+ * @throws {AuthError} 服务端拒绝、网络异常或请求期间账号已切换时抛出。
+ */
+async function fetchCurrentPrincipal(requestedGeneration) {
   const body = await requestWithStructuredContext('/auth/me', {
     method: 'GET',
     cache: 'no-store',

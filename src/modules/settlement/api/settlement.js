@@ -213,7 +213,15 @@ export async function getSettlementSession({ force = false } = {}) {
 }
 export async function ensureSettlementSession() {
   try {
-    const settlementSession = await getSettlementSession({ force: true });
+    // 两侧 `/auth/me` 互不依赖，并行发起可把进入结算系统的导航缩短一个往返；
+    // 失败语义不变：平台侧失败仍被吞掉，结算侧失败仍由 shouldStartSubsystemLogin 处理。
+    const [settlementSession, platformResult] = await Promise.all([
+      getSettlementSession({ force: true }),
+      getCurrentPrincipal().then(
+        (principal) => ({ ok: true, principal }),
+        (error) => ({ ok: false, error }),
+      ),
+    ]);
     // 本地 DevelopmentAuth 使用固定的 dev-finance 主体，不是基础平台 OIDC
     // 用户。若仍做跨系统主体比较，会永久命中“账号已切换”，形成
     // local-logout -> /auth/login -> /settlement/dashboard 的刷新循环。
@@ -222,16 +230,18 @@ export async function ensureSettlementSession() {
       return settlementSession;
     }
     try {
-      const platformPrincipal = await getCurrentPrincipal();
-      const platformIdentityID = principalIdentityID(platformPrincipal);
-      const settlementIdentityID = principalIdentityID(settlementSession);
-      const platformTenantID = String(platformPrincipal?.tenant_id || platformPrincipal?.tenant?.id || "");
-      const tenantChanged = platformTenantID && platformTenantID !== String(settlementSession?.tenant_id || "");
-      const userChanged = platformIdentityID && settlementIdentityID && platformIdentityID !== settlementIdentityID;
-      if (userChanged || tenantChanged) {
-        await clearSettlementLocalSession();
-        beginLogin({ force: true });
-        return null;
+      if (platformResult.ok) {
+        const platformPrincipal = platformResult.principal;
+        const platformIdentityID = principalIdentityID(platformPrincipal);
+        const settlementIdentityID = principalIdentityID(settlementSession);
+        const platformTenantID = String(platformPrincipal?.tenant_id || platformPrincipal?.tenant?.id || "");
+        const tenantChanged = platformTenantID && platformTenantID !== String(settlementSession?.tenant_id || "");
+        const userChanged = platformIdentityID && settlementIdentityID && platformIdentityID !== settlementIdentityID;
+        if (userChanged || tenantChanged) {
+          await clearSettlementLocalSession();
+          beginLogin({ force: true });
+          return null;
+        }
       }
     } catch {
       // 基础平台暂时不可用时，Settlement 自己的有效 OIDC 会话继续生效。
