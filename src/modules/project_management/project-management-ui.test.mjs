@@ -148,7 +148,7 @@ test('项目列表 KPI、趋势图、资质筛选与空态不发生视觉回归'
   assert.match(styles, /\.pm-qualification-filter span \{[^}]*flex: 0 0 auto;[^}]*white-space: nowrap;/)
 
   // 无数据与筛选无结果都必须在项目列表表体内给出明确反馈。
-  assert.match(source, /<tr v-if="!pagedProjects\.length"><td colspan="10" class="pm-empty-mini">\{\{ projects\.length \? '暂无符合当前筛选条件的项目' : '暂无项目，请先新建项目' \}\}<\/td><\/tr>/)
+  assert.match(source, /<tr v-if="!pagedProjects\.length"><td colspan="10" class="pm-empty-mini">\{\{ projectListEmptyText \}\}<\/td><\/tr>/)
 })
 
 test('执行总览的在途项目以项目名称为主信息并悬停提示项目编号', () => {
@@ -877,23 +877,24 @@ test('项目健康度字段已移除，风险项目改由服务端派生口径�
 
 test('项目列表卡片按角色职责展示并使用服务端裁剪后的统计口径', () => {
   assert.match(source, /pending_project_creation: 0, pending_project_creation_available: false/)
-  assert.match(source, /business_admin: \['pending_decomposition', 'in_flight', 'pending_creation'\]/)
-  assert.match(source, /technical_director: \['all_projects', 'all_service_items', 'allocation_pending', 'risk', 'pending_creation'\]/)
-  assert.match(source, /team_lead: \['all_projects', 'in_flight', 'completed', 'risk'\]/)
-  assert.match(source, /project_manager: \['all_projects', 'all_service_items', 'risk'\]/)
-  assert.match(source, /engineer: \['all_projects', 'in_flight', 'completed', 'risk'\]/)
-  assert.match(source, /penetration_engineer: \['all_projects', 'in_flight', 'completed', 'risk'\]/)
+  assert.match(source, /business_admin: \['pending_decomposition', 'in_flight', 'rectifying', 'pending_creation'\]/)
+  assert.match(source, /technical_director: \['all_projects', 'all_service_items', 'allocation_pending', 'in_flight', 'rectifying', 'risk', 'pending_creation'\]/)
+  assert.match(source, /team_lead: \['all_projects', 'in_flight', 'rectifying', 'completed', 'risk'\]/)
+  assert.match(source, /project_manager: \['all_projects', 'all_service_items', 'rectifying', 'risk'\]/)
+  assert.match(source, /engineer: \['all_projects', 'in_flight', 'rectifying', 'completed', 'risk'\]/)
+  assert.match(source, /penetration_engineer: \['all_projects', 'in_flight', 'rectifying', 'completed', 'risk'\]/)
   assert.match(source, /label: '资源分配待办', value: inboxItems\.value\.length/)
   assert.match(source, /label: '全部服务项', value: serviceItems\.value\.length/)
   assert.match(source, /dashboard\.value\.pending_project_creation_available \? dashboard\.value\.pending_project_creation : '—'/)
   assert.match(source, /合同流程已完成 · 尚未建项目/)
   // 技术总监只能看统计，项目创建入口仍由 canCreateProject 单独决定。
   assert.match(source, /action: canCreateProject\.value \? 'create' : ''/)
+  // 设置面板列出当前角色全部可用卡片，网格只渲染可见卡片。
   assert.match(source, /v-for="card in projectKpiCards"/)
-  // 卡片总数随角色变化：5 张以内保持单排，更多卡片拆成两行；末行由 flex 自动均匀铺满。
-  assert.match(source, /const projectKpiColumnCount = computed\(\(\) => \{/)
-  assert.match(source, /if \(count <= 5\) return Math\.max\(count, 1\)/)
-  assert.match(source, /return Math\.ceil\(count \/ 2\)/)
+  assert.match(source, /v-for="card in projectKpiVisibleCards"/)
+  // 可见卡片数决定列数：5 张以内单排，更多卡片拆成两行；全部隐藏时仍保留 1 列。
+  assert.match(source, /columnCount: projectKpiColumnCount/)
+  assert.match(source, /visibleCards: projectKpiVisibleCards/)
   assert.match(source, /class="pm-kpi-row pm-project-kpi-grid"/)
   assert.match(source, /pm-project-kpi-columns-\$\{projectKpiColumnCount\}/)
   assert.match(styles, /\.pm-project-kpi-grid \{ display: flex; flex-wrap: wrap;/)

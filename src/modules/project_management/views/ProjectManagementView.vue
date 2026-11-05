@@ -5,8 +5,10 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { formatUserError } from '../../shared/utils/userError.js'
 import { createRequestScope } from '../../platform/shared/composables/requestScope.js'
 import { useConfirmDialog } from '../../shared/composables/useConfirmDialog.js'
+import { usePromptDialog } from '../../shared/composables/usePromptDialog.js'
 import { useUrlFilterState } from '../../shared/composables/useUrlFilterState.js'
 import ConfirmDialog from '../../shared/components/ConfirmDialog.vue'
+import PromptDialog from '../../shared/components/PromptDialog.vue'
 import { assignServiceItemTeams } from '../assignment.js'
 import { useRoute, useRouter } from 'vue-router'
 import { AuthError, logoutCurrentSession } from '@/modules/platform/auth/api/auth'
@@ -16,6 +18,7 @@ import { useSupplementClosure } from '@/modules/project_management/composables/u
 import { supplementClosureAvailability } from '@/modules/project_management/supplementClosure.js'
 import { useProjectMonitoring } from '@/modules/project_management/composables/useProjectMonitoring'
 import { useProjectNotifications } from '@/modules/project_management/composables/useProjectNotifications'
+import { rectifyingProjectCount, useProjectKpiVisibility } from '@/modules/project_management/composables/useProjectKpiVisibility'
 // BIZ-PROJECT-06：缺项判定由服务端按服务项完整事件流给出，前端只消费结论；
 // 判定不可用（未拉取/失败/待同步）一律按"未知"处理并 fail-closed。
 import {
@@ -85,6 +88,9 @@ import {
   planEquipmentFor,
   planPersonnelFor,
   planPersonnelRows,
+  projectReportStageLabel,
+  reportStageLabel,
+  reportStatusLabel,
   reportTechReviewLabel,
   selectedIDs,
   slaDueLabel,
@@ -181,6 +187,7 @@ import {
 import '@/modules/project_management/styles/project-management.css'
 
 const { dialog: confirmDialog, askConfirm, accept: acceptConfirm, cancel: cancelConfirm } = useConfirmDialog()
+const { dialog: promptDialog, askPrompt, accept: acceptPrompt, cancel: cancelPrompt } = usePromptDialog()
 
 const route = useRoute()
 const router = useRouter()
@@ -306,6 +313,9 @@ const currentMeta = computed(() => pageMeta[activeSection.value])
 const mobileMenuOpen = ref(false)
 const keyword = ref('')
 const statusFilter = ref('')
+const reportStageFilter = ref('')
+// 报告阶段下拉的选项由唯一中文词表生成，值直接作为列表接口的 report_stage 查询参数。
+const reportStageFilterOptions = Object.entries(reportStageLabel).map(([value, label]) => ({ value, label }))
 const categoryFilter = ref('')
 const teamFilter = ref('')
 const projectCardFilter = ref('')
@@ -313,7 +323,7 @@ const projectCardFilter = ref('')
 useUrlFilterState({
   route,
   router,
-  fields: { keyword, status: statusFilter, category: categoryFilter, team: teamFilter, card: projectCardFilter },
+  fields: { keyword, status: statusFilter, report_stage: reportStageFilter, category: categoryFilter, team: teamFilter, card: projectCardFilter },
 })
 const selectedRows = ref([])
 const createOpen = ref(false)
@@ -374,10 +384,22 @@ const projectStatusFilters = [...projectStatusNodes, '补充协议处理中', '�
 const projectStatusCompleted = '已完成'
 
 const projects = ref([])
+// 报告阶段筛选由服务端完成：保留 projects 作为完整工作区快照（指标卡、详情跳转都要用），
+// 另存一份服务端按 report_stage 过滤后的列表，仅本项目列表消费，避免指标口径被筛选缩小。
+const reportStageProjects = ref([])
+const reportStageListLoading = ref(false)
+const reportStageListError = ref('')
+const reportStageListScope = createRequestScope()
+const projectListSource = computed(() => reportStageFilter.value ? reportStageProjects.value : projects.value)
+const projectListEmptyText = computed(() => {
+  if (reportStageListLoading.value) return '正在按报告阶段筛选…'
+  if (reportStageListError.value) return '报告阶段筛选结果读取失败'
+  return projectListSource.value.length ? '暂无符合当前筛选条件的项目' : '暂无项目，请先新建项目'
+})
 
 const filteredProjects = computed(() => {
   const query = keyword.value.trim().toLowerCase()
-  return projects.value.filter((project) => {
+  return projectListSource.value.filter((project) => {
     const assigned = projectAssignmentPeople(project.id)
     const matchKeyword = !query || [project.name, project.id, project.customer, project.contract, project.category, assigned.teamLeads, assigned.projectManagers].join(' ').toLowerCase().includes(query)
     const matchCard = !projectCardFilter.value
@@ -406,6 +428,34 @@ function gotoProjectPage(page) {
 // 筛选条件变化后回到第一页，避免停留在越界页码上看到空表。
 watch([keyword, statusFilter, categoryFilter, teamFilter, projectCardFilter], () => { projectPage.value = 1 })
 
+// 报告阶段筛选由服务端执行：值变化时带 report_stage 重新请求列表，不清空工作区快照。
+// 工作区刷新（写后/手动刷新）也会重新拉取当前筛选结果，避免展示过期的筛选快照。
+async function loadReportStageProjects() {
+  const stage = reportStageFilter.value
+  const ticket = reportStageListScope.begin(`REPORT_STAGE:${stage}`)
+  if (!stage) {
+    reportStageProjects.value = []
+    reportStageListError.value = ''
+    reportStageListLoading.value = false
+    return
+  }
+  reportStageListLoading.value = true
+  try {
+    const rows = await listProjects({ report_stage: stage })
+    if (!reportStageListScope.isCurrent(ticket)) return
+    reportStageProjects.value = rows
+    reportStageListError.value = ''
+  } catch (error) {
+    if (!reportStageListScope.isCurrent(ticket)) return
+    reportStageProjects.value = []
+    reportStageListError.value = formatUserError(error, { fallback: '报告阶段筛选加载失败，请稍后重试' })
+  } finally {
+    if (reportStageListScope.isCurrent(ticket)) reportStageListLoading.value = false
+  }
+}
+watch(reportStageFilter, () => { projectPage.value = 1; loadReportStageProjects() }, { immediate: true })
+watch(projects, () => { if (reportStageFilter.value) loadReportStageProjects() })
+
 // 检测类别目录是建项、拆解调整与列表筛选共用的唯一受控域。
 // 仅展示启用项，避免前端再次维护一套与服务端不一致的硬编码列表。
 const detectionCategories = ref([])
@@ -415,6 +465,9 @@ const activeDetectionCategoryOptions = computed(() => detectionCategories.value
 const categoryOptions = computed(() => activeDetectionCategoryOptions.value.map((item) => item.value))
 const teamOptions = computed(() => [...new Set(projects.value.map((p) => p.team).filter(Boolean))])
 const inFlightProjects = computed(() => projects.value.filter((p) => p.status !== projectStatusCompleted))
+// 副标注与服务项状态分布同口径：统计当前已加载服务项中报告阶段为整改中的项数，
+// 不代表全量；旧后端/旧数据没有 report_status 时自然为 0，前端不推断报告阶段。
+const rectifyingItemCount = computed(() => serviceItems.value.filter((item) => String(item.report_status ?? '').trim().toUpperCase() === 'RECTIFYING').length)
 // 风险口径由服务端统一派生（domain.IsRiskProject）：派生状态为异常处理中/已终止，
 // 或项目内存在已终止服务项。前端不再复刻该规则——此前前后端各写一遍，
 // 口径一旦调整（例如把"部分终止"纳入风险）就会出现两处不一致。
@@ -501,7 +554,7 @@ const monitoredProjects = computed(() => {
     return matchKeyword && (!teamFilter.value || p.team === teamFilter.value)
   })
 })
-function resetProjectFilters() { keyword.value = ''; statusFilter.value = ''; categoryFilter.value = ''; teamFilter.value = ''; projectCardFilter.value = '' }
+function resetProjectFilters() { keyword.value = ''; statusFilter.value = ''; reportStageFilter.value = ''; categoryFilter.value = ''; teamFilter.value = ''; projectCardFilter.value = '' }
 
 const serviceItems = ref([])
 // 项目本身的 team/manager 是建项时的展示快照，不能代表后续资源分配结果。
@@ -976,11 +1029,13 @@ async function removeSplitOverride(item) {
   finally { saving.value = false }
 }
 
-const reportStatusLabel = { NONE: '待编制', COMPILING: '编制中', REVIEWED: '已审核', ISSUED: '已签发', ARCHIVED: '已归档' }
+// 报告阶段与服务项报告状态的中文词表统一由 projectDisplay.js 提供；
+// 页面只负责展示，不在这里重复维护第二份文案。
 // SLA 口径标签与剩余/超期文案：与后端 domain.SlaKind* 常量对齐。
 const slaKindLabel = { PLAN_END_OVERDUE: '计划完成超期', STATUS_DEADLINE_OVERDUE: '状态停留超期', STATUS_DEADLINE_APPROACHING: '状态临近超期' }
-const reportStatusRank = { COMPILING: 1, REVIEWED: 2, ISSUED: 3, ARCHIVED: 4 }
-const reportPhaseNext = { NONE: 'COMPILING', COMPILING: 'REVIEWED', REVIEWED: 'ISSUED', ISSUED: 'ARCHIVED' }
+const reportStatusRank = { RECTIFYING: 1, COMPILING: 2, REVIEWED: 3, ISSUED: 4, ARCHIVED: 5 }
+const reportPhaseNext = { NONE: 'RECTIFYING', RECTIFYING: 'COMPILING', COMPILING: 'REVIEWED', REVIEWED: 'ISSUED', ISSUED: 'ARCHIVED' }
+const reportPhaseAction = { RECTIFYING: '开始整改', COMPILING: '开始编制', REVIEWED: '审核报告', ISSUED: '签发报告', ARCHIVED: '归档报告' }
 const reportItems = computed(() => serviceItems.value.filter((item) => {
   const projectStatus = projectByID.value.get(item.project_id)?.status
   return ['现场实施完成', '报告编制', '已完成'].includes(projectStatus) && (item.status === '现场实施完成' || (item.report_status && item.report_status !== 'NONE'))
@@ -1351,39 +1406,90 @@ const projectKpiCards = computed(() => {
     all_service_items: { key: 'all_service_items', label: '全部服务项', value: serviceItems.value.length, suffix: '项', meta: projectCardRole.value === 'project_manager' ? '分配给我的服务项' : '当前授权范围' },
     pending_decomposition: { key: 'pending_decomposition', label: '待拆解确认', value: pendingDecompositionCount.value, suffix: '个', meta: '需业务管理员处理', tone: 'amber', action: 'decomposition' },
     in_flight: { key: 'in_flight', label: '在途项目', value: inFlightProjects.value.length, suffix: '个', meta: '含实施中 / 报告编制', tone: 'blue', action: 'in_flight' },
+    // 整改中是报告的独立阶段（与 9 个项目状态正交），计数只取已加载项目，不伪造旧后端数据。
+    rectifying: { key: 'rectifying', label: '整改中项目', value: rectifyingProjectCount(projects.value), suffix: '个', meta: '报告整改阶段', tone: 'amber', action: 'rectifying' },
     completed: { key: 'completed', label: '已完成项目', value: doneProjectCount.value, suffix: '个', meta: '已完成交付', tone: 'green', action: 'completed' },
     allocation_pending: { key: 'allocation_pending', label: '资源分配待办', value: inboxItems.value.length, suffix: '项', meta: '责任团队待补齐人员', tone: 'amber', action: 'allocation' },
     risk: { key: 'risk', label: '风险项目', value: riskProjectCount.value, suffix: '个', meta: '含终止 / 超期', tone: 'red', action: 'risk' },
     pending_creation: { key: 'pending_creation', label: '待新建项目', value: pendingProjectValue, suffix: dashboard.value.pending_project_creation_available ? '个' : '', meta: dashboard.value.pending_project_creation_available ? '合同流程已完成 · 尚未建项目' : '合同统计暂时不可用', tone: 'red', action: canCreateProject.value ? 'create' : '' },
   }
   const layouts = {
-    business_admin: ['pending_decomposition', 'in_flight', 'pending_creation'],
-    technical_director: ['all_projects', 'all_service_items', 'allocation_pending', 'risk', 'pending_creation'],
-    team_lead: ['all_projects', 'in_flight', 'completed', 'risk'],
-    project_manager: ['all_projects', 'all_service_items', 'risk'],
-    engineer: ['all_projects', 'in_flight', 'completed', 'risk'],
-    penetration_engineer: ['all_projects', 'in_flight', 'completed', 'risk'],
-    admin: ['all_projects', 'all_service_items', 'pending_decomposition', 'in_flight', 'completed', 'allocation_pending', 'risk', 'pending_creation'],
-    system_admin: ['all_projects', 'all_service_items', 'pending_decomposition', 'in_flight', 'completed', 'allocation_pending', 'risk'],
-    default: ['all_projects', 'in_flight', 'completed', 'risk'],
+    business_admin: ['pending_decomposition', 'in_flight', 'rectifying', 'pending_creation'],
+    technical_director: ['all_projects', 'all_service_items', 'allocation_pending', 'in_flight', 'rectifying', 'risk', 'pending_creation'],
+    team_lead: ['all_projects', 'in_flight', 'rectifying', 'completed', 'risk'],
+    project_manager: ['all_projects', 'all_service_items', 'rectifying', 'risk'],
+    engineer: ['all_projects', 'in_flight', 'rectifying', 'completed', 'risk'],
+    penetration_engineer: ['all_projects', 'in_flight', 'rectifying', 'completed', 'risk'],
+    admin: ['all_projects', 'all_service_items', 'pending_decomposition', 'in_flight', 'rectifying', 'completed', 'allocation_pending', 'risk', 'pending_creation'],
+    system_admin: ['all_projects', 'all_service_items', 'pending_decomposition', 'in_flight', 'rectifying', 'completed', 'allocation_pending', 'risk'],
+    default: ['all_projects', 'in_flight', 'rectifying', 'completed', 'risk'],
   }
   return layouts[projectCardRole.value].map((key) => catalog[key])
 })
 
-// 项目列表的指标数量随角色变化。少量卡片保持单排；超过 5 张时拆成两行，
-// 再由弹性布局让最后一行自动铺满，避免管理员视角出现 7+1 的孤立卡片。
-const projectKpiColumnCount = computed(() => {
-  const count = projectKpiCards.value.length
-  if (count <= 5) return Math.max(count, 1)
-  return Math.ceil(count / 2)
+// 指标卡可逐张显示/隐藏，偏好按「租户 + 用户」存在浏览器本地；默认全部可见。
+// 隐藏后网格列数按可见卡片数重算，只做本地重排，不重新请求任何接口。
+const {
+  hiddenKeys: hiddenProjectKpiKeys,
+  visibleCards: projectKpiVisibleCards,
+  columnCount: projectKpiColumnCount,
+  allHidden: allProjectKpiHidden,
+  settingsOpen: kpiSettingsOpen,
+  isCardVisible: isProjectKpiVisible,
+  toggleCard: toggleProjectKpiCard,
+  resetCards: resetProjectKpiCards,
+  toggleSettings: toggleKpiSettings,
+  closeSettings: closeKpiSettings,
+} = useProjectKpiVisibility({
+  cards: projectKpiCards,
+  tenantID: computed(() => session.value?.tenant_id),
+  userID: computed(() => session.value?.user_id),
 })
+
+// 指标卡设置面板的焦点管理：打开后聚焦第一个开关，关闭时把焦点还给触发按钮。
+const kpiSettingsRoot = ref(null)
+const kpiSettingsTrigger = ref(null)
+const kpiSettingsPanel = ref(null)
+function openKpiSettings() {
+  toggleKpiSettings()
+  if (!kpiSettingsOpen.value) return
+  nextTick(() => {
+    const firstSwitch = kpiSettingsPanel.value?.querySelector('[role="switch"]')
+    ;(firstSwitch || kpiSettingsTrigger.value)?.focus()
+  })
+}
+function dismissKpiSettings({ restoreFocus = false } = {}) {
+  if (!kpiSettingsOpen.value) return false
+  const panel = kpiSettingsPanel.value
+  const focusInside = Boolean(panel && typeof document !== 'undefined' && panel.contains(document.activeElement))
+  closeKpiSettings()
+  if (restoreFocus || focusInside) kpiSettingsTrigger.value?.focus()
+  return true
+}
+// 点击面板与触发按钮以外的区域关闭；触发按钮自身在 root 内，不会误关。
+function onKpiSettingsOutsideClick(event) {
+  if (!kpiSettingsOpen.value) return
+  const root = kpiSettingsRoot.value
+  if (root && event.target instanceof Node && root.contains(event.target)) return
+  dismissKpiSettings()
+}
+// 离开项目列表时收起面板，避免再次进入时残留展开态。
+watch(activeSection, () => { if (kpiSettingsOpen.value) dismissKpiSettings() })
 
 const projectCardFilterLabel = computed(() => ({ in_flight: '在途项目', risk: '风险项目' })[projectCardFilter.value] || '')
 function activateProjectKpi(card) {
   if (!card.action) return
   if (card.action === 'create') { openCreateProject(); return }
   if (card.action === 'allocation') { navigate('inbox'); return }
+  // 指标卡切换的是项目范围，和状态筛选一样清掉报告阶段筛选，避免“全部项目”仍停留在子集。
+  // 例外：整改中卡片本身就是报告阶段范围，保留它写入的 report_stage 筛选。
   projectCardFilter.value = ['in_flight', 'risk'].includes(card.action) ? card.action : ''
+  if (card.action === 'rectifying') {
+    reportStageFilter.value = 'RECTIFYING'
+    statusFilter.value = ''
+    return
+  }
+  reportStageFilter.value = ''
   if (card.action === 'decomposition') statusFilter.value = '待拆解确认'
   else if (card.action === 'completed') statusFilter.value = projectStatusCompleted
   else statusFilter.value = ''
@@ -1415,7 +1521,7 @@ const canReviewSpecialMethod = computed(() => permissionSet.value.has('project.s
 const canConfirmDecomposition = computed(() => permissionSet.value.has('service_item.confirm'))
 // 拆解调整需要独立权限：业务管理员据此发起补充协议并重建服务项清单。
 const canManageDecomposition = computed(() => permissionSet.value.has('project.decomposition.manage'))
-const reportPhasePermission = { COMPILING: 'project.report.prepare', REVIEWED: 'project.report.review', ISSUED: 'project.report.issue', ARCHIVED: 'project.report.archive' }
+const reportPhasePermission = { RECTIFYING: 'project.report.prepare', COMPILING: 'project.report.prepare', REVIEWED: 'project.report.review', ISSUED: 'project.report.issue', ARCHIVED: 'project.report.archive' }
 const canAdvanceReportPhase = (phase) => permissionSet.value.has(reportPhasePermission[phase])
 // 分配动作由两个权限之一触发：业务管理员用 team.assign，团队负责人用 execution.assign。
 const canSubmitAllocation = computed(() => canAssignTeam.value || canExecutionAssign.value)
@@ -1498,7 +1604,7 @@ const operationRows = computed(() => ({
   methods: methodItems.value.map((s) => ({ id: s.id, name: `${s.id} · ${s.category}`, detail: `${s.site} / ${s.system || '—'}`, owner: personLabel(s.project_manager_id), state: reportTechReviewLabel(s.tech_review_status), progress: s.tech_review_status === 'PENDING' ? 50 : 0, due: formatBusinessDate(s.planned_end) || '待排期', review: s.tech_review_status, comment: s.tech_review_comment, reviewedAt: s.tech_reviewed_at })),
   exceptions: pendingDeviations.value.map((e) => ({ id: e.id, name: `${e.payload?.deviation_id} · ${e.service_item_id}`, detail: e.payload?.description || '现场偏离', owner: personLabel(e.actor_user_id, '—'), state: '待评审', progress: 0, due: formatDateTime(e.created_at) })),
   standards: [],
-  reports: reportItems.value.map((item) => { const project = projectByID.value.get(item.project_id); return { id: item.id, name: `${item.id} · ${item.site}`, detail: `${project?.customer || item.project_id} / 报告${reportStatusLabel[item.report_status] || item.report_status}`, owner: personLabel(item.project_manager_id, project?.manager || '待指派'), state: reportStatusLabel[item.report_status] || item.report_status, progress: (reportStatusRank[item.report_status] || 0) * 25, due: item.report_updated_at ? formatBusinessDate(item.report_updated_at) || '待排期' : formatBusinessDate(item.planned_end) || '待排期', report_status: item.report_status } }),
+  reports: reportItems.value.map((item) => { const project = projectByID.value.get(item.project_id); return { id: item.id, name: `${item.id} · ${item.site}`, detail: `${project?.customer || item.project_id} / 报告${reportStatusLabel[item.report_status] || item.report_status}`, owner: personLabel(item.project_manager_id, project?.manager || '待指派'), state: reportStatusLabel[item.report_status] || item.report_status, progress: (reportStatusRank[item.report_status] || 0) * 20, due: item.report_updated_at ? formatBusinessDate(item.report_updated_at) || '待排期' : formatBusinessDate(item.planned_end) || '待排期', report_status: item.report_status } }),
 }[activeSection.value] || []))
 
 const rules = ref([])
@@ -1601,11 +1707,12 @@ const operationSteps = computed(() => {
   ]
 })
 
-// 原型 PG-IMP-10 的报告阶段链：COMPILING→REVIEWED→ISSUED→ARCHIVED。
+// 报告必须先整改，再依次完成编制、审核、签发与归档。
 const reportSteps = computed(() => {
   const item = selectedServiceItem.value
   const current = reportStatusRank[item?.report_status] || 0
   return [
+    { phase: 'RECTIFYING', label: '报告整改' },
     { phase: 'COMPILING', label: '报告编制' },
     { phase: 'REVIEWED', label: '报告审核' },
     { phase: 'ISSUED', label: '报告签发' },
@@ -2671,6 +2778,50 @@ function currentPosition() {
   })
 }
 
+// 用途：固定原因输入前的服务项、选择范围与当前会话，防止等待期间串写。
+// 参数：items 为本次动作已经核验的服务项。
+// 返回值：服务项副本、选择范围、页面和会话快照。
+function captureReasonContext(items) {
+  return {
+    items: items.map((item) => ({ ...item })),
+    selection: JSON.stringify([...selectedServiceItemIDs.value].sort()),
+    section: activeSection.value,
+    session: session.value,
+  }
+}
+
+// 用途：复核输入期间页面、选择与服务项版本是否仍属于原操作。
+// 参数：context 为输入前保存的操作快照。
+// 返回值：上下文一致返回 true，否则返回 false。
+function reasonContextCurrent(context) {
+  if (activeSection.value !== context.section || session.value !== context.session) return false
+  if (JSON.stringify([...selectedServiceItemIDs.value].sort()) !== context.selection) return false
+  const fields = ['version', 'status', 'report_status', 'team_lead_id', 'project_manager_id']
+  return context.items.every((item) => {
+    const current = serviceItems.value.find((row) => row.id === item.id)
+    return current && fields.every((field) => current[field] === item[field])
+  })
+}
+
+// 用途：收集必填操作原因，并在提交前重新核验忙锁与业务上下文。
+// 参数：options 为输入弹窗文案，context 为快照，allowed 为当前权限和状态核验。
+// 返回值：有效原因字符串；取消、空白或上下文失效时返回 null。
+async function askOperationReason(options, context, allowed) {
+  if (saving.value || promptDialog.value || !allowed()) return null
+  const value = await askPrompt({ ...options, minlength: 1 })
+  if (value === null) return null
+  if (saving.value || !reasonContextCurrent(context) || !allowed()) {
+    showToast('操作范围或权限已变化，请重新选择后操作', 'warning')
+    return null
+  }
+  const reason = String(value).trim()
+  if (!reason) { showToast('请填写原因或审批意见', 'warning'); return null }
+  return reason
+}
+
+// 用途：按当前操作类型执行服务项交付动作并刷新工作区。
+// 参数：kind 为分配、计划、现场实施或报告推进等操作类型。
+// 返回值：无；校验失败不写入，接口失败以提示反馈。
 async function runOperation(kind) {
   if (saving.value) return
   const item = selectedServiceItem.value
@@ -2804,7 +2955,7 @@ async function runOperation(kind) {
       }
       await completeServiceItemField(item.id, { expected_version: Number(item.version) || 0, incomplete_reason: String(form.fieldIncompleteReason || '').trim() })
       form.fieldIncompleteReason = ''
-      showToast('现场测评已结束，进入报告编制')
+      showToast('现场测评已结束，报告待整改')
     }
     await refreshAfterWrite()
   } catch (error) {
@@ -2835,14 +2986,16 @@ async function runOperation(kind) {
 }
 
 async function revokeSelectedAssignment(kind) {
+  const permitted = () => kind === 'team' ? canRevokeTeam.value : kind === 'execution' && canRevokeExecution.value
+  if (saving.value || promptDialog.value || !permitted()) return
   const items = selectedServiceItems.value
   if (!items.length) { showToast('请至少选择一个服务项', 'warning'); return }
   const eligible = items.filter((item) => item.status === '待分配' && (kind === 'team' ? item.team_lead_id : item.project_manager_id))
   if (eligible.length !== items.length) { showToast('仅可撤销处于待分配状态且已有对应分配的服务项', 'warning'); return }
   const label = kind === 'team' ? '团队负责人分配（会同时撤销项目经理、工程师和能力校验）' : '项目经理与工程师分配'
   const reason = window.prompt(`请输入撤销${label}的原因：`)
-  if (reason === null) return
   if (!String(reason).trim()) { showToast('撤销原因不能为空', 'warning'); return }
+  if (reason === null) return
   saving.value = true
   try {
     for (const item of eligible) {
@@ -2858,12 +3011,13 @@ async function revokeSelectedAssignment(kind) {
 }
 
 async function returnSelectedToDecomposition() {
+  if (saving.value || promptDialog.value || !canManageDecomposition.value) return
   const items = selectedServiceItems.value
   if (!items.length) { showToast('请至少选择一个服务项', 'warning'); return }
   if (items.some((item) => item.status !== '待分配')) { showToast('仅可将待分配服务项退回拆解确认', 'warning'); return }
   const reason = window.prompt('请输入退回拆解确认的原因：')
-  if (reason === null) return
   if (!String(reason).trim()) { showToast('退回原因不能为空', 'warning'); return }
+  if (reason === null) return
   saving.value = true
   try {
     for (const item of items) {
@@ -2892,26 +3046,36 @@ const canSubmitReportCorrection = computed(() => canRequestReportCorrection.valu
   && ['ISSUED', 'ARCHIVED'].includes(selectedServiceItem.value?.report_status)
   && selectedReportCorrectionRequests.value.length === 0)
 async function withdrawPendingRollback(request) {
-  if (saving.value) return
-  const reason = window.prompt('请输入撤回原因：')
-  if (reason === null) return
+  const requestID = request.id
+  const itemID = request.service_item_id
+  const permitted = () => canRequestRollback.value && request.actor_user_id === session.value?.user_id
+    && pendingRollbackRequests.value.some((row) => row.id === requestID && row.service_item_id === itemID && row.actor_user_id === session.value?.user_id)
+  if (saving.value || promptDialog.value || !permitted()) return
+  const item = serviceItems.value.find((row) => row.id === itemID)
+  if (!item) { showToast('服务项已不可见，无法撤回', 'warning'); return }
+  const context = captureReasonContext([item])
+  const reason = await askOperationReason({
+    title: '撤回回退申请', confirmText: '撤回申请', label: '撤回原因',
+  }, context, permitted)
   if (!String(reason).trim()) { showToast('撤回原因不能为空', 'warning'); return }
+  if (reason === null) return
   saving.value = true
   try {
-    await withdrawRollback(request.service_item_id, request.id, { reason: String(reason).trim() })
+    await withdrawRollback(itemID, requestID, { reason })
     showToast('回退申请已撤回')
     await refreshAfterWrite()
   } catch (error) { showToast(formatUserError(error, { fallback: '撤回失败，请刷新后重试' }), 'error') } finally { saving.value = false }
 }
 async function revokeDeliveryPhase(kind) {
-  if (saving.value) return
-  const item = selectedServiceItem.value
-  if (!item) { showToast('请先选择服务项', 'warning'); return }
+  if (saving.value || promptDialog.value || !canRevokeImplementation.value) return
+  if (!['plan', 'preparation'].includes(kind)) return
+  const selected = selectedServiceItem.value
+  if (!selected) { showToast('请先选择服务项', 'warning'); return }
   const expectedStatus = kind === 'plan' ? '待实施' : '实施准备中'
   if (item.status !== expectedStatus) { showToast(`当前状态不能撤销${kind === 'plan' ? '实施计划' : '实施准备'}`, 'warning'); return }
   const reason = window.prompt(`请输入撤销${kind === 'plan' ? '实施计划' : '实施准备'}的原因：`)
-  if (reason === null) return
   if (!String(reason).trim()) { showToast('撤销原因不能为空', 'warning'); return }
+  if (reason === null) return
   saving.value = true
   try {
     const payload = { reason: String(reason).trim(), expected_version: Number(item.version) || 0 }
@@ -2921,30 +3085,51 @@ async function revokeDeliveryPhase(kind) {
     await refreshAfterWrite()
   } catch (error) { showToast(formatUserError(error, { fallback: '撤销失败，请刷新后重试' }), 'error') } finally { saving.value = false }
 }
+
+// 用途：为符合当前状态的服务项提交现场回退或报告返工申请。
+// 参数：kind 为现场回退或报告返工的业务类型。
+// 返回值：无；取消不写入，失败以提示反馈。
 async function submitRollbackRequest(kind) {
-  if (saving.value) return
-  const item = selectedServiceItem.value
-  if (!item) { showToast('请先选择服务项', 'warning'); return }
-  const reason = window.prompt(`请输入${kind === 'FIELD_TO_PREPARATION' ? '现场实施回退' : '报告返工'}申请原因：`)
-  if (reason === null) return
+  const eligible = () => canRequestRollback.value && (kind === 'FIELD_TO_PREPARATION'
+    ? selectedServiceItem.value?.status === '实施中'
+    : kind === 'REPORT_TO_FIELD' && selectedServiceItem.value?.status === '现场实施完成'
+      && ['RECTIFYING', 'COMPILING', 'REVIEWED'].includes(selectedServiceItem.value?.report_status))
+  if (saving.value || promptDialog.value || !eligible()) return
+  const context = captureReasonContext([selectedServiceItem.value])
+  const item = context.items[0]
+  const label = kind === 'FIELD_TO_PREPARATION' ? '申请回退至实施准备' : '申请报告返工'
+  const reason = await askOperationReason({
+    title: label, confirmText: label, label: '申请原因',
+  }, context, eligible)
   if (!String(reason).trim()) { showToast('申请原因不能为空', 'warning'); return }
+  if (reason === null) return
   saving.value = true
   try {
-    await requestRollback(item.id, { kind, reason: String(reason).trim(), expected_version: Number(item.version) || 0 })
+    await requestRollback(item.id, { kind, reason, expected_version: Number(item.version) || 0 })
     showToast('回退申请已提交，等待技术总监或系统管理员审批')
     await refreshAfterWrite()
   } catch (error) { showToast(formatUserError(error, { fallback: '回退申请失败' }), 'error') } finally { saving.value = false }
 }
 async function decidePendingRollback(request, decision) {
-  if (saving.value) return
-  const item = serviceItems.value.find((row) => row.id === request.service_item_id)
-  if (!item) { showToast('服务项已不可见，无法审批', 'warning'); return }
-  const comment = window.prompt(`请输入${decision === 'APPROVED' ? '批准' : '驳回'}意见：`)
-  if (comment === null) return
+  const requestID = request.id
+  const itemID = request.service_item_id
+  const permitted = () => canApproveRollback.value && ['APPROVED', 'REJECTED'].includes(decision)
+    && request.actor_user_id !== session.value?.user_id
+    && pendingRollbackRequests.value.some((row) => row.id === requestID && row.service_item_id === itemID && row.actor_user_id !== session.value?.user_id)
+  if (saving.value || promptDialog.value || !permitted()) return
+  const selected = serviceItems.value.find((row) => row.id === itemID)
+  if (!selected) { showToast('服务项已不可见，无法审批', 'warning'); return }
+  const context = captureReasonContext([selected])
+  const item = context.items[0]
+  const label = decision === 'APPROVED' ? '批准回退申请' : '驳回回退申请'
+  const comment = await askOperationReason({
+    title: label, confirmText: label, label: '审批意见', danger: decision === 'APPROVED',
+  }, context, permitted)
   if (!String(comment).trim()) { showToast('审批意见不能为空', 'warning'); return }
+  if (comment === null) return
   saving.value = true
   try {
-    await decideRollback(item.id, request.id, { decision, comment: String(comment).trim(), expected_version: Number(item.version) || 0 })
+    await decideRollback(item.id, requestID, { decision, comment, expected_version: Number(item.version) || 0 })
     showToast(decision === 'APPROVED' ? '回退申请已批准，服务项已按补偿规则回退' : '回退申请已驳回')
     await refreshAfterWrite()
   } catch (error) { showToast(formatUserError(error, { fallback: '审批失败，请刷新后重试' }), 'error') } finally { saving.value = false }
@@ -2968,6 +3153,9 @@ async function submitReportCorrection() {
   } finally { saving.value = false }
 }
 
+// 用途：审批报告更正申请，通过后生成待整改的新报告版本。
+// 参数：request 为待处理更正申请，decision 为批准或驳回决定。
+// 返回值：无；审批失败以提示反馈，版本冲突时重新加载工作区。
 async function decidePendingReportCorrection(request, decision) {
   if (saving.value) return
   const item = itemByID.value.get(request.service_item_id)
@@ -2979,7 +3167,7 @@ async function decidePendingReportCorrection(request, decision) {
   try {
     await decideReportCorrection(item.id, request.id, { decision, comment, expected_version: Number(item.version) || 0 })
     operationForm.value.reportCorrectionComment = ''
-    showToast(decision === 'APPROVED' ? '报告更正已批准，已生成新版本待编制' : '报告更正申请已驳回')
+    showToast(decision === 'APPROVED' ? '报告更正已批准，已生成新版本待整改' : '报告更正申请已驳回')
     await refreshAfterWrite()
   } catch (error) {
     showToast(formatUserError(error, { fallback: '报告更正审批失败' }), 'error')
@@ -3043,6 +3231,7 @@ function closeActiveOverlay() {
   if (closureOpen.value) { closeSupplementClosure(); return true }
   if (createOpen.value) { createOpen.value = false; return true }
   if (notificationOpen.value) { closeNotifications(); return true }
+  if (kpiSettingsOpen.value) { dismissKpiSettings({ restoreFocus: true }); return true }
   if (mobileMenuOpen.value) { mobileMenuOpen.value = false; return true }
   return false
 }
@@ -3065,6 +3254,7 @@ watch(() => fieldQueueOwner(), (ownerKey) => {
 }, { immediate: true })
 onMounted(() => {
   document.addEventListener('click', closeMultiOnOutsideClick)
+  document.addEventListener('click', onKpiSettingsOutsideClick)
   document.addEventListener('keydown', onGlobalKeydown)
   window.addEventListener('online', onFieldOnline)
 })
@@ -3095,6 +3285,7 @@ onBeforeUnmount(() => {
   if (approvedContractSearchTimer) window.clearTimeout(approvedContractSearchTimer)
   disposeNotifications()
   document.removeEventListener('click', closeMultiOnOutsideClick)
+  document.removeEventListener('click', onKpiSettingsOutsideClick)
   document.removeEventListener('keydown', onGlobalKeydown)
   window.removeEventListener('online', onFieldOnline)
 })
@@ -3187,7 +3378,7 @@ onBeforeUnmount(() => {
           <section class="pm-dashboard-grid">
             <article class="pm-panel pm-status-panel">
               <header><div><p class="pm-panel-kicker">服务流程</p><h2>服务项状态分布</h2></div><span>总计 <b>{{ serviceItems.length }}</b> 项</span></header>
-              <div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>状态</th><th class="num">数量</th><th>占比</th><th></th></tr></thead><tbody><tr v-for="flow in serviceFlow" :key="flow.key" :class="{ 'is-empty': flow.count === 0 }" @click="navigate(flow.route)"><td><span class="pm-badge" :class="statusTone(flow.key)">{{ flow.key }}</span></td><td class="num">{{ flow.count }}</td><td><div class="pm-bar-bg"><i class="pm-bar-fill" :class="flow.color" :style="{ width: `${serviceItems.length ? (flow.count * 100 / serviceItems.length).toFixed(1) : 0}%` }"></i></div><small>{{ serviceItems.length ? (flow.count * 100 / serviceItems.length).toFixed(1) : '0.0' }}%</small></td><td><button class="pm-link">→</button></td></tr><tr v-if="!serviceFlow.length"><td colspan="4" class="pm-empty-mini">暂无服务项数据</td></tr></tbody></table></div>
+              <div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>状态</th><th class="num">数量</th><th>占比</th><th></th></tr></thead><tbody><tr v-for="flow in serviceFlow" :key="flow.key" :class="{ 'is-empty': flow.count === 0 }" @click="navigate(flow.route)"><td><span class="pm-badge" :class="statusTone(flow.key)">{{ flow.key }}</span><span v-if="flow.key === '报告编制'" class="pm-cell-sub" title="按当前已加载服务项统计，非全量">其中整改中 {{ rectifyingItemCount }} 项</span></td><td class="num">{{ flow.count }}</td><td><div class="pm-bar-bg"><i class="pm-bar-fill" :class="flow.color" :style="{ width: `${serviceItems.length ? (flow.count * 100 / serviceItems.length).toFixed(1) : 0}%` }"></i></div><small>{{ serviceItems.length ? (flow.count * 100 / serviceItems.length).toFixed(1) : '0.0' }}%</small></td><td><button class="pm-link">→</button></td></tr><tr v-if="!serviceFlow.length"><td colspan="4" class="pm-empty-mini">暂无服务项数据</td></tr></tbody></table></div>
             </article>
             <article class="pm-panel">
               <header><div><p class="pm-panel-kicker danger">风险提示</p><h2>风险与待办</h2></div><button class="pm-link" @click="navigate('exceptions')">查看全部 →</button></header>
@@ -3231,39 +3422,90 @@ onBeforeUnmount(() => {
         </template>
 
         <template v-else-if="activeSection === 'projects'">
-          <section
-            class="pm-kpi-row pm-project-kpi-grid"
-            :class="`pm-project-kpi-columns-${projectKpiColumnCount}`"
-            :aria-label="`项目指标，共 ${projectKpiCards.length} 项`"
-          >
-            <KpiCard
-              v-for="card in projectKpiCards"
-              :key="card.key"
-              :label="card.label"
-              :value="card.value"
-              :suffix="card.suffix"
-              :meta="card.meta"
-              :tone="card.tone"
-              :actionable="Boolean(card.action)"
-              @activate="activateProjectKpi(card)"
-            />
+          <section class="pm-project-kpi" aria-label="项目指标">
+            <div ref="kpiSettingsRoot" class="pm-kpi-settings">
+              <button
+                ref="kpiSettingsTrigger"
+                type="button"
+                class="pm-kpi-settings-trigger"
+                aria-haspopup="dialog"
+                :aria-expanded="kpiSettingsOpen"
+                aria-controls="project-kpi-settings"
+                @click="openKpiSettings"
+              >
+                <ConsoleIcon name="settings" /><span>指标卡设置</span><em>{{ projectKpiVisibleCards.length }}/{{ projectKpiCards.length }}</em>
+              </button>
+              <div
+                v-if="kpiSettingsOpen"
+                id="project-kpi-settings"
+                ref="kpiSettingsPanel"
+                class="pm-kpi-settings-panel"
+                role="dialog"
+                aria-label="指标卡显示设置"
+              >
+                <div class="pm-kpi-settings-head"><b>指标卡显示</b><span>按当前角色可用指标，默认全部显示</span></div>
+                <ul class="pm-kpi-settings-list">
+                  <li v-for="card in projectKpiCards" :key="card.key">
+                    <button
+                      type="button"
+                      class="pm-kpi-switch"
+                      role="switch"
+                      :aria-checked="isProjectKpiVisible(card.key)"
+                      @click="toggleProjectKpiCard(card.key)"
+                    >
+                      <span class="pm-kpi-switch-text"><b>{{ card.label }}</b><small>{{ card.meta || '项目指标' }}</small></span>
+                      <span class="pm-kpi-switch-track" aria-hidden="true"><i></i></span>
+                    </button>
+                  </li>
+                </ul>
+                <div class="pm-kpi-settings-foot">
+                  <span>{{ allProjectKpiHidden ? '已隐藏全部指标卡' : `已隐藏 ${hiddenProjectKpiKeys.length} 张` }}</span>
+                  <button type="button" class="pm-kpi-settings-reset" :disabled="!hiddenProjectKpiKeys.length" @click="resetProjectKpiCards">恢复默认</button>
+                </div>
+              </div>
+            </div>
+            <div
+              class="pm-kpi-row pm-project-kpi-grid"
+              :class="`pm-project-kpi-columns-${projectKpiColumnCount}`"
+              role="group"
+              :aria-label="`项目指标，共 ${projectKpiVisibleCards.length} 项`"
+            >
+              <KpiCard
+                v-for="card in projectKpiVisibleCards"
+                :key="card.key"
+                :label="card.label"
+                :value="card.value"
+                :suffix="card.suffix"
+                :meta="card.meta"
+                :tone="card.tone"
+                :actionable="Boolean(card.action)"
+                @activate="activateProjectKpi(card)"
+              />
+            </div>
+            <p v-if="allProjectKpiHidden" class="pm-kpi-hidden-empty">
+              <ConsoleIcon name="info" /><span>已隐藏全部指标卡</span>
+              <button type="button" class="pm-kpi-settings-reset" @click="resetProjectKpiCards">恢复默认</button>
+            </p>
           </section>
           <FilterBar :count="filteredProjects.length" @reset="resetProjectFilters">
             <label class="pm-search-input"><ConsoleIcon name="search" /><input v-model="keyword" placeholder="搜索项目名称 / 项目编号 / 客户名称 / 服务项" aria-label="搜索项目"  maxlength="100"/></label>
             <select v-model="statusFilter" class="pm-filter-select" aria-label="按状态筛选" @change="projectCardFilter = ''"><option value="">状态：全部</option><option v-for="node in projectStatusFilters" :key="node" :value="node">{{ node }}</option></select>
+            <select v-model="reportStageFilter" class="pm-filter-select" aria-label="按报告阶段筛选"><option value="">报告阶段：全部</option><option v-for="option in reportStageFilterOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select>
             <select v-model="categoryFilter" class="pm-filter-select" aria-label="按检测类别筛选"><option value="">检测类别：全部</option><option v-for="option in categoryOptions" :key="option" :value="option">{{ option }}</option></select>
             <select v-model="teamFilter" class="pm-filter-select" aria-label="按团队筛选"><option value="">团队：全部</option><option v-for="option in teamOptions" :key="option" :value="option">{{ option }}</option></select>
             <template #tags>
               <span v-if="statusFilter" class="pm-filter-tag">状态：{{ statusFilter }}<button type="button" class="pm-filter-tag-x" :aria-label="`移除状态筛选 ${statusFilter}`" @click="statusFilter = ''">✕</button></span>
+              <span v-if="reportStageFilter" class="pm-filter-tag">报告阶段：{{ reportStageLabel[reportStageFilter] || reportStageFilter }}<button type="button" class="pm-filter-tag-x" :aria-label="`移除报告阶段筛选 ${reportStageLabel[reportStageFilter] || reportStageFilter}`" @click="reportStageFilter = ''">✕</button></span>
               <span v-if="categoryFilter" class="pm-filter-tag">类别：{{ categoryFilter }}<button type="button" class="pm-filter-tag-x" :aria-label="`移除类别筛选 ${categoryFilter}`" @click="categoryFilter = ''">✕</button></span>
               <span v-if="teamFilter" class="pm-filter-tag">团队：{{ teamFilter }}<button type="button" class="pm-filter-tag-x" :aria-label="`移除团队筛选 ${teamFilter}`" @click="teamFilter = ''">✕</button></span>
               <span v-if="projectCardFilterLabel" class="pm-filter-tag">范围：{{ projectCardFilterLabel }}<button type="button" class="pm-filter-tag-x" :aria-label="`移除范围筛选 ${projectCardFilterLabel}`" @click="projectCardFilter = ''">✕</button></span>
             </template>
           </FilterBar>
+          <p v-if="reportStageListError" class="pm-inline-alert danger" role="alert">{{ reportStageListError }}</p>
           <section class="pm-table-panel">
             <div class="pm-table-scroll"><table class="pm-table pm-responsive-list"><thead><tr><th></th><th>项目 / 客户</th><th>合同编号</th><th>服务项</th><th>检测类别</th><th>团队 / 项目经理</th><th>状态</th><th>交付进度</th><th>计划完成</th><th></th></tr></thead><tbody>
-              <tr v-for="project in pagedProjects" :key="project.id" :class="{ selected: selectedRows.includes(project.id), risk: project.risk }"><td class="pm-card-select" data-label="选择"><input type="checkbox" :checked="selectedRows.includes(project.id)" :aria-label="`选择 ${project.id}`" @change="toggleRow(project.id)" /></td><td class="pm-card-title" data-label="项目 / 客户"><button class="pm-project-link" @click="openProject(project)"><b>{{ project.id }}</b><span>{{ project.customer }}</span></button></td><td class="mono" data-label="合同编号">{{ project.contract }}</td><td data-label="服务项">{{ project.services }}</td><td data-label="检测类别">{{ project.category }}</td><td data-label="团队 / 项目经理"><b>团队负责人：{{ projectAssignmentPeople(project.id).teamLeads }}</b><span class="pm-cell-sub">项目经理：{{ projectAssignmentPeople(project.id).projectManagers }}</span></td><td data-label="状态"><span class="pm-badge" :class="statusTone(project.status)">{{ project.status }}</span></td><td data-label="交付进度"><ProgressCell :percent="project.progress" /></td><td data-label="计划完成" :class="{ 'pm-text-danger': project.due.includes('超期') }">{{ project.due }}</td><td class="pm-card-action" data-label="操作"><button class="pm-link" @click="openProject(project)">详情</button></td></tr>
-              <tr v-if="!pagedProjects.length"><td colspan="10" class="pm-empty-mini">{{ projects.length ? '暂无符合当前筛选条件的项目' : '暂无项目，请先新建项目' }}</td></tr>
+              <tr v-for="project in pagedProjects" :key="project.id" :class="{ selected: selectedRows.includes(project.id), risk: project.risk }"><td class="pm-card-select" data-label="选择"><input type="checkbox" :checked="selectedRows.includes(project.id)" :aria-label="`选择 ${project.id}`" @change="toggleRow(project.id)" /></td><td class="pm-card-title" data-label="项目 / 客户"><button class="pm-project-link" @click="openProject(project)"><b>{{ project.id }}</b><span>{{ project.customer }}</span></button></td><td class="mono" data-label="合同编号">{{ project.contract }}</td><td data-label="服务项">{{ project.services }}</td><td data-label="检测类别">{{ project.category }}</td><td data-label="团队 / 项目经理"><b>团队负责人：{{ projectAssignmentPeople(project.id).teamLeads }}</b><span class="pm-cell-sub">项目经理：{{ projectAssignmentPeople(project.id).projectManagers }}</span></td><td data-label="状态"><span class="pm-badge-stack"><span class="pm-badge" :class="statusTone(project.status)">{{ project.status }}</span><span v-if="projectReportStageLabel(project)" class="pm-badge" :class="statusTone(project.report_stage)">报告编制 · {{ projectReportStageLabel(project) }}</span></span></td><td data-label="交付进度"><ProgressCell :percent="project.progress" /></td><td data-label="计划完成" :class="{ 'pm-text-danger': project.due.includes('超期') }">{{ project.due }}</td><td class="pm-card-action" data-label="操作"><button class="pm-link" @click="openProject(project)">详情</button></td></tr>
+              <tr v-if="!pagedProjects.length"><td colspan="10" class="pm-empty-mini">{{ projectListEmptyText }}</td></tr>
             </tbody></table></div>
             <footer class="pm-table-footer"><span>已选择 {{ selectedRows.length }} 项 · 共 {{ filteredProjects.length }} 条 · 第 {{ projectPage }} / {{ projectPageCount }} 页</span><div class="pm-pagination"><button class="pm-pg" :disabled="projectPage <= 1" @click="gotoProjectPage(projectPage - 1)">‹</button><button class="pm-pg active">{{ projectPage }}</button><button class="pm-pg" :disabled="projectPage >= projectPageCount" @click="gotoProjectPage(projectPage + 1)">›</button></div></footer>
           </section>
@@ -3390,7 +3632,7 @@ onBeforeUnmount(() => {
             </header>
             <FilterBar variant="flat" @reset="resetMonitoringFilters"><label><ConsoleIcon name="search" /><input v-model="keyword" placeholder="搜索项目 / 客户 / 团队"  maxlength="100"/></label><select v-model="teamFilter" class="pm-filter-select" aria-label="按团队筛选"><option value="">团队：全部</option><option v-for="option in teamOptions" :key="option" :value="option">{{ option }}</option></select><select v-model="monitorCategory" class="pm-filter-select" aria-label="按检测类别筛选"><option value="">服务类别：全部</option><option v-for="option in categoryOptions" :key="option" :value="option">{{ option }}</option></select><select v-model="monitorProjectManager" class="pm-filter-select" aria-label="按项目经理筛选"><option value="">项目经理：全部</option><option v-for="option in projectManagerOptions" :key="option.id" :value="option.id">{{ option.name }}</option></select><label class="pm-filter-check"><input v-model="monitorSLAOnly" type="checkbox" /> SLA 预警</label><label class="pm-filter-check"><input v-model="monitorConflictOnly" type="checkbox" /> 资源冲突</label><label class="pm-filter-date">计划完成从 <input v-model="monitorDueFrom" type="date" /></label><label class="pm-filter-date">至 <input v-model="monitorDueTo" type="date" /></label></FilterBar>
             <div class="pm-table-scroll"><table class="pm-table pm-monitor-table"><thead><tr><th>项目 / 客户</th><th>当前 / 下一里程碑</th><th>服务项状态</th><th>资源</th><th>项目状态 / 进度</th><th>SLA / 冲突</th><th>计划完成</th><th>最近动态</th><th></th></tr></thead><tbody>
-              <tr v-for="row in monitoringRows" :key="row.project.id" :class="{ risk: row.project.risk || row.sla_items?.length || row.resources?.conflict_items }"><td><button class="pm-project-link" @click="openProject(row.project)"><b>{{ row.project.id }}</b></button><span class="pm-cell-sub">{{ row.project.customer }}</span><span class="pm-cell-sub">{{ row.project.team || '未分配团队' }}</span></td><td><b>{{ row.milestone.current }}</b><span class="pm-cell-sub">下一节点：{{ row.milestone.next || '—' }}</span><div class="pm-inline-progress"><i :style="{ width: `${Math.round((row.milestone.done / row.milestone.total) * 100)}%` }"></i></div></td><td><span>{{ row.project.services }} 项</span><span class="pm-cell-sub">{{ monitoringServiceSummary(row) }}</span></td><td>{{ monitoringResourceSummary(row) }}<span v-if="row.resources?.conflict_items" class="pm-cell-warning">{{ row.resources.conflict_items }} 项冲突</span></td><td><span class="pm-badge" :class="statusTone(row.project.status)">{{ row.project.status }}</span><span class="pm-cell-sub">{{ monitoredStatusByProject(row.project.status) }}</span><ProgressCell :percent="row.project.progress" /></td><td><span class="pm-badge" :class="row.sla_items?.length ? '风险' : 'normal'">{{ monitoringSlaLabel(row) }}</span></td><td :class="{ 'pm-text-danger': row.sla_items?.some((item) => item.kind === 'PLAN_END_OVERDUE') }">{{ row.planned_end ? formatBusinessDate(row.planned_end) : '待排期' }}</td><td><template v-if="row.latest_event"><b>{{ eventLabel(row.latest_event) }}</b><span class="pm-cell-sub">{{ personLabel(row.latest_event.actor_user_id, '系统') }} · {{ formatDateTime(row.latest_event.created_at) }}</span></template><span v-else>—</span></td><td class="pm-col-actions"><button class="pm-link" @click="openMonitoringAction(row)">前往当前节点</button><button class="pm-link" @click="openProjectTimeline(row.project)">时间线</button></td></tr>
+              <tr v-for="row in monitoringRows" :key="row.project.id" :class="{ risk: row.project.risk || row.sla_items?.length || row.resources?.conflict_items }"><td><button class="pm-project-link" @click="openProject(row.project)"><b>{{ row.project.id }}</b></button><span class="pm-cell-sub">{{ row.project.customer }}</span><span class="pm-cell-sub">{{ row.project.team || '未分配团队' }}</span></td><td><b>{{ row.milestone.current }}</b><span class="pm-cell-sub">下一节点：{{ row.milestone.next || '—' }}</span><div class="pm-inline-progress"><i :style="{ width: `${Math.round((row.milestone.done / row.milestone.total) * 100)}%` }"></i></div></td><td><span>{{ row.project.services }} 项</span><span class="pm-cell-sub">{{ monitoringServiceSummary(row) }}</span></td><td>{{ monitoringResourceSummary(row) }}<span v-if="row.resources?.conflict_items" class="pm-cell-warning">{{ row.resources.conflict_items }} 项冲突</span></td><td><span class="pm-badge-stack"><span class="pm-badge" :class="statusTone(row.project.status)">{{ row.project.status }}</span><span v-if="projectReportStageLabel(row.project)" class="pm-badge" :class="statusTone(row.project.report_stage)">报告编制 · {{ projectReportStageLabel(row.project) }}</span></span><span class="pm-cell-sub">{{ monitoredStatusByProject(row.project) }}</span><ProgressCell :percent="row.project.progress" /></td><td><span class="pm-badge" :class="row.sla_items?.length ? '风险' : 'normal'">{{ monitoringSlaLabel(row) }}</span></td><td :class="{ 'pm-text-danger': row.sla_items?.some((item) => item.kind === 'PLAN_END_OVERDUE') }">{{ row.planned_end ? formatBusinessDate(row.planned_end) : '待排期' }}</td><td><template v-if="row.latest_event"><b>{{ eventLabel(row.latest_event) }}</b><span class="pm-cell-sub">{{ personLabel(row.latest_event.actor_user_id, '系统') }} · {{ formatDateTime(row.latest_event.created_at) }}</span></template><span v-else>—</span></td><td class="pm-col-actions"><button class="pm-link" @click="openMonitoringAction(row)">前往当前节点</button><button class="pm-link" @click="openProjectTimeline(row.project)">时间线</button></td></tr>
               <tr v-if="!monitoringRows.length"><td colspan="9" class="pm-empty-mini">{{ monitoringLoading ? '正在同步监控快照…' : '暂无匹配的在途项目' }}</td></tr>
             </tbody></table></div>
             <footer class="pm-table-footer"><span>第 {{ monitoringSnapshot.page }} / {{ monitoringTotalPages }} 页 · 共 {{ monitoringSnapshot.total }} 个在途项目</span><div class="pm-pagination"><button class="pm-pg" :disabled="monitorPage <= 1 || monitoringLoading" @click="changeMonitoringPage(monitorPage - 1)">‹</button><button class="pm-pg active">{{ monitorPage }}</button><button class="pm-pg" :disabled="monitorPage >= monitoringTotalPages || monitoringLoading" @click="changeMonitoringPage(monitorPage + 1)">›</button></div></footer>
@@ -3434,7 +3676,7 @@ onBeforeUnmount(() => {
 
         <template v-else-if="activeSection === 'implementation'">
           <section class="pm-board-summary"><div><strong>{{ implementationProjectCount }}</strong><span>当前节点项目</span></div><div><strong>{{ implementationItems.length }}</strong><span>当前节点服务项</span></div><div><strong>{{ preparedImplementationCount }}</strong><span>准备完成</span></div><div><strong>{{ fieldImplementationCount }}</strong><span>现场实施中</span></div><div><strong>{{ penetrationPackageStats.total }}</strong><span>渗透专项（待确认 {{ penetrationPackageStats.pending }} / 进行中 {{ penetrationPackageStats.active }} / 完成 {{ penetrationPackageStats.completed }}）</span></div></section>
-          <section class="pm-kanban"><article v-for="column in implementationKanbanColumns" :key="column.key"><header><div><i :class="column.color"></i><b>{{ column.key }}</b></div><span>{{ column.count }}</span></header><div class="pm-kanban-body"><button v-for="card in column.cards" :key="card.id" class="pm-kanban-card" :class="[column.color, { risk: card.risk }]" @click="openProject(card)"><b>{{ card.id }}</b><h3>{{ card.customer }}</h3><span class="pm-badge" :class="statusTone(card.status)">{{ card.status }}</span><div class="pm-inline-progress"><i :style="{ width: `${card.progress}%` }"></i></div><footer><span>{{ card.progress }}%</span><time>{{ card.due || '待排期' }}</time></footer></button><div v-if="!column.cards.length" class="pm-empty-mini">暂无当前节点项目</div></div></article></section>
+          <section class="pm-kanban"><article v-for="column in implementationKanbanColumns" :key="column.key"><header><div><i :class="column.color"></i><b>{{ column.key }}</b></div><span>{{ column.count }}</span></header><div class="pm-kanban-body"><button v-for="card in column.cards" :key="card.id" class="pm-kanban-card" :class="[column.color, { risk: card.risk }]" @click="openProject(card)"><b>{{ card.id }}</b><h3>{{ card.customer }}</h3><span class="pm-badge-stack"><span class="pm-badge" :class="statusTone(card.status)">{{ card.status }}</span><span v-if="projectReportStageLabel(card)" class="pm-badge" :class="statusTone(card.report_stage)">报告编制 · {{ projectReportStageLabel(card) }}</span></span><div class="pm-inline-progress"><i :style="{ width: `${card.progress}%` }"></i></div><footer><span>{{ card.progress }}%</span><time>{{ card.due || '待排期' }}</time></footer></button><div v-if="!column.cards.length" class="pm-empty-mini">暂无当前节点项目</div></div></article></section>
           <section class="pm-panel pm-operation-panel">
             <header><div><p class="pm-panel-kicker">现场实施</p><h2>现场测评与记录</h2></div><div class="pm-field-sync"><span class="pm-badge" :class="pendingFieldSyncCount ? '关注' : 'normal'">待同步 {{ pendingFieldSyncCount }}</span><button v-if="pendingFieldSyncCount" type="button" class="pm-link" :disabled="fieldSyncing" @click="flushFieldOperations(true)">{{ fieldSyncing ? '同步中…' : '立即重试' }}</button></div></header>
             <ServiceItemPicker :items="implementationItems" :selected-ids="selectedServiceItem ? [selectedServiceItem.id] : []" empty-text="暂无处于现场实施节点的服务项" @select="selectServiceItem" />
@@ -3629,9 +3871,9 @@ onBeforeUnmount(() => {
               <button v-if="canRevokeImplementation && selectedServiceItem.status === '待实施'" type="button" class="pm-button danger" :disabled="saving" @click="revokeDeliveryPhase('plan')">撤销实施计划</button>
               <button v-if="canRevokeImplementation && selectedServiceItem.status === '实施准备中'" type="button" class="pm-button danger" :disabled="saving" @click="revokeDeliveryPhase('preparation')">撤销实施准备并释放设备</button>
               <button v-if="canRequestRollback && selectedServiceItem.status === '实施中'" type="button" class="pm-button" :disabled="saving" @click="submitRollbackRequest('FIELD_TO_PREPARATION')">申请回退至实施准备</button>
-              <button v-if="canRequestRollback && selectedServiceItem.status === '现场实施完成' && ['COMPILING', 'REVIEWED'].includes(selectedServiceItem.report_status)" type="button" class="pm-button" :disabled="saving" @click="submitRollbackRequest('REPORT_TO_FIELD')">申请报告返工</button>
+              <button v-if="canRequestRollback && selectedServiceItem.status === '现场实施完成' && ['RECTIFYING', 'COMPILING', 'REVIEWED'].includes(selectedServiceItem.report_status)" type="button" class="pm-button" :disabled="saving" @click="submitRollbackRequest('REPORT_TO_FIELD')">申请报告返工</button>
             </div>
-            <section v-if="activeSection === 'inbox' && pendingRollbackRequests.length" class="pm-panel pm-approval-panel"><header><div><p class="pm-panel-kicker">回退审批</p><h2>待处理回退申请</h2></div><span>{{ pendingRollbackRequests.length }} 项</span></header><div v-for="request in pendingRollbackRequests" :key="request.id" class="pm-form-row"><span>{{ request.service_item_id }} · {{ request.payload?.kind === 'FIELD_TO_PREPARATION' ? '现场回退' : '报告返工' }} · {{ request.payload?.reason }}</span><template v-if="canApproveRollback && request.actor_user_id !== session?.user_id"><button type="button" class="pm-button primary" :disabled="saving" @click="decidePendingRollback(request, 'APPROVED')">批准</button><button type="button" class="pm-button danger" :disabled="saving" @click="decidePendingRollback(request, 'REJECTED')">驳回</button></template><button v-if="canRequestRollback && request.actor_user_id === session?.user_id" type="button" class="pm-button" :disabled="saving" @click="withdrawPendingRollback(request)">撤回申请</button></div></section>
+            <section v-if="activeSection === 'inbox' && pendingRollbackRequests.length" class="pm-panel pm-approval-panel"><header><div><p class="pm-panel-kicker">回退审批</p><h2>待处理回退申请</h2></div><span>{{ pendingRollbackRequests.length }} 项</span></header><div v-for="request in pendingRollbackRequests" :key="request.id" class="pm-form-row"><span>{{ request.service_item_id }} · {{ request.payload?.kind === 'FIELD_TO_PREPARATION' ? '现场回退' : '报告返工' }} · {{ request.payload?.reason }}</span><template v-if="canApproveRollback && request.actor_user_id !== session?.user_id"><button type="button" class="pm-button primary" :disabled="saving" @click="decidePendingRollback(request, 'APPROVED')">批准回退</button><button type="button" class="pm-button danger" :disabled="saving" @click="decidePendingRollback(request, 'REJECTED')">驳回回退</button></template><button v-if="canRequestRollback && request.actor_user_id === session?.user_id" type="button" class="pm-button" :disabled="saving" @click="withdrawPendingRollback(request)">撤回申请</button></div></section>
             <div v-if="selectedServiceItem" class="pm-form pm-operation-form">
               <template v-if="['allocation', 'inbox', 'assignments'].includes(activeSection)">
                 <p v-if="personnelError" class="pm-form-hint pm-span-full" role="alert">{{ personnelError }}</p>
@@ -3681,10 +3923,10 @@ onBeforeUnmount(() => {
                   </div>
                 </section>
                 <div v-if="canSubmitReportCorrection" class="pm-form">
-                  <label><span>报告更正原因 <em>*</em></span><textarea v-model.trim="operationForm.reportCorrectionReason" rows="3" placeholder="说明已签发或已归档报告需要更正的内容" maxlength="1000"></textarea><small>审批通过后旧版本作废并生成下一报告版本，需重新完成编制、审核、签发和归档。</small></label>
+                  <label><span>报告更正原因 <em>*</em></span><textarea v-model.trim="operationForm.reportCorrectionReason" rows="3" placeholder="说明已签发或已归档报告需要更正的内容" maxlength="1000"></textarea><small>审批通过后旧版本作废并生成下一报告版本，需重新完成整改、编制、审核、签发和归档。</small></label>
                   <button type="button" class="pm-button" :disabled="saving" @click="submitReportCorrection">申请报告更正</button>
                 </div>
-                <button v-if="selectedServiceItem && reportPhaseNext[selectedServiceItem.report_status] && canAdvanceReportPhase(reportPhaseNext[selectedServiceItem.report_status])" class="pm-button primary" :disabled="saving" @click="runOperation('report-next')">推进至{{ reportStatusLabel[reportPhaseNext[selectedServiceItem.report_status]] }}</button>
+                <button v-if="selectedServiceItem && reportPhaseNext[selectedServiceItem.report_status] && canAdvanceReportPhase(reportPhaseNext[selectedServiceItem.report_status])" class="pm-button primary" :disabled="saving" @click="runOperation('report-next')">{{ reportPhaseAction[reportPhaseNext[selectedServiceItem.report_status]] }}</button>
               </template>
             </div><div v-else class="pm-empty-mini">请先选择服务项</div>
           </section>
@@ -3830,6 +4072,10 @@ onBeforeUnmount(() => {
       @cancel="cancelConfirm"
     />
 
+    <PromptDialog
+      v-if="promptDialog" v-bind="promptDialog"
+      @confirm="acceptPrompt" @cancel="cancelPrompt"
+    />
     <OperationToast :message="toastMessage" :tone="toastType" />
   </div>
 </template>

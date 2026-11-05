@@ -233,6 +233,9 @@ function unwrapPage(data) {
 /**
  * listProjects 按前端约定参数查询项目列表，并在返回非数组时兜底为空列表。
  *
+ * 支持 `report_stage` 查询参数（NONE/RECTIFYING/COMPILING/REVIEWED/ISSUED/ARCHIVED）：
+ * 参数原样下发给服务端做筛选与合法性校验，前端不对已加载列表做二次全量过滤。
+ *
  * @param {Record<string, string|number|boolean>} [params={}] 查询条件。支持 keyword 兼容映射为 q。
  * @returns {Promise<Array<object>>} 项目列表。
  * @throws {Error} 会话失效、鉴权失败或网关返回非成功状态时抛出。
@@ -259,6 +262,8 @@ export async function getProjectMonitoring(params = {}) {
     items: Array.isArray(data?.items) ? data.items : [],
     recent_events: Array.isArray(data?.recent_events) ? data.recent_events : [],
     status_counts: data?.status_counts || {},
+    // 报告阶段是独立维度：旧后端不返回该字段时保持空对象，分桶按 0 处理。
+    report_stage_counts: data?.report_stage_counts || {},
     categories: Array.isArray(data?.categories) ? data.categories : [],
     teams: Array.isArray(data?.teams) ? data.teams : [],
     project_manager_ids: Array.isArray(data?.project_manager_ids) ? data.project_manager_ids : [],
@@ -339,7 +344,8 @@ export function closeSupplement(projectID, payload) {
 /**
  * listProjectsPage 分页查询项目列表，返回 items 与 total 供分页控件渲染。
  * 状态过滤发生在服务端的派生态上，因此 total 是"筛选后的总数"。
- * @param {Record<string, string|number|boolean>} [params={}] 查询条件，含 page / page_size。
+ * `report_stage` 与状态筛选一样原样下发，由服务端决定组合口径。
+ * @param {Record<string, string|number|boolean>} [params={}] 查询条件，含 page / page_size / report_stage。
  * @returns {Promise<{items: Array<object>, total: number}>} 当前页与筛选后的总数。
  * @throws {Error} 会话失效、鉴权失败或分页参数不合法时抛出。
  */
@@ -702,11 +708,9 @@ export function reviewSpecialMethod(itemID, payload) {
 }
 
 /**
- * updateReportStatus 推进服务项报告状态（编制中→已审核→已签发→已归档）。
- * @param {string|number} itemID 服务项 ID。
- * @param {string} phase 目标阶段（COMPILING / REVIEWED / ISSUED / ARCHIVED）。
- * @returns {Promise<object>} 更新结果。
- * @throws {Error} 状态不允许、无权限或目标阶段非法时抛出。
+ * updateReportStatus 用途：依次推进整改中→编制中→已审核→已签发→已归档。
+ * 参数：itemID 为服务项 ID，phase 为目标阶段，expectedVersion 为当前服务项版本。
+ * 返回值：更新结果 Promise；跳级、无权限、版本冲突或阶段非法时抛出错误。
  */
 export function updateReportStatus(itemID, phase, expectedVersion) {
   // expectedVersion 为服务端返回的服务项版本：带上它，服务端在探测到"我基于的是旧版本"时

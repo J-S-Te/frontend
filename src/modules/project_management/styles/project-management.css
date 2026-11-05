@@ -1056,6 +1056,10 @@
 .pm-badge.blue { background: var(--pm-sky-soft); color: var(--pm-sky-text); }
 .pm-badge.green { background: var(--pm-green-soft); color: var(--pm-green-text); }
 
+/* 状态与报告阶段并排展示：窄屏自动换行，不挤压进度与操作列。 */
+.pm-badge-stack { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; vertical-align: middle; }
+.pm-kanban-card .pm-badge-stack { align-self: flex-start; }
+
 .pm-cell-warning {
   display: block;
   width: fit-content;
@@ -1435,6 +1439,10 @@
 .pm-alert.info { border-color: var(--pm-sky); background: var(--pm-sky-soft); color: var(--pm-sky-text); }
 .pm-alert.info i { background: var(--pm-sky); }
 .pm-alert.info b { color: var(--pm-sky-text); }
+
+/* 表内联错误条：监控快照与报告阶段筛选先用它保留上一份可用数据，再说明失败原因。 */
+.pm-inline-alert { display: flex; align-items: flex-start; gap: 8px; margin: 0 0 var(--pm-sp-3); padding: 9px var(--pm-sp-3); border: 1.5px solid transparent; border-radius: var(--pm-r-sm); font-size: var(--pm-fs-hint); line-height: var(--pm-lh-loose); }
+.pm-inline-alert.danger { border-color: var(--pm-red); background: var(--pm-red-soft); color: var(--pm-red-text); }
 
 .pm-contract-warning {
   display: flex;
@@ -1845,7 +1853,7 @@
 .pm-kpi .pm-kpi-trend.up { color: var(--pm-green-text); }
 .pm-kpi .pm-kpi-trend.down { color: var(--pm-red-text); }
 .pm-kpi .pm-kpi-trend.flat { color: var(--pm-gray-text); }
-.pm-kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--pm-gap-grid); }
+.pm-kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: var(--pm-gap-grid); }
 
 /* 项目列表卡片数量由角色决定。这里用可换行 flex 而不是 auto-fit 网格：
    既能限制首行的合理列数，也能让不足一整行的末行均匀铺满，避免 7+1 孤卡。 */
@@ -1858,12 +1866,108 @@
 .pm-project-kpi-columns-5 > .pm-kpi { flex-basis: calc(20% - 12.8px); }
 .pm-project-kpi-grid > button.pm-kpi { cursor: pointer; }
 
+/* 18.1.1 指标卡显示设置：轻量入口 + 开关面板，沿用 KPI 卡片的白底 / 细描边 / 同色焦点环。
+   面板默认贴右展开，窄屏改为整行宽度，避免在手机上溢出视口。 */
+.pm-project-kpi { display: flex; flex-direction: column; gap: var(--pm-sp-2); }
+.pm-kpi-settings { position: relative; display: flex; justify-content: flex-end; }
+.pm-kpi-settings-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--pm-line);
+  border-radius: var(--pm-r-full);
+  background: var(--pm-card);
+  color: var(--pm-body);
+  font-size: var(--pm-fs-hint);
+  font-weight: var(--pm-fw-semibold);
+  box-shadow: var(--pm-shadow);
+  transition: border-color var(--pm-t-base), background var(--pm-t-base), color var(--pm-t-base);
+}
+.pm-kpi-settings-trigger svg { width: 14px; height: 14px; flex: none; }
+.pm-kpi-settings-trigger:hover { border-color: var(--pm-line-strong); background: var(--pm-sunken); color: var(--pm-ink); }
+.pm-kpi-settings-trigger[aria-expanded="true"] { border-color: var(--pm-primary-border); background: var(--pm-primary-soft); color: var(--pm-blue-text); }
+.pm-kpi-settings-trigger em {
+  padding: 1px 7px;
+  border-radius: var(--pm-r-full);
+  background: var(--pm-sunken);
+  color: var(--pm-muted);
+  font-size: var(--pm-fs-nano);
+  font-style: normal;
+  font-weight: var(--pm-fw-semibold);
+  font-variant-numeric: tabular-nums;
+}
+.pm-kpi-settings-trigger[aria-expanded="true"] em { background: var(--pm-card); color: var(--pm-blue-text); }
+
+.pm-kpi-settings-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: var(--pm-z-dropdown);
+  width: min(342px, calc(100vw - 32px));
+  max-height: min(420px, 60vh);
+  overflow: auto;
+  padding: var(--pm-sp-3);
+  border: 1px solid var(--pm-line);
+  border-radius: var(--pm-r-lg);
+  background: var(--pm-card);
+  box-shadow: var(--pm-shadow-pop);
+}
+.pm-kpi-settings-head { display: flex; flex-direction: column; gap: 2px; padding: 0 2px var(--pm-sp-2); border-bottom: 1px solid var(--pm-line-soft); }
+.pm-kpi-settings-head b { color: var(--pm-ink); font-size: var(--pm-fs-label); font-weight: var(--pm-fw-semibold); }
+.pm-kpi-settings-head span { color: var(--pm-muted); font-size: var(--pm-fs-nano); }
+.pm-kpi-settings-list { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: var(--pm-sp-2) 0; list-style: none; }
+.pm-kpi-switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--pm-sp-3);
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: var(--pm-r-sm);
+  background: transparent;
+  color: var(--pm-body);
+  text-align: left;
+  cursor: pointer;
+}
+.pm-kpi-switch:hover { background: var(--pm-sunken); }
+.pm-kpi-switch:focus-visible { outline: 2px solid var(--pm-primary); outline-offset: 1px; }
+.pm-kpi-switch-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.pm-kpi-switch-text b { color: var(--pm-ink); font-size: var(--pm-fs-sm); font-weight: var(--pm-fw-medium); }
+.pm-kpi-switch-text small { overflow: hidden; color: var(--pm-muted); font-size: var(--pm-fs-nano); text-overflow: ellipsis; white-space: nowrap; }
+.pm-kpi-switch-track { position: relative; flex: none; width: 30px; height: 18px; border-radius: var(--pm-r-full); background: var(--pm-line-strong); transition: background var(--pm-t-base); }
+.pm-kpi-switch-track i { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: var(--pm-r-full); background: var(--pm-card); box-shadow: 0 1px 2px rgba(15, 23, 42, .2); transition: transform var(--pm-t-base); }
+.pm-kpi-switch[aria-checked="true"] .pm-kpi-switch-track { background: var(--pm-primary); }
+.pm-kpi-switch[aria-checked="true"] .pm-kpi-switch-track i { transform: translateX(12px); }
+.pm-kpi-settings-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--pm-sp-2); padding-top: var(--pm-sp-2); border-top: 1px solid var(--pm-line-soft); color: var(--pm-muted); font-size: var(--pm-fs-nano); }
+.pm-kpi-settings-reset {
+  padding: 4px 10px;
+  border: 1px solid var(--pm-line);
+  border-radius: var(--pm-r-full);
+  background: var(--pm-card);
+  color: var(--pm-blue-text);
+  font-size: var(--pm-fs-hint);
+  font-weight: var(--pm-fw-semibold);
+}
+.pm-kpi-settings-reset:hover:not(:disabled) { border-color: var(--pm-primary-border); background: var(--pm-primary-soft); }
+.pm-kpi-settings-reset:disabled { color: var(--pm-faint); cursor: not-allowed; }
+.pm-kpi-hidden-empty { display: flex; align-items: center; gap: var(--pm-sp-2); margin: 0; padding: var(--pm-sp-4); border: 1px dashed var(--pm-line-strong); border-radius: var(--pm-r-lg); background: var(--pm-card); color: var(--pm-muted); font-size: var(--pm-fs-hint); }
+.pm-kpi-hidden-empty svg { width: 16px; height: 16px; flex: none; }
+.pm-kpi-hidden-empty span { margin-right: auto; }
+
+
 @media (max-width: 1280px) {
   .pm-project-kpi-columns-5 > .pm-kpi { flex-basis: calc(33.333333% - 10.666667px); }
 }
 
 @media (max-width: 760px) {
   .pm-project-kpi-grid > .pm-kpi { flex-basis: calc(50% - 8px); }
+  /* 窄屏设置面板改为整行宽度，不再贴右绝对定位，避免超出视口。 */
+  .pm-kpi-settings { justify-content: stretch; }
+  .pm-kpi-settings-trigger { justify-content: center; width: 100%; }
+  .pm-kpi-settings-panel { left: 0; right: 0; width: auto; max-height: 50vh; }
 }
 
 @media (max-width: 520px) {
