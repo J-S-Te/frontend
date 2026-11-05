@@ -13,6 +13,8 @@ import { formatImportMinor } from './contractImport.js'
 export const importItemKeyPattern = /^[A-Za-z0-9_.:-]{1,128}$/
 export const importSourceSystemPattern = /^[A-Za-z0-9_.:-]{1,64}$/
 export const importServiceTestModes = ['STANDARD', 'PENETRATION']
+// 客户类型/行业/地区是可选画像字段，长度上限与后端字段校验保持一致（≤64 个字）。
+const importProfileFieldMaxLength = 64
 
 const sessionSalt = Math.random().toString(36).slice(2, 8).padEnd(6, '0')
 let generatedCount = 0
@@ -59,6 +61,12 @@ export function createImportFormRow({ fileName = '', key = '', externalRecordId 
     customerContact: '',
     customerPhone: '',
     customerCreditLevel: '',
+    // 销售姓名可空；历史导入 provision 时由服务端按 metadata.sales_name 解析销售账号。
+    salesName: '',
+    // 客户类型/行业/地区是 CRM 自动开立客户时的可选画像，留空由服务端补默认值。
+    customerType: '',
+    industry: '',
+    region: '',
     amount: '',
     currency: 'CNY',
     startDate: '',
@@ -115,6 +123,10 @@ export function importRowsFromItems(entries = [], sources = []) {
       row.customerContact = asText(metadata.customer_contact)
       row.customerPhone = asText(metadata.customer_phone)
       row.customerCreditLevel = asText(metadata.customer_credit_level)
+      row.salesName = asText(metadata.sales_name)
+      row.customerType = asText(metadata.customer_type)
+      row.industry = asText(metadata.industry)
+      row.region = asText(metadata.region)
       row.amount = amountText(metadata.amount_minor)
       row.currency = asText(metadata.currency) || 'CNY'
       row.startDate = datePart(metadata.start_date)
@@ -244,6 +256,11 @@ export function validateImportFormRows(rows, { files = [], sources = [], mode = 
 
     if ([...asText(row.externalPaperNumber)].length > 128) add('externalPaperNumber', 'TOO_LONG', `${label}：外部纸面编号不能超过 128 个字。`)
 
+    // 客户类型/行业/地区可留空；上限与后端字段校验一致，超长先在本行阻断。
+    for (const [field, fieldLabel] of [['customerType', '客户类型'], ['industry', '行业'], ['region', '地区']]) {
+      if ([...asText(row[field])].length > importProfileFieldMaxLength) add(field, 'TOO_LONG', `${label}：${fieldLabel}不能超过 ${importProfileFieldMaxLength} 个字。`)
+    }
+
     if (Boolean(asText(row.opportunityId)) !== Boolean(asText(row.opportunityName))) {
       add('opportunityId', 'OPPORTUNITY_PAIR_REQUIRED', `${label}：商机编号和商机名称必须同时填写，或都留空。`)
     }
@@ -321,6 +338,12 @@ function buildImportMetadata(row) {
     customer_contact: asText(row.customerContact),
     customer_phone: asText(row.customerPhone),
     customer_credit_level: asText(row.customerCreditLevel),
+    // 销售姓名在白名单内但不做客户端必填：解析失败由服务端 IMPORT_PROVISION_OWNER_UNRESOLVED 定位到该行。
+    sales_name: asText(row.salesName),
+    // 客户类型/行业/地区进入开立客户画像白名单，可空；超出 64 字由行级校验先阻断。
+    customer_type: asText(row.customerType),
+    industry: asText(row.industry),
+    region: asText(row.region),
     amount_minor: paymentAmountMinor(row.amount),
     currency,
     payment_terms: normalizePaymentTerms(paymentTerms, row.amount, currency),
@@ -375,6 +398,10 @@ const importMetadataFieldLabels = {
   'metadata.customer_contact': '客户联系人',
   'metadata.customer_phone': '客户电话',
   'metadata.customer_credit_level': '客户信用等级',
+  'metadata.sales_name': '销售姓名',
+  'metadata.customer_type': '客户类型',
+  'metadata.industry': '行业',
+  'metadata.region': '地区',
   'metadata.amount_minor': '合同金额',
   'metadata.currency': '币种',
   'metadata.payment_terms': '付款条款',

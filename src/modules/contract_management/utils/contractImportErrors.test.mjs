@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { contractImportErrorHeaders, contractImportErrorRows, contractImportErrorsCsv } from './contractImportErrors.js'
+import { contractImportErrorHeaders, contractImportErrorRows, contractImportErrorsCsv,
+  contractImportProvisionIssueLabels } from './contractImportErrors.js'
 
 const labels = { REQUIRED: '必填项缺失', INVALID_AMOUNT: '金额格式不正确' }
 const fieldLabel = (field) => ({ 'metadata.title': '合同标题', 'metadata.amount': '金额' })[field]
@@ -43,4 +44,21 @@ test('合同导入错误报告：公式前缀被中和，合同标识可回退�
   assert.ok(csv.includes("'=1+1"))
   assert.ok(csv.includes("'+batch"))
   assert.ok(csv.includes('old-2'))
+})
+
+test('provision 失败原因提供中文映射，错误报告不再只显示英文错误码', () => {
+  const codes = ['IMPORT_CRM_PROVISION_DISABLED', 'IMPORT_PROVISION_OWNER_UNRESOLVED', 'IMPORT_PROVISION_CUSTOMER_AMBIGUOUS',
+    'IMPORT_PROVISION_CRM_REJECTED', 'IMPORT_PROVISION_CONTRACT_NOT_VERIFIED']
+  for (const code of codes) {
+    assert.equal(typeof contractImportProvisionIssueLabels[code], 'string', code)
+    assert.match(contractImportProvisionIssueLabels[code], /[\u4e00-\u9fa5]/, code)
+  }
+  assert.equal(Object.isFrozen(contractImportProvisionIssueLabels), true)
+  const rows = contractImportErrorRows([
+    { item: { item_key: 'one' }, issues: codes.map((code) => ({ field_path: 'metadata.sales_name', code, retryable: false })) },
+  ], '', { issueLabels: contractImportProvisionIssueLabels, fieldLabel: () => '销售姓名' })
+  assert.equal(rows.length, codes.length)
+  assert.equal(rows[1][3], 'IMPORT_PROVISION_OWNER_UNRESOLVED')
+  assert.equal(rows[1][5], contractImportProvisionIssueLabels.IMPORT_PROVISION_OWNER_UNRESOLVED)
+  assert.equal(rows[1][2], '销售姓名')
 })

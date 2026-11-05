@@ -226,3 +226,64 @@ test('NORMAL表单LOCAL引用可生成并恢复，版本与原source_id身份不
   assert.equal(Object.hasOwn(legacy, 'counterparty_source'), false)
   assert.equal(Object.hasOwn(legacy.service_items[0], 'category_id'), false)
 })
+
+test('销售姓名进入 metadata 白名单且非必填，可从已保存清单恢复', () => {
+  assert.equal(createImportFormRow({ fileName: '合同A.pdf' }).salesName, '')
+  // 留空不产生任何行级问题，也不阻断清单生成。
+  assert.deepEqual(validateImportFormRows([validRow()], { files: [], sources: [] }), [])
+  assert.equal(buildImportManifestFromRows([validRow()]).items[0].metadata.sales_name, '')
+  assert.equal(importFieldLabel('metadata.sales_name'), '销售姓名')
+
+  const row = validRow({ salesName: '  张销售  ' })
+  assert.deepEqual(validateImportFormRows([row], { files: [], sources: [] }), [])
+  const manifest = buildImportManifestFromRows([row], { sourceSystem: 'manual' })
+  assert.equal(manifest.items[0].metadata.sales_name, '张销售')
+
+  const restored = importRowsFromItems([{ item: manifest.items[0], state: 'PREVIEWED', issues: [] }])[0]
+  assert.equal(restored.salesName, '张销售')
+  assert.equal(buildImportManifestFromRows([restored]).items[0].metadata.sales_name, '张销售')
+})
+
+test('客户类型/行业/地区进入 metadata 白名单且非必填，可从已保存清单恢复', () => {
+  const blank = createImportFormRow({ fileName: '合同A.pdf' })
+  assert.equal(blank.customerType, '')
+  assert.equal(blank.industry, '')
+  assert.equal(blank.region, '')
+  // 留空不产生任何行级问题，也不阻断清单生成。
+  assert.deepEqual(validateImportFormRows([validRow()], { files: [], sources: [] }), [])
+  const blankMetadata = buildImportManifestFromRows([validRow()]).items[0].metadata
+  assert.equal(blankMetadata.customer_type, '')
+  assert.equal(blankMetadata.industry, '')
+  assert.equal(blankMetadata.region, '')
+  assert.equal(importFieldLabel('metadata.customer_type'), '客户类型')
+  assert.equal(importFieldLabel('metadata.industry'), '行业')
+  assert.equal(importFieldLabel('metadata.region'), '地区')
+
+  const row = validRow({ customerType: '  企业  ', industry: ' 金融 ', region: ' 华东 ' })
+  assert.deepEqual(validateImportFormRows([row], { files: [], sources: [] }), [])
+  const manifest = buildImportManifestFromRows([row], { sourceSystem: 'manual' })
+  assert.equal(manifest.items[0].metadata.customer_type, '企业')
+  assert.equal(manifest.items[0].metadata.industry, '金融')
+  assert.equal(manifest.items[0].metadata.region, '华东')
+
+  // 已保存批次反填后仍能生成同一业务清单，草稿续填不会丢字段。
+  const sources = [{ file_ref: 'opaque-source-1', item_key: manifest.items[0].item_key, filename: '年度测评合同.pdf', state: 'READY' }]
+  const restored = importRowsFromItems([{ item: manifest.items[0], state: 'PREVIEWED', issues: [] }], sources)[0]
+  assert.equal(restored.customerType, '企业')
+  assert.equal(restored.industry, '金融')
+  assert.equal(restored.region, '华东')
+  const rebuilt = buildImportManifestFromRows([restored], { sources })
+  assert.equal(rebuilt.items[0].metadata.customer_type, '企业')
+  assert.equal(rebuilt.items[0].metadata.industry, '金融')
+  assert.equal(rebuilt.items[0].metadata.region, '华东')
+})
+
+test('客户类型/行业/地区超过 64 字按行阻断，边界值放行', () => {
+  for (const [field, code] of [['customerType', 'TOO_LONG'], ['industry', 'TOO_LONG'], ['region', 'TOO_LONG']]) {
+    const row = validRow({ [field]: '字'.repeat(65) })
+    const issues = validateImportFormRows([row], { files: [], sources: [] })
+    assert.deepEqual(issues.map((issue) => [issue.field, issue.code]), [[field, code]], field)
+  }
+  const boundary = validRow({ customerType: '字'.repeat(64), industry: '字'.repeat(64), region: '字'.repeat(64) })
+  assert.deepEqual(validateImportFormRows([boundary], { files: [], sources: [] }), [])
+})

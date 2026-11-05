@@ -6,7 +6,7 @@ import { contractImportRequest, listContractImportBatches, releaseContractImport
 import ContractPDFPreview from './ContractPDFPreview.vue'
 import LocalContractSourcePicker from './LocalContractSourcePicker.vue'
 import { importRowSourceForm, applyImportRowSourceForm } from '../utils/localImportSourceBridge.js'
-import { contractImportErrorRows, contractImportErrorsCsv } from '../utils/contractImportErrors.js'
+import { contractImportErrorRows, contractImportErrorsCsv, contractImportProvisionIssueLabels } from '../utils/contractImportErrors.js'
 import { prepareImportManifest, formatImportMinor } from '../utils/contractImport.js'
 import { buildImportManifestFromRows, createImportFormRow, emptyImportServiceItem,
   importFieldLabel, importRowsFromItems, validateImportFormRows } from '../utils/contractImportForm.js'
@@ -47,6 +47,7 @@ const targetLabels = { PROJECT: '项目接续', FINANCE: '财务接续', REPORT:
 const stateLabels = { DRAFT: '待预检', WAITING_RELEASE: '待申请放行', WAITING: '等待依赖满足', QUEUED: '等待执行', RUNNING: '正在核对执行', HOLD: '暂未放行', PREPARING: '正在建立财务暂存', PREPARED: '财务已暂存，待恢复对账', READY: '核对就绪，尚未放行', RELEASE_REQUESTED: '放行已申请，等待实际应用', COMPLETE: '已完成', COMPLETED: '已完成', NOT_APPLICABLE: '不建立此类业务', FAILED: '执行失败，可核对恢复', BLOCKED: '需要处理阻塞', NEEDS_REVIEW: '合同版本变化，需核对', CORRECTION_REQUIRED: '已建单基线需要业务更正', CREATED: '记录已创建，正在完成文件引用', PENDING: '待处理', APPROVED: '确认通过', STARTING: '正在启动独立确认', REJECTED: '确认驳回', WITHDRAWN: '确认撤回', EXPIRED: '确认已超时' }
 const historyItems = computed(() => (batch.value?.items || []).filter(entry => entry.item.mode !== 'NORMAL'))
 const issueLabels = {
+  ...contractImportProvisionIssueLabels,
   IMPORT_CRM_SESSION_REQUIRED: 'CRM 当前账号授权上下文缺失或已过期，请连接 CRM 后重新预检。',
   REQUIRED: '必填项缺失',
   UNSUPPORTED_ENUM: '取值不在允许范围',
@@ -65,6 +66,40 @@ const issueLabels = {
   IMPORT_POLICY_UNSUPPORTED: '当前服务端未开放该历史策略',
   IMPORT_EVIDENCE_UNSUPPORTED: '历史来源证据不完整',
   IMPORT_INACTIVE_RESPONSIBILITY_UNSUPPORTED: '历史结清财务重建策略不受支持',
+}
+// 历史导入自动开立 CRM 客户/商机时，预览响应会多返回 provision_plan；缺失整块不渲染，界面与未开放时完全一致。
+const provisionCustomerLabels = { EXISTS: '客户已存在', TO_CREATE: '将自动创建客户', AMBIGUOUS: '客户重名，需人工确认' }
+const provisionSalesLabels = { RESOLVED: '销售已解析', UNRESOLVED: '销售未命中', AMBIGUOUS: '销售重名，需人工确认' }
+const provisionPlan = computed(() => (Array.isArray(batch.value?.provision_plan) ? batch.value.provision_plan : [])
+  .filter((item) => item && typeof item === 'object'))
+const provisionSummary = computed(() => {
+  const summary = { toCreate: 0, existing: 0, customerAmbiguous: 0, resolved: 0, unresolved: 0, salesAmbiguous: 0 }
+  for (const plan of provisionPlan.value) {
+    if (plan.customer_state === 'TO_CREATE') summary.toCreate += 1
+    else if (plan.customer_state === 'EXISTS') summary.existing += 1
+    else if (plan.customer_state === 'AMBIGUOUS') summary.customerAmbiguous += 1
+    if (plan.sales_state === 'RESOLVED') summary.resolved += 1
+    else if (plan.sales_state === 'UNRESOLVED') summary.unresolved += 1
+    else if (plan.sales_state === 'AMBIGUOUS') summary.salesAmbiguous += 1
+  }
+  return summary
+})
+
+function provisionText(value) {
+  return String(value ?? '').trim()
+}
+
+// 用途：给每条 provision_plan 一个稳定的逐项定位，缺少合同标识时用序号，不伪造业务编号。
+function provisionPlanTitle(plan, index) {
+  return provisionText(plan.contract_number || plan.external_record_id || plan.contractNumber || plan.externalRecordId) || `第 ${index + 1} 项`
+}
+
+// 用途：按后端返回值原样展示商机金额与预计签约日，不猜测金额单位。
+function provisionOpportunityText(plan) {
+  const amount = provisionText(plan.opportunity_amount)
+  const date = provisionText(plan.opportunity_sign_date)
+  if (!amount && !date) return '商机：未生成'
+  return `商机：金额 ${amount || '—'}，签约日 ${date || '—'}`
 }
 const isNormalEntry = computed(() => entryMode.value === 'NORMAL')
 const usesJsonManifest = computed(() => !isNormalEntry.value || jsonAuthoritative.value)
@@ -1187,6 +1222,7 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
             <input id="contract-import-excel" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" :disabled="busy || excelBusy" @change="selectExcelFile" />
           </div>
           <p><a :href="contractExcelTemplateURL" download>下载 Excel 标准模板（含合同明细、服务项、系统信息、付款条款和填写说明）</a></p>
+          <p class="contract-import-hint">「合同明细」新增可选列：销售姓名、客户类型、行业、地区，四列均可留空。<strong>销售姓名</strong>（别名：销售、业务员、负责人姓名）用于历史导入自动开立 CRM 客户/商机时解析平台销售账号，留空不阻断导入，只有服务端解析未命中时才按行提示；<strong>客户类型、行业、地区</strong>留空时由系统补「企业 / 其他 / 未填写」。下载的模板如未包含这几列，可在「合同明细」末列自行补上同名列，表头文字保持一致即可。</p>
           <p v-if="excelFile" role="status">已选择 Excel：{{ excelFile.name }} <button class="contract-text-button" type="button" :disabled="busy || excelBusy" @click="applyExcelImport">重新应用 Excel（覆盖未保存详情）</button><button class="contract-text-button danger" type="button" :disabled="busy || excelBusy" @click="clearExcelFile">移除</button></p>
           <p v-if="excelBusy" role="status">正在解析 Excel 并匹配 PDF…</p>
           <p v-if="excelCRMProgress" role="status">{{ excelCRMProgress }}</p>
@@ -1264,6 +1300,22 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
     <p v-if="error" role="alert">{{ error }}</p>
     <template v-if="batch">
       <p role="status">批次 {{ batch.batch_id }} · 第 {{ batch.revision }} 版 · {{ labels[batch.state] || batch.state }}</p>
+      <section v-if="provisionPlan.length" class="contract-import-provision" aria-label="将自动创建的 CRM 客户与商机">
+        <p><strong>CRM 开立计划（共 {{ provisionPlan.length }} 项）：</strong>将自动创建客户 {{ provisionSummary.toCreate }} 项，客户已存在 {{ provisionSummary.existing }} 项<span v-if="provisionSummary.customerAmbiguous">，客户重名需人工确认 {{ provisionSummary.customerAmbiguous }} 项</span>；销售已解析 {{ provisionSummary.resolved }} 项，销售未命中 {{ provisionSummary.unresolved }} 项<span v-if="provisionSummary.salesAmbiguous">，销售重名需人工确认 {{ provisionSummary.salesAmbiguous }} 项</span>。以上为预览结果，实际开立仍按当前开关与逐项核对执行。</p>
+        <div class="contract-import-scroll">
+          <table class="contract-data-table" aria-label="逐项 CRM 客户与商机开立计划">
+            <thead><tr><th>合同</th><th>客户</th><th>销售</th><th>商机</th></tr></thead>
+            <tbody>
+              <tr v-for="(plan, index) in provisionPlan" :key="`provision-${index}-${provisionPlanTitle(plan, index)}`">
+                <td>{{ provisionPlanTitle(plan, index) }}</td>
+                <td>{{ plan.customer_name || '未提供' }}<small class="block">{{ provisionCustomerLabels[plan.customer_state] || plan.customer_state || '状态未返回' }}</small></td>
+                <td>{{ plan.sales_name || '未提供' }}<small class="block">{{ provisionSalesLabels[plan.sales_state] || plan.sales_state || '状态未返回' }}</small></td>
+                <td>{{ provisionOpportunityText(plan) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
       <p v-if="batch.items?.length">导入方式：{{ modeLabels[batch.items[0].item.mode] || batch.items[0].item.mode }}</p>
       <p v-if="batch.operation_id">操作号：{{ batch.operation_id }}。请保留批次号，重新登录或刷新页面后可查询恢复。</p>
       <p v-if="crmConnectionRequired" role="alert">
@@ -1430,6 +1482,9 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
 .contract-import-normal-modes label { display: inline-flex; align-items: center; gap: 6px; margin: 0; }
 .contract-import-normal-modes input { margin: 0; }
 .contract-import-excel-summary { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-block: 10px; padding: 10px 12px; color: var(--text, #0f172a); font-size: 12px; border: 1px solid var(--primary-border, #bfdbfe); border-radius: 8px; background: var(--primary-soft, #eff6ff); }
+.contract-import-provision { margin-block: 10px; padding: 10px 12px; color: var(--text, #0f172a); font-size: 12px; border: 1px solid var(--primary-border, #bfdbfe); border-radius: 8px; background: var(--primary-soft, #eff6ff); }
+.contract-import-provision p { margin-block: 0 8px; }
+.contract-import-provision table { font-size: 12px; }
 .contract-import-excel-issues { margin-block: 10px; padding: 10px 12px; color: var(--danger-ink, #7f1d1d); font-size: 12px; border: 1px solid var(--danger-border, #fecaca); border-radius: 8px; background: var(--danger-soft, #fef2f2); }
 .contract-import-excel-issues p { margin-block: 0 6px; }
 .contract-import-excel-issues ul { max-height: 220px; margin: 0; padding-inline-start: 20px; overflow: auto; }

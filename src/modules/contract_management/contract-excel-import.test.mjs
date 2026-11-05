@@ -13,25 +13,35 @@ const serviceHeaders = [...contractExcelTemplateHeaders.services]
 const systemHeaders = [...contractExcelTemplateHeaders.systems]
 const paymentHeaders = [...contractExcelTemplateHeaders.payments]
 
+function cellForHeader(header, values = {}) {
+  if (header === '合同编号') return values.contractNumber ?? 'HT-2026001'
+  if (header === '合同标题') return values.title ?? '示例合同'
+  if (header === '合同类型') return values.contractType ?? '直签'
+  if (header === '服务类型') return values.serviceType ?? '软件测试'
+  if (header === 'CRM客户编号') return values.crmCustomerId ?? ''
+  if (header === '客户名称') return values.customerName ?? '示例客户'
+  if (header === '金额（元）') return values.amount ?? '10000'
+  if (header === '币种') return values.currency ?? 'CNY'
+  if (header === '开始日期') return values.startDate ?? '2024-01-01'
+  if (header === '结束日期') return values.endDate ?? '2024-12-31'
+  if (header === '实施场所') return values.site ?? '上海总部'
+  if (header === '实施批次') return values.batch ?? '第一批次'
+  if (header === '检测类别') return values.category ?? '等保测评'
+  if (header === '检测方式') return values.testMode ?? '常规检测'
+  if (header === '体系/能力要求') return values.requirement ?? '等保三级'
+  if (header === '销售姓名') return values.salesName ?? ''
+  if (header === '客户类型') return values.customerType ?? ''
+  if (header === '行业') return values.industry ?? ''
+  if (header === '地区') return values.region ?? ''
+  return values[header] ?? ''
+}
+
 function mainRow(values = {}) {
-  return mainHeaders.map((header) => {
-    if (header === '合同编号') return values.contractNumber ?? 'HT-2026001'
-    if (header === '合同标题') return values.title ?? '示例合同'
-    if (header === '合同类型') return values.contractType ?? '直签'
-    if (header === '服务类型') return values.serviceType ?? '软件测试'
-    if (header === 'CRM客户编号') return values.crmCustomerId ?? ''
-    if (header === '客户名称') return values.customerName ?? '示例客户'
-    if (header === '金额（元）') return values.amount ?? '10000'
-    if (header === '币种') return values.currency ?? 'CNY'
-    if (header === '开始日期') return values.startDate ?? '2024-01-01'
-    if (header === '结束日期') return values.endDate ?? '2024-12-31'
-    if (header === '实施场所') return values.site ?? '上海总部'
-    if (header === '实施批次') return values.batch ?? '第一批次'
-    if (header === '检测类别') return values.category ?? '等保测评'
-    if (header === '检测方式') return values.testMode ?? '常规检测'
-    if (header === '体系/能力要求') return values.requirement ?? '等保三级'
-    return values[header] ?? ''
-  })
+  return mainHeaders.map((header) => cellForHeader(header, values))
+}
+
+function customRow(headers, values = {}, overrides = {}) {
+  return headers.map((header) => (Object.hasOwn(overrides, header) ? overrides[header] : cellForHeader(header, values)))
 }
 
 function workbook(rows = [mainRow()], extra = {}) {
@@ -235,6 +245,13 @@ test('下载模板的工作表名和表头与解析器常量一致', async () =>
   assert.deepEqual(byName.get('服务项')[0], [...contractExcelTemplateHeaders.services])
   assert.deepEqual(byName.get('系统信息')[0], [...contractExcelTemplateHeaders.systems])
   assert.deepEqual(byName.get('付款条款')[0], [...contractExcelTemplateHeaders.payments])
+  // 模板「合同明细」末尾 4 列必须与常量顺序一致，且「销售姓名」只能出现一次（重复列会让后加的列被静默忽略）。
+  assert.deepEqual(byName.get('合同明细')[0].slice(-4), ['销售姓名', '客户类型', '行业', '地区'])
+  const mainHeaderRow = byName.get('合同明细')[0]
+  for (const header of ['销售姓名', '客户类型', '行业', '地区']) {
+    assert.equal(mainHeaderRow.filter((cell) => cell === header).length, 1, header)
+  }
+  assert.deepEqual([...byName.keys()], ['合同明细', '服务项', '系统信息', '付款条款', '填写说明'])
 })
 
 test('浏览器读取适配层可直接读取 ArrayBuffer 并返回全部工作表', async () => {
@@ -342,4 +359,83 @@ test('多工作表但缺少「合同明细」时不回退主表，避免静默�
   ])
   assert.equal(parsed.records.length, 0)
   assert.ok(parsed.issues.some((issue) => issue.code === 'EXCEL_SHEET_MISSING'))
+})
+
+test('「销售姓名」列支持别名、可留空，并写入表单行', () => {
+  // 标准模板已把「销售姓名」放在末尾，别名用例改用不含该列表头，避免同名列重复后只认第一处。
+  const headersWithoutSalesName = mainHeaders.filter((header) => header !== '销售姓名')
+  for (const alias of ['销售姓名', '销售', '业务员', '负责人姓名']) {
+    const headers = [...headersWithoutSalesName, alias]
+    const parsed = parseContractExcelWorkbook([{ sheet: '合同明细', data: [headers, customRow(headers, { crmCustomerId: '42' }, { [alias]: '张销售' })] }])
+    assert.deepEqual(blockingContractExcelIssues(parsed.issues), [], alias)
+    assert.equal(parsed.records[0].salesName, '张销售', alias)
+    const matched = matchContractExcelRecordsToFiles(parsed.records, filesFor('HT-2026001.pdf'))
+    const rows = buildContractExcelImportRows(matched.matchedRecords)
+    assert.equal(rows[0].salesName, '张销售', alias)
+    assert.deepEqual(validateImportFormRows(rows, { files: filesFor('HT-2026001.pdf') }), [], alias)
+  }
+  const parsed = parseContractExcelWorkbook(workbook([mainRow({ crmCustomerId: '42', salesName: '' })]))
+  assert.deepEqual(blockingContractExcelIssues(parsed.issues), [])
+  assert.equal(parsed.records[0].salesName, '')
+  const matched = matchContractExcelRecordsToFiles(parsed.records, filesFor('HT-2026001.pdf'))
+  const rows = buildContractExcelImportRows(matched.matchedRecords)
+  assert.equal(rows[0].salesName, '')
+  // 销售姓名留空不是必填项，行校验不受影响。
+  assert.deepEqual(validateImportFormRows(rows, { files: filesFor('HT-2026001.pdf') }), [])
+})
+
+test('「客户类型/行业/地区」三列解析、可留空并写入表单行', () => {
+  const parsed = parseContractExcelWorkbook(workbook([mainRow({ crmCustomerId: '42', customerType: '企业', industry: '金融', region: '华东' })]))
+  assert.deepEqual(blockingContractExcelIssues(parsed.issues), [])
+  const record = parsed.records[0]
+  assert.equal(record.customerType, '企业')
+  assert.equal(record.industry, '金融')
+  assert.equal(record.region, '华东')
+  const matched = matchContractExcelRecordsToFiles(parsed.records, filesFor('HT-2026001.pdf'))
+  const rows = buildContractExcelImportRows(matched.matchedRecords)
+  assert.equal(rows[0].customerType, '企业')
+  assert.equal(rows[0].industry, '金融')
+  assert.equal(rows[0].region, '华东')
+  assert.deepEqual(validateImportFormRows(rows, { files: filesFor('HT-2026001.pdf') }), [])
+
+  // 三列不是必填项：留空不产生任何阻断问题，表单行保持空串。
+  const blank = parseContractExcelWorkbook(workbook([mainRow({ crmCustomerId: '42' })]))
+  assert.deepEqual(blockingContractExcelIssues(blank.issues), [])
+  assert.equal(blank.records[0].customerType, '')
+  assert.equal(blank.records[0].industry, '')
+  assert.equal(blank.records[0].region, '')
+  const blankRows = buildContractExcelImportRows(matchContractExcelRecordsToFiles(blank.records, filesFor('HT-2026001.pdf')).matchedRecords)
+  assert.equal(blankRows[0].customerType, '')
+  assert.equal(blankRows[0].industry, '')
+  assert.equal(blankRows[0].region, '')
+  assert.deepEqual(validateImportFormRows(blankRows, { files: filesFor('HT-2026001.pdf') }), [])
+})
+
+test('「客户类型/行业/地区」支持别名，且不误判「合同类型」', () => {
+  const headers = mainHeaders.map((header) => {
+    if (header === '客户类型') return '客户类型'
+    if (header === '行业') return '所属行业'
+    if (header === '地区') return '所属地区'
+    return header
+  })
+  const parsed = parseContractExcelWorkbook([{ sheet: '合同明细', data: [headers, customRow(headers, { crmCustomerId: '42', contractType: '三方' }, { 客户类型: '政府', 所属行业: '政务', 所属地区: '华北' })] }])
+  assert.deepEqual(blockingContractExcelIssues(parsed.issues), [])
+  const record = parsed.records[0]
+  // 「合同类型」与「客户类型」是两个字段，别名不得互相覆盖。
+  assert.equal(record.contractType, '三方')
+  assert.equal(record.customerType, '政府')
+  assert.equal(record.industry, '政务')
+  assert.equal(record.region, '华北')
+  assert.deepEqual(contractExcelTemplateHeaders.main.slice(-4), ['销售姓名', '客户类型', '行业', '地区'])
+})
+
+test('「客户类型/行业/地区」超长按 64 字上限阻断，可定位到具体列', () => {
+  const tooLong = '企'.repeat(65)
+  const parsed = parseContractExcelWorkbook(workbook([mainRow({ crmCustomerId: '42', customerType: tooLong, industry: '金融', region: tooLong })]))
+  const blocking = blockingContractExcelIssues(parsed.issues)
+  assert.deepEqual(blocking.map((issue) => issue.field).sort(), ['customerType', 'region'])
+  assert.ok(blocking.every((issue) => issue.code === 'TOO_LONG'))
+  // 上限是 64 个字（按字符计，不按字节），64 个字仍允许。
+  const boundary = parseContractExcelWorkbook(workbook([mainRow({ crmCustomerId: '42', customerType: '企'.repeat(64), industry: '金'.repeat(64), region: '华'.repeat(64) })]))
+  assert.deepEqual(blockingContractExcelIssues(boundary.issues), [])
 })
