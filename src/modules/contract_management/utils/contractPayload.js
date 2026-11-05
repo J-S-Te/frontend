@@ -3,10 +3,11 @@ import { paymentAmountMinor } from './paymentTerms.js'
 export const externalContractTypes = ['直签', '三方']
 export const contractSystemLevels = ['一级', '二级', '三级', '四级']
 
-// 外部合同的权威正文从 DOCX 中提取。
-// 共享草稿表单中的空 content 字段仅属于 JSON 草稿 API。
+// 用途：保留外部原件元数据并规范化明确LOCAL引用，正文始终来自原件。
+// 参数：payload为正式请求DTO；未知字段仍交给后端严格拒绝。
+// 返回值：无content字段且保留独立来源及服务项引用的元数据。
 export function externalContractMetadata(payload) {
-  const metadata = { ...payload }
+  const metadata = { ...payload, ...localContractReferencePayload(payload) }
   delete metadata.content
   return metadata
 }
@@ -43,8 +44,9 @@ function validateOptionalDate(value, label) {
   }
 }
 
-// 浏览器反馈与 prepareContract/validServiceItems 保持一致。
-// 这些检查用于改善输入反馈；所有边界仍由后端强制校验。
+// 用途：校验表单的金额、来源、目录版本和服务项，服务端继续强制复核。
+// 参数：form为表单，external表示外部原件路径。
+// 返回值：无；不符合正式接口边界时抛出可读错误。
 export function validateContractForm(form, { external = false } = {}) {
   if (!String(form.title || '').trim()) throw new Error('请填写合同名称。')
   if (!String(form.contract_type || '').trim()) throw new Error('请选择合同类型。')
@@ -55,6 +57,7 @@ export function validateContractForm(form, { external = false } = {}) {
   if (form.customer_id && (!/^[1-9]\d*$/.test(String(form.customer_id)) || !Number.isSafeInteger(Number(form.customer_id)))) {
     throw new Error('CRM 客户编号无效或超出可安全提交的范围，请重新选择。')
   }
+  localContractReferencePayload(form)
   validateOptionalDate(form.start_date, '开始')
   validateOptionalDate(form.end_date, '结束')
   if (form.start_date && form.end_date && form.start_date > form.end_date) throw new Error('合同开始日期不能晚于结束日期。')
@@ -70,4 +73,40 @@ export function validateContractForm(form, { external = false } = {}) {
       }
     })
   })
+}
+
+
+// 用途：仅输出明确的来源引用白名单，旧表单不新增字段或重解释客户身份。
+// 参数：form为合同表单，LOCAL目录ID/版本必须来自已读目录。
+// 返回值：可合并入正式请求的独立引用；无效或混用身份时抛出错误。
+export function localContractReferencePayload(form) {
+  const source = String(form.counterparty_source || '')
+  const categorySource = String(form.category_source || '')
+  if (source && !['LOCAL', 'CRM'].includes(source)) throw new Error('合同交易对方来源无效。')
+  if (categorySource && !['LOCAL', 'PROJECT'].includes(categorySource)) throw new Error('合同类别来源无效。')
+  const result = {}
+  if (source === 'LOCAL') {
+    if (!/^[0-9A-HJKMNP-TV-Z]{26}$/.test(String(form.local_counterparty_id || '')) || !Number.isSafeInteger(form.counterparty_version) || form.counterparty_version < 1) {
+      throw new Error('请重新选择有效的本地交易对方，确保目录版本完整。')
+    }
+    if (form.customer_id || form.crm_customer_id || form.opportunity_id || form.opportunity_name) throw new Error('本地交易对方不能混用 CRM 客户或商机引用。')
+    Object.assign(result, { counterparty_source: 'LOCAL', local_counterparty_id: form.local_counterparty_id, counterparty_version: form.counterparty_version, crm_customer_id: 0 })
+  } else if (source === 'CRM') {
+    if (!/^[1-9]\d*$/.test(String(form.customer_id || form.crm_customer_id || ''))) throw new Error('请选择有效的 CRM 客户。')
+    result.counterparty_source = 'CRM'
+  } else if (form.local_counterparty_id || form.counterparty_version) {
+    throw new Error('本地交易对方引用须明确选择本地来源。')
+  }
+  if (categorySource === 'LOCAL') {
+    if (!Array.isArray(form.service_items)) throw new Error('请维护本地类别服务项。')
+    result.category_source = 'LOCAL'
+    result.service_items = form.service_items.map((item, index) => {
+      if (!/^[0-9A-HJKMNP-TV-Z]{26}$/.test(String(item.category_id || '')) || !Number.isSafeInteger(item.category_version) || item.category_version < 1) {
+        throw new Error(`请重新选择服务项 ${index + 1} 的有效本地类别。`)
+      }
+      const fields = ['source_id', 'name', 'service_type', 'site', 'batch', 'category', 'requirement', 'test_mode', 'systems', 'category_id', 'category_version']
+      return Object.fromEntries(fields.filter(key => item[key] !== undefined).map(key => [key, item[key]]))
+    })
+  } else if (categorySource === 'PROJECT') result.category_source = 'PROJECT'
+  return result
 }

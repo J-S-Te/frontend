@@ -50,7 +50,10 @@ test('Portal project view keeps project, activities and evaluation as independen
   assert.match(view, /eligibility\?\.evaluation_id && hasPermission\('evaluation\.read'\)/)
   assert.match(view, /evaluationEligibility\?\.eligible && hasPermission\('evaluation\.create'\)/)
   assert.match(view, /项目详情不受影响/)
-  assert.match(view, /activityTotal > activityPageSize/)
+  // 2026-11 统一：项目动态改用共享分页条（shared/components/PaginationBar.vue）。
+  // 旧实现只在「多于 1 页」时才渲染 nav，分页条一出现就带总数；现在单页也展示总数，
+  // 两侧按钮由组件按 page / pageSize / total 自动禁用（见 shared/pagination-bar.test.mjs）。
+  assert.match(view, /<PaginationBar class="project-pagination" label="项目动态分页" :page="activityPage" :total="activityTotal" :page-size="activityPageSize"/)
   assert.match(view, /manager_contact_masked/)
   assert.match(view, /synced_at/)
 })

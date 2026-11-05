@@ -86,3 +86,19 @@ test('draft UI provides back-to-edit, version-aware save/submit, conflict reload
   assert.match(source, /重新载入草稿（放弃未保存修改）/)
   assert.match(source, /expected_version: submittedContract.version/)
 })
+
+test('LOCAL草稿真实恢复后可构造正式来源payload，旧草稿不补新来源字段', async () => {
+  const { localContractReferencePayload } = await import('./utils/contractPayload.js')
+  const local = { ...raw, crm_customer_id: 0, counterparty_source: 'LOCAL', local_counterparty_id: '01J00000000000000000000001', counterparty_version: 2, category_source: 'LOCAL', service_items: [{ ...raw.service_items[0], category: '软件测试', category_id: '01J00000000000000000000002', category_version: 3 }] }
+  const form = hydrateContractDraft(local)
+  assert.equal(form.counterparty_source, 'LOCAL')
+  assert.equal(form.counterparty_version, 2)
+  assert.equal(form.customer_id, '')
+  const payload = localContractReferencePayload(form)
+  assert.equal(payload.local_counterparty_id, local.local_counterparty_id)
+  assert.equal(payload.service_items[0].source_id, 'source-1')
+  assert.equal(payload.service_items[0].category_version, 3)
+  const old = hydrateContractDraft(raw)
+  assert.equal(Object.hasOwn(old, 'counterparty_source'), false)
+  assert.equal(Object.hasOwn(old.service_items[0], 'category_id'), false)
+})

@@ -14,10 +14,12 @@ import { useReportExport } from './composables/useReportExport.js'
 import { useReceivablePlans } from './composables/useReceivablePlans.js'
 import { useReceiptRegistration } from './composables/useReceiptRegistration.js'
 import { useInvoiceRequests } from './composables/useInvoiceRequests.js'
+import { createNativeFinancialAPI } from './api/nativeFinancial.js'
 
 // useSettlementActions 在 Node 域执行，notify 的 3.2 秒自动清除需要 window.setTimeout 桩。
 globalThis.window = { setTimeout() {} }
 import { createRequestScope } from '../platform/shared/composables/requestScope.js'
+import { DOWNLOAD_TIMEOUT_MESSAGE, downloadRequestSignal } from '../shared/utils/downloadTimeout.js'
 
 const source = await readFile(new URL('./api/settlement.js', import.meta.url), 'utf8')
 function harness(fetcher) {
@@ -26,6 +28,7 @@ function harness(fetcher) {
   const context = vm.createContext({
     fetch: fetcher, FormData, Blob, Headers, attachStructuredContext, listQuery, formatSettlementError,
     normalizeAuthorizationSession, principalIdentityID, shouldStartSubsystemLogin,
+    DOWNLOAD_TIMEOUT_MESSAGE, downloadRequestSignal,
     getCurrentPrincipal: async () => ({}),
     crypto: { randomUUID: () => `idempotent-${++uuid}` },
     URL: { createObjectURL: () => 'blob:isolated-test', revokeObjectURL: (url) => calls.revoked.push(url) },
@@ -179,6 +182,18 @@ test('binary success respects encoded safe file name and revokes the temporary o
   assert.deepEqual(calls.revoked, ['blob:isolated-test'])
 })
 
+test('settlement binary download carries a download timeout signal', async () => {
+  let requestOptions
+  const { api, calls } = harness(async (url, options) => {
+    requestOptions = options
+    return new Response('csv-content', { headers: { 'content-type': 'text/csv', 'content-disposition': 'attachment; filename="report.csv"' } })
+  })
+  await api.downloadReportExport('report')
+  assert.ok(requestOptions.signal, '结算报表/发票/回单/对账下载必须携带超时 signal')
+  assert.equal(requestOptions.signal.aborted, false)
+  assert.equal(calls.downloads.length, 1)
+})
+
 test('successful HTML login page or empty attachment is not saved as an invoice', async () => {
   for (const response of [new Response('<html>login</html>', { headers: { 'content-type': 'text/html' } }), new Response('', { headers: { 'content-type': 'application/pdf', 'content-disposition': 'attachment; filename="invoice.pdf"' } })]) {
     const { api, calls } = harness(async () => response)
@@ -215,12 +230,14 @@ async function viewHarness(overrides = {}) {
     window: { setTimeout() {}, confirm: () => false }, formatSettlementError, ...bindings,
     createRequestScope, allowedSections, permissionCheck, canLoad, canLoadKey: canLoad,
     useSettlementActions,
+    createNativeFinancialAPI,
     useReceiptAllocation,
     useInvoiceDetail,
     useReportExport,
     useReceivablePlans,
     useReceiptRegistration,
     useInvoiceRequests,
+    usePromptDialog: () => ({ dialog: { value: null }, askPrompt: async () => null, accept() {}, cancel() {} }),
     useConfirmDialog: () => ({ dialog: { value: null }, askConfirm: async () => true, accept() {}, cancel() {} }),
     useDunningCenter: () => ({ dunningCases: { value: [] }, dunningActions: { value: [] }, dunningPolicies: { value: [] }, dunningRecipients: { value: [] }, dunningOverview: { value: {} }, dunningCoverage: { value: {} }, policyForm: { value: { recipient_rule: '' } }, dunningActionDialog: { value: null } }),
     getSettlementSession: async () => ({permissions:["settlement.receipt.record","settlement.receivable.read","settlement.allocation.confirm"]}), ...overrides,

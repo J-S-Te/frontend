@@ -52,4 +52,28 @@ function timeLabel(value) {
 .operation-result-action { margin-top: 10px; border: 1px solid #86c99a; border-radius: 7px; background: #fff; color: #166534; padding: 6px 10px; font: inherit; font-size: 12px; cursor: pointer; }
 .operation-result > button { flex: 0 0 auto; border: 0; background: transparent; color: #166534; font-size: 22px; line-height: 1; cursor: pointer; }
 @media (max-width: 640px) { .operation-result dl { flex-direction: column; gap: 4px; } }
+
+/* 深色主题：完成提示条的浅绿底与深绿墨色；浅色声明未改。 */
+[data-theme="dark"] .operation-result {
+  color: var(--text-on-success);
+  border-color: var(--success-border);
+  background: var(--success-soft);
+}
+[data-theme="dark"] .operation-result p {
+  color: var(--text-on-success);
+}
+[data-theme="dark"] .operation-result dt {
+  color: var(--text-muted);
+}
+[data-theme="dark"] .operation-result dd {
+  color: var(--text-on-success);
+}
+[data-theme="dark"] .operation-result-action {
+  border-color: var(--success-border);
+  background: var(--surface-raised);
+  color: var(--text-on-success);
+}
+[data-theme="dark"] .operation-result > button {
+  color: var(--text-on-success);
+}
 </style>

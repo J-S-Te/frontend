@@ -17,8 +17,8 @@ createApp({
       h('button', { id:'toggle-busy', onClick:()=>{this.busy=!this.busy} }, '繁忙状态'),
       h('button', { id:'dictionary', onClick:()=>{this.dictionary=true} }, '指标字典'),
       h('div', { id:'result-fixture', style:'width:100%;max-width:480px;' }, [h(OperationResultBanner, {title:longText,message:longText,reference:longText})]),
-      this.confirm ? h(ConfirmDialog,{busy:this.busy,title:longText,description:longText,onCancel:()=>{this.confirm=false},onConfirm:()=>{this.confirm=false}}) : null,
-      this.prompt ? h(PromptDialog,{busy:this.busy,title:longText,description:longText,onCancel:()=>{this.prompt=false}}) : null,
+      this.confirm ? h(ConfirmDialog,{busy:this.busy,title:longText,description:longText,confirmText:'执行示例操作',onCancel:()=>{this.confirm=false},onConfirm:()=>{this.confirm=false}}) : null,
+      this.prompt ? h(PromptDialog,{busy:this.busy,title:longText,description:longText,confirmText:'执行示例操作',onCancel:()=>{this.prompt=false}}) : null,
       this.toast ? h(OperationToast,{message:longText,tone:'error'}) : null,
       this.dictionary ? h(DictionaryView,{permissions:['dictionary.manage']}) : null,
     ])

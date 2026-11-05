@@ -174,3 +174,57 @@ test('切换项目时迟到的旧目录响应不能覆盖新项目', async () =>
   assert.deepEqual(closure.closureContracts.value.map((item) => item.id), ['SUP-NEW'])
   assert.equal(closure.closureLoading.value, false)
 })
+
+for (const change of ['close', 'form', 'project', 'version']) {
+  test(`关账二次确认期间 ${change} 改变：不执行未确认范围`, async () => {
+    let resolve
+    const closure = harness()
+    closure.deps.askConfirm = () => new Promise((yes) => { resolve = yes })
+    // 使用延迟确认依赖重新建立真实组合函数实例。
+    Object.assign(closure, useSupplementClosure(closure.deps))
+    await closure.openSupplementClosure({ ...PROJECT, version: 3 })
+    fillForm(closure)
+    const pending = closure.submitSupplementClosure()
+    if (change === 'close') closure.closeSupplementClosure()
+    if (change === 'form') closure.closureForm.value.reason = '未经确认的新原因'
+    if (change === 'project') await closure.openSupplementClosure({ ...PROJECT, id: 'PJ-2' })
+    if (change === 'version') closure.closureProject.value.version += 1
+    resolve(true)
+    await pending
+    assert.equal(closure.calls.close.length, 0)
+  })
+}
+
+test('关账二次确认期间重复提交只开启一次确认', async () => {
+  let resolve
+  const closure = harness()
+  closure.deps.askConfirm = () => { closure.calls.confirm.push({}); return new Promise((yes) => { resolve = yes }) }
+  Object.assign(closure, useSupplementClosure(closure.deps))
+  await closure.openSupplementClosure(PROJECT)
+  fillForm(closure)
+  const pending = closure.submitSupplementClosure()
+  const duplicate = closure.submitSupplementClosure()
+  assert.equal(closure.calls.confirm.length, 1)
+  resolve(false)
+  await Promise.all([pending, duplicate])
+  assert.equal(closure.calls.close.length, 0)
+})
+
+for (const change of ['permission', 'busy']) {
+  test(`关账二次确认期间 ${change} 失效：复核后不写入`, async () => {
+    let resolve
+    let allowed = true
+    const closure = harness()
+    closure.deps.askConfirm = () => new Promise((yes) => { resolve = yes })
+    closure.deps.closureAllowed = () => allowed
+    Object.assign(closure, useSupplementClosure(closure.deps))
+    await closure.openSupplementClosure(PROJECT)
+    fillForm(closure)
+    const pending = closure.submitSupplementClosure()
+    if (change === 'permission') allowed = false
+    if (change === 'busy') closure.closureSaving.value = true
+    resolve(true)
+    await pending
+    assert.equal(closure.calls.close.length, 0)
+  })
+}

@@ -4,13 +4,14 @@ import { ref } from 'vue'
 import { useReceiptRegistration } from './useReceiptRegistration.js'
 import { todayBusinessDate } from '../../shared/utils/businessTime.js'
 
-function harness({ receivables = [], created = { id: 'RCPT-1' }, matches = [], refreshed = true, createError = null, matchError = null } = {}) {
-  const calls = { create: [], matches: [], load: 0, notify: [] }
+function harness({ receivables = [], created = { id: 'RCPT-1', receipt_no: 'RCPT-1' }, matches = [], refreshed = true, createError = null, matchError = null } = {}) {
+  const calls = { create: [], matches: [], load: 0, notify: [], references: [] }
   const deps = {
     can: () => true,
     receivables: ref(receivables),
     saving: ref(false),
-    notify: (value) => calls.notify.push(value),
+    // 第二个参数是业务编号：单独记录，保证“提示里必须带得走回款号”这条能被断言。
+    notify: (value, reference) => { calls.notify.push(value); calls.references.push(reference) },
     load: async () => { calls.load++; return refreshed },
     formatSettlementError: (cause, options) => options ? `${options.fallback}|${cause.code}` : `fmt:${cause.code}`,
     createReceipt: async (payload) => { calls.create.push(payload); if (createError) throw createError; return created },
@@ -101,4 +102,19 @@ test('仅登记回款能力不请求核销匹配建议', async () => {
   assert.equal(h.calls.create.length, 1)
   assert.equal(h.calls.matches.length, 0)
   assert.match(h.calls.notify.at(-1), /回款已登记/)
+})
+
+// 回款登记后续每条提示都必须带同一回款号：否则“勿重复登记”的提示出现时用户拿不到对账依据。
+test('回款登记的每条后续提示都带上同一回款号', async () => {
+  const cases = [
+    harness(),
+    harness({ refreshed: false }),
+    harness({ matchError: new Error('E_NET') }),
+  ]
+  for (const h of cases) {
+    h.receiptComposerOpen.value = true
+    await h.submitReceipt()
+    assert.ok(h.calls.references.length > 0, '至少应有一条提示')
+    assert.deepEqual(new Set(h.calls.references), new Set(['RCPT-1']), `回款号缺失: ${JSON.stringify(h.calls.references)}`)
+  }
 })

@@ -197,7 +197,7 @@ onBeforeUnmount(() => controller.dispose())
 </template>
 
 <style scoped>
-.runtime-enforcement { --runtime-border: var(--border, #e2e8f0); --runtime-muted: var(--text-secondary, #64748b); --runtime-primary: var(--primary, #2563eb); display: grid; gap: 16px; min-width: 0; margin-top: 12px; padding-top: 28px; border-top: 1px solid var(--runtime-border); color: var(--text, #1e293b); font-size: 14px; line-height: 1.6; }
+.runtime-enforcement { --runtime-border: var(--border, #e2e8f0); --runtime-muted: #64748b; --runtime-ink: #334155; --runtime-primary: var(--primary, #2563eb); display: grid; gap: 16px; min-width: 0; margin-top: 12px; padding-top: 28px; border-top: 1px solid var(--runtime-border); color: #1e293b; font-size: 14px; line-height: 1.6; }
 .runtime-enforcement *, .runtime-enforcement *::before, .runtime-enforcement *::after { box-sizing: border-box; }
 h3, h4, p { margin: 0; }
 h3 { font-size: 18px; font-weight: 650; letter-spacing: -.3px; }
@@ -206,12 +206,12 @@ h4 { font-size: 15px; font-weight: 600; }
 .runtime-header { justify-content: space-between; flex-wrap: wrap; gap: 18px; margin-bottom: 2px; }
 .runtime-heading { min-width: 0; }
 .runtime-heading p { margin-top: 3px; color: var(--runtime-muted); font-size: 12px; }
-.runtime-heading-icon { display: grid; flex: 0 0 42px; width: 42px; height: 42px; place-items: center; border: 1px solid var(--primary-border, #dbeafe); border-radius: 12px; background: var(--primary-soft, #eff6ff); color: var(--runtime-primary); }
+.runtime-heading-icon { display: grid; flex: 0 0 42px; width: 42px; height: 42px; place-items: center; border: 1px solid #dbeafe; border-radius: 12px; background: var(--primary-soft, #eff6ff); color: var(--runtime-primary); }
 .runtime-heading-icon svg { width: 23px; height: 23px; }
 .runtime-toolbar { flex-wrap: wrap; gap: 10px; }
 .runtime-select { display: flex; align-items: center; gap: 10px; margin: 0; color: var(--runtime-muted); font-size: 12px; }
-.runtime-select select { min-width: 192px; max-width: 100%; height: 38px; padding: 0 30px 0 12px; border: 1px solid var(--runtime-border); border-radius: 8px; background: var(--surface-card, #fff); color: var(--text, #1e293b); font: inherit; font-size: 13px; cursor: pointer; }
-.runtime-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; flex-shrink: 0; min-height: 38px; padding: 8px 14px; border: 1px solid var(--runtime-border); border-radius: 8px; background: var(--surface-card, #fff); color: var(--text, #334155); font: inherit; font-size: 13px; font-weight: 500; white-space: nowrap; cursor: pointer; transition: background .15s, border-color .15s; }
+.runtime-select select { min-width: 192px; max-width: 100%; height: 38px; padding: 0 30px 0 12px; border: 1px solid var(--runtime-border); border-radius: 8px; background: var(--surface-card, #fff); color: #1e293b; font: inherit; font-size: 13px; cursor: pointer; }
+.runtime-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; flex-shrink: 0; min-height: 38px; padding: 8px 14px; border: 1px solid var(--runtime-border); border-radius: 8px; background: var(--surface-card, #fff); color: var(--runtime-ink); font: inherit; font-size: 13px; font-weight: 500; white-space: nowrap; cursor: pointer; transition: background .15s, border-color .15s; }
 .runtime-button svg { width: 15px; height: 15px; }
 .runtime-button:hover:not(:disabled) { background: var(--surface-muted, #f8fafc); border-color: #b8c5d6; }
 .runtime-button-primary { background: var(--runtime-primary); border-color: var(--runtime-primary); color: #fff; }
@@ -225,20 +225,20 @@ button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-v
 .runtime-live, .runtime-subtle { color: var(--runtime-muted); font-size: 12px; }
 .runtime-live { display: inline-flex; align-items: center; gap: 6px; }
 .runtime-live i { width: 6px; height: 6px; border-radius: 50%; background: #22c55e; }
-.runtime-caveat { margin: 16px 0 0; padding: 10px 14px; border: 1px solid var(--warning-border, #fde68a); border-radius: 10px; background: var(--warning-soft, #fffbeb); color: var(--warning-text, #92400e); font-size: 12px; line-height: 1.7; }
+.runtime-caveat { margin: 16px 0 0; padding: 10px 14px; border: 1px solid var(--warning-border, #fde68a); border-radius: 10px; background: #fffbeb; color: var(--warning-ink, #92400e); font-size: 12px; line-height: 1.7; }
 .runtime-facts-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; margin: 18px 0 0; padding: 0; }
 .runtime-fact { display: grid; align-content: start; gap: 8px; min-width: 0; padding: 0 24px; border-left: 1px solid var(--runtime-border); }
 .runtime-fact:first-child { padding-left: 0; border-left: 0; }
 .runtime-fact:last-child { padding-right: 0; }
 .runtime-fact dd { display: grid; gap: 5px; margin: 0; min-width: 0; }
 .runtime-label { color: var(--runtime-muted); font-size: 12px; }
-.runtime-fact-source { color: var(--text-muted, #94a3b8); font-size: 11px; }
+.runtime-fact-source { color: #94a3b8; font-size: 11px; }
 .runtime-fact-value { display: flex; align-items: center; gap: 8px; min-height: 32px; font-size: 22px; font-weight: 600; letter-spacing: -.4px; }
 .runtime-fact-value[data-tone="success"] { color: var(--success-text, #15803d); }
 .runtime-fact-value[data-tone="info"] { color: var(--runtime-primary); }
 .runtime-fact-value[data-tone="pending"] { color: var(--warning-text, #b45309); }
 .runtime-fact-value[data-tone="danger"] { color: var(--danger-text, #b91c1c); }
-.runtime-fact-value[data-tone="muted"] { color: var(--text-secondary, #64748b); }
+.runtime-fact-value[data-tone="muted"] { color: #64748b; }
 .runtime-hint { color: var(--runtime-muted); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 .runtime-note { color: var(--runtime-muted); font-size: 12px; line-height: 1.7; }
 .runtime-poll { padding: 0 4px; }
@@ -246,13 +246,13 @@ button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-v
 .runtime-blocking { display: grid; gap: 10px; padding: 18px 24px; }
 .runtime-reason-list { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 0; padding: 0; list-style: none; }
 .runtime-reason-list li { display: inline-flex; align-items: center; gap: 8px; }
-.runtime-reason-code { color: var(--text-muted, #94a3b8); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+.runtime-reason-code { color: #94a3b8; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
 .runtime-unregistered { display: grid; gap: 8px; justify-items: start; padding: 20px 24px; }
 .runtime-unregistered .runtime-note { max-width: 760px; }
 .runtime-services-head { padding: 18px 24px; }
 .runtime-services-head h4 { display: flex; align-items: center; gap: 8px; }
 .runtime-services-head p { margin-top: 4px; }
-.runtime-count { display: inline-flex; justify-content: center; align-items: center; min-width: 24px; height: 22px; padding: 0 7px; border-radius: 6px; background: var(--surface-muted, #f1f5f9); color: var(--runtime-muted); font-size: 12px; font-weight: 500; }
+.runtime-count { display: inline-flex; justify-content: center; align-items: center; min-width: 24px; height: 22px; padding: 0 7px; border-radius: 6px; background: #f1f5f9; color: var(--runtime-muted); font-size: 12px; font-weight: 500; }
 .runtime-table { border-radius: 0 0 14px 14px; }
 table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 12px; }
 th, td { text-align: left; padding: 16px 20px; vertical-align: top; overflow-wrap: anywhere; }
@@ -263,11 +263,11 @@ th:nth-child(3) { width: 24%; }
 th:last-child, td:last-child { padding-right: 24px; width: 18%; }
 tbody tr + tr td { border-top: 1px solid var(--runtime-border); }
 tbody tr:hover { background: var(--surface-hover, #fafbfc); }
-.runtime-service-name { margin: 0; color: var(--text, #334155); font-size: 13px; font-weight: 600; line-height: 1.5; }
-.runtime-badge { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 5px; font-size: 11px; font-weight: 500; white-space: nowrap; color: var(--runtime-muted); background: var(--surface-muted, #f1f5f9); }
-.runtime-badge[data-tone="success"] { color: var(--success-text, #15803d); background: var(--success-soft, #f0fdf4); }
-.runtime-badge[data-tone="pending"] { color: var(--warning-text, #b45309); background: var(--warning-soft, #fffbeb); }
-.runtime-badge[data-tone="danger"] { color: var(--danger-text, #b91c1c); background: var(--danger-soft, #fff1f2); }
+.runtime-service-name { margin: 0; color: #334155; font-size: 13px; font-weight: 600; line-height: 1.5; }
+.runtime-badge { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 5px; font-size: 11px; font-weight: 500; white-space: nowrap; color: var(--runtime-muted); background: #f1f5f9; }
+.runtime-badge[data-tone="success"] { color: var(--success-text, #15803d); background: #f0fdf4; }
+.runtime-badge[data-tone="pending"] { color: var(--warning-text, #b45309); background: #fffbeb; }
+.runtime-badge[data-tone="danger"] { color: var(--danger-text, #b91c1c); background: #fff1f2; }
 .runtime-cell-note { display: block; margin-top: 6px; color: var(--runtime-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .runtime-confirmed { color: var(--success-text, #15803d); }
 .runtime-timestamp { font-variant-numeric: tabular-nums; color: var(--runtime-muted); }
@@ -276,7 +276,7 @@ tbody tr:hover { background: var(--surface-hover, #fafbfc); }
 .runtime-confirm { display: flex; align-items: flex-start; gap: 8px; margin: 14px 0 0; color: var(--text-secondary, #475569); font-size: 12px; cursor: pointer; }
 .runtime-confirm input { flex-shrink: 0; width: 15px; height: 15px; margin: 3px 0 0; accent-color: var(--runtime-primary); }
 .runtime-message { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 12px 16px; border: 1px solid var(--runtime-border); border-radius: 10px; background: var(--surface-muted, #f8fafc); color: var(--runtime-muted); font-size: 13px; }
-.runtime-error { color: var(--danger-text, #b91c1c); border-color: #fecaca; background: var(--danger-soft, #fff1f2); }
+.runtime-error { color: var(--danger-text, #b91c1c); border-color: #fecaca; background: #fff1f2; }
 .runtime-empty { padding: 36px 24px; text-align: center; }
 .runtime-empty h4 { margin-top: 10px; }
 .runtime-empty p { max-width: 540px; margin: 8px auto 0; color: var(--runtime-muted); font-size: 13px; }
@@ -305,4 +305,39 @@ tbody tr:hover { background: var(--surface-hover, #fafbfc); }
   .runtime-table { overflow-x: auto; }
   table { min-width: 560px; }
 }
+
+/* ==========================================================================
+   深色主题：运行时授权概览
+   --------------------------------------------------------------------------
+   本组件有一部分声明的浅色字面量与 token 的浅色取值并不相同（浅色正文是
+   #1e293b / #334155，而 --text 的浅色是 #0f172a；浅色弱化文字是 #94a3b8，
+   而 --text-muted 的浅色是 #64748b；浅色提示底是 #fffbeb，而 --warning-soft
+   的浅色是 #fef3c7）。这类声明不能写成 var(--token, 字面量)：token 在浅色
+   已定义，回退不生效，浅色会被 token 的取值顶掉。
+
+   所以浅色恢复为原字面量，深色在这里补同名覆盖，取值仍来自 main.css 的共享
+   token，深色渲染与改造前完全一致。
+   ========================================================================== */
+[data-theme="dark"] .runtime-enforcement {
+  --runtime-muted: var(--text-secondary);
+  --runtime-ink: var(--text);
+  color: var(--text);
+}
+/* 主按钮是实心蓝底 + 白字，不能跟着 --runtime-ink 变亮。 */
+[data-theme="dark"] .runtime-select select,
+[data-theme="dark"] .runtime-service-name {
+  color: var(--text);
+}
+[data-theme="dark"] .runtime-heading-icon { border-color: var(--primary-border); }
+[data-theme="dark"] .runtime-fact-source,
+[data-theme="dark"] .runtime-reason-code { color: var(--text-muted); }
+[data-theme="dark"] .runtime-fact-value[data-tone="muted"] { color: var(--text-secondary); }
+[data-theme="dark"] .runtime-count,
+[data-theme="dark"] .runtime-badge { background: var(--surface-muted); }
+[data-theme="dark"] .runtime-badge[data-tone="success"] { background: var(--success-soft); }
+[data-theme="dark"] .runtime-caveat,
+[data-theme="dark"] .runtime-badge[data-tone="pending"] { background: var(--warning-soft); }
+[data-theme="dark"] .runtime-badge[data-tone="danger"] { background: var(--danger-soft); }
+/* 错误条：底色换深色片，描边从浅粉 #fecaca 换成深色描边，深色下不再发亮。 */
+[data-theme="dark"] .runtime-error { background: var(--danger-soft); border-color: var(--danger-border); }
 </style>

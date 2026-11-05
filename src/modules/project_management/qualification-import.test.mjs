@@ -3,14 +3,15 @@ import test from 'node:test'
 import { readFile } from 'node:fs/promises'
 import { formatUserError } from '../shared/utils/userError.js'
 import { formatBusinessDate } from '../shared/utils/businessTime.js'
+import { projectImportErrorRows, projectImportErrorsCsv } from './importErrors.js'
 
 const dialog = await readFile(new URL('./components/QualificationImportDialog.vue', import.meta.url), 'utf8')
 const api = await readFile(new URL('./api/projectManagement.js', import.meta.url), 'utf8')
 function mount(apiCalls, resourceType = 'PERSON') {
   const script = dialog.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '')
   const events = []
-  const state = new Function('formatUserError', 'computed', 'ref', 'defineProps', 'defineEmits', 'downloadCapabilityImportTemplate', 'previewCapabilitiesImport', 'importCapabilities', 'downloadEquipmentImportTemplate', 'previewEquipmentImport', 'importEquipment', 'formatBusinessDate', `${script}\nreturn { file, preview, result, selected, busy, error, readyRows, selectedCount, pick, inspect, commit, reset, dateLabel, importMessage }`)(
-    formatUserError, (read) => ({ get value() { return read() } }), (value) => ({ value }), () => ({ codeOptions: [], resourceType }), () => (...args) => events.push(args), apiCalls.download, apiCalls.preview, apiCalls.commit, apiCalls.equipmentDownload, apiCalls.equipmentPreview, apiCalls.equipmentCommit, formatBusinessDate,
+  const state = new Function('formatUserError', 'computed', 'ref', 'defineProps', 'defineEmits', 'downloadCapabilityImportTemplate', 'previewCapabilitiesImport', 'importCapabilities', 'downloadEquipmentImportTemplate', 'previewEquipmentImport', 'importEquipment', 'formatBusinessDate', 'projectImportErrorRows', 'projectImportErrorsCsv', `${script}\nreturn { file, preview, result, selected, busy, error, readyRows, selectedCount, pick, inspect, commit, reset, dateLabel, importMessage, errorReportRows, canDownloadErrors, downloadErrorReport }`)(
+    formatUserError, (read) => ({ get value() { return read() } }), (value) => ({ value }), () => ({ codeOptions: [], resourceType }), () => (...args) => events.push(args), apiCalls.download, apiCalls.preview, apiCalls.commit, apiCalls.equipmentDownload, apiCalls.equipmentPreview, apiCalls.equipmentCommit, formatBusinessDate, projectImportErrorRows, projectImportErrorsCsv,
   )
   return { ...state, events }
 }
@@ -136,3 +137,18 @@ test('预检和确认请求使用原始文件、物理行号且不伪造内部�
   assert.doesNotMatch(dialog, /formData\.append\('user_id'|v-html/)
   assert.match(dialog, /无需填写用户 ID/)
 })
+test('人员/设备导入错误报告按钮覆盖预检与结果阶段，无错误行时禁用', () => {
+  const state = mount({})
+  assert.match(dialog, /下载错误报告 CSV/)
+  assert.match(dialog, /:disabled="busy \|\| !canDownloadErrors"/)
+  assert.equal(state.canDownloadErrors.value, false)
+  state.preview.value = { rows: [{ row_no: 2, status: 'READY' }] }
+  assert.equal(state.canDownloadErrors.value, false)
+  state.preview.value = { rows: [{ row_no: 2, status: 'READY' }, { row_no: 3, status: 'INVALID', errors: ['人员不唯一'] }] }
+  assert.equal(state.canDownloadErrors.value, true)
+  assert.equal(state.errorReportRows.value.length, 1)
+  state.result.value = { imported: 1, skipped: 1, rows: [{ row_no: 3, status: 'FAILED', message: '占用冲突' }] }
+  assert.equal(state.errorReportRows.value.length, 1)
+  assert.match(dialog, /errorReportSource = computed\(\(\) => result\.value \|\| preview\.value\)/)
+})
+

@@ -2,10 +2,9 @@
 // 预警中心（P-08）：按严重度/到期日排序展示，OPEN→ACK→CLOSED 闭环。
 // 权限与数据范围由后端逐请求执行，前端仅按 permissions 控制动作显隐。
 import { computed, onMounted, ref } from "vue"
-import ConsoleIcon from "@/modules/platform/shared/components/ConsoleIcon.vue"
-import EmptyState from "@/modules/platform/shared/components/EmptyState.vue"
-import ErrorState from "@/modules/platform/shared/components/ErrorState.vue"
-import LoadingState from "@/modules/platform/shared/components/LoadingState.vue"
+import ConsoleIcon from "@/modules/shared/components/ConsoleIcon.vue"
+import ListState from "@/modules/shared/components/ListState.vue"
+import PaginationBar from "@/modules/shared/components/PaginationBar.vue"
 import { ackAlert, closeAlert, getAlertSummary, getAlerts } from "../api/dataAnalysis"
 import { formatDataAnalysisError } from "../utils/errors.js"
 
@@ -109,6 +108,8 @@ const counts = computed(() => ({
   high: Number(summary.value.by_severity?.HIGH || 0) + Number(summary.value.by_severity?.CRITICAL || 0),
 }))
 const pageCount = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
+// 三态闸门：加载中 / 加载失败 / 无记录都走 ListState；失败一定带重试，不会渲染成「暂无预警」。
+const alertListState = computed(() => loading.value || Boolean(error.value) || !filteredAlerts.value.length)
 
 async function load() {
   loading.value = true
@@ -188,11 +189,17 @@ onMounted(load)
         <option value="LOW">低</option>
       </select>
       <button class="da-button ghost" :disabled="loading" @click="load"><ConsoleIcon name="reset" />刷新</button>
-      <span>共 {{ total }} 条 · 第 {{ page }} / {{ pageCount }} 页</span>
     </div>
 
-    <LoadingState v-if="loading" title="预警加载中…" />
-    <ErrorState v-else-if="error" :error="error" @retry="load" />
+    <ListState
+      v-if="alertListState"
+      :loading="loading"
+      :error="error"
+      error-title="预警列表加载失败"
+      empty-title="暂无预警"
+      empty-description="当前筛选条件下没有预警记录"
+      @retry="load"
+    />
     <div v-else class="da-alert-list">
       <article v-for="item in filteredAlerts" :key="item.id" class="da-alert-card">
         <i class="da-alert-severity" :class="item.severity.toLowerCase()"></i>
@@ -210,11 +217,7 @@ onMounted(load)
           <button v-if="item.status !== 'CLOSED'" class="da-button ghost" :disabled="acting === item.id" @click="onClose(item.id)">关闭</button>
         </div>
       </article>
-      <EmptyState v-if="filteredAlerts.length === 0" title="暂无预警" description="当前筛选条件下没有预警记录" />
-      <div class="da-filters" style="justify-content:flex-end">
-        <button class="da-button ghost" :disabled="page <= 1 || loading" @click="changePage(page - 1)">上一页</button>
-        <button class="da-button ghost" :disabled="page >= pageCount || loading" @click="changePage(page + 1)">下一页</button>
-      </div>
+      <PaginationBar label="预警列表分页" :page="page" :total="total" :page-size="pageSize" :loading="loading" @change="changePage" />
     </div>
   </section>
 </template>

@@ -9,15 +9,13 @@ import {
   validateSupplementClosure,
 } from '../supplementClosure.js'
 
-/**
- * 项目页「补充协议关账」弹窗域（BIZ-PROJECT-04 前端受控入口）。
- * 收编：候选补充协议装载、表单校验、二次确认、提交与写后刷新衔接。
- *
- * 注入项与组件内同名标识一一对应：closeSupplement/listSupplementContracts/
- * formatUserError/showToast/refreshAfterWrite/askConfirm；不直接导入 API 模块，
- * 保持可独立测试。入口可见性由视图按 supplement_status 与权限判定后调用这里。
- */
-export function useSupplementClosure({ closeSupplement, listSupplementContracts, formatUserError, showToast, refreshAfterWrite, askConfirm }) {
+// 用途：管理补充协议关账的目录、表单、二次确认与写后刷新。
+// 参数：依赖对象提供关账接口、目录读取、错误提示、刷新、确认和当前权限核验。
+// 返回值：弹窗状态及打开、关闭、重试、提交动作。
+export function useSupplementClosure({
+  closeSupplement, listSupplementContracts, formatUserError, showToast,
+  refreshAfterWrite, askConfirm, closureAllowed = () => true,
+}) {
   const closureOpen = ref(false)
   const closureProject = ref(null)
   const closureContracts = ref([])
@@ -27,6 +25,7 @@ export function useSupplementClosure({ closeSupplement, listSupplementContracts,
   const closureSaving = ref(false)
   const closureError = ref('')
   const closureScope = createRequestScope()
+  let confirmationPending = false
 
   function closeSupplementClosure() {
     closureOpen.value = false
@@ -73,10 +72,13 @@ export function useSupplementClosure({ closeSupplement, listSupplementContracts,
     await loadClosureContracts(project)
   }
 
+  // 用途：固定待确认范围并在二次确认后复核上下文，执行补充协议关账。
+  // 参数：无。
+  // 返回值：无；取消、上下文失效或业务失败时不报告成功。
   async function submitSupplementClosure() {
-    if (closureSaving.value || closureLoading.value) return
+    if (closureSaving.value || closureLoading.value || confirmationPending) return
     const project = closureProject.value
-    if (!project?.id) return
+    if (!project?.id || !closureAllowed(project)) return
     const invalid = validateSupplementClosure(closureForm.value)
     if (invalid) {
       closureError.value = invalid
@@ -84,21 +86,36 @@ export function useSupplementClosure({ closeSupplement, listSupplementContracts,
       return
     }
     // 二次确认：关账把“当前拆解范围”钉成新的权威基准，且不能靠再确认一次拆解撤销。
-    const confirmed = await askConfirm({
-      title: SUPPLEMENT_CLOSURE_CONFIRM_TITLE,
-      description: `目标项目 ${project.id}${project.name ? ` · ${project.name}` : ''}。${SUPPLEMENT_CLOSURE_CONFIRM_NOTE}`,
-      confirmText: '确认关账',
-      cancelText: '再核对一下',
-      danger: true,
-    })
+    const payload = {
+      supplement_contract_id: String(closureForm.value.supplementContractID).trim(),
+      reason: String(closureForm.value.reason).trim(),
+    }
+    const formSnapshot = JSON.stringify(closureForm.value)
+    const projectSnapshot = JSON.stringify(project)
+    const ticket = closureScope.begin(`CLOSURE_CONFIRM:${project.id}`)
+    confirmationPending = true
+    let confirmed
+    try {
+      confirmed = await askConfirm({
+        title: SUPPLEMENT_CLOSURE_CONFIRM_TITLE,
+        description: `目标项目 ${project.id}${project.name ? ` · ${project.name}` : ''}。${SUPPLEMENT_CLOSURE_CONFIRM_NOTE}`,
+        confirmText: '关账并固定范围',
+        cancelText: '返回核对',
+        danger: true,
+      })
+    } finally { confirmationPending = false }
     if (!confirmed) return
+    const unchanged = closureScope.isCurrent(ticket) && closureOpen.value
+      && closureProject.value === project && JSON.stringify(project) === projectSnapshot
+      && JSON.stringify(closureForm.value) === formSnapshot
+    if (!unchanged || closureSaving.value || closureLoading.value || !closureAllowed(project)) {
+      showToast('关账范围或权限已变化，请返回核对后重新提交', 'warning')
+      return
+    }
     closureSaving.value = true
     closureError.value = ''
     try {
-      const result = await closeSupplement(project.id, {
-        supplement_contract_id: String(closureForm.value.supplementContractID).trim(),
-        reason: String(closureForm.value.reason).trim(),
-      })
+      const result = await closeSupplement(project.id, payload)
       closureOpen.value = false
       closureScope.invalidate()
       const status = String(result?.status || '').trim()

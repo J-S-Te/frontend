@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "mimosa-hook-status/v1",
+  "recordedAt": "2026-10-26T03:12:54.749Z",
+  "sessionId": "session_662a7a57684f2f08121fd3eb7bfe701a",
+  "event": "PostToolUse",
+  "toolName": "Write",
+  "file": "composables/useCustomerImportWizard.test.mjs",
+  "outcome": "clear",
+  "coverage": "complete",
+  "findingCount": 0,
+  "durationMs": 2,
+  "hostState": "hook_complete",
+  "reportHint": ".mimosa/reports/"
+}

@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
+import ListState from '@/modules/shared/components/ListState.vue'
 import { displayStatus } from '@/modules/platform/iam/utils/iamPresentation'
 import {
   buildPositionOrganizationTree,
@@ -14,12 +15,14 @@ const props = defineProps({
   organizations: { type: Array, default: () => [] },
   keyword: { type: String, default: '' },
   loading: { type: Boolean, default: false },
+  // 岗位列表读取失败原因：交给 ListState 渲染可重试错误态，不能退化成「暂无组织和岗位记录」。
+  error: { type: [String, Object, Error], default: '' },
   canCreate: { type: Boolean, default: false },
   canDelete: { type: Boolean, default: false },
   deletingId: { type: String, default: '' },
 })
 
-const emit = defineEmits(['create', 'detail', 'remove'])
+const emit = defineEmits(['create', 'detail', 'remove', 'retry'])
 const collapsedIds = ref(new Set())
 const initialized = ref(false)
 const positionDisplayLimits = ref({})
@@ -35,6 +38,9 @@ const branchIds = computed(() => new Set(
     .map((node) => node.organization_id),
 ))
 const organizationCount = computed(() => flattenPositionOrganizationTree(completeTree.value).filter((node) => !node.unresolved).length)
+// 三态闸门：加载中 > 读取失败（可重试）> 空。失败排在空之前，避免请求失败被读成「暂无岗位」。
+const listState = computed(() => props.loading || Boolean(props.error) || !visibleNodes.value.length)
+const emptyTitle = computed(() => (String(props.keyword || '').trim() ? '没有匹配的岗位或组织。' : '暂无组织和岗位记录。'))
 
 watch(branchIds, (currentBranchIds) => {
   if (!initialized.value && currentBranchIds.size) {
@@ -108,8 +114,15 @@ function showMorePositions(node) {
       </div>
     </header>
 
-    <p v-if="loading" class="iam-position-groups-empty">正在读取组织架构与岗位…</p>
-    <p v-else-if="!visibleNodes.length" class="iam-position-groups-empty">{{ keyword ? '没有匹配的岗位或组织。' : '暂无组织和岗位记录。' }}</p>
+    <ListState
+      v-if="listState"
+      :loading="loading"
+      :error="error"
+      error-title="岗位列表加载失败"
+      loading-title="正在读取组织架构与岗位…"
+      :empty-title="emptyTitle"
+      @retry="emit('retry')"
+    />
 
     <div v-else class="iam-position-tree" role="tree" aria-label="岗位所属组织树">
       <section

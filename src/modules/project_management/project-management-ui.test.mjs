@@ -148,7 +148,13 @@ test('项目列表 KPI、趋势图、资质筛选与空态不发生视觉回归'
   assert.match(styles, /\.pm-qualification-filter span \{[^}]*flex: 0 0 auto;[^}]*white-space: nowrap;/)
 
   // 无数据与筛选无结果都必须在项目列表表体内给出明确反馈。
-  assert.match(source, /<tr v-if="!pagedProjects\.length"><td colspan="10" class="pm-empty-mini">\{\{ projectListEmptyText \}\}<\/td><\/tr>/)
+  // 2026-11 统一：三态由 ListState 承担，空态文案按「数据源为空 / 筛选无结果」区分，
+  // 加载与「报告阶段读取失败」不再被塞进同一句空文案里。
+  assert.match(source, /<tr v-if="!pagedProjects\.length"><td colspan="10">/)
+  assert.match(source, /:empty-title="projectListSource\.length \? '暂无符合当前筛选条件的项目' : '暂无项目，请先新建项目'"/)
+  assert.match(source, /:loading="reportStageListLoading"/)
+  assert.match(source, /:error="projectListError"/)
+  assert.doesNotMatch(source, /projectListEmptyText/)
 })
 
 test('执行总览的在途项目以项目名称为主信息并悬停提示项目编号', () => {
@@ -1041,8 +1047,10 @@ test('项目表提供真实分页控件', () => {
   assert.match(source, /v-for="project in pagedProjects"/)
   // 筛选变化后回到第一页，避免停在越界页码看到空表。
   assert.match(source, /watch\(\[keyword, statusFilter, categoryFilter, teamFilter, projectCardFilter\], \(\) => \{ projectPage\.value = 1 \}\)/)
-  assert.match(source, /:disabled="projectPage <= 1" @click="gotoProjectPage\(projectPage - 1\)"/)
-  assert.match(source, /:disabled="projectPage >= projectPageCount" @click="gotoProjectPage\(projectPage \+ 1\)"/)
+  // 上一页 / 下一页的禁用语义由统一分页条保证（shared/pagination-bar.test.mjs），
+  // 项目表侧只保留「同源于 projectPage / filteredProjects / projectPageSize」的契约。
+  assert.match(source, /<PaginationBar label="项目列表分页" :page="projectPage" :total="filteredProjects\.length" :page-size="projectPageSize"[^>]*@change="gotoProjectPage"/)
+  assert.doesNotMatch(source, /class="pm-pagination"/)
 })
 
 test('站点档案下线后新建项目直接使用实施场所文本', () => {
@@ -1610,8 +1618,8 @@ test('在途监控使用服务端快照、自动刷新、真分页和节点下�
   assert.match(monitoringSource, /window\.setInterval\([\s\S]*15000\)/)
   assert.match(monitoringSource, /document\.addEventListener\('visibilitychange', onMonitoringVisibility\)/)
   assert.match(monitoringSource, /window\.addEventListener\('focus', onMonitoringVisibility\)/)
-  assert.match(source, /changeMonitoringPage\(monitorPage - 1\)/)
-  assert.match(source, /changeMonitoringPage\(monitorPage \+ 1\)/)
+  // 监控列表的分页同样收敛到 PaginationBar：服务端 total 决定页数，越界页由 useProjectMonitoring 钳制。
+  assert.match(source, /<PaginationBar label="在途项目监控分页" :page="monitorPage" :total="monitoringSnapshot\.total" :page-size="monitorPageSize" :loading="monitoringLoading" @change="changeMonitoringPage"/)
   assert.doesNotMatch(source, /<button class="pm-pg" disabled>‹<\/button><button class="pm-pg active">1<\/button>/)
   for (const label of ['当前 / 下一里程碑', '服务项状态', '资源', 'SLA / 冲突', '最近交付事件', '前往当前节点']) assert.match(source, new RegExp(label))
   assert.match(source, /monitorSLAOnly/)

@@ -17,13 +17,16 @@ test('基础平台页面不展示研发需求编号标签', () => {
 test('系统设置页只保留一层页面标题并由各模块展示自身标题', () => {
   const settingsTemplate = source.slice(
     source.indexOf('<section v-else-if="currentView === \'settings\''),
-    source.indexOf('</section>\n      </section>\n    </main>'),
+    // 壳层已抽到 AppShell.vue：设置分段结束于 #overlay 模板的起始，不能再锚定 </main>。
+    source.indexOf('    <template #overlay>'),
   )
 
   assert.match(source, /<div v-if="currentView === 'audit'" class="console-page-head">/)
   assert.doesNotMatch(settingsTemplate, /class="console-page-head"/)
   assert.doesNotMatch(settingsTemplate, /class="settings-active-summary"/)
-  assert.match(settingsTemplate, /<h2>系统设置<\/h2>/)
+  // 页面级标题与审计页一致使用 <h1>（视觉尺寸由 settings-showcase.css 保留），
+  // 卡片内标题仍为 <h2>，保持单层页面标题 + 模块自身标题的层级。
+  assert.match(settingsTemplate, /<h1>系统设置<\/h1>/)
   assert.match(settingsTemplate, /<h2>平台基础信息<\/h2>/)
 })
 

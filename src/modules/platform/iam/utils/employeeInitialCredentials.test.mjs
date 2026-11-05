@@ -13,6 +13,9 @@ function fixture(result) {
   const events = []
   const state = {
     submitting: { value: false }, submitError: { value: '' }, credentialsVisible: { value: false },
+    // 提交失败时整批 422 的逐行问题清单（submitIssues）由 batchImportIssues 解析；
+    // 本用例只覆盖凭据交接，故给空清单与恒空解析器，行为与“服务端未返回 issues”一致。
+    submitIssues: { value: [] }, parseBatchImportIssues: () => [],
     selectedValidRows: { value: [{ displayName: 'fixture', lineNo: 2, applicationRoles: [] }] },
     selectedFile: { value: null }, submitResult: { value: null }, step: { value: 2 }, BATCH_LIMIT: 100,
     createEmployeesBatch: async () => result,

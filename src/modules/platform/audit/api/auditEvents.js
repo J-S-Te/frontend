@@ -1,6 +1,7 @@
 import { API_BASE_URL, createRequest, readBody } from '../../shared/api/request.js'
 import { attachStructuredContext } from '../../shared/api/requestContext.js'
 import { formatUserError } from '../../../shared/utils/userError.js'
+import { DOWNLOAD_TIMEOUT_MESSAGE, downloadRequestSignal } from '../../../shared/utils/downloadTimeout.js'
 
 /**
  * AuditEventsError 与业务错误分类相关的错误类型定义。
@@ -148,8 +149,37 @@ export function auditExportDownloadURL(jobId) {
   return `${API_BASE_URL}/audit/export-jobs/${encodeURIComponent(jobId)}/download`
 }
 
-/** 下载被拒绝时停留在当前页面，避免跳转至原始 JSON/HTML。 */
-export async function downloadAuditExportFile(jobId) {
+/**
+ * 审计导出下载票据请求头。服务端只接受请求头，刻意不支持 ?ticket= 查询参数：
+ * URL 会被浏览器历史、代理与访问日志留存，等于把 bearer 能力写进日志链。
+ */
+export const AUDIT_EXPORT_DOWNLOAD_TICKET_HEADER = 'X-Audit-Export-Ticket'
+
+/**
+ * 申请短时一次性审计导出下载票据。
+ * 服务端只保存票据摘要，明文票据只出现在本次响应里：调用方不得持久化或记录日志，
+ * 应在紧随其后的下载请求里通过 X-Audit-Export-Ticket 头一次性使用。
+ * @param {string} jobId 导出任务标识。
+ * @returns {Promise<object>} 含 ticket / download_url / expires_at 的签发结果。
+ */
+export function createAuditExportDownloadTicket(jobId) {
+  return request(`/audit/export-jobs/${encodeURIComponent(jobId)}/download-tickets`, { method: 'POST' })
+}
+
+/**
+ * 下载审计导出文件。
+ *
+ * 下载契约（审计导出下载一次性票据）：服务端不再接受只凭会话 Cookie 的 GET 下载，
+ * 必须先申请短时一次性票据，再带票据兑换文件字节；票据使用一次即作废，过期需重新申请。
+ * 未传入 ticket 时本函数会先申请，再立即兑换；调用方已持有票据（例如页面上先展示
+ * “准备下载”状态）时可传入，避免重复签发。
+ * @param {string} jobId 导出任务标识。
+ * @param {object} [options] 下载选项。
+ * @param {string} [options.ticket=''] 已申请的一次性下载票据。
+ * @returns {Promise<{blob: Blob, filename: string}>} 文件内容与安全文件名。
+ */
+export async function downloadAuditExportFile(jobId, { ticket: providedTicket = '' } = {}) {
+  const ticketPath = `/audit/export-jobs/${encodeURIComponent(jobId)}/download-tickets`
   const path = `/audit/export-jobs/${encodeURIComponent(jobId)}/download`
   const context = { subsystem: 'platform', feature: 'audit_download', method: 'GET', operation: 'GET', path }
   const failure = (body, status, code) => {
@@ -157,16 +187,44 @@ export async function downloadAuditExportFile(jobId) {
     error.details = body?.details || null
     return attachStructuredContext(error, context, { status, code: error.code, requestId: body?.request_id, traceId: body?.trace_id || body?.traceId })
   }
+  // 审计导出属于下载请求：票据申请 + 文件字节共用同一个超时 signal，避免网络挂起时永久等待。
+  const downloadAbort = downloadRequestSignal()
+  // 超时中断必须给出可重试的超时提示，不能伪装成网络错误或成功。
+  const timedOutFailure = (cause) => {
+    const error = failure({ message: DOWNLOAD_TIMEOUT_MESSAGE }, 0, 'AUDIT_DOWNLOAD_TIMEOUT')
+    error.message = DOWNLOAD_TIMEOUT_MESSAGE
+    error.cause = cause
+    return error
+  }
+  let ticket = String(providedTicket || '').trim()
+  if (!ticket) {
+    let issued
+    try { issued = await request(ticketPath, { method: 'POST', signal: downloadAbort.signal }) }
+    catch (cause) {
+      if (downloadAbort.timedOut()) throw timedOutFailure(cause)
+      // request() 已按统一错误模型给出 status/code（401/403/410 等）；原样保留语义。
+      throw cause
+    }
+    ticket = typeof issued?.ticket === 'string' ? issued.ticket.trim() : ''
+    // 没有票据就发下载请求只会得到 401；这里按无效响应处理，不静默重试。
+    if (!ticket) throw failure({ message: '服务未返回可用的下载票据。' }, 0, 'INVALID_DOWNLOAD_TICKET')
+  }
   let response
-  try { response = await fetch(auditExportDownloadURL(jobId), { credentials: 'include', cache: 'no-store', headers: { Accept: 'text/csv, application/octet-stream' } }) }
-  catch { throw failure(null, 0, 'NETWORK_ERROR') }
+  try { response = await fetch(auditExportDownloadURL(jobId), { credentials: 'include', cache: 'no-store', signal: downloadAbort.signal, headers: { Accept: 'text/csv, application/octet-stream', [AUDIT_EXPORT_DOWNLOAD_TICKET_HEADER]: ticket } }) }
+  catch (cause) {
+    if (downloadAbort.timedOut()) throw timedOutFailure(cause)
+    throw failure(null, 0, 'NETWORK_ERROR')
+  }
   if (!response.ok) throw failure(await readBody(response), response.status)
   const type = (response.headers.get('content-type') || '').split(';', 1)[0].trim().toLowerCase()
   const disposition = response.headers.get('content-disposition') || ''
   if (type !== 'text/csv' && !(type === 'application/octet-stream' && /^attachment\b/i.test(disposition))) throw failure(null, response.status, 'INVALID_DOWNLOAD_RESPONSE')
   let blob
   try { blob = await response.blob() }
-  catch { throw failure(null, response.status, 'NETWORK_ERROR') }
+  catch (cause) {
+    if (downloadAbort.timedOut()) throw timedOutFailure(cause)
+    throw failure(null, response.status, 'NETWORK_ERROR')
+  }
   if (!blob.size) throw failure(null, response.status, 'INVALID_DOWNLOAD_RESPONSE')
   const name = disposition.match(/filename\*=UTF-8''([^;]+)/i) || disposition.match(/filename="?([^";]+)/i)
   let filename = 'audit-export.csv'

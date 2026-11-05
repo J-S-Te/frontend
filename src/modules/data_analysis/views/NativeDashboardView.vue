@@ -269,6 +269,9 @@ function alertWidth(value) {
   return `${Math.max(4, Math.round((numberValue(value) / maxAlertValue.value) * 100))}%`
 }
 
+// 用途：按可用的真实摘要构造当前看板指标，并标明财务回款事实期间。
+// 参数：无，读取当前视图传入的摘要与权限可见状态。
+// 返回值：可展示的指标；缺失值继续使用不可用标记。
 function metricsForSection() {
   const contract = props.contractSummary || {}
   const project = props.projectSummary || {}
@@ -327,7 +330,7 @@ function metricsForSection() {
     const values = props.businessSummary?.available ? props.businessSummary.metrics || {} : {}
     return [metric("报告周期 P50", values.cycle_p50_days == null ? "—" : Number(values.cycle_p50_days).toFixed(2), "天"), metric("有效报告版本", values.active_reports == null ? "—" : formatInteger(values.active_reports), "份"), metric("已复核／批准版本", values.reviewed_reports == null ? "—" : formatInteger(values.reviewed_reports), "份"), metric("作废版本", values.void_reports == null ? "—" : formatInteger(values.void_reports), "份", "danger")]
   }
-  return currencyItems.value.flatMap(row => [metric(`${row.currency} 已核销回款率`, row.collection_rate == null ? "—" : Number(row.collection_rate).toFixed(2), "%"), metric(`${row.currency} 未清应收`, formatAmountMinor(row.open_minor), "万元"), metric(`${row.currency} 超期90天应收`, formatAmountMinor(row.over_90_minor), "万元", "danger"), metric(`${row.currency} 本月登记回款`, formatAmountMinor(row.month_receipts_minor), "万元")])
+  return currencyItems.value.flatMap(row => [metric(`${row.currency} 已核销回款率`, row.collection_rate == null ? "—" : Number(row.collection_rate).toFixed(2), "%"), metric(`${row.currency} 未清应收`, formatAmountMinor(row.open_minor), "万元"), metric(`${row.currency} 超期90天应收`, formatAmountMinor(row.over_90_minor), "万元", "danger"), metric(`${row.currency} ${financeReceiptLabel.value}`, formatAmountMinor(row.month_receipts_minor), "万元")])
 }
 
 // 项目分区按隐藏偏好过滤卡片；其他分区保持既有全部展示，不做重排。
@@ -338,6 +341,10 @@ const allProjectCardsHidden = computed(() => props.section === "project" && sect
 // 列数跟随可见卡片数变化，隐藏后不留下空列；全隐藏时网格不渲染，列数类仍保持合法。
 const metricsColumnsClass = computed(() => (props.section === "project" ? `da-native-metrics-cols-${metricColumnCount(displayedMetrics.value.length)}` : ""))
 
+const financeReceiptLabel = computed(() => {
+  const month = String(props.businessSummary?.metrics?.month || "")
+  return /^\d{4}-(0[1-9]|1[0-2])$/.test(month) ? `${month}登记回款` : "本月登记回款"
+})
 const currencyItems = computed(() => props.businessSummary?.available ? props.businessSummary?.metrics?.currencies || [] : [])
 const missingMetricLabels = { first_pass_rate: '首次通过率：缺少完整首轮审核结果记录', open_complaints: '投诉：尚无投诉数据源', recognized_income: '收入：尚无收入确认数据源', department_cost: '部门成本：尚无成本数据源' }
 </script>
@@ -458,9 +465,9 @@ const missingMetricLabels = { first_pass_rate: '首次通过率：缺少完整�
           <template v-if="section === 'report'"><div v-for="(count, status) in businessSummary.metrics?.status_counts || {}" :key="status" class="da-native-bar-row"><span>{{ status }}</span><small>{{ formatInteger(count) }} 份</small></div></template>
           <template v-else><div v-for="row in currencyItems" :key="row.currency" class="da-native-note">{{ row.currency }} 原始应收 {{ formatAmountMinor(row.original_minor) }} 万元，已核销回款 {{ formatAmountMinor(row.allocated_minor) }} 万元，未清 {{ formatAmountMinor(row.open_minor) }} 万元</div></template>
           <p class="da-native-note">{{ businessSummary.basis }}</p>
-          <p v-if="section === 'finance' && !currencyItems.length" class="da-native-note">本次同步成功，当前租户尚无应收或回款记录。</p>
+          <p v-if="section === 'finance' && !currencyItems.length" class="da-native-note">当前来源快照可用，当前租户尚无应收或回款记录。</p>
         </div>
-        <div v-else class="da-native-empty"><b>尚无可用来源快照</b><p>需要配置该系统的受控只读数据源并完成一次同步；读取失败不会显示演示统计。</p></div>
+        <div v-else class="da-native-empty"><b>尚无可用来源快照</b><p>{{ businessSummary?.basis || "需要配置该系统的受控只读数据源并完成一次同步；读取失败不会显示演示统计。" }}</p></div>
       </article>
       <article class="da-native-panel">
         <header><b>口径与数据边界</b><span>缺失来源不计为零</span></header>

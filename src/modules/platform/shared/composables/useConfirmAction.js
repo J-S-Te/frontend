@@ -1,17 +1,17 @@
 import { ref } from 'vue'
+import { requireActionLabel } from '../../../shared/utils/actionLabel.js'
 
-/**
- * 回调式危险操作确认弹窗状态。不使用 window.confirm，避免 WebView / 某些 PWA
- * 容器中 confirm 静默失败导致危险操作被误判为取消。同一时刻只有一个弹窗。
- *
- * onConfirm 返回 false 表示业务失败，保留弹窗让用户看到错误并可重试；
- * 抛出异常时同样保留弹窗，避免误判为成功。closeConfirm 在 busy 期间拒绝关闭，
- * 关闭时触发可选的 onCancel（未传入则无副作用）。
- */
+// useConfirmAction 管理明确动作确认、执行锁及失败保留。
+// 参数：无。
+// 返回值：弹窗状态及打开、取消、执行方法；回调失败时保留弹窗。
 export function useConfirmAction() {
   const dialog = ref(null) // { title, description, confirmText, cancelText, danger, busy, onConfirm, onCancel }
 
-  function openConfirm({ title, description, confirmText = '确认', cancelText = '取消', danger = false, onConfirm, onCancel }) {
+  // openConfirm 安装待执行操作并要求明确的动作按钮。
+  // 参数：配置包含标题、业务回调、动作文字与可选取消回调。
+  // 返回值：无；模糊动作文字会抛出参数错误。
+  function openConfirm({ title, description, confirmText, cancelText = '取消', danger = false, onConfirm, onCancel }) {
+    confirmText = requireActionLabel(confirmText)
     dialog.value = { title, description, confirmText, cancelText, danger, busy: false, onConfirm, onCancel }
   }
 

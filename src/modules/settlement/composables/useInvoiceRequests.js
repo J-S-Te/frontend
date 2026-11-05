@@ -1,12 +1,12 @@
 import { computed, ref } from "vue";
-import { todayBusinessDate } from "../../shared/utils/businessTime.js";
+import { formatBusinessDate, todayBusinessDate } from "../../shared/utils/businessTime.js";
 import { CANCELLABLE_INVOICE_STATUSES } from "../utils/invoiceStatus.js";
 
 /**
  * 开票申请域（治理批次 5 结算，自 SettlementView.vue 逐字迁移）。
  * 收编：开票区页签、申请编辑器 / 审核弹窗开关、关键字 + 状态筛选与重置、申请列表 / 已开发票两路可见派生、
  * 开票申请提交（按所选可开票应收组装买方 / 明细 / 余额锁定）、审核（批准 / 驳回须填原因）、
- * 人工登记发票（manualIssue 三次 window.prompt 逐字保留，行为修复另行授权）、
+ * 人工登记发票（单表单收集代码、号码与北京开票日期）、
  * 开票失败复核弹窗（5–1000 字校验、弹窗内联 error、成功后刷新并说明尚未重新开票）、
  * 作废（释放额度）弹窗（SET-06：仅待开具 / 开具失败可作废，5–1000 字原因，成功后以刷新结果为准，不做乐观更新）。
  * 注入项与组件内同名标识一一对应：invoiceRequests/taxInvoices/invoiceEligibleReceivables/saving/notify/act/load/
@@ -17,6 +17,9 @@ import { CANCELLABLE_INVOICE_STATUSES } from "../utils/invoiceStatus.js";
 // 参数：依赖对象含可见应收、API、保存状态与通知方法。
 // 返回值：开票交互状态及操作函数。
 export function useInvoiceRequests({
+  can = () => false,
+  askPrompt,
+  active = ref("invoices"),
   invoiceRequests,
   taxInvoices,
   invoiceEligibleReceivables,
@@ -32,6 +35,7 @@ export function useInvoiceRequests({
   registerManualInvoice,
   recoverInvoiceFailure,
 }) {
+  let manualPromptPending = false;
   const reviewFailureDialog = ref(null);
   const cancelDialog = ref(null);
   const invoiceTab = ref("requests");
@@ -193,25 +197,50 @@ export function useInvoiceRequests({
         : "开票申请已驳回，锁定的可开票余额已释放。",
     );
   }
-  function manualIssue(item) {
-    const invoice_code = window.prompt("请输入发票代码");
-    if (!invoice_code) return;
-    const invoice_no = window.prompt("请输入发票号码");
-    if (!invoice_no) return;
-    const issue_date = window.prompt(
-      "请输入开票日期（YYYY-MM-DD）",
-      // 纯日期按北京日历日取“今天”：toISOString 取的是 UTC 日历日，北京 00:00–08:00 会差一天。
-      todayBusinessDate(),
-    );
-    if (!issue_date) return;
+  // 用途：确认当前申请仍可人工登记，防止表单等待期间状态或权限变化。
+  // 参数：target 为打开表单时保存的申请标识与版本。
+  // 返回值：当前列表仍有相同申请且具备登记能力时为 true。
+  function canManuallyIssue(target) {
+    const current = invoiceRequests.value.find((item) => item.id === target?.id);
+    return !saving.value && active.value === "invoices" && can("settlement.invoice.issue")
+      && current?.version === target.version && current?.status === "ISSUE_PENDING"
+      && current?.issue_channel === "MANUAL";
+  }
+
+  // 用途：用一个表单登记人工开票结果，提交前复核原申请与保存状态。
+  // 参数：item 为当前申请行；登记信息由应用内表单一次收集。
+  // 返回值：登记完成的 Promise；取消或申请变化时不调用登记接口。
+  async function manualIssue(item) {
+    if (!item || manualPromptPending) return;
+    const target = { id: item.id, version: item.version };
+    if (!canManuallyIssue(target)) return;
+    manualPromptPending = true;
+    let form;
+    try {
+      form = await askPrompt({
+        title: "登记发票",
+        confirmText: "登记发票",
+        description: `为开票申请 ${item.request_no || item.id} 登记已开具的发票信息。`,
+        fields: [
+          { name: "invoice_code", label: "发票代码", type: "text", required: true },
+          { name: "invoice_no", label: "发票号码", type: "text", required: true },
+          { name: "issue_date", label: "开票日期", type: "date", required: true,
+            initialValue: todayBusinessDate() },
+        ],
+      });
+    } finally {
+      manualPromptPending = false;
+    }
+    if (!form || !canManuallyIssue(target)) return;
+    const invoice_code = String(form.invoice_code || "").trim();
+    const invoice_no = String(form.invoice_no || "").trim();
+    const issue_date = String(form.issue_date || "").trim();
+    if (!invoice_code || !invoice_no || !/^\d{4}-\d{2}-\d{2}$/.test(issue_date)
+      || formatBusinessDate(issue_date) !== issue_date) return;
     return act(
-      () =>
-        registerManualInvoice(item.id, {
-          invoice_code,
-          invoice_no,
-          issue_date,
-          seller_profile: {},
-        }),
+      () => registerManualInvoice(target.id, {
+        invoice_code, invoice_no, issue_date, seller_profile: {},
+      }),
       "发票已登记，应收开票金额已同步更新。",
     );
   }

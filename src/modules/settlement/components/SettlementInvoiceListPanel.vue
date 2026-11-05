@@ -274,7 +274,7 @@ function hasInvoiceRowAction(item) {
             role="alert"
           >{{ invoiceErrors.amount_incl_tax }}</small>
         </div>
-        <textarea v-model.trim="invoiceForm.special_reason" maxlength="1000" placeholder="特殊事项或折扣原因（填写后需总监加签）"></textarea><button :disabled="saving">提交申请</button>
+        <textarea v-model.trim="invoiceForm.special_reason" maxlength="1000" placeholder="特殊事项或折扣原因（填写后需总监加签）"></textarea><button :disabled="saving">提交开票申请</button>
       </form>
     </article>
     <article
@@ -309,7 +309,7 @@ function hasInvoiceRowAction(item) {
           :disabled="saving"
           @click="$emit('submit-review', 'reject')"
         >
-          驳回申请
+          驳回开票申请
         </button>
         <button
           type="button"
@@ -317,7 +317,7 @@ function hasInvoiceRowAction(item) {
           :disabled="saving"
           @click="$emit('submit-review', 'approve')"
         >
-          审批通过
+          批准开票申请
         </button>
       </div>
     </article>
@@ -418,7 +418,7 @@ function hasInvoiceRowAction(item) {
                   :disabled="saving"
                   @click="$emit('approve', item)"
                 >
-                  审核</button
+                  审核开票申请</button
                 ><button
                   v-else-if="item.status === 'ISSUE_PENDING' && item.issue_channel === 'MANUAL' && can('settlement.invoice.issue')"
                   class="console-button secondary small"
@@ -431,13 +431,13 @@ function hasInvoiceRowAction(item) {
                   class="console-button secondary small"
                   :disabled="saving"
                   @click="$emit('review-failure', item)"
-                >失败复核</button
+                >复核失败结果</button
                 ><button
                   v-if="showsCancelInvoice(item)"
                   class="console-button danger small"
                   :disabled="saving"
                   @click="$emit('cancel-invoice', item)"
-                >作废（释放额度）</button
+                >作废开票申请</button
                 ><span v-if="!hasInvoiceRowAction(item)" class="settlement-muted">—</span>
               </td>
             </tr>

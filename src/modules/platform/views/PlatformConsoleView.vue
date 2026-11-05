@@ -16,6 +16,9 @@ import DictionaryManagementModule from '@/modules/platform/dictionaries/componen
 import SubsystemOnboardingModule from '@/modules/platform/applications/components/SubsystemOnboardingModule.vue'
 import SubsystemAccessWizard from '@/modules/platform/applications/components/SubsystemAccessWizard.vue'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
+import AppShell from '@/modules/shared/components/AppShell.vue'
+import ListState from '@/modules/shared/components/ListState.vue'
+import PaginationBar from '@/modules/shared/components/PaginationBar.vue'
 import OperationResultBanner from '@/modules/shared/components/OperationResultBanner.vue'
 import OperationInboxPanel from '@/modules/shared/components/OperationInboxPanel.vue'
 import { usePersistentResult } from '@/modules/shared/composables/usePersistentResult.js'
@@ -30,6 +33,7 @@ import {
   listAuditEvents,
   getAuditIngestionHealth,
   createAuditExportJob,
+  createAuditExportDownloadTicket,
   getAuditExportJob,
   downloadAuditExportFile,
 } from '@/modules/platform/audit/api/auditEvents'
@@ -113,6 +117,8 @@ const auditDownloading = ref(false)
 const auditExportJob = ref(null)
 const notificationMenuOpen = ref(false)
 const notificationMenuLoading = ref(false)
+// 顶栏未读通知弹层：失败原因单独留存，弹层用三态闸门展示，不再吞成「暂无未读通知」。
+const topbarNotificationsError = ref('')
 const topbarNotifications = ref([])
 const topbarUnreadCount = ref(0)
 // 筛选器会在用户连续操作时触发多次请求；序号和 AbortController 共同保证旧响应
@@ -120,6 +126,9 @@ const topbarUnreadCount = ref(0)
 let auditRequestSequence = 0
 let auditRequestController = null
 const applications = ref([])
+// 应用目录是审计筛选的输入之一：失败必须单独留痕并可重试，
+// 否则只剩「全部应用」一个选项，用户会误判成「系统里只有一个应用」。
+const applicationsError = ref('')
 const environments = ref([])
 let toastTimer = null
 
@@ -257,6 +266,25 @@ const visibleSettingsTabs = computed(() => settingsTabs.filter((tab) => hasAnyPe
 const hasNoVisibleSettingsTab = computed(() => visibleSettingsTabs.value.length === 0)
 const canOpenSettings = computed(() => visibleSettingsTabs.value.length > 0)
 const hasAnySettingsOrAuditPermission = computed(() => canOpenSettings.value || canViewAudit.value)
+
+// 侧栏导航的数据化描述：外壳只负责渲染，权限与当前视图仍由本页决定。
+// 第一组不带 label（置顶的「返回子系统门户」），第二组按既有顺序列出系统管理入口；
+// visible: false 等价于原来的 v-if，不会渲染成空按钮。
+const navGroups = computed(() => [
+  {
+    items: [
+      { key: 'portal', label: '返回子系统门户', icon: 'dashboard', itemClass: 'console-nav-item--portal' },
+    ],
+  },
+  {
+    label: '系统管理',
+    items: [
+      { key: 'settings', label: '系统设置', icon: 'settings', active: currentView.value === 'settings', visible: canOpenSettings.value },
+      { key: 'audit', label: '审计日志', icon: 'audit', note: '只读', active: currentView.value === 'audit', visible: canViewAudit.value },
+    ],
+  },
+])
+
 const lastSettingsSection = ref('iam')
 // 设置页 tab 快速过滤：匹配 label / description / capabilities 任一字段，
 // 用于在 8 个 tab 中快速定位；空字符串不过滤。
@@ -298,6 +326,15 @@ const hasActiveFilteredSettingsTab = computed(() => (
   filteredSettingsTabs.value.some((tab) => tab.key === activeSettingsTab.value)
 ))
 
+// 设置页大纲补位：页面标题是 <h1>，各设置模块内部的标题从 <h3> 起（含无权限空状态），
+// 中间缺 <h2> 会造成标题层级跳跃。这里用当前 tab 名称生成一个只存在于可访问性树里的
+// 小节标题：视觉隐藏、不占布局、不改变任何可见标题的级别。
+const activeSettingsTabLabel = computed(() => (
+  filteredSettingsTabs.value.find((tab) => tab.key === activeSettingsTab.value)?.label
+  || visibleSettingsTabs.value.find((tab) => tab.key === activeSettingsTab.value)?.label
+  || '系统设置'
+))
+
 // 前后端 result / risk 枚举到中文标签的映射，与后端 audit/application 层枚举保持一致。
 // 下拉框展示中文标签，提交给后端的是稳定的机器可读分类值，不能把中文标签当作 action 精确值查询。
 const AUDIT_TYPE_OPTIONS = AUDIT_ACTION_CATEGORY_OPTIONS
@@ -329,6 +366,11 @@ function formatAuditTime(value) {
 const filteredAuditRecords = computed(() => auditRecords.value)
 
 const auditTotalPages = computed(() => Math.max(1, Math.ceil(auditTotal.value / auditPageSize)))
+// 审计列表的三态闸门：读取失败必须渲染可重试的错误态，绝不能退化成「未找到符合条件的审计事件」，
+// 否则运维会以为筛选条件没匹配到，而不是「请求失败了」。
+const auditListState = computed(() => auditLoading.value || Boolean(auditError.value) || !pagedAuditRecords.value.length)
+// 顶栏未读通知弹层同样走三态闸门：加载中 / 读取失败 / 没有未读。
+const topbarNotificationsState = computed(() => notificationMenuLoading.value || Boolean(topbarNotificationsError.value) || !topbarNotifications.value.length)
 // 审计接口已经按 page/page_size 返回当前页数据，前端不能再次按照全局页码切片，
 // 否则从第二页开始会把后端返回的当前页记录全部过滤掉。
 const pagedAuditRecords = computed(() => filteredAuditRecords.value)
@@ -361,6 +403,16 @@ function navigate(view) {
 function goToPortal() {
   mobileMenuOpen.value = false
   closeSubsystemTabOrFallback(window, () => router.replace({ name: 'portal' }))
+}
+
+// handleNavigate 把共享外壳抛出的导航键映射到本页现有入口，路由与权限口径保持不变。
+// 参数：key 为 navGroups 里的导航键。返回值：无。
+function handleNavigate(key) {
+  if (key === 'portal') {
+    goToPortal()
+    return
+  }
+  navigate(key)
 }
 
 function showToast(message) {
@@ -420,6 +472,7 @@ function resetSettings() {
 async function loadApplications() {
   if (!canReadApplications.value) {
     applications.value = []
+    applicationsError.value = ''
     return
   }
   try {
@@ -430,10 +483,13 @@ async function loadApplications() {
       { pageSize: 100, status: 'ACTIVE' },
       (item) => item?.application_id || item?.id || item?.code,
     )
+    // 成功即清空失败位：审计筛选的错误行不能在一次成功读取后继续挂着。
+    applicationsError.value = ''
   } catch (error) {
     applications.value = []
+    applicationsError.value = formatUserError(error, { fallback: '读取应用列表失败。' })
     if (error && error.code !== 'NETWORK_ERROR') {
-      showToast(formatUserError(error, { fallback: '读取应用列表失败。' }))
+      showToast(applicationsError.value)
     }
   }
 }
@@ -509,7 +565,7 @@ async function loadOnboardingReferences() {
     fetchCatalog(
       'console:onboarding:applications',
       () => loadAllCatalogPages(listApplications, { pageSize: 100, status: 'ACTIVE' }, (item) => onboardingReferenceKey(item, 'application_id', 'id', 'code')),
-      (items) => { applications.value = items },
+      (items) => { applications.value = items; applicationsError.value = '' },
       '应用目录',
       [RELATED_DATA.APPLICATIONS, RELATED_DATA.ENVIRONMENTS],
     ),
@@ -724,7 +780,10 @@ async function downloadAuditExport() {
   if (auditDownloading.value || auditExportJob.value?.status !== 'SUCCEEDED' || !auditExportJob.value?.job_id) return
   auditDownloading.value = true
   try {
-    const { blob, filename } = await downloadAuditExportFile(auditExportJob.value.job_id)
+    // 下载分两步（审计导出下载一次性票据）：先申请短时票据，再凭票据取文件字节。
+    // 票据只在本函数内存中短暂存在，不入组件状态、不写日志；过期（410）时重新申请即可。
+    const issued = await createAuditExportDownloadTicket(auditExportJob.value.job_id)
+    const { blob, filename } = await downloadAuditExportFile(auditExportJob.value.job_id, { ticket: issued?.ticket })
     const url = URL.createObjectURL(blob)
     try {
       const anchor = document.createElement('a')
@@ -736,13 +795,16 @@ async function downloadAuditExport() {
 
 async function loadTopbarNotifications() {
   notificationMenuLoading.value = true
+  topbarNotificationsError.value = ''
   try {
     const [count, page] = await Promise.all([getUnreadCount(), listInbox({ pageSize: 8, unreadOnly: true })])
     topbarUnreadCount.value = Number(count?.unread_count || 0)
     topbarNotifications.value = page?.items || []
-  } catch {
+  } catch (error) {
     topbarUnreadCount.value = 0
     topbarNotifications.value = []
+    // 读取失败不能显示成「暂无未读通知」：交给列表三态给出可重试的错误。
+    topbarNotificationsError.value = formatUserError(error, { fallback: '未读通知读取失败，请稍后重试。' })
   } finally { notificationMenuLoading.value = false }
 }
 
@@ -907,62 +969,39 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="console-page">
-    <aside class="console-sidebar" :class="{ open: mobileMenuOpen }">
-      <div class="console-brand">
-        <span class="console-brand-mark"><ConsoleIcon name="logo" /></span>
-        <span class="console-brand-copy">
-          <strong>基础能力平台</strong>
-          <small>Basic Platform</small>
-        </span>
-        <button class="console-close-menu" type="button" aria-label="关闭导航菜单" @click="mobileMenuOpen = false">
-          <ConsoleIcon name="close" />
-        </button>
+  <AppShell
+    v-model:menu-open="mobileMenuOpen"
+    brand-name="基础能力平台"
+    brand-subtitle="Basic Platform"
+    nav-label="平台导航"
+    :nav-groups="navGroups"
+    :nav-empty="!hasAnySettingsOrAuditPermission"
+    :user-name="currentAccountName"
+    :user-role="currentRoleNames"
+    :avatar-text="currentAccountAvatar"
+    :logout-disabled="isLoggingOut"
+    logout-label="退出应用系统"
+    topbar-avatar
+    @navigate="handleNavigate"
+    @logout="logout"
+  >
+    <template #nav-empty>当前账号未配置系统管理模块的访问权限。</template>
+
+    <template #breadcrumb>
+      <span>基础能力平台</span>
+      <ConsoleIcon name="chevron" />
+      <strong>{{ viewMeta.crumb }}</strong>
+    </template>
+
+    <template #topbar-actions>
+      <OperationInboxPanel server-tasks @open-server-tasks="openServerTaskCenter" />
+      <div class="console-notification-menu">
+        <button class="console-icon-button" type="button" aria-label="通知" :aria-expanded="notificationMenuOpen" @click="toggleNotificationMenu"><ConsoleIcon name="bell" /><i v-if="topbarUnreadCount"></i><b v-if="topbarUnreadCount">{{ topbarUnreadCount > 99 ? '99+' : topbarUnreadCount }}</b></button>
+        <aside v-if="notificationMenuOpen" class="console-notification-popover"><header><strong>未读通知</strong><button type="button" @click="notificationMenuOpen = false">×</button></header><ListState v-if="topbarNotificationsState" :loading="notificationMenuLoading" :error="topbarNotificationsError" error-title="未读通知加载失败" empty-title="暂无未读通知。" compact @retry="loadTopbarNotifications" /><button v-for="item in topbarNotifications" v-else :key="item.delivery_id" class="console-notification-row" type="button" @click="openTopbarNotification(item)"><strong>{{ item.title }}</strong><span>{{ item.content }}</span></button><footer><button type="button" @click="activeSettingsTab = 'notify'; notificationMenuOpen = false">进入通知中心</button></footer></aside>
       </div>
+    </template>
 
-      <nav class="console-nav" aria-label="平台导航">
-        <button class="console-nav-item console-nav-item--portal" type="button" @click="goToPortal">
-          <ConsoleIcon name="dashboard" />
-          <span>返回子系统门户</span>
-        </button>
-        <p class="console-nav-label">系统管理</p>
-        <button
-          v-if="canOpenSettings"
-          class="console-nav-item"
-          :class="{ active: currentView === 'settings' }"
-          type="button"
-          @click="navigate('settings')"
-        >
-          <ConsoleIcon name="settings" />
-          <span>系统设置</span>
-        </button>
-        <button
-          v-if="canViewAudit"
-          class="console-nav-item"
-          :class="{ active: currentView === 'audit' }"
-          type="button"
-          @click="navigate('audit')"
-        >
-          <ConsoleIcon name="audit" />
-          <span>审计日志</span>
-          <span class="console-nav-note">只读</span>
-        </button>
-        <p v-if="!hasAnySettingsOrAuditPermission" class="console-nav-empty">
-          当前账号未配置系统管理模块的访问权限。
-        </p>
-      </nav>
-
-      <div class="console-sidebar-user">
-        <span class="console-avatar" aria-hidden="true">{{ currentAccountAvatar }}</span>
-        <span class="console-user-copy">
-          <strong :title="currentAccountName">{{ currentAccountName }}</strong>
-          <small :title="currentRoleNames">{{ currentRoleNames }}</small>
-        </span>
-        <button class="console-logout" type="button" :disabled="isLoggingOut" aria-label="退出应用系统" @click="logout"><ConsoleIcon name="logout" /></button>
-      </div>
-    </aside>
-
-    <main class="console-main">
+    <template #main-prefix>
       <OperationResultBanner
         v-if="onboardingResult"
         :title="onboardingResult.title"
@@ -974,271 +1013,274 @@ onBeforeUnmount(() => {
         @action="openPositionAuthorizationFromOnboarding"
         @dismiss="clearOnboardingResult"
       />
-      <header class="console-topbar">
-        <button class="console-menu-button" type="button" aria-label="打开导航菜单" @click="mobileMenuOpen = true"><ConsoleIcon name="menu" /></button>
-        <div class="console-crumb"><span>基础能力平台</span><ConsoleIcon name="chevron" /><strong>{{ viewMeta.crumb }}</strong></div>
-        <div class="console-topbar-actions">
-          <OperationInboxPanel server-tasks @open-server-tasks="openServerTaskCenter" />
-          <div class="console-notification-menu">
-            <button class="console-icon-button" type="button" aria-label="通知" :aria-expanded="notificationMenuOpen" @click="toggleNotificationMenu"><ConsoleIcon name="bell" /><i v-if="topbarUnreadCount"></i><b v-if="topbarUnreadCount">{{ topbarUnreadCount > 99 ? '99+' : topbarUnreadCount }}</b></button>
-            <aside v-if="notificationMenuOpen" class="console-notification-popover"><header><strong>未读通知</strong><button type="button" @click="notificationMenuOpen = false">×</button></header><p v-if="notificationMenuLoading">正在加载…</p><p v-else-if="!topbarNotifications.length">暂无未读通知。</p><button v-for="item in topbarNotifications" v-else :key="item.delivery_id" class="console-notification-row" type="button" @click="openTopbarNotification(item)"><strong>{{ item.title }}</strong><span>{{ item.content }}</span></button><footer><button type="button" @click="activeSettingsTab = 'notify'; notificationMenuOpen = false">进入通知中心</button></footer></aside>
-          </div>
-          <span class="console-topbar-avatar">{{ currentAccountAvatar }}</span>
+    </template>
+
+    <template #page-head>
+      <div v-if="currentView === 'audit'" class="console-page-head">
+        <div>
+          <h1>{{ viewMeta.title }}</h1>
+          <p v-if="viewMeta.description">{{ viewMeta.description }}</p>
+        </div>
+        <button v-if="currentView === 'audit' && canExportAudit" class="console-button secondary" type="button" @click="exportAuditRecords"><ConsoleIcon name="export" />导出日志</button>
+      </div>
+    </template>
+
+    <section v-if="currentView === 'audit' && canViewAudit" class="audit-view" aria-label="审计日志列表">
+      <div class="audit-readonly-note"><ConsoleIcon name="info" /><span>审计事件与运行日志分离存储；本页查询 <code>audit_event</code> 及其变更摘要。运行日志、Trace、Metric 与告警由受限运维端点采集，当前控制台不提供不存在的跳转入口。</span></div>
+      <div v-if="auditHealth" class="audit-health-card" data-testid="audit-health-card">
+        <strong>审计摄取健康（平台侧）</strong>
+        <span>近 24 小时接收 {{ auditHealth.recent_events ?? 0 }} 条 / 累计 {{ auditHealth.total_events ?? 0 }} 条</span>
+        <span>来源未采集 {{ auditHealth.unknown_provenance ?? 0 }} 条</span>
+        <span v-if="auditHealth.last_received_at">最后接收 {{ formatAuditTime(auditHealth.last_received_at) }}</span>
+        <span v-if="auditHealth.oldest_unknown_at">最老未采集 {{ formatAuditTime(auditHealth.oldest_unknown_at) }}</span>
+        <small>口径：平台已接收的审计事件；子系统本地 Outbox 积压不在本卡片内。</small>
+      </div>
+      <div v-else-if="auditHealthError" class="audit-readonly-note"><ConsoleIcon name="info" /><span>审计摄取健康度暂不可用：{{ auditHealthError }}</span></div>
+      <div class="console-filter-bar audit-filter-bar">
+        <label class="console-search-field">
+          <ConsoleIcon name="search" />
+          <input v-model="auditKeyword" type="search" placeholder="操作人 / 操作 / 资源 / 请求路径 / Request ID / Trace ID…"  maxlength="100"/>
+        </label>
+        <label class="console-select-field"><select v-model="auditApplication" aria-label="应用"><option value="">全部应用</option><option v-for="app in applications" :key="app.application_id" :value="app.code">{{ app.name || app.code }}</option></select></label>
+        <label class="console-select-field"><select v-model="auditEnvironment" :disabled="!auditApplication" aria-label="环境"><option value="">全部环境</option><option v-for="env in environments" :key="env.environment_id" :value="env.environment_code || env.environment">{{ env.environment_code || env.environment }}</option></select></label>
+        <label class="console-select-field"><select v-model="auditType" aria-label="操作类型"><option value="">全部操作</option><option v-for="option in AUDIT_TYPE_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
+        <label class="console-select-field"><select v-model="auditRisk" aria-label="风险等级"><option value="">全部风险</option><option v-for="option in AUDIT_RISK_OPTIONS" :key="option" :value="option">{{ option }}</option></select></label>
+        <label class="console-select-field"><select v-model="auditResult" aria-label="操作结果"><option value="">全部结果</option><option v-for="option in AUDIT_RESULT_OPTIONS" :key="option" :value="option">{{ option }}</option></select></label>
+        <label class="console-select-field"><select v-model="auditTimeRange" aria-label="时间范围"><option value="24h">最近 24 小时</option><option value="7d">最近 7 天</option><option value="30d">最近 30 天</option></select></label>
+        <label class="console-search-field audit-advanced-field"><input v-model="auditEventID" type="search" placeholder="事件 ID" maxlength="64" aria-label="按事件 ID 精确检索"/></label>
+        <label class="console-search-field audit-advanced-field"><input v-model="auditActorID" type="search" placeholder="操作者 ID" maxlength="64" aria-label="按稳定操作者 ID 精确检索"/></label>
+        <label class="console-search-field audit-advanced-field"><input v-model="auditCorrelationID" type="search" placeholder="关联 ID" maxlength="64" aria-label="按业务关联 ID 精确检索"/></label>
+        <label class="console-search-field audit-advanced-field"><input v-model="auditLoginIP" type="search" placeholder="登录 IP" maxlength="45" aria-label="按登录 IP 精确检索"/></label>
+        <button class="console-button primary small" type="button" :disabled="auditLoading" @click="applyAuditFilters">查询</button>
+        <button class="console-button ghost small" type="button" :disabled="auditLoading" @click="resetAuditFilters"><ConsoleIcon name="reset" />重置</button>
+      </div>
+
+      <!-- 应用下拉只有「全部应用」有两种可能：读到目录后确实只有一项，或者读取失败。
+           这里把失败单独说出来并给出就地重试（重发同一个 loadApplications），
+           不能让失败伪装成「只有一个应用」；「全部应用」同时保持可用。 -->
+      <p v-if="applicationsError" class="console-prereq-error" data-testid="audit-applications-error" role="alert">
+        应用列表读取失败，应用筛选暂时只能选「全部应用」：{{ applicationsError }}
+        <button class="console-button ghost small" type="button" @click="loadApplications"><ConsoleIcon name="reset" />重试</button>
+      </p>
+
+      <div class="audit-batch-bar">
+        <span>审计事件为只读记录，不支持页面直接删除或归档。</span>
+        <div><button v-if="canExportAudit" class="console-button secondary small" type="button" :disabled="auditExporting" @click="exportAuditRecords"><ConsoleIcon name="export" />导出筛选结果</button></div>
+      </div>
+
+      <div v-if="auditExportJob" class="audit-readonly-note audit-export-status"><ConsoleIcon name="export" /><span>导出任务 <code>{{ auditExportJob.job_id }}</code>：{{ auditExportJob.status }}<template v-if="auditExportJob.error_message"> · {{ formatUserError({ message: auditExportJob.error_message, code: auditExportJob.error_code }) }}</template></span><button v-if="auditExportJob.status !== 'SUCCEEDED'" class="console-button ghost small" type="button" @click="refreshAuditExportJob">刷新状态</button><button v-else class="console-button primary small" type="button" :disabled="auditDownloading" @click="downloadAuditExport">{{ auditDownloading ? '下载中…' : '下载导出文件' }}</button></div>
+
+      <ListState
+        v-if="auditListState"
+        :loading="auditLoading"
+        :error="auditError"
+        error-title="审计事件加载失败"
+        empty-title="未找到符合筛选条件的审计事件。"
+        @retry="loadAuditEvents"
+      />
+      <div v-else class="console-table-card audit-table-card">
+        <div class="console-table-scroll">
+          <table class="console-data-table audit-data-table">
+            <thead><tr><th>发生时间</th><th>操作人</th><th>操作</th><th>应用 / 环境</th><th>资源对象</th><th>方法 / 路径</th><th>客户端 IP</th><th>状态</th><th>风险</th><th class="console-actions-cell">查看</th></tr></thead>
+            <tbody>
+              <tr v-for="record in pagedAuditRecords" :key="record.id">
+                <td class="console-mono" data-label="发生时间">{{ formatAuditTime(record.time) }}</td>
+                <td data-label="操作人"><strong class="console-entity-name">{{ record.operator || '—' }}</strong></td>
+                <td data-label="操作"><span class="console-badge audit-action-badge" :class="`type-${auditActionLabel(record)}`">{{ auditActionLabel(record) }}</span><span v-if="auditActionCode(record)" class="console-entity-meta console-mono">{{ auditActionCode(record) }}</span></td>
+                <td data-label="应用 / 环境"><strong>{{ record.application || '—' }}</strong><span class="console-entity-meta">{{ record.environment || '—' }}</span></td>
+                <td data-label="资源对象"><strong>{{ record.object || record.resource || '—' }}</strong><span class="console-entity-meta">{{ record.resource }}</span></td>
+                <td data-label="方法 / 路径"><span class="audit-method">{{ record.method || '—' }}</span><span class="console-entity-meta console-mono">{{ record.path || '—' }}</span></td>
+                <td class="console-mono" data-label="操作 IP">{{ record.ip || '—' }}</td>
+                <td data-label="状态"><span class="console-badge audit-result-badge" :class="auditResultTone(record.result)">{{ auditResultLabel(record) }}</span><span v-if="auditHttpStatusLabel(record.statusCode)" class="console-entity-meta audit-status-code">{{ auditHttpStatusLabel(record.statusCode) }}</span></td>
+                <td data-label="风险"><span class="console-badge" :class="`risk-${record.risk}`">{{ auditRiskLabel(record) }}</span></td>
+                <td class="console-actions-cell" data-label="操作"><button class="console-text-button" type="button" @click="openAuditDetail(record)">详情</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <footer class="console-table-footer audit-table-footer"><span>审计事件为只读记录</span><PaginationBar label="审计事件分页" :page="auditPage" :total="auditTotal" :page-size="auditPageSize" :loading="auditLoading" @change="changeAuditPage" /></footer>
+      </div>
+
+    </section>
+
+    <section v-else-if="currentView === 'settings' && canOpenSettings" class="settings-view" aria-label="系统设置">
+      <header class="settings-showcase-head">
+        <div>
+          <span class="settings-showcase-kicker"><ConsoleIcon name="settings" />平台配置中心</span>
+          <h1>系统设置</h1>
+          <p>集中维护平台基础资料、身份组织、统一登录、安全策略与运行支撑能力。</p>
         </div>
       </header>
 
-      <section class="console-content">
-        <div v-if="currentView === 'audit'" class="console-page-head">
-          <div>
-            <h1>{{ viewMeta.title }}</h1>
-            <p v-if="viewMeta.description">{{ viewMeta.description }}</p>
+      <div v-if="!hasNoVisibleSettingsTab" class="settings-tab-toolbar">
+        <label class="settings-tab-search">
+          <ConsoleIcon name="search" />
+          <input
+            v-model="settingsTabKeyword"
+            type="search"
+            placeholder="搜索设置模块（按名称 / 描述 / 功能）"
+            aria-label="搜索设置模块"
+           maxlength="100"/>
+          <button
+            v-if="settingsTabKeyword"
+            type="button"
+            class="settings-tab-search-clear"
+            aria-label="清空搜索"
+            @click="settingsTabKeyword = ''"
+          >×</button>
+        </label>
+        <span class="settings-tab-count">{{ filteredSettingsTabs.length }} / {{ visibleSettingsTabs.length }}</span>
+      </div>
+      <nav v-if="!hasNoVisibleSettingsTab" class="settings-tab-bar" role="tablist" aria-label="系统设置分类">
+        <button
+          v-for="tab in filteredSettingsTabs"
+          :key="tab.key"
+          class="settings-tab"
+          :class="{ active: activeSettingsTab === tab.key }"
+          type="button"
+          role="tab"
+          :aria-selected="activeSettingsTab === tab.key"
+          :title="tab.description"
+          @click="activeSettingsTab = tab.key"
+        >
+          <ConsoleIcon :name="tab.icon" />
+          <span>{{ tab.label }}</span>
+        </button>
+        <span v-if="filteredSettingsTabs.length === 0" class="settings-tab-empty">没有匹配“{{ settingsTabKeyword }}”的设置模块</span>
+      </nav>
+      <div v-else class="settings-empty" role="status">
+        <span class="settings-empty-icon" aria-hidden="true"><ConsoleIcon name="shield" /></span>
+        <h3>当前账号没有可访问的设置模块</h3>
+        <p>请联系平台管理员授予对应模块的读取或管理权限；IAM 不要求额外授予 <code>platform:user:read</code>。</p>
+      </div>
+
+      <!-- 页面标题为 <h1>。除“身份、组织与授权”外的 10 个设置模块自身首个标题就是 <h2>，
+           大纲已经连续，再补隐藏 <h2> 会让读屏标题列表出现两条同名同级的条目。
+           只有 IAM 模块内部从 <h3> 起（“按归属、职责和例外分层管理”），此处在它的面板前
+           补一层隐藏的 <h2> 承载 tab 名称，让大纲保持 h1 → h2 → h3，且不改变任何可见标题的
+           级别与布局。条件必须与下面 IamSettingsModule 的渲染条件一致。 -->
+      <h2 v-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'iam'" class="shared-visually-hidden">{{ activeSettingsTabLabel }}</h2>
+
+      <div v-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'base'" class="console-card settings-card">
+        <div class="console-card-body">
+          <h2>平台基础信息</h2>
+          <p class="console-card-hint">用于定义基础能力平台的展示名称。</p>
+          <p v-if="settingsLoading" class="console-card-hint">正在读取平台设置…</p>
+          <p v-else-if="settingsError" class="login-target-module__error" role="alert">{{ settingsError }}</p>
+          <div v-if="canReadPlatformSettings" class="console-form-grid">
+            <label class="console-form-item"><span>平台名称</span><input v-model="settings.organizationName" :disabled="settingsLoading || !canUpdatePlatformSettings"  maxlength="128"/></label>
+            <label class="console-form-item"><span>平台简称</span><input v-model="settings.organizationAlias" :disabled="settingsLoading || !canUpdatePlatformSettings"  maxlength="64"/></label>
           </div>
-          <button v-if="currentView === 'audit' && canExportAudit" class="console-button secondary" type="button" @click="exportAuditRecords"><ConsoleIcon name="export" />导出日志</button>
+          <div v-if="canReadPlatformSettings" class="console-form-actions"><button v-if="canUpdatePlatformSettings" class="console-button primary" type="button" :disabled="settingsSaving" @click="saveSettings"><ConsoleIcon name="save" />{{ settingsSaving ? '保存中…' : '保存设置' }}</button><button class="console-button ghost" type="button" :disabled="settingsLoading" @click="resetSettings">重新读取</button></div>
         </div>
+      </div>
 
-        <section v-if="currentView === 'audit' && canViewAudit" class="audit-view" aria-label="审计日志列表">
-          <div class="audit-readonly-note"><ConsoleIcon name="info" /><span>审计事件与运行日志分离存储；本页查询 <code>audit_event</code> 及其变更摘要。运行日志、Trace、Metric 与告警由受限运维端点采集，当前控制台不提供不存在的跳转入口。</span></div>
-          <div v-if="auditHealth" class="audit-health-card" data-testid="audit-health-card">
-            <strong>审计摄取健康（平台侧）</strong>
-            <span>近 24 小时接收 {{ auditHealth.recent_events ?? 0 }} 条 / 累计 {{ auditHealth.total_events ?? 0 }} 条</span>
-            <span>来源未采集 {{ auditHealth.unknown_provenance ?? 0 }} 条</span>
-            <span v-if="auditHealth.last_received_at">最后接收 {{ formatAuditTime(auditHealth.last_received_at) }}</span>
-            <span v-if="auditHealth.oldest_unknown_at">最老未采集 {{ formatAuditTime(auditHealth.oldest_unknown_at) }}</span>
-            <small>口径：平台已接收的审计事件；子系统本地 Outbox 积压不在本卡片内。</small>
-          </div>
-          <div v-else-if="auditHealthError" class="audit-readonly-note"><ConsoleIcon name="info" /><span>审计摄取健康度暂不可用：{{ auditHealthError }}</span></div>
-          <div class="console-filter-bar audit-filter-bar">
-            <label class="console-search-field">
-              <ConsoleIcon name="search" />
-              <input v-model="auditKeyword" type="search" placeholder="操作人 / 操作 / 资源 / 请求路径 / Request ID / Trace ID…"  maxlength="100"/>
-            </label>
-            <label class="console-select-field"><select v-model="auditApplication" aria-label="应用"><option value="">全部应用</option><option v-for="app in applications" :key="app.application_id" :value="app.code">{{ app.name || app.code }}</option></select></label>
-            <label class="console-select-field"><select v-model="auditEnvironment" :disabled="!auditApplication" aria-label="环境"><option value="">全部环境</option><option v-for="env in environments" :key="env.environment_id" :value="env.environment_code || env.environment">{{ env.environment_code || env.environment }}</option></select></label>
-            <label class="console-select-field"><select v-model="auditType" aria-label="操作类型"><option value="">全部操作</option><option v-for="option in AUDIT_TYPE_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
-            <label class="console-select-field"><select v-model="auditRisk" aria-label="风险等级"><option value="">全部风险</option><option v-for="option in AUDIT_RISK_OPTIONS" :key="option" :value="option">{{ option }}</option></select></label>
-            <label class="console-select-field"><select v-model="auditResult" aria-label="操作结果"><option value="">全部结果</option><option v-for="option in AUDIT_RESULT_OPTIONS" :key="option" :value="option">{{ option }}</option></select></label>
-            <label class="console-select-field"><select v-model="auditTimeRange" aria-label="时间范围"><option value="24h">最近 24 小时</option><option value="7d">最近 7 天</option><option value="30d">最近 30 天</option></select></label>
-            <label class="console-search-field audit-advanced-field"><input v-model="auditEventID" type="search" placeholder="事件 ID" maxlength="64" aria-label="按事件 ID 精确检索"/></label>
-            <label class="console-search-field audit-advanced-field"><input v-model="auditActorID" type="search" placeholder="操作者 ID" maxlength="64" aria-label="按稳定操作者 ID 精确检索"/></label>
-            <label class="console-search-field audit-advanced-field"><input v-model="auditCorrelationID" type="search" placeholder="关联 ID" maxlength="64" aria-label="按业务关联 ID 精确检索"/></label>
-            <label class="console-search-field audit-advanced-field"><input v-model="auditLoginIP" type="search" placeholder="登录 IP" maxlength="45" aria-label="按登录 IP 精确检索"/></label>
-            <button class="console-button primary small" type="button" :disabled="auditLoading" @click="applyAuditFilters">查询</button>
-            <button class="console-button ghost small" type="button" :disabled="auditLoading" @click="resetAuditFilters"><ConsoleIcon name="reset" />重置</button>
-          </div>
+      <PublicAccessSettingsModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'access'" @toast="showToast" />
 
-          <p v-if="auditError" class="login-target-module__error" role="alert">{{ auditError }}</p>
+      <IamSettingsModule
+    :initial-panel="iamInitialPanel" v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'iam'" :refresh-key="iamRefreshKey" @toast="showToast" @employee-onboarding="openEmployeeOnboarding" @personnel-change="openPersonnelChangeForUser" />
 
-          <div class="audit-batch-bar">
-            <span>审计事件为只读记录，不支持页面直接删除或归档。</span>
-            <div><button v-if="canExportAudit" class="console-button secondary small" type="button" :disabled="auditExporting" @click="exportAuditRecords"><ConsoleIcon name="export" />导出筛选结果</button></div>
-          </div>
+      <PersonnelChangeCenter v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'personnel'" :prefill-user-id="pendingPersonnelChangeUserId" @toast="showToast" @employee-onboarding="openEmployeeOnboarding" @prefill-consumed="pendingPersonnelChangeUserId = ''" />
 
-          <div v-if="auditExportJob" class="audit-readonly-note audit-export-status"><ConsoleIcon name="export" /><span>导出任务 <code>{{ auditExportJob.job_id }}</code>：{{ auditExportJob.status }}<template v-if="auditExportJob.error_message"> · {{ formatUserError({ message: auditExportJob.error_message, code: auditExportJob.error_code }) }}</template></span><button v-if="auditExportJob.status !== 'SUCCEEDED'" class="console-button ghost small" type="button" @click="refreshAuditExportJob">刷新状态</button><button v-else class="console-button primary small" type="button" :disabled="auditDownloading" @click="downloadAuditExport">{{ auditDownloading ? '下载中…' : '下载导出文件' }}</button></div>
+      <NotificationCenterModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'notify'" @toast="showToast" />
 
-          <div class="console-table-card audit-table-card">
-            <div class="console-table-scroll">
-              <table class="console-data-table audit-data-table">
-                <thead><tr><th>发生时间</th><th>操作人</th><th>操作</th><th>应用 / 环境</th><th>资源对象</th><th>方法 / 路径</th><th>客户端 IP</th><th>状态</th><th>风险</th><th class="console-actions-cell">查看</th></tr></thead>
-                <tbody>
-                  <tr v-if="auditLoading">
-                    <td colspan="10" class="login-target-module__state">正在读取审计事件…</td>
-                  </tr>
-                  <tr v-else-if="!pagedAuditRecords.length">
-                    <td colspan="10" class="login-target-module__state">未找到符合筛选条件的审计事件。</td>
-                  </tr>
-                  <tr v-for="record in pagedAuditRecords" :key="record.id">
-                    <td class="console-mono" data-label="发生时间">{{ formatAuditTime(record.time) }}</td>
-                    <td data-label="操作人"><strong class="console-entity-name">{{ record.operator || '—' }}</strong></td>
-                    <td data-label="操作"><span class="console-badge audit-action-badge" :class="`type-${auditActionLabel(record)}`">{{ auditActionLabel(record) }}</span><span v-if="auditActionCode(record)" class="console-entity-meta console-mono">{{ auditActionCode(record) }}</span></td>
-                    <td data-label="应用 / 环境"><strong>{{ record.application || '—' }}</strong><span class="console-entity-meta">{{ record.environment || '—' }}</span></td>
-                    <td data-label="资源对象"><strong>{{ record.object || record.resource || '—' }}</strong><span class="console-entity-meta">{{ record.resource }}</span></td>
-                    <td data-label="方法 / 路径"><span class="audit-method">{{ record.method || '—' }}</span><span class="console-entity-meta console-mono">{{ record.path || '—' }}</span></td>
-                    <td class="console-mono" data-label="操作 IP">{{ record.ip || '—' }}</td>
-                    <td data-label="状态"><span class="console-badge audit-result-badge" :class="auditResultTone(record.result)">{{ auditResultLabel(record) }}</span><span v-if="auditHttpStatusLabel(record.statusCode)" class="console-entity-meta audit-status-code">{{ auditHttpStatusLabel(record.statusCode) }}</span></td>
-                    <td data-label="风险"><span class="console-badge" :class="`risk-${record.risk}`">{{ auditRiskLabel(record) }}</span></td>
-                    <td class="console-actions-cell" data-label="操作"><button class="console-text-button" type="button" @click="openAuditDetail(record)">详情</button></td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <footer class="console-table-footer audit-table-footer"><span>第 {{ auditPage }} / {{ auditTotalPages }} 页 · 共 {{ auditTotal }} 条 · 审计事件为只读记录</span><div class="audit-pagination"><button class="console-text-button" type="button" :disabled="auditPage === 1 || auditLoading" @click="changeAuditPage(auditPage - 1)">上一页</button><span class="console-page-token">{{ auditPage }} / {{ auditTotalPages }}</span><button class="console-text-button" type="button" :disabled="auditPage === auditTotalPages || auditLoading" @click="changeAuditPage(auditPage + 1)">下一页</button></div></footer>
-          </div>
-
-        </section>
-
-        <section v-else-if="currentView === 'settings' && canOpenSettings" class="settings-view" aria-label="系统设置">
-          <header class="settings-showcase-head">
-            <div>
-              <span class="settings-showcase-kicker"><ConsoleIcon name="settings" />平台配置中心</span>
-              <h2>系统设置</h2>
-              <p>集中维护平台基础资料、身份组织、统一登录、安全策略与运行支撑能力。</p>
-            </div>
-          </header>
-
-          <div v-if="!hasNoVisibleSettingsTab" class="settings-tab-toolbar">
-            <label class="settings-tab-search">
-              <ConsoleIcon name="search" />
-              <input
-                v-model="settingsTabKeyword"
-                type="search"
-                placeholder="搜索设置模块（按名称 / 描述 / 功能）"
-                aria-label="搜索设置模块"
-               maxlength="100"/>
-              <button
-                v-if="settingsTabKeyword"
-                type="button"
-                class="settings-tab-search-clear"
-                aria-label="清空搜索"
-                @click="settingsTabKeyword = ''"
-              >×</button>
-            </label>
-            <span class="settings-tab-count">{{ filteredSettingsTabs.length }} / {{ visibleSettingsTabs.length }}</span>
-          </div>
-          <nav v-if="!hasNoVisibleSettingsTab" class="settings-tab-bar" role="tablist" aria-label="系统设置分类">
-            <button
-              v-for="tab in filteredSettingsTabs"
-              :key="tab.key"
-              class="settings-tab"
-              :class="{ active: activeSettingsTab === tab.key }"
-              type="button"
-              role="tab"
-              :aria-selected="activeSettingsTab === tab.key"
-              :title="tab.description"
-              @click="activeSettingsTab = tab.key"
-            >
-              <ConsoleIcon :name="tab.icon" />
-              <span>{{ tab.label }}</span>
-            </button>
-            <span v-if="filteredSettingsTabs.length === 0" class="settings-tab-empty">没有匹配“{{ settingsTabKeyword }}”的设置模块</span>
-          </nav>
-          <div v-else class="settings-empty" role="status">
-            <span class="settings-empty-icon" aria-hidden="true"><ConsoleIcon name="shield" /></span>
-            <h3>当前账号没有可访问的设置模块</h3>
-            <p>请联系平台管理员授予对应模块的读取或管理权限；IAM 不要求额外授予 <code>platform:user:read</code>。</p>
-          </div>
-
-          <div v-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'base'" class="console-card settings-card">
-            <div class="console-card-body">
-              <h2>平台基础信息</h2>
-              <p class="console-card-hint">用于定义基础能力平台的展示名称。</p>
-              <p v-if="settingsLoading" class="console-card-hint">正在读取平台设置…</p>
-              <p v-else-if="settingsError" class="login-target-module__error" role="alert">{{ settingsError }}</p>
-              <div v-if="canReadPlatformSettings" class="console-form-grid">
-                <label class="console-form-item"><span>平台名称</span><input v-model="settings.organizationName" :disabled="settingsLoading || !canUpdatePlatformSettings"  maxlength="128"/></label>
-                <label class="console-form-item"><span>平台简称</span><input v-model="settings.organizationAlias" :disabled="settingsLoading || !canUpdatePlatformSettings"  maxlength="64"/></label>
-              </div>
-              <div v-if="canReadPlatformSettings" class="console-form-actions"><button v-if="canUpdatePlatformSettings" class="console-button primary" type="button" :disabled="settingsSaving" @click="saveSettings"><ConsoleIcon name="save" />{{ settingsSaving ? '保存中…' : '保存设置' }}</button><button class="console-button ghost" type="button" :disabled="settingsLoading" @click="resetSettings">重新读取</button></div>
-            </div>
-          </div>
-
-          <PublicAccessSettingsModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'access'" @toast="showToast" />
-
-          <IamSettingsModule
-        :initial-panel="iamInitialPanel" v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'iam'" :refresh-key="iamRefreshKey" @toast="showToast" @employee-onboarding="openEmployeeOnboarding" @personnel-change="openPersonnelChangeForUser" />
-
-          <PersonnelChangeCenter v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'personnel'" :prefill-user-id="pendingPersonnelChangeUserId" @toast="showToast" @employee-onboarding="openEmployeeOnboarding" @prefill-consumed="pendingPersonnelChangeUserId = ''" />
-
-          <NotificationCenterModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'notify'" @toast="showToast" />
-
-          <LoginSecurityModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'security'" @toast="showToast" />
+      <LoginSecurityModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'security'" @toast="showToast" />
 
 
-          <DictionaryManagementModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'dict'" @toast="showToast" />
+      <DictionaryManagementModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'dict'" @toast="showToast" />
 
-          <ConfigurationCenterModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'config'" @toast="showToast" />
+      <ConfigurationCenterModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'config'" @toast="showToast" />
 
-          <FileTaskOperationsModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'jobs'" @toast="showToast" />
-          <CommercialLicenseView v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'licenses'" @toast="showToast" />
+      <FileTaskOperationsModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'jobs'" @toast="showToast" />
+      <CommercialLicenseView v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'licenses'" @toast="showToast" />
 
-          <template v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'applications'">
-            <SubsystemOnboardingModule
-              :can-onboard="canOnboardSubsystem"
+      <template v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'applications'">
+        <SubsystemOnboardingModule
+          :can-onboard="canOnboardSubsystem"
+          @toast="showToast"
+          @completed="loadApplications"
+        >
+          <template #header-actions>
+            <SubsystemAccessWizard
+              :can-preview="canReadApplications"
+              :can-submit="canSubmitSubsystemAccess"
+              :applications="subsystemAccessApplications"
+              :environments="subsystemAccessEnvironments"
               @toast="showToast"
               @completed="loadApplications"
-            >
-              <template #header-actions>
-                <SubsystemAccessWizard
-                  :can-preview="canReadApplications"
-                  :can-submit="canSubmitSubsystemAccess"
-                  :applications="subsystemAccessApplications"
-                  :environments="subsystemAccessEnvironments"
-                  @toast="showToast"
-                  @completed="loadApplications"
-                />
-              </template>
-            </SubsystemOnboardingModule>
+            />
           </template>
+        </SubsystemOnboardingModule>
+      </template>
+    </section>
+
+    <template #overlay>
+      <div v-if="auditDetail" class="console-modal-backdrop" role="presentation" @click.self="closeAuditDetail">
+        <section class="console-detail-modal audit-detail-modal" role="dialog" aria-modal="true" aria-label="审计事件详情">
+          <header><div><p class="console-modal-eyebrow">AUDIT EVENT · {{ auditDetail.id }}</p><h2>{{ auditDetail.object || auditDetail.resource || '审计事件' }}</h2></div><button class="console-modal-close" type="button" aria-label="关闭审计事件详情" @click="closeAuditDetail"><ConsoleIcon name="close" /></button></header>
+          <div class="audit-detail-sections">
+            <section class="audit-detail-section"><h3>事件概览</h3><div class="audit-detail-grid">
+              <div><span>动作</span><strong class="console-mono">{{ auditDetail.action || '—' }}</strong></div>
+              <div><span>结果</span><strong class="audit-detail-result-wrap"><span class="console-badge audit-result-badge" :class="auditResultTone(auditDetail.result)">{{ auditResultLabel(auditDetail) }}</span><small v-if="auditResultMeta(auditDetail)">{{ auditResultMeta(auditDetail) }}</small></strong></div>
+              <div><span>风险等级</span><strong>{{ auditDetail.riskLabel || '—' }}</strong></div>
+              <div><span>业务发生时间</span><strong>{{ formatAuditTime(auditDetail.time) }}</strong></div>
+              <div><span>平台接收时间</span><strong>{{ auditDetail.receivedAt ? formatAuditTime(auditDetail.receivedAt) : '历史记录无此字段' }}</strong></div>
+              <div><span>应用 / 环境</span><strong>{{ auditDetail.application || '—' }} / {{ auditDetail.environment || '—' }}</strong></div>
+              <div><span>HTTP 请求</span><strong>{{ auditDetail.method || '—' }} {{ auditDetail.path || '—' }}</strong></div>
+            </div></section>
+            <section class="audit-detail-section"><h3>操作者</h3><div class="audit-detail-grid">
+              <div><span>名称快照</span><strong>{{ auditDetail.operator || '—' }}</strong></div>
+              <div><span>稳定身份</span><strong class="console-mono">{{ auditDetail.actorId || '历史记录无此字段' }}</strong></div>
+              <div><span>主体类型</span><strong>{{ auditDetail.actorTypeLabel }}</strong></div>
+            </div></section>
+            <section class="audit-detail-section"><h3>业务对象</h3><div class="audit-detail-grid">
+              <div><span>对象类型</span><strong>{{ auditDetail.resource || '—' }}</strong></div>
+              <div><span>对象名称</span><strong>{{ auditDetail.object || '—' }}</strong></div>
+              <div><span>对象 ID</span><strong class="console-mono">{{ auditDetail.businessId || auditDetail.resourceId || '—' }}</strong></div>
+            </div></section>
+            <section class="audit-detail-section"><h3>来源地址</h3><div class="audit-detail-grid">
+              <div><span>登录 IP</span><strong>{{ auditDetail.loginIp || '未采集' }}</strong></div>
+              <div><span>登录地址来源</span><strong>{{ auditDetail.loginIpSourceLabel }}</strong></div>
+              <div><span>操作 IP</span><strong>{{ auditDetail.ip || '未采集' }}</strong></div>
+              <div><span>操作地址来源</span><strong>{{ auditDetail.ipSourceLabel }}</strong></div>
+              <div><span>投递端地址</span><strong>{{ auditDetail.ingestPeerIp || '未采集' }}</strong></div>
+              <div><span>User Agent</span><strong>{{ auditDetail.userAgent || '未采集' }}</strong></div>
+            </div><small>登录 IP 创建会话时固定，操作 IP 每次请求重新解析，投递地址只表示谁送来审计；三者不可互相替代。</small></section>
+            <section class="audit-detail-section"><h3>处理与关联</h3><div class="audit-detail-grid">
+              <div><span>原因代码</span><strong class="console-mono">{{ auditDetail.reasonCode || auditDetail.detail || '—' }}</strong></div>
+              <div><span>Request ID</span><strong class="console-mono">{{ auditDetail.requestId || '—' }}</strong></div>
+              <div><span>Trace ID</span><strong class="console-mono">{{ auditDetail.traceId || '—' }}</strong></div>
+              <div><span>Correlation ID</span><strong class="console-mono">{{ auditDetail.correlationId || '—' }}</strong></div>
+            </div></section>
+          </div>
+          <section class="audit-detail-section"><h3>事件说明</h3><p>{{ auditDetail.summary || '无附加说明。' }}</p><small v-if="auditDetail.reasonCode || auditDetail.detail">原因代码：{{ auditDetail.reasonCode || auditDetail.detail }}</small></section>
+          <section class="audit-detail-section"><h3>关联事件</h3><p class="audit-link-row">
+            <button v-if="auditDetail.requestId" class="console-button ghost" type="button" @click="filterRelatedAudit('requestId', auditDetail.requestId)">同一请求（{{ auditDetail.requestId }}）</button>
+            <button v-if="auditDetail.correlationId" class="console-button ghost" type="button" @click="filterRelatedAudit('correlationId', auditDetail.correlationId)">同一业务关联（{{ auditDetail.correlationId }}）</button>
+            <span v-if="!auditDetail.requestId && !auditDetail.correlationId">该事件没有可追溯的关联 ID。</span>
+          </p><small>关联检索沿用当前列表过滤条件，不会绕过租户与应用权限。</small></section>
+          <section class="audit-detail-section"><h3>数据变更摘要</h3><p>{{ auditDetail.changeSummary || '无字段变更。' }}</p><small>字段变更保存在当前审计事件中，敏感值按脱敏和最小化原则展示。</small></section>
+          <footer><button class="console-button ghost" type="button" @click="closeAuditDetail">关闭</button></footer>
         </section>
-      </section>
-    </main>
+      </div>
 
-    <div v-if="auditDetail" class="console-modal-backdrop" role="presentation" @click.self="closeAuditDetail">
-      <section class="console-detail-modal audit-detail-modal" role="dialog" aria-modal="true" aria-label="审计事件详情">
-        <header><div><p class="console-modal-eyebrow">AUDIT EVENT · {{ auditDetail.id }}</p><h2>{{ auditDetail.object || auditDetail.resource || '审计事件' }}</h2></div><button class="console-modal-close" type="button" aria-label="关闭审计事件详情" @click="closeAuditDetail"><ConsoleIcon name="close" /></button></header>
-        <div class="audit-detail-sections">
-          <section class="audit-detail-section"><h3>事件概览</h3><div class="audit-detail-grid">
-            <div><span>动作</span><strong class="console-mono">{{ auditDetail.action || '—' }}</strong></div>
-            <div><span>结果</span><strong class="audit-detail-result-wrap"><span class="console-badge audit-result-badge" :class="auditResultTone(auditDetail.result)">{{ auditResultLabel(auditDetail) }}</span><small v-if="auditResultMeta(auditDetail)">{{ auditResultMeta(auditDetail) }}</small></strong></div>
-            <div><span>风险等级</span><strong>{{ auditDetail.riskLabel || '—' }}</strong></div>
-            <div><span>业务发生时间</span><strong>{{ formatAuditTime(auditDetail.time) }}</strong></div>
-            <div><span>平台接收时间</span><strong>{{ auditDetail.receivedAt ? formatAuditTime(auditDetail.receivedAt) : '历史记录无此字段' }}</strong></div>
-            <div><span>应用 / 环境</span><strong>{{ auditDetail.application || '—' }} / {{ auditDetail.environment || '—' }}</strong></div>
-            <div><span>HTTP 请求</span><strong>{{ auditDetail.method || '—' }} {{ auditDetail.path || '—' }}</strong></div>
-          </div></section>
-          <section class="audit-detail-section"><h3>操作者</h3><div class="audit-detail-grid">
-            <div><span>名称快照</span><strong>{{ auditDetail.operator || '—' }}</strong></div>
-            <div><span>稳定身份</span><strong class="console-mono">{{ auditDetail.actorId || '历史记录无此字段' }}</strong></div>
-            <div><span>主体类型</span><strong>{{ auditDetail.actorTypeLabel }}</strong></div>
-          </div></section>
-          <section class="audit-detail-section"><h3>业务对象</h3><div class="audit-detail-grid">
-            <div><span>对象类型</span><strong>{{ auditDetail.resource || '—' }}</strong></div>
-            <div><span>对象名称</span><strong>{{ auditDetail.object || '—' }}</strong></div>
-            <div><span>对象 ID</span><strong class="console-mono">{{ auditDetail.businessId || auditDetail.resourceId || '—' }}</strong></div>
-          </div></section>
-          <section class="audit-detail-section"><h3>来源地址</h3><div class="audit-detail-grid">
-            <div><span>登录 IP</span><strong>{{ auditDetail.loginIp || '未采集' }}</strong></div>
-            <div><span>登录地址来源</span><strong>{{ auditDetail.loginIpSourceLabel }}</strong></div>
-            <div><span>操作 IP</span><strong>{{ auditDetail.ip || '未采集' }}</strong></div>
-            <div><span>操作地址来源</span><strong>{{ auditDetail.ipSourceLabel }}</strong></div>
-            <div><span>投递端地址</span><strong>{{ auditDetail.ingestPeerIp || '未采集' }}</strong></div>
-            <div><span>User Agent</span><strong>{{ auditDetail.userAgent || '未采集' }}</strong></div>
-          </div><small>登录 IP 创建会话时固定，操作 IP 每次请求重新解析，投递地址只表示谁送来审计；三者不可互相替代。</small></section>
-          <section class="audit-detail-section"><h3>处理与关联</h3><div class="audit-detail-grid">
-            <div><span>原因代码</span><strong class="console-mono">{{ auditDetail.reasonCode || auditDetail.detail || '—' }}</strong></div>
-            <div><span>Request ID</span><strong class="console-mono">{{ auditDetail.requestId || '—' }}</strong></div>
-            <div><span>Trace ID</span><strong class="console-mono">{{ auditDetail.traceId || '—' }}</strong></div>
-            <div><span>Correlation ID</span><strong class="console-mono">{{ auditDetail.correlationId || '—' }}</strong></div>
-          </div></section>
-        </div>
-        <section class="audit-detail-section"><h3>事件说明</h3><p>{{ auditDetail.summary || '无附加说明。' }}</p><small v-if="auditDetail.reasonCode || auditDetail.detail">原因代码：{{ auditDetail.reasonCode || auditDetail.detail }}</small></section>
-        <section class="audit-detail-section"><h3>关联事件</h3><p class="audit-link-row">
-          <button v-if="auditDetail.requestId" class="console-button ghost" type="button" @click="filterRelatedAudit('requestId', auditDetail.requestId)">同一请求（{{ auditDetail.requestId }}）</button>
-          <button v-if="auditDetail.correlationId" class="console-button ghost" type="button" @click="filterRelatedAudit('correlationId', auditDetail.correlationId)">同一业务关联（{{ auditDetail.correlationId }}）</button>
-          <span v-if="!auditDetail.requestId && !auditDetail.correlationId">该事件没有可追溯的关联 ID。</span>
-        </p><small>关联检索沿用当前列表过滤条件，不会绕过租户与应用权限。</small></section>
-        <section class="audit-detail-section"><h3>数据变更摘要</h3><p>{{ auditDetail.changeSummary || '无字段变更。' }}</p><small>字段变更保存在当前审计事件中，敏感值按脱敏和最小化原则展示。</small></section>
-        <footer><button class="console-button ghost" type="button" @click="closeAuditDetail">关闭</button></footer>
-      </section>
-    </div>
-
-    <EmployeeOnboardingModal
-      v-if="showEmployeeOnboarding"
-      :organizations="onboardingOrganizations"
-      :positions="onboardingPositions"
-      :applications="applications"
-      :references-loading="onboardingReferencesLoading"
-      :references-error="onboardingReferencesError"
-      :on-before-open="() => loadOnboardingReferences()"
-      @close="closeEmployeeOnboarding"
-      @completed="handleEmployeeOnboardingCompleted"
-      @refresh-prerequisites="refreshOnboardingReferences"
-      @retry-references="loadOnboardingReferences"
-      @toast="showToast"
-    />
-
-    <button v-if="mobileMenuOpen" class="console-menu-mask" type="button" aria-label="关闭导航遮罩" @click="mobileMenuOpen = false"></button>
-    <Teleport to="body">
-      <div v-if="toastMessage" class="console-toast" role="status" aria-live="polite" aria-atomic="true"><ConsoleIcon name="info" /><span>{{ toastMessage }}</span></div>
-    </Teleport>
-  </div>
+      <EmployeeOnboardingModal
+        v-if="showEmployeeOnboarding"
+        :organizations="onboardingOrganizations"
+        :positions="onboardingPositions"
+        :applications="applications"
+        :references-loading="onboardingReferencesLoading"
+        :references-error="onboardingReferencesError"
+        :on-before-open="() => loadOnboardingReferences()"
+        @close="closeEmployeeOnboarding"
+        @completed="handleEmployeeOnboardingCompleted"
+        @refresh-prerequisites="refreshOnboardingReferences"
+        @retry-references="loadOnboardingReferences"
+        @toast="showToast"
+      />
+      <Teleport to="body">
+        <div v-if="toastMessage" class="console-toast" role="status" aria-live="polite" aria-atomic="true"><ConsoleIcon name="info" /><span>{{ toastMessage }}</span></div>
+      </Teleport>
+    </template>
+  </AppShell>
 </template>

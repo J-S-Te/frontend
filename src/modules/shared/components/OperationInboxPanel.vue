@@ -1,6 +1,6 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
-import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
+import ConsoleIcon from '@/modules/shared/components/ConsoleIcon.vue'
 import { useOperationInbox } from '@/modules/shared/composables/useOperationInbox.js'
 
 const props = defineProps({ serverTasks: { type: Boolean, default: false } })
@@ -100,4 +100,52 @@ onBeforeUnmount(() => {
 .operation-inbox-panel dt { flex: 0 0 auto; color: #64748b; font-size: 11px; }
 .operation-inbox-panel dd { margin: 0; color: #334155; font-size: 11px; overflow-wrap: anywhere; }
 @media (max-width: 560px) { .operation-inbox-panel { position: fixed; top: 64px; right: 12px; left: 12px; width: auto; } }
+
+/* 深色主题：顶栏通知抽屉的白底、浅描边与墨色；浅色声明未改。 */
+[data-theme="dark"] .operation-inbox-trigger:hover {
+  border-color: var(--border);
+  background: var(--surface-hover);
+}
+[data-theme="dark"] .operation-inbox-panel {
+  border-color: var(--border);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-popover);
+}
+[data-theme="dark"] .operation-inbox-panel > header {
+  border-bottom-color: var(--border);
+  background: var(--surface-card);
+}
+[data-theme="dark"] .operation-inbox-panel > header strong,
+[data-theme="dark"] .operation-inbox-item-head strong {
+  color: var(--text);
+}
+[data-theme="dark"] .operation-inbox-panel > header small,
+[data-theme="dark"] .operation-inbox-empty,
+[data-theme="dark"] .operation-inbox-panel dt {
+  color: var(--text-muted);
+}
+[data-theme="dark"] .operation-inbox-actions button {
+  color: var(--text-secondary);
+}
+[data-theme="dark"] .operation-inbox-item-head button {
+  color: var(--text-faint);
+}
+[data-theme="dark"] .operation-inbox-footer {
+  border-top-color: var(--border);
+  background: var(--surface-card);
+}
+[data-theme="dark"] .operation-inbox-footer button {
+  border-color: var(--border);
+  background: var(--surface-raised);
+  color: var(--primary-ink);
+}
+[data-theme="dark"] .operation-inbox-panel li {
+  border-bottom-color: var(--line-soft);
+}
+[data-theme="dark"] .operation-inbox-panel p {
+  color: var(--text-secondary);
+}
+[data-theme="dark"] .operation-inbox-panel dd {
+  color: var(--text);
+}
 </style>

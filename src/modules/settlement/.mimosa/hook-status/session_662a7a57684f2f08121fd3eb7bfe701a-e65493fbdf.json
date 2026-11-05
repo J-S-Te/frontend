@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "mimosa-hook-status/v1",
+  "recordedAt": "2026-10-26T05:50:13.238Z",
+  "sessionId": "session_662a7a57684f2f08121fd3eb7bfe701a",
+  "event": "PostToolUse",
+  "toolName": "Write",
+  "file": "/Users/yglf/GOPATH/src/Unified_Identity_Authentication_Platform/.ai/qa/closure-20261025/goldens-settlement-panels/SettlementInvoiceListPanel.config.json",
+  "outcome": "clear",
+  "coverage": "complete",
+  "findingCount": 0,
+  "durationMs": 1,
+  "hostState": "hook_complete",
+  "reportHint": ".mimosa/reports/"
+}

@@ -516,7 +516,7 @@ async function submit() {
 .personnel-workbench-summary { margin: 1.1rem 0 1.25rem; border: 1px solid #dce8f7; border-radius: .8rem; background: linear-gradient(135deg, #fbfdff, #f5f9ff); }
 .personnel-workbench-summary strong { color: #2c4f91; }
 .personnel-workbench-summary p { max-width: 680px; }
-.personnel-workbench-stepper-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; margin: 0 0 .65rem; color: var(--text, #263650); }
+.personnel-workbench-stepper-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; margin: 0 0 .65rem; color: #263650; }
 .personnel-workbench-stepper-heading strong { font-size: 13px; }
 .personnel-workbench-stepper-heading span { color: var(--muted, #71829b); font-size: 11.5px; }
 .personnel-workbench-stepper { margin-bottom: 1.35rem; padding: .9rem 1rem; border: 1px solid #e3ebf6; border-radius: .75rem; background: #fbfdff; }
@@ -545,5 +545,54 @@ async function submit() {
   .personnel-workbench-header-hint { max-width: 18rem; }
   .personnel-workbench-modal .console-form-actions { flex-direction: column-reverse; }
   .personnel-workbench-modal .console-form-actions .console-button { width: 100%; justify-content: center; }
+}
+
+/* ==========================================================================
+   深色主题：员工入职向导里写死的浅蓝渐变头、白卡面与浅描边
+   --------------------------------------------------------------------------
+   只新增 [data-theme="dark"] 规则，浅色声明一行未改，浅色逐像素一致。
+   ========================================================================== */
+[data-theme="dark"] .personnel-workbench-modal {
+  border-color: var(--border);
+  box-shadow: var(--shadow-modal);
+}
+[data-theme="dark"] .personnel-workbench-header {
+  background: linear-gradient(135deg, var(--surface-card) 0%, var(--surface-tint) 100%);
+  border-bottom-color: var(--border);
+}
+[data-theme="dark"] .personnel-workbench-eyebrow-icon {
+  color: var(--primary-ink);
+  background: var(--chip-brand);
+}
+[data-theme="dark"] .personnel-workbench-summary {
+  border-color: var(--border-brand);
+  background: linear-gradient(135deg, var(--surface-muted), var(--surface-tint));
+}
+[data-theme="dark"] .personnel-workbench-summary strong {
+  color: var(--primary-ink-strong);
+}
+[data-theme="dark"] .personnel-workbench-stepper {
+  border-color: var(--border);
+  background: var(--surface-muted);
+}
+[data-theme="dark"] .personnel-workbench-modal .console-wizard-role-list > div {
+  border-color: var(--border);
+  box-shadow: none;
+}
+[data-theme="dark"] .personnel-workbench-modal .console-wizard-role-list > div::before {
+  background: var(--primary-light);
+}
+[data-theme="dark"] .personnel-workbench-modal .console-wizard-empty {
+  background: var(--surface-muted);
+}
+[data-theme="dark"] .personnel-workbench-modal .console-form-actions {
+  border-top-color: var(--border);
+  background: var(--surface-card);
+}
+/* 步骤标题的浅色原值是 #263650（比 --text 的浅色 #0f172a 浅一档），写成
+   var(--text, #263650) 会让浅色落到 #0f172a（token 在浅色已定义，回退不生效）。
+   所以浅色恢复原字面量，深色在这里补同名覆盖，取值仍是深色 --text。 */
+[data-theme="dark"] .personnel-workbench-stepper-heading {
+  color: var(--text);
 }
 </style>

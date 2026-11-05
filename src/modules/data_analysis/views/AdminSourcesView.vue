@@ -7,6 +7,7 @@ import EmptyState from "@/modules/platform/shared/components/EmptyState.vue"
 import ErrorState from "@/modules/platform/shared/components/ErrorState.vue"
 import LoadingState from "@/modules/platform/shared/components/LoadingState.vue"
 import { listSources, triggerAllSources, triggerSource } from "../api/dataAnalysis"
+import StandardFinanceImportPanel from "../components/StandardFinanceImportPanel.vue"
 import { formatDataAnalysisError } from "../utils/errors.js"
 
 const props = defineProps({ permissions: { type: Array, default: () => [] } })
@@ -98,6 +99,7 @@ onMounted(load)
 
 <template>
   <section>
+    <StandardFinanceImportPanel v-if="canTrigger" :permissions="permissions" />
     <div v-if="notice" class="da-filters" style="border-color:#bfe7d7;background:#f0fcf7;color:#177457">{{ notice }}</div>
     <div class="da-filters">
       <label><ConsoleIcon name="search" /><input v-model="keyword" placeholder="搜索子系统 / 库 / 主机"  maxlength="100"/></label>

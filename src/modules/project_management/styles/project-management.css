@@ -1001,22 +1001,9 @@
 .pm-status-panel .pm-table td { cursor: pointer; }
 .pm-status-panel .pm-table tbody tr:hover { background: var(--pm-primary-soft); }
 
-.pm-pagination { display: flex; align-items: center; gap: var(--pm-sp-1); }
-.pm-pg {
-  min-width: var(--pm-h-control);
-  height: var(--pm-h-control);
-  padding: 0 7px;
-  border: 1px solid var(--pm-line);
-  border-radius: var(--pm-r-xs);
-  background: var(--pm-card);
-  color: var(--pm-body);
-  font-size: var(--pm-fs-label);
-  line-height: 1;
-}
-
-.pm-pg:hover:not(:disabled) { border-color: var(--pm-primary-border); color: var(--pm-blue-text); }
-.pm-pg.active { border-color: var(--pm-primary); background: var(--pm-primary); color: #fff; font-weight: var(--pm-fw-semibold); }
-.pm-pg:disabled { opacity: .45; }
+/* 项目表与在途监控的分页条统一使用 shared/components/PaginationBar.vue（.ui-pager），
+   模块侧不再保留 .pm-pagination / .pm-pg 两套私有分页样式。 */
+.pm-table-footer .ui-pager { flex: 0 0 auto; }
 
 .pm-project-link { display: flex; flex-direction: column; gap: 3px; padding: 0; border: 0; background: transparent; color: var(--pm-body); text-align: left; }
 .pm-project-link b { color: var(--pm-blue-text); overflow-wrap: anywhere; word-break: break-word; }
@@ -1485,7 +1472,7 @@
 
 .pm-supplement-closure-context {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr));
   gap: 0;
   margin: 0;
   overflow: hidden;
@@ -1639,7 +1626,9 @@
 }
 
 @media (max-width: 900px) {
-  .pm-sidebar { transform: translateX(-100%); transition: transform var(--pm-t-slow) ease; }
+  /* 窄屏侧栏是抽屉：必须高于同层遮罩 .pm-menu-mask（--pm-z-mask），否则遮罩按 DOM
+     顺序盖住侧栏，打开菜单后侧栏条目不可点击。遮罩层值保持不变，点击空白仍可关闭。 */
+  .pm-sidebar { transform: translateX(-100%); transition: transform var(--pm-t-slow) ease; z-index: var(--pm-z-drawer); }
   .pm-sidebar.open { transform: translateX(0); }
   .pm-menu-mask { position: fixed; inset: 0; z-index: var(--pm-z-mask); background: rgba(15, 23, 42, .5); }
   .pm-main { margin-left: 0; }
@@ -1724,7 +1713,7 @@
   .pm-shell { --pm-h-control: 44px; --pm-h-button: 44px; }
   .pm-nav-item { min-height: 44px; }
   .pm-tab-pill,
-  .pm-pg,
+  .pm-shell .ui-pager__button,
   .pm-icon-button,
   .pm-logout,
   .pm-multi-option,
@@ -2087,7 +2076,7 @@
 .pm-chip .pm-chip-x:hover { background: var(--pm-primary-border); }
 
 /* 18.10 详情页布局（原型 PG-PRJ-02：摘要卡 + 计数标签页 + 甘特/时间线） */
-.pm-detail-summary { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: var(--pm-sp-3) var(--pm-sp-4); }
+.pm-detail-summary { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(210px, 100%), 1fr)); gap: var(--pm-sp-3) var(--pm-sp-4); }
 .pm-detail-summary div { min-width: 0; }
 .pm-detail-summary dt { margin-bottom: 2px; color: var(--pm-muted); font-size: var(--pm-fs-label); font-weight: var(--pm-fw-medium); }
 .pm-detail-summary dd { margin: 0; color: var(--pm-ink); font-size: var(--pm-fs-ui); font-weight: var(--pm-fw-semibold); }
@@ -2213,3 +2202,108 @@
 .pm-field-incomplete { display: grid; gap: var(--pm-sp-2); margin-top: var(--pm-sp-3); max-width: 720px; color: var(--pm-text-secondary); }
 .pm-field-incomplete textarea { min-height: 68px; }
 @media(max-width:1100px){.pm-field-workflow{grid-template-columns:1fr}.pm-signature-pad canvas{height:150px}}
+
+/* ==========================================================================
+   深色主题（UniLab v1.0 §1 令牌层的第二套取值）
+   --------------------------------------------------------------------------
+   项目管理系统所有组件只引用 --pm-* 令牌，所以换肤只在这一层完成：
+   深色下把令牌重新指向 main.css 的深色 token。这里不出现任何新的十六进制颜色，
+   调色板仍然只有 UniLab 的六语义色与中性墨色（规范 §1 的约束不变）。
+   ========================================================================== */
+.pm-shell[data-theme="dark"],
+[data-theme="dark"] .pm-shell {
+  --pm-primary-ink: var(--primary-ink);
+  --pm-primary-soft: var(--primary-soft);
+  --pm-primary-border: var(--primary-border);
+  --pm-focus-ring: rgba(125, 180, 255, .28);
+
+  --pm-ink: var(--text);
+  --pm-body: var(--text-secondary);
+  --pm-muted: var(--text-muted);
+  --pm-faint: var(--text-faint);
+
+  --pm-content: var(--surface-content);
+  --pm-card: var(--surface-card);
+  --pm-sunken: var(--surface-muted);
+  --pm-soft: var(--surface-muted);
+
+  --pm-line: var(--border);
+  --pm-line-soft: var(--line-soft);
+  --pm-line-strong: var(--line-strong);
+
+  --pm-sidebar: var(--sidebar);
+  --pm-sidebar-hover: var(--sidebar-hover);
+  --pm-sidebar-active: var(--sidebar-hover);
+  --pm-sidebar-label: var(--sidebar-label);
+  --pm-sidebar-dot: var(--sidebar-dot);
+
+  --pm-green-soft: var(--success-soft);
+  --pm-green-text: var(--success-text);
+  --pm-amber-soft: var(--warning-soft);
+  --pm-amber-text: var(--warning-text);
+  --pm-red-soft: var(--danger-soft);
+  --pm-red-text: var(--danger-text);
+  --pm-sky-soft: var(--sky-soft);
+  --pm-sky-text: var(--sky-ink);
+  --pm-violet-soft: var(--violet-soft);
+  --pm-violet-text: var(--violet-ink);
+  --pm-gray-soft: var(--chip-neutral);
+  --pm-gray-text: var(--text-secondary);
+  --pm-blue-text: var(--primary-ink);
+
+  --pm-shadow: 0 1px 2px rgba(0, 0, 0, .45), 0 4px 16px rgba(0, 0, 0, .35);
+  --pm-shadow-pop: 0 1px 3px rgba(0, 0, 0, .5), 0 8px 24px rgba(0, 0, 0, .45);
+  --pm-shadow-drawer: -8px 0 30px rgba(0, 0, 0, .55);
+  --pm-shadow-toast: 0 10px 30px rgba(0, 0, 0, .6);
+  --pm-shadow-modal: 0 20px 60px rgba(0, 0, 0, .68);
+}
+
+/* 表单控件在深色下统一用输入底色，避免白底输入框贴在深色卡片上。 */
+[data-theme="dark"] .pm-shell :is(
+    input:not([type="checkbox"]):not([type="radio"]),
+    select, textarea, .pm-input) {
+  background: var(--surface-input);
+  border-color: var(--pm-line);
+  color: var(--pm-ink);
+}
+
+[data-theme="dark"] .pm-shell :is(input, textarea)::placeholder {
+  color: var(--text-dim);
+}
+
+[data-theme="dark"] .pm-shell :is(input, select, textarea):focus {
+  background: var(--surface-input);
+}
+
+/* 半透明白底的分段切换器在深色下会发灰，改成半透明卡片底。 */
+[data-theme="dark"] .pm-decomposition-switcher {
+  background: rgba(17, 26, 44, .72);
+}
+
+/* 深色下遮罩加深，弹窗/抽屉靠阴影与描边分层。 */
+[data-theme="dark"] .pm-shell :is(.pm-modal-mask, .pm-drawer-mask, .pm-dialog-mask) {
+  background: var(--overlay-scrim);
+}
+
+[data-theme="dark"] .pm-shell :is(.pm-dialog, .pm-modal, .pm-drawer, .pm-popover, .pm-notifications) {
+  box-shadow: var(--pm-shadow-modal);
+}
+
+/* 深色下表格斑马纹与悬停层级：与浅色同样的三档底色顺序。 */
+[data-theme="dark"] .pm-shell .pm-table tbody tr:nth-child(even) {
+  background: var(--surface-stripe);
+}
+
+[data-theme="dark"] .pm-shell .pm-table tbody tr:hover {
+  background: var(--surface-hover);
+}
+
+[data-theme="dark"] .pm-shell .pm-table th {
+  background: var(--surface-head);
+}
+
+/* 侧栏在深色下比页面更深，用户区与品牌区继续沿用侧栏色。 */
+[data-theme="dark"] .pm-shell :is(.pm-sidebar-user, .pm-sidebar-footer) {
+  background: var(--pm-sidebar-hover);
+  border-top-color: var(--sidebar-border);
+}

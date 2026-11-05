@@ -7,6 +7,92 @@
 
 :where(h1, h2, h3, h4, section, article) { scroll-margin-top: 72px; }
 
+/* 视觉隐藏但保留在可访问性树中（1px 裁剪盒，不用 display:none / visibility:hidden）。
+   用于标题层级补位等“有语义、无需视觉呈现”的内容。 */
+.shared-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* 内容长度不是布局宽度：提供断行机会，保留控件值和预格式文本。 */
+body { overflow-wrap: anywhere; }
+fieldset { min-inline-size: 0; }
+:where(input, select, textarea) { min-width: 0; max-width: 100%; }
+:where(pre) { min-width: 0; max-width: 100%; overflow: auto; }
+
+/* Grid/Flex默认的最小内容宽度会被长选项、编号或表格放大。
+   约束内容轨道及其子项，宽表格仍保留原有列宽并在自己的容器内滚动。 */
+:is(.console-content, .contract-content, .pm-page, .crm-content, .portal-content,
+    .settlement-content, .da-page, .console-card, .contract-card, .pm-panel,
+    .crm-panel, .portal-card, .settlement-panel, .da-panel, .da-native-panel) {
+  min-width: 0;
+  max-width: 100%;
+}
+:is(.console-content, .contract-content, .pm-page, .crm-content, .portal-content,
+    .settlement-content, .da-page, .console-card, .contract-card, .pm-panel,
+    .crm-panel, .portal-card, .settlement-panel, .da-panel, .da-native-panel) > :not(table) {
+  min-width: 0;
+  max-width: 100%;
+}
+:is(.console-content, .contract-content, .pm-page, .crm-content, .portal-content,
+    .settlement-content, .da-page) :is(form, fieldset, label, input, select, textarea) {
+  min-width: 0;
+  max-width: 100%;
+}
+:is(.console-form-grid, .contract-form-grid, .pm-form-grid) > * { min-width: 0; }
+:is(.console-table-scroll, .contract-table-scroll, .pm-table-scroll,
+    .settlement-table-scroll, .da-table-scroll) { min-width: 0; max-width: 100%; }
+
+:is(.console-page-head, .contract-page-head, .pm-page-head, .crm-page-head,
+    .portal-title, .settlement-panel-head, .da-page-head) {
+  min-width: 0;
+  flex-wrap: wrap;
+}
+:is(.console-page-head, .contract-page-head, .pm-page-head, .crm-page-head,
+    .portal-title, .settlement-panel-head, .da-page-head) > div { min-width: 0; }
+:is(.console-button, .contract-button, .pm-button, .da-button),
+:is(.console-content, .contract-content, .pm-page, .crm-content, .portal-content,
+    .settlement-content, .da-page)
+  :is(button.console-button, a.console-button, button.contract-button, button.pm-button, button.da-button) {
+  min-width: 0;
+  max-width: 100%;
+  height: auto;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* 弹窗保持在视口内，内容纵向滚动，标题和表单允许收缩。 */
+:is(.console-modal, .console-detail-modal, .iam-modal, .crm-detail,
+    .contract-detail-modal, .pm-dialog, .da-modal, .portal-dialog > article,
+    .settlement-modal, .shared-confirm, .shared-prompt) {
+  min-width: 0;
+  min-height: 0;
+  max-width: 100%;
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+:is(.console-modal, .console-detail-modal, .iam-modal, .crm-detail,
+    .contract-detail-modal, .pm-dialog, .da-modal, .portal-dialog > article,
+    .settlement-modal, .shared-confirm, .shared-prompt) > :not(table) { min-width: 0; }
+:is(.console-modal, .console-detail-modal, .iam-modal, .crm-detail,
+    .contract-detail-modal, .pm-dialog, .da-modal, .portal-dialog > article,
+    .settlement-modal, .shared-confirm, .shared-prompt) :is(input, select, textarea, fieldset) {
+  min-width: 0;
+  max-width: 100%;
+}
+:is(.console-modal, .console-detail-modal, .iam-modal, .crm-detail,
+    .contract-detail-modal, .pm-dialog, .da-modal, .portal-dialog > article,
+    .settlement-modal, .shared-confirm, .shared-prompt) > footer { flex-wrap: wrap; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
@@ -147,7 +233,159 @@
 .subsystem-sidebar-user.subsystem-sidebar-user > button:disabled { cursor: wait; opacity: .55; }
 .subsystem-sidebar-user.subsystem-sidebar-user > button svg { width: 16px; height: 16px; }
 @media (max-width: 980px) {
-  .settlement-sidebar .subsystem-sidebar-user.subsystem-sidebar-user { flex-direction: column; gap: 8px; padding: 12px 8px; }
-  .settlement-sidebar .subsystem-sidebar-user.subsystem-sidebar-user > span:nth-child(2) { display: none; }
-  .settlement-sidebar .subsystem-sidebar-user.subsystem-sidebar-user > button { flex-basis: 32px; }
+  /* 结算侧栏在 ≤820px 收敛为整宽抽屉，不再有 64px 图标栏；
+     用户区保持横向（头像 + 姓名 + 退出）并压缩高度，为低矮视口留出导航空间。 */
+  .settlement-sidebar .subsystem-sidebar-user.subsystem-sidebar-user { min-height: 64px; padding: 10px 16px; }
+}
+
+/* 宽表格横向滚动的可见性（合同 / 平台控制台 / 结算 / 数据看板 / 商机 / 项目管理）。
+   macOS 覆盖式滚动条在未滚动时完全不可见，用户会误以为右侧列缺失：
+   1) 细滚动条：Chromium/Safari 用 ::-webkit-scrollbar 强制为经典常驻 8px 滚动条；
+      Firefox 走 scrollbar-width/scrollbar-color（@supports 限定，避免标准属性在
+      Chromium 中屏蔽 ::-webkit-scrollbar 样式）。
+   2) 边缘渐隐由“宿主覆盖层”负责，见下方 .table-scroll-host 规则和
+      shared/composables/useTableScrollAffordance.js：覆盖层画在滚动容器父元素上，
+      所以能盖住不透明、sticky 的表头；是否出现由滚动位置决定，滚到尽头就消失。
+      下面这条 :where() 规则是该覆盖层挂载前的降级表现（未执行增强 / 首帧），
+      增强完成后滚动容器带 .table-scroll-enhanced，这一层会被关掉。
+      它同时是深色主题 token 的约定所在：浅色下 token 未定义 → 回退到原来的
+      #fff / rgba(15,23,42,.14)，深色下取 main.css 的值，避免出现白边。
+   3) :where() 保持零权重，项目管理的自定义滚动条等模块规则照旧优先。 */
+:where(.contract-table-scroll, .console-table-scroll, .settlement-table-scroll,
+    .da-table-scroll, .pm-table-scroll, .table-panel, .filetask-table-wrap,
+    .iam-mini-table) {
+  background-image:
+    linear-gradient(to left, var(--surface-card, #fff) 0, rgba(255, 255, 255, 0) 100%),
+    linear-gradient(to left, var(--table-scroll-edge, rgba(15, 23, 42, .14)) 0,
+      rgba(15, 23, 42, 0) 100%);
+  background-repeat: no-repeat, no-repeat;
+  background-position: 100% 0, 100% 0;
+  background-size: 24px 100%, 24px 100%;
+  background-attachment: local, scroll;
+}
+/* 覆盖层接管之后关掉容器背景降级层，避免两层渐隐叠加。 */
+.table-scroll-enhanced { background-image: none; }
+:where(.contract-table-scroll, .console-table-scroll, .settlement-table-scroll,
+    .da-table-scroll, .pm-table-scroll, .table-panel, .filetask-table-wrap,
+    .iam-mini-table)::-webkit-scrollbar { width: 8px; height: 8px; }
+:where(.contract-table-scroll, .console-table-scroll, .settlement-table-scroll,
+    .da-table-scroll, .pm-table-scroll, .table-panel, .filetask-table-wrap,
+    .iam-mini-table)::-webkit-scrollbar-track { background: transparent; }
+:where(.contract-table-scroll, .console-table-scroll, .settlement-table-scroll,
+    .da-table-scroll, .pm-table-scroll, .table-panel, .filetask-table-wrap,
+    .iam-mini-table)::-webkit-scrollbar-thumb {
+  border-radius: 999px; background: var(--scrollbar-thumb, #cbd5e1);
+}
+:where(.contract-table-scroll, .console-table-scroll, .settlement-table-scroll,
+    .da-table-scroll, .pm-table-scroll, .table-panel, .filetask-table-wrap,
+    .iam-mini-table)::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover, #94a3b8);
+}
+
+/* Firefox：-moz-appearance 只在 Gecko 命中，Chromium/WebKit 继续使用上面的伪元素。 */
+@supports (-moz-appearance: none) {
+  :where(.contract-table-scroll, .console-table-scroll, .settlement-table-scroll,
+      .da-table-scroll, .pm-table-scroll, .table-panel, .filetask-table-wrap,
+      .iam-mini-table) {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb, #cbd5e1) transparent;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   表格滚动边缘覆盖层（状态感知、画在表头之上）
+   ---------------------------------------------------------------------------
+   useTableScrollAffordance.js 给滚动容器的父元素加 .table-scroll-host，并写入
+   --table-scroll-edge-top/right/left/height（滚动容器内容盒相对宿主的位置）。
+   两个伪元素就是左右两条渐隐带：
+     · position: absolute → 脱离文档流，不改变任何布局，也不随内容滚动；
+     · z-index 高于表头 sticky 层级（PM 粘性表头是 --pm-z-sticky: 20），
+       因此不透明的 th 底色盖不住它；
+     · opacity 0 → 1 只由 is-table-scroll-left / -right 决定，滚到尽头立刻消失；
+     · 宽 24px 从表面色渐变到透明，再叠一层 --table-scroll-edge 阴影线；颜色走
+       --surface-card / --table-scroll-edge，浅色回退 #fff / rgba(15,23,42,.14)，
+       深色自动跟随 main.css，两端都不会出现白条。
+   isolation: isolate 让宿主自己成为层叠上下文：覆盖层的 z-index 21 只在宿主内部
+   比较，再也逃不出宿主所在的层级。控制台/项目管理的粘性顶栏（z-index 20）是
+   宿主之外的兄弟层叠上下文，因此表格滚到顶栏下面时渐隐不会再盖住顶栏，而容器内
+   的 sticky 表头（同一层叠上下文内、z-index 更低）仍然被渐隐压在下面。
+   不要靠抬高顶栏 z-index 解决：那会连带改变弹层与下拉的层级关系。
+   --table-scroll-edge-z 继续可配置，用于容器内表头层级更高的模块；
+   --table-scroll-host-isolation 也保留可配置口子：某模块确实要渐隐盖住顶栏时，
+   在自己的作用域里把它设成 auto 即可回到旧行为。 */
+.table-scroll-host { isolation: var(--table-scroll-host-isolation, isolate); }
+.table-scroll-host--static { position: relative; }
+.table-scroll-host::before,
+.table-scroll-host::after {
+  content: '';
+  position: absolute;
+  z-index: var(--table-scroll-edge-z, 21);
+  top: var(--table-scroll-edge-top, 0);
+  width: 24px;
+  height: var(--table-scroll-edge-height, 0);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .16s ease;
+}
+.table-scroll-host::after {
+  right: var(--table-scroll-edge-right, 0);
+  background-image:
+    linear-gradient(to left, var(--surface-card, #fff) 0, rgba(255, 255, 255, 0) 100%),
+    linear-gradient(to left, var(--table-scroll-edge, rgba(15, 23, 42, .14)) 0,
+      rgba(15, 23, 42, 0) 100%);
+}
+.table-scroll-host::before {
+  left: var(--table-scroll-edge-left, 0);
+  background-image:
+    linear-gradient(to right, var(--surface-card, #fff) 0, rgba(255, 255, 255, 0) 100%),
+    linear-gradient(to right, var(--table-scroll-edge, rgba(15, 23, 42, .14)) 0,
+      rgba(15, 23, 42, 0) 100%);
+}
+.table-scroll-host.is-table-scroll-right::after { opacity: 1; }
+.table-scroll-host.is-table-scroll-left::before { opacity: 1; }
+
+/* 深色主题：整页滚动条、侧栏抽屉滚动条和弹窗内滚动条一起换成深色拇指。 */
+:root[data-theme="dark"] ::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+}
+:root[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+:root[data-theme="dark"] ::-webkit-scrollbar-track {
+  background: transparent;
+}
+:root[data-theme="dark"] {
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+/* 深色主题：抽屉/弹窗靠阴影分层，浅色阴影在深底上会消失，这里统一换成深色阴影。 */
+:root[data-theme="dark"] :is(.console-modal, .console-detail-modal, .iam-modal,
+    .crm-detail, .pm-dialog, .da-modal, .portal-dialog > article,
+    .settlement-modal, .shared-confirm, .shared-prompt) {
+  box-shadow: var(--shadow-modal);
+}
+
+/* 深色主题：侧栏底部用户区沿用侧栏 hover 色，避免比侧栏更亮形成断层。 */
+:root[data-theme="dark"] .subsystem-sidebar-user.subsystem-sidebar-user {
+  background: var(--sidebar-hover);
+  border-top-color: var(--sidebar-border);
+}
+
+/* 深色主题：共享操作提示条是 Teleport 出来的深色条，深色页面里加一圈描边才分得清边界。 */
+:root[data-theme="dark"] :is(.shared-operation-toast, .operation-result) {
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-popover);
+}
+
+/* ==========================================================================
+   深色主题：IAM 设置页弹窗遮罩
+   --------------------------------------------------------------------------
+   .iam-modal-backdrop 的浅色取值写在 iam-settings.css（模块级 CSS，不在本次
+   组件清单里），这里只把统一遮罩的 token 应用到它。组件内嵌样式里写死的浅色
+   表面（接入向导、许可管理、403、子系统不可用、批量导入、人员变动、员工入职、
+   渗透工作包、范围变更、结算时间轴、字典口径提示、共享确认/输入弹窗）已经由
+   各自 <style scoped> 的 [data-theme="dark"] 块接手，此处不再重复兜底。
+   ========================================================================== */
+:root[data-theme="dark"] .iam-modal-backdrop {
+  background: var(--overlay-scrim);
 }

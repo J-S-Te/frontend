@@ -18,7 +18,7 @@ function templateRender(descriptor, bindings) {
 }
 
 const shell = parse(await readFile(new URL('./views/DashboardShellView.vue', import.meta.url), 'utf8')).descriptor
-const errorDescriptor = parse(await readFile(new URL('../platform/shared/components/ErrorState.vue', import.meta.url), 'utf8')).descriptor
+const errorDescriptor = parse(await readFile(new URL('../shared/components/ErrorState.vue', import.meta.url), 'utf8')).descriptor
 const errorScript = compileScript(errorDescriptor, { id: 'scope-error-state' })
 const icon = { render: () => null }
 const ErrorState = new Function('computed', 'ConsoleIcon', 'formatUserError', 'userErrorDiagnostics', errorScript.content.replace(/^import .*$/gm, '').replace('export default', 'return'))(Vue.computed, icon, formatUserError, userErrorDiagnostics)
@@ -27,8 +27,9 @@ const render = templateRender(shell)
 const sections = ['overview', 'contract', 'project', 'report', 'finance']
 const scopeMessage = '当前数据范围无法读取此统计；报告与财务看板暂仅支持经授权的全租户范围。'
 
-// 验证生产模板与 ErrorState 渲染，不挂载外壳的会话或网络
-// 生命周期，也不替换其错误分支逻辑。
+// 用途：渲染真实外壳模板与错误组件，不挂载会话或网络生命周期。
+// 参数：section 为看板分区，summaryError 为摘要错误，overrides 为场景状态。
+// 返回值：服务端渲染的 HTML。
 async function renderSummary(section, summaryError, overrides = {}) {
   const noop = () => {}
   const app = Vue.createSSRApp({
@@ -38,7 +39,7 @@ async function renderSummary(section, summaryError, overrides = {}) {
       currentMeta: ['业务看板', '统计'], currentUserInitial: '测', currentUserName: '测试', currentUserRole: '总监',
       dataScopeLabel: '管辖团队', scopeModeLabel: '团队', scopeEmptyHint: '', navGroups: [], statusOptions: [], statusFilter: '全部', isLoggingOut: false,
       DASHBOARD_SECTIONS: sections, DASHBOARD_CODES: Object.fromEntries(sections.map(value => [value, value])),
-      EMBEDDED_DASHBOARD_SECTIONS: [], iframeLoading: false,
+      EMBEDDED_DASHBOARD_SECTIONS: [], dashboardEmbedEnabled: true, iframeLoading: false,
       overviewSummary: {}, dashboardSummary: null, contractDetails: {}, dashboardTrend: [], alertSummary: null, detailError: '',
       // 外壳把 /auth/me 的 tenant_id/user_id 传给原生看板做「租户+用户」级指标卡偏好，渲染前需有 me。
       me: null,
@@ -51,6 +52,7 @@ async function renderSummary(section, summaryError, overrides = {}) {
   app.component('ErrorState', ErrorState)
   app.component('LoadingState', { render: () => null })
   app.component('NativeDashboardView', { render: () => null })
+  app.component('ContractImportHistoryPanel', { render: () => null })
   app.component('AlertsCenterView', { render: () => null })
   app.component('DictionaryView', { render: () => null })
   app.component('AdminSourcesView', { render: () => null })
@@ -139,4 +141,18 @@ test('范围标签与空范围提示以非错误样式渲染', async () => {
   assert.ok(!withoutScope.includes(hint))
   assert.doesNotMatch(withoutScope, /数据范围：/)
   assert.doesNotMatch(withoutScope, /role="status"/)
+})
+
+
+test('原生模式不渲染嵌入区域，启用模式保留临时不可达错误', async () => {
+  const overrides = {
+    EMBEDDED_DASHBOARD_SECTIONS: ['overview', 'report', 'finance'],
+    iframeError: '嵌入服务暂不可达', iframeSrc: '', embedFrame: null,
+    embedActivity: {}, loadDashboard: () => {},
+  }
+  const nativeHtml = await renderSummary('finance', '', { ...overrides, dashboardEmbedEnabled: false })
+  assert.doesNotMatch(nativeHtml, /da-frame-panel|嵌入服务暂不可达|<iframe/)
+  const embeddedHtml = await renderSummary('finance', '', { ...overrides, dashboardEmbedEnabled: true })
+  assert.match(embeddedHtml, /da-frame-panel/)
+  assert.match(embeddedHtml, /嵌入服务暂不可达/)
 })

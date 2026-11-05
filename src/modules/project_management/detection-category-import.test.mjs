@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFile } from 'node:fs/promises'
 import { formatUserError } from '../shared/utils/userError.js'
+import { projectImportErrorRows, projectImportErrorsCsv } from './importErrors.js'
 
 const dialog = await readFile(new URL('./components/DetectionCategoryImportDialog.vue', import.meta.url), 'utf8')
 const api = await readFile(new URL('./api/projectManagement.js', import.meta.url), 'utf8')
@@ -9,8 +10,8 @@ const view = await readFile(new URL('./views/ProjectManagementView.vue', import.
 function mount(calls = {}) {
   const script = dialog.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '')
   const events = []
-  const state = new Function('formatUserError', 'computed', 'ref', 'defineProps', 'defineEmits', 'downloadDetectionCategoryImportTemplate', 'previewDetectionCategoriesImport', 'importDetectionCategories', `${script}\nreturn { file, preview, result, selected, busy, error, filter, visibleRows, selectedCount, pick, inspect, commit, reset, selectAll, importMessage }`)(
-    formatUserError, (read) => ({ get value() { return read() } }), (value) => ({ value }), () => ({ codeOptions: [] }), () => (...args) => events.push(args), calls.download, calls.preview, calls.commit,
+  const state = new Function('formatUserError', 'computed', 'ref', 'defineProps', 'defineEmits', 'downloadDetectionCategoryImportTemplate', 'previewDetectionCategoriesImport', 'importDetectionCategories', 'projectImportErrorRows', 'projectImportErrorsCsv', `${script}\nreturn { file, preview, result, selected, busy, error, filter, visibleRows, selectedCount, pick, inspect, commit, reset, selectAll, importMessage, errorReportRows, canDownloadErrors, downloadErrorReport }`)(
+    formatUserError, (read) => ({ get value() { return read() } }), (value) => ({ value }), () => ({ codeOptions: [] }), () => (...args) => events.push(args), calls.download, calls.preview, calls.commit, projectImportErrorRows, projectImportErrorsCsv,
   )
   return { ...state, events }
 }
@@ -94,4 +95,16 @@ test('确认请求处理中重复点击被阻止，逐行失败正常交付结�
   await pending
   assert.equal(state.result.value.rows[0].status, 'FAILED')
   assert.equal(state.events.length, 1)
+})
+test('检测类别导入错误报告按钮按非成功行启用，结果阶段优先使用结果数据', () => {
+  const state = mount()
+  assert.match(dialog, /下载错误报告 CSV/)
+  assert.match(dialog, /:disabled="busy \|\| !canDownloadErrors"/)
+  assert.equal(state.canDownloadErrors.value, false)
+  state.preview.value = { rows: [{ row_no: 2, status: 'READY' }, { row_no: 3, status: 'INVALID', errors: ['重复类别'] }] }
+  assert.equal(state.canDownloadErrors.value, true)
+  assert.equal(state.errorReportRows.value.length, 1)
+  state.result.value = { imported: 1, skipped: 0, rows: [{ row_no: 2, status: 'IMPORTED' }] }
+  assert.equal(state.canDownloadErrors.value, false)
+  assert.match(dialog, /检测类别导入错误\.csv/)
 })

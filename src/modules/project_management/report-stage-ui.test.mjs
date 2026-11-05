@@ -30,7 +30,10 @@ test('报告阶段筛选走列表接口 report_stage 参数并与状态筛选组
   assert.match(source, /reportStageFilter\.value = ''/)
   // 报告阶段筛选结果只替换列表数据源，完整工作区快照与指标口径保持不变。
   assert.match(source, /const projectListSource = computed\(\(\) => reportStageFilter\.value \? reportStageProjects\.value : projects\.value\)/)
-  assert.match(source, /const projectListEmptyText = computed/)
+  // 2026-11 统一：加载 / 失败 / 空三态不再挤进一句 computed 文案，
+  // 改为把三者分别交给 ListState（失败必须可重试，空才显示空文案）。
+  assert.match(source, /const projectListError = computed\(\(\) => reportStageListError\.value \|\| ''\)/)
+  assert.match(source, /:error="projectListError"/)
   assert.match(source, /return projectListSource\.value\.filter/)
   // 筛选读取失败时保留其它结果并给出有样式的内联错误条。
   assert.match(source, /v-if="reportStageListError" class="pm-inline-alert danger"/)

@@ -119,13 +119,34 @@ test('两级执行指派展示新状态、团队负责人和通知/超时文案'
 test('客户与商机管理复用基础平台壳层、图标导航和响应式规范', () => {
   assert.match(view, /import ConsoleIcon from '@\/modules\/platform\/shared\/components\/ConsoleIcon\.vue'/)
   assert.match(view, /import '@\/modules\/platform\/styles\/console\.css'/)
-  for (const className of ['console-page', 'console-sidebar', 'console-nav-item', 'console-main', 'console-topbar', 'console-content', 'console-page-head']) {
-    assert.match(view, new RegExp(className))
+  // 壳层骨架（console-page / console-sidebar / console-main / console-topbar / console-content）
+  // 已收敛到 shared/components/AppShell.vue，由它自己的 app-shell.test.mjs 锁定结构与渲染。
+  // 视图这边只保留「用哪个 <AppShell>、挂哪些皮肤类名、页头仍用 console-page-head」。
+  assert.match(view, /import AppShell from '@\/modules\/shared\/components\/AppShell\.vue'/)
+  assert.equal((view.match(/<AppShell[\s>]/g) ?? []).length, 1, '只允许一个 <AppShell>')
+  assert.equal((view.match(/<\/AppShell>/g) ?? []).length, 1)
+  assert.doesNotMatch(view, /<main[\s>]/, '主区由共享外壳渲染，视图不再自建 <main>')
+  // 侧栏由外壳渲染；视图里剩下的 <aside> 只属于详情浮层（商机团队 / 附件 / 外部报价），不是壳层侧栏。
+  assert.doesNotMatch(view, /<aside class="console-sidebar/, '壳层侧栏归共享外壳，视图不得再自建')
+  for (const skin of [
+    'page-class="crm-shell"',
+    'sidebar-class="crm-sidebar"',
+    'brand-class="crm-brand"',
+    'nav-class="crm-nav"',
+    'main-class="crm-main"',
+    'topbar-class="crm-topbar"',
+    'content-class="crm-content"',
+    'sidebar-user-class="subsystem-sidebar-user"',
+  ]) {
+    assert.ok(view.includes(skin), `缺少皮肤类名 prop：${skin}`)
   }
+  // 页头（含 crm-actions 操作区）仍由视图提供，经 #page-head 插槽落进 .console-content。
+  assert.match(view, /<template #page-head>[\s\S]{0,200}class="console-page-head crm-page-head"/)
   for (const section of ['客户管理', '商机管理', '售前技术支持', '个人通知']) {
     assert.match(view, new RegExp(section))
   }
-  assert.match(view, /v-if="canReadNotifications"/)
+  // 导航项权限从手写 v-if 改成外壳的 visible 标记，语义不变：无权限不渲染。
+  assert.match(view, /visible: canReadNotifications\.value/)
   assert.match(view, /mobileMenuOpen/)
   assert.match(style, /@media \(max-width: 820px\)/)
   assert.match(style, /@media \(max-width: 620px\)/)
@@ -178,6 +199,27 @@ test('售前申请详情使用摘要与双栏工作区并在窄屏回退单列',
   assert.match(style, /\.crm-presale-detail-workspace \{ display: grid; grid-template-columns: minmax\(0, 1\.08fr\) minmax\(420px, \.92fr\)/)
   assert.match(style, /\.crm-presale-detail-activity \{ position: sticky; top: 94px; \}/)
   assert.match(style, /@media \(max-width: 820px\)[\s\S]*\.crm-presale-detail-workspace \{ grid-template-columns: 1fr;/)
+})
+
+test('售前申请详情标题展示售前名称且摘要区按被支持单位/联系方式/支持内容重排', () => {
+  // 标题取商机名称（售前名称），缺失时回退申请编号；编号仍在头部说明中保留。
+  assert.match(view, /<h2 :title="selectedPresale\.opportunity_name \|\| selectedPresale\.request\.request_no">\{\{ selectedPresale\.opportunity_name \|\| selectedPresale\.request\.request_no \}\}<\/h2>/)
+  assert.match(view, /<small>申请编号 \{\{ selectedPresale\.request\.request_no \}\} · 关联商机/)
+  const summaryStart = view.indexOf('class="console-detail-grid crm-presale-summary"')
+  const summaryEnd = view.indexOf('class="crm-presale-detail-workspace"', summaryStart)
+  assert.ok(summaryStart > 0 && summaryEnd > summaryStart, '摘要区与工作区边界应存在')
+  const summary = view.slice(summaryStart, summaryEnd)
+  const labels = [...summary.matchAll(/<span>([^<]+)<\/span>/g)].map((match) => match[1])
+  assert.deepEqual(labels, ['状态', '关联商机', '被支持单位', '联系方式', '当前执行人', '团队负责人', '累计工时', '支持内容', '是否逾期'])
+  // 联系人并入联系方式：同一格展示姓名与电话（保留查看明文能力），不再单独占格。
+  assert.match(summary, /<span>联系方式<\/span><strong>\{\{ selectedPresale\.request\.contact_name \|\| '—' \}\} · \{\{ presaleContactPhone \|\| selectedPresale\.request\.contact_phone \|\| '—' \}\}<\/strong>/)
+  assert.doesNotMatch(summary, /<span>联系人<\/span>/)
+  assert.doesNotMatch(summary, /<span>联系电话<\/span>/)
+  // 原联系人位置换成被支持单位（商机所属客户），原是否逾期位置换成支持内容（需求说明），是否逾期右移一格。
+  assert.match(summary, /<span>被支持单位<\/span><strong>\{\{ selectedPresale\.customer_name \|\| '—' \}\}<\/strong>/)
+  assert.match(summary, /crm-presale-summary__support"><span>支持内容<\/span><strong>\{\{ selectedPresale\.request\.description \|\| '—' \}\}<\/strong>/)
+  assert.match(summary, /<span>支持内容<\/span>[\s\S]*<span>是否逾期<\/span><strong>\{\{ selectedPresale\.overdue \? '是' : '否' \}\}<\/strong>/)
+  assert.match(style, /\.crm-presale-summary__support strong \{ max-height: 96px; overflow-y: auto; white-space: pre-wrap; \}/)
 })
 
 test('确认导入成功后自动关闭客户 Excel 导入弹窗', () => {
@@ -355,7 +397,7 @@ test('CM-004 门户访问页签失败关闭且不展示本地密码', () => {
   assert.match(view, /链接只在本页面生命周期内显示/)
   assert.match(view, /CRM 不创建、展示或传递固定密码/)
   assert.match(view, /这不是“撤销邀请”/)
-  assert.match(view, /window\.confirm\('确认禁用该客户的门户访问/)
+  assert.match(view, /confirmText: '禁用门户访问'/)
   assert.match(view, /portalAccessDisableRetries\.keyFor\(customerID, reason\)/)
   assert.match(view, /自动恢复已达到上限/)
   assert.doesNotMatch(view, /11223344|portal-jwt|Portal JWT|初始密码/)
@@ -504,6 +546,9 @@ test('商机附件只展示后端扫描状态并在能力未配置时失败关�
   assert.match(view, /item\.scan_status !== 'CLEAN'/)
 	assert.match(view, /flow\.session\.upload_mode === 'INTERNAL'/)
 	assert.match(view, /uploadOpportunityAttachmentContent\(opportunityID, flow\.session\.attachment\.id, file\)/)
+  // 上传前按服务端 max_size_bytes / allowed_mime_types 校验：不合规不创建上传会话。
+  assert.match(view, /validateOpportunityAttachment\(file, capability\)/)
+  assert.match(view, /import \{ validateOpportunityAttachment \} from '\.\.\/utils\/attachmentValidation\.js'/)
   assert.doesNotMatch(view, /FileReader/)
 })
 
@@ -769,8 +814,10 @@ test('CM-002 项目历史明确展示 Portal 同步快照及新鲜度边界', ()
   assert.match(view, /同步链路可能已过期/)
   assert.match(view, /同步链路有效期内/)
   assert.match(view, /item\.sync_last_success_at/)
-  assert.match(view, /loadCustomerProjectPage\(customerProjectsPage\.number \+ 1\)/)
-  assert.match(view, /customerProjectsPage\.total/)
+  // 翻页入口改由统一分页条承接（2026-11 统一）：视图仍必须把服务端 total 交给分页条，
+  // 并继续用 customerProjectLoadSequence 丢弃迟到响应。
+  assert.match(view, /<PaginationBar class="crm-actions" label="客户项目历史分页"[^>]*:total="customerProjectsPage\.total"/)
+  assert.match(view, /<PaginationBar class="crm-actions" label="客户项目历史分页"[^>]*@change="loadCustomerProjectPage"/)
   assert.match(view, /customerProjectLoadSequence/)
 })
 
@@ -865,6 +912,16 @@ test('CM-001 Excel 导入权限、三阶段和失败关闭语义已接入', () =
   assert.match(importWizard, /URL\.revokeObjectURL\(objectURL\)/)
   assert.doesNotMatch(view, /FileReader|readAsArrayBuffer|xlsx\.read|localStorage|sessionStorage|v-html/)
   assert.doesNotMatch(importWizard, /FileReader|readAsArrayBuffer|xlsx\.read|localStorage|sessionStorage|v-html/)
+})
+
+test('CM-001 客户导入错误报告改由预检/结果行本地生成，并按内容禁用', () => {
+  assert.match(view, /customerImportErrorReportRows/)
+  assert.match(view, /:disabled="!customerImportErrorReportRows\.length"/)
+  assert.match(view, /下载错误报告 CSV/)
+  assert.doesNotMatch(view, /downloadCustomerImportErrors/)
+  assert.match(importWizard, /customerImportErrorsCsv/)
+  assert.match(importWizard, /new Blob\(\[csv\], \{ type: 'text\/csv;charset=utf-8' \}\)/)
+  assert.doesNotMatch(importWizard, /downloadCustomerImportErrors/)
 })
 
 test('CM-001 Excel 导入 API 严格使用真实 multipart、模板下载、版本提交和 CSV 路由', async (t) => {
@@ -1292,7 +1349,10 @@ test('TS-010 商机详情使用独立分页查询且仅可查看的任务进入�
   assert.match(view, /v-if="item\.can_view_detail"/)
   assert.match(view, /if \(!item\?\.can_view_detail\) return/)
   assert.match(view, /暂无关联售前任务/)
-  assert.match(view, /opportunityPresalePage\.number \* opportunityPresalePage\.size >= opportunityPresalePage\.total/)
+  // 上一页 / 下一页的禁用语义已收敛到 PaginationBar（见 shared/pagination-bar.test.mjs），
+  // 视图侧只保留「独立分页查询 + 服务端 total + 查看全部上限」这三条产品约束。
+  assert.match(view, /<PaginationBar label="关联售前任务分页"[^>]*:total="opportunityPresalePage\.total"/)
+  assert.match(view, /<PaginationBar label="关联售前任务分页"[^>]*@change="page => loadOpportunityPresales\(page\)"/)
 })
 
 test('TS-010 关联查询调用真实路由和分页参数', async (t) => {

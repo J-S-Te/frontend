@@ -1,6 +1,8 @@
 <script setup>
 import { loginUsername } from "@/modules/shared/loginUsername.mjs"
 import OperationToast from '@/modules/shared/components/OperationToast.vue'
+import ListState from '@/modules/shared/components/ListState.vue'
+import PaginationBar from '@/modules/shared/components/PaginationBar.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { formatUserError } from '../../shared/utils/userError.js'
 import { createRequestScope } from '../../platform/shared/composables/requestScope.js'
@@ -43,6 +45,9 @@ import ProgressCell from '@/modules/project_management/components/ProgressCell.v
 import ProjectNotificationCenter from '@/modules/project_management/components/ProjectNotificationCenter.vue'
 import QualificationImportDialog from '@/modules/project_management/components/QualificationImportDialog.vue'
 import DetectionCategoryImportDialog from '@/modules/project_management/components/DetectionCategoryImportDialog.vue'
+import NativeProjectCreateDialog from '@/modules/project_management/components/NativeProjectCreateDialog.vue'
+import NativeScopeChangePanel from '@/modules/project_management/components/NativeScopeChangePanel.vue'
+import { useProjectCreationCapabilities } from '@/modules/project_management/composables/useProjectCreationCapabilities.js'
 import RiskList from '@/modules/project_management/components/RiskList.vue'
 import SearchableSelect from '@/modules/project_management/components/SearchableSelect.vue'
 import ServiceItemPicker from '@/modules/project_management/components/ServiceItemPicker.vue'
@@ -111,13 +116,14 @@ import {
   toDateTimeLocal,
   toggleCodeSelection,
 } from '@/modules/project_management/projectDisplay'
-import { subsystemAccessMessage } from '@/modules/shared/authz/sessionCompatibility'
+import { principalIdentityID, subsystemAccessMessage } from '@/modules/shared/authz/sessionCompatibility'
 import { formatBusinessDate, formatBusinessDateTime, todayBusinessDate } from '@/modules/shared/utils/businessTime.js'
 import { closeSubsystemTabOrFallback } from '@/modules/shared/utils/returnToPortal'
 import {
   adjustDecomposition,
   confirmServiceItems as confirmServiceItemsRequest,
   createProject,
+  getProjectCreationCapabilities,
   createRule,
   getDashboard,
   getProjectSession,
@@ -311,6 +317,8 @@ watch([activeSection, () => navigation.value.sections.join('|')], () => {
 }, { immediate: true })
 const currentMeta = computed(() => pageMeta[activeSection.value])
 const mobileMenuOpen = ref(false)
+// 汉堡按钮引用：抽屉用 Escape 收起后焦点交还给它，键盘用户不会掉进已隐藏的侧栏。
+const mobileMenuButton = ref(null)
 const keyword = ref('')
 const statusFilter = ref('')
 const reportStageFilter = ref('')
@@ -327,6 +335,8 @@ useUrlFilterState({
 })
 const selectedRows = ref([])
 const createOpen = ref(false)
+const nativeCreateOpen = ref(false)
+const nativeScopeProjectID = ref('')
 const {
   notificationOpen, notificationItems, notificationCount, notificationLoading, notificationError, notificationActionID,
   closeNotifications, refreshNotificationCount, openNotification, toggleNotifications, disposeNotifications,
@@ -391,11 +401,8 @@ const reportStageListLoading = ref(false)
 const reportStageListError = ref('')
 const reportStageListScope = createRequestScope()
 const projectListSource = computed(() => reportStageFilter.value ? reportStageProjects.value : projects.value)
-const projectListEmptyText = computed(() => {
-  if (reportStageListLoading.value) return '正在按报告阶段筛选…'
-  if (reportStageListError.value) return '报告阶段筛选结果读取失败'
-  return projectListSource.value.length ? '暂无符合当前筛选条件的项目' : '暂无项目，请先新建项目'
-})
+// 项目列表的失败原因：报告阶段筛选失败时整表不可信，必须显示失败态而不是「暂无项目」。
+const projectListError = computed(() => reportStageListError.value || '')
 
 const filteredProjects = computed(() => {
   const query = keyword.value.trim().toLowerCase()
@@ -1391,6 +1398,31 @@ const canCreateProject = computed(() => {
   const roles = Array.isArray(session.value?.roles) ? session.value.roles : []
   return roles.some((role) => projectCreationRoles.has(role))
 })
+const canReadNativeProjectScope = computed(() =>
+  Array.isArray(session.value?.permissions) && session.value.permissions.includes('project.read'))
+const canReadProjectSourceCapabilities = computed(() =>
+  canReadNativeProjectScope.value || canCreateProject.value)
+const {
+  nativeEnabled: nativeProjectEnabled,
+  error: projectCreationCapabilityError,
+  refresh: refreshProjectCreationCapabilities,
+} = useProjectCreationCapabilities({
+  allowed: canReadProjectSourceCapabilities,
+  session,
+  loader: getProjectCreationCapabilities,
+})
+watch([canCreateProject, nativeProjectEnabled], ([allowed, enabled]) => {
+  if (!allowed || !enabled) nativeCreateOpen.value = false
+})
+
+// 用途：接收已成功保存的原生项目并刷新工作区，不重复发起建项。
+// 参数：project为服务端返回的新建或幂等重放项目。
+// 返回值：异步完成；刷新失败沿用已保存提示，保留服务端事实。
+async function onNativeProjectCreated(project) {
+  nativeCreateOpen.value = false
+  showToast(`项目 ${project.id} 已创建，服务项待拆解确认`)
+  await refreshAfterWrite()
+}
 
 const projectCardRole = computed(() => {
   const roles = new Set((Array.isArray(session.value?.roles) ? session.value.roles : []).map((role) => String(role).trim().toLowerCase()))
@@ -2380,6 +2412,23 @@ const detailProject = computed(() => {
   const id = String(route.query.project || '')
   return projects.value.find((project) => project.id === id) || null
 })
+// 只在身份、项目或读取授权变化时销毁工作区；普通刷新不丢弃未知写结果的原操作号。
+watch([
+  () => detailProject.value?.id,
+  () => principalIdentityID(session.value),
+  () => session.value?.tenant_id,
+  canReadNativeProjectScope,
+], () => { nativeScopeProjectID.value = '' })
+
+// 用途：刷新已提交的原生范围与服务项，不重发提案或审批。
+// 参数：change为真实持久提案回执。
+// 返回值：异步完成；读取失败保留既有已保存提示。
+async function onNativeScopeChanged(change) {
+  const status = { PENDING: '已提交，待审批', APPROVED: '已批准生效，请重新确认拆解', REJECTED: '已驳回', WITHDRAWN: '已撤回' }[change?.status] || '已保存'
+  showToast(`原生范围提案 ${change?.id || ''}${status}`)
+  await refreshAfterWrite()
+}
+
 // 项目详情是拆解已推进、无法再重建清单时唯一还能看到关账入口的地方，因此同样按
 // supplement_status 与 project.decomposition.manage 双重门控，缺权限时说明原因。
 const detailSupplementClosure = computed(() => supplementClosureAvailability(detailProject.value, permissionSet.value))
@@ -2500,6 +2549,7 @@ const {
   openSupplementClosure, closeSupplementClosure, reloadSupplementClosure, submitSupplementClosure,
 } = useSupplementClosure({
   closeSupplement, listSupplementContracts, formatUserError, showToast, refreshAfterWrite, askConfirm,
+  closureAllowed: (project) => !saving.value && supplementClosureAvailability(project, permissionSet.value).allowed,
 })
 
 async function toggleRule(rule) {
@@ -2985,6 +3035,9 @@ async function runOperation(kind) {
   finally { saving.value = false }
 }
 
+/** 用途：按原选择范围撤销负责人或执行团队分配并保留历史记录。
+ * 参数：kind 为 team（负责人）或 execution（执行团队）。
+ * 返回值：无；取消不写入，失败以提示反馈。 */
 async function revokeSelectedAssignment(kind) {
   const permitted = () => kind === 'team' ? canRevokeTeam.value : kind === 'execution' && canRevokeExecution.value
   if (saving.value || promptDialog.value || !permitted()) return
@@ -2992,14 +3045,17 @@ async function revokeSelectedAssignment(kind) {
   if (!items.length) { showToast('请至少选择一个服务项', 'warning'); return }
   const eligible = items.filter((item) => item.status === '待分配' && (kind === 'team' ? item.team_lead_id : item.project_manager_id))
   if (eligible.length !== items.length) { showToast('仅可撤销处于待分配状态且已有对应分配的服务项', 'warning'); return }
-  const label = kind === 'team' ? '团队负责人分配（会同时撤销项目经理、工程师和能力校验）' : '项目经理与工程师分配'
-  const reason = window.prompt(`请输入撤销${label}的原因：`)
-  if (!String(reason).trim()) { showToast('撤销原因不能为空', 'warning'); return }
+  const context = captureReasonContext(eligible)
+  const label = kind === 'team' ? '团队负责人分配' : '执行团队分配'
+  const reason = await askOperationReason({
+    title: `撤销${label}`, confirmText: `撤销${label}`, label: '撤销原因', danger: true,
+    description: `请输入撤销${label}的原因。${kind === 'team' ? '同时撤销项目经理、工程师分配及能力校验。' : ''}`,
+  }, context, permitted)
   if (reason === null) return
   saving.value = true
   try {
-    for (const item of eligible) {
-      const payload = { reason: String(reason).trim(), expected_version: Number(item.version) || 0 }
+    for (const item of context.items) {
+      const payload = { reason, expected_version: Number(item.version) || 0 }
       if (kind === 'team') await revokeTeamAssignment(item.id, payload)
       else await revokeExecutionAssignment(item.id, payload)
     }
@@ -3010,17 +3066,23 @@ async function revokeSelectedAssignment(kind) {
   } finally { saving.value = false }
 }
 
+// 用途：将原选择范围内待分配的服务项退回拆解确认。
+// 参数：无。
+// 返回值：无；取消不写入，失败以提示反馈。
 async function returnSelectedToDecomposition() {
   if (saving.value || promptDialog.value || !canManageDecomposition.value) return
   const items = selectedServiceItems.value
   if (!items.length) { showToast('请至少选择一个服务项', 'warning'); return }
   if (items.some((item) => item.status !== '待分配')) { showToast('仅可将待分配服务项退回拆解确认', 'warning'); return }
-  const reason = window.prompt('请输入退回拆解确认的原因：')
-  if (!String(reason).trim()) { showToast('退回原因不能为空', 'warning'); return }
+  const context = captureReasonContext(items)
+  const reason = await askOperationReason({
+    title: '退回拆解确认', confirmText: '退回拆解确认', label: '退回原因', danger: true,
+    description: '请输入退回拆解确认的原因。原分配与能力校验结果将清除。',
+  }, context, () => canManageDecomposition.value)
   if (reason === null) return
   saving.value = true
   try {
-    for (const item of items) {
+    for (const item of context.items) {
       await returnServiceItemToDecomposition(item.id, { reason: String(reason).trim(), expected_version: Number(item.version) || 0 })
     }
     showToast(`已将 ${items.length} 个服务项退回拆解确认，原分配与校验结果已清除`)
@@ -3045,6 +3107,9 @@ const canSubmitReportCorrection = computed(() => canRequestReportCorrection.valu
   && selectedServiceItem.value?.status === '现场实施完成'
   && ['ISSUED', 'ARCHIVED'].includes(selectedServiceItem.value?.report_status)
   && selectedReportCorrectionRequests.value.length === 0)
+// 用途：由申请人撤回仍待处理的回退申请。
+// 参数：request 为待撤回的回退申请。
+// 返回值：无；取消或申请失效不写入，失败以提示反馈。
 async function withdrawPendingRollback(request) {
   const requestID = request.id
   const itemID = request.service_item_id
@@ -3057,7 +3122,6 @@ async function withdrawPendingRollback(request) {
   const reason = await askOperationReason({
     title: '撤回回退申请', confirmText: '撤回申请', label: '撤回原因',
   }, context, permitted)
-  if (!String(reason).trim()) { showToast('撤回原因不能为空', 'warning'); return }
   if (reason === null) return
   saving.value = true
   try {
@@ -3066,19 +3130,28 @@ async function withdrawPendingRollback(request) {
     await refreshAfterWrite()
   } catch (error) { showToast(formatUserError(error, { fallback: '撤回失败，请刷新后重试' }), 'error') } finally { saving.value = false }
 }
+
+// 用途：撤销实施计划或实施准备，并保留对应补偿语义。
+// 参数：kind 为 plan（计划）或 preparation（准备）。
+// 返回值：无；取消不写入，失败以提示反馈。
 async function revokeDeliveryPhase(kind) {
   if (saving.value || promptDialog.value || !canRevokeImplementation.value) return
   if (!['plan', 'preparation'].includes(kind)) return
   const selected = selectedServiceItem.value
   if (!selected) { showToast('请先选择服务项', 'warning'); return }
   const expectedStatus = kind === 'plan' ? '待实施' : '实施准备中'
-  if (item.status !== expectedStatus) { showToast(`当前状态不能撤销${kind === 'plan' ? '实施计划' : '实施准备'}`, 'warning'); return }
-  const reason = window.prompt(`请输入撤销${kind === 'plan' ? '实施计划' : '实施准备'}的原因：`)
-  if (!String(reason).trim()) { showToast('撤销原因不能为空', 'warning'); return }
+  if (selected.status !== expectedStatus) { showToast(`当前状态不能撤销${kind === 'plan' ? '实施计划' : '实施准备'}`, 'warning'); return }
+  const context = captureReasonContext([selected])
+  const item = context.items[0]
+  const label = kind === 'plan' ? '实施计划' : '实施准备'
+  const reason = await askOperationReason({
+    title: `撤销${label}`, confirmText: `撤销${label}`, label: '撤销原因', danger: true,
+    description: kind === 'plan' ? '撤销后回到待分配。' : '撤销后释放设备预约。',
+  }, context, () => canRevokeImplementation.value)
   if (reason === null) return
   saving.value = true
   try {
-    const payload = { reason: String(reason).trim(), expected_version: Number(item.version) || 0 }
+    const payload = { reason, expected_version: Number(item.version) || 0 }
     if (kind === 'plan') await revokeImplementationPlan(item.id, payload)
     else await revokePreparation(item.id, payload)
     showToast(kind === 'plan' ? '实施计划已撤销，已回到待分配' : '实施准备已撤销，设备预约已释放')
@@ -3101,7 +3174,6 @@ async function submitRollbackRequest(kind) {
   const reason = await askOperationReason({
     title: label, confirmText: label, label: '申请原因',
   }, context, eligible)
-  if (!String(reason).trim()) { showToast('申请原因不能为空', 'warning'); return }
   if (reason === null) return
   saving.value = true
   try {
@@ -3110,6 +3182,10 @@ async function submitRollbackRequest(kind) {
     await refreshAfterWrite()
   } catch (error) { showToast(formatUserError(error, { fallback: '回退申请失败' }), 'error') } finally { saving.value = false }
 }
+
+// 用途：以当前版本批准或驳回他人仍待处理的回退申请。
+// 参数：request 为回退申请，decision 为 APPROVED 或 REJECTED。
+// 返回值：无；取消或申请失效不写入，失败以提示反馈。
 async function decidePendingRollback(request, decision) {
   const requestID = request.id
   const itemID = request.service_item_id
@@ -3125,7 +3201,6 @@ async function decidePendingRollback(request, decision) {
   const comment = await askOperationReason({
     title: label, confirmText: label, label: '审批意见', danger: decision === 'APPROVED',
   }, context, permitted)
-  if (!String(comment).trim()) { showToast('审批意见不能为空', 'warning'); return }
   if (comment === null) return
   saving.value = true
   try {
@@ -3232,7 +3307,8 @@ function closeActiveOverlay() {
   if (createOpen.value) { createOpen.value = false; return true }
   if (notificationOpen.value) { closeNotifications(); return true }
   if (kpiSettingsOpen.value) { dismissKpiSettings({ restoreFocus: true }); return true }
-  if (mobileMenuOpen.value) { mobileMenuOpen.value = false; return true }
+  // 收起抽屉后把焦点交还汉堡按钮（与共享外壳一致），否则焦点会留在已隐藏的侧栏里。
+  if (mobileMenuOpen.value) { mobileMenuOpen.value = false; mobileMenuButton.value?.focus?.(); return true }
   return false
 }
 
@@ -3293,7 +3369,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="pm-shell">
-    <aside class="pm-sidebar" :class="{ open: mobileMenuOpen }">
+    <aside id="pm-sidebar" class="pm-sidebar" :class="{ open: mobileMenuOpen }">
       <div class="pm-brand">
         <span class="pm-brand-mark">PS</span>
         <span><b>项目服务管理</b><small>PROJECT SERVICE</small></span>
@@ -3320,9 +3396,9 @@ onBeforeUnmount(() => {
     </aside>
     <div v-if="mobileMenuOpen" class="pm-menu-mask" @click="mobileMenuOpen = false"></div>
 
-    <main class="pm-main">
+    <main id="main-content" class="pm-main" tabindex="-1">
       <header class="pm-topbar">
-        <button class="pm-icon-button pm-menu-button" aria-label="打开菜单" @click="mobileMenuOpen = true"><ConsoleIcon name="menu" /></button>
+        <button ref="mobileMenuButton" class="pm-icon-button pm-menu-button" aria-label="打开菜单" :aria-expanded="mobileMenuOpen ? 'true' : 'false'" aria-controls="pm-sidebar" @click="mobileMenuOpen = true"><ConsoleIcon name="menu" /></button>
         <div class="pm-breadcrumb"><span>项目服务管理</span><b>/</b><template v-if="activeSection === 'project_detail'"><button type="button" class="pm-crumb-link" @click="navigate('projects')">项目列表</button><b>/</b><strong>{{ detailProject?.id || '项目详情' }}</strong></template><strong v-else>{{ currentMeta[0] }}</strong></div>
         <div class="pm-top-tools">
           <button class="pm-icon-button pm-notification-button" aria-label="通知" aria-controls="project-notifications" :aria-expanded="notificationOpen" @click="toggleNotifications"><ConsoleIcon name="bell" /><em v-if="notificationCount">{{ notificationCount }}</em></button>
@@ -3348,14 +3424,18 @@ onBeforeUnmount(() => {
           <template #actions>
             <button v-if="activeSection !== 'notifications'" class="pm-button" :disabled="loading" @click="loadWorkspace"><ConsoleIcon name="reset" />{{ loading ? '加载中' : '刷新' }}</button>
             <button v-if="activeSection === 'projects'" class="pm-button" @click="exportProjects"><ConsoleIcon name="export" />导出</button>
+            <button v-if="activeSection === 'projects' && canCreateProject && nativeProjectEnabled" class="pm-button" @click="nativeCreateOpen = true">＋ 原生委托项目</button>
             <button v-if="canManageActiveConfig && isVisibleConfigSection" class="pm-button primary" @click="openConfigCreate">{{ isStandardChangeSection ? '＋ 登记标准变更' : '＋ 新建规则' }}</button><button v-if="activeSection === 'projects' && canCreateProject" class="pm-button primary" @click="openCreateProject">＋ 新建项目</button>
             <button v-if="activeSection === 'decomposition' && canConfirmDecomposition" class="pm-button primary" :disabled="saving || !canConfirmCurrentDecomposition" @click="confirmDecomposition">{{ saving ? '提交中…' : '确认拆解' }}</button><button v-if="activeSection === 'decomposition' && canManageDecomposition" type="button" class="pm-button" :disabled="saving || !decompositionProject" @click="openDecompositionAdjust">调整拆解</button><button v-if="activeSection === 'decomposition' && decompositionSupplementClosure.allowed" type="button" class="pm-button" :disabled="saving || closureSaving || closureLoading || !decompositionProject" @click="openSupplementClosure(decompositionProject)">{{ closureLoading ? '读取中…' : '补充协议关账' }}</button>
           </template>
         </PageHead>
 
-        <section v-if="loadError" class="pm-empty">
-          <ConsoleIcon name="info" /><b>后端数据加载失败</b><span>{{ loadError }}</span><button class="pm-button" @click="loadWorkspace">重新加载</button>
+        <section v-if="['projects', 'project_detail'].includes(activeSection) && canReadProjectSourceCapabilities && projectCreationCapabilityError" class="pm-contract-warning" role="alert">
+          <span>{{ projectCreationCapabilityError }}</span>
+          <button class="pm-button" @click="refreshProjectCreationCapabilities">重试来源能力</button>
         </section>
+
+        <ListState v-if="loadError" error-title="后端数据加载失败" :error="loadError" retry-text="重新加载" @retry="loadWorkspace" />
 
         <section v-if="['decomposition', 'allocation'].includes(activeSection) && missingStampedContractCount" class="pm-contract-warning"><ConsoleIcon name="info" /><div><b>{{ missingStampedContractCount }} 份合同尚未上传盖章合同</b><p>{{ activeSection === 'decomposition' ? '合同审批已完成，可继续核对并确认服务项拆解；该提示不阻断拆解确认。' : '服务项拆解已确认，可继续分配团队、人员及设备；上传盖章合同后提示将自动清除。' }}</p></div></section>
 
@@ -3505,9 +3585,22 @@ onBeforeUnmount(() => {
           <section class="pm-table-panel">
             <div class="pm-table-scroll"><table class="pm-table pm-responsive-list"><thead><tr><th></th><th>项目 / 客户</th><th>合同编号</th><th>服务项</th><th>检测类别</th><th>团队 / 项目经理</th><th>状态</th><th>交付进度</th><th>计划完成</th><th></th></tr></thead><tbody>
               <tr v-for="project in pagedProjects" :key="project.id" :class="{ selected: selectedRows.includes(project.id), risk: project.risk }"><td class="pm-card-select" data-label="选择"><input type="checkbox" :checked="selectedRows.includes(project.id)" :aria-label="`选择 ${project.id}`" @change="toggleRow(project.id)" /></td><td class="pm-card-title" data-label="项目 / 客户"><button class="pm-project-link" @click="openProject(project)"><b>{{ project.id }}</b><span>{{ project.customer }}</span></button></td><td class="mono" data-label="合同编号">{{ project.contract }}</td><td data-label="服务项">{{ project.services }}</td><td data-label="检测类别">{{ project.category }}</td><td data-label="团队 / 项目经理"><b>团队负责人：{{ projectAssignmentPeople(project.id).teamLeads }}</b><span class="pm-cell-sub">项目经理：{{ projectAssignmentPeople(project.id).projectManagers }}</span></td><td data-label="状态"><span class="pm-badge-stack"><span class="pm-badge" :class="statusTone(project.status)">{{ project.status }}</span><span v-if="projectReportStageLabel(project)" class="pm-badge" :class="statusTone(project.report_stage)">报告编制 · {{ projectReportStageLabel(project) }}</span></span></td><td data-label="交付进度"><ProgressCell :percent="project.progress" /></td><td data-label="计划完成" :class="{ 'pm-text-danger': project.due.includes('超期') }">{{ project.due }}</td><td class="pm-card-action" data-label="操作"><button class="pm-link" @click="openProject(project)">详情</button></td></tr>
-              <tr v-if="!pagedProjects.length"><td colspan="10" class="pm-empty-mini">{{ projectListEmptyText }}</td></tr>
+              <tr v-if="!pagedProjects.length"><td colspan="10">
+                <ListState
+                  :loading="reportStageListLoading"
+                  :error="projectListError"
+                  error-title="报告阶段筛选结果读取失败"
+                  :retry="Boolean(projectListError)"
+                  :empty-title="projectListSource.length ? '暂无符合当前筛选条件的项目' : '暂无项目，请先新建项目'"
+                  loading-title="正在按报告阶段筛选…"
+                  @retry="loadReportStageProjects"
+                  compact
+                >
+                  <template #empty-action><button type="button" class="pm-button" @click="resetProjectFilters">重置筛选</button></template>
+                </ListState>
+              </td></tr>
             </tbody></table></div>
-            <footer class="pm-table-footer"><span>已选择 {{ selectedRows.length }} 项 · 共 {{ filteredProjects.length }} 条 · 第 {{ projectPage }} / {{ projectPageCount }} 页</span><div class="pm-pagination"><button class="pm-pg" :disabled="projectPage <= 1" @click="gotoProjectPage(projectPage - 1)">‹</button><button class="pm-pg active">{{ projectPage }}</button><button class="pm-pg" :disabled="projectPage >= projectPageCount" @click="gotoProjectPage(projectPage + 1)">›</button></div></footer>
+            <footer class="pm-table-footer"><span>已选择 {{ selectedRows.length }} 项</span><PaginationBar label="项目列表分页" :page="projectPage" :total="filteredProjects.length" :page-size="projectPageSize" :loading="reportStageListLoading" @change="gotoProjectPage" /></footer>
           </section>
         </template>
 
@@ -3517,6 +3610,16 @@ onBeforeUnmount(() => {
           </section>
           <template v-else>
             <section class="pm-actions-bar"><button class="pm-button" @click="navigate('projects')"><ConsoleIcon name="reset" />返回项目列表</button><button class="pm-button" :disabled="loading" @click="loadWorkspace"><ConsoleIcon name="reset" />刷新</button></section>
+            <section v-if="detailProject.source_kind === 'NATIVE' && canReadNativeProjectScope && (nativeProjectEnabled || nativeScopeProjectID === detailProject.id)" class="pm-panel">
+              <button v-if="!nativeScopeProjectID && nativeProjectEnabled" type="button" class="pm-button"
+                :disabled="saving" @click="nativeScopeProjectID = detailProject.id">原生委托范围变更</button>
+              <NativeScopeChangePanel
+                v-if="nativeScopeProjectID === detailProject.id"
+                :key="detailProject.id" :project-id="detailProject.id"
+                :categories="detectionCategories" :disabled="saving || !nativeProjectEnabled"
+                @close="nativeScopeProjectID = ''" @changed="onNativeScopeChanged"
+              />
+            </section>
             <section v-if="detailSupplementClosure.visible" class="pm-supplement-closure" aria-label="补充协议关账">
               <ConsoleIcon name="info" />
               <div>
@@ -3635,7 +3738,8 @@ onBeforeUnmount(() => {
               <tr v-for="row in monitoringRows" :key="row.project.id" :class="{ risk: row.project.risk || row.sla_items?.length || row.resources?.conflict_items }"><td><button class="pm-project-link" @click="openProject(row.project)"><b>{{ row.project.id }}</b></button><span class="pm-cell-sub">{{ row.project.customer }}</span><span class="pm-cell-sub">{{ row.project.team || '未分配团队' }}</span></td><td><b>{{ row.milestone.current }}</b><span class="pm-cell-sub">下一节点：{{ row.milestone.next || '—' }}</span><div class="pm-inline-progress"><i :style="{ width: `${Math.round((row.milestone.done / row.milestone.total) * 100)}%` }"></i></div></td><td><span>{{ row.project.services }} 项</span><span class="pm-cell-sub">{{ monitoringServiceSummary(row) }}</span></td><td>{{ monitoringResourceSummary(row) }}<span v-if="row.resources?.conflict_items" class="pm-cell-warning">{{ row.resources.conflict_items }} 项冲突</span></td><td><span class="pm-badge-stack"><span class="pm-badge" :class="statusTone(row.project.status)">{{ row.project.status }}</span><span v-if="projectReportStageLabel(row.project)" class="pm-badge" :class="statusTone(row.project.report_stage)">报告编制 · {{ projectReportStageLabel(row.project) }}</span></span><span class="pm-cell-sub">{{ monitoredStatusByProject(row.project) }}</span><ProgressCell :percent="row.project.progress" /></td><td><span class="pm-badge" :class="row.sla_items?.length ? '风险' : 'normal'">{{ monitoringSlaLabel(row) }}</span></td><td :class="{ 'pm-text-danger': row.sla_items?.some((item) => item.kind === 'PLAN_END_OVERDUE') }">{{ row.planned_end ? formatBusinessDate(row.planned_end) : '待排期' }}</td><td><template v-if="row.latest_event"><b>{{ eventLabel(row.latest_event) }}</b><span class="pm-cell-sub">{{ personLabel(row.latest_event.actor_user_id, '系统') }} · {{ formatDateTime(row.latest_event.created_at) }}</span></template><span v-else>—</span></td><td class="pm-col-actions"><button class="pm-link" @click="openMonitoringAction(row)">前往当前节点</button><button class="pm-link" @click="openProjectTimeline(row.project)">时间线</button></td></tr>
               <tr v-if="!monitoringRows.length"><td colspan="9" class="pm-empty-mini">{{ monitoringLoading ? '正在同步监控快照…' : '暂无匹配的在途项目' }}</td></tr>
             </tbody></table></div>
-            <footer class="pm-table-footer"><span>第 {{ monitoringSnapshot.page }} / {{ monitoringTotalPages }} 页 · 共 {{ monitoringSnapshot.total }} 个在途项目</span><div class="pm-pagination"><button class="pm-pg" :disabled="monitorPage <= 1 || monitoringLoading" @click="changeMonitoringPage(monitorPage - 1)">‹</button><button class="pm-pg active">{{ monitorPage }}</button><button class="pm-pg" :disabled="monitorPage >= monitoringTotalPages || monitoringLoading" @click="changeMonitoringPage(monitorPage + 1)">›</button></div></footer>
+            <!-- 总数只由分页条给出「第 N 页，共 M 条」：不再在页脚紧邻手写一行「共 N 个在途项目」。 -->
+            <footer class="pm-table-footer"><PaginationBar label="在途项目监控分页" :page="monitorPage" :total="monitoringSnapshot.total" :page-size="monitorPageSize" :loading="monitoringLoading" @change="changeMonitoringPage" /></footer>
           </section>
           <section class="pm-table-panel pm-event-stream-panel">
             <details class="pm-event-stream">
@@ -3834,11 +3938,11 @@ onBeforeUnmount(() => {
                   <label><span>是否特殊方法</span><select v-model="categoryDialog.special_method"><option v-for="option in specialMethodOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
                   <label><span>状态</span><select v-model="categoryDialog.enabled"><option :value="true">启用</option><option :value="false">停用</option></select></label>
                 </div>
-                <footer><button type="button" class="pm-button" @click="categoryDialog = null">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : '保存' }}</button></footer>
+                <footer><button type="button" class="pm-button" @click="categoryDialog = null">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : '保存检测类别' }}</button></footer>
               </form>
             </div>
 
-            <div v-if="overrideDialog" class="pm-overlay" @click.self="overrideDialog = null"><form class="pm-dialog pm-dialog-wide" @submit.prevent="submitSplitOverride"><header><div><span>覆盖规则</span><h2>{{ overrideDialog.id ? '编辑覆盖规则' : '新建覆盖规则' }}</h2><small class="pm-dialog-sub">只覆盖显式给出的设置，其余沿用默认分组规则；命中多条时取优先级最小的那条。</small></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="overrideDialog = null"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>规则名称 <em>*</em></span><input v-model.trim="overrideDialog.name" required placeholder="例如 金融行业批量合同"  maxlength="255"/></label><label><span>优先级 <em>*</em></span><input v-model.number="overrideDialog.priority" type="number" min="1" required /></label><label><span>客户名称包含</span><input v-model.trim="overrideDialog.match.customer_contains" placeholder="例如 银行 / 证券"  maxlength="255"/></label><label><span>合同号包含</span><input v-model.trim="overrideDialog.match.contract_contains" placeholder="例如 GTSR-"  maxlength="64"/><small>按合同编号子串匹配，编号里包含这段文字才算命中；如果合同编号规则或前缀调整过，需要回来核对这条规则还能不能命中合同。</small></label><label><span>合同服务项数 ≤</span><input v-model.number="overrideDialog.match.max_service_items" type="number" min="0" /></label><label><span>覆盖分组维度 1</span><select v-model="overrideDialog.settings.dimension_primary"><option value="">不覆盖</option><option v-for="option in splitDimensionAnyOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label><span>覆盖分组维度 2</span><select v-model="overrideDialog.settings.dimension_secondary"><option value="">不覆盖</option><option v-for="option in splitDimensionAnyOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label><span>覆盖分组维度 3</span><select v-model="overrideDialog.settings.dimension_tertiary"><option value="">不覆盖</option><option v-for="option in splitDimensionAnyOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label><span>覆盖默认进入状态</span><select v-model="overrideDialog.settings.default_status"><option value="">不覆盖</option><option v-for="option in splitDefaultStatusOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label><span>覆盖缺规则处理</span><select v-model="overrideDialog.settings.missing_rule_action"><option value="">不覆盖</option><option v-for="option in splitMissingRuleOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label><span>状态</span><select v-model="overrideDialog.enabled"><option :value="true">启用</option><option :value="false">停用</option></select></label></div><footer><button type="button" class="pm-button" @click="overrideDialog = null">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : '保存' }}</button></footer></form></div>
+            <div v-if="overrideDialog" class="pm-overlay" @click.self="overrideDialog = null"><form class="pm-dialog pm-dialog-wide" @submit.prevent="submitSplitOverride"><header><div><span>覆盖规则</span><h2>{{ overrideDialog.id ? '编辑覆盖规则' : '新建覆盖规则' }}</h2><small class="pm-dialog-sub">只覆盖显式给出的设置，其余沿用默认分组规则；命中多条时取优先级最小的那条。</small></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="overrideDialog = null"><ConsoleIcon name="close" /></button></header><div class="pm-form"><label><span>规则名称 <em>*</em></span><input v-model.trim="overrideDialog.name" required placeholder="例如 金融行业批量合同"  maxlength="255"/></label><label><span>优先级 <em>*</em></span><input v-model.number="overrideDialog.priority" type="number" min="1" required /></label><label><span>客户名称包含</span><input v-model.trim="overrideDialog.match.customer_contains" placeholder="例如 银行 / 证券"  maxlength="255"/></label><label><span>合同号包含</span><input v-model.trim="overrideDialog.match.contract_contains" placeholder="例如 GTSR-"  maxlength="64"/><small>按合同编号子串匹配，编号里包含这段文字才算命中；如果合同编号规则或前缀调整过，需要回来核对这条规则还能不能命中合同。</small></label><label><span>合同服务项数 ≤</span><input v-model.number="overrideDialog.match.max_service_items" type="number" min="0" /></label><label><span>覆盖分组维度 1</span><select v-model="overrideDialog.settings.dimension_primary"><option value="">不覆盖</option><option v-for="option in splitDimensionAnyOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label><span>覆盖分组维度 2</span><select v-model="overrideDialog.settings.dimension_secondary"><option value="">不覆盖</option><option v-for="option in splitDimensionAnyOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label><span>覆盖分组维度 3</span><select v-model="overrideDialog.settings.dimension_tertiary"><option value="">不覆盖</option><option v-for="option in splitDimensionAnyOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label><span>覆盖默认进入状态</span><select v-model="overrideDialog.settings.default_status"><option value="">不覆盖</option><option v-for="option in splitDefaultStatusOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label><span>覆盖缺规则处理</span><select v-model="overrideDialog.settings.missing_rule_action"><option value="">不覆盖</option><option v-for="option in splitMissingRuleOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label><span>状态</span><select v-model="overrideDialog.enabled"><option :value="true">启用</option><option :value="false">停用</option></select></label></div><footer><button type="button" class="pm-button" @click="overrideDialog = null">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : '保存覆盖规则' }}</button></footer></form></div>
           </template>
           <template v-else-if="isVisibleConfigSection">
           <section class="pm-kpi-row">
@@ -3950,6 +4054,12 @@ onBeforeUnmount(() => {
     />
 
     <div v-if="planEquipmentPickerOpen" class="pm-overlay" @click.self="planEquipmentPickerOpen = false"><aside class="pm-dialog pm-dialog-wide"><header><div><span>设备</span><h2>添加设备</h2><small class="pm-dialog-sub">只列设备目录中的有效设备；已被其他服务项占用、仅在公司使用或不在公司的设备不可选取。</small></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="planEquipmentPickerOpen = false"><ConsoleIcon name="close" /></button></header><div class="pm-dialog-body"><div class="pm-picker-search"><ConsoleIcon name="search" /><input v-model.trim="equipmentPickerKeyword" placeholder="搜索设备名称或能力码"  maxlength="100"/></div><div class="pm-table-scroll"><table class="pm-table pm-table-picker"><thead><tr><th>设备</th><th>能力码</th><th>检定有效期</th><th>状态</th><th class="pm-col-action">操作</th></tr></thead><tbody><tr v-for="item in planEquipmentFiltered" :key="item.resource_id"><td><b>{{ item.resource_name }}</b><small class="mono">{{ item.resource_id }}</small><small v-if="equipmentUnavailableReason(item)" class="pm-cell-sub pm-cell-danger">{{ equipmentUnavailableReason(item) }}</small></td><td><CodePills :codes="item.codes || []" /></td><td>{{ item.valid_until ? formatBusinessDate(item.valid_until) : '长期' }}</td><td><span class="pm-badge" :class="equipmentPickerState(item).tone">{{ equipmentPickerState(item).label }}</span></td><td><button type="button" class="pm-link" :disabled="equipmentPickerState(item).disabled" @click="addPlanEquipment(item)">{{ equipmentPickerState(item).action }}</button></td></tr><tr v-if="!planEquipmentFiltered.length"><td colspan="5" class="pm-empty-mini">{{ equipmentPickerKeyword ? '没有匹配的设备，换个关键字试试' : '设备目录为空，请先在「资质与能力」或「设备能力维护」中登记设备' }}</td></tr></tbody></table></div></div><footer><span class="pm-dialog-footnote">已加入 {{ planEquipmentAddedCount }} 台 · 可选 {{ planEquipmentAddableCount }} 台</span><button type="button" class="pm-button" @click="planEquipmentPickerOpen = false">关闭</button></footer></aside></div>
+    <NativeProjectCreateDialog
+      v-if="nativeCreateOpen && canCreateProject && nativeProjectEnabled"
+      :categories="detectionCategories"
+      @close="nativeCreateOpen = false"
+      @created="onNativeProjectCreated"
+    />
     <div v-if="createOpen" class="pm-overlay" @click.self="createOpen = false">
       <form class="pm-dialog pm-dialog-wide" @submit.prevent="saveCreate">
         <header><div><span>新建项目</span><h2>新建项目</h2><small class="pm-dialog-sub">选择已审批合同后，系统会自动读取合同服务范围；合同字段不可手工改写。</small></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="createOpen = false"><ConsoleIcon name="close" /></button></header>
@@ -3982,7 +4092,7 @@ onBeforeUnmount(() => {
             </section>
           </template>
         </div>
-        <footer><button type="button" class="pm-button" @click="createOpen = false">取消</button><button class="pm-button primary" :disabled="saving || contractServicesLoading || !selectedContractServiceIDs.length">{{ saving ? '保存中…' : '保存' }}</button></footer>
+        <footer><button type="button" class="pm-button" @click="createOpen = false">取消</button><button class="pm-button primary" :disabled="saving || contractServicesLoading || !selectedContractServiceIDs.length">{{ saving ? '保存中…' : '创建项目' }}</button></footer>
       </form>
     </div>
 
@@ -4058,7 +4168,7 @@ onBeforeUnmount(() => {
           </template>
           <label><span>启用</span><button type="button" class="pm-switch" :class="{ on: configForm.enabled }" :aria-label="`${configForm.enabled ? '停用' : '启用'}`" @click="configForm.enabled = !configForm.enabled"><i></i></button></label>
         </div>
-        <footer><button type="button" class="pm-button" @click="configEditorOpen = false">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : '保存' }}</button></footer>
+        <footer><button type="button" class="pm-button" @click="configEditorOpen = false">取消</button><button class="pm-button primary" :disabled="saving">{{ saving ? '保存中…' : isStandardChangeSection ? '保存标准变更记录' : '保存配置规则' }}</button></footer>
       </form>
     </div>
     <ConfirmDialog

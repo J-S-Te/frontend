@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
+import ListState from '@/modules/shared/components/ListState.vue'
 import {
   displayMembershipType,
   displayMembershipValidity,
@@ -15,9 +16,11 @@ const props = defineProps({
   organizations: { type: Array, default: () => [] },
   keyword: { type: String, default: '' },
   loading: { type: Boolean, default: false },
+  // 任职关系读取失败原因：交给 ListState 渲染可重试错误态，不能退化成「暂无任职关系」。
+  error: { type: [String, Object, Error], default: '' },
 })
 
-const emit = defineEmits(['detail'])
+const emit = defineEmits(['detail', 'retry'])
 const collapsedIds = ref(new Set())
 const initialized = ref(false)
 const membershipDisplayLimits = ref({})
@@ -27,6 +30,9 @@ const groups = computed(() => groupMembershipsByOrganization(props.memberships, 
 const allGroups = computed(() => groupMembershipsByOrganization(props.memberships, props.organizations))
 const groupIds = computed(() => new Set(allGroups.value.map((group) => group.organization_id)))
 const effectiveCollapsedIds = computed(() => String(props.keyword || '').trim() ? new Set() : collapsedIds.value)
+// 三态闸门：加载中 > 读取失败（可重试）> 空。失败排在空之前，避免失败被读成「暂无任职关系」。
+const listState = computed(() => props.loading || Boolean(props.error) || !groups.value.length)
+const emptyTitle = computed(() => (String(props.keyword || '').trim() ? '没有匹配的用户、组织或岗位。' : '暂无任职关系。'))
 
 watch(groupIds, (currentIds) => {
   if (!initialized.value && currentIds.size) {
@@ -91,8 +97,15 @@ function showMoreMemberships(group) {
       </div>
     </header>
 
-    <p v-if="loading" class="iam-membership-groups-empty">正在读取完整任职关系…</p>
-    <p v-else-if="!groups.length" class="iam-membership-groups-empty">{{ keyword ? '没有匹配的用户、组织或岗位。' : '暂无任职关系。' }}</p>
+    <ListState
+      v-if="listState"
+      :loading="loading"
+      :error="error"
+      error-title="任职关系加载失败"
+      loading-title="正在读取完整任职关系…"
+      :empty-title="emptyTitle"
+      @retry="emit('retry')"
+    />
 
     <div v-else class="iam-membership-groups">
       <section

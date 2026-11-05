@@ -5,8 +5,10 @@ import { AuthError, getCurrentPrincipal, logoutCurrentSession } from '@/modules/
 import { AUTHORIZATION_REFRESHED_EVENT } from '@/modules/platform/auth/utils/authorizationRefresh'
 import { listPortalApplications } from '@/modules/platform/applications/api/applications'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
+import PaginationBar from '@/modules/shared/components/PaginationBar.vue'
 import { buildPortalSubsystems } from '@/modules/registry/moduleRegistry.js'
 import {
+  PORTAL_PAGE_SIZE,
   portalGridForCount,
   portalPageCount,
   portalPageItems,
@@ -623,7 +625,12 @@ onBeforeUnmount(() => {
         <p>请选择需要访问的业务子系统</p>
       </div>
 
-      <p v-if="subsystemCatalogError" class="subsystem-portal__catalog-status is-error" role="alert">{{ subsystemCatalogError }}</p>
+      <!-- 目录读取失败时保留原有文案与位置，只补一个就地重试：重发同一个
+           loadPortalCatalog（非静默模式会重新置加载态并在成功后清空错误）。 -->
+      <p v-if="subsystemCatalogError" class="subsystem-portal__catalog-status is-error" role="alert">
+        {{ subsystemCatalogError }}
+        <button class="subsystem-portal__catalog-retry" type="button" :disabled="subsystemCatalogLoading" @click="loadPortalCatalog()">重试</button>
+      </p>
       <p v-else-if="registeredSubsystems.length === 0" class="subsystem-portal__catalog-status">当前账号暂无可访问的业务子系统。若子系统已经接入，请联系平台管理员为当前用户分配对应应用角色。</p>
 
       <div
@@ -658,15 +665,16 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <nav v-if="portalTotalPages > 1" class="subsystem-portal__pagination" aria-label="子系统分页">
-        <button type="button" :disabled="portalPage <= 1" aria-label="上一页" @click="changePortalPage(portalPage - 1)">
-          <ConsoleIcon name="chevron" />
-        </button>
-        <span>第 {{ portalPage }} / {{ portalTotalPages }} 页</span>
-        <button type="button" :disabled="portalPage >= portalTotalPages" aria-label="下一页" @click="changePortalPage(portalPage + 1)">
-          <ConsoleIcon name="chevron" />
-        </button>
-      </nav>
+      <!-- 分页统一交给 shared/components/PaginationBar.vue（.ui-pager）：
+           不再自绘图标按钮与「第 N / M 页」计数器，禁用语义与整平台其他列表一致。 -->
+      <PaginationBar
+        class="subsystem-portal__pagination"
+        label="子系统分页"
+        :page="portalPage"
+        :total="subsystems.length"
+        :page-size="PORTAL_PAGE_SIZE"
+        @change="changePortalPage"
+      />
     </section>
 
     <footer class="subsystem-portal__footer">

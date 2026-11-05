@@ -9,6 +9,7 @@ import {
 } from '../../shared/authz/sessionCompatibility.js'
 import { attachStructuredContext } from '../../platform/shared/api/requestContext.js'
 import { formatUserError } from '../../shared/utils/userError.js'
+import { DOWNLOAD_TIMEOUT_MESSAGE, downloadRequestSignal } from '../../shared/utils/downloadTimeout.js'
 import { externalContractMetadata } from '../utils/contractPayload.js'
 import { sourceSHA256 } from '../utils/sourceIntegrity.js'
 
@@ -99,6 +100,19 @@ function contractRequestError(body, response, context, { code, fallback, outcome
     ...context, tenantId: String(body?.tenant_id || ''), requestId, traceId,
     metadata: { source: 'contract_api', outcomeUnknown },
   }, { status, code: error.code, requestId, traceId })
+  return error
+}
+
+/**
+ * downloadTimeoutError 把本端下载超时转换为可读的合同错误，并保留既有错误字段结构。
+ * @param {unknown} cause 底层中断原因。
+ * @param {{feature: string, path: string, code: string}} context 下载请求上下文。
+ * @returns {Error} 带下载超时错误码的结构化错误。
+ */
+function downloadTimeoutError(cause, context) {
+  const error = contractRequestError(null, null, { subsystem: 'contract_management', feature: context.feature, operation: 'GET', method: 'GET', path: context.path }, { code: context.code, fallback: DOWNLOAD_TIMEOUT_MESSAGE })
+  error.message = DOWNLOAD_TIMEOUT_MESSAGE
+  error.cause = cause
   return error
 }
 
@@ -243,6 +257,30 @@ function contractPage(data) {
   return { ...data, items: contractArray(data.items) }
 }
 
+function contractLedgerPage(data) {
+  // 合同台账新协议：{ items, total, page, page_size }，total 是服务端计数，不是本页行数。
+  // 旧版服务端（滚动发布期间）仍返回裸数组，按“单页、total=已加载条数”降级，
+  // 页脚因此不会凭空显示一个假总数。
+  if (data === null) return { items: [], total: 0, page: 1, page_size: 0 }
+  if (Array.isArray(data)) {
+    const items = contractArray(data)
+    return { items, total: items.length, page: 1, page_size: items.length }
+  }
+  if (!data || typeof data !== 'object' || !Array.isArray(data.items)) {
+    throw invalidContractResponse('合同台账返回格式不正确，请刷新后重试。')
+  }
+  const items = contractArray(data.items)
+  const total = Number(data.total)
+  const page = Number(data.page)
+  const pageSize = Number(data.page_size)
+  return {
+    items,
+    total: Number.isFinite(total) && total >= 0 ? total : items.length,
+    page: Number.isFinite(page) && page >= 1 ? page : 1,
+    page_size: Number.isFinite(pageSize) && pageSize >= 1 ? pageSize : items.length,
+  }
+}
+
 function invalidContractResponse(message) {
   const error = new Error(message)
   error.status = 200
@@ -356,15 +394,17 @@ export function getContractDashboard() {
 }
 
 /**
- * listContracts 按查询条件获取合同列表，并将非数组响应安全降级为空列表。
- * @param {Record<string, string|number|boolean>} [params={}] 合同筛选与分页参数。
- * @returns {Promise<Array<unknown>>} 合同列表。
- * @throws {Error} 会话失效、网络失败或服务端返回非成功状态时抛出。
+ * listContracts 按查询条件读取合同台账页。
+ * 带 page/page_size 时服务端返回 { items, total, page, page_size }（total 为全量计数）；
+ * 不带分页参数时后端保持旧协议返回裸数组，这里统一降级成单页结构。
+ * @param {Record<string, string|number|boolean>} [params={}] 台账筛选与分页参数（keyword/status/type/page/page_size）。
+ * @returns {Promise<{items: Array<unknown>, total: number, page: number, page_size: number}>} 台账分页结果。
+ * @throws {Error} 会话失效、网络失败、服务端拒绝或响应格式异常时抛出。
  */
 export async function listContracts(params = {}) {
   const search = new URLSearchParams(params).toString()
   const data = await request(`/contracts${search ? `?${search}` : ''}`)
-  return contractArray(data)
+  return contractLedgerPage(data)
 }
 
 export async function listApprovedContracts(params = {}, options = {}) {
@@ -465,10 +505,13 @@ export async function downloadContractFile(contractId, format) {
   if (!contentTypes[format]) throw new Error('请选择支持的合同文件格式。')
   const path = `/approved-contracts/${encodeURIComponent(contractId)}/${format}`
   const context = { subsystem: 'contract_management', feature: 'contract_download', operation: 'GET', method: 'GET', path }
+  // 合同 DOCX/PDF/盖章 PDF 属于下载类请求：附加超时 signal，避免网络挂起时永久等待。
+  const downloadAbort = downloadRequestSignal()
   let response
   try {
-    response = await fetch(approvedContractDownloadURL(contractId, format), { credentials: 'include', headers: { Accept: contentTypes[format] } })
-  } catch {
+    response = await fetch(approvedContractDownloadURL(contractId, format), { credentials: 'include', signal: downloadAbort.signal, headers: { Accept: contentTypes[format] } })
+  } catch (cause) {
+    if (downloadAbort.timedOut()) throw downloadTimeoutError(cause, { feature: 'contract_download', path, code: 'CONTRACT_DOWNLOAD_TIMEOUT' })
     throw contractRequestError(null, null, context, { code: 'NETWORK_ERROR', fallback: '合同文件下载未完成，请检查网络后重新下载。' })
   }
   if (!response.ok) {
@@ -489,7 +532,11 @@ export async function downloadContractFile(contractId, format) {
   }
   let blob
   try { blob = await response.blob() }
-  catch { throw contractRequestError(null, response, context, { code: 'NETWORK_ERROR', fallback: '合同文件传输中断，请检查网络后重新下载。' }) }
+  catch (cause) {
+    // 超时可能发生在响应体传输阶段，不能降级成普通网络中断。
+    if (downloadAbort.timedOut()) throw downloadTimeoutError(cause, { feature: 'contract_download', path, code: 'CONTRACT_DOWNLOAD_TIMEOUT' })
+    throw contractRequestError(null, response, context, { code: 'NETWORK_ERROR', fallback: '合同文件传输中断，请检查网络后重新下载。' })
+  }
   if (!blob.size) throw contractRequestError(null, response, context, { code: 'INVALID_DOWNLOAD_RESPONSE', fallback: '合同文件为空，请联系管理员核对已保存的合同文件。' })
   const fallback = `合同-${contractId}.${format === 'docx' ? 'docx' : 'pdf'}`
   const disposition = response.headers.get('content-disposition') || ''
@@ -1014,6 +1061,9 @@ export async function previewContractDocument(contractId) {
  */
 export async function getContractSourceCapabilities() {
   return request('/contract-source-capabilities', { validateData: (data) => data &&
+    (data.counterparty_source === undefined || ['crm', 'local'].includes(data.counterparty_source)) &&
+    (data.category_source === undefined || ['project', 'local'].includes(data.category_source)) &&
+    (data.local_catalog_manage === undefined || typeof data.local_catalog_manage === 'boolean') &&
     typeof data.pdf_enabled === 'boolean' && data.max_docx_bytes === 10 * 1024 * 1024 &&
     data.max_pdf_bytes === 20 * 1024 * 1024 })
 }
@@ -1081,10 +1131,13 @@ export async function fetchContractPDFSource(sourcePath, { signal, expectedSHA25
     throw new Error('合同原件地址不符合受控路径要求。')
   }
   const context = { subsystem: 'contract_management', feature: 'contract_source', method: 'GET', path: sourcePath }
+  // 预览可传入调用方取消信号（切换原件时中止旧请求）；与下载超时合并，取消语义保持不变。
+  const downloadAbort = downloadRequestSignal(signal)
   let response
-  try { response = await fetch(`${API_BASE_URL}${sourcePath}`, { credentials: 'include', signal, headers: { Accept: 'application/pdf' } }) }
+  try { response = await fetch(`${API_BASE_URL}${sourcePath}`, { credentials: 'include', signal: downloadAbort.signal, headers: { Accept: 'application/pdf' } }) }
   catch (error) {
-    if (signal?.aborted) throw error
+    if (downloadAbort.cancelled()) throw error
+    if (downloadAbort.timedOut()) throw downloadTimeoutError(error, { feature: 'contract_source', path: sourcePath, code: 'CONTRACT_SOURCE_TIMEOUT' })
     throw contractRequestError(null, null, context, { code: 'NETWORK_ERROR', fallback: 'PDF 原件读取中断，请重试。' })
   }
   if (!response.ok) {
@@ -1096,7 +1149,13 @@ export async function fetchContractPDFSource(sourcePath, { signal, expectedSHA25
   if (media !== 'application/pdf' || Number(response.headers.get('content-length')) > 20 * 1024 * 1024) {
     throw new Error('PDF 原件响应格式或大小异常。')
   }
-  const blob = await response.blob()
+  let blob
+  try { blob = await response.blob() }
+  catch (cause) {
+    if (downloadAbort.cancelled()) throw cause
+    if (downloadAbort.timedOut()) throw downloadTimeoutError(cause, { feature: 'contract_source', path: sourcePath, code: 'CONTRACT_SOURCE_TIMEOUT' })
+    throw cause
+  }
   if (!blob.size || blob.size > 20 * 1024 * 1024 || await blob.slice(0, 5).text() !== '%PDF-') {
     throw new Error('PDF 原件内容格式或大小异常。')
   }
@@ -1285,4 +1344,57 @@ export async function retryFailedIntegrationOutboxEvent(kind, id) {
     validateData: (data) => resourceObject(data) && data.id === eventID
       && data.kind === queue && data.status === 'retry',
   })
+}
+
+// 用途：读取当前真实范围内的本地交易对方，失败不伪装空目录。
+// 参数：params为关键词及有界数量。
+// 返回值：经ID、名称、状态和版本校验的目录，错误保留原分类。
+export function listLocalContractCounterparties(params = {}) {
+  const search = new URLSearchParams({ keyword: params.keyword || '', limit: String(params.limit || 200) })
+  return request(`/local-catalog/counterparties?${search}`, { validateData: data => Array.isArray(data) && data.every(item => versionedResource(item) && typeof item.name === 'string' && typeof item.enabled === 'boolean') })
+}
+
+// 用途：保存或停用本地交易对方，仅提交名称、启用状态与已读版本。
+// 参数：id为空创建，否则更新；payload为白名单目录信息。
+// 返回值：权威新版本；失败不自动重试写入。
+export function saveLocalContractCounterparty(id, payload) {
+  return request(`/local-catalog/counterparties${id ? `/${encodeURIComponent(id)}` : ''}`, { method: id ? 'PUT' : 'POST', body: JSON.stringify({ name: payload.name, enabled: payload.enabled, expected_version: payload.expected_version || 0 }), validateData: versionedResource })
+}
+
+// 用途：读取真实范围内的本地类别，保留稳定编码和版本。
+// 参数：params为关键词及有界数量。
+// 返回值：经协议校验的目录；错误不转为空数组。
+export function listLocalContractCategories(params = {}) {
+  const search = new URLSearchParams({ keyword: params.keyword || '', limit: String(params.limit || 200) })
+  return request(`/local-catalog/categories?${search}`, { validateData: data => Array.isArray(data) && data.every(item => versionedResource(item) && typeof item.code === 'string' && typeof item.name === 'string' && typeof item.enabled === 'boolean') })
+}
+
+// 用途：保存或停用本地类别，既有稳定编码不能替换。
+// 参数：id为空创建，否则更新；payload为编码、名称、启用和已读版本。
+// 返回值：权威新版本；失败不推断已保存。
+export function saveLocalContractCategory(id, payload) {
+  return request(`/local-catalog/categories${id ? `/${encodeURIComponent(id)}` : ''}`, { method: id ? 'PUT' : 'POST', body: JSON.stringify({ code: payload.code, name: payload.name, enabled: payload.enabled, expected_version: payload.expected_version || 0 }), validateData: versionedResource })
+}
+
+// 用途：读取同租户当前有效销售及其组织作为显式授权候选。
+// 参数：无。
+// 返回值：权威USER/ORG候选，失败保留目录错误。
+export function listLocalCatalogGrantTargets() {
+  return request('/local-catalog/grant-targets', { validateData: data => Array.isArray(data) && data.every(item => ['USER','ORG'].includes(item.subject_type) && typeof item.subject_id === 'string' && !!item.subject_id && typeof item.name === 'string') })
+}
+
+// 用途：读取可管理条目的授权及撤销历史。
+// 参数：kind为固定目录种类，id为真实目录条目。
+// 返回值：带版本的授权列表，不把目录失败当作空授权。
+export function listLocalCatalogGrants(kind, id) {
+  if (!['counterparties','categories'].includes(kind) || !id) throw new Error('目录条目不合法')
+  return request(`/local-catalog/${kind}/${encodeURIComponent(id)}/grants`, { validateData: data => Array.isArray(data) && data.every(item => ['USER','ORG'].includes(item.subject_type) && typeof item.subject_id === 'string' && Number.isSafeInteger(item.version) && item.version > 0 && typeof item.enabled === 'boolean') })
+}
+
+// 用途：按稳定目标和CAS版本授权或撤销目录可见性，不提交客户端租户或归属。
+// 参数：kind/id为真实目录条目，input为平台候选目标、显式启停和预期版本。
+// 返回值：真实授权新版本或服务端范围/版本错误，不自动重试写入。
+export function saveLocalCatalogGrant(kind, id, input) {
+  if (!['counterparties','categories'].includes(kind) || !id) throw new Error('目录条目不合法')
+  return request(`/local-catalog/${kind}/${encodeURIComponent(id)}/grants`, { method: 'POST', body: JSON.stringify({ subject_type: input.subject_type, subject_id: input.subject_id, enabled: input.enabled, expected_version: input.expected_version }), validateData: data => Number.isSafeInteger(data?.version) && data.version > 0 && typeof data.enabled === 'boolean' })
 }

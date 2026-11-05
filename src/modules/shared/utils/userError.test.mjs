@@ -97,6 +97,17 @@ test('mutating timeout, broken response and network ambiguity never suggest blin
   assert.match(formatUserError({ code: 'NETWORK_ERROR' }, { method: 'GET' }), /检查网络连接后重试/)
 })
 
+test('reason-coded source rejections keep the concrete backend reason instead of collapsing to generic guidance', () => {
+  // 原件上传失败必须让用户看到真实原因，不能被字段标签或通用校验文案覆盖。
+  const formMessage = '上传表单必须恰好包含 1 个原件字段 file 与 item_key、expected_version 两个文本字段'
+  assert.equal(formatUserError({ status: 422, code: 'CON_VALIDATION_ERROR', message: formMessage, details: { reason_code: 'IMPORT_FORM_INVALID', field: 'file' } }), formMessage)
+  const sourceMessage = 'PDF图片像素或渲染内存超出接入上限'
+  assert.equal(formatUserError({ status: 422, code: 'IMPORT_SOURCE_REJECTED', message: sourceMessage, details: { reason_code: 'PDF_IMAGE_BUDGET_EXCEEDED', file_name: 'GTSR-261122.pdf' } }), sourceMessage)
+  const busyMessage = 'PDF 校验繁忙，请稍后重试。'
+  assert.equal(formatUserError({ status: 503, code: 'IMPORT_SOURCE_BUSY', message: busyMessage, details: { reason_code: 'IMPORT_SOURCE_BUSY' } }, { method: 'POST' }), busyMessage)
+  assert.doesNotMatch(formatUserError({ status: 422, code: 'IMPORT_SOURCE_REJECTED', message: sourceMessage, details: { reason_code: 'PDF_IMAGE_BUDGET_EXCEEDED' } }), /请检查必填项、选择项和格式/)
+})
+
 test('technical diagnostics require opt-in, are bounded identifiers, and never enter message', () => {
   const error = { status: 409, code: 'IAM_VERSION_CONFLICT', requestID: 'req-safe-1', details: { detail: 'SQLSTATE sensitive', next_action: 'private internal command' } }
   assert.deepEqual(userErrorDiagnostics(error), { code: 'IAM_VERSION_CONFLICT', requestId: 'req-safe-1' })

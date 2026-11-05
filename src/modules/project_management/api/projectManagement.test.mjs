@@ -130,9 +130,13 @@ test('资质能力更新、CSV 导入导出使用后端接口，上传不携带 
   assert.match(source, /request\('\/capabilities', \{ method: 'PUT', body: JSON\.stringify\(payload\) \}\)/)
   assert.match(source, /formData\.append\('file', file\)/)
   assert.match(source, /request\('\/capabilities\/import', \{ method: 'POST', body: formData \}\)/)
-  assert.match(source, /requestProjectCSV\(`\/capabilities\/export\$\{query\}`\)/)
-  assert.match(source, /filename\*?=\(?:UTF-8''|"\)\?\(\[\^";\]\+\)/i)
-  assert.match(source, /return \{ blob: await response\.blob\(\), filename \}/)
+  assert.match(source, /requestProjectCSV\(`\/capabilities\/export\$\{query\}`, fallbackFilename\)/)
+  assert.match(source, /safeDownloadFilename\(response\.headers\.get\('content-disposition'\), fallbackFilename, \{ extensions: \['\.csv'\] \}\)/)
+  // 下载/模板请求必须带超时 signal，响应体读取阶段的中断同样按超时转换。
+  assert.match(source, /const downloadAbort = downloadRequestSignal\(\)/)
+  assert.match(source, /signal: downloadAbort\.signal, headers: \{ Accept: 'text\/csv' \}/)
+  assert.match(source, /return \{ blob: await readDownloadBlob\(response, downloadAbort, /)
+  assert.doesNotMatch(source, /filename\*?=\(?:UTF-8''|"\)\?\(\[\^";\]\+\)/i)
 })
 
 test('人员姓名批量解析走独立端点，并对 user_id 去重后编码', () => {

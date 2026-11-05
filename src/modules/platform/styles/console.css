@@ -14,16 +14,18 @@
   --red-text: var(--danger-text);
   --red-bg: var(--danger-soft);
   --sky: #0ea5e9;
-  --sky-text: #0369a1;
-  --sky-bg: #e0f2fe;
+  --sky-text: var(--sky-ink, #0369a1);
+  --sky-bg: var(--sky-soft, #e0f2fe);
   --purple: #8b5cf6;
-  --purple-text: #6d28d9;
-  --purple-bg: #f5f3ff;
+  --purple-text: var(--violet-ink, #6d28d9);
+  --purple-bg: var(--violet-soft, #f5f3ff);
   --secondary: var(--text-secondary);
   --muted: var(--text-muted);
   --placeholder: var(--text-faint);
   --bg: var(--surface-content);
   --card: var(--surface-card);
+  /* 兼容旧设置页的 --card-bg 写法（原值 #fff，与 --card 同义）。 */
+  --card-bg: var(--surface-card);
   --sunken: var(--surface-muted);
   --sidebar-active: var(--sidebar-hover);
   min-height: 100vh;
@@ -115,7 +117,7 @@
 }
 
 .console-brand-copy small {
-  color: #64748b;
+  color: var(--text-muted, #64748b);
   font-size: 11px;
   letter-spacing: .2px;
 }
@@ -138,7 +140,7 @@
 .console-nav-label {
   padding: 14px 12px 7px;
   margin: 0;
-  color: #94a3b8;
+  color: var(--text-faint, #94a3b8);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 1px;
@@ -164,7 +166,7 @@
 .console-nav-item>svg {
   width: 18px;
   height: 18px;
-  color: #94a3b8;
+  color: var(--text-faint, #94a3b8);
 }
 
 .console-nav-item:hover {
@@ -203,7 +205,7 @@
 .console-nav-empty {
   margin: 4px 12px 8px;
   padding: 10px 12px;
-  color: #94a3b8;
+  color: var(--text-faint, #94a3b8);
   font-size: 11px;
   line-height: 1.55;
   border: 1px dashed rgba(148, 163, 184, .25);
@@ -221,7 +223,7 @@
   background: var(--card-bg, #fff);
   border: 1px dashed rgba(148, 163, 184, .35);
   border-radius: 12px;
-  color: #64748b;
+  color: var(--text-muted, #64748b);
   text-align: center;
 }
 
@@ -233,7 +235,7 @@
   height: 56px;
   border-radius: var(--radius-pill);
   background: rgba(139, 92, 246, .08);
-  color: #8b5cf6;
+  color: var(--violet-ink, #8b5cf6);
   margin-bottom: 16px;
 }
 
@@ -241,7 +243,7 @@
   margin: 0 0 8px;
   font-size: 16px;
   font-weight: 600;
-  color: #0f172a;
+  color: var(--text, #0f172a);
 }
 
 .settings-empty p {
@@ -252,12 +254,12 @@
 }
 
 .settings-empty code {
-  background: #f1f5f9;
+  background: var(--surface-content, #f1f5f9);
   padding: 1px 6px;
   border-radius: 6px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
-  color: #0f172a;
+  color: var(--text, #0f172a);
 }
 
 .console-sidebar-note {
@@ -266,7 +268,7 @@
   gap: 8px;
   margin: 0 12px 14px;
   padding: 10px;
-  color: #94a3b8;
+  color: var(--text-faint, #94a3b8);
   font-size: 11px;
   line-height: 1.55;
   border: 1px solid rgba(148, 163, 184, .14);
@@ -321,7 +323,7 @@
 
 .console-user-copy small {
   overflow: hidden;
-  color: #94a3b8;
+  color: var(--text-faint, #94a3b8);
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -331,7 +333,7 @@
   display: grid;
   padding: 6px;
   margin-left: auto;
-  color: #94a3b8;
+  color: var(--text-faint, #94a3b8);
   cursor: pointer;
   border-radius: 6px;
   background: transparent;
@@ -455,7 +457,7 @@
   justify-content: space-between;
   gap: 16px;
   flex-wrap: wrap;
-  margin-bottom: 1px;
+  margin-bottom: 16px;
 }
 
 .console-page-head h1 {
@@ -508,12 +510,12 @@
 .console-button.secondary {
   color: var(--secondary);
   border-color: var(--border);
-  background: #fff;
+  background: var(--surface-card, #fff);
 }
 
 .console-button.secondary:hover {
   color: var(--p);
-  border-color: #93c5fd;
+  border-color: var(--border-brand-strong, #93c5fd);
 }
 
 .console-button.ghost:hover {
@@ -523,13 +525,13 @@
 
 .console-button.danger {
   color: #fff;
-  border-color: #dc2626;
-  background: #dc2626;
+  border-color: var(--danger, #dc2626);
+  background: var(--danger, #dc2626);
 }
 
 .console-button.danger:hover:not(:disabled) {
-  border-color: #b91c1c;
-  background: #b91c1c;
+  border-color: var(--danger-strong, #b91c1c);
+  background: var(--danger-strong, #b91c1c);
   box-shadow: 0 3px 9px rgba(220, 38, 38, .18);
 }
 
@@ -545,9 +547,9 @@
   gap: 8px;
   padding: 10px 12px;
   margin-bottom: 16px;
-  color: #1d4ed8;
+  color: var(--primary-ink-strong, #1d4ed8);
   font-size: 12px;
-  border: 1px solid #bfdbfe;
+  border: 1px solid var(--primary-border, #bfdbfe);
   border-radius: 8px;
   background: var(--p-bg);
 }
@@ -565,7 +567,7 @@
   margin-bottom: 16px;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: #fff;
+  background: var(--surface-card, #fff);
   box-shadow: 0 1px 3px rgba(15, 23, 42, .04);
 }
 
@@ -666,7 +668,7 @@
 }
 
 .console-data-table tbody tr:hover td {
-  background: #fbfdff;
+  background: var(--surface-tint, #fbfdff);
 }
 
 .console-mono {
@@ -701,7 +703,7 @@
 }
 
 .type-登录 {
-  color: #2563eb;
+  color: var(--primary-ink, #2563eb);
   background: var(--p-bg);
 }
 
@@ -726,8 +728,8 @@
 }
 
 .risk-低 {
-  color: #64748b;
-  background: #f1f5f9;
+  color: var(--text-muted, #64748b);
+  background: var(--surface-content, #f1f5f9);
 }
 
 .risk-中 {
@@ -749,13 +751,6 @@
   color: var(--muted);
   font-size: 12px;
   border-top: 1px solid var(--border);
-}
-
-.console-page-token {
-  padding: 4px 9px;
-  color: var(--p);
-  border-radius: 6px;
-  background: var(--p-bg);
 }
 
 .console-tabs {
@@ -837,7 +832,7 @@
   border: 1px solid var(--border);
   border-radius: 6px;
   outline: 0;
-  background: #fff;
+  background: var(--surface-card, #fff);
   transition: border-color .15s, box-shadow .15s;
 }
 
@@ -862,7 +857,7 @@
 }
 
 .console-setting-list {
-  border-top: 1px solid #f1f5f9;
+  border-top: 1px solid var(--border-soft, #f1f5f9);
 }
 
 .console-setting-row {
@@ -872,7 +867,7 @@
   gap: 24px;
   min-height: 75px;
   padding: 14px 0;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid var(--border-soft, #f1f5f9);
 }
 
 .console-setting-row>div,
@@ -902,7 +897,7 @@
   padding: 0;
   cursor: pointer;
   border-radius: 999px;
-  background: #cbd5e1;
+  background: var(--chip-neutral-strong, #cbd5e1);
   transition: background .18s;
 }
 
@@ -913,7 +908,7 @@
   width: 16px;
   height: 16px;
   border-radius: var(--radius-pill);
-  background: #fff;
+  background: var(--surface-card, #fff);
   box-shadow: 0 1px 2px rgba(15, 23, 42, .2);
   transition: transform .18s;
 }
@@ -960,7 +955,7 @@
   font-size: 13px;
   line-height: 1.55;
   border-radius: 8px;
-  background: #0f172a;
+  background: var(--sidebar, #0f172a);
   box-shadow: 0 14px 30px rgba(15, 23, 42, .24);
   animation: console-toast-in .18s ease-out;
 }
@@ -1150,7 +1145,7 @@
   margin: 20px 0 14px;
   padding: 4px;
   border-radius: 8px;
-  background: #f1f5f9;
+  background: var(--surface-content, #f1f5f9);
 }
 
 .console-sub-tab {
@@ -1165,7 +1160,7 @@
 
 .console-sub-tab.active {
   color: var(--p);
-  background: #fff;
+  background: var(--surface-card, #fff);
   box-shadow: 0 1px 3px rgba(15, 23, 42, .12);
 }
 
@@ -1175,12 +1170,12 @@
   gap: 8px;
   margin-bottom: 14px;
   padding: 10px 12px;
-  color: #475569;
+  color: var(--text-secondary, #475569);
   font-size: 12px;
   line-height: 1.6;
-  border: 1px solid #dbeafe;
+  border: 1px solid var(--border-brand, #dbeafe);
   border-radius: 8px;
-  background: #f8fbff;
+  background: var(--surface-tint, #f8fbff);
 }
 
 .console-iam-tip svg {
@@ -1231,14 +1226,14 @@
   margin-right: 4px;
   padding: 3px 7px;
   overflow: hidden;
-  color: #1d4ed8;
+  color: var(--primary-ink-strong, #1d4ed8);
   font-size: 12px;
   line-height: 1.25;
   text-overflow: ellipsis;
   vertical-align: middle;
   white-space: nowrap;
   border-radius: 6px;
-  background: #eff6ff;
+  background: var(--primary-soft, #eff6ff);
 }
 
 .console-role-chip.large {
@@ -1250,36 +1245,36 @@
 .console-role-type {
   display: inline-flex;
   padding: 3px 8px;
-  color: #475569;
+  color: var(--text-secondary, #475569);
   font-size: 12px;
   line-height: 1.3;
   border-radius: var(--radius-pill);
-  background: #f1f5f9;
+  background: var(--surface-content, #f1f5f9);
 }
 
 .console-role-type.role-平台角色 {
-  color: #1d4ed8;
-  background: #eff6ff;
+  color: var(--primary-ink-strong, #1d4ed8);
+  background: var(--primary-soft, #eff6ff);
 }
 
 .console-role-type.role-应用角色 {
-  color: #8b5cf6;
-  background: #f5f3ff;
+  color: var(--violet-ink, #8b5cf6);
+  background: var(--violet-soft, #f5f3ff);
 }
 
 .console-role-type.role-自定义角色 {
-  color: #b45309;
-  background: #fef3c7;
+  color: var(--warning-text, #b45309);
+  background: var(--warning-soft, #fef3c7);
 }
 
 .console-badge.status-active {
-  color: #15803d;
-  background: #ecfdf5;
+  color: var(--success-text, #15803d);
+  background: var(--success-soft, #ecfdf5);
 }
 
 .console-badge.status-disabled {
-  color: #64748b;
-  background: #f1f5f9;
+  color: var(--text-muted, #64748b);
+  background: var(--surface-content, #f1f5f9);
 }
 
 .console-actions-cell {
@@ -1299,7 +1294,7 @@
 
 .console-text-button:hover {
   color: var(--p-dark);
-  background: #eff6ff;
+  background: var(--primary-soft, #eff6ff);
 }
 
 .console-entity-separator {
@@ -1322,7 +1317,7 @@
   overflow: auto;
   border: 1px solid rgba(226, 232, 240, .95);
   border-radius: 12px;
-  background: #fff;
+  background: var(--surface-card, #fff);
   box-shadow: 0 24px 70px rgba(15, 23, 42, .3);
 }
 
@@ -1332,7 +1327,7 @@
   justify-content: space-between;
   gap: 16px;
   padding: 22px 24px 17px;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--border, #e2e8f0);
 }
 
 .console-detail-modal>header>div {
@@ -1364,12 +1359,12 @@
   place-items: center;
   color: var(--muted);
   border-radius: 6px;
-  background: #f8fafc;
+  background: var(--surface-muted, #f8fafc);
 }
 
 .console-modal-close:hover {
   color: var(--text);
-  background: #e2e8f0;
+  background: var(--chip-neutral, #e2e8f0);
 }
 
 .console-modal-close svg {
@@ -1383,19 +1378,19 @@
   gap: 0;
   margin: 20px 24px 0;
   overflow: hidden;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--border, #e2e8f0);
   border-radius: 8px;
 }
 
 .console-detail-grid>div {
   min-width: 0;
   padding: 13px 14px;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--border, #e2e8f0);
 }
 
 .console-detail-grid>div:nth-child(odd) {
-  border-right: 1px solid #e2e8f0;
-  background: #f8fafc;
+  border-right: 1px solid var(--border, #e2e8f0);
+  background: var(--surface-muted, #f8fafc);
 }
 
 .console-detail-grid>div:nth-last-child(-n+2) {
@@ -1442,11 +1437,11 @@
   margin: 0 6px 7px 0;
   padding: 5px 7px;
   overflow-wrap: anywhere;
-  color: #1e3a8a;
+  color: var(--text-on-brand, #1e3a8a);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
   border-radius: 6px;
-  background: #eff6ff;
+  background: var(--primary-soft, #eff6ff);
 }
 
 .console-detail-modal>footer {
@@ -1455,16 +1450,16 @@
   gap: 10px;
   margin-top: 22px;
   padding: 16px 24px;
-  border-top: 1px solid #e2e8f0;
+  border-top: 1px solid var(--border, #e2e8f0);
 }
 
 /* AUD-001 审计中心：跨系统事件、变更摘要与链路追溯 */
 .audit-readonly-note code {
   padding: 1px 4px;
-  color: #1d4ed8;
+  color: var(--primary-ink-strong, #1d4ed8);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   border-radius: 6px;
-  background: #eff6ff;
+  background: var(--primary-soft, #eff6ff);
 }
 
 .audit-context-grid {
@@ -1476,27 +1471,27 @@
 
 .audit-context-grid article {
   padding: 13px 14px;
-  border: 1px solid #dbeafe;
+  border: 1px solid var(--border-brand, #dbeafe);
   border-radius: 8px;
-  background: #f8fbff;
+  background: var(--surface-tint, #f8fbff);
 }
 
 .audit-context-grid span {
   display: block;
-  color: #64748b;
+  color: var(--text-muted, #64748b);
   font-size: 11px;
 }
 
 .audit-context-grid strong {
   display: block;
   margin-top: 4px;
-  color: #1e3a8a;
+  color: var(--text-on-brand, #1e3a8a);
   font-size: 13px;
 }
 
 .audit-context-grid p {
   margin: 5px 0 0;
-  color: #64748b;
+  color: var(--text-muted, #64748b);
   font-size: 11px;
   line-height: 1.55;
 }
@@ -1521,15 +1516,15 @@
   gap: 12px;
   padding: 10px 12px;
   margin: 14px 0 10px;
-  color: #64748b;
+  color: var(--text-muted, #64748b);
   font-size: 12px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--border, #e2e8f0);
   border-radius: 8px;
-  background: #fff;
+  background: var(--surface-card, #fff);
 }
 
 .audit-batch-bar b {
-  color: #1d4ed8;
+  color: var(--primary-ink-strong, #1d4ed8);
 }
 
 .audit-batch-bar>div {
@@ -1554,24 +1549,24 @@
 .audit-check-cell input {
   width: 14px;
   height: 14px;
-  accent-color: #2563eb;
+  accent-color: var(--primary-ink, #2563eb);
 }
 
 .audit-method {
   display: inline-flex;
   padding: 3px 5px;
-  color: #8b5cf6;
+  color: var(--violet-ink, #8b5cf6);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
   border-radius: 6px;
-  background: #f5f3ff;
+  background: var(--violet-soft, #f5f3ff);
 }
 
 .audit-id {
   display: block;
   max-width: 168px;
   overflow: hidden;
-  color: #64748b;
+  color: var(--text-muted, #64748b);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
   text-overflow: ellipsis;
@@ -1587,13 +1582,13 @@
 
 .type-登录失败,
 .type-账号锁定 {
-  color: #b91c1c;
-  background: #fef2f2;
+  color: var(--danger-text, #b91c1c);
+  background: var(--danger-soft, #fef2f2);
 }
 
 .type-退出登录 {
-  color: #475569;
-  background: #f1f5f9;
+  color: var(--text-secondary, #475569);
+  background: var(--surface-content, #f1f5f9);
 }
 
 .audit-result-badge {
@@ -1616,8 +1611,8 @@
 }
 
 .audit-result-success {
-  color: #15803d;
-  background: #ecfdf5;
+  color: var(--success-text, #15803d);
+  background: var(--success-soft, #ecfdf5);
 }
 
 .audit-result-success::before {
@@ -1625,8 +1620,8 @@
 }
 
 .audit-result-denied {
-  color: #b45309;
-  background: #fef3c7;
+  color: var(--warning-text, #b45309);
+  background: var(--warning-soft, #fef3c7);
 }
 
 .audit-result-denied::before {
@@ -1634,8 +1629,8 @@
 }
 
 .audit-result-error {
-  color: #b91c1c;
-  background: #fef2f2;
+  color: var(--danger-text, #b91c1c);
+  background: var(--danger-soft, #fef2f2);
 }
 
 .audit-result-error::before {
@@ -1643,8 +1638,8 @@
 }
 
 .audit-result-partial {
-  color: #1d4ed8;
-  background: #eff6ff;
+  color: var(--primary-ink-strong, #1d4ed8);
+  background: var(--primary-soft, #eff6ff);
 }
 
 .audit-result-partial::before {
@@ -1652,12 +1647,12 @@
 }
 
 .audit-result-unknown {
-  color: #64748b;
-  background: #f1f5f9;
+  color: var(--text-muted, #64748b);
+  background: var(--surface-content, #f1f5f9);
 }
 
 .audit-status-code {
-  color: #64748b;
+  color: var(--text-muted, #64748b);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
   letter-spacing: .02em;
@@ -1677,38 +1672,38 @@
 }
 
 .audit-detail-grid .audit-detail-result-wrap .audit-result-success {
-  color: #15803d;
+  color: var(--success-text, #15803d);
 }
 
 .audit-detail-grid .audit-detail-result-wrap .audit-result-denied {
-  color: #b45309;
+  color: var(--warning-text, #b45309);
 }
 
 .audit-detail-grid .audit-detail-result-wrap .audit-result-error {
-  color: #b91c1c;
+  color: var(--danger-text, #b91c1c);
 }
 
 .audit-detail-grid .audit-detail-result-wrap .audit-result-partial {
-  color: #1d4ed8;
+  color: var(--primary-ink-strong, #1d4ed8);
 }
 
 .audit-detail-grid .audit-detail-result-wrap .audit-result-unknown {
-  color: #64748b;
+  color: var(--text-muted, #64748b);
 }
 
 .audit-detail-result-wrap small {
-  color: #64748b;
+  color: var(--text-muted, #64748b);
   font-size: 11px;
   font-weight: 400;
 }
 
 .console-text-button.danger {
-  color: #dc2626;
+  color: var(--danger, #dc2626);
 }
 
 .console-text-button.danger:hover {
-  color: #b91c1c;
-  background: #fef2f2;
+  color: var(--danger-text, #b91c1c);
+  background: var(--danger-soft, #fef2f2);
 }
 
 .console-button:disabled,
@@ -1764,7 +1759,7 @@
 
 .type-登录,
 .audit-result-partial {
-  color: #1d4ed8;
+  color: var(--primary-ink-strong, #1d4ed8);
   background: var(--p-bg);
 }
 
@@ -1778,15 +1773,9 @@
   box-shadow: 0 10px 30px rgba(0, 0, 0, .25);
 }
 
+/* 审计列表分页统一交给 shared/components/PaginationBar.vue（.ui-pager），页脚只保留对齐。 */
 .audit-table-footer {
   align-items: center;
-}
-
-.audit-pagination {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  white-space: nowrap;
 }
 
 .audit-detail-modal {
@@ -1799,19 +1788,19 @@
   gap: 0;
   margin: 20px 24px 0;
   overflow: hidden;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--border, #e2e8f0);
   border-radius: 8px;
 }
 
 .audit-detail-grid>div {
   min-width: 0;
   padding: 13px 14px;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--border, #e2e8f0);
 }
 
 .audit-detail-grid>div:nth-child(odd) {
-  border-right: 1px solid #e2e8f0;
-  background: #f8fafc;
+  border-right: 1px solid var(--border, #e2e8f0);
+  background: var(--surface-muted, #f8fafc);
 }
 
 .audit-detail-grid>div:nth-last-child(-n + 2) {
@@ -1836,7 +1825,7 @@
 
 .audit-detail-section small {
   display: block;
-  color: #94a3b8;
+  color: var(--text-faint, #94a3b8);
   font-size: 11px;
   line-height: 1.55;
   overflow-wrap: anywhere;
@@ -1875,7 +1864,7 @@
   }
 
   .audit-detail-grid>div:nth-last-child(-n + 2) {
-    border-bottom: 1px solid #e2e8f0;
+    border-bottom: 1px solid var(--border, #e2e8f0);
   }
 
   .audit-detail-grid>div:last-child {
@@ -1890,11 +1879,6 @@
 
   .audit-detail-grid {
     margin: 18px 18px 0;
-  }
-
-  .audit-pagination {
-    width: 100%;
-    justify-content: space-between;
   }
 
   .audit-table-footer {
@@ -1978,7 +1962,7 @@
     padding: 8px 12px;
     border: 1px solid var(--border);
     border-radius: 8px;
-    background: #fff;
+    background: var(--surface-card, #fff);
     box-shadow: 0 1px 3px rgba(15, 23, 42, .04);
   }
 
@@ -1993,12 +1977,12 @@
     align-items: start;
     padding: 8px 0;
     color: var(--secondary);
-    border-bottom: 1px dashed #e2e8f0;
+    border-bottom: 1px dashed var(--border, #e2e8f0);
   }
 
   .audit-data-table td::before {
     content: attr(data-label);
-    color: #94a3b8;
+    color: var(--text-faint, #94a3b8);
     font-size: 11px;
     font-weight: 500;
     line-height: 1.6;
@@ -2014,7 +1998,7 @@
     min-width: 0;
     padding: 3px 0 9px;
     text-align: left;
-    border-bottom: 1px solid #e2e8f0;
+    border-bottom: 1px solid var(--border, #e2e8f0);
   }
 
   .audit-data-table .audit-check-cell::before {
@@ -2060,7 +2044,7 @@
     text-align: center;
     border: 1px solid var(--border);
     border-radius: 8px;
-    background: #fff;
+    background: var(--surface-card, #fff);
   }
 
   .audit-data-table .console-empty::before {
@@ -2072,20 +2056,20 @@
     padding: 12px;
     border: 1px solid var(--border);
     border-radius: 8px;
-    background: #fff;
+    background: var(--surface-card, #fff);
   }
 }
 
 .console-notification-menu { position: relative; }
-.console-icon-button b { position: absolute; top: -7px; right: -8px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 10px; background: #dc2626; color: #fff; font-size: 10px; line-height: 18px; }
-.console-notification-popover { position: absolute; z-index: 30; top: calc(100% + 10px); right: 0; width: min(380px, calc(100vw - 28px)); overflow: hidden; border: 1px solid #dbe3ee; border-radius: 12px; background: #fff; box-shadow: 0 18px 45px rgba(15,23,42,.2); }
-.console-notification-popover header,.console-notification-popover footer { display:flex; justify-content:space-between; align-items:center; padding:12px 14px; background:#f8fafc; }
-.console-notification-popover header button,.console-notification-popover footer button { border:0; background:transparent; color:#2563eb; cursor:pointer; }
-.console-notification-popover>p { margin:0; padding:18px 14px; color:#64748b; }
-.console-notification-row { display:block; width:100%; padding:12px 14px; border:0; border-top:1px solid #eef2f7; background:#fff; text-align:left; cursor:pointer; }
-.console-notification-row:hover { background:#f8fbff; }
+.console-icon-button b { position: absolute; top: -7px; right: -8px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 10px; background: var(--danger, #dc2626); color: #fff; font-size: 10px; line-height: 18px; }
+.console-notification-popover { position: absolute; z-index: 30; top: calc(100% + 10px); right: 0; width: min(380px, calc(100vw - 28px)); overflow: hidden; border: 1px solid var(--border-soft, #dbe3ee); border-radius: 12px; background: var(--surface-card, #fff); box-shadow: 0 18px 45px rgba(15,23,42,.2); }
+.console-notification-popover header,.console-notification-popover footer { display:flex; justify-content:space-between; align-items:center; padding:12px 14px; background:var(--surface-muted, #f8fafc); }
+.console-notification-popover header button,.console-notification-popover footer button { border:0; background:transparent; color:var(--primary-ink, #2563eb); cursor:pointer; }
+.console-notification-popover>p { margin:0; padding:18px 14px; color:var(--text-muted, #64748b); }
+.console-notification-row { display:block; width:100%; padding:12px 14px; border:0; border-top:1px solid var(--border-soft, #eef2f7); background:var(--surface-card, #fff); text-align:left; cursor:pointer; }
+.console-notification-row:hover { background:var(--surface-tint, #f8fbff); }
 .console-notification-row strong,.console-notification-row span { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.console-notification-row span { margin-top:4px; color:#64748b; font-size:12px; }
+.console-notification-row span { margin-top:4px; color:var(--text-muted, #64748b); font-size:12px; }
 .audit-export-status { display:flex; align-items:center; gap:10px; }
 .audit-export-status span { flex:1; min-width:0; overflow-wrap:anywhere; }
 
@@ -2225,7 +2209,7 @@
   font-weight: 700;
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
-  background: #fff;
+  background: var(--surface-card, #fff);
   transition: color .2s ease, border-color .2s ease, background .2s ease;
 }
 
@@ -2291,7 +2275,7 @@
   border: 1px solid var(--border);
   border-left: 3px solid var(--border);
   border-radius: 8px;
-  background: #fff;
+  background: var(--surface-card, #fff);
   transition: border-color .2s, border-left-color .2s;
 }
 
@@ -2300,7 +2284,7 @@
 }
 
 .console-wizard-section.muted {
-  background: #f8fafc;
+  background: var(--surface-muted, #f8fafc);
   opacity: .92;
 }
 
@@ -2370,13 +2354,13 @@
   line-height: 1.6;
   border: 1px dashed var(--border);
   border-radius: 8px;
-  background: #f8fafc;
+  background: var(--surface-muted, #f8fafc);
 }
 
 .console-wizard-empty.error {
-  color: #b91c1c;
-  border-color: #fecaca;
-  background: #fef7f7;
+  color: var(--danger-text, #b91c1c);
+  border-color: var(--danger-border, #fecaca);
+  background: var(--danger-soft-strong, #fef7f7);
 }
 
 .console-wizard-role-list {
@@ -2390,7 +2374,7 @@
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #fff;
+  background: var(--surface-card, #fff);
 }
 
 .console-wizard-role-list strong {
@@ -2490,18 +2474,18 @@
 .console-status-dot--ok {
   color: var(--green);
   background: var(--green-bg);
-  border: 1px solid #c7f0d6;
+  border: 1px solid var(--success-border, #c7f0d6);
 }
 
 .console-status-dot--error {
-  color: #dc2626;
-  background: #fef2f2;
-  border: 1px solid #fecaca;
+  color: var(--danger, #dc2626);
+  background: var(--danger-soft, #fef2f2);
+  border: 1px solid var(--danger-border, #fecaca);
 }
 
 .console-status-dot--pending {
   color: var(--muted);
-  background: #f1f5f9;
+  background: var(--surface-content, #f1f5f9);
   border: 1px solid var(--border);
 }
 
@@ -2525,13 +2509,13 @@
 }
 
 .console-tag--error {
-  color: #b91c1c;
-  background: #fef2f2;
+  color: var(--danger-text, #b91c1c);
+  background: var(--danger-soft, #fef2f2);
 }
 
 .console-tag--pending {
   color: var(--muted);
-  background: #f1f5f9;
+  background: var(--surface-content, #f1f5f9);
 }
 
 .console-prereq-card {
@@ -2539,11 +2523,11 @@
 }
 
 .console-prereq-card[data-ready='true'] {
-  border-color: #c7f0d6;
+  border-color: var(--success-border, #c7f0d6);
 }
 
 .console-prereq-card[data-ready='false'] {
-  border-color: #fecaca;
+  border-color: var(--danger-border, #fecaca);
 }
 
 .console-prereq-card-head {
@@ -2585,8 +2569,8 @@
 }
 
 .console-prereq-card[data-ready='false'] .console-prereq-count {
-  color: #b91c1c;
-  background: #fef2f2;
+  color: var(--danger-text, #b91c1c);
+  background: var(--danger-soft, #fef2f2);
 }
 
 .console-prereq-card-foot {
@@ -2601,7 +2585,7 @@
   padding: 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #f8fafc;
+  background: var(--surface-muted, #f8fafc);
 }
 
 .console-prereq-form label {
@@ -2620,7 +2604,7 @@
   border: 1px solid var(--border);
   border-radius: 6px;
   outline: 0;
-  background: #fff;
+  background: var(--surface-card, #fff);
   transition: border-color .15s, box-shadow .15s;
 }
 
@@ -2655,13 +2639,13 @@
 .console-prereq-error {
   margin: 0;
   padding: 10px 12px;
-  color: #b91c1c;
+  color: var(--danger-text, #b91c1c);
   font-size: 12px;
   line-height: 1.55;
-  border: 1px solid #fecaca;
-  border-left: 3px solid #dc2626;
+  border: 1px solid var(--danger-border, #fecaca);
+  border-left: 3px solid var(--danger, #dc2626);
   border-radius: 8px;
-  background: #fef7f7;
+  background: var(--danger-soft-strong, #fef7f7);
 }
 
 @media (max-width: 760px) {
@@ -2688,4 +2672,218 @@
   .console-prereq-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* ==========================================================================
+   深色主题：平台控制台外壳（基础平台 / 结算 / 数据看板 / 商机共用）
+   --------------------------------------------------------------------------
+   .console-page 上的 --p / --bg / --card / --text / --border 等别名本来就指向
+   main.css 的全局 token，所以卡片、表格、按钮、徽章在深色下自动跟随；
+   这里只补三类别名覆盖不到的地方：写死的半透明遮罩、阴影、控件底色与开关。
+   选择器里的 .console-page.console-page 是刻意的：深色覆盖要和模块里
+   .console-form-grid input 这类两段式规则打平后靠位置取胜，重复一次类名
+   让权重固定高一档，避免依赖打包顺序。
+   ========================================================================== */
+[data-theme="dark"] .console-page.console-page {
+  --console-panel-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.28);
+  --console-popover-shadow: 0 18px 44px rgba(0, 0, 0, 0.58);
+}
+
+/* 输入类控件统一用输入底色，卡片色留给卡片自身，避免控件与卡片黏在一起。 */
+[data-theme="dark"] .console-page.console-page :is(
+    input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+    select,
+    textarea) {
+  background: var(--surface-input);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+[data-theme="dark"] .console-page.console-page :is(input, textarea)::placeholder {
+  color: var(--text-dim);
+}
+
+[data-theme="dark"] .console-page.console-page :is(input, select, textarea):focus {
+  border-color: var(--primary-ink);
+  box-shadow: 0 0 0 3px rgba(125, 180, 255, 0.16);
+}
+
+[data-theme="dark"] .console-page.console-page :is(input[type="checkbox"], input[type="radio"]) {
+  accent-color: var(--control-accent);
+}
+
+/* 卡片、抽屉、弹窗：浅色阴影在深底上不可见，换成深色阴影。 */
+[data-theme="dark"] .console-page.console-page :is(.console-card, .console-detail-modal) {
+  box-shadow: var(--console-panel-shadow);
+}
+
+[data-theme="dark"] .console-page.console-page .console-detail-modal {
+  box-shadow: var(--shadow-modal);
+  border-color: var(--border);
+}
+
+/* 遮罩层加深到 72%，弹窗才能从页面里"浮"出来。 */
+[data-theme="dark"] .console-modal-backdrop {
+  background: var(--overlay-scrim);
+}
+
+/* 提示条：侧栏色在深色页面里几乎看不见，改用抬起表面 + 描边。 */
+[data-theme="dark"] .console-toast {
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+/* 开关：轨道用中性 chip 色，滑块保持浅色，才能在深底上看出"已拨动"。 */
+[data-theme="dark"] .console-switch {
+  background: var(--chip-neutral-strong);
+}
+
+[data-theme="dark"] .console-switch.on {
+  background: var(--primary);
+}
+
+[data-theme="dark"] .console-switch i {
+  background: var(--text-strong);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+/* 表格：表头再压一层，斑马纹与悬停保持三档可分辨。 */
+[data-theme="dark"] .console-page.console-page .console-data-table th {
+  background: var(--surface-head);
+  color: var(--text-muted);
+}
+
+[data-theme="dark"] .console-page.console-page .console-data-table tbody tr:nth-child(even) td {
+  background: var(--surface-stripe);
+}
+
+/* 悬停必须和斑马纹同权重且排在其后：否则深色下偶数行的 hover 会被斑马纹盖住。 */
+[data-theme="dark"] .console-page.console-page .console-data-table tbody tr:hover td {
+  background: var(--surface-hover);
+}
+
+/* 侧栏底部与品牌区：和深色侧栏保持同一层，不再用比侧栏更亮的 #1e293b。 */
+[data-theme="dark"] .console-sidebar {
+  border-right: 1px solid var(--sidebar-border);
+}
+
+[data-theme="dark"] .console-sidebar-user {
+  background: var(--sidebar-hover);
+  border-top-color: var(--sidebar-border);
+}
+
+/* ==========================================================================
+   深色主题：控制台设置里的轻量业务模块
+   --------------------------------------------------------------------------
+   字典管理 / 登录安全 / 通知中心 / 文件任务 / 登录目标这些设置页签各自有一份
+   module 级样式（不在本次改写的文件清单里），但它们的白卡片、浅色描边和输入框
+   会直接变成深色页面里的孤岛。这里用控制台外壳样式统一覆盖它们的结构性表面，
+   不改那些文件本身，避免和正在改这些模块的同事冲突。
+   ========================================================================== */
+[data-theme="dark"] :is(.login-security, .dictionary-module, .notification-center,
+    .filetask-module, .login-target-module) {
+  --so-ink: var(--text);
+  --so-muted: var(--text-muted);
+  --so-line: var(--border);
+  --console-text: var(--text);
+}
+
+[data-theme="dark"] :is(.so-summary-card, .so-content, .so-card, .so-table-card,
+    .so-policy-card, .dictionary-card, .dictionary-catalog, .dictionary-items-panel,
+    .dictionary-dialog, .filetask-card, .filetask-table-wrap, .login-target-dialog,
+    .notification-list, .notification-item, .notification-detail) {
+  background: var(--surface-card);
+  border-color: var(--border);
+  box-shadow: var(--shadow-card);
+}
+
+[data-theme="dark"] :is(.dictionary-module__warning, .filetask-guide) {
+  color: var(--text-on-warning);
+  border-color: var(--warning-border);
+  background: var(--warning-soft);
+}
+
+[data-theme="dark"] .dictionary-module :is(
+    input:not([type="checkbox"]):not([type="radio"]),
+    select, textarea),
+[data-theme="dark"] :is(.so-policy-grid, .filetask-card, .login-target-module, .login-target-dialog) :is(
+    input:not([type="checkbox"]):not([type="radio"]),
+    select, textarea) {
+  background: var(--surface-input);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+[data-theme="dark"] .dictionary-module :is(.dictionary-card, .dictionary-catalog__list > li) {
+  border-color: var(--border-soft);
+}
+
+[data-theme="dark"] .dictionary-module :is(td, th) {
+  border-color: var(--line-soft);
+}
+
+[data-theme="dark"] .dictionary-card:hover {
+  border-color: var(--border-brand-strong);
+}
+
+[data-theme="dark"] .dictionary-card.active {
+  border-color: var(--primary-ink);
+  background: var(--surface-tint);
+}
+
+[data-theme="dark"] :is(.dictionary-card code, .dictionary-items-panel__head code) {
+  color: var(--primary-ink);
+}
+
+[data-theme="dark"] .dictionary-card__meta {
+  color: var(--text-faint);
+}
+
+/* 通知中心（源文件是压缩的一行式样式，权重打平，这里靠 [data-theme] 提权）。 */
+[data-theme="dark"] :is(.notification-center h2, .notification-item strong, .notification-detail h3) {
+  color: var(--text);
+}
+
+[data-theme="dark"] :is(.notification-center p, .notification-item small, .notification-item time) {
+  color: var(--text-muted);
+}
+
+[data-theme="dark"] :is(.notification-kicker, .notification-detail a) {
+  color: var(--primary-ink);
+}
+
+[data-theme="dark"] .notification-item {
+  border-bottom-color: var(--line-soft);
+}
+
+[data-theme="dark"] .notification-item:hover {
+  background: var(--surface-hover);
+}
+
+[data-theme="dark"] .notification-item.unread {
+  background: var(--surface-tint);
+}
+
+[data-theme="dark"] :is(.notification-empty, .notification-error) {
+  background: var(--surface-muted);
+  border-color: var(--line-strong);
+}
+
+[data-theme="dark"] .notification-error {
+  color: var(--danger-text);
+}
+
+/* 文件任务与登录目标：标题/说明文字换深色墨色。 */
+[data-theme="dark"] :is(.filetask-module h2, .filetask-card h3, .login-target-module__header h2,
+    .login-target-dialog h3) {
+  color: var(--text);
+}
+
+[data-theme="dark"] :is(.filetask-module p, .filetask-module__header p) {
+  color: var(--text-muted);
+}
+
+[data-theme="dark"] .filetask-module__eyebrow {
+  color: var(--primary-ink);
 }

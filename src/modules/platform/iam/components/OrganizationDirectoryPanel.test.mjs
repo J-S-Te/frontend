@@ -252,3 +252,63 @@ test('组织面板把 OrgUnitTree 五类事件原样再发出', async () => {
     assert.ok(panelSource.includes("emit('" + name), name)
   }
 })
+
+// ---------------------------------------------------------------------------
+// 失败 / 加载 / 空三态：组织目录读取失败必须渲染可重试的错误态，
+// 不能像改造前那样只留一句「暂无组织记录。」（用户会把失败读成组织被清空）。
+// 三个用例都走真实 SFC 渲染；金样用例（有数据）仍然逐字节等于提取前 DOM。
+// ---------------------------------------------------------------------------
+
+const FAILURE = '组织目录读取失败：网络不可用，请稍后重试。'
+
+function stateCase({ organizations = [], keyword = '', loading = false, error = '' } = {}) {
+  return {
+    organizations,
+    filteredOrganizations: organizations,
+    panelFilters: { organizations: keyword },
+    pagination: { organizations: { page: 1, pageSize: 100, total: organizations.length, serverPagingSupported: true } },
+    loading: { organizations: loading },
+    error,
+    deletingOrganizationId: '',
+    canCreate: false,
+    canUpdate: false,
+    canDelete: false,
+  }
+}
+
+test('组织面板：读取失败渲染可重试的错误态，而不是「暂无组织记录」', async () => {
+  const html = await renderComponent(component, stateCase({ error: FAILURE }))
+  assert.match(html, /role="alert"/)
+  assert.match(html, /组织目录加载失败/)
+  assert.match(html, new RegExp(FAILURE))
+  assert.match(html, /ui-state__retry/)
+  assert.match(html, />重新加载</)
+  assert.doesNotMatch(html, /暂无组织记录/)
+  assert.doesNotMatch(html, /iam-organization-tree-row/)
+})
+
+test('组织面板：加载中优先于失败，保留原来的加载文案', async () => {
+  const html = await renderComponent(component, stateCase({ loading: true, error: FAILURE }))
+  assert.match(html, /role="status"/)
+  assert.match(html, /ui-state__spinner/)
+  assert.match(html, /正在读取完整组织架构…/)
+  assert.doesNotMatch(html, /role="alert"/)
+  assert.doesNotMatch(html, /暂无组织记录/)
+})
+
+test('组织面板：真正的空数据与筛选无结果保留原空态文案', async () => {
+  const empty = await renderComponent(component, stateCase())
+  assert.match(empty, /暂无组织记录。/)
+  assert.doesNotMatch(empty, /role="alert"/)
+  assert.doesNotMatch(empty, /ui-state__retry/)
+
+  const filtered = await renderComponent(component, stateCase({ keyword: '运维' }))
+  assert.match(filtered, /没有匹配的组织单元。/)
+  assert.doesNotMatch(filtered, /暂无组织记录/)
+})
+
+test('组织面板把重试原样转交给父组件（retry 重新发起同一个 loadOrganizations）', async () => {
+  const panelSource = readFileSync(new URL('./OrganizationDirectoryPanel.vue', import.meta.url), 'utf8')
+  assert.match(panelSource, /@retry="\$emit\('retry'\)"/)
+  assert.ok(component.emits?.includes('retry'), 'OrganizationDirectoryPanel 必须声明 retry 事件')
+})

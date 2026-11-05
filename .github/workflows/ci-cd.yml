@@ -24,6 +24,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - name: Verify module selection builds
+        run: npm run verify:modules
       - name: Verify frontend deployment prerequisites
         run: bash scripts/test-deploy-frontend.sh
       - run: npm run build

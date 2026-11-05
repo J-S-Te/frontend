@@ -18,7 +18,9 @@ test('Portal 页面已对齐真实 HTTP 路由并对未配置能力失败关闭'
   assert.match(view, /登录、会话、项目查询、报告申请和等保备案草稿均已接入门户服务/)
   assert.match(view, /备案材料已接(?:受控|入受控)上传与文件校验状态/)
   assert.doesNotMatch(view, /退出登录/)
-  assert.match(view, /aria-label="结束门户会话"/)
+  // 退出入口改由共享外壳渲染：视图只声明 logoutLabel 的文案，按钮与 aria-label 归 AppShell。
+  assert.match(view, /logout-label="结束门户会话"/)
+  assert.match(view, /@logout="logoutPortal"/)
   assert.match(view, /下载 PDF 报告/)
   assert.match(view, /账号安全/)
   assert.doesNotMatch(view, /前往统一身份账号安全中心/)
@@ -142,6 +144,7 @@ test('备案矩阵使用原生单选，材料走受控上传且 PDF 能力失败
   assert.match(filingWizard, /撤销当前选择/)
   assert.match(filingWizard, /createFilingMaterialUpload/)
   assert.match(filingWizard, /completeFilingMaterialUpload/)
+  assert.match(filingWizard, /validateFilingMaterialFile\(file\)/)
   assert.match(filingWizard, /materialCreateKeys\[item\.key\] \|\|= newKey\(\)/)
   assert.match(filingWizard, /materialCreateKeys\[item\.key\]\)/)
   assert.match(filingWizard, /materialCreateKeys\[item\.key\] = ''/)
@@ -178,7 +181,11 @@ test('备案 PDF 导出使用版本化同源 POST、会话与 CSRF 并返回真�
   assert.equal(request.url, '/customer-portal/api/v1/filings/FILE%2F1/exports')
   assert.equal(request.options.method, 'POST')
   assert.equal(request.options.credentials, 'include')
-  assert.equal(request.options.signal, controller.signal)
+  // 调用方取消信号与下载超时合并：既不被覆盖（取消仍生效），也带上 60s 下载超时。
+  assert.ok(request.options.signal, '备案导出下载必须携带取消/超时 signal')
+  assert.equal(request.options.signal.aborted, false)
+  controller.abort()
+  assert.equal(request.options.signal.aborted, true)
   assert.equal(request.options.headers['X-CSRF-Token'], '1')
   assert.equal(request.options.headers['Content-Type'], 'application/json')
   assert.equal(request.options.headers.Accept, 'application/pdf, application/json')
@@ -200,7 +207,9 @@ test('备案 PDF 导出拒绝非 PDF 成功响应并保留后端失败关闭错�
 })
 
 test('备案入口按 filing.read 门禁，无权限时不挂载向导', () => {
-  assert.match(view, /v-if="hasPermission\('filing\.read'\)"/)
+  // 侧栏入口改由共享外壳按 visible 渲染（原来手写的是 v-if="hasPermission('filing.read')"），
+  // 权限与「超级管理员看不到客户业务入口」的过滤条件一起留在视图的 navGroups 里。
+  assert.match(view, /key: 'filings', label: '等保备案'[\s\S]{0,160}visible: !isPortalSuperAdmin\.value && hasPermission\('filing\.read'\)/)
   assert.match(view, /v-else-if="section === 'filings' && hasPermission\('filing\.read'\)"/)
   assert.match(view, /当前账号没有备案读取权限/)
 })

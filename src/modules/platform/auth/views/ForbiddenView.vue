@@ -177,4 +177,51 @@ async function goLogin() {
 .forbidden-button.ghost:hover {
   background: #f1f5f9;
 }
+
+/* ==========================================================================
+   深色主题：403 页
+   --------------------------------------------------------------------------
+   只新增 [data-theme="dark"] 规则，浅色声明一行未改，浅色逐像素一致。
+   ========================================================================== */
+[data-theme="dark"] .forbidden-page {
+  background: linear-gradient(135deg, var(--surface-content) 0%, var(--surface-muted) 100%);
+}
+[data-theme="dark"] .forbidden-card {
+  border-color: var(--border);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-modal);
+}
+[data-theme="dark"] .forbidden-icon {
+  color: var(--danger-text);
+  background: var(--danger-soft);
+}
+[data-theme="dark"] .forbidden-title {
+  color: var(--text);
+}
+[data-theme="dark"] .forbidden-subtitle {
+  color: var(--text-secondary);
+}
+[data-theme="dark"] .forbidden-meta {
+  color: var(--text-muted);
+}
+[data-theme="dark"] .forbidden-meta code {
+  color: var(--text);
+  background: var(--chip-neutral);
+}
+[data-theme="dark"] .forbidden-button.primary {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--text-strong);
+}
+[data-theme="dark"] .forbidden-button.primary:hover {
+  border-color: var(--primary-dark);
+  background: var(--primary-dark);
+}
+[data-theme="dark"] .forbidden-button.ghost {
+  color: var(--text);
+  border-color: var(--border);
+}
+[data-theme="dark"] .forbidden-button.ghost:hover {
+  background: var(--surface-hover);
+}
 </style>

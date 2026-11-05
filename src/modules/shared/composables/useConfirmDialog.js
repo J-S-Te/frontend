@@ -1,13 +1,9 @@
 import { onScopeDispose, ref } from 'vue'
+import { requireActionLabel } from '../utils/actionLabel.js'
 
-/**
- * Promise-based confirmation controller for destructive or irreversible actions.
- * One dialog is active at a time; a newer request resolves the previous one as
- * cancelled instead of silently replacing its callback.
- *
- * 宿主组件销毁时（路由离开/容器弹窗关闭），未决的 askConfirm 以取消收场，
- * 避免 await 永挂与 resolver 泄漏；非组件作用域调用时不注册清理。
- */
+// useConfirmDialog 管理重要操作的异步确认及取消生命周期。
+// 参数：无。
+// 返回值：弹窗状态及打开、接受、取消方法；销毁时取消未决请求。
 export function useConfirmDialog() {
   const dialog = ref(null)
   let resolver = null
@@ -23,13 +19,17 @@ export function useConfirmDialog() {
     if (resolver) settle(false)
   })
 
+  // askConfirm 显示具有明确操作结果的确认框。
+  // 参数：配置包含标题、说明、动作按钮和危险状态。
+  // 返回值：确认时为 true，取消、替换或销毁时为 false 的 Promise。
   function askConfirm({
     title,
     description = '',
-    confirmText = '确认',
+    confirmText,
     cancelText = '取消',
     danger = false,
   } = {}) {
+    confirmText = requireActionLabel(confirmText)
     if (resolver) settle(false)
     dialog.value = { title, description, confirmText, cancelText, danger }
     return new Promise((resolve) => {

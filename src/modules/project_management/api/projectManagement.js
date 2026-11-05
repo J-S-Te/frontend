@@ -7,6 +7,8 @@ import {
 import { attachStructuredContext } from '../../platform/shared/api/requestContext.js'
 import { formatUserError } from '../../shared/utils/userError.js'
 import { todayBusinessDate } from '../../shared/utils/businessTime.js'
+import { safeDownloadFilename } from '../../shared/utils/contentDisposition.js'
+import { DOWNLOAD_TIMEOUT_MESSAGE, downloadRequestSignal } from '../../shared/utils/downloadTimeout.js'
 
 const runtimeEnv = import.meta.env || {}
 const PUBLIC_PATH_PREFIX = (runtimeEnv.VITE_PROJECT_PUBLIC_PATH_PREFIX || '/project_management').replace(/\/$/, '')
@@ -1083,12 +1085,15 @@ export async function downloadCapabilityImportTemplate() {
   return downloadImportTemplate('/capabilities/import/template', '人员资质导入模板.csv')
 }
 
-async function requestProjectCSV(path) {
+async function requestProjectCSV(path, fallbackFilename) {
   const context = { subsystem: 'project_management', feature: 'project_download', operation: 'GET', path, method: 'GET' }
+  // 导出与模板下载共用本函数；只在这里附加超时 signal，上传仍保持原有不设硬超时。
+  const downloadAbort = downloadRequestSignal()
   let response
   try {
-    response = await fetch(`${API_BASE_URL}${path}`, { credentials: 'include', headers: { Accept: 'text/csv' } })
-  } catch {
+    response = await fetch(`${API_BASE_URL}${path}`, { credentials: 'include', signal: downloadAbort.signal, headers: { Accept: 'text/csv' } })
+  } catch (cause) {
+    if (downloadAbort.timedOut()) throw downloadTimeoutError(cause, context)
     throw projectRequestError(null, null, context, { code: 'NETWORK_ERROR', fallback: '下载未完成，请检查网络后重新下载。' })
   }
   if (!response.ok) {
@@ -1100,12 +1105,42 @@ async function requestProjectCSV(path) {
   if (mediaType !== 'text/csv') {
     throw projectRequestError(null, response, context, { code: 'INVALID_DOWNLOAD_RESPONSE', fallback: '下载服务返回的文件格式异常，请联系管理员检查文件下载配置。' })
   }
-  return response
+  const filename = safeDownloadFilename(response.headers.get('content-disposition'), fallbackFilename, { extensions: ['.csv'] })
+  return { response, filename, downloadAbort }
+}
+
+/**
+ * downloadTimeoutError 把本端下载超时转换为项目模块可读错误，保持既有错误字段结构。
+ * @param {unknown} cause 底层中断原因。
+ * @param {Record<string, unknown>} context 下载请求上下文。
+ * @returns {Error} 带下载超时错误码的结构化错误。
+ */
+function downloadTimeoutError(cause, context) {
+  const error = projectRequestError(null, null, context, { code: 'DOWNLOAD_TIMEOUT', fallback: DOWNLOAD_TIMEOUT_MESSAGE })
+  error.message = DOWNLOAD_TIMEOUT_MESSAGE
+  error.cause = cause
+  return error
+}
+
+/**
+ * readDownloadBlob 读取下载响应体；超时发生在读取阶段时同样转换为可读超时错误。
+ * @param {Response} response 下载响应。
+ * @param {{timedOut: () => boolean}} downloadAbort 下载超时归因。
+ * @param {Record<string, unknown>} context 下载请求上下文。
+ * @returns {Promise<Blob>} 完整响应体。
+ */
+async function readDownloadBlob(response, downloadAbort, context) {
+  try {
+    return await response.blob()
+  } catch (cause) {
+    if (downloadAbort.timedOut()) throw downloadTimeoutError(cause, context)
+    throw projectRequestError(null, response, context, { code: 'NETWORK_ERROR', fallback: '文件下载中断，请检查网络后重新下载。' })
+  }
 }
 
 async function downloadImportTemplate(path, filename) {
-  const response = await requestProjectCSV(path)
-  return { blob: await response.blob(), filename }
+  const { response, downloadAbort } = await requestProjectCSV(path)
+  return { blob: await readDownloadBlob(response, downloadAbort, { subsystem: 'project_management', feature: 'project_download', operation: 'GET', path, method: 'GET' }), filename }
 }
 
 /**
@@ -1116,10 +1151,49 @@ async function downloadImportTemplate(path, filename) {
  */
 export async function exportCapabilities(resourceType = '') {
   const query = resourceType ? `?resource_type=${encodeURIComponent(resourceType)}` : ''
-  const response = await requestProjectCSV(`/capabilities/export${query}`)
-  const disposition = response.headers.get('content-disposition') || ''
-  let filename = `capabilities-${todayBusinessDate()}.csv`
-  const match = disposition.match(/filename\*?=(?:UTF-8''|")?([^";]+)/i)
-  if (match) filename = match[1].replace(/^"|"$/g, '')
-  return { blob: await response.blob(), filename }
+  const fallbackFilename = `capabilities-${todayBusinessDate()}.csv`
+  const path = `/capabilities/export${query}`
+  const { response, filename, downloadAbort } = await requestProjectCSV(`/capabilities/export${query}`, fallbackFilename)
+  return { blob: await readDownloadBlob(response, downloadAbort, { subsystem: 'project_management', feature: 'project_download', operation: 'GET', path, method: 'GET' }), filename }
+}
+// 用途：读取当前环境显式开放的项目创建来源。
+// 参数：无。
+// 返回值：包含native_enabled的能力响应；失败时抛出HTTP错误。
+export function getProjectCreationCapabilities() {
+  return request('/project-creation-capabilities')
+}
+
+// 用途：按本地委托创建原生项目及待确认服务范围。
+// 参数：payload为稳定source_id、本地单位和服务项，来源必须为NATIVE。
+// 返回值：创建或相同请求重放的项目；校验、权限和幂等冲突时抛出错误。
+export function createNativeProject(payload) {
+  return request('/native-projects', { method: 'POST', body: JSON.stringify(payload) })
+}
+
+// 用途：读取原生项目的当前权威范围及审批历史。
+// 参数：id 为真实项目主键。
+// 返回值：服务端范围状态；认证和错误沿用现有transport。
+export function getNativeProjectScope(id) {
+  return request(`/projects/${encodeURIComponent(id)}/native-scope`)
+}
+
+// 用途：以明确操作号提交完整本地范围提案。
+// 参数：id 为项目主键，payload 为版本和冻结范围。
+// 返回值：真实持久提案或明确错误。
+export function requestNativeProjectScope(id, payload) {
+  return request(`/projects/${encodeURIComponent(id)}/native-scope-changes`, { method: 'POST', body: JSON.stringify(payload) })
+}
+
+// 用途：执行不同人的本地范围单级审批。
+// 参数：id/changeID 为真实坐标，payload 为原操作号、版本及决定。
+// 返回值：真实最终提案；未知结果沿原transport标记。
+export function decideNativeProjectScope(id, changeID, payload) {
+  return request(`/projects/${encodeURIComponent(id)}/native-scope-changes/${encodeURIComponent(changeID)}/decision`, { method: 'POST', body: JSON.stringify(payload) })
+}
+
+// 用途：由原申请人撤回本地待审批范围。
+// 参数：id/changeID 为真实坐标，payload 为原操作号和撤回意见。
+// 返回值：真实撤回回执或授权及状态错误。
+export function withdrawNativeProjectScope(id, changeID, payload) {
+  return request(`/projects/${encodeURIComponent(id)}/native-scope-changes/${encodeURIComponent(changeID)}/withdraw`, { method: 'POST', body: JSON.stringify(payload) })
 }

@@ -5,13 +5,15 @@ import { formatUserError } from '../../shared/utils/userError.js'
 import { attachStructuredContext } from '../../platform/shared/api/requestContext.js'
 import { normalizeAuthorizationSession, principalIdentityID, shouldStartSubsystemLogin } from '../../shared/authz/sessionCompatibility.js'
 import { todayBusinessDate } from '../../shared/utils/businessTime.js'
+import { safeDownloadFilename } from '../../shared/utils/contentDisposition.js'
+import { DOWNLOAD_TIMEOUT_MESSAGE, downloadRequestSignal } from '../../shared/utils/downloadTimeout.js'
 
 const source = (await readFile(new URL('./projectManagement.js', import.meta.url), 'utf8'))
   .replace(/^import\s[\s\S]*?from ['"][^'"]+['"]\n/gm, '')
   .replaceAll('import.meta.env', '({})').replace(/^export /gm, '')
 function client() {
-  return new Function('formatUserError', 'attachStructuredContext', 'normalizeAuthorizationSession', 'principalIdentityID', 'shouldStartSubsystemLogin', 'todayBusinessDate',
-    `${source}; return { request, downloadCapabilityImportTemplate, downloadEquipmentImportTemplate, downloadDetectionCategoryImportTemplate, exportCapabilities };`)(formatUserError, attachStructuredContext, normalizeAuthorizationSession, principalIdentityID, shouldStartSubsystemLogin, todayBusinessDate)
+  return new Function('formatUserError', 'attachStructuredContext', 'normalizeAuthorizationSession', 'principalIdentityID', 'shouldStartSubsystemLogin', 'todayBusinessDate', 'safeDownloadFilename', 'DOWNLOAD_TIMEOUT_MESSAGE', 'downloadRequestSignal',
+    `${source}; return { request, downloadCapabilityImportTemplate, downloadEquipmentImportTemplate, downloadDetectionCategoryImportTemplate, exportCapabilities };`)(formatUserError, attachStructuredContext, normalizeAuthorizationSession, principalIdentityID, shouldStartSubsystemLogin, todayBusinessDate, safeDownloadFilename, DOWNLOAD_TIMEOUT_MESSAGE, downloadRequestSignal)
 }
 async function withFetch(fetcher, run) {
   const originalFetch = globalThis.fetch, originalWindow = globalThis.window
@@ -110,4 +112,59 @@ test('项目正常 envelope 与 CSV 不改变成功协议、筛选和文件名',
     assert.equal(result.filename, 'capabilities-20261015.csv')
     assert.match(await result.blob.text(), /张三,测试/)
   })
+})
+
+test('项目能力 CSV 导出解码 RFC 5987 中文文件名并强制 CSV 扩展名', async () => {
+  await withFetch(async () => new Response('\ufeff姓名,资质\n张三,测试', {
+    headers: {
+      'content-type': 'text/csv; charset=utf-8',
+      'content-disposition': "attachment; filename=\"plain.csv\"; filename*=UTF-8''%E8%83%BD%E5%8A%9B%E5%AF%BC%E5%87%BA.csv",
+    },
+  }), async () => {
+    const result = await client().exportCapabilities()
+    assert.equal(result.filename, '能力导出.csv')
+  })
+})
+
+test('项目能力 CSV 导出对非法或非 CSV 文件名回退受控 .csv 名称', async () => {
+  const fallback = `capabilities-${todayBusinessDate()}.csv`
+  for (const disposition of [
+    "attachment; filename*=UTF-8''%E4%B8%AD%ZZ",
+    'attachment; filename="capabilities.pdf"',
+    "attachment; filename*=UTF-8''..%2F..%2Fsecret.csv",
+  ]) {
+    await withFetch(async () => new Response('a,b\n1,2', {
+      headers: { 'content-type': 'text/csv', 'content-disposition': disposition },
+    }), async () => {
+      const result = await client().exportCapabilities()
+      assert.equal(result.filename, fallback)
+      assert.match(result.filename, /\.csv$/)
+      assert.doesNotMatch(result.filename, /%E4|\.\.|[\\/]/)
+    })
+  }
+})
+
+test('项目模板下载继续使用固定中文文件名并忽略响应头名称', async () => {
+  await withFetch(async () => new Response('\ufeff姓名,资质', {
+    headers: {
+      'content-type': 'text/csv; charset=utf-8',
+      'content-disposition': "attachment; filename*=UTF-8''%E4%B8%8D%E5%BA%94%E4%BD%BF%E7%94%A8.csv",
+    },
+  }), async () => {
+    const result = await client().downloadCapabilityImportTemplate()
+    assert.equal(result.filename, '人员资质导入模板.csv')
+  })
+})
+
+test('项目 CSV 导出与模板下载请求携带下载超时 signal', async () => {
+  let requestOptions
+  await withFetch(async (url, options) => {
+    requestOptions = options
+    return new Response('\ufeff名称\n张三', { headers: { 'content-type': 'text/csv' } })
+  }, async () => {
+    const result = await client().downloadCapabilityImportTemplate()
+    assert.match(await result.blob.text(), /张三/)
+  })
+  assert.ok(requestOptions.signal, '项目 CSV 下载必须携带下载超时 signal')
+  assert.equal(requestOptions.signal.aborted, false)
 })

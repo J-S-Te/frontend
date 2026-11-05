@@ -4,15 +4,21 @@ import { agingDisplayRows } from "../utils/agingDisplay.js";
 import { allowedSections, permissionCheck, canLoad as canLoadKey } from "../utils/capabilities.js";
 import SettlementRolePanel from "../components/SettlementRolePanel.vue";
 import OperationToast from '@/modules/shared/components/OperationToast.vue'
+import LoadingState from '@/modules/shared/components/LoadingState.vue'
+import ErrorState from '@/modules/shared/components/ErrorState.vue'
+import SettlementListPager from '@/modules/settlement/components/SettlementListPager.vue'
 import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { AuthError, logoutCurrentSession } from "@/modules/platform/auth/api/auth";
 import { createRequestScope } from "@/modules/platform/shared/composables/requestScope.js";
 import ConsoleIcon from "@/modules/platform/shared/components/ConsoleIcon.vue";
+import AppShell from "@/modules/shared/components/AppShell.vue";
 import SettlementInvoiceDetailPanel from "@/modules/settlement/components/SettlementInvoiceDetailPanel.vue";
 import SettlementAllocationsPanel from "@/modules/settlement/components/SettlementAllocationsPanel.vue";
 import SettlementReceiptsPanel from "@/modules/settlement/components/SettlementReceiptsPanel.vue";
 import SettlementReceivablesPanel from "@/modules/settlement/components/SettlementReceivablesPanel.vue";
+import SettlementNativeFinancialPanel from "../components/SettlementNativeFinancialPanel.vue";
+import { createNativeFinancialAPI } from "../api/nativeFinancial.js";
 import SettlementPlanCoveragePanel from "@/modules/settlement/components/SettlementPlanCoveragePanel.vue";
 import SettlementDashboardPanel from "@/modules/settlement/components/SettlementDashboardPanel.vue";
 import SettlementContractImportPanel from "@/modules/settlement/components/SettlementContractImportPanel.vue";
@@ -38,10 +44,12 @@ import { useInvoiceRequests } from "@/modules/settlement/composables/useInvoiceR
 import { canRequestRedFlush } from "@/modules/settlement/utils/invoiceStatus";
 import { formatSettlementError } from "../utils/errors.js";
 import { closeSubsystemTabOrFallback } from "@/modules/shared/utils/returnToPortal";
+import { usePromptDialog } from "@/modules/shared/composables/usePromptDialog.js";
 import { useConfirmDialog } from "@/modules/shared/composables/useConfirmDialog.js";
 import ConfirmDialog from "@/modules/shared/components/ConfirmDialog.vue";
 import PromptDialog from "@/modules/shared/components/PromptDialog.vue";
 import {
+  request,
   approveInvoiceRequest,
   saveRoleResource,
   recoverInvoiceFailure,
@@ -87,9 +95,13 @@ import "@/modules/platform/styles/console.css";
 import "@/modules/settlement/styles/settlement.css";
 
 const { dialog: confirmDialog, askConfirm, accept: acceptConfirm, cancel: cancelConfirm } = useConfirmDialog();
+const { dialog: promptDialog, askPrompt, accept: acceptPrompt, cancel: cancelPrompt } = usePromptDialog();
 const route = useRoute(),
   router = useRouter();
+// 侧栏在 ≤820px 收敛为抽屉：菜单按钮/遮罩与平台控制台共用 console.css 的同一套开合状态。
+const mobileMenuOpen = ref(false);
 const settlementSession = ref({});
+const nativeFinancialAPI = createNativeFinancialAPI(request);
 const sessionDisplayName = computed(() => loginUsername(settlementSession.value));
 const sessionAccount = computed(() => "当前登录账号");
 const sessionAvatar = computed(() => sessionDisplayName.value.slice(0, 1).toUpperCase() || "结");
@@ -144,6 +156,37 @@ const active = computed(() => allowed.value.includes(route.params.section)
 const title = computed(
   () => sections.find(([key]) => key === active.value)?.[1] || "结算总览",
 );
+// 共享外壳只负责渲染侧栏骨架：把既有分组导航映射成 navGroups，
+// 分组顺序、标题、权限过滤（allowed）与当前页高亮仍由本页决定；
+// 「返回子系统门户」继续作为最后一个分组项。
+const navGroups = computed(() => [
+  ...navigationSections.value.map((group) => ({
+    label: group.label,
+    items: group.items.map(([key, label, icon]) => ({
+      key,
+      label,
+      icon,
+      title: label,
+      active: active.value === key,
+    })),
+  })),
+  {
+    label: "平台能力",
+    items: [
+      { key: "portal", label: "返回子系统门户", icon: "dashboard", title: "返回子系统门户" },
+    ],
+  },
+]);
+// 用途：把共享外壳抛出的导航键映射到本页既有入口。
+// 参数：key 为 navGroups 里的导航键。
+// 返回值：无。
+function handleNavigate(key) {
+  if (key === "portal") {
+    back();
+    return;
+  }
+  go(key);
+}
 const dashboardCurrencyTotals = (field, fallback) => {
   const totals = Array.isArray(dashboard.value.currency_totals)
     ? dashboard.value.currency_totals.filter((item) => item && item.currency)
@@ -355,7 +398,7 @@ const loading = ref(true),
   error = ref(""),
   isLoggingOut = ref(false);
 
-const { message, saving, notify, act } = useSettlementActions({ load, formatSettlementError });
+const { message, messageReference, saving, notify, act } = useSettlementActions({ load, formatSettlementError });
 const {
   dunningPolicies,
   dunningRecipients,
@@ -418,6 +461,8 @@ const {
   submitRedFlush,
   reviewRedFlush,
 } = useInvoiceDetail({
+  can,
+  askPrompt,
   route,
   router,
   active,
@@ -459,6 +504,9 @@ const {
   submitInvoiceReview,
   manualIssue,
 } = useInvoiceRequests({
+  can,
+  askPrompt,
+  active,
   invoiceRequests,
   taxInvoices,
   invoiceEligibleReceivables,
@@ -512,6 +560,19 @@ const {
   confirmPlan,
   submitPlanConfirmation,
 } = useReceivablePlans({ plans, notify, act, confirmReceivablePlan });
+// 用途：打开原计划确认流程并保留本地依据的明确来源显示。
+// 参数：plan为服务端当前页计划，合同号、计划身份和版本保持原值。
+// 返回值：无；仅本地来源追加显示元数据，不改变确认请求白名单。
+function confirmFinancialPlan(plan) {
+  confirmPlan(plan);
+  if (plan?.basis_type === "LOCAL_FINANCIAL") {
+    planEditor.value = {
+      ...planEditor.value,
+      basis_type: plan.basis_type,
+      local_document_no: plan.local_document_no,
+    };
+  }
+}
 // 用途：打开特殊开票加签弹窗，普通财务审核通过后才可操作。
 // 参数：item 为服务端待加签申请。
 // 返回值：无。
@@ -535,6 +596,7 @@ async function submitSpecialReview(approved) {
 // 参数：section 为目标页面代码。
 // 返回值：无。
 function go(section) {
+  mobileMenuOpen.value = false;
   if (allowed.value.includes(section)) router.push({ name: "settlement", params: { section } });
 }
 // 用途：返回统一门户。
@@ -562,6 +624,9 @@ async function logoutSystem() {
     isLoggingOut.value = false;
   }
 }
+// 结算列表接口是 limit/offset 分页，不返回总数：每页 50 条，页码上限沿用原面板的 2000 页。
+const LIST_PAGE_SIZE = 50;
+const LIST_MAX_PAGE = 2000;
 const listPages = ref({});
 const pagedLists = [
   [listReceivablePlans, plans, "应收计划"], [listReceivables, receivables, "正式应收"],
@@ -571,18 +636,39 @@ const pagedLists = [
   [listDunningCases, dunningCases, "催收案件"], [listDunningActions, dunningActions, "催收动作"],
   [listDunningPolicies, dunningPolicies, "催收策略"],
 ];
-const sectionLists = {
-  receivables: [0, 1], receipts: [2, 1], allocations: [2, 1, 3],
-  invoices: [6, 4, 5], dunning: [1, 7, 8, 9], tasks: [0, 3, 4, 7], finance: [2],
+// 每个列表面板自己的分页归属：分页条只出现在对应面板的页脚里，
+// 不再有一条浮在页面顶部、不知道在给哪个列表翻页的「列表分页」面板。
+const panelListGroups = {
+  receivables: [0, 1], receipts: [2], allocations: [3],
+  invoices: [4, 5], dunning: [7, 8, 9], tasks: [0, 3, 4, 7], finance: [2],
 };
-const visibleListPages = computed(() => (sectionLists[active.value] || []).filter((index) => canLoad(pagedLists[index][0])).map((index) => ({
-  index, label: pagedLists[index][2], page: listPages.value[index] || 0, count: pagedLists[index][1].value.length,
-})));
-// 用途：切换已授权列表的页码。
-// 参数：index 为列表索引；direction 为翻页方向。
+// 用途：给出某个面板里可见列表的分页参数。
+// 参数：section 为当前结算分区代码。
+// 返回值：已授权且当前有行（或在第 2 页以后）的列表分页条目。
+function listPagerEntries(section) {
+  return (panelListGroups[section] || [])
+    .filter((index) => canLoad(pagedLists[index][0]))
+    .map((index) => {
+      const pageIndex = listPages.value[index] || 0;
+      const rows = pagedLists[index][1].value.length;
+      return {
+        index,
+        label: pagedLists[index][2],
+        page: pageIndex + 1,
+        count: rows,
+        hasMore: rows >= LIST_PAGE_SIZE && pageIndex < LIST_MAX_PAGE - 1,
+      };
+    })
+    // 空列表不留一条「第 1 页 · 0 条」；但已经翻到后面的页仍要保留，否则回不去。
+    .filter((entry) => entry.count > 0 || entry.page > 1);
+}
+// 用途：按目标页码切换某个列表的 offset 分页。
+// 参数：payload.index 为列表索引；payload.page 为 1 起始的目标页。
 // 返回值：刷新完成的 Promise。
-async function changeListPage(index, direction) {
-  listPages.value[index] = Math.max(0, (listPages.value[index] || 0) + direction);
+async function changeListPage({ index, page } = {}) {
+  const next = Math.min(Math.max(1, Math.trunc(Number(page) || 1)), LIST_MAX_PAGE);
+  if (next - 1 === (listPages.value[index] || 0)) return;
+  listPages.value[index] = next - 1;
   await load();
 }
 // 用途：计划写入后刷新父列表及正式应收，保留子表单和成功提示。
@@ -782,33 +868,23 @@ watch(invoiceDetailID, load);
 </script>
 
 <template>
-  <main class="console-page settlement-shell">
-    <aside class="console-sidebar settlement-sidebar">
-      <div class="console-brand settlement-brand">
-        <span class="console-brand-mark"><ConsoleIcon name="account" /></span
-        ><span class="console-brand-copy"
-          ><strong>结算与开票</strong><small>FINANCE OPERATIONS</small></span
-        >
-      </div>
-      <nav class="console-nav" aria-label="结算模块导航">
-        <template v-for="group in navigationSections" :key="group.label"
-          ><p class="console-nav-label">{{ group.label }}</p>
-          <button
-            v-for="item in group.items"
-            :key="item[0]"
-            class="console-nav-item"
-            :class="{ active: active === item[0] }"
-            @click="go(item[0])"
-          >
-            <ConsoleIcon :name="item[2]" /><span>{{ item[1] }}</span>
-          </button></template
-        >
-        <p class="console-nav-label">平台能力</p>
-        <button class="console-nav-item" type="button" @click="back">
-          <ConsoleIcon name="dashboard" /><span>返回子系统门户</span>
-        </button>
-      </nav>
-      <div class="settlement-sidebar-footer subsystem-sidebar-user">
+  <AppShell
+    v-model:menu-open="mobileMenuOpen"
+    page-class="settlement-shell"
+    sidebar-class="settlement-sidebar"
+    brand-class="settlement-brand"
+    main-class="settlement-main"
+    topbar-class="settlement-topbar"
+    content-class="settlement-content"
+    brand-name="结算与开票"
+    brand-subtitle="FINANCE OPERATIONS"
+    brand-icon="account"
+    nav-label="结算模块导航"
+    :nav-groups="navGroups"
+    sidebar-user-class="settlement-sidebar-footer subsystem-sidebar-user"
+    @navigate="handleNavigate"
+  >
+    <template #sidebar-user>
         <span class="settlement-sidebar-avatar" aria-hidden="true">{{ sessionAvatar }}</span>
         <span class="settlement-sidebar-user-copy">
           <strong :title="sessionDisplayName">{{ sessionDisplayName }}</strong><small :title="sessionAccount">{{ sessionAccount }}</small>
@@ -823,13 +899,13 @@ watch(invoiceDetailID, load);
         >
           <ConsoleIcon name="logout" />
         </button>
-      </div>
-    </aside>
-    <section class="console-main settlement-main">
-      <header class="console-topbar settlement-topbar">
-        <div class="console-crumb">
-          <span>应用门户</span><b>/</b><strong>结算与开票管理</strong>
-        </div>
+    </template>
+
+    <template #breadcrumb>
+      <span>应用门户</span><b>/</b><strong>{{ title }}</strong>
+    </template>
+
+    <template #topbar-actions>
         <div class="settlement-topbar-actions">
           <button
             class="settlement-topbar-icon"
@@ -861,8 +937,9 @@ watch(invoiceDetailID, load);
             {{ sessionAvatar }}
           </button>
         </div>
-      </header>
-      <div class="console-content settlement-content">
+    </template>
+
+    <template #page-head>
         <div class="console-page-head">
           <div>
             <p>结算与开票管理系统</p>
@@ -896,6 +973,8 @@ watch(invoiceDetailID, load);
             >
           </div>
         </div>
+    </template>
+
         <article v-if="specialReview && can('settlement.invoice.special_approve')" class="settlement-panel" role="dialog" aria-label="总监特殊开票加签">
           <h2>总监特殊开票加签 · {{ specialReview.item.request_no }}</h2>
           <p>特殊原因：{{ specialReview.item.special_reason || '金额超过普通授权阈值' }}</p>
@@ -904,10 +983,17 @@ watch(invoiceDetailID, load);
           <button :disabled="saving" @click="submitSpecialReview(false)">驳回申请</button>
           <button :disabled="saving" @click="specialReview = null">取消</button>
         </article>
-        <OperationToast :message="message" />
-        <p v-if="error" class="settlement-error">{{ error }}</p>
-        <p v-if="loading" class="settlement-loading">正在读取结算数据…</p>
+        <OperationToast :message="message" :reference="messageReference" />
+        <!-- 失败必须带重试，加载不再借用红色错误文案。 -->
+        <ErrorState v-if="error" :error="error" title="结算数据读取失败" @retry="load" />
+        <LoadingState v-if="loading" title="正在读取结算数据…" />
         <template v-else-if="active">
+          <SettlementNativeFinancialPanel
+            v-if="active === 'receivables' && can('settlement.receivable.read')"
+            :api="nativeFinancialAPI"
+            :disabled="saving"
+            @changed="refreshRolePlans"
+          />
           <SettlementPlanCoveragePanel
             v-if="active === 'receivables' && can('settlement.receivable.read')"
             :can="can"
@@ -915,14 +1001,6 @@ watch(invoiceDetailID, load);
             @reload="load"
           />
           <SettlementContractImportPanel v-if="active === 'imports' && can('settlement.import.reconcile')" :can="can" :initial-snapshot-id="String(route.query.import_snapshot || '')" />
-          <div v-if="visibleListPages.length" class="settlement-panel" aria-label="列表分页">
-            <p class="settlement-muted">以下筛选仅作用于当前页，每页最多 50 条；可按列表翻页查看历史记录。</p>
-            <div v-for="entry in visibleListPages" :key="entry.index" class="settlement-head-actions">
-              <span>{{ entry.label }} · 第 {{ entry.page + 1 }} 页 · {{ entry.count }} 条</span>
-              <button class="console-button secondary small" :aria-label="`${entry.label}上一页`" :disabled="loading || saving || entry.page === 0" @click="changeListPage(entry.index, -1)">上一页</button>
-              <button class="console-button secondary small" :aria-label="`${entry.label}下一页`" :disabled="loading || saving || entry.count < 50 || entry.page >= 2000" @click="changeListPage(entry.index, 1)">下一页</button>
-            </div>
-          </div>
           <SettlementRolePanel v-if="active === 'receivables' && (can('settlement.receivable.create') || can('settlement.receivable.adjust'))"
             section="plans" :can="can" :plans="plans" :refresh-plans="refreshRolePlans" />
           <SettlementRolePanel v-if="active === 'receipts' && can('settlement.receipt.read')"
@@ -940,54 +1018,60 @@ watch(invoiceDetailID, load);
             :invoiced-receivable-top10="invoicedReceivableTop10"
             @navigate="go"
           />
-          <SettlementReceivablesPanel
-            :can="can"
-            v-else-if="active === 'receivables'"
-            :visible-plans="visiblePlans"
-            :receivables="receivables"
-            :saving="saving"
-            :plan-editor="planEditor"
-            v-model:plan-editor-open="planEditorOpen"
-            v-model:plan-keyword="planKeyword"
-            v-model:plan-confirmation-filter="planConfirmationFilter"
-            v-model:plan-maturity-filter="planMaturityFilter"
-            @reload="load"
-            @submit-plan="can('settlement.receivable.confirm') && submitPlanConfirmation()"
-            @reset-filters="resetPlanFilters"
-            @confirm-plan="can('settlement.receivable.confirm') && confirmPlan($event)"
-          />
-          <SettlementReceiptsPanel
-            v-else-if="active === 'receipts'"
-            :receipts="receipts"
-            :receipt-customers="receiptCustomers"
-            :saving="saving"
-            :receipt-form="receiptForm"
-            :can="can"
-            v-model:receipt-composer-open="receiptComposerOpen"
-            v-model:receipt-match-for="receiptMatchFor"
-            v-model:receipt-matches="receiptMatches"
-            @reload="load"
-            @submit-receipt="submitReceipt"
-            @sync-customer="syncReceiptCustomer"
-            @select-match="selectReceiptMatch"
-            @navigate="go"
-          />
-          <SettlementAllocationsPanel
-            :can="can"
-            v-else-if="active === 'allocations'"
-            :allocations="allocations"
-            :receipts="receipts"
-            :receivables="receivables"
-            :saving="saving"
-            :allocation-form="allocationForm"
-            :reversal-form="reversalForm"
-            v-model:allocation-tab="allocationTab"
-            v-model:allocation-composer-open="allocationComposerOpen"
-            v-model:reversal-composer-open="reversalComposerOpen"
-            @reload="load"
-            @submit-allocation="can('settlement.allocation.confirm') && submitAllocation()"
-            @submit-reversal="can('settlement.allocation.reverse') && submitReversal()"
-          />
+          <template v-else-if="active === 'receivables'">
+            <SettlementReceivablesPanel
+              :can="can"
+              :visible-plans="visiblePlans"
+              :receivables="receivables"
+              :saving="saving"
+              :plan-editor="planEditor"
+              v-model:plan-editor-open="planEditorOpen"
+              v-model:plan-keyword="planKeyword"
+              v-model:plan-confirmation-filter="planConfirmationFilter"
+              v-model:plan-maturity-filter="planMaturityFilter"
+              @reload="load"
+              @submit-plan="can('settlement.receivable.confirm') && submitPlanConfirmation()"
+              @reset-filters="resetPlanFilters"
+              @confirm-plan="can('settlement.receivable.confirm') && confirmFinancialPlan($event)"
+            />
+            <SettlementListPager :entries="listPagerEntries('receivables')" :page-size="LIST_PAGE_SIZE" :loading="loading" :saving="saving" @change="changeListPage" />
+          </template>
+          <template v-else-if="active === 'receipts'">
+            <SettlementReceiptsPanel
+              :receipts="receipts"
+              :receipt-customers="receiptCustomers"
+              :saving="saving"
+              :receipt-form="receiptForm"
+              :can="can"
+              v-model:receipt-composer-open="receiptComposerOpen"
+              v-model:receipt-match-for="receiptMatchFor"
+              v-model:receipt-matches="receiptMatches"
+              @reload="load"
+              @submit-receipt="submitReceipt"
+              @sync-customer="syncReceiptCustomer"
+              @select-match="selectReceiptMatch"
+              @navigate="go"
+            />
+            <SettlementListPager :entries="listPagerEntries('receipts')" :page-size="LIST_PAGE_SIZE" :loading="loading" :saving="saving" @change="changeListPage" />
+          </template>
+          <template v-else-if="active === 'allocations'">
+            <SettlementAllocationsPanel
+              :can="can"
+              :allocations="allocations"
+              :receipts="receipts"
+              :receivables="receivables"
+              :saving="saving"
+              :allocation-form="allocationForm"
+              :reversal-form="reversalForm"
+              v-model:allocation-tab="allocationTab"
+              v-model:allocation-composer-open="allocationComposerOpen"
+              v-model:reversal-composer-open="reversalComposerOpen"
+              @reload="load"
+              @submit-allocation="can('settlement.allocation.confirm') && submitAllocation()"
+              @submit-reversal="can('settlement.allocation.reverse') && submitReversal()"
+            />
+            <SettlementListPager :entries="listPagerEntries('allocations')" :page-size="LIST_PAGE_SIZE" :loading="loading" :saving="saving" @change="changeListPage" />
+          </template>
           <SettlementInvoiceDetailPanel
             :can="can"
             v-else-if="active === 'invoices' && invoiceDetailID"
@@ -1002,74 +1086,82 @@ watch(invoiceDetailID, load);
             @review-red-flush="reviewRedFlush"
             @submit-red-flush="submitRedFlush"
           />
-          <SettlementInvoiceListPanel
-            v-else-if="active === 'invoices'"
-            :visible-invoice-requests="visibleInvoiceRequests"
-            :visible-tax-invoices="visibleTaxInvoices"
-            :invoice-eligible-receivables="invoiceEligibleReceivables"
-            :saving="saving"
-            :invoice-form="invoiceForm"
-            :invoice-review="invoiceReview"
-            :can="can"
-            :current-user-id="String(settlementSession.identity_id || '')"
-            v-model:invoice-tab="invoiceTab"
-            v-model:invoice-composer-open="invoiceComposerOpen"
-            v-model:invoice-review-open="invoiceReviewOpen"
-            v-model:invoice-keyword="invoiceKeyword"
-            v-model:invoice-status-filter="invoiceStatusFilter"
-            @reload="load"
-            @submit-invoice="submitInvoice"
-            @submit-review="submitInvoiceReview"
-            @reset-filters="resetInvoiceFilters"
-            @special-review="reviewSpecialInvoice"
-            @approve="approveInvoice"
-            @manual-issue="manualIssue"
-            @review-failure="openReviewFailure"
-            @open-detail="openInvoiceDetail"
-            @cancel-invoice="openCancelInvoice"
-          />
-          <DunningCenterPanel
-            :can="can"
-            v-else-if="active === 'dunning'"
-            :saving="saving"
-            :export-job="exportJob"
-            :dunning-overview="dunningOverview"
-            :dunning-coverage="dunningCoverage"
-            :dunning-kpis="dunningKpis"
-            :aging-rows="agingRows"
-            :dunning-cases="dunningCases"
-            :dunning-actions="dunningActions"
-            :dunning-recipients="dunningRecipients"
-            :dunning-recipients-loading="dunningRecipientsLoading"
-            :dunning-recipients-error="dunningRecipientsError"
-            :policy-form="policyForm"
-            :can-complete-dunning-action="canCompleteDunningAction"
-            @export-aging="exportAgingReceivables"
-            @download-export="downloadExport"
-            @reload="load"
-            @complete-action="completeDunningAction"
-            @submit-policy="submitPolicy"
-          />
-          <SettlementRolePanel
-            v-else-if="['settings','collaboration','finance'].includes(active)"
-            :key="active" :section="active" :can="can" :receipts="receipts"
-          />
-          <SettlementTasksPanel
-            v-else-if="active === 'tasks'"
-            :task-groups="taskGroups"
-            @navigate="go"
-            @reload="load"
-          />
+          <template v-else-if="active === 'invoices'">
+            <SettlementInvoiceListPanel
+              :visible-invoice-requests="visibleInvoiceRequests"
+              :visible-tax-invoices="visibleTaxInvoices"
+              :invoice-eligible-receivables="invoiceEligibleReceivables"
+              :saving="saving"
+              :invoice-form="invoiceForm"
+              :invoice-review="invoiceReview"
+              :can="can"
+              :current-user-id="String(settlementSession.identity_id || '')"
+              v-model:invoice-tab="invoiceTab"
+              v-model:invoice-composer-open="invoiceComposerOpen"
+              v-model:invoice-review-open="invoiceReviewOpen"
+              v-model:invoice-keyword="invoiceKeyword"
+              v-model:invoice-status-filter="invoiceStatusFilter"
+              @reload="load"
+              @submit-invoice="submitInvoice"
+              @submit-review="submitInvoiceReview"
+              @reset-filters="resetInvoiceFilters"
+              @special-review="reviewSpecialInvoice"
+              @approve="approveInvoice"
+              @manual-issue="manualIssue"
+              @review-failure="openReviewFailure"
+              @open-detail="openInvoiceDetail"
+              @cancel-invoice="openCancelInvoice"
+            />
+            <SettlementListPager :entries="listPagerEntries('invoices')" :page-size="LIST_PAGE_SIZE" :loading="loading" :saving="saving" @change="changeListPage" />
+          </template>
+          <template v-else-if="active === 'dunning'">
+            <DunningCenterPanel
+              :can="can"
+              :saving="saving"
+              :export-job="exportJob"
+              :dunning-overview="dunningOverview"
+              :dunning-coverage="dunningCoverage"
+              :dunning-kpis="dunningKpis"
+              :aging-rows="agingRows"
+              :dunning-cases="dunningCases"
+              :dunning-actions="dunningActions"
+              :dunning-recipients="dunningRecipients"
+              :dunning-recipients-loading="dunningRecipientsLoading"
+              :dunning-recipients-error="dunningRecipientsError"
+              :policy-form="policyForm"
+              :can-complete-dunning-action="canCompleteDunningAction"
+              @export-aging="exportAgingReceivables"
+              @download-export="downloadExport"
+              @reload="load"
+              @complete-action="completeDunningAction"
+              @submit-policy="submitPolicy"
+            />
+            <SettlementListPager :entries="listPagerEntries('dunning')" :page-size="LIST_PAGE_SIZE" :loading="loading" :saving="saving" @change="changeListPage" />
+          </template>
+          <template v-else-if="['settings','collaboration','finance'].includes(active)">
+            <SettlementRolePanel
+              :key="active" :section="active" :can="can" :receipts="receipts"
+            />
+            <SettlementListPager :entries="listPagerEntries('finance')" :page-size="LIST_PAGE_SIZE" :loading="loading" :saving="saving" @change="changeListPage" />
+          </template>
+          <template v-else-if="active === 'tasks'">
+            <SettlementTasksPanel
+              :task-groups="taskGroups"
+              @navigate="go"
+              @reload="load"
+            />
+            <SettlementListPager :entries="listPagerEntries('tasks')" :page-size="LIST_PAGE_SIZE" :loading="loading" :saving="saving" @change="changeListPage" />
+          </template>
         </template>
-      </div>
-    </section>
+
+    <template #overlay>
       <PromptDialog
       v-if="reviewFailureDialog"
       title="复核税控失败结果"
       description="仅对税控已明确失败的申请恢复审批；结果未知不能重试，复核不会立即开票。恢复后仍需重新审核，旧开票尝试和失败记录会保留。"
       label="复核原因（5 至 1000 字）"
       placeholder="请写明已核对的原税控失败结果和恢复依据"
-      confirm-text="确认复核"
+      confirm-text="复核失败结果"
       cancel-text="取消"
       :minlength="5"
       :maxlength="1000"
@@ -1085,7 +1177,7 @@ watch(invoiceDetailID, load);
       description="只有仍在待开具或已明确失败、且税控从未受理的申请可以作废。作废会把申请置为已作废并释放未开票的额度预留；结果未知或已被受理的申请必须改为对账或红冲，页面不会自动重试。"
       label="作废原因（5 至 1000 字）"
       placeholder="请写明核对依据，例如：税控命令已死信、开票尝试从未被受理"
-      confirm-text="确认作废"
+      confirm-text="作废开票申请"
       cancel-text="取消"
       :minlength="5"
       :maxlength="1000"
@@ -1110,6 +1202,13 @@ watch(invoiceDetailID, load);
       @cancel="cancelDunningAction"
     />
 
+    <PromptDialog
+      v-if="promptDialog"
+      v-bind="promptDialog"
+      @confirm="acceptPrompt"
+      @cancel="cancelPrompt"
+    />
+
     <ConfirmDialog
       v-if="confirmDialog"
       :title="confirmDialog.title"
@@ -1120,5 +1219,6 @@ watch(invoiceDetailID, load);
       @confirm="acceptConfirm"
       @cancel="cancelConfirm"
     />
-  </main>
+    </template>
+  </AppShell>
 </template>

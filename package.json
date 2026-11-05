@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "test": "node src/test/run-tests.mjs",
+    "test:layout": "node src/test/ui-harness/responsive-boundaries-browser.mjs",
     "build": "vite build",
+    "verify:modules": "node build/verifyModuleSelection.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

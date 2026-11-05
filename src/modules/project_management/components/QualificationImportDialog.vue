@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { formatUserError } from '../../shared/utils/userError.js'
 import { formatBusinessDate } from '@/modules/shared/utils/businessTime.js'
 import { downloadCapabilityImportTemplate, previewCapabilitiesImport, importCapabilities, downloadEquipmentImportTemplate, previewEquipmentImport, importEquipment } from '@/modules/project_management/api/projectManagement'
+import { projectImportErrorRows, projectImportErrorsCsv } from '@/modules/project_management/importErrors.js'
 
 const props = defineProps({ codeOptions: { type: Array, default: () => [] }, resourceType: { type: String, default: 'PERSON', validator: (value) => ['PERSON', 'EQUIPMENT'].includes(value) } })
 const isEquipment = computed(() => props.resourceType === 'EQUIPMENT')
@@ -15,6 +16,21 @@ function importMessage(value) { return formatUserError(value, { fallback: '请�
 const visibleRows = computed(() => (preview.value?.rows || []).filter((row) => filter.value === 'all' || (filter.value === 'valid' ? row.status === 'READY' : row.status !== 'READY')))
 const readyRows = computed(() => (preview.value?.rows || []).filter((row) => row.status === 'READY'))
 const selectedCount = computed(() => readyRows.value.filter((row) => selected.value.includes(row.row_no)).length)
+const errorReportSource = computed(() => result.value || preview.value)
+const errorReportRows = computed(() => projectImportErrorRows(errorReportSource.value, importMessage))
+const canDownloadErrors = computed(() => errorReportRows.value.length > 0)
+function downloadErrorReport() {
+  if (!canDownloadErrors.value) return
+  let url = ''
+  try {
+    const blob = new Blob([projectImportErrorsCsv(errorReportSource.value, importMessage)], { type: 'text/csv;charset=utf-8' })
+    url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url; link.download = `${resourceLabel.value}导入错误.csv`
+    document.body.appendChild(link); link.click(); link.remove()
+  } catch (value) { error.value = formatUserError(value, { fallback: '错误报告生成失败，请稍后重试。' }) }
+  finally { if (url) URL.revokeObjectURL(url) }
+}
 function selectAll() { selected.value = readyRows.value.map((row) => row.row_no) }
 function pick(event) {
   file.value = event.target.files?.[0] || null
@@ -76,16 +92,19 @@ async function commit() {
         </template>
         <template v-else-if="!result">
           <h3>第二步：检测结果</h3><p>共 {{ preview.total }} 行 · 可导入 {{ preview.valid }} 行 · 问题 {{ preview.invalid }} 行 · 已选 {{ selectedCount }} 行</p><p v-if="isEquipment">确认时服务端会重新核验设备、编码、检定日期和使用范围；更新行将替换对应设备的信息，请核对后选择。日期或范围留空的含义以检测结果为准。</p><p v-else>确认时服务端会重新核验人员、编码及台账；更新行将替换该档案的资质编码和状态，请核对后选择。</p>
-          <div class="pm-actions"><select v-model="filter" aria-label="筛选检测结果"><option value="all">全部行</option><option value="valid">可导入</option><option value="invalid">问题行</option></select><button class="pm-button" :disabled="busy" @click="selectAll">选择全部有效行</button><button class="pm-button" :disabled="busy" @click="selected = []">清空选择</button></div>
+          <div class="pm-actions"><select v-model="filter" aria-label="筛选检测结果"><option value="all">全部行</option><option value="valid">可导入</option><option value="invalid">问题行</option></select><button class="pm-button" :disabled="busy" @click="selectAll">选择全部有效行</button><button class="pm-button" :disabled="busy" @click="selected = []">清空选择</button><button class="pm-button" :disabled="busy || !canDownloadErrors" aria-label="下载项目导入错误报告 CSV" @click="downloadErrorReport">下载错误报告 CSV</button></div>
           <div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>选择</th><th>文件行号</th><th>{{ isEquipment ? '设备 / 编号' : '人员 / 组织' }}</th><th>{{ isEquipment ? '能力编码' : '资质编码' }}</th><th v-if="isEquipment">检定日期 / 使用范围</th><th>检测结果</th><th>说明</th></tr></thead><tbody><tr v-for="row in visibleRows" :key="row.row_no"><td><input v-model="selected" type="checkbox" :value="row.row_no" :disabled="busy || row.status !== 'READY'" :aria-label="`选择第 ${row.row_no} 行`"></td><td>{{ row.row_no }}</td><td>{{ row.resource_name }}<br>{{ isEquipment ? (row.capability?.resource_id || '确认时生成') : (row.organization_name || '—') }}</td><td>{{ (row.capability?.codes || []).join('；') }}</td><td v-if="isEquipment">{{ dateLabel(row.capability?.valid_from) }} ~ {{ dateLabel(row.capability?.valid_until) }}<br>{{ row.capability?.usage_scope === 'COMPANY_ONLY' ? '仅在公司使用' : '可借出' }}</td><td>{{ row.status === 'READY' ? (row.action === 'UPDATE' ? '可更新' : '可导入') : '不通过' }}</td><td>{{ [...(row.errors || []), ...(row.warnings || [])].map(importMessage).join('；') || '校验通过' }}</td></tr></tbody></table></div>
         </template>
-        <template v-else><h3>第三步：导入结果</h3><p role="status">已选行：成功 {{ result.imported }} 行 · 失败 {{ result.skipped }} 行；未选行不导入。</p><ul v-if="result.errors?.length"><li v-for="(message, index) in result.errors" :key="index">{{ importMessage(message) }}</li></ul><div v-if="result.rows?.length" class="pm-table-scroll"><table class="pm-table"><thead><tr><th>文件行号</th><th>结果</th><th>说明</th></tr></thead><tbody><tr v-for="row in result.rows" :key="row.row_no"><td>{{ row.row_no }}</td><td>{{ row.status === 'IMPORTED' ? '成功' : row.status === 'FAILED' ? '失败' : '跳过' }}</td><td>{{ row.message ? importMessage(row.message) : '—' }}</td></tr></tbody></table></div></template>
+        <template v-else><h3>第三步：导入结果</h3><p role="status">已选行：成功 {{ result.imported }} 行 · 失败 {{ result.skipped }} 行；未选行不导入。</p><ul v-if="result.errors?.length"><li v-for="(message, index) in result.errors" :key="index">{{ importMessage(message) }}</li></ul><div v-if="result.rows?.length" class="pm-table-scroll"><table class="pm-table"><thead><tr><th>文件行号</th><th>结果</th><th>说明</th></tr></thead><tbody><tr v-for="row in result.rows" :key="row.row_no"><td>{{ row.row_no }}</td><td>{{ row.status === 'IMPORTED' ? '成功' : row.status === 'FAILED' ? '失败' : '跳过' }}</td><td>{{ row.message ? importMessage(row.message) : '—' }}</td></tr></tbody></table></div><div class="pm-actions"><button class="pm-button" :disabled="busy || !canDownloadErrors" aria-label="下载项目导入结果错误报告 CSV" @click="downloadErrorReport">下载错误报告 CSV</button></div></template>
       </div>
-      <footer><button class="pm-button" :disabled="busy" @click="emit('close')">{{ result ? '完成' : '取消' }}</button><button v-if="preview && !result" class="pm-button" :disabled="busy" @click="reset">返回重新上传</button><button v-if="!preview" class="pm-button primary" :disabled="busy || !file" @click="inspect">{{ busy ? '检测中…' : '上传并检测' }}</button><button v-else-if="!result" class="pm-button primary" :disabled="busy || !selectedCount" @click="commit">{{ busy ? '导入中…' : `确认导入 ${selectedCount} 行` }}</button></footer>
+      <footer><button class="pm-button" :disabled="busy" @click="emit('close')">{{ result ? '关闭结果' : '取消' }}</button><button v-if="preview && !result" class="pm-button" :disabled="busy" @click="reset">返回重新上传</button><button v-if="!preview" class="pm-button primary" :disabled="busy || !file" @click="inspect">{{ busy ? '检测中…' : '上传并检测' }}</button><button v-else-if="!result" class="pm-button primary" :disabled="busy || !selectedCount" @click="commit">{{ busy ? '导入中…' : `确认导入 ${selectedCount} 行` }}</button></footer>
     </section>
   </div>
 </template>
 
 <style scoped>
 .pm-import-overlay{justify-content:center;align-items:center}.pm-import-guide{padding:16px;background:var(--pm-content,#f8fafc);border:1px solid var(--pm-line,#e2e8f0);border-radius:12px}.pm-import-guide h3{margin:0}.pm-import-guide p{line-height:1.7}.pm-import-error{padding:12px;border:1px solid #fecaca;background:#fef2f2;color:#b91c1c;border-radius:8px}.pm-dialog-body details li{overflow-wrap:anywhere}.pm-dialog-body p{line-height:1.6}
+
+/* 深色主题：错误条写死的浅红底/描边/墨色；浅色声明未改。 */
+[data-theme="dark"] .pm-import-error{border-color:var(--danger-border);background:var(--danger-soft);color:var(--danger-text)}
 </style>

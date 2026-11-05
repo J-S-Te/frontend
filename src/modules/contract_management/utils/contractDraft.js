@@ -6,11 +6,18 @@ export function canEditContractDraft(contract) {
   return contract?.status === 'draft' && contract?.can_edit_draft === true
 }
 
+// 用途：恢复可编辑草稿及明确本地引用，旧合同不猜测新来源。
+// 参数：contract为服务端已授权草稿及可选来源版本。
+// 返回值：独立可编辑表单，保留原服务项身份及有效本地目录引用。
 export function hydrateContractDraft(contract) {
   if (!canEditContractDraft(contract)) throw new Error('当前合同不可编辑，请刷新后确认权限及草稿状态。')
   const value = (key) => String(contract[key] ?? '')
   const items = Array.isArray(contract.service_items) ? contract.service_items : []
   return {
+    ...(contract.counterparty_source ? { counterparty_source: value('counterparty_source') } : {}),
+    ...(contract.local_counterparty_id ? { local_counterparty_id: value('local_counterparty_id') } : {}),
+    ...(contract.counterparty_version ? { counterparty_version: contract.counterparty_version } : {}),
+    ...(contract.category_source ? { category_source: value('category_source') } : {}),
     title: value('title'), contract_type: value('contract_type'),
     opportunity_id: value('opportunity_id'), opportunity_name: value('opportunity_name'),
     customer_id: contract.crm_customer_id ? String(contract.crm_customer_id) : '',
@@ -21,6 +28,8 @@ export function hydrateContractDraft(contract) {
     payment_terms: (Array.isArray(contract.payment_terms) ? contract.payment_terms : []).map((term) => ({ installment_no: Number(term.installment_no), due_date: String(term.due_date || ''), amount: String(term.amount || '') })),
     template_id: value('template_id'), template_values: { ...(contract.template_values || {}) },
     service_items: items.map((item) => ({
+      ...(item.category_id ? { category_id: String(item.category_id) } : {}),
+      ...(item.category_version ? { category_version: item.category_version } : {}),
       source_id: String(item.source_id || ''), service_type: String(item.service_type || ''),
       name: String(item.name || ''), site: String(item.site || ''), batch: String(item.batch || ''),
       category: String(item.category || ''), requirement: String(item.requirement || ''),

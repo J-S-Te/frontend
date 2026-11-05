@@ -95,3 +95,62 @@
 @keyframes ui-state-spin {
   to { transform: rotate(360deg); }
 }
+
+/* ==========================================================================
+   统一分页条（shared/components/PaginationBar.vue）
+   --------------------------------------------------------------------------
+   · 只引用 main.css 的共用 token（浅色在 :root，深色在 :root[data-theme="dark"]），
+     因此浅色 / 深色同时成立，不需要再写一份 [data-theme="dark"] 覆盖。
+   · 按钮尺寸与三态的重试按钮对齐（30px 高、12px 级字号），保证同一条列表页脚里
+     状态按钮和分页按钮看起来是同一套控件。
+   ========================================================================== */
+.ui-pager {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2, 8px);
+  flex-wrap: wrap;
+}
+
+.ui-pager__button {
+  min-height: 30px;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+  cursor: pointer;
+  transition: border-color var(--duration-fast) ease, color var(--duration-fast) ease, background var(--duration-fast) ease;
+}
+
+.ui-pager__button:hover:not(:disabled) {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.ui-pager__button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.ui-pager__button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ui-pager__status {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ui-pager__status.is-loading {
+  color: var(--text-faint);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-pager__button { transition: none; }
+}

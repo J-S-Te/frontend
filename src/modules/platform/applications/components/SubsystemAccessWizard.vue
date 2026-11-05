@@ -599,7 +599,7 @@ function resetFlow() {
 
 .subsystem-access-wizard__steps {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr));
   gap: 8px;
   margin: 0;
   padding: 0;
@@ -659,6 +659,8 @@ function resetFlow() {
 .subsystem-access-wizard__form { display: grid; gap: 14px; }
 
 .subsystem-access-wizard__fieldset {
+  min-width: 0;
+  max-width: 100%;
   margin: 0;
   padding: 16px;
   border: 1px solid var(--sa-border);
@@ -705,11 +707,11 @@ function resetFlow() {
 
 .subsystem-access-wizard__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
   gap: 14px;
 }
 
-.subsystem-access-wizard__field { display: grid; gap: 6px; font-size: 13px; }
+.subsystem-access-wizard__field { display: grid; min-width: 0; gap: 6px; font-size: 13px; }
 .subsystem-access-wizard__field--wide { grid-column: 1 / -1; }
 
 .subsystem-access-wizard__field > span {
@@ -855,7 +857,7 @@ function resetFlow() {
 
 .subsystem-access-wizard__facts {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
   gap: 12px;
   margin: 0;
 }
@@ -944,12 +946,16 @@ function resetFlow() {
 
 .subsystem-access-wizard__title { font-size: 15px; }
 
-.subsystem-access-wizard__steps { grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); gap: 6px; }
+.subsystem-access-wizard__steps { grid-template-columns: repeat(auto-fit, minmax(min(112px, 100%), 1fr)); gap: 6px; }
 .subsystem-access-wizard__steps li { padding: 6px 9px; font-size: 12px; gap: 6px; }
 .subsystem-access-wizard__step-index { width: 18px; height: 18px; font-size: 11px; }
 
 .subsystem-access-wizard__fieldset { padding: 14px 16px; }
-.subsystem-access-wizard__grid { gap: 12px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+.subsystem-access-wizard__grid {
+  min-width: 0;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
+}
 
 .subsystem-access-wizard__note {
   margin: 8px 0 0;
@@ -960,7 +966,7 @@ function resetFlow() {
 
 .subsystem-access-wizard__actions { margin-top: 2px; }
 
-.subsystem-access-wizard__facts { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
+.subsystem-access-wizard__facts { grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr)); gap: 8px; }
 .subsystem-access-wizard__facts > div { padding: 7px 10px; }
 .subsystem-access-wizard__facts dt { font-size: 11px; }
 .subsystem-access-wizard__facts dd { font-size: 13px; }
@@ -993,13 +999,14 @@ function resetFlow() {
 .subsystem-access-wizard__trigger:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--sa-accent-soft); }
 
 .subsystem-access-wizard__overlay {
+  --sa-dialog-inset: clamp(12px, 5vh, 48px);
   position: fixed;
   inset: 0;
   z-index: 60;
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  padding: 48px 20px;
+  padding: var(--sa-dialog-inset) clamp(10px, 3vw, 20px);
   overflow: auto;
   background: rgba(15, 23, 42, 0.45);
   backdrop-filter: blur(2px);
@@ -1007,8 +1014,15 @@ function resetFlow() {
 
 .subsystem-access-wizard__dialog {
   width: min(1080px, 100%);
+  min-width: 0;
+  max-width: 100%;
+  max-height: calc(100dvh - 2 * var(--sa-dialog-inset));
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  overscroll-behavior: contain;
   padding: 20px 22px;
   border: 1px solid var(--sa-border);
   border-radius: 16px;
@@ -1017,9 +1031,25 @@ function resetFlow() {
   outline: none;
 }
 
-.subsystem-access-wizard__header-actions { display: flex; align-items: center; gap: 8px; }
+/* 证据和原生选择项的最小内容宽度不能反向撑大整列。 */
+.subsystem-access-wizard__dialog > *,
+.subsystem-access-wizard__heading,
+.subsystem-access-wizard__step-label,
+.subsystem-access-wizard__field > :is(input, select) { min-width: 0; }
+
+.subsystem-access-wizard__header-actions {
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.subsystem-access-wizard__badge { max-width: 100%; white-space: normal; }
 
 .subsystem-access-wizard__close {
+  flex: none;
   width: 28px;
   height: 28px;
   display: inline-flex;

@@ -120,18 +120,16 @@ function changeKind(next) {
   return load()
 }
 
-/**
- * retry 经用户确认后重置一条死信，成功后刷新当前队列并提示。
- * @param {Record<string, unknown>} item 死信条目。
- * @returns {Promise<void>}
- */
+// retry 核对后把失败事件重新置入后台投递队列。
+// 参数：item 为失败事件及所属队列。
+// 返回值：异步处理结果；取消不重试，重置不表示送达。
 async function retry(item) {
   if (!props.canManage || busyID.value) return
   const queue = kindMeta(item.kind || kind.value)
   const accepted = await askConfirm({
     title: '重试集成死信投递？',
     description: `将把${queue.label}队列中的事件 ${eventLabel(item.event)}（资源 ${item.aggregate_id || '未记录'}，已尝试 ${item.attempts} 次）重置为待投递，并记录本次运维审计。\n重置不代表已经送达，最终结果仍取决于后台投递。`,
-    confirmText: '确认重试',
+    confirmText: '重新投递',
     cancelText: '取消',
     danger: false,
   })
@@ -323,7 +321,7 @@ onMounted(load)
   font-size: 12px;
   border: 1px solid var(--cm-card-border);
   border-radius: 10px;
-  background: #fff;
+  background: var(--surface-card, #fff);
 }
 
 .contract-outbox-permission,
@@ -360,14 +358,15 @@ onMounted(load)
   grid-template-columns: 110px minmax(180px, 1.4fr) minmax(160px, 1fr) 110px;
   gap: 18px;
   padding: 13px 0;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid var(--border-soft, #f1f5f9);
 }
 
 .contract-outbox-loading-row i {
   display: block;
   height: 10px;
   border-radius: 5px;
-  background: linear-gradient(90deg, #eef2f8 25%, #f8fafc 50%, #eef2f8 75%);
+  background: linear-gradient(90deg,
+    var(--surface-hover, #eef2f8) 25%, var(--surface-muted, #f8fafc) 50%, var(--surface-hover, #eef2f8) 75%);
   background-size: 200% 100%;
   animation: contract-outbox-shimmer 1.4s ease-in-out infinite;
 }
