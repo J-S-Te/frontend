@@ -205,6 +205,39 @@ test('预检字段路径转为业务可读中文，未知路径保留原文', ()
   assert.equal(importFieldLabel('metadata.service_items[0].site'), '服务项 1 · 实施场所')
   assert.equal(importFieldLabel('metadata.service_items[2].systems[1].level'), '服务项 3 · 系统 2 · 系统等级')
   assert.equal(importFieldLabel('metadata.unknown_field'), 'metadata.unknown_field')
+
+  // 服务端点号索引 + snake_case（服务端预检返回写法）。
+  assert.equal(importFieldLabel('metadata.service_items.0.category'), '服务项 1 · 检测类别')
+  assert.equal(importFieldLabel('metadata.service_items[0].category'), '服务项 1 · 检测类别')
+  assert.equal(importFieldLabel('metadata.service_items.2.systems.1.level'), '服务项 3 · 系统 2 · 系统等级')
+  assert.equal(importFieldLabel('metadata.service_items[2].systems[1].level'), '服务项 3 · 系统 2 · 系统等级')
+
+  // 本地校验器生成的驼峰路径（无 metadata 前缀、点号索引）。
+  assert.equal(importFieldLabel('serviceItems.0.serviceType'), '服务项 1 · 服务类型')
+  assert.equal(importFieldLabel('serviceItems.0.categoryId'), '服务项 1 · 本地类别')
+  assert.equal(importFieldLabel('serviceItems.0.categoryVersion'), '服务项 1 · 类别版本')
+  assert.equal(importFieldLabel('serviceItems.0.testMode'), '服务项 1 · 检测方式')
+  assert.equal(importFieldLabel('serviceItems.0.systems'), '服务项 1 · 系统信息')
+  assert.equal(importFieldLabel('serviceItems.0.systems.0.name'), '服务项 1 · 系统 1 · 系统名称')
+  assert.equal(importFieldLabel('serviceItems.0.systems[0].name'), '服务项 1 · 系统 1 · 系统名称')
+  assert.equal(importFieldLabel('serviceItems.0.systems.1.level'), '服务项 1 · 系统 2 · 系统等级')
+
+  // 顶层驼峰路径复用 metadata 同义文案。
+  assert.equal(importFieldLabel('serviceItems'), '服务项')
+  assert.equal(importFieldLabel('paymentTerms'), '付款条款')
+  assert.equal(importFieldLabel('externalPaperNumber'), '外部纸面编号')
+  assert.equal(importFieldLabel('customerType'), '客户类型')
+  assert.equal(importFieldLabel('industry'), '行业')
+  assert.equal(importFieldLabel('region'), '地区')
+  assert.equal(importFieldLabel('opportunityId'), '商机编号')
+  assert.equal(importFieldLabel('categorySource'), '类别来源')
+  assert.equal(importFieldLabel('endDate'), '结束日期')
+
+  // 未识别路径仍原样返回，不被归一化改写。
+  assert.equal(importFieldLabel('metadata.unknown_field'), 'metadata.unknown_field')
+  assert.equal(importFieldLabel('serviceItems.0.unknownField'), '服务项 1 · unknownField')
+  assert.equal(importFieldLabel('unknown.camelPath'), 'unknown.camelPath')
+  assert.equal(importFieldLabel(''), '合同字段')
 })
 
 test('NORMAL表单LOCAL引用可生成并恢复，版本与原source_id身份不丢失', () => {
