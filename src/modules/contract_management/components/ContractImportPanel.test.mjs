@@ -12,7 +12,7 @@ import { applyContractExcelCustomerLookup, blockingContractExcelIssues, buildCon
   contractExcelTemplateHeaders, matchContractExcelRecordsToFiles, parseContractExcelWorkbook,
   summarizeContractExcelImport } from '../utils/contractExcelImport.js'
 import { paymentAmountMinor } from '../utils/paymentTerms.js'
-import { contractImportErrorRows, contractImportErrorsCsv } from '../utils/contractImportErrors.js'
+import { contractImportErrorRows, contractImportErrorsCsv, contractImportProvisionIssueLabels } from '../utils/contractImportErrors.js'
 import { fallbackServiceTypeOptions } from '../utils/contractDisplay.js'
 import { externalContractTypes, contractSystemLevels } from '../utils/contractPayload.js'
 import { importRowSourceForm, applyImportRowSourceForm } from '../utils/localImportSourceBridge.js'
@@ -38,7 +38,7 @@ function importPanelHarness(mode, request, listResponse = () => ({items:[],has_m
     parseContractExcelWorkbook,summarizeContractExcelImport,contractExcelMaximumBytes:5*1024*1024,contractExcelTemplateURL:'/contract-import-template.xlsx',
     readContractExcelWorkbook:excelReader,
     paymentAmountMinor,fallbackServiceTypeOptions,externalContractTypes,contractSystemLevels,
-    contractImportErrorRows,contractImportErrorsCsv,
+    contractImportErrorRows,contractImportErrorsCsv,contractImportProvisionIssueLabels,
     useDictionaryOptions:()=>({options:Vue.ref(fallbackServiceTypeOptions),loading:Vue.ref(false)}),
     listMyCustomers:customerResponse,
     ensureContractCRMDirectorySession:async()=>{},
@@ -813,3 +813,43 @@ test('预检问题与批次错误提供下载错误报告入口，无问题时�
   assert.equal(panel.state.importErrorReportRows.value.length, 2)
 })
 
+
+test('预览返回 provision_plan 时展示将自动创建客户、销售解析与商机摘要，缺失时界面不变', async () => {
+  const panel = importPanelHarness('NORMAL')
+  const plain = await panel.html()
+  assert.doesNotMatch(plain, /将自动创建客户/)
+  assert.doesNotMatch(plain, /CRM 开立计划/)
+
+  panel.state.batch.value.provision_plan = [
+    { contract_number: 'HT-1', customer_name: '新客户', customer_state: 'TO_CREATE', sales_name: '张销售', sales_state: 'RESOLVED', opportunity_amount: '10000.00', opportunity_sign_date: '2024-01-01' },
+    { customer_name: '重名客户', customer_state: 'AMBIGUOUS', sales_name: '李销售', sales_state: 'UNRESOLVED' },
+    { external_record_id: 'HT-3', customer_name: '老客户', customer_state: 'EXISTS', sales_name: '', sales_state: 'AMBIGUOUS', opportunity_amount: '88.00', opportunity_sign_date: '2023-05-06' },
+  ]
+  const html = await panel.html()
+  assert.match(html, /CRM 开立计划（共 3 项）/)
+  assert.match(html, /将自动创建客户 1 项/)
+  assert.match(html, /客户已存在 1 项/)
+  assert.match(html, /客户重名需人工确认 1 项/)
+  assert.match(html, /销售已解析 1 项/)
+  assert.match(html, /销售未命中 1 项/)
+  assert.match(html, /销售重名需人工确认 1 项/)
+  assert.match(html, /将自动创建客户/)
+  assert.match(html, /商机：金额 10000\.00，签约日 2024-01-01/)
+  assert.match(html, /商机：未生成/)
+  // 未返回合同标识的逐项以序号定位，不伪造业务编号。
+  assert.match(html, /第 2 项/)
+  // 既有阻断与文案不变：批次状态与错误报告入口仍在。
+  assert.match(html, /批次 batch-A/)
+  assert.doesNotMatch(html, /undefined/)
+})
+
+test('provision 错误码在页面与错误报告中显示中文原因', async () => {
+  const panel = importPanelHarness('NORMAL')
+  panel.state.batch.value.items[0].issues = [{ field_path: 'metadata.sales_name', code: 'IMPORT_PROVISION_OWNER_UNRESOLVED', retryable: false }]
+  const rows = panel.state.importErrorReportRows.value
+  assert.equal(rows.length, 1)
+  assert.equal(rows[0][2], '销售姓名')
+  assert.equal(rows[0][5], contractImportProvisionIssueLabels.IMPORT_PROVISION_OWNER_UNRESOLVED)
+  const html = await panel.html()
+  assert.match(html, /销售姓名：Excel「销售姓名」未能在平台人员目录中唯一匹配/)
+})

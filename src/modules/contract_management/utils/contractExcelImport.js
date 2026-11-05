@@ -18,8 +18,9 @@ export const contractExcelSheetNames = Object.freeze({
 })
 
 // 模板文件 frontend/public/contract-import-template.xlsx 的表头必须与这里一致。
+// 末尾 4 列（销售姓名、客户类型、行业、地区）是后加的可选列，顺序必须与模板「合同明细」表保持一致。
 export const contractExcelTemplateHeaders = Object.freeze({
-  main: Object.freeze(['合同编号', '合同标题', '合同类型', '服务类型', 'CRM客户编号', '客户名称', '客户地址', '客户联系人', '客户联系电话', '客户信用等级', '金额（元）', '币种', '开始日期', '结束日期', '外部纸面编号', '商机编号', '商机名称', '实施场所', '实施批次', '检测类别', '检测方式', '体系/能力要求', '合同正文']),
+  main: Object.freeze(['合同编号', '合同标题', '合同类型', '服务类型', 'CRM客户编号', '客户名称', '客户地址', '客户联系人', '客户联系电话', '客户信用等级', '金额（元）', '币种', '开始日期', '结束日期', '外部纸面编号', '商机编号', '商机名称', '实施场所', '实施批次', '检测类别', '检测方式', '体系/能力要求', '合同正文', '销售姓名', '客户类型', '行业', '地区']),
   services: Object.freeze(['合同编号', '序号', '服务类型', '服务名称', '实施场所', '实施批次', '检测类别', '检测方式', '体系/能力要求']),
   systems: Object.freeze(['合同编号', '服务项序号', '系统名称', '系统等级']),
   payments: Object.freeze(['合同编号', '分期号', '到期日', '金额（元）']),
@@ -37,6 +38,12 @@ const mainColumns = [
   { key: 'customerContact', aliases: ['客户联系人', '联系人'] },
   { key: 'customerPhone', aliases: ['客户联系电话', '客户电话', '联系电话'] },
   { key: 'customerCreditLevel', aliases: ['客户信用等级', '信用等级'] },
+  // 销售姓名用于历史导入自动开立 CRM 客户/商机时解析平台销售账号；本列可空，空值不阻断导入。
+  { key: 'salesName', aliases: ['销售姓名', '销售', '业务员', '负责人姓名'] },
+  // 客户类型/行业/地区用于 CRM 自动开立客户时补齐画像；三列均可空，别名不得与「合同类型」重叠。
+  { key: 'customerType', aliases: ['客户类型'] },
+  { key: 'industry', aliases: ['行业', '所属行业'] },
+  { key: 'region', aliases: ['地区', '所属地区'] },
   { key: 'amount', aliases: ['金额（元）', '金额(元)', '合同金额（元）', '合同金额(元)', '合同金额', '金额'] },
   { key: 'currency', aliases: ['币种', '货币'] },
   { key: 'startDate', aliases: ['开始日期', '合同开始日期', '起始日期'] },
@@ -77,6 +84,14 @@ const paymentColumns = [
 
 const mainRequiredHeaders = ['contractNumber', 'title', 'contractType', 'amount']
 const maximumExcelRows = 100
+// 客户类型/行业/地区是可选画像列，长度上限与后端字段校验保持一致（≤64 个字）。
+const maximumProfileTextLength = 64
+// 可选画像列的字段名与中文标签，解析与行级报错共用，避免出现两套写法。
+const profileFields = Object.freeze([
+  { key: 'customerType', label: '客户类型' },
+  { key: 'industry', label: '行业' },
+  { key: 'region', label: '地区' },
+])
 
 function asTrimmed(value) {
   return String(value ?? '').replace(/^\uFEFF/, '').trim()
@@ -187,6 +202,10 @@ function emptyRecord(rowNumber) {
     customerContact: '',
     customerPhone: '',
     customerCreditLevel: '',
+    salesName: '',
+    customerType: '',
+    industry: '',
+    region: '',
     amount: '',
     currency: 'CNY',
     startDate: '',
@@ -331,6 +350,16 @@ function parseMainSheet(data, issues) {
     record.customerContact = cellText(getCell(row, header.map, 'customerContact'))
     record.customerPhone = cellText(getCell(row, header.map, 'customerPhone'))
     record.customerCreditLevel = cellText(getCell(row, header.map, 'customerCreditLevel'))
+    // 「销售姓名」是可选列：留空保持空串，是否阻断由服务端 provision 解析结果（IMPORT_PROVISION_OWNER_UNRESOLVED）决定。
+    record.salesName = cellText(getCell(row, header.map, 'salesName'))
+    // 客户类型/行业/地区同样是可选列：留空不阻断，只在超长时给出可定位的行级问题。
+    for (const field of profileFields) {
+      const value = cellText(getCell(row, header.map, field.key))
+      record[field.key] = value
+      if ([...value].length > maximumProfileTextLength) {
+        addRecordIssue(record, field.key, 'TOO_LONG', field.label + '不能超过 ' + maximumProfileTextLength + ' 个字。')
+      }
+    }
     record.currency = cellText(getCell(row, header.map, 'currency')).toUpperCase() || 'CNY'
     record.externalPaperNumber = cellText(getCell(row, header.map, 'externalPaperNumber'))
     record.opportunityId = cellText(getCell(row, header.map, 'opportunityId'))
@@ -751,6 +780,10 @@ export function buildContractExcelImportRows(records = [], { keyByFileName = {} 
     row.customerContact = record.customerContact
     row.customerPhone = record.customerPhone
     row.customerCreditLevel = record.customerCreditLevel
+    row.salesName = record.salesName || ''
+    row.customerType = record.customerType || ''
+    row.industry = record.industry || ''
+    row.region = record.region || ''
     row.amount = record.amount
     row.currency = record.currency || 'CNY'
     row.startDate = record.startDate

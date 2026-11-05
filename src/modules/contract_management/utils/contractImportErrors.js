@@ -7,6 +7,18 @@ import { toCsvText } from '../../platform/iam/utils/csvExport.js'
 
 export const contractImportErrorHeaders = Object.freeze(['序号', '合同标识', '错误字段', '错误码', '可重试', '说明'])
 
+/**
+ * 历史导入自动开立 CRM 客户/商机（provision）失败原因的中文映射。
+ * 服务端逐项 Issues 只保证返回稳定错误码，页面与错误报告据此给出中文原因，不编造细节。
+ */
+export const contractImportProvisionIssueLabels = Object.freeze({
+  IMPORT_CRM_PROVISION_DISABLED: '服务端未开启历史导入自动开立 CRM 客户/商机，本批次不能按 provision 方式执行。',
+  IMPORT_PROVISION_OWNER_UNRESOLVED: 'Excel「销售姓名」未能在平台人员目录中唯一匹配，请核对姓名或先维护该销售账号。',
+  IMPORT_PROVISION_CUSTOMER_AMBIGUOUS: '客户名称在 CRM 中匹配到多个客户，无法自动开立商机；请填写 CRM 客户编号。',
+  IMPORT_PROVISION_CRM_REJECTED: 'CRM 拒绝了自动开立客户或商机，请核对客户、销售以及商机金额、签约日期后重试。',
+  IMPORT_PROVISION_CONTRACT_NOT_VERIFIED: '合同验真未通过，商机不能推进到「已签约」；请先完成合同验真再重试。',
+})
+
 function text(value) {
   return String(value ?? '')
 }
