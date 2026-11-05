@@ -1178,195 +1178,293 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
 <template>
   <details class="contract-import-panel">
     <summary>批量导入外部合同原件</summary>
-    <p>当前开放：{{ supportedModes.map(mode => modeLabels[mode] || mode).join('、') }}。普通合同可先批量上传 PDF、再上传 Excel 自动写入详情（也可切换手动逐份填写），仍需逐份走现有审批；历史合同需要完整 JSON 清单并走当前独立导入确认，各子系统分别核对放行。</p>
-    <p>历史签署日期是来源声明，导入确认不补造原年度审批，也不替代签署原件核验。</p>
-    <p v-if="!enabled">新增批次已关闭；已有批次仍可查询、暂停与恢复。</p>
-    <button v-if="enabled && canPreview" type="button" :disabled="busy" @click="startNewBatch">开始新批次（保留已保存任务）</button>
-    <label>查询批次号 <input v-model="lookupID" maxlength="26" :disabled="busy" autocomplete="off" /></label>
-    <button type="button" :disabled="busy || !lookupID" @click="refresh(lookupID)">查询／刷新结果</button>
-    <button type="button" :disabled="busy || listBusy" @click="loadBatches()">我的批次与待确认任务</button>
-    <p v-if="listBusy" role="status">正在查询批次列表…</p>
-    <p v-if="listError" role="alert">{{ listError }}</p>
-    <div class="contract-import-task-list"><button v-for="record in batches" :key="record.batch_id" type="button" :disabled="busy" @click="refresh(record.batch_id)">{{ record.batch_id }} · {{ labels[record.state] || record.state }}</button></div>
-    <div v-if="batches.length || listOffset || listHasMore" class="contract-import-task-list"><button type="button" :disabled="busy || listBusy || !listOffset" @click="loadBatches(Math.max(0, listOffset - 50))">列表上一页</button><button type="button" :disabled="busy || listBusy || !listHasMore" @click="loadBatches(listNextOffset)">列表下一页</button></div>
-    <p v-if="listLimitReached">已到达批次列表查询上限，请使用批次号定位需要处理的记录。</p>
+    <div class="contract-import-body">
+      <div class="contract-import-intro">
+        <p class="contract-import-lede">当前开放：{{ supportedModes.map(mode => modeLabels[mode] || mode).join('、') }}。普通合同可先批量上传 PDF、再上传 Excel 自动写入详情（也可切换手动逐份填写），仍需逐份走现有审批；历史合同需要完整 JSON 清单并走当前独立导入确认，各子系统分别核对放行。</p>
+        <p class="contract-import-note">历史签署日期是来源声明，导入确认不补造原年度审批，也不替代签署原件核验。</p>
+        <p v-if="!enabled" class="contract-import-note">新增批次已关闭；已有批次仍可查询、暂停与恢复。</p>
+      </div>
 
-    <template v-if="formEditable">
-      <p v-if="batch?.operation_id">已建单项须原样保留，只能修订尚未建单项；新修订会使旧预检和执行代次失效。已建单内容更正需先核对原合同。</p>
-      <fieldset v-if="supportedModes.length > 1" class="contract-import-mode" :disabled="busy || modeLocked">
-        <legend>导入方式</legend>
-        <label v-for="modeValue in supportedModes" :key="modeValue">
-          <input type="radio" name="contract-import-entry-mode" :value="modeValue" :checked="entryMode === modeValue" @change="selectEntryMode(modeValue)" />
-          {{ modeLabels[modeValue] || modeValue }}{{ modeValue === 'NORMAL' ? '（Excel/表单）' : '（完整 JSON 清单）' }}
-        </label>
-      </fieldset>
-      <p v-if="modeLocked" class="contract-import-hint">批次已保存清单，导入方式随当前批次固定；需要换一种方式请开始新批次。</p>
+      <ol class="contract-import-steps" aria-label="导入流程">
+        <li>选择导入方式</li>
+        <li>选择或拖入原件</li>
+        <li>暂存并预检</li>
+        <li>逐条核对问题</li>
+        <li>提交冻结清单</li>
+      </ol>
 
-      <section v-if="isNormalEntry" aria-label="普通新合同导入表单">
-        <fieldset class="contract-import-normal-modes" :disabled="busy">
-          <legend>详情填写方式</legend>
-          <label v-if="!localImportSources"><input type="radio" name="contract-import-normal-mode" value="excel" :checked="normalEntryMode === 'excel'" @change="selectNormalEntryMode('excel')" /> Excel 批量导入（推荐）</label>
-          <label><input type="radio" name="contract-import-normal-mode" value="manual" :checked="normalEntryMode === 'manual'" @change="selectNormalEntryMode('manual')" /> 手动逐份填写</label>
-        </fieldset>
-        <p v-if="localImportSources" class="contract-import-hint">本地来源使用逐份表单选择真实目录引用；可以一次上传多份原件并批量预检，历史清单不自动转换来源。</p>
-        <template v-if="normalEntryMode === 'excel'">
-          <p>第一步选择 PDF 原件（可多选），第二步选择填写好合同详情的 Excel。PDF 文件名去掉扩展名必须与 Excel「合同明细」的合同编号完全一致；系统按合同编号一一对应写入「编辑详情」，缺 PDF、缺 Excel 行、重复编号都会在下面列出并阻止预检。</p>
-          <div class="contract-import-dropzone" @dragover.prevent @drop.prevent="dropFiles">
-            <label for="contract-import-files">第一步：选择或拖入 PDF 原件（可多选，≤100 份）</label>
-            <input id="contract-import-files" :key="sourceSelectionVersion" type="file" multiple :accept="pdfEnabled ? '.docx,.pdf' : '.docx'" :disabled="busy" @change="selectFiles" />
-          </div>
-          <p v-if="files.length" role="status">已选择 {{ files.length }} 份原件：{{ files.map(file => file.name).join('、') }}</p>
-          <ul v-if="files.length" class="contract-import-file-list"><li v-for="file in files" :key="file.name">{{ file.name }} <button class="contract-text-button danger" type="button" :disabled="busy" @click="removeSelectedFile(file)">移除</button></li></ul>
-          <div class="contract-import-dropzone">
-            <label for="contract-import-excel">第二步：选择 Excel（.xlsx，≤5MiB）</label>
-            <input id="contract-import-excel" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" :disabled="busy || excelBusy" @change="selectExcelFile" />
-          </div>
-          <p><a :href="contractExcelTemplateURL" download>下载 Excel 标准模板（含合同明细、服务项、系统信息、付款条款和填写说明）</a></p>
-          <p class="contract-import-hint">「合同明细」新增可选列：销售姓名、客户类型、行业、地区，四列均可留空。<strong>销售姓名</strong>（别名：销售、业务员、负责人姓名）用于历史导入自动开立 CRM 客户/商机时解析平台销售账号，留空不阻断导入，只有服务端解析未命中时才按行提示；<strong>客户类型、行业、地区</strong>留空时由系统补「企业 / 其他 / 未填写」。下载的模板如未包含这几列，可在「合同明细」末列自行补上同名列，表头文字保持一致即可。</p>
-          <p v-if="excelFile" role="status">已选择 Excel：{{ excelFile.name }} <button class="contract-text-button" type="button" :disabled="busy || excelBusy" @click="applyExcelImport">重新应用 Excel（覆盖未保存详情）</button><button class="contract-text-button danger" type="button" :disabled="busy || excelBusy" @click="clearExcelFile">移除</button></p>
-          <p v-if="excelBusy" role="status">正在解析 Excel 并匹配 PDF…</p>
-          <p v-if="excelCRMProgress" role="status">{{ excelCRMProgress }}</p>
-          <p v-if="excelMessage" class="contract-import-hint" role="status">{{ excelMessage }}</p>
-          <div v-if="excelSummary" class="contract-import-excel-summary">
-            <span>Excel 合同 {{ excelSummary.contractCount }} 份</span>
-            <span>已匹配 {{ excelSummary.matchedCount }} 份</span>
-            <span>未匹配 PDF {{ excelSummary.unmatchedFileCount }} 份</span>
-            <span>阻断问题 {{ excelSummary.blockingCount }} 处</span>
-          </div>
-          <div v-if="excelIssues.length" class="contract-import-excel-issues" role="alert">
-            <p><strong>Excel 解析与匹配问题（共 {{ excelIssues.length }} 处）：</strong></p>
-            <ul><li v-for="(issue, index) in excelIssues.slice(0, 20)" :key="issue.code + '-' + issue.rowNumber + '-' + issue.contractNumber + '-' + index">{{ excelIssueText(issue) }}</li></ul>
-            <p v-if="excelIssues.length > 20">…还有 {{ excelIssues.length - 20 }} 处，请先修正 Excel 或 PDF 文件名后重新应用。</p>
-          </div>
-          <p v-if="excelCRMRequired" role="alert">Excel 中缺少 CRM 客户编号，部分客户尚未在 CRM 中核对。 <button type="button" :disabled="busy" @click="connectCRM(true)">连接 CRM</button> <button type="button" :disabled="busy || excelBusy" @click="applyExcelImport">登录后重新应用 Excel</button></p>
-          <p v-if="batch?.items?.length" class="contract-import-hint">当前批次已恢复；重新选择 Excel 会覆盖尚未建项的详情，已建单项不会被覆盖。</p>
-        </template>
-        <template v-else>
-          <p>先选择合同原件（PDF/DOCX），每份原件自动生成一行合同。文件名只作为原件引用，重命名文件后请移除该行并重新选择；同一文件只能导入一次。每行还须在「编辑详情」填写来源业务键（原系统合同编号/业务键，必填），系统据此识别重复导入的同一份合同。</p>
-          <div class="contract-import-dropzone" @dragover.prevent @drop.prevent="dropFiles">
-            <label for="contract-import-files">选择或拖入合同原件（可多选）</label>
-            <input id="contract-import-files" :key="sourceSelectionVersion" type="file" multiple :accept="pdfEnabled ? '.docx,.pdf' : '.docx'" :disabled="busy" @change="selectFiles" />
-          </div>
-          <p v-if="files.length" role="status">已选择 {{ files.length }} 份：{{ files.map(file => file.name).join('、') }}</p>
-        </template>
-        <p v-if="fileMessage" class="contract-import-error" role="alert">{{ fileMessage }}</p>
-        <div v-if="formRows.length" class="contract-import-scroll">
-          <table class="contract-data-table contract-import-rows" aria-label="普通合同导入行">
-            <thead><tr><th>原件</th><th>合同标题</th><th>客户</th><th>金额（元）</th><th>币种</th><th>开始日期</th><th>结束日期</th><th>状态／错误</th><th>操作</th></tr></thead>
-            <tbody>
-              <tr v-for="(row, index) in formRows" :key="row.key">
-                <td><strong>{{ row.fileName }}</strong><small class="block">{{ rowStaged(row) ? '重新预检沿用当前批次已暂存原件' : (batch ? '新原件，预检时上传' : '尚未上传') }}</small><small class="block" :class="hasExternalRecordId(row) ? '' : 'contract-import-error-text'">来源业务键：{{ row.externalRecordId || '未填写（请在「编辑详情」补填）' }}</small></td>
-                <td>{{ row.title || '未填写' }}</td>
-                <td>{{ row.customerName || '未填写' }}<small v-if="row.crmCustomerId" class="block">ID {{ row.crmCustomerId }}</small><small v-if="row.normalized" class="block">预检权威：{{ row.normalized.customer_name }} / {{ row.normalized.crm_customer_id }}</small><small v-if="normalizedCustomerDiff(row)" class="contract-import-error-text block">与预检客户不一致，请以权威目录为准</small></td>
-                <td class="amount">{{ row.amount || '未填写' }}<small v-if="row.contractId" class="block">合同 {{ row.contractId }}</small></td>
-                <td>{{ row.currency }}</td>
-                <td>{{ row.startDate || '—' }}</td>
-                <td>{{ row.endDate || '—' }}</td>
-                <td><span class="contract-badge" :class="rowStateTone(row)"><i></i>{{ stateLabels[row.state] || row.state }}</span><p v-if="rowIssues(row).length" class="contract-import-error-text" role="alert">发现 {{ rowIssues(row).length }} 处问题：{{ rowIssues(row)[0].message }}</p><p v-else-if="row.batchIssues.length" class="contract-import-error-text" role="alert">{{ rowBatchIssueSummary(row)[0] }}{{ row.batchIssues.length > 1 ? `（共 ${row.batchIssues.length} 处）` : '' }}</p></td>
-                <td><button class="contract-text-button" type="button" :aria-label="`编辑第 ${index + 1} 行详情`" @click="openRow(row, $event)">编辑详情</button><button class="contract-text-button danger" type="button" :disabled="busy" :aria-label="`移除第 ${index + 1} 行`" @click="removeRow(row)">移除</button></td>
-              </tr>
-            </tbody>
-          </table>
+      <section class="contract-import-block contract-import-tools" aria-label="批次查询与新建">
+        <div class="contract-import-toolbar">
+          <button v-if="enabled && canPreview" class="contract-button secondary small" type="button" :disabled="busy" @click="startNewBatch">开始新批次（保留已保存任务）</button>
+          <label class="contract-import-field">查询批次号<input v-model="lookupID" maxlength="26" :disabled="busy" autocomplete="off" /></label>
+          <button class="contract-button secondary small" type="button" :disabled="busy || !lookupID" @click="refresh(lookupID)">查询／刷新结果</button>
+          <button class="contract-button secondary small" type="button" :disabled="busy || listBusy" @click="loadBatches()">我的批次与待确认任务</button>
         </div>
-        <p v-else class="contract-import-hint">{{ normalEntryMode === 'excel' ? '尚未匹配到合同行。请选择 Excel，并确认 PDF 文件名去掉扩展名后与 Excel 合同编号完全一致；匹配成功后会写入下方详情。' : '尚未选择原件。选择后会自动生成合同行，不需要手工编写 JSON。' }}</p>
-        <p><button class="contract-button primary" type="button" :disabled="busy || !canPreviewAction" @click="preview">{{ batch ? '继续暂存／修订并重新预检' : '暂存并逐项预检' }}</button></p>
-        <p class="contract-import-hint">暂存并预检不会创建合同。预检错误会按行和字段显示，可修正后重试；预检通过后再提交冻结清单。</p>
+        <p v-if="listBusy" class="contract-import-status is-loading" role="status">正在查询批次列表…</p>
+        <p v-if="listError" class="contract-import-alert" role="alert">{{ listError }}</p>
+        <div class="contract-import-task-list"><button v-for="record in batches" :key="record.batch_id" type="button" :disabled="busy" @click="refresh(record.batch_id)">{{ record.batch_id }} · {{ labels[record.state] || record.state }}</button></div>
+        <div v-if="batches.length || listOffset || listHasMore" class="contract-import-task-list contract-import-pager"><button type="button" :disabled="busy || listBusy || !listOffset" @click="loadBatches(Math.max(0, listOffset - 50))">列表上一页</button><button type="button" :disabled="busy || listBusy || !listHasMore" @click="loadBatches(listNextOffset)">列表下一页</button></div>
+        <p v-if="listLimitReached" class="contract-import-note">已到达批次列表查询上限，请使用批次号定位需要处理的记录。</p>
       </section>
 
-      <section v-else aria-label="历史合同完整清单导入">
-        <p><strong>历史导入需要完整清单。</strong>历史存档、接续履约和历史结清档案包含 history_evidence、policy_options 等字段，继续使用 JSON 清单核对；不使用普通表单，避免丢字段或改写历史事实。</p>
-        <label for="contract-import-json">UTF-8 JSON 清单（≤2MiB，1—100项）</label>
-        <textarea id="contract-import-json" v-model="text" maxlength="2097152" rows="10" :disabled="busy" placeholder='{"schema_version":1,"source_system":"legacy","items":[{"item_key":"one","external_record_id":"原业务键","mode":"ARCHIVE_ONLY","source_file_ref":"原件.pdf","metadata":{},"history_evidence":{},"policy_options":{}}]}' />
-        <p>每项 metadata 填写完整合同字段；历史项还须提供 history_evidence 和 policy_options。source_file_ref 在此处填写对应文件名，须与所选原件一一匹配。</p>
-        <p v-if="batch">已暂存项保留当前 file_ref；需要更换原件时，将该行 source_file_ref 改为新选择的文件名。相同文件名的历史代次不会自动替换当前原件。</p>
-        <label>选择对应原件 <input :key="sourceSelectionVersion" type="file" multiple :accept="pdfEnabled ? '.docx,.pdf' : '.docx'" :disabled="busy" @change="selectFiles" /></label>
-        <p v-if="files.length" role="status">已选择：{{ files.map(file => file.name).join('、') }}</p>
-        <p v-if="fileMessage" class="contract-import-error" role="alert">{{ fileMessage }}</p>
-        <ul v-if="files.length" class="contract-import-file-list"><li v-for="file in files" :key="file.name">{{ file.name }} <button class="contract-text-button danger" type="button" :disabled="busy" @click="removeSelectedFile(file)">移除</button></li></ul>
-        <p><button class="contract-button primary" type="button" :disabled="busy || !canPreviewAction" @click="preview">{{ batch ? '继续暂存／修订并重新预检' : '暂存并逐项预检' }}</button></p>
-      </section>
+      <template v-if="formEditable">
+        <section class="contract-import-block" aria-label="导入方式">
+          <p v-if="batch?.operation_id" class="contract-import-note">已建单项须原样保留，只能修订尚未建单项；新修订会使旧预检和执行代次失效。已建单内容更正需先核对原合同。</p>
+          <fieldset v-if="supportedModes.length > 1" class="contract-import-mode" :disabled="busy || modeLocked">
+            <legend>导入方式</legend>
+            <label v-for="modeValue in supportedModes" :key="modeValue">
+              <input type="radio" name="contract-import-entry-mode" :value="modeValue" :checked="entryMode === modeValue" @change="selectEntryMode(modeValue)" />
+              {{ modeLabels[modeValue] || modeValue }}{{ modeValue === 'NORMAL' ? '（Excel/表单）' : '（完整 JSON 清单）' }}
+            </label>
+          </fieldset>
+          <p v-if="modeLocked" class="contract-import-hint">批次已保存清单，导入方式随当前批次固定；需要换一种方式请开始新批次。</p>
+        </section>
 
-      <details v-if="isNormalEntry" class="contract-import-advanced" @toggle="onAdvancedToggle">
-        <summary>高级：查看/编辑清单</summary>
-        <p>普通模式默认以表单为准；下方 JSON 由表单生成，仅用于核对或特殊处理。展开不会自动保存，也不会自动改写表单。</p>
-        <label class="contract-import-check"><input v-model="jsonAuthoritative" type="checkbox" :disabled="busy" @change="toggleJsonAuthoritative" /> 以 JSON 清单为准（高级；勾选后表单修改不会进入预检）</label>
-        <p v-if="jsonAuthoritative" class="contract-import-warning" role="alert">当前以 JSON 为准：预检直接保存下方 JSON。取消勾选会重新用表单生成清单，JSON 中的修改会被覆盖；需要历史字段请切换到历史导入方式。</p>
-        <label for="contract-import-advanced-json">清单 JSON（普通模式默认只读）</label>
-        <textarea id="contract-import-advanced-json" v-model="text" maxlength="2097152" rows="10" :readonly="!jsonAuthoritative" :disabled="busy" />
-        <div class="contract-import-actions"><button class="contract-button secondary small" type="button" :disabled="busy || jsonAuthoritative" @click="regenerateJSON">用当前表单重新生成 JSON</button><span v-if="advancedMessage" role="status">{{ advancedMessage }}</span></div>
-      </details>
-    </template>
-
-    <p v-if="error" role="alert">{{ error }}</p>
-    <template v-if="batch">
-      <p role="status">批次 {{ batch.batch_id }} · 第 {{ batch.revision }} 版 · {{ labels[batch.state] || batch.state }}</p>
-      <section v-if="provisionPlan.length" class="contract-import-provision" aria-label="将自动创建的 CRM 客户与商机">
-        <p><strong>CRM 开立计划（共 {{ provisionPlan.length }} 项）：</strong>将自动创建客户 {{ provisionSummary.toCreate }} 项，客户已存在 {{ provisionSummary.existing }} 项<span v-if="provisionSummary.customerAmbiguous">，客户重名需人工确认 {{ provisionSummary.customerAmbiguous }} 项</span>；销售已解析 {{ provisionSummary.resolved }} 项，销售未命中 {{ provisionSummary.unresolved }} 项<span v-if="provisionSummary.salesAmbiguous">，销售重名需人工确认 {{ provisionSummary.salesAmbiguous }} 项</span>。以上为预览结果，实际开立仍按当前开关与逐项核对执行。</p>
-        <div class="contract-import-scroll">
-          <table class="contract-data-table" aria-label="逐项 CRM 客户与商机开立计划">
-            <thead><tr><th>合同</th><th>客户</th><th>销售</th><th>商机</th></tr></thead>
-            <tbody>
-              <tr v-for="(plan, index) in provisionPlan" :key="`provision-${index}-${provisionPlanTitle(plan, index)}`">
-                <td>{{ provisionPlanTitle(plan, index) }}</td>
-                <td>{{ plan.customer_name || '未提供' }}<small class="block">{{ provisionCustomerLabels[plan.customer_state] || plan.customer_state || '状态未返回' }}</small></td>
-                <td>{{ plan.sales_name || '未提供' }}<small class="block">{{ provisionSalesLabels[plan.sales_state] || plan.sales_state || '状态未返回' }}</small></td>
-                <td>{{ provisionOpportunityText(plan) }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-      <p v-if="batch.items?.length">导入方式：{{ modeLabels[batch.items[0].item.mode] || batch.items[0].item.mode }}</p>
-      <p v-if="batch.operation_id">操作号：{{ batch.operation_id }}。请保留批次号，重新登录或刷新页面后可查询恢复。</p>
-      <p v-if="crmConnectionRequired" role="alert">
-        CRM 当前账号授权上下文缺失或已过期，请先连接 CRM，再重新预检当前批次。
-        <button type="button" :disabled="busy" @click="connectCRM()">连接 CRM</button>
-        <span v-if="crmConnectionMessage" role="status">{{ crmConnectionMessage }}</span>
-      </p>
-      <div class="contract-import-scroll"><table class="contract-data-table"><thead><tr><th>单项</th><th>来源业务键</th><th>状态／合同ID</th><th>字段及错误</th></tr></thead><tbody>
-        <tr v-for="entry in batch.items" :key="entry.id"><td>{{ entry.item.item_key }} · {{ modeLabels[entry.item.mode] }}<br /><small>原件：{{ batch.sources.find(source => source.file_ref === entry.item.source_file_ref)?.filename }}<br />{{ entry.item.source_file_ref }}</small><button v-if="entry.contract_id" class="contract-text-button" type="button" :disabled="busy" @click="viewSource(entry)">查看冻结原件</button></td><td>{{ entry.item.external_record_id }}<p>纸面编号：{{ entry.item.metadata.external_paper_number || '未提供' }}</p><p v-if="entry.item.history_evidence">声明签署日：{{ entry.item.history_evidence.declared_signed_date || '未声明' }}<br />原终态／履约态：{{ entry.item.history_evidence.historical_status }}</p></td><td>{{ stateLabels[entry.state] || entry.state }}<br />{{ entry.contract_id || '尚未建单' }}<p v-if="entry.normalized_metadata">权威客户：{{ entry.normalized_metadata.customer_name }}<br />客户ID：{{ entry.normalized_metadata.crm_customer_id }}<br />规范金额：{{ entry.normalized_metadata.currency }} {{ formatImportMinor(entry.normalized_metadata.amount_minor) }}</p><p v-if="entry.item.metadata.customer_name !== entry.normalized_metadata?.customer_name">清单客户声明：{{ entry.item.metadata.customer_name }}</p></td><td><template v-for="issue in entry.issues" :key="issue.field_path + issue.code"><p class="contract-import-issue" role="alert">{{ importFieldLabel(issue.field_path) }}：{{ issueLabels[issue.code] || issue.code }}{{ issue.retryable ? '（可恢复）' : '' }}</p></template><p v-if="!entry.issues?.length">无</p></td></tr>
-      </tbody></table></div>
-      <p><button class="contract-button secondary small" type="button" :disabled="busy || !importErrorReportRows.length" aria-label="下载合同批量导入错误报告 CSV" @click="downloadImportErrorReport">下载错误报告 CSV</button></p>
-      <p v-if="batch.state === 'PREVIEWED'">预计创建 {{ batch.items.filter(entry => !entry.contract_id).length }} 份记录；本次不免审生效。普通模式之后逐份审批；历史模式之后独立确认，再分别放行项目、财务和报表。</p>
-      <p v-if="!batch.can_commit">当前身份可查看此批次；提交和恢复须由具有导入提交权限的批次创建人执行。</p>
-      <button v-if="batch.state === 'PREVIEWED' && !historyItems.length && canCommit && batch.can_commit" type="button" :disabled="busy" @click="commit">确认冻结清单并创建草稿</button>
-      <button v-if="['RUNNING','QUEUED'].includes(batch.state) && canCommit && batch.can_commit" type="button" :disabled="busy" @click="control('pause')">暂停新认领</button>
-      <button v-if="['PAUSED','PARTIAL'].includes(batch.state) && canCommit && batch.can_commit && !batch.items.some(entry => ['CORRECTION_REQUIRED','NEEDS_REVIEW'].includes(entry.state))" type="button" :disabled="busy" @click="control('resume')">重新授权并恢复原操作</button>
-      <section v-if="historyItems.length" aria-label="历史导入确认及分目标接续">
-        <h3>历史导入独立确认</h3>
-        <p>确认对象为本批次当前冻结的原件、字段、原业务事实及子系统政策。已创建记录不代表历史接续已经完成。</p>
-        <button v-if="canCommit && batch.can_commit && batch.state === 'PREVIEWED' && !['STARTING','PENDING','APPROVED'].includes(batch.confirmation?.state)" type="button" :disabled="busy" @click="confirmation()">冻结清单、建立历史记录并提交独立确认</button>
-        <template v-if="batch.confirmation">
-          <p>当前确认：{{ stateLabels[batch.confirmation.state] || batch.confirmation.state }}；冻结修订 {{ batch.confirmation.revision }}。</p>
-          <p>要求角色：{{ batch.confirmation.roles.join('、') }}；已确认：{{ batch.confirmation.approved_roles?.join('、') || '无' }}。</p>
-          <button v-if="canVote" type="button" :disabled="busy" @click="confirmation('APPROVE')">确认本次历史导入基线</button>
-          <button v-if="canVote" type="button" :disabled="busy" @click="confirmation('REJECT')">驳回本次历史导入</button>
-          <button v-if="canCommit && batch.can_commit && ['STARTING','PENDING'].includes(batch.confirmation.state)" type="button" :disabled="busy" @click="confirmation('WITHDRAW')">撤回本次确认</button>
-        </template>
-        <article v-for="entry in historyItems" :key="entry.id" class="contract-import-targets">
-          <h4>{{ entry.item.item_key }} · {{ entry.confirmed ? '当前历史基线已确认' : '等待当前独立确认' }}</h4>
-          <p>项目政策 {{ entry.item.policy_options.project_mode }}；财务政策 {{ entry.item.policy_options.finance_mode }}；报表政策 {{ entry.item.policy_options.report_mode }}。</p>
-          <p v-if="entry.item.policy_options.finance_mode === 'EVIDENCE_ONLY'">仅保存原财务证明，未在结算重建财务台账，不能将此项解释为结算已核验零余额。</p>
-          <div v-for="target in entry.targets" :key="target.target">
-            <strong>{{ targetLabels[target.target] }}</strong>：{{ stateLabels[target.state] || target.state }}<span v-if="target.error_code && target.state !== 'COMPLETE'"> · {{ target.error_code }}</span>
-            <span v-if="target.receipt_id"> · 实际回执 {{ target.receipt_id }}</span>
-            <p v-if="target.state === 'BLOCKED' && target.recipient_http_status === 409 && target.recipient_code === 'SETTLEMENT_CONFLICT'">接收方已明确拒绝旧放行。财务须先重新对账；再次申请会严格核对新凭证、政策与责任，并保留旧命令记录。来源或政策不一致仍阻断。</p>
-            <p v-if="canRetryProjectRejection(target)">项目端明确拒绝参数或负责人。请核对项目负责人在目标环境的有效授权及冻结字段；恢复仅重试原命令，不修改已确认基线。</p>
-            <template v-if="canRelease && entry.confirmed && !['COMPLETE','NOT_APPLICABLE'].includes(target.state) && (target.state !== 'BLOCKED' || canRetryProjectRejection(target) || (target.target === 'FINANCE' && target.phase === 'RELEASE' && target.recipient_http_status === 409 && target.recipient_code === 'SETTLEMENT_CONFLICT'))">
-              <button v-if="target.target === 'FINANCE' && !target.receipt_id" type="button" :disabled="busy" @click="release(entry, target, 'PREPARE')">建立／恢复财务HOLD暂存</button>
-              <button v-else-if="canRetryProjectRejection(target)" type="button" :disabled="busy" @click="release(entry, target)">核对项目参数和负责人后重试同一命令</button>
-              <button v-else type="button" :disabled="busy" @click="release(entry, target)">{{ target.target === 'FINANCE' ? (target.state === 'BLOCKED' ? '重新核对并申请财务放行' : '核验对账和责任后申请财务放行') : target.target === 'REPORT' ? '申请／查询真实数析应用' : '申请／恢复项目绑定' }}</button>
-            </template>
-            <a v-if="target.target === 'FINANCE' && target.receipt_id" :href="`/settlement/imports?import_snapshot=${encodeURIComponent(target.receipt_id)}`">前往财务恢复工作台</a>
+        <section v-if="isNormalEntry" class="contract-import-block contract-import-stage" aria-label="普通新合同导入表单">
+          <fieldset class="contract-import-normal-modes" :disabled="busy">
+            <legend>详情填写方式</legend>
+            <label v-if="!localImportSources"><input type="radio" name="contract-import-normal-mode" value="excel" :checked="normalEntryMode === 'excel'" @change="selectNormalEntryMode('excel')" /> Excel 批量导入（推荐）</label>
+            <label><input type="radio" name="contract-import-normal-mode" value="manual" :checked="normalEntryMode === 'manual'" @change="selectNormalEntryMode('manual')" /> 手动逐份填写</label>
+          </fieldset>
+          <p v-if="localImportSources" class="contract-import-hint">本地来源使用逐份表单选择真实目录引用；可以一次上传多份原件并批量预检，历史清单不自动转换来源。</p>
+          <template v-if="normalEntryMode === 'excel'">
+            <p class="contract-import-hint">第一步选择 PDF 原件（可多选），第二步选择填写好合同详情的 Excel。PDF 文件名去掉扩展名必须与 Excel「合同明细」的合同编号完全一致；系统按合同编号一一对应写入「编辑详情」，缺 PDF、缺 Excel 行、重复编号都会在下面列出并阻止预检。</p>
+            <div class="contract-import-step">
+              <div class="contract-import-dropzone" @dragover.prevent @drop.prevent="dropFiles">
+                <label for="contract-import-files">第一步：选择或拖入 PDF 原件（可多选，≤100 份）</label>
+                <input id="contract-import-files" :key="sourceSelectionVersion" type="file" multiple :accept="pdfEnabled ? '.docx,.pdf' : '.docx'" :disabled="busy" @change="selectFiles" />
+              </div>
+              <p v-if="files.length" class="contract-import-status" role="status">已选择 {{ files.length }} 份原件：{{ files.map(file => file.name).join('、') }}</p>
+              <ul v-if="files.length" class="contract-import-file-list"><li v-for="file in files" :key="file.name"><span>{{ file.name }}</span> <button class="contract-text-button danger" type="button" :disabled="busy" @click="removeSelectedFile(file)">移除</button></li></ul>
+            </div>
+            <div class="contract-import-step">
+              <div class="contract-import-dropzone">
+                <label for="contract-import-excel">第二步：选择 Excel（.xlsx，≤5MiB）</label>
+                <input id="contract-import-excel" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" :disabled="busy || excelBusy" @change="selectExcelFile" />
+              </div>
+              <p class="contract-import-note"><a :href="contractExcelTemplateURL" download>下载 Excel 标准模板（含合同明细、服务项、系统信息、付款条款和填写说明）</a></p>
+              <p class="contract-import-hint">「合同明细」新增可选列：销售姓名、客户类型、行业、地区，四列均可留空。<strong>销售姓名</strong>（别名：销售、业务员、负责人姓名）用于历史导入自动开立 CRM 客户/商机时解析平台销售账号，留空不阻断导入，只有服务端解析未命中时才按行提示；<strong>客户类型、行业、地区</strong>留空时由系统补「企业 / 其他 / 未填写」。下载的模板如未包含这几列，可在「合同明细」末列自行补上同名列，表头文字保持一致即可。</p>
+              <p v-if="excelFile" class="contract-import-status" role="status">已选择 Excel：{{ excelFile.name }} <button class="contract-text-button" type="button" :disabled="busy || excelBusy" @click="applyExcelImport">重新应用 Excel（覆盖未保存详情）</button><button class="contract-text-button danger" type="button" :disabled="busy || excelBusy" @click="clearExcelFile">移除</button></p>
+              <p v-if="excelBusy" class="contract-import-status is-loading" role="status">正在解析 Excel 并匹配 PDF…</p>
+              <p v-if="excelCRMProgress" class="contract-import-status is-loading" role="status">{{ excelCRMProgress }}</p>
+              <p v-if="excelMessage" class="contract-import-hint" role="status">{{ excelMessage }}</p>
+              <div v-if="excelSummary" class="contract-import-excel-summary">
+                <span>Excel 合同 {{ excelSummary.contractCount }} 份</span>
+                <span>已匹配 {{ excelSummary.matchedCount }} 份</span>
+                <span>未匹配 PDF {{ excelSummary.unmatchedFileCount }} 份</span>
+                <span>阻断问题 {{ excelSummary.blockingCount }} 处</span>
+              </div>
+              <div v-if="excelIssues.length" class="contract-import-excel-issues" role="alert">
+                <p><strong>Excel 解析与匹配问题（共 {{ excelIssues.length }} 处）：</strong></p>
+                <ul><li v-for="(issue, index) in excelIssues.slice(0, 20)" :key="issue.code + '-' + issue.rowNumber + '-' + issue.contractNumber + '-' + index">{{ excelIssueText(issue) }}</li></ul>
+                <p v-if="excelIssues.length > 20">…还有 {{ excelIssues.length - 20 }} 处，请先修正 Excel 或 PDF 文件名后重新应用。</p>
+              </div>
+              <div v-if="excelCRMRequired" class="contract-import-alert contract-import-alert--warn" role="alert">
+                <p>Excel 中缺少 CRM 客户编号，部分客户尚未在 CRM 中核对。</p>
+                <div class="contract-import-actions">
+                  <button class="contract-button secondary small" type="button" :disabled="busy" @click="connectCRM(true)">连接 CRM</button>
+                  <button class="contract-button secondary small" type="button" :disabled="busy || excelBusy" @click="applyExcelImport">登录后重新应用 Excel</button>
+                </div>
+              </div>
+              <p v-if="batch?.items?.length" class="contract-import-hint">当前批次已恢复；重新选择 Excel 会覆盖尚未建项的详情，已建单项不会被覆盖。</p>
+            </div>
+          </template>
+          <template v-else>
+            <p class="contract-import-hint">先选择合同原件（PDF/DOCX），每份原件自动生成一行合同。文件名只作为原件引用，重命名文件后请移除该行并重新选择；同一文件只能导入一次。每行还须在「编辑详情」填写来源业务键（原系统合同编号/业务键，必填），系统据此识别重复导入的同一份合同。</p>
+            <div class="contract-import-dropzone" @dragover.prevent @drop.prevent="dropFiles">
+              <label for="contract-import-files">选择或拖入合同原件（可多选）</label>
+              <input id="contract-import-files" :key="sourceSelectionVersion" type="file" multiple :accept="pdfEnabled ? '.docx,.pdf' : '.docx'" :disabled="busy" @change="selectFiles" />
+            </div>
+            <p v-if="files.length" class="contract-import-status" role="status">已选择 {{ files.length }} 份：{{ files.map(file => file.name).join('、') }}</p>
+            <ul v-if="files.length" class="contract-import-file-list"><li v-for="file in files" :key="file.name"><span>{{ file.name }}</span> <button class="contract-text-button danger" type="button" :disabled="busy" @click="removeSelectedFile(file)">移除</button></li></ul>
+          </template>
+          <p v-if="fileMessage" class="contract-import-alert" role="alert">{{ fileMessage }}</p>
+          <!-- 长列表自带滚动容器：max-height 有界，短列表自然收起；动作区留在容器外的页脚里。 -->
+          <div v-if="formRows.length" class="contract-import-listframe" tabindex="0" role="group" aria-label="普通合同导入行列表，可滚动">
+            <ul class="contract-import-rows" aria-label="普通合同导入行">
+              <li v-for="(row, index) in formRows" :key="row.key" class="contract-import-row">
+                <div class="contract-import-row-head">
+                  <div class="contract-import-row-id">
+                    <strong>{{ row.fileName }}</strong>
+                    <span>{{ rowStaged(row) ? '重新预检沿用当前批次已暂存原件' : (batch ? '新原件，预检时上传' : '尚未上传') }}</span>
+                  </div>
+                  <div class="contract-import-row-actions">
+                    <span class="contract-badge" :class="rowStateTone(row)"><i></i>{{ stateLabels[row.state] || row.state }}</span>
+                    <button class="contract-text-button" type="button" :aria-label="`编辑第 ${index + 1} 行详情`" @click="openRow(row, $event)">编辑详情</button>
+                    <button class="contract-text-button danger" type="button" :disabled="busy" :aria-label="`移除第 ${index + 1} 行`" @click="removeRow(row)">移除</button>
+                  </div>
+                </div>
+                <dl class="contract-import-facts">
+                  <div class="contract-import-fact-title"><dt>合同标题</dt><dd>{{ row.title || '未填写' }}</dd></div>
+                  <div class="contract-import-fact-party">
+                    <dt>客户</dt>
+                    <dd>{{ row.customerName || '未填写' }}<small v-if="row.crmCustomerId" class="contract-import-fact-extra">ID {{ row.crmCustomerId }}</small><small v-if="row.normalized" class="contract-import-fact-extra">预检权威：{{ row.normalized.customer_name }} / {{ row.normalized.crm_customer_id }}</small><small v-if="normalizedCustomerDiff(row)" class="contract-import-fact-extra contract-import-error-text">与预检客户不一致，请以权威目录为准</small></dd>
+                  </div>
+                  <div><dt>金额（元）</dt><dd>{{ row.amount || '未填写' }}<small v-if="row.contractId" class="contract-import-fact-extra">合同 {{ row.contractId }}</small></dd></div>
+                  <div><dt>币种</dt><dd>{{ row.currency }}</dd></div>
+                  <div><dt>开始日期</dt><dd>{{ row.startDate || '—' }}</dd></div>
+                  <div><dt>结束日期</dt><dd>{{ row.endDate || '—' }}</dd></div>
+                </dl>
+                <p class="contract-import-row-key" :class="hasExternalRecordId(row) ? '' : 'contract-import-error-text'">来源业务键：{{ row.externalRecordId || '未填写（请在「编辑详情」补填）' }}</p>
+                <p v-if="rowIssues(row).length" class="contract-import-error-text" role="alert">发现 {{ rowIssues(row).length }} 处问题：{{ rowIssues(row)[0].message }}</p>
+                <p v-else-if="row.batchIssues.length" class="contract-import-error-text" role="alert">{{ rowBatchIssueSummary(row)[0] }}{{ row.batchIssues.length > 1 ? `（共 ${row.batchIssues.length} 处）` : '' }}</p>
+              </li>
+            </ul>
           </div>
-        </article>
+          <p v-else class="contract-import-empty">{{ normalEntryMode === 'excel' ? '尚未匹配到合同行。请选择 Excel，并确认 PDF 文件名去掉扩展名后与 Excel 合同编号完全一致；匹配成功后会写入下方详情。' : '尚未选择原件。选择后会自动生成合同行，不需要手工编写 JSON。' }}</p>
+          <div class="contract-import-actions contract-import-actions--footer">
+            <p class="contract-import-hint">暂存并预检不会创建合同。预检错误会按行和字段显示，可修正后重试；预检通过后再提交冻结清单。</p>
+            <button class="contract-button primary" type="button" :disabled="busy || !canPreviewAction" @click="preview">{{ batch ? '继续暂存／修订并重新预检' : '暂存并逐项预检' }}</button>
+          </div>
+        </section>
+
+        <section v-else class="contract-import-block contract-import-stage" aria-label="历史合同完整清单导入">
+          <p class="contract-import-hint"><strong>历史导入需要完整清单。</strong>历史存档、接续履约和历史结清档案包含 history_evidence、policy_options 等字段，继续使用 JSON 清单核对；不使用普通表单，避免丢字段或改写历史事实。</p>
+          <label class="contract-import-field" for="contract-import-json">UTF-8 JSON 清单（≤2MiB，1—100项）</label>
+          <textarea id="contract-import-json" v-model="text" maxlength="2097152" rows="10" :disabled="busy" placeholder='{"schema_version":1,"source_system":"legacy","items":[{"item_key":"one","external_record_id":"原业务键","mode":"ARCHIVE_ONLY","source_file_ref":"原件.pdf","metadata":{},"history_evidence":{},"policy_options":{}}]}' />
+          <p class="contract-import-hint">每项 metadata 填写完整合同字段；历史项还须提供 history_evidence 和 policy_options。source_file_ref 在此处填写对应文件名，须与所选原件一一匹配。</p>
+          <p v-if="batch" class="contract-import-hint">已暂存项保留当前 file_ref；需要更换原件时，将该行 source_file_ref 改为新选择的文件名。相同文件名的历史代次不会自动替换当前原件。</p>
+          <label class="contract-import-field">选择对应原件<input :key="sourceSelectionVersion" type="file" multiple :accept="pdfEnabled ? '.docx,.pdf' : '.docx'" :disabled="busy" @change="selectFiles" /></label>
+          <p v-if="files.length" class="contract-import-status" role="status">已选择：{{ files.map(file => file.name).join('、') }}</p>
+          <p v-if="fileMessage" class="contract-import-alert" role="alert">{{ fileMessage }}</p>
+          <ul v-if="files.length" class="contract-import-file-list"><li v-for="file in files" :key="file.name"><span>{{ file.name }}</span> <button class="contract-text-button danger" type="button" :disabled="busy" @click="removeSelectedFile(file)">移除</button></li></ul>
+          <div class="contract-import-actions contract-import-actions--footer">
+            <button class="contract-button primary" type="button" :disabled="busy || !canPreviewAction" @click="preview">{{ batch ? '继续暂存／修订并重新预检' : '暂存并逐项预检' }}</button>
+          </div>
+        </section>
+
+        <details v-if="isNormalEntry" class="contract-import-advanced" @toggle="onAdvancedToggle">
+          <summary>高级：查看/编辑清单</summary>
+          <div class="contract-import-advanced-body">
+            <p class="contract-import-hint">普通模式默认以表单为准；下方 JSON 由表单生成，仅用于核对或特殊处理。展开不会自动保存，也不会自动改写表单。</p>
+            <label class="contract-import-check"><input v-model="jsonAuthoritative" type="checkbox" :disabled="busy" @change="toggleJsonAuthoritative" /> 以 JSON 清单为准（高级；勾选后表单修改不会进入预检）</label>
+            <p v-if="jsonAuthoritative" class="contract-import-warning" role="alert">当前以 JSON 为准：预检直接保存下方 JSON。取消勾选会重新用表单生成清单，JSON 中的修改会被覆盖；需要历史字段请切换到历史导入方式。</p>
+            <label class="contract-import-field" for="contract-import-advanced-json">清单 JSON（普通模式默认只读）</label>
+            <textarea id="contract-import-advanced-json" v-model="text" maxlength="2097152" rows="10" :readonly="!jsonAuthoritative" :disabled="busy" />
+            <div class="contract-import-actions"><button class="contract-button secondary small" type="button" :disabled="busy || jsonAuthoritative" @click="regenerateJSON">用当前表单重新生成 JSON</button><span v-if="advancedMessage" role="status">{{ advancedMessage }}</span></div>
+          </div>
+        </details>
+      </template>
+
+      <p v-if="error" class="contract-import-alert" role="alert">{{ error }}</p>
+
+      <template v-if="batch">
+        <section class="contract-import-block contract-import-batch" aria-label="批次导入结果">
+          <header class="contract-import-block-head">
+            <p class="contract-import-batch-id" role="status">批次 {{ batch.batch_id }} · 第 {{ batch.revision }} 版 · {{ labels[batch.state] || batch.state }}</p>
+            <button class="contract-button secondary small" type="button" :disabled="busy || !importErrorReportRows.length" aria-label="下载合同批量导入错误报告 CSV" @click="downloadImportErrorReport">下载错误报告 CSV</button>
+          </header>
+          <p v-if="crmConnectionRequired" class="contract-import-alert contract-import-alert--warn" role="alert">CRM 当前账号授权上下文缺失或已过期，请先连接 CRM，再重新预检当前批次。 <button class="contract-text-button" type="button" :disabled="busy" @click="connectCRM()">连接 CRM</button> <span v-if="crmConnectionMessage" class="contract-import-hint" role="status">{{ crmConnectionMessage }}</span></p>
+          <div class="contract-import-batch-meta">
+            <p v-if="batch.items?.length">导入方式：{{ modeLabels[batch.items[0].item.mode] || batch.items[0].item.mode }}</p>
+            <p v-if="batch.operation_id">操作号：{{ batch.operation_id }}。请保留批次号，重新登录或刷新页面后可查询恢复。</p>
+          </div>
+          <section v-if="provisionPlan.length" class="contract-import-provision" aria-label="将自动创建的 CRM 客户与商机">
+            <p><strong>CRM 开立计划（共 {{ provisionPlan.length }} 项）：</strong>将自动创建客户 {{ provisionSummary.toCreate }} 项，客户已存在 {{ provisionSummary.existing }} 项<span v-if="provisionSummary.customerAmbiguous">，客户重名需人工确认 {{ provisionSummary.customerAmbiguous }} 项</span>；销售已解析 {{ provisionSummary.resolved }} 项，销售未命中 {{ provisionSummary.unresolved }} 项<span v-if="provisionSummary.salesAmbiguous">，销售重名需人工确认 {{ provisionSummary.salesAmbiguous }} 项</span>。以上为预览结果，实际开立仍按当前开关与逐项核对执行。</p>
+            <ul class="contract-import-provision-list">
+              <li v-for="(plan, index) in provisionPlan" :key="`provision-${index}-${provisionPlanTitle(plan, index)}`" class="contract-import-provision-item">
+                <p class="contract-import-provision-title">{{ provisionPlanTitle(plan, index) }}</p>
+                <dl class="contract-import-facts contract-import-facts--inline">
+                  <dt>客户</dt><dd>{{ plan.customer_name || '未提供' }}<small class="contract-import-fact-extra">{{ provisionCustomerLabels[plan.customer_state] || plan.customer_state || '状态未返回' }}</small></dd>
+                  <dt>销售</dt><dd>{{ plan.sales_name || '未提供' }}<small class="contract-import-fact-extra">{{ provisionSalesLabels[plan.sales_state] || plan.sales_state || '状态未返回' }}</small></dd>
+                </dl>
+                <p class="contract-import-provision-opportunity">{{ provisionOpportunityText(plan) }}</p>
+              </li>
+            </ul>
+          </section>
+          <!-- 批次逐项结果同样有界滚动；提交 / 暂停 / 恢复放在下方的常驻页脚里。 -->
+          <div v-if="batch.items?.length" class="contract-import-listframe" tabindex="0" role="group" aria-label="批次逐项结果列表，可滚动">
+            <ul class="contract-import-batch-items" aria-label="批次逐项结果">
+              <li v-for="entry in batch.items" :key="entry.id" class="contract-import-batch-item">
+                <div class="contract-import-batch-item-main">
+                  <p class="contract-import-batch-item-title"><strong>{{ entry.item.item_key }}</strong><span>{{ modeLabels[entry.item.mode] }}</span></p>
+                  <p class="contract-import-batch-item-state">{{ stateLabels[entry.state] || entry.state }}</p>
+                  <p class="contract-import-batch-item-contract">{{ entry.contract_id || '尚未建单' }}</p>
+                  <button v-if="entry.contract_id" class="contract-text-button" type="button" :disabled="busy" @click="viewSource(entry)">查看冻结原件</button>
+                </div>
+                <div class="contract-import-batch-item-side">
+                  <dl class="contract-import-facts contract-import-facts--inline">
+                    <dt>原件：</dt><dd>{{ batch.sources.find(source => source.file_ref === entry.item.source_file_ref)?.filename }}<small class="contract-import-fact-extra">{{ entry.item.source_file_ref }}</small></dd>
+                    <dt>来源业务键：</dt><dd>{{ entry.item.external_record_id }}</dd>
+                    <dt>纸面编号：</dt><dd>{{ entry.item.metadata.external_paper_number || '未提供' }}</dd>
+                    <template v-if="entry.item.history_evidence">
+                      <dt>声明签署日：</dt><dd>{{ entry.item.history_evidence.declared_signed_date || '未声明' }}</dd>
+                      <dt>原终态／履约态：</dt><dd>{{ entry.item.history_evidence.historical_status }}</dd>
+                    </template>
+                    <template v-if="entry.normalized_metadata">
+                      <dt>权威客户：</dt><dd>{{ entry.normalized_metadata.customer_name }}</dd>
+                      <dt>客户ID：</dt><dd>{{ entry.normalized_metadata.crm_customer_id }}</dd>
+                      <dt>规范金额：</dt><dd>{{ entry.normalized_metadata.currency }} {{ formatImportMinor(entry.normalized_metadata.amount_minor) }}</dd>
+                    </template>
+                    <template v-if="entry.item.metadata.customer_name !== entry.normalized_metadata?.customer_name">
+                      <dt>清单客户声明：</dt><dd>{{ entry.item.metadata.customer_name }}</dd>
+                    </template>
+                  </dl>
+                </div>
+                <div class="contract-import-batch-item-issues">
+                  <p class="contract-import-issues-title">字段及错误</p>
+                  <ul v-if="entry.issues?.length" class="contract-import-issues">
+                    <li v-for="issue in entry.issues" :key="issue.field_path + issue.code" class="contract-import-issue" :class="{ 'is-retryable': issue.retryable }" role="alert">{{ importFieldLabel(issue.field_path) }}：{{ issueLabels[issue.code] || issue.code }}{{ issue.retryable ? '（可恢复）' : '' }}</li>
+                  </ul>
+                  <p v-else class="contract-import-issues-empty">无</p>
+                </div>
+              </li>
+            </ul>
+          </div>
+          <!-- 常驻页脚：在滚动容器之外，列表再长也不会把提交 / 暂停 / 恢复顶走。 -->
+          <div class="contract-import-batch-foot">
+            <p v-if="batch.state === 'PREVIEWED'" class="contract-import-note">预计创建 {{ batch.items.filter(entry => !entry.contract_id).length }} 份记录；本次不免审生效。普通模式之后逐份审批；历史模式之后独立确认，再分别放行项目、财务和报表。</p>
+            <p v-if="!batch.can_commit" class="contract-import-note">当前身份可查看此批次；提交和恢复须由具有导入提交权限的批次创建人执行。</p>
+            <div class="contract-import-actions">
+              <button v-if="batch.state === 'PREVIEWED' && !historyItems.length && canCommit && batch.can_commit" class="contract-button primary" type="button" :disabled="busy" @click="commit">确认冻结清单并创建草稿</button>
+              <button v-if="['RUNNING','QUEUED'].includes(batch.state) && canCommit && batch.can_commit" class="contract-button secondary" type="button" :disabled="busy" @click="control('pause')">暂停新认领</button>
+              <button v-if="['PAUSED','PARTIAL'].includes(batch.state) && canCommit && batch.can_commit && !batch.items.some(entry => ['CORRECTION_REQUIRED','NEEDS_REVIEW'].includes(entry.state))" class="contract-button secondary" type="button" :disabled="busy" @click="control('resume')">重新授权并恢复原操作</button>
+            </div>
+          </div>
+        </section>
+
+        <section v-if="historyItems.length" class="contract-import-block contract-import-history" aria-label="历史导入确认及分目标接续">
+          <h3>历史导入独立确认</h3>
+          <p class="contract-import-hint">确认对象为本批次当前冻结的原件、字段、原业务事实及子系统政策。已创建记录不代表历史接续已经完成。</p>
+          <div class="contract-import-actions">
+            <button v-if="canCommit && batch.can_commit && batch.state === 'PREVIEWED' && !['STARTING','PENDING','APPROVED'].includes(batch.confirmation?.state)" class="contract-button primary" type="button" :disabled="busy" @click="confirmation()">冻结清单、建立历史记录并提交独立确认</button>
+          </div>
+          <template v-if="batch.confirmation">
+            <p class="contract-import-hint">当前确认：{{ stateLabels[batch.confirmation.state] || batch.confirmation.state }}；冻结修订 {{ batch.confirmation.revision }}。</p>
+            <p class="contract-import-hint">要求角色：{{ batch.confirmation.roles.join('、') }}；已确认：{{ batch.confirmation.approved_roles?.join('、') || '无' }}。</p>
+            <div class="contract-import-actions">
+              <button v-if="canVote" class="contract-button secondary small" type="button" :disabled="busy" @click="confirmation('APPROVE')">确认本次历史导入基线</button>
+              <button v-if="canVote" class="contract-button secondary small" type="button" :disabled="busy" @click="confirmation('REJECT')">驳回本次历史导入</button>
+              <button v-if="canCommit && batch.can_commit && ['STARTING','PENDING'].includes(batch.confirmation.state)" class="contract-button secondary small" type="button" :disabled="busy" @click="confirmation('WITHDRAW')">撤回本次确认</button>
+            </div>
+          </template>
+          <article v-for="entry in historyItems" :key="entry.id" class="contract-import-targets">
+            <h4>{{ entry.item.item_key }} · {{ entry.confirmed ? '当前历史基线已确认' : '等待当前独立确认' }}</h4>
+            <p class="contract-import-hint">项目政策 {{ entry.item.policy_options.project_mode }}；财务政策 {{ entry.item.policy_options.finance_mode }}；报表政策 {{ entry.item.policy_options.report_mode }}。</p>
+            <p v-if="entry.item.policy_options.finance_mode === 'EVIDENCE_ONLY'" class="contract-import-note">仅保存原财务证明，未在结算重建财务台账，不能将此项解释为结算已核验零余额。</p>
+            <ul class="contract-import-target-list">
+              <li v-for="target in entry.targets" :key="target.target" class="contract-import-target">
+                <p class="contract-import-target-head"><strong>{{ targetLabels[target.target] }}</strong>：{{ stateLabels[target.state] || target.state }}<span v-if="target.error_code && target.state !== 'COMPLETE'"> · {{ target.error_code }}</span><span v-if="target.receipt_id"> · 实际回执 {{ target.receipt_id }}</span></p>
+                <p v-if="target.state === 'BLOCKED' && target.recipient_http_status === 409 && target.recipient_code === 'SETTLEMENT_CONFLICT'" class="contract-import-note">接收方已明确拒绝旧放行。财务须先重新对账；再次申请会严格核对新凭证、政策与责任，并保留旧命令记录。来源或政策不一致仍阻断。</p>
+                <p v-if="canRetryProjectRejection(target)" class="contract-import-note">项目端明确拒绝参数或负责人。请核对项目负责人在目标环境的有效授权及冻结字段；恢复仅重试原命令，不修改已确认基线。</p>
+                <div v-if="canRelease && entry.confirmed && !['COMPLETE','NOT_APPLICABLE'].includes(target.state) && (target.state !== 'BLOCKED' || canRetryProjectRejection(target) || (target.target === 'FINANCE' && target.phase === 'RELEASE' && target.recipient_http_status === 409 && target.recipient_code === 'SETTLEMENT_CONFLICT'))" class="contract-import-actions">
+                  <button v-if="target.target === 'FINANCE' && !target.receipt_id" class="contract-button secondary small" type="button" :disabled="busy" @click="release(entry, target, 'PREPARE')">建立／恢复财务HOLD暂存</button>
+                  <button v-else-if="canRetryProjectRejection(target)" class="contract-button secondary small" type="button" :disabled="busy" @click="release(entry, target)">核对项目参数和负责人后重试同一命令</button>
+                  <button v-else class="contract-button secondary small" type="button" :disabled="busy" @click="release(entry, target)">{{ target.target === 'FINANCE' ? (target.state === 'BLOCKED' ? '重新核对并申请财务放行' : '核验对账和责任后申请财务放行') : target.target === 'REPORT' ? '申请／查询真实数析应用' : '申请／恢复项目绑定' }}</button>
+                </div>
+                <a v-if="target.target === 'FINANCE' && target.receipt_id" :href="`/settlement/imports?import_snapshot=${encodeURIComponent(target.receipt_id)}`">前往财务恢复工作台</a>
+              </li>
+            </ul>
+          </article>
+        </section>
+      </template>
+
+      <section v-if="document" class="contract-import-block contract-import-document" aria-label="冻结导入原件">
+        <div class="contract-import-actions"><button class="contract-button secondary small" type="button" @click="closeSource">关闭原件</button></div>
+        <ContractPDFPreview v-if="document.format === 'PDF'" :descriptor="document" title="当前导入基线的PDF原件" />
+        <a v-else :href="importItemSourceURL(document.batchID, document.itemID)">下载冻结的 DOCX 原件</a>
       </section>
-    </template>
-    <section v-if="document" aria-label="冻结导入原件">
-      <button type="button" @click="closeSource">关闭原件</button>
-      <ContractPDFPreview v-if="document.format === 'PDF'" :descriptor="document" title="当前导入基线的PDF原件" />
-      <a v-else :href="importItemSourceURL(document.batchID, document.itemID)">下载冻结的 DOCX 原件</a>
-    </section>
+    </div>
 
     <div v-if="drawerRow" class="contract-modal-mask contract-import-drawer-mask" @click.self="closeDrawer">
       <article ref="drawerRef" class="contract-detail-modal contract-import-drawer" role="dialog" aria-modal="true" aria-labelledby="contract-import-drawer-title" tabindex="-1" @keydown="onDrawerKeydown">
@@ -1461,51 +1559,702 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
 
 <style scoped>
 /* 深色主题：结构性表面 / 墨色 / 描边一律写成 var(--token, 原字面量)。
-   token 在浅色下未定义或取值与原字面量相同，浅色渲染不变；深色下取 main.css 的值。 */
-.contract-import-panel { padding: 16px; margin-block: 16px; border: 1px solid var(--line-strong, #cbd5e1); border-radius: 8px; background: var(--surface-card, #fff); }
-.contract-import-panel label { display: block; margin-block: 12px; }
-.contract-import-panel textarea { display: block; width: 100%; box-sizing: border-box; }
-.contract-import-panel input { max-width: 100%; }
-.contract-import-panel p { overflow-wrap: anywhere; }
-.contract-import-panel button { margin: 4px; padding: 8px; }
-.contract-import-scroll { overflow-x: auto; }
-.contract-import-panel th,.contract-import-panel td { padding: 8px; text-align: left; vertical-align: top; }
-.contract-import-task-list { display: flex; flex-wrap: wrap; }
-.contract-import-targets { padding: 12px; border-block-start: 1px solid var(--border-soft, #d9e1ec); }
-.contract-import-targets div { margin-block: 8px; }
-.contract-import-mode { display: flex; flex-wrap: wrap; gap: 14px; margin-block: 12px; padding: 12px; border: 1px solid var(--line-strong, #cbd5e1); border-radius: 8px; }
-.contract-import-mode legend { padding-inline: 4px; font-weight: 600; }
-.contract-import-mode label { display: inline-flex; align-items: center; gap: 6px; margin: 0; }
-.contract-import-mode input { margin: 0; }
-.contract-import-normal-modes { display: flex; flex-wrap: wrap; gap: 14px; margin-block: 12px; padding: 12px; border: 1px solid var(--line-strong, #cbd5e1); border-radius: 8px; }
-.contract-import-normal-modes legend { padding-inline: 4px; font-weight: 600; }
-.contract-import-normal-modes label { display: inline-flex; align-items: center; gap: 6px; margin: 0; }
+   token 在浅色下的取值与回退一致（--surface-tint 一类只在深色定义的除外），
+   浅色渲染不变；深色下取 main.css 的值。 */
+
+/* ── 面板骨架 ─────────────────────────────────────────────────────────── */
+.contract-import-panel {
+  margin-block: 16px;
+  color: var(--text, #0f172a);
+  font-size: 13px;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 14px;
+  background: var(--surface-card, #fff);
+  box-shadow: var(--shadow-card);
+}
+
+.contract-import-panel > summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 15px 18px;
+  color: var(--text, #0f172a);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  cursor: pointer;
+  border-radius: 14px;
+  list-style: none;
+  transition: background var(--duration-fast) ease;
+}
+
+.contract-import-panel > summary::-webkit-details-marker { display: none; }
+.contract-import-panel > summary::marker { content: ''; }
+.contract-import-panel > summary:hover { background: var(--surface-muted, #f8fafc); }
+
+/* 折叠指示：静态用 CSS 三角形，展开时旋转 90°，不额外引入图标组件。 */
+.contract-import-panel > summary::before {
+  width: 0;
+  height: 0;
+  flex: 0 0 auto;
+  content: '';
+  border-block: 4.5px solid transparent;
+  border-inline-start: 6px solid var(--text-muted, #64748b);
+  transition: transform var(--duration-fast) ease;
+}
+
+/* 折叠标题是面板的第一个键盘落点，焦点环沿用全局配色（深色下更亮）。 */
+.contract-import-panel > summary:focus-visible,
+.contract-import-advanced > summary:focus-visible {
+  outline: 2px solid var(--focus-ring, #2563eb);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+.contract-import-panel[open] > summary::before { transform: rotate(90deg); }
+.contract-import-panel[open] > summary { border-end-end-radius: 0; border-end-start-radius: 0; }
+
+/* ── 纵向节奏：所有区块共用一套间距 ──────────────────────────────────── */
+.contract-import-body {
+  display: grid;
+  gap: 16px;
+  padding: 0 18px 18px;
+}
+
+.contract-import-body p { margin: 0; overflow-wrap: anywhere; }
+:where(.contract-import-body label) { display: block; margin: 0; }
+.contract-import-body input { max-width: 100%; }
+
+.contract-import-intro {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--surface-muted, #f8fafc);
+}
+
+.contract-import-lede { color: var(--text-secondary, #475569); font-size: 12.5px; line-height: 1.7; }
+.contract-import-note { color: var(--text-muted, #64748b); font-size: 12px; line-height: 1.7; }
+.contract-import-hint { color: var(--text-secondary, #475569); font-size: 12px; line-height: 1.7; }
+
+/* 主线：选方式 → 选原件 → 预检 → 核问题 → 提交。只表达流程，不表达进度。 */
+.contract-import-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 0;
+  margin: 0;
+  padding: 0;
+  color: var(--text-muted, #64748b);
+  font-size: 12px;
+  list-style: none;
+  counter-reset: contract-import-step;
+}
+
+.contract-import-steps li {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding-inline-end: 14px;
+  counter-increment: contract-import-step;
+}
+
+.contract-import-steps li::before {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  place-items: center;
+  content: counter(contract-import-step);
+  color: var(--primary-ink, #1d4ed8);
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: var(--r-full, 999px);
+  background: var(--primary-soft, #eff6ff);
+}
+
+.contract-import-steps li:not(:last-child)::after {
+  width: 12px;
+  height: 1px;
+  margin-inline-start: 7px;
+  content: '';
+  background: var(--border, #e2e8f0);
+}
+
+/* ── 区块容器与区头 ──────────────────────────────────────────────────── */
+.contract-import-block {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 12px;
+}
+
+.contract-import-block-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line-soft, #edf0f5);
+}
+
+.contract-import-batch-id { color: var(--text, #0f172a); font-size: 13px; font-weight: 600; line-height: 1.5; }
+.contract-import-batch-meta { display: flex; flex-wrap: wrap; gap: 4px 16px; color: var(--text-muted, #64748b); font-size: 12px; }
+.contract-import-batch-meta p { color: inherit; font-size: inherit; line-height: 1.6; }
+
+/* ── 批次工具条 ──────────────────────────────────────────────────────── */
+.contract-import-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.contract-import-toolbar .contract-import-field { flex: 1 1 220px; min-width: 0; }
+
+.contract-import-field {
+  display: grid;
+  gap: 5px;
+  align-items: start;
+  margin: 0;
+  color: var(--text-secondary, #475569);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.contract-import-field input:not([type='checkbox']):not([type='file']) {
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 10px;
+  color: var(--text, #0f172a);
+  font-size: 12.5px;
+  font-weight: 400;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 8px;
+  background: var(--surface-input, #fff);
+  transition: border-color var(--duration-fast) ease;
+}
+
+.contract-import-field input:not([type='checkbox']):not([type='file']):focus { border-color: var(--border-brand-strong, #93c5fd); }
+
+/* 批次列表 / 分页：把「选中的批次」与「翻页」分成两组，用间距而不是边框区分。 */
+.contract-import-task-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.contract-import-pager { padding-top: 10px; border-top: 1px dashed var(--border, #e2e8f0); }
+
+/* 面板内没有专门样式的按钮（批次项、分页、目标放行等）统一成同一尺寸。 */
+.contract-import-body button:not(.contract-button):not(.contract-text-button) {
+  padding: 6px 12px;
+  color: var(--text-secondary, #475569);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 8px;
+  background: var(--surface-raised, #fff);
+  transition: color var(--duration-fast) ease, border-color var(--duration-fast) ease, background var(--duration-fast) ease;
+}
+
+.contract-import-body button:not(.contract-button):not(.contract-text-button):hover {
+  color: var(--primary-dark, #1d4ed8);
+  border-color: var(--border-brand-strong, #93c5fd);
+  background: var(--primary-soft, #eff6ff);
+}
+
+.contract-import-body button:disabled { cursor: not-allowed; opacity: .55; }
+
+/* ── 导入方式 / 填写方式：单选药丸 ──────────────────────────────────── */
+.contract-import-mode,
+.contract-import-normal-modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 12px 14px 14px;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 10px;
+  background: var(--surface-muted, #f8fafc);
+}
+
+.contract-import-mode legend,
+.contract-import-normal-modes legend {
+  padding-inline: 6px;
+  color: var(--text, #0f172a);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.contract-import-mode label,
+.contract-import-normal-modes label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  padding: 7px 12px;
+  color: var(--text-secondary, #475569);
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.4;
+  cursor: pointer;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: var(--r-full, 999px);
+  background: var(--surface-raised, #fff);
+  transition: color var(--duration-fast) ease, border-color var(--duration-fast) ease, background var(--duration-fast) ease;
+}
+
+.contract-import-mode label:hover,
+.contract-import-normal-modes label:hover { border-color: var(--border-brand-strong, #93c5fd); }
+
+.contract-import-mode label:has(input:checked),
+.contract-import-normal-modes label:has(input:checked) {
+  color: var(--primary-dark, #1d4ed8);
+  border-color: var(--primary-border, #bfdbfe);
+  background: var(--primary-soft, #eff6ff);
+}
+
+.contract-import-mode label:has(input:focus-visible),
+.contract-import-normal-modes label:has(input:focus-visible) {
+  outline: 2px solid var(--primary, #2563eb);
+  outline-offset: 2px;
+}
+
+.contract-import-mode input,
 .contract-import-normal-modes input { margin: 0; }
-.contract-import-excel-summary { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-block: 10px; padding: 10px 12px; color: var(--text, #0f172a); font-size: 12px; border: 1px solid var(--primary-border, #bfdbfe); border-radius: 8px; background: var(--primary-soft, #eff6ff); }
-.contract-import-provision { margin-block: 10px; padding: 10px 12px; color: var(--text, #0f172a); font-size: 12px; border: 1px solid var(--primary-border, #bfdbfe); border-radius: 8px; background: var(--primary-soft, #eff6ff); }
-.contract-import-provision p { margin-block: 0 8px; }
-.contract-import-provision table { font-size: 12px; }
-.contract-import-excel-issues { margin-block: 10px; padding: 10px 12px; color: var(--danger-ink, #7f1d1d); font-size: 12px; border: 1px solid var(--danger-border, #fecaca); border-radius: 8px; background: var(--danger-soft, #fef2f2); }
-.contract-import-excel-issues p { margin-block: 0 6px; }
+
+.contract-import-mode:disabled label,
+.contract-import-normal-modes:disabled label { cursor: not-allowed; opacity: .6; }
+
+/* ── 步骤区（拖放 + 状态） ──────────────────────────────────────────── */
+.contract-import-stage { gap: 14px; }
+.contract-import-step { display: grid; gap: 10px; }
+
+.contract-import-dropzone {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 15px 16px;
+  border: 1px dashed var(--border-brand-strong, #93c5fd);
+  border-radius: 10px;
+  background: var(--surface-tint, #f8fbff);
+  transition: border-color var(--duration-fast) ease;
+}
+
+.contract-import-dropzone:focus-within { border-color: var(--primary, #2563eb); }
+.contract-import-dropzone label { margin: 0; color: var(--text, #0f172a); font-size: 12.5px; font-weight: 600; line-height: 1.5; }
+
+.contract-import-dropzone input[type='file'] {
+  width: 100%;
+  max-width: 100%;
+  padding: 0;
+  color: var(--text-muted, #64748b);
+  font-size: 12px;
+  cursor: pointer;
+  border: 0;
+  background: transparent;
+}
+
+.contract-import-dropzone input[type='file']::file-selector-button {
+  margin-inline-end: 10px;
+  padding: 7px 12px;
+  color: var(--text-secondary, #475569);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 8px;
+  background: var(--surface-raised, #fff);
+  transition: color var(--duration-fast) ease, border-color var(--duration-fast) ease;
+}
+
+.contract-import-dropzone input[type='file']::file-selector-button:hover {
+  color: var(--primary-dark, #1d4ed8);
+  border-color: var(--border-brand-strong, #93c5fd);
+}
+
+.contract-import-file-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+
+.contract-import-file-list li {
+  display: inline-flex;
+  max-width: 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 6px;
+  padding: 4px 4px 4px 11px;
+  color: var(--text-secondary, #475569);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: var(--r-full, 999px);
+  background: var(--surface-muted, #f8fafc);
+}
+
+/* ── 行卡片：主信息在头部与字段网格，次要信息降为小字 ────────────────── */
+.contract-import-rows { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+
+.contract-import-row {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 10px;
+  background: var(--surface-card, #fff);
+}
+
+.contract-import-row-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+
+.contract-import-row-id { display: grid; min-width: 0; gap: 2px; }
+.contract-import-row-id strong { color: var(--text, #0f172a); font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.contract-import-row-id span { color: var(--text-muted, #64748b); font-size: 11.5px; line-height: 1.5; }
+.contract-import-row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 4px; }
+.contract-import-row-key { color: var(--text-secondary, #475569); font-size: 12px; line-height: 1.6; }
+
+/* 事实清单：窄屏一列、宽屏自动多列，标签在上、值在下，不靠 <br> 折行。 */
+.contract-import-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px 18px;
+  margin: 0;
+}
+
+.contract-import-facts > div { display: grid; min-width: 0; gap: 2px; }
+.contract-import-facts dt { color: var(--text-muted, #64748b); font-size: 11.5px; font-weight: 500; line-height: 1.5; }
+.contract-import-facts dd { min-width: 0; margin: 0; color: var(--text, #0f172a); font-size: 12.5px; line-height: 1.55; overflow-wrap: anywhere; }
+
+.contract-import-facts--inline {
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: baseline;
+  gap: 5px 10px;
+}
+
+.contract-import-facts--inline dt { color: var(--text-muted, #64748b); font-size: 12px; font-weight: 500; }
+.contract-import-facts--inline dd { color: var(--text-secondary, #475569); font-size: 12px; }
+.contract-import-fact-extra { display: block; margin-top: 2px; color: var(--text-muted, #64748b); font-size: 11.5px; font-weight: 400; line-height: 1.5; }
+
+.contract-import-empty {
+  padding: 20px 16px;
+  color: var(--text-muted, #64748b);
+  font-size: 12.5px;
+  line-height: 1.7;
+  text-align: center;
+  border: 1px dashed var(--border, #e2e8f0);
+  border-radius: 10px;
+  background: var(--surface-muted, #f8fafc);
+}
+
+/* ── 长列表：容器自带滚动，动作区留在容器外的常驻页脚 ────────────────── */
+/* 滚动发生在容器内部，所以页面流里不再有「很长的列表把按钮顶到很远」这件事，
+   也不需要视图层 sticky（那会盖住下面的区块、并在流程里留下空白）。
+   用 max-height 而不是 height：只有长列表被截住，短列表自然收起、不留空档。
+   可滚提示走两条不会看错的信号：
+     1) 明确的「窗口」边界——描边、圆角、淡底托盘；
+     2) 上下两条 sticky 渐变遮罩：用 position: sticky 贴在滚动视口的内沿，
+        高度靠负外边距抵掉，所以不占布局；内容在切口处渐隐，
+        原本被硬切一半的卡片因此读起来是「后面还有」。
+   遮罩用托盘色而不是深色阴影：浅色下是白雾、深色下是深雾，两端都不出现脏边。
+   容器 tabindex="0"，键盘可以把焦点放进来直接上下翻，焦点环沿用面板约定。 */
+.contract-import-listframe {
+  max-height: min(60vh, 520px);
+  padding: 10px;
+  overflow-y: auto;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 12px;
+  background: var(--surface-muted, #f8fafc);
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb, #cbd5e1) transparent;
+}
+
+.contract-import-listframe::before,
+.contract-import-listframe::after {
+  position: sticky;
+  z-index: 1;
+  display: block;
+  height: 24px;
+  pointer-events: none;
+  content: '';
+}
+
+.contract-import-listframe::before {
+  top: 0;
+  margin-bottom: -24px;
+  background: linear-gradient(to bottom, var(--surface-muted, #f8fafc) 40%, transparent);
+}
+
+.contract-import-listframe::after {
+  bottom: 0;
+  margin-top: -24px;
+  background: linear-gradient(to top, var(--surface-muted, #f8fafc) 40%, transparent);
+}
+
+.contract-import-listframe:focus-visible {
+  border-color: var(--border-brand-strong, #93c5fd);
+  outline: 2px solid var(--focus-ring, #2563eb);
+  outline-offset: 2px;
+  border-radius: 12px;
+}
+
+.contract-import-listframe::-webkit-scrollbar { width: 8px; }
+.contract-import-listframe::-webkit-scrollbar-track { background: transparent; }
+
+.contract-import-listframe::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--scrollbar-thumb, #cbd5e1);
+  background-clip: padding-box;
+}
+
+.contract-import-listframe::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover, #94a3b8);
+  background-clip: padding-box;
+}
+
+/* ── 批次逐项：主信息 / 次要信息两栏，问题整行铺开 ──────────────────── */
+.contract-import-batch-items { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+
+.contract-import-batch-item {
+  display: grid;
+  gap: 10px 20px;
+  padding: 12px 14px;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 10px;
+  background: var(--surface-card, #fff);
+}
+
+.contract-import-batch-item-main { display: grid; min-width: 0; gap: 4px; align-content: start; }
+.contract-import-batch-item-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; color: var(--text, #0f172a); font-size: 13px; }
+.contract-import-batch-item-title strong { font-weight: 600; overflow-wrap: anywhere; }
+.contract-import-batch-item-title span { color: var(--text-muted, #64748b); font-size: 11.5px; }
+.contract-import-batch-item-state { color: var(--text-secondary, #475569); font-size: 12px; font-weight: 600; line-height: 1.5; }
+.contract-import-batch-item-contract { color: var(--text-muted, #64748b); font-size: 11.5px; line-height: 1.5; overflow-wrap: anywhere; }
+.contract-import-batch-item-main .contract-text-button { justify-self: start; }
+.contract-import-batch-item-side { min-width: 0; }
+.contract-import-batch-item-issues { min-width: 0; padding-top: 8px; border-top: 1px dashed var(--border, #e2e8f0); }
+
+/* 问题列表：默认（阻断）走危险色，可恢复的走警示色，色差之外还有「（可恢复）」文字。 */
+.contract-import-issues-title { color: var(--text-muted, #64748b); font-size: 11.5px; font-weight: 600; }
+.contract-import-issues { display: grid; gap: 4px; margin: 6px 0 0; padding: 0; list-style: none; }
+.contract-import-issues-empty { margin-top: 6px; color: var(--text-muted, #64748b); font-size: 12px; }
+
+.contract-import-issue {
+  padding: 6px 10px;
+  color: var(--danger-text, #b91c1c);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  border-inline-start: 3px solid var(--danger, #dc2626);
+  border-radius: 0 6px 6px 0;
+  background: var(--danger-soft, #fef2f2);
+}
+
+.contract-import-issue.is-retryable {
+  color: var(--warning-ink, #92400e);
+  border-inline-start-color: var(--warning, #d97706);
+  background: var(--warning-soft, #fef3c7);
+}
+
+/* ── CRM 开立计划 ───────────────────────────────────────────────────── */
+.contract-import-provision {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 12px 14px;
+  color: var(--text-secondary, #475569);
+  font-size: 12px;
+  border: 1px solid var(--primary-border, #bfdbfe);
+  border-radius: 10px;
+  background: var(--primary-soft, #eff6ff);
+}
+
+.contract-import-provision > p { color: inherit; font-size: inherit; line-height: 1.7; }
+.contract-import-provision-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+
+.contract-import-provision-item {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--primary-border, #bfdbfe);
+  border-radius: 8px;
+  background: var(--surface-card, #fff);
+}
+
+.contract-import-provision-title { color: var(--text, #0f172a); font-size: 12.5px; font-weight: 600; overflow-wrap: anywhere; }
+.contract-import-provision-opportunity { color: var(--text-muted, #64748b); font-size: 12px; line-height: 1.6; }
+
+/* ── 状态 / 提示 / 危险条 ───────────────────────────────────────────── */
+.contract-import-status { color: var(--text-secondary, #475569); font-size: 12px; line-height: 1.7; }
+.contract-import-status.is-loading { display: flex; align-items: center; gap: 8px; }
+
+.contract-import-status.is-loading::before {
+  width: 11px;
+  height: 11px;
+  flex: 0 0 auto;
+  content: '';
+  border: 2px solid var(--border, #e2e8f0);
+  border-top-color: var(--primary, #2563eb);
+  border-radius: var(--r-full, 999px);
+  animation: contract-import-spin .8s linear infinite;
+}
+
+@keyframes contract-import-spin { to { transform: rotate(360deg); } }
+
+.contract-import-alert {
+  padding: 10px 12px;
+  color: var(--danger-text, #b91c1c);
+  font-size: 12px;
+  line-height: 1.7;
+  border: 1px solid var(--danger-border, #fecaca);
+  border-radius: 10px;
+  background: var(--danger-soft, #fef2f2);
+}
+
+.contract-import-alert .contract-import-hint { display: inline; color: var(--text-secondary, #475569); }
+
+/* 可恢复的待处理状态（例如 CRM 会话缺失）用警示色，危险色只留给真正的失败。 */
+.contract-import-alert--warn {
+  color: var(--warning-ink, #92400e);
+  border-color: var(--warning-border, #fcd34d);
+  background: var(--warning-soft, #fef3c7);
+}
+.contract-import-error-text { color: var(--danger-text, #b91c1c); font-size: 12px; }
+
+.contract-import-warning {
+  padding: 10px 12px;
+  color: var(--warning-ink, #92400e);
+  font-size: 12px;
+  line-height: 1.7;
+  border: 1px solid var(--warning-border, #fcd34d);
+  border-radius: 10px;
+  background: var(--warning-soft-strong, #fffbeb);
+}
+
+.contract-import-excel-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  padding: 10px 12px;
+  color: var(--text, #0f172a);
+  font-size: 12px;
+  border: 1px solid var(--primary-border, #bfdbfe);
+  border-radius: 10px;
+  background: var(--primary-soft, #eff6ff);
+}
+
+.contract-import-excel-summary span { white-space: nowrap; }
+
+.contract-import-excel-issues {
+  padding: 10px 12px;
+  color: var(--danger-ink, #7f1d1d);
+  font-size: 12px;
+  line-height: 1.6;
+  border: 1px solid var(--danger-border, #fecaca);
+  border-radius: 10px;
+  background: var(--danger-soft, #fef2f2);
+}
+
+.contract-import-excel-issues p { margin-block: 0 6px; color: inherit; font-size: inherit; }
 .contract-import-excel-issues ul { max-height: 220px; margin: 0; padding-inline-start: 20px; overflow: auto; }
 .contract-import-excel-issues li { margin-block: 3px; overflow-wrap: anywhere; }
-.contract-import-hint { color: var(--text-secondary, #475569); font-size: 12px; }
-.contract-import-warning { padding: 10px 12px; color: var(--warning-ink, #92400e); font-size: 12px; border: 1px solid var(--warning-border, #fcd34d); border-radius: 8px; background: var(--warning-soft-strong, #fffbeb); }
-.contract-import-error { color: var(--danger-text, #b91c1c); font-size: 12px; }
-.contract-import-error-text { color: var(--danger-text, #b91c1c); font-size: 12px; }
-.contract-import-issue { margin: 0 0 6px; color: var(--danger-text, #b91c1c); font-size: 12px; }
-.contract-import-rows { min-width: 1080px; }
-.contract-import-dropzone { margin-block: 12px; padding: 14px; border: 1px dashed var(--border-brand-strong, #93c5fd); border-radius: 9px; background: var(--surface-tint, #f8fbff); }
-.contract-import-dropzone label { margin: 0 0 8px; }
-.contract-import-advanced { margin-block: 14px; padding: 12px; border: 1px dashed var(--line-strong, #cbd5e1); border-radius: 8px; }
-.contract-import-advanced summary { cursor: pointer; font-weight: 600; }
-.contract-import-advanced textarea[readonly] { background: var(--surface-muted, #f8fafc); }
-.contract-import-check { display: flex; align-items: flex-start; gap: 8px; }
-.contract-import-check input { margin-top: 3px; }
+
+/* ── 历史确认与分目标接续 ───────────────────────────────────────────── */
+.contract-import-history h3 { margin: 0; color: var(--text, #0f172a); font-size: 13.5px; font-weight: 600; }
+
+.contract-import-targets {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 10px;
+  background: var(--surface-muted, #f8fafc);
+}
+
+.contract-import-targets h4 { margin: 0; color: var(--text, #0f172a); font-size: 12.5px; font-weight: 600; overflow-wrap: anywhere; }
+.contract-import-target-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+
+.contract-import-target {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 8px;
+  background: var(--surface-card, #fff);
+}
+
+.contract-import-target-head { color: var(--text-secondary, #475569); font-size: 12px; line-height: 1.6; }
+.contract-import-target-head strong { color: var(--text, #0f172a); font-weight: 600; }
+.contract-import-target > a { color: var(--primary-ink, #1d4ed8); font-size: 12px; }
+.contract-import-body a { color: var(--primary-ink, #1d4ed8); }
+
+/* ── 动作区：固定在区块视觉终点（贴底、整幅通栏），不与长列表争位置 ──── */
 .contract-import-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .contract-import-actions span { color: var(--text-secondary, #475569); font-size: 12px; }
-.contract-import-file-list { padding-inline-start: 20px; font-size: 12px; }
-.contract-import-file-list li { margin-block: 4px; }
+
+.contract-import-actions--footer {
+  justify-content: space-between;
+  gap: 10px 18px;
+  margin: 2px -16px -16px;
+  padding: 13px 16px;
+  border-top: 1px solid var(--line-soft, #edf0f5);
+  border-radius: 0 0 12px 12px;
+  background: var(--surface-muted, #f8fafc);
+}
+
+.contract-import-actions--footer .contract-import-hint { flex: 1 1 320px; min-width: 0; }
+
+/* 批次结果的常驻页脚：与导入表单的 --footer 同一套视觉语言（通栏、描边分隔、
+   淡底、贴住区块圆角），但内容是「备注 + 动作」两段，所以用 grid 排而不是 flex。
+   它不在滚动容器里，列表滚多远都不会把它顶走，也不会盖住下一个区块。 */
+.contract-import-batch-foot {
+  display: grid;
+  gap: 10px;
+  margin: 2px -16px -16px;
+  padding: 13px 16px;
+  border-top: 1px solid var(--line-soft, #edf0f5);
+  border-radius: 0 0 12px 12px;
+  background: var(--surface-muted, #f8fafc);
+}
+
+/* ── 高级清单（默认折叠） ───────────────────────────────────────────── */
+.contract-import-advanced { border: 1px dashed var(--line-strong, #cbd5e1); border-radius: 10px; }
+
+.contract-import-advanced > summary {
+  padding: 12px 14px;
+  color: var(--text-secondary, #475569);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.contract-import-advanced-body { display: grid; gap: 10px; padding: 2px 14px 14px; }
+
+.contract-import-advanced textarea[readonly] { background: var(--surface-muted, #f8fafc); }
+
+.contract-import-check { display: flex; align-items: flex-start; gap: 8px; color: var(--text-secondary, #475569); font-size: 12px; line-height: 1.6; }
+.contract-import-check input { margin-top: 3px; }
+
+.contract-import-body textarea {
+  display: block;
+  width: 100%;
+  padding: 10px 12px;
+  color: var(--text, #0f172a);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  resize: vertical;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 10px;
+  background: var(--surface-input, #fff);
+}
+
+.contract-import-body textarea:focus { border-color: var(--border-brand-strong, #93c5fd); }
+.contract-import-document a { color: var(--primary-ink, #1d4ed8); font-size: 12.5px; }
+
+/* ── 单行编辑抽屉（结构沿用合同模块的弹窗规范） ─────────────────────── */
 .contract-import-drawer { width: min(1020px, 100%); }
 .contract-import-drawer label { display: flex; flex-direction: column; gap: 7px; margin: 0; color: var(--text-secondary, #475569); font-size: 12px; font-weight: 600; }
 .contract-import-drawer label > small { color: var(--text-muted, #64748b); font-size: 11px; font-weight: 400; }
@@ -1516,11 +2265,55 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
 .contract-import-drawer > header > button,.contract-import-drawer .contract-service-item > header > button { width: 30px; height: 30px; padding: 0; }
 .contract-import-drawer .contract-system-row > button { height: 36px; padding: 0; }
 .contract-import-drawer .contract-form-grid { gap: 12px; }
+
 .contract-import-customer-picker { padding: 12px; border: 1px solid var(--border-soft, #dbe3ee); border-radius: 9px; background: var(--surface-muted, #f8fafc); }
 .contract-import-customer-picker > span { color: var(--text-secondary, #475569); font-size: 12px; }
 .contract-import-customer-picker ul { display: grid; gap: 4px; max-height: 190px; margin: 8px 0 0; padding: 0; overflow: auto; list-style: none; }
 .contract-import-customer-picker li button { display: flex; width: 100%; justify-content: space-between; gap: 10px; padding: 8px 10px; text-align: left; border-radius: 7px; background: var(--surface-raised, #fff); }
 .contract-import-customer-picker li button:hover { background: var(--primary-soft, #eff6ff); }
 .contract-import-customer-picker li span { color: var(--text-muted, #64748b); font-size: 11px; }
-@media (max-width: 720px) { .contract-import-drawer { width: 100%; } .contract-import-mode { flex-direction: column; } }
+
+/* ── 响应式：窄屏改单列，不产生横向滚动、不叠字 ─────────────────────── */
+@media (min-width: 900px) {
+  .contract-import-batch-item { grid-template-columns: minmax(170px, 250px) minmax(0, 1fr); }
+  .contract-import-batch-item-issues { grid-column: 1 / -1; }
+  /* 行卡片：标题与客户各占半行，金额/币种/起止日期四种短字段排成一行。 */
+  .contract-import-row .contract-import-facts { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .contract-import-row .contract-import-fact-title,
+  .contract-import-row .contract-import-fact-party { grid-column: span 2; }
+}
+
+@media (max-width: 768px) {
+  .contract-import-body { gap: 14px; padding: 0 14px 14px; }
+  .contract-import-panel > summary { padding: 13px 14px; }
+  .contract-import-block { padding: 14px; }
+  .contract-import-toolbar { flex-direction: column; align-items: stretch; }
+  .contract-import-toolbar .contract-import-field { flex: 0 0 auto; }
+  .contract-import-toolbar > .contract-button { width: 100%; }
+  .contract-import-actions--footer { flex-direction: column; align-items: stretch; margin: 2px -14px -14px; padding: 13px 14px; }
+  .contract-import-actions--footer .contract-import-hint { flex: 0 0 auto; }
+  .contract-import-actions--footer .contract-button { width: 100%; }
+  /* 窄屏上列表最多占半屏多一点，页脚离得近；动作按钮整幅排开，手指好点。 */
+  .contract-import-listframe { max-height: min(56vh, 460px); padding: 8px; }
+  .contract-import-batch-foot { margin: 2px -14px -14px; padding: 13px 14px; }
+  .contract-import-batch-foot .contract-import-actions { flex-direction: column; align-items: stretch; }
+  .contract-import-batch-foot .contract-button { width: 100%; }
+  .contract-import-facts { grid-template-columns: minmax(0, 1fr); }
+  .contract-import-facts--inline { grid-template-columns: max-content minmax(0, 1fr); }
+  .contract-import-facts--inline dt { font-size: 11.5px; }
+  .contract-import-row-head { align-items: stretch; flex-direction: column; }
+  .contract-import-task-list > button { flex: 1 1 auto; }
+  .contract-import-steps { font-size: 11.5px; }
+}
+
+@media (max-width: 720px) {
+  .contract-import-drawer { width: 100%; }
+  .contract-import-mode, .contract-import-normal-modes { flex-direction: column; align-items: stretch; }
+  .contract-import-mode label, .contract-import-normal-modes label { justify-content: flex-start; border-radius: 8px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .contract-import-status.is-loading::before { animation: none; }
+  .contract-import-panel > summary::before { transition: none; }
+}
 </style>
