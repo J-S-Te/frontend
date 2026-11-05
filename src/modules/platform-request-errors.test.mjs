@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { afterEach, test } from 'node:test'
 import { createRequest } from './platform/shared/api/request.js'
-import { AuthError, loginWithPassword, getCurrentPrincipal, refreshCurrentSession, changeOwnPassword, logoutCurrentSession } from './platform/auth/api/auth.js'
+import { AuthError, loginWithPassword, getCurrentPrincipal, invalidateCurrentPrincipalCache, refreshCurrentSession, changeOwnPassword, logoutCurrentSession } from './platform/auth/api/auth.js'
 import { readFileSync } from 'node:fs'
 import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc'
 
@@ -93,6 +93,9 @@ test('auth rejects contradictory or incomplete 2xx JSON without changing the cur
 })
 
 test('auth accepts real session contracts, retains account-switch guard and rejects missing principal data', async () => {
+  // `/auth/me` 有 5s 短缓存（单飞 + TTL）：本用例要验证的是服务端返回不完整主体时
+  // 必须失败，因此先作废上一个用例留下的成功缓存，断言本身不放松。
+  invalidateCurrentPrincipalCache()
   for (const data of [{}, null, [], { user: { id: 'fixture-user' } }]) {
     globalThis.fetch = async () => response(200, { code: 'OK', data })
     await assert.rejects(getCurrentPrincipal(), error => error.code === 'INVALID_RESPONSE' && error.request_method === 'GET')

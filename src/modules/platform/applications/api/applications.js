@@ -30,6 +30,31 @@ const request = createRequest({
   subsystem: 'platform',
   feature: 'applications',
 })
+
+/**
+ * 部署 Agent 相关端点单次请求的长超时（毫秒）。
+ *
+ * 这些端点在服务端同步执行容器编排、网关重载或 docker 子进程（能力探测、发现、
+ * 重试、接管、切换、拆除），耗时远超普通 CRUD。统一给它们放大到 3 分钟，
+ * 避免请求层 20s 默认超时把仍在执行的部署误判成失败。
+ */
+const AGENT_REQUEST_TIMEOUT_MS = 180 * 1000
+
+/**
+ * agentRequest 以部署 Agent 长超时发起请求。
+ * @param {string} path 接口路径。
+ * @param {Object} [options] 请求选项；显式 timeoutMs 优先。
+ * @returns {Promise<any>} 接口数据。
+ */
+function agentRequest(path, options = {}) {
+  return request(path, { timeoutMs: AGENT_REQUEST_TIMEOUT_MS, ...options })
+}
+
+// 部署 Agent 能力快照：60s TTL + 单飞。能力由服务端部署模式决定，短时间内的
+// 重复读取没有意义，但失败结果绝不写入缓存。
+const CAPABILITIES_CACHE_TTL_MS = 60 * 1000
+let capabilitiesCache = null
+let capabilitiesInFlight = null
 /**
  * 只有服务端确认写入成功后才发布关联数据失效；应用、环境或运行时状态改变后，
  * 门户、登录目标和授权目标选择器必须重新读取，而不是继续使用打开页面时的快照。
@@ -245,7 +270,7 @@ export function registerSubsystemDirectory({
  * @throws {ApplicationRegistryError} 子系统不存在、无查询权限或部署服务不可用时抛出。
  */
 export function getSubsystemStatus({ applicationCode, environment } = {}) {
-  return request(`/subsystem-status${pageQuery({ application_code: applicationCode, environment })}`)
+  return agentRequest(`/subsystem-status${pageQuery({ application_code: applicationCode, environment })}`)
 }
 
 /**
@@ -306,11 +331,29 @@ export function replayKeycloakProjectionFailure({ eventId, confirmation, reason 
 
 /**
  * getSubsystemCapabilities 查询后端部署 Agent 的非敏感能力。
+ *
+ * 该端点会在服务端触发 Agent IPC 与 docker 子进程，且同一控制台里接入向导与
+ * 应用注册模块都会各读一次；这里加 60s TTL 缓存与单飞复用，避免每次打开面板
+ * 都重复拉起子进程。失败不缓存，下一次调用仍会真实重试。
+ *
  * @returns {Promise<Object>} 返回用于渲染接入表单的服务器能力。
  * @throws {ApplicationRegistryError} 无查询权限或部署 Agent 不可用时抛出。
  */
 export function getSubsystemCapabilities() {
-  return request('/subsystem-capabilities')
+  if (capabilitiesCache && capabilitiesCache.expiresAt > Date.now()) {
+    return Promise.resolve(capabilitiesCache.value)
+  }
+  if (capabilitiesInFlight) return capabilitiesInFlight
+  const promise = agentRequest('/subsystem-capabilities')
+    .then((value) => {
+      capabilitiesCache = { value, expiresAt: Date.now() + CAPABILITIES_CACHE_TTL_MS }
+      return value
+    })
+    .finally(() => {
+      if (capabilitiesInFlight === promise) capabilitiesInFlight = null
+    })
+  capabilitiesInFlight = promise
+  return promise
 }
 
 /**
@@ -319,7 +362,7 @@ export function getSubsystemCapabilities() {
  * @throws {ApplicationRegistryError} 无发现权限或 Docker 发现服务不可用时抛出。
  */
 export function discoverSubsystemCandidates() {
-  return request('/subsystem-discovery')
+  return agentRequest('/subsystem-discovery')
 }
 
 /**
@@ -329,7 +372,7 @@ export function discoverSubsystemCandidates() {
  * @throws {ApplicationRegistryError} 接入记录不存在、当前状态不允许重试或部署 Agent 不可用时抛出。
  */
 export function retrySubsystem({ applicationCode, environment, publicBaseUrl = '', upstreamUrl = '', pathPrefix = '', issuerAlias = '' } = {}) {
-  return onWriteSuccess(request('/subsystem-retry', {
+  return onWriteSuccess(agentRequest('/subsystem-retry', {
     method: 'POST',
     body: JSON.stringify({
       application_code: applicationCode,
@@ -350,7 +393,7 @@ export function retrySubsystem({ applicationCode, environment, publicBaseUrl = '
  * @throws {ApplicationRegistryError} 接管不受支持、运行时不健康、资源不存在或操作无权限时抛出。
  */
 export function adoptSubsystemRuntime({ applicationCode, environment, publicBaseUrl = '', upstreamUrl = '', pathPrefix = '', issuerAlias = '' } = {}) {
-  return onWriteSuccess(request('/subsystem-adoption', {
+  return onWriteSuccess(agentRequest('/subsystem-adoption', {
     method: 'POST',
     body: JSON.stringify({
       application_code: applicationCode,
@@ -370,7 +413,7 @@ export function adoptSubsystemRuntime({ applicationCode, environment, publicBase
  * @throws {ApplicationRegistryError} 配置无效、子系统不存在、部署失败或操作无权限时抛出。
  */
 export function updateSubsystemRuntime({ applicationCode, environment, publicBaseUrl = '', upstreamUrl = '', pathPrefix = '', issuerAlias = '' } = {}) {
-  return onWriteSuccess(request('/subsystem-update', {
+  return onWriteSuccess(agentRequest('/subsystem-update', {
     method: 'POST',
     body: JSON.stringify({
       application_code: applicationCode,
@@ -390,7 +433,7 @@ export function updateSubsystemRuntime({ applicationCode, environment, publicBas
  * @throws {ApplicationRegistryError} 接入记录不存在、地址配置无效、Keycloak 拒绝同步或操作无权限时抛出。
  */
 export function syncKeycloakClient({ applicationCode, environment, publicBaseUrl, upstreamUrl, pathPrefix } = {}) {
-  return onWriteSuccess(request('/keycloak-integration/sync', {
+  return onWriteSuccess(agentRequest('/keycloak-integration/sync', {
     method: 'POST',
     body: JSON.stringify({
       application_code: applicationCode,
@@ -409,7 +452,7 @@ export function syncKeycloakClient({ applicationCode, environment, publicBaseUrl
  * @throws {ApplicationRegistryError} Keycloak 尚未就绪、观察期不满足、配置无效或切换失败时抛出。
  */
 export function switchToKeycloak({ applicationCode, environment, publicBaseUrl = '', upstreamUrl = '', pathPrefix = '' } = {}) {
-  return onWriteSuccess(request('/keycloak-integration/switch', {
+  return onWriteSuccess(agentRequest('/keycloak-integration/switch', {
     method: 'POST',
     body: JSON.stringify({
       application_code: applicationCode,
@@ -428,7 +471,7 @@ export function switchToKeycloak({ applicationCode, environment, publicBaseUrl =
  * @throws {ApplicationRegistryError} 子系统不存在、配置无效、回滚失败或操作无权限时抛出。
  */
 export function rollbackToPlatform({ applicationCode, environment, publicBaseUrl = '', upstreamUrl = '', pathPrefix = '' } = {}) {
-  return onWriteSuccess(request('/keycloak-integration/rollback', {
+  return onWriteSuccess(agentRequest('/keycloak-integration/rollback', {
     method: 'POST',
     body: JSON.stringify({
       application_code: applicationCode,
@@ -447,7 +490,7 @@ export function rollbackToPlatform({ applicationCode, environment, publicBaseUrl
  * @throws {ApplicationRegistryError} 子系统不存在、当前状态不允许清理、Agent 执行失败或操作无权限时抛出。
  */
 export function teardownSubsystem({ applicationCode, environment } = {}) {
-  return onWriteSuccess(request('/subsystem-teardown', {
+  return onWriteSuccess(agentRequest('/subsystem-teardown', {
     method: 'POST',
     body: JSON.stringify({ application_code: applicationCode, environment }),
   }), ENVIRONMENT_WRITE_KINDS)
@@ -492,7 +535,7 @@ export function submitSubsystemAccessOperation({
   applicationCode = '', environment = '', publicOrigin = '', authProvider = '', initialAdminId = '',
   previewVersion = '', idempotencyKey = '',
 } = {}) {
-  return onWriteSuccess(request('/subsystem-access/operations', {
+  return onWriteSuccess(agentRequest('/subsystem-access/operations', {
     method: 'POST',
     body: JSON.stringify({
       application_code: applicationCode,
@@ -541,7 +584,7 @@ export function findSubsystemAccessOperation({ applicationCode = '', environment
  */
 export function resumeSubsystemAccessOperation(operationId) {
   const identifier = encodeURIComponent(String(operationId || '').trim())
-  return onWriteSuccess(request(`/subsystem-access/operations/${identifier}/resume`, {
+  return onWriteSuccess(agentRequest(`/subsystem-access/operations/${identifier}/resume`, {
     method: 'POST',
   }), SUBSYSTEM_ACCESS_WRITE_KINDS)
 }

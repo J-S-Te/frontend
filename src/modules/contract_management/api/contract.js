@@ -357,18 +357,30 @@ async function clearContractLocalSession() {
  */
 export async function ensureContractSession() {
   try {
-    const contractSession = await getContractSession({ force: true })
+    // 子系统 `/auth/me` 与平台 `/auth/me` 互不依赖，串行等待会让进入子系统的
+    // 导航多花一个往返。这里并行发起，但两侧失败语义保持原样：
+    //   · 平台侧失败仍被吞掉（平台暂时不可用不使合同 OIDC 会话失效）；
+    //   · 子系统侧失败仍由外层 shouldStartSubsystemLogin 分支处理。
+    const [contractSession, platformResult] = await Promise.all([
+      getContractSession({ force: true }),
+      getCurrentPrincipal().then(
+        (principal) => ({ ok: true, principal }),
+        (error) => ({ ok: false, error }),
+      ),
+    ])
     try {
-      const platformPrincipal = await getCurrentPrincipal()
-      const platformUserID = principalIdentityID(platformPrincipal)
-      const platformTenantID = String(platformPrincipal?.tenant_id || platformPrincipal?.tenant?.id || '')
-      const contractIdentityID = principalIdentityID(contractSession)
-      const userChanged = platformUserID && contractIdentityID && platformUserID !== contractIdentityID
-      const tenantChanged = platformTenantID && platformTenantID !== String(contractSession?.tenant_id || '')
-      if (userChanged || tenantChanged) {
-        await clearContractLocalSession()
-        startContractLogin({ force: true })
-        return null
+      if (platformResult.ok) {
+        const platformPrincipal = platformResult.principal
+        const platformUserID = principalIdentityID(platformPrincipal)
+        const platformTenantID = String(platformPrincipal?.tenant_id || platformPrincipal?.tenant?.id || '')
+        const contractIdentityID = principalIdentityID(contractSession)
+        const userChanged = platformUserID && contractIdentityID && platformUserID !== contractIdentityID
+        const tenantChanged = platformTenantID && platformTenantID !== String(contractSession?.tenant_id || '')
+        if (userChanged || tenantChanged) {
+          await clearContractLocalSession()
+          startContractLogin({ force: true })
+          return null
+        }
       }
     } catch {
       // 平台浏览器 Cookie 过期或平台 API 暂时不可用，并不自动使合同系统自己的

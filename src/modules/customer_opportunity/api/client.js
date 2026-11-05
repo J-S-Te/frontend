@@ -421,17 +421,27 @@ export function toQuery(params = {}) {
  * @throws {TypeError} 网络连接失败时抛出。
  */
 export async function ensureCRMSession() {
-  const crmSession = normalizeAuthorizationSession(await request('/auth/me'))
+  // CRM 自身 `/auth/me` 与平台 `/api/v1/auth/me` 互不依赖，并行发起可少一个往返；
+  // 失败语义不变：平台侧失败仍被吞掉，CRM 侧失败仍原样抛出。
+  const [crmSession, platformResult] = await Promise.all([
+    request('/auth/me').then((value) => normalizeAuthorizationSession(value)),
+    getPlatformPrincipalForSessionCheck().then(
+      (principal) => ({ ok: true, principal }),
+      (error) => ({ ok: false, error }),
+    ),
+  ])
   try {
-    const platformPrincipal = await getPlatformPrincipalForSessionCheck()
-    const platformIdentityID = principalIdentityID(platformPrincipal)
-    const crmIdentityID = principalIdentityID(crmSession)
-    const platformTenantID = String(platformPrincipal?.tenant_id || platformPrincipal?.tenant?.id || '')
-    const crmTenantID = String(crmSession?.tenant_id || '')
-    if ((platformIdentityID && crmIdentityID && platformIdentityID !== crmIdentityID) || (platformTenantID && crmTenantID && platformTenantID !== crmTenantID)) {
-      await clearCRMLocalSession()
-      startForcedCRMLogin()
-      return null
+    if (platformResult.ok) {
+      const platformPrincipal = platformResult.principal
+      const platformIdentityID = principalIdentityID(platformPrincipal)
+      const crmIdentityID = principalIdentityID(crmSession)
+      const platformTenantID = String(platformPrincipal?.tenant_id || platformPrincipal?.tenant?.id || '')
+      const crmTenantID = String(crmSession?.tenant_id || '')
+      if ((platformIdentityID && crmIdentityID && platformIdentityID !== crmIdentityID) || (platformTenantID && crmTenantID && platformTenantID !== crmTenantID)) {
+        await clearCRMLocalSession()
+        startForcedCRMLogin()
+        return null
+      }
     }
   } catch {
     // 平台短暂不可用时保留 CRM 自己的有效会话；平台恢复后下一次校验会完成切换。

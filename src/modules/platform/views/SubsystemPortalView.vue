@@ -157,25 +157,36 @@ function showToast(message, type = 'enter') {
 }
 
 async function loadPortalCatalog({ silent = false } = {}) {
+  // 目录单飞：首次加载、授权变更后的静默刷新与 3s 投影轮询可能同时触发，
+  // 同一时刻只允许一个请求在途，其余调用方复用同一个 Promise。
+  // 在途 Promise 挂在 loader 自身，使本函数保持自包含（单元测试按源码抽取该函数
+  // 单独执行，不依赖其它模块级状态）。
+  if (loadPortalCatalog.inFlight) return loadPortalCatalog.inFlight
   // 静默刷新（授权后台轮询）不切换加载状态、不清空已有卡片，避免门户每 15 秒
   // 出现“正在加载已接入的子系统…”并整体重绘；仅首次加载时显示加载态。
-  if (!silent) {
-    subsystemCatalogLoading.value = true
-    subsystemCatalogError.value = ''
-  }
-  try {
-    const data = await listPortalApplications({ environment: portalEnvironment })
-    registeredSubsystems.value = Array.isArray(data) ? data : []
-    if (silent) subsystemCatalogError.value = ''
-  } catch (error) {
+  const run = (async () => {
     if (!silent) {
-      registeredSubsystems.value = []
-      subsystemCatalogError.value = formatUserError(error, { fallback: '无法加载已接入的子系统。' })
+      subsystemCatalogLoading.value = true
+      subsystemCatalogError.value = ''
     }
-    // 静默刷新失败时保留当前卡片，避免后台轮询抖动破坏已展示的门户。
-  } finally {
-    subsystemCatalogLoading.value = false
-  }
+    try {
+      const data = await listPortalApplications({ environment: portalEnvironment })
+      registeredSubsystems.value = Array.isArray(data) ? data : []
+      if (silent) subsystemCatalogError.value = ''
+    } catch (error) {
+      if (!silent) {
+        registeredSubsystems.value = []
+        subsystemCatalogError.value = formatUserError(error, { fallback: '无法加载已接入的子系统。' })
+      }
+      // 静默刷新失败时保留当前卡片，避免后台轮询抖动破坏已展示的门户。
+    } finally {
+      subsystemCatalogLoading.value = false
+    }
+  })()
+  loadPortalCatalog.inFlight = run.finally(() => {
+    loadPortalCatalog.inFlight = null
+  })
+  return loadPortalCatalog.inFlight
 }
 
 function onAuthorizationRefreshed(event) {
@@ -631,6 +642,12 @@ onBeforeUnmount(() => {
         {{ subsystemCatalogError }}
         <button class="subsystem-portal__catalog-retry" type="button" :disabled="subsystemCatalogLoading" @click="loadPortalCatalog()">重试</button>
       </p>
+      <!-- 首屏加载与“确实没有可访问子系统”必须区分：加载中不再误报为空态。 -->
+      <p v-else-if="subsystemCatalogLoading"
+        class="subsystem-portal__catalog-status is-loading"
+        role="status"
+        aria-live="polite"
+      >正在加载已接入的业务子系统…</p>
       <p v-else-if="registeredSubsystems.length === 0" class="subsystem-portal__catalog-status">当前账号暂无可访问的业务子系统。若子系统已经接入，请联系平台管理员为当前用户分配对应应用角色。</p>
 
       <div
@@ -638,6 +655,7 @@ onBeforeUnmount(() => {
         :data-density="portalGrid.density"
         :style="portalGridStyle"
         aria-label="子系统列表"
+        :aria-busy="subsystemCatalogLoading ? 'true' : 'false'"
       >
         <button
           v-for="(subsystem, index) in visibleSubsystems"
