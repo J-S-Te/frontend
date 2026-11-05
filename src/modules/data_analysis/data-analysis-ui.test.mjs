@@ -2,7 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import { parse, compileTemplate } from '@vue/compiler-sfc'
+import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc'
 
 const shell = await readFile(new URL('./views/DashboardShellView.vue', import.meta.url), 'utf8')
 const native = await readFile(new URL('./views/NativeDashboardView.vue', import.meta.url), 'utf8')
@@ -75,6 +75,10 @@ test('合同和项目看板展示聚合库最新摘要', () => {
   for (const field of ['project_count', 'in_flight_projects', 'risk_projects', 'service_items', 'status_counts']) {
     assert.match(native, new RegExp(`project(?:Summary)?[^\\n]*${field}|project\\.${field}`))
   }
+  // 项目分区新增「整改中项目」卡：只读后端可选字段 report_stage_counts，缺失时显示未采集。
+  assert.match(native, /report_stage_counts/)
+  assert.match(native, /整改中项目/)
+  assert.match(native, /未采集/)
   assert.match(native, /formatAmountMinor/)
   assert.match(native, /currency_totals/)
   assert.match(native, /dashboardFreshnessItems/)
@@ -86,7 +90,10 @@ test('合同和项目看板展示聚合库最新摘要', () => {
 test('NativeDashboardView 模板可编译，时间口径面板可用于真实渲染', () => {
   const { descriptor, errors } = parse(native, { filename: 'NativeDashboardView.vue' })
   assert.deepEqual(errors, [])
-  const compiled = compileTemplate({ source: descriptor.template.content, filename: 'NativeDashboardView.vue', id: 'native-dashboard' })
+  // 指标卡开关接入了更多响应式状态：脚本也要能编译，避免模板能过、脚本语法坏掉。
+  const script = compileScript(descriptor, { id: 'native-dashboard' })
+  assert.ok(script.content.includes('setup('))
+  const compiled = compileTemplate({ source: descriptor.template.content, filename: 'NativeDashboardView.vue', id: 'native-dashboard', compilerOptions: { bindingMetadata: script.bindings } })
   assert.deepEqual(compiled.errors, [])
 })
 

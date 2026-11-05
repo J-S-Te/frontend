@@ -252,12 +252,50 @@
 .da-native-dashboard { margin-bottom: 16px; }
 .da-native-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
 .da-native-heading h2 { margin: 4px 0 0; color: var(--da-ink, #0f172a); font-size: 15px; font-weight: 600; }
-.da-native-metrics { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
-.da-native-metric { min-height: 92px; padding: 14px 16px; border: 1px solid var(--da-line, #e4ecfc); border-radius: 12px; background: #fff; box-shadow: var(--da-shadow, 0 1px 3px rgba(15, 23, 42, .06)); }
+.da-native-metrics { --da-metric-columns: 6; display: grid; grid-template-columns: repeat(var(--da-metric-columns), minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
+.da-native-metric { min-height: 92px; padding: 14px 16px; border: 1px solid var(--da-line, #e4ecfc); border-radius: 12px; background: var(--surface-card, #fff); box-shadow: var(--da-shadow, 0 1px 3px rgba(15, 23, 42, .06)); }
 .da-native-metric span { display: block; color: var(--da-muted, #64748b); font-size: 12px; }
 .da-native-metric strong { display: inline-block; margin-top: 8px; color: var(--da-ink, #0f172a); font-size: 24px; line-height: 1; }
 .da-native-metric small { margin-left: 4px; color: var(--da-muted, #64748b); font-size: 12px; }
-.da-native-metric.danger strong { color: #dc2626; }
+.da-native-metric.danger strong { color: var(--danger-ink, #dc2626); }
+.da-native-metric.warn strong { color: var(--da-amber-text, #b45309); }
+.da-native-metric-meta { margin: 6px 0 0; color: var(--da-muted, #64748b); font-size: 11px; }
+/* 指标卡显示设置：只重排本分区卡片，不改看板栅格与配色。 */
+.da-native-metrics-toolbar { display: flex; justify-content: flex-end; margin: 0 0 8px; }
+.da-native-card-settings { position: relative; }
+.da-native-card-settings-trigger { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; color: var(--da-body, #334155); font: inherit; font-size: 12px; border: 1px solid var(--da-line, #e4ecfc); border-radius: 8px; background: var(--surface-card, #fff); cursor: pointer; transition: border-color .15s ease, background .15s ease; }
+.da-native-card-settings-trigger:hover { border-color: var(--border-soft, #c7dbfa); background: var(--surface-tint, #f8fbff); }
+.da-native-card-settings-trigger:focus-visible { outline: 2px solid rgba(37, 99, 235, .35); outline-offset: 2px; }
+.da-native-card-settings-trigger em { padding: 0 6px; color: var(--primary-ink, #2563eb); font-size: 11px; font-style: normal; border-radius: 999px; background: var(--primary-soft, #eff6ff); }
+.da-native-card-settings-panel { position: absolute; z-index: 60; top: calc(100% + 6px); right: 0; width: min(300px, calc(100vw - 32px)); max-height: min(420px, 60vh); overflow: auto; padding: 12px; border: 1px solid var(--da-line, #e4ecfc); border-radius: 12px; background: var(--surface-card, #fff); box-shadow: 0 16px 36px rgba(15, 23, 42, .16); }
+.da-native-card-settings-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.da-native-card-settings-head b { color: var(--da-ink, #0f172a); font-size: 12px; }
+.da-native-card-settings-head span { color: var(--da-muted, #64748b); font-size: 11px; }
+.da-native-card-settings-list { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.da-native-card-switch { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; padding: 8px 6px; border: 0; border-radius: 8px; background: transparent; font: inherit; text-align: left; cursor: pointer; }
+.da-native-card-switch:hover { background: var(--surface-tint, #f5f9ff); }
+.da-native-card-switch:focus-visible { outline: 2px solid rgba(37, 99, 235, .35); outline-offset: 1px; }
+.da-native-card-switch-text { display: grid; gap: 2px; }
+.da-native-card-switch-text b { color: var(--da-ink, #0f172a); font-size: 12px; font-weight: 600; }
+.da-native-card-switch-text small { color: var(--da-muted, #64748b); font-size: 11px; }
+.da-native-card-switch-track { position: relative; flex: 0 0 auto; width: 30px; height: 16px; border-radius: 999px; background: var(--chip-neutral-strong, #cbd5e1); transition: background .16s ease; }
+.da-native-card-switch-track i { position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--surface-card, #fff); transition: transform .16s ease; }
+.da-native-card-switch[aria-checked="true"] .da-native-card-switch-track { background: #2563eb; }
+.da-native-card-switch[aria-checked="true"] .da-native-card-switch-track i { transform: translateX(14px); }
+.da-native-card-settings-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; padding-top: 10px; color: var(--da-muted, #64748b); font-size: 11px; border-top: 1px solid var(--border-soft, #eef2f9); }
+.da-native-card-settings-reset { padding: 4px 9px; color: var(--primary-ink, #2563eb); font: inherit; font-size: 11px; border: 1px solid var(--border-soft, #cfe0fb); border-radius: 7px; background: var(--surface-tint, #f4f8ff); cursor: pointer; }
+.da-native-card-settings-reset:hover:not(:disabled) { background: var(--surface-tint, #e8f1ff); }
+.da-native-card-settings-reset:focus-visible { outline: 2px solid rgba(37, 99, 235, .35); outline-offset: 2px; }
+.da-native-card-settings-reset:disabled { color: var(--text-faint, #94a3b8); border-color: var(--border, #e2e8f0); background: var(--surface-muted, #f8fafc); cursor: default; }
+.da-native-metrics-empty { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 12px; padding: 22px 16px; color: var(--da-muted, #64748b); font-size: 12px; border: 1px dashed #d7e3f6; border-radius: 12px; background: var(--surface-tint, #fbfdff); }
+/* 列数跟随可见卡片：桌面端最多 6 列，窄屏沿用既有 3/2 列断点，不挤出视口。 */
+@media (min-width: 1101px) {
+  .da-native-metrics-cols-1 { --da-metric-columns: 1; }
+  .da-native-metrics-cols-2 { --da-metric-columns: 2; }
+  .da-native-metrics-cols-3 { --da-metric-columns: 3; }
+  .da-native-metrics-cols-4 { --da-metric-columns: 4; }
+  .da-native-metrics-cols-5 { --da-metric-columns: 5; }
+}
 .da-contract-target-row { display: flex; align-items: center; gap: 4px; margin-top: 8px; color: var(--da-muted, #64748b); font-size: 11px; }
 .da-contract-target-row label { flex: 0 0 auto; }
 .da-contract-target-row input { width: 72px; padding: 3px 6px; border: 1px solid var(--da-line, #e4ecfc); border-radius: 5px; color: var(--da-ink, #0f172a); font-size: 11px; }

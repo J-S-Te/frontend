@@ -484,6 +484,8 @@ onBeforeUnmount(() => {
             :can-view-contract="canViewDashboard('contract')"
             :can-view-project="canViewDashboard('project')"
     :status-filter="statusFilter"
+            :tenant-id="me?.tenant_id"
+            :user-id="me?.user_id"
             :trend="section === 'overview' ? dashboardTrend : []"
             :alert-summary="section === 'overview' ? alertSummary : null"
           />
