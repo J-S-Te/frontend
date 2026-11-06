@@ -13,7 +13,7 @@ import {
   SUBSYSTEM_ACCESS_STEPS,
   actionLabel,
   canConfirmPreview,
-  isResumableOperation,
+  isAutoResumableOperation,
   markApplicationScope,
   missingItems,
   subsystemAccessIdempotencyKey,
@@ -69,6 +69,8 @@ const busy = ref(false)
 const errorText = ref('')
 const errorNextAction = ref('')
 const errorDiagnostics = ref({})
+// 人工核验面板句柄：「前往人工核验」按钮据此滚动并触发读取预检。
+const manualRecoveryPanel = ref(null)
 let observer = null
 
 const stepIndex = computed(() => subsystemAccessStepIndex({
@@ -96,7 +98,15 @@ const canPreviewNow = computed(() => props.canPreview && Boolean(String(form.app
 const canConfirm = computed(() => props.canSubmit && canConfirmPreview(preview.value) && !busy.value)
 
 // 已提交后：可继续则显示「继续处理」，否则显示「重新检查」。
-const operationResumable = computed(() => isResumableOperation(operation.value))
+// 等待中的「部署结果未知」不可继续：服务端会 409 要求先人工核验，这里必须排除，
+// 否则操作者会把"结果未知"误当成网络问题反复点击。
+const manualRecoveryRequired = computed(() => isManualRecoveryCandidate(operation.value))
+const operationResumable = computed(() => isAutoResumableOperation(operation.value))
+// 自动尝试次数直接来自服务端，用来解释"为什么再点也不会推进"。
+const manualAttemptCount = computed(() => {
+  const value = Number(operation.value?.attempt_count)
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0
+})
 const previewMissing = computed(() => missingItems(preview.value?.missing))
 const previewAction = computed(() => (preview.value ? actionLabel(preview.value.action) : ''))
 
@@ -236,10 +246,27 @@ async function confirmAndSubmit() {
  * 返回值：无，后续部署仍由操作者显式继续。
  */
 function acceptManualRecovery(value) {
+  // 两种收口语义都必须被识别：清单未变更时是 OPERATOR_ABANDONED，
+  // 原代次已被取代时是 DEPLOYMENT_SUPERSEDED_UNKNOWN。两者都不是成功，也都不是可重试错误。
+  const accepted = ['OPERATOR_ABANDONED', 'DEPLOYMENT_SUPERSEDED_UNKNOWN']
   if (value?.operation_id !== operation.value?.operation_id || value?.status !== 'FAILED'
-    || value?.error_code !== 'OPERATOR_ABANDONED') return
+    || !accepted.includes(value?.error_code)) return
   applyOperationPayload(value)
-  emit('toast', { type: 'success', message: '原代次已终止为失败；请显式继续恢复。' })
+  emit('toast', { type: 'success', message: value.error_code === 'DEPLOYMENT_SUPERSEDED_UNKNOWN'
+    ? '原代次已按「已被取代」收口为失败，未声明部署成功；请显式继续恢复。'
+    : '原代次已终止为失败；请显式继续恢复。' })
+}
+
+/**
+ * focusManualRecovery 把操作者送到人工核验面板并读取真实预检。
+ * 参数：无，使用当前已加载的原操作。
+ * 返回值：Promise<void>；面板尚未挂载时只提示查询原操作。
+ */
+async function focusManualRecovery() {
+  const panel = manualRecoveryPanel.value
+  if (panel?.startReview) { await panel.startReview(); return }
+  reportError(Object.assign(new Error('MANUAL_RECOVERY_PANEL_UNAVAILABLE'), { code: 'MANUAL_RECOVERY_PANEL_UNAVAILABLE' }),
+    '请先查询原操作状态，再点「前往人工核验」读取核对事实。')
 }
 
 /**
@@ -260,6 +287,13 @@ async function refreshManualRecoveryOperation(id) {
 async function resumeOperation() {
   const operationId = operation.value?.operation_id
   if (!operationId || busy.value) return
+  // 未知派发的"继续处理"没有服务端出口：同一持久代次不会从 DISPATCHED 退回 PREPARED，
+  // 重排只会清掉错误码再回到未知，因此服务端会直接 409。这里先拦下并转到人工核验。
+  if (isManualRecoveryCandidate(operation.value)) {
+    clearError()
+    await focusManualRecovery()
+    return
+  }
   clearError()
   busy.value = true
   try {
@@ -271,7 +305,18 @@ async function resumeOperation() {
     }
     if (finalStatus === 'SUCCEEDED') emit('completed')
   } catch (error) {
-    reportError(error, '恢复检查失败，请稍后重试。')
+    // 409 + SUBSYSTEM_ACCESS_DEPLOYMENT_EFFECT_UNKNOWN 是"结果未知，必须人工核验"的
+    // 明确业务拒绝，不是网络抖动，也不是可重试错误：直接给出服务端的下一步指引。
+    if (String(error?.code || '') === 'SUBSYSTEM_ACCESS_DEPLOYMENT_EFFECT_UNKNOWN') {
+      // 面板只对"运行部署阶段的等待中未知派发"渲染，因此提示要区分能否直接人工核验。
+      errorText.value = isManualRecoveryCandidate(operation.value)
+        ? '部署已派发但结果未知：不能通过「继续处理」重排。请在下方人工核验中核对原代次与两份清单校验和后再收口。'
+        : '部署已派发但结果未知：不能通过「继续处理」重排。请先查询原操作状态；确认仍为等待核对后，再在人工核验中核对原代次与清单校验和收口。'
+      errorNextAction.value = String(error?.nextAction || '')
+      errorDiagnostics.value = userErrorDiagnostics(error)
+    } else {
+      reportError(error, '恢复检查失败，请稍后重试。')
+    }
   } finally {
     busy.value = false
   }
@@ -478,9 +523,23 @@ function resetFlow() {
       </div>
 
       <p class="subsystem-access-wizard__hint">确认后由服务端按上述判定自动执行；缺少批准、许可证、镜像或认证观察期未结束时会进入"等待处理"。</p>
+      <p v-if="operation && manualRecoveryRequired" class="subsystem-access-wizard__hint subsystem-access-wizard__hint--manual" role="status">
+        <strong>部署已派发但结果未知：</strong>该操作已自动尝试 {{ manualAttemptCount }} 次，重复点「继续处理」不会再推进，也不会改变结果。
+        请先到下方「未知部署人工恢复」读取核验，核对原清单与当前清单校验和后收口原代次，再另行恢复。
+      </p>
       <div class="subsystem-access-wizard__actions">
         <button
-          v-if="operation && operationResumable"
+          v-if="operation && manualRecoveryRequired"
+          type="button"
+          class="subsystem-access-wizard__button subsystem-access-wizard__button--primary"
+          :class="{ 'is-busy': busy }"
+          :disabled="busy"
+          @click="focusManualRecovery"
+        >
+          前往人工核验
+        </button>
+        <button
+          v-else-if="operation && operationResumable"
           type="button"
           class="subsystem-access-wizard__button subsystem-access-wizard__button--primary"
           :class="{ 'is-busy': busy }"
@@ -516,6 +575,21 @@ function resetFlow() {
     <p v-if="operation" class="subsystem-access-wizard__muted" data-testid="operation-target">
       当前操作目标：{{ operation.application_code || form.applicationCode }} / {{ operation.environment || operation.environment_code || form.environment }}
     </p>
+    <!-- 没有条件检查预览时（例如仅"查看当前操作"），主按钮区不渲染，
+         这里仍要给出唯一正确出口，避免操作者只剩进度面板里的"继续恢复"。 -->
+    <div v-if="operation && manualRecoveryRequired && !preview" class="subsystem-access-wizard__manual-entry" role="note">
+      <p><strong>部署已派发但结果未知：</strong>该操作已自动尝试 {{ manualAttemptCount }} 次，重复点「继续恢复」不会再推进，也不会改变结果。</p>
+      <p>请读取人工核验，核对原清单与当前清单校验和后收口原代次；收口不等于部署成功，也不会自动回滚。</p>
+      <button
+        type="button"
+        class="subsystem-access-wizard__button subsystem-access-wizard__button--primary"
+        :class="{ 'is-busy': busy }"
+        :disabled="busy"
+        @click="focusManualRecovery"
+      >
+        前往人工核验
+      </button>
+    </div>
     <SubsystemAccessProgress
       v-if="operation"
       :operation="operation"
@@ -525,7 +599,8 @@ function resetFlow() {
       @resume="resumeOperation"
     />
     <SubsystemAccessRecoveryPanel
-      v-if="canSubmit && isManualRecoveryCandidate(operation)"
+      v-if="canSubmit && manualRecoveryRequired"
+      ref="manualRecoveryPanel"
       :operation-id="operation.operation_id"
       @resolved="acceptManualRecovery"
       @refresh="refreshManualRecoveryOperation"
@@ -923,6 +998,31 @@ function resetFlow() {
 }
 
 .subsystem-access-wizard__warn { margin: 0; color: var(--sa-warn); font-weight: 500; }
+
+/* 「结果未知，请人工核验」的独立提示：与普通次要提示区分开，
+   用左侧警示条说明"再点也不会推进"，避免被当成网络重试提示。 */
+.subsystem-access-wizard__hint--manual {
+  border-left: 3px solid var(--sa-warn);
+  background: var(--sa-warn-soft);
+  color: var(--sa-text);
+}
+
+.subsystem-access-wizard__hint--manual strong { color: var(--sa-warn); }
+
+/* 没有预览时的人工核验入口：与提示条同一视觉语言，单按钮收在这一块里。 */
+.subsystem-access-wizard__manual-entry {
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+  padding: 12px 14px;
+  border-left: 3px solid var(--sa-warn);
+  border-radius: 10px;
+  background: var(--sa-warn-soft);
+  color: var(--sa-text);
+}
+
+.subsystem-access-wizard__manual-entry p { margin: 0; line-height: 1.6; }
+.subsystem-access-wizard__manual-entry strong { color: var(--sa-warn); }
 .subsystem-access-wizard__muted { margin: 0; color: var(--sa-text-muted); }
 
 @media (max-width: 640px) {
