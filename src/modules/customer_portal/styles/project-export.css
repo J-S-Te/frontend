@@ -19,13 +19,13 @@
   padding: 14px;
   border: 1px solid var(--border-soft, #e4ecfc);
   border-radius: 8px;
-  background: #fff;
+  background: var(--surface-card, #fff);
   color: var(--text, #0f172a);
 }
 .project-conversation h3 { margin: 0 0 10px; font-size: 14px; }
-.project-message { padding: 8px 12px; margin: 8px 0; border-left: 3px solid #8fb2e5; }
+.project-message { padding: 8px 12px; margin: 8px 0; border-left: 3px solid var(--border-brand, #8fb2e5); }
 .project-message p { overflow-wrap: anywhere; margin: 5px 0; white-space: pre-wrap; }
-.project-message small { color: var(--muted, #64748b); }
+.project-message small { color: var(--text-muted, #64748b); }
 .project-conversation form,
 .project-conversation label { display: grid; gap: 8px; }
 .project-conversation textarea {
@@ -34,13 +34,13 @@
   min-height: 80px;
   padding: 9px 11px;
   color: var(--text, #0f172a);
-  font-size: 13px;
+  font-size: 14px;
   border: 1px solid var(--border-soft, #e4ecfc);
   border-radius: 7px;
   outline: 0;
-  background: #fff;
+  background: var(--surface-input, #fff);
 }
-.project-conversation textarea:focus { border-color: var(--p, #2563eb); box-shadow: 0 0 0 3px rgba(37, 99, 235, .1); }
+.project-conversation textarea:focus { border-color: var(--p, #2563eb); box-shadow: 0 0 0 3px var(--focus-ring, rgba(37, 99, 235, .1)); }
 .project-conversation button,
 .project-actions button {
   display: inline-flex;
@@ -51,7 +51,7 @@
   padding: 8px 14px;
   color: #fff;
   font: inherit;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   cursor: pointer;
   border: 1px solid var(--p, #2563eb);
@@ -61,5 +61,4 @@
 .project-conversation button:hover:not(:disabled),
 .project-actions button:hover:not(:disabled) { border-color: var(--p-dark, #1d4ed8); background: var(--p-dark, #1d4ed8); }
 .project-conversation button:disabled,
-.project-actions button:disabled { color: #94a3b8; cursor: not-allowed; border-color: #e2e8f0; background: #f1f5f9; }
-
+.project-actions button:disabled { color: var(--text-faint, #94a3b8); cursor: not-allowed; border-color: var(--border, #e2e8f0); background: var(--chip-neutral, #f1f5f9); }

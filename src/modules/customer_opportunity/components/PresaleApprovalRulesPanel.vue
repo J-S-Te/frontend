@@ -351,5 +351,5 @@ onMounted(() => {
       </div>
     </form>
   </section>
-  <ConfirmDialog v-if="confirmDialog" v-bind="confirmDialog" @confirm="acceptConfirm" @cancel="cancelConfirm" />
+  <ConfirmDialog :open="Boolean(confirmDialog)" v-bind="confirmDialog || {}" @confirm="acceptConfirm" @cancel="cancelConfirm" />
 </template>

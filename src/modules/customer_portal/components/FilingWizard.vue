@@ -517,12 +517,8 @@ onUnmounted(() => {
     <!-- 确认弹窗必须挂在根级公共区：列表删除草稿、详情删除与提交锁定共用它；
          放进任何条件分支（如新建备案工具栏）会让其余场景的 askConfirm 永远挂起。 -->
     <ConfirmDialog
-      v-if="confirmDialog"
-      :title="confirmDialog.title"
-      :description="confirmDialog.description"
-      :confirm-text="confirmDialog.confirmText"
-      :cancel-text="confirmDialog.cancelText"
-      :danger="confirmDialog.danger"
+      :open="Boolean(confirmDialog)"
+      v-bind="confirmDialog || {}"
       @confirm="acceptConfirm"
       @cancel="cancelConfirm"
     />

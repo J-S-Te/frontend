@@ -1595,8 +1595,8 @@ onMounted(() => {
     <div v-if="pendingRuntimeAdoption" class="application-registry-modal-backdrop" role="presentation" @click.self="pendingRuntimeAdoption = null">
       <section class="application-registry-modal" role="dialog" aria-modal="true" aria-label="接管运行时确认"><h3>接管 {{ selectedApplication.code }}/{{ pendingRuntimeAdoption.environment }} 运行时</h3><p>平台会核验当前服务、网关路由和 Worker 状态，并将已运行的环境纳入受控部署。此操作不会删除或格式化数据库、数据卷、环境目录、登录目标及现有业务数据。</p><footer class="console-form-actions"><button class="console-button primary" type="button" :disabled="saving" @click="confirmRuntimeAdoption">接管运行时</button><button class="console-button ghost" type="button" :disabled="saving" @click="pendingRuntimeAdoption = null">取消</button></footer></section>
     </div>
-    <ConfirmDialog v-if="confirmDialog" v-bind="confirmDialog" @confirm="accept" @cancel="cancel" />
-    <PromptDialog v-if="promptDialog" v-bind="promptDialog" @confirm="acceptPrompt" @cancel="cancelPrompt" />
+    <ConfirmDialog :open="Boolean(confirmDialog)" v-bind="confirmDialog || {}" @confirm="accept" @cancel="cancel" />
+    <PromptDialog :open="Boolean(promptDialog)" v-bind="promptDialog || {}" @confirm="acceptPrompt" @cancel="cancelPrompt" />
   </section>
 </template>
 

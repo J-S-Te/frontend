@@ -1279,7 +1279,9 @@ onBeforeUnmount(() => {
         @toast="showToast"
       />
       <Teleport to="body">
-        <div v-if="toastMessage" class="console-toast" role="status" aria-live="polite" aria-atomic="true"><ConsoleIcon name="info" /><span>{{ toastMessage }}</span></div>
+        <Transition name="console-toast">
+          <div v-if="toastMessage" class="console-toast" role="status" aria-live="polite" aria-atomic="true"><ConsoleIcon name="info" /><span>{{ toastMessage }}</span></div>
+        </Transition>
       </Teleport>
     </template>
   </AppShell>

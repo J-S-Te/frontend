@@ -432,9 +432,9 @@ onBeforeUnmount(() => {
     </div>
 
     <PromptDialog
-      v-if="resolveDialog"
+      :open="Boolean(resolveDialog)"
       title="关单确认"
-      :description="`确认修订工单 ${resolveDialog.contractNo || resolveDialog.id}（合同版本 ${resolveDialog.versionText}）已完成逐期调整或红冲。关单只关闭人工复核工单，不会自动改写任何收款计划或票据。`"
+      :description="`确认修订工单 ${resolveDialog?.contractNo || resolveDialog?.id || ''}（合同版本 ${resolveDialog?.versionText || ''}）已完成逐期调整或红冲。关单只关闭人工复核工单，不会自动改写任何收款计划或票据。`"
       :label="`关单说明（${REVISION_HOLD_REASON_MIN} 至 ${REVISION_HOLD_REASON_MAX} 字）`"
       placeholder="请写明已完成的处理，例如：第 2 期已按修订金额调整并红冲原发票"
       confirm-text="关闭修订工单"

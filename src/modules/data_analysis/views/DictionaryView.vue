@@ -175,12 +175,8 @@ function operationLabel(operation) { return ({ BASELINE: "原始口径", CREATE:
     <div v-if="history" class="da-modal-backdrop" @click.self="closeHistory"><section class="da-modal da-dict-history"><header><b>{{ history.name }} · 版本历史</b><button type="button" class="da-icon-button" @click="closeHistory">×</button></header><p class="da-dict-meta">按版本从新到旧展示最近 200 条；更早版本仍保留在数据库中。</p><LoadingState v-if="historyLoading" title="版本历史加载中…" /><ErrorState v-else-if="historyError" :error="historyError" @retry="openHistory(history)" /><template v-else><article v-for="(entry, index) in history.versions" :key="`${entry.metric?.version}-${index}`" class="da-dict-history-entry"><h3>v{{ entry.metric.version }} · {{ operationLabel(entry.operation) }}</h3><p>{{ entry.created_at }} · 操作人 {{ entry.actor_id || '系统' }}</p><p>{{ entry.metric.name }} · {{ entry.metric.dashboard }} · {{ entry.metric.period }}</p><p>口径状态：{{ entry.metric.status }}；{{ entry.metric.enabled ? '已启用' : '已停用' }}</p><p>业务定义：{{ entry.metric.definition }}</p><p>公式说明：{{ entry.metric.formula }}</p><p>数据源说明：{{ entry.metric.source }}</p></article><EmptyState v-if="history.versions.length === 0" title="暂无持久化版本历史" /></template></section></div>
   </section>
   <ConfirmDialog
-    v-if="confirmDialog"
-    :title="confirmDialog.title"
-    :description="confirmDialog.description"
-    :confirm-text="confirmDialog.confirmText"
-    :cancel-text="confirmDialog.cancelText"
-    :danger="confirmDialog.danger"
+    :open="Boolean(confirmDialog)"
+    v-bind="confirmDialog || {}"
     @confirm="acceptConfirm"
     @cancel="cancelConfirm"
   />

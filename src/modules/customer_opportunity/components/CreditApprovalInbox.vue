@@ -107,5 +107,5 @@ onMounted(load)
       </article>
     </div>
   </section>
-  <PromptDialog v-if="promptDialog" v-bind="promptDialog" @confirm="acceptPrompt" @cancel="cancelPrompt" />
+  <PromptDialog :open="Boolean(promptDialog)" v-bind="promptDialog || {}" @confirm="acceptPrompt" @cancel="cancelPrompt" />
 </template>

@@ -30,6 +30,9 @@ if (process.argv[2] === '--list') {
   const result = spawnSync(process.execPath, ['--test', ...process.argv.slice(2), ...files], {
     cwd: root,
     stdio: 'inherit',
+    // 测试必须固定跑 Vue 开发分支：外部 shell 若导出 NODE_ENV=production，会让
+    // createCommentVNode 占位符与 app._instance 行为偏离基线，导致 golden 快照和渲染断言误报。
+    env: { ...process.env, NODE_ENV: 'test' },
   })
   if (result.error) console.error(result.error.message)
   process.exitCode = result.status ?? 1
