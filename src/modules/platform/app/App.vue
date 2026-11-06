@@ -15,6 +15,8 @@ import {
 } from '@/modules/platform/auth/utils/authorizationRefresh'
 import { installDocumentThemeSync, syncDocumentTheme } from '@/modules/platform/shared/composables/useDocumentTheme'
 import { installTableScrollAffordance } from '@/modules/shared/composables/useTableScrollAffordance'
+import ErrorBoundary from '@/modules/shared/errors/ErrorBoundary.vue'
+import GlobalErrorToasts from '@/modules/shared/errors/GlobalErrorToasts.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -207,7 +209,13 @@ onBeforeUnmount(() => {
 
 <template>
   <a class="skip-link" href="#main-content">跳到主要内容</a>
-  <RouterView />
+  <!-- 页面组件渲染崩溃时替换成可读的降级界面，而不是白屏；错误在本组件内消化，
+       不再冒到 app.config.errorHandler，避免降级页与全局提示同时出现。 -->
+  <ErrorBoundary>
+    <RouterView />
+  </ErrorBoundary>
+  <!-- 只接"谁都没接住"的错误；业务视图自己的 OperationToast 通道保持不变。 -->
+  <GlobalErrorToasts />
 </template>
 
 <style scoped>
