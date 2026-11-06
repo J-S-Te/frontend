@@ -1,8 +1,11 @@
+// 手工证据脚本：需先另起 Vite dev server（本脚本默认 http://127.0.0.1:5179），
+// 未接入 CI；需要改端口时设置 HARNESS_BASE_URL，非 macOS 环境设置 CHROMIUM_PATH。
 import { chromium } from 'playwright-core'
 import assert from 'node:assert/strict'
 import { writeFile } from 'node:fs/promises'
 
-const browser = await chromium.launch({ executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless:true })
+const baseUrl = (process.env.HARNESS_BASE_URL || 'http://127.0.0.1:5179').replace(/\/$/, '')
+const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless:true })
 const results=[]
 const output = new URL('../../../../.ai/qa/priority-remediation-20261026/',import.meta.url)
 try {
@@ -11,11 +14,11 @@ try {
     const errors=[]
     page.on('pageerror', error=>errors.push(error.message))
     const metrics = width === 1366 ? [1,2].map(i=>({code:'fixture_'+i,name:'夹具指标'+i,origin:'CUSTOM',version:1,enabled:false,status:'待确认',dashboard:'合同看板',definition:'定义',formula:'公式',source:'夹具',period:'月'})) : []
-    await page.route('http://127.0.0.1:5179/data_analysis/api/**', route=> {
+    await page.route(`${baseUrl}/data_analysis/api/**`, route=> {
       assert.equal(route.request().method(),'GET','fixture must not make business writes')
       return route.fulfill({json:{code:'OK',data:{metrics}}})
     })
-    await page.goto('http://127.0.0.1:5179/src/test/ui-harness/priority.html')
+    await page.goto(`${baseUrl}/src/test/ui-harness/priority.html`)
     await page.locator('#open-both').click()
     await page.waitForFunction(()=>{
       const layers=[...document.querySelectorAll('.shared-confirm-mask,.shared-prompt-mask')]

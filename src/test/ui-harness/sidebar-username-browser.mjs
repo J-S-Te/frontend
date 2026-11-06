@@ -1,5 +1,6 @@
 // Isolated component fixture: actual footer templates + actual identity helper + actual styles.
 // No business API, browser session, or database access.
+// 手工证据脚本：内联渲染，未接入 CI；非 macOS 环境用 CHROMIUM_PATH 指向本机 Chrome/Chromium.
 import { chromium } from 'playwright-core'
 import { readFile, writeFile } from 'node:fs/promises'
 import assert from 'node:assert/strict'
@@ -17,7 +18,7 @@ for(const [module,view,style,cls] of modules){
  assert.ok(start>=0)
  templates.push(source.slice(start,source.indexOf('</div>',start)+6))
 }
-const browser=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true})
+const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true})
 const results=[]
 try {
  for(const width of [1280,760]) {

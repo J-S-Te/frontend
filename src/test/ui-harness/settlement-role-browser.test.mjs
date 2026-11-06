@@ -31,7 +31,9 @@ test('浏览器 E2E 夹具仍是 opt-in：需要隔离夹具会话与回环地�
   assert.match(SOURCE, /assert\.equal\(new URL\(fixture\.origin\)\.hostname, '127\.0\.0\.1'\)/)
   assert.match(SOURCE, /assert\.equal\(new URL\(fixture\.origin\)\.port, '18173'\)/)
   assert.match(SOURCE, /SETTLEMENT_ROLE_BROWSER_CASES/)
-  assert.match(SOURCE, /executablePath: '\/Applications\/Google Chrome\.app\/Contents\/MacOS\/Google Chrome'/)
+  // 防止再引入不可移植的浏览器路径：必须 env 兜底，禁止纯字面量硬编码。
+  assert.match(SOURCE, /executablePath: process\.env\.CHROMIUM_PATH \|\| '[^']*Google Chrome'/)
+  assert.doesNotMatch(SOURCE, /executablePath: '[^']*Google Chrome/)
 })
 
 test('SET-04 后销售侧计划改动落在差额阈值内，且断言语义未被放宽', () => {

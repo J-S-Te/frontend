@@ -1,8 +1,12 @@
+// 手工证据脚本：需先另起 Vite dev server（本脚本默认 http://127.0.0.1:5187），
+// 未接入 CI；需要改端口时设置 HARNESS_BASE_URL。CI 只跑 responsive-boundaries-browser.mjs。
 import assert from 'node:assert/strict'
 import { chromium } from 'playwright-core'
 import { mkdir, writeFile } from 'node:fs/promises'
 
 const output = new URL('../../../../.ai/qa/action-button-labels-20261104/', import.meta.url)
+// 夹具页面由手工 dev server 提供；CHROMIUM_PATH 用于非 macOS 环境。
+const baseUrl = (process.env.HARNESS_BASE_URL || 'http://127.0.0.1:5187').replace(/\/$/, '')
 const browser = await chromium.launch({
   executablePath: process.env.CHROMIUM_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   headless: true,
@@ -15,7 +19,7 @@ try {
     const errors = []
     page.on('pageerror', error => errors.push(error.message))
     await page.route('**/api/**', () => { throw new Error('夹具禁止访问业务 API') })
-    await page.goto('http://127.0.0.1:5187/src/test/ui-harness/action-buttons.html')
+    await page.goto(`${baseUrl}/src/test/ui-harness/action-buttons.html`)
     await page.getByRole('button', { name: '打开登记表单' }).click()
     const submit = page.getByRole('button', { name: '登记发票', exact: true })
     assert.equal(await submit.isDisabled(), true)

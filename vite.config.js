@@ -209,6 +209,12 @@ export default defineConfig(({ mode }) => {
             // pdf.js 体积大且只在打开合同原件预览时用到，单独切块以保持首屏体积；
             // 由 contractPDFRuntime 动态 import，未打开预览的页面不会下载。
             if (id.includes('/node_modules/pdfjs-dist/')) return 'pdf-engine'
+            // 批量导入的姓名转拼音只在 IAM 批量建员工对话框解析 CSV 时用到；
+            // 单独成块后即使该对话框静态 import 也不会进入首屏 vendor。
+            if (id.includes('/node_modules/pinyin-pro/')) return 'pinyin'
+            // 合同 Excel 导入的读取器与解压依赖按需加载，不随首屏 vendor 下发。
+            if (id.includes('/node_modules/read-excel-file/')) return 'excel'
+            if (id.includes('/node_modules/fflate/')) return 'excel'
             if (id.includes('/node_modules/')) return 'vendor'
             return undefined
           },
