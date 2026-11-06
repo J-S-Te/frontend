@@ -1,5 +1,6 @@
 // 统一接入向导的纯逻辑：步骤、阶段文案、状态判定与幂等键。
 // 这里不依赖 Vue，便于用 node:test 直接验证；组件只负责渲染与调用接口。
+import { isManualRecoveryCandidate } from './subsystemAccessRecovery.mjs'
 
 export const SUBSYSTEM_ACCESS_STEPS = Object.freeze([
   Object.freeze({ key: 'select', label: '选择系统与环境' }),
@@ -42,6 +43,14 @@ export function isTerminalOperationStatus(status) {
 export function isResumableOperation(operation) {
   const status = String(operation?.status || '').toUpperCase()
   return status === 'WAITING' || status === 'FAILED'
+}
+
+// 可继续处理的判定：等待中的"部署结果未知"不能靠重排推进——同一持久代次不会从
+// DISPATCHED 退回 PREPARED，重复提交只会再回到未知，服务端会直接返回 409 并要求
+// 人工核验。这里把它排除掉，页面主按钮改为"前往人工核验"。
+export function isAutoResumableOperation(operation) {
+  if (!isResumableOperation(operation)) return false
+  return !isManualRecoveryCandidate(operation)
 }
 
 export function stageLabel(stage) {

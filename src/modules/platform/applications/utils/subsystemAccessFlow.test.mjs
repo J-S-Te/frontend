@@ -9,6 +9,7 @@ import {
   blockingMissingItems,
   canConfirmPreview,
   confirmBlockedReason,
+  isAutoResumableOperation,
   isResumableOperation,
   isTerminalOperationStatus,
   markApplicationScope,
@@ -22,8 +23,10 @@ import {
 
 const wizardFile = new URL('../components/SubsystemAccessWizard.vue', import.meta.url)
 const progressFile = new URL('../components/SubsystemAccessProgress.vue', import.meta.url)
+const recoveryPanelFile = new URL('../components/SubsystemAccessRecoveryPanel.vue', import.meta.url)
 const wizardSource = await readFile(wizardFile, 'utf8')
 const progressSource = await readFile(progressFile, 'utf8')
+const recoveryPanelSource = await readFile(recoveryPanelFile, 'utf8')
 
 function compileSfc(source, filename) {
   const { descriptor, errors } = parse(source, { filename })
@@ -39,9 +42,10 @@ function compileSfc(source, filename) {
   return { descriptor, script, template }
 }
 
-test('统一接入向导与进度组件均可编译', () => {
+test('统一接入向导、进度与人工恢复面板均可编译', () => {
   compileSfc(wizardSource, wizardFile.pathname)
   compileSfc(progressSource, progressFile.pathname)
+  compileSfc(recoveryPanelSource, recoveryPanelFile.pathname)
 })
 
 test('控制台应用页签已挂载统一接入向导（旧模块保留兼容）', async () => {
@@ -55,7 +59,7 @@ test('控制台应用页签已挂载统一接入向导（旧模块保留兼容�
 })
 
 test('组件使用文本绑定而不是 v-html（避免把服务端文本当 HTML 渲染）', () => {
-  for (const source of [wizardSource, progressSource]) {
+  for (const source of [wizardSource, progressSource, recoveryPanelSource]) {
     assert.doesNotMatch(source, /v-html/)
   }
   assert.match(wizardSource, /\{\{ errorText \}\}/)
@@ -94,6 +98,17 @@ test('终态与恢复判定一致（WAITING 属于终态但可继续）', () => 
   assert.equal(isResumableOperation({ status: 'WAITING' }), true)
   assert.equal(isResumableOperation({ status: 'FAILED' }), true)
   assert.equal(isResumableOperation({ status: 'SUCCEEDED' }), false)
+})
+
+// 部署结果未知是持久事实：服务端对它的 resume 会直接 409，页面不能把它当成可重试状态。
+test('等待中的部署结果未知不可自动继续，只能人工核验', () => {
+  const unknownEffect = { status: 'WAITING', stage: 'DEPLOY', error_code: 'DEPLOYMENT_EFFECT_UNKNOWN' }
+  assert.equal(isAutoResumableOperation(unknownEffect), false)
+  assert.equal(isResumableOperation(unknownEffect), true)
+  assert.equal(isAutoResumableOperation({ status: 'WAITING', stage: 'DEPLOY', error_code: 'LICENSE_MISSING' }), true)
+  assert.equal(isAutoResumableOperation({ status: 'FAILED', stage: 'DEPLOY', error_code: 'DEPLOYMENT_EFFECT_UNKNOWN' }), true)
+  assert.equal(isAutoResumableOperation({ status: 'SUCCEEDED' }), false)
+  assert.equal(isAutoResumableOperation(null), false)
 })
 
 test('缺项与阶段行按分项规范化', () => {
@@ -218,4 +233,26 @@ test('缺项二次归一化仍保留下一步指引', () => {
   assert.equal(twice[0].code, 'RUNTIME_APPROVAL_MISSING')
   assert.equal(twice[0].message, '缺少运行批准')
   assert.equal(twice[0].nextAction, '生成批准候选')
+})
+
+// 人工核验是"结果未知"唯一的安全出口：界面必须能肉眼比对两份清单，并区分收口语义。
+test('人工恢复面板并排展示两份清单校验和，并按模式区分失败收口语义', () => {
+  assert.match(recoveryPanelSource, /原清单校验和（派发回执）/)
+  assert.match(recoveryPanelSource, /当前清单校验和（当前 profile）/)
+  assert.match(recoveryPanelSource, /审核基准已变更/)
+  assert.match(recoveryPanelSource, /DEPLOYMENT_SUPERSEDED_UNKNOWN/)
+  assert.match(recoveryPanelSource, /OPERATOR_ABANDONED/)
+  // 取代路径必须额外一次确认；清单未变更的原有单次确认保留。
+  assert.match(recoveryPanelSource, /confirmedSuperseded/)
+  assert.match(recoveryPanelSource, /v-if="superseded"/)
+  // superseded 下不再渲染空的运行文件/容器明细表。
+  assert.match(recoveryPanelSource, /<template v-else>[\s\S]*?受控运行文件/)
+})
+
+test('向导在未知派发状态把主按钮换成前往人工核验，并展示尝试次数', () => {
+  assert.match(wizardSource, /前往人工核验/)
+  assert.match(wizardSource, /manualAttemptCount/)
+  assert.match(wizardSource, /isAutoResumableOperation/)
+  // 两种收口码都要被父向导识别为"失败收口"，不能被当成部署成功。
+  assert.match(wizardSource, /'OPERATOR_ABANDONED', 'DEPLOYMENT_SUPERSEDED_UNKNOWN'/)
 })
