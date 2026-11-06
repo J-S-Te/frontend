@@ -5,9 +5,20 @@
 // “独立可拆分模块”设计各自保留 client，不依赖本工具。
 
 import { attachStructuredContext } from './requestContext.js'
+import { downloadRequestSignal as withRequestTimeout } from '../../../shared/utils/downloadTimeout.js'
 import { formatUserError, safeUserMessage, userFieldErrors } from '../../../shared/utils/userError.js'
 
 const API_BASE_URL = (import.meta.env?.VITE_API_BASE_URL || '/api/v1').replace(/\/$/, '')
+
+/**
+ * 平台接口默认超时时间（毫秒）。
+ *
+ * 没有超时的 fetch 在网络半开、连接被中间设备丢弃或后端进程假死时会永久挂起，
+ * 页面只能一直停在“加载中”。20s 覆盖正常 CRUD；耗时更长的部署 Agent 端点由
+ * 调用方通过 `options.timeoutMs` 显式放大，FormData 上传不设硬超时（与
+ * shared/utils/downloadTimeout.js 的约定一致，避免慢速上传被误杀）。
+ */
+export const DEFAULT_REQUEST_TIMEOUT_MS = 20 * 1000
 
 export { API_BASE_URL }
 
@@ -48,6 +59,17 @@ export async function readBody(response) {
 }
 
 /**
+ * resolveTimeoutMs 归一化单次请求的超时时间。
+ * @param {unknown} override 调用方通过 `options.timeoutMs` 传入的覆盖值。
+ * @returns {number} 有效毫秒数；调用方显式传 0、负数或非数字时返回 0（不设超时）。
+ */
+function resolveTimeoutMs(override) {
+  if (override === undefined || override === null) return DEFAULT_REQUEST_TIMEOUT_MS
+  const ms = Number(override)
+  return Number.isFinite(ms) && ms > 0 ? ms : 0
+}
+
+/**
  * createRequest 生成模块化的接口请求方法，统一处理鉴权、网络错误和失败返回结构。
  * @param {Object} config 配置对象。
  * @param {Function} config.ErrorClass 失败时抛出的错误构造函数。
@@ -77,10 +99,21 @@ export function createRequest({ ErrorClass, networkMessage, failureMessage, subs
       metadata: context.metadata || null,
     }
 
+    // timeoutMs 是本请求管道自己的选项，不能透传给 fetch。
+    const { timeoutMs: timeoutOption, ...fetchOptions } = options
+    const callerSignal = fetchOptions.signal
+    // multipart 上传不设硬超时：慢速上传被中途掐断会让服务端留下半份数据。
+    const isUpload = typeof FormData !== 'undefined' && fetchOptions.body instanceof FormData
+    const timeoutMs = isUpload ? 0 : resolveTimeoutMs(timeoutOption)
+    // 复用下载超时工具：同时保留调用方取消语义与超时语义，并给出归因。
+    const timeoutGuard = timeoutMs > 0 ? withRequestTimeout(callerSignal, timeoutMs) : null
+    const signal = timeoutGuard ? timeoutGuard.signal : callerSignal
+
     let response
     try {
       response = await fetch(`${API_BASE_URL}${path}`, {
-        ...options,
+        ...fetchOptions,
+        signal,
         credentials: 'include',
         // 平台目录和用户授权投影依赖当前会话；Cookie 切换后浏览器绝不能复用
         // 上一账号的响应，因此所有平台 API 请求统一禁用缓存。
@@ -88,20 +121,32 @@ export function createRequest({ ErrorClass, networkMessage, failureMessage, subs
         headers: {
           Accept: 'application/json',
           'Cache-Control': 'no-cache',
-          ...(options.body && !(options.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
-          ...(options.headers || {}),
+          ...(fetchOptions.body && !(fetchOptions.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
+          // 纵深防御：写请求统一携带 CSRF 标记头，与 CRM/门户/结算/项目管理/合同等
+          // 子系统客户端保持一致。后端仍以 Origin 校验为权威，这里只是第二道门禁。
+          // 置于调用方自定义头之前，调用方显式传入的同名头优先。
+          ...(method !== 'GET' ? { 'X-CSRF-Token': '1' } : {}),
+          ...(fetchOptions.headers || {}),
         },
       })
     } catch (error) {
-      const code = error?.name === 'AbortError' ? 'REQUEST_ABORTED' : 'NETWORK_ERROR'
-      const requestError = new ErrorClass(formatUserError(error, { code, method, fallback: networkMessage }), { code, cause: error })
+      const timedOut = Boolean(timeoutGuard?.timedOut())
+      const aborted = error?.name === 'AbortError' || error?.name === 'TimeoutError'
+      // 超时沿用既有错误类型与既有文案映射（userError 已把 *_TIMEOUT 识别为
+      // 「服务响应超时」）；调用方取消仍是 REQUEST_ABORTED，其余为 NETWORK_ERROR。
+      const code = timedOut ? 'REQUEST_TIMEOUT' : aborted ? 'REQUEST_ABORTED' : 'NETWORK_ERROR'
+      // 超时由 AbortController 触发，底层异常名是 AbortError/TimeoutError；
+      // 直接传给 formatUserError 会被误判成“读取已取消”，这里换成中性输入。
+      const source = timedOut ? { status: 0, code, message: '' } : error
+      const requestError = new ErrorClass(formatUserError(source, { code, status: 0, method, fallback: networkMessage }), { code, cause: error })
       attachStructuredContext(requestError, {
         ...requestContext,
-        metadata: { ...(requestContext.metadata || {}), network: true },
+        metadata: { ...(requestContext.metadata || {}), network: true, ...(timedOut ? { timeout: true } : {}) },
       }, {
         code,
         status: 0,
       })
+      timeoutGuard?.dispose()
       throw requestError
     }
     let body
@@ -111,10 +156,24 @@ export function createRequest({ ErrorClass, networkMessage, failureMessage, subs
         const error = new Error('服务返回的信息无法识别。'); error.code = 'INVALID_RESPONSE'; throw error
       }
     } catch (cause) {
+      if (timeoutGuard?.timedOut()) {
+        // 响应体读取阶段也可能卡住（连接被静默丢弃）；此时按超时失败，而不是误报
+        // “服务返回的信息无法识别”。
+        const code = 'REQUEST_TIMEOUT'
+        const timeoutError = new ErrorClass(formatUserError({ status: 0, code, message: '' }, { code, status: 0, method, fallback: networkMessage }), { code, cause })
+        attachStructuredContext(timeoutError, {
+          ...requestContext,
+          metadata: { ...(requestContext.metadata || {}), network: true, timeout: true },
+        }, { code, status: 0 })
+        throw timeoutError
+      }
       const code = 'INVALID_RESPONSE'
       const error = new ErrorClass(formatUserError(cause, { code, method }), { status: response.status, code, cause })
       attachStructuredContext(error, requestContext, { status: response.status, code })
       throw error
+    } finally {
+      // 响应体读完（成功或失败）即撤销超时定时器与合并监听，避免悬挂定时器。
+      timeoutGuard?.dispose()
     }
     if (!response.ok) {
       // SEC-X4：message 是会被各页面直接展示的文本，必须先过安全过滤；

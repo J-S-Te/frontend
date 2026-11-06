@@ -382,54 +382,84 @@ export function buildImportManifestFromRows(rows, { sourceSystem = 'manual', mod
   }
 }
 
+// 顶层字段中文名统一用 snake_case 作键：驼峰路径在归一化时转成 snake_case 再查表，
+// 保证服务端 snake_case 与本地校验器 camelCase 只有一套叫法。
 const importMetadataFieldLabels = {
-  'metadata.title': '合同标题',
-  'metadata.contract_type': '合同类型',
-  'metadata.service_type': '服务类型',
-  'metadata.opportunity_id': '商机编号',
-  'metadata.opportunity_name': '商机名称',
-  'metadata.crm_customer_id': 'CRM 客户编号',
-  'metadata.counterparty_source': '交易对方来源',
-  'metadata.local_counterparty_id': '本地交易对方',
-  'metadata.counterparty_version': '交易对方目录版本',
-  'metadata.category_source': '类别来源',
-  'metadata.customer_name': '客户名称',
-  'metadata.customer_address': '客户地址',
-  'metadata.customer_contact': '客户联系人',
-  'metadata.customer_phone': '客户电话',
-  'metadata.customer_credit_level': '客户信用等级',
-  'metadata.sales_name': '销售姓名',
-  'metadata.customer_type': '客户类型',
-  'metadata.industry': '行业',
-  'metadata.region': '地区',
-  'metadata.amount_minor': '合同金额',
-  'metadata.currency': '币种',
-  'metadata.payment_terms': '付款条款',
-  'metadata.start_date': '开始日期',
-  'metadata.end_date': '结束日期',
-  'metadata.external_paper_number': '外部纸面编号',
-  'metadata.service_items': '服务项',
-  'metadata.systems': '系统信息',
+  title: '合同标题',
+  contract_type: '合同类型',
+  service_type: '服务类型',
+  opportunity_id: '商机编号',
+  opportunity_name: '商机名称',
+  crm_customer_id: 'CRM 客户编号',
+  counterparty_source: '交易对方来源',
+  local_counterparty_id: '本地交易对方',
+  counterparty_version: '交易对方目录版本',
+  category_source: '类别来源',
+  customer_name: '客户名称',
+  customer_address: '客户地址',
+  customer_contact: '客户联系人',
+  customer_phone: '客户电话',
+  customer_credit_level: '客户信用等级',
+  sales_name: '销售姓名',
+  customer_type: '客户类型',
+  industry: '行业',
+  region: '地区',
+  amount_minor: '合同金额',
+  currency: '币种',
+  payment_terms: '付款条款',
+  start_date: '开始日期',
+  end_date: '结束日期',
+  external_paper_number: '外部纸面编号',
+  service_items: '服务项',
+  systems: '系统信息',
 }
 
+// 服务项字段：snake_case 键，camelCase 由归一化转换后命中，避免维护两张表。
 const importServiceFieldLabels = {
   service_type: '服务类型', name: '服务名称', site: '实施场所', batch: '实施批次',
   category: '检测类别', category_id: '本地类别', category_version: '类别版本', test_mode: '检测方式', requirement: '体系 / 能力要求', systems: '系统信息',
 }
 
+const importSystemFieldLabels = { name: '系统名称', level: '系统等级' }
+
+function toSnakeField(name) {
+  return asText(name).replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase()
+}
+
+/**
+ * normalizeFieldSegments 归一化字段路径：去掉可选 metadata. 前缀，[n] 与 .n 索引统一成点号分段。
+ * 参数：text为已转为文本的 field_path。
+ * 返回值：按点号切分的分段数组，空分段保留以便上层判定为未识别。
+ */
+function normalizeFieldSegments(text) {
+  const prefix = 'metadata.'
+  const body = text.startsWith(prefix) ? text.slice(prefix.length) : text
+  return body.replace(/\[(\d+)\]/g, '.$1').split('.')
+}
+
+/**
+ * fieldLabelFromSegments 按归一化分段生成中文定位。
+ * 参数：segments为点号分段后的路径。
+ * 返回值：中文标签；未识别返回空串，由调用方回退原文。
+ */
+function fieldLabelFromSegments(segments) {
+  if (segments.some((segment) => segment === '')) return ''
+  if (segments.length === 1) return importMetadataFieldLabels[toSnakeField(segments[0])] || ''
+  if (toSnakeField(segments[0]) !== 'service_items' || !/^\d+$/.test(segments[1])) return ''
+  const item = `服务项 ${Number(segments[1]) + 1}`
+  if (segments.length === 2) return item
+  if (segments.length === 3) return `${item} · ${importServiceFieldLabels[toSnakeField(segments[2])] || segments[2]}`
+  if (segments.length !== 5 || toSnakeField(segments[2]) !== 'systems' || !/^\d+$/.test(segments[3])) return ''
+  // 系统层沿用既有输出：level 为系统等级，其余（含 name）保持系统名称。
+  return `${item} · 系统 ${Number(segments[3]) + 1} · ${importSystemFieldLabels[toSnakeField(segments[4])] || '系统名称'}`
+}
+
 /**
  * importFieldLabel 把预检返回的字段路径转成中文定位，避免只显示 metadata.xxx。
- * 参数：path为服务端 field_path。
+ * 参数：path为服务端或本地校验器返回的 field_path，兼容 metadata. 前缀、[n]/.n 索引与 camelCase 字段名。
  * 返回值：中文标签；未知路径保留原文。
  */
 export function importFieldLabel(path) {
   const text = asText(path)
-  if (importMetadataFieldLabels[text]) return importMetadataFieldLabels[text]
-  const service = /^metadata\.service_items\[(\d+)\](?:\.([A-Za-z_]+))?(?:\.systems\[(\d+)\]\.([A-Za-z_]+))?$/.exec(text)
-  if (service) {
-    const index = Number(service[1]) + 1
-    if (service[4]) return `服务项 ${index} · 系统 ${Number(service[3]) + 1} · ${service[4] === 'level' ? '系统等级' : '系统名称'}`
-    return `服务项 ${index}${service[2] ? ` · ${importServiceFieldLabels[service[2]] || service[2]}` : ''}`
-  }
-  return text || '合同字段'
+  return fieldLabelFromSegments(normalizeFieldSegments(text)) || text || '合同字段'
 }

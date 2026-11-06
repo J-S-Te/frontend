@@ -197,18 +197,28 @@ async function clearProjectLocalSession() {
  */
 export async function ensureProjectSession() {
   try {
-    const projectSession = await getProjectSession({ force: true })
+    // 两侧 `/auth/me` 互不依赖，并行发起可把进入项目系统的导航缩短一个往返；
+    // 失败语义不变：平台侧失败仍被吞掉，项目侧失败仍由 shouldStartSubsystemLogin 处理。
+    const [projectSession, platformResult] = await Promise.all([
+      getProjectSession({ force: true }),
+      getCurrentPrincipal().then(
+        (principal) => ({ ok: true, principal }),
+        (error) => ({ ok: false, error }),
+      ),
+    ])
     try {
-      const platformPrincipal = await getCurrentPrincipal()
-      const platformIdentityID = principalIdentityID(platformPrincipal)
-      const projectIdentityID = principalIdentityID(projectSession)
-      const userChanged = platformIdentityID && projectIdentityID && platformIdentityID !== projectIdentityID
-      const platformTenantID = String(platformPrincipal?.tenant_id || platformPrincipal?.tenant?.id || '')
-      const tenantChanged = platformTenantID && platformTenantID !== String(projectSession?.tenant_id || '')
-      // 普通 OIDC 登录会复用 Keycloak 中仍存活的旧 Realm 会话。账号切换后必须
-      // 强制 Keycloak 重新经过基础平台 Broker；能够切换时建立当前主体会话，
-      // Keycloak 拒绝切换时停在明确错误页，均不能再静默重建旧会话形成刷新风暴。
-      if (userChanged || tenantChanged) { await clearProjectLocalSession(); startProjectLogin({ force: true }); return null }
+      if (platformResult.ok) {
+        const platformPrincipal = platformResult.principal
+        const platformIdentityID = principalIdentityID(platformPrincipal)
+        const projectIdentityID = principalIdentityID(projectSession)
+        const userChanged = platformIdentityID && projectIdentityID && platformIdentityID !== projectIdentityID
+        const platformTenantID = String(platformPrincipal?.tenant_id || platformPrincipal?.tenant?.id || '')
+        const tenantChanged = platformTenantID && platformTenantID !== String(projectSession?.tenant_id || '')
+        // 普通 OIDC 登录会复用 Keycloak 中仍存活的旧 Realm 会话。账号切换后必须
+        // 强制 Keycloak 重新经过基础平台 Broker；能够切换时建立当前主体会话，
+        // Keycloak 拒绝切换时停在明确错误页，均不能再静默重建旧会话形成刷新风暴。
+        if (userChanged || tenantChanged) { await clearProjectLocalSession(); startProjectLogin({ force: true }); return null }
+      }
     } catch { /* 基础平台暂时不可用时，项目 OIDC 会话仍按自身有效期独立生效。 */ }
     return projectSession
   } catch (error) {
