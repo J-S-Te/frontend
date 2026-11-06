@@ -212,7 +212,7 @@ try {
         await page.close()
       }
       for (const grid of ['crm-customer-cards', 'crm-stage-alert-grid', 'pm-detail-summary', 'project-list',
-        'license-summary', 'license-binding-grid', 'license-field-row', 'iam-person-summary-grid']) {
+        'license-facts', 'license-app-facts', 'license-field-row', 'iam-person-summary-grid']) {
         const page = await browser.newPage({ viewport: { width, height }, reducedMotion: 'reduce' })
         const scope = grid.startsWith('license-') ? licenseScope : ''
         await page.setContent(`<style>${css}</style><section class="console-card" style="width:min(220px,100%);padding:20px" data-boundary>

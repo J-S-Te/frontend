@@ -126,6 +126,137 @@ export const licenseTone = status => ({ VALID: 'success', NOT_EFFECTIVE: 'info',
 export const runtimeTone = status => ({ RUNNING: 'success', PARTIAL: 'info', NOT_FOUND: 'pending', STOPPED: 'danger', UNKNOWN: 'muted' })[status] || 'muted'
 export const enforcementTone = status => ({ ENFORCED: 'success', APPLYING: 'info', PENDING_ENFORCEMENT: 'pending' })[status] || 'muted'
 
+// summarizeEnforcement 用途：把单应用概览压成许可证页逐应用行需要的少量事实。
+// 参数：overview 为已通过契约校验的概览。
+// 返回值：返回执行状态、修订、准备/确认计数与最近一次 READY/ACK 时间。
+const recordTime = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(value) && !value.startsWith('0001-') ? value : ''
+function latestTimestamp(values) {
+  let latest = ''
+  let latestAt = 0
+  for (const value of values.map(recordTime)) {
+    if (!value) continue
+    const at = Date.parse(value)
+    if (!Number.isFinite(at) || at <= latestAt) continue
+    latest = value
+    latestAt = at
+  }
+  return latest
+}
+export function summarizeEnforcement(overview) {
+  const progress = memberProgress(overview.enforcement.members)
+  return {
+    available: true,
+    registration: overview.registration.status,
+    status: overview.enforcement.status,
+    revision: overview.enforcement.revision,
+    deploymentRevision: overview.enforcement.deployment_revision,
+    memberCount: overview.enforcement.members.length,
+    ready: progress.ready,
+    acknowledged: progress.acknowledged,
+    latestReadyAt: latestTimestamp(overview.enforcement.members.map(member => member.ready_at)),
+    latestAckAt: latestTimestamp(overview.enforcement.members.map(member => member.ack_at)),
+    snapshotCurrent: overview.enforcement.snapshot_current,
+    activationStatus: overview.activation?.status || '',
+    waitSeconds: overview.activation?.wait_seconds || 0,
+    blockingReasons: [...(overview.blocking_reasons || [])],
+    allowedActions: [...(overview.allowed_actions || [])],
+    checkedAt: overview.checked_at,
+    error: '',
+  }
+}
+
+// summarizeAggregateEnforcement 用途：把 GET /licenses/status 的 systems[].enforcement
+// 聚合成与逐应用概览同构的摘要，页面只认这一种形状。
+// 参数：enforcement 为契约字段（snake_case）；null、available:true 之外的任何取值
+// 都只能导出“不可用”，字段缺失或类型不对同样按未知处理，绝不补出执行结论。
+// 返回值：返回执行状态、修订与准备/确认计数，以及说明为何不可用的 note。
+const aggregateCount = value => (isCount(value) ? value : 0)
+const aggregateTime = value => (isTimestamp(value) && !value.startsWith('0001-') ? value : '')
+const aggregateStatus = value => (enforcementStatusSet.has(value) ? value : 'UNKNOWN')
+const aggregateRegistration = value => (registrationStatusSet.has(value) ? value : 'UNKNOWN')
+function unavailableEnforcement(note) {
+  return {
+    available: false,
+    registration: 'UNKNOWN',
+    status: 'UNKNOWN',
+    revision: 0,
+    deploymentRevision: 0,
+    memberCount: 0,
+    ready: 0,
+    acknowledged: 0,
+    latestReadyAt: '',
+    latestAckAt: '',
+    snapshotCurrent: false,
+    activationStatus: '',
+    waitSeconds: 0,
+    blockingReasons: [],
+    allowedActions: [],
+    checkedAt: '',
+    error: '',
+    note,
+  }
+}
+export function summarizeAggregateEnforcement(enforcement) {
+  if (enforcement === null) return unavailableEnforcement('服务端未提供该系统的运行执行聚合')
+  if (enforcement === undefined) return null
+  if (!isRecord(enforcement)) return unavailableEnforcement('运行执行聚合字段格式无法识别')
+  if (enforcement.available !== true) return unavailableEnforcement('服务端标记该系统的运行执行聚合不可用')
+  return {
+    available: true,
+    registration: aggregateRegistration(enforcement.registration),
+    status: aggregateStatus(enforcement.status),
+    revision: aggregateCount(enforcement.revision),
+    deploymentRevision: aggregateCount(enforcement.deployment_revision),
+    memberCount: aggregateCount(enforcement.member_count),
+    ready: aggregateCount(enforcement.ready_count),
+    acknowledged: aggregateCount(enforcement.ack_count),
+    latestReadyAt: aggregateTime(enforcement.latest_ready_at),
+    latestAckAt: aggregateTime(enforcement.latest_ack_at),
+    snapshotCurrent: enforcement.snapshot_current === true,
+    activationStatus: '',
+    waitSeconds: 0,
+    blockingReasons: [],
+    allowedActions: [],
+    checkedAt: '',
+    error: '',
+    note: '',
+  }
+}
+
+// loadApplicationEnforcement 用途：为许可证页一次性读取多个应用的运行执行概览。
+// 参数：applications 为系统编码列表；options.fetchOverview 便于测试注入。
+// 返回值：返回 { [code]: 汇总 }；单个应用失败只把该应用标为未读取成功，不抛出、不伪造状态。
+export async function loadApplicationEnforcement(applications = [], options = {}) {
+  const fetchOverview = options.fetchOverview || getRuntimeEnforcementOverview
+  const entries = await Promise.all(applications.map(async application => {
+    try {
+      const overview = validateEnforcementOverview(await fetchOverview(application), application)
+      return [application, summarizeEnforcement(overview)]
+    } catch (error) {
+      return [application, {
+        available: false,
+        status: 'UNKNOWN',
+        registration: 'UNKNOWN',
+        revision: 0,
+        deploymentRevision: 0,
+        memberCount: 0,
+        ready: 0,
+        acknowledged: 0,
+        latestReadyAt: '',
+        latestAckAt: '',
+        snapshotCurrent: false,
+        activationStatus: '',
+        waitSeconds: 0,
+        blockingReasons: [],
+        allowedActions: [],
+        checkedAt: '',
+        error: formatUserError(error, { fallback: '运行时授权概览读取失败，请重试。' }),
+      }]
+    }
+  }))
+  return Object.fromEntries(entries)
+}
+
 export const overviewIsRegistered = overview => Boolean(overview) && overview.registration.status === 'REGISTERED'
 export const overviewIsUnregistered = overview => Boolean(overview) && overview.registration.status === 'UNREGISTERED'
 // 只有已登记且非 ENFORCED 才显示原激活区域；UNREGISTERED/ENFORCED 一律不显示。
