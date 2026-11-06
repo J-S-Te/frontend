@@ -1151,7 +1151,23 @@
   flex-direction: column;
   background: var(--pm-card);
   box-shadow: var(--pm-shadow-drawer);
-  animation: pm-slide var(--pm-t-slow) ease;
+}
+
+/* 操作详情抽屉的进出场：遮罩淡入淡出，面板从右侧滑回右侧。
+   退场 160ms 约为进场 250ms 的 64%，并沿用抽屉曲线保持空间一致。
+   抽屉专用遮罩不再使用 pm-fade，避免 Transition 结束后基础动画重新播放。 */
+.pm-overlay:has(> .pm-drawer) { animation: none; }
+.pm-drawer-enter-active { transition: opacity 200ms var(--ease-out); }
+.pm-drawer-leave-active { transition: opacity 130ms var(--ease-out); }
+.pm-drawer-enter-from,
+.pm-drawer-leave-to { opacity: 0; }
+.pm-drawer-enter-active .pm-drawer { transition: transform 250ms var(--ease-drawer); }
+.pm-drawer-leave-active .pm-drawer { transition: transform 160ms var(--ease-in-out); }
+.pm-drawer-enter-from .pm-drawer,
+.pm-drawer-leave-to .pm-drawer { transform: translateX(100%); }
+@media (prefers-reduced-motion: reduce) {
+  .pm-drawer-enter-from .pm-drawer,
+  .pm-drawer-leave-to .pm-drawer { transform: none; }
 }
 
 .pm-dialog {
@@ -1212,7 +1228,6 @@
 .pm-dialog > footer { display: flex; justify-content: flex-end; gap: var(--pm-sp-2); padding: 14px var(--pm-sp-6); border-top: 1px solid var(--pm-line); background: linear-gradient(180deg, var(--pm-card), var(--pm-content)); }
 
 @keyframes pm-fade { from { opacity: 0; } }
-@keyframes pm-slide { from { transform: translateX(100%); } }
 @keyframes pm-rise { from { opacity: 0; transform: translateY(12px) scale(.98); } }
 
 /* ==========================================================================

@@ -957,7 +957,6 @@
   border-radius: 8px;
   background: var(--sidebar, #0f172a);
   box-shadow: 0 14px 30px rgba(15, 23, 42, .24);
-  animation: console-toast-in .18s ease-out;
 }
 
 .console-toast svg {
@@ -968,16 +967,25 @@
   color: #93c5fd;
 }
 
-@keyframes console-toast-in {
-  from {
-    transform: translateY(8px);
-    opacity: 0;
-  }
-
-  to {
-    transform: none;
-    opacity: 1;
-  }
+/* 顶部提示按原路进出：进场 180ms 强 ease-out，退场 120ms 对称回位。 */
+.console-toast-enter-active {
+  transition:
+    opacity 180ms var(--ease-out),
+    transform 180ms var(--ease-out);
+}
+.console-toast-leave-active {
+  transition:
+    opacity 120ms var(--ease-in-out),
+    transform 120ms var(--ease-in-out);
+}
+.console-toast-enter-from,
+.console-toast-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .console-toast-enter-from,
+  .console-toast-leave-to { transform: none; }
 }
 
 @media (max-width: 820px) {

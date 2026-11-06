@@ -952,12 +952,8 @@ function formatFileSize(bytes) {
       </footer>
     </section>
     <ConfirmDialog
-      v-if="closeConfirm"
-      :title="closeConfirm.title"
-      :description="closeConfirm.description"
-      :confirm-text="closeConfirm.confirmText"
-      :cancel-text="closeConfirm.cancelText"
-      :danger="closeConfirm.danger"
+      :open="Boolean(closeConfirm)"
+      v-bind="closeConfirm || {}"
       @confirm="acceptClose"
       @cancel="cancelClose"
     />

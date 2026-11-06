@@ -1156,7 +1156,7 @@ watch(invoiceDetailID, load);
 
     <template #overlay>
       <PromptDialog
-      v-if="reviewFailureDialog"
+      :open="Boolean(reviewFailureDialog)"
       title="复核税控失败结果"
       description="仅对税控已明确失败的申请恢复审批；结果未知不能重试，复核不会立即开票。恢复后仍需重新审核，旧开票尝试和失败记录会保留。"
       label="复核原因（5 至 1000 字）"
@@ -1166,13 +1166,13 @@ watch(invoiceDetailID, load);
       :minlength="5"
       :maxlength="1000"
       :busy="saving"
-      :error="reviewFailureDialog.error"
+      :error="reviewFailureDialog?.error"
       @confirm="submitReviewFailure"
       @cancel="closeReviewFailure"
     />
 
     <PromptDialog
-      v-if="cancelDialog"
+      :open="Boolean(cancelDialog)"
       title="作废开票申请（释放额度）"
       description="只有仍在待开具或已明确失败、且税控从未受理的申请可以作废。作废会把申请置为已作废并释放未开票的额度预留；结果未知或已被受理的申请必须改为对账或红冲，页面不会自动重试。"
       label="作废原因（5 至 1000 字）"
@@ -1182,13 +1182,13 @@ watch(invoiceDetailID, load);
       :minlength="5"
       :maxlength="1000"
       :busy="saving"
-      :error="cancelDialog.error"
+      :error="cancelDialog?.error"
       @confirm="submitCancelInvoice"
       @cancel="closeCancelInvoice"
     />
 
     <PromptDialog
-      v-if="dunningActionDialog"
+      :open="Boolean(dunningActionDialog)"
       title="完成催收跟进"
       description="填写本次催收跟进结果。完成后该动作不再计入待办。"
       label="跟进结果（最多 500 字）"
@@ -1197,25 +1197,21 @@ watch(invoiceDetailID, load);
       cancel-text="取消"
       :maxlength="500"
       :busy="saving"
-      :error="dunningActionDialog.error"
+      :error="dunningActionDialog?.error"
       @confirm="confirmDunningAction"
       @cancel="cancelDunningAction"
     />
 
     <PromptDialog
-      v-if="promptDialog"
-      v-bind="promptDialog"
+      :open="Boolean(promptDialog)"
+      v-bind="promptDialog || {}"
       @confirm="acceptPrompt"
       @cancel="cancelPrompt"
     />
 
     <ConfirmDialog
-      v-if="confirmDialog"
-      :title="confirmDialog.title"
-      :description="confirmDialog.description"
-      :confirm-text="confirmDialog.confirmText"
-      :cancel-text="confirmDialog.cancelText"
-      :danger="confirmDialog.danger"
+      :open="Boolean(confirmDialog)"
+      v-bind="confirmDialog || {}"
       @confirm="acceptConfirm"
       @cancel="cancelConfirm"
     />

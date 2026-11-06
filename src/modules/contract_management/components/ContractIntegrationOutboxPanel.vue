@@ -276,12 +276,8 @@ onMounted(load)
     </div>
 
     <ConfirmDialog
-      v-if="confirmDialog"
-      :title="confirmDialog.title"
-      :description="confirmDialog.description"
-      :confirm-text="confirmDialog.confirmText"
-      :cancel-text="confirmDialog.cancelText"
-      :danger="confirmDialog.danger"
+      :open="Boolean(confirmDialog)"
+      v-bind="confirmDialog || {}"
       :busy="Boolean(busyID)"
       @confirm="acceptConfirm"
       @cancel="cancelConfirm"

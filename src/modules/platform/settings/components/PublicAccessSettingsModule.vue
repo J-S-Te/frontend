@@ -187,7 +187,7 @@ onMounted(loadSettings)
         当前已保存：{{ savedSettings.publicOrigin || '仅本机访问' }}（版本 {{ savedSettings.version }}）
       </p>
     </div>
-    <ConfirmDialog v-if="confirmDialog" v-bind="confirmDialog" @confirm="accept" @cancel="cancel" />
+    <ConfirmDialog :open="Boolean(confirmDialog)" v-bind="confirmDialog || {}" @confirm="accept" @cancel="cancel" />
   </div>
 </template>
 

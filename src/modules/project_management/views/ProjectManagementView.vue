@@ -4046,12 +4046,14 @@ onBeforeUnmount(() => {
     <QualificationImportDialog v-if="equipmentImportOpen && canManageDevice" resource-type="EQUIPMENT" :code-options="capabilityCodeOptions('EQUIPMENT').map((option) => ({ value: option.code, label: option.name }))" @close="equipmentImportOpen = false" @completed="importEquipmentFile" />
     <DetectionCategoryImportDialog v-if="detectionCategoryImportOpen && canManageRules" :code-options="capabilityCodeOptions('PERSON').map((option) => ({ value: option.code, label: option.name }))" @close="detectionCategoryImportOpen = false" @completed="importDetectionCategoryFile" />
 
-    <OperationDetailDrawer
-      v-if="operationDetail"
-      :detail="operationDetail"
-      :fields="operationDetailFields"
-      @close="operationDetail = null"
-    />
+    <Transition name="pm-drawer">
+      <OperationDetailDrawer
+        v-if="operationDetail"
+        :detail="operationDetail"
+        :fields="operationDetailFields"
+        @close="operationDetail = null"
+      />
+    </Transition>
 
     <div v-if="planEquipmentPickerOpen" class="pm-overlay" @click.self="planEquipmentPickerOpen = false"><aside class="pm-dialog pm-dialog-wide"><header><div><span>设备</span><h2>添加设备</h2><small class="pm-dialog-sub">只列设备目录中的有效设备；已被其他服务项占用、仅在公司使用或不在公司的设备不可选取。</small></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="planEquipmentPickerOpen = false"><ConsoleIcon name="close" /></button></header><div class="pm-dialog-body"><div class="pm-picker-search"><ConsoleIcon name="search" /><input v-model.trim="equipmentPickerKeyword" placeholder="搜索设备名称或能力码"  maxlength="100"/></div><div class="pm-table-scroll"><table class="pm-table pm-table-picker"><thead><tr><th>设备</th><th>能力码</th><th>检定有效期</th><th>状态</th><th class="pm-col-action">操作</th></tr></thead><tbody><tr v-for="item in planEquipmentFiltered" :key="item.resource_id"><td><b>{{ item.resource_name }}</b><small class="mono">{{ item.resource_id }}</small><small v-if="equipmentUnavailableReason(item)" class="pm-cell-sub pm-cell-danger">{{ equipmentUnavailableReason(item) }}</small></td><td><CodePills :codes="item.codes || []" /></td><td>{{ item.valid_until ? formatBusinessDate(item.valid_until) : '长期' }}</td><td><span class="pm-badge" :class="equipmentPickerState(item).tone">{{ equipmentPickerState(item).label }}</span></td><td><button type="button" class="pm-link" :disabled="equipmentPickerState(item).disabled" @click="addPlanEquipment(item)">{{ equipmentPickerState(item).action }}</button></td></tr><tr v-if="!planEquipmentFiltered.length"><td colspan="5" class="pm-empty-mini">{{ equipmentPickerKeyword ? '没有匹配的设备，换个关键字试试' : '设备目录为空，请先在「资质与能力」或「设备能力维护」中登记设备' }}</td></tr></tbody></table></div></div><footer><span class="pm-dialog-footnote">已加入 {{ planEquipmentAddedCount }} 台 · 可选 {{ planEquipmentAddableCount }} 台</span><button type="button" class="pm-button" @click="planEquipmentPickerOpen = false">关闭</button></footer></aside></div>
     <NativeProjectCreateDialog
@@ -4172,18 +4174,15 @@ onBeforeUnmount(() => {
       </form>
     </div>
     <ConfirmDialog
-      v-if="confirmDialog"
-      :title="confirmDialog.title"
-      :description="confirmDialog.description"
-      :confirm-text="confirmDialog.confirmText"
-      :cancel-text="confirmDialog.cancelText"
-      :danger="confirmDialog.danger"
+      :open="Boolean(confirmDialog)"
+      v-bind="confirmDialog || {}"
       @confirm="acceptConfirm"
       @cancel="cancelConfirm"
     />
 
     <PromptDialog
-      v-if="promptDialog" v-bind="promptDialog"
+      :open="Boolean(promptDialog)"
+      v-bind="promptDialog || {}"
       @confirm="acceptPrompt" @cancel="cancelPrompt"
     />
     <OperationToast :message="toastMessage" :tone="toastType" />
