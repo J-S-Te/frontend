@@ -21,7 +21,6 @@ const COMPONENTS = [
   { name: '应用接入向导', file: '../platform/applications/components/SubsystemOnboardingModule.vue' },
   { name: '批量导入弹窗', file: '../platform/iam/components/BatchUserImportDialog.vue' },
   { name: '员工入职向导', file: '../platform/iam/components/EmployeeOnboardingModal.vue' },
-  { name: '许可管理页', file: '../platform/features/licenses/CommercialLicenseView.vue' },
   { name: '运行时授权概览', file: '../platform/features/licenses/RuntimeEnforcementView.vue' },
   { name: '子系统不可用页', file: '../platform/auth/views/SubsystemAccessErrorView.vue' },
   { name: '403 页', file: '../platform/auth/views/ForbiddenView.vue' },
@@ -215,30 +214,39 @@ for (const { name, file } of COMPONENTS) {
   })
 }
 
-test('许可管理页的卡片/描边/正文别名在深色下补齐，浅色仍取原 fallback', () => {
+test('许可管理页：表面/描边/墨色全部走共享 token，因此深色由 token 统一覆盖', () => {
   const source = read('../platform/features/licenses/CommercialLicenseView.vue')
   const css = styleBlock(source, 'CommercialLicenseView.vue')
-  // 浅色就是靠“别名未定义 + fallback”画出来的白卡，这里锁住这个前提
-  assert.match(css, /\.license-card \{ background: var\(--surface, #fff\)/)
-  assert.match(css, /\.license-stat \{ background: var\(--surface, #fff\)/)
-  const dark = darkRules(css)
-  const aliasRule = dark.find((rule) => rule.selectors.includes('.license-page'))
-  assert.ok(aliasRule, '缺少 .license-page 的深色别名块')
-  for (const [alias, token] of [
-    ['--surface', 'var(--surface-card)'],
-    ['--surface-2', 'var(--surface-muted)'],
-    ['--border-color', 'var(--border)'],
-    ['--text-primary', 'var(--text)'],
-  ]) {
-    assert.ok(
-      aliasRule.body.replace(/\s+/g, ' ').includes(`${alias}: ${token}`),
-      `深色别名块缺少 ${alias}: ${token}`,
-    )
+  // 重构后页面不再写死浅色表面，也不再靠“别名未定义 + fallback”画白卡：
+  // 卡片外壳复用控制台 .console-card，语义色只取 main.css token。
+  assert.match(source, /class="console-card license-section"/)
+  assert.match(css, /\.license-page \{[\s\S]*?--license-ink: var\(--text/)
+  assert.match(css, /\.license-page \{[\s\S]*?--license-border: var\(--border/)
+  assert.match(css, /\.license-page \{[\s\S]*?--license-muted: var\(--text-muted/)
+  // 卡片、徽标、描边、正文都不允许写死十六进制：一旦写死，深色就会留浅色孤岛。
+  const literals = []
+  for (const rule of parseRules(css)) {
+    if (rule.selectors.some(selector => selector.includes('[data-theme='))) continue
+    for (const declaration of declarations(rule.body)) {
+      const property = declaration.property
+      const colorBearing = property === 'color' || property === 'background' || property === 'background-color' ||
+        /^border(?:-(?:top|right|bottom|left))?(?:-color)?$/.test(property)
+      if (!colorBearing) continue
+      if (declaration.value.includes('var(')) continue
+      // 只有出现颜色字面量才算浅色孤岛（border: 0 之类没有颜色）。
+      if (!/#[0-9a-f]{3,8}\b|\brgba?\(|\bwhite\b|\bblack\b/i.test(declaration.value)) continue
+      // 主色实心块上的纯白文字不随主题变化。
+      if (/^(?:#fff|#ffffff|white)$/i.test(declaration.value.trim())) continue
+      literals.push(`${rule.selectors.join(', ')} → ${declaration.property}: ${declaration.value}`)
+    }
   }
-  // 这些别名在全局样式里没有定义，浅色才会落到 fallback；一旦有人全局定义，浅色会变
+  assert.deepEqual(literals, [], `许可管理页仍有写死的浅色表面/描边/墨色：\n${literals.join('\n')}`)
+  // 旧实现的页面级深色别名块应已删除，避免两套深色来源。
+  assert.doesNotMatch(css, /\[data-theme="dark"\] \.license-page \{/)
+  // 旧别名一旦被全局定义，其它组件的 fallback 会静默失效，这条继续守住。
   const main = read('../platform/shared/styles/main.css')
   for (const alias of ['--surface:', '--surface-2:', '--border-color:', '--text-primary:']) {
-    assert.ok(!main.includes(alias), `main.css 不应定义 ${alias}，否则浅色不再取组件 fallback`)
+    assert.ok(!main.includes(alias), `main.css 不应定义 ${alias}，否则组件 fallback 会失效`)
   }
 })
 

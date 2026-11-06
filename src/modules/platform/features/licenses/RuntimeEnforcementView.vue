@@ -74,6 +74,9 @@ function handleActivationAction() { return applying.value ? controller.refresh()
 watch(() => props.licenseRevision, () => controller.invalidate())
 onMounted(() => { controller.refresh(); controller.startPolling() })
 onBeforeUnmount(() => controller.dispose())
+// 供商业授权页的“去激活 / 查看运行详情”切到指定系统；
+// 系统码合法性与忙状态仍由控制器校验，这里不放宽任何门禁。
+defineExpose({ selectApplication: application => controller.select(application) })
 </script>
 
 <template>
