@@ -13,7 +13,17 @@ const STATUS_NAMES = { NO_LICENSE: '未导入许可证', NOT_PURCHASED: '未购�
 export function statusRows(status) {
   return LICENSE_SYSTEMS.map(system => {
     const application = status?.systems?.find(item => item.code === system.code)
-    return { ...system, application: application?.kind ? application : null, state: STATUS_NAMES[application?.status] || '状态未知', status: application?.status || 'NOT_PURCHASED', effectiveAt: Math.max(status?.current?.not_before || 0, application?.not_before || 0) }
+    return {
+      ...system,
+      application: application?.kind ? application : null,
+      state: STATUS_NAMES[application?.status] || '状态未知',
+      status: application?.status || 'NOT_PURCHASED',
+      effectiveAt: Math.max(status?.current?.not_before || 0, application?.not_before || 0),
+      // 聚合执行事实与原因码原样透传：undefined = 旧后端没这个字段（页面回退逐应用概览），
+      // null = 服务端明确没有聚合（只能显示状态未知），两者不能混为一谈。
+      enforcement: application?.enforcement,
+      reasonCode: typeof application?.reason_code === 'string' ? application.reason_code : '',
+    }
   })
 }
 // 当前授权面板只展示许可证覆盖的系统；未购买的系统不渲染，避免整屏"未购买"噪音。

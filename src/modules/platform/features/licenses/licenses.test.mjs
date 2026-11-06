@@ -12,8 +12,8 @@ function respond(data, status = 200) {
 }
 test('all license requests use shared authenticated no-store transport and exact contract', async () => {
   const requests = []
-  globalThis.fetch = async (url, options) => { requests.push({ url, options }); return respond({ deployment: { revision: 3 }, initialized: true, systems: [], server_time: 'now', runtime_enforcement: 'NOT_CONNECTED', configured_environment: 'production' }) }
-  assert.deepEqual(await getLicenseStatus(), { revision: 3, initialized: true, systems: [], server_time: 'now', runtime_enforcement: 'NOT_CONNECTED', configured_environment: 'production' })
+  globalThis.fetch = async (url, options) => { requests.push({ url, options }); return respond({ deployment: { revision: 3 }, initialized: true, systems: [], server_time: 'now', runtime_enforcement: 'AVAILABLE', runtime_enforcement_source: 'per_application_coordination', configured_environment: 'production' }) }
+  assert.deepEqual(await getLicenseStatus(), { revision: 3, initialized: true, systems: [], server_time: 'now', runtime_enforcement: 'AVAILABLE', runtime_enforcement_source: 'per_application_coordination', configured_environment: 'production' })
   await initializeLicense('customer-a', 'production')
   await getLicenseRequest()
   await previewLicense('signed.token.value')
@@ -84,4 +84,25 @@ test('runtime overview stays mounted before license initialization instead of hi
   const source = readFileSync(new URL('./CommercialLicenseView.vue', import.meta.url), 'utf8')
   assert.match(source, /<RuntimeEnforcementView[^>]*@toast=/)
   assert.doesNotMatch(source, /RuntimeEnforcementView[^\n>]*v-if=/)
+})
+test('statusRows 原样透传聚合 enforcement 与 reason_code，并保留 undefined/null 的区别', () => {
+  const rows = statusRows({
+    systems: [
+      { code: 'settlement', status: 'VALID', kind: 'FULL', expires_at: 100, reason_code: 'EXPIRED', enforcement: { available: true, registration: 'REGISTERED', status: 'ENFORCED' } },
+      { code: 'contract_management', status: 'CLOCK_ABNORMAL', kind: 'FULL', reason_code: 'CLOCK_ABNORMAL', enforcement: null },
+      { code: 'project_management', status: 'VALID', kind: 'FULL' },
+    ],
+  })
+  const settlement = rows.find(row => row.code === 'settlement')
+  assert.equal(settlement.enforcement.status, 'ENFORCED')
+  assert.equal(settlement.reasonCode, 'EXPIRED')
+  const clock = rows.find(row => row.code === 'contract_management')
+  assert.equal(clock.enforcement, null, '服务端明确没有聚合时必须是 null，不能变成 undefined')
+  assert.equal(clock.reasonCode, 'CLOCK_ABNORMAL')
+  // 旧后端没有这两个字段：undefined 才能触发逐应用概览回退。
+  const legacy = rows.find(row => row.code === 'project_management')
+  assert.equal(legacy.enforcement, undefined)
+  assert.equal(legacy.reasonCode, '')
+  // 未购买的系统不进入当前授权面板。
+  assert.equal(licensedOnly(rows).some(row => row.code === 'data_analysis'), false)
 })
