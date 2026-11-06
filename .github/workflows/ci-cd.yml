@@ -5,6 +5,12 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      modules:
+        description: "VITE_ENABLED_MODULES：all、none 或逗号分隔的业务模块编码（如 contract_management,project_management）"
+        type: string
+        default: all
+        required: false
 
 permissions:
   contents: read
@@ -26,9 +32,54 @@ jobs:
       - run: npm test
       - name: Verify module selection builds
         run: npm run verify:modules
+      - name: Design token hardcode gate
+        run: npm run audit:design-tokens
       - name: Verify frontend deployment prerequisites
         run: bash scripts/test-deploy-frontend.sh
       - run: npm run build
+
+  # 布局断点回归：真实模块 CSS + 真实组件，全部在浏览器内渲染，不依赖后端与 dev server。
+  # 与 test 并列（push/PR 默认执行），不进 image/deploy 依赖链；失败时 harness 会打印
+  # 具体 module/width/height/order 与边界断言明细。
+  layout:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Resolve Chrome binary
+        shell: bash
+        env:
+          CHROMIUM_PATH: /usr/bin/google-chrome
+        run: |
+          set -Eeuo pipefail
+          candidate="$CHROMIUM_PATH"
+          if [ ! -x "$candidate" ]; then
+            candidate="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          fi
+          if [ -z "$candidate" ] || [ ! -x "$candidate" ]; then
+            echo "::error::找不到可用 Chrome/Chromium，布局回归无法执行（不静默跳过）。"
+            exit 1
+          fi
+          echo "CHROMIUM_PATH=$candidate" >> "$GITHUB_ENV"
+          "$candidate" --version
+      - name: Layout boundary regression
+        env:
+          LAYOUT_OUTPUT_DIR: ${{ github.workspace }}/layout-evidence/${{ github.run_id }}
+        run: npm run test:layout
+      - name: Upload layout evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: layout-evidence
+          path: layout-evidence/
+          retention-days: 7
+          if-no-files-found: warn
 
   image:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
@@ -70,6 +121,7 @@ jobs:
           tags: |
             ${{ steps.vars.outputs.image }}:${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           build-args: |
+            VITE_ENABLED_MODULES=${{ inputs.modules || 'all' }}
             VITE_API_BASE_URL=/api/v1
             VITE_LOGIN_SUCCESS_URL=/
           cache-from: type=gha

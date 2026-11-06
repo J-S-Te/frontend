@@ -9,6 +9,7 @@
     "test:layout": "node src/test/ui-harness/responsive-boundaries-browser.mjs",
     "build": "vite build",
     "verify:modules": "node build/verifyModuleSelection.mjs",
+    "audit:design-tokens": "node scripts/audit-design-tokens.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

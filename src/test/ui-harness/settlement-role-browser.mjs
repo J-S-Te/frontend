@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+// 手工证据脚本（opt-in）：需提供隔离夹具会话 SETTLEMENT_ROLE_BROWSER_FIXTURE / 隔离 MySQL，
+// 未接入 CI；非 macOS 环境用 CHROMIUM_PATH 指向本机 Chrome/Chromium。
 import { fileURLToPath } from 'node:url'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { createServer } from 'vite'
@@ -100,7 +102,7 @@ async function readResource(page, path) {
 try {
   await server.listen()
   browser = await chromium.launch({
-    executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true,
+    executablePath: process.env.CHROMIUM_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true,
   })
   await check('management-readonly', 'management', 'finance', async (page, requests) => {
     await page.getByRole('button', { name: '结算总览', exact: true }).waitFor()

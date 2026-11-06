@@ -1,3 +1,5 @@
+// 手工证据脚本：只读真实模板与样式、内联渲染，未接入 CI；
+// 非 macOS 环境用 CHROMIUM_PATH 指向本机 Chrome/Chromium。
 import { chromium } from 'playwright-core'
 import {readFile,writeFile} from 'node:fs/promises'
 import assert from 'node:assert/strict'
@@ -18,7 +20,7 @@ for(const [name,module,view,css,cls] of modules){
  html=html.replace(/\{\{[^}]+\}\}/g,()=>field++===0?'本':'01M594AD09J03FRJV8SDXMH72S'.repeat(4))
  footers.push({name,html})
 }
-const browser=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true})
+const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true})
 const rows=[]
 try{
  for(const width of [1280,760]){

@@ -1,0 +1,334 @@
+{
+  "version": 1,
+  "generatedAt": "2026-11-06T06:49:58.468Z",
+  "generatedFrom": {
+    "branch": "wip/frontend-styles-20261106",
+    "commit": "4336280"
+  },
+  "source": "src",
+  "scope": "src/**/*.vue (仅 <style> 块) + src/**/*.css；不含 dist/build/node_modules/点目录",
+  "rule": "每个已登记文件的计数不得增加；三类总量不得增加（新文件计入总量）。--update 显式刷新。",
+  "classes": [
+    "color",
+    "fontSize",
+    "zIndex"
+  ],
+  "notes": [
+    "只登记含硬编码的文件；0 计数的文件不入表，其新增由总量门禁兜住。",
+    "自定义属性定义（--x: ...）不计入三类；它是 token 的合法落点。",
+    "颜色口径：#hex 与不带 var() 的 rgb()/rgba()/hsl()/hsla() 均计数（含 #fff/#000）；transparent/currentColor/inherit 等关键字与具名色（white/black）不在本切片范围。"
+  ],
+  "filesScanned": 141,
+  "totals": {
+    "color": 3037,
+    "fontSize": 1407,
+    "zIndex": 73
+  },
+  "files": {
+    "src/modules/contract_management/components/ContractImportPanel.vue": {
+      "color": 155,
+      "fontSize": 59,
+      "zIndex": 1
+    },
+    "src/modules/contract_management/components/ContractIntegrationOutboxPanel.vue": {
+      "color": 5,
+      "fontSize": 4,
+      "zIndex": 0
+    },
+    "src/modules/contract_management/components/ContractPDFPreview.vue": {
+      "color": 4,
+      "fontSize": 1,
+      "zIndex": 0
+    },
+    "src/modules/contract_management/components/ContractReportsPanel.vue": {
+      "color": 4,
+      "fontSize": 5,
+      "zIndex": 0
+    },
+    "src/modules/contract_management/components/LocalContractCatalogPanel.vue": {
+      "color": 3,
+      "fontSize": 0,
+      "zIndex": 0
+    },
+    "src/modules/contract_management/components/LocalContractSourcePicker.vue": {
+      "color": 2,
+      "fontSize": 0,
+      "zIndex": 0
+    },
+    "src/modules/contract_management/styles/contract-management.css": {
+      "color": 281,
+      "fontSize": 230,
+      "zIndex": 14
+    },
+    "src/modules/customer_opportunity/components/OpportunityWinConfirmationPanel.vue": {
+      "color": 1,
+      "fontSize": 0,
+      "zIndex": 0
+    },
+    "src/modules/customer_opportunity/styles/customer-opportunity.css": {
+      "color": 612,
+      "fontSize": 184,
+      "zIndex": 12
+    },
+    "src/modules/customer_opportunity/views/CRMLoginCompleteView.vue": {
+      "color": 6,
+      "fontSize": 3,
+      "zIndex": 0
+    },
+    "src/modules/customer_portal/components/PortalLocalAdminPanel.vue": {
+      "color": 2,
+      "fontSize": 0,
+      "zIndex": 0
+    },
+    "src/modules/customer_portal/styles/customer-portal.css": {
+      "color": 261,
+      "fontSize": 61,
+      "zIndex": 7
+    },
+    "src/modules/customer_portal/styles/project-export.css": {
+      "color": 19,
+      "fontSize": 4,
+      "zIndex": 0
+    },
+    "src/modules/data_analysis/styles/data-analysis.css": {
+      "color": 158,
+      "fontSize": 79,
+      "zIndex": 5
+    },
+    "src/modules/data_analysis/views/DictionaryView.vue": {
+      "color": 5,
+      "fontSize": 1,
+      "zIndex": 0
+    },
+    "src/modules/platform/app/App.vue": {
+      "color": 2,
+      "fontSize": 1,
+      "zIndex": 1
+    },
+    "src/modules/platform/applications/components/SubsystemAccessProgress.vue": {
+      "color": 6,
+      "fontSize": 23,
+      "zIndex": 1
+    },
+    "src/modules/platform/applications/components/SubsystemAccessRecoveryPanel.vue": {
+      "color": 9,
+      "fontSize": 1,
+      "zIndex": 0
+    },
+    "src/modules/platform/applications/components/SubsystemAccessWizard.vue": {
+      "color": 28,
+      "fontSize": 25,
+      "zIndex": 1
+    },
+    "src/modules/platform/applications/components/SubsystemOnboardingModule.vue": {
+      "color": 125,
+      "fontSize": 43,
+      "zIndex": 1
+    },
+    "src/modules/platform/auth/views/ForbiddenView.vue": {
+      "color": 19,
+      "fontSize": 5,
+      "zIndex": 0
+    },
+    "src/modules/platform/auth/views/ForcePasswordChangeView.vue": {
+      "color": 2,
+      "fontSize": 0,
+      "zIndex": 0
+    },
+    "src/modules/platform/auth/views/SubsystemAccessErrorView.vue": {
+      "color": 16,
+      "fontSize": 2,
+      "zIndex": 0
+    },
+    "src/modules/platform/configuration/components/ConfigurationCenterModule.vue": {
+      "color": 8,
+      "fontSize": 1,
+      "zIndex": 0
+    },
+    "src/modules/platform/dictionaries/styles/dictionary-management.css": {
+      "color": 13,
+      "fontSize": 19,
+      "zIndex": 0
+    },
+    "src/modules/platform/features/licenses/CommercialLicenseView.vue": {
+      "color": 69,
+      "fontSize": 46,
+      "zIndex": 0
+    },
+    "src/modules/platform/features/licenses/LicenseProblem.vue": {
+      "color": 10,
+      "fontSize": 7,
+      "zIndex": 0
+    },
+    "src/modules/platform/features/licenses/RuntimeEnforcementView.vue": {
+      "color": 40,
+      "fontSize": 23,
+      "zIndex": 0
+    },
+    "src/modules/platform/files/styles/file-task-operations.css": {
+      "color": 11,
+      "fontSize": 11,
+      "zIndex": 0
+    },
+    "src/modules/platform/iam/components/BatchUserImportDialog.vue": {
+      "color": 122,
+      "fontSize": 28,
+      "zIndex": 1
+    },
+    "src/modules/platform/iam/components/EmployeeOnboardingModal.vue": {
+      "color": 25,
+      "fontSize": 6,
+      "zIndex": 3
+    },
+    "src/modules/platform/iam/components/PersonnelChangeCenter.vue": {
+      "color": 116,
+      "fontSize": 24,
+      "zIndex": 3
+    },
+    "src/modules/platform/iam/styles/iam-settings.css": {
+      "color": 75,
+      "fontSize": 233,
+      "zIndex": 2
+    },
+    "src/modules/platform/login-targets/styles/application-login-target.css": {
+      "color": 5,
+      "fontSize": 10,
+      "zIndex": 1
+    },
+    "src/modules/platform/notifications/components/NotificationCenterModule.vue": {
+      "color": 10,
+      "fontSize": 0,
+      "zIndex": 0
+    },
+    "src/modules/platform/notifications/styles/notification-center.css": {
+      "color": 4,
+      "fontSize": 9,
+      "zIndex": 1
+    },
+    "src/modules/platform/security/styles/login-security.css": {
+      "color": 10,
+      "fontSize": 11,
+      "zIndex": 0
+    },
+    "src/modules/platform/shared/styles/main.css": {
+      "color": 89,
+      "fontSize": 37,
+      "zIndex": 1
+    },
+    "src/modules/platform/shared/styles/state.css": {
+      "color": 11,
+      "fontSize": 4,
+      "zIndex": 0
+    },
+    "src/modules/platform/styles/console.css": {
+      "color": 215,
+      "fontSize": 86,
+      "zIndex": 6
+    },
+    "src/modules/platform/styles/settings-showcase.css": {
+      "color": 66,
+      "fontSize": 13,
+      "zIndex": 0
+    },
+    "src/modules/platform/styles/subsystem-portal.css": {
+      "color": 32,
+      "fontSize": 14,
+      "zIndex": 7
+    },
+    "src/modules/project_management/components/DetectionCategoryImportDialog.vue": {
+      "color": 5,
+      "fontSize": 0,
+      "zIndex": 0
+    },
+    "src/modules/project_management/components/NativeProjectCreateDialog.vue": {
+      "color": 4,
+      "fontSize": 0,
+      "zIndex": 0
+    },
+    "src/modules/project_management/components/NativeScopeChangePanel.vue": {
+      "color": 5,
+      "fontSize": 0,
+      "zIndex": 0
+    },
+    "src/modules/project_management/components/PenetrationWorkPackageCard.vue": {
+      "color": 20,
+      "fontSize": 3,
+      "zIndex": 0
+    },
+    "src/modules/project_management/components/ProjectNotificationCenter.vue": {
+      "color": 7,
+      "fontSize": 0,
+      "zIndex": 0
+    },
+    "src/modules/project_management/components/QualificationImportDialog.vue": {
+      "color": 5,
+      "fontSize": 0,
+      "zIndex": 0
+    },
+    "src/modules/project_management/components/SearchableSelect.vue": {
+      "color": 1,
+      "fontSize": 4,
+      "zIndex": 0
+    },
+    "src/modules/project_management/styles/project-management.css": {
+      "color": 31,
+      "fontSize": 0,
+      "zIndex": 0
+    },
+    "src/modules/settlement/components/ContractRevisionHoldPanel.vue": {
+      "color": 8,
+      "fontSize": 3,
+      "zIndex": 0
+    },
+    "src/modules/settlement/components/SettlementContractImportPanel.vue": {
+      "color": 1,
+      "fontSize": 0,
+      "zIndex": 0
+    },
+    "src/modules/settlement/components/SettlementNativeFinancialPanel.vue": {
+      "color": 2,
+      "fontSize": 0,
+      "zIndex": 0
+    },
+    "src/modules/settlement/components/SettlementTimeline.vue": {
+      "color": 13,
+      "fontSize": 5,
+      "zIndex": 0
+    },
+    "src/modules/settlement/styles/settlement.css": {
+      "color": 179,
+      "fontSize": 52,
+      "zIndex": 0
+    },
+    "src/modules/shared/components/ConfirmDialog.vue": {
+      "color": 14,
+      "fontSize": 3,
+      "zIndex": 1
+    },
+    "src/modules/shared/components/OperationInboxPanel.vue": {
+      "color": 22,
+      "fontSize": 10,
+      "zIndex": 2
+    },
+    "src/modules/shared/components/OperationResultBanner.vue": {
+      "color": 12,
+      "fontSize": 5,
+      "zIndex": 0
+    },
+    "src/modules/shared/components/OperationToast.vue": {
+      "color": 7,
+      "fontSize": 4,
+      "zIndex": 1
+    },
+    "src/modules/shared/components/PromptDialog.vue": {
+      "color": 19,
+      "fontSize": 3,
+      "zIndex": 1
+    },
+    "src/modules/shared/styles/global-ux.css": {
+      "color": 26,
+      "fontSize": 2,
+      "zIndex": 0
+    }
+  }
+}

@@ -1,4 +1,5 @@
 // 隔离布局回归：实际Vue组件、实际模块CSS、合成数据；全部请求在浏览器内处理。
+// CI 入口：npm run test:layout（无需 dev server；用 CHROMIUM_PATH 指定本机 Chrome/Chromium）。
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
@@ -10,8 +11,7 @@ import { chromium } from 'playwright-core'
 const root = fileURLToPath(new URL('../../../', import.meta.url))
 const run = process.env.LAYOUT_RUN_LABEL || 'latest'
 assert.match(run, /^[A-Za-z0-9_-]{1,48}$/, 'layout result label must remain inside the evidence directory')
-const output = fileURLToPath(new URL(
-  `../../../../.ai/qa/responsive-boundaries-20261103/${run}/`, import.meta.url))
+const output = process.env.LAYOUT_OUTPUT_DIR ? (process.env.LAYOUT_OUTPUT_DIR.endsWith('/') ? process.env.LAYOUT_OUTPUT_DIR : process.env.LAYOUT_OUTPUT_DIR + '/') : fileURLToPath(new URL(`../../../../.ai/qa/responsive-boundaries-20261103/${run}/`, import.meta.url))
 const token = 'A'.repeat(240)
 const longText = '超长业务名称与说明'.repeat(24)
 const modules = [
