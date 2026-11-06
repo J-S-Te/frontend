@@ -46,7 +46,15 @@ export function credentialAPIURL(path) {
 
 async function credentialRequest(path, purpose, payload, resourceId = '') {
   try {
-    const result = await postCredentialJSON({ url: credentialAPIURL(path), purpose, resourceId, body: payload })
+    // 纵深防御：凭据封装本身不走统一请求管道，写请求需要自己带上 CSRF 标记头，
+    // 与 auth/api/auth.js 的凭据分支保持一致；加密封套流程不变。
+    const result = await postCredentialJSON({
+      url: credentialAPIURL(path),
+      purpose,
+      resourceId,
+      body: payload,
+      headers: { 'X-CSRF-Token': '1' },
+    })
     return credentialResponseData(result)
   } catch (error) {
     if (error instanceof CredentialProtocolError) {
@@ -58,7 +66,12 @@ async function credentialRequest(path, purpose, payload, resourceId = '') {
 
 async function credentialMultipart(path, payloadForm) {
   try {
-    const result = await postCredentialFormData({ url: credentialAPIURL(path), purpose: 'CREATE_EMPLOYEES_BATCH', formData: payloadForm })
+    const result = await postCredentialFormData({
+      url: credentialAPIURL(path),
+      purpose: 'CREATE_EMPLOYEES_BATCH',
+      formData: payloadForm,
+      headers: { 'X-CSRF-Token': '1' },
+    })
     return credentialResponseData(result)
   } catch (error) {
     if (error instanceof CredentialProtocolError) {

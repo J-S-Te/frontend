@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { afterEach, test } from 'node:test'
+import { readFile } from 'node:fs/promises'
 import {
   RELATED_DATA,
   relatedDataVersion,
@@ -476,4 +477,28 @@ test('credential API paths are prefixed exactly once for IAM endpoints', () => {
 test('encrypted IAM responses unwrap the business data envelope', () => {
   assert.deepEqual(credentialResponseData({ body: { code: 'OK', data: { temporary_password: 'once' } } }), { temporary_password: 'once' })
   assert.equal(credentialResponseData({ body: null }), undefined)
+})
+
+const iamSource = await readFile(new URL('./iam.js', import.meta.url), 'utf8')
+
+test('凭据加密写请求同样携带 CSRF 标记头（纵深防御）', () => {
+  // 凭据封装绕开统一请求管道，node 环境又只会走 CREDENTIAL_ENCRYPTION_MODE=disabled
+  // 分支，因此用源码契约锁住注入点：JSON 与 multipart 两个封装都必须显式传
+  // X-CSRF-Token: '1'，且仍然经由 postCredentialJSON / postCredentialFormData
+  // 的加密封套流程（不自行拼装 fetch）。
+  const jsonBlock = iamSource.slice(
+    iamSource.indexOf('async function credentialRequest'),
+    iamSource.indexOf('async function credentialMultipart'),
+  )
+  assert.match(jsonBlock, /postCredentialJSON\(\{/)
+  assert.match(jsonBlock, /headers: \{ 'X-CSRF-Token': '1' \}/)
+  assert.doesNotMatch(jsonBlock, /globalThis\.fetch|fetchImpl/)
+
+  const multipartBlock = iamSource.slice(
+    iamSource.indexOf('async function credentialMultipart'),
+    iamSource.indexOf('const request = createRequest('),
+  )
+  assert.match(multipartBlock, /postCredentialFormData\(\{/)
+  assert.match(multipartBlock, /headers: \{ 'X-CSRF-Token': '1' \}/)
+  assert.doesNotMatch(multipartBlock, /globalThis\.fetch|fetchImpl/)
 })

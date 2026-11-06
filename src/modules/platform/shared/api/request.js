@@ -122,6 +122,10 @@ export function createRequest({ ErrorClass, networkMessage, failureMessage, subs
           Accept: 'application/json',
           'Cache-Control': 'no-cache',
           ...(fetchOptions.body && !(fetchOptions.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
+          // 纵深防御：写请求统一携带 CSRF 标记头，与 CRM/门户/结算/项目管理/合同等
+          // 子系统客户端保持一致。后端仍以 Origin 校验为权威，这里只是第二道门禁。
+          // 置于调用方自定义头之前，调用方显式传入的同名头优先。
+          ...(method !== 'GET' ? { 'X-CSRF-Token': '1' } : {}),
           ...(fetchOptions.headers || {}),
         },
       })

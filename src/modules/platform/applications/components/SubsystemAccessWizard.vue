@@ -1113,4 +1113,47 @@ function resetFlow() {
   .subsystem-access-wizard__chip[data-tone="warn"],
   .subsystem-access-wizard__button.is-busy::before { animation: none !important; }
 }
+
+/* ---- 深色主题：只做覆盖，浅色渲染保持逐像素不变 ----
+   --sa-* 是向导的设计令牌，进度面板（SubsystemAccessProgress）通过继承共用；
+   这里把它们映射到全局深色 token，否则面板与弹窗在深色下仍是浅色孤岛。 */
+[data-theme="dark"] .subsystem-access-wizard,
+[data-theme="dark"] .subsystem-access-wizard__dialog {
+  --sa-accent: var(--primary-ink);
+  --sa-accent-soft: var(--primary-soft);
+  --sa-border: var(--border);
+  --sa-surface: var(--surface-card);
+  --sa-surface-muted: var(--surface-muted);
+  --sa-text: var(--text);
+  --sa-text-muted: var(--text-muted);
+  --sa-warn: var(--warning-text);
+  --sa-warn-soft: var(--warning-soft);
+  --sa-danger: var(--danger-text);
+  --sa-danger-soft: var(--danger-soft);
+  border-color: var(--border);
+  background: var(--surface-card);
+  color: var(--text);
+}
+
+[data-theme="dark"] .subsystem-access-wizard__dialog { box-shadow: var(--shadow-modal); }
+
+/* 强调色在深色下用于文字（提亮），按钮实心填充仍用品牌色保持白字对比度。 */
+[data-theme="dark"] .subsystem-access-wizard__trigger,
+[data-theme="dark"] .subsystem-access-wizard__button--primary,
+[data-theme="dark"] .subsystem-access-wizard__steps li[data-active="true"] .subsystem-access-wizard__step-index {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--text-on-brand, #fff);
+}
+
+[data-theme="dark"] .subsystem-access-wizard__chip[data-tone="ok"] {
+  border-color: var(--success-border);
+  background: var(--success-soft);
+  color: var(--success-text);
+}
+
+[data-theme="dark"] .subsystem-access-wizard__button:hover:not(:disabled),
+[data-theme="dark"] .subsystem-access-wizard__close:hover {
+  border-color: var(--line-strong);
+}
 </style>
