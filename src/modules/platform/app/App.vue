@@ -186,6 +186,15 @@ function onExternalSessionEnd(event) {
   clearSessionScopedStorage()
   if (route.name !== 'login') void router.replace({ name: 'login', query: { reason: 'logout' } })
 }
+
+// onBoundaryError 把错误边界接住的原始错误写进控制台。
+// 边界在 onErrorCaptured 里返回 false，错误不会再冒到 app.config.errorHandler，
+// 因此渲染期崩溃的堆栈只有这里能留下；降级页已经呈现给用户，这里不再额外弹提示。
+// 参数：payload为边界 emit 的 { error, info }。
+// 返回值：无。
+function onBoundaryError({ error, info } = {}) {
+  console.error('[error-boundary]', { error, info })
+}
 const sessionChannel = typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel('basic-platform-auth')
 if (sessionChannel) sessionChannel.onmessage = event => {
   if (event.data?.type === 'session-ended') onExternalSessionEnd(event)
@@ -210,8 +219,9 @@ onBeforeUnmount(() => {
 <template>
   <a class="skip-link" href="#main-content">跳到主要内容</a>
   <!-- 页面组件渲染崩溃时替换成可读的降级界面，而不是白屏；错误在本组件内消化，
-       不再冒到 app.config.errorHandler，避免降级页与全局提示同时出现。 -->
-  <ErrorBoundary>
+       不再冒到 app.config.errorHandler，所以边界的原始错误由 @error 自己写日志，
+       避免降级页与全局提示同时出现。 -->
+  <ErrorBoundary @error="onBoundaryError">
     <RouterView />
   </ErrorBoundary>
   <!-- 只接"谁都没接住"的错误；业务视图自己的 OperationToast 通道保持不变。 -->
