@@ -16,6 +16,7 @@
 | `action-buttons-browser.mjs` | 访问 dev server 的 `action-buttons.html` | 否 | **手工 dev server** |
 | `priority-browser.mjs` | 访问 dev server 的 `priority.html` | 否 | **手工 dev server** |
 | `pagination-layout-browser.mjs` | `page.setContent` 内联渲染真实 PaginationBar + 模块 CSS | 否 | 仅 Chrome |
+| `first-run-browser.mjs` | 路由合成 `page.goto` + 内联真实组件/CSS | 否 | 仅 Chrome |
 | `settlement-role-browser.mjs` | 自起 Vite + 隔离夹具后端/MySQL | 否（opt-in） | 隔离夹具会话 + 隔离 MySQL + 后端 |
 
 进 CI 的只有 `responsive-boundaries-browser.mjs`：它不依赖 dev server、不依赖后端，
@@ -25,6 +26,21 @@
 其余脚本保留为**手工证据脚本**：`action-buttons-browser.mjs` 与 `priority-browser.mjs`
 依赖手工另起的 Vite dev server（默认端口分别 5187 / 5179，`vite` 本身默认 5173 + strictPort），
 端口不可在 CI 复现，因此未接入 CI。
+
+### 平台导览 / 上手清单交互回归
+
+```bash
+CHROMIUM_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  node src/test/ui-harness/first-run-browser.mjs
+```
+
+用真实 `FirstRunGuideHost` / `FirstRunChecklistPanel` 组件和真实 `first-run.css`，在隔离页面里验证
+600ms 延迟启动、层级 9000、焦点锁 / 滚动锁 / 关闭还原焦点、Esc / 跳过终态、遮罩点击不关闭、
+缺锚步骤跳过、header 缺锚不启动、清单 5 项与权限可见性、第 ④ 项只读探测
+（`GET /api/v1/users?page=1&page_size=1`，后端 total 排除初始化超管后 `total>=1` 完成，合成响应）、
+窄屏 ≤640px 底部面板、锚点在视口外时先 `scrollIntoView` 定位，以及门户默认深色通过
+`createDocumentThemeOverride()` 覆盖 `<html data-theme>` 后实际渲染色与恢复。请求全部在浏览器内
+以合成响应处理；证据写入 `.ai/qa/first-run-guide-20261107/browser/<FIRST_RUN_RUN_LABEL>/`。
 
 ### 分页条布局回归（错位 / 换行）
 
