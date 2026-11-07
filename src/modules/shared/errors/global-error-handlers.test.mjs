@@ -13,6 +13,36 @@ import { globalToastBus } from './toastBus.js'
 const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8')
 
 // ---------------------------------------------------------------------------
+// 控制台探针
+// ---------------------------------------------------------------------------
+//
+// 兜底通道的契约之一是"原始错误必须落到日志通道"（Vue 一旦设置 app.config.errorHandler
+// 就不再走自带的 logError，原始堆栈只能由这里负责）。所以 report() 默认会写 console.error。
+// 整套用例共用一个探针：既避免把故障日志混进 TAP 输出，也让"到底记了几条、记了什么"
+// 可以被断言。
+
+const originalConsole = { error: console.error, warn: console.warn, log: console.log }
+let consoleRecords = []
+console.error = (...args) => { consoleRecords.push({ level: 'error', args }) }
+console.warn = (...args) => { consoleRecords.push({ level: 'warn', args }) }
+
+// 清空并返回只读视图：error()/warn() 取当前累积的调用参数。
+function consoleSpy() {
+  consoleRecords = []
+  return {
+    records: () => consoleRecords,
+    error: () => consoleRecords.filter((record) => record.level === 'error'),
+    warn: () => consoleRecords.filter((record) => record.level === 'warn'),
+    clear: () => { consoleRecords = [] },
+  }
+}
+
+test.after(() => {
+  console.error = originalConsole.error
+  console.warn = originalConsole.warn
+})
+
+// ---------------------------------------------------------------------------
 // 假宿主：window 监听表 + router.onError + app.config + 可控时钟
 // ---------------------------------------------------------------------------
 
@@ -261,6 +291,113 @@ test('不传 notify 时，未捕获错误会进入全局 toast 总线', () => {
 })
 
 // ---------------------------------------------------------------------------
+// 原始错误留痕：控制台 + 可注入上报通道
+// ---------------------------------------------------------------------------
+//
+// Vue 3 一旦设置 app.config.errorHandler，就改用这个函数而不再调用自带的 logError，
+// 所以"渲染 / watch 期崩溃的原始堆栈"只能由这里写进日志。下面把四条通路各走一遍，
+// 断言原始 error 对象本身（不是清洗后的中文文案）确实被记录。
+
+test('四条通路的原始错误各写一条控制台日志，来源标签可分辨', () => {
+  const spy = consoleSpy()
+  const harness = createHarness()
+
+  const vueError = new TypeError("Cannot read properties of undefined (reading 'rows')")
+  uncaught(harness, vueError)
+  const windowError = new TypeError('window boom')
+  harness.win.dispatch('error', { message: windowError.message, error: windowError, target: harness.win })
+  const rejection = new Error('rejection boom')
+  harness.win.dispatch('unhandledrejection', { reason: rejection, preventDefault() {} })
+  const routerError = new TypeError('Failed to fetch dynamically imported module: https://portal.test/assets/X-1.js')
+  harness.router.fail(routerError)
+
+  const errors = spy.error()
+  assert.equal(errors.length, 4, '每个来源各记录一次')
+  assert.deepEqual(errors.map((record) => record.args[1].source),
+    ['app.errorHandler', 'window.error', 'unhandledrejection', 'router.onError'],
+    '来源标签必须能一眼对上注册入口')
+  assert.deepEqual(errors.map((record) => record.args[1].error), [vueError, windowError, rejection, routerError],
+    '记录里必须是原始 error，不能是清洗后的用户文案')
+  assert.equal(errors[0].args[0], '[global-error]', '统一前缀，便于在控制台过滤')
+  harness.handler.dispose()
+})
+
+test('节流丢弃的提示不静默：用户只有 3 条，日志一条不少', () => {
+  const spy = consoleSpy()
+  const harness = createHarness()
+  for (let index = 1; index <= 5; index += 1) {
+    uncaught(harness, new Error(`第 ${index} 个业务失败`))
+    harness.advance(1000)
+  }
+  assert.equal(harness.calls.length, 3, '用户侧仍然只有 3 条提示')
+  assert.equal(spy.error().length, 5, '被丢弃的两条原始错误也必须留在日志里')
+  const warns = spy.warn()
+  assert.equal(warns.length, 2, '丢弃要有明确记录，不能当没发生')
+  assert.deepEqual(warns.map((record) => record.args[1].reason), ['throttled', 'throttled'])
+  harness.handler.dispose()
+})
+
+test('去重窗口内的重复错误只弹一条提示，但两条都留日志', () => {
+  const spy = consoleSpy()
+  const harness = createHarness()
+  const error = new TypeError('x is not a function')
+  harness.win.dispatch('unhandledrejection', { reason: error, preventDefault() {} })
+  harness.win.dispatch('error', { message: error.message, error, target: harness.win })
+  assert.equal(harness.calls.length, 1, '去重仍然生效')
+  assert.equal(spy.error().length, 2)
+  assert.equal(spy.warn().length, 1)
+  assert.equal(spy.warn()[0].args[1].reason, 'duplicate')
+  harness.handler.dispose()
+})
+
+test('注入的 reportTo 在写日志之后调用，且不受提示节流裁剪', () => {
+  const spy = consoleSpy()
+  const uploaded = []
+  const seenLogCount = []
+  const harness = createHarness({
+    install: {
+      reportTo: (event) => {
+        uploaded.push(event)
+        // 记录上报时刻已有的日志条数，用来证明"先记录再上报"。
+        seenLogCount.push(spy.error().length)
+      },
+    },
+  })
+  for (let index = 1; index <= 5; index += 1) {
+    uncaught(harness, new Error(`第 ${index} 个业务失败`))
+    harness.advance(1000)
+  }
+  assert.equal(harness.calls.length, 3, '提示仍然受节流保护')
+  assert.equal(uploaded.length, 5, '上报通道不能被用户提示的节流裁掉')
+  assert.deepEqual(uploaded.map((event) => event.source), Array(5).fill('app.errorHandler'))
+  assert.deepEqual(seenLogCount, [1, 2, 3, 4, 5], 'console.error 必须先于 reportTo')
+  harness.handler.dispose()
+})
+
+test('reportTo 抛错不会打断兜底提示', () => {
+  consoleSpy()
+  const harness = createHarness({ install: { reportTo: () => { throw new Error('uploader down') } } })
+  assert.doesNotThrow(() => uncaught(harness, new Error('业务失败')))
+  assert.equal(harness.calls.length, 1, '上报失败不影响用户看到提示')
+  harness.handler.dispose()
+})
+
+test('dispose 之后不再记录、不再上报，直接调用 report 也静默', () => {
+  const spy = consoleSpy()
+  const uploaded = []
+  const harness = createHarness({ install: { reportTo: (event) => uploaded.push(event) } })
+  harness.handler.dispose()
+  spy.clear()
+
+  harness.win.dispatch('error', { message: 'late boom', error: new Error('late boom'), target: harness.win })
+  harness.win.dispatch('unhandledrejection', { reason: new Error('later'), preventDefault() {} })
+  harness.router.fail(new Error('late route'))
+  assert.equal(harness.handler.report(new Error('late direct'), 'vue'), false, '卸载后 report 不再接受')
+  assert.equal(spy.records().length, 0, '卸载后不能再往控制台写兜底日志')
+  assert.equal(uploaded.length, 0, '卸载后不能再上报')
+})
+
+// ---------------------------------------------------------------------------
 // 装配守卫：注册顺序错了，兜底就不生效
 // ---------------------------------------------------------------------------
 
@@ -275,6 +412,21 @@ test('main.js 在 mount 之前安装全局错误处理', () => {
 
 test('App.vue 用错误边界包住 RouterView，并挂载全局提示宿主', () => {
   const source = read('../../platform/app/App.vue')
-  assert.match(source, /<ErrorBoundary>[\s\S]*<RouterView\s*\/>[\s\S]*<\/ErrorBoundary>/, 'RouterView 必须被错误边界包住')
+  assert.match(source, /<ErrorBoundary\b[\s\S]*<RouterView\s*\/>[\s\S]*<\/ErrorBoundary>/, 'RouterView 必须被错误边界包住')
   assert.match(source, /<GlobalErrorToasts\s*\/>/, '全局提示宿主必须挂在 App.vue')
+})
+
+test('App.vue 的边界把原始错误写进控制台，不再额外弹提示', () => {
+  const source = read('../../platform/app/App.vue')
+  // 用 test 而不是 assert.match：失败时不要把整个 App.vue 打进 TAP 输出。
+  assert.ok(/<ErrorBoundary\b[^>]*@error="onBoundaryError"/.test(source),
+    '边界必须监听 @error，否则原始错误随降级页一起消失')
+  const handlerAt = source.indexOf('function onBoundaryError')
+  assert.ok(handlerAt >= 0, 'App.vue 必须有 onBoundaryError')
+  const body = source.slice(handlerAt, handlerAt + 300)
+  assert.match(body, /console\.error\('\[error-boundary\]'/, '边界错误必须留日志')
+  assert.match(body, /\berror\b/, '日志要带原始 error')
+  assert.match(body, /\binfo\b/, '日志要带 Vue 给出的出错钩子信息')
+  assert.doesNotMatch(source, /onBoundaryError[\s\S]{0,200}notifyGlobalError|onBoundaryError[\s\S]{0,200}showToast/,
+    '边界已经渲染降级页，不允许再弹一条全局提示造成双重提示')
 })
