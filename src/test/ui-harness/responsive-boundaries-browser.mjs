@@ -45,8 +45,10 @@ async function componentBundle() {
     stdin: { contents: `import {createApp} from 'vue';
       import Wizard from './src/modules/platform/applications/components/SubsystemAccessWizard.vue';
       import Confirm from './src/modules/shared/components/ConfirmDialog.vue';
+      import LicenseEventsSheet from './src/modules/platform/features/licenses/LicenseEventsSheet.vue';
       window.mountWizard=props=>createApp(Wizard,props).mount('#fixture');
-      window.mountConfirm=props=>createApp(Confirm,props).mount('#fixture');`, resolveDir: root },
+      window.mountConfirm=props=>createApp(Confirm,props).mount('#fixture');
+      window.mountLicenseEventsSheet=props=>createApp(LicenseEventsSheet,props).mount('#fixture');`, resolveDir: root },
     bundle: true, write: false, format: 'iife', platform: 'browser',
     define: { 'import.meta.env': '{}' }, alias: { '@': root + 'src' },
     plugins: [{ name: 'layout-vue',
@@ -143,6 +145,47 @@ async function violations(page, wizard = false) {
   }, wizard)
 }
 
+// 用途：用真实 console.css 骨架检查授权事件抽屉的几何契约。
+// 参数：page 为挂载了真实 LicenseEventsSheet 的页面；width/height 为当前视口。
+// 返回值：违规列表；≤720px 要求整屏，>720px 要求右贴边且不超过 560px。
+async function sheetViolations(page, width, height) {
+  return page.evaluate(({ width, height }) => {
+    const errors = []
+    const box = element => element.getBoundingClientRect()
+    const sheet = document.querySelector('.console-sheet')
+    if (!sheet) return ['event sheet missing']
+    const rect = box(sheet)
+    const fullScreen = width <= 720
+    if (fullScreen) {
+      if (Math.abs(rect.left) > 1 || Math.abs(rect.top) > 1
+        || Math.abs(rect.right - width) > 1 || Math.abs(rect.bottom - height) > 1) {
+        errors.push('mobile sheet must cover viewport: ' + JSON.stringify(rect))
+      }
+    } else {
+      if (Math.abs(rect.right - width) > 1) errors.push('desktop sheet must stick to the right edge')
+      if (rect.width > 561 || rect.width < 200) errors.push('desktop sheet width out of range: ' + rect.width)
+      if (Math.abs(rect.height - height) > 1) errors.push('desktop sheet must be full height')
+    }
+    const close = box(document.querySelector('.console-sheet__close'))
+    if (close.width < (fullScreen ? 44 : 36)) errors.push('close target too small: ' + close.width)
+    if (close.left < -1 || close.right > width + 1 || close.top < -1 || close.bottom > height + 1) errors.push('close action unreachable')
+    const body = document.querySelector('.console-sheet__body')
+    if (body.scrollWidth > body.clientWidth + 1) errors.push('event sheet body horizontal overflow')
+    const footer = box(document.querySelector('.console-sheet__footer'))
+    if (footer.bottom > height + 1) errors.push('sheet pagination unreachable')
+    if (document.documentElement.scrollWidth > width + 1) errors.push('document horizontal overflow (sheet)')
+    // 行高契约：桌面 48px、移动 64px；摘要行内部不允许横向溢出。
+    const summary = document.querySelector('.license-event-summary')
+    if (summary) {
+      const measured = box(summary)
+      const expected = fullScreen ? 64 : 48
+      if (measured.height < expected - 1) errors.push(`event summary height ${measured.height} < ${expected}`)
+      if (summary.scrollWidth > summary.clientWidth + 1) errors.push('event summary horizontal overflow')
+    }
+    return errors
+  }, { width, height })
+}
+
 // 用途：拦截所有浏览器请求，用只读合成响应驱动真实向导恢复到结果步骤。
 // 参数：page 为独立页面；errors 为收集非预期请求的数组。
 // 返回值：无；禁止对外请求与任何业务写入。
@@ -182,6 +225,8 @@ moduleCss.push(parse(licenseSource).descriptor.styles.map(style => compileStyle(
   source: style.content, id: licenseScope, scoped: style.scoped,
 }).code).join('\n'))
 const scoped = [...componentStyles.values()].join('\n')
+// 抽屉夹具单独用一份完整样式（含真实组件 scoped 样式），在宽度循环里只跑一次。
+const sheetCss = base + consoleCss + sharedCss + moduleCss.join('\n') + scoped
 const browser = await chromium.launch({
   executablePath: process.env.CHROMIUM_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   headless: true,
@@ -263,6 +308,36 @@ try {
       assert.ok(await action.isVisible(), 'long dialogs must retain a reachable confirmation action')
       results.push({ module: 'actual-shared-confirm', width, height, order, errors: confirmationErrors })
       await confirm.close()
+    }
+    // 授权事件抽屉：挂真实组件，用真实 console.css 骨架检查「移动端整屏 / 桌面 560px 右贴边」。
+    {
+      const sheetPage = await browser.newPage({ viewport: { width, height }, reducedMotion: 'reduce' })
+      const sheetErrors = []
+      sheetPage.on('pageerror', error => sheetErrors.push(error.message))
+      await sheetPage.setContent('<div id="fixture"></div>')
+      await sheetPage.addStyleTag({ content: sheetCss })
+      await sheetPage.addScriptTag({ content: bundle })
+      // 抽屉自己取数：只替换 fetch，注入 20 条合成事件，不发任何真实请求。
+      await sheetPage.evaluate(({ longText, pageSize }) => {
+        const items = Array.from({ length: pageSize }, (_, index) => ({
+          id: '01H0000000000000000000' + String(index).padStart(4, '0'),
+          kind: index === 0 ? 'FUTURE_EVENT' : 'IMPORTED_CURRENT',
+          version: 3, revision: index + 1, created_at: '2026-10-13T04:34:56Z',
+          digest: 'sha256:' + 'a'.repeat(40), tenant_id: '', user_id: '',
+          note: longText,
+        }))
+        window.fetch = async () => ({
+          ok: true, status: 200, headers: { get: () => 'application/json' },
+          json: async () => ({ code: 'OK', data: { items, total: 120, page: 1 } }),
+        })
+        window.mountLicenseEventsSheet({ open: true })
+      }, { longText, pageSize: 20 })
+      await sheetPage.locator('.console-sheet').waitFor()
+      await sheetPage.locator('.license-event-summary').first().waitFor()
+      sheetErrors.push(...await sheetViolations(sheetPage, width, height))
+      if (width === 1440 || width === 375) await sheetPage.screenshot({ path: output + `license-events-sheet-${width}.png` })
+      results.push({ module: 'actual-license-events-sheet', width, height, order: 'sheet-only', errors: sheetErrors })
+      await sheetPage.close()
     }
   }
 } finally {

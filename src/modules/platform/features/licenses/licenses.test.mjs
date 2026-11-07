@@ -74,6 +74,18 @@ test('commercial authorization Vue view compiles with actual script bindings', (
   const template = compileTemplate({ source: descriptor.template.content, filename: filename.pathname, id: 'license-view', compilerOptions: { bindingMetadata: script.bindings } })
   assert.deepEqual(template.errors, [])
 })
+test('event row and event sheet compile on their own', () => {
+  // 页内摘要与抽屉是两个独立组件：拆开后各自身份（props / emit / 指令）都要能编译，
+  // 否则只有整页编译通过时会漏掉一个在抽屉里才会炸的绑定错误。
+  for (const name of ['LicenseEventRow.vue', 'LicenseEventsSheet.vue']) {
+    const filename = new URL(`./${name}`, import.meta.url)
+    const { descriptor, errors } = parse(readFileSync(filename, 'utf8'), { filename: filename.pathname })
+    assert.deepEqual(errors, [], name)
+    const script = compileScript(descriptor, { id: name })
+    const template = compileTemplate({ source: descriptor.template.content, filename: filename.pathname, id: name, compilerOptions: { bindingMetadata: script.bindings } })
+    assert.deepEqual(template.errors, [], name)
+  }
+})
 test('valid license never claims business activation or disconnected implementation', () => {
   const source = readFileSync(new URL('./CommercialLicenseView.vue', import.meta.url), 'utf8')
   assert.match(source, /不代表业务系统已开放/)
