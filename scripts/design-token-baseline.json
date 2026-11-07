@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-06T06:49:58.468Z",
+  "generatedAt": "2026-11-07T07:32:49.517Z",
   "generatedFrom": {
-    "branch": "wip/frontend-styles-20261106",
-    "commit": "4336280"
+    "branch": "fix/design-token-baseline-20261107",
+    "commit": "02eb68f"
   },
   "source": "src",
   "scope": "src/**/*.vue (仅 <style> 块) + src/**/*.css；不含 dist/build/node_modules/点目录",
@@ -18,10 +18,10 @@
     "自定义属性定义（--x: ...）不计入三类；它是 token 的合法落点。",
     "颜色口径：#hex 与不带 var() 的 rgb()/rgba()/hsl()/hsla() 均计数（含 #fff/#000）；transparent/currentColor/inherit 等关键字与具名色（white/black）不在本切片范围。"
   ],
-  "filesScanned": 141,
+  "filesScanned": 143,
   "totals": {
-    "color": 3037,
-    "fontSize": 1407,
+    "color": 3055,
+    "fontSize": 1414,
     "zIndex": 73
   },
   "files": {
@@ -111,8 +111,8 @@
       "zIndex": 1
     },
     "src/modules/platform/applications/components/SubsystemAccessRecoveryPanel.vue": {
-      "color": 9,
-      "fontSize": 1,
+      "color": 27,
+      "fontSize": 8,
       "zIndex": 0
     },
     "src/modules/platform/applications/components/SubsystemAccessWizard.vue": {
