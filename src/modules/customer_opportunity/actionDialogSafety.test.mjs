@@ -196,14 +196,34 @@ test('客户合并确认后提交两个客户的版本和原因', async () => {
 test('规则删除确认后使用原规则版本且仅成功后重读', async () => {
   const rule = { id: 7, version: 2, name: '售前规则' }
   const calls = []
+  const closings = []
   const scope = {
     canEdit: { value: true }, deletingRuleId: { value: '' }, saving: { value: false },
-    rules: { value: [rule] }, askConfirm: async () => true,
+    editing: { value: 7 }, rules: { value: [rule] }, askConfirm: async () => true,
     deletePresaleApprovalRule: async (...args) => { calls.push(['delete', ...args]) },
     load: async () => { calls.push(['reload']); return true }, error: { value: '' },
     formatCRMError: () => '删除失败',
+    closeEditor: () => closings.push('close'), reset: () => closings.push('reset'),
   }
   await operation(rules, 'remove', scope)(rule)
   assert.deepEqual(calls, [['delete', 7, 2], ['reload']])
   assert.equal(scope.deletingRuleId.value, '')
+  assert.deepEqual(closings, ['close', 'reset'], '删掉当前编辑的规则后收起编辑区')
+})
+
+test('删除的不是当前编辑的规则时，编辑区保持展开', async () => {
+  const rule = { id: 7, version: 2, name: '售前规则' }
+  const calls = []
+  const closings = []
+  const scope = {
+    canEdit: { value: true }, deletingRuleId: { value: '' }, saving: { value: false },
+    editing: { value: 9 }, rules: { value: [rule] }, askConfirm: async () => true,
+    deletePresaleApprovalRule: async (...args) => { calls.push(['delete', ...args]) },
+    load: async () => { calls.push(['reload']); return true }, error: { value: '' },
+    formatCRMError: () => '删除失败',
+    closeEditor: () => closings.push('close'), reset: () => closings.push('reset'),
+  }
+  await operation(rules, 'remove', scope)(rule)
+  assert.deepEqual(calls, [['delete', 7, 2], ['reload']])
+  assert.deepEqual(closings, [], '编辑别的规则时删除不应打断编辑')
 })

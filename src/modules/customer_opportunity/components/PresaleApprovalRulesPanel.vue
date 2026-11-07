@@ -1,7 +1,7 @@
 <script setup>
 import { formatCRMError } from '../api/errorMessages.js'
 import { createRequestScope } from '@/modules/platform/shared/composables/requestScope'
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import ConfirmDialog from '@/modules/shared/components/ConfirmDialog.vue'
 import { useConfirmDialog } from '@/modules/shared/composables/useConfirmDialog.js'
 import {
@@ -25,6 +25,10 @@ const editing = ref(null)
 const activeRuleId = ref('')
 const rulesExpanded = ref(true)
 const editorExpanded = ref(true)
+// 编辑区默认收起：只有「编辑」「新增规则」（以及点规则行）才展开，默认不占列表旁边的位置。
+const editorOpen = ref(false)
+const editorCardRef = ref(null)
+const editorTitleRef = ref(null)
 const form = reactive({
   id: '',
   name: '',
@@ -49,6 +53,8 @@ const roles = [
   { value: 'team_lead', label: '团队负责人' },
 ]
 const canEdit = computed(() => props.isAdmin)
+// 编辑卡是否渲染：无权限时不渲染，默认也收起，只有用户主动编辑/新增才出现。
+const editorVisible = computed(() => canEdit.value && editorOpen.value)
 
 function reset() {
   Object.assign(form, {
@@ -86,13 +92,14 @@ async function load({ reportError = true } = {}) {
     rules.value = result?.data || result || []
     if (!activeRuleId.value && rules.value.length) activeRuleId.value = String(rules.value[0].id)
     if (activeRuleId.value && !rules.value.some((rule) => String(rule.id) === String(activeRuleId.value))) activeRuleId.value = rules.value[0] ? String(rules.value[0].id) : ''
-    // 列表重读后让编辑器跟上权威数据：未在编辑时打开首条规则；正在编辑的规则
-    // 已被删除（他人操作或本页删除）时回退到仍有权限查看的规则，列表为空则回到新建态。
+    // 列表重读后不再顺手打开编辑器：编辑器只在用户主动编辑/新增时展开。
+    // 已展开时只做一件事——正在编辑的规则被他人删掉了就回退到仍有权限查看的规则，
+    // 没有可回退的规则则保留新建态，可见性仍由用户上次的操作决定。
     const editingID = String(editing.value || '')
     const editingStillExists = editingID && rules.value.some((rule) => String(rule.id) === editingID)
-    if (!editingID || !editingStillExists) {
+    if (editorOpen.value && editingID && !editingStillExists) {
       const nextRule = rules.value.find((rule) => String(rule.id) === String(activeRuleId.value)) || rules.value[0]
-      if (nextRule) edit(nextRule)
+      if (nextRule) applyRule(nextRule)
       else reset()
     }
     loaded = true
@@ -104,37 +111,67 @@ async function load({ reportError = true } = {}) {
   return loaded
 }
 
-function edit(rule) {
+// 只把某条规则的权威值回填到表单，不改编辑区的展开状态（列表重读、保存前回填共用）。
+function applyRule(rule) {
   Object.assign(form, JSON.parse(JSON.stringify(rule)))
   editing.value = rule.id
   activeRuleId.value = String(rule.id)
-  editorExpanded.value = true
   error.value = ''
 }
 
+// 编辑区收放：openEditor 只负责展开卡片，滚动与焦点交给 revealEditor。
+function openEditor() {
+  editorOpen.value = true
+  editorExpanded.value = true
+}
+
+function closeEditor() {
+  editorOpen.value = false
+}
+
+// 展开后把焦点交给标题（读屏能读出「编辑审批规则」），并把卡片滚进面板可见范围。
+function revealEditor() {
+  nextTick(() => {
+    const title = editorTitleRef.value
+    if (title && typeof title.focus === 'function') title.focus({ preventScroll: true })
+    const card = editorCardRef.value
+    if (card && typeof card.scrollIntoView === 'function') card.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  })
+}
+
+function edit(rule) {
+  applyRule(rule)
+  openEditor()
+  revealEditor()
+}
+
 function selectRule(rule) {
-  activeRuleId.value = String(rule.id)
   edit(rule)
 }
 
+// 选中态只跟着真正打开的编辑区走：编辑卡收起时不该有一行看起来“正在编辑”。
 function isActiveRule(rule) {
-  return String(rule.id) === String(activeRuleId.value)
+  return editorVisible.value && String(rule.id) === String(activeRuleId.value)
 }
 
 function startCreate() {
   if (saving.value) return
   reset()
-  editorExpanded.value = true
   error.value = ''
+  openEditor()
+  revealEditor()
 }
 
-// 放弃当前草稿：正在编辑已有规则时按列表里的权威值回填；新建态则清空表单。
+// 放弃当前草稿：编辑已有规则时按列表里的权威值回填，新建态则回到首条规则；
+// 两种情况都收起编辑区回到列表，不把半成品留在旁边。
 function cancelEdit() {
   if (saving.value) return
   error.value = ''
-  const active = rules.value.find((rule) => String(rule.id) === String(activeRuleId.value))
-  if (active) edit(active)
-  else startCreate()
+  closeEditor()
+  const target = rules.value.find((rule) => String(rule.id) === String(editing.value))
+    || rules.value.find((rule) => String(rule.id) === String(activeRuleId.value))
+  if (target) applyRule(target)
+  else reset()
 }
 
 function toggleRules() {
@@ -193,6 +230,8 @@ async function save() {
   if (!canEdit.value || saving.value) return
   const problem = validateRule()
   if (problem) {
+    // 校验失败：编辑区必须保持展开，用户才看得到这条提示。
+    editorOpen.value = true
     editorExpanded.value = true
     error.value = problem
     return
@@ -225,6 +264,8 @@ async function save() {
     saving.value = false
   }
   if (!saved) return
+  // 保存成功：先收起编辑区回到列表，再重读权威数据（重读失败也不会把编辑器拉起来）。
+  closeEditor()
   reset()
   // 任务 B（保存/刷新分离）：规则已保存（HTTP 200）；其后列表重读失败只说明展示未更新，
   // 不得报成“规则保存失败”，也不回退刚保存的结果。
@@ -258,6 +299,11 @@ async function remove(rule) {
     deletingRuleId.value = ''
   }
   if (!removed) return
+  // 删掉的正是当前编辑的规则：收起编辑区回到列表，不做“偷偷跳到下一条”的隐式编辑。
+  if (String(id) === String(editing.value)) {
+    closeEditor()
+    reset()
+  }
   // 任务 B：规则已删除（HTTP 200）；其后列表重读失败只说明展示未更新，不误报为删除失败。
   if (!(await load({ reportError: false }))) {
     error.value = '规则已删除，但最新列表读取失败，请刷新页面核对。'
@@ -287,7 +333,7 @@ onMounted(() => {
 
     <p v-if="error" class="crm-alert error crm-approval-rules-alert" role="alert">{{ error }}</p>
 
-    <div class="crm-approval-rules-layout" :class="{ 'is-single': !canEdit }">
+    <div class="crm-approval-rules-layout" :class="{ 'is-single': !editorVisible }">
       <section class="crm-approval-rules-list-card" aria-labelledby="crm-presale-approval-rules-list-title">
         <header class="crm-approval-card-heading">
           <div>
@@ -335,11 +381,11 @@ onMounted(() => {
         </div>
       </section>
 
-      <form v-if="canEdit" class="crm-approval-rule-editor" @submit.prevent="save" aria-labelledby="crm-presale-approval-editor-title">
+      <form v-if="editorVisible" ref="editorCardRef" class="crm-approval-rule-editor" @submit.prevent="save" aria-labelledby="crm-presale-approval-editor-title">
         <header class="crm-approval-editor-heading">
           <div class="crm-approval-editor-heading-copy">
             <span class="crm-approval-editor-eyebrow">审批流程配置</span>
-            <strong id="crm-presale-approval-editor-title">{{ editing ? '编辑审批规则' : '新建审批规则' }}</strong>
+            <strong id="crm-presale-approval-editor-title" ref="editorTitleRef" tabindex="-1">{{ editing ? '编辑审批规则' : '新建审批规则' }}</strong>
             <span>{{ editing ? `正在编辑「${form.name || '未命名规则'}」，保存后仅影响新提交的申请。` : '填写名称与优先级，再按执行顺序配置审批节点。' }}</span>
           </div>
           <div class="crm-approval-editor-heading-actions">

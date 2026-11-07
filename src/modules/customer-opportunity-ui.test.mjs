@@ -73,6 +73,27 @@ test('售前审批规则支持规则列表和编辑区折叠', () => {
   assert.match(style, /\.crm-approval-collapse-button/)
 })
 
+test('售前审批规则编辑卡默认收起，只有「编辑」/「新增规则」才展开', () => {
+  // 编辑卡可见性由 editorOpen 决定，默认 false：整张卡不渲染，也就不占列表旁边的位置。
+  assert.match(approvalPanel, /const editorOpen = ref\(false\)/)
+  assert.match(approvalPanel, /const editorVisible = computed\(\(\) => canEdit\.value && editorOpen\.value\)/)
+  assert.match(approvalPanel, /<form v-if="editorVisible"/)
+  assert.match(approvalPanel, /:class="\{ 'is-single': !editorVisible \}"/)
+  for (const entry of ['function openEditor\\(\\)', 'function closeEditor\\(\\)', 'function revealEditor\\(\\)', 'function startCreate\\(\\)', 'function cancelEdit\\(\\)']) {
+    assert.match(approvalPanel, new RegExp(entry), `缺少收放入口：${entry}`)
+  }
+  // 保存成功与删除当前编辑规则后都必须收起；校验失败必须保持可见。
+  assert.match(approvalPanel, /closeEditor\(\)\n  reset\(\)/)
+  assert.match(approvalPanel, /if \(String\(id\) === String\(editing\.value\)\) \{\n {4}closeEditor\(\)/)
+  assert.match(approvalPanel, /editorOpen\.value = true\n {4}editorExpanded\.value = true/)
+  // 展开后把焦点交给标题并把卡片滚进可见范围（键盘/读屏可用，不外溢到页面顶部）。
+  assert.match(approvalPanel, /ref="editorTitleRef" tabindex="-1"/)
+  assert.match(approvalPanel, /scrollIntoView\(\{ block: 'nearest', behavior: 'smooth' \}\)/)
+  // 出现时轻微淡入，动效敏感用户关闭。
+  assert.match(style, /\.crm-approval-rule-editor \{\n  display: grid;\n  gap: 16px;\n  padding: 18px;\n  animation: crm-approval-editor-in/)
+  assert.match(style, /@media \(prefers-reduced-motion: reduce\) \{ \.crm-approval-rule-editor \{ animation: none; \} \}/)
+})
+
 test('售前审批规则的列表与编辑器拆成并列卡片，空态/加载态/忙态都有明确出口', () => {
   assert.match(approvalPanel, /crm-approval-rules-layout/)
   assert.match(approvalPanel, /crm-approval-rules-list-card/)

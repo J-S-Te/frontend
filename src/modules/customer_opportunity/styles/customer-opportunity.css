@@ -1745,7 +1745,19 @@
   box-shadow: var(--shadow-card);
 }
 .crm-approval-rules-list-card { display: grid; gap: 12px; align-content: start; padding: 16px; }
-.crm-approval-rule-editor { display: grid; gap: 16px; padding: 18px; }
+/* 编辑卡只在用户点「编辑」/「新增规则」时出现，出现时轻微上浮淡入，
+   让「列表 → 编辑」的切换有方向感，而不是卡片突然砸出来。 */
+.crm-approval-rule-editor {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+  animation: crm-approval-editor-in .18s ease-out;
+}
+@keyframes crm-approval-editor-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) { .crm-approval-rule-editor { animation: none; } }
 
 .crm-approval-card-heading {
   display: flex;
@@ -1922,6 +1934,12 @@
   letter-spacing: .08em;
 }
 .crm-approval-editor-heading strong { color: var(--text); font-size: var(--fs-body-lg); }
+/* 标题可编程聚焦（tabindex="-1"）：键盘用户才画焦点环，鼠标点开不画。 */
+.crm-approval-editor-heading strong:focus-visible {
+  outline: 2px solid var(--border-brand-strong, #93c5fd);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
 .crm-approval-editor-heading-copy > span:last-child {
   color: var(--text-muted);
   font-size: var(--fs-xs);

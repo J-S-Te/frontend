@@ -142,6 +142,7 @@ function rulesHarness(options = {}) {
   const reloads = []
   const resetCalls = []
   const editCalls = []
+  const editorOpen = ref(options.editorOpen ?? true)
   const context = {
     canEdit: ref(true),
     saving: ref(false),
@@ -151,12 +152,15 @@ function rulesHarness(options = {}) {
     activeRuleId: ref('r1'),
     loading: ref(false),
     editorExpanded: ref(options.editorExpanded ?? true),
+    // 编辑区可见性：默认收起，只有「编辑」「新增规则」展开；保存成功/取消收起。
+    editorOpen,
+    closeEditor: () => { editorOpen.value = false },
     rules: ref([{ id: 'stale' }]),
     rulesScope: createRequestScope(),
     form: { name: '规则A', priority: 1, enabled: true, nodes: [{ id: 'n1', name: '审批', type: 'APPROVAL', role_code: 'sales_director' }], version: 2 },
     validateRule: options.validateRule || (() => ''),
     reset: () => resetCalls.push(1),
-    edit: (rule) => editCalls.push(String(rule.id)),
+    applyRule: (rule) => editCalls.push(String(rule.id)),
     formatCRMError: (value) => String(value?.message || '规则错误'),
     updatePresaleApprovalRule: () => pending.promise,
     createPresaleApprovalRule: async () => { throw new Error('create not used in this test') },
@@ -178,6 +182,7 @@ test('规则保存成功后列表重读失败：提示已保存与读取失败�
   await saving
   assert.equal(h.context.saving.value, false)
   assert.deepEqual(h.resetCalls, [1], '保存成功后仍清空编辑器')
+  assert.equal(h.context.editorOpen.value, false, '保存成功后编辑区必须收起，回到列表')
   assert.match(h.context.error.value, /规则已保存/)
   assert.match(h.context.error.value, /读取失败/)
   assert.doesNotMatch(h.context.error.value, /保存失败/, '重读失败不得报成保存失败')
@@ -194,13 +199,25 @@ test('规则读取被新请求或卸载取代后，迟到响应不回写列表�
 })
 
 test('保存前本地校验失败时展开编辑区并保留草稿，不进入保存请求', async () => {
-  const h = rulesHarness({ editorExpanded: false, validateRule: () => '请填写规则名称。' })
+  const h = rulesHarness({ editorExpanded: false, editorOpen: false, validateRule: () => '请填写规则名称。' })
   await h.save()
+  assert.equal(h.context.editorOpen.value, true, '校验失败时编辑区必须可以看见，提示才可见')
   assert.equal(h.context.editorExpanded.value, true, '校验失败时编辑区必须展开，提示才可见')
   assert.equal(h.context.error.value, '请填写规则名称。')
   assert.equal(h.context.saving.value, false)
   assert.equal(h.context.form.name, '规则A', '校验失败不得清空草稿')
   assert.equal(h.reloads.length, 0, '校验失败不得发起保存或重读')
+})
+
+test('编辑区收起时列表重读不擅自展开编辑器', async () => {
+  const h = rulesHarness({ editorOpen: false })
+  const loading = h.load()
+  h.reloads[0].resolve([{ id: 'r2', name: '规则B' }])
+  await loading
+  assert.equal(h.context.editorOpen.value, false, '列表刷新不得把编辑卡拉起来')
+  assert.deepEqual(h.editCalls, [], '收起状态下不预填任何规则')
+  assert.deepEqual(h.resetCalls, [], '收起状态下也不重置草稿')
+  assert.equal(h.context.activeRuleId.value, 'r2', '选中项仍跟随列表，供下次「编辑」使用')
 })
 
 test('正在编辑的规则已不在列表中时，重读后回退到仍存在的规则', async () => {

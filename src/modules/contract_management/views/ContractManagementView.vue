@@ -134,7 +134,9 @@ import { approvalAmountInput, approvalAmountMinor, copyRuleExpression, ruleExpre
 import PaymentTermsSummary from '@/modules/contract_management/components/PaymentTermsSummary.vue'
 import { isSystemContractNumberField, isContractAmountField, synchronizeContractTemplateValues } from '@/modules/contract_management/utils/systemTemplateFields'
 import { closeSubsystemTabOrFallback } from '@/modules/shared/utils/returnToPortal'
-import { copyTextToClipboard } from '@/modules/shared/utils/clipboard.js'
+// 客户查询模块暂不上线（2026-11-07）：剪贴板工具原先只服务于客户查询申请说明，随分区一并注释，
+// 避免留下未使用的 import；恢复客户查询分区时需同时恢复本行。
+// import { copyTextToClipboard } from '@/modules/shared/utils/clipboard.js'
 import '@/modules/contract_management/styles/contract-management.css'
 
 const route = useRoute()
@@ -272,7 +274,8 @@ async function completeCRMDirectoryConnection(attempt) {
 const sectionMeta = {
   dashboard: { title: '工作台', description: '合同全生命周期概览与重点事项提醒' },
   intakes: { title: '签单关联核对', description: '人工核对 CRM 签单上下文与既有合同引用，不创建合同' },
-  customers: { title: '客户查询', description: '查询客户主数据与历史合作情况' },
+  // 客户查询模块暂不上线（2026-11-07）：保留代码便于日后恢复（见 .ai/qa/ 本任务记录）。
+  // customers: { title: '客户查询', description: '查询客户主数据与历史合作情况' },
   contracts: { title: '合同台账', description: '统一管理合同版本、状态、金额与关键日期' },
   imports: { title: '合同批量导入', description: '查询批次、处理受派确认与各子系统接续' },
   templates: { title: '合同模板', description: '标准模板、适用范围与版本管理' },
@@ -300,9 +303,8 @@ const adminNavGroupDefinitions = [
   {
     label: '查询台账',
     items: [
-      // 客户查询在上线前就暴露入口，但用“建设中”明确标注：它只能查看建设说明，
-      // 不会读取或展示客户数据，避免用户以为整页缺失或客户不存在。
-      { key: 'customers', label: '客户查询', icon: 'user', badge: '建设中' },
+      // 客户查询模块暂不上线（2026-11-07）：管理员侧栏入口已下线，保留代码便于日后恢复（见 .ai/qa/ 本任务记录）。
+      // { key: 'customers', label: '客户查询', icon: 'user', badge: '建设中' },
       { key: 'signing', label: '签署台账', icon: 'shield' },
     ],
   },
@@ -327,7 +329,8 @@ const userNavGroupDefinitions = [
     items: [
       { key: 'intakes', label: '签单关联核对', icon: 'audit' },
       { key: 'contracts', label: '合同台账', icon: 'account' },
-      { key: 'customers', label: '客户查询', icon: 'user', badge: '建设中' },
+      // 客户查询模块暂不上线（2026-11-07）：非管理员侧栏入口已下线，保留代码便于日后恢复（见 .ai/qa/ 本任务记录）。
+      // { key: 'customers', label: '客户查询', icon: 'user', badge: '建设中' },
       { key: 'imports', label: '合同批量导入', icon: 'save' },
       { key: 'templates', label: '合同模板', icon: 'save' },
       { key: 'signing', label: '签署台账', icon: 'shield' },
@@ -651,6 +654,18 @@ const activeSection = computed(() => {
 const businessDataError = computed(() => businessDataErrors.value[activeSection.value] || '')
 const pageMeta = computed(() => sectionMeta[activeSection.value])
 
+// 深链兼容：外部跳转可能带 ?import_batch=<批次号> 直达某个导入批次。导入面板现在只挂在
+// imports（合同批量导入）分区，若落点停在台账等其他分区，就会出现“参数在、面板不在”的空白页。
+// 因此初始化（会话就绪后）与 URL 参数变化时把分区校正为 imports。是否真的跳转仍由
+// canAccessContractSection 判定：无权进入 imports 时不跳，避免和路由守卫的“无权分区回退”互相触发。
+function ensureImportBatchSection() {
+  const batchID = String(route.query.import_batch || '')
+  if (!batchID || activeSection.value === 'imports') return false
+  if (!canAccessContractSection(session.value, 'imports')) return false
+  void router.replace({ name: 'contract_management', params: { section: 'imports' }, query: { ...route.query } })
+  return true
+}
+
 // 状态与类型筛选都必须下推到服务端：GET /contracts 已支持 keyword/status/type
 // （精确匹配状态码与 contract_type，见 contract_management/internal/transport/httpapi/router.go
 // 的 listContracts，以及 internal/infrastructure/mysql/repository.go 的 contractLedgerFilters）。
@@ -758,20 +773,19 @@ function navigatePlatform(name) {
   router.push({ name })
 }
 
-// 客户查询尚未上线（产品决定：如实标注“建设中”并给出申请入口）。
-// 页面只说明能力范围与当前可做的替代操作，不读取客户数据、不展示占位数据，
-// 也不承诺上线时间；申请说明复制走共享剪贴板工具，失败时页面上仍有可直接选中的文本。
-const customerQueryCopyHint = ref('')
-const customerQueryApplicationText = computed(() => `申请开通机构合同管理系统「客户查询」：可按客户名称或客户编号查询客户主数据与历史合作情况。申请人（当前登录账号）：${currentLoginUsername.value || '当前登录账号'}。说明：该能力尚在建设中，当前页面不展示客户数据。`)
+// 客户查询模块暂不上线（2026-11-07）：申请说明与复制逻辑随分区一起下线，保留代码便于日后恢复
+// （见 .ai/qa/ 本任务记录）。恢复时需同时恢复下方 @/modules/shared/utils/clipboard.js 的 import。
+// const customerQueryCopyHint = ref('')
+// const customerQueryApplicationText = computed(() => `申请开通机构合同管理系统「客户查询」：可按客户名称或客户编号查询客户主数据与历史合作情况。申请人（当前登录账号）：${currentLoginUsername.value || '当前登录账号'}。说明：该能力尚在建设中，当前页面不展示客户数据。`)
 
-async function copyCustomerQueryApplication() {
-  try {
-    await copyTextToClipboard(customerQueryApplicationText.value)
-    customerQueryCopyHint.value = '申请说明已复制，可粘贴到工单或消息中发送给系统管理员。'
-  } catch {
-    customerQueryCopyHint.value = '浏览器未允许自动复制，请手动选择页面上的申请说明文本复制。'
-  }
-}
+// async function copyCustomerQueryApplication() {
+//   try {
+//     await copyTextToClipboard(customerQueryApplicationText.value)
+//     customerQueryCopyHint.value = '申请说明已复制，可粘贴到工单或消息中发送给系统管理员。'
+//   } catch {
+//     customerQueryCopyHint.value = '浏览器未允许自动复制，请手动选择页面上的申请说明文本复制。'
+//   }
+// }
 
 function returnToUnifiedPortal() {
   mobileMenuOpen.value = false
@@ -2751,6 +2765,9 @@ watch(activeSection, () => {
   void handleSectionSwitch()
 }, { immediate: true })
 
+// 路由参数变化（例如从其他页面带 ?import_batch 跳到本模块）同样要校正分区。
+watch(() => route.query.import_batch, () => { ensureImportBatchSection() })
+
 // 用途：读取原件及业务来源能力，失败保留明确提示且不猜测本地来源。
 // 参数：无；使用当前合同会话。
 // 返回值：异步完成；失败保持PDF入口关闭，既有台账仍可读取。
@@ -2766,6 +2783,7 @@ async function loadContractSourceCapabilities() {
 onMounted(async () => {
   try {
     session.value = await getContractSession()
+    ensureImportBatchSection()
     void loadContractSourceCapabilities()
     await loadBusinessData()
     document.addEventListener('visibilitychange', handleApprovalVisibilityChange)
@@ -2868,7 +2886,7 @@ onBeforeUnmount(() => {
 
         <p v-if="contractSourceCapabilityError" class="contract-field-error" role="alert">{{ contractSourceCapabilityError }} <button class="contract-button secondary" @click="loadContractSourceCapabilities">重试来源能力</button></p>
         <LocalContractCatalogPanel v-if="localCatalogOpen && can('contract.catalog.manage')" :permissions="session?.permissions || []" />
-        <ContractImportPanel v-if="['contracts', 'imports'].includes(activeSection) && (can('contract.import.preview') || can('contract.import.commit') || can('contract.import.approve') || can('contract.import.release'))"
+        <ContractImportPanel v-if="activeSection === 'imports' && (can('contract.import.preview') || can('contract.import.commit') || can('contract.import.approve') || can('contract.import.release'))"
           :enabled="contractSourceCapabilities.batch_enabled === true"
           :pdf-enabled="contractSourceCapabilities.pdf_enabled === true"
           :source-capabilities="contractSourceCapabilities"
@@ -2876,7 +2894,7 @@ onBeforeUnmount(() => {
           :can-approve="can('contract.import.approve')" :can-release="can('contract.import.release')"
           :can-manage-auto-approve="isAdmin"
           :section="activeSection"
-          :default-open="activeSection === 'imports' || Boolean(route.query.import_batch)"
+          :default-open="activeSection === 'imports'"
           :actor-id="session?.identity_id || session?.user_id || ''" :initial-batch-id="String(route.query.import_batch || '')"
           :supported-modes="contractSourceCapabilities.supported_modes || ['NORMAL']" />
 
@@ -2907,25 +2925,26 @@ onBeforeUnmount(() => {
           <div class="contract-table-card"><div class="contract-table-scroll"><table class="contract-data-table contract-intake-table"><thead><tr><th>商机编号</th><th>客户 ID</th><th>既有合同引用</th><th>预计金额</th><th>签单发生时间</th><th>状态</th><th>版本</th><th>操作</th></tr></thead><tbody><tr v-for="item in opportunityIntakes" :key="item.intake_id"><td><strong>{{ item.opportunity_no }}</strong><small>{{ item.opportunity_id }}</small></td><td>{{ item.customer_id }}</td><td>{{ item.contract_ref }}</td><td class="amount">{{ formatAmount(Number(item.expected_amount || 0)) }}</td><td>{{ formatDateTime(item.occurred_at) }}</td><td><span class="contract-badge" :class="opportunityIntakeStatus(item.status).tone"><i></i>{{ opportunityIntakeStatus(item.status).label }}</span></td><td>V{{ item.version }}</td><td><button class="contract-text-button" type="button" @click="openOpportunityIntake(item)">{{ item.status === 'ACCEPTED' && can('opportunity_intake.process') ? '查看并核对' : '查看详情' }}</button></td></tr><tr v-if="!opportunityIntakeLoading && !opportunityIntakes.length"><td colspan="8" class="contract-empty">当前筛选条件下没有签单关联核对记录</td></tr></tbody></table></div><footer class="contract-table-footer"><span>已加载 {{ opportunityIntakes.length }} 条</span><button v-if="opportunityIntakeHasMore" class="contract-button secondary small" type="button" :disabled="opportunityIntakeLoadingMore" @click="loadOpportunityIntakes({ append: true })">{{ opportunityIntakeLoadingMore ? '正在加载…' : '加载更多' }}</button><span v-else-if="opportunityIntakes.length">已加载全部当前结果</span></footer></div>
         </template>
 
-        <template v-else-if="activeSection === 'customers'">
-          <div class="contract-info-banner"><ConsoleIcon name="info" /><span>客户查询尚未开放：本页不读取、不展示客户数据，空白不代表“客户不存在”。</span></div>
-          <div class="contract-card contract-empty-state">
-            <ConsoleIcon name="user" />
-            <h3>客户查询建设中</h3>
-            <p>该能力上线后，可按客户名称或客户编号查询客户主数据，并查看与之关联的历史合作合同、签约金额与履约进展。当前版本还不能查询客户，也不会用占位数据代替真实记录。</p>
-          </div>
-          <h2 class="contract-subsection-title">现在可以这样处理</h2>
-          <div class="contract-info-banner"><ConsoleIcon name="account" /><span>查看某个客户的合同：进入「合同台账」，用顶部搜索或筛选栏按客户名称检索合同记录。</span></div>
-          <div class="contract-info-banner"><ConsoleIcon name="user" /><span>核对客户主数据：请联系本企业的客户主数据管理员在客户与商机系统中处理；本页不提供该系统入口，也不代替它的权限判断。</span></div>
-          <div class="contract-info-banner"><ConsoleIcon name="info" /><span>需要开通本页能力：请联系本系统超级管理员，为您的角色申请客户查询权限。本页不会自动开通，也不承诺上线时间。</span></div>
-          <h2 class="contract-subsection-title">申请说明</h2>
-          <p class="contract-approval-summary">{{ customerQueryApplicationText }}</p>
-          <div class="contract-page-actions" role="group" aria-label="客户查询替代操作">
-            <button v-if="can('contract.read')" class="contract-button primary" type="button" @click="navigate('contracts')">去合同台账按客户名称查找</button>
-            <button class="contract-button secondary" type="button" @click="copyCustomerQueryApplication">复制申请说明</button>
-          </div>
-          <p v-if="customerQueryCopyHint" class="contract-session-info" role="status">{{ customerQueryCopyHint }}</p>
-        </template>
+        <!-- 客户查询模块暂不上线（2026-11-07）：整个分区模板已注释，保留代码便于日后恢复（见 .ai/qa/ 本任务记录）。 -->
+<!--         <template v-else-if="activeSection === 'customers'"> -->
+<!--           <div class="contract-info-banner"><ConsoleIcon name="info" /><span>客户查询尚未开放：本页不读取、不展示客户数据，空白不代表“客户不存在”。</span></div> -->
+<!--           <div class="contract-card contract-empty-state"> -->
+<!--             <ConsoleIcon name="user" /> -->
+<!--             <h3>客户查询建设中</h3> -->
+<!--             <p>该能力上线后，可按客户名称或客户编号查询客户主数据，并查看与之关联的历史合作合同、签约金额与履约进展。当前版本还不能查询客户，也不会用占位数据代替真实记录。</p> -->
+<!--           </div> -->
+<!--           <h2 class="contract-subsection-title">现在可以这样处理</h2> -->
+<!--           <div class="contract-info-banner"><ConsoleIcon name="account" /><span>查看某个客户的合同：进入「合同台账」，用顶部搜索或筛选栏按客户名称检索合同记录。</span></div> -->
+<!--           <div class="contract-info-banner"><ConsoleIcon name="user" /><span>核对客户主数据：请联系本企业的客户主数据管理员在客户与商机系统中处理；本页不提供该系统入口，也不代替它的权限判断。</span></div> -->
+<!--           <div class="contract-info-banner"><ConsoleIcon name="info" /><span>需要开通本页能力：请联系本系统超级管理员，为您的角色申请客户查询权限。本页不会自动开通，也不承诺上线时间。</span></div> -->
+<!--           <h2 class="contract-subsection-title">申请说明</h2> -->
+<!--           <p class="contract-approval-summary">{{ customerQueryApplicationText }}</p> -->
+<!--           <div class="contract-page-actions" role="group" aria-label="客户查询替代操作"> -->
+<!--             <button v-if="can('contract.read')" class="contract-button primary" type="button" @click="navigate('contracts')">去合同台账按客户名称查找</button> -->
+<!--             <button class="contract-button secondary" type="button" @click="copyCustomerQueryApplication">复制申请说明</button> -->
+<!--           </div> -->
+<!--           <p v-if="customerQueryCopyHint" class="contract-session-info" role="status">{{ customerQueryCopyHint }}</p> -->
+<!--         </template> -->
 
         <template v-else-if="activeSection === 'contracts'">
           <div class="contract-filter-bar"><label class="contract-search-field"><ConsoleIcon name="search" /><input v-model="keyword" type="search" maxlength="100" autocomplete="off" placeholder="合同编号 / 名称 / 类型" @change="reloadLedger" /></label><label><span>状态</span><select v-model="statusFilter" aria-label="按合同状态筛选" title="「已过期」/「未过期」按服务端 expired=true/false 筛选：已过期为状态为已生效/履约中/待付款且到期日早于今天，未过期为其反面；同一时刻只能选一个状态" @change="reloadLedger"><option v-for="option in ledgerStatusOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label title="按合同类型筛选（服务端 GET /contracts?type=… 精确匹配合同类型）"><span>类型</span><select v-model="typeFilter" aria-label="按合同类型筛选" @change="reloadLedger"><option value="">全部类型</option><option v-for="value in contractTypeOptions" :key="value" :value="value">{{ value }}</option></select></label><button class="contract-button ghost small" type="button" @click="resetFilters"><ConsoleIcon name="reset" />重置</button><button class="contract-button primary small" type="button" @click="loadBusinessData"><ConsoleIcon name="reset" />刷新</button></div>
