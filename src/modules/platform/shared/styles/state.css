@@ -151,6 +151,92 @@
   color: var(--text-faint);
 }
 
+/* 页码按钮：与「上一页 / 下一页」同一套尺寸与三态，当前页用主色实心区分。
+   页数很多时中间用省略号占位（disabled），页码条不会被撑到换行溢出。 */
+.ui-pager__page {
+  min-width: 30px;
+  min-height: 30px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: border-color var(--duration-fast) ease, color var(--duration-fast) ease, background var(--duration-fast) ease;
+}
+
+.ui-pager__page:hover:not(:disabled):not(.is-active) {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.ui-pager__page:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.ui-pager__page.is-active {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--on-primary);
+  cursor: default;
+}
+
+.ui-pager__page.is-gap {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: default;
+}
+
+.ui-pager__page:disabled:not(.is-active):not(.is-gap) {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* 跳页与页大小：只在 total 存在时渲染，窄屏随 flex-wrap 换行。 */
+.ui-pager__extra {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2, 8px);
+}
+
+.ui-pager__field {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+
+.ui-pager__jump,
+.ui-pager__size {
+  min-height: 30px;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--text);
+  font-size: var(--fs-sm);
+}
+
+.ui-pager__jump { width: 64px; text-align: center; }
+
+.ui-pager__jump:focus-visible,
+.ui-pager__size:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.ui-pager__button--small { min-height: 28px; padding: 4px 8px; }
+
 @media (prefers-reduced-motion: reduce) {
-  .ui-pager__button { transition: none; }
+  .ui-pager__button,
+  .ui-pager__page { transition: none; }
 }

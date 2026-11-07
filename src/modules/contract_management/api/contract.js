@@ -1104,6 +1104,46 @@ export function listContractImportBatches(offset = 0) {
 }
 
 /**
+ * importAutoApproveSetting 校验历史导入自动审批设置的响应形状。
+ * 参数：value为服务端data字段。
+ * 返回值：是否同时具备能力开关、当前状态、版本和更新人字段。
+ */
+function importAutoApproveSetting(value) {
+  return resourceObject(value)
+    && typeof value.capability_enabled === 'boolean'
+    && typeof value.enabled === 'boolean'
+    && Number.isSafeInteger(value.version) && value.version >= 0
+    && typeof value.updated_by === 'string'
+    && (value.updated_at === null || typeof value.updated_at === 'string')
+}
+
+/**
+ * getImportAutoApproveSetting 读取历史导入自动审批的当前状态。
+ * 参数：无；只有合同超级管理员能通过服务端权限校验。
+ * 返回值：capability_enabled（部署能力）、enabled（租户开关）、version及更新人/时间；
+ *          能力未开启是正常返回，不是错误。
+ */
+export function getImportAutoApproveSetting() {
+  return request('/contract-import/auto-approve', { validateData: importAutoApproveSetting })
+}
+
+/**
+ * setImportAutoApproveSetting 切换历史导入自动审批，必须带上刚读取的版本。
+ * 参数：enabled为目标状态，expectedVersion为读到version，服务端不一致时返回409。
+ * 返回值：保存后的权威设置；受理成功也只代表开关已记录，不承诺历史导入一定自动通过。
+ */
+export function setImportAutoApproveSetting({ enabled, expectedVersion } = {}) {
+  if (typeof enabled !== 'boolean' || !Number.isSafeInteger(expectedVersion) || expectedVersion < 0) {
+    throw new Error('历史导入自动审批设置参数不合法。')
+  }
+  return request('/contract-import/auto-approve', {
+    method: 'PUT',
+    body: JSON.stringify({ enabled, expected_version: expectedVersion }),
+    validateData: importAutoApproveSetting,
+  })
+}
+
+/**
  * releaseContractImportItem 申请独立目标放行，不从浏览器自报审批或财务核对结果。
  * 参数：itemID为单项ID，payload为目标、服务端读取版本及明确阶段。
  * 返回值：真实目标状态；受理不代表业务完成。

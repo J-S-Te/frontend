@@ -23,6 +23,8 @@
   --surface-muted: #f8fafc;
   --sidebar: #0f172a;
   --sidebar-hover: #1e293b;
+  /* 主色实心控件上的文字色：--primary 在浅色/深色都保持 #2563eb，白色文字对比度一致。 */
+  --on-primary: #ffffff;
 
   --success: #16a34a;
   --success-text: #15803d;

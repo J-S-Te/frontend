@@ -17,6 +17,9 @@
   --cm-border: var(--border, #e2e8f0);
   --cm-card-border: var(--border-soft, #e4ecfc);
   --cm-bg: #f6f8fc;
+  /* 台账吸附首列的层级与副行字号：固定在 token 落点，避免样式里散落数字。 */
+  --cm-z-sticky: 2;
+  --cm-fs-sub: 10px;
   min-height: 100vh;
   color: var(--cm-text);
   background: var(--cm-bg);
@@ -313,8 +316,24 @@
 .contract-inline-actions label.contract-text-button { cursor: pointer; }
 .contract-sign-stats-four { grid-template-columns: repeat(4,minmax(0,1fr)); }
 .contract-signing-table { min-width: 1120px; }
-/* 台账在合同名称后新增“客户”列：同步加宽，避免 10 列互相挤压换行。 */
-.contract-ledger-table { min-width: 1120px; }
+/* 台账把「合同类型 + 服务类型」「到期 + 创建」各合并为一列，次要信息降级为副行；
+   宽度从 1120 收到 980，并吸附首列，横向滚动时合同身份不丢。 */
+.contract-ledger-table { min-width: 980px; }
+.contract-ledger-table th:first-child,
+.contract-ledger-table td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: var(--cm-z-sticky);
+  background: var(--surface-card);
+}
+.contract-ledger-table thead th:first-child { background: var(--surface-head); }
+.contract-ledger-table tbody tr:hover td:first-child { background: var(--surface-tint); }
+.contract-cell-sub {
+  display: block;
+  margin-top: 2px;
+  color: var(--cm-muted);
+  font-size: var(--cm-fs-sub);
+}
 .contract-signing-modal { width: min(920px,100%); }
 .contract-signing-modal .contract-section-title > div { display: flex; flex-wrap: wrap; justify-content: flex-end; }
 .contract-signing-submit { align-self: end; }
@@ -458,7 +477,7 @@
 .contract-filter-bar label:not(.contract-search-field) select { font-size: 13px; }
 .contract-table-card { overflow: hidden; }
 .contract-data-table { font-size: 13.5px; }
-.contract-data-table th { padding: 12px 16px; font-size: 12.5px; background: var(--surface-head, #f8fafc); }
+.contract-data-table th { padding: 12px 16px; font-size: 12.5px; background: var(--surface-head); }
 .contract-data-table td { padding: 13px 16px; border-color: var(--cm-line-soft); }
 .contract-data-table tbody tr:hover td { background: var(--surface-hover, #f8fafc); }
 .contract-data-table .mono,

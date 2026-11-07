@@ -103,7 +103,7 @@ const auditEnvironment = ref('')
 const auditResult = ref('')
 const auditTimeRange = ref('7d')
 const auditPage = ref(1)
-const auditPageSize = 20
+const auditPageSize = ref(20)
 const auditDetail = ref(null)
 const auditRecords = ref([])
 const auditTotal = ref(0)
@@ -365,7 +365,7 @@ function formatAuditTime(value) {
 
 const filteredAuditRecords = computed(() => auditRecords.value)
 
-const auditTotalPages = computed(() => Math.max(1, Math.ceil(auditTotal.value / auditPageSize)))
+const auditTotalPages = computed(() => Math.max(1, Math.ceil(auditTotal.value / auditPageSize.value)))
 // 审计列表的三态闸门：读取失败必须渲染可重试的错误态，绝不能退化成「未找到符合条件的审计事件」，
 // 否则运维会以为筛选条件没匹配到，而不是「请求失败了」。
 const auditListState = computed(() => auditLoading.value || Boolean(auditError.value) || !pagedAuditRecords.value.length)
@@ -379,13 +379,18 @@ const viewMeta = computed(() => {
   if (currentView.value === 'audit') {
     return { title: '审计日志', crumb: '审计日志', description: '审计事件、数据变更摘要与跨链路追溯' }
   }
+  // 面包屑带出当前设置页签：深链直达某个设置分组时，顶栏能直接看出当前分组，
+  // 而不是所有设置页都显示同一个“系统设置”。
+  const settingsCrumb = activeSettingsTabLabel.value && activeSettingsTabLabel.value !== '系统设置'
+    ? `系统设置 · ${activeSettingsTabLabel.value}`
+    : '系统设置'
   if (activeSettingsTab.value === 'iam') {
-    return { title: '系统设置', crumb: '系统设置', description: '身份、组织、角色与权限集中配置' }
+    return { title: '系统设置', crumb: settingsCrumb, description: '身份、组织、角色与权限集中配置' }
   }
   if (activeSettingsTab.value === 'security') {
-    return { title: '系统设置', crumb: '系统设置', description: '登录策略、账户锁定与会话超时集中配置' }
+    return { title: '系统设置', crumb: settingsCrumb, description: '登录策略、账户锁定与会话超时集中配置' }
   }
-  return { title: '系统设置', crumb: '系统设置', description: '平台级参数、通知与安全策略集中配置' }
+  return { title: '系统设置', crumb: settingsCrumb, description: '平台级参数、通知与安全策略集中配置' }
 })
 
 function navigate(view) {
@@ -657,7 +662,7 @@ async function loadAuditEvents() {
     const bounds = rangeBounds(auditTimeRange.value)
     const data = await listAuditEvents({
       page: auditPage.value,
-      pageSize: auditPageSize,
+      pageSize: auditPageSize.value,
       keyword: auditKeyword.value.trim(),
       clientIp: auditClientIP.value.trim(),
       resourceId: auditResourceID.value.trim(),
@@ -720,6 +725,15 @@ function applyAuditFilters() {
 
 function changeAuditPage(nextPage) {
   auditPage.value = Math.min(Math.max(nextPage, 1), auditTotalPages.value)
+  loadAuditEvents()
+}
+
+// 切换每页条数后原页码大概率越界：回到第 1 页并用服务端 total 重算页数。
+function changeAuditPageSize(nextSize) {
+  const size = Math.trunc(Number(nextSize) || 0)
+  if (size <= 0 || size === auditPageSize.value) return
+  auditPageSize.value = size
+  auditPage.value = 1
   loadAuditEvents()
 }
 
@@ -1098,7 +1112,7 @@ onBeforeUnmount(() => {
             </tbody>
           </table>
         </div>
-        <footer class="console-table-footer audit-table-footer"><span>审计事件为只读记录</span><PaginationBar label="审计事件分页" :page="auditPage" :total="auditTotal" :page-size="auditPageSize" :loading="auditLoading" @change="changeAuditPage" /></footer>
+        <footer class="console-table-footer audit-table-footer"><span>审计事件为只读记录</span><PaginationBar label="审计事件分页" :page="auditPage" :total="auditTotal" :page-size="auditPageSize" :loading="auditLoading" @change="changeAuditPage" @change-page-size="changeAuditPageSize" /></footer>
       </div>
 
     </section>

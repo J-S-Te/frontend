@@ -63,3 +63,15 @@ test('审计结果与风险筛选复用已导入的稳定枚举字典', () => {
   assert.match(source, /Object\.entries\(AUDIT_RISK_LABELS\).*value === label/)
   assert.doesNotMatch(source, /Object\.entries\((?:RESULT_LABELS|RISK_LABELS)\)/)
 })
+
+// P1-9：设置页签吸顶，面包屑带出当前页签。
+test('设置页签在内容滚动时吸顶，且面包屑显示当前页签', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const settingsCss = await readFile(new URL('./platform/styles/settings-showcase.css', import.meta.url), 'utf8')
+  assert.match(settingsCss, /\.settings-tab-bar \{[^}]*position: sticky/, '页签条必须吸顶')
+  assert.match(settingsCss, /\.settings-tab-bar \{[^}]*top: 64px/, '吸顶位置在共享顶栏之下')
+  assert.match(settingsCss, /\.settings-tab-bar \{[^}]*background: var\(--surface-card\)/, '吸顶后必须有实底，避免内容透出')
+  assert.match(source, /const settingsCrumb = activeSettingsTabLabel\.value/)
+  assert.match(source, /`系统设置 · \$\{activeSettingsTabLabel\.value\}`/)
+  assert.match(source, /crumb: settingsCrumb/, '设置页面包屑必须带当前页签')
+})

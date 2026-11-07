@@ -81,6 +81,7 @@ function loadLedgerRequest() {
     'let typeFilter = { value: "" }',
     'let ledgerPage = { value: 1 }',
     'const LEDGER_PAGE_SIZE = 20',
+    'const ledgerPageSize = { value: 20 }',
     expiryConstants,
     declaration('contractStatusQuery'),
     declaration('ledgerExpiryQuery'),
@@ -148,7 +149,8 @@ test('contractStatusQuery 通过 statusLabels 反查状态码，匹配不到时�
 // 旧的 limit: 200 会静默截断超过 200 份合同的客户台账，不允许再出现。
 test('台账请求对象带 page/page_size，并按状态码与类型条件追加 status/type', () => {
   assert.match(view, /const LEDGER_PAGE_SIZE = 20\b/)
-  assert.match(view, /const ledgerQuery = \{ page: ledgerPage\.value, page_size: LEDGER_PAGE_SIZE, keyword: keyword\.value\.trim\(\) \}/)
+  assert.match(view, /const ledgerPageSize = ref\(LEDGER_PAGE_SIZE\)/)
+  assert.match(view, /const ledgerQuery = \{ page: ledgerPage\.value, page_size: ledgerPageSize\.value, keyword: keyword\.value\.trim\(\) \}/)
   assert.match(view, /const statusCode = contractStatusQuery\(\)/)
   assert.match(view, /if \(statusCode\) ledgerQuery\.status = statusCode/)
   assert.match(view, /if \(typeFilter\.value\) ledgerQuery\.type = typeFilter\.value/)
@@ -217,7 +219,7 @@ test('changeLedgerPage 钳制页码后重新加载台账', () => {
   assert.match(body, /Math\.min\(Math\.max\(1, Math\.trunc\(Number\(next\) \|\| 1\)\), ledgerPageCount\.value\)/)
   assert.match(body, /if \(page === ledgerPage\.value\) return/)
   assert.match(body, /await loadBusinessData\(\)/)
-  assert.match(view, /const ledgerPageCount = computed\(\(\) => Math\.max\(1, Math\.ceil\(ledgerTotal\.value \/ LEDGER_PAGE_SIZE\)\)\)/)
+  assert.match(view, /const ledgerPageCount = computed\(\(\) => Math\.max\(1, Math\.ceil\(ledgerTotal\.value \/ ledgerPageSize\.value\)\)\)/)
 })
 
 // 回归锁定：「已过期」/「未过期」是服务端 expired=true/false 组合筛选，不再只筛当前页。
@@ -424,7 +426,7 @@ test('台账页脚展示服务端总数与分页条，不再出现 200 条上限
   // 上一页 / 第 N 页，共 M 条 / 下一页的文案与禁用语义由组件保证（见 shared/pagination-bar.test.mjs），
   // 台账侧继续用服务端 total 作为总数来源、用 changeLedgerPage 作为翻页入口。
   // 页脚左侧原来还有一句「共 N 条合同记录」，与分页条的总数重复，已随统一去掉。
-  assert.match(ledger, /<PaginationBar label="合同台账分页" :page="ledgerPage" :total="ledgerTotal" :page-size="LEDGER_PAGE_SIZE" :loading="businessDataLoading" @change="changeLedgerPage" \/>/)
+  assert.match(ledger, /<PaginationBar label="合同台账分页" :page="ledgerPage" :total="ledgerTotal" :page-size="ledgerPageSize" :loading="businessDataLoading" @change="changeLedgerPage" @change-page-size="changeLedgerPageSize" \/>/)
   assert.doesNotMatch(ledger, /共 \{\{ ledgerTotal \}\} 条合同记录/)
   assert.doesNotMatch(ledger, /单次最多 200 条/)
   assert.doesNotMatch(ledger, /已加载 \{\{/)

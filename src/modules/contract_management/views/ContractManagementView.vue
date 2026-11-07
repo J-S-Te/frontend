@@ -553,11 +553,13 @@ const ledgerStatusOptions = [
   { value: LEDGER_UNEXPIRED_FILTER, label: LEDGER_UNEXPIRED_FILTER },
 ]
 // 合同台账服务端分页：GET /contracts?page&page_size 返回 {items,total,page,page_size}，
-// 每页 20 条；总数由服务端计数，页脚因此可以给出真实“共 N 条”而不是“已加载 N 条”。
+// 默认每页 20 条、可在分页条切换 20/50/100；总数由服务端计数，页脚因此可以给出
+// 真实“共 N 条”而不是“已加载 N 条”。
 const LEDGER_PAGE_SIZE = 20
+const ledgerPageSize = ref(LEDGER_PAGE_SIZE)
 const ledgerPage = ref(1)
 const ledgerTotal = ref(0)
-const ledgerPageCount = computed(() => Math.max(1, Math.ceil(ledgerTotal.value / LEDGER_PAGE_SIZE)))
+const ledgerPageCount = computed(() => Math.max(1, Math.ceil(ledgerTotal.value / ledgerPageSize.value)))
 // 台账空态的动作：只有真的设了筛选（关键词 / 状态 / 类型）才提供「重置筛选」。
 // 没有筛选时的空台账是“确实没有合同”，此时给重置按钮只会误导用户再点一次。
 const ledgerFiltersActive = computed(() => Boolean(keyword.value.trim() || statusFilter.value || typeFilter.value))
@@ -814,6 +816,16 @@ async function changeLedgerPage(next) {
   const page = Math.min(Math.max(1, Math.trunc(Number(next) || 1)), ledgerPageCount.value)
   if (page === ledgerPage.value) return
   ledgerPage.value = page
+  await loadBusinessData()
+}
+
+// changeLedgerPageSize 切换每页条数：页大小变化后原页码大概率越界，
+// 统一回到第 1 页再请求，并用服务端返回的 total 重新推导页数。
+async function changeLedgerPageSize(next) {
+  const size = Math.trunc(Number(next) || 0)
+  if (size <= 0 || size === ledgerPageSize.value) return
+  ledgerPageSize.value = size
+  ledgerPage.value = 1
   await loadBusinessData()
 }
 
@@ -1558,7 +1570,7 @@ async function loadBusinessData() {
     // 台账改成服务端分页：page/page_size 触发分页信封并带回真实 total。
     // 状态与类型都是服务端筛选参数（GET /contracts 支持 keyword/status/type），
     // 否则只能从最近一页里筛，全量台账的命中会被静默丢掉；筛选变化因此必须重新加载（见筛选栏 @change）。
-    const ledgerQuery = { page: ledgerPage.value, page_size: LEDGER_PAGE_SIZE, keyword: keyword.value.trim() }
+    const ledgerQuery = { page: ledgerPage.value, page_size: ledgerPageSize.value, keyword: keyword.value.trim() }
     const statusCode = contractStatusQuery()
     if (statusCode) ledgerQuery.status = statusCode
     // 「已过期」下发 expired=true、「未过期」下发 expired=false（与状态徽章同一口径），
@@ -2862,6 +2874,9 @@ onBeforeUnmount(() => {
           :source-capabilities="contractSourceCapabilities"
           :can-preview="can('contract.import.preview')" :can-commit="can('contract.import.commit')"
           :can-approve="can('contract.import.approve')" :can-release="can('contract.import.release')"
+          :can-manage-auto-approve="isAdmin"
+          :section="activeSection"
+          :default-open="activeSection === 'imports' || Boolean(route.query.import_batch)"
           :actor-id="session?.identity_id || session?.user_id || ''" :initial-batch-id="String(route.query.import_batch || '')"
           :supported-modes="contractSourceCapabilities.supported_modes || ['NORMAL']" />
 
@@ -2914,7 +2929,7 @@ onBeforeUnmount(() => {
 
         <template v-else-if="activeSection === 'contracts'">
           <div class="contract-filter-bar"><label class="contract-search-field"><ConsoleIcon name="search" /><input v-model="keyword" type="search" maxlength="100" autocomplete="off" placeholder="合同编号 / 名称 / 类型" @change="reloadLedger" /></label><label><span>状态</span><select v-model="statusFilter" aria-label="按合同状态筛选" title="「已过期」/「未过期」按服务端 expired=true/false 筛选：已过期为状态为已生效/履约中/待付款且到期日早于今天，未过期为其反面；同一时刻只能选一个状态" @change="reloadLedger"><option v-for="option in ledgerStatusOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label title="按合同类型筛选（服务端 GET /contracts?type=… 精确匹配合同类型）"><span>类型</span><select v-model="typeFilter" aria-label="按合同类型筛选" @change="reloadLedger"><option value="">全部类型</option><option v-for="value in contractTypeOptions" :key="value" :value="value">{{ value }}</option></select></label><button class="contract-button ghost small" type="button" @click="resetFilters"><ConsoleIcon name="reset" />重置</button><button class="contract-button primary small" type="button" @click="loadBusinessData"><ConsoleIcon name="reset" />刷新</button></div>
-          <div class="contract-table-card"><div class="contract-table-scroll"><table class="contract-data-table contract-ledger-table"><thead><tr><th>合同编号 / 名称</th><th>客户</th><th>合同类型</th><th>服务类型</th><th>合同金额</th><th>负责人姓名</th><th>创建日期</th><th>到期日期</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="contract in filteredContracts" :key="contract.recordId"><td><button class="contract-entity-link" type="button" @click="openContract(contract)"><strong>{{ contract.name }}</strong><small>{{ contract.id }}</small></button></td><td>{{ contract.customerName || '—' }}</td><td>{{ contract.type }}</td><td>{{ contract.serviceType }}</td><td class="amount">{{ formatContractAmount(contract) }}</td><td>{{ contract.owner }}</td><td>{{ contract.createdAt }}</td><td>{{ contract.endDate }}</td><td><span class="contract-badge" :class="statusTone(contract.displayStatus)"><i></i>{{ contract.displayStatus }}</span></td><td><button class="contract-text-button" type="button" @click="openContract(contract)">详情</button></td></tr><tr v-if="!filteredContracts.length && !businessDataError && !businessDataLoading"><td colspan="10"><EmptyState compact title="当前没有可查看的合同"><button v-if="ledgerFiltersActive" type="button" class="contract-button secondary small" @click="resetFilters">重置筛选</button></EmptyState></td></tr></tbody></table></div><footer class="contract-table-footer contract-table-footer--pager"><PaginationBar label="合同台账分页" :page="ledgerPage" :total="ledgerTotal" :page-size="LEDGER_PAGE_SIZE" :loading="businessDataLoading" @change="changeLedgerPage" /></footer></div>
+          <div class="contract-table-card"><div class="contract-table-scroll"><table class="contract-data-table contract-ledger-table"><thead><tr><th>合同编号 / 名称</th><th>客户</th><th>类型 / 服务</th><th>合同金额</th><th>负责人姓名</th><th>到期 / 创建</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="contract in filteredContracts" :key="contract.recordId"><td class="contract-ledger-sticky-col"><button class="contract-entity-link" type="button" @click="openContract(contract)"><strong>{{ contract.name }}</strong><small>{{ contract.id }}</small></button></td><td>{{ contract.customerName || '—' }}</td><td><span>{{ contract.type }}</span><small class="contract-cell-sub">{{ contract.serviceType || '—' }}</small></td><td class="amount">{{ formatContractAmount(contract) }}</td><td>{{ contract.owner }}</td><td><span>{{ contract.endDate || '—' }}</span><small class="contract-cell-sub">创建：{{ contract.createdAt || '—' }}</small></td><td><span class="contract-badge" :class="statusTone(contract.displayStatus)"><i></i>{{ contract.displayStatus }}</span></td><td><button class="contract-text-button" type="button" @click="openContract(contract)">详情</button></td></tr><tr v-if="!filteredContracts.length && !businessDataError && !businessDataLoading"><td colspan="8"><EmptyState compact title="当前没有可查看的合同"><button v-if="ledgerFiltersActive" type="button" class="contract-button secondary small" @click="resetFilters">重置筛选</button></EmptyState></td></tr></tbody></table></div><footer class="contract-table-footer contract-table-footer--pager"><PaginationBar label="合同台账分页" :page="ledgerPage" :total="ledgerTotal" :page-size="ledgerPageSize" :loading="businessDataLoading" @change="changeLedgerPage" @change-page-size="changeLedgerPageSize" /></footer></div>
         </template>
 
         <template v-else-if="activeSection === 'templates'">
