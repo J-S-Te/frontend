@@ -42,8 +42,25 @@ test('读取已审批合同不足以进入签署台账', () => {
   // 必须由 contract.signing.manage 单独把守，不能被读权限顺带放开。
   const importer = { roles: ['contract_importer'], permissions: ['contract.approved.read'] }
   assert.equal(canAccessContractSection(importer, 'signing'), false)
-  for (const section of ['dashboard', 'customers', 'contracts', 'templates', 'approvals', 'rules', 'reports']) {
+  for (const section of ['dashboard', 'contracts', 'templates', 'approvals', 'rules', 'reports']) {
     assert.equal(canAccessContractSection(importer, section), false, section)
+  }
+})
+
+test('客户查询分区已下线：权限层不再登记该分区，也不给总监白名单放行', () => {
+  // 客户查询模块暂不上线（2026-11-07）：分区键与总监硬编码白名单一起移除；
+  // 只注释其中一处会让 sales/tech/finance_director 继续穿过守卫渲染空白页。
+  assert.equal(Object.hasOwn(CONTRACT_SECTION_PERMISSIONS, 'customers'), false)
+  for (const session of [
+    { role: { code: 'admin' }, permissions: ['customer.read'] },
+    { roles: ['admin'], permissions: ['all'] },
+    { roles: ['sales_director'], permissions: ['customer.read'] },
+    { roles: ['tech_director'], permissions: ['customer.read'] },
+    { roles: ['finance_director'], permissions: ['customer.read'] },
+    { roles: ['sales'], permissions: ['customer.read'] },
+    { permissions: ['customer.read'] },
+  ]) {
+    assert.equal(canAccessContractSection(session, 'customers'), false, JSON.stringify(session))
   }
 })
 

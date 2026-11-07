@@ -22,7 +22,8 @@ export function hasContractPermission(session, permission) {
 
 export const CONTRACT_SECTION_PERMISSIONS = Object.freeze({
   dashboard: ['dashboard'],
-  customers: ['customer.read'],
+  // 客户查询模块暂不上线（2026-11-07）：保留代码便于日后恢复（见 .ai/qa/ 本任务记录）。
+  // customers: ['customer.read'],
   contracts: ['contract.read'],
   imports: ['contract.import.preview', 'contract.import.commit', 'contract.import.approve', 'contract.import.release'],
   intakes: ['opportunity_intake.read'],
@@ -56,7 +57,9 @@ export function canAccessContractSection(session, section) {
     return Object.hasOwn(CONTRACT_SECTION_PERMISSIONS, section)
   }
   if (['sales_director', 'tech_director', 'finance_director'].some((roleCode) => roleCodes.has(roleCode))) {
-    return ['dashboard', 'customers', 'contracts', 'approvals', 'rules', 'reports'].includes(section)
+    // 客户查询模块暂不上线（2026-11-07）：总监白名单不再放行该分区，保留代码便于日后恢复。
+    // 'customers',
+    return ['dashboard', 'contracts', 'approvals', 'rules', 'reports'].includes(section)
   }
   if (roleCodes.has('sales') && section === 'rules') return false
 

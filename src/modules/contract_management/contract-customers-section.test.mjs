@@ -1,76 +1,100 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFile } from 'node:fs/promises'
-import { canAccessContractSection } from '../shared/authz/sys004.js'
+import { CONTRACT_SECTION_PERMISSIONS, canAccessContractSection } from '../shared/authz/sys004.js'
 
+// 客户查询模块暂不上线（2026-11-07）：本文件语义整体反转——旧断言要求“入口必须可见、
+// 页面必须存在、权限可进”，现在锁定“三处同时下线、无法通过 URL 或侧栏进入”。
+// 恢复客户查询时，把本文件与三处源码注释一起回退。
 const source = await readFile(new URL('./views/ContractManagementView.vue', import.meta.url), 'utf8')
+const routerSource = await readFile(new URL('../../router/index.js', import.meta.url), 'utf8')
+const apiSource = await readFile(new URL('./api/contract.js', import.meta.url), 'utf8')
 
-// customersSection 截取客户查询分区的模板片段，供结构与文案断言使用。
-function customersSection() {
-  const start = source.indexOf(`<template v-else-if="activeSection === 'customers'">`)
-  assert.ok(start >= 0, '缺少客户查询分区模板')
-  const end = source.indexOf('</template>', start)
-  assert.ok(end > start)
-  return source.slice(start, end)
+// activeLines 只保留真正生效的源码行，注释保留的代码不算“仍在上线”。
+// 参数：text 为文件全文。
+// 返回值：既不是 // 也不是 <!-- --> 注释、且非空的行。
+function activeLines(text) {
+  return text.split('\n').filter((line) => {
+    const trimmed = line.trim()
+    return trimmed !== '' && !trimmed.startsWith('//') && !trimmed.startsWith('<!--')
+  })
 }
 
-// 回归锁定 L3：客户查询必须在两个侧边栏都可见并带“建设中”标记，
-// 不能只靠手敲 URL 进入。
-test('admin and non-admin sidebars expose the customer section with a building marker', () => {
+// 回归锁定：路由分区清单不再登记 customers，否则 URL 仍能进入一个空白页。
+test('contract route sections no longer include the customer lookup section', () => {
+  const sectionsLine = routerSource
+    .split('\n')
+    .find((line) => line.startsWith('const contractSections = ['))
+  assert.ok(sectionsLine, '缺少 contractSections 定义')
+  assert.doesNotMatch(sectionsLine, /'customers'/)
+  // 其余分区与顺序保持不变，避免顺手打乱首个允许分区的回落顺序。
+  assert.match(sectionsLine, /const contractSections = \['dashboard', 'intakes', 'contracts', 'imports', 'templates', 'approvals', 'rules', 'signing', 'reports', 'outbox'\]/)
+  // 注释保留原入口，便于日后恢复时不必重写清单。
+  assert.match(routerSource, /^\/\/ 'customers',$/m)
+  // 守卫仍以 contractSections 作为回落范围。
+  assert.match(routerSource, /const firstAllowedSection = contractSections\.find\(\(section\) => canAccessContractSection\(session, section\)\)/)
+})
+
+// 回归锁定：权限层同时移除分区键与总监白名单项，三个总监角色不能再穿过守卫。
+test('authz layer no longer registers or whitelists the customer section', () => {
+  assert.equal(Object.hasOwn(CONTRACT_SECTION_PERMISSIONS, 'customers'), false)
+  for (const session of [
+    { role: { code: 'admin' }, permissions: ['customer.read'] },
+    { roles: ['admin'], permissions: ['all'] },
+    { roles: ['sales_director'], permissions: ['customer.read'] },
+    { roles: ['tech_director'], permissions: ['customer.read'] },
+    { roles: ['finance_director'], permissions: ['customer.read'] },
+    { roles: ['sales'], permissions: ['customer.read'] },
+  ]) {
+    assert.equal(canAccessContractSection(session, 'customers'), false, JSON.stringify(session))
+  }
+})
+
+// 回归锁定：两个侧栏入口都已注释下线，且没有留下空分组。
+test('admin and non-admin sidebars no longer expose the customer section', () => {
   const definitions = source.slice(
     source.indexOf('const adminNavGroupDefinitions'),
     source.indexOf('const contracts = ref([])'),
   )
   const admin = definitions.slice(0, definitions.indexOf('const userNavGroupDefinitions'))
   const user = definitions.slice(definitions.indexOf('const userNavGroupDefinitions'))
-  assert.match(admin, /\{ key: 'customers', label: '客户查询', icon: 'user', badge: '建设中' \}/)
-  assert.match(user, /\{ key: 'customers', label: '客户查询', icon: 'user', badge: '建设中' \}/)
-  // 导航模板把正式字段渲染成可见标记，而不是隐藏字段。
-  assert.match(source, /<i v-if="item\.badge">\{\{ item\.badge \}\}<\/i>/)
+  for (const [name, block] of [['管理员', admin], ['非管理员', user]]) {
+    assert.doesNotMatch(block, /^\s*\{ key: 'customers'/m, `${name}侧栏仍暴露客户查询入口`)
+  }
+  // 注释保留原入口行，恢复时放开即可。
+  assert.match(admin, /\/\/ \{ key: 'customers', label: '客户查询', icon: 'user', badge: '建设中' \},/)
+  assert.match(user, /\/\/ \{ key: 'customers', label: '客户查询', icon: 'user', badge: '建设中' \},/)
+  // 空分组会被过滤掉，但入口移除后原分组仍有其它条目，不依赖该过滤兜底。
+  const lookupGroup = admin.slice(admin.indexOf(`label: '查询台账'`), admin.indexOf(`label: '配置管理'`))
+  assert.match(lookupGroup, /^\s*\{ key: 'signing'/m)
+  const businessGroup = user.slice(user.indexOf(`label: '合同业务'`), user.indexOf(`label: '审批协同'`))
+  assert.match(businessGroup, /^\s*\{ key: 'contracts'/m)
+  assert.match(businessGroup, /^\s*\{ key: 'imports'/m)
 })
 
-// 回归锁定：入口可见性仍由既有权限决定，不因补充导航而放宽。
-test('customer section visibility still follows the existing customer.read permission', () => {
-  const granted = { permissions: ['customer.read'] }
-  const denied = { permissions: ['contract.read'] }
-  assert.equal(canAccessContractSection(granted, 'customers'), true)
-  assert.equal(canAccessContractSection(denied, 'customers'), false)
-  assert.equal(canAccessContractSection({ roles: ['admin'] }, 'customers'), true)
+// 回归锁定：分区模板、分区说明与申请说明逻辑都以注释保留，不参与渲染。
+test('customer section template, metadata and copy helpers are commented out', () => {
+  const active = activeLines(source)
+  for (const line of active) {
+    assert.doesNotMatch(line, /activeSection === 'customers'/, `仍有生效的客户查询模板：${line}`)
+    assert.doesNotMatch(line, /^\s*customers: \{ title: '客户查询'/, `仍有生效的分区说明：${line}`)
+    assert.doesNotMatch(line, /customerQuery(CopyHint|ApplicationText)/, `仍有生效的申请说明引用：${line}`)
+    assert.doesNotMatch(line, /copyCustomerQueryApplication/, `仍有生效的复制处理函数：${line}`)
+    assert.doesNotMatch(line, /copyTextToClipboard/, `仍有生效的剪贴板 import：${line}`)
+  }
+  // 注释保留完整模板块，恢复时整块放开即可。
+  assert.match(source, /<!--\s*<template v-else-if="activeSection === 'customers'">/)
+  assert.match(source, /<!--\s*<h3>客户查询建设中<\/h3>/)
+  assert.match(source, /\/\/ customers: \{ title: '客户查询', description: '查询客户主数据与历史合作情况' \},/)
+  // 回落：activeSection 用 sectionMeta 校验，键移除后落回 dashboard。
+  assert.match(source, /return sectionMeta\[section\] \? section : 'dashboard'/)
 })
 
-// 回归锁定：页面是明确的“建设中”状态，而不是看起来像坏页的“暂无客户数据”。
-test('customer page is an explicit in-progress state, not an empty data page', () => {
-  const section = customersSection()
-  assert.match(section, /<h3>客户查询建设中<\/h3>/)
-  assert.match(section, /客户查询尚未开放：本页不读取、不展示客户数据/)
-  assert.doesNotMatch(section, /暂无客户数据/)
-  // 说明将要提供的能力，不承诺上线时间、不提供假数据。
-  assert.match(section, /该能力上线后，可按客户名称或客户编号查询客户主数据/)
-  assert.match(section, /历史合作合同、签约金额与履约进展/)
-  assert.match(section, /不承诺上线时间/)
-  assert.doesNotMatch(section, /v-for=/)
-  assert.doesNotMatch(section, /listMyCustomers|客户列表/)
-})
-
-// 回归锁定：没有真实申请接口时，只提供可执行的真实替代动作与可复制的申请说明，
-// 不出现点了没反应的按钮，也不虚构外部系统或联系方式。
-test('customer page offers real alternative actions and copyable guidance', () => {
-  const section = customersSection()
-  assert.match(section, /<div class="contract-info-banner"><ConsoleIcon name="account" \/><span>查看某个客户的合同：进入「合同台账」/)
-  assert.match(section, /<button v-if="can\('contract\.read'\)" class="contract-button primary" type="button" @click="navigate\('contracts'\)">去合同台账按客户名称查找<\/button>/)
-  assert.match(section, /<button class="contract-button secondary" type="button" @click="copyCustomerQueryApplication">复制申请说明<\/button>/)
-  assert.match(section, /<p class="contract-approval-summary">\{\{ customerQueryApplicationText \}\}<\/p>/)
-  assert.match(section, /role="status"/)
-  // 申请说明是页面可见文本，复制失败也能手动选取；复制走共享剪贴板工具。
-  assert.match(source, /import \{ copyTextToClipboard \} from '@\/modules\/shared\/utils\/clipboard\.js'/)
-  assert.match(source, /await copyTextToClipboard\(customerQueryApplicationText\.value\)/)
-  assert.match(source, /申请说明已复制，可粘贴到工单或消息中发送给系统管理员。/)
-  assert.match(source, /浏览器未允许自动复制，请手动选择页面上的申请说明文本复制。/)
-  // 不新增申请/审批接口调用。
-  assert.doesNotMatch(section, /fetch\(|axios|api\//)
-})
-
-// 回归锁定：分区说明保持既有业务描述，供面包屑与页面标题继续使用。
-test('section metadata keeps the customer lookup description', () => {
-  assert.match(source, /customers: \{ title: '客户查询', description: '查询客户主数据与历史合作情况' \}/)
+// 红线：下线的只是“建设中”占位页，新建合同/Excel 导入/提交前核验仍依赖 CRM 客户查询接口。
+test('customer lookup removal keeps the CRM lookup used by contract creation intact', () => {
+  assert.match(apiSource, /const CUSTOMER_API_BASE_URL = /)
+  assert.match(apiSource, /export async function listMyCustomers/)
+  assert.match(apiSource, /export async function listMyOpportunities/)
+  const active = activeLines(source)
+  assert.ok(active.some((line) => /await listMyCustomers\(/.test(line)), '新建合同的客户核验仍必须调用 listMyCustomers')
 })

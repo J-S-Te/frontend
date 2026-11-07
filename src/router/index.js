@@ -30,7 +30,9 @@ const { Contract: ensureContractSession, Project: ensureProjectSession,
   Settlement: ensureSettlementSession, CRM: ensureCRMSession,
   Portal: ensurePortalSession, DataAnalysis: ensureDataAnalysisSession } = sessionLoaders
 
-const contractSections = ['dashboard', 'intakes', 'customers', 'contracts', 'imports', 'templates', 'approvals', 'rules', 'signing', 'reports', 'outbox']
+// 客户查询模块暂不上线（2026-11-07）：已从可访问分区清单移除，保留代码便于日后恢复（见 .ai/qa/ 本任务记录）。
+// 'customers',
+const contractSections = ['dashboard', 'intakes', 'contracts', 'imports', 'templates', 'approvals', 'rules', 'signing', 'reports', 'outbox']
 
 // 路由守卫与设置页签共享同一份权限模块键，新增设置模块时不会出现
 // “页面已展示、点击却被守卫重定向”的双份白名单漂移。
