@@ -163,6 +163,38 @@
 .subsystem-portal__theme-dot { width: 7px; height: 7px; border: 1px solid currentColor; border-radius: 50%; }
 .subsystem-portal__theme-option.is-active .subsystem-portal__theme-dot { border-color: var(--portal-primary); background: var(--portal-primary); box-shadow: 0 0 9px var(--portal-primary); }
 
+/* 上手清单入口：页头与页脚共用同一套状态色，进度只显示真实完成数。 */
+.subsystem-portal__guide-entry {
+  display: inline-flex;
+  min-height: 40px;
+  padding: 0 var(--space-3);
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--portal-text-secondary);
+  cursor: pointer;
+  border: 1px solid var(--portal-border);
+  border-radius: 12px;
+  background: var(--portal-surface-soft);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  white-space: nowrap;
+  transition: color var(--duration-fast) ease, border-color var(--duration-fast) ease, background var(--duration-fast) ease;
+}
+.subsystem-portal__guide-entry:hover,
+.subsystem-portal__guide-entry:focus-visible { color: var(--portal-text); border-color: var(--portal-primary-border); outline: none; background: var(--portal-panel); }
+.subsystem-portal__guide-entry:disabled { cursor: progress; opacity: .62; }
+.subsystem-portal__guide-entry:disabled:hover { color: var(--portal-text-secondary); border-color: var(--portal-border); background: var(--portal-surface-soft); }
+.subsystem-portal__guide-entry-icon { display: grid; width: 18px; height: 18px; flex: 0 0 auto; place-items: center; color: var(--portal-primary-strong); }
+.subsystem-portal__guide-entry-icon svg { width: 18px; height: 18px; }
+.subsystem-portal__guide-entry-count {
+  padding: 1px 7px;
+  color: var(--portal-primary-strong);
+  border-radius: var(--radius-pill);
+  background: var(--portal-primary-soft);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+
 .subsystem-portal__user-menu { position: relative; z-index: 4; }
 .subsystem-portal__user-trigger {
   display: inline-flex;
@@ -239,6 +271,29 @@
 .subsystem-portal__logout-button:hover,
 .subsystem-portal__logout-button:focus-visible { border-color: var(--portal-danger); outline: none; background: rgba(244, 63, 94, .18); }
 .subsystem-portal__logout-button:disabled { cursor: wait; opacity: .65; }
+
+/* 用户面板里的导览/清单重看入口：与退出按钮区分主次，颜色全部走门户 token。 */
+.subsystem-portal__user-panel-actions { display: grid; gap: var(--space-2); margin-top: var(--space-4); }
+.subsystem-portal__user-panel-action {
+  width: 100%;
+  min-height: 36px;
+  padding: 0 var(--space-3);
+  color: var(--portal-text-secondary);
+  text-align: left;
+  cursor: pointer;
+  border: 1px solid var(--portal-border);
+  border-radius: var(--radius-md);
+  background: var(--portal-surface-soft);
+  font-size: var(--fs-body);
+  font-weight: 600;
+  transition: color var(--duration-fast) ease, border-color var(--duration-fast) ease, background var(--duration-fast) ease;
+}
+.subsystem-portal__user-panel-action:hover,
+.subsystem-portal__user-panel-action:focus-visible { color: var(--portal-text); border-color: var(--portal-primary-border); outline: none; background: var(--portal-primary-soft); }
+/* 上手记录未就绪：与页头清单入口一致，禁用态显示进行中而不是静默无响应。 */
+.subsystem-portal__user-panel-action:disabled { cursor: progress; opacity: .62; }
+.subsystem-portal__user-panel-action:disabled:hover { color: var(--portal-text-secondary); border-color: var(--portal-border); background: var(--portal-surface-soft); }
+.subsystem-portal__user-panel-actions + .subsystem-portal__user-panel-status { margin-top: var(--space-2); }
 
 .portal-user-panel-enter-active,
 .portal-user-panel-leave-active { transition: opacity var(--duration-fast) ease, translate var(--duration-fast) ease; }
@@ -374,6 +429,27 @@
 .subsystem-portal__footer { position: relative; z-index: 1; display: flex; flex: 0 0 auto; justify-content: space-between; gap: var(--space-4); padding: 0 clamp(24px, 3vw, 52px) 24px; color: var(--portal-text-faint); font-size: var(--fs-sm); }
 .subsystem-portal__footer-note { margin-right: auto; }
 .subsystem-portal__footer-copyright { margin-left: auto; }
+.subsystem-portal__guide-footer-entry {
+  display: inline-flex;
+  min-height: 28px;
+  margin-right: var(--space-4);
+  padding: 0 var(--space-3);
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--portal-text-muted);
+  cursor: pointer;
+  border: 1px solid var(--portal-border);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  transition: color var(--duration-fast) ease, border-color var(--duration-fast) ease, background var(--duration-fast) ease;
+}
+.subsystem-portal__guide-footer-entry:hover,
+.subsystem-portal__guide-footer-entry:focus-visible { color: var(--portal-text); border-color: var(--portal-primary-border); outline: none; background: var(--portal-surface-soft); }
+.subsystem-portal__guide-footer-entry:disabled { cursor: progress; opacity: .62; }
+.subsystem-portal__guide-footer-entry:disabled:hover { color: var(--portal-text-muted); border-color: var(--portal-border); background: transparent; }
+.subsystem-portal__guide-footer-count { color: var(--portal-primary-strong); font-variant-numeric: tabular-nums; }
 .subsystem-portal__toast { position: fixed; z-index: 10; bottom: 30px; left: 50%; min-width: min(360px, calc(100vw - 32px)); padding: var(--space-3) var(--space-5); color: #fff; border: 1px solid var(--portal-border-strong); border-radius: var(--radius-lg); background: #0f1c31; box-shadow: var(--portal-shadow); font-size: var(--fs-body-lg); text-align: center; transform: translateX(-50%); }
 .subsystem-portal__toast.is-deny { background: #9f1239; }
 .portal-toast-enter-active,
@@ -427,6 +503,7 @@
   .subsystem-portal__header-actions { width: 100%; align-items: stretch; flex-direction: column; }
   .subsystem-portal__theme-switcher { width: 100%; }
   .subsystem-portal__theme-option { flex: 1; justify-content: center; }
+  .subsystem-portal__guide-entry { width: 100%; justify-content: center; }
   .subsystem-portal__user-menu,
   .subsystem-portal__user-trigger { width: 100%; }
   .subsystem-portal__user-trigger { max-width: none; }

@@ -6,6 +6,7 @@ import {
   THEME_STORAGE_KEY,
   THEME_SWITCHER_SELECTOR,
   applyDocumentTheme,
+  createDocumentThemeOverride,
   installDocumentThemeSync,
   readThemePreference,
   resolveDocumentTheme,
@@ -30,6 +31,7 @@ function createHarness({ stored = null, prefersDark = false, storageThrows = fal
   const documentElement = {
     setAttribute(name, value) { attributes.set(name, String(value)) },
     getAttribute(name) { return attributes.has(name) ? attributes.get(name) : null },
+    removeAttribute(name) { attributes.delete(name) },
   }
   const document = {
     documentElement,
@@ -185,6 +187,28 @@ test('syncDocumentTheme 可被路由切换等场景手动调用', () => {
   harness.setStoredTheme('dark')
   assert.equal(syncDocumentTheme({ window: harness.window, document: harness.document }), 'dark')
   assert.equal(harness.attributes.get('data-theme'), 'dark')
+})
+
+test('门户主题覆盖：挂载期间跟随 resolvedTheme，卸载按最新偏好恢复控制权', () => {
+  const fresh = createHarness()
+  fresh.setStoredTheme('dark')
+  const override = createDocumentThemeOverride({ window: fresh.window, document: fresh.document })
+  override.apply('dark')
+  assert.equal(fresh.attributes.get('data-theme'), 'dark')
+  override.apply('light')
+  assert.equal(fresh.attributes.get('data-theme'), 'light')
+  // 卸载不能写回挂载前快照；应按当前偏好重新同步（此处偏好仍是 dark）。
+  override.restore()
+  assert.equal(fresh.attributes.get('data-theme'), 'dark', '恢复应读取最新偏好')
+
+  const existing = createHarness()
+  existing.setStoredTheme('light')
+  existing.document.documentElement.setAttribute('data-theme', 'dark')
+  const existingOverride = createDocumentThemeOverride({ window: existing.window, document: existing.document })
+  existingOverride.apply('dark')
+  assert.equal(existing.attributes.get('data-theme'), 'dark')
+  existingOverride.restore()
+  assert.equal(existing.attributes.get('data-theme'), 'light', '恢复应读取最新偏好而不是旧快照')
 })
 
 test('没有 window/document 时安装是空操作（避免测试或预渲染环境报错）', () => {

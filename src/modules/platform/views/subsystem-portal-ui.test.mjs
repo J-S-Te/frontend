@@ -83,3 +83,86 @@ test('门户在桌面端按卡片数量自适应一屏，分页交给统一 Pagi
   assert.match(styles, /@media \(min-width: 901px\) and \(max-height: 820px\)/)
   assert.match(styles, /@media \(max-width: 900px\)[\s\S]*overflow:\s*visible/)
 })
+
+// 用途：从真实门户组件提取命名函数并注入隔离依赖，执行真实分支。
+// 参数：source 为组件源码，name 为函数名，scope 为替代的响应式状态、存储读取与 DOM。
+// 返回值：可执行的组件函数；找不到函数时测试失败。
+function operation(source, name, scope) {
+  const start = source.indexOf(`function ${name}(`)
+  assert.ok(start >= 0, `缺少函数 ${name}`)
+  const end = source.indexOf('\n}', start)
+  assert.ok(end > start, `无法确定 ${name} 的函数体`)
+  return new Function(...Object.keys(scope), `${source.slice(start, end + 2)}; return ${name}`)(...Object.values(scope))
+}
+
+test('主题跟随：跨标签页主题键、同页主题事件与切回标签页都重投根元素', () => {
+  const applied = []
+  // 用可变闭包模拟 localStorage 与系统深色：事件处理里重新读取才会看到新值。
+  let storedTheme = 'light'
+  let prefersDark = true
+  const scope = {
+    themeMode: { value: 'dark' },
+    systemPrefersDark: { value: false },
+    readStoredPortalThemeOrNull: () => storedTheme,
+    readSystemPrefersDark: () => prefersDark,
+    syncPortalDocumentTheme: () => { applied.push('apply') },
+    PORTAL_THEME_STORAGE_KEY: 'basic-platform.portal-theme',
+    THEME_STORAGE_KEY: 'basic-platform.portal-theme',
+    document: { visibilityState: 'visible' },
+  }
+  const syncFromStorage = operation(source, 'syncPortalThemeFromStorage', scope)
+  const onStorage = operation(source, 'onPortalThemeStorage', {
+    ...scope,
+    syncPortalThemeFromStorage: syncFromStorage,
+  })
+
+  // 无关的存储键不能打断门户：不重读偏好、也不改写根元素。
+  assert.equal(onStorage({ key: 'basic-platform.first-run|v1|t:x|u:y' }), false)
+  assert.deepEqual(applied, [])
+  assert.equal(scope.themeMode.value, 'dark')
+
+  // 门户主题键与全局偏好键是同一个键：另一标签页改动后立即重读并应用（含系统深色）。
+  assert.equal(onStorage({ key: scope.THEME_STORAGE_KEY }), true)
+  assert.equal(scope.themeMode.value, 'light')
+  assert.equal(scope.systemPrefersDark.value, true)
+  assert.deepEqual(applied, ['apply'])
+
+  // storage.clear() 的 key === null 也要重新读取，否则会停留在旧主题。
+  assert.equal(onStorage({ key: null }), true)
+  assert.equal(applied.length, 2)
+  // 缺事件对象（部分测试替身/老浏览器）按“未知键”兜底重读，不静默跳过。
+  assert.equal(onStorage(undefined), true)
+  assert.equal(applied.length, 3)
+
+  // 同标签页其它外壳广播主题事件时同样同步重投（不排队到下一帧）。
+  storedTheme = 'system'
+  prefersDark = true
+  const onPreferenceChanged = operation(source, 'syncPortalThemeFromStorage', scope)
+  onPreferenceChanged()
+  assert.equal(scope.themeMode.value, 'system')
+  assert.equal(scope.systemPrefersDark.value, true)
+  assert.equal(applied.length, 4)
+
+  // 页面隐藏时不做任何写入；切回可见时补读系统主题，保证浮层与门户同色。
+  const onVisibility = operation(source, 'onPortalVisibilityChangeForTheme', {
+    ...scope,
+    syncPortalThemeFromStorage: syncFromStorage,
+  })
+  scope.document.visibilityState = 'hidden'
+  assert.equal(onVisibility(), false)
+  assert.equal(applied.length, 4)
+  scope.document.visibilityState = 'visible'
+  assert.equal(onVisibility(), true)
+  assert.equal(applied.length, 5)
+
+  // 存储被禁用或从未写过偏好：保留当前会话内的选择，不被默认深色覆盖。
+  storedTheme = null
+  scope.themeMode.value = 'light'
+  syncFromStorage()
+  assert.equal(scope.themeMode.value, 'light')
+  assert.equal(applied.length, 6)
+})
+
+test('门户主区提供 #main-content 落点，供跳转链接与导览关闭兜底聚焦', () => {
+  assert.match(source, /id="main-content"[\s\S]{0,160}class="subsystem-portal"[\s\S]{0,400}tabindex="-1"/)
+})

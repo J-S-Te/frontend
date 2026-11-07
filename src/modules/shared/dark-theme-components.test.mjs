@@ -250,6 +250,36 @@ test('许可管理页：表面/描边/墨色全部走共享 token，因此深色
   }
 })
 
+test('许可卡片：颜色/描边/墨色只用共享 token，因此深色同样由 token 统一覆盖', () => {
+  const source = read('../platform/features/licenses/LicenseAppCard.vue')
+  const css = styleBlock(source, 'LicenseAppCard.vue')
+  // 逐应用卡片拆分出来后单独守一次：它不在上面的浅色清单里（清单要求文件里至少有一条
+  // 写死的浅色声明，全 token 的组件永远不满足），所以这里改为“一条写死的颜色都不许有”。
+  const literals = []
+  for (const rule of parseRules(css)) {
+    for (const declaration of declarations(rule.body)) {
+      const property = declaration.property
+      const colorBearing = property === 'color' || property === 'background' || property === 'background-color' ||
+        /^border(?:-(?:top|right|bottom|left))?(?:-color)?$/.test(property)
+      if (!colorBearing) continue
+      if (declaration.value.includes('var(')) continue
+      if (!/#[0-9a-f]{3,8}\b|\brgba?\(|\bwhite\b|\bblack\b/i.test(declaration.value)) continue
+      literals.push(`${rule.selectors.join(', ')} → ${declaration.property}: ${declaration.value}`)
+    }
+  }
+  assert.deepEqual(literals, [], `许可卡片仍有写死的浅色表面/描边/墨色：\n${literals.join('\n')}`)
+  // 组件内不写第二套深色：深色完全沿用 main.css 的 token。
+  assert.doesNotMatch(css, /\[data-theme="dark"\]/)
+  // 字号只允许本地自定义属性承载，不能再散落 px 字面量（design-token 门禁按文件总量计）。
+  assert.doesNotMatch(css, /font-size:\s*\d/)
+  // 卡片结构本身也要守住：两层事实分成两块、近方形由 aspect-ratio 表达，不写死 height。
+  assert.match(css, /\.license-app-card \{[\s\S]*?grid-template-rows: auto auto 1fr auto;/)
+  assert.match(css, /\.license-app-card \{[\s\S]*?aspect-ratio: 1 \/ 1;/)
+  assert.doesNotMatch(css, /\.license-app-card \{[^}]*[;\s]height:/)
+  assert.doesNotMatch(css, /\.license-app-card \{[^}]*overflow:\s*hidden/)
+  assert.match(css, /\.license-app-card:focus-within \{ outline: 2px solid var\(--primary\); outline-offset: 2px; \}/)
+})
+
 test('global-ux.css 不再重复组件内的深色兜底（单一来源）', () => {
   const globalUx = read('./styles/global-ux.css')
   const darkText = darkRules(globalUx)

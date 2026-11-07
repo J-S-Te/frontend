@@ -17,6 +17,8 @@ import { installDocumentThemeSync, syncDocumentTheme } from '@/modules/platform/
 import { installTableScrollAffordance } from '@/modules/shared/composables/useTableScrollAffordance'
 import ErrorBoundary from '@/modules/shared/errors/ErrorBoundary.vue'
 import GlobalErrorToasts from '@/modules/shared/errors/GlobalErrorToasts.vue'
+import FirstRunGuideHost from '@/modules/platform/first-run/components/FirstRunGuideHost.vue'
+import { observeFirstRunRoute } from '@/modules/platform/first-run/composables/useFirstRun.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -32,6 +34,11 @@ const disposeTableScrollAffordance = installTableScrollAffordance()
 watch(() => route.fullPath, () => {
   syncDocumentTheme()
 })
+// 首登导览的全局路由观察器：只有已经存在 first-run 记录时才会把 /audit 记为完成，
+// 从未访问过门户的主体不会因为打开审计页就被创建记录。
+watch(() => route.fullPath, () => {
+  observeFirstRunRoute(route)
+}, { immediate: true })
 const transport = createSessionTransport()
 // 一个路由只使用一个活动时钟；独立Cookie、业务权限和客户边界仍由各自后端检查。
 const lifecycle = createUnifiedSessionLifecycle({
@@ -226,6 +233,8 @@ onBeforeUnmount(() => {
   </ErrorBoundary>
   <!-- 只接"谁都没接住"的错误；业务视图自己的 OperationToast 通道保持不变。 -->
   <GlobalErrorToasts />
+  <!-- 首登导览 + 上手清单：全局唯一入口，只在门户就绪且记录未到终态时展示导览。 -->
+  <FirstRunGuideHost />
 </template>
 
 <style scoped>

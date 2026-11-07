@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
 import { afterEach, test } from 'node:test'
 import { readFileSync } from 'node:fs'
+import * as Vue from 'vue'
 import { compileScript, compileTemplate, parse } from '@vue/compiler-sfc'
+import { renderToString } from '@vue/server-renderer'
 import { MAX_LICENSE_BYTES, commitLicense, getLicenseEvents, getLicenseRequest, getLicenseStatus, initializeLicense, previewLicense, validateLicenseInput } from './api.js'
 import { licenseRows, licensedOnly, previewCanCommit, riskyChange, statusRows } from './presentation.js'
 
@@ -86,6 +88,73 @@ test('event row and event sheet compile on their own', () => {
     assert.deepEqual(template.errors, [], name)
   }
 })
+test('license app card compiles and renders both license and runtime facts', async () => {
+  const card = await loadLicenseAppCard()
+  const html = await renderCard(card, {
+    code: 'settlement', name: '结算管理', tone: 'warning',
+    application: { kind: 'FULL', expires_at: 4102444800 },
+    license: { key: 'IMPORTED', label: '已导入', tone: 'success' },
+    enforcement: { key: 'PENDING_ENFORCEMENT', label: '待激活', tone: 'warning', note: '' },
+    summary: { available: true, revision: 7, deploymentRevision: 42, memberCount: 2, ready: 2, acknowledged: 1, latestReadyAt: '2026-10-27T05:54:38Z', latestAckAt: '2026-10-26T01:02:03Z' },
+    showEnforcementCounters: true,
+    reasonCode: 'EXPIRED',
+    action: { key: 'ACTIVATE', label: '去激活', target: 'runtime', hint: '在下方运行详情中核对执行修订并勾选确认后启用' },
+  })
+  // 标题、许可层面与运行执行必须同时存在，且两区各自独立成块。
+  assert.match(html, /id="license-app-title-settlement"/)
+  assert.match(html, /aria-labelledby="license-app-title-settlement"/)
+  assert.equal(html.match(/许可层面/g).length, 1)
+  assert.equal(html.match(/运行执行/g).length, 1)
+  assert.match(html, /<dt class="license-app-section-label"[^>]*>许可层面<\/dt>/)
+  assert.match(html, /<dt class="license-app-section-label"[^>]*>运行执行<\/dt>/)
+  assert.match(html, /结算管理/)
+  assert.match(html, /正式授权 · 到期 01-01 08:00/)
+  assert.match(html, /title="到期 \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}"/)
+  assert.match(html, /剩余 \d+ 天/)
+  // 原因码整行保留在 DOM 里，完整文本进 title。
+  assert.match(html, /原因：有效期已结束，需要供应商签发更高版本/)
+  assert.match(html, /<code class="license-app-reason-code"[^>]*>EXPIRED<\/code>/)
+  assert.match(html, /修订 7 · 部署 42/)
+  assert.match(html, /准备 2\/2 · 确认 1\/2/)
+  assert.match(html, /确认 10-26 09:02/)
+  // 每张卡片只有一个动作按钮，accessible name 含系统名与动作名。
+  assert.equal(html.match(/<button/g).length, 1)
+  assert.match(html, /aria-label="结算管理 · 去激活"/)
+})
+test('license app card keeps runtime facts when counters are unavailable', async () => {
+  const card = await loadLicenseAppCard()
+  const unregistered = await renderCard(card, {
+    code: 'project_management', name: '项目管理', tone: 'neutral',
+    application: { kind: 'TRIAL', expires_at: 4102444800 },
+    license: { key: 'IMPORTED', label: '已导入', tone: 'success' },
+    enforcement: { key: 'UNREGISTERED', label: '未纳管', tone: 'neutral', note: '运行组件尚未登记，运行执行事实不存在' },
+    summary: { available: false, revision: 0, deploymentRevision: 0, memberCount: 0, ready: 0, acknowledged: 0 },
+    showEnforcementCounters: false,
+    reasonCode: '',
+    action: { key: 'ENROLL', label: '查看运行详情', target: 'runtime', hint: '' },
+  })
+  // showEnforcementCounters 只关掉计数，不能把整块运行执行（徽标+note）藏掉。
+  assert.match(unregistered, /运行执行/)
+  assert.match(unregistered, /未纳管/)
+  assert.match(unregistered, /运行组件尚未登记，运行执行事实不存在/)
+  assert.doesNotMatch(unregistered, /修订 0 · 部署 0/)
+  assert.doesNotMatch(unregistered, /0\/0/)
+  assert.match(unregistered, /试用授权 · 到期/)
+  // 没有动作时只给文字提示，不渲染禁用按钮。
+  const hintOnly = await renderCard(card, {
+    code: 'contract_management', name: '合同管理', tone: 'danger',
+    application: { kind: 'FULL', expires_at: 4102444800 },
+    license: { key: 'CLOCK_ABNORMAL', label: '时钟异常', tone: 'danger' },
+    enforcement: { key: 'UNKNOWN', label: '状态未知', tone: 'neutral', note: '概览读取失败，请刷新执行状态重试' },
+    summary: null,
+    showEnforcementCounters: false,
+    reasonCode: 'CLOCK_ABNORMAL',
+    action: { key: 'RECOVER', label: '联系授权管理员', target: 'none', hint: '检测到时间回拨，授权已按失败关闭处理；只有商业授权管理员可以提交恢复凭据' },
+  })
+  assert.doesNotMatch(hintOnly, /<button/)
+  assert.match(hintOnly, /只有商业授权管理员可以提交恢复凭据/)
+  assert.match(hintOnly, /原因：检测到时间回拨，授权已按失败关闭处理/)
+})
 test('valid license never claims business activation or disconnected implementation', () => {
   const source = readFileSync(new URL('./CommercialLicenseView.vue', import.meta.url), 'utf8')
   assert.match(source, /不代表业务系统已开放/)
@@ -118,3 +187,36 @@ test('statusRows 原样透传聚合 enforcement 与 reason_code，并保留 unde
   // 未购买的系统不进入当前授权面板。
   assert.equal(licensedOnly(rows).some(row => row.code === 'data_analysis'), false)
 })
+
+// loadLicenseAppCard 用途：编译真实的 LicenseAppCard 单文件组件，供下方 SSR 断言直接渲染。
+// 参数：无；入口固定为同目录的 LicenseAppCard.vue。
+// 返回值：可交给 createSSRApp 的组件对象；parse/compile 有错时用例直接失败。
+async function loadLicenseAppCard() {
+  const filename = new URL('./LicenseAppCard.vue', import.meta.url)
+  const source = readFileSync(filename, 'utf8')
+  const { descriptor, errors } = parse(source, { filename: filename.pathname })
+  assert.deepEqual(errors, [])
+  assert.ok(descriptor.scriptSetup, 'LicenseAppCard.vue 必须使用 <script setup>')
+  const script = compileScript(descriptor, { id: 'license-app-card' })
+  const template = compileTemplate({ source: descriptor.template.content, filename: filename.pathname, id: 'license-app-card', compilerOptions: { bindingMetadata: script.bindings } })
+  assert.deepEqual(template.errors, [])
+  const bindings = {}
+  for (const node of script.scriptSetupAst.filter(item => item.type === 'ImportDeclaration')) {
+    const specifier = node.source.value
+    const dependency = specifier === 'vue' ? Vue : await import(new URL(specifier, filename))
+    for (const spec of node.specifiers) {
+      bindings[spec.local.name] = spec.type === 'ImportDefaultSpecifier' ? (dependency.default ?? dependency) : dependency[spec.imported.name]
+    }
+  }
+  const component = new Function(...Object.keys(bindings), script.content
+    .replace(/^import\s[\s\S]*?from ['"][^'"]+['"]\n/gm, '')
+    .replace('export default', 'return'))(...Object.values(bindings))
+  component.render = new Function('Vue', template.code
+    .replace(/import \{([^}]+)\} from "vue"/g, (_, names) => `const { ${names.replace(/ as /g, ': ')} } = Vue`)
+    .replace('export function render', 'return function render'))(Vue)
+  return component
+}
+
+async function renderCard(component, row) {
+  return renderToString(Vue.createSSRApp({ render: () => Vue.h(component, { row, busy: false, loading: false }) }))
+}
