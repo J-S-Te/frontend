@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFile } from 'node:fs/promises'
+import vm from 'node:vm'
 
 const source = await readFile(new URL('./projectManagement.js', import.meta.url), 'utf8')
 const routerSource = await readFile(new URL('../../../router/index.js', import.meta.url), 'utf8')
@@ -168,15 +169,56 @@ test('人员身份复核调用独立端点', () => {
   assert.match(source, /request\('\/capabilities\/sync-identities', \{ method: 'POST' \}\)/)
 })
 
-test('列表接口统一解包分页 envelope，未分页时拿到完整集合', () => {
-  // 后端列表接口统一返回 {items,total,page,page_size}；page_size 未指定时 items 即全量。
+test('列表接口统一解包分页 envelope，并解析快照 truncated 标记', () => {
+  // 后端列表接口统一返回 {items,total,page,page_size,truncated}；省略 page_size 时只回默认 20 行，
+  // 全量集合必须显式走 all=1 快照，因此这里同时固定 truncated 的默认值与解析口径。
   assert.match(source, /function unwrapPage\(data\)/)
-  assert.match(source, /if \(Array\.isArray\(data\)\) return \{ items: data, total: data\.length \}/)
+  assert.match(source, /if \(Array\.isArray\(data\)\) return \{ items: data, total: data\.length, truncated: false \}/)
   assert.match(source, /if \(data && Array\.isArray\(data\.items\)\)/)
-  // 三个列表都走解包：服务项与设备是下拉数据源，必须仍是完整集合。
+  assert.match(source, /truncated: Boolean\(data\.truncated\)/)
+  // 仍保留三个普通列表解包入口（项目、服务项与设备各一处）；快照入口单独返回 envelope。
   assert.equal((source.match(/return unwrapPage\(data\)\.items/g) || []).length, 3)
   assert.match(source, /export async function listProjectsPage\(params = \{\}\)/)
   assert.match(source, /return unwrapPage\(await request\(`\/projects\$\{search \? `\?\$\{search\}` : ''\}`\)\)/)
+})
+
+test('项目与服务项快照请求强制 all=1，不会误传分页参数并保留 truncated', async () => {
+  // 从真实 API 源提取函数执行：all 与 page/page_size 同传会被后端 422，
+  // 快照入口必须保证请求只含 all=1 + 业务筛选，且逐字段回传 truncated。
+  const bodies = ['unwrapPage', 'listProjectsSnapshot', 'listServiceItemsSnapshot'].map((name) => {
+    const start = source.search(new RegExp(`(?:export )?(?:async )?function ${name}\\(`))
+    assert.ok(start >= 0, `missing ${name}`)
+    return source.slice(start, source.indexOf('\n}', start) + 2).replace(/^export /, '')
+  })
+  const paths = []
+  const context = {
+    URLSearchParams,
+    request: async (path) => {
+      paths.push(path)
+      return { items: [{ id: 'ROW-1' }], total: 600, page: 1, page_size: 500, truncated: true }
+    },
+  }
+  const api = vm.runInNewContext(`${bodies.join('\n')}\n({ listProjectsSnapshot, listServiceItemsSnapshot })`, context)
+
+  const projects = await api.listProjectsSnapshot({ keyword: '安全', report_stage: 'REVIEWED', page: 2, page_size: 20 })
+  assert.match(paths[0], /^\/projects\?/)
+  assert.match(paths[0], /(?:^|[?&])all=1(?:&|$)/)
+  assert.match(paths[0], /(?:^|[?&])q=%E5%AE%89%E5%85%A8(?:&|$)/)
+  assert.doesNotMatch(paths[0], /keyword=/)
+  assert.doesNotMatch(paths[0], /[?&]page=/)
+  assert.doesNotMatch(paths[0], /page_size=/)
+  // vm 里的对象来自另一 realm，逐字段断言避免原型差异导致的假失败。
+  assert.deepEqual(projects.items.map((row) => row.id), ['ROW-1'])
+  assert.equal(projects.total, 600)
+  assert.equal(projects.truncated, true)
+
+  const scoped = await api.listServiceItemsSnapshot('PJ-1')
+  assert.equal(paths[1], '/service-items?all=1&project_id=PJ-1')
+  assert.deepEqual(scoped.items.map((row) => row.id), ['ROW-1'])
+  assert.equal(scoped.total, 600)
+  assert.equal(scoped.truncated, true)
+  await api.listServiceItemsSnapshot()
+  assert.equal(paths[2], '/service-items?all=1')
 })
 
 test('实时监控读取独立服务端快照并保留分页与版本元数据', () => {

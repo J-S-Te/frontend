@@ -1,7 +1,7 @@
 import { formatUserError } from '../shared/utils/userError.js'
 
 /** 两个分别提交的命令绝不能复用指派前的版本。 */
-export async function assignServiceItemTeams({ item, teamLeadID, projectManagerID, engineerIDs, executionAllowed, assignTeam, assignExecutionTeam, listServiceItems, onTeamAssigned = () => {} }) {
+export async function assignServiceItemTeams({ item, teamLeadID, projectManagerID, engineerIDs, executionAllowed, assignTeam, assignExecutionTeam, listServiceItemsSnapshot, onTeamAssigned = () => {} }) {
   let current = item
   let teamAssigned = false
   try {
@@ -12,7 +12,9 @@ export async function assignServiceItemTeams({ item, teamLeadID, projectManagerI
       if (executionAllowed) {
         // 第一个端点仅返回 TEAM_ASSIGNED，不返回新版本。
         // 读取权威记录，不猜测版本加一，也不禁用乐观锁。
-        const rows = await listServiceItems(item.project_id)
+        // 服务项列表默认只回 20 行，按项目读取必须走 all=1 快照，否则可能读不到目标行。
+        const snapshot = await listServiceItemsSnapshot(item.project_id)
+        const rows = Array.isArray(snapshot) ? snapshot : snapshot?.items
         current = Array.isArray(rows) ? rows.find(row => row.id === item.id) : null
         const version = Number(current?.version)
         if (!current || current.team_lead_id !== teamLeadID || current.status !== '待分配'

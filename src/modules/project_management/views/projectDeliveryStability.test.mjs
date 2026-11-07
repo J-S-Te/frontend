@@ -34,7 +34,7 @@ async function until(condition, timeoutMs = 100) {
 // —— 任务 B：保存/刷新分离 —— 写入 HTTP 2xx 即已保存，随后的工作区刷新失败
 // 只提示“已保存，但最新数据读取失败”，不得误报为操作失败，也不得把整页切成错误区。
 
-function workspaceContext({ listProjects = async () => [] } = {}) {
+function workspaceContext({ listProjectsSnapshot = async () => ({ items: [], total: 0, truncated: false }) } = {}) {
   const toasts = []
   const context = {
     ref, createRequestScope, formatUserError, subsystemAccessMessage,
@@ -42,6 +42,7 @@ function workspaceContext({ listProjects = async () => [] } = {}) {
     toastTimer: 0,
     toastMessage: ref(''), toastType: ref('success'),
     loading: ref(true), loadError: ref('错误'), ruleConfigurationCatalogError: ref(''),
+    workspaceTruncated: ref(false),
     lastUpdatedAt: ref(null),
     projects: ref([]), serviceItems: ref([]), rules: ref([]), deliveryEvents: ref([]),
     capabilities: ref([]), dashboard: ref({}), session: ref(null), navigation: ref({ sections: [] }),
@@ -52,7 +53,8 @@ function workspaceContext({ listProjects = async () => [] } = {}) {
     router: { replace: async () => {} },
     workspaceScope: createRequestScope(),
     decorateRule: (rule) => rule,
-    listProjects, listServiceItems: async () => [], listRules: async () => [], listDeliveryEvents: async () => [],
+    listProjectsSnapshot, listServiceItemsSnapshot: async () => ({ items: [], total: 0, truncated: false }),
+    listRules: async () => [], listDeliveryEvents: async () => [],
     listCapabilities: async () => [], getDashboard: async () => ({}), getProjectSession: async () => ({}),
     getProjectNavigation: async () => ({ sections: ['projects'], default_section: 'projects' }),
     listDetectionCategories: async () => [], listRuleConfigurationCatalog: async () => ({ automation_triggers: [], sla_statuses: [] }),
@@ -68,7 +70,7 @@ function workspaceContext({ listProjects = async () => [] } = {}) {
 
 test('拆解确认写入成功但刷新失败：提示已保存与读取失败，不误报确认失败也不切错误页', async () => {
   let workspaceLoads = 0
-  const w = workspaceContext({ listProjects: () => { workspaceLoads++; return Promise.reject(new Error('服务端瞬断')) } })
+  const w = workspaceContext({ listProjectsSnapshot: () => { workspaceLoads++; return Promise.reject(new Error('服务端瞬断')) } })
   Object.assign(w.context, { ...functions('./ProjectManagementView.vue', ['loadWorkspace', 'refreshAfterWrite', 'showToast', 'confirmDecomposition'], w.context) })
   const pending = deferred()
   w.context.confirmServiceItemsRequest = () => pending.promise
@@ -117,11 +119,11 @@ test('工作区双请求：先发请求迟到时不得覆盖新请求的数据',
   Object.assign(w.context, { ...functions('./ProjectManagementView.vue', ['loadWorkspace'], w.context) })
   const first = deferred()
   let calls = 0
-  w.context.listProjects = () => { calls++; return calls === 1 ? first.promise : Promise.resolve([{ id: 'PJ-NEW' }]) }
+  w.context.listProjectsSnapshot = () => { calls++; return calls === 1 ? first.promise : Promise.resolve({ items: [{ id: 'PJ-NEW' }], total: 1, truncated: false }) }
   const slow = w.context.loadWorkspace()
   const fast = w.context.loadWorkspace()
   await until(() => calls === 2)
-  first.resolve([{ id: 'PJ-OLD' }])
+  first.resolve({ items: [{ id: 'PJ-OLD' }], total: 1, truncated: false })
   await slow
   await fast
   assert.deepEqual(w.context.projects.value, [{ id: 'PJ-NEW' }], '旧工作区响应不得污染新工作区')
@@ -213,4 +215,46 @@ test('runOperation 在写操作进行中再次触发时直接返回，不重复�
   const { runOperation } = functions('./ProjectManagementView.vue', ['runOperation'], context)
   await runOperation('planning')
   assert.equal(planCalls, 0, '写操作进行中必须被单飞 guard 拦截')
+})
+
+// —— F1：列表接口省略 page_size 只回 20 行 —— 工作区与详情读取必须走 all=1 快照，
+// 截断时（服务端上限 500 行）用提示条明确集合不完整，而不是把截断集合当成全量。
+test('工作区快照走 all=1 接口并以 envelope items 整体替换，任一快照截断即置位提示', async () => {
+  const w = workspaceContext({
+    listProjectsSnapshot: async () => ({ items: [{ id: 'PJ-FULL' }], total: 600, truncated: true }),
+  })
+  Object.assign(w.context, { ...functions('./ProjectManagementView.vue', ['loadWorkspace'], w.context) })
+  w.context.listServiceItemsSnapshot = async () => ({ items: [{ id: 'SI-1', status: '待分配' }], total: 1, truncated: false })
+  await w.context.loadWorkspace()
+  assert.deepEqual(w.context.projects.value, [{ id: 'PJ-FULL' }], '项目数据取自快照 items')
+  assert.equal(w.context.serviceItems.value[0].id, 'SI-1', '服务项数据取自快照 items')
+  assert.equal(w.context.workspaceTruncated.value, true, '项目快照截断即提示')
+  assert.equal(w.context.loadError.value, '')
+})
+
+test('两个快照都未截断时关闭提示，不误报集合不完整', async () => {
+  const w = workspaceContext({
+    listProjectsSnapshot: async () => ({ items: [{ id: 'PJ-1' }], total: 1, truncated: false }),
+  })
+  Object.assign(w.context, { ...functions('./ProjectManagementView.vue', ['loadWorkspace'], w.context) })
+  w.context.listServiceItemsSnapshot = async () => ({ items: [], total: 0, truncated: false })
+  await w.context.loadWorkspace()
+  assert.equal(w.context.workspaceTruncated.value, false)
+})
+
+test('工作区加载接线只调用快照入口，截断提示条按 workspaceTruncated 渲染', () => {
+  const source = readFileSync(new URL('./ProjectManagementView.vue', import.meta.url), 'utf8')
+  const loadWorkspaceBody = source.match(/async function loadWorkspace\(\{ reportError = true \} = \{\}\)[\s\S]*?\n\}/)
+  assert.ok(loadWorkspaceBody, '工作区加载函数应存在')
+  assert.match(loadWorkspaceBody[0], /listProjectsSnapshot\(\)/)
+  assert.match(loadWorkspaceBody[0], /listServiceItemsSnapshot\(\)/)
+  assert.match(loadWorkspaceBody[0], /projects\.value = projectSnapshot\.items/)
+  assert.match(loadWorkspaceBody[0], /serviceItems\.value = itemSnapshot\.items\.map/)
+  assert.match(loadWorkspaceBody[0], /workspaceTruncated\.value = Boolean\(projectSnapshot\.truncated \|\| itemSnapshot\.truncated\)/)
+  // 普通列表入口省略 page_size 只回 20 行，工作区不得再用它们拉快照。
+  assert.doesNotMatch(loadWorkspaceBody[0], /(?:^|[^.\w])listProjects\(/)
+  assert.doesNotMatch(loadWorkspaceBody[0], /(?:^|[^.\w])listServiceItems\(/)
+  // 提示条只在截断时渲染，role=status 可被辅助技术朗读，且固定文案说明上限与出路。
+  assert.match(source, /<section v-if="workspaceTruncated" class="pm-contract-warning" role="status">/)
+  assert.match(source, /当前快照超过 500 行，仅展示前 500 条；请使用筛选或分页缩小范围/)
 })

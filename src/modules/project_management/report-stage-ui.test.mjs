@@ -21,7 +21,9 @@ function extractFunction(name, context) {
 test('报告阶段筛选走列表接口 report_stage 参数并与状态筛选组合', () => {
   assert.match(source, /const reportStageFilter = ref\(''\)/)
   assert.match(source, /report_stage: reportStageFilter/)
-  assert.match(source, /listProjects\(\{ report_stage: stage \}\)/)
+  // 默认分页只回 20 行，报告阶段筛选必须走 all=1 快照，否则结果被静默截少。
+  assert.match(source, /listProjectsSnapshot\(\{ report_stage: stage \}\)/)
+  assert.match(source, /reportStageProjects\.value = snapshot\.items/)
   assert.match(source, /fields: \{ keyword, status: statusFilter, report_stage: reportStageFilter/)
   assert.match(source, /reportStageFilterOptions = Object\.entries\(reportStageLabel\)/)
   assert.match(source, /aria-label="按报告阶段筛选"/)
@@ -50,7 +52,7 @@ test('报告阶段筛选请求携带 report_stage，切换筛选后旧响应不�
     reportStageListLoading: ref(false),
     reportStageListError: ref(''),
     reportStageListScope: createRequestScope(),
-    listProjects: (params) => {
+    listProjectsSnapshot: (params) => {
       calls.push(params)
       return new Promise((resolve, reject) => pending.push({ resolve, reject }))
     },
@@ -66,12 +68,12 @@ test('报告阶段筛选请求携带 report_stage，切换筛选后旧响应不�
   const second = loadReportStageProjects()
   assert.equal(calls[1].report_stage, 'COMPILING')
 
-  pending[0].resolve([{ id: 'PJ-OLD' }])
+  pending[0].resolve({ items: [{ id: 'PJ-OLD' }], total: 1, truncated: false })
   await first
   assert.deepEqual(context.reportStageProjects.value, [])
   assert.equal(context.reportStageListLoading.value, true, '旧请求 finally 不得关闭新请求的加载态')
 
-  pending[1].resolve([{ id: 'PJ-NEW', report_stage: 'COMPILING' }])
+  pending[1].resolve({ items: [{ id: 'PJ-NEW', report_stage: 'COMPILING' }], total: 1, truncated: false })
   await second
   assert.deepEqual(context.reportStageProjects.value, [{ id: 'PJ-NEW', report_stage: 'COMPILING' }])
   assert.equal(context.reportStageListLoading.value, false)
