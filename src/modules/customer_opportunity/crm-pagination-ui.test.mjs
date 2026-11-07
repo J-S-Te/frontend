@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8')
 const view = read('./views/CustomerOpportunityView.vue')
+const style = read('./styles/customer-opportunity.css')
 
 const DRAFT_PAGE = /(?<![A-Za-z])page\.(number|total|size)/
 
@@ -19,7 +20,7 @@ const BARS = [
 ]
 
 function paginationBar(label) {
-  const index = view.indexOf(`<PaginationBar class="crm-actions" label="${label}"`)
+  const index = view.indexOf(`<PaginationBar class="crm-pagination" label="${label}"`)
   assert.ok(index >= 0, `缺少分页条 ${label}`)
   const end = view.indexOf('/>', index)
   assert.ok(end > index)
@@ -87,4 +88,21 @@ test('下一页禁用条件不再由视图手写，基准 props 同源于 render
     assert.doesNotMatch(bar, /:page="page\./)
   }
   assert.doesNotMatch(view, /renderedPage\.number \* page\.size/)
+})
+
+// P2④：客户 / 商机 / 售前三个列表的分页条都在 .table-panel（横向滚动容器）里。
+// 普通块级子元素会被表格一起横向滚出视口；这里锁住「吸左 + 自带底色 + 取滚动视口宽度」。
+test('客户 / 商机 / 售前分页条位于 .table-panel 内并吸左，不被表格带走', () => {
+  for (const [label] of [['客户列表分页'], ['商机列表分页'], ['售前申请列表分页']]) {
+    const section = new RegExp(`<section[^>]*class="crm-panel table-panel"[^>]*>[\\s\\S]*?<PaginationBar class="crm-pagination" label="${label}"`)
+    assert.match(view, section, `${label}: 分页条必须是 .table-panel 滚动容器的直接子元素`)
+  }
+
+  const rule = /\.table-panel > \.crm-pagination\s*\{([^}]*)\}/.exec(style)
+  assert.ok(rule, '缺少 .table-panel > .crm-pagination 吸左规则')
+  assert.match(rule[1], /position:\s*sticky/, '分页条必须 sticky')
+  assert.match(rule[1], /left:\s*0/, '分页条必须吸左')
+  assert.match(rule[1], /width:\s*100%/, '分页条宽度取滚动视口而不是表格内容宽度')
+  assert.match(rule[1], /background:\s*var\(--surface-card/, '分页条必须自带卡片底色，滚动时遮住表格内容')
+  assert.match(rule[1], /padding:\s*12px 18px/, '吸左后不能再用 margin 留白（margin 区没有底色）')
 })

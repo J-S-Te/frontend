@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 
 import {
   resolveTableScrollState,
@@ -7,6 +8,7 @@ import {
   tableScrollStateClasses,
   TABLE_SCROLL_CLASS,
   TABLE_SCROLL_EPSILON,
+  TABLE_SCROLL_SCROLLERS,
 } from './composables/useTableScrollAffordance.js'
 
 // 纯函数单测：状态判定和覆盖层矩形换算都不依赖 DOM，可以直接断言。
@@ -149,4 +151,47 @@ test('结果按 0.01px 取整，避免行长小数为 0.0001 时抖动', () => {
   assert.equal(insets.top, 3.33)
   assert.equal(insets.right, 88.89)
   assert.equal(insets.height, 88.89)
+})
+
+// ── 登记表覆盖（P2⑧） ───────────────────────────────────────────────────────
+// 横向滚动提示原先只认 8 个共享类，新页面的滚动容器没有渐隐，用户看不到右侧还有列。
+// 现在用 data-table-scroll 作为显式 opt-in 标记，并把已知的 12 类容器补齐。
+
+test('滚动容器登记表包含 data-table-scroll opt-in 标记', () => {
+  assert.ok(TABLE_SCROLL_SCROLLERS.includes('[data-table-scroll]'), '登记表必须识别 [data-table-scroll]')
+})
+
+// 文件相对本测试文件（src/modules/shared/）；数量是该文件里应出现的标记数。
+const DATA_TABLE_SCROLL_CONTAINERS = [
+  ['结算 · import-scroll', '../settlement/components/SettlementContractImportPanel.vue', 2],
+  ['数析 · import-history-scroll', '../data_analysis/components/ContractImportHistoryPanel.vue', 1],
+  // 模板示例表 + 唯一含宽表格的商机团队任期面板（三个 attachment-panel 共享宿主，只标记其一）
+  ['CRM · crm-import-template-scroll / opportunity-attachment-panel', '../customer_opportunity/views/CustomerOpportunityView.vue', 2],
+  ['门户 · filing-matrix-scroll', '../customer_portal/components/FilingWizard.vue', 1],
+  ['IAM · personnel-change-table', '../platform/iam/components/PersonnelChangeCenter.vue', 1],
+  ['平台 · configuration-table', '../platform/configuration/components/ConfigurationCenterModule.vue', 1],
+  ['平台 · notification-table', '../platform/notifications/components/NotificationCenterModule.vue', 2],
+  ['许可 · runtime-table', '../platform/features/licenses/RuntimeEnforcementView.vue', 1],
+  ['项目 · pm-matrix-wrap', '../project_management/views/ProjectManagementView.vue', 2],
+  ['合同 · local-catalog-table', '../contract_management/components/LocalContractCatalogPanel.vue', 1],
+  ['合同 · contract-integration-outbox', '../contract_management/components/ContractIntegrationOutboxPanel.vue', 1],
+]
+
+test('12 类新增滚动容器都显式标记 data-table-scroll', () => {
+  for (const [label, file, expected] of DATA_TABLE_SCROLL_CONTAINERS) {
+    const source = readFileSync(new URL(file, import.meta.url), 'utf8')
+    const occurrences = (source.match(/data-table-scroll/g) || []).length
+    assert.ok(occurrences >= expected, `${label}: 需要至少 ${expected} 处 data-table-scroll，实际 ${occurrences}`)
+  }
+})
+
+test('global-ux.css 的渐隐与滚动条清单同步包含 data-table-scroll', () => {
+  const css = readFileSync(new URL('./styles/global-ux.css', import.meta.url), 'utf8')
+  const lists = [...css.matchAll(/:where\(([^)]*)\)/g)]
+    .map((matched) => matched[1])
+    .filter((list) => list.includes('.contract-table-scroll'))
+  assert.ok(lists.length >= 6, `应至少覆盖降级渐隐 / 滚动条 / Firefox 三组共 6 条清单，实际 ${lists.length}`)
+  for (const list of lists) {
+    assert.ok(list.includes('[data-table-scroll]'), `滚动清单漏掉 data-table-scroll：${list.trim().slice(0, 80)}…`)
+  }
 })

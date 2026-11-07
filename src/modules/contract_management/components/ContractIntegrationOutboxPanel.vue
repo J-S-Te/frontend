@@ -229,7 +229,7 @@ onMounted(load)
     </div>
 
     <div v-else-if="canManage && !permissionStatus" class="contract-table-card contract-outbox-table-card" :class="{ 'is-refreshing': refreshing }">
-      <div class="contract-table-scroll">
+      <div class="contract-table-scroll" data-table-scroll>
         <table class="contract-data-table contract-outbox-table">
           <thead>
             <tr>

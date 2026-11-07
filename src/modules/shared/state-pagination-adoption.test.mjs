@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 
 // 三态 / 分页 / 反馈统一的「接线」锁。
 //
@@ -197,6 +197,20 @@ test('失败原因与空态文案分开传：失败不会再显示成「暂无�
   assert.doesNotMatch(VIEWS.settlement, /<p v-if="loading" class="settlement-loading">/)
 })
 
+test('列表分页条使用专用容器类，不借用通用操作行 / 加载更多类', () => {
+  // 通用操作行（.crm-actions）在窄屏会把直接子按钮撑成半宽，加载更多（.project-pagination）
+  // 带 !important 的居中对齐；两者都会把分页条内部布局改坏，所以分页条必须用专用类。
+  for (const [name, source] of Object.entries(VIEWS)) {
+    assert.doesNotMatch(
+      source,
+      /<PaginationBar[^>]*class="[^"]*\b(crm-actions|project-pagination)\b/,
+      `${name}: 分页条不得复用通用操作行 / 加载更多类`,
+    )
+  }
+  assert.match(VIEWS.crm, /<PaginationBar class="crm-pagination" label="售前申请列表分页"/)
+  assert.match(VIEWS.portal, /<PaginationBar class="portal-pagination" label="项目动态分页"/)
+})
+
 test('手写的「上一页 / 下一页」条已全部由 PaginationBar 替代', () => {
   for (const [name, source] of Object.entries(VIEWS)) {
     assert.doesNotMatch(source, />上一页<\/button>/, `${name}: 仍有手写上一页按钮`)
@@ -302,4 +316,34 @@ test('每个接入面的三态闸门都把失败排在空态之前（loading > e
   for (const [name, file, pattern] of STATE_GUARDS) {
     assert.match(read(file), pattern, `${name}: 三态闸门丢掉了失败分支或优先级`)
   }
+})
+
+// P2③：「每页」下拉是显式 opt-in。视图层只有确实实现了 change-page-size（按新页大小
+// 重新请求列表）的分页条才允许传 page-size-options；其余页面保持默认不渲染，避免出现
+// 点了没反应、列表也不重载的死控件。
+test('只有已接 change-page-size 的分页条才传 page-size-options，且正好 4 条', () => {
+  const root = new URL('../', import.meta.url)
+  const offenders = []
+  const wired = []
+  const visit = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        if (!['node_modules', '.mimosa'].includes(entry.name)) visit(new URL(`${entry.name}/`, dir))
+        continue
+      }
+      if (!entry.name.endsWith('.vue')) continue
+      const source = readFileSync(new URL(entry.name, dir), 'utf8')
+      for (const tag of source.matchAll(/<PaginationBar\b[\s\S]*?\/>/g)) {
+        const markup = tag[0]
+        const hasHandler = /@change-page-size=/.test(markup)
+        const hasOptions = /:page-size-options="/.test(markup)
+        if (hasHandler && !hasOptions) offenders.push(`${entry.name}: ${markup.slice(0, 80)}…`)
+        if (hasOptions && !hasHandler) offenders.push(`${entry.name}: 传了候选但没有处理器 ${markup.slice(0, 80)}…`)
+        if (hasHandler) wired.push(entry.name)
+      }
+    }
+  }
+  visit(root)
+  assert.deepEqual(offenders, [], `页大小下拉的候选与处理器必须成对出现：\n${offenders.join('\n')}`)
+  assert.equal(wired.length, 4, `已接页大小切换的分页条应保持 4 条，实际 ${wired.length}`)
 })

@@ -365,9 +365,9 @@
   --primary-soft: var(--portal-primary-soft);
 }
 
+/* 分页条的对齐与内部尺寸由 shared/components/PaginationBar.vue 负责：这里只留外距。 */
 .subsystem-portal__pagination {
   flex: 0 0 auto;
-  justify-content: center;
   margin-top: var(--space-3);
 }
 

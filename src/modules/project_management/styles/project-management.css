@@ -936,10 +936,17 @@
 .pm-filter-count { margin-left: auto; color: var(--pm-muted); font-size: var(--pm-fs-hint); white-space: nowrap; }
 .pm-filters-flat { margin: 0; border: 0; border-bottom: 1px solid var(--pm-line-soft); border-radius: 0; box-shadow: none; }
 
-.pm-qualification-filter { display: flex; gap: var(--pm-sp-3); padding: var(--pm-sp-3) var(--pm-sp-5); border-bottom: 1px solid var(--pm-line-soft); }
-.pm-qualification-filter label { display: flex; align-items: center; gap: var(--pm-sp-2); }
+/* 资质与能力筛选行：标签色块 + 多个下拉。窄屏（≤700px）放不下一行时允许换行并改为
+   纵向排列，避免下拉被挤出卡片右边（卡片是 overflow: hidden）。 */
+.pm-qualification-filter { display: flex; flex-wrap: wrap; align-items: center; gap: var(--pm-sp-3); padding: var(--pm-sp-3) var(--pm-sp-5); border-bottom: 1px solid var(--pm-line-soft); }
+.pm-qualification-filter label { display: flex; align-items: center; gap: var(--pm-sp-2); min-width: 0; }
 .pm-qualification-filter span { flex: 0 0 auto; color: var(--pm-muted); font-size: var(--pm-fs-hint); white-space: nowrap; }
-.pm-qualification-filter select { height: var(--pm-h-control); min-width: 140px; padding: 0 10px; border: 1px solid var(--pm-line); border-radius: var(--pm-r-sm); background: var(--pm-card); color: var(--pm-body); font-size: var(--pm-fs-sm); }
+.pm-qualification-filter select { height: var(--pm-h-control); max-width: 100%; min-width: min(140px, 100%); padding: 0 10px; border: 1px solid var(--pm-line); border-radius: var(--pm-r-sm); background: var(--pm-card); color: var(--pm-body); font-size: var(--pm-fs-sm); }
+@media (max-width: 700px) {
+  .pm-qualification-filter { align-items: stretch; flex-direction: column; }
+  .pm-qualification-filter label { justify-content: space-between; }
+  .pm-qualification-filter select { flex: 1 1 auto; }
+}
 
 .pm-tab-pill {
   min-height: var(--pm-h-control);
@@ -1017,13 +1024,17 @@
 .pm-cell-sub { display: block; margin-top: 3px; color: var(--pm-muted); font-size: var(--pm-fs-hint); overflow-wrap: anywhere; word-break: break-word; }
 .pm-table .num { text-align: right; font-variant-numeric: tabular-nums; }
 .pm-table-panel > footer { display: flex; justify-content: space-between; padding: var(--pm-sp-3) var(--pm-sp-4); border-top: 1px solid var(--pm-line-soft); background: var(--pm-sunken); color: var(--pm-muted); font-size: var(--pm-fs-hint); }
-.pm-table-footer { display: flex; align-items: center; justify-content: space-between; gap: var(--pm-sp-3); }
+.pm-table-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--pm-sp-3); min-width: 0; }
+.pm-table-footer > span { min-width: 0; }
 .pm-status-panel .pm-table td { cursor: pointer; }
 .pm-status-panel .pm-table tbody tr:hover { background: var(--pm-primary-soft); }
 
 /* 项目表与在途监控的分页条统一使用 shared/components/PaginationBar.vue（.ui-pager），
-   模块侧不再保留 .pm-pagination / .pm-pg 两套私有分页样式。 */
-.pm-table-footer .ui-pager { flex: 0 0 auto; }
+   模块侧不再保留 .pm-pagination / .pm-pg 两套私有分页样式。
+   分页条必须可收缩：.pm-table-panel 是 overflow: hidden 的卡片，561–900px 时页脚
+   的左侧说明 + 分页条放不下，flex: 0 0 auto 会把「下一页 / 跳至 / 每页」顶到卡片
+   外面被裁掉。允许它按可用宽度收缩并自行换行；放不下时整条落到下一行。 */
+.pm-table-footer .ui-pager { flex: 0 1 auto; min-width: 0; max-width: 100%; }
 
 .pm-project-link { display: flex; flex-direction: column; gap: 3px; padding: 0; border: 0; background: transparent; color: var(--pm-body); text-align: left; }
 .pm-project-link b { color: var(--pm-blue-text); overflow-wrap: anywhere; word-break: break-word; }
