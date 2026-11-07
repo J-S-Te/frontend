@@ -18,16 +18,19 @@ import { externalContractTypes, contractSystemLevels } from '../utils/contractPa
 import { importRowSourceForm, applyImportRowSourceForm } from '../utils/localImportSourceBridge.js'
 
 // importPanelHarness 编译实际导入面板并替换受控外部接口以验证模式及未知结果。
-// 参数：mode为测试模式，request/listResponse替代外部接口，crmLogin替代正常登录窗口。
+// 参数：mode为测试模式，request/listResponse替代外部接口，crmLogin替代正常登录窗口，
+//   autoApproveApi可替换自动审批的读取/保存实现。
 // 返回值：实际setup状态、组件渲染器和请求记录；不冒充真实服务验收。
 function importPanelHarness(mode, request, listResponse = () => ({items:[],has_more:false,next_offset:null}), crmLogin = () => true,
   excelReader = async () => { throw new Error('Excel reader not configured') },
   customerResponse = async () => ({items:[],page:1,page_size:20,total:0,has_more:false}),
-  sourceCapabilities = {}) {
-  const calls = [], delays = [], listCalls = [], timers = [], directoryCalls = []
-  const props = Vue.reactive({enabled:true,pdfEnabled:true,canPreview:true,canCommit:true,canApprove:true,canRelease:true,actorId:'actor',initialBatchId:'',supportedModes:['NORMAL','ARCHIVE_ONLY'],sourceCapabilities})
+  sourceCapabilities = {}, autoApproveApi = {}) {
+  const calls = [], delays = [], listCalls = [], timers = [], directoryCalls = [], mounted = []
+  const autoApproveGets = [], autoApprovePuts = [], copyCalls = []
+  const defaultAutoApprove = {capability_enabled:true,enabled:false,version:3,updated_by:'合同超级管理员',updated_at:'2026-11-06T02:30:00Z'}
+  const props = Vue.reactive({enabled:true,pdfEnabled:true,canPreview:true,canCommit:true,canApprove:true,canRelease:true,canManageAutoApprove:false,actorId:'actor',initialBatchId:'',supportedModes:['NORMAL','ARCHIVE_ONLY'],sourceCapabilities})
   const batch = {batch_id:'batch-A',version:11,revision:1,preview_token:'preview',state:'PREVIEWED',can_commit:true,source_system:'legacy',sources:[],items:[{id:'item-A',item:{mode,item_key:'one',external_record_id:'old-1',source_file_ref:'file-ref',metadata:{customer_name:'历史客户'},policy_options:{project_mode:'NONE',finance_mode:'NONE',report_mode:'ARCHIVE_SEPARATE'}},state:'READY',issues:[]}]}
-  const deps = {computed:Vue.computed,ref:Vue.ref,watch:Vue.watch,nextTick:Vue.nextTick,onMounted(){},onBeforeUnmount(){},setTimeout(callback,delay){delays.push(delay);timers.push(callback);return 0},clearTimeout(){},ContractPDFPreview:{render(){return null}},
+  const deps = {computed:Vue.computed,ref:Vue.ref,watch:Vue.watch,nextTick:Vue.nextTick,onMounted(callback){mounted.push(callback)},onBeforeUnmount(){},setTimeout(callback,delay){delays.push(delay);timers.push(callback);return 0},clearTimeout(){},ContractPDFPreview:{render(){return null}},
     LocalContractSourcePicker:{render(){return null}},importRowSourceForm,applyImportRowSourceForm,
     contractImportRequest:async (...args)=> {calls.push(args);return request ? request(batch,...args) : structuredClone(batch)},
     listContractImportBatches:async(offset)=>{listCalls.push(offset);return listResponse(offset)},releaseContractImportItem:async()=>({}),getImportItemDocumentDescriptor:async()=>({}),importItemSourceURL:()=>'',
@@ -42,6 +45,12 @@ function importPanelHarness(mode, request, listResponse = () => ({items:[],has_m
     useDictionaryOptions:()=>({options:Vue.ref(fallbackServiceTypeOptions),loading:Vue.ref(false)}),
     listMyCustomers:customerResponse,
     ensureContractCRMDirectorySession:async()=>{},
+    getImportAutoApproveSetting:async()=>{autoApproveGets.push(true);return autoApproveApi.get?autoApproveApi.get():structuredClone(defaultAutoApprove)},
+    setImportAutoApproveSetting:async(payload)=>{autoApprovePuts.push(structuredClone(payload));
+      if(autoApproveApi.put)return autoApproveApi.put(payload)
+      return {...structuredClone(defaultAutoApprove),enabled:payload.enabled,version:payload.expectedVersion+1}},
+    formatBusinessDateTime:(value)=>value?String(value).replace('T',' ').replace(/\.\d+Z$/,'').replace(/Z$/,''):'',
+    copyTextToClipboard:async(value)=>{copyCalls.push(String(value));return true},
     listContractDetectionCategories:async()=>{directoryCalls.push('project');return [{category:'等保测评'},{category:'软件测试'}]}}
   const {descriptor}=parse(readFileSync(new URL('./ContractImportPanel.vue',import.meta.url),'utf8'))
   const script=compileScript(descriptor,{id:'import-panel-test'})
@@ -51,7 +60,7 @@ function importPanelHarness(mode, request, listResponse = () => ({items:[],has_m
   const render=new Function('Vue',template.code.replace(/import \{([^}]+)\} from "vue"/g,(_,names)=>`const { ${names.replace(/ as /g,': ')} } = Vue`).replace('export function render','return function render'))(Vue)
   const state=component.setup(props,{expose(){}})
   state.batch.value=structuredClone(batch);state.batchID.value=batch.batch_id;state.lookupID.value=batch.batch_id
-  return {state,props,batch,calls,delays,listCalls,timers,directoryCalls,html:()=>renderToString(Vue.createSSRApp({render:()=>render({},[],props,Vue.proxyRefs(state),{}, {})}))}
+  return {state,props,batch,calls,delays,listCalls,timers,directoryCalls,mounted,autoApproveGets,autoApprovePuts,copyCalls,html:()=>renderToString(Vue.createSSRApp({render:()=>render({},[],props,Vue.proxyRefs(state),{}, {})}))}
 }
 
 test('LOCAL普通导入抽屉保留来源版本、无需CRM/项目目录，实际生成清单不丢引用', async () => {
@@ -852,4 +861,171 @@ test('provision 错误码在页面与错误报告中显示中文原因', async (
   assert.equal(rows[0][5], contractImportProvisionIssueLabels.IMPORT_PROVISION_OWNER_UNRESOLVED)
   const html = await panel.html()
   assert.match(html, /销售姓名：Excel「销售姓名」未能在平台人员目录中唯一匹配/)
+})
+
+// ── 历史导入自动审批（合同超级管理员开关） ───────────────────────────────
+
+const flushAutoApprove = () => new Promise((resolve) => setImmediate(resolve))
+
+test('历史导入自动审批开关只对合同超级管理员渲染，非 admin 不读接口', async () => {
+  const panel = importPanelHarness('NORMAL')
+  const html = await panel.html()
+  assert.doesNotMatch(html, /历史导入自动审批开关/)
+  assert.doesNotMatch(html, /contract-import-auto-approve/)
+  assert.doesNotMatch(html, /role="switch"/)
+  panel.mounted.forEach((callback) => callback())
+  await flushAutoApprove()
+  assert.equal(panel.autoApproveGets.length, 0, '非 admin 不得读取自动审批设置')
+  panel.state.requestAutoApproveToggle()
+  assert.equal(panel.state.autoApproveConfirm.value, '')
+  assert.equal(panel.autoApprovePuts.length, 0)
+})
+
+test('服务端能力未开启时开关禁用并说明部署配置，不可切换', async () => {
+  const panel = importPanelHarness('NORMAL', undefined, undefined, undefined, undefined, undefined, {},
+    { get: async () => ({ capability_enabled: false, enabled: false, version: 1, updated_by: '', updated_at: null }) })
+  panel.props.canManageAutoApprove = true
+  await panel.state.loadAutoApprove()
+  const html = await panel.html()
+  assert.match(html, /历史导入自动审批/)
+  assert.match(html, /能力未开启/)
+  assert.match(html, /CONTRACT_IMPORT_AUTO_APPROVE_HISTORICAL=true/)
+  assert.match(html, /请联系平台运维/)
+  assert.match(html, /role="switch"[^>]*disabled|disabled[^>]*role="switch"/)
+  panel.state.requestAutoApproveToggle()
+  assert.equal(panel.state.autoApproveConfirm.value, '', '能力未开启不得进入确认')
+  assert.equal(panel.autoApprovePuts.length, 0)
+})
+
+test('开启历史导入自动审批需先确认，PUT 携带读取到的 expected_version，成功后显示已开启', async () => {
+  const panel = importPanelHarness('NORMAL', undefined, undefined, undefined, undefined, undefined, {},
+    { get: async () => ({ capability_enabled: true, enabled: false, version: 7, updated_by: '合同超级管理员', updated_at: '2026-11-06T02:30:00Z' }),
+      put: async (payload) => ({ capability_enabled: true, enabled: payload.enabled, version: payload.expectedVersion + 1, updated_by: '当前管理员', updated_at: '2026-11-06T03:00:00Z' }) })
+  panel.props.canManageAutoApprove = true
+  panel.mounted.forEach((callback) => callback())
+  await flushAutoApprove()
+  assert.equal(panel.autoApproveGets.length, 1, '面板初始化读取一次')
+  panel.mounted.forEach((callback) => callback())
+  await flushAutoApprove()
+  assert.equal(panel.autoApproveGets.length, 1, '已有结果时不重复读取')
+
+  const settled = await panel.html()
+  assert.match(settled, /历史导入自动审批/)
+  assert.match(settled, /role="switch"/)
+  assert.match(settled, /已关闭/)
+  assert.match(settled, /最近更新：合同超级管理员/)
+
+  panel.state.requestAutoApproveToggle()
+  assert.equal(panel.autoApprovePuts.length, 0, '确认前不得写服务端')
+  const confirming = await panel.html()
+  assert.match(confirming, /跳过人工会签/)
+  assert.match(confirming, /仅超级管理员可操作/)
+  assert.match(confirming, /确认开启/)
+
+  await panel.state.applyAutoApproveToggle()
+  assert.deepEqual(panel.autoApprovePuts, [{ enabled: true, expectedVersion: 7 }])
+  assert.equal(panel.state.autoApproveEnabled.value, true)
+  assert.equal(panel.state.autoApproveConfirm.value, '')
+  const done = await panel.html()
+  assert.match(done, /已开启/)
+  assert.doesNotMatch(done, /确认开启/)
+  assert.doesNotMatch(done, /立即生效/)
+})
+
+test('版本冲突提示刷新后重试并重新读取，错误码可复制', async () => {
+  const conflict = new Error('设置已被其他管理员更新')
+  conflict.status = 409
+  conflict.code = 'IMPORT_REVISION_CONFLICT'
+  const panel = importPanelHarness('NORMAL', undefined, undefined, undefined, undefined, undefined, {},
+    { get: async () => ({ capability_enabled: true, enabled: false, version: 4, updated_by: '合同超级管理员', updated_at: null }),
+      put: async () => { throw conflict } })
+  panel.props.canManageAutoApprove = true
+  panel.mounted.forEach((callback) => callback())
+  await flushAutoApprove()
+  const getsBefore = panel.autoApproveGets.length
+  panel.state.requestAutoApproveToggle()
+  await panel.state.applyAutoApproveToggle()
+  assert.equal(panel.autoApproveGets.length, getsBefore + 1, '冲突后重新读取最新设置')
+  const html = await panel.html()
+  assert.match(html, /刷新/)
+  assert.match(html, /IMPORT_REVISION_CONFLICT/)
+  assert.match(html, /复制错误码/)
+  assert.equal(panel.state.autoApproveConfirm.value, '')
+  await panel.state.copyAutoApproveErrorCode()
+  assert.deepEqual(panel.copyCalls, ['IMPORT_REVISION_CONFLICT'])
+  assert.match(panel.state.autoApproveCopyHint.value, /已复制/)
+})
+
+test('能力未开启的保存拒绝显示部署配置说明并保留错误码', async () => {
+  const disabled = new Error('历史导入自动审批未开启')
+  disabled.status = 422
+  disabled.code = 'IMPORT_AUTO_APPROVE_DISABLED'
+  const panel = importPanelHarness('NORMAL', undefined, undefined, undefined, undefined, undefined, {},
+    { get: async () => ({ capability_enabled: true, enabled: false, version: 2, updated_by: '', updated_at: null }),
+      put: async () => { throw disabled } })
+  panel.props.canManageAutoApprove = true
+  await panel.state.loadAutoApprove()
+  panel.state.requestAutoApproveToggle()
+  await panel.state.applyAutoApproveToggle()
+  assert.equal(panel.autoApprovePuts.length, 1)
+  const html = await panel.html()
+  assert.match(html, /CONTRACT_IMPORT_AUTO_APPROVE_HISTORICAL=true/)
+  assert.match(html, /IMPORT_AUTO_APPROVE_DISABLED/)
+  assert.equal(panel.state.autoApproveEnabled.value, false)
+})
+
+// ── P1-4 / P2-4 / P2-5：导入面板默认展开、批次文案一致与常驻状态条 ─────────────
+
+test('导入页或带批次号直达默认展开，合同台账页保持折叠', async () => {
+  const panel = importPanelHarness('NORMAL')
+  assert.equal(panel.state.panelOpen.value, false, '台账页默认折叠')
+  assert.doesNotMatch(await panel.html(), /<details[^>]*\bopen\b/, '折叠态不得带 open')
+
+  panel.props.defaultOpen = true
+  await Vue.nextTick()
+  assert.equal(panel.state.panelOpen.value, true, '导入页/批次号直达默认展开')
+  assert.match(await panel.html(), /<details[^>]*\bopen\b/, '展开态必须带 open')
+
+  panel.props.defaultOpen = false
+  await Vue.nextTick()
+  assert.equal(panel.state.panelOpen.value, false, '回到台账页重新折叠')
+})
+
+test('自动审批开启且存在历史项时，批次页脚改按声明状态自动审批归档并加已开启徽标', async () => {
+  const panel = importPanelHarness('ARCHIVE_ONLY', undefined, undefined, undefined, undefined, undefined, {},
+    { get: async () => ({ capability_enabled: true, enabled: true, version: 5, updated_by: '合同超级管理员', updated_at: '2026-11-06T02:30:00Z' }) })
+  panel.props.canManageAutoApprove = true
+  await panel.state.loadAutoApprove()
+  panel.state.batch.value.state = 'PREVIEWED'
+  const html = await panel.html()
+  assert.match(html, /自动审批：已开启/, '批次头必须出现自动审批已开启徽标')
+  assert.match(html, /将按清单声明状态自动审批归档/, '历史项审批路径必须与开关一致')
+  assert.doesNotMatch(html, /历史模式之后独立确认/, '开启时不得再暗示人工会签')
+  assert.match(html, /普通新合同仍逐份审批/, '普通合同仍走逐份审批')
+
+  // 关闭后回到原有文案且移除徽标，避免关闭态仍宣称自动归档。
+  await panel.state.applyAutoApproveToggle()
+  panel.state.autoApprove.value.enabled = false
+  panel.state.batch.value.state = 'PREVIEWED'
+  const disabled = await panel.html()
+  assert.doesNotMatch(disabled, /自动审批：已开启/)
+  assert.match(disabled, /本次不免审生效/)
+})
+
+test('导入页顶部常驻状态条在面板折叠时仍显示最近变更人/时间，其他页签不渲染', async () => {
+  const panel = importPanelHarness('NORMAL', undefined, undefined, undefined, undefined, undefined, {},
+    { get: async () => ({ capability_enabled: true, enabled: true, version: 9, updated_by: '合同超级管理员', updated_at: '2026-11-06T02:30:00Z' }) })
+  panel.props.canManageAutoApprove = true
+  panel.props.section = 'imports'
+  await panel.state.loadAutoApprove()
+  const html = await panel.html()
+  assert.match(html, /contract-import-statusbar/, '导入页必须渲染常驻状态条')
+  assert.match(html, /历史导入自动审批/)
+  assert.match(html, /最近更新：合同超级管理员/)
+  assert.match(html, /历史项将按声明状态自动审批归档/)
+  assert.equal(panel.state.panelOpen.value, false, '状态条与折叠面板相互独立')
+
+  panel.props.section = 'contracts'
+  const ledger = await panel.html()
+  assert.doesNotMatch(ledger, /contract-import-statusbar/, '合同台账页不渲染导入状态条')
 })

@@ -14,6 +14,18 @@
 //    aria-controls 关联侧栏，抽屉打开时 Escape 可收起并把焦点交还汉堡按钮。
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import ConsoleIcon from '@/modules/shared/components/ConsoleIcon.vue'
+import {
+  THEME_MODES,
+  THEME_PREFERENCE_CHANGED_EVENT,
+  THEME_STORAGE_KEY,
+  readThemePreference,
+  writeThemePreference,
+} from '@/modules/shared/theme/themePreference.js'
+import {
+  SIDEBAR_COLLAPSED_STORAGE_KEY,
+  readSidebarCollapsed,
+  writeSidebarCollapsed,
+} from '@/modules/shared/utils/shellPreferences.js'
 
 const props = defineProps({
   // 外壳各区块的附加类名：模块用它们挂自己的皮肤（settlement-sidebar / crm-main …）。
@@ -97,6 +109,54 @@ function setMenuOpen(next) {
 
 // 侧栏的稳定 id：汉堡按钮用 aria-controls 指向它，建立「按钮控制抽屉」的可访问关系。
 const SIDEBAR_ID = 'app-shell-sidebar'
+
+// 桌面侧栏折叠（P1-12）：状态持久化在 localStorage，避免刷新后跳回展开；
+// 是否作用到布局由 CSS 的 min-width:821px 媒体查询决定，窄屏仍走抽屉。
+const sidebarCollapsed = ref(readSidebarCollapsed())
+
+// 主题模式（P1-10）：浅色 / 深色 / 跟随系统。写入与门户开关同一个
+// localStorage 键并广播同一事件，<html data-theme> 由文档级同步统一投射。
+const themeMode = ref(readThemePreference())
+const themeOptions = THEME_MODES.map((value) => ({
+  value,
+  label: value === 'light' ? '浅色' : value === 'dark' ? '深色' : '跟随系统',
+}))
+
+// syncShellPreferences 从存储重读两项偏好；跨标签页 storage 事件与门户切换都复用它。
+// 参数：无。返回值：无。
+function syncShellPreferences() {
+  sidebarCollapsed.value = readSidebarCollapsed()
+  themeMode.value = readThemePreference()
+}
+
+// toggleSidebarCollapsed 切换折叠并立即持久化；持久化失败只影响下次刷新，不影响本次布局。
+// 参数：无。返回值：无。
+function toggleSidebarCollapsed() {
+  sidebarCollapsed.value = !sidebarCollapsed.value
+  writeSidebarCollapsed(sidebarCollapsed.value)
+}
+
+// selectTheme 持久化主题偏好并广播变更事件，文档级同步据此更新 data-theme。
+// 参数：mode 为 'light' | 'dark' | 'system'。返回值：无。
+function selectTheme(mode) {
+  if (!THEME_MODES.includes(mode)) return
+  themeMode.value = mode
+  writeThemePreference(mode)
+}
+
+// onShellStorage 只响应本外壳关心的两个键，其它模块的 storage 事件不触发重读。
+// 参数：event 为 storage 事件。返回值：无。
+function onShellStorage(event) {
+  if (!event || event.key === null || event.key === SIDEBAR_COLLAPSED_STORAGE_KEY || event.key === THEME_STORAGE_KEY) {
+    syncShellPreferences()
+  }
+}
+
+// onThemePreferenceChanged 同步同标签页内的门户主题切换（storage 事件不会跨同页触发）。
+// 参数：无。返回值：无。
+function onThemePreferenceChanged() {
+  themeMode.value = readThemePreference()
+}
 // 汉堡按钮引用：Escape 收起抽屉后把焦点交还给它，键盘用户不会掉进已隐藏的侧栏。
 const menuButton = ref(null)
 
@@ -116,10 +176,15 @@ onMounted(() => {
   // 非浏览器环境（node --test 的渲染用例）没有 document，直接跳过。
   if (typeof document === 'undefined') return
   document.addEventListener('keydown', closeMenuOnEscape)
+  syncShellPreferences()
+  window.addEventListener('storage', onShellStorage)
+  window.addEventListener(THEME_PREFERENCE_CHANGED_EVENT, onThemePreferenceChanged)
 })
 onBeforeUnmount(() => {
   if (typeof document === 'undefined') return
   document.removeEventListener('keydown', closeMenuOnEscape)
+  window.removeEventListener('storage', onShellStorage)
+  window.removeEventListener(THEME_PREFERENCE_CHANGED_EVENT, onThemePreferenceChanged)
 })
 
 // 折叠分组状态：默认全部展开；键取 group.key（缺省回退分组标题）。
@@ -149,7 +214,7 @@ function selectNav(item) {
 </script>
 
 <template>
-  <div class="console-page" :class="pageClass">
+  <div class="console-page" :class="[pageClass, sidebarCollapsed ? 'is-sidebar-collapsed' : '']">
     <aside :id="SIDEBAR_ID" :class="[sidebarBaseClass, sidebarClass, { open: menuOpen }]">
       <div class="console-brand" :class="brandClass">
         <slot name="brand">
@@ -213,6 +278,8 @@ function selectNav(item) {
       <slot name="main-prefix" />
       <header class="console-topbar" :class="topbarClass">
         <button ref="menuButton" class="console-menu-button" type="button" aria-label="打开导航菜单" :aria-expanded="menuOpen ? 'true' : 'false'" :aria-controls="SIDEBAR_ID" @click="setMenuOpen(true)"><ConsoleIcon name="menu" /></button>
+        <!-- 桌面侧栏折叠：窄屏由 CSS 隐藏，改用汉堡/遮罩抽屉。 -->
+        <button class="console-sidebar-toggle" type="button" :aria-label="sidebarCollapsed ? '展开侧栏' : '收起侧栏'" :aria-expanded="sidebarCollapsed ? 'false' : 'true'" :aria-controls="SIDEBAR_ID" @click="toggleSidebarCollapsed"><ConsoleIcon name="chevron" /></button>
         <div class="console-crumb">
           <slot name="breadcrumb">
             <span v-if="brandName">{{ brandName }}</span>
@@ -222,6 +289,10 @@ function selectNav(item) {
         </div>
         <slot name="topbar-center" />
         <div class="console-topbar-actions">
+          <!-- 主题切换：浅色 / 深色 / 跟随系统；与门户开关共用同一存储键与变更事件。 -->
+          <div class="console-theme-toggle" role="group" aria-label="界面主题">
+            <button v-for="option in themeOptions" :key="option.value" type="button" class="console-theme-option" :class="{ active: themeMode === option.value }" :aria-pressed="themeMode === option.value ? 'true' : 'false'" @click="selectTheme(option.value)">{{ option.label }}</button>
+          </div>
           <slot name="topbar-actions" />
           <span v-if="topbarAvatar" class="console-topbar-avatar">{{ avatarInitials }}</span>
         </div>

@@ -200,6 +200,13 @@ function renderShell(props = {}, slots = {}) {
     byClass,
     byTag,
     oneByClass,
+    // 响应式更新后重新遍历当前子树：vnode 数组是渲染快照，点击后必须手动刷新。
+    sync() {
+      vnodes.length = 0
+      elements.length = 0
+      walkVNodes(app._instance.subTree, (vnode) => vnodes.push(vnode))
+      for (const vnode of vnodes) if (typeof vnode.type === 'string') elements.push(vnode)
+    },
     // 宿主节点记录了 parent，可据此断言真实祖先关系（而不只靠文档顺序推断归属）。
     inside: (vnode, ancestor) => {
       let node = vnode?.el?.parent ?? null
@@ -707,4 +714,123 @@ test('overlay 插槽渲染在 </main> 之后、仍在外壳根节点内', () => 
   assert.ok(shell.inside(overlay, shell.oneByClass('console-page')), 'overlay 内容必须仍在外壳根节点内')
   assert.ok(shell.elements.indexOf(overlay) > shell.elements.indexOf(shell.byTag('main')[0]),
     '弹窗不允许被主区包住，否则会被主区滚动/裁剪')
+})
+
+// ===========================================================================
+// 7. 桌面侧栏折叠 / 主题切换（P1-10、P1-12、P2-1）
+// ===========================================================================
+
+function fakeBrowser({ stored = {} } = {}) {
+  const store = new Map(Object.entries(stored))
+  const listeners = new Map()
+  const dispatched = []
+  const localStorage = {
+    getItem: (key) => (store.has(key) ? store.get(key) : null),
+    setItem: (key, value) => store.set(key, String(value)),
+  }
+  class FakeCustomEvent {
+    constructor(type, init = {}) { this.type = type; this.detail = init.detail }
+  }
+  const window = {
+    localStorage,
+    CustomEvent: FakeCustomEvent,
+    addEventListener(type, handler) {
+      if (!listeners.has(type)) listeners.set(type, new Set())
+      listeners.get(type).add(handler)
+    },
+    removeEventListener(type, handler) { listeners.get(type)?.delete(handler) },
+    dispatchEvent(event) { dispatched.push(event); for (const handler of listeners.get(event.type) || []) handler(event) },
+  }
+  const document = {
+    addEventListener() {},
+    removeEventListener() {},
+  }
+  return { window, document, store, dispatched }
+}
+
+async function withBrowser(browser, run) {
+  const previousWindow = globalThis.window
+  const previousDocument = globalThis.document
+  globalThis.window = browser.window
+  globalThis.document = browser.document
+  try {
+    return await run()
+  } finally {
+    if (previousWindow === undefined) delete globalThis.window
+    else globalThis.window = previousWindow
+    if (previousDocument === undefined) delete globalThis.document
+    else globalThis.document = previousDocument
+  }
+}
+
+test('顶栏主题开关提供浅色 / 深色 / 跟随系统，点击后写同一存储键并广播变更事件', async () => {
+  const browser = fakeBrowser()
+  await withBrowser(browser, async () => {
+    const shell = renderShell({})
+    const options = shell.byClass('console-theme-option')
+    assert.deepEqual(options.map((option) => textOf(option).trim()), ['浅色', '深色', '跟随系统'])
+    assert.equal(options.filter((option) => option.props['aria-pressed'] === 'true').length, 1, '恰好一个当前模式')
+
+    shell.click(shell.byClass('console-theme-option').find((option) => textOf(option).trim() === '深色'))
+    await Vue.nextTick()
+    shell.sync()
+    assert.equal(browser.store.get('basic-platform.portal-theme'), 'dark')
+    assert.equal(browser.dispatched.at(-1)?.type, 'basic-platform:theme-preference-changed')
+    const pressed = shell.byClass('console-theme-option').find((option) => option.props['aria-pressed'] === 'true')
+    assert.equal(textOf(pressed).trim(), '深色', '点击后当前模式立即切换')
+  })
+})
+
+test('顶栏主题开关初始读取门户已保存的偏好，跟随系统也是合法值', async () => {
+  const browser = fakeBrowser({ stored: { 'basic-platform.portal-theme': 'system' } })
+  await withBrowser(browser, async () => {
+    const shell = renderShell({})
+    await Vue.nextTick()
+    shell.sync()
+    const pressed = shell.byClass('console-theme-option').find((option) => option.props['aria-pressed'] === 'true')
+    assert.equal(textOf(pressed).trim(), '跟随系统', 'onMounted 后同步已保存偏好')
+  })
+})
+
+test('桌面侧栏折叠按钮切换根节点类并持久化；再次点击恢复展开', async () => {
+  const browser = fakeBrowser()
+  await withBrowser(browser, async () => {
+    const shell = renderShell({})
+    await Vue.nextTick()
+    shell.sync()
+    const toggle = shell.oneByClass('console-sidebar-toggle')
+    assert.equal(toggle.props['aria-expanded'], 'true', '默认展开')
+    assert.ok(!classTokens(shell.oneByClass('console-page')).includes('is-sidebar-collapsed'))
+
+    shell.click(toggle)
+    await Vue.nextTick()
+    shell.sync()
+    assert.ok(classTokens(shell.oneByClass('console-page')).includes('is-sidebar-collapsed'), '点击后根节点标记折叠')
+    assert.equal(browser.store.get('basic-platform.sidebar-collapsed'), '1')
+    assert.equal(shell.oneByClass('console-sidebar-toggle').props['aria-expanded'], 'false')
+
+    shell.click(shell.oneByClass('console-sidebar-toggle'))
+    await Vue.nextTick()
+    shell.sync()
+    assert.ok(!classTokens(shell.oneByClass('console-page')).includes('is-sidebar-collapsed'))
+    assert.equal(browser.store.get('basic-platform.sidebar-collapsed'), '0')
+  })
+})
+
+test('折叠状态从存储恢复，刷新后不会跳回展开', async () => {
+  const browser = fakeBrowser({ stored: { 'basic-platform.sidebar-collapsed': '1' } })
+  await withBrowser(browser, async () => {
+    const shell = renderShell({})
+    await Vue.nextTick()
+    shell.sync()
+    assert.ok(classTokens(shell.oneByClass('console-page')).includes('is-sidebar-collapsed'))
+    assert.equal(shell.oneByClass('console-sidebar-toggle').props['aria-expanded'], 'false')
+  })
+})
+
+test('≤620px 保留通知铃铛的样式护栏与折叠按钮的桌面限定', () => {
+  const narrow620 = consoleCss.slice(consoleCss.indexOf('@media (max-width: 620px)'))
+  assert.match(narrow620, /\.console-notification-menu\s+\.console-icon-button\s*\{[^}]*display:\s*grid/, '620px 下通知铃铛必须仍可见')
+  assert.match(consoleCss, /@media \(min-width: 821px\)[\s\S]*?\.console-page\.is-sidebar-collapsed \.console-sidebar/, '折叠只作用于桌面')
+  assert.match(consoleCss, /@media \(max-width: 820px\)[\s\S]*?\.console-sidebar-toggle\s*\{[^}]*display:\s*none/, '窄屏隐藏桌面折叠按钮')
 })
