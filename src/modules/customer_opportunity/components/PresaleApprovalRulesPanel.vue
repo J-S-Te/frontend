@@ -86,8 +86,15 @@ async function load({ reportError = true } = {}) {
     rules.value = result?.data || result || []
     if (!activeRuleId.value && rules.value.length) activeRuleId.value = String(rules.value[0].id)
     if (activeRuleId.value && !rules.value.some((rule) => String(rule.id) === String(activeRuleId.value))) activeRuleId.value = rules.value[0] ? String(rules.value[0].id) : ''
-    const activeRule = rules.value.find((rule) => String(rule.id) === String(activeRuleId.value))
-    if (activeRule && !editing.value) edit(activeRule)
+    // 列表重读后让编辑器跟上权威数据：未在编辑时打开首条规则；正在编辑的规则
+    // 已被删除（他人操作或本页删除）时回退到仍有权限查看的规则，列表为空则回到新建态。
+    const editingID = String(editing.value || '')
+    const editingStillExists = editingID && rules.value.some((rule) => String(rule.id) === editingID)
+    if (!editingID || !editingStillExists) {
+      const nextRule = rules.value.find((rule) => String(rule.id) === String(activeRuleId.value)) || rules.value[0]
+      if (nextRule) edit(nextRule)
+      else reset()
+    }
     loaded = true
   } catch (loadError) {
     if (reportError && rulesScope.isCurrent(ticket)) error.value = formatCRMError(loadError, { fallback: '规则加载失败' })
@@ -102,11 +109,32 @@ function edit(rule) {
   editing.value = rule.id
   activeRuleId.value = String(rule.id)
   editorExpanded.value = true
+  error.value = ''
 }
 
 function selectRule(rule) {
   activeRuleId.value = String(rule.id)
   edit(rule)
+}
+
+function isActiveRule(rule) {
+  return String(rule.id) === String(activeRuleId.value)
+}
+
+function startCreate() {
+  if (saving.value) return
+  reset()
+  editorExpanded.value = true
+  error.value = ''
+}
+
+// 放弃当前草稿：正在编辑已有规则时按列表里的权威值回填；新建态则清空表单。
+function cancelEdit() {
+  if (saving.value) return
+  error.value = ''
+  const active = rules.value.find((rule) => String(rule.id) === String(activeRuleId.value))
+  if (active) edit(active)
+  else startCreate()
 }
 
 function toggleRules() {
@@ -118,6 +146,7 @@ function toggleEditor() {
 }
 
 function addNode() {
+  if (saving.value || form.nodes.length >= 10) return
   form.nodes.push({ id: `node-${Date.now()}`, name: '新节点', type: 'APPROVAL', role_code: 'team_lead' })
 }
 
@@ -164,6 +193,7 @@ async function save() {
   if (!canEdit.value || saving.value) return
   const problem = validateRule()
   if (problem) {
+    editorExpanded.value = true
     error.value = problem
     return
   }
@@ -211,7 +241,7 @@ async function remove(rule) {
   const id = rule.id
   const version = rule.version
   const confirmed = await askConfirm({
-    title: '删除售前审批规则', description: `确认删除规则“${rule.name}”？`,
+    title: '删除售前审批规则', description: `确认删除规则“${rule.name}”？已提交申请继续使用规则快照，新申请将不再匹配该规则。`,
     confirmText: '删除审批规则', cancelText: '保留规则', danger: true,
   })
   if (!confirmed || !canEdit.value || deletingRuleId.value || saving.value) return
@@ -241,115 +271,141 @@ onMounted(() => {
 </script>
 
 <template>
-  <section class="crm-panel crm-approval-rules-panel">
+  <section class="crm-panel crm-approval-rules-panel" aria-labelledby="crm-presale-approval-rules-title">
     <div class="crm-panel-heading crm-approval-rules-heading">
       <div>
-        <h2>售前审批规则</h2>
-        <p class="crm-note">规则按优先级匹配；已提交申请使用规则快照。</p>
+        <h2 id="crm-presale-approval-rules-title">售前审批规则</h2>
+        <p class="crm-note">规则按优先级从高到低匹配；已提交申请使用提交时的规则快照。</p>
       </div>
       <div class="crm-approval-heading-actions">
         <span class="crm-approval-count-badge">{{ rules.length }} 条规则</span>
-        <button v-if="canEdit" class="console-button primary small" type="button" @click="reset">
-          新增规则
+        <button v-if="canEdit" class="console-button primary" type="button" :disabled="loading || saving" @click="startCreate">
+          <span aria-hidden="true">＋</span>新增规则
         </button>
       </div>
     </div>
 
-    <p v-if="error" class="crm-alert error" role="alert">{{ error }}</p>
-    <p v-if="loading" class="crm-note">加载中…</p>
+    <p v-if="error" class="crm-alert error crm-approval-rules-alert" role="alert">{{ error }}</p>
 
-    <div v-if="!loading && !rules.length" class="crm-approval-rules-empty">
-      <strong>暂无审批规则</strong>
-      <span>创建规则后，新的售前申请将按优先级自动匹配审批流程。</span>
-    </div>
-
-    <div class="crm-approval-rules-section-heading">
-      <div>
-        <strong>规则列表</strong>
-        <span>按优先级从高到低匹配</span>
-      </div>
-      <button class="console-button ghost small crm-approval-collapse-button" type="button" :aria-expanded="rulesExpanded" @click="toggleRules">
-        <span class="crm-approval-chevron" :class="{ 'is-open': rulesExpanded }" aria-hidden="true">⌄</span>{{ rulesExpanded ? '收起列表' : '展开列表' }}
-      </button>
-    </div>
-    <div v-show="rulesExpanded" class="crm-approval-rules-list">
-      <div
-        v-for="rule in rules"
-        :key="rule.id"
-        :class="['crm-approval-rule-row', { 'is-active': String(rule.id) === String(activeRuleId) }]"
-        role="button"
-        tabindex="0"
-        @click="selectRule(rule)"
-        @keydown.enter.prevent="selectRule(rule)"
-      >
-        <div class="crm-approval-rule-main">
-          <div class="crm-approval-rule-title">
-            <span class="crm-approval-rule-dot" :class="{ 'is-enabled': rule.enabled }" aria-hidden="true"></span>
-            <strong>{{ rule.name }}</strong>
-            <span :class="['crm-approval-status', rule.enabled ? 'is-enabled' : 'is-disabled']">
-              {{ rule.enabled ? '已启用' : '已停用' }}
-            </span>
+    <div class="crm-approval-rules-layout" :class="{ 'is-single': !canEdit }">
+      <section class="crm-approval-rules-list-card" aria-labelledby="crm-presale-approval-rules-list-title">
+        <header class="crm-approval-card-heading">
+          <div>
+            <h3 id="crm-presale-approval-rules-list-title">规则列表</h3>
+            <span>点击规则行即可编辑</span>
           </div>
-        <span class="crm-approval-rule-meta">优先级 {{ rule.priority }} · {{ rule.nodes?.length || 0 }} 个节点</span>
-        </div>
-        <div v-if="canEdit" class="crm-actions">
-          <button class="console-button ghost small" type="button" @click.stop="edit(rule)">编辑</button>
-          <button class="console-button danger small" type="button" @click.stop="remove(rule)">删除</button>
-        </div>
-      </div>
-    </div>
-
-    <form v-if="canEdit" class="crm-approval-rule-editor" @submit.prevent="save">
-      <button class="crm-approval-editor-heading" type="button" :aria-expanded="editorExpanded" @click="toggleEditor">
-        <span class="crm-approval-editor-heading-copy">
-          <strong>{{ editing ? '编辑审批规则' : '新建审批规则' }}</strong>
-          <span>定义规则名称、优先级和审批/指派节点</span>
-        </span>
-        <span class="crm-approval-editor-heading-actions">
-          <span class="crm-approval-editor-badge">{{ form.enabled ? '启用中' : '已停用' }}</span>
-          <span class="crm-approval-chevron" :class="{ 'is-open': editorExpanded }" aria-hidden="true">⌄</span>
-        </span>
-      </button>
-      <div v-show="editorExpanded" class="crm-approval-editor-body">
-        <div class="crm-approval-rule-fields">
-          <label>
-            <span>规则名称</span>
-            <input v-model.trim="form.name" required maxlength="128" />
-          </label>
-          <label>
-            <span>优先级</span>
-            <input v-model.number="form.priority" type="number" />
-          </label>
-          <label class="checkbox">
-            <input v-model="form.enabled" type="checkbox" />
-            <span>启用此规则</span>
-          </label>
-        </div>
-        <div class="crm-approval-node-toolbar">
-          <div class="crm-approval-node-heading"><strong>流程节点</strong><span>按列表顺序执行，共 {{ form.nodes.length }} 个节点</span></div>
-          <button class="console-button ghost small" type="button" @click="addNode">添加节点</button>
-        </div>
-        <div class="crm-approval-node-list">
-          <div v-for="(node, index) in form.nodes" :key="node.id" class="crm-approval-node">
-            <span class="crm-approval-node-index">{{ index + 1 }}</span>
-            <input v-model.trim="node.name" required placeholder="节点名称" :aria-label="`第 ${index + 1} 个节点名称`"  maxlength="128"/>
-            <select v-model="node.type" :aria-label="`第 ${index + 1} 个节点类型`">
-              <option v-for="item in nodeTypes" :key="item.value" :value="item.value">{{ item.label }}</option>
-            </select>
-            <select v-model="node.role_code" :aria-label="`第 ${index + 1} 个节点角色`">
-              <option v-for="item in roles" :key="item.value" :value="item.value">{{ item.label }}</option>
-            </select>
-            <button class="console-button danger small" type="button" :disabled="form.nodes.length <= 1" :aria-label="`删除第 ${index + 1} 个节点`" @click="form.nodes.splice(index, 1)">删除</button>
-          </div>
-        </div>
-        <div class="crm-approval-form-footer">
-          <span class="crm-note">保存后将用于新提交的售前申请。</span>
-          <button class="console-button primary" type="submit" :disabled="saving">
-            {{ saving ? '保存中…' : (editing ? '保存审批规则' : '创建审批规则') }}
+          <button class="console-button ghost small crm-approval-collapse-button" type="button" :aria-expanded="rulesExpanded" @click="toggleRules">
+            <span class="crm-approval-chevron" :class="{ 'is-open': rulesExpanded }" aria-hidden="true">⌄</span>{{ rulesExpanded ? '收起列表' : '展开列表' }}
           </button>
+        </header>
+
+        <div v-show="rulesExpanded" class="crm-approval-rules-body">
+          <div v-if="loading" class="crm-approval-rules-loading" role="status">
+            <span class="crm-approval-spinner" aria-hidden="true"></span>
+            <span>正在读取审批规则…</span>
+          </div>
+          <div v-else-if="!rules.length" class="crm-approval-rules-empty">
+            <strong>暂无审批规则</strong>
+            <span>创建规则后，新的售前申请会按优先级自动匹配审批流程。</span>
+            <button v-if="canEdit" class="console-button primary small" type="button" @click="startCreate">新建规则</button>
+          </div>
+          <div v-else class="crm-approval-rules-list" role="list">
+            <div v-for="rule in rules" :key="rule.id" class="crm-approval-rule-row" :class="{ 'is-active': isActiveRule(rule) }" role="listitem">
+              <button class="crm-approval-rule-select" type="button" :aria-pressed="isActiveRule(rule)" @click="selectRule(rule)">
+                <span class="crm-approval-rule-dot" :class="{ 'is-enabled': rule.enabled }" aria-hidden="true"></span>
+                <span class="crm-approval-rule-main">
+                  <span class="crm-approval-rule-title">
+                    <strong :title="rule.name">{{ rule.name }}</strong>
+                    <span :class="['crm-approval-status', rule.enabled ? 'is-enabled' : 'is-disabled']">{{ rule.enabled ? '已启用' : '已停用' }}</span>
+                  </span>
+                  <span class="crm-approval-rule-meta">
+                    <span class="crm-approval-priority">优先级 {{ rule.priority }}</span>
+                    <span>{{ rule.nodes?.length || 0 }} 个节点</span>
+                  </span>
+                </span>
+              </button>
+              <div v-if="canEdit" class="crm-approval-rule-actions">
+                <button class="console-button ghost small" type="button" :disabled="saving || Boolean(deletingRuleId)" @click.stop="edit(rule)">编辑</button>
+                <button class="console-button ghost small crm-approval-delete" type="button" :disabled="saving || deletingRuleId === String(rule.id)" @click.stop="remove(rule)">
+                  {{ deletingRuleId === String(rule.id) ? '删除中…' : '删除' }}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
-    </form>
+      </section>
+
+      <form v-if="canEdit" class="crm-approval-rule-editor" @submit.prevent="save" aria-labelledby="crm-presale-approval-editor-title">
+        <header class="crm-approval-editor-heading">
+          <div class="crm-approval-editor-heading-copy">
+            <span class="crm-approval-editor-eyebrow">审批流程配置</span>
+            <strong id="crm-presale-approval-editor-title">{{ editing ? '编辑审批规则' : '新建审批规则' }}</strong>
+            <span>{{ editing ? `正在编辑「${form.name || '未命名规则'}」，保存后仅影响新提交的申请。` : '填写名称与优先级，再按执行顺序配置审批节点。' }}</span>
+          </div>
+          <div class="crm-approval-editor-heading-actions">
+            <span :class="['crm-approval-status', form.enabled ? 'is-enabled' : 'is-disabled']">{{ form.enabled ? '启用中' : '已停用' }}</span>
+            <button class="console-button ghost small crm-approval-collapse-button" type="button" :aria-expanded="editorExpanded" @click="toggleEditor">
+              <span class="crm-approval-chevron" :class="{ 'is-open': editorExpanded }" aria-hidden="true">⌄</span>{{ editorExpanded ? '收起编辑' : '展开编辑' }}
+            </button>
+          </div>
+        </header>
+
+        <div v-show="editorExpanded" class="crm-approval-editor-body">
+          <div class="crm-approval-rule-fields">
+            <label class="crm-approval-field">
+              <span>规则名称 <em>必填</em></span>
+              <input v-model.trim="form.name" required maxlength="128" placeholder="例如：标准售前审批" />
+            </label>
+            <label class="crm-approval-field">
+              <span>优先级</span>
+              <input v-model.number="form.priority" type="number" step="1" />
+              <small>数值越大越先匹配</small>
+            </label>
+            <label class="crm-approval-switch">
+              <input v-model="form.enabled" type="checkbox" role="switch" :aria-checked="form.enabled" />
+              <span class="crm-approval-switch-track" aria-hidden="true"></span>
+              <span class="crm-approval-switch-copy"><strong>启用此规则</strong><small>停用后新申请不再匹配。</small></span>
+            </label>
+          </div>
+
+          <div class="crm-approval-nodes">
+            <div class="crm-approval-node-toolbar">
+              <div class="crm-approval-node-heading">
+                <strong>流程节点</strong>
+                <span>按顺序执行，共 {{ form.nodes.length }} 个（最多 10 个）</span>
+              </div>
+              <button class="console-button secondary small" type="button" :disabled="saving || form.nodes.length >= 10" @click="addNode">添加节点</button>
+            </div>
+            <div class="crm-approval-node-table">
+              <div class="crm-approval-node-head" aria-hidden="true">
+                <span>序号</span><span>节点名称</span><span>节点类型</span><span>角色</span><span>操作</span>
+              </div>
+              <div class="crm-approval-node-list">
+                <div v-for="(node, index) in form.nodes" :key="node.id" class="crm-approval-node">
+                  <span class="crm-approval-node-index" aria-hidden="true">{{ index + 1 }}</span>
+                  <input v-model.trim="node.name" class="crm-approval-node-name" required placeholder="节点名称" :aria-label="`第 ${index + 1} 个节点名称`" maxlength="128" />
+                  <select v-model="node.type" class="crm-approval-node-type" :aria-label="`第 ${index + 1} 个节点类型`">
+                    <option v-for="item in nodeTypes" :key="item.value" :value="item.value">{{ item.label }}</option>
+                  </select>
+                  <select v-model="node.role_code" class="crm-approval-node-role" :aria-label="`第 ${index + 1} 个节点角色`">
+                    <option v-for="item in roles" :key="item.value" :value="item.value">{{ item.label }}</option>
+                  </select>
+                  <button class="console-button ghost small crm-approval-node-remove" type="button" :disabled="form.nodes.length <= 1 || saving" :aria-label="`删除第 ${index + 1} 个节点`" @click="form.nodes.splice(index, 1)">删除</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="crm-approval-form-footer">
+            <span class="crm-note">保存后仅影响新提交的售前申请；已提交申请继续使用规则快照。</span>
+            <div class="crm-approval-form-actions">
+              <button class="console-button secondary" type="button" :disabled="saving" @click="cancelEdit">{{ editing ? '放弃修改' : '重置' }}</button>
+              <button class="console-button primary" type="submit" :disabled="saving || loading">{{ saving ? '保存中…' : (editing ? '保存审批规则' : '创建审批规则') }}</button>
+            </div>
+          </div>
+        </div>
+      </form>
+    </div>
   </section>
   <ConfirmDialog :open="Boolean(confirmDialog)" v-bind="confirmDialog || {}" @confirm="acceptConfirm" @cancel="cancelConfirm" />
 </template>

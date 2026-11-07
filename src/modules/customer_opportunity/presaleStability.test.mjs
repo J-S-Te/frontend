@@ -137,10 +137,11 @@ test('当前申请的指派记录正常回写并结束加载状态', async () =>
 
 // —— 审批规则面板：任务 B 保存/重读分离 + 任务 C 规则读取作用域 ——
 
-function rulesHarness() {
+function rulesHarness(options = {}) {
   const pending = deferred()
   const reloads = []
   const resetCalls = []
+  const editCalls = []
   const context = {
     canEdit: ref(true),
     saving: ref(false),
@@ -149,11 +150,13 @@ function rulesHarness() {
     editing: ref('r1'),
     activeRuleId: ref('r1'),
     loading: ref(false),
+    editorExpanded: ref(options.editorExpanded ?? true),
     rules: ref([{ id: 'stale' }]),
     rulesScope: createRequestScope(),
     form: { name: '规则A', priority: 1, enabled: true, nodes: [{ id: 'n1', name: '审批', type: 'APPROVAL', role_code: 'sales_director' }], version: 2 },
-    validateRule: () => '',
+    validateRule: options.validateRule || (() => ''),
     reset: () => resetCalls.push(1),
+    edit: (rule) => editCalls.push(String(rule.id)),
     formatCRMError: (value) => String(value?.message || '规则错误'),
     updatePresaleApprovalRule: () => pending.promise,
     createPresaleApprovalRule: async () => { throw new Error('create not used in this test') },
@@ -162,7 +165,7 @@ function rulesHarness() {
   }
   return {
     ...functions('./components/PresaleApprovalRulesPanel.vue', ['load', 'save'], context),
-    context, pending, reloads, resetCalls,
+    context, pending, reloads, resetCalls, editCalls,
   }
 }
 
@@ -188,4 +191,32 @@ test('规则读取被新请求或卸载取代后，迟到响应不回写列表�
   await loading
   assert.deepEqual(h.context.rules.value, [{ id: 'stale' }], '迟到响应不得覆盖现有规则列表')
   assert.equal(h.context.error.value, '')
+})
+
+test('保存前本地校验失败时展开编辑区并保留草稿，不进入保存请求', async () => {
+  const h = rulesHarness({ editorExpanded: false, validateRule: () => '请填写规则名称。' })
+  await h.save()
+  assert.equal(h.context.editorExpanded.value, true, '校验失败时编辑区必须展开，提示才可见')
+  assert.equal(h.context.error.value, '请填写规则名称。')
+  assert.equal(h.context.saving.value, false)
+  assert.equal(h.context.form.name, '规则A', '校验失败不得清空草稿')
+  assert.equal(h.reloads.length, 0, '校验失败不得发起保存或重读')
+})
+
+test('正在编辑的规则已不在列表中时，重读后回退到仍存在的规则', async () => {
+  const h = rulesHarness()
+  const loading = h.load()
+  h.reloads[0].resolve([{ id: 'r2', name: '规则B' }])
+  await loading
+  assert.deepEqual(h.context.rules.value.map((rule) => rule.id), ['r2'])
+  assert.deepEqual(h.editCalls, ['r2'], '被删除的编辑目标不应继续占有编辑器')
+})
+
+test('列表为空时重读后回到新建态而不是保留已删除草稿', async () => {
+  const h = rulesHarness()
+  const loading = h.load()
+  h.reloads[0].resolve([])
+  await loading
+  assert.deepEqual(h.editCalls, [])
+  assert.deepEqual(h.resetCalls, [1], '没有可编辑规则时回到新建态')
 })
