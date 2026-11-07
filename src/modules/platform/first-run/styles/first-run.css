@@ -1,0 +1,411 @@
+/* 平台导览 + 上手清单的浮层样式。
+ *
+ * 层级：导览 9000 / 清单面板 9100 / 面板内相对层 1，均低于确认框 10000 与 toast 12000。
+ *       所有 z-index 先声明为自定义属性，再以 var() 使用，符合设计 token 门禁；
+ *       JS 侧保留同名常量仅供内联 style 使用，改层级时需同步两处。
+ * 颜色：全部读取 main.css 的全局设计 token（--surface-card / --text / --border /
+ *       --primary / --shadow-modal / --overlay-scrim）。深色由根元素上的主题属性切换
+ *       全局 token 值自动生效，因此本文件不写任何主题属性选择器或深色字面量。
+ * 窄屏：≤640px 导览气泡与清单面板改为底部面板，位置完全交给媒体查询，避免内联 top 干扰。
+ */
+
+.first-run-tour,
+.first-run-checklist {
+  --first-run-scrim: var(--overlay-scrim, rgba(15, 23, 42, .55));
+  --first-run-tour-layer: 9000;
+  --first-run-checklist-layer: 9100;
+  --first-run-panel-layer: 1;
+}
+
+.first-run-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.first-run-tour {
+  position: fixed;
+  inset: 0;
+  z-index: var(--first-run-tour-layer);
+}
+
+.first-run-tour__mask {
+  position: absolute;
+  inset: 0;
+  background: var(--first-run-scrim);
+}
+
+.first-run-tour__ring {
+  position: fixed;
+  z-index: var(--first-run-tour-layer);
+  box-sizing: border-box;
+  pointer-events: none;
+  border: 2px solid var(--primary-light);
+  border-radius: var(--radius-panel);
+  /* 整行锚点（门户页头）宽度等于视口：外扩阴影会被视口左右裁断，
+     因此用内描边，环始终画在锚点矩形以内。 */
+  box-shadow: inset 0 0 0 4px var(--primary-soft);
+}
+
+.first-run-tour__bubble {
+  position: fixed;
+  z-index: var(--first-run-tour-layer);
+  box-sizing: border-box;
+  width: min(380px, calc(100vw - 32px));
+  padding: var(--space-5);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-modal);
+}
+
+.first-run-tour__progress {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-3);
+  color: var(--primary-ink, var(--primary));
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: .12em;
+}
+
+.first-run-tour__title {
+  margin: 0 0 var(--space-2);
+  color: var(--text);
+  font-size: var(--fs-title-sm);
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.first-run-tour__description {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--fs-body);
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+
+.first-run-tour__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+}
+
+.first-run-tour__nav {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.first-run-button {
+  min-height: 36px;
+  padding: 0 var(--space-4);
+  color: var(--text-secondary);
+  cursor: pointer;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-body);
+  font-weight: 600;
+  transition: background var(--duration-fast) ease, border-color var(--duration-fast) ease, color var(--duration-fast) ease;
+}
+
+.first-run-button:focus-visible,
+.first-run-checklist__close:focus-visible,
+.first-run-checklist__retry:focus-visible {
+  outline: 2px solid var(--primary-ink, var(--primary));
+  outline-offset: 2px;
+}
+
+.first-run-button.is-ghost {
+  color: var(--text-muted);
+  background: transparent;
+}
+
+.first-run-button.is-ghost:hover { color: var(--text); background: var(--surface-muted); }
+
+.first-run-button.is-secondary {
+  color: var(--text-secondary);
+  border-color: var(--border);
+  background: var(--surface-card);
+}
+
+.first-run-button.is-secondary:hover { background: var(--surface-muted); }
+
+.first-run-button.is-primary {
+  color: var(--on-primary);
+  background: var(--primary);
+}
+
+.first-run-button.is-primary:hover { background: var(--primary-dark); }
+
+/* ---------------- 上手清单面板 ---------------- */
+
+.first-run-checklist {
+  position: fixed;
+  inset: 0;
+  z-index: var(--first-run-checklist-layer);
+  display: grid;
+  box-sizing: border-box;
+  place-items: center;
+  padding: var(--space-4);
+}
+
+.first-run-checklist__mask {
+  position: absolute;
+  inset: 0;
+  background: var(--first-run-scrim);
+}
+
+.first-run-checklist__panel {
+  position: relative;
+  z-index: var(--first-run-panel-layer);
+  display: flex;
+  box-sizing: border-box;
+  width: min(560px, 100%);
+  max-height: calc(100dvh - 48px);
+  flex-direction: column;
+  overflow-y: auto;
+  padding: var(--space-6);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-modal);
+}
+
+.first-run-checklist__panel:focus-visible { outline: none; }
+
+.first-run-checklist__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.first-run-checklist__eyebrow {
+  margin: 0 0 var(--space-1);
+  color: var(--primary-ink, var(--primary));
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: .16em;
+}
+
+.first-run-checklist__title {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--fs-title);
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.first-run-checklist__summary {
+  margin: var(--space-1) 0 0;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+
+.first-run-checklist__close {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  padding: 0;
+  place-items: center;
+  color: var(--text-muted);
+  cursor: pointer;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface-muted);
+  font-size: 20px;
+  line-height: 1;
+}
+
+.first-run-checklist__close:hover { color: var(--text); background: var(--surface-hover, var(--surface-muted)); }
+
+.first-run-checklist__progress {
+  display: flex;
+  gap: var(--space-1);
+  margin: var(--space-5) 0 var(--space-4);
+}
+
+.first-run-checklist__progress-segment {
+  height: 4px;
+  flex: 1 1 0;
+  border-radius: var(--radius-pill);
+  background: var(--surface-muted);
+  transition: background var(--duration-base) ease;
+}
+
+.first-run-checklist__progress-segment.is-done { background: var(--primary); }
+
+.first-run-checklist__list {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.first-run-checklist__item {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-muted);
+}
+
+.first-run-checklist__item.is-done { border-color: var(--primary-border); }
+
+.first-run-checklist__marker {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface-card);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+}
+
+.first-run-checklist__item.is-done .first-run-checklist__marker {
+  color: var(--primary-ink, var(--primary));
+  border-color: var(--primary-border);
+  background: var(--primary-soft);
+}
+
+.first-run-checklist__body { min-width: 0; }
+
+.first-run-checklist__item-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin: 0;
+  color: var(--text);
+  font-size: var(--fs-body);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.first-run-checklist__state {
+  flex: 0 0 auto;
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+.first-run-checklist__state.is-done { color: var(--success-text); background: var(--success-soft); }
+.first-run-checklist__state.is-pending { color: var(--text-muted); background: var(--surface-card); }
+
+.first-run-checklist__hint {
+  margin: var(--space-1) 0 0;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.first-run-checklist__probe {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+  padding: var(--space-2) var(--space-3);
+  color: var(--text-muted);
+  border-radius: var(--radius-md);
+  background: var(--surface-card);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.first-run-checklist__probe.is-complete { color: var(--success-text); background: var(--success-soft); }
+.first-run-checklist__probe.is-error { color: var(--danger-text); background: var(--danger-soft); }
+
+.first-run-checklist__retry {
+  min-height: 26px;
+  padding: 0 var(--space-3);
+  color: inherit;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  font: inherit;
+  font-weight: 600;
+}
+
+.first-run-checklist__retry:hover { border-color: var(--primary-border); }
+
+.first-run-checklist__note {
+  margin: var(--space-5) 0 0;
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+}
+
+/* ---------------- 窄屏：底部面板 ---------------- */
+
+@media (max-width: 640px) {
+  .first-run-tour__bubble.is-sheet {
+    top: auto;
+    right: 12px;
+    bottom: 12px;
+    left: 12px;
+    width: auto;
+    max-height: 62dvh;
+    overflow-y: auto;
+    border-radius: var(--radius-panel) var(--radius-panel) var(--radius-md) var(--radius-md);
+  }
+
+  .first-run-tour__ring { display: none; }
+
+  .first-run-tour__actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .first-run-tour__nav { display: grid; grid-template-columns: 1fr 1fr; }
+  .first-run-tour__nav .first-run-button { width: 100%; }
+
+  .first-run-checklist { padding: 12px; }
+
+  .first-run-checklist__panel {
+    align-self: end;
+    width: 100%;
+    max-height: 78dvh;
+    padding: var(--space-5) var(--space-4);
+    border-radius: var(--radius-panel) var(--radius-panel) var(--radius-md) var(--radius-md);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .first-run-fade-enter-active,
+  .first-run-fade-leave-active,
+  .first-run-checklist__progress-segment { transition: none; }
+}
+
+.first-run-fade-enter-active,
+.first-run-fade-leave-active { transition: opacity 180ms var(--ease-out); }
+
+.first-run-fade-enter-from,
+.first-run-fade-leave-to { opacity: 0; }

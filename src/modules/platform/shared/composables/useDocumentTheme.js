@@ -64,6 +64,48 @@ export function applyDocumentTheme(theme, doc = globalThis.document) {
   return resolved
 }
 
+/**
+ * createDocumentThemeOverride 创建一个“挂载期间临时覆盖根元素主题”的控制器。
+ *
+ * 门户默认深色，而全局 <html data-theme> 在未保存偏好时保持浅色；导览/清单
+ * Teleport 到 body 后不在 `.subsystem-portal[data-theme]` 子树内，只能读取根元素
+ * token，因此门户挂载时把 resolvedTheme 临时投射到 <html>，卸载时恢复挂载前原值。
+ * @param {Object} [options] 依赖注入。
+ * @param {Object} [options.document] document 对象。
+ * @returns {{apply:(theme:string)=>void,restore:()=>void}} 覆盖控制器。
+ */
+export function createDocumentThemeOverride(options = {}) {
+  const doc = options.document ?? globalThis.document
+  const win = options.window ?? doc?.defaultView ?? globalThis.window
+  const root = doc?.documentElement
+  if (!root) return { apply: () => {}, restore: () => {} }
+  // dataset 与 data-theme 属性互相映射；优先走 dataset.theme，测试替身没有 dataset 时回退属性。
+  function writeTheme(value) {
+    if (root.dataset) root.dataset.theme = value
+    else if (typeof root.setAttribute === 'function') root.setAttribute('data-theme', value)
+  }
+
+  function clearTheme() {
+    if (root.dataset) delete root.dataset.theme
+    else if (typeof root.removeAttribute === 'function') root.removeAttribute('data-theme')
+  }
+
+  let active = false
+  return {
+    apply(theme) {
+      active = true
+      writeTheme(theme === 'dark' ? 'dark' : 'light')
+    },
+    restore() {
+      if (!active) return
+      active = false
+      // 不能写回挂载前快照：门户内切换主题会更新全局偏好，路由 watcher 也会先同步
+      // 新偏好；快照会把这次变更覆盖回旧值。恢复即按当前偏好重新同步，交还控制权。
+      syncDocumentTheme({ window: win, document: doc })
+    },
+  }
+}
+
 // syncDocumentTheme 重新读取偏好并同步到根元素。
 // 参数：options.window / options.document 便于测试注入。
 // 返回值：本次生效的主题。

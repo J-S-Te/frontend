@@ -18,10 +18,26 @@ import {
   platformConsoleLandingRoute,
 } from '@/modules/platform/auth/utils/platformConsoleAccess'
 import { isSafeOpenTarget } from '@/modules/platform/login-targets/utils/targetUri.js'
+import { createDocumentThemeOverride } from '@/modules/platform/shared/composables/useDocumentTheme'
+import {
+  THEME_PREFERENCE_CHANGED_EVENT,
+  THEME_STORAGE_KEY,
+} from '@/modules/shared/theme/themePreference.js'
+import { firstRun } from '@/modules/platform/first-run/composables/useFirstRun.js'
 import { formatUserError } from '../../shared/utils/userError.js'
 import '@/modules/platform/styles/subsystem-portal.css'
 
 const router = useRouter()
+// 上手清单进度由全局 first-run store 提供：只统计当前权限可见的任务。
+const checklistSummary = firstRun.checklistSummary
+// 主体确定且记录已创建后清单才可打开；未就绪时入口显示 loading/disabled，
+// 不再出现“点了没反应”。
+const checklistReady = computed(() => firstRun.state.portalReady && Boolean(firstRun.state.record))
+const checklistEntryLabel = computed(() => (
+  checklistReady.value
+    ? `打开上手清单，已完成 ${checklistSummary.value.done} 项，共 ${checklistSummary.value.total} 项`
+    : '上手清单正在载入，请稍候'
+))
 const canvasRef = ref(null)
 const userMenuRef = ref(null)
 const toast = ref({ visible: false, message: '', type: '' })
@@ -41,13 +57,19 @@ const PORTAL_THEME_OPTIONS = [
   { value: 'system', label: '跟随系统' },
 ]
 
-function readStoredPortalTheme() {
+// 读取已保存的门户主题；没有合法值（从未选择过、存储被禁用）时返回 null，
+// 由调用方决定回落到默认深色还是保留当前会话内的选择。
+function readStoredPortalThemeOrNull() {
   try {
     const storedTheme = window.localStorage.getItem(PORTAL_THEME_STORAGE_KEY)
-    return PORTAL_THEME_OPTIONS.some((option) => option.value === storedTheme) ? storedTheme : 'dark'
+    return PORTAL_THEME_OPTIONS.some((option) => option.value === storedTheme) ? storedTheme : null
   } catch {
-    return 'dark'
+    return null
   }
+}
+
+function readStoredPortalTheme() {
+  return readStoredPortalThemeOrNull() || 'dark'
 }
 
 function readSystemPrefersDark() {
@@ -65,6 +87,14 @@ const resolvedTheme = computed(() => (
     ? (systemPrefersDark.value ? 'dark' : 'light')
     : themeMode.value
 ))
+
+// 导览/清单 Teleport 到 body，不在门户 main[data-theme] 子树内；挂载期间把门户解析后的
+// 主题临时投射到 <html data-theme>，让浮层与默认深色门户保持一致，卸载时恢复原值。
+const documentThemeOverride = createDocumentThemeOverride()
+
+function syncPortalDocumentTheme() {
+  documentThemeOverride.apply(resolvedTheme.value)
+}
 
 const userDisplayName = computed(() => {
   const principal = currentPrincipal.value
@@ -136,16 +166,57 @@ let cardTiltFrame = 0
 
 function setPortalTheme(nextTheme) {
   if (!PORTAL_THEME_OPTIONS.some((option) => option.value === nextTheme)) return
+  const changed = themeMode.value !== nextTheme
   themeMode.value = nextTheme
   try {
     window.localStorage.setItem(PORTAL_THEME_STORAGE_KEY, nextTheme)
   } catch {
     // 浏览器禁用本地存储时仍保留当前会话内的主题选择。
   }
+  // 只有真的切换了主题才记第 ③ 项；点当前已选中的选项不算完成动作。
+  if (changed) firstRun.markTaskCompleted('theme')
 }
 
 function syncSystemTheme(event) {
   systemPrefersDark.value = Boolean(event?.matches ?? systemThemeQuery?.matches)
+}
+
+/**
+ * 从存储重读主题偏好与系统深色后再投射到 <html>：跨标签页改主题、切回标签页、
+ * 同标签页其它外壳改偏好都走这里。导览/清单 Teleport 到 body，只能跟随根元素
+ * token，所以事件到达时必须立即重写，不能等焦点或组件重新渲染。
+ * 没有已保存偏好（存储被禁用或从未写过）时保留会话内的选择，不被默认深色覆盖。
+ * @returns {void}
+ */
+function syncPortalThemeFromStorage() {
+  const storedTheme = readStoredPortalThemeOrNull()
+  if (storedTheme) themeMode.value = storedTheme
+  systemPrefersDark.value = readSystemPrefersDark()
+  syncPortalDocumentTheme()
+}
+
+/**
+ * 跨标签页主题同步：门户主题键与全局偏好键指向同一份存储，任一变化（含
+ * storage.clear() 的 key === null）都重新读取；其它键直接忽略，不打断粒子动画。
+ * @param {StorageEvent|{key:string|null}} event storage 事件。
+ * @returns {boolean} 是否按主题变更处理。
+ */
+function onPortalThemeStorage(event) {
+  if (event && event.key !== null && event.key !== PORTAL_THEME_STORAGE_KEY && event.key !== THEME_STORAGE_KEY) return false
+  syncPortalThemeFromStorage()
+  return true
+}
+
+/**
+ * 切回标签页时补一次同步：后台期间浏览器可能冻结/合并 storage 与 matchMedia 回调，
+ * 而 App 的 installDocumentThemeSync 会在可见时按全局偏好重写 <html>，门户挂载期间
+ * 必须后写才能保证浮层与门户一致。隐藏时不做任何写入。
+ * @returns {boolean} 是否同步。
+ */
+function onPortalVisibilityChangeForTheme() {
+  if (document.visibilityState !== 'visible') return false
+  syncPortalThemeFromStorage()
+  return true
 }
 
 function showToast(message, type = 'enter') {
@@ -236,6 +307,8 @@ async function loadCurrentPrincipal() {
 
 function toggleUserMenu() {
   userMenuOpen.value = !userMenuOpen.value
+  // 第 ① 项由“面板真的被打开”驱动，收起面板不会撤销完成。
+  if (userMenuOpen.value) firstRun.markTaskCompleted('userPanel')
 }
 
 function closeUserMenuWhenClickOutside(event) {
@@ -271,6 +344,30 @@ async function logoutApplication() {
   } finally {
     isLoggingOut.value = false
   }
+}
+
+// 上手清单入口（门户页头与页脚共用）。面板本身由 App.vue 挂载的 GuideHost 渲染，
+// 这里只负责打开，不代替用户完成任何清单项。未就绪时入口本身是 disabled，
+// 这里再守一道，避免程序化调用绕过可见状态。
+function openFirstRunChecklist() {
+  if (!checklistReady.value) return
+  firstRun.openChecklist()
+}
+
+// 用户面板“重新查看平台导览”：显式回到 pending，由 GuideHost 重新调度展示。
+// 记录未就绪时按钮已禁用，这里再守一道，避免程序化调用静默失败。
+function restartFirstRunTour() {
+  if (!checklistReady.value) return false
+  userMenuOpen.value = false
+  firstRun.restartTour()
+  return true
+}
+
+// 用户面板“重置上手清单”：只清空任务进度，不动导览终态之外的东西。
+function resetFirstRunChecklist() {
+  if (!checklistReady.value) return false
+  if (firstRun.resetChecklist()) showToast('上手清单已重置', 'enter')
+  return true
 }
 
 // 门户入口优先在新标签页打开，避免覆盖门户上下文；如果浏览器拦截弹窗，
@@ -322,13 +419,13 @@ function openSubsystem(subsystem) {
     // OIDC 入口开始，确保本次访问经过 Keycloak；有效的基础平台会话会由
     // Broker 自动复用，因此用户不会看到 Keycloak 登录或选择页面。
     const targetURL = new URL(subsystem.authenticationURL, window.location.origin).href
-    openSubsystemTarget(targetURL)
+    if (openSubsystemTarget(targetURL)) firstRun.markTaskCompleted('subsystem')
     return
   }
 
   if (subsystem.publicURL) {
     // 外部系统不在统一前端路由内，保持新标签页打开，避免当前门户页被替换。
-    openSubsystemTarget(subsystem.publicURL)
+    if (openSubsystemTarget(subsystem.publicURL)) firstRun.markTaskCompleted('subsystem')
     return
   }
 
@@ -337,7 +434,7 @@ function openSubsystem(subsystem) {
     // 通过 Router 解析保持 base、编码和命名路由参数一致。
     const routeURL = router.resolve(subsystem.route).href
     const targetURL = new URL(routeURL, window.location.origin).href
-    openSubsystemTarget(targetURL)
+    if (openSubsystemTarget(targetURL)) firstRun.markTaskCompleted('subsystem')
     return
   }
 
@@ -505,7 +602,44 @@ function resetCardTransform(event) {
   card.style.removeProperty('--portal-mouse-y')
 }
 
+// 主体一确定就创建 first-run 记录（清单可立即打开），不再等目录加载完成；
+// 目录只通过 catalogReady 控制导览是否具备启动条件。主体不明时只清内存态，
+// 绝不写 localStorage（“主体不明不读写”）。
+watch(
+  () => [isPrincipalLoading.value, currentPrincipal.value],
+  ([principalLoading, principal]) => {
+    if (principalLoading) return
+    if (!principal) {
+      firstRun.markPortalUnready()
+      firstRun.bindPrincipal(null)
+      return
+    }
+    firstRun.markPortalReady(principal)
+    firstRun.setCatalogReady(!subsystemCatalogLoading.value)
+  },
+  { immediate: true },
+)
+
+// 目录加载完成/失败都解除“未就绪”：导览锚点在目录区，目录 settled 后才能调度。
+watch(
+  () => [subsystemCatalogLoading.value, currentPrincipal.value],
+  ([catalogLoading, principal]) => {
+    firstRun.setCatalogReady(Boolean(principal) && !catalogLoading)
+  },
+  { immediate: true },
+)
+
 onMounted(() => {
+  // 首帧先把门户主题投射到根元素，避免浮层在挂载前读到全局浅色 token。
+  syncPortalDocumentTheme()
+  // App 的 installDocumentThemeSync 会在回到前台时按偏好重写 <html>；门户挂载期间
+  // 必须让门户解析结果胜出，因此聚焦时再覆盖一次，卸载后统一恢复原值。
+  window.addEventListener('focus', syncPortalThemeFromStorage)
+  // 主题跟随不依赖焦点：跨标签页改主题走 storage，同标签页其它外壳改偏好走事件，
+  // 切回标签页时补读系统深色，三者都立刻重写 <html>，导览/清单随之换色。
+  document.addEventListener('visibilitychange', onPortalVisibilityChangeForTheme)
+  window.addEventListener('storage', onPortalThemeStorage)
+  window.addEventListener(THEME_PREFERENCE_CHANGED_EVENT, syncPortalThemeFromStorage)
   window.addEventListener(AUTHORIZATION_REFRESHED_EVENT, onAuthorizationRefreshed)
   setupPortalEffects()
   loadCurrentPrincipal()
@@ -521,6 +655,7 @@ onMounted(() => {
 })
 
 watch(resolvedTheme, () => {
+  syncPortalDocumentTheme()
   if (canvasRef.value) drawParticleFrame()
 })
 
@@ -529,6 +664,13 @@ watch(() => subsystems.value.length, () => {
 })
 
 onBeforeUnmount(() => {
+  firstRun.markPortalUnready()
+  window.removeEventListener('focus', syncPortalThemeFromStorage)
+  document.removeEventListener('visibilitychange', onPortalVisibilityChangeForTheme)
+  window.removeEventListener('storage', onPortalThemeStorage)
+  window.removeEventListener(THEME_PREFERENCE_CHANGED_EVENT, syncPortalThemeFromStorage)
+  // 恢复挂载前 <html data-theme> 原值（通常是 App 全局同步的浅色）。
+  documentThemeOverride.restore()
   window.clearTimeout(toastTimer)
   window.clearInterval(projectionRefreshTimer)
   window.cancelAnimationFrame(particleAnimationFrame)
@@ -545,13 +687,20 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main class="subsystem-portal" :data-theme="resolvedTheme" :style="{ colorScheme: resolvedTheme }" aria-label="子系统门户">
+  <main
+    id="main-content"
+    class="subsystem-portal"
+    :data-theme="resolvedTheme"
+    :style="{ colorScheme: resolvedTheme }"
+    aria-label="子系统门户"
+    tabindex="-1"
+  >
     <canvas ref="canvasRef" class="subsystem-portal__particles" aria-hidden="true"></canvas>
     <div class="subsystem-portal__grid" aria-hidden="true"></div>
     <div class="subsystem-portal__glow subsystem-portal__glow--top" aria-hidden="true"></div>
     <div class="subsystem-portal__glow subsystem-portal__glow--bottom" aria-hidden="true"></div>
 
-    <header class="subsystem-portal__header">
+    <header class="subsystem-portal__header" data-first-run-anchor="portal-header">
       <div class="subsystem-portal__brand">
         <span class="subsystem-portal__logo"><ConsoleIcon name="logo" /></span>
         <span>
@@ -560,7 +709,7 @@ onBeforeUnmount(() => {
         </span>
       </div>
       <div class="subsystem-portal__header-actions">
-        <div class="subsystem-portal__theme-switcher" role="group" aria-label="页面主题">
+        <div class="subsystem-portal__theme-switcher" role="group" aria-label="页面主题" data-first-run-anchor="theme-switcher">
           <button
             v-for="option in PORTAL_THEME_OPTIONS"
             :key="option.value"
@@ -576,7 +725,27 @@ onBeforeUnmount(() => {
           </button>
         </div>
 
-        <div ref="userMenuRef" class="subsystem-portal__user-menu">
+        <!-- 上手清单入口：显示真实完成进度 n/m；n/m 只统计当前权限可见的任务。
+             主体/记录未就绪时显示 loading 且 disabled，不再“点了没反应”。 -->
+        <button
+          class="subsystem-portal__guide-entry"
+          type="button"
+          data-first-run-anchor="checklist-entry"
+          :disabled="!checklistReady"
+          :aria-busy="checklistReady ? 'false' : 'true'"
+          :aria-label="checklistEntryLabel"
+          :title="checklistReady ? '' : '正在读取当前账号信息，请稍候'"
+          @click="openFirstRunChecklist"
+        >
+          <span class="subsystem-portal__guide-entry-icon" aria-hidden="true">
+            <!-- 清单/任务语义：save 的勾选形状会被读成“保存/下载”，改用带勾选语义的 audit。 -->
+            <ConsoleIcon name="audit" />
+          </span>
+          <span class="subsystem-portal__guide-entry-text">{{ checklistReady ? '上手清单' : '清单载入中' }}</span>
+          <span v-if="checklistReady" class="subsystem-portal__guide-entry-count">{{ checklistSummary.done }}/{{ checklistSummary.total }}</span>
+        </button>
+
+        <div ref="userMenuRef" class="subsystem-portal__user-menu" data-first-run-anchor="user-panel">
           <button
             class="subsystem-portal__user-trigger"
             type="button"
@@ -620,6 +789,37 @@ onBeforeUnmount(() => {
               </template>
               <p v-else class="subsystem-portal__user-panel-status is-error">当前用户信息暂不可用。</p>
 
+              <div class="subsystem-portal__user-panel-actions">
+                <!-- 记录未就绪（主体/记录还没读到）时与页头清单入口一致：禁用 + 可见的
+                     载入提示，不再出现“点了没反应”。 -->
+                <button
+                  class="subsystem-portal__user-panel-action"
+                  type="button"
+                  :disabled="!checklistReady"
+                  :aria-disabled="checklistReady ? 'false' : 'true'"
+                  :title="checklistReady ? '' : '正在读取当前账号的上手记录，请稍候'"
+                  @click="restartFirstRunTour"
+                >
+                  重新查看平台导览
+                </button>
+                <button
+                  class="subsystem-portal__user-panel-action"
+                  type="button"
+                  :disabled="!checklistReady"
+                  :aria-disabled="checklistReady ? 'false' : 'true'"
+                  :title="checklistReady ? '' : '正在读取当前账号的上手记录，请稍候'"
+                  @click="resetFirstRunChecklist"
+                >
+                  重置上手清单
+                </button>
+              </div>
+              <p
+                v-if="!checklistReady"
+                class="subsystem-portal__user-panel-status"
+                role="status"
+                aria-live="polite"
+              >上手记录载入中，稍后即可重新查看导览或重置上手清单…</p>
+
               <button class="subsystem-portal__logout-button" type="button" :disabled="isLoggingOut" @click="logoutApplication">
                 {{ isLoggingOut ? '正在退出…' : '退出应用系统' }}
               </button>
@@ -652,6 +852,7 @@ onBeforeUnmount(() => {
 
       <div
         class="subsystem-portal__cards"
+        data-first-run-anchor="subsystem-cards"
         :data-density="portalGrid.density"
         :style="portalGridStyle"
         aria-label="子系统列表"
@@ -697,6 +898,18 @@ onBeforeUnmount(() => {
 
     <footer class="subsystem-portal__footer">
       <span class="subsystem-portal__footer-note">建议分辨率：1920×1080 · 浏览器：Chrome / Edge 最新版</span>
+      <button
+        class="subsystem-portal__guide-footer-entry"
+        type="button"
+        :disabled="!checklistReady"
+        :aria-busy="checklistReady ? 'false' : 'true'"
+        :aria-label="checklistEntryLabel"
+        :title="checklistReady ? '' : '正在读取当前账号信息，请稍候'"
+        @click="openFirstRunChecklist"
+      >
+        {{ checklistReady ? '上手清单' : '清单载入中' }}
+        <span v-if="checklistReady" class="subsystem-portal__guide-footer-count">{{ checklistSummary.done }}/{{ checklistSummary.total }}</span>
+      </button>
       <span class="subsystem-portal__footer-copyright">© 2026 V2.1.0</span>
     </footer>
 
