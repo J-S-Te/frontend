@@ -853,8 +853,8 @@ test('CM-002 项目历史明确展示 Portal 同步快照及新鲜度边界', ()
   assert.match(view, /item\.sync_last_success_at/)
   // 翻页入口改由统一分页条承接（2026-11 统一）：视图仍必须把服务端 total 交给分页条，
   // 并继续用 customerProjectLoadSequence 丢弃迟到响应。
-  assert.match(view, /<PaginationBar class="crm-actions" label="客户项目历史分页"[^>]*:total="customerProjectsPage\.total"/)
-  assert.match(view, /<PaginationBar class="crm-actions" label="客户项目历史分页"[^>]*@change="loadCustomerProjectPage"/)
+  assert.match(view, /<PaginationBar class="crm-pagination" label="客户项目历史分页"[^>]*:total="customerProjectsPage\.total"/)
+  assert.match(view, /<PaginationBar class="crm-pagination" label="客户项目历史分页"[^>]*@change="loadCustomerProjectPage"/)
   assert.match(view, /customerProjectLoadSequence/)
 })
 
@@ -1594,8 +1594,51 @@ test('新建售前申请需求说明有长度上限且必填项显示星标', ()
   }
 })
 
+const presaleCreateSection = (() => {
+  // 截取「新建售前申请」独立创建区段（页面 head 之后到 overlay 之前），用于断言去重与排版。
+  const start = view.indexOf('<section v-if="activeSection === \'presale\' && presaleCreatePage" class="crm-presale-create-page">')
+  const end = view.indexOf('<template #overlay>')
+  return start >= 0 && end > start ? view.slice(start, end) : ''
+})()
+
+test('新建售前申请页只保留一处主标题与一段说明', () => {
+  // 页面级标题唯一：新建售前申请只由页面 head 的 h1 承载，卡片内不再出现同名大标题。
+  assert.equal((view.match(/新建售前申请/g) || []).length, 1)
+  assert.match(view, /<h1>\{\{ activeSection === 'presale' && presaleCreatePage \? '新建售前申请' : sectionTitle \}\}<\/h1>/)
+  assert.match(view, /填写售前支持需求，提交后进入两级审批流程/)
+  assert.ok(presaleCreateSection.length > 0, '未定位到新建售前申请创建区段')
+  // 移除卡片内重复的 eyebrow、大标题与副标题；创建区段不再复述售前技术支持/新建售前申请。
+  assert.doesNotMatch(presaleCreateSection, /<h1|<h3>/)
+  assert.doesNotMatch(presaleCreateSection, /售前技术支持/)
+  assert.doesNotMatch(presaleCreateSection, /新建售前申请/)
+  assert.doesNotMatch(presaleCreateSection, /关联跟进中的商机/)
+  // 三个阶段的二级标题唯一，承接页面 h1，不跳级。
+  for (const [id, title] of [
+    ['presale-create-opportunity-heading', '关联商机'],
+    ['presale-create-support-heading', '支持信息'],
+    ['presale-create-schedule-heading', '时间安排'],
+  ]) {
+    assert.match(presaleCreateSection, new RegExp(`<h2 id="${id}">${title}</h2>`))
+  }
+  assert.equal((presaleCreateSection.match(/<h2 /g) || []).length, 3)
+})
+
+test('新建售前申请按步骤条、提交说明、表单卡片分层并保留返回/提交按钮', () => {
+  // 顺序：步骤条 → 提交前说明 → 表单卡片，形成单一视觉层级。
+  const stepsAt = presaleCreateSection.indexOf('class="crm-presale-create-steps"')
+  const noticeAt = presaleCreateSection.indexOf('class="crm-presale-create-notice"')
+  const formAt = presaleCreateSection.indexOf('id="presale-create-form"')
+  assert.ok(stepsAt >= 0 && noticeAt > stepsAt && formAt > noticeAt, '步骤条/说明/表单顺序不符合分层要求')
+  assert.match(presaleCreateSection, /class="crm-presale-create-steps"[\s\S]*>1<[\s\S]*关联商机[\s\S]*>2<[\s\S]*支持信息[\s\S]*>3<[\s\S]*时间安排/)
+  assert.match(presaleCreateSection, /aria-label="申请填写步骤"/)
+  // 返回按钮只在页面 head，提交按钮只在表单底部，同一动作不重复出现。
+  assert.doesNotMatch(view, /form="presale-create-form"/)
+  assert.match(view, /@click="closePresaleCreatePage">← 返回申请列表<\/button>/)
+  assert.equal((presaleCreateSection.match(/提交申请/g) || []).length, 1)
+  assert.match(presaleCreateSection, /class="crm-presale-create-actions"[\s\S]*@click="closePresaleCreatePage">取消<[\s\S]*type="submit"[\s\S]*提交申请/)
+})
+
 test('新建售前申请使用分区式响应布局并保留完整提交动作', () => {
-  assert.match(view, /class="crm-presale-create-hero"[\s\S]*新建售前申请[\s\S]*关联商机[\s\S]*支持信息[\s\S]*时间安排/)
   assert.match(view, /class="crm-presale-create-notice" role="status"/)
   assert.match(view, /aria-labelledby="presale-create-opportunity-heading"/)
   assert.match(view, /aria-labelledby="presale-create-support-heading"/)
@@ -1603,7 +1646,11 @@ test('新建售前申请使用分区式响应布局并保留完整提交动作',
   assert.match(view, /class="crm-presale-create-actions"[\s\S]*@click="closePresaleCreatePage">取消<[\s\S]*提交申请/)
   assert.match(style, /\.crm-presale-create-page \{ width: min\(100%, 1040px\); margin: 0 auto; \}/)
   assert.match(style, /\.crm-presale-create-section \{ display: grid; grid-template-columns: 190px minmax\(0, 1fr\)/)
+  assert.match(style, /\.crm-presale-create-steps \{\n  display: flex;\n  align-items: center;\n  gap: 16px;/)
+  assert.match(style, /\.crm-presale-create-steps li b \{[^}]*background: var\(--primary, #2563eb\)/)
+  assert.doesNotMatch(style, /\.crm-presale-create-hero/)
   assert.match(style, /@media \(max-width: 620px\)[\s\S]*\.crm-presale-create-fields \{ grid-template-columns: 1fr; \}/)
+  assert.match(style, /@media \(max-width: 620px\)[\s\S]*\.crm-presale-create-steps ol \{ display: grid;/)
 })
 
 test('负责人列表与详情会按需补全人员目录名字', () => {
@@ -1733,4 +1780,21 @@ test('从详情打开的编辑弹窗叠在详情之上，不被遮住', () => {
   assert.match(view, /console-modal-backdrop" :class="\{ nested: !!selectedCustomer \}"/)
   assert.match(view, /console-modal-backdrop" :class="\{ nested: !!selectedOpportunity \}"/)
   assert.match(style, /console-modal-backdrop\.nested \{ z-index: 80; \}/)
+})
+
+// P2⑨：.crm-toolbar / .crm-customer-filters / .crm-presale-filters 是同一个
+// display: flex 容器，栅格列宽对它们完全无效。这里锁住清理结果，并确认真正的网格
+// 筛选（.crm-report-filters）仍保留响应式列定义。
+test('CRM 工具条筛选行不再写对 flex 元素无效的 grid-template-columns', () => {
+  const offenders = []
+  for (const matched of style.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    if (!/grid-template-columns/.test(matched[2])) continue
+    const selector = matched[1].replace(/\/\*[\s\S]*?\*\//g, '').trim()
+    if (/\.crm-(toolbar|customer-filters|presale-filters|engineer-filters)\b/.test(selector)) offenders.push(selector)
+  }
+  assert.deepEqual(offenders, [], `flex 工具条上仍留有无效栅格规则：\n${offenders.join('\n')}`)
+
+  assert.match(style, /\.crm-report-filters\s*\{[\s\S]*?grid-template-columns:\s*repeat\(3/, '真正的网格筛选行应保留列定义')
+  assert.match(style, /@media \(max-width: 820px\)[\s\S]*?\.crm-report-filters\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2/, '≤820px 网格筛选应降为两列')
+  assert.match(style, /@media \(max-width: 620px\)[\s\S]*?\.crm-report-filters\s*\{[\s\S]*?grid-template-columns:\s*1fr/, '≤620px 网格筛选应降为单列')
 })

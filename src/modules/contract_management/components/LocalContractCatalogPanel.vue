@@ -182,7 +182,7 @@ onMounted(load)
       <label><input v-model="draft.enabled" type="checkbox" :disabled="saving" />启用</label>
       <button type="submit" :disabled="!canWrite">{{ saving ? '保存中…' : '保存目录' }}</button><button type="button" :disabled="saving" @click="cancelEditor">取消编辑</button>
     </form>
-    <div class="local-catalog-table"><table><thead><tr><th v-if="kind === 'categories'">编码</th><th>名称</th><th>状态</th><th>版本</th><th>操作</th></tr></thead><tbody><tr v-for="item in rows" :key="item.id"><td v-if="kind === 'categories'">{{ item.code }}</td><td>{{ item.name }}</td><td>{{ item.enabled ? '已启用' : '已停用' }}</td><td>{{ item.version }}</td><td><button type="button" :disabled="!canWrite || !!editing" @click="openEditor(item)">编辑 / 停用</button><button type="button" :disabled="!canWrite || !!editing || grantLoading || grantSaving" @click="openGrants(item)">可见销售 / 组织</button></td></tr></tbody></table></div>
+    <div class="local-catalog-table" data-table-scroll><table><thead><tr><th v-if="kind === 'categories'">编码</th><th>名称</th><th>状态</th><th>版本</th><th>操作</th></tr></thead><tbody><tr v-for="item in rows" :key="item.id"><td v-if="kind === 'categories'">{{ item.code }}</td><td>{{ item.name }}</td><td>{{ item.enabled ? '已启用' : '已停用' }}</td><td>{{ item.version }}</td><td><button type="button" :disabled="!canWrite || !!editing" @click="openEditor(item)">编辑 / 停用</button><button type="button" :disabled="!canWrite || !!editing || grantLoading || grantSaving" @click="openGrants(item)">可见销售 / 组织</button></td></tr></tbody></table></div>
     <section v-if="grantEntry" class="catalog-grants" aria-label="目录可见性授权">
       <h4>{{ grantEntry.name }} · 可见销售 / 组织</h4>
       <p>条目Owner仍可读取。仅向下列有效销售或组织授权；合同本身的数据范围保持原规则。</p>

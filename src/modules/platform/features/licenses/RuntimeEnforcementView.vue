@@ -163,7 +163,7 @@ defineExpose({ selectApplication: application => controller.select(application) 
             <div><h4>当前系统的受控服务 <span class="runtime-count">{{ overview.enforcement.members.length }}</span></h4><p class="runtime-note">登记组件 {{ overview.registration.member_count }} 个；已准备 {{ progress.ready }}、已确认当前修订 {{ progress.acknowledged }}；计数仅供诊断，不代表全部已强制执行。</p></div>
             <span class="runtime-subtle">{{ applicationName }}</span>
           </div>
-          <div v-if="overview.enforcement.members.length" class="runtime-table" role="region" aria-label="受控服务明细" tabindex="0">
+          <div v-if="overview.enforcement.members.length" class="runtime-table" data-table-scroll role="region" aria-label="受控服务明细" tabindex="0">
             <table>
               <caption class="runtime-sr-only">{{ applicationName }}的受控服务，时间按北京时间显示</caption>
               <thead><tr><th scope="col">服务</th><th scope="col">准备状态</th><th scope="col">下发 / 确认修订</th><th scope="col">确认时间</th></tr></thead>

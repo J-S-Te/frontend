@@ -1112,7 +1112,7 @@ onBeforeUnmount(() => {
             </tbody>
           </table>
         </div>
-        <footer class="console-table-footer audit-table-footer"><span>审计事件为只读记录</span><PaginationBar label="审计事件分页" :page="auditPage" :total="auditTotal" :page-size="auditPageSize" :loading="auditLoading" @change="changeAuditPage" @change-page-size="changeAuditPageSize" /></footer>
+        <footer class="console-table-footer audit-table-footer"><span>审计事件为只读记录</span><PaginationBar label="审计事件分页" :page="auditPage" :total="auditTotal" :page-size-options="[20, 50, 100]" :page-size="auditPageSize" :loading="auditLoading" @change="changeAuditPage" @change-page-size="changeAuditPageSize" /></footer>
       </div>
 
     </section>

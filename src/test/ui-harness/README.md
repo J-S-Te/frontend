@@ -15,6 +15,7 @@
 | `sidebar-username-browser.mjs` | `page.setContent` 内联渲染 | 否 | 仅 Chrome |
 | `action-buttons-browser.mjs` | 访问 dev server 的 `action-buttons.html` | 否 | **手工 dev server** |
 | `priority-browser.mjs` | 访问 dev server 的 `priority.html` | 否 | **手工 dev server** |
+| `pagination-layout-browser.mjs` | `page.setContent` 内联渲染真实 PaginationBar + 模块 CSS | 否 | 仅 Chrome |
 | `settlement-role-browser.mjs` | 自起 Vite + 隔离夹具后端/MySQL | 否（opt-in） | 隔离夹具会话 + 隔离 MySQL + 后端 |
 
 进 CI 的只有 `responsive-boundaries-browser.mjs`：它不依赖 dev server、不依赖后端，
@@ -25,12 +26,28 @@
 依赖手工另起的 Vite dev server（默认端口分别 5187 / 5179，`vite` 本身默认 5173 + strictPort），
 端口不可在 CI 复现，因此未接入 CI。
 
+### 分页条布局回归（错位 / 换行）
+
+```bash
+CHROMIUM_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  node src/test/ui-harness/pagination-layout-browser.mjs
+```
+
+用真实组件 + 真实模块 CSS 在 `crm / contract / settlement / console / project / portal /
+login-target` 七种列表页容器里渲染分页条，在 1440 / 1024 / 900 / 820 / 768 / 700 /
+640 / 600 / 561 / 390 十档视口检查「单行右对齐、控件同高、跳页输入 60px、窄屏不重叠
+不孤字、主次与禁用态一致」，并验证模块通用按钮 / 输入框规则没有改写分页条尺寸、
+`overflow: hidden` 的卡片没有把「下一页 / 跳至 / 每页」裁掉。证据（`results.json` +
+截图）写到 `.ai/qa/pagination-bar-layout-20261107/<label>/`。
+
 ## 环境变量
 
 | 变量 | 作用 | 默认 |
 | --- | --- | --- |
 | `CHROMIUM_PATH` | Chrome/Chromium 可执行文件路径（所有脚本都走 env 兜底） | macOS `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome` |
 | `HARNESS_BASE_URL` | 手工 dev server 的基地址（`action-buttons-browser.mjs`、`priority-browser.mjs`） | `http://127.0.0.1:5187` / `http://127.0.0.1:5179` |
+| `PAGINATION_RUN_LABEL` | 分页条布局证据子目录名（`[A-Za-z0-9_-]{1,48}`） | `latest` |
+| `PAGINATION_OUTPUT_DIR` | 分页条布局证据输出目录 | `.ai/qa/pagination-bar-layout-20261107/<label>/` |
 | `LAYOUT_RUN_LABEL` | 断点回归证据子目录名（`[A-Za-z0-9_-]{1,48}`） | `latest` |
 | `SETTLEMENT_ROLE_BROWSER_FIXTURE` | 结算角色夹具的 JSON（`origin` 必须是 `127.0.0.1:18173`，`apiBase` 同回环） | 无，缺失即断言失败 |
 | `SETTLEMENT_ROLE_BROWSER_CASES` | 选择结算角色用例（逗号分隔） | 全集 |
