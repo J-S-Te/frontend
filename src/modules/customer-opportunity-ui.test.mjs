@@ -73,6 +73,22 @@ test('售前审批规则支持规则列表和编辑区折叠', () => {
   assert.match(style, /\.crm-approval-collapse-button/)
 })
 
+test('售前审批规则的列表与编辑器拆成并列卡片，空态/加载态/忙态都有明确出口', () => {
+  assert.match(approvalPanel, /crm-approval-rules-layout/)
+  assert.match(approvalPanel, /crm-approval-rules-list-card/)
+  assert.match(approvalPanel, /class="crm-approval-rule-select"/)
+  assert.match(approvalPanel, /class="crm-approval-node-head"/)
+  assert.match(approvalPanel, /class="crm-approval-form-actions"/)
+  assert.match(approvalPanel, /function startCreate\(\)/)
+  assert.match(approvalPanel, /crm-approval-rules-loading/)
+  assert.match(approvalPanel, /暂无审批规则/)
+  assert.match(approvalPanel, /:disabled="saving \|\| form\.nodes\.length >= 10"/)
+  assert.match(approvalPanel, /:disabled="saving \|\| deletingRuleId === String\(rule\.id\)"/)
+  assert.match(style, /\.crm-approval-rules-layout \{\s*display: grid;\s*grid-template-columns: minmax\(0, 360px\)/)
+  assert.match(style, /@media \(max-width: 1100px\) \{\s*\.crm-approval-rules-layout \{ grid-template-columns: minmax\(0, 1fr\); \}/)
+  assert.match(style, /\.crm-approval-node-head \{\s*display: grid;/)
+})
+
 test('审批规则保存前本地校验，避免落到售前申请的通用错误文案', () => {
   assert.match(approvalPanel, /function validateRule\(\)/)
   assert.match(approvalPanel, /同一种执行动作只能配置一次/)
