@@ -1029,3 +1029,79 @@ test('导入页顶部常驻状态条在面板折叠时仍显示最近变更人/�
   const ledger = await panel.html()
   assert.doesNotMatch(ledger, /contract-import-statusbar/, '合同台账页不渲染导入状态条')
 })
+
+// ── P1：已提交批次按台账 policy_decision 展示自动审批，不用 live 开关反推 ────────
+// 自动审批批次提交即 APPROVED，但台账里没有人工签署事实；确认区必须说清是按租户
+// 策略自动审批，避免操作者把 APPROVED 读成“有人签过”。
+
+function autoApprovedConfirmation(overrides = {}) {
+  return { state: 'APPROVED', revision: 1, roles: ['销售总监'], approved_roles: ['销售总监'],
+    commands: [], assignees: {}, ...overrides }
+}
+
+test('AUTO 批次确认区展示按租户策略自动审批及策略版本，不出现人工签署文案', async () => {
+  const panel = importPanelHarness('ARCHIVE_ONLY')
+  panel.state.batch.value.confirmation = autoApprovedConfirmation({ policy_decision: 'AUTO', policy_version: 3 })
+  const html = await panel.html()
+  assert.match(html, /按租户策略自动审批/, 'AUTO 批次必须说明是自动审批')
+  assert.match(html, /策略版本 3/, '展示判定所依据的租户开关版本')
+  assert.doesNotMatch(html, /确认通过/, 'APPROVED 不得渲染成人工“确认通过”')
+  assert.doesNotMatch(html, /已批准/, '不得出现暗示人工签署的“已批准”')
+  assert.doesNotMatch(html, /审批人/, '不得出现“审批人”占位')
+  assert.doesNotMatch(html, /已确认：销售总监/, '自动审批批次不展示人工已确认角色')
+})
+
+test('AUTO 批次缺失策略版本时只展示自动审批文案', async () => {
+  const panel = importPanelHarness('ARCHIVE_ONLY')
+  panel.state.batch.value.confirmation = autoApprovedConfirmation({ policy_decision: 'AUTO' })
+  const html = await panel.html()
+  assert.match(html, /按租户策略自动审批/)
+  assert.doesNotMatch(html, /策略版本/)
+  assert.doesNotMatch(html, /确认通过/)
+})
+
+test('MANUAL 与旧数据缺省策略保持原有确认文案与角色展示', async () => {
+  const panel = importPanelHarness('ARCHIVE_ONLY')
+  panel.state.batch.value.confirmation = autoApprovedConfirmation({ policy_decision: 'MANUAL', policy_version: 3 })
+  let html = await panel.html()
+  assert.match(html, /当前确认：确认通过/)
+  assert.match(html, /要求角色：销售总监；已确认：销售总监/)
+  assert.doesNotMatch(html, /按租户策略自动审批/)
+
+  // 引入 policy_decision 之前的旧批次：字段缺省，按原人工确认路径展示。
+  delete panel.state.batch.value.confirmation.policy_decision
+  delete panel.state.batch.value.confirmation.policy_version
+  html = await panel.html()
+  assert.match(html, /当前确认：确认通过/)
+  assert.match(html, /要求角色：销售总监；已确认：销售总监/)
+  assert.doesNotMatch(html, /按租户策略自动审批/)
+})
+
+test('确认状态以 batch.confirmation.policy_decision 为准，不随 live 自动审批开关变化', async () => {
+  const panel = importPanelHarness('ARCHIVE_ONLY', undefined, undefined, undefined, undefined, undefined, {},
+    { get: async () => ({ capability_enabled: true, enabled: true, version: 4, updated_by: '合同超级管理员', updated_at: '2026-11-06T02:30:00Z' }) })
+  panel.props.canManageAutoApprove = true
+  await panel.state.loadAutoApprove()
+  assert.equal(panel.state.autoApproveEnabled.value, true, 'live 开关已开启')
+
+  // live 开启，但历史批次台账是 MANUAL：仍按台账展示人工确认。
+  panel.state.batch.value.confirmation = autoApprovedConfirmation({ policy_decision: 'MANUAL', policy_version: 4 })
+  let html = await panel.html()
+  assert.match(html, /当前确认：确认通过/)
+  assert.doesNotMatch(html, /按租户策略自动审批（策略版本 4）/)
+
+  // live 关闭，但历史批次台账是 AUTO：仍按台账展示自动审批。
+  panel.state.autoApprove.value.enabled = false
+  panel.state.batch.value.confirmation = autoApprovedConfirmation({ policy_decision: 'AUTO', policy_version: 2 })
+  html = await panel.html()
+  assert.match(html, /按租户策略自动审批（策略版本 2）/)
+  assert.doesNotMatch(html, /当前确认：确认通过/)
+})
+
+test('无 confirmation 时确认区保持空态且不报错', async () => {
+  const panel = importPanelHarness('ARCHIVE_ONLY')
+  panel.state.batch.value.confirmation = null
+  const html = await panel.html()
+  assert.doesNotMatch(html, /当前确认：/)
+  assert.doesNotMatch(html, /按租户策略自动审批/)
+})
