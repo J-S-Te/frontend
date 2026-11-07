@@ -473,6 +473,29 @@
 }
 .crm-actions > span { color: var(--crm-muted, #64748b); font-size: 12px; }
 
+/* 列表分页条：布局、控件尺寸与对齐全部由 shared/components/PaginationBar.vue 负责，
+   这里只补列表卡片内的上边距。不要再把分页条挂到 .crm-actions 上——那条规则是给
+   操作按钮行的（窄屏会把直接子按钮撑成半宽），会把分页按钮挤到换行。 */
+.crm-pagination { margin-top: 12px; }
+
+/* .table-panel 本身就是横向滚动容器（overflow-x: auto）。分页条如果只是普通块级
+   子元素，横向滚到右侧列时会被一起带出视口，用户以为列表没有下一页。让它在滚动
+   容器内吸左（sticky left），并自带卡片底色遮住滚到下面的表格内容；宽度取滚动
+   视口宽度，而不是表格的完整内容宽度。 */
+.table-panel > .crm-pagination {
+  position: sticky;
+  left: 0;
+  /* 不写 z-index：sticky 已是定位元素，按绘制顺序盖在静态表格内容之上；
+     显式层级会扩大全局 z-index 基线（audit:design-tokens 门禁）。 */
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border-soft, #f1f5f9);
+  background: var(--surface-card, #fff);
+}
+
 .crm-modal {
   position: fixed;
   z-index: 70;
@@ -931,26 +954,27 @@
 .crm-panel-heading p,
 .crm-subsection-heading p { margin: 0; }
 .crm-presale-create-page { width: min(100%, 1040px); margin: 0 auto; }
-.crm-presale-create-hero {
+.crm-presale-create-steps {
   display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 28px;
-  padding: 6px 4px 20px;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 12px;
+  padding: 13px 18px;
+  border: 1px solid var(--border-soft, #dbe7f5);
+  border-radius: var(--radius-xl, 12px);
+  background: var(--surface-card, #fff);
 }
-.crm-presale-create-hero > div > p { margin: 0 0 5px; color: var(--primary-ink, #2563eb); font-size: 12px; font-weight: 800; letter-spacing: .08em; }
-.crm-presale-create-hero h2 { margin: 0; color: var(--text, #0f172a); font-size: clamp(24px, 2.6vw, 32px); line-height: 1.2; }
-.crm-presale-create-hero > div > span { display: block; margin-top: 8px; color: var(--text-muted, #64748b); font-size: 13px; }
-.crm-presale-create-hero ol { display: flex; gap: 6px; margin: 0; padding: 0; list-style: none; }
-.crm-presale-create-hero li { display: flex; align-items: center; gap: 7px; padding: 8px 10px; color: var(--text-secondary, #475569); font-size: 12px; font-weight: 650; border-radius: 999px; background: #eef4ff; }
-.crm-presale-create-hero li b { display: grid; width: 21px; height: 21px; place-items: center; color: #fff; border-radius: 50%; background: #2563eb; font-size: 11px; }
+.crm-presale-create-steps__label { flex: 0 0 auto; margin: 0; color: var(--primary-ink, #2563eb); font-size: 12px; font-weight: 800; letter-spacing: .08em; }
+.crm-presale-create-steps ol { display: flex; flex: 1 1 auto; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.crm-presale-create-steps li { display: flex; flex: 1 1 0; align-items: center; justify-content: center; gap: 8px; min-width: 0; padding: 8px 10px; color: var(--text-secondary, #475569); font-size: 12px; font-weight: 650; border-radius: var(--radius-pill, 999px); background: var(--chip-brand, #eef4ff); }
+.crm-presale-create-steps li b { display: grid; flex: 0 0 auto; width: 20px; height: 20px; place-items: center; color: var(--on-primary, #fff); border-radius: 50%; background: var(--primary, #2563eb); font-size: 11px; }
 .crm-presale-create-notice { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 14px; padding: 12px 15px; color: var(--text-on-warning, #92400e); border: 1px solid var(--warning-border, #fde68a); border-radius: 11px; background: var(--warning-soft-strong, #fffbeb); font-size: 12px; line-height: 1.6; }
 .crm-presale-create-notice strong { flex: 0 0 auto; color: var(--warning-text, #b45309); }
 .crm-presale-create-form { overflow: hidden; padding: 0; border-color: var(--border-soft, #dbe7f5); box-shadow: 0 12px 32px rgba(30, 64, 175, .07); }
 .crm-presale-create-section { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 28px; padding: 24px; border-bottom: 1px solid var(--border-soft, #e7edf5); }
 .crm-presale-create-section > header { display: flex; align-items: flex-start; gap: 11px; }
 .crm-presale-create-section > header > b { display: grid; flex: 0 0 auto; width: 34px; height: 34px; place-items: center; color: var(--primary-ink, #2563eb); border-radius: 10px; background: var(--chip-brand, #eaf2ff); font-size: 11px; font-weight: 800; }
-.crm-presale-create-section > header h3 { margin: 1px 0 4px; color: var(--text-strong, #1e293b); font-size: 15px; }
+.crm-presale-create-section > header h2 { margin: 1px 0 4px; color: var(--text-strong, #1e293b); font-size: 15px; }
 .crm-presale-create-section > header p { margin: 0; color: var(--text-muted, #64748b); font-size: 11px; line-height: 1.55; }
 .crm-presale-create-section .crm-business-picker { align-self: start; padding: 0; border: 0; background: transparent; }
 .crm-presale-create-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px 18px; }
@@ -1033,8 +1057,10 @@
 }
 .crm-customer-cards strong { color: var(--crm-text); overflow-wrap: anywhere; word-break: break-word; }
 .crm-customer-cards span { color: var(--crm-muted); font-size: 12px; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
-.crm-customer-filters,
-.crm-presale-filters { grid-template-columns: repeat(auto-fit, minmax(min(145px, 100%), 1fr)); }
+/* 注意：.crm-customer-filters / .crm-presale-filters 与 .crm-toolbar 是同一个 flex
+   容器（display: flex + flex-wrap: wrap），字段宽度由 .crm-toolbar > label 的
+   flex: 1 1 180px 决定。这里不要再写 grid-template-columns —— 对 flex 元素完全
+   不生效，只会误导后续维护者以为筛选行是网格。 */
 .crm-customer-tabs { margin-top: 12px; }
 .crm-profile-list,
 .crm-inbox-list { display: grid; gap: 10px; }
@@ -1233,9 +1259,7 @@
 .crm-import-template-scroll table { min-width: 980px; margin: 0; }
 .crm-import-template-scroll th { white-space: nowrap; }
 
-.crm-engineer-filters,
 .crm-report-filters { margin-bottom: 14px; }
-.crm-engineer-filters { grid-template-columns: repeat(4, minmax(130px, 1fr)); }
 .crm-engineer-list { display: grid; gap: 8px; max-height: 310px; overflow: auto; }
 .crm-engineer {
   align-items: flex-start !important;
@@ -1568,13 +1592,11 @@
   .crm-presale-detail-workspace { grid-template-columns: 1fr; margin: 14px 18px 0; }
   .crm-presale-detail-activity { position: static; }
   .crm-presale-detail-activity .crm-timeline-list { max-height: min(52vh, 520px); }
-  .crm-presale-create-hero { align-items: flex-start; flex-direction: column; gap: 16px; }
+  .crm-presale-create-steps { align-items: stretch; flex-direction: column; gap: 10px; }
   .crm-presale-create-section { grid-template-columns: 1fr; gap: 16px; }
   .crm-presale-create-section > header p { max-width: none; }
   .crm-page-head .crm-actions { width: 100%; max-width: none; justify-content: flex-start; }
-  .crm-toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .crm-report-filters,
-  .crm-engineer-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .crm-report-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .crm-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .crm-alert-list button,
   .crm-alert-rule { grid-template-columns: 1fr; }
@@ -1584,8 +1606,8 @@
 }
 
 @media (max-width: 620px) {
-  .crm-presale-create-hero ol { display: grid; width: 100%; grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .crm-presale-create-hero li { justify-content: center; padding: 8px 5px; }
+  .crm-presale-create-steps ol { display: grid; width: 100%; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .crm-presale-create-steps li { padding: 8px 5px; }
   .crm-presale-create-notice { flex-direction: column; gap: 3px; }
   .crm-presale-create-section { padding: 18px 14px; }
   .crm-presale-create-fields { grid-template-columns: 1fr; }
@@ -1593,11 +1615,8 @@
   .crm-presale-create-fields > label:has(textarea) { grid-column: auto; }
   .crm-presale-create-actions { align-items: stretch; flex-direction: column; padding: 14px; }
   .crm-presale-create-actions .crm-actions { width: 100%; }
-  .crm-toolbar,
-  .crm-customer-filters,
-  .crm-presale-filters,
-  .crm-report-filters,
-  .crm-engineer-filters { grid-template-columns: 1fr; padding: 12px; }
+  .crm-toolbar { padding: 12px; }
+  .crm-report-filters { grid-template-columns: 1fr; padding: 12px; }
   .crm-toolbar > button { width: 100%; }
   .crm-owner-search { grid-template-columns: 1fr; }
   .crm-business-picker,

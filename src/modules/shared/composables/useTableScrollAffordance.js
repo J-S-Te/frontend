@@ -41,6 +41,8 @@
 //     ResizeObserver 回调，仍然会被重算覆盖。
 
 // 所有需要边缘提示的滚动容器。新增模块在此登记一次即可。
+// [data-table-scroll] 是显式 opt-in 标记：不在下面共享类清单里的新表格容器，
+// 只要在滚动容器上加这个属性就会被识别，无需再改这里与 global-ux.css 的类清单。
 export const TABLE_SCROLL_SCROLLERS = Object.freeze([
   '.contract-table-scroll',
   '.console-table-scroll',
@@ -50,6 +52,7 @@ export const TABLE_SCROLL_SCROLLERS = Object.freeze([
   '.table-panel',
   '.filetask-table-wrap',
   '.iam-mini-table',
+  '[data-table-scroll]',
 ])
 
 export const TABLE_SCROLL_SELECTOR = TABLE_SCROLL_SCROLLERS.join(', ')

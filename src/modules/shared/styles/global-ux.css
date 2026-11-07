@@ -253,7 +253,7 @@ fieldset { min-inline-size: 0; }
    3) :where() 保持零权重，项目管理的自定义滚动条等模块规则照旧优先。 */
 :where(.contract-table-scroll, .console-table-scroll, .settlement-table-scroll,
     .da-table-scroll, .pm-table-scroll, .table-panel, .filetask-table-wrap,
-    .iam-mini-table) {
+    .iam-mini-table, [data-table-scroll]) {
   background-image:
     linear-gradient(to left, var(--surface-card, #fff) 0, rgba(255, 255, 255, 0) 100%),
     linear-gradient(to left, var(--table-scroll-edge, rgba(15, 23, 42, .14)) 0,
@@ -267,18 +267,18 @@ fieldset { min-inline-size: 0; }
 .table-scroll-enhanced { background-image: none; }
 :where(.contract-table-scroll, .console-table-scroll, .settlement-table-scroll,
     .da-table-scroll, .pm-table-scroll, .table-panel, .filetask-table-wrap,
-    .iam-mini-table)::-webkit-scrollbar { width: 8px; height: 8px; }
+    .iam-mini-table, [data-table-scroll])::-webkit-scrollbar { width: 8px; height: 8px; }
 :where(.contract-table-scroll, .console-table-scroll, .settlement-table-scroll,
     .da-table-scroll, .pm-table-scroll, .table-panel, .filetask-table-wrap,
-    .iam-mini-table)::-webkit-scrollbar-track { background: transparent; }
+    .iam-mini-table, [data-table-scroll])::-webkit-scrollbar-track { background: transparent; }
 :where(.contract-table-scroll, .console-table-scroll, .settlement-table-scroll,
     .da-table-scroll, .pm-table-scroll, .table-panel, .filetask-table-wrap,
-    .iam-mini-table)::-webkit-scrollbar-thumb {
+    .iam-mini-table, [data-table-scroll])::-webkit-scrollbar-thumb {
   border-radius: 999px; background: var(--scrollbar-thumb, #cbd5e1);
 }
 :where(.contract-table-scroll, .console-table-scroll, .settlement-table-scroll,
     .da-table-scroll, .pm-table-scroll, .table-panel, .filetask-table-wrap,
-    .iam-mini-table)::-webkit-scrollbar-thumb:hover {
+    .iam-mini-table, [data-table-scroll])::-webkit-scrollbar-thumb:hover {
   background: var(--scrollbar-thumb-hover, #94a3b8);
 }
 
@@ -286,7 +286,7 @@ fieldset { min-inline-size: 0; }
 @supports (-moz-appearance: none) {
   :where(.contract-table-scroll, .console-table-scroll, .settlement-table-scroll,
       .da-table-scroll, .pm-table-scroll, .table-panel, .filetask-table-wrap,
-      .iam-mini-table) {
+      .iam-mini-table, [data-table-scroll]) {
     scrollbar-width: thin;
     scrollbar-color: var(--scrollbar-thumb, #cbd5e1) transparent;
   }

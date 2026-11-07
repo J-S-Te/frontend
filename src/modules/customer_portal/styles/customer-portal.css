@@ -214,6 +214,11 @@
 .project-pagination button:hover:not(:disabled) { color: var(--p, #2563eb); border-color: var(--border-brand-strong, #93c5fd); }
 .project-pagination button:disabled { color: var(--text-faint, #94a3b8); cursor: not-allowed; }
 
+/* 项目动态的列表分页用共享 PaginationBar（.ui-pager）：这里只留外距。
+   .project-pagination 仍是「加载更多」手写导航的样式，不要再复用到分页条上：
+   那条规则带 !important 的居中对齐，会覆盖分页条自己的右对齐与尺寸。 */
+.portal-pagination { padding: 8px 0; }
+
 /* ===== 双栏布局 ===== */
 .portal-columns { display: grid; grid-template-columns: 380px minmax(0, 1fr); gap: 18px; }
 

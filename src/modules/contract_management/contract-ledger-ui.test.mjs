@@ -426,7 +426,7 @@ test('台账页脚展示服务端总数与分页条，不再出现 200 条上限
   // 上一页 / 第 N 页，共 M 条 / 下一页的文案与禁用语义由组件保证（见 shared/pagination-bar.test.mjs），
   // 台账侧继续用服务端 total 作为总数来源、用 changeLedgerPage 作为翻页入口。
   // 页脚左侧原来还有一句「共 N 条合同记录」，与分页条的总数重复，已随统一去掉。
-  assert.match(ledger, /<PaginationBar label="合同台账分页" :page="ledgerPage" :total="ledgerTotal" :page-size="ledgerPageSize" :loading="businessDataLoading" @change="changeLedgerPage" @change-page-size="changeLedgerPageSize" \/>/)
+  assert.match(ledger, /<PaginationBar label="合同台账分页" :page="ledgerPage" :total="ledgerTotal" :page-size-options="\[20, 50, 100\]" :page-size="ledgerPageSize" :loading="businessDataLoading" @change="changeLedgerPage" @change-page-size="changeLedgerPageSize" \/>/)
   assert.doesNotMatch(ledger, /共 \{\{ ledgerTotal \}\} 条合同记录/)
   assert.doesNotMatch(ledger, /单次最多 200 条/)
   assert.doesNotMatch(ledger, /已加载 \{\{/)

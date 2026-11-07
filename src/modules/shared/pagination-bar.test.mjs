@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import * as Vue from 'vue'
@@ -226,20 +226,35 @@ function pageButtonTags(html) {
   return [...html.matchAll(/<button\b[^>]*class="ui-pager__page[^"]*"[^>]*>[^<]*<\/button>/g)].map((matched) => matched[0])
 }
 
-test('仅 total 存在时渲染页码、跳页与 20/50/100 页大小；total 未知时三者都不渲染', async () => {
+test('仅 total 存在时渲染页码与跳页；total 未知时两者都不渲染', async () => {
   const known = await render({ page: 2, total: 120, pageSize: 20 })
-  assert.match(known, /ui-pager__page/, '有总数时必须有页码按钮')
+  assert.match(known, /class="ui-pager__page\b/, '有总数时必须有页码按钮')
   assert.match(known, /aria-current="page"/, '当前页必须有 aria-current')
   assert.match(known, /跳至/)
-  assert.match(known, /每页/)
-  assert.match(known, /<option value="20" selected>20<\/option>|value="20"/)
-  assert.match(known, /<option value="50"/)
-  assert.match(known, /<option value="100"/)
 
   const unknown = await render({ page: 2, total: null, count: 50, pageSize: 50, hasMore: true })
-  assert.doesNotMatch(unknown, /ui-pager__page/, 'offset 分页不知道总页数，不得伪造页码')
+  assert.doesNotMatch(unknown, /class="ui-pager__page\b/, 'offset 分页不知道总页数，不得伪造页码')
   assert.doesNotMatch(unknown, /跳至/)
-  assert.doesNotMatch(unknown, /每页/)
+})
+
+// P2③：页大小下拉是显式 opt-in。17 个未接 @change-page-size 的页面必须默认不出现
+// 这个下拉，否则就是一个点了没反应、也不会重载列表的死控件。
+test('「每页」下拉默认不渲染；只有传 pageSizeOptions 的页面才出现候选', async () => {
+  const byDefault = await render({ page: 2, total: 120, pageSize: 20 })
+  assert.doesNotMatch(byDefault, /每页/, '未 opt-in 的页面不得渲染「每页」标签')
+  assert.doesNotMatch(byDefault, /class="ui-pager__size"/, '未 opt-in 的页面不得渲染页大小下拉')
+  assert.doesNotMatch(byDefault, /<option value="50"/)
+
+  const optIn = await render({ page: 2, total: 120, pageSize: 20, pageSizeOptions: [20, 50, 100] })
+  assert.match(optIn, /每页/)
+  assert.match(optIn, /class="ui-pager__size"/)
+  assert.match(optIn, /<option value="20" selected>20<\/option>|value="20"/)
+  assert.match(optIn, /<option value="50"/)
+  assert.match(optIn, /<option value="100"/)
+
+  // opt-in 但当前页大小不在候选里时补进候选，避免下拉值与页面实际页大小不一致。
+  const missingCurrent = await render({ page: 1, total: 30, pageSize: 30, pageSizeOptions: [20, 50] })
+  assert.match(missingCurrent, /<option value="30"/)
 })
 
 test('页码窗口：总页数不超过 7 时全部展示，超过时保留首尾与当前页并用省略号收束', async () => {
@@ -286,13 +301,98 @@ test('跳页输入提交目标页，非法输入不 emit；翻页后清空草稿
   assert.equal(events.length, 1, '非法 / 空输入不得 emit')
 })
 
-test('页大小选择 emit change-page-size，不重复 emit 相同值', async () => {
+test('页大小选择 emit change-page-size，不重复 emit 相同值；未 opt-in 不 emit', async () => {
   const events = []
-  const ctx = setup({ page: 1, total: 100, pageSize: 20 }, events)
+  const ctx = setup({ page: 1, total: 100, pageSize: 20, pageSizeOptions: [20, 50, 100] }, events)
   assert.equal(ctx.safePageSize.value, 20)
   ctx.changePageSize({ target: { value: '50' } })
   ctx.changePageSize({ target: { value: '20' } })
   ctx.changePageSize({ target: { value: 'abc' } })
   assert.deepEqual(events, [['change-page-size', 50]])
   assert.deepEqual(ctx.pageSizeChoices.value, [20, 50, 100])
+
+  const notOptedIn = []
+  const plain = setup({ page: 1, total: 100, pageSize: 20 }, notOptedIn)
+  assert.deepEqual(plain.pageSizeChoices.value, [], '未传候选时没有可切换的页大小')
+  plain.changePageSize({ target: { value: '50' } })
+  assert.deepEqual(notOptedIn, [], '未 opt-in 的页面即使被误调用也不得 emit')
+})
+
+
+// ── 布局契约（「跳至 / 每页 / 跳转」错位与按钮换行的回归锁） ────────────────
+
+const PAGER_SOURCE = readFileSync(join(SRC, 'modules/shared/components/PaginationBar.vue'), 'utf8')
+const PAGER_STYLE = PAGER_SOURCE.match(/<style scoped>([\s\S]*?)<\/style>/)?.[1]
+
+test('跳页与页大小控件都有可见标签、无障碍名，且跳转按钮不在 <label> 里', async () => {
+  const html = await render({ page: 1, total: 120, pageSize: 20, pageSizeOptions: [20, 50, 100] })
+  assert.match(html, /<span class="ui-pager__label">跳至<\/span>/)
+  assert.match(html, /<span class="ui-pager__unit">页<\/span>/)
+  assert.match(html, /<span class="ui-pager__label">每页<\/span>/)
+  assert.match(html, /<span class="ui-pager__unit">条<\/span>/)
+  assert.match(html, /class="ui-pager__jump"[^>]*aria-label="跳转页码（共 6 页）"/)
+  assert.match(html, /class="ui-pager__size"[^>]*aria-label="每页条数（当前 20 条）"/)
+
+  const fields = [...html.matchAll(/<label class="ui-pager__field">([\s\S]*?)<\/label>/g)].map((match) => match[1])
+  assert.equal(fields.length, 2, '跳至页与每页条数各有一个 label')
+  for (const field of fields) {
+    assert.doesNotMatch(field, /<button\b/, '按钮不能嵌进 label，否则点按钮会先聚焦输入框、读屏也会读成输入框标签')
+  }
+  assert.match(
+    html,
+    /<\/label><button type="button" class="ui-pager__button ui-pager__button--small"[^>]*>跳转<\/button>/,
+    '跳转按钮与输入框同组但独立',
+  )
+  // 组内不拆行：跳至组 = label + 跳转按钮。
+  assert.match(html, /<div class="ui-pager__group"><label class="ui-pager__field">[\s\S]*?<\/label><button[^>]*>跳转<\/button><\/div>/)
+})
+
+test('样式契约：分页条自带 scoped 样式，用双写类名压过模块通用控件规则', () => {
+  assert.ok(PAGER_STYLE, 'PaginationBar.vue 必须有 <style scoped>')
+  for (const selector of [
+    '.ui-pager.ui-pager {',
+    '.ui-pager.ui-pager .ui-pager__button',
+    '.ui-pager.ui-pager .ui-pager__jump',
+    '.ui-pager.ui-pager .ui-pager__extra',
+  ]) {
+    assert.ok(PAGER_STYLE.includes(selector), `缺少样式规则 ${selector}`)
+  }
+  // 固定宽度/高度与不折行是这次错位修复的核心，不允许退化成 width:100%。
+  const jumpRule = PAGER_STYLE.match(/\.ui-pager\.ui-pager \.ui-pager__jump \{([\s\S]*?)\}/)?.[1] || ''
+  assert.match(jumpRule, /width:\s*60px/)
+  assert.match(jumpRule, /min-width:\s*60px/)
+  const fieldRule = PAGER_STYLE.match(/\.ui-pager\.ui-pager \.ui-pager__field \{([\s\S]*?)\}/)?.[1] || ''
+  assert.match(fieldRule, /white-space:\s*nowrap/)
+  const statusRule = PAGER_STYLE.match(/\.ui-pager\.ui-pager \.ui-pager__status \{([\s\S]*?)\}/)?.[1] || ''
+  assert.match(statusRule, /white-space:\s*nowrap/)
+  assert.match(PAGER_STYLE, /flex:\s*0 0 auto/, '按钮不能继承模块的 flex:1（会被撑成半宽换行）')
+  // 根节点显式声明行方向：页面规则（登录目标页 ≤720px 的 column 分组）不得把分页条改成纵向。
+  const rootRule = PAGER_STYLE.match(/\.ui-pager\.ui-pager \{([\s\S]*?)\}/)?.[1] || ''
+  assert.match(rootRule, /flex-direction:\s*row/, '分页条根节点必须显式 flex-direction: row 兜底')
+  assert.match(PAGER_STYLE, /@media \(max-width: 720px\)/, '窄屏必须允许换行并改为左对齐')
+  assert.match(PAGER_STYLE, /@media \(pointer: coarse\)/, '触控目标需要 44px 兜底')
+})
+
+test('只有组件自己定义 .ui-pager 内部样式；模块 CSS 不得用 !important 覆盖分页条', () => {
+  const stateCss = readFileSync(join(SRC, 'modules/platform/shared/styles/state.css'), 'utf8')
+  assert.doesNotMatch(stateCss, /\.ui-pager\b\s*\{/, '全局 state.css 不应再保留第二份 .ui-pager 规则')
+  const offenders = []
+  const visit = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name)
+      if (entry.isDirectory()) {
+        if (!['node_modules', '.mimosa'].includes(entry.name)) visit(path)
+        continue
+      }
+      if (!/\.(css|vue)$/.test(entry.name)) continue
+      const source = readFileSync(path, 'utf8')
+      for (const match of source.matchAll(/([^{}]*ui-pager[^{}]*)\{([^{}]*)\}/g)) {
+        if (!/!important/.test(match[2])) continue
+        if (path.endsWith('PaginationBar.vue')) continue
+        offenders.push(`${path}: ${match[1].trim()}`)
+      }
+    }
+  }
+  visit(join(SRC, 'modules'))
+  assert.deepEqual(offenders, [], `模块样式不得用 !important 覆盖分页条：\n${offenders.join('\n')}`)
 })

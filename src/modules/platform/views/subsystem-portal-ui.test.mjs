@@ -70,9 +70,11 @@ test('门户在桌面端按卡片数量自适应一屏，分页交给统一 Pagi
   assert.doesNotMatch(source, /aria-label="下一页"/)
   assert.doesNotMatch(source, /第 \{\{ portalPage \}\} \/ \{\{ portalTotalPages \}\} 页/)
   assert.doesNotMatch(source, /v-if="portalTotalPages > 1"/)
-  // 门户不再给共享分页条自绘按钮样式，只保留居中位置并桥接门户 token（深色/浅色都走 token）。
+  // 门户不再给共享分页条自绘按钮样式，也不再自己决定对齐方式：
+  // 对齐与控件尺寸由共享分页条统一（桌面右对齐、窄屏左对齐），这里只保留外距。
   assert.doesNotMatch(styles, /\.subsystem-portal__pagination button/)
-  assert.match(styles, /\.subsystem-portal__pagination \{[^}]*(justify-content: center)/)
+  assert.doesNotMatch(styles, /\.subsystem-portal__pagination \{[^}]*(justify-content: center)/)
+  assert.match(styles, /\.subsystem-portal__pagination \{[^}]*flex: 0 0 auto/)
   assert.match(styles, /--border: var\(--portal-border\)/)
   assert.match(styles, /--text-muted: var\(--portal-text-muted\)/)
   assert.match(styles, /height:\s*100dvh/)
