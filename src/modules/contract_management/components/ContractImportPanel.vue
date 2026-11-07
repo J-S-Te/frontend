@@ -2,7 +2,10 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { contractImportRequest, listContractImportBatches, releaseContractImportItem,
   getImportItemDocumentDescriptor, importItemSourceURL, openContractCRMLogin,
-  listMyCustomers, ensureContractCRMDirectorySession, listContractDetectionCategories } from '../api/contract.js'
+  listMyCustomers, ensureContractCRMDirectorySession, listContractDetectionCategories,
+  getImportAutoApproveSetting, setImportAutoApproveSetting } from '../api/contract.js'
+import { formatBusinessDateTime } from '@/modules/shared/utils/businessTime.js'
+import { copyTextToClipboard } from '@/modules/shared/utils/clipboard.js'
 import ContractPDFPreview from './ContractPDFPreview.vue'
 import LocalContractSourcePicker from './LocalContractSourcePicker.vue'
 import { importRowSourceForm, applyImportRowSourceForm } from '../utils/localImportSourceBridge.js'
@@ -20,7 +23,12 @@ import { useDictionaryOptions } from '@/modules/platform/dictionaries/composable
 import { ensureStableReviewAttempt } from '../utils/opportunityIntakeReview.js'
 
 const props = defineProps({ enabled: Boolean, pdfEnabled: Boolean, canPreview: { type: Boolean, default: true }, canCommit: Boolean,
-  canApprove: Boolean, canRelease: Boolean, actorId: { type: String, default: '' }, initialBatchId: { type: String, default: '' },
+  canApprove: Boolean, canRelease: Boolean, canManageAutoApprove: Boolean,
+  actorId: { type: String, default: '' }, initialBatchId: { type: String, default: '' },
+  // 当前所在页签：imports 页把自动审批状态条固定展示在折叠面板之外（P2-5）。
+  section: { type: String, default: '' },
+  // 进入导入页或带批次号直达时默认展开面板；合同台账页保持折叠（P1-4）。
+  defaultOpen: { type: Boolean, default: false },
   supportedModes: { type: Array, default: () => ['NORMAL'] },
   sourceCapabilities: { type: Object, default: () => ({}) } })
 const text = ref(''), files = ref([]), batch = ref(null), batchID = ref(''), lookupID = ref(props.initialBatchId)
@@ -36,6 +44,47 @@ const excelExcludedFiles = ref([])
 const drawerRowKey = ref(''), drawerRef = ref(null)
 const customerOptions = ref([]), customerLoading = ref(false), customerError = ref(''), customerCrmRequired = ref(false)
 const detectionCategoryOptions = ref([]), detectionCategoryLoading = ref(false), detectionCategoryError = ref('')
+// 历史导入自动审批是全系统唯一开关：只有合同超级管理员能看到这一行。
+// 读取到 version 后才允许写，写请求带版本，避免覆盖另一位管理员的修改。
+const autoApprove = ref(null), autoApproveLoading = ref(false), autoApproveSaving = ref(false)
+const autoApproveError = ref(''), autoApproveErrorCode = ref(''), autoApproveNotice = ref(''), autoApproveCopyHint = ref('')
+const autoApproveConfirm = ref('')
+let autoApproveTicket = 0
+const AUTO_APPROVE_DISABLED_TEXT = '服务端未开启该能力（需部署时配置 CONTRACT_IMPORT_AUTO_APPROVE_HISTORICAL=true），请联系平台运维。'
+const autoApproveCapability = computed(() => autoApprove.value?.capability_enabled === true)
+const autoApproveEnabled = computed(() => autoApprove.value?.enabled === true)
+const autoApproveBusy = computed(() => autoApproveLoading.value || autoApproveSaving.value)
+const autoApproveSwitchDisabled = computed(() => autoApproveBusy.value || !autoApprove.value || !autoApproveCapability.value)
+const autoApproveStatusLabel = computed(() => {
+  if (!autoApprove.value) return '设置未读取'
+  if (!autoApproveCapability.value) return '能力未开启'
+  return autoApproveEnabled.value ? '已开启' : '已关闭'
+})
+const autoApproveStatusTone = computed(() => (autoApproveCapability.value && autoApproveEnabled.value ? 'success' : 'neutral'))
+// 更新人/时间由服务端记录，按北京时间展示；两者都缺失时不显示假的更新时间。
+const autoApproveUpdatedLabel = computed(() => {
+  const data = autoApprove.value
+  if (!data) return ''
+  const actor = typeof data.updated_by === 'string' ? data.updated_by.trim() : ''
+  const at = data.updated_at ? formatBusinessDateTime(data.updated_at) : ''
+  if (actor && at) return `最近更新：${actor}（${at}）`
+  if (actor) return `最近更新：${actor}`
+  if (at) return `最近更新：${at}`
+  return ''
+})
+const autoApproveConfirmText = computed(() => (autoApproveConfirm.value === 'enable'
+  ? '开启后历史合同导入将自动审批并按清单声明状态归档，跳过人工会签；仅超级管理员可操作。'
+  : '关闭后历史合同导入将恢复人工会签确认；仅超级管理员可操作。'))
+
+// P1-4：导入页或带批次号直达时默认展开，合同台账页保持折叠。
+// 用受控 open 而不是只在 onMounted 改 DOM，SSR/测试与浏览器两侧行为一致；
+// 用户手动折叠后仍以原生 toggle 事件回写状态。
+const panelOpen = ref(Boolean(props.defaultOpen))
+watch(() => props.defaultOpen, (value) => { panelOpen.value = Boolean(value) })
+function onPanelToggle(event) {
+  const next = Boolean(event?.target?.open)
+  if (next !== panelOpen.value) panelOpen.value = next
+}
 let detectionCategoriesLoaded = false, drawerReturnFocus = null
 const { options: serviceTypeItems } = useDictionaryOptions('CONTRACT_SERVICE_TYPE', { fallback: fallbackServiceTypeOptions })
 const serviceTypeOptions = computed(() => (serviceTypeItems.value || []).map((item) => item.value).filter(Boolean))
@@ -46,6 +95,20 @@ const modeLabels = { NORMAL: '普通新合同', ARCHIVE_ONLY: '历史存档', CO
 const targetLabels = { PROJECT: '项目接续', FINANCE: '财务接续', REPORT: '数析同步' }
 const stateLabels = { DRAFT: '待预检', WAITING_RELEASE: '待申请放行', WAITING: '等待依赖满足', QUEUED: '等待执行', RUNNING: '正在核对执行', HOLD: '暂未放行', PREPARING: '正在建立财务暂存', PREPARED: '财务已暂存，待恢复对账', READY: '核对就绪，尚未放行', RELEASE_REQUESTED: '放行已申请，等待实际应用', COMPLETE: '已完成', COMPLETED: '已完成', NOT_APPLICABLE: '不建立此类业务', FAILED: '执行失败，可核对恢复', BLOCKED: '需要处理阻塞', NEEDS_REVIEW: '合同版本变化，需核对', CORRECTION_REQUIRED: '已建单基线需要业务更正', CREATED: '记录已创建，正在完成文件引用', PENDING: '待处理', APPROVED: '确认通过', STARTING: '正在启动独立确认', REJECTED: '确认驳回', WITHDRAWN: '确认撤回', EXPIRED: '确认已超时' }
 const historyItems = computed(() => (batch.value?.items || []).filter(entry => entry.item.mode !== 'NORMAL'))
+// P2-4：自动审批已开启且有历史项时，批次页脚文案必须与真实审批路径一致，
+// 不能再写“之后独立确认/逐份审批”让人误以为还要人工会签。
+const historyAutoApproveActive = computed(() => autoApproveEnabled.value && historyItems.value.length > 0)
+const batchPreviewNote = computed(() => {
+  const pending = batch.value ? batch.value.items.filter((entry) => !entry.contract_id).length : 0
+  if (historyAutoApproveActive.value) {
+    return `预计创建 ${pending} 份记录；历史项将按清单声明状态自动审批归档（自动审批已开启），普通新合同仍逐份审批；确认后分别放行项目、财务和报表。`
+  }
+  return `预计创建 ${pending} 份记录；本次不免审生效。普通模式之后逐份审批；历史模式之后独立确认，再分别放行项目、财务和报表。`
+})
+// 批次头的状态徽标只在自动审批开启且本批次确有历史项时出现；普通新合同批次
+// 即使全局开关开启也不该显示无关的自动审批提示。
+const showAutoApproveBadge = computed(() => autoApproveEnabled.value && historyItems.value.length > 0)
+
 const issueLabels = {
   ...contractImportProvisionIssueLabels,
   IMPORT_CRM_SESSION_REQUIRED: 'CRM 当前账号授权上下文缺失或已过期，请连接 CRM 后重新预检。',
@@ -1170,13 +1233,129 @@ function downloadImportErrorReport() {
   finally { if (url) URL.revokeObjectURL(url) }
 }
 
-onMounted(() => { if (props.initialBatchId) refresh(props.initialBatchId) })
+/**
+ * loadAutoApprove 读取历史导入自动审批的当前状态与服务端能力开关。
+ * 参数：无；只有合同超级管理员触发，能力关闭也是正常返回。
+ * 返回值：Promise<void>；迟到的读取不会覆盖更新的读取结果。
+ */
+async function loadAutoApprove() {
+  if (!props.canManageAutoApprove) return
+  const ticket = ++autoApproveTicket
+  autoApproveLoading.value = true
+  autoApproveError.value = ''; autoApproveErrorCode.value = ''; autoApproveCopyHint.value = ''
+  try {
+    const data = await getImportAutoApproveSetting()
+    if (disposed || ticket !== autoApproveTicket) return
+    autoApprove.value = data
+  } catch (failure) {
+    if (disposed || ticket !== autoApproveTicket) return
+    autoApproveErrorCode.value = typeof failure?.code === 'string' ? failure.code : ''
+    autoApproveError.value = failure?.message || '读取历史导入自动审批设置失败，请稍后重试。'
+  } finally {
+    if (ticket === autoApproveTicket) autoApproveLoading.value = false
+  }
+}
+
+// 初始化与权限迟到时都只读一次：已有结果、正在读取或已报错都不重复请求。
+function ensureAutoApproveLoaded() {
+  if (!props.canManageAutoApprove || autoApproveBusy.value || autoApprove.value || autoApproveError.value) return
+  loadAutoApprove()
+}
+
+/**
+ * requestAutoApproveToggle 打开确认条，不直接写服务端。
+ * 参数：event为原生复选框事件；确认前一律把开关显示拉回服务器状态。
+ * 返回值：无；真正保存见 applyAutoApproveToggle。
+ */
+function requestAutoApproveToggle(event) {
+  if (event?.target) event.target.checked = autoApproveEnabled.value
+  autoApproveNotice.value = ''; autoApproveError.value = ''; autoApproveErrorCode.value = ''; autoApproveCopyHint.value = ''
+  if (!props.canManageAutoApprove || autoApproveBusy.value) return
+  if (!autoApprove.value) { ensureAutoApproveLoaded(); return }
+  if (!autoApproveCapability.value) { autoApproveError.value = AUTO_APPROVE_DISABLED_TEXT; return }
+  autoApproveConfirm.value = autoApproveEnabled.value ? 'disable' : 'enable'
+}
+
+/**
+ * applyAutoApproveToggle 提交确认后的开关变更，并带上刚读取到的版本。
+ * 参数：无；目标状态来自当前确认条。
+ * 返回值：Promise<void>；成功后以服务端返回值刷新状态，版本冲突时重新读取。
+ */
+async function applyAutoApproveToggle() {
+  const target = autoApproveConfirm.value === 'enable'
+  if (!props.canManageAutoApprove || !autoApprove.value || autoApproveSaving.value) return
+  const expectedVersion = Number.isSafeInteger(autoApprove.value.version) ? autoApprove.value.version : 0
+  autoApproveSaving.value = true
+  autoApproveError.value = ''; autoApproveErrorCode.value = ''; autoApproveNotice.value = ''; autoApproveCopyHint.value = ''
+  try {
+    const data = await setImportAutoApproveSetting({ enabled: target, expectedVersion })
+    autoApprove.value = data
+    autoApproveConfirm.value = ''
+    autoApproveNotice.value = data.enabled ? '历史导入自动审批已开启。' : '历史导入自动审批已关闭。'
+  } catch (failure) {
+    const code = typeof failure?.code === 'string' ? failure.code : ''
+    autoApproveErrorCode.value = code
+    if (code === 'IMPORT_REVISION_CONFLICT') {
+      // 版本冲突说明别人刚改过：先放弃本地确认态并重新读取，避免拿旧版本反复重试。
+      autoApproveConfirm.value = ''
+      await loadAutoApprove()
+      autoApproveErrorCode.value = code
+      autoApproveError.value = autoApprove.value
+        ? '设置已被其他管理员更新，已重新读取最新状态，请刷新核对后重试。'
+        : '设置已被其他管理员更新，请刷新页面后重试。'
+    } else if (code === 'IMPORT_AUTO_APPROVE_DISABLED') {
+      autoApproveConfirm.value = ''
+      autoApproveError.value = AUTO_APPROVE_DISABLED_TEXT
+    } else {
+      autoApproveError.value = failure?.message || '自动审批设置未能保存，请稍后重试。'
+    }
+  } finally { autoApproveSaving.value = false }
+}
+
+function cancelAutoApproveToggle() {
+  if (!autoApproveSaving.value) autoApproveConfirm.value = ''
+}
+
+/**
+ * copyAutoApproveErrorCode 复制服务端错误码，便于转给平台运维排查。
+ * 参数：无；没有错误码时不复制。
+ * 返回值：Promise<void>；复制失败时提示手动选择。
+ */
+async function copyAutoApproveErrorCode() {
+  const code = autoApproveErrorCode.value
+  if (!code) return
+  try {
+    await copyTextToClipboard(code)
+    autoApproveCopyHint.value = `错误码 ${code} 已复制，可发给平台运维排查。`
+  } catch {
+    autoApproveCopyHint.value = '浏览器未允许自动复制，请手动选择错误码复制。'
+  }
+}
+
+// 会话与角色可能晚于面板挂载到位：权限从无到有时补一次读取，避免开关一直停在“设置未读取”。
+watch(() => props.canManageAutoApprove, (allowed) => { if (allowed) ensureAutoApproveLoaded() })
+
+onMounted(() => {
+  // 合同超级管理员一进入导入区就读一次开关状态，避免显示猜测的默认值。
+  ensureAutoApproveLoaded()
+  if (props.initialBatchId) refresh(props.initialBatchId)
+})
 
 onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; excelGeneration++; clearTimeout(timer) })
 </script>
 
 <template>
-  <details class="contract-import-panel">
+  <!-- P2-5：导入页顶部常驻状态条。放在折叠面板之外，面板收起时仍能看到
+       自动审批当前状态与最近变更人/时间；只对能读取该设置的合同超级管理员渲染。 -->
+  <aside v-if="section === 'imports' && canManageAutoApprove" class="contract-import-statusbar" role="status" aria-label="导入自动审批状态">
+    <span class="contract-import-statusbar-label">历史导入自动审批</span>
+    <span class="contract-badge" :class="autoApproveStatusTone"><i></i>{{ autoApproveStatusLabel }}</span>
+    <span v-if="autoApproveUpdatedLabel" class="contract-import-statusbar-meta">{{ autoApproveUpdatedLabel }}</span>
+    <span v-else-if="autoApproveLoading" class="contract-import-statusbar-meta">正在读取最近变更…</span>
+    <span class="contract-import-statusbar-hint"><template v-if="!autoApprove">正在读取自动审批状态…</template><template v-else>{{ autoApproveEnabled ? '历史项将按声明状态自动审批归档' : '历史项提交后仍需人工会签' }}；变更在“批量导入”面板内确认后生效。</template></span>
+  </aside>
+
+  <details class="contract-import-panel" :open="panelOpen" @toggle="onPanelToggle">
     <summary>批量导入外部合同原件</summary>
     <div class="contract-import-body">
       <div class="contract-import-intro">
@@ -1192,6 +1371,39 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
         <li>逐条核对问题</li>
         <li>提交冻结清单</li>
       </ol>
+
+      <!-- 历史导入自动审批是系统级开关，只对合同超级管理员渲染；能力未开启时只读。 -->
+      <section v-if="canManageAutoApprove" class="contract-import-block contract-import-auto-approve" aria-labelledby="contract-import-auto-approve-title">
+        <div class="contract-import-auto-approve-head">
+          <p id="contract-import-auto-approve-title" class="contract-import-batch-id">历史导入自动审批</p>
+          <span class="contract-badge" :class="autoApproveStatusTone"><i></i>{{ autoApproveStatusLabel }}</span>
+        </div>
+        <div class="contract-import-actions">
+          <label class="contract-import-switch-label">
+            <input class="contract-import-switch" type="checkbox" role="switch" aria-label="历史导入自动审批开关"
+              :checked="autoApproveEnabled" :disabled="autoApproveSwitchDisabled" @change="requestAutoApproveToggle" />
+            <span>{{ autoApproveEnabled ? '已开启' : '已关闭' }}</span>
+          </label>
+          <span v-if="autoApproveUpdatedLabel">{{ autoApproveUpdatedLabel }}</span>
+        </div>
+        <p class="contract-import-note">开启后，历史合同导入在提交冻结清单时自动审批并按清单声明状态归档，跳过人工会签；普通新合同仍走现有逐份审批。只有合同超级管理员可以切换，保存以服务端返回的版本为准。</p>
+        <p v-if="autoApproveLoading" class="contract-import-status is-loading" role="status">正在读取历史导入自动审批设置…</p>
+        <p v-if="autoApprove && !autoApproveCapability" class="contract-import-warning" role="status">{{ AUTO_APPROVE_DISABLED_TEXT }}</p>
+        <p v-if="autoApproveError" class="contract-import-alert" role="alert">
+          {{ autoApproveError }}
+          <span v-if="autoApproveErrorCode" class="contract-import-error-code">错误码 <code>{{ autoApproveErrorCode }}</code><button class="contract-text-button" type="button" @click="copyAutoApproveErrorCode">复制错误码</button></span>
+          <button class="contract-text-button" type="button" :disabled="autoApproveBusy" @click="loadAutoApprove">重新读取设置</button>
+        </p>
+        <p v-else-if="autoApproveNotice" class="contract-import-hint" role="status">{{ autoApproveNotice }}</p>
+        <p v-if="autoApproveCopyHint" class="contract-import-note" role="status">{{ autoApproveCopyHint }}</p>
+        <div v-if="autoApproveConfirm" class="contract-import-auto-approve-confirm" role="group" aria-label="确认变更历史导入自动审批" aria-live="polite">
+          <p class="contract-import-warning">{{ autoApproveConfirmText }}</p>
+          <div class="contract-import-actions">
+            <button class="contract-button primary small" type="button" :disabled="autoApproveSaving" @click="applyAutoApproveToggle">{{ autoApproveSaving ? '正在保存…' : (autoApproveConfirm === 'enable' ? '确认开启' : '确认关闭') }}</button>
+            <button class="contract-button secondary small" type="button" :disabled="autoApproveSaving" @click="cancelAutoApproveToggle">取消</button>
+          </div>
+        </div>
+      </section>
 
       <section class="contract-import-block contract-import-tools" aria-label="批次查询与新建">
         <div class="contract-import-toolbar">
@@ -1351,7 +1563,7 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
       <template v-if="batch">
         <section class="contract-import-block contract-import-batch" aria-label="批次导入结果">
           <header class="contract-import-block-head">
-            <p class="contract-import-batch-id" role="status">批次 {{ batch.batch_id }} · 第 {{ batch.revision }} 版 · {{ labels[batch.state] || batch.state }}</p>
+            <p class="contract-import-batch-id" role="status">批次 {{ batch.batch_id }} · 第 {{ batch.revision }} 版 · {{ labels[batch.state] || batch.state }}<span v-if="showAutoApproveBadge" class="contract-badge success contract-import-batch-approve-badge"><i></i>自动审批：已开启</span></p>
             <button class="contract-button secondary small" type="button" :disabled="busy || !importErrorReportRows.length" aria-label="下载合同批量导入错误报告 CSV" @click="downloadImportErrorReport">下载错误报告 CSV</button>
           </header>
           <p v-if="crmConnectionRequired" class="contract-import-alert contract-import-alert--warn" role="alert">CRM 当前账号授权上下文缺失或已过期，请先连接 CRM，再重新预检当前批次。 <button class="contract-text-button" type="button" :disabled="busy" @click="connectCRM()">连接 CRM</button> <span v-if="crmConnectionMessage" class="contract-import-hint" role="status">{{ crmConnectionMessage }}</span></p>
@@ -1413,7 +1625,7 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
           </div>
           <!-- 常驻页脚：在滚动容器之外，列表再长也不会把提交 / 暂停 / 恢复顶走。 -->
           <div class="contract-import-batch-foot">
-            <p v-if="batch.state === 'PREVIEWED'" class="contract-import-note">预计创建 {{ batch.items.filter(entry => !entry.contract_id).length }} 份记录；本次不免审生效。普通模式之后逐份审批；历史模式之后独立确认，再分别放行项目、财务和报表。</p>
+            <p v-if="batch.state === 'PREVIEWED'" class="contract-import-note">{{ batchPreviewNote }}</p>
             <p v-if="!batch.can_commit" class="contract-import-note">当前身份可查看此批次；提交和恢复须由具有导入提交权限的批次创建人执行。</p>
             <div class="contract-import-actions">
               <button v-if="batch.state === 'PREVIEWED' && !historyItems.length && canCommit && batch.can_commit" class="contract-button primary" type="button" :disabled="busy" @click="commit">确认冻结清单并创建草稿</button>
@@ -1563,6 +1775,29 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
    浅色渲染不变；深色下取 main.css 的值。 */
 
 /* ── 面板骨架 ─────────────────────────────────────────────────────────── */
+/* P2-5 导入页常驻状态条：与面板同宽同语言，信息按优先级从左到右，
+   窄屏自动换行，不挤压右侧说明。 */
+.contract-import-statusbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin-block: 16px 0;
+  padding: 10px 14px;
+  color: var(--text);
+  font-size: var(--fs-xs);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-muted);
+}
+
+.contract-import-statusbar-label { font-weight: 600; }
+.contract-import-statusbar-meta { color: var(--text-muted); }
+.contract-import-statusbar-hint { color: var(--text-muted); }
+
+/* 批次头徽标与批次号同一行，空间不足时随 flex 换行。 */
+.contract-import-batch-approve-badge { margin-inline-start: 8px; vertical-align: middle; }
+
 .contract-import-panel {
   margin-block: 16px;
   color: var(--text, #0f172a);
@@ -2273,6 +2508,54 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
 .contract-import-customer-picker li button:hover { background: var(--primary-soft, #eff6ff); }
 .contract-import-customer-picker li span { color: var(--text-muted, #64748b); font-size: 11px; }
 
+/* ── 历史导入自动审批（仅合同超级管理员） ───────────────────────────── */
+/* 开关用原生复选框绘制（appearance: none）：焦点、键盘和读屏语义仍由浏览器负责。
+   颜色全部引用全局 token，不在这里新造字面量，深色主题随 main.css 一起切换。 */
+.contract-import-auto-approve-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; }
+
+.contract-import-switch-label { display: inline-flex; align-items: center; gap: 8px; margin: 0; cursor: pointer; }
+
+.contract-import-switch {
+  width: 38px;
+  height: 22px;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid var(--border);
+  border-radius: var(--r-full, 999px);
+  background-color: var(--border);
+  /* 关闭态：描边色轨道 + 中性灰圆钮。浅色是浅灰轨道配灰钮，深色是深蓝灰轨道配灰钮，
+     两端都靠 --text-faint 与轨道拉开明度差，不引入字面量，也不依赖阴影。 */
+  background-image: radial-gradient(circle closest-side, var(--text-faint) 0 100%, transparent 100%);
+  background-repeat: no-repeat;
+  background-position: 2px center;
+  background-size: 16px 16px;
+  transition: background-color var(--duration-fast) ease, background-position var(--duration-fast) ease, border-color var(--duration-fast) ease;
+}
+
+/* 开启态：轨道换成主色、圆钮换成卡片色（浅色为白、深色为深蓝），
+   滑动距离 = 轨道内宽 36px - 圆钮 16px - 两侧各 2px 留白 = 18px。 */
+.contract-import-switch:checked {
+  border-color: var(--primary);
+  background-color: var(--primary);
+  background-image: radial-gradient(circle closest-side, var(--surface-card) 0 100%, transparent 100%);
+  background-position: 18px center;
+}
+
+/* 焦点环沿用主色：浅色与 panel 其他焦点环同为 #2563eb，深色由 main.css 的 --primary 提亮。 */
+.contract-import-switch:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+.contract-import-switch:disabled { cursor: not-allowed; opacity: .55; }
+
+.contract-import-auto-approve-confirm { display: grid; gap: 10px; }
+
+/* 错误码是可复制的短标签，等宽字体便于口头或工单核对。 */
+.contract-import-error-code { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-inline-start: 6px; }
+.contract-import-error-code code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
 /* ── 响应式：窄屏改单列，不产生横向滚动、不叠字 ─────────────────────── */
 @media (min-width: 900px) {
   .contract-import-batch-item { grid-template-columns: minmax(170px, 250px) minmax(0, 1fr); }
@@ -2315,5 +2598,6 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
 @media (prefers-reduced-motion: reduce) {
   .contract-import-status.is-loading::before { animation: none; }
   .contract-import-panel > summary::before { transition: none; }
+  .contract-import-switch { transition: none; }
 }
 </style>

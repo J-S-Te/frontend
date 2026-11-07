@@ -1,4 +1,4 @@
-.settings-view { min-width: 0; }
+.settings-view { --z-settings-tabs: 19; min-width: 0; }
 .settings-showcase-head { padding: 4px 2px 15px; }
 .settings-showcase-kicker { display: inline-flex; align-items: center; gap: 6px; color: var(--primary); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .settings-showcase-kicker svg { width: 15px; height: 15px; }
@@ -16,7 +16,20 @@
 .settings-tab-count { color: var(--text-faint, #94a3b8); font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .settings-tab-empty { display: inline-flex; align-items: center; padding: 10px 14px; color: var(--text-faint, #94a3b8); font-size: 12px; }
 
-.settings-tab-bar { display: flex; gap: 3px; margin-bottom: 12px; overflow-x: auto; border-bottom: 1px solid var(--border); scrollbar-width: thin; }
+.settings-tab-bar {
+  position: sticky;
+  /* 顶栏本身 sticky 在 0，页签条停在它下面，滚动设置分组时仍可切换页签。 */
+  top: 64px;
+  z-index: var(--z-settings-tabs);
+  display: flex;
+  gap: 3px;
+  margin-bottom: 12px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+  /* 吸顶时必须有不透明底色，否则滚动内容会从页签文字下面透出。 */
+  background: var(--surface-card);
+  scrollbar-width: thin;
+}
 .settings-tab { position: relative; display: inline-flex; flex: 0 0 auto; align-items: center; gap: 6px; padding: 10px 11px; margin-bottom: -1px; color: var(--text-muted, #64748b); font-size: 12px; font-weight: 600; line-height: 1.4; white-space: nowrap; cursor: pointer; border: 0; border-bottom: 2px solid transparent; background: transparent; transition: color .16s ease, background .16s ease, border-color .16s ease; }
 .settings-tab svg { width: 15px; height: 15px; color: var(--text-faint, #94a3b8); }
 .settings-tab:hover { color: var(--text-strong, #1e293b); background: var(--surface-muted, #f8fafc); }
@@ -40,6 +53,10 @@
 .settings-active-summary.green { border-color: var(--success-border, #c7f0d6); border-left-color: #16a34a; background: var(--success-soft, #ecfdf5); }.settings-active-summary.green .settings-active-summary-icon { color: #16a34a; background: var(--success-soft, #ecfdf5); }.settings-active-summary.green .settings-active-capabilities span { color: var(--success-text, #15803d); background: var(--success-soft, #ecfdf5); }
 .settings-active-summary.slate { border-color: var(--line-strong, #cbd5e1); border-left-color: #475569; background: #fbfcfd; }.settings-active-summary.slate .settings-active-summary-icon { color: var(--text-secondary, #475569); background: var(--chip-neutral, #e2e8f0); }.settings-active-summary.slate .settings-active-capabilities span { color: var(--text-secondary, #475569); background: var(--chip-neutral, #e2e8f0); }
 
+@media (max-width: 620px) {
+  /* ≤620px 共享顶栏高度降到 56px，页签条跟随收口，避免悬浮 8px 缝。 */
+  .settings-tab-bar { top: 56px; }
+}
 @media (max-width: 760px) {
   .settings-active-summary { align-items: flex-start; flex-wrap: wrap; }
   .settings-active-capabilities { flex-basis: 100%; justify-content: flex-start; padding-left: 42px; }

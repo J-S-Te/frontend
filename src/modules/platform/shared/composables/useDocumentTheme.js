@@ -11,40 +11,27 @@
 //     因此浅色渲染路径与今天完全一致；
 //   · 颜色本身不在这里决定，全部来自 main.css 的 [data-theme="dark"] token 覆盖。
 
-export const THEME_STORAGE_KEY = 'basic-platform.portal-theme'
-export const THEME_MODES = Object.freeze(['light', 'dark', 'system'])
-export const DEFAULT_THEME_MODE = 'light'
-// 门户主题开关按钮的类名；同一标签页内的切换不会触发 storage 事件，
-// 因此用一次委托点击把偏好重新读进文档属性。
-export const THEME_SWITCHER_SELECTOR = '.subsystem-portal__theme-option'
-// 其它写入方（例如后续把开关抽成共享组件）可广播这个事件，无需再来改本文件。
-export const THEME_PREFERENCE_CHANGED_EVENT = 'basic-platform:theme-preference-changed'
+// 偏好键、读取逻辑与变更事件已下沉到 shared/theme，供共享外壳 AppShell 与门户开关
+// 共用同一份实现；这里保留同名 re-export，现有调用方与测试无需改动。
+import {
+  DEFAULT_THEME_MODE,
+  THEME_MODES,
+  THEME_PREFERENCE_CHANGED_EVENT,
+  THEME_STORAGE_KEY,
+  THEME_SWITCHER_SELECTOR,
+  readThemePreference,
+} from '../../../shared/theme/themePreference.js'
+
+export {
+  DEFAULT_THEME_MODE,
+  THEME_MODES,
+  THEME_PREFERENCE_CHANGED_EVENT,
+  THEME_STORAGE_KEY,
+  THEME_SWITCHER_SELECTOR,
+  readThemePreference,
+}
 
 const DARK_QUERY = '(prefers-color-scheme: dark)'
-
-// safeLocalStorage 在禁用 Cookie/存储的浏览器里返回 null 而不是抛错。
-// 参数：win 为 window 对象。
-// 返回值：Storage 或 null。
-function safeLocalStorage(win) {
-  try {
-    return win?.localStorage || null
-  } catch {
-    return null
-  }
-}
-
-// readThemePreference 读取门户写入的主题偏好。
-// 参数：win 为 window 对象。
-// 返回值：'light' | 'dark' | 'system'；缺失或非法值回落到默认模式。
-export function readThemePreference(win = globalThis.window) {
-  let stored = null
-  try {
-    stored = safeLocalStorage(win)?.getItem(THEME_STORAGE_KEY) ?? null
-  } catch {
-    stored = null
-  }
-  return THEME_MODES.includes(stored) ? stored : DEFAULT_THEME_MODE
-}
 
 // systemPrefersDark 读取操作系统深色偏好。
 // 参数：win 为 window 对象。

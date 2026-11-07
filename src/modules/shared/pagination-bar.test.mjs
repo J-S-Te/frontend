@@ -79,8 +79,10 @@ function setup(props, emit) {
   })
 }
 
+// 只取「上一页 / 下一页」主按钮：页码、跳页、页大小属于 total 存在时的附加控件，
+// 由下方独立用例断言，避免主按钮数量被新增控件带偏。
 function buttonTags(html) {
-  return [...html.matchAll(/<button\b[^>]*>[^<]*<\/button>/g)].map((matched) => matched[0])
+  return [...html.matchAll(/<button\b[^>]*class="ui-pager__button"[^>]*>[^<]*<\/button>/g)].map((matched) => matched[0])
 }
 
 test('只有一页且零记录时完全不渲染分页条', async () => {
@@ -215,4 +217,82 @@ test('点击语义：emit 目标页码；禁用时不 emit', async () => {
   const clamped = []
   setup({ page: 2, total: 60, pageSize: 20 }, clamped).goTo(0)
   assert.deepEqual(clamped, [['change', 1]], '非法目标页码钳到第 1 页后 emit')
+})
+
+
+// ── total 存在时的页码 / 跳页 / 页大小（P1-3） ─────────────────────────────
+
+function pageButtonTags(html) {
+  return [...html.matchAll(/<button\b[^>]*class="ui-pager__page[^"]*"[^>]*>[^<]*<\/button>/g)].map((matched) => matched[0])
+}
+
+test('仅 total 存在时渲染页码、跳页与 20/50/100 页大小；total 未知时三者都不渲染', async () => {
+  const known = await render({ page: 2, total: 120, pageSize: 20 })
+  assert.match(known, /ui-pager__page/, '有总数时必须有页码按钮')
+  assert.match(known, /aria-current="page"/, '当前页必须有 aria-current')
+  assert.match(known, /跳至/)
+  assert.match(known, /每页/)
+  assert.match(known, /<option value="20" selected>20<\/option>|value="20"/)
+  assert.match(known, /<option value="50"/)
+  assert.match(known, /<option value="100"/)
+
+  const unknown = await render({ page: 2, total: null, count: 50, pageSize: 50, hasMore: true })
+  assert.doesNotMatch(unknown, /ui-pager__page/, 'offset 分页不知道总页数，不得伪造页码')
+  assert.doesNotMatch(unknown, /跳至/)
+  assert.doesNotMatch(unknown, /每页/)
+})
+
+test('页码窗口：总页数不超过 7 时全部展示，超过时保留首尾与当前页并用省略号收束', async () => {
+  const small = await render({ page: 3, total: 100, pageSize: 20 })
+  assert.equal(pageButtonTags(small).length, 5, '5 页时页码全部展示')
+  assert.match(small, />1</)
+  assert.match(small, />5</)
+
+  const large = await render({ page: 10, total: 400, pageSize: 20 })
+  const pages = pageButtonTags(large)
+  assert.ok(pages.some((tag) => />1</.test(tag)), '保留首页')
+  assert.ok(pages.some((tag) => />20</.test(tag)), '保留末页')
+  assert.ok(pages.some((tag) => />10</.test(tag)), '保留当前页')
+  assert.ok(pages.some((tag) => />…</.test(tag)), '首尾与当前页之间用省略号')
+  assert.match(large, /aria-current="page"[^>]*>10<|>10<\/button>/, '当前页按钮高亮')
+})
+
+test('点击页码 emit 目标页，当前页 / 越界 / 加载中都按语义处理', async () => {
+  const events = []
+  const ctx = setup({ page: 3, total: 100, pageSize: 20 }, events)
+  ctx.goToPage(5)
+  ctx.goToPage(3)
+  ctx.goToPage(99)
+  ctx.goToPage(0)
+  assert.deepEqual(events, [['change', 5], ['change', 5], ['change', 1]], '当前页不 emit；越界钳到首尾页')
+
+  const loading = []
+  setup({ page: 3, total: 100, pageSize: 20, loading: true }, loading).goToPage(1)
+  assert.deepEqual(loading, [], '加载中点击页码不得 emit')
+})
+
+test('跳页输入提交目标页，非法输入不 emit；翻页后清空草稿', async () => {
+  const events = []
+  const ctx = setup({ page: 2, total: 100, pageSize: 20 }, events)
+  ctx.jumpDraft.value = '5'
+  ctx.submitJump()
+  assert.deepEqual(events, [['change', 5]])
+  assert.equal(ctx.jumpDraft.value, '', '提交后清空跳页草稿')
+
+  ctx.jumpDraft.value = 'abc'
+  ctx.submitJump()
+  ctx.jumpDraft.value = ''
+  ctx.submitJump()
+  assert.equal(events.length, 1, '非法 / 空输入不得 emit')
+})
+
+test('页大小选择 emit change-page-size，不重复 emit 相同值', async () => {
+  const events = []
+  const ctx = setup({ page: 1, total: 100, pageSize: 20 }, events)
+  assert.equal(ctx.safePageSize.value, 20)
+  ctx.changePageSize({ target: { value: '50' } })
+  ctx.changePageSize({ target: { value: '20' } })
+  ctx.changePageSize({ target: { value: 'abc' } })
+  assert.deepEqual(events, [['change-page-size', 50]])
+  assert.deepEqual(ctx.pageSizeChoices.value, [20, 50, 100])
 })

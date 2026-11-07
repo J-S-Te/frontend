@@ -392,6 +392,76 @@
   margin-left: auto;
 }
 
+/* 桌面侧栏折叠：按钮只在 ≥821px 出现；折叠后侧栏整体移出并隐藏焦点，
+   主区回到 0 偏移。窄屏继续使用汉堡 + 遮罩抽屉，不受折叠偏好影响。 */
+.console-sidebar-toggle {
+  display: grid;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  margin-right: 8px;
+  place-items: center;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 8px;
+  background: transparent;
+  transition: background var(--duration-fast) ease, color var(--duration-fast) ease;
+}
+
+.console-sidebar-toggle svg {
+  width: 17px;
+  height: 17px;
+  transition: transform var(--duration-fast) ease;
+}
+
+.console-sidebar-toggle:hover {
+  color: var(--p);
+  background: var(--p-bg);
+}
+
+.console-page.is-sidebar-collapsed .console-sidebar-toggle svg { transform: rotate(180deg); }
+.console-page.is-sidebar-collapsed .console-sidebar { transition: transform var(--duration-normal) ease; }
+
+@media (min-width: 821px) {
+  .console-page.is-sidebar-collapsed .console-sidebar {
+    transform: translateX(-100%);
+    visibility: hidden;
+  }
+
+  .console-page.is-sidebar-collapsed .console-main { margin-left: 0; }
+}
+
+/* 主题切换：三段式控件，尺寸与顶栏图标按钮接近；
+   当前项用主色实心，切换后由文档级 data-theme 统一换肤。 */
+.console-theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface-muted);
+}
+
+.console-theme-option {
+  min-height: 26px;
+  padding: 3px 9px;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  line-height: 1.3;
+  white-space: nowrap;
+  cursor: pointer;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  transition: color var(--duration-fast) ease, background var(--duration-fast) ease;
+}
+
+.console-theme-option:hover { color: var(--p); }
+
+.console-theme-option.active {
+  color: var(--on-primary);
+  background: var(--p);
+}
+
 .console-icon-button {
   position: relative;
   display: grid;
@@ -1007,6 +1077,11 @@
     place-items: center;
   }
 
+  /* 窄屏使用汉堡 + 遮罩抽屉，桌面折叠按钮让位。 */
+  .console-sidebar-toggle {
+    display: none;
+  }
+
   .console-main {
     margin-left: 0;
   }
@@ -1050,7 +1125,21 @@
     gap: 10px;
   }
 
+  /* P2-1：≤620px 仍保留通知铃铛；其余图标按钮（如收件箱）继续收起。 */
   .console-icon-button {
+    display: none;
+  }
+
+  .console-notification-menu .console-icon-button {
+    display: grid;
+  }
+
+  /* 主题切换让位给铃铛与核心操作；窄屏仍可在子系统门户切换主题。 */
+  .console-theme-toggle {
+    display: none;
+  }
+
+  .console-sidebar-toggle {
     display: none;
   }
 
