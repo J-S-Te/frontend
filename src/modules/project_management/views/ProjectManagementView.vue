@@ -128,7 +128,7 @@ import {
   getDashboard,
   getProjectSession,
   getProjectNavigation,
-  listProjects,
+  listProjectsSnapshot,
   getProjectMonitoring,
   listCapabilities,
   upsertCapability,
@@ -150,7 +150,7 @@ import {
   listSplitOverrides,
   saveSplitOverride,
   deleteSplitOverride,
-  listServiceItems,
+  listServiceItemsSnapshot,
   listPersonnel,
   listQualifiedPersonnel,
   listEquipmentReservations,
@@ -346,6 +346,8 @@ const toastType = ref('success')
 const isLoggingOut = ref(false)
 const loading = ref(true)
 const loadError = ref('')
+// 工作区快照走 all=1（服务端上限 500 行）；truncated 只驱动提示条，不改变整体替换逻辑。
+const workspaceTruncated = ref(false)
 const saving = ref(false)
 const emptyCreateForm = () => ({ name: '', customer: '', contract: '', contractID: '', contractVersion: '', site: '' })
 const createForm = ref(emptyCreateForm())
@@ -448,9 +450,10 @@ async function loadReportStageProjects() {
   }
   reportStageListLoading.value = true
   try {
-    const rows = await listProjects({ report_stage: stage })
+    // 报告阶段筛选同样必须走 all=1：默认分页只回 20 行，会把筛选结果静默截少。
+    const snapshot = await listProjectsSnapshot({ report_stage: stage })
     if (!reportStageListScope.isCurrent(ticket)) return
-    reportStageProjects.value = rows
+    reportStageProjects.value = snapshot.items
     reportStageListError.value = ''
   } catch (error) {
     if (!reportStageListScope.isCurrent(ticket)) return
@@ -1944,13 +1947,16 @@ async function loadWorkspace({ reportError = true } = {}) {
   try {
     // 项目、服务项和规则共同构成当前工作区快照；三者全部成功后才一次性替换页面状态，
     // 防止新旧数据混用。接口层仍分别执行会话与资源权限校验。
-    const [projectRows, itemRows, ruleRows, eventRows, capabilityRows, dashboardData, sessionData, navigationData, categoryRows, ruleCatalog] = await Promise.all([listProjects(), listServiceItems(), listRules(), listDeliveryEvents(), listCapabilities(), getDashboard(), getProjectSession(), getProjectNavigation(), listDetectionCategories(), listRuleConfigurationCatalog().catch((error) => {
+    // 列表接口省略 page_size 时只返回 20 行，工作区必须显式走 all=1 快照；
+    // 超过服务端 500 行上限时 truncated 为 true，用户据此提示缩小筛选范围。
+    const [projectSnapshot, itemSnapshot, ruleRows, eventRows, capabilityRows, dashboardData, sessionData, navigationData, categoryRows, ruleCatalog] = await Promise.all([listProjectsSnapshot(), listServiceItemsSnapshot(), listRules(), listDeliveryEvents(), listCapabilities(), getDashboard(), getProjectSession(), getProjectNavigation(), listDetectionCategories(), listRuleConfigurationCatalog().catch((error) => {
       ruleConfigurationCatalogError.value = formatUserError(error, { fallback: '规则目录加载失败' })
       return { automation_triggers: [], sla_statuses: [] }
     })])
     if (!workspaceScope.isCurrent(ticket)) return
-    projects.value = projectRows
-    serviceItems.value = itemRows.map((item) => ({ ...item, selected: ['待确认', '待复核'].includes(item.status) }))
+    projects.value = projectSnapshot.items
+    serviceItems.value = itemSnapshot.items.map((item) => ({ ...item, selected: ['待确认', '待复核'].includes(item.status) }))
+    workspaceTruncated.value = Boolean(projectSnapshot.truncated || itemSnapshot.truncated)
     rules.value = ruleRows.map(decorateRule)
     deliveryEvents.value = eventRows
     capabilities.value = capabilityRows
@@ -2887,7 +2893,7 @@ async function runOperation(kind) {
         await assignServiceItemTeams({
           item: selected, teamLeadID: form.teamLeadID, projectManagerID: form.projectManagerID,
           engineerIDs: selectedIDs(form.engineerIDs), executionAllowed: canExecutionAssign.value,
-          assignTeam, assignExecutionTeam, listServiceItems,
+          assignTeam, assignExecutionTeam, listServiceItemsSnapshot,
           onTeamAssigned: (id) => { selected.team_lead_id = id },
         })
         completedAssignmentIDs.push(selected.id)
@@ -3438,6 +3444,12 @@ onBeforeUnmount(() => {
         </section>
 
         <ListState v-if="loadError" error-title="后端数据加载失败" :error="loadError" retry-text="重新加载" @retry="loadWorkspace" />
+
+        <!-- F1：工作区走 all=1 快照，服务端上限 500 行；截断时明示集合不完整并引导缩小范围。 -->
+        <section v-if="workspaceTruncated" class="pm-contract-warning" role="status">
+          <ConsoleIcon name="info" />
+          <p>当前快照超过 500 行，仅展示前 500 条；请使用筛选或分页缩小范围</p>
+        </section>
 
         <section v-if="['decomposition', 'allocation'].includes(activeSection) && missingStampedContractCount" class="pm-contract-warning"><ConsoleIcon name="info" /><div><b>{{ missingStampedContractCount }} 份合同尚未上传盖章合同</b><p>{{ activeSection === 'decomposition' ? '合同审批已完成，可继续核对并确认服务项拆解；该提示不阻断拆解确认。' : '服务项拆解已确认，可继续分配团队、人员及设备；上传盖章合同后提示将自动清除。' }}</p></div></section>
 

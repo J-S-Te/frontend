@@ -6,7 +6,7 @@ import { formatUserError } from '../shared/utils/userError.js'
 
 const viewSource = await readFile(new URL('./views/ProjectManagementView.vue', import.meta.url), 'utf8')
 
-function allocationPage(items, { assignTeam = async () => {}, assignExecutionTeam = async () => {}, listServiceItems = async () => items.map(row => ({ ...row, version: row.version + 5 })), refreshed = async () => {} } = {}) {
+function allocationPage(items, { assignTeam = async () => {}, assignExecutionTeam = async () => {}, listServiceItemsSnapshot = async () => ({ items: items.map(row => ({ ...row, version: row.version + 5 })), total: items.length, truncated: false }), refreshed = async () => {} } = {}) {
   const ref = value => ({ value })
   const state = {
     selectedServiceItemIDs: ref(items.map(row => row.id)), operationForm: ref({ teamLeadID: 'lead-1', projectManagerID: 'manager-1', engineerIDs: 'engineer-1' }),
@@ -17,22 +17,22 @@ function allocationPage(items, { assignTeam = async () => {}, assignExecutionTea
   const operation = viewSource.slice(viewSource.indexOf('async function runOperation(kind)'), viewSource.indexOf('\nasync function revokeSelectedAssignment('))
   const toast = viewSource.slice(viewSource.indexOf('function showToast(message'), viewSource.indexOf('\nfunction projectEvents('))
   let refreshCount = 0
-  const run = new Function(...Object.keys(state), 'selectedServiceItems', 'selectedServiceItem', 'formatUserError', 'assignServiceItemTeams', 'assignTeam', 'assignExecutionTeam', 'listServiceItems', 'selectedIDs', 'loadWorkspace', 'refreshAfterWrite', 'window',
-    `let toastTimer; ${toast}; ${operation}; return runOperation;`)(...Object.values(state), selectedServiceItems, selectedServiceItem, formatUserError, assignServiceItemTeams, assignTeam, assignExecutionTeam, listServiceItems, text => text.split(','), async () => { refreshCount++; await refreshed() }, async () => { refreshCount++; await refreshed() }, { clearTimeout: () => {}, setTimeout: () => 1 })
+  const run = new Function(...Object.keys(state), 'selectedServiceItems', 'selectedServiceItem', 'formatUserError', 'assignServiceItemTeams', 'assignTeam', 'assignExecutionTeam', 'listServiceItemsSnapshot', 'selectedIDs', 'loadWorkspace', 'refreshAfterWrite', 'window',
+    `let toastTimer; ${toast}; ${operation}; return runOperation;`)(...Object.values(state), selectedServiceItems, selectedServiceItem, formatUserError, assignServiceItemTeams, assignTeam, assignExecutionTeam, listServiceItemsSnapshot, text => text.split(','), async () => { refreshCount++; await refreshed() }, async () => { refreshCount++; await refreshed() }, { clearTimeout: () => {}, setTimeout: () => 1 })
   return { ...state, run, refreshCount: () => refreshCount }
 }
 
 const item = { id: 'item-1', project_id: 'project-1', version: 12, status: '待分配', team_lead_id: '' }
 function inputs(overrides = {}) {
   return { item: { ...item }, teamLeadID: 'lead-1', projectManagerID: 'manager-1', engineerIDs: ['engineer-1'], executionAllowed: true,
-    assignTeam: async () => ({ status: 'TEAM_ASSIGNED' }), listServiceItems: async () => [{ ...item, team_lead_id: 'lead-1', version: 37 }], assignExecutionTeam: async () => ({}), ...overrides }
+    assignTeam: async () => ({ status: 'TEAM_ASSIGNED' }), listServiceItemsSnapshot: async () => ({ items: [{ ...item, team_lead_id: 'lead-1', version: 37 }], total: 1, truncated: false }), assignExecutionTeam: async () => ({}), ...overrides }
 }
 
 test('团队分配后重新读取真实版本再指派执行团队，不猜版本增量', async () => {
   const commands = []
   const result = await assignServiceItemTeams(inputs({
     assignTeam: async (id, payload) => { commands.push(['team', id, payload]); return { status: 'TEAM_ASSIGNED' } },
-    listServiceItems: async projectID => { commands.push(['read', projectID]); return [{ ...item, team_lead_id: 'lead-1', version: 37 }] },
+    listServiceItemsSnapshot: async projectID => { commands.push(['read', projectID]); return { items: [{ ...item, team_lead_id: 'lead-1', version: 37 }], total: 1, truncated: false } },
     assignExecutionTeam: async (id, payload) => commands.push(['execution', id, payload]),
   }))
   assert.deepEqual(commands, [
@@ -53,7 +53,7 @@ test('负责人被并发修改、阶段改变或响应缺少权威版本时禁�
   ]
   for (const rows of invalid) {
     let executionCalls = 0
-    await assert.rejects(assignServiceItemTeams(inputs({ listServiceItems: async () => rows, assignExecutionTeam: async () => { executionCalls++ } })), error => {
+    await assert.rejects(assignServiceItemTeams(inputs({ listServiceItemsSnapshot: async () => (Array.isArray(rows) ? { items: rows, total: rows.length, truncated: false } : rows), assignExecutionTeam: async () => { executionCalls++ } })), error => {
       assert.equal(error.status, 409)
       assert.equal(error.code, 'PM_STATE_CONFLICT')
       assert.equal(error.requiresReload, true)
@@ -70,7 +70,7 @@ test('第一步失败或结果未知不虚构已完成，不自动重试和不�
     let writes = 0
     await assert.rejects(assignServiceItemTeams(inputs({
       assignTeam: async () => { writes++; throw cause },
-      listServiceItems: async () => assert.fail('failed first write must not read-and-continue'),
+      listServiceItemsSnapshot: async () => assert.fail('failed first write must not read-and-continue'),
       assignExecutionTeam: async () => assert.fail('must not execute'),
     })), error => error === cause && !error.partialCompletion)
     assert.equal(writes, 1)
@@ -102,7 +102,7 @@ test('第二步失败保留部分完成和原始诊断，刷新后继续不会�
 })
 
 test('刷新失败时不丢失第一步成功事实，也不会继续下游指派', async () => {
-  await assert.rejects(assignServiceItemTeams(inputs({ listServiceItems: async () => { throw Object.assign(new Error('SQLSTATE HY000'), { status: 500, code: 'PM_INTERNAL_ERROR' }) }, assignExecutionTeam: async () => assert.fail('cannot continue without authoritative row') })), error => {
+  await assert.rejects(assignServiceItemTeams(inputs({ listServiceItemsSnapshot: async () => { throw Object.assign(new Error('SQLSTATE HY000'), { status: 500, code: 'PM_INTERNAL_ERROR' }) }, assignExecutionTeam: async () => assert.fail('cannot continue without authoritative row') })), error => {
     assert.match(error.message, /团队负责人已分配/)
     assert.equal(error.requiresReload, true)
     assert.doesNotMatch(error.message, /SQLSTATE/)
@@ -111,7 +111,7 @@ test('刷新失败时不丢失第一步成功事实，也不会继续下游指�
 })
 
 test('仅有团队指派权限时只提交第一步，已有负责人不被该工具覆盖', async () => {
-  const result = await assignServiceItemTeams(inputs({ executionAllowed: false, listServiceItems: () => assert.fail('no second step'), assignExecutionTeam: () => assert.fail('not authorized') }))
+  const result = await assignServiceItemTeams(inputs({ executionAllowed: false, listServiceItemsSnapshot: () => assert.fail('no second step'), assignExecutionTeam: () => assert.fail('not authorized') }))
   assert.deepEqual(result, { teamAssigned: true, executionAssigned: false })
   await assignServiceItemTeams(inputs({ item: { ...item, team_lead_id: 'existing-lead' }, executionAllowed: false, assignTeam: () => assert.fail('do not overwrite existing lead') }))
 })
@@ -121,6 +121,9 @@ test('操作台调用权威版本编排并在部分完成后刷新，不再复�
   const operation = source.slice(source.indexOf('async function runOperation(kind)'), source.indexOf('\nasync function revokeSelectedAssignment('))
   assert.match(operation, /await assignServiceItemTeams\(/)
   assert.match(operation, /onTeamAssigned: \(id\) => \{ selected\.team_lead_id = id \}/)
+  // 按项目回读权威版本必须走 all=1 快照：默认分页只回 20 行，会读不到目标行。
+  assert.match(operation, /assignTeam, assignExecutionTeam, listServiceItemsSnapshot,/)
+  assert.doesNotMatch(operation, /(?:^|[^.\w])listServiceItems,/)
   assert.match(operation, /if \(error\?\.status === 409 \|\| error\?\.requiresReload \|\| partialAssignment\) \{\s*try \{ await loadWorkspace\(\{ reportError: false \}\)/)
   assert.doesNotMatch(operation, /await assignExecutionTeam\(selected.id/)
 })
