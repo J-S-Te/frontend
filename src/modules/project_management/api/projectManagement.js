@@ -228,18 +228,18 @@ export async function ensureProjectSession() {
 }
 
 /**
- * unwrapPage 兼容两种列表响应：分页 envelope（{items,total,page,page_size}）与历史数组。
- * 后端列表接口统一返回 envelope，page_size 未指定时 items 即全量，
- * 因此下拉数据源（服务项、设备）仍能拿到完整集合。
+ * unwrapPage 兼容两种列表响应：分页 envelope（{items,total,page,page_size,truncated}）与历史数组。
+ * 后端省略 page_size 时只返回默认 20 行，因此 items 不再等于全量；需要完整集合时必须显式
+ * 走 all 快照模式（listProjectsSnapshot / listServiceItemsSnapshot）并检查 truncated。
  * @param {unknown} data 接口返回体。
- * @returns {{items: Array<object>, total: number}} 列表与总数。
+ * @returns {{items: Array<object>, total: number, truncated: boolean}} 列表、总数与快照截断标记。
  */
 function unwrapPage(data) {
-  if (Array.isArray(data)) return { items: data, total: data.length }
+  if (Array.isArray(data)) return { items: data, total: data.length, truncated: false }
   if (data && Array.isArray(data.items)) {
-    return { items: data.items, total: Number(data.total ?? data.items.length) }
+    return { items: data.items, total: Number(data.total ?? data.items.length), truncated: Boolean(data.truncated) }
   }
-  return { items: [], total: 0 }
+  return { items: [], total: 0, truncated: false }
 }
 
 /**
@@ -247,9 +247,11 @@ function unwrapPage(data) {
  *
  * 支持 `report_stage` 查询参数（NONE/RECTIFYING/COMPILING/REVIEWED/ISSUED/ARCHIVED）：
  * 参数原样下发给服务端做筛选与合法性校验，前端不对已加载列表做二次全量过滤。
+ * 未传 page_size 时服务端只返回默认 20 行（安全审查 F1：省略分页不再等于全量），
+ * 因此这里只适合分页/筛选读取；工作区完整快照走 listProjectsSnapshot。
  *
  * @param {Record<string, string|number|boolean>} [params={}] 查询条件。支持 keyword 兼容映射为 q。
- * @returns {Promise<Array<object>>} 项目列表。
+ * @returns {Promise<Array<object>>} 项目列表（默认最多 20 行）。
  * @throws {Error} 会话失效、鉴权失败或网关返回非成功状态时抛出。
  */
 export async function listProjects(params = {}) {
@@ -261,6 +263,28 @@ export async function listProjects(params = {}) {
   const search = new URLSearchParams(Object.entries(query).filter(([, value]) => value !== undefined && value !== null && value !== '')).toString()
   const data = await request(`/projects${search ? `?${search}` : ''}`)
   return unwrapPage(data).items
+}
+
+/**
+ * listProjectsSnapshot 以显式 all 快照模式读取项目集合，供工作区一次性替换使用。
+ *
+ * all=1 时服务端最多返回 500 行，总数（过滤后）仍由 total 给出；total 大于实际行数时
+ * truncated 为 true，调用方必须提示“仅展示前 500 条”，不能把截断集合当成全量。
+ * all 与 page/page_size 互斥（同传即 422），这里主动剔除分页参数避免误传。
+ *
+ * @param {Record<string, string|number|boolean>} [params={}] 查询条件。支持 keyword 兼容映射为 q。
+ * @returns {Promise<{items: Array<object>, total: number, truncated: boolean}>} 快照行、过滤后总数与截断标记。
+ * @throws {Error} 会话失效、鉴权失败或网关返回非成功状态时抛出。
+ */
+export async function listProjectsSnapshot(params = {}) {
+  const query = { ...params, all: 1 }
+  if (query.q === undefined && query.keyword !== undefined) query.q = query.keyword
+  delete query.keyword
+  delete query.page
+  delete query.page_size
+  const search = new URLSearchParams(Object.entries(query).filter(([, value]) => value !== undefined && value !== null && value !== '')).toString()
+  const page = unwrapPage(await request(`/projects${search ? `?${search}` : ''}`))
+  return { items: page.items, total: page.total, truncated: page.truncated }
 }
 
 /** 返回一份由服务端生成、按角色限定范围的进行中监控快照。 */
@@ -403,14 +427,34 @@ export function adjustDecomposition(projectID, payload) {
 
 /**
  * listServiceItems 查询项目下的服务项；projectID 为空时返回全部。
+ *
+ * 未传 page_size 时服务端只返回默认 20 行（安全审查 F1）；需要完整服务项集合
+ * （按项目详情核对、写后读取权威版本）时必须使用 listServiceItemsSnapshot。
+ *
  * @param {string|number} [projectID=''] 可选项目 ID。
- * @returns {Promise<Array<object>>} 服务项列表。
+ * @returns {Promise<Array<object>>} 服务项列表（默认最多 20 行）。
  * @throws {Error} 会话失效、鉴权失败或网关返回非成功状态时抛出。
  */
 export async function listServiceItems(projectID = '') {
   const search = projectID ? `?project_id=${encodeURIComponent(projectID)}` : ''
   const data = await request(`/service-items${search}`)
   return unwrapPage(data).items
+}
+
+/**
+ * listServiceItemsSnapshot 以显式 all 快照模式读取服务项集合（可选按项目过滤）。
+ *
+ * all=1 时服务端最多返回 500 行，truncated 表示过滤后总数大于本次行数：
+ * 调用方不得把截断集合当成完整清单，需要向用户提示缩小筛选范围。
+ *
+ * @param {string|number} [projectID=''] 可选项目 ID。
+ * @returns {Promise<{items: Array<object>, total: number, truncated: boolean}>} 快照行、过滤后总数与截断标记。
+ * @throws {Error} 会话失效、鉴权失败或网关返回非成功状态时抛出。
+ */
+export async function listServiceItemsSnapshot(projectID = '') {
+  const search = projectID ? `?all=1&project_id=${encodeURIComponent(projectID)}` : '?all=1'
+  const page = unwrapPage(await request(`/service-items${search}`))
+  return { items: page.items, total: page.total, truncated: page.truncated }
 }
 
 /**
