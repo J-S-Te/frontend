@@ -651,6 +651,18 @@ const activeSection = computed(() => {
 const businessDataError = computed(() => businessDataErrors.value[activeSection.value] || '')
 const pageMeta = computed(() => sectionMeta[activeSection.value])
 
+// 深链兼容：外部跳转可能带 ?import_batch=<批次号> 直达某个导入批次。导入面板现在只挂在
+// imports（合同批量导入）分区，若落点停在台账等其他分区，就会出现“参数在、面板不在”的空白页。
+// 因此初始化（会话就绪后）与 URL 参数变化时把分区校正为 imports。是否真的跳转仍由
+// canAccessContractSection 判定：无权进入 imports 时不跳，避免和路由守卫的“无权分区回退”互相触发。
+function ensureImportBatchSection() {
+  const batchID = String(route.query.import_batch || '')
+  if (!batchID || activeSection.value === 'imports') return false
+  if (!canAccessContractSection(session.value, 'imports')) return false
+  void router.replace({ name: 'contract_management', params: { section: 'imports' }, query: { ...route.query } })
+  return true
+}
+
 // 状态与类型筛选都必须下推到服务端：GET /contracts 已支持 keyword/status/type
 // （精确匹配状态码与 contract_type，见 contract_management/internal/transport/httpapi/router.go
 // 的 listContracts，以及 internal/infrastructure/mysql/repository.go 的 contractLedgerFilters）。
@@ -2751,6 +2763,9 @@ watch(activeSection, () => {
   void handleSectionSwitch()
 }, { immediate: true })
 
+// 路由参数变化（例如从其他页面带 ?import_batch 跳到本模块）同样要校正分区。
+watch(() => route.query.import_batch, () => { ensureImportBatchSection() })
+
 // 用途：读取原件及业务来源能力，失败保留明确提示且不猜测本地来源。
 // 参数：无；使用当前合同会话。
 // 返回值：异步完成；失败保持PDF入口关闭，既有台账仍可读取。
@@ -2766,6 +2781,7 @@ async function loadContractSourceCapabilities() {
 onMounted(async () => {
   try {
     session.value = await getContractSession()
+    ensureImportBatchSection()
     void loadContractSourceCapabilities()
     await loadBusinessData()
     document.addEventListener('visibilitychange', handleApprovalVisibilityChange)
@@ -2868,7 +2884,7 @@ onBeforeUnmount(() => {
 
         <p v-if="contractSourceCapabilityError" class="contract-field-error" role="alert">{{ contractSourceCapabilityError }} <button class="contract-button secondary" @click="loadContractSourceCapabilities">重试来源能力</button></p>
         <LocalContractCatalogPanel v-if="localCatalogOpen && can('contract.catalog.manage')" :permissions="session?.permissions || []" />
-        <ContractImportPanel v-if="['contracts', 'imports'].includes(activeSection) && (can('contract.import.preview') || can('contract.import.commit') || can('contract.import.approve') || can('contract.import.release'))"
+        <ContractImportPanel v-if="activeSection === 'imports' && (can('contract.import.preview') || can('contract.import.commit') || can('contract.import.approve') || can('contract.import.release'))"
           :enabled="contractSourceCapabilities.batch_enabled === true"
           :pdf-enabled="contractSourceCapabilities.pdf_enabled === true"
           :source-capabilities="contractSourceCapabilities"
@@ -2876,7 +2892,7 @@ onBeforeUnmount(() => {
           :can-approve="can('contract.import.approve')" :can-release="can('contract.import.release')"
           :can-manage-auto-approve="isAdmin"
           :section="activeSection"
-          :default-open="activeSection === 'imports' || Boolean(route.query.import_batch)"
+          :default-open="activeSection === 'imports'"
           :actor-id="session?.identity_id || session?.user_id || ''" :initial-batch-id="String(route.query.import_batch || '')"
           :supported-modes="contractSourceCapabilities.supported_modes || ['NORMAL']" />
 
