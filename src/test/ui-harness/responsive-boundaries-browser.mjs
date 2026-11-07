@@ -42,11 +42,13 @@ const componentStyles = new Map()
 // 返回值：浏览器脚本与编译后的样式；编译错误直接失败。
 async function componentBundle() {
   const result = await build({
-    stdin: { contents: `import {createApp} from 'vue';
+    stdin: { contents: `import {createApp, h} from 'vue';
       import Wizard from './src/modules/platform/applications/components/SubsystemAccessWizard.vue';
       import Confirm from './src/modules/shared/components/ConfirmDialog.vue';
+      import LicenseAppCard from './src/modules/platform/features/licenses/LicenseAppCard.vue';
       window.mountWizard=props=>createApp(Wizard,props).mount('#fixture');
-      window.mountConfirm=props=>createApp(Confirm,props).mount('#fixture');`, resolveDir: root },
+      window.mountConfirm=props=>createApp(Confirm,props).mount('#fixture');
+      window.mountLicenseCards=(rows,el)=>createApp({render:()=>rows.map(row=>h(LicenseAppCard,{row, busy:false, loading:false}))}).mount(el);`, resolveDir: root },
     bundle: true, write: false, format: 'iife', platform: 'browser',
     define: { 'import.meta.env': '{}' }, alias: { '@': root + 'src' },
     plugins: [{ name: 'layout-vue',
@@ -86,6 +88,24 @@ function moduleMarkup(item) {
         <tbody><tr><td>${token}</td><td>${longText}</td><td><button>查看详情</button></td></tr></tbody></table></div>
       <pre data-scroll>${token.repeat(3)}\n  第二行保留缩进</pre>
     </section></main>`
+}
+
+// 用途：拼出真实组件要的六行许可事实，交给浏览器里挂载的 LicenseAppCard 渲染。
+// 参数：无；数值均为合成事实，不含真实许可证或凭据。
+// 返回值：行对象数组；第一张卡同时带原因码与执行计数，代表内容最高的情况。
+function licenseCardRows() {
+  const expiry = days => Math.floor(Date.now() / 1000) + days * 86400
+  const summary = { available: true, revision: 7, deploymentRevision: 42, memberCount: 2, ready: 2, acknowledged: 1, latestReadyAt: '2026-10-27T05:54:38Z', latestAckAt: '2026-10-26T01:02:03Z' }
+  const license = (label, tone) => ({ key: 'IMPORTED', label, tone })
+  const counters = true
+  return [
+    { name: '结算管理', code: 'settlement', tone: 'danger', application: { kind: 'FULL', expires_at: expiry(-12) }, license: license('已过期', 'danger'), enforcement: { key: 'ENFORCED', label: '已强制执行', tone: 'success', note: '' }, summary, showEnforcementCounters: counters, reasonCode: 'EXPIRED', action: { key: 'REIMPORT', label: '重新导入', target: 'import', hint: '已过期，需要供应商签发更高版本后再导入' } },
+    { name: '客户与商机', code: 'customer_and_opportunity', tone: 'success', application: { kind: 'FULL', expires_at: expiry(268) }, license: license('已导入', 'success'), enforcement: { key: 'ENFORCED', label: '已强制执行', tone: 'success', note: '' }, summary, showEnforcementCounters: counters, reasonCode: '', action: { key: 'DETAIL', label: '查看运行详情', target: 'runtime', hint: '已强制执行，不提供重复激活' } },
+    { name: '客户门户', code: 'customer_portal', tone: 'info', application: { kind: 'TRIAL', expires_at: expiry(252) }, license: license('待生效', 'info'), enforcement: { key: 'APPLYING', label: '激活中', tone: 'info', note: '' }, summary, showEnforcementCounters: counters, reasonCode: 'NOT_EFFECTIVE', action: { key: 'PROGRESS', label: '查看激活进度', target: 'runtime', hint: '激活已提交，等待组件准备并确认当前修订' } },
+    { name: '合同管理', code: 'contract_management', tone: 'warning', application: { kind: 'FULL', expires_at: expiry(237) }, license: license('已导入', 'success'), enforcement: { key: 'PENDING_ENFORCEMENT', label: '待激活', tone: 'warning', note: '' }, summary, showEnforcementCounters: counters, reasonCode: '', action: { key: 'ACTIVATE', label: '去激活', target: 'runtime', hint: '在下方运行详情中核对执行修订并勾选确认后启用' } },
+    { name: '项目管理', code: 'project_management', tone: 'neutral', application: { kind: 'FULL', expires_at: expiry(208) }, license: license('已导入', 'success'), enforcement: { key: 'UNREGISTERED', label: '未纳管', tone: 'neutral', note: '运行组件尚未登记，运行执行事实不存在' }, summary: null, showEnforcementCounters: false, reasonCode: '', action: { key: 'ENROLL', label: '查看运行详情', target: 'runtime', hint: '运行组件尚未登记，未接入运行时授权执行' } },
+    { name: '数据分析', code: 'data_analysis', tone: 'neutral', application: { kind: 'TRIAL', expires_at: expiry(206) }, license: license('已导入', 'success'), enforcement: { key: 'UNKNOWN', label: '状态未知', tone: 'neutral', note: longText }, summary: null, showEnforcementCounters: false, reasonCode: '', action: { key: 'CONTACT', label: '联系授权管理员', target: 'none', hint: '需要商业授权管理权限才能发起激活' } },
+  ]
 }
 
 // 用途：用可观察几何边界检查页面、控件与局部滚动，不依赖具体CSS实现。
@@ -177,10 +197,14 @@ const sharedCss = await load('shared/styles/global-ux.css')
 const moduleCss = await Promise.all(modules.slice(1).map(item => load(item[1])))
 moduleCss.push(await load('platform/iam/styles/iam-settings.css'))
 const licenseSource = await readFile(root + 'src/modules/platform/features/licenses/CommercialLicenseView.vue', 'utf8')
+const licenseCardSource = await readFile(root + 'src/modules/platform/features/licenses/LicenseAppCard.vue', 'utf8')
 const licenseScope = 'data-v-layout-license'
-moduleCss.push(parse(licenseSource).descriptor.styles.map(style => compileStyle({
-  source: style.content, id: licenseScope, scoped: style.scoped,
-}).code).join('\n'))
+// 许可页与卡片分别编译、共用同一个作用域 id：夹具里两组规则都只认属性存在，与真实两份 scope 等价。
+for (const source of [licenseSource, licenseCardSource]) {
+  moduleCss.push(parse(source).descriptor.styles.map(style => compileStyle({
+    source: style.content, id: licenseScope, scoped: style.scoped,
+  }).code).join('\n'))
+}
 const scoped = [...componentStyles.values()].join('\n')
 const browser = await chromium.launch({
   executablePath: process.env.CHROMIUM_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
@@ -212,7 +236,7 @@ try {
         await page.close()
       }
       for (const grid of ['crm-customer-cards', 'crm-stage-alert-grid', 'pm-detail-summary', 'project-list',
-        'license-facts', 'license-app-facts', 'license-field-row', 'iam-person-summary-grid']) {
+        'license-facts', 'license-app-grid', 'license-field-row', 'iam-person-summary-grid']) {
         const page = await browser.newPage({ viewport: { width, height }, reducedMotion: 'reduce' })
         const scope = grid.startsWith('license-') ? licenseScope : ''
         await page.setContent(`<style>${css}</style><section class="console-card" style="width:min(220px,100%);padding:20px" data-boundary>
@@ -220,6 +244,35 @@ try {
         results.push({ module: grid, width, height, order, errors: await violations(page) })
         await page.close()
       }
+      // 逐应用卡片网格：挂载真实 LicenseAppCard 渲染六张卡，1440 下应 4 列 2 行、近方形、无横向溢出。
+      const cardPage = await browser.newPage({ viewport: { width, height }, reducedMotion: 'reduce' })
+      await cardPage.setContent(`<style>${css}</style><main class="console-content"><section class="license-page" ${licenseScope}>
+        <section class="console-card license-section" ${licenseScope} data-boundary>
+          <ul class="license-app-grid" ${licenseScope} data-boundary></ul>
+        </section></section></main>`)
+      await cardPage.addScriptTag({ content: bundle })
+      await cardPage.evaluate(rows => window.mountLicenseCards(rows, document.querySelector('.license-app-grid')), licenseCardRows())
+      const cardErrors = await violations(cardPage)
+      const cardMetrics = await cardPage.evaluate(() => {
+        const boxes = [...document.querySelectorAll('.license-app-card')].map(card => card.getBoundingClientRect())
+        const columns = new Set(boxes.map(box => Math.round(box.left))).size
+        const rows = new Set(boxes.map(box => Math.round(box.top))).size
+        const widths = boxes.map(box => Math.round(box.width))
+        const heights = boxes.map(box => Math.round(box.height))
+        const ratio = Math.max(...boxes.map(box => box.height / box.width))
+        return { cards: boxes.length, columns, rows, width: Math.min(...widths), maxWidth: Math.max(...widths), height: Math.max(...heights), ratio: Math.round(ratio * 1000) / 1000 }
+      })
+      if (width === 1440) {
+        assert.equal(cardMetrics.cards, 6, '六张卡片必须全部渲染')
+        assert.equal(cardMetrics.columns, 4, '≥1280 期望四列，实际 ' + JSON.stringify(cardMetrics))
+        assert.ok(cardMetrics.rows <= 2, '六张卡在 1440 下不得超过两行：' + JSON.stringify(cardMetrics))
+        assert.ok(cardMetrics.ratio <= 1.15, '卡片应接近方形（高/宽 ≤ 1.15）：' + JSON.stringify(cardMetrics))
+      }
+      if (width === 375 || width === 1440) {
+        await cardPage.screenshot({ path: output + `license-app-cards-${width}-${order}.png`, fullPage: true })
+      }
+      results.push({ module: 'license-app-cards', width, height, order, errors: cardErrors, metrics: cardMetrics })
+      await cardPage.close()
       const page = await browser.newPage({ viewport: { width, height }, reducedMotion: 'reduce' })
       const errors = []
       page.on('pageerror', error => errors.push(error.message))

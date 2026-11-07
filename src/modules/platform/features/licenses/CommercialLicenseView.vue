@@ -2,11 +2,12 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import RuntimeEnforcementView from './RuntimeEnforcementView.vue'
 import LicenseProblem from './LicenseProblem.vue'
+import LicenseAppCard from './LicenseAppCard.vue'
 import ConsoleIcon from '@/modules/shared/components/ConsoleIcon.vue'
 import { hasPermission } from '../../auth/utils/principal.js'
 import { MAX_LICENSE_BYTES, commitLicense, getLicenseEvents, getLicenseRequest, getLicenseStatus, initializeLicense, previewLicense, restoreLicenseClock, validateLicenseInput } from './api.js'
-import { formatLicenseTime, licenseEventName, licensedOnly, licenseRows, previewCanCommit, riskyChange, statusRows, systemName } from './presentation.js'
-import { buildApplicationRows, licenseSteps, overallState, reasonHintOf, runtimeEnforcementInfo, runtimeEnforcementSourceLabel } from './license-state.js'
+import { expiryMeta, formatLicenseTime, licenseEventName, licensedOnly, licenseRows, previewCanCommit, riskyChange, statusRows, systemName } from './presentation.js'
+import { buildApplicationRows, licenseSteps, overallState, runtimeEnforcementInfo, runtimeEnforcementSourceLabel } from './license-state.js'
 import { CLOCK_RECOVERY_CONFIRMATION, CLOCK_RECOVERY_FAILURE_NEXT, CLOCK_RECOVERY_READONLY_HINT, CLOCK_RECOVERY_RISKS, CLOCK_RECOVERY_SUCCESS, clockRecoveryReady, clockRecoverySubmitted } from './clock-recovery.js'
 import { loadApplicationEnforcement } from './runtime-api.js'
 import { formatUserError, safeUserMessage, userErrorDiagnostics } from '../../../shared/utils/userError.js'
@@ -86,13 +87,6 @@ const steps = computed(() => licenseSteps({ status: status.value, appRows: appRo
 
 const dangerousChanges = computed(() => preview.value?.requires_change_confirmation || preview.value?.changes?.some(riskyChange))
 const commitAllowed = computed(() => canManage.value && !busy.value && !loading.value && previewCanCommit(preview.value, confirmChanges.value, confirmReplacement.value))
-const expiry = expiresAt => {
-  const days = Math.floor(((expiresAt || 0) * 1000 - Date.now()) / 86400000)
-  if (!expiresAt) return { tone: 'muted', label: '—' }
-  if (days < 0) return { tone: 'expired', label: `已过期 ${-days} 天` }
-  if (days <= 30) return { tone: 'soon', label: `剩余 ${days} 天` }
-  return { tone: 'ok', label: `剩余 ${days} 天` }
-}
 
 function clearPreview() {
   preview.value = null
@@ -425,7 +419,7 @@ onMounted(load)
               <div><dt>绑定环境</dt><dd>{{ status.environment || '—' }}</dd></div>
               <div><dt>部署实例</dt><dd class="mono">{{ status.instance_id || '—' }}</dd></div>
               <div><dt>当前授权生效</dt><dd>{{ formatLicenseTime(status.current?.not_before) }}</dd></div>
-              <div><dt>最近到期</dt><dd>{{ soonestExpiry ? formatLicenseTime(soonestExpiry).split(' ')[0] : '—' }}<small :data-tone="soonestExpiry ? expiry(soonestExpiry).tone : 'muted'">{{ soonestExpiry ? expiry(soonestExpiry).label : '暂无到期项' }}</small></dd></div>
+              <div><dt>最近到期</dt><dd>{{ soonestExpiry ? formatLicenseTime(soonestExpiry).split(' ')[0] : '—' }}<small :data-tone="soonestExpiry ? expiryMeta(soonestExpiry).tone : 'none'">{{ soonestExpiry ? expiryMeta(soonestExpiry).label : '暂无到期项' }}</small></dd></div>
               <div><dt>执行状态来源</dt><dd>{{ runtimeEnforcement.label }}<small v-if="runtimeSourceLabel" :title="runtimeEnforcementSource">{{ runtimeSourceLabel }}</small></dd></div>
             </dl>
           </article>
@@ -483,7 +477,7 @@ onMounted(load)
             <header class="license-section-head">
               <div>
                 <h3 id="license-apps-title">应用授权与执行状态</h3>
-                <p class="license-note">下表是签名许可证状态，不代表业务系统已开放；运行时是否强制执行，请以每个系统的运行时登记与执行确认状态为准。</p>
+                <p class="license-note">每张卡片是签名许可证状态，不代表业务系统已开放；运行时是否强制执行，请以每个系统的运行时登记与执行确认状态为准。</p>
               </div>
               <div class="license-head-actions">
                 <span class="license-chip">{{ appRows.length }} 个系统</span>
@@ -520,40 +514,15 @@ onMounted(load)
               empty-title="当前许可证未包含任何业务系统。"
               empty-description="供应商签发的许可证没有覆盖业务系统时，这里不会显示任何执行状态。"
             />
-            <ul v-else class="license-app-list">
-              <li v-for="row in appRows" :key="row.code" class="license-app" :data-tone="row.tone">
-                <div class="license-app-name">
-                  <strong>{{ row.name }}</strong>
-                  <span class="license-app-code mono">{{ row.code }}</span>
-                </div>
-                <dl class="license-app-facts">
-                  <div>
-                    <dt>许可层面</dt>
-                    <dd>
-                      <span class="license-badge" :data-tone="row.license.tone">{{ row.license.label }}</span>
-                      <span class="license-app-meta">{{ row.application?.kind === 'TRIAL' ? '试用授权' : '正式授权' }} · 到期 {{ formatLicenseTime(row.application?.expires_at) }}</span>
-                      <span class="license-app-meta" :data-tone="expiry(row.application?.expires_at).tone">{{ expiry(row.application?.expires_at).label }}</span>
-                      <span v-if="reasonHintOf(row.reasonCode)" class="license-app-meta">原因：{{ reasonHintOf(row.reasonCode) }} <code :title="row.reasonCode">{{ row.reasonCode }}</code></span>
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>运行执行</dt>
-                    <dd>
-                      <span class="license-badge" :data-tone="row.enforcement.tone">{{ row.enforcement.label }}</span>
-                      <template v-if="row.showEnforcementCounters">
-                        <span class="license-app-meta">执行修订 {{ row.summary.revision }} · 部署修订 {{ row.summary.deploymentRevision }}</span>
-                        <span class="license-app-meta">已准备 {{ row.summary.ready }}/{{ row.summary.memberCount }} · 已确认 {{ row.summary.acknowledged }}/{{ row.summary.memberCount }}</span>
-                        <span class="license-app-meta" :title="row.summary.latestReadyAt ? `最近准备 ${formatLicenseTime(row.summary.latestReadyAt)}` : ''">{{ row.summary.latestAckAt ? `最近确认 ${formatLicenseTime(row.summary.latestAckAt)}` : '尚未确认当前修订' }}</span>
-                      </template>
-                      <span v-else class="license-app-meta" :title="row.summary?.error || ''">{{ row.enforcement.note }}</span>
-                    </dd>
-                  </div>
-                </dl>
-                <div class="license-app-action">
-                  <button v-if="row.action.target !== 'none'" type="button" class="console-button ghost small" :disabled="loading || busy" @click="runRowAction(row)">{{ row.action.label }}<span aria-hidden="true">→</span></button>
-                  <span v-else class="license-app-meta">{{ row.action.hint }}</span>
-                </div>
-              </li>
+            <ul v-else class="license-app-grid" aria-label="逐系统授权与执行状态">
+              <LicenseAppCard
+                v-for="row in appRows"
+                :key="row.code"
+                :row="row"
+                :busy="busy"
+                :loading="loading"
+                @action="runRowAction"
+              />
             </ul>
           </section>
 
@@ -817,38 +786,22 @@ onMounted(load)
 .license-legend { display: flex; flex-wrap: wrap; gap: 6px 20px; margin: 0; padding: 10px 12px; border: 1px solid var(--license-border); border-radius: 10px; background: var(--surface-muted, #f8fafc); list-style: none; }
 .license-legend li { display: inline-flex; align-items: center; gap: 7px; color: var(--license-muted); font-size: 11.5px; line-height: 1.6; }
 
-/* 逐应用列表 */
-.license-app-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
-.license-app {
-  --row-tone: var(--license-border);
+/* 逐应用卡片网格：auto-fit 自然落位（≥1280 四列），卡片近方形，窄屏单列。
+   列数只由 auto-fit + 240px 下限推导：1120px 容器恰好落成 4 列、每列约 268px；
+   若把上限写死成 300px，auto-repeat 会按上限计数，同样宽度只会得到 3 列。 */
+.license-app-grid {
   display: grid;
-  grid-template-columns: minmax(140px, .85fr) minmax(0, 2.2fr) auto;
-  align-items: start;
-  gap: 10px 18px;
-  padding: 14px 16px;
-  border: 1px solid var(--license-border);
-  border-left: 3px solid var(--row-tone);
-  border-radius: 10px;
-  background: var(--surface-card, #fff);
-  transition: box-shadow .15s var(--ease-standard);
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+  justify-content: center;
+  gap: 16px;
+  max-width: 1120px;
+  /* 宽度到顶之后整块网格在区块里居中，避免右侧留出一条空白带。 */
+  margin: 0 auto;
+  padding: 0;
+  list-style: none;
 }
-.license-app:hover { box-shadow: var(--shadow-card); }
-.license-app[data-tone="success"] { --row-tone: var(--success, #16a34a); }
-.license-app[data-tone="info"] { --row-tone: var(--primary, #2563eb); }
-.license-app[data-tone="warning"] { --row-tone: var(--warning, #d97706); }
-.license-app[data-tone="danger"] { --row-tone: var(--danger, #dc2626); }
-.license-app[data-tone="neutral"] { --row-tone: var(--line-strong, #cbd5e1); }
-.license-app-name { display: grid; gap: 3px; min-width: 0; }
-.license-app-name strong { font-size: 14px; font-weight: 650; }
-.license-app-code { color: var(--license-muted); font-size: 11px; }
-.license-app-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr)); gap: 10px 18px; margin: 0; min-width: 0; }
-.license-app-facts dt { color: var(--license-muted); font-size: 11px; font-weight: 600; }
-.license-app-facts dd { display: grid; justify-items: start; gap: 3px; margin: 5px 0 0; min-width: 0; }
+/* 仍在待生效列表、变更预览里复用的说明文字；卡片内的一套在 LicenseAppCard 里 */
 .license-app-meta { color: var(--license-muted); font-size: 11.5px; line-height: 1.55; overflow-wrap: anywhere; }
-.license-app-meta[data-tone="ok"] { color: var(--success-text, #15803d); }
-.license-app-meta[data-tone="soon"] { color: var(--warning-text, #b45309); }
-.license-app-meta[data-tone="expired"] { color: var(--danger-text, #b91c1c); }
-.license-app-action { display: flex; align-items: center; justify-content: flex-end; }
 
 /* 空状态 */
 .license-empty { display: grid; justify-items: start; gap: 8px; padding: 20px; border: 1px dashed var(--line-strong, #cbd5e1); border-radius: 10px; background: var(--surface-muted, #f8fafc); }
@@ -865,7 +818,6 @@ onMounted(load)
 .license-clock-body { display: grid; gap: 12px; padding-top: 14px; border-top: 1px dashed var(--license-border); }
 .license-clock-risks { display: grid; gap: 6px; max-width: 760px; margin: 0; padding: 10px 14px 10px 30px; border: 1px solid var(--warning-border, #fde68a); border-radius: 10px; background: var(--warning-soft); color: var(--warning-text, #b45309); font-size: 12px; line-height: 1.65; }
 .license-clock-risks li::marker { color: var(--warning, #d97706); }
-.license-app-meta code { padding: 0 4px; border-radius: 4px; background: var(--surface-muted, #f8fafc); color: inherit; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10.5px; }
 
 
 /* 导入区 */
@@ -923,9 +875,8 @@ onMounted(load)
 
 .license-alert { margin: 0; padding: 12px 14px; border: 1px solid var(--danger-border, #fecaca); border-radius: 10px; background: var(--danger-soft, #fef2f2); color: var(--danger-text, #b91c1c); font-size: 13px; }
 
+/* 卡片网格自己负责列数，这里只剩顶部摘要卡在中等宽度下的对齐调整。 */
 @media (max-width: 1080px) {
-  .license-app { grid-template-columns: minmax(0, 1fr); }
-  .license-app-action { justify-content: flex-start; }
   .license-hero-cta { justify-items: start; text-align: left; }
 }
 @media (max-width: 720px) {
@@ -935,5 +886,6 @@ onMounted(load)
   .license-facts { grid-template-columns: repeat(auto-fit, minmax(min(130px, 100%), 1fr)); }
   .license-timeline li { grid-template-columns: minmax(0, 1fr); gap: 4px; }
   .license-event-time { padding-bottom: 4px; }
+  .license-app-grid { grid-template-columns: minmax(0, 1fr); justify-content: stretch; }
 }
 </style>
