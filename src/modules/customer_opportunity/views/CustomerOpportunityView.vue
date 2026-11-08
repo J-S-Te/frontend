@@ -666,7 +666,7 @@ const navGroups = computed(() => [
   },
   {
     label: '平台能力',
-    items: [{ key: 'portal', label: '返回子系统门户', icon: 'dashboard' }],
+    items: [{ key: 'portal', label: '返回子系统门户', icon: 'dashboard', anchor: 'subsystem-portal' }],
   },
 ])
 // handleNavigate 把共享外壳抛出的导航键映射到本页既有入口。
