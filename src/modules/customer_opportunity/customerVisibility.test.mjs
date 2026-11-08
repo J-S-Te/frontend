@@ -3,6 +3,8 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 const viewPath = new URL('./views/CustomerOpportunityView.vue', import.meta.url)
+// 阶段 3-CRM：客户编辑弹窗的表单字段迁入 CustomerEditorDialog.vue，字段级断言按新归属读取。
+const dialogPath = new URL('./components/CustomerEditorDialog.vue', import.meta.url)
 
 test('客户列表重新查询前清空旧数据，失败时不会回显上一授权范围的客户', async () => {
   const source = await readFile(viewPath, 'utf8')
@@ -23,18 +25,21 @@ test('客户详情只在服务端校验成功后展示，并在越权或不可�
 
 test('客户基础资料使用受控选项，并优先显示服务端返回的负责人名称', async () => {
   const source = await readFile(viewPath, 'utf8')
+  const dialog = await readFile(dialogPath, 'utf8')
 
-  assert.match(source, /customerForm\.customer_type && !customerTypeSuggestions\.includes\(customerForm\.customer_type\)/)
-  assert.match(source, /customerForm\.region && !customerRegionSuggestions\.includes\(customerForm\.region\)/)
+  assert.match(dialog, /form\.customer_type && !customerTypeSuggestions\.includes\(form\.customer_type\)/)
+  assert.match(dialog, /form\.region && !regionSuggestions\.includes\(form\.region\)/)
   assert.match(source, /owner\?\.owner_display_name/)
   assert.match(source, /负责人账号已失效/)
 })
 
 test('新建客户不要求创建原因，编辑客户仍要求更新原因', async () => {
   const source = await readFile(viewPath, 'utf8')
+  const dialog = await readFile(dialogPath, 'utf8')
 
   assert.doesNotMatch(source, /创建原因/)
-  assert.match(source, /<label v-if="customerEditMode" class="console-form-item full"><span>更新原因 \*<\/span>/)
+  assert.doesNotMatch(dialog, /创建原因/)
+  assert.match(dialog, /<label v-if="editMode" class="console-form-item full"><span>更新原因 \*<\/span><textarea v-model="form\.reason" required/)
   assert.match(source, /delete createPayload\.reason/)
   assert.match(source, /owner_user_id: customerForm\.owner_user_id, owner_org_id: customerForm\.owner_org_id, reason: customerForm\.reason/)
 })

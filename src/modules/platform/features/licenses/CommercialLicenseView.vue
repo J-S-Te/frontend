@@ -1,17 +1,19 @@
 <script setup>
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import RuntimeEnforcementView from './RuntimeEnforcementView.vue'
 import LicenseProblem from './LicenseProblem.vue'
+import LicenseAppCard from './LicenseAppCard.vue'
+import LicenseEventRow from './LicenseEventRow.vue'
+import LicenseEventsSheet from './LicenseEventsSheet.vue'
 import ConsoleIcon from '@/modules/shared/components/ConsoleIcon.vue'
 import { hasPermission } from '../../auth/utils/principal.js'
 import { MAX_LICENSE_BYTES, commitLicense, getLicenseEvents, getLicenseRequest, getLicenseStatus, initializeLicense, previewLicense, restoreLicenseClock, validateLicenseInput } from './api.js'
-import { formatLicenseTime, licenseEventName, licensedOnly, licenseRows, previewCanCommit, riskyChange, statusRows, systemName } from './presentation.js'
+import { expiryMeta, formatLicenseTime, licenseEventName, licensedOnly, licenseRows, previewCanCommit, riskyChange, statusRows, systemName } from './presentation.js'
 import { buildApplicationRows, licenseSteps, overallState, reasonHintOf, runtimeEnforcementInfo, runtimeEnforcementSourceLabel } from './license-state.js'
 import { CLOCK_RECOVERY_CONFIRMATION, CLOCK_RECOVERY_FAILURE_NEXT, CLOCK_RECOVERY_READONLY_HINT, CLOCK_RECOVERY_RISKS, CLOCK_RECOVERY_SUCCESS, clockRecoveryReady, clockRecoverySubmitted } from './clock-recovery.js'
 import { loadApplicationEnforcement } from './runtime-api.js'
 import { formatUserError, safeUserMessage, userErrorDiagnostics } from '../../../shared/utils/userError.js'
 import ListState from '@/modules/shared/components/ListState.vue'
-import PaginationBar from '@/modules/shared/components/PaginationBar.vue'
 
 const emit = defineEmits(['toast'])
 const canRead = computed(() => hasPermission('platform:license:read'))
@@ -86,13 +88,6 @@ const steps = computed(() => licenseSteps({ status: status.value, appRows: appRo
 
 const dangerousChanges = computed(() => preview.value?.requires_change_confirmation || preview.value?.changes?.some(riskyChange))
 const commitAllowed = computed(() => canManage.value && !busy.value && !loading.value && previewCanCommit(preview.value, confirmChanges.value, confirmReplacement.value))
-const expiry = expiresAt => {
-  const days = Math.floor(((expiresAt || 0) * 1000 - Date.now()) / 86400000)
-  if (!expiresAt) return { tone: 'muted', label: '—' }
-  if (days < 0) return { tone: 'expired', label: `已过期 ${-days} 天` }
-  if (days <= 30) return { tone: 'soon', label: `剩余 ${days} 天` }
-  return { tone: 'ok', label: `剩余 ${days} 天` }
-}
 
 function clearPreview() {
   preview.value = null
@@ -101,16 +96,25 @@ function clearPreview() {
 }
 watch(raw, clearPreview)
 
-// 授权事件：次要信息，默认只显示本页前 5 条，翻页仍走服务端 page 参数。
-const events = ref({ items: [], total: 0, page: 1 })
+// 授权事件：页内只保留最近几条「单行摘要」，完整列表进右侧抽屉（服务端分页 20 条/页）。
+// 摘要条数由 matchMedia 派生而不是 CSS 隐藏：计数文案与真实行数必须一致，
+// 否则窄屏会出现「显示最近 5 条」但只看得见 3 行。≤720px 取 3 条，其余取 5 条。
+const events = ref({ items: [], total: null, page: 1 })
 const eventsLoading = ref(false)
+const eventsRefreshing = ref(false)
 const eventsError = ref('')
-// 事件分页沿用服务端 page 参数；每页 20 条与后端默认一致，供 PaginationBar 推导末页。
-const eventPageSize = 20
-const eventsExpanded = ref(false)
-const visibleEvents = computed(() => eventsExpanded.value ? events.value.items : events.value.items.slice(0, 5))
+const eventsSheetOpen = ref(false)
+const eventsTrigger = ref(null)
+// 同一个 matchMedia 既给初值也给后续监听，避免两处各建一个查询对象。
+let narrowMedia = typeof matchMedia === 'function' ? matchMedia('(max-width:720px)') : null
+const narrowViewport = ref(Boolean(narrowMedia?.matches))
+function syncNarrowViewport(event) { narrowViewport.value = Boolean(event.matches) }
 // 三态闸门：加载中 / 加载失败 / 没有事件都交给 ListState，失败时绝不渲染成「暂无授权事件」。
 const eventsListState = computed(() => eventsLoading.value || Boolean(eventsError.value) || !events.value.items.length)
+const recentLimit = computed(() => (narrowViewport.value ? 3 : 5))
+const recentEvents = computed(() => events.value.items.slice(0, recentLimit.value))
+// total 未知（失败后）显示「—」而不是 0，避免把「没读到」伪装成「一条都没有」。
+const eventsTotalLabel = computed(() => (Number.isFinite(events.value.total) ? events.value.total : '—'))
 
 // message 用途：用户可读的失败原因；状态冲突单独给出可执行指引。
 // 参数：error 为接口异常。
@@ -118,13 +122,33 @@ const eventsListState = computed(() => eventsLoading.value || Boolean(eventsErro
 function message(error, fallback = '商业授权操作失败，请重试。') {
   return error?.status === 409 && error?.code === 'LICENSE_VERSION_CONFLICT' ? '授权状态已变更，请刷新并重新预览后提交。' : formatUserError(error, { fallback })
 }
+/* loadEvents：读取指定页的授权事件；已有行时按后台刷新处理，不把列表打回 loading。
+   失败时清掉旧快照，错误态旁边不会继续挂着上一页的 total / 0 条。 */
 async function loadEvents(page = 1) {
-  if (!canRead.value || eventsLoading.value) return
-  eventsLoading.value = true
+  if (!canRead.value || eventsLoading.value || eventsRefreshing.value) return
+  if (events.value.items.length) eventsRefreshing.value = true
+  else eventsLoading.value = true
   eventsError.value = ''
-  try { events.value = await getLicenseEvents(page); eventsExpanded.value = false }
-  catch (error) { eventsError.value = formatUserError(error, { fallback: '授权事件读取失败，请重试。' }) }
-  finally { eventsLoading.value = false }
+  try { events.value = await getLicenseEvents(page) }
+  catch (error) {
+    events.value = { items: [], total: null, page: 1 }
+    eventsError.value = formatUserError(error, { fallback: '授权事件读取失败，请重试。' })
+  }
+  finally { eventsLoading.value = false; eventsRefreshing.value = false }
+}
+// openEventsSheet 用途：打开右侧抽屉（抽屉打开时自己回第 1 页并加载）。
+// 参数：无。
+// 返回值：无；未加载时的紧凑 loading 由抽屉自己显示，不会先闪一条「0 条」。
+function openEventsSheet() {
+  eventsSheetOpen.value = true
+}
+// closeEventsSheet 用途：关闭抽屉并把键盘焦点交还给「查看全部」入口按钮。
+// 参数：无。
+// 返回值：无。
+async function closeEventsSheet() {
+  eventsSheetOpen.value = false
+  await nextTick()
+  eventsTrigger.value?.focus?.({ preventScroll: true })
 }
 async function load() {
   if (!canRead.value || loading.value || busy.value) return
@@ -330,6 +354,12 @@ async function commit() {
   if (done) await focusPanel(rows.value.length ? appsPanel : importPanel)
 }
 onMounted(load)
+// 摘要条数跟着视口走：只在同一个 matchMedia 上加减监听，卸载时摘掉，避免叠加。
+onMounted(() => narrowMedia?.addEventListener?.('change', syncNarrowViewport))
+onBeforeUnmount(() => {
+  narrowMedia?.removeEventListener?.('change', syncNarrowViewport)
+  narrowMedia = null
+})
 </script>
 
 <template>
@@ -425,7 +455,7 @@ onMounted(load)
               <div><dt>绑定环境</dt><dd>{{ status.environment || '—' }}</dd></div>
               <div><dt>部署实例</dt><dd class="mono">{{ status.instance_id || '—' }}</dd></div>
               <div><dt>当前授权生效</dt><dd>{{ formatLicenseTime(status.current?.not_before) }}</dd></div>
-              <div><dt>最近到期</dt><dd>{{ soonestExpiry ? formatLicenseTime(soonestExpiry).split(' ')[0] : '—' }}<small :data-tone="soonestExpiry ? expiry(soonestExpiry).tone : 'muted'">{{ soonestExpiry ? expiry(soonestExpiry).label : '暂无到期项' }}</small></dd></div>
+              <div><dt>最近到期</dt><dd>{{ soonestExpiry ? formatLicenseTime(soonestExpiry).split(' ')[0] : '—' }}<small :data-tone="soonestExpiry ? expiryMeta(soonestExpiry).tone : 'none'">{{ soonestExpiry ? expiryMeta(soonestExpiry).label : '暂无到期项' }}</small></dd></div>
               <div><dt>执行状态来源</dt><dd>{{ runtimeEnforcement.label }}<small v-if="runtimeSourceLabel" :title="runtimeEnforcementSource">{{ runtimeSourceLabel }}</small></dd></div>
             </dl>
           </article>
@@ -483,7 +513,7 @@ onMounted(load)
             <header class="license-section-head">
               <div>
                 <h3 id="license-apps-title">应用授权与执行状态</h3>
-                <p class="license-note">下表是签名许可证状态，不代表业务系统已开放；运行时是否强制执行，请以每个系统的运行时登记与执行确认状态为准。</p>
+                <p class="license-note">每张卡片是签名许可证状态，不代表业务系统已开放；运行时是否强制执行，请以每个系统的运行时登记与执行确认状态为准。</p>
               </div>
               <div class="license-head-actions">
                 <span class="license-chip">{{ appRows.length }} 个系统</span>
@@ -520,40 +550,15 @@ onMounted(load)
               empty-title="当前许可证未包含任何业务系统。"
               empty-description="供应商签发的许可证没有覆盖业务系统时，这里不会显示任何执行状态。"
             />
-            <ul v-else class="license-app-list">
-              <li v-for="row in appRows" :key="row.code" class="license-app" :data-tone="row.tone">
-                <div class="license-app-name">
-                  <strong>{{ row.name }}</strong>
-                  <span class="license-app-code mono">{{ row.code }}</span>
-                </div>
-                <dl class="license-app-facts">
-                  <div>
-                    <dt>许可层面</dt>
-                    <dd>
-                      <span class="license-badge" :data-tone="row.license.tone">{{ row.license.label }}</span>
-                      <span class="license-app-meta">{{ row.application?.kind === 'TRIAL' ? '试用授权' : '正式授权' }} · 到期 {{ formatLicenseTime(row.application?.expires_at) }}</span>
-                      <span class="license-app-meta" :data-tone="expiry(row.application?.expires_at).tone">{{ expiry(row.application?.expires_at).label }}</span>
-                      <span v-if="reasonHintOf(row.reasonCode)" class="license-app-meta">原因：{{ reasonHintOf(row.reasonCode) }} <code :title="row.reasonCode">{{ row.reasonCode }}</code></span>
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>运行执行</dt>
-                    <dd>
-                      <span class="license-badge" :data-tone="row.enforcement.tone">{{ row.enforcement.label }}</span>
-                      <template v-if="row.showEnforcementCounters">
-                        <span class="license-app-meta">执行修订 {{ row.summary.revision }} · 部署修订 {{ row.summary.deploymentRevision }}</span>
-                        <span class="license-app-meta">已准备 {{ row.summary.ready }}/{{ row.summary.memberCount }} · 已确认 {{ row.summary.acknowledged }}/{{ row.summary.memberCount }}</span>
-                        <span class="license-app-meta" :title="row.summary.latestReadyAt ? `最近准备 ${formatLicenseTime(row.summary.latestReadyAt)}` : ''">{{ row.summary.latestAckAt ? `最近确认 ${formatLicenseTime(row.summary.latestAckAt)}` : '尚未确认当前修订' }}</span>
-                      </template>
-                      <span v-else class="license-app-meta" :title="row.summary?.error || ''">{{ row.enforcement.note }}</span>
-                    </dd>
-                  </div>
-                </dl>
-                <div class="license-app-action">
-                  <button v-if="row.action.target !== 'none'" type="button" class="console-button ghost small" :disabled="loading || busy" @click="runRowAction(row)">{{ row.action.label }}<span aria-hidden="true">→</span></button>
-                  <span v-else class="license-app-meta">{{ row.action.hint }}</span>
-                </div>
-              </li>
+            <ul v-else class="license-app-grid" aria-label="逐系统授权与执行状态">
+              <LicenseAppCard
+                v-for="row in appRows"
+                :key="row.code"
+                :row="row"
+                :busy="busy"
+                :loading="loading"
+                @action="runRowAction"
+              />
             </ul>
           </section>
 
@@ -648,49 +653,6 @@ onMounted(load)
             </div>
           </section>
 
-          <!-- 5 授权事件：次要信息，默认只看本页前 5 条 -->
-          <section class="console-card license-section license-events" aria-labelledby="license-events-title">
-            <header class="license-section-head">
-              <div>
-                <h3 id="license-events-title">授权事件</h3>
-                <p class="license-note">初始化、导入、生效与运行登记的不可变记录，按时间倒序。</p>
-              </div>
-              <div class="license-head-actions"><span class="license-chip">共 {{ events.total }} 条</span></div>
-            </header>
-            <ListState
-              v-if="eventsListState"
-              :loading="eventsLoading"
-              :error="eventsError"
-              error-title="授权事件加载失败"
-              empty-title="暂无授权事件。"
-              compact
-              @retry="loadEvents(events.page)"
-            />
-            <ul v-else id="license-event-list" class="license-timeline" :class="{ expanded: eventsExpanded }" tabindex="0" aria-label="授权事件列表">
-              <li v-for="event in visibleEvents" :key="event.id">
-                <span class="license-timeline-dot" aria-hidden="true"></span>
-                <div class="license-event-content">
-                  <div class="license-event-heading"><strong :title="event.kind">{{ licenseEventName(event.kind) }}</strong><span class="license-event-meta">版本 {{ event.version ?? '—' }} · 修订 {{ event.revision ?? '—' }}</span></div>
-                  <code class="license-event-code" :title="event.kind">{{ event.kind }}</code>
-                </div>
-                <time class="license-event-time">{{ formatLicenseTime(event.created_at) }}</time>
-              </li>
-            </ul>
-            <div v-if="!eventsError && events.items.length > 5" class="license-event-toggle">
-              <span class="license-note">本页显示 {{ visibleEvents.length }} / {{ events.items.length }} 条</span>
-              <button type="button" class="console-button ghost small" :aria-expanded="eventsExpanded" aria-controls="license-event-list" @click="eventsExpanded = !eventsExpanded">{{ eventsExpanded ? '收起' : '展开本页全部' }}</button>
-            </div>
-            <PaginationBar
-              v-if="!eventsError"
-              class="license-pagination"
-              label="授权事件分页"
-              :page="events.page"
-              :total="events.total"
-              :page-size="eventPageSize"
-              :loading="eventsLoading"
-              @change="loadEvents"
-            />
-          </section>
         </template>
       </template>
     </template>
@@ -699,6 +661,49 @@ onMounted(load)
     <div ref="runtimeAnchor" tabindex="-1" class="license-runtime-anchor">
       <RuntimeEnforcementView ref="runtimeView" :license-revision="status?.revision || 0" @toast="emit('toast', $event)" />
     </div>
+
+    <!-- 6 授权事件：页面最底部，最近 N 条单行摘要 + 「查看全部」进右侧抽屉。
+         摘要不再内滚动、不再页内分页：挤占问题从结构上消掉，完整列表交给抽屉。 -->
+    <section v-if="canRead && status && initialized && !loading" class="console-card license-section license-events" aria-labelledby="license-events-title">
+      <header class="license-section-head">
+        <div>
+          <h3 id="license-events-title">授权事件</h3>
+          <p class="license-note">初始化、导入、生效与运行登记的不可变记录，按时间倒序；展开单行可看原始事件码、时间与摘要。</p>
+        </div>
+        <div class="license-head-actions">
+          <span v-if="!eventsError && events.items.length" class="license-chip">共 {{ eventsTotalLabel }} 条</span>
+        </div>
+      </header>
+
+      <ListState
+        v-if="eventsListState"
+        :loading="eventsLoading"
+        :error="eventsError"
+        error-title="授权事件加载失败"
+        empty-title="暂无授权事件。"
+        retry-text="重新读取"
+        compact
+        @retry="loadEvents(events.page)"
+      />
+      <ul v-else class="license-event-list" :aria-busy="eventsRefreshing ? 'true' : 'false'" aria-label="最近授权事件">
+        <LicenseEventRow v-for="event in recentEvents" :key="event.id" :event="event" id-prefix="license-event" />
+      </ul>
+
+      <footer v-if="!eventsListState" class="license-event-foot">
+        <span class="license-note">显示最近 {{ recentEvents.length }} 条，共 {{ eventsTotalLabel }} 条</span>
+        <button
+          ref="eventsTrigger"
+          type="button"
+          class="console-button ghost small"
+          aria-haspopup="dialog"
+          :aria-expanded="eventsSheetOpen"
+          @click="openEventsSheet"
+        >查看全部 {{ eventsTotalLabel }} 条<span aria-hidden="true">→</span></button>
+      </footer>
+    </section>
+
+    <!-- 抽屉自己取数据、自己分页：页内摘要必须始终是「最近几条」，不能被抽屉翻页带走。 -->
+    <LicenseEventsSheet v-if="canRead" :open="eventsSheetOpen" @close="closeEventsSheet" />
   </section>
 </template>
 
@@ -817,38 +822,22 @@ onMounted(load)
 .license-legend { display: flex; flex-wrap: wrap; gap: 6px 20px; margin: 0; padding: 10px 12px; border: 1px solid var(--license-border); border-radius: 10px; background: var(--surface-muted, #f8fafc); list-style: none; }
 .license-legend li { display: inline-flex; align-items: center; gap: 7px; color: var(--license-muted); font-size: 11.5px; line-height: 1.6; }
 
-/* 逐应用列表 */
-.license-app-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
-.license-app {
-  --row-tone: var(--license-border);
+/* 逐应用卡片网格：auto-fit 自然落位（≥1280 四列），卡片近方形，窄屏单列。
+   列数只由 auto-fit + 240px 下限推导：1120px 容器恰好落成 4 列、每列约 268px；
+   若把上限写死成 300px，auto-repeat 会按上限计数，同样宽度只会得到 3 列。 */
+.license-app-grid {
   display: grid;
-  grid-template-columns: minmax(140px, .85fr) minmax(0, 2.2fr) auto;
-  align-items: start;
-  gap: 10px 18px;
-  padding: 14px 16px;
-  border: 1px solid var(--license-border);
-  border-left: 3px solid var(--row-tone);
-  border-radius: 10px;
-  background: var(--surface-card, #fff);
-  transition: box-shadow .15s var(--ease-standard);
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+  justify-content: center;
+  gap: 16px;
+  max-width: 1120px;
+  /* 宽度到顶之后整块网格在区块里居中，避免右侧留出一条空白带。 */
+  margin: 0 auto;
+  padding: 0;
+  list-style: none;
 }
-.license-app:hover { box-shadow: var(--shadow-card); }
-.license-app[data-tone="success"] { --row-tone: var(--success, #16a34a); }
-.license-app[data-tone="info"] { --row-tone: var(--primary, #2563eb); }
-.license-app[data-tone="warning"] { --row-tone: var(--warning, #d97706); }
-.license-app[data-tone="danger"] { --row-tone: var(--danger, #dc2626); }
-.license-app[data-tone="neutral"] { --row-tone: var(--line-strong, #cbd5e1); }
-.license-app-name { display: grid; gap: 3px; min-width: 0; }
-.license-app-name strong { font-size: 14px; font-weight: 650; }
-.license-app-code { color: var(--license-muted); font-size: 11px; }
-.license-app-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr)); gap: 10px 18px; margin: 0; min-width: 0; }
-.license-app-facts dt { color: var(--license-muted); font-size: 11px; font-weight: 600; }
-.license-app-facts dd { display: grid; justify-items: start; gap: 3px; margin: 5px 0 0; min-width: 0; }
+/* 仍在待生效列表、变更预览里复用的说明文字；卡片内的一套在 LicenseAppCard 里 */
 .license-app-meta { color: var(--license-muted); font-size: 11.5px; line-height: 1.55; overflow-wrap: anywhere; }
-.license-app-meta[data-tone="ok"] { color: var(--success-text, #15803d); }
-.license-app-meta[data-tone="soon"] { color: var(--warning-text, #b45309); }
-.license-app-meta[data-tone="expired"] { color: var(--danger-text, #b91c1c); }
-.license-app-action { display: flex; align-items: center; justify-content: flex-end; }
 
 /* 空状态 */
 .license-empty { display: grid; justify-items: start; gap: 8px; padding: 20px; border: 1px dashed var(--line-strong, #cbd5e1); border-radius: 10px; background: var(--surface-muted, #f8fafc); }
@@ -865,7 +854,6 @@ onMounted(load)
 .license-clock-body { display: grid; gap: 12px; padding-top: 14px; border-top: 1px dashed var(--license-border); }
 .license-clock-risks { display: grid; gap: 6px; max-width: 760px; margin: 0; padding: 10px 14px 10px 30px; border: 1px solid var(--warning-border, #fde68a); border-radius: 10px; background: var(--warning-soft); color: var(--warning-text, #b45309); font-size: 12px; line-height: 1.65; }
 .license-clock-risks li::marker { color: var(--warning, #d97706); }
-.license-app-meta code { padding: 0 4px; border-radius: 4px; background: var(--surface-muted, #f8fafc); color: inherit; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10.5px; }
 
 
 /* 导入区 */
@@ -898,34 +886,22 @@ onMounted(load)
 .license-check input { flex: 0 0 auto; width: 15px; height: 15px; margin: 2px 0 0; accent-color: var(--primary, #2563eb); }
 .license-check-risk { border: 1px solid var(--danger-border, #fecaca); background: var(--danger-soft, #fef2f2); color: var(--danger-text, #b91c1c); }
 
-/* 授权事件（次要信息） */
+/* 授权事件：页内只留最近几条单行摘要，行本身（LicenseEventRow）自带样式。
+   这里不再有 max-height / overflow / 页内分页：完整列表搬到右侧抽屉。 */
 .license-events { background: var(--surface-card, #fff); }
 .license-events h3 { font-size: 15px; }
-.license-timeline { list-style: none; margin: 0; padding: 0 8px 0 6px; max-height: 340px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
-.license-timeline.expanded { max-height: 400px; }
-.license-timeline:focus-visible { outline: 2px solid var(--primary, #2563eb); outline-offset: 4px; border-radius: 4px; }
-/* 圆点使用绝对定位，不应占用 14px 的网格列。 */
-.license-timeline li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: center; padding: 10px 0 10px 18px; min-height: 58px; box-sizing: border-box; border-left: 2px solid var(--license-border); margin-left: 4px; position: relative; }
-.license-timeline li + li .license-event-content { border-top: 1px solid var(--license-border); }
-.license-timeline-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint, #94a3b8); position: absolute; left: -5px; top: 26px; }
-.license-event-content { min-width: 0; padding-top: 6px; }
-.license-event-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
-.license-event-heading strong { min-width: 0; max-width: 100%; font-size: 13px; line-height: 1.5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.license-event-meta { font-size: 12px; color: var(--license-muted); white-space: nowrap; }
-.license-event-code { display: block; margin-top: 3px; font-size: 11px; line-height: 1.5; color: var(--license-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.license-event-time { font-size: 12px; color: var(--license-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
-.license-event-toggle { display: flex; gap: 12px; align-items: center; justify-content: space-between; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--license-border); }
-.license-event-toggle .license-note { margin: 0; font-size: 12px; }
-.license-pagination { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 10px; }
+.license-event-list { display: grid; margin: 0; padding: 0; list-style: none; }
+.license-event-list[aria-busy="true"] { opacity: .72; }
+.license-event-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--license-border); }
+.license-event-foot .license-note { margin: 0; font-size: 12px; }
 
 /* 运行详情锚点：从“去激活”跳转过来时承接焦点。 */
 .license-runtime-anchor { scroll-margin-top: 12px; outline: none; }
 
 .license-alert { margin: 0; padding: 12px 14px; border: 1px solid var(--danger-border, #fecaca); border-radius: 10px; background: var(--danger-soft, #fef2f2); color: var(--danger-text, #b91c1c); font-size: 13px; }
 
+/* 卡片网格自己负责列数，这里只剩顶部摘要卡在中等宽度下的对齐调整。 */
 @media (max-width: 1080px) {
-  .license-app { grid-template-columns: minmax(0, 1fr); }
-  .license-app-action { justify-content: flex-start; }
   .license-hero-cta { justify-items: start; text-align: left; }
 }
 @media (max-width: 720px) {
@@ -933,7 +909,10 @@ onMounted(load)
   .license-hero-title { font-size: 18px; }
   .license-steps li { flex-basis: 100%; padding-right: 0; }
   .license-facts { grid-template-columns: repeat(auto-fit, minmax(min(130px, 100%), 1fr)); }
+  .license-event-foot { align-items: stretch; }
+  .license-event-foot .console-button { width: 100%; }
   .license-timeline li { grid-template-columns: minmax(0, 1fr); gap: 4px; }
   .license-event-time { padding-bottom: 4px; }
+  .license-app-grid { grid-template-columns: minmax(0, 1fr); justify-content: stretch; }
 }
 </style>

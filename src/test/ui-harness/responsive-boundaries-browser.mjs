@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
-import { build } from 'esbuild'
+import { build, transform } from 'esbuild'
 import { parse, compileScript, compileStyle } from '@vue/compiler-sfc'
 import { chromium } from 'playwright-core'
 
@@ -42,11 +42,15 @@ const componentStyles = new Map()
 // 返回值：浏览器脚本与编译后的样式；编译错误直接失败。
 async function componentBundle() {
   const result = await build({
-    stdin: { contents: `import {createApp} from 'vue';
+    stdin: { contents: `import {createApp, h} from 'vue';
       import Wizard from './src/modules/platform/applications/components/SubsystemAccessWizard.vue';
       import Confirm from './src/modules/shared/components/ConfirmDialog.vue';
+      import LicenseEventsSheet from './src/modules/platform/features/licenses/LicenseEventsSheet.vue';
+      import LicenseAppCard from './src/modules/platform/features/licenses/LicenseAppCard.vue';
       window.mountWizard=props=>createApp(Wizard,props).mount('#fixture');
-      window.mountConfirm=props=>createApp(Confirm,props).mount('#fixture');`, resolveDir: root },
+      window.mountConfirm=props=>createApp(Confirm,props).mount('#fixture');
+      window.mountLicenseEventsSheet=props=>createApp(LicenseEventsSheet,props).mount('#fixture');
+      window.mountLicenseCards=(rows,el)=>createApp({render:()=>rows.map(row=>h(LicenseAppCard,{row, busy:false, loading:false}))}).mount(el);`, resolveDir: root },
     bundle: true, write: false, format: 'iife', platform: 'browser',
     define: { 'import.meta.env': '{}' }, alias: { '@': root + 'src' },
     plugins: [{ name: 'layout-vue',
@@ -62,7 +66,9 @@ async function componentBundle() {
         componentStyles.set(path, descriptor.styles.map(style => compileStyle({
           source: style.content, filename: path, id, scoped: style.scoped,
         }).code).join('\n'))
-        return { contents: script.content + `\n__fixtureComponent.__scopeId=${JSON.stringify(id)};export default __fixtureComponent;`,
+        // 组件可写成 `<script setup lang="ts">`：compileScript 不擦除类型标注，先交给 esbuild 降级。
+        const transpiled = await transform(script.content, { loader: 'ts' })
+        return { contents: transpiled.code + `\n__fixtureComponent.__scopeId=${JSON.stringify(id)};export default __fixtureComponent;`,
           loader: 'js', resolveDir: fileURLToPath(new URL('.', 'file://' + path)) }
       })
     } }],
@@ -86,6 +92,24 @@ function moduleMarkup(item) {
         <tbody><tr><td>${token}</td><td>${longText}</td><td><button>查看详情</button></td></tr></tbody></table></div>
       <pre data-scroll>${token.repeat(3)}\n  第二行保留缩进</pre>
     </section></main>`
+}
+
+// 用途：拼出真实组件要的六行许可事实，交给浏览器里挂载的 LicenseAppCard 渲染。
+// 参数：无；数值均为合成事实，不含真实许可证或凭据。
+// 返回值：行对象数组；第一张卡同时带原因码与执行计数，代表内容最高的情况。
+function licenseCardRows() {
+  const expiry = days => Math.floor(Date.now() / 1000) + days * 86400
+  const summary = { available: true, revision: 7, deploymentRevision: 42, memberCount: 2, ready: 2, acknowledged: 1, latestReadyAt: '2026-10-27T05:54:38Z', latestAckAt: '2026-10-26T01:02:03Z' }
+  const license = (label, tone) => ({ key: 'IMPORTED', label, tone })
+  const counters = true
+  return [
+    { name: '结算管理', code: 'settlement', tone: 'danger', application: { kind: 'FULL', expires_at: expiry(-12) }, license: license('已过期', 'danger'), enforcement: { key: 'ENFORCED', label: '已强制执行', tone: 'success', note: '' }, summary, showEnforcementCounters: counters, reasonCode: 'EXPIRED', action: { key: 'REIMPORT', label: '重新导入', target: 'import', hint: '已过期，需要供应商签发更高版本后再导入' } },
+    { name: '客户与商机', code: 'customer_and_opportunity', tone: 'success', application: { kind: 'FULL', expires_at: expiry(268) }, license: license('已导入', 'success'), enforcement: { key: 'ENFORCED', label: '已强制执行', tone: 'success', note: '' }, summary, showEnforcementCounters: counters, reasonCode: '', action: { key: 'DETAIL', label: '查看运行详情', target: 'runtime', hint: '已强制执行，不提供重复激活' } },
+    { name: '客户门户', code: 'customer_portal', tone: 'info', application: { kind: 'TRIAL', expires_at: expiry(252) }, license: license('待生效', 'info'), enforcement: { key: 'APPLYING', label: '激活中', tone: 'info', note: '' }, summary, showEnforcementCounters: counters, reasonCode: 'NOT_EFFECTIVE', action: { key: 'PROGRESS', label: '查看激活进度', target: 'runtime', hint: '激活已提交，等待组件准备并确认当前修订' } },
+    { name: '合同管理', code: 'contract_management', tone: 'warning', application: { kind: 'FULL', expires_at: expiry(237) }, license: license('已导入', 'success'), enforcement: { key: 'PENDING_ENFORCEMENT', label: '待激活', tone: 'warning', note: '' }, summary, showEnforcementCounters: counters, reasonCode: '', action: { key: 'ACTIVATE', label: '去激活', target: 'runtime', hint: '在下方运行详情中核对执行修订并勾选确认后启用' } },
+    { name: '项目管理', code: 'project_management', tone: 'neutral', application: { kind: 'FULL', expires_at: expiry(208) }, license: license('已导入', 'success'), enforcement: { key: 'UNREGISTERED', label: '未纳管', tone: 'neutral', note: '运行组件尚未登记，运行执行事实不存在' }, summary: null, showEnforcementCounters: false, reasonCode: '', action: { key: 'ENROLL', label: '查看运行详情', target: 'runtime', hint: '运行组件尚未登记，未接入运行时授权执行' } },
+    { name: '数据分析', code: 'data_analysis', tone: 'neutral', application: { kind: 'TRIAL', expires_at: expiry(206) }, license: license('已导入', 'success'), enforcement: { key: 'UNKNOWN', label: '状态未知', tone: 'neutral', note: longText }, summary: null, showEnforcementCounters: false, reasonCode: '', action: { key: 'CONTACT', label: '联系授权管理员', target: 'none', hint: '需要商业授权管理权限才能发起激活' } },
+  ]
 }
 
 // 用途：用可观察几何边界检查页面、控件与局部滚动，不依赖具体CSS实现。
@@ -143,6 +167,47 @@ async function violations(page, wizard = false) {
   }, wizard)
 }
 
+// 用途：用真实 console.css 骨架检查授权事件抽屉的几何契约。
+// 参数：page 为挂载了真实 LicenseEventsSheet 的页面；width/height 为当前视口。
+// 返回值：违规列表；≤720px 要求整屏，>720px 要求右贴边且不超过 560px。
+async function sheetViolations(page, width, height) {
+  return page.evaluate(({ width, height }) => {
+    const errors = []
+    const box = element => element.getBoundingClientRect()
+    const sheet = document.querySelector('.console-sheet')
+    if (!sheet) return ['event sheet missing']
+    const rect = box(sheet)
+    const fullScreen = width <= 720
+    if (fullScreen) {
+      if (Math.abs(rect.left) > 1 || Math.abs(rect.top) > 1
+        || Math.abs(rect.right - width) > 1 || Math.abs(rect.bottom - height) > 1) {
+        errors.push('mobile sheet must cover viewport: ' + JSON.stringify(rect))
+      }
+    } else {
+      if (Math.abs(rect.right - width) > 1) errors.push('desktop sheet must stick to the right edge')
+      if (rect.width > 561 || rect.width < 200) errors.push('desktop sheet width out of range: ' + rect.width)
+      if (Math.abs(rect.height - height) > 1) errors.push('desktop sheet must be full height')
+    }
+    const close = box(document.querySelector('.console-sheet__close'))
+    if (close.width < (fullScreen ? 44 : 36)) errors.push('close target too small: ' + close.width)
+    if (close.left < -1 || close.right > width + 1 || close.top < -1 || close.bottom > height + 1) errors.push('close action unreachable')
+    const body = document.querySelector('.console-sheet__body')
+    if (body.scrollWidth > body.clientWidth + 1) errors.push('event sheet body horizontal overflow')
+    const footer = box(document.querySelector('.console-sheet__footer'))
+    if (footer.bottom > height + 1) errors.push('sheet pagination unreachable')
+    if (document.documentElement.scrollWidth > width + 1) errors.push('document horizontal overflow (sheet)')
+    // 行高契约：桌面 48px、移动 64px；摘要行内部不允许横向溢出。
+    const summary = document.querySelector('.license-event-summary')
+    if (summary) {
+      const measured = box(summary)
+      const expected = fullScreen ? 64 : 48
+      if (measured.height < expected - 1) errors.push(`event summary height ${measured.height} < ${expected}`)
+      if (summary.scrollWidth > summary.clientWidth + 1) errors.push('event summary horizontal overflow')
+    }
+    return errors
+  }, { width, height })
+}
+
 // 用途：拦截所有浏览器请求，用只读合成响应驱动真实向导恢复到结果步骤。
 // 参数：page 为独立页面；errors 为收集非预期请求的数组。
 // 返回值：无；禁止对外请求与任何业务写入。
@@ -177,11 +242,17 @@ const sharedCss = await load('shared/styles/global-ux.css')
 const moduleCss = await Promise.all(modules.slice(1).map(item => load(item[1])))
 moduleCss.push(await load('platform/iam/styles/iam-settings.css'))
 const licenseSource = await readFile(root + 'src/modules/platform/features/licenses/CommercialLicenseView.vue', 'utf8')
+const licenseCardSource = await readFile(root + 'src/modules/platform/features/licenses/LicenseAppCard.vue', 'utf8')
 const licenseScope = 'data-v-layout-license'
-moduleCss.push(parse(licenseSource).descriptor.styles.map(style => compileStyle({
-  source: style.content, id: licenseScope, scoped: style.scoped,
-}).code).join('\n'))
+// 许可页与卡片分别编译、共用同一个作用域 id：夹具里两组规则都只认属性存在，与真实两份 scope 等价。
+for (const source of [licenseSource, licenseCardSource]) {
+  moduleCss.push(parse(source).descriptor.styles.map(style => compileStyle({
+    source: style.content, id: licenseScope, scoped: style.scoped,
+  }).code).join('\n'))
+}
 const scoped = [...componentStyles.values()].join('\n')
+// 抽屉夹具单独用一份完整样式（含真实组件 scoped 样式），在宽度循环里只跑一次。
+const sheetCss = base + consoleCss + sharedCss + moduleCss.join('\n') + scoped
 const browser = await chromium.launch({
   executablePath: process.env.CHROMIUM_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   headless: true,
@@ -212,7 +283,7 @@ try {
         await page.close()
       }
       for (const grid of ['crm-customer-cards', 'crm-stage-alert-grid', 'pm-detail-summary', 'project-list',
-        'license-facts', 'license-app-facts', 'license-field-row', 'iam-person-summary-grid']) {
+        'license-facts', 'license-app-grid', 'license-field-row', 'iam-person-summary-grid']) {
         const page = await browser.newPage({ viewport: { width, height }, reducedMotion: 'reduce' })
         const scope = grid.startsWith('license-') ? licenseScope : ''
         await page.setContent(`<style>${css}</style><section class="console-card" style="width:min(220px,100%);padding:20px" data-boundary>
@@ -220,6 +291,35 @@ try {
         results.push({ module: grid, width, height, order, errors: await violations(page) })
         await page.close()
       }
+      // 逐应用卡片网格：挂载真实 LicenseAppCard 渲染六张卡，1440 下应 4 列 2 行、近方形、无横向溢出。
+      const cardPage = await browser.newPage({ viewport: { width, height }, reducedMotion: 'reduce' })
+      await cardPage.setContent(`<style>${css}</style><main class="console-content"><section class="license-page" ${licenseScope}>
+        <section class="console-card license-section" ${licenseScope} data-boundary>
+          <ul class="license-app-grid" ${licenseScope} data-boundary></ul>
+        </section></section></main>`)
+      await cardPage.addScriptTag({ content: bundle })
+      await cardPage.evaluate(rows => window.mountLicenseCards(rows, document.querySelector('.license-app-grid')), licenseCardRows())
+      const cardErrors = await violations(cardPage)
+      const cardMetrics = await cardPage.evaluate(() => {
+        const boxes = [...document.querySelectorAll('.license-app-card')].map(card => card.getBoundingClientRect())
+        const columns = new Set(boxes.map(box => Math.round(box.left))).size
+        const rows = new Set(boxes.map(box => Math.round(box.top))).size
+        const widths = boxes.map(box => Math.round(box.width))
+        const heights = boxes.map(box => Math.round(box.height))
+        const ratio = Math.max(...boxes.map(box => box.height / box.width))
+        return { cards: boxes.length, columns, rows, width: Math.min(...widths), maxWidth: Math.max(...widths), height: Math.max(...heights), ratio: Math.round(ratio * 1000) / 1000 }
+      })
+      if (width === 1440) {
+        assert.equal(cardMetrics.cards, 6, '六张卡片必须全部渲染')
+        assert.equal(cardMetrics.columns, 4, '≥1280 期望四列，实际 ' + JSON.stringify(cardMetrics))
+        assert.ok(cardMetrics.rows <= 2, '六张卡在 1440 下不得超过两行：' + JSON.stringify(cardMetrics))
+        assert.ok(cardMetrics.ratio <= 1.15, '卡片应接近方形（高/宽 ≤ 1.15）：' + JSON.stringify(cardMetrics))
+      }
+      if (width === 375 || width === 1440) {
+        await cardPage.screenshot({ path: output + `license-app-cards-${width}-${order}.png`, fullPage: true })
+      }
+      results.push({ module: 'license-app-cards', width, height, order, errors: cardErrors, metrics: cardMetrics })
+      await cardPage.close()
       const page = await browser.newPage({ viewport: { width, height }, reducedMotion: 'reduce' })
       const errors = []
       page.on('pageerror', error => errors.push(error.message))
@@ -263,6 +363,36 @@ try {
       assert.ok(await action.isVisible(), 'long dialogs must retain a reachable confirmation action')
       results.push({ module: 'actual-shared-confirm', width, height, order, errors: confirmationErrors })
       await confirm.close()
+    }
+    // 授权事件抽屉：挂真实组件，用真实 console.css 骨架检查「移动端整屏 / 桌面 560px 右贴边」。
+    {
+      const sheetPage = await browser.newPage({ viewport: { width, height }, reducedMotion: 'reduce' })
+      const sheetErrors = []
+      sheetPage.on('pageerror', error => sheetErrors.push(error.message))
+      await sheetPage.setContent('<div id="fixture"></div>')
+      await sheetPage.addStyleTag({ content: sheetCss })
+      await sheetPage.addScriptTag({ content: bundle })
+      // 抽屉自己取数：只替换 fetch，注入 20 条合成事件，不发任何真实请求。
+      await sheetPage.evaluate(({ longText, pageSize }) => {
+        const items = Array.from({ length: pageSize }, (_, index) => ({
+          id: '01H0000000000000000000' + String(index).padStart(4, '0'),
+          kind: index === 0 ? 'FUTURE_EVENT' : 'IMPORTED_CURRENT',
+          version: 3, revision: index + 1, created_at: '2026-10-13T04:34:56Z',
+          digest: 'sha256:' + 'a'.repeat(40), tenant_id: '', user_id: '',
+          note: longText,
+        }))
+        window.fetch = async () => ({
+          ok: true, status: 200, headers: { get: () => 'application/json' },
+          json: async () => ({ code: 'OK', data: { items, total: 120, page: 1 } }),
+        })
+        window.mountLicenseEventsSheet({ open: true })
+      }, { longText, pageSize: 20 })
+      await sheetPage.locator('.console-sheet').waitFor()
+      await sheetPage.locator('.license-event-summary').first().waitFor()
+      sheetErrors.push(...await sheetViolations(sheetPage, width, height))
+      if (width === 1440 || width === 375) await sheetPage.screenshot({ path: output + `license-events-sheet-${width}.png` })
+      results.push({ module: 'actual-license-events-sheet', width, height, order: 'sheet-only', errors: sheetErrors })
+      await sheetPage.close()
     }
   }
 } finally {

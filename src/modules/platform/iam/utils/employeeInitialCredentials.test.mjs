@@ -32,6 +32,8 @@ function fixture(result) {
     closeConfirm: { value: null }, askConfirm: async () => true, acceptClose: () => {}, cancelClose: () => {},
     initialCredentialsForImport, initialCredentialsDocument, clearInitialCredentials,
     rows: [], rawText: { value: '' }, fileName: { value: '' }, fileSize: { value: 0 }, parseError: { value: '' }, filterMode: { value: 'all' },
+    // 预览分页状态：restart 会把它复位成默认值，用例只提供夹具不改变凭据语义。
+    page: { value: 1 }, pageSize: { value: 25 }, DEFAULT_PAGE_SIZE: 25, highlightedLineNo: { value: 0 },
   }
   const controller = vm.runInNewContext(`${submit}\n${controls}\n({ submit, close, restart, onBackdropClick, onKeydown, downloadInitialCredentials })`, state)
   return { state, controller, events }

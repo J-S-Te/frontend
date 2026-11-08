@@ -242,6 +242,20 @@ const crmConnectionRequired = computed(() => props.canPreview && (batch.value?.i
 const canVote = computed(() => props.canApprove && batch.value?.confirmation?.state === 'PENDING'
   && !(batch.value.confirmation.commands || []).some(command => command.actor_id === props.actorId && ['APPROVE','REJECT'].includes(command.action))
   && Object.entries(batch.value.confirmation.assignees || {}).some(([role, ids]) => Array.isArray(ids) && ids.includes(props.actorId) && !(batch.value.confirmation.approved_roles || []).includes(role)))
+// P1：已提交批次的确认口径以台账 confirmation.policy_decision 为准（AUTO/MANUAL）。
+// AUTO 批次的 APPROVED 是提交时按租户策略自动形成的，没有人工签署，
+// 因此不能用 stateLabels 的“确认通过”，也不能用当前租户开关反推历史批次。
+const confirmationAutoApproved = computed(() => batch.value?.confirmation?.policy_decision === 'AUTO')
+const confirmationStateText = computed(() => {
+  const confirmation = batch.value?.confirmation
+  if (!confirmation) return ''
+  if (confirmation.policy_decision !== 'AUTO') return stateLabels[confirmation.state] || confirmation.state
+  // policy_version 是判定所依据的租户开关版本；缺失（或旧数据 0）时不编造版本号。
+  const version = Number(confirmation.policy_version)
+  return Number.isInteger(version) && version > 0
+    ? `按租户策略自动审批（策略版本 ${version}）`
+    : '按租户策略自动审批'
+})
 const importErrorReportRows = computed(() => contractImportErrorRows(batch.value?.items || [], error.value, { issueLabels, fieldLabel: importFieldLabel }))
 
 /**
@@ -1642,8 +1656,9 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
             <button v-if="canCommit && batch.can_commit && batch.state === 'PREVIEWED' && !['STARTING','PENDING','APPROVED'].includes(batch.confirmation?.state)" class="contract-button primary" type="button" :disabled="busy" @click="confirmation()">冻结清单、建立历史记录并提交独立确认</button>
           </div>
           <template v-if="batch.confirmation">
-            <p class="contract-import-hint">当前确认：{{ stateLabels[batch.confirmation.state] || batch.confirmation.state }}；冻结修订 {{ batch.confirmation.revision }}。</p>
-            <p class="contract-import-hint">要求角色：{{ batch.confirmation.roles.join('、') }}；已确认：{{ batch.confirmation.approved_roles?.join('、') || '无' }}。</p>
+            <p class="contract-import-hint">当前确认：{{ confirmationStateText }}；冻结修订 {{ batch.confirmation.revision }}。</p>
+            <!-- AUTO 批次没有人工会签事实：不展示“要求角色/已确认”这类会被读成签署记录的占位。 -->
+            <p v-if="!confirmationAutoApproved" class="contract-import-hint">要求角色：{{ batch.confirmation.roles.join('、') }}；已确认：{{ batch.confirmation.approved_roles?.join('、') || '无' }}。</p>
             <div class="contract-import-actions">
               <button v-if="canVote" class="contract-button secondary small" type="button" :disabled="busy" @click="confirmation('APPROVE')">确认本次历史导入基线</button>
               <button v-if="canVote" class="contract-button secondary small" type="button" :disabled="busy" @click="confirmation('REJECT')">驳回本次历史导入</button>

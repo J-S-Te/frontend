@@ -16,7 +16,7 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
-import { build } from 'esbuild'
+import { build, transform } from 'esbuild'
 import { parse, compileScript, compileStyle } from '@vue/compiler-sfc'
 import { chromium } from 'playwright-core'
 
@@ -131,8 +131,10 @@ async function componentBundle() {
           styles.set(path, descriptor.styles.map((style) => compileStyle({
             source: style.content, filename: path, id, scoped: style.scoped,
           }).code).join('\n'))
+          // 组件可写成 `<script setup lang="ts">`：compileScript 不擦除类型标注，先交给 esbuild 降级。
+          const transpiled = await transform(script.content, { loader: 'ts' })
           return {
-            contents: script.content + `\n__fixtureComponent.__scopeId=${JSON.stringify(id)};export default __fixtureComponent;`,
+            contents: transpiled.code + `\n__fixtureComponent.__scopeId=${JSON.stringify(id)};export default __fixtureComponent;`,
             loader: 'js',
             resolveDir: fileURLToPath(new URL('.', 'file://' + path)),
           }

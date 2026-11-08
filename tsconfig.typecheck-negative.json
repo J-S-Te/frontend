@@ -1,0 +1,8 @@
+{
+  // 负向门禁：只检查故意写错的夹具，断言它**必须**报错。
+  // 继承正向门禁的全部编译选项（strict / alias / allowJs 等），只换 include：
+  // 这样「负向能报错」证明的就是正向门禁同一套类型，而不是另一套宽松配置。
+  "extends": "./tsconfig.typecheck.json",
+  "include": ["src/test/typecheck-negative.fixtures.ts"],
+  "exclude": ["node_modules", "dist"]
+}

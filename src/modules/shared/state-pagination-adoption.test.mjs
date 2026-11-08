@@ -104,17 +104,21 @@ const PLATFORM_SURFACES = [
   },
   {
     name: '商业授权事件',
+    // 三态闸门留在页面里（失败可重试、空态文案分开），分页条搬进「查看全部」右侧抽屉：
+    // 页内只剩最近几条摘要，翻页只在 LicenseEventsSheet.vue 里发生。
     source: read('../platform/features/licenses/CommercialLicenseView.vue'),
+    pagerSource: read('../platform/features/licenses/LicenseEventsSheet.vue'),
     pagers: [
-      /<PaginationBar[\s\S]{0,300}:page="events\.page"/,
-      /:total="events\.total"/,
-      /:page-size="eventPageSize"/,
-      /@change="loadEvents"/,
+      /<PaginationBar[\s\S]{0,300}label="授权事件分页"/,
+      /:page="page"/,
+      /:total="total"/,
+      /:page-size="pageSize"/,
+      /@change="loadEvents\(\$event\)"/,
     ],
     states: [
       /<ListState[\s\S]{0,200}v-if="eventsListState"[\s\S]{0,400}:error="eventsError"[\s\S]{0,400}@retry="loadEvents\(events\.page\)"/,
     ],
-    forbidden: [/正在读取事件…/, /<p v-else-if="!eventsLoading && !eventsError" class="license-muted">/],
+    forbidden: [/正在读取事件…/, /<p v-else-if="!eventsLoading && !eventsError" class="license-muted">/, /class="license-timeline"/, /eventsExpanded/],
   },
   {
     name: '岗位授权模板',
@@ -262,21 +266,26 @@ test('写操作返回业务编号时，提示把编号交给用户', () => {
 // ===========================================================================
 
 test('平台 / 预警中心接入面都引入了共享三态与分页组件', () => {
-  for (const { name, source } of PLATFORM_SURFACES) {
+  // 商业授权事件把分页条搬进了抽屉，所以「分页组件」按 pagerSource 检查：
+  // 三态闸门仍在页面里，分页条必须真的在抽屉里，两边都不能各自手写一套。
+  for (const { name, source, pagerSource } of PLATFORM_SURFACES) {
     // 引号风格各模块不同（单/双引号都在用），只锁「真的从 shared 引入」。
     assert.match(source, /import ListState from ['"]@\/modules\/shared\/components\/ListState\.vue['"]/, `${name}: 缺少 ListState 引入`)
-    assert.match(source, /import PaginationBar from ['"]@\/modules\/shared\/components\/PaginationBar\.vue['"]/, `${name}: 缺少 PaginationBar 引入`)
+    assert.match(pagerSource || source, /import PaginationBar from ['"]@\/modules\/shared\/components\/PaginationBar\.vue['"]/, `${name}: 缺少 PaginationBar 引入`)
   }
 })
 
 test('平台 / 预警中心分页条都拿到真实页码与总数，手写「上一页 / 下一页」已清除', () => {
-  for (const { name, source, pagers } of PLATFORM_SURFACES) {
+  for (const { name, source, pagerSource, pagers } of PLATFORM_SURFACES) {
+    // 分页属性在 pagerSource（抽屉）里检查；页面与抽屉都不许再长回手写翻页。
     for (const pattern of pagers) {
-      assert.match(source, pattern, `${name}: 分页条缺少 ${pattern}`)
+      assert.match(pagerSource || source, pattern, `${name}: 分页条缺少 ${pattern}`)
     }
-    assert.doesNotMatch(source, />上一页<\/button>/, `${name}: 仍有手写上一页按钮`)
-    assert.doesNotMatch(source, />下一页<\/button>/, `${name}: 仍有手写下一页按钮`)
-    assert.doesNotMatch(source, /aria-label="[^"]*分页"\s*>/, `${name}: 仍有手写分页容器`)
+    for (const target of [source, pagerSource].filter(Boolean)) {
+      assert.doesNotMatch(target, />上一页<\/button>/, `${name}: 仍有手写上一页按钮`)
+      assert.doesNotMatch(target, />下一页<\/button>/, `${name}: 仍有手写下一页按钮`)
+      assert.doesNotMatch(target, /aria-label="[^"]*分页"\s*>/, `${name}: 仍有手写分页容器`)
+    }
   }
 })
 
@@ -321,7 +330,7 @@ test('每个接入面的三态闸门都把失败排在空态之前（loading > e
 // P2③：「每页」下拉是显式 opt-in。视图层只有确实实现了 change-page-size（按新页大小
 // 重新请求列表）的分页条才允许传 page-size-options；其余页面保持默认不渲染，避免出现
 // 点了没反应、列表也不重载的死控件。
-test('只有已接 change-page-size 的分页条才传 page-size-options，且正好 4 条', () => {
+test('只有已接 change-page-size 的分页条才传 page-size-options，且正好 5 条', () => {
   const root = new URL('../', import.meta.url)
   const offenders = []
   const wired = []
@@ -345,5 +354,5 @@ test('只有已接 change-page-size 的分页条才传 page-size-options，且�
   }
   visit(root)
   assert.deepEqual(offenders, [], `页大小下拉的候选与处理器必须成对出现：\n${offenders.join('\n')}`)
-  assert.equal(wired.length, 4, `已接页大小切换的分页条应保持 4 条，实际 ${wired.length}`)
+  assert.equal(wired.length, 5, `已接页大小切换的分页条应保持 5 条，实际 ${wired.length}`)
 })

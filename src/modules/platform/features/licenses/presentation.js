@@ -66,6 +66,25 @@ const LICENSE_EVENT_NAMES = {
 }
 export const licenseEventName = kind => LICENSE_EVENT_NAMES[kind] || kind || '未知事件'
 
+// 授权事件的 created_at 是 Go 的 RFC3339 字符串。<time datetime> 需要机器可读原值，
+// 展示仍走 formatLicenseTime 的北京时间；零值 / 本地时间 / 非字符串一律不给 datetime，
+// 宁可不写属性，也不输出一个看起来合法其实错 8 小时的时间。
+export function licenseEventTimestamp(value) {
+  if (typeof value !== 'string') return ''
+  const text = value.trim()
+  if (value.startsWith('0001-')) return ''
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value) ? text : ''
+}
+
+// digest 只在核对时用：保留前 12 / 后 6，中间显式省略号，避免长串把行撑破或读丢首尾。
+// 完整值仍在 DOM 的 title 与复制按钮里，截断只影响可见文本。
+export function shortenDigest(value, head = 12, tail = 6) {
+  const text = typeof value === 'string' ? value.trim() : ''
+  if (!text) return ''
+  if (text.length <= head + tail + 1) return text
+  return `${text.slice(0, head)}…${text.slice(-tail)}`
+}
+
 // 许可证有效期使用 Unix 秒时间戳；事件 created_at 使用 Go 的 RFC3339 时间戳。
 // 展示口径统一走共享业务时间（北京时间 UTC+8），与审计日志页同一入口，避免同屏两个页签差 8 小时。
 export function formatLicenseTime(value) {

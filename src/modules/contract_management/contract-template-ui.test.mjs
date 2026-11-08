@@ -2,8 +2,11 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFile } from 'node:fs/promises'
 
-const source = await readFile(new URL('./views/ContractManagementView.vue', import.meta.url), 'utf8')
+const viewSource = await readFile(new URL('./views/ContractManagementView.vue', import.meta.url), 'utf8')
 const approvalDetailSource = await readFile(new URL('./composables/useApprovalDetail.js', import.meta.url), 'utf8')
+// 草稿字段区拆到 ContractDraftFields.vue：模板字段渲染断言改在子组件上，提交/预览链路仍在页面。
+const draftFieldsSource = await readFile(new URL('./components/ContractDraftFields.vue', import.meta.url), 'utf8')
+const source = [viewSource, draftFieldsSource].join('\n')
 
 test('contract template upload button is gated only by the admin role', () => {
   assert.match(source, /roleCodes\.includes\('admin'\) \|\| session\.value\?\.role\?\.code === 'admin'/)
@@ -26,7 +29,9 @@ test('template source replacement retains identity and explains existing contrac
 })
 
 test('sales contract creation renders and submits template-generated fields', () => {
-  assert.match(source, /v-model="newContract\.template_id" :disabled="Boolean\(editingContract\)" required @change="selectContractTemplate"/)
+  // 拆分后：模板下拉在字段子组件里，选择模板后通过明确事件交回页面处理（页面仍是唯一提交者）。
+  assert.match(draftFieldsSource, /v-model="newContract\.template_id" :disabled="Boolean\(editingContract\)" required @change="\$emit\('template-change'\)"/)
+  assert.match(viewSource, /@template-change="selectContractTemplate"/)
   assert.match(source, /v-for="field in editableContractTemplateFields"/)
   assert.match(source, /v-model="newContract\.template_values\[field\.name\]"/)
   assert.match(source, /previewContractTemplate\(templateID, values\)/)

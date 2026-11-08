@@ -1,8 +1,10 @@
 <script setup>
-import { computed, reactive, ref, watch, onBeforeUnmount } from 'vue'
+import { computed, nextTick, reactive, ref, watch, onBeforeUnmount } from 'vue'
 import { pinyin } from 'pinyin-pro'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import ConfirmDialog from '../../../shared/components/ConfirmDialog.vue'
+import PaginationBar from '../../../shared/components/PaginationBar.vue'
+import BatchUserImportPreviewTable from './BatchUserImportPreviewTable.vue'
 import { useConfirmDialog } from '../../../shared/composables/useConfirmDialog.js'
 import { createEmployeesBatch } from '@/modules/platform/iam/api/iam'
 import { parseApplicationRoles, restoreRowSelection } from '@/modules/platform/iam/utils/batchUserImport.js'
@@ -55,11 +57,34 @@ const rows = reactive([])
 let rowIdCounter = 0
 
 // 过滤视图：'all' 看全部，'valid' 只看合法行，'invalid' 只看异常行。
+// 完整原始行集合 rows 始终保留；筛选与分页都是在它之上派生的视图（筛选结果 →
+// 当前页），翻页只切切片，不重建记录，勾选 / 错误信息 / 原始行号都不会丢。
 const filterMode = ref('all')
-const visibleRows = computed(() => {
+const filteredRows = computed(() => {
   if (filterMode.value === 'valid') return rows.filter((row) => row.valid)
   if (filterMode.value === 'invalid') return rows.filter((row) => !row.valid)
   return rows
+})
+
+// ---- 预览分页 ----
+// 分页只影响展示：单批 100 行上限、校验、统计、提交与错误报告仍基于完整批次。
+// 默认 25 行/页，档位 25 / 50 / 100 复用共享 PaginationBar。
+const DEFAULT_PAGE_SIZE = 25
+const PAGE_SIZE_OPTIONS = [25, 50, 100]
+const pageSize = ref(DEFAULT_PAGE_SIZE)
+const page = ref(1)
+
+const totalPages = computed(() => Math.max(1, Math.ceil(filteredRows.value.length / pageSize.value)))
+// 渲染时的页码始终收敛到有效范围：重新校验 / 筛选 / 页大小变化导致当前页越界时
+// 直接显示最后一页，而不是先闪出一个空页。
+const currentPage = computed(() => {
+  const value = Math.trunc(Number(page.value))
+  const normalized = Number.isFinite(value) && value > 0 ? value : 1
+  return Math.min(normalized, totalPages.value)
+})
+const pageRows = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return filteredRows.value.slice(start, start + pageSize.value)
 })
 
 const stats = computed(() => {
@@ -134,6 +159,9 @@ async function ingestFile(file) {
   fileSize.value = file.size
   selectedFile.value = file
   rawText.value = text
+  // 新文件回到第 1 页，避免沿用上一份文件的页码 / 定位高亮。
+  page.value = 1
+  highlightedLineNo.value = 0
   rebuildRows()
   if (parseError.value) return
   if (!rows.length) {
@@ -333,6 +361,9 @@ function rebuildRows() {
     // 超过上限保留解析结果但阻止提交，避免一次性 500。
     parseError.value = `共解析出 ${rows.length} 行，超过单次 ${BATCH_LIMIT} 上限；请拆分文件后重试。`
   }
+  // 记录集变化后立即收敛页码（重新校验 / 换文件都可能让行数变少并被当前页剔除），
+  // 保证渲染前 page 本身就在有效范围内，不会出现空白页。
+  page.value = Math.min(Math.max(1, page.value), totalPages.value)
   // 记录本次预览使用的目录签名，用于识别“预览后又有人改了组织 / 岗位”。
   previewCatalogSignature.value = catalogsSignature()
 }
@@ -413,6 +444,8 @@ function makeRow(cells, columnMap, lineNo) {
 
 
 // ---- 选中控制 ----
+// 表头全选 / 反选 / 仅选合法行都遍历完整 rows（而不是当前页或当前筛选），
+// 因此勾选状态跨筛选、跨页保留，语义始终是「全部有效行」。
 function toggleAll(value) {
   for (const row of rows) {
     if (row.valid) row.selected = Boolean(value)
@@ -429,6 +462,62 @@ function selectValidOnly() {
 }
 
 const selectedValidRows = computed(() => rows.filter((row) => row.selected && row.valid))
+
+// ---- 分页交互 ----
+// 筛选变化必须回到第 1 页：旧页码在新结果集里没有意义。这里用手写 handler 而不是
+// watch(filterMode)：错误定位会临时把筛选切回「全部」并直接跳到目标行所在页，
+// watch 的异步复位会把定位页码覆盖回第 1 页。
+function changeFilter(next) {
+  filterMode.value = next === 'valid' || next === 'invalid' ? next : 'all'
+  page.value = 1
+}
+
+function changePageSize(next) {
+  const value = Math.trunc(Number(next))
+  if (!Number.isFinite(value) || value <= 0) return
+  pageSize.value = value
+  page.value = 1
+}
+
+// ---- 错误定位（跨页） ----
+// 服务端逐行问题只带 CSV 行号，目标行可能不在当前页，也可能被当前筛选隐藏。
+// 定位流程：必要时切回「全部」→ 求该行在筛选结果里的下标 → 切到所在页 →
+// 高亮并滚动到原始行（scrollIntoView + 1.6s 高亮，沿用既有定位反馈的时长）。
+const tableWrapEl = ref(null)
+const highlightedLineNo = ref(0)
+let locateHighlightTimer = null
+onBeforeUnmount(() => {
+  if (locateHighlightTimer) clearTimeout(locateHighlightTimer)
+})
+
+function scrollToLine(lineNo) {
+  const wrap = tableWrapEl.value
+  if (!wrap || typeof wrap.querySelector !== 'function') return
+  const target = wrap.querySelector(`[data-line="${lineNo}"]`)
+  if (target && typeof target.scrollIntoView === 'function') {
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
+}
+
+function locateLine(lineNo) {
+  const target = Math.trunc(Number(lineNo))
+  if (!Number.isFinite(target)) return
+  let index = filteredRows.value.findIndex((row) => row.lineNo === target)
+  if (index < 0) {
+    // 目标行被当前筛选隐藏时先恢复「全部」，否则定位会静默失败。
+    filterMode.value = 'all'
+    index = filteredRows.value.findIndex((row) => row.lineNo === target)
+  }
+  if (index < 0) return
+  page.value = Math.floor(index / pageSize.value) + 1
+  highlightedLineNo.value = target
+  if (locateHighlightTimer) clearTimeout(locateHighlightTimer)
+  locateHighlightTimer = setTimeout(() => { highlightedLineNo.value = 0 }, 1600)
+  // Node（测试 / SSR）里 setTimeout 没有 unref，浏览器里也不存在该属性，统一可选调用。
+  locateHighlightTimer?.unref?.()
+  nextTick(() => scrollToLine(target))
+}
+
 
 // ---- 样例 CSV ----
 const SAMPLE_CSV = '姓名,邮箱,手机号,状态,组织,岗位,应用角色\n张三,zhang.san@example.com,13800000000,启用,华东事业部,销售经理,\n李四,,13900000000,启用,华东事业部,项目经理,\n王五,wang.wu@example.com,,启用,华南事业部,技术顾问,\n赵六,zhao.liu@example.com,13500000000,停用,华东事业部,合同专员,合同管理系统：审计管理员\n'
@@ -501,6 +590,12 @@ async function submit() {
     return
   }
   const items = selectedValidRows.value
+  // 分页只影响展示：批次上限仍按文件解析出的完整行数判断，不能靠翻页 / 勾选
+  // 当前页来绕过 100 行限制（按钮已禁用，这里再做一次兜底）。
+  if (rows.length > BATCH_LIMIT) {
+    submitError.value = `当前文件共 ${rows.length} 行，超过单次 ${BATCH_LIMIT} 行上限；请拆分文件后重试。`
+    return
+  }
   if (!items.length) {
     submitError.value = '请至少勾选 1 行合法数据。'
     return
@@ -617,6 +712,9 @@ function restart() {
   submitIssues.value = []
   submitResult.value = null
   filterMode.value = 'all'
+  page.value = 1
+  pageSize.value = DEFAULT_PAGE_SIZE
+  highlightedLineNo.value = 0
   catalogNotice.value = ''
   previewCatalogSignature.value = ''
 }
@@ -764,7 +862,7 @@ function formatFileSize(bytes) {
           <div class="iam-batch-import-toolbar-right">
             <label class="iam-batch-import-filter">
               <span>筛选</span>
-              <select v-model="filterMode">
+              <select :value="filterMode" @change="changeFilter($event.target.value)">
                 <option value="all">全部（{{ stats.total }}）</option>
                 <option value="valid">仅合法（{{ stats.valid }}）</option>
                 <option value="invalid">仅异常（{{ stats.invalid }}）</option>
@@ -795,7 +893,14 @@ function formatFileSize(bytes) {
           <div v-if="submitIssues.length" class="iam-batch-import-issue-report">
             <ul class="iam-batch-import-issue-list">
               <li v-for="issue in visibleSubmitIssues" :key="`${issue.row}-${issue.field}-${issue.code}-${issue.message}`">
-                <span class="issue-row">{{ issue.row > 0 ? `第 ${issue.row} 行` : '整批问题' }}</span>
+                <button
+                  v-if="issue.row > 0"
+                  type="button"
+                  class="issue-row issue-locate"
+                  :title="`定位到第 ${issue.row} 行`"
+                  @click="locateLine(issue.row)"
+                >第 {{ issue.row }} 行</button>
+                <span v-else class="issue-row">整批问题</span>
                 <span v-if="issue.field" class="issue-field">{{ issue.field }}</span>
                 <span class="issue-message">{{ issue.message || issue.code }}</span>
               </li>
@@ -815,78 +920,31 @@ function formatFileSize(bytes) {
           </div>
         </div>
 
-        <div class="iam-batch-import-table-wrap">
-          <table class="iam-batch-import-table">
-            <thead>
-              <tr>
-                <th class="col-check">
-                  <input
-                    type="checkbox"
-                    :checked="allSelected"
-                    :indeterminate.prop="someSelected"
-                    :disabled="!rows.length"
-                    aria-label="全选"
-                    @change="(event) => toggleAll(event.target.checked)"
-                  />
-                </th>
-                <th class="col-line">行</th>
-                <th>姓名</th>
-                <th>邮箱</th>
-                <th>手机</th>
-                <th>状态</th>
-                <th>组织</th>
-                <th>岗位</th>
-                <th>应用角色 / 权限来源</th>
-                <th class="col-status">校验</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-if="!visibleRows.length">
-                <td colspan="10" class="empty">当前筛选下没有数据行。</td>
-              </tr>
-              <tr
-                v-for="row in visibleRows"
-                :key="row.id"
-                :class="{ invalid: !row.valid, success: row.submitStatus === 'success', failed: row.submitStatus === 'failed' }"
-              >
-                <td class="col-check">
-                  <input
-                    type="checkbox"
-                    v-model="row.selected"
-                    :disabled="!row.valid"
-                    :aria-label="`第 ${row.lineNo} 行`"
-                  />
-                </td>
-                <td class="col-line">{{ row.lineNo }}</td>
-                <td>{{ row.displayName || '—' }}</td>
-                <td>{{ row.email || '—' }}</td>
-                <td>{{ row.mobile || '—' }}</td>
-                <td>{{ row.status === 'ACTIVE' ? '启用' : '停用' }}</td>
-                <td>{{ row.organizationName || '—' }}</td>
-                <td>{{ row.positionName || '—' }}</td>
-                <td class="col-roles">
-                  <code v-if="row.rawApplicationRoles">{{ row.rawApplicationRoles }}</code>
-                  <span v-else class="role-inherited"><ConsoleIcon name="shield" />继承岗位授权模板</span>
-                  <small v-if="row.rawApplicationRoles" class="role-source">{{ row.authorizationSource }}</small>
-                </td>
-                <td class="col-status">
-                  <span v-if="row.submitStatus === 'success'" class="badge ok">
-                    <ConsoleIcon name="save" />已创建
-                  </span>
-                  <span v-else-if="row.submitStatus === 'failed'" class="badge bad" :title="row.submitMessage">
-                    <ConsoleIcon name="close" />失败
-                  </span>
-                  <span v-else-if="row.valid" class="badge ok">
-                    <ConsoleIcon name="save" />合法
-                  </span>
-                  <span v-else class="badge bad" :title="row.errors.join('；')">
-                    <ConsoleIcon name="close" />{{ row.errors[0] }}
-                    <small v-if="row.errors.length > 1">等 {{ row.errors.length }} 项</small>
-                  </span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+        <div ref="tableWrapEl" class="iam-batch-import-table-wrap">
+          <BatchUserImportPreviewTable
+            :rows="pageRows"
+            :all-selected="allSelected"
+            :some-selected="someSelected"
+            :has-rows="rows.length > 0"
+            :highlighted-line-no="highlightedLineNo"
+            empty-text="当前筛选下没有数据行。"
+            @toggle-all="toggleAll"
+          />
+        </div>
+        <div class="iam-batch-import-pagination">
+          <p v-if="filteredRows.length > pageSize" class="iam-batch-import-page-note">
+            分页只影响显示：统计、校验与提交始终基于完整批次的 {{ stats.total }} 行；表头全选覆盖全部有效行（跨筛选、跨页）。
+          </p>
+          <PaginationBar
+            :page="currentPage"
+            :total="filteredRows.length"
+            :page-size="pageSize"
+            :page-size-options="PAGE_SIZE_OPTIONS"
+            label="导入预览分页"
+            :disabled="submitting"
+            @change="page = $event"
+            @change-page-size="changePageSize"
+          />
         </div>
       </div>
 
@@ -1168,6 +1226,19 @@ function formatFileSize(bytes) {
   font-size: 12px;
 }
 .iam-batch-import-issue-list .issue-row { flex: 0 0 auto; font-weight: 600; color: var(--danger-text, #b91c1c); }
+/* 行号是可点的定位入口：点击后切到该行所在页并高亮原始行（按钮样式贴合文本）。 */
+.iam-batch-import-issue-list button.issue-row {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  color: var(--danger-text, #b91c1c);
+  text-decoration: underline dotted;
+  cursor: pointer;
+}
+.iam-batch-import-issue-list button.issue-row:hover { text-decoration-style: solid; }
+.iam-batch-import-issue-list button.issue-row:focus-visible { outline: 2px solid var(--danger-text, #b91c1c); outline-offset: 2px; }
 .iam-batch-import-issue-list .issue-field { flex: 0 0 auto; color: var(--ink-3, #6b7280); }
 .iam-batch-import-issue-list .issue-message { flex: 1 1 220px; min-width: 0; overflow-wrap: anywhere; }
 .iam-batch-import-issue-report small { display: block; margin-top: 6px; color: var(--ink-3, #6b7280); font-size: 11.5px; }
@@ -1342,41 +1413,21 @@ function formatFileSize(bytes) {
   overflow-wrap: anywhere;
   word-break: break-word;
 }
-.iam-batch-import-table tbody tr { transition: background 140ms; }
-.iam-batch-import-table tbody tr:hover:not(.invalid):not(.failed) { background: #f8fbff; }
 .iam-batch-import-table tbody tr:last-child td { border-bottom: 0; }
-.iam-batch-import-table tbody tr.invalid { background: #fff8f8; }
-.iam-batch-import-table tbody tr.success { background: #f0fdf4; }
-.iam-batch-import-table tbody tr.failed { background: #fff8f8; }
-.iam-batch-import-table tbody td.empty { text-align: center; color: var(--ink-3, #6b7280); padding: 18px; }
-.iam-batch-import-table .col-check { width: 36px; text-align: center; }
-.iam-batch-import-table .col-line { width: 50px; color: var(--ink-3, #6b7280); }
-.iam-batch-import-table .col-roles { min-width: 170px; }
-.iam-batch-import-table .col-roles code { display: block; white-space: normal; }
-.iam-batch-import-table .role-inherited {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  color: #2563eb;
-  font-size: 12px;
-  font-weight: 600;
+
+/* 预览分页：分页条右对齐；跨页说明在窄屏下折行，不与分页控件抢一行。 */
+.iam-batch-import-pagination {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
 }
-.iam-batch-import-table .role-inherited svg { width: 14px; height: 14px; }
-.iam-batch-import-table .role-source { display: block; margin-top: 4px; color: #64748b; font-size: 11px; }
-.iam-batch-import-table .col-status { width: 200px; }
-.iam-batch-import-table .badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+.iam-batch-import-page-note {
+  margin: 0;
+  color: var(--ink-3, #6b7280);
   font-size: 11.5px;
-  font-weight: 600;
-  padding: 4px 8px;
-  border-radius: 999px;
+  line-height: 1.55;
 }
-.iam-batch-import-table .badge svg { width: 12px; height: 12px; }
-.iam-batch-import-table .badge.ok { background: #dcfce7; color: #15803d; }
-.iam-batch-import-table .badge.bad { background: #fee2e2; color: #b91c1c; }
-.iam-batch-import-table .badge small { font-weight: 500; opacity: 0.85; margin-left: 2px; }
 
 .iam-batch-import-result {
   display: flex;
@@ -1435,7 +1486,6 @@ function formatFileSize(bytes) {
   .iam-batch-import-summary { flex-direction: column; align-items: flex-start; }
   .iam-batch-import-stats { width: 100%; }
   .iam-batch-import-stats .stat { flex: 1; }
-  .iam-batch-import-table .col-status { width: auto; }
   .iam-batch-import-modal > footer { flex-wrap: wrap; padding-inline: 20px; }
 }
 
@@ -1564,30 +1614,7 @@ function formatFileSize(bytes) {
 [data-theme="dark"] .iam-batch-import-table tbody td {
   border-bottom-color: var(--line-soft);
 }
-[data-theme="dark"] .iam-batch-import-table tbody tr:hover:not(.invalid):not(.failed) {
-  background: var(--surface-hover);
-}
-[data-theme="dark"] .iam-batch-import-table tbody tr.invalid,
-[data-theme="dark"] .iam-batch-import-table tbody tr.failed {
-  background: var(--danger-soft);
-}
-[data-theme="dark"] .iam-batch-import-table tbody tr.success {
-  background: var(--success-soft);
-}
-[data-theme="dark"] .iam-batch-import-table .role-inherited {
-  color: var(--primary-ink);
-}
-[data-theme="dark"] .iam-batch-import-table .role-source {
-  color: var(--text-muted);
-}
-[data-theme="dark"] .iam-batch-import-table .badge.ok {
-  background: var(--success-soft-strong);
-  color: var(--success-text);
-}
-[data-theme="dark"] .iam-batch-import-table .badge.bad {
-  background: var(--danger-soft-strong);
-  color: var(--danger-text);
-}
+/* 预览表格的深色覆盖随样式一起迁移到 BatchUserImportPreviewTable.vue。 */
 [data-theme="dark"] .iam-batch-import-result-icon.success {
   background: var(--success-soft-strong);
 }

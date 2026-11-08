@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { formatUserError } from '../../shared/utils/userError.js'
 import { businessWallClockToInstant, formatBusinessDateTime, instantToBusinessWallClock } from '../../shared/utils/businessTime.js'
 import SearchableSelect from './SearchableSelect.vue'
+import { penetrationParentAllows } from '../penetrationLifecycle.js'
 import {
   advancePenetrationExecution,
   advancePenetrationReport,
@@ -35,14 +36,16 @@ const cancellation = ref({ reason: '', customerContact: '', communicatedAt: '', 
 const permissionSet = computed(() => new Set(Array.isArray(props.session?.permissions) ? props.session.permissions : []))
 const currentUserID = computed(() => String(props.session?.user_id || ''))
 const isProjectManager = computed(() => currentUserID.value && currentUserID.value === String(props.item?.project_manager_id || ''))
-const canManage = computed(() => isProjectManager.value && permissionSet.value.has('project.implementation.plan'))
-const canExecute = computed(() => permissionSet.value.has('project.field.execute') && (workPackage.value?.engineer_ids || []).includes(currentUserID.value))
+const parentAllowsMutation = computed(() => penetrationParentAllows(props.item))
+const canChangeDecision = computed(() => penetrationParentAllows(props.item, 'decision'))
+const canManage = computed(() => parentAllowsMutation.value && isProjectManager.value && permissionSet.value.has('project.implementation.plan'))
+const canExecute = computed(() => parentAllowsMutation.value && permissionSet.value.has('project.field.execute') && (workPackage.value?.engineer_ids || []).includes(currentUserID.value))
 const reportPermission = computed(() => ({
   DRAFTING: 'project.report.prepare', SUBMITTED: 'project.report.prepare', APPROVED: 'project.report.review',
   ISSUED: 'project.report.issue', ARCHIVED: 'project.report.archive',
 }))
 const reportNext = computed(() => ({ NONE: 'DRAFTING', DRAFTING: 'SUBMITTED', SUBMITTED: 'APPROVED', APPROVED: 'ISSUED', ISSUED: 'ARCHIVED' })[workPackage.value?.report_status] || '')
-const canAdvanceReport = computed(() => Boolean(reportNext.value && permissionSet.value.has(reportPermission.value[reportNext.value])))
+const canAdvanceReport = computed(() => Boolean(parentAllowsMutation.value && reportNext.value && permissionSet.value.has(reportPermission.value[reportNext.value])))
 const decisionLabel = computed(() => ({ PENDING: '待与客户确认', REQUIRED: '确认开展', NOT_REQUIRED: '不开展' })[workPackage.value?.decision_status] || '尚未建立')
 const executionLabel = computed(() => ({ NOT_STARTED: '未开始', IN_PROGRESS: '测试中', COMPLETED: '已完成', CANCELLED: '已取消' })[workPackage.value?.execution_status] || '—')
 const reportLabel = computed(() => ({ NONE: '未开始', DRAFTING: '编制中', SUBMITTED: '待审核', APPROVED: '已审核', ISSUED: '已签发', ARCHIVED: '已归档' })[workPackage.value?.report_status] || '—')
@@ -102,8 +105,11 @@ async function ensurePackage() {
   finally { busy.value = false }
 }
 
+// 用途：仅在父项允许变更时提交客户沟通结论。
+// 参数：无；读取当前表单、专项版本及父项状态。
+// 返回值：无；成功更新专项，失败保留草稿并提示原因。
 async function submitDecision() {
-  if (!workPackage.value || busy.value) return
+  if (!workPackage.value || !canManage.value || !canChangeDecision.value || busy.value) return
   busy.value = true
   try {
     const payload = {
@@ -216,7 +222,7 @@ watch(workPackage, fillForms)
       </dl>
       <p v-if="workPackage.communication_summary" class="pen-note">沟通结论：{{ workPackage.communication_summary }}</p>
 
-      <section v-if="canManage && (workPackage.decision_status !== 'REQUIRED' || workPackage.execution_status === 'NOT_STARTED')" class="pen-form">
+      <section v-if="canManage && canChangeDecision && (workPackage.decision_status !== 'REQUIRED' || workPackage.execution_status === 'NOT_STARTED')" class="pen-form">
         <h4>{{ workPackage.decision_status === 'PENDING' ? '记录客户沟通结论' : '变更开展结论' }}</h4>
         <div class="pen-choice"><label><input v-model="decision.status" type="radio" value="REQUIRED" />开展</label><label><input v-model="decision.status" type="radio" value="NOT_REQUIRED" />不开展</label></div>
         <label><span>客户联系人 *</span><input v-model.trim="decision.customerContact"  maxlength="128"/></label>
