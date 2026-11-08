@@ -2,8 +2,12 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFile } from 'node:fs/promises'
 
-const source = await readFile(new URL('./views/ContractManagementView.vue', import.meta.url), 'utf8')
+const viewSource = await readFile(new URL('./views/ContractManagementView.vue', import.meta.url), 'utf8')
 const css = await readFile(new URL('./styles/contract-management.css', import.meta.url), 'utf8')
+// 草稿字段区拆到 ContractDraftFields.vue：长度/必填断言覆盖子组件里的真实输入框，
+// 拆分不能成为绕过输入合规检查的口子。
+const draftFieldsSource = await readFile(new URL('./components/ContractDraftFields.vue', import.meta.url), 'utf8')
+const source = [viewSource, draftFieldsSource].join('\n')
 
 test('new contract form marks required fields and explains the marker', () => {
   assert.match(source, /contract-form-required-hint/)
@@ -54,7 +58,9 @@ test('CRM customer selector stays full width and only the clear button is narrow
   assert.doesNotMatch(css, /\.contract-opportunity-control>button:last-child/)
   assert.match(css, /\.contract-opportunity-control>\.contract-opportunity-select\s*\{[^}]*flex:1/)
   assert.match(css, /\.contract-opportunity-control>\.contract-opportunity-clear\s*\{[^}]*width:36px/)
-  assert.match(source, /class="contract-opportunity-select" type="button" @click="openCustomerPicker"/)
+  // 拆分后：按钮 DOM 与类名不变，点击通过明确事件交回页面（页面保留目录读取与清空权限）。
+  assert.match(draftFieldsSource, /class="contract-opportunity-select" type="button" @click="\$emit\('open-customer-picker'\)"/)
+  assert.match(viewSource, /@open-customer-picker="openCustomerPicker"/)
   assert.match(source, /class="contract-opportunity-clear" type="button" aria-label="清除 CRM 客户"/)
   assert.match(source, /class="contract-opportunity-clear" type="button" aria-label="清除关联商机"/)
 })

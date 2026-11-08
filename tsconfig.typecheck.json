@@ -1,0 +1,75 @@
+{
+  // 渐进式类型门禁（前端优化计划 阶段 1）。
+  //
+  // 为什么是「独立 tsconfig」而不是全仓 `tsconfig.json`：
+  //   仓库 95% 是 JS/JSX 风格的 SFC，一次性开启 `checkJs` 会把历史文件的历史问题
+  //   变成一次无法评审的红屏，团队只会选择关掉门禁。这里用一份显式白名单，
+  //   只把已经改写为 TypeScript 的组件纳入检查，门禁覆盖范围**只扩大不缩小**：
+  //   新增覆盖一律追加到下方 include，绝不通过放宽 compilerOptions 换绿。
+  //
+  // 三个共享组件（AsyncPanel / PaginationBar / ListState）是阶段 1 的首批契约，
+  // 它们被各子系统复用，类型先立住，后续接入方才有可依赖的签名。
+  "compilerOptions": {
+    // 目标运行时是 Vite 打包后的现代浏览器，与 vite.config.js 的构建目标一致。
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "preserve",
+
+    // 对齐 vite.config.js 的 resolve.alias：'@' → <root>/src。
+    // 事件 / 属性类型在组件与夹具之间共享，必须使用与构建一致的解析结果。
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+
+    // 严格检查：strict 打开全部语言级检查，再叠加 strict 之外的项。
+    // noUnusedLocals / noUnusedParameters 按阶段 1 约定**不启用**：调用方的
+    // 兼容性写法（例如异步错误回调里未使用的 error/retry 形参）属于接口形状，
+    // 不是死代码信号，开启会逼着用 `_` 重命名去凑绿。
+    "strict": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    // 子类覆盖父类成员时必须显式 override（组件库组合时防止静默覆盖）。
+    "noImplicitOverride": true,
+    // 所有代码路径必须显式 return：异步加载器的「成功/失败」分支不允许漏掉返回值。
+    "noImplicitReturns": true,
+    // switch 分支必须 break/return：分页条与状态机的状态分派不允许贯穿。
+    "noFallthroughCasesInSwitch": true,
+    // 类型导入必须显式 import type：保证运行时不会因为「看起来是类型」的导入被打包。
+    "verbatimModuleSyntax": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+
+    // allowJs: true 但 checkJs: false —— 首批只检查上面三支组件的 `<script lang="ts">`。
+    // 三支组件引用的 JS 依赖（LoadingState / ErrorState / EmptyState 等）仍然参与
+    // 模块解析与类型推断，但**不会**被报 JS 错误：门禁范围是明确的、可增长的。
+    "allowJs": true,
+    "checkJs": false,
+
+    // Vue SFC 由 vue-tsc 提供类型，不产出任何文件；模板类型检查随 SFC 一起进行
+    // （vue-tsc 会对 include 里的 .vue 做 template 类型检查，无需额外开关）。
+    "noEmit": true,
+    // 第三方 d.ts（vue / vite 生态）不参与报错，门禁只对仓库内代码负责。
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "types": []
+  },
+  // 白名单：阶段 1 只覆盖三支共享组件 + 它们的正向类型夹具。
+  // 新增覆盖请直接追加，不要改成 `src/**/*`（见文件头部「只扩大不缩小」）。
+  "include": [
+    "src/modules/shared/components/AsyncPanel.vue",
+    "src/modules/shared/components/PaginationBar.vue",
+    "src/modules/shared/components/ListState.vue",
+    "src/test/typecheck-positive.fixtures.ts"
+  ],
+  // 负向夹具故意包含类型错误，由 tsconfig.typecheck-negative.json 单独检查，
+  // 绝不能进入正向门禁（否则每一轮 typecheck 都会红）。
+  "exclude": [
+    "node_modules",
+    "dist",
+    "src/test/typecheck-negative.fixtures.ts"
+  ]
+}

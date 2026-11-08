@@ -2,14 +2,21 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFile } from 'node:fs/promises'
 
-const source = await readFile(new URL('./views/ContractManagementView.vue', import.meta.url), 'utf8')
+const viewSource = await readFile(new URL('./views/ContractManagementView.vue', import.meta.url), 'utf8')
 const displaySource = await readFile(new URL('./utils/contractDisplay.js', import.meta.url), 'utf8')
 const api = await readFile(new URL('./api/contract.js', import.meta.url), 'utf8')
 const payload = await readFile(new URL('./utils/contractPayload.js', import.meta.url), 'utf8')
+// 草稿字段区拆到 ContractDraftFields.vue、编辑状态与动作拆到 useContractDraftEditor.js：
+// 断言仍针对同一份真实实现，跨文件查找；事件契约同时锁定子组件 emit 与父层处理函数。
+const draftFieldsSource = await readFile(new URL('./components/ContractDraftFields.vue', import.meta.url), 'utf8')
+const draftEditorSource = await readFile(new URL('./composables/useContractDraftEditor.js', import.meta.url), 'utf8')
+const source = [viewSource, draftFieldsSource, draftEditorSource].join('\n')
 
 test('external contract creation uploads multipart file and metadata without a template', () => {
-  assert.match(source, /contractCreationMode = ref\('template'\)/)
-  assert.match(source, /selectContractCreationMode\('external'\)/)
+  // 创建方式状态在组合式函数里，切换动作在子组件里只发事件、由页面执行。
+  assert.match(draftEditorSource, /contractCreationMode = ref\('template'\)/)
+  assert.match(source, /\$emit\('select-mode', 'external'\)/)
+  assert.match(source, /@select-mode="selectContractCreationMode"/)
   assert.match(source, /await createExternalContract\(fileSnapshot, payload\)/)
   assert.match(api, /export async function createExternalContract\(file, metadata\)/)
   assert.match(api, /form\.set\('file', file\)/)

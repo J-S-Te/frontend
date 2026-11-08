@@ -15,7 +15,7 @@ function mountInbox(api) {
 }
 test('项目系统挂载个人通知页面并提供侧栏和铃铛入口', () => {
   assert.match(view, /key: 'notifications', label: '个人通知中心'/)
-  assert.match(view, /ProjectNotificationCenter v-if="activeSection === 'notifications'"/)
+  assert.match(view, /ProjectNotificationCenter v-else-if="activeSection === 'notifications'"/)
   assert.match(popover, /查看全部通知/)
 })
 

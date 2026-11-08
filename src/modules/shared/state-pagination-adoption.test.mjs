@@ -330,7 +330,7 @@ test('每个接入面的三态闸门都把失败排在空态之前（loading > e
 // P2③：「每页」下拉是显式 opt-in。视图层只有确实实现了 change-page-size（按新页大小
 // 重新请求列表）的分页条才允许传 page-size-options；其余页面保持默认不渲染，避免出现
 // 点了没反应、列表也不重载的死控件。
-test('只有已接 change-page-size 的分页条才传 page-size-options，且正好 4 条', () => {
+test('只有已接 change-page-size 的分页条才传 page-size-options，且正好 5 条', () => {
   const root = new URL('../', import.meta.url)
   const offenders = []
   const wired = []
@@ -354,5 +354,5 @@ test('只有已接 change-page-size 的分页条才传 page-size-options，且�
   }
   visit(root)
   assert.deepEqual(offenders, [], `页大小下拉的候选与处理器必须成对出现：\n${offenders.join('\n')}`)
-  assert.equal(wired.length, 4, `已接页大小切换的分页条应保持 4 条，实际 ${wired.length}`)
+  assert.equal(wired.length, 5, `已接页大小切换的分页条应保持 5 条，实际 ${wired.length}`)
 })

@@ -13,6 +13,10 @@ const styles = await readFile(new URL('./styles/project-management.css', import.
 const pickerSource = await readFile(new URL('./components/ServiceItemPicker.vue', import.meta.url), 'utf8')
 const searchableSelectSource = await readFile(new URL('./components/SearchableSelect.vue', import.meta.url), 'utf8')
 const penetrationWorkPackageSource = await readFile(new URL('./components/PenetrationWorkPackageCard.vue', import.meta.url), 'utf8')
+// 阶段 3-项目：设备维护面板与状态迁出主页面后，相关断言必须落在真实实现文件上。
+const equipmentPanelSource = await readFile(new URL('./components/ProjectEquipmentPanel.vue', import.meta.url), 'utf8')
+const equipmentComposableSource = await readFile(new URL('./composables/useProjectEquipment.js', import.meta.url), 'utf8')
+const personnelNamesSource = await readFile(new URL('./composables/useProjectPersonnelNames.js', import.meta.url), 'utf8')
 const monitoringSource = await readFile(new URL('./composables/useProjectMonitoring.js', import.meta.url), 'utf8')
 const filterBarSource = await readFile(new URL('./components/FilterBar.vue', import.meta.url), 'utf8')
 const adjustSource = await readFile(new URL('./composables/useDecompositionAdjust.js', import.meta.url), 'utf8')
@@ -124,7 +128,7 @@ test('项目管理页面不再渲染原型模拟业务数据', () => {
     assert.doesNotMatch(source, new RegExp(mockValue.replaceAll('.', '\\.')))
   }
   assert.match(source, /getDashboard\(\)/)
-  assert.match(source, /getProjectSession\(\)/)
+  assert.match(source, /getProjectSession\(\{ force: true \}\)/)
   assert.match(source, /standards: \[\]/)
   assert.match(source, /projectEvents\(detailProject\.value\)/)
 })
@@ -427,7 +431,7 @@ test('退回拆解确认的项目整体退出任务分配列表', () => {
   assert.match(source, /const allocationItems = computed\(\(\) => serviceItems\.value\.filter\(\(item\) => item\.status === '待分配' && projectAllowsNode\(item, 'allocation'\)\)\)/)
   assert.match(source, /allocation: allocationItems\.value\.map/)
   assert.match(source, /activeSection === 'allocation'" :items="allocationItems"/)
-  assert.match(source, /watch\(\[activeSection, activeNodeItems\],[\s\S]*selectedServiceItemIDs\.value = selectedServiceItemIDs\.value\.filter/)
+  assert.match(source, /watch\(\[activeSection, activeNodeItems, loading, sectionExtrasLoading, workspaceReady\],[\s\S]*selectedServiceItemIDs\.value = selectedServiceItemIDs\.value\.filter/)
 })
 
 test('所有业务节点只展示当前归属项目并在回退后清除原节点选择', () => {
@@ -448,7 +452,7 @@ test('所有业务节点只展示当前归属项目并在回退后清除原节�
   }
   assert.match(source, /ServiceItemPicker :items="implementationItems"/)
   assert.match(source, /ServiceItemPicker v-else :items="activeNodeItems"/)
-  assert.match(source, /watch\(\[activeSection, activeNodeItems\],[\s\S]*selectedServiceItemIDs\.value = selectedServiceItemIDs\.value\.filter/)
+  assert.match(source, /watch\(\[activeSection, activeNodeItems, loading, sectionExtrasLoading, workspaceReady\],[\s\S]*selectedServiceItemIDs\.value = selectedServiceItemIDs\.value\.filter/)
   assert.match(source, /\['现场实施完成', '报告编制', '已完成'\]\.includes\(projectStatus\)/)
   // 现场实施页面不得再渲染包含拆解、分配、报告和完成态的全生命周期看板。
   assert.match(source, /const implementationKanbanColumns = computed/)
@@ -575,9 +579,10 @@ test('资质与能力编码由系统配置目录统一管理并按类型多选',
   // 分表自增 ID 可重复，配置保存回填必须同时比对 kind。
   assert.match(source, /findIndex\(\(rule\) => rule\.kind === saved\.kind && rule\.id === saved\.id\)/)
   // 人员与设备各取对应类型的启用目录，两个入口均不再自由输入编码。
-  assert.match(source, /capabilityCodeOptions\('EQUIPMENT', equipmentCodeSelection\.value\)/)
+  assert.match(source, /codeOptions: \(selectedCodes\) => capabilityCodeOptions\('EQUIPMENT', selectedCodes\)/)
+  assert.match(equipmentComposableSource, /const equipmentCodeOptions = computed\(\(\) => codeOptions\(equipmentCodeSelection\.value\)\)/)
   assert.match(source, /capabilityCodeOptions\(capabilityDialog\.value\?\.resource_type \|\| 'PERSON', capabilityCodeSelection\.value\)/)
-  assert.match(source, /openMulti === 'equipmentCodes'/)
+  assert.match(equipmentPanelSource, /openMulti === 'equipmentCodes'/)
   assert.match(source, /v-model="capabilityCodeSelection"[\s\S]*:options="capabilityDialogCodeOptions"[\s\S]*value-key="code"[\s\S]*multiple/)
   assert.match(source, /search-placeholder="搜索编码或名称"/)
   assert.match(source, /menu-z-index="calc\(var\(--pm-z-modal, 50\) \+ 1\)"/)
@@ -585,13 +590,15 @@ test('资质与能力编码由系统配置目录统一管理并按类型多选',
   assert.doesNotMatch(source, /onCapabilityCodesKeydown|toggleCapabilityCode/)
   assert.doesNotMatch(source, /v-model\.trim="equipmentForm\.codes"/)
   assert.doesNotMatch(source, /v-model\.trim="capabilityDialog\.codes"/)
-  assert.match(source, /codes: \[\.\.\.equipmentCodeSelection\.value\]/)
+  assert.match(equipmentComposableSource, /codes: \[\.\.\.equipmentCodeSelection\.value\]/)
   assert.match(source, /codes: \[\.\.\.capabilityCodeSelection\.value\]/)
   // 空目录明确引导到系统配置；历史停用/删除值标记后保留。
-  assert.match(source, /请先到「系统配置 → 资质 \/ 能力编码」/)
+  assert.match(equipmentPanelSource, /请先到「系统配置 → 资质 \/ 能力编码」/)
+  assert.match(source, /请先到「规则配置中心 → 资质 \/ 能力编码」新增并启用人员资质编码/)
   assert.match(source, /不在当前编码目录/)
   assert.match(source, /仅保留历史引用/)
-  assert.match(source, /validateCapabilityCodes\('EQUIPMENT', equipmentCodeSelection\.value, equipmentForm\.value\.originalCodes \|\| \[\]\)/)
+  assert.match(source, /validateCodes: \(codes, originalCodes\) => validateCapabilityCodes\('EQUIPMENT', codes, originalCodes\)/)
+  assert.match(equipmentComposableSource, /validateCodes\(equipmentCodeSelection\.value, equipmentForm\.value\.originalCodes \|\| \[\]\)/)
   assert.match(source, /const original = new Set\(originalCodes\.map\(capabilityCodeKey\)\)/)
 })
 
@@ -787,15 +794,19 @@ test('新建项目入口仅向超级管理员和业务管理员开放', () => {
 test('团队负责人、项目经理、工程师显示姓名而不是平台 ID', () => {
   // 服务端批量解析 user_id → 姓名，前端缓存映射并在工作区加载后补齐。
   assert.match(source, /^\s+resolvePersonnelNames,$/m)
-  assert.match(source, /const personnelNameByID = ref\(new Map\(\)\)/)
+  assert.match(source, /const \{ names: personnelNameByID, loading: personnelNamesLoading, error: personnelNamesError \} = personnelNames/)
+  assert.match(personnelNamesSource, /function referenced\(refresh = false\) \{/)
+  assert.match(personnelNamesSource, /function remember\(mapping = \{\}\) \{/)
   assert.match(source, /function personLabel\(userID, fallback = '待指派'\)/)
   assert.match(source, /function personListLabel\(ids, fallback = '未指派'\)/)
   assert.match(source, /const projectAssignmentIDsByProject = computed\(\(\) =>/)
   assert.match(source, /function projectAssignmentPeople\(projectID\)/)
-  assert.match(source, /async function loadPersonnelNames\(/)
-  assert.match(source, /await loadPersonnelNames\(\)/)
+  assert.match(source, /const personnelNames = useProjectPersonnelNames\(\{/)
+  assert.match(source, /readIDs: \(\) => referencedPersonnelIDs\.value/)
+  assert.match(source, /function loadPersonnelNames\(\) \{ return personnelNames\.load\(\) \}/)
+  assert.match(personnelNamesSource, /const next = referenced\(\)/)
   // 解析不到时显示占位符，绝不回退成对业务用户无意义的 ULID。
-  assert.match(source, /personnelNameByID\.value\.get\(id\) \|\| '—'/)
+  assert.match(source, /personnelNames\.names\.value\.get\(id\) \|\| '—'/)
   assert.doesNotMatch(source, /name: `\$\{id\}（当前值）`/)
   assert.doesNotMatch(source, /person\.display_name \|\| person\.user_id/)
   // 列表与详情一律走姓名渲染：每个 owner 值都必须是姓名渲染（或本来就是姓名的字段），
@@ -940,13 +951,13 @@ test('实施计划提交人员清单，设备清单在实施准备登记并校�
 
 test('设备在位状态与使用范围在设备能力维护中维护，借出中可归还', () => {
   // 使用范围（可借出 / 仅在公司使用）随设备档案保存。
-  assert.match(source, /usage_scope: equipmentForm\.value\.usageScope/)
-  assert.match(source, /<option value="COMPANY_ONLY">仅在公司使用（不可借出）<\/option>/)
+  assert.match(equipmentComposableSource, /usage_scope: equipmentForm\.value\.usageScope/)
+  assert.match(equipmentPanelSource, /<option value="COMPANY_ONLY">仅在公司使用（不可借出）<\/option>/)
   // 在位状态由占用时段派生，列表显示借出中的占用方与时段，并提供归还。
   assert.match(displaySource, /function equipmentPresenceLabel\(item\)/)
   assert.match(displaySource, /不在公司（借出中）/)
-  assert.match(source, /async function returnEquipment\(item\)/)
-  assert.match(source, /returnServiceItemEquipment\(serviceItemID, item\.resource_id\)/)
+  assert.match(equipmentComposableSource, /async function returnEquipment\(item\)/)
+  assert.match(equipmentComposableSource, /returnServiceItemEquipment\(serviceItemID, item\.resource_id\)/)
   // 选择器按原因置灰：仅在公司使用 > 当前不在公司 > 时段已被占用。
   assert.match(source, /function equipmentUnavailableReason\(item\)/)
   assert.match(source, /仅在公司使用 · 不可借出/)
@@ -980,8 +991,8 @@ test('人员资质保存不发送设备字段或日期', () => {
 })
 
 test('设备使用范围只在设备能力维护', () => {
-  assert.match(source, /usageScope: item\.usage_scope \|\| 'ANY'/)
-  assert.match(source, /<option value="COMPANY_ONLY">仅在公司使用（不可借出）<\/option>/)
+  assert.match(equipmentComposableSource, /usageScope: item\.usage_scope \|\| 'ANY'/)
+  assert.match(equipmentPanelSource, /<option value="COMPANY_ONLY">仅在公司使用（不可借出）<\/option>/)
   const saveCapability = source.slice(source.indexOf('async function saveCapability()'), source.indexOf('async function importQualificationFile'))
   assert.doesNotMatch(saveCapability, /usage_scope/)
 })
@@ -1313,14 +1324,16 @@ test('设备维护入口按 project.device.manage 门控，创建项目后提示
   // 站点、资质、规则都按各自权限码门控入口，设备此前漏了：设备模块一旦对更多角色可见
   // 就会变成「能点必 403」，表单也只能填不能存。
   assert.match(source, /const canManageDevice = computed\(\(\) => Array\.isArray\(session\.value\?\.permissions\) && session\.value\.permissions\.includes\('project\.device\.manage'\)\)/)
-  assert.match(source, /<form v-if="canManageDevice" class="pm-form pm-equipment-form" @submit\.prevent="saveEquipment">/)
-  assert.match(source, /<button v-if="canManageDevice" class="pm-link" :disabled="saving" @click="editEquipment\(item\)">/)
-  assert.match(source, /async function removeEquipment\(item\)/)
-  assert.match(source, /@click="removeEquipment\(item\)">删除</)
+  assert.match(source, /<component[\s\S]*:is="equipmentPanel"/)
+  assert.match(source, /:can-manage="canManageDevice"/)
+  assert.match(equipmentPanelSource, /<form v-if="canManage" class="pm-form pm-equipment-form" @submit\.prevent="\$emit\('save'\)">/)
+  assert.match(equipmentPanelSource, /<button v-if="canManage" class="pm-link" :disabled="saving" @click="\$emit\('edit', item\)">/)
+  assert.match(equipmentComposableSource, /async function removeEquipment\(item\)/)
+  assert.match(equipmentPanelSource, /@click="\$emit\('remove', item\)">删除</)
   assert.match(pmApiSource, /export function deleteEquipment\(resourceID\) \{[\s\S]*method: 'DELETE'/)
-  assert.match(source, /v-if="item\.presence === 'OUT_OF_COMPANY' && \(canManageDevice \|\| canPlanImplementation\)"/)
+  assert.match(equipmentPanelSource, /v-if="item\.presence === 'OUT_OF_COMPANY' && \(canManage \|\| canPlan\)"/)
   // 只读角色要明确告知原因，而不是留一张静默无按钮的表单。
-  assert.match(source, /当前角色只能查看设备台账；维护设备需要「设备维护」权限。/)
+  assert.match(equipmentPanelSource, /当前角色只能查看设备台账；维护设备需要「设备维护」权限。/)
   // 手动创建的项目必须进入拆解确认，提示里写明下一步。
   assert.match(source, /showToast\(`项目 \$\{created\.id\} 已创建，服务项待拆解确认`\)/)
 })
@@ -1537,7 +1550,7 @@ test('状态字段统一为语义化胶囊标签（statusTone 单一映射）', 
   assert.match(source, /<b class="pm-badge" :class="statusTone\(item && reportTechReviewLabel\(item\.tech_review_status\)\)"/)
   assert.match(source, /<b class="pm-badge" :class="statusTone\(reportStatusLabel\[selectedServiceItem\.report_status\] \|\| selectedServiceItem\.report_status\)"/)
   // 修复未定义的 warning 色调：设备在位改 amber，使用范围改关注，CSS 提供兼容别名。
-  assert.match(source, /item\.presence === 'OUT_OF_COMPANY' \? 'amber' : 'normal'/)
+  assert.match(equipmentPanelSource, /item\.presence === 'OUT_OF_COMPANY' \? 'amber' : 'normal'/)
   assert.match(source, /item\.usage_scope === 'COMPANY_ONLY' \? '关注' : 'neutral'/)
   assert.match(styles, /\.pm-badge\.warning \{/)
   // 状态胶囊的语义色调类必须全部存在。

@@ -2,8 +2,10 @@
 import { loginUsername } from "@/modules/shared/loginUsername.mjs"
 import OperationToast from '@/modules/shared/components/OperationToast.vue'
 import ListState from '@/modules/shared/components/ListState.vue'
+import LoadingState from '@/modules/shared/components/LoadingState.vue'
+import ErrorState from '@/modules/shared/components/ErrorState.vue'
 import PaginationBar from '@/modules/shared/components/PaginationBar.vue'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, defineComponent, h, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { formatUserError } from '../../shared/utils/userError.js'
 import { createRequestScope } from '../../platform/shared/composables/requestScope.js'
 import { useConfirmDialog } from '../../shared/composables/useConfirmDialog.js'
@@ -18,6 +20,10 @@ import { getUnreadCount, listInbox as listNotificationInbox, markNotificationRea
 import { useDecompositionAdjust } from '@/modules/project_management/composables/useDecompositionAdjust'
 import { useSupplementClosure } from '@/modules/project_management/composables/useSupplementClosure'
 import { supplementClosureAvailability } from '@/modules/project_management/supplementClosure.js'
+import { useProjectSectionData } from '@/modules/project_management/composables/useProjectSectionData.js'
+import { useProjectAuxiliaryResource } from '@/modules/project_management/composables/useProjectAuxiliaryResource.js'
+import { useProjectEquipment } from '@/modules/project_management/composables/useProjectEquipment.js'
+import { useProjectPersonnelNames } from '@/modules/project_management/composables/useProjectPersonnelNames.js'
 import { useProjectMonitoring } from '@/modules/project_management/composables/useProjectMonitoring'
 import { useProjectNotifications } from '@/modules/project_management/composables/useProjectNotifications'
 import { rectifyingProjectCount, useProjectKpiVisibility } from '@/modules/project_management/composables/useProjectKpiVisibility'
@@ -271,11 +277,11 @@ const pageMeta = {
 const activeSection = computed(() => pageMeta[route.params.section] ? route.params.section : 'dashboard')
 const navigation = ref({ sections: [], default_section: '' })
 // 导航角标与原型一致：待办数量由工作区数据实时派生，可见性仍以服务端 navigation 为准。
-const navBadges = computed(() => ({
+const navBadges = computed(() => sectionEventsReady.value ? ({
   decomposition: decompositionItems.value.length,
   inbox: inboxItems.value.length,
   exceptions: pendingDeviations.value.length,
-}))
+}) : ({}))
 const visibleNavGroups = computed(() => {
   const allowed = new Set(navigation.value.sections)
   return allNavGroups
@@ -376,9 +382,6 @@ const selectedApprovedContractServices = computed(() => {
   const selected = new Set(selectedContractServiceIDs.value)
   return approvedContractServiceItems.value.filter((item) => selected.has(item.source_id))
 })
-const equipment = ref([])
-const equipmentError = ref('')
-const equipmentForm = ref({ resourceID: '', resourceName: '', codes: [], originalCodes: [], validFrom: '', validUntil: '', status: 'ACTIVE', usageScope: 'ANY' })
 const dashboard = ref({ project_count: 0, in_flight_projects: 0, risk_projects: 0, pending_project_creation: 0, pending_project_creation_available: false, service_items: 0, status_counts: {} })
 // SLA 超期/临近项来自服务端 GET /delivery/sla-overdue，口径由后端统一计算（计划完成超期 + 状态停留超期/临近）。
 const slaOverdueItems = ref([])
@@ -387,6 +390,13 @@ const slaOverdueItems = ref([])
 const slaOverdueItemCount = computed(() => new Set(slaOverdueItems.value.map((item) => item.id)).size)
 const session = ref(null)
 const lastUpdatedAt = ref(null)
+// 附加/辅助数据严格按用户、租户、授权修订和导航隔离，不跨身份永久缓存。
+// 换用户、换租户或授权修订变化后，旧代次的在途读取不得回写任何数据/错误/加载态。
+const sectionDataContext = computed(() => JSON.stringify([
+  session.value?.tenant_id, principalIdentityID(session.value), session.value?.authorization_revision,
+  session.value?.permissions, session.value?.roles, navigation.value.sections,
+  navigation.value.authorization_revision, navigation.value.catalog_version,
+]))
 let toastTimer = 0
 
 // 线性节点必须与服务端 domain.ProjectStatusNodes 完全一致；两个分支状态由同一后端状态机返回。
@@ -583,6 +593,7 @@ const projectAssignmentIDsByProject = computed(() => {
   }]))
 })
 const deliveryEvents = ref([])
+const sectionEventsReady = ref(false)
 // 服务端现场证据判定快照：只保存与当前选中服务项对应的那一份，
 // 切换服务项或拉取失败都必须清空，避免把上一项的结论当成本项的结论。
 const fieldEvidenceSnapshot = ref(null)
@@ -598,7 +609,7 @@ const capabilityDialog = ref(null)
 const capabilityAutoID = ref(false)
 const importResult = ref(null)
 const qualificationImportOpen = ref(false)
-const equipmentImportOpen = ref(false)
+// 设备导入弹窗的开关由 useProjectEquipment 持有（与设备维护状态同源）。
 // 资质列表受标签页（全部/人员/设备）与类型、状态筛选共同约束；
 // 「体系与编码」「到期提醒」两个标签页使用各自的聚合视图，不走本筛选。
 const filteredCapabilities = computed(() => capabilities.value
@@ -1135,7 +1146,7 @@ const capabilityPersonOptions = computed(() => {
   const options = [...capabilityPersonnel.value]
   const selectedID = capabilityDialog.value?.user_id
   if (selectedID && !options.some((person) => person.id === selectedID)) {
-    options.push({ id: selectedID, name: capabilityDialog.value?.resource_name || personnelNameByID.value.get(selectedID) || '当前人员（目录中不可用）' })
+    options.push({ id: selectedID, name: capabilityDialog.value?.resource_name || personnelNames.names.value.get(selectedID) || '当前人员（目录中不可用）' })
   }
   return options
 })
@@ -1153,7 +1164,7 @@ function roleOptions(roleCode, selectedIDs) {
   const known = new Set(options.map((option) => option.id))
   for (const id of selectedIDs) {
     if (id && !known.has(id)) {
-      options.push({ id, name: personnelNameByID.value.get(id) || '姓名解析中…' })
+      options.push({ id, name: personnelNames.names.value.get(id) || '姓名解析中…' })
       known.add(id)
     }
   }
@@ -1358,21 +1369,19 @@ const currentUserRoleLabel = computed(() => {
   return [...new Set(roles.map((role) => names.get(role) || role).filter(Boolean))].join('、') || '未分配角色'
 })
 // 团队负责人 / 项目经理 / 工程师在界面上必须显示姓名而不是平台 ULID。
-// 目录只支持单个 user_id 查询，所以由服务端批量解析，这里缓存映射避免重复请求。
-const personnelNameByID = ref(new Map())
-const personnelNameError = ref('')
-
+// 姓名属于辅助数据：只在已加载的业务记录出现未解析的人员 ID 时才按集合批量读取，
+// 映射由 useProjectPersonnelNames 持有（按租户/用户/授权代次隔离，刷新后重新确认）。
 // personLabel 渲染单个人员；personListLabel 渲染工程师这类多人字段。
 // 解析不到时显示占位符而不是回退成 ULID：对业务用户来说 ID 没有任何信息量。
 function personLabel(userID, fallback = '待指派') {
   const id = String(userID || '').trim()
   if (!id) return fallback
-  return personnelNameByID.value.get(id) || '—'
+  return personnelNames.names.value.get(id) || '—'
 }
 function personListLabel(ids, fallback = '未指派') {
   const list = (Array.isArray(ids) ? ids : []).map((id) => String(id || '').trim()).filter(Boolean)
   if (!list.length) return fallback
-  return list.map((id) => personnelNameByID.value.get(id) || '—').join('、')
+  return list.map((id) => personnelNames.names.value.get(id) || '—').join('、')
 }
 function projectAssignmentPeople(projectID) {
   const assigned = projectAssignmentIDsByProject.value.get(projectID) || { teamLeads: [], projectManagers: [] }
@@ -1381,16 +1390,7 @@ function projectAssignmentPeople(projectID) {
     projectManagers: personListLabel(assigned.projectManagers, '待指派'),
   }
 }
-function rememberPersonnelNames(names = {}) {
-  const merged = new Map(personnelNameByID.value)
-  let changed = false
-  for (const [id, name] of Object.entries(names)) {
-    const key = String(id || '').trim()
-    const value = String(name || '').trim()
-    if (key && value && merged.get(key) !== value) { merged.set(key, value); changed = true }
-  }
-  if (changed) personnelNameByID.value = merged
-}
+function rememberPersonnelNames(names = {}) { personnelNames.remember(names) }
 
 const canExecutionAssign = computed(() => Array.isArray(session.value?.permissions) && session.value.permissions.includes('project.execution.assign'))
 // 项目创建是高影响动作：除 project.create 外，仅超级管理员（admin）和业务管理员可发起。
@@ -1692,11 +1692,6 @@ function capabilityCodeOptions(resourceType, selectedCodes = []) {
   }
   return options
 }
-const equipmentCodeSelection = computed({
-  get: () => Array.isArray(equipmentForm.value.codes) ? equipmentForm.value.codes : selectedIDs(equipmentForm.value.codes),
-  set: (values) => { equipmentForm.value.codes = [...values] },
-})
-const equipmentCodeOptions = computed(() => capabilityCodeOptions('EQUIPMENT', equipmentCodeSelection.value))
 const capabilityCodeSelection = computed({
   get: () => Array.isArray(capabilityDialog.value?.codes) ? capabilityDialog.value.codes : selectedIDs(capabilityDialog.value?.codes),
   set: (values) => { if (capabilityDialog.value) capabilityDialog.value.codes = [...values] },
@@ -1712,7 +1707,6 @@ const detectionRequiredCodeOptions = computed(() => capabilityCodeOptions('PERSO
 function hasActiveCapabilityCodes(resourceType) {
   return capabilityCodeCatalog.value.some((rule) => rule.check_type === resourceType && rule.enabled)
 }
-function toggleEquipmentCode(code) { toggleCodeSelection(equipmentCodeSelection.value, (values) => { equipmentCodeSelection.value = values }, code) }
 function toggleDetectionRequiredCode(code) { toggleCodeSelection(detectionRequiredCodeSelection.value, (values) => { detectionRequiredCodeSelection.value = values }, code) }
 function validateCapabilityCodes(resourceType, codes, originalCodes = []) {
   if (!codes.length) { showToast('请至少选择一个资质 / 能力编码', 'warning'); return false }
@@ -1763,6 +1757,34 @@ const {
   monitoringParams, loadMonitoring, scheduleMonitoringPoll, onMonitoringVisibility,
   resetMonitoringFilters, changeMonitoringPage, openMonitoringAction,
 } = useProjectMonitoring({ activeSection, keyword, teamFilter, loadPersonnelNames, navigate, openProject })
+
+// 人员姓名按需读取：汇总当前已加载业务记录引用的人员 ID（服务项、交付事件、监控快照），
+// 只解析其中尚未解析的 ID；租户/用户/授权代次变化或工作区刷新后重新确认。
+const referencedPersonnelIDs = computed(() => {
+  const ids = []
+  const push = (value) => {
+    const id = String(value || '').trim()
+    if (id) ids.push(id)
+  }
+  for (const item of serviceItems.value) {
+    push(item.team_lead_id)
+    push(item.project_manager_id)
+    for (const id of item.engineer_ids || []) push(id)
+  }
+  for (const event of deliveryEvents.value) push(event.actor_user_id)
+  for (const row of monitoringRows.value) for (const id of row.project_manager_ids || []) push(id)
+  for (const event of monitoringSnapshot.value.recent_events || []) push(event.actor_user_id)
+  return ids
+})
+const personnelNames = useProjectPersonnelNames({
+  context: sectionDataContext,
+  readIDs: () => referencedPersonnelIDs.value,
+  resolve: resolvePersonnelNames,
+  describe: (cause, fallback) => subsystemAccessMessage(cause, fallback),
+})
+// 模板直接消费展平的读取态：姓名映射/错误/加载中都是独立的辅助数据状态。
+const { names: personnelNameByID, loading: personnelNamesLoading, error: personnelNamesError } = personnelNames
+watch(referencedPersonnelIDs, () => { void personnelNames.load() })
 
 // 资质与能力（PG-RES-06）：全部 / 人员 / 设备 / 体系与编码 / 到期提醒 标签页。
 const capabilityTab = ref('all')
@@ -1938,8 +1960,108 @@ const operationDetailFields = computed(() => {
 // 时把失败写入页面错误区；reportError=false 用于写后刷新——静默上抛，由调用方以
 // “已保存，但最新数据读取失败”的准确文案提示，不把整个工作区替换成错误页。
 const workspaceScope = createRequestScope()
+const workspaceReady = ref(false)
+const { loading: sectionExtrasLoading, error: sectionExtrasError, load: loadSectionExtras } = useProjectSectionData({
+  section: activeSection, context: sectionDataContext, ready: workspaceReady,
+  allowed: (section) => navigation.value.sections.includes(section)
+    || (section === 'project_detail' && navigation.value.sections.includes('projects')),
+  loaders: { events: () => listDeliveryEvents(), dashboard: () => getDashboard(), catalog: () => listRuleConfigurationCatalog() },
+  apply: (data) => {
+    if (data.events) { deliveryEvents.value = data.events; sectionEventsReady.value = true }
+    if (data.dashboard) dashboard.value = data.dashboard
+    if (data.catalog) {
+      // 配置字段持有目录数组引用，原地更新才能让已构建的表单获得新选项。
+      automationTriggerOptions.value.splice(0, automationTriggerOptions.value.length, ...data.catalog.automation_triggers)
+      slaStatusOptions.value.splice(0, slaStatusOptions.value.length, ...data.catalog.sla_statuses)
+    }
+  },
+  reset: () => {
+    deliveryEvents.value = []
+    sectionEventsReady.value = false
+    dashboard.value = { pending_project_creation_available: false }
+    automationTriggerOptions.value.splice(0)
+    slaStatusOptions.value.splice(0)
+  },
+})
+// 设备目录与设备维护状态（阶段 3-项目）：目录只在进入「设备能力」「实施准备」或打开
+// 设备候选选择器时确认；维护成功后失效并在下次使用重新读取。主页面仍持有导航、会话、
+// 核心快照与写后刷新协调，组合式只消费注入的能力。
+const {
+  equipment, equipmentLoading, equipmentError, equipmentConfirmed,
+  ensureEquipmentCatalog, retryEquipmentCatalog, invalidateEquipmentCatalog,
+  equipmentForm, equipmentImportOpen, equipmentCodeSelection, equipmentCodeOptions, toggleEquipmentCode,
+  editEquipment, saveEquipment, removeEquipment, returnEquipment, importEquipmentFile,
+} = useProjectEquipment({
+  context: sectionDataContext,
+  saving,
+  canManage: canManageDevice,
+  askConfirm,
+  notify: showToast,
+  closeMulti: () => { openMulti.value = '' },
+  describeError: (cause, fallback) => subsystemAccessMessage(cause, fallback),
+  codeOptions: (selectedCodes) => capabilityCodeOptions('EQUIPMENT', selectedCodes),
+  canonicalCodes: (codes) => canonicalCapabilityCodes('EQUIPMENT', codes),
+  validateCodes: (codes, originalCodes) => validateCapabilityCodes('EQUIPMENT', codes, originalCodes),
+  formatDate: formatBusinessDate,
+  reservationFor: (resourceID) => equipmentReservationByID.value.get(resourceID),
+  reloadReservations: () => loadEquipmentReservations(selectedServiceItem.value),
+  listEquipment, upsertEquipment, deleteEquipment, returnServiceItemEquipment,
+})
+// SLA 超期明细是监控区域的辅助数据：只在进入监控区域或显式刷新时读取。
+// 口径仍由服务端统一计算；读取失败必须显示「不可用」，不能渲染成「没有超期」。
+const {
+  loading: slaOverdueLoading,
+  error: slaOverdueError,
+  confirmed: slaOverdueConfirmed,
+  load: loadSlaOverdueDetails,
+  invalidate: invalidateSlaOverdue,
+} = useProjectAuxiliaryResource({
+  context: sectionDataContext,
+  loader: () => listSlaOverdue(),
+  apply: (rows) => { slaOverdueItems.value = Array.isArray(rows) ? rows : [] },
+  reset: () => { slaOverdueItems.value = [] },
+  describe: (cause, fallback) => subsystemAccessMessage(cause, fallback),
+})
+
+// 设备目录尚未确认（未读取/维护后失效）时按读取中呈现，避免显示成「暂无设备」。
+const equipmentCatalogPending = computed(() => !equipmentConfirmed.value && !equipmentError.value)
+// SLA 明细尚未确认时同样按读取中呈现，避免把「未知」说成「没有超期」。
+const slaOverduePending = computed(() => !slaOverdueConfirmed.value && !slaOverdueError.value)
+// 用途：刷新后按当前区域重新确认辅助数据；未进入的区域不发请求（保持按需读取）。
+// 参数：无。
+// 返回值：无；失败由各资源自己的错误态与重试入口承担，不阻断工作区。
+// 说明：设备占用由 selectedServiceItem 的监听在快照替换后读取，这里不重复发起。
+function refreshSectionAuxiliary() {
+  if (!workspaceReady.value) return
+  const section = activeSection.value
+  if (['equipment', 'preparation'].includes(section)) void ensureEquipmentCatalog()
+  if (section === 'monitoring') void loadSlaOverdueDetails()
+}
+
+// 用途：监控区域的显式刷新（同时刷新服务端快照与 SLA 明细）。
+// 参数：无。
+// 返回值：无；两者各自维护加载态与错误态。
+function refreshMonitoringSnapshot() {
+  void loadSlaOverdueDetails({ force: true })
+  void loadMonitoring()
+}
+
+// 用途：SLA 明细的显式刷新/失败重试。
+// 参数：无。
+// 返回值：无；失败保持「不可用」并显示重试入口。
+function refreshSlaDetails() { void loadSlaOverdueDetails({ force: true }) }
+
+// 用途：人员姓名读取失败后的重试入口（姓名只影响可读性，不阻断页面）。
+// 参数：无。
+// 返回值：无。
+function retryPersonnelNames() { void personnelNames.retry() }
+
+// 用途：刷新核心原子快照，再读取当前已授权栏目的依赖。
+// 参数：reportError 控制读取失败是否显示为工作区错误。
+// 返回值：读取完成；写后刷新失败仍交由既有调用方区分已保存结果。
 async function loadWorkspace({ reportError = true } = {}) {
   const ticket = workspaceScope.begin('WORKSPACE')
+  workspaceReady.value = false
   loading.value = true
   loadError.value = ''
   ruleConfigurationCatalogError.value = ''
@@ -1949,23 +2071,20 @@ async function loadWorkspace({ reportError = true } = {}) {
     // 防止新旧数据混用。接口层仍分别执行会话与资源权限校验。
     // 列表接口省略 page_size 时只返回 20 行，工作区必须显式走 all=1 快照；
     // 超过服务端 500 行上限时 truncated 为 true，用户据此提示缩小筛选范围。
-    const [projectSnapshot, itemSnapshot, ruleRows, eventRows, capabilityRows, dashboardData, sessionData, navigationData, categoryRows, ruleCatalog] = await Promise.all([listProjectsSnapshot(), listServiceItemsSnapshot(), listRules(), listDeliveryEvents(), listCapabilities(), getDashboard(), getProjectSession(), getProjectNavigation(), listDetectionCategories(), listRuleConfigurationCatalog().catch((error) => {
-      ruleConfigurationCatalogError.value = formatUserError(error, { fallback: '规则目录加载失败' })
-      return { automation_triggers: [], sla_statuses: [] }
-    })])
+    const [projectSnapshot, itemSnapshot, ruleRows, capabilityRows, sessionData, navigationData, categoryRows,
+    ] = await Promise.all([
+      listProjectsSnapshot(), listServiceItemsSnapshot(), listRules(), listCapabilities(),
+      getProjectSession({ force: true }), getProjectNavigation(), listDetectionCategories(),
+    ])
     if (!workspaceScope.isCurrent(ticket)) return
     projects.value = projectSnapshot.items
     serviceItems.value = itemSnapshot.items.map((item) => ({ ...item, selected: ['待确认', '待复核'].includes(item.status) }))
     workspaceTruncated.value = Boolean(projectSnapshot.truncated || itemSnapshot.truncated)
     rules.value = ruleRows.map(decorateRule)
-    deliveryEvents.value = eventRows
     capabilities.value = capabilityRows
-    dashboard.value = dashboardData
     session.value = sessionData
     navigation.value = navigationData
     detectionCategories.value = categoryRows
-    automationTriggerOptions.value.splice(0, automationTriggerOptions.value.length, ...ruleCatalog.automation_triggers)
-    slaStatusOptions.value.splice(0, slaStatusOptions.value.length, ...ruleCatalog.sla_statuses)
     // 侧栏账号行的角色名依赖服务端角色目录；不阻塞工作区首屏，失败只影响副标题文案。
     loadApplicationRoles()
     // 拆解规则配置由独立接口提供（不属于六类规则表），进入页面时按需加载。
@@ -1976,6 +2095,10 @@ async function loadWorkspace({ reportError = true } = {}) {
       await router.replace({ name: 'project_management', params: { section: navigationData.default_section || navigationData.sections[0] || 'dashboard' } })
     }
     lastUpdatedAt.value = new Date()
+    workspaceReady.value = true
+    const extrasLoaded = await loadSectionExtras()
+    if (!workspaceScope.isCurrent(ticket)) return
+    if (!extrasLoaded && !reportError) throw new Error('当前栏目依赖数据读取失败。')
     loaded = true
   } catch (error) {
     // 迟到的旧请求失败不得代表当前上下文报错；写后随动刷新（reportError=false）静默上抛，
@@ -1987,21 +2110,11 @@ async function loadWorkspace({ reportError = true } = {}) {
     // 只有仍持有当前票据的请求才能结束 loading，避免旧请求的 finally 关闭新请求的加载态。
     if (workspaceScope.isCurrent(ticket)) loading.value = false
   }
-  // 设备目录只作为表单下拉选项，属于辅助数据：单独加载并容忍失败，
-  // 避免某一个下拉数据源不可用就把整个工作区替换成错误页。
-  if (loaded) {
-    await loadEquipment()
-    await loadPersonnelNames()
-    // 工作区刷新后现场证据可能已变化（现场操作、报告推进），判定必须重新拉取；
-    // 失败只影响"能否完成"这一步（界面转"未知"），不阻断工作区本身。
-    await refreshSelectedFieldEvidence()
-    // SLA 超期是监控页的辅助指标：拉取失败只清空面板，不阻断工作区。
-    try {
-      slaOverdueItems.value = await listSlaOverdue()
-    } catch {
-      slaOverdueItems.value = []
-    }
-  }
+  // 设备目录、人员姓名与 SLA 明细都不在首屏预读：设备目录在进入相关区域/打开候选
+  // 选择器时确认，姓名只在出现未解析 ID 时合并读取，SLA 明细只在监控区域读取。
+  // 工作区刷新后现场证据可能已变化（现场操作、报告推进），判定必须重新拉取；
+  // 失败只影响"能否完成"这一步（界面转"未知"），不阻断工作区本身。
+  if (loaded) await refreshSelectedFieldEvidence()
 }
 
 // 任务 B：计划/现场/报告的写操作 HTTP 2xx 即已保存。随后的工作区刷新失败只提示
@@ -2052,39 +2165,8 @@ async function refreshSelectedFieldEvidence({ reportError = false } = {}) {
 
 // loadPersonnelNames 把当前工作区引用的平台 user_id 批量解析成姓名：
 // 团队负责人、项目经理、工程师以及操作人都不应该在界面上显示成 ULID。
-// 解析失败只降级为占位符，不影响工作区本身的可读性。
-async function loadPersonnelNames() {
-  const wanted = new Set()
-  const remember = (value) => {
-    const id = String(value || '').trim()
-    if (id && !personnelNameByID.value.has(id)) wanted.add(id)
-  }
-  for (const item of serviceItems.value) {
-    remember(item.team_lead_id)
-    remember(item.project_manager_id)
-    for (const id of item.engineer_ids || []) remember(id)
-  }
-  for (const event of deliveryEvents.value) remember(event.actor_user_id)
-  for (const row of monitoringRows.value) for (const id of row.project_manager_ids || []) remember(id)
-  for (const event of monitoringSnapshot.value.recent_events || []) remember(event.actor_user_id)
-  if (!wanted.size) return
-  try {
-    rememberPersonnelNames(await resolvePersonnelNames([...wanted]))
-    personnelNameError.value = ''
-  } catch (error) {
-    personnelNameError.value = subsystemAccessMessage(error, '人员姓名暂时无法解析，将显示占位符。')
-  }
-}
-
-async function loadEquipment() {
-  equipmentError.value = ''
-  try {
-    equipment.value = await listEquipment()
-  } catch (error) {
-    equipment.value = []
-    equipmentError.value = subsystemAccessMessage(error, '设备目录加载失败，请稍后重试。')
-  }
-}
+// 名称解析是辅助数据：只合并读取“已加载记录里未解析的 ID”，失败降级为占位符并保留重试入口。
+function loadPersonnelNames() { return personnelNames.load() }
 
 async function openCreateProject() {
   try {
@@ -2236,64 +2318,8 @@ async function selectApprovedContract(contract) {
     if (requestID === contractServiceRequest) contractServicesLoading.value = false
   }
 }
-function editEquipment(item) {
-  const codes = canonicalCapabilityCodes('EQUIPMENT', item.codes || [])
-  equipmentForm.value = {
-    resourceID: item.resource_id, resourceName: item.resource_name, codes, originalCodes: [...codes],
-    validFrom: formatBusinessDate(item.valid_from), validUntil: formatBusinessDate(item.valid_until),
-    status: item.status || 'ACTIVE', usageScope: item.usage_scope || 'ANY',
-  }
-  openMulti.value = ''
-}
-// 归还：把设备从借出它的服务项清单里释放；设备维护人员也能操作，现场可能提前寄回。
-async function returnEquipment(item) {
-  const serviceItemID = item.borrowed_service_item_id || equipmentReservationByID.value.get(item.resource_id)?.service_item_id
-  if (!serviceItemID) { showToast('未找到借出该设备的服务项，请刷新后重试', 'warning'); return }
-  saving.value = true
-  try {
-    await returnServiceItemEquipment(serviceItemID, item.resource_id)
-    showToast(`设备 ${item.resource_name} 已归还`)
-    await Promise.all([loadEquipment(), loadEquipmentReservations(selectedServiceItem.value)])
-  } catch (error) { showToast(formatUserError(error, { fallback: '归还失败，请稍后重试' }), 'error') }
-  finally { saving.value = false }
-}
-async function saveEquipment() {
-  if (!validateCapabilityCodes('EQUIPMENT', equipmentCodeSelection.value, equipmentForm.value.originalCodes || [])) return
-  saving.value = true
-  try {
-    const item = await upsertEquipment({ resource_id: equipmentForm.value.resourceID, resource_name: equipmentForm.value.resourceName, codes: [...equipmentCodeSelection.value], valid_from: equipmentForm.value.validFrom ? new Date(equipmentForm.value.validFrom).toISOString() : '', valid_until: equipmentForm.value.validUntil ? new Date(equipmentForm.value.validUntil).toISOString() : '', status: equipmentForm.value.status, usage_scope: equipmentForm.value.usageScope })
-    equipment.value = [item, ...equipment.value.filter((row) => row.resource_id !== item.resource_id)]
-    showToast('设备信息已保存')
-  } catch (error) { showToast(formatUserError(error, { fallback: '设备信息保存失败' }), 'error') }
-  finally { saving.value = false }
-}
-async function removeEquipment(item) {
-  if (!item?.resource_id) return
-  const ok = await askConfirm({
-    title: '删除设备？',
-    description: `确定删除设备「${item.resource_name || item.resource_id}」吗？已归还或已完成项目中的历史设备快照不会受影响。`,
-    confirmText: '删除设备',
-    cancelText: '取消',
-    danger: true,
-  })
-  if (!ok) return
-  saving.value = true
-  try {
-    await deleteEquipment(item.resource_id)
-    equipment.value = equipment.value.filter((row) => row.resource_id !== item.resource_id)
-    showToast(`设备 ${item.resource_name || item.resource_id} 已删除`)
-  } catch (error) { showToast(formatUserError(error, { fallback: '设备删除失败，请先确认设备未被实施计划占用' }), 'error') }
-  finally { saving.value = false }
-}
-async function importEquipmentFile(result) {
-  saving.value = true
-  showToast(`设备导入完成：成功 ${result.imported} 条${result.skipped ? `，失败 ${result.skipped} 条，请查看逐行结果` : ''}`, result.skipped ? 'warning' : 'success')
-  try {
-    await loadEquipment()
-  } catch (error) { showToast(`导入结果已保存，但台账刷新失败：${formatUserError(error, { fallback: '请刷新设备能力页面核对结果' })}`, 'warning') }
-  finally { saving.value = false }
-}
-
+// 设备维护动作（编辑/保存/删除/归还/导入）由 useProjectEquipment 持有：
+// 写成功后使设备目录失效并重新确认；读取失败按「已保存但读取失败」提示，不重发写入。
 // 人员与设备使用不同前缀，编号由系统顺延生成，业务用户无需手工填写。
 function resourceIDPrefix(resourceType) {
   return resourceType === 'EQUIPMENT' ? 'EQ-' : 'P-'
@@ -2626,7 +2652,7 @@ function updatePenetrationPackage(workPackage) {
 function notifyFromPenetration({ message, type }) { showToast(message, type) }
 function planResourceName(row) {
   const capability = capabilities.value.find((item) => item.resource_id === row.resourceID || (item.resource_type === 'PERSON' && item.user_id === row.resourceID))
-  return capability?.resource_name || personnelNameByID.value.get(row.resourceID) || row.resourceID || '未命名资源'
+  return capability?.resource_name || personnelNames.names.value.get(row.resourceID) || row.resourceID || '未命名资源'
 }
 function planResourceCodes(row) {
   const capability = capabilities.value.find((item) => item.resource_id === row.resourceID || (item.resource_type === 'PERSON' && item.user_id === row.resourceID))
@@ -2638,7 +2664,10 @@ function planResourceValidUntil(row) {
   return capability?.valid_until ? formatBusinessDate(capability.valid_until) : '—'
 }
 // 设备占用：实施准备阶段把已被其他服务项在同一时段占用的设备置灰，不允许重复选取。
+// 占用是独立于设备目录的读取：不能用目录内容代替占用校验，读取失败也不能当成「没有占用」。
 const equipmentReservations = ref([])
+const equipmentReservationsLoading = ref(false)
+const equipmentReservationsError = ref('')
 // 计划/准备链读取的作用域：设备占用按服务项隔离，工作区快照全局一份；
 // 组件卸载时 requestScope 经 onScopeDispose 自动失效在途响应。
 const reservationScope = createRequestScope()
@@ -2649,21 +2678,46 @@ const equipmentReservationByID = computed(() => {
   }
   return map
 })
-async function loadEquipmentReservations(item) {
+// 同一服务项的并发读取合并：进入准备区域、切换服务项与快照替换可能在同一拍触发，
+// 复用同一个在途读取；失败不缓存，下一次调用会重新发起。
+const reservationReads = { targetID: '', pending: null }
+function loadEquipmentReservations(item) {
   const targetID = item?.id
-  if (!targetID) { reservationScope.invalidate(); equipmentReservations.value = []; return }
-  const ticket = reservationScope.begin(`RESERVATIONS:${targetID}`)
-  try {
-    const rows = await listEquipmentReservations(targetID)
-    // 此前选中的服务项所返回的迟到响应，绝不能
-    // 覆盖当前服务项的设备可用情况。
-    if (!reservationScope.isCurrent(ticket) || selectedServiceItem.value?.id !== targetID) return
-    equipmentReservations.value = rows
-  } catch {
-    if (!reservationScope.isCurrent(ticket) || selectedServiceItem.value?.id !== targetID) return
-    // 占用信息拿不到时不阻断挑选，保存时服务端仍会硬拦重叠占用。
+  if (!targetID) {
+    reservationScope.invalidate()
     equipmentReservations.value = []
+    equipmentReservationsLoading.value = false
+    equipmentReservationsError.value = ''
+    return Promise.resolve(false)
   }
+  if (reservationReads.targetID === targetID && reservationReads.pending) return reservationReads.pending
+  const ticket = reservationScope.begin(`RESERVATIONS:${targetID}`)
+  equipmentReservationsLoading.value = true
+  equipmentReservationsError.value = ''
+  let pending = null
+  pending = (async () => {
+    try {
+      const rows = await listEquipmentReservations(targetID)
+      // 此前选中的服务项所返回的迟到响应，绝不能
+      // 覆盖当前服务项的设备可用情况。
+      if (!reservationScope.isCurrent(ticket) || selectedServiceItem.value?.id !== targetID) return false
+      equipmentReservations.value = rows
+      return true
+    } catch (error) {
+      if (!reservationScope.isCurrent(ticket) || selectedServiceItem.value?.id !== targetID) return false
+      // 占用信息拿不到时不阻断挑选，但必须标明「占用未确认」并提供重试；
+      // 保存时服务端仍会硬拦重叠占用，界面绝不能把失败当成「没有占用」。
+      equipmentReservations.value = []
+      equipmentReservationsError.value = formatUserError(error, { fallback: '设备占用信息读取失败，请重试。' })
+      return false
+    } finally {
+      if (reservationScope.isCurrent(ticket)) equipmentReservationsLoading.value = false
+      if (reservationReads.pending === pending) { reservationReads.pending = null; reservationReads.targetID = '' }
+    }
+  })()
+  reservationReads.targetID = targetID
+  reservationReads.pending = pending
+  return pending
 }
 // 设备不可选的三种原因按优先级解释：仅在公司使用（不可借出）> 当前不在公司 > 时段已被占用。
 function equipmentUnavailableReason(item) {
@@ -2679,9 +2733,12 @@ function equipmentReservationLabel(resourceID) {
 }
 const planEquipmentPickerOpen = ref(false)
 const equipmentPickerKeyword = ref('')
-function openEquipmentPicker() {
+async function openEquipmentPicker() {
   equipmentPickerKeyword.value = ''
   planEquipmentPickerOpen.value = true
+  // 打开时校验目录新鲜度：过期/未读取/上一次读取失败都会重新确认，
+  // 未确认前选择器不展示可选设备，避免按旧目录完成选择。
+  await ensureEquipmentCatalog()
 }
 // 实施准备只展示有效期覆盖整个实施计划窗口的设备。设备档案只在“今天”有效仍不够：
 // 若计划结束前检定到期，提交时服务端会拒绝，因此选择阶段就应过滤掉。
@@ -2703,16 +2760,23 @@ const planEquipmentFiltered = computed(() => {
 const planEquipmentAddedCount = computed(() => operationForm.value.equipment.length)
 const planEquipmentAddableCount = computed(() => planEquipmentOptions.value.filter((item) => !equipmentPickerState(item).disabled).length)
 // 每一行的状态与可执行动作：已加入 > 不可选取（含原因）> 可添加。
+// 占用读取失败或尚未确认时不得标成「可添加」：目录里的在位字段不能代替占用校验，
+// 否则会把“占用未知”误导成“没有占用”；保存时服务端仍会硬拦重叠占用。
 function equipmentPickerState(item) {
   if (operationForm.value.equipment.some((row) => row.resourceID === item.resource_id)) {
     return { label: '已加入', tone: 'normal', action: '已加入', disabled: true }
   }
   const reason = equipmentUnavailableReason(item)
   if (reason) return { label: '不可选取', tone: 'warning', action: '不可选取', disabled: true }
+  if (equipmentReservationsLoading.value || equipmentReservationsError.value) {
+    return { label: '占用未确认', tone: 'warning', action: '占用未确认', disabled: false, note: '保存时由服务端校验重叠占用' }
+  }
   return { label: '可添加', tone: 'neutral', action: '添加', disabled: false }
 }
 function addPlanEquipment(equipmentItem) {
   if (!equipmentItem) return
+  // 设备目录尚未确认（未读取/读取失败/维护后失效）时不允许据此完成选择。
+  if (!equipmentConfirmed.value) { showToast('设备目录尚未确认，请先重试读取目录后再选择设备', 'warning'); return }
   if (equipmentPickerState(equipmentItem).disabled) return
   operationForm.value.equipment = [...operationForm.value.equipment, { resourceType: 'EQUIPMENT', resourceID: equipmentItem.resource_id, windowStart: '', windowEnd: '', note: '' }]
   planEquipmentPickerOpen.value = false
@@ -3327,6 +3391,31 @@ function onGlobalKeydown(event) {
 
 function onFieldOnline() { flushFieldOperations(true) }
 
+// 设备维护面板只在进入「设备能力」栏目时才加载对应代码块；模块加载失败给出显式重试，
+// 不把“资源没加载出来”渲染成“暂无设备”。
+function createEquipmentPanel() {
+  return defineAsyncComponent({
+    loader: () => import('@/modules/project_management/components/ProjectEquipmentPanel.vue'),
+    loadingComponent: LoadingState,
+    delay: 120,
+    timeout: 30000,
+    errorComponent: defineComponent({
+      name: 'ProjectEquipmentPanelError',
+      setup: () => () => h(ErrorState, {
+        title: '设备维护面板加载失败',
+        description: '页面资源暂不可用，请重试加载。',
+        retryText: '重试加载',
+        onRetry: retryEquipmentPanel,
+      }),
+    }),
+  })
+}
+const equipmentPanel = shallowRef(createEquipmentPanel())
+// 用途：面板代码块加载失败后的重试入口。
+// 参数：无。
+// 返回值：无；替换为新实例以重新请求代码块。
+function retryEquipmentPanel() { equipmentPanel.value = createEquipmentPanel() }
+
 onMounted(loadWorkspace)
 onMounted(loadPersonnel)
 onMounted(refreshNotificationCount)
@@ -3340,13 +3429,30 @@ onMounted(() => {
   document.addEventListener('keydown', onGlobalKeydown)
   window.addEventListener('online', onFieldOnline)
 })
+// 栏目切换只触发该栏目真正依赖的辅助数据：设备目录在「设备能力」「实施准备」读取，
+// 设备占用在准备操作读取，SLA 明细在监控区域读取；未进入的区域一律不发请求。
 // 进入资源分配/待办/指派栏目时刷新人员目录，保证新建或停用的平台账号能及时反映。
-watch(activeSection, (section) => {
+function onSectionChanged(section) {
   if (['allocation', 'inbox', 'assignments', 'monitoring'].includes(section)) loadPersonnel()
-  if (section === 'preparation') loadEquipmentReservations(selectedServiceItem.value)
+  if (['equipment', 'preparation'].includes(section)) void ensureEquipmentCatalog()
+  if (section === 'preparation') void loadEquipmentReservations(selectedServiceItem.value)
+  // 监控区域每次进入都重新确认 SLA 明细：时限预警不能沿用离开页面之前的旧结论。
+  if (section === 'monitoring') void loadSlaOverdueDetails({ force: true })
+}
+watch(activeSection, onSectionChanged)
+// 工作区成功刷新后辅助数据必须重新确认：姓名按新快照重新读取，设备目录/SLA 明细置为
+// 待确认并在当前使用区域重新读取；失败不缓存，由各自的重试入口承担。
+watch(lastUpdatedAt, () => {
+  if (!lastUpdatedAt.value) return
+  void personnelNames.reload()
+  invalidateEquipmentCatalog()
+  invalidateSlaOverdue()
+  refreshSectionAuxiliary()
 })
 // 刷新或切换节点后，立即清除已经不属于当前节点的选择，避免回退项目残留操作按钮。
-watch([activeSection, activeNodeItems], ([section, items]) => {
+watch([activeSection, activeNodeItems, loading, sectionExtrasLoading, workspaceReady], ([section, items]) => {
+  // 事件参与节点判定；未就绪时的暂时空集合不能当作服务项已经移出节点。
+  if (loading.value || sectionExtrasLoading.value || !workspaceReady.value) return
   if (!['allocation', 'inbox', 'planning', 'preparation', 'assignments', 'methods', 'exceptions', 'reports', 'implementation'].includes(section)) return
   const available = new Set(items.map((item) => item.id))
   selectedServiceItemIDs.value = selectedServiceItemIDs.value.filter((id) => available.has(id))
@@ -3354,9 +3460,9 @@ watch([activeSection, activeNodeItems], ([section, items]) => {
 // 会话权限异步到达：只有拿到执行团队分配权限后，项目经理/工程师的角色目录才会被查询；
 // 权限在这之后才加载完成时必须补一次，否则这两个下拉会一直空着。
 // 切换服务项或在准备页刷新工作区时重新拉取设备占用：占用是别的项目造成的，
-// 只靠本地缓存会给出过期的可选设备。
+// 只靠本地缓存（或设备目录的在位字段）会给出过期的可选设备。
 watch(selectedServiceItem, (item) => {
-  if (activeSection.value === 'preparation') loadEquipmentReservations(item)
+  if (activeSection.value === 'preparation') void loadEquipmentReservations(item)
 })
 watch(canExecutionAssign, (allowed) => {
   if (allowed && ['allocation', 'inbox', 'assignments'].includes(activeSection.value)) loadPersonnel()
@@ -3443,7 +3549,12 @@ onBeforeUnmount(() => {
           <button class="pm-button" @click="refreshProjectCreationCapabilities">重试来源能力</button>
         </section>
 
-        <ListState v-if="loadError" error-title="后端数据加载失败" :error="loadError" retry-text="重新加载" @retry="loadWorkspace" />
+
+        <!-- F1：工作区走 all=1 快照，服务端上限 500 行；截断时明示集合不完整并引导缩小范围。 -->
+        <section v-if="workspaceTruncated" class="pm-contract-warning" role="status">
+          <ConsoleIcon name="info" />
+          <p>当前快照超过 500 行，仅展示前 500 条；请使用筛选或分页缩小范围</p>
+        </section>
 
         <!-- F1：工作区走 all=1 快照，服务端上限 500 行；截断时明示集合不完整并引导缩小范围。 -->
         <section v-if="workspaceTruncated" class="pm-contract-warning" role="status">
@@ -3453,7 +3564,16 @@ onBeforeUnmount(() => {
 
         <section v-if="['decomposition', 'allocation'].includes(activeSection) && missingStampedContractCount" class="pm-contract-warning"><ConsoleIcon name="info" /><div><b>{{ missingStampedContractCount }} 份合同尚未上传盖章合同</b><p>{{ activeSection === 'decomposition' ? '合同审批已完成，可继续核对并确认服务项拆解；该提示不阻断拆解确认。' : '服务项拆解已确认，可继续分配团队、人员及设备；上传盖章合同后提示将自动清除。' }}</p></div></section>
 
-        <ProjectNotificationCenter v-if="activeSection === 'notifications'" @read="refreshNotificationCount" />
+        <!-- 人员姓名是辅助数据：读取失败只降级为占位符并保留重试入口，不阻断工作区。 -->
+        <section v-if="personnelNamesError" class="pm-contract-warning" role="alert">
+          <ConsoleIcon name="info" />
+          <p>{{ personnelNamesError }}<button type="button" class="pm-link" :disabled="personnelNamesLoading" @click="retryPersonnelNames">{{ personnelNamesLoading ? '读取中…' : '重试读取姓名' }}</button></p>
+        </section>
+
+        <ListState v-if="loading || sectionExtrasLoading" loading loading-title="正在读取当前栏目数据…" />
+        <ListState v-else-if="loadError || !workspaceReady" error-title="后端数据加载失败" :error="loadError || '工作区数据尚未确认，请重新读取。'" retry-text="重新加载" @retry="loadWorkspace" />
+        <ListState v-else-if="sectionExtrasError" error-title="当前栏目数据读取失败" :error="sectionExtrasError" retry-text="重试当前栏目" @retry="loadSectionExtras" />
+        <ProjectNotificationCenter v-else-if="activeSection === 'notifications'" @read="refreshNotificationCount" />
         <template v-else-if="activeSection === 'dashboard'">
           <section class="pm-kpis">
             <KpiCard label="全部项目" :value="dashboard.project_count" suffix="个" badge="实时" tone="primary" actionable @activate="navigate('projects')">
@@ -3697,7 +3817,7 @@ onBeforeUnmount(() => {
 
         <template v-else-if="activeSection === 'monitoring'">
           <article class="pm-panel pm-monitoring-snapshot" :class="{ 'is-empty': !monitoringLoading && !monitoredStatusMix.length }">
-            <header><div><p class="pm-panel-kicker">实时快照</p><h2>在途项目实时监控</h2><small>服务端快照 {{ monitoringUpdatedLabel }} · 与本机相差 {{ monitoringLagSeconds ?? '—' }} 秒</small></div><div class="pm-panel-actions"><span>共 {{ monitoringSnapshot.total }} 个在途项目</span><button type="button" class="pm-button ghost" :disabled="monitoringLoading" @click="loadMonitoring()">{{ monitoringLoading ? '同步中…' : '立即刷新' }}</button></div></header>
+            <header><div><p class="pm-panel-kicker">实时快照</p><h2>在途项目实时监控</h2><small>服务端快照 {{ monitoringUpdatedLabel }} · 与本机相差 {{ monitoringLagSeconds ?? '—' }} 秒</small></div><div class="pm-panel-actions"><span>共 {{ monitoringSnapshot.total }} 个在途项目</span><button type="button" class="pm-button ghost" :disabled="monitoringLoading" @click="refreshMonitoringSnapshot">{{ monitoringLoading ? '同步中…' : '立即刷新' }}</button></div></header>
             <div v-if="monitoringError" class="pm-inline-alert danger" role="alert">{{ monitoringError }}；已保留上一份成功快照。</div>
             <template v-if="monitoredStatusMix.length">
               <div class="pm-statusbar" role="img" :aria-label="monitoredStatusMix.map((bucket) => `${bucket.key} ${bucket.count} 个`).join('，')">
@@ -3736,9 +3856,12 @@ onBeforeUnmount(() => {
               <RiskList :items="riskRows" @select="navigate('exceptions')" />
             </article>
           </section>
+          <!-- SLA 超期明细是辅助数据：只在进入监控区域或显式刷新时读取。
+               失败必须显示「不可用」并保留重试，不能渲染成「暂无超期」。 -->
           <section class="pm-table-panel">
-            <header><div><p class="pm-panel-kicker danger">时限预警</p><h2>SLA 超期与临近超期服务项</h2></div><span>综合计划完成时间与流程时限生成提醒</span></header>
-            <div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>服务项</th><th>所属项目</th><th>场所 / 类别</th><th>状态</th><th>口径</th><th>判定依据</th><th>时限</th></tr></thead><tbody>
+            <header class="pm-monitor-head"><div><p class="pm-panel-kicker danger">时限预警</p><h2>SLA 超期与临近超期服务项</h2></div><div class="pm-panel-actions"><span>综合计划完成时间与流程时限生成提醒</span><button type="button" class="pm-button ghost" :disabled="slaOverdueLoading" @click="refreshSlaDetails">{{ slaOverdueLoading ? '同步中…' : '立即刷新' }}</button></div></header>
+            <ListState v-if="slaOverdueLoading || slaOverduePending || slaOverdueError" :loading="slaOverdueLoading || slaOverduePending" :error="slaOverdueError" error-title="SLA 超期明细不可用" loading-title="正在读取 SLA 超期明细…" retry-text="重试读取" compact @retry="refreshSlaDetails" />
+            <div v-else class="pm-table-scroll"><table class="pm-table"><thead><tr><th>服务项</th><th>所属项目</th><th>场所 / 类别</th><th>状态</th><th>口径</th><th>判定依据</th><th>时限</th></tr></thead><tbody>
               <tr v-for="item in slaOverdueItems" :key="`${item.kind}-${item.id}`"><td class="mono"><b>{{ item.id }}</b></td><td><button class="pm-project-link" @click="openProject({ id: item.project_id })"><b>{{ item.project_id }}</b></button></td><td>{{ item.site }}<span class="pm-cell-sub">{{ item.category }}</span></td><td><span class="pm-badge" :class="statusTone(item.status)">{{ item.status }}</span></td><td><span class="pm-badge" :class="item.kind === 'STATUS_DEADLINE_APPROACHING' ? '关注' : '风险'">{{ slaKindLabel[item.kind] || '计划完成超期' }}</span></td><td>{{ item.rule_name ? `${item.rule_name}（${item.rule_status} · ${item.deadline_hours}h）` : (item.planned_end ? `计划完成 ${formatBusinessDateTime(item.planned_end)}` : '—') }}</td><td :class="{ 'pm-text-danger': item.kind !== 'STATUS_DEADLINE_APPROACHING' }">{{ slaDueLabel(item) }}</td></tr>
               <tr v-if="!slaOverdueItems.length"><td colspan="7" class="pm-empty-mini">暂无超期或临近超期的服务项</td></tr>
             </tbody></table></div>
@@ -3813,34 +3936,31 @@ onBeforeUnmount(() => {
           </section>
         </template>
 
-        <template v-else-if="activeSection === 'equipment'">
-          <section v-if="canManageDevice" class="pm-panel"><header class="pm-section-toolbar"><div class="pm-panel-actions"><button class="pm-button" :disabled="saving" @click="equipmentImportOpen = true">导入设备能力 CSV</button></div><span>下载中文模板，先检测、再选择有效行导入；设备编号可留空自动生成</span></header></section>
-          <section class="pm-panel pm-equipment-layout">
-            <form v-if="canManageDevice" class="pm-form pm-equipment-form" @submit.prevent="saveEquipment">
-              <label><span>设备编号 <em>*</em></span><input v-model.trim="equipmentForm.resourceID" required placeholder="例如 EQ-001"  maxlength="64"/></label>
-              <label><span>设备名称 <em>*</em></span><input v-model.trim="equipmentForm.resourceName" required placeholder="请输入设备名称"  maxlength="128"/></label>
-              <div class="pm-field pm-span-full">
-                <span>能力编码 <em>*</em></span>
-                <div class="pm-multi-dropdown" :class="{ open: openMulti === 'equipmentCodes' }">
-                  <button type="button" class="pm-multi-trigger" :class="{ placeholder: !equipmentCodeSelection.length }" aria-haspopup="listbox" :aria-expanded="openMulti === 'equipmentCodes'" @click.stop="toggleMulti('equipmentCodes')" @keydown="onEquipmentCodesKeydown"><span>{{ multiSummary(equipmentCodeSelection, equipmentCodeOptions, '请选择设备能力编码', 'code') }}</span><i class="pm-multi-caret"></i></button>
-                  <div v-if="openMulti === 'equipmentCodes'" class="pm-multi-menu" role="listbox" aria-label="选择设备能力编码" aria-multiselectable="true">
-                    <label v-for="option in equipmentCodeOptions" :key="option.code" class="pm-multi-option" :class="{ 'is-active': equipmentCodeOptions[multiActiveIndex]?.code === option.code }" role="option" :aria-selected="equipmentCodeSelection.includes(option.code)"><input type="checkbox" :checked="equipmentCodeSelection.includes(option.code)" @change="toggleEquipmentCode(option.code)" /><span>{{ option.name }}<small v-if="option.unavailable" class="pm-form-hint">{{ option.unavailableReason }}，仅保留历史引用</small></span></label>
-                    <p v-if="!equipmentCodeOptions.length" class="pm-empty-mini">暂无可选编码，请先到系统配置维护设备能力编码</p>
-                  </div>
-                </div>
-                <div v-if="equipmentCodeSelection.length" class="pm-multi-chips"><span v-for="option in equipmentCodeOptions.filter((item) => equipmentCodeSelection.includes(item.code))" :key="option.code" class="pm-chip">{{ option.code }}{{ option.unavailable ? `（${option.unavailableReason}）` : '' }}<button type="button" class="pm-chip-x" :aria-label="`移除 ${option.code}`" @click.stop="toggleEquipmentCode(option.code)">✕</button></span></div>
-                <p v-if="!hasActiveCapabilityCodes('EQUIPMENT')" class="pm-form-hint">请先到「系统配置 → 资质 / 能力编码」新增并启用设备能力编码。</p>
-              </div>
-              <label><span>检定开始</span><input v-model="equipmentForm.validFrom" type="date" /></label>
-              <label><span>检定到期</span><input v-model="equipmentForm.validUntil" type="date" /></label>
-              <label><span>状态</span><select v-model="equipmentForm.status"><option value="ACTIVE">启用</option><option value="DISABLED">停用</option></select></label>
-              <label><span>使用范围</span><select v-model="equipmentForm.usageScope"><option value="ANY">可借出</option><option value="COMPANY_ONLY">仅在公司使用（不可借出）</option></select></label>
-              <button class="pm-button primary">保存设备</button>
-            </form>
-            <p v-else class="pm-form-hint">当前角色只能查看设备台账；维护设备需要「设备维护」权限。</p>
-          </section>
-          <section class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>设备编号</th><th>设备名称</th><th>能力</th><th>检定有效期</th><th>状态</th><th>在位 / 使用范围</th><th>操作</th></tr></thead><tbody><tr v-for="item in equipment" :key="item.resource_id"><td class="mono">{{ item.resource_id }}</td><td><b>{{ item.resource_name }}</b></td><td><CodePills :codes="item.codes || []" /></td><td>{{ item.valid_until ? formatDateTime(item.valid_until) : '未设置' }}</td><td><span class="pm-badge" :class="statusTone(capabilityEffectiveStatus(item))">{{ capabilityStatusLabel(item) }}</span><small v-if="item.status_reason" class="pm-cell-sub">{{ item.status_reason }}</small></td><td><span class="pm-badge" :class="item.presence === 'OUT_OF_COMPANY' ? 'amber' : 'normal'">{{ equipmentPresenceLabel(item) }}</span><small v-if="item.borrowed_by" class="pm-cell-sub">{{ item.borrowed_by }} · {{ item.borrowed_window }}</small><small v-if="item.usage_scope === 'COMPANY_ONLY'" class="pm-form-hint">仅在公司使用 · 不可借出</small></td><td><button v-if="canManageDevice" class="pm-link" :disabled="saving" @click="editEquipment(item)">编辑 / 更新</button><button v-if="canManageDevice" class="pm-link danger" :disabled="saving" @click="removeEquipment(item)">删除</button><button v-if="item.presence === 'OUT_OF_COMPANY' && (canManageDevice || canPlanImplementation)" class="pm-link danger" :disabled="saving" @click="returnEquipment(item)">归还</button></td></tr></tbody></table></div><p v-if="equipmentError" class="pm-form-hint" role="alert">{{ equipmentError }}</p><div v-else-if="!equipment.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无设备</b><span>使用上方表单新增设备。</span></div></section>
-        </template>
+        <component
+          :is="equipmentPanel"
+          v-else-if="activeSection === 'equipment'"
+          :items="equipment"
+          :loading="equipmentLoading || equipmentCatalogPending"
+          :error="equipmentError"
+          :can-manage="canManageDevice"
+          :can-plan="canPlanImplementation"
+          :saving="saving"
+          :form="equipmentForm"
+          :code-options="equipmentCodeOptions"
+          :selected-codes="equipmentCodeSelection"
+          :has-active-codes="hasActiveCapabilityCodes('EQUIPMENT')"
+          :open-multi="openMulti"
+          :multi-active-index="multiActiveIndex"
+          @retry="retryEquipmentCatalog"
+          @edit="editEquipment"
+          @remove="removeEquipment"
+          @return="returnEquipment"
+          @save="saveEquipment"
+          @open-import="equipmentImportOpen = true"
+          @toggle-multi="toggleMulti('equipmentCodes')"
+          @toggle-code="toggleEquipmentCode"
+          @codes-keydown="onEquipmentCodesKeydown"
+        />
         <template v-else-if="activeSection === 'qualifications'"><section class="pm-panel"><header class="pm-section-toolbar"><div class="pm-panel-actions"><button class="pm-button" :disabled="saving" @click="downloadCapabilities">导出 CSV</button><template v-if="canManageResource"><button class="pm-button" :disabled="saving" @click="qualificationImportOpen = true">导入人员资质 CSV</button><button class="pm-button" :disabled="saving" @click="syncIdentities">同步人员状态</button><button class="pm-button primary" :disabled="saving" @click="openCapabilityDialog()">＋ 新建人员资质</button></template></div></header><div class="pm-qualification-filter"><section class="pm-sm-tabs pm-capability-tabs"><button v-for="tab in capabilityTabs" :key="tab.key" type="button" class="pm-tab-pill" :class="{ active: capabilityTab === tab.key }" @click="capabilityTab = tab.key">{{ tab.label }}<span class="pm-tab-count">{{ tab.count }}</span></button></section><label><span>资源类型</span><select v-model="capabilityTypeFilter" class="pm-filter-select"><option value="">全部</option><option value="PERSON">人员资质</option><option value="EQUIPMENT">设备能力（只读）</option></select></label><label><span>状态</span><select v-model="capabilityStatusFilter" class="pm-filter-select"><option value="">全部</option><option value="ACTIVE">有效</option><option value="EXPIRED">无效（已过期）</option><option value="NOT_YET_EFFECTIVE">未生效</option><option value="DISABLED">停用</option></select></label></div></section><section v-if="capabilityTab === 'codes'" class="pm-table-panel"><header><div><p class="pm-panel-kicker">资质矩阵</p><h2>体系与编码映射</h2></div><span>按能力台账聚合：编码 × 持有人员数 / 设备数</span></header><div class="pm-matrix-wrap" data-table-scroll><table class="pm-matrix"><thead><tr><th>能力编码</th><th>人员</th><th>设备</th><th>覆盖合计</th></tr></thead><tbody><tr v-for="row in capabilityCodeRows" :key="row.code"><td><span class="pm-code-pill">{{ row.code }}</span></td><td><span class="pm-badge" :class="row.personCount ? 'normal' : 'neutral'">{{ row.personCount }} 人</span></td><td><span class="pm-badge" :class="row.equipmentCount ? 'normal' : 'neutral'">{{ row.equipmentCount }} 台</span></td><td class="num">{{ row.personCount + row.equipmentCount }}</td></tr><tr v-if="!capabilityCodeRows.length"><td colspan="4" class="pm-empty-mini">暂无能力编码，请在规则配置中心维护</td></tr></tbody></table></div></section>
           <section v-else-if="capabilityTab === 'expiry'" class="pm-table-panel"><header><div><p class="pm-panel-kicker danger">到期提醒</p><h2>设备检定到期提醒</h2></div><span>30 天内到期或已过期 · 按到期时间升序</span></header><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>设备编号</th><th>设备名称</th><th>能力编码</th><th>检定到期日</th><th>状态</th></tr></thead><tbody><tr v-for="item in expiringCapabilities" :key="item.resource_id" :class="{ risk: new Date(item.valid_until).getTime() <= Date.now() }"><td class="mono">{{ item.resource_id }}</td><td><b>{{ item.resource_name }}</b></td><td><CodePills :codes="item.codes || []" /></td><td :class="{ 'pm-text-danger': new Date(item.valid_until).getTime() <= Date.now() }">{{ formatBusinessDate(item.valid_until) }}</td><td><span class="pm-badge" :class="new Date(item.valid_until).getTime() <= Date.now() ? '风险' : '关注'">{{ new Date(item.valid_until).getTime() <= Date.now() ? '已过期' : '即将到期' }}</span></td></tr><tr v-if="!expiringCapabilities.length"><td colspan="5" class="pm-empty-mini">30 天内没有到期的设备检定</td></tr></tbody></table></div></section>
           <section v-else class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th>资源类型</th><th>编号</th><th>名称</th><th>资质 / 能力编码</th><th>有效期</th><th>使用范围</th><th>状态</th><th>人员状态</th><th></th></tr></thead><tbody><tr v-for="item in filteredCapabilities" :key="item.resource_id"><td><span class="pm-badge neutral">{{ item.resource_type === 'PERSON' ? '人员' : '设备' }}</span></td><td class="mono">{{ item.resource_id }}</td><td><b>{{ item.resource_name }}</b></td><td><CodePills :codes="item.codes || []" /></td><td>{{ item.valid_until ? (item.valid_from ? `${formatBusinessDate(item.valid_from)} ~ ` : '') + formatBusinessDate(item.valid_until) : '长期' }}</td><td><span v-if="item.resource_type === 'EQUIPMENT'" class="pm-badge" :class="item.usage_scope === 'COMPANY_ONLY' ? '关注' : 'neutral'">{{ item.usage_scope === 'COMPANY_ONLY' ? '仅在公司使用' : '可借出' }}</span><span v-else>—</span></td><td><span class="pm-badge" :class="statusTone(capabilityEffectiveStatus(item))">{{ capabilityStatusLabel(item) }}</span><small v-if="item.status_reason" class="pm-cell-sub">{{ item.status_reason }}</small></td><td><template v-if="item.resource_type === 'PERSON'"><span class="pm-badge" :class="statusTone(item.identity_status)">{{ identityStatusLabel(item.identity_status) }}</span></template><span v-else>—</span></td><td class="pm-col-actions"><button v-if="canManageResource && item.resource_type === 'PERSON'" class="pm-link" @click="openCapabilityDialog(item)">编辑人员资质</button><span v-else-if="item.resource_type === 'EQUIPMENT'" class="pm-cell-sub">请到设备能力维护</span></td></tr></tbody></table></div><div v-if="!filteredCapabilities.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无资质记录</b><span>点击「＋ 新建人员资质」或通过 CSV 导入添加人员资质。</span></div><footer v-if="importResult"><span role="status">导入完成：成功 {{ importResult.imported }} 条，跳过 {{ importResult.skipped }} 条。</span><span v-if="importResult.errors?.length"><small>{{ importResult.errors.slice(0, 3).join('；') }}{{ importResult.errors.length > 3 ? '…' : '' }}</small></span></footer></section>
@@ -4069,7 +4189,9 @@ onBeforeUnmount(() => {
       />
     </Transition>
 
-    <div v-if="planEquipmentPickerOpen" class="pm-overlay" @click.self="planEquipmentPickerOpen = false"><aside class="pm-dialog pm-dialog-wide"><header><div><span>设备</span><h2>添加设备</h2><small class="pm-dialog-sub">只列设备目录中的有效设备；已被其他服务项占用、仅在公司使用或不在公司的设备不可选取。</small></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="planEquipmentPickerOpen = false"><ConsoleIcon name="close" /></button></header><div class="pm-dialog-body"><div class="pm-picker-search"><ConsoleIcon name="search" /><input v-model.trim="equipmentPickerKeyword" placeholder="搜索设备名称或能力码"  maxlength="100"/></div><div class="pm-table-scroll"><table class="pm-table pm-table-picker"><thead><tr><th>设备</th><th>能力码</th><th>检定有效期</th><th>状态</th><th class="pm-col-action">操作</th></tr></thead><tbody><tr v-for="item in planEquipmentFiltered" :key="item.resource_id"><td><b>{{ item.resource_name }}</b><small class="mono">{{ item.resource_id }}</small><small v-if="equipmentUnavailableReason(item)" class="pm-cell-sub pm-cell-danger">{{ equipmentUnavailableReason(item) }}</small></td><td><CodePills :codes="item.codes || []" /></td><td>{{ item.valid_until ? formatBusinessDate(item.valid_until) : '长期' }}</td><td><span class="pm-badge" :class="equipmentPickerState(item).tone">{{ equipmentPickerState(item).label }}</span></td><td><button type="button" class="pm-link" :disabled="equipmentPickerState(item).disabled" @click="addPlanEquipment(item)">{{ equipmentPickerState(item).action }}</button></td></tr><tr v-if="!planEquipmentFiltered.length"><td colspan="5" class="pm-empty-mini">{{ equipmentPickerKeyword ? '没有匹配的设备，换个关键字试试' : '设备目录为空，请先在「资质与能力」或「设备能力维护」中登记设备' }}</td></tr></tbody></table></div></div><footer><span class="pm-dialog-footnote">已加入 {{ planEquipmentAddedCount }} 台 · 可选 {{ planEquipmentAddableCount }} 台</span><button type="button" class="pm-button" @click="planEquipmentPickerOpen = false">关闭</button></footer></aside></div>
+    <!-- 设备候选：目录未确认（读取中/失败/维护后失效）时不展示可选设备；
+         占用未确认时行仍可添加但明确标注，保存时由服务端校验重叠占用。 -->
+    <div v-if="planEquipmentPickerOpen" class="pm-overlay" @click.self="planEquipmentPickerOpen = false"><aside class="pm-dialog pm-dialog-wide"><header><div><span>设备</span><h2>添加设备</h2><small class="pm-dialog-sub">只列设备目录中的有效设备；已被其他服务项占用、仅在公司使用或不在公司的设备不可选取。</small></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="planEquipmentPickerOpen = false"><ConsoleIcon name="close" /></button></header><div class="pm-dialog-body"><div class="pm-picker-search"><ConsoleIcon name="search" /><input v-model.trim="equipmentPickerKeyword" placeholder="搜索设备名称或能力码"  maxlength="100"/></div><p v-if="equipmentReservationsError" class="pm-form-hint" role="alert">{{ equipmentReservationsError }}<button type="button" class="pm-link" :disabled="equipmentReservationsLoading" @click="loadEquipmentReservations(selectedServiceItem)">{{ equipmentReservationsLoading ? '读取中…' : '重试读取占用' }}</button></p><ListState v-if="equipmentLoading" loading compact loading-title="正在读取设备目录…" /><ListState v-else-if="equipmentError" error-title="设备目录读取失败" :error="equipmentError" retry-text="重试读取目录" compact @retry="retryEquipmentCatalog" /><div v-else class="pm-table-scroll"><table class="pm-table pm-table-picker"><thead><tr><th>设备</th><th>能力码</th><th>检定有效期</th><th>状态</th><th class="pm-col-action">操作</th></tr></thead><tbody><tr v-for="item in planEquipmentFiltered" :key="item.resource_id"><td><b>{{ item.resource_name }}</b><small class="mono">{{ item.resource_id }}</small><small v-if="equipmentUnavailableReason(item)" class="pm-cell-sub pm-cell-danger">{{ equipmentUnavailableReason(item) }}</small></td><td><CodePills :codes="item.codes || []" /></td><td>{{ item.valid_until ? formatBusinessDate(item.valid_until) : '长期' }}</td><td><span class="pm-badge" :class="equipmentPickerState(item).tone">{{ equipmentPickerState(item).label }}</span><small v-if="equipmentPickerState(item).note" class="pm-cell-sub">{{ equipmentPickerState(item).note }}</small></td><td><button type="button" class="pm-link" :disabled="equipmentPickerState(item).disabled" @click="addPlanEquipment(item)">{{ equipmentPickerState(item).action }}</button></td></tr><tr v-if="!planEquipmentFiltered.length"><td colspan="5" class="pm-empty-mini">{{ equipmentPickerKeyword ? '没有匹配的设备，换个关键字试试' : '设备目录为空，请先在「资质与能力」或「设备能力维护」中登记设备' }}</td></tr></tbody></table></div></div><footer><span class="pm-dialog-footnote">已加入 {{ planEquipmentAddedCount }} 台 · 可选 {{ planEquipmentAddableCount }} 台</span><button type="button" class="pm-button" @click="planEquipmentPickerOpen = false">关闭</button></footer></aside></div>
     <NativeProjectCreateDialog
       v-if="nativeCreateOpen && canCreateProject && nativeProjectEnabled"
       :categories="detectionCategories"
