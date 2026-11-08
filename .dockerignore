@@ -8,6 +8,12 @@
 !index.html
 !login.html
 !vite.config.js
+# 类型门禁：typecheck-gate.test.mjs 会读 tsconfig 与 scripts/，镜像内 npm test 需要它们
+# 才能与本地 / PR 门禁保持一致；缺一个就整条流水线在 image 阶段失败。
+!tsconfig.typecheck.json
+!tsconfig.typecheck-negative.json
+!scripts/
+!scripts/**
 !build/
 !build/**
 !src/
