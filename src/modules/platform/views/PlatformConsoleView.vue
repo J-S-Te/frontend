@@ -273,7 +273,7 @@ const hasAnySettingsOrAuditPermission = computed(() => canOpenSettings.value || 
 const navGroups = computed(() => [
   {
     items: [
-      { key: 'portal', label: '返回子系统门户', icon: 'dashboard', itemClass: 'console-nav-item--portal' },
+      { key: 'portal', label: '返回子系统门户', icon: 'dashboard', itemClass: 'console-nav-item--portal', anchor: 'subsystem-portal' },
     ],
   },
   {

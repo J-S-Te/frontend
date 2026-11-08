@@ -71,6 +71,7 @@ const props = defineProps({
 // - label 为空表示该组不渲染分组标题（用于「返回门户」这类置顶单项）。
 // - visible: false 的项不渲染（替代模块里的 v-if="hasPermission(...)"）。
 // - note 渲染成 .console-nav-note 小标签，itemClass 用于 --portal 等单项修饰类；
+//   anchor 渲染成 data-first-run-anchor，供首登导览定位返回门户入口（如 subsystem-portal）。
 //   noteClass 可替换 note 的类名（例如 CRM 的 .crm-nav-badge），缺省仍是 .console-nav-note。
 // - collapsible: true 且有 label 时，分组标题渲染成可折叠按钮（aria-expanded 开合），
 //   默认关闭 → 既有模块的分组标题仍是 <p class="console-nav-label">，导航项顺序不变。
@@ -227,7 +228,7 @@ function selectNav(item) {
         <button class="console-close-menu" type="button" aria-label="关闭导航菜单" @click="setMenuOpen(false)"><ConsoleIcon name="close" /></button>
       </div>
 
-      <nav class="console-nav" :class="navClass" :aria-label="navLabel">
+      <nav class="console-nav" :class="navClass" :aria-label="navLabel" data-first-run-anchor="subsystem-nav">
         <slot name="nav">
           <template v-for="(group, index) in normalizedGroups" :key="group.label || `group-${index}`">
             <button
@@ -247,6 +248,7 @@ function selectNav(item) {
                 type="button"
                 :title="item.title || undefined"
                 :aria-current="item.active ? 'page' : undefined"
+                :data-first-run-anchor="item.anchor || undefined"
                 @click="selectNav(item)"
               >
                 <ConsoleIcon v-if="item.icon" :name="item.icon" />
@@ -298,7 +300,7 @@ function selectNav(item) {
         </div>
       </header>
 
-      <section class="console-content" :class="contentClass">
+      <section class="console-content" :class="contentClass" data-first-run-anchor="subsystem-title">
         <slot name="page-head" />
         <slot />
       </section>

@@ -173,7 +173,7 @@ const navGroups = computed(() => [
   {
     label: "平台能力",
     items: [
-      { key: "portal", label: "返回子系统门户", icon: "dashboard", title: "返回子系统门户" },
+      { key: "portal", label: "返回子系统门户", icon: "dashboard", title: "返回子系统门户", anchor: "subsystem-portal" },
     ],
   },
 ]);

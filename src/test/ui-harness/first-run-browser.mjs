@@ -211,8 +211,8 @@ try {
   assert.equal(tour.storageKeyCount, 1)
   assert.ok(tour.storageKey.includes('tenant-e2e'))
   assert.ok(tour.storageKey.includes('user-e2e'))
-  assert.equal(tour.record.tour, 'running')
-  assert.equal(tour.record.v, 1)
+  assert.equal(tour.record.guides.portal.tour, 'running')
+  assert.equal(tour.record.v, 2)
   record('导览启动与无障碍', JSON.stringify({ zIndex: tour.zIndex, role: tour.role, ariaModal: tour.ariaModal }))
 
   // 第 1 步锚点是整行页头：1366 / 1920 下环必须完全落在视口内，且只能用内描边，
@@ -273,8 +273,8 @@ try {
       dialogs: document.querySelectorAll('[role="alertdialog"]').length,
     }
   })
-  assert.equal(afterSkip.record.tour, 'skipped')
-  assert.equal(afterSkip.record.seenAt !== null, true)
+  assert.equal(afterSkip.record.guides.portal.tour, 'skipped')
+  assert.equal(afterSkip.record.guides.portal.seenAt !== null, true)
   assert.equal(afterSkip.activeId, 'checklist-entry', '关闭导览后焦点应回到入口')
   assert.equal(afterSkip.bodyOverflow, '', '关闭导览后必须恢复页面滚动')
   assert.equal(afterSkip.dialogs, 0, '跳过不应触发二次确认')
@@ -289,7 +289,7 @@ try {
     const key = Object.keys(localStorage).find((item) => item.startsWith('basic-platform.first-run'))
     return JSON.parse(localStorage.getItem(key))
   })
-  assert.equal(afterRestartSkip.tour, 'skipped')
+  assert.equal(afterRestartSkip.guides.portal.tour, 'skipped')
   record('重新查看后可再次跳过，仍为终态')
 
   // 缺锚步骤跳过：移除主题切换锚点后，第二步的“下一步”应直接到用户面板。
@@ -315,7 +315,7 @@ try {
   })
   await page.waitForTimeout(1000)
   assert.equal(await page.$('.first-run-tour__bubble'), null, 'header 锚点缺失时不得启动导览')
-  const pendingAfterHeaderMissing = await page.evaluate(() => window.__firstRun.state.record.tour)
+  const pendingAfterHeaderMissing = await page.evaluate(() => window.__firstRun.state.record.guides.portal.tour)
   assert.equal(pendingAfterHeaderMissing, 'pending')
   await page.evaluate(() => {
     document.getElementById('fixture-anchors').firstElementChild.setAttribute('data-first-run-anchor', 'portal-header')

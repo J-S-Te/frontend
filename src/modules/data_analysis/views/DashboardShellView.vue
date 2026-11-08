@@ -474,7 +474,7 @@ onBeforeUnmount(() => {
         <span><b>数据看板与统计分析</b><small>DATA INTELLIGENCE</small></span>
         <button class="da-icon-button da-mobile-close" aria-label="关闭菜单" @click="mobileMenuOpen = false"><ConsoleIcon name="close" /></button>
       </div>
-      <nav class="da-nav" aria-label="数据看板导航">
+      <nav class="da-nav" aria-label="数据看板导航" data-first-run-anchor="subsystem-nav">
         <div v-for="group in navGroups" :key="group.label" class="da-nav-group">
           <div class="da-nav-label">{{ group.label }}</div>
           <button v-for="item in group.items" :key="item.key" v-show="!item.permission || hasPermission(item.permission)" class="da-nav-item" :class="{ active: section === item.key }" :aria-current="section === item.key ? 'page' : undefined" @click="navigate(item.key)">
@@ -483,7 +483,7 @@ onBeforeUnmount(() => {
         </div>
         <div class="da-nav-group">
           <div class="da-nav-label">平台能力</div>
-          <button class="da-nav-item" type="button" @click="returnToUnifiedPortal"><ConsoleIcon name="dashboard" /><span>返回子系统门户</span></button>
+          <button class="da-nav-item" type="button" data-first-run-anchor="subsystem-portal" @click="returnToUnifiedPortal"><ConsoleIcon name="dashboard" /><span>返回子系统门户</span></button>
         </div>
       </nav>
       <div class="da-sidebar-user subsystem-sidebar-user">
@@ -502,7 +502,7 @@ onBeforeUnmount(() => {
       </header>
 
       <div class="da-page">
-        <section class="da-page-head">
+        <section class="da-page-head" data-first-run-anchor="subsystem-title">
           <div><p class="da-eyebrow">DATA INTELLIGENCE</p><h1>{{ currentMeta[0] }}</h1><p>{{ currentMeta[1] }} · {{ dataScopeLabel }} <span v-if="scopeModeLabel" class="da-badge neutral">数据范围：{{ scopeModeLabel }}</span></p></div>
           <div v-if="statusOptions.length" class="da-page-filters" aria-label="看板筛选条件">
             <label>状态<select v-model="statusFilter"><option v-for="option in statusOptions" :key="option" :value="option">{{ option }}</option></select></label>
