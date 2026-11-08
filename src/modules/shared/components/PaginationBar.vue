@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 // 统一分页条：「上一页 / 页码 / 第 N 页，共 M 条 / 下一页」，服务端返回 total 时
 // 额外提供页码按钮、跳页输入与每页条数选择（20 / 50 / 100）。
 //
@@ -17,22 +17,43 @@
 //      页大小、也没有 change-page-size 处理器，渲染下拉会变成点了没反应的死控件。
 //      只有确实会按新页大小重载列表的调用方传 pageSizeOptions 并监听
 //      change-page-size，才出现该控件。
+// 类型门禁（阶段 1）：本文件是首批纳入 `npm run typecheck` 的共享组件之一。
+// 分页属性与两类翻页事件在这里显式声明，接入方以后被纳入检查时直接吃这份签名。
 import { computed, ref, watch } from 'vue'
+import type { PropType } from 'vue'
+
+// 页码窗口里的一项：真实页码（'page'）或省略号占位（'gap'）。
+// gap 的 value 是窗口两端的页码组合（如 '5-12'），只用作稳定 key，不参与点击。
+interface PageEntry {
+  type: 'page'
+  value: number
+}
+
+interface GapEntry {
+  type: 'gap'
+  value: string
+}
+
+type PagerEntry = PageEntry | GapEntry
+
+// 页码目标的入参形态：模板把页码按钮的 value 直接传进来（number），
+// 跳页输入框给的是字符串草稿；两者都在函数里用 Number() 归一，因此签名如实声明宽入参。
+type PageTarget = number | string
 
 const props = defineProps({
   // 当前页，从 1 开始。
   page: { type: Number, default: 1 },
   // 服务端返回的记录总数；接口不返回总数时传 null，由 count 承担展示与翻页判断。
-  total: { type: Number, default: null },
+  total: { type: Number as PropType<number | null>, default: null },
   // 当前页实际条数；仅当 total 未知时使用。
-  count: { type: Number, default: null },
+  count: { type: Number as PropType<number | null>, default: null },
   // 每页条数；用于由 total 推导是否还有下一页，也是页大小下拉的当前值。
   pageSize: { type: Number, default: 20 },
   // 页大小候选。默认 null = 不渲染「每页」控件：只有真正支持切换页大小并会重载
   // 列表的页面才传入候选（20 / 50 / 100），否则下拉会变成没有处理器的死控件。
-  pageSizeOptions: { type: Array, default: null },
+  pageSizeOptions: { type: Array as PropType<number[] | null>, default: null },
   // 是否有下一页：null 表示由 total/pageSize 推导；offset 分页由调用方给出真实值。
-  hasMore: { type: Boolean, default: null },
+  hasMore: { type: Boolean as PropType<boolean | null>, default: null },
   loading: { type: Boolean, default: false },
   // 调用方自己的互斥态（如保存中不允许翻页）。
   disabled: { type: Boolean, default: false },
@@ -43,7 +64,12 @@ const props = defineProps({
   loadingText: { type: String, default: '正在加载…' },
 })
 
-const emit = defineEmits(['change', 'change-page-size'])
+// 两类抖出事件都只带一个数字载荷：目标页码 / 新的每页条数。
+// 调用方监听时拿到的一定是已归一化的数字，不需要自己再 Number() 一次。
+const emit = defineEmits<{
+  change: [page: number]
+  'change-page-size': [size: number]
+}>()
 
 const pageNumber = computed(() => {
   const value = Math.trunc(Number(props.page))
@@ -76,13 +102,13 @@ const controlsDisabled = computed(() => props.disabled || props.loading)
 
 // 页码窗口：总页数不超过 7 时全部展示；否则固定首尾页、当前页及左右一页，
 // 中间用省略号占位，既保留全貌又不让页码条无限增长。
-const pageItems = computed(() => {
+const pageItems = computed<PagerEntry[]>(() => {
   const count = totalPages.value
   if (!hasTotal.value || count <= 0) return []
-  if (count <= 7) return Array.from({ length: count }, (_, index) => ({ type: 'page', value: index + 1 }))
+  if (count <= 7) return Array.from({ length: count }, (_, index): PageEntry => ({ type: 'page', value: index + 1 }))
   const keep = new Set([1, count, pageNumber.value - 1, pageNumber.value, pageNumber.value + 1]
     .filter((value) => value >= 1 && value <= count))
-  const items = []
+  const items: PagerEntry[] = []
   let previous = 0
   for (const value of [...keep].sort((a, b) => a - b)) {
     if (previous && value - previous > 1) items.push({ type: 'gap', value: `${previous}-${value}` })
@@ -108,40 +134,42 @@ const pageSizeChoices = computed(() => {
 const pageSizeSwitchable = computed(() => pageSizeChoices.value.length > 0)
 
 // 跳页输入只保存草稿，提交时才校验并 emit；翻页成功后清空，避免残留旧目标。
-const jumpDraft = ref('')
+const jumpDraft = ref<string>('')
 watch(() => props.page, () => { jumpDraft.value = '' })
 
 // 加载中优先展示占位文案，其余情况按「有总数 → 共 M 条」「无总数 → 本页 M 条」逐级降级。
-const statusText = computed(() => {
+const statusText = computed<string>(() => {
   if (props.loading) return props.loadingText
   if (hasTotal.value) return `第 ${pageNumber.value} 页，共 ${knownTotal.value} 条`
   if (knownCount.value !== null) return `第 ${pageNumber.value} 页 · ${knownCount.value} 条`
   return `第 ${pageNumber.value} 页`
 })
 
-function goTo(target) {
+// 唯一翻页出口：目标页归一化为 >= 1 的整数，与当前页相同则不 emit（避免无意义重载）。
+function goTo(target: PageTarget): void {
   const next = Math.max(1, Math.trunc(Number(target) || 1))
   if (next === pageNumber.value) return
   emit('change', next)
 }
 
-function goPrev() {
+function goPrev(): void {
   if (prevDisabled.value) return
   goTo(pageNumber.value - 1)
 }
 
-function goNext() {
+function goNext(): void {
   if (nextDisabled.value) return
   goTo(pageNumber.value + 1)
 }
 
-function goToPage(target) {
+// 页码按钮走这里：再夹一次总页数上界，防止窗口外的旧页码把列表翻到空白页。
+function goToPage(target: PageTarget): void {
   if (controlsDisabled.value) return
   const next = Math.min(Math.max(1, Math.trunc(Number(target) || 1)), totalPages.value || 1)
   goTo(next)
 }
 
-function submitJump() {
+function submitJump(): void {
   if (controlsDisabled.value) return
   if (String(jumpDraft.value).trim() === '') return
   const parsed = Math.trunc(Number(jumpDraft.value))
@@ -150,10 +178,13 @@ function submitJump() {
   goToPage(parsed)
 }
 
-function changePageSize(event) {
+// 页大小变更的入参是原生 change 事件：只读取 target.value，换取「事件来源」与「取值」解耦，
+// 因此这里只声明成 Event，并在函数内按实际读取的形状收窄。
+function changePageSize(event: Event): void {
   if (!pageSizeSwitchable.value) return
   if (controlsDisabled.value) return
-  const next = Math.trunc(Number(event?.target?.value))
+  const source = event?.target as { value?: unknown } | null
+  const next = Math.trunc(Number(source?.value))
   if (!Number.isFinite(next) || next <= 0 || next === safePageSize.value) return
   emit('change-page-size', next)
 }

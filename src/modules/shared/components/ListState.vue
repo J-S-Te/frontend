@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 // 列表三态闸门：把「加载中 / 失败 / 空」的优先级收敛到一处。
 //
 // 为什么需要这一层：改造前各模块把三态写成互不相干的条件（或干脆没有失败分支），
@@ -10,14 +10,25 @@
 //
 // 本组件只负责「该显示哪个状态」，不包裹表格：数据区仍由调用方用自己的 v-if 控制，
 // 所以既有的表格 / 卡片直接子元素选择器（.crm-panel > table 等）不受影响。
+//
+// 类型门禁（阶段 1）：本文件是首批纳入 `npm run typecheck` 的共享组件之一。
+// 对外契约（loading / error / retry 的取值与 retry 事件）在这里显式声明，
+// 接入方以后被纳入检查时能直接吃到这份签名，而不是 `any`。
+import type { PropType } from 'vue'
 import LoadingState from './LoadingState.vue'
 import ErrorState from './ErrorState.vue'
 import EmptyState from './EmptyState.vue'
 
 const props = defineProps({
+  // 加载中：优先级最高，既不显示失败也不显示空。
   loading: { type: Boolean, default: false },
   // 失败原因：字符串或 Error 对象，原样交给 ErrorState 做用户化处理。
-  error: { type: [String, Object, Error], default: '' },
+  // 运行时仍然同时接受 String / Object / Error 三种构造器（历史调用方会传普通对象），
+  // 静态类型收敛到 `string | Error`：这两类才有稳定的用户化文案映射。
+  error: {
+    type: [String, Object, Error] as unknown as PropType<string | Error>,
+    default: '',
+  },
   // 失败标题：默认沿用 ErrorState 的「加载失败」；有明确分类时可覆盖（如「客户列表加载失败」）。
   errorTitle: { type: String, default: '加载失败' },
   // 是否显示重试按钮；默认显示，失败恢复是这一层的核心目的。
@@ -31,9 +42,11 @@ const props = defineProps({
   compact: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['retry'])
+// 重试事件没有载荷：调用方拿到的就是「用户要求重新加载」这一事实。
+const emit = defineEmits<{ retry: [] }>()
 
-const hasError = () => Boolean(props.error)
+// 失败判定收敛在一处：模板只问「有没有失败」，不自己判断 error 的真值形状。
+const hasError = (): boolean => Boolean(props.error)
 </script>
 
 <template>

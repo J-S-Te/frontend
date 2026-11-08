@@ -5,6 +5,7 @@ import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import * as Vue from 'vue'
 import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc'
+import { transformSync } from 'esbuild'
 import { renderToString } from '@vue/server-renderer'
 
 // 三态闸门（shared/components/ListState.vue）的行为锁。
@@ -56,7 +57,13 @@ async function loadSfc(file) {
       if (imported && !(local in imports)) imports[local] = Vue[imported]
     }
   }
-  const component = new Function(...Object.keys(imports), script.content
+  // 共享组件已改为 `<script lang="ts">`：compileScript 只展开宏、不擦除类型标注，
+  // 因此先用 esbuild 把编译产物降级成 JS，再交给 new Function 求值。
+  // esbuild 会把 import 重排成单行并补分号：在这里一次性去掉，下游 new Function 只吃纯 JS。
+  const scriptCode = transformSync(script.content, { loader: 'ts' }).code
+    .replace(/^import\s[\s\S]*?from ['"][^'"]+['"];?\n/gm, '')
+    .replace(/^import\s+['"][^'"]+['"];?\n?/gm, '')
+  const component = new Function(...Object.keys(imports), scriptCode
     .replace(/^import\s[\s\S]*?from ['"][^'"]+['"]\n/gm, '')
     .replace('export default', 'return'))(...Object.values(imports))
   component.render = new Function('Vue', compiled.code
