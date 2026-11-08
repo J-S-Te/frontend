@@ -42,7 +42,8 @@ function workspaceContext({ listProjectsSnapshot = async () => ({ items: [], tot
     toastTimer: 0,
     toastMessage: ref(''), toastType: ref('success'),
     loading: ref(true), loadError: ref('错误'), ruleConfigurationCatalogError: ref(''),
-    workspaceTruncated: ref(false),
+    workspaceTruncated: ref(false), workspaceReady: ref(false),
+    loadSectionExtras: async () => true,
     lastUpdatedAt: ref(null),
     projects: ref([]), serviceItems: ref([]), rules: ref([]), deliveryEvents: ref([]),
     capabilities: ref([]), dashboard: ref({}), session: ref(null), navigation: ref({ sections: [] }),
@@ -175,9 +176,12 @@ test('监控读取切换筛选后：旧筛选迟到响应不回写快照，也�
 test('设备占用读取切换服务项后：旧服务项迟到响应不得回写', async () => {
   const pending = []
   const context = {
-    ref, createRequestScope,
+    ref, createRequestScope, formatUserError,
     selectedServiceItem: ref({ id: 'ITEM-A' }),
     equipmentReservations: ref([{ resource_id: 'EQ-OLD' }]),
+    equipmentReservationsLoading: ref(false),
+    equipmentReservationsError: ref(''),
+    reservationReads: { targetID: '', pending: null },
     reservationScope: createRequestScope(),
     listEquipmentReservations: (itemID) => new Promise((resolve, reject) => pending.push({ itemID, resolve, reject })),
   }
@@ -192,6 +196,69 @@ test('设备占用读取切换服务项后：旧服务项迟到响应不得回�
   assert.deepEqual(context.equipmentReservations.value, [{ resource_id: 'EQ-OLD' }], '旧服务项的占用响应不得污染新服务项')
   pending[1].resolve([{ resource_id: 'EQ-FROM-B' }])
   await fresh
+  assert.deepEqual(context.equipmentReservations.value, [{ resource_id: 'EQ-FROM-B' }])
+  assert.equal(context.equipmentReservationsLoading.value, false, '只有当前服务项能结束加载态')
+})
+
+test('同一服务项的并发占用读取合并为一次请求', async () => {
+  const pending = []
+  const context = {
+    ref, createRequestScope, formatUserError,
+    selectedServiceItem: ref({ id: 'ITEM-A' }),
+    equipmentReservations: ref([]),
+    equipmentReservationsLoading: ref(false),
+    equipmentReservationsError: ref(''),
+    reservationReads: { targetID: '', pending: null },
+    reservationScope: createRequestScope(),
+    listEquipmentReservations: (itemID) => new Promise((resolve, reject) => pending.push({ itemID, resolve, reject })),
+  }
+  const { loadEquipmentReservations } = functions('./ProjectManagementView.vue', ['loadEquipmentReservations'], context)
+  const first = loadEquipmentReservations({ id: 'ITEM-A' })
+  const second = loadEquipmentReservations({ id: 'ITEM-A' })
+  await until(() => pending.length === 1)
+  assert.equal(context.equipmentReservationsLoading.value, true)
+  pending[0].resolve([{ resource_id: 'EQ-A' }])
+  assert.equal(await first, true)
+  assert.equal(await second, true)
+  assert.equal(pending.length, 1, '同一服务项的并发读取必须合并，不同拍不重复请求')
+  assert.deepEqual(context.equipmentReservations.value, [{ resource_id: 'EQ-A' }])
+  assert.equal(context.equipmentReservationsLoading.value, false)
+})
+
+test('设备占用读取失败不能当成「没有占用」：保留可重试错误，迟到失败不污染新服务项', async () => {
+  const pending = []
+  const context = {
+    ref, createRequestScope, formatUserError,
+    selectedServiceItem: ref({ id: 'ITEM-A' }),
+    equipmentReservations: ref([{ resource_id: 'EQ-OLD' }]),
+    equipmentReservationsLoading: ref(false),
+    equipmentReservationsError: ref(''),
+    reservationReads: { targetID: '', pending: null },
+    reservationScope: createRequestScope(),
+    listEquipmentReservations: (itemID) => new Promise((resolve, reject) => pending.push({ itemID, resolve, reject })),
+  }
+  const { loadEquipmentReservations } = functions('./ProjectManagementView.vue', ['loadEquipmentReservations'], context)
+  const failing = loadEquipmentReservations({ id: 'ITEM-A' })
+  await until(() => pending.length === 1)
+  // 当前服务项读取失败：清空占用并保留可重试错误，绝不能当成「没有占用」而放行选择。
+  pending[0].reject(new Error('占用接口不可用'))
+  await failing
+  assert.equal(context.equipmentReservations.value.length, 0, '失败必须清空列表，不能把上一份占用当成当前事实')
+  assert.match(context.equipmentReservationsError.value, /占用/)
+  assert.equal(context.equipmentReservationsLoading.value, false)
+  // 切到新服务项后，旧服务项的迟到失败不得写入当前错误态，也不得关闭加载态。
+  const slow = loadEquipmentReservations({ id: 'ITEM-A' })
+  await until(() => pending.length === 2)
+  context.selectedServiceItem.value = { id: 'ITEM-B' }
+  const fresh = loadEquipmentReservations({ id: 'ITEM-B' })
+  await until(() => pending.length === 3)
+  pending[1].reject(new Error('旧服务项迟到失败'))
+  await slow
+  assert.equal(context.equipmentReservationsError.value, '', '旧服务项的迟到失败不得污染新服务项')
+  assert.equal(context.equipmentReservationsLoading.value, true, '旧请求 finally 不得关闭新请求的加载态')
+  pending[2].resolve([{ resource_id: 'EQ-FROM-B' }])
+  await fresh
+  assert.equal(context.equipmentReservationsError.value, '')
   assert.deepEqual(context.equipmentReservations.value, [{ resource_id: 'EQ-FROM-B' }])
 })
 
