@@ -5,8 +5,10 @@ import ListState from '@/modules/shared/components/ListState.vue'
 import PaginationBar from '@/modules/shared/components/PaginationBar.vue'
 import { useConfirmDialog } from '@/modules/shared/composables/useConfirmDialog.js'
 import ConfirmDialog from '@/modules/shared/components/ConfirmDialog.vue'
+import LoadingState from '@/modules/shared/components/LoadingState.vue'
+import ErrorState from '@/modules/shared/components/ErrorState.vue'
 import { formatCRMError } from '../api/errorMessages.js'
-import { computed, onMounted, reactive, ref, toRaw, watch } from 'vue'
+import { computed, defineAsyncComponent, defineComponent, h, onMounted, reactive, ref, shallowRef, toRaw, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { AuthError, logoutCurrentSession } from '@/modules/platform/auth/api/auth'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
@@ -66,7 +68,6 @@ import {
   alertTypeText,
   approvalResultText,
   assignees,
-  catalogSelectionIDs,
   creditLevelLabel,
   crmRoleNames,
   customerImportTemplateColumns,
@@ -88,7 +89,6 @@ import {
   importRowStatusText,
   influenceText,
   isPresaleEligibleOpportunity,
-  mergeCatalogOptions,
   normalizeReportRows,
   normalizeReportSummary,
   opportunityStageOptions,
@@ -120,7 +120,8 @@ import {
 } from '@/modules/customer_opportunity/crmDisplay'
 import StageAlertDetailModal from '@/modules/customer_opportunity/components/StageAlertDetailModal.vue'
 import { usePresaleReportData } from '@/modules/customer_opportunity/composables/usePresaleReportData'
-import { useOpportunityCustomerDirectory } from '../composables/useOpportunityCustomerDirectory.js'
+import { useCustomerEditor } from '../composables/useCustomerEditor.js'
+import { useOpportunityEditor } from '../composables/useOpportunityEditor.js'
 import { useCustomerImportWizard } from '../composables/useCustomerImportWizard.js'
 import { createPresaleReportFilters } from '../composables/usePresaleReportFilters.js'
 import { getNotificationUnreadCount, listNotifications, markNotificationRead } from '../api/notification.js'
@@ -166,15 +167,6 @@ function notifyWithReference(text, reference) {
   noticeReferenceByText.value = reference ? { [text]: reference } : {}
 }
 const customers = ref([])
-const {
-  opportunityCustomerOptions, opportunityCustomerOptionsLoading, opportunityCustomerOptionsError,
-  opportunityCustomerOptionsTotal, opportunityCustomerKeyword, loadOpportunityCustomerOptions,
-} = useOpportunityCustomerDirectory({
-  listCustomers, formatCRMError,
-  isDialogOpen: () => opportunityEditMode.value,
-  selectedCustomerID: () => opportunityForm.customer_id,
-  clearSelectedCustomer: () => { opportunityForm.customer_id = '' },
-})
 const customerOwnerKeyword = ref('')
 const customerOwnerOptions = ref([])
 const customerOwnerOptionsLoading = ref(false)
@@ -264,12 +256,6 @@ const customerDialog = ref(false)
 const customerEditMode = ref(false)
 const opportunityDialog = ref(false)
 const opportunityEditMode = ref(false)
-const opportunityTypeSelections = ref([])
-const opportunitySourceSelections = ref([])
-const opportunityTypeOptions = ref([])
-const opportunitySourceOptions = ref([])
-const opportunityCatalogLoading = ref(false)
-const opportunityCatalogError = ref('')
 const opportunityCatalogDialog = ref(false)
 const stageDialog = ref(false)
 const terminalDialog = ref(false)
@@ -305,6 +291,86 @@ let presaleFormInitial = ''
 const customerFormDirty = computed(() => customerFormInitial !== '' && JSON.stringify(customerForm) !== customerFormInitial)
 const opportunityFormDirty = computed(() => opportunityFormInitial !== '' && JSON.stringify(opportunityForm) !== opportunityFormInitial)
 const presaleFormDirty = computed(() => presaleFormInitial !== '' && JSON.stringify(presaleForm) !== presaleFormInitial)
+
+// 客户/商机编辑弹窗的编辑域（阶段 3-CRM）。
+// 表单对象、弹窗开关、编辑态与脏检查基线的所有权仍在本页：组合式函数只是按同一引用回填/清空，
+// 目录读取也收在里面；子组件异步加载、加载失败重试或重新挂载都不会产生第二份表单。
+const customerEditor = useCustomerEditor({
+  form: customerForm,
+  dialog: customerDialog,
+  editMode: customerEditMode,
+  setSnapshot: (value) => { customerFormInitial = value },
+})
+const opportunityEditor = useOpportunityEditor({
+  form: opportunityForm,
+  dialog: opportunityDialog,
+  editMode: opportunityEditMode,
+  setSnapshot: (value) => { opportunityFormInitial = value },
+  selectedOpportunity,
+  selectedOpportunityOwnerOrgID,
+  listCustomers,
+  listOpportunityCatalogItems,
+  formatCRMError,
+})
+const {
+  typeSelections: opportunityTypeSelections, sourceSelections: opportunitySourceSelections,
+  typeSelectOptions: opportunityTypeSelectOptions, sourceSelectOptions: opportunitySourceSelectOptions,
+  catalogLoading: opportunityCatalogLoading, catalogError: opportunityCatalogError,
+  customerOptions: opportunityCustomerOptions, customerOptionsLoading: opportunityCustomerOptionsLoading,
+  customerOptionsError: opportunityCustomerOptionsError, customerOptionsTotal: opportunityCustomerOptionsTotal,
+  customerKeyword: opportunityCustomerKeyword,
+  loadCustomerOptions: loadOpportunityCustomerOptions,
+  loadCatalogOptions: loadOpportunityCatalogOptions,
+  syncSelections: syncOpportunitySelections,
+} = opportunityEditor
+
+// 低频弹窗用动态导入建立加载边界。弹窗里的输入状态在父层，代码块加载/重试只影响渲染：
+// 失败时给显式重试入口（替换为新的异步组件实例重新请求），不会触发任何业务提交。
+const loadCustomerEditorDialog = () => import('../components/CustomerEditorDialog.vue')
+function createCustomerEditorDialog() {
+  return defineAsyncComponent({
+    loader: loadCustomerEditorDialog,
+    loadingComponent: LoadingState,
+    delay: 120,
+    timeout: 30000,
+    errorComponent: defineComponent({
+      name: 'CustomerEditorDialogError',
+      setup: () => () => h(ErrorState, {
+        title: '客户表单加载失败',
+        description: '页面资源暂不可用，请重试加载。',
+        retryText: '重试加载',
+        onRetry: retryCustomerEditorDialog,
+      }),
+    }),
+    // 由错误面板承载受控提示，避免原始模块路径进入页面提示。
+    onError: (_error, _retry, fail) => fail(),
+  })
+}
+const customerEditorDialog = shallowRef(createCustomerEditorDialog())
+function retryCustomerEditorDialog() { customerEditorDialog.value = createCustomerEditorDialog() }
+
+const loadOpportunityEditorDialog = () => import('../components/OpportunityEditorDialog.vue')
+function createOpportunityEditorDialog() {
+  return defineAsyncComponent({
+    loader: loadOpportunityEditorDialog,
+    loadingComponent: LoadingState,
+    delay: 120,
+    timeout: 30000,
+    errorComponent: defineComponent({
+      name: 'OpportunityEditorDialogError',
+      setup: () => () => h(ErrorState, {
+        title: '商机表单加载失败',
+        description: '页面资源暂不可用，请重试加载。',
+        retryText: '重试加载',
+        onRetry: retryOpportunityEditorDialog,
+      }),
+    }),
+    onError: (_error, _retry, fail) => fail(),
+  })
+}
+const opportunityEditorDialog = shallowRef(createOpportunityEditorDialog())
+function retryOpportunityEditorDialog() { opportunityEditorDialog.value = createOpportunityEditorDialog() }
+
 const { dialog: confirmDialog, askConfirm, accept: acceptConfirm, cancel: cancelConfirm } = useConfirmDialog()
 async function confirmDiscardIfDirty(dirty) {
   if (!dirty) return true
@@ -578,32 +644,6 @@ watch(() => selectedOpportunity.value?.id, () => {
 })
 
 
-const opportunityTypeSelectOptions = computed(() => mergeCatalogOptions(opportunityTypeOptions.value, opportunityEditMode.value ? selectedOpportunity.value?.types : []))
-const opportunitySourceSelectOptions = computed(() => mergeCatalogOptions(opportunitySourceOptions.value, opportunityEditMode.value ? selectedOpportunity.value?.sources : []))
-async function loadOpportunityCatalogOptions() {
-  opportunityCatalogLoading.value = true
-  opportunityCatalogError.value = ''
-  try {
-    const [types, sources] = await Promise.all([listOpportunityCatalogItems('TYPE'), listOpportunityCatalogItems('SOURCE')])
-    opportunityTypeOptions.value = Array.isArray(types) ? types : []
-    opportunitySourceOptions.value = Array.isArray(sources) ? sources : []
-    if (!opportunityTypeOptions.value.length || !opportunitySourceOptions.value.length) throw new Error('商机基础数据为空，请联系有权限的管理员配置。')
-  } catch (value) {
-    opportunityTypeOptions.value = []
-    opportunitySourceOptions.value = []
-    opportunityCatalogError.value = formatCRMError(value, { fallback: '商机类型和来源加载失败。' })
-  } finally {
-    opportunityCatalogLoading.value = false
-  }
-}
-function syncOpportunitySelections() {
-  const typeIDs = opportunityTypeSelections.value.map(Number)
-  const sourceIDs = opportunitySourceSelections.value.map(Number)
-  opportunityForm.type_ids = typeIDs
-  opportunityForm.source_ids = sourceIDs
-  opportunityForm.type = opportunityTypeSelectOptions.value.filter((item) => typeIDs.includes(Number(item.id))).map((item) => item.name).join('、')
-  opportunityForm.source = opportunitySourceSelectOptions.value.filter((item) => sourceIDs.includes(Number(item.id))).map((item) => item.name).join('、')
-}
 function resetMessages() { error.value = ''; notice.value = '' }
 function showError(value) {
   if (value?.code === 'CRM_PRESALE_OPPORTUNITY_NOT_ELIGIBLE') error.value = presaleEligibilityMessage
@@ -794,12 +834,9 @@ const {
   loadReportFilterOptions,
 })
 
-function openNewCustomer() {
-  Object.assign(customerForm, emptyCustomer())
-  customerEditMode.value = false
-  customerFormInitial = JSON.stringify(customerForm)
-  customerDialog.value = true
-}
+// 新建/编辑入口保持原名称：编辑态由父层当前选中的客户/商机回填，子组件不自行取数。
+function openNewCustomer() { return customerEditor.openNew() }
+function editCustomer() { return customerEditor.openEdit(selectedCustomer.value) }
 
 function directoryErrorMessage(value) {
   if (value?.status === 403) return '当前账号没有读取平台人员目录的权限。'
@@ -893,55 +930,11 @@ async function loadTeamDirectory() {
   }
 }
 
-async function openNewOpportunity() {
-  Object.assign(opportunityForm, emptyOpportunity())
-  opportunityTypeSelections.value = []
-  opportunitySourceSelections.value = []
-  opportunityEditMode.value = false
-  opportunityCustomerKeyword.value = ''
-  opportunityCustomerOptions.value = []
-  opportunityCustomerOptionsTotal.value = 0
-  opportunityFormInitial = JSON.stringify(opportunityForm)
-  opportunityDialog.value = true
-  await Promise.all([loadOpportunityCustomerOptions(), loadOpportunityCatalogOptions()])
-}
-async function editOpportunity() {
-  const value = selectedOpportunity.value
-  await loadOpportunityCatalogOptions()
-  Object.assign(opportunityForm, {
-    name: value.name, customer_id: value.customer_id, type: value.type, source: value.source,
-    expected_amount: value.expected_amount, expected_sign_date: value.expected_sign_date,
-    requirement_summary: value.requirement_summary, system_count: value.system_count || 0,
-    pain_points: value.pain_points || '', competitor_info: value.competitor_info || '',
-    owner_user_id: value.owner_user_id, owner_org_id: selectedOpportunityOwnerOrgID.value, reason: '',
-  })
-  opportunityTypeSelections.value = catalogSelectionIDs(value.types, value.type, opportunityTypeSelectOptions.value)
-  opportunitySourceSelections.value = catalogSelectionIDs(value.sources, value.source, opportunitySourceSelectOptions.value)
-  syncOpportunitySelections()
-  opportunityEditMode.value = true
-  opportunityFormInitial = JSON.stringify(opportunityForm)
-  opportunityDialog.value = true
-}
-function editCustomer() {
-  const value = selectedCustomer.value
-  // 客户详情不返回完整信用代码，联系人也只返回脱敏值；编辑态用空值表示“不提交变更”，
-  // submitCustomer 仅把用户重新输入的敏感字段放入更新载荷，由服务端保留其余原密文。
-  Object.assign(customerForm, {
-    name: value.name, unified_credit_code: '', customer_type: value.customer_type, industry: value.industry,
-    region: value.region, owner_user_id: value.owner_user_id, owner_org_id: value.owner_org_id || '', reason: '',
-    duplicate_override: false, duplicate_override_reason: '', contacts: (value.contacts || []).map((item) => ({ id: item.id, name: item.name, phone: '', email: '', is_registration: item.is_registration })),
-  })
-  customerEditMode.value = true
-  customerFormInitial = JSON.stringify(customerForm)
-  customerDialog.value = true
-}
-function addCustomerContact() { customerForm.contacts.push({ id: 0, name: '', phone: '', email: '', is_registration: false }) }
-function removeCustomerContact(index) {
-  if (customerForm.contacts.length <= 1 || index < 0 || index >= customerForm.contacts.length) return
-  const [removed] = customerForm.contacts.splice(index, 1)
-  if (removed?.is_registration && !customerForm.contacts.some((item) => item.is_registration)) {
-    customerForm.contacts[0].is_registration = true
-  }
+function openNewOpportunity() { return opportunityEditor.openNew() }
+function editOpportunity() { return opportunityEditor.openEdit(selectedOpportunity.value) }
+// 关联客户下拉的关键字沿用原 v-model.trim 语义：输入即去首尾空白后再查询。
+function setOpportunityCustomerKeyword(value) {
+  opportunityCustomerKeyword.value = typeof value === 'string' ? value.trim() : ''
 }
 
 // reportError=false 供写操作成功后的刷新链使用：读取失败只向调用方返回 false，
@@ -2568,6 +2561,8 @@ async function saveAlertRule(rule) {
   } finally { alertRuleSavingType.value = '' }
 }
 async function submitCustomer() {
+  // 提交中再次提交（重复点击/原生表单重复触发）必须被挡住：这里仍是唯一写入入口。
+  if (actionLoading.value) return
   actionLoading.value = true; resetMessages()
   try {
     let createRetry = null
@@ -2641,6 +2636,7 @@ function changeCustomerStatus(action) {
   })
 }
 async function submitOpportunity() {
+  if (actionLoading.value) return
   syncOpportunitySelections()
   if (opportunityCatalogLoading.value || opportunityCatalogError.value) {
     error.value = opportunityCatalogError.value || '商机基础数据正在加载，请稍后提交。'
@@ -3219,75 +3215,49 @@ onMounted(async () => {
       </article>
     </div>
 
-    <div v-if="customerDialog" class="console-modal-backdrop" :class="{ nested: !!selectedCustomer }" role="presentation" @click.self="closeCustomerDialog">
-      <form class="console-detail-modal crm-customer-dialog" role="dialog" aria-modal="true" :aria-label="customerEditMode ? '编辑客户' : '新建客户'" @submit.prevent="submitCustomer">
-        <header>
-          <div>
-            <p class="console-modal-eyebrow">客户档案</p>
-            <h2>{{ customerEditMode ? '编辑客户' : '新建客户' }}</h2>
-          </div>
-          <button class="console-modal-close" type="button" aria-label="关闭" @click="closeCustomerDialog"><ConsoleIcon name="close" /></button>
-        </header>
-        <div class="console-form-grid crm-customer-dialog__body">
-          <label class="console-form-item"><span>客户名称 *</span><input v-model="customerForm.name" required autocomplete="off" placeholder="请输入客户名称" maxlength="200"></label>
-          <label class="console-form-item"><span>统一社会信用代码</span><input v-model="customerForm.unified_credit_code" :placeholder="customerEditMode ? '留空表示保持原值' : '选填'" autocomplete="off" maxlength="64"></label>
-          <label class="console-form-item"><span>客户类型 *</span><select v-model="customerForm.customer_type" required><option value="" disabled>请选择客户类型</option><option v-if="customerForm.customer_type && !customerTypeSuggestions.includes(customerForm.customer_type)" :value="customerForm.customer_type">{{ customerForm.customer_type }}（历史值）</option><option v-for="customerType in customerTypeSuggestions" :key="customerType" :value="customerType">{{ customerType }}</option></select></label>
-          <label class="console-form-item"><span>行业 *</span><select v-model="customerForm.industry" required><option value="" disabled>请选择行业</option><option v-if="customerForm.industry && !customerIndustryOptions.includes(customerForm.industry)" :value="customerForm.industry">{{ customerForm.industry }}（历史值）</option><option v-for="industry in customerIndustryOptions" :key="industry" :value="industry">{{ industry }}</option></select></label>
-          <label class="console-form-item"><span>区域 *</span><select v-model="customerForm.region" required><option value="" disabled>请选择区域</option><option v-if="customerForm.region && !customerRegionSuggestions.includes(customerForm.region)" :value="customerForm.region">{{ customerForm.region }}（历史值）</option><option v-for="region in customerRegionSuggestions" :key="region" :value="region">{{ region }}</option></select></label>
-          <div v-if="customerEditMode" class="console-form-item full"><OwnerSelector v-model:user-id="customerForm.owner_user_id" v-model:organization-id="customerForm.owner_org_id" :default-user-id="crmSession?.user_id || ''" :default-organization-id="crmSession?.primary_org_id || ''" /></div>
-          <section v-for="(contact, index) in customerForm.contacts" :key="contact.id || index" class="crm-customer-contacts">
-            <div class="crm-customer-contact-heading">
-              <h3>联系人 {{ index + 1 }}</h3>
-              <button class="console-button danger small" type="button" :disabled="customerForm.contacts.length <= 1" :title="customerForm.contacts.length <= 1 ? '至少保留一个联系人' : '删除此联系人'" @click="removeCustomerContact(index)">删除联系人</button>
-            </div>
-            <div class="console-form-grid">
-              <label class="console-form-item"><span>姓名 *</span><input v-model="contact.name" required autocomplete="off" maxlength="100"></label>
-              <label class="console-form-item"><span>电话 *</span><input v-model="contact.phone" :required="!contact.id" :placeholder="contact.id ? '留空表示保持原值' : ''" autocomplete="off" maxlength="32"></label>
-              <label class="console-form-item"><span>邮箱</span><input v-model="contact.email" type="email" :placeholder="contact.id ? '留空表示保持原值' : ''" autocomplete="off" maxlength="200"></label>
-              <label class="console-form-item crm-check-item"><span>门户登记联系人</span><input v-model="contact.is_registration" type="checkbox"></label>
-            </div>
-          </section>
-          <button class="console-button ghost" type="button" @click="addCustomerContact">添加联系人</button>
-          <label v-if="customerEditMode" class="console-form-item full"><span>更新原因 *</span><textarea v-model="customerForm.reason" required maxlength="500" rows="3" placeholder="说明本次更新客户的原因"></textarea></label>
-          <label class="console-form-item full crm-check-item"><span>授权覆盖名称查重</span><input v-model="customerForm.duplicate_override" type="checkbox"></label>
-          <label v-if="customerForm.duplicate_override" class="console-form-item full"><span>覆盖原因 *</span><textarea v-model="customerForm.duplicate_override_reason" required maxlength="500" rows="2" placeholder="说明为什么允许与疑似重复客户并存"></textarea></label>
-        </div>
-        <footer>
-          <button class="console-button ghost" type="button" :disabled="actionLoading" @click="closeCustomerDialog">取消</button>
-          <button class="console-button primary" type="submit" :disabled="actionLoading">{{ actionLoading ? '保存中…' : '保存客户' }}</button>
-        </footer>
-      </form>
-    </div>
+    <component
+      :is="customerEditorDialog"
+      v-if="customerDialog"
+      :form="customerForm"
+      :edit-mode="customerEditMode"
+      :busy="actionLoading"
+      :nested="!!selectedCustomer"
+      :session="crmSession"
+      :customer-type-suggestions="customerTypeSuggestions"
+      :industry-options="customerIndustryOptions"
+      :region-suggestions="customerRegionSuggestions"
+      @submit="submitCustomer"
+      @close="closeCustomerDialog"
+      @add-contact="customerEditor.addContact"
+      @remove-contact="customerEditor.removeContact"
+    />
     <div v-if="customerImportDialog" class="crm-modal" role="dialog" aria-modal="true"><form class="crm-import-wizard" @submit.prevent="previewImport"><h2>客户 Excel 导入</h2><p class="crm-note">第一步：上传 .xlsx 后由服务端先执行文件格式和内容结构校验，再进行固定表头和逐行预检。浏览器不会读取 Excel 内容，也不会保存文件或敏感字段。</p><template v-if="!customerImportPreview"><section class="crm-import-template" aria-labelledby="customer-import-template-title"><h3 id="customer-import-template-title">填写示例</h3><p class="crm-note">下载模板后，请将示例行替换为真实客户数据，无需填写任何人员或组织 ID。新客户自动归当前导入人，所属组织由系统确认；如需交接给其他人员，请在导入后使用“变更负责人”。</p><div class="crm-import-template-scroll" data-table-scroll><table><thead><tr><th v-for="column in customerImportTemplateColumns" :key="column[0]">{{ column[0] }}</th></tr></thead><tbody><tr><td v-for="column in customerImportTemplateColumns" :key="column[0]">{{ column[1] }}</td></tr></tbody></table></div><button type="button" @click="downloadCustomerImportExample">下载 .xlsx 示例文件</button></section><label>Excel 文件<input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required @change="selectCustomerImportFile"></label><label>导入原因<textarea v-model.trim="customerImportForm.reason" required maxlength="500"></textarea></label><div class="crm-actions"><button type="button" @click="closeCustomerImport">取消</button><button class="primary" :disabled="actionLoading || !customerImportForm.file || !customerImportForm.reason">{{ actionLoading ? '服务端校验与预检中…' : '上传并预检' }}</button></div></template><template v-else><h3>第二步：服务端预检结果</h3><dl class="crm-import-summary"><dt>任务号</dt><dd>{{ customerImportPreview.job_no }}</dd><dt>状态</dt><dd>{{ customerImportPreview.status }}</dd><dt>总行数</dt><dd>{{ customerImportPreview.total_rows }}</dd><dt>可导入</dt><dd>{{ customerImportPreview.importable_rows }}</dd><dt>警告</dt><dd>{{ customerImportPreview.warning_rows }}</dd><dt>错误</dt><dd>{{ customerImportPreview.error_rows }}</dd><dt>预检过期时间</dt><dd>{{ formatDate(customerImportPreview.expires_at) }}</dd></dl><p class="crm-note">警告行和错误行本次均跳过；只有状态为“可导入”的行会提交。下表的信用代码、电话和邮箱均为服务端返回的脱敏值。</p><table v-if="customerImportPreview.rows?.length"><thead><tr><th>行号</th><th>状态</th><th>客户</th><th>信用代码（脱敏）</th><th>负责人 / 所属组织</th><th>联系人</th><th>联系方式（脱敏）</th><th>问题</th></tr></thead><tbody><tr v-for="row in customerImportPreview.rows" :key="row.row_no"><td>{{ row.row_no }}</td><td>{{ importRowStatusText(row.status) }}</td><td>{{ row.name || '—' }}<br>{{ row.customer_type || '—' }} · {{ row.industry || '—' }} · {{ row.region || '—' }}</td><td>{{ row.unified_credit_code || '—' }}</td><td>{{ row.owner_display_name || '当前导入人' }}<br>{{ row.owner_org_name || '未确认组织' }}</td><td>{{ row.contact_name || '—' }}</td><td>{{ row.contact_phone || '—' }}<br>{{ row.contact_email || '—' }}</td><td><span v-if="!row.issues?.length">—</span><ul v-else><li v-for="issue in row.issues" :key="`${issue.column}-${issue.code}`">{{ issue.column }} · {{ issue.code }} · {{ issue.message }}</li></ul></td></tr></tbody></table><template v-if="!customerImportResult"><div class="crm-actions"><button type="button" @click="resetCustomerImportPreview">重新上传</button><button type="button" :disabled="!customerImportErrorReportRows.length" aria-label="下载客户导入预检错误报告 CSV" @click="downloadImportErrors">下载错误报告 CSV</button><button type="button" class="primary" :disabled="actionLoading || Number(customerImportPreview.importable_rows) === 0" @click="commitImport">{{ actionLoading ? '提交中…' : '第三步：确认导入可导入行' }}</button></div></template><template v-else><h3>第三步：导入结果</h3><dl class="crm-import-summary"><dt>状态</dt><dd>{{ customerImportResult.status }}</dd><dt>总行数</dt><dd>{{ customerImportResult.total_rows }}</dd><dt>成功</dt><dd>{{ customerImportResult.succeeded_rows }}</dd><dt>失败</dt><dd>{{ customerImportResult.failed_rows }}</dd><dt>跳过</dt><dd>{{ customerImportResult.skipped_rows }}</dd><dt>完成时间</dt><dd>{{ formatDate(customerImportResult.completed_at) }}</dd></dl><table v-if="customerImportResult.rows?.length"><thead><tr><th>行号</th><th>结果</th><th>客户编号</th><th>错误码</th><th>说明</th></tr></thead><tbody><tr v-for="row in customerImportResult.rows" :key="row.row_no"><td>{{ row.row_no }}</td><td>{{ importRowStatusText(row.status) }}</td><td>{{ row.customer_no || '—' }}</td><td>{{ row.error_code || '—' }}</td><td>{{ row.message || '—' }}</td></tr></tbody></table><div class="crm-actions"><button type="button" :disabled="!customerImportErrorReportRows.length" aria-label="下载客户导入结果错误报告 CSV" @click="downloadImportErrors">下载错误报告 CSV</button><button type="button" class="primary" @click="closeCustomerImport">关闭结果</button></div></template></template></form></div>
-    <div v-if="opportunityDialog" class="console-modal-backdrop" :class="{ nested: !!selectedOpportunity }" role="presentation" @click.self="closeOpportunityDialog">
-      <form class="console-detail-modal crm-opportunity-dialog" role="dialog" aria-modal="true" :aria-label="opportunityEditMode ? '编辑商机' : '新建商机'" @submit.prevent="submitOpportunity">
-        <header>
-          <div><p class="console-modal-eyebrow">商机档案</p><h2>{{ opportunityEditMode ? '编辑商机' : '新建商机' }}</h2></div>
-          <button class="console-modal-close" type="button" aria-label="关闭商机表单" @click="closeOpportunityDialog"><ConsoleIcon name="close" /></button>
-        </header>
-        <div class="console-form-grid crm-opportunity-dialog__body">
-          <label class="console-form-item"><span>商机名称 *</span><input v-model="opportunityForm.name" required autocomplete="off" placeholder="请输入商机名称" maxlength="200"></label>
-          <label v-if="opportunityEditMode" class="console-form-item"><span>关联客户</span><input :value="opportunityForm.customer_id" readonly disabled></label>
-          <div v-else class="console-form-item full crm-opportunity-customer-picker">
-            <span>关联客户 *</span>
-            <div class="crm-opportunity-customer-search"><input v-model.trim="opportunityCustomerKeyword" type="search" autocomplete="off" placeholder="按客户号或名称查询" @keyup.enter.prevent="loadOpportunityCustomerOptions" maxlength="100"><button class="console-button ghost" type="button" :disabled="opportunityCustomerOptionsLoading" @click="loadOpportunityCustomerOptions">{{ opportunityCustomerOptionsLoading ? '查询中…' : '查询客户' }}</button></div>
-            <select v-model="opportunityForm.customer_id" required :disabled="opportunityCustomerOptionsLoading || !opportunityCustomerOptions.length"><option value="" disabled>{{ opportunityCustomerOptionsLoading ? '正在加载客户…' : '请选择客户' }}</option><option v-for="customer in opportunityCustomerOptions" :key="customer.id" :value="String(customer.id)">{{ customer.name }}（{{ customer.customer_no }}）· {{ customer.industry }} / {{ customer.region }}</option></select>
-            <small v-if="opportunityCustomerOptionsError" class="crm-alert error" role="alert">{{ opportunityCustomerOptionsError }}</small><small v-else-if="!opportunityCustomerOptionsLoading && !opportunityCustomerOptions.length" class="crm-note">暂无符合条件的有效客户，请先在客户管理中创建客户。</small><small v-else-if="opportunityCustomerOptionsTotal > opportunityCustomerOptions.length" class="crm-note">当前显示前 {{ opportunityCustomerOptions.length }} 条，请输入关键词缩小范围。</small>
-          </div>
-          <fieldset class="console-form-item crm-opportunity-multi-field"><legend>商机类型 *（可多选）</legend><p v-if="opportunityCatalogLoading" class="crm-note">正在加载商机类型…</p><p v-else-if="opportunityCatalogError" class="crm-alert error" role="alert">{{ opportunityCatalogError }}</p><div v-else class="crm-opportunity-check-list" aria-label="商机类型"><label v-for="item in opportunityTypeSelectOptions" :key="item.id" class="crm-opportunity-check-item"><input v-model="opportunityTypeSelections" type="checkbox" :value="Number(item.id)" :disabled="!item.enabled && !opportunityTypeSelections.includes(Number(item.id))" @change="syncOpportunitySelections"><span>{{ item.name }}<small v-if="!item.enabled">（已停用）</small></span></label></div><small class="crm-note">已选择 {{ opportunityTypeSelections.length }} 项，停用项仅可在历史商机中保留。</small></fieldset>
-          <fieldset class="console-form-item crm-opportunity-multi-field"><legend>来源 *（可多选）</legend><p v-if="opportunityCatalogLoading" class="crm-note">正在加载商机来源…</p><p v-else-if="opportunityCatalogError" class="crm-alert error" role="alert">{{ opportunityCatalogError }}</p><div v-else class="crm-opportunity-check-list" aria-label="来源"><label v-for="item in opportunitySourceSelectOptions" :key="item.id" class="crm-opportunity-check-item"><input v-model="opportunitySourceSelections" type="checkbox" :value="Number(item.id)" :disabled="!item.enabled && !opportunitySourceSelections.includes(Number(item.id))" @change="syncOpportunitySelections"><span>{{ item.name }}<small v-if="!item.enabled">（已停用）</small></span></label></div><small class="crm-note">已选择 {{ opportunitySourceSelections.length }} 项，停用项仅可在历史商机中保留。</small></fieldset>
-          <label class="console-form-item"><span>预计金额 *</span><input v-model="opportunityForm.expected_amount" required inputmode="decimal" autocomplete="off" placeholder="请输入预计金额" maxlength="18"></label>
-          <label class="console-form-item"><span>预计签单日期 *</span><input v-model="opportunityForm.expected_sign_date" type="date" required></label>
-          <label class="console-form-item full"><span>需求摘要 *</span><textarea v-model="opportunityForm.requirement_summary" required rows="3" placeholder="请概述客户需求和项目范围" maxlength="10000"></textarea></label>
-          <label class="console-form-item"><span>系统数量</span><input v-model.number="opportunityForm.system_count" type="number" min="0" placeholder="0"></label>
-          <label class="console-form-item full"><span>客户痛点</span><textarea v-model="opportunityForm.pain_points" rows="3" placeholder="选填" maxlength="10000"></textarea></label>
-          <label class="console-form-item full"><span>竞争信息</span><textarea v-model="opportunityForm.competitor_info" rows="3" placeholder="选填" maxlength="10000"></textarea></label>
-          <fieldset v-if="opportunityEditMode" class="crm-owner-selector crm-opportunity-owner" disabled><legend>负责人</legend><div class="console-form-grid"><label class="console-form-item"><span>负责人用户</span><input :value="ownerLabel(opportunityForm.owner_user_id)" readonly></label><label class="console-form-item"><span>负责人组织</span><input value="由基础平台组织目录确定" readonly></label></div><p class="crm-note">商机主档编辑不变更负责人，请使用详情中的“变更负责人”。</p></fieldset>
-          <label v-if="opportunityEditMode" class="console-form-item full"><span>更新原因 *</span><textarea v-model="opportunityForm.reason" required maxlength="500" rows="3" placeholder="请说明本次更新原因"></textarea></label>
-        </div>
-        <footer><button class="console-button ghost" type="button" :disabled="actionLoading" @click="closeOpportunityDialog">取消</button><button class="console-button primary" type="submit" :disabled="actionLoading || opportunityCatalogLoading || !!opportunityCatalogError">{{ actionLoading ? '提交中…' : opportunityEditMode ? '保存商机' : '创建商机' }}</button></footer>
-      </form>
-    </div>
+    <component
+      :is="opportunityEditorDialog"
+      v-if="opportunityDialog"
+      :form="opportunityForm"
+      :edit-mode="opportunityEditMode"
+      :busy="actionLoading"
+      :nested="!!selectedOpportunity"
+      :customer-keyword="opportunityCustomerKeyword"
+      :customer-options="opportunityCustomerOptions"
+      :customer-options-loading="opportunityCustomerOptionsLoading"
+      :customer-options-error="opportunityCustomerOptionsError"
+      :customer-options-total="opportunityCustomerOptionsTotal"
+      :catalog-loading="opportunityCatalogLoading"
+      :catalog-error="opportunityCatalogError"
+      :type-options="opportunityTypeSelectOptions"
+      :source-options="opportunitySourceSelectOptions"
+      :type-selections="opportunityTypeSelections"
+      :source-selections="opportunitySourceSelections"
+      :owner-label="ownerLabel(opportunityForm.owner_user_id)"
+      @submit="submitOpportunity"
+      @close="closeOpportunityDialog"
+      @update:customer-keyword="setOpportunityCustomerKeyword"
+      @search-customer="loadOpportunityCustomerOptions"
+      @toggle-type="opportunityEditor.toggleType"
+      @toggle-source="opportunityEditor.toggleSource"
+    />
     <OpportunityCatalogDialog v-if="opportunityCatalogDialog" @close="opportunityCatalogDialog = false" @changed="loadOpportunityCatalogOptions" @notice="notice = $event" @error="error = $event" />
     <div v-if="selectedCustomer" class="crm-modal">
 <article class="crm-detail">

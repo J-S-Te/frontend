@@ -14,6 +14,11 @@ const creditApprovalInbox = await readFile(new URL('./customer_opportunity/compo
 const creditRuleSettings = await readFile(new URL('./customer_opportunity/components/CreditRuleSettingsPanel.vue', import.meta.url), 'utf8')
 const ownerSelector = await readFile(new URL('./customer_opportunity/components/OwnerSelector.vue', import.meta.url), 'utf8')
 const opportunityCatalogDialog = await readFile(new URL('./customer_opportunity/components/OpportunityCatalogDialog.vue', import.meta.url), 'utf8')
+// 阶段 3-CRM：客户/商机编辑弹窗拆为独立子组件与组合式函数，表单字段断言按新归属读取。
+const customerDialogSource = await readFile(new URL('./customer_opportunity/components/CustomerEditorDialog.vue', import.meta.url), 'utf8')
+const opportunityDialogSource = await readFile(new URL('./customer_opportunity/components/OpportunityEditorDialog.vue', import.meta.url), 'utf8')
+const customerEditorSource = await readFile(new URL('./customer_opportunity/composables/useCustomerEditor.js', import.meta.url), 'utf8')
+const opportunityEditorSource = await readFile(new URL('./customer_opportunity/composables/useOpportunityEditor.js', import.meta.url), 'utf8')
 const api = await import('./customer_opportunity/api/presale.js')
 const customer = await import('./customer_opportunity/api/customer.js')
 const client = await import('./customer_opportunity/api/client.js')
@@ -213,15 +218,17 @@ test('商机详情空响应时清空旧数据并提示错误', () => {
 })
 
 test('商机和售前核心表单统一使用大系统 console 弹窗规范', () => {
-  assert.match(view, /v-if="opportunityDialog" class="console-modal-backdrop"[\s\S]*class="console-detail-modal crm-opportunity-dialog"[\s\S]*class="console-form-grid crm-opportunity-dialog__body"/)
+  // 商机弹窗外壳随阶段 3-CRM 迁入 OpportunityEditorDialog.vue：页面只保留异步加载边界与事件接线。
+  assert.match(view, /:is="opportunityEditorDialog"[\s\S]*v-if="opportunityDialog"/)
+  assert.match(opportunityDialogSource, /class="console-modal-backdrop"[\s\S]*class="console-detail-modal crm-opportunity-dialog"[\s\S]*class="console-form-grid crm-opportunity-dialog__body"/)
   assert.match(view, /v-if="showReport" class="console-modal-backdrop"[\s\S]*class="console-detail-modal crm-report-dialog"[\s\S]*class="console-form-grid crm-report-filters"/)
   assert.match(view, /v-if="showAlertConfig" class="console-modal-backdrop"[\s\S]*class="console-detail-modal crm-alert-rules-dialog"[\s\S]*class="console-setting-list"/)
   assert.match(view, /v-if="selectedPresale" class="console-modal-backdrop"[\s\S]*class="console-detail-modal crm-presale-console-detail"[\s\S]*class="console-detail-grid crm-presale-summary"/)
   for (const className of ['crm-opportunity-dialog', 'crm-report-dialog', 'crm-alert-rules-dialog', 'crm-presale-console-detail']) {
     assert.match(style, new RegExp(`\\.${className}`))
   }
-  assert.match(view, /class="console-modal-close"[^>]*aria-label="关闭商机表单"/)
-  assert.match(view, /class="console-button primary" type="submit"[^>]*>\{\{ actionLoading/)
+  assert.match(opportunityDialogSource, /class="console-modal-close"[^>]*aria-label="关闭商机表单"/)
+  assert.match(opportunityDialogSource, /class="console-button primary" type="submit" :disabled="busy \|\| catalogLoading \|\| !!catalogError"/)
   assert.match(view, /class="console-data-table crm-report-table"/)
   assert.match(view, /class="console-switch"|\['console-switch', \{ on: rule\.enabled \}\]/)
   assert.doesNotMatch(view, /v-if="opportunityDialog" class="crm-modal"/)
@@ -268,9 +275,12 @@ test('确认导入成功后自动关闭客户 Excel 导入弹窗', () => {
 
 test('负责人通过基础平台授权目录选择用户及其有效组织', async (t) => {
   assert.match(view, /import OwnerSelector from '\.\.\/components\/OwnerSelector\.vue'/)
-  assert.equal((view.match(/<OwnerSelector/g) || []).length, 2)
-  assert.match(view, /v-if="customerEditMode" class="console-form-item full"><OwnerSelector v-model:user-id="customerForm\.owner_user_id"/)
+  // 客户编辑弹窗迁出后，父层只剩“变更负责人”弹窗一处；编辑弹窗自带负责人选择器。
+  assert.equal((view.match(/<OwnerSelector/g) || []).length, 1)
+  assert.equal((customerDialogSource.match(/<OwnerSelector/g) || []).length, 1)
+  assert.match(customerDialogSource, /v-if="editMode" class="console-form-item full"><OwnerSelector v-model:user-id="form\.owner_user_id" v-model:organization-id="form\.owner_org_id"/)
   assert.doesNotMatch(view, /v-if="!opportunityEditMode"[^>]*><OwnerSelector/)
+  assert.doesNotMatch(opportunityDialogSource, /<OwnerSelector/)
   assert.doesNotMatch(view, /负责人用户 ID<input/)
   assert.doesNotMatch(view, /真实人员目录校验尚待稳定契约/)
   assert.match(ownerSelector, /基础平台 OIDC sub/)
@@ -701,10 +711,11 @@ test('客户成交与待跟进快捷筛选使用不同卡片背景色', () => {
 })
 
 test('客户表单支持删除联系人且始终至少保留一个登记联系人', () => {
-  assert.match(view, /@click="removeCustomerContact\(index\)">删除联系人<\/button>/)
-  assert.match(view, /:disabled="customerForm\.contacts\.length <= 1"/)
-  assert.match(view, /function removeCustomerContact\(index\)[\s\S]*customerForm\.contacts\.splice\(index, 1\)/)
-  assert.match(view, /removed\?\.is_registration[\s\S]*customerForm\.contacts\[0\]\.is_registration = true/)
+  // 联系人行随阶段 3-CRM 迁入 CustomerEditorDialog.vue，增删动作与规则收在 useCustomerEditor.js。
+  assert.match(customerDialogSource, /@click="emit\('remove-contact', index\)">删除联系人<\/button>/)
+  assert.match(customerDialogSource, /:disabled="form\.contacts\.length <= 1"/)
+  assert.match(customerEditorSource, /function removeContact\(index\)[\s\S]*form\.contacts\.splice\(index, 1\)/)
+  assert.match(customerEditorSource, /removed\?\.is_registration[\s\S]*form\.contacts\[0\]\.is_registration = true/)
   assert.match(style, /\.crm-customer-contact-heading/)
 })
 
@@ -712,18 +723,18 @@ test('客户新建表单的行业使用受控下拉菜单并兼容历史值', ()
   for (const industry of ['金融', '政府', '医疗', '教育', '能源', '制造', '软件', '互联网', '通信', '物流', '交通', '建筑', '房地产', '零售', '服务', '其他']) {
     assert.match(displaySource, new RegExp(`'${industry}'`))
   }
-  assert.match(view, /<span>行业 \*<\/span><select v-model="customerForm\.industry" required>/)
-  assert.match(view, /<option value="" disabled>请选择行业<\/option>/)
-  assert.match(view, /!customerIndustryOptions\.includes\(customerForm\.industry\)[^>]*>\{\{ customerForm\.industry \}\}（历史值）/)
-  assert.doesNotMatch(view, /<span>行业 \*<\/span><input v-model="customerForm\.industry"/)
+  assert.match(customerDialogSource, /<span>行业 \*<\/span><select v-model="form\.industry" required>/)
+  assert.match(customerDialogSource, /<option value="" disabled>请选择行业<\/option>/)
+  assert.match(customerDialogSource, /!industryOptions\.includes\(form\.industry\)[^>]*>\{\{ form\.industry \}\}（历史值）/)
+  assert.doesNotMatch(customerDialogSource, /<span>行业 \*<\/span><input v-model="form\.industry"/)
 })
 
 test('新建商机从客户管理加载可见有效客户且不允许手填客户 ID', async (t) => {
   assert.match(view, /await listCustomers\(\{[\s\S]*status: 'ACTIVE',[\s\S]*page_size: 100/)
-  assert.match(view, /v-model="opportunityForm\.customer_id" required[^>]*><option value="" disabled>/)
-  assert.match(view, /v-for="customer in opportunityCustomerOptions"[^>]*:value="String\(customer\.id\)"/)
-  assert.match(view, /请先在客户管理中创建客户/)
-  assert.doesNotMatch(view, /<span>客户 ID \*<\/span><input v-model="opportunityForm\.customer_id"/)
+  assert.match(opportunityDialogSource, /v-model="form\.customer_id" required[^>]*><option value="" disabled>/)
+  assert.match(opportunityDialogSource, /v-for="customer in customerOptions"[^>]*:value="String\(customer\.id\)"/)
+  assert.match(opportunityDialogSource, /请先在客户管理中创建客户/)
+  assert.doesNotMatch(opportunityDialogSource, /<span>客户 ID \*<\/span><input v-model="form\.customer_id"/)
 
   const originalFetch = globalThis.fetch
   t.after(() => { globalThis.fetch = originalFetch })
@@ -734,15 +745,16 @@ test('新建商机从客户管理加载可见有效客户且不允许手填客�
 })
 
 test('商机类型和来源使用租户目录、结构化 ID 与安全删除', async (t) => {
-  assert.match(view, /await Promise\.all\(\[listOpportunityCatalogItems\('TYPE'\), listOpportunityCatalogItems\('SOURCE'\)\]\)/)
+  // 目录读取与勾选同步随阶段 3-CRM 收在 useOpportunityEditor.js，选项渲染在 OpportunityEditorDialog.vue。
+  assert.match(opportunityEditorSource, /Promise\.all\(\[listOpportunityCatalogItems\('TYPE'\), listOpportunityCatalogItems\('SOURCE'\)\]\)/)
   assert.doesNotMatch(view, /const opportunityTypeOptions = Object\.freeze\(/)
   assert.doesNotMatch(view, /const opportunitySourceOptions = Object\.freeze\(/)
-  assert.match(view, /v-model="opportunityTypeSelections" type="checkbox"/)
-  assert.match(view, /v-model="opportunitySourceSelections" type="checkbox"/)
-  assert.match(view, /opportunityForm\.type_ids = typeIDs/)
-  assert.match(view, /opportunityForm\.source_ids = sourceIDs/)
-  assert.match(view, /!item\.enabled && !opportunityTypeSelections\.includes/)
-  assert.match(view, /crm-opportunity-check-list/)
+  assert.match(opportunityDialogSource, /:checked="typeSelections\.includes\(Number\(item\.id\)\)"/)
+  assert.match(opportunityDialogSource, /:checked="sourceSelections\.includes\(Number\(item\.id\)\)"/)
+  assert.match(opportunityEditorSource, /form\.type_ids = typeIDs/)
+  assert.match(opportunityEditorSource, /form\.source_ids = sourceIDs/)
+  assert.match(opportunityDialogSource, /!item\.enabled && !typeSelections\.includes/)
+  assert.match(opportunityDialogSource, /crm-opportunity-check-list/)
   assert.match(view, /请至少选择一个商机类型和一个来源。/)
   assert.match(view, /canManageOpportunityCatalog/)
   assert.match(opportunityCatalogDialog, /includeDisabled: true/)
@@ -1777,8 +1789,11 @@ test('阶段告警界面展示详情、状态语义和权限关闭行为', () =>
 })
 
 test('从详情打开的编辑弹窗叠在详情之上，不被遮住', () => {
-  assert.match(view, /console-modal-backdrop" :class="\{ nested: !!selectedCustomer \}"/)
-  assert.match(view, /console-modal-backdrop" :class="\{ nested: !!selectedOpportunity \}"/)
+  // 弹窗根节点迁入子组件后，父层传 nested、子组件把它落到 .console-modal-backdrop.nested 上。
+  assert.match(view, /:nested="!!selectedCustomer"/)
+  assert.match(view, /:nested="!!selectedOpportunity"/)
+  assert.match(customerDialogSource, /class="console-modal-backdrop" :class="\{ nested \}"/)
+  assert.match(opportunityDialogSource, /class="console-modal-backdrop" :class="\{ nested \}"/)
   assert.match(style, /console-modal-backdrop\.nested \{ z-index: 80; \}/)
 })
 
