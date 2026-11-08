@@ -21,6 +21,11 @@ export function useApprovalDetail({ getApproval, previewApprovalContract, comman
   const selectedApproval = ref(null)
   let approvalDetailTicket = null
 
+/**
+ * executeApprovalCommand 提交详情快照绑定的审批命令并等待持久化结果。
+ * 参数：action为操作，payload为业务参数，close指定成功后关闭详情。
+ * 返回值：Promise<void>；失败提示由统一格式化处理。
+ */
 async function executeApprovalCommand(action, payload = {}, { close = false } = {}) {
   if (approvalCommandBusy.value) return
   if (approvalDetail.value?.state_unavailable) {
@@ -52,7 +57,13 @@ async function executeApprovalCommand(action, payload = {}, { close = false } = 
   if (!target) return
   approvalCommandBusy.value = true
   try {
-    const accepted = await commandApproval(target.id, action, { comment: approvalComment.value.trim(), ...payload })
+    const state = approvalDetail.value?.state
+    const node = state?.nodes?.[state.current_node_index]
+    const origin = requiresActiveTask ? {
+      origin_node_id: node?.node?.id,
+      origin_node_revision: node?.revision ?? 0,
+    } : {}
+    const accepted = await commandApproval(target.id, action, { comment: approvalComment.value.trim(), ...payload, ...origin })
     const durable = await waitForApprovalCommand(accepted.command_id, action, target.id)
     if (close && durable) closeApproval()
     await refreshApprovalRealtime()
@@ -144,10 +155,20 @@ async function waitForApprovalCommand(commandID, action, approvalID) {
   return false
 }
 
+/**
+ * approvalCommandIsDurable 核对动作持久化及对应审批种类的合同终态。
+ * 参数：detail为详情，commandID为受理身份，action为用户操作。
+ * 返回值：动作及必要业务状态均已落库时为true。
+ */
 function approvalCommandIsDurable(detail, commandID, action) {
   if (!detail?.actions?.some((item) => item.command_id === commandID)) return false
-  if (action === 'approve' && detail.state?.status === 'approved') return detail.contract?.status === 'active'
-  if (['reject', 'withdraw'].includes(action)) return detail.contract?.status === 'draft'
+  const isStatusChange = detail.meta?.kind === 'status_change'
+  if (action === 'approve' && detail.state?.status === 'approved') {
+    return detail.contract?.status === (isStatusChange ? detail.meta.target_status : 'active')
+  }
+  if (['reject', 'withdraw'].includes(action)) {
+    return detail.contract?.status === (isStatusChange ? detail.meta.from_status : 'draft')
+  }
   return true
 }
 
