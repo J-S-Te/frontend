@@ -3382,7 +3382,7 @@ onBeforeUnmount(() => {
         <!-- P2-2：移动抽屉必须有可见关闭按钮；桌面隐藏，打开抽屉时才能点。 -->
         <button class="pm-close-menu" type="button" aria-label="关闭菜单" @click="mobileMenuOpen = false"><ConsoleIcon name="close" /></button>
       </div>
-      <nav class="pm-nav" aria-label="项目管理导航">
+      <nav class="pm-nav" aria-label="项目管理导航" data-first-run-anchor="subsystem-nav">
         <div v-for="group in visibleNavGroups" :key="group.label" class="pm-nav-group">
           <button type="button" class="pm-nav-label" :aria-expanded="!isNavGroupCollapsed(group)" @click="toggleNavGroup(group)"><span>{{ group.label }}</span><i aria-hidden="true"></i></button>
           <div v-show="!isNavGroupCollapsed(group)" class="pm-nav-group-items">
@@ -3393,7 +3393,7 @@ onBeforeUnmount(() => {
         </div>
         <div class="pm-nav-group">
           <div class="pm-nav-label">平台能力</div>
-          <button class="pm-nav-item" type="button" @click="returnToUnifiedPortal"><ConsoleIcon name="dashboard" /><span>返回子系统门户</span></button>
+          <button class="pm-nav-item" type="button" data-first-run-anchor="subsystem-portal" @click="returnToUnifiedPortal"><ConsoleIcon name="dashboard" /><span>返回子系统门户</span></button>
         </div>
       </nav>
       <div class="pm-sidebar-user subsystem-sidebar-user">
@@ -3428,7 +3428,7 @@ onBeforeUnmount(() => {
       </header>
 
       <div class="pm-page">
-        <PageHead eyebrow="项目运营" :title="currentMeta[0]" :description="activeSection === 'notifications' ? currentMeta[1] : `${currentMeta[1]} · 数据更新于 ${lastUpdatedLabel}`">
+        <PageHead eyebrow="项目运营" data-first-run-anchor="subsystem-title" :title="currentMeta[0]" :description="activeSection === 'notifications' ? currentMeta[1] : `${currentMeta[1]} · 数据更新于 ${lastUpdatedLabel}`">
           <template #actions>
             <button v-if="activeSection !== 'notifications'" class="pm-button" :disabled="loading" @click="loadWorkspace"><ConsoleIcon name="reset" />{{ loading ? '加载中' : '刷新' }}</button>
             <button v-if="activeSection === 'projects'" class="pm-button" @click="exportProjects"><ConsoleIcon name="export" />导出</button>

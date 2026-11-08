@@ -1,30 +1,40 @@
 <script setup>
-// 平台导览浮层（全局唯一）。挂在 App.vue，只有 /portal 且会话与目录就绪时才可能展示，
-// 不在门户页面时只观察路由（用于第 ⑤ 项审计完成），不写任何新记录。
+// 多导览浮层（全局唯一）。挂在 App.vue，按 route.name 选择当前 guide：
+//   portal / platform(settings,audit) / contract / project / settlement /
+//   customer_opportunity / customer_portal / data_analysis。
+// 一次只展示一个 guide：进入新子系统时先关闭旧导览（落 skipped，不标记完成），再调度新 guide。
 //
 // 交互约定（产品最终决策）：
-//   · 就绪后延迟 600ms 启动，每 (tenant,user,版本) 只自动出现一次；
+//   · 每 (tenant,user,guide,版本) 只自动出现一次；就绪后延迟 600ms；
+//   · 子系统首次进入、会话/页面就绪、600ms；门户仍需 catalogReady（目录 settled）；
 //   · Esc / “跳过导览” 直接进入终态，没有二次确认；遮罩点击不关闭；
 //   · 层级 9000，低于确认框 10000 与 toast 12000；确认框打开时不启动也不抢键盘；
 //   · 焦点锁在气泡内、锁定页面滚动、关闭还原焦点；role=dialog + aria-modal + aria-live；
-//   · 锚点缺失的步骤跳过；门户 header 锚点缺失时整次不启动；
-//   · 窄屏（≤640px）改为底部面板，位置由 CSS 接管。
+//   · 缺锚点的步骤跳过；首步锚点（门户 header / 子系统 nav）缺失时整次不启动；
+//   · 离开该子系统 / pagehide 时 running 落为 skipped，不自动续播；
+//   · 子系统支持 `?guide=1` 强制当前 guide 重看（支持人员用），不新增常驻按钮；
+//   · 窄屏（≤640px）改为底部面板，位置由 CSS 接管；深色沿用门户 token。
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
+import { getCurrentPrincipal } from '@/modules/platform/auth/api/auth'
 import { AUTHORIZATION_REFRESHED_EVENT } from '@/modules/platform/auth/utils/authorizationRefresh'
 import { acquireBodyScrollLock, releaseBodyScrollLock } from '@/modules/shared/utils/bodyScrollLock'
 import FirstRunChecklistPanel from './FirstRunChecklistPanel.vue'
 import { firstRun } from '../composables/useFirstRun.js'
 import {
   FIRST_RUN_ANCHOR_ATTRIBUTE,
+  FIRST_RUN_PORTAL_GUIDE,
   FIRST_RUN_TOUR_STEP_DELAY_MS,
-  FIRST_RUN_TOUR_STEPS,
   FIRST_RUN_Z_INDEX,
+  firstRunGuideKeyForRouteName,
+  firstRunGuideSteps,
   resolveNextTourStepIndex,
+  shouldStartFirstRunTour,
 } from '../utils/firstRunState.js'
 import '../styles/first-run.css'
 
 const route = useRoute()
+const router = useRouter()
 const bubbleRef = ref(null)
 const primaryButtonRef = ref(null)
 const ringStyle = ref({})
@@ -40,28 +50,35 @@ let startTimer = 0
 let confirmObserver = null
 let previousFocus = null
 let tourListening = false
+let previousGuideKey = ''
+// 只允许最新一次 guide 准备流程写状态（切路由时丢弃迟到的 getCurrentPrincipal）。
+let guidePreparationToken = 0
 
-// 关闭导览的焦点兜底顺序：门户清单入口 → #main-content。自动启动的导览没有“点击
-// 来源”，previousFocus 常是 body；不兜底会把键盘用户丢回页面开头。
+// 关闭导览的焦点兜底顺序：门户清单入口 → 子系统导航 → #main-content。
+// 自动启动的导览没有“点击来源”，previousFocus 常是 body；不兜底会把键盘用户丢回页面开头。
 const TOUR_FOCUS_FALLBACK_SELECTORS = Object.freeze([
   '[data-first-run-anchor="checklist-entry"]',
   '[data-first-run-anchor="checklist"]',
+  '[data-first-run-anchor="subsystem-nav"]',
   '#main-content',
 ])
 
+const activeGuideKey = computed(() => firstRunGuideKeyForRouteName(route.name))
 const tourVisible = computed(() => firstRun.state.tourVisible)
 const tourStep = firstRun.tourStep
+const tourLabel = firstRun.tourLabel
+const tourStepCount = firstRun.tourStepCount
 const announcement = firstRun.tourAnnouncement
 
 const stepNumber = computed(() => firstRun.state.tourIndex + 1)
 const hasNextStep = computed(() => (
   tourStep.value
-    ? resolveNextTourStepIndex(firstRun.state.tourIndex + 1, anchorExists) >= 0
+    ? resolveNextTourStepIndex(firstRun.state.tourIndex + 1, anchorExists, firstRun.tourSteps.value) >= 0
     : false
 ))
 
 /**
- * 锚点查询：门户模板用 data-first-run-anchor 声明，导览不依赖组件实例。
+ * 锚点查询：模板用 data-first-run-anchor 声明，导览不依赖组件实例。
  * 不可见（尺寸为 0 或 display:none）等同于缺失，避免气泡贴在隐藏元素上。
  */
 function anchorElement(anchor) {
@@ -77,19 +94,33 @@ function anchorExists(anchor) {
   return Boolean(anchorElement(anchor))
 }
 
-/** 600ms 延迟启动：条件变化随时可以取消，绝不重复排队。 */
+/** 当前 guide 的启动前置条件（不含首步锚点；锚点在 attemptStart 里单独判定）。 */
+function startOptions() {
+  const key = activeGuideKey.value
+  if (!key) return null
+  return {
+    guideKey: key,
+    routeName: route.name,
+    sessionReady: firstRun.isGuideReady(key),
+    catalogReady: firstRun.state.catalogReady,
+    pageVisible: typeof document !== 'undefined' && document.visibilityState === 'visible',
+    confirmDialogOpen: typeof document !== 'undefined' && document.body?.dataset?.confirmDialogOpen === 'true',
+    record: firstRun.state.record,
+  }
+}
+
+/**
+ * 是否允许排队启动：当前路由有 guide、记录为 pending、会话/页面就绪、
+ * 没有确认框、也没有其它导览/清单占用。
+ * @returns {boolean} 是否允许排队。
+ */
 function schedulingAllowed() {
   if (typeof document === 'undefined') return false
-  return route.name === 'portal'
-    && firstRun.state.portalReady
-    // 目录只控制导览调度：主体已就绪但目录未 settled 时先不启动。
-    && firstRun.state.catalogReady
-    && !firstRun.state.tourVisible
-    && !firstRun.state.checklistOpen
-    // 只有 pending 会自动启动；running 已由 interruptTour 落为 skipped，绝不续播。
-    && firstRun.state.record?.tour === 'pending'
-    && document.visibilityState === 'visible'
-    && document.body?.dataset?.confirmDialogOpen !== 'true'
+  if (firstRun.state.tourVisible || firstRun.state.checklistOpen) return false
+  const options = startOptions()
+  if (!options) return false
+  // 先在“锚点未就绪”的状态下排队；600ms 后 attemptStart 再检查首步锚点。
+  return shouldStartFirstRunTour({ ...options, firstAnchorAvailable: true })
 }
 
 function clearStartTimer() {
@@ -107,13 +138,66 @@ function scheduleStart() {
 }
 
 function attemptStart() {
-  if (!schedulingAllowed()) {
-    // 条件暂时不满足（例如确认框刚打开）：等下一次触发，不自行轮询。
-    return
+  if (!schedulingAllowed()) return
+  const key = activeGuideKey.value
+  const options = startOptions()
+  if (!options) return
+  // 首步锚点缺失时整次不启动：门户 header / 子系统 nav 必须真实存在。
+  // 记录保持 pending，不写入终态；下一次触发（路由/主体/可见性变化）会重新排队。
+  if (!anchorExists(firstRunGuideSteps(key)[0].anchor)) return
+  if (!shouldStartFirstRunTour({ ...options, firstAnchorAvailable: true })) return
+  firstRun.beginTour({ guideKey: key, hasAnchor: anchorExists })
+}
+
+/**
+ * 子系统 `?guide=1`：强制当前 guide 重看（支持人员用），然后从 URL 移除该参数，
+ * 避免刷新后再次重看。不新增常驻按钮；门户仍走用户面板的“重新查看平台导览”。
+ * @param {string} guideKey 当前 guide。
+ * @returns {Promise<boolean>} 是否触发了重看。
+ */
+async function applyForcedGuide(guideKey) {
+  if (!guideKey || guideKey === FIRST_RUN_PORTAL_GUIDE) return false
+  if (String(route.query?.guide ?? '') !== '1') return false
+  if (!firstRun.state.record) return false
+  const restarted = firstRun.restartTour(guideKey)
+  // 清掉 guide 参数；失败只影响 URL 是否干净，不影响已经写入的 pending。
+  const query = { ...route.query }
+  delete query.guide
+  try {
+    await router.replace({ path: route.path, query, hash: route.hash })
+  } catch {
+    // 路由守卫拒绝 replace 时保留原 URL，本次重看仍然生效。
   }
-  // header 锚点缺失时整次不启动，记录保持 pending，不写入终态。
-  if (!anchorExists(FIRST_RUN_TOUR_STEPS[0].anchor)) return
-  firstRun.beginTour({ hasAnchor: anchorExists })
+  return restarted
+}
+
+/**
+ * 为当前 guide 准备主体与记录：
+ *   · 门户由 SubsystemPortalView 调用 markPortalReady / setCatalogReady；
+ *   · 子系统在路由守卫确认会话后，用平台主体确定 tenant/user 作用域并确保记录存在；
+ *   · 平台会话不可用时无法确定作用域，宁可不展示也不写错记录。
+ * @param {string} guideKey 当前 guide。
+ */
+async function prepareGuide(guideKey) {
+  if (!guideKey) return
+  const token = ++guidePreparationToken
+  if (guideKey !== FIRST_RUN_PORTAL_GUIDE) {
+    if (!firstRun.state.scope) {
+      try {
+        const principal = await getCurrentPrincipal()
+        if (token !== guidePreparationToken || activeGuideKey.value !== guideKey) return
+        firstRun.markGuideReady(principal)
+      } catch {
+        return
+      }
+    } else {
+      firstRun.markGuideReady()
+    }
+    if (token !== guidePreparationToken || activeGuideKey.value !== guideKey) return
+    await applyForcedGuide(guideKey)
+    if (token !== guidePreparationToken || activeGuideKey.value !== guideKey) return
+  }
+  scheduleStart()
 }
 
 /**
@@ -144,7 +228,7 @@ function positionTour() {
     return
   }
   const rect = element.getBoundingClientRect()
-  // 高亮环与锚点同框：第 1 步锚点是整行页头，宽度等于视口宽，任何外扩描边都会在
+  // 高亮环与锚点同框：第 1 步门户锚点是整行页头，宽度等于视口宽，任何外扩描边都会在
   // 左右被视口裁掉；环本身用内描边（first-run.css），这里再把 left/top 收到 0 以上、
   // right/bottom 收进视口，保证 1366 / 1920 都不裁切。
   const viewportWidth = window.innerWidth
@@ -243,6 +327,8 @@ function onVisibilityChange() {
 function onAuthorizationRefreshed(event) {
   const principal = event?.detail?.principal
   firstRun.bindPrincipal(principal)
+  const key = activeGuideKey.value
+  if (key && key !== FIRST_RUN_PORTAL_GUIDE && firstRun.state.scope) firstRun.markGuideReady()
   scheduleStart()
 }
 
@@ -253,7 +339,7 @@ function syncNarrowScreen(event) {
 
 /**
  * 关闭导览时还原焦点：优先启动前元素；它不可连接、就是 body 或已禁用/隐藏时，
- * 依次退到门户清单入口与 #main-content，绝不把焦点留在已卸载的气泡或 body 上。
+ * 依次退到门户清单入口、子系统导航与 #main-content，绝不把焦点留在已卸载的气泡或 body 上。
  * @returns {Element|null} 实际焦点落点；没有可聚焦目标时返回 null。
  */
 function restoreFocusAfterTour() {
@@ -320,17 +406,35 @@ watch(
     route.name,
     firstRun.state.portalReady,
     firstRun.state.catalogReady,
-    firstRun.state.record?.tour,
-    firstRun.state.record?.step,
+    firstRun.state.record,
     firstRun.state.checklistOpen,
+    firstRun.state.tourVisible,
   ],
-  () => scheduleStart(),
+  () => {
+    if (!firstRun.state.tourVisible) scheduleStart()
+  },
 )
 
-// 离开 /portal 时把正在展示的导览落为 skipped：不自动续播，重看入口仍可重开。
-watch(() => route.name, (name) => {
-  if (name !== 'portal') firstRun.interruptTour()
+// guide 切换：进入新子系统先关旧导览（running → skipped，不标记 done），再准备新 guide。
+// 同一 guide 内切 section 不会触发这里的关闭逻辑。
+watch(activeGuideKey, (next) => {
+  const previous = previousGuideKey
+  previousGuideKey = next
+  if (previous && previous !== next) firstRun.interruptTour(previous)
+  if (!next) {
+    // 登录页 / 错误页等未登记路由：不自动跨页，直接中断当前导览。
+    firstRun.interruptTour()
+    return
+  }
+  void prepareGuide(next)
 }, { immediate: true })
+
+// 同一 guide 内通过 `?guide=1` 触发重看（路由名不变，上面的 watcher 不会重复执行）。
+watch(() => route.query?.guide, () => {
+  const key = activeGuideKey.value
+  if (!key) return
+  if (String(route.query?.guide ?? '') === '1') void prepareGuide(key)
+})
 
 // pagehide 覆盖刷新、关闭标签页、前进后退缓存等不经过路由 watcher 的离开方式。
 function onPageHide() {
@@ -353,8 +457,8 @@ onMounted(() => {
     })
     confirmObserver.observe(document.body, { attributes: true, attributeFilter: ['data-confirm-dialog-open'] })
   }
-  // 首次挂载可能已经停在 /audit：直接访问时是否补记由 App.vue 的观察器与
-  // authorization-refreshed 事件共同决定，这里只负责门户导览的调度。
+  // 首次挂载可能已经停在某个子系统：把主体/记录准备好后立即排队。
+  if (activeGuideKey.value) void prepareGuide(activeGuideKey.value)
   scheduleStart()
 })
 
@@ -379,7 +483,7 @@ onBeforeUnmount(() => {
         :style="{ zIndex: FIRST_RUN_Z_INDEX }"
         data-first-run-layer="tour"
       >
-        <!-- 遮罩点击是受控的空操作：不会关闭导览，也不会把点击透传给门户页面。 -->
+        <!-- 遮罩点击是受控的空操作：不会关闭导览，也不会把点击透传给页面。 -->
         <div class="first-run-tour__mask" aria-hidden="true" @click.stop></div>
         <div class="first-run-tour__ring" :style="ringStyle" aria-hidden="true"></div>
 
@@ -396,8 +500,8 @@ onBeforeUnmount(() => {
           @click.stop
         >
           <p class="first-run-tour__progress">
-            <span>平台导览</span>
-            <span>{{ stepNumber }} / {{ FIRST_RUN_TOUR_STEPS.length }}</span>
+            <span>{{ tourLabel }}</span>
+            <span>{{ stepNumber }} / {{ tourStepCount }}</span>
           </p>
           <h2 :id="titleId" class="first-run-tour__title">{{ tourStep.title }}</h2>
           <p :id="descriptionId" class="first-run-tour__description">{{ tourStep.description }}</p>

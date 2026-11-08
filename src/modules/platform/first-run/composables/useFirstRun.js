@@ -1,24 +1,29 @@
-// 平台导览 + 上手清单的响应式状态容器（全局单例 + 可注入工厂）。
+// 多导览（门户 + 各子系统）+ 上手清单的响应式状态容器（全局单例 + 可注入工厂）。
 //
 // 职责边界：
-//   · 只服务 /portal；App.vue 挂载的 GuideHost 与门户页面共用同一个单例；
+//   · 全局单例挂在 App.vue；门户页面、各子系统壳层与 GuideHost 共用同一份记录；
 //   · 所有持久化都经过 utils/firstRunState.js，主体不明时不读不写；
-//   · 事件写入只发生在真实动作之后（门户把事件转发到这里），本模块不代替用户操作；
+//   · 事件写入只发生在真实动作之后（门户/审计路由把事件转发到这里），本模块不代替用户操作；
+//   · 每个 guide 的 tour/step 独立；Host 按 route.name 选择当前 guide，一次只展示一个；
 //   · 第 ④ 项用一次只读 GET /api/v1/users?page=1&page_size=1 探测。后端 /users 的
 //     total 已排除初始化超管，因此 total >= 1 即表示租户内已有业务账号；探测失败
 //     保持未完成并允许重试；
 //   · 探测请求按 scope + generation 隔离：切主体/重置后迟到的响应直接丢弃；
-//   · 多标签页通过 storage 事件合并“任务 OR、导览终态单调”的记录，写前先重读最新值。
+//   · 多标签页通过 storage 事件合并“任务 OR、每个 guide 终态单调”的记录，写前先重读最新值。
 
 import { computed, reactive } from 'vue'
 import { checkPermission } from '../../auth/utils/permissions.js'
 import { formatUserError } from '../../../shared/utils/userError.js'
 import {
   FIRST_RUN_AUDIT_PERMISSION,
-  FIRST_RUN_TOUR_STEPS,
+  FIRST_RUN_GUIDES,
+  FIRST_RUN_PORTAL_GUIDE,
   createFirstRunRecord,
   ensureFirstRunRecord,
   firstRunChecklistSummary,
+  firstRunGuideLabel,
+  firstRunGuideState,
+  firstRunGuideSteps,
   firstRunScopeOf,
   firstRunStorageKey,
   isFirstRunTaskVisible,
@@ -47,6 +52,10 @@ async function defaultLoadUsers(query) {
   return listUsers(query)
 }
 
+function normalizeGuideKey(guideKey) {
+  return FIRST_RUN_GUIDES[guideKey] ? guideKey : FIRST_RUN_PORTAL_GUIDE
+}
+
 /**
  * 创建隔离的 first-run 状态容器。
  * @param {Object} [options] 依赖注入。
@@ -66,13 +75,15 @@ export function createFirstRunStore({
     principal: null,
     scope: '',
     record: null,
-    // 主体/记录已就绪，清单可打开；不代表目录已加载。
+    // 主体/记录已就绪，门户清单可打开；不代表目录已加载。
     portalReady: false,
-    // 目录 settled 后为 true，仅用于控制导览调度。
+    // 目录 settled 后为 true，仅用于控制门户导览调度。
     catalogReady: false,
     checklistOpen: false,
     tourVisible: false,
     tourIndex: -1,
+    // 当前正在展示的 guide；切换子系统时 Host 先关旧导览再开新导览。
+    tourGuide: '',
     routePath: '',
     // idle | checking | incomplete | complete | error
     probeStatus: 'idle',
@@ -105,7 +116,7 @@ export function createFirstRunStore({
   }
 
   /**
-   * 写前重读：返回“内存 + 存储最新值”的合并结果。任务 OR、终态单调，
+   * 写前重读：返回“内存 + 存储最新值”的合并结果。任务 OR、每个 guide 终态单调，
    * 避免旧标签页用内存快照覆盖另一标签页刚写入的完成状态。
    * @returns {Object|null} 合并后的记录。
    */
@@ -126,6 +137,7 @@ export function createFirstRunStore({
   function clearTourUi() {
     state.tourVisible = false
     state.tourIndex = -1
+    state.tourGuide = ''
   }
 
   function clearScopeState() {
@@ -166,7 +178,7 @@ export function createFirstRunStore({
     state.principal = next
     const scope = firstRunScopeOf(next)
     if (!scope) {
-      // 登出/主体失效等同于离开门户：正在展示的导览先落 skipped，再清内存。
+      // 登出/主体失效等同于离开当前导览：正在展示的导览先落 skipped，再清内存。
       interruptTour()
       clearScopeState()
       return false
@@ -192,6 +204,35 @@ export function createFirstRunStore({
   }
 
   /**
+   * 确保当前主体已有记录（首次创建或迁移旧 v1）。主体不明时返回 false 且不写盘。
+   * 子系统/平台控制台在路由守卫确认会话后调用，门户也可以直接复用。
+   * @param {Object} [principal] 当前主体；缺省沿用已绑定主体。
+   * @returns {boolean} 记录是否可用。
+   */
+  function markGuideReady(principal = undefined) {
+    if (principal !== undefined) bindPrincipal(principal)
+    if (!state.scope) return false
+    // 已存在当前 v2 键时不再写盘；只有首次创建或刚读到旧 v1 记录（内存有值、
+    // 当前键尚未落盘）时走一次 ensure，完成迁移写回并清理旧键。
+    const store = currentStorage()
+    const key = firstRunStorageKey(state.scope)
+    let persisted = false
+    if (store && key) {
+      try {
+        persisted = store.getItem(key) !== null
+      } catch {
+        persisted = false
+      }
+    }
+    if (state.record && persisted) return true
+    const stored = ensureFirstRunRecord(state.scope, currentStorage())
+    state.record = stored
+      ? mergeFirstRunRecords(state.record || stored, stored)
+      : (state.record || createFirstRunRecord())
+    return true
+  }
+
+  /**
    * 门户“主体已确定”时调用：确保记录存在（首次创建），允许打开上手清单。
    * 目录是否就绪不再阻塞建记录，只通过 setCatalogReady 控制导览调度。
    * @param {Object} [principal] 当前主体；缺省沿用已绑定主体。
@@ -210,7 +251,7 @@ export function createFirstRunStore({
   }
 
   /**
-   * 目录 settled 状态：只控制导览调度，不影响清单入口。
+   * 目录 settled 状态：只控制门户导览调度，不影响清单入口。
    * @param {boolean} ready 目录是否就绪。
    * @returns {boolean} 生效后的状态。
    */
@@ -220,7 +261,18 @@ export function createFirstRunStore({
   }
 
   /**
-   * 离开门户：若导览仍在运行则落为 skipped（不自动续播），并收起浮层/停止调度。
+   * 指定 guide 是否具备启动条件。门户要求 portalReady（清单入口可用），
+   * 子系统/平台控制台在记录存在后即可（会话已由路由守卫确认）。
+   * @param {string} guideKey guide 键。
+   * @returns {boolean} 是否就绪。
+   */
+  function isGuideReady(guideKey) {
+    if (!state.scope || !state.record) return false
+    return normalizeGuideKey(guideKey) === FIRST_RUN_PORTAL_GUIDE ? state.portalReady : true
+  }
+
+  /**
+   * 离开门户/子系统：若导览仍在运行则落为 skipped（不自动续播），并收起浮层/停止调度。
    * 记录中的清单进度保持不变。
    */
   function markPortalUnready() {
@@ -311,21 +363,27 @@ export function createFirstRunStore({
   }
 
   /**
-   * 启动导览。只有 pending 会自动启动；header 锚点缺失时整次不启动。
+   * 启动指定 guide 的导览。只有 pending 会自动启动；首步锚点缺失时整次不启动。
+   * 同一时刻只允许一个导览可见。
    * @param {Object} options 选项。
+   * @param {string} [options.guideKey] guide 键，缺省为门户。
    * @param {(anchor:string)=>boolean} options.hasAnchor 锚点探测。
    * @returns {boolean} 是否真正展示。
    */
-  function beginTour({ hasAnchor } = {}) {
-    if (!state.record || !state.portalReady || state.tourVisible) return false
+  function beginTour({ guideKey = FIRST_RUN_PORTAL_GUIDE, hasAnchor } = {}) {
+    const key = normalizeGuideKey(guideKey)
+    if (!state.record || !state.scope || state.tourVisible) return false
+    if (!isGuideReady(key)) return false
     const base = baseRecord()
     if (!base) return false
     state.record = base
-    if (!isFirstRunTourOpen(base)) return false
-    if (typeof hasAnchor !== 'function' || !hasAnchor(FIRST_RUN_TOUR_STEPS[0].anchor)) return false
-    const index = resolveNextTourStepIndex(0, hasAnchor)
+    if (!isFirstRunTourOpen(base, key)) return false
+    const steps = firstRunGuideSteps(key)
+    if (typeof hasAnchor !== 'function' || !hasAnchor(steps[0].anchor)) return false
+    const index = resolveNextTourStepIndex(0, hasAnchor, steps)
     if (index < 0) return false
-    commit(withTourStarted(base, index))
+    commit(withTourStarted(base, index, key))
+    state.tourGuide = key
     state.tourIndex = index
     state.tourVisible = true
     return true
@@ -334,9 +392,11 @@ export function createFirstRunStore({
   function setTourIndex(index) {
     const base = baseRecord()
     if (!base) return
-    const next = withTourStarted(base, index)
-    commit(next)
-    state.tourIndex = index
+    const key = normalizeGuideKey(state.tourGuide)
+    const steps = firstRunGuideSteps(key)
+    const safeIndex = Math.max(0, Math.min(Number(index) || 0, steps.length - 1))
+    commit(withTourStarted(base, safeIndex, key))
+    state.tourIndex = safeIndex
   }
 
   /**
@@ -346,7 +406,12 @@ export function createFirstRunStore({
    */
   function advanceTour({ hasAnchor } = {}) {
     if (!state.tourVisible || !state.record) return
-    const index = resolveNextTourStepIndex(state.tourIndex + 1, hasAnchor || (() => false))
+    const key = normalizeGuideKey(state.tourGuide)
+    const index = resolveNextTourStepIndex(
+      state.tourIndex + 1,
+      hasAnchor || (() => false),
+      firstRunGuideSteps(key),
+    )
     if (index < 0) {
       finishTour('done')
       return
@@ -357,60 +422,76 @@ export function createFirstRunStore({
   /** 上一步：向前跳过缺锚点步骤；没有可回退步骤时保持当前步。 */
   function retreatTour({ hasAnchor } = {}) {
     if (!state.tourVisible || !state.record) return
-    const index = resolvePreviousTourStepIndex(state.tourIndex - 1, hasAnchor || (() => false))
+    const key = normalizeGuideKey(state.tourGuide)
+    const index = resolvePreviousTourStepIndex(
+      state.tourIndex - 1,
+      hasAnchor || (() => false),
+      firstRunGuideSteps(key),
+    )
     if (index < 0) return
     setTourIndex(index)
   }
 
   /**
-   * 导览到达终态（Esc / 跳过 / 完成）。终态不会被二次确认，也不会自动再次出现。
+   * 指定 guide 的导览到达终态（Esc / 跳过 / 完成）。终态不会被二次确认，
+   * 也不会自动再次出现。缺省作用于当前展示的 guide。
    * @param {'done'|'skipped'} outcome 终态类型。
+   * @param {string} [guideKey] guide 键。
    */
-  function finishTour(outcome) {
+  function finishTour(outcome, guideKey = state.tourGuide || FIRST_RUN_PORTAL_GUIDE) {
     if (!state.record) return
+    const key = normalizeGuideKey(guideKey)
     const base = baseRecord()
     if (!base) return
-    const next = withTourFinished(base, outcome, nowIso())
+    const next = withTourFinished(base, outcome, nowIso(), key)
     if (next === base) {
       state.record = base
-      clearTourUi()
+      if (!state.tourGuide || state.tourGuide === key) clearTourUi()
       return
     }
     commit(next)
-    clearTourUi()
+    if (!state.tourGuide || state.tourGuide === key) clearTourUi()
   }
 
   /**
-   * 导览被中断（pagehide / 离开 /portal）：running 落为 skipped，不自动续播；
-   * 用户仍可通过“重新查看平台导览”显式重开。
+   * 导览被中断（pagehide / 离开该子系统 / 切换子系统 / 登出换号）：running 落为 skipped，
+   * 不自动续播；用户仍可显式重看。缺省作用于当前展示的 guide。
+   * @param {string} [guideKey] guide 键。
    * @returns {boolean} 是否写入终态。
    */
-  function interruptTour() {
-    if (!state.record || state.record.tour !== 'running') return false
+  function interruptTour(guideKey = state.tourGuide || FIRST_RUN_PORTAL_GUIDE) {
+    if (!state.record) return false
+    const key = normalizeGuideKey(guideKey)
     const base = baseRecord()
     if (!base) return false
-    if (base.tour !== 'running') {
+    if (firstRunGuideState(base, key).tour !== 'running') {
       state.record = base
-      clearTourUi()
+      if (!state.tourGuide || state.tourGuide === key) clearTourUi()
       return false
     }
-    commit(withTourFinished(base, 'skipped', nowIso()))
-    clearTourUi()
+    commit(withTourFinished(base, 'skipped', nowIso(), key))
+    if (!state.tourGuide || state.tourGuide === key) clearTourUi()
     return true
   }
 
-  /** 用户面板“重新查看平台导览”：显式回到 pending，由 GuideHost 重新调度展示。 */
-  function restartTour() {
+  /**
+   * 显式重看指定 guide：回到 pending，由 GuideHost 重新调度展示。
+   * 门户用户面板传 'portal'；子系统由 `?guide=1` 对当前 guide 调用。
+   * @param {string} [guideKey] guide 键，缺省为门户。
+   * @returns {boolean} 是否写入。
+   */
+  function restartTour(guideKey = FIRST_RUN_PORTAL_GUIDE) {
     if (!state.scope) return false
+    const key = normalizeGuideKey(guideKey)
     const base = baseRecord()
     if (!base) return false
-    commit(withTourRestarted(base))
+    commit(withTourRestarted(base, key))
     state.checklistOpen = false
-    clearTourUi()
+    if (!state.tourGuide || state.tourGuide === key) clearTourUi()
     return true
   }
 
-  /** 用户面板“重置上手清单”：清空任务进度与完成时间，保留导览记录。 */
+  /** 用户面板“重置上手清单”：清空任务进度与完成时间，保留所有导览记录。 */
   function resetChecklist() {
     if (!state.scope) return false
     const base = baseRecord()
@@ -425,7 +506,7 @@ export function createFirstRunStore({
   }
 
   /**
-   * 当前作用域键对应的 storage 事件：重读并按“任务 OR、终态单调”合并。
+   * 当前作用域键对应的 storage 事件：重读并按“任务 OR、每个 guide 终态单调”合并。
    * @param {StorageEvent|{key:string|null}} event storage 事件。
    * @returns {boolean} 是否更新了内存记录。
    */
@@ -458,13 +539,16 @@ export function createFirstRunStore({
     ...task,
     done: state.record?.tasks?.[task.key] === true,
   })))
+  const tourSteps = computed(() => firstRunGuideSteps(state.tourGuide || FIRST_RUN_PORTAL_GUIDE))
   const tourStep = computed(() => (
-    state.tourIndex >= 0 ? FIRST_RUN_TOUR_STEPS[state.tourIndex] || null : null
+    state.tourIndex >= 0 ? tourSteps.value[state.tourIndex] || null : null
   ))
+  const tourLabel = computed(() => firstRunGuideLabel(state.tourGuide || FIRST_RUN_PORTAL_GUIDE))
+  const tourStepCount = computed(() => tourSteps.value.length)
   const tourAnnouncement = computed(() => {
     const step = tourStep.value
     if (!step || !state.tourVisible) return ''
-    return `平台导览第 ${state.tourIndex + 1} 步，共 ${FIRST_RUN_TOUR_STEPS.length} 步：${step.title}`
+    return `${tourLabel.value}第 ${state.tourIndex + 1} 步，共 ${tourStepCount.value} 步：${step.title}`
   })
 
   // 真实浏览器里的全局单例监听跨标签页 storage；测试注入 storage / node 环境默认不监听。
@@ -482,11 +566,18 @@ export function createFirstRunStore({
     state,
     checklistSummary,
     checklistItems,
+    tourSteps,
     tourStep,
+    tourLabel,
+    tourStepCount,
     tourAnnouncement,
     bindPrincipal,
+    markGuideReady,
     markPortalReady,
     setCatalogReady,
+    isGuideReady,
+    guideState: (guideKey) => firstRunGuideState(state.record, normalizeGuideKey(guideKey)),
+    isGuidePending: (guideKey) => isFirstRunTourOpen(state.record, normalizeGuideKey(guideKey)),
     markPortalUnready,
     openChecklist,
     closeChecklist,

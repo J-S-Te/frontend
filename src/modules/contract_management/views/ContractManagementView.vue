@@ -2818,7 +2818,7 @@ onBeforeUnmount(() => {
         <span><strong>机构合同管理</strong><small>CONTRACT HUB</small></span>
         <button class="contract-mobile-close" type="button" aria-label="关闭菜单" @click="mobileMenuOpen = false"><ConsoleIcon name="close" /></button>
       </div>
-      <nav class="contract-nav" aria-label="合同管理导航">
+      <nav class="contract-nav" aria-label="合同管理导航" data-first-run-anchor="subsystem-nav">
         <section v-for="group in navGroups" :key="group.label">
           <p>{{ group.label }}</p>
           <button v-for="item in group.items" :key="item.key" type="button" :class="{ active: activeSection === item.key }" :aria-current="activeSection === item.key ? 'page' : undefined" @click="navigate(item.key)">
@@ -2828,7 +2828,7 @@ onBeforeUnmount(() => {
         <section>
           <p>平台能力</p>
           <button v-if="can('all')" type="button" @click="navigatePlatform('settings')"><ConsoleIcon name="settings" /><span>系统设置</span><em>平台</em></button>
-          <button type="button" @click="returnToUnifiedPortal"><ConsoleIcon name="dashboard" /><span>返回子系统门户</span></button>
+          <button type="button" data-first-run-anchor="subsystem-portal" @click="returnToUnifiedPortal"><ConsoleIcon name="dashboard" /><span>返回子系统门户</span></button>
         </section>
       </nav>
       <div class="contract-sidebar-user subsystem-sidebar-user"><span class="contract-avatar">{{ currentUserInitial }}</span><span><strong :title="currentLoginUsername">{{ currentLoginUsername }}</strong><small :title="currentRoleLabel">{{ currentRoleLabel }}</small></span><button type="button" :disabled="isLoggingOut" aria-label="退出应用系统" @click="logoutSystem"><ConsoleIcon name="logout" /></button></div>
@@ -2873,7 +2873,7 @@ onBeforeUnmount(() => {
           loading-title="正在加载合同数据…"
           @retry="loadBusinessData"
         />
-        <header class="contract-page-head">
+        <header class="contract-page-head" data-first-run-anchor="subsystem-title">
           <div><h1>{{ pageMeta.title }}</h1><p>{{ pageMeta.description }}</p></div>
           <div class="contract-page-actions">
             <button v-if="['contracts', 'reports'].includes(activeSection)" class="contract-button secondary" type="button" :disabled="exportBusy" :aria-busy="exportBusy ? 'true' : 'false'" @click="exportContracts"><ConsoleIcon name="export" />{{ exportBusy ? '正在导出…' : '导出' }}</button>
