@@ -3,7 +3,6 @@ import { loginUsername } from "@/modules/shared/loginUsername.mjs"
 import OperationToast from '@/modules/shared/components/OperationToast.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { formatUserError } from '../../shared/utils/userError.js'
-import { createFormSnapshot, hasUnsavedChanges } from '../../shared/utils/unsavedChanges.js'
 import { useConfirmDialog } from '../../shared/composables/useConfirmDialog.js'
 import { createRequestScope } from '../../platform/shared/composables/requestScope.js'
 import { useBeforeUnloadGuard } from '../../shared/composables/useBeforeUnloadGuard.js'
@@ -23,7 +22,6 @@ import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import { useDictionaryOptions } from '@/modules/platform/dictionaries/composables/useDictionaryOptions.js'
 import ContractDocumentPreview from '@/modules/contract_management/components/ContractDocumentPreview.vue'
 import ContractPDFPreview from '@/modules/contract_management/components/ContractPDFPreview.vue'
-import ContractImportPanel from '@/modules/contract_management/components/ContractImportPanel.vue'
 import LocalContractSourcePicker from '@/modules/contract_management/components/LocalContractSourcePicker.vue'
 import LocalContractCatalogPanel from '@/modules/contract_management/components/LocalContractCatalogPanel.vue'
 import { validateRecipientPhoneNumber } from '@/modules/contract_management/utils/recipientPhone.js'
@@ -40,7 +38,7 @@ import {
 import { formatBusinessDate } from '../../shared/utils/businessTime.js'
 import { cloneNormalizedSigningRecord, isNormalizedSigningRecord } from '@/modules/contract_management/utils/signingRecord.js'
 import ContractReportsPanel from '@/modules/contract_management/components/ContractReportsPanel.vue'
-import ContractNumberRulePanel from '@/modules/contract_management/components/ContractNumberRulePanel.vue'
+import AsyncPanel from '@/modules/shared/components/AsyncPanel.vue'
 import {
   commandApproval,
   ContractAuthError,
@@ -100,7 +98,7 @@ import {
   contractRole,
   hasContractPermission,
 } from '@/modules/shared/authz/sys004'
-import { buildTemplateValues } from '@/modules/contract_management/utils/currentUserPrefill'
+import ContractDraftFields from '@/modules/contract_management/components/ContractDraftFields.vue'
 import {
   approvalActionLabels,
   approvalKindLabel,
@@ -111,7 +109,6 @@ import {
   approvalStatusLabels,
   emptyNewContract,
   emptyRuleForm,
-  emptyServiceItem,
   fallbackContractTypeOptions,
   fallbackServiceTypeOptions,
   fallbackSystemLevelOptions,
@@ -127,7 +124,8 @@ import ContractNotificationPanel from '@/modules/contract_management/components/
 import ContractIntegrationOutboxPanel from '@/modules/contract_management/components/ContractIntegrationOutboxPanel.vue'
 import { useSigningLedger } from '@/modules/contract_management/composables/useSigningLedger'
 import { useApprovalDetail } from '@/modules/contract_management/composables/useApprovalDetail'
-import { canEditContractDraft, hydrateContractDraft, saveContractDraft } from '@/modules/contract_management/utils/contractDraft'
+import { useContractDraftEditor } from '@/modules/contract_management/composables/useContractDraftEditor'
+import { canEditContractDraft, saveContractDraft } from '@/modules/contract_management/utils/contractDraft'
 import { normalizePaymentTerms, paymentAmountMinor } from '@/modules/contract_management/utils/paymentTerms'
 import { contractSystemLevels, externalContractTypes, isContractDOCXFile, validateContractSourceFile, validateContractForm, localContractReferencePayload } from '@/modules/contract_management/utils/contractPayload'
 import { approvalAmountInput, approvalAmountMinor, copyRuleExpression, ruleExpressionSummary } from '@/modules/contract_management/utils/approvalRule'
@@ -138,6 +136,15 @@ import { closeSubsystemTabOrFallback } from '@/modules/shared/utils/returnToPort
 // 避免留下未使用的 import；恢复客户查询分区时需同时恢复本行。
 // import { copyTextToClipboard } from '@/modules/shared/utils/clipboard.js'
 import '@/modules/contract_management/styles/contract-management.css'
+
+// 用途：仅在编号规则区域实际挂载时加载面板资源。
+// 参数：无。
+// 返回值：编号规则组件模块；加载失败由共享异步边界提供重试。
+const loadContractNumberRulePanel = () => import('../components/ContractNumberRulePanel.vue')
+// 用途：仅在「合同批量导入」分区实际挂载时加载大批量导入面板资源。
+// 参数：无。
+// 返回值：导入面板组件模块；加载失败由共享异步边界（AsyncPanel）提供重试，不伪装成业务空数据。
+const loadContractImportPanel = () => import('../components/ContractImportPanel.vue')
 
 const route = useRoute()
 const router = useRouter()
@@ -408,36 +415,51 @@ const templatePreviewError = ref('')
 const templatePreviewRef = ref(null)
 const ruleSaving = ref(false)
 const editingRuleId = ref('')
-const contractCreationMode = ref('template')
-const externalContractFile = ref(null)
-const externalContractFileError = ref('')
-const externalContractFileInputKey = ref(0)
-const contractCreating = ref(false)
-const editingContract = ref(null)
-const draftEditLoading = ref(false)
-const draftEditError = ref('')
-const draftErrorElement = ref(null)
-const draftEditConflict = ref(false)
-const newContract = ref(emptyNewContract())
-const draftInitialSnapshot = ref('')
-const draftInitialHadFile = ref(false)
 const { dialog: confirmDialog, askConfirm, accept: acceptConfirm, cancel: cancelConfirm } = useConfirmDialog()
 // 会话作用域持久化：以合同会话主体（tenant_id + identity_id，getContractSession
 // 经 normalizeAuthorizationSession 提供）隔离操作结果与操作记录；主体未就绪时仅内存态。
 const contractPrincipal = computed(() => session.value)
 const { result: contractResult, save: saveContractResult, clear: clearContractResult } = usePersistentResult('uip:last-contract-creation', { principal: contractPrincipal })
 const createDialogElement = ref(null)
-const createDialogOpen = ref(false)
 const { push: pushOperationRecord } = useOperationInbox({ principal: contractPrincipal })
+const draftErrorElement = ref(null)
 
-function markDraftClean() {
-  draftInitialSnapshot.value = createFormSnapshot(newContract.value)
-  draftInitialHadFile.value = Boolean(externalContractFile.value)
+// 草稿编辑器的状态与编辑动作由组合式函数持有；页面只保留提交入口、关闭确认、错误定位和目录读取。
+// 注入项一次性声明：route/session/contractTemplates 为只读上下文，其余为页面动作（提交与目录读取仍在页面）。
+const {
+  newContract, contractCreationMode, externalContractFile, externalContractFileError, externalContractFileInputKey,
+  editingContract, contractCreating, draftEditLoading, draftEditError, draftEditConflict, createDialogOpen,
+  selectedContractTemplate, canAddServiceItem, paymentPlanError,
+  markDraftClean, draftHasUnsavedChanges, replaceDraftForm,
+  addPaymentTerm, removePaymentTerm, canAddSystemRow, addSystemRow, removeSystemRow, addServiceItem, removeServiceItem,
+  openNewContract, editContractDraft, closeDraftEditorNow, selectContractCreationMode, selectContractTemplate,
+  syncManagedTemplateValues,
+} = useContractDraftEditor({
+  route,
+  session,
+  contractTemplates,
+  termsIdentical,
+  closeContract,
+  resetCRMDirectoryConnection,
+  resetTemplatePreview,
+  invalidateDetectionCategoryRequest,
+  loadDetectionCategoryOptions,
+  showToast,
+})
+
+// 用途：清空已生成的正文与预览错误，编辑动作切换表单时不得保留旧正文。
+// 参数：无。
+// 返回值：无；在途预览序列由 invalidateTemplatePreview 单独管理。
+function resetTemplatePreview() {
+  templatePreviewHTML.value = ''
+  templatePreviewError.value = ''
 }
 
-function draftHasUnsavedChanges() {
-  return hasUnsavedChanges(draftInitialSnapshot.value, newContract.value) ||
-    Boolean(externalContractFile.value) !== draftInitialHadFile.value
+// 用途：使在途的检测类别读取失效，切换创建方式后迟到的旧目录不得回填。
+// 参数：无。
+// 返回值：无；下一次读取重新取号。
+function invalidateDetectionCategoryRequest() {
+  detectionCategoryRequestID += 1
 }
 
 useBeforeUnloadGuard(computed(() => createDialogOpen.value && !contractCreating.value && draftHasUnsavedChanges()))
@@ -453,18 +475,6 @@ onBeforeRouteLeave(async () => {
     danger: true,
   })
 })
-const paymentPlanError = computed(() => {
-  try { normalizePaymentTerms(newContract.value.payment_terms, newContract.value.amount, newContract.value.currency); return '' }
-  catch (error) { return formatUserError(error, { fallback: '付款计划未通过校验，请核对金额、分期与日期。' }) }
-})
-function addPaymentTerm() {
-  if (newContract.value.payment_terms.length >= 100) return
-  const used = new Set(newContract.value.payment_terms.map((term) => Number(term.installment_no)))
-  let next = 1
-  while (used.has(next)) next += 1
-  newContract.value.payment_terms.push({ installment_no: next, due_date: '', amount: '' })
-}
-
 const { options: contractTypeItems } = useDictionaryOptions('CONTRACT_TYPE', { fallback: toDictionaryFallback(fallbackContractTypeOptions) })
 const { options: serviceTypeItems } = useDictionaryOptions('CONTRACT_SERVICE_TYPE', { fallback: toDictionaryFallback(fallbackServiceTypeOptions) })
 const { options: systemLevelItems } = useDictionaryOptions('CONTRACT_SYSTEM_LEVEL', { fallback: toDictionaryFallback(fallbackSystemLevelOptions) })
@@ -492,7 +502,6 @@ const detectionCategoryOptions = ref([])
 const detectionCategoryLoading = ref(false)
 const detectionCategoryError = ref('')
 let detectionCategoryRequestID = 0
-const canAddServiceItem = computed(() => newContract.value.service_items.length < 20 && Boolean(newContract.value.service_items.at(-1)?.service_type))
 const isExternalContractMode = computed(() => contractCreationMode.value === 'external')
 const canSaveNewContract = computed(() => {
   if (contractCreating.value) return false
@@ -530,7 +539,6 @@ const isAdmin = computed(() => {
 const navGroups = computed(() => (isAdmin.value ? adminNavGroupDefinitions : userNavGroupDefinitions)
   .map((group) => ({ ...group, items: group.items.filter((item) => canAccessContractSection(session.value, item.key)) }))
   .filter((group) => group.items.length))
-const selectedContractTemplate = computed(() => contractTemplates.value.find((item) => item.id === newContract.value.template_id) || null)
 const editableContractTemplateFields = computed(() => (selectedContractTemplate.value?.fields || []).filter((field) => !isSystemContractNumberField(field)))
 
 const keyword = ref('')
@@ -1928,68 +1936,6 @@ async function removeTemplate(item) {
   }
 }
 
-function openNewContract() {
-  termsIdentical.value = false
-  editingContract.value = null
-  draftEditError.value = ''
-  draftEditConflict.value = false
-  newContract.value = emptyNewContract()
-  // 从商机/客户等外部入口进入时，只带入用户明确提供的对象标识和名称；
-  // 金额、服务项、模板和日期仍由用户在合同中核对填写，不静默猜测。
-  const contextCustomerId = String(route.query.customer_id || route.query.customerId || '').trim()
-  const contextOpportunityId = String(route.query.opportunity_id || route.query.opportunityId || '').trim()
-  if (contextCustomerId) newContract.value.customer_id = contextCustomerId
-  if (contextCustomerId && route.query.customer_name) newContract.value.customer_name = String(route.query.customer_name)
-  if (contextOpportunityId) newContract.value.opportunity_id = contextOpportunityId
-  if (contextOpportunityId && route.query.opportunity_name) newContract.value.opportunity_name = String(route.query.opportunity_name)
-  contractCreationMode.value = 'template'
-  externalContractFile.value = null
-  externalContractFileError.value = ''
-  externalContractFileInputKey.value += 1
-  templatePreviewHTML.value = ''
-  templatePreviewError.value = ''
-  createDialogOpen.value = true
-  resetCRMDirectoryConnection()
-  markDraftClean()
-}
-
-async function editContractDraft(contract) {
-  if (draftEditLoading.value || contractCreating.value) return
-  draftEditLoading.value = true
-  try {
-    const raw = await getContract(contract.recordId || contract.id)
-    const form = hydrateContractDraft(raw)
-    editingContract.value = raw
-    newContract.value = form
-    draftEditError.value = ''
-    draftEditConflict.value = false
-    contractCreationMode.value = raw.template_id ? 'template' : 'external'
-    externalContractFile.value = null
-    externalContractFileError.value = ''
-    templatePreviewHTML.value = ''
-    templatePreviewError.value = ''
-    closeContract()
-    createDialogOpen.value = true
-    resetCRMDirectoryConnection()
-    markDraftClean()
-    if (!raw.template_id) void loadDetectionCategoryOptions()
-    else if (!selectedContractTemplate.value) draftEditError.value = '原合同模板已不可用，不能重新生成正文，请联系管理员恢复原模板。'
-  } catch (error) {
-    showToast(formatUserError(error, { fallback: '读取草稿失败' }))
-  } finally {
-    draftEditLoading.value = false
-  }
-}
-
-function closeDraftEditorNow() {
-  createDialogOpen.value = false
-  editingContract.value = null
-  draftEditError.value = ''
-  draftEditConflict.value = false
-  draftInitialSnapshot.value = ''
-  draftInitialHadFile.value = false
-}
-
 async function closeDraftEditor() {
   if (contractCreating.value) return
   if (draftHasUnsavedChanges()) {
@@ -2003,26 +1949,6 @@ async function closeDraftEditor() {
     if (!ok) return
   }
   closeDraftEditorNow()
-}
-
-function selectContractCreationMode(mode) {
-  if (editingContract.value) return
-  detectionCategoryRequestID += 1
-  contractCreationMode.value = mode
-  templatePreviewHTML.value = ''
-  templatePreviewError.value = ''
-  if (mode === 'template') {
-    externalContractFile.value = null
-    externalContractFileError.value = ''
-    externalContractFileInputKey.value += 1
-    return
-  }
-  newContract.value.template_id = ''
-  newContract.value.template_values = {}
-  for (const serviceItem of newContract.value.service_items) {
-    if (!serviceItem.batch.trim()) serviceItem.batch = '第一批次'
-  }
-  void loadDetectionCategoryOptions()
 }
 
 // 用途：读取合同当前实际使用的项目类别，明确本地来源不请求未售项目系统。
@@ -2258,68 +2184,36 @@ function clearOpportunity() {
   newContract.value.opportunity_name = ''
 }
 
-function addServiceItem() {
-  if (!canAddServiceItem.value) return
-  newContract.value.service_items.push(emptyServiceItem())
-}
-
-function removeServiceItem(index) {
-  if (newContract.value.service_items.length === 1) {
-    newContract.value.service_items[0] = emptyServiceItem()
-    return
-  }
-  newContract.value.service_items.splice(index, 1)
-}
-
-function canAddSystemRow(serviceItem) {
-  const last = serviceItem.systems.at(-1)
-  return serviceItem.systems.length < 15 && (!last || Boolean(last.name.trim() && last.level))
-}
-
-function addSystemRow(serviceItem) {
-  if (!canAddSystemRow(serviceItem)) return
-  serviceItem.systems.push({ name: '', level: '' })
-}
-
-function removeSystemRow(serviceItem, index) {
-  serviceItem.systems.splice(index, 1)
-}
-
-function selectContractTemplate() {
-  newContract.value.template_values = buildTemplateValues(
-    selectedContractTemplate.value?.fields,
-    session.value,
-  )
-  templatePreviewHTML.value = ''
-  templatePreviewError.value = ''
-}
-
-function syncManagedTemplateValues() {
-  newContract.value.template_values = synchronizeContractTemplateValues(
-    selectedContractTemplate.value?.fields, newContract.value.template_values, newContract.value.amount,
-  )
-}
-
 watch(createDialogOpen, (open) => {
   // 弹窗关闭即失效在途登录轮询，避免登录标签页完成后回填已关闭的表单。
-  if (!open) resetCRMDirectoryConnection()
+  if (!open) {
+    resetCRMDirectoryConnection()
+    invalidateTemplatePreview()
+  }
 })
 watch(() => [newContract.value.amount, newContract.value.template_id], syncManagedTemplateValues)
-watch(newContract, () => {
-  // 表单变化立即让在途预览失效，旧响应不得回填到新表单。
+// 正文接口仅接收模板编号和替换值；服务项等其它字段不影响本次预览。
+watch(() => [newContract.value.template_id, JSON.stringify(newContract.value.template_values)],
+  invalidateTemplatePreview, { flush: 'sync' })
+
+// 用途：使旧正文及在途预览立即失效，关闭弹窗后也不能回填旧正文。
+// 参数：无。
+// 返回值：无；保留表单和草稿内容。
+function invalidateTemplatePreview() {
   templatePreviewSequence += 1
   templatePreviewing.value = false
   templatePreviewHTML.value = ''
-}, { deep: true })
+}
 
+// 用途：校验并生成当前模板替换值对应的受控正文预览。
+// 参数：无；使用当前合同表单。
+// 返回值：预览完成；错误显示在表单中，过期响应丢弃。
 async function previewNewContract() {
   if (!selectedContractTemplate.value) {
     templatePreviewError.value = '请先选择合同模板。'
     return
   }
   syncManagedTemplateValues()
-  // 让由本次同步触发的深度 watch 先冲刷，否则它会立即让刚发起的预览失效。
-  await nextTick()
   const missingField = (selectedContractTemplate.value.fields || []).find((field) => !isSystemContractNumberField(field) && !String(newContract.value.template_values[field.name] ?? '').trim() && !field.default)
   if (missingField) {
     templatePreviewError.value = `请先填写“${missingField.label}”。`
@@ -2886,7 +2780,8 @@ onBeforeUnmount(() => {
 
         <p v-if="contractSourceCapabilityError" class="contract-field-error" role="alert">{{ contractSourceCapabilityError }} <button class="contract-button secondary" @click="loadContractSourceCapabilities">重试来源能力</button></p>
         <LocalContractCatalogPanel v-if="localCatalogOpen && can('contract.catalog.manage')" :permissions="session?.permissions || []" />
-        <ContractImportPanel v-if="activeSection === 'imports' && (can('contract.import.preview') || can('contract.import.commit') || can('contract.import.approve') || can('contract.import.release'))"
+        <AsyncPanel v-if="activeSection === 'imports' && (can('contract.import.preview') || can('contract.import.commit') || can('contract.import.approve') || can('contract.import.release'))"
+          :loader="loadContractImportPanel"
           :enabled="contractSourceCapabilities.batch_enabled === true"
           :pdf-enabled="contractSourceCapabilities.pdf_enabled === true"
           :source-capabilities="contractSourceCapabilities"
@@ -2964,7 +2859,7 @@ onBeforeUnmount(() => {
           <!-- 编号规则与模板同属配置管理：进入本区域才挂载并读取，不占首屏请求。
                可编辑性绑定专用高权权限码 contract.number_rule.manage：规则是全系统单行配置，
                合同 admin 角色不能凭 isAdmin 拿到写入能力，非高权用户仍可只读查看。 -->
-          <ContractNumberRulePanel v-if="isAdmin || can('contract.read')" :can-manage="can('contract.number_rule.manage')" @notify="showToast" />
+          <AsyncPanel v-if="isAdmin || can('contract.read')" :loader="loadContractNumberRulePanel" :can-manage="can('contract.number_rule.manage')" @notify="showToast" />
         </template>
 
         <template v-else-if="activeSection === 'approvals'">
@@ -3066,50 +2961,62 @@ onBeforeUnmount(() => {
       <form ref="createDialogElement" class="contract-detail-modal contract-create-modal" role="dialog" aria-modal="true" aria-label="合同草稿" @keydown.esc.prevent="closeDraftEditor" @submit.prevent="submitNewContract($event)">
         <header><div><span class="contract-badge info">合同草稿</span><h2>{{ editingContract ? '编辑合同草稿' : '新建合同' }}</h2><p>{{ editingContract ? '修改现有草稿；创建人、合同来源及数据范围保持不变' : '可使用标准模板生成，也可上传不依赖模板的外部合同 DOCX' }}</p></div><button type="button" aria-label="关闭" :disabled="contractCreating" @click="closeDraftEditor"><ConsoleIcon name="close" /></button></header>
         <section>
-          <div class="contract-form-grid">
-            <p class="contract-form-wide contract-form-required-hint">带 <strong>*</strong> 的为必填项；输入框按字段类型限制长度、格式和数值范围。</p>
-            <p v-if="editingContract && isExternalContractMode" class="contract-info-banner contract-form-wide">编辑结构化信息时保留原外部 DOCX，不替换合同文件；正文金额等条款如需改变，应创建与新文件一致的合同。</p>
-            <p v-if="draftEditError" ref="draftErrorElement" tabindex="-1" class="contract-session-error contract-form-wide" role="alert">{{ draftEditError }} <button v-if="draftEditConflict" type="button" :disabled="contractCreating || draftEditLoading" @click="editContractDraft(editingContract)">重新载入草稿（放弃未保存修改）</button></p>
-            <div v-if="crmConnectionRequired && !crmConnecting && !customerPickerOpen" class="contract-session-error contract-form-wide" role="status"><p>{{ crmConnectionMessage }}</p><button class="contract-button secondary" type="button" @click="connectCRM">连接 CRM</button></div>
-            <div v-if="!editingContract" class="contract-form-wide contract-creation-mode" role="radiogroup" aria-label="合同创建方式"><button type="button" :class="{ active: contractCreationMode === 'template' }" role="radio" :aria-checked="contractCreationMode === 'template'" @click="selectContractCreationMode('template')"><strong>使用合同模板</strong><span>选择标准模板并填写模板字段</span></button><button type="button" :class="{ active: contractCreationMode === 'external' }" role="radio" :aria-checked="contractCreationMode === 'external'" @click="selectContractCreationMode('external')"><strong>上传外部合同</strong><span>上传未签署 DOCX，并补全结构化字段</span></button></div>
-            <label v-if="contractCreationMode === 'template'" class="contract-form-wide contract-template-first"><span>第一步：选择合同模板</span><select v-model="newContract.template_id" :disabled="Boolean(editingContract)" required @change="selectContractTemplate"><option value="" disabled>请选择用于新建合同的模板</option><option v-for="item in contractTemplates" :key="item.id" :value="item.id">{{ item.name }}（{{ item.fields?.length || 0 }} 个字段）</option></select><small>模板将生成合同正文，合同编号在审批通过后自动生成。</small></label>
-            <label v-else-if="!editingContract" class="contract-form-wide contract-external-file"><span>第一步：上传外部合同原件</span><input :key="externalContractFileInputKey" required type="file" :accept="contractSourceCapabilities.pdf_enabled ? '.docx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document' : '.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document'" @change="selectExternalContractFile" /><small v-if="externalContractFile">已选择：{{ externalContractFile.name }}（{{ (externalContractFile.size / 1024 / 1024).toFixed(2) }}MB）</small><small v-else>{{ contractSourceCapabilities.pdf_enabled ? '支持 DOCX（≤10MB）或 PDF（≤20MB）；PDF原件不改写，字段需另行填写。' : '支持 DOCX（≤10MB）；当前服务端未开放PDF源文件上传。' }}</small><small v-if="externalContractFileError" class="contract-field-error" role="alert">{{ externalContractFileError }}</small></label>
-            <template v-if="selectedContractTemplate || isExternalContractMode">
-              <LocalContractSourcePicker class="contract-form-wide" v-model="newContract" :capabilities="contractFormSourceCapabilities" :disabled="contractCreating" />
-              <label v-if="!localContractCounterparty && (isExternalContractMode || newContract.payment_terms.length || newContract.customer_id)" :class="{ 'is-required': isExternalContractMode || newContract.payment_terms.length > 0 }"><span>CRM 客户</span><div class="contract-opportunity-control"><button class="contract-opportunity-select" type="button" @click="openCustomerPicker">{{ newContract.customer_name || '点击选择权限范围内的客户' }}</button><button v-if="newContract.customer_id" class="contract-opportunity-clear" type="button" aria-label="清除 CRM 客户" @click="clearCustomer">×</button></div><small>外部合同及付款计划须关联 CRM 客户，不能只输入客户名称</small></label>
-              <label v-if="!localContractCounterparty"><span>关联商机（选填）</span><div class="contract-opportunity-control"><select v-model="newContract.opportunity_id" :disabled="isExternalContractMode && !newContract.customer_id" @focus="ensureOpportunityOptions" @change="selectOpportunityById"><option value="">{{ opportunityLoading ? '正在读取商机…' : (opportunityOptions.length ? '不关联商机' : (isExternalContractMode && !newContract.customer_id ? '请先选择 CRM 客户' : '暂无可关联商机')) }}</option><option v-for="item in opportunityOptions" :key="item.id || item.opportunity_id" :value="String(item.id || item.opportunity_id || '')">{{ item.name || item.title || item.opportunity_name || '未命名商机' }}（{{ item.opportunity_no || item.code || '—' }}）</option></select><button v-if="newContract.opportunity_id" class="contract-opportunity-clear" type="button" aria-label="清除关联商机" @click="clearOpportunity">×</button></div><small>合同编号将在审批通过后自动生成</small></label>
-              <label><span>合同名称</span><input v-model="newContract.title" required maxlength="255" autocomplete="off" placeholder="请输入合同名称" /></label>
-              <label><span>合同负责人</span><input :value="editingContract ? editingContract.owner_display_name : currentUserLabel" readonly aria-readonly="true" /><small>{{ editingContract ? '保留原合同创建人，不随编辑人变更' : '已根据当前登录用户自动填入' }}</small></label>
-              <label><span>合同类型</span><select v-model="newContract.contract_type" required><option value="" disabled>请选择合同类型</option><option v-for="item in availableContractTypeOptions" :key="item" :value="item">{{ item }}</option></select></label>
-              <div class="contract-form-wide contract-service-items"><div class="contract-section-title"><div><h3>服务项</h3><p>外部合同的场所、批次和检测类别必须完整，合同生效后将用于项目拆解；最多 20 个服务项。</p></div><button class="contract-text-button" type="button" :disabled="!canAddServiceItem" @click="addServiceItem">＋ 增加服务项</button></div><p v-if="isExternalContractMode && detectionCategoryLoading" class="contract-service-directory-state">正在读取项目管理检测类别…</p><p v-else-if="isExternalContractMode && detectionCategoryError" class="contract-field-error" role="alert">{{ detectionCategoryError }} <button type="button" @click="loadDetectionCategoryOptions">重新加载</button></p><article v-for="(serviceItem, serviceIndex) in newContract.service_items" :key="serviceIndex" class="contract-service-item"><header><strong>服务项 {{ serviceIndex + 1 }}</strong><button type="button" :aria-label="`删除服务项 ${serviceIndex + 1}`" @click="removeServiceItem(serviceIndex)">×</button></header><label><span>服务类型</span><select v-model="serviceItem.service_type" required><option value="" disabled>请选择服务类型</option><option v-for="item in serviceTypeOptions" :key="item" :value="item">{{ item }}</option></select></label><label><span>服务名称</span><input v-model="serviceItem.name" maxlength="255" placeholder="默认使用服务类型" /></label><label><span>实施场所</span><input v-model="serviceItem.site" :required="isExternalContractMode" maxlength="255" placeholder="例如：上海总部" /></label><label><span>实施批次</span><input v-model="serviceItem.batch" :required="isExternalContractMode" maxlength="120" placeholder="默认：第一批次" /></label><label><span>检测类别</span><select v-if="isExternalContractMode && !localContractCategories" v-model="serviceItem.category" required :disabled="detectionCategoryLoading || !detectionCategoryOptions.length"><option value="" disabled>{{ detectionCategoryLoading ? '正在加载检测类别' : (detectionCategoryError ? '目录加载失败，请点击上方重新加载' : '请选择检测类别') }}</option><option v-for="item in detectionCategoryOptions" :key="item.category" :value="item.category">{{ item.category }}</option></select><input v-else v-model="serviceItem.category" :readonly="localContractCategories" maxlength="120" :placeholder="localContractCategories ? '请在本地目录中选择类别' : '默认使用服务类型'" /></label><label><span>检测方式</span><select v-model="serviceItem.test_mode" required><option value="STANDARD">常规检测</option><option value="PENETRATION">渗透测试</option></select></label><label><span>体系 / 能力要求</span><input v-model="serviceItem.requirement" maxlength="1000" placeholder="例如：等保三级" /></label><section class="contract-system-information"><div class="contract-section-title"><div><h3>系统信息（选填）</h3><p>每个系统将形成可独立实施的服务来源，最多 15 个。</p></div><button class="contract-text-button" type="button" :disabled="!canAddSystemRow(serviceItem)" @click="addSystemRow(serviceItem)">＋ 增加系统信息</button></div><p v-if="!serviceItem.systems.length" class="contract-service-empty">尚未增加系统信息</p><div v-for="(system, systemIndex) in serviceItem.systems" :key="systemIndex" class="contract-system-row"><label><span>系统名称</span><input v-model="system.name" required maxlength="255" placeholder="请输入系统名称" /></label><label><span>系统等级</span><select v-model="system.level" required><option value="">请选择系统等级</option><option v-for="level in systemLevelOptions" :key="level" :value="level">{{ level }}</option></select></label><button type="button" aria-label="删除系统信息" @click="removeSystemRow(serviceItem, systemIndex)">×</button></div></section></article></div>
-              <label><span>合同金额</span><input v-model="newContract.amount" :readonly="Boolean(editingContract && isExternalContractMode)" required type="number" :min="isExternalContractMode ? 0.01 : 0" max="90071992547409.91" step="0.01" placeholder="0.00" /><small v-if="editingContract && isExternalContractMode">原件保持不变，金额不能单独修改</small></label>
-              <label><span>币种</span><input v-model="newContract.currency" :readonly="Boolean(editingContract && isExternalContractMode)" required maxlength="3" pattern="[A-Za-z]{3}" autocomplete="off" /></label>
-              <section class="contract-form-wide contract-payment-plan">
-                <div class="contract-section-title"><div><h3>付款计划</h3><p>分期使用合同币种，合计须等于合同金额；审批开始后冻结。旧合同未维护的分期不会自动补造。</p></div><button class="contract-text-button" type="button" :disabled="newContract.payment_terms.length >= 100" @click="addPaymentTerm">＋ 增加分期</button></div>
-                <p v-if="!newContract.payment_terms.length">尚未维护付款计划。保存后可在草稿中补齐；没有分期的合同不会生成结算应收计划。</p>
-                <div v-for="(term, index) in newContract.payment_terms" :key="index" class="contract-payment-term-row">
-                  <label><span>分期号</span><input v-model.number="term.installment_no" required type="number" min="1" max="100" step="1" /></label>
-                  <label><span>到期日</span><input v-model="term.due_date" required type="date" min="1000-01-01" max="9999-12-31" /></label>
-                  <label><span>金额（{{ newContract.currency }}）</span><input v-model="term.amount" required type="text" inputmode="decimal" maxlength="20" pattern="[0-9]{1,15}([.][0-9]{1,2})?" placeholder="0.00" /></label>
-                  <button class="contract-text-button" type="button" :aria-label="`删除第${term.installment_no}期`" @click="newContract.payment_terms.splice(index, 1)">删除</button>
-                </div>
-                <p v-if="paymentPlanError" class="contract-field-error" role="alert">{{ paymentPlanError }}</p>
-              </section>
-              <label><span>开始日期（选填）</span><input v-model="newContract.start_date" type="date" min="0001-01-01" max="9999-12-31" /></label>
-              <label><span>结束日期（选填）</span><input v-model="newContract.end_date" type="date" :min="newContract.start_date || '0001-01-01'" max="9999-12-31" /></label>
-              <label><span>客户名称</span><input v-model="newContract.customer_name" required maxlength="255" :readonly="isExternalContractMode || localContractCounterparty" :aria-readonly="isExternalContractMode || localContractCounterparty ? 'true' : undefined" :placeholder="localContractCounterparty ? '请从本地交易对方目录选择' : isExternalContractMode ? '请从 CRM 客户目录选择' : '请输入客户名称'" /></label>
-              <label><span>客户地址</span><input v-model="newContract.customer_address" maxlength="500" placeholder="请输入客户地址" /></label>
-              <label><span>客户联系人</span><input v-model="newContract.customer_contact" maxlength="128" placeholder="请输入客户联系人" /></label>
-              <label><span>客户联系电话</span><input v-model="newContract.customer_phone" type="tel" inputmode="tel" maxlength="64" placeholder="请输入客户联系电话" /></label>
+          <ContractDraftFields
+            :new-contract="newContract"
+            :contract-creation-mode="contractCreationMode"
+            :editing-contract="editingContract"
+            :contract-templates="contractTemplates"
+            :selected-contract-template="selectedContractTemplate"
+            :editable-contract-template-fields="editableContractTemplateFields"
+            :available-contract-type-options="availableContractTypeOptions"
+            :service-type-options="serviceTypeOptions"
+            :system-level-options="systemLevelOptions"
+            :current-user-label="currentUserLabel"
+            :external-contract-file="externalContractFile"
+            :external-contract-file-error="externalContractFileError"
+            :external-contract-file-input-key="externalContractFileInputKey"
+            :contract-source-capabilities="contractSourceCapabilities"
+            :contract-form-source-capabilities="contractFormSourceCapabilities"
+            :local-contract-counterparty="localContractCounterparty"
+            :local-contract-categories="localContractCategories"
+            :can-add-service-item="canAddServiceItem"
+            :can-add-system-row="canAddSystemRow"
+            :detection-category-options="detectionCategoryOptions"
+            :detection-category-loading="detectionCategoryLoading"
+            :detection-category-error="detectionCategoryError"
+            :opportunity-options="opportunityOptions"
+            :opportunity-loading="opportunityLoading"
+            :payment-plan-error="paymentPlanError"
+            :is-admin="isAdmin"
+            :template-previewing="templatePreviewing"
+            :template-preview-error="templatePreviewError"
+            :is-external-contract-mode="isExternalContractMode"
+            :busy="contractCreating"
+            @select-mode="selectContractCreationMode"
+            @template-change="selectContractTemplate"
+            @select-file="selectExternalContractFile"
+            @replace-form="replaceDraftForm"
+            @open-customer-picker="openCustomerPicker"
+            @clear-customer="clearCustomer"
+            @focus-opportunity="ensureOpportunityOptions"
+            @opportunity-change="selectOpportunityById"
+            @clear-opportunity="clearOpportunity"
+            @add-service-item="addServiceItem"
+            @remove-service-item="removeServiceItem"
+            @add-system-row="addSystemRow"
+            @remove-system-row="removeSystemRow"
+            @add-payment-term="addPaymentTerm"
+            @remove-payment-term="removePaymentTerm"
+            @preview-template="previewNewContract"
+            @reload-detection-categories="loadDetectionCategoryOptions"
+          >
+            <template #status>
+              <p class="contract-form-wide contract-form-required-hint">带 <strong>*</strong> 的为必填项；输入框按字段类型限制长度、格式和数值范围。</p>
+              <p v-if="editingContract && isExternalContractMode" class="contract-info-banner contract-form-wide">编辑结构化信息时保留原外部 DOCX，不替换合同文件；正文金额等条款如需改变，应创建与新文件一致的合同。</p>
+              <p v-if="draftEditError" ref="draftErrorElement" tabindex="-1" class="contract-session-error contract-form-wide" role="alert">{{ draftEditError }} <button v-if="draftEditConflict" type="button" :disabled="contractCreating || draftEditLoading" @click="editContractDraft(editingContract)">重新载入草稿（放弃未保存修改）</button></p>
+              <div v-if="crmConnectionRequired && !crmConnecting && !customerPickerOpen" class="contract-session-error contract-form-wide" role="status"><p>{{ crmConnectionMessage }}</p><button class="contract-button secondary" type="button" @click="connectCRM">连接 CRM</button></div>
             </template>
-          </div>
-          <div v-if="selectedContractTemplate" class="contract-generated-form">
-            <div class="contract-section-title"><div><h3>填写模板字段</h3><p>{{ selectedContractTemplate.original_filename }} · 姓名、账号、邮箱等当前用户已有信息会自动填入空白字段</p></div><button class="contract-button secondary small" type="button" :disabled="templatePreviewing" @click="previewNewContract">{{ templatePreviewing ? '正在生成预览…' : '预览合同' }}</button></div>
-            <p v-if="selectedContractTemplate.fields?.some(isSystemContractNumberField)" class="contract-info-banner">正文合同编号由系统在审批通过后自动生成，不允许手工填写。</p>
-            <div class="contract-template-field-grid"><label v-for="field in editableContractTemplateFields" :key="field.name" :title="field.locked && !isAdmin ? '此项已由管理员预设' : undefined"><span>{{ field.label }}</span><input v-model="newContract.template_values[field.name]" required maxlength="2000" autocomplete="off" :readonly="isContractAmountField(field) || (field.locked && !isAdmin)" :class="{ 'is-admin-configured': field.locked && !isAdmin }" :title="field.locked && !isAdmin ? '此项已由管理员预设' : undefined" :placeholder="field.default ? `默认：${field.default}` : `请输入${field.label}`" /><small v-if="isContractAmountField(field)">自动使用上方合同金额；金额大写由服务端生成。</small><small v-else-if="field.locked && !isAdmin">此项已由管理员预设</small></label></div>
-            <p v-if="templatePreviewError" class="contract-template-preview-error" role="alert">{{ templatePreviewError }}</p>
-          </div>
-          <p v-else-if="contractCreationMode === 'template'" class="contract-info-banner"><ConsoleIcon name="info" />请先选择合同模板，再填写合同、服务项和系统信息。</p>
+          </ContractDraftFields>
           <ContractDocumentPreview v-if="templatePreviewHTML" ref="templatePreviewRef" closable :html="templatePreviewHTML" @close="templatePreviewHTML = ''" />
         </section>
         <footer><button class="contract-button secondary" type="button" :disabled="contractCreating" @click="closeDraftEditor">取消</button><button class="contract-button primary" type="submit" :disabled="!canSaveNewContract"><ConsoleIcon name="save" />{{ contractCreating ? '正在保存…' : (editingContract ? '保存为草稿' : (isExternalContractMode ? '上传并保存合同' : '生成并保存合同')) }}</button><button v-if="editingContract" class="contract-button primary" type="submit" data-action="approval" :disabled="!canSaveNewContract || !can('contract.create')">保存并发起审批</button></footer>

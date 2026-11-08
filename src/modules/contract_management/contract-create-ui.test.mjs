@@ -2,9 +2,14 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFile } from 'node:fs/promises'
 
-const source = await readFile(new URL('./views/ContractManagementView.vue', import.meta.url), 'utf8')
+const viewSource = await readFile(new URL('./views/ContractManagementView.vue', import.meta.url), 'utf8')
 const displaySource = await readFile(new URL('./utils/contractDisplay.js', import.meta.url), 'utf8')
 const api = await readFile(new URL('./api/contract.js', import.meta.url), 'utf8')
+// 草稿字段区已拆到 ContractDraftFields.vue、编辑状态与动作拆到 useContractDraftEditor.js：
+// 断言仍针对同一份真实实现，只是跨文件查找，字段 DOM 与文案没有放宽。
+const draftFieldsSource = await readFile(new URL('./components/ContractDraftFields.vue', import.meta.url), 'utf8')
+const draftEditorSource = await readFile(new URL('./composables/useContractDraftEditor.js', import.meta.url), 'utf8')
+const source = [viewSource, draftFieldsSource, draftEditorSource].join('\n')
 
 test('new contracts select an optional permission-scoped opportunity and have no manual number', () => {
   assert.match(source, /关联商机（选填）/)
@@ -82,5 +87,7 @@ test('new contract dialog probes the CRM session silently and connects automatic
   assert.match(source, /openContractCRMLogin\(\{ force: crmForceLogin\.value \}\)/)
   assert.match(source, /waitForContractCRMDirectorySession/)
   assert.match(source, /if \(crmSessionState\.value === 'required' && !crmConnecting\.value && startCRMDirectoryConnection/)
-  assert.match(source, /@focus="ensureOpportunityOptions"/)
+  // 拆分后：子组件只发出明确事件，商机目录加载与自动登录仍由页面处理。
+  assert.match(draftFieldsSource, /@focus="\$emit\('focus-opportunity'\)"/)
+  assert.match(viewSource, /@focus-opportunity="ensureOpportunityOptions"/)
 })

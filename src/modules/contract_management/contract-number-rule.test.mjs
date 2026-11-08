@@ -3,6 +3,9 @@ import test from 'node:test'
 import { readFile } from 'node:fs/promises'
 
 const viewSource = await readFile(new URL('./views/ContractManagementView.vue', import.meta.url), 'utf8')
+// 草稿字段区拆到 ContractDraftFields.vue：编号承诺文案随字段区迁移，断言同时覆盖页面与子组件。
+const draftFieldsSource = await readFile(new URL('./components/ContractDraftFields.vue', import.meta.url), 'utf8')
+const draftUISource = [viewSource, draftFieldsSource].join('\n')
 const panelSource = await readFile(new URL('./components/ContractNumberRulePanel.vue', import.meta.url), 'utf8')
 const apiSource = await readFile(new URL('./api/contract.js', import.meta.url), 'utf8')
 const utilSource = await readFile(new URL('./utils/contractNumberRule.js', import.meta.url), 'utf8')
@@ -70,9 +73,9 @@ test('设置面板展示实时预览、年度用量与保存结果提示', () =>
 })
 
 test('设置面板接入合同模板区域，进入该区域才按需加载', () => {
-  assert.match(viewSource, /import ContractNumberRulePanel from '@\/modules\/contract_management\/components\/ContractNumberRulePanel\.vue'/)
+  assert.match(viewSource, /import\('\.\.\/components\/ContractNumberRulePanel\.vue'\)/)
   const templatesSection = viewSource.match(/<template v-else-if="activeSection === 'templates'">[\s\S]*?<\/template>/)?.[0] || ''
-  assert.match(templatesSection, /<ContractNumberRulePanel v-if="isAdmin \|\| can\('contract\.read'\)" :can-manage="can\('contract\.number_rule\.manage'\)" @notify="showToast" \/>/)
+  assert.match(templatesSection, /<AsyncPanel v-if="isAdmin \|\| can\('contract\.read'\)" :loader="loadContractNumberRulePanel" :can-manage="can\('contract\.number_rule\.manage'\)" @notify="showToast" \/>/)
   assert.match(templatesSection, /系统合同编号规则/)
   // 组件用 v-if 挂载而非首屏常驻，读取发生在进入模板区域之后。
   assert.match(panelSource, /onMounted\(loadRule\)/)
@@ -98,8 +101,8 @@ test('模板编号格式改为只读展示，并说明实际编号由系统级�
   // 只读不改存储：保存模板时仍完整回传既有格式，避免清空历史配置。
   assert.match(viewSource, /number_format: templateEditForm\.value\.number_format\.trim\(\)/)
   assert.match(viewSource, /历史编号格式：\{\{ item\.number_format \|\| 'HT-\{YYYYMMDD\}-\{ID8\}' \}\}（不参与新编号）/)
-  // 「审批通过后自动生成编号」的既有承诺不能被新面板冲淡。
-  assert.match(viewSource, /合同编号将在审批通过后自动生成/)
+  // 「审批通过后自动生成编号」的既有承诺不能被新面板冲淡（草稿字段区与页面两处口径）。
+  assert.match(draftUISource, /合同编号将在审批通过后自动生成/)
 })
 
 test('前后缀字符集提示与本地拦截：非法字符不发请求，也不叠加后端 422 提示', () => {

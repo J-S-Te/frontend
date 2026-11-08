@@ -76,11 +76,17 @@ test('invalid version or malformed save response cannot initiate approval', asyn
 })
 
 test('draft UI provides back-to-edit, version-aware save/submit, conflict reload and preserved source', async () => {
-  const source = await readFile(new URL('./views/ContractManagementView.vue', import.meta.url), 'utf8')
+  // 草稿编辑动作拆到 useContractDraftEditor.js、字段区拆到 ContractDraftFields.vue：
+  // 行为断言跨文件查找，编辑/提交链路与冲突重载都没有放宽。
+  const viewSource = await readFile(new URL('./views/ContractManagementView.vue', import.meta.url), 'utf8')
+  const draftFieldsSource = await readFile(new URL('./components/ContractDraftFields.vue', import.meta.url), 'utf8')
+  const draftEditorSource = await readFile(new URL('./composables/useContractDraftEditor.js', import.meta.url), 'utf8')
+  const source = [viewSource, draftFieldsSource, draftEditorSource].join('\n')
   assert.match(source, /v-if="selectedContract.canEditDraft"[\s\S]*返回上一步编辑/)
-  assert.match(source, /getContract\(contract.recordId \|\| contract.id\)/)
-  assert.match(source, /hydrateContractDraft\(raw\)/)
-  assert.match(source, /:disabled="Boolean\(editingContract\)" required @change="selectContractTemplate"/)
+  assert.match(draftEditorSource, /getContract\(contract.recordId \|\| contract.id\)/)
+  assert.match(draftEditorSource, /hydrateContractDraft\(raw\)/)
+  assert.match(draftFieldsSource, /:disabled="Boolean\(editingContract\)" required @change="\$emit\('template-change'\)"/)
+  assert.match(viewSource, /@template-change="selectContractTemplate"/)
   assert.match(source, /保存为草稿/)
   assert.match(source, /data-action="approval"/)
   assert.match(source, /重新载入草稿（放弃未保存修改）/)
