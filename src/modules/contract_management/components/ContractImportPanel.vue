@@ -1357,9 +1357,9 @@ function downloadImportErrorReport() {
     const csv = contractImportErrorsCsv(batch.value?.items || [], error.value, { issueLabels, fieldLabel: importFieldLabel })
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
     url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
+    const link = globalThis.document.createElement('a')
     link.href = url; link.download = '合同导入错误.csv'
-    document.body.appendChild(link); link.click(); link.remove()
+    globalThis.document.body.appendChild(link); link.click(); link.remove()
   } catch (failure) { error.value = failure?.message || '错误报告生成失败，请稍后重试。' }
   finally { if (url) URL.revokeObjectURL(url) }
 }

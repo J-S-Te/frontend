@@ -890,6 +890,38 @@ test('预检问题与批次错误提供下载错误报告入口，无问题时�
   assert.equal(panel.state.importErrorReportRows.value.length, 2)
 })
 
+test('错误报告使用浏览器文档下载CSV并保留原件预览状态', async (t) => {
+  const panel = importPanelHarness('ARCHIVE_ONLY')
+  panel.state.batch.value.items[0].issues = [{ field_path: 'metadata.title', code: 'REQUIRED' }]
+  const preview = { file_id: 'preview-source' }
+  panel.state.document.value = preview
+  const links = []
+  let clicked = false, removed = false, csvBlob
+  const link = { click() { clicked = true }, remove() { removed = true } }
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'document')
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: {
+    createElement(tag) { assert.equal(tag, 'a'); return link },
+    body: { appendChild(value) { links.push(value) } },
+  } })
+  t.after(() => {
+    if (previous) Object.defineProperty(globalThis, 'document', previous)
+    else delete globalThis.document
+  })
+  t.mock.method(URL, 'createObjectURL', (blob) => { csvBlob = blob; return 'blob:error-report' })
+  const revoke = t.mock.method(URL, 'revokeObjectURL', () => {})
+
+  panel.state.downloadImportErrorReport()
+
+  assert.equal(panel.state.error.value, '')
+  assert.equal(panel.state.document.value.file_id, preview.file_id)
+  assert.deepEqual(links, [link])
+  assert.equal(link.download, '合同导入错误.csv')
+  assert.equal(link.href, 'blob:error-report')
+  assert.ok(clicked && removed)
+  assert.match(await csvBlob.text(), /metadata.title|合同标题/)
+  assert.equal(revoke.mock.calls[0].arguments[0], 'blob:error-report')
+})
+
 
 test('预览返回 provision_plan 时展示将自动创建客户、销售解析与商机摘要，缺失时界面不变', async () => {
   const panel = importPanelHarness('NORMAL')
