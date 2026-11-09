@@ -111,6 +111,57 @@ test('NORMAL preview retains its ordinary commit entry', async()=>{
   assert.doesNotMatch(html,/冻结清单、建立历史记录并提交独立确认/)
 })
 
+test('入口与JSON的普通/历史类别不符时在上传及保存清单前阻断，并保留输入', async () => {
+  for (const [existingBatch, selectedMode, manifestMode] of [
+    [false, 'ARCHIVE_ONLY', 'NORMAL'], [false, 'NORMAL', 'ARCHIVE_ONLY'],
+    [true, 'ARCHIVE_ONLY', 'NORMAL'], [true, 'NORMAL', 'ARCHIVE_ONLY'],
+  ]) {
+    const panel = importPanelHarness(selectedMode)
+    if (!existingBatch) {
+      panel.state.batch.value = null
+      panel.state.batchID.value = ''
+    }
+    panel.state.entryMode.value = selectedMode
+    panel.state.jsonAuthoritative.value = selectedMode === 'NORMAL'
+    const text = JSON.stringify({ schema_version: 1, source_system: 'legacy', items: [{
+      item_key: 'one', external_record_id: 'old-1', mode: manifestMode, source_file_ref: 'old.pdf',
+      metadata: { customer_name: '待建历史客户' }, history_evidence: {}, policy_options: {},
+    }] })
+    panel.state.text.value = text
+    const file = new File(['PDF fixture'], 'old.pdf', { type: 'application/pdf' })
+    panel.state.files.value = [file]
+    await panel.state.preview()
+    assert.match(panel.state.error.value, /导入方式.*不一致/)
+    assert.equal(panel.calls.length, 0, '不应上传、创建批次或保存错模式清单')
+    assert.equal(panel.state.text.value, text)
+    assert.equal(panel.state.files.value[0], file)
+  }
+})
+
+test('历史JSON待建客户不带CRM编号也能预检，不依赖普通Excel的CRM浏览器会话', async () => {
+  let customerReads = 0
+  const panel = importPanelHarness('ARCHIVE_ONLY', undefined, undefined, undefined, undefined,
+    async () => { customerReads++; throw Object.assign(new Error('CRM session missing'), { status: 401 }) })
+  panel.state.entryMode.value = 'ARCHIVE_ONLY'
+  panel.state.batch.value.sources = [{ item_key: 'one', filename: 'old.pdf', file_ref: 'file-ref', state: 'READY' }]
+  panel.state.excelIssues.value = [{ code: 'CRM_CUSTOMER_NOT_FOUND', blocking: true }]
+  panel.state.text.value = JSON.stringify({ schema_version: 1, source_system: 'legacy', items: [{
+    item_key: 'one', external_record_id: 'old-1', mode: 'ARCHIVE_ONLY', source_file_ref: 'old.pdf',
+    metadata: { customer_name: '待建历史客户', crm_customer_id: 0, sales_name: '测试销售' },
+    history_evidence: {}, policy_options: { finance_mode: 'NONE' },
+  }] })
+  await panel.state.preview()
+  const manifest = panel.calls.find(call => call[0] === 'manifest')?.[2].manifest
+  assert.ok(manifest)
+  assert.equal(manifest.items[0].mode, 'ARCHIVE_ONLY')
+  assert.equal(manifest.items[0].metadata.crm_customer_id, 0)
+  assert.equal(manifest.items[0].source_file_ref, 'file-ref')
+  assert.equal(panel.state.error.value, '')
+  assert.equal(customerReads, 0)
+  assert.equal(panel.directoryCalls.length, 0)
+  assert.ok(panel.calls.some(call => call[0] === 'preview'))
+})
+
 test('missing CRM context offers normal login while preserving the batch, source and unsaved manifest', async()=>{
   let opens=0
   const panel=importPanelHarness('NORMAL',null,undefined,()=>{opens++;return true})
