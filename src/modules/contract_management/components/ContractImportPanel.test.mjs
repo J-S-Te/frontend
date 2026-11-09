@@ -299,7 +299,7 @@ test('a delayed old-batch read cannot redirect a new preview upload and manifest
   })
   panel.state.batch.value=null;panel.state.batchID.value='';useNewHistory(panel)
   panel.state.jsonAuthoritative.value=true
-  panel.state.text.value=JSON.stringify({schema_version:1,source_system:'legacy',items:[{item_key:'one',external_record_id:'old-1',mode:'ARCHIVE_ONLY',source_file_ref:'one.pdf',metadata:{},history_evidence:{},policy_options:{}}]})
+  panel.state.text.value=JSON.stringify({schema_version:1,source_system:'legacy',items:[{item_key:'one',external_record_id:'old-1',mode:'ARCHIVE_ONLY',source_file_ref:'one.pdf',metadata:{},history_evidence:{},policy_options:{finance_mode:'NONE'}}]})
   panel.state.files.value=[new File(['PDF fixture'],'one.pdf',{type:'application/pdf'})]
   const oldRead=panel.state.refresh('batch-A')
   const preview=panel.state.preview()
@@ -678,7 +678,7 @@ test('原件未就绪时不发任何请求，直接给出可定位的中文错�
   panel.state.batchID.value = ''
   useNewHistory(panel)
   panel.state.jsonAuthoritative.value = true
-  panel.state.text.value = JSON.stringify({ schema_version: 1, source_system: 'manual', items: [{ mode: 'ARCHIVE_ONLY', item_key: 'one', external_record_id: 'HT-2024-001', history_evidence: {}, policy_options: {} }] })
+  panel.state.text.value = JSON.stringify({ schema_version: 1, source_system: 'manual', items: [{ mode: 'ARCHIVE_ONLY', item_key: 'one', external_record_id: 'HT-2024-001', history_evidence: {}, policy_options: {finance_mode:'NONE'} }] })
   // 普通对象 stub：没有字符串 name，不能被塞进 FormData 变成 "undefined"。
   panel.state.files.value = [{ size: 64 }]
   await panel.state.preview()
@@ -1067,9 +1067,9 @@ test('自动审批开启且存在历史项时，批次页脚改按声明状态�
   panel.state.batch.value.state = 'PREVIEWED'
   const html = await panel.html()
   assert.match(html, /自动审批：已开启/, '批次头必须出现自动审批已开启徽标')
-  assert.match(html, /将按清单声明状态自动审批归档/, '历史项审批路径必须与开关一致')
+  assert.match(html, /将自动审批归档/, '历史项审批路径必须与开关一致')
   assert.doesNotMatch(html, /历史模式之后独立确认/, '开启时不得再暗示人工会签')
-  assert.match(html, /普通新合同仍逐份审批/, '普通合同仍走逐份审批')
+  assert.match(html, /新建合同请走正常新建流程/, '普通合同仍走正常流程')
 
   // 关闭后回到原有文案且移除徽标，避免关闭态仍宣称自动归档。
   await panel.state.applyAutoApproveToggle()
@@ -1077,7 +1077,7 @@ test('自动审批开启且存在历史项时，批次页脚改按声明状态�
   panel.state.batch.value.state = 'PREVIEWED'
   const disabled = await panel.html()
   assert.doesNotMatch(disabled, /自动审批：已开启/)
-  assert.match(disabled, /本次不免审生效/)
+  assert.match(disabled, /仍需独立确认/)
 })
 
 test('导入页顶部常驻状态条在面板折叠时仍显示最近变更人/时间，其他页签不渲染', async () => {
@@ -1192,7 +1192,7 @@ test('历史Excel两种模式从文件选择到预检完整传递，不调用浏
   for (const mode of ['ARCHIVE_ONLY', 'HISTORICAL_CLOSED']) {
     let stored, customerReads = 0
     const sheets = excelWorkbook([excelMainRow({ CRM客户编号: '', 销售姓名: '合成销售',
-      客户联系人: '合成联系人', 客户联系电话: '13800000000' })])
+      客户联系人: '合成联系人', 客户联系电话: '13800000000', 当前负责人: '现任负责人' })])
     const panel = importPanelHarness(mode, (original, action, id, payload) => {
       if (action === 'create') stored = { ...structuredClone(original), batch_id: 'new-history',
         source_system: payload.source_system, state: 'DRAFT', items: [], sources: [] }
@@ -1200,9 +1200,10 @@ test('历史Excel两种模式从文件选择到预检完整传递，不调用浏
         stored.sources = [{ file_ref: 'history-file', item_key: payload.get('item_key'), filename: 'HT-2026001.pdf', state: 'READY' }]
         return { file_ref: 'history-file' }
       }
-      if (action === 'manifest') stored.items = payload.manifest.items.map(item => ({ id: 'history-item', item, state: 'READY', issues: [] }))
+      if (action === 'manifest') stored.items = payload.manifest.items.map(item => ({ id: 'history-item', item: structuredClone(item), state: 'READY', issues: [] }))
       if (action === 'preview') {
         stored.state = 'PREVIEWED'
+        for (const entry of stored.items) if (entry.item.history_evidence.target_owner_name) entry.item.history_evidence.target_owner_user_id = 'actor'
         stored.provision_plan = [{ customer_name: 'Excel客户', customer_action: 'TO_CREATE' }]
       }
       return structuredClone(stored || original)
@@ -1224,14 +1225,16 @@ test('历史Excel两种模式从文件选择到预检完整传递，不调用浏
     assert.equal(manifest.items[0].metadata.sales_name, '合成销售')
     assert.equal(manifest.items[0].source_file_ref, 'history-file')
     assert.equal(manifest.items[0].history_evidence.declared_signed_date, '2024-01-03')
-    assert.equal(manifest.items[0].history_evidence.target_owner_user_id, 'actor')
+    assert.equal(manifest.items[0].history_evidence.target_owner_user_id, '')
+    assert.equal(manifest.items[0].history_evidence.target_owner_name, '现任负责人')
+    assert.equal(panel.state.formRows.value[0].historyEvidence.target_owner_user_id, 'actor')
     assert.equal(customerReads, 0)
     assert.ok(panel.calls.some(call => call[0] === 'preview'))
     panel.state.formRows.value = []
     await panel.state.refresh('new-history')
     assert.equal(panel.state.formRows.value[0].historyEvidence.declared_signed_date, '2024-01-03')
     assert.equal(panel.state.formRows.value[0].key, manifest.items[0].item_key)
-    assert.equal(panel.state.formRows.value[0].policyOptions.finance_mode, mode === 'ARCHIVE_ONLY' ? 'NONE' : 'EVIDENCE_ONLY')
+    assert.equal(panel.state.formRows.value[0].policyOptions.finance_mode, 'NONE')
     await panel.state.preview()
     assert.equal(panel.calls.filter(call => call[0] === 'files').length, 1)
   }
@@ -1308,7 +1311,7 @@ test('批量历史补填跳过成功项，不能清空已有财务事实或编�
   panel.state.historyOptions.value = { targetOwnerUserID: 'actor', historicalStatus: 'archived',
     reportChannels: 'API_ONLY', declaredSignedDate: '2024-01-01', noHistoricalFacts: true }
   panel.state.applyBatchHistory()
-  assert.match(panel.state.error.value, /已有历史财务事实/)
+  assert.equal(panel.state.error.value, '')
   assert.equal(pending.historyEvidence.expected_facts.length, 1)
   panel.state.historyOptions.value.noHistoricalFacts = false
   panel.state.applyBatchHistory()
@@ -1319,4 +1322,50 @@ test('批量历史补填跳过成功项，不能清空已有财务事实或编�
   assert.equal(panel.state.drawerRowKey.value, '')
   panel.state.removeRow(done)
   assert.equal(panel.state.formRows.value.length, 2)
+})
+
+test('重新应用Excel更换当前负责人时清空旧账号，旧批次隐藏通道不随批量补填改变', async () => {
+  const sheets = excelWorkbook([excelMainRow({ 当前负责人: '负责人乙' })])
+  const panel = importPanelHarness('ARCHIVE_ONLY', undefined, undefined, undefined, async () => sheets)
+  panel.state.jsonAuthoritative.value = false
+  const row = normalRow({ fileName: 'HT-2026001.pdf', historyEvidence: {
+    target_owner_name: '负责人甲', target_owner_user_id: 'user-A', report_required_channels: 'API_AND_SOURCE_FACTS',
+  } })
+  panel.state.formRows.value = [row]
+  panel.state.files.value = [new File(['%PDF'], 'HT-2026001.pdf', { type: 'application/pdf' })]
+  await panel.state.selectExcelFile({ target: { files: [new File(['xlsx'], '历史.xlsx')], value: '' } })
+  const updated = panel.state.formRows.value[0]
+  assert.equal(updated.historyEvidence.target_owner_name, '负责人乙')
+  assert.equal(updated.historyEvidence.target_owner_user_id, undefined)
+  panel.state.historyOptions.value = { historicalStatus: 'archived', declaredSignedDate: '2020-01-01' }
+  panel.state.applyBatchHistory()
+  assert.equal(updated.historyEvidence.report_required_channels, 'API_AND_SOURCE_FACTS')
+})
+
+test('新历史Excel页面不展示财务重建及报表技术通道，保留姓名自动匹配说明', async () => {
+  const panel = importPanelHarness('ARCHIVE_ONLY')
+  panel.props.supportedModes = ['ARCHIVE_ONLY', 'HISTORICAL_CLOSED']
+  panel.state.startNewBatch()
+  panel.state.selectEntryMode('HISTORICAL_CLOSED')
+  const html = await panel.html()
+  assert.doesNotMatch(html, /<select[^>]*>[^]*?请选择财务处理方式/)
+  assert.doesNotMatch(html, /<span>报表来源通道<\/span>/)
+  assert.doesNotMatch(html, /完整 JSON 清单）/)
+  assert.match(html, /当前负责人.*唯一匹配/)
+  assert.match(html, /历史导入不参与结算开票/)
+})
+
+test('批量显式选择负责人账号时清空旧Excel姓名，未选账号时保留原负责人', () => {
+  const panel = importPanelHarness('ARCHIVE_ONLY')
+  const row = normalRow({ historyEvidence: { target_owner_name: '姓名甲', target_owner_user_id: 'user-A' } })
+  panel.state.formRows.value = [row]
+  panel.state.historyOptions.value = { targetOwnerUserID: 'user-B', historicalStatus: 'archived' }
+  panel.state.applyBatchHistory()
+  assert.equal(row.historyEvidence.target_owner_user_id, 'user-B')
+  assert.equal(row.historyEvidence.target_owner_name, '')
+  row.historyEvidence.target_owner_name = '姓名乙'
+  panel.state.historyOptions.value = { declaredSignedDate: '2020-01-01', historicalStatus: 'archived' }
+  panel.state.applyBatchHistory()
+  assert.equal(row.historyEvidence.target_owner_user_id, 'user-B')
+  assert.equal(row.historyEvidence.target_owner_name, '姓名乙')
 })

@@ -20,7 +20,7 @@ export const contractExcelSheetNames = Object.freeze({
 // 模板文件 frontend/public/contract-import-template.xlsx 的表头必须与这里一致。
 // 末尾 4 列（销售姓名、客户类型、行业、地区）是后加的可选列，顺序必须与模板「合同明细」表保持一致。
 export const contractExcelTemplateHeaders = Object.freeze({
-  main: Object.freeze(['合同编号', '合同标题', '合同类型', '服务类型', 'CRM客户编号', '客户名称', '客户地址', '客户联系人', '客户联系电话', '客户信用等级', '金额（元）', '币种', '开始日期', '结束日期', '外部纸面编号', '商机编号', '商机名称', '实施场所', '实施批次', '检测类别', '检测方式', '体系/能力要求', '合同正文', '销售姓名', '客户类型', '行业', '地区']),
+  main: Object.freeze(['合同编号', '合同标题', '合同类型', '服务类型', 'CRM客户编号', '客户名称', '客户地址', '客户联系人', '客户联系电话', '客户信用等级', '金额（元）', '币种', '开始日期', '结束日期', '外部纸面编号', '商机编号', '商机名称', '实施场所', '实施批次', '检测类别', '检测方式', '体系/能力要求', '合同正文', '销售姓名', '客户类型', '行业', '地区', '当前负责人']),
   services: Object.freeze(['合同编号', '序号', '服务类型', '服务名称', '实施场所', '实施批次', '检测类别', '检测方式', '体系/能力要求']),
   systems: Object.freeze(['合同编号', '服务项序号', '系统名称', '系统等级']),
   payments: Object.freeze(['合同编号', '分期号', '到期日', '金额（元）']),
@@ -39,6 +39,7 @@ const mainColumns = [
   { key: 'customerPhone', aliases: ['客户联系电话', '客户电话', '联系电话'] },
   { key: 'customerCreditLevel', aliases: ['客户信用等级', '信用等级'] },
   // 销售姓名用于历史导入自动开立 CRM 客户/商机时解析平台销售账号；本列可空，空值不阻断导入。
+  { key: 'currentOwnerName', aliases: ['当前负责人', '当前负责人姓名'] },
   { key: 'salesName', aliases: ['销售姓名', '销售', '业务员', '负责人姓名'] },
   // 客户类型/行业/地区用于 CRM 自动开立客户时补齐画像；三列均可空，别名不得与「合同类型」重叠。
   { key: 'customerType', aliases: ['客户类型'] },
@@ -360,6 +361,7 @@ function parseMainSheet(data, issues) {
         addRecordIssue(record, field.key, 'TOO_LONG', field.label + '不能超过 ' + maximumProfileTextLength + ' 个字。')
       }
     }
+    record.currentOwnerName = cellText(getCell(row, header.map, 'currentOwnerName'))
     record.currency = cellText(getCell(row, header.map, 'currency')).toUpperCase() || 'CNY'
     record.externalPaperNumber = cellText(getCell(row, header.map, 'externalPaperNumber'))
     record.opportunityId = cellText(getCell(row, header.map, 'opportunityId'))

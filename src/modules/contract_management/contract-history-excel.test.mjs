@@ -26,26 +26,38 @@ const defaults = { targetOwnerUserID: 'actor', historicalStatus: 'archived',
   declaredSignedDate: '2025-01-01', historicalOwnerLabel: '原销售',
   financeMode: 'EVIDENCE_ONLY', reportMode: 'HISTORICAL_SEPARATE', reportChannels: 'API_ONLY' }
 
-test('历史Excel解析真实来源信息、财务策略和事实，不从合同日期推断签署日期', () => {
-  const records = [{ contractNumber: 'OLD-1' }]
+test('新历史Excel清单固定不参与结算，旧页面财务选项不能改变新策略', () => {
+  for (const mode of ['ARCHIVE_ONLY', 'HISTORICAL_CLOSED']) {
+    const item = buildImportManifestFromRows([historyRow()], { mode,
+      historyOptions: { ...defaults, financeMode: 'FULL_REPLAY', noHistoricalFacts: true } }).items[0]
+    assert.equal(item.policy_options.finance_mode, 'NONE')
+    assert.equal(item.history_evidence.expected_facts, undefined)
+    assert.deepEqual(validateHistoryImportDetails(item, mode), [])
+  }
+})
+
+test('旧Excel若填写了财务策略或事实必须明确阻断，不能静默丢掉财务资料', () => {
   const result = readHistoryExcelRecords([
-    { sheet: '历史档案', data: [
-      ['合同编号', '原签署日期', '原合同状态', '原客户名称', '原负责人', '财务处理方式', '报表统计方式', '报表来源通道'],
-      ['OLD-1', '2025-02-03', '已完成', '原客户', '原销售', '重建历史台账', '历史单独统计', 'API及来源事实'],
-    ] },
-    { sheet: '历史财务事实', data: [
-      ['合同编号', '来源系统', '事实类型', '原事实编号'],
-      ['OLD-1', 'legacy-finance', '收款', 'receipt-1'],
-    ] },
-  ], records)
+    { sheet: '历史档案', data: [['合同编号', '财务处理方式'], ['OLD-1', '重建历史台账']] },
+    { sheet: '历史财务事实', data: [['合同编号', '来源系统', '事实类型', '原事实编号'], ['OLD-1', 'old', '收款', 'r1']] },
+  ], [{ contractNumber: 'OLD-1' }])
+  assert.equal(result.issues.filter(issue => issue.code === 'HISTORY_FINANCE_NOT_APPLICABLE').length, 2)
+})
+
+test('历史Excel保留原签署日期并默认只同步合同档案，不采集财务事实', () => {
+  const result = readHistoryExcelRecords([{ sheet: '历史档案', data: [
+    ['合同编号', '原签署日期', '原合同状态', '原客户名称', '原负责人', '报表统计方式'],
+    ['OLD-1', '2025-02-03', '已完成', '原客户', '原销售', '历史单独统计'],
+  ] }], [{ contractNumber: 'OLD-1', currentOwnerName: '现任负责人' }])
   assert.deepEqual(result.issues, [])
   const detail = historyImportDetails(result.records[0], 'HISTORICAL_CLOSED', defaults)
   assert.equal(detail.history_evidence.declared_signed_date, '2025-02-03')
   assert.equal(detail.history_evidence.historical_status, 'completed')
-  assert.equal(detail.policy_options.finance_mode, 'FULL_REPLAY')
-  assert.deepEqual(detail.history_evidence.expected_facts, [
-    { source_system: 'legacy-finance', fact_type: 'RECEIPT', external_fact_id: 'receipt-1' },
-  ])
+  assert.equal(detail.history_evidence.target_owner_name, '现任负责人')
+  assert.equal(detail.history_evidence.target_owner_user_id, '')
+  assert.equal(detail.history_evidence.report_required_channels, 'API_ONLY')
+  assert.equal(detail.policy_options.finance_mode, 'NONE')
+  assert.equal(detail.history_evidence.expected_facts, undefined)
 })
 
 test('两种历史模式可由Excel行生成完整清单，客户编号为空交给后端查重', () => {
@@ -57,7 +69,7 @@ test('两种历史模式可由Excel行生成完整清单，客户编号为空交
     assert.equal(item.metadata.crm_customer_id, 0)
     assert.equal(item.history_evidence.target_owner_user_id, 'actor')
     assert.equal(item.policy_options.project_mode, 'NONE')
-    assert.equal(item.policy_options.finance_mode, mode === 'ARCHIVE_ONLY' ? 'NONE' : 'EVIDENCE_ONLY')
+    assert.equal(item.policy_options.finance_mode, 'NONE')
     assert.equal(item.metadata.sales_name, '合成销售')
     const [restored] = importRowsFromItems([{ item, state: 'READY', issues: [] }], [])
     const rebuilt = buildImportManifestFromRows([restored], { mode, sourceSystem: 'legacy' })
@@ -76,9 +88,9 @@ test('客户引用与商机引用仍严格校验，普通模式不接受空客�
 
 test('历史证据缺失、财务事实空白与非法组合不能被默认值掩盖', () => {
   assert.ok(validateHistoryImportDetails(historyImportDetails({}, 'ARCHIVE_ONLY', {}), 'ARCHIVE_ONLY').length)
-  const replay = historyImportDetails({}, 'HISTORICAL_CLOSED', { ...defaults, financeMode: 'FULL_REPLAY' })
+  const replay = historyImportDetails({ policyOptions: { finance_mode: 'FULL_REPLAY' } }, 'HISTORICAL_CLOSED', defaults)
   assert.ok(validateHistoryImportDetails(replay, 'HISTORICAL_CLOSED').some(i => i.field.includes('expected_facts')))
-  const none = historyImportDetails({ historyEvidence: { expected_facts: [] } }, 'HISTORICAL_CLOSED',
+  const none = historyImportDetails({ historyEvidence: { expected_facts: [] }, policyOptions: { finance_mode: 'FULL_REPLAY' } }, 'HISTORICAL_CLOSED',
     { ...defaults, financeMode: 'FULL_REPLAY' })
   assert.deepEqual(validateHistoryImportDetails(none, 'HISTORICAL_CLOSED'), [])
   const invalid = historyImportDetails({ policyOptions: { project_mode: 'CREATE_NEW' } }, 'ARCHIVE_ONLY', defaults)
@@ -92,7 +104,7 @@ test('历史分表重复、孤立事实和非法日期逐行报错，不能静�
   ], [{ contractNumber: 'OLD-1' }])
   assert.ok(result.issues.some(i => i.code === 'HISTORY_DATE_INVALID'))
   assert.ok(result.issues.some(i => i.code === 'HISTORY_DUPLICATE'))
-  assert.ok(result.issues.some(i => i.code === 'HISTORY_ORPHAN'))
+  assert.ok(result.issues.some(i => i.code === 'HISTORY_FINANCE_NOT_APPLICABLE'))
 })
 
 test('恢复同名多代原件时保留当前精确file_ref，不能猜最新或丢引用', () => {
@@ -132,13 +144,13 @@ test('实际下载模板的历史分表可生成后端完整清单，无需手�
   const buffer = await readFile(new URL('../../../public/contract-import-template.xlsx', import.meta.url))
   const sheets = await readContractExcelWorkbook(buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength))
   const values = { 合同编号: 'OLD-1', 合同标题: '合成历史合同', 合同类型: '直签', 服务类型: '等保测评',
-    客户名称: '合成客户', 客户联系人: '合成联系人', 客户联系电话: '13800000000', 销售姓名: '合成销售',
+    客户名称: '合成客户', 当前负责人: '现任负责人', 客户联系人: '合成联系人', 客户联系电话: '13800000000', 销售姓名: '合成销售',
     '金额（元）': '50000', 币种: 'CNY', 开始日期: '2025-01-01', 实施场所: '合成现场',
     实施批次: '一', 检测类别: '等保测评', 检测方式: '常规检测' }
   const main = sheets.find(sheet => sheet.sheet === '合同明细').data
   main.push(main[0].map(header => values[header] ?? null))
   const history = sheets.find(sheet => sheet.sheet === '历史档案').data
-  history.push(['OLD-1', '2025-02-03', '已归档', '原客户', '原销售', null, null, '仅API', null])
+  history.push(['OLD-1', '2025-02-03', '已归档', '原客户', '原销售', null])
   const parsed = parseContractExcelWorkbook(sheets)
   assert.deepEqual(parsed.issues, [])
   const read = readHistoryExcelRecords(sheets, parsed.records)
@@ -150,6 +162,7 @@ test('实际下载模板的历史分表可生成后端完整清单，无需手�
     sourceSystem: 'legacy', historyOptions: { targetOwnerUserID: 'actor' } })
   assert.equal(manifest.items[0].history_evidence.declared_signed_date, '2025-02-03')
   assert.equal(manifest.items[0].metadata.crm_customer_id, 0)
+  assert.equal(manifest.items[0].history_evidence.target_owner_name, '现任负责人')
   assert.equal(manifest.items[0].history_evidence.historical_owner_label, '原销售')
   assert.doesNotThrow(() => prepareImportManifest(JSON.stringify(manifest), files, [], ['ARCHIVE_ONLY'], 'ARCHIVE_ONLY'))
 })

@@ -40,7 +40,7 @@ const listBusy = ref(false), listError = ref('')
 const newBatchModes = computed(() => props.supportedModes.filter(mode => historicalExcelModes.includes(mode)))
 const entryMode = ref(newBatchModes.value[0] || '')
 const historyOptions = ref({ targetOwnerUserID: '', declaredSignedDate: '', historicalStatus: '',
-  historicalCustomerName: '', historicalOwnerLabel: '', financeMode: '', reportMode: '', reportChannels: '', noHistoricalFacts: false })
+  historicalCustomerName: '', historicalOwnerLabel: '', reportMode: '' })
 const sourceSystem = ref('legacy')
 const historyOwnerOptions = ref([]), historyOwnerBusy = ref(false), historyOwnerError = ref('')
 const formRows = ref([]), jsonAuthoritative = ref(false), fileMessage = ref(''), advancedMessage = ref('')
@@ -106,6 +106,9 @@ const historyItems = computed(() => (batch.value?.items || []).filter(entry => e
 const historyAutoApproveActive = computed(() => autoApproveEnabled.value && historyItems.value.length > 0)
 const batchPreviewNote = computed(() => {
   const pending = batch.value ? batch.value.items.filter((entry) => !entry.contract_id).length : 0
+  if (historyItems.value.length && historyItems.value.every(entry => entry.item.policy_options?.finance_mode === 'NONE')) {
+    return `预计创建 ${pending} 份记录；历史项${historyAutoApproveActive.value ? '将自动审批归档' : '仍需独立确认'}。不参与结算开票，确认后仅按档案策略同步报表。`
+  }
   if (historyAutoApproveActive.value) {
     return `预计创建 ${pending} 份记录；历史项将按清单声明状态自动审批归档（自动审批已开启），普通新合同仍逐份审批；确认后分别放行项目、财务和报表。`
   }
@@ -212,15 +215,16 @@ async function loadHistoryOwners() {
 function applyBatchHistory() {
   if (busy.value || !isHistoricalEntry.value) return
   error.value = ''
-  if (historyOptions.value.noHistoricalFacts && formRows.value.some(row => !row.contractId && row.historyEvidence?.expected_facts?.length)) {
-    error.value = '已有历史财务事实，不能用“无历史事实”覆盖；请核对原始记录。'
-    return
-  }
   for (const row of formRows.value) {
     if (row.contractId) continue
     const detail = historyImportDetails({}, row.importMode || entryMode.value, historyOptions.value)
+    const savedChannel = row.historyEvidence?.report_required_channels
+    const savedOwnerID = row.historyEvidence?.target_owner_user_id
     row.historyEvidence = { ...row.historyEvidence, ...detail.history_evidence }
-    row.policyOptions = { ...row.policyOptions, ...detail.policy_options }
+    if (savedChannel) row.historyEvidence.report_required_channels = savedChannel
+    if (historyOptions.value.targetOwnerUserID) row.historyEvidence.target_owner_name = ''
+    else if (savedOwnerID) row.historyEvidence.target_owner_user_id = savedOwnerID
+    row.policyOptions = { ...detail.policy_options, ...row.policyOptions }
   }
   applyFormIssues(validateImportFormRows(formRows.value, importFormOptions()))
 }
@@ -333,6 +337,10 @@ function syncRowBatchState() {
     if (row.contractId && entry?.item) row.savedItem = JSON.parse(JSON.stringify(entry.item))
     row.normalized = entry?.normalized_metadata || null
     if (entry?.item?.source_file_ref) row.sourceFileRef = entry.item.source_file_ref
+    const resolvedOwner = entry?.item?.history_evidence
+    if (row.historyEvidence?.target_owner_name && row.historyEvidence.target_owner_name === resolvedOwner?.target_owner_name) {
+      row.historyEvidence.target_owner_user_id = resolvedOwner.target_owner_user_id
+    }
   }
 }
 
@@ -613,6 +621,10 @@ async function applyExcelImport() {
       row.importMode = existing?.importMode
       row.sourceFileRef = existing?.sourceFileRef
       row.historyEvidence = { ...existing?.historyEvidence, ...resolved[index].historyEvidence }
+      if (resolved[index].historyEvidence?.target_owner_name
+          && resolved[index].historyEvidence.target_owner_name !== existing?.historyEvidence?.target_owner_name) {
+        delete row.historyEvidence.target_owner_user_id
+      }
       row.policyOptions = { ...existing?.policyOptions, ...resolved[index].policyOptions }
     })
     // parsed.issues 已汇总工作簿问题和所有 Excel 行的问题；未被 PDF 匹配的行也必须保留其问题，
@@ -1075,7 +1087,7 @@ function startNewBatch() {
   normalEntryMode.value = 'excel'; resetExcelState()
   entryMode.value = newBatchModes.value[0] || ''
   sourceSystem.value = 'legacy'
-  for (const key of Object.keys(historyOptions.value)) historyOptions.value[key] = key === 'noHistoricalFacts' ? false : ''
+  for (const key of Object.keys(historyOptions.value)) historyOptions.value[key] = ''
 }
 
 /**
@@ -1149,6 +1161,15 @@ async function preview() {
     )
     if (!batchID.value && prepared.manifest.items.some(item => !newBatchModes.value.includes(item.mode))) {
       throw new Error('新批量导入只接受历史存档或历史结清档案，接续履约旧批次请按原批次号恢复。')
+    }
+    for (const item of prepared.manifest.items) {
+      if (!historicalExcelModes.includes(item.mode) || item.policy_options?.finance_mode === 'NONE') continue
+      const old = batch.value?.items?.find(entry => entry.item.item_key === item.item_key)?.item
+      if (!old || old.external_record_id !== item.external_record_id || old.mode !== item.mode
+          || ['policy_version', 'project_mode', 'finance_mode', 'report_mode', 'responsibility_mode', 'signing_mode']
+            .some(field => old.policy_options?.[field] !== item.policy_options?.[field])) {
+        throw new Error('新历史导入不参与结算开票，不能使用财务接续策略；旧批次仅保留原策略恢复。')
+      }
     }
     for (const file of files.value) validateContractSourceFile(file, { pdfEnabled: props.pdfEnabled })
     // 上传前兜底：映射缺失或不是带 name 的对象时立刻失败，绝不把 undefined 塞进 FormData（会被序列化成 "undefined" 发出去）。
@@ -1537,7 +1558,7 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
             <legend>导入方式</legend>
             <label v-for="modeValue in selectableModes" :key="modeValue">
               <input type="radio" name="contract-import-entry-mode" :value="modeValue" :checked="entryMode === modeValue" @change="selectEntryMode(modeValue)" />
-              {{ modeLabels[modeValue] || modeValue }}{{ modeValue === 'NORMAL' ? '（Excel/表单）' : '（完整 JSON 清单）' }}
+              {{ modeLabels[modeValue] || modeValue }}{{ modeValue === 'CONTINUE_LIVE' ? '（原清单）' : '（Excel）' }}
             </label>
           </fieldset>
           <p v-if="modeLocked" class="contract-import-hint">批次已保存清单，导入方式随当前批次固定；需要换一种方式请开始新批次。</p>
@@ -1548,6 +1569,7 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
         <section v-if="isFormEntry" class="contract-import-block contract-import-stage" :aria-label="isHistoricalEntry ? '历史合同Excel导入表单' : '已有普通批次修订表单'">
           <fieldset v-if="isHistoricalEntry" id="contract-import-history" class="contract-form-grid" :disabled="busy">
             <legend>本批历史信息（Excel 行中已填写的值优先）</legend>
+            <p class="contract-import-note contract-form-wide">历史导入不参与结算开票，不建立财务台账；后续由财务人员按正常流程办理。档案报表独立同步，不代表回款或开票已核验。</p>
             <label><span>来源系统标识</span><input v-model="sourceSystem" maxlength="64" :readonly="!!batch" pattern="[A-Za-z0-9_.:\-]+" /><small>同一来源保持不变，用于识别重复导入。</small></label>
             <label><span>当前负责人</span><select v-model="historyOptions.targetOwnerUserID"><option value="">请选择负责人</option><option v-if="actorId" :value="actorId">当前登录人（提交时服务端核验）</option><option v-for="owner in historyOwnerOptions" :key="owner.subject_id" :value="owner.subject_id">{{ owner.name }}</option></select></label>
             <button v-if="sourceCapabilities.local_catalog_manage" class="contract-button secondary small" type="button" :disabled="historyOwnerBusy" @click="loadHistoryOwners">{{ historyOwnerBusy ? '正在读取账号…' : '读取其他可选负责人' }}</button>
@@ -1557,14 +1579,10 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
             <label><span>原客户名称（可空）</span><input v-model="historyOptions.historicalCustomerName" maxlength="255" /></label>
             <label><span>原负责人姓名（可空）</span><input v-model="historyOptions.historicalOwnerLabel" maxlength="128" /></label>
             <template v-if="entryMode === 'HISTORICAL_CLOSED'">
-              <label><span>财务处理方式</span><select v-model="historyOptions.financeMode"><option value="">请选择财务处理方式</option><option value="EVIDENCE_ONLY">仅保留凭证</option><option value="FULL_REPLAY">重建历史台账</option></select></label>
               <label><span>报表统计方式</span><select v-model="historyOptions.reportMode"><option value="">请选择统计方式</option><option value="ARCHIVE_SEPARATE">档案单独统计</option><option value="HISTORICAL_SEPARATE">历史单独统计</option></select></label>
-              <label v-if="historyOptions.financeMode === 'FULL_REPLAY'" class="contract-form-wide"><input v-model="historyOptions.noHistoricalFacts" type="checkbox" />明确声明本批没有历史收款或核销事实；有事实请填写 Excel“历史财务事实”分表。</label>
-              <p class="contract-import-note contract-form-wide">仅保留凭证不会重建结算台账，也不表示结算系统已核验零余额。财务重建必须提供付款条款及完整事实清单，并通过服务端能力与事实核验。</p>
             </template>
-            <label><span>报表来源通道</span><select v-model="historyOptions.reportChannels"><option value="">请选择来源通道</option><option value="API_ONLY">仅 API</option><option value="API_AND_SOURCE_FACTS">API 及来源事实</option></select></label>
             <button class="contract-button secondary small" type="button" :disabled="!formRows.length" @click="applyBatchHistory">用本批信息覆盖各行历史信息</button>
-            <p class="contract-import-note contract-form-wide">新行未填写的字段使用本批信息；已有批次保留逐行历史信息。覆盖会替换各行签署日期、原状态、负责人和处理策略，请先核对。</p>
+            <p class="contract-import-note contract-form-wide">新行未填写的字段使用本批信息；已有批次保留逐行历史信息。覆盖会替换未建项的签署日期、原状态及本批所选负责人；旧策略与原财务资料保留，请先核对。</p>
           </fieldset>
           <fieldset v-if="isNormalEntry" class="contract-import-normal-modes" :disabled="busy">
             <legend>详情填写方式</legend>
@@ -1588,7 +1606,7 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
                 <input id="contract-import-excel" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" :disabled="busy || excelBusy" @change="selectExcelFile" />
               </div>
               <p class="contract-import-note"><a :href="contractExcelTemplateURL" download>下载 Excel 标准模板（含合同明细、服务项、系统信息、付款条款和填写说明）</a></p>
-              <p class="contract-import-hint">历史 Excel 的 CRM 客户编号可以留空，由服务端查重并在提交后自动创建客户、生成编号。自动开立时商机编号和名称都留空；填写真实销售姓名，新客户须有真实联系人和电话。客户类型、行业、地区可留空。历史档案及财务事实可填在对应分表，也可补填本批历史信息。</p>
+              <p class="contract-import-hint">历史 Excel 的 CRM 客户编号可以留空，由服务端查重并在提交后自动创建客户、生成编号。自动开立时商机编号和名称都留空；填写真实销售姓名，新客户须有真实联系人和电话。客户类型、行业、地区可留空。“当前负责人”列填写真实姓名，系统按姓名唯一匹配有效账号；未匹配或重名会逐行提示。历史档案可填在对应分表，也可补填本批历史信息。</p>
               <p v-if="excelFile" class="contract-import-status" role="status">已选择 Excel：{{ excelFile.name }} <button class="contract-text-button" type="button" :disabled="busy || excelBusy" @click="applyExcelImport">重新应用 Excel（覆盖未保存详情）</button><button class="contract-text-button danger" type="button" :disabled="busy || excelBusy" @click="clearExcelFile">移除</button></p>
               <p v-if="excelBusy" class="contract-import-status is-loading" role="status">正在解析 Excel 并匹配 PDF…</p>
               <p v-if="excelCRMProgress" class="contract-import-status is-loading" role="status">{{ excelCRMProgress }}</p>
@@ -1645,6 +1663,7 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
                     <dt>客户</dt>
                     <dd>{{ row.customerName || '未填写' }}<small v-if="row.crmCustomerId" class="contract-import-fact-extra">ID {{ row.crmCustomerId }}</small><small v-if="row.normalized" class="contract-import-fact-extra">预检权威：{{ row.normalized.customer_name }} / {{ row.normalized.crm_customer_id }}</small><small v-if="normalizedCustomerDiff(row)" class="contract-import-fact-extra contract-import-error-text">与预检客户不一致，请以权威目录为准</small></dd>
                   </div>
+<div v-if="isHistoricalEntry"><dt>当前负责人</dt><dd>{{ row.historyEvidence?.target_owner_name || (row.historyEvidence?.target_owner_user_id ? '已选账号' : '未填写') }}<small v-if="row.historyEvidence?.target_owner_name && row.historyEvidence?.target_owner_user_id">已匹配有效账号</small></dd></div>
                   <div><dt>金额（元）</dt><dd>{{ row.amount || '未填写' }}<small v-if="row.contractId" class="contract-import-fact-extra">合同 {{ row.contractId }}</small></dd></div>
                   <div><dt>币种</dt><dd>{{ row.currency }}</dd></div>
                   <div><dt>开始日期</dt><dd>{{ row.startDate || '—' }}</dd></div>
@@ -1788,7 +1807,8 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
           </template>
           <article v-for="entry in historyItems" :key="entry.id" class="contract-import-targets">
             <h4>{{ entry.item.item_key }} · {{ entry.confirmed ? '当前历史基线已确认' : '等待当前独立确认' }}</h4>
-            <p class="contract-import-hint">项目政策 {{ entry.item.policy_options.project_mode }}；财务政策 {{ entry.item.policy_options.finance_mode }}；报表政策 {{ entry.item.policy_options.report_mode }}。</p>
+            <p v-if="entry.item.policy_options.finance_mode === 'NONE'" class="contract-import-note">本项不参与结算开票，合同金额及来源结清状态仅作为档案资料，不表示财务核验完成。</p>
+            <p v-else class="contract-import-hint">旧批次原策略保留：项目 {{ entry.item.policy_options.project_mode }}；财务 {{ entry.item.policy_options.finance_mode }}；报表 {{ entry.item.policy_options.report_mode }}。</p>
             <p v-if="entry.item.policy_options.finance_mode === 'EVIDENCE_ONLY'" class="contract-import-note">仅保存原财务证明，未在结算重建财务台账，不能将此项解释为结算已核验零余额。</p>
             <ul class="contract-import-target-list">
               <li v-for="target in entry.targets" :key="target.target" class="contract-import-target">
@@ -1830,16 +1850,14 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
           <p v-if="drawerRow.batchIssues.length" class="contract-field-error contract-form-wide" role="alert">预检返回 {{ drawerRow.batchIssues.length }} 处问题：{{ rowBatchIssueSummary(drawerRow).join('；') }}</p>
           <div class="contract-form-grid">
             <template v-if="isHistoricalEntry && drawerRow.historyEvidence">
+              <label><span>当前负责人姓名（Excel）</span><input v-model="drawerRow.historyEvidence.target_owner_name" maxlength="128" @input="drawerRow.historyEvidence.target_owner_user_id = ''" /><small>预检按姓名唯一匹配有效账号，重名请明确选择账号。</small></label>
               <label><span>原签署日期</span><input v-model="drawerRow.historyEvidence.declared_signed_date" type="date" /></label>
               <label><span>原合同状态</span><select v-model="drawerRow.historyEvidence.historical_status"><option value="">请选择</option><option value="archived">已归档</option><template v-if="(drawerRow.importMode || entryMode) === 'HISTORICAL_CLOSED'"><option value="completed">已完成</option><option value="terminated">已终止</option></template></select></label>
               <label><span>原客户名称</span><input v-model="drawerRow.historyEvidence.historical_customer_name" maxlength="255" /></label>
               <label><span>原负责人姓名</span><input v-model="drawerRow.historyEvidence.historical_owner_label" maxlength="128" /></label>
-              <label><span>当前负责人</span><select v-model="drawerRow.historyEvidence.target_owner_user_id"><option value="">请选择</option><option v-if="actorId" :value="actorId">当前登录人</option><option v-if="drawerRow.historyEvidence.target_owner_user_id && drawerRow.historyEvidence.target_owner_user_id !== actorId && !historyOwnerOptions.some(owner => owner.subject_id === drawerRow.historyEvidence.target_owner_user_id)" :value="drawerRow.historyEvidence.target_owner_user_id">已保存的负责人（服务端复核）</option><option v-for="owner in historyOwnerOptions" :key="owner.subject_id" :value="owner.subject_id">{{ owner.name }}</option></select></label>
-              <label><span>报表来源通道</span><select v-model="drawerRow.historyEvidence.report_required_channels"><option value="">请选择</option><option value="API_ONLY">仅 API</option><option value="API_AND_SOURCE_FACTS">API 及来源事实</option></select></label>
+              <label><span>当前负责人</span><select v-model="drawerRow.historyEvidence.target_owner_user_id" @change="drawerRow.historyEvidence.target_owner_name = ''"><option value="">请选择</option><option v-if="actorId" :value="actorId">当前登录人</option><option v-if="drawerRow.historyEvidence.target_owner_user_id && drawerRow.historyEvidence.target_owner_user_id !== actorId && !historyOwnerOptions.some(owner => owner.subject_id === drawerRow.historyEvidence.target_owner_user_id)" :value="drawerRow.historyEvidence.target_owner_user_id">已保存的负责人（服务端复核）</option><option v-for="owner in historyOwnerOptions" :key="owner.subject_id" :value="owner.subject_id">{{ owner.name }}</option></select></label>
               <template v-if="(drawerRow.importMode || entryMode) === 'HISTORICAL_CLOSED'">
-                <label><span>财务处理方式</span><select v-model="drawerRow.policyOptions.finance_mode"><option value="">请选择</option><option value="EVIDENCE_ONLY">仅保留凭证</option><option value="FULL_REPLAY">重建历史台账</option></select></label>
                 <label><span>报表统计方式</span><select v-model="drawerRow.policyOptions.report_mode"><option value="">请选择</option><option value="ARCHIVE_SEPARATE">档案单独统计</option><option value="HISTORICAL_SEPARATE">历史单独统计</option></select></label>
-                <p>历史财务事实：{{ Array.isArray(drawerRow.historyEvidence.expected_facts) ? drawerRow.historyEvidence.expected_facts.length + ' 条（已显式声明）' : '未提供；重建台账时须在 Excel 中填写' }}</p>
               </template>
             </template>
             <label class="contract-form-wide"><span>合同标题</span><input id="contract-import-row-title" v-model="drawerRow.title" maxlength="255" required autocomplete="off" :aria-invalid="rowIssue(drawerRow, 'title') ? 'true' : undefined" /><small v-if="rowIssue(drawerRow, 'title')" class="contract-field-error" role="alert">{{ rowIssue(drawerRow, 'title').message }}</small></label>
