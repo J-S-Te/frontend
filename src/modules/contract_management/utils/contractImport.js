@@ -1,9 +1,12 @@
 /**
  * prepareImportManifest 校验本地清单与原件一一映射，金额仍由服务器逐项校验。
- * 参数：text为JSON清单，files为所选原件，existingSources为暂存台账，supportedModes为开放模式。
+ * 参数：text为清单，files为原件，existingSources为暂存台账，supportedModes为开放模式；
+ *   expectedMode为当前入口，仅隔离普通与历史类别，不改写逐项历史策略。
  * 返回值：清单及文件映射；重复、不支持模式或缺文件时抛出中文错误。
  */
-export function prepareImportManifest(text, files, existingSources = [], supportedModes = ['NORMAL']) {
+export function prepareImportManifest(
+  text, files, existingSources = [], supportedModes = ['NORMAL'], expectedMode = '',
+) {
   if (new TextEncoder().encode(text).length > 2 * 1024 * 1024) throw new Error('清单不能超过 2MiB。')
   for (const token of text.matchAll(/"(?:\\.|[^"\\])*"|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g)) {
     if (token[1] && (!/^-?(?:0|[1-9]\d*)$/.test(token[1]) || BigInt(token[1]) > BigInt(Number.MAX_SAFE_INTEGER) || BigInt(token[1]) < BigInt(Number.MIN_SAFE_INTEGER))) {
@@ -13,6 +16,13 @@ export function prepareImportManifest(text, files, existingSources = [], support
   const manifest = JSON.parse(text)
   if (manifest.schema_version !== 1 || !manifest.source_system || !Array.isArray(manifest.items)
       || !manifest.items.length || manifest.items.length > 100) throw new Error('清单版本必须为1，每批1—100项。')
+  if (expectedMode && manifest.items.some(item =>
+    (item.mode === 'NORMAL') !== (expectedMode === 'NORMAL'))) {
+    const error = new Error('清单导入方式与当前选择不一致，请核对每项 mode：'
+      + '普通新合同使用 NORMAL，历史导入使用对应历史模式；不会自动改写合同生命周期。')
+    error.code = 'IMPORT_ENTRY_MODE_MISMATCH'
+    throw error
+  }
   if (manifest.items.some(item => item.mode === 'NORMAL') && manifest.items.some(item => item.mode !== 'NORMAL')) throw new Error('NORMAL与历史合同须分别建立批次。')
   const names = new Map()
   for (const file of files) {

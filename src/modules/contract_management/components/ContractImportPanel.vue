@@ -1057,7 +1057,9 @@ async function preview() {
       advancedMessage.value = '普通模式以表单为准，清单已从当前表单生成。'
       formRows.value.forEach((row) => { row.issues = [] })
     }
-    const prepared = prepareImportManifest(text.value, files.value, batch.value?.sources || [], props.supportedModes)
+    const prepared = prepareImportManifest(
+      text.value, files.value, batch.value?.sources || [], props.supportedModes, entryMode.value,
+    )
     for (const file of files.value) validateContractSourceFile(file, { pdfEnabled: props.pdfEnabled })
     // 上传前兜底：映射缺失或不是带 name 的对象时立刻失败，绝不把 undefined 塞进 FormData（会被序列化成 "undefined" 发出去）。
     for (const item of prepared.manifest.items) {
@@ -1090,7 +1092,10 @@ async function preview() {
     excelIssues.value = []; excelSummary.value = null; excelMessage.value = ''; excelCRMRequired.value = false; excelCRMProgress.value = ''
     syncRowBatchState()
   } catch (failure) {
-    if (failure?.issues?.length) {
+    if (failure?.code === 'IMPORT_ENTRY_MODE_MISMATCH') {
+      // 本地模式校验还没有发起写入，不能用旧批次覆盖用户尚未保存的清单和原件。
+      error.value = failure.message
+    } else if (failure?.issues?.length) {
       applyFormIssues(failure.issues)
       error.value = `表单有 ${failure.issues.length} 处需要修正：${failure.message}`
       if (batchID.value) await refresh(batchID.value, { fromWrite: true })
@@ -1444,6 +1449,8 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
             </label>
           </fieldset>
           <p v-if="modeLocked" class="contract-import-hint">批次已保存清单，导入方式随当前批次固定；需要换一种方式请开始新批次。</p>
+          <p v-if="isNormalEntry" class="contract-import-hint">普通新合同按当前来源选择已有 CRM 客户或本地交易对方，Excel 和手动表单都不会自动建客户。历史资料需要自动建档时，请选择“历史存档”或“历史结清档案”，并提交完整 JSON 清单。</p>
+          <p v-else-if="['ARCHIVE_ONLY', 'HISTORICAL_CLOSED'].includes(entryMode)" class="contract-import-hint">历史自动建档启用后，由服务端查重：客户不存在时创建客户，客户编号由 CRM 生成；客户重名或停用时逐项阻断。预检只展示计划，提交冻结清单后才执行创建。</p>
         </section>
 
         <section v-if="isNormalEntry" class="contract-import-block contract-import-stage" aria-label="普通新合同导入表单">
@@ -1469,7 +1476,7 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
                 <input id="contract-import-excel" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" :disabled="busy || excelBusy" @change="selectExcelFile" />
               </div>
               <p class="contract-import-note"><a :href="contractExcelTemplateURL" download>下载 Excel 标准模板（含合同明细、服务项、系统信息、付款条款和填写说明）</a></p>
-              <p class="contract-import-hint">「合同明细」新增可选列：销售姓名、客户类型、行业、地区，四列均可留空。<strong>销售姓名</strong>（别名：销售、业务员、负责人姓名）用于历史导入自动开立 CRM 客户/商机时解析平台销售账号，留空不阻断导入，只有服务端解析未命中时才按行提示；<strong>客户类型、行业、地区</strong>留空时由系统补「企业 / 其他 / 未填写」。下载的模板如未包含这几列，可在「合同明细」末列自行补上同名列，表头文字保持一致即可。</p>
+              <p class="contract-import-hint">「合同明细」支持销售姓名、客户类型、行业、地区四个可选列，四列均可留空并保留在清单中。本 Excel 入口只处理普通新合同，这些列不会触发自动建客户，仍需填写或选择已有 CRM 客户。历史自动建档请使用历史存档／历史结清的完整 JSON 清单，由服务端校验销售和客户资料。</p>
               <p v-if="excelFile" class="contract-import-status" role="status">已选择 Excel：{{ excelFile.name }} <button class="contract-text-button" type="button" :disabled="busy || excelBusy" @click="applyExcelImport">重新应用 Excel（覆盖未保存详情）</button><button class="contract-text-button danger" type="button" :disabled="busy || excelBusy" @click="clearExcelFile">移除</button></p>
               <p v-if="excelBusy" class="contract-import-status is-loading" role="status">正在解析 Excel 并匹配 PDF…</p>
               <p v-if="excelCRMProgress" class="contract-import-status is-loading" role="status">{{ excelCRMProgress }}</p>
@@ -1549,6 +1556,7 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
           <label class="contract-import-field" for="contract-import-json">UTF-8 JSON 清单（≤2MiB，1—100项）</label>
           <textarea id="contract-import-json" v-model="text" maxlength="2097152" rows="10" :disabled="busy" placeholder='{"schema_version":1,"source_system":"legacy","items":[{"item_key":"one","external_record_id":"原业务键","mode":"ARCHIVE_ONLY","source_file_ref":"原件.pdf","metadata":{},"history_evidence":{},"policy_options":{}}]}' />
           <p class="contract-import-hint">每项 metadata 填写完整合同字段；历史项还须提供 history_evidence 和 policy_options。source_file_ref 在此处填写对应文件名，须与所选原件一一匹配。</p>
+          <p v-if="['ARCHIVE_ONLY', 'HISTORICAL_CLOSED'].includes(entryMode)" class="contract-import-hint">已启用历史自动建档时，待建客户可不填 crm_customer_id，同时留空商机编号及名称；请填写真实客户名称、销售姓名，以及新客户的联系人和电话。服务端预检会校验字段并展示客户／商机开立计划，无须先登录 CRM 手工创建客户。</p>
           <p v-if="batch" class="contract-import-hint">已暂存项保留当前 file_ref；需要更换原件时，将该行 source_file_ref 改为新选择的文件名。相同文件名的历史代次不会自动替换当前原件。</p>
           <label class="contract-import-field">选择对应原件<input :key="sourceSelectionVersion" type="file" multiple :accept="pdfEnabled ? '.docx,.pdf' : '.docx'" :disabled="busy" @change="selectFiles" /></label>
           <p v-if="files.length" class="contract-import-status" role="status">已选择：{{ files.map(file => file.name).join('、') }}</p>
@@ -1709,7 +1717,7 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
           <p v-if="drawerRow.batchIssues.length" class="contract-field-error contract-form-wide" role="alert">预检返回 {{ drawerRow.batchIssues.length }} 处问题：{{ rowBatchIssueSummary(drawerRow).join('；') }}</p>
           <div class="contract-form-grid">
             <label class="contract-form-wide"><span>合同标题</span><input id="contract-import-row-title" v-model="drawerRow.title" maxlength="255" required autocomplete="off" :aria-invalid="rowIssue(drawerRow, 'title') ? 'true' : undefined" /><small v-if="rowIssue(drawerRow, 'title')" class="contract-field-error" role="alert">{{ rowIssue(drawerRow, 'title').message }}</small></label>
-            <label class="contract-form-wide"><span>来源业务键：原系统合同编号/业务键（必填，用于重复导入识别）</span><input id="contract-import-row-external-record-id" v-model="drawerRow.externalRecordId" maxlength="128" pattern="[A-Za-z0-9_.:-]+" required autocomplete="off" @input="clearExternalRecordIdIssue(drawerRow, $event)" :aria-invalid="(!hasExternalRecordId(drawerRow) || rowIssue(drawerRow, 'externalRecordId')) ? 'true' : undefined" /><small>填写来源系统中的原合同编号或业务键；只能使用字母/数字/._:-，同一批次内不能重复，重复导入据此识别同一份合同。</small><small v-if="rowIssue(drawerRow, 'externalRecordId')" class="contract-field-error" role="alert">{{ rowIssue(drawerRow, 'externalRecordId').message }}</small></label>
+            <label class="contract-form-wide"><span>来源业务键：原系统合同编号/业务键（必填，用于重复导入识别）</span><input id="contract-import-row-external-record-id" v-model="drawerRow.externalRecordId" maxlength="128" pattern="[A-Za-z0-9_.:\-]+" required autocomplete="off" @input="clearExternalRecordIdIssue(drawerRow, $event)" :aria-invalid="(!hasExternalRecordId(drawerRow) || rowIssue(drawerRow, 'externalRecordId')) ? 'true' : undefined" /><small>填写来源系统中的原合同编号或业务键；只能使用字母/数字/._:-，同一批次内不能重复，重复导入据此识别同一份合同。</small><small v-if="rowIssue(drawerRow, 'externalRecordId')" class="contract-field-error" role="alert">{{ rowIssue(drawerRow, 'externalRecordId').message }}</small></label>
             <label><span>合同类型</span><select id="contract-import-row-type" v-model="drawerRow.contractType" required :aria-invalid="rowIssue(drawerRow, 'contractType') ? 'true' : undefined"><option value="" disabled>请选择合同类型</option><option v-for="type in externalContractTypes" :key="type" :value="type">{{ type }}</option></select><small v-if="rowIssue(drawerRow, 'contractType')" class="contract-field-error" role="alert">{{ rowIssue(drawerRow, 'contractType').message }}</small></label>
             <label><span>金额（元）*</span><input id="contract-import-row-amount" v-model="drawerRow.amount" type="text" inputmode="decimal" maxlength="20" pattern="[0-9]+([.][0-9]{1,2})?" placeholder="0.00" required :aria-invalid="rowIssue(drawerRow, 'amount') ? 'true' : undefined" /><small>{{ amountMinorHint(drawerRow) }}</small><small v-if="rowIssue(drawerRow, 'amount')" class="contract-field-error" role="alert">{{ rowIssue(drawerRow, 'amount').message }}</small></label>
             <label><span>币种</span><input id="contract-import-row-currency" v-model="drawerRow.currency" maxlength="3" pattern="[A-Za-z]{3}" autocomplete="off" required :aria-invalid="rowIssue(drawerRow, 'currency') ? 'true' : undefined" /><small v-if="rowIssue(drawerRow, 'currency')" class="contract-field-error" role="alert">{{ rowIssue(drawerRow, 'currency').message }}</small></label>
