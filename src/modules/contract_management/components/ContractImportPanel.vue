@@ -33,6 +33,9 @@ const props = defineProps({ enabled: Boolean, pdfEnabled: Boolean, canPreview: {
   supportedModes: { type: Array, default: () => ['NORMAL'] },
   sourceCapabilities: { type: Object, default: () => ({}) } })
 const text = ref(''), files = ref([]), batch = ref(null), batchID = ref(''), lookupID = ref(props.initialBatchId)
+const batchItemLimit = computed(() => Number.isInteger(props.sourceCapabilities?.max_batch_items)
+  && props.sourceCapabilities.max_batch_items >= 1 && props.sourceCapabilities.max_batch_items <= 100
+  ? props.sourceCapabilities.max_batch_items : 100)
 const busy = ref(false), error = ref(''), commitKey = ref(''), sourceSelectionVersion = ref(0)
 const crmConnectionMessage = ref('')
 const batches = ref([]), listOffset = ref(0), listNextOffset = ref(null), listHasMore = ref(false), listLimitReached = ref(false), document = ref(null), confirmationAttempt = ref(null), actionAttempt = ref(null)
@@ -786,8 +789,8 @@ function selectFiles(event) {
     }
     try { validateContractSourceFile(file, { pdfEnabled: props.pdfEnabled }) }
     catch (failure) { fileMessage.value = `${file.name}：${failure.message}`; continue }
-    if (isFormEntry.value && nextFiles.length >= 100) {
-      fileMessage.value = '每批最多 100 份合同，请拆分后再导入。'
+    if (isFormEntry.value && nextFiles.length >= batchItemLimit.value) {
+      fileMessage.value = `每批最多 ${batchItemLimit.value} 份合同，请拆分后再导入。`
       break
     }
     known.add(file.name)
@@ -1133,6 +1136,9 @@ async function preview() {
   crmConnectionMessage.value = ''
   let writeStarted = false
   try {
+    if (!usesJsonManifest.value && formRows.value.length > batchItemLimit.value) {
+      throw new Error(`本批有 ${formRows.value.length} 份合同，当前每批最多 ${batchItemLimit.value} 份，请拆分批次后再预检。`)
+    }
     if (!batchID.value && !newBatchModes.value.includes(entryMode.value)) throw new Error('批量导入仅用于历史存档或历史结清档案，新建合同请走正常流程。')
     if (batch.value?.operation_id && !['PAUSED', 'PARTIAL', 'DRAFT', 'BLOCKED', 'PREVIEWED'].includes(batch.value.state)) throw new Error('请先暂停批次并查询结果，只有未建单项可修订。')
     if (isFormEntry.value && normalEntryMode.value === 'excel' && excelStale.value) {
@@ -1159,6 +1165,9 @@ async function preview() {
     const prepared = prepareImportManifest(
       text.value, files.value, batch.value?.sources || [], props.supportedModes, entryMode.value,
     )
+    if (prepared.manifest.items.length > batchItemLimit.value) {
+      throw new Error(`本批有 ${prepared.manifest.items.length} 份合同，当前每批最多 ${batchItemLimit.value} 份，请拆分批次后再预检。`)
+    }
     if (!batchID.value && prepared.manifest.items.some(item => !newBatchModes.value.includes(item.mode))) {
       throw new Error('新批量导入只接受历史存档或历史结清档案，接续履约旧批次请按原批次号恢复。')
     }
@@ -1594,7 +1603,7 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
             <p class="contract-import-hint">第一步选择 PDF 原件（可多选），第二步选择填写好合同详情的 Excel。PDF 文件名去掉扩展名必须与 Excel「合同明细」的合同编号完全一致；系统按合同编号一一对应写入「编辑详情」，缺 PDF、缺 Excel 行、重复编号都会在下面列出并阻止预检。</p>
             <div class="contract-import-step">
               <div class="contract-import-dropzone" @dragover.prevent @drop.prevent="dropFiles">
-                <label for="contract-import-files">第一步：选择或拖入 PDF 原件（可多选，≤100 份）</label>
+                <label for="contract-import-files">第一步：选择或拖入 PDF 原件（可多选，≤{{ batchItemLimit }} 份）</label>
                 <input id="contract-import-files" :key="sourceSelectionVersion" type="file" multiple :accept="pdfEnabled ? '.docx,.pdf' : '.docx'" :disabled="busy" @change="selectFiles" />
               </div>
               <p v-if="files.length" class="contract-import-status" role="status">已选择 {{ files.length }} 份原件：{{ files.map(file => file.name).join('、') }}</p>

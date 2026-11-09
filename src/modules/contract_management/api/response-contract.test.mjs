@@ -8,7 +8,7 @@ const source = await readFile(new URL('./contract.js', import.meta.url), 'utf8')
 const moduleSource = source.replace(/^import\s[\s\S]*?from ['"][^'"]+['"]\n/gm, '')
   .replaceAll('import.meta.env', '({})').replace(/^export /gm, '')
 const api = new Function('formatUserError', 'externalContractMetadata', 'attachStructuredContext', 'subsystemAccessMessage',
-  `${moduleSource}; return { contractImportRequest, listContracts, listSigningRecords, listContractTemplates, listApprovalTasks, listApprovals, listApprovalRules, listOpportunityIntakes, listContractDetectionCategories, listMyCustomers, listMyOpportunities, createContract, createExternalContract, updateContractDraft, createApprovalRule, updateApprovalRule, submitContract, commandApproval };\n//# sourceURL=contract-api-under-test.js`)(
+  `${moduleSource}; return { getContractSourceCapabilities, contractImportRequest, listContracts, listSigningRecords, listContractTemplates, listApprovalTasks, listApprovals, listApprovalRules, listOpportunityIntakes, listContractDetectionCategories, listMyCustomers, listMyOpportunities, createContract, createExternalContract, updateContractDraft, createApprovalRule, updateApprovalRule, submitContract, commandApproval };\n//# sourceURL=contract-api-under-test.js`)(
   formatUserError, externalContractMetadata, (error, context) => { error.testRequestContext = context }, (error, message) => message)
 
 async function withResponse(body, contentType, run, status = 200) {
@@ -215,5 +215,22 @@ test('原件存储故障与在途上传保留服务端诊断提示，不被写�
         return true
       })
     }, status)
+  }
+})
+
+
+test('原件能力兼容旧后端缺省上限，拒绝非法批次数量能力', async () => {
+  const base = { pdf_enabled: true, max_docx_bytes: 10485760, max_pdf_bytes: 20971520 }
+  for (const value of [undefined, 3, 100]) {
+    const data = { ...base, ...(value === undefined ? {} : { max_batch_items: value }) }
+    await withResponse(JSON.stringify({ code: 'OK', data }), 'application/json', async () => {
+      assert.deepEqual(await api.getContractSourceCapabilities(), data)
+    })
+  }
+  for (const value of [0, -1, 101, 3.5, '3', null]) {
+    await withResponse(JSON.stringify({ code: 'OK', data: { ...base, max_batch_items: value } }),
+      'application/json', async () => {
+        await assert.rejects(api.getContractSourceCapabilities(), error => error.code === 'INVALID_CONTRACT_RESPONSE')
+      })
   }
 })
