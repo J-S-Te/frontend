@@ -1,10 +1,10 @@
 // 历史Excel只生成既有导入契约，实际目录、权限及开立能力仍由服务端校验。
 export const historicalExcelModes = ['ARCHIVE_ONLY', 'HISTORICAL_CLOSED']
 export const historyExcelHeaders = ['合同编号', '原签署日期', '原合同状态', '原客户名称',
-  '原负责人', '财务处理方式', '报表统计方式', '报表来源通道', '无历史财务事实']
+  '原负责人', '报表统计方式']
+const legacyHistoryHeaders = [...historyExcelHeaders, '报表来源通道', '财务处理方式', '无历史财务事实']
 export const historyFactHeaders = ['合同编号', '来源系统', '事实类型', '原事实编号']
 const statusValues = { 已归档: 'archived', 已完成: 'completed', 已终止: 'terminated' }
-const financeValues = { 仅保留凭证: 'EVIDENCE_ONLY', 重建历史台账: 'FULL_REPLAY' }
 const reportValues = { 档案单独统计: 'ARCHIVE_SEPARATE', 历史单独统计: 'HISTORICAL_SEPARATE' }
 const channelValues = { 仅API: 'API_ONLY', API及来源事实: 'API_AND_SOURCE_FACTS' }
 const keyPattern = /^[A-Za-z0-9_.:-]{1,128}$/
@@ -63,52 +63,40 @@ function historyExcelIssue(issues, row, code, message) {
     contractNumber: historyText(row.values['合同编号']), code, message, blocking: true })
 }
 
-// readHistoryExcelRecords 合并显式历史证据和财务事实，不访问CRM或创建客户。
+// readHistoryExcelRecords 合并历史档案并拒绝旧财务导入内容，不访问CRM或创建客户。
 // 参数：sheets为Excel分表，records为已解析合同记录。
 // 返回值：保留原记录字段的新记录及阻断问题；分表可缺省，由页面补齐历史信息。
 export function readHistoryExcelRecords(sheets = [], records = []) {
-  const result = records.map(r => ({ ...r }))
+  const result = records.map(r => ({ ...r, ...(historyText(r.currentOwnerName)
+    ? { historyEvidence: { ...r.historyEvidence, target_owner_name: historyText(r.currentOwnerName) } } : {}) }))
   const known = new Map(result.map(r => [r.contractNumber, r]))
   const issues = [], seen = new Set()
-  for (const row of historySheetRows(sheets, '历史档案', historyExcelHeaders, issues)) {
+  for (const row of historySheetRows(sheets, '历史档案', legacyHistoryHeaders, issues)) {
     const v = row.values, number = historyText(v['合同编号']), record = known.get(number)
     if (!record) { historyExcelIssue(issues, row, 'HISTORY_ORPHAN', '历史档案没有对应的合同明细。'); continue }
     if (seen.has(number)) { historyExcelIssue(issues, row, 'HISTORY_DUPLICATE', '同一合同只能填写一行历史档案。'); continue }
     seen.add(number)
     const signed = historyDate(v['原签署日期'])
     if (!validHistoryDate(signed)) historyExcelIssue(issues, row, 'HISTORY_DATE_INVALID', '原签署日期无效。')
-    record.historyEvidence = {}
+    record.historyEvidence ||= {}
     if (signed) record.historyEvidence.declared_signed_date = signed
     if (historyText(v['原客户名称'])) record.historyEvidence.historical_customer_name = historyText(v['原客户名称'])
     if (historyText(v['原负责人'])) record.historyEvidence.historical_owner_label = historyText(v['原负责人'])
     if (historyText(v['原合同状态'])) record.historyEvidence.historical_status = statusValues[historyText(v['原合同状态'])] || historyText(v['原合同状态'])
-    if (historyText(v['报表来源通道'])) record.historyEvidence.report_required_channels = channelValues[historyText(v['报表来源通道'])] || historyText(v['报表来源通道'])
-    const empty = historyText(v['无历史财务事实'])
-    if (empty === '是') record.historyEvidence.expected_facts = []
-    else if (empty && empty !== '否') historyExcelIssue(issues, row, 'HISTORY_FACT_DECLARATION_INVALID', '无历史财务事实请填写“是”或“否”。')
+    if (historyText(v['报表来源通道']) && (channelValues[historyText(v['报表来源通道'])] || historyText(v['报表来源通道'])) !== 'API_ONLY') {
+      historyExcelIssue(issues, row, 'HISTORY_REPORT_CHANNEL_UNSUPPORTED',
+        '新历史Excel固定通过合同接口同步档案，请移除旧模板的其他来源通道设置；已保存批次保留原值。')
+    }
+    if (historyText(v['财务处理方式']) || historyText(v['无历史财务事实'])) {
+      historyExcelIssue(issues, row, 'HISTORY_FINANCE_NOT_APPLICABLE',
+        '历史导入不参与结算开票，请使用新版模板；旧财务策略及声明不能通过导入执行。')
+    }
     record.policyOptions = {}
-    if (historyText(v['财务处理方式'])) record.policyOptions.finance_mode = financeValues[historyText(v['财务处理方式'])] || historyText(v['财务处理方式'])
     if (historyText(v['报表统计方式'])) record.policyOptions.report_mode = reportValues[historyText(v['报表统计方式'])] || historyText(v['报表统计方式'])
   }
-  const factKeys = new Set()
   for (const row of historySheetRows(sheets, '历史财务事实', historyFactHeaders, issues)) {
-    const v = row.values, record = known.get(historyText(v['合同编号']))
-    if (!record) { historyExcelIssue(issues, row, 'HISTORY_ORPHAN', '财务事实没有对应的合同明细。'); continue }
-    const fact = { source_system: historyText(v['来源系统']),
-      fact_type: ({ 收款: 'RECEIPT', 核销: 'ALLOCATION' })[v['事实类型']] || historyText(v['事实类型']),
-      external_fact_id: historyText(v['原事实编号']) }
-    const key = JSON.stringify([record.contractNumber, fact])
-    if (!keyPattern.test(fact.source_system) || fact.source_system.length > 64 || !keyPattern.test(fact.external_fact_id)
-        || !['RECEIPT', 'ALLOCATION'].includes(fact.fact_type) || factKeys.has(key)) {
-      historyExcelIssue(issues, row, 'HISTORY_FACT_INVALID', '财务事实字段无效或重复。'); continue
-    }
-    factKeys.add(key)
-    record.historyEvidence ||= {}
-    if (record.historyEvidence.expected_facts?.length === 0 && seen.has(record.contractNumber)) {
-      historyExcelIssue(issues, row, 'HISTORY_FACT_CONFLICT', '已声明无历史财务事实，不能同时填写事实明细。')
-    }
-    record.historyEvidence.expected_facts ||= []
-    record.historyEvidence.expected_facts.push(fact)
+    historyExcelIssue(issues, row, 'HISTORY_FINANCE_NOT_APPLICABLE',
+      '历史导入不采集收款或核销事实，请保留原财务资料并由财务人员按正常流程处理。')
   }
   return { records: result, issues }
 }
@@ -124,13 +112,13 @@ export function historyImportDetails(row, mode, options = {}) {
       historical_status: historyText(options.historicalStatus),
       historical_customer_name: historyText(options.historicalCustomerName),
       historical_owner_label: historyText(options.historicalOwnerLabel),
-      target_owner_user_id: historyText(options.targetOwnerUserID),
-      report_required_channels: historyText(options.reportChannels),
-      ...(options.noHistoricalFacts === true ? { expected_facts: [] } : {}),
+      target_owner_user_id: row.historyEvidence?.target_owner_name
+        ? historyText(row.historyEvidence.target_owner_user_id) : historyText(options.targetOwnerUserID),
+      report_required_channels: 'API_ONLY',
       ...row.historyEvidence,
     },
     policy_options: { policy_version: 1, project_mode: 'NONE', responsibility_mode: 'INACTIVE',
-      signing_mode: 'DECLARED_ONLY', finance_mode: archive ? 'NONE' : historyText(options.financeMode),
+      signing_mode: 'DECLARED_ONLY', finance_mode: 'NONE',
       report_mode: archive ? 'ARCHIVE_SEPARATE' : historyText(options.reportMode), ...row.policyOptions },
   }
 }
@@ -142,7 +130,10 @@ export function validateHistoryImportDetails(detail, mode) {
   const e = detail.history_evidence || {}, p = detail.policy_options || {}, issues = []
   const add = (field, message) => issues.push({ field, code: 'HISTORY_INVALID', message })
   if (!historicalExcelModes.includes(mode)) add('mode', 'Excel历史导入只支持历史存档或历史结清档案。')
-  if (!e.target_owner_user_id || e.target_owner_user_id.length > 64) add('history_evidence.target_owner_user_id', '请选择当前负责人。')
+  if ((!e.target_owner_user_id && !historyText(e.target_owner_name)) || historyText(e.target_owner_user_id).length > 64) {
+    add('history_evidence.target_owner_user_id', '请在Excel填写当前负责人姓名，或选择当前负责人。')
+  }
+  if ([...historyText(e.target_owner_name)].length > 128) add('history_evidence.target_owner_name', '当前负责人姓名不能超过128个字。')
   if (!validHistoryDate(e.declared_signed_date)) add('history_evidence.declared_signed_date', '原签署日期无效。')
   const statuses = mode === 'ARCHIVE_ONLY' ? ['archived'] : ['archived', 'completed', 'terminated']
   if (!statuses.includes(e.historical_status)) add('history_evidence.historical_status', '请明确原合同状态。')
@@ -150,7 +141,7 @@ export function validateHistoryImportDetails(detail, mode) {
   if (p.policy_version !== 1 || p.project_mode !== 'NONE' || p.responsibility_mode !== 'INACTIVE'
       || p.signing_mode !== 'DECLARED_ONLY' || !['ARCHIVE_SEPARATE', 'HISTORICAL_SEPARATE'].includes(p.report_mode)
       || (mode === 'ARCHIVE_ONLY' && (p.finance_mode !== 'NONE' || p.report_mode !== 'ARCHIVE_SEPARATE'))
-      || (mode === 'HISTORICAL_CLOSED' && !['EVIDENCE_ONLY', 'FULL_REPLAY'].includes(p.finance_mode))) {
+      || (mode === 'HISTORICAL_CLOSED' && !['NONE', 'EVIDENCE_ONLY', 'FULL_REPLAY'].includes(p.finance_mode))) {
     add('policy_options', '历史处理策略不完整或与模式冲突，请核对财务及报表处理方式。')
   }
   if (p.finance_mode === 'FULL_REPLAY' && !Array.isArray(e.expected_facts)) {

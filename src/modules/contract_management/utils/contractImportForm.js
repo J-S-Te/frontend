@@ -424,6 +424,8 @@ function importRowSourceRef(row, files, sources) {
 // 顶层字段中文名统一用 snake_case 作键：驼峰路径在归一化时转成 snake_case 再查表，
 // 保证服务端 snake_case 与本地校验器 camelCase 只有一套叫法。
 const importMetadataFieldLabels = {
+  target_owner_name: '当前负责人姓名', target_owner_user_id: '当前负责人账号',
+  history_evidence: '历史来源信息',
   title: '合同标题',
   contract_type: '合同类型',
   service_type: '服务类型',
