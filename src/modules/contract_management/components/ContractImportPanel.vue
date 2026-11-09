@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { contractImportRequest, listContractImportBatches, releaseContractImportItem,
   getImportItemDocumentDescriptor, importItemSourceURL, openContractCRMLogin,
   listMyCustomers, ensureContractCRMDirectorySession, listContractDetectionCategories,
-  getImportAutoApproveSetting, setImportAutoApproveSetting } from '../api/contract.js'
+  getImportAutoApproveSetting, setImportAutoApproveSetting, listLocalCatalogGrantTargets } from '../api/contract.js'
 import { formatBusinessDateTime } from '@/modules/shared/utils/businessTime.js'
 import { copyTextToClipboard } from '@/modules/shared/utils/clipboard.js'
 import ContractPDFPreview from './ContractPDFPreview.vue'
@@ -15,6 +15,7 @@ import { buildImportManifestFromRows, createImportFormRow, emptyImportServiceIte
   importFieldLabel, importRowsFromItems, validateImportFormRows } from '../utils/contractImportForm.js'
 import { applyContractExcelCustomerLookup, blockingContractExcelIssues, buildContractExcelImportRows,
   matchContractExcelRecordsToFiles, parseContractExcelWorkbook, summarizeContractExcelImport } from '../utils/contractExcelImport.js'
+import { historicalExcelModes, historyImportDetails, readHistoryExcelRecords } from '../utils/contractHistoryExcel.js'
 import { contractExcelMaximumBytes, contractExcelTemplateURL, readContractExcelWorkbook } from '../utils/contractExcelReader.js'
 import { externalContractTypes, contractSystemLevels, validateContractSourceFile } from '../utils/contractPayload.js'
 import { paymentAmountMinor } from '../utils/paymentTerms.js'
@@ -36,7 +37,12 @@ const busy = ref(false), error = ref(''), commitKey = ref(''), sourceSelectionVe
 const crmConnectionMessage = ref('')
 const batches = ref([]), listOffset = ref(0), listNextOffset = ref(null), listHasMore = ref(false), listLimitReached = ref(false), document = ref(null), confirmationAttempt = ref(null), actionAttempt = ref(null)
 const listBusy = ref(false), listError = ref('')
-const entryMode = ref(props.supportedModes.includes('NORMAL') ? 'NORMAL' : (props.supportedModes[0] || 'NORMAL'))
+const newBatchModes = computed(() => props.supportedModes.filter(mode => historicalExcelModes.includes(mode)))
+const entryMode = ref(newBatchModes.value[0] || '')
+const historyOptions = ref({ targetOwnerUserID: '', declaredSignedDate: '', historicalStatus: '',
+  historicalCustomerName: '', historicalOwnerLabel: '', financeMode: '', reportMode: '', reportChannels: '', noHistoricalFacts: false })
+const sourceSystem = ref('legacy')
+const historyOwnerOptions = ref([]), historyOwnerBusy = ref(false), historyOwnerError = ref('')
 const formRows = ref([]), jsonAuthoritative = ref(false), fileMessage = ref(''), advancedMessage = ref('')
 const normalEntryMode = ref('excel'), excelFile = ref(null), excelBusy = ref(false), excelMessage = ref('')
 const excelIssues = ref([]), excelSummary = ref(null), excelCRMRequired = ref(false), excelCRMProgress = ref(''), excelStale = ref(false)
@@ -165,8 +171,59 @@ function provisionOpportunityText(plan) {
   return `商机：金额 ${amount || '—'}，签约日 ${date || '—'}`
 }
 const isNormalEntry = computed(() => entryMode.value === 'NORMAL')
-const usesJsonManifest = computed(() => !isNormalEntry.value || jsonAuthoritative.value)
+const isHistoricalEntry = computed(() => historicalExcelModes.includes(entryMode.value))
+const originalManifestRequired = computed(() => (batch.value?.items || []).some(entry => entry.item?.mode === 'CONTINUE_LIVE'))
+const isFormEntry = computed(() => !originalManifestRequired.value && (isNormalEntry.value || isHistoricalEntry.value))
+const usesJsonManifest = computed(() => !isFormEntry.value || jsonAuthoritative.value)
+const selectableModes = computed(() => modeLocked.value ? [entryMode.value] : newBatchModes.value)
 const modeLocked = computed(() => Boolean(batch.value?.items?.length))
+watch(newBatchModes, (modes) => {
+  if (!batchID.value && !files.value.length && !formRows.value.length && !modes.includes(entryMode.value)) {
+    entryMode.value = modes[0] || ''
+  }
+})
+
+// importFormOptions 统一预检与清单生成选项，避免历史行误用普通客户校验。
+// 参数：无；读取当前批次和操作者明确填写的历史信息。
+// 返回值：纯转换器选项，已有批次始终沿用原来源系统。
+function importFormOptions() {
+  return { sourceSystem: batch.value?.source_system || (isHistoricalEntry.value ? sourceSystem.value : 'manual'),
+    mode: entryMode.value, files: files.value, sources: batch.value?.sources || [], historyOptions: historyOptions.value }
+}
+
+// loadHistoryOwners 读取已有合同目录中的真实账号，权限不足不退回任意ID输入。
+// 参数：无。
+// 返回值：无；失败显示错误并保留已选负责人。
+async function loadHistoryOwners() {
+  if (historyOwnerBusy.value) return
+  historyOwnerBusy.value = true
+  historyOwnerError.value = ''
+  try {
+    const rows = await listLocalCatalogGrantTargets()
+    if (!disposed) historyOwnerOptions.value = rows.filter(row => row.subject_type === 'USER' && row.subject_id !== props.actorId)
+  } catch (failure) {
+    if (!disposed) historyOwnerError.value = failure.message || '当前负责人目录不可用。'
+  } finally { if (!disposed) historyOwnerBusy.value = false }
+}
+
+// applyBatchHistory 显式把本批信息应用到行，避免输入默认值覆盖已恢复历史事实。
+// 参数：无；使用操作者当前填写的本批历史信息。
+// 返回值：无；逐行错误由本地校验重新生成。
+function applyBatchHistory() {
+  if (busy.value || !isHistoricalEntry.value) return
+  error.value = ''
+  if (historyOptions.value.noHistoricalFacts && formRows.value.some(row => !row.contractId && row.historyEvidence?.expected_facts?.length)) {
+    error.value = '已有历史财务事实，不能用“无历史事实”覆盖；请核对原始记录。'
+    return
+  }
+  for (const row of formRows.value) {
+    if (row.contractId) continue
+    const detail = historyImportDetails({}, row.importMode || entryMode.value, historyOptions.value)
+    row.historyEvidence = { ...row.historyEvidence, ...detail.history_evidence }
+    row.policyOptions = { ...row.policyOptions, ...detail.policy_options }
+  }
+  applyFormIssues(validateImportFormRows(formRows.value, importFormOptions()))
+}
 const drawerRow = computed(() => formRows.value.find((row) => row.key === drawerRowKey.value) || null)
 const drawerSourceError = ref('')
 const localImportSources = computed(() => props.sourceCapabilities?.counterparty_source === 'local'
@@ -187,7 +244,7 @@ const drawerSourceCapabilities = computed(() => {
 const drawerLocalCounterparty = computed(() => drawerSourceCapabilities.value.counterparty_source === 'local')
 const drawerLocalCategories = computed(() => drawerSourceCapabilities.value.category_source === 'local')
 watch(localImportSources, (local) => {
-  if (local && !excelFile.value && !formRows.value.length && !batch.value?.items?.length) {
+  if (local && isNormalEntry.value && !excelFile.value && !formRows.value.length && !batch.value?.items?.length) {
     normalEntryMode.value = 'manual'
   }
 }, { immediate: true })
@@ -263,6 +320,9 @@ const importErrorReportRows = computed(() => contractImportErrorRows(batch.value
  * 参数：无；以 item_key 精确对应，避免重名文件串行。
  * 返回值：无。
  */
+// syncRowBatchState 同步服务端行状态及精确原件代次，不覆盖未保存的合同字段。
+// 参数：无。
+// 返回值：无；历史事实仍保留当前编辑值。
 function syncRowBatchState() {
   const entries = new Map((batch.value?.items || []).map((entry) => [entry.item.item_key, entry]))
   for (const row of formRows.value) {
@@ -270,7 +330,9 @@ function syncRowBatchState() {
     row.batchIssues = entry?.issues || []
     row.state = entry?.state || 'DRAFT'
     row.contractId = entry?.contract_id || ''
+    if (row.contractId && entry?.item) row.savedItem = JSON.parse(JSON.stringify(entry.item))
     row.normalized = entry?.normalized_metadata || null
+    if (entry?.item?.source_file_ref) row.sourceFileRef = entry.item.source_file_ref
   }
 }
 
@@ -517,7 +579,7 @@ async function resolveExcelCustomers(records, ticket) {
  * 返回值：Promise<void>；结构性匹配问题阻断预检，字段问题交给现有逐行校验。
  */
 async function applyExcelImport() {
-  if (busy.value || excelBusy.value || !excelFile.value || !isNormalEntry.value) return
+  if (busy.value || excelBusy.value || !excelFile.value || !isFormEntry.value) return
   if (batchHasCreatedContract()) {
     excelMessage.value = '当前批次已有创建完成的合同，不能用 Excel 覆盖详情；请逐行核对已建项，或开始新批次。'
     excelIssues.value = []
@@ -533,25 +595,35 @@ async function applyExcelImport() {
   try {
     await ensureDetectionCategories()
     const sheets = await readContractExcelWorkbook(excelFile.value)
-    if (disposed || ticket !== excelGeneration || normalEntryMode.value !== 'excel' || !isNormalEntry.value) return
+    if (disposed || ticket !== excelGeneration || normalEntryMode.value !== 'excel' || !isFormEntry.value) return
     const parsed = parseContractExcelWorkbook(sheets)
     const matchingFiles = excelSourceFiles.value
     const matched = matchContractExcelRecordsToFiles(parsed.records, matchingFiles)
     if (disposed || ticket !== excelGeneration || normalEntryMode.value !== 'excel') return
-    const resolved = await resolveExcelCustomers(matched.matchedRecords, ticket)
+    const historical = isHistoricalEntry.value ? readHistoryExcelRecords(sheets, matched.matchedRecords)
+      : { records: matched.matchedRecords, issues: [] }
+    const resolved = isHistoricalEntry.value ? historical.records
+      : await resolveExcelCustomers(matched.matchedRecords, ticket)
     if (!resolved || disposed || ticket !== excelGeneration || normalEntryMode.value !== 'excel') return
     const keyByFileName = {}
     for (const row of formRows.value) if (row.fileName && row.key) keyByFileName[row.fileName] = row.key
     const rows = buildContractExcelImportRows(resolved, { keyByFileName })
+    if (isHistoricalEntry.value) rows.forEach((row, index) => {
+      const existing = formRows.value.find(old => old.fileName === row.fileName)
+      row.importMode = existing?.importMode
+      row.sourceFileRef = existing?.sourceFileRef
+      row.historyEvidence = { ...existing?.historyEvidence, ...resolved[index].historyEvidence }
+      row.policyOptions = { ...existing?.policyOptions, ...resolved[index].policyOptions }
+    })
     // parsed.issues 已汇总工作簿问题和所有 Excel 行的问题；未被 PDF 匹配的行也必须保留其问题，
     // 否则重复合同编号等结构性错误会在后续展示/阻断时丢失。
-    const finalIssues = dedupeExcelIssues([...parsed.issues, ...matched.issues, ...resolved.flatMap((record) => record.issues)])
+    const finalIssues = dedupeExcelIssues([...parsed.issues, ...matched.issues, ...historical.issues, ...resolved.flatMap((record) => record.issues)])
       // 空合同编号会同时产生 record 与 match 两条同义问题；页面只保留带行号的 match 一条。
       .filter((issue) => !(issue.scope === 'record' && issue.code === 'CONTRACT_NUMBER_REQUIRED'))
     formRows.value = rows
     excelIssues.value = finalIssues
     excelSummary.value = summarizeContractExcelImport({ records: parsed.records, matchedRecords: resolved, issues: finalIssues, files: matchingFiles })
-    const rowFieldIssues = validateImportFormRows(rows, { files: files.value, sources: batch.value?.sources || [] })
+    const rowFieldIssues = validateImportFormRows(rows, importFormOptions())
     applyFormIssues(rowFieldIssues)
     const directoryIssueCount = applyExcelDirectoryIssues(rows)
     const fieldIssueCount = rowFieldIssues.length + directoryIssueCount
@@ -584,7 +656,7 @@ async function applyExcelImport() {
  * 返回值：无；切回手动时只为缺少表单行的原件补行。
  */
 function selectNormalEntryMode(value) {
-  if (busy.value || !isNormalEntry.value || !['excel', 'manual'].includes(value)) return
+  if (busy.value || !isFormEntry.value || !['excel', 'manual'].includes(value)) return
   if (value === 'excel' && localImportSources.value) {
     error.value = '本地来源请使用逐份表单选择目录引用，可一次上传多份原件后批量预检。'
     return
@@ -622,7 +694,7 @@ function selectNormalEntryMode(value) {
  * 返回值：无；不自动重建表单行，避免静默覆盖用户在「编辑详情」中已做的修改。
  */
 function markExcelStale() {
-  if (normalEntryMode.value !== 'excel' || !excelFile.value || !isNormalEntry.value) return
+  if (normalEntryMode.value !== 'excel' || !excelFile.value || !isFormEntry.value) return
   excelGeneration++
   excelBusy.value = false
   excelCRMProgress.value = ''
@@ -702,13 +774,13 @@ function selectFiles(event) {
     }
     try { validateContractSourceFile(file, { pdfEnabled: props.pdfEnabled }) }
     catch (failure) { fileMessage.value = `${file.name}：${failure.message}`; continue }
-    if (isNormalEntry.value && nextFiles.length >= 100) {
+    if (isFormEntry.value && nextFiles.length >= 100) {
       fileMessage.value = '每批最多 100 份合同，请拆分后再导入。'
       break
     }
     known.add(file.name)
     nextFiles.push(file)
-    if (isNormalEntry.value && normalEntryMode.value === 'manual' && !nextRows.some((row) => row.fileName === file.name)) {
+    if (isFormEntry.value && normalEntryMode.value === 'manual' && !nextRows.some((row) => row.fileName === file.name)) {
       const row = createImportFormRow({ fileName: file.name })
       flagMissingExternalRecordId(row)
       nextRows.push(row)
@@ -718,7 +790,7 @@ function selectFiles(event) {
   files.value = nextFiles
   const selectedNames = new Set(nextFiles.map((file) => file.name))
   excelExcludedFiles.value = excelExcludedFiles.value.filter((name) => !selectedNames.has(name))
-  if (isNormalEntry.value && normalEntryMode.value === 'manual') formRows.value = nextRows
+  if (isFormEntry.value && normalEntryMode.value === 'manual') formRows.value = nextRows
   advancedMessage.value = ''
   if (filesChanged) markExcelStale()
 }
@@ -733,7 +805,14 @@ function dropFiles(event) {
   if (dropped.length) selectFiles({ target: { files: dropped, value: '' } })
 }
 
+// removeRow 移除未建项及其新选原件，已建合同保持冻结身份。
+// 参数：row为当前表单行。
+// 返回值：无；已建项需要纠错时显示明确提示。
 function removeRow(row) {
+  if (row.contractId) {
+    error.value = '该项已创建合同，不能从批次移除；更正请走合同纠错流程。'
+    return
+  }
   formRows.value = formRows.value.filter((item) => item.key !== row.key)
   files.value = files.value.filter((file) => file.name !== row.fileName)
   if (row.fileName && !excelExcludedFiles.value.includes(row.fileName)) excelExcludedFiles.value.push(row.fileName)
@@ -748,27 +827,19 @@ function removeSelectedFile(file) {
   markExcelStale()
 }
 
+// selectEntryMode 切换新历史批次模式，作废迟到解析但保留用户文件与已编辑行。
+// 参数：modeValue为服务端开放的历史模式。
+// 返回值：无；已保存批次禁止改变生命周期。
 function selectEntryMode(modeValue) {
-  if (modeLocked.value || busy.value || !props.supportedModes.includes(modeValue)) return
-  const wasNormal = entryMode.value === 'NORMAL'
+  if (modeLocked.value || busy.value || !newBatchModes.value.includes(modeValue)) return
+  excelGeneration++
+  excelBusy.value = false
+  excelCRMProgress.value = ''
   entryMode.value = modeValue
   fileMessage.value = ''
   advancedMessage.value = ''
-  if (modeValue === 'NORMAL') {
-    if (!wasNormal) normalEntryMode.value = localImportSources.value ? 'manual' : 'excel'
-    if (normalEntryMode.value === 'manual') {
-      const existing = new Set(formRows.value.map((row) => row.fileName))
-      const missing = files.value.filter((file) => !existing.has(file.name)).map((file) => {
-        const row = createImportFormRow({ fileName: file.name })
-        flagMissingExternalRecordId(row)
-        return row
-      })
-      if (missing.length) formRows.value = [...formRows.value, ...missing]
-    } else {
-      markExcelStale()
-    }
-  }
-  if (modeValue !== 'NORMAL') jsonAuthoritative.value = false
+  jsonAuthoritative.value = false
+  markExcelStale()
 }
 
 function rowStaged(row) {
@@ -815,6 +886,15 @@ function removePaymentTerm(row, index) {
  * 返回值：无；同时按需读取检测类别目录。
  */
 function openRow(row, event) {
+  if (row.contractId) {
+    error.value = '该项已创建合同，保留已冻结的原件及历史信息；更正请走合同纠错流程。'
+    return
+  }
+  if (isHistoricalEntry.value) {
+    const detail = historyImportDetails(row, row.importMode || entryMode.value, historyOptions.value)
+    row.historyEvidence = detail.history_evidence
+    row.policyOptions = detail.policy_options
+  }
   drawerReturnFocus = event?.currentTarget || null
   drawerRowKey.value = row.key
   customerOptions.value = []
@@ -854,7 +934,7 @@ function onDrawerKeydown(event) {
  */
 async function ensureDetectionCategories(force = false) {
   if (drawerLocalCategories.value) return
-  if (!isNormalEntry.value || detectionCategoryLoading.value) return
+  if (!isFormEntry.value || detectionCategoryLoading.value) return
   if (!force && detectionCategoriesLoaded) return
   detectionCategoryLoading.value = true
   detectionCategoryError.value = ''
@@ -917,13 +997,14 @@ function toggleJsonAuthoritative() {
   regenerateJSON()
 }
 
+// regenerateJSON 根据当前表单生成核对清单，保留既有历史策略及来源身份。
+// 参数：无。
+// 返回值：无；校验失败时只提示，不覆盖当前清单。
 function regenerateJSON() {
-  if (!isNormalEntry.value) return
+  if (!isFormEntry.value) return
   try {
     text.value = JSON.stringify(buildImportManifestFromRows(formRows.value, {
-      sourceSystem: batch.value?.source_system || 'manual',
-      files: files.value,
-      sources: batch.value?.sources || [],
+      ...importFormOptions(),
     }), null, 2)
     advancedMessage.value = '已根据当前表单重新生成清单；表单修正后再点一次可刷新。'
   } catch (failure) {
@@ -958,12 +1039,14 @@ async function refresh(id = lookupID.value.trim(), { fromWrite = false } = {}) {
     }
     batchID.value = result.batch_id
     if (switched || lookupID.value.trim() === result.batch_id) lookupID.value = result.batch_id
+    sourceSystem.value = result.source_system || 'legacy'
     const batchMode = result.items?.[0]?.item?.mode
     if (batchMode) entryMode.value = batchMode
+    if (switched && historicalExcelModes.includes(batchMode)) normalEntryMode.value = 'excel'
     if (!text.value && result.items?.length) {
       text.value = JSON.stringify({ schema_version: 1, source_system: result.source_system, items: result.items.map((entry) => entry.item) }, null, 2)
     }
-    if (isNormalEntry.value && result.items?.length && (switched || !formRows.value.length)) {
+    if (isFormEntry.value && result.items?.length && (switched || !formRows.value.length)) {
       formRows.value = importRowsFromItems(result.items, result.sources || [])
     }
     syncRowBatchState()
@@ -989,8 +1072,10 @@ function startNewBatch() {
   crmConnectionMessage.value = ''
   formRows.value = []; jsonAuthoritative.value = false; fileMessage.value = ''; advancedMessage.value = ''
   drawerRowKey.value = ''; drawerReturnFocus = null; customerOptions.value = []; customerError.value = ''; customerCrmRequired.value = false
-  normalEntryMode.value = localImportSources.value ? 'manual' : 'excel'; resetExcelState()
-  entryMode.value = props.supportedModes.includes('NORMAL') ? 'NORMAL' : (props.supportedModes[0] || 'NORMAL')
+  normalEntryMode.value = 'excel'; resetExcelState()
+  entryMode.value = newBatchModes.value[0] || ''
+  sourceSystem.value = 'legacy'
+  for (const key of Object.keys(historyOptions.value)) historyOptions.value[key] = key === 'noHistoricalFacts' ? false : ''
 }
 
 /**
@@ -1027,22 +1112,24 @@ function importSourceErrorMessage(failure) {
 
 /**
  * preview 建立批次、逐文件暂存后提交清单预检。
- * 参数：无；普通模式以表单生成清单，历史模式使用完整 JSON；已暂存文件沿用精确file_ref。
+ * 参数：无；Excel与表单生成普通或历史清单，高级旧批次保留原JSON及精确原件代次。
  * 返回值：Promise<void>；任一不确定结果保留批次号并要求先查询。
  */
 async function preview() {
   generation++; clearTimeout(timer)
   busy.value = true; error.value = ''; fileMessage.value = ''
   crmConnectionMessage.value = ''
+  let writeStarted = false
   try {
+    if (!batchID.value && !newBatchModes.value.includes(entryMode.value)) throw new Error('批量导入仅用于历史存档或历史结清档案，新建合同请走正常流程。')
     if (batch.value?.operation_id && !['PAUSED', 'PARTIAL', 'DRAFT', 'BLOCKED', 'PREVIEWED'].includes(batch.value.state)) throw new Error('请先暂停批次并查询结果，只有未建单项可修订。')
-    if (isNormalEntry.value && normalEntryMode.value === 'excel' && excelStale.value) {
+    if (isFormEntry.value && normalEntryMode.value === 'excel' && excelStale.value) {
       throw new Error('原件或合同行已变化，请先点击「重新应用 Excel」或切换手动逐份填写后再预检。')
     }
-    if (isNormalEntry.value && normalEntryMode.value === 'excel' && excelStructuralIssues.value.length) {
+    if (isFormEntry.value && normalEntryMode.value === 'excel' && excelStructuralIssues.value.length) {
       throw new Error('Excel 与 PDF 还有未处理的结构性匹配问题，请先按上方提示修正后再预检。')
     }
-    if (isNormalEntry.value && normalEntryMode.value === 'excel') {
+    if (isFormEntry.value && normalEntryMode.value === 'excel') {
       // 用户可能在抽屉里修改了服务类型/检测类别；预检前重新用当前目录刷新一次，避免误放行或残留过期提示。
       clearExcelDirectoryIssues(formRows.value)
       const directoryIssueCount = applyExcelDirectoryIssues(formRows.value)
@@ -1051,15 +1138,18 @@ async function preview() {
     if (usesJsonManifest.value && !text.value.trim()) throw new Error('请填写完整 JSON 清单后再预检。')
     if (!usesJsonManifest.value) {
       const built = buildImportManifestFromRows(formRows.value, {
-        sourceSystem: batch.value?.source_system || 'manual', files: files.value, sources: batch.value?.sources || [],
+        ...importFormOptions(),
       })
       text.value = JSON.stringify(built, null, 2)
-      advancedMessage.value = '普通模式以表单为准，清单已从当前表单生成。'
+      advancedMessage.value = '清单已从当前表单及显式历史信息生成。'
       formRows.value.forEach((row) => { row.issues = [] })
     }
     const prepared = prepareImportManifest(
       text.value, files.value, batch.value?.sources || [], props.supportedModes, entryMode.value,
     )
+    if (!batchID.value && prepared.manifest.items.some(item => !newBatchModes.value.includes(item.mode))) {
+      throw new Error('新批量导入只接受历史存档或历史结清档案，接续履约旧批次请按原批次号恢复。')
+    }
     for (const file of files.value) validateContractSourceFile(file, { pdfEnabled: props.pdfEnabled })
     // 上传前兜底：映射缺失或不是带 name 的对象时立刻失败，绝不把 undefined 塞进 FormData（会被序列化成 "undefined" 发出去）。
     for (const item of prepared.manifest.items) {
@@ -1070,6 +1160,7 @@ async function preview() {
         throw new Error(`原件未就绪：${label}，请重新选择原件后再预检。`)
       }
     }
+    writeStarted = true
     if (!batch.value) {
       const created = await contractImportRequest('create', '', { schema_version: 1, source_system: prepared.manifest.source_system })
       batch.value = created; batchID.value = created.batch_id; lookupID.value = created.batch_id
@@ -1098,9 +1189,9 @@ async function preview() {
     } else if (failure?.issues?.length) {
       applyFormIssues(failure.issues)
       error.value = `表单有 ${failure.issues.length} 处需要修正：${failure.message}`
-      if (batchID.value) await refresh(batchID.value, { fromWrite: true })
+      if (writeStarted && batchID.value) await refresh(batchID.value, { fromWrite: true })
     } else {
-      if (batchID.value) await refresh(batchID.value, { fromWrite: true })
+      if (writeStarted && batchID.value) await refresh(batchID.value, { fromWrite: true })
       error.value = `${importSourceErrorMessage(failure)}${batchID.value ? ' 批次已保留，请先查询状态。' : ''}`
     }
   } finally { busy.value = false }
@@ -1378,7 +1469,7 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
     <summary>批量导入外部合同原件</summary>
     <div class="contract-import-body">
       <div class="contract-import-intro">
-        <p class="contract-import-lede">当前开放：{{ supportedModes.map(mode => modeLabels[mode] || mode).join('、') }}。普通合同可先批量上传 PDF、再上传 Excel 自动写入详情（也可切换手动逐份填写），仍需逐份走现有审批；历史合同需要完整 JSON 清单并走当前独立导入确认，各子系统分别核对放行。</p>
+        <p class="contract-import-lede">批量导入用于历史存档与历史结清档案。上传合同原件和 Excel，逐行核对历史信息及客户开立计划后提交；新建合同请走正常新建流程。</p>
         <p class="contract-import-note">历史签署日期是来源声明，导入确认不补造原年度审批，也不替代签署原件核验。</p>
         <p v-if="!enabled" class="contract-import-note">新增批次已关闭；已有批次仍可查询、暂停与恢复。</p>
       </div>
@@ -1439,27 +1530,48 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
       </section>
 
       <template v-if="formEditable">
+        <p v-if="!batch && !newBatchModes.length" class="contract-import-alert" role="alert">服务端尚未开放历史存档或历史结清导入，请联系管理员；不会改用普通合同导入。</p>
         <section class="contract-import-block" aria-label="导入方式">
           <p v-if="batch?.operation_id" class="contract-import-note">已建单项须原样保留，只能修订尚未建单项；新修订会使旧预检和执行代次失效。已建单内容更正需先核对原合同。</p>
-          <fieldset v-if="supportedModes.length > 1" class="contract-import-mode" :disabled="busy || modeLocked">
+          <fieldset v-if="selectableModes.length" class="contract-import-mode" :disabled="busy || modeLocked">
             <legend>导入方式</legend>
-            <label v-for="modeValue in supportedModes" :key="modeValue">
+            <label v-for="modeValue in selectableModes" :key="modeValue">
               <input type="radio" name="contract-import-entry-mode" :value="modeValue" :checked="entryMode === modeValue" @change="selectEntryMode(modeValue)" />
               {{ modeLabels[modeValue] || modeValue }}{{ modeValue === 'NORMAL' ? '（Excel/表单）' : '（完整 JSON 清单）' }}
             </label>
           </fieldset>
           <p v-if="modeLocked" class="contract-import-hint">批次已保存清单，导入方式随当前批次固定；需要换一种方式请开始新批次。</p>
-          <p v-if="isNormalEntry" class="contract-import-hint">普通新合同按当前来源选择已有 CRM 客户或本地交易对方，Excel 和手动表单都不会自动建客户。历史资料需要自动建档时，请选择“历史存档”或“历史结清档案”，并提交完整 JSON 清单。</p>
+          <p v-if="isNormalEntry" class="contract-import-hint">普通新合同按当前来源选择已有 CRM 客户或本地交易对方，Excel 和手动表单都不会自动建客户。历史资料需要自动建档时，请选择“历史存档”或“历史结清档案”，并上传 Excel。</p>
           <p v-else-if="['ARCHIVE_ONLY', 'HISTORICAL_CLOSED'].includes(entryMode)" class="contract-import-hint">历史自动建档启用后，由服务端查重：客户不存在时创建客户，客户编号由 CRM 生成；客户重名或停用时逐项阻断。预检只展示计划，提交冻结清单后才执行创建。</p>
         </section>
 
-        <section v-if="isNormalEntry" class="contract-import-block contract-import-stage" aria-label="普通新合同导入表单">
-          <fieldset class="contract-import-normal-modes" :disabled="busy">
+        <section v-if="isFormEntry" class="contract-import-block contract-import-stage" :aria-label="isHistoricalEntry ? '历史合同Excel导入表单' : '已有普通批次修订表单'">
+          <fieldset v-if="isHistoricalEntry" id="contract-import-history" class="contract-form-grid" :disabled="busy">
+            <legend>本批历史信息（Excel 行中已填写的值优先）</legend>
+            <label><span>来源系统标识</span><input v-model="sourceSystem" maxlength="64" :readonly="!!batch" pattern="[A-Za-z0-9_.:\-]+" /><small>同一来源保持不变，用于识别重复导入。</small></label>
+            <label><span>当前负责人</span><select v-model="historyOptions.targetOwnerUserID"><option value="">请选择负责人</option><option v-if="actorId" :value="actorId">当前登录人（提交时服务端核验）</option><option v-for="owner in historyOwnerOptions" :key="owner.subject_id" :value="owner.subject_id">{{ owner.name }}</option></select></label>
+            <button v-if="sourceCapabilities.local_catalog_manage" class="contract-button secondary small" type="button" :disabled="historyOwnerBusy" @click="loadHistoryOwners">{{ historyOwnerBusy ? '正在读取账号…' : '读取其他可选负责人' }}</button>
+            <p v-if="historyOwnerError" class="contract-field-error" role="alert">{{ historyOwnerError }}</p>
+            <label><span>原签署日期（可空）</span><input v-model="historyOptions.declaredSignedDate" type="date" /><small>按原件填写，不自动取合同开始日期。</small></label>
+            <label><span>原合同状态</span><select v-model="historyOptions.historicalStatus"><option value="">请选择原状态</option><option value="archived">已归档</option><template v-if="entryMode === 'HISTORICAL_CLOSED'"><option value="completed">已完成</option><option value="terminated">已终止</option></template></select></label>
+            <label><span>原客户名称（可空）</span><input v-model="historyOptions.historicalCustomerName" maxlength="255" /></label>
+            <label><span>原负责人姓名（可空）</span><input v-model="historyOptions.historicalOwnerLabel" maxlength="128" /></label>
+            <template v-if="entryMode === 'HISTORICAL_CLOSED'">
+              <label><span>财务处理方式</span><select v-model="historyOptions.financeMode"><option value="">请选择财务处理方式</option><option value="EVIDENCE_ONLY">仅保留凭证</option><option value="FULL_REPLAY">重建历史台账</option></select></label>
+              <label><span>报表统计方式</span><select v-model="historyOptions.reportMode"><option value="">请选择统计方式</option><option value="ARCHIVE_SEPARATE">档案单独统计</option><option value="HISTORICAL_SEPARATE">历史单独统计</option></select></label>
+              <label v-if="historyOptions.financeMode === 'FULL_REPLAY'" class="contract-form-wide"><input v-model="historyOptions.noHistoricalFacts" type="checkbox" />明确声明本批没有历史收款或核销事实；有事实请填写 Excel“历史财务事实”分表。</label>
+              <p class="contract-import-note contract-form-wide">仅保留凭证不会重建结算台账，也不表示结算系统已核验零余额。财务重建必须提供付款条款及完整事实清单，并通过服务端能力与事实核验。</p>
+            </template>
+            <label><span>报表来源通道</span><select v-model="historyOptions.reportChannels"><option value="">请选择来源通道</option><option value="API_ONLY">仅 API</option><option value="API_AND_SOURCE_FACTS">API 及来源事实</option></select></label>
+            <button class="contract-button secondary small" type="button" :disabled="!formRows.length" @click="applyBatchHistory">用本批信息覆盖各行历史信息</button>
+            <p class="contract-import-note contract-form-wide">新行未填写的字段使用本批信息；已有批次保留逐行历史信息。覆盖会替换各行签署日期、原状态、负责人和处理策略，请先核对。</p>
+          </fieldset>
+          <fieldset v-if="isNormalEntry" class="contract-import-normal-modes" :disabled="busy">
             <legend>详情填写方式</legend>
             <label v-if="!localImportSources"><input type="radio" name="contract-import-normal-mode" value="excel" :checked="normalEntryMode === 'excel'" @change="selectNormalEntryMode('excel')" /> Excel 批量导入（推荐）</label>
             <label><input type="radio" name="contract-import-normal-mode" value="manual" :checked="normalEntryMode === 'manual'" @change="selectNormalEntryMode('manual')" /> 手动逐份填写</label>
           </fieldset>
-          <p v-if="localImportSources" class="contract-import-hint">本地来源使用逐份表单选择真实目录引用；可以一次上传多份原件并批量预检，历史清单不自动转换来源。</p>
+          <p v-if="localImportSources && isNormalEntry" class="contract-import-hint">本地来源使用逐份表单选择真实目录引用；可以一次上传多份原件并批量预检，历史清单不自动转换来源。</p>
           <template v-if="normalEntryMode === 'excel'">
             <p class="contract-import-hint">第一步选择 PDF 原件（可多选），第二步选择填写好合同详情的 Excel。PDF 文件名去掉扩展名必须与 Excel「合同明细」的合同编号完全一致；系统按合同编号一一对应写入「编辑详情」，缺 PDF、缺 Excel 行、重复编号都会在下面列出并阻止预检。</p>
             <div class="contract-import-step">
@@ -1476,7 +1588,7 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
                 <input id="contract-import-excel" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" :disabled="busy || excelBusy" @change="selectExcelFile" />
               </div>
               <p class="contract-import-note"><a :href="contractExcelTemplateURL" download>下载 Excel 标准模板（含合同明细、服务项、系统信息、付款条款和填写说明）</a></p>
-              <p class="contract-import-hint">「合同明细」支持销售姓名、客户类型、行业、地区四个可选列，四列均可留空并保留在清单中。本 Excel 入口只处理普通新合同，这些列不会触发自动建客户，仍需填写或选择已有 CRM 客户。历史自动建档请使用历史存档／历史结清的完整 JSON 清单，由服务端校验销售和客户资料。</p>
+              <p class="contract-import-hint">历史 Excel 的 CRM 客户编号可以留空，由服务端查重并在提交后自动创建客户、生成编号。自动开立时商机编号和名称都留空；填写真实销售姓名，新客户须有真实联系人和电话。客户类型、行业、地区可留空。历史档案及财务事实可填在对应分表，也可补填本批历史信息。</p>
               <p v-if="excelFile" class="contract-import-status" role="status">已选择 Excel：{{ excelFile.name }} <button class="contract-text-button" type="button" :disabled="busy || excelBusy" @click="applyExcelImport">重新应用 Excel（覆盖未保存详情）</button><button class="contract-text-button danger" type="button" :disabled="busy || excelBusy" @click="clearExcelFile">移除</button></p>
               <p v-if="excelBusy" class="contract-import-status is-loading" role="status">正在解析 Excel 并匹配 PDF…</p>
               <p v-if="excelCRMProgress" class="contract-import-status is-loading" role="status">{{ excelCRMProgress }}</p>
@@ -1513,8 +1625,8 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
           </template>
           <p v-if="fileMessage" class="contract-import-alert" role="alert">{{ fileMessage }}</p>
           <!-- 长列表自带滚动容器：max-height 有界，短列表自然收起；动作区留在容器外的页脚里。 -->
-          <div v-if="formRows.length" class="contract-import-listframe" tabindex="0" role="group" aria-label="普通合同导入行列表，可滚动">
-            <ul class="contract-import-rows" aria-label="普通合同导入行">
+          <div v-if="formRows.length" class="contract-import-listframe" tabindex="0" role="group" aria-label="合同导入行列表，可滚动">
+            <ul class="contract-import-rows" aria-label="合同导入行">
               <li v-for="(row, index) in formRows" :key="row.key" class="contract-import-row">
                 <div class="contract-import-row-head">
                   <div class="contract-import-row-id">
@@ -1523,8 +1635,8 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
                   </div>
                   <div class="contract-import-row-actions">
                     <span class="contract-badge" :class="rowStateTone(row)"><i></i>{{ stateLabels[row.state] || row.state }}</span>
-                    <button class="contract-text-button" type="button" :aria-label="`编辑第 ${index + 1} 行详情`" @click="openRow(row, $event)">编辑详情</button>
-                    <button class="contract-text-button danger" type="button" :disabled="busy" :aria-label="`移除第 ${index + 1} 行`" @click="removeRow(row)">移除</button>
+                    <button class="contract-text-button" type="button" :disabled="!!row.contractId" :aria-label="`编辑第 ${index + 1} 行详情`" @click="openRow(row, $event)">编辑详情</button>
+                    <button class="contract-text-button danger" type="button" :disabled="busy || !!row.contractId" :aria-label="`移除第 ${index + 1} 行`" @click="removeRow(row)">移除</button>
                   </div>
                 </div>
                 <dl class="contract-import-facts">
@@ -1539,7 +1651,8 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
                   <div><dt>结束日期</dt><dd>{{ row.endDate || '—' }}</dd></div>
                 </dl>
                 <p class="contract-import-row-key" :class="hasExternalRecordId(row) ? '' : 'contract-import-error-text'">来源业务键：{{ row.externalRecordId || '未填写（请在「编辑详情」补填）' }}</p>
-                <p v-if="rowIssues(row).length" class="contract-import-error-text" role="alert">发现 {{ rowIssues(row).length }} 处问题：{{ rowIssues(row)[0].message }}</p>
+                <p v-if="rowIssues(row).length" class="contract-import-error-text">发现 {{ rowIssues(row).length }} 处问题</p>
+                <ul v-if="rowIssues(row).length" class="contract-import-error-text" role="alert"><li v-for="(issue, issueIndex) in rowIssues(row)" :key="issueIndex">{{ issue.message }}</li></ul>
                 <p v-else-if="row.batchIssues.length" class="contract-import-error-text" role="alert">{{ rowBatchIssueSummary(row)[0] }}{{ row.batchIssues.length > 1 ? `（共 ${row.batchIssues.length} 处）` : '' }}</p>
               </li>
             </ul>
@@ -1551,7 +1664,7 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
           </div>
         </section>
 
-        <section v-else class="contract-import-block contract-import-stage" aria-label="历史合同完整清单导入">
+        <section v-else-if="batch" class="contract-import-block contract-import-stage" aria-label="历史合同完整清单导入">
           <p class="contract-import-hint"><strong>历史导入需要完整清单。</strong>历史存档、接续履约和历史结清档案包含 history_evidence、policy_options 等字段，继续使用 JSON 清单核对；不使用普通表单，避免丢字段或改写历史事实。</p>
           <label class="contract-import-field" for="contract-import-json">UTF-8 JSON 清单（≤2MiB，1—100项）</label>
           <textarea id="contract-import-json" v-model="text" maxlength="2097152" rows="10" :disabled="busy" placeholder='{"schema_version":1,"source_system":"legacy","items":[{"item_key":"one","external_record_id":"原业务键","mode":"ARCHIVE_ONLY","source_file_ref":"原件.pdf","metadata":{},"history_evidence":{},"policy_options":{}}]}' />
@@ -1567,10 +1680,10 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
           </div>
         </section>
 
-        <details v-if="isNormalEntry" class="contract-import-advanced" @toggle="onAdvancedToggle">
+        <details v-if="isFormEntry" class="contract-import-advanced" @toggle="onAdvancedToggle">
           <summary>高级：查看/编辑清单</summary>
           <div class="contract-import-advanced-body">
-            <p class="contract-import-hint">普通模式默认以表单为准；下方 JSON 由表单生成，仅用于核对或特殊处理。展开不会自动保存，也不会自动改写表单。</p>
+            <p class="contract-import-hint">默认以 Excel 和编辑详情为准，下方清单只用于核对或兼容旧批次。展开不会自动保存，也不会改写历史事实。</p>
             <label class="contract-import-check"><input v-model="jsonAuthoritative" type="checkbox" :disabled="busy" @change="toggleJsonAuthoritative" /> 以 JSON 清单为准（高级；勾选后表单修改不会进入预检）</label>
             <p v-if="jsonAuthoritative" class="contract-import-warning" role="alert">当前以 JSON 为准：预检直接保存下方 JSON。取消勾选会重新用表单生成清单，JSON 中的修改会被覆盖；需要历史字段请切换到历史导入方式。</p>
             <label class="contract-import-field" for="contract-import-advanced-json">清单 JSON（普通模式默认只读）</label>
@@ -1705,7 +1818,7 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
       <article ref="drawerRef" class="contract-detail-modal contract-import-drawer" role="dialog" aria-modal="true" aria-labelledby="contract-import-drawer-title" tabindex="-1" @keydown="onDrawerKeydown">
         <header>
           <div>
-            <span class="contract-badge info">普通合同导入</span>
+            <span class="contract-badge info">{{ isHistoricalEntry ? '历史合同导入' : '已有普通批次修订' }}</span>
             <h2 id="contract-import-drawer-title">{{ drawerRow.fileName }}</h2>
             <p>填写完整合同字段；金额按元输入，提交前精确转换为分，不猜测原件中的金额、客户或分期。</p>
           </div>
@@ -1716,6 +1829,19 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
           <p v-if="rowIssues(drawerRow).length" class="contract-field-error contract-form-wide" role="alert">需要修正 {{ rowIssues(drawerRow).length }} 处：{{ rowIssues(drawerRow).map(issue => issue.message).join('；') }}</p>
           <p v-if="drawerRow.batchIssues.length" class="contract-field-error contract-form-wide" role="alert">预检返回 {{ drawerRow.batchIssues.length }} 处问题：{{ rowBatchIssueSummary(drawerRow).join('；') }}</p>
           <div class="contract-form-grid">
+            <template v-if="isHistoricalEntry && drawerRow.historyEvidence">
+              <label><span>原签署日期</span><input v-model="drawerRow.historyEvidence.declared_signed_date" type="date" /></label>
+              <label><span>原合同状态</span><select v-model="drawerRow.historyEvidence.historical_status"><option value="">请选择</option><option value="archived">已归档</option><template v-if="(drawerRow.importMode || entryMode) === 'HISTORICAL_CLOSED'"><option value="completed">已完成</option><option value="terminated">已终止</option></template></select></label>
+              <label><span>原客户名称</span><input v-model="drawerRow.historyEvidence.historical_customer_name" maxlength="255" /></label>
+              <label><span>原负责人姓名</span><input v-model="drawerRow.historyEvidence.historical_owner_label" maxlength="128" /></label>
+              <label><span>当前负责人</span><select v-model="drawerRow.historyEvidence.target_owner_user_id"><option value="">请选择</option><option v-if="actorId" :value="actorId">当前登录人</option><option v-if="drawerRow.historyEvidence.target_owner_user_id && drawerRow.historyEvidence.target_owner_user_id !== actorId && !historyOwnerOptions.some(owner => owner.subject_id === drawerRow.historyEvidence.target_owner_user_id)" :value="drawerRow.historyEvidence.target_owner_user_id">已保存的负责人（服务端复核）</option><option v-for="owner in historyOwnerOptions" :key="owner.subject_id" :value="owner.subject_id">{{ owner.name }}</option></select></label>
+              <label><span>报表来源通道</span><select v-model="drawerRow.historyEvidence.report_required_channels"><option value="">请选择</option><option value="API_ONLY">仅 API</option><option value="API_AND_SOURCE_FACTS">API 及来源事实</option></select></label>
+              <template v-if="(drawerRow.importMode || entryMode) === 'HISTORICAL_CLOSED'">
+                <label><span>财务处理方式</span><select v-model="drawerRow.policyOptions.finance_mode"><option value="">请选择</option><option value="EVIDENCE_ONLY">仅保留凭证</option><option value="FULL_REPLAY">重建历史台账</option></select></label>
+                <label><span>报表统计方式</span><select v-model="drawerRow.policyOptions.report_mode"><option value="">请选择</option><option value="ARCHIVE_SEPARATE">档案单独统计</option><option value="HISTORICAL_SEPARATE">历史单独统计</option></select></label>
+                <p>历史财务事实：{{ Array.isArray(drawerRow.historyEvidence.expected_facts) ? drawerRow.historyEvidence.expected_facts.length + ' 条（已显式声明）' : '未提供；重建台账时须在 Excel 中填写' }}</p>
+              </template>
+            </template>
             <label class="contract-form-wide"><span>合同标题</span><input id="contract-import-row-title" v-model="drawerRow.title" maxlength="255" required autocomplete="off" :aria-invalid="rowIssue(drawerRow, 'title') ? 'true' : undefined" /><small v-if="rowIssue(drawerRow, 'title')" class="contract-field-error" role="alert">{{ rowIssue(drawerRow, 'title').message }}</small></label>
             <label class="contract-form-wide"><span>来源业务键：原系统合同编号/业务键（必填，用于重复导入识别）</span><input id="contract-import-row-external-record-id" v-model="drawerRow.externalRecordId" maxlength="128" pattern="[A-Za-z0-9_.:\-]+" required autocomplete="off" @input="clearExternalRecordIdIssue(drawerRow, $event)" :aria-invalid="(!hasExternalRecordId(drawerRow) || rowIssue(drawerRow, 'externalRecordId')) ? 'true' : undefined" /><small>填写来源系统中的原合同编号或业务键；只能使用字母/数字/._:-，同一批次内不能重复，重复导入据此识别同一份合同。</small><small v-if="rowIssue(drawerRow, 'externalRecordId')" class="contract-field-error" role="alert">{{ rowIssue(drawerRow, 'externalRecordId').message }}</small></label>
             <label><span>合同类型</span><select id="contract-import-row-type" v-model="drawerRow.contractType" required :aria-invalid="rowIssue(drawerRow, 'contractType') ? 'true' : undefined"><option value="" disabled>请选择合同类型</option><option v-for="type in externalContractTypes" :key="type" :value="type">{{ type }}</option></select><small v-if="rowIssue(drawerRow, 'contractType')" class="contract-field-error" role="alert">{{ rowIssue(drawerRow, 'contractType').message }}</small></label>

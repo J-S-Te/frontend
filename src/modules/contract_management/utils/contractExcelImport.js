@@ -759,7 +759,7 @@ export function applyContractExcelCustomerLookup(records = [], lookup = {}) {
 }
 
 /**
- * buildContractExcelImportRows 把匹配后的 Excel 记录转成现有普通导入表单行。
+ * buildContractExcelImportRows 把匹配后的Excel记录转换为保留历史信息的表单行。
  * 参数：records 为匹配后的记录，keyByFileName 用于复用已暂存原件的行键，避免重新预检时换键。
  * 返回值：可直接进入现有暂存/预检流程的表单行。
  */
@@ -812,6 +812,8 @@ export function buildContractExcelImportRows(records = [], { keyByFileName = {} 
     }))
     row.excelRowNumber = record.rowNumber
     row.excelIssues = record.issues
+    if (record.historyEvidence) row.historyEvidence = record.historyEvidence
+    if (record.policyOptions) row.policyOptions = record.policyOptions
     return row
   })
 }

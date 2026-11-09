@@ -113,8 +113,8 @@ test('空行与缺字段错误按行报告，可定位到具体字段', () => {
   assert.ok(validateImportFormRows([invalid]).some((issue) => issue.field === 'fileName' && issue.code === 'FILE_MISSING'))
 })
 
-test('普通表单拒绝历史模式，提醒改用完整 JSON 清单', () => {
-  assert.throws(() => buildImportManifestFromRows([validRow()], { mode: 'ARCHIVE_ONLY' }), /历史导入需要完整 JSON 清单/)
+test('历史表单必须显式提供历史信息，普通表单契约不变', () => {
+  assert.throws(() => buildImportManifestFromRows([validRow()], { mode: 'ARCHIVE_ONLY' }), /请选择当前负责人/)
   assert.doesNotThrow(() => buildImportManifestFromRows([validRow()], { mode: 'NORMAL' }))
 })
 

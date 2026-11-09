@@ -7,6 +7,7 @@ import { applyContractExcelCustomerLookup, blockingContractExcelIssues, buildCon
   summarizeContractExcelImport } from './utils/contractExcelImport.js'
 import { readContractExcelWorkbook } from './utils/contractExcelReader.js'
 import { validateImportFormRows } from './utils/contractImportForm.js'
+import { historyExcelHeaders, historyFactHeaders } from './utils/contractHistoryExcel.js'
 
 const mainHeaders = [...contractExcelTemplateHeaders.main]
 const serviceHeaders = [...contractExcelTemplateHeaders.services]
@@ -251,14 +252,16 @@ test('下载模板的工作表名和表头与解析器常量一致', async () =>
   for (const header of ['销售姓名', '客户类型', '行业', '地区']) {
     assert.equal(mainHeaderRow.filter((cell) => cell === header).length, 1, header)
   }
-  assert.deepEqual([...byName.keys()], ['合同明细', '服务项', '系统信息', '付款条款', '填写说明'])
+  assert.deepEqual([...byName.keys()], ['合同明细', '服务项', '系统信息', '付款条款', '填写说明', '历史档案', '历史财务事实'])
+  assert.deepEqual(byName.get('历史档案')[0], historyExcelHeaders)
+  assert.deepEqual(byName.get('历史财务事实')[0], historyFactHeaders)
 })
 
 test('浏览器读取适配层可直接读取 ArrayBuffer 并返回全部工作表', async () => {
   const buffer = await readFile(new URL('../../../public/contract-import-template.xlsx', import.meta.url))
   const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
   const sheets = await readContractExcelWorkbook(arrayBuffer)
-  assert.deepEqual(sheets.map((sheet) => sheet.sheet), ['合同明细', '服务项', '系统信息', '付款条款', '填写说明'])
+  assert.deepEqual(sheets.map((sheet) => sheet.sheet), ['合同明细', '服务项', '系统信息', '付款条款', '填写说明', '历史档案', '历史财务事实'])
   assert.deepEqual(sheets[0].data[0], [...contractExcelTemplateHeaders.main])
 })
 
