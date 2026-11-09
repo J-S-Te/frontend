@@ -219,6 +219,22 @@ test('原件存储故障与在途上传保留服务端诊断提示，不被写�
 })
 
 
+test('历史负责人目录能力允许可选布尔值，拒绝非法字段类型', async () => {
+  const base = { pdf_enabled: true, max_docx_bytes: 10485760, max_pdf_bytes: 20971520 }
+  for (const value of [undefined, false, true]) {
+    const data = { ...base, ...(value === undefined ? {} : { history_owner_directory: value }) }
+    await withResponse(JSON.stringify({ code: 'OK', data }), 'application/json', async () => {
+      assert.deepEqual(await api.getContractSourceCapabilities(), data)
+    })
+  }
+  for (const value of ['true', 1, null, {}]) {
+    await withResponse(JSON.stringify({ code: 'OK', data: { ...base, history_owner_directory: value } }),
+      'application/json', async () => {
+        await assert.rejects(api.getContractSourceCapabilities(), error => error.code === 'INVALID_CONTRACT_RESPONSE')
+      })
+  }
+})
+
 test('原件能力兼容旧后端缺省上限，拒绝非法批次数量能力', async () => {
   const base = { pdf_enabled: true, max_docx_bytes: 10485760, max_pdf_bytes: 20971520 }
   for (const value of [undefined, 3, 100]) {

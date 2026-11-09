@@ -98,6 +98,32 @@ test('LOCAL普通导入抽屉保留来源版本、无需CRM/项目目录，实�
   assert.equal(panel.state.normalEntryMode.value, 'manual')
 })
 
+test('历史负责人目录在外部来源下按独立能力展示，不改变已选负责人', async () => {
+  const panel = importPanelHarness('ARCHIVE_ONLY', undefined, undefined, undefined, undefined,
+    undefined, { counterparty_source: 'crm', category_source: 'project',
+      local_catalog_manage: false, history_owner_directory: true })
+  useNewHistory(panel)
+  panel.state.historyOptions.value.targetOwnerUserID = 'saved-owner'
+  assert.match(await panel.html(), /读取其他可选负责人/)
+  assert.equal(panel.state.historyOptions.value.targetOwnerUserID, 'saved-owner')
+})
+
+test('历史负责人目录显式无权限时隐藏，旧API缺字段时回退原能力', async () => {
+  for (const [capabilities, visible] of [
+    [{ local_catalog_manage: true, history_owner_directory: false }, false],
+    [{ local_catalog_manage: true }, true],
+    [{ local_catalog_manage: false }, false],
+    [{}, false],
+  ]) {
+    const panel = importPanelHarness('ARCHIVE_ONLY', undefined, undefined, undefined, undefined,
+      undefined, capabilities)
+    useNewHistory(panel)
+    const html = await panel.html()
+    assert.equal(html.includes('读取其他可选负责人'), visible)
+    assert.equal(panel.state.historyOptions.value.targetOwnerUserID, 'actor')
+  }
+})
+
 test('historical PREVIEWED renders the direct confirmation entry before any contract exists', async()=>{
   const panel=importPanelHarness('ARCHIVE_ONLY')
   const html=await panel.html()
