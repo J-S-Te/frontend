@@ -113,6 +113,63 @@ test('NORMAL preview retains its ordinary commit entry', async()=>{
   assert.doesNotMatch(html,/冻结清单、建立历史记录并提交独立确认/)
 })
 
+test('服务端每批三份时页面显示真实上限，四行在任何写请求前阻断并保留表单', async () => {
+  const panel = importPanelHarness('ARCHIVE_ONLY', undefined, undefined, undefined, undefined,
+    undefined, { max_batch_items: 3 })
+  useNewHistory(panel)
+  panel.state.batch.value = null
+  panel.state.batchID.value = ''
+  panel.state.formRows.value = Array.from({ length: 4 }, (_, index) => normalRow({
+    key: `limit-${index}`, externalRecordId: `OLD-${index}`, fileName: `limit-${index}.pdf`,
+  }))
+  panel.state.files.value = panel.state.formRows.value.map(row => new File(['pdf'], row.fileName))
+  await panel.state.preview()
+  assert.equal(panel.calls.length, 0)
+  assert.equal(panel.state.formRows.value.length, 4)
+  assert.equal(panel.state.files.value.length, 4)
+  assert.match(panel.state.error.value, /每批最多 3 份/)
+  assert.match(await panel.html(), /≤3 份/)
+})
+
+test('权威JSON三项不受旧表单四行阻断，既有暂存引用继续使用', async () => {
+  const panel = importPanelHarness('ARCHIVE_ONLY', undefined, undefined, undefined, undefined,
+    undefined, { max_batch_items: 3 })
+  const sample = structuredClone(panel.batch.items[0].item)
+  sample.history_evidence = { historical_status: 'archived', target_owner_user_id: 'actor',
+    report_required_channels: 'API_ONLY' }
+  const items = Array.from({ length: 3 }, (_, index) => ({ ...structuredClone(sample),
+    item_key: `json-${index}`, external_record_id: `JSON-${index}`, source_file_ref: `ref-${index}`,
+  }))
+  panel.state.batch.value.sources = items.map(item => ({ item_key: item.item_key,
+    file_ref: item.source_file_ref, filename: `${item.item_key}.pdf`, state: 'READY' }))
+  panel.state.formRows.value = Array.from({ length: 4 }, () => normalRow())
+  panel.state.jsonAuthoritative.value = true
+  panel.state.text.value = JSON.stringify({ schema_version: 1, source_system: 'legacy', items })
+  await panel.state.preview()
+  const saved = panel.calls.find(([action]) => action === 'manifest')
+  assert.ok(saved, panel.state.error.value)
+  assert.equal(saved?.[2].manifest.items.length, 3)
+  assert.deepEqual(saved[2].manifest.items.map(item => item.source_file_ref), ['ref-0', 'ref-1', 'ref-2'])
+  assert.equal(panel.calls.filter(([action]) => action === 'files').length, 0)
+})
+
+test('实际文件选择使用服务端三份上限，超限重试保留已选文件及既有批次', async () => {
+  const panel = importPanelHarness('ARCHIVE_ONLY', undefined, undefined, undefined, undefined,
+    undefined, { max_batch_items: 3 })
+  const picked = Array.from({ length: 4 }, (_, index) => new File(['pdf'], `limit-${index}.pdf`))
+  panel.state.selectFiles({ target: { files: picked, value: 'picked' } })
+  assert.deepEqual(panel.state.files.value.map(file => file.name), ['limit-0.pdf', 'limit-1.pdf', 'limit-2.pdf'])
+  assert.match(panel.state.fileMessage.value, /每批最多 3 份/)
+  panel.state.formRows.value = Array.from({ length: 4 }, (_, index) => normalRow({ key: `limit-${index}` }))
+  panel.state.batch.value.sources = [{ file_ref: 'keep-ref', item_key: 'limit-0', state: 'READY' }]
+  panel.state.jsonAuthoritative.value = false
+  await panel.state.preview()
+  assert.equal(panel.calls.length, 0)
+  assert.equal(panel.state.formRows.value.length, 4)
+  assert.equal(panel.state.files.value.length, 3)
+  assert.equal(panel.state.batch.value.sources[0].file_ref, 'keep-ref')
+})
+
 test('入口与JSON的普通/历史类别不符时在上传及保存清单前阻断，并保留输入', async () => {
   for (const [existingBatch, selectedMode, manifestMode] of [
     [false, 'ARCHIVE_ONLY', 'NORMAL'], [false, 'NORMAL', 'ARCHIVE_ONLY'],
