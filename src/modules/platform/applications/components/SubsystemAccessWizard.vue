@@ -477,7 +477,7 @@ function resetFlow() {
           class="subsystem-access-wizard__chip"
           :data-tone="preview.execution_path === 'legacy' ? 'warn' : (preview.display_only ? 'muted' : 'ok')"
         >
-          {{ preview.execution_path === 'legacy' ? '走既有入口' : (preview.display_only ? '无需操作' : '可自动执行') }}
+          {{ preview.execution_path === 'legacy' ? '走既有入口' : (preview.display_only ? '接入配置已一致' : '可自动执行') }}
         </span>
       </div>
 
@@ -492,7 +492,7 @@ function resetFlow() {
         </div>
       </dl>
 
-      <p v-if="preview.display_only" class="subsystem-access-wizard__hint">目标已接入且配置一致，无需重复操作。</p>
+      <p v-if="preview.display_only" class="subsystem-access-wizard__hint">目标已接入且配置一致，无需重复接入。此结果仅核对接入配置；授权内容和组件近期 READY／ACK 请在“运行时授权执行”中核验。</p>
       <p v-if="preview.execution_path === 'legacy'" class="subsystem-access-wizard__hint">
         该动作当前由既有受控更新入口执行：{{ preview.legacy_hint }}
       </p>

@@ -129,7 +129,8 @@ defineExpose({ selectApplication: application => controller.select(application) 
               <dd>
                 <strong class="runtime-fact-value" :data-tone="enforcementTone(overview.enforcement.status)">{{ enforcementStatusName(overview.enforcement.status) }}</strong>
                 <span class="runtime-hint">登记状态 {{ registrationStatusName(overview.registration.status) }} · 登记组件 {{ overview.registration.member_count }}</span>
-                <span class="runtime-hint">执行修订 {{ overview.enforcement.revision }} / 部署修订 {{ overview.enforcement.deployment_revision }}</span>
+                <span class="runtime-hint">应用执行修订 {{ overview.enforcement.revision }} · 全局许可协调修订 {{ overview.enforcement.deployment_revision }}</span>
+                <span class="runtime-hint">其他应用更新会推进全局修订，两者无需数值相等；请核对当前授权内容及各组件的近期确认。</span>
                 <span class="runtime-hint">{{ registered ? snapshotLabel : '未纳管时不存在运行时授权执行事实' }}</span>
               </dd>
             </div>
