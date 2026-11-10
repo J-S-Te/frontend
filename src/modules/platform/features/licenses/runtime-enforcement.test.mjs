@@ -81,7 +81,7 @@ function fakeDocument(visibilityState = 'visible') {
 }
 
 test('overview request is authenticated, uncached and strictly validated', async () => {
-  assert.equal(RUNTIME_APPLICATIONS.length, 6)
+  assert.equal(RUNTIME_APPLICATIONS.length, 7)
   const requests = []
   globalThis.fetch = async (url, options) => { requests.push({ url, options }); return response(overview()) }
   const data = await getRuntimeEnforcementOverview('contract_management')

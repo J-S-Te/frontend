@@ -32,16 +32,16 @@ test('input validation bounds UTF-8 byte size and rejects private keys without r
   assert.throws(() => validateLicenseInput('界'.repeat(MAX_LICENSE_BYTES / 3 + 1)), /256 KiB/)
   assert.doesNotThrow(() => validateLicenseInput('a'.repeat(MAX_LICENSE_BYTES)))
 })
-test('six system rows retain unpurchased systems and exclusive expiry boundaries', () => {
+test('seven system rows retain unpurchased systems and exclusive expiry boundaries', () => {
   const rows = licenseRows({ not_before: 50, applications: [{ code: 'settlement', not_before: 80, expires_at: 100, kind: 'FULL' }, { code: 'data_analysis', not_before: 120, expires_at: 150, kind: 'TRIAL' }] }, 100)
-  assert.equal(rows.length, 6)
+  assert.equal(rows.length, 7)
   assert.equal(rows.find(row => row.code === 'settlement').state, '已到期')
   assert.equal(rows.find(row => row.code === 'data_analysis').state, '尚未生效')
   assert.equal(rows.find(row => row.code === 'project_management').state, '未购买')
 })
 test('display uses authoritative server statuses, including clock and integrity failures', () => {
   const rows = statusRows({ systems: [{ code: 'settlement', status: 'CLOCK_ABNORMAL', kind: 'FULL', expires_at: 100 }, { code: 'customer_portal', status: 'VALIDATION_ERROR' }] })
-  assert.equal(rows.length, 6)
+  assert.equal(rows.length, 7)
   assert.equal(rows.find(row => row.code === 'settlement').state, '时钟异常')
   assert.equal(rows.find(row => row.code === 'customer_portal').state, '校验异常')
 })

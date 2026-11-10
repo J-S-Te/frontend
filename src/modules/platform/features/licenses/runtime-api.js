@@ -6,6 +6,7 @@ export const RUNTIME_APPLICATIONS = Object.freeze([
   { code: 'customer_and_opportunity', name: '客户与商机管理' },
   { code: 'project_management', name: '项目服务管理' },
   { code: 'settlement', name: '结算与开票管理' },
+  { code: 'reimbursement', name: '报销管理' },
   { code: 'data_analysis', name: '数据看板与统计分析' },
   { code: 'customer_portal', name: '客户门户' },
 ])

@@ -1273,3 +1273,50 @@ export function decideNativeProjectScope(id, changeID, payload) {
 export function withdrawNativeProjectScope(id, changeID, payload) {
   return request(`/projects/${encodeURIComponent(id)}/native-scope-changes/${encodeURIComponent(changeID)}/withdraw`, { method: 'POST', body: JSON.stringify(payload) })
 }
+
+// 用途：读取当前项目允许公开的报销净支出摘要，不请求票据或其他项目分摊。
+// 参数：projectID 为项目ID，cursor 为上一页单据游标。
+// 返回值：服务端项目范围内的分页金额摘要；失败原样抛出。
+export function getProjectReimbursementSpend(projectID, cursor = '') {
+  const query = new URLSearchParams({ page_size: '20' })
+  if (cursor) query.set('cursor', cursor)
+  return request(`/projects/${encodeURIComponent(projectID)}/reimbursement-spend?${query}`)
+}
+
+// 用途：编码参与资格的有效期、版本及移除请求，不推断永久有效资格。
+// 参数：form 为人工输入及当前版本，revoke 表示受控移除。
+// 返回值：项目参与资格DTO；日期、原因或版本不合法时拒绝请求。
+export function expenseParticipantPayload(form, revoke = false) {
+  const subject = String(form.subject_id || '').trim()
+  const reason = String(form.reason || '').trim()
+  const version = Number(form.version ?? 0)
+  if (!subject || subject.length > 128 || !reason || reason.length > 1000) throw new Error('请填写人员稳定主体和不超过1000字的原因')
+  if (!Number.isSafeInteger(version) || version < 0) throw new Error('请重新读取资格当前版本')
+  const value = { subject_id: subject, reason, expected_version: version, status: revoke ? 'REVOKED' : 'ACTIVE' }
+  if (!revoke) {
+    const fromText=String(form.valid_from||''), untilText=String(form.valid_until||'')
+    const from = new Date(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(fromText) ? `${fromText}:00+08:00` : fromText)
+    const until = new Date(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(untilText) ? `${untilText}:00+08:00` : untilText)
+    if (!Number.isFinite(from.getTime()) || !Number.isFinite(until.getTime())
+      || from >= until || until - from > 366 * 86400000) throw new Error('请填写有效起止时间，最长366天')
+    value.valid_from = from.toISOString(); value.valid_until = until.toISOString()
+  }
+  return value
+}
+
+// 用途：读取当前项目显式费用参与资格，仅由精确管理能力触发。
+// 参数：projectID 为项目标识，cursor 为上一页人员主体。
+// 返回值：项目范围内的参与资格页或真实错误。
+export function getProjectExpenseParticipants(projectID, cursor = '') {
+  const query = new URLSearchParams({ page_size: '20', ...(cursor ? { cursor } : {}) })
+  return request(`/projects/${encodeURIComponent(projectID)}/expense-participants?${query}`)
+}
+
+// 用途：按当前版本增加、修改或移除项目费用参与资格。
+// 参数：projectID 为项目标识，form 为人工字段，revoke 为移除标志。
+// 返回值：真实持久化资格回执；不通过前端推导项目读取权限。
+export function putProjectExpenseParticipant(projectID, form, revoke = false) {
+  return request(`/projects/${encodeURIComponent(projectID)}/expense-participants`, {
+    method: 'PUT', body: JSON.stringify(expenseParticipantPayload(form, revoke)),
+  })
+}

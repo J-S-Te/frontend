@@ -52,6 +52,8 @@ import ProjectNotificationCenter from '@/modules/project_management/components/P
 import QualificationImportDialog from '@/modules/project_management/components/QualificationImportDialog.vue'
 import DetectionCategoryImportDialog from '@/modules/project_management/components/DetectionCategoryImportDialog.vue'
 import NativeProjectCreateDialog from '@/modules/project_management/components/NativeProjectCreateDialog.vue'
+import ReimbursementSpendPanel from '@/modules/project_management/components/ReimbursementSpendPanel.vue'
+import ProjectArchiveDirectory from '../components/ProjectArchiveDirectory.vue'
 import NativeScopeChangePanel from '@/modules/project_management/components/NativeScopeChangePanel.vue'
 import { useProjectCreationCapabilities } from '@/modules/project_management/composables/useProjectCreationCapabilities.js'
 import RiskList from '@/modules/project_management/components/RiskList.vue'
@@ -1072,7 +1074,11 @@ const personnelScope = createRequestScope()
 const emptyPersonnelByRole = () => ({ [PROJECT_ROLE_CODES.teamLead]: [], [PROJECT_ROLE_CODES.projectManager]: [], [PROJECT_ROLE_CODES.engineer]: [] })
 const personnelByRole = ref(emptyPersonnelByRole())
 
+// 用途：按已确认项目会话能力加载人员目录。
+// 参数：无。
+// 返回值：无；无项目读取权限时不发请求。
 async function loadPersonnel() {
+  if (!session.value?.permissions?.includes('project.read')) return
   // 项目经理/工程师只在具备 project.execution.assign 的表单里出现。
   const roles = canExecutionAssign.value
     ? [PROJECT_ROLE_CODES.teamLead, PROJECT_ROLE_CODES.projectManager, PROJECT_ROLE_CODES.engineer]
@@ -2071,10 +2077,19 @@ async function loadWorkspace({ reportError = true } = {}) {
     // 防止新旧数据混用。接口层仍分别执行会话与资源权限校验。
     // 列表接口省略 page_size 时只返回 20 行，工作区必须显式走 all=1 快照；
     // 超过服务端 500 行上限时 truncated 为 true，用户据此提示缩小筛选范围。
-    const [projectSnapshot, itemSnapshot, ruleRows, capabilityRows, sessionData, navigationData, categoryRows,
+    const sessionData = await getProjectSession({ force: true })
+    if (!workspaceScope.isCurrent(ticket)) return
+    session.value = sessionData
+    if (!sessionData.permissions?.includes('project.read')) {
+      projects.value = []; serviceItems.value = []; rules.value = []; capabilities.value = []
+      navigation.value = { sections: [], default_section: 'expense-entry', roles: [] }
+      workspaceReady.value = true
+      return
+    }
+    const [projectSnapshot, itemSnapshot, ruleRows, capabilityRows, navigationData, categoryRows,
     ] = await Promise.all([
       listProjectsSnapshot(), listServiceItemsSnapshot(), listRules(), listCapabilities(),
-      getProjectSession({ force: true }), getProjectNavigation(), listDetectionCategories(),
+      getProjectNavigation(), listDetectionCategories(),
     ])
     if (!workspaceScope.isCurrent(ticket)) return
     projects.value = projectSnapshot.items
@@ -2087,6 +2102,8 @@ async function loadWorkspace({ reportError = true } = {}) {
     detectionCategories.value = categoryRows
     // 侧栏账号行的角色名依赖服务端角色目录；不阻塞工作区首屏，失败只影响副标题文案。
     loadApplicationRoles()
+    void loadPersonnel()
+    void refreshNotificationCount()
     // 拆解规则配置由独立接口提供（不属于六类规则表），进入页面时按需加载。
     if (activeSection.value === 'split-rules') loadSplitConfig()
     const allowed = new Set(navigationData.sections)
@@ -3417,11 +3434,11 @@ const equipmentPanel = shallowRef(createEquipmentPanel())
 function retryEquipmentPanel() { equipmentPanel.value = createEquipmentPanel() }
 
 onMounted(loadWorkspace)
-onMounted(loadPersonnel)
-onMounted(refreshNotificationCount)
 watch(() => fieldQueueOwner(), (ownerKey) => {
   pendingFieldSyncCount.value = 0
-  if (ownerKey) { refreshFieldQueueCount(); flushFieldOperations(false) }
+  if (ownerKey && session.value?.permissions?.includes('project.read')) {
+    refreshFieldQueueCount(); flushFieldOperations(false)
+  }
 }, { immediate: true })
 onMounted(() => {
   document.addEventListener('click', closeMultiOnOutsideClick)
@@ -3432,7 +3449,11 @@ onMounted(() => {
 // 栏目切换只触发该栏目真正依赖的辅助数据：设备目录在「设备能力」「实施准备」读取，
 // 设备占用在准备操作读取，SLA 明细在监控区域读取；未进入的区域一律不发请求。
 // 进入资源分配/待办/指派栏目时刷新人员目录，保证新建或停用的平台账号能及时反映。
+// 用途：按已确认会话能力加载切换栏目所需辅助数据。
+// 参数：section 为目标栏目。
+// 返回值：无；无项目读取能力时保留独立费用入口。
 function onSectionChanged(section) {
+  if (!session.value?.permissions?.includes('project.read')) return
   if (['allocation', 'inbox', 'assignments', 'monitoring'].includes(section)) loadPersonnel()
   if (['equipment', 'preparation'].includes(section)) void ensureEquipmentCatalog()
   if (section === 'preparation') void loadEquipmentReservations(selectedServiceItem.value)
@@ -3573,6 +3594,7 @@ onBeforeUnmount(() => {
         <ListState v-if="loading || sectionExtrasLoading" loading loading-title="正在读取当前栏目数据…" />
         <ListState v-else-if="loadError || !workspaceReady" error-title="后端数据加载失败" :error="loadError || '工作区数据尚未确认，请重新读取。'" retry-text="重新加载" @retry="loadWorkspace" />
         <ListState v-else-if="sectionExtrasError" error-title="当前栏目数据读取失败" :error="sectionExtrasError" retry-text="重试当前栏目" @retry="loadSectionExtras" />
+        <ReimbursementSpendPanel v-else-if="session && !session.permissions?.includes('project.read')" :session="session" />
         <ProjectNotificationCenter v-else-if="activeSection === 'notifications'" @read="refreshNotificationCount" />
         <template v-else-if="activeSection === 'dashboard'">
           <section class="pm-kpis">
@@ -3744,6 +3766,10 @@ onBeforeUnmount(() => {
           </section>
           <template v-else>
             <section class="pm-actions-bar"><button class="pm-button" @click="navigate('projects')"><ConsoleIcon name="reset" />返回项目列表</button><button class="pm-button" :disabled="loading" @click="loadWorkspace"><ConsoleIcon name="reset" />刷新</button></section>
+            <ReimbursementSpendPanel :session="session" :project-id="detailProject.id" />
+            <ProjectArchiveDirectory :key="detailProject.id" :project="detailProject" :items="detailItems"
+              :events="detailEvents" :session="session" @view-service="detailTab='items';selectServiceItem($event)"
+              @view-events="detailTab='events'" />
             <section v-if="detailProject.source_kind === 'NATIVE' && canReadNativeProjectScope && (nativeProjectEnabled || nativeScopeProjectID === detailProject.id)" class="pm-panel">
               <button v-if="!nativeScopeProjectID && nativeProjectEnabled" type="button" class="pm-button"
                 :disabled="saving" @click="nativeScopeProjectID = detailProject.id">原生委托范围变更</button>

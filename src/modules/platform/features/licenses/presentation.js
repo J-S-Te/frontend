@@ -6,6 +6,7 @@ export const LICENSE_SYSTEMS = [
   { code: 'contract_management', name: '合同管理' },
   { code: 'project_management', name: '项目管理' },
   { code: 'settlement', name: '结算管理' },
+  { code: 'reimbursement', name: '报销管理' },
   { code: 'data_analysis', name: '数据分析' },
 ]
 export const systemName = code => LICENSE_SYSTEMS.find(item => item.code === code)?.name || code

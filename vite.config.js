@@ -14,6 +14,7 @@ import { selectedModulesPlugin } from './build/moduleSelection.mjs'
 const DEFAULT_API_PROXY_TARGET = 'http://127.0.0.1:8080'
 const DEFAULT_CONTRACT_API_PROXY_TARGET = 'http://127.0.0.1:8081'
 const DEFAULT_PROJECT_API_PROXY_TARGET = 'http://127.0.0.1:8082'
+const DEFAULT_REIMBURSEMENT_API_PROXY_TARGET = 'http://127.0.0.1:8087'
 const DEFAULT_SETTLEMENT_API_PROXY_TARGET = 'http://127.0.0.1:8085'
 // customer-api 保留在本地 Compose 网络内。本地 Vite 服务器
 // 通过 compose.local.yaml 仅向回环地址发布的端口访问它。
@@ -137,6 +138,7 @@ export default defineConfig(({ mode }) => {
   const proxyTarget = env.VITE_API_PROXY_TARGET || DEFAULT_API_PROXY_TARGET
   const contractProxyTarget = env.VITE_CONTRACT_API_PROXY_TARGET || DEFAULT_CONTRACT_API_PROXY_TARGET
   const projectProxyTarget = env.VITE_PROJECT_API_PROXY_TARGET || DEFAULT_PROJECT_API_PROXY_TARGET
+  const reimbursementProxyTarget = env.VITE_REIMBURSEMENT_API_PROXY_TARGET || DEFAULT_REIMBURSEMENT_API_PROXY_TARGET
   const settlementProxyTarget = env.VITE_SETTLEMENT_API_PROXY_TARGET || DEFAULT_SETTLEMENT_API_PROXY_TARGET
   const customerOpportunityProxyTarget = env.VITE_CUSTOMER_OPPORTUNITY_PROXY_TARGET || DEFAULT_CUSTOMER_OPPORTUNITY_PROXY_TARGET
   const customerPortalProxyTarget = env.VITE_CUSTOMER_PORTAL_PROXY_TARGET || DEFAULT_CUSTOMER_PORTAL_PROXY_TARGET
@@ -154,6 +156,11 @@ export default defineConfig(({ mode }) => {
       ...apiProxy(projectProxyTarget),
       rewrite: (requestPath) => requestPath.replace(/^\/project_management/, ''),
     }
+  }
+  for (const path of ['/reimbursement/api', '/reimbursement/auth', '/reimbursement/logged-out',
+    '/reimbursement/healthz', '/reimbursement/readyz']) {
+    proxy[path] = { ...apiProxy(reimbursementProxyTarget),
+      rewrite: (requestPath) => requestPath.replace(/^\/reimbursement/, '') }
   }
   for (const path of SETTLEMENT_BACKEND_PATHS) {
     proxy[path] = {

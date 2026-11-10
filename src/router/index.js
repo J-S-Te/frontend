@@ -25,10 +25,11 @@ const SubsystemPortalView = () => import('@/modules/platform/views/SubsystemPort
 // 编译入口只导入已选业务，未编译视图不会登记为可访问路由。
 const { ContractManagementView, ProjectManagementView, SettlementView,
   CustomerOpportunityView, CRMLoginCompleteView, CustomerPortalView,
-  DataAnalysisView } = businessViews
+  DataAnalysisView, ReimbursementView } = businessViews
 const { Contract: ensureContractSession, Project: ensureProjectSession,
   Settlement: ensureSettlementSession, CRM: ensureCRMSession,
-  Portal: ensurePortalSession, DataAnalysis: ensureDataAnalysisSession } = sessionLoaders
+  Portal: ensurePortalSession, DataAnalysis: ensureDataAnalysisSession,
+  Reimbursement: ensureReimbursementSession } = sessionLoaders
 
 // 客户查询模块暂不上线（2026-11-07）：已从可访问分区清单移除，保留代码便于日后恢复（见 .ai/qa/ 本任务记录）。
 // 'customers',
@@ -168,6 +169,12 @@ const router = createRouter({
       meta: { title: '数据看板与统计分析', requiresAuth: true, requiresDataAnalysisSession: true },
     },
     {
+      path: '/reimbursement/:section?',
+      name: 'reimbursement',
+      component: ReimbursementView,
+      meta: { title: '报销管理系统', requiresAuth: true, requiresReimbursementSession: true },
+    },
+    {
       path: '/:pathMatch(.*)*',
       redirect: { name: 'portal' },
     },
@@ -237,6 +244,11 @@ router.beforeEach(async (to) => {
       // 不要把合同后端故障误判成基础平台未登录。
       return subsystemAccessFailure(error, to)
     }
+  }
+
+  if (to.meta.requiresReimbursementSession) {
+    try { return Boolean(await ensureReimbursementSession()) }
+    catch (error) { return subsystemAccessFailure(error, to) }
   }
 
   if (to.meta.requiresProjectSession) {

@@ -7,7 +7,8 @@ import { selectModules } from './moduleSelection.mjs'
 
 const directory = await mkdtemp(join(tmpdir(), 'frontend-selected-modules-'))
 const selections = process.argv.slice(2)
-if (!selections.length) selections.push('none', 'contract_management', 'contract_management,project_management')
+if (!selections.length) selections.push('none', 'contract_management', 'contract_management,project_management',
+  'reimbursement', 'reimbursement,project_management', 'all')
 for (const [index, selection] of selections.entries()) {
   process.env.VITE_ENABLED_MODULES = selection
   const outDir = join(directory, `build-${index}`)
@@ -20,7 +21,7 @@ for (const [index, selection] of selections.entries()) {
   for (const [code, view] of [['contract_management', 'ContractManagementView'],
     ['project_management', 'ProjectManagementView'], ['settlement', 'SettlementView'],
     ['customer_and_opportunity', 'CustomerOpportunityView'], ['customer_portal', 'CustomerPortalView'],
-    ['data_analysis', 'DashboardShellView']]) {
+    ['data_analysis', 'DashboardShellView'], ['reimbursement', 'ReimbursementView']]) {
     assert.equal(assets.some((file) => file.startsWith(`${view}-`)), expected.includes(code), code)
   }
   console.log(JSON.stringify({ selection, outDir, manifest, status: 'PASS' }))

@@ -50,7 +50,9 @@ test('工作区首屏不再预读设备目录、人员姓名与 SLA 明细', () 
 
 test('按栏目触发：未进入相关区域不发设备目录/SLA 请求', () => {
   const calls = []
+  const session = ref({ permissions: ['project.read'] })
   const onChange = extractFunction('onSectionChanged', {
+    session,
     loadPersonnel: () => calls.push('personnel'),
     ensureEquipmentCatalog: () => calls.push('catalog'),
     loadEquipmentReservations: () => calls.push('reservations'),
@@ -72,6 +74,10 @@ test('按栏目触发：未进入相关区域不发设备目录/SLA 请求', () 
   calls.length = 0
   onChange('inbox')
   assert.deepEqual(calls, ['personnel'], '待办区域只刷新人员目录')
+  calls.length = 0
+  session.value = { permissions: ['project.expense_reference.eligible'] }
+  for (const section of ['equipment', 'preparation', 'monitoring', 'inbox']) onChange(section)
+  assert.deepEqual(calls, [], '仅费用资格主体不触发项目栏目的辅助接口')
 })
 
 test('刷新后按当前区域重新确认辅助数据，未进入的区域不发请求', () => {

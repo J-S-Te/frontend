@@ -34,6 +34,9 @@ async function until(condition, timeoutMs = 100) {
 // —— 任务 B：保存/刷新分离 —— 写入 HTTP 2xx 即已保存，随后的工作区刷新失败
 // 只提示“已保存，但最新数据读取失败”，不得误报为操作失败，也不得把整页切成错误区。
 
+// 用途：建立具备项目读取能力的工作区测试边界，权限拒绝由独立用例覆盖。
+// 参数：listProjectsSnapshot为可替换的项目快照读取依赖。
+// 返回值：真实函数的响应式上下文与通知记录。
 function workspaceContext({ listProjectsSnapshot = async () => ({ items: [], total: 0, truncated: false }) } = {}) {
   const toasts = []
   const context = {
@@ -56,9 +59,10 @@ function workspaceContext({ listProjectsSnapshot = async () => ({ items: [], tot
     decorateRule: (rule) => rule,
     listProjectsSnapshot, listServiceItemsSnapshot: async () => ({ items: [], total: 0, truncated: false }),
     listRules: async () => [], listDeliveryEvents: async () => [],
-    listCapabilities: async () => [], getDashboard: async () => ({}), getProjectSession: async () => ({}),
+    listCapabilities: async () => [], getDashboard: async () => ({}), getProjectSession: async () => ({permissions:['project.read']}),
     getProjectNavigation: async () => ({ sections: ['projects'], default_section: 'projects' }),
     listDetectionCategories: async () => [], listRuleConfigurationCatalog: async () => ({ automation_triggers: [], sla_statuses: [] }),
+    loadPersonnel: async () => {}, refreshNotificationCount: async () => {},
     loadApplicationRoles: () => {}, loadSplitConfig: async () => {}, loadEquipment: async () => {}, loadPersonnelNames: async () => {},
     // BIZ-PROJECT-06：工作区刷新后会重新拉取服务端缺项判定；该读取不属于本用例的断言范围，
     // 注入成功桩，避免把"判定读取"混进工作区请求作用域的断言。
@@ -122,6 +126,7 @@ test('工作区双请求：先发请求迟到时不得覆盖新请求的数据',
   let calls = 0
   w.context.listProjectsSnapshot = () => { calls++; return calls === 1 ? first.promise : Promise.resolve({ items: [{ id: 'PJ-NEW' }], total: 1, truncated: false }) }
   const slow = w.context.loadWorkspace()
+  await until(() => calls === 1)
   const fast = w.context.loadWorkspace()
   await until(() => calls === 2)
   first.resolve({ items: [{ id: 'PJ-OLD' }], total: 1, truncated: false })

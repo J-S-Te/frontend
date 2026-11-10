@@ -12,11 +12,11 @@ async function selectionTools() {
   return import(url)
 }
 
-test('选择 none 仅保留平台，默认 all 保持六业务兼容', async () => {
+test('选择 none 仅保留平台，默认 all 包含报销业务', async () => {
   const { selectModules } = await selectionTools()
   assert.deepEqual(selectModules('none').map(({ code }) => code), ['basic-platform'])
-  assert.equal(selectModules().length, 7)
-  assert.equal(selectModules('all').length, 7)
+  assert.equal(selectModules().length, 8)
+  assert.equal(selectModules('all').length, 8)
 })
 
 test('显式组合按规范 code 去重，拒绝拼错、空项及混用保留值', async () => {
