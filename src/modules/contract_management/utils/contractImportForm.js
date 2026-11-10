@@ -9,6 +9,7 @@
 import { externalContractTypes, contractSystemLevels, localContractReferencePayload } from './contractPayload.js'
 import { paymentAmountMinor, normalizePaymentTerms } from './paymentTerms.js'
 import { formatImportMinor } from './contractImport.js'
+import { historicalExcelModes, historyImportDetails, validateHistoryImportDetails } from './contractHistoryExcel.js'
 
 export const importItemKeyPattern = /^[A-Za-z0-9_.:-]{1,128}$/
 export const importSourceSystemPattern = /^[A-Za-z0-9_.:-]{1,64}$/
@@ -94,13 +95,13 @@ function amountText(value) {
 }
 
 /**
- * importRowsFromItems 把已保存批次项反填成普通表单行，便于查询后继续修订。
- * 参数：entries为批次 items，sources为批次 sources；只处理 NORMAL 项。
- * 返回值：与清单一一对应的表单行；历史项保持原 JSON 工作流，不强行表单化。
+ * importRowsFromItems 把已保存批次项反填为可修订行，保留历史证据及成功项快照。
+ * 参数：entries为批次items，sources为原件台账；仅接续履约继续保留高级清单。
+ * 返回值：保留历史证据、策略及原件身份的可编辑行。
  */
 export function importRowsFromItems(entries = [], sources = []) {
   return (Array.isArray(entries) ? entries : [])
-    .filter((entry) => entry?.item?.mode === 'NORMAL')
+    .filter((entry) => ['NORMAL', ...historicalExcelModes].includes(entry?.item?.mode))
     .map((entry) => {
       const item = entry.item, metadata = item.metadata || {}, normalized = entry.normalized_metadata || {}
       const source = (Array.isArray(sources) ? sources : []).find((row) => row.file_ref === item.source_file_ref)
@@ -109,6 +110,7 @@ export function importRowsFromItems(entries = [], sources = []) {
         key: item.item_key,
         externalRecordId: item.external_record_id,
       })
+      row.sourceFileRef = asText(item.source_file_ref)
       row.title = asText(metadata.title)
       row.contractType = asText(metadata.contract_type)
       row.opportunityId = asText(metadata.opportunity_id)
@@ -159,7 +161,13 @@ export function importRowsFromItems(entries = [], sources = []) {
       row.batchIssues = Array.isArray(entry.issues) ? entry.issues : []
       row.state = entry.state || 'PENDING'
       row.contractId = entry.contract_id || ''
+      if (row.contractId) row.savedItem = JSON.parse(JSON.stringify(item))
       row.normalized = entry.normalized_metadata || null
+      if (item.mode !== 'NORMAL') {
+        row.importMode = item.mode
+        row.historyEvidence = structuredClone(item.history_evidence || {})
+        row.policyOptions = structuredClone(item.policy_options || {})
+      }
       return row
     })
 }
@@ -178,12 +186,12 @@ function importDateValue(value) {
 
 /**
  * validateImportFormRows 统一收集行级问题，供页面逐字段展示与保存前阻断。
- * 参数：rows为表单行，files为当前所选原件，sources为批次已暂存原件；mode固定普通模式。
+ * 参数：rows为表单行，选项包含模式、原件台账和操作者明确填写的历史信息。
  * 返回值：按行定位的问题数组（field/code/message）；空行、缺字段、来源业务键、重名、金额与日期错误均在此收口。
  */
-export function validateImportFormRows(rows, { files = [], sources = [], mode = 'NORMAL' } = {}) {
-  if (mode !== 'NORMAL') {
-    return [{ rowKey: '', field: 'mode', code: 'MODE_UNSUPPORTED', message: '普通表单只用于普通新合同；历史导入需要完整 JSON 清单（含历史来源证据与策略）。' }]
+export function validateImportFormRows(rows, { files = [], sources = [], mode = 'NORMAL', historyOptions = {} } = {}) {
+  if (mode !== 'NORMAL' && !historicalExcelModes.includes(mode)) {
+    return [{ rowKey: '', field: 'mode', code: 'MODE_UNSUPPORTED', message: '当前模式不支持Excel表单；接续履约旧批次请保留原始高级清单。' }]
   }
   const list = Array.isArray(rows) ? rows : []
   if (!list.length) return [{ rowKey: '', field: 'rows', code: 'ITEM_COUNT_INVALID', message: '请先选择至少一份合同原件再预检。' }]
@@ -200,9 +208,15 @@ export function validateImportFormRows(rows, { files = [], sources = [], mode = 
   const checkFileSelection = selectedNames.size > 0 || staged.size > 0
 
   list.forEach((row, index) => {
+    // 已建项必须沿用服务端冻结清单，不能因修订失败项触发成功项纠错。
+    if (row.contractId && row.savedItem) return
     const name = asText(row.fileName)
     const label = `第 ${index + 1} 行${name ? `（${name}）` : ''}`
     const add = (field, code, message) => issues.push({ rowKey: row.key || `row-${index + 1}`, field, code, message })
+    if (row.importMode && ((mode === 'NORMAL') !== (row.importMode === 'NORMAL')
+        || (mode !== 'NORMAL' && !historicalExcelModes.includes(row.importMode)))) {
+      add('mode', 'MODE_UNSUPPORTED', `${label}：行模式与当前入口不一致，不能改写已有生命周期。`)
+    }
 
     if (!name) add('fileName', 'FILE_MISSING', `${label}：请重新选择合同原件。`)
     else if (seenNames.has(name)) add('fileName', 'DUPLICATE_SOURCE_FILE', `${label}：同一原件只能导入一次，重复文件请先整理。`)
@@ -231,8 +245,11 @@ export function validateImportFormRows(rows, { files = [], sources = [], mode = 
       if (!/^[0-9A-HJKMNP-TV-Z]{26}$/.test(asText(row.localCounterpartyId))) add('localCounterpartyId', 'LOCAL_REFERENCE_INVALID', `${label}：请选择有效本地交易对方。`)
       if (!Number.isSafeInteger(row.counterpartyVersion) || row.counterpartyVersion < 1) add('counterpartyVersion', 'LOCAL_REFERENCE_INVALID', `${label}：请重新读取本地交易对方版本。`)
       if (customerId || asText(row.opportunityId) || asText(row.opportunityName)) add('counterpartySource', 'LOCAL_REFERENCE_INVALID', `${label}：本地来源不能混用CRM客户或商机。`)
-    } else if (!customerId) add('crmCustomerId', 'REQUIRED', `${label}：请填写 CRM 客户编号，或从 CRM 客户目录选择。`)
-    else if (!/^[1-9]\d*$/.test(customerId) || !Number.isSafeInteger(Number(customerId))) add('crmCustomerId', 'INVALID', `${label}：CRM 客户编号无效或超出可安全提交的范围，请重新选择。`)
+    } else if (!customerId && !(historicalExcelModes.includes(mode)
+        && !asText(row.opportunityId) && !asText(row.opportunityName))) {
+      add('crmCustomerId', 'REQUIRED', `${label}：请填写 CRM 客户编号，或从 CRM 客户目录选择。`)
+    }
+    else if (customerId && (!/^[1-9]\d*$/.test(customerId) || !Number.isSafeInteger(Number(customerId)))) add('crmCustomerId', 'INVALID', `${label}：CRM 客户编号无效或超出可安全提交的范围，请重新选择。`)
     if (row.categorySource && !['LOCAL', 'PROJECT'].includes(row.categorySource)) add('categorySource', 'UNSUPPORTED_ENUM', `${label}：类别来源无效。`)
     if (!asText(row.customerName)) add('customerName', 'REQUIRED', `${label}：请填写客户名称。`)
 
@@ -289,6 +306,15 @@ export function validateImportFormRows(rows, { files = [], sources = [], mode = 
     })
 
     const terms = Array.isArray(row.paymentTerms) ? row.paymentTerms : []
+    if (historicalExcelModes.includes(mode)) {
+      const detail = historyImportDetails(row, row.importMode || mode, historyOptions)
+      for (const issue of validateHistoryImportDetails(detail, row.importMode || mode)) {
+        add(issue.field, issue.code, `${label}：${issue.message}`)
+      }
+      if (detail.policy_options.finance_mode === 'FULL_REPLAY' && !terms.length) {
+        add('paymentTerms', 'REQUIRED', `${label}：重建历史台账必须提供付款条款。`)
+      }
+    }
     if (terms.length > 100) add('paymentTerms', 'ITEM_COUNT_INVALID', `${label}：付款条款最多 100 期。`)
     else if (terms.length && amountOK) {
       try {
@@ -357,12 +383,12 @@ function buildImportMetadata(row) {
 }
 
 /**
- * buildImportManifestFromRows 把普通表单行组装成现有 schema_version=1 清单。
- * 参数：rows为表单行，sourceSystem取自批次或默认manual，mode仅允许NORMAL。
+ * buildImportManifestFromRows 把合同及历史信息组装成既有版本1清单。
+ * 参数：rows为表单行，选项含来源、模式、原件及操作者填写的本批历史信息。
  * 返回值：可直接交给 prepareImportManifest 的对象；任何字段错误在调用前阻断并抛出首条中文提示。
  */
-export function buildImportManifestFromRows(rows, { sourceSystem = 'manual', mode = 'NORMAL', files = [], sources = [] } = {}) {
-  const issues = validateImportFormRows(rows, { files, sources, mode })
+export function buildImportManifestFromRows(rows, { sourceSystem = 'manual', mode = 'NORMAL', files = [], sources = [], historyOptions = {} } = {}) {
+  const issues = validateImportFormRows(rows, { files, sources, mode, historyOptions })
   if (issues.length) {
     const error = new Error(issues[0].message)
     error.issues = issues
@@ -372,19 +398,34 @@ export function buildImportManifestFromRows(rows, { sourceSystem = 'manual', mod
   return {
     schema_version: 1,
     source_system: asText(sourceSystem),
-    items: rows.map((row) => ({
+    items: rows.map((row) => row.contractId && row.savedItem ? JSON.parse(JSON.stringify(row.savedItem)) : ({
       item_key: asText(row.key),
       external_record_id: asText(row.externalRecordId),
-      mode: 'NORMAL',
-      source_file_ref: asText(row.fileName),
+      mode: row.importMode || mode,
+      source_file_ref: importRowSourceRef(row, files, sources),
       metadata: buildImportMetadata(row),
+      ...(mode === 'NORMAL' ? {} : historyImportDetails(row, row.importMode || mode, historyOptions)),
     })),
   }
+}
+
+// importRowSourceRef 恢复原件时沿用精确代次，显式重选文件时才使用文件名触发上传。
+// 参数：row为当前行，files为新选择文件，sources为服务端已就绪原件台账。
+// 返回值：可信的原file_ref或当前文件名；无法确定代次时交由清单校验阻断。
+function importRowSourceRef(row, files, sources) {
+  if (!files.some(file => file.name === row.fileName) && row.sourceFileRef
+      && sources.some(source => source.state === 'READY' && source.item_key === row.key
+        && source.file_ref === row.sourceFileRef && source.filename === row.fileName)) {
+    return row.sourceFileRef
+  }
+  return asText(row.fileName)
 }
 
 // 顶层字段中文名统一用 snake_case 作键：驼峰路径在归一化时转成 snake_case 再查表，
 // 保证服务端 snake_case 与本地校验器 camelCase 只有一套叫法。
 const importMetadataFieldLabels = {
+  target_owner_name: '当前负责人姓名', target_owner_user_id: '当前负责人账号',
+  history_evidence: '历史来源信息',
   title: '合同标题',
   contract_type: '合同类型',
   service_type: '服务类型',

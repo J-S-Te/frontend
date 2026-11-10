@@ -4,6 +4,39 @@ import { prepareImportManifest, formatImportMinor } from './utils/contractImport
 import { sourceSHA256 } from './utils/sourceIntegrity.js'
 import { createHash } from 'node:crypto'
 
+test('历史入口不能把遗留普通JSON清单继续送入普通客户校验', () => {
+  const manifest = { schema_version: 1, source_system: 'legacy', items: [{
+    item_key: 'one', external_record_id: 'old-1', mode: 'NORMAL',
+    source_file_ref: 'old.pdf', metadata: { customer_name: '待建历史客户' },
+  }] }
+  assert.throws(() => prepareImportManifest(JSON.stringify(manifest), [{ name: 'old.pdf' }], [],
+    ['NORMAL', 'ARCHIVE_ONLY'], 'ARCHIVE_ONLY'), /导入方式.*不一致/)
+  assert.equal(manifest.items[0].mode, 'NORMAL', '不得把普通合同静默改成历史免审记录')
+})
+
+test('历史清单缺少CRM编号可送服务端查重建档，不触发普通表单必填', () => {
+  const manifest = { schema_version: 1, source_system: 'legacy', items: [{
+    item_key: 'one', external_record_id: 'old-1', mode: 'ARCHIVE_ONLY',
+    source_file_ref: 'old.pdf', metadata: { customer_name: '待建历史客户', crm_customer_id: 0 },
+    history_evidence: {}, policy_options: { finance_mode: 'NONE' },
+  }] }
+  const result = prepareImportManifest(JSON.stringify(manifest), [{ name: 'old.pdf' }], [],
+    ['NORMAL', 'ARCHIVE_ONLY'], 'ARCHIVE_ONLY')
+  assert.deepEqual(result.manifest.items[0].metadata, { customer_name: '待建历史客户', crm_customer_id: 0 })
+})
+
+test('历史入口保留存档与结清的逐项政策，不把历史混合批次改写成一种模式', () => {
+  const modes = ['ARCHIVE_ONLY', 'HISTORICAL_CLOSED']
+  const manifest = { schema_version: 1, source_system: 'legacy', items: modes.map((mode, index) => ({
+    item_key: `item-${index}`, external_record_id: `old-${index}`, mode,
+    source_file_ref: `${index}.pdf`, metadata: { crm_customer_id: 0 },
+    history_evidence: {}, policy_options: { finance_mode: 'NONE' },
+  })) }
+  const result = prepareImportManifest(JSON.stringify(manifest), [{ name: '0.pdf' }, { name: '1.pdf' }], [],
+    ['NORMAL', ...modes], 'ARCHIVE_ONLY')
+  assert.deepEqual(result.manifest.items.map(item => item.mode), ['ARCHIVE_ONLY', 'HISTORICAL_CLOSED'])
+})
+
 test('清单与原件显式一一匹配，保留元数据不猜测业务字段', () => {
   const file = { name: '原件.pdf' }
   const input = { schema_version: 1, source_system: 'legacy', items: [{ item_key: 'one', external_record_id: 'old-1', mode: 'NORMAL', source_file_ref: file.name, metadata: { amount_minor: 321 } }] }

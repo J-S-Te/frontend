@@ -11,6 +11,7 @@ import { buildImportManifestFromRows, createImportFormRow, emptyImportServiceIte
 import { applyContractExcelCustomerLookup, blockingContractExcelIssues, buildContractExcelImportRows,
   contractExcelTemplateHeaders, matchContractExcelRecordsToFiles, parseContractExcelWorkbook,
   summarizeContractExcelImport } from '../utils/contractExcelImport.js'
+import { historicalExcelModes, historyImportDetails, readHistoryExcelRecords } from '../utils/contractHistoryExcel.js'
 import { paymentAmountMinor } from '../utils/paymentTerms.js'
 import { contractImportErrorRows, contractImportErrorsCsv, contractImportProvisionIssueLabels } from '../utils/contractImportErrors.js'
 import { fallbackServiceTypeOptions } from '../utils/contractDisplay.js'
@@ -42,6 +43,7 @@ function importPanelHarness(mode, request, listResponse = () => ({items:[],has_m
     readContractExcelWorkbook:excelReader,
     paymentAmountMinor,fallbackServiceTypeOptions,externalContractTypes,contractSystemLevels,
     contractImportErrorRows,contractImportErrorsCsv,contractImportProvisionIssueLabels,
+    historicalExcelModes,historyImportDetails,readHistoryExcelRecords,listLocalCatalogGrantTargets:async()=>[],
     useDictionaryOptions:()=>({options:Vue.ref(fallbackServiceTypeOptions),loading:Vue.ref(false)}),
     listMyCustomers:customerResponse,
     ensureContractCRMDirectorySession:async()=>{},
@@ -59,7 +61,7 @@ function importPanelHarness(mode, request, listResponse = () => ({items:[],has_m
   assert.deepEqual(template.errors,[])
   const render=new Function('Vue',template.code.replace(/import \{([^}]+)\} from "vue"/g,(_,names)=>`const { ${names.replace(/ as /g,': ')} } = Vue`).replace('export function render','return function render'))(Vue)
   const state=component.setup(props,{expose(){}})
-  state.batch.value=structuredClone(batch);state.batchID.value=batch.batch_id;state.lookupID.value=batch.batch_id
+  state.entryMode.value=mode;if(mode==='NORMAL' && (sourceCapabilities.counterparty_source==='local' || sourceCapabilities.category_source==='local'))state.normalEntryMode.value='manual';state.jsonAuthoritative.value=mode!=='NORMAL';state.batch.value=structuredClone(batch);state.batchID.value=batch.batch_id;state.lookupID.value=batch.batch_id
   return {state,props,batch,calls,delays,listCalls,timers,directoryCalls,mounted,autoApproveGets,autoApprovePuts,copyCalls,html:()=>renderToString(Vue.createSSRApp({render:()=>render({},[],props,Vue.proxyRefs(state),{}, {})}))}
 }
 
@@ -96,6 +98,32 @@ test('LOCAL普通导入抽屉保留来源版本、无需CRM/项目目录，实�
   assert.equal(panel.state.normalEntryMode.value, 'manual')
 })
 
+test('历史负责人目录在外部来源下按独立能力展示，不改变已选负责人', async () => {
+  const panel = importPanelHarness('ARCHIVE_ONLY', undefined, undefined, undefined, undefined,
+    undefined, { counterparty_source: 'crm', category_source: 'project',
+      local_catalog_manage: false, history_owner_directory: true })
+  useNewHistory(panel)
+  panel.state.historyOptions.value.targetOwnerUserID = 'saved-owner'
+  assert.match(await panel.html(), /读取其他可选负责人/)
+  assert.equal(panel.state.historyOptions.value.targetOwnerUserID, 'saved-owner')
+})
+
+test('历史负责人目录显式无权限时隐藏，旧API缺字段时回退原能力', async () => {
+  for (const [capabilities, visible] of [
+    [{ local_catalog_manage: true, history_owner_directory: false }, false],
+    [{ local_catalog_manage: true }, true],
+    [{ local_catalog_manage: false }, false],
+    [{}, false],
+  ]) {
+    const panel = importPanelHarness('ARCHIVE_ONLY', undefined, undefined, undefined, undefined,
+      undefined, capabilities)
+    useNewHistory(panel)
+    const html = await panel.html()
+    assert.equal(html.includes('读取其他可选负责人'), visible)
+    assert.equal(panel.state.historyOptions.value.targetOwnerUserID, 'actor')
+  }
+})
+
 test('historical PREVIEWED renders the direct confirmation entry before any contract exists', async()=>{
   const panel=importPanelHarness('ARCHIVE_ONLY')
   const html=await panel.html()
@@ -109,6 +137,114 @@ test('NORMAL preview retains its ordinary commit entry', async()=>{
   const html=await importPanelHarness('NORMAL').html()
   assert.match(html,/确认冻结清单并创建草稿<\/button>/)
   assert.doesNotMatch(html,/冻结清单、建立历史记录并提交独立确认/)
+})
+
+test('服务端每批三份时页面显示真实上限，四行在任何写请求前阻断并保留表单', async () => {
+  const panel = importPanelHarness('ARCHIVE_ONLY', undefined, undefined, undefined, undefined,
+    undefined, { max_batch_items: 3 })
+  useNewHistory(panel)
+  panel.state.batch.value = null
+  panel.state.batchID.value = ''
+  panel.state.formRows.value = Array.from({ length: 4 }, (_, index) => normalRow({
+    key: `limit-${index}`, externalRecordId: `OLD-${index}`, fileName: `limit-${index}.pdf`,
+  }))
+  panel.state.files.value = panel.state.formRows.value.map(row => new File(['pdf'], row.fileName))
+  await panel.state.preview()
+  assert.equal(panel.calls.length, 0)
+  assert.equal(panel.state.formRows.value.length, 4)
+  assert.equal(panel.state.files.value.length, 4)
+  assert.match(panel.state.error.value, /每批最多 3 份/)
+  assert.match(await panel.html(), /≤3 份/)
+})
+
+test('权威JSON三项不受旧表单四行阻断，既有暂存引用继续使用', async () => {
+  const panel = importPanelHarness('ARCHIVE_ONLY', undefined, undefined, undefined, undefined,
+    undefined, { max_batch_items: 3 })
+  const sample = structuredClone(panel.batch.items[0].item)
+  sample.history_evidence = { historical_status: 'archived', target_owner_user_id: 'actor',
+    report_required_channels: 'API_ONLY' }
+  const items = Array.from({ length: 3 }, (_, index) => ({ ...structuredClone(sample),
+    item_key: `json-${index}`, external_record_id: `JSON-${index}`, source_file_ref: `ref-${index}`,
+  }))
+  panel.state.batch.value.sources = items.map(item => ({ item_key: item.item_key,
+    file_ref: item.source_file_ref, filename: `${item.item_key}.pdf`, state: 'READY' }))
+  panel.state.formRows.value = Array.from({ length: 4 }, () => normalRow())
+  panel.state.jsonAuthoritative.value = true
+  panel.state.text.value = JSON.stringify({ schema_version: 1, source_system: 'legacy', items })
+  await panel.state.preview()
+  const saved = panel.calls.find(([action]) => action === 'manifest')
+  assert.ok(saved, panel.state.error.value)
+  assert.equal(saved?.[2].manifest.items.length, 3)
+  assert.deepEqual(saved[2].manifest.items.map(item => item.source_file_ref), ['ref-0', 'ref-1', 'ref-2'])
+  assert.equal(panel.calls.filter(([action]) => action === 'files').length, 0)
+})
+
+test('实际文件选择使用服务端三份上限，超限重试保留已选文件及既有批次', async () => {
+  const panel = importPanelHarness('ARCHIVE_ONLY', undefined, undefined, undefined, undefined,
+    undefined, { max_batch_items: 3 })
+  const picked = Array.from({ length: 4 }, (_, index) => new File(['pdf'], `limit-${index}.pdf`))
+  panel.state.selectFiles({ target: { files: picked, value: 'picked' } })
+  assert.deepEqual(panel.state.files.value.map(file => file.name), ['limit-0.pdf', 'limit-1.pdf', 'limit-2.pdf'])
+  assert.match(panel.state.fileMessage.value, /每批最多 3 份/)
+  panel.state.formRows.value = Array.from({ length: 4 }, (_, index) => normalRow({ key: `limit-${index}` }))
+  panel.state.batch.value.sources = [{ file_ref: 'keep-ref', item_key: 'limit-0', state: 'READY' }]
+  panel.state.jsonAuthoritative.value = false
+  await panel.state.preview()
+  assert.equal(panel.calls.length, 0)
+  assert.equal(panel.state.formRows.value.length, 4)
+  assert.equal(panel.state.files.value.length, 3)
+  assert.equal(panel.state.batch.value.sources[0].file_ref, 'keep-ref')
+})
+
+test('入口与JSON的普通/历史类别不符时在上传及保存清单前阻断，并保留输入', async () => {
+  for (const [existingBatch, selectedMode, manifestMode] of [
+    [false, 'ARCHIVE_ONLY', 'NORMAL'], [false, 'NORMAL', 'ARCHIVE_ONLY'],
+    [true, 'ARCHIVE_ONLY', 'NORMAL'], [true, 'NORMAL', 'ARCHIVE_ONLY'],
+  ]) {
+    const panel = importPanelHarness(selectedMode)
+    if (!existingBatch) {
+      panel.state.batch.value = null
+      panel.state.batchID.value = ''
+    }
+    panel.state.entryMode.value = selectedMode
+    panel.state.jsonAuthoritative.value = true
+    const text = JSON.stringify({ schema_version: 1, source_system: 'legacy', items: [{
+      item_key: 'one', external_record_id: 'old-1', mode: manifestMode, source_file_ref: 'old.pdf',
+      metadata: { customer_name: '待建历史客户' }, history_evidence: {}, policy_options: {},
+    }] })
+    panel.state.text.value = text
+    const file = new File(['PDF fixture'], 'old.pdf', { type: 'application/pdf' })
+    panel.state.files.value = [file]
+    await panel.state.preview()
+    assert.match(panel.state.error.value, !existingBatch && selectedMode === 'NORMAL' ? /批量导入仅用于历史/ : /导入方式.*不一致/)
+    assert.equal(panel.calls.length, 0, '不应上传、创建批次或保存错模式清单')
+    assert.equal(panel.state.text.value, text)
+    assert.equal(panel.state.files.value[0], file)
+  }
+})
+
+test('历史JSON待建客户不带CRM编号也能预检，不依赖普通Excel的CRM浏览器会话', async () => {
+  let customerReads = 0
+  const panel = importPanelHarness('ARCHIVE_ONLY', undefined, undefined, undefined, undefined,
+    async () => { customerReads++; throw Object.assign(new Error('CRM session missing'), { status: 401 }) })
+  panel.state.entryMode.value = 'ARCHIVE_ONLY'
+  panel.state.batch.value.sources = [{ item_key: 'one', filename: 'old.pdf', file_ref: 'file-ref', state: 'READY' }]
+  panel.state.excelIssues.value = [{ code: 'CRM_CUSTOMER_NOT_FOUND', blocking: true }]
+  panel.state.text.value = JSON.stringify({ schema_version: 1, source_system: 'legacy', items: [{
+    item_key: 'one', external_record_id: 'old-1', mode: 'ARCHIVE_ONLY', source_file_ref: 'old.pdf',
+    metadata: { customer_name: '待建历史客户', crm_customer_id: 0, sales_name: '测试销售' },
+    history_evidence: {}, policy_options: { finance_mode: 'NONE' },
+  }] })
+  await panel.state.preview()
+  const manifest = panel.calls.find(call => call[0] === 'manifest')?.[2].manifest
+  assert.ok(manifest)
+  assert.equal(manifest.items[0].mode, 'ARCHIVE_ONLY')
+  assert.equal(manifest.items[0].metadata.crm_customer_id, 0)
+  assert.equal(manifest.items[0].source_file_ref, 'file-ref')
+  assert.equal(panel.state.error.value, '')
+  assert.equal(customerReads, 0)
+  assert.equal(panel.directoryCalls.length, 0)
+  assert.ok(panel.calls.some(call => call[0] === 'preview'))
 })
 
 test('missing CRM context offers normal login while preserving the batch, source and unsaved manifest', async()=>{
@@ -244,9 +380,9 @@ test('a delayed old-batch read cannot redirect a new preview upload and manifest
     if(action==='manifest') created.items=payload.manifest.items.map(item=>({id:'item-B',item,state:'READY',issues:[]}))
     return structuredClone(created)
   })
-  panel.state.batch.value=null;panel.state.batchID.value=''
+  panel.state.batch.value=null;panel.state.batchID.value='';useNewHistory(panel)
   panel.state.jsonAuthoritative.value=true
-  panel.state.text.value=JSON.stringify({schema_version:1,source_system:'legacy',items:[{item_key:'one',external_record_id:'old-1',mode:'NORMAL',source_file_ref:'one.pdf',metadata:{}}]})
+  panel.state.text.value=JSON.stringify({schema_version:1,source_system:'legacy',items:[{item_key:'one',external_record_id:'old-1',mode:'ARCHIVE_ONLY',source_file_ref:'one.pdf',metadata:{},history_evidence:{},policy_options:{finance_mode:'NONE'}}]})
   panel.state.files.value=[new File(['PDF fixture'],'one.pdf',{type:'application/pdf'})]
   const oldRead=panel.state.refresh('batch-A')
   const preview=panel.state.preview()
@@ -302,6 +438,16 @@ test('background refresh preserves a different batch number being typed for the 
   assert.equal(panel.state.batchID.value,'batch-A')
 })
 
+// useNewHistory 将上传及重试测试切到受支持的新历史批次，保留原文件和断言目标。
+// 参数：panel为真实组件测试实例。
+// 返回值：无；只提供显式历史信息，不替代组件转换实现。
+function useNewHistory(panel) {
+  panel.state.entryMode.value = 'ARCHIVE_ONLY'
+  panel.state.jsonAuthoritative.value = false
+  panel.state.sourceSystem.value = 'manual'
+  panel.state.historyOptions.value = { targetOwnerUserID: 'actor', historicalStatus: 'archived', reportChannels: 'API_ONLY' }
+}
+
 // normalRow 提供普通模式最小可预检合同行，测试只替换必要的业务值。
 function normalRow(overrides = {}) {
   return {
@@ -332,15 +478,13 @@ test('普通模式默认隐藏必填的原始 JSON，并呈现 PDF+Excel 批量�
   assert.doesNotMatch(html, /<textarea[^>]*required/)
 })
 
-test('历史模式保留完整 JSON 清单工作流并说明需要历史证据与策略', async () => {
+test('历史模式默认Excel并保留高级清单兼容入口', async () => {
   const panel = importPanelHarness('ARCHIVE_ONLY')
   panel.state.entryMode.value = 'ARCHIVE_ONLY'
   const html = await panel.html()
-  assert.match(html, /历史导入需要完整清单/)
-  assert.match(html, /history_evidence/)
-  assert.match(html, /policy_options/)
-  assert.match(html, /id="contract-import-json"/)
-  assert.doesNotMatch(html, /高级：查看\/编辑清单/)
+  assert.match(html, /id="contract-import-excel"/)
+  assert.match(html, /id="contract-import-history"/)
+  assert.match(html, /高级：查看\/编辑清单/)
 })
 
 test('文件选择按原件生成行，重名原件被阻止并显示可访问错误', async () => {
@@ -407,6 +551,7 @@ test('缺来源业务键时写前阻断，补填后清单携带来源业务键',
   })
   panel.state.batch.value = null
   panel.state.batchID.value = ''
+  useNewHistory(panel)
   const row = normalRow({ externalRecordId: '' })
   panel.state.formRows.value = [row]
   panel.state.files.value = [new File(['PDF fixture'], '年度测评合同.pdf', { type: 'application/pdf' })]
@@ -453,6 +598,7 @@ test('普通模式预检由表单生成清单，金额转为分且原子上传�
   })
   panel.state.batch.value = null
   panel.state.batchID.value = ''
+  useNewHistory(panel)
   panel.state.formRows.value = [normalRow()]
   panel.state.files.value = [new File(['PDF fixture'], '年度测评合同.pdf', { type: 'application/pdf' })]
   await panel.state.preview()
@@ -470,6 +616,7 @@ test('表单缺字段在写请求前失败关闭，并把问题挂回具体行',
   const panel = importPanelHarness('NORMAL')
   panel.state.batch.value = null
   panel.state.batchID.value = ''
+  useNewHistory(panel)
   panel.state.formRows.value = [createImportFormRow({ fileName: '合同A.pdf' })]
   panel.state.files.value = [new File(['PDF fixture'], '合同A.pdf', { type: 'application/pdf' })]
   await panel.state.preview()
@@ -534,6 +681,7 @@ test('重新预检沿用已暂存原件，不重复上传且保留表单修订',
   })
   panel.state.batch.value = null
   panel.state.batchID.value = ''
+  useNewHistory(panel)
   panel.state.formRows.value = [normalRow({ fileName: '年度测评合同.pdf' })]
   panel.state.files.value = [new File(['PDF fixture'], '年度测评合同.pdf', { type: 'application/pdf' })]
   await panel.state.preview()
@@ -567,6 +715,7 @@ test('原件上传被服务端拒绝时透出具体原因、原因码与文件�
   })
   panel.state.batch.value = null
   panel.state.batchID.value = ''
+  useNewHistory(panel)
   panel.state.formRows.value = [normalRow({ fileName: 'GTSR-261122.pdf' })]
   panel.state.files.value = [new File(['PDF fixture'], 'GTSR-261122.pdf', { type: 'application/pdf' })]
   await panel.state.preview()
@@ -595,6 +744,7 @@ test('PDF 校验繁忙（503）提示稍后重试，不引导用户改动已填�
   })
   panel.state.batch.value = null
   panel.state.batchID.value = ''
+  useNewHistory(panel)
   panel.state.formRows.value = [normalRow({ fileName: 'GTSR-261122.pdf' })]
   panel.state.files.value = [new File(['PDF fixture'], 'GTSR-261122.pdf', { type: 'application/pdf' })]
   await panel.state.preview()
@@ -609,8 +759,9 @@ test('原件未就绪时不发任何请求，直接给出可定位的中文错�
   const panel = importPanelHarness('NORMAL')
   panel.state.batch.value = null
   panel.state.batchID.value = ''
+  useNewHistory(panel)
   panel.state.jsonAuthoritative.value = true
-  panel.state.text.value = JSON.stringify({ schema_version: 1, source_system: 'manual', items: [{ mode: 'NORMAL', item_key: 'one', external_record_id: 'HT-2024-001' }] })
+  panel.state.text.value = JSON.stringify({ schema_version: 1, source_system: 'manual', items: [{ mode: 'ARCHIVE_ONLY', item_key: 'one', external_record_id: 'HT-2024-001', history_evidence: {}, policy_options: {finance_mode:'NONE'} }] })
   // 普通对象 stub：没有字符串 name，不能被塞进 FormData 变成 "undefined"。
   panel.state.files.value = [{ size: 64 }]
   await panel.state.preview()
@@ -822,6 +973,38 @@ test('预检问题与批次错误提供下载错误报告入口，无问题时�
   assert.equal(panel.state.importErrorReportRows.value.length, 2)
 })
 
+test('错误报告使用浏览器文档下载CSV并保留原件预览状态', async (t) => {
+  const panel = importPanelHarness('ARCHIVE_ONLY')
+  panel.state.batch.value.items[0].issues = [{ field_path: 'metadata.title', code: 'REQUIRED' }]
+  const preview = { file_id: 'preview-source' }
+  panel.state.document.value = preview
+  const links = []
+  let clicked = false, removed = false, csvBlob
+  const link = { click() { clicked = true }, remove() { removed = true } }
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'document')
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: {
+    createElement(tag) { assert.equal(tag, 'a'); return link },
+    body: { appendChild(value) { links.push(value) } },
+  } })
+  t.after(() => {
+    if (previous) Object.defineProperty(globalThis, 'document', previous)
+    else delete globalThis.document
+  })
+  t.mock.method(URL, 'createObjectURL', (blob) => { csvBlob = blob; return 'blob:error-report' })
+  const revoke = t.mock.method(URL, 'revokeObjectURL', () => {})
+
+  panel.state.downloadImportErrorReport()
+
+  assert.equal(panel.state.error.value, '')
+  assert.equal(panel.state.document.value.file_id, preview.file_id)
+  assert.deepEqual(links, [link])
+  assert.equal(link.download, '合同导入错误.csv')
+  assert.equal(link.href, 'blob:error-report')
+  assert.ok(clicked && removed)
+  assert.match(await csvBlob.text(), /metadata.title|合同标题/)
+  assert.equal(revoke.mock.calls[0].arguments[0], 'blob:error-report')
+})
+
 
 test('预览返回 provision_plan 时展示将自动创建客户、销售解析与商机摘要，缺失时界面不变', async () => {
   const panel = importPanelHarness('NORMAL')
@@ -999,9 +1182,9 @@ test('自动审批开启且存在历史项时，批次页脚改按声明状态�
   panel.state.batch.value.state = 'PREVIEWED'
   const html = await panel.html()
   assert.match(html, /自动审批：已开启/, '批次头必须出现自动审批已开启徽标')
-  assert.match(html, /将按清单声明状态自动审批归档/, '历史项审批路径必须与开关一致')
+  assert.match(html, /将自动审批归档/, '历史项审批路径必须与开关一致')
   assert.doesNotMatch(html, /历史模式之后独立确认/, '开启时不得再暗示人工会签')
-  assert.match(html, /普通新合同仍逐份审批/, '普通合同仍走逐份审批')
+  assert.match(html, /新建合同请走正常新建流程/, '普通合同仍走正常流程')
 
   // 关闭后回到原有文案且移除徽标，避免关闭态仍宣称自动归档。
   await panel.state.applyAutoApproveToggle()
@@ -1009,7 +1192,7 @@ test('自动审批开启且存在历史项时，批次页脚改按声明状态�
   panel.state.batch.value.state = 'PREVIEWED'
   const disabled = await panel.html()
   assert.doesNotMatch(disabled, /自动审批：已开启/)
-  assert.match(disabled, /本次不免审生效/)
+  assert.match(disabled, /仍需独立确认/)
 })
 
 test('导入页顶部常驻状态条在面板折叠时仍显示最近变更人/时间，其他页签不渲染', async () => {
@@ -1104,4 +1287,200 @@ test('无 confirmation 时确认区保持空态且不报错', async () => {
   const html = await panel.html()
   assert.doesNotMatch(html, /当前确认：/)
   assert.doesNotMatch(html, /按租户策略自动审批/)
+})
+
+
+test('新批次只展示两种历史模式与Excel入口，历史信息可显式填写', async () => {
+  const panel = importPanelHarness('NORMAL')
+  panel.props.supportedModes = ['NORMAL', 'ARCHIVE_ONLY', 'CONTINUE_LIVE', 'HISTORICAL_CLOSED']
+  panel.state.startNewBatch()
+  assert.equal(panel.state.entryMode.value, 'ARCHIVE_ONLY')
+  assert.deepEqual(panel.state.newBatchModes.value, ['ARCHIVE_ONLY', 'HISTORICAL_CLOSED'])
+  const html = await panel.html()
+  assert.match(html, /id="contract-import-excel"/)
+  assert.match(html, /id="contract-import-history"/)
+  assert.doesNotMatch(html, /name="contract-import-entry-mode"[^>]*value="NORMAL"/)
+  assert.doesNotMatch(html, /name="contract-import-entry-mode"[^>]*value="CONTINUE_LIVE"/)
+})
+
+test('历史Excel两种模式从文件选择到预检完整传递，不调用浏览器CRM目录', async () => {
+  for (const mode of ['ARCHIVE_ONLY', 'HISTORICAL_CLOSED']) {
+    let stored, customerReads = 0
+    const sheets = excelWorkbook([excelMainRow({ CRM客户编号: '', 销售姓名: '合成销售',
+      客户联系人: '合成联系人', 客户联系电话: '13800000000', 当前负责人: '现任负责人' })])
+    const panel = importPanelHarness(mode, (original, action, id, payload) => {
+      if (action === 'create') stored = { ...structuredClone(original), batch_id: 'new-history',
+        source_system: payload.source_system, state: 'DRAFT', items: [], sources: [] }
+      if (action === 'files') {
+        stored.sources = [{ file_ref: 'history-file', item_key: payload.get('item_key'), filename: 'HT-2026001.pdf', state: 'READY' }]
+        return { file_ref: 'history-file' }
+      }
+      if (action === 'manifest') stored.items = payload.manifest.items.map(item => ({ id: 'history-item', item: structuredClone(item), state: 'READY', issues: [] }))
+      if (action === 'preview') {
+        stored.state = 'PREVIEWED'
+        for (const entry of stored.items) if (entry.item.history_evidence.target_owner_name) entry.item.history_evidence.target_owner_user_id = 'actor'
+        stored.provision_plan = [{ customer_name: 'Excel客户', customer_action: 'TO_CREATE' }]
+      }
+      return structuredClone(stored || original)
+    }, undefined, undefined, async () => sheets, async () => { customerReads++; throw new Error('CRM未登录') })
+    panel.props.supportedModes = ['NORMAL', 'ARCHIVE_ONLY', 'HISTORICAL_CLOSED']
+    panel.state.startNewBatch()
+    panel.state.selectEntryMode(mode)
+    panel.state.historyOptions.value = { targetOwnerUserID: 'actor', historicalStatus: mode === 'ARCHIVE_ONLY' ? 'archived' : 'completed',
+      declaredSignedDate: '2024-01-03', reportChannels: 'API_ONLY', financeMode: 'EVIDENCE_ONLY', reportMode: 'HISTORICAL_SEPARATE' }
+    panel.state.selectFiles({ target: { files: [new File(['%PDF'], 'HT-2026001.pdf', { type: 'application/pdf' })], value: '' } })
+    await panel.state.selectExcelFile({ target: { files: [new File(['xlsx'], '历史合同.xlsx')], value: '' } })
+    assert.equal(panel.state.formRows.value[0].crmCustomerId, '')
+    assert.deepEqual(panel.state.formRows.value[0].issues, [])
+    await panel.state.preview()
+    assert.equal(panel.state.error.value, '')
+    const manifest = panel.calls.find(call => call[0] === 'manifest')[2].manifest
+    assert.equal(manifest.items[0].mode, mode)
+    assert.equal(manifest.items[0].metadata.crm_customer_id, 0)
+    assert.equal(manifest.items[0].metadata.sales_name, '合成销售')
+    assert.equal(manifest.items[0].source_file_ref, 'history-file')
+    assert.equal(manifest.items[0].history_evidence.declared_signed_date, '2024-01-03')
+    assert.equal(manifest.items[0].history_evidence.target_owner_user_id, '')
+    assert.equal(manifest.items[0].history_evidence.target_owner_name, '现任负责人')
+    assert.equal(panel.state.formRows.value[0].historyEvidence.target_owner_user_id, 'actor')
+    assert.equal(customerReads, 0)
+    assert.ok(panel.calls.some(call => call[0] === 'preview'))
+    panel.state.formRows.value = []
+    await panel.state.refresh('new-history')
+    assert.equal(panel.state.formRows.value[0].historyEvidence.declared_signed_date, '2024-01-03')
+    assert.equal(panel.state.formRows.value[0].key, manifest.items[0].item_key)
+    assert.equal(panel.state.formRows.value[0].policyOptions.finance_mode, 'NONE')
+    await panel.state.preview()
+    assert.equal(panel.calls.filter(call => call[0] === 'files').length, 1)
+  }
+})
+
+test('历史Excel解析迟到不覆盖另一模式，旧批次本地校验失败不刷新丢输入', async () => {
+  let finish
+  const panel = importPanelHarness('ARCHIVE_ONLY', undefined, undefined, undefined,
+    () => new Promise(resolve => { finish = resolve }))
+  panel.props.supportedModes = ['ARCHIVE_ONLY', 'HISTORICAL_CLOSED']
+  panel.state.startNewBatch()
+  panel.state.selectFiles({ target: { files: [new File(['%PDF'], 'HT-2026001.pdf', { type: 'application/pdf' })], value: '' } })
+  const pending = panel.state.selectExcelFile({ target: { files: [new File(['xlsx'], '历史.xlsx')], value: '' } })
+  await new Promise(resolve => setImmediate(resolve))
+  panel.state.selectEntryMode('HISTORICAL_CLOSED')
+  finish(excelWorkbook([excelMainRow()]))
+  await pending
+  assert.equal(panel.state.entryMode.value, 'HISTORICAL_CLOSED')
+  assert.equal(panel.state.formRows.value.length, 0)
+  const old = importPanelHarness('ARCHIVE_ONLY')
+  old.state.jsonAuthoritative.value = false
+  old.state.formRows.value = [normalRow({ title: '未保存修改', amount: '' })]
+  old.state.historyOptions.value = { targetOwnerUserID: 'actor', historicalStatus: 'archived', reportChannels: 'API_ONLY' }
+  await old.state.preview()
+  assert.equal(old.calls.length, 0)
+  assert.equal(old.state.formRows.value[0].title, '未保存修改')
+  assert.ok(old.state.formRows.value[0].issues.some(issue => issue.field === 'amount'))
+})
+
+test('新批次不接受普通合同或接续履约高级清单，能力关闭不回退普通模式', async () => {
+  const panel = importPanelHarness('NORMAL')
+  panel.props.supportedModes = ['NORMAL']
+  panel.state.startNewBatch()
+  assert.equal(panel.state.entryMode.value, '')
+  assert.match(await panel.html(), /尚未开放历史存档或历史结清导入/)
+  await panel.state.preview()
+  assert.equal(panel.calls.length, 0)
+  assert.match(panel.state.error.value, /批量导入仅用于历史/)
+  panel.props.supportedModes = ['NORMAL', 'ARCHIVE_ONLY', 'CONTINUE_LIVE']
+  panel.state.startNewBatch()
+  panel.state.jsonAuthoritative.value = true
+  panel.state.files.value = [new File(['%PDF'], 'one.pdf', { type: 'application/pdf' })]
+  panel.state.text.value = JSON.stringify({ schema_version: 1, source_system: 'legacy', items: [{
+    mode: 'CONTINUE_LIVE', item_key: 'one', external_record_id: 'old-1', source_file_ref: 'one.pdf',
+    metadata: {}, history_evidence: { expected_facts: [] }, policy_options: { finance_mode: 'FULL_REPLAY' },
+  }] })
+  await panel.state.preview()
+  assert.equal(panel.calls.length, 0)
+  assert.match(panel.state.error.value, /新批量导入只接受历史/)
+})
+
+test('混合历史旧批次包含接续项时整体保留原清单，不能通过表单过滤丢项', async () => {
+  const panel = importPanelHarness('ARCHIVE_ONLY')
+  panel.batch.items.push({ ...structuredClone(panel.batch.items[0]), id: 'continue-item',
+    item: { ...structuredClone(panel.batch.items[0].item), item_key: 'continue-1', mode: 'CONTINUE_LIVE' } })
+  await panel.state.refresh('batch-A')
+  assert.equal(panel.state.usesJsonManifest.value, true)
+  assert.equal(panel.state.formRows.value.length, 0)
+  assert.equal(JSON.parse(panel.state.text.value).items.length, 2)
+  assert.match(await panel.html(), /id="contract-import-json"/)
+})
+
+test('批量历史补填跳过成功项，不能清空已有财务事实或编辑移除成功项', () => {
+  const panel = importPanelHarness('ARCHIVE_ONLY')
+  panel.state.jsonAuthoritative.value = false
+  const done = normalRow({ key: 'done', contractId: 'created',
+    historyEvidence: { declared_signed_date: '2020-01-01', target_owner_user_id: 'old-owner' },
+    policyOptions: { finance_mode: 'NONE' } })
+  const pending = normalRow({ key: 'pending', historyEvidence: { expected_facts: [
+    { source_system: 'legacy', fact_type: 'RECEIPT', external_fact_id: 'r1' },
+  ] } })
+  const original = JSON.stringify(done)
+  panel.state.formRows.value = [done, pending]
+  panel.state.historyOptions.value = { targetOwnerUserID: 'actor', historicalStatus: 'archived',
+    reportChannels: 'API_ONLY', declaredSignedDate: '2024-01-01', noHistoricalFacts: true }
+  panel.state.applyBatchHistory()
+  assert.equal(panel.state.error.value, '')
+  assert.equal(pending.historyEvidence.expected_facts.length, 1)
+  panel.state.historyOptions.value.noHistoricalFacts = false
+  panel.state.applyBatchHistory()
+  assert.equal(JSON.stringify(done), original)
+  assert.equal(pending.historyEvidence.declared_signed_date, '2024-01-01')
+  assert.equal(pending.historyEvidence.expected_facts[0].external_fact_id, 'r1')
+  panel.state.openRow(done)
+  assert.equal(panel.state.drawerRowKey.value, '')
+  panel.state.removeRow(done)
+  assert.equal(panel.state.formRows.value.length, 2)
+})
+
+test('重新应用Excel更换当前负责人时清空旧账号，旧批次隐藏通道不随批量补填改变', async () => {
+  const sheets = excelWorkbook([excelMainRow({ 当前负责人: '负责人乙' })])
+  const panel = importPanelHarness('ARCHIVE_ONLY', undefined, undefined, undefined, async () => sheets)
+  panel.state.jsonAuthoritative.value = false
+  const row = normalRow({ fileName: 'HT-2026001.pdf', historyEvidence: {
+    target_owner_name: '负责人甲', target_owner_user_id: 'user-A', report_required_channels: 'API_AND_SOURCE_FACTS',
+  } })
+  panel.state.formRows.value = [row]
+  panel.state.files.value = [new File(['%PDF'], 'HT-2026001.pdf', { type: 'application/pdf' })]
+  await panel.state.selectExcelFile({ target: { files: [new File(['xlsx'], '历史.xlsx')], value: '' } })
+  const updated = panel.state.formRows.value[0]
+  assert.equal(updated.historyEvidence.target_owner_name, '负责人乙')
+  assert.equal(updated.historyEvidence.target_owner_user_id, undefined)
+  panel.state.historyOptions.value = { historicalStatus: 'archived', declaredSignedDate: '2020-01-01' }
+  panel.state.applyBatchHistory()
+  assert.equal(updated.historyEvidence.report_required_channels, 'API_AND_SOURCE_FACTS')
+})
+
+test('新历史Excel页面不展示财务重建及报表技术通道，保留姓名自动匹配说明', async () => {
+  const panel = importPanelHarness('ARCHIVE_ONLY')
+  panel.props.supportedModes = ['ARCHIVE_ONLY', 'HISTORICAL_CLOSED']
+  panel.state.startNewBatch()
+  panel.state.selectEntryMode('HISTORICAL_CLOSED')
+  const html = await panel.html()
+  assert.doesNotMatch(html, /<select[^>]*>[^]*?请选择财务处理方式/)
+  assert.doesNotMatch(html, /<span>报表来源通道<\/span>/)
+  assert.doesNotMatch(html, /完整 JSON 清单）/)
+  assert.match(html, /当前负责人.*唯一匹配/)
+  assert.match(html, /历史导入不参与结算开票/)
+})
+
+test('批量显式选择负责人账号时清空旧Excel姓名，未选账号时保留原负责人', () => {
+  const panel = importPanelHarness('ARCHIVE_ONLY')
+  const row = normalRow({ historyEvidence: { target_owner_name: '姓名甲', target_owner_user_id: 'user-A' } })
+  panel.state.formRows.value = [row]
+  panel.state.historyOptions.value = { targetOwnerUserID: 'user-B', historicalStatus: 'archived' }
+  panel.state.applyBatchHistory()
+  assert.equal(row.historyEvidence.target_owner_user_id, 'user-B')
+  assert.equal(row.historyEvidence.target_owner_name, '')
+  row.historyEvidence.target_owner_name = '姓名乙'
+  panel.state.historyOptions.value = { declaredSignedDate: '2020-01-01', historicalStatus: 'archived' }
+  panel.state.applyBatchHistory()
+  assert.equal(row.historyEvidence.target_owner_user_id, 'user-B')
+  assert.equal(row.historyEvidence.target_owner_name, '姓名乙')
 })

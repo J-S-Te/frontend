@@ -8,7 +8,7 @@ const source = await readFile(new URL('./contract.js', import.meta.url), 'utf8')
 const moduleSource = source.replace(/^import\s[\s\S]*?from ['"][^'"]+['"]\n/gm, '')
   .replaceAll('import.meta.env', '({})').replace(/^export /gm, '')
 const api = new Function('formatUserError', 'externalContractMetadata', 'attachStructuredContext', 'subsystemAccessMessage',
-  `${moduleSource}; return { listContracts, listSigningRecords, listContractTemplates, listApprovalTasks, listApprovals, listApprovalRules, listOpportunityIntakes, listContractDetectionCategories, listMyCustomers, listMyOpportunities, createContract, createExternalContract, updateContractDraft, createApprovalRule, updateApprovalRule, submitContract, commandApproval };\n//# sourceURL=contract-api-under-test.js`)(
+  `${moduleSource}; return { getContractSourceCapabilities, contractImportRequest, listContracts, listSigningRecords, listContractTemplates, listApprovalTasks, listApprovals, listApprovalRules, listOpportunityIntakes, listContractDetectionCategories, listMyCustomers, listMyOpportunities, createContract, createExternalContract, updateContractDraft, createApprovalRule, updateApprovalRule, submitContract, commandApproval };\n//# sourceURL=contract-api-under-test.js`)(
   formatUserError, externalContractMetadata, (error, context) => { error.testRequestContext = context }, (error, message) => message)
 
 async function withResponse(body, contentType, run, status = 200) {
@@ -198,4 +198,55 @@ test('resource validators preserve non-success status, real error code, request 
       return true
     })
   }, 409)
+})
+
+
+test('原件存储故障与在途上传保留服务端诊断提示，不被写入未知文案覆盖', async () => {
+  for (const [status, code, message] of [
+    [503, 'IMPORT_SOURCE_STORAGE_UNAVAILABLE', '原件存储暂时不可用，请联系管理员检查存储容量或服务状态；先查询批次，待恢复后继续暂存。'],
+    [409, 'IMPORT_SOURCE_UPLOAD_PENDING', '原件仍在上传处理中，请先查询批次状态，稍后再继续暂存。'],
+  ]) {
+    await withResponse(JSON.stringify({ code, message }), 'application/json', async () => {
+      await assert.rejects(api.contractImportRequest('files', '01ARZ3NDEKTSV4RRFFQ69G5FAV', new FormData()), (error) => {
+        assert.equal(error.status, status)
+        assert.equal(error.code, code)
+        assert.equal(error.message, message)
+        assert.notEqual(error.outcomeUnknown, true)
+        return true
+      })
+    }, status)
+  }
+})
+
+
+test('历史负责人目录能力允许可选布尔值，拒绝非法字段类型', async () => {
+  const base = { pdf_enabled: true, max_docx_bytes: 10485760, max_pdf_bytes: 20971520 }
+  for (const value of [undefined, false, true]) {
+    const data = { ...base, ...(value === undefined ? {} : { history_owner_directory: value }) }
+    await withResponse(JSON.stringify({ code: 'OK', data }), 'application/json', async () => {
+      assert.deepEqual(await api.getContractSourceCapabilities(), data)
+    })
+  }
+  for (const value of ['true', 1, null, {}]) {
+    await withResponse(JSON.stringify({ code: 'OK', data: { ...base, history_owner_directory: value } }),
+      'application/json', async () => {
+        await assert.rejects(api.getContractSourceCapabilities(), error => error.code === 'INVALID_CONTRACT_RESPONSE')
+      })
+  }
+})
+
+test('原件能力兼容旧后端缺省上限，拒绝非法批次数量能力', async () => {
+  const base = { pdf_enabled: true, max_docx_bytes: 10485760, max_pdf_bytes: 20971520 }
+  for (const value of [undefined, 3, 100]) {
+    const data = { ...base, ...(value === undefined ? {} : { max_batch_items: value }) }
+    await withResponse(JSON.stringify({ code: 'OK', data }), 'application/json', async () => {
+      assert.deepEqual(await api.getContractSourceCapabilities(), data)
+    })
+  }
+  for (const value of [0, -1, 101, 3.5, '3', null]) {
+    await withResponse(JSON.stringify({ code: 'OK', data: { ...base, max_batch_items: value } }),
+      'application/json', async () => {
+        await assert.rejects(api.getContractSourceCapabilities(), error => error.code === 'INVALID_CONTRACT_RESPONSE')
+      })
+  }
 })

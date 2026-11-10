@@ -1067,15 +1067,18 @@ export async function previewContractDocument(contractId) {
 }
 
 /**
- * getContractSourceCapabilities 获取当前服务端开放的原件接入能力。
+ * getContractSourceCapabilities 获取原件接入、目录维护及历史负责人读取能力。
  * 参数：无；使用当前合同会话。
- * 返回值：经契约校验的能力及体积限制；不可用时抛出错误，不默认开启PDF。
+ * 返回值：经契约校验的能力、批次及体积限制；不可用时抛出错误，不默认开启PDF。
  */
 export async function getContractSourceCapabilities() {
   return request('/contract-source-capabilities', { validateData: (data) => data &&
     (data.counterparty_source === undefined || ['crm', 'local'].includes(data.counterparty_source)) &&
     (data.category_source === undefined || ['project', 'local'].includes(data.category_source)) &&
     (data.local_catalog_manage === undefined || typeof data.local_catalog_manage === 'boolean') &&
+    (data.history_owner_directory === undefined || typeof data.history_owner_directory === 'boolean') &&
+    (data.max_batch_items === undefined || (Number.isInteger(data.max_batch_items)
+      && data.max_batch_items >= 1 && data.max_batch_items <= 100)) &&
     typeof data.pdf_enabled === 'boolean' && data.max_docx_bytes === 10 * 1024 * 1024 &&
     data.max_pdf_bytes === 20 * 1024 * 1024 })
 }

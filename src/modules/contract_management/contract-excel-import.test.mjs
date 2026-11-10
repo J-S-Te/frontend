@@ -7,6 +7,7 @@ import { applyContractExcelCustomerLookup, blockingContractExcelIssues, buildCon
   summarizeContractExcelImport } from './utils/contractExcelImport.js'
 import { readContractExcelWorkbook } from './utils/contractExcelReader.js'
 import { validateImportFormRows } from './utils/contractImportForm.js'
+import { historyExcelHeaders, historyFactHeaders } from './utils/contractHistoryExcel.js'
 
 const mainHeaders = [...contractExcelTemplateHeaders.main]
 const serviceHeaders = [...contractExcelTemplateHeaders.services]
@@ -246,19 +247,22 @@ test('下载模板的工作表名和表头与解析器常量一致', async () =>
   assert.deepEqual(byName.get('系统信息')[0], [...contractExcelTemplateHeaders.systems])
   assert.deepEqual(byName.get('付款条款')[0], [...contractExcelTemplateHeaders.payments])
   // 模板「合同明细」末尾 4 列必须与常量顺序一致，且「销售姓名」只能出现一次（重复列会让后加的列被静默忽略）。
-  assert.deepEqual(byName.get('合同明细')[0].slice(-4), ['销售姓名', '客户类型', '行业', '地区'])
+  assert.deepEqual(byName.get('合同明细')[0].slice(-5, -1), ['销售姓名', '客户类型', '行业', '地区'])
   const mainHeaderRow = byName.get('合同明细')[0]
   for (const header of ['销售姓名', '客户类型', '行业', '地区']) {
     assert.equal(mainHeaderRow.filter((cell) => cell === header).length, 1, header)
   }
-  assert.deepEqual([...byName.keys()], ['合同明细', '服务项', '系统信息', '付款条款', '填写说明'])
+  assert.deepEqual([...byName.keys()], ['合同明细', '服务项', '系统信息', '付款条款', '填写说明', '历史档案'])
+  assert.deepEqual(byName.get('历史档案')[0], historyExcelHeaders)
+  assert.equal(byName.has('历史财务事实'), false)
+  assert.equal(byName.get('合同明细')[0].at(-1), '当前负责人')
 })
 
 test('浏览器读取适配层可直接读取 ArrayBuffer 并返回全部工作表', async () => {
   const buffer = await readFile(new URL('../../../public/contract-import-template.xlsx', import.meta.url))
   const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
   const sheets = await readContractExcelWorkbook(arrayBuffer)
-  assert.deepEqual(sheets.map((sheet) => sheet.sheet), ['合同明细', '服务项', '系统信息', '付款条款', '填写说明'])
+  assert.deepEqual(sheets.map((sheet) => sheet.sheet), ['合同明细', '服务项', '系统信息', '付款条款', '填写说明', '历史档案'])
   assert.deepEqual(sheets[0].data[0], [...contractExcelTemplateHeaders.main])
 })
 
@@ -426,7 +430,7 @@ test('「客户类型/行业/地区」支持别名，且不误判「合同类型
   assert.equal(record.customerType, '政府')
   assert.equal(record.industry, '政务')
   assert.equal(record.region, '华北')
-  assert.deepEqual(contractExcelTemplateHeaders.main.slice(-4), ['销售姓名', '客户类型', '行业', '地区'])
+  assert.deepEqual(contractExcelTemplateHeaders.main.slice(-5, -1), ['销售姓名', '客户类型', '行业', '地区'])
 })
 
 test('「客户类型/行业/地区」超长按 64 字上限阻断，可定位到具体列', () => {
