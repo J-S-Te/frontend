@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 import { approvalNodeLabel } from '../rolePresentation.js'
+import BusinessAttachmentSelect from './BusinessAttachmentSelect.vue'
 
 const props = defineProps({
   item: { type: Object, required: true },
@@ -10,6 +11,7 @@ const props = defineProps({
   tailPolicies: { type: Array, default: () => [] },
   disabled: { type: Boolean, default: false },
   canDownload: { type: Boolean, default: false },
+  names: { type: Object, default: () => ({}) },
 })
 const emit = defineEmits(['upload', 'download'])
 const tailFiles = computed(() => [...new Set(String(props.item.historical_tail_evidence_text || '')
@@ -18,6 +20,15 @@ const travelFiles = computed(() => [...new Set(String(props.item.travel_confirma
   .split(',').map((value) => value.trim()).filter(Boolean))].slice(0, 20))
 const assessments = { MATCH: '事实匹配', MISMATCH: '事实存在不一致', UNKNOWN: '事实未知',
   NOT_REQUESTED_LEGACY: '历史记录未请求交叉核验' }
+
+// 用途：为查看证据按钮展示真实原名，缺少名称时不暴露文件内部引用。
+// 参数：fileID 为附件引用；index 为当前证据列表的显示序号。
+// 返回值：真实文件名或带序号的名称待核对说明。
+function evidenceName(fileID, index) {
+  const value = props.names[fileID]
+  return typeof value === 'string' && value.trim() && value.trim() !== fileID
+    ? value.trim() : `附件 ${index + 1}（名称待核对）`
+}
 </script>
 
 <template>
@@ -63,13 +74,13 @@ const assessments = { MATCH: '事实匹配', MISMATCH: '事实存在不一致', 
       <summary>历史尾款申请与证据</summary>
       <fieldset :disabled="disabled">
         <label>终止前费用及尾款申请原因<textarea v-model="item.historical_tail_reason" maxlength="2000" /></label>
-        <label>上传本费用证据（PDF / PNG / JPEG，最多20MiB）
-          <input type="file" accept=".pdf,.png,.jpg,.jpeg" @change="emit('upload', $event, 'claimTail')">
-        </label>
-        <label>尾款证据文件ID（最多20份）<input v-model="item.historical_tail_evidence_text"></label>
+        <p>尾款证据最多20份；PDF / PNG / JPEG 单份最多20MiB。</p>
+        <BusinessAttachmentSelect v-model="item.historical_tail_evidence_text"
+          purpose="reimbursement.claim.evidence" :disabled="disabled" :names="names"
+          @upload="emit('upload', $event, 'claimTail')" />
       </fieldset>
-      <div class="expense-actions"><button v-for="file in tailFiles" :key="file"
-        class="expense-button" :disabled="!canDownload" @click="emit('download', file)">查看尾款证据 {{ file }}</button></div>
+      <div class="expense-actions"><button v-for="(file, index) in tailFiles" :key="file"
+        class="expense-button" :disabled="!canDownload" @click="emit('download', file)">查看尾款证据 {{ evidenceName(file, index) }}</button></div>
       <p>新证据先保存到草稿，再按当前单据范围申请查看。</p>
       <p>费用截止日按费用发生日核对，政策有效期按提交业务日核对；填写原因不会自动启用历史尾款政策。</p>
       <p v-for="policy in tailPolicies" :key="policy.id">可见政策提示 {{ policy.id }} · v{{ policy.version }}
@@ -122,13 +133,13 @@ const assessments = { MATCH: '事实匹配', MISMATCH: '事实存在不一致', 
           <option value="ACKNOWLEDGED_MISMATCH">承认事实不一致并申请额外审批</option>
         </select></label>
         <label>人工依据<textarea v-model="item.travel_confirmation.reason" maxlength="2000" /></label>
-        <label>上传差旅佐证（不自动解析为发票）
-          <input type="file" accept=".pdf,.png,.jpg,.jpeg" @change="emit('upload', $event, 'claimTravel')">
-        </label>
-        <label>差旅证据文件ID（最多20份）<input v-model="item.travel_confirmation.evidence_text"></label>
+        <p>差旅佐证最多20份，不自动解析为发票。</p>
+        <BusinessAttachmentSelect v-model="item.travel_confirmation.evidence_text"
+          purpose="reimbursement.claim.evidence" :disabled="disabled" :names="names"
+          @upload="emit('upload', $event, 'claimTravel')" />
       </fieldset>
-      <div class="expense-actions"><button v-for="file in travelFiles" :key="file"
-        class="expense-button" :disabled="!canDownload" @click="emit('download', file)">查看差旅证据 {{ file }}</button></div>
+      <div class="expense-actions"><button v-for="(file, index) in travelFiles" :key="file"
+        class="expense-button" :disabled="!canDownload" @click="emit('download', file)">查看差旅证据 {{ evidenceName(file, index) }}</button></div>
     </details>
   </section>
 </template>

@@ -10,6 +10,7 @@ import { canSelectProjectReference, editableClaimItem, evidenceIDs,travelInput }
 import { policyFields, policyFormFrom, policyPayload } from '../policy.js'
 import { createCommandRunner, createRequestID, formatMinor, toMinor, validateItems } from '../api/client.js'
 import { sourceSHA256 } from '../../shared/utils/sourceIntegrity.js'
+import * as claimPresentation from '../claimPresentation.js'
 import * as workspaceState from '../workspaceState.js'
 import { frontendModules } from '../../registry/compiledModules.js'
 import * as workspace from '../workspace.js'
@@ -17,6 +18,16 @@ import { allocationInput } from '../allocation.js'
 import * as invoiceClassification from '../invoiceClassification.js'
 
 const panelStub = { render: () => null }
+
+// 用途：提供当前真实任职与唯一有效费用档案的完整合成选项。
+// 参数：orgID为费用组织，routeType为该档案的权威业务线路。
+// 返回值：适用于普通草稿测试的完整claim-options响应。
+function draftOptionsFixture(orgID = 'org', routeType = 'TECHNICAL') {
+  return { applicant: { id: 'actor', name: '王工' },
+    organizations: [{ id: orgID, name: '技术部', is_primary: true }],
+    draft_context: { status: 'READY', org_id: orgID, route_type: routeType, employee_profile_id: 'profile' },
+    employee_profiles: [{ id: 'profile', org_id: orgID, route_type: routeType, active: true }] }
+}
 
 // 用途：挂载真实报销页面setup，仅替换路由、认证和HTTP外部边界。
 // 参数：permissions 为服务端能力，request 为接口替身，section 为入口，roles 为显示角色。
@@ -27,10 +38,10 @@ async function mountPage(permissions, request, section = 'dashboard', roles = []
   const route = Vue.reactive({ params: { section }, query: {} })
   const { descriptor } = parse(readFileSync(new URL('./ReimbursementView.vue', import.meta.url), 'utf8'))
   const script = compileScript(descriptor, { id: 'expense-view-test' })
-  const dependencies = { ...workspaceState, ...workspace, ...invoiceClassification, allocationInput, travelInput,frontendModules,sourceSHA256,
+  const dependencies = { ...claimPresentation, ...workspaceState, ...workspace, ...invoiceClassification, allocationInput, travelInput,frontendModules,sourceSHA256,
     computed: Vue.computed, nextTick: Vue.nextTick, onBeforeUnmount: Vue.onBeforeUnmount,
     onMounted: Vue.onMounted, ref: Vue.ref, watch: Vue.watch, useRoute: () => route, useRouter: () => ({ push() {} }),
-    onBeforeRouteLeave() {}, AppShell: { setup: (_props, { slots }) => () => Vue.h('main', slots.default?.()) }, LoadingState: panelStub, ExpenseInbox: panelStub, ArchiveBorrowPanel: panelStub, TravelFields: panelStub, ClaimPreviewPanel:panelStub,InvoiceContentFields:panelStub,InvoiceContentMappings:panelStub,InvoiceClassificationEvidence:panelStub,ParseExceptionsPanel:panelStub, PaymentExceptionPanel: panelStub, ClaimEvidenceTravelPanel: panelStub, ArchivePackagePanel: panelStub, InvoiceControlsPanel: panelStub, ApprovalRoundsPanel: panelStub, ClaimSyncPanel: panelStub, RecoveryPanel: panelStub, todayBusinessDate: () => '2026-11-10', formatBusinessDateTime: (value) => value,
+    onBeforeRouteLeave() {}, AppShell: { setup: (_props, { slots }) => () => Vue.h('main', slots.default?.()) }, LoadingState: panelStub, ExpenseInbox: panelStub, ArchiveBorrowPanel: panelStub, TravelFields: panelStub, BusinessObjectSelect: panelStub, BusinessAttachmentSelect: panelStub, CitySelect: panelStub, ClaimPreviewPanel:panelStub,InvoiceContentFields:panelStub,InvoiceContentMappings:panelStub,InvoiceClassificationEvidence:panelStub,ParseExceptionsPanel:panelStub, PaymentExceptionPanel: panelStub, ClaimEvidenceTravelPanel: panelStub, ArchivePackagePanel: panelStub, InvoiceControlsPanel: panelStub, ApprovalRoundsPanel: panelStub, ClaimSyncPanel: panelStub, RecoveryPanel: panelStub, todayBusinessDate: () => '2026-11-10', formatBusinessDateTime: (value) => value,
     createCommandRunner, createRequestID, formatMinor, toMinor, validateItems, approvalNodeLabel, assignmentPurpose, expenseScopeDescription, hasTenantAllCapability, reimbursementRoleLabel, canSelectProjectReference, editableClaimItem, evidenceIDs, policyFields, policyFormFrom, policyPayload,
     ensureReimbursementSession: async () => ({ tenant_id: 'test', subject_id: 'actor', permissions, roles }),
     logoutReimbursement: async () => ({}), api: { request }, startReimbursementLogin() {} }
@@ -111,7 +122,7 @@ test('HTTP上传仍计算原件摘要并使用系统回执文档，不暴露可�
     fixture = await mountPage(['expense.invoice.read', 'expense.invoice.upload'], async (path, options) => {
       writes.push([path, options && JSON.parse(options.body)])
       if (path === '/invoice-documents/upload-sessions') return {
-        document_id: 'server-document', file_id: 'server-file',
+        status: 'CREATED', document_id: 'server-document', file_id: 'server-file',
         upload_url: '/file-gateway/upload/fixture', ticket: 'synthetic-upload-ticket',
       }
       if (path === '/invoice-documents/server-document/complete') return {
@@ -133,6 +144,7 @@ test('HTTP上传仍计算原件摘要并使用系统回执文档，不暴露可�
     assert.equal(writes[0][1].sha256,
       createHash('sha256').update(Buffer.from(await file.arrayBuffer())).digest('hex'))
     assert.equal(fixture.state.documentID.value, 'server-document')
+    assert.equal(fixture.state.evidenceNames.value['server-file'], 'upload-fixture.pdf')
     const html = await fixture.html()
     assert.doesNotMatch(html, /文档ID|上传后的文档ID|server-document/)
     assert.match(html, /upload-fixture\.pdf/)
@@ -159,7 +171,7 @@ test('列表筛选发送完整业务条件且应用后回到第一页，异常�
 })
 
 test('新费用草稿保存类型备注与比例派生金额，不把展示比例当服务端结论', async () => {
-  const fixture = await mountPage(['expense.claim.read','expense.claim.create'],async()=>({items:[],total:0}),'claims')
+  const fixture = await mountPage(['expense.claim.read','expense.claim.create'],async(path)=>path === '/claim-options' ? draftOptionsFixture() : ({items:[],total:0}),'claims')
   try {
     Object.assign(fixture.state.draft.value,{title:'差旅',claim_type:'TRAVEL',remark:'业务说明'})
     const item=fixture.state.draft.value.items[0]
@@ -181,6 +193,7 @@ test('提交依赖故障保留草稿输入和原命令，不显示提交成功',
   const calls = []
   const fixture = await mountPage(['expense.claim.read', 'expense.claim.create'], async (path, options) => {
     calls.push([path, options])
+    if (path === '/claim-options') return draftOptionsFixture()
     if (!options) return { items: [], total: 0, page: 1, page_size: 20 }
     throw Object.assign(new Error('项目引用服务暂不可用'), { status: 503, outcomeUnknown: true })
   }, 'claims')
@@ -204,7 +217,7 @@ test('新建草稿立即获得服务器ID并绑定可信组织选项', async () 
   const calls = []
   const fixture = await mountPage(['expense.claim.read', 'expense.claim.create'], async (path, options) => {
     calls.push([path, options])
-    if (path === '/claim-options') return { employee_profiles: [{ id: 'profile', org_id: 'trusted-org' }] }
+    if (path === '/claim-options') return { applicant: { id: 'actor', name: '王工' }, organizations: [{ id: 'trusted-org', name: '技术部' }], draft_context: { status: 'READY', org_id: 'trusted-org' }, employee_profiles: [{ id: 'profile', org_id: 'trusted-org', route_type: 'TECHNICAL', active: true }] }
     if (path === '/claims' && options?.method === 'POST') return { id: 'server-draft' }
     if (path === '/claims/server-draft') return { id: 'server-draft', version: 1, status: 'DRAFT', org_id: 'trusted-org', items: [] }
     return { items: [], total: 0 }
@@ -221,8 +234,8 @@ test('新建草稿立即获得服务器ID并绑定可信组织选项', async () 
 test('销售人员新建草稿按当前受控人员资料选择线路，不能沿用技术默认值', async () => {
   let sent
   const fixture = await mountPage(['expense.claim.read', 'expense.claim.create'], async (path, options) => {
-    if (path === '/claim-options') return { org_ids: ['sales-org'], employee_profiles: [
-      { org_id: 'sales-org', route_type: 'SALES' },
+    if (path === '/claim-options') return { applicant: { id: 'actor', name: '销售人员' }, organizations: [{ id: 'sales-org', name: '销售部' }], draft_context: { status: 'READY', org_id: 'sales-org' }, employee_profiles: [
+      { id: 'sales-profile', org_id: 'sales-org', route_type: 'SALES', active: true },
     ] }
     if (path === '/claims' && options?.method === 'POST') { sent = JSON.parse(options.body); return { id: 'sales-draft' } }
     if (path === '/claims/sales-draft') return { id: 'sales-draft', version: 1, status: 'DRAFT',
@@ -243,6 +256,8 @@ test('审批绑定单据版本和任务版本，冲正绑定独立申请版本',
     return options ? { id: 'accepted' } : { my_claims: 1 }
   })
   try {
+    fixture.state.approvalTask.value = { id: 'task' }
+    fixture.state.transferSubject.value = 'qualified-person'
     await fixture.state.approve({ id: 'task', claim_version: 8, version: 3, round: 2 }, 'TRANSFER')
     assert.equal(calls[0][1].expected_version, 8)
     assert.equal(calls[0][1].task_version, 3)
@@ -294,7 +309,8 @@ test('已发布政策只能派生新草稿，发布传递种类与当前版本',
     assert.equal(fixture.state.policyPublished.value, false)
     await fixture.state.savePolicy()
     assert.equal(calls[0][1].limit_minor, '12345')
-    assert.equal(Object.hasOwn(calls[0][1], 'id'), false)
+    assert.match(calls[0][1].id, /^[0-9a-f-]{36}$/)
+    assert.notEqual(calls[0][1].id, 'old')
     fixture.state.policyID.value = 'new'
     fixture.state.policyVersion.value = 1
     await fixture.state.publishPolicy()
@@ -650,6 +666,7 @@ test('预览只发送当前草稿和版本，不提交单据、不占用命令�
   const calls=[]
   const fixture=await mountPage(['expense.claim.read','expense.claim.update'],async(path,options)=>{
     if(options) calls.push([path,JSON.parse(options.body)])
+    if(path==='/claim-options')return draftOptionsFixture()
     if(path==='/claims/c/preview')return {claim_id:'c',expected_version:4,preview_only:true,items:[],approval_nodes:[]}
     return {items:[],total:0}
   },'claims')
@@ -764,4 +781,182 @@ test('退回率展示真实提交分母和退回分子，零分母不显示零�
   assert.match(html,/暂无已提交单据/)
   assert.match(html,/差旅异常/)
  }finally{fixture.unmount()}
+})
+
+test('基础信息只读展示本人姓名任职部门，唯一主体及收款档案自动选择且不露受控引用', async () => {
+  const options = { ...draftOptionsFixture(),
+    finance_entities: [{ id: 'entity', name: '甲公司', active: true, org_ids: ['org'] },
+      { id: 'foreign', name: '其他公司', active: true, org_ids: ['other'] }],
+    payee_profiles: [{ id: 'payee', subject_id: 'actor', active: true, reviewed: true,
+      account_ref: 'private-bank-reference', version: 3 }] }
+  const fixture = await mountPage(['expense.claim.read', 'expense.claim.create'], async (path) =>
+    path === '/claim-options' ? options : { items: [], total: 0 }, 'claims')
+  try {
+    assert.equal(fixture.state.draft.value.org_id, 'org')
+    assert.equal(fixture.state.draft.value.route_type, 'TECHNICAL')
+    assert.equal(fixture.state.draft.value.finance_entity_id, 'entity')
+    assert.equal(fixture.state.draft.value.payee_profile_id, 'payee')
+    const html = await fixture.html()
+    assert.match(html, /报销人<input[^>]*value="王工"[^>]*readonly/)
+    assert.match(html, /所属部门<input[^>]*value="技术部"[^>]*readonly/)
+    assert.doesNotMatch(html, /private-bank-reference|组织ID|付款主体ID|收款档案ID/)
+  } finally { fixture.unmount() }
+})
+
+test('歧义档案不能新建草稿，手改组织或线路不会绕过真实本人上下文', async () => {
+  const mutations = []
+  const options = draftOptionsFixture()
+  options.employee_profiles.push({ id: 'other-profile', org_id: 'org', route_type: 'SALES', active: true })
+  options.draft_context = { status: 'PROFILE_AMBIGUOUS', message: '当前部门存在多份费用档案' }
+  const fixture = await mountPage(['expense.claim.read', 'expense.claim.create'], async (path, request) => {
+    if (request) mutations.push(path)
+    return path === '/claim-options' ? options : { items: [], total: 0 }
+  }, 'claims')
+  try {
+    Object.assign(fixture.state.draft.value, { org_id: 'forged', route_type: 'SALES' })
+    await fixture.state.createDraft()
+    assert.equal(mutations.length, 0)
+    assert.match(fixture.state.error.value, /本人有效任职/)
+    Object.assign(fixture.state.draft.value, { org_id: 'org', route_type: 'TECHNICAL' })
+    await fixture.state.createDraft()
+    assert.equal(mutations.length, 0)
+    assert.match(fixture.state.error.value, /歧义/)
+  } finally { fixture.unmount() }
+})
+
+test('本人项目默认空词读取仅保留报告阶段资格，游标翻页仍保留已选业务标签', async () => {
+  const requests = []
+  const reference = { project_id: 'private-project', service_item_id: 'private-item',
+    project_name: '年度检测', site: '杭州现场', planned_start: '2026-11-10',
+    project_status: '报告编制', eligible: true, participant_eligible: true }
+  const fixture = await mountPage(['expense.claim.read', 'expense.claim.create'], async (path) => {
+    if (path === '/claim-options') return draftOptionsFixture()
+    if (path.startsWith('/project-options?')) {
+      requests.push(path)
+      return path.includes('cursor=') ? { items: [], next_cursor: '' } : {
+        items: [reference, { ...reference, project_id: 'early', project_status: '实施中' },
+          { ...reference, project_id: 'outsider', participant_eligible: false }], next_cursor: 'opaque',
+      }
+    }
+    return { items: [], total: 0 }
+  }, 'claims')
+  try {
+    assert.equal(requests.length, 1)
+    assert.equal(new URL(requests[0], 'https://test.invalid').searchParams.get('keyword'), '')
+    assert.equal(fixture.state.projectOptions.value.length, 1)
+    const allocation = fixture.state.draft.value.items[0].allocations[0]
+    fixture.state.selectProject(allocation, { target: { value: '0' } })
+    await fixture.state.searchProjects(true)
+    assert.ok(requests[1].includes('cursor=opaque'))
+    assert.equal(fixture.state.selectedProjectOption(allocation), 'retained')
+    assert.match(fixture.state.selectedProjectLabel(allocation), /年度检测.*杭州现场/)
+    assert.doesNotMatch(fixture.state.selectedProjectLabel(allocation), /private-project|private-item/)
+  } finally { fixture.unmount() }
+})
+
+test('转交先绑定当前任务再选择人员，上一任务人员不能直接带到另一条待办', async () => {
+  const mutations = []
+  const task = { id: 'task', version: 2, claim_version: 3, round: 1, allowed_actions: ['TRANSFER'] }
+  const fixture = await mountPage(['expense.approval.act'], async (path, options) => {
+    if (options) { mutations.push([path, JSON.parse(options.body)]); return { id: 'accepted' } }
+    if (path === '/approval-tasks/task') return task
+    return { items: [], total: 0 }
+  }, 'approvals')
+  try {
+    fixture.state.transferSubject.value = 'previous-task-person'
+    await fixture.state.approve(task, 'TRANSFER')
+    assert.equal(mutations.length, 0)
+    assert.equal(fixture.state.approvalTask.value.id, 'task')
+    assert.equal(fixture.state.transferSubject.value, '')
+    await fixture.state.approve(task, 'TRANSFER')
+    assert.equal(mutations.length, 0)
+    fixture.state.transferSubject.value = 'current-task-person'
+    await fixture.state.approve(task, 'TRANSFER')
+    assert.equal(mutations[0][1].target_subject_id, 'current-task-person')
+    assert.equal(mutations[0][1].task_version, 2)
+  } finally { fixture.unmount() }
+})
+
+test('READY上传会话回放跳过网关PUT，仍完成原本地文档且不重建会话或幂等键', async () => {
+  const previousFetch = globalThis.fetch
+  const file = new File(['%PDF-1.4\n% replay fixture\n'], 'replayed.pdf', { type: 'application/pdf' })
+  const calls = []
+  let fetches = 0
+  const fixture = await mountPage(['expense.invoice.read', 'expense.invoice.upload'], async (path, options) => {
+    calls.push([path, options ? JSON.parse(options.body) : null])
+    if (path === '/invoice-documents/upload-sessions') {
+      throw Object.assign(new Error('上传会话结果未知'), { status: 503, outcomeUnknown: true })
+    }
+    if (path.startsWith('/commands/')) return {
+      status: 'READY', document_id: 'same-document', file_id: 'same-file', upload_id: 'same-upload',
+      sha256: createHash('sha256').update(Buffer.from(await file.arrayBuffer())).digest('hex'),
+      media_type: 'application/pdf', purpose: 'reimbursement.invoice.original',
+    }
+    if (path === '/invoice-documents/same-document/complete') return {
+      document_id: 'same-document', file_id: 'same-file', status: 'READY', parse_run_id: 'real-local-run',
+    }
+    return { items: [], total: 0 }
+  }, 'invoice-upload')
+  globalThis.fetch = async () => { fetches++; throw new Error('READY不得重新传输文件') }
+  try {
+    await fixture.state.uploadInvoiceBatch({ target: { files: [file] } })
+    const original = fixture.state.runner.pending()
+    assert.equal(original.key, 'document.upload')
+    await fixture.state.resolvePending()
+    assert.equal(fetches, 0)
+    assert.equal(calls.filter(([path]) => path === '/invoice-documents/upload-sessions').length, 1)
+    assert.ok(calls.some(([path]) => path === `/commands/${original.command_id}`))
+    assert.equal(calls.filter(([path]) => path === '/invoice-documents/same-document/complete').length, 1)
+    assert.equal(fixture.state.documentID.value, 'same-document')
+    assert.equal(fixture.state.parseRun.value.id, 'real-local-run')
+    assert.equal(fixture.state.uploadBatch.value[0].status, 'READY')
+    assert.equal(fixture.state.uploadBatch.value[0].document_id, 'same-document')
+    assert.equal(fixture.state.evidenceNames.value['same-file'], 'replayed.pdf')
+    assert.equal(fixture.state.runner.pending(), null)
+  } finally { fixture.unmount(); globalThis.fetch = previousFetch }
+})
+
+test('远端READY但本地complete失败仍保持未完成及原complete待确认命令', async () => {
+  const previousFetch = globalThis.fetch
+  const file = new File(['%PDF-1.4\n% incomplete fixture\n'], 'incomplete.pdf', { type: 'application/pdf' })
+  const calls = []
+  const fixture = await mountPage(['expense.invoice.read', 'expense.invoice.upload'], async (path, options) => {
+    calls.push([path, options ? JSON.parse(options.body) : null])
+    if (path === '/invoice-documents/upload-sessions') {
+      throw Object.assign(new Error('上传会话结果未知'), { status: 503, outcomeUnknown: true })
+    }
+    if (path.startsWith('/commands/')) return {
+      status: 'READY', document_id: 'same-document', file_id: 'same-file', upload_id: 'same-upload',
+    }
+    if (path === '/invoice-documents/same-document/complete') {
+      throw Object.assign(new Error('本地完成结果未知'), { status: 503, outcomeUnknown: true })
+    }
+    return { items: [], total: 0 }
+  }, 'invoice-upload')
+  globalThis.fetch = async () => { assert.fail('READY不应调用fetch') }
+  try {
+    await fixture.state.uploadInvoiceBatch({ target: { files: [file] } })
+    await fixture.state.resolvePending()
+    assert.equal(calls.filter(([path]) => path.endsWith('/complete')).length, 1)
+    assert.equal(fixture.state.uploadBatch.value[0].status, 'UNKNOWN')
+    assert.equal(fixture.state.parseRun.value, null)
+    assert.equal(fixture.state.evidenceNames.value['same-file'], undefined)
+    assert.equal(fixture.state.runner.pending().key, 'document.complete')
+    assert.match(fixture.state.error.value, /本地完成结果未知/)
+    assert.equal(fixture.state.notice.value, '')
+  } finally { fixture.unmount(); globalThis.fetch = previousFetch }
+})
+
+test('未知上传状态在传输前拒绝，不调用本地完成或生成替代文档', async () => {
+  const calls = []
+  const fixture = await mountPage(['expense.invoice.read'], async (path) => {
+    calls.push(path)
+    return { my_claims: 0 }
+  })
+  try {
+    await assert.rejects(() => fixture.state.uploadContent({ status: 'UPLOADING', document_id: 'document',
+      upload_url: 'https://outside.invalid/file-gateway/path', ticket: 'unused' }, null,
+    'reimbursement.invoice.original'), /上传状态/)
+    assert.equal(calls.filter((path) => path.includes('/complete')).length, 0)
+  } finally { fixture.unmount() }
 })

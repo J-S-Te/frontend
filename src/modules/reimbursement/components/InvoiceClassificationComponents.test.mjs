@@ -6,7 +6,7 @@ import * as Vue from 'vue'
 import { renderToString } from '@vue/server-renderer'
 import * as classification from '../invoiceClassification.js'
 import { travelInput, evidenceIDs } from '../claimFields.js'
-import { createCommandRunner, formatMinor, toMinor } from '../api/client.js'
+import { createCommandRunner, createRequestID, formatMinor, toMinor } from '../api/client.js'
 
 // 用途：编译真实业务组件，仅替换其外部HTTP边界。
 // 参数：name为组件文件名，extras为外部依赖，inline表示同时编译模板。
@@ -14,7 +14,7 @@ import { createCommandRunner, formatMinor, toMinor } from '../api/client.js'
 function component(name, extras = {}, inline = true) {
  const {descriptor}=parse(readFileSync(new URL(name,import.meta.url),'utf8'))
  const compiled=compileScript(descriptor,{id:'classification-component-test',inlineTemplate:inline})
- const values={...extras}
+ const values={createRequestID,...extras}
  const body=compiled.content.replace(/import\s+\{([^}]+)\}\s+from\s+['"]([^'"]+)['"];?/g,(_,names,source)=>{
   for(const item of names.split(',')) {const [key,alias=key]=item.trim().split(/\s+as\s+/);values[alias]=source==='vue'?Vue[key]:extras[key]}
   return ''
@@ -36,7 +36,8 @@ test('真实归类组件显示来源规则、混合原因及人工选值，文�
 
 test('真实内容规则组件提供逐项业务字段，票面内容锁定时禁用编辑',async()=>{
  const rules=await renderToString(Vue.createSSRApp(component('InvoiceContentMappings.vue'),{value:[{id:'hotel',keywords:'住宿',tax_code_prefixes:'123',fee_type:'HOTEL',priority:1}]}))
- assert.match(rules,/唯一规则ID/);assert.match(rules,/每行一个/);assert.match(rules,/HOTEL/)
+ assert.doesNotMatch(rules,/唯一规则ID|value="hotel"/)
+ assert.match(rules,/每行一个/);assert.match(rules,/HOTEL/)
  const fields=await renderToString(Vue.createSSRApp(component('InvoiceContentFields.vue'),{disabled:true,value:{lines:[{name:'住宿',amount:'1.00'}]}}))
  assert.match(fields,/<fieldset[^>]*disabled/);assert.match(fields,/人工对照原件确认/);assert.match(fields,/住宿/)
 })

@@ -4,6 +4,7 @@ import { reimbursementAPI as api } from '../api/reimbursement.js'
 import { createCommandRunner } from '../api/client.js'
 import { recoveryCommand } from '../recovery.js'
 import { formatBusinessDateTime } from '../../shared/utils/businessTime.js'
+import BusinessObjectSelect from './BusinessObjectSelect.vue'
 
 const props = defineProps({ permissions: { type: Array, default: () => [] } })
 const kinds = computed(() => [
@@ -18,6 +19,7 @@ const total = ref(0)
 const selected = ref(null)
 const reason = ref('')
 const target = ref('')
+const targetParams = computed(() => ({ purpose: 'recovery', resource_id: selected.value?.id || '' }))
 const loading = ref(false)
 const saving = ref(false)
 const error = ref('')
@@ -32,6 +34,8 @@ let sequence = 0
 async function load() {
   const ticket = ++sequence
   if (!kinds.value.some(([key]) => key === kind.value)) return
+  selected.value = null
+  target.value = ''
   loading.value = true
   error.value = ''
   try {
@@ -80,6 +84,14 @@ async function retryPending() {
 // 返回值：无。
 function choose(row) { selected.value = row; reason.value = ''; target.value = '' }
 
+// 用途：用业务单号及处置类型标识恢复任务，不把内部任务ID展示为选择依据。
+// 参数：row为当前服务端恢复记录。
+// 返回值：可读的业务名称；缺少业务单号时仅显示当前处置类型。
+function recoveryLabel(row) {
+  const type = kinds.value.find(([key]) => key === kind.value)?.[1] || '待恢复业务记录'
+  return [row?.claim_no || row?.resource_name || row?.name, type].filter(Boolean).join(' · ')
+}
+
 watch(kind, () => { page.value = 1; rows.value = []; void load() })
 watch(page, () => { void load() })
 watch(() => props.permissions, () => {
@@ -103,7 +115,7 @@ onBeforeUnmount(() => { sequence++ })
     <table v-else class="expense-table">
       <thead><tr><th>对象 / 类型</th><th>状态 / 原因</th><th>版本 / 时间</th><th>操作</th></tr></thead>
       <tbody><tr v-for="row in rows" :key="row.id">
-        <td>{{ row.claim_id || row.resource_id || row.id }}<br>{{ row.node_code || row.topic || row.kind }}</td>
+        <td>{{ recoveryLabel(row) }}<br>{{ row.node_name || row.topic_name || '' }}</td>
         <td>{{ row.status }}<br>{{ row.last_error || row.assignee || row.reason || '—' }}</td>
         <td>{{ row.version }}<br>{{ formatBusinessDateTime(row.updated_at || row.next_attempt_at) }}</td>
         <td><button class="expense-button" :disabled="saving || !!pending" @click="choose(row)">核对处理</button></td>
@@ -116,9 +128,11 @@ onBeforeUnmount(() => { sequence++ })
       <button class="expense-button" :disabled="page * 20 >= total || loading" @click="page++">下一页</button>
     </div>
     <form v-if="selected" class="expense-item" @submit.prevent="recover">
-      <h3>核对 {{ selected.id }}</h3>
+      <h3>核对 {{ recoveryLabel(selected) }}</h3>
       <p v-if="kind === 'reconciliation'">源版本 {{ selected.source_revision }} / 项目版本 {{ selected.remote_revision }}；重建保留权威事件。</p>
-      <label v-if="kind === 'approvals'">新受理人主体标识 <input v-model="target" required maxlength="128"></label>
+      <BusinessObjectSelect v-if="kind === 'approvals'" :key="selected.id" v-model="target"
+        label="新受理人" source="/personnel-options" :extra-params="targetParams"
+        :required-search="true" :disabled="saving || !!pending" />
       <label>处置原因 <textarea v-model="reason" required maxlength="1000" /></label>
       <button class="expense-button" :disabled="saving || !!pending" type="submit">
         {{ kind === 'approvals' ? '核验并接管' : '核验并恢复' }}
