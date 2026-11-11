@@ -381,7 +381,7 @@ const financeReceiptLabel = computed(() => {
   return /^\d{4}-(0[1-9]|1[0-2])$/.test(month) ? `${month}登记回款` : "本月登记回款"
 })
 const currencyItems = computed(() => props.businessSummary?.available ? props.businessSummary?.metrics?.currencies || [] : [])
-const missingMetricLabels = { first_pass_rate: '首次通过率：缺少完整首轮审核结果记录', open_complaints: '投诉：尚无投诉数据源', recognized_income: '收入：尚无收入确认数据源', department_cost: '部门成本：尚无成本数据源' }
+const missingMetricLabels = { first_pass_rate: '首次通过率见下方真实审核事实统计。', open_complaints: '客户投诉统计本轮暂缓。', recognized_income: '收入确认见下方财务独立复核账本统计。', department_cost: '部门、人员及项目确认成本见下方成本归属统计。' }
 </script>
 
 <template>
@@ -542,15 +542,10 @@ const missingMetricLabels = { first_pass_rate: '首次通过率：缺少完整�
         <div v-if="section === 'overview' && alertItems.length" class="da-native-bars"><div v-for="item in alertItems" :key="item.label" class="da-native-bar-row"><span>{{ item.label }}</span><i><em :style="{ width: alertWidth(item.value) }"></em></i><small>{{ formatInteger(item.value) }} 条</small></div><p class="da-native-note">未关闭 {{ formatInteger(numberValue(alertSummary?.open) + numberValue(alertSummary?.ack)) }} 条，共 {{ formatInteger(numberValue(alertSummary?.total)) }} 条</p></div><div v-else class="da-native-empty"><span class="da-native-empty-icon">⌁</span><b>暂无预警摘要</b><p>当前租户没有可展示的预警聚合数据。</p></div>
       </article>
     </div>
-    <div v-if="section === 'contract' || section === 'project'" class="da-native-columns da-native-secondary">
+    <div v-if="section === 'contract'" class="da-native-columns da-native-secondary">
       <article class="da-native-panel">
         <header><b>{{ section === 'contract' ? '商机→合同转化率漏斗' : '返工率（尚未接入）' }}</b><span>聚合级</span></header>
         <div v-if="section === 'contract' && summaryAvailable && contractSummary?.conversion_available" class="da-native-bars"><div v-for="item in contractFunnelItems" :key="item.label" class="da-native-bar-row"><span>{{ item.label }}</span><i><em :style="{ width: funnelWidth(item.value) }"></em></i><small>{{ formatInteger(item.value) }}</small></div><p class="da-native-note">转化率：{{ conversionRate }}；{{ contractSummary.conversion_basis }}</p></div><div v-else class="da-native-empty"><span class="da-native-empty-icon">⌁</span><b>{{ section === 'contract' ? '暂无转化来源快照' : '返工率尚未接入' }}</b><p>{{ section === 'contract' ? '商机与合同来源均首次成功后展示同范围转化漏斗。' : '缺少完整报告退回及现场重测事实，不能计算返工率。' }}</p></div>
-      </article>
-      <article class="da-native-panel">
-        <header><b>{{ section === 'contract' ? '折扣分析（区间分布）' : '人员 / 设备利用率（尚未接入）' }}</b><span>只读</span></header>
-        <div v-if="section === 'contract' && summaryAvailable && contractDiscountItems.length" class="da-native-bars"><div v-for="item in contractDiscountItems" :key="item.label" class="da-native-bar-row"><span>{{ item.label }}</span><i><em :style="{ width: barWidth(item.value) }"></em></i><small>{{ formatInteger(item.value) }}</small></div></div><div v-else class="da-native-empty"><span class="da-native-empty-icon">⌁</span><b>{{ section === 'contract' ? '折扣无法计算' : '利用率尚未接入' }}</b><p>{{ section === 'contract' ? '缺少权威标准报价及币种基准，不能计算折扣区间。' : '缺少权威工时、人员及设备可用容量事实，不能计算利用率。' }}</p></div>
-        <p v-if="section === 'contract'" class="da-native-note">{{ contractSummary?.discount_unavailable_reason || '暂无可用快照，不使用演示数据填充业务指标。' }}</p>
       </article>
     </div>
     <div v-if="section === 'contract' || section === 'project'" class="da-native-panel da-native-table-panel">

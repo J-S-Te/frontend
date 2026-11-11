@@ -521,3 +521,8 @@ export function resolveContractRevisionHold(id, reason) {
     idempotent: true,
   });
 }
+
+// 用途：经服务端逐次组织ACL及原文件摘要校验后下载真实财务证据。
+// 参数：id为结算本地证据引用，不能传任意File Gateway文件标识。
+// 返回值：受控附件下载完成或真实错误。
+export const downloadRecognitionEvidence = (id) => downloadFile(`/recognitions/evidence/${encodeURIComponent(id)}/download`, '财务确认证据');

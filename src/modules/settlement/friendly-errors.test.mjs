@@ -1,4 +1,5 @@
 import test from 'node:test'
+import { createRecognitionAPI } from './api/recognition.js'
 import { allowedSections, permissionCheck, canLoad } from './utils/capabilities.js'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
@@ -230,7 +231,7 @@ async function viewHarness(overrides = {}) {
     window: { setTimeout() {}, confirm: () => false }, formatSettlementError, ...bindings,
     createRequestScope, allowedSections, permissionCheck, canLoad, canLoadKey: canLoad,
     useSettlementActions,
-    createNativeFinancialAPI,
+    createNativeFinancialAPI,createRecognitionAPI,
     useReceiptAllocation,
     useInvoiceDetail,
     useReportExport,

@@ -1453,3 +1453,32 @@ export function saveLocalCatalogGrant(kind, id, input) {
   if (!['counterparties','categories'].includes(kind) || !id) throw new Error('目录条目不合法')
   return request(`/local-catalog/${kind}/${encodeURIComponent(id)}/grants`, { method: 'POST', body: JSON.stringify({ subject_type: input.subject_type, subject_id: input.subject_id, enabled: input.enabled, expected_version: input.expected_version }), validateData: data => Number.isSafeInteger(data?.version) && data.version > 0 && typeof data.enabled === 'boolean' })
 }
+
+// 用途：读取已授权标准价分页，普通销售仅能取得已发布版本。
+// 参数：query为status、limit与offset筛选。
+// 返回值：包含items和has_more的服务端分页。
+export function listStandardPrices(query = {}) {
+  return request(`/standard-prices?${new URLSearchParams(query)}`)
+}
+
+// 用途：创建或更新价格草稿，已发布版本须另建草稿。
+// 参数：payload为业务目录字段和expected_version，id为可选草稿身份。
+// 返回值：服务端保存的目录版本。
+export function saveStandardPrice(payload, id = '') {
+  return request(`/standard-prices${id ? `/${encodeURIComponent(id)}` : ''}`, { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) })
+}
+
+// 用途：独立发布或停用标准价，服务器复验职责分离。
+// 参数：id为价格版本，version为并发版本，action为publish或disable。
+// 返回值：已发布或停用的目录记录。
+export function commandStandardPrice(id, version, action) {
+  if (!['publish', 'disable'].includes(action)) throw new Error('标准价操作无效。')
+  return request(`/standard-prices/${encodeURIComponent(id)}/${action}`, { method: 'POST', body: JSON.stringify({ expected_version: version }) })
+}
+
+// 用途：提交合同金额变更或显式重选基准审批，保留原有效合同直到批准。
+// 参数：id为合同，payload为版本、金额、计划和原因，reselect选择独立审批入口。
+// 返回值：新有效版本或新审批身份。
+export function changeContractPricing(id, payload, reselect = false) {
+  return request(`/contracts/${encodeURIComponent(id)}/${reselect ? 'pricing-revisions' : 'financial-terms'}`, { method: reselect ? 'POST' : 'PUT', body: JSON.stringify(payload) })
+}

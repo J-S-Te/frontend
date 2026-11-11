@@ -8,6 +8,7 @@ import InvoiceControlsPanel from '../components/InvoiceControlsPanel.vue'
 import ArchivePackagePanel from '../components/ArchivePackagePanel.vue'
 import ApprovalRoundsPanel from '../components/ApprovalRoundsPanel.vue'
 import ClaimSyncPanel from '../components/ClaimSyncPanel.vue'
+import ReimbursementCostNotice from '../components/ReimbursementCostNotice.vue'
 import RecoveryPanel from '../components/RecoveryPanel.vue'
 import ExpenseInbox from '../components/ExpenseInbox.vue'
 import TravelFields from '../components/TravelFields.vue'
@@ -3916,6 +3917,7 @@ onBeforeUnmount(() => {
         </p>
         <ApprovalRoundsPanel :key="`payment-rounds-${selected.id}`" :claim-id="selected.id" />
         <ArchivePackagePanel v-if="section === 'archives' && can('expense.archive.export')" :key="selected.id" :archives="archives" />
+        <ReimbursementCostNotice :claim="selected" :settlement-enabled="frontendModules.some(module => module.code === 'settlement')" />
         <ClaimSyncPanel :key="selected.id" :claim="selected" :permissions="session?.permissions || []" />
         <template v-if="section === 'payments'">
           <fieldset
