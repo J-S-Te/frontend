@@ -175,14 +175,14 @@ async function submitDecision() {
         <p>本页只展示当前快照，不包含原备份差异。请另行核对原操作备份，并在原因中记录结论；无法核实的变化仍按未知副作用保留。</p>
         <table>
           <caption>受控运行文件（仅当前存在性与摘要）</caption>
-          <thead><tr><th>文件</th><th>状态</th><th>SHA256</th></tr></thead>
+          <thead><tr><th scope="col">文件</th><th scope="col">状态</th><th scope="col">SHA256</th></tr></thead>
           <tbody><tr v-for="file in preview.runtime_files" :key="file.path">
             <td>{{ file.path }}</td><td>{{ file.present ? '存在' : '不存在' }}</td><td><code>{{ file.sha256 || '—' }}</code></td>
           </tr></tbody>
         </table>
         <table>
           <caption>当前选择服务的实际容器</caption>
-          <thead><tr><th>服务 / 容器</th><th>镜像</th><th>运行 / 健康</th></tr></thead>
+          <thead><tr><th scope="col">服务 / 容器</th><th scope="col">镜像</th><th scope="col">运行 / 健康</th></tr></thead>
           <tbody><tr v-for="container in preview.containers" :key="`${container.service_id}/${container.container_id || ''}`">
             <td>{{ container.service_id }}<br><code>{{ container.container_id || '不存在' }}</code></td>
             <td><code>{{ container.image || '—' }}</code></td><td>{{ container.state || '不存在' }} / {{ container.health || '未提供' }}</td>

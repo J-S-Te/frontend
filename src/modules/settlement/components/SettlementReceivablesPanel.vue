@@ -134,14 +134,14 @@ function financialSourceLabel(item, fallback = '—') {
         <table>
           <thead>
             <tr>
-              <th>{{ hasLocalFinancialBasis ? '财务依据 / 合同' : '合同编号' }}</th>
-              <th>客户</th>
-              <th>期次</th>
-              <th>计划收款日</th>
-              <th>计划金额</th>
-              <th>确认状态</th>
-              <th>状态</th>
-              <th>操作</th>
+              <th scope="col">{{ hasLocalFinancialBasis ? '财务依据 / 合同' : '合同编号' }}</th>
+              <th scope="col">客户</th>
+              <th scope="col">期次</th>
+              <th scope="col">计划收款日</th>
+              <th scope="col">计划金额</th>
+              <th scope="col">确认状态</th>
+              <th scope="col">状态</th>
+              <th scope="col">操作</th>
             </tr>
           </thead>
           <tbody>
@@ -200,14 +200,14 @@ function financialSourceLabel(item, fallback = '—') {
         <table>
           <thead>
             <tr>
-              <th>应收单号</th>
-              <th>{{ hasLocalFinancialBasis ? '财务依据 / 合同' : '合同编号' }}</th>
-              <th>客户</th>
-              <th>到期日</th>
-              <th>应收金额</th>
-              <th>未收余额</th>
-              <th>收款状态</th>
-              <th>开票状态</th>
+              <th scope="col">应收单号</th>
+              <th scope="col">{{ hasLocalFinancialBasis ? '财务依据 / 合同' : '合同编号' }}</th>
+              <th scope="col">客户</th>
+              <th scope="col">到期日</th>
+              <th scope="col">应收金额</th>
+              <th scope="col">未收余额</th>
+              <th scope="col">收款状态</th>
+              <th scope="col">开票状态</th>
             </tr>
           </thead>
           <tbody>

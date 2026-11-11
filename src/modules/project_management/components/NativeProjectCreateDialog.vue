@@ -2,13 +2,14 @@
 import { computed, reactive, ref } from 'vue'
 import { createNativeProject } from '../api/projectManagement.js'
 import { formatUserError } from '../../shared/utils/userError.js'
+import { createIdempotencyKey } from '../../shared/utils/idempotencyKey.js'
 
 const props = defineProps({ categories: { type: Array, default: () => [] }, ownerOrgId: { type: String, default: '' } })
 const emit = defineEmits(['close', 'created'])
 const busy = ref(false)
 const error = ref('')
 const confirmed = ref(false)
-const operationID = crypto.randomUUID()
+const operationID = createIdempotencyKey()
 const form = reactive({ name: '', customer: '', customer_id: '', owner_org_id: props.ownerOrgId, due: '' })
 const items = ref([{ category: '', site: '', batch: '第一批', system: '', system_level: '', requirement: '', test_mode: 'STANDARD' }])
 const categories = computed(() => props.categories.filter((item) => item.enabled))

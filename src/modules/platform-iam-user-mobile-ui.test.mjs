@@ -7,7 +7,7 @@ const onboarding = await readFile(new URL('./platform/iam/components/EmployeeOnb
 const style = await readFile(new URL('./platform/iam/styles/iam-settings.css', import.meta.url), 'utf8')
 
 test('基础平台用户模块展示并导出脱敏手机号', () => {
-  assert.match(view, /<th>手机号<\/th>/)
+  assert.match(view, /<th scope="col">手机号<\/th>/)
   assert.match(view, /data-label="手机号" class="console-mono iam-user-mobile-cell"/)
   assert.match(view, /\{\{ item\.mobile_masked \|\| '—' \}\}/)
   assert.match(view, /'手机号（脱敏）'/)

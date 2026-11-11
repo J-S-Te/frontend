@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import AppShell from '../../shared/components/AppShell.vue'
 import LoadingState from '../../shared/components/LoadingState.vue'
+import PaginationBar from '../../shared/components/PaginationBar.vue'
 import InvoiceControlsPanel from '../components/InvoiceControlsPanel.vue'
 import ArchivePackagePanel from '../components/ArchivePackagePanel.vue'
 import ApprovalRoundsPanel from '../components/ApprovalRoundsPanel.vue'
@@ -19,11 +20,20 @@ import PaymentExceptionPanel from '../components/PaymentExceptionPanel.vue'
 import ClaimPreviewPanel from '../components/ClaimPreviewPanel.vue'
 import ParseExceptionsPanel from '../components/ParseExceptionsPanel.vue'
 import ClaimEvidenceTravelPanel from '../components/ClaimEvidenceTravelPanel.vue'
+import BusinessOptionPicker from '../components/BusinessOptionPicker.vue'
+import ErrorState from '../../shared/components/ErrorState.vue'
+import EmptyState from '../../shared/components/EmptyState.vue'
+import { recallTask, rememberTask, savedAtLabel } from '../taskPersistence.js'
 import { canSelectProjectReference, editableClaimItem, evidenceIDs,travelInput } from '../claimFields.js'
-import { approvalNodeLabel, assignmentPurpose, expenseScopeDescription, hasTenantAllCapability,
-  reimbursementRoleLabel } from '../rolePresentation.js'
+import { claimStatusLabel as statusLabel, failureMessage, failureText } from '../statusLabels.js'
+import { pollTask, taskSettled } from '../asyncTask.js'
+import { formatUserError } from '../../shared/utils/userError.js'
+import { createIdempotencyKey } from '../../shared/utils/idempotencyKey.js'
+import InvoiceOriginalViewer from '../components/InvoiceOriginalViewer.vue'
+import { approvalNodeLabel, approvalNodesLabel, assignmentPurpose, expenseScopeDescription,
+  hasTenantAllCapability, reimbursementRoleLabel } from '../rolePresentation.js'
 import { formatBusinessDateTime, todayBusinessDate } from '../../shared/utils/businessTime.js'
-import { createCommandRunner, formatMinor, toMinor, validateItems } from '../api/client.js'
+import { createCommandRunner, formatMinor, toMinor, timeoutSignal, validateItems } from '../api/client.js'
 import { ensureReimbursementSession, logoutReimbursement, reimbursementAPI as api,
   startReimbursementLogin } from '../api/reimbursement.js'
 import { policyFields, policyFormFrom, policyPayload } from '../policy.js'
@@ -41,10 +51,15 @@ const loading = ref(false)
 const saving = ref(false)
 const error = ref('')
 const fieldErrors = ref([])
+const validationHint = ref('')
 const conflictSnapshot = ref(null)
 const returnProject = computed(() => frontendModules.some((module) => module.code === 'project_management') ? returnProjectLocation(route.query) : null)
 const notice = ref('')
+const sessionExpired = ref(false)
+const heading = ref(null)
+const detailPanel = ref(null)
 const pending = ref(null)
+const pendingApprovalAction = ref('')
 const runner = createCommandRunner(api)
 const dashboard = ref(null)
 const rows = ref([])
@@ -64,6 +79,13 @@ const statistics = ref(null)
 const selected = ref(null)
 const selectedInvoice = ref(null)
 const invoiceContentEditor = ref(null)
+// 票面总额在展示层统一用元；提交时再换成整数分，避免"元/分"两种单位混着填。
+const invoiceTotalYuan = ref('')
+const invoiceTotalMinorHint = computed(() => {
+  const text = String(invoiceTotalYuan.value || '').trim()
+  if (!text) return ''
+  try { return `${toMinor(text)} 分` } catch { return '格式待校验' }
+})
 const invoiceSuggestions = ref([])
 const invoiceReviewReason = ref('')
 const verificationResult = ref('UNKNOWN')
@@ -77,8 +99,24 @@ const replacementPolicyID = ref('')
 const reversalRequests = ref([])
 const reversalVersion = ref(null)
 const payment = ref(null)
+const paymentHistory = ref([])
+const reversalHistory = ref([])
+const paymentHistoryError = ref('')
+const paymentHistoryLoading = ref(false)
+// 只有真正读成功后，才允许把空列表解释成"尚无记录"。
+const paymentHistoryLoaded = ref(false)
+const paymentHistoryTotal = ref(0)
+const paymentHistoryPage = ref(1)
+const paymentHistoryPageSize = 20
+let paymentHistorySequence = 0
 const archives = ref(null)
 const archiveProjects=ref(null)
+// 列表/工作台/归档项目/看板/冲正历史的读取失败分别记录，失败不能被渲染成"暂无数据"。
+const listError = ref('')
+const dashboardError = ref('')
+const analyticsError = ref('')
+const archiveProjectsError = ref('')
+const reversalHistoryError = ref('')
 const projectValidation = ref(null)
 const projectOptions = ref([])
 const keyword = ref('')
@@ -86,11 +124,10 @@ const invoiceRows = ref([])
 const originalPreview = ref('')
 const originalDownload = ref('')
 const originalMedia = ref('')
-const previewZoom=ref(1)
-const previewRotation=ref(0)
 const selectedSource = ref(null)
 const invoiceFacts = ref({})
 const exportJob = ref(null)
+const exportScopeIDs = ref([])
 const parseRun = ref(null)
 const documentStatus = ref(null)
 const manualInvoiceForm = ref(null)
@@ -100,6 +137,12 @@ const selectedCandidate = ref(null)
 const selectedCandidateSource = ref(null)
 const parsedCandidates = computed(() => documentStatus.value?.detail?.parse_result?.documents || [])
 const documentID = ref('')
+// 上传后仍由系统回填文档引用；名称只用于展示"本次上传"，不让用户手抄文档ID。
+const uploadedDocument = ref({ id: '', name: '' })
+const documentLabel = computed(() => (uploadedDocument.value.id
+  && uploadedDocument.value.id === documentID.value ? uploadedDocument.value.name : ''))
+// 最近一次解析/导出/原件的本地坐标：刷新后仍能找回任务号，不必重新上传或重跑。
+const recentTask = ref({ parse: null, export: null, document: null })
 const paymentStatus = ref('APPROVED_PENDING_PAYMENT')
 const policyBaseline = ref(null)
 let detailSequence = 0
@@ -111,6 +154,8 @@ const approvalHistory = ref([])
 const historyLoading = ref(false)
 const historyError = ref('')
 let approvalSequence = 0
+let parsePollSequence = 0
+let exportPollSequence = 0
 const approvalStatus = ref('PENDING')
 const transferSubject = ref('')
 const reversalID = ref('')
@@ -119,6 +164,11 @@ const reversalFact = ref('NO_PAYMENT')
 const evidenceFiles = ref('')
 const paymentForm = ref({ paid_date: todayBusinessDate(), method: 'BANK',
   source_account_ref: '', transaction_no: '', voucher_file_ids: '' })
+// 付款账户与收款档案只来自既有 /claims/{id}/payment-options，不提供手填账户。
+const paymentAccounts = ref([])
+const paymentPayeeProfiles = ref([])
+const paymentOptionError = ref('')
+const paymentOptionsLoaded = ref(false)
 const claimControlReason = ref('')
 const exceptionRows = ref(null)
 const exceptionPage = ref(1)
@@ -134,8 +184,60 @@ const policyID = ref('')
 const policyVersion = ref(0)
 const draft = ref(blankDraft())
 const draftBaseline = ref('')
-const draftDirty = computed(() => JSON.stringify(draft.value) !== draftBaseline.value)
+// 用途：按稳定键序序列化草稿，避免对象键顺序变化被误判为未保存修改。
+// 参数：value 为可序列化的草稿对象或数组。
+// 返回值：键序稳定的 JSON 字符串。
+function stableStringify(value) {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`
+  }
+  return JSON.stringify(value)
+}
+const draftDirty = computed(() => stableStringify(draft.value) !== draftBaseline.value)
+
+// 用途：识别费用行里是否真的有用户输入，避免新建草稿的空白占位行被当成未保存修改。
+// 参数：item 为费用编辑行。
+// 返回值：存在任一业务输入时为 true。
+function itemHasInput(item) {
+  if (!item) return false
+  if (item.fee_type || item.amount || item.reason || item.exception_reason || item.city_level
+    || item.city_code || item.transport_category || item.accommodation_category
+    || item.no_invoice_proof_type || item.no_invoice_evidence_text || item.no_invoice_reason
+    || item.historical_tail_reason || item.historical_tail_evidence_text) return true
+  if ((item.expense_nature || 'ACTUAL') !== 'ACTUAL') return true
+  const travel = item.travel_declaration || {}
+  if (Object.values(travel).some(Boolean)) return true
+  const confirmation = item.travel_confirmation || {}
+  if (confirmation.decision || confirmation.reason || confirmation.evidence_text) return true
+  return (item.allocations || []).some((row) => row.project_id || row.amount || row.ratio)
+    || (item.invoice_usages || []).some((row) => row.invoice_id || row.amount)
+}
+
+// 用途：只保留业务输入构造可比较的草稿，空占位行不参与脏数据判断。
+// 参数：value 为当前草稿。
+// 返回值：用于稳定序列化的草稿子集。
+function meaningfulDraft(value) {
+  if (!value) return null
+  return {
+    title: value.title || '', claim_type: value.claim_type || '', remark: value.remark || '',
+    org_id: value.org_id || '', route_type: value.route_type || '', currency: value.currency || '',
+    finance_entity_id: value.finance_entity_id || '', payee_profile_id: value.payee_profile_id || '',
+    items: (value.items || []).filter(itemHasInput),
+  }
+}
+
+// 用途：判断是否存在真正需要保护的未保存编辑，供离开、刷新和新建前确认。
+// 参数：无。
+// 返回值：存在未保存业务输入时为 true。
+const draftProtected = computed(() => {
+  let baseline
+  try { baseline = draftBaseline.value ? JSON.parse(draftBaseline.value) : blankDraft() }
+  catch { baseline = blankDraft() }
+  return stableStringify(meaningfulDraft(draft.value)) !== stableStringify(meaningfulDraft(baseline))
+})
 let loadSequence = 0
+let loadedWorkspace = ''
 
 const sections = [
   ['dashboard', '报销工作台', 'expense.claim.read'],
@@ -156,13 +258,40 @@ const sections = [
 const workspace = computed(() => String(route.params.section || 'dashboard'))
 const section = computed(() => workspaceSection(workspace.value))
 const title = computed(() => sections.find(([key]) => key === workspace.value)?.[1] || '报销工作台')
+const sectionIcons = {
+  dashboard: 'dashboard', invoices: 'search', 'invoice-upload': 'save', 'invoice-abnormal': 'info',
+  claims: 'account', submitted: 'audit', approvals: 'shield', payments: 'link', archives: 'organization',
+  recovery: 'reset', policies: 'settings', analytics: 'audit', messages: 'bell',
+}
 const navGroups = computed(() => [{ items: [{ key: 'portal', label: '返回门户', icon: 'dashboard' }] },
-  { label: '报销管理', items: sections.filter(([, , permission]) => can(permission))
-    .map(([key, label]) => ({ key, label, active: workspace.value === key, icon: 'account' })) }])
+  // 发票上传与人工录入属于发票中心，不再单占一个导航项，避免三个入口指向同一块内容。
+  { label: '报销管理', items: sections.filter(([key, , permission]) => can(permission) && key !== 'invoice-upload')
+    .map(([key, label]) => ({ key, label, active: workspace.value === key, icon: sectionIcons[key] || 'account' })) }])
 const editable = computed(() => selected.value
   ? can('expense.claim.update') && selected.value.applicant_subject_id === session.value?.subject_id
     && ['DRAFT', 'RETURNED', 'WITHDRAWN'].includes(selected.value.status)
   : can('expense.claim.create'))
+// 用途：解释报销单为什么只读，避免整块 fieldset 静默禁用。
+// 参数：无。
+// 返回值：一句业务可读原因；可编辑时为空。
+const claimReadonlyReason = computed(() => {
+  if (!selected.value || editable.value) return ''
+  if (!can('expense.claim.update')) return '当前账号没有修改报销单的权限；如需更正，请联系申请人或管理员。'
+  if (selected.value.applicant_subject_id !== session.value?.subject_id) return '只有申请人本人可以修改这张单据；当前以查看或审核身份访问。'
+  return `单据当前为「${statusLabel(selected.value.status)}」，只有草稿、已退回或已撤回状态可以编辑。`
+})
+// 用途：解释发票票面为什么只读，区分权限、归属和占用状态。
+// 参数：无。
+// 返回值：一句业务可读原因；可编辑时为空。
+const invoiceReadonlyReason = computed(() => {
+  const invoice = selectedInvoice.value
+  if (!invoice) return ''
+  if (!can('expense.invoice.review')) return '当前账号没有人工复核发票的权限；这里只显示票面与来源。'
+  if (invoice.owner_subject_id !== session.value?.subject_id) return '只有票据所有人可以人工复核这张发票；当前以查看身份访问。'
+  if (invoice.review_status === 'CONFIRMED') return '这张发票已确认，票面字段只读；重大变化需走独立更正审批。'
+  if (!['AVAILABLE', ''].includes(invoice.reservation_state || '')) return '这张发票已被单据占用或消费，票面只读；更正需走独立更正审批。'
+  return ''
+})
 const draftTotal = computed(() => {
   try { return formatMinor(String(draft.value.items.reduce((sum, item) => sum + BigInt(toMinor(item.amount)), 0n))) }
   catch { return '待校验' }
@@ -171,11 +300,69 @@ const hasModule = computed(() => Boolean(session.value)
   && sections.some(([key, , permission]) => key === workspace.value && can(permission)))
 const sessionRolesLabel = computed(() => (session.value?.roles || [])
   .map((role) => reimbursementRoleLabel(typeof role === 'string' ? role : role.code)).filter(Boolean)
-  .join('、') || '按服务端能力与范围校验')
+  .join('、') || '按当前账号授权范围')
 const scopeDescription = computed(() => expenseScopeDescription(session.value))
+
+// 工作台指标：每一项都能跳到对应分区，指标不再只是几行死文本。
+const dashboardMetrics = [
+  { key: 'my_claims', label: '我的单据', section: 'claims' },
+  { key: 'pending_approvals', label: '待审批', section: 'approvals' },
+  { key: 'pending_payments', label: '待付款', section: 'payments' },
+  { key: 'invoice_review_required', label: '待复核发票', section: 'invoices' },
+  { key: 'my_paid_this_month', label: '本月本人已付款', section: 'payments' },
+]
+
+// 用途：判断分区是否在当前账号能力内，避免指标把用户带进无权页面。
+// 参数：key 为分区键。
+// 返回值：当前账号可进入该分区时为 true。
+function sectionAllowed(key) {
+  const entry = sections.find(([name]) => name === key)
+  return Boolean(entry) && can(entry[2])
+}
+
+// 列表列定义按分区拆分：审批区展示轮次与节点，单据区展示应付金额，票据区展示票面。
+const listAmountLabel = computed(() => ({
+  invoices: '票面金额', approvals: '审批轮次', policies: '金额 / 标准上限',
+}[section.value] || '应付金额'))
+const listNodeLabel = computed(() => ({
+  invoices: '销售方税号 / 核验', approvals: '审批节点 / 异常', policies: '节点 / 异常',
+}[section.value] || '当前节点 / 异常'))
+// 付款与归档的每一行都是单据，没有独立审批节点，强行保留列只会出现一列"—"。
+const listHasNodeColumn = computed(() => ['invoices', 'approvals', 'claims', 'policies'].includes(section.value))
+// 状态页签：普通报销入口保留草稿；「我发起的审批」只列提交后的状态，已作废也要能被找回。
+const statusTabs = computed(() => workspace.value === 'submitted'
+  ? { '':'全部', IN_APPROVAL:'审批中', RETURNED:'已退回', APPROVED_PENDING_PAYMENT:'待付款',
+    PAID:'已付款', VOID:'已作废' }
+  : { '':'全部', DRAFT:'草稿', IN_APPROVAL:'审批中', APPROVED_PENDING_PAYMENT:'待付款',
+    PAID:'已付款', RETURNED:'已退回' })
+
+// 用途：把整数分展示为带单位的元，缺值时不伪造 0.00。
+// 参数：value 为服务端整数分字段。
+// 返回值：元金额文本；非法值显示未提供。
+function moneyText(value) {
+  const text = formatMinor(value)
+  return text === '不可用' ? '未提供' : `${text} 元`
+}
+
+// 用途：解释发票为什么不能勾选生成费用，避免静默禁用的复选框。
+// 参数：row 为发票列表行。
+// 返回值：一句业务原因；可勾选时为空串。
+function invoiceSelectHint(row) {
+  if (row.review_status !== 'CONFIRMED') return '这张发票还未人工复核，不能生成费用'
+  if (!['AVAILABLE', ''].includes(row.reservation_state || '')) return '这张发票已被其他单据占用或消费，不能重复使用'
+  return ''
+}
 
 const organizationOptions = computed(() => editorOptions.value?.org_ids
   || [...new Set((editorOptions.value?.employee_profiles || []).map((profile) => profile.org_id))])
+// 编辑既有单据时用草稿选项里的真实组织名称回显，避免出现裸组织ID。
+const organizationNames = computed(() => {
+  const map = {}
+  for (const row of Array.isArray(editorOptions.value?.organizations) ? editorOptions.value.organizations : []) {
+    if (row?.id) map[row.id] = row.name || ''
+  }
+  return map
+})
 const replacementCandidates = computed(() => rows.value.filter((row) => row.id !== policyID.value
   && !row.published && (!row.lifecycle_status || row.lifecycle_status === 'DRAFT')))
 const policyLifecycleStatus = computed(() => policyRecord.value?.lifecycle_status
@@ -187,8 +374,21 @@ const policyChanges = computed(() => currentPolicyFields.value.map((field) => ({
 })).filter((row) => String(row.before) !== String(row.after)))
 const candidateFields = {
   invoice_number: '发票号码', invoice_code: '发票代码', invoice_date: '开票日期',
-  gross_minor: '票面总额（分）', amount_minor: '不含税金额（分）', tax_minor: '税额（分）',
+  gross_minor: '票面总额', amount_minor: '不含税金额', tax_minor: '税额',
   buyer_tax_id: '购买方税号', seller_tax_id: '销售方税号', buyer_name: '购买方', seller_name: '销售方',
+}
+// 解析候选里的金额字段是整数分；展示时一律补上等值元，避免和人工录入的元混用。
+const candidateMoneyFields = new Set(['gross_minor', 'amount_minor', 'tax_minor'])
+
+// 用途：把解析候选值渲染为业务可读文本，金额同时给出分和元。
+// 参数：field 为候选字段名，value 为服务端候选值对象。
+// 返回值：候选值文本；金额字段形如「10000 分（100.00 元）」。
+function candidateValue(field, value) {
+  const raw = value?.value ?? value?.raw_value ?? ''
+  const text = String(raw).trim()
+  if (!text) return '缺失'
+  if (!candidateMoneyFields.has(field) || !/^-?\d+$/.test(text)) return text
+  return `${text} 分（${formatMinor(text)} 元）`
 }
 const groupLabels = {
   SINGLE_CANDIDATE: '单票候选，仍待人工复核',
@@ -211,18 +411,6 @@ const optionLabels = {
 // 返回值：规则、条件、费用及优先级的文字摘要。
 function mappingSummary(rows) {
   return (rows || []).map(row=>`${row.id || '新规则'}：税码 ${row.tax_code_prefixes || '无'}；关键词 ${row.keywords || '无'} → ${row.fee_type || '待填'} / ${row.default_claim_type || '不指定'}，优先级 ${row.priority}`).join('；') || '未配置内容规则'
-}
-
-// 用途：将稳定状态编码展示为准确中文，不把人工复核称为验真。
-// 参数：value 为服务器状态编码。
-// 返回值：中文状态；未知值保留原文以兼容后续枚举。
-function statusLabel(value) {
-  return ({ ACTIVE: '有效政策', RETIRED: '已退休', DRAFT: '草稿', RETURNED: '已退回', WITHDRAWN: '已撤回', IN_APPROVAL: '审批中',
-    APPROVED_PENDING_PAYMENT: '待付款', PAID: '已付款', VOIDED: '已作废', VOID: '已作废', VERIFIED_CONFLICT: '已核实存在冲突', DISMISSED: '已排除', RESOLVED: '已关联合法账本解除冲突',
-    PENDING: '待处理', APPROVED: '已同意', CONFIRMED: '已人工复核', AVAILABLE: '可申报',
-    RESERVED: '已占用', CONSUMED: '已消费', DONE: '处理完成', SEALED: '已封存', FAILED: '处理失败',
-    NOT_CHECKED: '未查验', UNVERIFIED: '未查验', MANUAL_REVIEWED: '已人工核验', MISMATCH: '内容不一致',
-  })[value] || value || '待确认'
 }
 
 // 用途：检查会话中的精确动作能力，不推导财务范围。
@@ -250,33 +438,129 @@ function blankDraft() {
     payee_profile_id: '', currency: 'CNY', items: [] }
 }
 
+// 用途：用浏览器确认框保护未保存草稿；无交互环境不阻塞。
+// 参数：message 为业务可读的放弃提醒。
+// 返回值：允许继续时为 true。
+function confirmDiscard(message) {
+  if (typeof window === 'undefined' || typeof window.confirm !== 'function') return true
+  return window.confirm(message)
+}
+
+// 用途：在丢掉当前草稿前征得确认，覆盖切换分区、打开其他单据和新建。
+// 参数：无。
+// 返回值：可以继续时为 true；用户取消时保持原表单。
+function discardDraft() {
+  if (!draftProtected.value) return true
+  return confirmDiscard('当前草稿有尚未保存的修改，离开后这些修改会丢失。确定离开吗？')
+}
+
 // 用途：在现有统一路由中切换工作区。
 // 参数：key 为导航区域。
-// 返回值：无；触发路由切换。
+// 返回值：无；有未保存草稿时先确认，取消则不跳转。
 function navigate(key) {
+  if (key !== workspace.value && !discardDraft()) return
   router.push(key === 'portal' ? { name: 'portal' } : { name: 'reimbursement', params: { section: key } })
+}
+
+// 用途：新建报销前保护当前草稿，并先进入报销分区。
+// 参数：无。
+// 返回值：无；用户取消或命令未确认时保持原页面。
+async function startNewClaim() {
+  if (!discardDraft()) return
+  if (workspace.value !== 'claims') await router.push({ name: 'reimbursement', params: { section: 'claims' } })
+  await newDraft(true)
+}
+
+// 用途：把API或本地校验错误统一成一句可展示原因，并附请求号便于追查。
+// 参数：cause 为错误对象，method 为缺省请求方法。
+// 返回值：中文原因；后台诊断码只翻译成原因和下一步，不直接展示机器码。
+function errorText(cause, method = 'POST') {
+  const requestId = typeof cause?.requestID === 'string' && /^[A-Za-z0-9._:-]{1,128}$/.test(cause.requestID)
+    ? cause.requestID : ''
+  return `${failureText(cause?.code) || formatUserError(cause, { method: cause?.method || method })}`
+    + `${requestId ? `（请求号：${requestId}）` : ''}`
+}
+
+// 用途：把读取失败落在它自己的数据区，失败不再被渲染成"暂无数据"。
+// 参数：area 为数据区（dashboard/analytics/archives/其它视为列表），cause 为错误。
+// 返回值：无；会话过期时仍走全局恢复入口。
+function areaError(area, cause) {
+  const message = errorText(cause, 'GET')
+  if (area === 'dashboard') dashboardError.value = message
+  else if (area === 'analytics') analyticsError.value = message
+  else if (area === 'archives') archiveProjectsError.value = message
+  else listError.value = message
+  if (cause?.status === 401) showError(cause)
 }
 
 // 用途：显示真实错误并保留表单与命令结果未知状态。
 // 参数：cause 为API或本地校验错误。
 // 返回值：无；更新页面反馈。
 function showError(cause) {
-  fieldErrors.value = validationFields(cause.details)
+  fieldErrors.value = validationFields(cause?.details)
+  validationHint.value = ''
   if (fieldErrors.value.length) void focusValidation(fieldErrors.value[0].field)
-  error.value = `${cause.message || '操作失败'}${cause.code ? `（${cause.code}）` : ''}${cause.requestID ? ` 请求号：${cause.requestID}` : ''}`
+  // 统一走平台错误文案：业务中文原因优先；后台诊断码只翻译为原因和下一步，不直接展示。
+  error.value = errorText(cause)
   pending.value = runner.pending()
-  if (cause.status === 401) notice.value = '会话已过期；恢复登录前请勿关闭尚有未确认命令的页面。'
+  if (cause?.status === 401) {
+    sessionExpired.value = true
+    notice.value = '会话已过期；恢复登录前请勿关闭尚有未确认命令的页面。'
+  }
+}
+
+// 用途：切换分区时清掉上一个分区的详情对象。
+// 参数：无。
+// 返回值：无；避免残留面板带着旧单据渲染成"尚无记录"的假空态。
+function clearForeignDetail() {
+  approvalTask.value = null; approvalHistory.value = []; historyError.value = ''
+  selectedInvoice.value = null; invoiceRows.value = []; selectedSource.value = null
+  exceptionRows.value = null; selectedException.value = null; exceptionPage.value = 1
+}
+
+// 用途：进入付款/归档分区时补齐当前单据的分区数据。
+// 参数：无。
+// 返回值：无；"当前单据尚无付款记录"只会在真实请求成功后出现。
+async function refreshSelectedSection() {
+  if (!selected.value?.id) return
+  if (section.value === 'payments') {
+    payment.value = null
+    paymentHistory.value = []; reversalHistory.value = []; reversalHistoryError.value = ''
+    paymentHistoryError.value = ''; paymentHistoryTotal.value = 0
+    paymentHistoryPage.value = 1; paymentHistoryLoaded.value = false
+    await loadPaymentAccountOptions()
+    if (!can('expense.payment.read')) return
+    const paymentID = selected.value.active_payment_id
+    if (paymentID) {
+      try { payment.value = await api.request(`/payments/${encodeURIComponent(paymentID)}`) }
+      catch (cause) { showError(cause) }
+    }
+    await loadPaymentHistory(1)
+    return
+  }
+  if (section.value === 'archives') {
+    archives.value = null
+    if (can('expense.archive.read')) await loadArchives()
+  }
 }
 
 // 用途：只按当前已授权页面加载业务数据，防止跨页迟到结果覆盖。
 // 参数：无。
-// 返回值：无；错误显式呈现，不用空列表代替失败。
+// 返回值：无；错误显式呈现在对应数据区，不用空列表代替失败。
 async function load() {
   const ticket = ++loadSequence
   const current = section.value
+  const changedWorkspace = workspace.value !== loadedWorkspace
+  loadedWorkspace = workspace.value
   loading.value = true
   selectedClaimIDs.value=[]
   error.value = ''
+  sessionExpired.value = false
+  conflictSnapshot.value = null
+  validationHint.value = ''
+  listError.value = ''; dashboardError.value = ''; analyticsError.value = ''
+  archiveProjectsError.value = ''
+  if (changedWorkspace) { notice.value = ''; fieldErrors.value = []; clearForeignDetail() }
   try {
     const activeSession = await ensureReimbursementSession()
     if (ticket !== loadSequence || !activeSession) return
@@ -286,7 +570,8 @@ async function load() {
       rows.value = []
       const first = sections.find(([, , permission]) => can(permission))
       if (first) { await router.replace({ name: 'reimbursement', params: { section: first[0] } }); return }
-      throw new Error('当前账号没有该区域的访问能力')
+      showError(new Error('当前账号没有该区域的访问能力'))
+      return
     }
     if (current === 'claims' && (can('expense.claim.create') || can('expense.claim.update'))) {
       editorOptions.value = await api.request('/claim-options')
@@ -298,12 +583,18 @@ async function load() {
       return
     }
     if (current === 'analytics') {
-      statistics.value = await api.request(`/statistics?${workspaceQuery(workspace.value,listFilters.value,1,20,'')}`)
+      const result = await api.request(`/statistics?${workspaceQuery(workspace.value,listFilters.value,1,20,'')}`)
+      if (ticket === loadSequence) statistics.value = result
       return
     }
     if (workspace.value === 'invoice-upload') { rows.value=[]; total.value=0; return }
     if(current==='archives') {
-      archiveProjects.value=await api.request(`/archive-projects?${workspaceQuery('archives',listFilters.value,page.value,pageSize.value,route.query.project_id || '')}`)
+      // 项目归档聚合失败不影响下面的单据列表，两块失败各自显示原因。
+      try {
+        archiveProjects.value=await api.request(`/archive-projects?${workspaceQuery('archives',listFilters.value,page.value,pageSize.value,route.query.project_id || '')}`)
+      } catch (cause) {
+        if (ticket === loadSequence) { archiveProjects.value = null; areaError('archives', cause) }
+      }
       if(ticket!==loadSequence)return
     }
     if (['recovery','messages'].includes(current)) { rows.value = []; total.value = 0; return }
@@ -326,7 +617,12 @@ async function load() {
       const latest = result.items.find((row) => row.id === policyID.value)
       if (latest) { policyRecord.value = { ...policyRecord.value, ...latest }; policyVersion.value = latest.version }
     }
-  } catch (cause) { if (ticket === loadSequence) showError(cause) }
+    // 从别的分区切进付款/归档时，当前单据的分区数据必须重新读取。
+    if (changedWorkspace && selected.value?.id) await refreshSelectedSection()
+  } catch (cause) {
+    if (ticket !== loadSequence) return
+    areaError(current === 'dashboard' ? 'dashboard' : current === 'analytics' ? 'analytics' : 'list', cause)
+  }
   finally { if (ticket === loadSequence) loading.value = false }
 }
 
@@ -336,7 +632,8 @@ async function load() {
 async function mutate(key, path, payload, method = 'POST') {
   if (saving.value) return null
   saving.value = true
-  error.value = ''; notice.value = ''
+  error.value = ''; notice.value = ''; fieldErrors.value = []
+  conflictSnapshot.value = null; validationHint.value = ''
   try {
     const result = await runner.execute(key, path, payload, method)
     pending.value = runner.pending()
@@ -351,27 +648,174 @@ async function mutate(key, path, payload, method = 'POST') {
 }
 
 
+// 用途：把失败命令路径映射到可按权限重新读取的权威资源。
+// 参数：path 为失败命令的固定API路径。
+// 返回值：资源名称与读取函数；无对应读取端点时返回null。
+function conflictTarget(path) {
+  if (/^\/exports(?:\/|$)/.test(path || '')) {
+    return { label: '导出范围', load: async () => {
+      const ids = [...new Set(exportScopeIDs.value.map(String))].filter(Boolean).slice(0, 100)
+      if (!ids.length) return null
+      const results = await Promise.allSettled(ids.map((id) => api.request(`/claims/${encodeURIComponent(id)}`)))
+      const claims = results.filter((row) => row.status === 'fulfilled' && row.value).map((row) => row.value)
+      return claims.length ? { claims, missing: ids.length - claims.length } : null
+    },
+    describe: (value) => `导出范围 ${value.claims.length} 张单据：${value.claims
+      .map((claim) => `${claim.claim_no || claim.id}@v${claim.version}（${statusLabel(claim.status)}）`)
+      .join('、')}${value.missing ? `，另有 ${value.missing} 张未读取到` : ''}` }
+  }
+  const rules = [
+    [/^\/claims\/([^/]+)/, '报销单', (id) => api.request(`/claims/${id}`)],
+    [/^\/invoices\/([^/]+)/, '发票', (id) => api.request(`/invoices/${id}`)],
+    [/^\/approval-tasks\/([^/]+)/, '审批任务', (id) => api.request(`/approval-tasks/${id}`)],
+    [/^\/payment-exceptions\/([^/]+)/, '付款异常', (id) => api.request(`/payment-exceptions/${id}`)],
+    [/^\/payments\/([^/]+)/, '付款记录', (id) => api.request(`/payments/${id}`)],
+    [/^\/invoice-documents\/([^/]+)/, '发票原件', (id) => api.request(`/invoice-documents/${id}`)],
+  ]
+  for (const [pattern, label, load] of rules) {
+    const match = pattern.exec(path || '')
+    if (match && match[1] !== 'upload-sessions') return { label, load: () => load(encodeURIComponent(match[1])) }
+  }
+  const config = /^\/configurations\/([^/]+)(?:\/([^/]+))?/.exec(path || '')
+  if (config) {
+    const kind = config[1]
+    return { label: '配置版本', load: async () => {
+      const result = await api.request(`/configurations/${encodeURIComponent(kind)}`)
+      const id = config[2] || policyID.value
+      return (result?.items || []).find((row) => row.id === id) || null
+    } }
+  }
+  if (/^\/reversal-requests\//.test(path || '')) {
+    return { label: '冲正申请', load: async () => {
+      if (!selected.value?.id) return null
+      const claim = await api.request(`/claims/${encodeURIComponent(selected.value.id)}`)
+      await loadReversals()
+      const row = reversalRequests.value.find((item) => item.id === reversalID.value)
+      return row || claim
+    } }
+  }
+  return null
+}
+
+// 用途：把冲突资源整理为可核对的单行摘要。
+// 参数：label 为资源名称，value 为最新权威对象。
+// 返回值：包含版本、状态及标识的中文说明。
+function conflictSummary(label, value) {
+  if (!value || typeof value !== 'object') return `${label}：已更新，请刷新后核对。`
+  const parts = []
+  const version = value.version ?? value.content_version
+  if (version !== undefined && version !== null) parts.push(`版本 ${version}`)
+  if (value.status) parts.push(`状态 ${statusLabel(value.status)}`)
+  const identity = value.title || value.claim_no || value.invoice_number
+    || value.code || value.id
+  if (identity) parts.push(`标识 ${identity}`)
+  return `${label}：${parts.join(' · ') || '已更新，请刷新后核对'}`
+}
+
 // 用途：读取冲突对象最新状态供核对，保留尚未保存表单及原版本。
 // 参数：path 为失败命令固定API路径。
 // 返回值：无；刷新失败单独提示，不掩盖原始业务错误。
 async function refreshConflict(path) {
-  const match = path.match(/^\/(claims|invoices|approval-tasks)\/([^/]+)/)
-  if (!match) return
+  const target = conflictTarget(path)
+  if (!target) {
+    conflictSnapshot.value = { text: '服务器状态已变化，请刷新当前列表后重新操作。' }
+    return
+  }
+  conflictSnapshot.value = { text: `${target.label}：正在读取服务器最新状态…` }
   try {
-    conflictSnapshot.value = { kind: match[1], value: await api.request(`/${match[1]}/${match[2]}`) }
-    notice.value = '已读取服务器最新状态，当前编辑仍保留。请核对差异后重新打开最新版本再修改。'
-  } catch { notice.value = '读取最新状态暂时失败；当前输入保留，请稍后刷新核对。' }
+    const value = await target.load()
+    conflictSnapshot.value = value
+      ? { text: `${target.describe ? target.describe(value) : conflictSummary(target.label, value)}；当前编辑仍保留，请核对后重新操作。` }
+      : { text: `${target.label}：未找到可核对的最新记录，请刷新列表后重试。` }
+    if (value) notice.value = '已读取服务器最新状态，当前编辑仍保留。请核对差异后重新打开最新版本再修改。'
+  } catch {
+    conflictSnapshot.value = { text: `${target.label}：最新状态读取失败，请稍后刷新核对。` }
+    notice.value = '读取最新状态暂时失败；当前输入保留，请稍后刷新核对。'
+  }
 }
 
-// 用途：定位服务器指出的具体费用行，避免用户逐项查找。
-// 参数：field 为服务端items[index].field坐标。
-// 返回值：无；仅对当前表单内固定费用行执行聚焦。
+// 用途：按字段名查找已标注的表单锚点。
+// 参数：name 为服务端字段坐标。
+// 返回值：匹配字段的控件或容器；无匹配时为null。
+function fieldElement(name) {
+  return [...document.querySelectorAll('[data-field]')]
+    .find((element) => element.dataset.field === name) || null
+}
+
+// 用途：滚动到校验目标并把键盘焦点落在可聚焦控件上。
+// 参数：element 为字段控件或费用行容器。
+// 返回值：无。
+function revealElement(element) {
+  if (!element) return
+  element.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  if (typeof element.focus === 'function'
+    && element.matches('input,select,textarea,button,a[href],[tabindex]')) element.focus()
+}
+
+// 用途：定位服务器指出的具体费用行或字段，避免用户逐项查找。
+// 参数：field 为服务端items[index].field、items.index.field或顶层字段坐标。
+// 返回值：无；坐标与控件键不一致时按别名逐级回退，仍无锚点则给出可见提示。
+const fieldCoordinateAliases = {
+  amount_minor: ['requested_minor'],
+  requested_amount: ['requested_minor'],
+  requested_amount_minor: ['requested_minor'],
+  payable_amount: ['payable_minor'],
+  payee_profile: ['payee_profile_id'],
+  payee_tax_id: ['payee_profile_id'],
+  tax_id: ['payee_profile_id'],
+  invoice_seller_name: ['seller_name'],
+  invoice_buyer_name: ['buyer_name'],
+}
 async function focusValidation(field) {
-  const match = /^items\[(\d+)\]/.exec(field || '')
-  if (!match) return
+  const name = String(field || '').trim()
+  if (!name) return
   await nextTick()
-  const element = document.querySelector(`[data-expense-index="${Number(match[1])}"]`)
-  element?.scrollIntoView({ block: 'center', behavior: 'smooth' }); element?.focus()
+  validationHint.value = ''
+  if (typeof document === 'undefined') return
+  const item = /^items(?:\[(\d+)\]|\.(\d+))(?:\.(.+))?$/.exec(name)
+  if (item) {
+    const index = Number(item[1] ?? item[2])
+    const row = document.querySelector(`[data-expense-index="${index}"]`)
+    if (row) {
+      const sub = item[3] || ''
+      const subControl = sub
+        ? [...row.querySelectorAll('[data-field]')].find((element) => element.dataset.field === sub)
+        : null
+      revealElement(subControl?.matches('input,select,textarea,button,[tabindex]') ? subControl : row)
+      return
+    }
+  }
+  const leaf = name.split('.').pop()
+  const candidates = [...new Set([
+    name,
+    `draft.${name}`,
+    leaf,
+    `draft.${leaf}`,
+    ...(fieldCoordinateAliases[leaf] || []),
+    ...(fieldCoordinateAliases[name.replace(/^draft\./, '')] || []),
+  ].filter(Boolean))]
+  for (const candidate of candidates) {
+    const direct = fieldElement(candidate)
+    if (direct) { revealElement(direct); return }
+  }
+  validationHint.value = `字段坐标 ${name} 暂未对应到页面输入框，请展开对应区域核对后重试。`
+}
+
+// 用途：判断字段错误是否指向当前控件，供 aria-invalid 显示可见标红。
+// 参数：field 为页面字段名，index 为可选的费用行序号。
+// 返回值：该控件命中任一服务端或客户端字段错误时为 true。
+function invalidField(field, index = null) {
+  return fieldErrors.value.some((row) => {
+    const name = String(row.field || '')
+    if (index !== null) {
+      const match = /^items(?:\[(\d+)\]|\.(\d+))(?:\.(.+))?$/.exec(name)
+      if (!match || Number(match[1] ?? match[2]) !== index) return false
+      const sub = match[3] || ''
+      return !sub || sub === field || (fieldCoordinateAliases[sub] || []).includes(field)
+    }
+    const leaf = name.split('.').pop()
+    return leaf === field || (fieldCoordinateAliases[leaf] || []).includes(field)
+  })
 }
 
 // 用途：查询尚未确认的原命令结果，避免重新登记付款。
@@ -434,7 +878,7 @@ async function applyRecoveredResult(operation, result) {
 // 参数：无。
 // 返回值：无；新增内存表单项。
 function addItem() {
-  draft.value.items.push({ id: crypto.randomUUID(), fee_type: '', occurred_date: todayBusinessDate(),
+  draft.value.items.push({ id: createIdempotencyKey(), fee_type: '', occurred_date: todayBusinessDate(),
     amount: '', expense_nature:'ACTUAL',reason: '', exception_reason: '', travel_exception: false,
     city_level: '', city_code: '', transport_category: '', accommodation_category: '',
     no_invoice_proof_type: '', no_invoice_evidence_text: '', grade: '', units: 1, no_invoice_reason: '',
@@ -455,6 +899,14 @@ async function searchProjects() {
   } catch (cause) { showError(cause) }
 }
 
+// 用途：从报销付款入口跳转项目管理侧维护项目费用参与人。
+// 参数：option 为已查询到的授权项目选项。
+// 返回值：无；路由只提供入口，参与资格仍由项目管理侧校验。
+function openProjectExpenseParticipants(option) {
+  if (!option?.project_id) return
+  router.push({ name: 'project_management', params: { section: 'project_detail' }, query: { project: option.project_id } })
+}
+
 // 用途：应用筛选并重置分页，避免保留上一查询的末页。
 // 参数：无。
 // 返回值：无；真实服务端错误保留输入并显示。
@@ -472,6 +924,7 @@ async function resetFilters() {
 // 参数：projectID为服务端返回的授权项目坐标。
 // 返回值：无；路由查询不替代服务端范围核验。
 function openArchiveProject(projectID) {
+  if (!discardDraft()) return
   selected.value=null;archives.value=null
   router.push({name:'reimbursement',params:{section:'archives'},query:{project_id:projectID}})
 }
@@ -526,7 +979,7 @@ async function createDraftFromInvoices() {
       throw new Error('所选票据需要人工归类，请先核对下方命中依据；也可新建草稿人工选择费用类别')
     }
     await newDraft()
-    draft.value.claim_type=suggestions[0].default_claim_type || 'TRAVEL'
+    if (!selected.value) return
     draft.value.title='发票费用报销'
     draft.value.items=[]
     for(const suggestion of suggestions) {
@@ -602,7 +1055,16 @@ function draftInvoiceUsage(id) {
 // 返回值：精确金额的草稿DTO；校验失败抛错。
 function claimPayload() {
   const value = draft.value
-  const items = value.items.map(editableClaimItem)
+  const items = value.items.map((item, index) => {
+    try { return editableClaimItem(item) } catch (cause) {
+      const leaf = /金额/.test(cause.message) ? 'requested_minor'
+        : /证据|文件/.test(cause.message) ? 'no_invoice_evidence_file_ids'
+          : /差旅/.test(cause.message) ? 'travel_confirmation' : ''
+      throw Object.assign(cause, { details: [{
+        field: `items[${index}]${leaf ? `.${leaf}` : ''}`, message: cause.message,
+      }] })
+    }
+  })
   validateItems(items)
   return { title: value.title, claim_type:value.claim_type, remark:value.remark,
     org_id: value.org_id, route_type: value.route_type,
@@ -618,14 +1080,45 @@ async function saveDraft() {
     const payload = claimPayload()
     const result = await mutate(selected.value ? 'claim.update' : 'claim.create', selected.value ? `/claims/${selected.value.id}` : '/claims',
       payload, selected.value ? 'PATCH' : 'POST')
-    if (result) { await openClaim(result.id); await load() }
+    if (result) { await openClaim(result.id, true); await load() }
   } catch (cause) { showError(cause) }
+}
+
+// 用途：把刚打开的详情滚动到视口，避免用户以为点击没有反应。
+// 参数：无。
+// 返回值：无；仅操作当前详情容器。
+async function revealDetail() {
+  await nextTick()
+  if (typeof detailPanel.value?.scrollIntoView === 'function') {
+    detailPanel.value.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  }
+}
+
+// 用途：从详情返回列表，并清理已确认放弃的草稿与深链参数。
+// 参数：kind 为 claim、invoice 或 approval，决定要关闭的详情。
+// 返回值：无；有未保存草稿时先确认。
+async function backToList(kind = 'claim') {
+  if (!discardDraft()) return
+  if (kind === 'invoice') {
+    selectedInvoice.value = null; invoiceRows.value = []; selectedSource.value = null
+  } else if (kind === 'approval') {
+    approvalTask.value = null; approvalHistory.value = []; historyError.value = ''
+  } else {
+    selected.value = null; draft.value = blankDraft(); draftBaseline.value = ''
+  }
+  const query = { ...route.query }
+  delete query.claim_id
+  router.replace({ name: 'reimbursement', params: { section: workspace.value }, query })
+  await nextTick()
+  heading.value?.scrollIntoView?.({ block: 'start', behavior: 'smooth' })
+  heading.value?.focus?.()
 }
 
 // 用途：读取单据详情并建立可编辑副本，不把只读字段回传。
 // 参数：id 为服务器单据ID。
 // 返回值：无；详情读取失败保持表单。
-async function openClaim(id) {
+async function openClaim(id, force = false) {
+  if (!force && selected.value?.id !== String(id) && !discardDraft()) return
   const ticket = ++detailSequence
   try {
     const result = await api.request(`/claims/${encodeURIComponent(id)}`)
@@ -646,11 +1139,18 @@ async function openClaim(id) {
         ratio: row.ratio_basis_points ? String(row.ratio_basis_points / 100) : '' })),
       invoice_usages: (item.invoice_usages || []).map((row) => ({ ...row, amount: formatMinor(row.used_minor) })),
     })) }
-    draftBaseline.value = JSON.stringify(draft.value)
+    draftBaseline.value = stableStringify(draft.value)
     payment.value = null; archives.value = null
-    if (section.value === 'payments' && result.active_payment_id && can('expense.payment.read')) {
-      payment.value = await api.request(`/payments/${encodeURIComponent(result.active_payment_id)}`)
+    reversalHistoryError.value = ''
+    paymentHistory.value = []; reversalHistory.value = []; paymentHistoryError.value = ''
+    paymentHistoryTotal.value = 0; paymentHistoryPage.value = 1; paymentHistoryLoaded.value = false
+    // 付款与归档分区按当前分区补齐数据，避免残留面板显示成"尚无付款记录"。
+    await refreshSelectedSection()
+    if (route.query.claim_id !== String(id)) {
+      router.replace({ name: 'reimbursement', params: { section: workspace.value },
+        query: { ...route.query, claim_id: String(id) } })
     }
+    await revealDetail()
   } catch (cause) { showError(cause) }
 }
 
@@ -662,7 +1162,7 @@ async function validateProjects() {
   try {
     projectValidation.value = await api.request('/project-references/validate', { method: 'POST',
       body: JSON.stringify({ claim_id: selected.value.id, draft_version: selected.value.version,
-        expected_version: selected.value.version, command_id: crypto.randomUUID() }) })
+        expected_version: selected.value.version, command_id: createIdempotencyKey() }) })
   } catch (cause) { showError(cause) }
 }
 
@@ -686,7 +1186,50 @@ async function approve(task, action) {
   const result = await mutate('approval.action', `/approval-tasks/${task.id}/actions`,
     { expected_version: task.claim_version, round: task.round, task_version: task.version,
       action, reason: approvalReason.value, target_subject_id: transferSubject.value })
-  if (result) { await load(); if (approvalTask.value?.id === task.id) await loadApprovalHistory() }
+  if (result) {
+    pendingApprovalAction.value = ''
+    notice.value = autoReturnNotice(result)
+      || `审批动作「${approvalActionLabel(action)}」已提交，任务列表已刷新。`
+    await load()
+    if (approvalTask.value?.id === task.id) await openApproval(task.id)
+  }
+}
+
+// 用途：把审批动作编码转换为业务按钮文案。
+// 参数：action 为服务端允许的动作。
+// 返回值：中文动作名；未知动作显示待确认。
+function approvalActionLabel(action) {
+  return { APPROVE: '同意', RETURN: '退回', TRANSFER: '转交', ADDSIGN: '加签' }[action] || '该动作'
+}
+
+// 用途：在详情内先校验原因和目标，再进入二次确认，不直接执行审批。
+// 参数：action 为服务端允许的动作。
+// 返回值：无；缺少原因或目标时给出可见提示。
+function requestApprovalAction(action) {
+  if (!approvalTask.value) return
+  if (action === 'RETURN' && !approvalReason.value.trim()) {
+    showError(new Error('退回前请填写审批说明，说明将写入审批历史')); return
+  }
+  if (['TRANSFER', 'ADDSIGN'].includes(action) && !transferSubject.value.trim()) {
+    showError(new Error('转交或加签前请填写目标主体')); return
+  }
+  pendingApprovalAction.value = action
+}
+
+// 用途：二次确认后提交审批动作，避免误点直接改变单据状态。
+// 参数：无。
+// 返回值：无；提交后刷新任务与历史。
+async function confirmApprovalAction() {
+  const action = pendingApprovalAction.value
+  if (!action || !approvalTask.value) return
+  await approve(approvalTask.value, action)
+}
+
+// 用途：取消二次确认，保持当前原因和目标。
+// 参数：无。
+// 返回值：无。
+function cancelApprovalAction() {
+  pendingApprovalAction.value = ''
 }
 
 // 用途：读取服务端按任务范围裁剪的固定审批快照。
@@ -699,7 +1242,11 @@ async function openApproval(id) {
     const task = await api.request(`/approval-tasks/${encodeURIComponent(id)}`)
     if (ticket !== approvalSequence) return
     approvalTask.value = task
+    pendingApprovalAction.value = ''
+    approvalReason.value = ''
+    transferSubject.value = ''
     await loadApprovalHistory()
+    await revealDetail()
   } catch (cause) { if (ticket === approvalSequence) showError(cause) }
 }
 
@@ -721,11 +1268,39 @@ async function loadApprovalHistory() {
   } finally { if (ticket === approvalSequence) historyLoading.value = false }
 }
 
+// 用途：读取当前单据可用受控付款账户与收款档案，付款表单只按业务名称选择。
+// 参数：无。
+// 返回值：无；失败保留原因，不退回手填账户。
+async function loadPaymentAccountOptions() {
+  paymentAccounts.value = []
+  paymentOptionError.value = ''
+  paymentOptionsLoaded.value = false
+  if (!selected.value?.id || !can('expense.payment.record')) { paymentOptionsLoaded.value = true; return }
+  try {
+    const result = await api.request(`/claims/${encodeURIComponent(selected.value.id)}/payment-options`)
+    paymentAccounts.value = Array.isArray(result?.source_accounts) ? result.source_accounts : []
+    paymentPayeeProfiles.value = Array.isArray(result?.payee_profiles) ? result.payee_profiles : []
+  } catch (cause) { paymentOptionError.value = errorText(cause, 'GET') }
+  finally { paymentOptionsLoaded.value = true }
+}
+
+// 用途：把当前收款档案显示为业务信息，避免只留一个内部编号。
+// 参数：无。
+// 返回值：收款档案说明；未返回名称时说明以批准快照为准。
+const paymentPayeeLabel = computed(() => {
+  const id = selected.value?.payee_profile_id
+  if (!id) return '按批准快照中的收款档案付款'
+  const profile = paymentPayeeProfiles.value.find((row) => row.id === id)
+  return profile ? `${profile.name || '已审核收款档案'} · 账户引用 ${profile.account_ref || '未返回'} · v${profile.version ?? '未返回'}`
+    : '按批准快照中的收款档案付款（当前选项未返回账户引用）'
+})
+
 // 用途：登记当前批准单据全额付款事实。
 // 参数：无。
 // 返回值：无；成功展示服务器付款记录，不伪称银行已执行转账。
 async function registerPayment() {
   if (!selected.value) return
+  if (!paymentForm.value.source_account_ref) { showError(new Error('请选择受控付款账户后再登记付款')); return }
   const result = await mutate('payment.record', `/claims/${selected.value.id}/payments`,
     { ...paymentForm.value, expected_version: selected.value.version,
       amount_minor: selected.value.payable_minor, currency: selected.value.currency,
@@ -866,7 +1441,7 @@ async function downloadClaimEvidence(fileID, claimID=selected.value?.id) {
       throw new Error('费用证据地址不受信任')
     }
     const response = await fetch(target.href, { credentials: 'include', cache: 'no-store',
-      headers: { Authorization: `DownloadTicket ${permit.ticket}` }, signal: AbortSignal.timeout(30000) })
+      headers: { Authorization: `DownloadTicket ${permit.ticket}` }, signal: timeoutSignal(30000) })
     if (!response.ok) throw new Error('费用证据读取失败')
     const blob = await response.blob()
     if (blob.size > 20 * 1024 * 1024) throw new Error('费用证据超过20MiB边界')
@@ -890,7 +1465,7 @@ function boundedEvidence(value) {
 // 用途：把显式文件ID输入转换为去重列表，文件权限由服务端重新校验。
 // 参数：value 为逗号分隔文件ID。
 // 返回值：非空文件ID列表。
-function splitIDs(value) { return [...new Set(String(value).split(',').map((item) => item.trim()).filter(Boolean))] }
+function splitIDs(value) { return [...new Set(String(value || '').split(',').map((item) => item.trim()).filter(Boolean))] }
 
 // 用途：申请独立冲正审批，原付款事实不在页面直接改写。
 // 参数：无。
@@ -901,7 +1476,7 @@ async function requestReversal() {
   const result = await mutate('reversal.request', `/payments/${id}/reversal-requests`,
     { expected_version: selected.value.version, reason: reversalReason.value, fact_kind: reversalFact.value,
       evidence_file_ids: splitIDs(evidenceFiles.value), terminate_obligation: false })
-  if (result) { reversalID.value = result.id; reversalVersion.value = result.version; notice.value = `冲正申请已受理：${result.id}` }
+  if (result) { reversalID.value = result.id; reversalVersion.value = result.version; notice.value = `冲正申请已受理：${result.id}`; await loadPaymentHistory() }
 }
 
 // 用途：批准或拒绝独立冲正申请。
@@ -910,7 +1485,7 @@ async function requestReversal() {
 async function decideReversal(approve) {
   const result = await mutate('reversal.decide', `/reversal-requests/${encodeURIComponent(reversalID.value)}/decisions`,
     { expected_version: reversalVersion.value, approve, reason: reversalReason.value })
-  if (result) await load()
+  if (result) { await loadPaymentHistory(); await load() }
 }
 
 // 用途：加载当前单据冲正申请及其独立版本。
@@ -929,6 +1504,55 @@ async function loadReversals() {
 function selectReversal(event) {
   const row = reversalRequests.value.find((item) => item.id === event.target.value)
   reversalID.value = row?.id || ''; reversalVersion.value = row?.version ?? null
+}
+
+// 用途：加载当前单据付款与冲正历史，避免只看 active_payment_id 单条记录。
+// 参数：nextPage 为付款历史页码，默认停留在当前页。
+// 返回值：无；两段历史分别容错，失败时保留可核对的部分并提示原因。
+async function loadPaymentHistory(nextPage = paymentHistoryPage.value) {
+  if (!selected.value?.id || !can('expense.payment.read')) return
+  const ticket = ++paymentHistorySequence
+  paymentHistoryPage.value = Math.max(1, Number(nextPage) || 1)
+  paymentHistoryLoading.value = true
+  paymentHistoryError.value = ''; reversalHistoryError.value = ''
+  paymentHistoryLoaded.value = false
+  const base = `/claims/${encodeURIComponent(selected.value.id)}`
+  const [payments, reversals] = await Promise.allSettled([
+    api.request(`${base}/payments?page=${paymentHistoryPage.value}&page_size=${paymentHistoryPageSize}`),
+    api.request(`${base}/reversal-requests?page=1&page_size=20`),
+  ])
+  if (ticket !== paymentHistorySequence) return
+  paymentHistoryLoading.value = false
+  if (payments.status === 'fulfilled' && Array.isArray(payments.value?.items)) {
+    paymentHistory.value = payments.value.items
+    paymentHistoryTotal.value = Number(payments.value?.total) || payments.value.items.length
+    paymentHistoryLoaded.value = true
+  } else {
+    paymentHistory.value = []
+    paymentHistoryError.value = '付款历史读取失败，请稍后重试；当前有效付款仍以页面单条记录为准。'
+  }
+  if (reversals.status === 'fulfilled' && Array.isArray(reversals.value?.items)) {
+    reversalHistory.value = reversals.value.items
+  } else {
+    // 冲正历史失败不能安静地空白，否则"没有冲正"和"没读出来"看起来一样。
+    reversalHistory.value = []
+    reversalHistoryError.value = '冲正申请读取失败，请稍后重试；这里不显示未经确认的冲正记录。'
+  }
+}
+
+// 用途：把付款状态与可能的冲正关联字段合并为可读说明。
+// 参数：record 为付款历史记录。
+// 返回值：付款状态及冲正关联文本，缺失关联时不虚构。
+function paymentHistoryStatus(record) {
+  const parts = [statusLabel(record.status)]
+  const reversalStatus = record.reversal_status || record.reversal_request_status
+  if (reversalStatus) parts.push(`冲正：${statusLabel(reversalStatus)}`)
+  const reversalID = record.reversal_request_id || record.reversal_id
+  if (reversalID) parts.push(`关联 ${reversalID}`)
+  const originalID = record.reversal_of_payment_id || record.original_payment_id
+  if (originalID) parts.push(`冲正原付款 ${originalID}`)
+  if (record.reversed_by_payment_id) parts.push(`已被冲正 ${record.reversed_by_payment_id}`)
+  return parts.filter(Boolean).join(' · ')
 }
 
 // 用途：从解析异常定位本人原件与实际Job，不把运行标识当任务标识。
@@ -955,9 +1579,11 @@ async function openInvoice(id) {
     const result = await api.request(`/invoices/${encodeURIComponent(id)}`)
     if (ticket !== detailSequence) return
     invoiceContentEditor.value = invoiceContentForm(result.content)
+    invoiceTotalYuan.value = formatMinor(result.total_minor) === '不可用' ? '' : formatMinor(result.total_minor)
     selectedInvoice.value = result; invoiceRows.value = []; originalPreview.value = ''; selectedSource.value = null
     if (originalDownload.value) URL.revokeObjectURL(originalDownload.value)
     originalDownload.value = ''
+    await revealDetail()
   }
   catch (cause) { showError(cause) }
 }
@@ -967,15 +1593,19 @@ async function openInvoice(id) {
 // 返回值：无；成功后读取权威复核状态。
 async function confirmInvoice() {
   const invoice = selectedInvoice.value
-  let content
-  try { content=invoiceContentInput(invoiceContentEditor.value) }
+  let content, totalMinor
+  try {
+    content=invoiceContentInput(invoiceContentEditor.value)
+    // 票面总额输入框是元；这里换算成整数分提交，未填写时沿用服务端当前票面。
+    totalMinor = String(invoiceTotalYuan.value || '').trim() ? toMinor(invoiceTotalYuan.value) : invoice.total_minor
+  }
   catch (cause) { showError(cause); return }
   const result = await mutate('invoice.confirm', `/invoices/${invoice.id}/confirm`,
     { expected_version: invoice.version, reason: invoiceReviewReason.value,
       invoice_type: invoice.invoice_type, invoice_number: invoice.invoice_number,
       invoice_code: invoice.invoice_code, invoice_date: invoice.invoice_date,
       seller_tax_id: invoice.seller_tax_id, buyer_tax_id: invoice.buyer_tax_id,
-      total_minor: invoice.total_minor, file_ids: invoice.file_ids, content,travel_facts:travelInput(invoice.travel_facts,true) })
+      total_minor: totalMinor, file_ids: invoice.file_ids, content,travel_facts:travelInput(invoice.travel_facts,true) })
   if (result) { await openInvoice(invoice.id); await load() }
 }
 
@@ -1006,7 +1636,7 @@ async function uploadInvoice(event, purpose = 'reimbursement.invoice.original', 
     saving.value = false
     const result = await mutate('document.upload', '/invoice-documents/upload-sessions',
       { purpose, original_name: file.name, media_type: media,
-        size_bytes: file.size, sha256, idempotency_key: crypto.randomUUID(), expected_version: 0 })
+        size_bytes: file.size, sha256, idempotency_key: createIdempotencyKey(), expected_version: 0 })
     if (result) return await uploadContent(result, file, purpose)
   } catch (cause) { showError(cause) }
   finally { saving.value = false }
@@ -1017,6 +1647,7 @@ async function uploadInvoice(event, purpose = 'reimbursement.invoice.original', 
 // 返回值：带原上传文档ID的完成回执；网络中断后保留文档ID供完成查询。
 async function uploadContent(permit, file, purpose) {
   documentID.value = permit.document_id
+  uploadedDocument.value = { id: permit.document_id, name: file?.name || '' }
   const target = new URL(permit.upload_url, window.location.origin)
   if (target.origin !== window.location.origin || !target.pathname.startsWith('/file-gateway/')) {
     throw new Error('上传会话返回非平台文件网关地址，已拒绝传送文件')
@@ -1025,7 +1656,7 @@ async function uploadContent(permit, file, purpose) {
   try {
     const response = await fetch(target.href, { method: 'PUT', credentials: 'include',
       headers: { 'Content-Type': 'application/octet-stream', Authorization: `UploadTicket ${permit.ticket}` },
-      body: file, signal: AbortSignal.timeout(120000) })
+      body: file, signal: timeoutSignal(120000) })
     if (!response.ok) throw new Error('文件上传未确认成功，请查询文档状态后确认完成')
     saving.value = false
     const completed = await mutate('document.complete', `/invoice-documents/${permit.document_id}/complete`,
@@ -1055,6 +1686,72 @@ async function uploadInvoiceBatch(event) {
   finally {batchBusy.value=false}
 }
 
+// 用途：记住最近一次的解析/导出/原件任务，刷新页面后仍能找回任务号。
+// 参数：kind 为任务种类，value 为任务坐标。
+// 返回值：无；本地存储不可用时只保留当前页面的内存记忆。
+function rememberTaskRun(kind, value) {
+  if (!value) return
+  rememberTask(kind, value)
+  recentTask.value = { ...recentTask.value, [kind]: { ...value, saved_at: Date.now() } }
+}
+
+// 用途：把解析任务与原件坐标一起记下来，供刷新后继续查询。
+// 参数：job 为解析任务；id 为原件标识，缺省取当前文档ID。
+// 返回值：无。
+function rememberParseTask(job, id = documentID.value) {
+  if (!job?.id) return
+  rememberTaskRun('parse', { task_id: String(job.id), document_id: String(id || ''), status: String(job.status || '') })
+}
+
+// 用途：把导出任务与原导出范围一起记下来，供刷新后继续查询或重试。
+// 参数：job 为导出任务。
+// 返回值：无。
+function rememberExportTask(job) {
+  if (!job?.id) return
+  rememberTaskRun('export', { task_id: String(job.id), claim_ids: [...exportScopeIDs.value].map(String),
+    status: String(job.status || '') })
+}
+
+// 用途：继续查询上次的解析任务，避免刷新等同于重新上传。
+// 参数：无。
+// 返回值：无；失败显示真实原因并保留任务号。
+async function resumeParseTask() {
+  const saved = recentTask.value.parse
+  if (!saved?.task_id) return
+  if (saved.document_id) documentID.value = saved.document_id
+  try {
+    parseRun.value = await api.request(`/parse-runs/${encodeURIComponent(saved.task_id)}`)
+    if (documentID.value) documentStatus.value = await api.request(`/invoice-documents/${encodeURIComponent(documentID.value)}`)
+    rememberParseTask(parseRun.value)
+    notice.value = '已找回上次解析任务，请核对任务状态与候选。'
+  } catch (cause) { showError(cause) }
+}
+
+// 用途：继续查询上次导出任务，并恢复原导出范围以便失败重试。
+// 参数：无。
+// 返回值：无；失败显示真实原因。
+async function resumeExportTask() {
+  const saved = recentTask.value.export
+  if (!saved?.task_id) return
+  exportScopeIDs.value = (saved.claim_ids || []).map(String)
+  try {
+    exportJob.value = await api.request(`/exports/${encodeURIComponent(saved.task_id)}`)
+    rememberExportTask(exportJob.value)
+    notice.value = '已找回上次导出任务，请核对任务状态。'
+  } catch (cause) { showError(cause) }
+}
+
+// 用途：读取最近上传的原件，找回文档ID后继续解析或人工录入。
+// 参数：无。
+// 返回值：无；失败显示真实原因。
+async function resumeRecentDocument() {
+  const saved = recentTask.value.document
+  if (!saved?.document_id) return
+  documentID.value = saved.document_id
+  const doc = await readDocument()
+  if (doc) notice.value = '已读取最近上传的原件；可继续发起解析或人工录入。'
+}
+
 // 用途：展示网关已确认的文档或凭证结果，不把解析任务当成人工复核。
 // 参数：result 为完成回执，purpose 为用途，fileID 为凭证引用，destination 为目标表单。
 // 返回值：无；更新后续解析或付款凭证引用。
@@ -1071,6 +1768,10 @@ function applyUploadCompletion(result, purpose, fileID, destination = 'payment')
     notice.value = '付款凭证已上传并由服务器确认。'
   } else if (purpose === 'reimbursement.invoice.original') {
     parseRun.value = result.parse_run || (result.parse_run_id ? { id: result.parse_run_id } : null)
+    // 记住原件与解析任务：刷新后仍能靠"最近上传的原件"找回文档ID。
+    const id = result.document_id || documentID.value
+    if (id) rememberTaskRun('document', { document_id: String(id) })
+    if (parseRun.value?.id) rememberParseTask(parseRun.value, id)
     notice.value = '文件已确认就绪，解析状态请单独查询；提取字段仍需人工复核。'
   }
 }
@@ -1094,7 +1795,41 @@ async function parseDocument() {
   const result = await mutate('invoice.reparse', path, { expected_version: doc.version })
   if (result) {
     parseRun.value = result
+    rememberParseTask(result)
     if (result.document_version) documentStatus.value.version = result.document_version
+    if (result.status) await autoRefreshParse()
+  }
+}
+
+// 用途：解析任务创建后自动短轮询，完成后提示人工复核，失败时保留重试入口。
+// 参数：无。
+// 返回值：无；过期响应不覆盖新任务。
+async function autoRefreshParse() {
+  const ticket = ++parsePollSequence
+  const jobID = parseRun.value?.id
+  if (!jobID) return
+  try {
+    const final = await pollTask(async () => {
+      const job = await api.request(`/parse-runs/${encodeURIComponent(jobID)}`)
+      if (!job || typeof job.status !== 'string') return job
+      if (ticket === parsePollSequence) parseRun.value = job
+      return job
+    }, {
+      attempts: 5,
+      delay: 2000,
+      shouldContinue: () => ticket === parsePollSequence,
+      onValue: (job) => {
+        if (ticket !== parsePollSequence || !taskSettled(job?.status)) return
+        notice.value = job.status === 'DONE'
+          ? '解析任务已完成，请核对候选并人工复核；识别结果不代表已验真。'
+          : `解析任务未完成：${failureMessage(job.last_error)}`
+      },
+    })
+    if (final?.status && !taskSettled(final.status) && ticket === parsePollSequence) {
+      notice.value = '解析任务仍在处理中；可稍后点击查询解析状态，或重新发起解析。'
+    }
+  } catch (cause) {
+    if (ticket === parsePollSequence) showError(cause)
   }
 }
 
@@ -1104,7 +1839,9 @@ async function parseDocument() {
 async function refreshParse() {
   try {
     parseRun.value = await api.request(`/parse-runs/${encodeURIComponent(parseRun.value.id)}`)
-    documentStatus.value = await api.request(`/invoice-documents/${encodeURIComponent(documentID.value)}`)
+    rememberParseTask(parseRun.value)
+    // 只查询任务时可能还没有文档ID，此时不去拼一个空文档地址。
+    if (documentID.value) documentStatus.value = await api.request(`/invoice-documents/${encodeURIComponent(documentID.value)}`)
     await load()
   }
   catch (cause) { showError(cause) }
@@ -1213,7 +1950,7 @@ async function readInvoiceOriginal(source) {
       throw new Error('原件下载地址不受信任')
     }
     const response = await fetch(target.href, { credentials: 'include', cache: 'no-store',
-      headers: { Authorization: `DownloadTicket ${permit.ticket}` }, signal: AbortSignal.timeout(30000) })
+      headers: { Authorization: `DownloadTicket ${permit.ticket}` }, signal: timeoutSignal(30000) })
     if (!response.ok) throw new Error('受控原件读取失败')
     const blob = await response.blob()
     if (blob.size > 20 * 1024 * 1024) throw new Error('原件超过20MiB预览边界')
@@ -1221,7 +1958,6 @@ async function readInvoiceOriginal(source) {
     originalDownload.value = URL.createObjectURL(blob)
     originalMedia.value = response.headers.get('content-type')?.split(';')[0] || ''
     originalPreview.value = originalMedia.value === 'application/pdf' ? originalDownload.value : ''
-    previewZoom.value=1;previewRotation.value=0
   } catch (cause) { showError(cause) }
 }
 
@@ -1232,17 +1968,6 @@ async function previewApprovalInvoice(invoiceID) {
   try {
     selectedInvoice.value=await api.request(`/invoices/${encodeURIComponent(invoiceID)}`)
     await invoiceSources()
-  } catch(cause) {showError(cause)}
-}
-
-// 用途：在用户操作下把当前原件查看区全屏，不生成新文件权限。
-// 参数：无。
-// 返回值：无；浏览器不支持时显示可理解提示。
-async function fullscreenOriginal() {
-  try {
-    const element=document.querySelector('[data-invoice-preview]')
-    if(!element?.requestFullscreen)throw new Error('此浏览器不支持全屏，请下载原件查看')
-    await element.requestFullscreen()
   } catch(cause) {showError(cause)}
 }
 
@@ -1267,10 +1992,57 @@ async function retryArchive() {
 // 参数：claimIDs为显式选择的单据，未传时沿用当前详情或既有范围。
 // 返回值：无；受理不代表文件已生成。
 async function createExport(claimIDs = null) {
+  const scope = Array.isArray(claimIDs) ? claimIDs : selected.value ? [selected.value.id] : []
+  exportScopeIDs.value = scope.map(String)
   const result = await mutate('export.create', '/exports',
-    { expected_version: selected.value?.version || 0, claim_ids: Array.isArray(claimIDs) ? claimIDs : selected.value ? [selected.value.id] : [],
+    { expected_version: selected.value?.version || 0, claim_ids: scope,
       ...(route.query.project_id ? { project_id: String(route.query.project_id) } : {}) })
-  if (result) exportJob.value = result
+  if (result) {
+    exportJob.value = result
+    rememberExportTask(result)
+    if (result.status) await autoRefreshExport()
+  }
+}
+
+// 用途：导出任务创建后自动短轮询，完成后提示下载，失败时保留重试入口。
+// 参数：无。
+// 返回值：无；过期响应不覆盖新任务。
+async function autoRefreshExport() {
+  const ticket = ++exportPollSequence
+  const jobID = exportJob.value?.id
+  if (!jobID) return
+  try {
+    const final = await pollTask(async () => {
+      const job = await api.request(`/exports/${encodeURIComponent(jobID)}`)
+      if (!job || typeof job.status !== 'string') return job
+      if (ticket === exportPollSequence) exportJob.value = job
+      return job
+    }, {
+      attempts: 5,
+      delay: 2000,
+      shouldContinue: () => ticket === exportPollSequence,
+      onValue: (job) => {
+        if (ticket !== exportPollSequence || !taskSettled(job?.status)) return
+        notice.value = job.status === 'DONE'
+          ? '导出任务已完成，可下载受控文件。'
+          : `导出任务未完成：${failureMessage(job.last_error)}`
+      },
+    })
+    if (final?.status && !taskSettled(final.status) && ticket === exportPollSequence) {
+      notice.value = '导出任务仍在处理中；可稍后点击查询导出状态。'
+    }
+  } catch (cause) {
+    if (ticket === exportPollSequence) showError(cause)
+  }
+}
+
+// 用途：沿用原导出范围重试，避免失败后让用户重新勾选。
+// 参数：无。
+// 返回值：无；原范围丢失时给出可见提示。
+async function retryExport() {
+  const scope = [...exportScopeIDs.value]
+  if (!scope.length) { showError(new Error('原导出范围已丢失，请重新勾选当前页单据')); return }
+  await createExport(scope)
 }
 
 // 用途：仅为本页明确勾选的可见单据创建导出，不以空选择扩大范围。
@@ -1321,7 +2093,10 @@ function invalidateClaimPreview() {
 // 参数：无。
 // 返回值：无；失败保留原任务ID。
 async function refreshExport() {
-  try { exportJob.value = await api.request(`/exports/${encodeURIComponent(exportJob.value.id)}`) }
+  try {
+    exportJob.value = await api.request(`/exports/${encodeURIComponent(exportJob.value.id)}`)
+    rememberExportTask(exportJob.value)
+  }
   catch (cause) { showError(cause) }
 }
 
@@ -1436,17 +2211,17 @@ function selectPolicy(row) {
 // 参数：无。
 // 返回值：无；移除历史标识和发布状态，不覆盖原版本。
 function clonePolicy() {
-  try {
-    policyID.value = ''; policyVersion.value = 0; policyPublished.value = false; policyRecord.value = null
-  } catch (cause) { showError(cause) }
+  policyID.value = ''; policyVersion.value = 0; policyPublished.value = false; policyRecord.value = null
 }
 
 // 用途：清空当前已确认详情并开始新草稿，未知命令时拒绝切换。
 // 参数：无。
 // 返回值：无；初始化空白编辑表单。
-async function newDraft() {
+async function newDraft(skipConfirm = false) {
   if (runner.pending()) { showError(new Error('请先确认原命令结果')); return }
+  if (!skipConfirm && !discardDraft()) return
   selected.value = null; draft.value = blankDraft()
+  draftBaseline.value = stableStringify(draft.value)
   try {
     editorOptions.value = await api.request('/claim-options')
     const orgs = editorOptions.value.org_ids || [...new Set((editorOptions.value.employee_profiles || []).map((profile) => profile.org_id))]
@@ -1460,7 +2235,13 @@ async function newDraft() {
 // 参数：无。
 // 返回值：无；无可选组织时不发出创建请求。
 async function createDraft() {
-  if (!draft.value.org_id) { showError(new Error('请选择已授权费用组织')); return }
+  if (!draft.value.org_id) {
+    const cause = new Error('请选择已授权费用组织')
+    cause.details = [{ field: 'org_id', message: cause.message }]
+    showError(cause); return
+  }
+  // 创建服务器草稿会先落一个空单据；本地未保存的费用明细不会被带走，先征得确认。
+  if (!confirmDiscard('创建服务器草稿会先保存空单据，当前未保存的费用明细不会一并保存。继续创建吗？')) return
   const profile = editorOptions.value?.employee_profiles?.find(
     (value) => value.org_id === draft.value.org_id)
   if (['TECHNICAL', 'SALES'].includes(profile?.route_type)) {
@@ -1469,7 +2250,7 @@ async function createDraft() {
   const result = await mutate('claim.create', '/claims', { expected_version: 0,
     title: draft.value.title || '未命名报销', org_id: draft.value.org_id,
     route_type: draft.value.route_type, currency: 'CNY', items: [] })
-  if (result) { await openClaim(result.id); if (!draft.value.items.length) addItem() }
+  if (result) { await openClaim(result.id, true); if (!draft.value.items.length) addItem() }
 }
 
 
@@ -1478,12 +2259,22 @@ async function createDraft() {
 // 返回值：无；成功返回门户。
 async function logout() {
   if (runner.pending()) { showError(new Error('请先确认原命令结果再退出')); return }
+  if (!discardDraft()) return
   try { await logoutReimbursement() } catch (cause) { showError(cause) } }
 
 watch(draft,invalidateClaimPreview,{deep:true})
 watch(() => selected.value?.id,()=>{previewEnabled.value=false;invalidateClaimPreview()})
-watch(() => route.params.section, () => { page.value = 1; void load() })
-watch(() => route.query.claim_id, (id) => { if (id && section.value === 'claims') void openClaim(String(id)) })
+watch(() => route.params.section, async () => {
+  page.value = 1
+  // 状态页签属于当前入口：从「我的报销单」带过来的草稿筛选不能进入审批轨迹。
+  if (!Object.hasOwn(statusTabs.value, listFilters.value.status)) listFilters.value.status = ''
+  await load()
+  await nextTick()
+  heading.value?.focus()
+})
+watch(() => route.query.claim_id, (id) => {
+  if (id && section.value === 'claims' && selected.value?.id !== String(id)) void openClaim(String(id))
+})
 watch(()=>route.query.project_id,()=>{page.value=1;void load()})
 watch(approvalStatus, () => { page.value = 1; void load() })
 watch(paymentStatus, () => { page.value = 1; void load() })
@@ -1496,17 +2287,24 @@ watch(policyKind, () => {
 // 参数：event 为浏览器离开事件。
 // 返回值：无；存在未确认命令时请求浏览器确认。
 function protectPending(event) {
-  if (!runner.pending()) return
+  if (!runner.pending() && !draftProtected.value) return
   event.preventDefault(); event.returnValue = ''
 }
 onBeforeRouteLeave(() => {
-  if (!runner.pending()) return true
-  showError(new Error('请先查询原命令结果，再离开报销工作区'))
-  return false
+  if (runner.pending()) {
+    showError(new Error('请先查询原命令结果，再离开报销工作区'))
+    return false
+  }
+  return discardDraft()
 })
-onMounted(() => { addItem(); void load(); window.addEventListener('beforeunload', protectPending) })
+onMounted(() => {
+  // 刷新页面后先恢复最近任务坐标，用户可以继续查询而不用重新上传或重跑。
+  recentTask.value = { parse: recallTask('parse'), export: recallTask('export'), document: recallTask('document') }
+  addItem(); void load(); window.addEventListener('beforeunload', protectPending)
+})
 onBeforeUnmount(() => {
-  ++previewSequence;++documentSequence;++detailSequence;clearTimeout(previewTimer)
+  ++previewSequence;++documentSequence;++detailSequence;++parsePollSequence;++exportPollSequence
+  clearTimeout(previewTimer)
   ++loadSequence; window.removeEventListener('beforeunload', protectPending)
   if (originalDownload.value) URL.revokeObjectURL(originalDownload.value)
 })
@@ -1525,7 +2323,7 @@ onBeforeUnmount(() => {
     @logout="logout"
   >
     <template #topbar-actions>
-      <button class="expense-button" :disabled="loading || saving" @click="load">
+      <button type="button" class="expense-button" :disabled="loading || saving" @click="load">
         刷新
       </button>
     </template>
@@ -1534,24 +2332,27 @@ onBeforeUnmount(() => {
         <p class="expense-kicker">
           REIMBURSEMENT
         </p>
-        <h1>
+        <h1
+          ref="heading"
+          tabindex="-1"
+        >
           {{ title }}
         </h1>
         <p>
           按当前主体与数据范围读取；金额以人民币元展示。
         </p>
       </div>
-      <button
+      <button type="button"
         v-if="can('expense.claim.create')"
         class="expense-button primary"
-        @click="navigate('claims'); newDraft()"
+        @click="startNewClaim"
       >
         新建报销
       </button>
     </header>
     <div v-if="error" class="expense-alert danger" role="alert">
       {{ error }}
-      <button v-if="notice.includes('会话已过期')" @click="startReimbursementLogin()">
+      <button type="button" v-if="sessionExpired" @click="startReimbursementLogin()">
         恢复登录
       </button>
     </div>
@@ -1563,10 +2364,10 @@ onBeforeUnmount(() => {
       <code>
         {{ pending.command_id }}
       </code>
-      <button class="expense-button" :disabled="saving" @click="resolvePending">
+      <button type="button" class="expense-button" :disabled="saving" @click="resolvePending">
         查询原命令结果
       </button>
-      <button class="expense-button" :disabled="saving" @click="retryPending">
+      <button type="button" class="expense-button" :disabled="saving" @click="retryPending">
         查询后重试原命令
       </button>
       <p>
@@ -1579,8 +2380,43 @@ onBeforeUnmount(() => {
         {{ scopeDescription }}
       </p>
       <p v-if="returnProject"><RouterLink :to="returnProject">返回来源项目</RouterLink></p>
-      <div v-if="fieldErrors.length" role="alert"><button v-for="field in fieldErrors" :key="field.field" class="expense-button" @click="focusValidation(field.field)">{{ field.message }}</button></div>
-      <p v-if="conflictSnapshot" role="status">服务器最新版本 {{ conflictSnapshot.value.version }} · 状态 {{ statusLabel(conflictSnapshot.value.status) }} · 标题 {{ conflictSnapshot.value.title || conflictSnapshot.value.invoice_number }}</p>
+      <section
+        v-if="section === 'payments' && can('expense.claim.read')"
+        class="expense-panel"
+      >
+        <h2>
+          项目费用参与人
+        </h2>
+        <p>
+          项目费用参与资格由项目工作区按项目范围维护；报销侧只提供查询与跳转入口。
+        </p>
+        <div class="expense-actions">
+          <input v-model="keyword" maxlength="128" placeholder="输入项目关键词" aria-label="项目关键词">
+          <button type="button" class="expense-button" @click="searchProjects">
+            查询项目选项
+          </button>
+        </div>
+        <p v-if="!projectOptions.length">
+          暂无已查询项目选项。
+        </p>
+        <ul v-else>
+          <li v-for="option in projectOptions" :key="option.project_id">
+            {{ option.project_id }} / {{ option.project_name || '名称待确认' }}
+            <button type="button" class="expense-button" @click="openProjectExpenseParticipants(option)">
+              维护费用参与人
+            </button>
+          </li>
+        </ul>
+      </section>
+      <div v-if="fieldErrors.length" role="alert">
+        <button type="button" v-for="field in fieldErrors" :key="field.field" class="expense-button" @click="focusValidation(field.field)">
+          {{ field.message }}
+        </button>
+        <span v-if="validationHint">{{ validationHint }}</span>
+      </div>
+      <p v-if="conflictSnapshot" role="status">
+        {{ conflictSnapshot.text }}
+      </p>
       <RecoveryPanel v-if="section === 'recovery'" :permissions="session?.permissions || []" />
       <ExpenseInbox v-if="section === 'messages'" />
       <ArchiveBorrowPanel v-if="section === 'archives'" :archives="archives" />
@@ -1588,31 +2424,40 @@ onBeforeUnmount(() => {
         <h2>
           我的工作区
         </h2>
-        <p>
-          <span
-            v-for="(label, key) in { my_claims: '我的单据', pending_approvals: '待审批', pending_payments: '待付款', invoice_review_required: '待复核发票', my_paid_this_month:'本月本人已付款' }"
-            :key="key"
-            class="expense-metric"
-          >
-            {{ label }}：{{ dashboard?.[key] ?? '不可用' }}
-          </span>
-        </p>
-        <h3>我的待办</h3>
-        <ul v-if="dashboard?.pending_tasks?.length">
-          <li v-for="task in dashboard.pending_tasks" :key="task.id">
-            {{ task.claim_no || task.claim_id }} · {{ approvalNodeLabel(task.node_code) }}
-            <button class="expense-button" @click="navigate('approvals')">进入审批中心</button>
-          </li>
-        </ul>
-        <p v-else>当前没有可办理的审批待办。</p>
+        <!-- 读取失败必须显示原因和重试，不能落成"没有待办"。 -->
+        <ErrorState v-if="dashboardError" :error="dashboardError" title="工作台加载失败" @retry="load" />
+        <template v-else>
+          <p class="expense-metrics" role="group" aria-label="工作台指标">
+            <template v-for="metric in dashboardMetrics" :key="metric.key">
+              <button v-if="sectionAllowed(metric.section)" type="button"
+                class="expense-metric expense-metric-link"
+                @click="navigate(metric.section)"
+              >
+                {{ metric.label }}：{{ dashboard?.[metric.key] ?? '不可用' }}
+              </button>
+              <span v-else class="expense-metric">{{ metric.label }}：{{ dashboard?.[metric.key] ?? '不可用' }}</span>
+            </template>
+          </p>
+          <h3>我的待办</h3>
+          <ul v-if="dashboard?.pending_tasks?.length">
+            <li v-for="task in dashboard.pending_tasks" :key="task.id">
+              {{ task.claim_no || task.claim_id }} · {{ approvalNodeLabel(task.node_code) }}
+              <button type="button" class="expense-button" @click="navigate('approvals')">进入审批中心</button>
+            </li>
+          </ul>
+          <p v-else-if="dashboard">当前没有可办理的审批待办。</p>
+        </template>
+      </section>
+      <!-- 刷新后找回：任务号和文档ID不随刷新丢失，用户不必重新上传。 -->
+      <section v-if="section === 'invoices' && (recentTask.parse || recentTask.document)" class="expense-panel" aria-label="找回上次上传与解析">
+        <h2>找回上次上传与解析</h2>
+        <p>刷新页面后任务号和文档号仍保留在本机；继续查询不会重新上传，也不会重复发起解析。</p>
         <div class="expense-actions">
-          <button
-            v-for="entry in sections.slice(1).filter((row) => can(row[2]))"
-            :key="entry[0]"
-            class="expense-button"
-            @click="navigate(entry[0])"
-          >
-            {{ entry[1] }}
+          <button v-if="recentTask.document" type="button" class="expense-button" @click="resumeRecentDocument">
+            读取最近上传的原件（{{ savedAtLabel(recentTask.document.saved_at) }}）
+          </button>
+          <button v-if="recentTask.parse" type="button" class="expense-button" @click="resumeParseTask">
+            继续查询上次解析任务
           </button>
         </div>
       </section>
@@ -1633,27 +2478,36 @@ onBeforeUnmount(() => {
         <p>可拖入1至20张原件，每份不超过20MiB。PDF/OFD可解析候选；图片请人工录入。人工核验不代表税务自动验真。</p>
         <ul v-if="uploadBatch.length" aria-live="polite"><li v-for="(file,index) in uploadBatch" :key="index">
           {{ file.name }} · {{ {WAITING:'等待',UPLOADING:'上传中',READY:'已就绪',UNKNOWN:'结果待确认',FAILED:'失败'}[file.status] }}
-          <button v-if="file.document_id" class="expense-button" @click="documentID=file.document_id; readDocument()">读取此原件</button>
+          <button type="button" v-if="file.document_id" class="expense-button" @click="documentID=file.document_id; readDocument()">读取此原件</button>
         </li></ul>
-        <label>
-          文档ID
-          <input v-model="documentID" placeholder="上传后的文档ID">
-        </label>
+        <div class="expense-option-field">
+          <span>原件文档（上传后自动回填；也可按文件名选择已上传原件）</span>
+          <BusinessOptionPicker
+            v-model="documentID"
+            path="/invoice-document-options"
+            purpose="reimbursement.invoice.original"
+            object-label="原件文档"
+            :current-label="documentLabel"
+            :disabled="saving || batchBusy || !!pending"
+            aria-label="选择原件文档"
+          />
+          <small v-if="documentLabel">本次上传：{{ documentLabel }}</small>
+        </div>
         <div class="expense-actions">
-          <button class="expense-button" :disabled="saving || !documentID" @click="parseDocument">
+          <button type="button" class="expense-button" :disabled="saving || !documentID" @click="parseDocument">
             发起解析
           </button>
-          <button class="expense-button" :disabled="!documentID" @click="readDocument">
+          <button type="button" class="expense-button" :disabled="!documentID" @click="readDocument">
             查询原件状态
           </button>
-          <button
+          <button type="button"
             class="expense-button"
             :disabled="saving || !!pending || !documentID"
             @click="prepareManualInvoice()"
           >
             人工复核 / 拆分多票
           </button>
-          <button v-if="parseRun" class="expense-button" @click="refreshParse">
+          <button type="button" v-if="parseRun" class="expense-button" @click="refreshParse">
             查询解析状态
           </button>
         </div>
@@ -1662,16 +2516,20 @@ onBeforeUnmount(() => {
             解析任务 {{ parseRun.id }} · {{ statusLabel(parseRun.status) }} · 已尝试 {{ parseRun.attempt ?? 0 }} 次
           </p>
           <p v-if="documentStatus">
-            文档状态：{{ documentStatus.status }}
+            文档状态：{{ statusLabel(documentStatus.status) }}
           </p>
           <ul>
             <li v-for="issue in documentStatus?.detail?.parse_issues || []" :key="issue">
               {{ issue }}
             </li>
           </ul>
-          <p v-if="parseRun.last_error">
-            处理失败原因：{{ parseRun.last_error }}
+          <p v-if="parseRun.last_error" role="alert">
+            处理失败：{{ failureMessage(parseRun.last_error) }}
           </p>
+          <button v-if="parseRun.last_error || parseRun.status === 'FAILED'" type="button"
+            class="expense-button" :disabled="saving || !!pending || !documentID" @click="parseDocument">
+            重新发起解析
+          </button>
         </div>
         <p>
           解析仅提取字段；人工复核、外部税务查验分别显示。
@@ -1683,8 +2541,12 @@ onBeforeUnmount(() => {
         <h3>当前原件解析任务</h3>
         <p>文档 {{ documentID }} · 任务 {{ parseRun.id }} · {{ statusLabel(parseRun.status) }}
           · 已尝试 {{ parseRun.attempt ?? 0 }} 次</p>
-        <p v-if="parseRun.last_error" role="alert">{{ parseRun.last_error }}</p>
-        <button class="expense-button" @click="refreshParse">刷新任务与原件</button>
+        <p v-if="parseRun.last_error" role="alert">处理失败：{{ failureMessage(parseRun.last_error) }}</p>
+        <button type="button" class="expense-button" @click="refreshParse">刷新任务与原件</button>
+        <button v-if="parseRun.last_error || parseRun.status === 'FAILED'" type="button"
+          class="expense-button" :disabled="saving || !!pending || !documentID" @click="parseDocument">
+          重新发起解析
+        </button>
       </section>
       <section v-if="section === 'invoices' && documentStatus" class="expense-panel">
         <h2>
@@ -1697,22 +2559,22 @@ onBeforeUnmount(() => {
           原件 {{ documentStatus.id || documentStatus.document_id }} · 文件 {{ documentStatus.file_id }} · 候选 {{ parsedCandidates.length }} 组
         </p>
         <div class="expense-table">
-          <table>
+          <table class="expense-table-body">
             <thead>
               <tr>
-                <th>
+                <th scope="col">
                   候选号码
                 </th>
-                <th>
+                <th scope="col">
                   日期
                 </th>
-                <th>
+                <th scope="col">
                   票面总额
                 </th>
-                <th>
+                <th scope="col">
                   分组 / 缺失原因
                 </th>
-                <th>
+                <th scope="col">
                   操作
                 </th>
               </tr>
@@ -1737,7 +2599,7 @@ onBeforeUnmount(() => {
                   </ul>
                 </td>
                 <td>
-                  <button
+                  <button type="button"
                     class="expense-button"
                     :disabled="saving || !!pending"
                     @click="prepareManualInvoice(candidate)"
@@ -1754,7 +2616,7 @@ onBeforeUnmount(() => {
             </tbody>
           </table>
         </div>
-        <button
+        <button type="button"
           v-if="can('expense.invoice.upload')"
           class="expense-button"
           :disabled="saving || !!pending"
@@ -1805,16 +2667,16 @@ onBeforeUnmount(() => {
               原始字段候选与来源（仅供辅助）
             </summary>
             <div class="expense-table">
-              <table>
+              <table class="expense-table-body">
                 <thead>
                   <tr>
-                    <th>
+                    <th scope="col">
                       字段
                     </th>
-                    <th>
+                    <th scope="col">
                       候选值
                     </th>
-                    <th>
+                    <th scope="col">
                       来源
                     </th>
                   </tr>
@@ -1829,7 +2691,7 @@ onBeforeUnmount(() => {
                         {{ candidateFields[field] || field }}
                       </td>
                       <td>
-                        {{ value.value || value.raw_value || '缺失' }}
+                        {{ candidateValue(field, value) }}
                       </td>
                       <td>
                         <span v-for="(source, si) in value.sources || []" :key="si">
@@ -1842,7 +2704,7 @@ onBeforeUnmount(() => {
               </table>
             </div>
           </details>
-          <button
+          <button type="button"
             class="expense-button primary"
             :disabled="!manualInvoiceForm.amount"
             @click="createManualInvoice"
@@ -1869,7 +2731,7 @@ onBeforeUnmount(() => {
       </section>
       <section v-if="section === 'approvals'" class="expense-panel">
         <nav class="expense-status-tabs" aria-label="审批线路">
-          <button v-for="(label,key) in {ALL:'全部线路',TECHNICAL:'技术线',SALES:'销售线'}" :key="key"
+          <button type="button" v-for="(label,key) in {ALL:'全部线路',TECHNICAL:'技术线',SALES:'销售线'}" :key="key"
             class="expense-button" :aria-pressed="listFilters.route_type === (key==='ALL'?'':key)"
             @click="listFilters.route_type=key==='ALL'?'':key;applyFilters()">{{ label }}</button>
         </nav>
@@ -1891,14 +2753,7 @@ onBeforeUnmount(() => {
             </option>
           </select>
         </label>
-        <label>
-          审批说明
-          <textarea v-model="approvalReason" />
-        </label>
-        <label>
-          转交主体
-          <input v-model="transferSubject" placeholder="仅用于允许转交的任务">
-        </label>
+        <p>审批动作、原因与二次确认在下方任务详情内完成；列表只用于定位待办。</p>
       </section>
       <section v-if="section === 'policies'" class="expense-panel">
         <h2>
@@ -1973,8 +2828,9 @@ onBeforeUnmount(() => {
                 v-if="field.type === 'boolean'"
                 v-model="policyForm[field.key]"
                 type="checkbox"
+                :data-field="field.key"
               >
-              <select v-else-if="field.type === 'select'" v-model="policyForm[field.key]">
+              <select v-else-if="field.type === 'select'" v-model="policyForm[field.key]" :data-field="field.key">
                 <option value="">
                   请选择
                 </option>
@@ -1987,6 +2843,7 @@ onBeforeUnmount(() => {
                 v-model="policyForm[field.key]"
                 :type="field.type === 'date' ? 'date' : field.type === 'number' ? 'number' : 'text'"
                 :inputmode="field.type === 'money' ? 'decimal' : undefined"
+                :data-field="field.key"
               >
             </label>
           </div>
@@ -2013,16 +2870,16 @@ onBeforeUnmount(() => {
             发布前字段差异（{{ policyChanges.length }}项）
           </summary>
           <div class="expense-table">
-            <table>
+            <table class="expense-table-body">
               <thead>
                 <tr>
-                  <th>
+                  <th scope="col">
                     字段
                   </th>
-                  <th>
+                  <th scope="col">
                     原版本
                   </th>
-                  <th>
+                  <th scope="col">
                     当前草稿
                   </th>
                 </tr>
@@ -2044,7 +2901,7 @@ onBeforeUnmount(() => {
           </div>
         </details>
         <div class="expense-actions">
-          <button
+          <button type="button"
             v-if="can('expense.config.manage')"
             class="expense-button"
             :disabled="saving || !!pending || policyPublished"
@@ -2052,14 +2909,14 @@ onBeforeUnmount(() => {
           >
             保存政策草稿
           </button>
-          <button
+          <button type="button"
             v-if="policyID && can('expense.config.manage')"
             class="expense-button"
             @click="clonePolicy"
           >
             基于此版本新建草稿
           </button>
-          <button
+          <button type="button"
             v-if="can('expense.policy.publish')"
             class="expense-button primary"
             :disabled="saving || !policyID || !!pending || policyLifecycleStatus !== 'DRAFT'"
@@ -2083,7 +2940,7 @@ onBeforeUnmount(() => {
             退休或替换原因 *
             <textarea v-model="policyLifecycleReason" maxlength="1000" />
           </label>
-          <button
+          <button type="button"
             class="expense-button"
             :disabled="!policyLifecycleReason.trim()"
             @click="retirePolicy"
@@ -2108,7 +2965,7 @@ onBeforeUnmount(() => {
           <p v-if="!replacementCandidates.length">
             当前页没有同类草稿。可翻页查找，或先保存新草稿后再选择旧版本进行替换。
           </p>
-          <button
+          <button type="button"
             class="expense-button primary"
             :disabled="!replacementPolicyID || !policyLifecycleReason.trim()"
             @click="replacePolicy"
@@ -2120,9 +2977,14 @@ onBeforeUnmount(() => {
       <section v-if="['claims','invoices','approvals','payments','archives','analytics'].includes(section) && workspace !== 'invoice-upload'" class="expense-panel">
         <h2>{{ workspace === 'invoice-abnormal' ? '异常票据处理' : '查询与筛选' }}</h2>
         <p v-if="workspace === 'invoice-abnormal'">集中处理未确认、查验不一致及待关闭风险；进入详情查看真实来源和处理记录。</p>
-        <div v-if="section === 'claims' && workspace !== 'submitted'" class="expense-tabs" role="group" aria-label="报销状态">
-          <button v-for="(label,key) in { '':'全部',DRAFT:'草稿',IN_APPROVAL:'审批中',APPROVED_PENDING_PAYMENT:'待付款',PAID:'已付款',RETURNED:'已退回' }"
-            :key="key" class="expense-button" :aria-pressed="listFilters.status===key"
+        <p v-else-if="section === 'invoices'">
+          上传、人工录入与票面复核都在本页完成，下面是已上传票据台账；未确认或查验不一致的票据请到异常发票池处理。
+          <button v-if="sectionAllowed('invoice-abnormal')" type="button" class="expense-button" @click="navigate('invoice-abnormal')">
+            打开异常发票池
+          </button>
+        </p>
+        <div v-if="section === 'claims'" class="expense-tabs" role="group" aria-label="报销状态">
+          <button type="button" v-for="(label,key) in statusTabs" :key="key" class="expense-button" :aria-pressed="listFilters.status===key"
             @click="listFilters.status=key;applyFilters()">{{ label }}</button>
         </div>
         <form class="expense-grid" @submit.prevent="applyFilters">
@@ -2141,66 +3003,81 @@ onBeforeUnmount(() => {
             <label>票面复核<select v-model="listFilters.review_status"><option value="">全部</option>
               <option value="PENDING">待复核</option><option value="CONFIRMED">已确认</option></select></label>
           </template>
-          <div class="expense-actions"><button class="expense-button primary" :disabled="loading">查询</button>
+          <div class="expense-actions"><button type="button" class="expense-button primary" :disabled="loading">查询</button>
             <button type="button" class="expense-button" @click="resetFilters">重置</button></div>
         </form>
         <p>日期按北京时间业务日查询。仅筛选当前账号可见对象，不授予额外数据权限。</p>
       </section>
       <InvoiceClassificationEvidence v-if="['invoices','claims'].includes(section)" :rows="invoiceSuggestions" />
-      <section v-if="section === 'analytics' && statistics" class="expense-panel">
+      <section v-if="section === 'analytics'" class="expense-panel">
         <h2>个人与项目费用看板</h2>
-        <p>范围：{{ statistics.date_from }} 至 {{ statistics.date_to }}；按单据创建月归属的当前已付净额，已全额冲正的历史付款不重复计入。</p>
-        <p>退回率按当前筛选范围内有真实提交事实的去重单据计算；同单多轮退回只计一次，撤回与作废不计退回，差旅异常单独统计。</p>
-        <div class="expense-metrics">
-          <span class="expense-metric">单据 {{ statistics.total_count }}</span>
-          <span class="expense-metric">超标 {{ statistics.over_standard_count }}</span>
-          <span class="expense-metric">差旅异常 {{ statistics.exception_count }}</span>
-          <span class="expense-metric">已提交单据 {{ statistics.submitted_count ?? '未提供' }}</span>
-          <span class="expense-metric">实际退回单据 {{ statistics.returned_count ?? '未提供' }}</span>
-          <span class="expense-metric">实际退回率 {{ returnRateLabel(statistics.return_rate_basis_points) }}</span>
-          <span class="expense-metric">超标占比 {{ statistics.total_count ? (statistics.over_standard_count*100/statistics.total_count).toFixed(1) : '0.0' }}%</span>
-        </div>
-        <article v-for="group in [{key:'monthly',field:'month',title:'月度趋势'},{key:'by_type',field:'claim_type',title:'类型分布'},{key:'by_project',field:'project_id',title:'项目成本'}]" :key="group.key" class="expense-item">
-          <h3>{{ group.title }}</h3>
-          <p v-if="!statistics[group.key]?.length">当前范围没有数据。</p>
-          <div v-for="row in statistics[group.key]" :key="row[group.field]" class="expense-chart-row">
-            <span>{{ group.key==='by_type' ? claimTypes[row.claim_type] || '历史未分类' : row[group.field] }}</span>
-            <meter min="0" max="100" :value="statisticWidth(row,statistics[group.key])" :aria-label="`${row[group.field]}金额占最大分组比例`" />
-            <span>{{ formatMinor(row.amount_minor) }} 元 · {{ row.count }} 单</span>
+        <!-- 看板读取失败要显示原因和重试，不能让面板整块消失。 -->
+        <ErrorState v-if="analyticsError" :error="analyticsError" title="看板加载失败" @retry="load" />
+        <EmptyState v-else-if="!statistics" title="看板数据尚未读取"
+          description="点击「刷新」读取当前范围内的已付款统计。" />
+        <template v-else>
+          <p>范围：{{ statistics.date_from }} 至 {{ statistics.date_to }}；按单据创建月归属的当前已付净额，已全额冲正的历史付款不重复计入。</p>
+          <p>退回率按当前筛选范围内有真实提交事实的去重单据计算；同单多轮退回只计一次，撤回与作废不计退回，差旅异常单独统计。</p>
+          <div class="expense-metrics">
+            <span class="expense-metric">单据 {{ statistics.total_count }}</span>
+            <span class="expense-metric">超标 {{ statistics.over_standard_count }}</span>
+            <span class="expense-metric">差旅异常 {{ statistics.exception_count }}</span>
+            <span class="expense-metric">已提交单据 {{ statistics.submitted_count ?? '未提供' }}</span>
+            <span class="expense-metric">实际退回单据 {{ statistics.returned_count ?? '未提供' }}</span>
+            <span class="expense-metric">实际退回率 {{ returnRateLabel(statistics.return_rate_basis_points) }}</span>
+            <span class="expense-metric">超标占比 {{ statistics.total_count ? (statistics.over_standard_count*100/statistics.total_count).toFixed(1) : '0.0' }}%</span>
           </div>
-        </article>
+          <article v-for="group in [{key:'monthly',field:'month',title:'月度趋势'},{key:'by_type',field:'claim_type',title:'类型分布'},{key:'by_project',field:'project_id',title:'项目成本'}]" :key="group.key" class="expense-item">
+            <h3>{{ group.title }}</h3>
+            <p v-if="!statistics[group.key]?.length">当前范围没有数据。</p>
+            <div v-for="row in statistics[group.key]" :key="row[group.field]" class="expense-chart-row">
+              <span>{{ group.key==='by_type' ? claimTypes[row.claim_type] || '历史未分类' : row[group.field] }}</span>
+              <meter min="0" max="100" :value="statisticWidth(row,statistics[group.key])" :aria-label="`${row[group.field]}金额占最大分组比例`" />
+              <span>{{ formatMinor(row.amount_minor) }} 元 · {{ row.count }} 单</span>
+            </div>
+          </article>
+        </template>
       </section>
-      <section v-if="section === 'archives' && archiveProjects" class="expense-panel">
+      <section v-if="section === 'archives'" class="expense-panel">
         <h2>项目归档包</h2><p>按实际封存日期筛选；同一单据多个档案版本不重复累计金额，金额为当前已付净额。</p>
-        <div class="expense-table"><table><thead><tr><th>项目</th><th>报销单数</th><th>当前净额</th><th>最近封存</th><th>操作</th></tr></thead>
+        <!-- 归档聚合失败显示原因与重试，不再整块消失。 -->
+        <ErrorState v-if="archiveProjectsError" :error="archiveProjectsError" title="项目归档包加载失败" @retry="load" />
+        <div v-else-if="archiveProjects" class="expense-table"><table class="expense-table-body"><thead><tr><th scope="col">项目</th><th scope="col">报销单数</th><th scope="col">当前净额</th><th scope="col">最近封存</th><th scope="col">操作</th></tr></thead>
           <tbody><tr v-for="project in archiveProjects.items" :key="project.project_id"><td>{{ project.project_id }}</td><td>{{ project.claim_count }}</td>
             <td>{{ formatMinor(project.amount_minor) }}元</td><td>{{ formatBusinessDateTime(project.last_archived_at) }}</td>
-            <td><button class="expense-button" @click="openArchiveProject(project.project_id)">查看项目档案</button></td></tr>
+            <td><button type="button" class="expense-button" @click="openArchiveProject(project.project_id)">查看项目档案</button></td></tr>
             <tr v-if="!archiveProjects.items.length"><td colspan="5">当前范围没有已封存项目档案。</td></tr></tbody></table></div>
       </section>
       <section v-if="section !== 'dashboard' && !['invoice-upload','analytics','recovery','messages'].includes(workspace)" class="expense-panel">
         <div v-if="section === 'invoices' && can('expense.claim.create')" class="expense-actions">
           <span>已选择 {{ selectedInvoiceIDs.length }} 张</span>
-          <button class="expense-button primary" :disabled="!selectedInvoiceIDs.length || saving || !!pending" @click="createDraftFromInvoices">从已确认发票生成费用草稿</button>
+          <button type="button" class="expense-button primary" :disabled="!selectedInvoiceIDs.length || saving || !!pending" @click="createDraftFromInvoices">从已确认发票生成费用草稿</button>
         </div>
-        <div class="expense-table">
-          <table>
+        <p v-if="section === 'invoices' && can('expense.claim.create')">
+          只有「已人工复核」且未被其他单据占用的本人票据可以勾选生成费用；其余票据请先复核票面。
+        </p>
+        <!-- 失败落在列表位置并带重试；空列表才说"暂无记录"。 -->
+        <ErrorState v-if="listError" :error="listError" title="列表加载失败" @retry="load" />
+        <EmptyState v-else-if="!loading && !rows.length" title="当前权限范围内暂无记录"
+          description="调整筛选条件，或确认当前账号的数据范围后再试。" />
+        <div v-else class="expense-table">
+          <table class="expense-table-body">
             <thead>
               <tr>
-                <th v-if="section === 'invoices' && can('expense.claim.create')">选择</th>
-                <th v-if="['claims','payments','archives'].includes(section) && can('expense.archive.export')">导出选择</th>
-                <th>
+                <th v-if="section === 'invoices' && can('expense.claim.create')" scope="col">选择</th>
+                <th v-if="['claims','payments','archives'].includes(section) && can('expense.archive.export')" scope="col">导出选择</th>
+                <th scope="col">
                   编号 / 标题
                 </th>
-                <th>
+                <th scope="col">
                   状态 / 版本
                 </th>
-                <th>
-                  {{ section === 'invoices' ? '票面金额' : '金额 / 任务' }}
+                <th scope="col">
+                  {{ listAmountLabel }}
                 </th>
-                <th>{{ section === 'invoices' ? '类型 / 开票日期' : '类型 / 报销人' }}</th>
-                <th>{{ section === 'invoices' ? '销售方税号 / 核验' : '当前节点 / 异常' }}</th>
-                <th>创建时间</th><th>操作</th>
+                <th scope="col">{{ section === 'invoices' ? '类型 / 开票日期' : section === 'approvals' ? '类型 / 受理人' : '类型 / 报销人' }}</th>
+                <th v-if="listHasNodeColumn" scope="col">{{ listNodeLabel }}</th>
+                <th scope="col">创建时间</th><th scope="col">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -2210,6 +3087,7 @@ onBeforeUnmount(() => {
                 <td v-if="section === 'invoices' && can('expense.claim.create')">
                   <input v-model="selectedInvoiceIDs" type="checkbox" :value="row.id"
                     :disabled="row.review_status !== 'CONFIRMED' || !['AVAILABLE',''].includes(row.reservation_state || '')"
+                    :title="invoiceSelectHint(row) || undefined"
                     :aria-label="`选择发票${row.invoice_number || row.id}`">
                 </td>
                 <td>
@@ -2219,17 +3097,19 @@ onBeforeUnmount(() => {
                   </small>
                 </td>
                 <td>
-                  {{ row.lifecycle_status ? statusLabel(row.lifecycle_status) : row.status || row.review_status || (row.published ? '已发布' : '草稿') }}
+                  {{ row.lifecycle_status ? statusLabel(row.lifecycle_status)
+                    : (row.status || row.review_status) ? statusLabel(row.status || row.review_status)
+                      : (row.published ? '已发布' : '草稿') }}
                   <small>
                     版本 {{ row.version }}
                   </small>
                 </td>
                 <td>
-                  {{ section === 'invoices' ? formatMinor(row.total_minor) : section === 'approvals' ? `第 ${row.round} 轮` : formatMinor(row.payable_minor || row.limit_minor) }}
+                  {{ section === 'invoices' ? moneyText(row.total_minor) : section === 'approvals' ? `第 ${row.round} 轮` : moneyText(row.payable_minor || row.limit_minor) }}
                 </td>
-                <td>{{ section === 'invoices' ? `${row.invoice_type || '待确认'} / ${row.invoice_date || '日期待确认'}` : `${claimTypes[row.claim_type] || '历史未分类'} / ${row.applicant_subject_id || row.assignee_subject_id || '按任务可见'}` }}</td>
+                <td>{{ section === 'invoices' ? `${row.invoice_type || '待确认'} / ${row.invoice_date || '日期待确认'}` : `${claimTypes[row.claim_type] || '历史未分类'} / ${row.applicant_subject_id || row.assignee_subject_id || '本任务范围未提供'}` }}</td>
                 <td v-if="section === 'invoices'">{{ row.seller_tax_id || '税号待核对' }} · {{ statusLabel(row.verification_status) }}</td>
-                <td v-else>{{ row.current_approval_node || row.node_code || '—' }}
+                <td v-else-if="listHasNodeColumn">{{ row.current_approval_node || row.node_code ? approvalNodesLabel(row.current_approval_node || row.node_code) : '—' }}
                   <span v-if="section==='approvals' && row.urgency==='OVERDUE'" class="expense-flag danger">待办超48小时</span>
                   <span v-if="row.has_over_standard" class="expense-flag">超标</span>
                   <span v-if="row.has_exception" class="expense-flag danger">异常</span>
@@ -2237,31 +3117,17 @@ onBeforeUnmount(() => {
                 <td>{{ formatBusinessDateTime(row.created_at) }}
                   <small v-if="section==='approvals' && row.pending_since">当前待办起点 {{ formatBusinessDateTime(row.pending_since) }}</small></td>
                 <td class="expense-actions">
-                  <button
+                  <button type="button"
                     v-if="section === 'invoices'"
                     class="expense-button"
                     @click="openInvoice(row.id)"
                   >
                     复核详情
                   </button>
-                  <template v-else-if="section === 'approvals'">
-                    <button class="expense-button" @click="openApproval(row.id)">
-                      查看固定快照
-                    </button>
-                    <button
-                      v-for="action in (row.allowed_actions || [])"
-                      :key="action"
-                      class="expense-button"
-                      :disabled="saving || !!pending"
-                      @click="approve(row, action)"
-                    >
-                      {{ { APPROVE: '同意', RETURN: '退回', TRANSFER: '转交',ADDSIGN:'加签' }[action] || action }}
-                    </button>
-                    <span v-if="!row.allowed_actions?.length">
-                      服务端未授予动作
-                    </span>
-                  </template>
-                  <button
+                  <button type="button" v-else-if="section === 'approvals'" class="expense-button" @click="openApproval(row.id)">
+                    查看任务与办理
+                  </button>
+                  <button type="button"
                     v-else-if="section === 'policies'"
                     class="expense-button"
                     :disabled="saving || !!pending"
@@ -2269,45 +3135,36 @@ onBeforeUnmount(() => {
                   >
                     查看版本
                   </button>
-                  <button v-else class="expense-button" @click="openClaim(row.id)">
+                  <button type="button" v-else class="expense-button" @click="openClaim(row.id)">
                     查看详情
                   </button>
-                </td>
-              </tr>
-              <tr v-if="!loading && !error && !rows.length">
-                <td :colspan="section === 'invoices' && can('expense.claim.create') ? 8 : 7">
-                  当前权限范围内暂无记录
                 </td>
               </tr>
             </tbody>
           </table>
         </div>
-        <footer class="expense-actions">
-          <button v-if="['claims','payments','archives'].includes(section) && can('expense.archive.export')" class="expense-button"
+        <footer v-if="!listError" class="expense-actions">
+          <button type="button" v-if="['claims','payments','archives'].includes(section) && can('expense.archive.export')" class="expense-button"
             :disabled="!selectedClaimIDs.length || saving || !!pending" @click="exportSelectedClaims">导出所选 {{ selectedClaimIDs.length }} 张</button>
-          <span>
-            共 {{ total }} 条 · 第 {{ page }} 页
-          </span>
-          <label>每页<select v-model.number="pageSize" @change="applyFilters"><option v-for="size in [10,20,50,100]" :key="size" :value="size">{{ size }}</option></select></label>
-          <button class="expense-button" :disabled="page <= 1 || loading" @click="page--; load()">
-            上一页
-          </button>
-          <button
-            class="expense-button"
-            :disabled="page * pageSize >= total || loading"
-            @click="page++; load()"
-          >
-            下一页
-          </button>
+          <PaginationBar label="报销列表分页" :page="page" :total="total" :page-size="pageSize"
+            :page-size-options="[10, 20, 50, 100]" :loading="loading"
+            @change="nextPage => { page = nextPage; load() }"
+            @change-page-size="nextSize => { pageSize = nextSize; applyFilters() }" />
         </footer>
       </section>
       <ApprovalRoundsPanel v-if="approvalTask && section === 'approvals'" :claim-id="approvalTask.claim_id" />
-      <section v-if="approvalTask && section === 'approvals'" class="expense-panel">
-        <h2>
-          第 {{ approvalTask.round }} 轮 · {{ approvalNodeLabel(approvalTask.node_role || approvalTask.node_code) }}
-        </h2>
+      <section v-if="approvalTask && section === 'approvals'" ref="detailPanel" class="expense-panel">
+        <header class="expense-actions">
+          <h2>
+            第 {{ approvalTask.round }} 轮 · {{ approvalNodeLabel(approvalTask.node_role || approvalTask.node_code) }}
+          </h2>
+          <button type="button" class="expense-button" @click="backToList('approval')">
+            返回待办列表
+          </button>
+        </header>
         <p>
           固定快照版本 {{ approvalTask.snapshot?.version }} · 状态 {{ statusLabel(approvalTask.status) }}
+          · 待办人 {{ approvalTask.assignee || '以服务端当前受理人为准' }}
         </p>
         <p v-if="approvalTask.snapshot?.scope_limited">
           仅展示本任务覆盖项目；完整票据和其他项目分摊不在本任务范围。
@@ -2315,31 +3172,28 @@ onBeforeUnmount(() => {
         <template v-if="!approvalTask.snapshot?.scope_limited && can('expense.invoice.read')">
           <h3>审批关联票据影像</h3>
           <div class="expense-actions" v-for="item in approvalTask.snapshot?.items || []" :key="item.id">
-            <button v-for="usage in item.invoice_usages || []" :key="usage.invoice_id" class="expense-button" @click="previewApprovalInvoice(usage.invoice_id)">读取票据 {{ usage.invoice_id }} 原件</button>
+            <button type="button" v-for="usage in item.invoice_usages || []" :key="usage.invoice_id" class="expense-button" @click="previewApprovalInvoice(usage.invoice_id)">读取票据 {{ usage.invoice_id }} 原件</button>
           </div>
-          <button v-for="source in invoiceRows" :key="source.id || source.file_id" class="expense-button" @click="readInvoiceOriginal(source)">{{ source.filename || source.file_id }} 查看影像</button>
-          <div data-invoice-preview class="expense-original-container">
-            <iframe v-if="originalPreview" :src="originalPreview" class="expense-original-preview" title="审批受控票据原件" />
-            <img v-else-if="['image/png','image/jpeg'].includes(originalMedia) && originalDownload" :src="originalDownload" alt="审批受控发票影像" class="expense-original-image">
-          </div>
+          <button type="button" v-for="source in invoiceRows" :key="source.id || source.file_id" class="expense-button" @click="readInvoiceOriginal(source)">{{ source.filename || source.file_id }} 查看影像</button>
+          <InvoiceOriginalViewer :preview="originalPreview" :download="originalDownload" :media="originalMedia" title="审批受控票据原件" alt="审批受控发票影像" />
         </template>
         <div class="expense-table">
-          <table>
+          <table class="expense-table-body">
             <thead>
               <tr>
-                <th>
+                <th scope="col">
                   费用类型
                 </th>
-                <th>
+                <th scope="col">
                   发生日
                 </th>
-                <th>
+                <th scope="col">
                   范围内金额
                 </th>
-                <th>
+                <th scope="col">
                   项目分摊
                 </th>
-                <th>
+                <th scope="col">
                   追加原因
                 </th>
               </tr>
@@ -2352,7 +3206,7 @@ onBeforeUnmount(() => {
                   <p v-if="item.finance_review_required">财务重点复核：{{ item.review_hints?.join('、') }}</p>
                   <template v-if="!approvalTask.snapshot?.scope_limited">
                     <p v-if="item.reason">用途与说明：{{ item.reason }}</p>
-                    <button v-for="file in item.no_invoice_evidence_file_ids || []" :key="file" class="expense-button"
+                    <button type="button" v-for="file in item.no_invoice_evidence_file_ids || []" :key="file" class="expense-button"
                       @click="downloadClaimEvidence(file,approvalTask.claim_id)">查看独立证明 {{ file }}</button>
                   </template>
                 </td>
@@ -2378,13 +3232,52 @@ onBeforeUnmount(() => {
       <section
         v-if="approvalTask && section === 'approvals'"
         class="expense-panel"
+        aria-label="办理当前审批任务"
+      >
+        <h3>办理当前审批任务</h3>
+        <label>
+          审批说明（退回、转交、加签时必须填写）
+          <textarea v-model="approvalReason" maxlength="2000" data-field="approval_reason" />
+        </label>
+        <label>
+          转交 / 加签目标主体
+          <input v-model="transferSubject" maxlength="128" data-field="transfer_subject" placeholder="仅用于允许转交或加签的任务">
+        </label>
+        <div class="expense-actions">
+          <button v-for="action in approvalTask.allowed_actions || []" :key="action" type="button"
+            class="expense-button" :disabled="saving || !!pending" @click="requestApprovalAction(action)">
+            {{ approvalActionLabel(action) }}
+          </button>
+        </div>
+        <p v-if="!(approvalTask.allowed_actions || []).length">
+          当前任务没有可执行动作；请核对任务状态、轮次和受理人。
+        </p>
+        <div v-if="pendingApprovalAction" class="expense-alert warning" role="alertdialog" aria-label="确认审批动作">
+          <p>
+            确认对第 {{ approvalTask.round }} 轮「{{ approvalNodeLabel(approvalTask.node_role || approvalTask.node_code) }}」执行「{{ approvalActionLabel(pendingApprovalAction) }}」？
+          </p>
+          <p v-if="pendingApprovalAction === 'RETURN'">退回原因：{{ approvalReason.trim() || '未填写' }}</p>
+          <p v-if="['TRANSFER', 'ADDSIGN'].includes(pendingApprovalAction)">目标主体：{{ transferSubject.trim() }}</p>
+          <div class="expense-actions">
+            <button type="button" class="expense-button primary" :disabled="saving || !!pending" @click="confirmApprovalAction">
+              确认{{ approvalActionLabel(pendingApprovalAction) }}
+            </button>
+            <button type="button" class="expense-button" @click="cancelApprovalAction">
+              取消
+            </button>
+          </div>
+        </div>
+      </section>
+      <section
+        v-if="approvalTask && section === 'approvals'"
+        class="expense-panel"
         aria-label="审批转交历史"
       >
         <header class="expense-actions">
           <h2>
             审批与每跳转交历史
           </h2>
-          <button class="expense-button" :disabled="historyLoading" @click="loadApprovalHistory">
+          <button type="button" class="expense-button" :disabled="historyLoading" @click="loadApprovalHistory">
             {{ historyLoading ? '读取中…' : '刷新历史' }}
           </button>
         </header>
@@ -2398,7 +3291,7 @@ onBeforeUnmount(() => {
           <li v-for="entry in approvalHistory" :key="entry.id">
             <header>
               <strong>
-                {{ { TRANSFER: '转交', APPROVE: '同意', RETURN: '退回' }[entry.action] || entry.action }}
+                {{ { TRANSFER: '转交', APPROVE: '同意', RETURN: '退回', ADDSIGN: '加签' }[entry.action] || '动作已记录' }}
               </strong>
               <time>
                 {{ formatBusinessDateTime(entry.created_at) }}
@@ -2484,44 +3377,61 @@ onBeforeUnmount(() => {
       </section>
       <section
         v-if="section === 'claims' && (selected || can('expense.claim.create'))"
+        ref="detailPanel"
         class="expense-panel"
       >
-        <h2>
-          {{ selected ? `单据 ${selected.claim_no || selected.id}` : '新建草稿' }}
-        </h2>
+        <header class="expense-actions">
+          <h2>
+            {{ selected ? `单据 ${selected.claim_no || selected.id}` : '新建草稿' }}
+          </h2>
+          <button v-if="selected" type="button" class="expense-button" @click="backToList('claim')">
+            返回列表
+          </button>
+        </header>
         <p v-if="selected">
-          状态 {{ statusLabel(selected.status) }} · 版本 {{ selected.version }} · 服务端金额 {{ formatMinor(selected.payable_minor) }} 元
+          状态 {{ statusLabel(selected.status) }} · 版本 {{ selected.version }} · 应付金额 {{ formatMinor(selected.payable_minor) }} 元
+          <template v-if="selected.status !== 'DRAFT' && selected.status !== 'WITHDRAWN'">
+            · 第 {{ selected.current_round || selected.round || 1 }} 轮
+            <template v-if="selected.current_approval_node"> · 当前节点 {{ approvalNodesLabel(selected.current_approval_node) }}</template>
+          </template>
         </p>
+        <ApprovalRoundsPanel
+          v-if="selected && selected.status !== 'DRAFT' && selected.status !== 'WITHDRAWN'"
+          :key="`claim-rounds-${selected.id}`"
+          :claim-id="selected.id"
+        />
         <p v-if="selected?.invoice_date_warnings?.length" class="expense-alert warning">存在发票时效风险：{{ selected.invoice_date_warnings.map(row=>`${row.invoice_id}已开具${row.age_days}天`).join('；') }}。已冻结到当前审批快照。</p>
+        <p v-if="claimReadonlyReason" class="expense-alert warning">
+          {{ claimReadonlyReason }}
+        </p>
         <fieldset :disabled="!editable || saving || !!pending">
           <div class="expense-grid">
             <label>
               标题
-              <input v-model="draft.title" maxlength="200">
+              <input v-model="draft.title" maxlength="200" data-field="title" :aria-invalid="invalidField('title')">
             </label>
-            <label>报销类型<select v-model="draft.claim_type">
+            <label>报销类型<select v-model="draft.claim_type" data-field="claim_type" :aria-invalid="invalidField('claim_type')">
               <option v-if="!draft.claim_type" value="">历史未分类，请确认后选择</option>
               <option v-for="(label,key) in claimTypes" :key="key" :value="key">{{ label }}</option>
             </select></label>
-            <label>备注<textarea v-model="draft.remark" maxlength="2000" /></label>
-            <label>
-              组织ID
-              <select v-model="draft.org_id">
-                <option value="">
-                  选择组织
-                </option>
-                <option
-                  v-for="org in organizationOptions"
-                  :key="org"
-                  :value="org"
-                >
-                  {{ org }}
-                </option>
-              </select>
-            </label>
+            <label>备注<textarea v-model="draft.remark" maxlength="2000" data-field="remark" :aria-invalid="invalidField('remark')" /></label>
+            <div class="expense-option-field">
+              <span>费用组织</span>
+              <BusinessOptionPicker
+                v-model="draft.org_id"
+                path="/organization-options"
+                object-label="费用组织"
+                :current-label="organizationNames[draft.org_id] || ''"
+                :disabled="!editable || saving || !!pending"
+                :preload="editable"
+                aria-label="选择费用组织"
+                data-field="org_id"
+                :aria-invalid="invalidField('org_id')"
+              />
+            </div>
             <label>
               业务线路
-              <select v-model="draft.route_type">
+              <select v-model="draft.route_type" data-field="route_type" :aria-invalid="invalidField('route_type')">
                 <option value="TECHNICAL">
                   技术线
                 </option>
@@ -2531,10 +3441,10 @@ onBeforeUnmount(() => {
               </select>
             </label>
             <label>
-              付款主体ID
-              <select v-model="draft.finance_entity_id">
+              付款主体
+              <select v-model="draft.finance_entity_id" data-field="finance_entity_id" :aria-invalid="invalidField('finance_entity_id')">
                 <option value="">
-                  选择付款主体
+                  选择付款主体（按业务名称）
                 </option>
                 <option
                   v-for="entity in editorOptions?.finance_entities || []"
@@ -2546,24 +3456,25 @@ onBeforeUnmount(() => {
               </select>
             </label>
             <label>
-              收款档案ID
-              <select v-model="draft.payee_profile_id">
+              收款档案
+              <select v-model="draft.payee_profile_id" data-field="payee_profile_id" :aria-invalid="invalidField('payee_profile_id')">
                 <option value="">
-                  选择已审核收款档案
+                  选择本人已审核收款档案
                 </option>
                 <option
                   v-for="profile in editorOptions?.payee_profiles || []"
                   :key="profile.id"
                   :value="profile.id"
                 >
-                  {{ profile.account_ref }} · v{{ profile.version }}
+                  本人已审核收款档案 · 账户引用 {{ profile.account_ref }} · v{{ profile.version }}
                 </option>
               </select>
+              <small>只列出本人当前已审核的收款档案；实际付款仍由财务按批准快照核对。</small>
             </label>
           </div>
           <div class="expense-actions">
             <input v-model="keyword" aria-label="项目关键词" placeholder="搜索有费用资格的项目">
-            <button class="expense-button" @click="searchProjects">
+            <button type="button" class="expense-button" @click="searchProjects">
               查询项目选项
             </button>
           </div>
@@ -2573,28 +3484,43 @@ onBeforeUnmount(() => {
           <ClaimPreviewPanel :value="claimPreview" :busy="previewBusy" :error="previewError"
             :enabled="previewEnabled" :disabled="!selected || !editable || saving || !!pending" @refresh="refreshClaimPreview" />
           <article v-for="(item, index) in draft.items" :key="item.id" class="expense-item" :data-expense-index="index" tabindex="-1">
-            <InvoiceClassificationEvidence :rows="item.classification_evidence || []" saved />
-            <TravelFields v-model:value="item.travel_declaration" :disabled="!editable" />
-            <div class="expense-form-grid">
-              <label>费用性质<select v-model="item.expense_nature"><option value="ACTUAL">实际发生费用</option><option value="PREPAYMENT">预付费用（须政策允许及财务复核）</option></select></label>
-              <p v-if="item.expense_nature==='PREPAYMENT'">预付需说明用途并上传独立证明；没有有效预付政策时服务端拒绝提交，不产生借款或自动核销。</p>
-              <label>城市代码<input v-model="item.city_code" maxlength="6" placeholder="六位结构化城市代码"></label>
-              <label>交通分类<input v-model="item.transport_category" :list="`transport-${item.id}`" placeholder="选择已发布标准编码或输入">
-                <datalist :id="`transport-${item.id}`"><option v-for="value in standardChoices('transport_category',item.fee_type)" :key="value" :value="value" /></datalist></label>
-              <label>住宿分类<input v-model="item.accommodation_category" :list="`accommodation-${item.id}`" placeholder="选择已发布标准编码或输入">
-                <datalist :id="`accommodation-${item.id}`"><option v-for="value in standardChoices('accommodation_category',item.fee_type)" :key="value" :value="value" /></datalist></label>
-              <label>无票证明类型<select v-model="item.no_invoice_proof_type"><option value="">未选择</option><option value="PAYMENT_PROOF">支付证明</option><option value="SERVICE_CONFIRMATION">服务确认</option><option value="OTHER">其他证明</option></select></label>
-              <label>无票／预付独立证明（PDF / PNG / JPEG）<input type="file" accept=".pdf,.png,.jpg,.jpeg"
-                @change="uploadInvoice($event,'reimbursement.claim.evidence',`claimNoInvoice:${item.id}`)"></label>
-              <label>独立证明文件引用<input v-model="item.no_invoice_evidence_text" placeholder="上传后自动关联；引用仍由服务器校验"></label>
-            </div>
             <h3>
               费用 {{ index + 1 }}
             </h3>
+            <InvoiceClassificationEvidence :rows="item.classification_evidence || []" saved />
+            <TravelFields v-model:value="item.travel_declaration" :disabled="!editable" />
+            <div class="expense-form-grid">
+              <label>费用性质<select v-model="item.expense_nature" data-field="expense_nature" :aria-invalid="invalidField('expense_nature', index)"><option value="ACTUAL">实际发生费用</option><option value="PREPAYMENT">预付费用（须政策允许及财务复核）</option></select></label>
+              <p v-if="item.expense_nature==='PREPAYMENT'">预付需说明用途并上传独立证明；没有有效预付政策时服务端拒绝提交，不产生借款或自动核销。</p>
+              <label>城市代码<input v-model="item.city_code" maxlength="6" placeholder="六位结构化城市代码" data-field="city_code" :aria-invalid="invalidField('city_code', index)"></label>
+              <label>交通分类<input v-model="item.transport_category" :list="`transport-${item.id}`" placeholder="选择已发布标准编码或输入" data-field="transport_category" :aria-invalid="invalidField('transport_category', index)">
+                <datalist :id="`transport-${item.id}`"><option v-for="value in standardChoices('transport_category',item.fee_type)" :key="value" :value="value" /></datalist></label>
+              <label>住宿分类<input v-model="item.accommodation_category" :list="`accommodation-${item.id}`" placeholder="选择已发布标准编码或输入" data-field="accommodation_category" :aria-invalid="invalidField('accommodation_category', index)">
+                <datalist :id="`accommodation-${item.id}`"><option v-for="value in standardChoices('accommodation_category',item.fee_type)" :key="value" :value="value" /></datalist></label>
+              <label>无票证明类型<select v-model="item.no_invoice_proof_type" data-field="no_invoice_proof_type" :aria-invalid="invalidField('no_invoice_proof_type', index)"><option value="">未选择</option><option value="PAYMENT_PROOF">支付证明</option><option value="SERVICE_CONFIRMATION">服务确认</option><option value="OTHER">其他证明</option></select></label>
+              <label>无票／预付独立证明（PDF / PNG / JPEG）<input type="file" accept=".pdf,.png,.jpg,.jpeg"
+                @change="uploadInvoice($event,'reimbursement.claim.evidence',`claimNoInvoice:${item.id}`)"></label>
+              <div class="expense-option-field">
+                <span>独立证明文件（上传后自动关联；也可按文件名补选，仍由服务器校验）</span>
+                <BusinessOptionPicker
+                  :model-value="splitIDs(item.no_invoice_evidence_text)"
+                  path="/invoice-document-options"
+                  purpose="reimbursement.claim.evidence"
+                  value-key="file_id"
+                  object-label="独立证明文件"
+                  multiple
+                  :disabled="!editable || saving || !!pending"
+                  aria-label="选择无票或预付独立证明文件"
+                  data-field="no_invoice_evidence_file_ids"
+                  :aria-invalid="invalidField('no_invoice_evidence_file_ids', index)"
+                  @update:model-value="ids => { item.no_invoice_evidence_text = ids.slice(0, 20).join(',') }"
+                />
+              </div>
+            </div>
             <div class="expense-grid">
               <label>
                 费用类型
-                <select v-model="item.fee_type">
+                <select v-model="item.fee_type" data-field="fee_type" :aria-invalid="invalidField('fee_type', index)">
                   <option value="">
                     选择费用类型
                   </option>
@@ -2605,19 +3531,19 @@ onBeforeUnmount(() => {
               </label>
               <label>
                 发生日期
-                <input v-model="item.occurred_date" type="date">
+                <input v-model="item.occurred_date" type="date" data-field="occurred_date" :aria-invalid="invalidField('occurred_date', index)">
               </label>
               <label>
                 申请金额（元）
-                <input v-model="item.amount" inputmode="decimal">
+                <input v-model="item.amount" inputmode="decimal" data-field="requested_minor" :aria-invalid="invalidField('requested_minor', index)">
               </label>
               <label>
                 标准单位数
-                <input v-model.number="item.units" type="number" min="1">
+                <input v-model.number="item.units" type="number" min="1" data-field="units" :aria-invalid="invalidField('units', index)">
               </label>
               <label>
                 城市等级
-                <input v-model="item.city_level" :list="`city-level-${item.id}`">
+                <input v-model="item.city_level" :list="`city-level-${item.id}`" data-field="city_level" :aria-invalid="invalidField('city_level', index)">
                 <datalist :id="`city-level-${item.id}`"><option v-for="value in standardChoices('city_level',item.fee_type)" :key="value" :value="value" /></datalist>
               </label>
               <label>
@@ -2630,19 +3556,19 @@ onBeforeUnmount(() => {
             </div>
             <label>
               个人说明
-              <textarea v-model="item.reason" />
+              <textarea v-model="item.reason" data-field="reason" :aria-invalid="invalidField('reason', index)" />
             </label>
             <label>
               超标说明
-              <input v-model="item.exception_reason">
+              <input v-model="item.exception_reason" data-field="exception_reason" :aria-invalid="invalidField('exception_reason', index)">
             </label>
             <label>
-              <input v-model="item.travel_exception" type="checkbox">
+              <input v-model="item.travel_exception" type="checkbox" data-field="travel_exception" :aria-invalid="invalidField('travel_exception', index)">
               差旅异常
             </label>
             <label>
               无票原因（受政策限制）
-              <input v-model="item.no_invoice_reason">
+              <input v-model="item.no_invoice_reason" data-field="no_invoice_reason" :aria-invalid="invalidField('no_invoice_reason', index)">
             </label>
             <h4>
               项目分摊 · 已分摊 {{ allocationTotal(item) }} 元 / 申请 {{ item.amount || '待填写' }} 元
@@ -2650,7 +3576,7 @@ onBeforeUnmount(() => {
             <label>分摊方式<select :value="item.allocation_mode || 'AMOUNT'" @change="changeAllocationMode(item,$event.target.value)">
               <option value="AMOUNT">按金额</option><option value="RATIO">按比例</option></select></label>
             <p v-if="item.allocation_mode === 'RATIO'">比例合计100%，最多两位小数；按最大余数分配尾分，同余数按项目/服务项排序。金额仅供核对，保存时服务器重新计算。</p>
-            <div v-for="(allocation, ai) in item.allocations" :key="ai" class="expense-actions">
+            <div v-for="(allocation, ai) in item.allocations" :key="ai" class="expense-actions" data-field="allocations" :aria-invalid="invalidField('allocations', index)">
               <select
                 aria-label="项目服务项"
                 :value="selectedProjectOption(allocation)"
@@ -2679,11 +3605,11 @@ onBeforeUnmount(() => {
               >
               <template v-else><label>比例 %<input v-model="allocation.ratio" inputmode="decimal" aria-label="分摊比例" /></label>
                 <span>派生 {{ ratioAmount(item,ai) }} 元</span></template>
-              <button class="expense-button" @click="item.allocations.splice(ai, 1)">
+              <button type="button" class="expense-button" @click="item.allocations.splice(ai, 1)">
                 删除分摊
               </button>
             </div>
-            <button
+            <button type="button"
               class="expense-button"
               @click="item.allocations.push({ project_id: '', service_item_id: '', amount: '',ratio:'' })"
             >
@@ -2692,8 +3618,8 @@ onBeforeUnmount(() => {
             <h4>
               票据用量
             </h4>
-            <button class="expense-button" @click="loadInvoiceChoices">查询本人已确认发票</button>
-            <div v-for="(usage, ui) in item.invoice_usages" :key="ui" class="expense-actions">
+            <button type="button" class="expense-button" @click="loadInvoiceChoices">查询本人已确认发票</button>
+            <div v-for="(usage, ui) in item.invoice_usages" :key="ui" class="expense-actions" data-field="invoice_usages" :aria-invalid="invalidField('invoice_usages', index)">
               <select v-model="usage.invoice_id" aria-label="选择已复核发票">
                 <option value="">选择已复核发票</option>
                 <option v-if="usage.invoice_id && !invoiceChoices.some(row=>row.id===usage.invoice_id)" :value="usage.invoice_id">当前引用 {{ usage.invoice_id }}</option>
@@ -2705,47 +3631,44 @@ onBeforeUnmount(() => {
                 inputmode="decimal"
                 placeholder="使用金额（元）"
               >
-              <button class="expense-button" @click="checkInvoice(usage.invoice_id)">
+              <button type="button" class="expense-button" @click="checkInvoice(usage.invoice_id)">
                 核对票据余额
               </button>
               <span>
                 服务器剩余 {{ formatMinor(invoiceFacts[usage.invoice_id]?.remaining_minor) }} 元；本草稿合计 {{ draftInvoiceUsage(usage.invoice_id) }} 元
               </span>
-              <button class="expense-button" @click="item.invoice_usages.splice(ui, 1)">
+              <button type="button" class="expense-button" @click="item.invoice_usages.splice(ui, 1)">
                 删除用量
               </button>
             </div>
+            <ClaimEvidenceTravelPanel
+              :item="item"
+              :references="item.allocations.map(referenceFor)"
+              :standard-hints="(editorOptions?.standards || []).filter((standard) => standard.org_id === draft.org_id && standard.fee_type === item.fee_type)"
+              :tail-policies="(editorOptions?.historical_tail_policies || []).filter((policy) => policy.org_id === draft.org_id && item.allocations.some((part) => part.project_id === policy.project_id))"
+              :disabled="!editable || saving || !!pending"
+              :can-download="!!selected?.id && !selected?.scope_limited"
+              @upload="(event, kind) => uploadClaimEvidence(item.id, event, kind)"
+              @download="downloadClaimEvidence"
+            />
             <div class="expense-actions">
-              <button
+              <button type="button"
                 class="expense-button"
                 @click="item.invoice_usages.push({ invoice_id: '', amount: '' })"
               >
                 增加票据
               </button>
-              <button class="expense-button" @click="draft.items.splice(index, 1)">
+              <button type="button" class="expense-button" @click="draft.items.splice(index, 1)">
                 删除费用
               </button>
             </div>
           </article>
-          <button class="expense-button" @click="addItem">
+          <button type="button" class="expense-button" @click="addItem">
             添加费用
           </button>
         </fieldset>
-        <ClaimEvidenceTravelPanel
-          v-for="(item, index) in draft.items"
-          :key="item.id"
-          :item="item"
-          :item-number="index + 1"
-          :references="item.allocations.map(referenceFor)"
-          :standard-hints="(editorOptions?.standards || []).filter((standard) => standard.org_id === draft.org_id && standard.fee_type === item.fee_type)"
-          :tail-policies="(editorOptions?.historical_tail_policies || []).filter((policy) => policy.org_id === draft.org_id && item.allocations.some((part) => part.project_id === policy.project_id))"
-          :disabled="!editable || saving || !!pending"
-          :can-download="!!selected?.id && !selected?.scope_limited"
-          @upload="(event, kind) => uploadClaimEvidence(item.id, event, kind)"
-          @download="downloadClaimEvidence"
-        />
         <footer class="expense-actions">
-          <button
+          <button type="button"
             v-if="!selected"
             class="expense-button primary"
             :disabled="saving || !!pending || !draft.org_id"
@@ -2753,7 +3676,7 @@ onBeforeUnmount(() => {
           >
             创建服务器草稿
           </button>
-          <button
+          <button type="button"
             v-if="selected && can('expense.project.reference')"
             class="expense-button"
             :disabled="saving || !!pending"
@@ -2764,14 +3687,14 @@ onBeforeUnmount(() => {
           <strong>
             分摊前费用合计 {{ draftTotal }} 元
           </strong>
-          <button
+          <button type="button"
             class="expense-button primary"
             :disabled="!editable || saving || !!pending"
             @click="saveDraft"
           >
             保存草稿
           </button>
-          <button
+          <button type="button"
             v-if="selected?.allowed_actions?.includes('SUBMIT')"
             class="expense-button"
             :disabled="saving || !!pending"
@@ -2779,7 +3702,7 @@ onBeforeUnmount(() => {
           >
             提交已保存版本
           </button>
-          <button
+          <button type="button"
             v-if="selected?.allowed_actions?.includes('WITHDRAW')"
             class="expense-button"
             :disabled="saving || !!pending"
@@ -2787,7 +3710,7 @@ onBeforeUnmount(() => {
           >
             撤回
           </button>
-          <button
+          <button type="button"
             v-if="selected?.allowed_actions?.includes('VOID')"
             class="expense-button"
             :disabled="saving || !!pending"
@@ -2814,14 +3737,23 @@ onBeforeUnmount(() => {
           提交使用最后保存的服务器版本。修改表单后请先保存。非项目费用首发关闭。
         </p>
       </section>
-      <section v-if="selected && ['payments', 'archives'].includes(section)" class="expense-panel">
-        <h2>
-          {{ selected.claim_no || selected.title }}
-        </h2>
+      <section v-if="selected && ['payments', 'archives'].includes(section)" ref="detailPanel" class="expense-panel">
+        <header class="expense-actions">
+          <h2>
+            {{ selected.claim_no || selected.title }}
+          </h2>
+          <button type="button" class="expense-button" @click="backToList('claim')">
+            返回列表
+          </button>
+        </header>
         <p>
           状态 {{ statusLabel(selected.status) }} · 版本 {{ selected.version }} · 应付 {{ formatMinor(selected.payable_minor) }} {{ selected.currency }}
+          <template v-if="selected.status !== 'DRAFT' && selected.status !== 'WITHDRAWN'">
+            · 第 {{ selected.current_round || selected.round || 1 }} 轮
+            <template v-if="selected.current_approval_node"> · 当前节点 {{ approvalNodesLabel(selected.current_approval_node) }}</template>
+          </template>
         </p>
-        <ApprovalRoundsPanel :claim-id="selected.id" />
+        <ApprovalRoundsPanel :key="`payment-rounds-${selected.id}`" :claim-id="selected.id" />
         <ArchivePackagePanel v-if="section === 'archives' && can('expense.archive.export')" :key="selected.id" :archives="archives" />
         <ClaimSyncPanel :key="selected.id" :claim="selected" :permissions="session?.permissions || []" />
         <template v-if="section === 'payments'">
@@ -2838,10 +3770,10 @@ onBeforeUnmount(() => {
             </p>
             <label>
               财务原因
-              <textarea v-model="claimControlReason" maxlength="2000" />
+              <textarea v-model="claimControlReason" maxlength="2000" data-field="control_reason" />
             </label>
             <div class="expense-actions">
-              <button
+              <button type="button"
                 v-if="selected.allowed_actions?.includes('REOPEN') && can('expense.claim.reopen')"
                 class="expense-button"
                 :disabled="!claimControlReason.trim()"
@@ -2849,7 +3781,7 @@ onBeforeUnmount(() => {
               >
                 重开并交回申请人
               </button>
-              <button
+              <button type="button"
                 v-if="selected.allowed_actions?.includes('APPROVED_VOID') && can('expense.claim.approved_void')"
                 class="expense-button"
                 :disabled="!claimControlReason.trim()"
@@ -2859,58 +3791,100 @@ onBeforeUnmount(() => {
               </button>
             </div>
           </fieldset>
-          <h3>
-            全额付款事实登记
-          </h3>
-          <p>
-            请核对银行或现金支付事实后登记。本操作不执行银行转账。
-          </p>
-          <div class="expense-grid">
-            <label>
-              实际付款日期
-              <input v-model="paymentForm.paid_date" type="date">
-            </label>
-            <label>
-              付款方式
-              <select v-model="paymentForm.method">
-                <option value="BANK">
-                  银行转账
-                </option>
-                <option value="CASH">
-                  现金
-                </option>
-              </select>
-            </label>
-            <label>
-              付款账户引用
-              <input v-model="paymentForm.source_account_ref">
-            </label>
-            <label>
-              流水号
-              <input v-model="paymentForm.transaction_no">
-            </label>
-            <label>
-              上传付款凭证
-              <input
-                type="file"
-                accept=".pdf,.png,.jpg,.jpeg"
-                :disabled="saving || !!pending"
-                @change="uploadInvoice($event, 'reimbursement.payment.voucher')"
-              >
-            </label>
-            <label>
-              付款凭证文件ID（逗号分隔）
-              <input v-model="paymentForm.voucher_file_ids">
-            </label>
-          </div>
-          <button
+          <fieldset
             v-if="can('expense.payment.record')"
-            class="expense-button primary"
             :disabled="saving || !!pending || selected.status !== 'APPROVED_PENDING_PAYMENT'"
-            @click="registerPayment"
           >
-            登记全额 {{ formatMinor(selected.payable_minor) }} 元
-          </button>
+            <h3>
+              全额付款事实登记
+            </h3>
+            <p>
+              请核对银行或现金支付事实后登记。本操作不执行银行转账。
+            </p>
+            <div class="expense-grid">
+              <label>
+                实际付款日期
+                <input v-model="paymentForm.paid_date" type="date" data-field="paid_date">
+              </label>
+              <label>
+                付款方式
+                <select v-model="paymentForm.method" data-field="method">
+                  <option value="BANK">
+                    银行转账
+                  </option>
+                  <option value="CASH">
+                    现金
+                  </option>
+                </select>
+              </label>
+              <div class="expense-option-field">
+                <span>付款账户（受控账户，按名称选择）</span>
+                <select
+                  v-model="paymentForm.source_account_ref"
+                  data-field="source_account_ref"
+                  aria-label="付款账户"
+                >
+                  <option value="">
+                    选择受控付款账户
+                  </option>
+                  <option
+                    v-if="paymentForm.source_account_ref && !paymentAccounts.some(row => row.account_ref === paymentForm.source_account_ref)"
+                    :value="paymentForm.source_account_ref"
+                  >
+                    已保存账户 {{ paymentForm.source_account_ref }}
+                  </option>
+                  <option v-for="account in paymentAccounts" :key="account.id" :value="account.account_ref">
+                    {{ account.name }} · {{ account.account_ref }}
+                  </option>
+                </select>
+                <small v-if="paymentOptionError">付款账户读取失败：{{ paymentOptionError }}</small>
+                <small v-else-if="paymentOptionsLoaded && !paymentAccounts.length">当前付款主体没有可用受控账户，请联系财务管理员维护付款账户目录。</small>
+              </div>
+              <label>
+                流水号
+                <input v-model="paymentForm.transaction_no" data-field="transaction_no">
+              </label>
+              <label>
+                上传付款凭证
+                <input
+                  type="file"
+                  accept=".pdf,.png,.jpg,.jpeg"
+                  :disabled="saving || !!pending"
+                  @change="uploadInvoice($event, 'reimbursement.payment.voucher')"
+                >
+              </label>
+              <div class="expense-option-field">
+                <span>付款凭证文件（按文件名选择，可多选）</span>
+                <BusinessOptionPicker
+                  :model-value="splitIDs(paymentForm.voucher_file_ids)"
+                  path="/invoice-document-options"
+                  purpose="reimbursement.payment.voucher"
+                  value-key="file_id"
+                  object-label="付款凭证"
+                  multiple
+                  :disabled="saving || !!pending"
+                  aria-label="选择付款凭证文件"
+                  data-field="voucher_file_ids"
+                  @update:model-value="ids => { paymentForm.voucher_file_ids = ids.slice(0, 20).join(',') }"
+                />
+              </div>
+            </div>
+            <p>收款档案：{{ paymentPayeeLabel }}</p>
+            <button type="button"
+              class="expense-button primary"
+              :disabled="saving || !!pending || selected.status !== 'APPROVED_PENDING_PAYMENT'
+                || !paymentForm.source_account_ref"
+              @click="registerPayment"
+            >
+              登记全额 {{ formatMinor(selected.payable_minor) }} 元
+            </button>
+          </fieldset>
+          <p v-else class="expense-alert warning">
+            你没有登记付款的权限；这里只显示付款记录供核对。付款由出纳登记，且登记人必须与会计审核人不同。
+          </p>
+          <p v-if="can('expense.payment.record') && selected.status !== 'APPROVED_PENDING_PAYMENT'" class="expense-alert warning">
+            只有「待付款」状态的单据可以登记付款；当前状态为「{{ statusLabel(selected.status) }}」，付款字段只读。
+          </p>
           <dl v-if="payment" class="expense-grid">
             <div>
               <dt>
@@ -2945,38 +3919,133 @@ onBeforeUnmount(() => {
               </dd>
             </div>
           </dl>
-          <h3>
-            独立冲正申请
-          </h3>
-          <label>
-            事实类型
-            <select v-model="reversalFact">
-              <option value="NO_PAYMENT">
-                实际未付款
-              </option>
-              <option value="FULL_REFUND">
-                全额退款
-              </option>
-            </select>
-          </label>
-          <label>
-            事实与原因
-            <textarea v-model="reversalReason" />
-          </label>
-          <label>
-            证据文件ID
-            <input v-model="evidenceFiles">
-          </label>
-          <button
-            v-if="can('expense.payment.reversal.request')"
-            class="expense-button"
-            :disabled="saving || !!pending"
-            @click="requestReversal"
-          >
-            申请冲正
-          </button>
+          <section class="expense-item">
+            <h3>
+              付款历史
+            </h3>
+            <button type="button" class="expense-button" :disabled="paymentHistoryLoading" @click="loadPaymentHistory(1)">
+              {{ paymentHistoryLoading ? '读取中…' : '刷新历史' }}
+            </button>
+            <!-- 没读成功就不能说"尚无付款记录"：读取中、失败、未读取、真为空四种状态分开说。 -->
+            <p v-if="paymentHistoryLoading">
+              付款历史读取中…
+            </p>
+            <p v-else-if="paymentHistoryError" class="expense-alert danger" role="alert">
+              {{ paymentHistoryError }}
+            </p>
+            <p v-else-if="!paymentHistoryLoaded">
+              付款历史尚未读取；请点击「刷新历史」查询本单付款记录。
+            </p>
+            <p v-else-if="!paymentHistory.length">
+              当前单据尚无付款记录。
+            </p>
+            <template v-else>
+              <p>
+                共 {{ paymentHistoryTotal }} 条，第 {{ paymentHistoryPage }} 页。
+              </p>
+              <div class="expense-table"><table class="expense-table-body">
+              <thead>
+                <tr>
+                  <th scope="col">付款单号</th>
+                  <th scope="col">金额</th>
+                  <th scope="col">货币</th>
+                  <th scope="col">实际付款日</th>
+                  <th scope="col">方式</th>
+                  <th scope="col">流水号</th>
+                  <th scope="col">状态 / 关联</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="record in paymentHistory" :key="record.id">
+                  <td>{{ record.id }}</td>
+                  <td>{{ formatMinor(record.amount_minor) }}</td>
+                  <td>{{ record.currency }}</td>
+                  <td>{{ record.paid_date }}</td>
+                  <td>{{ record.method === 'BANK' ? '银行转账' : record.method === 'CASH' ? '现金' : record.method }}</td>
+                  <td>{{ record.transaction_no }}</td>
+                  <td>{{ paymentHistoryStatus(record) }}</td>
+                </tr>
+              </tbody>
+            </table></div>
+              <PaginationBar label="付款历史分页" :page="paymentHistoryPage" :total="paymentHistoryTotal"
+                :page-size="paymentHistoryPageSize" :loading="paymentHistoryLoading"
+                @change="loadPaymentHistory" />
+            </template>
+            <p v-if="reversalHistoryError" class="expense-alert danger" role="alert">
+              {{ reversalHistoryError }}
+            </p>
+            <template v-if="reversalHistory.length">
+              <h4>
+                冲正申请
+              </h4>
+              <div class="expense-table"><table class="expense-table-body">
+                <thead>
+                  <tr>
+                    <th scope="col">申请</th>
+                    <th scope="col">事实类型</th>
+                    <th scope="col">状态</th>
+                    <th scope="col">版本</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="item in reversalHistory" :key="item.id">
+                    <td>{{ item.id }}</td>
+                    <td>{{ item.fact_kind === 'NO_PAYMENT' ? '实际未付款' : item.fact_kind === 'FULL_REFUND' ? '全额退款' : item.fact_kind }}</td>
+                    <td>{{ statusLabel(item.status) }}</td>
+                    <td>v{{ item.version }}</td>
+                  </tr>
+                </tbody>
+              </table></div>
+            </template>
+          </section>
+          <fieldset v-if="can('expense.payment.reversal.request')" :disabled="saving || !!pending">
+            <h3>
+              独立冲正申请
+            </h3>
+            <label>
+              事实类型
+              <select v-model="reversalFact" data-field="fact_kind">
+                <option value="NO_PAYMENT">
+                  实际未付款
+                </option>
+                <option value="FULL_REFUND">
+                  全额退款
+                </option>
+              </select>
+            </label>
+            <label>
+              事实与原因
+              <textarea v-model="reversalReason" data-field="reason" />
+            </label>
+            <div class="expense-option-field">
+              <span>冲正证据文件（按文件名选择，1至20份）</span>
+              <BusinessOptionPicker
+                :model-value="splitIDs(evidenceFiles)"
+                path="/invoice-document-options"
+                purpose="reimbursement.payment.voucher"
+                value-key="file_id"
+                object-label="冲正证据文件"
+                multiple
+                :disabled="saving || !!pending"
+                aria-label="选择冲正证据文件"
+                @update:model-value="ids => { evidenceFiles = ids.slice(0, 20).join(',') }"
+              />
+            </div>
+            <button type="button"
+              class="expense-button"
+              :disabled="saving || !!pending"
+              @click="requestReversal"
+            >
+              申请冲正
+            </button>
+          </fieldset>
+          <p v-else class="expense-alert warning">
+            {{ can('expense.payment.reversal.approve')
+              ? '冲正由出纳发起；你可以在下方独立批准或拒绝待处理的冲正申请。'
+              : '你没有发起或批准冲正的权限；这里只显示冲正记录供核对。' }}
+          </p>
           <div v-if="can('expense.payment.reversal.approve')" class="expense-actions">
-            <button class="expense-button" @click="loadReversals">
+            <button type="button" class="expense-button" @click="loadReversals">
               读取冲正待办
             </button>
             <select aria-label="冲正申请" @change="selectReversal">
@@ -2984,17 +4053,17 @@ onBeforeUnmount(() => {
                 请选择申请及版本
               </option>
               <option v-for="request in reversalRequests" :key="request.id" :value="request.id">
-                {{ request.id }} · {{ request.status }} · v{{ request.version }}
+                {{ request.id }} · {{ statusLabel(request.status) }} · v{{ request.version }}
               </option>
             </select>
-            <button
+            <button type="button"
               class="expense-button"
               :disabled="saving || !reversalID || reversalVersion === null || !!pending"
               @click="decideReversal(true)"
             >
               批准冲正
             </button>
-            <button
+            <button type="button"
               class="expense-button"
               :disabled="saving || !reversalID || reversalVersion === null || !!pending"
               @click="decideReversal(false)"
@@ -3004,10 +4073,10 @@ onBeforeUnmount(() => {
           </div>
         </template>
         <template v-else>
-          <button class="expense-button" @click="loadArchives">
+          <button type="button" class="expense-button" @click="loadArchives">
             读取归档版本和完整性
           </button>
-          <button
+          <button type="button"
             v-if="can('expense.archive.retry')"
             class="expense-button"
             :disabled="saving || !!pending"
@@ -3060,14 +4129,14 @@ onBeforeUnmount(() => {
         <h2>
           受控导出任务
         </h2>
-        <button class="expense-button" :disabled="saving || !!pending" @click="createExport">
+        <button type="button" class="expense-button" :disabled="saving || !!pending" @click="createExport">
           创建导出任务
         </button>
         <template v-if="exportJob">
-          <button class="expense-button" @click="refreshExport">
+          <button type="button" class="expense-button" @click="refreshExport">
             查询导出状态
           </button>
-          <button
+          <button type="button"
             v-if="exportJob.status === 'DONE' && exportJob.result?.result?.content !== undefined"
             class="expense-button"
             @click="downloadExport"
@@ -3077,19 +4146,37 @@ onBeforeUnmount(() => {
           <p>
             任务 {{ exportJob.id }} · {{ statusLabel(exportJob.status) }} · 已尝试 {{ exportJob.attempt ?? 0 }} 次
           </p>
-          <p v-if="exportJob.last_error">
-            处理失败：{{ exportJob.last_error }}
+          <p v-if="exportJob.last_error" role="alert">
+            处理失败：{{ failureMessage(exportJob.last_error) }}
           </p>
+          <button v-if="exportJob.status === 'FAILED'" type="button" class="expense-button"
+            :disabled="saving || !!pending" @click="retryExport">
+            重试导出
+          </button>
           <p v-if="exportJob.result?.result">
             结果：{{ exportJob.result.result.filename }} · {{ exportJob.result.result.claim_ids?.length }} 张单据 · 摘要 {{ exportJob.result.result.sha256 }}
           </p>
         </template>
+        <!-- 刷新后找回：任务号与导出范围都在本地，不需要重新勾选。 -->
+        <div v-else-if="recentTask.export" role="status">
+          <p>
+            上次导出任务 {{ recentTask.export.task_id }} · {{ savedAtLabel(recentTask.export.saved_at) }}提交
+          </p>
+          <button type="button" class="expense-button" :disabled="saving || !!pending" @click="resumeExportTask">
+            继续查询上次导出
+          </button>
+        </div>
       </section>
       <InvoiceControlsPanel v-if="selectedInvoice && section === 'invoices' && session" :key="selectedInvoice.id" :invoice="selectedInvoice" :session="session" @changed="openInvoice(selectedInvoice.id)" />
-      <section v-if="selectedInvoice && section === 'invoices'" class="expense-panel">
-        <h2>
-          人工复核 · {{ selectedInvoice.id }}
-        </h2>
+      <section v-if="selectedInvoice && section === 'invoices'" ref="detailPanel" class="expense-panel">
+        <header class="expense-actions">
+          <h2>
+            人工复核 · {{ selectedInvoice.id }}
+          </h2>
+          <button type="button" class="expense-button" @click="backToList('invoice')">
+            返回发票列表
+          </button>
+        </header>
         <aside v-if="selectedInvoice.suspected_duplicates?.length" class="expense-alert warning" role="alert">
           <strong>疑似重复：存在同日、同金额、同销售方的不同票据，请对照原件核验。</strong>
           <p v-for="invoice in selectedInvoice.suspected_duplicates" :key="invoice.invoice_id">{{ invoice.invoice_number }} · {{ invoice.invoice_date }} · {{ formatMinor(invoice.total_minor) }}元</p>
@@ -3107,13 +4194,13 @@ onBeforeUnmount(() => {
             <h3>
               来源原件
             </h3>
-            <button class="expense-button" @click="invoiceSources">
+            <button type="button" class="expense-button" @click="invoiceSources">
               获取受控原件
             </button>
             <p v-if="!invoiceRows.length">
               OFD请下载原件对照；缺字段请人工补录，不能视为已验真。
             </p>
-            <button
+            <button type="button"
               v-for="source in invoiceRows"
               :key="source.id || source.file_id"
               class="expense-button"
@@ -3123,7 +4210,7 @@ onBeforeUnmount(() => {
             </button>
             <div v-if="selectedSource">
               <p>
-                来源：{{ selectedSource.original_name || selectedSource.file_id }} · {{ selectedSource.parse_status || '解析状态待查询' }}
+                来源：{{ selectedSource.original_name || selectedSource.file_id }} · {{ selectedSource.parse_status ? statusLabel(selectedSource.parse_status) : '解析状态待查询' }}
               </p>
               <p>
                 解析器 {{ selectedSource.parser_version || '不可用' }} · 规则 {{ selectedSource.rules_version || '不可用' }}
@@ -3147,16 +4234,16 @@ onBeforeUnmount(() => {
                   字段来源与坐标（展示前50行）
                 </summary>
                 <div class="expense-table">
-                  <table>
+                  <table class="expense-table-body">
                     <thead>
                       <tr>
-                        <th>
+                        <th scope="col">
                           页码 / XML路径
                         </th>
-                        <th>
+                        <th scope="col">
                           坐标
                         </th>
-                        <th>
+                        <th scope="col">
                           源文字
                         </th>
                       </tr>
@@ -3181,24 +4268,7 @@ onBeforeUnmount(() => {
                 </div>
               </details>
             </div>
-            <div data-invoice-preview class="expense-original-container">
-            <iframe
-              v-if="originalPreview"
-              :src="originalPreview"
-              class="expense-original-preview"
-              title="发票原件对照"
-            />
-            <img v-else-if="['image/png','image/jpeg'].includes(originalMedia) && originalDownload" :src="originalDownload" alt="受控发票原件"
-              class="expense-original-image" :style="{transform:`rotate(${previewRotation}deg) scale(${previewZoom})`}">
-            </div>
-            <div v-if="originalDownload" class="expense-actions">
-              <button class="expense-button" @click="fullscreenOriginal">全屏查看</button>
-              <template v-if="['image/png','image/jpeg'].includes(originalMedia)">
-                <button class="expense-button" @click="previewRotation=(previewRotation+90)%360">旋转</button>
-                <button class="expense-button" :disabled="previewZoom>=3" @click="previewZoom+=0.25">放大</button>
-                <button class="expense-button" :disabled="previewZoom<=0.5" @click="previewZoom-=0.25">缩小</button>
-              </template>
-            </div>
+            <InvoiceOriginalViewer :preview="originalPreview" :download="originalDownload" :media="originalMedia" title="发票原件对照" alt="受控发票原件" transformable :report-error="showError" />
             <a
               v-if="originalDownload"
               :href="originalDownload"
@@ -3208,7 +4278,13 @@ onBeforeUnmount(() => {
               下载当前原件
             </a>
           </aside>
-          <fieldset :disabled="saving || !!pending || !can('expense.invoice.review')">
+          <p v-if="invoiceReadonlyReason" class="expense-alert warning">
+            {{ invoiceReadonlyReason }}
+          </p>
+          <fieldset :disabled="saving || !!pending || !can('expense.invoice.review')
+            || selectedInvoice.owner_subject_id !== session?.subject_id
+            || !['AVAILABLE', ''].includes(selectedInvoice.reservation_state || '')
+            || selectedInvoice.review_status === 'CONFIRMED'">
             <label>
               发票类型
               <input v-model="selectedInvoice.invoice_type">
@@ -3234,14 +4310,15 @@ onBeforeUnmount(() => {
               <input v-model="selectedInvoice.buyer_tax_id">
             </label>
             <label>
-              票面总额（整数分）
-              <input v-model="selectedInvoice.total_minor" inputmode="numeric">
+              票面总额（元）
+              <input v-model="invoiceTotalYuan" inputmode="decimal" placeholder="对照原件填写，最多两位小数">
+              <small v-if="invoiceTotalMinorHint">提交时记为 {{ invoiceTotalMinorHint }}</small>
             </label>
             <label>
               人工复核或校正原因
               <textarea v-model="invoiceReviewReason" />
             </label>
-            <button class="expense-button primary" @click="confirmInvoice">
+            <button type="button" class="expense-button primary" @click="confirmInvoice">
               确认人工复核字段
             </button>
           </fieldset>
@@ -3271,11 +4348,21 @@ onBeforeUnmount(() => {
             核验依据
             <textarea v-model="verificationReason" />
           </label>
-          <label>
-            已上传证据原件ID（逗号分隔）
-            <input v-model="verificationEvidence">
-          </label>
-          <button class="expense-button" @click="verifyInvoice">
+          <div class="expense-option-field">
+            <span>核验证据原件（按文件名选择，1至20份）</span>
+            <BusinessOptionPicker
+              :model-value="splitIDs(verificationEvidence)"
+              path="/invoice-document-options"
+              purpose="reimbursement.invoice.original"
+              value-key="file_id"
+              object-label="核验证据原件"
+              multiple
+              :disabled="saving || !!pending"
+              aria-label="选择核验证据原件"
+              @update:model-value="ids => { verificationEvidence = ids.slice(0, 20).join(',') }"
+            />
+          </div>
+          <button type="button" class="expense-button" @click="verifyInvoice">
             保存人工核验记录
           </button>
         </fieldset>

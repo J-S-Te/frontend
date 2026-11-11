@@ -1,6 +1,7 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { approvalNodeLabel } from '../rolePresentation.js'
+import BusinessOptionPicker from './BusinessOptionPicker.vue'
 
 const props = defineProps({
   item: { type: Object, required: true },
@@ -18,11 +19,32 @@ const travelFiles = computed(() => [...new Set(String(props.item.travel_confirma
   .split(',').map((value) => value.trim()).filter(Boolean))].slice(0, 20))
 const assessments = { MATCH: '事实匹配', MISMATCH: '事实存在不一致', UNKNOWN: '事实未知',
   NOT_REQUESTED_LEGACY: '历史记录未请求交叉核验' }
+// 同一费用项的证据按用途分开：尾款、差旅补证各自一组，避免和"无票/预付独立证明"混用。
+const limitNotice = ref('')
+
+// 用途：把选择器返回的文件引用写回尾款证据，超过20份时保留前20份并提示。
+// 参数：ids 为选择器给出的文件引用数组。
+// 返回值：无。
+function setTailFiles(ids) {
+  const values = Array.isArray(ids) ? ids : []
+  limitNotice.value = values.length > 20 ? '每组证据最多20份，超出的选择未保存。' : ''
+  props.item.historical_tail_evidence_text = values.slice(0, 20).join(',')
+}
+
+// 用途：把选择器返回的文件引用写回差旅人工确认证据。
+// 参数：ids 为选择器给出的文件引用数组。
+// 返回值：无。
+function setTravelFiles(ids) {
+  const values = Array.isArray(ids) ? ids : []
+  limitNotice.value = values.length > 20 ? '每组证据最多20份，超出的选择未保存。' : ''
+  if (!props.item.travel_confirmation) props.item.travel_confirmation = { decision: '', reason: '', evidence_text: '' }
+  props.item.travel_confirmation.evidence_text = values.slice(0, 20).join(',')
+}
 </script>
 
 <template>
-  <section class="expense-item" aria-label="历史尾款与差旅事实">
-    <h4>费用 {{ itemNumber || item.id }} · 项目状态与权威差旅事实</h4>
+  <section class="expense-evidence" aria-label="历史尾款与差旅事实">
+    <h4>项目状态与权威差旅事实</h4>
     <p>实施准备、行程安排均不是出差审批。选择已终止项目只用于申请后端尾款政策，不表示已获准报销。</p>
     <article v-for="(reference, index) in references" :key="index">
       <template v-if="reference">
@@ -66,7 +88,20 @@ const assessments = { MATCH: '事实匹配', MISMATCH: '事实存在不一致', 
         <label>上传本费用证据（PDF / PNG / JPEG，最多20MiB）
           <input type="file" accept=".pdf,.png,.jpg,.jpeg" @change="emit('upload', $event, 'claimTail')">
         </label>
-        <label>尾款证据文件ID（最多20份）<input v-model="item.historical_tail_evidence_text"></label>
+        <div class="expense-option-field">
+          <span>历史尾款证据文件（最多20份，只用于尾款申请，不替代无票/预付独立证明）</span>
+          <BusinessOptionPicker
+            :model-value="tailFiles"
+            path="/invoice-document-options"
+            purpose="reimbursement.claim.evidence"
+            value-key="file_id"
+            object-label="尾款证据文件"
+            multiple
+            :disabled="disabled"
+            aria-label="选择历史尾款证据文件"
+            @update:model-value="setTailFiles"
+          />
+        </div>
       </fieldset>
       <div class="expense-actions"><button v-for="file in tailFiles" :key="file"
         class="expense-button" :disabled="!canDownload" @click="emit('download', file)">查看尾款证据 {{ file }}</button></div>
@@ -125,10 +160,26 @@ const assessments = { MATCH: '事实匹配', MISMATCH: '事实存在不一致', 
         <label>上传差旅佐证（不自动解析为发票）
           <input type="file" accept=".pdf,.png,.jpg,.jpeg" @change="emit('upload', $event, 'claimTravel')">
         </label>
-        <label>差旅证据文件ID（最多20份）<input v-model="item.travel_confirmation.evidence_text"></label>
+        <div class="expense-option-field">
+          <span>差旅补证文件（最多20份，只用于本次人工决定，不改写权威评估）</span>
+          <BusinessOptionPicker
+            :model-value="travelFiles"
+            path="/invoice-document-options"
+            purpose="reimbursement.claim.evidence"
+            value-key="file_id"
+            object-label="差旅补证文件"
+            multiple
+            :disabled="disabled"
+            aria-label="选择差旅补证文件"
+            @update:model-value="setTravelFiles"
+          />
+        </div>
       </fieldset>
       <div class="expense-actions"><button v-for="file in travelFiles" :key="file"
         class="expense-button" :disabled="!canDownload" @click="emit('download', file)">查看差旅证据 {{ file }}</button></div>
     </details>
+    <p v-if="limitNotice" class="expense-alert warning" role="status">
+      {{ limitNotice }}
+    </p>
   </section>
 </template>

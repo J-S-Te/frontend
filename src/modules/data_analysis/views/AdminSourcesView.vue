@@ -100,7 +100,7 @@ onMounted(load)
 <template>
   <section>
     <StandardFinanceImportPanel v-if="canTrigger" :permissions="permissions" />
-    <div v-if="notice" class="da-filters" style="border-color:#bfe7d7;background:#f0fcf7;color:#177457">{{ notice }}</div>
+    <div v-if="notice" class="da-filters da-filter-notice">{{ notice }}</div>
     <div class="da-filters">
       <label><ConsoleIcon name="search" /><input v-model="keyword" placeholder="搜索子系统 / 库 / 主机"  maxlength="100"/></label>
       <button class="da-button ghost" :disabled="loading" @click="load"><ConsoleIcon name="reset" />刷新</button>
@@ -113,7 +113,7 @@ onMounted(load)
     <div v-else class="da-table-panel">
       <div class="da-table-scroll">
         <table class="da-table">
-          <thead><tr><th>子系统</th><th>数据库</th><th>主机</th><th>接入状态</th><th>最近同步</th><th>最近结果</th><th>最近错误</th><th></th></tr></thead>
+          <thead><tr><th scope="col">子系统</th><th scope="col">数据库</th><th scope="col">主机</th><th scope="col">接入状态</th><th scope="col">最近同步</th><th scope="col">最近结果</th><th scope="col">最近错误</th><th scope="col"></th></tr></thead>
           <tbody>
             <tr v-for="s in filteredSources" :key="s.id">
               <td><b>{{ subsystemLabel(s.subsystem_code) }}</b><small class="da-source-code">{{ s.subsystem_code }}</small></td>

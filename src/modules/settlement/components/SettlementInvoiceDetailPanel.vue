@@ -201,12 +201,12 @@ function chooseInvoiceDocument() {
             <table>
               <thead>
                 <tr>
-                  <th>项目</th>
-                  <th>税收分类编码</th>
-                  <th>不含税金额</th>
-                  <th>税率</th>
-                  <th>税额</th>
-                  <th>价税合计</th>
+                  <th scope="col">项目</th>
+                  <th scope="col">税收分类编码</th>
+                  <th scope="col">不含税金额</th>
+                  <th scope="col">税率</th>
+                  <th scope="col">税额</th>
+                  <th scope="col">价税合计</th>
                 </tr>
               </thead>
               <tbody>
@@ -240,12 +240,12 @@ function chooseInvoiceDocument() {
             <table>
               <thead>
                 <tr>
-                  <th>项目</th>
-                  <th>税收分类编码</th>
-                  <th>不含税金额</th>
-                  <th>税率</th>
-                  <th>税额</th>
-                  <th>价税合计</th>
+                  <th scope="col">项目</th>
+                  <th scope="col">税收分类编码</th>
+                  <th scope="col">不含税金额</th>
+                  <th scope="col">税率</th>
+                  <th scope="col">税额</th>
+                  <th scope="col">价税合计</th>
                 </tr>
               </thead>
               <tbody>

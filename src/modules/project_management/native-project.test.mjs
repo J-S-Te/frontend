@@ -15,7 +15,9 @@ function harness(failure = null) {
   assert.ok(source, '原生委托建项组件尚未实现')
   const calls = [], events = []
   const context = { ...Vue, defineProps: () => ({ categories: [{ category: '等保测评', enabled: true }], ownerOrgId: '' }),
-    defineEmits: () => (...args) => events.push(args), crypto: { randomUUID: () => 'native-operation-1' },
+    defineEmits: () => (...args) => events.push(args),
+    // 组件用共享幂等键生成器（非安全上下文也能工作），测试注入固定值以断言请求标识。
+    createIdempotencyKey: () => 'native-operation-1',
     createNativeProject: async (payload) => { calls.push(payload); if (failure) throw failure; return { id: 'PJ-1', ...payload } },
     formatUserError: (error) => error.message,
   }

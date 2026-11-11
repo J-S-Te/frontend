@@ -57,9 +57,7 @@ const isEditing = computed(() => mode.value !== 'list')
 const loading = computed(() => Boolean(props.loadState?.loading))
 const catalogLoading = computed(() => Boolean(props.loadState?.catalogLoading))
 const environmentsLoading = computed(() => Boolean(props.loadState?.environmentsLoading))
-const currentEditorTitle = computed(() => mode.value === 'create' ? '新增个人例外' : (mode.value === 'normalize' ? '统一调整历史记录' : '修改个人例外'))
 const anomalyGroups = computed(() => view.value.groups.filter((group) => group.anomalyTypes.length > 0))
-const cleanGroups = computed(() => view.value.groups.filter((group) => !group.anomalyTypes.length))
 const inheritedCountText = computed(() => view.value.counts.inheritedSources
   ? '已有岗位继承授权 ' + view.value.counts.inheritedSources + ' 项（角色 ' + view.value.counts.inheritedRoles + ' 个）'
   : '当前没有岗位继承授权')
@@ -243,10 +241,6 @@ function recordValidity(record) {
 
 function recordScope(record) {
   return scopeTextOf(record)
-}
-
-function statusClass(group) {
-  return group.status.code === 'EXPIRED' ? 'is-expired' : (group.status.code === 'PENDING' ? 'is-pending' : 'is-active')
 }
 
 function recordStatusLabel(record) {

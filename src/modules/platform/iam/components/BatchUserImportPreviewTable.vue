@@ -31,7 +31,7 @@ const emit = defineEmits(['toggle-all'])
   <table class="iam-batch-import-table">
     <thead>
       <tr>
-        <th class="col-check">
+        <th scope="col" class="col-check">
           <input
             type="checkbox"
             :checked="allSelected"
@@ -42,15 +42,15 @@ const emit = defineEmits(['toggle-all'])
             @change="(event) => emit('toggle-all', event.target.checked)"
           />
         </th>
-        <th class="col-line">行</th>
-        <th>姓名</th>
-        <th>邮箱</th>
-        <th>手机</th>
-        <th>状态</th>
-        <th>组织</th>
-        <th>岗位</th>
-        <th>应用角色 / 权限来源</th>
-        <th class="col-status">校验</th>
+        <th scope="col" class="col-line">行</th>
+        <th scope="col">姓名</th>
+        <th scope="col">邮箱</th>
+        <th scope="col">手机</th>
+        <th scope="col">状态</th>
+        <th scope="col">组织</th>
+        <th scope="col">岗位</th>
+        <th scope="col">应用角色 / 权限来源</th>
+        <th scope="col" class="col-status">校验</th>
       </tr>
     </thead>
     <tbody>

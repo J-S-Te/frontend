@@ -233,13 +233,13 @@ onMounted(load)
         <table class="contract-data-table contract-outbox-table">
           <thead>
             <tr>
-              <th>类型</th>
-              <th>事件 / 资源</th>
-              <th>尝试次数</th>
-              <th>最后错误</th>
-              <th>创建时间</th>
-              <th>最近变化</th>
-              <th>操作</th>
+              <th scope="col">类型</th>
+              <th scope="col">事件 / 资源</th>
+              <th scope="col">尝试次数</th>
+              <th scope="col">最后错误</th>
+              <th scope="col">创建时间</th>
+              <th scope="col">最近变化</th>
+              <th scope="col">操作</th>
             </tr>
           </thead>
           <tbody>

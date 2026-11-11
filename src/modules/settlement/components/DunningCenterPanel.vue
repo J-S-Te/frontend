@@ -106,11 +106,11 @@ const policyRecipientAccount = computed({
         <table>
           <thead>
             <tr>
-              <th>账龄区间</th>
-              <th>金额</th>
-              <th>占比</th>
-              <th>笔数</th>
-              <th>状态</th>
+              <th scope="col">账龄区间</th>
+              <th scope="col">金额</th>
+              <th scope="col">占比</th>
+              <th scope="col">笔数</th>
+              <th scope="col">状态</th>
             </tr>
           </thead>
           <tbody>
@@ -150,15 +150,15 @@ const policyRecipientAccount = computed({
         <table>
           <thead>
             <tr>
-              <th>案件 ID</th>
-              <th>应收单号</th>
-              <th>客户</th>
-              <th>逾期天数</th>
-              <th>未结金额</th>
-              <th>升级级别</th>
-              <th>状态</th>
-              <th>下次跟进</th>
-              <th>当前负责人</th>
+              <th scope="col">案件 ID</th>
+              <th scope="col">应收单号</th>
+              <th scope="col">客户</th>
+              <th scope="col">逾期天数</th>
+              <th scope="col">未结金额</th>
+              <th scope="col">升级级别</th>
+              <th scope="col">状态</th>
+              <th scope="col">下次跟进</th>
+              <th scope="col">当前负责人</th>
             </tr>
           </thead>
           <tbody>
@@ -196,15 +196,15 @@ const policyRecipientAccount = computed({
         <table>
           <thead>
             <tr>
-              <th>记录 ID</th>
-              <th>应收单号</th>
-              <th>渠道</th>
-              <th>创建时间</th>
-              <th>接收人</th>
-              <th>升级标记</th>
-              <th>状态</th>
-              <th>完成时间</th>
-              <th>操作</th>
+              <th scope="col">记录 ID</th>
+              <th scope="col">应收单号</th>
+              <th scope="col">渠道</th>
+              <th scope="col">创建时间</th>
+              <th scope="col">接收人</th>
+              <th scope="col">升级标记</th>
+              <th scope="col">状态</th>
+              <th scope="col">完成时间</th>
+              <th scope="col">操作</th>
             </tr>
           </thead>
           <tbody>

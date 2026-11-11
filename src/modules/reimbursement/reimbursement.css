@@ -1,7 +1,13 @@
 @import '../platform/styles/console.css';
-.expense-tabs,.expense-metrics {display:flex;gap:10px;flex-wrap:wrap;margin:16px 0;}
-.expense-tabs button[aria-pressed="true"] {color:var(--primary,#2563eb);border-color:currentColor;}
-.expense-flag {display:inline-block;padding:3px 8px;border-radius:6px;background:#f5f3ff;color:#7c3aed;margin:3px;}
+.expense-tabs,.expense-status-tabs,.expense-metrics {display:flex;gap:10px;flex-wrap:wrap;margin:16px 0;}
+.expense-tabs button[aria-pressed="true"],.expense-status-tabs button[aria-pressed="true"] {
+  color:var(--primary-ink,#2563eb);
+  border-color:currentColor;
+  background:var(--primary-soft,#eff6ff);
+  box-shadow:inset 0 0 0 1px currentColor;
+  font-weight:700;
+}
+.expense-flag {display:inline-block;padding:3px 8px;border-radius:6px;background:var(--violet-soft,#f5f3ff);color:var(--violet-ink,#7c3aed);margin:3px;}
 .expense-flag.danger {background:var(--danger-soft);color:var(--danger-text);}
 .expense-chart-row {display:grid;grid-template-columns:minmax(100px,1fr) minmax(100px,2fr) minmax(140px,1fr);gap:12px;align-items:center;margin:14px 0;overflow-wrap:anywhere;}
 .expense-chart-row meter {width:100%;height:20px;}
@@ -22,8 +28,8 @@
 }
 
 .expense-kicker {
-  color:var(--accent,#2563eb);
-  font-size:11px;
+  color:var(--primary-ink,#2563eb);
+  font-size:var(--fs-xs, 12px);
   letter-spacing:.16em;
   font-weight:700;
 }
@@ -50,10 +56,26 @@
   font-size:16px;
 }
 
-.expense-grid {
+/* 与其它模块一致：min(210px,100%) 让容器比轨道下限更窄时也不溢出，
+   窄容器自动落为单列，宽容器仍按可用宽度铺多列。 */
+.expense-grid,
+.expense-form-grid {
   display:grid;
-  grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+  grid-template-columns:repeat(auto-fit,minmax(min(210px,100%),1fr));
   gap:16px;
+}
+
+/* 字段校验命中时给出可见标红；非输入容器用外框提示，不改变原有配色体系。 */
+.expense-panel input[aria-invalid="true"],
+.expense-panel select[aria-invalid="true"],
+.expense-panel textarea[aria-invalid="true"] {
+  border-color:var(--danger-text,#b91c1c);
+  box-shadow:0 0 0 1px var(--danger-text,#b91c1c);
+}
+
+.expense-panel [data-field][aria-invalid="true"]:not(input):not(select):not(textarea) {
+  outline:2px solid var(--danger-text,#b91c1c);
+  outline-offset:2px;
 }
 
 .expense-panel label {
@@ -87,12 +109,17 @@
   padding:0;
 }
 
-.expense-actions {
+.expense-actions,
+.expense-toolbar {
   display:flex;
   flex-wrap:wrap;
   gap:9px;
   align-items:center;
   margin:12px 0;
+}
+
+.expense-toolbar {
+  justify-content:space-between;
 }
 
 .expense-button {
@@ -108,7 +135,7 @@
 
 .expense-button.primary {
   background:var(--primary,#2563eb);
-  color:white;
+  color:var(--on-primary,white);
   border-color:var(--primary,#2563eb);
 }
 
@@ -118,7 +145,7 @@
 }
 
 .expense-button:focus-visible,.expense-panel input:focus-visible,.expense-panel select:focus-visible,.expense-panel textarea:focus-visible {
-  outline:2px solid #2563eb;
+  outline:2px solid var(--focus-ring,#2563eb);
   outline-offset:2px;
 }
 
@@ -127,7 +154,7 @@
   margin:12px 0;
   border-radius:9px;
   background:var(--primary-soft,#eff6ff);
-  color:var(--primary,#1e40af);
+  color:var(--primary-ink,#1e40af);
   overflow-wrap:anywhere;
 }
 
@@ -145,10 +172,19 @@
   overflow-x:auto;
 }
 
-.expense-table table {
+.expense-table table,
+.expense-table-body {
   width:100%;
   border-collapse:collapse;
-  font-size:13px;
+  font-size:var(--fs-body, 14px);
+}
+
+/* 表体稳定挂点：全局 body{overflow-wrap:anywhere} 允许逐字断行，
+   没有宽度下限时窄屏会把列压成逐字竖排。880px 按现有 5 列异常表的
+   内容宽度实测得出（业务枚举 + 金额 + 操作 + 单元格内边距），
+   保证 375px 由 .expense-table 横向滚动承接，1024px 仍可整表放下。 */
+.expense-table-body {
+  min-width:880px;
 }
 
 .expense-table th,.expense-table td {
@@ -161,16 +197,6 @@
   display:block;
   margin-top:5px;
   color:var(--text-secondary, #475569);
-}
-
-.expense-panel pre {
-  max-height:380px;
-  overflow:auto;
-  white-space:pre-wrap;
-  overflow-wrap:anywhere;
-  background:var(--surface-muted, #f8fafc);
-  padding:15px;
-  border-radius:8px;
 }
 
 .expense-item {
@@ -213,6 +239,28 @@
   font-size:16px;
 }
 
+/* 工作台指标本身就是入口：保持纯文本观感，但给出可点击与键盘焦点反馈。 */
+.expense-metric-link {
+  border:0;
+  background:none;
+  color:inherit;
+  font:inherit;
+  font-size:16px;
+  text-align:left;
+  cursor:pointer;
+  border-radius:8px;
+}
+
+.expense-metric-link:hover {
+  color:var(--primary-ink,#1e40af);
+  text-decoration:underline;
+}
+
+.expense-metric-link:focus-visible {
+  outline:2px solid var(--focus-ring,#2563eb);
+  outline-offset:2px;
+}
+
 .expense-history {
   list-style: none;
   margin: 16px 0;
@@ -247,3 +295,166 @@
   color: var(--text-secondary, #475569);
   font-size: 13px;
 }
+
+/* 业务对象选择器：把内部编号换成"按名称搜索 + 分页加载"的选项面板。
+   触发器保持与表单控件一致的高度和边框，窄屏只纵向伸展，不横向溢出。 */
+.expense-option-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 10px 0;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+.expense-option-picker {
+  position: relative;
+  min-width: 0;
+  width: 100%;
+}
+.expense-option-trigger {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 7px;
+  background: var(--surface-card, #fff);
+  color: inherit;
+  font: inherit;
+  font-weight: 400;
+  text-align: left;
+  cursor: pointer;
+}
+.expense-option-trigger > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.expense-option-trigger.placeholder { color: var(--text-secondary, #475569); }
+.expense-option-trigger i {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg) translateY(-2px);
+  transition: transform .16s ease;
+}
+.expense-option-picker.open .expense-option-trigger i { transform: rotate(225deg) translate(-2px, -2px); }
+.expense-option-trigger:focus-visible,
+.expense-option-picker.open .expense-option-trigger {
+  border-color: var(--primary, #2563eb);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary, #2563eb) 16%, transparent);
+  outline: none;
+}
+.expense-option-trigger[aria-invalid="true"] {
+  border-color: var(--danger-text, #b91c1c);
+  box-shadow: 0 0 0 1px var(--danger-text, #b91c1c);
+}
+.expense-option-picker.disabled { opacity: .6; }
+.expense-option-menu {
+  position: absolute;
+  z-index: 20;
+  left: 0;
+  right: 0;
+  top: calc(100% + 6px);
+  display: grid;
+  gap: 8px;
+  max-height: 320px;
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 10px;
+  background: var(--surface-card, #fff);
+  box-shadow: 0 18px 40px rgba(15, 23, 42, .16);
+}
+.expense-option-search { gap: 5px; margin: 0; font-weight: 400; }
+.expense-option-menu ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+.expense-option-menu li > button {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 400;
+  text-align: left;
+  cursor: pointer;
+}
+.expense-option-menu li > button:hover,
+.expense-option-menu li > button:focus-visible {
+  background: var(--primary-soft, #eff6ff);
+  outline: none;
+}
+.expense-option-menu li > button.selected { color: var(--primary-ink, #1e40af); }
+.expense-option-menu b {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}
+.expense-option-menu small {
+  grid-column: 1 / -1;
+  color: var(--text-secondary, #475569);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.expense-option-empty,
+.expense-option-error {
+  margin: 0;
+  padding: 10px 2px;
+  color: var(--text-secondary, #475569);
+  font-size: 13px;
+  font-weight: 400;
+}
+.expense-option-error { color: var(--danger-text, #b91c1c); }
+.expense-option-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 7px;
+  font-weight: 400;
+}
+.expense-option-chips > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: var(--primary-soft, #eff6ff);
+  color: var(--primary-ink, #1e40af);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.expense-option-chips button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+/* 证据面板跟随所属费用项：卡片内部用分隔线分组，不再另起一张带边框的卡片。 */
+.expense-evidence {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--border, #e2e8f0);
+}
+.expense-evidence > h4 { margin-top: 0; }

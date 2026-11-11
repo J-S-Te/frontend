@@ -561,7 +561,7 @@
 }
 .settlement-policy-field small {
   color: var(--muted, #64748b);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 400;
   line-height: 1.45;
 }
@@ -870,7 +870,7 @@
   height: 22px;
   place-items: center;
   color: var(--muted, #64748b);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 700;
   border-radius: 50%;
   background: var(--bg, #f1f5f9);

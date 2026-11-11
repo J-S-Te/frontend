@@ -346,10 +346,10 @@ watch(() => props.section, load, { immediate: true })
       <table>
       <thead>
       <tr>
-      <th>项目</th>
-      <th>人员</th>
-      <th>状态</th>
-      <th>操作</th>
+      <th scope="col">项目</th>
+      <th scope="col">人员</th>
+      <th scope="col">状态</th>
+      <th scope="col">操作</th>
       </tr>
       </thead>
       <tbody>
@@ -393,9 +393,9 @@ watch(() => props.section, load, { immediate: true })
       <table>
       <thead>
       <tr>
-      <th>合同</th>
-      <th>客户</th>
-      <th>项目</th>
+      <th scope="col">合同</th>
+      <th scope="col">客户</th>
+      <th scope="col">项目</th>
       </tr>
       </thead>
       <tbody>
@@ -493,14 +493,14 @@ watch(() => props.section, load, { immediate: true })
         <table>
       <thead>
       <tr>
-      <th>回款</th>
-      <th>类型</th>
-      <th>金额</th>
-      <th>原因</th>
-      <th>状态</th>
-      <th>处置</th>
-      <th>退款凭证</th><th>退款完成时间</th><th>退款确认人</th>
-      <th>操作</th>
+      <th scope="col">回款</th>
+      <th scope="col">类型</th>
+      <th scope="col">金额</th>
+      <th scope="col">原因</th>
+      <th scope="col">状态</th>
+      <th scope="col">处置</th>
+      <th scope="col">退款凭证</th><th scope="col">退款完成时间</th><th scope="col">退款确认人</th>
+      <th scope="col">操作</th>
       </tr>
       </thead>
       <tbody>
@@ -566,10 +566,10 @@ watch(() => props.section, load, { immediate: true })
         <table>
       <thead>
       <tr>
-      <th>核销</th>
-      <th>回传状态</th>
-      <th>外部编号</th>
-      <th>操作</th>
+      <th scope="col">核销</th>
+      <th scope="col">回传状态</th>
+      <th scope="col">外部编号</th>
+      <th scope="col">操作</th>
       </tr>
       </thead>
       <tbody>

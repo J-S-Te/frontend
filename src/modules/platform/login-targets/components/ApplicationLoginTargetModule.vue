@@ -277,12 +277,12 @@ useRelatedDataInvalidation((event) => {
           <table class="console-data-table login-target-module__table">
             <thead>
               <tr>
-                <th>目标编码</th>
-                <th>名称</th>
-                <th>批准跳转地址</th>
-                <th>状态</th>
-                <th>更新时间</th>
-                <th class="login-target-module__action-column">操作</th>
+                <th scope="col">目标编码</th>
+                <th scope="col">名称</th>
+                <th scope="col">批准跳转地址</th>
+                <th scope="col">状态</th>
+                <th scope="col">更新时间</th>
+                <th scope="col" class="login-target-module__action-column">操作</th>
               </tr>
             </thead>
             <tbody>

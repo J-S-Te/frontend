@@ -76,7 +76,7 @@ test('计划差额面板：展示合同金额 / 计划合计 / 差额列与超�
   const html = await render({ can: can('settlement.receivable.read'), coverageItems: [GAP_ROW] })
   assert.match(html, /计划差额（合同金额对计划合计）/)
   for (const header of ['合同编号', '合同金额', '计划合计', '差额', '差额比例', '判定', '触发原因']) {
-    assert.match(html, new RegExp(`<th>${header}</th>`), header)
+    assert.match(html, new RegExp(`<th scope="col">${header}</th>`), header)
   }
   assert.match(html, /HT-2026-001/)
   assert.match(html, /¥100\.00/)

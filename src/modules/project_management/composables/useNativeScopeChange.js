@@ -1,4 +1,5 @@
 import { computed, ref } from 'vue'
+import { createIdempotencyKey } from '../../shared/utils/idempotencyKey.js'
 
 // 用途：仅提取服务端允许变更的完整范围字段。
 // 参数：item 为当前权威服务项。
@@ -26,7 +27,7 @@ function exactReceipt(value, command, project) {
 // 用途：管理本地范围提案及异人审批，未知结果仅允许原操作精确重试。
 // 参数：projectId 为固定项目，api 为既有真实transport，disabled 为当前禁写状态，uuid 生成操作号。
 // 返回值：完整表单、状态、权限及读取和写入动作。
-export function useNativeScopeChange({ projectId, api, disabled = () => false, uuid = () => crypto.randomUUID(), onChanged = () => {}, initialState = null }) {
+export function useNativeScopeChange({ projectId, api, disabled = () => false, uuid = createIdempotencyKey, onChanged = () => {}, initialState = null }) {
   const state = ref(initialState), lines = ref([]), reason = ref(''), confirmed = ref(false)
   const busy = ref(false), loading = ref(false), error = ref(''), notice = ref(''), pending = ref(null)
   const active = computed(() => state.value?.changes?.find((item) => item.status === 'PENDING'))

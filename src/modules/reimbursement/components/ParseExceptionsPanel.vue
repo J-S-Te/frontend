@@ -2,6 +2,9 @@
 import { onMounted, ref } from 'vue'
 import { reimbursementAPI as api } from '../api/reimbursement.js'
 import { formatBusinessDateTime } from '../../shared/utils/businessTime.js'
+import { failureMessage } from '../statusLabels.js'
+import PaginationBar from '@/modules/shared/components/PaginationBar.vue'
+import ErrorState from '../../shared/components/ErrorState.vue'
 const emit=defineEmits(['open'])
 const rows=ref([]),total=ref(0),page=ref(1),status=ref(''),busy=ref(false),error=ref('')
 const dateFrom=ref(''),dateTo=ref('')
@@ -36,17 +39,16 @@ onMounted(()=>load())
       <option v-for="(label,key) in statuses" :key="key" :value="key">{{ label }}</option></select></label>
       <label>运行开始日期<input v-model="dateFrom" type="date"></label><label>运行结束日期<input v-model="dateTo" type="date"></label>
       <button class="expense-button" :disabled="busy" @click="load(true)">查询解析异常</button></div>
-    <p v-if="error" role="alert">{{ error }}</p>
-    <div class="expense-table"><table><thead><tr><th>原件</th><th>状态与原因</th><th>候选组</th><th>运行时间</th><th>处理</th></tr></thead><tbody>
+    <ErrorState v-if="error" compact title="解析异常读取失败" :error="error" retry-text="重新读取解析异常" @retry="load()" />
+    <div class="expense-table"><table class="expense-table-body"><thead><tr><th scope="col">原件</th><th scope="col">状态与原因</th><th scope="col">候选组</th><th scope="col">运行时间</th><th scope="col">处理</th></tr></thead><tbody>
       <tr v-for="row in rows" :key="row.parse_run_id"><td>{{ row.original_name || row.document_id }}</td>
-        <td>{{ statuses[row.parse_status] || row.parse_status }} · {{ row.error_code || '请对照原件核对缺失或冲突字段' }}</td>
+        <td>{{ statuses[row.parse_status] || '状态待确认' }} · {{ row.error_code ? failureMessage(row.error_code) : '请对照原件核对缺失或冲突字段' }}</td>
         <td>{{ row.parsed_candidate_count }} 组待核对；尚无可用业务发票</td>
         <td>{{ formatBusinessDateTime(row.created_at) }}</td><td>
           <button class="expense-button" @click="emit('open',row)">查看原件与人工处理</button></td></tr>
       <tr v-if="!rows.length&&!error&&!busy"><td colspan="5">当前范围没有待处理原件。</td></tr>
     </tbody></table></div>
-    <footer class="expense-actions"><button class="expense-button" :disabled="page<=1||busy" @click="page--;load()">上一页</button>
-      <span>第 {{ page }} 页，共 {{ total }} 份原件</span>
-      <button class="expense-button" :disabled="page*20>=total||busy" @click="page++;load()">下一页</button></footer>
+    <PaginationBar label="原件解析待处理池分页" :page="page" :total="total" :page-size="20" :loading="busy"
+      @change="nextPage => { page = nextPage; load() }" />
   </section>
 </template>

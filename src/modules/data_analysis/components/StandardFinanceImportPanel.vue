@@ -175,7 +175,7 @@ onMounted(loadState)
       <div v-if="preview" class="da-table-scroll">
         <p>截至日 {{ documentFile.as_of_date }} · {{ preview.row_count }} 条事实 · 预期当前版本 {{ preview.expected_version }}</p>
         <p v-if="preview.row_count === 0">文件无事实记录，本次发布将把本来源明确更新为真实零值，请确认业务确实无应收和回款。</p>
-        <table class="da-table"><thead><tr><th>币种</th><th>原始应收</th><th>已核销回款</th><th>未清余额</th><th>逾期超过90天</th><th>截至月回款</th></tr></thead><tbody><tr v-for="row in currencyRows" :key="row.currency"><td>{{ row.currency }}</td><td>{{ amount(row.original_minor) }}</td><td>{{ amount(row.allocated_minor) }}</td><td>{{ amount(row.open_minor) }}</td><td>{{ amount(row.over_90_minor) }}</td><td>{{ amount(row.month_receipts_minor) }}</td></tr></tbody></table>
+        <table class="da-table"><thead><tr><th scope="col">币种</th><th scope="col">原始应收</th><th scope="col">已核销回款</th><th scope="col">未清余额</th><th scope="col">逾期超过90天</th><th scope="col">截至月回款</th></tr></thead><tbody><tr v-for="row in currencyRows" :key="row.currency"><td>{{ row.currency }}</td><td>{{ amount(row.original_minor) }}</td><td>{{ amount(row.allocated_minor) }}</td><td>{{ amount(row.open_minor) }}</td><td>{{ amount(row.over_90_minor) }}</td><td>{{ amount(row.month_receipts_minor) }}</td></tr></tbody></table>
         <label class="standard-finance-confirm"><input v-model="confirmed" type="checkbox" :disabled="!canImport" />我已核对截至日、完整性和分币种总额，确认发布本来源的新版本。</label>
         <button class="da-button primary" :disabled="!canImport || !confirmed" @click="publish">明确发布标准事实</button>
       </div>

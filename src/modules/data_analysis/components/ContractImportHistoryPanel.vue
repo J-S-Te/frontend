@@ -32,7 +32,7 @@ onBeforeUnmount(() => { generation++ })
     <template v-if="result">
       <p>同步状态：{{ result.sync_status || 'UNKNOWN' }}；最近成功同步：{{ result.synced_at || '尚无成功记录' }}；未归期：{{ result.sync_status === 'UNKNOWN' ? '未知' : result.unassigned_count }}。</p>
       <p>来源快照 {{ result.source_snapshot_id || '未知' }}；聚合运行 {{ result.aggregation_run_id || '未知' }}<span v-if="result.error_code">；错误 {{ result.error_code }}</span></p>
-      <div class="import-history-scroll" data-table-scroll><table class="da-table"><thead><tr><th>原月份</th><th>币种</th><th>模式／口径／状态</th><th>数量</th><th>原金额</th><th>实际源事实接入</th></tr></thead><tbody>
+      <div class="import-history-scroll" data-table-scroll><table class="da-table"><thead><tr><th scope="col">原月份</th><th scope="col">币种</th><th scope="col">模式／口径／状态</th><th scope="col">数量</th><th scope="col">原金额</th><th scope="col">实际源事实接入</th></tr></thead><tbody>
         <tr v-for="row in result.periods || []" :key="[row.period,row.currency,row.import_mode,row.report_mode,row.status].join('/')">
           <td>{{ row.period === 'UNASSIGNED' ? '未归期' : row.period }}</td><td>{{ row.currency }}</td><td>{{ row.import_mode }}／{{ row.report_mode }}／{{ row.status }}</td><td>{{ row.contract_count }}</td><td>{{ historyAmount(row.amount_minor) }}</td><td>{{ row.source_facts_count }}／{{ row.contract_count }}（其余仅API摘要）</td>
         </tr>

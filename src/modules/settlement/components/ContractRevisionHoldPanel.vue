@@ -508,6 +508,7 @@ onBeforeUnmount(() => {
 }
 .revision-holds-detail {
   margin-top: 6px;
+  overflow-x: auto;
 }
 .revision-holds-detail > summary {
   cursor: pointer;

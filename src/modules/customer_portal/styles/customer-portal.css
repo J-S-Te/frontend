@@ -14,8 +14,7 @@
  */
 .portal-shell { min-width: 0; }
 
-.portal-brand small,
-.portal-sidebar-note { color: var(--muted, #64748b); }
+.portal-brand small{ color: var(--muted, #64748b); }
 
 .portal-topbar .console-button { min-height: 32px; padding: 6px 12px; font-size: 12px; }
 
@@ -135,10 +134,6 @@
 .portal-error { color: var(--danger-text, #b91c1c); border-color: var(--danger-border, #fecaca); background: var(--danger-soft, #fef2f2); }
 .portal-warning { color: var(--warning-text, #b45309); border-color: var(--warning-border, #fde68a); background: var(--warning-soft, #fef3c7); }
 .portal-success { color: var(--success-text, #15803d); border-color: var(--success-border, #c7f0d6); background: var(--success-soft, #ecfdf5); }
-.section-issues { margin: 14px 0 0; padding: 10px 13px; color: var(--danger-text, #b91c1c); font-size: 12px; line-height: 1.6; border: 1px solid var(--danger-border, #fecaca); border-radius: 8px; background: var(--danger-soft, #fef2f2); }
-.section-issues h3 { margin: 0 0 7px; font-size: 12px; }
-.section-issues ol,
-.section-issues ul { margin: 0; padding-left: 18px; }
 
 .portal-empty {
   padding: 46px !important;
@@ -427,7 +422,6 @@
 .filing-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
 .filing-toolbar h2 { margin: 5px 0; min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
 .filing-toolbar > div:last-child { display: flex; gap: 8px; }
-.filing-toolbar .filing-toolbar-meta { display: grid; gap: 3px; }
 
 /* 按钮变体：对齐 console-button primary / secondary */
 .filing-workspace button.primary {
@@ -560,7 +554,7 @@
   max-width: 100%;
   overflow-wrap: anywhere;
   color: var(--muted, #64748b);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   line-height: 1.4;
 }
 .filing-steps button.active small { color: var(--p, #2563eb); }
@@ -771,7 +765,7 @@
   top: 4px;
   right: 7px;
   color: rgba(255, 255, 255, .92);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 700;
 }
 .filing-matrices td label:has(input:checked) span { font-weight: 600; }
@@ -792,7 +786,7 @@
 .filing-validation { overflow: hidden; padding: 0 !important; }
 .filing-validation-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 18px; border-bottom: 1px solid var(--border-soft, #e4ecfc); background: var(--surface-tint, #fbfdff); }
 .filing-validation-heading h2 { margin: 3px 0 0; color: var(--text, #0f172a); font-size: 16px; }
-.filing-validation-eyebrow { color: var(--muted, #64748b); font-size: 11px; }
+.filing-validation-eyebrow { color: var(--muted, #64748b); font-size: var(--fs-xs); }
 .filing-validation-badge { padding: 5px 10px; color: var(--warning-text, #b45309); font-size: 12px; font-weight: 600; white-space: nowrap; border: 1px solid var(--warning-border, #fde68a); border-radius: 999px; background: var(--warning-soft-strong, #fffbeb); }
 .filing-validation.is-valid .filing-validation-badge { color: var(--success-text, #15803d); border-color: var(--success-border, #bbf7d0); background: var(--success-soft-strong, #f0fdf4); }
 .filing-validation-summary { display: flex; align-items: center; gap: 11px; padding: 16px 18px 12px; }

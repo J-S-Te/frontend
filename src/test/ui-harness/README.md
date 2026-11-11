@@ -95,6 +95,22 @@ LAYOUT_RUN_LABEL=local-20261106 CHROMIUM_PATH=/usr/bin/google-chrome npm run tes
 
 失败时退出码非 0，且 stdout 会带 `examples`，每条含 `module`、`width`、`height`、`order`、`errors`。
 
+当前覆盖 8 个模块骨架（platform / contract / project / crm / portal / settlement / analysis /
+reimbursement）：CSS 只读真实模块样式，合成超长文本与 240 字符 token 驱动边界；窄容器栅格循环
+包含报销 `.expense-grid`（180px 内容宽度必须单列、不溢出）。报销模块额外
+挂载真实 `ArchivePackagePanel`、`PaymentExceptionPanel`、`ClaimSyncPanel` 与共享 `ErrorState`，
+所有请求用浏览器内 `fetch` 合成响应（档案包任务直接返回 `DONE`、同步状态返回快照缺失、
+失败态返回 503），不访问真实后端；表体使用 `.expense-table-body` 稳定挂点，375px 断言真实 5 列
+异常表由 `.expense-table` 横向滚动并保留 880px 可读宽度；同一断言语义也覆盖付款历史（7 列）与
+冲正历史（4 列）两张分页历史表（`actual-reimbursement-history-tables`，合成行沿用真实模板单元格
+形状）；证据截图包括 `reimbursement-page-*`、`reimbursement-form-grid-*`、
+`reimbursement-table-375-viewport.png`、`reimbursement-exception-table-375-*`、
+`reimbursement-payment-history-375-*`、`reimbursement-reversal-history-375-*`、
+`reimbursement-history-*`、`reimbursement-panels-*`、`reimbursement-error-*`、
+`reimbursement-sync-error-375-*`。历史表这类结构由
+`src/modules/reimbursement/views/ReimbursementView.test.mjs` 的真实模板 SSR 断言兜住挂点，
+浏览器夹具只负责几何。
+
 ### 2. 需要手工 dev server 的脚本
 
 `vite.config.js` 默认 `5173` + `strictPort`，用 CLI `--port` 覆盖：

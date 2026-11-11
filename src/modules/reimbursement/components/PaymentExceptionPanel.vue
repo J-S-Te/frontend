@@ -1,8 +1,12 @@
 <script setup>
+import { computed, onMounted, ref } from 'vue'
 import { formatMinor } from '../api/client.js'
 import { formatBusinessDateTime } from '../../shared/utils/businessTime.js'
+import PaginationBar from '@/modules/shared/components/PaginationBar.vue'
+import BusinessOptionPicker from './BusinessOptionPicker.vue'
+import { reimbursementAPI as api } from '../api/reimbursement.js'
 
-defineProps({
+const props = defineProps({
   claim: { type: Object, required: true },
   rows: { type: Array, default: null },
   page: { type: Number, default: 1 },
@@ -16,6 +20,43 @@ defineProps({
   pending: { type: Boolean, default: false },
 })
 const emit = defineEmits(['read', 'select', 'record', 'review', 'upload', 'page'])
+// 实际付款账户与收款档案优先来自既有付款选项接口；异常事实本身允许外部账户，
+// 因此额外保留一处带警示的高级手工入口，不把外部异常硬塞进受控目录。
+const paymentAccounts = ref([])
+const payeeProfiles = ref([])
+const optionError = ref('')
+const accounts = computed(() => (Array.isArray(paymentAccounts.value) ? paymentAccounts.value : []))
+const payees = computed(() => (Array.isArray(payeeProfiles.value) ? payeeProfiles.value : []))
+const accountNeedsManual = computed(() => Boolean(props.form?.source_account_ref)
+  && !accounts.value.some((row) => row.account_ref === props.form.source_account_ref))
+const payeeNeedsManual = computed(() => Boolean(props.form?.payee_profile_id)
+  && !payees.value.some((row) => row.id === props.form.payee_profile_id))
+const voucherList = computed({ get: () => splitIDs(props.form?.voucher_file_ids),
+  set: (value) => { props.form.voucher_file_ids = joinIDs(value) } })
+const evidenceList = computed({ get: () => splitIDs(props.reviewForm?.evidence_file_ids),
+  set: (value) => { props.reviewForm.evidence_file_ids = joinIDs(value) } })
+
+// 用途：把逗号分隔引用拆成去重列表，供选择器读写。
+// 参数：value 为表单里的逗号分隔文件引用。
+// 返回值：去重后的文件引用数组。
+function splitIDs(value) { return [...new Set(String(value || '').split(',').map((item) => item.trim()).filter(Boolean))] }
+function joinIDs(value) { return (Array.isArray(value) ? value : []).slice(0, 20).join(',') }
+
+// 用途：读取当前单据可用的受控付款账户与申请人收款档案，失败给出可重试原因。
+// 参数：无。
+// 返回值：无；选项缺失时不猜测目录内容。
+async function loadPaymentOptions() {
+  const id = props.claim?.id
+  if (!id) return
+  optionError.value = ''
+  try {
+    const result = await api.request(`/claims/${encodeURIComponent(id)}/payment-options`)
+    paymentAccounts.value = Array.isArray(result?.source_accounts) ? result.source_accounts : []
+    payeeProfiles.value = Array.isArray(result?.payee_profiles) ? result.payee_profiles : []
+  } catch (cause) { optionError.value = cause?.message || '付款账户与收款档案选项读取失败' }
+}
+
+onMounted(() => { if (props.canRecord) void loadPaymentOptions() })
 const decisions = {
   CONFIRM_CONFLICT: '核实确有冲突，保留待处置',
   DISMISS: '证据排除异常',
@@ -47,23 +88,70 @@ const statuses = {
         <label>实际方式<select v-model="form.method">
           <option value="BANK">银行转账</option><option value="CASH">现金</option>
         </select></label>
-        <label>实际付款账户引用<input v-model="form.source_account_ref"></label>
+        <div class="expense-option-field">
+          <span>实际付款账户（受控账户名称）</span>
+          <select v-model="form.source_account_ref" aria-label="实际付款账户">
+            <option value="">
+              选择实际付款账户
+            </option>
+            <option v-if="accountNeedsManual" :value="form.source_account_ref">
+              当前已保存账户 {{ form.source_account_ref }}
+            </option>
+            <option v-for="account in accounts" :key="account.id" :value="account.account_ref">
+              {{ account.name }} · {{ account.account_ref }}
+            </option>
+          </select>
+          <small v-if="optionError" class="expense-option-error">{{ optionError }}</small>
+        </div>
         <label>实际流水号<input v-model="form.transaction_no"></label>
-        <label>实际收款档案引用<input v-model="form.payee_profile_id"></label>
+        <div class="expense-option-field">
+          <span>实际收款档案（本人已审核）</span>
+          <select v-model="form.payee_profile_id" aria-label="实际收款档案">
+            <option value="">
+              选择已审核收款档案
+            </option>
+            <option v-if="payeeNeedsManual" :value="form.payee_profile_id">
+              当前已保存收款档案 {{ form.payee_profile_id }}
+            </option>
+            <option v-for="payee in payees" :key="payee.id" :value="payee.id">
+              {{ payee.name }} · {{ payee.account_ref }} · v{{ payee.version }}
+            </option>
+          </select>
+        </div>
         <label>上传外部付款凭证
           <input type="file" accept=".pdf,.png,.jpg,.jpeg"
             @change="emit('upload', $event, 'exceptionFact')">
         </label>
-        <label>已上传凭证ID（1至20份）<input v-model="form.voucher_file_ids"></label>
+        <div class="expense-option-field">
+          <span>已上传外部付款凭证（1至20份，按文件名选择）</span>
+          <BusinessOptionPicker
+            v-model="voucherList"
+            path="/invoice-document-options"
+            purpose="reimbursement.payment.voucher"
+            value-key="file_id"
+            object-label="付款凭证"
+            multiple
+            :disabled="saving || pending"
+            aria-label="选择外部付款凭证"
+          />
+        </div>
       </div>
+      <details class="expense-option-field">
+        <summary>高级：外部实际账户不在受控目录时手工填写</summary>
+        <p class="expense-alert warning">
+          异常事实可能发生在本平台目录之外的账户。只有确知外部真实账户引用时才手工填写；正常付款请回到「全额付款事实登记」用受控账户登记。
+        </p>
+        <label>外部付款账户引用<input v-model="form.source_account_ref" maxlength="128"></label>
+        <label>外部收款档案引用<input v-model="form.payee_profile_id" maxlength="64"></label>
+      </details>
       <label>事实与当前审批不符的原因<textarea v-model="form.reason" maxlength="2000" /></label>
       <button class="expense-button" @click="emit('record')">仅记录异常事实</button>
     </fieldset>
 
     <div v-if="rows" class="expense-table">
-      <table>
-        <thead><tr><th>记录 / 实际流水</th><th>实际金额</th><th>观察时状态</th>
-          <th>核实状态</th><th>操作</th></tr></thead>
+      <table class="expense-table-body">
+        <thead><tr><th scope="col">记录 / 实际流水</th><th scope="col">实际金额</th><th scope="col">观察时状态</th>
+          <th scope="col">核实状态</th><th scope="col">操作</th></tr></thead>
         <tbody>
           <tr v-for="record in rows" :key="record.id">
             <td>{{ record.id }}<small>{{ record.transaction_no }}</small></td>
@@ -77,14 +165,8 @@ const statuses = {
           <tr v-if="!rows.length"><td colspan="5">当前单据暂无异常事实记录。</td></tr>
         </tbody>
       </table>
-      <div class="expense-actions">
-        <span>共 {{ total }} 条 · 第 {{ page }} 页</span>
-        <button class="expense-button" :disabled="page <= 1" @click="emit('page', page - 1)">
-          上一页
-        </button>
-        <button class="expense-button" :disabled="page * 20 >= total"
-          @click="emit('page', page + 1)">下一页</button>
-      </div>
+      <PaginationBar label="异常事实分页" :page="page" :total="total" :page-size="20"
+        @change="nextPage => emit('page', nextPage)" />
     </div>
 
     <article v-if="selected" class="expense-item">
@@ -113,7 +195,19 @@ const statuses = {
         <label>独立核实依据<textarea v-model="reviewForm.reason" maxlength="2000" /></label>
         <label>上传核实证据<input type="file" accept=".pdf,.png,.jpg,.jpeg"
           @change="emit('upload', $event, 'exceptionReview')"></label>
-        <label>已上传核实证据ID（1至20份）<input v-model="reviewForm.evidence_file_ids"></label>
+        <div class="expense-option-field">
+          <span>已上传核实证据（1至20份，按文件名选择）</span>
+          <BusinessOptionPicker
+            v-model="evidenceList"
+            path="/invoice-document-options"
+            purpose="reimbursement.payment.voucher"
+            value-key="file_id"
+            object-label="核实证据"
+            multiple
+            :disabled="saving || pending"
+            aria-label="选择独立核实证据"
+          />
+        </div>
         <label v-if="['RESOLVE_WITH_PAYMENT', 'RESOLVE_WITH_REVERSAL'].includes(reviewForm.decision)">
           已有合法付款ID<input v-model="reviewForm.linked_payment_id">
         </label>

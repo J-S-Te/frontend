@@ -1,4 +1,5 @@
 import { principalIdentityID } from '../shared/authz/sessionCompatibility.js'
+import { createDownloadTimeoutSignal } from '../shared/utils/downloadTimeout.js'
 
 // 用途：从当前已授权项目快照编目引用，不宣称业务记录已封存成文件。
 // 参数：project为可见项目，items/events为相同范围内的服务项和交付记录。
@@ -30,12 +31,18 @@ export function projectArchiveEntries(project, items = [], events = []) {
 // 参数：fetcher为同源请求，path为固定路径。
 // 返回值：服务端data；HTTP/信封错误时抛出明确错误。
 async function directoryData(fetcher,path) {
-  const response=await fetcher(path,{credentials:'include',cache:'no-store',signal:AbortSignal.timeout(15000)})
-  const value=await response.json().catch(()=>null)
-  if(!response.ok || !value || !Object.hasOwn(value,'data')) {
-    throw new Error(value?.message || '目录读取失败，请先打开对应子系统确认登录和权限')
+  // 旧版 Safari 没有 AbortSignal.timeout，统一走共享的降级超时信号，避免请求全部失败。
+  const timeout=createDownloadTimeoutSignal(15000)
+  try {
+    const response=await fetcher(path,{credentials:'include',cache:'no-store',signal:timeout.signal})
+    const value=await response.json().catch(()=>null)
+    if(!response.ok || !value || !Object.hasOwn(value,'data')) {
+      throw new Error(value?.message || '目录读取失败，请先打开对应子系统确认登录和权限')
+    }
+    return value.data
+  } finally {
+    timeout.dispose()
   }
-  return value.data
 }
 
 // 用途：核对两个独立会话主体后读取报销自己的当前授权档案目录。

@@ -66,6 +66,8 @@ test('Settlement view exposes the first-phase financial workflow without mock re
   assert.match(source, /navigationGroups/)
   assert.match(source, /dashboardKpis/)
   assert.match(source, /workItems/)
+  // 回归锁定：总览面板必须绑定真实待办，历史缺陷是 :work-items="[]" 写死导致「我的待办」卡片永不显示。
+  assert.match(source, /:work-items="workItems"/)
   // 回归锁定：催收页账龄区间报表必须绑定真实计算属性 agingRows。
   // 历史缺陷：定义改名 agingRows 后本表仍用旧名 agingBuckets，绑定悬空导致 tbody 长期空渲染。
   // 催收区模板已提取为 DunningCenterPanel.vue（golden 逐字节锁定），表格绑定断言随之指向组件源；视图经 :aging-rows 传入。

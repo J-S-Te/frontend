@@ -43,13 +43,13 @@ defineEmits(['reload'])
         <table>
           <thead>
             <tr>
-              <th>合同编号</th>
-              <th>合同金额</th>
-              <th>计划合计</th>
-              <th>差额</th>
-              <th>差额比例</th>
-              <th>判定</th>
-              <th>触发原因</th>
+              <th scope="col">合同编号</th>
+              <th scope="col">合同金额</th>
+              <th scope="col">计划合计</th>
+              <th scope="col">差额</th>
+              <th scope="col">差额比例</th>
+              <th scope="col">判定</th>
+              <th scope="col">触发原因</th>
             </tr>
           </thead>
           <tbody>
