@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { webcrypto } from 'node:crypto'
+import { createHash, webcrypto } from 'node:crypto'
 import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc'
 import * as Vue from 'vue'
 import { renderToString } from '@vue/server-renderer'
@@ -9,6 +9,7 @@ import { approvalNodeLabel, assignmentPurpose, expenseScopeDescription, hasTenan
 import { canSelectProjectReference, editableClaimItem, evidenceIDs,travelInput } from '../claimFields.js'
 import { policyFields, policyFormFrom, policyPayload } from '../policy.js'
 import { createCommandRunner, createRequestID, formatMinor, toMinor, validateItems } from '../api/client.js'
+import { sourceSHA256 } from '../../shared/utils/sourceIntegrity.js'
 import * as workspaceState from '../workspaceState.js'
 import { frontendModules } from '../../registry/compiledModules.js'
 import * as workspace from '../workspace.js'
@@ -26,7 +27,7 @@ async function mountPage(permissions, request, section = 'dashboard', roles = []
   const route = Vue.reactive({ params: { section }, query: {} })
   const { descriptor } = parse(readFileSync(new URL('./ReimbursementView.vue', import.meta.url), 'utf8'))
   const script = compileScript(descriptor, { id: 'expense-view-test' })
-  const dependencies = { ...workspaceState, ...workspace, ...invoiceClassification, allocationInput, travelInput,frontendModules,
+  const dependencies = { ...workspaceState, ...workspace, ...invoiceClassification, allocationInput, travelInput,frontendModules,sourceSHA256,
     computed: Vue.computed, nextTick: Vue.nextTick, onBeforeUnmount: Vue.onBeforeUnmount,
     onMounted: Vue.onMounted, ref: Vue.ref, watch: Vue.watch, useRoute: () => route, useRouter: () => ({ push() {} }),
     onBeforeRouteLeave() {}, AppShell: { setup: (_props, { slots }) => () => Vue.h('main', slots.default?.()) }, LoadingState: panelStub, ExpenseInbox: panelStub, ArchiveBorrowPanel: panelStub, TravelFields: panelStub, ClaimPreviewPanel:panelStub,InvoiceContentFields:panelStub,InvoiceContentMappings:panelStub,InvoiceClassificationEvidence:panelStub,ParseExceptionsPanel:panelStub, PaymentExceptionPanel: panelStub, ClaimEvidenceTravelPanel: panelStub, ArchivePackagePanel: panelStub, InvoiceControlsPanel: panelStub, ApprovalRoundsPanel: panelStub, ClaimSyncPanel: panelStub, RecoveryPanel: panelStub, todayBusinessDate: () => '2026-11-10', formatBusinessDateTime: (value) => value,
@@ -93,6 +94,52 @@ test('HTTP入口缺少randomUUID时仍能初始化工作台费用表单', async 
     assert.equal(fixture.state.dashboard.value.my_claims, 0)
   } finally {
     fixture?.unmount()
+    Object.defineProperty(globalThis, 'crypto', previousCrypto)
+  }
+})
+
+test('HTTP上传仍计算原件摘要并使用系统回执文档，不暴露可编辑文档编号', async () => {
+  const previousCrypto = Object.getOwnPropertyDescriptor(globalThis, 'crypto')
+  const previousFetch = globalThis.fetch
+  Object.defineProperty(globalThis, 'crypto', { configurable: true,
+    value: { getRandomValues: webcrypto.getRandomValues.bind(webcrypto) } })
+  const writes = []
+  const file = new File(['%PDF-1.4\n% test fixture\n%%EOF\n'], 'upload-fixture.pdf',
+    { type: 'application/pdf' })
+  let fixture
+  try {
+    fixture = await mountPage(['expense.invoice.read', 'expense.invoice.upload'], async (path, options) => {
+      writes.push([path, options && JSON.parse(options.body)])
+      if (path === '/invoice-documents/upload-sessions') return {
+        document_id: 'server-document', file_id: 'server-file',
+        upload_url: '/file-gateway/upload/fixture', ticket: 'synthetic-upload-ticket',
+      }
+      if (path === '/invoice-documents/server-document/complete') return {
+        id: 'server-document', file_id: 'server-file', status: 'READY', parse_run_id: 'server-run',
+      }
+      throw new Error(`unexpected API: ${path}`)
+    }, 'invoice-upload')
+    window.location = { origin: 'http://fixture.example.test',
+      href: 'http://fixture.example.test/reimbursement/invoice-upload' }
+    globalThis.fetch = async (url, options) => {
+      assert.equal(url, 'http://fixture.example.test/file-gateway/upload/fixture')
+      assert.equal(options.method, 'PUT')
+      assert.equal(options.body, file)
+      return new Response(null, { status: 200 })
+    }
+    await fixture.state.uploadInvoiceBatch({ target: { files: [file] } })
+    assert.equal(fixture.state.error.value, '')
+    assert.equal(fixture.state.uploadBatch.value[0].status, 'READY')
+    assert.equal(writes[0][1].sha256,
+      createHash('sha256').update(Buffer.from(await file.arrayBuffer())).digest('hex'))
+    assert.equal(fixture.state.documentID.value, 'server-document')
+    const html = await fixture.html()
+    assert.doesNotMatch(html, /文档ID|上传后的文档ID|server-document/)
+    assert.match(html, /upload-fixture\.pdf/)
+    assert.match(html, /查询原件状态/)
+  } finally {
+    fixture?.unmount()
+    globalThis.fetch = previousFetch
     Object.defineProperty(globalThis, 'crypto', previousCrypto)
   }
 })

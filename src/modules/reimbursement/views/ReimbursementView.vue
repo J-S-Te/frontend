@@ -23,6 +23,7 @@ import { canSelectProjectReference, editableClaimItem, evidenceIDs,travelInput }
 import { approvalNodeLabel, assignmentPurpose, expenseScopeDescription, hasTenantAllCapability,
   reimbursementRoleLabel } from '../rolePresentation.js'
 import { formatBusinessDateTime, todayBusinessDate } from '../../shared/utils/businessTime.js'
+import { sourceSHA256 } from '../../shared/utils/sourceIntegrity.js'
 import { createCommandRunner, createRequestID, formatMinor, toMinor, validateItems } from '../api/client.js'
 import { ensureReimbursementSession, logoutReimbursement, reimbursementAPI as api,
   startReimbursementLogin } from '../api/reimbursement.js'
@@ -1001,8 +1002,7 @@ async function uploadInvoice(event, purpose = 'reimbursement.invoice.original', 
   catch(cause) {showError(cause);return null}
   error.value = ''; queuedUpload = { file, purpose, voucherDestination }; saving.value = true
   try {
-    const hash = await crypto.subtle.digest('SHA-256', await file.arrayBuffer())
-    const sha256 = Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, '0')).join('')
+    const sha256 = await sourceSHA256(file)
     saving.value = false
     const result = await mutate('document.upload', '/invoice-documents/upload-sessions',
       { purpose, original_name: file.name, media_type: media,
@@ -1359,8 +1359,7 @@ async function downloadExport() {
       throw new Error('导出尚未完成或受控结果不完整，请先查询任务状态')
     }
     const bytes = new TextEncoder().encode(result.content)
-    const digest = await crypto.subtle.digest('SHA-256', bytes)
-    const hash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
+    const hash = await sourceSHA256(new Blob([bytes]))
     if (hash !== result.sha256) throw new Error('导出内容摘要不一致，已停止下载')
     const url = URL.createObjectURL(new Blob([bytes], { type: 'text/csv;charset=utf-8' }))
     const anchor = document.createElement('a')
@@ -1635,10 +1634,7 @@ onBeforeUnmount(() => {
           {{ file.name }} · {{ {WAITING:'等待',UPLOADING:'上传中',READY:'已就绪',UNKNOWN:'结果待确认',FAILED:'失败'}[file.status] }}
           <button v-if="file.document_id" class="expense-button" @click="documentID=file.document_id; readDocument()">读取此原件</button>
         </li></ul>
-        <label>
-          文档ID
-          <input v-model="documentID" placeholder="上传后的文档ID">
-        </label>
+        <p v-if="!documentID">上传原件后，系统会自动关联原件并开放后续操作。</p>
         <div class="expense-actions">
           <button class="expense-button" :disabled="saving || !documentID" @click="parseDocument">
             发起解析
@@ -1681,7 +1677,7 @@ onBeforeUnmount(() => {
         @open="openParseException" />
       <section v-if="workspace==='invoice-abnormal' && parseRun" class="expense-panel" aria-label="当前原件解析任务">
         <h3>当前原件解析任务</h3>
-        <p>文档 {{ documentID }} · 任务 {{ parseRun.id }} · {{ statusLabel(parseRun.status) }}
+        <p>当前原件 · {{ statusLabel(parseRun.status) }}
           · 已尝试 {{ parseRun.attempt ?? 0 }} 次</p>
         <p v-if="parseRun.last_error" role="alert">{{ parseRun.last_error }}</p>
         <button class="expense-button" @click="refreshParse">刷新任务与原件</button>
@@ -1694,7 +1690,7 @@ onBeforeUnmount(() => {
           以下结果仅辅助填写。金额缺失、票据分组不确定或字段冲突时，请逐张对照原件；创建后仍须独立人工复核，不能视为已验真。
         </p>
         <p>
-          原件 {{ documentStatus.id || documentStatus.document_id }} · 文件 {{ documentStatus.file_id }} · 候选 {{ parsedCandidates.length }} 组
+          当前原件共有 {{ parsedCandidates.length }} 组候选
         </p>
         <div class="expense-table">
           <table>
