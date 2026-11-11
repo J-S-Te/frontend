@@ -3760,7 +3760,7 @@ onBeforeUnmount(() => {
           </section>
           <template v-else>
             <section class="pm-actions-bar"><button class="pm-button" @click="navigate('projects')"><ConsoleIcon name="reset" />返回项目列表</button><button class="pm-button" :disabled="loading" @click="loadWorkspace"><ConsoleIcon name="reset" />刷新</button></section>
-            <ReimbursementSpendPanel :session="session" :project-id="detailProject.id" />
+            <ReimbursementSpendPanel :session="session" :project-id="detailProject.id" :project-status="detailProject.status" />
             <ProjectArchiveDirectory :key="detailProject.id" :project="detailProject" :items="detailItems"
               :events="detailEvents" :session="session" @view-service="detailTab='items';selectServiceItem($event)"
               @view-events="detailTab='events'" />

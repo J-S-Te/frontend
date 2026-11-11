@@ -1,8 +1,8 @@
 import { formatMinor, toMinor } from './api/client.js'
 import { contentMappingForm, contentMappingInput } from './invoiceClassification.js'
 
-const organizations = { key: 'org_id', label: '费用组织ID', required: true }
-const subject = { key: 'subject_id', label: '人员稳定主体ID', required: true }
+const organizations = { key: 'org_id', label: '费用组织', type: 'organization', required: true }
+const subject = { key: 'subject_id', label: '人员姓名', type: 'person', required: true }
 const period = [{ key: 'valid_from', label: '生效日期', type: 'date', required: true },
   { key: 'valid_until', label: '截止日期（留空持续有效）', type: 'date' }]
 const roles = ['ACCOUNTANT', 'FINANCE_DIRECTOR', 'PROJECT_EXPENSE_OWNER',
@@ -24,7 +24,7 @@ const fields = {
     { key: 'requires_travel_facts', label: '此标准要求差旅事实核对', type: 'boolean' },
   ],
   city_mappings: [organizations, { key: 'source_city', label: '权威目的地原文（精确匹配）', required: true },
-    { key: 'city_code', label: '六位城市代码', required: true },
+    { key: 'city_code', label: '城市', type: 'city', required: true },
     { key: 'city_level', label: '城市等级编码', required: true }, ...period,
     { key: 'active', label: '启用人工城市映射', type: 'boolean' }],
   archive_retention_policies: [organizations,
@@ -33,7 +33,7 @@ const fields = {
     { key: 'hold', label: '暂停到期处置（HOLD）', type: 'boolean' },
     { key: 'basis', label: '组织批准制度依据', required: true }, ...period],
   historical_tail_policies: [organizations,
-    { key: 'project_id', label: '适用历史尾款项目ID', required: true },
+    { key: 'project_id', label: '适用历史尾款项目', type: 'project', required: true },
     { key: 'expense_cutoff', label: '费用发生截止日', type: 'date', required: true },
     { key: 'valid_from', label: '政策生效日期', type: 'date', required: true },
     { key: 'valid_until', label: '政策截止日期', type: 'date', required: true },
@@ -44,16 +44,20 @@ const fields = {
     { key:'extra_threshold_basis_points',label:'逐项超额比例升级阈值（基点；100=1%，0关闭；两项均0为任意超标升级）',type:'number' },
     { key:'extra_threshold_minor',label:'逐项超额金额升级阈值（元；0关闭，任一阈值严格超过即升级）',type:'money',default:'0' },
   ],
-  assignments: [organizations, { key: 'project_id', label: '项目ID（项目经理替代必填，其他按授权项目范围）' },
+  assignments: [organizations, { key: 'project_id', label: '适用项目（项目经理替代必选）', type: 'project' },
     { key: 'role', label: '财务岗位或受控替代用途', type: 'select', required: true, options: roles }, subject, ...period],
   finance_entities: [{ key: 'name', label: '付款主体名称', required: true },
     { key: 'tax_id', label: '购买方税号', required: true },
-    { key: 'org_ids', label: '适用组织ID（逗号分隔）', type: 'list', required: true },
+    { key: 'org_ids', label: '适用组织', type: 'organizations', required: true },
     { key: 'active', label: '启用主体', type: 'boolean' }],
+  payment_accounts: [{ key: 'name', label: '付款账户名称', required: true },
+    { key: 'finance_entity_id', label: '所属付款主体', type: 'finance-entity', required: true },
+    { key: 'account_ref', label: '外部受控付款引用（请勿填写银行账号原文）', required: true },
+    { key: 'active', label: '启用付款账户', type: 'boolean' }],
   payee_profiles: [subject, { key: 'account_ref', label: '外部受控收款引用（请勿填写银行账号原文）', required: true },
     { key: 'active', label: '启用收款档案', type: 'boolean' },
     { key: 'reviewed', label: '已按制度核对收款档案', type: 'boolean' }],
-  scopes: [subject, { key: 'org_ids', label: '允许的组织ID（逗号分隔）', type: 'list' },
+  scopes: [subject, { key: 'org_ids', label: '允许的组织', type: 'organizations' },
     { key: 'tenant_all', label: '显式授予租户全部财务数据范围', type: 'boolean' }],
   employee_profiles: [subject, organizations, { key: 'grade', label: '费用职级', required: true },
     { key: 'route_type', label: '业务线路', type: 'select', required: true, options: ['TECHNICAL', 'SALES'] },
@@ -82,6 +86,7 @@ export function policyFormFrom(kind, value = {}) {
   return Object.fromEntries(policyFields(kind).map((field) => {
     let current = value[field.key]
     if (field.type === 'content-mappings') current = contentMappingForm(current)
+    else if (field.type === 'organizations') current = Array.isArray(current) ? [...current] : []
     else if (field.type === 'boolean') current = current === true
     else if (field.type === 'list') current = Array.isArray(current) ? current.join(',') : ''
     else if (field.type === 'money') current = current === undefined ? field.default ?? '' : formatMinor(current)
@@ -101,7 +106,10 @@ export function policyPayload(kind, form) {
     }
     if (field.type === 'content-mappings') value = contentMappingInput(value)
     else if (field.type === 'money') value = toMinor(String(value))
-    else if (field.type === 'list') value = [...new Set(String(value || '').split(',').map((part) => part.trim()).filter(Boolean))]
+    else if (field.type === 'list' || field.type === 'organizations') {
+      const values = Array.isArray(value) ? value : String(value || '').split(',')
+      value = [...new Set(values.map((part) => String(part).trim()).filter(Boolean))]
+    }
     else if (field.type === 'boolean') value = value === true
     else if (field.type === 'number') {
       value = Number(value || 0)
@@ -120,7 +128,7 @@ export function policyPayload(kind, form) {
   }
   if (kind === 'assignments') {
     if (!roles.includes(payload.role)) throw new Error('请选择明确的财务岗位或受控替代用途')
-    if (payload.role === 'PROJECT_EXPENSE_OWNER' && !payload.project_id) throw new Error('项目经理受控替代必须填写项目ID')
+    if (payload.role === 'PROJECT_EXPENSE_OWNER' && !payload.project_id) throw new Error('项目经理受控替代必须选择项目')
   }
   return payload
 }

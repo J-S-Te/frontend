@@ -18,21 +18,29 @@ const pickerStub = {
 }
 
 // 用途：编译真实异常事实业务组件供SSR验证。
-// 参数：无。
+// 参数：name为当前目录的真实组件文件名。
 // 返回值：保留真实字段、权限条件和转义规则的组件。
-function component() {
-  const { descriptor } = parse(readFileSync(new URL('./PaymentExceptionPanel.vue', import.meta.url), 'utf8'))
+function component(name = './PaymentExceptionPanel.vue') {
+  const { descriptor } = parse(readFileSync(new URL(name, import.meta.url), 'utf8'))
   const compiled = compileScript(descriptor, { id: 'payment-exception-test', inlineTemplate: true })
   const bindings = { formatMinor, formatBusinessDateTime, PaginationBar: PaginationBarStub,
-    BusinessOptionPicker: pickerStub, reimbursementAPI: { request: async () => ({ source_accounts: [], payee_profiles: [] }) } }
+    BusinessOptionPicker: pickerStub, reimbursementAPI: { request: async () => ({ source_accounts: [], payee_profiles: [], items: [], payments: [], reversals: [] }) } }
   const source = compiled.content
     .replace(/^import\s+\w+\s+from\s+['"][^'"]+['"];?[ \t]*$/gm, '')
     .replace(/import\s+\{([^}]+)\}\s+from\s+['"]([^'"]+)['"];?/g,
+
     (_, names, specifier) => {
       if (specifier === 'vue') for (const entry of names.split(',')) {
         const [name, alias = name] = entry.trim().split(/\s+as\s+/)
         bindings[alias] = Vue[name]
       }
+      else for (const entry of names.split(',')) {
+        const [name, alias = name] = entry.trim().split(/\s+as\s+/)
+        bindings[alias] = bindings[name]
+      }
+      return ''
+    }).replace(/^import\s+(\w+)\s+from\s+['"]([^'"]+)['"];?\s*$/gm, (_, name, source) => {
+      bindings[name] = component(source)
       return ''
     })
   return new Function(...Object.keys(bindings), source.replace('export default', 'return'))(...Object.values(bindings))

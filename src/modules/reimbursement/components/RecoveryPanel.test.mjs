@@ -23,6 +23,9 @@ const detail = {
   snapshot: { payable_minor: '1545', items: [{ requested_minor: '1200' }, { requested_minor: '345' }] },
 }
 
+// 用途：挂载恢复面板真实逻辑，替换网络与目录选择边界。
+// 参数：request 为HTTP替身，permissions 为当前主体能力。
+// 返回值：面板状态、模板渲染和卸载方法。
 function mount(request, permissions = ['expense.approval.recover']) {
   const { descriptor } = parse(readFileSync(new URL('./RecoveryPanel.vue', import.meta.url), 'utf8'))
   const script = compileScript(descriptor, { id: 'recovery-panel-test' })
@@ -31,6 +34,7 @@ function mount(request, permissions = ['expense.approval.recover']) {
     computed: Vue.computed, ref: Vue.ref, watch: Vue.watch, onBeforeUnmount: Vue.onBeforeUnmount,
     reimbursementAPI, api: reimbursementAPI, formatMinor, formatBusinessDateTime, recoveryCommand, statusLabel, failureMessage,
     PaginationBar: PaginationBarStub,
+    BusinessObjectSelect: { render: () => null },
     ErrorState: createErrorStateStub().Stub,
     createCommandRunner: () => ({
       execute: async () => ({}), retry: async () => ({}), pending: () => null,
@@ -50,6 +54,9 @@ function mount(request, permissions = ['expense.approval.recover']) {
   })
   const app = renderer.createApp(component, { permissions })
   app.mount({})
+  // 用途：渲染当前真实恢复详情模板。
+  // 参数：无。
+  // 返回值：可断言的SSR文本。
   async function html() {
     const compiled = compileTemplate({
       source: descriptor.template.content,

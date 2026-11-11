@@ -4,19 +4,23 @@ import { readFileSync } from 'node:fs'
 import { parse, compileScript } from '@vue/compiler-sfc'
 import * as Vue from 'vue'
 import { renderToString } from '@vue/server-renderer'
+import * as cities from '../cities.js'
 
 // 用途：把真实差旅行程字段组件编译为可SSR断言的Vue组件。
-// 参数：inline 表示是否同时把模板编译进setup。
+// 参数：inline 表示是否编译模板，name 为真实组件文件名。
 // 返回值：保留真实字段标签、禁用状态与受控事件的组件对象。
-function component(inline = true) {
-  const { descriptor } = parse(readFileSync(new URL('./TravelFields.vue', import.meta.url), 'utf8'))
+function component(inline = true, name = './TravelFields.vue') {
+  const { descriptor } = parse(readFileSync(new URL(name, import.meta.url), 'utf8'))
   const compiled = compileScript(descriptor, { id: `travel-fields-test-${inline}`, inlineTemplate: inline })
-  const values = {}
+  const values = { ...cities }
   const body = compiled.content.replace(/import\s+\{([^}]+)\}\s+from\s+['"]([^'"]+)['"];?/g, (_, names, source) => {
     for (const item of names.split(',')) {
       const [key, alias = key] = item.trim().split(/\s+as\s+/)
-      values[alias] = source === 'vue' ? Vue[key] : undefined
+      values[alias] = source === 'vue' ? Vue[key] : values[key]
     }
+    return ''
+  }).replace(/^import\s+(\w+)\s+from\s+['"]([^'"]+)['"];?\s*$/gm, (_, key, path) => {
+    values[key] = component(true, path)
     return ''
   })
   return new Function(...Object.keys(values), body.replace('export default', 'return'))(...Object.values(values))

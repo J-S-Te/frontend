@@ -1,27 +1,30 @@
 <script setup>
 import TravelFields from './TravelFields.vue'
 import InvoiceContentFields from './InvoiceContentFields.vue'
+import BusinessObjectSelect from './BusinessObjectSelect.vue'
 import { invoiceContentForm, invoiceContentInput } from '../invoiceClassification.js'
 import { travelInput } from '../claimFields.js'
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { reimbursementAPI as api } from '../api/reimbursement.js'
 import { createCommandRunner, formatMinor, toMinor } from '../api/client.js'
-import { evidenceIDs } from '../claimFields.js'
-import BusinessOptionPicker from './BusinessOptionPicker.vue'
 import ErrorState from '../../shared/components/ErrorState.vue'
+
 
 const props = defineProps({ invoice: { type: Object, required: true }, session: { type: Object, required: true } })
 const emit = defineEmits(['changed'])
 const controls = ref(null)
 const reason = ref('')
 const form = ref({})
-const fileIDs = ref('')
 const documentID = ref('')
-const runID = ref('')
+const sourceDocument = ref(null)
+const sourceDocumentName = ref('')
+const sourceLoading = ref(false)
 const candidateIndex = ref('')
 const riskKind = ref('VOID')
 const originalID = ref('')
-const riskFiles = ref('')
+const originalName = ref('')
+const riskFiles = ref([])
+const riskDocumentChoice = ref('')
 const error = ref('')
 const busy = ref(false)
 const pending = ref(null)
@@ -42,17 +45,12 @@ const riskKindLabels = { RED_LETTER: '红字', VOID: '作废', REFUND: '退款' 
 const resolutionLabels = { CONFIRMED_RISK: '确认风险并关闭', DISMISSED: '有依据排除风险' }
 const sourceKindLabels = { PARSED: '独立解析来源，仍需人工复核', MANUAL_LINK: '人工关联原件', LEGACY_UNVERIFIED: '遗留未核实来源' }
 function controlLabel(table, code) { return table[code] || '状态待确认' }
-// 用途：把逗号分隔引用拆成去重列表，选择器按列表读写、提交仍写回原字段。
-// 参数：value 为已保存的逗号分隔文件引用。
-// 返回值：去重后的文件引用数组。
-function splitIDs(value) { return [...new Set(String(value || '').split(',').map((item) => item.trim()).filter(Boolean))] }
-// 用途：选择器返回的文件引用写回逗号字段，超界时保留前20份。
-// 参数：value 为选择器给出的文件引用数组。
-// 返回值：写回用的逗号分隔文本。
-function joinIDs(value) { return (Array.isArray(value) ? value : []).slice(0, 20).join(',') }
-const fileIDList = computed({ get: () => splitIDs(fileIDs.value), set: (value) => { fileIDs.value = joinIDs(value) } })
-const riskFileList = computed({ get: () => splitIDs(riskFiles.value), set: (value) => { riskFiles.value = joinIDs(value) } })
 let sequence = 0
+let documentSequence = 0
+const candidates = computed(() => {
+  const rows = sourceDocument.value?.detail?.parse_result?.documents
+  return Array.isArray(rows) ? rows : []
+})
 
 // 用途：读取当前票据的控制记录，不将别的票据迟到结果写入页面。
 // 参数：无。
@@ -96,13 +94,63 @@ async function requestCorrection() {
 // 返回值：无；来源以服务端原始运行核验，不接受手造坐标。
 async function appendSources() {
   try {
-    const files = evidenceIDs(fileIDs.value)
-    const selections = runID.value ? [{ file_id: files[0], document_id: documentID.value,
-      run_id: runID.value, candidate_index: Number(candidateIndex.value) }] : []
-    if (runID.value && (!documentID.value || !Number.isSafeInteger(Number(candidateIndex.value)) || Number(candidateIndex.value) < 0 || candidateIndex.value === '')) throw new Error('请填写真实文档、解析运行及从0开始的候选序号')
+    const doc = sourceDocument.value
+    if (sourceLoading.value || !doc?.file_id || doc.id !== documentID.value) {
+      throw new Error('请先选择并读取已就绪原件')
+    }
+    const index = candidateIndex.value === '' ? null : Number(candidateIndex.value)
+    if (index !== null && (!doc.parse_run_id || !Number.isSafeInteger(index) ||
+      index < 0 || index >= candidates.value.length)) throw new Error('请重新选择当前原件的票面候选')
+    const selections = index === null ? [] : [{ file_id: doc.file_id, document_id: doc.id,
+      run_id: doc.parse_run_id, candidate_index: index }]
     await send('invoice.source.append', `/invoices/${encodeURIComponent(props.invoice.id)}/sources`,
-      { expected_version: props.invoice.version, file_ids: files, source_selections: selections })
+      { expected_version: props.invoice.version, file_ids: [doc.file_id], source_selections: selections })
   } catch (cause) { error.value = cause.message }
+}
+
+// 用途：读取用户选择的本人原件事实，仅由服务端文档绑定文件和解析来源。
+// 参数：row为原件选项，包含内部文档标识、文件引用和业务文件名。
+// 返回值：无；读取失败或旧响应不允许追加来源。
+async function selectOriginal(row) {
+  const ticket = ++documentSequence
+  documentID.value = row?.id || ''
+  sourceDocument.value = null
+  sourceDocumentName.value = row?.name || ''
+  candidateIndex.value = ''
+  error.value = ''
+  sourceLoading.value = !!row
+  if (!row) return
+  try {
+    const doc = await api.request(`/invoice-documents/${encodeURIComponent(row.id)}`)
+    if (ticket !== documentSequence) return
+    if (doc.id !== row.id || !doc.file_id || (row.file_id && doc.file_id !== row.file_id) ||
+      !['READY', 'PARSED'].includes(doc.status) ||
+      doc.detail?.purpose !== 'reimbursement.invoice.original') {
+      throw new Error('原件状态已改变，请重新选择已就绪原件')
+    }
+    sourceDocument.value = doc
+  } catch {
+    if (ticket === documentSequence) error.value = '原件读取失败，请重新选择或重试。'
+  } finally {
+    if (ticket === documentSequence) sourceLoading.value = false
+  }
+}
+
+// 用途：加入本人已就绪的原件风险证据，去重并保留业务文件名。
+// 参数：row为用途限定为发票原件的已上传文档选项。
+// 返回值：无；空选择不删除已有证据。
+function addRiskEvidence(row) {
+  if (!row?.file_id || riskFiles.value.some((file) => file.file_id === row.file_id)) return
+  if (riskFiles.value.length >= 20) { error.value = '风险证据最多选择20份'; return }
+  riskFiles.value.push({ file_id: row.file_id, name: row.name })
+}
+
+// 用途：保留用户选择的原票业务名称，避免翻页后显示另一张票的名称。
+// 参数：row为本人发票业务选项，清空时为null。
+// 返回值：无；内部引用仅由选项取得。
+function chooseRiskOriginal(row) {
+  originalID.value = row?.id || ''
+  originalName.value = row?.name || ''
 }
 
 // 用途：将红字、作废或退款证据登记为独立财务复核案件。
@@ -111,7 +159,7 @@ async function appendSources() {
 async function reportRisk() {
   try { await send('invoice.risk.record', `/invoices/${encodeURIComponent(props.invoice.id)}/risks`,
     { expected_version: props.invoice.version, risk_kind: riskKind.value,
-      original_invoice_id: originalID.value, evidence_file_ids: evidenceIDs(riskFiles.value) }) }
+      original_invoice_id: originalID.value, evidence_file_ids: riskFiles.value.map((file) => file.file_id) }) }
   catch (cause) { error.value = cause.message }
 }
 
@@ -139,8 +187,13 @@ async function retry() {
 watch(() => [props.invoice.id, props.invoice.version], () => {
   form.value = { ...props.invoice, content:invoiceContentForm(props.invoice.content), amount: formatMinor(props.invoice.total_minor) }
   originalID.value = props.invoice.id
+  originalName.value = props.invoice.name || props.invoice.invoice_number || '当前票据'
+  documentSequence++
+  documentID.value = ''; sourceDocument.value = null; sourceDocumentName.value = ''
+  sourceLoading.value = false; candidateIndex.value = ''; riskFiles.value = []
   controls.value = null; error.value = ''; void load()
 }, { immediate: true })
+onBeforeUnmount(() => { sequence++; documentSequence++ })
 </script>
 
 <template>
@@ -167,67 +220,38 @@ watch(() => [props.invoice.id, props.invoice.version], () => {
     </details>
     <div v-for="impact in controls?.impacts || []" :key="impact.id"><p>相关单据 {{ impact.claim_id }} · {{ controlLabel(impactLabels, impact.status) }}</p><button v-if="owner && impact.status === 'RECONFIRM_REQUIRED'" class="expense-button" :disabled="busy || !!pending" @click="reconfirm(impact)">接受更正后重新提交审批</button></div>
     <fieldset v-if="owner" :disabled="busy || !!pending"><legend>补充原件或解析来源</legend>
-      <div class="expense-option-field">
-        <span>已上传原件（按文件名选择，可多选）</span>
-        <BusinessOptionPicker
-          v-model="fileIDList"
-          path="/invoice-document-options"
-          purpose="reimbursement.invoice.original"
-          value-key="file_id"
-          object-label="已上传原件"
-          multiple
-          :disabled="busy || !!pending"
-          aria-label="选择已上传原件"
-        />
-      </div>
-      <details>
-        <summary>高级：绑定不可变解析来源</summary>
-        <p class="expense-alert warning">
-          仅当确知服务器上的解析运行时填写。普通补件请直接选择已上传原件，不要手抄文档或运行编号。
-        </p>
-        <div class="expense-option-field">
-          <span>文档（原件）</span>
-          <BusinessOptionPicker
-            v-model="documentID"
-            path="/invoice-document-options"
-            purpose="reimbursement.invoice.original"
-            object-label="原件文档"
-            :disabled="busy || !!pending"
-            aria-label="选择原件文档"
-          />
-        </div>
-        <label>真实解析运行ID<input v-model="runID" placeholder="服务器返回的解析运行编号"></label>
-        <label>候选序号（从0开始）<input v-model="candidateIndex" type="number" min="0"></label>
-      </details>
-      <button class="expense-button" @click="appendSources">受控追加证据来源</button>
+      <BusinessObjectSelect v-model="documentID" label="选择已就绪原件"
+        source="/invoice-document-options" :extra-params="{ purpose: 'reimbursement.invoice.original' }"
+        :selected-label="sourceDocumentName" :disabled="busy || !!pending" @select="selectOriginal" />
+      <p v-if="sourceLoading" role="status">正在核对原件状态及解析来源…</p>
+      <button v-if="documentID && !sourceDocument && !sourceLoading" class="expense-button"
+        @click="selectOriginal({ id: documentID, name: sourceDocumentName })">重新读取原件</button>
+      <label v-if="sourceDocument">原件票面候选
+        <select v-model="candidateIndex" :disabled="busy || !!pending">
+          <option value="">仅关联原件（明确人工关联）</option>
+          <option v-for="(candidate, index) in candidates" :key="index" :value="String(index)">
+            第{{ index + 1 }}组 · {{ candidate.invoice_type || '票面候选' }}
+            {{ candidate.invoice_number || '请对照原件核对' }}
+          </option>
+        </select>
+      </label>
+      <p v-if="sourceDocument && !candidates.length">此原件没有可用解析候选，将保留明确人工关联。</p>
+      <button class="expense-button" :disabled="!sourceDocument || sourceLoading"
+        @click="appendSources">受控追加证据来源</button>
+
     </fieldset>
     <p v-for="source in controls?.sources || []" :key="source.id">来源 {{ source.document_id }} · {{ controlLabel(sourceKindLabels, source.source_kind) }} · 运行 {{ source.run_id || '明确人工关联' }} · 候选 {{ source.candidate_index }} · {{ source.sources?.map(part => part.page ? `第${part.page}页` : part.xml_path).join('、') }}</p>
     <fieldset v-if="owner" :disabled="busy || !!pending"><legend>登记异常票据事实</legend>
       <label>事实类型<select v-model="riskKind"><option value="RED_LETTER">红字</option><option value="VOID">作废</option><option value="REFUND">退款</option></select></label>
-      <div class="expense-option-field">
-        <span>原票（按票号选择）</span>
-        <BusinessOptionPicker
-          v-model="originalID"
-          path="/invoice-options"
-          object-label="发票"
-          :current-label="invoice.invoice_number ? `${invoice.invoice_number}（当前票据）` : '当前票据'"
-          :disabled="busy || !!pending"
-          aria-label="选择原票"
-        />
-      </div>
-      <div class="expense-option-field">
-        <span>风险证据文件（按文件名选择，可多选）</span>
-        <BusinessOptionPicker
-          v-model="riskFileList"
-          path="/invoice-document-options"
-          purpose="reimbursement.invoice.original"
-          value-key="file_id"
-          object-label="风险证据文件"
-          multiple
-          :disabled="busy || !!pending"
-          aria-label="选择风险证据文件"
-        />
-      </div>
+      <BusinessObjectSelect v-model="originalID" label="原票" source="/invoice-options"
+        :selected-label="originalName" :disabled="busy || !!pending" @select="chooseRiskOriginal" />
+      <BusinessObjectSelect v-model="riskDocumentChoice" label="风险证据原件"
+        source="/invoice-document-options" :extra-params="{ purpose: 'reimbursement.invoice.original' }"
+        :disabled="busy || !!pending" @select="addRiskEvidence" />
+      <ul><li v-for="(file, index) in riskFiles" :key="file.file_id">{{ file.name }}
+        <button type="button" class="expense-button" @click="riskFiles.splice(index, 1)">移除</button>
+      </li></ul>
+
       <button class="expense-button" @click="reportRisk">登记并发起财务复核</button>
     </fieldset>
     <div v-for="risk in controls?.risks || []" :key="risk.id">

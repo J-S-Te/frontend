@@ -25,9 +25,14 @@ export function validateLicenseInput(raw) {
   if (/-----BEGIN [^-]*PRIVATE KEY-----/.test(raw)) throw new LicenseError('此处仅接受签发后的许可证，不接受私钥。')
 }
 
+// previewLicense 用途：校验原始输入后提交规范的签名许可证预览。
+// 参数：raw为文件或粘贴的许可证文本，允许外围空白。
+// 返回值：平台验签预览；非法文件在请求前拒绝。
 export function previewLicense(raw) {
   validateLicenseInput(raw)
-  return request('/licenses/imports/preview', { method: 'POST', body: JSON.stringify({ raw_jws: raw }) })
+  return request('/licenses/imports/preview', {
+    method: 'POST', body: JSON.stringify({ raw_jws: raw.trim() }),
+  })
 }
 
 // 恢复凭据与许可证同属供应商签发的 compact JWS，使用同一份输入边界校验：
@@ -40,7 +45,19 @@ export function restoreLicenseClock(rawJWS) {
   return request('/licenses/clock-recoveries', { method: 'POST', body: JSON.stringify({ raw_jws: raw }) })
 }
 
+// commitLicense 用途：按同一规范文本提交已预览的许可证及并发期望。
+// 参数：raw为原文本，preview为预览快照，两个确认值分别允许变更和替换待生效证。
+// 返回值：提交结果；非法文件在请求前拒绝，状态冲突由平台返回。
 export function commitLicense(raw, preview, confirmChanges, confirmReplacePending) {
   validateLicenseInput(raw)
-  return request('/licenses/imports/commit', { method: 'POST', body: JSON.stringify({ raw_jws: raw, digest: preview.digest, expected_revision: preview.revision, expected_current_version: preview.current_version, expected_pending_digest: preview.pending_digest, confirm_changes: confirmChanges, confirm_replace_pending: confirmReplacePending }) })
+  return request('/licenses/imports/commit', {
+    method: 'POST',
+    body: JSON.stringify({
+      raw_jws: raw.trim(), digest: preview.digest,
+      expected_revision: preview.revision,
+      expected_current_version: preview.current_version,
+      expected_pending_digest: preview.pending_digest,
+      confirm_changes: confirmChanges, confirm_replace_pending: confirmReplacePending,
+    }),
+  })
 }

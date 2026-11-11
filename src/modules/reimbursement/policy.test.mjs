@@ -32,7 +32,7 @@ test('普通范围表单默认组织列表且不默认为tenant_all，不接受�
   const { policyFormFrom, policyPayload } = await import('./policy.js')
   const form = policyFormFrom('scopes')
   assert.equal(form.tenant_all, false)
-  assert.equal(form.org_ids, '')
+  assert.deepEqual(form.org_ids, [])
   const payload = policyPayload('scopes', { subject_id: 'person', org_ids: 'org-a,org-b', tenant_all: false,
     admin: true, reimbursement_admin: true, permissions: ['expense.scope.tenant_all'], allow_all: true })
   assert.deepEqual(payload, { subject_id: 'person', org_ids: ['org-a', 'org-b'], tenant_all: false })
@@ -56,7 +56,7 @@ test('业务首岗位不通过本地表单分配，路由兼容字段按线路�
   assert.equal(payload.extra_role, 'TECHNICAL_DIRECTOR')
   assert.equal(payload.accounting_role, 'ACCOUNTANT')
   assert.throws(() => policyPayload('assignments', { org_id: 'org', project_id: '', role: 'PROJECT_EXPENSE_OWNER',
-    subject_id: 'person', valid_from: '2026-11-10', valid_until: '' }), /项目ID/)
+    subject_id: 'person', valid_from: '2026-11-10', valid_until: '' }), /选择项目/)
 })
 
 test('票面分类规则业务表单完整往返且只发送受控字段',async()=>{
@@ -67,4 +67,17 @@ test('票面分类规则业务表单完整往返且只发送受控字段',async(
  form.content_mappings[0].server_only='forged'
  const result=policyPayload('invoice_rules',form)
  assert.deepEqual(result.content_mappings,[{id:'hotel',tax_code_prefixes:['123'],keywords:['住宿'],fee_type:'HOTEL',default_claim_type:'TRAVEL',priority:10}])
+})
+test('付款账户只编辑业务字段且组织列表保留数组协议，不提供技术ID手填字段', async () => {
+  const { policyFields, policyFormFrom, policyPayload } = await import('./policy.js')
+  assert.deepEqual(policyFields('payment_accounts').map((field) => field.key),
+    ['name', 'finance_entity_id', 'account_ref', 'active'])
+  const payload = policyPayload('payment_accounts', { name: '基本结算户',
+    finance_entity_id: 'entity', account_ref: 'external-controlled-reference', active: true })
+  assert.equal(payload.finance_entity_id, 'entity')
+  assert.equal(payload.account_ref, 'external-controlled-reference')
+  assert.equal(Object.hasOwn(payload, 'id'), false)
+  const form = policyFormFrom('finance_entities', { name: '公司', tax_id: 'tax', org_ids: ['org'] })
+  assert.deepEqual(form.org_ids, ['org'])
+  assert.deepEqual(policyPayload('finance_entities', form).org_ids, ['org'])
 })

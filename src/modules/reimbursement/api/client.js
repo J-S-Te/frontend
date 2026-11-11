@@ -1,5 +1,3 @@
-import { createIdempotencyKey } from '../../shared/utils/idempotencyKey.js'
-
 // 用途：将元金额转换为精确整数分，避免浮点舍入。
 // 参数：value 为非负十进制元字符串，最多两位小数。
 // 返回值：整数分字符串；非法格式抛出校验错误。
@@ -105,10 +103,27 @@ export function createClient({ fetcher = (...args) => fetch(...args), base = '/r
   }
 }
 
+// 用途：生成费用行和幂等命令使用的UUID，兼容HTTP入口未提供randomUUID的浏览器。
+// 参数：cryptoImpl为浏览器安全随机源，默认使用当前页面的Web Crypto。
+// 返回值：UUID v4；没有安全随机源时明确报错，不退化为时间戳或Math.random。
+export function createRequestID(cryptoImpl = globalThis.crypto) {
+  if (typeof cryptoImpl?.randomUUID === 'function') return cryptoImpl.randomUUID()
+  if (typeof cryptoImpl?.getRandomValues !== 'function') {
+    throw new Error('当前浏览器无法生成安全请求编号，请升级浏览器后重试。')
+  }
+  const bytes = cryptoImpl.getRandomValues(new Uint8Array(16))
+  bytes[6] = (bytes[6] & 0x0f) | 0x40
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
+  const hex = Array.from(bytes, value => value.toString(16).padStart(2, '0')).join('')
+  return [hex.slice(0, 8), hex.slice(8, 12), hex.slice(12, 16),
+    hex.slice(16, 20), hex.slice(20)].join('-')
+}
+
 // 用途：管理一次未确认命令，阻止重复点击或断网产生新业务事实。
 // 参数：client 为HTTP客户端，uuid 为命令ID生成器。
 // 返回值：执行、查询及待确认状态；命令仅保留于当前页面内存。
-export function createCommandRunner(client, uuid = createIdempotencyKey) {
+export function createCommandRunner(client, uuid = createRequestID) {
+
   let pending = null
   let busy = false
   // 用途：查询原命令的权威结果；失败时保留命令。

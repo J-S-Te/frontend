@@ -1,4 +1,5 @@
 <script setup>
+import { createRequestID } from '../api/client.js'
 const props = defineProps({ value: { type: Array, default: () => [] } })
 const emit = defineEmits(['update:value'])
 
@@ -7,11 +8,15 @@ const emit = defineEmits(['update:value'])
 // 返回值：无；通过事件更新父表单。
 function change(index, key, value) { emit('update:value', props.value.map((row, position) => position === index ? { ...row, [key]: value } : row)) }
 
-// 用途：添加一条显式待配置的内容规则，默认不猜测费用类别。
+// 用途：为新增内容规则自动生成稳定内部编号，默认不猜测费用类别。
 // 参数：无。
 // 返回值：无；最多100条规则。
 function add() {
-  if (props.value.length < 100) emit('update:value', [...props.value, { id: '', tax_code_prefixes: '', keywords: '', fee_type: '', default_claim_type: '', priority: 0 }])
+  if (props.value.length >= 100) return
+  emit('update:value', [...props.value, {
+    id: createRequestID(), tax_code_prefixes: '', keywords: '', fee_type: '',
+    default_claim_type: '', priority: 0,
+  }])
 }
 
 // 用途：移除当前未发布表单中的一条归类规则。
@@ -27,7 +32,6 @@ function remove(index) { emit('update:value', props.value.filter((_, position) =
   <div v-for="(row,index) in value" :key="index" class="expense-item">
    <h4>规则 {{ index+1 }}</h4>
    <div class="expense-form-grid">
-    <label>唯一规则ID<input :value="row.id" maxlength="64" @input="change(index,'id',$event.target.value)"></label>
     <label>税码前缀（逗号分隔，最多20项）<input :value="row.tax_code_prefixes" @input="change(index,'tax_code_prefixes',$event.target.value)"></label>
     <label>明细字面关键词（每行一个，最多20项）<textarea :value="row.keywords" rows="3" @input="change(index,'keywords',$event.target.value)" /></label>
     <label>建议费用类型编码<input :value="row.fee_type" maxlength="64" @input="change(index,'fee_type',$event.target.value)"></label>

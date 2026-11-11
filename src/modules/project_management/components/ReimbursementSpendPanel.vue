@@ -5,13 +5,14 @@ import { frontendModules } from '../../registry/compiledModules.js'
 import { formatBusinessDateTime, todayBusinessDate } from '../../shared/utils/businessTime.js'
 import { getProjectExpenseParticipants, putProjectExpenseParticipant, getProjectReimbursementSpend, listPersonnel } from '../api/projectManagement.js'
 
-const props = defineProps({ session: { type: Object, default: null }, projectId: { type: String, default: '' } })
+const props = defineProps({ session: { type: Object, default: null }, projectId: { type: String, default: '' }, projectStatus: { type: String, default: '' } })
 const router = useRouter()
 const loading = ref(false)
 const error = ref('')
 const rows = ref(null)
 const cursor = ref('')
 const compiled = frontendModules.some((module) => module.code === 'reimbursement')
+const canCreate = computed(() => compiled && !!props.projectId && ['报告编制', '已完成'].includes(props.projectStatus))
 const participants = ref(null)
 const participantCursor = ref('')
 const participantError = ref('')
@@ -57,10 +58,10 @@ function money(value) {
 }
 
 // 用途：通过目标应用路由守卫建立报销会话，项目参数仅用于提示和过滤。
-// 参数：create 为是否进入新建单据入口。
+// 参数：create为是否新建，claimID为服务器返回的既有报销单引用。
 // 返回值：无；未编译报销模块时不跳转。
 function openReimbursement(create = false, claimID = '') {
-  if (!compiled) return
+  if (!compiled || (create && !canCreate.value)) return
   router.push({ name: 'reimbursement', params: { section: 'claims' },
     query: { ...(props.projectId ? { project_id: props.projectId } : {}), ...(create ? { create: '1' } : {}), ...(claimID ? { claim_id: claimID } : {}) } })
 }
@@ -172,7 +173,7 @@ watch(() => [props.projectId, canRead.value, canManage.value], () => {
         <button class="pm-button" @click="openReimbursement(false)">
           相关报销
         </button>
-        <button class="pm-button" @click="openReimbursement(true)">
+        <button class="pm-button" :disabled="!canCreate" @click="openReimbursement(true)">
           新建报销
         </button>
       </template>
@@ -188,6 +189,7 @@ watch(() => [props.projectId, canRead.value, canManage.value], () => {
         {{ loading ? '读取中…' : '查询报销支出' }}
       </button>
     </div>
+    <p v-if="projectId && !canCreate">项目进入报告编制或已完成后可新建报销；已有报销仍可查询。</p>
     <p v-if="projectId && !canRead">
       当前账号未获项目报销支出查看权限。
     </p>
