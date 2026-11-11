@@ -87,7 +87,7 @@ test('合同和项目看板展示聚合库最新摘要', () => {
   assert.match(native, /currency_totals/)
   assert.match(native, /dashboardFreshnessItems/)
   assert.match(native, /dashboardFreshnessStatus/)
-  assert.match(native, /trendCurrencyLabel/)
+  assert.match(native, /trendCurrencies/)
   assert.match(native, /barWidth\(item\.value\)/)
 })
 
@@ -151,9 +151,9 @@ test('看板按权限控制角色可见分区并标示数据范围', () => {
     assert.match(shell, new RegExp(`${code}: "dashboard\\.${code}\\.view"`))
   }
   assert.match(shell, /visibleDashboardSections/)
-  assert.match(shell, /ROLE_SCOPE_LABELS/)
-  assert.match(shell, /本人及下属组织/)
-  assert.match(shell, /管辖团队/)
+  assert.match(shell, /SCOPE_MODE_LABELS/)
+  assert.doesNotMatch(shell, /ROLE_SCOPE_LABELS/)
+  assert.match(shell, /scope_mode/)
   assert.match(shell, /Promise\.allSettled/)
 })
 

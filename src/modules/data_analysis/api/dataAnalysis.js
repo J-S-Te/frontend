@@ -59,6 +59,71 @@ function validStandardPreview(data) {
       && Number.isFinite(row.collection_rate) && row.collection_rate >= 0 && row.collection_rate <= 100)))
 }
 
+// validCount 校验可展示的非负整数，避免畸形值被格式化为零。
+// 参数：value 为来源计数或金额。
+// 返回值：安全非负整数时为 true。
+function validCount(value) {
+  return Number.isSafeInteger(value) && value >= 0
+}
+
+// validCurrencyTotals 校验原币种金额及数量列表。
+// 参数：rows 为接口币种聚合数组。
+// 返回值：每项币种和数值完整合法时为 true。
+function validCurrencyTotals(rows) {
+  return Array.isArray(rows) && rows.every((row) => isRecord(row)
+    && /^[A-Z]{3}$/.test(row.currency) && validCount(row.amount_minor) && validCount(row.contracts))
+}
+
+// validDashboardSummary 检查看板摘要的可用性及核心指标。
+// 参数：data 为服务端摘要，kind 为看板类型。
+// 返回值：不可用状态或完整真实指标符合契约时为 true。
+function validDashboardSummary(data, kind) {
+  if (!isRecord(data) || typeof data.available !== 'boolean') return false
+  if (!data.available) return true
+  if (kind === 'contract') {
+    return ['total_contracts', 'approval_contracts', 'active_contracts', 'expired_contracts',
+      'opportunity_count', 'won_contract_count', 'total_amount_minor'].every((key) => validCount(data[key]))
+      && typeof data.conversion_available === 'boolean' && typeof data.discount_available === 'boolean'
+      && validCurrencyTotals(data.currency_totals)
+      && (data.total_contracts === 0 || data.currency_totals.length > 0)
+  }
+  if (kind === 'project') {
+    return ['project_count', 'in_flight_projects', 'risk_projects', 'service_items']
+      .every((key) => validCount(data[key])) && isRecord(data.status_counts)
+      && Object.values(data.status_counts).every(validCount)
+      && (data.report_stage_counts == null || (isRecord(data.report_stage_counts)
+        && Object.values(data.report_stage_counts).every(validCount)))
+  }
+  if (!isRecord(data.metrics)) return false
+  if (kind === 'report') {
+    return ['active_reports', 'reviewed_reports', 'void_reports'].every((key) => validCount(data.metrics[key]))
+      && (data.metrics.cycle_p50_days === null || (typeof data.metrics.cycle_p50_days === 'number'
+        && Number.isFinite(data.metrics.cycle_p50_days) && data.metrics.cycle_p50_days >= 0))
+      && isRecord(data.metrics.status_counts) && Object.values(data.metrics.status_counts).every(validCount)
+  }
+  return Array.isArray(data.metrics.currencies) && data.metrics.currencies.every((row) =>
+    isRecord(row) && /^[A-Z]{3}$/.test(row.currency)
+    && ['original_minor', 'allocated_minor', 'open_minor', 'over_90_minor', 'month_receipts_minor'].every((key) => validCount(row[key]))
+    && (row.collection_rate === null || (typeof row.collection_rate === 'number'
+      && Number.isFinite(row.collection_rate) && row.collection_rate >= 0 && row.collection_rate <= 100)))
+}
+
+// validDashboardDetails 检查分页信封与脱敏明细字段。
+// 参数：data 为分页响应，project 为项目列表标记。
+// 返回值：分页和记录数值类型合法时为 true。
+function validDashboardDetails(data, project) {
+  if (!isRecord(data) || !Array.isArray(data.items) || !validCount(data.total)
+    || !Number.isSafeInteger(data.page) || data.page < 1 || !Number.isSafeInteger(data.page_size)
+    || data.page_size < 1 || data.page_size > 100 || data.items.length > data.page_size) return false
+  if (project && typeof data.available !== 'boolean') return false
+  return data.items.every((row) => isRecord(row) && typeof row.status === 'string'
+    && (project ? typeof row.project_id === 'string' && typeof row.name === 'string'
+      && typeof row.manager === 'string' && typeof row.owner_org_id === 'string'
+      && typeof row.report_stage === 'string' && typeof row.risk === 'boolean'
+      && typeof row.in_flight === 'boolean' && validCount(row.service_items) : typeof row.contract_number === 'string'
+      && typeof row.title === 'string' && validCount(row.amount_minor) && /^[A-Z]{3}$/.test(row.currency)))
+}
+
 // 用途：按现有接口契约检查数据响应，写操作缺真实回执时拒绝确认成功。
 // 参数：body为响应信封，path为业务路径，method为HTTP方法。
 // 返回值：符合当前或受支持旧信封返回true，否则触发结果异常处理。
@@ -73,6 +138,16 @@ function validDataEnvelope(body, path, method) {
       && validStandardPublication(data.publication, true)
   }
   if (route === '/admin/standard-finance/preview') return validStandardPreview(data)
+  if (['/dashboard/contract', '/dashboard/project', '/dashboard/report', '/dashboard/finance'].includes(route)) {
+    return validDashboardSummary(data, route.split('/').at(-1))
+  }
+  if (route === '/dashboard/contracts' || route === '/dashboard/projects') return validDashboardDetails(data, route.endsWith('/projects'))
+  if (route === '/dashboard/trend') return Array.isArray(data) && data.every((row) => isRecord(row)
+    && /^\d{4}-(0[1-9]|1[0-2])$/.test(row.period) && validCount(row.contract_count)
+    && validCount(row.project_count) && validCurrencyTotals(row.currency_totals || []))
+  if (route === '/alerts/summary') return isRecord(data)
+    && ['total', 'open', 'ack', 'closed'].every((key) => validCount(data[key]))
+    && isRecord(data.by_severity) && Object.values(data.by_severity).every(validCount)
   if (route === '/auth/me') return isRecord(data) && !!data.user_id && !!data.tenant_id && Array.isArray(data.permissions)
   const listRoute = ['/alerts', '/alert-rules', '/admin/sources', '/dashboard/trend'].includes(route) || /^\/dictionary\/metrics\/[^/]+\/versions$/.test(route)
   if (method === 'GET' && listRoute) return Array.isArray(data)
@@ -267,6 +342,14 @@ export function getFinanceDashboardSummary() { return request('/dashboard/financ
 
 /** getContractDetails 查询合同下钻分页明细。 */
 export function getContractDetails(params = {}) { const query = new URLSearchParams(params).toString(); return request(`/dashboard/contracts${query ? `?${query}` : ''}`) }
+
+// getProjectDetails 查询当前可信范围内成功发布的项目明细。
+// 参数：params 为页码与页大小，权限范围由服务端确定。
+// 返回值：分页响应；无首次成功时 available 为 false。
+export function getProjectDetails(params = {}) {
+  const query = new URLSearchParams(params).toString()
+  return request(`/dashboard/projects${query ? `?${query}` : ''}`)
+}
 
 /** getDashboardTrend 查询合同/项目月度趋势。 */
 export function getDashboardTrend() { return request('/dashboard/trend') }

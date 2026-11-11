@@ -18,7 +18,8 @@ const component = new Function(
   'dashboardFreshnessItems',
   'dashboardFreshnessStatus',
   'dashboardCardVisibility',
-  `const { computed, ref, watch, nextTick } = Vue
+  `const PaginationBar = { render: () => null }
+   const { computed, ref, watch, nextTick } = Vue
    const onMounted = () => {}
    const onBeforeUnmount = () => {}
    const { PROJECT_CARD_KEYS, cardHiddenStorageKey, metricColumnCount, normalizeHiddenCardKeys, readHiddenCardKeys, reportStageCount, visibleDashboardCards, writeHiddenCardKeys } = dashboardCardVisibility
@@ -37,6 +38,6 @@ test('未发布标准源展示真实原因，已发布零值明确可用，非�
   assert.doesNotMatch(zero, /尚无可用来源快照/)
   const facts = await renderToString(Vue.createSSRApp(component, { section: 'finance', businessSummary: { available: true, metrics: { month: '2026-10', currencies: [{ currency: 'USD', original_minor: 2000000, allocated_minor: 500000, open_minor: 1500000, over_90_minor: 0, month_receipts_minor: 500000, collection_rate: 25 }] }, basis: '来源 standard-finance，批次 batch-001，截至日2026-11-04' } }))
   assert.match(facts, /USD 2026-10登记回款/)
-  assert.match(facts, /USD 原始应收 2 万元，已核销回款 0.5 万元，未清 1.5 万元/)
+  assert.match(facts, /USD 原始应收 2 万USD，已核销回款 0.5 万USD，未清 1.5 万USD/)
   assert.match(facts, /来源 standard-finance，批次 batch-001，截至日2026-11-04/)
 })

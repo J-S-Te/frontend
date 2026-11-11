@@ -1,6 +1,7 @@
 <script setup>
 // 高保真模型的本地兜底视图：没有 Metabase 或业务摘要时，仍提供清晰的指标层级与数据状态。
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
+import PaginationBar from "@/modules/shared/components/PaginationBar.vue"
 import ConsoleIcon from "@/modules/shared/components/ConsoleIcon.vue"
 import { dashboardFreshnessItems, dashboardFreshnessStatus } from "../utils/freshness.js"
 import {
@@ -14,12 +15,17 @@ import {
   writeHiddenCardKeys,
 } from "../utils/dashboardCardVisibility.js"
 
+const emit = defineEmits(["detail-page"])
+
 const props = defineProps({
   section: { type: String, required: true },
   contractSummary: { type: Object, default: null },
   projectSummary: { type: Object, default: null },
   businessSummary: { type: Object, default: null },
   contractDetails: { type: Object, default: () => ({ items: [], total: 0 }) },
+  projectDetails: { type: Object, default: () => ({ available: false, items: [], total: 0 }) },
+  detailLoading: { type: Boolean, default: false },
+  detailError: { type: String, default: "" },
   canViewContract: { type: Boolean, default: true },
   canViewProject: { type: Boolean, default: true },
   statusFilter: { type: String, default: "全部" },
@@ -245,7 +251,17 @@ const breakdownItems = computed(() => {
 
 const maxBreakdownValue = computed(() => Math.max(1, ...breakdownItems.value.map((item) => item.value)))
 const trendItems = computed(() => [...(props.trend || [])].reverse())
-const maxTrendAmount = computed(() => Math.max(1, ...trendItems.value.map((item) => numberValue(item.contract_amount_minor))))
+const trendCurrencies = computed(() => [...new Set(trendItems.value.flatMap((item) =>
+  (item.currency_totals || []).map((row) => row.currency)))].sort())
+const overviewSources = computed(() => [
+  ...(props.canViewContract ? [{ label: '合同来源', summary: props.contractSummary }] : []),
+  ...(props.canViewProject ? [{ label: '项目来源', summary: props.projectSummary }] : []),
+])
+const activeDetails = computed(() => props.section === 'contract' ? props.contractDetails : props.projectDetails)
+const conversionRate = computed(() => {
+  const total = numberValue(props.contractSummary?.opportunity_count)
+  return total > 0 ? `${(numberValue(props.contractSummary?.won_contract_count) / total * 100).toFixed(2)}%` : '不可计算（有效商机为0）'
+})
 const alertItems = computed(() => Object.entries(props.alertSummary?.by_severity || {}).map(([label, value]) => ({ label, value: numberValue(value) })))
 const maxAlertValue = computed(() => Math.max(1, ...alertItems.value.map((item) => item.value)))
 
@@ -255,18 +271,37 @@ function barWidth(value) {
   return `${Math.max(4, Math.round((normalized / maxBreakdownValue.value) * 100))}%`
 }
 
-function trendWidth(value) {
-  return `${Math.max(4, Math.round((numberValue(value) / maxTrendAmount.value) * 100))}%`
+// trendAmount 读取指定月份和币种的金额，缺币种保持零而不跨币种相加。
+// 参数：item 为月度趋势，currency 为原币种代码。
+// 返回值：该币种最小货币单位金额。
+function trendAmount(item, currency) {
+  return numberValue((item.currency_totals || []).find((row) => row.currency === currency)?.amount_minor)
 }
 
-function trendCurrencyLabel(item) {
-  const totals = Array.isArray(item?.currency_totals) ? item.currency_totals.filter((row) => row && row.currency) : []
-  if (!totals.length) return `${formatAmountMinor(item?.contract_amount_minor)} 万元`
-  return totals.map((row) => `${row.currency} ${formatAmountMinor(row.amount_minor)} 万元`).join(" · ")
+// trendWidth 按各币种或计数序列独立标尺计算柱宽。
+// 参数：item 为月度点，series 为币种代码或计数字段名。
+// 返回值：非负百分比；真实零值为0%。
+function trendWidth(item, series) {
+  const amount = /^[A-Z]{3}$/.test(series)
+  const read = (row) => amount ? trendAmount(row, series) : numberValue(row[series])
+  const value = read(item)
+  const maximum = Math.max(1, ...trendItems.value.map(read))
+  return `${value <= 0 ? 0 : Math.max(4, Math.round(value / maximum * 100))}%`
 }
 
+// funnelWidth 使用有效商机分母计算漏斗柱宽。
+// 参数：value 为当前漏斗项数量。
+// 返回值：百分比；分母为0时返回0%并由文案说明不可计算。
+function funnelWidth(value) {
+  const denominator = numberValue(props.contractSummary?.opportunity_count)
+  return `${denominator > 0 ? Math.min(100, Math.max(0, numberValue(value) / denominator * 100)) : 0}%`
+}
+
+// alertWidth 计算预警计数柱宽并保持真实零值。
+// 参数：value 为当前级别计数。
+// 返回值：按预警最大值缩放的百分比。
 function alertWidth(value) {
-  return `${Math.max(4, Math.round((numberValue(value) / maxAlertValue.value) * 100))}%`
+  return `${numberValue(value) <= 0 ? 0 : Math.max(4, Math.round((numberValue(value) / maxAlertValue.value) * 100))}%`
 }
 
 // 用途：按可用的真实摘要构造当前看板指标，并标明财务回款事实期间。
@@ -280,9 +315,9 @@ function metricsForSection() {
     if (props.canViewContract) {
       metrics.push(metric("合同总数", contract.available ? formatInteger(contract.total_contracts) : "—", "份"))
       if (contractCurrencyItems.value.length) {
-        for (const item of contractCurrencyItems.value) metrics.push(metric(`合同金额 ${item.currency}`, formatAmountMinor(item.amount_minor), "万元"))
+        for (const item of contractCurrencyItems.value) metrics.push(metric(`合同金额 ${item.currency}`, formatAmountMinor(item.amount_minor), `万${item.currency}`))
       } else {
-        metrics.push(metric("合同金额", contract.available ? formatAmountMinor(contract.total_amount_minor) : "—", "万元"))
+        metrics.push(metric("合同金额", contract.available ? formatAmountMinor(contract.total_amount_minor) : "—", "万CNY"))
       }
     }
     if (props.canViewProject) {
@@ -301,8 +336,8 @@ function metricsForSection() {
   }
   if (props.section === "contract") {
     const amountMetrics = contractCurrencyItems.value.length
-      ? contractCurrencyItems.value.map((item) => metric(`合同金额 ${item.currency}`, formatAmountMinor(item.amount_minor), "万元"))
-      : [metric("合同总金额", contract.available ? formatAmountMinor(contract.total_amount_minor) : "—", "万元")]
+      ? contractCurrencyItems.value.map((item) => metric(`合同金额 ${item.currency}`, formatAmountMinor(item.amount_minor), `万${item.currency}`))
+      : [metric("合同总金额", contract.available ? formatAmountMinor(contract.total_amount_minor) : "—", "万CNY")]
     return [
       ...amountMetrics,
       metric("合同总数", contract.available ? formatInteger(contract.total_contracts) : "—", "份"),
@@ -330,7 +365,7 @@ function metricsForSection() {
     const values = props.businessSummary?.available ? props.businessSummary.metrics || {} : {}
     return [metric("报告周期 P50", values.cycle_p50_days == null ? "—" : Number(values.cycle_p50_days).toFixed(2), "天"), metric("有效报告版本", values.active_reports == null ? "—" : formatInteger(values.active_reports), "份"), metric("已复核／批准版本", values.reviewed_reports == null ? "—" : formatInteger(values.reviewed_reports), "份"), metric("作废版本", values.void_reports == null ? "—" : formatInteger(values.void_reports), "份", "danger")]
   }
-  return currencyItems.value.flatMap(row => [metric(`${row.currency} 已核销回款率`, row.collection_rate == null ? "—" : Number(row.collection_rate).toFixed(2), "%"), metric(`${row.currency} 未清应收`, formatAmountMinor(row.open_minor), "万元"), metric(`${row.currency} 超期90天应收`, formatAmountMinor(row.over_90_minor), "万元", "danger"), metric(`${row.currency} ${financeReceiptLabel.value}`, formatAmountMinor(row.month_receipts_minor), "万元")])
+  return currencyItems.value.flatMap(row => [metric(`${row.currency} 已核销回款率`, row.collection_rate == null ? "—" : Number(row.collection_rate).toFixed(2), "%"), metric(`${row.currency} 未清应收`, formatAmountMinor(row.open_minor), `万${row.currency}`), metric(`${row.currency} 超期90天应收`, formatAmountMinor(row.over_90_minor), `万${row.currency}`, "danger"), metric(`${row.currency} ${financeReceiptLabel.value}`, formatAmountMinor(row.month_receipts_minor), `万${row.currency}`)])
 }
 
 // 项目分区按隐藏偏好过滤卡片；其他分区保持既有全部展示，不做重排。
@@ -369,6 +404,15 @@ const missingMetricLabels = { first_pass_rate: '首次通过率：缺少完整�
       </dl>
       <p class="da-native-freshness-note">源数据更新时间、最近成功同步时间与本次查询时间分别展示；本次查询时间不代表源数据更新时间。</p>
     </aside>
+
+    <aside v-if="section === 'overview'" class="da-native-freshness" role="status">
+      <div v-for="source in overviewSources" :key="source.label">
+        <b>{{ source.label }}：</b><span>{{ source.summary?.available ? dashboardFreshnessStatus(source.summary).label : '尚无可用来源快照' }}</span>
+        <p v-if="source.summary?.freshness?.stale">{{ source.summary.freshness.stale_reason }}</p>
+        <dl v-if="source.summary?.available" class="da-native-freshness-grid"><template v-for="item in dashboardFreshnessItems(source.summary)" :key="item.key"><dt>{{ item.label }}</dt><dd>{{ item.value }}</dd></template></dl>
+      </div>
+    </aside>
+    <p v-if="businessSummary?.source_code" class="da-native-note">来源：{{ businessSummary.source_code }}</p>
 
     <div v-if="section === 'project'" class="da-native-metrics-toolbar">
       <div ref="cardSettingsRoot" class="da-native-card-settings">
@@ -446,7 +490,7 @@ const missingMetricLabels = { first_pass_rate: '首次通过率：缺少完整�
           </div>
         </div>
         <div v-else class="da-native-empty"><span class="da-native-empty-icon">⌁</span><b>暂无状态快照</b><p>完成一次数据源同步后，这里会展示真实状态分布。</p></div>
-        <p v-if="summaryAvailable" class="da-native-note">当前筛选：{{ statusFilter }}；数据时间以「源数据更新 / 最近成功同步」为准，本次查询时间不冒充数据更新时间。</p>
+        <p v-if="summaryAvailable" class="da-native-note">当前筛选仅影响状态分布：{{ statusFilter }}；数据时间以「源数据更新 / 最近成功同步」为准，本次查询时间不冒充数据更新时间。</p>
       </article>
       <article class="da-native-panel">
         <header><b>数据口径说明</b><span>只读</span></header>
@@ -463,7 +507,7 @@ const missingMetricLabels = { first_pass_rate: '首次通过率：缺少完整�
         <header><b>{{ section === 'report' ? '报告状态分布' : '分币种应收与回款' }}</b><span>真实来源快照</span></header>
         <div v-if="businessSummary?.available" class="da-native-bars">
           <template v-if="section === 'report'"><div v-for="(count, status) in businessSummary.metrics?.status_counts || {}" :key="status" class="da-native-bar-row"><span>{{ status }}</span><small>{{ formatInteger(count) }} 份</small></div></template>
-          <template v-else><div v-for="row in currencyItems" :key="row.currency" class="da-native-note">{{ row.currency }} 原始应收 {{ formatAmountMinor(row.original_minor) }} 万元，已核销回款 {{ formatAmountMinor(row.allocated_minor) }} 万元，未清 {{ formatAmountMinor(row.open_minor) }} 万元</div></template>
+          <template v-else><div v-for="row in currencyItems" :key="row.currency" class="da-native-note">{{ row.currency }} 原始应收 {{ formatAmountMinor(row.original_minor) }} 万{{ row.currency }}，已核销回款 {{ formatAmountMinor(row.allocated_minor) }} 万{{ row.currency }}，未清 {{ formatAmountMinor(row.open_minor) }} 万{{ row.currency }}</div></template>
           <p class="da-native-note">{{ businessSummary.basis }}</p>
           <p v-if="section === 'finance' && !currencyItems.length" class="da-native-note">当前来源快照可用，当前租户尚无应收或回款记录。</p>
         </div>
@@ -478,7 +522,20 @@ const missingMetricLabels = { first_pass_rate: '首次通过率：缺少完整�
     <div v-else class="da-native-columns">
       <article class="da-native-panel">
         <header><b>{{ section === 'overview' ? '签约与项目趋势' : section === 'report' ? '质量效率分析' : '经营回款分析' }}</b><span>T+1 · 指标口径见字典</span></header>
-        <div v-if="section === 'overview' && trendItems.length" class="da-native-bars"><div v-for="item in trendItems" :key="item.period" class="da-native-bar-row"><span>{{ item.period }}</span><i><em :style="{ width: trendWidth(item.contract_amount_minor) }"></em></i><small>{{ trendCurrencyLabel(item) }}</small></div></div><div v-else class="da-native-empty"><span class="da-native-empty-icon">⌁</span><b>暂无趋势快照</b><p>完成合同与项目同步后，这里会展示真实月度趋势。</p></div>
+        <div v-if="section === 'overview' && trendItems.length" class="da-native-bars">
+          <template v-for="item in trendItems" :key="item.period">
+            <template v-if="canViewContract && item.contract_available !== false">
+              <div v-for="currency in trendCurrencies" :key="`${item.period}/${currency}`" class="da-native-bar-row">
+                <span>{{ item.period }} {{ currency }}</span><i><em :style="{ width: trendWidth(item, currency) }"></em></i><small>{{ formatAmountMinor(trendAmount(item, currency)) }} 万{{ currency }}</small>
+              </div>
+              <div class="da-native-bar-row"><span>{{ item.period }} 合同数</span><i><em :style="{ width: trendWidth(item, 'contract_count') }"></em></i><small>{{ formatInteger(item.contract_count) }} 份</small></div>
+            </template>
+            <div v-if="canViewProject && item.project_available !== false" class="da-native-bar-row"><span>{{ item.period }} 项目数</span><i><em :style="{ width: trendWidth(item, 'project_count') }"></em></i><small>{{ formatInteger(item.project_count) }} 个</small></div>
+            <p v-if="canViewContract && item.contract_available === false" class="da-native-note">{{ item.period }}：无当月合同事实，不计为0。</p>
+            <p v-if="canViewProject && item.project_available === false" class="da-native-note">{{ item.period }}：无当月项目快照，不计为0。</p>
+          </template>
+          <p class="da-native-note">金额按原币种独立量纲展示，各币种和数量序列各用独立标尺，不跨币种合计。</p>
+        </div><div v-else class="da-native-empty"><span class="da-native-empty-icon">⌁</span><b>暂无趋势快照</b><p>完成授权来源同步后展示真实月度趋势。</p></div>
       </article>
       <article class="da-native-panel">
         <header><b>{{ section === 'overview' ? '预警聚合' : section === 'report' ? '退回原因分布' : '应收账款账龄' }}</b><span>只读</span></header>
@@ -487,18 +544,25 @@ const missingMetricLabels = { first_pass_rate: '首次通过率：缺少完整�
     </div>
     <div v-if="section === 'contract' || section === 'project'" class="da-native-columns da-native-secondary">
       <article class="da-native-panel">
-        <header><b>{{ section === 'contract' ? '商机→合同转化率漏斗' : '返工率（报告退回+现场重测）' }}</b><span>聚合级</span></header>
-        <div v-if="section === 'contract' && summaryAvailable && contractSummary?.conversion_available" class="da-native-bars"><div v-for="item in contractFunnelItems" :key="item.label" class="da-native-bar-row"><span>{{ item.label }}</span><i><em :style="{ width: barWidth(item.value) }"></em></i><small>{{ formatInteger(item.value) }}</small></div><p class="da-native-note">{{ contractSummary.conversion_basis }}</p></div><div v-else class="da-native-empty"><span class="da-native-empty-icon">⌁</span><b>暂无明细快照</b><p>同步商机与合同事实后展示转化漏斗。</p></div>
+        <header><b>{{ section === 'contract' ? '商机→合同转化率漏斗' : '返工率（尚未接入）' }}</b><span>聚合级</span></header>
+        <div v-if="section === 'contract' && summaryAvailable && contractSummary?.conversion_available" class="da-native-bars"><div v-for="item in contractFunnelItems" :key="item.label" class="da-native-bar-row"><span>{{ item.label }}</span><i><em :style="{ width: funnelWidth(item.value) }"></em></i><small>{{ formatInteger(item.value) }}</small></div><p class="da-native-note">转化率：{{ conversionRate }}；{{ contractSummary.conversion_basis }}</p></div><div v-else class="da-native-empty"><span class="da-native-empty-icon">⌁</span><b>{{ section === 'contract' ? '暂无转化来源快照' : '返工率尚未接入' }}</b><p>{{ section === 'contract' ? '商机与合同来源均首次成功后展示同范围转化漏斗。' : '缺少完整报告退回及现场重测事实，不能计算返工率。' }}</p></div>
       </article>
       <article class="da-native-panel">
-        <header><b>{{ section === 'contract' ? '折扣分析（区间分布）' : '人员 / 设备利用率（本月）' }}</b><span>只读</span></header>
-        <div v-if="section === 'contract' && summaryAvailable && contractDiscountItems.length" class="da-native-bars"><div v-for="item in contractDiscountItems" :key="item.label" class="da-native-bar-row"><span>{{ item.label }}</span><i><em :style="{ width: barWidth(item.value) }"></em></i><small>{{ formatInteger(item.value) }}</small></div></div><div v-else class="da-native-empty"><span class="da-native-empty-icon">⌁</span><b>暂无折扣快照</b><p>当前合同数据未提供可计算的折扣区间。</p></div>
-        <p class="da-native-note">{{ contractSummary?.discount_unavailable_reason || '暂无可用快照，不使用演示数据填充业务指标。' }}</p>
+        <header><b>{{ section === 'contract' ? '折扣分析（区间分布）' : '人员 / 设备利用率（尚未接入）' }}</b><span>只读</span></header>
+        <div v-if="section === 'contract' && summaryAvailable && contractDiscountItems.length" class="da-native-bars"><div v-for="item in contractDiscountItems" :key="item.label" class="da-native-bar-row"><span>{{ item.label }}</span><i><em :style="{ width: barWidth(item.value) }"></em></i><small>{{ formatInteger(item.value) }}</small></div></div><div v-else class="da-native-empty"><span class="da-native-empty-icon">⌁</span><b>{{ section === 'contract' ? '折扣无法计算' : '利用率尚未接入' }}</b><p>{{ section === 'contract' ? '缺少权威标准报价及币种基准，不能计算折扣区间。' : '缺少权威工时、人员及设备可用容量事实，不能计算利用率。' }}</p></div>
+        <p v-if="section === 'contract'" class="da-native-note">{{ contractSummary?.discount_unavailable_reason || '暂无可用快照，不使用演示数据填充业务指标。' }}</p>
       </article>
     </div>
     <div v-if="section === 'contract' || section === 'project'" class="da-native-panel da-native-table-panel">
       <header><b>{{ section === 'contract' ? '合同列表（下钻明细）' : '项目执行明细' }}</b><span>聚合级 · 不含敏感字段</span></header>
-      <div v-if="section === 'contract' && contractDetails.items?.length" class="da-native-detail-table"><table class="da-table"><thead><tr><th scope="col">合同编号</th><th scope="col">名称</th><th scope="col">状态</th><th scope="col">金额</th><th scope="col">币种</th><th scope="col">到期日</th></tr></thead><tbody><tr v-for="item in contractDetails.items" :key="item.contract_number"><td class="mono">{{ item.contract_number }}</td><td>{{ item.title }}</td><td>{{ contractStatusLabel(item.status) }}</td><td>{{ formatAmountMinor(item.amount_minor) }} 万元</td><td>{{ item.currency || '—' }}</td><td>{{ item.end_date || '—' }}</td></tr></tbody></table><p class="da-native-note">共 {{ contractDetails.total }} 条，当前展示前 10 条</p></div><div v-else class="da-native-empty"><b>暂无明细数据</b><p>当前租户没有可展示的{{ section === 'contract' ? '合同' : '项目' }}记录。</p></div>
+      <p v-if="detailLoading" role="status">正在加载明细…</p>
+      <p v-if="detailError" class="da-native-inline-error" role="alert">{{ detailError }}<button type="button" class="da-button" @click="emit('detail-page', activeDetails.page || 1)">重试明细</button></p>
+      <div v-if="!detailError && activeDetails.items?.length && (section !== 'contract' || summaryAvailable)" class="da-native-detail-table">
+        <table v-if="section === 'contract'" class="da-table"><thead><tr><th scope="col">合同编号</th><th scope="col">名称</th><th scope="col">状态</th><th scope="col">金额</th><th scope="col">到期日</th></tr></thead><tbody><tr v-for="item in contractDetails.items" :key="item.contract_number"><td class="mono">{{ item.contract_number }}</td><td>{{ item.title }}</td><td>{{ contractStatusLabel(item.status) }}</td><td>{{ formatAmountMinor(item.amount_minor) }} 万{{ item.currency }}</td><td>{{ item.end_date || '—' }}</td></tr></tbody></table>
+        <table v-else class="da-table"><thead><tr><th scope="col">项目</th><th scope="col">状态</th><th scope="col">经理</th><th scope="col">归属组织ID</th><th scope="col">服务项</th><th scope="col">报告阶段</th><th scope="col">风险</th></tr></thead><tbody><tr v-for="item in projectDetails.items" :key="item.project_id"><td>{{ item.name }}</td><td>{{ item.status }}</td><td>{{ item.manager || '—' }}</td><td>{{ item.owner_org_id || '—' }}</td><td>{{ item.service_items }}</td><td>{{ item.report_stage || '未采集' }}</td><td>{{ item.risk ? '风险' : '正常' }}</td></tr></tbody></table>
+      </div>
+      <div v-else-if="!detailLoading && !detailError" class="da-native-empty"><b>{{ section === 'project' && !projectDetails.available ? '尚无可用项目投影' : section === 'contract' && !summaryAvailable ? '尚无可用合同快照' : '当前范围内暂无明细' }}</b><p>{{ section === 'project' && !projectDetails.available ? '等待首次完整项目投影成功发布；无可用范围也不可读取明细。' : section === 'contract' && !summaryAvailable ? '等待首次合同来源同步成功后核对明细。' : '当前成功来源在授权范围内没有记录。' }}</p></div>
+      <PaginationBar :page="activeDetails.page || 1" :total="detailError ? null : activeDetails.total" :page-size="activeDetails.page_size || 20" :loading="detailLoading" :label="section === 'contract' ? '合同明细分页' : '项目明细分页'" @change="emit('detail-page', $event)" />
     </div>
   </section>
 </template>
