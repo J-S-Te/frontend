@@ -58,11 +58,11 @@ const KNOWN_SECTIONS = [...DASHBOARD_SECTIONS, "alerts", "dictionary", "admin/so
 
 const navGroups = [
   { label: "经营看板", items: [
-    { key: "overview", label: "经营总览", icon: "dashboard", meta: ["集团经营指标与目标达成态势", "OQ1"], permission: DASHBOARD_PERMISSIONS.overview },
-    { key: "contract", label: "合同看板", icon: "account", meta: ["合同签约、执行与回款全景", "OQ2"], permission: DASHBOARD_PERMISSIONS.contract },
-    { key: "project", label: "项目看板", icon: "organization", meta: ["项目交付、进度与质量全景", "OQ3"], permission: DASHBOARD_PERMISSIONS.project },
+    { key: "overview", label: "经营总览", icon: "dashboard", meta: ["合同与项目经营指标及趋势", "OQ1"], permission: DASHBOARD_PERMISSIONS.overview },
+    { key: "contract", label: "合同看板", icon: "account", meta: ["普通合同签约与执行统计", "OQ2"], permission: DASHBOARD_PERMISSIONS.contract },
+    { key: "project", label: "项目看板", icon: "organization", meta: ["项目规模、交付状态与报告阶段", "OQ3"], permission: DASHBOARD_PERMISSIONS.project },
     { key: "report", label: "报告看板", icon: "audit", meta: ["报告编制、复核与签发效率", "OQ4"], permission: DASHBOARD_PERMISSIONS.report },
-    { key: "finance", label: "财务看板", icon: "settings", meta: ["收入、成本与利润口径分析", "OQ5"], permission: DASHBOARD_PERMISSIONS.finance },
+    { key: "finance", label: "财务看板", icon: "settings", meta: ["应收、净核销回款与账龄分析", "OQ5"], permission: DASHBOARD_PERMISSIONS.finance },
   ] },
   { label: "预警与口径", items: [
     { key: "alerts", label: "预警中心", icon: "bell", meta: ["指标预警的受理、跟踪与闭环", "P-08"], permission: "alert.view" },
@@ -75,11 +75,11 @@ const navGroups = [
 ]
 
 const pageMeta = {
-  overview: ["经营总览", "集团经营指标与目标达成态势"],
-  contract: ["合同看板", "合同签约、执行与回款全景"],
-  project: ["项目看板", "项目交付、进度与质量全景"],
+  overview: ["经营总览", "合同与项目经营指标及趋势"],
+  contract: ["合同看板", "普通合同签约与执行统计"],
+  project: ["项目看板", "项目规模、交付状态与报告阶段"],
   report: ["报告看板", "报告编制、复核与签发效率"],
-  finance: ["财务看板", "收入、成本与利润口径分析"],
+  finance: ["财务看板", "应收、净核销回款与账龄分析"],
   alerts: ["预警中心", "指标预警的受理、跟踪与闭环"],
   dictionary: ["指标字典", "指标口径与版本的统一查阅"],
   "admin/sources": ["数据源与同步", "各子系统数据源接入与同步状态"],
