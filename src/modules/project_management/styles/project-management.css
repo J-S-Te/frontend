@@ -183,10 +183,6 @@
 }
 
 /* 图表等价文本：颜色之外必须提供等价信息 */
-.pm-shell .pm-chart-table { width: 100%; border-collapse: collapse; font-size: var(--pm-fs-hint); }
-.pm-shell .pm-chart-table th,
-.pm-shell .pm-chart-table td { padding: var(--pm-sp-1) var(--pm-sp-2); border-bottom: 1px solid var(--pm-line-soft); text-align: left; }
-.pm-shell .pm-chart-table th { color: var(--pm-muted); font-weight: var(--pm-fw-semibold); }
 
 @media (prefers-reduced-motion: reduce) {
   .pm-shell *,
@@ -378,22 +374,6 @@
 }
 
 .pm-nav-item.active em { background: var(--pm-sidebar-dot); color: #fff; }
-.pm-nav-item .pm-platform-tag {
-  margin-left: auto;
-  padding: 2px 7px;
-  border-radius: var(--pm-r-full);
-  background: var(--pm-sidebar-dot);
-  color: var(--pm-sidebar-text);
-  font-size: var(--pm-fs-nano);
-}
-
-.pm-sidebar-foot {
-  padding: 14px var(--pm-sp-4);
-  border-top: 1px solid var(--pm-sidebar-hover);
-  color: var(--pm-sidebar-label);
-  font-size: var(--pm-fs-nano);
-  letter-spacing: .05em;
-}
 
 /* ==========================================================================
    §5 顶栏 Topbar
@@ -603,18 +583,6 @@
 
 .pm-link:hover { background: var(--pm-primary-soft); }
 
-.pm-btn-link {
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--pm-primary);
-  font-size: var(--pm-fs-label);
-  font-weight: var(--pm-fw-semibold);
-  white-space: nowrap;
-}
-
-.pm-btn-link:hover { text-decoration: underline; }
-
 /* ==========================================================================
    §7 卡片 / KPI
    ========================================================================== */
@@ -783,8 +751,6 @@
 .pm-donut strong { color: var(--pm-ink); font-size: var(--pm-fs-display); font-weight: var(--pm-fw-bold); line-height: var(--pm-lh-tight); }
 .pm-donut span { color: var(--pm-muted); font-size: var(--pm-fs-hint); }
 
-.pm-status-chart { min-height: 220px; display: grid; grid-template-columns: 44% 1fr; align-items: center; gap: var(--pm-sp-4); padding: var(--pm-sp-5); }
-
 .pm-legend { display: flex; flex-direction: column; gap: var(--pm-sp-1); }
 .pm-legend button {
   display: grid;
@@ -845,27 +811,6 @@
 .pm-risk-list b { display: block; color: var(--pm-ink); font-size: var(--pm-fs-ui); font-weight: var(--pm-fw-semibold); line-height: 1.45; }
 .pm-risk-list p { margin: 2px 0 0; color: var(--pm-muted); font-size: var(--pm-fs-hint); line-height: 1.55; }
 .pm-risk-list time { padding-top: 2px; color: var(--pm-faint); font-size: var(--pm-fs-micro); font-variant-numeric: tabular-nums; white-space: nowrap; }
-
-.pm-project-progress { overflow: hidden; }
-.pm-progress-row {
-  min-height: 60px;
-  display: grid;
-  grid-template-columns: 2fr 60px 1.5fr 42px 80px;
-  align-items: center;
-  gap: 14px;
-  padding: 10px var(--pm-sp-5);
-  border-bottom: 1px solid var(--pm-line-soft);
-  cursor: pointer;
-}
-
-.pm-progress-row:last-child { border-bottom: 0; }
-.pm-progress-row:hover { background: var(--pm-sunken); }
-.pm-progress-row > div:first-child { display: flex; gap: 10px; min-width: 0; font-size: var(--pm-fs-sm); }
-.pm-progress-row > div:first-child b { min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
-.pm-progress-row > div:first-child span,
-.pm-progress-row time { color: var(--pm-muted); }
-.pm-progress-row > strong { color: var(--pm-ink); font-size: var(--pm-fs-sm); }
-.pm-progress-row time { font-size: var(--pm-fs-sm); text-align: right; }
 
 /* 统计条 / 运营指标 */
 .pm-board-summary {
@@ -986,8 +931,6 @@
 .pm-monitor-table td { vertical-align: top; }
 .pm-monitor-table .pm-col-actions { display: grid; gap: var(--pm-sp-1); }
 
-.pm-file-input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
-
 /* ==========================================================================
    §9 表格
    ========================================================================== */
@@ -1089,7 +1032,6 @@
   font-size: var(--pm-fs-nano);
   font-weight: var(--pm-fw-semibold);
 }
-
 
 .pm-num-badge {
   display: inline-grid;
@@ -1296,7 +1238,6 @@
 
 /* 弹窗表单通栏/半宽控制：地址、坐标等长内容字段独占一行，短字段两两成行。 */
 .pm-form .pm-span-full { grid-column: 1 / -1; }
-.pm-form label.pm-span-half { grid-column: auto; }
 /* 坐标等复合字段内部的行内控件：输入框等分弹性伸展，按钮按内容宽度。 */
 .pm-form .pm-field .pm-form-row { display: flex; align-items: center; gap: var(--pm-sp-2); }
 .pm-form .pm-field .pm-form-row input { flex: 1 1 0; min-width: 0; }
@@ -1305,11 +1246,6 @@
 /* 提交按钮是网格子项：独占一行、按内容宽度靠左，避免被拉满整列 */
 .pm-form > .pm-button { grid-column: 1 / -1; justify-self: start; align-self: center; width: auto; }
 .pm-form-row { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--pm-sp-2); }
-.pm-personnel-checklist-field { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 7px; color: var(--pm-body); font-size: var(--pm-fs-label); }
-.pm-personnel-checklist-field > span { font-weight: var(--pm-fw-semibold); }
-.pm-personnel-checklist { display: grid; gap: 6px; max-height: 200px; overflow: auto; padding: 10px var(--pm-sp-3); border: 1px solid var(--pm-line); border-radius: var(--pm-r-sm); background: var(--pm-sunken); }
-.pm-personnel-check { display: flex; align-items: center; gap: var(--pm-sp-2); font-size: var(--pm-fs-sm); }
-.pm-personnel-check input { width: auto; min-height: 0; }
 
 /* 下拉多选：不使用快捷键，纯点选，与「团队负责人 / 项目经理」的原生 select 保持同一视觉基线。
    盒高与边框已由与 .pm-form select 相同的 min-height / padding / border 决定，此处不再改动行高
@@ -1338,12 +1274,13 @@
 /* 箭头已由触发器自身的背景图承担；保留元素会与原生 select 的箭头形成两种样式。 */
 .pm-multi-caret { display: none; }
 .pm-multi-menu { position: absolute; z-index: var(--pm-z-dropdown); top: calc(100% + 4px); left: 0; right: 0; max-height: 220px; overflow: auto; padding: 6px; border: 1px solid var(--pm-line); border-radius: var(--pm-r-sm); background: var(--pm-card); box-shadow: var(--pm-shadow-pop); }
+/* 弹窗表单自身是纵向滚动容器（见 .pm-dialog > .pm-form 的 overflow-y:auto），
+   绝对定位的下拉会被它裁切，必须滚动表单才看得全；弹窗内改为流内展开，
+   由表单滚动完整呈现，避免下拉被截掉一截。设备面板不在弹窗内，仍保持悬浮。 */
+.pm-dialog > .pm-form .pm-multi-menu { position: static; margin-top: 4px; }
 .pm-multi-option { display: flex; align-items: center; gap: var(--pm-sp-2); padding: 7px var(--pm-sp-2); border-radius: var(--pm-r-xs); font-size: var(--pm-fs-sm); cursor: pointer; }
 .pm-multi-option:hover { background: var(--pm-primary-soft); }
 .pm-multi-option input { width: auto; min-height: 0; }
-
-.pm-code-chips { display: flex; flex-wrap: wrap; gap: 6px; min-height: 40px; padding: 7px 10px; border: 1px dashed var(--pm-line); border-radius: var(--pm-r-sm); background: var(--pm-sunken); }
-.pm-code-chip { padding: var(--pm-sp-1) 10px; border: 1px solid var(--pm-line); border-radius: var(--pm-r-full); background: var(--pm-card); color: var(--pm-blue-text); font-size: var(--pm-fs-hint); font-variant-numeric: tabular-nums; }
 
 /* 资质/能力编码的只读胶囊标签：多个编码逐个成胶囊，空值回落为“—”占位符。 */
 .pm-code-pills { display: inline-flex; flex-wrap: wrap; gap: 4px; }
@@ -1423,11 +1360,6 @@
    §14 轻提示 Toast
    ========================================================================== */
 
-
-
-
-
-
 /* ==========================================================================
    §15 反馈状态：空态 / 冲突 / 警告
    ========================================================================== */
@@ -1459,8 +1391,6 @@
 .pm-blocker.danger { border-color: var(--pm-red); background: var(--pm-red-soft); color: var(--pm-red-text); }
 
 /* 危险态三重表达：红框 + 浅底 + 文案（不能只靠颜色） */
-.pm-conflict { border: 1.5px solid var(--pm-red); background: var(--pm-red-soft); border-radius: var(--pm-r-sm); padding: var(--pm-sp-3); color: var(--pm-red-text); font-size: var(--pm-fs-sm); }
-.pm-okbox { border: 1.5px solid var(--pm-green); background: var(--pm-green-soft); border-radius: var(--pm-r-sm); padding: var(--pm-sp-3); color: var(--pm-green-text); font-size: var(--pm-fs-sm); }
 
 /* 提示条：布局与圆点由基类承担，颜色由 warn/info 变体决定。此前只有 .warn 一套规则，
    而视图里同时用了 .pm-alert.info（SLA 口径说明），该面板因此完全无样式。 */
@@ -1665,9 +1595,6 @@
 @media (max-width: 1180px) {
   .pm-dashboard-grid,
   .pm-dashboard-grid-3 { grid-template-columns: 1fr; }
-  .pm-status-chart { grid-template-columns: 35% 1fr; }
-  .pm-progress-row { grid-template-columns: 2fr 60px 1fr 40px; }
-  .pm-progress-row time { display: none; }
   .pm-kanban { grid-template-columns: repeat(5, 210px); }
 }
 
@@ -1731,12 +1658,8 @@
   .pm-page-head { flex-direction: column; }
   .pm-actions { justify-content: flex-start; }
   .pm-kpis { grid-template-columns: 1fr; }
-  .pm-status-chart { grid-template-columns: 1fr; gap: var(--pm-sp-4); }
   .pm-donut { width: 132px; height: 132px; }
   .pm-donut::before { width: 88px; height: 88px; }
-  .pm-progress-row { grid-template-columns: 1fr auto; }
-  .pm-progress-row > .pm-progress,
-  .pm-progress-row > strong { display: none; }
   .pm-board-summary { overflow-x: auto; }
   .pm-board-summary div { min-width: 130px; }
   .pm-operational-stats { grid-template-columns: 1fr; }
@@ -1885,10 +1808,6 @@
 
 /* 18.1 指标卡扩展：趋势 / 角标 / 补充说明（原型 .stat-card 的 trend / extra / meta）
    注:.pm-kpi 主样式已在 §7 重做,这里只补 trend 和 row 布局,避免与 §7 重复定义。 */
-.pm-kpi .pm-kpi-trend { display: inline-flex; align-items: center; gap: 3px; margin-top: 6px; font-size: var(--pm-fs-hint); font-weight: var(--pm-fw-semibold); font-variant-numeric: tabular-nums; }
-.pm-kpi .pm-kpi-trend.up { color: var(--pm-green-text); }
-.pm-kpi .pm-kpi-trend.down { color: var(--pm-red-text); }
-.pm-kpi .pm-kpi-trend.flat { color: var(--pm-gray-text); }
 .pm-kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: var(--pm-gap-grid); }
 
 /* 项目列表卡片数量由角色决定。这里用可换行 flex 而不是 auto-fit 网格：
@@ -1992,7 +1911,6 @@
 .pm-kpi-hidden-empty { display: flex; align-items: center; gap: var(--pm-sp-2); margin: 0; padding: var(--pm-sp-4); border: 1px dashed var(--pm-line-strong); border-radius: var(--pm-r-lg); background: var(--pm-card); color: var(--pm-muted); font-size: var(--pm-fs-hint); }
 .pm-kpi-hidden-empty svg { width: 16px; height: 16px; flex: none; }
 .pm-kpi-hidden-empty span { margin-right: auto; }
-
 
 @media (max-width: 1280px) {
   .pm-project-kpi-columns-5 > .pm-kpi { flex-basis: calc(33.333333% - 10.666667px); }
@@ -2131,10 +2049,6 @@
 .pm-tab-count { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; margin-left: 6px; padding: 0 5px; border-radius: var(--pm-r-full); background: var(--pm-primary-soft); color: var(--pm-blue-text); font-size: var(--pm-fs-nano); font-weight: var(--pm-fw-semibold); }
 
 /* 18.11 轻提示语义色：图标底色随结果切换，错误不再是绿色对勾 */
-
-
-
-
 
 @media (max-width: 900px) {
   .pm-approval-step { min-width: 160px; }

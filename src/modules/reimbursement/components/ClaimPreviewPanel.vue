@@ -1,5 +1,6 @@
 <script setup>
 import { formatMinor } from '../api/client.js'
+import ErrorState from '../../shared/components/ErrorState.vue'
 const props=defineProps({value:{type:Object,default:null},busy:Boolean,error:String,enabled:Boolean,disabled:Boolean})
 const emit=defineEmits(['refresh'])
 </script>
@@ -10,7 +11,7 @@ const emit=defineEmits(['refresh'])
     <button class="expense-button" :disabled="disabled || busy" @click="emit('refresh')">
       {{ busy ? '正在核对标准与当前审批资格…' : '更新标准与审批预览' }}</button>
     <p v-if="enabled">修改费用后自动重新预览；未返回新结果时不沿用旧结论。</p>
-    <p v-if="error" role="alert">{{ error }}</p>
+    <ErrorState v-if="error" compact title="标准与审批预览未完成" :error="error" :retry="false" />
     <template v-if="value?.preview_only">
       <p>草稿版本 {{ value.expected_version }} · 预览规则 {{ value.rule_version }}</p>
       <article v-for="(item,index) in value.items" :key="item.id" class="expense-item">

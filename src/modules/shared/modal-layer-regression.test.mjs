@@ -31,7 +31,7 @@ test('项目不再处理已消费的 Escape', () => {
 })
 for(const accepted of [false,true]) test(`CRM关闭脏表单遵守应用确认结果=${accepted}，不使用原生确认`,async()=>{
  const source=read('../customer_opportunity/views/CustomerOpportunityView.vue');let asks=0;let native=0
- const state={actionLoading:{value:false},customerFormDirty:{value:true},customerDialog:{value:true},customerFormInitial:'old',confirmDialog:{value:null},window:{confirm(){native++;return true}},askConfirm:async()=>{asks++;return accepted}}
+ const state={actionLoading:{value:false},customerFormDirty:{value:true},customerDialog:{value:true},customerFormInitial:'old',confirmDialog:{value:null},window:{confirm(){native++;return true}},askConfirm:async()=>{asks++;return accepted},resetCustomerEditContacts(){}}
  const close=vm.runInNewContext(`${extract(source,'confirmDiscardIfDirty')}\n(${extract(source,'closeCustomerDialog')})`,state)
  await close()
  assert.equal(asks,1);assert.equal(native,0);assert.equal(state.customerDialog.value,!accepted)
@@ -41,7 +41,7 @@ for (const name of ['closeCustomerDialog','closeOpportunityDialog','closePresale
  for (const accepted of [false,true]) test(`${name} 关闭确认=${accepted}，保留或丢弃对应草稿`,async()=>{
   const source=read('../customer_opportunity/views/CustomerOpportunityView.vue')
   let invalidated=0
-  const state={actionLoading:{value:false},presaleCreateLoading:{value:false},customerFormDirty:{value:true},opportunityFormDirty:{value:true},presaleFormDirty:{value:true},customerDialog:{value:true},opportunityDialog:{value:true},presaleCreatePage:{value:true},customerFormInitial:'old',opportunityFormInitial:'old',presaleFormInitial:'old',presaleOpportunityOptionsLoadSequence:{value:0},presaleReopenRequest:{value:{}},presaleCreateOptionsScope:{invalidate(){invalidated++}},resetMessages(){},confirmDialog:{value:null},askConfirm:async()=>accepted}
+  const state={actionLoading:{value:false},presaleCreateLoading:{value:false},customerFormDirty:{value:true},opportunityFormDirty:{value:true},presaleFormDirty:{value:true},customerDialog:{value:true},opportunityDialog:{value:true},presaleCreatePage:{value:true},customerFormInitial:'old',opportunityFormInitial:'old',presaleFormInitial:'old',presaleOpportunityOptionsLoadSequence:{value:0},presaleReopenRequest:{value:{}},presaleCreateOptionsScope:{invalidate(){invalidated++}},resetMessages(){},confirmDialog:{value:null},askConfirm:async()=>accepted,resetCustomerEditContacts(){}}
   const close=vm.runInNewContext(`${extract(source,'confirmDiscardIfDirty')}\n(${extract(source,name)})`,state)
   await close()
   const key={closeCustomerDialog:'customerDialog',closeOpportunityDialog:'opportunityDialog',closePresaleCreatePage:'presaleCreatePage'}[name]
@@ -51,7 +51,7 @@ for (const name of ['closeCustomerDialog','closeOpportunityDialog','closePresale
 }
 test('CRM保存中不关闭也不弹确认，未修改时直接关闭',async()=>{
  const source=read('../customer_opportunity/views/CustomerOpportunityView.vue');let asks=0
- const state={actionLoading:{value:true},customerFormDirty:{value:true},customerDialog:{value:true},customerFormInitial:'old',confirmDialog:{value:null},askConfirm:async()=>{asks++;return true}}
+ const state={actionLoading:{value:true},customerFormDirty:{value:true},customerDialog:{value:true},customerFormInitial:'old',confirmDialog:{value:null},askConfirm:async()=>{asks++;return true},resetCustomerEditContacts(){}}
  const close=vm.runInNewContext(`${extract(source,'confirmDiscardIfDirty')}\n(${extract(source,'closeCustomerDialog')})`,state)
  await close();assert.equal(state.customerDialog.value,true);assert.equal(asks,0)
  state.actionLoading.value=false;state.customerFormDirty.value=false

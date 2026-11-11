@@ -142,14 +142,14 @@ defineEmits(['reload','submit-receipt','sync-customer','select-match','navigate'
         <table>
           <thead>
             <tr>
-              <th>回款号</th>
-              <th>客户</th>
-              <th>金额</th>
-              <th>回款日期</th>
-              <th>方式</th>
-              <th>银行凭证号</th>
-              <th>状态</th>
-              <th>操作</th>
+              <th scope="col">回款号</th>
+              <th scope="col">客户</th>
+              <th scope="col">金额</th>
+              <th scope="col">回款日期</th>
+              <th scope="col">方式</th>
+              <th scope="col">银行凭证号</th>
+              <th scope="col">状态</th>
+              <th scope="col">操作</th>
             </tr>
           </thead>
           <tbody>

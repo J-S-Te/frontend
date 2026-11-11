@@ -63,14 +63,14 @@ defineEmits(['reload','submit-allocation','submit-reversal'])
         <table>
           <thead>
             <tr>
-              <th>核销单号</th>
-              <th>回款号</th>
-              <th>应收单号</th>
-              <th>金额</th>
-              <th>币种</th>
-              <th>确认时间</th>
-              <th>状态</th>
-              <th>操作</th>
+              <th scope="col">核销单号</th>
+              <th scope="col">回款号</th>
+              <th scope="col">应收单号</th>
+              <th scope="col">金额</th>
+              <th scope="col">币种</th>
+              <th scope="col">确认时间</th>
+              <th scope="col">状态</th>
+              <th scope="col">操作</th>
             </tr>
           </thead>
           <tbody>

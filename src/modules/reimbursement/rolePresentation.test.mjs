@@ -12,8 +12,10 @@ test('超级管理员仅更名展示，全租户能力只认服务端明确marke
 })
 
 test('岗位名称与项目经理、技术总监和销售总监一致，不显示团队负责人替代', async () => {
-  const { approvalNodeLabel } = await import('./rolePresentation.js')
+  const { approvalNodeLabel, approvalNodesLabel } = await import('./rolePresentation.js')
   assert.match(approvalNodeLabel('PROJECT_EXPENSE_OWNER'), /项目经理/)
   assert.match(approvalNodeLabel('TECHNICAL_DIRECTOR'), /项目技术总监/)
   assert.match(approvalNodeLabel('SALES_DIRECTOR'), /项目销售总监/)
+  assert.equal(approvalNodesLabel('ACCOUNTANT / FINANCE_DIRECTOR'), '会计审核 / 财务负责人')
+  assert.doesNotMatch(approvalNodesLabel('ACCOUNTANT / FINANCE_DIRECTOR'), /ACCOUNTANT|FINANCE_DIRECTOR/)
 })

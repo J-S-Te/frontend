@@ -3,12 +3,16 @@ import { computed, ref, watch } from 'vue'
 import { reimbursementAPI as api } from '../api/reimbursement.js'
 import { createCommandRunner } from '../api/client.js'
 import { formatBusinessDateTime } from '../../shared/utils/businessTime.js'
+import ErrorState from '../../shared/components/ErrorState.vue'
+import { claimStatusLabel as statusLabel, failureMessage } from '../statusLabels.js'
 
 const props = defineProps({ claim: { type: Object, required: true },
   permissions: { type: Array, default: () => [] } })
 const state = ref(null)
 const capacity = ref(null)
-const error = ref('')
+// 读取失败与业务动作失败分开：前者可重读同步状态，后者不能拿"重新加载"冒充重试。
+const loadError = ref(null)
+const actionError = ref(null)
 const reason = ref('')
 const busy = ref(false)
 const pending = ref(null)
@@ -21,7 +25,7 @@ let generation = 0
 // 返回值：无；失败时不展示旧单据诊断。
 async function load() {
   const ticket = ++generation
-  state.value = null; capacity.value = null; error.value = ''
+  state.value = null; capacity.value = null; loadError.value = null; actionError.value = null
   try {
     const id = encodeURIComponent(props.claim.id)
     const result = await api.request(`/claims/${id}/sync-status`)
@@ -31,7 +35,7 @@ async function load() {
       const value = await api.request(`/claims/${id}/spend-capacity`)
       if (ticket === generation) capacity.value = value
     }
-  } catch (cause) { if (ticket === generation) error.value = cause.message }
+  } catch (cause) { if (ticket === generation) loadError.value = cause }
 }
 
 // 用途：恢复当前单据的权威完整快照，未知结果沿用原命令。
@@ -39,7 +43,7 @@ async function load() {
 // 返回值：无；恢复不会增加财务版本或付款事实。
 async function replay(retry = false) {
   if (busy.value) return
-  busy.value = true; error.value = ''
+  busy.value = true; actionError.value = null
   try {
     if (retry) await runner.retry()
     else {
@@ -48,7 +52,7 @@ async function replay(retry = false) {
         { expected_version: props.claim.version, reason: reason.value.trim() })
     }
     await load()
-  } catch (cause) { error.value = cause.message }
+  } catch (cause) { actionError.value = cause }
   finally { pending.value = runner.pending(); busy.value = false }
 }
 
@@ -58,10 +62,12 @@ watch(() => [props.claim.id, props.claim.version], load, { immediate: true })
 <template>
   <article class="expense-item">
     <h3>项目支出同步</h3>
-    <p v-if="error" role="alert">{{ error }}</p>
+    <ErrorState v-if="loadError" compact title="同步状态读取失败" :error="loadError"
+      retry-text="重新读取同步状态" @retry="load" />
+    <ErrorState v-else-if="actionError" compact title="同步操作未完成" :error="actionError" :retry="false" />
     <template v-if="state">
-      <p>当前财务版本 {{ state.current_revision }} · 最后成功投递版本 {{ state.successful_revision }} · {{ state.status }}</p>
-      <p v-if="state.last_error">失败原因：{{ state.last_error }}</p>
+      <p>当前财务版本 {{ state.current_revision }} · 最后成功投递版本 {{ state.successful_revision }} · {{ statusLabel(state.status) }}</p>
+      <p v-if="state.last_error">同步失败：{{ failureMessage(state.last_error) }}</p>
       <p v-if="state.next_attempt_at">下一次重试：{{ formatBusinessDateTime(state.next_attempt_at) }}</p>
     </template>
     <p v-if="capacity">累计历史分摊 {{ capacity.allocations_used }} / {{ capacity.allocation_limit }}；本次付款及全额冲正预留 {{ capacity.allocation_reservation }} 条。</p>

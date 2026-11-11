@@ -6,6 +6,17 @@ import * as Vue from 'vue'
 import { approvalNodeLabel } from '../rolePresentation.js'
 import { renderToString } from '@vue/server-renderer'
 
+// 用途：替身只记录选择器收到的接口、用途与当前引用，供模板断言外部边界。
+// 参数：无。
+// 返回值：渲染为可断言文本的Vue组件。
+const pickerStub = {
+  props: ['modelValue', 'path', 'purpose', 'valueKey', 'objectLabel', 'multiple', 'disabled', 'ariaLabel'],
+  setup: (props) => () => Vue.h('div', { class: 'picker-stub' }, [
+    Vue.h('b', {}, `${props.path} | ${props.purpose || ''}`),
+    Vue.h('span', {}, String(Array.isArray(props.modelValue) ? props.modelValue.join(',') : props.modelValue || '')),
+  ]),
+}
+
 // 用途：编译真实尾款与差旅业务面板供SSR检查。
 // 参数：name 为真实组件文件名；request 为受控目录读取替身。
 // 返回值：保留真实条件、证据按钮和只读状态的Vue组件。
@@ -22,6 +33,7 @@ function component(name = './ClaimEvidenceTravelPanel.vue', request = async () =
     return ''
   }).replace(/^import\s+(\w+)\s+from\s+['"]([^'"]+)['"];?\s*$/gm,
     (_, key, file) => { bindings[key] = component(file, request); return '' })
+
   return new Function(...Object.keys(bindings), body.replace('export default', 'return'))(...Object.values(bindings))
 }
 
@@ -108,6 +120,10 @@ test('人工补证后UNKNOWN仍显示未知，无差旅要求不强迫确认，�
   assert.match(html, /查看尾款证据/)
   assert.doesNotMatch(html, /tail-file|尾款证据文件ID|差旅证据文件ID/)
   assert.doesNotMatch(html, /<select[^>]* required/)
+  // 证据引用改由选择器按文件名挑选，面板里不再留可手抄文件ID的输入框。
+  assert.match(html, /已上传附件/)
+  assert.match(html, /名称待核对/)
+  assert.doesNotMatch(html, /尾款证据文件ID|差旅证据文件ID/)
 })
 
 test('审批岗位来源逐项展示项目权威node_role，不用本地映射或旧teamlead代替', async () => {

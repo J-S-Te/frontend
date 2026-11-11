@@ -541,7 +541,7 @@ watch(canReadDictionaries, (granted, previouslyGranted) => {
             />
             <div v-else-if="canReadItems" class="console-table-scroll dictionary-table-wrap">
               <table class="console-data-table dictionary-items-table">
-                <thead><tr><th>显示名称</th><th>项编码</th><th>实际值</th><th>排序</th><th>状态</th><th>更新时间</th><th class="console-actions-cell">操作</th></tr></thead>
+                <thead><tr><th scope="col">显示名称</th><th scope="col">项编码</th><th scope="col">实际值</th><th scope="col">排序</th><th scope="col">状态</th><th scope="col">更新时间</th><th scope="col" class="console-actions-cell">操作</th></tr></thead>
                 <tbody>
                   <tr v-for="item in items" :key="itemID(item)">
                     <td><strong class="console-entity-name">{{ item.label }}</strong></td><td class="console-mono">{{ item.code }}</td><td class="console-mono">{{ item.value }}</td><td>{{ item.sort_order }}</td>

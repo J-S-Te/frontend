@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { frontendModules } from '../../registry/compiledModules.js'
 import { formatBusinessDateTime, todayBusinessDate } from '../../shared/utils/businessTime.js'
-import { getProjectExpenseParticipants, putProjectExpenseParticipant, getProjectReimbursementSpend } from '../api/projectManagement.js'
+import { getProjectExpenseParticipants, putProjectExpenseParticipant, getProjectReimbursementSpend, listPersonnel } from '../api/projectManagement.js'
 
 const props = defineProps({ session: { type: Object, default: null }, projectId: { type: String, default: '' }, projectStatus: { type: String, default: '' } })
 const router = useRouter()
@@ -19,6 +19,13 @@ const participantError = ref('')
 const participantNotice = ref('')
 const participantBusy = ref(false)
 const participantForm = ref({ subject_id:'',valid_from:`${todayBusinessDate()}T00:00`,valid_until:'',reason:'',version:0 })
+const personnelOptions = ref([])
+const personnelNames = ref({})
+const personnelKeyword = ref('')
+const personnelLoading = ref(false)
+const personnelError = ref('')
+const manualSubject = ref(false)
+let personnelSequence = 0
 const canManage = computed(() => props.session?.permissions?.includes('project.expense_participant.manage') === true)
 const canRead = computed(() => props.session?.permissions?.includes('project.reimbursement_spend.read') === true)
 let sequence = 0
@@ -74,6 +81,44 @@ async function loadParticipants(next = false) {
   finally{participantBusy.value=false}
 }
 
+// 用途：从基础平台人员目录读取候选主体，避免手工输入无法核对的128位用户ID。
+// 参数：无；关键词取自 personnelKeyword，为空时取第一页。
+// 返回值：无；失败仅影响候选列表，不阻断已有资格编辑。
+async function loadPersonnel() {
+  if (!props.projectId || !canManage.value) return
+  const ticket = ++personnelSequence
+  personnelLoading.value = true; personnelError.value = ''
+  try {
+    const keyword = personnelKeyword.value.trim()
+    const page = await listPersonnel({ page: 1, page_size: 50, ...(keyword ? { keyword } : {}) })
+    if (ticket !== personnelSequence) return
+    personnelOptions.value = page.items
+      .map((person) => ({ id: String(person?.user_id || ''), name: person?.display_name || '未命名人员' }))
+      .filter((person) => person.id)
+    personnelNames.value = { ...personnelNames.value,
+      ...Object.fromEntries(personnelOptions.value.map((person) => [person.id, person.name])) }
+  } catch (cause) {
+    if (ticket === personnelSequence) { personnelOptions.value = []; personnelError.value = cause.message || '人员目录暂不可用' }
+  } finally { if (ticket === personnelSequence) personnelLoading.value = false }
+}
+
+// 用途：把主体ID显示为已读取到的人员姓名，未读取到时保留原始ID。
+// 参数：id 为稳定主体标识。
+// 返回值：可读人员名称；未知主体返回原ID。
+function personnelLabel(id) {
+  return personnelNames.value[id] || id
+}
+
+const personnelSelectOptions = computed(() => {
+  const options = personnelOptions.value.map((person) => ({ id: person.id, label: `${person.name}（${person.id}）` }))
+  const selected = String(participantForm.value.subject_id || '').trim()
+  if (selected && !options.some((person) => person.id === selected)) {
+    const name = personnelNames.value[selected]
+    options.unshift({ id: selected, label: name ? `${name}（${selected}）` : selected })
+  }
+  return options
+})
+
 // 用途：按北京时间展示既有资格并绑定当前版本，保留独立编辑原因。
 // 参数：row 为服务端当前资格。
 // 返回值：无；不从主体名称推造身份。
@@ -103,6 +148,8 @@ async function saveParticipant(revoke = false) {
 
 watch(() => [props.projectId, canRead.value, canManage.value], () => {
   ++sequence; rows.value = null; cursor.value = ''; error.value = ''; participants.value=null; participantCursor.value=''; participantError.value=''; participantNotice.value=''; participantForm.value={subject_id:'',valid_from:`${todayBusinessDate()}T00:00`,valid_until:'',reason:'',version:0}
+  personnelSequence++; personnelOptions.value = []; personnelNames.value = {}; personnelKeyword.value = ''; personnelError.value = ''; personnelLoading.value = false; manualSubject.value = false
+  if (props.projectId && canManage.value) void loadPersonnel()
 }, { immediate: true })
 </script>
 
@@ -153,21 +200,21 @@ watch(() => [props.projectId, canRead.value, canManage.value], () => {
       <table class="pm-table">
         <thead>
           <tr>
-            <th>
+            <th scope="col">
               来源单号
             </th>
-            <th>
+            <th scope="col">
               本项目已付净额
             </th>
-            <th>费用类别（本项目净额）</th>
-            <th>最近付款时间</th>
-            <th>
+            <th scope="col">费用类别（本项目净额）</th>
+            <th scope="col">最近付款时间</th>
+            <th scope="col">
               币种
             </th>
-            <th>
+            <th scope="col">
               投影版本
             </th>
-            <th>
+            <th scope="col">
               同步时间
             </th>
           </tr>
@@ -210,12 +257,25 @@ watch(() => [props.projectId, canRead.value, canManage.value], () => {
       <button class="pm-button" :disabled="participantBusy" @click="loadParticipants(false)">读取当前名单</button>
       <p v-if="participantError" role="alert">{{ participantError }}</p>
       <p v-if="participantNotice" role="status">{{ participantNotice }}</p>
-      <div v-if="participants" class="pm-table-scroll"><table class="pm-table"><thead><tr><th>稳定主体</th><th>状态</th><th>有效期（北京时间）</th><th>版本</th><th>操作</th></tr></thead><tbody>
-        <tr v-for="person in participants" :key="person.subject_id"><td>{{ person.subject_id }}</td><td>{{ person.status }}</td><td>{{ formatBusinessDateTime(person.valid_from) }} 至 {{ formatBusinessDateTime(person.valid_until) }}</td><td>{{ person.version }}</td><td><button class="pm-button" @click="chooseParticipant(person)">选择当前版本</button></td></tr>
+      <div v-if="participants" class="pm-table-scroll"><table class="pm-table"><thead><tr><th scope="col">稳定主体</th><th scope="col">状态</th><th scope="col">有效期（北京时间）</th><th scope="col">版本</th><th scope="col">操作</th></tr></thead><tbody>
+        <tr v-for="person in participants" :key="person.subject_id"><td>{{ personnelLabel(person.subject_id) }}<br><small>{{ person.subject_id }}</small></td><td>{{ person.status }}</td><td>{{ formatBusinessDateTime(person.valid_from) }} 至 {{ formatBusinessDateTime(person.valid_until) }}</td><td>{{ person.version }}</td><td><button class="pm-button" @click="chooseParticipant(person)">选择当前版本</button></td></tr>
         <tr v-if="!participants.length"><td colspan="5">当前没有显式参与资格。</td></tr>
       </tbody></table><button v-if="participantCursor" class="pm-button" :disabled="participantBusy" @click="loadParticipants(true)">下一页</button></div>
       <fieldset :disabled="participantBusy"><legend>新增或调整资格</legend>
-        <label>人员稳定主体ID<input v-model="participantForm.subject_id" maxlength="128"></label>
+        <label v-if="!manualSubject">人员稳定主体
+          <select v-model="participantForm.subject_id" :disabled="personnelLoading">
+            <option value="">请选择人员</option>
+            <option v-for="person in personnelSelectOptions" :key="person.id" :value="person.id">{{ person.label }}</option>
+          </select>
+        </label>
+        <label v-else>人员稳定主体ID<input v-model="participantForm.subject_id" maxlength="128" placeholder="手动输入权威主体ID"></label>
+        <label><input v-model="manualSubject" type="checkbox"> 手动输入主体 ID</label>
+        <div v-if="!manualSubject" class="pm-actions-bar">
+          <input v-model="personnelKeyword" maxlength="64" placeholder="按姓名或工号搜索人员目录" @keyup.enter="loadPersonnel">
+          <button class="pm-button" :disabled="personnelLoading" @click="loadPersonnel">{{ personnelLoading ? '查询中…' : '查询人员目录' }}</button>
+        </div>
+        <p v-if="personnelError" role="alert">{{ personnelError }}；可勾选“手动输入主体 ID”继续保存。</p>
+        <p v-if="participantForm.subject_id && !manualSubject">已选主体：{{ personnelLabel(participantForm.subject_id) }}（{{ participantForm.subject_id }}）</p>
         <label>生效时间（北京时间）<input v-model="participantForm.valid_from" type="datetime-local"></label>
         <label>到期时间（北京时间）<input v-model="participantForm.valid_until" type="datetime-local"></label>
         <label>原因<textarea v-model="participantForm.reason" maxlength="1000" /></label>

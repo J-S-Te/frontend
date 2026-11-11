@@ -1,4 +1,12 @@
+import { formatMinor } from './api/client.js'
+
 export const claimTypes = Object.freeze({ TRAVEL:'差旅', DAILY:'日常', PROJECT_EXECUTION:'项目执行' })
+
+// 「我发起的审批」只展示已经提交过的单据：草稿尚未进入审批，不属于该入口。
+// 与后端 /claims 的合法状态字符串保持完全一致（大小写敏感），多值由逗号分隔。
+export const submittedClaimStatuses = Object.freeze([
+  'IN_APPROVAL', 'RETURNED', 'APPROVED_PENDING_PAYMENT', 'PAID', 'VOID',
+])
 
 // 用途：仅接收站内路径，防止通知深链跳到外站或脚本协议。
 // 参数：value为平台返回的业务目标路径。
@@ -8,9 +16,18 @@ export function safeNotificationPath(value) {
     && !/[\\\u0000-\u0020]/.test(value) ? value : ''
 }
 
+// 用途：把服务端整数分渲染为元，供轮次差异对照使用。
+// 参数：value 为服务端金额字段（整数分）或其它可读文本。
+// 返回值：元金额文本；非整数分保持原文，空值显示未设置。
+function moneyLabel(value) {
+  const text = String(value ?? '').trim()
+  if (!text) return '未设置'
+  return /^-?\d+$/.test(text) ? `${formatMinor(text)} 元` : text
+}
+
 // 用途：比较两个已授权快照的关键可写字段，不把范围裁剪当业务增删。
 // 参数：before为旧快照，after为新快照，两者均由受控接口提供。
-// 返回值：带字段标签及前后原值的差异；受限视图仅比较共同费用。
+// 返回值：带字段标签及前后原值的差异；金额统一以元展示，受限视图仅比较共同费用。
 export function claimChanges(before,after) {
   if(!before || !after)return []
   const changes=[]
@@ -27,7 +44,9 @@ export function claimChanges(before,after) {
       continue
     }
     for(const [key,label] of [['fee_type','类别'],['occurred_date','日期'],['requested_minor','金额'],['exception_reason','例外说明']]) {
-      if((old[key] || '')!==(current[key] || ''))changes.push({label:`费用${id}${label}`,before:old[key] || '未设置',after:current[key] || '未设置'})
+      const before=key==='requested_minor'?moneyLabel(old[key]):(old[key] || '未设置')
+      const after=key==='requested_minor'?moneyLabel(current[key]):(current[key] || '未设置')
+      if(before!==after)changes.push({label:`费用${id}${label}`,before,after})
     }
   }
   return changes
@@ -54,7 +73,11 @@ export function workspaceQuery(workspace, filters, page, size, project) {
   }
   if (project) query.set('project_id',String(project))
   if (workspace==='invoice-abnormal') query.set('exception_only','true')
-  if (workspace==='submitted') { query.set('mine','true'); query.set('status','IN_APPROVAL') }
+  if (workspace==='submitted') {
+    query.set('mine','true')
+    // 页签选中时沿用上面的单值筛选；「全部」由入口固有范围补齐，避免草稿混入审批轨迹。
+    if (!query.has('status')) query.set('status', submittedClaimStatuses.join(','))
+  }
   return query.toString()
 }
 

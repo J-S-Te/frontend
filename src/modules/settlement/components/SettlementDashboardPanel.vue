@@ -123,12 +123,12 @@ defineEmits(['navigate'])
           <table>
             <thead>
               <tr>
-                <th>#</th>
-                <th>客户</th>
-                <th>合同</th>
-                <th>应收单</th>
-                <th>未回款金额</th>
-                <th>状态</th>
+                <th scope="col">#</th>
+                <th scope="col">客户</th>
+                <th scope="col">合同</th>
+                <th scope="col">应收单</th>
+                <th scope="col">未回款金额</th>
+                <th scope="col">状态</th>
               </tr>
             </thead>
             <tbody>

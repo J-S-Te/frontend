@@ -7,6 +7,8 @@ import { renderToString } from '@vue/server-renderer'
 import * as classification from '../invoiceClassification.js'
 import { travelInput, evidenceIDs } from '../claimFields.js'
 import { createCommandRunner, createRequestID, formatMinor, toMinor } from '../api/client.js'
+import { createErrorStateStub } from '../../../test/helpers/errorStateStub.mjs'
+
 
 // 用途：编译真实业务组件，仅替换其外部HTTP边界。
 // 参数：name为组件文件名，extras为外部依赖，inline表示同时编译模板。
@@ -45,7 +47,7 @@ test('真实内容规则组件提供逐项业务字段，票面内容锁定时�
 test('正式更正请求发送人工内容白名单，保留当前票据版本及原件',async()=>{
  const calls=[]
  const request=async(path,options)=>{if(options){calls.push([path,JSON.parse(options.body)]);return{id:'case'}}return{corrections:[],impacts:[]}}
- const view=component('InvoiceControlsPanel.vue',{...classification,travelInput,evidenceIDs,createCommandRunner,formatMinor,toMinor,reimbursementAPI:{request},TravelFields:{render:()=>null},InvoiceContentFields:{render:()=>null}},false)
+ const view=component('InvoiceControlsPanel.vue',{...classification,travelInput,evidenceIDs,createCommandRunner,formatMinor,toMinor,reimbursementAPI:{request},TravelFields:{render:()=>null},InvoiceContentFields:{render:()=>null},ErrorState:createErrorStateStub().Stub},false)
  let state
  const setup=view.setup
  view.setup=(props,ctx)=>{state=setup(props,ctx);return()=>null}

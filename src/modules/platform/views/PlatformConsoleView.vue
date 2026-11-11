@@ -1095,7 +1095,7 @@ onBeforeUnmount(() => {
       <div v-else class="console-table-card audit-table-card">
         <div class="console-table-scroll">
           <table class="console-data-table audit-data-table">
-            <thead><tr><th>发生时间</th><th>操作人</th><th>操作</th><th>应用 / 环境</th><th>资源对象</th><th>方法 / 路径</th><th>客户端 IP</th><th>状态</th><th>风险</th><th class="console-actions-cell">查看</th></tr></thead>
+            <thead><tr><th scope="col">发生时间</th><th scope="col">操作人</th><th scope="col">操作</th><th scope="col">应用 / 环境</th><th scope="col">资源对象</th><th scope="col">方法 / 路径</th><th scope="col">客户端 IP</th><th scope="col">状态</th><th scope="col">风险</th><th scope="col" class="console-actions-cell">查看</th></tr></thead>
             <tbody>
               <tr v-for="record in pagedAuditRecords" :key="record.id">
                 <td class="console-mono" data-label="发生时间">{{ formatAuditTime(record.time) }}</td>

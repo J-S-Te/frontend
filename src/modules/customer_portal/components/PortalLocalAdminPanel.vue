@@ -7,6 +7,7 @@ import {
   retryLocalOperation, retryLocalReportFile, revokeLocalInvitation, saveLocalProject,
   setLocalProjectAccess,
 } from '../api/localIdentity.js'
+import { createIdempotencyKey } from '../../shared/utils/idempotencyKey.js'
 
 const props = defineProps({ session: { type: Object, required: true } })
 const permissions = computed(() => new Set(Array.isArray(props.session.permissions) ? props.session.permissions : Object.keys(props.session.permissions || {})))
@@ -73,7 +74,7 @@ async function run(action, message = '') {
 function operationKey(kind, input) {
   const fingerprint = JSON.stringify({ kind, input })
   if (pending.value && pending.value.fingerprint !== fingerprint) throw new Error('上一操作结果尚未核实，请保持原内容重试或先查看操作记录')
-  if (!pending.value) pending.value = { fingerprint, key: crypto.randomUUID() }
+  if (!pending.value) pending.value = { fingerprint, key: createIdempotencyKey() }
   return pending.value.key
 }
 

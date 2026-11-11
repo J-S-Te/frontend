@@ -17,6 +17,10 @@ const props = defineProps({
   editMode: { type: Boolean, default: false },
   /** 父层提交中：只用于禁用取消/保存，避免提交期间关闭或重复提交。 */
   busy: { type: Boolean, default: false },
+  /** 编辑态联系人正在从服务端回填：期间禁止保存与追加行，避免回填覆盖刚输入的行。 */
+  contactsLoading: { type: Boolean, default: false },
+  /** 联系人回填失败或客户确实没有联系人：由父层给出的可读原因，提交仍由父层阻断。 */
+  contactsError: { type: String, default: '' },
   /** 详情弹窗在前时叠放为内层弹窗（层级样式由父层选中状态决定）。 */
   nested: { type: Boolean, default: false },
   session: { type: Object, default: null },
@@ -44,6 +48,8 @@ const emit = defineEmits(['submit', 'close', 'add-contact', 'remove-contact'])
         <label class="console-form-item"><span>行业 *</span><select v-model="form.industry" required><option value="" disabled>请选择行业</option><option v-if="form.industry && !industryOptions.includes(form.industry)" :value="form.industry">{{ form.industry }}（历史值）</option><option v-for="industry in industryOptions" :key="industry" :value="industry">{{ industry }}</option></select></label>
         <label class="console-form-item"><span>区域 *</span><select v-model="form.region" required><option value="" disabled>请选择区域</option><option v-if="form.region && !regionSuggestions.includes(form.region)" :value="form.region">{{ form.region }}（历史值）</option><option v-for="region in regionSuggestions" :key="region" :value="region">{{ region }}</option></select></label>
         <div v-if="editMode" class="console-form-item full"><OwnerSelector v-model:user-id="form.owner_user_id" v-model:organization-id="form.owner_org_id" :default-user-id="session?.user_id || ''" :default-organization-id="session?.primary_org_id || ''" /></div>
+        <p v-if="contactsLoading" class="crm-note" role="status">正在加载客户联系人…</p>
+        <p v-else-if="contactsError" class="crm-alert error" role="alert">{{ contactsError }}</p>
         <section v-for="(contact, index) in form.contacts" :key="contact.id || index" class="crm-customer-contacts">
           <div class="crm-customer-contact-heading">
             <h3>联系人 {{ index + 1 }}</h3>
@@ -56,14 +62,14 @@ const emit = defineEmits(['submit', 'close', 'add-contact', 'remove-contact'])
             <label class="console-form-item crm-check-item"><span>门户登记联系人</span><input v-model="contact.is_registration" type="checkbox"></label>
           </div>
         </section>
-        <button class="console-button ghost" type="button" @click="emit('add-contact')">添加联系人</button>
+        <button class="console-button ghost" type="button" :disabled="contactsLoading" @click="emit('add-contact')">添加联系人</button>
         <label v-if="editMode" class="console-form-item full"><span>更新原因 *</span><textarea v-model="form.reason" required maxlength="500" rows="3" placeholder="说明本次更新客户的原因"></textarea></label>
         <label class="console-form-item full crm-check-item"><span>授权覆盖名称查重</span><input v-model="form.duplicate_override" type="checkbox"></label>
         <label v-if="form.duplicate_override" class="console-form-item full"><span>覆盖原因 *</span><textarea v-model="form.duplicate_override_reason" required maxlength="500" rows="2" placeholder="说明为什么允许与疑似重复客户并存"></textarea></label>
       </div>
       <footer>
         <button class="console-button ghost" type="button" :disabled="busy" @click="emit('close')">取消</button>
-        <button class="console-button primary" type="submit" :disabled="busy">{{ busy ? '保存中…' : '保存客户' }}</button>
+        <button class="console-button primary" type="submit" :disabled="busy || contactsLoading">{{ busy ? '保存中…' : '保存客户' }}</button>
       </footer>
     </form>
   </div>

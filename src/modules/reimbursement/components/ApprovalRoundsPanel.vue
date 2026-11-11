@@ -4,8 +4,14 @@ import { reimbursementAPI as api } from '../api/reimbursement.js'
 import { approvalNodeLabel } from '../rolePresentation.js'
 import { formatBusinessDateTime } from '../../shared/utils/businessTime.js'
 import { claimChanges } from '../workspace.js'
+import PaginationBar from '@/modules/shared/components/PaginationBar.vue'
+import ErrorState from '../../shared/components/ErrorState.vue'
 
 const props = defineProps({ claimId: { type: String, required: true } })
+// 用途：历史动作只显示业务名称；未知旧动作保留可读说明，不回显英文码。
+// 参数：无。
+// 返回值：动作编码到中文文案的只读表。
+const actionLabels = { APPROVE: '同意', RETURN: '退回', TRANSFER: '转交', ADDSIGN: '加签' }
 const rounds = ref([])
 const page = ref(1)
 const total = ref(0)
@@ -30,12 +36,12 @@ watch(page, load)
 <template>
   <article class="expense-item">
     <h3>审批轮次与责任来源</h3>
-    <p v-if="error" role="alert">{{ error }}</p>
+    <ErrorState v-if="error" compact title="审批轮次读取失败" :error="error" retry-text="重新读取审批轮次" @retry="load" />
     <details v-for="round in rounds" :key="round.round">
       <summary>第 {{ round.round }} 轮 · {{ formatBusinessDateTime(round.created_at) }}</summary>
       <p>冻结内容摘要 {{ round.content_hash }} · 路由版本 {{ round.rule_version }}</p>
       <section v-if="rounds.some(previous=>previous.round===round.round-1)">
-        <h4>与上一轮关键字段对比（金额为整数分）</h4>
+        <h4>与上一轮关键字段对比（金额为元）</h4>
         <p v-if="round.snapshot?.scope_limited">仅比较两轮共同可见的费用，不将范围变化视作整单业务变化。</p>
         <p v-for="(change,index) in claimChanges(rounds.find(previous=>previous.round===round.round-1)?.snapshot,round.snapshot)" :key="index">
           {{ change.label }}：{{ change.before }} → {{ change.after }}</p>
@@ -46,10 +52,9 @@ watch(page, load)
         <p>项目 {{ reference.project_id }} / {{ reference.service_item_id || '项目级' }} · 引用版本 {{ reference.reference_version }}</p>
         <p v-for="person in reference.required_approver_refs" :key="person.node_role + person.subject_id">{{ approvalNodeLabel(person.node_role) }}：{{ person.subject_id }} · {{ person.source_field }} · 版本 {{ person.source_version || person.source_digest }}</p>
       </div>
-      <p v-for="action in round.actions" :key="action.ID">{{ formatBusinessDateTime(action.CreatedAt) }} · {{ action.Actor }} · {{ action.Action }} · {{ action.Reason }}</p>
+      <p v-for="action in round.actions" :key="action.ID">{{ formatBusinessDateTime(action.CreatedAt) }} · {{ action.Actor }} · {{ actionLabels[action.Action] || '动作已记录' }} · {{ action.Reason }}</p>
     </details>
-    <button class="expense-button" :disabled="page <= 1" @click="page--">上一页</button>
-    <span>第 {{ page }} 页，共 {{ total }} 轮</span>
-    <button class="expense-button" :disabled="page * 10 >= total" @click="page++">下一页</button>
+    <PaginationBar label="审批轮次分页" :page="page" :total="total" :page-size="10"
+      @change="nextPage => { page = nextPage }" />
   </article>
 </template>

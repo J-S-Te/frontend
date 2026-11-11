@@ -2,16 +2,20 @@
 import { ref,onMounted } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 import { reimbursementAPI as api,publicPrefix } from '../api/reimbursement.js'
-import { createCommandRunner } from '../api/client.js'
+import { createCommandRunner, timeoutSignal } from '../api/client.js'
 import { formatBusinessDateTime } from '../../shared/utils/businessTime.js'
+import PaginationBar from '@/modules/shared/components/PaginationBar.vue'
+import ErrorState from '../../shared/components/ErrorState.vue'
+import { borrowStatusLabels, failureMessage, packageStatusLabels } from '../statusLabels.js'
 
 const props=defineProps({archives:{type:Object,default:null}})
 const rows=ref([]),total=ref(0),page=ref(1),status=ref(''),reason=ref(''),reviewReason=ref('')
 const days=ref(7),error=ref(''),busy=ref(false),pending=ref(null)
 const runner=createCommandRunner(api)
 let sequence=0
-const statusLabels={PENDING:'待审核',APPROVED:'已批准',REJECTED:'已拒绝',EXPIRED:'已过期'}
-const packageLabels={PENDING:'待生成',RUNNING:'生成中',DONE:'已就绪',FAILED:'生成失败',EXPIRED:'已过期',NOT_REQUESTED:'未申请'}
+// 字典收敛（整改）：借阅与文件包状态文案统一来自 statusLabels.js 权威来源。
+const statusLabels=borrowStatusLabels
+const packageLabels=packageStatusLabels
 
 // 用途：分页读取本人或当前可审核的借阅申请，不根据前端角色扩大范围。
 // 参数：无。
@@ -75,7 +79,7 @@ async function download(row) {
   const current=await api.request(`/archive-borrows/${encodeURIComponent(row.id)}`)
   if(!current.allowed_actions?.includes('DOWNLOAD'))throw new Error('当前借阅尚不可下载，请核对期限和文件包状态')
   const response=await fetch(`${publicPrefix}/api/v1/archive-borrows/${encodeURIComponent(row.id)}/download`,{
-   method:'POST',credentials:'include',headers:{'X-CSRF-Token':'1'},signal:AbortSignal.timeout(60000)})
+   method:'POST',credentials:'include',headers:{'X-CSRF-Token':'1'},signal:timeoutSignal(60000)})
   if(!response.ok){const result=await response.json().catch(()=>({}));throw new Error(result.message||'借阅下载失败')}
   if(!response.headers.get('content-type')?.includes('application/zip'))throw new Error('文件包响应格式不正确')
   const blob=await response.blob()
@@ -92,7 +96,7 @@ onMounted(load)
 <template>
  <section class="expense-panel">
   <h2>受控档案借阅</h2><p>仅可申请已有整单读取范围的档案，由独立档案人员审核，最长7天。下载逐次重验当前权限；借阅不扩大财务数据范围。</p>
-  <p v-if="error" role="alert">{{ error }}</p>
+  <ErrorState v-if="error" compact title="档案借阅未完成" :error="error" :retry="false" />
   <div v-if="pending" class="expense-alert warning">原命令 {{ pending.command_id }} 结果未确认，请保留本页。
    <button class="expense-button" :disabled="busy" @click="retry">查询并重试原命令</button></div>
   <fieldset :disabled="busy||!!pending"><label>借阅用途<textarea v-model="reason" maxlength="2000" /></label>
@@ -104,14 +108,14 @@ onMounted(load)
    <button class="expense-button" @click="load">刷新借阅状态</button></div>
   <label>独立审核原因<textarea v-model="reviewReason" maxlength="2000" :disabled="busy||!!pending" /></label>
   <article v-for="row in rows" :key="row.id" class="expense-item">
-   <h3>档案 {{ row.archive_id }} · {{ statusLabels[row.status] || row.status }}</h3><p>申请人 {{ row.requester_subject_id }} · 用途 {{ row.reason }}</p>
-   <p>审核人 {{ row.approver_subject_id || '待审核' }} · 文件包 {{ packageLabels[row.package_status] || row.package_status || '未生成' }} · 到期 {{ row.expires_at ? formatBusinessDateTime(row.expires_at) : '批准后生效' }}</p>
-   <p v-if="row.last_error" role="alert">{{ row.last_error }}</p>
+   <h3>档案 {{ row.archive_id }} · {{ statusLabels[row.status] || '状态待确认' }}</h3><p>申请人 {{ row.requester_subject_id }} · 用途 {{ row.reason }}</p>
+   <p>审核人 {{ row.approver_subject_id || '待审核' }} · 文件包 {{ packageLabels[row.package_status] || (row.package_status ? '状态待确认' : '未生成') }} · 到期 {{ row.expires_at ? formatBusinessDateTime(row.expires_at) : '批准后生效' }}</p>
+   <p v-if="row.last_error" role="alert">{{ failureMessage(row.last_error) }}</p>
    <div class="expense-actions"><button v-for="action in (row.allowed_actions || [])" :key="action" class="expense-button" :disabled="busy||!!pending"
-     @click="action==='DOWNLOAD'?download(row):decide(row,action)">{{ {APPROVE:'批准借阅',REJECT:'拒绝',DOWNLOAD:'下载借阅包'}[action] }}</button></div>
+     @click="action==='DOWNLOAD'?download(row):decide(row,action)">{{ {APPROVE:'批准借阅',REJECT:'拒绝',DOWNLOAD:'下载借阅包'}[action] || '办理' }}</button></div>
   </article>
   <p v-if="!error&&!rows.length">当前范围没有借阅申请。</p>
-  <footer class="expense-actions"><button class="expense-button" :disabled="page<=1||busy" @click="page--;load()">上一页</button><span>第{{ page }}页，共{{ total }}条</span>
-   <button class="expense-button" :disabled="page*20>=total||busy" @click="page++;load()">下一页</button></footer>
+  <PaginationBar label="档案借阅分页" :page="page" :total="total" :page-size="20" :loading="busy"
+   @change="nextPage => { page = nextPage; load() }" />
  </section>
 </template>

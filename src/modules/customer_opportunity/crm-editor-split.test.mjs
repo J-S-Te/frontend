@@ -65,6 +65,10 @@ function customerHarness(overrides = {}) {
     actionLoading: ref(false),
     customerEditMode: ref(false),
     customerForm: form,
+    // 编辑弹窗的联系人回填状态：加载中/加载失败都必须在提交入口被挡住（见缺陷 1 回归）。
+    customerEditContactsLoading: ref(false),
+    customerEditContactsError: ref(''),
+    customerEditContactsLoadFailed: ref(false),
     customerDialog: ref(true),
     selectedCustomer: ref(null),
     error: ref(''),
@@ -181,22 +185,29 @@ test('编辑客户只提交一次：更新载荷仍带版本与更新原因', as
 test('取消关闭编辑弹窗不触发任何业务提交', async () => {
   // 关闭确认仍由父层持有：执行页面真实的 closeCustomerDialog，观察“继续编辑/放弃修改”两个分支。
   for (const accepted of [false, true]) {
-    const calls = { create: 0, update: 0 }
+    const calls = { create: 0, update: 0, cleared: 0 }
     const state = {
       actionLoading: { value: false },
       customerFormDirty: { value: true },
       customerDialog: { value: true },
       customerFormInitial: 'old',
       confirmDialog: { value: null },
+      customerEditContactsSequence: { value: 0 },
+      customerEditContactsLoading: { value: false },
+      customerEditContactsError: { value: '' },
+      customerEditContactsLoadFailed: { value: false },
+      // 关闭时联系人状态必须清空，避免把上一个客户的联系人带到下一个编辑对象。
+      customerEditor: { clearContacts: () => { calls.cleared += 1 } },
       askConfirm: async () => accepted,
       createCustomer: async () => { calls.create += 1 },
       updateCustomer: async () => { calls.update += 1 },
     }
     const close = new Function(...Object.keys(state),
-      `${functionSources(viewScript, ['confirmDiscardIfDirty', 'closeCustomerDialog'])}; return closeCustomerDialog;`)(...Object.values(state))
+      `${functionSources(viewScript, ['confirmDiscardIfDirty', 'resetCustomerEditContacts', 'closeCustomerDialog'])}; return closeCustomerDialog;`)(...Object.values(state))
     await close()
     assert.equal(state.customerDialog.value, !accepted, accepted ? '确认放弃后关闭弹窗' : '取消放弃时留在表单')
-    assert.deepEqual(calls, { create: 0, update: 0 }, '关闭或放弃确认本身不提交业务写入')
+    assert.deepEqual({ create: calls.create, update: calls.update }, { create: 0, update: 0 }, '关闭或放弃确认本身不提交业务写入')
+    assert.equal(calls.cleared, accepted ? 1 : 0, accepted ? '关闭后清空联系人状态' : '仍在编辑时不得清空联系人状态')
   }
 })
 

@@ -35,6 +35,15 @@ export function approvalNodeLabel(code) {
   })[code] || code || '岗位来源未返回'
 }
 
+// 用途：展示同一轮多个并行待办节点，逐个翻译后再用分隔符连接。
+// 参数：value 为服务端返回的单节点或「A / B」组合编码。
+// 返回值：中文节点名；空值给出来源说明。
+export function approvalNodesLabel(value) {
+  const text = String(value ?? '').trim()
+  if (!text) return approvalNodeLabel('')
+  return text.split(/\s*\/\s*/).map((code) => approvalNodeLabel(code)).join(' / ')
+}
+
 // 用途：说明本地映射的首次财务与受控替代用途，不覆盖项目业务首岗位。
 // 参数：role 为本地映射角色编码。
 // 返回值：财务岗位或仅受控替代说明。

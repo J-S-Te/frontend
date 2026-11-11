@@ -9,7 +9,7 @@ test('contract reports show summaries, distributions and complete business detai
     assert.match(source, new RegExp(label))
   }
   for (const field of ['合同编号', '合同名称', '合同类型', '服务类型', '客户信用等级', '金额 / 币种', '负责人', '开始日期', '到期日期', '创建日期', '更新日期', '状态', '合同内容']) {
-    assert.match(source, new RegExp(`<th>${field.replace('/', '\\/')}</th>`))
+    assert.match(source, new RegExp(`<th scope="col">${field.replace('/', '\\/')}</th>`))
   }
   assert.match(source, /emit\('open-contract', contract\)/)
 })

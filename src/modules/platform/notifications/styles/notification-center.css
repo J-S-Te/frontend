@@ -115,7 +115,6 @@
   word-break: break-word;
 }
 
-.notification-empty,
 .notification-error {
   padding: 22px;
   border: 1px dashed var(--line-strong);

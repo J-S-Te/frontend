@@ -199,7 +199,7 @@ test('商机列表、七阶段看板和详情统一展示已签约合同数量',
   assert.equal(formatSignedContractCount(0), '0 份')
   assert.equal(formatSignedContractCount(null), '合同服务未接入')
   assert.equal(formatSignedContractCount(undefined), '合同服务未接入')
-  assert.match(view, /<th>已签约合同<\/th>/)
+  assert.match(view, /<th scope="col">已签约合同<\/th>/)
   assert.match(view, /<td>\{\{ formatSignedContractCount\(item\.signed_contract_count\) \}\}<\/td>/)
   assert.match(view, /已签约合同 \{\{ formatSignedContractCount\(item\.signed_contract_count\) \}\}/)
   assert.match(view, /<dt>累计已签约合同<\/dt><dd>\{\{ formatSignedContractCount\(selectedOpportunity\.signed_contract_count\) \}\}<\/dd>/)

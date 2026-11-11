@@ -119,20 +119,20 @@ function statusTone(status) {
       <table class="contract-data-table contract-report-detail-table">
         <thead>
           <tr>
-            <th>合同编号</th>
-            <th>合同名称</th>
-            <th>合同类型</th>
-            <th>服务类型</th>
-            <th>客户信用等级</th>
-            <th>金额 / 币种</th>
-            <th>负责人</th>
-            <th>开始日期</th>
-            <th>到期日期</th>
-            <th>创建日期</th>
-            <th>更新日期</th>
-            <th>状态</th>
-            <th>合同内容</th>
-            <th>操作</th>
+            <th scope="col">合同编号</th>
+            <th scope="col">合同名称</th>
+            <th scope="col">合同类型</th>
+            <th scope="col">服务类型</th>
+            <th scope="col">客户信用等级</th>
+            <th scope="col">金额 / 币种</th>
+            <th scope="col">负责人</th>
+            <th scope="col">开始日期</th>
+            <th scope="col">到期日期</th>
+            <th scope="col">创建日期</th>
+            <th scope="col">更新日期</th>
+            <th scope="col">状态</th>
+            <th scope="col">合同内容</th>
+            <th scope="col">操作</th>
           </tr>
         </thead>
         <tbody>

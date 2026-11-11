@@ -968,7 +968,7 @@ function formatFileSize(bytes) {
             </div>
             <div class="iam-batch-import-table-wrap">
               <table class="iam-batch-import-table">
-                <thead><tr><th>用户名</th><th>初始密码</th></tr></thead>
+                <thead><tr><th scope="col">用户名</th><th scope="col">初始密码</th></tr></thead>
                 <tbody><tr v-for="credential in submitResult.initialCredentials" :key="credential.accountName">
                   <td>{{ credential.accountName }}</td>
                   <td><input :type="credentialsVisible ? 'text' : 'password'" :value="credential.initialPassword" readonly autocomplete="off" :aria-label="`${credential.accountName} 的初始密码`" /></td>

@@ -28,3 +28,11 @@ test('项目参与资格命令绑定当前版本和明确有效期，移除不�
   assert.equal(calls[0][0], '/projects/p%2F1/expense-participants')
   assert.deepEqual(JSON.parse(calls[0][1].body), { subject_id: 'u', reason: '离开项目', expected_version: 4, status: 'REVOKED' })
 })
+
+test('项目费用参与资格从人员目录选择主体，不再只靠手输未知用户ID', async () => {
+  const source = await readFile(new URL('./components/ReimbursementSpendPanel.vue', import.meta.url), 'utf8')
+  assert.match(source, /listPersonnel\(\{ page: 1, page_size: 50/)
+  assert.match(source, /personnelSelectOptions/)
+  assert.match(source, /手动输入主体 ID/)
+  assert.match(source, /personnelLabel\(person\.subject_id\)/)
+})

@@ -41,7 +41,7 @@ watch(kind,()=>{page.value=1})
     <label>资料类别<select v-model="kind"><option value="">全部</option>
       <option v-for="(label,key) in kinds" :key="key" :value="key">{{ label }}</option></select></label>
     <div class="pm-table-scroll"><table class="pm-table"><thead><tr>
-      <th>来源类别</th><th>对象</th><th>版本 / 状态</th><th>查看来源</th>
+      <th scope="col">来源类别</th><th scope="col">对象</th><th scope="col">版本 / 状态</th><th scope="col">查看来源</th>
     </tr></thead><tbody>
       <tr v-for="row in visible" :key="`${row.kind}/${row.id}`"><td>{{ kinds[row.kind] }}</td>
         <td>{{ row.label }}</td><td>{{ row.version ? `v${row.version} · ` : '' }}{{ row.status }}</td>

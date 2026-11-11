@@ -185,7 +185,7 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
     <div v-else class="da-table-panel">
       <div class="da-table-scroll">
         <table class="da-table">
-          <thead><tr><th>规则编码</th><th>规则名称</th><th>数据源</th><th>严重度</th><th>阈值参数</th><th>启用</th><th v-if="canManage">操作</th></tr></thead>
+          <thead><tr><th scope="col">规则编码</th><th scope="col">规则名称</th><th scope="col">数据源</th><th scope="col">严重度</th><th scope="col">阈值参数</th><th scope="col">启用</th><th scope="col" v-if="canManage">操作</th></tr></thead>
           <tbody>
             <tr v-for="rule in filteredRules" :key="rule.rule_code">
               <td class="mono"><b>{{ rule.rule_code }}</b></td>

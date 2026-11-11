@@ -11,7 +11,7 @@ defineProps({ terms: { type: Array, default: () => [] }, currency: { type: Strin
          一个局部滚动容器，只让付款计划表自己横向滚动。 -->
     <div v-else class="contract-payment-scroll" data-table-scroll>
       <table class="contract-data-table">
-        <thead><tr><th>分期号</th><th>到期日</th><th>金额（{{ currency }}）</th></tr></thead>
+        <thead><tr><th scope="col">分期号</th><th scope="col">到期日</th><th scope="col">金额（{{ currency }}）</th></tr></thead>
         <tbody><tr v-for="term in terms" :key="term.installment_no"><td>{{ term.installment_no }}</td><td>{{ term.due_date }}</td><td>{{ term.amount }}</td></tr></tbody>
       </table>
     </div>

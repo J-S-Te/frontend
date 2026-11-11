@@ -162,7 +162,7 @@ test('项目列表 KPI、趋势图、资质筛选与空态不发生视觉回归'
 })
 
 test('执行总览的在途项目以项目名称为主信息并悬停提示项目编号', () => {
-  assert.match(source, /<th>项目名称<\/th><th>客户<\/th>/)
+  assert.match(source, /<th scope="col">项目名称<\/th><th scope="col">客户<\/th>/)
   assert.match(source, /:title="`项目编号：\$\{project\.id\}`"/)
   assert.match(source, /<b>\{\{ project\.name \|\| '未命名项目' \}\}<\/b>/)
   assert.match(source, /:aria-label="`\$\{project\.name \|\| '未命名项目'\}，项目编号：\$\{project\.id\}`"/)
@@ -1047,7 +1047,7 @@ test('人员资质档案展示并复核基础平台身份状态', () => {
   assert.match(displaySource, /function identityStatusLabel\(status\)/)
   assert.match(source, /已离职\/查无此人/)
   assert.match(source, /@click="syncIdentities"/)
-  assert.match(source, /<th>人员状态<\/th>/)
+  assert.match(source, /<th scope="col">人员状态<\/th>/)
   assert.match(source, /statusTone\(item\.identity_status\)/)
 })
 
@@ -1373,7 +1373,7 @@ test('合同拆解规则配置按原型 PG-CFG-01 做成三段式，口径完全
   // ② 检测类别域：原型的六列（类别/体系要求/必备资质/特殊方法/关联服务项/操作）。
   assert.match(source, /<h2>② 检测类别与人员要求<\/h2>/)
   for (const column of ['检测类别', '默认体系要求', '必备资质（默认）', '是否特殊方法', '关联服务项']) {
-    assert.ok(source.includes(`<th>${column}</th>`), `检测类别域缺少列：${column}`)
+    assert.ok(source.includes(`<th scope="col">${column}</th>`), `检测类别域缺少列：${column}`)
   }
   assert.match(source, /specialMethodLabel\[item\.special_method\]/)
   assert.match(source, /\{\{ item\.service_item_count \|\| 0 \}\} 项/)

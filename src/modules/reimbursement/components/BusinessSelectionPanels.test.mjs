@@ -9,16 +9,20 @@ import * as classification from '../invoiceClassification.js'
 import * as fields from '../claimFields.js'
 import * as recovery from '../recovery.js'
 import * as cities from '../cities.js'
+import * as optionPicker from '../optionPicker.js'
 import { formatBusinessDateTime } from '../../shared/utils/businessTime.js'
+import { PaginationBarStub } from '../../../test/helpers/paginationStub.mjs'
+import { createErrorStateStub } from '../../../test/helpers/errorStateStub.mjs'
+import { claimStatusLabel, failureMessage } from '../statusLabels.js'
 
 // 用途：编译真实面板和子组件，仅替换网络读取边界。
 // 参数：name为组件名，request为网络替身，inline为是否包含真实模板。
 // 返回值：保留真实业务函数和选择器接线的Vue组件。
 function component(name, request, inline = false) {
   const { descriptor } = parse(readFileSync(new URL(name, import.meta.url), 'utf8'))
-  const compiled = compileScript(descriptor, { id: name, inlineTemplate: inline })
-  const bindings = { ...client, ...classification, ...fields, ...recovery, ...cities,
-    formatBusinessDateTime, reimbursementAPI: { request } }
+  const compiled = compileScript(descriptor, { id: String(name), inlineTemplate: inline })
+  const bindings = { ...client, ...classification, ...fields, ...recovery, ...cities, ...optionPicker,
+    formatBusinessDateTime, claimStatusLabel, failureMessage, reimbursementAPI: { request } }
   const body = compiled.content.replace(
     /import\s+\{([^}]+)\}\s+from\s+['"]([^'"]+)['"];?/g,
     (_, names, source) => {
@@ -29,7 +33,9 @@ function component(name, request, inline = false) {
       return ''
     },
   ).replace(/^import\s+(\w+)\s+from\s+['"]([^'"]+)['"];?\s*$/gm, (_, key, source) => {
-    bindings[key] = component(source, request, true)
+    bindings[key] = key === 'ErrorState' ? createErrorStateStub().Stub
+      : key === 'PaginationBar' ? PaginationBarStub
+        : component(new URL(source, new URL(name, import.meta.url)), request, true)
     return ''
   })
   return new Function(...Object.keys(bindings), body.replace('export default', 'return'))(
@@ -171,7 +177,7 @@ test('原件切换后旧文档迟到不能覆盖当前文件或解析来源', as
   } finally { fixture.unmount() }
 })
 
-test('付款主数据或解除关联候选读取失败均显式报错，保留实际事实且无手填绕过', async () => {
+test('付款选项失败保留独立事实高级入口，异常解除仍只用真实账本选项', async () => {
   const props = { claim: { id: 'claim' }, form: { amount: '12.34', voucher_file_ids: '' },
     reviewForm: { decision: 'RESOLVE_WITH_REVERSAL', evidence_file_ids: '' },
     canRecord: true, canReview: true,
@@ -185,7 +191,16 @@ test('付款主数据或解除关联候选读取失败均显式报错，保留�
     assert.deepEqual(fixture.state.resolutionOptions.value.reversals, [])
     assert.equal(props.form.amount, '12.34')
     const html = await renderToString(Vue.createSSRApp(component('PaymentExceptionPanel.vue', request, true), props))
-    assert.doesNotMatch(html, /凭证ID（|收款档案引用|已有合法付款ID|全额冲正ID|实际付款账户引用/)
+    assert.doesNotMatch(html, /凭证ID（|已有合法付款ID|全额冲正ID|实际付款账户引用/)
+    assert.match(html, /高级：外部实际账户不在受控目录时手工填写/)
+    assert.match(html, /只有确知外部真实账户引用时才手工填写/)
+    const reviewSection = html.slice(html.indexOf('追加独立核实记录') > 0
+      ? html.lastIndexOf('<fieldset') : html.length)
+    assert.doesNotMatch(reviewSection, /外部收款档案引用|外部付款账户引用/)
+    const template = readFileSync(new URL('./PaymentExceptionPanel.vue', import.meta.url), 'utf8')
+    assert.doesNotMatch(template, /<input[^>]*v-model="reviewForm\.linked_(?:payment|reversal)_id"/)
+    assert.match(template, /:options="availablePayments"/)
+    assert.match(template, /:options="resolutionOptions\.reversals"/)
     assert.match(html, /实际付款账户|已有批准全额冲正|上传核实证据/)
   } finally { fixture.unmount() }
 })

@@ -374,14 +374,14 @@ function hasInvoiceRowAction(item) {
         <table>
           <thead>
             <tr>
-              <th>申请号</th>
-              <th>合同号</th>
-              <th>购方名称</th>
-              <th>税号</th>
-              <th>金额</th>
-              <th>税率</th>
-              <th>状态</th>
-              <th>操作</th>
+              <th scope="col">申请号</th>
+              <th scope="col">合同号</th>
+              <th scope="col">购方名称</th>
+              <th scope="col">税号</th>
+              <th scope="col">金额</th>
+              <th scope="col">税率</th>
+              <th scope="col">状态</th>
+              <th scope="col">操作</th>
             </tr>
           </thead>
           <tbody>
@@ -455,16 +455,16 @@ function hasInvoiceRowAction(item) {
         <table>
           <thead>
             <tr>
-              <th>发票号码</th>
-              <th>发票代码</th>
-              <th>合同号</th>
-              <th>购方名称</th>
-              <th>开票日期</th>
-              <th>价税合计</th>
-              <th>类型</th>
-              <th>状态</th>
-              <th>红冲流程</th>
-              <th>操作</th>
+              <th scope="col">发票号码</th>
+              <th scope="col">发票代码</th>
+              <th scope="col">合同号</th>
+              <th scope="col">购方名称</th>
+              <th scope="col">开票日期</th>
+              <th scope="col">价税合计</th>
+              <th scope="col">类型</th>
+              <th scope="col">状态</th>
+              <th scope="col">红冲流程</th>
+              <th scope="col">操作</th>
             </tr>
           </thead>
           <tbody>

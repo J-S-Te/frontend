@@ -183,7 +183,7 @@ onBeforeUnmount(() => { disposed = true; generation++ })
       <h3>{{ snapshot.source_contract_no }} · {{ snapshot.customer_name }}</h3>
       <p>客户ID {{ snapshot.customer_id }}；原合同额 {{ snapshot.currency }} {{ snapshot.contract_amount }}；本地版本 {{ snapshot.snapshot_version }}；财务状态 {{ snapshot.migration_state }}／{{ snapshot.state }}</p>
       <p>当前责任：{{ snapshot.owner_user_id || '尚未投影' }}（版本 {{ snapshot.owner_version }}，{{ snapshot.owner_matches ? '活动责任已匹配' : '尚未满足放行责任要求' }}）</p>
-      <div class="import-scroll" data-table-scroll><table><thead><tr><th>原期号／到期日</th><th>计划额／未收</th><th>确认</th></tr></thead><tbody>
+      <div class="import-scroll" data-table-scroll><table><thead><tr><th scope="col">原期号／到期日</th><th scope="col">计划额／未收</th><th scope="col">确认</th></tr></thead><tbody>
         <tr v-for="plan in snapshot.plans" :key="plan.id"><td>{{ plan.installment_no }}／{{ plan.due_date }}</td><td>{{ plan.planned_amount }}／{{ plan.open_amount }}</td><td>{{ plan.confirmation_status }} <button v-if="plan.confirmation_status !== 'CONFIRMED' && can('settlement.receivable.confirm') && snapshot.migration_state === 'HOLD'" type="button" :disabled="busy" @click="mutate(() => confirmReceivablePlan(plan.id, { version: plan.version }), '原分期已确认')">确认原分期</button></td></tr>
       </tbody></table></div>
       <template v-if="snapshot.migration_state === 'HOLD'">
@@ -218,7 +218,7 @@ onBeforeUnmount(() => { disposed = true; generation++ })
       </template>
       <p v-if="snapshot.reconciliation_id">对账凭证 {{ snapshot.reconciliation_id }}。凭证不等于财务已放行；任何事实变化会要求重新核对。</p>
       <h3>实际恢复映射（{{ facts.total }} 条）</h3>
-      <div class="import-scroll" data-table-scroll><table><thead><tr><th>来源系统／类型／原事实ID</th><th>本地业务ID</th></tr></thead><tbody><tr v-for="fact in facts.items" :key="fact.source_system + fact.fact_type + fact.external_fact_id"><td>{{ fact.source_system }}／{{ fact.fact_type }}／{{ fact.external_fact_id }}</td><td>{{ fact.target_business_id }}</td></tr></tbody></table></div>
+      <div class="import-scroll" data-table-scroll><table><thead><tr><th scope="col">来源系统／类型／原事实ID</th><th scope="col">本地业务ID</th></tr></thead><tbody><tr v-for="fact in facts.items" :key="fact.source_system + fact.fact_type + fact.external_fact_id"><td>{{ fact.source_system }}／{{ fact.fact_type }}／{{ fact.external_fact_id }}</td><td>{{ fact.target_business_id }}</td></tr></tbody></table></div>
       <button type="button" :disabled="busy || factPage === 0" @click="changeFactsPage(-1)">映射上一页</button>
       <button type="button" :disabled="busy || (factPage + 1) * 50 >= facts.total" @click="changeFactsPage(1)">映射下一页</button>
       <button type="button" :disabled="busy" @click="exportStatement">{{ exportJob ? '查询并下载完整对账CSV' : '生成完整对账CSV' }}</button>

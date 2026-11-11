@@ -1013,7 +1013,7 @@ watch(invoiceDetailID, load);
           <SettlementDashboardPanel
             v-if="active === 'dashboard'"
             :dashboard-kpis="dashboardKpis"
-            :work-items="[]"
+            :work-items="workItems"
             :aging-rows="agingRows"
             :invoiced-receivable-top10="invoicedReceivableTop10"
             @navigate="go"

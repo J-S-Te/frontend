@@ -7,6 +7,8 @@ import { travelInput } from '../claimFields.js'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { reimbursementAPI as api } from '../api/reimbursement.js'
 import { createCommandRunner, formatMinor, toMinor } from '../api/client.js'
+import ErrorState from '../../shared/components/ErrorState.vue'
+
 
 const props = defineProps({ invoice: { type: Object, required: true }, session: { type: Object, required: true } })
 const emit = defineEmits(['changed'])
@@ -32,6 +34,17 @@ const reviewer = computed(() => props.session.permissions?.includes('expense.inv
   && props.session.permissions?.includes('expense.finance.review'))
 const labels = [['invoice_type', '票种'], ['invoice_code', '发票代码'], ['invoice_number', '发票号码'],
   ['invoice_date', '开票日'], ['seller_tax_id', '销售方税号'], ['buyer_tax_id', '购买方税号'], ['amount', '价税合计（元）']]
+// 用途：把更正、影响和风险案件的编码翻译成业务可读文案；未知编码显示待确认，不回显机器码。
+// 参数：无。
+// 返回值：各对象的只读文案表。
+const correctionLabels = { PENDING: '待独立批准', APPROVED: '已批准', REJECTED: '已拒绝' }
+const impactLabels = { PENDING_CORRECTION: '待更正处理', FINANCE_REVIEW_REQUIRED: '待财务复核',
+  RECONFIRM_REQUIRED: '待申请人重新确认', REJECTED: '已拒绝', RESOLVED: '已解除' }
+const riskLabels = { OPEN: '待处理', CLOSED: '已关闭' }
+const riskKindLabels = { RED_LETTER: '红字', VOID: '作废', REFUND: '退款' }
+const resolutionLabels = { CONFIRMED_RISK: '确认风险并关闭', DISMISSED: '有依据排除风险' }
+const sourceKindLabels = { PARSED: '独立解析来源，仍需人工复核', MANUAL_LINK: '人工关联原件', LEGACY_UNVERIFIED: '遗留未核实来源' }
+function controlLabel(table, code) { return table[code] || '状态待确认' }
 let sequence = 0
 let documentSequence = 0
 const candidates = computed(() => {
@@ -186,7 +199,7 @@ onBeforeUnmount(() => { sequence++; documentSequence++ })
 <template>
   <article class="expense-item">
     <h3>票据更正与财务复核</h3>
-    <p v-if="error" role="alert">{{ error }}</p>
+    <ErrorState v-if="error" compact title="票据更正未完成" :error="error" :retry="false" />
     <label>本次原因<textarea v-model="reason" maxlength="2000" :disabled="busy || !!pending" /></label>
     <fieldset v-if="owner" :disabled="busy || !!pending"><legend>申请重大更正（保留原批准历史）</legend>
       <div class="expense-form-grid"><label v-for="[key, label] in labels" :key="key">{{ label }}<input v-model="form[key]" :type="key === 'invoice_date' ? 'date' : 'text'"></label></div>
@@ -195,17 +208,17 @@ onBeforeUnmount(() => { sequence++; documentSequence++ })
       <button class="expense-button" @click="requestCorrection">提交独立更正申请</button>
     </fieldset>
     <details v-for="item in controls?.corrections || []" :key="item.id">
-      <summary>更正 {{ item.id }} · {{ item.status }} · 版本 {{ item.version }}</summary>
+      <summary>更正 {{ item.id }} · {{ controlLabel(correctionLabels, item.status) }} · 版本 {{ item.version }}</summary>
       <p>申请人 {{ item.requester_subject_id }} · 原因 {{ item.content?.reason }}</p>
       <p v-for="[key, label] in labels.filter(([key]) => key !== 'amount')" :key="key">{{ label }}：{{ item.content?.previous?.[key] }} → {{ item.content?.proposed_invoice?.[key] }}</p>
       <p>商品服务明细：{{ item.content?.previous?.content?.lines?.map(row=>row.name).join('、') || '未录入' }} → {{ item.content?.proposed_invoice?.content?.lines?.map(row=>row.name).join('、') || '未录入' }}</p>
-      <p>价税合计：{{ formatMinor(item.content?.previous?.total_minor) }} → {{ formatMinor(item.content?.proposed_invoice?.total_minor) }}</p>
+      <p>价税合计：{{ formatMinor(item.content?.previous?.total_minor) }} 元 → {{ formatMinor(item.content?.proposed_invoice?.total_minor) }} 元</p>
       <template v-if="reviewer && item.status === 'PENDING' && item.requester_subject_id !== session.subject_id">
         <button class="expense-button" :disabled="busy || !!pending" @click="send('invoice.correction.decide', `/invoice-corrections/${item.id}/decisions`, { expected_version: item.version, approve: true })">独立批准</button>
         <button class="expense-button" :disabled="busy || !!pending" @click="send('invoice.correction.decide', `/invoice-corrections/${item.id}/decisions`, { expected_version: item.version, approve: false })">拒绝更正</button>
       </template>
     </details>
-    <div v-for="impact in controls?.impacts || []" :key="impact.id"><p>相关单据 {{ impact.claim_id }} · {{ impact.status }}</p><button v-if="owner && impact.status === 'RECONFIRM_REQUIRED'" class="expense-button" :disabled="busy || !!pending" @click="reconfirm(impact)">接受更正后重新提交审批</button></div>
+    <div v-for="impact in controls?.impacts || []" :key="impact.id"><p>相关单据 {{ impact.claim_id }} · {{ controlLabel(impactLabels, impact.status) }}</p><button v-if="owner && impact.status === 'RECONFIRM_REQUIRED'" class="expense-button" :disabled="busy || !!pending" @click="reconfirm(impact)">接受更正后重新提交审批</button></div>
     <fieldset v-if="owner" :disabled="busy || !!pending"><legend>补充原件或解析来源</legend>
       <BusinessObjectSelect v-model="documentID" label="选择已就绪原件"
         source="/invoice-document-options" :extra-params="{ purpose: 'reimbursement.invoice.original' }"
@@ -225,8 +238,9 @@ onBeforeUnmount(() => { sequence++; documentSequence++ })
       <p v-if="sourceDocument && !candidates.length">此原件没有可用解析候选，将保留明确人工关联。</p>
       <button class="expense-button" :disabled="!sourceDocument || sourceLoading"
         @click="appendSources">受控追加证据来源</button>
+
     </fieldset>
-    <p v-for="source in controls?.sources || []" :key="source.id">来源 {{ source.document_id }} · {{ source.source_kind }} · 运行 {{ source.run_id || '明确人工关联' }} · 候选 {{ source.candidate_index }} · {{ source.sources?.map(part => part.page ? `第${part.page}页` : part.xml_path).join('、') }}</p>
+    <p v-for="source in controls?.sources || []" :key="source.id">来源 {{ source.document_id }} · {{ controlLabel(sourceKindLabels, source.source_kind) }} · 运行 {{ source.run_id || '明确人工关联' }} · 候选 {{ source.candidate_index }} · {{ source.sources?.map(part => part.page ? `第${part.page}页` : part.xml_path).join('、') }}</p>
     <fieldset v-if="owner" :disabled="busy || !!pending"><legend>登记异常票据事实</legend>
       <label>事实类型<select v-model="riskKind"><option value="RED_LETTER">红字</option><option value="VOID">作废</option><option value="REFUND">退款</option></select></label>
       <BusinessObjectSelect v-model="originalID" label="原票" source="/invoice-options"
@@ -237,10 +251,11 @@ onBeforeUnmount(() => { sequence++; documentSequence++ })
       <ul><li v-for="(file, index) in riskFiles" :key="file.file_id">{{ file.name }}
         <button type="button" class="expense-button" @click="riskFiles.splice(index, 1)">移除</button>
       </li></ul>
+
       <button class="expense-button" @click="reportRisk">登记并发起财务复核</button>
     </fieldset>
     <div v-for="risk in controls?.risks || []" :key="risk.id">
-      <p>{{ risk.risk_kind }} · 原票 {{ risk.original_invoice_id }} · {{ risk.status }} · {{ risk.resolution }}</p>
+      <p>{{ controlLabel(riskKindLabels, risk.risk_kind) }} · 原票 {{ risk.original_invoice_id }} · {{ controlLabel(riskLabels, risk.status) }} · {{ controlLabel(resolutionLabels, risk.resolution) }}</p>
       <template v-if="reviewer && risk.status === 'OPEN' && risk.recorder_subject_id !== session.subject_id">
         <button class="expense-button" :disabled="busy || !!pending" @click="send('invoice.risk.close', `/invoice-risks/${risk.id}/resolutions`, { expected_version: risk.version, resolution: 'CONFIRMED_RISK' })">确认风险并结束核查</button>
         <button class="expense-button" :disabled="busy || !!pending" @click="send('invoice.risk.close', `/invoice-risks/${risk.id}/resolutions`, { expected_version: risk.version, resolution: 'DISMISSED' })">有依据排除风险</button>

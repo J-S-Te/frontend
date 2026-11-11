@@ -104,8 +104,7 @@ fieldset { min-inline-size: 0; }
 
 @media (max-width: 1366px) {
   .console-topbar-actions,
-  .contract-topbar-actions,
-  .pm-topbar-actions { gap: 4px; }
+  .contract-topbar-actions{ gap: 4px; }
   .operation-result { margin-bottom: 12px; }
 }
 
@@ -223,7 +222,7 @@ fieldset { min-inline-size: 0; }
   font-family: inherit; line-height: 1.4;
 }
 .subsystem-sidebar-user.subsystem-sidebar-user strong { color: #f8fafc; font-size: 13px; font-weight: 600; }
-.subsystem-sidebar-user.subsystem-sidebar-user small { color: #94a3b8; font-size: 11px; font-weight: 400; }
+.subsystem-sidebar-user.subsystem-sidebar-user small { color: #94a3b8; font-size: var(--fs-xs); font-weight: 400; }
 .subsystem-sidebar-user.subsystem-sidebar-user > button {
   display: grid; place-items: center; flex: 0 0 32px; box-sizing: border-box;
   width: 32px; height: 32px; margin: 0; padding: 0;

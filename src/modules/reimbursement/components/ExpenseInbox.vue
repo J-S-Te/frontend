@@ -3,6 +3,8 @@ import { onMounted,ref } from 'vue'
 import { listInbox,getNotification,getUnreadCount,markNotificationRead } from '../../platform/notifications/api/notifications.js'
 import { safeNotificationPath } from '../workspace.js'
 import { formatBusinessDateTime } from '../../shared/utils/businessTime.js'
+import PaginationBar from '@/modules/shared/components/PaginationBar.vue'
+import ErrorState from '../../shared/components/ErrorState.vue'
 
 const rows=ref([]),total=ref(0),page=ref(1),unreadOnly=ref(false),unread=ref(0)
 const detail=ref(null),error=ref(''),busy=ref(false)
@@ -36,7 +38,7 @@ onMounted(load)
 <template>
  <section class="expense-panel">
   <h2>站内消息</h2><p>平台统一收件箱；审批待办、催办等消息以平台实际接收结果为准。未读 {{ unread }}</p>
-  <p v-if="error" role="alert">{{ error }}</p>
+  <ErrorState v-if="error" compact title="站内消息未完成" :error="error" :retry="false" />
   <label><input v-model="unreadOnly" type="checkbox" @change="page=1;load()">只看未读</label>
   <button class="expense-button" :disabled="busy" @click="load">刷新消息</button>
   <p v-if="busy">正在读取消息…</p><p v-else-if="!error && !rows.length">当前收件箱没有消息。</p>
@@ -45,8 +47,8 @@ onMounted(load)
    <p>{{ row.content }}</p><p>{{ formatBusinessDateTime(row.delivered_at) }}</p>
    <button class="expense-button" @click="open(row)">查看消息</button>
   </article>
-  <footer class="expense-actions"><button class="expense-button" :disabled="page<=1||busy" @click="page--;load()">上一页</button>
-   <span>第{{ page }}页，共{{ total }}条</span><button class="expense-button" :disabled="page*20>=total||busy" @click="page++;load()">下一页</button></footer>
+  <PaginationBar label="站内消息分页" :page="page" :total="total" :page-size="20" :loading="busy"
+   @change="nextPage => { page = nextPage; load() }" />
   <aside v-if="detail" class="expense-item"><h3>{{ detail.title }}</h3><p>{{ detail.content }}</p>
    <a v-if="safeNotificationPath(detail.target_url)" :href="safeNotificationPath(detail.target_url)">查看关联业务（重新校验权限）</a>
    <button class="expense-button" @click="detail=null">关闭</button></aside>

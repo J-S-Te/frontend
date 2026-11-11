@@ -3,6 +3,7 @@ import { attachStructuredContext } from '../../platform/shared/api/requestContex
 import { safeDownloadFilename } from '../../shared/utils/contentDisposition.js'
 import { DOWNLOAD_TIMEOUT_MESSAGE, downloadRequestSignal } from '../../shared/utils/downloadTimeout.js'
 import { formatCRMError } from './errorMessages.js'
+import { createIdempotencyKey } from '../../shared/utils/idempotencyKey.js'
 
 const PUBLIC_PATH_PREFIX = (import.meta.env?.VITE_CRM_PUBLIC_PATH_PREFIX || '/customer-opportunity').replace(/\/$/, '')
 const API_BASE_URL = (import.meta.env?.VITE_CRM_API_BASE_URL || `${PUBLIC_PATH_PREFIX}/api/v1`).replace(/\/$/, '')
@@ -161,13 +162,13 @@ function downloadTimeoutError(cause, context) {
 }
 
 /**
- * createIdempotencyKey 生成写操作幂等键；优先使用浏览器安全随机 UUID。
+ * createIdempotencyKey 生成写操作幂等键。
+ * 明文 HTTP（非安全上下文）下浏览器不暴露 crypto.randomUUID，直接调用会让写操作在
+ * 构造 Idempotency-Key 请求头时抛 TypeError；实现统一收在 shared/utils/idempotencyKey.js，
+ * 由它负责安全上下文/旧浏览器降级，本模块导入后再导出同一份实现，避免两套生成逻辑分叉。
  * @returns {string} 当前页面进程内新生成的幂等键。
  */
-export function createIdempotencyKey() {
-  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
-  return `${Date.now()}-${Math.random().toString(36).slice(2)}`
-}
+export { createIdempotencyKey }
 
 /**
  * request 调用 CRM API，统一附加 CSRF、幂等请求头和结构化错误上下文。

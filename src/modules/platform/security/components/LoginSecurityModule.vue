@@ -160,7 +160,7 @@ onMounted(async () => {
         <header><div><h3>已锁定账号</h3><p>管理员可手动解锁，相关操作继续写入基础审计日志。</p></div><span class="so-status warning">{{ lockedAccounts.length }} 个</span></header>
         <div class="console-table-scroll">
           <table class="console-data-table">
-            <thead><tr><th>账号</th><th>账号 ID</th><th>失败次数</th><th>最近失败时间</th><th>锁定至</th><th class="console-actions-cell">操作</th></tr></thead>
+            <thead><tr><th scope="col">账号</th><th scope="col">账号 ID</th><th scope="col">失败次数</th><th scope="col">最近失败时间</th><th scope="col">锁定至</th><th scope="col" class="console-actions-cell">操作</th></tr></thead>
             <tbody>
               <tr v-if="lockedLoading"><td class="console-empty" colspan="6">正在读取锁定账号…</td></tr>
               <tr v-else-if="!lockedAccounts.length"><td colspan="6" class="console-empty">当前没有锁定账号。</td></tr>
