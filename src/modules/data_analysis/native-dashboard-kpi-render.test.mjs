@@ -91,6 +91,7 @@ async function mount(props, storage = memoryStorage()) {
     onMounted: () => {},
     onBeforeUnmount: () => {},
     ConsoleIcon,
+    PaginationBar: { render: () => null },
     dashboardFreshnessItems,
     dashboardFreshnessStatus,
     PROJECT_CARD_KEYS,
@@ -223,4 +224,42 @@ test('其他分区不参与项目卡开关，仍展示全部指标', async () =>
   const contract = await mount({ section: 'contract', contractSummary: { available: true, total_contracts: 4, approval_contracts: 1, active_contracts: 2, expired_contracts: 1, total_amount_minor: 120000000 }, tenantId: 't1', userId: 'u1' }, storage)
   assert.equal(cardCount(contract.html), 5)
   assert.doesNotMatch(contract.html, /da-native-metrics-toolbar/)
+})
+
+test('混币趋势独立系列、实际数量与零柱宽，漏斗使用商机分母', async () => {
+  const { html, ui } = await mount({ section: 'overview', canViewContract: true, canViewProject: true,
+    trend: [{ period: '2026-11', contract_count: 0, project_count: 2, currency_totals: [
+      { currency: 'CNY', amount_minor: 0, contracts: 0 }, { currency: 'USD', amount_minor: 2000000, contracts: 0 },
+    ] }], contractSummary: { available: true, total_contracts: 0, currency_totals: [] }, projectSummary: collectedProject })
+  assert.match(html, /2 万USD/)
+  assert.match(html, /2026-11 合同数/)
+  assert.match(html, /2026-11 项目数/)
+  assert.equal(ui.trendWidth({ currency_totals: [{ currency: 'CNY', amount_minor: 0 }] }, 'CNY'), '0%')
+  const funnel = await mount({ section: 'contract', contractSummary: { available: true, conversion_available: true, opportunity_count: 10, won_contract_count: 2, approval_contracts: 1, active_contracts: 1, expired_contracts: 0 } })
+  assert.equal(funnel.ui.funnelWidth(2), '20%')
+  assert.match(funnel.html, /转化率：20.00%/)
+  const zero = await mount({ section: 'contract', contractSummary: { available: true, conversion_available: true, opportunity_count: 0, won_contract_count: 0 } })
+  assert.match(zero.html, /不可计算（有效商机为0）/)
+})
+
+test('项目明细真实分页数据及未采集指标原因不会沿用合同文案', async () => {
+  const { html } = await mount({ section: 'project', projectSummary: collectedProject,
+    projectDetails: { available: true, total: 25, page: 2, page_size: 20, items: [
+      { project_id: 'p21', name: '真实项目21', status: '实施中', manager: '经理甲', owner_org_id: 'org1', service_items: 3, report_stage: 'RECTIFYING', risk: false },
+    ] } })
+  assert.match(html, /真实项目21/)
+  assert.match(html, /经理甲/)
+  assert.match(html, /缺少权威工时/)
+  assert.match(html, /缺少完整报告退回及现场重测事实/)
+  assert.doesNotMatch(html, /暂无折扣快照|同步商机与合同事实后展示转化漏斗/)
+})
+
+
+test('仅有项目快照的月份不会显示合同数为0', async () => {
+  const { html } = await mount({ section: 'overview', canViewContract: true, canViewProject: true,
+    trend: [{ period: '2026-11', contract_available: false, project_available: true, contract_count: 0,
+      project_count: 2, currency_totals: [] }] })
+  assert.match(html, /无当月合同事实，不计为0/)
+  assert.doesNotMatch(html, /2026-11 合同数/)
+  assert.match(html, /2026-11 项目数/)
 })

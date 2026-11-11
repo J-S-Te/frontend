@@ -22,8 +22,14 @@ const keyword = ref("")
 
 const canTrigger = computed(() => props.permissions.includes("aggregation.manage"))
 
+// subsystemLabel 展示数据源对应的业务名称。
+// 参数：code 为服务端返回的数据源编码。
+// 返回值：友好名称，未知编码保留可识别的原值。
 const subsystemLabel = (code) => ({
   contract_management: "合同管理",
+  contract_dashboard: "合同看板摘要",
+  project_dashboard: "项目看板摘要",
+  settlement: "结算财务",
   customer_and_opportunity: "客户与商机管理",
   project_management: "项目管理",
   customer_portal: "客户门户",

@@ -19,6 +19,7 @@ async function refresh() {
   catch (failure) { if (ticket === generation) error.value = failure.message }
   finally { if (ticket === generation) busy.value = false }
 }
+defineExpose({ refresh })
 onMounted(refresh)
 onBeforeUnmount(() => { generation++ })
 </script>

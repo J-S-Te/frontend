@@ -10,7 +10,7 @@ import ConsoleIcon from "@/modules/platform/shared/components/ConsoleIcon.vue"
 import ErrorState from "@/modules/platform/shared/components/ErrorState.vue"
 import LoadingState from "@/modules/platform/shared/components/LoadingState.vue"
 import { closeSubsystemTabOrFallback } from "@/modules/shared/utils/returnToPortal"
-import { isDashboardEmbedEnabled, getAuthMe, getEmbedToken, getContractDashboardSummary, getProjectDashboardSummary, getReportDashboardSummary, getFinanceDashboardSummary, getContractDetails, getDashboardTrend, getAlertSummary } from "../api/dataAnalysis"
+import { isDashboardEmbedEnabled, getAuthMe, getEmbedToken, getContractDashboardSummary, getProjectDashboardSummary, getReportDashboardSummary, getFinanceDashboardSummary, getContractDetails, getProjectDetails, getDashboardTrend, getAlertSummary } from "../api/dataAnalysis"
 import AlertsCenterView from "./AlertsCenterView.vue"
 import DictionaryView from "./DictionaryView.vue"
 import AdminSourcesView from "./AdminSourcesView.vue"
@@ -44,14 +44,6 @@ const DASHBOARD_PERMISSIONS = {
   report: "dashboard.report.view",
   finance: "dashboard.finance.view",
 }
-const ROLE_SCOPE_LABELS = {
-  boss: "全租户经营视角",
-  finance_manager: "全租户财务视角",
-  sales_director: "本人及下属组织",
-  tech_director: "管辖团队",
-  dashboard_admin: "系统运维视角（不含业务明细）",
-  admin: "全量系统视角",
-}
 const ROLE_LABELS = {
   admin: "超级管理员",
   boss: "老板/总经理",
@@ -66,11 +58,11 @@ const KNOWN_SECTIONS = [...DASHBOARD_SECTIONS, "alerts", "dictionary", "admin/so
 
 const navGroups = [
   { label: "经营看板", items: [
-    { key: "overview", label: "经营总览", icon: "dashboard", meta: ["集团经营指标与目标达成态势", "OQ1"], permission: DASHBOARD_PERMISSIONS.overview },
-    { key: "contract", label: "合同看板", icon: "account", meta: ["合同签约、执行与回款全景", "OQ2"], permission: DASHBOARD_PERMISSIONS.contract },
-    { key: "project", label: "项目看板", icon: "organization", meta: ["项目交付、进度与质量全景", "OQ3"], permission: DASHBOARD_PERMISSIONS.project },
+    { key: "overview", label: "经营总览", icon: "dashboard", meta: ["合同与项目经营指标及趋势", "OQ1"], permission: DASHBOARD_PERMISSIONS.overview },
+    { key: "contract", label: "合同看板", icon: "account", meta: ["普通合同签约与执行统计", "OQ2"], permission: DASHBOARD_PERMISSIONS.contract },
+    { key: "project", label: "项目看板", icon: "organization", meta: ["项目规模、交付状态与报告阶段", "OQ3"], permission: DASHBOARD_PERMISSIONS.project },
     { key: "report", label: "报告看板", icon: "audit", meta: ["报告编制、复核与签发效率", "OQ4"], permission: DASHBOARD_PERMISSIONS.report },
-    { key: "finance", label: "财务看板", icon: "settings", meta: ["收入、成本与利润口径分析", "OQ5"], permission: DASHBOARD_PERMISSIONS.finance },
+    { key: "finance", label: "财务看板", icon: "settings", meta: ["应收、净核销回款与账龄分析", "OQ5"], permission: DASHBOARD_PERMISSIONS.finance },
   ] },
   { label: "预警与口径", items: [
     { key: "alerts", label: "预警中心", icon: "bell", meta: ["指标预警的受理、跟踪与闭环", "P-08"], permission: "alert.view" },
@@ -83,11 +75,11 @@ const navGroups = [
 ]
 
 const pageMeta = {
-  overview: ["经营总览", "集团经营指标与目标达成态势"],
-  contract: ["合同看板", "合同签约、执行与回款全景"],
-  project: ["项目看板", "项目交付、进度与质量全景"],
+  overview: ["经营总览", "合同与项目经营指标及趋势"],
+  contract: ["合同看板", "普通合同签约与执行统计"],
+  project: ["项目看板", "项目规模、交付状态与报告阶段"],
   report: ["报告看板", "报告编制、复核与签发效率"],
-  finance: ["财务看板", "收入、成本与利润口径分析"],
+  finance: ["财务看板", "应收、净核销回款与账龄分析"],
   alerts: ["预警中心", "指标预警的受理、跟踪与闭环"],
   dictionary: ["指标字典", "指标口径与版本的统一查阅"],
   "admin/sources": ["数据源与同步", "各子系统数据源接入与同步状态"],
@@ -129,7 +121,13 @@ watch(iframeSrc, embedActivity.reset, { flush: 'sync' })
 const iframeLoading = ref(false)
 const iframeError = ref(null)
 const dashboardSummary = ref(null)
-const contractDetails = ref({ items: [], total: 0 })
+const contractDetails = ref({ items: [], total: 0, page: 1, page_size: 20 })
+const projectDetails = ref({ available: false, items: [], total: 0, page: 1, page_size: 20 })
+const detailLoading = ref(false)
+const historyPanel = ref(null)
+let detailsRequestVersion = 0
+let meRequestVersion = 0
+let disposed = false
 const overviewSummary = ref({ contract: null, project: null })
 const dashboardTrend = ref([])
 const alertSummary = ref(null)
@@ -167,12 +165,8 @@ const permissions = computed(() => me.value?.permissions || [])
 const hasPermission = (code) => permissions.value.includes(code)
 const canViewDashboard = (code) => permissions.value.includes(DASHBOARD_PERMISSIONS[code])
 const visibleDashboardSections = computed(() => DASHBOARD_SECTIONS.filter(canViewDashboard))
-const dataScopeLabel = computed(() => {
-  const role = (me.value?.roles || []).find((item) => ROLE_SCOPE_LABELS[item])
-  return ROLE_SCOPE_LABELS[role] || "当前授权数据范围"
-})
-// 数据范围（DATA-09）：优先读会话的 scope_mode（后端 /auth/me 可能尚未返回该字段），
-// 未返回时只保留上面的角色口径标签，不猜测范围。
+const dataScopeLabel = computed(() => SCOPE_MODE_LABELS[scopeMode.value] ? `当前授权范围：${SCOPE_MODE_LABELS[scopeMode.value]}` : "数据范围尚未提供")
+// 数据范围只读可信会话字段；缺失时明确未知，不由角色名推断。
 const SCOPE_MODE_LABELS = { TENANT: "全租户", ORG: "组织", TEAM: "团队", SELF: "个人", NONE: "无可用范围" }
 // 用途：按别名读取 /auth/me 的可选数据范围字段。
 // 参数：source 为会话对象；names 为候选字段名；返回值缺失时为 undefined。
@@ -212,15 +206,23 @@ const statusOptions = computed(() => {
   return ["全部", ...statuses]
 })
 
+// loadMe 读取最新身份并使旧身份的请求立即失效。
+// 参数：无。
+// 返回值：无；会话读取失败保留明确错误状态。
 async function loadMe() {
+  const ticket = ++meRequestVersion
+  invalidateDashboardRequests()
   loading.value = true
   loadError.value = ""
   try {
-    me.value = await getAuthMe()
+    const identity = await getAuthMe()
+    if (disposed || ticket !== meRequestVersion) return
+    me.value = identity
   } catch (err) {
+    if (disposed || ticket !== meRequestVersion) return
     loadError.value = formatDataAnalysisError(err, { fallback: "会话读取失败，请稍后刷新。" })
   } finally {
-    loading.value = false
+    if (ticket === meRequestVersion && !disposed) loading.value = false
   }
 }
 
@@ -291,7 +293,11 @@ function onVisibilityChange() {
   }
 }
 
+// loadSummary 加载当前有权查看分区的摘要，组合来源失败相互独立。
+// 参数：code 为当前分区代码。
+// 返回值：无；迟到响应在切换、身份刷新或卸载后失效。
 async function loadSummary(code) {
+  if (disposed || !me.value || !canViewDashboard(code)) return
   const requestVersion = ++summaryRequestVersion
   detailError.value = ""
   if (code === 'overview') {
@@ -299,9 +305,9 @@ async function loadSummary(code) {
     summaryError.value = ""
     try {
       const [contractResult, projectResult, trendResult, alertResult] = await Promise.allSettled([
-        canViewDashboard("contract") ? getContractDashboardSummary() : Promise.reject(new Error("contract dashboard unavailable")),
-        canViewDashboard("project") ? getProjectDashboardSummary() : Promise.reject(new Error("project dashboard unavailable")),
-        canViewDashboard("overview") ? getDashboardTrend() : Promise.reject(new Error("trend unavailable")),
+        canViewDashboard("contract") ? getContractDashboardSummary() : Promise.resolve(null),
+        canViewDashboard("project") ? getProjectDashboardSummary() : Promise.resolve(null),
+        canViewDashboard("overview") ? getDashboardTrend() : Promise.resolve([]),
         // 预警摘要是总览中的可选模块；没有查看权限时静默跳过，不能把权限缺失误报成总览加载失败。
         hasPermission("alert.view") ? getAlertSummary() : Promise.resolve(null),
       ])
@@ -343,17 +349,8 @@ async function loadSummary(code) {
     const result = await loaders[code]()
     if (requestVersion !== summaryRequestVersion || section.value !== code) return
     dashboardSummary.value = result
-    if (code === 'contract') {
-      try {
-        const details = await getContractDetails({ page: 1, page_size: 10 })
-        if (requestVersion !== summaryRequestVersion || section.value !== code) return
-        contractDetails.value = details
-      } catch (err) {
-        if (requestVersion !== summaryRequestVersion || section.value !== code) return
-        contractDetails.value = { items: [], total: 0 }
-        detailError.value = `合同摘要已加载，但明细加载失败：${formatDataAnalysisError(err, { fallback: '请稍后重试。' })}`
-      }
-    }
+    if (code === 'contract' || code === 'project') await loadDetails(code, 1)
+
   } catch (err) {
     if (requestVersion !== summaryRequestVersion) return
     dashboardSummary.value = null
@@ -363,11 +360,57 @@ async function loadSummary(code) {
   }
 }
 
+// invalidateDashboardRequests 使切换、身份刷新和卸载前的异步响应失效。
+// 参数：无。
+// 返回值：无；同时清空旧身份可见的摘要和明细。
+function invalidateDashboardRequests() {
+  summaryRequestVersion += 1
+  detailsRequestVersion += 1
+  iframeRequestVersion += 1
+  clearEmbedRenewal()
+  dashboardSummary.value = null
+  overviewSummary.value = { contract: null, project: null }
+  dashboardTrend.value = []
+  alertSummary.value = null
+  contractDetails.value = { items: [], total: 0, page: 1, page_size: 20 }
+  projectDetails.value = { available: false, items: [], total: 0, page: 1, page_size: 20 }
+  detailError.value = ""
+  detailLoading.value = false
+  summaryLoading.value = false
+  iframeSrc.value = ""
+  iframeLoading.value = false
+}
+
+// loadDetails 独立读取当前分区的服务端分页明细。
+// 参数：code 为合同或项目分区，page 为目标页码。
+// 返回值：无；明细失败只更新明细错误，不覆盖成功摘要。
+async function loadDetails(code, page) {
+  if (disposed || !canViewDashboard(code)) return
+  const ticket = ++detailsRequestVersion
+  detailError.value = ""
+  detailLoading.value = true
+  try {
+    const loader = code === 'contract' ? getContractDetails : getProjectDetails
+    const value = await loader({ page, page_size: 20 })
+    if (disposed || ticket !== detailsRequestVersion || section.value !== code) return
+    if (code === 'contract') contractDetails.value = value
+    else projectDetails.value = value
+  } catch (err) {
+    if (disposed || ticket !== detailsRequestVersion || section.value !== code) return
+    if (code === 'contract') contractDetails.value = { items: [], total: 0, page, page_size: 20 }
+    else projectDetails.value = { available: false, items: [], total: 0, page, page_size: 20 }
+    detailError.value = `明细加载失败：${formatDataAnalysisError(err, { fallback: '请稍后重试。' })}`
+  } finally {
+    if (ticket === detailsRequestVersion && !disposed) detailLoading.value = false
+  }
+}
+
 function scheduleRelatedRefresh() {
   if (relatedRefreshTimer) window.clearTimeout(relatedRefreshTimer)
   relatedRefreshTimer = window.setTimeout(async () => {
     relatedRefreshTimer = null
     await loadMe()
+    if (disposed) return
     if (DASHBOARD_SECTIONS.includes(section.value)) await refreshCurrentDashboard()
   }, 50)
 }
@@ -377,8 +420,9 @@ function scheduleRelatedRefresh() {
 // 返回值：无；摘要与嵌入分别保留各自错误状态。
 async function refreshCurrentDashboard() {
   const code = DASHBOARD_CODES[section.value]
-  if (!code) return
+  if (!code || disposed || !canViewDashboard(code)) return
   const tasks = [loadSummary(code)]
+  if (code === 'contract') tasks.push(historyPanel.value?.refresh?.())
   if (dashboardEmbedEnabled.value && EMBEDDED_DASHBOARD_SECTIONS.includes(section.value)) tasks.push(loadDashboard(code))
   await Promise.all(tasks)
 }
@@ -410,9 +454,11 @@ async function logoutSystem() {
 }
 
 watch(() => section.value, (value) => {
+  invalidateDashboardRequests()
   statusFilter.value = "全部"
   if (DASHBOARD_SECTIONS.includes(value)) {
-    if (me.value && !canViewDashboard(value)) {
+    if (!me.value || loading.value || disposed) return
+    if (!canViewDashboard(value)) {
       const fallback = visibleDashboardSections.value[0]
       if (fallback) router.replace({ name: "data_analysis", params: { section: fallback } })
       return
@@ -429,7 +475,11 @@ watch(() => section.value, (value) => {
     }
     loadSummary(DASHBOARD_CODES[value])
   }
-})
+}, { flush: 'sync' })
+
+watch(() => `${me.value?.tenant_id || ''}/${me.value?.user_id || ''}`, () => {
+  invalidateDashboardRequests()
+}, { flush: 'sync' })
 
 watch(statusOptions, (options) => {
   if (!options.includes(statusFilter.value)) statusFilter.value = "全部"
@@ -441,6 +491,7 @@ onMounted(async () => {
   document.addEventListener("keydown", closeMenuOnEscape)
   unsubscribeRelatedData = subscribeRelatedDataChanges(scheduleRelatedRefresh, { kinds: [RELATED_DATA.ORGANIZATIONS, RELATED_DATA.POSITIONS, RELATED_DATA.MEMBERSHIPS, RELATED_DATA.ROLE_CATALOG] })
   await loadMe()
+  if (disposed) return
   if (DASHBOARD_SECTIONS.includes(section.value)) {
     if (!canViewDashboard(section.value)) {
       const fallback = visibleDashboardSections.value[0]
@@ -456,6 +507,9 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  disposed = true
+  meRequestVersion += 1
+  invalidateDashboardRequests()
   embedActivity.destroy()
   clearEmbedRenewal()
   if (relatedRefreshTimer) window.clearTimeout(relatedRefreshTimer)
@@ -505,7 +559,7 @@ onBeforeUnmount(() => {
         <section class="da-page-head" data-first-run-anchor="subsystem-title">
           <div><p class="da-eyebrow">DATA INTELLIGENCE</p><h1>{{ currentMeta[0] }}</h1><p>{{ currentMeta[1] }} · {{ dataScopeLabel }} <span v-if="scopeModeLabel" class="da-badge neutral">数据范围：{{ scopeModeLabel }}</span></p></div>
           <div v-if="statusOptions.length" class="da-page-filters" aria-label="看板筛选条件">
-            <label>状态<select v-model="statusFilter"><option v-for="option in statusOptions" :key="option" :value="option">{{ option }}</option></select></label>
+            <label>状态分布局部筛选<select v-model="statusFilter"><option v-for="option in statusOptions" :key="option" :value="option">{{ option }}</option></select></label>
           </div>
           <div class="da-actions">
             <button v-if="DASHBOARD_SECTIONS.includes(section)" class="da-button" :disabled="iframeLoading || summaryLoading" @click="refreshCurrentDashboard"><ConsoleIcon name="reset" />{{ iframeLoading || summaryLoading ? '加载中' : '刷新看板' }}</button>
@@ -525,7 +579,11 @@ onBeforeUnmount(() => {
             :contract-summary="section === 'overview' ? overviewSummary.contract : section === 'contract' ? dashboardSummary : null"
             :project-summary="section === 'overview' ? overviewSummary.project : section === 'project' ? dashboardSummary : null"
             :business-summary="['report', 'finance'].includes(section) ? dashboardSummary : null"
-            :contract-details="section === 'contract' ? contractDetails : { items: [], total: 0 }"
+            :contract-details="contractDetails"
+            :project-details="projectDetails"
+            :detail-loading="detailLoading"
+            :detail-error="detailError"
+            @detail-page="loadDetails(section, $event)"
             :can-view-contract="canViewDashboard('contract')"
             :can-view-project="canViewDashboard('project')"
     :status-filter="statusFilter"
@@ -534,9 +592,9 @@ onBeforeUnmount(() => {
             :trend="section === 'overview' ? dashboardTrend : []"
             :alert-summary="section === 'overview' ? alertSummary : null"
           />
-          <ContractImportHistoryPanel v-if="section === 'contract' && canViewDashboard('contract')" />
+          <ContractImportHistoryPanel ref="historyPanel" :key="`${me?.tenant_id}/${me?.user_id}`" v-if="section === 'contract' && canViewDashboard('contract')" />
           <p v-if="summaryError && section === 'overview'" class="da-native-inline-error" role="alert">{{ summaryError }}</p>
-          <p v-if="detailError && section === 'contract'" class="da-native-inline-error" role="alert">{{ detailError }}</p>
+
           <section v-if="dashboardEmbedEnabled && EMBEDDED_DASHBOARD_SECTIONS.includes(section)" class="da-frame-panel">
             <header class="da-frame-head"><div><p>EMBEDDED DASHBOARD</p><b>{{ currentMeta[0] }}</b></div><span>经统一嵌入桥加载 · 数据实时刷新</span></header>
             <div class="da-frame-stage">
