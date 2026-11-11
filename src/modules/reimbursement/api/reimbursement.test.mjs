@@ -6,6 +6,14 @@ import assert from 'node:assert/strict'
 // 返回值：客户端导出；缺文件时测试失败。
 async function tools() { return import('./client.js') }
 
+test('请求UUID使用原生或安全随机源，缺少安全源时明确拒绝', async () => {
+  const { createRequestID } = await tools()
+  assert.equal(createRequestID({ randomUUID: () => 'native-id' }), 'native-id')
+  assert.equal(createRequestID({ getRandomValues: bytes => bytes.fill(255) }),
+    'ffffffff-ffff-4fff-bfff-ffffffffffff')
+  assert.throws(() => createRequestID({}), /安全请求编号/)
+})
+
 test('金额用十进制字符串和BigInt保留超大整数精度，拒绝小数分及负数', async () => {
   const { toMinor, formatMinor, validateItems } = await tools()
   assert.equal(toMinor('90071992547409.93'), '9007199254740993')

@@ -1,13 +1,14 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { webcrypto } from 'node:crypto'
 import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc'
 import * as Vue from 'vue'
 import { renderToString } from '@vue/server-renderer'
 import { approvalNodeLabel, assignmentPurpose, expenseScopeDescription, hasTenantAllCapability, reimbursementRoleLabel } from '../rolePresentation.js'
 import { canSelectProjectReference, editableClaimItem, evidenceIDs,travelInput } from '../claimFields.js'
 import { policyFields, policyFormFrom, policyPayload } from '../policy.js'
-import { createCommandRunner, formatMinor, toMinor, validateItems } from '../api/client.js'
+import { createCommandRunner, createRequestID, formatMinor, toMinor, validateItems } from '../api/client.js'
 import * as workspaceState from '../workspaceState.js'
 import { frontendModules } from '../../registry/compiledModules.js'
 import * as workspace from '../workspace.js'
@@ -29,7 +30,7 @@ async function mountPage(permissions, request, section = 'dashboard', roles = []
     computed: Vue.computed, nextTick: Vue.nextTick, onBeforeUnmount: Vue.onBeforeUnmount,
     onMounted: Vue.onMounted, ref: Vue.ref, watch: Vue.watch, useRoute: () => route, useRouter: () => ({ push() {} }),
     onBeforeRouteLeave() {}, AppShell: { setup: (_props, { slots }) => () => Vue.h('main', slots.default?.()) }, LoadingState: panelStub, ExpenseInbox: panelStub, ArchiveBorrowPanel: panelStub, TravelFields: panelStub, ClaimPreviewPanel:panelStub,InvoiceContentFields:panelStub,InvoiceContentMappings:panelStub,InvoiceClassificationEvidence:panelStub,ParseExceptionsPanel:panelStub, PaymentExceptionPanel: panelStub, ClaimEvidenceTravelPanel: panelStub, ArchivePackagePanel: panelStub, InvoiceControlsPanel: panelStub, ApprovalRoundsPanel: panelStub, ClaimSyncPanel: panelStub, RecoveryPanel: panelStub, todayBusinessDate: () => '2026-11-10', formatBusinessDateTime: (value) => value,
-    createCommandRunner, formatMinor, toMinor, validateItems, approvalNodeLabel, assignmentPurpose, expenseScopeDescription, hasTenantAllCapability, reimbursementRoleLabel, canSelectProjectReference, editableClaimItem, evidenceIDs, policyFields, policyFormFrom, policyPayload,
+    createCommandRunner, createRequestID, formatMinor, toMinor, validateItems, approvalNodeLabel, assignmentPurpose, expenseScopeDescription, hasTenantAllCapability, reimbursementRoleLabel, canSelectProjectReference, editableClaimItem, evidenceIDs, policyFields, policyFormFrom, policyPayload,
     ensureReimbursementSession: async () => ({ tenant_id: 'test', subject_id: 'actor', permissions, roles }),
     logoutReimbursement: async () => ({}), api: { request }, startReimbursementLogin() {} }
   const content = script.content.replace(/^import[\s\S]*?['"][^'"]+['"]\n/gm, '')
@@ -78,6 +79,22 @@ test('工作台统计只显示服务端范围统计，不用当前页条数推�
     assert.equal(fixture.state.dashboard.value.my_claims, 57)
     assert.equal(fixture.state.rows.value.length, 0)
   } finally { fixture.unmount() }
+})
+
+test('HTTP入口缺少randomUUID时仍能初始化工作台费用表单', async () => {
+  const previousCrypto = Object.getOwnPropertyDescriptor(globalThis, 'crypto')
+  Object.defineProperty(globalThis, 'crypto', { configurable: true,
+    value: { getRandomValues: webcrypto.getRandomValues.bind(webcrypto) } })
+  let fixture
+  try {
+    fixture = await mountPage(['expense.claim.read'], async () => ({ my_claims: 0 }))
+    assert.match(fixture.state.draft.value.items[0].id,
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+    assert.equal(fixture.state.dashboard.value.my_claims, 0)
+  } finally {
+    fixture?.unmount()
+    Object.defineProperty(globalThis, 'crypto', previousCrypto)
+  }
 })
 
 test('列表筛选发送完整业务条件且应用后回到第一页，异常入口保留服务端约束', async () => {

@@ -23,7 +23,7 @@ import { canSelectProjectReference, editableClaimItem, evidenceIDs,travelInput }
 import { approvalNodeLabel, assignmentPurpose, expenseScopeDescription, hasTenantAllCapability,
   reimbursementRoleLabel } from '../rolePresentation.js'
 import { formatBusinessDateTime, todayBusinessDate } from '../../shared/utils/businessTime.js'
-import { createCommandRunner, formatMinor, toMinor, validateItems } from '../api/client.js'
+import { createCommandRunner, createRequestID, formatMinor, toMinor, validateItems } from '../api/client.js'
 import { ensureReimbursementSession, logoutReimbursement, reimbursementAPI as api,
   startReimbursementLogin } from '../api/reimbursement.js'
 import { policyFields, policyFormFrom, policyPayload } from '../policy.js'
@@ -434,7 +434,7 @@ async function applyRecoveredResult(operation, result) {
 // 参数：无。
 // 返回值：无；新增内存表单项。
 function addItem() {
-  draft.value.items.push({ id: crypto.randomUUID(), fee_type: '', occurred_date: todayBusinessDate(),
+  draft.value.items.push({ id: createRequestID(), fee_type: '', occurred_date: todayBusinessDate(),
     amount: '', expense_nature:'ACTUAL',reason: '', exception_reason: '', travel_exception: false,
     city_level: '', city_code: '', transport_category: '', accommodation_category: '',
     no_invoice_proof_type: '', no_invoice_evidence_text: '', grade: '', units: 1, no_invoice_reason: '',
@@ -662,7 +662,7 @@ async function validateProjects() {
   try {
     projectValidation.value = await api.request('/project-references/validate', { method: 'POST',
       body: JSON.stringify({ claim_id: selected.value.id, draft_version: selected.value.version,
-        expected_version: selected.value.version, command_id: crypto.randomUUID() }) })
+        expected_version: selected.value.version, command_id: createRequestID() }) })
   } catch (cause) { showError(cause) }
 }
 
@@ -1006,7 +1006,7 @@ async function uploadInvoice(event, purpose = 'reimbursement.invoice.original', 
     saving.value = false
     const result = await mutate('document.upload', '/invoice-documents/upload-sessions',
       { purpose, original_name: file.name, media_type: media,
-        size_bytes: file.size, sha256, idempotency_key: crypto.randomUUID(), expected_version: 0 })
+        size_bytes: file.size, sha256, idempotency_key: createRequestID(), expected_version: 0 })
     if (result) return await uploadContent(result, file, purpose)
   } catch (cause) { showError(cause) }
   finally { saving.value = false }
