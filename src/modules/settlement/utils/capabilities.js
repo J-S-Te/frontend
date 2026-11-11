@@ -11,6 +11,7 @@ const sectionPermissions = {
   // 合同财务修订工单与差异记录同属财务处置入口：仅有修订工单读取能力时也能进入该分区，
   // 其余子区块仍按各自能力判断，不会因此扩大可写范围。
   finance: ['settlement.difference.manage', 'settlement.voucher.manage', 'settlement.revision.read'],
+  recognition: ['settlement.recognition.read'],
   settings: ['settlement.settings.manage'],
   imports: ['settlement.import.reconcile'],
 }

@@ -4,6 +4,7 @@ import { attachStructuredContext } from '../../platform/shared/api/requestContex
 import { createApiRequestContext } from '../../platform/shared/api/requestContext.js'
 import { shouldStartSubsystemLogin } from '../../shared/authz/sessionCompatibility.js'
 import { formatDataAnalysisError } from '../utils/errors.js'
+import { validMetricFactsSummary } from '../utils/metricFacts.js'
 
 const runtimeEnv = import.meta.env || {}
 const PUBLIC_PATH_PREFIX = (runtimeEnv.VITE_DATA_ANALYSIS_PUBLIC_PATH_PREFIX || '/data_analysis').replace(/\/$/, '')
@@ -132,6 +133,8 @@ function validDataEnvelope(body, path, method) {
   if (!isRecord(body) || !Object.hasOwn(body, 'data')) return false
   const data = body.data
   const route = path.split('?')[0]
+  if (route === '/dashboard/metrics') return validMetricFactsSummary(data)
+    && data.section === new URLSearchParams(path.split('?')[1] || '').get('section')
   if (route === '/admin/standard-finance/publish') return validStandardPublication(data, false)
   if (route === '/admin/standard-finance/status') {
     return isRecord(data) && ['standard', 'integration'].includes(data.selected_source)
@@ -339,6 +342,15 @@ export function getProjectDashboardSummary() { return request('/dashboard/projec
 
 export function getReportDashboardSummary() { return request('/dashboard/report') }
 export function getFinanceDashboardSummary() { return request('/dashboard/finance') }
+
+// getMetricFacts 查询当前分区的真实新增业务指标，范围由服务端主体决定。
+// 参数：section为看板分区，period为可选北京业务月份。
+// 返回值：经过完整契约校验的摘要，缺来源或错误原样明确呈现。
+export function getMetricFacts(section, period = '') {
+  const query = new URLSearchParams({ section })
+  if (period) query.set('period', period)
+  return request(`/dashboard/metrics?${query}`)
+}
 
 /** getContractDetails 查询合同下钻分页明细。 */
 export function getContractDetails(params = {}) { const query = new URLSearchParams(params).toString(); return request(`/dashboard/contracts${query ? `?${query}` : ''}`) }

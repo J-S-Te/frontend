@@ -17,6 +17,7 @@ import AdminSourcesView from "./AdminSourcesView.vue"
 import AlertRulesView from "./AlertRulesView.vue"
 import NativeDashboardView from "./NativeDashboardView.vue"
 import ContractImportHistoryPanel from "../components/ContractImportHistoryPanel.vue"
+import MetricFactsPanel from "../components/MetricFactsPanel.vue"
 import { isolatedEmbedUrl } from "../utils/embedOrigin.mjs"
 import { createEmbedSessionActivity } from "../utils/embedSessionActivity.js"
 import { RELATED_DATA, subscribeRelatedDataChanges } from "@/modules/platform/shared/utils/relatedDataInvalidation.js"
@@ -125,6 +126,7 @@ const contractDetails = ref({ items: [], total: 0, page: 1, page_size: 20 })
 const projectDetails = ref({ available: false, items: [], total: 0, page: 1, page_size: 20 })
 const detailLoading = ref(false)
 const historyPanel = ref(null)
+const metricFactsPanel = ref(null)
 let detailsRequestVersion = 0
 let meRequestVersion = 0
 let disposed = false
@@ -341,6 +343,14 @@ async function loadSummary(code) {
     overviewSummary.value = { contract: null, project: null }
     return
   }
+  // 旧报告/财务快照只有租户合计；较窄范围只读取下方按维度过滤的新事实统计。
+  if (['report', 'finance'].includes(code) && scopeMode.value && scopeMode.value !== 'TENANT') {
+    dashboardSummary.value = { available: false, metrics: {},
+      basis: '当前范围不读取租户总量；请查看下方按授权范围计算的新增指标。' }
+    summaryLoading.value = false
+    summaryError.value = ""
+    return
+  }
   summaryLoading.value = true
   summaryError.value = ""
   detailError.value = ""
@@ -422,6 +432,7 @@ async function refreshCurrentDashboard() {
   const code = DASHBOARD_CODES[section.value]
   if (!code || disposed || !canViewDashboard(code)) return
   const tasks = [loadSummary(code)]
+  tasks.push(metricFactsPanel.value?.refresh?.())
   if (code === 'contract') tasks.push(historyPanel.value?.refresh?.())
   if (dashboardEmbedEnabled.value && EMBEDDED_DASHBOARD_SECTIONS.includes(section.value)) tasks.push(loadDashboard(code))
   await Promise.all(tasks)
@@ -593,6 +604,12 @@ onBeforeUnmount(() => {
             :alert-summary="section === 'overview' ? alertSummary : null"
           />
           <ContractImportHistoryPanel ref="historyPanel" :key="`${me?.tenant_id}/${me?.user_id}`" v-if="section === 'contract' && canViewDashboard('contract')" />
+          <MetricFactsPanel
+            v-if="!loading && ['contract', 'project', 'report', 'finance'].includes(section) && canViewDashboard(section)"
+            ref="metricFactsPanel"
+            :key="JSON.stringify([section, me?.tenant_id, me?.user_id, scopeMode, me?.organization_ids, me?.team_ids, me?.permissions])"
+            :section="section" :tenant-id="me?.tenant_id || ''" :user-id="me?.user_id || ''"
+          />
           <p v-if="summaryError && section === 'overview'" class="da-native-inline-error" role="alert">{{ summaryError }}</p>
 
           <section v-if="dashboardEmbedEnabled && EMBEDDED_DASHBOARD_SECTIONS.includes(section)" class="da-frame-panel">
