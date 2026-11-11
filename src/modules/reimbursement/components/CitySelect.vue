@@ -60,7 +60,7 @@ function chooseCity(event) {
 .expense-city-select { min-width: 0; }
 .expense-city-hint {
   margin: 4px 0;
-  color: var(--text-secondary, #475569);
+  color: var(--text-secondary);
   font-size: 13px;
   overflow-wrap: anywhere;
 }
