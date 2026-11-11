@@ -75,7 +75,7 @@ test('等保附属渗透测试以专项卡片呈现且不混入服务项统计',
   assert.match(penetrationWorkPackageSource, /execution_status/)
   assert.match(penetrationWorkPackageSource, /report_status/)
   assert.match(penetrationWorkPackageSource, /expected_version: workPackage\.value\.version/)
-  assert.match(penetrationWorkPackageSource, /选择具备 PENETRATION_TEST 能力的工程师/)
+  assert.match(penetrationWorkPackageSource, /选择实施工程师或渗透测试工程师（需具备 PENETRATION_TEST 能力）/)
   assert.match(penetrationWorkPackageSource, /取消专项并归入不开展/)
 })
 
@@ -467,6 +467,7 @@ test('独立人员查询区已移除，三个下拉按对应角色读取完整�
   assert.match(displaySource, /teamLead: 'team_lead'/)
   assert.match(displaySource, /projectManager: 'project_manager'/)
   assert.match(displaySource, /engineer: 'engineer'/)
+  assert.match(displaySource, /penetrationEngineer: 'penetration_engineer'/)
   const assignmentPersonnelLoader = source.match(/async function loadPersonnel\(\) \{[\s\S]*?\n\}\n\n\/\/ 人员资质只能/)
   assert.ok(assignmentPersonnelLoader, '缺少任务分配人员资质加载函数')
   assert.match(assignmentPersonnelLoader[0], /role_code: roleCode/)
@@ -485,6 +486,23 @@ test('独立人员查询区已移除，三个下拉按对应角色读取完整�
   assert.match(source, /:options="engineerOptions"/)
   assert.match(source, /search-placeholder="搜索姓名、资质编号或资质编码"/)
   assert.doesNotMatch(source, /personnelOptions/)
+})
+
+test('渗透测试工程师接入候选加载与渗透专项指派下拉，无对应权限不拉取该角色', () => {
+  // 空目录必须预留渗透测试工程师键，否则按角色回填时该角色候选永远为空。
+  assert.match(source, /const emptyPersonnelByRole = \(\) => \(\{ [^}]*\[PROJECT_ROLE_CODES\.penetrationEngineer\]: \[\] \}\)/)
+  // 渗透专项指派要求 project.implementation.plan：没有该权限的账号不额外请求这一角色目录。
+  assert.match(source, /if \(canPlanImplementation\.value\) roles\.push\(PROJECT_ROLE_CODES\.penetrationEngineer\)/)
+  assert.doesNotMatch(source, /canExecutionAssign\.value\s*\?\s*\[[^\]]*penetrationEngineer/)
+  // 渗透专项候选取「实施工程师 ∪ 渗透测试工程师」，能力过滤与后端 penetration.go 同口径。
+  assert.match(source, /const penetrationEngineerOptions = computed\(\(\) => penetrationEngineerCandidates\(\{/)
+  assert.match(source, /selectedIDs: serviceItems\.value\.flatMap\(\(item\) => item\.penetration_work_package\?\.engineer_ids \|\| \[\]\)/)
+  assert.match(displaySource, /\[PROJECT_ROLE_CODES\.engineer, PROJECT_ROLE_CODES\.penetrationEngineer\]/)
+  assert.match(displaySource, /export function penetrationCapableUserIDs/)
+  // 两处指派下拉的文案必须能区分「实施工程师」与「渗透测试工程师」；提交仍走 engineer_ids。
+  assert.match(source, /<span>实施工程师 <em>\*<\/em><\/span>/)
+  assert.match(penetrationWorkPackageSource, /<span>渗透测试工程师 \*<\/span>/)
+  assert.match(penetrationWorkPackageSource, /engineer_ids: plan\.value\.engineerIDs/)
 })
 
 test('服务项操作台统一使用带模糊搜索的下拉组件', () => {

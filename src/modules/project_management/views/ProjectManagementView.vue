@@ -96,6 +96,7 @@ import {
   operationSectionLabel,
   overrideMatchText,
   overrideSettingsText,
+  penetrationEngineerCandidates,
   penetrationPackageLabel,
   permissionFieldLabel,
   planEquipmentFor,
@@ -1057,7 +1058,7 @@ const capabilityPersonnelError = ref('')
 const personnelScope = createRequestScope()
 
 
-const emptyPersonnelByRole = () => ({ [PROJECT_ROLE_CODES.teamLead]: [], [PROJECT_ROLE_CODES.projectManager]: [], [PROJECT_ROLE_CODES.engineer]: [] })
+const emptyPersonnelByRole = () => ({ [PROJECT_ROLE_CODES.teamLead]: [], [PROJECT_ROLE_CODES.projectManager]: [], [PROJECT_ROLE_CODES.engineer]: [], [PROJECT_ROLE_CODES.penetrationEngineer]: [] })
 const personnelByRole = ref(emptyPersonnelByRole())
 
 // 用途：按已确认项目会话能力加载人员目录。
@@ -1069,6 +1070,9 @@ async function loadPersonnel() {
   const roles = canExecutionAssign.value
     ? [PROJECT_ROLE_CODES.teamLead, PROJECT_ROLE_CODES.projectManager, PROJECT_ROLE_CODES.engineer]
     : [PROJECT_ROLE_CODES.teamLead]
+  // 渗透测试工程师只服务渗透专项指派（project.implementation.plan + 专项卡片），
+  // 没有该权限的账号不额外请求这一角色的目录，避免无谓的候选查询。
+  if (canPlanImplementation.value) roles.push(PROJECT_ROLE_CODES.penetrationEngineer)
   const ticket = personnelScope.begin(`PERSONNEL:${roles.join('+')}`)
   personnelLoading.value = true
   personnelError.value = ''
@@ -1151,12 +1155,13 @@ function onCapabilityPersonChange() {
 
 // 已保存的角色可能不在当前查询结果里（例如任职已调整）；补一条“当前值”选项，避免编辑既有
 // 服务项时被静默清空。下拉里也不显示 ULID：姓名尚未解析时用占位符，解析成功后自动变成姓名。
+const personFallbackName = (id) => personnelNames.names.value.get(id) || '姓名解析中…'
 function roleOptions(roleCode, selectedIDs) {
   const options = [...(personnelByRole.value[roleCode] || [])]
   const known = new Set(options.map((option) => option.id))
   for (const id of selectedIDs) {
     if (id && !known.has(id)) {
-      options.push({ id, name: personnelNames.names.value.get(id) || '姓名解析中…' })
+      options.push({ id, name: personFallbackName(id) })
       known.add(id)
     }
   }
@@ -1171,13 +1176,15 @@ const engineerSelection = computed({
   set: (values) => { operationForm.value.engineerIDs = values.join(',') },
 })
 const engineerOptions = computed(() => roleOptions(PROJECT_ROLE_CODES.engineer, engineerSelection.value))
-const penetrationEngineerOptions = computed(() => {
-  const selected = serviceItems.value.flatMap((item) => item.penetration_work_package?.engineer_ids || [])
-  const qualified = new Set(capabilities.value
-    .filter((item) => item.resource_type === 'PERSON' && (item.codes || []).some((code) => String(code).toUpperCase() === 'PENETRATION_TEST'))
-    .flatMap((item) => [item.user_id, item.resource_id]).filter(Boolean))
-  return roleOptions(PROJECT_ROLE_CODES.engineer, selected).filter((option) => qualified.has(option.id) || selected.includes(option.id))
-})
+// 渗透专项卡片与任务分配表单是两处独立指派：这里提交的是专项计划的 engineer_ids。
+// 后端按「实施工程师 ∪ 渗透测试工程师」合并校验角色，候选因此取两个角色目录的并集，
+// 再按 PENETRATION_TEST 能力过滤——只认单一角色会出现“后端放行、页面选不到”。
+const penetrationEngineerOptions = computed(() => penetrationEngineerCandidates({
+  personnelByRole: personnelByRole.value,
+  capabilities: capabilities.value,
+  selectedIDs: serviceItems.value.flatMap((item) => item.penetration_work_package?.engineer_ids || []),
+  resolveName: personFallbackName,
+}))
 // 工程师使用与团队负责人、项目经理一致的下拉样式：展开后逐项勾选，
 // 不要求用户按住 ⌘/Ctrl 做加选，选中结果仍写回逗号分隔的 ID 列表。
 // 设备不在任务分配中选取：设备清单在「实施准备」阶段登记。
@@ -4138,9 +4145,9 @@ onBeforeUnmount(() => {
                 <div class="pm-field"><span>团队负责人 <em>*</em></span><SearchableSelect v-model="operationForm.teamLeadID" :options="teamLeadOptions" value-key="id" label-key="name" description-key="description" placeholder="请选择团队负责人" search-placeholder="搜索姓名、资质编号或资质编码" empty-text="人员资质库中没有匹配的团队负责人" aria-label="选择团队负责人" :disabled="personnelLoading" required /></div>
                 <template v-if="canExecutionAssign">
                   <div class="pm-field"><span>项目经理 <em>*</em></span><SearchableSelect v-model="operationForm.projectManagerID" :options="projectManagerOptions" value-key="id" label-key="name" description-key="description" placeholder="请选择项目经理" search-placeholder="搜索姓名、资质编号或资质编码" empty-text="人员资质库中没有匹配的项目经理" aria-label="选择项目经理" :disabled="personnelLoading" required /></div>
-                  <div class="pm-field"><span>工程师 <em>*</em></span><SearchableSelect v-model="engineerSelection" :options="engineerOptions" value-key="id" label-key="name" description-key="description" placeholder="请选择工程师（可多选）" search-placeholder="搜索姓名、资质编号或资质编码" empty-text="人员资质库中没有匹配的工程师" aria-label="选择工程师" :disabled="personnelLoading" multiple required /></div>
+                  <div class="pm-field"><span>实施工程师 <em>*</em></span><SearchableSelect v-model="engineerSelection" :options="engineerOptions" value-key="id" label-key="name" description-key="description" placeholder="请选择实施工程师（可多选）" search-placeholder="搜索姓名、资质编号或资质编码" empty-text="人员资质库中没有匹配的实施工程师" aria-label="选择实施工程师" :disabled="personnelLoading" multiple required /></div>
                 </template>
-                <p v-if="selectedServiceItems.length" class="pm-form-hint pm-allocation-preview">影响预览：将为 {{ selectedServiceItems.length }} 个服务项{{ canExecutionAssign ? '写入团队负责人、项目经理与工程师并触发能力校验' : '写入团队负责人' }}；已选 {{ selectedServiceItems.map((item) => item.id).join('、') }}</p>
+                <p v-if="selectedServiceItems.length" class="pm-form-hint pm-allocation-preview">影响预览：将为 {{ selectedServiceItems.length }} 个服务项{{ canExecutionAssign ? '写入团队负责人、项目经理与实施工程师并触发能力校验' : '写入团队负责人' }}；已选 {{ selectedServiceItems.map((item) => item.id).join('、') }}</p>
                 <button v-if="canSubmitAllocation" class="pm-button primary" :disabled="saving" @click="runOperation('allocation')">{{ saving ? '提交中…' : canExecutionAssign ? '保存分配并校验能力' : '分配团队负责人' }}</button>
               </template>
               <template v-else-if="activeSection === 'planning'"><section v-if="operationSteps.length" class="pm-panel pm-stepper-panel"><div class="pm-stepper"><template v-for="(step, index) in operationSteps" :key="step.label"><div class="pm-step" :class="step.state"><span class="pm-step-num">{{ step.state === 'done' ? '✓' : index + 1 }}</span><span>{{ step.label }}</span></div><div v-if="index < operationSteps.length - 1" class="pm-step-line"></div></template></div></section><div v-if="planningBlocked" class="pm-blocker" :class="planningBlocked.tone" role="alert"><b>暂时不能发布实施计划</b><span>{{ planningBlocked.reason }}</span><button class="pm-button" type="button" @click="navigate('allocation')">前往任务分配</button></div><label><span>计划开始 <em>*</em></span><input v-model.trim="operationForm.plannedStart" type="datetime-local" /></label><label><span>计划结束 <em>*</em></span><input v-model.trim="operationForm.plannedEnd" type="datetime-local" /></label><label><span>现场计划</span><textarea v-model.trim="operationForm.sitePlan" rows="3" placeholder="现场实施步骤和窗口" maxlength="5000"></textarea></label><template v-if="selectedServiceItem.test_mode === 'PENETRATION'"><label><span>渗透测试专项计划 <em>*</em></span><textarea v-model.trim="operationForm.penetrationTestPlan" rows="3" maxlength="5000"></textarea></label><fieldset class="pm-compliant-fieldset"><legend>专项合规要素（授权 / 白名单 / 时间窗 / 应急 / 回滚）</legend><label><span>授权书编号 <em>*</em></span><input v-model.trim="operationForm.authDocNo" required placeholder="例如 AUTH-2026-001"  maxlength="128"/></label><label><span>授权生效 <em>*</em></span><input v-model.trim="operationForm.authStart" type="datetime-local" required /></label><label><span>授权截止 <em>*</em></span><input v-model.trim="operationForm.authEnd" type="datetime-local" required /></label><label><span>授权范围 <em>*</em></span><input v-model.trim="operationForm.authScope" required placeholder="例如 内网段 10.0.0.0/8"  maxlength="5000"/></label><label><span>计划测试范围 <em>*</em></span><input v-model.trim="operationForm.testScope" required placeholder="例如 关键业务系统 WEB 渗透"  maxlength="5000"/></label><label><span>测试时间窗 <em>*</em></span><input v-model.trim="operationForm.testWindow" required placeholder="例如 00:00-06:00"  maxlength="128"/></label><label><span>应急联系人 <em>*</em></span><input v-model.trim="operationForm.emergencyContact" required placeholder="姓名 + 电话"  maxlength="128"/></label><label><span>回滚方案 <em>*</em></span><textarea v-model.trim="operationForm.rollbackPlan" rows="3" required maxlength="5000"></textarea></label></fieldset></template><section class="pm-plan-resources"><header><div><b>实施人员</b><small>资质编码取自「资质与能力」档案，人员不限制有效期；使用时段留空表示全程；设备清单在「实施准备」中登记</small></div></header><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th scope="col">名称</th><th scope="col">规格 / 资质</th><th scope="col">有效期规则</th><th scope="col">使用时段</th><th scope="col">备注</th><th scope="col"></th></tr></thead><tbody><tr v-for="(row, index) in operationForm.personnel" :key="row.resourceID"><td>{{ planResourceName(row) }}</td><td><CodePills :codes="planResourceCodes(row)" /></td><td>{{ planResourceValidUntil(row) }}</td><td><div class="pm-plan-window"><input v-model="row.windowStart" type="date" aria-label="使用时段开始" /><span>~</span><input v-model="row.windowEnd" type="date" aria-label="使用时段结束" /></div></td><td><input v-model.trim="row.note" placeholder="例如 备份"  maxlength="500"/></td><td><button type="button" class="pm-link danger" @click="removePlanPersonnel(index)">移除</button></td></tr><tr v-if="!operationForm.personnel.length"><td colspan="6" class="pm-empty-mini">请至少添加一名实施人员</td></tr></tbody></table></div></section><button v-if="canPlanImplementation" class="pm-button primary" :disabled="saving || !!planningBlocked" :title="planningBlocked ? planningBlocked.reason : ''" @click="runOperation('planning')">发布实施计划</button></template>

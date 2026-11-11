@@ -290,7 +290,55 @@ export function toggleCodeSelection(selection, update, code) {
 
 // 分配候选必须同时满足：项目人员资质有效、平台身份有效、具备对应项目角色。
 // 人员日期不限制派工；基础平台目录仍只用于新建资质时选择身份主体。
-export const PROJECT_ROLE_CODES = Object.freeze({ teamLead: 'team_lead', projectManager: 'project_manager', engineer: 'engineer' })
+// 角色码与后端 project_management/internal/application 的 assignmentRole* 常量逐字对齐；
+// 渗透测试工程师与实施工程师在指派接口里共用 engineer_ids。
+export const PROJECT_ROLE_CODES = Object.freeze({ teamLead: 'team_lead', projectManager: 'project_manager', engineer: 'engineer', penetrationEngineer: 'penetration_engineer' })
+
+// 渗透专项只派给具备 PENETRATION_TEST 能力的人员：这与后端派工前置
+// （application/penetration.go 的 penetrationCapabilityCode）同一口径。
+// 能力码大小写不敏感；设备能力不能充当人员能力。
+export function penetrationCapableUserIDs(capabilities = []) {
+  const ids = new Set()
+  for (const item of capabilities || []) {
+    if (item?.resource_type !== 'PERSON') continue
+    const capable = (item.codes || []).some((code) => String(code).toUpperCase() === 'PENETRATION_TEST')
+    if (!capable) continue
+    for (const id of [item.user_id, item.resource_id]) {
+      if (id) ids.add(String(id))
+    }
+  }
+  return ids
+}
+
+// 多角色候选合并：按角色顺序拼接并按人员 ID 去重；已保存但当前目录里查不到的 ID 补位，
+// 避免编辑既有指派时被静默清空。
+export function mergeRoleCandidates(personnelByRole = {}, roleCodes = [], selectedIDs = [], resolveName = () => '姓名解析中…') {
+  const options = []
+  const known = new Set()
+  for (const roleCode of roleCodes || []) {
+    for (const option of personnelByRole?.[roleCode] || []) {
+      if (!option?.id || known.has(option.id)) continue
+      known.add(option.id)
+      options.push(option)
+    }
+  }
+  for (const id of selectedIDs || []) {
+    if (!id || known.has(id)) continue
+    known.add(id)
+    options.push({ id, name: resolveName(id) })
+  }
+  return options
+}
+
+// 渗透工作包的指派下拉候选取「实施工程师 ∪ 渗透测试工程师」：
+// 后端 AssignExecutionTeam 按两角色合并校验 engineer_ids，前端只认单一角色会出现
+// 「后端放行、UI 选不到」。仍按 PENETRATION_TEST 能力过滤，已保存的指派始终保留。
+export function penetrationEngineerCandidates({ personnelByRole = {}, capabilities = [], selectedIDs = [], resolveName } = {}) {
+  const qualified = penetrationCapableUserIDs(capabilities)
+  const selected = new Set(selectedIDs || [])
+  return mergeRoleCandidates(personnelByRole, [PROJECT_ROLE_CODES.engineer, PROJECT_ROLE_CODES.penetrationEngineer], selectedIDs, resolveName)
+    .filter((option) => qualified.has(option.id) || selected.has(option.id))
+}
 
 export function monitoringServiceSummary(row) {
   return Object.entries(row.service_status_counts || {}).map(([status, count]) => `${status} ${count}`).join(' · ') || '无服务项'
