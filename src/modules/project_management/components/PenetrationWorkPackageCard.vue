@@ -237,7 +237,7 @@ watch(workPackage, fillForms)
         <div v-if="canManage && ['NOT_STARTED', 'CANCELLED'].includes(workPackage.execution_status)" class="pen-form">
           <label><span>计划开始 *</span><input v-model="plan.plannedStart" type="datetime-local" /></label>
           <label><span>计划结束 *</span><input v-model="plan.plannedEnd" type="datetime-local" /></label>
-          <div class="pen-field wide"><span>渗透测试工程师 *</span><SearchableSelect v-model="plan.engineerIDs" :options="engineerOptions" value-key="id" label-key="name" description-key="description" multiple placeholder="选择具备 PENETRATION_TEST 能力的工程师" search-placeholder="搜索工程师" /></div>
+          <div class="pen-field wide"><span>渗透测试工程师 *</span><SearchableSelect v-model="plan.engineerIDs" :options="engineerOptions" value-key="id" label-key="name" description-key="description" multiple placeholder="选择实施工程师或渗透测试工程师（需具备 PENETRATION_TEST 能力）" search-placeholder="搜索实施工程师或渗透测试工程师" /></div>
           <label><span>授权书编号 *</span><input v-model.trim="plan.authDocNo"  maxlength="128"/></label>
           <label><span>授权生效 *</span><input v-model="plan.authStart" type="datetime-local" /></label>
           <label><span>授权截止 *</span><input v-model="plan.authEnd" type="datetime-local" /></label>

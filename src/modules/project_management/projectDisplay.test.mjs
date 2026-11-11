@@ -15,6 +15,8 @@ import {
   monitoringSlaLabel,
   monitoringStatusBuckets,
   multiSummary,
+  penetrationCapableUserIDs,
+  penetrationEngineerCandidates,
   planEquipmentFor,
   planPersonnelFor,
   planPersonnelRows,
@@ -256,9 +258,44 @@ test('交付事件名与后端 delivery.go 常量逐字对齐（抽取样例防�
 })
 
 test('项目角色码与拆解调整表单工厂保持稳定契约', () => {
-  assert.deepEqual(PROJECT_ROLE_CODES, { teamLead: 'team_lead', projectManager: 'project_manager', engineer: 'engineer' })
+  // 四个角色码与后端 assignmentRole* 常量逐字对齐：渗透测试工程师与实施工程师共用 engineer_ids。
+  assert.deepEqual(PROJECT_ROLE_CODES, { teamLead: 'team_lead', projectManager: 'project_manager', engineer: 'engineer', penetrationEngineer: 'penetration_engineer' })
   const form = emptyAdjustForm()
   assert.equal(form.reason, '')
   assert.equal(form.items.length, 1)
   assert.equal(form.items[0].testMode, 'STANDARD')
+})
+
+test('渗透工作包候选取实施工程师 ∪ 渗透测试工程师，同人去重并保留已保存指派', () => {
+  const personnelByRole = {
+    [PROJECT_ROLE_CODES.engineer]: [
+      { id: 'u1', name: '实施甲', description: 'RES-1 · ENV_SAMPLING' },
+      { id: 'u2', name: '实施乙', description: 'RES-2 · ENV_SAMPLING' },
+    ],
+    [PROJECT_ROLE_CODES.penetrationEngineer]: [
+      { id: 'u3', name: '渗透丙', description: 'RES-3 · PENETRATION_TEST' },
+      { id: 'u1', name: '实施甲', description: 'RES-1 · ENV_SAMPLING' },
+    ],
+  }
+  const capabilities = [
+    { resource_type: 'PERSON', user_id: 'u1', resource_id: 'RES-1', codes: ['PENETRATION_TEST'] },
+    { resource_type: 'PERSON', user_id: 'u2', resource_id: 'RES-2', codes: ['ENV_SAMPLING'] },
+    // 能力码来自档案，大小写不敏感；设备能力不能充当人员能力。
+    { resource_type: 'PERSON', user_id: 'u3', resource_id: 'RES-3', codes: ['penetration_test'] },
+    { resource_type: 'EQUIPMENT', user_id: 'u4', resource_id: 'RES-4', codes: ['PENETRATION_TEST'] },
+  ]
+  const resolveName = (id) => `解析中 ${id}`
+  // 只具备渗透测试工程师角色的人（u3）必须出现在候选里，这正是本次修复的缺口。
+  const options = penetrationEngineerCandidates({ personnelByRole, capabilities, selectedIDs: ['u9'], resolveName })
+  assert.deepEqual(options.map((option) => option.id), ['u1', 'u3', 'u9'])
+  assert.equal(options[0].name, '实施甲')
+  assert.equal(options[1].name, '渗透丙')
+  assert.equal(options[2].name, '解析中 u9')
+  // 已保存但能力档案里没有 PENETRATION_TEST 的指派不能被静默清空。
+  const kept = penetrationEngineerCandidates({ personnelByRole, capabilities, selectedIDs: ['u2'], resolveName })
+  assert.deepEqual(kept.map((option) => option.id), ['u1', 'u2', 'u3'])
+  // 空输入不制造候选，也不抛错。
+  assert.deepEqual(penetrationEngineerCandidates({}), [])
+  assert.deepEqual(penetrationEngineerCandidates(), [])
+  assert.deepEqual(penetrationCapableUserIDs([]), new Set())
 })
