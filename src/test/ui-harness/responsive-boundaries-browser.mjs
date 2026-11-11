@@ -186,6 +186,14 @@ function reimbursementFacts() {
       { id: 'arc-2026-03', package_version: 3, status: 'SEALED' },
       { id: 'arc-2026-02', package_version: 2, status: 'PENDING' },
     ] },
+    resolutionOptions: {
+      claim_id: 'claim-01', claim_version: 7, exception_version: selected.version,
+      payments: [{ id: '01H000000000000000000000099', name: '已登记付款',
+        paid_date: selected.paid_date, amount_minor: selected.amount_minor,
+        currency: selected.currency, method: selected.method,
+        transaction_no: selected.transaction_no, can_resolve_payment: true }],
+      reversals: [],
+    },
     syncClaim: { id: 'claim-01', version: 7 },
     permissions: ['expense.payment.read', 'expense.integration.manage'],
     payment: {
@@ -334,6 +342,10 @@ async function reimbursementNetwork(page, payload) {
       }
       if (method === 'GET' && /\/claims\/[^/]+\/spend-capacity$/.test(path)) {
         return reply(200, { code: 'OK', data: payload.capacity })
+      }
+      if (method === 'GET' && path ===
+        `/reimbursement/api/v1/payment-exceptions/${payload.payment.selected.id}/resolution-options`) {
+        return reply(200, { code: 'OK', data: payload.resolutionOptions })
       }
       // 付款表单与外部异常表单按既有付款选项接口选账户，夹具给出受控账户与收款档案。
       if (method === 'GET' && /\/claims\/[^/]+\/payment-options$/.test(path)) {
@@ -636,6 +648,11 @@ try {
         await panelPage.waitForFunction(() => document.querySelector('#sync-panel')?.textContent.includes('同步快照待恢复'))
         await panelPage.getByRole('button', { name: '生成文件包' }).click()
         await panelPage.waitForFunction(() => document.querySelector('#archive-panel')?.textContent.includes('已完成'))
+        const paymentChoice = panelPage.getByRole('combobox', { name: '已有合法付款', exact: true })
+        await paymentChoice.locator('option', { hasText: '已登记付款' }).waitFor({ state: 'attached' })
+        assert.equal(await paymentChoice.locator('option', { hasText: '已登记付款' })
+          .getAttribute('value'), facts.resolutionOptions.payments[0].id,
+        '异常解除选择器必须显示真实响应契约中的付款候选')
         panelErrors.push(...await violations(panelPage))
         const network = await panelPage.evaluate(() => ({
           calls: window.__reimbursementCalls, missing: window.__reimbursementMissing,
@@ -643,6 +660,9 @@ try {
         assert.deepEqual(network.missing, [], '夹具必须覆盖全部报销请求：' + network.missing.join(', '))
         assert.ok(network.calls.includes('POST /reimbursement/api/v1/archives/arc-2026-03/packages'),
           '档案包生成必须走真实命令入口：' + network.calls.join(', '))
+        assert.ok(network.calls.includes('GET /reimbursement/api/v1/payment-exceptions/'
+          + facts.payment.selected.id + '/resolution-options'),
+        '异常面板必须读取当前异常的真实解除选项接口：' + network.calls.join(', '))
         assert.ok(network.calls.some(call => call.endsWith('/sync-status')),
           '同步面板必须读取真实同步状态接口：' + network.calls.join(', '))
         // 记录真实异常表的几何：它是 5 列表格在 375px 的实际表现，必须由滚动容器承接，
