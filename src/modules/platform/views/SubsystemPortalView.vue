@@ -28,6 +28,22 @@ import { formatUserError } from '../../shared/utils/userError.js'
 import '@/modules/platform/styles/subsystem-portal.css'
 
 const router = useRouter()
+// 门户卡片悬停/聚焦时预取目标子系统的视图分块。子系统入口仍走服务端 OIDC
+// （安全边界不变），但静态资源可以在跳转往返期间进入浏览器缓存，减少登录回来后的首屏等待。
+const prefetchedViewRoutes = new Set()
+function prefetchSubsystemView(subsystem, event) {
+  // 触屏的 pointerenter 由点击触发，预取价值低且会消耗移动流量；只处理鼠标悬停与键盘聚焦。
+  if (event?.pointerType && event.pointerType !== 'mouse') return
+  const routeLocation = subsystem?.route
+  const routeName = routeLocation?.name
+  if (!routeName || prefetchedViewRoutes.has(routeName)) return
+  const resolved = router.resolve(routeLocation)
+  const record = resolved.matched[resolved.matched.length - 1]
+  const loader = record?.components?.default
+  if (typeof loader !== 'function') return
+  prefetchedViewRoutes.add(routeName)
+  Promise.resolve(loader()).catch(() => prefetchedViewRoutes.delete(routeName))
+}
 // 上手清单进度由全局 first-run store 提供：只统计当前权限可见的任务。
 const checklistSummary = firstRun.checklistSummary
 // 主体确定且记录已创建后清单才可打开；未就绪时入口显示 loading/disabled，
@@ -148,6 +164,30 @@ const portalGridStyle = computed(() => ({
   '--portal-grid-max-width': `${portalGrid.value.columns === 1 ? 520 : portalGrid.value.columns === 2 ? 900 : 1380}px`,
   '--portal-grid-max-height': `${portalGrid.value.density === 'spacious' ? 280 : portalGrid.value.density === 'standard' ? 546 : portalGrid.value.rows * 210 + (portalGrid.value.rows - 1) * 16}px`,
 }))
+
+// 门户停留后再空闲预取当前页的前几张卡片：先让门户自身首屏与接口完成，
+// 避免预取和当前页面争抢带宽；2G/省流量模式直接跳过。
+let prefetchIdleTimer = 0
+function cancelIdlePrefetch() {
+  if (prefetchIdleTimer) {
+    window.clearTimeout(prefetchIdleTimer)
+    prefetchIdleTimer = 0
+  }
+}
+function scheduleIdlePrefetch() {
+  if (typeof window === 'undefined') return
+  cancelIdlePrefetch()
+  const navigatorRef = typeof navigator === 'undefined' ? null : navigator
+  const connection = navigatorRef?.connection || navigatorRef?.mozConnection || navigatorRef?.webkitConnection
+  if (connection?.saveData || /(^|-)2g$/.test(String(connection?.effectiveType || ''))) return
+  const targets = visibleSubsystems.value.slice(0, 3)
+  if (!targets.length) return
+  prefetchIdleTimer = window.setTimeout(() => {
+    prefetchIdleTimer = 0
+    targets.forEach((subsystem) => prefetchSubsystemView(subsystem))
+  }, 1800)
+}
+watch(visibleSubsystems, scheduleIdlePrefetch, { flush: 'post' })
 
 function changePortalPage(page) {
   portalPage.value = Math.min(Math.max(1, Number(page) || 1), portalTotalPages.value)
@@ -664,6 +704,7 @@ watch(() => subsystems.value.length, () => {
 })
 
 onBeforeUnmount(() => {
+  cancelIdlePrefetch()
   firstRun.markPortalUnready()
   window.removeEventListener('focus', syncPortalThemeFromStorage)
   document.removeEventListener('visibilitychange', onPortalVisibilityChangeForTheme)
@@ -868,6 +909,8 @@ onBeforeUnmount(() => {
           :aria-label="subsystem.allowed ? `进入${subsystem.name}` : `${subsystem.name}权限同步未完成`"
           :aria-disabled="!subsystem.allowed"
           @click="openSubsystem(subsystem)"
+          @pointerenter="prefetchSubsystemView(subsystem, $event)"
+          @focus="prefetchSubsystemView(subsystem, $event)"
           @pointermove="handleCardPointerMove"
           @pointerleave="resetCardTransform"
           @pointercancel="resetCardTransform"
