@@ -25,6 +25,7 @@ function shellHarness(session, failure = null) {
     getAuthMe: async () => session,
     getEmbedToken: async () => { calls.embed++; if (failure) throw failure; return {} },
     getFinanceDashboardSummary: summary, getContractDashboardSummary: summary,
+    getContractRegions: async () => ({ available: false, items: [], basis: "" }),
     getProjectDashboardSummary: summary, getReportDashboardSummary: summary,
     getContractDetails: summary, getDashboardTrend: summary, getAlertSummary: summary,
     isDashboardEmbedEnabled: api.isDashboardEmbedEnabled,

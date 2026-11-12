@@ -42,6 +42,16 @@ const enableableMetricSummary = computed(() => {
   const labels = enableableMetricLabels(dictionary.value?.metrics || [])
   return labels.length ? labels.join("、") : "暂无"
 })
+// groupedMetrics 按看板分组呈现，保持原型“口径目录”的阅读顺序；未知看板归入未分类。
+const groupedMetrics = computed(() => {
+  const groups = new Map()
+  for (const item of filteredMetrics.value) {
+    const dashboard = String(item.dashboard || "").trim() || "未分类"
+    if (!groups.has(dashboard)) groups.set(dashboard, [])
+    groups.get(dashboard).push(item)
+  }
+  return [...groups.entries()].map(([dashboard, items]) => ({ dashboard, items }))
+})
 
 async function load() {
   if (loading.value || saving.value) return
@@ -149,26 +159,56 @@ function operationLabel(operation) { return ({ BASELINE: "原始口径", CREATE:
   <section>
     <LoadingState v-if="loading" title="指标字典加载中…" />
     <ErrorState v-else-if="error" :error="error" @retry="load" />
-    <div v-else-if="dictionary" class="da-dict-grid">
-      <article class="da-dict-card">
-        <p class="da-panel-kicker">METRIC DICTIONARY</p>
-        <h2>指标口径目录</h2>
-        <p class="da-dict-meta">共 {{ dictionary.metrics?.length || 0 }} 项指标；每个指标独立管理版本。</p>
-        <p class="da-dict-meta">内置指标可修订或停用；自定义指标在未被引用时可删除。</p>
-      </article>
-      <aside class="da-dict-note">
-        <h2>口径与计算说明</h2>
-        <p>公式是业务口径说明，不作为 SQL 或可执行表达式运行。新建指标默认停用，未绑定计算能力的自定义指标不可启用。</p>
-        <p>“已确认”表示口径已确认，与启用开关独立。启用要求口径已确认且匹配后台受控计算能力；字典开关不改写既有统计结果，也不会自动为自定义指标创建计算任务或将历史报表绑定到新版本。</p>
-        <p>当前具备受控计算能力的指标：{{ enableableMetricSummary }}；新建或修订口径不会自动创建计算能力。</p>
-        <p v-if="!canManage">当前权限允许查阅口径和版本历史；维护需要 dictionary.manage 权限。</p>
-      </aside>
-      <div class="da-dict-metrics da-table-panel">
-        <div class="da-filters"><label><ConsoleIcon name="search" /><input v-model="keyword" placeholder="检索指标名称 / 看板 / 关键词"  maxlength="100"/></label><span>{{ filteredMetrics.length }} / {{ dictionary.metrics?.length || 0 }} 项指标</span><button class="da-button" :disabled="saving" @click="load">刷新</button><button v-if="canManage" class="da-button primary" :disabled="!canWrite" @click="openEditor()">新建指标</button></div>
-        <OperationToast :message="toast" />
-        <div class="da-table-scroll"><table class="da-table"><thead><tr><th scope="col">编码 / 版本</th><th scope="col">指标 / 来源</th><th scope="col">看板</th><th scope="col">业务定义</th><th scope="col">公式说明</th><th scope="col">数据源</th><th scope="col">周期</th><th scope="col">口径状态</th><th scope="col">启用状态</th><th scope="col">操作</th></tr></thead><tbody><tr v-for="item in filteredMetrics" :key="item.code"><td class="mono">{{ item.code }}<br />v{{ item.version }}</td><td><b>{{ item.name }}</b><br />{{ item.origin === 'BUILTIN' ? '内置' : '自定义' }}</td><td>{{ item.dashboard }}</td><td>{{ item.definition }}</td><td>{{ item.formula }}</td><td class="mono">{{ item.source }}</td><td>{{ item.period }}</td><td>{{ item.status }}</td><td><span class="da-badge" :class="item.enabled ? 'normal' : 'warning'">{{ item.enabled ? '已启用' : '已停用' }}</span><small v-if="!item.enabled && !item.can_enable" class="da-dict-hint">{{ metricEnableBlockText(item) }}</small><small v-else class="da-dict-hint">{{ item.calculation_binding || '已绑定计算能力' }}</small></td><td><div class="da-dict-actions"><button class="da-button compact" @click="openHistory(item)">版本历史</button><template v-if="canManage"><button class="da-button compact" :disabled="!canWrite" @click="openEditor(item)">编辑</button><button class="da-button compact" :disabled="!canWrite || (!item.enabled && !item.can_enable)" :title="item.enabled || item.can_enable ? '' : metricEnableBlockText(item)" @click="toggleMetric(item)">{{ item.enabled ? '停用' : '启用' }}</button><button v-if="item.origin === 'CUSTOM'" class="da-button compact" :disabled="!canWrite" @click="removeMetric(item)">删除</button>
-</template></div></td></tr></tbody></table></div>
-        <EmptyState v-if="filteredMetrics.length === 0" title="未找到匹配指标" />
+    <div v-else-if="dictionary" class="da-dict-page">
+      <div class="da-dict-toolbar">
+        <label class="da-dict-search"><ConsoleIcon name="search" /><input v-model="keyword" placeholder="检索指标名称 / 看板 / 关键词…" maxlength="100" /></label>
+        <span class="da-pill">{{ filteredMetrics.length }} / {{ dictionary.metrics?.length || 0 }} 项 · 每项独立版本</span>
+        <span class="da-dict-toolbar-spacer"></span>
+        <button class="da-button" :disabled="saving" @click="load"><ConsoleIcon name="reset" />刷新</button>
+        <button v-if="canManage" class="da-button primary" :disabled="!canWrite" @click="openEditor()">新建指标</button>
+      </div>
+      <OperationToast :message="toast" />
+
+      <div v-if="groupedMetrics.length" class="da-dict-list">
+        <section v-for="group in groupedMetrics" :key="group.dashboard" class="da-dict-section">
+          <div class="da-dict-group">{{ group.dashboard }}<span>{{ group.items.length }} 项</span></div>
+          <article v-for="item in group.items" :key="item.code" class="da-dict-item">
+            <h4>
+              <span>{{ item.name }}</span>
+              <span class="da-badge" :class="item.status === '已确认' ? 'normal' : 'warning'">{{ item.status }}</span>
+              <span class="da-badge" :class="item.enabled ? 'normal' : 'neutral'">{{ item.enabled ? '已启用' : '已停用' }}</span>
+              <span class="da-badge neutral">{{ item.code }} · v{{ item.version }}</span>
+              <span class="da-dict-origin">{{ item.origin === 'BUILTIN' ? '内置' : '自定义' }}</span>
+            </h4>
+            <div class="da-dict-meta-grid">
+              <span><b>定义</b>{{ item.definition }}</span>
+              <span><b>源</b>{{ item.source }}</span>
+              <span><b>公式</b>{{ item.formula }}</span>
+              <span><b>周期</b>{{ item.period }}</span>
+            </div>
+            <p v-if="!item.enabled && !item.can_enable" class="da-dict-hint">{{ metricEnableBlockText(item) }}</p>
+            <p v-else class="da-dict-hint">{{ item.calculation_binding || '已绑定计算能力' }}</p>
+            <div class="da-dict-item-actions">
+              <button class="da-button compact" @click="openHistory(item)">版本历史</button>
+              <template v-if="canManage">
+                <button class="da-button compact" :disabled="!canWrite" @click="openEditor(item)">编辑</button>
+                <button class="da-button compact" :disabled="!canWrite || (!item.enabled && !item.can_enable)" :title="item.enabled || item.can_enable ? '' : metricEnableBlockText(item)" @click="toggleMetric(item)">{{ item.enabled ? '停用' : '启用' }}</button>
+                <button v-if="item.origin === 'CUSTOM'" class="da-button compact danger" :disabled="!canWrite" @click="removeMetric(item)">删除</button>
+              </template>
+            </div>
+          </article>
+        </section>
+      </div>
+      <EmptyState v-else title="未找到匹配指标" />
+
+      <div class="da-dict-note-panel">
+        <div class="da-dict-note">
+          <h2>口径与计算说明</h2>
+          <p>公式是业务口径说明，不作为 SQL 或可执行表达式运行。新建指标默认停用，未绑定计算能力的自定义指标不可启用。</p>
+          <p>“已确认”表示口径已确认，与启用开关独立。启用要求口径已确认且匹配后台受控计算能力；字典开关不改写既有统计结果。</p>
+          <p>当前具备受控计算能力的指标：{{ enableableMetricSummary }}；新建或修订口径不会自动创建计算能力。</p>
+          <p v-if="!canManage">当前权限允许查阅口径和版本历史；维护需要 dictionary.manage 权限。</p>
+        </div>
       </div>
     </div>
     <div v-if="editing" class="da-modal-backdrop" @click.self="closeEditor"><form class="da-modal" @submit.prevent="saveEditor"><header><b>{{ editing.mode === 'edit' ? '编辑指标口径' : '新建指标口径' }}</b><button type="button" class="da-icon-button" :disabled="saving" @click="closeEditor">×</button></header><p class="da-dict-meta">公式仅作为口径说明。新建指标保存后停用；计算绑定由服务端管理。</p><label>编码<input v-model="draft.code" :disabled="editing.mode === 'edit' || saving" required  maxlength="64"/></label><label>名称<input v-model="draft.name" :disabled="saving" required  maxlength="128"/></label><label>看板<input v-model="draft.dashboard" :disabled="saving" required  maxlength="128"/></label><label>业务定义<textarea v-model="draft.definition" :disabled="saving" required  maxlength="512"/></label><label>公式说明<textarea v-model="draft.formula" :disabled="saving" required  maxlength="512"/></label><label>数据源说明<input v-model="draft.source" :disabled="saving" required  maxlength="255"/></label><label>统计周期<input v-model="draft.period" :disabled="saving" required  maxlength="64"/></label><label>口径确认状态<input v-model="draft.status" :disabled="saving" list="metric-confirmation-status" maxlength="32" required /><datalist id="metric-confirmation-status"><option value="待确认" /><option value="已确认" /></datalist></label><p v-if="editorError" role="alert" class="da-dict-message">{{ editorError }}</p><footer><button type="button" class="da-button" :disabled="saving" @click="closeEditor">取消</button><button class="da-button primary" :disabled="!canWrite">{{ saving ? '保存中…' : '保存口径' }}</button></footer></form></div>
@@ -183,19 +223,44 @@ function operationLabel(operation) { return ({ BASELINE: "原始口径", CREATE:
 </template>
 
 <style scoped>
-.da-dict-meta { margin: 6px 0 0; color: #64748b; font-size: 12.5px; }
+.da-dict-page { display: grid; gap: 0; }
+.da-dict-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 16px; }
+.da-dict-search { flex: 1; max-width: 420px; height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 12px; border: 1px solid var(--da-line); border-radius: 8px; background: var(--surface-card); }
+.da-dict-search svg { width: 15px; height: 15px; color: var(--text-muted); }
+.da-dict-search input { width: 100%; border: 0; outline: 0; color: var(--text); background: transparent; font-size:  var(--fs-sm); }
+.da-dict-toolbar-spacer { flex: 1; }
+.da-dict-list { display: grid; gap: 0; }
+.da-dict-section { display: grid; gap: 0; }
+.da-dict-group { display: flex; align-items: center; justify-content: space-between; margin: 18px 0 8px; padding-left: 8px; border-left: 3px solid var(--primary); color: var(--text); font-size:  var(--fs-sm); font-weight: 700; }
+.da-dict-group span { color: var(--text-muted); font-size:  var(--fs-xs); font-weight: 400; }
+.da-dict-item { margin-bottom: 12px; padding: 14px 16px; border: 1px solid #e2e8f0; border-radius: 12px; background: var(--surface-card); box-shadow: 0 1px 3px rgba(0, 0, 0, .06); }
+.da-dict-item h4 { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin: 0; color: var(--text); font-size:  var(--fs-body); }
+.da-dict-item h4 > span:first-child { margin-right: 2px; font-weight: 600; }
+.da-dict-origin { color: var(--text-muted); font-size:  var(--fs-xs); }
+.da-dict-meta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px 18px; margin-top: 10px; color: var(--text-secondary); font-size:  var(--fs-xs); line-height: 1.6; }
+.da-dict-meta-grid span { overflow-wrap: anywhere; }
+.da-dict-meta-grid b { margin-right: 4px; color: var(--text-muted); font-weight: 600; }
+.da-dict-item-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.da-dict-note-panel { margin-top: 8px; }
+.da-dict-meta { margin: 6px 0 0; color: var(--text-muted); font-size:  var(--fs-xs); }
 .da-dict-meta:first-of-type { margin-top: 14px; }
-.da-dict-hint { display: block; margin-top: 6px; color: #64748b; }
-.da-dict-message { padding: 12px; background: #fff7ed; color: #9a3412; border-radius: 8px; }
+.da-dict-hint { display: block; margin: 6px 0 0; color: var(--text-muted); font-size:  var(--fs-xs); }
+.da-dict-message { padding: 12px; background: var(--surface-card)7ed; color: var(--warning-text); border-radius: 8px; }
 .da-dict-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .da-dict-history { max-height: 85vh; overflow: auto; }
-.da-dict-history-entry { border-bottom: 1px solid #e2e8f0; padding: 12px 0; overflow-wrap: anywhere; }
+.da-dict-history-entry { border-bottom: 1px solid var(--border); padding: 12px 0; overflow-wrap: anywhere; }
 
-/* 深色主题：字典页的说明文字、口径提示条与分隔线；浅色声明未改。 */
 [data-theme="dark"] .da-dict-meta,
-[data-theme="dark"] .da-dict-hint {
+[data-theme="dark"] .da-dict-hint,
+[data-theme="dark"] .da-dict-origin {
   color: var(--text-muted);
 }
+[data-theme="dark"] .da-dict-search,
+[data-theme="dark"] .da-dict-item {
+  background: var(--surface-card);
+  border-color: var(--border);
+}
+[data-theme="dark"] .da-dict-search input { color: var(--text); }
 [data-theme="dark"] .da-dict-message {
   background: var(--warning-soft);
   color: var(--text-on-warning);

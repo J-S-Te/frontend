@@ -24,8 +24,10 @@ const acting = ref(null)
 
 const canManage = computed(() => props.permissions.includes("alert.manage"))
 
-const SEVERITY_LABELS = { HIGH: "高", MEDIUM: "中", LOW: "低" }
+const SEVERITY_LABELS = { CRITICAL: "P0", HIGH: "高", MEDIUM: "中", LOW: "低" }
 const STATUS_LABELS = { OPEN: "待受理", ACK: "处理中", CLOSED: "已关闭" }
+const ALERT_TYPE_LABELS = { CONTRACT_EXPIRY: "合同到期", PAYMENT_OVERDUE: "回款逾期", PROJECT_DELAY: "交付延期", REPORT_OVERDUE: "报告超期", ISSUE_UNCLOSED: "异常未闭环" }
+function alertTypeLabel(value) { return ALERT_TYPE_LABELS[String(value || "").toUpperCase()] || String(value || "—") }
 
 // 关闭原因（DATA-07）：后端 closed_reason 可能尚未上线，缺失时不显示任何标签。
 // 自动关闭与人工关闭必须区分：自动关闭说明条件已消失/目标离开窗口，人工关闭说明有人处理过。
@@ -166,15 +168,27 @@ onMounted(load)
 
 <template>
   <section>
-    <div class="da-summary-strip">
-      <button type="button" @click="statusFilter = statusFilter === 'OPEN' ? '' : 'OPEN'; applyFilters()"><b>{{ counts.open }}</b><span>待受理</span></button>
-      <button type="button" @click="statusFilter = statusFilter === 'ACK' ? '' : 'ACK'; applyFilters()"><b>{{ counts.ack }}</b><span>处理中</span></button>
-      <button type="button" @click="statusFilter = statusFilter === 'CLOSED' ? '' : 'CLOSED'; applyFilters()"><b>{{ counts.closed }}</b><span>已关闭</span></button>
-      <button type="button" class="danger"><b>{{ counts.high }}</b><span>高危预警</span></button>
+    <div class="da-alert-stats">
+      <article class="da-native-metric" :class="{ danger: counts.open > 0 }">
+        <span>待处理预警</span><strong>{{ counts.open }}</strong><small>项</small>
+        <p class="da-native-metric-meta">{{ counts.open > 0 ? '需跟进' : '当前无待处理项' }}</p>
+      </article>
+      <article class="da-native-metric" :class="{ danger: counts.high > 0 }">
+        <span>高危 / P0</span><strong>{{ counts.high }}</strong><small>项</small>
+        <p class="da-native-metric-meta">紧急 / 高风险</p>
+      </article>
+      <article class="da-native-metric">
+        <span>处理中</span><strong>{{ counts.ack }}</strong><small>项</small>
+        <p class="da-native-metric-meta">已受理，待闭环</p>
+      </article>
+      <article class="da-native-metric">
+        <span>已关闭</span><strong>{{ counts.closed }}</strong><small>项</small>
+        <p class="da-native-metric-meta">含规则自动收敛</p>
+      </article>
     </div>
 
-    <div class="da-filters">
-      <label><ConsoleIcon name="search" /><input v-model="keyword" placeholder="搜索标题 / 类型 / 规则 / 对象"  maxlength="100"/></label>
+    <div class="da-filters da-alert-toolbar">
+      <label><ConsoleIcon name="search" /><input v-model="keyword" placeholder="搜索标题 / 类型 / 规则 / 对象" maxlength="100" /></label>
       <select v-model="statusFilter" @change="applyFilters">
         <option value="">全部状态</option>
         <option value="OPEN">待受理</option>
@@ -183,12 +197,13 @@ onMounted(load)
       </select>
       <select v-model="severityFilter" @change="applyFilters">
         <option value="">全部严重度</option>
-        <option value="CRITICAL">紧急</option>
+        <option value="CRITICAL">P0 紧急</option>
         <option value="HIGH">高</option>
         <option value="MEDIUM">中</option>
         <option value="LOW">低</option>
       </select>
       <button class="da-button ghost" :disabled="loading" @click="load"><ConsoleIcon name="reset" />刷新</button>
+      <span class="da-pill">数据与看板同源 · 只读汇总</span>
     </div>
 
     <ListState
@@ -200,25 +215,34 @@ onMounted(load)
       empty-description="当前筛选条件下没有预警记录"
       @retry="load"
     />
-    <div v-else class="da-alert-list">
-      <article v-for="item in filteredAlerts" :key="item.id" class="da-alert-card">
-        <i class="da-alert-severity" :class="item.severity.toLowerCase()"></i>
-        <div class="da-alert-main">
-          <div class="da-alert-title">
-            <b>{{ item.title }}</b>
-            <span class="da-badge" :class="item.status === 'OPEN' ? 'risk' : item.status === 'ACK' ? 'warning' : 'neutral'">{{ STATUS_LABELS[item.status] || item.status }}</span>
-            <span class="da-badge neutral">{{ SEVERITY_LABELS[String(item.severity).toUpperCase()] || item.severity }}</span>
-          </div>
-          <div class="da-alert-meta">{{ item.alert_type }} · 规则 {{ item.rule_code || '—' }} · 对象 {{ item.target_ref || '—' }} · 到期 {{ item.due_date || '无期限' }}</div>
-          <div v-if="item.statusNotes?.length" class="da-alert-meta da-alert-status">{{ item.statusNotes.join(' · ') }}</div>
-        </div>
-        <div class="da-alert-actions">
-          <button v-if="item.status === 'OPEN'" class="da-button" :disabled="acting === item.id" @click="onAck(item.id)">{{ acting === item.id ? '处理中…' : '受理' }}</button>
-          <button v-if="item.status !== 'CLOSED'" class="da-button ghost" :disabled="acting === item.id" @click="onClose(item.id)">关闭</button>
-        </div>
-      </article>
+    <div v-else class="da-panel da-table-panel da-alert-table-panel">
+      <header><div><b>预警清单</b><p>按严重度与到期日排序 · 受理后进入处理中</p></div><span>共 {{ total }} 条</span></header>
+      <div class="da-table-scroll">
+        <table class="da-table">
+          <thead><tr><th scope="col">严重度</th><th scope="col">预警项</th><th scope="col">对象</th><th scope="col">触发规则</th><th scope="col">到期 / 状态</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
+          <tbody>
+            <tr v-for="item in filteredAlerts" :key="item.id" :class="{ risk: String(item.severity).toUpperCase() === 'CRITICAL' }">
+              <td><span class="da-alert-severity-pill" :class="item.severity.toLowerCase()">{{ SEVERITY_LABELS[String(item.severity).toUpperCase()] || item.severity }}</span></td>
+              <td><b>{{ item.title }}</b><small>{{ alertTypeLabel(item.alert_type) }}</small></td>
+              <td>{{ item.target_ref || '—' }}</td>
+              <td><span class="mono">{{ item.rule_code || '—' }}</span></td>
+              <td>{{ item.due_date || '无期限' }}</td>
+              <td>
+                <span class="da-badge" :class="item.status === 'OPEN' ? 'risk' : item.status === 'ACK' ? 'warning' : 'neutral'">{{ STATUS_LABELS[item.status] || item.status }}</span>
+                <small v-if="item.statusNotes?.length" class="da-alert-meta da-alert-status">{{ item.statusNotes.join(' · ') }}</small>
+              </td>
+              <td>
+                <div class="da-alert-actions">
+                  <button v-if="item.status === 'OPEN'" class="da-button compact" :disabled="acting === item.id" @click="onAck(item.id)">{{ acting === item.id ? '处理中…' : '受理' }}</button>
+                  <button v-if="item.status !== 'CLOSED'" class="da-button compact ghost" :disabled="acting === item.id" @click="onClose(item.id)">关闭</button>
+                  <span v-if="item.status === 'CLOSED'" class="da-alert-closed">已闭环</span>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
       <PaginationBar label="预警列表分页" :page="page" :total="total" :page-size="pageSize" :loading="loading" @change="changePage" />
     </div>
   </section>
 </template>
-

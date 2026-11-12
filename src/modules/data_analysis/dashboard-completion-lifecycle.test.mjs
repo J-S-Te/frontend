@@ -22,7 +22,7 @@ function harness(loaders={}){
  useRoute:()=>route,useRouter:()=>({replace:async()=>{},push:()=>{}}),useUrlFilterState:()=>{},loginUsername:()=>'',
  createEmbedSessionActivity:()=>({reset:()=>{},destroy:()=>{}}),subscribeRelatedDataChanges:()=>()=>{},RELATED_DATA:{},
  getAuthMe:async()=>({tenant_id:'t',user_id:'u',permissions:['dashboard.contract.view','dashboard.project.view','dashboard.overview.view']}),
- isDashboardEmbedEnabled:()=>false,getContractDashboardSummary:empty,getProjectDashboardSummary:empty,getReportDashboardSummary:empty,getFinanceDashboardSummary:empty,
+ isDashboardEmbedEnabled:()=>false,getContractDashboardSummary:empty,getContractRegions:async()=>({available:false,items:[],basis:''}),getProjectDashboardSummary:empty,getReportDashboardSummary:empty,getFinanceDashboardSummary:empty,
  getContractDetails:empty,getProjectDetails:empty,getDashboardTrend:async()=>[],getAlertSummary:empty,
  formatDataAnalysisError:(error)=>error.message,
  window:{clearTimeout,setTimeout,location:{origin:'https://test.example'}},document:{addEventListener:()=>{},removeEventListener:()=>{}},...loaders}

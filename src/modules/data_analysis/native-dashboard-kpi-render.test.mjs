@@ -155,9 +155,10 @@ test('旧快照没有 report_stage_counts 时显示 — 与未采集，不把未
   assert.doesNotMatch(html, /报告整改阶段/)
 })
 
-test('经营总览的项目组同样展示整改中卡，口径与项目分区一致', async () => {
+test('经营总览按原型两行三卡展示，项目组仍含整改中卡且口径一致', async () => {
   const overview = await mount({ section: 'overview', projectSummary: collectedProject, canViewContract: false, tenantId: 't1', userId: 'u1' })
-  assert.equal(cardCount(overview.html), 5)
+  // 原型总览固定 6 张卡：签约金额/回款率/完成项目数/应收超期/待处理预警/在执项目数。
+  assert.equal(cardCount(overview.html), 6)
   assert.match(overview.html, /整改中项目/)
   const legacy = await mount({ section: 'overview', projectSummary: legacyProject, canViewContract: false, tenantId: 't1', userId: 'u1' })
   assert.match(legacy.html, /未采集/)
