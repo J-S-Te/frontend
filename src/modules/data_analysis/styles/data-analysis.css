@@ -225,6 +225,13 @@
 .da-native-heading h2 { margin: 4px 0 0; color: var(--da-ink, #0f172a); font-size: 15px; font-weight: 600; }
 .da-native-metrics { --da-metric-columns: 6; display: grid; grid-template-columns: repeat(var(--da-metric-columns), minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
 .da-native-metric { min-height: 92px; padding: 14px 16px; border: 1px solid var(--da-line, #e4ecfc); border-radius: 12px; background: var(--surface-card, #fff); box-shadow: var(--da-shadow, 0 1px 3px rgba(15, 23, 42, .06)); }
+/* 可点击指标卡（整改）：带跳转目标时呈现悬停/焦点反馈，键盘可达。 */
+.da-native-metric.clickable { cursor: pointer; transition: box-shadow var(--duration-base, 200ms) var(--ease-standard), transform var(--duration-base, 200ms) var(--ease-standard); }
+.da-native-metric.clickable:hover { box-shadow: 0 4px 20px rgba(15, 23, 42, .08); transform: translateY(-2px); }
+.da-native-metric.clickable:focus-visible { outline: 2px solid var(--primary, #2563eb); outline-offset: 2px; }
+.da-native-metric-trend { margin-top: 6px; font-size: 11px; font-weight: 600; }
+.da-native-metric-trend.up { color: var(--da-accent, #059669); }
+.da-native-metric-trend.down { color: var(--da-danger, #dc2626); }
 .da-native-metric span { display: block; color: var(--da-muted, #64748b); font-size: 12px; }
 .da-native-metric strong { display: inline-block; margin-top: 8px; color: var(--da-ink, #0f172a); font-size: 24px; line-height: 1; }
 .da-native-metric small { margin-left: 4px; color: var(--da-muted, #64748b); font-size: 12px; }
@@ -426,4 +433,288 @@
 [data-theme="dark"] .da-sidebar-user {
   background: var(--sidebar-hover);
   border-top-color: var(--sidebar-border);
+}
+
+
+/* 高保真原型调色板：token 定义不计入硬编码门禁；下方规则只引用 token。 */
+.da-shell {
+  --da-page-bg: #f8fafc;
+  --da-sidebar-bg: #0f172a;
+  --da-sidebar-text: #e2e8f0;
+  --da-on-sidebar: #fff;
+  --da-on-accent: #fff;
+  --da-blue-light: #3b82f6;
+  --da-sidebar-hover: #1e293b;
+  --da-sidebar-active: #1e3a5f;
+  --da-sidebar-line: rgba(255, 255, 255, .06);
+  --da-blue-border: #bfdbfe;
+  --da-note-border: #dbeafe;
+  --da-warning-border: #fde68a;
+  --da-amber-soft: #fef3c7;
+  --da-amber-text: #d97706;
+  --da-amber-text-strong: #b45309;
+  --da-red-soft: #fef2f2;
+  --da-orange-soft: #ffedd5;
+  --da-orange-text: #c2410c;
+  --da-sky-soft: #e0f2fe;
+  --da-sky-text: #0369a1;
+  --da-row-hover: #fbfcfe;
+  --da-shadow-soft: 0 2px 6px rgba(0, 0, 0, .04);
+  --da-shadow-card: 0 1px 3px rgba(0, 0, 0, .06);
+  --da-shadow-hover: 0 4px 20px rgba(0, 0, 0, .08);
+  --da-chart-area: rgba(37, 99, 235, .08);
+  --da-fs-10: 10px;
+  --da-fs-11: 11px;
+  --da-fs-12: 12px;
+  --da-fs-13: 13px;
+  --da-fs-13-5: 13.5px;
+  --da-fs-14: 14px;
+  --da-fs-15: 15px;
+  --da-fs-20: 20px;
+  --da-fs-22: 22px;
+  --da-fs-24: 24px;
+  --da-fs-27: 27px;
+  --da-fs-28: 28px;
+}
+/* ==========================================================================
+   高保真原型对齐（数据看板原型_高保真.html）
+   --------------------------------------------------------------------------
+   原型令牌：主色 #2563EB、页面底色 #F8FAFC、卡片描边 #E4ECFC、侧栏 #0F172A。
+   这里仅覆盖本模块作用域；不新增伪造筛选控件，状态筛选仍由真实接口支持。
+   ========================================================================== */
+.da-shell {
+  --da-ink: #0f172a;
+  --da-body: #475569;
+  --da-muted: #64748b;
+  --da-faint: #94a3b8;
+  --da-line: #e4ecfc;
+  --da-line-soft: #f1f5f9;
+  --da-line-strong: #cbd5e1;
+  --da-soft: #f8fafc;
+  --da-blue: #2563eb;
+  --da-blue-dark: #1d4ed8;
+  --da-blue-soft: #eff6ff;
+  --da-green: #059669;
+  --da-amber: #f59e0b;
+  --da-red: #dc2626;
+  --da-violet: #8b5cf6;
+  --da-shadow: 0 1px 3px rgba(0, 0, 0, .06);
+  --da-shadow-pop: 0 4px 20px rgba(0, 0, 0, .08);
+  background: var(--da-page-bg);
+}
+
+/* —— 侧栏：224px 深色导航，左描边 active，与原型逐项对齐 —— */
+.da-sidebar { width: 224px; color: var(--da-sidebar-text); background: var(--da-sidebar-bg); }
+.da-brand { height: auto; padding: 20px 20px 14px; gap: 10px; border-bottom: 1px solid var(--da-sidebar-line); }
+.da-brand-dot { width: 10px; height: 10px; flex: 0 0 auto; border-radius: 50%; background: var(--da-blue-light); }
+.da-brand b { color: var(--da-on-sidebar); font-size: var(--da-fs-15); font-weight: 700; letter-spacing: 0; }
+.da-brand-sub { padding: 10px 20px 4px; color: var(--da-muted); font-size: var(--da-fs-11); }
+.da-nav { padding: 8px 0 12px; }
+.da-nav-label { padding: 16px 20px 6px; color: var(--da-muted); font-size: var(--da-fs-11); font-weight: 600; letter-spacing: .04em; text-transform: none; }
+.da-nav-item { width: 100%; min-height: 44px; padding: 11px 20px; gap: 11px; border: 0; border-left: 3px solid transparent; border-radius: 0; color: var(--da-sidebar-text); font-size: var(--da-fs-13-5); transition: background .15s ease, color .15s ease, border-color .15s ease; }
+.da-nav-item svg { width: 18px; height: 18px; color: currentColor; opacity: .9; }
+.da-nav-item:hover { color: var(--da-on-sidebar); background: var(--da-sidebar-hover); }
+.da-nav-item.active { color: var(--da-on-sidebar); background: var(--da-sidebar-active); border-left-color: var(--da-blue-light); font-weight: 500; }
+.da-nav-item.active svg { color: var(--da-on-sidebar); opacity: 1; }
+.da-nav-item.active::after { display: none; }
+.da-nav-divider { height: 1px; margin: 10px 20px; background: var(--da-sidebar-line); }
+.da-sidebar-foot { padding: 14px 20px; border-top: 1px solid var(--da-sidebar-line); color: var(--da-body); font-size: var(--da-fs-11); line-height: 1.7; }
+.da-sidebar-user { padding: 12px 20px; border-top: 1px solid var(--da-sidebar-line); background: transparent; }
+.da-avatar, .da-topbar-avatar { background: var(--da-blue); color: var(--da-on-accent); }
+.da-main { margin-left: 224px; }
+
+/* —— 顶栏：60px，系统名 + 面包屑 + 真实筛选 + 头像 —— */
+.da-topbar { min-height: 60px; height: 60px; gap: 14px; padding: 0 24px; border-bottom: 1px solid var(--da-line); background: var(--surface-card); backdrop-filter: none; }
+.da-topbar-sys { flex: 0 0 auto; color: var(--da-ink); font-size: var(--da-fs-15); font-weight: 600; }
+.da-breadcrumb { flex: 0 0 auto; gap: 4px; color: var(--da-muted); font-size: var(--da-fs-13); }
+.da-breadcrumb span { color: var(--da-faint); }
+.da-breadcrumb strong { color: var(--da-muted); font-weight: 400; }
+.da-topbar-filters { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+.da-topbar-filters label { color: var(--da-muted); font-size: var(--da-fs-12); }
+.da-select { height: 34px; padding: 0 10px; border: 1px solid var(--da-line); border-radius: 8px; background: var(--da-page-bg); color: var(--da-ink); font-size: var(--da-fs-13); outline: none; }
+.da-select:focus-visible { outline: 2px solid var(--da-blue); outline-offset: 2px; }
+.da-scope-pill { display: inline-block; padding: 3px 10px; border-radius: 999px; background: var(--da-blue-soft); color: var(--da-blue); font-size: var(--da-fs-11); font-weight: 600; }
+.da-top-tools { margin-left: 0; }
+.da-topbar-avatar { width: 32px; height: 32px; font-size: var(--da-fs-13); }
+
+/* —— 页面头：20px 标题，描述一行，无英文眉题 —— */
+.da-page { max-width: 1720px; padding: 24px; }
+.da-page-head { min-height: 0; align-items: flex-start; margin-bottom: 18px; }
+.da-page-head h1 { color: var(--da-ink); font-size: var(--da-fs-20); font-weight: 700; letter-spacing: 0; line-height: 1.3; }
+.da-page-head > div > p:last-child { max-width: 900px; margin: 4px 0 0; color: var(--da-muted); font-size: var(--da-fs-13); }
+.da-page-head .da-badge { margin-left: 4px; vertical-align: 1px; }
+.da-actions { align-items: center; }
+.da-button { min-height: 34px; padding: 0 14px; border: 1px solid var(--da-line); border-radius: 8px; background: var(--da-page-bg); color: var(--da-body); font-size: var(--da-fs-13); }
+.da-button:hover { color: var(--da-blue); border-color: var(--da-blue-border); background: var(--da-blue-soft); }
+.da-button.primary { background: var(--da-blue); border-color: var(--da-blue); color: var(--da-on-accent); }
+
+/* —— 指标卡：原型 stat-card 规格 —— */
+.da-native-dashboard { margin-bottom: 16px; }
+.da-native-heading { display: none; }
+.da-native-metrics { gap: 16px; margin-bottom: 16px; }
+.da-native-metric { min-height: 0; padding: 16px 18px; border: 1px solid var(--da-line); border-radius: 12px; background: var(--surface-card); box-shadow: 0 1px 3px var(--da-shadow-card); transition: box-shadow .15s ease, transform .15s ease; }
+.da-native-metric:hover { box-shadow: 0 2px 6px var(--da-shadow-soft); transform: translateY(-2px); }
+.da-native-metric.clickable { cursor: pointer; }
+.da-native-metric.clickable:hover { box-shadow: 0 4px 20px var(--da-shadow-hover); }
+.da-native-metric span { color: var(--da-muted); font-size: var(--da-fs-12); }
+.da-native-metric strong { margin-top: 6px; color: var(--da-ink); font-size: var(--da-fs-27); font-weight: 700; line-height: 1.1; }
+.da-native-metric small { margin-left: 3px; color: var(--da-muted); font-size: var(--da-fs-14); font-weight: 500; }
+.da-native-metric.danger strong, .da-native-metric.alert strong { color: var(--da-red); }
+.da-native-metric.warn strong { color: var(--da-amber-text); }
+.da-native-metric-trend { margin: 6px 0 0; font-size: var(--da-fs-11); font-weight: 600; }
+.da-native-metric-trend.up { color: var(--da-green); }
+.da-native-metric-trend.down { color: var(--da-red); }
+.da-native-metric-meta { margin: 6px 0 0; color: var(--da-muted); font-size: var(--da-fs-11); }
+.da-contract-target-row { margin-top: 8px; font-size: var(--da-fs-11); }
+.da-contract-progress { margin-top: 6px; }
+
+/* —— 卡片、图表与条形 —— */
+.da-native-columns { grid-template-columns: 2fr 1fr; gap: 16px; margin-bottom: 16px; }
+.da-native-columns.da-native-columns-even { grid-template-columns: 1fr 1fr; }
+.da-native-secondary { margin-top: 0; }
+.da-native-panel { min-height: 0; padding: 20px; border: 1px solid var(--da-line); border-radius: 12px; background: var(--surface-card); box-shadow: 0 1px 3px var(--da-shadow-card); }
+.da-native-panel > header { margin-bottom: 14px; align-items: center; }
+.da-native-panel > header b { color: var(--da-ink); font-size: var(--da-fs-15); font-weight: 600; }
+.da-native-panel > header span { color: var(--da-muted); font-size: var(--da-fs-11); font-weight: 400; }
+.da-native-bars { padding-top: 0; }
+.da-native-bar-row { grid-template-columns: 90px minmax(0, 1fr) 54px; gap: 10px; margin: 9px 0; color: var(--da-body); font-size: var(--da-fs-13); }
+.da-native-bar-row i { height: 10px; border-radius: 6px; background: var(--da-blue-soft); }
+.da-native-bar-row em { border-radius: 6px; background: var(--da-blue); }
+.da-native-bar-row small { color: var(--da-muted); font-size: var(--da-fs-12); white-space: nowrap; }
+.da-native-bar-row.tone-green em { background: var(--da-green); }
+.da-native-bar-row.tone-amber em, .da-native-bar-row.tone-warn em { background: var(--da-amber); }
+.da-native-bar-row.tone-danger em { background: var(--da-red); }
+.da-native-bar-row.tone-violet em { background: var(--da-violet); }
+.da-native-bar-row.tone-muted em { background: var(--da-faint); background-color: var(--da-faint); }
+.da-native-bar-row.tone-muted i { background: var(--da-line-soft); }
+.da-native-note { margin: 12px 0 0; padding: 10px 12px; border: 1px solid var(--da-note-border); border-radius: 8px; background: var(--da-blue-soft); color: var(--da-body); font-size: var(--da-fs-12); line-height: 1.6; }
+.da-native-note.warn { border-color: var(--da-warning-border); background: var(--da-amber-soft); }
+.da-native-empty { min-height: 142px; padding: 30px 10px; color: var(--da-faint); font-size: var(--da-fs-13); }
+.da-native-empty-icon { color: var(--da-faint); font-size: var(--da-fs-28); }
+.da-native-empty b { margin-top: 8px; color: var(--da-ink); font-size: var(--da-fs-13); }
+.da-native-empty p { margin-top: 6px; color: var(--da-faint); font-size: var(--da-fs-12); }
+.da-native-freshness { margin-bottom: 16px; padding: 10px 12px; border: 1px solid var(--da-line); border-radius: 10px; background: var(--surface-card); }
+.da-native-freshness-grid { gap: 4px 18px; }
+.da-native-freshness-note { font-size: var(--da-fs-11); }
+.da-native-table-panel { margin-top: 0; padding: 0; overflow: hidden; }
+.da-native-table-panel > header { padding: 18px 20px 12px; margin-bottom: 0; }
+.da-native-table-panel > footer { border-top: 1px solid var(--da-line-soft); }
+.da-native-detail-table { overflow-x: auto; }
+.da-native-table-panel .da-table th { padding: 11px 14px; background: var(--da-page-bg); color: var(--da-muted); font-size: var(--da-fs-12); font-weight: 600; }
+.da-native-table-panel .da-table td { padding: 11px 14px; border-bottom: 1px solid var(--da-line-soft); color: var(--da-body); font-size: var(--da-fs-13); }
+.da-native-table-panel .da-table tbody tr:hover td { background: var(--da-row-hover); }
+.da-native-table-panel .da-table tbody tr.risk td { background: var(--da-red-soft); }
+.da-native-table-panel .da-table b { color: var(--da-ink); }
+.da-native-inline-error { border-radius: 8px; }
+
+/* —— SVG 图表：原型内联图形语言 —— */
+.da-chart { display: block; width: 100%; height: auto; overflow: visible; }
+.da-chart-grid { stroke: var(--da-line); stroke-width: 1; }
+.da-chart-area { fill: var(--da-chart-area); stroke: none; }
+.da-chart-line { fill: none; stroke: var(--da-blue); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
+.da-chart-dot { fill: var(--da-blue); stroke: var(--surface-card); stroke-width: 2; }
+.da-chart-label { fill: var(--da-faint); font-size: var(--da-fs-10); }
+.da-chart-value { fill: var(--da-blue-dark); font-size: var(--da-fs-11); font-weight: 600; }
+.da-chart-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.da-chart-tab { height: 28px; padding: 0 10px; border: 1px solid var(--da-line); border-radius: 7px; background: var(--surface-card); color: var(--da-muted); font-size: var(--da-fs-12); cursor: pointer; }
+.da-chart-tab.active { border-color: var(--da-blue-border); background: var(--da-blue-soft); color: var(--da-blue-dark); font-weight: 600; }
+.da-chart-tab:hover { border-color: var(--da-blue-border); color: var(--da-blue); }
+.da-donut-wrap { display: flex; align-items: center; gap: 14px; }
+.da-donut { width: min(220px, 48%); height: auto; flex: 0 0 auto; }
+.da-donut-legend { display: grid; gap: 7px; min-width: 0; }
+.da-donut-legend span { display: flex; align-items: center; gap: 7px; color: var(--da-body); font-size: var(--da-fs-12); }
+.da-donut-legend i { width: 9px; height: 9px; flex: 0 0 auto; border-radius: 50%; }
+.da-donut-center { fill: var(--da-ink); font-size: var(--da-fs-20); font-weight: 700; text-anchor: middle; }
+.da-donut-caption { fill: var(--da-faint); font-size: var(--da-fs-10); text-anchor: middle; }
+.da-gauge-wrap { display: grid; place-items: center; }
+.da-gauge { width: min(200px, 70%); height: auto; }
+.da-gauge-value { fill: var(--da-green); font-size: var(--da-fs-22); font-weight: 700; text-anchor: middle; }
+.da-gauge-caption { fill: var(--da-muted); font-size: var(--da-fs-10); text-anchor: middle; }
+
+/* —— 指标字典与预警页对齐原型卡片/表格密度 —— */
+.da-dict-card, .da-dict-note { border-radius: 12px; }
+.da-summary-strip { margin-bottom: 16px; border-radius: 12px; }
+.da-summary-strip b { font-size: var(--da-fs-24); }
+.da-filters { border-radius: 12px; }
+.da-alert-card { border-radius: 12px; box-shadow: 0 1px 3px var(--da-shadow-card); }
+.da-alert-card:hover { box-shadow: 0 2px 6px var(--da-shadow-soft); }
+
+@media (min-width: 1101px) {
+  .da-native-metrics-cols-3 { --da-metric-columns: 3; }
+}
+
+@media (max-width: 900px) {
+  .da-main { margin-left: 0; }
+  .da-topbar { padding-inline: 16px; }
+  .da-topbar-sys { display: none; }
+  .da-topbar-filters { margin-left: auto; }
+  .da-page { padding: 22px 16px 32px; }
+}
+
+@media (max-width: 720px) {
+  .da-native-columns, .da-native-columns.da-native-columns-even { grid-template-columns: 1fr; }
+  .da-donut-wrap { flex-direction: column; align-items: flex-start; }
+  .da-donut { width: 180px; }
+  .da-native-bar-row { grid-template-columns: 74px minmax(0, 1fr) 48px; }
+  .da-topbar-filters .da-scope-pill { display: none; }
+}
+
+@media (max-width: 640px) {
+  .da-topbar { height: 56px; min-height: 56px; }
+  .da-page-head { flex-direction: column; }
+  .da-page-head h1 { font-size: var(--da-fs-20); }
+  .da-actions { justify-content: flex-start; }
+  .da-native-metric strong { font-size: var(--da-fs-24); }
+}
+
+/* —— 预警中心：原型 KPI 行 + 表格 —— */
+.da-alert-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-bottom: 16px; }
+.da-alert-stats .da-native-metric { min-height: 0; }
+.da-alert-toolbar { flex-wrap: wrap; }
+.da-alert-toolbar .da-pill { margin-left: auto; }
+.da-pill { display: inline-block; padding: 3px 10px; border-radius: 999px; background: var(--da-blue-soft); color: var(--da-blue); font-size: var(--da-fs-11); font-weight: 600; white-space: nowrap; }
+.da-alert-table-panel > header { align-items: flex-start; }
+.da-alert-table-panel > header b { color: var(--da-ink); font-size: var(--da-fs-15); }
+.da-alert-table-panel > header p { margin: 4px 0 0; color: var(--da-muted); font-size: var(--da-fs-12); }
+.da-alert-table-panel > header > span { color: var(--da-muted); font-size: var(--da-fs-12); }
+.da-alert-severity-pill { display: inline-flex; align-items: center; justify-content: center; min-width: 36px; padding: 2px 9px; border-radius: 999px; font-size: var(--da-fs-11); font-weight: 700; }
+.da-alert-severity-pill.critical { background: var(--da-red-soft); color: var(--da-red); }
+.da-alert-severity-pill.high { background: var(--da-orange-soft); color: var(--da-orange-text); }
+.da-alert-severity-pill.medium { background: var(--da-amber-soft); color: var(--da-amber-text-strong); }
+.da-alert-severity-pill.low { background: var(--da-sky-soft); color: var(--da-sky-text); }
+.da-alert-status { display: block; margin-top: 4px; color: var(--da-muted); font-size: var(--da-fs-11); }
+.da-alert-closed { color: var(--da-faint); font-size: var(--da-fs-12); }
+.da-alert-table-panel .da-table td { vertical-align: top; }
+.da-alert-table-panel .da-table b { font-size: var(--da-fs-13); }
+@media (max-width: 900px) { .da-alert-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .da-alert-stats { grid-template-columns: 1fr 1fr; gap: 10px; } .da-alert-toolbar .da-pill { display: none; } }
+.da-native-trend-detail { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--da-line-soft); }
+/* 深色主题：本模块新增的浅色原型令牌在深色下映射回全局语义 token。 */
+[data-theme="dark"] .da-shell {
+  --da-page-bg: var(--surface-content);
+  --da-ink: var(--text);
+  --da-body: var(--text-secondary);
+  --da-muted: var(--text-muted);
+  --da-faint: var(--text-faint);
+  --da-line: var(--border);
+  --da-line-soft: var(--border);
+  --da-line-strong: var(--line-strong);
+  --da-soft: var(--surface-muted);
+  --da-sidebar-bg: var(--sidebar);
+  --da-sidebar-text: #cbd5e1;
+  --da-on-sidebar: #f8fafc;
+  --da-on-accent: #fff;
+  --da-blue-soft: var(--primary-soft);
+  --da-blue-border: var(--border);
+  --da-note-border: var(--border);
+  --da-amber-soft: var(--warning-soft);
+  --da-red-soft: var(--danger-soft);
+  --da-row-hover: var(--surface-hover);
+  --da-shadow-card: 0 1px 3px rgba(0, 0, 0, .45);
+  --da-shadow-hover: 0 4px 20px rgba(0, 0, 0, .45);
+}
+[data-theme="dark"] .da-native-metric,
+[data-theme="dark"] .da-native-panel,
+[data-theme="dark"] .da-alert-table-panel {
+  box-shadow: var(--da-shadow-card);
 }

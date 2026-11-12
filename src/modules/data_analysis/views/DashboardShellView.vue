@@ -10,7 +10,7 @@ import ConsoleIcon from "@/modules/platform/shared/components/ConsoleIcon.vue"
 import ErrorState from "@/modules/platform/shared/components/ErrorState.vue"
 import LoadingState from "@/modules/platform/shared/components/LoadingState.vue"
 import { closeSubsystemTabOrFallback } from "@/modules/shared/utils/returnToPortal"
-import { isDashboardEmbedEnabled, getAuthMe, getEmbedToken, getContractDashboardSummary, getProjectDashboardSummary, getReportDashboardSummary, getFinanceDashboardSummary, getContractDetails, getProjectDetails, getDashboardTrend, getAlertSummary } from "../api/dataAnalysis"
+import { isDashboardEmbedEnabled, getAuthMe, getEmbedToken, getContractDashboardSummary, getContractRegions, getProjectDashboardSummary, getReportDashboardSummary, getFinanceDashboardSummary, getContractDetails, getProjectDetails, getDashboardTrend, getAlertSummary } from "../api/dataAnalysis"
 import AlertsCenterView from "./AlertsCenterView.vue"
 import DictionaryView from "./DictionaryView.vue"
 import AdminSourcesView from "./AdminSourcesView.vue"
@@ -58,31 +58,29 @@ const EMBEDDED_DASHBOARD_SECTIONS = DASHBOARD_SECTIONS.filter((code) => !['contr
 const KNOWN_SECTIONS = [...DASHBOARD_SECTIONS, "alerts", "dictionary", "admin/sources", "admin/rules"]
 
 const navGroups = [
-  { label: "经营看板", items: [
-    { key: "overview", label: "经营总览", icon: "dashboard", meta: ["合同与项目经营指标及趋势", "OQ1"], permission: DASHBOARD_PERMISSIONS.overview },
-    { key: "contract", label: "合同看板", icon: "account", meta: ["普通合同签约与执行统计", "OQ2"], permission: DASHBOARD_PERMISSIONS.contract },
-    { key: "project", label: "项目看板", icon: "organization", meta: ["项目规模、交付状态与报告阶段", "OQ3"], permission: DASHBOARD_PERMISSIONS.project },
-    { key: "report", label: "报告看板", icon: "audit", meta: ["报告编制、复核与签发效率", "OQ4"], permission: DASHBOARD_PERMISSIONS.report },
-    { key: "finance", label: "财务看板", icon: "settings", meta: ["应收、净核销回款与账龄分析", "OQ5"], permission: DASHBOARD_PERMISSIONS.finance },
+  { label: "", items: [
+    { key: "overview", label: "经营总览", icon: "dashboard", permission: DASHBOARD_PERMISSIONS.overview },
+    { key: "contract", label: "合同看板", icon: "account", permission: DASHBOARD_PERMISSIONS.contract },
+    { key: "project", label: "项目执行看板", icon: "organization", permission: DASHBOARD_PERMISSIONS.project },
+    { key: "report", label: "报告与质量看板", icon: "audit", permission: DASHBOARD_PERMISSIONS.report },
+    { key: "finance", label: "财务与经营看板", icon: "settings", permission: DASHBOARD_PERMISSIONS.finance },
+    { key: "dictionary", label: "指标字典", icon: "info", permission: "dictionary.view" },
+    { key: "alerts", label: "预警中心", icon: "bell", permission: "alert.view" },
   ] },
-  { label: "预警与口径", items: [
-    { key: "alerts", label: "预警中心", icon: "bell", meta: ["指标预警的受理、跟踪与闭环", "P-08"], permission: "alert.view" },
-    { key: "dictionary", label: "指标字典", icon: "info", meta: ["指标口径与版本的统一查阅", "P-07"], permission: "dictionary.view" },
-  ] },
-  { label: "管理配置", items: [
-    { key: "admin/sources", label: "数据源与同步", icon: "save", meta: ["各子系统数据源接入与同步状态", "P-09"], permission: "aggregation.manage" },
-    { key: "admin/rules", label: "预警规则配置", icon: "shield", meta: ["预警触发条件与阈值参数", "P-10"], permission: "alert.manage" },
+  { label: "系统配置", items: [
+    { key: "admin/sources", label: "数据源与同步", icon: "save", permission: "aggregation.manage" },
+    { key: "admin/rules", label: "预警规则配置", icon: "shield", permission: "alert.manage" },
   ] },
 ]
 
 const pageMeta = {
-  overview: ["经营总览", "合同与项目经营指标及趋势"],
-  contract: ["合同看板", "普通合同签约与执行统计"],
-  project: ["项目看板", "项目规模、交付状态与报告阶段"],
-  report: ["报告看板", "报告编制、复核与签发效率"],
-  finance: ["财务看板", "应收、净核销回款与账龄分析"],
-  alerts: ["预警中心", "指标预警的受理、跟踪与闭环"],
-  dictionary: ["指标字典", "指标口径与版本的统一查阅"],
+  overview: ["经营总览", "高管落地页 · 一眼看全局"],
+  contract: ["合同看板", "面向老板 / 销售总监 / 财务经理 · 口径见指标字典 1.1–1.5"],
+  project: ["项目执行看板", "面向技术总监 / 项目经理 · 口径见指标字典 2.1–2.6"],
+  report: ["报告与质量看板", "面向技术总监 / 客服·销售 · 口径见指标字典 3.1–3.4"],
+  finance: ["财务与经营看板", "面向老板 / 财务经理 · 口径见指标字典 4.1–4.7"],
+  alerts: ["预警中心", "规则预警汇总 · 独立页汇总，看板内高亮为辅"],
+  dictionary: ["指标字典", "统一口径唯一依据 · 指标口径与版本管理"],
   "admin/sources": ["数据源与同步", "各子系统数据源接入与同步状态"],
   "admin/rules": ["预警规则配置", "预警触发条件与阈值参数"],
 }
@@ -130,8 +128,10 @@ const metricFactsPanel = ref(null)
 let detailsRequestVersion = 0
 let meRequestVersion = 0
 let disposed = false
-const overviewSummary = ref({ contract: null, project: null })
+const overviewSummary = ref({ contract: null, project: null, finance: null })
 const dashboardTrend = ref([])
+const contractRegions = ref({ available: false, items: [], basis: "" })
+const regionsError = ref("")
 const alertSummary = ref(null)
 const summaryLoading = ref(false)
 const summaryError = ref("")
@@ -306,12 +306,15 @@ async function loadSummary(code) {
     summaryLoading.value = true
     summaryError.value = ""
     try {
-      const [contractResult, projectResult, trendResult, alertResult] = await Promise.allSettled([
+      const financeVisible = canViewDashboard("finance")
+      const [contractResult, projectResult, trendResult, alertResult, financeResult] = await Promise.allSettled([
         canViewDashboard("contract") ? getContractDashboardSummary() : Promise.resolve(null),
         canViewDashboard("project") ? getProjectDashboardSummary() : Promise.resolve(null),
         canViewDashboard("overview") ? getDashboardTrend() : Promise.resolve([]),
         // 预警摘要是总览中的可选模块；没有查看权限时静默跳过，不能把权限缺失误报成总览加载失败。
         hasPermission("alert.view") ? getAlertSummary() : Promise.resolve(null),
+        // 回款率与超期应收来自财务来源快照；无财务权限时静默跳过，不把权限缺失算作总览失败。
+        financeVisible ? getFinanceDashboardSummary() : Promise.resolve(null),
       ])
       if (requestVersion !== summaryRequestVersion || section.value !== code) return
       const failedParts = [
@@ -323,13 +326,14 @@ async function loadSummary(code) {
       overviewSummary.value = {
         contract: contractResult.status === "fulfilled" ? contractResult.value : null,
         project: projectResult.status === "fulfilled" ? projectResult.value : null,
+        finance: financeResult.status === "fulfilled" ? financeResult.value : null,
       }
       dashboardTrend.value = trendResult.status === "fulfilled" ? (Array.isArray(trendResult.value) ? trendResult.value : trendResult.value?.items || []) : []
       alertSummary.value = alertResult.status === "fulfilled" ? alertResult.value : null
       summaryError.value = failedParts.length ? `${failedParts.join('、')}加载失败，页面仅展示已成功返回的数据。` : ""
     } catch (err) {
       if (requestVersion !== summaryRequestVersion) return
-      overviewSummary.value = { contract: null, project: null }
+      overviewSummary.value = { contract: null, project: null, finance: null }
       summaryError.value = formatDataAnalysisError(err, { fallback: "摘要加载失败，请稍后刷新。" })
     } finally {
       if (requestVersion === summaryRequestVersion) summaryLoading.value = false
@@ -340,7 +344,7 @@ async function loadSummary(code) {
     summaryLoading.value = false
     summaryError.value = ""
     dashboardSummary.value = null
-    overviewSummary.value = { contract: null, project: null }
+    overviewSummary.value = { contract: null, project: null, finance: null }
     return
   }
   // 旧报告/财务快照只有租户合计；较窄范围只读取下方按维度过滤的新事实统计。
@@ -355,11 +359,34 @@ async function loadSummary(code) {
   summaryError.value = ""
   detailError.value = ""
   try {
-    const loaders = { contract: getContractDashboardSummary, project: getProjectDashboardSummary, report: getReportDashboardSummary, finance: getFinanceDashboardSummary }
+    if (code === 'contract') {
+      // 合同页同时加载趋势与区域分布；两者是独立可选来源，失败不回滚已成功的合同摘要。
+      const [summaryResult, regionsResult, trendResult] = await Promise.allSettled([
+        getContractDashboardSummary(),
+        getContractRegions(),
+        // 趋势接口沿用 overview 权限；只有合同权限时跳过请求，避免把 403 误报成趋势加载失败。
+        canViewDashboard("overview") ? getDashboardTrend() : Promise.resolve([]),
+      ])
+      if (requestVersion !== summaryRequestVersion || section.value !== code) return
+      if (summaryResult.status === 'rejected') throw summaryResult.reason
+      dashboardSummary.value = summaryResult.value
+      contractRegions.value = regionsResult.status === 'fulfilled'
+        ? regionsResult.value
+        : { available: false, items: [], basis: "区域分布加载失败；合同摘要不受影响。" }
+      regionsError.value = regionsResult.status === 'rejected'
+        ? formatDataAnalysisError(regionsResult.reason, { fallback: "区域分布加载失败，请稍后刷新。" })
+        : ""
+      dashboardTrend.value = trendResult.status === 'fulfilled'
+        ? (Array.isArray(trendResult.value) ? trendResult.value : trendResult.value?.items || [])
+        : []
+      await loadDetails(code, 1)
+      return
+    }
+    const loaders = { project: getProjectDashboardSummary, report: getReportDashboardSummary, finance: getFinanceDashboardSummary }
     const result = await loaders[code]()
     if (requestVersion !== summaryRequestVersion || section.value !== code) return
     dashboardSummary.value = result
-    if (code === 'contract' || code === 'project') await loadDetails(code, 1)
+    if (code === 'project') await loadDetails(code, 1)
 
   } catch (err) {
     if (requestVersion !== summaryRequestVersion) return
@@ -379,8 +406,10 @@ function invalidateDashboardRequests() {
   iframeRequestVersion += 1
   clearEmbedRenewal()
   dashboardSummary.value = null
-  overviewSummary.value = { contract: null, project: null }
+  overviewSummary.value = { contract: null, project: null, finance: null }
   dashboardTrend.value = []
+  contractRegions.value = { available: false, items: [], basis: "" }
+  regionsError.value = ""
   alertSummary.value = null
   contractDetails.value = { items: [], total: 0, page: 1, page_size: 20 }
   projectDetails.value = { available: false, items: [], total: 0, page: 1, page_size: 20 }
@@ -535,22 +564,22 @@ onBeforeUnmount(() => {
   <div class="console-page da-shell">
     <aside id="da-sidebar" class="da-sidebar" :class="{ open: mobileMenuOpen }">
       <div class="da-brand">
-        <span class="da-brand-mark"><ConsoleIcon name="logo" /></span>
-        <span><b>数据看板与统计分析</b><small>DATA INTELLIGENCE</small></span>
+        <span class="da-brand-dot" aria-hidden="true"></span>
+        <b>数据看板子系统</b>
         <button class="da-icon-button da-mobile-close" aria-label="关闭菜单" @click="mobileMenuOpen = false"><ConsoleIcon name="close" /></button>
       </div>
+      <div class="da-brand-sub">经营数据视图 · 一期</div>
       <nav class="da-nav" aria-label="数据看板导航" data-first-run-anchor="subsystem-nav">
-        <div v-for="group in navGroups" :key="group.label" class="da-nav-group">
-          <div class="da-nav-label">{{ group.label }}</div>
+        <template v-for="group in navGroups" :key="group.label || 'primary'">
+          <div v-if="group.label && group.items.some((item) => !item.permission || hasPermission(item.permission))" class="da-nav-label">{{ group.label }}</div>
           <button v-for="item in group.items" :key="item.key" v-show="!item.permission || hasPermission(item.permission)" class="da-nav-item" :class="{ active: section === item.key }" :aria-current="section === item.key ? 'page' : undefined" @click="navigate(item.key)">
             <ConsoleIcon :name="item.icon" /><span>{{ item.label }}</span>
           </button>
-        </div>
-        <div class="da-nav-group">
-          <div class="da-nav-label">平台能力</div>
-          <button class="da-nav-item" type="button" data-first-run-anchor="subsystem-portal" @click="returnToUnifiedPortal"><ConsoleIcon name="dashboard" /><span>返回子系统门户</span></button>
-        </div>
+        </template>
+        <div class="da-nav-divider"></div>
+        <button class="da-nav-item" type="button" data-first-run-anchor="subsystem-portal" @click="returnToUnifiedPortal"><ConsoleIcon name="dashboard" /><span>返回子系统门户</span></button>
       </nav>
+      <div class="da-sidebar-foot">复用基础平台 · Metabase 嵌入<br />角色：{{ currentUserRole }}</div>
       <div class="da-sidebar-user subsystem-sidebar-user">
         <span class="da-avatar">{{ currentUserInitial }}</span>
         <span class="da-sidebar-user-copy"><strong :title="currentUserName">{{ currentUserName }}</strong><small :title="currentUserRole">{{ currentUserRole }}</small></span>
@@ -562,16 +591,23 @@ onBeforeUnmount(() => {
     <main id="main-content" class="da-main" tabindex="-1">
       <header class="da-topbar">
         <button ref="menuButton" class="da-icon-button da-menu-button" aria-label="打开菜单" :aria-expanded="mobileMenuOpen ? 'true' : 'false'" aria-controls="da-sidebar" @click="mobileMenuOpen = true"><ConsoleIcon name="menu" /></button>
-        <div class="da-breadcrumb"><span>数据看板与统计分析</span><ConsoleIcon name="chevron" /><strong>{{ currentMeta[0] }}</strong></div>
+        <div class="da-topbar-sys">数据看板与统计分析</div>
+        <div class="da-breadcrumb"><span>/</span><strong>{{ currentMeta[0] }}</strong></div>
+        <div class="da-topbar-filters">
+          <template v-if="statusOptions.length">
+            <label for="da-status-filter">状态</label>
+            <select id="da-status-filter" v-model="statusFilter" class="da-select">
+              <option v-for="option in statusOptions" :key="option" :value="option">{{ option }}</option>
+            </select>
+          </template>
+          <span v-if="scopeModeLabel" class="da-scope-pill">数据范围：{{ scopeModeLabel }}</span>
+        </div>
         <div class="da-top-tools"><span class="da-topbar-avatar">{{ currentUserInitial }}</span></div>
       </header>
 
       <div class="da-page">
         <section class="da-page-head" data-first-run-anchor="subsystem-title">
-          <div><p class="da-eyebrow">DATA INTELLIGENCE</p><h1>{{ currentMeta[0] }}</h1><p>{{ currentMeta[1] }} · {{ dataScopeLabel }} <span v-if="scopeModeLabel" class="da-badge neutral">数据范围：{{ scopeModeLabel }}</span></p></div>
-          <div v-if="statusOptions.length" class="da-page-filters" aria-label="看板筛选条件">
-            <label>状态分布局部筛选<select v-model="statusFilter"><option v-for="option in statusOptions" :key="option" :value="option">{{ option }}</option></select></label>
-          </div>
+          <div><h1>{{ currentMeta[0] }}</h1><p>{{ currentMeta[1] }} · {{ dataScopeLabel }} <span v-if="scopeModeLabel" class="da-badge neutral">数据范围：{{ scopeModeLabel }}</span></p></div>
           <div class="da-actions">
             <button v-if="DASHBOARD_SECTIONS.includes(section)" class="da-button" :disabled="iframeLoading || summaryLoading" @click="refreshCurrentDashboard"><ConsoleIcon name="reset" />{{ iframeLoading || summaryLoading ? '加载中' : '刷新看板' }}</button>
           </div>
@@ -589,18 +625,22 @@ onBeforeUnmount(() => {
             :section="section"
             :contract-summary="section === 'overview' ? overviewSummary.contract : section === 'contract' ? dashboardSummary : null"
             :project-summary="section === 'overview' ? overviewSummary.project : section === 'project' ? dashboardSummary : null"
-            :business-summary="['report', 'finance'].includes(section) ? dashboardSummary : null"
+            :business-summary="section === 'overview' ? overviewSummary.finance : ['report', 'finance'].includes(section) ? dashboardSummary : null"
+            :contract-regions="contractRegions"
+            :regions-error="regionsError"
             :contract-details="contractDetails"
             :project-details="projectDetails"
             :detail-loading="detailLoading"
             :detail-error="detailError"
             @detail-page="loadDetails(section, $event)"
+            @navigate="navigate"
             :can-view-contract="canViewDashboard('contract')"
             :can-view-project="canViewDashboard('project')"
-    :status-filter="statusFilter"
+            :can-view-finance="canViewDashboard('finance')"
+            :status-filter="statusFilter"
             :tenant-id="me?.tenant_id"
             :user-id="me?.user_id"
-            :trend="section === 'overview' ? dashboardTrend : []"
+            :trend="section === 'overview' || section === 'contract' ? dashboardTrend : []"
             :alert-summary="section === 'overview' ? alertSummary : null"
           />
           <ContractImportHistoryPanel ref="historyPanel" :key="`${me?.tenant_id}/${me?.user_id}`" v-if="section === 'contract' && canViewDashboard('contract')" />

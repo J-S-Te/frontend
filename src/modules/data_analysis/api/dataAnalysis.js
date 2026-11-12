@@ -60,6 +60,16 @@ function validStandardPreview(data) {
       && Number.isFinite(row.collection_rate) && row.collection_rate >= 0 && row.collection_rate <= 100)))
 }
 
+// validContractRegions 校验区域分布可用性信封；不可用时 items 仍必须为数组。
+// 参数：data 为 /dashboard/contract-regions 响应。
+// 返回值：字段类型与金额、数量均合法时为 true。
+function validContractRegions(data) {
+  if (!isRecord(data) || typeof data.available !== 'boolean' || typeof data.basis !== 'string') return false
+  if (!Array.isArray(data.items)) return false
+  return data.items.every((row) => isRecord(row) && typeof row.region === 'string'
+    && /^[A-Z]{3}$/.test(row.currency) && validCount(row.amount_minor) && validCount(row.contract_count))
+}
+
 // validCount 校验可展示的非负整数，避免畸形值被格式化为零。
 // 参数：value 为来源计数或金额。
 // 返回值：安全非负整数时为 true。
@@ -113,11 +123,12 @@ function validDashboardSummary(data, kind) {
 // 参数：data 为分页响应，project 为项目列表标记。
 // 返回值：分页和记录数值类型合法时为 true。
 function validDashboardDetails(data, project) {
-  if (!isRecord(data) || !Array.isArray(data.items) || !validCount(data.total)
+  const items = data?.items === null ? [] : data?.items
+  if (!isRecord(data) || !Array.isArray(items) || !validCount(data.total)
     || !Number.isSafeInteger(data.page) || data.page < 1 || !Number.isSafeInteger(data.page_size)
-    || data.page_size < 1 || data.page_size > 100 || data.items.length > data.page_size) return false
+    || data.page_size < 1 || data.page_size > 100 || items.length > data.page_size) return false
   if (project && typeof data.available !== 'boolean') return false
-  return data.items.every((row) => isRecord(row) && typeof row.status === 'string'
+  return items.every((row) => isRecord(row) && typeof row.status === 'string'
     && (project ? typeof row.project_id === 'string' && typeof row.name === 'string'
       && typeof row.manager === 'string' && typeof row.owner_org_id === 'string'
       && typeof row.report_stage === 'string' && typeof row.risk === 'boolean'
@@ -133,8 +144,6 @@ function validDataEnvelope(body, path, method) {
   if (!isRecord(body) || !Object.hasOwn(body, 'data')) return false
   const data = body.data
   const route = path.split('?')[0]
-  if (route === '/dashboard/metrics') return validMetricFactsSummary(data)
-    && data.section === new URLSearchParams(path.split('?')[1] || '').get('section')
   if (route === '/admin/standard-finance/publish') return validStandardPublication(data, false)
   if (route === '/admin/standard-finance/status') {
     return isRecord(data) && ['standard', 'integration'].includes(data.selected_source)
@@ -145,6 +154,8 @@ function validDataEnvelope(body, path, method) {
     return validDashboardSummary(data, route.split('/').at(-1))
   }
   if (route === '/dashboard/contracts' || route === '/dashboard/projects') return validDashboardDetails(data, route.endsWith('/projects'))
+  if (route === '/dashboard/metrics') return validMetricFactsSummary(data) && data.section === new URLSearchParams(path.split('?')[1] || '').get('section')
+  if (route === '/dashboard/contract-regions') return validContractRegions(data)
   if (route === '/dashboard/trend') return Array.isArray(data) && data.every((row) => isRecord(row)
     && /^\d{4}-(0[1-9]|1[0-2])$/.test(row.period) && validCount(row.contract_count)
     && validCount(row.project_count) && validCurrencyTotals(row.currency_totals || []))
@@ -153,7 +164,7 @@ function validDataEnvelope(body, path, method) {
     && isRecord(data.by_severity) && Object.values(data.by_severity).every(validCount)
   if (route === '/auth/me') return isRecord(data) && !!data.user_id && !!data.tenant_id && Array.isArray(data.permissions)
   const listRoute = ['/alerts', '/alert-rules', '/admin/sources', '/dashboard/trend'].includes(route) || /^\/dictionary\/metrics\/[^/]+\/versions$/.test(route)
-  if (method === 'GET' && listRoute) return Array.isArray(data)
+  if (method === 'GET' && listRoute) return Array.isArray(data) || (isRecord(data) && Array.isArray(data.items))
   if (method === 'PUT' && route === '/alert-rules') return Array.isArray(data) && data.length > 0
   if (method === 'DELETE') return isRecord(data) && data.deleted === true
   return isRecord(data) && Object.keys(data).length > 0
@@ -341,26 +352,33 @@ export function getContractDashboardSummary() { return request('/dashboard/contr
 export function getProjectDashboardSummary() { return request('/dashboard/project') }
 
 export function getReportDashboardSummary() { return request('/dashboard/report') }
-export function getFinanceDashboardSummary() { return request('/dashboard/finance') }
-
 // getMetricFacts 查询当前分区的真实新增业务指标，范围由服务端主体决定。
-// 参数：section为看板分区，period为可选北京业务月份。
-// 返回值：经过完整契约校验的摘要，缺来源或错误原样明确呈现。
 export function getMetricFacts(section, period = '') {
   const query = new URLSearchParams({ section })
   if (period) query.set('period', period)
   return request(`/dashboard/metrics?${query}`)
 }
+export function getFinanceDashboardSummary() { return request('/dashboard/finance') }
+
+// getContractRegions 查询签约事实的区域×币种聚合（字典指标 1.3）。
+// 参数：无；权限和租户范围由服务端会话确定。
+// 返回值：{ available, items, basis }；非全租户范围会明确不可用。
+export function getContractRegions() { return request('/dashboard/contract-regions') }
 
 /** getContractDetails 查询合同下钻分页明细。 */
-export function getContractDetails(params = {}) { const query = new URLSearchParams(params).toString(); return request(`/dashboard/contracts${query ? `?${query}` : ''}`) }
+export async function getContractDetails(params = {}) {
+  const query = new URLSearchParams(params).toString()
+  const value = await request(`/dashboard/contracts${query ? `?${query}` : ''}`)
+  return { ...value, items: Array.isArray(value.items) ? value.items : [] }
+}
 
 // getProjectDetails 查询当前可信范围内成功发布的项目明细。
 // 参数：params 为页码与页大小，权限范围由服务端确定。
 // 返回值：分页响应；无首次成功时 available 为 false。
-export function getProjectDetails(params = {}) {
+export async function getProjectDetails(params = {}) {
   const query = new URLSearchParams(params).toString()
-  return request(`/dashboard/projects${query ? `?${query}` : ''}`)
+  const value = await request(`/dashboard/projects${query ? `?${query}` : ''}`)
+  return { ...value, items: Array.isArray(value.items) ? value.items : [] }
 }
 
 /** getDashboardTrend 查询合同/项目月度趋势。 */
