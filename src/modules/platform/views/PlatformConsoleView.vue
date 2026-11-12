@@ -76,6 +76,8 @@ import { formatUserError } from '../../shared/utils/userError.js'
 import { formatBusinessDateTime } from '@/modules/shared/utils/businessTime.js'
 import '@/modules/platform/styles/console.css'
 import '@/modules/platform/styles/settings-showcase.css'
+// 平台控制台视觉层：只作用于 .console-page--platform，避免影响共用 console.css 的其他业务外壳。
+import '@/modules/platform/styles/platform-console.css'
 
 const route = useRoute()
 const router = useRouter()
@@ -110,6 +112,8 @@ const auditTotal = ref(0)
 // 批次 3：平台侧摄取健康度（口径：平台已接收事件，不含子系统本地 Outbox 积压）。
 const auditHealth = ref(null)
 const auditHealthError = ref('')
+// 高级筛选（操作类型/结果/风险/精确 ID）默认收起，主筛选保持一眼可读。
+const auditAdvancedOpen = ref(false)
 const auditLoading = ref(false)
 const auditError = ref('')
 const auditExporting = ref(false)
@@ -259,6 +263,16 @@ const settingsTabs = [
   },
 ]
 
+// 设置导航分组：只影响左侧导航的展示顺序与分组标题，不改变 settingsTabs 的既有顺序、
+// 权限判定与搜索过滤结果（filteredSettingsTabs 仍是唯一过滤来源）。
+const SETTINGS_NAV_GROUPS = Object.freeze([
+  { key: 'identity', label: '身份与权限', sections: ['iam', 'personnel'] },
+  { key: 'platform', label: '平台与接入', sections: ['licenses', 'applications', 'base', 'access'] },
+  { key: 'security', label: '安全与通知', sections: ['security', 'notify'] },
+  { key: 'runtime', label: '运行支撑', sections: ['config', 'dict', 'jobs'] },
+])
+const SETTINGS_NAV_GROUPED_KEYS = new Set(SETTINGS_NAV_GROUPS.flatMap((group) => group.sections))
+
 const settingsSectionKeys = new Set(settingsTabs.map((tab) => tab.key))
 // 当前账号对各 tab 都有权限的可见集合 + "一个都看不到"的判断。
 // 没有权限的 tab 不会渲染按钮，且 lastSettingsSection 不会落到无权限 tab 上。
@@ -296,6 +310,22 @@ const filteredSettingsTabs = computed(() => {
     const haystack = [tab.label, tab.description, ...(tab.capabilities || [])].join(' ').toLowerCase()
     return haystack.includes(query)
   })
+})
+// filteredSettingsTabGroups 按导航分组渲染当前过滤结果。
+// 新增设置分区但忘记登记分组时，不会被静默隐藏：未登记的 key 落到末尾“其他”分组。
+const filteredSettingsTabGroups = computed(() => {
+  const groups = SETTINGS_NAV_GROUPS
+    .map((group) => ({
+      key: group.key,
+      label: group.label,
+      tabs: group.sections
+        .map((key) => filteredSettingsTabs.value.find((tab) => tab.key === key))
+        .filter(Boolean),
+    }))
+    .filter((group) => group.tabs.length > 0)
+  const others = filteredSettingsTabs.value.filter((tab) => !SETTINGS_NAV_GROUPED_KEYS.has(tab.key))
+  if (others.length) groups.push({ key: 'other', label: '其他', tabs: others })
+  return groups
 })
 const activeSettingsTab = computed({
   get() {
@@ -364,6 +394,20 @@ function formatAuditTime(value) {
 }
 
 const filteredAuditRecords = computed(() => auditRecords.value)
+
+// 高级筛选已生效条件数（只用于按钮角标，不参与查询语义）。
+const activeAuditAdvancedCount = computed(() => [
+  auditType.value,
+  auditResult.value,
+  auditRisk.value,
+  auditEventID.value,
+  auditActorID.value,
+  auditCorrelationID.value,
+  auditLoginIP.value,
+  auditRequestID.value,
+  auditResourceID.value,
+  auditClientIP.value,
+].filter((value) => String(value || '').trim()).length)
 
 const auditTotalPages = computed(() => Math.max(1, Math.ceil(auditTotal.value / auditPageSize.value)))
 // 审计列表的三态闸门：读取失败必须渲染可重试的错误态，绝不能退化成「未找到符合条件的审计事件」，
@@ -714,6 +758,7 @@ function resetAuditFilters() {
   auditLoginIP.value = ''
   auditTimeRange.value = '7d'
   auditPage.value = 1
+  auditAdvancedOpen.value = false
   loadEnvironments('')
   loadAuditEvents()
 }
@@ -750,6 +795,8 @@ function filterRelatedAudit(field, value) {
   if (!trimmed) return
   if (field === 'requestId') auditRequestID.value = trimmed
   if (field === 'correlationId') auditCorrelationID.value = trimmed
+  // 从详情点进来的精确条件在高级筛选里，展开让用户看到当前过滤条件。
+  auditAdvancedOpen.value = true
   auditPage.value = 1
   closeAuditDetail()
   loadAuditEvents()
@@ -985,6 +1032,7 @@ onBeforeUnmount(() => {
 <template>
   <AppShell
     v-model:menu-open="mobileMenuOpen"
+    page-class="console-page--platform"
     brand-name="基础能力平台"
     brand-subtitle="Basic Platform"
     nav-label="平台导航"
@@ -1035,39 +1083,66 @@ onBeforeUnmount(() => {
           <h1>{{ viewMeta.title }}</h1>
           <p v-if="viewMeta.description">{{ viewMeta.description }}</p>
         </div>
-        <button v-if="currentView === 'audit' && canExportAudit" class="console-button secondary" type="button" @click="exportAuditRecords"><ConsoleIcon name="export" />导出日志</button>
       </div>
     </template>
 
     <section v-if="currentView === 'audit' && canViewAudit" class="audit-view" aria-label="审计日志列表">
-      <div class="audit-readonly-note"><ConsoleIcon name="info" /><span>审计事件与运行日志分离存储；本页查询 <code>audit_event</code> 及其变更摘要。运行日志、Trace、Metric 与告警由受限运维端点采集，当前控制台不提供不存在的跳转入口。</span></div>
-      <div v-if="auditHealth" class="audit-health-card" data-testid="audit-health-card">
-        <strong>审计摄取健康（平台侧）</strong>
-        <span>近 24 小时接收 {{ auditHealth.recent_events ?? 0 }} 条 / 累计 {{ auditHealth.total_events ?? 0 }} 条</span>
-        <span>来源未采集 {{ auditHealth.unknown_provenance ?? 0 }} 条</span>
-        <span v-if="auditHealth.last_received_at">最后接收 {{ formatAuditTime(auditHealth.last_received_at) }}</span>
-        <span v-if="auditHealth.oldest_unknown_at">最老未采集 {{ formatAuditTime(auditHealth.oldest_unknown_at) }}</span>
-        <small>口径：平台已接收的审计事件；子系统本地 Outbox 积压不在本卡片内。</small>
-      </div>
+      <!-- 摄取健康度：从一行文本改为四个指标块，口径说明与数值分开，便于一眼核对。 -->
+      <section v-if="auditHealth" class="audit-health" data-testid="audit-health-card" aria-label="审计摄取健康度">
+        <header class="audit-health-head">
+          <div>
+            <strong>审计摄取健康（平台侧）</strong>
+            <small>口径：平台已接收的审计事件；子系统本地 Outbox 积压不在本卡片内。</small>
+          </div>
+          <span class="console-badge audit-health-badge">只读</span>
+        </header>
+        <dl class="audit-health-grid">
+          <div class="audit-health-tile"><dt>近 24 小时接收</dt><dd>{{ auditHealth.recent_events ?? 0 }}<small>条</small></dd></div>
+          <div class="audit-health-tile"><dt>累计接收</dt><dd>{{ auditHealth.total_events ?? 0 }}<small>条</small></dd></div>
+          <div class="audit-health-tile"><dt>来源未采集</dt><dd>{{ auditHealth.unknown_provenance ?? 0 }}<small>条</small></dd></div>
+          <div class="audit-health-tile is-text"><dt>最后接收</dt><dd>{{ auditHealth.last_received_at ? formatAuditTime(auditHealth.last_received_at) : '—' }}</dd></div>
+        </dl>
+        <p v-if="auditHealth.oldest_unknown_at" class="audit-health-foot">最老未采集：{{ formatAuditTime(auditHealth.oldest_unknown_at) }}</p>
+      </section>
       <div v-else-if="auditHealthError" class="audit-readonly-note"><ConsoleIcon name="info" /><span>审计摄取健康度暂不可用：{{ auditHealthError }}</span></div>
-      <div class="console-filter-bar audit-filter-bar">
-        <label class="console-search-field">
-          <ConsoleIcon name="search" />
-          <input v-model="auditKeyword" type="search" placeholder="操作人 / 操作 / 资源 / 请求路径 / Request ID / Trace ID…"  maxlength="100"/>
-        </label>
-        <label class="console-select-field"><select v-model="auditApplication" aria-label="应用"><option value="">全部应用</option><option v-for="app in applications" :key="app.application_id" :value="app.code">{{ app.name || app.code }}</option></select></label>
-        <label class="console-select-field"><select v-model="auditEnvironment" :disabled="!auditApplication" aria-label="环境"><option value="">全部环境</option><option v-for="env in environments" :key="env.environment_id" :value="env.environment_code || env.environment">{{ env.environment_code || env.environment }}</option></select></label>
-        <label class="console-select-field"><select v-model="auditType" aria-label="操作类型"><option value="">全部操作</option><option v-for="option in AUDIT_TYPE_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
-        <label class="console-select-field"><select v-model="auditRisk" aria-label="风险等级"><option value="">全部风险</option><option v-for="option in AUDIT_RISK_OPTIONS" :key="option" :value="option">{{ option }}</option></select></label>
-        <label class="console-select-field"><select v-model="auditResult" aria-label="操作结果"><option value="">全部结果</option><option v-for="option in AUDIT_RESULT_OPTIONS" :key="option" :value="option">{{ option }}</option></select></label>
-        <label class="console-select-field"><select v-model="auditTimeRange" aria-label="时间范围"><option value="24h">最近 24 小时</option><option value="7d">最近 7 天</option><option value="30d">最近 30 天</option></select></label>
-        <label class="console-search-field audit-advanced-field"><input v-model="auditEventID" type="search" placeholder="事件 ID" maxlength="64" aria-label="按事件 ID 精确检索"/></label>
-        <label class="console-search-field audit-advanced-field"><input v-model="auditActorID" type="search" placeholder="操作者 ID" maxlength="64" aria-label="按稳定操作者 ID 精确检索"/></label>
-        <label class="console-search-field audit-advanced-field"><input v-model="auditCorrelationID" type="search" placeholder="关联 ID" maxlength="64" aria-label="按业务关联 ID 精确检索"/></label>
-        <label class="console-search-field audit-advanced-field"><input v-model="auditLoginIP" type="search" placeholder="登录 IP" maxlength="45" aria-label="按登录 IP 精确检索"/></label>
-        <button class="console-button primary small" type="button" :disabled="auditLoading" @click="applyAuditFilters">查询</button>
-        <button class="console-button ghost small" type="button" :disabled="auditLoading" @click="resetAuditFilters"><ConsoleIcon name="reset" />重置</button>
-      </div>
+
+      <!-- 筛选：主筛选常驻，精确检索收进「高级筛选」，避免 11 个控件同时铺开。 -->
+      <section class="audit-filter-card" aria-label="审计筛选">
+        <div class="audit-filter-primary">
+          <label class="console-search-field audit-filter-keyword">
+            <ConsoleIcon name="search" />
+            <input v-model="auditKeyword" type="search" placeholder="操作人 / 操作 / 资源 / 请求路径 / Request ID / Trace ID…"  maxlength="100"/>
+          </label>
+          <label class="console-select-field"><select v-model="auditApplication" aria-label="应用"><option value="">全部应用</option><option v-for="app in applications" :key="app.application_id" :value="app.code">{{ app.name || app.code }}</option></select></label>
+          <label class="console-select-field"><select v-model="auditEnvironment" :disabled="!auditApplication" aria-label="环境"><option value="">全部环境</option><option v-for="env in environments" :key="env.environment_id" :value="env.environment_code || env.environment">{{ env.environment_code || env.environment }}</option></select></label>
+          <label class="console-select-field"><select v-model="auditTimeRange" aria-label="时间范围"><option value="24h">最近 24 小时</option><option value="7d">最近 7 天</option><option value="30d">最近 30 天</option></select></label>
+          <div class="audit-filter-actions">
+            <button class="console-button primary" type="button" :disabled="auditLoading" @click="applyAuditFilters">查询</button>
+            <button class="console-button ghost" type="button" :disabled="auditLoading" @click="resetAuditFilters"><ConsoleIcon name="reset" />重置</button>
+            <button
+              class="console-button ghost audit-advanced-toggle"
+              type="button"
+              :class="{ active: auditAdvancedOpen }"
+              :aria-expanded="auditAdvancedOpen ? 'true' : 'false'"
+              aria-controls="audit-advanced-filters"
+              @click="auditAdvancedOpen = !auditAdvancedOpen"
+            >
+              <ConsoleIcon name="filter" />高级筛选
+              <span v-if="activeAuditAdvancedCount" class="audit-advanced-count">{{ activeAuditAdvancedCount }}</span>
+              <ConsoleIcon name="chevron" class="audit-advanced-chevron" />
+            </button>
+          </div>
+        </div>
+        <div v-show="auditAdvancedOpen" id="audit-advanced-filters" class="audit-filter-advanced">
+          <label class="console-select-field"><select v-model="auditType" aria-label="操作类型"><option value="">全部操作</option><option v-for="option in AUDIT_TYPE_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
+          <label class="console-select-field"><select v-model="auditResult" aria-label="操作结果"><option value="">全部结果</option><option v-for="option in AUDIT_RESULT_OPTIONS" :key="option" :value="option">{{ option }}</option></select></label>
+          <label class="console-select-field"><select v-model="auditRisk" aria-label="风险等级"><option value="">全部风险</option><option v-for="option in AUDIT_RISK_OPTIONS" :key="option" :value="option">{{ option }}</option></select></label>
+          <label class="console-search-field audit-advanced-field"><input v-model="auditEventID" type="search" placeholder="事件 ID" maxlength="64" aria-label="按事件 ID 精确检索"/></label>
+          <label class="console-search-field audit-advanced-field"><input v-model="auditActorID" type="search" placeholder="操作者 ID" maxlength="64" aria-label="按稳定操作者 ID 精确检索"/></label>
+          <label class="console-search-field audit-advanced-field"><input v-model="auditCorrelationID" type="search" placeholder="关联 ID" maxlength="64" aria-label="按业务关联 ID 精确检索"/></label>
+          <label class="console-search-field audit-advanced-field"><input v-model="auditLoginIP" type="search" placeholder="登录 IP" maxlength="45" aria-label="按登录 IP 精确检索"/></label>
+        </div>
+      </section>
 
       <!-- 应用下拉只有「全部应用」有两种可能：读到目录后确实只有一项，或者读取失败。
            这里把失败单独说出来并给出就地重试（重发同一个 loadApplications），
@@ -1077,9 +1152,9 @@ onBeforeUnmount(() => {
         <button class="console-button ghost small" type="button" @click="loadApplications"><ConsoleIcon name="reset" />重试</button>
       </p>
 
-      <div class="audit-batch-bar">
-        <span>审计事件为只读记录，不支持页面直接删除或归档。</span>
-        <div><button v-if="canExportAudit" class="console-button secondary small" type="button" :disabled="auditExporting" @click="exportAuditRecords"><ConsoleIcon name="export" />导出筛选结果</button></div>
+      <div class="audit-toolbar">
+        <p class="audit-toolbar-note"><ConsoleIcon name="info" /><span>审计事件为只读记录，不支持页面直接删除或归档。数据来源与运行日志分离，本页查询 <code>audit_event</code> 及其变更摘要。</span></p>
+        <div class="audit-toolbar-actions"><button v-if="canExportAudit" class="console-button secondary" type="button" :disabled="auditExporting" @click="exportAuditRecords"><ConsoleIcon name="export" />导出筛选结果</button></div>
       </div>
 
       <div v-if="auditExportJob" class="audit-readonly-note audit-export-status"><ConsoleIcon name="export" /><span>导出任务 <code>{{ auditExportJob.job_id }}</code>：{{ auditExportJob.status }}<template v-if="auditExportJob.error_message"> · {{ formatUserError({ message: auditExportJob.error_message, code: auditExportJob.error_code }) }}</template></span><button v-if="auditExportJob.status !== 'SUCCEEDED'" class="console-button ghost small" type="button" @click="refreshAuditExportJob">刷新状态</button><button v-else class="console-button primary small" type="button" :disabled="auditDownloading" @click="downloadAuditExport">{{ auditDownloading ? '下载中…' : '下载导出文件' }}</button></div>
@@ -1118,114 +1193,123 @@ onBeforeUnmount(() => {
     </section>
 
     <section v-else-if="currentView === 'settings' && canOpenSettings" class="settings-view" aria-label="系统设置">
-      <header class="settings-showcase-head">
-        <div>
-          <span class="settings-showcase-kicker"><ConsoleIcon name="settings" />平台配置中心</span>
-          <h1>系统设置</h1>
-          <p>集中维护平台基础资料、身份组织、统一登录、安全策略与运行支撑能力。</p>
-        </div>
-      </header>
-
-      <div v-if="!hasNoVisibleSettingsTab" class="settings-tab-toolbar">
-        <label class="settings-tab-search">
-          <ConsoleIcon name="search" />
-          <input
-            v-model="settingsTabKeyword"
-            type="search"
-            placeholder="搜索设置模块（按名称 / 描述 / 功能）"
-            aria-label="搜索设置模块"
-           maxlength="100"/>
-          <button
-            v-if="settingsTabKeyword"
-            type="button"
-            class="settings-tab-search-clear"
-            aria-label="清空搜索"
-            @click="settingsTabKeyword = ''"
-          >×</button>
-        </label>
-        <span class="settings-tab-count">{{ filteredSettingsTabs.length }} / {{ visibleSettingsTabs.length }}</span>
-      </div>
-      <nav v-if="!hasNoVisibleSettingsTab" class="settings-tab-bar" role="tablist" aria-label="系统设置分类">
-        <button
-          v-for="tab in filteredSettingsTabs"
-          :key="tab.key"
-          class="settings-tab"
-          :class="{ active: activeSettingsTab === tab.key }"
-          type="button"
-          role="tab"
-          :aria-selected="activeSettingsTab === tab.key"
-          :title="tab.description"
-          @click="activeSettingsTab = tab.key"
-        >
-          <ConsoleIcon :name="tab.icon" />
-          <span>{{ tab.label }}</span>
-        </button>
-        <span v-if="filteredSettingsTabs.length === 0" class="settings-tab-empty">没有匹配“{{ settingsTabKeyword }}”的设置模块</span>
-      </nav>
-      <div v-else class="settings-empty" role="status">
-        <span class="settings-empty-icon" aria-hidden="true"><ConsoleIcon name="shield" /></span>
-        <h3>当前账号没有可访问的设置模块</h3>
-        <p>请联系平台管理员授予对应模块的读取或管理权限；IAM 不要求额外授予 <code>platform:user:read</code>。</p>
-      </div>
-
-      <!-- 页面标题为 <h1>。除“身份、组织与授权”外的 10 个设置模块自身首个标题就是 <h2>，
-           大纲已经连续，再补隐藏 <h2> 会让读屏标题列表出现两条同名同级的条目。
-           只有 IAM 模块内部从 <h3> 起（“按归属、职责和例外分层管理”），此处在它的面板前
-           补一层隐藏的 <h2> 承载 tab 名称，让大纲保持 h1 → h2 → h3，且不改变任何可见标题的
-           级别与布局。条件必须与下面 IamSettingsModule 的渲染条件一致。 -->
-      <h2 v-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'iam'" class="shared-visually-hidden">{{ activeSettingsTabLabel }}</h2>
-
-      <div v-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'base'" class="console-card settings-card">
-        <div class="console-card-body">
-          <h2>平台基础信息</h2>
-          <p class="console-card-hint">用于定义基础能力平台的展示名称。</p>
-          <p v-if="settingsLoading" class="console-card-hint">正在读取平台设置…</p>
-          <p v-else-if="settingsError" class="login-target-module__error" role="alert">{{ settingsError }}</p>
-          <div v-if="canReadPlatformSettings" class="console-form-grid">
-            <label class="console-form-item"><span>平台名称</span><input v-model="settings.organizationName" :disabled="settingsLoading || !canUpdatePlatformSettings"  maxlength="128"/></label>
-            <label class="console-form-item"><span>平台简称</span><input v-model="settings.organizationAlias" :disabled="settingsLoading || !canUpdatePlatformSettings"  maxlength="64"/></label>
+      <!-- 设置导航：宽屏为左侧分组导航（≥1800px），窄屏回退为页头下方吸顶的横向分区条。
+           分组只影响展示顺序与分组标题；可见性、权限与 filteredSettingsTabs 的既有语义不变。 -->
+      <aside class="settings-rail">
+        <header class="settings-showcase-head">
+          <div>
+            <span class="settings-showcase-kicker"><ConsoleIcon name="settings" />平台配置中心</span>
+            <h1>系统设置</h1>
+            <p>集中维护平台基础资料、身份组织、统一登录、安全策略与运行支撑能力。</p>
           </div>
-          <div v-if="canReadPlatformSettings" class="console-form-actions"><button v-if="canUpdatePlatformSettings" class="console-button primary" type="button" :disabled="settingsSaving" @click="saveSettings"><ConsoleIcon name="save" />{{ settingsSaving ? '保存中…' : '保存设置' }}</button><button class="console-button ghost" type="button" :disabled="settingsLoading" @click="resetSettings">重新读取</button></div>
+        </header>
+
+        <div v-if="!hasNoVisibleSettingsTab" class="settings-tab-toolbar">
+          <label class="settings-tab-search">
+            <ConsoleIcon name="search" />
+            <input
+              v-model="settingsTabKeyword"
+              type="search"
+              placeholder="搜索设置模块"
+              aria-label="搜索设置模块"
+             maxlength="100"/>
+            <button
+              v-if="settingsTabKeyword"
+              type="button"
+              class="settings-tab-search-clear"
+              aria-label="清空搜索"
+              @click="settingsTabKeyword = ''"
+            >×</button>
+          </label>
+          <span class="settings-tab-count">{{ filteredSettingsTabs.length }} / {{ visibleSettingsTabs.length }}</span>
         </div>
-      </div>
-
-      <PublicAccessSettingsModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'access'" @toast="showToast" />
-
-      <IamSettingsModule
-    :initial-panel="iamInitialPanel" v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'iam'" :refresh-key="iamRefreshKey" @toast="showToast" @employee-onboarding="openEmployeeOnboarding" @personnel-change="openPersonnelChangeForUser" />
-
-      <PersonnelChangeCenter v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'personnel'" :prefill-user-id="pendingPersonnelChangeUserId" @toast="showToast" @employee-onboarding="openEmployeeOnboarding" @prefill-consumed="pendingPersonnelChangeUserId = ''" />
-
-      <NotificationCenterModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'notify'" @toast="showToast" />
-
-      <LoginSecurityModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'security'" @toast="showToast" />
-
-
-      <DictionaryManagementModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'dict'" @toast="showToast" />
-
-      <ConfigurationCenterModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'config'" @toast="showToast" />
-
-      <FileTaskOperationsModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'jobs'" @toast="showToast" />
-      <CommercialLicenseView v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'licenses'" @toast="showToast" />
-
-      <template v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'applications'">
-        <SubsystemOnboardingModule
-          :can-onboard="canOnboardSubsystem"
-          @toast="showToast"
-          @completed="loadApplications"
-        >
-          <template #header-actions>
-            <SubsystemAccessWizard
-              :can-preview="canReadApplications"
-              :can-submit="canSubmitSubsystemAccess"
-              :applications="subsystemAccessApplications"
-              :environments="subsystemAccessEnvironments"
-              @toast="showToast"
-              @completed="loadApplications"
-            />
+        <nav v-if="!hasNoVisibleSettingsTab" class="settings-tab-bar" role="tablist" aria-label="系统设置分类">
+          <template v-for="group in filteredSettingsTabGroups" :key="group.key">
+            <p class="settings-nav-group" role="presentation">{{ group.label }}</p>
+            <button
+              v-for="tab in group.tabs"
+              :key="tab.key"
+              class="settings-tab"
+              :class="{ active: activeSettingsTab === tab.key }"
+              type="button"
+              role="tab"
+              :aria-selected="activeSettingsTab === tab.key"
+              :title="tab.description"
+              @click="activeSettingsTab = tab.key"
+            >
+              <span class="settings-tab-icon" aria-hidden="true"><ConsoleIcon :name="tab.icon" /></span>
+              <span class="settings-tab-label">{{ tab.label }}</span>
+            </button>
           </template>
-        </SubsystemOnboardingModule>
-      </template>
+          <span v-if="filteredSettingsTabs.length === 0" class="settings-tab-empty">没有匹配“{{ settingsTabKeyword }}”的设置模块</span>
+        </nav>
+        <div v-else class="settings-empty" role="status">
+          <span class="settings-empty-icon" aria-hidden="true"><ConsoleIcon name="shield" /></span>
+          <h3>当前账号没有可访问的设置模块</h3>
+          <p>请联系平台管理员授予对应模块的读取或管理权限；IAM 不要求额外授予 <code>platform:user:read</code>。</p>
+        </div>
+      </aside>
+
+      <div class="settings-content">
+        <!-- 页面标题为 <h1>。除“身份、组织与授权”外的 10 个设置模块自身首个标题就是 <h2>，
+             大纲已经连续，再补隐藏 <h2> 会让读屏标题列表出现两条同名同级的条目。
+             只有 IAM 模块内部从 <h3> 起（“按归属、职责和例外分层管理”），此处在它的面板前
+             补一层隐藏的 <h2> 承载 tab 名称，让大纲保持 h1 → h2 → h3，且不改变任何可见标题的
+             级别与布局。条件必须与下面 IamSettingsModule 的渲染条件一致。 -->
+        <h2 v-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'iam'" class="shared-visually-hidden">{{ activeSettingsTabLabel }}</h2>
+
+        <div v-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'base'" class="console-card settings-card">
+          <div class="console-card-body">
+            <h2>平台基础信息</h2>
+            <p class="console-card-hint">用于定义基础能力平台的展示名称。</p>
+            <p v-if="settingsLoading" class="console-card-hint">正在读取平台设置…</p>
+            <p v-else-if="settingsError" class="login-target-module__error" role="alert">{{ settingsError }}</p>
+            <div v-if="canReadPlatformSettings" class="console-form-grid">
+              <label class="console-form-item"><span>平台名称</span><input v-model="settings.organizationName" :disabled="settingsLoading || !canUpdatePlatformSettings"  maxlength="128"/></label>
+              <label class="console-form-item"><span>平台简称</span><input v-model="settings.organizationAlias" :disabled="settingsLoading || !canUpdatePlatformSettings"  maxlength="64"/></label>
+            </div>
+            <div v-if="canReadPlatformSettings" class="console-form-actions"><button v-if="canUpdatePlatformSettings" class="console-button primary" type="button" :disabled="settingsSaving" @click="saveSettings"><ConsoleIcon name="save" />{{ settingsSaving ? '保存中…' : '保存设置' }}</button><button class="console-button ghost" type="button" :disabled="settingsLoading" @click="resetSettings">重新读取</button></div>
+          </div>
+        </div>
+
+        <PublicAccessSettingsModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'access'" @toast="showToast" />
+
+        <IamSettingsModule
+      :initial-panel="iamInitialPanel" v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'iam'" :refresh-key="iamRefreshKey" @toast="showToast" @employee-onboarding="openEmployeeOnboarding" @personnel-change="openPersonnelChangeForUser" />
+
+        <PersonnelChangeCenter v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'personnel'" :prefill-user-id="pendingPersonnelChangeUserId" @toast="showToast" @employee-onboarding="openEmployeeOnboarding" @prefill-consumed="pendingPersonnelChangeUserId = ''" />
+
+        <NotificationCenterModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'notify'" @toast="showToast" />
+
+        <LoginSecurityModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'security'" @toast="showToast" />
+
+
+        <DictionaryManagementModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'dict'" @toast="showToast" />
+
+        <ConfigurationCenterModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'config'" @toast="showToast" />
+
+        <FileTaskOperationsModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'jobs'" @toast="showToast" />
+        <CommercialLicenseView v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'licenses'" @toast="showToast" />
+
+        <template v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'applications'">
+          <SubsystemOnboardingModule
+            :can-onboard="canOnboardSubsystem"
+            @toast="showToast"
+            @completed="loadApplications"
+          >
+            <template #header-actions>
+              <SubsystemAccessWizard
+                :can-preview="canReadApplications"
+                :can-submit="canSubmitSubsystemAccess"
+                :applications="subsystemAccessApplications"
+                :environments="subsystemAccessEnvironments"
+                @toast="showToast"
+                @completed="loadApplications"
+              />
+            </template>
+          </SubsystemOnboardingModule>
+        </template>
+      </div>
     </section>
 
     <template #overlay>

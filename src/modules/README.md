@@ -68,3 +68,21 @@
 ## 发行模块选择（VITE_ENABLED_MODULES）
 
 `src/modules/registry/compiledModules.js` 是构建期生成的模块入口，`build/moduleSelection.mjs` 的 Vite 插件在构建时按 `VITE_ENABLED_MODULES` 在内存中替换它：`all`（默认全量）、`none`（仅平台）、或逗号分隔的模块编码（`platform` 始终保留）。未选模块的路由不注册、视图不参与编译；未选模块代码若被引用，构建直接失败。产物附带 `frontend-modules.json` 记录本次启用与编译清单。CI 通过 `npm run verify:modules` 用真实构建验证 `none`、单模块与两模块组合。业务模块不得反向引用 `platform` 内部实现；公共 UI/工具以 `src/modules/shared/` 为权威来源（ConsoleIcon 已收敛，platform 侧仅保留兼容薄壳）。
+
+## 基础平台控制台布局（2026-11-12）
+
+系统设置与审计日志共用 `platform/views/PlatformConsoleView.vue` 和 `platform/styles/console.css`。本轮视觉层新增独立样式表
+`platform/styles/platform-console.css`，全部规则挂在 `.console-page--platform` 下，只影响平台控制台；结算、客户与商机、客户门户等
+共用 `console.css` 的业务外壳不受影响。
+
+- **设置导航**：11 个设置分区按“身份与权限 / 平台与接入 / 安全与通知 / 运行支撑”分组。≥1800px 为左侧分组导航；<1800px 回退为
+  页头下方的吸顶横向分区条（单行铺满 1440，窄屏横向滚动）。分组只决定展示顺序与分组标题，权限、搜索过滤与路由参数仍来自
+  `filteredSettingsTabs` 与 `settingsTabs`；新增分区未登记分组时会落到“其他”，不会从导航消失。
+- **标题层级**：每个设置页仍只有一个页面级 `<h1>系统设置</h1>`，具体分区标题由各模块自身的 `<h2>` 承载；应用目录详情、登录目标等
+  嵌套标题降级到与模块标题同级，避免“卡片内标题比页面标题更大”。
+- **审计日志**：摄取健康度改为四个指标块；操作类型/结果/风险与精确 ID 收进默认收起的“高级筛选”，主筛选保持一行。
+- **响应式**：设置导航与内容布局按视口区间切换，不使用 `@container` 的布局包含；`container-type` 会让模块内 `position: fixed` 的弹窗
+  以内容区而不是视口定位。窄屏布局以真实视口媒体查询实现，弹窗定位上下文保持不变。
+- **证据入口**：`.ai/qa/platform-console-restyle-20261112/`（隔离夹具截图、导航/抽屉/断点检查与验证记录）。夹具命令为
+  `node src/test/ui-harness/platform-console-page-browser.mjs`（自动拉起临时 Vite，不连接业务 API）。真实登录后的浏览器验收
+  仍需在可用测试环境另行执行，夹具截图不等同业务验收。

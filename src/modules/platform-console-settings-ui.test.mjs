@@ -75,3 +75,46 @@ test('设置页签在内容滚动时吸顶，且面包屑显示当前页签', as
   assert.match(source, /`系统设置 · \$\{activeSettingsTabLabel\.value\}`/)
   assert.match(source, /crumb: settingsCrumb/, '设置页面包屑必须带当前页签')
 })
+
+
+// 2026-11-12 设置导航改造：11 个设置分区必须全部落入分组导航。
+// 新增分区但忘记登记 SETTINGS_NAV_GROUPS 时，导航会少一项而内容仍可路由访问，
+// 用户只能靠搜索找到它；这里把它锁成可失败的回归。
+test('设置分区全部分组登记，新增分区不会从左侧导航消失', () => {
+  const tabsSource = source.slice(source.indexOf('const settingsTabs = ['), source.indexOf('// 设置导航分组'))
+  const tabKeys = [...tabsSource.matchAll(/\bkey: '([a-z]+)', label:/g)].map((match) => match[1])
+  assert.equal(tabKeys.length, 11, '设置分区数量变化时需要同步更新本断言')
+
+  const groupsSource = source.slice(source.indexOf('const SETTINGS_NAV_GROUPS'), source.indexOf('const SETTINGS_NAV_GROUPED_KEYS'))
+  const groupedKeys = [...groupsSource.matchAll(/sections: \[([^\]]+)\]/g)]
+    .flatMap((match) => [...match[1].matchAll(/'([a-z]+)'/g)].map((item) => item[1]))
+
+  assert.deepEqual([...new Set(tabKeys)].sort(), [...new Set(groupedKeys)].sort(), '每个设置分区必须且只能登记一次')
+  // 未登记分区仍会落到“其他”分组，不能静默丢项。
+  assert.match(source, /const others = filteredSettingsTabs\.value\.filter/)
+  assert.match(source, /groups\.push\(\{ key: 'other', label: '其他', tabs: others \}\)/)
+})
+
+test('设置导航按分组渲染，并在窄屏回退为吸顶横向分区条', async () => {
+  assert.match(source, /v-for="group in filteredSettingsTabGroups"/)
+  assert.match(source, /const filteredSettingsTabGroups = computed\(\(\) => \{/)
+  const settingsCss = await readFile(new URL('./platform/styles/settings-showcase.css', import.meta.url), 'utf8')
+  assert.match(settingsCss, /@media \(max-width: 1799px\)/, '窄屏必须回退为整宽横向分区条')
+  assert.match(settingsCss, /\.settings-rail \{\s*display: contents;/, '回退时导航必须脱离卡片、按网格排布')
+})
+
+test('审计高级筛选默认收起，并提供可访问的展开开关', () => {
+  assert.match(source, /const auditAdvancedOpen = ref\(false\)/)
+  assert.match(source, /:aria-expanded="auditAdvancedOpen \? 'true' : 'false'"/)
+  assert.match(source, /aria-controls="audit-advanced-filters"/)
+  assert.match(source, /v-show="auditAdvancedOpen" id="audit-advanced-filters"/)
+  assert.match(source, /activeAuditAdvancedCount/)
+})
+
+test('审计摄取健康度保留稳定锚点与四个指标块', () => {
+  assert.match(source, /data-testid="audit-health-card"/)
+  assert.match(source, /class="audit-health-grid"/)
+  for (const label of ['近 24 小时接收', '累计接收', '来源未采集', '最后接收']) {
+    assert.match(source, new RegExp(label), `健康度缺少 ${label}`)
+  }
+})
