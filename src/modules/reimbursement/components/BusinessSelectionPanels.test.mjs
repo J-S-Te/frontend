@@ -9,6 +9,8 @@ import * as classification from '../invoiceClassification.js'
 import * as fields from '../claimFields.js'
 import * as recovery from '../recovery.js'
 import * as cities from '../cities.js'
+
+await cities.ensureCityCatalog()
 import * as optionPicker from '../optionPicker.js'
 import { formatBusinessDateTime } from '../../shared/utils/businessTime.js'
 import { PaginationBarStub } from '../../../test/helpers/paginationStub.mjs'

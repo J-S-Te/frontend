@@ -222,6 +222,9 @@ export default defineConfig(({ mode }) => {
             // 合同 Excel 导入的读取器与解压依赖按需加载，不随首屏 vendor 下发。
             if (id.includes('/node_modules/read-excel-file/')) return 'excel'
             if (id.includes('/node_modules/fflate/')) return 'excel'
+            // 行政区划数据只在报销城市选择器使用（约 116 KiB），单独成块后不再随
+            // 共享 vendor 在登录、门户和所有子系统首屏下载。
+            if (id.includes('/node_modules/@vant/area-data/')) return 'area-data'
             if (id.includes('/node_modules/')) return 'vendor'
             return undefined
           },

@@ -5,6 +5,9 @@ import { parse, compileScript } from '@vue/compiler-sfc'
 import * as Vue from 'vue'
 import * as cities from '../cities.js'
 
+// 城市目录在真实交互中按需加载；组件测试先预载，保证同步渲染断言稳定。
+await cities.ensureCityCatalog()
+
 // 用途：编译真实城市及行程组件，保留模板和事件绑定。
 // 参数：name为当前目录的组件文件名，extras为真实子组件依赖。
 // 返回值：可由Vue渲染的组件定义。
