@@ -123,11 +123,12 @@ function validDashboardSummary(data, kind) {
 // 参数：data 为分页响应，project 为项目列表标记。
 // 返回值：分页和记录数值类型合法时为 true。
 function validDashboardDetails(data, project) {
-  if (!isRecord(data) || !Array.isArray(data.items) || !validCount(data.total)
+  const items = data?.items === null ? [] : data?.items
+  if (!isRecord(data) || !Array.isArray(items) || !validCount(data.total)
     || !Number.isSafeInteger(data.page) || data.page < 1 || !Number.isSafeInteger(data.page_size)
-    || data.page_size < 1 || data.page_size > 100 || data.items.length > data.page_size) return false
+    || data.page_size < 1 || data.page_size > 100 || items.length > data.page_size) return false
   if (project && typeof data.available !== 'boolean') return false
-  return data.items.every((row) => isRecord(row) && typeof row.status === 'string'
+  return items.every((row) => isRecord(row) && typeof row.status === 'string'
     && (project ? typeof row.project_id === 'string' && typeof row.name === 'string'
       && typeof row.manager === 'string' && typeof row.owner_org_id === 'string'
       && typeof row.report_stage === 'string' && typeof row.risk === 'boolean'
@@ -163,7 +164,7 @@ function validDataEnvelope(body, path, method) {
     && isRecord(data.by_severity) && Object.values(data.by_severity).every(validCount)
   if (route === '/auth/me') return isRecord(data) && !!data.user_id && !!data.tenant_id && Array.isArray(data.permissions)
   const listRoute = ['/alerts', '/alert-rules', '/admin/sources', '/dashboard/trend'].includes(route) || /^\/dictionary\/metrics\/[^/]+\/versions$/.test(route)
-  if (method === 'GET' && listRoute) return Array.isArray(data)
+  if (method === 'GET' && listRoute) return Array.isArray(data) || (isRecord(data) && Array.isArray(data.items))
   if (method === 'PUT' && route === '/alert-rules') return Array.isArray(data) && data.length > 0
   if (method === 'DELETE') return isRecord(data) && data.deleted === true
   return isRecord(data) && Object.keys(data).length > 0
@@ -365,14 +366,19 @@ export function getFinanceDashboardSummary() { return request('/dashboard/financ
 export function getContractRegions() { return request('/dashboard/contract-regions') }
 
 /** getContractDetails 查询合同下钻分页明细。 */
-export function getContractDetails(params = {}) { const query = new URLSearchParams(params).toString(); return request(`/dashboard/contracts${query ? `?${query}` : ''}`) }
+export async function getContractDetails(params = {}) {
+  const query = new URLSearchParams(params).toString()
+  const value = await request(`/dashboard/contracts${query ? `?${query}` : ''}`)
+  return { ...value, items: Array.isArray(value.items) ? value.items : [] }
+}
 
 // getProjectDetails 查询当前可信范围内成功发布的项目明细。
 // 参数：params 为页码与页大小，权限范围由服务端确定。
 // 返回值：分页响应；无首次成功时 available 为 false。
-export function getProjectDetails(params = {}) {
+export async function getProjectDetails(params = {}) {
   const query = new URLSearchParams(params).toString()
-  return request(`/dashboard/projects${query ? `?${query}` : ''}`)
+  const value = await request(`/dashboard/projects${query ? `?${query}` : ''}`)
+  return { ...value, items: Array.isArray(value.items) ? value.items : [] }
 }
 
 /** getDashboardTrend 查询合同/项目月度趋势。 */
