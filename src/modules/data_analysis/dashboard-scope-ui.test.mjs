@@ -41,6 +41,8 @@ async function renderSummary(section, summaryError, overrides = {}) {
       DASHBOARD_SECTIONS: sections, DASHBOARD_CODES: Object.fromEntries(sections.map(value => [value, value])),
       EMBEDDED_DASHBOARD_SECTIONS: [], dashboardEmbedEnabled: true, iframeLoading: false,
       overviewSummary: {}, dashboardSummary: null, contractDetails: {}, dashboardTrend: [], alertSummary: null, detailError: '',
+      contractRegions: { available: false, items: [], basis: '' }, regionsError: '',
+      projectDetails: { available: false, items: [], total: 0, page: 1, page_size: 20 }, detailLoading: false,
       // 外壳把 /auth/me 的 tenant_id/user_id 传给原生看板做「租户+用户」级指标卡偏好，渲染前需有 me。
       me: null,
       hasPermission: () => true, canViewDashboard: () => true,

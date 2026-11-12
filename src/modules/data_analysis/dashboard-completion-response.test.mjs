@@ -18,4 +18,9 @@ test('看板畸形数值和类型必须拒绝，合法零值仍有效',()=>{
  assert.equal(valid('/dashboard/contracts',{items:[{amount_minor:'bad'}],total:1,page:1,page_size:20}),false)
  assert.equal(valid('/dashboard/projects',{available:false,items:[],total:0,page:1,page_size:20}),true)
  assert.equal(valid('/dashboard/trend',[{period:'2026-11',contract_count:1,project_count:1,currency_totals:[{currency:'USD',amount_minor:'bad',contracts:1}]}]),false)
+ // 区域分布信封：可用性、币种、金额/数量都必须合法；不可用也必须是空数组而不是 null。
+ assert.equal(valid('/dashboard/contract-regions',{available:true,items:[{region:'华东',currency:'CNY',amount_minor:100,contract_count:2}],basis:'按区域归集'}),true)
+ assert.equal(valid('/dashboard/contract-regions',{available:false,items:[],basis:'当前范围不支持'}),true)
+ assert.equal(valid('/dashboard/contract-regions',{available:true,items:null,basis:''}),false)
+ assert.equal(valid('/dashboard/contract-regions',{available:true,items:[{region:'华东',currency:'CNY',amount_minor:'bad',contract_count:2}],basis:''}),false)
 })

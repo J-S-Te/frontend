@@ -59,6 +59,16 @@ function validStandardPreview(data) {
       && Number.isFinite(row.collection_rate) && row.collection_rate >= 0 && row.collection_rate <= 100)))
 }
 
+// validContractRegions 校验区域分布可用性信封；不可用时 items 仍必须为数组。
+// 参数：data 为 /dashboard/contract-regions 响应。
+// 返回值：字段类型与金额、数量均合法时为 true。
+function validContractRegions(data) {
+  if (!isRecord(data) || typeof data.available !== 'boolean' || typeof data.basis !== 'string') return false
+  if (!Array.isArray(data.items)) return false
+  return data.items.every((row) => isRecord(row) && typeof row.region === 'string'
+    && /^[A-Z]{3}$/.test(row.currency) && validCount(row.amount_minor) && validCount(row.contract_count))
+}
+
 // validCount 校验可展示的非负整数，避免畸形值被格式化为零。
 // 参数：value 为来源计数或金额。
 // 返回值：安全非负整数时为 true。
@@ -142,6 +152,7 @@ function validDataEnvelope(body, path, method) {
     return validDashboardSummary(data, route.split('/').at(-1))
   }
   if (route === '/dashboard/contracts' || route === '/dashboard/projects') return validDashboardDetails(data, route.endsWith('/projects'))
+  if (route === '/dashboard/contract-regions') return validContractRegions(data)
   if (route === '/dashboard/trend') return Array.isArray(data) && data.every((row) => isRecord(row)
     && /^\d{4}-(0[1-9]|1[0-2])$/.test(row.period) && validCount(row.contract_count)
     && validCount(row.project_count) && validCurrencyTotals(row.currency_totals || []))
@@ -339,6 +350,11 @@ export function getProjectDashboardSummary() { return request('/dashboard/projec
 
 export function getReportDashboardSummary() { return request('/dashboard/report') }
 export function getFinanceDashboardSummary() { return request('/dashboard/finance') }
+
+// getContractRegions 查询签约事实的区域×币种聚合（字典指标 1.3）。
+// 参数：无；权限和租户范围由服务端会话确定。
+// 返回值：{ available, items, basis }；非全租户范围会明确不可用。
+export function getContractRegions() { return request('/dashboard/contract-regions') }
 
 /** getContractDetails 查询合同下钻分页明细。 */
 export function getContractDetails(params = {}) { const query = new URLSearchParams(params).toString(); return request(`/dashboard/contracts${query ? `?${query}` : ''}`) }
