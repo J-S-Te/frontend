@@ -309,9 +309,6 @@ function navigateNavItem(item) {
   navigate(item.targetSection || item.key)
 }
 const collapsedNavGroups = ref(new Set())
-function navGroupContainsActiveItem(group) {
-  return group.items.some((item) => isNavItemActive(item))
-}
 function isNavGroupCollapsed(group) {
   return collapsedNavGroups.value.has(group.label)
 }
@@ -321,10 +318,11 @@ function toggleNavGroup(group) {
   else next.add(group.label)
   collapsedNavGroups.value = next
 }
-// 默认只展开当前路由所属分组，让完整导航在常用桌面高度内可见；用户仍可按需展开其它分组。
+// 默认展开全部业务分组（对齐原型侧栏的完整导航）；分组标题仍可点击收起。
 watch([activeSection, () => navigation.value.sections.join('|')], () => {
-  const groups = visibleNavGroups.value
-  collapsedNavGroups.value = new Set(groups.filter((group) => !navGroupContainsActiveItem(group)).map((group) => group.label))
+  // 原型侧栏默认展开全部业务分组：条目数与原型一致，桌面高度内可完整浏览；
+  // 折叠能力保留给用户按需收起，不再在首屏把非当前分组全部折起。
+  collapsedNavGroups.value = new Set()
 }, { immediate: true })
 const currentMeta = computed(() => pageMeta[activeSection.value])
 const mobileMenuOpen = ref(false)
@@ -1355,7 +1353,13 @@ const activeNodeItems = computed(() => ({
   implementation: implementationItems.value,
 }[activeSection.value] || serviceItems.value))
 const completedProjectCount = computed(() => projects.value.filter((project) => project.status === projectStatusCompleted).length)
-const currentUserName = computed(() => loginUsername(session.value))
+const currentUserName = computed(() => {
+  const account = loginUsername(session.value)
+  // 部分部署的项目会话把平台内部主体 ID（platform-…）放在 username 上；
+  // 侧栏账号名只展示服务端 display_name，不把内部 ID 当成登录账号。
+  const displayName = String(session.value?.display_name || '').trim()
+  return displayName && /^(platform|user|subject)-/i.test(account) ? displayName : account
+})
 // 与客户与商机系统的账号行保持一致：首字头像 + 账号名 + 角色名。
 // 角色名取服务端角色目录，目录未就绪或请求失败时退回角色码，不出现空白副标题。
 const currentUserInitial = computed(() => {
@@ -3394,6 +3398,10 @@ function closeActiveOverlay() {
   if (capabilityDialog.value) { capabilityDialog.value = null; return true }
   if (adjustOpen.value) { adjustOpen.value = false; return true }
   if (closureOpen.value) { closeSupplementClosure(); return true }
+  if (nativeCreateOpen.value) { nativeCreateOpen.value = false; return true }
+  if (qualificationImportOpen.value) { qualificationImportOpen.value = false; return true }
+  if (equipmentImportOpen.value) { equipmentImportOpen.value = false; return true }
+  if (detectionCategoryImportOpen.value) { detectionCategoryImportOpen.value = false; return true }
   if (createOpen.value) { createOpen.value = false; return true }
   if (notificationOpen.value) { closeNotifications(); return true }
   if (kpiSettingsOpen.value) { dismissKpiSettings({ restoreFocus: true }); return true }
@@ -3629,8 +3637,8 @@ onBeforeUnmount(() => {
               <header><div><p class="pm-panel-kicker">准时交付</p><h2>近 12 周准时交付率趋势</h2></div><span>近 4 周均值 <b>{{ onTimeRecentAverage !== null ? `${onTimeRecentAverage}%` : '—' }}</b></span></header>
               <div class="pm-trend-chart">
                 <div v-for="week in weeklyDeliveryTrend" :key="week.key" class="pm-trend-bar" :title="week.tooltip">
-                  <span class="pm-trend-val">{{ week.rate }}%</span>
-                  <i :class="week.rate >= 85 ? 'good' : 'low'" :style="{ height: `${week.rate}%` }"></i>
+                  <span class="pm-trend-val">{{ week.total ? `${week.rate}%` : '—' }}</span>
+                  <i :class="!week.total ? 'empty' : week.rate >= 85 ? 'good' : 'low'" :style="{ height: `${week.rate}%` }"></i>
                   <span class="pm-trend-lbl">{{ week.label }}</span>
                 </div>
               </div>
@@ -3769,10 +3777,6 @@ onBeforeUnmount(() => {
           </section>
           <template v-else>
             <section class="pm-actions-bar"><button class="pm-button" @click="navigate('projects')"><ConsoleIcon name="reset" />返回项目列表</button><button class="pm-button" :disabled="loading" @click="loadWorkspace"><ConsoleIcon name="reset" />刷新</button></section>
-            <ReimbursementSpendPanel :session="session" :project-id="detailProject.id" :project-status="detailProject.status" />
-            <ProjectArchiveDirectory :key="detailProject.id" :project="detailProject" :items="detailItems"
-              :events="detailEvents" :session="session" @view-service="detailTab='items';selectServiceItem($event)"
-              @view-events="detailTab='events'" />
             <section v-if="detailProject.source_kind === 'NATIVE' && canReadNativeProjectScope && (nativeProjectEnabled || nativeScopeProjectID === detailProject.id)" class="pm-panel">
               <button v-if="!nativeScopeProjectID && nativeProjectEnabled" type="button" class="pm-button"
                 :disabled="saving" @click="nativeScopeProjectID = detailProject.id">原生委托范围变更</button>
@@ -3841,6 +3845,10 @@ onBeforeUnmount(() => {
               <header><div><p class="pm-panel-kicker danger">异常记录</p><h2>异常记录</h2></div><button class="pm-link" @click="navigate('exceptions')">前往异常评审 →</button></header>
               <div class="pm-risk-list"><button v-for="event in detailPendingDeviations" :key="event.id" @click="navigate('exceptions')"><span :class="event.payload?.severity === 'HIGH' ? 'high' : 'medium'">{{ event.payload?.severity === 'HIGH' ? '高' : '中' }}</span><div><b>{{ event.payload?.deviation_id }} · {{ event.service_item_id }}</b><p>{{ event.payload?.description || '现场偏离' }}</p></div><time>{{ formatDateTime(event.created_at) }}</time></button><div v-if="!detailPendingDeviations.length" class="pm-empty-mini">该项目暂无待评审异常</div></div>
             </article>
+            <ReimbursementSpendPanel :session="session" :project-id="detailProject.id" :project-status="detailProject.status" />
+            <ProjectArchiveDirectory :key="detailProject.id" :project="detailProject" :items="detailItems"
+              :events="detailEvents" :session="session" @view-service="detailTab='items';selectServiceItem($event)"
+              @view-events="detailTab='events'" />
           </template>
         </template>
 

@@ -103,10 +103,11 @@ function openMonitoringAction(row) {
 
   // 筛选变化防抖 250ms 后重查；翻页立即重查。
   // 进入监控页即装载快照；离开也保持轮询调度（原视图行为：每次 section 变化都重排轮询）。
+  // immediate：直接深链接或刷新进入监控页时也要装载快照，不能只在栏目切换时读取。
   watch(activeSection, (section) => {
     if (section === 'monitoring') loadMonitoring()
     scheduleMonitoringPoll()
-  })
+  }, { immediate: true })
 
 watch([keyword, teamFilter, monitorFilter, monitorCategory, monitorProjectManager, monitorSLAOnly, monitorConflictOnly, monitorDueFrom, monitorDueTo], () => {
   if (activeSection.value !== 'monitoring') return
