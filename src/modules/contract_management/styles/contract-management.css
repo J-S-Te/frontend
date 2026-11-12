@@ -814,3 +814,170 @@
 
 /* 滚动条（整页 / 弹窗内 / 表格）与表格右缘渐隐在 global-ux.css 里已经走
    --scrollbar-thumb / --table-scroll-edge，深色下自动跟随，这里不重复定义。 */
+
+/* 合同状态变更弹窗：目标状态与原因同屏，提交中禁止关闭。 */
+.contract-status-change-modal { width: min(560px, 100%); }
+.contract-status-change-modal .contract-status-change-reason { grid-column: 1 / -1; }
+.contract-status-change-modal textarea {
+  min-height: 110px;
+  padding: 10px;
+  color: var(--cm-text);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  resize: vertical;
+  outline: 0;
+  border: 1px solid var(--cm-border);
+  border-radius: 7px;
+  background: var(--surface-input, #fff);
+}
+.contract-status-change-modal textarea:focus {
+  border-color: var(--border-brand-strong, var(--primary));
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+@media (max-width: 640px) {
+  .contract-status-change-modal .contract-status-change-reason { grid-column: auto; }
+}
+
+/* 工作台待办卡：对齐原型仪表盘右下“我的待办”，只渲染真实分配给我的审批任务。 */
+.contract-dashboard-todo {
+  padding: 18px 20px;
+}
+
+.contract-dashboard-todo > .contract-section-title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.contract-dashboard-todo > .contract-section-title h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.contract-dashboard-todo > .contract-section-title p {
+  margin: 4px 0 0;
+  color: var(--cm-muted);
+  font-size: var(--fs-xs);
+}
+
+.contract-dashboard-todo-list {
+  display: grid;
+  gap: 10px;
+}
+
+.contract-dashboard-todo-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--cm-border);
+  border-radius: 9px;
+  background: var(--surface-muted, #f8fafc);
+}
+
+.contract-dashboard-todo-item > div {
+  min-width: 0;
+  flex: 1;
+}
+
+.contract-dashboard-todo-item strong {
+  display: block;
+  font-size: 12px;
+}
+
+.contract-dashboard-todo-item small {
+  display: block;
+  margin-top: 3px;
+  color: var(--cm-muted);
+  font-size: var(--fs-xs);
+}
+
+@media (max-width: 640px) {
+  .contract-dashboard-todo-item {
+    flex-wrap: wrap;
+  }
+}
+
+/* 合同模板搜索条：与台账筛选条同构，右侧显示当前命中数量。 */
+.contract-template-count {
+  margin-left: auto;
+  align-self: center;
+  color: var(--cm-muted);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
+/* 审批规则：按原型改为左右两栏（规则列表 + 选中规则的流程预览）。 */
+.contract-rule-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.contract-rule-index,
+.contract-rule-preview {
+  padding: 18px 20px;
+}
+
+.contract-rule-index .contract-section-title,
+.contract-rule-preview .contract-section-title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.contract-rule-index .contract-section-title h2,
+.contract-rule-preview .contract-section-title h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.contract-rule-index .contract-section-title p,
+.contract-rule-preview .contract-section-title p {
+  margin: 4px 0 0;
+  color: var(--cm-muted);
+  font-size: var(--fs-xs);
+}
+
+.contract-rule-list article {
+  cursor: pointer;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+
+.contract-rule-list article.is-active {
+  border-color: var(--cm-primary);
+  box-shadow: 0 0 0 2px var(--cm-primary-soft);
+}
+
+.contract-rule-preview .contract-stepper {
+  margin-top: 14px;
+}
+
+.contract-rule-note {
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  color: var(--cm-muted);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  border-radius: 8px;
+  background: var(--surface-muted, #f8fafc);
+}
+
+.contract-rule-preview .contract-rule-actions {
+  width: auto;
+  margin: 14px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--cm-border);
+  justify-content: flex-end;
+}
+
+@media (max-width: 1100px) {
+  .contract-rule-layout {
+    grid-template-columns: 1fr;
+  }
+}

@@ -43,6 +43,7 @@ import { cloneNormalizedSigningRecord, isNormalizedSigningRecord } from '@/modul
 import ContractReportsPanel from '@/modules/contract_management/components/ContractReportsPanel.vue'
 import AsyncPanel from '@/modules/shared/components/AsyncPanel.vue'
 import {
+  changeContractStatus,
   commandApproval,
   ContractAuthError,
   createApprovalRule,
@@ -88,6 +89,7 @@ import {
   replaceContractTemplateSource,
   uploadStampedContractPDF,
   downloadContractFile,
+  downloadApprovalContractSource,
 } from '@/modules/contract_management/api/contract'
 import {
   ensureStableReviewAttempt,
@@ -125,6 +127,7 @@ import {
 } from '@/modules/contract_management/utils/contractDisplay'
 import ContractNotificationPanel from '@/modules/contract_management/components/ContractNotificationPanel.vue'
 import ContractIntegrationOutboxPanel from '@/modules/contract_management/components/ContractIntegrationOutboxPanel.vue'
+import ContractAuditOutboxPanel from '@/modules/contract_management/components/ContractAuditOutboxPanel.vue'
 import { useSigningLedger } from '@/modules/contract_management/composables/useSigningLedger'
 import { useApprovalDetail } from '@/modules/contract_management/composables/useApprovalDetail'
 import { useContractDraftEditor } from '@/modules/contract_management/composables/useContractDraftEditor'
@@ -293,7 +296,7 @@ const sectionMeta = {
   rules: { title: '审批规则', description: '按合同类型与金额配置审批流程' },
   signing: { title: '签署台账', description: '跟踪盖章、签署、归档与到期情况' },
   reports: { title: '统计报表', description: '洞察签约规模、结构与履约趋势' },
-  outbox: { title: '集成死信', description: '查看四类 Outbox 投递失败事件，人工重置重试并核对最后错误' },
+  outbox: { title: '死信运维', description: '查看集成 Outbox 与审计 Outbox 投递失败事件，人工确认后重置重试' },
 }
 
 const adminNavGroupDefinitions = [
@@ -325,7 +328,7 @@ const adminNavGroupDefinitions = [
       { key: 'rules', label: '审批规则', icon: 'organization' },
     ],
   },
-  { label: '运维/集成', items: [{ key: 'outbox', label: '集成死信', icon: 'reset' }] },
+  { label: '运维/集成', items: [{ key: 'outbox', label: '死信运维', icon: 'reset' }] },
   { label: '统计查看', items: [{ key: 'reports', label: '统计报表', icon: 'dashboard' }] },
 ]
 
@@ -353,7 +356,7 @@ const userNavGroupDefinitions = [
       { key: 'rules', label: '审批规则', icon: 'organization' },
     ],
   },
-  { label: '运维/集成', items: [{ key: 'outbox', label: '集成死信', icon: 'reset' }] },
+  { label: '运维/集成', items: [{ key: 'outbox', label: '死信运维', icon: 'reset' }] },
   { label: '数据分析', items: [{ key: 'reports', label: '统计报表', icon: 'dashboard' }] },
 ]
 
@@ -370,6 +373,7 @@ const signingOpenedDocument = ref({ version: 0, sha256: '' })
 const signingDetailLoading = ref(false)
 const signingOperationBusy = ref(false)
 const contractDownloadBusy = ref(false)
+const approvalSourceBusy = ref(false)
 let signingFilterTimer = 0
 // C-ii（task-62）：recipient_phone 是后端寄送保存的必填字段（router.go 非空 + ≤20 rune），
 // 表单状态必须携带该键，否则保存请求恒被 422 拒绝。
@@ -382,7 +386,22 @@ const approvals = ref([])
 const initiatedApprovals = ref([])
 const approvalTab = ref('tasks')
 const rules = ref([])
+// 审批规则页采用原型的左右两栏：左侧选择规则，右侧展示选中规则的流程预览。
+// 未显式选择时回落到第一条，删除/刷新后不会留下不存在的选中项。
+const selectedRuleID = ref('')
+const selectedRule = computed(() => rules.value.find((rule) => rule.id === selectedRuleID.value) || rules.value[0] || null)
+function selectRule(rule) {
+  if (rule?.id) selectedRuleID.value = rule.id
+}
 const contractTemplates = ref([])
+const templateKeyword = ref('')
+// 模板列表是整表读取的小数据集，按名称/文件名在本地筛选；清空关键词恢复全部。
+const filteredContractTemplates = computed(() => {
+  const keyword = templateKeyword.value.trim().toLowerCase()
+  if (!keyword) return contractTemplates.value
+  return contractTemplates.value.filter((item) => [item.name, item.original_filename]
+    .some((value) => String(value || '').toLowerCase().includes(keyword)))
+})
 const opportunityIntakes = ref([])
 const opportunityIntakeFilter = ref('ACCEPTED')
 const opportunityIntakeLoading = ref(false)
@@ -633,7 +652,29 @@ const selectedContractPreviewError = ref('')
 const selectedContractLifecycle = ref([])
 const selectedContractLifecycleLoading = ref(false)
 const selectedContractLifecycleError = ref('')
+// 合同状态变更：只暴露当前状态可达的运维动作；审批流内的 draft→pending→approved→active
+// 仍走“提交审批”，不能从本入口绕过审批。目标状态最终由服务端状态机与版本复核。
+const CONTRACT_STATUS_CHANGE_TARGETS = Object.freeze({
+  active: ['in_progress', 'terminated', 'archived'],
+  in_progress: ['pending_pay', 'completed', 'terminated', 'archived'],
+  pending_pay: ['completed', 'terminated', 'archived'],
+  completed: ['archived'],
+  terminated: ['archived'],
+})
+const statusChangeOpen = ref(false)
+const statusChangeElement = ref(null)
+const statusChangeSubmitting = ref(false)
+const statusChangeTarget = ref('')
+const statusChangeReason = ref('')
+const statusChangeError = ref('')
+const statusChangeTargets = computed(() => {
+  if (!selectedContract.value || !can('contract.edit')) return []
+  const current = String(selectedContract.value.rawStatus || '').toLowerCase()
+  return (CONTRACT_STATUS_CHANGE_TARGETS[current] || []).map((value) => ({ value, label: contractStatusLabel(value) }))
+})
+useDialogFocusTrap({ active: computed(() => statusChangeOpen.value), container: statusChangeElement, initialFocus: 'select, textarea' })
 const notificationOpen = ref(false)
+const outboxTab = ref('integration')
 const toast = ref('')
 const isLoggingOut = ref(false)
 let toastTimer = 0
@@ -665,6 +706,21 @@ const activeSection = computed(() => {
 })
 const businessDataError = computed(() => businessDataErrors.value[activeSection.value] || '')
 const pageMeta = computed(() => sectionMeta[activeSection.value])
+// 工作台页头沿用原型“问候 + 角色 + 待办数”的信息密度；其他分区保留静态说明。
+const pageDescription = computed(() => {
+  if (activeSection.value !== 'dashboard') return pageMeta.value.description
+  return `您好，${currentUserLabel.value} · 当前角色：${currentRoleLabel.value} · 您有 ${approvals.value.length} 项审批待处理`
+})
+// 状态变更审批同时可能出现在“分配给我”和“我发起的”里，按 id 去重后单独成页签；
+// kind 来自服务端 approval.kind，不在前端猜测审批类型。
+const statusChangeApprovals = computed(() => {
+  const seen = new Set()
+  return [...approvals.value, ...initiatedApprovals.value].filter((item) => {
+    if (item.kind !== 'status_change' || seen.has(item.id)) return false
+    seen.add(item.id)
+    return true
+  })
+})
 
 // 深链兼容：外部跳转可能带 ?import_batch=<批次号> 直达某个导入批次。导入面板现在只挂在
 // imports（合同批量导入）分区，若落点停在台账等其他分区，就会出现“参数在、面板不在”的空白页。
@@ -1127,6 +1183,28 @@ async function downloadApprovedContract(contract, format) {
   }
 }
 
+// downloadApprovalSource 下载当前审批快照的合同原件（DOCX/PDF）。
+// 审批参与范围与快照版本由服务端复核；下载失败留在当前弹窗提示，不整页跳转。
+async function downloadApprovalSource() {
+  if (approvalSourceBusy.value || !selectedApproval.value) return
+  const approval = selectedApproval.value
+  approvalSourceBusy.value = true
+  let url = ''
+  try {
+    const { blob, filename } = await downloadApprovalContractSource(approval.id)
+    url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = filename
+    link.click()
+  } catch (error) {
+    showToast(formatUserError(error, { fallback: '审批合同原件下载失败，请稍后重试。' }))
+  } finally {
+    if (url) window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+    approvalSourceBusy.value = false
+  }
+}
+
 
 watch([signingKeyword, signingMethodFilter, signingStatusFilter], () => {
   if (!session.value) return
@@ -1404,6 +1482,8 @@ function normalizeApproval(item) {
     contractId: item.contract_id,
     step: item.node_name || item.node_id || (Number.isInteger(item.current_node_index) ? `第 ${item.current_node_index + 1} 节点` : '—'),
     type: approvalKindLabel(item.kind),
+    kind: String(item.kind || ''),
+    applicant: displayNameFor(item.applicant_user_id, item.applicant_display_name),
     status: item.status || '—',
     submittedAt: formatDate(item.created_at),
   }
@@ -2494,6 +2574,67 @@ async function submitSelectedContract() {
   }
 }
 
+// openStatusChange 打开状态变更表单：目标状态只来自当前合同状态的可达动作，
+// 原因必填，避免把“无备注”的状态变更提交给管理员审批。
+function openStatusChange() {
+  if (!selectedContract.value || !statusChangeTargets.value.length) return
+  statusChangeTarget.value = ''
+  statusChangeReason.value = ''
+  statusChangeError.value = ''
+  statusChangeOpen.value = true
+}
+
+// closeStatusChange 关闭状态变更表单；提交中不允许关闭，避免请求结果无处确认。
+function closeStatusChange() {
+  if (statusChangeSubmitting.value) return
+  statusChangeOpen.value = false
+  statusChangeError.value = ''
+}
+
+// submitStatusChange 提交状态变更；200 表示已直接变更，202 表示已进入管理员审批。
+// 成功后刷新台账与详情，失败按服务端错误码展示，不自动重试写请求。
+async function submitStatusChange() {
+  if (statusChangeSubmitting.value) return
+  const contract = selectedContract.value
+  if (!contract) return
+  const target = statusChangeTarget.value
+  const reason = statusChangeReason.value.trim()
+  if (!target) {
+    statusChangeError.value = '请选择目标状态。'
+    return
+  }
+  if (!reason) {
+    statusChangeError.value = '请填写变更原因。'
+    return
+  }
+  if (reason.length > 1000) {
+    statusChangeError.value = '变更原因不能超过 1000 字。'
+    return
+  }
+  statusChangeSubmitting.value = true
+  statusChangeError.value = ''
+  try {
+    const result = await changeContractStatus(contract.recordId, {
+      version: contract.version,
+      targetStatus: target,
+      reason,
+    })
+    statusChangeOpen.value = false
+    statusChangeTarget.value = ''
+    statusChangeReason.value = ''
+    showToast(result.changed
+      ? `合同状态已变更为${contractStatusLabel(target)}`
+      : '状态变更已提交审批，可在“我发起的”查看进度')
+    await loadBusinessData()
+    const fresh = contracts.value.find((item) => item.recordId === contract.recordId)
+    if (fresh && selectedContract.value?.recordId === contract.recordId) await openContract(fresh)
+  } catch (error) {
+    statusChangeError.value = formatUserError(error, { fallback: '合同状态变更失败' })
+  } finally {
+    statusChangeSubmitting.value = false
+  }
+}
+
 function openNewRule() {
   editingRuleId.value = ''
   ruleForm.value = emptyRuleForm()
@@ -2769,7 +2910,7 @@ onBeforeUnmount(() => {
           @retry="loadBusinessData"
         />
         <header class="contract-page-head" data-first-run-anchor="subsystem-title">
-          <div><h1>{{ pageMeta.title }}</h1><p>{{ pageMeta.description }}</p></div>
+          <div><h1>{{ pageMeta.title }}</h1><p>{{ pageDescription }}</p></div>
           <div class="contract-page-actions">
             <button v-if="['contracts', 'reports'].includes(activeSection)" class="contract-button secondary" type="button" :disabled="exportBusy" :aria-busy="exportBusy ? 'true' : 'false'" @click="exportContracts"><ConsoleIcon name="export" />{{ exportBusy ? '正在导出…' : '导出' }}</button>
             <button v-if="activeSection === 'rules' && can('approval_rule.manage')" class="contract-button primary" type="button" @click="openNewRule">＋ 新增规则</button>
@@ -2797,7 +2938,6 @@ onBeforeUnmount(() => {
           :supported-modes="contractSourceCapabilities.supported_modes || ['NORMAL']" />
 
         <template v-if="activeSection === 'dashboard'">
-          <section class="contract-welcome"><div><span>已安全登录</span><h2>您好，{{ currentUserLabel }}</h2><p>当前角色：<b>{{ currentRoleLabel }}</b>。您可以使用当前角色已授权的合同功能。</p></div><button v-if="can('approval.process')" type="button" @click="navigate('approvals')">查看我的审批流程 <ConsoleIcon name="chevron" /></button></section>
           <section v-if="isAdmin" class="contract-stat-grid contract-admin-stat-grid">
             <button class="blue" type="button" @click="openDashboardDetail('total_amount')"><span class="contract-stat-icon"><ConsoleIcon name="account" /></span><p>当前企业合同总额</p><strong>{{ dashboardTotalAmountLabel }}</strong><em>点击查看全部合同</em></button>
             <button class="purple" type="button" @click="openDashboardDetail('total_count')"><span class="contract-stat-icon"><ConsoleIcon name="save" /></span><p>当前企业合同份数</p><strong>{{ adminDashboard?.total_contracts || 0 }}<small>份</small></strong><em>点击查看全部合同</em></button>
@@ -2810,6 +2950,20 @@ onBeforeUnmount(() => {
             <article class="purple"><span class="contract-stat-icon"><ConsoleIcon name="save" /></span><p>本人合同</p><strong>{{ personalContractCount }}<small>份</small></strong><em>按当前可见范围汇总</em></article>
             <article v-if="can('approval.process')" class="orange"><span class="contract-stat-icon"><ConsoleIcon name="audit" /></span><p>分配给我</p><strong>{{ approvals.length }}<small>项</small></strong><em>含待流转节点</em></article>
             <article class="green"><span class="contract-stat-icon"><ConsoleIcon name="shield" /></span><p>生效及履约</p><strong>{{ activeContractCount }}<small>份</small></strong><em>按当前状态统计</em></article>
+          </section>
+          <section class="contract-card contract-dashboard-todo" aria-labelledby="contract-dashboard-todo-title">
+            <header class="contract-section-title">
+              <div><h2 id="contract-dashboard-todo-title">我的待办</h2><p>仅显示分配给您、仍可处理的审批任务；点击“查看全部”进入审批中心。</p></div>
+              <button class="contract-text-button" type="button" @click="navigate('approvals')">查看全部</button>
+            </header>
+            <div v-if="approvals.length" class="contract-dashboard-todo-list">
+              <article v-for="approval in approvals.slice(0, 5)" :key="approval.id" class="contract-dashboard-todo-item">
+                <span class="contract-badge warning"><i></i>待审批</span>
+                <div><strong>{{ approval.type }}</strong><small>任务创建于 {{ approval.submittedAt }} · 当前节点 {{ approval.step }}</small></div>
+                <button class="contract-text-button" type="button" @click="openApproval(approval)">{{ can('approval.process') ? '处理' : '查看' }}</button>
+              </article>
+            </div>
+            <p v-else class="contract-empty">当前没有待处理审批；新的合同审批流转到您时会显示在这里。</p>
           </section>
         </template>
 
@@ -2846,18 +3000,55 @@ onBeforeUnmount(() => {
 
         <template v-else-if="activeSection === 'contracts'">
           <div class="contract-filter-bar"><label class="contract-search-field"><ConsoleIcon name="search" /><input v-model="keyword" type="search" maxlength="100" autocomplete="off" placeholder="合同编号 / 名称 / 类型" @change="reloadLedger" /></label><label><span>状态</span><select v-model="statusFilter" aria-label="按合同状态筛选" title="「已过期」/「未过期」按服务端 expired=true/false 筛选：已过期为状态为已生效/履约中/待付款且到期日早于今天，未过期为其反面；同一时刻只能选一个状态" @change="reloadLedger"><option v-for="option in ledgerStatusOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label title="按合同类型筛选（服务端 GET /contracts?type=… 精确匹配合同类型）"><span>类型</span><select v-model="typeFilter" aria-label="按合同类型筛选" @change="reloadLedger"><option value="">全部类型</option><option v-for="value in contractTypeOptions" :key="value" :value="value">{{ value }}</option></select></label><button class="contract-button ghost small" type="button" @click="resetFilters"><ConsoleIcon name="reset" />重置</button><button class="contract-button primary small" type="button" @click="loadBusinessData"><ConsoleIcon name="reset" />刷新</button></div>
-          <div class="contract-table-card"><div class="contract-table-scroll"><table class="contract-data-table contract-ledger-table"><thead><tr><th scope="col">合同编号 / 名称</th><th scope="col">客户</th><th scope="col">类型 / 服务</th><th scope="col">合同金额</th><th scope="col">负责人姓名</th><th scope="col">到期 / 创建</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead><tbody><tr v-for="contract in filteredContracts" :key="contract.recordId"><td class="contract-ledger-sticky-col"><button class="contract-entity-link" type="button" @click="openContract(contract)"><strong>{{ contract.name }}</strong><small>{{ contract.id }}</small></button></td><td>{{ contract.customerName || '—' }}</td><td><span>{{ contract.type }}</span><small class="contract-cell-sub">{{ contract.serviceType || '—' }}</small></td><td class="amount">{{ formatContractAmount(contract) }}</td><td>{{ contract.owner }}</td><td><span>{{ contract.endDate || '—' }}</span><small class="contract-cell-sub">创建：{{ contract.createdAt || '—' }}</small></td><td><span class="contract-badge" :class="statusTone(contract.displayStatus)"><i></i>{{ contract.displayStatus }}</span></td><td><button class="contract-text-button" type="button" @click="openContract(contract)">详情</button></td></tr><tr v-if="!filteredContracts.length && !businessDataError && !businessDataLoading"><td colspan="8"><EmptyState compact title="当前没有可查看的合同"><button v-if="ledgerFiltersActive" type="button" class="contract-button secondary small" @click="resetFilters">重置筛选</button></EmptyState></td></tr></tbody></table></div><footer class="contract-table-footer contract-table-footer--pager"><PaginationBar label="合同台账分页" :page="ledgerPage" :total="ledgerTotal" :page-size-options="[20, 50, 100]" :page-size="ledgerPageSize" :loading="businessDataLoading" @change="changeLedgerPage" @change-page-size="changeLedgerPageSize" /></footer></div>
+          <div class="contract-table-card">
+            <div class="contract-table-scroll">
+              <table class="contract-data-table contract-ledger-table">
+                <thead>
+                  <tr>
+                    <th scope="col">合同编号</th>
+                    <th scope="col">合同标题</th>
+                    <th scope="col">客户</th>
+                    <th scope="col">合同金额</th>
+                    <th scope="col">状态</th>
+                    <th scope="col">开始日期</th>
+                    <th scope="col">结束日期</th>
+                    <th scope="col">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="contract in filteredContracts" :key="contract.recordId">
+                    <td class="contract-ledger-sticky-col"><span class="mono">{{ contract.id }}</span></td>
+                    <td><button class="contract-entity-link" type="button" @click="openContract(contract)"><strong>{{ contract.name }}</strong></button></td>
+                    <td>{{ contract.customerName || '—' }}</td>
+                    <td class="amount">{{ formatContractAmount(contract) }}</td>
+                    <td><span class="contract-badge" :class="statusTone(contract.displayStatus)"><i></i>{{ contract.displayStatus }}</span></td>
+                    <td>{{ contract.startDate || '—' }}</td>
+                    <td>{{ contract.endDate || '—' }}</td>
+                    <td><button class="contract-text-button" type="button" @click="openContract(contract)">详情</button></td>
+                  </tr>
+                  <tr v-if="!filteredContracts.length && !businessDataError && !businessDataLoading">
+                    <td colspan="8"><EmptyState compact title="当前没有可查看的合同"><button v-if="ledgerFiltersActive" type="button" class="contract-button secondary small" @click="resetFilters">重置筛选</button></EmptyState></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <footer class="contract-table-footer contract-table-footer--pager"><PaginationBar label="合同台账分页" :page="ledgerPage" :total="ledgerTotal" :page-size-options="[20, 50, 100]" :page-size="ledgerPageSize" :loading="businessDataLoading" @change="changeLedgerPage" @change-page-size="changeLedgerPageSize" /></footer>
+          </div>
         </template>
 
         <template v-else-if="activeSection === 'templates'">
-          <section v-if="contractTemplates.length" class="contract-template-grid">
-            <article v-for="(item, index) in contractTemplates" :key="item.id">
+          <div class="contract-filter-bar">
+            <label class="contract-search-field"><ConsoleIcon name="search" /><input v-model="templateKeyword" type="search" maxlength="100" autocomplete="off" placeholder="搜索模板名称 / 文件名" aria-label="搜索合同模板" /></label>
+            <span class="contract-template-count">共 {{ filteredContractTemplates.length }} 套模板</span>
+          </div>
+          <section v-if="filteredContractTemplates.length" class="contract-template-grid">
+            <article v-for="(item, index) in filteredContractTemplates" :key="item.id">
               <div class="contract-template-cover" :class="['', 'purple', 'green', 'orange'][index % 4]"><span><ConsoleIcon name="save" /></span><i>DOCX</i></div>
               <div class="contract-template-copy"><span class="contract-badge success"><i></i>可用</span><h3>{{ item.name }}</h3><p>{{ item.original_filename }}</p><p>历史编号格式：{{ item.number_format || 'HT-{YYYYMMDD}-{ID8}' }}（不参与新编号）</p><div><span>{{ item.fields?.length || 0 }} 个填写字段 · {{ item.fields?.filter((field) => field.locked).length || 0 }} 个管理员配置</span><span>{{ formatDate(item.created_at) }}</span></div></div>
               <footer v-if="isAdmin" class="contract-template-actions"><button type="button" @click="editTemplate(item)">编辑</button><button type="button" @click="openTemplateReplacement(item)">替换模板文件</button><button class="danger" type="button" @click="removeTemplate(item)">删除</button></footer>
             </article>
           </section>
-          <div v-else class="contract-card contract-empty-state"><ConsoleIcon name="save" /><h3>暂无合同模板</h3><p>{{ isAdmin ? '点击右上角“上传模板”添加第一个 DOCX 模板。' : '超级管理员尚未上传合同模板。' }}</p></div>
+          <div v-else class="contract-card contract-empty-state"><ConsoleIcon name="save" /><h3>{{ contractTemplates.length ? '没有匹配的合同模板' : '暂无合同模板' }}</h3><p>{{ contractTemplates.length ? '换一个关键词，或清空搜索后查看全部模板。' : (isAdmin ? '点击右上角“上传模板”添加第一个 DOCX 模板。' : '超级管理员尚未上传合同模板。') }}</p></div>
           <h2 class="contract-subsection-title">系统合同编号规则</h2>
           <!-- 编号规则与模板同属配置管理：进入本区域才挂载并读取，不占首屏请求。
                可编辑性绑定专用高权权限码 contract.number_rule.manage：规则是全系统单行配置，
@@ -2867,17 +3058,43 @@ onBeforeUnmount(() => {
 
         <template v-else-if="activeSection === 'approvals'">
           <div class="contract-tabs" role="tablist" aria-label="审批列表">
-            <button :class="{ active: approvalTab === 'tasks' }" type="button" role="tab" :aria-selected="approvalTab === 'tasks'" @click="approvalTab = 'tasks'">分配给我 <i>{{ approvals.length }}</i></button>
+            <button :class="{ active: approvalTab === 'tasks' }" type="button" role="tab" :aria-selected="approvalTab === 'tasks'" @click="approvalTab = 'tasks'">待我审批 <i>{{ approvals.length }}</i></button>
             <button :class="{ active: approvalTab === 'initiated' }" type="button" role="tab" :aria-selected="approvalTab === 'initiated'" @click="approvalTab = 'initiated'">我发起的 {{ initiatedApprovals.length }}</button>
+            <button :class="{ active: approvalTab === 'status' }" type="button" role="tab" :aria-selected="approvalTab === 'status'" @click="approvalTab = 'status'">状态变更审批 <i>{{ statusChangeApprovals.length }}</i></button>
             <button type="button" @click="loadBusinessData">刷新</button>
           </div>
-          <section v-if="approvalTab === 'tasks'" class="contract-approval-list" role="tabpanel"><article v-for="approval in approvals" :key="approval.id"><header><span class="contract-badge" :class="approvalStatusTone(approval.status)"><i></i>{{ approvalStatusLabel(approval.status) }}</span><small>{{ approval.submittedAt }}</small></header><div><span class="contract-approval-icon"><ConsoleIcon name="audit" /></span><section><div><span class="contract-badge neutral">{{ approval.type }}</span><h3>合同审批</h3></div><p>任务创建于 {{ approval.submittedAt }}</p></section></div><footer><span><i></i>当前节点：{{ approval.step }}</span><button v-if="can('approval.process')" class="contract-button primary small" type="button" @click="openApproval(approval)">查看并处理</button></footer></article><div v-if="!approvals.length" class="contract-card contract-empty-state"><ConsoleIcon name="save" /><h3>当前没有活动待办</h3><p>当有合同流转到您处理时，待办会显示在这里。</p></div></section>
-          <section v-else class="contract-approval-list" role="tabpanel"><article v-for="approval in initiatedApprovals" :key="approval.id"><header><span class="contract-badge" :class="approvalStatusTone(approval.status)"><i></i>{{ approvalStatusLabel(approval.status) }}</span><small>{{ approval.submittedAt }}</small></header><div><span class="contract-approval-icon"><ConsoleIcon name="audit" /></span><section><div><span class="contract-badge neutral">{{ approval.type }}</span><h3>合同审批</h3></div><p>发起于 {{ approval.submittedAt }}</p></section></div><footer><span><i></i>流程位置：{{ approval.step }}</span><button class="contract-button secondary small" type="button" :disabled="approval.initializing" @click="openApproval(approval)">{{ approval.initializing ? '正在初始化' : '查看进度' }}</button></footer></article><div v-if="!initiatedApprovals.length" class="contract-card contract-empty-state"><ConsoleIcon name="save" /><h3>尚未发起审批</h3><p>在合同台账打开草稿并点击“提交审批”。</p></div></section>
+          <section v-if="approvalTab === 'tasks'" class="contract-approval-list" role="tabpanel"><article v-for="approval in approvals" :key="approval.id"><header><span class="contract-badge" :class="approvalStatusTone(approval.status)"><i></i>{{ approvalStatusLabel(approval.status) }}</span><small>{{ approval.submittedAt }}</small></header><div><span class="contract-approval-icon"><ConsoleIcon name="audit" /></span><section><div><span class="contract-badge neutral">{{ approval.type }}</span><h3>{{ approval.type }}</h3></div><p>申请人 {{ approval.applicant }} · 提交于 {{ approval.submittedAt }}</p></section></div><footer><span><i></i>当前节点：{{ approval.step }}</span><button v-if="can('approval.process')" class="contract-button primary small" type="button" @click="openApproval(approval)">查看并处理</button></footer></article><div v-if="!approvals.length" class="contract-card contract-empty-state"><ConsoleIcon name="save" /><h3>当前没有活动待办</h3><p>当有合同流转到您处理时，待办会显示在这里。</p></div></section>
+          <section v-else-if="approvalTab === 'initiated'" class="contract-approval-list" role="tabpanel"><article v-for="approval in initiatedApprovals" :key="approval.id"><header><span class="contract-badge" :class="approvalStatusTone(approval.status)"><i></i>{{ approvalStatusLabel(approval.status) }}</span><small>{{ approval.submittedAt }}</small></header><div><span class="contract-approval-icon"><ConsoleIcon name="audit" /></span><section><div><span class="contract-badge neutral">{{ approval.type }}</span><h3>{{ approval.type }}</h3></div><p>申请人 {{ approval.applicant }} · 发起于 {{ approval.submittedAt }}</p></section></div><footer><span><i></i>流程位置：{{ approval.step }}</span><button class="contract-button secondary small" type="button" :disabled="approval.initializing" @click="openApproval(approval)">{{ approval.initializing ? '正在初始化' : '查看进度' }}</button></footer></article><div v-if="!initiatedApprovals.length" class="contract-card contract-empty-state"><ConsoleIcon name="save" /><h3>尚未发起审批</h3><p>在合同台账打开草稿并点击“提交审批”。</p></div></section>
+          <section v-else class="contract-approval-list" role="tabpanel">
+            <article v-for="approval in statusChangeApprovals" :key="approval.id">
+              <header><span class="contract-badge" :class="approvalStatusTone(approval.status)"><i></i>{{ approvalStatusLabel(approval.status) }}</span><small>{{ approval.submittedAt }}</small></header>
+              <div><span class="contract-approval-icon"><ConsoleIcon name="audit" /></span><section><div><span class="contract-badge neutral">{{ approval.type }}</span><h3>状态变更审批</h3></div><p>申请人 {{ approval.applicant }} · 提交于 {{ approval.submittedAt }}</p></section></div>
+              <footer><span><i></i>审批节点：{{ approval.step }}</span><button v-if="can('approval.process')" class="contract-button primary small" type="button" @click="openApproval(approval)">处理审批</button><button v-else class="contract-button secondary small" type="button" @click="openApproval(approval)">查看进度</button></footer>
+            </article>
+            <div v-if="!statusChangeApprovals.length" class="contract-card contract-empty-state"><ConsoleIcon name="audit" /><h3>当前没有状态变更审批</h3><p>在合同详情发起“变更状态”后，审批会显示在这里。</p></div>
+          </section>
         </template>
 
         <template v-else-if="activeSection === 'rules'">
           <div class="contract-info-banner"><ConsoleIcon name="info" /><span>审批流程按合同类型、金额与组织范围自动匹配。规则变更仅对新发起的流程生效。</span></div>
-          <section class="contract-rule-list"><article v-for="rule in rules" :key="rule.id"><header><span class="contract-rule-icon"><ConsoleIcon name="organization" /></span><div><h3>{{ rule.name }}</h3><p>{{ ruleConditionSummary(rule) }}</p><p>优先级 {{ rule.priority }}</p></div><span class="contract-badge" :class="rule.enabled ? 'success' : 'neutral'"><i></i>{{ rule.enabled ? '已启用' : '已停用' }}</span><div v-if="can('approval_rule.manage')" class="contract-rule-actions"><button class="contract-text-button" type="button" @click="editRule(rule)">编辑</button><button class="contract-text-button" type="button" @click="toggleRule(rule)">{{ rule.enabled ? '停用' : '启用' }}</button><button class="contract-text-button danger" type="button" @click="removeRule(rule)">删除</button></div></header><div class="contract-stepper"><template v-for="(node, index) in rule.nodes || []" :key="node.id"><span><b>{{ index + 1 }}</b><small>{{ node.name }} · {{ roleLabel(node.role_code) }}</small></span><i v-if="index < rule.nodes.length - 1"></i></template></div></article><div v-if="!rules.length" class="contract-card contract-empty-state"><ConsoleIcon name="organization" /><h3>暂无审批规则</h3><p>{{ can('approval_rule.manage') ? '点击“新增规则”配置第一条审批规则；未匹配时使用默认审批流程。' : '当前企业尚未配置审批规则。' }}</p></div></section>
+          <div class="contract-rule-layout">
+            <section class="contract-card contract-rule-index" aria-label="审批规则列表">
+              <header class="contract-section-title"><div><h2>审批规则列表</h2><p>共 {{ rules.length }} 条；选择一条规则查看流程预览</p></div></header>
+              <section class="contract-rule-list">
+                <article v-for="rule in rules" :key="rule.id" :class="{ 'is-active': selectedRule?.id === rule.id }" role="button" tabindex="0" @click="selectRule(rule)" @keydown.enter.prevent="selectRule(rule)" @keydown.space.prevent="selectRule(rule)">
+                  <header><span class="contract-rule-icon"><ConsoleIcon name="organization" /></span><div><h3>{{ rule.name }}</h3><p>{{ ruleConditionSummary(rule) }}</p><p>优先级 {{ rule.priority }}</p></div><span class="contract-badge" :class="rule.enabled ? 'success' : 'neutral'"><i></i>{{ rule.enabled ? '已启用' : '已停用' }}</span></header>
+                </article>
+                <div v-if="!rules.length" class="contract-card contract-empty-state"><ConsoleIcon name="organization" /><h3>暂无审批规则</h3><p>{{ can('approval_rule.manage') ? '点击“新增规则”配置第一条审批规则；未匹配时使用默认审批流程。' : '当前企业尚未配置审批规则。' }}</p></div>
+              </section>
+            </section>
+            <section v-if="selectedRule" class="contract-card contract-rule-preview" aria-label="审批流程预览">
+              <header class="contract-section-title"><div><h2>{{ selectedRule.name }} · 流程预览</h2><p>{{ ruleConditionSummary(selectedRule) }} · 优先级 {{ selectedRule.priority }}</p></div><span class="contract-badge" :class="selectedRule.enabled ? 'success' : 'neutral'"><i></i>{{ selectedRule.enabled ? '已启用' : '已停用' }}</span></header>
+              <div class="contract-stepper"><template v-for="(node, index) in selectedRule.nodes || []" :key="node.id"><span><b>{{ index + 1 }}</b><small>{{ node.name }} · {{ roleLabel(node.role_code) }}</small></span><i v-if="index < (selectedRule.nodes || []).length - 1"></i></template></div>
+              <p v-if="!(selectedRule.nodes || []).length" class="contract-empty">该规则尚未配置审批节点。</p>
+              <p class="contract-rule-note">规则变更只对新发起的流程生效；条件按优先级匹配，未命中时使用默认审批流程。</p>
+              <footer v-if="can('approval_rule.manage')" class="contract-rule-actions"><button class="contract-text-button" type="button" @click="editRule(selectedRule)">编辑</button><button class="contract-text-button" type="button" @click="toggleRule(selectedRule)">{{ selectedRule.enabled ? '停用' : '启用' }}</button><button class="contract-text-button danger" type="button" @click="removeRule(selectedRule)">删除</button></footer>
+            </section>
+          </div>
         </template>
 
         <template v-else-if="activeSection === 'signing'">
@@ -2898,7 +3115,12 @@ onBeforeUnmount(() => {
         </template>
 
         <template v-else-if="activeSection === 'outbox'">
-          <ContractIntegrationOutboxPanel :can-manage="can('approval.manage')" @notify="showToast" />
+          <div class="contract-tabs" role="tablist" aria-label="死信类型">
+            <button :class="{ active: outboxTab === 'integration' }" type="button" role="tab" :aria-selected="outboxTab === 'integration'" @click="outboxTab = 'integration'">集成死信</button>
+            <button :class="{ active: outboxTab === 'audit' }" type="button" role="tab" :aria-selected="outboxTab === 'audit'" @click="outboxTab = 'audit'">审计死信</button>
+          </div>
+          <ContractIntegrationOutboxPanel v-if="outboxTab === 'integration'" :can-manage="can('approval.manage')" @notify="showToast" />
+          <ContractAuditOutboxPanel v-else :can-manage="can('approval.manage')" @notify="showToast" />
         </template>
 
         <template v-else-if="activeSection === 'reports'">
@@ -2951,13 +3173,28 @@ onBeforeUnmount(() => {
         <section><h3>基本信息</h3><dl><div><dt>合同类型</dt><dd>{{ selectedContract.type }}</dd></div><div><dt>服务类型</dt><dd>{{ selectedContract.serviceType }}</dd></div><div><dt>创建日期</dt><dd>{{ selectedContract.createdAt }}</dd></div><div><dt>到期日期</dt><dd>{{ selectedContract.endDate }}</dd></div></dl></section>
         <section><h3>合同内容</h3><div v-if="selectedContractPreviewLoading" class="contract-modal-loading">正在读取格式化合同…</div><p v-else-if="selectedContractPreviewError" class="contract-session-error">{{ selectedContractPreviewError }}</p><ContractPDFPreview v-else-if="selectedContractPreviewPDF" :descriptor="selectedContractPreviewPDF" title="合同 PDF 原件" /><ContractDocumentPreview v-else-if="selectedContractPreviewHTML" class="contract-saved-document-preview" title="合同正文预览" :html="selectedContractPreviewHTML" /><p v-else class="contract-approval-summary">{{ selectedContract.content || '未填写合同内容' }}</p><label v-if="selectedContract.status === '草稿' && selectedContract.canEditDraft" class="contract-check-label"><input v-model="termsIdentical" type="checkbox" /><span>本合同条款与关联历史合同一致（参与审批规则匹配）</span></label></section>
         <section><h3>流转明细</h3><div v-if="selectedContractLifecycleLoading" class="contract-modal-loading">正在读取流转明细…</div><p v-else-if="selectedContractLifecycleError" class="contract-session-error">{{ selectedContractLifecycleError }}</p><div v-else-if="selectedContractLifecycle.length" class="contract-action-log"><div v-for="event in selectedContractLifecycle" :key="event.id"><strong>{{ contractStatusLabel(event.from_status) }} → {{ contractStatusLabel(event.to_status) }}</strong><span>{{ event.actor_user_id === 'SYSTEM' ? '系统' : displayNameFor(event.actor_user_id) }}</span><p>{{ lifecycleReason(event.reason) }} · {{ formatDateTime(event.occurred_at) }}</p></div></div><p v-else class="contract-approval-summary">暂无流转记录</p></section>
-        <footer><button class="contract-button secondary" type="button" @click="closeContract">关闭</button><button v-if="selectedContract.canEditDraft" class="contract-button secondary" type="button" :disabled="draftEditLoading || submittingContract" @click="editContractDraft(selectedContract)">{{ draftEditLoading ? '正在读取…' : '返回上一步编辑' }}</button><button v-if="selectedContract.status === '草稿' && selectedContract.canEditDraft" class="contract-button primary" type="button" :disabled="submittingContract" @click="submitSelectedContract">{{ submittingContract ? '正在提交…' : '提交审批' }}</button></footer>
+        <footer><button class="contract-button secondary" type="button" @click="closeContract">关闭</button><button v-if="selectedContract.canEditDraft" class="contract-button secondary" type="button" :disabled="draftEditLoading || submittingContract" @click="editContractDraft(selectedContract)">{{ draftEditLoading ? '正在读取…' : '返回上一步编辑' }}</button><button v-if="statusChangeTargets.length" class="contract-button secondary" type="button" @click="openStatusChange">变更状态</button><button v-if="selectedContract.status === '草稿' && selectedContract.canEditDraft" class="contract-button primary" type="button" :disabled="submittingContract" @click="submitSelectedContract">{{ submittingContract ? '正在提交…' : '提交审批' }}</button></footer>
+      </article>
+    </div>
+
+    <div v-if="statusChangeOpen" class="contract-modal-mask" @click.self="closeStatusChange">
+      <article ref="statusChangeElement" class="contract-detail-modal contract-status-change-modal" role="dialog" aria-modal="true" aria-labelledby="contract-status-change-title">
+        <header><div><span class="contract-badge info">状态变更</span><h2 id="contract-status-change-title">{{ selectedContract?.name }}</h2><p>{{ selectedContract?.id }} · 当前状态：{{ selectedContract?.displayStatus }}</p></div><button type="button" aria-label="关闭" @click="closeStatusChange"><ConsoleIcon name="close" /></button></header>
+        <section>
+          <p class="contract-info-banner"><ConsoleIcon name="info" /><span>状态变更需要管理员审批；提交后可在“我发起的”查看进度，审批通过前合同保持当前状态。</span></p>
+          <div class="contract-form-grid">
+            <label><span>目标状态</span><select v-model="statusChangeTarget"><option value="">请选择目标状态</option><option v-for="option in statusChangeTargets" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
+            <label class="contract-status-change-reason"><span>变更原因</span><textarea v-model="statusChangeReason" maxlength="1000" rows="4" placeholder="请填写变更原因（必填，最多 1000 字）"></textarea></label>
+          </div>
+          <p v-if="statusChangeError" class="contract-session-error" role="alert">{{ statusChangeError }}</p>
+        </section>
+        <footer><button class="contract-button secondary" type="button" :disabled="statusChangeSubmitting" @click="closeStatusChange">取消</button><button class="contract-button primary" type="button" :disabled="statusChangeSubmitting || !statusChangeTarget || !statusChangeReason.trim()" @click="submitStatusChange">{{ statusChangeSubmitting ? '正在提交…' : '提交状态变更' }}</button></footer>
       </article>
     </div>
 
     <div v-if="dashboardDetailKey" class="contract-modal-mask" @click.self="dashboardDetailKey = ''"><article class="contract-detail-modal contract-dashboard-detail-modal"><header><div><span class="contract-badge info">企业合同统计</span><h2>{{ dashboardDetailMeta.title }}</h2><p>{{ dashboardDetailMeta.value }} · 数据范围为当前企业</p></div><button type="button" aria-label="关闭" @click="dashboardDetailKey = ''"><ConsoleIcon name="close" /></button></header><section><p v-if="adminDashboard?.contract_detail_limited" class="contract-info-banner"><ConsoleIcon name="info" />明细仅展示最近更新的 200 份合同，卡片统计值为企业全部合同的精确结果。</p><div class="contract-table-scroll"><table class="contract-data-table contract-dashboard-detail-table"><thead><tr><th scope="col">合同编号 / 名称</th><th scope="col">金额</th><th scope="col">负责人</th><th scope="col">到期日期</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead><tbody><tr v-for="contract in dashboardDetailContracts" :key="contract.recordId"><td><strong>{{ contract.name }}</strong><span class="block mono">{{ contract.id }}</span></td><td class="amount">{{ formatContractAmount(contract) }}</td><td>{{ contract.owner }}</td><td>{{ contract.endDate }}</td><td><span class="contract-badge" :class="statusTone(contract.displayStatus)"><i></i>{{ contract.displayStatus }}</span></td><td><button class="contract-text-button" type="button" @click="openDashboardContract(contract)">查看详情</button></td></tr><tr v-if="!dashboardDetailContracts.length"><td colspan="6" class="contract-empty">当前分类暂无合同</td></tr></tbody></table></div></section><footer><button class="contract-button secondary" type="button" @click="dashboardDetailKey = ''">关闭</button></footer></article></div>
 
-    <div v-if="selectedApproval" class="contract-modal-mask" @click.self="closeApproval"><article class="contract-detail-modal contract-approval-modal"><header><div><span class="contract-badge" :class="approvalStatusTone(approvalDetail?.state?.status || selectedApproval.status)"><i></i>{{ approvalStatusLabel(approvalDetail?.state?.status || selectedApproval.status) }}</span><h2>{{ approvalDetail?.contract?.title || '合同审批' }}</h2><p>{{ selectedApproval.type }} · {{ selectedApproval.submittedAt }}</p></div><button type="button" aria-label="关闭" @click="closeApproval"><ConsoleIcon name="close" /></button></header><div v-if="approvalDetailLoading" class="contract-modal-loading">正在加载审批内容与流程记录…</div><template v-else-if="approvalDetail"><p v-if="approvalDetail.snapshot_available === false" class="contract-info-banner"><ConsoleIcon name="info" />该审批创建于历史版本，未保存提交快照；以下展示当前合同，可能与审批时内容不一致。</p><p v-if="approvalDetail.state_unavailable" class="contract-info-banner"><ConsoleIcon name="info" />审批工作流历史已不可查询；以下展示提交时的不可变快照，流程操作已停用。</p><PricingSnapshotSummary :pricing="approvalDetail.contract.pricing || null" /><PaymentTermsSummary :terms="approvalDetail.contract.payment_terms || []" :currency="approvalDetail.contract.currency" /><div class="contract-detail-highlight"><div><span>合同金额</span><strong>{{ formatMinorAmount(approvalDetail.contract.amount_minor, approvalDetail.contract.currency) }}</strong></div><div><span>申请人姓名</span><strong>{{ displayNameFor(approvalDetail.meta.applicant_user_id, approvalDetail.meta.applicant_display_name) }}</strong></div><div><span>当前节点</span><strong>{{ selectedApproval.step }}</strong></div></div><section><h3>审批事项</h3><dl><div><dt>合同编号</dt><dd>{{ approvalDetail.contract.contract_number }}</dd></div><div><dt>合同类型</dt><dd>{{ approvalDetail.contract.contract_type }}</dd></div><div><dt>服务类型</dt><dd>{{ approvalDetail.contract.service_type }}</dd></div><div><dt>审批流程</dt><dd>{{ approvalDetail.meta.rule_id ? '已匹配配置流程' : '系统默认流程' }}</dd></div><div><dt>状态变更</dt><dd>{{ contractStatusLabel(approvalDetail.meta.from_status) }} → {{ contractStatusLabel(approvalDetail.meta.target_status) }}</dd></div><div><dt>申请原因</dt><dd>{{ approvalDetail.meta.reason || '合同提交审批' }}</dd></div></dl></section><section><h3>合同正文</h3><div v-if="approvalContractPreviewLoading" class="contract-modal-loading">正在读取格式化合同…</div><p v-else-if="approvalContractPreviewError" class="contract-session-error">{{ approvalContractPreviewError }}</p><ContractPDFPreview v-else-if="approvalContractPreviewPDF" :descriptor="approvalContractPreviewPDF" title="审批 PDF 快照" /><ContractDocumentPreview v-else-if="approvalContractPreviewHTML" class="contract-saved-document-preview" title="审批合同预览" :html="approvalContractPreviewHTML" /><p v-else class="contract-approval-summary">{{ approvalDetail.contract.content || '未填写合同内容' }}</p></section><section><h3>审批流程</h3><div class="contract-detail-timeline"><div v-for="(runtime, index) in approvalDetail.state.nodes || []" :key="runtime.node.id" :class="{ done: runtime.status === 'approved', active: runtime.status === 'active' }"><i>{{ index + 1 }}</i><span><strong>{{ runtime.node.name }}</strong><small>{{ roleLabel(runtime.node.role_code) }} · {{ approvalStatusLabel(runtime.status) }}</small></span></div></div></section><section v-if="approvalDetail.actions?.length"><h3>处理记录</h3><div class="contract-action-log"><div v-for="action in approvalDetail.actions" :key="action.id"><strong>{{ approvalActionLabel(action.action) }}</strong><span>{{ displayNameFor(action.actor_user_id, action.actor_display_name) }}</span><p>{{ action.comment || '无备注' }} · {{ formatDate(action.occurred_at) }}</p></div></div></section><section><label class="contract-comment-label">审批意见 / 评论<textarea v-model="approvalComment" maxlength="2000" placeholder="驳回、加签、转交、退回和撤回时必须填写原因"></textarea></label><div v-if="can('approval.process')" class="contract-advanced-actions"><label><span>加签 / 转交用户</span><select v-model="approvalTargetUser"><option value="">{{ approvalTargetUsers.length ? '请选择具有合同审批权限的人员' : '没有其他可用审批人员' }}</option><option v-for="user in approvalTargetUsers" :key="user.user_id" :value="user.user_id">{{ user.display_name }}</option></select></label><button class="contract-button secondary small" type="button" :disabled="!approvalTargetUser || approvalCommandBusy" @click="executeApprovalCommand('sign', { target_user_ids: [approvalTargetUser], countersign: 'all' })">加签</button><button class="contract-button secondary small" type="button" :disabled="!approvalTargetUser || approvalCommandBusy" @click="executeApprovalCommand('transfer', { target_user_ids: [approvalTargetUser] })">转交</button><label><span>退回至</span><select v-model="approvalTargetNode"><option value="">请选择已通过节点</option><option v-for="runtime in (approvalDetail.state.nodes || []).filter((item) => item.status === 'approved')" :key="runtime.node.id" :value="runtime.node.id">{{ runtime.node.name }}</option></select></label><button class="contract-button secondary small" type="button" :disabled="!approvalTargetNode || approvalCommandBusy" @click="executeApprovalCommand('return', { target_node_id: approvalTargetNode })">退回</button></div></section></template><footer><button v-if="can('approval.process')" class="contract-button danger" type="button" :disabled="approvalCommandBusy" @click="processApproval('reject')">驳回</button><button class="contract-button secondary" type="button" :disabled="approvalCommandBusy || !approvalComment.trim()" @click="executeApprovalCommand('comments')">发表评论</button><button v-if="can('approval.manage')" class="contract-button secondary" type="button" :disabled="approvalCommandBusy" @click="repairApprovalState">修复审批状态</button><button v-if="can('approval.manage') || approvalDetail?.meta?.applicant_user_id === session?.user_id" class="contract-button secondary" type="button" :disabled="approvalCommandBusy" @click="executeApprovalCommand('urge')">催办</button><button v-if="approvalDetail?.meta?.applicant_user_id === session?.user_id" class="contract-button secondary" type="button" :disabled="approvalCommandBusy" @click="executeApprovalCommand('withdraw', {}, { close: true })">撤回</button><button v-if="can('approval.process')" class="contract-button primary" type="button" :disabled="approvalCommandBusy" @click="processApproval('approve')"><ConsoleIcon name="save" />同意</button></footer></article></div>
+    <div v-if="selectedApproval" class="contract-modal-mask" @click.self="closeApproval"><article class="contract-detail-modal contract-approval-modal"><header><div><span class="contract-badge" :class="approvalStatusTone(approvalDetail?.state?.status || selectedApproval.status)"><i></i>{{ approvalStatusLabel(approvalDetail?.state?.status || selectedApproval.status) }}</span><h2>{{ approvalDetail?.contract?.title || '合同审批' }}</h2><p>{{ selectedApproval.type }} · {{ selectedApproval.submittedAt }}</p></div><button type="button" aria-label="关闭" @click="closeApproval"><ConsoleIcon name="close" /></button></header><div v-if="approvalDetailLoading" class="contract-modal-loading">正在加载审批内容与流程记录…</div><template v-else-if="approvalDetail"><p v-if="approvalDetail.snapshot_available === false" class="contract-info-banner"><ConsoleIcon name="info" />该审批创建于历史版本，未保存提交快照；以下展示当前合同，可能与审批时内容不一致。</p><p v-if="approvalDetail.state_unavailable" class="contract-info-banner"><ConsoleIcon name="info" />审批工作流历史已不可查询；以下展示提交时的不可变快照，流程操作已停用。</p><PricingSnapshotSummary :pricing="approvalDetail.contract.pricing || null" /><PaymentTermsSummary :terms="approvalDetail.contract.payment_terms || []" :currency="approvalDetail.contract.currency" /><div class="contract-detail-highlight"><div><span>合同金额</span><strong>{{ formatMinorAmount(approvalDetail.contract.amount_minor, approvalDetail.contract.currency) }}</strong></div><div><span>申请人姓名</span><strong>{{ displayNameFor(approvalDetail.meta.applicant_user_id, approvalDetail.meta.applicant_display_name) }}</strong></div><div><span>当前节点</span><strong>{{ selectedApproval.step }}</strong></div></div><section><h3>审批事项</h3><dl><div><dt>合同编号</dt><dd>{{ approvalDetail.contract.contract_number }}</dd></div><div><dt>合同类型</dt><dd>{{ approvalDetail.contract.contract_type }}</dd></div><div><dt>服务类型</dt><dd>{{ approvalDetail.contract.service_type }}</dd></div><div><dt>审批流程</dt><dd>{{ approvalDetail.meta.rule_id ? '已匹配配置流程' : '系统默认流程' }}</dd></div><div><dt>状态变更</dt><dd>{{ contractStatusLabel(approvalDetail.meta.from_status) }} → {{ contractStatusLabel(approvalDetail.meta.target_status) }}</dd></div><div><dt>申请原因</dt><dd>{{ approvalDetail.meta.reason || '合同提交审批' }}</dd></div></dl></section><section><div class="contract-section-title"><h3>合同正文</h3><button class="contract-text-button" type="button" :disabled="approvalSourceBusy" @click="downloadApprovalSource">{{ approvalSourceBusy ? '正在下载…' : '下载合同原件' }}</button></div><div v-if="approvalContractPreviewLoading" class="contract-modal-loading">正在读取格式化合同…</div><p v-else-if="approvalContractPreviewError" class="contract-session-error">{{ approvalContractPreviewError }}</p><ContractPDFPreview v-else-if="approvalContractPreviewPDF" :descriptor="approvalContractPreviewPDF" title="审批 PDF 快照" /><ContractDocumentPreview v-else-if="approvalContractPreviewHTML" class="contract-saved-document-preview" title="审批合同预览" :html="approvalContractPreviewHTML" /><p v-else class="contract-approval-summary">{{ approvalDetail.contract.content || '未填写合同内容' }}</p></section><section><h3>审批流程</h3><div class="contract-detail-timeline"><div v-for="(runtime, index) in approvalDetail.state.nodes || []" :key="runtime.node.id" :class="{ done: runtime.status === 'approved', active: runtime.status === 'active' }"><i>{{ index + 1 }}</i><span><strong>{{ runtime.node.name }}</strong><small>{{ roleLabel(runtime.node.role_code) }} · {{ approvalStatusLabel(runtime.status) }}</small></span></div></div></section><section v-if="approvalDetail.actions?.length"><h3>处理记录</h3><div class="contract-action-log"><div v-for="action in approvalDetail.actions" :key="action.id"><strong>{{ approvalActionLabel(action.action) }}</strong><span>{{ displayNameFor(action.actor_user_id, action.actor_display_name) }}</span><p>{{ action.comment || '无备注' }} · {{ formatDate(action.occurred_at) }}</p></div></div></section><section><label class="contract-comment-label">审批意见 / 评论<textarea v-model="approvalComment" maxlength="2000" placeholder="驳回、加签、转交、退回和撤回时必须填写原因"></textarea></label><div v-if="can('approval.process')" class="contract-advanced-actions"><label><span>加签 / 转交用户</span><select v-model="approvalTargetUser"><option value="">{{ approvalTargetUsers.length ? '请选择具有合同审批权限的人员' : '没有其他可用审批人员' }}</option><option v-for="user in approvalTargetUsers" :key="user.user_id" :value="user.user_id">{{ user.display_name }}</option></select></label><button class="contract-button secondary small" type="button" :disabled="!approvalTargetUser || approvalCommandBusy" @click="executeApprovalCommand('sign', { target_user_ids: [approvalTargetUser], countersign: 'all' })">加签</button><button class="contract-button secondary small" type="button" :disabled="!approvalTargetUser || approvalCommandBusy" @click="executeApprovalCommand('transfer', { target_user_ids: [approvalTargetUser] })">转交</button><label><span>退回至</span><select v-model="approvalTargetNode"><option value="">请选择已通过节点</option><option v-for="runtime in (approvalDetail.state.nodes || []).filter((item) => item.status === 'approved')" :key="runtime.node.id" :value="runtime.node.id">{{ runtime.node.name }}</option></select></label><button class="contract-button secondary small" type="button" :disabled="!approvalTargetNode || approvalCommandBusy" @click="executeApprovalCommand('return', { target_node_id: approvalTargetNode })">退回</button></div></section></template><footer><button v-if="can('approval.process')" class="contract-button danger" type="button" :disabled="approvalCommandBusy" @click="processApproval('reject')">驳回</button><button class="contract-button secondary" type="button" :disabled="approvalCommandBusy || !approvalComment.trim()" @click="executeApprovalCommand('comments')">发表评论</button><button v-if="can('approval.manage')" class="contract-button secondary" type="button" :disabled="approvalCommandBusy" @click="repairApprovalState">修复审批状态</button><button v-if="can('approval.manage') || approvalDetail?.meta?.applicant_user_id === session?.user_id" class="contract-button secondary" type="button" :disabled="approvalCommandBusy" @click="executeApprovalCommand('urge')">催办</button><button v-if="approvalDetail?.meta?.applicant_user_id === session?.user_id" class="contract-button secondary" type="button" :disabled="approvalCommandBusy" @click="executeApprovalCommand('withdraw', {}, { close: true })">撤回</button><button v-if="can('approval.process')" class="contract-button primary" type="button" :disabled="approvalCommandBusy" @click="processApproval('approve')"><ConsoleIcon name="save" />同意</button></footer></article></div>
 
     <div v-if="ruleDialogOpen" class="contract-modal-mask" @click.self="ruleDialogOpen = false"><form class="contract-detail-modal contract-rule-modal" @submit.prevent="saveRule"><header><div><span class="contract-badge info">规则引擎</span><h2>{{ editingRuleId ? '编辑审批规则' : '新增审批规则' }}</h2><p>按优先级从高到低匹配，命中第一条规则后固化到审批实例。</p></div><button type="button" aria-label="关闭" @click="ruleDialogOpen = false"><ConsoleIcon name="close" /></button></header><section><div class="contract-form-grid"><label><span>规则名称</span><input v-model="ruleForm.name" required maxlength="128" autocomplete="off" placeholder="例如：标准服务简化审批" /></label><label><span>优先级</span><input v-model.number="ruleForm.priority" required type="number" min="0" max="9999" step="1" /></label><label><span>条件关系</span><select v-model="ruleForm.logical" :disabled="ruleForm.expressionReadonly"><option value="and">全部满足（AND）</option><option value="or">任一满足（OR）</option></select></label><label class="contract-check-label"><input v-model="ruleForm.enabled" type="checkbox" /><span>保存后立即启用</span></label></div></section><section v-if="ruleForm.expressionReadonly"><h3>触发条件（只读）</h3><p class="contract-info-banner">此规则包含嵌套条件组，当前表单完整保留原条件，不修改或展开为平铺条件；可修改规则基本信息和审批节点。</p><p>{{ ruleConditionSummary({ expression: ruleForm.originalExpression }) }}</p></section><section v-else><div class="contract-section-title"><h3>触发条件</h3><button class="contract-text-button" type="button" @click="addRuleCondition">＋ 添加条件</button></div><div class="contract-rule-editor-list"><div v-for="(condition, index) in ruleForm.conditions" :key="index"><select v-model="condition.field" @change="condition.operator = conditionOperators(condition.field)[0].value; condition.value = conditionField(condition.field).kind === 'boolean' ? true : ''"><option v-for="field in ruleFieldOptions" :key="field.value" :value="field.value">{{ field.label }}</option></select><select v-model="condition.operator"><option v-for="operator in conditionOperators(condition.field)" :key="operator.value" :value="operator.value">{{ operator.label }}</option></select><select v-if="conditionField(condition.field).kind === 'boolean'" v-model="condition.value"><option :value="true">是</option><option :value="false">否</option></select><input v-else v-model="condition.value" required maxlength="1000" :type="conditionField(condition.field).kind === 'number' ? 'number' : 'text'" :step="conditionField(condition.field).kind === 'number' ? '0.01' : undefined" :placeholder="condition.operator === 'in' ? '多个值用逗号分隔' : '条件值'" /><button type="button" aria-label="删除条件" :disabled="ruleForm.conditions.length === 1" @click="ruleForm.conditions.splice(index, 1)">×</button></div></div></section><section><div class="contract-section-title"><h3>审批节点</h3><button class="contract-text-button" type="button" @click="addRuleNode">＋ 添加节点</button></div><div class="contract-rule-editor-list nodes"><div v-for="(node, index) in ruleForm.nodes" :key="index"><input v-model="node.name" required maxlength="128" autocomplete="off" placeholder="节点名称" /><select v-model="node.role_code" required><option value="">请选择审批角色</option><option v-if="node.role_code && !contractRole(node.role_code)" :value="node.role_code">未识别角色</option><option v-for="role in CONTRACT_ROLE_DEFINITIONS" :key="role.code" :value="role.code">{{ role.name }}</option></select><select v-model="node.countersign" disabled><option value="any">或签（任一）</option></select><button type="button" aria-label="删除节点" :disabled="ruleForm.nodes.length === 1" @click="ruleForm.nodes.splice(index, 1)">×</button></div></div></section><footer><button class="contract-button secondary" type="button" @click="ruleDialogOpen = false">取消</button><button class="contract-button primary" type="submit" :disabled="ruleSaving">{{ ruleSaving ? '正在保存…' : '保存规则' }}</button></footer></form></div>
 

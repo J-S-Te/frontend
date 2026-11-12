@@ -464,3 +464,15 @@ test('看板卡片改用服务端看板明细，不再对台账当前页汇总',
   assert.match(view, /const personalContractCount = computed\(\(\) => summarizableContracts\.value\.length\)/)
   assert.match(view, /\{\{ personalContractCount \}\}/)
 })
+
+// 原型对齐：合同台账列顺序为编号 / 标题 / 客户 / 金额 / 状态 / 起止日期 / 操作，
+// 负责人、类型等字段保留在详情与导出中，不再挤占台账首屏。
+test('台账列按原型顺序展示编号、标题、客户、金额、状态与起止日期', () => {
+  const start = view.indexOf('contract-ledger-table')
+  assert.ok(start >= 0, '缺少台账表格')
+  const end = view.indexOf('</table>', start)
+  assert.ok(end > start, '台账表格未闭合')
+  const table = view.slice(start, end)
+  const headers = [...table.matchAll(/<th scope="col">([^<]+)<\/th>/g)].map((match) => match[1])
+  assert.deepEqual(headers, ['合同编号', '合同标题', '客户', '合同金额', '状态', '开始日期', '结束日期', '操作'])
+})

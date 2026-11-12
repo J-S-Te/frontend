@@ -79,3 +79,14 @@ test('合同授权在新标签页建立会话，不劫持当前页面', () => {
   assert.match(source, /export function openContractAuthorizationInNewTab\(\)/)
   assert.match(source, /window\.open\(`\$\{CONTRACT_PUBLIC_PATH_PREFIX\}\/auth\/login`, '_blank', 'noopener'\)/)
 })
+
+// 合同状态变更必须携带乐观版本、目标状态与原因，且只接受“直接变更”或“已启动审批”两种形状。
+test('contract status change posts optimistic version, target and reason', () => {
+  assert.ok(source.includes('export async function changeContractStatus'), '缺少 changeContractStatus')
+  assert.ok(source.includes('/status-changes'), '状态变更必须走 status-changes 路由')
+  assert.ok(source.includes('encodeURIComponent(contractId)'), '合同标识必须编码')
+  assert.ok(source.includes('target_status: String(change.targetStatus'), '目标状态字段名必须是 target_status')
+  assert.ok(source.includes("reason: String(change.reason || '').trim()"), '原因必须去空白后提交')
+  assert.ok(source.includes('version: Number(change.version) || 0'), '必须携带乐观版本')
+  assert.ok(source.includes("data.status === 'changed' || resourceID(data.approval_id)"), '响应必须是直接变更或审批号')
+})

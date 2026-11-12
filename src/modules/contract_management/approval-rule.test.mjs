@@ -82,3 +82,16 @@ test('read-only groups cannot silently resave amounts outside the exact integer 
   assert.throws(() => editRule({ ...baseRule, expression }), /安全编辑/)
   assert.equal(ruleForm.value, null)
 })
+
+// 原型审批规则页是左右两栏：左侧规则列表选择，右侧展示选中规则的流程预览。
+test('rules page follows the prototype two-column list and flow preview', () => {
+  assert.match(view, /const selectedRuleID = ref\(''\)/)
+  assert.match(view, /const selectedRule = computed/)
+  assert.match(view, /class="contract-rule-layout"/)
+  assert.match(view, /@click="selectRule\(rule\)"/)
+  assert.match(view, /class="contract-card contract-rule-preview"/)
+  assert.match(view, /selectedRule\.name \}\} · 流程预览/)
+  assert.match(view, /editRule\(selectedRule\)/)
+  assert.match(view, /toggleRule\(selectedRule\)/)
+  assert.match(view, /removeRule\(selectedRule\)/)
+})
