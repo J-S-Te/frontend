@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { borrowStatusLabels, claimStatusLabel, failureMessage, failureText, packageStatusLabels } from './statusLabels.js'
+import { borrowStatusLabels, claimStatusLabel, claimStatusTone, failureMessage, failureText, packageStatusLabels } from './statusLabels.js'
 
 test('异步任务、原件与审批任务的状态码都显示中文，未知编码保留原文', () => {
   for (const code of ['PROCESSING', 'READY', 'PARSED', 'PARTIAL', 'RECORDED', 'WAITING',
@@ -13,6 +13,16 @@ test('异步任务、原件与审批任务的状态码都显示中文，未知�
   assert.equal(claimStatusLabel(''), '待确认')
   assert.equal(packageStatusLabels.PROCESSING, '生成中')
   assert.equal(borrowStatusLabels.PENDING, '待审核')
+})
+
+test('状态胶囊 tone 稳定，未知状态不被误标为成功', () => {
+  assert.equal(claimStatusTone('PAID'), 'success')
+  assert.equal(claimStatusTone('IN_APPROVAL'), 'warning')
+  assert.equal(claimStatusTone('RETURNED'), 'danger')
+  assert.equal(claimStatusTone('APPROVED'), 'info')
+  assert.equal(claimStatusTone('DRAFT'), 'gray')
+  assert.equal(claimStatusTone('FUTURE_BACKEND_CODE'), 'gray')
+  assert.equal(claimStatusTone(''), 'gray')
 })
 
 test('失败码翻译为原因和下一步，不把机器码交给用户', () => {
