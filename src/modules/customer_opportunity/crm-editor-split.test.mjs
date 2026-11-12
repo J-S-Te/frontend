@@ -82,6 +82,7 @@ function customerHarness(overrides = {}) {
     createCustomer: async () => { calls.create += 1; return { id: 'c1', customer_no: 'C-1' } },
     updateCustomer: async () => { calls.update += 1; return { id: 'c1', version: 2 } },
     loadCurrent: async () => { calls.refresh += 1 },
+    customerStats: { loadedAt: 0 },
     ...overrides,
   }
   const name = 'submitCustomer'

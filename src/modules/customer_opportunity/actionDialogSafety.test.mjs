@@ -68,6 +68,7 @@ test('合并客户确认期间源客户、目标或版本变化均不误合并�
       askConfirm: () => dialog.promise,
       mergeCustomers: async (...args) => { calls.push(args); return {} },
       loadCurrent: async () => {}, notice: { value: '' }, showError: (error) => { throw error },
+      customerStats: { loadedAt: 0 },
       window: { confirm: () => { throw new Error('合并操作仍使用同步原生弹窗') } },
     }
     const run = operation(view, 'submitCustomerMerge', scope)()
@@ -183,6 +184,7 @@ test('客户合并确认后提交两个客户的版本和原因', async () => {
     askConfirm: async () => true,
     mergeCustomers: async (...args) => { calls.push(args); return { migrated_counts: {} } },
     loadCurrent: async () => {}, notice: { value: '' }, showError: (error) => { throw error },
+    customerStats: { loadedAt: 0 },
   }
   await operation(view, 'submitCustomerMerge', scope)()
   assert.deepEqual(calls, [[{

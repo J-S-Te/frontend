@@ -177,8 +177,11 @@ const platformSessions = createPlatformSessionSynchronizer({
 watch(() => route.meta.requiresPlatformSession === true, platformSessions.synchronize, { immediate: true })
 watch(() => sessionTargetForRoute(route.meta)?.key, () => {
   const target = sessionTargetForRoute(route.meta)
+  // 统一入口时钟只在平台确认中央模式后启动。滚动发布/本地 legacy 模式仍可能让
+  // 子系统返回 503（中央会话未启用），此时由 legacyLifecycle 按 /auth/me 的空闲字段
+  // 维持会话，不能由路由 watcher 提前发起中央 /auth/session 探测。
+  if (platformSessionMode !== 'central') { lifecycle.stop(); return }
   if (target?.key !== 'Platform') void lifecycle.setTarget(target)
-  else if (platformSessionMode !== 'central') lifecycle.stop()
 }, { immediate: true })
 
 // onExternalSessionEnd 仅对用户显式全局退出清理界面；其他失效信号先核对当前入口。
