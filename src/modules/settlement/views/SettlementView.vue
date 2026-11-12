@@ -1237,6 +1237,6 @@ watch(invoiceDetailID, load);
 </template>
 
 <style scoped>
-.settlement-topbar-notifications{position:relative;display:inline-flex}
-.settlement-notification-popover{position:absolute;right:0;top:calc(100% + 8px);width:420px;max-width:calc(100vw - 32px);padding:12px;border:1px solid var(--border,#e2e8f0);border-radius:12px;background:var(--bg,#fff);color:inherit;box-shadow:0 12px 32px rgba(15,23,42,.18);z-index:60}
+.settlement-topbar-notifications{--settlement-popover-z:60;position:relative;display:inline-flex}
+.settlement-notification-popover{position:absolute;right:0;top:calc(100% + 8px);width:420px;max-width:calc(100vw - 32px);padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--bg);color:inherit;box-shadow:0 12px 32px rgba(15,23,42,.18);z-index:var(--settlement-popover-z)}
 </style>
