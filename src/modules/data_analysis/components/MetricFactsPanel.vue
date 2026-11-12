@@ -36,6 +36,13 @@ async function refresh() {
     if (mounted && ticket === requestVersion) summary.value = result
   } catch (failure) {
     if (mounted && ticket === requestVersion) {
+      // 旧后端尚未发布指标事实端点时隐藏本面板，不把跨版本差异显示成红色错误；
+      // 端点上线后同一前端无需改动即可恢复真实指标展示。
+      if (failure?.status === 404) {
+        error.value = ''
+        summary.value = null
+        return
+      }
       error.value = formatDataAnalysisError(failure, { fallback: '新增指标读取失败，请稍后重试。' })
     }
   } finally {
