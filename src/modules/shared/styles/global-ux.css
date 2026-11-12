@@ -26,6 +26,10 @@
 body { overflow-wrap: anywhere; }
 fieldset { min-inline-size: 0; }
 :where(input, select, textarea) { min-width: 0; max-width: 100%; }
+/* Safari/WebKit：原生 select 的 option 文本会被计入 label/栅格的 scrollWidth，
+   即使 select 自身已 max-width:100%，仍会把表单栅格和页面撑宽。
+   只裁剪 select 自身的横向滚动内容，原生下拉弹层、焦点环和纵向高度不受影响。 */
+select { overflow-x: clip; }
 :where(pre) { min-width: 0; max-width: 100%; overflow: auto; }
 
 /* Grid/Flex默认的最小内容宽度会被长选项、编号或表格放大。
