@@ -24,3 +24,16 @@ test('admin dashboard opens the matching contract and requests persisted DOCX fo
   assert.match(source, /async function openContract\(contract\)[\s\S]*previewContractDocument\(contract\.recordId\)/)
   assert.doesNotMatch(source, /if \(contract\.templateId\)/)
 })
+
+test('dashboard header and todo list follow the prototype information density', () => {
+  assert.ok(source.includes('const pageDescription = computed(() => {'))
+  assert.ok(source.includes('您好，${currentUserLabel.value} · 当前角色：${currentRoleLabel.value} · 您有 ${approvals.value.length} 项审批待处理'))
+  assert.ok(source.includes('<p>{{ pageDescription }}</p>'))
+  assert.ok(source.includes('class="contract-card contract-dashboard-todo"'))
+  assert.ok(source.includes('我的待办'))
+  assert.ok(source.includes('approvals.slice(0, 5)'))
+  assert.ok(source.includes('@click="openApproval(approval)"'))
+  assert.ok(source.includes("can('approval.process') ? '处理' : '查看'"))
+  // 原型的问候信息由页头承载；旧的整块欢迎横幅不再保留。
+  assert.equal(source.includes('class="contract-welcome"'), false)
+})

@@ -77,3 +77,15 @@ test('approval progress renders its template contract with document formatting',
   assert.match(source, /v-else-if="approvalContractPreviewHTML"/)
   assert.match(source, /ContractDocumentPreview[^>]*:html="approvalContractPreviewHTML"/)
 })
+
+// 原型模板页带搜索条与结果计数；当前数据没有“类型/适用业务/状态”，先按名称/文件名做真实本地筛选。
+test('template list supports name/file search with a real count and empty state', () => {
+  assert.match(viewSource, /const templateKeyword = ref\(''\)/)
+  assert.match(viewSource, /const filteredContractTemplates = computed/)
+  assert.match(viewSource, /item\.original_filename/)
+  assert.match(viewSource, /v-model="templateKeyword"/)
+  assert.match(viewSource, /共 \{\{ filteredContractTemplates\.length \}\} 套模板/)
+  assert.match(viewSource, /v-for="\(item, index\) in filteredContractTemplates"/)
+  assert.match(viewSource, /没有匹配的合同模板/)
+  assert.match(viewSource, /换一个关键词，或清空搜索后查看全部模板。/)
+})

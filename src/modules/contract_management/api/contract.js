@@ -511,19 +511,34 @@ export function approvedContractDownloadURL(contractId, format) {
   return `${API_BASE_URL}/approved-contracts/${encodeURIComponent(contractId)}/${format}`
 }
 
-/** 就地请求下载，避免拒绝下载时将用户导航至原始错误响应。 */
-export async function downloadContractFile(contractId, format) {
-  const contentTypes = { docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', pdf: 'application/pdf', 'stamped-pdf': 'application/pdf' }
-  if (!contentTypes[format]) throw new Error('请选择支持的合同文件格式。')
-  const path = `/approved-contracts/${encodeURIComponent(contractId)}/${format}`
-  const context = { subsystem: 'contract_management', feature: 'contract_download', operation: 'GET', method: 'GET', path }
+/** 从 Content-Disposition 提取受控文件名；非法编码不阻断已经完成的文件传输。 */
+function downloadFilename(response, fallback) {
+  const disposition = response.headers.get('content-disposition') || ''
+  const name = disposition.match(/filename\*=UTF-8''([^;]+)/i) || disposition.match(/filename="?([^";]+)/i)
+  if (!name) return fallback
+  try {
+    return decodeURIComponent(name[1]).replace(/[\\/\u0000-\u001f\u007f]/g, '_').trim() || fallback
+  } catch {
+    return fallback
+  }
+}
+
+/**
+ * downloadBinary 就地下载合同文件，避免拒绝下载时将用户导航至原始错误响应。
+ * 调用方负责先做格式/参数校验；这里统一处理超时、HTTP 错误、媒体类型与空文件。
+ * @param {string} path 合同后端的同源相对路径。
+ * @param {{accept: string, fallbackFilename: string|((mediaType: string) => string), feature?: string}} options 允许的媒体类型与兜底文件名。
+ * @returns {Promise<{blob: Blob, filename: string}>} 文件内容与受控文件名。
+ */
+async function downloadBinary(path, { accept, fallbackFilename, feature = 'contract_download' }) {
+  const context = { subsystem: 'contract_management', feature, operation: 'GET', method: 'GET', path }
   // 合同 DOCX/PDF/盖章 PDF 属于下载类请求：附加超时 signal，避免网络挂起时永久等待。
   const downloadAbort = downloadRequestSignal()
   let response
   try {
-    response = await fetch(approvedContractDownloadURL(contractId, format), { credentials: 'include', signal: downloadAbort.signal, headers: { Accept: contentTypes[format] } })
+    response = await fetch(`${API_BASE_URL}${path}`, { credentials: 'include', signal: downloadAbort.signal, headers: { Accept: accept } })
   } catch (cause) {
-    if (downloadAbort.timedOut()) throw downloadTimeoutError(cause, { feature: 'contract_download', path, code: 'CONTRACT_DOWNLOAD_TIMEOUT' })
+    if (downloadAbort.timedOut()) throw downloadTimeoutError(cause, { feature, path, code: 'CONTRACT_DOWNLOAD_TIMEOUT' })
     throw contractRequestError(null, null, context, { code: 'NETWORK_ERROR', fallback: '合同文件下载未完成，请检查网络后重新下载。' })
   }
   if (!response.ok) {
@@ -539,26 +554,45 @@ export async function downloadContractFile(contractId, format) {
     throw error
   }
   const mediaType = (response.headers.get('content-type') || '').split(';', 1)[0].trim().toLowerCase()
-  if (mediaType !== contentTypes[format]) {
+  const accepted = accept.split(',').map((value) => value.trim().toLowerCase()).filter(Boolean)
+  if (!accepted.includes(mediaType)) {
     throw contractRequestError(null, response, context, { code: 'INVALID_DOWNLOAD_RESPONSE', fallback: '合同下载服务返回的文件格式异常，请联系管理员检查下载配置。' })
   }
   let blob
   try { blob = await response.blob() }
   catch (cause) {
     // 超时可能发生在响应体传输阶段，不能降级成普通网络中断。
-    if (downloadAbort.timedOut()) throw downloadTimeoutError(cause, { feature: 'contract_download', path, code: 'CONTRACT_DOWNLOAD_TIMEOUT' })
+    if (downloadAbort.timedOut()) throw downloadTimeoutError(cause, { feature, path, code: 'CONTRACT_DOWNLOAD_TIMEOUT' })
     throw contractRequestError(null, response, context, { code: 'NETWORK_ERROR', fallback: '合同文件传输中断，请检查网络后重新下载。' })
   }
   if (!blob.size) throw contractRequestError(null, response, context, { code: 'INVALID_DOWNLOAD_RESPONSE', fallback: '合同文件为空，请联系管理员核对已保存的合同文件。' })
-  const fallback = `合同-${contractId}.${format === 'docx' ? 'docx' : 'pdf'}`
-  const disposition = response.headers.get('content-disposition') || ''
-  const name = disposition.match(/filename\*=UTF-8''([^;]+)/i) || disposition.match(/filename="?([^";]+)/i)
-  let filename = fallback
-  if (name) {
-    try { filename = decodeURIComponent(name[1]).replace(/[\\/\u0000-\u001f\u007f]/g, '_').trim() || fallback }
-    catch { /* 非法文件名编码不能阻断已经完成的文件传输。 */ }
-  }
-  return { blob, filename }
+  const fallback = typeof fallbackFilename === 'function' ? fallbackFilename(mediaType) : fallbackFilename
+  return { blob, filename: downloadFilename(response, fallback) }
+}
+
+export async function downloadContractFile(contractId, format) {
+  const contentTypes = { docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', pdf: 'application/pdf', 'stamped-pdf': 'application/pdf' }
+  if (!contentTypes[format]) throw new Error('请选择支持的合同文件格式。')
+  return downloadBinary(`/approved-contracts/${encodeURIComponent(contractId)}/${format}`, {
+    accept: contentTypes[format],
+    fallbackFilename: `合同-${contractId}.${format === 'docx' ? 'docx' : 'pdf'}`,
+  })
+}
+
+/**
+ * downloadApprovalContractSource 下载审批快照对应的合同原件（DOCX 或 PDF）。
+ * 审批详情的 PDF 预览由 ContractPDFPreview 直接读取 descriptor；此入口补 DOCX 原件下载，
+ * 仍由后端按审批参与范围复核快照，不以当前合同文件替换。
+ * @param {string|number} approvalId 审批实例标识。
+ * @returns {Promise<{blob: Blob, filename: string}>} 文件内容与受控文件名。
+ * @throws {Error} 会话失效、网络失败、服务端拒绝或响应结构异常时抛出。
+ */
+export function downloadApprovalContractSource(approvalId) {
+  return downloadBinary(`/approvals/${encodeURIComponent(approvalId)}/contract-source`, {
+    accept: 'application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    fallbackFilename: (mediaType) => `审批合同-${approvalId}.${mediaType === 'application/pdf' ? 'pdf' : 'docx'}`,
+    feature: 'contract_approval_source',
+  })
 }
 
 /**
@@ -1043,6 +1077,33 @@ export async function submitContract(contractId, payload = {}) {
   })
 }
 
+/**
+ * changeContractStatus 发起合同状态变更。
+ * 需要审批的目标状态由后端返回 202 与 approval_id；可直接变更的目标返回 200 和 status=changed。
+ * 版本、当前状态与目标状态由服务端状态机复核，前端只提交用户选择与原因。
+ * @param {string|number} contractId 合同标识。
+ * @param {{version?:number,targetStatus?:string,reason?:string}} [change={}] 当前版本、目标状态与变更原因。
+ * @returns {Promise<{changed:boolean,approvalId:string}>} changed=true 表示已直接变更，否则表示已启动审批。
+ * @throws {Error} 网络失败、响应解析失败或服务端返回非成功状态时抛出。
+ */
+export async function changeContractStatus(contractId, change = {}) {
+  const payload = {
+    version: Number(change.version) || 0,
+    target_status: String(change.targetStatus || ''),
+    reason: String(change.reason || '').trim(),
+  }
+  const data = await request(`/contracts/${encodeURIComponent(contractId)}/status-changes`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+    validateData: (data) => resourceObject(data)
+      && (data.status === 'changed' || resourceID(data.approval_id)),
+  })
+  return {
+    changed: data.status === 'changed' && !data.approval_id,
+    approvalId: data.approval_id || '',
+  }
+}
+
 export async function getContract(contractId) {
   return request(`/contracts/${encodeURIComponent(contractId)}`)
 }
@@ -1398,6 +1459,52 @@ export async function retryFailedIntegrationOutboxEvent(kind, id) {
     method: 'POST',
     validateData: (data) => resourceObject(data) && data.id === eventID
       && data.kind === queue && data.status === 'retry',
+  })
+}
+
+// 审计死信（Audit Outbox）运维：平台审计上报失败后的事件。
+// 与集成死信分开：字段、权限（approval.manage）和重试路由都不同，不能混用队列。
+function auditOutboxItemResource(value) {
+  return resourceObject(value)
+    && resourceID(value.id)
+    && resourceID(value.event_id)
+    && typeof value.action === 'string'
+    && typeof value.resource_type === 'string'
+    && typeof value.resource_id === 'string'
+    && typeof value.request_id === 'string'
+    && typeof value.last_error === 'string'
+    && Number.isSafeInteger(value.attempts) && value.attempts >= 0
+    && resourceID(value.created_at)
+}
+
+/**
+ * listFailedAuditOutboxEvents 读取当前租户处于 dead 状态的审计上报事件。
+ * @param {{limit?: number}} [options={}] limit 为服务端上限内的读取条数。
+ * @returns {Promise<Array<unknown>>} 审计死信列表；响应结构不符时抛错。
+ * @throws {Error} 会话失效、网络失败、服务端拒绝或响应结构异常时抛出。
+ */
+export async function listFailedAuditOutboxEvents({ limit = 100 } = {}) {
+  const size = Math.min(200, Math.max(1, Number(limit) || 100))
+  const data = await request(`/audit-outbox/failed?limit=${size}`, {
+    validateData: (value) => resourceObject(value) && Array.isArray(value.items)
+      && value.items.every(auditOutboxItemResource),
+  })
+  return data.items
+}
+
+/**
+ * retryFailedAuditOutboxEvent 把一条审计死信重置为待投递；是否送达仍由后台投递决定。
+ * @param {string|number} id 审计死信标识。
+ * @returns {Promise<Record<string, unknown>>} 服务端重置回执；结构不符时抛错。
+ * @throws {Error} 参数不合法、会话失效、网络失败、服务端拒绝或响应结构异常时抛出。
+ */
+export async function retryFailedAuditOutboxEvent(id) {
+  const eventID = String(id ?? '').trim()
+  if (!resourceID(eventID) || eventID.length > 64) throw new Error('审计死信标识不合法，无法重试。')
+  return request(`/audit-outbox/failed/${encodeURIComponent(eventID)}/retry`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+    validateData: (data) => resourceObject(data) && data.id === eventID && data.status === 'retry',
   })
 }
 

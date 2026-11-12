@@ -71,3 +71,23 @@ test('add-sign candidates are limited to users with contract approval permission
   assert.match(source, /state_unavailable/)
   assert.match(source, /审批工作流历史已不可查询/)
 })
+
+// 原型对齐：审批中心增加“状态变更审批”页签，按服务端 approval.kind 过滤并去重，
+// 不在前端猜测审批类型。
+test('approval center exposes a status-change tab filtered by server kind', () => {
+  assert.match(source, /const statusChangeApprovals = computed/)
+  assert.match(source, /item\.kind !== 'status_change'/)
+  assert.match(source, /seen\.has\(item\.id\)/)
+  assert.match(source, /@click="approvalTab = 'status'"/)
+  assert.match(source, /状态变更审批 <i>\{\{ statusChangeApprovals\.length \}\}<\/i>/)
+  assert.match(source, /v-for="approval in statusChangeApprovals"/)
+  assert.match(source, /当前没有状态变更审批/)
+})
+
+// 原型卡片信息密度：展示申请人，类型用服务端 kind 的标签，而不是写死“合同审批”。
+test('approval cards show applicant and server-provided kind labels', () => {
+  assert.match(source, /applicant: displayNameFor\(item\.applicant_user_id, item\.applicant_display_name\)/)
+  assert.match(source, /kind: String\(item\.kind \|\| ''\)/)
+  assert.match(source, /申请人 \{\{ approval\.applicant \}\} · 提交于/)
+  assert.match(source, /<h3>\{\{ approval\.type \}\}<\/h3>/)
+})

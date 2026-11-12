@@ -5,16 +5,17 @@ import { readFile } from 'node:fs/promises'
 const viewSource = await readFile(new URL('./views/ContractManagementView.vue', import.meta.url), 'utf8')
 const routerSource = await readFile(new URL('../../router/index.js', import.meta.url), 'utf8')
 
-test('集成死信作为独立运维分区接入合同后台导航', () => {
-  assert.match(viewSource, /outbox: \{ title: '集成死信', description: '[^']+' \}/)
-  assert.match(viewSource, /label: '运维\/集成', items: \[\{ key: 'outbox', label: '集成死信', icon: 'reset' \}\]/)
+test('死信运维作为独立分区接入合同后台导航，覆盖集成与审计两类死信', () => {
+  assert.match(viewSource, /outbox: \{ title: '死信运维', description: '[^']+' \}/)
+  assert.match(viewSource, /label: '运维\/集成', items: \[\{ key: 'outbox', label: '死信运维', icon: 'reset' \}\]/)
   // 管理员与普通角色导航都声明该入口，实际可见性由 canAccessContractSection 过滤。
-  assert.equal((viewSource.match(/key: 'outbox', label: '集成死信'/g) || []).length, 2)
+  assert.equal((viewSource.match(/key: 'outbox', label: '死信运维'/g) || []).length, 2)
 })
 
-test('集成死信面板只在对应分区挂载，并由 approval.manage 决定运维视图', () => {
+test('集成与审计死信面板只在对应分区挂载，并由 approval.manage 决定运维视图', () => {
   assert.match(viewSource, /import ContractIntegrationOutboxPanel from '@\/modules\/contract_management\/components\/ContractIntegrationOutboxPanel\.vue'/)
-  assert.match(viewSource, /activeSection === 'outbox'[\s\S]*<ContractIntegrationOutboxPanel :can-manage="can\('approval\.manage'\)" @notify="showToast" \/>/)
+  assert.match(viewSource, /import ContractAuditOutboxPanel from '@\/modules\/contract_management\/components\/ContractAuditOutboxPanel\.vue'/)
+  assert.match(viewSource, /activeSection === 'outbox'[\s\S]*outboxTab === 'integration'[\s\S]*outboxTab === 'audit'[\s\S]*<ContractIntegrationOutboxPanel v-if="outboxTab === 'integration'" :can-manage="can\('approval\.manage'\)" @notify="showToast" \/>[\s\S]*<ContractAuditOutboxPanel v-else :can-manage="can\('approval\.manage'\)" @notify="showToast" \/>/)
 })
 
 test('合同路由分区白名单包含集成死信分区', () => {
