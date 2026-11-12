@@ -18,7 +18,7 @@ import * as workspace from '../workspace.js'
 import { allocationInput } from '../allocation.js'
 import * as invoiceClassification from '../invoiceClassification.js'
 import { PaginationBarStub } from '../../../test/helpers/paginationStub.mjs'
-import { claimStatusLabel as statusLabel, claimStatusTone, failureMessage, failureText } from '../statusLabels.js'
+import { claimStatusLabel as statusLabel, claimStatusTone, failureMessage, failureText, parseIssueLabel } from '../statusLabels.js'
 import { pollTask, taskSettled } from '../asyncTask.js'
 import { recallTask, rememberTask, savedAtLabel } from '../taskPersistence.js'
 import { formatUserError } from '../../shared/utils/userError.js'
@@ -70,7 +70,7 @@ async function mountPage(permissions, request, section = 'dashboard', roles = []
     onMounted: Vue.onMounted, ref: Vue.ref, watch: Vue.watch, useRoute: () => route, useRouter: () => router,
     onBeforeRouteLeave() {}, PaginationBar: PaginationBarStub,
     AppShell: { setup: (_props, { slots }) => () => Vue.h('main', slots.default?.()) }, LoadingState: panelStub, ErrorState: ErrorStateStub, EmptyState: EmptyStateStub, ExpenseInbox: panelStub, ArchiveBorrowPanel: panelStub, TravelFields: panelStub, BusinessObjectSelect: panelStub, BusinessAttachmentSelect: panelStub, CitySelect: panelStub, ClaimPreviewPanel:panelStub,InvoiceContentFields:panelStub,InvoiceContentMappings:panelStub,InvoiceClassificationEvidence:panelStub,ParseExceptionsPanel:panelStub, PaymentExceptionPanel: panelStub, ClaimEvidenceTravelPanel: panelStub, BusinessOptionPicker: panelStub, ArchivePackagePanel: panelStub, InvoiceControlsPanel: panelStub, ApprovalRoundsPanel: panelStub, ClaimSyncPanel: panelStub, ReimbursementCostNotice: panelStub, RecoveryPanel: panelStub, InvoiceOriginalViewer: panelStub, todayBusinessDate: () => '2026-11-10', formatBusinessDateTime: (value) => value,
-    createCommandRunner, createRequestID, timeoutSignal, formatMinor, toMinor, validateItems, createIdempotencyKey: (() => { let n = 0; return () => `expense-key-${++n}` })(), approvalNodeLabel, approvalNodesLabel, assignmentPurpose, expenseScopeDescription, hasTenantAllCapability, reimbursementRoleLabel, canSelectProjectReference, editableClaimItem, evidenceIDs, policyFields, policyFormFrom, policyPayload, statusLabel, claimStatusTone, failureMessage, failureText, formatUserError, pollTask, taskSettled, recallTask, rememberTask, savedAtLabel,
+    createCommandRunner, createRequestID, timeoutSignal, formatMinor, toMinor, validateItems, createIdempotencyKey: (() => { let n = 0; return () => `expense-key-${++n}` })(), approvalNodeLabel, approvalNodesLabel, assignmentPurpose, expenseScopeDescription, hasTenantAllCapability, reimbursementRoleLabel, canSelectProjectReference, editableClaimItem, evidenceIDs, policyFields, policyFormFrom, policyPayload, statusLabel, claimStatusTone, failureMessage, failureText, parseIssueLabel, formatUserError, pollTask, taskSettled, recallTask, rememberTask, savedAtLabel,
 
     ensureReimbursementSession: async () => ({ tenant_id: 'test', subject_id: 'actor', permissions, roles }),
     logoutReimbursement: async () => ({}), api: { request }, startReimbursementLogin() {} }
@@ -162,7 +162,10 @@ test('HTTP上传仍计算原件摘要并使用系统回执文档，不暴露可�
       }
       if (path === '/invoice-documents/server-document') return {
         id: 'server-document', version: 2, status: 'READY',
-        detail: { parse_run_id: 'server-run', parse_result: { documents: [] } },
+        detail: {
+          parse_run_id: 'server-run', parse_result: { documents: [] },
+          parse_issues: ['TEXT_EXTRACTION_IS_NOT_TAX_VERIFICATION', 'MANUAL_CONFIRMATION_REQUIRED', 'FIELD_MISSING:gross_minor', 'DETAIL_AMOUNTS_INCOMPLETE'],
+        },
       }
       throw new Error(`unexpected API: ${path}`)
     }, 'invoice-upload')
@@ -190,6 +193,9 @@ test('HTTP上传仍计算原件摘要并使用系统回执文档，不暴露可�
     assert.match(html, /upload-fixture\.pdf/)
     assert.match(html, /查询原件状态/)
     assert.match(html, /查询解析状态/)
+    assert.match(html, /仅提取票面文字，不代表税务验真/)
+    assert.match(html, /缺少字段：价税合计（票面总额）/)
+    assert.doesNotMatch(html, /TEXT_EXTRACTION_IS_NOT_TAX_VERIFICATION|FIELD_MISSING:gross_minor/)
   } finally {
     fixture?.unmount()
     globalThis.fetch = previousFetch
