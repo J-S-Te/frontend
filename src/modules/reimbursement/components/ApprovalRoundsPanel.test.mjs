@@ -144,7 +144,9 @@ test('真实审批轮次按轮次展示冻结责任、权威岗位来源和跨�
     assert.match(rendered, /项目技术总监（技术负责人） · 冻结受理人 tech · 责任分摊 key-a、key-b/)
     assert.match(rendered, /项目 project-1 \/ 项目级 · 引用版本 4/)
     assert.match(rendered, /财务负责人：finance · finance_director · 版本 7/)
-    assert.match(rendered, /2026-11-02 11:00 · actor · 同意 · 同意/)
+    assert.match(rendered, /actor[\s\S]*同意/)
+    assert.match(rendered, /2026-11-02 11:00/)
+    assert.match(rendered, /expense-timeline__comment">同意/)
     assert.match(rendered, /第 1 页，共 2 条/)
   } finally { app.unmount() }
 })

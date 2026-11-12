@@ -20,11 +20,35 @@ const claimStatusLabels = {
   AUTHORITATIVE_SNAPSHOT_MISSING: '同步快照待恢复',
 }
 
+// 状态胶囊 tone：只决定颜色语义，不参与任何业务判断。
+// 同一编码在不同对象上的显示颜色保持稳定；未知码回落 gray，避免把新状态误标成成功。
+const claimStatusTones = {
+  PAID: 'success', CONFIRMED: 'success', VERIFIED: 'success', MANUAL_REVIEWED: 'success',
+  ACTIVE: 'success', SEALED: 'success', DONE: 'success', READY: 'success', PARSED: 'success',
+  SYNCED: 'success', RESOLVED: 'success',
+  IN_APPROVAL: 'warning', APPROVED_PENDING_PAYMENT: 'warning', PENDING: 'warning',
+  RUNNING: 'warning', PROCESSING: 'warning', WAITING: 'warning', PARTIAL: 'warning',
+  NEEDS_REVIEW: 'warning', RESERVED: 'warning', TRANSFERRED: 'warning', WITHDRAWN: 'warning',
+  RETURNED: 'danger', VOID: 'danger', VOIDED: 'danger', FAILED: 'danger', MISMATCH: 'danger',
+  REJECTED: 'danger', EXPIRED: 'danger', INVALID: 'danger', DISPUTED: 'danger',
+  VERIFIED_CONFLICT: 'danger', AUTHORITATIVE_SNAPSHOT_MISSING: 'danger',
+  APPROVED: 'info', RECORDED: 'info', AVAILABLE: 'info',
+  DRAFT: 'gray', NOT_CHECKED: 'gray', UNVERIFIED: 'gray', UNAVAILABLE: 'gray',
+  CANCELLED: 'gray', ABANDONED: 'gray',
+}
+
 // 用途：把服务器状态编码渲染为中文；未知/空值回退「待确认」。
 // 参数：value 为服务器状态编码。
 // 返回值：中文状态或原文。
 export function claimStatusLabel(value) {
   return claimStatusLabels[value] || value || '待确认'
+}
+
+// 用途：给状态胶囊选择稳定 tone；未知状态不冒充成功/失败。
+// 参数：value 为服务器状态编码。
+// 返回值：success / info / warning / danger / gray。
+export function claimStatusTone(value) {
+  return claimStatusTones[value] || 'gray'
 }
 
 // 归档借阅申请状态。

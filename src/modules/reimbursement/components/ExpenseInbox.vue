@@ -37,16 +37,26 @@ onMounted(load)
 </script>
 <template>
  <section class="expense-panel">
-  <h2>站内消息</h2><p>平台统一收件箱；审批待办、催办等消息以平台实际接收结果为准。未读 {{ unread }}</p>
+  <header class="expense-card-head">
+   <h2 class="expense-card-title">站内消息 <span class="expense-badge" :class="unread ? 'info' : 'gray'">未读 {{ unread }}</span></h2>
+   <div class="expense-card-extra">
+    <label><input v-model="unreadOnly" type="checkbox" @change="page=1;load()"> 只看未读</label>
+    <button class="expense-button" :disabled="busy" @click="load">刷新消息</button>
+   </div>
+  </header>
+  <p>平台统一收件箱；审批待办、催办等消息以平台实际接收结果为准。</p>
   <ErrorState v-if="error" compact title="站内消息未完成" :error="error" :retry="false" />
-  <label><input v-model="unreadOnly" type="checkbox" @change="page=1;load()">只看未读</label>
-  <button class="expense-button" :disabled="busy" @click="load">刷新消息</button>
   <p v-if="busy">正在读取消息…</p><p v-else-if="!error && !rows.length">当前收件箱没有消息。</p>
-  <article v-for="row in rows" :key="row.delivery_id" class="expense-item">
-   <h3>{{ row.title }} <span v-if="!row.read_at" class="expense-flag">未读</span></h3>
-   <p>{{ row.content }}</p><p>{{ formatBusinessDateTime(row.delivered_at) }}</p>
-   <button class="expense-button" @click="open(row)">查看消息</button>
-  </article>
+  <ul v-else class="expense-message-list">
+   <li v-for="row in rows" :key="row.delivery_id" class="expense-message">
+    <span class="expense-message__main">
+      <span class="expense-message__title">{{ row.title }} <span v-if="!row.read_at" class="expense-badge info">未读</span></span>
+      <span class="expense-message__content">{{ row.content }}</span>
+      <span class="expense-message__time">{{ formatBusinessDateTime(row.delivered_at) }}</span>
+    </span>
+    <button class="expense-button" @click="open(row)">查看消息</button>
+   </li>
+  </ul>
   <PaginationBar label="站内消息分页" :page="page" :total="total" :page-size="20" :loading="busy"
    @change="nextPage => { page = nextPage; load() }" />
   <aside v-if="detail" class="expense-item"><h3>{{ detail.title }}</h3><p>{{ detail.content }}</p>

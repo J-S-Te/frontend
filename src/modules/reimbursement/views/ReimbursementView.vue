@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import AppShell from '../../shared/components/AppShell.vue'
+import ConsoleIcon from '../../shared/components/ConsoleIcon.vue'
 import LoadingState from '../../shared/components/LoadingState.vue'
 import PaginationBar from '../../shared/components/PaginationBar.vue'
 import InvoiceControlsPanel from '../components/InvoiceControlsPanel.vue'
@@ -31,7 +32,7 @@ import ErrorState from '../../shared/components/ErrorState.vue'
 import EmptyState from '../../shared/components/EmptyState.vue'
 import { recallTask, rememberTask, savedAtLabel } from '../taskPersistence.js'
 import { canSelectProjectReference, editableClaimItem, evidenceIDs,travelInput } from '../claimFields.js'
-import { claimStatusLabel as statusLabel, failureMessage, failureText } from '../statusLabels.js'
+import { claimStatusLabel as statusLabel, claimStatusTone, failureMessage, failureText } from '../statusLabels.js'
 import { pollTask, taskSettled } from '../asyncTask.js'
 import { formatUserError } from '../../shared/utils/userError.js'
 import InvoiceOriginalViewer from '../components/InvoiceOriginalViewer.vue'
@@ -84,6 +85,8 @@ const uploadBatch = ref([])
 const batchBusy = ref(false)
 const statistics = ref(null)
 const selected = ref(null)
+// 新建/详情工作区默认收起，列表页保持原型的一屏列表结构；用户点“新建报销”或打开单据后再展开。
+const claimFormOpen = ref(false)
 const selectedInvoice = ref(null)
 const invoiceContentEditor = ref(null)
 // 票面总额在展示层统一用元；提交时再换成整数分，避免"元/分"两种单位混着填。
@@ -259,16 +262,16 @@ let loadSequence = 0
 let loadedWorkspace = ''
 
 const sections = [
-  ['dashboard', '报销工作台', 'expense.claim.read'],
-  ['invoices', '发票中心', 'expense.invoice.read'],
-  ['invoice-upload', '发票上传与人工录入', 'expense.invoice.upload'],
+  ['dashboard', '工作台', 'expense.claim.read'],
+  ['invoices', '发票台账', 'expense.invoice.read'],
+  ['invoice-upload', '发票上传 / OCR', 'expense.invoice.upload'],
   ['invoice-abnormal', '异常发票池', 'expense.invoice.read'],
-  ['claims', '我的报销单', 'expense.claim.read'],
-  ['submitted', '我发起的审批', 'expense.claim.read'],
-  ['approvals', '审批中心', 'expense.approval.act'],
-  ['payments', '付款中心', ['expense.payment.read', 'expense.payment.exception.record',
+  ['claims', '我的报销', 'expense.claim.read'],
+  ['submitted', '我发起的', 'expense.claim.read'],
+  ['approvals', '待我审批', 'expense.approval.act'],
+  ['payments', '付款管理', ['expense.payment.read', 'expense.payment.exception.record',
     'expense.payment.exception.review', 'expense.claim.reopen', 'expense.claim.approved_void']],
-  ['archives', '归档中心', 'expense.archive.read'],
+  ['archives', '项目归档包', 'expense.archive.read'],
   ['recovery', '异常恢复', ['expense.approval.recover', 'expense.integration.manage']],
   ['policies', '政策配置', ['expense.config.manage', 'expense.policy.publish']],
   ['analytics', '报销看板', 'expense.claim.read'],
@@ -276,16 +279,64 @@ const sections = [
 ]
 const workspace = computed(() => String(route.params.section || 'dashboard'))
 const section = computed(() => workspaceSection(workspace.value))
-const title = computed(() => sections.find(([key]) => key === workspace.value)?.[1] || '报销工作台')
+const title = computed(() => sections.find(([key]) => key === workspace.value)?.[1] || '工作台')
+// 页面描述与原型每个页面标题下方的一句话说明对齐；不承载权限或业务结论。
+const sectionDescriptions = {
+  dashboard: '查看当前账号的待办、关键指标与常用入口。',
+  invoices: '查看已上传票据台账；人工复核、生成费用草稿与异常处理都在受控范围内完成。',
+  'invoice-upload': '批量上传发票原件，解析结果仅辅助填写，仍需逐张人工复核。',
+  'invoice-abnormal': '集中处理未确认、查验不一致及待关闭风险的票据。',
+  claims: '查看本人报销单；新建或编辑草稿后提交审批。',
+  submitted: '查看已提交审批的单据及当前节点。',
+  approvals: '处理当前待办审批任务；动作、原因与确认在同一详情内完成。',
+  payments: '登记付款、查看付款历史与冲正记录。',
+  archives: '按项目查看归档包与归档详情；金额为当前已付净额。',
+  recovery: '查询失败审批与集成任务，按受控流程恢复。',
+  policies: '维护费用标准、审批路由与票据映射等政策版本。',
+  analytics: '查看当前范围内的费用、退回率与项目成本统计。',
+  messages: '平台统一收件箱，展示审批待办与业务通知。',
+}
 const sectionIcons = {
   dashboard: 'dashboard', invoices: 'search', 'invoice-upload': 'save', 'invoice-abnormal': 'info',
-  claims: 'account', submitted: 'audit', approvals: 'shield', payments: 'link', archives: 'organization',
+  claims: 'account', submitted: 'export', approvals: 'shield', payments: 'link', archives: 'organization',
   recovery: 'reset', policies: 'settings', analytics: 'audit', messages: 'bell',
 }
-const navGroups = computed(() => [{ items: [{ key: 'portal', label: '返回门户', icon: 'dashboard' }] },
-  // 发票上传与人工录入属于发票中心，不再单占一个导航项，避免三个入口指向同一块内容。
-  { label: '报销管理', items: sections.filter(([key, , permission]) => can(permission) && key !== 'invoice-upload')
-    .map(([key, label]) => ({ key, label, active: workspace.value === key, icon: sectionIcons[key] || 'account' })) }])
+// 侧栏分组对齐原型：工作台 / 发票中心 / 报销单 / 付款 / 归档中心 / 配置 / 消息 / 系统。
+// 只渲染当前账号至少有一个可见入口的分组；权限判断仍由 sections 的 permission 负责。
+const navGroups = computed(() => {
+  const groups = [
+    { items: [{ key: 'portal', label: '返回门户', icon: 'dashboard' }] },
+    { label: '工作台', keys: ['dashboard', 'analytics'] },
+    { label: '发票中心', keys: ['invoices', 'invoice-upload', 'invoice-abnormal'] },
+    { label: '报销单', keys: ['claims', 'submitted', 'approvals'] },
+    { label: '付款', keys: ['payments'] },
+    { label: '归档中心', keys: ['archives'] },
+    { label: '配置', keys: ['policies'] },
+    { label: '消息', keys: ['messages'] },
+    { label: '系统', keys: ['recovery'] },
+  ]
+  return groups.map((group) => ({
+    ...group,
+    // 有标题的业务分组可折叠；「返回门户」单入口组没有标题，保持不可折叠。
+    collapsible: Boolean(group.label),
+    items: (group.items || (group.keys || []).map((key) => {
+      const entry = sections.find(([name]) => name === key)
+      return entry ? { key: entry[0], label: entry[1], permission: entry[2] } : null
+    }).filter(Boolean)).filter((item) => item.key === 'portal'
+      || can(item.permission)).map((item) => ({
+      key: item.key,
+      label: item.label,
+      icon: item.icon || sectionIcons[item.key] || 'account',
+      active: workspace.value === item.key,
+    })),
+  })).filter((group) => group.items.length)
+})
+// 原型角色卡：只显示当前真实会话的主体与授权范围，不提供 mock 角色切换。
+const sessionInitials = computed(() => {
+  const name = String(session.value?.display_name || session.value?.subject_id || '').trim()
+  if (!name) return '用'
+  return /^[\x00-\x7F]+$/.test(name) ? name.slice(0, 2).toUpperCase() : Array.from(name).slice(0, 1).join('')
+})
 const editable = computed(() => selected.value
   ? can('expense.claim.update') && selected.value.applicant_subject_id === session.value?.subject_id
     && ['DRAFT', 'RETURNED', 'WITHDRAWN'].includes(selected.value.status)
@@ -322,13 +373,18 @@ const sessionRolesLabel = computed(() => (session.value?.roles || [])
   .join('、') || '按当前账号授权范围')
 const scopeDescription = computed(() => expenseScopeDescription(session.value))
 
-// 工作台指标：每一项都能跳到对应分区，指标不再只是几行死文本。
+// 工作台统计卡：tone 只影响色条，不改变服务端指标含义；suffix/hint 只做展示。
 const dashboardMetrics = [
-  { key: 'my_claims', label: '我的单据', section: 'claims' },
-  { key: 'pending_approvals', label: '待审批', section: 'approvals' },
-  { key: 'pending_payments', label: '待付款', section: 'payments' },
-  { key: 'invoice_review_required', label: '待复核发票', section: 'invoices' },
-  { key: 'my_paid_this_month', label: '本月本人已付款', section: 'payments' },
+  { key: 'my_claims', label: '我的单据', section: 'claims', icon: 'account', tone: 'blue',
+    suffix: '单', hint: '本人在当前范围' },
+  { key: 'pending_approvals', label: '待审批', section: 'approvals', icon: 'shield', tone: 'orange',
+    suffix: '单', hint: '当前可办理' },
+  { key: 'pending_payments', label: '待付款', section: 'payments', icon: 'link', tone: 'green',
+    suffix: '单', hint: '已通过待支付' },
+  { key: 'invoice_review_required', label: '待复核发票', section: 'invoices', icon: 'search', tone: 'purple',
+    suffix: '张', hint: '本人票据' },
+  { key: 'my_paid_this_month', label: '本月本人已付款', section: 'payments', icon: 'dashboard', tone: 'blue',
+    suffix: '笔', hint: '按业务日统计' },
 ]
 
 // 用途：判断分区是否在当前账号能力内，避免指标把用户带进无权页面。
@@ -340,6 +396,11 @@ function sectionAllowed(key) {
 }
 
 // 列表列定义按分区拆分：审批区展示轮次与节点，单据区展示应付金额，票据区展示票面。
+const listTitle = computed(() => ({
+  claims: '我的报销', submitted: '我发起的', invoices: '发票台账',
+  'invoice-abnormal': '异常发票池', approvals: '待审批任务', payments: '付款记录',
+  archives: '归档单据', policies: '政策版本',
+}[workspace.value] || '列表'))
 const listAmountLabel = computed(() => ({
   invoices: '票面金额', approvals: '审批轮次', policies: '金额 / 标准上限',
 }[section.value] || '应付金额'))
@@ -363,6 +424,57 @@ function moneyText(value) {
   return text === '不可用' ? '未提供' : `${text} 元`
 }
 
+// 用途：统一列表行的状态码与状态文案，保留原生命周期 > 业务状态 > 复核状态 > 发布标记的优先级。
+// 参数：row 为列表接口返回的受控行。
+// 返回值：状态码或发布标记。
+function listRowStatusCode(row) {
+  return row?.lifecycle_status || row?.status || row?.review_status || ''
+}
+
+// 用途：给状态胶囊提供稳定 tone，未知码统一回落 gray。
+// 参数：row 为列表接口返回的受控行。
+// 返回值：success/info/warning/danger/gray。
+function listRowTone(row) {
+  const code = listRowStatusCode(row)
+  if (code) return claimStatusTone(code)
+  return row?.published ? 'success' : 'gray'
+}
+
+// 用途：列表行状态文案；没有状态码时只把已发布/草稿翻译成已有业务术语。
+// 参数：row 为列表接口返回的受控行。
+// 返回值：中文状态文本。
+function listRowStatusText(row) {
+  const code = listRowStatusCode(row)
+  if (code) return statusLabel(code)
+  return row?.published ? '已发布' : '草稿'
+}
+
+// 配置页按原型拆成费用标准 / 审批路由 / 发票映射 / 其他配置四组；
+// policyKind 仍是唯一服务端配置类型，不新增接口。
+const policyKindGroups = {
+  standards: ['standards'],
+  route_rules: ['route_rules'],
+  invoice_rules: ['invoice_rules'],
+  other: ['city_mappings', 'archive_retention_policies', 'historical_tail_policies',
+    'assignments', 'finance_entities', 'payment_accounts', 'payee_profiles',
+    'employee_profiles', 'scopes'],
+}
+const policyTabs = [
+  { key: 'standards', label: '费用标准' },
+  { key: 'route_rules', label: '审批路由规则' },
+  { key: 'invoice_rules', label: '发票类型映射' },
+  { key: 'other', label: '其他配置' },
+]
+const activePolicyTab = computed(() => policyTabs.find((tab) => tab.key === policyKind.value)?.key || 'other')
+
+// 用途：切换配置分组时选择该组第一个可维护类型；其他配置保留用户当前选择。
+// 参数：key 为分组键。
+// 返回值：无。
+function selectPolicyTab(key) {
+  if (key !== 'other') { policyKind.value = key; return }
+  if (!policyKindGroups.other.includes(policyKind.value)) policyKind.value = 'city_mappings'
+}
+
 // 用途：解释发票为什么不能勾选生成费用，避免静默禁用的复选框。
 // 参数：row 为发票列表行。
 // 返回值：一句业务原因；可勾选时为空串。
@@ -376,6 +488,60 @@ const organizationOptions = computed(() => draftOrganizations(editorOptions.valu
 const currentDraftContext = computed(() => resolveDraftContext(editorOptions.value, draft.value.org_id))
 const draftEntityOptions = computed(() => financeEntityChoices(editorOptions.value, draft.value.org_id))
 const draftPayeeOptions = computed(() => payeeChoices(editorOptions.value))
+// 用途：回显地址栏带来的单据与项目参数，让深链来源在页面上可见。
+// 参数：无。
+// 返回值：仅包含非空字符串参数的标签与值。
+const routeContextChips = computed(() => [
+  { label: '来源单据', value: route.query.claim_id },
+  { label: '来源项目', value: route.query.project_id },
+].filter((row) => typeof row.value === 'string' && row.value))
+// 用途：汇总当前单据的关键业务参数，供只读核对，
+// 而不是再填一遍内部编号。
+// 参数：无。
+// 返回值：按单据、线路、主体、收款资料排列的非空标签值。
+const claimContextChips = computed(() => {
+  const claim = selected.value
+  if (!claim) return []
+  const chips = [
+    { label: '单据', value: claim.claim_no || claim.id },
+    { label: '状态', value: statusLabel(claim.status) },
+    { label: '版本', value: claim.version ? `v${claim.version}` : '' },
+    { label: '应付金额',
+      value: claim.payable_minor == null ? '' : moneyText(claim.payable_minor) },
+    { label: '任职组织', value: currentDraftContext.value.organization_name || '' },
+    { label: '业务线路', value: optionLabels[currentDraftContext.value.route_type] || '' },
+    { label: '付款主体', value: financeEntityLabel(draft.value.finance_entity_id) },
+    { label: '收款资料', value: payeeProfileLabel(draft.value.payee_profile_id) },
+  ]
+  return chips.filter((row) => row.value)
+})
+// 用途：把超标单据占比换算成看板环形图百分比。
+// 参数：无。
+// 返回值：0–100 的数值；当前范围没有单据时为 0。
+const overStandardRatio = computed(() => {
+  const total = Number(statistics.value?.total_count || 0)
+  const over = Number(statistics.value?.over_standard_count || 0)
+  return total > 0 ? Math.min(100, Math.max(0, (over * 100) / total)) : 0
+})
+// 用途：把服务端以基点表示的退回率换算成环形图百分比。
+// 参数：无。
+// 返回值：0–100 的数值；服务端未提供退回率时为 0。
+const returnRateRatio = computed(() => {
+  const basisPoints = statistics.value?.return_rate_basis_points
+  if (basisPoints === null || basisPoints === undefined) return 0
+  return Math.min(100, Math.max(0, Number(basisPoints) / 100))
+})
+// 用途：生成环形图中心的超标占比文本。
+// 参数：无。
+// 返回值：一位小数的百分比文本。
+const overStandardPercentText = computed(() => `${overStandardRatio.value.toFixed(1)}%`)
+// 用途：生成环形图中心的退回率文本，缺数据时不伪造 0%。
+// 参数：无。
+// 返回值：两位小数的百分比文本；服务端未提供退回率时为短横线。
+const returnRatePercentText = computed(() => {
+  const basisPoints = statistics.value?.return_rate_basis_points
+  return basisPoints === null || basisPoints === undefined ? '—' : `${(Number(basisPoints) / 100).toFixed(2)}%`
+})
 const applicantName = computed(() => selected.value?.applicant_name ||
   (selected.value?.applicant_subject_id && selected.value.applicant_subject_id !== editorOptions.value?.applicant?.id
     ? '报销人姓名待核对' : editorOptions.value?.applicant?.name || session.value?.display_name || '本人姓名待核对'))
@@ -595,7 +761,10 @@ async function load() {
   validationHint.value = ''
   listError.value = ''; dashboardError.value = ''; analyticsError.value = ''
   archiveProjectsError.value = ''
-  if (changedWorkspace) { notice.value = ''; fieldErrors.value = []; clearForeignDetail() }
+  if (changedWorkspace) {
+    notice.value = ''; fieldErrors.value = []; clearForeignDetail()
+    if (workspace.value !== 'claims') claimFormOpen.value = false
+  }
   try {
     const activeSession = await ensureReimbursementSession()
     if (ticket !== loadSequence || !activeSession) return
@@ -612,8 +781,16 @@ async function load() {
       const options = await api.request('/claim-options')
       if (ticket !== loadSequence) return
       editorOptions.value = options
-      if (!selected.value) applyDraftContext(draft.value.org_id)
-      await searchProjects()
+      if (!selected.value) {
+        applyDraftContext(draft.value.org_id)
+        // 首次进入时的任职/主体/收款档案是服务端默认上下文，不是用户输入；
+        // 记录为基线，避免从列表打开详情时被误判成未保存修改。
+        if (!draftBaseline.value) draftBaseline.value = stableStringify(draft.value)
+      }
+      // 没有可用在职组织/费用档案时不请求项目资格服务：
+      // 该账号本来没有报销主体，强查项目只会得到一个业务上无意义的依赖错误。
+      if (currentDraftContext.value.ready) await searchProjects()
+      else { projectOptions.value = []; projectError.value = '' }
     }
     if (current === 'dashboard') {
       const result = await api.request('/dashboard')
@@ -985,6 +1162,59 @@ function applyDraftContext(orgID = '') {
   return true
 }
 
+// 用途：把付款主体引用回显为业务名称，缺少选项时明确标注，
+// 而不是显示内部ID。
+// 参数：id 为草稿或单据当前保存的付款主体引用。
+// 返回值：可展示名称；空引用返回空串。
+function financeEntityLabel(id) {
+  if (!id) return ''
+  const rows = Array.isArray(editorOptions.value?.finance_entities)
+    ? editorOptions.value.finance_entities : []
+  return rows.find((row) => row.id === id)?.name || '已保存（当前选项未包含）'
+}
+
+// 用途：把本人收款资料引用回显为业务名称，
+// 不暴露账户引用或内部编号。
+// 参数：id 为草稿或单据当前保存的收款资料引用。
+// 返回值：可展示名称；空引用返回空串。
+function payeeProfileLabel(id) {
+  if (!id) return ''
+  const rows = Array.isArray(editorOptions.value?.payee_profiles)
+    ? editorOptions.value.payee_profiles : []
+  return rows.find((row) => row.id === id)?.name || '已保存（当前选项未包含）'
+}
+
+// 用途：保留原单据已保存但当前选项未包含的主体与收款资料，
+// 避免静默清空。
+// 参数：claim 为刚读取的权威单据。
+// 返回值：需要提示时的中文说明；无需保留返回空串。
+function restoreSavedChoices(claim) {
+  const kept = []
+  if (claim.finance_entity_id && !draft.value.finance_entity_id) {
+    draft.value.finance_entity_id = claim.finance_entity_id
+    kept.push('付款主体')
+  }
+  if (claim.payee_profile_id && !draft.value.payee_profile_id) {
+    draft.value.payee_profile_id = claim.payee_profile_id
+    kept.push('收款资料')
+  }
+  if (!kept.length) return ''
+  return `已保留原单据的${kept.join('与')}（当前选项未包含），提交前请核对。`
+}
+
+// 用途：把地址栏可识别的筛选参数回填到筛选表单，保证深链参数可见。
+// 参数：无。
+// 返回值：无；只接受字符串参数，不猜测数组或对象。
+function hydrateFiltersFromRoute() {
+  const keys = ['q','status','claim_type','date_from','date_to','invoice_type',
+    'verification_status','review_status','route_type']
+  const query = route.query || {}
+  for (const key of keys) {
+    const value = query[key]
+    if (typeof value === 'string' && value) listFilters.value[key] = value
+  }
+}
+
 // 用途：读取当前付款单据的受控账户选项，失败不允许手填引用绕过。
 // 参数：claimID为服务器返回的当前报销单引用。
 // 返回值：无；只更新当前单据的选项，不改变付款事实。
@@ -1250,7 +1480,8 @@ async function backToList(kind = 'claim') {
   } else if (kind === 'approval') {
     approvalTask.value = null; approvalHistory.value = []; historyError.value = ''
   } else {
-    selected.value = null; draft.value = blankDraft(); draftBaseline.value = ''
+    selected.value = null; claimFormOpen.value = false
+    draft.value = blankDraft(); draftBaseline.value = ''
   }
   const query = { ...route.query }
   delete query.claim_id
@@ -1270,6 +1501,7 @@ async function openClaim(id, force = false) {
     const result = await api.request(`/claims/${encodeURIComponent(id)}`)
     if (ticket !== detailSequence) return
     selected.value = result
+    claimFormOpen.value = true
     exceptionRows.value = null; selectedException.value = null; exceptionPage.value = 1
     exceptionForm.value.payee_profile_id = result.payee_profile_id || ''
     projectValidation.value = null
@@ -1285,8 +1517,12 @@ async function openClaim(id, force = false) {
         ratio: row.ratio_basis_points ? String(row.ratio_basis_points / 100) : '' })),
       invoice_usages: (item.invoice_usages || []).map((row) => ({ ...row, amount: formatMinor(row.used_minor) })),
     })) }
-    if (section.value === 'claims' && editable.value && editorOptions.value) applyDraftContext(draft.value.org_id)
-    if (section.value === 'claims' && editable.value) await searchProjects()
+    if (section.value === 'claims' && editable.value && editorOptions.value) {
+      applyDraftContext(draft.value.org_id)
+      const kept = restoreSavedChoices(result)
+      if (kept) notice.value = kept
+    }
+    if (section.value === 'claims' && editable.value && currentDraftContext.value.ready) await searchProjects()
     if (ticket !== detailSequence) return
     draftBaseline.value = stableStringify(draft.value)
     payment.value = null; archives.value = null
@@ -2405,12 +2641,13 @@ function clonePolicy() {
 async function newDraft(skipConfirm = false) {
   if (runner.pending()) { showError(new Error('请先确认原命令结果')); return }
   if (!skipConfirm && !discardDraft()) return
+  claimFormOpen.value = true
   selected.value = null; draft.value = blankDraft()
   draftBaseline.value = stableStringify(draft.value)
   try {
     editorOptions.value = await api.request('/claim-options')
-    await searchProjects()
     if (!applyDraftContext()) { addItem(); return }
+    await searchProjects()
     await createDraft()
   } catch (cause) { showError(cause) }
 }
@@ -2476,6 +2713,7 @@ onBeforeRouteLeave(() => {
 onMounted(() => {
   // 刷新页面后先恢复最近任务坐标，用户可以继续查询而不用重新上传或重跑。
   recentTask.value = { parse: recallTask('parse'), export: recallTask('export'), document: recallTask('document') }
+  hydrateFiltersFromRoute()
   addItem(); void load(); window.addEventListener('beforeunload', protectPending)
 })
 onBeforeUnmount(() => {
@@ -2490,8 +2728,9 @@ onBeforeUnmount(() => {
 <template>
   <AppShell
     v-model:menu-open="menuOpen"
-    brand-name="报销管理"
+    brand-name="报销管理系统"
     brand-subtitle="费用与票据工作区"
+    content-class="expense-canvas"
     :nav-groups="navGroups"
     :crumb="title"
     :user-name="session?.display_name || session?.subject_id || ''"
@@ -2505,10 +2744,7 @@ onBeforeUnmount(() => {
       </button>
     </template>
     <header class="expense-head">
-      <div>
-        <p class="expense-kicker">
-          REIMBURSEMENT
-        </p>
+      <div class="expense-head__copy">
         <h1
           ref="heading"
           tabindex="-1"
@@ -2516,16 +2752,39 @@ onBeforeUnmount(() => {
           {{ title }}
         </h1>
         <p>
-          按当前主体与数据范围读取；金额以人民币元展示。
+          {{ sectionDescriptions[workspace] || '按当前主体与数据范围读取；金额以人民币元展示。' }}
         </p>
       </div>
-      <button type="button"
-        v-if="can('expense.claim.create')"
-        class="expense-button primary"
-        @click="startNewClaim"
-      >
-        新建报销
-      </button>
+      <div class="expense-head__actions">
+        <button type="button"
+          v-if="workspace === 'invoices' && can('expense.invoice.upload')"
+          class="expense-button primary"
+          @click="navigate('invoice-upload')"
+        >
+          上传发票
+        </button>
+        <button type="button"
+          v-if="workspace === 'invoices' && sectionAllowed('invoice-abnormal')"
+          class="expense-button"
+          @click="navigate('invoice-abnormal')"
+        >
+          异常发票池
+        </button>
+        <button type="button"
+          v-if="workspace === 'invoice-upload'"
+          class="expense-button"
+          @click="navigate('invoices')"
+        >
+          返回台账
+        </button>
+        <button type="button"
+          v-if="['dashboard', 'claims'].includes(workspace) && can('expense.claim.create')"
+          class="expense-button primary"
+          @click="startNewClaim"
+        >
+          新建报销
+        </button>
+      </div>
     </header>
     <div v-if="error" class="expense-alert danger" role="alert">
       {{ error }}
@@ -2557,13 +2816,20 @@ onBeforeUnmount(() => {
         {{ scopeDescription }}
       </p>
       <p v-if="returnProject"><RouterLink :to="returnProject">返回来源项目</RouterLink></p>
+      <div v-if="routeContextChips.length" class="expense-context" role="group" aria-label="地址参数回显">
+        <span class="expense-context__title">地址参数</span>
+        <span v-for="chip in routeContextChips" :key="chip.label" class="expense-context__chip">
+          <small>{{ chip.label }}</small><b>{{ chip.value }}</b>
+        </span>
+      </div>
       <section
-        v-if="section === 'payments' && can('expense.claim.read')"
+        v-if="section === 'archives' && can('expense.claim.read')"
         class="expense-panel"
       >
-        <h2>
-          项目费用参与人
-        </h2>
+        <header class="expense-card-head">
+          <h2 class="expense-card-title">项目费用参与人</h2>
+          <span class="expense-card-extra">资格由项目工作区维护</span>
+        </header>
         <p>
           项目费用参与资格由项目工作区按项目范围维护；报销侧只提供查询与跳转入口。
         </p>
@@ -2597,37 +2863,100 @@ onBeforeUnmount(() => {
       <RecoveryPanel v-if="section === 'recovery'" :permissions="session?.permissions || []" />
       <ExpenseInbox v-if="section === 'messages'" />
       <ArchiveBorrowPanel v-if="section === 'archives'" :archives="archives" />
-      <section v-if="section === 'dashboard'" class="expense-panel">
-        <h2>
-          我的工作区
-        </h2>
+      <section v-if="section === 'dashboard'" class="expense-dashboard">
+        <article class="expense-role-card">
+          <div class="expense-role-card__info">
+            <span class="expense-role-card__avatar" aria-hidden="true">{{ sessionInitials }}</span>
+            <div class="expense-role-card__copy">
+              <strong class="expense-role-card__name">{{ session?.display_name || session?.subject_id || '当前账号' }}</strong>
+              <span class="expense-role-card__meta">角色：{{ sessionRolesLabel }}</span>
+              <span class="expense-role-card__meta">{{ scopeDescription }}</span>
+            </div>
+          </div>
+          <p class="expense-role-card__summary">
+            当前可办理 <strong>{{ dashboard?.pending_approvals ?? '—' }}</strong> 条审批待办
+          </p>
+        </article>
         <!-- 读取失败必须显示原因和重试，不能落成"没有待办"。 -->
         <ErrorState v-if="dashboardError" :error="dashboardError" title="工作台加载失败" @retry="load" />
         <template v-else>
-          <p class="expense-metrics" role="group" aria-label="工作台指标">
+          <div class="expense-metrics expense-metrics--tiles" role="group" aria-label="工作台指标">
             <template v-for="metric in dashboardMetrics" :key="metric.key">
               <button v-if="sectionAllowed(metric.section)" type="button"
                 class="expense-metric expense-metric-link"
+                :data-tone="metric.tone"
                 @click="navigate(metric.section)"
               >
-                {{ metric.label }}：{{ dashboard?.[metric.key] ?? '不可用' }}
+                <span class="expense-metric__icon" aria-hidden="true">
+                  <ConsoleIcon :name="metric.icon" />
+                </span>
+                <span class="expense-metric__body">
+                  <span class="expense-metric__label">{{ metric.label }}</span>
+                  <strong class="expense-metric__value">
+                    {{ dashboard?.[metric.key] ?? '不可用' }}<span v-if="dashboard?.[metric.key] != null" class="expense-metric__suffix">{{ metric.suffix }}</span>
+                  </strong>
+                  <span class="expense-metric__hint">{{ metric.hint }}</span>
+                </span>
               </button>
-              <span v-else class="expense-metric">{{ metric.label }}：{{ dashboard?.[metric.key] ?? '不可用' }}</span>
+              <span v-else class="expense-metric" :data-tone="metric.tone">
+                <span class="expense-metric__icon" aria-hidden="true">
+                  <ConsoleIcon :name="metric.icon" />
+                </span>
+                <span class="expense-metric__body">
+                  <span class="expense-metric__label">{{ metric.label }}</span>
+                  <strong class="expense-metric__value">
+                    {{ dashboard?.[metric.key] ?? '不可用' }}<span v-if="dashboard?.[metric.key] != null" class="expense-metric__suffix">{{ metric.suffix }}</span>
+                  </strong>
+                  <span class="expense-metric__hint">{{ metric.hint }}</span>
+                </span>
+              </span>
             </template>
-          </p>
-          <h3>我的待办</h3>
-          <ul v-if="dashboard?.pending_tasks?.length">
-            <li v-for="task in dashboard.pending_tasks" :key="task.id">
-              {{ task.claim_no || task.claim_id }} · {{ approvalNodeLabel(task.node_code) }}
-              <button type="button" class="expense-button" @click="navigate('approvals')">进入审批中心</button>
-            </li>
-          </ul>
-          <p v-else-if="dashboard">当前没有可办理的审批待办。</p>
+          </div>
+          <div class="expense-split">
+            <section class="expense-panel expense-panel--flush">
+              <header class="expense-card-head">
+                <h2 class="expense-card-title">我的待办</h2>
+                <span class="expense-card-extra">共 {{ dashboard?.pending_approvals ?? 0 }} 条</span>
+              </header>
+              <div v-if="dashboard?.pending_tasks?.length" class="expense-table">
+                <table class="expense-table-body expense-table-body--fit">
+                  <thead>
+                    <tr><th scope="col">单号</th><th scope="col">当前节点</th><th scope="col">创建时间</th><th scope="col">操作</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="task in dashboard.pending_tasks" :key="task.id">
+                      <td><strong>{{ task.claim_no || task.claim_id }}</strong></td>
+                      <td><span class="expense-badge info">{{ approvalNodeLabel(task.node_code) }}</span></td>
+                      <td>{{ formatBusinessDateTime(task.created_at) }}</td>
+                      <td><button type="button" class="expense-button" @click="navigate('approvals')">查看审批</button></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <p v-else-if="dashboard" class="expense-meta">当前没有可办理的审批待办。</p>
+            </section>
+            <aside class="expense-split__side">
+              <section class="expense-panel">
+                <header class="expense-card-head">
+                  <h2 class="expense-card-title">快捷操作</h2>
+                </header>
+                <div class="expense-quick-actions">
+                  <button v-if="can('expense.claim.create')" type="button" class="expense-button" @click="startNewClaim"><ConsoleIcon name="account" />新建报销</button>
+                  <button v-if="can('expense.invoice.upload')" type="button" class="expense-button" @click="navigate('invoice-upload')"><ConsoleIcon name="save" />上传发票</button>
+                  <button type="button" class="expense-button" @click="navigate('claims')"><ConsoleIcon name="audit" />我的报销</button>
+                  <button v-if="sectionAllowed('approvals')" type="button" class="expense-button" @click="navigate('approvals')"><ConsoleIcon name="shield" />待我审批</button>
+                </div>
+              </section>
+            </aside>
+          </div>
         </template>
       </section>
       <!-- 刷新后找回：保留任务与原件位置，用户不必重新上传。 -->
-      <section v-if="section === 'invoices' && (recentTask.parse || recentTask.document)" class="expense-panel" aria-label="找回上次上传与解析">
-        <h2>找回上次上传与解析</h2>
+      <section v-if="workspace === 'invoice-upload' && (recentTask.parse || recentTask.document)" class="expense-panel" aria-label="找回上次上传与解析">
+        <header class="expense-card-head">
+          <h2 class="expense-card-title">找回上次上传与解析</h2>
+          <span class="expense-card-extra">任务与原件坐标保存在本机</span>
+        </header>
         <p>刷新页面后任务号和文档号仍保留在本机；继续查询不会重新上传，也不会重复发起解析。</p>
         <div class="expense-actions">
           <button v-if="recentTask.document" type="button" class="expense-button" @click="resumeRecentDocument">
@@ -2638,80 +2967,97 @@ onBeforeUnmount(() => {
           </button>
         </div>
       </section>
-      <section v-if="section === 'invoices' && workspace !== 'invoice-abnormal' && can('expense.invoice.upload')" class="expense-panel" @dragover.prevent @drop.prevent="uploadInvoiceBatch">
-        <h2>
-          上传与人工核验
-        </h2>
-        <label>
-          发票原件
-          <input
-            type="file"
-            accept=".pdf,.ofd,.png,.jpg,.jpeg"
-            multiple
-            :disabled="saving || batchBusy || !!pending"
-            @change="uploadInvoiceBatch"
+      <section v-if="workspace === 'invoice-upload' && can('expense.invoice.upload')" class="expense-upload-page">
+        <section class="expense-panel">
+          <header class="expense-card-head">
+            <h2 class="expense-card-title"><span class="expense-step">1</span>选择发票文件</h2>
+            <span class="expense-card-extra">1–20 个文件 · 单个 ≤ 20MiB</span>
+          </header>
+          <label class="expense-upload-zone"
+            @dragover.prevent
+            @drop.prevent="uploadInvoiceBatch"
           >
-        </label>
-        <p>可拖入1至20张原件，每份不超过20MiB。PDF/OFD可解析候选；图片请人工录入。人工核验不代表税务自动验真。</p>
-        <ul v-if="uploadBatch.length" aria-live="polite"><li v-for="(file,index) in uploadBatch" :key="index">
-          {{ file.name }} · {{ {WAITING:'等待',UPLOADING:'上传中',READY:'已就绪',UNKNOWN:'结果待确认',FAILED:'失败'}[file.status] }}
-          <button type="button" v-if="file.document_id" class="expense-button" @click="documentID=file.document_id; readDocument()">读取此原件</button>
-        </li></ul>
-        <div class="expense-option-field">
-          <span>原件文档（上传后自动回填；也可按文件名选择已上传原件）</span>
-          <BusinessOptionPicker
-            v-model="documentID"
-            path="/invoice-document-options"
-            purpose="reimbursement.invoice.original"
-            object-label="原件文档"
-            :current-label="documentLabel"
-            :disabled="saving || batchBusy || !!pending"
-            aria-label="选择原件文档"
-          />
-          <small v-if="documentLabel">本次上传：{{ documentLabel }}</small>
-        </div>
-
-        <div class="expense-actions">
-          <button type="button" class="expense-button" :disabled="saving || !documentID" @click="parseDocument">
-            发起解析
-          </button>
-          <button type="button" class="expense-button" :disabled="!documentID" @click="readDocument">
-            查询原件状态
-          </button>
-          <button type="button"
-            class="expense-button"
-            :disabled="saving || !!pending || !documentID"
-            @click="prepareManualInvoice()"
-          >
-            人工复核 / 拆分多票
-          </button>
-          <button type="button" v-if="parseRun" class="expense-button" @click="refreshParse">
-            查询解析状态
-          </button>
-        </div>
-        <div v-if="parseRun" role="status">
-          <p>
-            解析任务 {{ parseRun.id }} · {{ statusLabel(parseRun.status) }} · 已尝试 {{ parseRun.attempt ?? 0 }} 次
-          </p>
-          <p v-if="documentStatus">
-            文档状态：{{ statusLabel(documentStatus.status) }}
-          </p>
-          <ul>
-            <li v-for="issue in documentStatus?.detail?.parse_issues || []" :key="issue">
-              {{ issue }}
+            <input
+              type="file"
+              accept=".pdf,.ofd,.png,.jpg,.jpeg"
+              multiple
+              :disabled="saving || batchBusy || !!pending"
+              @change="uploadInvoiceBatch"
+            >
+            <span class="expense-upload-zone__icon" aria-hidden="true">
+              <ConsoleIcon name="save" />
+            </span>
+            <span class="expense-upload-zone__title">拖拽发票到此处，或点击选择文件</span>
+            <span class="expense-upload-zone__help">支持 PDF / OFD / PNG / JPEG。PDF/OFD 可解析候选；图片请人工录入，人工核验不代表税务自动验真。</span>
+          </label>
+          <ul v-if="uploadBatch.length" class="expense-todo-list" aria-live="polite">
+            <li v-for="(file,index) in uploadBatch" :key="index" class="expense-todo">
+              <span class="expense-todo__main">
+                <b>{{ file.name }}</b>
+                <small>{{ {WAITING:'等待',UPLOADING:'上传中',READY:'已就绪',UNKNOWN:'结果待确认',FAILED:'失败'}[file.status] }}</small>
+              </span>
+              <button type="button" v-if="file.document_id" class="expense-button" @click="documentID=file.document_id; readDocument()">读取此原件</button>
             </li>
           </ul>
-          <p v-if="parseRun.last_error" role="alert">
-            处理失败：{{ failureMessage(parseRun.last_error) }}
-          </p>
-          <button v-if="parseRun.last_error || parseRun.status === 'FAILED'" type="button"
-            class="expense-button" :disabled="saving || !!pending || !documentID" @click="parseDocument">
-            重新发起解析
-          </button>
-        </div>
-        <p>
-          解析仅提取字段；人工复核、外部税务查验分别显示。
-        </p>
+        </section>
+        <section class="expense-panel">
+          <header class="expense-card-head">
+            <h2 class="expense-card-title"><span class="expense-step">2</span>解析与原件</h2>
+            <span class="expense-card-extra">解析结果仅辅助填写</span>
+          </header>
+          <div class="expense-option-field">
+            <span>原件文档（上传后自动回填；也可按文件名选择已上传原件）</span>
+            <BusinessOptionPicker
+              v-model="documentID"
+              path="/invoice-document-options"
+              purpose="reimbursement.invoice.original"
+              object-label="原件文档"
+              :current-label="documentLabel"
+              :disabled="saving || batchBusy || !!pending"
+              aria-label="选择原件文档"
+            />
+            <small v-if="documentLabel">本次上传：{{ documentLabel }}</small>
+          </div>
+          <div class="expense-actions">
+            <button type="button" class="expense-button primary" :disabled="saving || !documentID" @click="parseDocument">
+              发起解析
+            </button>
+            <button type="button" class="expense-button" :disabled="!documentID" @click="readDocument">
+              查询原件状态
+            </button>
+            <button type="button"
+              class="expense-button"
+              :disabled="saving || !!pending || !documentID"
+              @click="prepareManualInvoice()"
+            >
+              人工复核 / 拆分多票
+            </button>
+            <button type="button" v-if="parseRun" class="expense-button" @click="refreshParse">
+              查询解析状态
+            </button>
+          </div>
+          <div v-if="parseRun" class="expense-item" role="status">
+            <h3>解析任务 {{ parseRun.id }}</h3>
+            <p>
+              <span class="expense-badge" :class="claimStatusTone(parseRun.status)">{{ statusLabel(parseRun.status) }}</span>
+              · 已尝试 {{ parseRun.attempt ?? 0 }} 次
+              <template v-if="documentStatus">
+                · 文档状态：{{ statusLabel(documentStatus.status) }}
+              </template>
+            </p>
+            <ul v-if="documentStatus?.detail?.parse_issues?.length">
+              <li v-for="issue in documentStatus.detail.parse_issues" :key="issue">{{ issue }}</li>
+            </ul>
+            <p v-if="parseRun.last_error" role="alert">
+              处理失败：{{ failureMessage(parseRun.last_error) }}
+            </p>
+            <button v-if="parseRun.last_error || parseRun.status === 'FAILED'" type="button"
+              class="expense-button" :disabled="saving || !!pending || !documentID" @click="parseDocument">
+              重新发起解析
+            </button>
+          </div>
+          <p class="expense-meta">解析仅提取字段；人工复核、外部税务查验分别显示。</p>
+        </section>
       </section>
       <ParseExceptionsPanel v-if="workspace==='invoice-abnormal' && can('expense.invoice.read')"
         @open="openParseException" />
@@ -2726,15 +3072,13 @@ onBeforeUnmount(() => {
           重新发起解析
         </button>
       </section>
-      <section v-if="section === 'invoices' && documentStatus" class="expense-panel">
-        <h2>
-          原件候选与人工拆分
-        </h2>
+      <section v-if="workspace === 'invoice-upload' && documentStatus" class="expense-panel">
+        <header class="expense-card-head">
+          <h2 class="expense-card-title"><span class="expense-step">3</span>识别结果与人工录入</h2>
+          <span class="expense-card-extra">当前原件共 {{ parsedCandidates.length }} 组候选</span>
+        </header>
         <p>
           以下结果仅辅助填写。金额缺失、票据分组不确定或字段冲突时，请逐张对照原件；创建后仍须独立人工复核，不能视为已验真。
-        </p>
-        <p>
-          当前原件共有 {{ parsedCandidates.length }} 组候选
         </p>
         <div class="expense-table">
           <table class="expense-table-body">
@@ -2934,52 +3278,42 @@ onBeforeUnmount(() => {
         <p>审批动作、原因与二次确认在下方任务详情内完成；列表只用于定位待办。</p>
 
       </section>
-      <section v-if="section === 'policies'" class="expense-panel">
-        <h2>
-          政策版本
-        </h2>
-        <label>
-          配置类型
-          <select v-model="policyKind" :disabled="saving || !!pending">
-            <option value="standards">
-              费用标准
-            </option>
-            <option value="city_mappings">城市代码与人工映射</option>
-            <option value="archive_retention_policies">组织档案保留政策</option>
-            <option value="historical_tail_policies">
-              历史尾款政策（默认关闭）
-            </option>
-            <option value="route_rules">
-              审批路由
-            </option>
-            <option value="assignments">
-              财务岗位 / 受控替代人
-            </option>
-            <option value="finance_entities">
-              付款主体
-            </option>
-            <option value="payment_accounts">付款账户</option>
-            <option value="payee_profiles">
-              收款档案
-            </option>
-            <option value="employee_profiles">
-              员工费用职级
-            </option>
-            <option value="invoice_rules">
-              票种身份与查验规则
-            </option>
-            <option value="scopes">
-              显式数据范围
-            </option>
-          </select>
-        </label>
-        <p>
-          选择记录查看实际字段；保存创建草稿，发布前请核对差异。已发布版本不可覆盖。
-        </p>
-        <article v-if="policyRecord" class="expense-item">
-          <h3>
-            所选版本 {{ policyRecord.id }} · {{ statusLabel(policyLifecycleStatus) }}
-          </h3>
+      <section v-if="section === 'policies'" class="expense-policies">
+        <section class="expense-panel">
+          <header class="expense-card-head">
+            <h2 class="expense-card-title">政策配置</h2>
+            <span class="expense-card-extra">已发布版本不可覆盖</span>
+          </header>
+          <div class="expense-tabs" role="group" aria-label="政策配置分组">
+            <button v-for="tab in policyTabs" :key="tab.key" type="button" class="expense-button"
+              :aria-pressed="activePolicyTab === tab.key" @click="selectPolicyTab(tab.key)">{{ tab.label }}</button>
+          </div>
+          <label v-if="activePolicyTab === 'other'">
+            其他配置类型
+            <select v-model="policyKind" :disabled="saving || !!pending">
+              <option value="standards">费用标准</option>
+              <option value="city_mappings">城市代码与人工映射</option>
+              <option value="archive_retention_policies">组织档案保留政策</option>
+              <option value="historical_tail_policies">历史尾款政策（默认关闭）</option>
+              <option value="route_rules">审批路由</option>
+              <option value="assignments">财务岗位 / 受控替代人</option>
+              <option value="finance_entities">付款主体</option>
+              <option value="payment_accounts">付款账户</option>
+              <option value="payee_profiles">收款档案</option>
+              <option value="employee_profiles">员工费用职级</option>
+              <option value="invoice_rules">票种身份与查验规则</option>
+              <option value="scopes">显式数据范围</option>
+            </select>
+          </label>
+          <p>
+            选择记录查看实际字段；保存创建草稿，发布前请核对差异。已发布版本不可覆盖。
+          </p>
+        </section>
+        <article v-if="policyRecord" class="expense-panel">
+          <header class="expense-card-head">
+            <h2 class="expense-card-title">所选版本 {{ policyRecord.id }}</h2>
+            <span class="expense-badge" :class="claimStatusTone(policyLifecycleStatus)">{{ statusLabel(policyLifecycleStatus) }}</span>
+          </header>
           <p>
             内容版本 {{ policyRecord.content_version ?? policyRecord.version }} · 当前操作版本 {{ policyVersion }}
           </p>
@@ -2998,10 +3332,15 @@ onBeforeUnmount(() => {
             </p>
           </template>
         </article>
-        <fieldset
-          :disabled="policyPublished || saving || !!pending || !can('expense.config.manage')"
-        >
-          <div class="expense-grid">
+        <section class="expense-panel">
+          <header class="expense-card-head">
+            <h2 class="expense-card-title">版本表单</h2>
+            <span class="expense-card-extra">{{ activePolicyTab === 'other' ? '其他配置' : policyTabs.find(tab => tab.key === activePolicyTab)?.label }}</span>
+          </header>
+          <fieldset
+            :disabled="policyPublished || saving || !!pending || !can('expense.config.manage')"
+          >
+            <div class="expense-grid">
             <div v-for="field in currentPolicyFields.filter(row => row.type !== 'content-mappings')" :key="field.key">
               <BusinessObjectSelect v-if="['person', 'organization', 'project', 'finance-entity'].includes(field.type)"
                 v-model="policyForm[field.key]" :label="field.label" :source="policyObjectSource(field)"
@@ -3111,15 +3450,14 @@ onBeforeUnmount(() => {
           >
             发布所选版本
           </button>
-        </div>
-        <fieldset
-          v-if="can('expense.policy.publish') && policyLifecycleStatus === 'ACTIVE' && policyID"
-          :disabled="saving || !!pending"
-          class="expense-item"
-        >
-          <h3>
-            停止使用或替换有效政策
-          </h3>
+          </div>
+        </section>
+        <section v-if="can('expense.policy.publish') && policyLifecycleStatus === 'ACTIVE' && policyID" class="expense-panel">
+          <header class="expense-card-head">
+            <h2 class="expense-card-title">停止使用或替换有效政策</h2>
+            <span class="expense-card-extra">退休不可恢复</span>
+          </header>
+          <fieldset :disabled="saving || !!pending">
           <p>
             退休不可恢复，只停止新单据使用。若已有替换草稿，请用原子替换，旧版本退休与新版本发布一起生效。
           </p>
@@ -3159,22 +3497,19 @@ onBeforeUnmount(() => {
           >
             原子替换并发布草稿
           </button>
-        </fieldset>
+          </fieldset>
+        </section>
       </section>
-      <section v-if="['claims','invoices','approvals','payments','archives','analytics'].includes(section) && workspace !== 'invoice-upload'" class="expense-panel">
-        <h2>{{ workspace === 'invoice-abnormal' ? '异常票据处理' : '查询与筛选' }}</h2>
-        <p v-if="workspace === 'invoice-abnormal'">集中处理未确认、查验不一致及待关闭风险；进入详情查看真实来源和处理记录。</p>
-        <p v-else-if="section === 'invoices'">
-          上传、人工录入与票面复核都在本页完成，下面是已上传票据台账；未确认或查验不一致的票据请到异常发票池处理。
-          <button v-if="sectionAllowed('invoice-abnormal')" type="button" class="expense-button" @click="navigate('invoice-abnormal')">
-            打开异常发票池
-          </button>
+      <section v-if="['claims','invoices','approvals','payments','archives','analytics'].includes(section) && workspace !== 'invoice-upload'
+        && !(section === 'claims' && (selected || claimFormOpen))" class="expense-list-tools">
+        <p v-if="workspace === 'invoice-abnormal'" class="expense-alert">
+          集中处理未确认、查验不一致及待关闭风险；进入详情查看真实来源和处理记录。
         </p>
         <div v-if="section === 'claims'" class="expense-tabs" role="group" aria-label="报销状态">
           <button type="button" v-for="(label,key) in statusTabs" :key="key" class="expense-button" :aria-pressed="listFilters.status===key"
             @click="listFilters.status=key;applyFilters()">{{ label }}</button>
         </div>
-        <form class="expense-grid" @submit.prevent="applyFilters">
+        <form class="expense-searchbar" @submit.prevent="applyFilters">
           <label>单号 / 标题 / 发票号码<input v-model="listFilters.q" maxlength="128"></label>
           <label v-if="section !== 'invoices'">报销类型<select v-model="listFilters.claim_type">
             <option value="">全部类型</option><option v-for="(label,key) in claimTypes" :key="key" :value="key">{{ label }}</option>
@@ -3192,63 +3527,140 @@ onBeforeUnmount(() => {
             <label>票面复核<select v-model="listFilters.review_status"><option value="">全部</option>
               <option value="PENDING">待复核</option><option value="CONFIRMED">已确认</option></select></label>
           </template>
-          <div class="expense-actions"><button type="button" class="expense-button primary" :disabled="loading">查询</button>
-            <button type="button" class="expense-button" @click="resetFilters">重置</button></div>
+          <div class="expense-searchbar__actions">
+            <button type="submit" class="expense-button primary" :disabled="loading">查询</button>
+            <button type="button" class="expense-button" @click="resetFilters">重置</button>
+          </div>
         </form>
-        <p>日期按北京时间业务日查询。仅筛选当前账号可见对象，不授予额外数据权限。</p>
+        <p class="expense-meta">日期按北京时间业务日查询。仅筛选当前账号可见对象，不授予额外数据权限。</p>
       </section>
       <InvoiceClassificationEvidence v-if="['invoices','claims'].includes(section)" :rows="invoiceSuggestions" />
-      <section v-if="section === 'analytics'" class="expense-panel">
-        <h2>个人与项目费用看板</h2>
+      <section v-if="section === 'analytics'" class="expense-analytics">
         <!-- 看板读取失败要显示原因和重试，不能让面板整块消失。 -->
         <ErrorState v-if="analyticsError" :error="analyticsError" title="看板加载失败" @retry="load" />
         <EmptyState v-else-if="!statistics" title="看板数据尚未读取"
           description="点击「刷新」读取当前范围内的已付款统计。" />
         <template v-else>
-          <p>范围：{{ statistics.date_from }} 至 {{ statistics.date_to }}；按单据创建月归属的当前已付净额，已全额冲正的历史付款不重复计入。</p>
-          <p>退回率按当前筛选范围内有真实提交事实的去重单据计算；同单多轮退回只计一次，撤回与作废不计退回，差旅异常单独统计。</p>
-          <div class="expense-metrics">
-            <span class="expense-metric">单据 {{ statistics.total_count }}</span>
-            <span class="expense-metric">超标 {{ statistics.over_standard_count }}</span>
-            <span class="expense-metric">差旅异常 {{ statistics.exception_count }}</span>
-            <span class="expense-metric">已提交单据 {{ statistics.submitted_count ?? '未提供' }}</span>
-            <span class="expense-metric">实际退回单据 {{ statistics.returned_count ?? '未提供' }}</span>
-            <span class="expense-metric">实际退回率 {{ returnRateLabel(statistics.return_rate_basis_points) }}</span>
-            <span class="expense-metric">超标占比 {{ statistics.total_count ? (statistics.over_standard_count*100/statistics.total_count).toFixed(1) : '0.0' }}%</span>
-          </div>
-          <article v-for="group in [{key:'monthly',field:'month',title:'月度趋势'},{key:'by_type',field:'claim_type',title:'类型分布'},{key:'by_project',field:'project_id',title:'项目成本'}]" :key="group.key" class="expense-item">
-            <h3>{{ group.title }}</h3>
+          <section class="expense-panel">
+            <header class="expense-card-head">
+              <h2 class="expense-card-title">个人与项目费用看板</h2>
+              <span class="expense-card-extra">{{ statistics.date_from }} 至 {{ statistics.date_to }}</span>
+            </header>
+            <p>范围按单据创建月归属的当前已付净额统计，已全额冲正的历史付款不重复计入。</p>
+            <div class="expense-metrics expense-metrics--tiles" role="group" aria-label="报销看板指标">
+              <article class="expense-metric" data-tone="blue">
+                <span class="expense-metric__body"><span class="expense-metric__label">单据总数</span><strong class="expense-metric__value">{{ statistics.total_count }}<span class="expense-metric__suffix">单</span></strong></span>
+              </article>
+              <article class="expense-metric" data-tone="orange">
+                <span class="expense-metric__body"><span class="expense-metric__label">超标单据</span><strong class="expense-metric__value">{{ statistics.over_standard_count }}<span class="expense-metric__suffix">单</span></strong></span>
+              </article>
+              <article class="expense-metric" data-tone="purple">
+                <span class="expense-metric__body"><span class="expense-metric__label">差旅异常</span><strong class="expense-metric__value">{{ statistics.exception_count }}<span class="expense-metric__suffix">单</span></strong></span>
+              </article>
+              <article class="expense-metric" data-tone="blue">
+                <span class="expense-metric__body"><span class="expense-metric__label">已提交单据</span><strong class="expense-metric__value">{{ statistics.submitted_count ?? '未提供' }}</strong></span>
+              </article>
+              <article class="expense-metric" data-tone="red">
+                <span class="expense-metric__body"><span class="expense-metric__label">实际退回单据</span><strong class="expense-metric__value">{{ statistics.returned_count ?? '未提供' }}</strong></span>
+              </article>
+              <article class="expense-metric" data-tone="red">
+                <span class="expense-metric__body"><span class="expense-metric__label">实际退回率</span><strong class="expense-metric__value">{{ returnRateLabel(statistics.return_rate_basis_points) }}</strong></span>
+              </article>
+              <article class="expense-metric" data-tone="orange">
+                <span class="expense-metric__body"><span class="expense-metric__label">超标占比</span><strong class="expense-metric__value">{{ statistics.total_count ? (statistics.over_standard_count*100/statistics.total_count).toFixed(1) : '0.0' }}<span class="expense-metric__suffix">%</span></strong></span>
+              </article>
+            </div>
+            <p class="expense-meta">退回率按当前筛选范围内有真实提交事实的去重单据计算；同单多轮退回只计一次，撤回与作废不计退回，差旅异常单独统计。</p>
+          </section>
+          <section class="expense-panel">
+            <header class="expense-card-head">
+              <h2 class="expense-card-title">比例概览</h2>
+            </header>
+            <div class="expense-donut-grid">
+              <article class="expense-item expense-donut-card expense-donut-card--ink">
+                <h3>超标占比</h3>
+                <div class="expense-donut" role="img"
+                  :aria-label="`超标占比 ${overStandardPercentText}`"
+                  :style="{ '--donut-value': overStandardRatio }"
+                >
+                  <span class="expense-donut__value">{{ overStandardPercentText }}</span>
+                </div>
+                <p class="expense-donut__note">
+                  超标 {{ statistics.over_standard_count }} 单 / 共 {{ statistics.total_count }} 单
+                </p>
+              </article>
+              <article class="expense-item expense-donut-card expense-donut-card--light">
+                <h3>退回率</h3>
+                <div class="expense-donut" role="img"
+                  :aria-label="`退回率 ${returnRatePercentText}`"
+                  :style="{ '--donut-value': returnRateRatio }"
+                >
+                  <span class="expense-donut__value">{{ returnRatePercentText }}</span>
+                </div>
+                <p class="expense-donut__note">
+                  按有真实提交事实的去重单据计算
+                </p>
+              </article>
+            </div>
+          </section>
+          <section v-for="group in [{key:'monthly',field:'month',title:'月度趋势'},{key:'by_type',field:'claim_type',title:'类型分布'},{key:'by_project',field:'project_id',title:'项目成本'}]" :key="group.key" class="expense-panel">
+            <header class="expense-card-head">
+              <h2 class="expense-card-title">{{ group.title }}</h2>
+            </header>
             <p v-if="!statistics[group.key]?.length">当前范围没有数据。</p>
             <div v-for="row in statistics[group.key]" :key="row[group.field]" class="expense-chart-row">
               <span>{{ group.key==='by_type' ? claimTypes[row.claim_type] || '历史未分类' : row[group.field] }}</span>
               <meter min="0" max="100" :value="statisticWidth(row,statistics[group.key])" :aria-label="`${row[group.field]}金额占最大分组比例`" />
               <span>{{ formatMinor(row.amount_minor) }} 元 · {{ row.count }} 单</span>
             </div>
-          </article>
+          </section>
         </template>
       </section>
-      <section v-if="section === 'archives'" class="expense-panel">
-        <h2>项目归档包</h2><p>按实际封存日期筛选；同一单据多个档案版本不重复累计金额，金额为当前已付净额。</p>
+      <section v-if="section === 'archives'" class="expense-panel expense-panel--flush">
+        <header class="expense-card-head">
+          <h2 class="expense-card-title">项目归档包</h2>
+          <span class="expense-card-extra">按实际封存日期筛选；同一单据多个档案版本不重复累计金额</span>
+        </header>
         <!-- 归档聚合失败显示原因与重试，不再整块消失。 -->
         <ErrorState v-if="archiveProjectsError" :error="archiveProjectsError" title="项目归档包加载失败" @retry="load" />
-        <div v-else-if="archiveProjects" class="expense-table"><table class="expense-table-body"><thead><tr><th scope="col">项目</th><th scope="col">报销单数</th><th scope="col">当前净额</th><th scope="col">最近封存</th><th scope="col">操作</th></tr></thead>
-          <tbody><tr v-for="project in archiveProjects.items" :key="project.project_id"><td>{{ project.project_id }}</td><td>{{ project.claim_count }}</td>
-            <td>{{ formatMinor(project.amount_minor) }}元</td><td>{{ formatBusinessDateTime(project.last_archived_at) }}</td>
-            <td><button type="button" class="expense-button" @click="openArchiveProject(project.project_id)">查看项目档案</button></td></tr>
-            <tr v-if="!archiveProjects.items.length"><td colspan="5">当前范围没有已封存项目档案。</td></tr></tbody></table></div>
-      </section>
-      <section v-if="section !== 'dashboard' && !['invoice-upload','analytics','recovery','messages'].includes(workspace)" class="expense-panel">
-        <div v-if="section === 'invoices' && can('expense.claim.create')" class="expense-actions">
-          <span>已选择 {{ selectedInvoiceIDs.length }} 张</span>
-          <button type="button" class="expense-button primary" :disabled="!selectedInvoiceIDs.length || saving || !!pending" @click="createDraftFromInvoices">从已确认发票生成费用草稿</button>
+        <div v-else-if="archiveProjects" class="expense-table">
+          <table class="expense-table-body">
+            <thead><tr><th scope="col">项目</th><th scope="col">报销单数</th><th class="expense-num" scope="col">当前净额</th><th scope="col">最近封存</th><th scope="col">操作</th></tr></thead>
+            <tbody>
+              <tr v-for="project in archiveProjects.items" :key="project.project_id">
+                <td>{{ project.project_id }}</td>
+                <td>{{ project.claim_count }}</td>
+                <td class="expense-num">{{ formatMinor(project.amount_minor) }} 元</td>
+                <td>{{ formatBusinessDateTime(project.last_archived_at) }}</td>
+                <td><button type="button" class="expense-button" @click="openArchiveProject(project.project_id)">查看项目档案</button></td>
+              </tr>
+              <tr v-if="!archiveProjects.items.length"><td colspan="5">当前范围没有已封存项目档案。</td></tr>
+            </tbody>
+          </table>
         </div>
-        <p v-if="section === 'invoices' && can('expense.claim.create')">
+        <p v-else class="expense-meta">当前范围没有已封存项目档案。</p>
+      </section>
+      <section v-if="section !== 'dashboard' && !['invoice-upload','analytics','recovery','messages'].includes(workspace)
+        && !(section === 'claims' && (selected || claimFormOpen))" class="expense-panel expense-panel--flush">
+        <header class="expense-card-head">
+          <h2 class="expense-card-title">{{ listTitle }}</h2>
+          <div class="expense-card-extra">
+            <span>共 {{ total }} 条</span>
+            <button v-if="workspace === 'invoices' && can('expense.invoice.upload')" type="button" class="expense-button" @click="navigate('invoice-upload')">上传发票</button>
+            <button v-if="workspace === 'invoices' && sectionAllowed('invoice-abnormal')" type="button" class="expense-button" @click="navigate('invoice-abnormal')">异常发票池</button>
+          </div>
+        </header>
+        <div v-if="section === 'invoices' && can('expense.claim.create') && selectedInvoiceIDs.length" class="expense-bulkbar">
+          <span>已选择 {{ selectedInvoiceIDs.length }} 张</span>
+          <button type="button" class="expense-button primary" :disabled="saving || !!pending" @click="createDraftFromInvoices">从已确认发票生成费用草稿</button>
+        </div>
+        <p v-if="section === 'invoices' && can('expense.claim.create')" class="expense-panel__note">
           只有「已人工复核」且未被其他单据占用的本人票据可以勾选生成费用；其余票据请先复核票面。
         </p>
         <!-- 失败落在列表位置并带重试；空列表才说"暂无记录"。 -->
-        <ErrorState v-if="listError" :error="listError" title="列表加载失败" @retry="load" />
+        <ErrorState v-if="listError" :error="listError" title="列表加载失败" class="expense-panel__state" @retry="load" />
         <EmptyState v-else-if="!loading && !rows.length" title="当前权限范围内暂无记录"
-          description="调整筛选条件，或确认当前账号的数据范围后再试。" />
+          description="调整筛选条件，或确认当前账号的数据范围后再试。" class="expense-panel__state" />
         <div v-else class="expense-table">
           <table class="expense-table-body">
             <thead>
@@ -3286,18 +3698,16 @@ onBeforeUnmount(() => {
                   </small>
                 </td>
                 <td>
-                  {{ row.lifecycle_status ? statusLabel(row.lifecycle_status)
-                    : (row.status || row.review_status) ? statusLabel(row.status || row.review_status)
-                      : (row.published ? '已发布' : '草稿') }}
+                  <span class="expense-badge" :class="listRowTone(row)">{{ listRowStatusText(row) }}</span>
                   <small>
                     版本 {{ row.version }}
                   </small>
                 </td>
-                <td>
+                <td class="expense-num">
                   {{ section === 'invoices' ? moneyText(row.total_minor) : section === 'approvals' ? `第 ${row.round} 轮` : moneyText(row.payable_minor || row.limit_minor) }}
                 </td>
                 <td>{{ section === 'invoices' ? `${row.invoice_type || '待确认'} / ${row.invoice_date || '日期待确认'}` : `${claimTypes[row.claim_type] || '历史未分类'} / ${row.applicant_subject_id || row.assignee_subject_id || '本任务范围未提供'}` }}</td>
-                <td v-if="section === 'invoices'">{{ row.seller_tax_id || '税号待核对' }} · {{ statusLabel(row.verification_status) }}</td>
+                <td v-if="section === 'invoices'">{{ row.seller_tax_id || '税号待核对' }} · <span class="expense-badge" :class="claimStatusTone(row.verification_status)">{{ statusLabel(row.verification_status) }}</span></td>
                 <td v-else-if="listHasNodeColumn">{{ row.current_approval_node || row.node_code ? approvalNodesLabel(row.current_approval_node || row.node_code) : '—' }}
                   <span v-if="section==='approvals' && row.urgency==='OVERDUE'" class="expense-flag danger">待办超48小时</span>
                   <span v-if="row.has_over_standard" class="expense-flag">超标</span>
@@ -3332,7 +3742,7 @@ onBeforeUnmount(() => {
             </tbody>
           </table>
         </div>
-        <footer v-if="!listError" class="expense-actions">
+        <footer v-if="!listError" class="expense-panel__foot">
           <button type="button" v-if="['claims','payments','archives'].includes(section) && can('expense.archive.export')" class="expense-button"
             :disabled="!selectedClaimIDs.length || saving || !!pending" @click="exportSelectedClaims">导出所选 {{ selectedClaimIDs.length }} 张</button>
           <PaginationBar label="报销列表分页" :page="page" :total="total" :page-size="pageSize"
@@ -3341,20 +3751,24 @@ onBeforeUnmount(() => {
             @change-page-size="nextSize => { pageSize = nextSize; applyFilters() }" />
         </footer>
       </section>
-      <ApprovalRoundsPanel v-if="approvalTask && section === 'approvals'" :claim-id="approvalTask.claim_id" />
-      <section v-if="approvalTask && section === 'approvals'" ref="detailPanel" class="expense-panel">
-        <header class="expense-actions">
-          <h2>
-            第 {{ approvalTask.round }} 轮 · {{ approvalNodeLabel(approvalTask.node_role || approvalTask.node_code) }}
-          </h2>
-          <button type="button" class="expense-button" @click="backToList('approval')">
-            返回待办列表
-          </button>
-        </header>
-        <p>
-          固定快照版本 {{ approvalTask.snapshot?.version }} · 状态 {{ statusLabel(approvalTask.status) }}
-          · 待办人 {{ approvalTask.assignee || '以服务端当前受理人为准' }}
-        </p>
+      <div v-if="approvalTask && section === 'approvals'" class="expense-split">
+        <div class="expense-split__main">
+          <ApprovalRoundsPanel :claim-id="approvalTask.claim_id" />
+          <section ref="detailPanel" class="expense-panel">
+            <header class="expense-detail-head">
+              <div>
+                <h2>
+                  第 {{ approvalTask.round }} 轮 · {{ approvalNodeLabel(approvalTask.node_role || approvalTask.node_code) }}
+                </h2>
+                <p class="expense-detail-meta">
+                  固定快照版本 {{ approvalTask.snapshot?.version }} · 状态 {{ statusLabel(approvalTask.status) }}
+                  · 待办人 {{ approvalTask.assignee || '以服务端当前受理人为准' }}
+                </p>
+              </div>
+              <button type="button" class="expense-button" @click="backToList('approval')">
+                返回待办列表
+              </button>
+            </header>
         <p v-if="approvalTask.snapshot?.scope_limited">
           仅展示本任务覆盖项目；完整票据和其他项目分摊不在本任务范围。
         </p>
@@ -3416,48 +3830,6 @@ onBeforeUnmount(() => {
               </tr>
             </tbody>
           </table>
-        </div>
-      </section>
-      <section
-        v-if="approvalTask && section === 'approvals'"
-        class="expense-panel"
-        aria-label="办理当前审批任务"
-      >
-        <h3>办理当前审批任务</h3>
-        <label>
-          审批说明（退回、转交、加签时必须填写）
-          <textarea v-model="approvalReason" maxlength="2000" data-field="approval_reason" />
-        </label>
-        <label>
-          转交 / 加签目标主体
-          <BusinessObjectSelect :key="approvalTask.id" v-model="transferSubject"
-            label="转交或加签人员" source="/personnel-options"
-            :extra-params="{ purpose: 'transfer', resource_id: approvalTask.id }"
-            :required-search="true" :disabled="saving || !!pending" data-field="transfer_subject" />
-        </label>
-        <div class="expense-actions">
-          <button v-for="action in approvalTask.allowed_actions || []" :key="action" type="button"
-            class="expense-button" :disabled="saving || !!pending" @click="requestApprovalAction(action)">
-            {{ approvalActionLabel(action) }}
-          </button>
-        </div>
-        <p v-if="!(approvalTask.allowed_actions || []).length">
-          当前任务没有可执行动作；请核对任务状态、轮次和受理人。
-        </p>
-        <div v-if="pendingApprovalAction" class="expense-alert warning" role="alertdialog" aria-label="确认审批动作">
-          <p>
-            确认对第 {{ approvalTask.round }} 轮「{{ approvalNodeLabel(approvalTask.node_role || approvalTask.node_code) }}」执行「{{ approvalActionLabel(pendingApprovalAction) }}」？
-          </p>
-          <p v-if="pendingApprovalAction === 'RETURN'">退回原因：{{ approvalReason.trim() || '未填写' }}</p>
-          <p v-if="['TRANSFER', 'ADDSIGN'].includes(pendingApprovalAction)">目标主体：{{ transferSubject.trim() }}</p>
-          <div class="expense-actions">
-            <button type="button" class="expense-button primary" :disabled="saving || !!pending" @click="confirmApprovalAction">
-              确认{{ approvalActionLabel(pendingApprovalAction) }}
-            </button>
-            <button type="button" class="expense-button" @click="cancelApprovalAction">
-              取消
-            </button>
-          </div>
         </div>
       </section>
       <section
@@ -3566,38 +3938,127 @@ onBeforeUnmount(() => {
             </details>
           </li>
         </ol>
-      </section>
+          </section>
+        </div>
+        <aside class="expense-split__side">
+          <section class="expense-panel" aria-label="办理当前审批任务">
+            <header class="expense-card-head">
+              <h2 class="expense-card-title">办理当前审批任务</h2>
+              <span class="expense-badge warning">待办</span>
+            </header>
+            <label>
+              审批说明（退回、转交、加签时必须填写）
+              <textarea v-model="approvalReason" maxlength="2000" data-field="approval_reason" />
+            </label>
+            <label>
+              转交 / 加签目标主体
+              <BusinessObjectSelect :key="approvalTask.id" v-model="transferSubject"
+                label="转交或加签人员" source="/personnel-options"
+                :extra-params="{ purpose: 'transfer', resource_id: approvalTask.id }"
+                :required-search="true" :disabled="saving || !!pending" data-field="transfer_subject" />
+            </label>
+            <div class="expense-actions">
+              <button v-for="action in approvalTask.allowed_actions || []" :key="action" type="button"
+                class="expense-button" :class="{ primary: action === 'APPROVE', danger: action === 'RETURN' }"
+                :disabled="saving || !!pending" @click="requestApprovalAction(action)">
+                {{ approvalActionLabel(action) }}
+              </button>
+            </div>
+            <p v-if="!(approvalTask.allowed_actions || []).length">
+              当前任务没有可执行动作；请核对任务状态、轮次和受理人。
+            </p>
+            <div v-if="pendingApprovalAction" class="expense-alert warning" role="alertdialog" aria-label="确认审批动作">
+              <p>
+                确认对第 {{ approvalTask.round }} 轮「{{ approvalNodeLabel(approvalTask.node_role || approvalTask.node_code) }}」执行「{{ approvalActionLabel(pendingApprovalAction) }}」？
+              </p>
+              <p v-if="pendingApprovalAction === 'RETURN'">退回原因：{{ approvalReason.trim() || '未填写' }}</p>
+              <p v-if="['TRANSFER', 'ADDSIGN'].includes(pendingApprovalAction)">目标主体：{{ transferSubject.trim() }}</p>
+              <div class="expense-actions">
+                <button type="button" class="expense-button primary" :disabled="saving || !!pending" @click="confirmApprovalAction">
+                  确认{{ approvalActionLabel(pendingApprovalAction) }}
+                </button>
+                <button type="button" class="expense-button" @click="cancelApprovalAction">
+                  取消
+                </button>
+              </div>
+            </div>
+          </section>
+        </aside>
+      </div>
       <section
-        v-if="section === 'claims' && (selected || can('expense.claim.create'))"
-        ref="detailPanel"
-        class="expense-panel"
+        v-if="section === 'claims' && (selected || claimFormOpen)"
+        class="expense-claim-workspace"
       >
-        <header class="expense-actions">
-          <h2>
-            {{ selected ? `单据 ${selected.claim_no || selected.id}` : '新建草稿' }}
-          </h2>
+        <header class="expense-detail-head">
+          <div>
+            <h2>
+              {{ selected ? `单据 ${selected.claim_no || selected.id}` : '新建草稿' }}
+              <span v-if="selected" class="expense-badge" :class="claimStatusTone(selected.status)">{{ statusLabel(selected.status) }}</span>
+            </h2>
+            <p class="expense-detail-meta">
+              {{ selected ? `版本 ${selected.version} · 应付金额 ${formatMinor(selected.payable_minor)} 元` : '保存后生成服务器草稿，提交前请完成全部校验。' }}
+            </p>
+          </div>
           <button v-if="selected" type="button" class="expense-button" @click="backToList('claim')">
             返回列表
           </button>
         </header>
-
-        <p v-if="selected">
+        <div class="expense-split">
+          <section ref="detailPanel" class="expense-panel">
+        <p v-if="selected" class="expense-meta">
           状态 {{ statusLabel(selected.status) }} · 版本 {{ selected.version }} · 应付金额 {{ formatMinor(selected.payable_minor) }} 元
           <template v-if="selected.status !== 'DRAFT' && selected.status !== 'WITHDRAWN'">
             · 第 {{ selected.current_round || selected.round || 1 }} 轮
             <template v-if="selected.current_approval_node"> · 当前节点 {{ approvalNodesLabel(selected.current_approval_node) }}</template>
           </template>
         </p>
+        <div v-if="claimContextChips.length" class="expense-context" role="group" aria-label="当前单据参数">
+          <span class="expense-context__title">当前参数</span>
+          <span v-for="chip in claimContextChips" :key="chip.label" class="expense-context__chip">
+            <small>{{ chip.label }}</small><b>{{ chip.value }}</b>
+          </span>
+        </div>
         <ApprovalRoundsPanel
           v-if="selected && selected.status !== 'DRAFT' && selected.status !== 'WITHDRAWN'"
           :key="`claim-rounds-${selected.id}`"
           :claim-id="selected.id"
         />
         <p v-if="selected?.invoice_date_warnings?.length" class="expense-alert warning">存在发票时效风险：{{ selected.invoice_date_warnings.map(row=>`${row.invoice_id}已开具${row.age_days}天`).join('；') }}。已冻结到当前审批快照。</p>
-        <p v-if="claimReadonlyReason" class="expense-alert warning">
+        <p v-if="claimReadonlyReason && editable" class="expense-alert warning">
           {{ claimReadonlyReason }}
         </p>
-        <h3>1 基础信息</h3>
+        <template v-if="selected && !editable">
+          <h3><span class="expense-step">1</span>单据摘要</h3>
+          <div class="expense-item">
+            <div class="expense-summary-list">
+              <div class="expense-summary-list__item"><span class="expense-summary-list__k">单据状态</span><span class="expense-summary-list__v">{{ statusLabel(selected.status) }}</span></div>
+              <div class="expense-summary-list__item"><span class="expense-summary-list__k">报销类型</span><span class="expense-summary-list__v">{{ claimTypes[selected.claim_type] || '历史未分类' }}</span></div>
+              <div class="expense-summary-list__item"><span class="expense-summary-list__k">报销人</span><span class="expense-summary-list__v">{{ applicantName }}</span></div>
+              <div class="expense-summary-list__item"><span class="expense-summary-list__k">应付金额</span><span class="expense-summary-list__v">{{ moneyText(selected.payable_minor) }}</span></div>
+              <div class="expense-summary-list__item"><span class="expense-summary-list__k">版本</span><span class="expense-summary-list__v">{{ selected.version }}</span></div>
+              <div class="expense-summary-list__item"><span class="expense-summary-list__k">当前轮次</span><span class="expense-summary-list__v">{{ selected.current_round || selected.round || '—' }}</span></div>
+              <div class="expense-summary-list__item"><span class="expense-summary-list__k">当前节点</span><span class="expense-summary-list__v">{{ selected.current_approval_node ? approvalNodesLabel(selected.current_approval_node) : '—' }}</span></div>
+              <div class="expense-summary-list__item"><span class="expense-summary-list__k">创建时间</span><span class="expense-summary-list__v">{{ formatBusinessDateTime(selected.created_at) }}</span></div>
+            </div>
+          </div>
+          <h3><span class="expense-step">2</span>费用明细</h3>
+          <div class="expense-table">
+            <table class="expense-table-body">
+              <thead><tr><th scope="col">费用类型</th><th scope="col">发生日</th><th class="expense-num" scope="col">金额</th><th scope="col">说明</th></tr></thead>
+              <tbody>
+                <tr v-for="item in draft.items" :key="item.id">
+                  <td>{{ item.fee_type || '未分类' }}</td>
+                  <td>{{ item.occurred_date || '—' }}</td>
+                  <td class="expense-num">{{ moneyText(item.requested_minor) }}</td>
+                  <td>{{ item.reason || '—' }}</td>
+                </tr>
+                <tr v-if="!draft.items.length"><td colspan="4">当前单据没有可见费用项。</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </template>
+        <template v-else>
+        <h3><span class="expense-step">1</span>基础信息</h3>
         <p v-if="!currentDraftContext.ready" role="status">{{ currentDraftContext.message }}</p>
 
         <fieldset :disabled="!editable || saving || !!pending">
@@ -3635,13 +4096,14 @@ onBeforeUnmount(() => {
           </div>
           <p v-if="projectLoading" role="status">正在读取本人报告阶段可用项目…</p>
           <p v-if="projectError" role="alert">{{ projectError }}</p>
-          <h3>2 关联本人项目</h3>
+          <h3><span class="expense-step">2</span>关联本人项目</h3>
           <p>项目须已进入报告编制或已完成；仅展示当前本人范围及有效费用参与资格。</p>
           <p v-if="route.query.project_id">
             {{ projectRouteHint }} 地址参数不代表费用资格。
           </p>
           <ClaimPreviewPanel :value="claimPreview" :busy="previewBusy" :error="previewError"
             :enabled="previewEnabled" :disabled="!selected || !editable || saving || !!pending" @refresh="refreshClaimPreview" />
+          <h3><span class="expense-step">3</span>费用明细与票据</h3>
           <article v-for="(item, index) in draft.items" :key="item.id" class="expense-item" :data-expense-index="index" tabindex="-1">
 
             <h3>
@@ -3828,8 +4290,9 @@ onBeforeUnmount(() => {
             添加费用
           </button>
         </fieldset>
+        </template>
 
-        <footer class="expense-actions">
+        <footer class="expense-panel__foot expense-claim-footer">
           <button type="button"
             v-if="!selected"
             class="expense-button primary"
@@ -3898,23 +4361,67 @@ onBeforeUnmount(() => {
         <p>
           提交使用最后保存的服务器版本。修改表单后请先保存。非项目费用首发关闭。
         </p>
+          </section>
+          <aside class="expense-split__side">
+            <section class="expense-panel">
+              <header class="expense-card-head">
+                <h2 class="expense-card-title">本次报销</h2>
+                <span class="expense-card-extra">{{ draft.items.length }} 条费用</span>
+              </header>
+              <div class="expense-summary-list">
+                <div class="expense-summary-list__item">
+                  <span class="expense-summary-list__k">单据状态</span>
+                  <span class="expense-summary-list__v">{{ selected ? statusLabel(selected.status) : '新建草稿' }}</span>
+                </div>
+                <div class="expense-summary-list__item">
+                  <span class="expense-summary-list__k">分摊前合计</span>
+                  <span class="expense-summary-list__v">{{ draftTotal }} 元</span>
+                </div>
+                <div class="expense-summary-list__item">
+                  <span class="expense-summary-list__k">当前轮次</span>
+                  <span class="expense-summary-list__v">{{ selected?.current_round || selected?.round || '—' }}</span>
+                </div>
+                <div class="expense-summary-list__item">
+                  <span class="expense-summary-list__k">当前节点</span>
+                  <span class="expense-summary-list__v">{{ selected?.current_approval_node ? approvalNodesLabel(selected.current_approval_node) : '—' }}</span>
+                </div>
+              </div>
+              <p class="expense-meta">保存后仍以服务端重新计算、标准匹配与项目资格校验为准。</p>
+            </section>
+            <section v-if="claimReadonlyReason" class="expense-panel">
+              <header class="expense-card-head">
+                <h2 class="expense-card-title">只读原因</h2>
+              </header>
+              <p>{{ claimReadonlyReason }}</p>
+            </section>
+            <section v-if="selected?.invoice_date_warnings?.length" class="expense-panel">
+              <header class="expense-card-head">
+                <h2 class="expense-card-title">关键提醒</h2>
+              </header>
+              <p class="expense-alert warning">存在发票时效风险：{{ selected.invoice_date_warnings.map(row=>`${row.invoice_id}已开具${row.age_days}天`).join('；') }}。已冻结到当前审批快照。</p>
+            </section>
+          </aside>
+        </div>
       </section>
       <section v-if="selected && ['payments', 'archives'].includes(section)" ref="detailPanel" class="expense-panel">
-        <header class="expense-actions">
-          <h2>
-            {{ selected.claim_no || selected.title }}
-          </h2>
+        <header class="expense-detail-head">
+          <div>
+            <h2>
+              {{ selected.claim_no || selected.title }}
+              <span class="expense-badge" :class="claimStatusTone(selected.status)">{{ statusLabel(selected.status) }}</span>
+            </h2>
+            <p class="expense-detail-meta">
+              版本 {{ selected.version }} · 应付 {{ formatMinor(selected.payable_minor) }} {{ selected.currency }}
+              <template v-if="selected.status !== 'DRAFT' && selected.status !== 'WITHDRAWN'">
+                · 第 {{ selected.current_round || selected.round || 1 }} 轮
+                <template v-if="selected.current_approval_node"> · 当前节点 {{ approvalNodesLabel(selected.current_approval_node) }}</template>
+              </template>
+            </p>
+          </div>
           <button type="button" class="expense-button" @click="backToList('claim')">
             返回列表
           </button>
         </header>
-        <p>
-          状态 {{ statusLabel(selected.status) }} · 版本 {{ selected.version }} · 应付 {{ formatMinor(selected.payable_minor) }} {{ selected.currency }}
-          <template v-if="selected.status !== 'DRAFT' && selected.status !== 'WITHDRAWN'">
-            · 第 {{ selected.current_round || selected.round || 1 }} 轮
-            <template v-if="selected.current_approval_node"> · 当前节点 {{ approvalNodesLabel(selected.current_approval_node) }}</template>
-          </template>
-        </p>
         <ApprovalRoundsPanel :key="`payment-rounds-${selected.id}`" :claim-id="selected.id" />
         <ArchivePackagePanel v-if="section === 'archives' && can('expense.archive.export')" :key="selected.id" :archives="archives" />
         <ReimbursementCostNotice :claim="selected" :settlement-enabled="frontendModules.some(module => module.code === 'settlement')" />
@@ -4335,10 +4842,17 @@ onBeforeUnmount(() => {
       </section>
       <InvoiceControlsPanel v-if="selectedInvoice && section === 'invoices' && session" :key="selectedInvoice.id" :invoice="selectedInvoice" :session="session" @changed="openInvoice(selectedInvoice.id)" />
       <section v-if="selectedInvoice && section === 'invoices'" ref="detailPanel" class="expense-panel">
-        <header class="expense-actions">
-          <h2>
-            人工复核 · {{ selectedInvoice.id }}
-          </h2>
+        <header class="expense-detail-head">
+          <div>
+            <h2>
+              人工复核 · {{ selectedInvoice.id }}
+              <span class="expense-badge" :class="claimStatusTone(selectedInvoice.review_status)">{{ statusLabel(selectedInvoice.review_status) }}</span>
+            </h2>
+            <p class="expense-detail-meta">
+              外部查验：<span class="expense-badge" :class="claimStatusTone(selectedInvoice.verification_status)">{{ statusLabel(selectedInvoice.verification_status) }}</span>
+              · 占用：<span class="expense-badge" :class="claimStatusTone(selectedInvoice.reservation_state)">{{ statusLabel(selectedInvoice.reservation_state) }}</span>
+            </p>
+          </div>
           <button type="button" class="expense-button" @click="backToList('invoice')">
             返回发票列表
           </button>
@@ -4352,9 +4866,6 @@ onBeforeUnmount(() => {
         <p v-if="selectedInvoice.reservation_state!=='AVAILABLE'">已占用或消费的商品服务明细只读，须通过独立更正及申请人重新确认。</p>
         <TravelFields v-model:value="selectedInvoice.travel_facts" invoice :disabled="!can('expense.invoice.review') || selectedInvoice.review_status==='CONFIRMED'" />
         <p v-if="selectedInvoice.review_status==='CONFIRMED'">已确认票面行程只读；重大变化请使用独立更正审批，不重新覆盖原事实。</p>
-        <p>
-          复核：{{ statusLabel(selectedInvoice.review_status) }} · 外部查验：{{ statusLabel(selectedInvoice.verification_status) }} · 占用：{{ statusLabel(selectedInvoice.reservation_state) }}
-        </p>
         <div class="expense-grid">
           <aside>
             <h3>

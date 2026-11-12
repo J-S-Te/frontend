@@ -158,7 +158,7 @@ test('收件箱显示未读计数、未读标记、正文与业务时间，并�
     const rendered = html()
     assert.match(rendered, /未读 1/)
     assert.match(rendered, /审批待办/)
-    assert.match(rendered, /class="expense-flag">未读/)
+    assert.match(rendered, /class="expense-badge info">未读/)
     assert.match(rendered, /&lt;b&gt;请处理&lt;\/b&gt;/)
     assert.doesNotMatch(rendered, /<b>请处理/)
     assert.match(rendered, /2026-11-11 09:00/)
