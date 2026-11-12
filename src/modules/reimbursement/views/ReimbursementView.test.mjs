@@ -157,6 +157,13 @@ test('HTTP上传仍计算原件摘要并使用系统回执文档，不暴露可�
       if (path === '/invoice-documents/server-document/complete') return {
         id: 'server-document', file_id: 'server-file', status: 'READY', parse_run_id: 'server-run',
       }
+      if (path === '/parse-runs/server-run') return {
+        id: 'server-run', status: 'DONE', document_id: 'server-document', attempt: 1,
+      }
+      if (path === '/invoice-documents/server-document') return {
+        id: 'server-document', version: 2, status: 'READY',
+        detail: { parse_run_id: 'server-run', parse_result: { documents: [] } },
+      }
       throw new Error(`unexpected API: ${path}`)
     }, 'invoice-upload')
     window.location = { origin: 'http://fixture.example.test',
@@ -168,7 +175,10 @@ test('HTTP上传仍计算原件摘要并使用系统回执文档，不暴露可�
       return new Response(null, { status: 200 })
     }
     await fixture.state.uploadInvoiceBatch({ target: { files: [file] } })
+    await new Promise((resolve) => setTimeout(resolve, 20))
     assert.equal(fixture.state.error.value, '')
+    assert.ok(writes.some(([path]) => path === '/parse-runs/server-run'), 'upload must auto-query parse run')
+    assert.equal(fixture.state.parseRun.value?.status, 'DONE')
     assert.equal(fixture.state.uploadBatch.value[0].status, 'READY')
     assert.equal(writes[0][1].sha256,
       createHash('sha256').update(Buffer.from(await file.arrayBuffer())).digest('hex'))
@@ -176,8 +186,10 @@ test('HTTP上传仍计算原件摘要并使用系统回执文档，不暴露可�
     assert.equal(fixture.state.evidenceNames.value['server-file'], 'upload-fixture.pdf')
     const html = await fixture.html()
     assert.doesNotMatch(html, /文档ID|上传后的文档ID|server-document/)
+    assert.doesNotMatch(html, /发起解析/, '自动识别后不应再要求用户点击发起解析')
     assert.match(html, /upload-fixture\.pdf/)
     assert.match(html, /查询原件状态/)
+    assert.match(html, /查询解析状态/)
   } finally {
     fixture?.unmount()
     globalThis.fetch = previousFetch

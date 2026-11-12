@@ -2191,7 +2191,13 @@ function applyUploadCompletion(result, purpose, fileID, destination = 'payment')
     const id = result.document_id || documentID.value
     if (id) rememberTaskRun('document', { document_id: String(id) })
     if (parseRun.value?.id) rememberParseTask(parseRun.value, id)
-    notice.value = '文件已确认就绪，解析状态请单独查询；提取字段仍需人工复核。'
+    if (parseRun.value?.id) {
+      notice.value = '文件已确认就绪，正在自动识别；完成后请核对候选并人工复核。'
+      // complete 已在服务端原子创建解析任务；这里直接查询并轮询，用户无需再点“发起解析”。
+      void autoRefreshParse()
+    } else {
+      notice.value = '文件已确认就绪，但未取得解析任务；可手动发起解析，提取字段仍需人工复核。'
+    }
   }
 }
 
@@ -2244,7 +2250,14 @@ async function autoRefreshParse() {
           : `解析任务未完成：${failureMessage(job.last_error)}`
       },
     })
-    if (final?.status && !taskSettled(final.status) && ticket === parsePollSequence) {
+    if (final?.status && taskSettled(final.status) && ticket === parsePollSequence) {
+      // 自动识别完成后立即读取原件，把候选字段呈现给用户；无需再点“发起解析”。
+      await readDocument()
+      if (ticket !== parsePollSequence) return
+      notice.value = final.status === 'DONE'
+        ? '文件已上传，解析任务已完成；请核对候选并人工复核，识别结果不代表已验真。'
+        : `解析任务未完成：${failureMessage(final.last_error)}`
+    } else if (final?.status && !taskSettled(final.status) && ticket === parsePollSequence) {
       notice.value = '解析任务仍在处理中；可稍后点击查询解析状态，或重新发起解析。'
     }
   } catch (cause) {
@@ -2957,7 +2970,7 @@ onBeforeUnmount(() => {
           <h2 class="expense-card-title">找回上次上传与解析</h2>
           <span class="expense-card-extra">任务与原件坐标保存在本机</span>
         </header>
-        <p>刷新页面后任务号和文档号仍保留在本机；继续查询不会重新上传，也不会重复发起解析。</p>
+        <p>刷新页面后任务号和文档号仍保留在本机；继续查询不会重新上传，也不会重复创建解析任务。</p>
         <div class="expense-actions">
           <button v-if="recentTask.document" type="button" class="expense-button" @click="resumeRecentDocument">
             读取最近上传的原件（{{ savedAtLabel(recentTask.document.saved_at) }}）
@@ -3019,8 +3032,8 @@ onBeforeUnmount(() => {
             <small v-if="documentLabel">本次上传：{{ documentLabel }}</small>
           </div>
           <div class="expense-actions">
-            <button type="button" class="expense-button primary" :disabled="saving || !documentID" @click="parseDocument">
-              发起解析
+            <button v-if="!parseRun" type="button" class="expense-button primary" :disabled="saving || !documentID" @click="parseDocument">
+              手动发起解析
             </button>
             <button type="button" class="expense-button" :disabled="!documentID" @click="readDocument">
               查询原件状态
