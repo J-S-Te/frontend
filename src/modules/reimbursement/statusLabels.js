@@ -37,6 +37,53 @@ const claimStatusTones = {
   CANCELLED: 'gray', ABANDONED: 'gray',
 }
 
+// 解析问题码与字段名只用于人工核对提示，不能把机器码直接交给用户。
+// 字段坐标来自发票解析器：FIELD_MISSING / FIELD_CONFLICT / AMOUNT_PRECISION_OR_FORMAT_INVALID。
+const parseFieldLabels = {
+  invoice_type: '发票类型', invoice_number: '发票号码', invoice_code: '发票代码',
+  invoice_date: '开票日期', buyer_name: '购买方名称', buyer_tax_id: '购买方税号',
+  seller_name: '销售方名称', seller_tax_id: '销售方税号',
+  amount_minor: '不含税金额', tax_minor: '税额', gross_minor: '价税合计（票面总额）',
+}
+
+const parseIssueLabels = {
+  TEXT_EXTRACTION_IS_NOT_TAX_VERIFICATION: '仅提取票面文字，不代表税务验真',
+  OFD_EXTRACTION_IS_NOT_SIGNATURE_OR_TAX_VERIFICATION: '仅提取 OFD 票面信息，不代表电子签章或税务验真',
+  MANUAL_CONFIRMATION_REQUIRED: '需人工确认',
+  DETAIL_AMOUNTS_INCOMPLETE: '明细金额不完整',
+  DETAIL_LINES_REQUIRE_REVIEW: '明细行需人工核对',
+  DETAIL_AMOUNTS_REQUIRE_REVIEW: '明细金额需人工核对',
+  DETAIL_NET_TOTAL_CONFLICT: '明细不含税金额合计与票面不一致',
+  DETAIL_TAX_TOTAL_CONFLICT: '明细税额合计与票面不一致',
+  DETAIL_FIELD_CONFLICT: '明细字段存在冲突',
+  AMOUNT_CONFLICT: '不含税金额与税额之和不等于价税合计',
+  RED_OR_NEGATIVE_INVOICE_REQUIRES_FINANCE_REVIEW: '红字或负数发票需财务复核',
+  INVOICE_NUMBER_FORMAT_REQUIRES_REVIEW: '发票号码格式需核对',
+  INVOICE_CODE_FORMAT_REQUIRES_REVIEW: '发票代码格式需核对',
+  INVOICE_DATE_INVALID: '开票日期无法识别',
+  PARTY_REGION_UNKNOWN: '购销方地区未识别',
+  PARTY_TAX_ID_FORMAT_REQUIRES_REVIEW: '购销方税号格式需核对',
+  MULTIPAGE_DETAILS_REQUIRE_REVIEW: '多页明细需人工核对',
+  AMBIGUOUS_OR_MERGED_INVOICES: '检测到多张或合并开票，需拆分核对',
+  UNASSIGNED_DETAIL_ROW_REQUIRES_REVIEW: '存在未归属明细行，需人工核对',
+  EVIDENCE_COMPACTED_REFER_TO_ORIGINAL: '证据已压缩，请对照原件核对',
+}
+
+const parseFieldLabel = (field) => parseFieldLabels[field] || '相关字段'
+
+// 用途：把解析问题码翻译为中文人工核对提示。
+// 参数：value 为解析器返回的问题码或历史中文说明。
+// 返回值：中文提示；未知码给出通用核对提示，不回显机器码。
+export function parseIssueLabel(value) {
+  const raw = typeof value === 'string' ? value.trim() : ''
+  if (!raw) return '解析提示：请核对原件与字段后人工确认。'
+  if (/[\u3400-\u9fff]/u.test(raw)) return raw
+  if (raw.startsWith('FIELD_MISSING:')) return `缺少字段：${parseFieldLabel(raw.slice('FIELD_MISSING:'.length))}`
+  if (raw.startsWith('FIELD_CONFLICT:')) return `字段存在冲突：${parseFieldLabel(raw.slice('FIELD_CONFLICT:'.length))}`
+  if (raw.startsWith('AMOUNT_PRECISION_OR_FORMAT_INVALID:')) return `金额格式或精度需核对：${parseFieldLabel(raw.slice('AMOUNT_PRECISION_OR_FORMAT_INVALID:'.length))}`
+  return parseIssueLabels[raw] || '解析提示：请核对原件与字段后人工确认。'
+}
+
 // 用途：把服务器状态编码渲染为中文；未知/空值回退「待确认」。
 // 参数：value 为服务器状态编码。
 // 返回值：中文状态或原文。

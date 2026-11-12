@@ -32,7 +32,7 @@ import ErrorState from '../../shared/components/ErrorState.vue'
 import EmptyState from '../../shared/components/EmptyState.vue'
 import { recallTask, rememberTask, savedAtLabel } from '../taskPersistence.js'
 import { canSelectProjectReference, editableClaimItem, evidenceIDs,travelInput } from '../claimFields.js'
-import { claimStatusLabel as statusLabel, claimStatusTone, failureMessage, failureText } from '../statusLabels.js'
+import { claimStatusLabel as statusLabel, claimStatusTone, failureMessage, failureText, parseIssueLabel } from '../statusLabels.js'
 import { pollTask, taskSettled } from '../asyncTask.js'
 import { formatUserError } from '../../shared/utils/userError.js'
 import InvoiceOriginalViewer from '../components/InvoiceOriginalViewer.vue'
@@ -3059,7 +3059,7 @@ onBeforeUnmount(() => {
               </template>
             </p>
             <ul v-if="documentStatus?.detail?.parse_issues?.length">
-              <li v-for="issue in documentStatus.detail.parse_issues" :key="issue">{{ issue }}</li>
+              <li v-for="issue in documentStatus.detail.parse_issues" :key="issue">{{ parseIssueLabel(issue) }}</li>
             </ul>
             <p v-if="parseRun.last_error" role="alert">
               处理失败：{{ failureMessage(parseRun.last_error) }}

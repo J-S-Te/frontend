@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { borrowStatusLabels, claimStatusLabel, claimStatusTone, failureMessage, failureText, packageStatusLabels } from './statusLabels.js'
+import { borrowStatusLabels, claimStatusLabel, claimStatusTone, failureMessage, failureText, packageStatusLabels, parseIssueLabel } from './statusLabels.js'
 
 test('异步任务、原件与审批任务的状态码都显示中文，未知编码保留原文', () => {
   for (const code of ['PROCESSING', 'READY', 'PARSED', 'PARTIAL', 'RECORDED', 'WAITING',
@@ -13,6 +13,18 @@ test('异步任务、原件与审批任务的状态码都显示中文，未知�
   assert.equal(claimStatusLabel(''), '待确认')
   assert.equal(packageStatusLabels.PROCESSING, '生成中')
   assert.equal(borrowStatusLabels.PENDING, '待审核')
+})
+
+test('解析问题码显示中文人工核对提示，字段缺失不暴露机器码', () => {
+  assert.equal(parseIssueLabel('TEXT_EXTRACTION_IS_NOT_TAX_VERIFICATION'), '仅提取票面文字，不代表税务验真')
+  assert.equal(parseIssueLabel('MANUAL_CONFIRMATION_REQUIRED'), '需人工确认')
+  assert.equal(parseIssueLabel('DETAIL_AMOUNTS_INCOMPLETE'), '明细金额不完整')
+  assert.equal(parseIssueLabel('FIELD_MISSING:gross_minor'), '缺少字段：价税合计（票面总额）')
+  assert.equal(parseIssueLabel('FIELD_CONFLICT:invoice_number'), '字段存在冲突：发票号码')
+  assert.equal(parseIssueLabel('AMOUNT_PRECISION_OR_FORMAT_INVALID:tax_minor'), '金额格式或精度需核对：税额')
+  const unknown = parseIssueLabel('FUTURE_PARSER_ISSUE')
+  assert.match(unknown, /[\u3400-\u9fff]/u)
+  assert.doesNotMatch(unknown, /FUTURE_PARSER_ISSUE/)
 })
 
 test('状态胶囊 tone 稳定，未知状态不被误标为成功', () => {
