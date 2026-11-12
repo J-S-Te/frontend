@@ -11,7 +11,7 @@ function mountInbox(api) {
   const ref = (value) => ({ value })
   const computed = (read) => ({ get value() { return read() } })
   const emitted = []
-  return new Function('formatUserError', 'ref', 'computed', 'onMounted', 'defineEmits', 'getNotification', 'listInbox', 'markNotificationRead', 'window', `${script}\nreturn { items, total, page, unreadOnly, loading, error, detail, projectTarget, load, open, changeFilter, changePage }`)(formatUserError, ref, computed, () => {}, () => (event) => emitted.push(event), api.getNotification, api.listInbox, api.markNotificationRead, { location: { origin: 'http://localhost:8081' } })
+  return new Function('formatUserError', 'ref', 'computed', 'onMounted', 'defineEmits', 'getNotification', 'listInbox', 'markNotificationRead', 'deleteReadNotifications', 'window', `${script}\nreturn { items, total, page, unreadOnly, tab, tabs, loading, error, detail, projectTarget, load, open, changeFilter, changePage, changeTab }`)(formatUserError, ref, computed, () => {}, () => (event) => emitted.push(event), api.getNotification, api.listInbox, api.markNotificationRead, api.deleteReadNotifications || (() => Promise.resolve({ deleted_count: 0 })), { location: { origin: 'http://localhost:8081' } })
 }
 test('项目系统挂载个人通知页面并提供侧栏和铃铛入口', () => {
   assert.match(view, /key: 'notifications', label: '个人通知中心'/)
@@ -62,8 +62,21 @@ test('过期响应不会覆盖最新筛选，网络异常和不安全跳转不�
   assert.equal(failed.error.value, '服务不可用')
   assert.equal(failed.loading.value, false)
 })
+test('本系统/跨系统页签按来源收窄平台收件箱', async () => {
+  const queries = []
+  const state = mountInbox({ listInbox: async (value) => { queries.push(value); return { items: [], total: 0 } } })
+  state.tab.value = 'local'
+  await state.load()
+  state.tab.value = 'cross'
+  await state.load()
+  assert.equal(queries[0].sourceApplication, 'project_management')
+  assert.equal(queries[1].excludeSourceApplication, 'project_management')
+})
+
 test('个人通知复用当前用户站内信接口，提供真实分页、未读筛选和详情已读', () => {
-  assert.match(inbox, /listInbox\(\{ page: page\.value, pageSize, unreadOnly: unreadOnly\.value \}\)/)
+  assert.match(inbox, /sourceApplication: 'project_management'/) 
+  assert.match(inbox, /excludeSourceApplication: 'project_management'/) 
+  assert.match(inbox, /listInbox\(\{ page: page\.value, pageSize, unreadOnly: unreadOnly\.value, \.\.\.scope \}\)/)
   assert.match(inbox, /Math\.ceil\(total\.value \/ pageSize\)/)
   assert.match(inbox, /getNotification\(item\.delivery_id\)/)
   assert.match(inbox, /markNotificationRead\(item\.delivery_id\)/)

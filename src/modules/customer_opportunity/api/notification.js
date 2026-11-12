@@ -11,3 +11,6 @@ export const getNotificationUnreadCount = () => request('/notifications/unread-c
 export const markNotificationRead = (id) => request(`/notifications/${encodeURIComponent(id)}/read`, {
   method: 'POST',
 })
+
+/** 软删除当前用户全部已读通知；未读和其他用户不受影响。 */
+export const deleteReadNotifications = () => request('/notifications/read/delete', { method: 'POST' })
