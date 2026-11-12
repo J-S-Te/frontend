@@ -9,6 +9,7 @@ import OperationToast from '@/modules/shared/components/OperationToast.vue'
 import LoadingState from '@/modules/shared/components/LoadingState.vue'
 import ErrorState from '@/modules/shared/components/ErrorState.vue'
 import SettlementListPager from '@/modules/settlement/components/SettlementListPager.vue'
+import PlatformNotificationInbox from '@/modules/shared/components/PlatformNotificationInbox.vue'
 import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { AuthError, logoutCurrentSession } from "@/modules/platform/auth/api/auth";
@@ -127,6 +128,7 @@ function canLoad(loader) {
   return canLoadKey(loaderKeys.get(loader), can);
 }
 const allowed = computed(() => allowedSections(settlementSession.value));
+const showNotifications = ref(false), notificationUnread = ref(0)
 const sections = [
   ["dashboard", "结算总览", "dashboard"],
   ["receivables", "应收计划与应收单", "audit"],
@@ -923,6 +925,14 @@ watch(invoiceDetailID, load);
           >
             <ConsoleIcon name="bell" /><i class="settlement-notification-dot" />
           </button>
+          <div class="settlement-topbar-notifications">
+            <button class="settlement-topbar-icon" type="button" title="站内通知" aria-label="站内通知" @click="showNotifications = !showNotifications">
+              <ConsoleIcon name="bell" /><i v-if="notificationUnread" class="settlement-notification-dot" />
+            </button>
+            <div v-if="showNotifications" class="settlement-notification-popover" role="dialog" aria-label="站内通知">
+              <PlatformNotificationInbox app-code="settlement" :page-size="8" @unread-change="notificationUnread = $event" />
+            </div>
+          </div>
           <button
             class="settlement-topbar-icon"
             type="button"
@@ -1225,3 +1235,8 @@ watch(invoiceDetailID, load);
     </template>
   </AppShell>
 </template>
+
+<style scoped>
+.settlement-topbar-notifications{--settlement-popover-z:60;position:relative;display:inline-flex}
+.settlement-notification-popover{position:absolute;right:0;top:calc(100% + 8px);width:420px;max-width:calc(100vw - 32px);padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--bg);color:inherit;box-shadow:0 12px 32px rgba(15,23,42,.18);z-index:var(--settlement-popover-z)}
+</style>

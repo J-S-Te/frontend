@@ -3,7 +3,7 @@ import { readFileSync, existsSync } from 'node:fs'
 import { afterEach, test } from 'node:test'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { getNotificationSettings, retryFailedNotificationDeliveries, updateNotificationSettings } from './notifications.js'
+import { deleteReadNotifications, getNotificationSettings, retryFailedNotificationDeliveries, updateNotificationSettings } from './notifications.js'
 
 // 跨仓契约守卫：前端使用的通知路由必须真实存在于平台路由表，
 // 避免只断言模拟响应而漏掉路径拼写错误（历史缺陷：retry-failed）。
@@ -42,6 +42,23 @@ test('getNotificationSettings reads the tenant reminder settings', async () => {
   assert.equal(requested.options.method, undefined)
   assert.equal(requested.options.credentials, 'include')
   assert.equal(requested.options.body, undefined)
+})
+
+test('deleteReadNotifications uses the soft-delete inbox route', async () => {
+  let requested
+  globalThis.fetch = async (url, options) => {
+    requested = { url, options }
+    return jsonResponse({ data: { deleted_count: 2 } })
+  }
+
+  const result = await deleteReadNotifications()
+
+  assert.deepEqual(result, { deleted_count: 2 })
+  assert.equal(requested.url, '/api/v1/notifications/inbox/read/delete')
+  assert.equal(requested.options.method, 'POST')
+  assert.equal(requested.options.credentials, 'include')
+  assert.equal(requested.options.body, '{}')
+  if (routerSource) assert.match(routerSource, /notifications\/inbox\/read\/delete/)
 })
 
 test('updateNotificationSettings keeps email fail-closed and bumps optimistic version', async () => {

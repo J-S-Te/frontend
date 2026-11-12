@@ -2,11 +2,12 @@
 import { computed, onMounted, ref } from 'vue'
 import { formatUserError } from '../../shared/utils/userError.js'
 import { formatBusinessDateTime } from '../../shared/utils/businessTime.js'
-import { getNotification, listInbox, markNotificationRead } from '@/modules/platform/notifications/api/notifications'
+import { deleteReadNotifications, getNotification, listInbox, markNotificationRead } from '@/modules/platform/notifications/api/notifications'
 import PaginationBar from '@/modules/shared/components/PaginationBar.vue'
 
 const emit = defineEmits(['read'])
 const items = ref([]), total = ref(0), page = ref(1), unreadOnly = ref(false)
+const tab = ref('all'), tabs = [{ key: 'all', label: '全部' }, { key: 'local', label: '本系统' }, { key: 'cross', label: '跨系统' }]
 const loading = ref(false), error = ref(''), detail = ref(null), actionID = ref('')
 const pageSize = 20
 let loadSequence = 0
@@ -29,7 +30,8 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const result = await listInbox({ page: page.value, pageSize, unreadOnly: unreadOnly.value })
+    const scope = tab.value === 'local' ? { sourceApplication: 'project_management' } : tab.value === 'cross' ? { excludeSourceApplication: 'project_management' } : {}
+    const result = await listInbox({ page: page.value, pageSize, unreadOnly: unreadOnly.value, ...scope })
     if (sequence !== loadSequence) return
     if (!Array.isArray(result?.items) || !Number.isFinite(Number(result.total))) throw new Error('通知列表响应异常，请重试。')
     items.value = result.items
@@ -42,6 +44,7 @@ async function load() {
   } finally { if (sequence === loadSequence) loading.value = false }
 }
 function changeFilter() { page.value = 1; detail.value = null; load() }
+function changeTab(next) { tab.value = next; page.value = 1; detail.value = null; load() }
 function changePage(next) { page.value = next; load() }
 async function open(item) {
   if (actionID.value) return
@@ -59,12 +62,27 @@ async function open(item) {
   } catch (value) { error.value = formatUserError(value, { fallback: '通知读取失败，请重试。' }) }
   finally { actionID.value = '' }
 }
+const hasReadItems = computed(() => items.value.some((item) => item.read_at))
+// deleteRead 软删除当前账号已读站内信；未读与其他收件人的通知不受影响。
+async function deleteRead() {
+  if (!hasReadItems.value || loading.value || actionID.value) return
+  if (typeof window !== 'undefined' && !window.confirm('确认删除当前账号的全部已读通知？该操作只影响你的收件箱。')) return
+  loading.value = true
+  error.value = ''
+  try {
+    await deleteReadNotifications()
+    emit('read')
+    await load()
+  } catch (value) {
+    error.value = formatUserError(value, { fallback: '删除已读通知失败，请重试。' })
+  } finally { loading.value = false }
+}
 onMounted(load)
 </script>
 
 <template>
   <section class="pm-panel pm-personal-notifications" aria-label="个人通知中心">
-    <header><div><h2>我的通知</h2><p>查看统一站内信中发送给你的业务通知。</p></div><div class="pm-actions"><label><input v-model="unreadOnly" type="checkbox" :disabled="!!actionID" @change="changeFilter"> 仅看未读</label><button type="button" class="pm-button" :disabled="loading || !!actionID" @click="load">刷新</button></div></header>
+    <header><div><h2>我的通知</h2><p>查看统一站内信中发送给你的业务通知。</p></div><div class="pm-actions"><div class="pm-notification-tabs" role="tablist"><button v-for="item in tabs" :key="item.key" type="button" :class="{ active: tab === item.key }" :disabled="!!actionID" @click="changeTab(item.key)">{{ item.label }}</button></div><label><input v-model="unreadOnly" type="checkbox" :disabled="!!actionID" @change="changeFilter"> 仅看未读</label><button type="button" class="pm-button" :disabled="loading || !!actionID || !hasReadItems" @click="deleteRead">删除已读</button><button type="button" class="pm-button" :disabled="loading || !!actionID" @click="load">刷新</button></div></header>
     <div v-if="error" role="alert" class="pm-notification-error"><p>{{ error }}</p><button class="pm-button" :disabled="loading || !!actionID" @click="load">重新加载</button></div>
     <p v-if="loading" role="status">正在加载通知…</p>
     <template v-else-if="!error">
@@ -77,5 +95,5 @@ onMounted(load)
 </template>
 
 <style scoped>
-.pm-personal-notifications>header,.pm-personal-detail>header,.pm-personal-pagination{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}.pm-personal-notifications h2,.pm-personal-detail h3{margin:0}.pm-personal-notifications header p,.pm-personal-pagination,.pm-personal-list time{color:var(--pm-muted,#64748b)}.pm-personal-list{display:grid;gap:10px;margin:20px 0}.pm-personal-list>button{display:grid;gap:8px;text-align:left;padding:18px;border:1px solid var(--pm-border,#e2e8f0);border-radius:12px;background:transparent;color:inherit;cursor:pointer}.pm-personal-list>button.unread{border-left:4px solid #2563eb}.pm-personal-title{display:flex;justify-content:space-between;gap:16px;font-weight:600}.pm-personal-title small{font-weight:400;color:#64748b}.pm-personal-content{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pm-personal-empty{padding:64px 20px;text-align:center;color:#64748b}.pm-personal-detail{margin-top:24px;padding:20px;border:1px solid var(--pm-border,#e2e8f0);border-radius:12px}.pm-personal-detail p{white-space:pre-wrap;overflow-wrap:anywhere}.pm-personal-detail a{display:inline-flex;margin:12px}.pm-notification-error{color:#b91c1c}
+.pm-personal-notifications>header,.pm-personal-detail>header,.pm-personal-pagination{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}.pm-personal-notifications h2,.pm-personal-detail h3{margin:0}.pm-personal-notifications header p,.pm-personal-pagination,.pm-personal-list time{color:var(--pm-muted,#64748b)}.pm-personal-list{display:grid;gap:10px;margin:20px 0}.pm-personal-list>button{display:grid;gap:8px;text-align:left;padding:18px;border:1px solid var(--pm-border,#e2e8f0);border-radius:12px;background:transparent;color:inherit;cursor:pointer}.pm-personal-list>button.unread{border-left:4px solid #2563eb}.pm-personal-title{display:flex;justify-content:space-between;gap:16px;font-weight:600}.pm-personal-title small{font-weight:400;color:#64748b}.pm-personal-content{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pm-personal-empty{padding:64px 20px;text-align:center;color:#64748b}.pm-personal-detail{margin-top:24px;padding:20px;border:1px solid var(--pm-border,#e2e8f0);border-radius:12px}.pm-personal-detail p{white-space:pre-wrap;overflow-wrap:anywhere}.pm-personal-detail a{display:inline-flex;margin:12px}.pm-notification-error{color:#b91c1c}.pm-notification-tabs{--pm-tab-border:#e2e8f0;--pm-tab-active:#2563eb;--pm-tab-on:#fff;display:inline-flex;gap:4px;margin-right:8px}.pm-notification-tabs button{padding:6px 10px;border:1px solid var(--pm-tab-border);border-radius:8px;background:transparent;color:inherit;cursor:pointer}.pm-notification-tabs button.active{background:var(--pm-tab-active);border-color:var(--pm-tab-active);color:var(--pm-tab-on)}
 </style>

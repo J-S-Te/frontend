@@ -128,7 +128,8 @@ import { useCustomerEditor } from '../composables/useCustomerEditor.js'
 import { useOpportunityEditor } from '../composables/useOpportunityEditor.js'
 import { useCustomerImportWizard } from '../composables/useCustomerImportWizard.js'
 import { createPresaleReportFilters } from '../composables/usePresaleReportFilters.js'
-import { getNotificationUnreadCount, listNotifications, markNotificationRead } from '../api/notification.js'
+import { deleteReadNotifications, getNotificationUnreadCount, listNotifications, markNotificationRead } from '../api/notification.js'
+import PlatformNotificationInbox from '@/modules/shared/components/PlatformNotificationInbox.vue'
 import { listOwnerDirectory } from '../api/ownerDirectory.js'
 import { parseNotificationTarget } from '../navigation.js'
 import {
@@ -599,6 +600,7 @@ const runtimeCapabilities = ref({})
 const runtimeCapabilitiesError = ref('')
 const runtimeCapabilitiesLoading = ref(false)
 const notifications = ref([])
+const showCrossNotifications = ref(false)
 const notificationUnreadCount = ref(0)
 const notificationUnreadOnly = ref(false)
 const stageAlerts = ref([])
@@ -1196,6 +1198,7 @@ const customersListState = computed(() => loading.value || Boolean(listError.val
 const opportunitiesListState = computed(() => loading.value || Boolean(listError.value) || !opportunities.value.length)
 const presaleListState = computed(() => loading.value || Boolean(listError.value) || !presales.value.length)
 const notificationsListState = computed(() => loading.value || Boolean(listError.value) || !notifications.value.length)
+const hasReadNotifications = computed(() => notifications.value.some((item) => item.status === 'READ'))
 // 看板同样是「列表」：加载中 / 失败 / 空都要先过闸门。看板模式下 listError 不是列表分支的
 // 私有状态——请求失败时必须显示错误 + 重试，不能把空列渲染成「暂无任务」让用户以为真的没有任务。
 const opportunityBoardState = computed(() => loading.value || Boolean(listError.value) || !board.value.length)
@@ -2130,6 +2133,13 @@ async function openNotification(item) {
     // 绕过商机、售前任务的对象级授权边界。
     if (target.params.section === 'presale') await openPresale(Number(target.query.request_id))
   } catch (value) { showError(value) }
+}
+
+// deleteRead 软删除当前账号已读通知；未读与其他用户的通知不受影响。
+async function deleteRead() {
+  if (!hasReadNotifications.value) return
+  if (typeof window !== 'undefined' && !window.confirm('确认删除当前账号的全部已读通知？该操作只影响你的收件箱。')) return
+  try { await deleteReadNotifications(); await loadCurrent() } catch (value) { showError(value) }
 }
 
 function notificationContext(item) {
@@ -3331,7 +3341,7 @@ onMounted(async () => {
 
       <section v-if="activeSection === 'customers'" class="crm-quick-filters" aria-label="客户快捷筛选"><button :class="{ active: customerFilters.quick_filter === 'NEW' }" @click="useCustomerQuickFilter('NEW')">新增客户（近 30 天）</button><button :class="{ active: customerFilters.quick_filter === 'WON' }" @click="useCustomerQuickFilter('WON')">成交客户</button><button :class="{ active: customerFilters.quick_filter === 'FOLLOWUP_DUE' }" @click="useCustomerQuickFilter('FOLLOWUP_DUE')">待跟进</button></section>
 
-      <section v-if="activeSection === 'notifications'" class="crm-panel crm-inbox"><div class="crm-panel-heading"><div><h2>我的业务通知</h2><p class="crm-note">包含当前用户的商机、售前与信用等级通知；点击后标为已读，并通过真实详情接口再次校验对象权限。</p></div><label class="check"><input v-model="notificationUnreadOnly" type="checkbox">仅看未读</label></div><ListState v-if="notificationsListState" :loading="loading" :error="listError" error-title="业务通知加载失败" :empty-title="notificationUnreadOnly ? '暂无未读个人通知' : '暂无个人通知'" @retry="loadCurrent"><template #empty-action><button v-if="notificationUnreadOnly" type="button" class="crm-state-action" @click="notificationUnreadOnly = false">查看全部通知</button></template></ListState><div v-else class="crm-inbox-list"><button v-for="item in notifications" :key="item.id" :class="['crm-inbox-item', { unread: item.status === 'UNREAD' }]" @click="openNotification(item)"><span class="crm-status">{{ item.status === 'UNREAD' ? '未读' : '已读' }}</span><strong>{{ item.title }}</strong><span>{{ item.body }}</span><small>{{ notificationContext(item) }} · {{ formatDate(item.created_at) }}</small></button></div></section>
+      <section v-if="activeSection === 'notifications'" class="crm-panel crm-inbox"><div class="crm-panel-heading"><div><h2>我的业务通知</h2><p class="crm-note">包含当前用户的商机、售前与信用等级通知；点击后标为已读，并通过真实详情接口再次校验对象权限。</p></div><div class="crm-inbox-actions"><label class="check"><input v-model="notificationUnreadOnly" type="checkbox">仅看未读</label><button type="button" class="crm-state-action" :disabled="!hasReadNotifications || loading" @click="deleteRead">删除已读</button><button type="button" class="crm-state-action" @click="showCrossNotifications = !showCrossNotifications">{{ showCrossNotifications ? '收起跨系统' : '跨系统提醒' }}</button></div></div><ListState v-if="notificationsListState" :loading="loading" :error="listError" error-title="业务通知加载失败" :empty-title="notificationUnreadOnly ? '暂无未读个人通知' : '暂无个人通知'" @retry="loadCurrent"><template #empty-action><button v-if="notificationUnreadOnly" type="button" class="crm-state-action" @click="notificationUnreadOnly = false">查看全部通知</button></template></ListState><div v-else class="crm-inbox-list"><button v-for="item in notifications" :key="item.id" :class="['crm-inbox-item', { unread: item.status === 'UNREAD' }]" @click="openNotification(item)"><span class="crm-status">{{ item.status === 'UNREAD' ? '未读' : '已读' }}</span><strong>{{ item.title }}</strong><span>{{ item.body }}</span><small>{{ notificationContext(item) }} · {{ formatDate(item.created_at) }}</small></button></div><PlatformNotificationInbox v-if="showCrossNotifications" app-code="customer_and_opportunity" scope="cross" :page-size="8" /></section>
       <CreditApprovalInbox v-if="activeSection === 'credit-approvals'" :permissions="crmSession?.permissions || []" :roles="crmSession?.roles || []" />
       <CreditRuleSettingsPanel v-if="activeSection === 'credit-rules'" @notice="notice = $event" @error="error = $event" />
 
