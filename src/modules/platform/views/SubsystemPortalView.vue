@@ -940,7 +940,7 @@ onBeforeUnmount(() => {
     </section>
 
     <footer class="subsystem-portal__footer">
-      <span class="subsystem-portal__footer-note">建议分辨率：1920×1080 · 浏览器：Chrome / Edge 最新版</span>
+      <span class="subsystem-portal__footer-note">建议分辨率：1920×1080 · 主流浏览器：Chrome / Edge / Firefox / Safari 最新版</span>
       <button
         class="subsystem-portal__guide-footer-entry"
         type="button"

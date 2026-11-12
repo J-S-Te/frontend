@@ -827,7 +827,8 @@
 }
 @media (max-width: 460px) {
   .iam-summary-grid { grid-template-columns: 1fr; }
-  .iam-panel-actions .console-button { flex: 1; }
+  /* 窄屏按钮按内容宽度换行：固定等分会让“批量导入用户”等长标签溢出并压到相邻按钮。 */
+  .iam-panel-actions .console-button { flex: 0 0 auto; max-width: 100%; }
   .iam-mini-table { display: block; overflow-x: auto; }
 }
 

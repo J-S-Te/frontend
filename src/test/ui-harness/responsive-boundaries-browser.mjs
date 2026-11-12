@@ -6,7 +6,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { build, transform } from 'esbuild'
 import { parse, compileScript, compileStyle } from '@vue/compiler-sfc'
-import { chromium } from 'playwright-core'
+import { chromium, firefox, webkit } from 'playwright-core'
 
 const root = fileURLToPath(new URL('../../../', import.meta.url))
 const run = process.env.LAYOUT_RUN_LABEL || 'latest'
@@ -454,10 +454,21 @@ for (const source of [licenseSource, licenseCardSource]) {
 const scoped = [...componentStyles.values()].join('\n')
 // 抽屉夹具单独用一份完整样式（含真实组件 scoped 样式），在宽度循环里只跑一次。
 const sheetCss = base + stateCss + consoleCss + sharedCss + moduleCss.join('\n') + scoped
-const browser = await chromium.launch({
-  executablePath: process.env.CHROMIUM_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: true,
-})
+// 默认仍用 CI 的本机 Chrome；LAYOUT_BROWSER=firefox|webkit 可复跑同一套几何断言。
+const layoutBrowser = process.env.LAYOUT_BROWSER || 'chromium'
+const firefoxHome = process.env.LAYOUT_FIREFOX_HOME
+const firefoxEnv = firefoxHome
+  ? { ...process.env, HOME: firefoxHome, CFFIXED_USER_HOME: firefoxHome, TMPDIR: firefoxHome + '/tmp' }
+  : undefined
+const browser = layoutBrowser === 'firefox'
+  ? await firefox.launch({ headless: true, ...(firefoxEnv ? { env: firefoxEnv } : {}) })
+  : layoutBrowser === 'webkit'
+    ? await webkit.launch({ headless: true })
+    : await chromium.launch({
+      executablePath: process.env.CHROMIUM_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      headless: true,
+    })
+console.log('layout browser:', layoutBrowser)
 const results = []
 try {
   for (const [width, height] of [[1440, 900], [1024, 768], [800, 600], [640, 480], [375, 667], [320, 568]]) {
