@@ -78,6 +78,7 @@ import {
   dateKey,
   datetimeLocalToInstant,
   defaultConfigFieldValue,
+  implementationProgressColumns,
   emptyAdjustForm,
   emptyAdjustItem,
   equipmentPresenceLabel,
@@ -1324,7 +1325,13 @@ const implementationItems = computed(() => serviceItems.value.filter((item) => {
   if (item.status === '实施中') return projectAllowsNode(item, 'implementation')
   return projectAllowsNode(item, 'implementation') && item.status === '实施准备中' && event?.type === 'PREPARATION_STARTED'
 }))
-const implementationProjectCount = computed(() => new Set(implementationItems.value.map((item) => item.project_id)).size)
+const implementationProjectCount = computed(() => implementationKanbanColumns.value
+  .reduce((total, column) => total + column.count, 0))
+const implementationBoardServiceCount = computed(() => {
+  const projectIDs = new Set(implementationKanbanColumns.value
+    .flatMap(column => column.cards.map(project => project.id)))
+  return serviceItems.value.filter(item => projectIDs.has(item.project_id)).length
+})
 const preparedImplementationCount = computed(() => implementationItems.value.filter((item) => item.status === '实施准备中').length)
 const fieldImplementationCount = computed(() => implementationItems.value.filter((item) => item.status === '实施中').length)
 const penetrationPackageStats = computed(() => {
@@ -1626,20 +1633,9 @@ const riskRows = computed(() => [
   ...serviceItems.value.filter((item) => item.conflict_status === 'CONFLICT').map((item) => { const project = projectByID.value.get(item.project_id); return { id: `conflict-${item.id}`, level: '高', project: `${item.project_id} · ${project?.customer || item.site}`, issue: `${item.id} 人员或设备能力冲突`, owner: personLabel(item.project_manager_id || item.team_lead_id, '待分配'), deadline: formatBusinessDate(item.planned_start) || '待处理' } }),
 ].slice(0, 10))
 
-// 现场实施页不是全生命周期总览，只展示真正处于现场实施节点的项目。
-// 拆解、分配、计划、准备、异常和报告项目分别留在各自工作区，不能在这里提前出现或继续残留。
-const implementationKanbanColumns = computed(() => [
-  { key: '准备完成', color: 'violet', statuses: ['实施准备中'] },
-  { key: '现场实施', color: 'amber', statuses: ['实施中'] },
-].map((column) => {
-  // 看板与操作列表必须共用同一节点归属结果，不能只看项目状态。尤其现场回退到
-  // 实施准备后，项目状态仍是“实施准备中”，但最新事件已把它归还准备节点。
-  const projectIDs = new Set(implementationItems.value
-    .filter((item) => column.statuses.includes(item.status))
-    .map((item) => item.project_id))
-  const cards = projects.value.filter((project) => projectIDs.has(project.id))
-  return { ...column, cards, count: cards.length }
-}))
+// 看板跟踪现场至交付完成的进度；下方办理列表继续只使用现场节点服务项。
+const implementationKanbanColumns = computed(() =>
+  implementationProgressColumns(projects.value, implementationItems.value))
 
 const operationRows = computed(() => ({
   monitoring: projects.value.slice(0, 5).map((p) => ({ id: p.id, name: `${p.id} · ${p.customer}`, detail: p.category, owner: p.manager, state: p.status, progress: p.progress, due: p.due })),
@@ -3953,7 +3949,7 @@ onBeforeUnmount(() => {
         </template>
 
         <template v-else-if="activeSection === 'implementation'">
-          <section class="pm-board-summary"><div><strong>{{ implementationProjectCount }}</strong><span>当前节点项目</span></div><div><strong>{{ implementationItems.length }}</strong><span>当前节点服务项</span></div><div><strong>{{ preparedImplementationCount }}</strong><span>准备完成</span></div><div><strong>{{ fieldImplementationCount }}</strong><span>现场实施中</span></div><div><strong>{{ penetrationPackageStats.total }}</strong><span>渗透专项（待确认 {{ penetrationPackageStats.pending }} / 进行中 {{ penetrationPackageStats.active }} / 完成 {{ penetrationPackageStats.completed }}）</span></div></section>
+          <section class="pm-board-summary"><div><strong>{{ implementationProjectCount }}</strong><span>看板项目</span></div><div><strong>{{ implementationBoardServiceCount }}</strong><span>看板服务项</span></div><div><strong>{{ preparedImplementationCount }}</strong><span>准备完成</span></div><div><strong>{{ fieldImplementationCount }}</strong><span>现场实施中</span></div><div><strong>{{ penetrationPackageStats.total }}</strong><span>渗透专项（待确认 {{ penetrationPackageStats.pending }} / 进行中 {{ penetrationPackageStats.active }} / 完成 {{ penetrationPackageStats.completed }}）</span></div></section>
           <section class="pm-kanban"><article v-for="column in implementationKanbanColumns" :key="column.key"><header><div><i :class="column.color"></i><b>{{ column.key }}</b></div><span>{{ column.count }}</span></header><div class="pm-kanban-body"><button v-for="card in column.cards" :key="card.id" class="pm-kanban-card" :class="[column.color, { risk: card.risk }]" @click="openProject(card)"><b>{{ card.id }}</b><h3>{{ card.customer }}</h3><span class="pm-badge-stack"><span class="pm-badge" :class="statusTone(card.status)">{{ card.status }}</span><span v-if="projectReportStageLabel(card)" class="pm-badge" :class="statusTone(card.report_stage)">报告编制 · {{ projectReportStageLabel(card) }}</span></span><div class="pm-inline-progress"><i :style="{ width: `${card.progress}%` }"></i></div><footer><span>{{ card.progress }}%</span><time>{{ card.due || '待排期' }}</time></footer></button><div v-if="!column.cards.length" class="pm-empty-mini">暂无当前节点项目</div></div></article></section>
           <section class="pm-panel pm-operation-panel">
             <header><div><p class="pm-panel-kicker">现场实施</p><h2>现场测评与记录</h2></div><div class="pm-field-sync"><span class="pm-badge" :class="pendingFieldSyncCount ? '关注' : 'normal'">待同步 {{ pendingFieldSyncCount }}</span><button v-if="pendingFieldSyncCount" type="button" class="pm-link" :disabled="fieldSyncing" @click="flushFieldOperations(true)">{{ fieldSyncing ? '同步中…' : '立即重试' }}</button></div></header>

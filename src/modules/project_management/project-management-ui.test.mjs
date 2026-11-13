@@ -464,13 +464,12 @@ test('所有业务节点只展示当前归属项目并在回退后清除原节�
   assert.match(source, /ServiceItemPicker v-else :items="activeNodeItems"/)
   assert.match(source, /watch\(\[activeSection, activeNodeItems, loading, sectionExtrasLoading, workspaceReady\],[\s\S]*selectedServiceItemIDs\.value = selectedServiceItemIDs\.value\.filter/)
   assert.match(source, /\['现场实施完成', '报告编制', '已完成'\]\.includes\(projectStatus\)/)
-  // 现场实施页面不得再渲染包含拆解、分配、报告和完成态的全生命周期看板。
+  // 进度总览覆盖报告及完成阶段，现场办理仍使用严格的 implementationItems。
   assert.match(source, /const implementationKanbanColumns = computed/)
-  assert.match(source, /const projectIDs = new Set\(implementationItems\.value/)
-  assert.match(source, /const cards = projects\.value\.filter\(\(project\) => projectIDs\.has\(project\.id\)\)/)
+  assert.match(source, /implementationProgressColumns\(projects\.value, implementationItems\.value\)/)
   assert.match(source, /v-for="column in implementationKanbanColumns"/)
   assert.doesNotMatch(source, /v-for="column in kanbanColumns"/)
-  assert.match(source, /当前节点项目/)
+  assert.match(source, /看板项目/)
 })
 
 test('独立人员查询区已移除，三个下拉按对应角色读取完整人员资质库', () => {
@@ -789,9 +788,8 @@ test('项目状态只由服务端派生，前端不再自行拼装状态集合',
   assert.match(source, /const projectStatusCompleted = '已完成'/)
   // 状态筛选必须由节点表生成，而不是手写 option 列表。
   assert.match(source, /<option v-for="node in projectStatusFilters"/)
-  // 现场看板只消费服务端返回的当前现场状态，不再把全生命周期项目复制进来。
-  assert.match(source, /statuses: \['实施准备中'\]/)
-  assert.match(source, /statuses: \['实施中'\]/)
+  // 看板只消费服务端状态和真实节点归属，不自行重算项目生命周期。
+  assert.match(source, /implementationProgressColumns\(projects\.value, implementationItems\.value\)/)
   assert.doesNotMatch(source, /statuses: \['待拆解确认', '待分配'\]/)
   assert.doesNotMatch(source, /statuses: \[projectStatusCompleted, '补充协议处理中', '已终止'\]/)
   assert.match(source, /:class="statusTone\(card\.status\)"/)
