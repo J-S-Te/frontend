@@ -91,6 +91,48 @@ export function projectReportStageLabel(project) {
   return stage ? reportStageLabel[stage] || '' : ''
 }
 
+// 用途：按服务端项目状态确定进度列，现场阶段继续核对实际节点归属。
+// 参数：project 为已授权项目；fieldProjects 为各现场节点的项目编号集合。
+// 返回值：唯一列名称；未进入看板阶段或已回退的项目返回空串。
+function implementationProgressKey(project, fieldProjects) {
+  const status = String(project.status || '').trim()
+  if (status === '已完成') return '已完成'
+  if (['现场实施完成', '报告编制'].includes(status)) {
+    const stage = String(project.report_stage || '').trim().toUpperCase()
+    if (stage === 'RECTIFYING') return '整改中'
+    if (status === '报告编制' || ['COMPILING', 'REVIEWED', 'ISSUED'].includes(stage)) {
+      return '报告编制中'
+    }
+  }
+  if (status === '实施准备中' && fieldProjects.prepared.has(project.id)) return '准备完成'
+  if (status === '实施中' && fieldProjects.active.has(project.id)) return '现场实施'
+  return ''
+}
+
+// 用途：生成实施进度五列，同一项目仅归入一个当前阶段。
+// 参数：projects 为已授权项目快照；implementationItems 为既有现场节点筛选结果。
+// 返回值：含真实项目卡片和项目数量的五列；空列仍保留。
+export function implementationProgressColumns(projects, implementationItems) {
+  const columns = [
+    { key: '准备完成', color: 'violet', cards: [] },
+    { key: '现场实施', color: 'amber', cards: [] },
+    { key: '整改中', color: 'amber', cards: [] },
+    { key: '报告编制中', color: 'blue', cards: [] },
+    { key: '已完成', color: 'green', cards: [] },
+  ]
+  const fieldProjects = {
+    prepared: new Set(implementationItems.filter(item => item.status === '实施准备中')
+      .map(item => item.project_id)),
+    active: new Set(implementationItems.filter(item => item.status === '实施中')
+      .map(item => item.project_id)),
+  }
+  for (const project of projects) {
+    const key = implementationProgressKey(project, fieldProjects)
+    columns.find(column => column.key === key)?.cards.push(project)
+  }
+  return columns.map(column => ({ ...column, count: column.cards.length }))
+}
+
 export function capabilityEffectiveStatus(item) { return item?.effective_status || item?.status || 'DISABLED' }
 
 export function capabilityStatusLabel(item) {
