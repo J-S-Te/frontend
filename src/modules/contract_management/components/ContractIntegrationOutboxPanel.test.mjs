@@ -63,6 +63,7 @@ function panelHarness({ canManage = true, list = async () => [], retry = async (
     onMounted(callback) { mounted.push(callback) },
     ConsoleIcon: { render() { return null } },
     ConfirmDialog: { render() { return null } },
+    SegmentedTabs: { render() { return null } },
     useConfirmDialog: () => confirm,
     listFailedIntegrationOutboxEvents: async (kind, options) => {
       listCalls.push([kind, options])
