@@ -68,7 +68,7 @@ export function useProjectPersonnelNames({ context, readIDs, resolve, describe, 
     })
   }
 
-  // 用途：读取尚未解析的姓名；并发调用复用同一个 Promise。
+  // 用途：读取尚未解析的姓名；并发合并，本轮每个ID最多请求一次。
   // 参数：refresh 为 true 时重新确认全部引用 ID（刷新后的失效语义）。
   // 返回值：成功或无需读取为 true；失败、旧代次或已销毁为 false。
   async function load({ refresh = false } = {}) {
@@ -82,12 +82,15 @@ export function useProjectPersonnelNames({ context, readIDs, resolve, describe, 
     error.value = ''
     pending = (async () => {
       try {
+        const attempted = new Set(ids)
         let settled = await request(ids, ticket)
         // 读取期间新到达的记录（事件流、监控快照）可能带来更多 ID：同一代次内继续合并读取。
+        // 成功响应遗漏的ID不是新增项，留给下一次显式读取，避免无限请求目录。
         // 失败时不再自动补读，避免在服务不可用时连环重试；重试入口会重新发起。
         while (settled && !disposed && ticket === generation) {
-          const next = referenced()
+          const next = referenced().filter((id) => !attempted.has(id))
           if (!next.length) break
+          for (const id of next) attempted.add(id)
           settled = await request(next, ticket)
         }
         return settled
