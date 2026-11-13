@@ -92,6 +92,55 @@ test('读取期间新到达的 ID 在同一代次内补读，不留永久占位'
   } finally { view.scope.stop() }
 })
 
+for (const [label, mapping] of [['部分', { 'u-1': '姓名一' }], ['空', {}]]) {
+  test(`${label}成功响应遗漏姓名时本轮结束，下一轮仍可重新查询`, async () => {
+    const view = fixture(true)
+    try {
+      view.referenced.value = ['u-1', 'u-2']
+      const load = view.state.load()
+      await until(() => view.pending.length === 1)
+      view.pending[0].resolve(mapping)
+      await until(() => view.pending.length > 1 || !view.state.loading.value)
+      // 让旧实现的意外补读有界结束，避免回归测试也陷入无穷请求。
+      if (view.pending.length > 1) view.pending[1].reject(new Error('不应重复请求遗漏姓名'))
+      assert.equal(await load, true, '成功但缺失姓名应正常结束')
+      assert.deepEqual(view.calls, [['u-1', 'u-2']], '本轮每个ID只请求一次')
+      assert.equal(view.state.loading.value, false)
+      assert.equal(view.state.error.value, '')
+      assert.equal(view.state.names.value.has('u-2'), false, '不为缺失姓名伪造结果')
+
+      const retry = view.state.retry()
+      await until(() => view.pending.length === 2)
+      const missing = ['u-1', 'u-2'].filter((id) => !mapping[id])
+      assert.deepEqual(view.calls[1], missing, '不跨轮缓存缺失结果')
+      view.pending[1].resolve(Object.fromEntries(missing.map((id) => [id, `姓名-${id}`])))
+      assert.equal(await retry, true)
+      assert.equal(view.state.names.value.has('u-2'), true)
+    } finally { view.scope.stop() }
+  })
+}
+
+test('并发读取共用本轮，遗漏ID不重复补查，真正新增ID仍补读', async () => {
+  const view = fixture(true)
+  try {
+    view.referenced.value = ['u-1', 'u-missing']
+    const first = view.state.load()
+    const concurrent = view.state.load()
+    await until(() => view.pending.length === 1)
+    view.referenced.value = ['u-1', 'u-missing', 'u-3']
+    view.pending[0].resolve({ 'u-1': '姓名一' })
+    await until(() => view.pending.length === 2)
+    view.pending[1].resolve({ 'u-3': '姓名三' })
+    await until(() => view.pending.length > 2 || !view.state.loading.value)
+    if (view.pending.length > 2) view.pending[2].reject(new Error('重复补查遗漏ID'))
+    assert.deepEqual(await Promise.all([first, concurrent]), [true, true])
+    assert.deepEqual(view.calls, [['u-1', 'u-missing'], ['u-3']])
+    assert.equal(view.state.names.value.get('u-3'), '姓名三')
+    assert.equal(view.state.names.value.has('u-missing'), false)
+    assert.equal(view.state.loading.value, false)
+  } finally { view.scope.stop() }
+})
+
 test('解析失败保留可重试错误且不缓存；重试成功后清空错误', async () => {
   const view = fixture(true)
   try {
