@@ -767,7 +767,7 @@ export function reviewSpecialMethod(itemID, payload) {
 }
 
 /**
- * updateReportStatus 用途：依次推进整改中→编制中→已审核→已签发→已归档。
+ * updateReportStatus 用途：默认先整改，可从待整改直接编制，后续依次审核、签发、归档。
  * 参数：itemID 为服务项 ID，phase 为目标阶段，expectedVersion 为当前服务项版本。
  * 返回值：更新结果 Promise；跳级、无权限、版本冲突或阶段非法时抛出错误。
  */

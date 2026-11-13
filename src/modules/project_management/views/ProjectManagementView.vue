@@ -1745,12 +1745,12 @@ const operationSteps = computed(() => {
   ]
 })
 
-// 报告必须先整改，再依次完成编制、审核、签发与归档。
+// 报告默认先整改；无需整改时可直接编制，审核、签发与归档仍依次完成。
 const reportSteps = computed(() => {
   const item = selectedServiceItem.value
   const current = reportStatusRank[item?.report_status] || 0
   return [
-    { phase: 'RECTIFYING', label: '报告整改' },
+    { phase: 'RECTIFYING', label: '报告整改（可选）' },
     { phase: 'COMPILING', label: '报告编制' },
     { phase: 'REVIEWED', label: '报告审核' },
     { phase: 'ISSUED', label: '报告签发' },
@@ -2960,7 +2960,7 @@ async function askOperationReason(options, context, allowed) {
 }
 
 // 用途：按当前操作类型执行服务项交付动作并刷新工作区。
-// 参数：kind 为分配、计划、现场实施或报告推进等操作类型。
+// 参数：kind 为分配、计划、现场实施或报告推进类型，含待整改时直接编制。
 // 返回值：无；校验失败不写入，接口失败以提示反馈。
 async function runOperation(kind) {
   if (saving.value) return
@@ -3007,8 +3007,18 @@ async function runOperation(kind) {
     } else if (kind === 'special-approve' || kind === 'special-reject') {
       await reviewSpecialMethod(item.id, { decision: kind === 'special-approve' ? 'APPROVED' : 'REJECTED', comment: form.reviewComment })
       showToast(kind === 'special-approve' ? '复核已通过，可发布实施计划' : '复核已驳回，请修正后重新提交复核')
-    } else if (kind === 'report-next') {
-      const next = reportPhaseNext[item.report_status]
+    } else if (kind === 'report-next' || kind === 'report-skip-rectifying') {
+      const skipRectifying = kind === 'report-skip-rectifying'
+      if (skipRectifying && (item.status !== '现场实施完成' ||
+        item.report_status !== 'NONE' || !canAdvanceReportPhase('COMPILING'))) {
+        showToast('仅有编制权限且处于待整改时，才可直接开始编制', 'warning')
+        return
+      }
+      const next = skipRectifying ? 'COMPILING' : reportPhaseNext[item.report_status]
+      if (next === 'REVIEWED') {
+        showToast('请在报告送审与审核记录中提交，并由独立审核人完成审核', 'warning')
+        return
+      }
       await updateReportStatus(item.id, next, item.version)
       showToast(`报告状态已推进至：${reportStatusLabel[next]}`)
     } else if (kind === 'preparation') {
@@ -4195,10 +4205,17 @@ onBeforeUnmount(() => {
                   </div>
                 </section>
                 <div v-if="canSubmitReportCorrection" class="pm-form">
-                  <label><span>报告更正原因 <em>*</em></span><textarea v-model.trim="operationForm.reportCorrectionReason" rows="3" placeholder="说明已签发或已归档报告需要更正的内容" maxlength="1000"></textarea><small>审批通过后旧版本作废并生成下一报告版本，需重新完成整改、编制、审核、签发和归档。</small></label>
+                  <label><span>报告更正原因 <em>*</em></span><textarea v-model.trim="operationForm.reportCorrectionReason" rows="3" placeholder="说明已签发或已归档报告需要更正的内容" maxlength="1000"></textarea><small>审批通过后旧版本作废并生成下一报告版本，需重新完成编制、审核、签发和归档；整改按需选择。</small></label>
                   <button type="button" class="pm-button" :disabled="saving" @click="submitReportCorrection">申请报告更正</button>
                 </div>
                 <button v-if="selectedServiceItem && reportPhaseNext[selectedServiceItem.report_status] !== 'REVIEWED' && reportPhaseNext[selectedServiceItem.report_status] && canAdvanceReportPhase(reportPhaseNext[selectedServiceItem.report_status])" class="pm-button primary" :disabled="saving" @click="runOperation('report-next')">{{ reportPhaseAction[reportPhaseNext[selectedServiceItem.report_status]] }}</button>
+                <button
+                  v-if="selectedServiceItem?.status === '现场实施完成' && selectedServiceItem.report_status === 'NONE' && canAdvanceReportPhase('COMPILING')"
+                  type="button"
+                  class="pm-button"
+                  :disabled="saving"
+                  @click="runOperation('report-skip-rectifying')"
+                >跳过整改，开始编制</button>
               </template>
             </div><div v-else class="pm-empty-mini">请先选择服务项</div>
           </section>
