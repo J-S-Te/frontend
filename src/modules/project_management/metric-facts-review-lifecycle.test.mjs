@@ -26,3 +26,37 @@ test('主报告待审不受专项超过50轮历史和翻页影响，按钮命令
     assert.equal(commands[0][2].round_id, 'main-pending')
   } finally { mounted.unmount() }
 })
+
+test('项目经理送审带当前版本，回执未知时仅按原幂等命令重试', async () => {
+  const commands = []
+  let uncertain = true
+  const mounted = await mountSFC(resolve('src/modules/project_management/components/ReportReviewFactsPanel.vue'), { [api]: {
+    getMetricReportReviews: async () => [], getCurrentMetricReportReviews: async () => [],
+    postMetricReportReview: async (...args) => {
+      commands.push(args)
+      if (uncertain) throw Object.assign(new Error('结果尚未确认'), {outcomeUnknown:true})
+      return {}
+    },
+  } }, { item: {id:'SI-submit',version:5,report_revision:2,report_status:'COMPILING'},
+    session: {user_id:'manager',permissions:['project.report.prepare']} })
+  try {
+    await nextTick(); await nextTick()
+    assert.equal(mounted.state.canSubmit.value, true)
+    assert.equal(mounted.state.canDecide.value, false)
+    await mounted.state.submit()
+    assert.equal(commands.length, 1)
+    const [item, action, payload] = commands[0]
+    assert.equal(item, 'SI-submit')
+    assert.equal(action, 'submit')
+    assert.equal(payload.subject_type, 'SERVICE_ITEM')
+    assert.equal(payload.revision, 2)
+    assert.equal(payload.expected_version, 5)
+    assert.match(payload.idempotency_key, /^[\da-f-]{36}$/i)
+    await mounted.state.submit()
+    assert.equal(commands.length, 1)
+    uncertain = false
+    await mounted.state.execute()
+    assert.deepEqual(commands[1], commands[0])
+    assert.equal(mounted.state.pending.value, null)
+  } finally { mounted.unmount() }
+})

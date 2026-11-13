@@ -65,17 +65,35 @@ const nextButton = source.match(/<button[^>]+@click="runOperation\('report-next'
 const rollbackButton = source.match(/<button[^>]+@click="submitRollbackRequest\('REPORT_TO_FIELD'\)"[^]*?<\/button>/)[0]
 const chain = source.match(/<section class="pm-panel pm-stepper-panel"><header><div><p class="pm-panel-kicker">报告阶段<[^]*?<\/section>/)[0]
 
-test('报告实际推进函数按五阶段发送目标状态，列表进度每阶段递增 20%', async () => {
+test('阶段推进保留整改编制签发归档，审核完成后才继续签发', async () => {
   const h = reportHarness('NONE')
   assert.equal(h.operationRows.value[0].progress, 0)
-  for (const [phase, progress] of [['RECTIFYING', 20], ['COMPILING', 40],
-    ['REVIEWED', 60], ['ISSUED', 80], ['ARCHIVED', 100]]) {
+  for (const [phase, progress] of [['RECTIFYING', 20], ['COMPILING', 40]]) {
+    await h.runOperation('report-next')
+    assert.deepEqual(h.writes.at(-1), ['SI-REPORT', phase, 7])
+    h.item.report_status = phase
+    assert.equal(h.operationRows.value[0].progress, progress)
+  }
+  await h.runOperation('report-next')
+  assert.equal(h.writes.length, 2, '编制完成不能通过旧阶段接口直接审核')
+  // 审核轮次接口的真实通过结果由刷新回读；此处仅验证通过后的后续阶段。
+  h.item.report_status = 'REVIEWED'
+  assert.equal(h.operationRows.value[0].progress, 60)
+  for (const [phase, progress] of [['ISSUED', 80], ['ARCHIVED', 100]]) {
     await h.runOperation('report-next')
     assert.deepEqual(h.writes.at(-1), ['SI-REPORT', phase, 7])
     h.item.report_status = phase
     assert.equal(h.operationRows.value[0].progress, progress)
   }
   assert.equal(h.reportPhaseNext.ARCHIVED, undefined)
+})
+
+test('审核权限主体看不到旧审核按钮，直接误调用也不发送阶段更新', async () => {
+  const h = reportHarness('COMPILING', ['project.report.review'])
+  assert.doesNotMatch(await renderFragment(nextButton, h), /<button/)
+  await h.runOperation('report-next')
+  assert.equal(h.writes.length, 0)
+  assert.equal(h.context.saving.value, false)
 })
 
 test('报告入口复用编制权限，待整改与整改中显示对应开始动作', async () => {
@@ -119,4 +137,48 @@ test('报告返工按钮允许整改、编制和审核，签发归档仍不可�
   h.item.report_status = 'RECTIFYING'
   h.context.canRequestRollback.value = false
   assert.doesNotMatch(await renderFragment(rollbackButton, h), /<button/)
+})
+
+test('待整改保留默认整改主按钮，并提供直接编制次按钮', async () => {
+  const match = source.match(/<button[^>]+@click="runOperation\('report-skip-rectifying'\)"[^]*?<\/button>/)
+  assert.ok(match, '待整改缺少跳过整改入口')
+  const h = reportHarness('NONE')
+  assert.match(await renderFragment(nextButton, h), /class="pm-button primary"[^>]*>开始整改/)
+  const optional = await renderFragment(match[0], h)
+  assert.match(optional, /跳过整改，开始编制/)
+  assert.doesNotMatch(optional, /class="[^"]*primary/)
+  h.context.saving.value = true
+  assert.match(await renderFragment(match[0], h), /disabled/)
+  h.context.saving.value = false
+  for (const status of ['RECTIFYING', 'COMPILING', 'REVIEWED', 'ISSUED', 'ARCHIVED']) {
+    h.item.report_status = status
+    assert.doesNotMatch(await renderFragment(match[0], h), /<button/)
+  }
+  h.item.report_status = 'NONE'
+  h.item.status = '实施中'
+  assert.doesNotMatch(await renderFragment(match[0], h), /<button/)
+  h.item.status = '现场实施完成'
+  h.context.permissionSet.value = new Set(['project.report.review'])
+  assert.doesNotMatch(await renderFragment(match[0], h), /<button/)
+})
+
+test('直接编制发送当前版本，默认整改不变且不允许复用跳过动作', async () => {
+  const h = reportHarness('NONE')
+  await h.runOperation('report-next')
+  assert.deepEqual(h.writes.pop(), ['SI-REPORT', 'RECTIFYING', 7])
+  await h.runOperation('report-skip-rectifying')
+  assert.deepEqual(h.writes.pop(), ['SI-REPORT', 'COMPILING', 7])
+  for (const status of ['RECTIFYING', 'COMPILING', 'REVIEWED', 'ISSUED', 'ARCHIVED']) {
+    h.item.report_status = status
+    await h.runOperation('report-skip-rectifying')
+  }
+  h.item.report_status = 'NONE'
+  h.context.permissionSet.value = new Set(['project.report.review'])
+  await h.runOperation('report-skip-rectifying')
+  h.context.permissionSet.value = new Set(['project.report.prepare'])
+  h.item.status = '实施中'
+  await h.runOperation('report-skip-rectifying')
+  assert.equal(h.writes.length, 0)
+  assert.equal(h.context.saving.value, false)
+  assert.match(h.reportSteps.value[0].label, /可选/)
 })
