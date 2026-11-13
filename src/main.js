@@ -6,6 +6,7 @@ import { installNativeDatePickerOnClick } from '@/modules/shared/composables/use
 import '@/modules/platform/shared/styles/main.css'
 import '@/modules/platform/shared/styles/state.css'
 import '@/modules/shared/styles/global-ux.css'
+import '@/modules/shared/styles/ui-refresh.css'
 
 const app = createApp(App)
 // 顺序有讲究：先装 router（router.onError 才能挂上），再装全局兜底，最后 mount。
