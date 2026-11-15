@@ -54,6 +54,13 @@ test('独立资源面板可以选择授权进行中及已完成服务项，不�
   const mounted = await mountSFC(resolve('src/modules/project_management/components/ResourceMetricFactsPanel.vue'), { [api]: {
     getMetricResources: async () => [], listPersonnel: async () => ({ items: [], total: 0 }),
     postMetricResource: async (...args) => { commands.push(args); return {} }, postMetricUsageAction: async () => ({}),
+    postMetricUsageBatch: async () => ({ items: [] }),
+    getMetricCalendar: async () => [], saveMetricCalendarRule: async () => ({}),
+    getMetricCalendarExceptions: async () => [], saveMetricCalendarException: async () => ({}),
+    deleteMetricCalendarException: async () => ({}), generateMetricCapacities: async () => [],
+    getMetricUsageCandidates: async () => [], applyMetricUsageCandidate: async () => ({}),
+    getMetricAutoConfirmSetting: async () => ({ enabled: false, version: 0 }),
+    setMetricAutoConfirmSetting: async () => ({ enabled: false, version: 1 }),
   } }, { items: [{ id: 'SI-running', status: '实施中' }, { id: 'SI-done', status: '已完成' }], session: { user_id: 'engineer', permissions: ['project.resource_usage.record', 'project.field.execute'] }, resources: [{ resource_type: 'PERSON', resource_id: 'person' }] })
   try {
     if (mounted.state.selectedMetricItemID) mounted.state.selectedMetricItemID.value = 'SI-done'

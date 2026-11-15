@@ -95,7 +95,7 @@
 }
 
 .login-target-module select,
-.login-target-dialog input,
+.login-target-dialog input:not([type="checkbox"]):not([type="radio"]),
 .login-target-dialog select {
   min-height: 36px;
   border: 1px solid var(--border);
@@ -110,14 +110,14 @@
   padding: 0 9px;
 }
 
-.login-target-dialog input,
+.login-target-dialog input:not([type="checkbox"]):not([type="radio"]),
 .login-target-dialog select {
   width: 100%;
   box-sizing: border-box;
   padding: 8px 10px;
 }
 
-.login-target-dialog input:focus,
+.login-target-dialog input:not([type="checkbox"]):not([type="radio"]):focus,
 .login-target-dialog select:focus,
 .login-target-module select:focus {
   border-color: var(--primary);

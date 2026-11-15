@@ -36,6 +36,7 @@ import {
   withChecklistReset,
   withFirstRunTaskCompleted,
   withTourFinished,
+  withTourPaused,
   withTourRestarted,
   withTourStarted,
   writeFirstRunRecord,
@@ -379,8 +380,11 @@ export function createFirstRunStore({
     state.record = base
     if (!isFirstRunTourOpen(base, key)) return false
     const steps = firstRunGuideSteps(key)
-    if (typeof hasAnchor !== 'function' || !hasAnchor(steps[0].anchor)) return false
-    const index = resolveNextTourStepIndex(0, hasAnchor, steps)
+    if (typeof hasAnchor !== 'function') return false
+    const current = firstRunGuideState(base, key)
+    const resumeIndex = current.tour === 'paused' ? Math.min(current.step, steps.length - 1) : 0
+    let index = resolveNextTourStepIndex(resumeIndex, hasAnchor, steps)
+    if (index < 0 && resumeIndex > 0) index = resolveNextTourStepIndex(0, hasAnchor, steps)
     if (index < 0) return false
     commit(withTourStarted(base, index, key))
     state.tourGuide = key
@@ -459,7 +463,7 @@ export function createFirstRunStore({
    * @param {string} [guideKey] guide 键。
    * @returns {boolean} 是否写入终态。
    */
-  function interruptTour(guideKey = state.tourGuide || FIRST_RUN_PORTAL_GUIDE) {
+  function pauseTour(guideKey = state.tourGuide || FIRST_RUN_PORTAL_GUIDE) {
     if (!state.record) return false
     const key = normalizeGuideKey(guideKey)
     const base = baseRecord()
@@ -469,9 +473,14 @@ export function createFirstRunStore({
       if (!state.tourGuide || state.tourGuide === key) clearTourUi()
       return false
     }
-    commit(withTourFinished(base, 'skipped', nowIso(), key))
+    commit(withTourPaused(base, key))
     if (!state.tourGuide || state.tourGuide === key) clearTourUi()
     return true
+  }
+
+  // 兼容旧调用：中断不再落 skipped 终态，统一保留步骤供下次继续。
+  function interruptTour(guideKey) {
+    return pauseTour(guideKey)
   }
 
   /**
@@ -587,6 +596,7 @@ export function createFirstRunStore({
     advanceTour,
     retreatTour,
     finishTour,
+    pauseTour,
     interruptTour,
     restartTour,
     resetChecklist,

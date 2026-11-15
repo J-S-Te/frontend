@@ -68,11 +68,20 @@ async function mountPage(permissions, request, section = 'dashboard', roles = []
   const router = { push(...args) { routerCalls.push.push(args) }, replace(...args) { routerCalls.replace.push(args) } }
   const { descriptor } = parse(readFileSync(new URL('./ReimbursementView.vue', import.meta.url), 'utf8'))
   const script = compileScript(descriptor, { id: 'expense-view-test' })
-    const dependencies = { ...claimPresentation, ...workspaceState, ...workspace, ...invoiceClassification, allocationInput, travelInput,frontendModules,sourceSHA256,
+    const confirmCalls = []
+  const confirmState = { answer: true }
+  const confirmController = { calls: confirmCalls, state: confirmState }
+  const useConfirmDialogStub = () => ({
+    dialog: Vue.ref(null),
+    askConfirm: async (options) => { confirmCalls.push(options); return confirmState.answer },
+    accept() {}, cancel() {},
+  })
+  const dependencies = { ...claimPresentation, ...workspaceState, ...workspace, ...invoiceClassification, allocationInput, travelInput,frontendModules,sourceSHA256,
     ConsoleIcon: { props: ['name'], setup: () => () => Vue.h('svg') },
     computed: Vue.computed, nextTick: Vue.nextTick, onBeforeUnmount: Vue.onBeforeUnmount,
     onMounted: Vue.onMounted, ref: Vue.ref, watch: Vue.watch, useRoute: () => route, useRouter: () => router,
     onBeforeRouteLeave() {}, PaginationBar: PaginationBarStub, InvoiceCandidateCards, loginUsername,
+    ConfirmDialog: panelStub, useConfirmDialog: useConfirmDialogStub,
     AppShell: { props: ['userName'], setup: (props, { slots }) => {
       Object.assign(shellProps, props)
       return () => Vue.h('main', slots.default?.())
@@ -113,7 +122,7 @@ async function mountPage(permissions, request, section = 'dashboard', roles = []
       setup: (props, { slots }) => () => Vue.h('a', {}, slots.default?.()) })
     return renderToString(app)
   }
-  return { state, route, routerCalls, html, shellProps,
+  return { state, route, routerCalls, html, shellProps, confirm: confirmController,
     unmount: () => { app.unmount(); globalThis.window = previousWindow } }
 }
 
@@ -1037,16 +1046,15 @@ test('付款分区打开单据后请求付款历史并渲染历史表', async ()
   } finally { fixture.unmount() }
 })
 
-test('项目费用参与人入口归入归档中心，不占用付款页面', async () => {
+test('项目费用参与资格入口归入归档中心，不占用付款页面', async () => {
   const fixture = await mountPage(['expense.archive.read', 'expense.claim.read'], async () => ({ items: [], total: 0 }), 'archives')
   try {
-    fixture.state.projectOptions.value = [{ project_id: 'project-1', project_name: '示例项目' }]
+    fixture.state.projectOptions.value = [{ project_id: 'project-1', project_name: '示例项目', project_status: '报告编制' }]
     const html = await fixture.html()
-    assert.match(html, /项目费用参与人/)
-    assert.match(html, /查询项目选项/)
-    assert.match(html, /project-1/)
+    assert.match(html, /项目费用参与资格/)
+    assert.match(html, /查询可报销项目/)
     assert.match(html, /示例项目/)
-    assert.match(html, /维护费用参与人/)
+    assert.match(html, /去项目维护/)
   } finally { fixture.unmount() }
 })
 
@@ -1138,7 +1146,7 @@ test('422 items.0.field 点号坐标同样聚焦费用行子控件', async () =>
 
 test('报销工作区基于授权项目选项提供费用参与人入口且不代持项目写操作', async () => {
   const source = readFileSync(new URL('./ReimbursementView.vue', import.meta.url), 'utf8')
-  assert.match(source, /项目费用参与人/)
+  assert.match(source, /项目费用参与资格/)
   assert.match(source, /\/project-options\?/)
   assert.match(source, /openProjectExpenseParticipants/)
   assert.match(source, /project_detail/)
@@ -1196,19 +1204,18 @@ test('有未保存草稿时切换分区、刷新和新建都先确认，取消�
   try {
     fixture.state.draft.value.title = '未保存的差旅标题'
     assert.equal(fixture.state.draftProtected.value, true)
-    const confirms = []
-    globalThis.window.confirm = (message) => { confirms.push(message); return false }
-    fixture.state.navigate('invoices')
-    assert.equal(confirms.length, 1)
+    fixture.confirm.state.answer = false
+    await fixture.state.navigate('invoices')
+    assert.equal(fixture.confirm.calls.length, 1)
     assert.equal(fixture.routerCalls.push.length, 0)
     let prevented = false
     fixture.state.protectPending({ preventDefault() { prevented = true } })
     assert.equal(prevented, true)
     await fixture.state.newDraft()
     assert.equal(fixture.state.draft.value.title, '未保存的差旅标题')
-    assert.equal(confirms.length, 2)
-    assert.match(confirms[0], /未保存.*丢失/)
-  } finally { delete globalThis.window.confirm; fixture.unmount() }
+    assert.equal(fixture.confirm.calls.length, 2)
+    assert.match(fixture.confirm.calls[0].description, /未保存.*丢失/)
+  } finally { fixture.unmount() }
 })
 
 test('新建草稿里的空白占位费用不触发未保存确认', async () => {
@@ -1216,11 +1223,10 @@ test('新建草稿里的空白占位费用不触发未保存确认', async () =>
   try {
     assert.equal(fixture.state.draft.value.items.length, 1)
     assert.equal(fixture.state.draftProtected.value, false)
-    let confirms = 0
-    globalThis.window.confirm = () => { confirms += 1; return true }
-    fixture.state.navigate('invoices')
-    assert.equal(confirms, 0)
-  } finally { delete globalThis.window.confirm; fixture.unmount() }
+    fixture.confirm.state.answer = true
+    await fixture.state.navigate('invoices')
+    assert.equal(fixture.confirm.calls.length, 0)
+  } finally { fixture.unmount() }
 })
 
 test('客户端校验失败带费用行坐标、标红对应区域且不发送保存请求', async () => {
@@ -1653,7 +1659,7 @@ test('工作台指标可跳转到对应分区，侧栏重复按钮墙已移除',
     assert.match(html, new RegExp(
       `<button[^>]*expense-metric-link[^>]*>${scope}待复核发票${scope}4`))
     // 指标点击走导航，而不是只有一行数字。
-    fixture.state.navigate('invoices')
+    await fixture.state.navigate('invoices')
     assert.equal(fixture.routerCalls.push.at(-1)[0].params.section, 'invoices')
     // 侧栏已有入口，工作台不再重复一墙按钮。
     assert.doesNotMatch(html, /<button[^>]*>(发票中心|报销看板|审批中心|付款中心)</)

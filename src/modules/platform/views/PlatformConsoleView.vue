@@ -316,7 +316,22 @@ const navGroups = computed(() => [
   {
     label: '系统管理',
     items: [
-      { key: 'settings', label: '系统设置', icon: 'settings', active: currentView.value === 'settings', visible: canOpenSettings.value },
+      {
+        key: 'settings',
+        label: '系统设置',
+        icon: 'settings',
+        active: currentView.value === 'settings',
+        expanded: currentView.value === 'settings',
+        visible: canOpenSettings.value,
+        children: filteredSettingsTabGroups.value.flatMap((group) => group.tabs.map((tab) => ({
+          key: `settings:${tab.key}`,
+          settingsTab: tab.key,
+          label: tab.label,
+          icon: tab.icon,
+          groupLabel: group.label,
+          active: currentView.value === 'settings' && activeSettingsTab.value === tab.key,
+        }))),
+      },
       { key: 'audit', label: '审计日志', icon: 'audit', note: '只读', active: currentView.value === 'audit', visible: canViewAudit.value },
     ],
   },
@@ -479,9 +494,20 @@ function goToPortal() {
 
 // handleNavigate 把共享外壳抛出的导航键映射到本页现有入口，路由与权限口径保持不变。
 // 参数：key 为 navGroups 里的导航键。返回值：无。
-function handleNavigate(key) {
+function handleNavigate(key, item) {
   if (key === 'portal') {
     goToPortal()
+    return
+  }
+  // 侧栏二级设置项：item.settingsTab 是唯一来源，未知 key 不猜测，避免绕过权限/路由校验。
+  if (item?.settingsTab) {
+    activeSettingsTab.value = item.settingsTab
+    mobileMenuOpen.value = false
+    return
+  }
+  if (typeof key === 'string' && key.startsWith('settings:')) {
+    activeSettingsTab.value = key.slice('settings:'.length)
+    mobileMenuOpen.value = false
     return
   }
   navigate(key)
@@ -1216,17 +1242,13 @@ onBeforeUnmount(() => {
     </section>
 
     <section v-else-if="currentView === 'settings' && canOpenSettings" class="settings-view" aria-label="系统设置">
-      <!-- 设置导航：宽屏为左侧分组导航（≥1800px），窄屏回退为页头下方吸顶的横向分区条。
-           分组只影响展示顺序与分组标题；可见性、权限与 filteredSettingsTabs 的既有语义不变。 -->
-      <aside class="settings-rail">
-        <header class="settings-showcase-head">
-          <div>
-            <span class="settings-showcase-kicker"><ConsoleIcon name="settings" />平台配置中心</span>
-            <h1>系统设置</h1>
-            <p>集中维护平台基础资料、身份组织、统一登录、安全策略与运行支撑能力。</p>
-          </div>
-        </header>
-
+      <!-- 设置模块已进入主侧栏二级折叠菜单；本页只保留标题、搜索与内容，避免双层导航。 -->
+      <header class="settings-showcase-head settings-page-head">
+        <div>
+          <span class="settings-showcase-kicker"><ConsoleIcon name="settings" />平台配置中心</span>
+          <h1>系统设置</h1>
+          <p>集中维护平台基础资料、身份组织、统一登录、安全策略与运行支撑能力。</p>
+        </div>
         <div v-if="!hasNoVisibleSettingsTab" class="settings-tab-toolbar">
           <label class="settings-tab-search">
             <ConsoleIcon name="search" />
@@ -1246,34 +1268,19 @@ onBeforeUnmount(() => {
           </label>
           <span class="settings-tab-count">{{ filteredSettingsTabs.length }} / {{ visibleSettingsTabs.length }}</span>
         </div>
-        <nav v-if="!hasNoVisibleSettingsTab" class="settings-tab-bar" role="tablist" aria-label="系统设置分类">
-          <template v-for="group in filteredSettingsTabGroups" :key="group.key">
-            <p class="settings-nav-group" role="presentation">{{ group.label }}</p>
-            <button
-              v-for="tab in group.tabs"
-              :key="tab.key"
-              class="settings-tab"
-              :class="{ active: activeSettingsTab === tab.key }"
-              type="button"
-              role="tab"
-              :aria-selected="activeSettingsTab === tab.key"
-              :title="tab.description"
-              @click="activeSettingsTab = tab.key"
-            >
-              <span class="settings-tab-icon" aria-hidden="true"><ConsoleIcon :name="tab.icon" /></span>
-              <span class="settings-tab-label">{{ tab.label }}</span>
-            </button>
-          </template>
-          <span v-if="filteredSettingsTabs.length === 0" class="settings-tab-empty">没有匹配“{{ settingsTabKeyword }}”的设置模块</span>
-        </nav>
-        <div v-else class="settings-empty" role="status">
-          <span class="settings-empty-icon" aria-hidden="true"><ConsoleIcon name="shield" /></span>
-          <h3>当前账号没有可访问的设置模块</h3>
-          <p>请联系平台管理员授予对应模块的读取或管理权限；IAM 不要求额外授予 <code>platform:user:read</code>。</p>
-        </div>
-      </aside>
+      </header>
 
-      <div class="settings-content">
+      <div v-if="hasNoVisibleSettingsTab" class="settings-empty" role="status">
+        <span class="settings-empty-icon" aria-hidden="true"><ConsoleIcon name="shield" /></span>
+        <h3>当前账号没有可访问的设置模块</h3>
+        <p>请联系平台管理员授予对应模块的读取或管理权限；IAM 不要求额外授予 <code>platform:user:read</code>。</p>
+      </div>
+      <div v-else-if="!filteredSettingsTabs.length" class="settings-empty" role="status">
+        <h3>没有匹配“{{ settingsTabKeyword }}”的设置模块</h3>
+        <button class="console-button ghost" type="button" @click="settingsTabKeyword = ''">清空搜索</button>
+      </div>
+
+      <div v-else class="settings-content">
         <!-- 页面标题为 <h1>。除“身份、组织与授权”外的 10 个设置模块自身首个标题就是 <h2>，
              大纲已经连续，再补隐藏 <h2> 会让读屏标题列表出现两条同名同级的条目。
              只有 IAM 模块内部从 <h3> 起（“按归属、职责和例外分层管理”），此处在它的面板前

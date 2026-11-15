@@ -2,7 +2,7 @@
 // 多导览浮层（全局唯一）。挂在 App.vue，按 route.name 选择当前 guide：
 //   portal / platform(settings,audit) / contract / project / settlement /
 //   customer_opportunity / customer_portal / data_analysis。
-// 一次只展示一个 guide：进入新子系统时先关闭旧导览（落 skipped，不标记完成），再调度新 guide。
+// 一次只展示一个 guide：进入新子系统时先把旧导览落为 paused（保留步骤），再调度新 guide。
 //
 // 交互约定（产品最终决策）：
 //   · 每 (tenant,user,guide,版本) 只自动出现一次；就绪后延迟 600ms；
@@ -11,7 +11,7 @@
 //   · 层级 9000，低于确认框 10000 与 toast 12000；确认框打开时不启动也不抢键盘；
 //   · 焦点锁在气泡内、锁定页面滚动、关闭还原焦点；role=dialog + aria-modal + aria-live；
 //   · 缺锚点的步骤跳过；首步锚点（门户 header / 子系统 nav）缺失时整次不启动；
-//   · 离开该子系统 / pagehide 时 running 落为 skipped，不自动续播；
+//   · 离开该子系统 / pagehide 时 running 落为 paused，下次进入从原步骤继续；
 //   · 子系统支持 `?guide=1` 强制当前 guide 重看（支持人员用），不新增常驻按钮；
 //   · 窄屏（≤640px）改为底部面板，位置由 CSS 接管；深色沿用门户 token。
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
@@ -45,8 +45,13 @@ const narrowScreen = ref(false)
 const titleId = 'first-run-tour-title'
 const descriptionId = 'first-run-tour-description'
 
+const ANCHOR_RETRY_INTERVAL_MS = 300
+const ANCHOR_RETRY_MAX_ATTEMPTS = 10
 let narrowQuery = null
 let startTimer = 0
+let anchorRetryTimer = 0
+let anchorRetryAttempts = 0
+const snoozedGuide = ref('')
 let confirmObserver = null
 let previousFocus = null
 let tourListening = false
@@ -116,6 +121,7 @@ function startOptions() {
  */
 function schedulingAllowed() {
   if (typeof document === 'undefined') return false
+  if (snoozedGuide.value === activeGuideKey.value) return false
   if (firstRun.state.tourVisible || firstRun.state.checklistOpen) return false
   const options = startOptions()
   if (!options) return false
@@ -125,7 +131,10 @@ function schedulingAllowed() {
 
 function clearStartTimer() {
   window.clearTimeout(startTimer)
+  window.clearTimeout(anchorRetryTimer)
   startTimer = 0
+  anchorRetryTimer = 0
+  anchorRetryAttempts = 0
 }
 
 function scheduleStart() {
@@ -137,15 +146,34 @@ function scheduleStart() {
   }, FIRST_RUN_TOUR_STEP_DELAY_MS)
 }
 
+function retryStartWhenAnchorAppears() {
+  if (anchorRetryAttempts >= ANCHOR_RETRY_MAX_ATTEMPTS) return
+  anchorRetryAttempts += 1
+  anchorRetryTimer = window.setTimeout(() => {
+    anchorRetryTimer = 0
+    attemptStart()
+  }, ANCHOR_RETRY_INTERVAL_MS)
+}
+
 function attemptStart() {
   if (!schedulingAllowed()) return
   const key = activeGuideKey.value
   const options = startOptions()
   if (!options) return
-  // 首步锚点缺失时整次不启动：门户 header / 子系统 nav 必须真实存在。
-  // 记录保持 pending，不写入终态；下一次触发（路由/主体/可见性变化）会重新排队。
-  if (!anchorExists(firstRunGuideSteps(key)[0].anchor)) return
+  const steps = firstRunGuideSteps(key)
+  const guide = firstRun.guideState(key)
+  const resumeIndex = guide?.tour === 'paused' ? Math.min(guide.step, steps.length - 1) : 0
+  // pending 仍要求首步锚点；paused 从原步骤继续，原步骤消失时回退到首步。
+  let startIndex = anchorExists(steps[0].anchor) || resumeIndex > 0
+    ? resolveNextTourStepIndex(resumeIndex, anchorExists, steps) : -1
+  if (startIndex < 0 && resumeIndex > 0) startIndex = resolveNextTourStepIndex(0, anchorExists, steps)
+  if (startIndex < 0) {
+    // 动态渲染/懒加载页面可能晚于 600ms 才出现锚点：短轮询等待，不直接放弃。
+    retryStartWhenAnchorAppears()
+    return
+  }
   if (!shouldStartFirstRunTour({ ...options, firstAnchorAvailable: true })) return
+  clearStartTimer()
   firstRun.beginTour({ guideKey: key, hasAnchor: anchorExists })
 }
 
@@ -159,6 +187,7 @@ async function applyForcedGuide(guideKey) {
   if (!guideKey || guideKey === FIRST_RUN_PORTAL_GUIDE) return false
   if (String(route.query?.guide ?? '') !== '1') return false
   if (!firstRun.state.record) return false
+  snoozedGuide.value = ''
   const restarted = firstRun.restartTour(guideKey)
   // 清掉 guide 参数；失败只影响 URL 是否干净，不影响已经写入的 pending。
   const query = { ...route.query }
@@ -308,6 +337,11 @@ function goPrevious() {
   firstRun.retreatTour({ hasAnchor: anchorExists })
 }
 
+function pauseCurrentTour() {
+  snoozedGuide.value = activeGuideKey.value
+  firstRun.pauseTour()
+}
+
 function skipTour() {
   firstRun.finishTour('skipped')
 }
@@ -415,15 +449,16 @@ watch(
   },
 )
 
-// guide 切换：进入新子系统先关旧导览（running → skipped，不标记 done），再准备新 guide。
+// guide 切换：进入新子系统先把旧导览落为 paused（保留步骤），再准备新 guide。
 // 同一 guide 内切 section 不会触发这里的关闭逻辑。
 watch(activeGuideKey, (next) => {
   const previous = previousGuideKey
   previousGuideKey = next
-  if (previous && previous !== next) firstRun.interruptTour(previous)
+  if (snoozedGuide.value && snoozedGuide.value !== next) snoozedGuide.value = ''
+  if (previous && previous !== next) firstRun.pauseTour(previous)
   if (!next) {
-    // 登录页 / 错误页等未登记路由：不自动跨页，直接中断当前导览。
-    firstRun.interruptTour()
+    // 登录页 / 错误页等未登记路由：不自动跨页，把当前导览落为 paused。
+    firstRun.pauseTour()
     return
   }
   void prepareGuide(next)
@@ -438,7 +473,7 @@ watch(() => route.query?.guide, () => {
 
 // pagehide 覆盖刷新、关闭标签页、前进后退缓存等不经过路由 watcher 的离开方式。
 function onPageHide() {
-  firstRun.interruptTour()
+  firstRun.pauseTour()
 }
 
 onMounted(() => {
@@ -508,6 +543,7 @@ onBeforeUnmount(() => {
           <p class="first-run-sr-only" role="status" aria-live="polite">{{ announcement }}</p>
 
           <footer class="first-run-tour__actions">
+            <button type="button" class="first-run-button is-ghost" @click="pauseCurrentTour">稍后</button>
             <button type="button" class="first-run-button is-ghost" @click="skipTour">跳过导览</button>
             <div class="first-run-tour__nav">
               <button

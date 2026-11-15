@@ -29,6 +29,8 @@ import ParseExceptionsPanel from '../components/ParseExceptionsPanel.vue'
 import ClaimEvidenceTravelPanel from '../components/ClaimEvidenceTravelPanel.vue'
 import BusinessOptionPicker from '../components/BusinessOptionPicker.vue'
 import ErrorState from '../../shared/components/ErrorState.vue'
+import ConfirmDialog from '@/modules/shared/components/ConfirmDialog.vue'
+import { useConfirmDialog } from '@/modules/shared/composables/useConfirmDialog.js'
 import EmptyState from '../../shared/components/EmptyState.vue'
 import { recallTask, rememberTask, savedAtLabel } from '../taskPersistence.js'
 import { canSelectProjectReference, editableClaimItem, evidenceIDs,travelInput } from '../claimFields.js'
@@ -166,6 +168,7 @@ const uploadedDocument = ref({ id: '', name: '' })
 const documentLabel = computed(() => (uploadedDocument.value.id
   && uploadedDocument.value.id === documentID.value ? uploadedDocument.value.name : ''))
 // 最近一次解析/导出/原件的本地坐标：刷新后仍能找回任务号，不必重新上传或重跑。
+const { dialog: confirmDialog, askConfirm, accept: acceptConfirm, cancel: cancelConfirm } = useConfirmDialog()
 const recentTask = ref({ parse: null, export: null, document: null })
 const paymentStatus = ref('APPROVED_PENDING_PAYMENT')
 const policyBaseline = ref(null)
@@ -307,7 +310,7 @@ const sectionIcons = {
 // 只渲染当前账号至少有一个可见入口的分组；权限判断仍由 sections 的 permission 负责。
 const navGroups = computed(() => {
   const groups = [
-    { items: [{ key: 'portal', label: '返回门户', icon: 'dashboard' }] },
+    { items: [{ key: 'portal', label: '返回门户', icon: 'dashboard', anchor: 'subsystem-portal' }] },
     { label: '工作台', keys: ['dashboard', 'analytics'] },
     { label: '发票中心', keys: ['invoices', 'invoice-upload', 'invoice-abnormal'] },
     { label: '报销单', keys: ['claims', 'submitted', 'approvals'] },
@@ -637,27 +640,32 @@ function blankDraft() {
     payee_profile_id: '', currency: 'CNY', items: [] }
 }
 
-// 用途：用浏览器确认框保护未保存草稿；无交互环境不阻塞。
+// 用途：用应用内确认框保护未保存草稿；不依赖 WebView 的原生 confirm。
 // 参数：message 为业务可读的放弃提醒。
 // 返回值：允许继续时为 true。
-function confirmDiscard(message) {
-  if (typeof window === 'undefined' || typeof window.confirm !== 'function') return true
-  return window.confirm(message)
+async function confirmDiscard(message) {
+  return await askConfirm({
+    title: '放弃当前未保存的修改？',
+    description: message,
+    confirmText: '放弃修改',
+    cancelText: '继续编辑',
+    danger: true,
+  })
 }
 
 // 用途：在丢掉当前草稿前征得确认，覆盖切换分区、打开其他单据和新建。
 // 参数：无。
 // 返回值：可以继续时为 true；用户取消时保持原表单。
-function discardDraft() {
+async function discardDraft() {
   if (!draftProtected.value) return true
-  return confirmDiscard('当前草稿有尚未保存的修改，离开后这些修改会丢失。确定离开吗？')
+  return await confirmDiscard('当前草稿有尚未保存的修改，离开后这些修改会丢失。确定离开吗？')
 }
 
 // 用途：在现有统一路由中切换工作区。
 // 参数：key 为导航区域。
 // 返回值：无；有未保存草稿时先确认，取消则不跳转。
-function navigate(key) {
-  if (key !== workspace.value && !discardDraft()) return
+async function navigate(key) {
+  if (key !== workspace.value && !(await discardDraft())) return
   router.push(key === 'portal' ? { name: 'portal' } : { name: 'reimbursement', params: { section: key } })
 }
 
@@ -665,7 +673,7 @@ function navigate(key) {
 // 参数：无。
 // 返回值：无；用户取消或命令未确认时保持原页面。
 async function startNewClaim() {
-  if (!discardDraft()) return
+  if (!(await discardDraft())) return
   if (workspace.value !== 'claims') await router.push({ name: 'reimbursement', params: { section: 'claims' } })
   await newDraft(true)
 }
@@ -1299,8 +1307,8 @@ async function resetFilters() {
 // 用途：从项目归档聚合定位该项目的当前可见报销单。
 // 参数：projectID为服务端返回的授权项目坐标。
 // 返回值：无；路由查询不替代服务端范围核验。
-function openArchiveProject(projectID) {
-  if (!discardDraft()) return
+async function openArchiveProject(projectID) {
+  if (!(await discardDraft())) return
   selected.value=null;archives.value=null
   router.push({name:'reimbursement',params:{section:'archives'},query:{project_id:projectID}})
 }
@@ -1481,7 +1489,7 @@ async function revealDetail() {
 // 参数：kind 为 claim、invoice 或 approval，决定要关闭的详情。
 // 返回值：无；有未保存草稿时先确认。
 async function backToList(kind = 'claim') {
-  if (!discardDraft()) return
+  if (!(await discardDraft())) return
   if (kind === 'invoice') {
     selectedInvoice.value = null; invoiceRows.value = []; selectedSource.value = null
   } else if (kind === 'approval') {
@@ -1502,7 +1510,7 @@ async function backToList(kind = 'claim') {
 // 参数：id 为服务器单据ID，force 表示保存成功后跳过重复放弃确认。
 // 返回值：无；详情读取失败保持表单。
 async function openClaim(id, force = false) {
-  if (!force && selected.value?.id !== String(id) && !discardDraft()) return
+  if (!force && selected.value?.id !== String(id) && !(await discardDraft())) return
   const ticket = ++detailSequence
   try {
     const result = await api.request(`/claims/${encodeURIComponent(id)}`)
@@ -2660,7 +2668,7 @@ function clonePolicy() {
 // 返回值：无；初始化空白编辑表单。
 async function newDraft(skipConfirm = false) {
   if (runner.pending()) { showError(new Error('请先确认原命令结果')); return }
-  if (!skipConfirm && !discardDraft()) return
+  if (!skipConfirm && !(await discardDraft())) return
   claimFormOpen.value = true
   selected.value = null; draft.value = blankDraft()
   draftBaseline.value = stableStringify(draft.value)
@@ -2677,7 +2685,7 @@ async function newDraft(skipConfirm = false) {
 // 返回值：无；无可选组织时不发出创建请求。
 async function createDraft() {
   if (!applyDraftContext(draft.value.org_id)) { showError(new Error(notice.value)); return }
-  if (!confirmDiscard('创建服务器草稿会先保存空单据，当前未保存的费用明细不会一并保存。继续创建吗？')) return
+  if (!(await confirmDiscard('创建服务器草稿会先保存空单据，当前未保存的费用明细不会一并保存。继续创建吗？'))) return
   const result = await mutate('claim.create', '/claims', { expected_version: 0,
     title: draft.value.title || '未命名报销', org_id: draft.value.org_id,
     route_type: draft.value.route_type, finance_entity_id: draft.value.finance_entity_id,
@@ -2692,7 +2700,7 @@ async function createDraft() {
 // 返回值：无；成功返回门户。
 async function logout() {
   if (runner.pending()) { showError(new Error('请先确认原命令结果再退出')); return }
-  if (!discardDraft()) return
+  if (!(await discardDraft())) return
   try { await logoutReimbursement() } catch (cause) { showError(cause) } }
 
 watch(draft,invalidateClaimPreview,{deep:true})
@@ -2723,12 +2731,12 @@ function protectPending(event) {
   if (!runner.pending() && !draftProtected.value) return
   event.preventDefault(); event.returnValue = ''
 }
-onBeforeRouteLeave(() => {
+onBeforeRouteLeave(async () => {
   if (runner.pending()) {
     showError(new Error('请先查询原命令结果，再离开报销工作区'))
     return false
   }
-  return discardDraft()
+  return await discardDraft()
 })
 onMounted(() => {
   // 刷新页面后先恢复最近任务坐标，用户可以继续查询而不用重新上传或重跑。
@@ -2847,29 +2855,37 @@ onBeforeUnmount(() => {
         class="expense-panel"
       >
         <header class="expense-card-head">
-          <h2 class="expense-card-title">项目费用参与人</h2>
-          <span class="expense-card-extra">资格由项目工作区维护</span>
+          <h2 class="expense-card-title">项目费用参与资格</h2>
+          <span class="expense-card-extra">资格由项目工作区统一维护</span>
         </header>
-        <p>
-          项目费用参与资格由项目工作区按项目范围维护；报销侧只提供查询与跳转入口。
-        </p>
+        <p>只展示本人当前可报销的项目/服务项；参与人变化后，报销选项会自动联动。</p>
         <div class="expense-actions">
           <input v-model="keyword" maxlength="128" placeholder="输入项目关键词" aria-label="项目关键词">
-          <button type="button" class="expense-button" @click="searchProjects">
-            查询项目选项
+          <button type="button" class="expense-button" :disabled="projectLoading" @click="searchProjects">
+            {{ projectLoading ? '查询中…' : '查询可报销项目' }}
           </button>
         </div>
-        <p v-if="!projectOptions.length">
-          暂无已查询项目选项。
-        </p>
-        <ul v-else>
-          <li v-for="option in projectOptions" :key="option.project_id">
-            {{ option.project_id }} / {{ option.project_name || '名称待确认' }}
-            <button type="button" class="expense-button" @click="openProjectExpenseParticipants(option)">
-              维护费用参与人
-            </button>
-          </li>
-        </ul>
+        <p v-if="projectError" role="alert">{{ projectError }}</p>
+        <div v-if="projectOptions.length" class="expense-table">
+          <table>
+            <thead>
+              <tr><th scope="col">项目 / 服务项</th><th scope="col">项目状态</th><th scope="col">操作</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="option in projectOptions" :key="`${option.project_id}/${option.service_item_id || ''}`">
+                <td>{{ projectReferenceLabel(option) }}</td>
+                <td>{{ option.project_status }}</td>
+                <td>
+                  <button type="button" class="expense-button" @click="openProjectExpenseParticipants(option)">去项目维护</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <div v-if="projectCursor" class="expense-actions">
+            <button type="button" class="expense-button" :disabled="projectLoading" @click="searchProjects(true)">加载更多</button>
+          </div>
+        </div>
+        <p v-else-if="!projectLoading">暂无已查询的可报销项目。</p>
       </section>
       <div v-if="fieldErrors.length" role="alert">
         <button type="button" v-for="field in fieldErrors" :key="field.field" class="expense-button" @click="focusValidation(field.field)">
@@ -5015,5 +5031,6 @@ onBeforeUnmount(() => {
         </fieldset>
       </section>
     </template>
+    <ConfirmDialog :open="Boolean(confirmDialog)" v-bind="confirmDialog || {}" @confirm="acceptConfirm" @cancel="cancelConfirm" />
   </AppShell>
 </template>

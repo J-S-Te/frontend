@@ -1383,6 +1383,45 @@ export function postMetricUsageAction(id, action, payload) {
   return request(`/metric-facts/usages/${encodeURIComponent(id)}/${action}`, { method: 'POST', body: JSON.stringify(payload) })
 }
 
+// 用途：读取组织工作日历、资源例外和强证据自动确认策略。
+export function getMetricCalendar(organizationID) {
+  return request(`/metric-facts/calendar?organization_id=${encodeURIComponent(organizationID)}`)
+}
+export function saveMetricCalendarRule(payload) {
+  return request('/metric-facts/calendar', { method: 'PUT', body: JSON.stringify(payload) })
+}
+export function getMetricCalendarExceptions(organizationID, from, to) {
+  return request(`/metric-facts/calendar-exceptions?organization_id=${encodeURIComponent(organizationID)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`)
+}
+export function saveMetricCalendarException(payload) {
+  return request('/metric-facts/calendar-exceptions', { method: 'POST', body: JSON.stringify(payload) })
+}
+export function deleteMetricCalendarException(id, expectedVersion, idempotencyKey) {
+  return request(`/metric-facts/calendar-exceptions/${encodeURIComponent(id)}?expected_version=${expectedVersion}&idempotency_key=${encodeURIComponent(idempotencyKey)}`, { method: 'DELETE' })
+}
+export function generateMetricCapacities(payload) {
+  return request('/metric-facts/capacities/generate', { method: 'POST', body: JSON.stringify(payload) })
+}
+export function getMetricUsageCandidates(itemID) {
+  return request(`/service-items/${encodeURIComponent(itemID)}/metric-usage-candidates`)
+}
+export function applyMetricUsageCandidate(itemID, payload) {
+  return request(`/service-items/${encodeURIComponent(itemID)}/metric-usage-candidates/apply`, { method: 'POST', body: JSON.stringify(payload) })
+}
+export function getMetricAutoConfirmSetting() {
+  return request('/metric-facts/auto-confirm')
+}
+export function setMetricAutoConfirmSetting(payload) {
+  return request('/metric-facts/auto-confirm', { method: 'PUT', body: JSON.stringify(payload) })
+}
+
+// 用途：原子批量提交、确认或取消本页用量；整批失败不产生部分生效。
+// 参数：payload 包含 items、action、decision、note 和 idempotency_key。
+// 返回值：整批生效后的真实用量。
+export function postMetricUsageBatch(payload) {
+  return request('/metric-facts/usages/batch-decision', { method: 'POST', body: JSON.stringify(payload) })
+}
+
 // 用途：读取主报告与专项当前版本最新轮次，与历史分页独立。
 // 参数：itemID 为已授权父服务项。
 // 返回值：最多两条真实当前轮次或读取错误。

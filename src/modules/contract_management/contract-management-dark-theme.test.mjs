@@ -262,7 +262,7 @@ test('弹窗与表单：遮罩、弹窗头尾、详情网格、导入/审批/签
   assertAlias(CONTRACT, '.contract-detail-highlight strong', 'color', '--primary-ink-strong', '#1e3a8a')
 
   for (const selector of [
-    '.contract-form-grid input',
+    '.contract-form-grid input:not([type="checkbox"]):not([type="radio"])',
     '.contract-form-grid select',
     '.contract-intake-review select',
     '.contract-advanced-actions input',

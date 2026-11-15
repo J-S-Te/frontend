@@ -4330,6 +4330,7 @@ onBeforeUnmount(() => {
         <ResourceMetricFactsPanel
           v-if="session?.permissions?.includes('project.read') && workspaceReady && !loading && !loadError && ['planning', 'qualifications', 'equipment', 'implementation'].includes(activeSection)"
           :session="session" :items="serviceItems" :resources="capabilities" :equipment="equipment"
+          :selected-item-id="selectedServiceItem?.id || ''"
         />
       </div>
     </main>

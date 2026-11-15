@@ -8,9 +8,12 @@ import '@/modules/platform/notifications/styles/notification-center.css'
 import { formatUserError } from '../../../shared/utils/userError.js'
 
 import PromptDialog from '@/modules/shared/components/PromptDialog.vue'
+import ConfirmDialog from '@/modules/shared/components/ConfirmDialog.vue'
+import { useConfirmDialog } from '@/modules/shared/composables/useConfirmDialog.js'
 import { usePromptDialog } from '@/modules/shared/composables/usePromptDialog.js'
 
 const { dialog: promptDialog, askPrompt, accept: acceptPrompt, cancel: cancelPrompt } = usePromptDialog()
+const { dialog: confirmDialog, askConfirm, accept: acceptConfirm, cancel: cancelConfirm } = useConfirmDialog()
 const emit = defineEmits(['toast'])
 const tab = ref('inbox'), loading = ref(false), error = ref(''), items = ref([]), unreadCount = ref(0), detail = ref(null), templates = ref([]), deliveries = ref([]), deliveryStatus = ref('')
 const settings = reactive({ inbox_enabled: true, email_enabled: false, reminder_frequency: 'IMMEDIATE', version: 1 })
@@ -55,7 +58,14 @@ const hasReadItems = computed(() => items.value.some((item) => item.read_at))
 // deleteRead 软删除当前账号已读站内信；只影响本人收件箱，未读与其他收件人保持不变。
 async function deleteRead() {
   if (!hasReadItems.value || working.value || loading.value) return
-  if (typeof window !== 'undefined' && !window.confirm('确认删除当前账号的全部已读站内信？该操作只影响你的收件箱。')) return
+  const confirmed = await askConfirm({
+    title: '删除全部已读站内信？',
+    description: '确认删除当前账号的全部已读站内信？该操作只影响你的收件箱，删除后不可恢复。',
+    confirmText: '删除已读',
+    cancelText: '取消',
+    danger: true,
+  })
+  if (!confirmed || !hasReadItems.value || working.value || loading.value) return
   await runAction(deleteReadNotifications, result => `已删除 ${result?.deleted_count ?? 0} 条已读站内信。`, loadInbox)
 }
 async function submitTemplate() {
@@ -102,6 +112,7 @@ onMounted(refresh)
     <template v-else-if="tab === 'deliveries'"><div class="notification-actions"><select v-model="deliveryStatus" @change="refresh"><option value="">全部状态</option><option>PENDING</option><option>PROCESSING</option><option>DELIVERED</option><option>FAILED</option></select><button class="console-button primary small" @click="retryFailed">重试失败投递</button></div><div class="notification-table" data-table-scroll><table class="console-data-table"><thead><tr><th scope="col">投递 ID</th><th scope="col">收件人</th><th scope="col">状态</th><th scope="col">尝试</th><th scope="col">下次重试</th></tr></thead><tbody><tr v-if="!deliveries.length"><td colspan="5">暂无投递记录。</td></tr><tr v-for="item in deliveries" :key="item.id"><td><code>{{ item.id }}</code></td><td><code>{{ item.recipient_user_id }}</code></td><td>{{ item.status }}</td><td>{{ item.attempt_count }}</td><td>{{ item.next_attempt_at || '—' }}</td></tr></tbody></table></div></template>
     <template v-else><form class="notification-settings" @submit.prevent="saveSettings"><label><span>站内信</span><input v-model="settings.inbox_enabled" type="checkbox" :disabled="!canUpdateSettings" /></label><label><span>提醒频率</span><select v-model="settings.reminder_frequency" :disabled="!canUpdateSettings"><option value="IMMEDIATE">即时（创建即可见）</option><option value="DAILY">每日汇总（每日 09:00 北京时间可见）</option><option value="WEEKLY">每周汇总（每周一 09:00 北京时间可见）</option><option value="NEVER">不提醒（不进入站内信）</option></select></label><label class="disabled"><span>邮件通知</span><input type="checkbox" disabled /><small>尚未部署邮件提供方和投递 Worker，已强制关闭。</small></label><button v-if="canUpdateSettings" class="console-button primary">保存设置</button></form></template>
     <aside v-if="detail" class="notification-detail"><header><h3>{{ detail.title }}</h3><button @click="detail = null">×</button></header><p>{{ detail.content }}</p><a v-if="safeTarget(detail.target_url)" :href="safeTarget(detail.target_url)">查看关联内容</a></aside>
+    <ConfirmDialog :open="Boolean(confirmDialog)" v-bind="confirmDialog || {}" @confirm="acceptConfirm" @cancel="cancelConfirm" />
     <PromptDialog :open="Boolean(promptDialog)" v-bind="promptDialog || {}" @confirm="acceptPrompt" @cancel="cancelPrompt" />
   </section>
 </template>

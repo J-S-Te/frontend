@@ -11,17 +11,11 @@ const registry = resolve('src/modules/registry/compiledModules.js')
 const session = { permissions: ['project.expense_participant.manage'] }
 const defaults = [{ subject_id: 'implementer', display_name: '叶工', resource_id: 'P-17', service_item_id: 'a' }]
 
-// 用途：等待实际组件的接口回执和 Vue 响应式状态更新。
-// 参数：无。
-// 返回值：异步完成后可读取组件当前状态。
 async function settlePanel() {
   await new Promise((resolve) => setImmediate(resolve))
   await nextTick()
 }
 
-// 用途：以真实组件和外部 API 替身挂载费用面板。
-// 参数：responses 为本场景的接口实现，props 为当前项目与授权。
-// 返回值：实际响应式状态、根属性与卸载方法。
 async function mountExpensePanel(responses, props = { projectId: 'p', session }) {
   return mountSFC(panel, {
     [api]: {
@@ -36,7 +30,7 @@ async function mountExpensePanel(responses, props = { projectId: 'p', session })
   }, props)
 }
 
-test('实施人员默认显示并优先作为候选，打开面板不生成手工授权或拉取全员目录', async () => {
+test('实施人员默认显示，打开面板不拉全员目录也不要求手输版本', async () => {
   let directoryReads = 0
   const mounted = await mountExpensePanel({
     listPersonnel: async () => { directoryReads++; return { items: [] } },
@@ -44,14 +38,14 @@ test('实施人员默认显示并优先作为候选，打开面板不生成手�
   try {
     await settlePanel()
     assert.deepEqual(mounted.state.implementationParticipants?.value, defaults)
-    assert.deepEqual(mounted.state.personnelSelectOptions.value.map((row) => row.id), ['implementer'])
     assert.equal(directoryReads, 0)
-    assert.equal(mounted.state.participantForm.value.version, 0)
+    assert.equal(mounted.state.exceptionForm.value.subject_id, '')
+    assert.ok(mounted.state.eligibilityRows.value.some((row) => row.sourceLabel === '实施计划'))
   } finally { mounted.unmount() }
 })
 
-test('默认名单翻页保留前页人员，人工名单与未知主体编辑仍独立保留', async () => {
-  const explicit = [{ subject_id: 'extra', version: 3, status: 'ACTIVE' }]
+test('自动名单翻页保留前页人员，例外名单独立展示并可移除', async () => {
+  const explicit = [{ subject_id: 'extra', version: 3, status: 'ACTIVE', valid_until: '2027-11-10T00:00:00Z' }]
   const mounted = await mountExpensePanel({
     getProjectExpenseParticipants: async (_project, _cursor, implementationCursor) => ({
       items: explicit,
@@ -66,9 +60,9 @@ test('默认名单翻页保留前页人员，人工名单与未知主体编辑�
     await mounted.state.loadParticipants(false, true)
     assert.deepEqual(mounted.state.implementationParticipants.value.map((row) => row.subject_id), ['implementer', 'second'])
     assert.deepEqual(mounted.state.participants.value, explicit)
-    mounted.state.chooseParticipant(explicit[0])
-    assert.equal(mounted.state.participantForm.value.version, 3)
-    assert.ok(mounted.state.personnelSelectOptions.value.some((row) => row.id === 'extra'))
+    const extra = mounted.state.eligibilityRows.value.find((row) => row.subject_id === 'extra')
+    assert.equal(extra.explicit, true)
+    assert.equal(extra.sourceLabel, '项目例外')
   } finally { mounted.unmount() }
 })
 
@@ -85,7 +79,8 @@ test('缺少管理权限或项目标识时不读取默认人员和目录', async
     await settlePanel()
     await mounted.state.loadParticipants()
     await mounted.state.loadPersonnel()
-    await mounted.state.saveParticipant()
+    await mounted.state.addException()
+    await mounted.state.removeException({ subject_id: 'x', person: { version: 1 } })
     assert.equal(reads, 0)
     assert.equal(writes, 0)
     mounted.unmount()
@@ -104,8 +99,8 @@ test('管理权限撤销后忽略仍在途的默认名单，旧响应不恢复�
     await nextTick()
     complete({ items: [{ subject_id: 'old' }], implementation_participants: { items: defaults } })
     await settlePanel()
-    assert.equal(mounted.state.implementationParticipants.value, null)
-    assert.equal(mounted.state.participants.value, null)
+    assert.deepEqual(mounted.state.implementationParticipants.value, [])
+    assert.deepEqual(mounted.state.participants.value, [])
     assert.equal(mounted.state.participantBusy.value, false)
   } finally { mounted.unmount() }
 })
@@ -121,7 +116,7 @@ test('人员会话切换时丢弃旧名单，即使项目和权限名称相同',
     await nextTick()
     pending[0]({ items: [], implementation_participants: { items: defaults } })
     await settlePanel()
-    assert.equal(mounted.state.implementationParticipants.value, null)
+    assert.deepEqual(mounted.state.implementationParticipants.value, [])
     assert.equal(pending.length, 2)
     pending[1]({ items: [], implementation_participants: { items: [] } })
     await settlePanel()

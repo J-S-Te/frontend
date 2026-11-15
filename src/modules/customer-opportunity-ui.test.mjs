@@ -675,13 +675,28 @@ test('界面已接入客户生命周期、商机看板/跟进/历史/终态待�
   assert.doesNotMatch(view, /后端暂未提供申请列表与详情/)
 })
 
-test('商机阶段看板按推进程度设置独立背景色且不影响售前看板', () => {
+test('商机阶段看板使用中性列与阶段强调色，不再整列铺满彩虹底色', () => {
   assert.match(view, /class="crm-board crm-opportunity-board"/)
   assert.match(view, /:data-stage="column\.stage"/)
   for (const stage of ['初步接触', '需求沟通', '方案制定', '报价', '投标', '已签约', '失败']) {
     assert.match(style, new RegExp(`\\.crm-opportunity-board \\.crm-board-column\\[data-stage='${stage}'\\]`))
   }
-  assert.match(style, /\.crm-opportunity-board \.crm-board-column\s*\{[\s\S]*background:\s*linear-gradient/)
+  assert.match(style, /\.crm-opportunity-board \.crm-board-column\s*\{[\s\S]*background:\s*var\(--surface-card/)
+  assert.doesNotMatch(style, /\.crm-opportunity-board \.crm-board-column\s*\{[^}]*linear-gradient/)
+})
+
+test('商机看板显示管道汇总、列金额、空阶段开关和卡片异常提示', () => {
+  assert.match(view, /crm-board-summary/)
+  assert.match(view, /boardSummary\.amount/)
+  assert.match(view, /crm-board-column-total/)
+  assert.match(view, /showEmptyBoardStages/)
+  assert.match(view, /boardDateLabel\(item\)/)
+  assert.match(view, /boardOwnerMissing\(item\)/)
+  assert.match(view, /boardIsStale\(item\)/)
+  assert.match(view, /boardColumnOverdue\(column\)/)
+  assert.match(style, /\.crm-board-summary/)
+  assert.match(style, /\.crm-board-column-total/)
+  assert.match(style, /\.crm-board-age/)
 })
 
 test('售前状态看板按流程状态设置独立背景色', () => {

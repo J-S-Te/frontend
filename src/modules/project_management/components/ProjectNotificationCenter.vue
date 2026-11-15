@@ -4,8 +4,11 @@ import { formatUserError } from '../../shared/utils/userError.js'
 import { formatBusinessDateTime } from '../../shared/utils/businessTime.js'
 import { deleteReadNotifications, getNotification, listInbox, markNotificationRead } from '@/modules/platform/notifications/api/notifications'
 import PaginationBar from '@/modules/shared/components/PaginationBar.vue'
+import ConfirmDialog from '@/modules/shared/components/ConfirmDialog.vue'
+import { useConfirmDialog } from '@/modules/shared/composables/useConfirmDialog.js'
 
 const emit = defineEmits(['read'])
+const { dialog: confirmDialog, askConfirm, accept: acceptConfirm, cancel: cancelConfirm } = useConfirmDialog()
 const items = ref([]), total = ref(0), page = ref(1), unreadOnly = ref(false)
 const tab = ref('all'), tabs = [{ key: 'all', label: '全部' }, { key: 'local', label: '本系统' }, { key: 'cross', label: '跨系统' }]
 const loading = ref(false), error = ref(''), detail = ref(null), actionID = ref('')
@@ -66,7 +69,14 @@ const hasReadItems = computed(() => items.value.some((item) => item.read_at))
 // deleteRead 软删除当前账号已读站内信；未读与其他收件人的通知不受影响。
 async function deleteRead() {
   if (!hasReadItems.value || loading.value || actionID.value) return
-  if (typeof window !== 'undefined' && !window.confirm('确认删除当前账号的全部已读通知？该操作只影响你的收件箱。')) return
+  const confirmed = await askConfirm({
+    title: '删除全部已读通知？',
+    description: '确认删除当前账号的全部已读通知？该操作只影响你的收件箱，删除后不可恢复。',
+    confirmText: '删除已读',
+    cancelText: '取消',
+    danger: true,
+  })
+  if (!confirmed || !hasReadItems.value || loading.value || actionID.value) return
   loading.value = true
   error.value = ''
   try {
@@ -90,6 +100,7 @@ onMounted(load)
       <div v-else class="pm-personal-list"><button v-for="item in items" :key="item.delivery_id" type="button" :class="{ unread: !item.read_at }" :disabled="!!actionID" @click="open(item)"><span class="pm-personal-title">{{ item.title }}<small>{{ item.read_at ? '已读' : '未读' }}</small></span><span class="pm-personal-content">{{ item.content }}</span><time>{{ formatDate(item.delivered_at) }}</time></button></div>
       <PaginationBar class="pm-personal-pagination" label="个人通知分页" :page="page" :total="total" :page-size="pageSize" :loading="loading" :disabled="!!actionID" @change="changePage" />
     </template>
+    <ConfirmDialog :open="Boolean(confirmDialog)" v-bind="confirmDialog || {}" @confirm="acceptConfirm" @cancel="cancelConfirm" />
     <aside v-if="detail" class="pm-personal-detail" aria-label="通知详情"><header><h3>{{ detail.title }}</h3><button type="button" class="pm-button" @click="detail = null">关闭详情</button></header><p>{{ detail.content }}</p><small>送达时间：{{ formatDate(detail.delivered_at) }}</small><a v-if="projectTarget" class="pm-button" :href="projectTarget">查看项目关联内容</a></aside>
   </section>
 </template>

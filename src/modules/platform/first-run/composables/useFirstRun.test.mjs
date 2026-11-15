@@ -169,7 +169,7 @@ test('门户导览：header 锚点缺失不启动、缺锚步骤跳过、终态�
   assert.equal(store.beginTour({ hasAnchor: () => true }), false)
 })
 
-test('门户导览中途离开落为 skipped，不自动续播；重新查看仍可重开', () => {
+test('门户导览中途离开落为 paused，下次从原步骤继续；重新查看仍可重开', () => {
   const store = createStore()
   store.markPortalReady(principal())
   store.beginTour({ hasAnchor: () => true })
@@ -178,12 +178,15 @@ test('门户导览中途离开落为 skipped，不自动续播；重新查看仍
 
   store.markPortalUnready()
   assert.equal(store.state.tourVisible, false)
-  assert.equal(portalTour(store), 'skipped', '中断必须落为终态，不能留下 running')
+  assert.equal(portalTour(store), 'paused')
   assert.equal(portalStep(store), 1)
-  assert.ok(store.state.record.guides.portal.seenAt)
+  assert.equal(store.state.record.guides.portal.seenAt, null, 'paused 不是终态，不写 seenAt')
 
   store.markPortalReady()
-  assert.equal(store.beginTour({ hasAnchor: () => true }), false)
+  assert.equal(store.beginTour({ hasAnchor: () => true }), true)
+  assert.equal(store.state.tourIndex, 1, '从离开时的步骤继续')
+  store.finishTour('skipped')
+
   assert.equal(store.restartTour(), true)
   assert.equal(portalTour(store), 'pending')
   assert.equal(store.beginTour({ hasAnchor: () => true }), true)
@@ -218,16 +221,16 @@ test('子系统导览：每个 guide 独立启动/切步/中断，互不覆盖',
   assert.equal(store.state.record.guides.contract.tour, 'done')
   assert.equal(store.state.record.guides.platform.tour, 'running')
 
-  // 离开平台控制台：running → skipped，合同终态保持 done。
+  // 离开平台控制台：running → paused，合同终态保持 done。
   assert.equal(store.interruptTour('platform'), true)
-  assert.equal(store.state.record.guides.platform.tour, 'skipped')
+  assert.equal(store.state.record.guides.platform.tour, 'paused')
   assert.equal(store.state.record.guides.contract.tour, 'done')
   assert.equal(store.state.tourVisible, false)
 
   // 显式重看合同：只把合同拉回 pending，平台控制台终态不变。
   assert.equal(store.restartTour('contract'), true)
   assert.equal(store.state.record.guides.contract.tour, 'pending')
-  assert.equal(store.state.record.guides.platform.tour, 'skipped')
+  assert.equal(store.state.record.guides.platform.tour, 'paused')
 })
 
 test('子系统首步 nav 锚点缺失时不启动，记录保持 pending', () => {

@@ -22,6 +22,7 @@ const settlementView = await readFile(new URL('../../settlement/views/Settlement
 const crmView = await readFile(new URL('../../customer_opportunity/views/CustomerOpportunityView.vue', import.meta.url), 'utf8')
 const customerPortalView = await readFile(new URL('../../customer_portal/views/CustomerPortalView.vue', import.meta.url), 'utf8')
 const platformConsoleView = await readFile(new URL('../views/PlatformConsoleView.vue', import.meta.url), 'utf8')
+const reimbursementView = await readFile(new URL('../../reimbursement/views/ReimbursementView.vue', import.meta.url), 'utf8')
 
 test('App.vue 全局挂载 GuideHost 与路由观察器，审计完成只在已有记录时写入', () => {
   assert.match(app, /import FirstRunGuideHost from '@\/modules\/platform\/first-run\/components\/FirstRunGuideHost\.vue'/)
@@ -41,8 +42,9 @@ test('导览触发：按 route.name 选 guide、会话/页面就绪、600ms、�
   assert.match(guide, /confirmDialogOpen/)
   assert.match(guide, /firstRun\.state\.tourVisible \|\| firstRun\.state\.checklistOpen/)
   assert.match(guide, /window\.setTimeout\(\(\) => \{\s*startTimer = 0\s*attemptStart\(\)\s*\}, FIRST_RUN_TOUR_STEP_DELAY_MS\)/)
-  // 首步锚点缺失时整次不启动（门户 header / 子系统 nav），记录保持 pending。
-  assert.match(guide, /if \(!anchorExists\(firstRunGuideSteps\(key\)\[0\]\.anchor\)\) return/)
+  // 首步锚点缺失时短轮询等待；paused 从原步骤继续，原步骤缺失回退首步。
+  assert.match(guide, /const resumeIndex = guide\?\.tour === 'paused'/)
+  assert.match(guide, /retryStartWhenAnchorAppears\(\)/)
   assert.match(guide, /firstRun\.beginTour\(\{ guideKey: key, hasAnchor: anchorExists \}\)/)
   // 缺锚步骤跳过：当前步骤锚点消失时前进到下一个可用步骤。
   assert.match(guide, /firstRun\.advanceTour\(\{ hasAnchor: anchorExists \}\)/)
@@ -54,6 +56,7 @@ test('多 guide 路由映射与一次只展示一个', () => {
   for (const [routeName, guideKey] of [
     ['portal', 'portal'], ['settings', 'platform'], ['audit', 'platform'],
     ['contract_management', 'contract'], ['project_management', 'project'],
+    ['reimbursement', 'reimbursement'],
     ['settlement', 'settlement'], ['customer_opportunity', 'customer_opportunity'],
     ['customer_portal', 'customer_portal'], ['data_analysis', 'data_analysis'],
   ]) {
@@ -67,22 +70,23 @@ test('多 guide 路由映射与一次只展示一个', () => {
   assert.match(store, /const tourLabel = computed\(\(\) => firstRunGuideLabel\(state\.tourGuide \|\| FIRST_RUN_PORTAL_GUIDE\)\)/)
 })
 
-test('切换子系统先关旧导览（落 skipped，不标记旧 guide 完成），离开/ pagehide 落 skipped', () => {
-  // guide 切换 watcher：旧 guide 只调用 interruptTour，绝不 finishTour('done')。
-  assert.match(guide, /watch\(activeGuideKey, \(next\) => \{[\s\S]{0,700}previousGuideKey = next[\s\S]{0,200}if \(previous && previous !== next\) firstRun\.interruptTour\(previous\)/)
+test('切换子系统先把旧导览落为 paused（不标记完成），离开/ pagehide 可续播', () => {
+  // guide 切换 watcher：旧 guide 只调用 pauseTour，绝不 finishTour('done')。
+  assert.match(guide, /watch\(activeGuideKey, \(next\) => \{[\s\S]{0,800}previousGuideKey = next[\s\S]{0,300}firstRun\.pauseTour\(previous\)/)
   const switchBlock = guide.slice(
     guide.indexOf('watch(activeGuideKey'),
     guide.indexOf('// 同一 guide 内通过 `?guide=1`'),
   )
-  assert.match(switchBlock, /firstRun\.interruptTour\(previous\)/)
+  assert.match(switchBlock, /firstRun\.pauseTour\(previous\)/)
   assert.doesNotMatch(switchBlock, /finishTour\('done'\)/)
-  // 未登记路由直接中断当前导览，不自动跨页。
-  assert.match(guide, /if \(!next\) \{[\s\S]{0,120}firstRun\.interruptTour\(\)/)
-  assert.match(guide, /function onPageHide\(\) \{\s*firstRun\.interruptTour\(\)\s*\}/)
+  // 未登记路由直接把当前导览落为 paused，不自动跨页。
+  assert.match(guide, /if \(!next\) \{[\s\S]{0,140}firstRun\.pauseTour\(\)/)
+  assert.match(guide, /function onPageHide\(\) \{\s*firstRun\.pauseTour\(\)\s*\}/)
   assert.match(guide, /window\.addEventListener\('pagehide', onPageHide\)/)
-  // store 侧：中断写 skipped（按 guide），不写 done。
-  assert.match(store, /function interruptTour\(guideKey = state\.tourGuide \|\| FIRST_RUN_PORTAL_GUIDE\)/)
-  assert.match(store, /withTourFinished\(base, 'skipped', nowIso\(\), key\)/)
+  // store 侧：中断写 paused（按 guide），不写 done/skipped；旧的 interruptTour 保留兼容。
+  assert.match(store, /function pauseTour\(guideKey = state\.tourGuide \|\| FIRST_RUN_PORTAL_GUIDE\)/)
+  assert.match(store, /withTourPaused\(base, key\)/)
+  assert.match(store, /function interruptTour\(guideKey\) \{\s*return pauseTour\(guideKey\)\s*\}/)
 })
 
 test('子系统 ?guide=1 强制当前 guide 重看，并清理 URL 参数', () => {
@@ -368,14 +372,14 @@ test('第 ④ 项探测：只读 GET /users?page=1&page_size=1、total>=1 完成
   assert.match(checklist, /尚未检测到业务账号/)
 })
 
-test('导览中断与竞态：pagehide/离开落 skipped、探测按 scope+generation 丢弃', () => {
-  assert.match(guide, /function onPageHide\(\) \{\s*firstRun\.interruptTour\(\)\s*\}/)
+test('导览中断与竞态：pagehide/离开落 paused 可续播、探测按 scope+generation 丢弃', () => {
+  assert.match(guide, /function onPageHide\(\) \{\s*firstRun\.pauseTour\(\)\s*\}/)
   assert.match(guide, /window\.addEventListener\('pagehide', onPageHide\)/)
   assert.match(guide, /firstRun\.state\.catalogReady/)
   assert.match(guide, /shouldStartFirstRunTour/)
   assert.match(guide, /firstRun\.isGuideReady\(key\)/)
-  assert.match(store, /function interruptTour\(guideKey = state\.tourGuide \|\| FIRST_RUN_PORTAL_GUIDE\)/)
-  assert.match(store, /withTourFinished\(base, 'skipped', nowIso\(\), key\)/)
+  assert.match(store, /function pauseTour\(guideKey = state\.tourGuide \|\| FIRST_RUN_PORTAL_GUIDE\)/)
+  assert.match(store, /withTourPaused\(base, key\)/)
   assert.match(store, /const probePromises = new Map\(\)/)
   assert.match(store, /let probeGeneration = 0/)
   assert.match(store, /const generation = probeGeneration/)
@@ -404,13 +408,13 @@ test('切步/启动前先 scrollIntoView 到视口中部再测量', () => {
   assert.match(guide, /function onWindowResize\(\) \{\s*positionTour\(\)\s*\}/)
 })
 
-test('六个子系统壳层 + 平台控制台补齐统一锚点', () => {
+test('七个子系统壳层 + 平台控制台补齐统一锚点', () => {
   // 共享外壳统一提供导航与主操作区；各 AppShell 模块的返回门户项显式声明 anchor。
   assert.match(appShell, /data-first-run-anchor="subsystem-nav"/)
   assert.match(appShell, /data-first-run-anchor="subsystem-title"/)
   assert.match(appShell, /:data-first-run-anchor="item\.anchor \|\| undefined"/)
   for (const [name, source] of [
-    ['结算', settlementView], ['CRM', crmView], ['客户门户', customerPortalView], ['平台控制台', platformConsoleView],
+    ['结算', settlementView], ['报销', reimbursementView], ['CRM', crmView], ['客户门户', customerPortalView], ['平台控制台', platformConsoleView],
   ]) {
     assert.match(source, /anchor: ["']subsystem-portal["']/, `${name} 缺少返回门户锚点声明`)
   }

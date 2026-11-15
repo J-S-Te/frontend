@@ -85,7 +85,20 @@ const normalizedGroups = computed(() => (Array.isArray(props.navGroups) ? props.
     collapsible: group?.collapsible === true && String(group?.label || '').trim() !== '',
     key: String(group?.key || group?.label || ''),
     items: (Array.isArray(group?.items) ? group.items : [])
-      .filter((item) => item && item.visible !== false && String(item.label || '').trim()),
+      .filter((item) => item && item.visible !== false)
+      .map((item) => ({
+        ...item,
+        key: String(item.key || item.label || ''),
+        label: String(item.label || ''),
+        children: (Array.isArray(item.children) ? item.children : [])
+          .filter((child) => child && child.visible !== false && String(child.label || '').trim())
+          .map((child) => ({
+            ...child,
+            key: String(child.key || child.label || ''),
+            label: String(child.label || ''),
+          })),
+      }))
+      .filter((item) => item.label || item.children.length > 0),
   }))
   .filter((group) => group.items.length > 0))
 
@@ -212,6 +225,34 @@ function selectNav(item) {
   setMenuOpen(false)
   emit('navigate', item.key, item)
 }
+
+// 二级菜单折叠状态：item.expanded 是模块给的默认展开态；用户手动收起优先。
+const collapsedItems = ref(new Set())
+const expandedItems = ref(new Set())
+
+// isItemExpanded 判断带子项的导航是否展开。
+// 参数：item 为归一化后的导航项。返回值：布尔值；无子项恒为 false。
+function isItemExpanded(item) {
+  if (!item?.children?.length) return false
+  if (collapsedItems.value.has(item.key)) return false
+  return expandedItems.value.has(item.key) || item.expanded === true
+}
+
+// toggleItem 切换二级菜单；手动收起优先于 item.expanded，手动展开优先于默认收起。
+// 参数：item 为带子项的导航项。返回值：无。
+function toggleItem(item) {
+  const nextCollapsed = new Set(collapsedItems.value)
+  const nextExpanded = new Set(expandedItems.value)
+  if (isItemExpanded(item)) {
+    nextCollapsed.add(item.key)
+    nextExpanded.delete(item.key)
+  } else {
+    nextCollapsed.delete(item.key)
+    nextExpanded.add(item.key)
+  }
+  collapsedItems.value = nextCollapsed
+  expandedItems.value = nextExpanded
+}
 </script>
 
 <template>
@@ -240,21 +281,40 @@ function selectNav(item) {
             ><span>{{ group.label }}</span></button>
             <p v-else-if="group.label" class="console-nav-label">{{ group.label }}</p>
             <template v-if="!group.collapsible || !isGroupCollapsed(group.key)">
-              <button
-                v-for="item in group.items"
-                :key="item.key"
-                class="console-nav-item"
-                :class="[item.itemClass, { active: Boolean(item.active) }]"
-                type="button"
-                :title="item.title || undefined"
-                :aria-current="item.active ? 'page' : undefined"
-                :data-first-run-anchor="item.anchor || undefined"
-                @click="selectNav(item)"
-              >
-                <ConsoleIcon v-if="item.icon" :name="item.icon" />
-                <span>{{ item.label }}</span>
-                <span v-if="item.note" :class="item.noteClass || 'console-nav-note'">{{ item.note }}</span>
-              </button>
+              <template v-for="item in group.items" :key="item.key">
+                <button
+                  class="console-nav-item"
+                  :class="[item.itemClass, { active: Boolean(item.active), 'has-children': item.children.length > 0, 'is-expanded': isItemExpanded(item) }]"
+                  type="button"
+                  :title="item.title || undefined"
+                  :aria-current="item.active && !item.children.some((child) => child.active) ? 'page' : undefined"
+                  :aria-expanded="item.children.length ? (isItemExpanded(item) ? 'true' : 'false') : undefined"
+                  :data-first-run-anchor="item.anchor || undefined"
+                  @click="item.children.length ? toggleItem(item) : selectNav(item)"
+                >
+                  <ConsoleIcon v-if="item.icon" :name="item.icon" />
+                  <span>{{ item.label }}</span>
+                  <span v-if="item.note" :class="item.noteClass || 'console-nav-note'">{{ item.note }}</span>
+                  <ConsoleIcon v-if="item.children.length" class="console-nav-chevron" name="chevron" />
+                </button>
+                <div v-if="item.children.length && isItemExpanded(item)" class="console-nav-children" role="group" :aria-label="item.label">
+                  <template v-for="(child, childIndex) in item.children" :key="child.key">
+                    <p v-if="child.groupLabel && (childIndex === 0 || child.groupLabel !== item.children[childIndex - 1].groupLabel)" class="console-nav-sublabel">{{ child.groupLabel }}</p>
+                    <button
+                      class="console-nav-item console-nav-item--child"
+                      :class="[child.itemClass, { active: Boolean(child.active) }]"
+                      type="button"
+                      :title="child.title || undefined"
+                      :aria-current="child.active ? 'page' : undefined"
+                      @click="selectNav(child)"
+                    >
+                      <ConsoleIcon v-if="child.icon" :name="child.icon" />
+                      <span>{{ child.label }}</span>
+                      <span v-if="child.note" :class="child.noteClass || 'console-nav-note'">{{ child.note }}</span>
+                    </button>
+                  </template>
+                </div>
+              </template>
             </template>
           </template>
         </slot>

@@ -202,6 +202,44 @@
   background: rgba(37, 99, 235, .18);
 }
 
+/* 二级导航：父项只负责展开/收起，子项沿用主侧栏的深色底与 active 语义。 */
+.console-nav-chevron {
+  width: 14px;
+  height: 14px;
+  margin-left: auto;
+  color: var(--text-faint, #94a3b8);
+  transition: transform .16s ease;
+}
+.console-nav-item.is-expanded .console-nav-chevron { transform: rotate(180deg); }
+.console-nav-children {
+  display: grid;
+  gap: 2px;
+  margin: 1px 0 6px 14px;
+  padding: 2px 0 2px 9px;
+  border-left: 1px solid rgba(148, 163, 184, .2);
+}
+.console-nav-sublabel {
+  margin: 0;
+  padding: 7px 10px 3px;
+  color: var(--text-faint, #94a3b8);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.console-nav-item--child {
+  min-height: 34px;
+  padding: 0 9px;
+  gap: 8px;
+  font-size: 12.5px;
+  border-radius: 6px;
+}
+.console-nav-item--child>svg {
+  width: 15px;
+  height: 15px;
+}
+.console-nav-item--child.active>svg { color: #93c5fd; }
+
 .console-nav-empty {
   margin: 4px 12px 8px;
   padding: 10px 12px;
@@ -856,7 +894,7 @@
   grid-column: 1 / -1;
 }
 
-.console-form-item input,
+.console-form-item input:not([type="checkbox"]):not([type="radio"]),
 .console-form-item select,
 .console-form-item textarea,
 .console-number-input {
@@ -875,7 +913,7 @@
   line-height: 1.6;
 }
 
-.console-form-item input:focus,
+.console-form-item input:not([type="checkbox"]):not([type="radio"]):focus,
 .console-form-item select:focus,
 .console-form-item textarea:focus,
 .console-number-input:focus {

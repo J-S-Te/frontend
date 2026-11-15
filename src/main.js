@@ -7,6 +7,7 @@ import '@/modules/platform/shared/styles/main.css'
 import '@/modules/platform/shared/styles/state.css'
 import '@/modules/shared/styles/global-ux.css'
 import '@/modules/shared/styles/ui-refresh.css'
+import '@/modules/shared/styles/process-timeline.css'
 import '@/modules/shared/styles/component-experience.css'
 
 const app = createApp(App)
