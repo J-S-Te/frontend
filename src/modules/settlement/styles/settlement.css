@@ -432,7 +432,7 @@
   gap: 10px;
   margin-bottom: 22px;
 }
-.settlement-form input,
+.settlement-form input:not([type="checkbox"]):not([type="radio"]),
 .settlement-form select,
 .settlement-form button,
 .settlement-panel button {
@@ -445,7 +445,7 @@
   border-radius: 7px;
   background: var(--surface-card, #fff);
 }
-.settlement-form input:focus,
+.settlement-form input:not([type="checkbox"]):not([type="radio"]):focus,
 .settlement-form select:focus {
   border-color: var(--settlement-blue);
   outline: 0;
@@ -1160,7 +1160,7 @@
 .settlement-operation-form .wide {
   grid-column: 1 / -1;
 }
-.settlement-operation-form input,
+.settlement-operation-form input:not([type="checkbox"]):not([type="radio"]),
 .settlement-operation-form select,
 .settlement-operation-form textarea,
 .settlement-review-reason textarea {
@@ -1174,7 +1174,7 @@
   background: var(--surface-card, #fff);
   resize: vertical;
 }
-.settlement-operation-form input:focus,
+.settlement-operation-form input:not([type="checkbox"]):not([type="radio"]):focus,
 .settlement-operation-form select:focus,
 .settlement-operation-form textarea:focus,
 .settlement-review-reason textarea:focus {

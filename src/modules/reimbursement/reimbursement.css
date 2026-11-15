@@ -344,7 +344,7 @@
   font-weight: 500;
 }
 
-.expense-panel input,
+.expense-panel input:not([type="checkbox"]):not([type="radio"]),
 .expense-panel select,
 .expense-panel textarea,
 .expense-actions > input,
@@ -362,7 +362,7 @@
     box-shadow var(--duration-fast, 140ms) var(--ease-out);
 }
 
-.expense-panel input:hover,
+.expense-panel input:not([type="checkbox"]):not([type="radio"]):hover,
 .expense-panel select:hover,
 .expense-panel textarea:hover,
 .expense-actions > input:hover,
@@ -370,7 +370,7 @@
   border-color: var(--exp-accent-border);
 }
 
-.expense-panel input:focus,
+.expense-panel input:not([type="checkbox"]):not([type="radio"]):focus,
 .expense-panel select:focus,
 .expense-panel textarea:focus,
 .expense-actions > input:focus,
@@ -380,7 +380,7 @@
   box-shadow: var(--exp-focus);
 }
 
-.expense-panel input[readonly],
+.expense-panel input:not([type="checkbox"]):not([type="radio"])[readonly],
 .expense-panel textarea[readonly] {
   background: var(--exp-inset);
   color: var(--exp-ink-soft);

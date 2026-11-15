@@ -856,7 +856,7 @@
   grid-column: 1 / -1;
 }
 
-.console-form-item input,
+.console-form-item input:not([type="checkbox"]):not([type="radio"]),
 .console-form-item select,
 .console-form-item textarea,
 .console-number-input {
@@ -875,7 +875,7 @@
   line-height: 1.6;
 }
 
-.console-form-item input:focus,
+.console-form-item input:not([type="checkbox"]):not([type="radio"]):focus,
 .console-form-item select:focus,
 .console-form-item textarea:focus,
 .console-number-input:focus {

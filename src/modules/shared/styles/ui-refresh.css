@@ -350,6 +350,25 @@ body {
   background: var(--ui-primary);
 }
 
+/* Native checkbox/radio：grid/flex 表单标签不能把它们拉伸成整行。
+   只覆盖明确的表单容器；CRM 自定义 switch 等不在这些容器内，避免改写开关尺寸。 */
+:root body :is(
+  .console-form-item, .settlement-form, .settlement-operation-form, .da-modal,
+  .pm-form, .contract-form-grid, .login-target-dialog, .so-policy-grid,
+  .expense-panel, .filing-field, .crm-opportunity-check-list, .crm-check-item
+) :is(input[type="checkbox"], input[type="radio"]) {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  min-height: 0;
+  flex: 0 0 auto;
+  align-self: flex-start;
+  justify-self: start;
+  padding: 0;
+  margin: 0;
+  accent-color: var(--ui-primary);
+}
+
 /* Tag / Badge：Ant Tag 的 4px 圆角与语义底色。 */
 :root :is(.contract-badge, .settlement-badge, .console-badge, .crm-badge, .pm-badge, .da-badge, .expense-badge) {
   padding: 1px 8px;

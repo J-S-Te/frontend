@@ -35,10 +35,10 @@
 }
 .portal-card h2 { margin: 0 0 14px; color: var(--text, #0f172a); font-size: 16px; font-weight: 600; }
 .portal-card label { display: grid; gap: 7px; margin: 13px 0; color: var(--secondary, #475569); font-size: 13px; }
-.portal-card input,
+.portal-card input:not([type="checkbox"]):not([type="radio"]),
 .portal-card select,
 .portal-card textarea,
-.filing-field input,
+.filing-field input:not([type="checkbox"]):not([type="radio"]),
 .filing-field select,
 .filing-field textarea {
   box-sizing: border-box;
@@ -55,10 +55,10 @@
 }
 .portal-card textarea,
 .filing-field textarea { min-height: 90px; resize: vertical; line-height: 1.6; }
-.portal-card input:focus,
+.portal-card input:not([type="checkbox"]):not([type="radio"]):focus,
 .portal-card select:focus,
 .portal-card textarea:focus,
-.filing-field input:focus,
+.filing-field input:not([type="checkbox"]):not([type="radio"]):focus,
 .filing-field select:focus,
 .filing-field textarea:focus {
   border-color: var(--p, #2563eb);
