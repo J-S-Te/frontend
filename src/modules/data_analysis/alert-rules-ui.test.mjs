@@ -25,8 +25,10 @@ function harness({ permissions = ['alert.manage'], get = async () => [existing()
     putAlertRules: async (payload) => { calls.put.push(payload); return put ? put(payload) : payload },
     deleteAlertRule: async (id) => { calls.remove.push(id); if (remove) await remove(id) },
     previewAlertRule: async (payload) => { calls.preview.push(payload); return preview ? preview(payload) : { matched_count: 0, sample: [], limited: false } },
+    getAlertRuleScopeOptions: async () => ({ owner_org_ids: ['org-a', 'org-b'], customer_types: ['企业', '政府'], currencies: ['CNY', 'USD'] }),
+    getAlertRuleExecutions: async () => [],
   })
-  vm.runInContext(`${script}\nglobalThis.ui = { rules, loading, error, saving, toast, editing, draft, canWrite, canCreate, load, toggleRule, openEditor, closeEditor, saveEditor, removeRule, setDraftThresholdDays, previewDraft, previewResult, previewError, previewBusy, scopeOwnerOrgIDs, scopeCustomerTypes, scopeAmountMinYuan, scopeAmountMaxYuan }`, context)
+  vm.runInContext(`${script}\nglobalThis.ui = { rules, loading, error, saving, toast, editing, draft, canWrite, canCreate, load, toggleRule, openEditor, closeEditor, saveEditor, removeRule, setDraftThresholdDays, previewDraft, previewResult, previewError, previewBusy, scopeOwnerOrgIDs, scopeCustomerTypes, scopeCurrencies, scopeAmountMinYuan, scopeAmountMaxYuan }`, context)
   return { ui: context.ui, calls }
 }
 
@@ -252,15 +254,16 @@ test('规则范围会序列化为分单位 JSON，并在保存前展示命中预
   await ui.load()
   ui.openEditor()
   ui.setDraftThresholdDays(30)
-  ui.scopeOwnerOrgIDs.value = ' org-a, org-b, org-a '
-  ui.scopeCustomerTypes.value = '企业'
+  ui.scopeOwnerOrgIDs.value = ['org-a', 'org-b', 'org-a']
+  ui.scopeCustomerTypes.value = ['企业']
+  ui.scopeCurrencies.value = ['CNY']
   ui.scopeAmountMinYuan.value = '100.50'
   ui.scopeAmountMaxYuan.value = '2000'
   ui.draft.value.effective_from = '2026-12-01'
   ui.draft.value.effective_to = '2027-01-31'
   await ui.previewDraft()
   assert.equal(calls.preview[0].days, 30)
-  assert.equal(calls.preview[0].scope_json, JSON.stringify({ owner_org_ids: ['org-a', 'org-b'], customer_types: ['企业'], amount_min_minor: 10050, amount_max_minor: 200000 }))
+  assert.equal(calls.preview[0].scope_json, JSON.stringify({ owner_org_ids: ['org-a', 'org-b'], customer_types: ['企业'], currencies: ['CNY'], amount_min_minor: 10050, amount_max_minor: 200000 }))
   assert.equal(ui.previewResult.value.matched_count, 2)
   await ui.saveEditor()
   assert.equal(calls.put[0][0].scope_json, calls.preview[0].scope_json)
