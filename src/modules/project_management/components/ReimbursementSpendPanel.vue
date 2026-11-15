@@ -15,6 +15,8 @@ const compiled = frontendModules.some((module) => module.code === 'reimbursement
 const canCreate = computed(() => compiled && !!props.projectId && ['报告编制', '已完成'].includes(props.projectStatus))
 
 const participants = ref([])
+const implementationParticipants = ref([])
+const implementationCursor = ref('')
 const participantCursor = ref('')
 const participantError = ref('')
 const participantNotice = ref('')
@@ -35,6 +37,23 @@ let personnelSequence = 0
 
 const today = todayBusinessDate()
 const activeExceptions = computed(() => participants.value.filter((person) => person.status === 'ACTIVE'))
+
+// 用途：把实施人员自动资格与项目例外合并成一张可核对的资格表。
+// 自动资格来自服务端 implementation_participants，不要求人工再次登记。
+const eligibilityRows = computed(() => {
+  const rows = new Map()
+  for (const person of implementationParticipants.value || []) {
+    const id = String(person?.subject_id || '').trim()
+    if (!id) continue
+    rows.set(id, { ...person, subject_id: id, display_name: person.display_name || personnelNames.value[person.subject_id] || id, sourceLabel: '实施计划', explicit: false })
+  }
+  for (const person of participants.value || []) {
+    const id = String(person?.subject_id || '').trim()
+    if (!id) continue
+    rows.set(id, { ...person, subject_id: id, display_name: person.display_name || personnelNames.value[person.subject_id] || id, sourceLabel: '项目例外', explicit: true })
+  }
+  return [...rows.values()]
+})
 
 function defaultUntilDate() {
   return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai' }).format(new Date(Date.now() + 365 * 86400000))
@@ -68,21 +87,36 @@ function openReimbursement(create = false, claimID = '') {
     query: { ...(props.projectId ? { project_id: props.projectId } : {}), ...(create ? { create: '1' } : {}), ...(claimID ? { claim_id: claimID } : {}) } })
 }
 
-// 用途：只读取例外人员名单；自动资格由项目角色/实施计划判定，不在此重复拉取。
-async function loadParticipants(next = false) {
+// 用途：读取项目例外和实施人员自动资格，分别保留各自分页。
+// 参数：next 为例外翻页，implementationNext 为自动资格翻页。
+// 返回值：无；权限撤销或会话切换后迟到的旧响应不写回。
+async function loadParticipants(next = false, implementationNext = false) {
   if (!props.projectId || !canManage.value) return
   const ticket = ++participantSequence
   const project = props.projectId
   participantBusy.value = true
   participantError.value = ''
   try {
-    const result = await getProjectExpenseParticipants(project, next ? participantCursor.value : '')
+    const result = await getProjectExpenseParticipants(project,
+      next ? participantCursor.value : '', implementationNext ? implementationCursor.value : '')
     if (ticket !== participantSequence || project !== props.projectId) return
     if (!Array.isArray(result.items)) throw new Error('例外名单响应不完整')
-    participants.value = next ? [...participants.value, ...result.items] : result.items
-    participantCursor.value = result.items.length === 20 ? result.items.at(-1).subject_id : ''
+    if (!implementationNext) {
+      participants.value = next ? [...participants.value, ...result.items] : result.items
+      participantCursor.value = result.items.length === 20 ? result.items.at(-1).subject_id : ''
+    }
+    const page = result.implementation_participants
+    if (!Array.isArray(page?.items)) throw new Error('项目服务未返回实施人员默认资格，请确认服务版本后重试')
+    implementationParticipants.value = implementationNext
+      ? [...implementationParticipants.value, ...page.items] : page.items
+    implementationCursor.value = page.next_cursor || ''
+    const names = { ...personnelNames.value }
+    for (const person of page.items) {
+      if (person?.subject_id && person.display_name) names[person.subject_id] = person.display_name
+    }
+    personnelNames.value = names
   } catch (cause) {
-    if (ticket === participantSequence) participantError.value = cause.message || '例外名单暂不可用'
+    if (ticket === participantSequence) participantError.value = cause.message || '参与名单暂不可用'
   } finally { if (ticket === participantSequence) participantBusy.value = false }
 }
 
@@ -165,6 +199,8 @@ watch(() => [props.projectId, props.session?.tenant_id, props.session?.user_id,
   cursor.value = ''
   error.value = ''
   participants.value = []
+  implementationParticipants.value = []
+  implementationCursor.value = ''
   participantCursor.value = ''
   participantError.value = ''
   participantNotice.value = ''
@@ -237,7 +273,15 @@ onBeforeUnmount(() => {
           <button class="pm-button" @click="toggleAdd">{{ showAdd ? '收起例外' : '添加例外' }}</button>
         </div>
       </div>
-      <p class="pm-expense-eligibility__summary">当前例外 {{ activeExceptions.length }} 人；自动资格不在此重复展示。</p>
+      <p class="pm-expense-eligibility__summary">当前例外 {{ activeExceptions.length }} 人；实施人员自动资格 {{ implementationParticipants.length }} 人，二者合并展示但不重复写入。</p>
+      <div v-if="implementationParticipants.length" class="pm-expense-defaults">
+        <h4>实施人员自动资格</h4>
+        <p>由服务端实施计划和项目角色自动判定，不需要人工再次登记；打开面板不会拉取全员目录。</p>
+        <ul>
+          <li v-for="person in implementationParticipants" :key="person.subject_id">{{ person.display_name || personnelNames[person.subject_id] || person.subject_id }}<small v-if="person.service_item_id"> · 服务项 {{ person.service_item_id }}</small></li>
+        </ul>
+        <button v-if="implementationCursor" class="pm-button" :disabled="participantBusy" @click="loadParticipants(false, true)">更多自动资格</button>
+      </div>
       <p v-if="participantError" role="alert">{{ participantError }}</p>
       <p v-if="participantNotice" role="status">{{ participantNotice }}</p>
       <div class="pm-table-scroll">
@@ -285,7 +329,7 @@ onBeforeUnmount(() => {
 .pm-expense-eligibility{margin-top:28px;padding-top:20px;border-top:1px solid var(--pm-border)}
 .pm-expense-eligibility__head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
 .pm-expense-eligibility h3{margin:0 0 6px}
-.pm-expense-eligibility__summary{color:var(--pm-muted);margin:10px 0 12px}
+.pm-expense-eligibility__summary{color:var(--pm-muted);margin:10px 0 12px}.pm-expense-defaults{margin:10px 0 16px;padding:12px;border:1px solid var(--pm-border);border-radius:8px;background:var(--pm-surface,#f8fafc)}.pm-expense-defaults h4{margin:0 0 6px}.pm-expense-defaults p{margin:0 0 8px;color:var(--pm-muted)}.pm-expense-defaults ul{margin:0;padding-inline-start:18px}
 .pm-expense-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;align-items:end;margin-top:14px}
 .pm-expense-form label{display:grid;gap:6px}
 </style>
