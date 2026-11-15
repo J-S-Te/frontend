@@ -2503,3 +2503,66 @@
   background: var(--pm-sidebar-hover);
   border-top-color: var(--sidebar-border);
 }
+
+
+/* 18.15 报告状态页：顶部阶段链 + 左侧审核记录 + 右侧文件/更正操作，避免两列内容被通用表单网格随机分栏。 */
+.pm-report-workspace {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(300px, .85fr);
+  gap: var(--pm-sp-4);
+  align-items: start;
+  min-width: 0;
+}
+.pm-report-workspace > .pm-stepper-panel { grid-column: 1 / -1; grid-row: 1; margin: 0; }
+.pm-report-workspace > .pm-metric-review { grid-column: 1; grid-row: 2 / span 5; margin: 0; min-width: 0; height: 100%; }
+.pm-report-workspace > .pm-report-phase { display: none; }
+.pm-report-workspace > .pm-report-form {
+  grid-column: 2;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pm-sp-3);
+  min-width: 0;
+  padding: var(--pm-sp-4);
+  border: 1px solid var(--pm-line);
+  border-radius: var(--pm-r-md);
+  background: var(--pm-card);
+}
+.pm-report-workspace > .pm-report-form label { display: flex; flex-direction: column; gap: 7px; }
+.pm-report-workspace > .pm-report-form textarea { width: 100%; min-height: 80px; }
+.pm-report-workspace > .pm-report-form > button { width: auto; align-self: flex-start; }
+.pm-report-workspace > .pm-approval-panel,
+.pm-report-workspace > .pm-report-side-empty { grid-column: 2; min-width: 0; padding: var(--pm-sp-4); }
+.pm-report-workspace > .pm-approval-panel header { margin-bottom: var(--pm-sp-3); }
+.pm-report-workspace > .pm-form-hint { grid-column: 2; margin: 0; }
+.pm-report-side-empty { display: grid; gap: 6px; color: var(--pm-muted); }
+.pm-report-side-empty b { color: var(--pm-ink); font-size: var(--pm-fs-label); }
+.pm-report-side-empty span { font-size: var(--pm-fs-hint); line-height: 1.55; }
+
+.pm-report-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--pm-sp-2);
+  margin-left: auto;
+}
+.pm-report-side-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--pm-sp-2);
+  padding-bottom: var(--pm-sp-2);
+  border-bottom: 1px solid var(--pm-line);
+}
+.pm-report-side-head b { color: var(--pm-ink); font-size: var(--pm-fs-label); }
+.pm-report-side-head span { color: var(--pm-muted); font-size: var(--pm-fs-hint); }
+@media (max-width: 1100px) {
+  .pm-report-workspace { grid-template-columns: minmax(0, 1fr); }
+  .pm-report-workspace > .pm-metric-review { grid-column: 1; grid-row: auto; }
+  .pm-report-workspace > .pm-report-form,
+  .pm-report-workspace > .pm-approval-panel,
+  .pm-report-workspace > .pm-report-side-empty,
+  .pm-report-workspace > .pm-form-hint { grid-column: 1; }
+}

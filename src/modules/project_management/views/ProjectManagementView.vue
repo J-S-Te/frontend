@@ -4265,6 +4265,7 @@ onBeforeUnmount(() => {
               </template>
               <template v-else-if="activeSection === 'exceptions'"><section v-if="exceptionFlow.length" class="pm-panel pm-approval-panel"><header><div><p class="pm-panel-kicker">复核流程</p><h2>异常处置流程 · {{ selectedDeviation?.payload?.deviation_id || '—' }}</h2></div><span>{{ pendingDeviations.length }} 项待评审</span></header><div class="pm-approval"><template v-for="(step, index) in exceptionFlow" :key="step.title"><div class="pm-approval-step" :class="step.state"><span class="pm-approval-dot">{{ step.state === 'done' ? '✓' : step.state === 'doing' ? '!' : '○' }}</span><div class="pm-approval-body"><b>{{ step.title }}</b><small>{{ step.when }}</small><em>{{ step.note }}</em></div></div><span v-if="index < exceptionFlow.length - 1" class="pm-approval-arrow">→</span></template></div></section><label><span>偏离描述</span><textarea v-model.trim="operationForm.deviationDescription" rows="3" placeholder="选择服务项后填写偏离内容" maxlength="1000"></textarea></label><label><span>偏离证据</span><input type="file" accept="application/pdf,image/png,image/jpeg" @change="operationForm.deviationEvidenceFile = $event.target.files?.[0] || null" /></label><div class="pm-field"><span>严重度</span><SearchableSelect v-model="operationForm.severity" :options="deviationSeverityOptions" placeholder="请选择严重度" search-placeholder="搜索严重度" aria-label="选择偏离严重度" /></div><button v-if="canReportDeviation" class="pm-button primary" :disabled="saving" @click="runOperation('exception-report')">上报偏离</button><label><span>评审偏离 ID</span><input v-model.trim="operationForm.deviationID" placeholder="DV-..."  maxlength="64"/></label><div class="pm-field"><span>评审决定</span><SearchableSelect v-model="operationForm.decision" :options="deviationDecisionOptions" placeholder="请选择评审决定" search-placeholder="搜索放行、重测或终止" aria-label="选择评审决定" /></div><label><span>{{ operationForm.decision === 'TERMINATE' ? '终止原因 *' : '评审说明' }}</span><textarea v-model.trim="operationForm.comment" rows="3" :required="operationForm.decision === 'TERMINATE'" placeholder="说明放行、重测或终止依据" maxlength="1000"></textarea></label><button v-if="canReviewDeviation" class="pm-button" :disabled="saving" @click="runOperation('exception-review')">提交偏离评审</button></template>
               <template v-else-if="activeSection === 'reports'">
+                <div class="pm-report-workspace">
                 <ReportReviewFactsPanel
                   v-if="selectedServiceItem"
                   :key="selectedServiceItem.id"
@@ -4273,13 +4274,41 @@ onBeforeUnmount(() => {
                   :manual-main-report="true"
                   @changed="refreshAfterWrite"
                 />
-                <section class="pm-panel pm-stepper-panel"><header><div><p class="pm-panel-kicker">报告阶段</p><h2>报告阶段链</h2></div><span v-if="selectedServiceItem" class="pm-op-current">当前：<span class="pm-badge" :class="statusTone(reportStatusLabel[selectedServiceItem.report_status] || '未开始')">{{ reportStatusLabel[selectedServiceItem.report_status] || '未开始' }}</span></span></header><div class="pm-stepper"><template v-for="(step, index) in reportSteps" :key="step.phase"><div class="pm-step" :class="step.state"><span class="pm-step-num">{{ step.state === 'done' ? '✓' : index + 1 }}</span><span>{{ step.label }}</span></div><div v-if="index < reportSteps.length - 1" class="pm-step-line"></div></template></div></section>
+                <section class="pm-panel pm-stepper-panel">
+                  <header>
+                    <div>
+                      <p class="pm-panel-kicker">报告阶段</p>
+                      <h2>报告阶段链</h2>
+                    </div>
+                    <div class="pm-report-hero-actions">
+                      <span v-if="selectedServiceItem" class="pm-op-current">当前：<span class="pm-badge" :class="statusTone(reportStatusLabel[selectedServiceItem.report_status] || '未开始')">{{ reportStatusLabel[selectedServiceItem.report_status] || '未开始' }}</span></span>
+                      <button
+                        v-if="selectedServiceItem && reportPhaseNext[selectedServiceItem.report_status] && canAdvanceReportPhase(reportPhaseNext[selectedServiceItem.report_status])"
+                        class="pm-button primary" :disabled="saving" @click="runOperation('report-next')"
+                      >{{ reportPhaseAction[reportPhaseNext[selectedServiceItem.report_status]] }}</button>
+                      <button
+                        v-if="selectedServiceItem?.status === '现场实施完成' && selectedServiceItem.report_status === 'NONE' && canAdvanceReportPhase('COMPILING')"
+                        type="button" class="pm-button" :disabled="saving" @click="runOperation('report-skip-rectifying')"
+                      >跳过整改，开始编制</button>
+                    </div>
+                  </header>
+                  <div class="pm-stepper">
+                    <template v-for="(step, index) in reportSteps" :key="step.phase">
+                      <div class="pm-step" :class="step.state">
+                        <span class="pm-step-num">{{ step.state === 'done' ? '✓' : index + 1 }}</span>
+                        <span>{{ step.label }}</span>
+                      </div>
+                      <div v-if="index < reportSteps.length - 1" class="pm-step-line" />
+                    </template>
+                  </div>
+                </section>
                 <div class="pm-report-phase" v-if="selectedServiceItem?.report_status"><span>当前报告阶段</span><b class="pm-badge" :class="statusTone(reportStatusLabel[selectedServiceItem.report_status] || selectedServiceItem.report_status)">{{ reportStatusLabel[selectedServiceItem.report_status] || selectedServiceItem.report_status }}</b></div>
                 <div
                   v-if="reportFileUploadEnabled && selectedServiceItem?.report_status === 'COMPILING'
                     && permissionSet.has('project.report.prepare')"
-                  class="pm-form"
+                  class="pm-form pm-report-form"
                 >
+                  <div class="pm-report-side-head"><b>报告文件</b><span>上传并登记报告摘要</span></div>
                   <label>
                     <span>R{{ Number(selectedServiceItem.report_revision) || 0 }} 报告文件 <em>*</em></span>
                     <input type="file" accept="application/pdf"
@@ -4292,7 +4321,7 @@ onBeforeUnmount(() => {
                 </div>
                 <section v-if="selectedReportCorrectionRequests.length" class="pm-panel pm-approval-panel">
                   <header><div><p class="pm-panel-kicker">报告更正</p><h2>待处理更正申请</h2></div><span>{{ selectedReportCorrectionRequests.length }} 项</span></header>
-                  <div v-for="request in selectedReportCorrectionRequests" :key="request.id" class="pm-form">
+                  <div v-for="request in selectedReportCorrectionRequests" :key="request.id" class="pm-form pm-report-form">
                     <p class="pm-form-hint">R{{ Number(request.payload?.old_revision) || 0 }} · {{ request.payload?.reason }} · 申请人：{{ personLabel(request.actor_user_id, '未知') }}</p>
                     <template v-if="canApproveReportCorrection && request.actor_user_id !== session?.user_id">
                       <label><span>审批意见 <em>*</em></span><textarea v-model.trim="operationForm.reportCorrectionComment" rows="2" placeholder="填写批准或驳回意见" maxlength="1000"></textarea></label>
@@ -4301,23 +4330,20 @@ onBeforeUnmount(() => {
                     <p v-else class="pm-form-hint">更正申请正在等待其他有审批权限的人员处理。</p>
                   </div>
                 </section>
-                <div v-if="canSubmitReportCorrection" class="pm-form">
+                <div v-if="canSubmitReportCorrection" class="pm-form pm-report-form">
+                  <div class="pm-report-side-head"><b>报告更正</b><span>作废旧版本并生成待整改新版本</span></div>
                   <label><span>报告更正原因 <em>*</em></span><textarea v-model.trim="operationForm.reportCorrectionReason" rows="3" placeholder="说明已签发或已归档报告需要更正的内容" maxlength="1000"></textarea><small>审批通过后旧版本作废并生成下一报告版本，需重新完成编制、审核、签发和归档；整改按需选择。</small></label>
                   <button type="button" class="pm-button" :disabled="saving" @click="submitReportCorrection">申请报告更正</button>
                 </div>
+                <div v-if="!selectedReportCorrectionRequests.length && !canSubmitReportCorrection
+                  && !(reportFileUploadEnabled && selectedServiceItem?.report_status === 'COMPILING' && permissionSet.has('project.report.prepare'))"
+                  class="pm-panel pm-report-side-empty">
+                  <b>当前无需报告文件或更正操作</b>
+                  <span>审核记录在左侧，阶段变更在顶部；有需要时这里会出现上传或更正入口。</span>
+                </div>
                 <p class="pm-form-hint">主报告阶段暂由本服务项的项目经理按顺序手动流转。</p>
-                <button
-                  v-if="selectedServiceItem && reportPhaseNext[selectedServiceItem.report_status]
-                    && canAdvanceReportPhase(reportPhaseNext[selectedServiceItem.report_status])"
-                  class="pm-button primary" :disabled="saving" @click="runOperation('report-next')"
-                >{{ reportPhaseAction[reportPhaseNext[selectedServiceItem.report_status]] }}</button>
-                <button
-                  v-if="selectedServiceItem?.status === '现场实施完成' && selectedServiceItem.report_status === 'NONE' && canAdvanceReportPhase('COMPILING')"
-                  type="button"
-                  class="pm-button"
-                  :disabled="saving"
-                  @click="runOperation('report-skip-rectifying')"
-                >跳过整改，开始编制</button>
+
+                </div>
               </template>
             </div><div v-else class="pm-empty-mini">请先选择服务项</div>
           </section>
