@@ -18,6 +18,7 @@ export function hydrateContractDraft(contract) {
     ...(contract.local_counterparty_id ? { local_counterparty_id: value('local_counterparty_id') } : {}),
     ...(contract.counterparty_version ? { counterparty_version: contract.counterparty_version } : {}),
     ...(contract.category_source ? { category_source: value('category_source') } : {}),
+    ...(contract.pricing ? { pricing: JSON.parse(JSON.stringify(contract.pricing)) } : {}),
     title: value('title'), contract_type: value('contract_type'),
     opportunity_id: value('opportunity_id'), opportunity_name: value('opportunity_name'),
     customer_id: contract.crm_customer_id ? String(contract.crm_customer_id) : '',

@@ -2,6 +2,8 @@
 import { loginUsername } from "@/modules/shared/loginUsername.mjs"
 import { agingDisplayRows } from "../utils/agingDisplay.js";
 import { allowedSections, permissionCheck, canLoad as canLoadKey } from "../utils/capabilities.js";
+import SettlementRecognitionPanel from "../components/SettlementRecognitionPanel.vue";
+import { createRecognitionAPI } from "../api/recognition.js";
 import SettlementRolePanel from "../components/SettlementRolePanel.vue";
 import OperationToast from '@/modules/shared/components/OperationToast.vue'
 import LoadingState from '@/modules/shared/components/LoadingState.vue'
@@ -64,6 +66,7 @@ import {
   createReceipt,
   createReceiptAllocation,
   downloadTaxInvoiceDocument,
+  downloadRecognitionEvidence,
   getDashboard,
   getAgingSummary,
   getDunningCoverage,
@@ -102,6 +105,7 @@ const route = useRoute(),
 // 侧栏在 ≤820px 收敛为抽屉：菜单按钮/遮罩与平台控制台共用 console.css 的同一套开合状态。
 const mobileMenuOpen = ref(false);
 const settlementSession = ref({});
+const recognitionAPI = createRecognitionAPI(request, downloadRecognitionEvidence);
 const nativeFinancialAPI = createNativeFinancialAPI(request);
 const sessionDisplayName = computed(() => loginUsername(settlementSession.value));
 const sessionAccount = computed(() => "当前登录账号");
@@ -135,6 +139,7 @@ const sections = [
   ["tasks", "我的待办", "organization"],
   ["collaboration", "项目协作", "organization"],
   ["finance", "差异与会计凭证", "save"],
+  ["recognition", "收入与成本确认", "save"],
   ["imports", "历史合同财务恢复", "save"],
   ["settings", "结算设置", "reset"],
 ];
@@ -142,7 +147,7 @@ const navigationGroups = [
   { label: "工作台", keys: ["dashboard", "tasks"] },
   {
     label: "结算管理",
-    keys: ["receivables", "invoices", "receipts", "allocations", "dunning", "collaboration", "finance", "imports", "settings"],
+    keys: ["receivables", "invoices", "receipts", "allocations", "dunning", "collaboration", "finance", "recognition", "imports", "settings"],
   },
 ];
 const navigationSections = computed(() =>
@@ -475,6 +480,7 @@ const {
   formatSettlementError,
   uploadTaxInvoiceDocument,
   downloadTaxInvoiceDocument,
+  downloadRecognitionEvidence,
   requestTaxInvoiceRedFlush,
   approveInvoiceRedFlush,
   rejectInvoiceRedFlush,
@@ -999,6 +1005,7 @@ watch(invoiceDetailID, load);
         <ErrorState v-if="error" :error="error" title="结算数据读取失败" @retry="load" />
         <LoadingState v-if="loading" title="正在读取结算数据…" />
         <template v-else-if="active">
+          <SettlementRecognitionPanel v-if="active === 'recognition' && can('settlement.recognition.read')" :api="recognitionAPI" :can="can" :session="settlementSession" :initial-claim="String(route.query.claim_id || '')" />
           <SettlementNativeFinancialPanel
             v-if="active === 'receivables' && can('settlement.receivable.read')"
             :api="nativeFinancialAPI"
@@ -1232,6 +1239,6 @@ watch(invoiceDetailID, load);
 </template>
 
 <style scoped>
-.settlement-topbar-notifications{position:relative;display:inline-flex}
-.settlement-notification-popover{position:absolute;right:0;top:calc(100% + 8px);width:420px;max-width:calc(100vw - 32px);padding:12px;border:1px solid var(--border,#e2e8f0);border-radius:12px;background:var(--bg,#fff);color:inherit;box-shadow:0 12px 32px rgba(15,23,42,.18);z-index:60}
+.settlement-topbar-notifications{--settlement-popover-z:60;position:relative;display:inline-flex}
+.settlement-notification-popover{position:absolute;right:0;top:calc(100% + 8px);width:420px;max-width:calc(100vw - 32px);padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--bg);color:inherit;box-shadow:0 12px 32px rgba(15,23,42,.18);z-index:var(--settlement-popover-z)}
 </style>

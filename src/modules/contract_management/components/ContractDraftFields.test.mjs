@@ -62,6 +62,7 @@ async function fieldsHarness(overrides = {}) {
   const deps = {
     _defineComponent: Vue.defineComponent,
     ConsoleIcon: { render() { return null } },
+    ContractPricingFields: { props: ['form', 'disabled'], render() { return null } },
     LocalContractSourcePicker: { props: ['modelValue', 'capabilities', 'disabled'], emits: ['update:modelValue'], render() { return null } },
     isContractAmountField,
     isSystemContractNumberField,

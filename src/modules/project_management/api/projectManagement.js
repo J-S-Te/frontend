@@ -1359,6 +1359,30 @@ export function postMetricReportReview(itemID, action, payload) {
   return request(`/service-items/${encodeURIComponent(itemID)}/report-reviews/${action}`, { method: 'POST', body: JSON.stringify(payload) })
 }
 
+// 用途：分页读取真实资源容量或实际用量。
+// 参数：kind 为capacities/usages，page 为从1开始页码。
+// 返回值：最多50条服务端已过滤的记录。
+export function getMetricResources(kind, page = 1) {
+  if (!['capacities', 'usages'].includes(kind)) throw new Error('资源事实类型无效')
+  return request(`/metric-facts/${kind}?page=${page}`)
+}
+
+// 用途：发布明确容量或登记实际用量草稿。
+// 参数：kind 为capacities/usages，payload 为明确业务字段及幂等键。
+// 返回值：冻结事实或真实错误。
+export function postMetricResource(kind, payload) {
+  if (!['capacities', 'usages'].includes(kind)) throw new Error('资源事实类型无效')
+  return request(`/metric-facts/${kind}`, { method: 'POST', body: JSON.stringify(payload) })
+}
+
+// 用途：提交、独立确认或申请取消已登记用量。
+// 参数：id 为真实用量，action 为submit/decision/cancel，payload 为原版本命令。
+// 返回值：新状态或冲突错误，不自动重建幂等键。
+export function postMetricUsageAction(id, action, payload) {
+  if (!['submit', 'decision', 'cancel'].includes(action)) throw new Error('用量动作无效')
+  return request(`/metric-facts/usages/${encodeURIComponent(id)}/${action}`, { method: 'POST', body: JSON.stringify(payload) })
+}
+
 // 用途：读取主报告与专项当前版本最新轮次，与历史分页独立。
 // 参数：itemID 为已授权父服务项。
 // 返回值：最多两条真实当前轮次或读取错误。
