@@ -1307,8 +1307,11 @@ export function expenseParticipantPayload(form, revoke = false) {
 // 用途：读取当前项目显式费用参与资格，仅由精确管理能力触发。
 // 参数：projectID 为项目标识，cursor 为上一页人员主体。
 // 返回值：项目范围内的参与资格页或真实错误。
-export function getProjectExpenseParticipants(projectID, cursor = '') {
-  const query = new URLSearchParams({ page_size: '20', ...(cursor ? { cursor } : {}) })
+export function getProjectExpenseParticipants(projectID, cursor = '', implementationCursor = '') {
+  const query = new URLSearchParams({
+    page_size: '20', ...(cursor ? { cursor } : {}),
+    ...(implementationCursor ? { implementation_cursor: implementationCursor } : {}),
+  })
   return request(`/projects/${encodeURIComponent(projectID)}/expense-participants?${query}`)
 }
 
