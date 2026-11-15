@@ -1336,3 +1336,13 @@
 .console-page--platform .audit-data-table .console-entity-meta {
   max-width: none;
 }
+
+/* 审计数据类型切换：租户审计与全局安全事件物理隔离，不混在同一张表。 */
+.console-page--platform .audit-mode-switch { display: inline-flex; gap: 2px; border-bottom: 1px solid var(--border); }
+.console-page--platform .audit-mode-switch button { padding: 9px 14px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--text-muted); font-size: var(--fs-sm); font-weight: 600; cursor: pointer; }
+.console-page--platform .audit-mode-switch button:hover { color: var(--text); }
+.console-page--platform .audit-mode-switch button.active { border-bottom-color: var(--primary); color: var(--primary); }
+.console-page--platform .audit-security-panel { display: grid; gap: 14px; }
+
+.console-page--platform .audit-coverage-card { display: grid; gap: 10px; padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-card); }
+.console-page--platform .audit-coverage-card .audit-health-head { padding: 0; border: 0; }
