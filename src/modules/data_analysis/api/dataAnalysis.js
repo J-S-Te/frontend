@@ -432,6 +432,15 @@ export function putAlertRules(payload) {
 }
 
 /**
+ * previewAlertRule 只读计算合同到期规则当前命中数和样例，不保存规则。
+ * @param {{days:number, scope_json?:string}} payload 到期窗口和适用范围。
+ * @returns {Promise<{matched_count:number, sample:Array<object>, limited:boolean}>}
+ */
+export function previewAlertRule(payload) {
+  return request('/alert-rules/preview', { method: 'POST', body: JSON.stringify(payload) })
+}
+
+/**
  * deleteAlertRule 删除没有历史预警记录的规则。
  * @param {string} id 规则 ID。
  * @returns {Promise<any>} 返回删除结果。

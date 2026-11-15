@@ -9,7 +9,7 @@ import ConsoleIcon from "@/modules/shared/components/ConsoleIcon.vue"
 import EmptyState from "@/modules/shared/components/EmptyState.vue"
 import ErrorState from "@/modules/shared/components/ErrorState.vue"
 import LoadingState from "@/modules/shared/components/LoadingState.vue"
-import { deleteAlertRule, getAlertRules, putAlertRules } from "../api/dataAnalysis"
+import { deleteAlertRule, getAlertRules, previewAlertRule, putAlertRules } from "../api/dataAnalysis"
 import { formatDataAnalysisError } from "../utils/errors.js"
 
 const props = defineProps({ permissions: { type: Array, default: () => [] } })
@@ -24,6 +24,13 @@ const editing = ref(null)
 const draft = ref(null)
 let editorInitialSnapshot = ""
 const keyword = ref("")
+const scopeOwnerOrgIDs = ref("")
+const scopeCustomerTypes = ref("")
+const scopeAmountMinYuan = ref("")
+const scopeAmountMaxYuan = ref("")
+const previewBusy = ref(false)
+const previewError = ref("")
+const previewResult = ref(null)
 let toastTimer = 0
 let loadPending = false
 
@@ -107,19 +114,115 @@ function nextRuleName() {
   return `${base}（${index}）`
 }
 
+
+function splitScopeValues(value) {
+  return [...new Set(String(value || "").split(/[,，\n]/).map((item) => item.trim()).filter(Boolean))]
+}
+
+function parseYuanToMinor(value, label) {
+  if (String(value ?? "").trim() === "") return { value: null, error: "" }
+  const number = Number(value)
+  if (!Number.isFinite(number) || number < 0) return { value: null, error: `${label}必须是非负金额` }
+  return { value: Math.round(number * 100), error: "" }
+}
+
+function buildScopeJSON() {
+  const ownerOrgIDs = splitScopeValues(scopeOwnerOrgIDs.value)
+  const customerTypes = splitScopeValues(scopeCustomerTypes.value)
+  const min = parseYuanToMinor(scopeAmountMinYuan.value, "最低金额")
+  const max = parseYuanToMinor(scopeAmountMaxYuan.value, "最高金额")
+  if (min.error || max.error) return { value: null, error: min.error || max.error }
+  if (min.value !== null && max.value !== null && min.value > max.value) {
+    return { value: null, error: "最低金额不能高于最高金额" }
+  }
+  if (!ownerOrgIDs.length && !customerTypes.length && min.value === null && max.value === null) {
+    return { value: null, error: "" }
+  }
+  return {
+    value: JSON.stringify({
+      owner_org_ids: ownerOrgIDs,
+      customer_types: customerTypes,
+      amount_min_minor: min.value,
+      amount_max_minor: max.value,
+    }),
+    error: "",
+  }
+}
+
+function resetScopeFields(rule) {
+  let scope = {}
+  try { scope = rule?.scope_json ? JSON.parse(rule.scope_json) : {} } catch { scope = {} }
+  scopeOwnerOrgIDs.value = Array.isArray(scope.owner_org_ids) ? scope.owner_org_ids.join(", ") : ""
+  scopeCustomerTypes.value = Array.isArray(scope.customer_types) ? scope.customer_types.join(", ") : ""
+  scopeAmountMinYuan.value = Number.isSafeInteger(scope.amount_min_minor) ? (scope.amount_min_minor / 100).toFixed(2) : ""
+  scopeAmountMaxYuan.value = Number.isSafeInteger(scope.amount_max_minor) ? (scope.amount_max_minor / 100).toFixed(2) : ""
+  previewResult.value = null
+  previewError.value = ""
+}
+
+function ruleScopeSummary(rule) {
+  let scope = {}
+  try { scope = rule?.scope_json ? JSON.parse(rule.scope_json) : {} } catch { scope = {} }
+  const parts = []
+  if (Array.isArray(scope.owner_org_ids) && scope.owner_org_ids.length) parts.push(`组织 ${scope.owner_org_ids.length}`)
+  if (Array.isArray(scope.customer_types) && scope.customer_types.length) parts.push(`客户类型 ${scope.customer_types.length}`)
+  if (Number.isSafeInteger(scope.amount_min_minor) || Number.isSafeInteger(scope.amount_max_minor)) {
+    const min = Number.isSafeInteger(scope.amount_min_minor) ? `¥${(scope.amount_min_minor / 100).toFixed(2)}` : "不限"
+    const max = Number.isSafeInteger(scope.amount_max_minor) ? `¥${(scope.amount_max_minor / 100).toFixed(2)}` : "不限"
+    parts.push(`金额 ${min}–${max}`)
+  }
+  return parts.length ? parts.join(" · ") : "全部普通合同"
+}
+
+function ruleEffectiveSummary(rule) {
+  if (!rule?.effective_from && !rule?.effective_to) return "长期有效"
+  if (rule.effective_from && rule.effective_to) return `${rule.effective_from} 至 ${rule.effective_to}`
+  return rule.effective_from ? `${rule.effective_from} 起` : `至 ${rule.effective_to}`
+}
+
+async function previewDraft() {
+  if (!draft.value || previewBusy.value || saving.value) return
+  const validation = validateDraft()
+  if (validation) { previewError.value = validation; previewResult.value = null; return }
+  const scope = buildScopeJSON()
+  if (scope.error) { previewError.value = scope.error; previewResult.value = null; return }
+  previewBusy.value = true
+  previewError.value = ""
+  previewResult.value = null
+  try {
+    previewResult.value = await previewAlertRule({ days: draftThresholdDays(), scope_json: scope.value })
+  } catch (err) {
+    previewError.value = formatDataAnalysisError(err, { fallback: "命中预览读取失败，请稍后重试。" })
+  } finally {
+    previewBusy.value = false
+  }
+}
+
+
+function editorSnapshot() {
+  return JSON.stringify({
+    draft: draft.value,
+    ownerOrgIDs: scopeOwnerOrgIDs.value,
+    customerTypes: scopeCustomerTypes.value,
+    amountMin: scopeAmountMinYuan.value,
+    amountMax: scopeAmountMaxYuan.value,
+  })
+}
+
 function openEditor(rule = null) {
   if (!canWrite.value || (rule ? !rules.value.includes(rule) : !canCreate.value)) return
   editing.value = rule ? "edit" : "create"
   draft.value = rule
     ? { ...rule, threshold_json: rule.threshold_json || '{"days":30}' }
-    : { rule_code: "CONTRACT_EXPIRY", name: nextRuleName(), source_fct: "dim_contract", severity: "MEDIUM", enabled: false, threshold_json: '{"days":30}' }
-  editorInitialSnapshot = JSON.stringify(draft.value)
+    : { rule_code: "CONTRACT_EXPIRY", name: nextRuleName(), source_fct: "dim_contract", severity: "MEDIUM", enabled: false, threshold_json: '{"days":30}', scope_json: null, effective_from: null, effective_to: null }
+  resetScopeFields(rule)
+  editorInitialSnapshot = editorSnapshot()
 }
 
 async function closeEditor() {
   if (saving.value || !editing.value || confirmDialog.value) return
   const current = draft.value
-  if (editorInitialSnapshot !== JSON.stringify(draft.value)) {
+  if (editorInitialSnapshot !== editorSnapshot()) {
     const discard = await askConfirm({ title: '放弃预警规则编辑？', description: '当前表单有未保存的修改，放弃后不会保留。', confirmText: '放弃修改', cancelText: '继续编辑', danger: true })
     if (!discard || saving.value || draft.value !== current) return
   }
@@ -143,6 +246,9 @@ function validateDraft() {
   try { threshold = JSON.parse(draft.value.threshold_json) } catch { return "阈值必须是 JSON，例如 {\"days\":30}" }
   if (!Number.isInteger(threshold.days) || threshold.days < 1 || threshold.days > 3650) return "合同到期提前天数必须为 1～3650 的整数"
   if (!["LOW", "MEDIUM", "HIGH"].includes(draft.value.severity)) return "请选择有效的严重度"
+  const scope = buildScopeJSON()
+  if (scope.error) return scope.error
+  if (draft.value.effective_from && draft.value.effective_to && draft.value.effective_from > draft.value.effective_to) return "生效开始日期不能晚于结束日期"
   return ""
 }
 
@@ -155,6 +261,11 @@ async function saveEditor() {
     return
   }
   const mode = editing.value
+  const scope = buildScopeJSON()
+  if (scope.error) { showToast(scope.error); return }
+  draft.value.scope_json = scope.value
+  draft.value.effective_from = draft.value.effective_from || null
+  draft.value.effective_to = draft.value.effective_to || null
   saving.value = true
   try {
     const payload = editing.value === "edit"
@@ -217,7 +328,7 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
           <tbody>
             <tr v-for="rule in filteredRules" :key="rule.id">
               <td class="mono"><b>{{ rule.rule_code }}</b></td>
-              <td>{{ rule.name || '—' }}</td>
+              <td>{{ rule.name || '—' }}<small class="alert-rule-summary">{{ ruleScopeSummary(rule) }} · {{ ruleEffectiveSummary(rule) }}</small></td>
               <td>{{ rule.source_fct || '—' }}</td>
               <td><span class="da-badge" :class="String(rule.severity).toUpperCase() === 'HIGH' ? 'high' : String(rule.severity).toUpperCase() === 'MEDIUM' ? 'warning' : 'info'">{{ SEVERITY_LABELS[String(rule.severity).toUpperCase()] || rule.severity }}</span></td>
               <td class="mono"><small>{{ rule.threshold_json || '—' }}</small></td>
@@ -232,14 +343,47 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
     </div>
 
     <div v-if="editing && draft" class="da-modal-backdrop" @click.self="closeEditor">
-      <form class="da-modal" @submit.prevent="saveEditor">
+      <form class="da-modal alert-rule-editor" @submit.prevent="saveEditor">
         <header><div><b>{{ editing === 'create' ? '新建预警规则' : '编辑预警规则' }}</b><span>需要预警管理权限</span></div><button type="button" class="da-icon-button" :disabled="saving" aria-label="关闭" @click="closeEditor">×</button></header>
         <label>规则编码<select v-model="draft.rule_code" disabled><option value="CONTRACT_EXPIRY">CONTRACT_EXPIRY · 合同到期</option></select></label>
         <label>规则名称<input v-model="draft.name" :disabled="!canWrite" maxlength="128" required /></label>
         <label>严重度<select v-model="draft.severity" :disabled="!canWrite"><option value="HIGH">高</option><option value="MEDIUM">中</option><option value="LOW">低</option></select></label>
         <label>提前天数<input :value="draftThresholdDays()" :disabled="!canWrite" type="number" min="1" max="3650" step="1" required @input="setDraftThresholdDays($event.target.value)" /></label>
+        <section class="alert-rule-scope">
+          <div class="alert-rule-scope-head"><b>适用范围</b><span>留空表示全部普通合同</span></div>
+          <div class="alert-rule-form-grid">
+            <label>归属组织 ID<input v-model="scopeOwnerOrgIDs" :disabled="!canWrite" placeholder="多个用逗号分隔" maxlength="2000" /></label>
+            <label>客户类型<input v-model="scopeCustomerTypes" :disabled="!canWrite" placeholder="企业, 政府" maxlength="2000" /></label>
+            <label>最低金额（元）<input v-model="scopeAmountMinYuan" :disabled="!canWrite" type="number" min="0" step="0.01" placeholder="不限" /></label>
+            <label>最高金额（元）<input v-model="scopeAmountMaxYuan" :disabled="!canWrite" type="number" min="0" step="0.01" placeholder="不限" /></label>
+            <label>生效开始<input v-model="draft.effective_from" :disabled="!canWrite" type="date" /></label>
+            <label>生效结束<input v-model="draft.effective_to" :disabled="!canWrite" type="date" /></label>
+          </div>
+          <p class="da-modal-help">组织 ID 与客户类型来自数据看板聚合维度；留空表示不限制。</p>
+        </section>
+        <div class="alert-rule-preview-actions">
+          <button type="button" class="da-button" :disabled="!canWrite || previewBusy" @click="previewDraft">{{ previewBusy ? '预览中…' : '预览命中' }}</button>
+          <span v-if="previewResult" class="alert-rule-preview-count">当前条件预计命中 {{ previewResult.matched_count }} 份合同</span>
+        </div>
+        <p v-if="previewError" class="alert-rule-preview-error" role="alert">{{ previewError }}</p>
+        <div v-if="previewResult" class="alert-rule-preview-result">
+          <p class="da-modal-help">以下为最多 20 条样例，预览不会创建预警。</p>
+          <div v-if="previewResult.sample?.length" class="alert-rule-preview-scroll">
+            <table class="da-table"><thead><tr><th>合同</th><th>归属组织</th><th>客户类型</th><th>金额</th><th>到期日</th></tr></thead><tbody>
+              <tr v-for="item in previewResult.sample" :key="item.contract_id">
+                <td>{{ item.title }}<small>{{ item.contract_id }}</small></td>
+                <td>{{ item.owner_org_id || '—' }}</td>
+                <td>{{ item.customer_type || '—' }}</td>
+                <td>{{ (Number(item.amount_minor || 0) / 100).toFixed(2) }}</td>
+                <td>{{ item.due_date }}</td>
+              </tr>
+            </tbody></table>
+          </div>
+          <p v-else class="da-modal-help">当前条件下没有命中合同。</p>
+          <p v-if="previewResult.limited" class="da-modal-help">仅展示前 20 条，实际命中数高于当前样例数。</p>
+        </div>
         <p v-if="editing === 'create'" class="da-modal-help">新规则默认停用，创建后可通过列表开关启用。</p>
-        <p class="da-modal-help">合同结束日期在当前日期起 1～3650 天内时触发预警，系统会自动保存为标准阈值 JSON。</p>
+        <p class="da-modal-help">合同结束日期在当前日期前后 N 天内时触发预警；适用范围只影响规则命中，不改变合同本身。</p>
         <footer><button type="button" class="da-button" :disabled="saving" @click="closeEditor">取消</button><button type="submit" class="da-button primary" :disabled="!canWrite">{{ saving ? '保存中…' : '确认保存' }}</button></footer>
       </form>
     </div>
@@ -254,3 +398,108 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
     <OperationToast :message="toast" />
   </section>
 </template>
+
+<style scoped>
+.alert-rule-editor {
+  width: min(760px, 100%);
+}
+
+.alert-rule-summary {
+  display: block;
+  margin-top: 3px;
+  color: var(--da-muted);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+.alert-rule-scope {
+  display: grid;
+  gap: 9px;
+  padding: 12px;
+  border: 1px solid var(--da-line);
+  border-radius: 9px;
+  background: var(--da-soft);
+}
+
+.alert-rule-scope-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.alert-rule-scope-head b {
+  color: var(--da-ink);
+  font-size: var(--fs-xs);
+}
+
+.alert-rule-scope-head span {
+  color: var(--da-muted);
+  font-size: var(--fs-xs);
+}
+
+.alert-rule-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px 12px;
+}
+
+.alert-rule-preview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.alert-rule-preview-count {
+  color: var(--da-ink);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+.alert-rule-preview-error {
+  margin: 0;
+  padding: 8px 10px;
+  color: var(--da-red-text);
+  font-size: var(--fs-xs);
+  border: 1px solid var(--danger-border);
+  border-radius: 7px;
+  background: var(--da-red-soft);
+}
+
+.alert-rule-preview-result {
+  display: grid;
+  gap: 7px;
+  padding: 10px;
+  border: 1px solid var(--da-line);
+  border-radius: 8px;
+  background: var(--surface-card);
+}
+
+.alert-rule-preview-scroll {
+  max-height: 220px;
+  overflow: auto;
+}
+
+.alert-rule-preview-result .da-table {
+  font-size: var(--fs-xs);
+}
+
+.alert-rule-preview-result .da-table th,
+.alert-rule-preview-result .da-table td {
+  padding: 7px 8px;
+}
+
+.alert-rule-preview-result .da-table small {
+  margin-top: 2px;
+  color: var(--da-muted);
+  font-size: var(--fs-xs);
+}
+
+@media (max-width: 640px) {
+  .alert-rule-form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+</style>
