@@ -29,7 +29,8 @@ let loadPending = false
 
 const canManage = computed(() => props.permissions.includes("alert.manage"))
 const canWrite = computed(() => canManage.value && !loading.value && !error.value && !saving.value)
-const canCreate = computed(() => canWrite.value && !rules.value.some((rule) => rule.rule_code === "CONTRACT_EXPIRY"))
+// 同一规则编码可保存多份命名配置；最多一条启用，由保存接口再次校验。
+const canCreate = computed(() => canWrite.value)
 
 const filteredRules = computed(() => {
   const query = keyword.value.trim().toLowerCase()
@@ -79,10 +80,15 @@ async function toggleRule(rule) {
   if (!canWrite.value || editing.value || !rules.value.includes(rule)) return
   saving.value = true
   try {
-    const payload = rules.value.map((item) => item.id === rule.id ? { ...item, enabled: !item.enabled } : { ...item })
+    const nextEnabled = !rule.enabled
+    const payload = rules.value.map((item) => {
+      if (item.id === rule.id) return { ...item, enabled: nextEnabled }
+      if (nextEnabled && item.rule_code === rule.rule_code) return { ...item, enabled: false }
+      return { ...item }
+    })
     const saved = await putAlertRules(payload)
     rules.value = saved
-    showToast(rule.enabled ? "规则已停用" : "规则已启用")
+    showToast(rule.enabled ? "规则已停用" : "规则已启用；同编码其他配置已自动停用")
   } catch (err) {
     showToast(mutationError(err, "规则状态保存失败"))
   } finally {
@@ -90,12 +96,23 @@ async function toggleRule(rule) {
   }
 }
 
+// 用途：生成不与现有规则重名的默认名称，避免后端唯一名称冲突。
+// 参数：无；读取当前规则列表。
+// 返回值：可编辑的默认名称。
+function nextRuleName() {
+  const base = "合同到期提醒"
+  if (!rules.value.some((item) => item.name === base)) return base
+  let index = 2
+  while (rules.value.some((item) => item.name === `${base}（${index}）`)) index += 1
+  return `${base}（${index}）`
+}
+
 function openEditor(rule = null) {
   if (!canWrite.value || (rule ? !rules.value.includes(rule) : !canCreate.value)) return
   editing.value = rule ? "edit" : "create"
   draft.value = rule
     ? { ...rule, threshold_json: rule.threshold_json || '{"days":30}' }
-    : { rule_code: "CONTRACT_EXPIRY", name: "合同到期提醒", source_fct: "dim_contract", severity: "MEDIUM", enabled: false, threshold_json: '{"days":30}' }
+    : { rule_code: "CONTRACT_EXPIRY", name: nextRuleName(), source_fct: "dim_contract", severity: "MEDIUM", enabled: false, threshold_json: '{"days":30}' }
   editorInitialSnapshot = JSON.stringify(draft.value)
 }
 
@@ -133,8 +150,8 @@ async function saveEditor() {
   if (!canWrite.value || !editing.value || !draft.value) return
   const validationError = validateDraft()
   if (validationError) { showToast(validationError); return }
-  if (editing.value === "create" && rules.value.some((rule) => rule.rule_code === draft.value.rule_code)) {
-    showToast("该规则已存在，请直接编辑现有规则")
+  if (rules.value.some((rule) => rule.id !== draft.value.id && rule.name.trim() === draft.value.name.trim())) {
+    showToast("规则名称已存在，请换一个名称")
     return
   }
   const mode = editing.value
@@ -198,7 +215,7 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
         <table class="da-table">
           <thead><tr><th scope="col">规则编码</th><th scope="col">规则名称</th><th scope="col">数据源</th><th scope="col">严重度</th><th scope="col">阈值参数</th><th scope="col">启用</th><th scope="col" v-if="canManage">操作</th></tr></thead>
           <tbody>
-            <tr v-for="rule in filteredRules" :key="rule.rule_code">
+            <tr v-for="rule in filteredRules" :key="rule.id">
               <td class="mono"><b>{{ rule.rule_code }}</b></td>
               <td>{{ rule.name || '—' }}</td>
               <td>{{ rule.source_fct || '—' }}</td>
@@ -211,7 +228,7 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
         </table>
       </div>
       <EmptyState v-if="filteredRules.length === 0" :title="keyword.trim() ? '未找到匹配规则' : '暂无预警规则'" :description="keyword.trim() ? '请调整搜索关键词' : '当前支持合同到期提醒（CONTRACT_EXPIRY），可新建规则后启用。'" />
-      <footer><span>当前支持合同到期提醒，每种规则仅可配置一条。</span><span>开关立即保存；已有历史预警的规则只能停用。</span></footer>
+      <footer><span>同一规则编码可配置多条命名规则，但同时只能启用一条；启用新配置会自动停用同编码其他配置。</span><span>开关立即保存；已有历史预警的规则只能停用。</span></footer>
     </div>
 
     <div v-if="editing && draft" class="da-modal-backdrop" @click.self="closeEditor">
