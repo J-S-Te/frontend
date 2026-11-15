@@ -2840,30 +2840,39 @@ onBeforeUnmount(() => {
         class="expense-panel"
       >
         <header class="expense-card-head">
-          <h2 class="expense-card-title">项目费用参与人</h2>
-          <span class="expense-card-extra">资格由项目工作区维护</span>
+          <h2 class="expense-card-title">项目费用参与资格</h2>
+          <span class="expense-card-extra">资格由项目工作区统一维护</span>
         </header>
-        <p>
-          项目费用参与资格由项目工作区按项目范围维护；报销侧只提供查询与跳转入口。
-        </p>
+        <p>只展示本人当前可报销的项目/服务项；参与人变化后，报销选项会自动联动。</p>
         <div class="expense-actions">
           <input v-model="keyword" maxlength="128" placeholder="输入项目关键词" aria-label="项目关键词">
-          <button type="button" class="expense-button" @click="searchProjects">
-            查询项目选项
+          <button type="button" class="expense-button" :disabled="projectLoading" @click="searchProjects">
+            {{ projectLoading ? '查询中…' : '查询可报销项目' }}
           </button>
         </div>
-        <p v-if="!projectOptions.length">
-          暂无已查询项目选项。
-        </p>
-        <ul v-else>
-          <li v-for="option in projectOptions" :key="option.project_id">
-            {{ option.project_id }} / {{ option.project_name || '名称待确认' }}
-            <button type="button" class="expense-button" @click="openProjectExpenseParticipants(option)">
-              维护费用参与人
-            </button>
-          </li>
-        </ul>
+        <p v-if="projectError" role="alert">{{ projectError }}</p>
+        <div v-if="projectOptions.length" class="expense-table">
+          <table>
+            <thead>
+              <tr><th scope="col">项目 / 服务项</th><th scope="col">项目状态</th><th scope="col">操作</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="option in projectOptions" :key="`${option.project_id}/${option.service_item_id || ''}`">
+                <td>{{ projectReferenceLabel(option) }}</td>
+                <td>{{ option.project_status }}</td>
+                <td>
+                  <button type="button" class="expense-button" @click="openProjectExpenseParticipants(option)">去项目维护</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <div v-if="projectCursor" class="expense-actions">
+            <button type="button" class="expense-button" :disabled="projectLoading" @click="searchProjects(true)">加载更多</button>
+          </div>
+        </div>
+        <p v-else-if="!projectLoading">暂无已查询的可报销项目。</p>
       </section>
+
       <div v-if="fieldErrors.length" role="alert">
         <button type="button" v-for="field in fieldErrors" :key="field.field" class="expense-button" @click="focusValidation(field.field)">
           {{ field.message }}

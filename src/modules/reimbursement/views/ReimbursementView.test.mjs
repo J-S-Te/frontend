@@ -1007,16 +1007,15 @@ test('付款分区打开单据后请求付款历史并渲染历史表', async ()
   } finally { fixture.unmount() }
 })
 
-test('项目费用参与人入口归入归档中心，不占用付款页面', async () => {
+test('项目费用参与资格入口归入归档中心，不占用付款页面', async () => {
   const fixture = await mountPage(['expense.archive.read', 'expense.claim.read'], async () => ({ items: [], total: 0 }), 'archives')
   try {
-    fixture.state.projectOptions.value = [{ project_id: 'project-1', project_name: '示例项目' }]
+    fixture.state.projectOptions.value = [{ project_id: 'project-1', project_name: '示例项目', project_status: '报告编制' }]
     const html = await fixture.html()
-    assert.match(html, /项目费用参与人/)
-    assert.match(html, /查询项目选项/)
-    assert.match(html, /project-1/)
+    assert.match(html, /项目费用参与资格/)
+    assert.match(html, /查询可报销项目/)
     assert.match(html, /示例项目/)
-    assert.match(html, /维护费用参与人/)
+    assert.match(html, /去项目维护/)
   } finally { fixture.unmount() }
 })
 
@@ -1108,7 +1107,7 @@ test('422 items.0.field 点号坐标同样聚焦费用行子控件', async () =>
 
 test('报销工作区基于授权项目选项提供费用参与人入口且不代持项目写操作', async () => {
   const source = readFileSync(new URL('./ReimbursementView.vue', import.meta.url), 'utf8')
-  assert.match(source, /项目费用参与人/)
+  assert.match(source, /项目费用参与资格/)
   assert.match(source, /\/project-options\?/)
   assert.match(source, /openProjectExpenseParticipants/)
   assert.match(source, /project_detail/)
