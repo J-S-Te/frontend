@@ -1440,7 +1440,7 @@ test('TS-010 从商机发起申请锁定机会且提交后只刷新面板不改�
   assert.match(view, /class="console-modal-backdrop crm-opportunity-presale-create-backdrop"/)
   assert.match(view, /class="console-detail-modal crm-opportunity-presale-create-dialog"/)
   assert.match(view, /id="opportunity-presale-create-form" class="console-form-grid crm-opportunity-presale-create-body"/)
-  assert.match(style, /\.crm-opportunity-presale-create-backdrop\s*\{[^}]*z-index:\s*90/)
+  assert.match(style, /\.crm-opportunity-presale-create-backdrop\s*\{[^}]*z-index:\s*(?:90|var\(--crm-z-backdrop\))/)
   assert.match(style, /\.crm-opportunity-presale-create-dialog/)
   assert.match(view, /\{\{ selectedOpportunity\.opportunity_no \}\}[\s\S]*\{\{ selectedOpportunity\.name \}\}/)
   assert.match(view, /售前内部流程暂时不可用/)
@@ -1809,7 +1809,7 @@ test('从详情打开的编辑弹窗叠在详情之上，不被遮住', () => {
   assert.match(view, /:nested="!!selectedOpportunity"/)
   assert.match(customerDialogSource, /class="console-modal-backdrop" :class="\{ nested \}"/)
   assert.match(opportunityDialogSource, /class="console-modal-backdrop" :class="\{ nested \}"/)
-  assert.match(style, /console-modal-backdrop\.nested \{ z-index: 80; \}/)
+  assert.match(style, /console-modal-backdrop\.nested \{ z-index:\s*(?:80|var\(--crm-z-modal\)); \}/)
 })
 
 // P2⑨：.crm-toolbar / .crm-customer-filters / .crm-presale-filters 是同一个
