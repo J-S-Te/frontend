@@ -21,6 +21,7 @@ import { AUTHORIZATION_REFRESHED_EVENT } from '@/modules/platform/auth/utils/aut
 import { acquireBodyScrollLock, releaseBodyScrollLock } from '@/modules/shared/utils/bodyScrollLock'
 import FirstRunChecklistPanel from './FirstRunChecklistPanel.vue'
 import { firstRun } from '../composables/useFirstRun.js'
+import { createFirstRunTabLock, FIRST_RUN_TAB_LOCK_TTL_MS } from '../utils/firstRunTabLock.js'
 import {
   FIRST_RUN_ANCHOR_ATTRIBUTE,
   FIRST_RUN_PORTAL_GUIDE,
@@ -47,6 +48,8 @@ const descriptionId = 'first-run-tour-description'
 
 const ANCHOR_RETRY_INTERVAL_MS = 300
 const ANCHOR_RETRY_MAX_ATTEMPTS = 10
+const tabLock = createFirstRunTabLock()
+let lockRenewTimer = 0
 let narrowQuery = null
 let startTimer = 0
 let anchorRetryTimer = 0
@@ -99,6 +102,15 @@ function anchorExists(anchor) {
   return Boolean(anchorElement(anchor))
 }
 
+// 除确认框外，任何可见的 aria-modal 对话框/抽屉都应阻止导览启动，避免抢焦点或叠层。
+function anotherModalOpen() {
+  if (typeof document === 'undefined') return false
+  if (document.body?.dataset?.confirmDialogOpen === 'true') return true
+  return [...document.querySelectorAll('[role="dialog"][aria-modal="true"]')].some((element) => (
+    !element.closest('.first-run-tour, .first-run-checklist') && element.getClientRects().length > 0
+  ))
+}
+
 /** 当前 guide 的启动前置条件（不含首步锚点；锚点在 attemptStart 里单独判定）。 */
 function startOptions() {
   const key = activeGuideKey.value
@@ -121,12 +133,13 @@ function startOptions() {
  */
 function schedulingAllowed() {
   if (typeof document === 'undefined') return false
+  if (!firstRun.state.configReady || firstRun.state.enabled === false) return false
   if (snoozedGuide.value === activeGuideKey.value) return false
   if (firstRun.state.tourVisible || firstRun.state.checklistOpen) return false
   const options = startOptions()
   if (!options) return false
-  // 先在“锚点未就绪”的状态下排队；600ms 后 attemptStart 再检查首步锚点。
-  return shouldStartFirstRunTour({ ...options, firstAnchorAvailable: true })
+  // 先在“锚点未就绪”的状态下排队；600ms 后 attemptStart 再检查锚点/弹层/标签页锁。
+  return shouldStartFirstRunTour({ ...options, confirmDialogOpen: false, firstAnchorAvailable: true })
 }
 
 function clearStartTimer() {
@@ -160,6 +173,10 @@ function attemptStart() {
   const key = activeGuideKey.value
   const options = startOptions()
   if (!options) return
+  if (anotherModalOpen() || tabLock.heldByOther(firstRun.state.scope)) {
+    retryStartWhenAnchorAppears()
+    return
+  }
   const steps = firstRunGuideSteps(key)
   const guide = firstRun.guideState(key)
   const resumeIndex = guide?.tour === 'paused' ? Math.min(guide.step, steps.length - 1) : 0
@@ -173,8 +190,12 @@ function attemptStart() {
     return
   }
   if (!shouldStartFirstRunTour({ ...options, firstAnchorAvailable: true })) return
+  if (!tabLock.acquire(firstRun.state.scope, key)) {
+    retryStartWhenAnchorAppears()
+    return
+  }
   clearStartTimer()
-  firstRun.beginTour({ guideKey: key, hasAnchor: anchorExists })
+  if (!firstRun.beginTour({ guideKey: key, hasAnchor: anchorExists })) tabLock.release(firstRun.state.scope)
 }
 
 /**
@@ -209,6 +230,8 @@ async function applyForcedGuide(guideKey) {
  */
 async function prepareGuide(guideKey) {
   if (!guideKey) return
+  await firstRun.ensureConfig()
+  if (firstRun.state.enabled === false) return
   const token = ++guidePreparationToken
   if (guideKey !== FIRST_RUN_PORTAL_GUIDE) {
     if (!firstRun.state.scope) {
@@ -396,6 +419,12 @@ function restoreFocusAfterTour() {
   return null
 }
 
+function releaseTourLock() {
+  window.clearInterval(lockRenewTimer)
+  lockRenewTimer = 0
+  if (firstRun.state.scope) tabLock.release(firstRun.state.scope)
+}
+
 function syncTourListeners(visible) {
   if (visible && !tourListening) {
     tourListening = true
@@ -404,6 +433,14 @@ function syncTourListeners(visible) {
     window.addEventListener('resize', onWindowResize, { passive: true })
     window.addEventListener('scroll', onWindowScroll, true)
     acquireBodyScrollLock()
+    const scope = firstRun.state.scope
+    if (scope) {
+      tabLock.acquire(scope, firstRun.state.tourGuide)
+      window.clearInterval(lockRenewTimer)
+      lockRenewTimer = window.setInterval(() => {
+        if (firstRun.state.tourVisible) tabLock.renew(scope, firstRun.state.tourGuide)
+      }, Math.max(1000, Math.floor(FIRST_RUN_TAB_LOCK_TTL_MS / 3)))
+    }
     return
   }
   if (!visible && tourListening) {
@@ -412,6 +449,7 @@ function syncTourListeners(visible) {
     window.removeEventListener('resize', onWindowResize)
     window.removeEventListener('scroll', onWindowScroll, true)
     releaseBodyScrollLock()
+    releaseTourLock()
     restoreFocusAfterTour()
   }
 }
@@ -474,6 +512,13 @@ watch(() => route.query?.guide, () => {
 // pagehide 覆盖刷新、关闭标签页、前进后退缓存等不经过路由 watcher 的离开方式。
 function onPageHide() {
   firstRun.pauseTour()
+  releaseTourLock()
+}
+
+// 另一个标签页释放导览锁 / 写入记录后，当前标签页重新排队。
+function onStorage(event) {
+  if (event && event.key !== null && !String(event.key).endsWith('|tab-lock')) return
+  if (!firstRun.state.tourVisible) scheduleStart()
 }
 
 onMounted(() => {
@@ -484,6 +529,7 @@ onMounted(() => {
   narrowQuery?.addEventListener?.('change', syncNarrowScreen)
   window.addEventListener(AUTHORIZATION_REFRESHED_EVENT, onAuthorizationRefreshed)
   window.addEventListener('pagehide', onPageHide)
+  window.addEventListener('storage', onStorage)
   document.addEventListener('visibilitychange', onVisibilityChange)
   // 确认框开关只通过 body.dataset.confirmDialogOpen 暴露：关闭后重新排队，打开期间不启动。
   if (typeof MutationObserver !== 'undefined' && document.body) {
@@ -499,12 +545,14 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   clearStartTimer()
+  releaseTourLock()
   syncTourListeners(false)
   narrowQuery?.removeEventListener?.('change', syncNarrowScreen)
   confirmObserver?.disconnect()
   confirmObserver = null
   window.removeEventListener(AUTHORIZATION_REFRESHED_EVENT, onAuthorizationRefreshed)
   window.removeEventListener('pagehide', onPageHide)
+  window.removeEventListener('storage', onStorage)
   document.removeEventListener('visibilitychange', onVisibilityChange)
 })
 </script>

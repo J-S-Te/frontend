@@ -498,3 +498,27 @@ test('落盘内容不包含主体姓名、账号名等 PII', () => {
     assert.equal(serialized.includes(pii), false, `存储中不应出现 ${pii}`)
   }
 })
+
+test('服务端开关关闭时不自动启动，配置失败 fail-open；事件失败静默忽略', async () => {
+  const off = createStore({ loadConfig: async () => ({ enabled: false, version: 2 }) })
+  assert.equal(await off.ensureConfig(), false)
+  assert.equal(off.state.enabled, false)
+  assert.equal(off.state.configReady, true)
+
+  const broken = createStore({ loadConfig: async () => { throw new Error('offline') } })
+  assert.equal(await broken.ensureConfig(), true)
+  assert.equal(broken.state.enabled, true)
+  assert.equal(broken.state.configReady, true)
+
+  const events = []
+  const store = createStore({
+    loadConfig: async () => ({ enabled: true, version: 2 }),
+    recordEvent: async (payload) => { events.push(payload) },
+  })
+  await store.ensureConfig()
+  store.markPortalReady(principal())
+  assert.equal(store.beginTour({ hasAnchor: () => true }), true)
+  await Promise.resolve()
+  assert.equal(events[0]?.event, 'tour_started')
+  assert.equal(events[0]?.guide_key, 'portal')
+})

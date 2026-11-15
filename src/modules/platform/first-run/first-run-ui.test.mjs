@@ -81,7 +81,7 @@ test('切换子系统先把旧导览落为 paused（不标记完成），离开/
   assert.doesNotMatch(switchBlock, /finishTour\('done'\)/)
   // 未登记路由直接把当前导览落为 paused，不自动跨页。
   assert.match(guide, /if \(!next\) \{[\s\S]{0,140}firstRun\.pauseTour\(\)/)
-  assert.match(guide, /function onPageHide\(\) \{\s*firstRun\.pauseTour\(\)\s*\}/)
+  assert.match(guide, /function onPageHide\(\) \{\s*firstRun\.pauseTour\(\)\s*releaseTourLock\(\)\s*\}/)
   assert.match(guide, /window\.addEventListener\('pagehide', onPageHide\)/)
   // store 侧：中断写 paused（按 guide），不写 done/skipped；旧的 interruptTour 保留兼容。
   assert.match(store, /function pauseTour\(guideKey = state\.tourGuide \|\| FIRST_RUN_PORTAL_GUIDE\)/)
@@ -133,7 +133,7 @@ test('焦点锁、滚动锁、关闭还原焦点与 aria 语义', () => {
   assert.match(guide, /document\.addEventListener\('keydown', onTourKeydown, true\)/)
   assert.match(guide, /if \(event\.key !== 'Tab'\) return/)
   assert.match(guide, /previousFocus = document\.activeElement/)
-  assert.match(guide, /releaseBodyScrollLock\(\)\s*restoreFocusAfterTour\(\)/)
+  assert.match(guide, /releaseBodyScrollLock\(\)[\s\S]{0,200}restoreFocusAfterTour\(\)/)
   assert.match(guide, /if \(document\.body\?\.dataset\?\.confirmDialogOpen === 'true'\) return/)
 })
 
@@ -373,7 +373,7 @@ test('第 ④ 项探测：只读 GET /users?page=1&page_size=1、total>=1 完成
 })
 
 test('导览中断与竞态：pagehide/离开落 paused 可续播、探测按 scope+generation 丢弃', () => {
-  assert.match(guide, /function onPageHide\(\) \{\s*firstRun\.pauseTour\(\)\s*\}/)
+  assert.match(guide, /function onPageHide\(\) \{\s*firstRun\.pauseTour\(\)\s*releaseTourLock\(\)\s*\}/)
   assert.match(guide, /window\.addEventListener\('pagehide', onPageHide\)/)
   assert.match(guide, /firstRun\.state\.catalogReady/)
   assert.match(guide, /shouldStartFirstRunTour/)
@@ -431,4 +431,31 @@ test('七个子系统壳层 + 平台控制台补齐统一锚点', () => {
   for (const source of [contractView, projectView, dataAnalysisView]) {
     assert.match(source, /返回子系统门户/)
   }
+})
+
+test('稍后只暂停保留步骤，跳过/Esc 才进入终态', () => {
+  assert.match(guide, /@click="pauseCurrentTour">稍后/)
+  assert.match(guide, /function pauseCurrentTour\(\)[\s\S]{0,200}firstRun\.pauseTour\(\)/)
+  assert.match(guide, /function skipTour\(\) \{\s*firstRun\.finishTour\('skipped'\)\s*\}/)
+  assert.match(state, /export function withTourPaused/)
+  assert.match(state, /tour === 'pending' \|\| tour === 'paused'/)
+})
+
+test('P1：多标签锁、非确认框弹层避让、storage 唤醒', () => {
+  assert.match(guide, /createFirstRunTabLock/)
+  assert.match(guide, /tabLock\.acquire\(firstRun\.state\.scope, key\)/)
+  assert.match(guide, /tabLock\.heldByOther\(firstRun\.state\.scope\)/)
+  assert.match(guide, /function anotherModalOpen\(\)/)
+  assert.match(guide, /\[role="dialog"\]\[aria-modal="true"\]/)
+  assert.match(guide, /window\.addEventListener\('storage', onStorage\)/)
+  assert.match(guide, /lockRenewTimer = window\.setInterval/)
+  assert.match(guide, /function releaseTourLock\(\)/)
+})
+
+test('P1：服务端配置门禁与 first-run API 接入', () => {
+  assert.match(guide, /await firstRun\.ensureConfig\(\)/)
+  assert.match(guide, /firstRun\.state\.configReady/)
+  assert.match(guide, /firstRun\.state\.enabled === false/)
+  assert.match(store, /loadConfigFn\(\)/)
+  assert.match(store, /recordEventFn\(payload\)/)
 })

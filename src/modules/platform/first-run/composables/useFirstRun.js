@@ -53,6 +53,16 @@ async function defaultLoadUsers(query) {
   return listUsers(query)
 }
 
+async function defaultLoadConfig() {
+  const { fetchFirstRunConfig } = await import('../api/firstRun.js')
+  return fetchFirstRunConfig()
+}
+
+async function defaultRecordEvent(payload) {
+  const { recordFirstRunEvent } = await import('../api/firstRun.js')
+  return recordFirstRunEvent(payload)
+}
+
 function normalizeGuideKey(guideKey) {
   return FIRST_RUN_GUIDES[guideKey] ? guideKey : FIRST_RUN_PORTAL_GUIDE
 }
@@ -69,6 +79,8 @@ function normalizeGuideKey(guideKey) {
 export function createFirstRunStore({
   storage,
   loadUsers: loadUsersFn = defaultLoadUsers,
+  loadConfig: loadConfigFn = null,
+  recordEvent: recordEventFn = null,
   now = () => new Date(),
   listenStorage = undefined,
 } = {}) {
@@ -89,11 +101,16 @@ export function createFirstRunStore({
     // idle | checking | incomplete | complete | error
     probeStatus: 'idle',
     probeMessage: '',
+    // 服务端开关；默认开启，配置接口不可用时 fail-open 不阻断首登。
+    enabled: true,
+    configReady: false,
+    guideVersion: 2,
   })
 
   // 探测按 scope 单飞；generation 在切主体/重置时递增，迟到的响应直接丢弃。
   const probePromises = new Map()
   let probeGeneration = 0
+  let configPromise = null
 
   function currentStorage() {
     if (storage !== undefined) return storage
@@ -109,6 +126,39 @@ export function createFirstRunStore({
     const value = now()
     const date = value instanceof Date ? value : new Date(value)
     return Number.isFinite(date.getTime()) ? date.toISOString() : new Date().toISOString()
+  }
+
+  // 配置按 store 单飞；失败降级为开启，避免后端未部署时整段首登消失。
+  function ensureConfig() {
+    if (state.configReady) return Promise.resolve(state.enabled)
+    if (configPromise) return configPromise
+    if (typeof loadConfigFn !== 'function') {
+      state.configReady = true
+      return Promise.resolve(true)
+    }
+    configPromise = Promise.resolve().then(() => loadConfigFn()).then((config) => {
+      state.enabled = config?.enabled !== false
+      state.guideVersion = Number.isInteger(config?.version) ? config.version : 2
+      state.configReady = true
+      return state.enabled
+    }).catch(() => {
+      state.enabled = true
+      state.configReady = true
+      return true
+    }).finally(() => { configPromise = null })
+    return configPromise
+  }
+
+  // 遥测失败静默忽略；不阻断导览、清单或业务操作。
+  function emit(event, extra = {}) {
+    if (!state.enabled || typeof recordEventFn !== 'function') return
+    const step = Number.isInteger(extra.step) ? extra.step : Math.max(0, state.tourIndex)
+    const payload = {
+      event, guide_key: extra.guideKey || state.tourGuide || '', step,
+      outcome: extra.outcome || '', task_key: extra.taskKey || '',
+      client_version: '2', occurred_at: nowIso(),
+    }
+    Promise.resolve().then(() => recordEventFn(payload)).catch(() => {})
   }
 
   function persist() {
@@ -288,6 +338,7 @@ export function createFirstRunStore({
   function openChecklist() {
     if (!state.record || !state.principal) return false
     state.checklistOpen = true
+    emit('checklist_opened')
     if (isFirstRunTaskVisible('firstAccount', state.principal)) void probeFirstAccount()
     return true
   }
@@ -312,6 +363,7 @@ export function createFirstRunStore({
       return false
     }
     commit(next)
+    emit('checklist_task_completed', { taskKey: key })
     return true
   }
 
@@ -390,6 +442,7 @@ export function createFirstRunStore({
     state.tourGuide = key
     state.tourIndex = index
     state.tourVisible = true
+    emit('tour_started', { guideKey: key, step: index })
     return true
   }
 
@@ -401,6 +454,7 @@ export function createFirstRunStore({
     const safeIndex = Math.max(0, Math.min(Number(index) || 0, steps.length - 1))
     commit(withTourStarted(base, safeIndex, key))
     state.tourIndex = safeIndex
+    emit('tour_step', { guideKey: key, step: safeIndex })
   }
 
   /**
@@ -447,6 +501,7 @@ export function createFirstRunStore({
     const key = normalizeGuideKey(guideKey)
     const base = baseRecord()
     if (!base) return
+    const step = state.tourIndex
     const next = withTourFinished(base, outcome, nowIso(), key)
     if (next === base) {
       state.record = base
@@ -455,6 +510,7 @@ export function createFirstRunStore({
     }
     commit(next)
     if (!state.tourGuide || state.tourGuide === key) clearTourUi()
+    emit('tour_finished', { guideKey: key, outcome, step })
   }
 
   /**
@@ -473,8 +529,10 @@ export function createFirstRunStore({
       if (!state.tourGuide || state.tourGuide === key) clearTourUi()
       return false
     }
+    const step = state.tourIndex
     commit(withTourPaused(base, key))
     if (!state.tourGuide || state.tourGuide === key) clearTourUi()
+    emit('tour_paused', { guideKey: key, step })
     return true
   }
 
@@ -497,6 +555,7 @@ export function createFirstRunStore({
     commit(withTourRestarted(base, key))
     state.checklistOpen = false
     if (!state.tourGuide || state.tourGuide === key) clearTourUi()
+    emit('guide_restarted', { guideKey: key })
     return true
   }
 
@@ -511,6 +570,7 @@ export function createFirstRunStore({
     commit(withChecklistReset(base, nowIso()))
     state.probeStatus = 'idle'
     state.probeMessage = ''
+    emit('checklist_reset')
     return true
   }
 
@@ -581,6 +641,7 @@ export function createFirstRunStore({
     tourStepCount,
     tourAnnouncement,
     bindPrincipal,
+    ensureConfig,
     markGuideReady,
     markPortalReady,
     setCatalogReady,
@@ -607,7 +668,7 @@ export function createFirstRunStore({
 }
 
 /** App.vue 与门户共用的单例；测试用 createFirstRunStore 创建隔离实例。 */
-export const firstRun = createFirstRunStore()
+export const firstRun = createFirstRunStore({ loadConfig: defaultLoadConfig, recordEvent: defaultRecordEvent })
 
 /**
  * App.vue 路由观察器入口：既有记录时补记审计完成，未访问过门户则不创建记录。
