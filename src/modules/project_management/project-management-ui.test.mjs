@@ -1130,11 +1130,10 @@ test('每个写操作入口都按服务端同款权限码门控', () => {
   assert.match(source, /v-if="canReviewSpecialMethod" class="pm-form-row"/)
   assert.match(source, /v-if="canManageResource && item\.resource_type === 'PERSON'" class="pm-link" @click="openCapabilityDialog\(item\)"/)
   assert.match(source, /v-(?:if|else-if)="canManageActiveConfig" class="pm-switch"/)
-  // 报告推进按编制、审核、签发、归档四类职责分别授权。
+  // 主报告暂由指派项目经理凭编制权限手动维护；真实审核留在独立面板。
   assert.match(source, /canAdvanceReportPhase\(reportPhaseNext\[selectedServiceItem\.report_status\]\)/)
-  for (const permission of ['project.report.prepare', 'project.report.review', 'project.report.issue', 'project.report.archive']) {
-    assert.ok(source.includes(permission), `缺少报告阶段权限：${permission}`)
-  }
+  assert.ok(source.includes("permissionSet.value.has('project.report.prepare')"))
+  assert.match(source, /item\?\.project_manager_id === session\.value\.user_id/)
   // 字段级权限页签只对持有该权限的角色可见，避免"能打开、提交必 403"。
   assert.match(source, /if \(kind === 'permissions'\) return canManageFieldPermissions\.value/)
   assert.match(source, /if \(kind === 'capability-codes'\) return canManageCapabilityCodes\.value/)

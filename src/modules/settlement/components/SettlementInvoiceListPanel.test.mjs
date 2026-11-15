@@ -6,8 +6,27 @@ import { pathToFileURL } from 'node:url'
 import * as Vue from 'vue'
 import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc'
 import { renderToString } from '@vue/server-renderer'
+import vm from 'node:vm'
+import { INVOICE_REQUEST_FIELDS, firstInvalidField } from '../utils/formFeedback.js'
 
 const SRC = new URL('../../../', import.meta.url).pathname
+
+test('服务端字段反馈聚焦现有税额输入，不生成自动数量字段', async () => {
+  const source = readFileSync(new URL('./SettlementInvoiceListPanel.vue', import.meta.url), 'utf8')
+  const start = source.indexOf('async function showServerFieldErrors(')
+  assert.ok(start >= 0, '服务端字段反馈必须接入实际表单')
+  const focused = []
+  const invoiceErrors = { value: {} }
+  const show = vm.runInNewContext(source.slice(start, source.indexOf('\n}', start) + 2)
+    + '\nshowServerFieldErrors', {
+    INVOICE_REQUEST_FIELDS, firstInvalidField, invoiceErrors, nextTick: async () => {},
+    invoiceFormElement: { value: { querySelector: selector => ({ focus: () => focused.push(selector) }) } },
+  })
+  await show({ tax_amount: '第 1 行：税额应为 0.60', quantity: '自动数量' })
+  assert.deepEqual(focused, ['[name="tax_amount"]'])
+  assert.match(invoiceErrors.value.tax_amount, /税额应为 0.60/)
+  assert.equal(invoiceErrors.value.quantity, undefined)
+})
 
 async function resolveDependency(fromFile, specifier) {
   if (specifier === 'vue') return Vue

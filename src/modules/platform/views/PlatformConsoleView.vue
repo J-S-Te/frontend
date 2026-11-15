@@ -1,21 +1,44 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, h, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { AuthError, logoutCurrentSession } from '@/modules/platform/auth/api/auth'
-import IamSettingsModule from '@/modules/platform/iam/components/IamSettingsModule.vue'
-import PersonnelChangeCenter from '@/modules/platform/iam/components/PersonnelChangeCenter.vue'
-import PublicAccessSettingsModule from '@/modules/platform/settings/components/PublicAccessSettingsModule.vue'
-import EmployeeOnboardingModal from '@/modules/platform/iam/components/EmployeeOnboardingModal.vue'
-import NotificationCenterModule from '@/modules/platform/notifications/components/NotificationCenterModule.vue'
-import ConfigurationCenterModule from '@/modules/platform/configuration/components/ConfigurationCenterModule.vue'
-import FileTaskOperationsModule from '@/modules/platform/files/components/FileTaskOperationsModule.vue'
-import CommercialLicenseView from '@/modules/platform/features/licenses/CommercialLicenseView.vue'
 import { getUnreadCount, listInbox, markNotificationRead } from '@/modules/platform/notifications/api/notifications'
-import LoginSecurityModule from '@/modules/platform/security/components/LoginSecurityModule.vue'
-import DictionaryManagementModule from '@/modules/platform/dictionaries/components/DictionaryManagementModule.vue'
-import SubsystemOnboardingModule from '@/modules/platform/applications/components/SubsystemOnboardingModule.vue'
-import SubsystemAccessWizard from '@/modules/platform/applications/components/SubsystemAccessWizard.vue'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
+import LoadingState from '@/modules/shared/components/LoadingState.vue'
+
+// 设置分区组件按需加载：控制台/审计首屏只带外壳与当前分区，审计页不再下载 11 个
+// 设置面板的 JS/CSS；某个分区的加载失败或大数据量也不会拖慢其他入口。
+const PanelLoading = { render: () => h(LoadingState, { title: '正在加载设置模块…', compact: true }) }
+const PanelError = {
+  render: () => h('div', { class: 'ui-state ui-state--compact', role: 'alert' }, [
+    h('b', { class: 'ui-state__title' }, '设置模块加载失败'),
+    h('span', { class: 'ui-state__description' }, '请刷新页面后重试；当前登录状态和其他设置分区不受影响。'),
+  ]),
+}
+const asyncPanel = (loader) => defineAsyncComponent({
+  loader,
+  loadingComponent: PanelLoading,
+  errorComponent: PanelError,
+  delay: 120,
+  timeout: 30000,
+  // 单个分块失败先自动重试，仍失败时由 PanelError 明确展示，不静默白屏。
+  onError(error, retry, fail, attempts) {
+    if (attempts <= 2) retry()
+    else fail()
+  },
+})
+const IamSettingsModule = asyncPanel(() => import('@/modules/platform/iam/components/IamSettingsModule.vue'))
+const PersonnelChangeCenter = asyncPanel(() => import('@/modules/platform/iam/components/PersonnelChangeCenter.vue'))
+const PublicAccessSettingsModule = asyncPanel(() => import('@/modules/platform/settings/components/PublicAccessSettingsModule.vue'))
+const EmployeeOnboardingModal = asyncPanel(() => import('@/modules/platform/iam/components/EmployeeOnboardingModal.vue'))
+const NotificationCenterModule = asyncPanel(() => import('@/modules/platform/notifications/components/NotificationCenterModule.vue'))
+const ConfigurationCenterModule = asyncPanel(() => import('@/modules/platform/configuration/components/ConfigurationCenterModule.vue'))
+const FileTaskOperationsModule = asyncPanel(() => import('@/modules/platform/files/components/FileTaskOperationsModule.vue'))
+const CommercialLicenseView = asyncPanel(() => import('@/modules/platform/features/licenses/CommercialLicenseView.vue'))
+const LoginSecurityModule = asyncPanel(() => import('@/modules/platform/security/components/LoginSecurityModule.vue'))
+const DictionaryManagementModule = asyncPanel(() => import('@/modules/platform/dictionaries/components/DictionaryManagementModule.vue'))
+const SubsystemOnboardingModule = asyncPanel(() => import('@/modules/platform/applications/components/SubsystemOnboardingModule.vue'))
+const SubsystemAccessWizard = asyncPanel(() => import('@/modules/platform/applications/components/SubsystemAccessWizard.vue'))
 import AppShell from '@/modules/shared/components/AppShell.vue'
 import ListState from '@/modules/shared/components/ListState.vue'
 import PaginationBar from '@/modules/shared/components/PaginationBar.vue'

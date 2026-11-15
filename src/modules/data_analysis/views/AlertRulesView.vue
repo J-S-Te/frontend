@@ -45,8 +45,19 @@ function showToast(message) {
   toastTimer = window.setTimeout(() => { toast.value = "" }, 5200)
 }
 
+// 用途：显示真实操作结果，保存完成后的读取故障冻结旧版本编辑直到刷新。
+// 参数：err 为服务端错误回执，fallback 为当前动作的兜底提示。
+// 返回值：安全中文提示；明确已保存时关闭旧编辑并开启只读错误态。
 function mutationError(err, fallback) {
-  return formatDataAnalysisError(err, { fallback })
+  const message = formatDataAnalysisError(err, { fallback })
+  if (!err?.outcomeUnknown && err?.status === 500 && err?.code === 'RULE_SAVED_REFRESH_FAILED'
+    && err?.details?.saved === true && err?.details?.refresh_failed === true) {
+    error.value = message
+    editing.value = null
+    draft.value = null
+    editorInitialSnapshot = ''
+  }
+  return message
 }
 
 async function load() {

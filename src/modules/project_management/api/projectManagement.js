@@ -26,6 +26,9 @@ export function startProjectLogin({ force = false } = {}) {
   window.location.replace(`${PUBLIC_PATH_PREFIX}/auth/login${prompt}`)
 }
 
+// 用途：保留服务端分类、字段与追踪信息，并明确未知写入结果。
+// 参数：body/response 为响应，context 为请求，配置含回退文案及结果未知标记。
+// 返回值：供页面核对状态的结构化错误，不重发请求。
 function projectRequestError(body, response, context, { code, fallback, outcomeUnknown = false } = {}) {
   const status = response?.status || 0
   const requestId = body?.request_id || body?.requestId || response?.headers?.get('x-request-id') || ''
@@ -63,6 +66,9 @@ function handleProjectAuthentication(error, response) {
   return error
 }
 
+// 用途：请求项目接口，校验响应并保留确定拒绝与未知结果的区别。
+// 参数：path 为业务路径，options 为既有请求选项。
+// 返回值：响应数据；请求或契约失败抛出结构化错误。
 async function request(path, options = {}) {
   const method = String(options.method || 'GET').toUpperCase()
   const isMutation = !['GET', 'HEAD', 'OPTIONS'].includes(method)
@@ -105,7 +111,9 @@ async function request(path, options = {}) {
   if (!response.ok) {
     const error = projectRequestError(body, response, requestContext, {
       fallback: '项目操作未完成，请稍后重试。',
-      outcomeUnknown: isMutation && ([408, 502, 504].includes(response.status) || body?.code === 'PM_SERVICE_TIMEOUT'),
+      outcomeUnknown: isMutation && ([408, 502, 504].includes(response.status)
+        || body?.code === 'PM_SERVICE_TIMEOUT'
+        || (response.status >= 500 && (!body?.code || body.code === 'PM_INTERNAL_ERROR'))),
     })
     if (options.suppressLoginRedirect) throw error
     throw handleProjectAuthentication(error, response)
@@ -767,7 +775,7 @@ export function reviewSpecialMethod(itemID, payload) {
 }
 
 /**
- * updateReportStatus 用途：依次推进整改中→编制中→已审核→已签发→已归档。
+ * updateReportStatus 用途：默认先整改，可从待整改直接编制，后续依次审核、签发、归档。
  * 参数：itemID 为服务项 ID，phase 为目标阶段，expectedVersion 为当前服务项版本。
  * 返回值：更新结果 Promise；跳级、无权限、版本冲突或阶段非法时抛出错误。
  */
@@ -775,6 +783,18 @@ export function updateReportStatus(itemID, phase, expectedVersion) {
   // expectedVersion 为服务端返回的服务项版本：带上它，服务端在探测到"我基于的是旧版本"时
   // 返回 409，避免静默覆盖他人刚提交的修改。
   return request(`/service-items/${encodeURIComponent(itemID)}/report-status`, {
+    method: 'POST',
+    body: JSON.stringify({ phase, expected_version: Number(expectedVersion) || 0 }),
+  })
+}
+
+/**
+ * advanceManualReportStatus 用途：由当前指派项目经理逐步手动维护主报告阶段。
+ * 参数：itemID 为服务项，phase 为下一阶段，expectedVersion 为服务端返回的当前版本。
+ * 返回值：阶段更新结果；非当前经理、非法跳步或旧版本时拒绝。
+ */
+export function advanceManualReportStatus(itemID, phase, expectedVersion) {
+  return request(`/service-items/${encodeURIComponent(itemID)}/report-status/manual`, {
     method: 'POST',
     body: JSON.stringify({ phase, expected_version: Number(expectedVersion) || 0 }),
   })
@@ -1304,11 +1324,14 @@ export function expenseParticipantPayload(form, revoke = false) {
   return value
 }
 
-// 用途：读取当前项目显式费用参与资格，仅由精确管理能力触发。
-// 参数：projectID 为项目标识，cursor 为上一页人员主体。
+// 用途：读取当前项目手工费用资格与实施人员默认资格，仅由精确管理能力触发。
+// 参数：projectID 为项目，cursor 为手工名单游标，implementationCursor 为实施人员游标。
 // 返回值：项目范围内的参与资格页或真实错误。
-export function getProjectExpenseParticipants(projectID, cursor = '') {
-  const query = new URLSearchParams({ page_size: '20', ...(cursor ? { cursor } : {}) })
+export function getProjectExpenseParticipants(projectID, cursor = '', implementationCursor = '') {
+  const query = new URLSearchParams({
+    page_size: '20', ...(cursor ? { cursor } : {}),
+    ...(implementationCursor ? { implementation_cursor: implementationCursor } : {}),
+  })
   return request(`/projects/${encodeURIComponent(projectID)}/expense-participants?${query}`)
 }
 
@@ -1319,4 +1342,26 @@ export function putProjectExpenseParticipant(projectID, form, revoke = false) {
   return request(`/projects/${encodeURIComponent(projectID)}/expense-participants`, {
     method: 'PUT', body: JSON.stringify(expenseParticipantPayload(form, revoke)),
   })
+}
+
+// 用途：分页读取主报告与专项的真实审核轮次。
+// 参数：itemID 为已授权父项，page 为从1开始页码。
+// 返回值：最多50条审核事实或真实错误。
+export function getMetricReportReviews(itemID, page = 1) {
+  return request(`/service-items/${encodeURIComponent(itemID)}/report-reviews?page=${page}`)
+}
+
+// 用途：提交或独立审核当前报告版本，不复用旧阶段推进假造结论。
+// 参数：itemID 为父项，action 为submit/decision，payload 为版本化幂等命令。
+// 返回值：服务端持久化轮次或业务错误。
+export function postMetricReportReview(itemID, action, payload) {
+  if (!['submit', 'decision'].includes(action)) throw new Error('审核动作无效')
+  return request(`/service-items/${encodeURIComponent(itemID)}/report-reviews/${action}`, { method: 'POST', body: JSON.stringify(payload) })
+}
+
+// 用途：读取主报告与专项当前版本最新轮次，与历史分页独立。
+// 参数：itemID 为已授权父服务项。
+// 返回值：最多两条真实当前轮次或读取错误。
+export function getCurrentMetricReportReviews(itemID) {
+ return request(`/service-items/${encodeURIComponent(itemID)}/report-reviews/current`)
 }

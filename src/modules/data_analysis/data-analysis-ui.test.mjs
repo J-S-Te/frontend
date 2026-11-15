@@ -171,7 +171,11 @@ test('权限管理的子视图都接收会话 permissions，指标字典保留�
 })
 
 test('摘要无快照时仍展示合同指标卡，不依赖 Metabase 嵌入内容', () => {
-  assert.match(native, /暂无(?:可用|明细)?快照/)
+  assert.match(native, /暂无(?:可用|明细|聚合)?快照/)
+  assert.match(shell, /import MetricFactsPanel from "..\/components\/MetricFactsPanel.vue"/)
+  assert.match(shell, /<MetricFactsPanel[\s\S]*?:section="section"/)
+  assert.match(shell, /:tenant-id="me\?\.tenant_id \|\| ''"/)
+  assert.match(shell, /:user-id="me\?\.user_id \|\| ''"/)
   assert.match(shell, /dashboardSummary/)
 })
 

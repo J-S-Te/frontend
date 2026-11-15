@@ -1071,12 +1071,16 @@
      当前分区仍可从设置导航读取，这里只做单行省略。 */
   .console-page--platform .console-crumb {
     flex: 1 1 auto;
+    gap: 6px;
     min-width: 0;
     overflow: hidden;
   }
 
+  /* WebKit 的中文字体略宽，13px 下会比 Chromium/Firefox 更早触发省略；
+     窄屏统一 12px，保证“系统设置 · 身份、组织与授权”完整可读。 */
   .console-page--platform .console-crumb strong {
     min-width: 0;
+    font-size: 12px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

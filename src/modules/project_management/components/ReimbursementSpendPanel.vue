@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { frontendModules } from '../../registry/compiledModules.js'
 import { formatBusinessDateTime, todayBusinessDate } from '../../shared/utils/businessTime.js'
@@ -18,6 +18,10 @@ const participantCursor = ref('')
 const participantError = ref('')
 const participantNotice = ref('')
 const participantBusy = ref(false)
+const implementationParticipants = ref(null)
+const implementationCursor = ref('')
+let participantSequence = 0
+let participantContext = 0
 const participantForm = ref({ subject_id:'',valid_from:`${todayBusinessDate()}T00:00`,valid_until:'',reason:'',version:0 })
 const personnelOptions = ref([])
 const personnelNames = ref({})
@@ -66,19 +70,37 @@ function openReimbursement(create = false, claimID = '') {
     query: { ...(props.projectId ? { project_id: props.projectId } : {}), ...(create ? { create: '1' } : {}), ...(claimID ? { claim_id: claimID } : {}) } })
 }
 
-// 用途：读取当前项目参与名单，资格管理权限不足时不触发任何接口。
-// 参数：next 为是否读取下一页。
-// 返回值：无；失败保留独立错误，名单不扩大项目读取能力。
-async function loadParticipants(next = false) {
+// 用途：读取手工资格和实施人员默认资格，保留服务项边界及各自分页。
+// 参数：next 为手工名单翻页，implementationNext 为默认名单翻页。
+// 返回值：无；权限不足不请求，过期响应不改变当前项目状态。
+async function loadParticipants(next = false, implementationNext = false) {
   if (!props.projectId || !canManage.value) return
-  const project=props.projectId; participantBusy.value=true; participantError.value=''
+  const ticket = ++participantSequence
+  participantBusy.value = true
+  participantError.value = ''
   try {
-    const result=await getProjectExpenseParticipants(project,next?participantCursor.value:'')
-    if(project!==props.projectId||!canManage.value)return
-    if(!Array.isArray(result.items))throw new Error('参与名单响应不完整')
-    participants.value=result.items;participantCursor.value=result.items.length===20?result.items.at(-1).subject_id:''
-  } catch(cause){if(project===props.projectId)participantError.value=cause.message}
-  finally{participantBusy.value=false}
+    const result = await getProjectExpenseParticipants(props.projectId,
+      next ? participantCursor.value : '', implementationNext ? implementationCursor.value : '')
+    if (ticket !== participantSequence) return
+    if (!Array.isArray(result.items)) throw new Error('参与名单响应不完整')
+    if (!implementationNext) {
+      participants.value = result.items
+      participantCursor.value = result.items.length === 20 ? result.items.at(-1).subject_id : ''
+    }
+    const page = result.implementation_participants
+    if (!Array.isArray(page?.items)) throw new Error('项目服务未返回实施人员默认资格，请确认服务版本后重试')
+    if (!next) {
+      implementationParticipants.value = implementationNext
+        ? [...(implementationParticipants.value || []), ...page.items] : page.items
+      implementationCursor.value = page.next_cursor || ''
+      personnelNames.value = { ...personnelNames.value,
+        ...Object.fromEntries(page.items.map((person) => [person.subject_id, person.display_name])) }
+    }
+  } catch (cause) {
+    if (ticket === participantSequence) participantError.value = cause.message || '参与名单暂不可用'
+  } finally {
+    if (ticket === participantSequence) participantBusy.value = false
+  }
 }
 
 // 用途：从基础平台人员目录读取候选主体，避免手工输入无法核对的128位用户ID。
@@ -110,7 +132,14 @@ function personnelLabel(id) {
 }
 
 const personnelSelectOptions = computed(() => {
-  const options = personnelOptions.value.map((person) => ({ id: person.id, label: `${person.name}（${person.id}）` }))
+  const people = new Map((implementationParticipants.value || [])
+    .map((person) => [person.subject_id, { id: person.subject_id, name: person.display_name }]))
+  for (const person of personnelOptions.value) {
+    if (!people.has(person.id)) people.set(person.id, person)
+  }
+  const options = [...people.values()].map((person) => ({
+    id: person.id, label: `${person.name || person.id}（${person.id}）`,
+  }))
   const selected = String(participantForm.value.subject_id || '').trim()
   if (selected && !options.some((person) => person.id === selected)) {
     const name = personnelNames.value[selected]
@@ -131,26 +160,67 @@ function chooseParticipant(row) {
 // 参数：revoke 表示明确移除；不会物理删除历史授权。
 // 返回值：无；未知结果先读名单核对，禁止伪造成功。
 async function saveParticipant(revoke = false) {
-  if(participantBusy.value||!canManage.value)return
-  const project=props.projectId;participantBusy.value=true;participantError.value='';participantNotice.value=''
+  if (!props.projectId || participantBusy.value || !canManage.value) return
+  const context = participantContext
+  const project = props.projectId
+  participantBusy.value = true
+  participantError.value = ''
+  participantNotice.value = ''
   try {
-    const result=await putProjectExpenseParticipant(project,participantForm.value,revoke)
-    if(project!==props.projectId)return
-    participantForm.value.version=result.version
-    participantNotice.value=revoke?'资格已移除，历史仍保留。':'资格已保存；有效期以北京时间解释。'
+    const result = await putProjectExpenseParticipant(project, participantForm.value, revoke)
+    if (context !== participantContext) return
+    participantForm.value.version = result.version
+    participantNotice.value = revoke ? '资格已移除，历史仍保留。' : '资格已保存；有效期以北京时间解释。'
     await loadParticipants()
-  } catch(cause) {
-    if(project!==props.projectId)return
-    participantError.value=cause.message
-    if(cause.status===409||cause.outcomeUnknown){await loadParticipants();participantNotice.value='已重新读取当前名单；您的输入保留。请选择当前资格核对版本后再提交。'}
-  } finally{participantBusy.value=false}
+  } catch (cause) {
+    if (context !== participantContext) return
+    participantError.value = cause.message
+    if (cause.status === 409 || cause.outcomeUnknown) {
+      await loadParticipants()
+      if (context === participantContext) {
+        participantNotice.value = '已重新读取当前名单；您的输入保留。请选择当前资格核对版本后再提交。'
+      }
+    }
+  } finally {
+    if (context === participantContext) participantBusy.value = false
+  }
 }
 
-watch(() => [props.projectId, canRead.value, canManage.value], () => {
-  ++sequence; rows.value = null; cursor.value = ''; error.value = ''; participants.value=null; participantCursor.value=''; participantError.value=''; participantNotice.value=''; participantForm.value={subject_id:'',valid_from:`${todayBusinessDate()}T00:00`,valid_until:'',reason:'',version:0}
-  personnelSequence++; personnelOptions.value = []; personnelNames.value = {}; personnelKeyword.value = ''; personnelError.value = ''; personnelLoading.value = false; manualSubject.value = false
-  if (props.projectId && canManage.value) void loadPersonnel()
+watch(() => [props.projectId, props.session?.tenant_id, props.session?.user_id,
+  canRead.value, canManage.value], () => {
+  ++participantContext
+  ++participantSequence
+  participantBusy.value = false
+  implementationParticipants.value = null
+  implementationCursor.value = ''
+  ++sequence
+  rows.value = null
+  cursor.value = ''
+  error.value = ''
+  participants.value = null
+  participantCursor.value = ''
+  participantError.value = ''
+  participantNotice.value = ''
+  participantForm.value = {
+    subject_id: '', valid_from: `${todayBusinessDate()}T00:00`,
+    valid_until: '', reason: '', version: 0,
+  }
+  ++personnelSequence
+  personnelOptions.value = []
+  personnelNames.value = {}
+  personnelKeyword.value = ''
+  personnelError.value = ''
+  personnelLoading.value = false
+  manualSubject.value = false
+  if (props.projectId && canManage.value) void loadParticipants()
 }, { immediate: true })
+
+onBeforeUnmount(() => {
+  ++sequence
+  ++participantSequence
+  ++participantContext
+  ++personnelSequence
+})
 </script>
 
 <template>
@@ -253,15 +323,41 @@ watch(() => [props.projectId, canRead.value, canManage.value], () => {
     </div>
     <section v-if="projectId && canManage" aria-label="项目费用参与资格">
       <h3>项目费用参与资格</h3>
-      <p>名单仅授予报销引用资格；生效和到期按北京时间，最长366天。移除保留历史。</p>
-      <button class="pm-button" :disabled="participantBusy" @click="loadParticipants(false)">读取当前名单</button>
+      <p>实施人员默认具备其参与服务项的报销引用资格，随当前实施计划变化，无需重复保存。</p>
+      <p>其他人员可添加额外项目资格；生效和到期按北京时间，最长366天。移除保留历史。</p>
+      <button class="pm-button" :disabled="participantBusy" @click="loadParticipants(false)">{{ participantBusy ? '读取中…' : '刷新当前名单' }}</button>
       <p v-if="participantError" role="alert">{{ participantError }}</p>
       <p v-if="participantNotice" role="status">{{ participantNotice }}</p>
+      <div v-if="implementationParticipants" class="pm-table-scroll">
+        <h4>默认参与资格（实施人员）</h4>
+        <table class="pm-table">
+          <thead>
+            <tr>
+              <th scope="col">人员</th><th scope="col">所属服务项</th><th scope="col">资格来源</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="person in implementationParticipants"
+              :key="`${person.service_item_id}:${person.resource_id}`"
+            >
+              <td>{{ person.display_name || person.subject_id }}<br><small>{{ person.subject_id }}</small></td>
+              <td>{{ person.service_item_id }}</td><td>实施计划自动生效</td>
+            </tr>
+            <tr v-if="!implementationParticipants.length">
+              <td colspan="3">当前没有已关联平台账号的实施人员；请在实施计划与人员资质中维护。</td>
+            </tr>
+          </tbody>
+        </table>
+        <button v-if="implementationCursor" class="pm-button" :disabled="participantBusy" @click="loadParticipants(false, true)">更多实施人员</button>
+      </div>
+      <h4 v-if="participants">额外项目资格（人工维护）</h4>
       <div v-if="participants" class="pm-table-scroll"><table class="pm-table"><thead><tr><th scope="col">稳定主体</th><th scope="col">状态</th><th scope="col">有效期（北京时间）</th><th scope="col">版本</th><th scope="col">操作</th></tr></thead><tbody>
         <tr v-for="person in participants" :key="person.subject_id"><td>{{ personnelLabel(person.subject_id) }}<br><small>{{ person.subject_id }}</small></td><td>{{ person.status }}</td><td>{{ formatBusinessDateTime(person.valid_from) }} 至 {{ formatBusinessDateTime(person.valid_until) }}</td><td>{{ person.version }}</td><td><button class="pm-button" @click="chooseParticipant(person)">选择当前版本</button></td></tr>
         <tr v-if="!participants.length"><td colspan="5">当前没有显式参与资格。</td></tr>
       </tbody></table><button v-if="participantCursor" class="pm-button" :disabled="participantBusy" @click="loadParticipants(true)">下一页</button></div>
-      <fieldset :disabled="participantBusy"><legend>新增或调整资格</legend>
+      <p>默认资格仅适用于对应服务项；移除额外项目资格不影响实施计划产生的默认资格。</p>
+      <fieldset :disabled="participantBusy"><legend>新增或调整额外项目资格</legend>
         <label v-if="!manualSubject">人员稳定主体
           <select v-model="participantForm.subject_id" :disabled="personnelLoading">
             <option value="">请选择人员</option>

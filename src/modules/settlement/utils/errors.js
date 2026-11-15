@@ -3,7 +3,7 @@ import { formatUserError } from "../../shared/utils/userError.js";
 // 仅转换服务端已定义的校验语句，不能把数据库或税控内部异常直接展示给用户。
 const validationMessages = {
   "amount must be a positive decimal with at most two fractional digits": "金额必须大于 0，且最多保留两位小数。",
-  "invalid decimal": "金额格式不正确，请填写有效数字，最多保留两位小数。",
+  "invalid decimal": "数值格式不正确，请核对开票明细中的数量、单价或税率及对应精度。",
   "currency must be a three-letter code": "币种格式不正确，请选择三位字母币种，例如 CNY。",
   "invalid payment_method": "请选择有效的回款方式。",
   "receipt_date must be YYYY-MM-DD": "回款日期格式不正确，请重新选择日期。",
@@ -17,6 +17,8 @@ const validationMessages = {
   "rejection reason is required": "驳回时必须填写原因。",
   "items and allocations are required": "请添加发票明细，并选择关联应收及分摊金额。",
   "invoice line total mismatch": "发票明细的金额合计不一致，请核对数量、单价和税额。",
+  "invoice line does not match quantity, unit price, tax rate and totals": "发票明细的金额关系不一致，请核对数量、单价、税率、税额及价税合计。",
+  "receipt_date must not be later than the Beijing business day": "回款日期不能晚于当前北京业务日，请核对真实回款日期。",
   "allocation total must equal invoice total": "应收分摊合计必须等于本次开票总金额，请核对后提交。",
   "applicant cannot approve own invoice": "申请人不能审核自己的开票申请，请由其他有权限的财务人员审核。",
   "applicant cannot review own invoice": "申请人不能复核自己的开票申请，请由其他有权限的财务人员处理。",
@@ -36,12 +38,19 @@ const requiredFields = {
   bank_account: "银行账号", bank_reference: "银行流水号", reason: "原因说明", reason_detail: "红冲原因说明", invoice_no: "发票号码",
 };
 
+// 用途：复用共享安全展示，保留业务原因及明确的差额审批指引。
+// 参数：input 为真实错误，options 为请求路径、方法、状态与未知结果选项。
+// 返回值：可执行中文提示；未知结果优先且不重复追加说明。
 export function formatSettlementError(input, options = {}) {
+  if (options.outcomeUnknown || input?.outcomeUnknown) return formatUserError(input, options);
   const message = settlementMessage(input, options);
   const hint = planAdjustConflictHint(input, options);
-  return hint ? `${message}${hint}` : message;
+  return hint && !message.includes(hint) ? `${message}${hint}` : message;
 }
 
+// 用途：翻译仍在使用的既有英文拒绝，优先保留受控中文和字段详情。
+// 参数：input 为服务端错误，options 为请求展示上下文。
+// 返回值：共享formatter处理后的安全文案。
 function settlementMessage(input, options = {}) {
   const code = String(options.code || input?.code || "");
   const raw = String(options.message || input?.message || (typeof input === "string" ? input : ""));
@@ -59,15 +68,16 @@ function settlementMessage(input, options = {}) {
   return formatUserError(input, options);
 }
 
-// 用途：计划新建 / 受控调整被服务端 409 拒绝时，补充"合计上限 + 差额超阈值需财务 override"的可执行说明（SET-04）。
-// 参数：input 为服务端错误；options 同 formatSettlementError，需带 path，status 取 options 或错误本身。
-// 返回值：附加说明；非计划写入路径或非冲突时为空字符串，其他模块文案完全不受影响。
+// 用途：仅对服务端明确的计划覆盖阈值拒绝补充既有财务处理路径。
+// 参数：input 为错误，options 为请求路径、状态及安全详情。
+// 返回值：覆盖阈值处理说明；版本、金额下限、合同上限及未知结果不追加。
 function planAdjustConflictHint(input, options = {}) {
   const path = String(options.path || "");
   if (!/^\/receivable-plans(?:[/?]|$)/.test(path)) return "";
   const status = Number(options.status || input?.status || 0);
   const code = String(options.code || input?.code || "");
-  if (status !== 409 && code !== "SETTLEMENT_CONFLICT") return "";
-  // 服务端只返回通用冲突码，不返回具体差额；因此这里给出确定可执行的处置路径，并申明不自动重试。
-  return "计划合计不得超过合同金额；若合计差额或单期降幅超过阈值，需要结算财务负责人（settlement.finance.override）override 权限后由该账号重新提交。页面不会自动重试保存，请先在“计划差额（合同金额对计划合计）”核对本次改动。";
+  const details = options.details ?? input?.details;
+  if (status !== 409 || code !== "SETTLEMENT_CONFLICT" ||
+    details?.reason_code !== "PLAN_COVERAGE_THRESHOLD") return "";
+  return "请先在“计划差额（合同金额对计划合计）”核对本次改动，再由具备差额放行权限的结算财务负责人处理。页面不会自动重试保存。";
 }

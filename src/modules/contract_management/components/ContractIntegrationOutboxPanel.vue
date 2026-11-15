@@ -4,6 +4,7 @@
 import { computed, onMounted, ref } from 'vue'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import ConfirmDialog from '@/modules/shared/components/ConfirmDialog.vue'
+import SegmentedTabs from '@/modules/shared/components/SegmentedTabs.vue'
 import { useConfirmDialog } from '@/modules/shared/composables/useConfirmDialog.js'
 import { formatUserError } from '@/modules/shared/utils/userError.js'
 import { formatBusinessDateTime } from '@/modules/shared/utils/businessTime.js'
@@ -32,6 +33,12 @@ const EVENT_LABELS = {
 }
 
 const kind = ref('financial')
+const queueTabs = computed(() => KINDS.map((queue) => ({
+  value: queue.key,
+  label: queue.label,
+  title: queue.hint,
+  count: kind.value === queue.key && items.value.length && !loading.value ? items.value.length : undefined,
+})))
 const items = ref([])
 const loading = ref(false)
 const error = ref('')
@@ -165,22 +172,14 @@ onMounted(load)
     </div>
 
     <div class="contract-outbox-toolbar">
-      <div class="contract-tabs contract-outbox-tabs" role="tablist" aria-label="选择集成死信队列">
-        <button
-          v-for="queue in KINDS"
-          :key="queue.key"
-          type="button"
-          role="tab"
-          :aria-selected="kind === queue.key"
-          :class="{ active: kind === queue.key }"
-          :disabled="!canManage"
-          :title="queue.hint"
-          @click="changeKind(queue.key)"
-        >
-          {{ queue.label }}
-          <i v-if="kind === queue.key && items.length && !loading">{{ items.length }}</i>
-        </button>
-      </div>
+      <SegmentedTabs
+        :model-value="kind"
+        class="contract-tabs contract-outbox-tabs"
+        aria-label="选择集成死信队列"
+        :items="queueTabs"
+        :disabled="!canManage"
+        @update:model-value="changeKind"
+      />
       <button
         v-if="canManage"
         class="contract-button secondary small"

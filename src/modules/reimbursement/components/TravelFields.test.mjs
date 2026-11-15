@@ -6,6 +6,8 @@ import * as Vue from 'vue'
 import { renderToString } from '@vue/server-renderer'
 import * as cities from '../cities.js'
 
+await cities.ensureCityCatalog()
+
 // 用途：把真实差旅行程字段组件编译为可SSR断言的Vue组件。
 // 参数：inline 表示是否编译模板，name 为真实组件文件名。
 // 返回值：保留真实字段标签、禁用状态与受控事件的组件对象。

@@ -22,9 +22,11 @@ const request = createRequest({
   feature: 'notifications',
 })
 /** listInbox 读取站内信收件箱分页列表，可由通知铃铛只请求未读事件。 */
-export const listInbox = ({ page = 1, pageSize = 20, unreadOnly = false } = {}) => {
+export const listInbox = ({ page = 1, pageSize = 20, unreadOnly = false, sourceApplication = '', excludeSourceApplication = '' } = {}) => {
   const query = new URLSearchParams({ page: String(page), page_size: String(pageSize) })
   if (unreadOnly) query.set('unread_only', 'true')
+  if (sourceApplication) query.set('source_application', sourceApplication)
+  if (excludeSourceApplication) query.set('exclude_source_application', excludeSourceApplication)
   return request(`/notifications/inbox?${query}`)
 }
 /**
@@ -43,6 +45,9 @@ export const markNotificationRead = (deliveryID) => request(`/notifications/inbo
 
 /** markAllNotificationsRead 一次性标记当前用户全部站内信为已读。 */
 export const markAllNotificationsRead = () => request('/notifications/inbox/read-all', { method: 'POST', body: '{}' })
+
+/** deleteReadNotifications 软删除当前用户全部已读站内信；未读与其他用户的通知不受影响。 */
+export const deleteReadNotifications = () => request('/notifications/inbox/read/delete', { method: 'POST', body: '{}' })
 
 export const listNotificationTemplates = ({ page = 1, pageSize = 50 } = {}) => request(`/notifications/templates?page=${page}&page_size=${pageSize}`).then((result) => ({
   ...result,

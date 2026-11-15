@@ -18,12 +18,15 @@ import * as workspace from '../workspace.js'
 import { allocationInput } from '../allocation.js'
 import * as invoiceClassification from '../invoiceClassification.js'
 import { PaginationBarStub } from '../../../test/helpers/paginationStub.mjs'
-import { claimStatusLabel as statusLabel, failureMessage, failureText } from '../statusLabels.js'
+import { claimStatusLabel as statusLabel, claimStatusTone, failureMessage, failureText, parseIssueLabel } from '../statusLabels.js'
 import { pollTask, taskSettled } from '../asyncTask.js'
 import { recallTask, rememberTask, savedAtLabel } from '../taskPersistence.js'
 import { formatUserError } from '../../shared/utils/userError.js'
+import { loadInvoiceCandidateCards } from '../components/InvoiceCandidateCards.test-support.mjs'
+import { loginUsername } from '../../shared/loginUsername.mjs'
 
 const panelStub = { render: () => null }
+const InvoiceCandidateCards = loadInvoiceCandidateCards()
 
 // 失败态替身：把标题和错误原因渲染成可断言文本，验证"失败没有被渲染成空态"。
 const ErrorStateStub = {
@@ -54,24 +57,29 @@ function draftOptionsFixture(orgID = 'org', routeType = 'TECHNICAL') {
 }
 
 // 用途：挂载真实报销页面setup，仅替换路由、认证和HTTP外部边界。
-// 参数：permissions 为服务端能力，request 为接口替身，section 为入口，roles 为显示角色。
+// 参数：permissions/request 为外部边界，section 为入口，roles 为角色，profile 为当前账号资料。
 // 返回值：真实Vue响应式状态和卸载方法，不冒充浏览器DOM验收。
-async function mountPage(permissions, request, section = 'dashboard', roles = []) {
+async function mountPage(permissions, request, section = 'dashboard', roles = [], profile = {}) {
   const previousWindow = globalThis.window
   globalThis.window = { addEventListener() {}, removeEventListener() {} }
   const route = Vue.reactive({ params: { section }, query: {} })
   const routerCalls = { push: [], replace: [] }
+  const shellProps = {}
   const router = { push(...args) { routerCalls.push.push(args) }, replace(...args) { routerCalls.replace.push(args) } }
   const { descriptor } = parse(readFileSync(new URL('./ReimbursementView.vue', import.meta.url), 'utf8'))
   const script = compileScript(descriptor, { id: 'expense-view-test' })
-  const dependencies = { ...claimPresentation, ...workspaceState, ...workspace, ...invoiceClassification, allocationInput, travelInput,frontendModules,sourceSHA256,
+    const dependencies = { ...claimPresentation, ...workspaceState, ...workspace, ...invoiceClassification, allocationInput, travelInput,frontendModules,sourceSHA256,
+    ConsoleIcon: { props: ['name'], setup: () => () => Vue.h('svg') },
     computed: Vue.computed, nextTick: Vue.nextTick, onBeforeUnmount: Vue.onBeforeUnmount,
     onMounted: Vue.onMounted, ref: Vue.ref, watch: Vue.watch, useRoute: () => route, useRouter: () => router,
-    onBeforeRouteLeave() {}, PaginationBar: PaginationBarStub,
-    AppShell: { setup: (_props, { slots }) => () => Vue.h('main', slots.default?.()) }, LoadingState: panelStub, ErrorState: ErrorStateStub, EmptyState: EmptyStateStub, ExpenseInbox: panelStub, ArchiveBorrowPanel: panelStub, TravelFields: panelStub, BusinessObjectSelect: panelStub, BusinessAttachmentSelect: panelStub, CitySelect: panelStub, ClaimPreviewPanel:panelStub,InvoiceContentFields:panelStub,InvoiceContentMappings:panelStub,InvoiceClassificationEvidence:panelStub,ParseExceptionsPanel:panelStub, PaymentExceptionPanel: panelStub, ClaimEvidenceTravelPanel: panelStub, BusinessOptionPicker: panelStub, ArchivePackagePanel: panelStub, InvoiceControlsPanel: panelStub, ApprovalRoundsPanel: panelStub, ClaimSyncPanel: panelStub, RecoveryPanel: panelStub, InvoiceOriginalViewer: panelStub, todayBusinessDate: () => '2026-11-10', formatBusinessDateTime: (value) => value,
-    createCommandRunner, createRequestID, timeoutSignal, formatMinor, toMinor, validateItems, createIdempotencyKey: (() => { let n = 0; return () => `expense-key-${++n}` })(), approvalNodeLabel, approvalNodesLabel, assignmentPurpose, expenseScopeDescription, hasTenantAllCapability, reimbursementRoleLabel, canSelectProjectReference, editableClaimItem, evidenceIDs, policyFields, policyFormFrom, policyPayload, statusLabel, failureMessage, failureText, formatUserError, pollTask, taskSettled, recallTask, rememberTask, savedAtLabel,
+    onBeforeRouteLeave() {}, PaginationBar: PaginationBarStub, InvoiceCandidateCards, loginUsername,
+    AppShell: { props: ['userName'], setup: (props, { slots }) => {
+      Object.assign(shellProps, props)
+      return () => Vue.h('main', slots.default?.())
+    } }, LoadingState: panelStub, ErrorState: ErrorStateStub, EmptyState: EmptyStateStub, ExpenseInbox: panelStub, ArchiveBorrowPanel: panelStub, TravelFields: panelStub, BusinessObjectSelect: panelStub, BusinessAttachmentSelect: panelStub, CitySelect: panelStub, ClaimPreviewPanel:panelStub,InvoiceContentFields:panelStub,InvoiceContentMappings:panelStub,InvoiceClassificationEvidence:panelStub,ParseExceptionsPanel:panelStub, PaymentExceptionPanel: panelStub, ClaimEvidenceTravelPanel: panelStub, BusinessOptionPicker: panelStub, ArchivePackagePanel: panelStub, InvoiceControlsPanel: panelStub, ApprovalRoundsPanel: panelStub, ClaimSyncPanel: panelStub, RecoveryPanel: panelStub, InvoiceOriginalViewer: panelStub, todayBusinessDate: () => '2026-11-10', formatBusinessDateTime: (value) => value,
+    createCommandRunner, createRequestID, timeoutSignal, formatMinor, toMinor, validateItems, createIdempotencyKey: (() => { let n = 0; return () => `expense-key-${++n}` })(), approvalNodeLabel, approvalNodesLabel, assignmentPurpose, expenseScopeDescription, hasTenantAllCapability, reimbursementRoleLabel, canSelectProjectReference, editableClaimItem, evidenceIDs, policyFields, policyFormFrom, policyPayload, statusLabel, claimStatusTone, failureMessage, failureText, parseIssueLabel, formatUserError, pollTask, taskSettled, recallTask, rememberTask, savedAtLabel,
 
-    ensureReimbursementSession: async () => ({ tenant_id: 'test', subject_id: 'actor', permissions, roles }),
+    ensureReimbursementSession: async () => ({ tenant_id: 'test', subject_id: 'actor', permissions, roles, ...profile }),
     logoutReimbursement: async () => ({}), api: { request }, startReimbursementLogin() {} }
   const content = script.content.replace(/^import[\s\S]*?['"][^'"]+['"]\n/gm, '')
     .replace('export default', 'return')
@@ -105,8 +113,31 @@ async function mountPage(permissions, request, section = 'dashboard', roles = []
       setup: (props, { slots }) => () => Vue.h('a', {}, slots.default?.()) })
     return renderToString(app)
   }
-  return { state, route, routerCalls, html, unmount: () => { app.unmount(); globalThis.window = previousWindow } }
+  return { state, route, routerCalls, html, shellProps,
+    unmount: () => { app.unmount(); globalThis.window = previousWindow } }
 }
+
+test('侧栏使用当前登录账号和对应头像，不显示OIDC内部名称', async () => {
+  const fixture = await mountPage(['expense.claim.read'], async () => ({ my_claims: 0 }),
+    'dashboard', [], { username: 'alice', display_name: 'platform-01INTERNAL' })
+  try {
+    const html = await fixture.html()
+    assert.equal(fixture.shellProps.userName, 'alice')
+    assert.match(html, /class="expense-role-card__avatar"[^>]*>\s*AL\s*<\/span>/)
+    assert.doesNotMatch(html, /platform-01INTERNAL/)
+  } finally { fixture.unmount() }
+})
+
+test('没有真实账号时使用明确占位，不能回退成内部主体标识', async () => {
+  const fixture = await mountPage(['expense.claim.read'], async () => ({ my_claims: 0 }),
+    'dashboard', [], { display_name: 'platform-01INTERNAL' })
+  try {
+    const html = await fixture.html()
+    assert.equal(fixture.shellProps.userName, '当前用户')
+    assert.match(html, /class="expense-role-card__avatar"[^>]*>\s*用\s*<\/span>/)
+    assert.doesNotMatch(html, /platform-01INTERNAL/)
+  } finally { fixture.unmount() }
+})
 
 test('工作台统计只显示服务端范围统计，不用当前页条数推导', async () => {
   const calls = []
@@ -156,6 +187,16 @@ test('HTTP上传仍计算原件摘要并使用系统回执文档，不暴露可�
       if (path === '/invoice-documents/server-document/complete') return {
         id: 'server-document', file_id: 'server-file', status: 'READY', parse_run_id: 'server-run',
       }
+      if (path === '/parse-runs/server-run') return {
+        id: 'server-run', status: 'DONE', document_id: 'server-document', attempt: 1,
+      }
+      if (path === '/invoice-documents/server-document') return {
+        id: 'server-document', version: 2, status: 'READY',
+        detail: {
+          parse_run_id: 'server-run', parse_result: { documents: [] },
+          parse_issues: ['TEXT_EXTRACTION_IS_NOT_TAX_VERIFICATION', 'MANUAL_CONFIRMATION_REQUIRED', 'FIELD_MISSING:gross_minor', 'DETAIL_AMOUNTS_INCOMPLETE'],
+        },
+      }
       throw new Error(`unexpected API: ${path}`)
     }, 'invoice-upload')
     window.location = { origin: 'http://fixture.example.test',
@@ -167,7 +208,10 @@ test('HTTP上传仍计算原件摘要并使用系统回执文档，不暴露可�
       return new Response(null, { status: 200 })
     }
     await fixture.state.uploadInvoiceBatch({ target: { files: [file] } })
+    await new Promise((resolve) => setTimeout(resolve, 20))
     assert.equal(fixture.state.error.value, '')
+    assert.ok(writes.some(([path]) => path === '/parse-runs/server-run'), 'upload must auto-query parse run')
+    assert.equal(fixture.state.parseRun.value?.status, 'DONE')
     assert.equal(fixture.state.uploadBatch.value[0].status, 'READY')
     assert.equal(writes[0][1].sha256,
       createHash('sha256').update(Buffer.from(await file.arrayBuffer())).digest('hex'))
@@ -175,8 +219,13 @@ test('HTTP上传仍计算原件摘要并使用系统回执文档，不暴露可�
     assert.equal(fixture.state.evidenceNames.value['server-file'], 'upload-fixture.pdf')
     const html = await fixture.html()
     assert.doesNotMatch(html, /文档ID|上传后的文档ID|server-document/)
+    assert.doesNotMatch(html, /发起解析/, '自动识别后不应再要求用户点击发起解析')
     assert.match(html, /upload-fixture\.pdf/)
     assert.match(html, /查询原件状态/)
+    assert.match(html, /查询解析状态/)
+    assert.match(html, /仅提取票面文字，不代表税务验真/)
+    assert.match(html, /缺少字段：价税合计（票面总额）/)
+    assert.doesNotMatch(html, /TEXT_EXTRACTION_IS_NOT_TAX_VERIFICATION|FIELD_MISSING:gross_minor/)
   } finally {
     fixture?.unmount()
     globalThis.fetch = previousFetch
@@ -283,7 +332,7 @@ test('提交依赖故障保留草稿输入和原命令，不显示提交成功',
     Object.assign(item.allocations[0], { project_id: 'project', amount: '12.34' })
     await fixture.state.saveDraft()
     assert.equal(fixture.state.draft.value.title, '保留草稿')
-    assert.match(fixture.state.error.value, /项目引用服务暂不可用/)
+    assert.match(fixture.state.error.value, /结果尚未确认.*查询原命令/)
     assert.equal(fixture.state.notice.value, '')
     assert.ok(fixture.state.pending.value.command_id)
     const sent = JSON.parse(calls.at(-1)[1].body)
@@ -627,7 +676,7 @@ test('候选业务模板明确显示缺总额和不确定分组，不把空值�
       { invoice_number: '', gross_minor: '', group_kind: 'AMBIGUOUS_MERGE_OR_CONTINUATION', issues: ['TOTAL_MISSING'] },
     ] } } }
   const fixture = await mountPage(['expense.invoice.read', 'expense.invoice.upload'], async (path) =>
-    path === '/invoice-documents/doc' ? doc : { items: [], total: 0 }, 'invoices')
+    path === '/invoice-documents/doc' ? doc : { items: [], total: 0 }, 'invoice-upload')
   try {
     fixture.state.documentID.value = 'doc'
     await fixture.state.readDocument()
@@ -988,8 +1037,8 @@ test('付款分区打开单据后请求付款历史并渲染历史表', async ()
   } finally { fixture.unmount() }
 })
 
-test('付款分区展示项目费用参与人查询与维护入口', async () => {
-  const fixture = await mountPage(['expense.payment.read', 'expense.claim.read'], async () => ({ items: [], total: 0 }), 'payments')
+test('项目费用参与人入口归入归档中心，不占用付款页面', async () => {
+  const fixture = await mountPage(['expense.archive.read', 'expense.claim.read'], async () => ({ items: [], total: 0 }), 'archives')
   try {
     fixture.state.projectOptions.value = [{ project_id: 'project-1', project_name: '示例项目' }]
     const html = await fixture.html()
@@ -1115,7 +1164,7 @@ test('解析失败现场显示原因与下一步，不回显 PARSER_FAILED 机�
   const fixture = await mountPage(['expense.invoice.read', 'expense.invoice.upload'], async (path) => {
     if (path.startsWith('/invoices?')) return { items: [], total: 0 }
     throw new Error(`unexpected ${path}`)
-  }, 'invoices')
+  }, 'invoice-upload')
   try {
     fixture.state.parseRun.value = { id: 'job-1', status: 'FAILED', attempt: 2, last_error: 'PARSER_FAILED' }
     fixture.state.documentStatus.value = { id: 'document-1', status: 'READY' }
@@ -1124,6 +1173,21 @@ test('解析失败现场显示原因与下一步，不回显 PARSER_FAILED 机�
     assert.match(html, /人工录入/)
     assert.match(html, /已就绪/)
     assert.doesNotMatch(html, /PARSER_FAILED/)
+  } finally { fixture.unmount() }
+})
+
+test('同步归档政策拒绝保留具体原因，未知写入先查询原命令', async () => {
+  const fixture = await mountPage(['expense.claim.read'], async () => ({ items: [], total: 0 }), 'claims')
+  try {
+    const cause = Object.assign(new Error('组织保留政策重叠，请先受控修复'), {
+      code: 'ARCHIVE_RETENTION_CONFLICT', status: 422, method: 'POST',
+    })
+    fixture.state.showError(cause)
+    assert.match(fixture.state.error.value, /组织保留政策重叠.*受控修复/)
+    assert.doesNotMatch(fixture.state.error.value, /证据包任务|核对归档版本/)
+    fixture.state.showError(Object.assign(cause, { outcomeUnknown: true }))
+    assert.match(fixture.state.error.value, /结果.*未确认.*查询原命令/)
+    assert.doesNotMatch(fixture.state.error.value, /组织保留政策重叠/)
   } finally { fixture.unmount() }
 })
 
@@ -1172,6 +1236,7 @@ test('客户端校验失败带费用行坐标、标红对应区域且不发送�
     Object.assign(item.allocations[0], { project_id: 'project', amount: '10.00' })
     const scrolled = []
     const row = { matches: () => false, scrollIntoView: () => scrolled.push('row'), querySelectorAll: () => [] }
+    fixture.state.claimFormOpen.value = true
     const previousDocument = globalThis.document
     globalThis.document = { querySelectorAll: () => [], querySelector: () => row }
     try {
@@ -1581,8 +1646,12 @@ test('工作台指标可跳转到对应分区，侧栏重复按钮墙已移除',
     })
   try {
     const html = await fixture.html()
-    assert.match(html, /<button[^>]*expense-metric-link[^>]*>我的单据：3/)
-    assert.match(html, /<button[^>]*expense-metric-link[^>]*>待复核发票：4/)
+    // 磁贴结构：同一按钮内同时出现指标名称与数值，点击语义不变。
+    const scope = '(?:(?!</button>)[\\s\\S])*?'
+    assert.match(html, new RegExp(
+      `<button[^>]*expense-metric-link[^>]*>${scope}我的单据${scope}3`))
+    assert.match(html, new RegExp(
+      `<button[^>]*expense-metric-link[^>]*>${scope}待复核发票${scope}4`))
     // 指标点击走导航，而不是只有一行数字。
     fixture.state.navigate('invoices')
     assert.equal(fixture.routerCalls.push.at(-1)[0].params.section, 'invoices')
@@ -1591,16 +1660,72 @@ test('工作台指标可跳转到对应分区，侧栏重复按钮墙已移除',
   } finally { fixture.unmount() }
 })
 
-test('发票上传并入发票中心导航，异常池保留单独入口并说明关系', async () => {
+test('发票台账与发票上传拆分为导航入口，异常池保留单独入口', async () => {
   const fixture = await mountPage(['expense.invoice.read', 'expense.invoice.upload'],
     async () => ({ items: [], total: 0 }), 'invoices')
   try {
-    const items = fixture.state.navGroups.value.flatMap((group) => group.items || [])
-    assert.deepEqual(items.map((item) => item.key), ['portal', 'invoices', 'invoice-abnormal'])
+    const groups = fixture.state.navGroups.value
+    assert.deepEqual(groups.map((group) => group.label || '门户'), ['门户', '发票中心'])
+    // 有标题的业务分组可折叠；返回门户单入口组没有标题，不显示折叠控件。
+    assert.equal(groups[0].collapsible, false)
+    assert.equal(groups[1].collapsible, true)
+    const items = groups.flatMap((group) => group.items || [])
+    assert.deepEqual(items.map((item) => item.key), ['portal', 'invoices', 'invoice-upload', 'invoice-abnormal'])
     const html = await fixture.html()
-    assert.match(html, /上传、人工录入与票面复核都在本页完成/)
-    assert.match(html, /打开异常发票池/)
-    assert.doesNotMatch(html, /发票上传与人工录入/)
+    assert.match(html, /发票台账/)
+    assert.match(html, /上传发票/)
+    assert.match(html, /异常发票池/)
+    assert.doesNotMatch(html, /拖拽发票到此处/)
+  } finally { fixture.unmount() }
+
+  const upload = await mountPage(['expense.invoice.read', 'expense.invoice.upload'],
+    async () => ({ items: [], total: 0 }), 'invoice-upload')
+  try {
+    const html = await upload.html()
+    assert.match(html, /选择发票文件/)
+    assert.match(html, /拖拽发票到此处/)
+    assert.match(html, /解析与原件/)
+    assert.doesNotMatch(html, /expense-searchbar/)
+  } finally { upload.unmount() }
+})
+
+test('工作台按原型呈现角色卡、统计卡和双栏待办', async () => {
+  const fixture = await mountPage(['expense.claim.read', 'expense.claim.create', 'expense.approval.act',
+    'expense.payment.read', 'expense.invoice.read', 'expense.invoice.upload'],
+  async (path) => {
+    if (path === '/dashboard') {
+      return { my_claims: 3, pending_approvals: 1, pending_payments: 2, invoice_review_required: 4,
+        my_paid_this_month: 5, pending_tasks: [{ id: 'task-1', claim_no: 'BX-1', node_code: 'TECH_DIRECTOR', created_at: '2026-11-10T09:00:00+08:00' }] }
+    }
+    return { items: [], total: 0 }
+  })
+  try {
+    const html = await fixture.html()
+    assert.match(html, /expense-role-card/)
+    assert.match(html, /expense-metrics--tiles/)
+    assert.match(html, /expense-metric-link[^>]*data-tone="orange"/)
+    assert.match(html, /expense-split/)
+    assert.match(html, /我的待办/)
+    assert.match(html, /快捷操作/)
+    assert.match(html, /新建报销/)
+    assert.match(html, /上传发票/)
+    assert.doesNotMatch(html, /角色切换/)
+  } finally { fixture.unmount() }
+})
+
+test('政策配置按原型拆分为费用标准、审批路由、发票映射和其他配置页签', async () => {
+  const fixture = await mountPage(['expense.config.manage', 'expense.policy.publish'],
+    async () => ({ items: [], total: 0 }), 'policies')
+  try {
+    const html = await fixture.html()
+    assert.match(html, /费用标准/)
+    assert.match(html, /审批路由规则/)
+    assert.match(html, /发票类型映射/)
+    assert.match(html, /其他配置/)
+    fixture.state.selectPolicyTab('route_rules')
+    assert.equal(fixture.state.policyKind.value, 'route_rules')
+    fixture.state.selectPolicyTab('other')
+    assert.equal(fixture.state.policyKind.value, 'city_mappings')
   } finally { fixture.unmount() }
 })
 
@@ -1649,7 +1774,7 @@ test('刷新后仍能靠本地记忆找回解析任务与最近原件并继续�
       if (path === '/invoice-documents/doc/parse') return { id: 'run-1', status: 'PENDING', document_version: 3 }
       if (path === '/parse-runs/run-1') return { id: 'run-1', status: 'DONE' }
       return { items: [], total: 0 }
-    }, 'invoices')
+    }, 'invoice-upload')
     try {
       first.state.documentID.value = 'doc'
       await first.state.parseDocument()
@@ -1665,7 +1790,7 @@ test('刷新后仍能靠本地记忆找回解析任务与最近原件并继续�
       if (path === '/parse-runs/run-1') return { id: 'run-1', status: 'DONE' }
       if (path === '/invoice-documents/doc') return { id: 'doc', version: 2, file_id: 'file', status: 'READY' }
       return { items: [], total: 0 }
-    }, 'invoices')
+    }, 'invoice-upload')
     try {
       assert.equal(second.state.recentTask.value.parse.task_id, 'run-1')
       assert.equal(second.state.recentTask.value.document.document_id, 'doc')
@@ -1856,6 +1981,7 @@ test('基础信息只读展示本人姓名任职部门，唯一主体及收款�
     assert.equal(fixture.state.draft.value.route_type, 'TECHNICAL')
     assert.equal(fixture.state.draft.value.finance_entity_id, 'entity')
     assert.equal(fixture.state.draft.value.payee_profile_id, 'payee')
+    fixture.state.claimFormOpen.value = true
     const html = await fixture.html()
     assert.match(html, /报销人<input[^>]*value="王工"[^>]*readonly/)
     assert.match(html, /所属部门<input[^>]*value="技术部"[^>]*readonly/)
@@ -2002,7 +2128,7 @@ test('远端READY但本地complete失败仍保持未完成及原complete待确�
     assert.equal(fixture.state.parseRun.value, null)
     assert.equal(fixture.state.evidenceNames.value['same-file'], undefined)
     assert.equal(fixture.state.runner.pending().key, 'document.complete')
-    assert.match(fixture.state.error.value, /本地完成结果未知/)
+    assert.match(fixture.state.error.value, /结果尚未确认.*查询原命令/)
     assert.equal(fixture.state.notice.value, '')
   } finally { fixture.unmount(); globalThis.fetch = previousFetch }
 })

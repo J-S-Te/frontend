@@ -1,0 +1,420 @@
+/* ==========================================================================
+   Ant Design 5-inspired enterprise UI layer (2026-11-13)
+   --------------------------------------------------------------------------
+   参考 https://ant.design/components/overview-cn 的 token、Layout/Menu/Breadcrumb、
+   Button/Input/Table/Tabs/Tag/Modal 规范，在现有 Vue 组件上统一落地。
+   不引入第二套运行时组件库；只提供视觉和交互基线，业务组件、权限、接口不变。
+   使用 :root + :is(...) 提高优先级，覆盖异步加载的模块 CSS。
+   ========================================================================== */
+:root {
+  --ui-canvas: #f5f5f5;
+  --ui-card: #ffffff;
+  --ui-card-soft: #fafafa;
+  --ui-line: #f0f0f0;
+  --ui-line-strong: #d9d9d9;
+  --ui-text: rgba(0, 0, 0, .88);
+  --ui-text-secondary: rgba(0, 0, 0, .65);
+  --ui-muted: rgba(0, 0, 0, .45);
+  --ui-primary: #1677ff;
+  --ui-primary-ink: #1677ff;
+  --ui-primary-hover: #4096ff;
+  --ui-primary-active: #0958d9;
+  --ui-primary-soft: #e6f4ff;
+  --ui-primary-border: #91caff;
+  --ui-success: #52c41a;
+  --ui-warning: #faad14;
+  --ui-danger: #ff4d4f;
+  --ui-success-soft: #f6ffed;
+  --ui-warning-soft: #fffbe6;
+  --ui-danger-soft: #fff2f0;
+  --ui-table-head: #fafafa;
+  --ui-hover: #fafafa;
+  --ui-radius-card: 8px;
+  --ui-radius-control: 6px;
+  --ui-shadow-card: 0 1px 2px rgba(0, 0, 0, .03), 0 1px 6px -1px rgba(0, 0, 0, .02);
+  --ui-shadow-hover: 0 6px 16px rgba(0, 0, 0, .08);
+  --ui-shadow-modal: 0 6px 16px rgba(0, 0, 0, .08), 0 3px 6px -4px rgba(0, 0, 0, .12);
+}
+
+:root[data-theme="dark"] {
+  --ui-canvas: #141414;
+  --ui-card: #1f1f1f;
+  --ui-card-soft: #1a1a1a;
+  --ui-line: #303030;
+  --ui-line-strong: #424242;
+  --ui-text: rgba(255, 255, 255, .85);
+  --ui-text-secondary: rgba(255, 255, 255, .65);
+  --ui-muted: rgba(255, 255, 255, .45);
+  --ui-primary: #1668dc;
+  --ui-primary-ink: #3c89e8;
+  --ui-primary-hover: #3c89e8;
+  --ui-primary-active: #1554ad;
+  --ui-primary-soft: #111a2c;
+  --ui-primary-border: #15325b;
+  --ui-success-soft: #162312;
+  --ui-warning-soft: #2b2111;
+  --ui-danger-soft: #2a1215;
+  --ui-table-head: #1d1d1d;
+  --ui-hover: #262626;
+  --ui-shadow-card: 0 1px 2px rgba(0, 0, 0, .28);
+  --ui-shadow-modal: 0 6px 16px rgba(0, 0, 0, .48);
+}
+
+html,
+body {
+  background: var(--ui-canvas);
+  color: var(--ui-text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "Noto Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+/* Layout：深色 Sider + 白色 Header + 浅灰 Content，对应 Ant Design Layout。 */
+:is(.console-page, .contract-app, .pm-page, .crm-page, .portal-page, .settlement-page, .da-shell, .expense-canvas) {
+  background: var(--ui-canvas);
+}
+:root :is(.console-sidebar, .contract-sidebar, .pm-sidebar, .crm-sidebar, .da-sidebar, .settlement-sidebar, .portal-sidebar) {
+  color: rgba(255, 255, 255, .65);
+  border-right: 0;
+  background: #001529;
+  box-shadow: 2px 0 8px rgba(0, 0, 0, .15);
+}
+:root :is(.console-topbar, .contract-topbar, .pm-topbar, .crm-topbar, .da-topbar, .settlement-topbar, .portal-topbar) {
+  color: var(--ui-text);
+  border-bottom: 1px solid var(--ui-line);
+  background: var(--ui-card);
+  box-shadow: none;
+}
+:root :is(.console-crumb, .contract-breadcrumb, .pm-breadcrumb, .da-breadcrumb) {
+  color: var(--ui-muted);
+  font-size: 14px;
+}
+
+/* Navigation Menu：Ant Menu 的 40px 行高、6px 圆角和选中蓝底。 */
+:root :is(.console-nav-item, .contract-nav-item, .pm-nav-item, .crm-nav-item, .da-nav-item, .settlement-nav-item, .portal-nav-item) {
+  min-height: 40px;
+  margin: 4px 8px;
+  padding: 0 12px;
+  color: rgba(255, 255, 255, .65);
+  font-size: 14px;
+  border-radius: var(--ui-radius-control);
+  transition: background-color .2s ease, color .2s ease;
+}
+:root :is(.console-nav-item, .contract-nav-item, .pm-nav-item, .crm-nav-item, .da-nav-item, .settlement-nav-item, .portal-nav-item):hover {
+  color: #fff;
+  background: rgba(255, 255, 255, .08);
+}
+:root :is(.console-nav-item, .contract-nav-item, .pm-nav-item, .crm-nav-item, .da-nav-item, .settlement-nav-item, .portal-nav-item).active {
+  color: #fff;
+  background: var(--ui-primary);
+  box-shadow: none;
+}
+:root :is(.console-nav-label, .contract-nav-label, .pm-nav-label, .crm-nav-label, .da-nav-label, .settlement-nav-label) {
+  color: rgba(255, 255, 255, .45);
+  font-size: 12px;
+}
+
+/* Typography / PageHeader：Ant 的 20px 标题和 14px 描述。 */
+:root :is(.console-page-head, .contract-page-head, .crm-page-head, .da-page-head, .pm-page-head, .portal-title, .expense-head) h1 {
+  color: var(--ui-text);
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.4;
+}
+:root :is(.console-page-head, .contract-page-head, .crm-page-head, .da-page-head, .pm-page-head, .portal-title, .expense-head) p {
+  margin-top: 4px;
+  color: var(--ui-muted);
+  font-size: 14px;
+  line-height: 1.57;
+}
+
+/* Card：8px 圆角、1px 浅边框、极轻阴影。 */
+:root :is(
+  .console-card, .console-table-card, .contract-card, .contract-table-card,
+  .crm-panel, .portal-card, .settlement-panel, .da-panel, .da-native-panel,
+  .da-native-table-panel, .da-alert-table-panel, .pm-panel, .expense-panel
+) {
+  color: var(--ui-text);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-radius-card);
+  background: var(--ui-card);
+  box-shadow: var(--ui-shadow-card);
+}
+:root :is(.crm-stat-card, .pm-kpi, .expense-metric, .da-native-metric) {
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-radius-card);
+  background: var(--ui-card);
+  box-shadow: var(--ui-shadow-card);
+}
+:root :is(.crm-stat-card, .pm-kpi, .expense-metric, .da-native-metric):hover {
+  border-color: var(--ui-line-strong);
+  box-shadow: var(--ui-shadow-hover);
+}
+
+/* Button：Ant 四个状态；主按钮 #1677ff，默认/危险边界明确。 */
+:root :is(.console-button, .contract-button, .pm-button, .da-button, .expense-button) {
+  min-height: 32px;
+  padding: 4px 15px;
+  color: var(--ui-text);
+  font-size: 14px;
+  font-weight: 400;
+  border: 1px solid var(--ui-line-strong);
+  border-radius: var(--ui-radius-control);
+  background: var(--ui-card);
+  box-shadow: none;
+  transition: color .2s ease, border-color .2s ease, background-color .2s ease, box-shadow .2s ease;
+}
+:root :is(.console-button, .contract-button, .pm-button, .da-button, .expense-button):hover:not(:disabled) {
+  color: var(--ui-primary);
+  border-color: var(--ui-primary-hover);
+}
+:root :is(.console-button, .contract-button, .pm-button, .da-button, .expense-button).primary {
+  color: #fff;
+  border-color: var(--ui-primary);
+  background: var(--ui-primary);
+  box-shadow: 0 2px 0 rgba(5, 145, 255, .1);
+}
+:root :is(.console-button, .contract-button, .pm-button, .da-button, .expense-button).primary:hover:not(:disabled) {
+  color: #fff;
+  border-color: var(--ui-primary-hover);
+  background: var(--ui-primary-hover);
+}
+:root :is(.console-button, .contract-button, .pm-button, .da-button, .expense-button).primary:active:not(:disabled) {
+  border-color: var(--ui-primary-active);
+  background: var(--ui-primary-active);
+}
+:root :is(.console-button, .contract-button, .pm-button, .da-button, .expense-button).secondary {
+  color: var(--ui-text);
+  border-color: var(--ui-line-strong);
+  background: var(--ui-card);
+}
+:root :is(.console-button, .contract-button, .pm-button, .da-button, .expense-button).secondary:hover:not(:disabled) {
+  color: var(--ui-primary);
+  border-color: var(--ui-primary-hover);
+  background: var(--ui-card);
+}
+:root :is(.console-button, .contract-button, .pm-button, .da-button, .expense-button).danger {
+  color: #fff;
+  border-color: var(--ui-danger);
+  background: var(--ui-danger);
+}
+:root :is(.console-button, .contract-button, .pm-button, .da-button, .expense-button).danger:hover:not(:disabled) {
+  border-color: #ff7875;
+  background: #ff7875;
+}
+:root :is(.console-button, .contract-button, .pm-button, .da-button, .expense-button).small {
+  min-height: 24px;
+  padding: 0 7px;
+  font-size: 14px;
+}
+:root :is(.console-button, .contract-button, .pm-button, .da-button, .expense-button):disabled {
+  color: rgba(0, 0, 0, .25);
+  border-color: var(--ui-line-strong);
+  background: rgba(0, 0, 0, .04);
+  box-shadow: none;
+}
+:root[data-theme="dark"] :is(.console-button, .contract-button, .pm-button, .da-button, .expense-button):disabled {
+  color: rgba(255, 255, 255, .25);
+  border-color: var(--ui-line-strong);
+  background: rgba(255, 255, 255, .08);
+}
+
+/* Input / Select / Form：32px 控件、6px 圆角、Ant 的蓝色 focus ring。 */
+:root :is(.console-content, .contract-content, .pm-page, .crm-content, .portal-content,
+  .settlement-content, .da-page, .expense-canvas, .contract-create-modal, .contract-rule-modal,
+  .contract-signing-review, .crm-customer-dialog, .crm-opportunity-dialog, .crm-credit-apply-form,
+  .pm-dialog, .da-modal, .console-detail-modal, .portal-dialog)
+  form :is(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="hidden"]), select, textarea) {
+  min-height: 32px;
+  padding: 4px 11px;
+  color: var(--ui-text);
+  font-size: 14px;
+  border: 1px solid var(--ui-line-strong);
+  border-radius: var(--ui-radius-control);
+  background: var(--ui-card);
+  transition: border-color .2s ease, box-shadow .2s ease;
+}
+:root :is(.console-content, .contract-content, .pm-page, .crm-content, .portal-content,
+  .settlement-content, .da-page, .expense-canvas, .contract-create-modal, .contract-rule-modal,
+  .contract-signing-review, .crm-customer-dialog, .crm-opportunity-dialog, .crm-credit-apply-form,
+  .pm-dialog, .da-modal, .console-detail-modal, .portal-dialog)
+  form :is(input, select, textarea):hover {
+  border-color: var(--ui-primary-hover);
+}
+:root :is(.console-content, .contract-content, .pm-page, .crm-content, .portal-content,
+  .settlement-content, .da-page, .expense-canvas, .contract-create-modal, .contract-rule-modal,
+  .contract-signing-review, .crm-customer-dialog, .crm-opportunity-dialog, .crm-credit-apply-form,
+  .pm-dialog, .da-modal, .console-detail-modal, .portal-dialog)
+  form :is(input, select, textarea):focus {
+  border-color: var(--ui-primary);
+  box-shadow: 0 0 0 2px rgba(5, 145, 255, .1);
+  outline: 0;
+}
+:root :is(.console-filter-bar, .contract-filter-bar, .pm-filter-bar, .crm-filter-bar, .da-filters) {
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-radius-card);
+  background: var(--ui-card);
+  box-shadow: none;
+}
+:root :is(.console-search-field, .contract-search-field) {
+  border-color: var(--ui-line-strong);
+  border-radius: var(--ui-radius-control);
+  background: var(--ui-card);
+}
+:root :is(.console-search-field, .contract-search-field):focus-within {
+  border-color: var(--ui-primary);
+  box-shadow: 0 0 0 2px rgba(5, 145, 255, .1);
+}
+
+/* Table：#fafafa 表头、14px 字号、hover 浅灰；不改变表格滚动容器。 */
+:root :is(.console-data-table, .contract-data-table, .crm-data-table, .crm-light-table,
+  .pm-table, .da-table, .settlement-plan-table, .settlement-invoice-table table,
+  .metric-facts-table, .expense-table-body table) {
+  border-collapse: separate;
+  border-spacing: 0;
+  color: var(--ui-text);
+  font-size: 14px;
+}
+:root :is(.console-data-table, .contract-data-table, .crm-data-table, .crm-light-table,
+  .pm-table, .da-table, .settlement-plan-table, .settlement-invoice-table table,
+  .metric-facts-table, .expense-table-body table) th {
+  height: 47px;
+  padding: 12px 16px;
+  color: var(--ui-text);
+  font-size: 14px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--ui-line);
+  background: var(--ui-table-head);
+}
+:root :is(.console-data-table, .contract-data-table, .crm-data-table, .crm-light-table,
+  .pm-table, .da-table, .settlement-plan-table, .settlement-invoice-table table,
+  .metric-facts-table, .expense-table-body table) td {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--ui-line);
+}
+:root :is(.console-data-table, .contract-data-table, .crm-data-table, .crm-light-table,
+  .pm-table, .da-table, .settlement-plan-table, .settlement-invoice-table table,
+  .metric-facts-table, .expense-table-body table) tbody tr:hover td {
+  background: var(--ui-hover);
+}
+
+/* Tabs：Ant 的下划线页签，而非 pill。 */
+:root :is(.contract-tabs, .settlement-tabs, .settings-tab-bar, .crm-tabs, .crm-customer-tabs,
+  .crm-catalog-tabs, .pm-sm-tabs, .pm-detail-tabs, .pm-notification-tabs, .notification-tabs,
+  .expense-tabs, .expense-inbox-tabs, .expense-status-tabs, .da-chart-tabs) {
+  display: flex;
+  gap: 24px;
+  padding: 0;
+  overflow-x: auto;
+  border: 0;
+  border-bottom: 1px solid var(--ui-line);
+  border-radius: 0;
+  background: transparent;
+  scrollbar-width: thin;
+}
+:root :is(.contract-tabs, .settlement-tabs, .settings-tab-bar, .crm-tabs, .crm-customer-tabs,
+  .crm-catalog-tabs, .pm-sm-tabs, .pm-detail-tabs, .pm-notification-tabs, .notification-tabs,
+  .expense-tabs, .expense-inbox-tabs, .expense-status-tabs, .da-chart-tabs) button {
+  position: relative;
+  min-height: 40px;
+  padding: 8px 0;
+  color: var(--ui-text);
+  font-size: 14px;
+  font-weight: 400;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+:root :is(.contract-tabs, .settlement-tabs, .settings-tab-bar, .crm-tabs, .crm-customer-tabs,
+  .crm-catalog-tabs, .pm-sm-tabs, .pm-detail-tabs, .pm-notification-tabs, .notification-tabs,
+  .expense-tabs, .expense-inbox-tabs, .expense-status-tabs, .da-chart-tabs) button:hover:not(:disabled) {
+  color: var(--ui-primary);
+  background: transparent;
+}
+:root :is(.contract-tabs, .settlement-tabs, .settings-tab-bar, .crm-tabs, .crm-customer-tabs,
+  .crm-catalog-tabs, .pm-sm-tabs, .pm-detail-tabs, .pm-notification-tabs, .notification-tabs,
+  .expense-tabs, .expense-inbox-tabs, .expense-status-tabs, .da-chart-tabs) button.active {
+  color: var(--ui-primary);
+  font-weight: 500;
+  background: transparent;
+}
+:root :is(.contract-tabs, .settlement-tabs, .settings-tab-bar, .crm-tabs, .crm-customer-tabs,
+  .crm-catalog-tabs, .pm-sm-tabs, .pm-detail-tabs, .pm-notification-tabs, .notification-tabs,
+  .expense-tabs, .expense-inbox-tabs, .expense-status-tabs, .da-chart-tabs) button.active::after {
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  display: block;
+  height: 2px;
+  content: "";
+  background: var(--ui-primary);
+}
+
+/* Tag / Badge：Ant Tag 的 4px 圆角与语义底色。 */
+:root :is(.contract-badge, .settlement-badge, .console-badge, .crm-badge, .pm-badge, .da-badge, .expense-badge) {
+  padding: 1px 8px;
+  font-size: 12px;
+  font-weight: 400;
+  border-radius: 4px;
+}
+
+/* Modal：Ant 8px 圆角、轻阴影。 */
+:root :is(.console-modal, .contract-detail-modal, .pm-dialog, .da-modal, .settlement-modal, .crm-detail) {
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-radius-card);
+  background: var(--ui-card);
+  box-shadow: var(--ui-shadow-modal);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root :is(.console-button, .contract-button, .pm-button, .da-button, .expense-button),
+  :root :is(.crm-stat-card, .pm-kpi, .expense-metric, .da-native-metric) {
+    transition: none;
+  }
+}
+
+/* Shared feedback components: Ant Modal/Message compactness where scoped styles allow. */
+:root body :is(.shared-confirm, .shared-prompt) {
+  border-radius: var(--ui-radius-card);
+  background: var(--ui-card);
+  box-shadow: var(--ui-shadow-modal);
+}
+:root body :is(.shared-confirm, .shared-prompt) header h3 {
+  color: var(--ui-text);
+  font-size: 16px;
+  font-weight: 600;
+}
+:root body :is(.shared-confirm, .shared-prompt) header p {
+  color: var(--ui-primary);
+  font-size: 12px;
+  letter-spacing: 0;
+}
+:root body :is(.shared-confirm, .shared-prompt) :is(.shared-confirm-button, .shared-prompt-button) {
+  min-height: 32px;
+  padding: 4px 15px;
+  font-size: 14px;
+  font-weight: 400;
+  border-radius: var(--ui-radius-control);
+}
+
+/* AppShell is scoped; raise specificity so Ant layout wins after lazy CSS injection. */
+:root body :is(.console-page, .contract-app, .pm-page, .crm-page, .portal-page, .settlement-page, .da-shell, .expense-canvas) {
+  background: var(--ui-canvas);
+}
+:root body :is(.console-sidebar, .contract-sidebar, .pm-sidebar, .crm-sidebar, .da-sidebar, .settlement-sidebar, .portal-sidebar) {
+  color: rgba(255, 255, 255, .65);
+  border-right: 0;
+  background: #001529;
+}
+:root body :is(.console-topbar, .contract-topbar, .pm-topbar, .crm-topbar, .da-topbar, .settlement-topbar, .portal-topbar) {
+  color: var(--ui-text);
+  border-bottom: 1px solid var(--ui-line);
+  background: var(--ui-card);
+}
+:root body :is(.console-nav-item, .contract-nav-item, .pm-nav-item, .crm-nav-item, .da-nav-item, .settlement-nav-item, .portal-nav-item) {
+  color: rgba(255, 255, 255, .65);
+}
+:root body :is(.console-nav-item, .contract-nav-item, .pm-nav-item, .crm-nav-item, .da-nav-item, .settlement-nav-item, .portal-nav-item).active {
+  color: #fff;
+  background: var(--ui-primary);
+}

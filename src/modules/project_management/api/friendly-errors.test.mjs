@@ -25,6 +25,23 @@ async function withFetch(fetcher, run) {
 }
 const response = (status, body, headers = {}) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } })
 
+test('项目通用500写入标记未知，具体依赖拒绝保持确定性', async () => {
+  await withFetch(async () => response(500, { code: 'PM_INTERNAL_ERROR', message: '服务暂不可用' }), async () => {
+    await assert.rejects(client().request('/service-items/SI/preparation', { method: 'POST' }), error => {
+      assert.equal(error.outcomeUnknown, true)
+      assert.match(error.message, /核对.*重复|重复.*核对/)
+      return true
+    })
+  })
+  await withFetch(async () => response(503, { code: 'PM_PERSONNEL_UNAVAILABLE', message: '基础平台人员目录尚未配置或暂不可用' }), async () => {
+    await assert.rejects(client().request('/service-items/SI/preparation', { method: 'POST' }), error => {
+      assert.notEqual(error.outcomeUnknown, true)
+      assert.match(error.message, /人员目录/)
+      return true
+    })
+  })
+})
+
 test('项目参数契约不一致给出版本与格式指引，具体业务拒绝保留原义', async () => {
   const scenarios = [
     [400, 'PM_INVALID_JSON', '请求内容不合法', /数据格式.*服务要求不一致/],

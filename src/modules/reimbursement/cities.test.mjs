@@ -1,6 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { cityByCode, cityOptions, searchCities } from './cities.js'
+import { cityByCode, cityOptions, searchCities, ensureCityCatalog } from './cities.js'
+
+// 目录已改为按需加载：断言前先完成一次加载，后续同步 API 语义不变。
+await ensureCityCatalog()
 
 test('城市目录展示中文省市并保留内置六位编码，不接收自由文本', () => {
   assert.ok(cityOptions.length > 300)

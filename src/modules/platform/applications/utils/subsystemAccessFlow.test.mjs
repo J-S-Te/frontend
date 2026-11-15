@@ -52,7 +52,8 @@ test('控制台应用页签已挂载统一接入向导（旧模块保留兼容�
   const consoleFile = new URL('../../views/PlatformConsoleView.vue', import.meta.url)
   const source = await readFile(consoleFile, 'utf8')
   compileSfc(source, consoleFile.pathname)
-  assert.match(source, /import SubsystemAccessWizard from '@\/modules\/platform\/applications\/components\/SubsystemAccessWizard\.vue'/)
+  // 设置面板按需加载后向导改为动态 import；仍必须挂载同一个组件并保留权限入参。
+  assert.match(source, /const SubsystemAccessWizard = asyncPanel\(\(\) => import\('@\/modules\/platform\/applications\/components\/SubsystemAccessWizard\.vue'\)\)/)
   assert.match(source, /<SubsystemAccessWizard[\s\S]{0,400}?can-preview="canReadApplications"/)
   // 旧接入模块保持挂载（保留旧接口兼容）。
   assert.match(source, /<SubsystemOnboardingModule[\s\S]{0,200}?can-onboard="canOnboardSubsystem"/)

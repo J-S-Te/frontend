@@ -36,13 +36,12 @@ async function renderSummary(section, summaryError, overrides = {}) {
     render,
     setup: () => ({
       section, summaryError, summaryLoading: false, loadError: '', mobileMenuOpen: false,
+      loading: false, scopeMode: 'TEAM', projectDetails: { available: false, items: [], total: 0 }, detailLoading: false,
       currentMeta: ['业务看板', '统计'], currentUserInitial: '测', currentUserName: '测试', currentUserRole: '总监',
       dataScopeLabel: '管辖团队', scopeModeLabel: '团队', scopeEmptyHint: '', navGroups: [], statusOptions: [], statusFilter: '全部', isLoggingOut: false,
       DASHBOARD_SECTIONS: sections, DASHBOARD_CODES: Object.fromEntries(sections.map(value => [value, value])),
       EMBEDDED_DASHBOARD_SECTIONS: [], dashboardEmbedEnabled: true, iframeLoading: false,
       overviewSummary: {}, dashboardSummary: null, contractDetails: {}, dashboardTrend: [], alertSummary: null, detailError: '',
-      contractRegions: { available: false, items: [], basis: '' }, regionsError: '',
-      projectDetails: { available: false, items: [], total: 0, page: 1, page_size: 20 }, detailLoading: false,
       // 外壳把 /auth/me 的 tenant_id/user_id 传给原生看板做「租户+用户」级指标卡偏好，渲染前需有 me。
       me: null,
       hasPermission: () => true, canViewDashboard: () => true,
@@ -55,6 +54,7 @@ async function renderSummary(section, summaryError, overrides = {}) {
   app.component('LoadingState', { render: () => null })
   app.component('NativeDashboardView', { render: () => null })
   app.component('ContractImportHistoryPanel', { render: () => null })
+  app.component('MetricFactsPanel', { render: () => null })
   app.component('AlertsCenterView', { render: () => null })
   app.component('DictionaryView', { render: () => null })
   app.component('AdminSourcesView', { render: () => null })

@@ -48,7 +48,7 @@ test('data analysis free-text inputs carry explicit length limits', async () => 
       const type = (tag.text.match(/\btype="([^"]*)"/) || [])[1] || 'text'
       if (has(tag.text, 'maxlength')) continue
       if (hasBare(tag.text, 'readonly') || hasBare(tag.text, 'disabled')) continue
-      if (['checkbox', 'radio', 'file', 'date', 'datetime-local', 'number', 'hidden'].includes(type)) continue
+      if (['checkbox', 'radio', 'file', 'date', 'month', 'datetime-local', 'number', 'hidden'].includes(type)) continue
       if (/:type="[^"]*'number'/.test(tag.text)) continue
       violations.push(file.replace(new URL('.', import.meta.url).pathname, '') + ':' + (source.slice(0, tag.start).split('\n').length) + ' ' + tag.text.replace(/\s+/g, ' ').slice(0, 140))
     }

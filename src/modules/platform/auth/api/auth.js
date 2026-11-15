@@ -82,6 +82,9 @@ function validAuthResult(path, body) {
   return true
 }
 
+// 用途：通过既有认证管道请求接口，保留安全提示、字段和追踪上下文。
+// 参数：path 为认证路径，options 为请求参数，extra 为当前操作和兜底说明。
+// 返回值：成功响应数据；失败抛出原认证错误类型，不输出敏感诊断。
 async function requestWithStructuredContext(path, options = {}, extra = {}) {
   const context = requestContext(path, options, extra)
   let response
@@ -128,9 +131,10 @@ async function requestWithStructuredContext(path, options = {}, extra = {}) {
       status: response.status,
       code: body.code || '',
       traceId: body.request_id || body.trace_id || body.traceId || '',
-      details: body.details,
+      details: body.details ?? body.field_errors ?? body.fieldErrors,
     })
-    requestError.fieldErrors = [400, 422].includes(response.status) ? userFieldErrors(body.details) : []
+    requestError.fieldErrors = [400, 422].includes(response.status)
+      ? userFieldErrors(body.details ?? body.field_errors ?? body.fieldErrors) : []
     attachStructuredContext(requestError, {
       ...context,
       requestId: body.request_id || '',

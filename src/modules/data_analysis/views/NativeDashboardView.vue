@@ -438,7 +438,7 @@ const financeReceiptLabel = computed(() => {
   return /^\d{4}-(0[1-9]|1[0-2])$/.test(month) ? `${month}登记回款` : "本月登记回款"
 })
 const currencyItems = computed(() => financeRows.value)
-const missingMetricLabels = { first_pass_rate: '首次通过率：缺少完整首轮审核结果记录', open_complaints: '投诉：尚无投诉数据源', recognized_income: '收入：尚无收入确认数据源', department_cost: '部门成本：尚无成本数据源' }
+const missingMetricLabels = { first_pass_rate: '首次通过率见下方真实审核事实统计。', open_complaints: '客户投诉统计本轮暂缓。', recognized_income: '收入确认见下方财务独立复核账本统计。', department_cost: '部门、人员及项目确认成本见下方成本归属统计。' }
 const reportMissingMetrics = computed(() => Array.isArray(props.businessSummary?.missing_metrics) && props.businessSummary.missing_metrics.length
   ? props.businessSummary.missing_metrics
   : ['first_pass_rate', 'open_complaints'])
@@ -773,17 +773,6 @@ const metricsColumnsClass = computed(() => {
         <p class="da-native-note">锚点：实际开始日（缺失补计划开始日）；异常终止单列，不计入常规分布。当前来源未提供周期字段。</p>
       </article>
     </div>
-    <div v-if="section === 'project'" class="da-native-columns da-native-columns-even">
-      <article class="da-native-panel">
-        <header><b>返工率（报告退回+现场重测）</b><span>尚未接入</span></header>
-        <div class="da-native-empty"><span class="da-native-empty-icon">⌁</span><b>返工率尚未接入</b><p>缺少完整报告退回及现场重测事实，不能计算返工率。</p></div>
-      </article>
-      <article class="da-native-panel">
-        <header><b>人员 / 设备利用率（本月）</b><span>尚未接入</span></header>
-        <div class="da-native-empty"><span class="da-native-empty-icon">⌁</span><b>利用率尚未接入</b><p>缺少权威工时、人员及设备可用容量事实，不能计算利用率。</p></div>
-      </article>
-    </div>
-
     <!-- ===== 报告与质量看板：退回原因 + 首次通过率 / 状态分布 + 边界 ===== -->
     <div v-if="section === 'report'" class="da-native-columns">
       <article class="da-native-panel">

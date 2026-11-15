@@ -24,9 +24,25 @@ export function startReimbursementLogin(force = false) {
 // 返回值：会话及权威权限；失败原样抛出。
 export function getReimbursementSession() { return authAPI.request('/auth/session') }
 
+// 用途：为已核对为同一用户和租户的报销会话补充真实账号展示资料。
+// 参数：session 为报销授权会话，principal 为平台当前主体，matched 表示身份绑定已通过。
+// 返回值：仅补充账号及姓名的新对象；未绑定或资料缺失时保留原会话。
+function withCurrentUserProfile(session, principal, matched) {
+  if (!matched) return session
+  const profile = {}
+  for (const [field, values] of [
+    ['username', [principal.account?.name, principal.account?.code]],
+    ['display_name', [principal.user?.name]],
+  ]) {
+    const value = values.find(item => typeof item === 'string' && item.trim())
+    if (value) profile[field] = value.trim()
+  }
+  return Object.keys(profile).length ? { ...session, ...profile } : session
+}
+
 // 用途：建立目标应用会话并核对平台与报销主体一致性。
 // 参数：无。
-// 返回值：真实会话；已跳转登录时返回null。
+// 返回值：带绑定用户展示资料的真实会话；已跳转登录时返回null。
 export async function ensureReimbursementSession() {
   try {
     const [session, principal] = await Promise.all([
@@ -36,13 +52,16 @@ export async function ensureReimbursementSession() {
     if (!session.tenant_id || !identity || !Array.isArray(session.permissions)) {
       throw Object.assign(new Error('报销会话响应不完整'), { status: 503, code: 'INVALID_SESSION' })
     }
-    if (principal && ((principalIdentityID(principal) && principalIdentityID(principal) !== identity)
-      || (principal.tenant_id && principal.tenant_id !== session.tenant_id))) {
+    const platformIdentity = principalIdentityID(principal)
+    const platformTenant = principal?.tenant_id || principal?.tenant?.id || ''
+    if (principal && ((platformIdentity && platformIdentity !== identity)
+      || (platformTenant && platformTenant !== session.tenant_id))) {
       await authAPI.request('/auth/local-logout', { method: 'POST' })
       startReimbursementLogin(true)
       return null
     }
-    return session
+    return withCurrentUserProfile(session, principal,
+      platformIdentity === identity && platformTenant === session.tenant_id)
   } catch (error) {
     if (error.status === 401) { startReimbursementLogin(); return null }
     throw error

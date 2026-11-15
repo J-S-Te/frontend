@@ -1,6 +1,6 @@
 // 仅处理展示：调用方保留状态、错误码、详情和请求标识。
 // 此处不负责传输、会话处理、重试或业务状态决策。
-const GENERIC_MESSAGES = /^(?:请求参数不合法|请求内容不合法|参数错误|参数无效|请求失败|操作失败|服务暂时不可用|依赖服务暂时不可用|请求的资源不存在|没有执行此操作的权限|登录状态无效或已过期|资源状态冲突)[。！!\s]*$/
+const GENERIC_MESSAGES = /^(?:请求参数不合法|请求内容不合法|参数错误|参数无效|请求失败|操作失败|服务处理失败|服务暂不可用|服务暂时不可用|依赖服务暂时不可用|请求的资源不存在|没有执行此操作的权限|登录状态无效或已过期|资源状态冲突)[。！!\s]*$/
 const INTERNAL_DETAILS = /(?:https?:\/\/|\/api\/|\/(?:Users|root|etc|var|opt|home)\/|[A-Z]:\\|<\/?[a-z!][^>]*>|SQLSTATE|\b(?:mysql|postgres|gorm|panic|stack|stacktrace|goroutine|TypeError|SyntaxError|ReferenceError|ECONNREFUSED|ENOTFOUND|EAI_AGAIN)\b|dial tcp|connection refused|connection reset|\bError\s+\d{3,}\b|\b\d{1,3}(?:\.\d{1,3}){3}:\d+\b|\b(?:SELECT\s+.+?\s+FROM|INSERT\s+INTO|DELETE\s+FROM|UPDATE\s+\S+\s+SET)\b|\b(?:Table\s+[^\r\n]+?\s+(?:does\s+not\s+exist|doesn't\s+exist)|Duplicate\s+entry|Unknown\s+column|column\s+[^\r\n]+?\s+does\s+not\s+exist|duplicate\s+key\s+value|syntax\s+error\s+at\s+or\s+near|foreign\s+key\s+constraint\s+fails)\b|\b(?:json|uuid|http|trace[_ -]?id|request[_ -]?id|next[_ -]?action)\b|cannot unmarshal|validation for|failed on the|-----BEGIN|\bBearer\s+|(?:access_token|refresh_token|client_secret|password|api_key)\s*[:=]|[A-Za-z0-9_-]{32,}\.[A-Za-z0-9_-]{32,}\.[A-Za-z0-9_-]+|[\u0000-\u0008\u000b\u000c\u000e-\u001f])/i
 const TECHNICAL_GUIDANCE = /\b(?:docker(?:-compose)?|kubectl|systemctl|journalctl|sudo|chmod|chown|curl|wget|bash|powershell)\s+\S|\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/
 
@@ -21,27 +21,42 @@ const FIELDS = {
   contract_id: ['合同', '选择'], contract_type: ['合同类型', '选择'], contract_name: ['合同名称', '填写'], template_id: ['合同模板', '选择'],
   service_type: ['服务类型', '选择'], service_items: ['服务项', '添加'], services: ['服务项', '添加'], category: ['检测类别', '选择'], detection_category: ['检测类别', '选择'],
   batch: ['实施批次', '填写'], site: ['实施场所', '填写'], system: ['系统名称', '填写'], system_level: ['系统等级', '选择'], test_mode: ['检测方式', '选择'],
-  amount: ['金额', '填写'], amount_minor: ['合同金额', '填写'], amount_incl_tax: ['含税金额', '填写'], currency: ['币种', '选择'],
+  amount: ['金额', '填写'], amount_minor: ['金额', '填写'], amount_incl_tax: ['含税金额', '填写'], currency: ['币种', '选择'],
   planned_start: ['计划开始时间', '填写'], planned_end: ['计划结束时间', '填写'], start_date: ['开始日期', '填写'], end_date: ['结束日期', '填写'], due_date: ['到期日期', '填写'],
   valid_from: ['有效期开始时间', '填写'], valid_until: ['有效期结束时间', '填写'], effective_from: ['生效日期', '填写'], effective_to: ['失效日期', '填写'],
   reason: ['操作原因', '填写'], comment: ['说明', '填写'], content: ['内容', '填写'], file: ['文件', '选择'], file_id: ['文件', '选择'],
   code: ['编码', '填写'], type: ['类型', '选择'], status: ['状态', '选择'], type_ids: ['商机类型', '选择'], source_ids: ['商机来源', '选择'],
   registration_contact_name: ['登记联系人姓名', '填写'], registration_contact_phone: ['登记联系人电话', '填写'],
   receipt_date: ['回款日期', '填写'], payment_method: ['回款方式', '选择'], bank_transaction_reference: ['银行流水号', '填写'],
+  employee_no: ['工号', '填写'], pms_person_id: ['项目人员', '选择'],
+  membership_type: ['任职类型', '选择'], initial_password: ['初始密码', '填写'],
+  paid_date: ['付款日期', '填写'], transaction_no: ['流水或现金凭证号', '填写'],
+  source_account_ref: ['付款来源账户', '选择'], voucher_file_ids: ['付款附件', '添加'],
+  invoice_usages: ['发票使用明细', '添加'], invoice_id: ['发票', '选择'],
+  invoice_date: ['开票日期', '填写'], quantity: ['数量', '填写'], unit_price: ['单价', '填写'],
+  tax_rate: ['税率', '填写'], tax_amount: ['税额', '填写'],
 }
 const AUTO_FIELDS = new Set(['version', 'expected_version', 'expected_revision', 'idempotency_key', 'client_operation_id', 'tenant_id', 'source_id'])
 
+// 用途：把结构体字段或请求路径转换为已有中文字段标签的查询键。
+// 参数：value 为字段名或数组中的真实字段路径。
+// 返回值：去除数组下标并标准化的末级字段，不包含用户填写值。
 function fieldKey(value) {
   if (typeof value !== 'string' || value.length > 180) return ''
   // 现有后端同时使用 Gin 结构体字段名和 JSON 路径。
-  return value.split(/[.\[\]]/).filter(Boolean).pop()?.replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2').replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase() || ''
+  return value.replace(/\[\d+\]/g, '').split('.').pop()
+    ?.replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase() || ''
 }
 
+// 用途：从现有字段规则或安全业务说明生成可执行的中文提示。
+// 参数：issue 为不包含待回显值的字段问题元数据。
+// 返回值：已知字段的中文说明，无法安全解释时返回空串。
 function issueMessage(issue) {
   if (!issue || typeof issue !== 'object') return ''
   const field = fieldKey(issue.field || issue.path || issue.name)
   if (AUTO_FIELDS.has(field)) return '页面数据已过期或不完整，请刷新后重新操作；仍失败时请联系管理员。'
-  const definition = FIELDS[field]
+  const definition = Object.hasOwn(FIELDS, field) ? FIELDS[field] : null
   const message = safeUserMessage(issue.message)
   if (message && !GENERIC_MESSAGES.test(message)) return message
   if (!definition) return ''
@@ -54,17 +69,29 @@ function issueMessage(issue) {
   return `${label}未通过校验，请检查后重新${action}。`
 }
 
-/** 仅显示字段名和标签；绝不回显被拒绝的值或任意详情字符串。 */
+// 用途：解释有界字段问题，保留费用行坐标且不回显拒绝值或原始诊断。
+// 参数：details 为后端已有的 issues、field_errors 或字段映射。
+// 返回值：最多三项中文字段问题，同一错误发生在不同行时分别保留。
 export function userFieldErrors(details) {
   if (!details || typeof details !== 'object') return []
   const candidates = Array.isArray(details) ? details : details.issues || details.field_errors || details.errors || details.fields || (details.field ? [details] : [])
-  const issues = Array.isArray(candidates) ? candidates : Object.entries(candidates || {}).slice(0, 20).map(([field, value]) => ({ field, ...(typeof value === 'object' && value !== null ? value : { rule: value }) }))
+  const issues = Array.isArray(candidates) ? candidates : Object.entries(candidates || {}).slice(0, 20)
+    .map(([field, value]) => ({ field, ...(typeof value === 'object' && value !== null
+      ? value : safeUserMessage(value) ? { message: value } : { rule: value }) }))
   const found = []
   for (const issue of issues.slice(0, 20)) {
-    const message = issueMessage(issue)
-    if (!message || found.some(row => row.message === message)) continue
-    const row = Number(issue.row || issue.line || 0)
-    found.push({ field: fieldKey(issue.field || issue.path || issue.name), message: row > 0 && Number.isSafeInteger(row) ? `第 ${row} 行：${message}` : message })
+    let message = issueMessage(issue)
+    if (!message) continue
+    const raw = issue.field || issue.path || issue.name || ''
+    const path = typeof raw === 'string' && raw.length <= 180 &&
+      /^[A-Za-z_][A-Za-z0-9_]*(?:\[\d{1,6}\]|\.[A-Za-z_][A-Za-z0-9_]*)*$/.test(raw)
+      ? raw : ''
+    const index = path.match(/\[(\d+)\]/)?.[1]
+    const row = Number(issue.row || issue.line || (index === undefined ? 0 : Number(index) + 1))
+    if (row > 0 && Number.isSafeInteger(row)) message = `第 ${row} 行：${message}`
+    const field = path.includes('[') ? path : fieldKey(raw)
+    if (found.some(item => item.field === field && item.message === message)) continue
+    found.push({ field, message })
     if (found.length >= 3) break
   }
   return found
@@ -91,18 +118,42 @@ const CONTRACT_MISMATCH = '当前页面的数据格式与服务要求不一致�
 const REFRESH = '数据已被修改或当前状态不允许此操作，请刷新列表后检查记录，再重新操作。'
 const WRITE_UNKNOWN = '暂时无法确认操作结果，请先刷新列表或查看记录核对，避免重复提交；仍有问题请联系管理员。'
 
+// 用途：兼容各客户端的错误元数据，统一方法、字段问题与结果未知标记。
+// 参数：input 为接口错误或文案，options 为调用方已知的请求信息。
+// 返回值：仅供展示判定的标准化元数据，不改变请求和业务状态。
 function normalize(input, options) {
   const source = input && typeof input === 'object' ? input : {}
   return {
     status: Number(options.status ?? source.status ?? 0),
     code: String(options.code ?? source.code ?? ''),
     message: options.message ?? (typeof input === 'string' ? input : source.message ?? source.msg ?? ''),
-    details: options.details ?? source.details ?? source.fieldErrors,
-    method: String(options.method || source.request_method || source.context?.method || options.operation || source.operation || 'GET').toUpperCase(),
+    details: options.details ?? source.details ?? source.field_errors ?? source.fieldErrors,
+    method: String(options.method || source.method || source.request_method ||
+      source.context?.method || options.operation || source.operation || 'GET').toUpperCase(),
+    outcomeUnknown: options.outcomeUnknown === true || source.outcomeUnknown === true,
     name: source.name || '',
   }
 }
 
+// 用途：为客户端保留写入结果未知标记，与展示提示使用相同的错误元数据。
+// 参数：input 为服务回执或异常，options 为已知请求方法和状态。
+// 返回值：明确无法确认的写请求返回 true；具体业务拒绝和普通读取返回 false。
+export function isWriteOutcomeUnknown(input, options = {}) {
+  const error = normalize(input, options)
+  if (error.outcomeUnknown) return true
+  if (['GET', 'HEAD', 'OPTIONS'].includes(error.method)) return false
+  const text = typeof error.message === 'string' ? error.message : ''
+  const safe = safeUserMessage(text)
+  return [408, 502, 504].includes(error.status) || error.name === 'AbortError' ||
+    /(?:^|_)(?:NETWORK_ERROR|REQUEST_ABORTED)$|(?:TIMEOUT|TIMED_OUT)$/.test(error.code) ||
+    /(?:^|_)(?:(?:INVALID|UNEXPECTED|MALFORMED)_(?:[A-Z]+_)?RESPONSE|RESPONSE_(?:INVALID|UNEXPECTED)|INVALID_ENVELOPE)$/.test(error.code) ||
+    /^(?:Failed to fetch|NetworkError|Load failed|fetch failed)$/i.test(text) ||
+    (error.status >= 500 && (!safe || GENERIC_MESSAGES.test(safe)))
+}
+
+// 用途：把当前错误转换为准确中文，保留业务拒绝并优先保护未知写入结果。
+// 参数：input 为错误或文案，options 为可信请求方法、元数据和兜底提示。
+// 返回值：可展示文本，不暴露原始异常，不推断操作已经成功或自动重发。
 export function formatUserError(input, options = {}) {
   const error = normalize(input, options)
   const { status, code, details, method } = error
@@ -110,6 +161,7 @@ export function formatUserError(input, options = {}) {
   const text = typeof error.message === 'string' ? error.message : ''
   const safe = safeUserMessage(text)
   const fallback = safeUserMessage(options.fallback)
+  if (error.outcomeUnknown) return WRITE_UNKNOWN
   if (code === 'REQUEST_ABORTED' || error.name === 'AbortError') return writing ? WRITE_UNKNOWN : '读取已取消，请重新加载。'
   if (/(?:^|_)NETWORK_ERROR$/.test(code) || /^(?:Failed to fetch|NetworkError|Load failed|fetch failed)$/i.test(text)) return writing ? `网络连接中断，${WRITE_UNKNOWN}` : (safe || fallback || '无法连接服务，请检查网络连接后重试。')
   if (status === 408 || status === 504 || /(?:TIMEOUT|TIMED_OUT)$/.test(code)) return writing ? WRITE_UNKNOWN : '服务响应超时，请稍后重新加载；仍失败时请联系管理员。'

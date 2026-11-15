@@ -7,6 +7,9 @@ import { shouldStartSubsystemLogin } from '../shared/authz/sessionCompatibility.
 import { formatDataAnalysisError } from './utils/errors.js'
 
 const source = await readFile(new URL('./api/dataAnalysis.js', import.meta.url), 'utf8')
+// 用途：在真实数析客户端外替换网络边界，验证公开错误回执的消费行为。
+// 参数：fetcher 为只返回合成响应的网络实现。
+// 返回值：真实API函数与观察到的登录跳转。
 function harness(fetcher) {
   const redirects = []
   const context = vm.createContext({
@@ -15,10 +18,48 @@ function harness(fetcher) {
     window: { location: { replace: (url) => redirects.push(url) } },
   })
   const script = source.replace(/^import .*$/gm, '').replace(/import\.meta\.env/g, '({})').replace(/^export /gm, '')
-  vm.runInContext(`${script}\nglobalThis.api = { getAuthMe, getAlertRules, putAlertRules, triggerSource, getEmbedToken, createDictionaryMetric, deleteAlertRule, deleteDictionaryMetric, ensureDataAnalysisSession };`, context)
+  vm.runInContext(`${script}\nglobalThis.api = { getAuthMe, getAlertRules, putAlertRules, triggerSource, triggerAllSources, getEmbedToken, createDictionaryMetric, deleteAlertRule, deleteDictionaryMetric, ensureDataAnalysisSession };`, context)
   return { api: context.api, redirects }
 }
 const json = (body, status = 200, headers = {}) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } })
+
+test('BI metric capacity and validation explain their distinct next steps', async () => {
+  for (const [code, expected] of [
+    ['METRIC_LIMIT_EXCEEDED', /500.*保留/],
+    ['METRIC_VALIDATION_FAILED', /字段.*编码|编码.*字段/],
+  ]) {
+    const { api } = harness(async () => json({ code, message: '指标请求无效' }, 400))
+    await assert.rejects(api.createDictionaryMetric({ code: 'custom.kpi' }), error => {
+      assert.match(error.message, expected)
+      assert.equal(error.code, code)
+      return true
+    })
+  }
+})
+
+test('BI batch failure retains confirmed counts without encouraging another submission', async () => {
+  const details = { queued: 2, skipped: 1, partial_completion: true }
+  const { api } = harness(async () => json({ code: 'SYNC_ALL_FAILED', message: '批量同步入队未全部完成', details }, 500))
+  await assert.rejects(api.triggerAllSources(), error => {
+    assert.match(error.message, /2.*入队.*1.*跳过.*勿重复/)
+    assert.deepEqual(error.details, details)
+    return true
+  })
+})
+
+test('BI saved-rule receipt distinguishes a failed follow-up read from unknown writes', async () => {
+  const { api } = harness(async () => json({ code: 'RULE_SAVED_REFRESH_FAILED',
+    message: '规则已保存，但最新列表读取失败', details: { saved: true, refresh_failed: true } }, 500))
+  await assert.rejects(api.putAlertRules([]), error => {
+    assert.match(error.message, /已保存.*列表.*无需再次保存/)
+    assert.equal(error.details.saved, true)
+    return true
+  })
+  const unknown = formatDataAnalysisError({ code: 'RULE_SAVED_REFRESH_FAILED', status: 500,
+    outcomeUnknown: true, details: { saved: true, refresh_failed: true }, method: 'PUT' })
+  assert.match(unknown, /无法确认.*避免重复提交/)
+  assert.doesNotMatch(unknown, /已保存/)
+})
 
 test('BI known validation and version conflicts use actionable Chinese without field-name jargon', async () => {
   for (const [code, message, expected] of [

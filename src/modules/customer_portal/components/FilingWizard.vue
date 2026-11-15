@@ -234,12 +234,17 @@ async function uploadMaterial(item) {
   } finally { materialBusy[item.key] = false }
 }
 function labelForStep(code) { return steps.find(item => item[0] === code)?.[1] || code }
+// 用途：将备案字段、整分区和矩阵校验问题映射为中文业务标签。
+// 参数：issue 为后端已生成的路径与规则码，不使用原始异常消息。
+// 返回值：安全中文校验提示；未知路径使用通用业务名称。
 function issueLabel(issue) {
   const parts = String(issue.path || '').split('.').filter(Boolean)
   const code = parts[0] === 'sections' ? parts[1] : currentCode.value
   const key = parts[0] === 'sections' || parts[0] === 'materials' ? parts[2] || parts[1] : parts.at(-1)
   const item = fields[code]?.find(value => value.key === key || value.fileKey === key)
-  const label = item?.label || key || labelForStep(code)
+  const wholeSection = parts[0] === 'sections' && parts.length === 2
+  const sectionLabel = steps.find(step => step[0] === code)?.[1] || '备案分区'
+  const label = wholeSection ? sectionLabel : item?.label || (parts[0] === 'matrices' ? '等级矩阵' : '备案信息')
   const messages = {
     REQUIRED: `${label}未填写，请补充。`,
     RANGE: `${label}填写不合规，请填写允许范围内的内容。`,
@@ -250,6 +255,8 @@ function issueLabel(issue) {
     MUTUALLY_EXCLUSIVE: `${label}选项组合不合规，请重新选择。`,
     CLEAN_MATERIAL_REQUIRED: `${label}尚未完成安全校验，暂时不能提交。`,
     LEVEL_MISMATCH: `${label}与定级结果不一致，请检查后修改。`,
+    CROSS_SECTION_MISMATCH: `${label}与其他分区的定级结果不一致，请核对后修改。`,
+    REPORT_MISMATCH: `${label}与定级报告不一致，请核对后重新选择。`,
   }
   return messages[issue.code] || `${label}填写不合规，请检查后重试。`
 }
@@ -337,6 +344,9 @@ async function deleteDraft(item) {
   catch (error) { emit('error', error) }
   finally { busy.value = false }
 }
+// 用途：在备案冲突后停止暂存，并按锁定、版本或幂等原因给出处理指引。
+// 参数：error 为备案 API 错误，保留原有 HTTP 409 停止暂存范围。
+// 返回值：是否已处理冲突；非冲突错误交由调用方展示。
 function handleConflict(error) {
   if (error?.status !== 409) return false
   // 任一子资源发生乐观锁冲突后停止整个编辑会话的自动暂存。继续保存可能拿旧
@@ -344,7 +354,17 @@ function handleConflict(error) {
   conflict.value = true
   for (const timer of saveTimers.values()) clearTimeout(timer)
   saveTimers.clear()
-  emit('error', new Error('检测到其他页面已修改该备案。自动暂存已停止，请重新加载后再编辑；系统未覆盖服务端内容。'))
+  const messages = {
+    PORTAL_FILING_LOCKED: '备案资料已提交并锁定，不能直接修改；如需调整请联系服务人员。',
+    PORTAL_FILING_VERSION_CONFLICT: '检测到其他操作已修改该备案。',
+    PORTAL_FILING_IDEMPOTENCY_CONFLICT: '该重试标识已用于其他提交，请先查看处理结果并核对当前内容。',
+    PORTAL_FILING_INVALID_STATE: '备案状态已变化，请重新加载详情核对可用操作。',
+  }
+  const message = messages[error?.code] || formatPortalError(error)
+  const recovery = error?.code === 'PORTAL_FILING_VERSION_CONFLICT'
+    ? '自动暂存已停止，请重新加载最新内容后再编辑；系统未覆盖服务端内容。'
+    : '自动暂存已停止，系统未覆盖服务端内容。'
+  emit('error', new Error(`${message}${recovery}`))
   return true
 }
 async function reloadCurrent() { if (filing.value) await openFiling(filing.value.id) }

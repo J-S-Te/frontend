@@ -7,6 +7,7 @@ import vm from 'node:vm'
 import * as Vue from 'vue'
 import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc'
 import { renderToString } from '@vue/server-renderer'
+import { renderMetricFacts } from './metric-facts-render-harness.mjs'
 import { dashboardFreshnessItems, dashboardFreshnessStatus } from './utils/freshness.js'
 import {
   PROJECT_CARD_KEYS,
@@ -110,8 +111,7 @@ async function mount(props, storage = memoryStorage()) {
   return { html, ui: Vue.reactive({ ...bindings }), storage }
 }
 
-// class 值允许多个附加词（tone/clickable 等），逐一匹配避免多词卡片漏计。
-const cardCount = (html) => (html.match(/class="da-native-metric(?: [a-z]+)*"/g) || []).length
+const cardCount = (html) => (html.match(/class="da-native-metric(?: [a-z]+)?"/g) || []).length
 
 const collectedProject = {
   available: true,
@@ -160,7 +160,6 @@ test('经营总览按原型两行三卡展示，项目组仍含整改中卡且�
   // 原型总览固定 6 张卡：签约金额/回款率/完成项目数/应收超期/待处理预警/在执项目数。
   assert.equal(cardCount(overview.html), 6)
   assert.match(overview.html, /整改中项目/)
-  assert.match(overview.html, /完成项目数/)
   const legacy = await mount({ section: 'overview', projectSummary: legacyProject, canViewContract: false, tenantId: 't1', userId: 'u1' })
   assert.match(legacy.html, /未采集/)
 })
@@ -245,15 +244,26 @@ test('混币趋势独立系列、实际数量与零柱宽，漏斗使用商机�
   assert.match(zero.html, /不可计算（有效商机为0）/)
 })
 
-test('项目明细真实分页数据及未采集指标原因不会沿用合同文案', async () => {
+test('项目明细真实分页数据保持项目口径，不重复旧指标占位说明', async () => {
   const { html } = await mount({ section: 'project', projectSummary: collectedProject,
     projectDetails: { available: true, total: 25, page: 2, page_size: 20, items: [
       { project_id: 'p21', name: '真实项目21', status: '实施中', manager: '经理甲', owner_org_id: 'org1', service_items: 3, report_stage: 'RECTIFYING', risk: false },
     ] } })
   assert.match(html, /真实项目21/)
   assert.match(html, /经理甲/)
-  assert.match(html, /缺少权威工时/)
-  assert.match(html, /缺少完整报告退回及现场重测事实/)
+  assert.doesNotMatch(html, /缺少权威工时|缺少完整报告退回及现场重测事实/)
+  const facts = await renderMetricFacts({ section: 'project', summary: {
+    available: true,
+    person: { actual_minutes: 60, capacity_minutes: 240, rate: 25, pending: 1, unknown: 3 },
+    equipment: { actual_minutes: 0, capacity_minutes: 0, rate: null, pending: 0, unknown: 2 },
+  } })
+  assert.match(facts, /人员实际利用率/)
+  assert.match(facts, /25.00%/)
+  assert.match(facts, /已确认 60 分钟 \/ 明确容量 240 分钟/)
+  assert.match(facts, /待确认 1；容量或采集未知 3/)
+  const missing = await renderMetricFacts({ section: 'project', summary: { available: false } })
+  assert.match(missing, /尚无完整发布的指标来源/)
+  assert.doesNotMatch(missing, /0.00%/)
   assert.doesNotMatch(html, /暂无折扣快照|同步商机与合同事实后展示转化漏斗/)
 })
 

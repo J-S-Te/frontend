@@ -1647,6 +1647,9 @@ function ruleConditionSummary(rule) {
   return ruleExpressionSummary(rule.expression, conditionLabel)
 }
 
+// 用途：按权限独立加载合同各区域，保留成功数据与具体安全失败原因。
+// 参数：无；使用当前会话、筛选及分页状态。
+// 返回值：异步完成；各区域读取错误独立展示，不冒充业务写入失败。
 async function loadBusinessData() {
   // 各区域按权限独立加载并用 allSettled 汇总，单个非关键接口失败不会清空已经
   // 成功的数据。权限仍由后端逐接口执行，这里的条件只避免发起无意义请求。
@@ -1720,7 +1723,7 @@ async function loadBusinessData() {
     if (result.status !== 'rejected') return
     const request = requests[index]
     for (const section of request.sections) {
-      const message = `${request.label}加载失败，请刷新重试。`
+      const message = `${request.label}加载失败：${formatUserError(result.reason, { fallback: '请刷新重试。' })}`
       nextErrors[section] = nextErrors[section] ? `${nextErrors[section]}；${message}` : message
     }
   })

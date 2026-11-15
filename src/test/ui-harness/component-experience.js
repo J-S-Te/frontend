@@ -1,0 +1,17 @@
+import { createApp } from 'vue'
+import Harness from './ComponentExperienceHarness.vue'
+import '@/modules/platform/shared/styles/main.css'
+import '@/modules/platform/shared/styles/state.css'
+import '@/modules/platform/styles/console.css'
+import '@/modules/contract_management/styles/contract-management.css'
+import '@/modules/project_management/styles/project-management.css'
+import '@/modules/customer_opportunity/styles/customer-opportunity.css'
+import '@/modules/customer_portal/styles/customer-portal.css'
+import '@/modules/settlement/styles/settlement.css'
+import '@/modules/data_analysis/styles/data-analysis.css'
+import '@/modules/reimbursement/reimbursement.css'
+import '@/modules/shared/styles/global-ux.css'
+import '@/modules/shared/styles/ui-refresh.css'
+import '@/modules/shared/styles/component-experience.css'
+
+createApp(Harness).mount('#app')

@@ -20,7 +20,7 @@ test('人员目录失败时保留手动输入降级且不吞错', () => {
   assert.match(source, /ticket !== personnelSequence/)
 })
 
-test('仅在项目存在且具备资格管理权限时读取人员目录', () => {
+test('仅在项目存在且具备资格管理权限时默认读取项目资格名单', () => {
   assert.match(source, /if \(!props\.projectId \|\| !canManage\.value\) return/)
-  assert.match(source, /if \(props\.projectId && canManage\.value\) void loadPersonnel\(\)/)
+  assert.match(source, /if \(props\.projectId && canManage\.value\) void loadParticipants\(\)/)
 })

@@ -128,7 +128,7 @@ onMounted(load)
               <td><span class="da-badge" :class="s.enabled ? 'normal' : 'neutral'">{{ s.enabled ? '已启用' : '已停用' }}</span></td>
               <td>{{ s.last_run_at || '—' }}</td>
               <td><span class="da-badge" :class="statusTone(s.last_status)">{{ statusLabel(s.last_status) }}</span></td>
-              <td><small>{{ s.last_error ? formatDataAnalysisError(s.last_error, { fallback: '同步执行失败，请联系管理员检查数据源和同步任务。' }) : '—' }}</small></td>
+              <td><small>{{ s.last_error ? formatDataAnalysisError(s.last_error, { code: s.last_error_code, fallback: '同步执行失败，请联系管理员检查数据源和同步任务。' }) : '—' }}</small></td>
               <td><button class="da-button ghost" :disabled="!canTrigger || triggering === s.id" @click="onTrigger(s.id)">{{ triggering === s.id ? '触发中…' : '触发同步' }}</button></td>
             </tr>
           </tbody>

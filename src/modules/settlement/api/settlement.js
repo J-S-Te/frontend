@@ -97,6 +97,7 @@ export async function request(path, options = {}) {
       : "连接中断，尚无法确认本次操作是否已生效。请先刷新列表核对结果，勿重复提交。");
     error.status = 0;
     error.code = code;
+    error.outcomeUnknown = !["GET", "HEAD", "OPTIONS"].includes(method);
     attachStructuredContext(
       error,
       {
@@ -122,10 +123,16 @@ export async function request(path, options = {}) {
   }
   const businessError = isRecord(body) && Object.hasOwn(body, "code") && body.code !== "OK";
   if (!response.ok || businessError) {
-    const error = new Error(formatSettlementError(body, { status: response.status, method, fallback: "结算服务暂时无法处理请求。" }));
+    const outcomeUnknown = !["GET", "HEAD", "OPTIONS"].includes(method) &&
+      ([408, 502, 504].includes(response.status) || (response.status >= 500 &&
+        (!body?.code || body.code === "SETTLEMENT_INTERNAL_ERROR")));
+    const error = new Error(formatSettlementError(body, { status: response.status, method, path,
+      outcomeUnknown, fallback: "结算服务暂时无法处理请求。" }));
     error.status = response.status;
     error.code = body?.code;
     error.details = body?.details;
+    error.fieldErrors = body?.field_errors ?? body?.fieldErrors ?? body?.details?.issues;
+    error.outcomeUnknown = outcomeUnknown;
     error.requestID = body?.request_id || requestID;
     error.traceId = body?.trace_id || body?.traceId || traceID;
     if (parseCause) error.cause = parseCause;
@@ -171,6 +178,7 @@ export async function request(path, options = {}) {
     : "服务器已接受操作，但返回结果异常。请先刷新列表核对结果，勿重复提交。");
   invalid.status = response.status;
   invalid.code = "INVALID_RESPONSE";
+  invalid.outcomeUnknown = !["GET", "HEAD", "OPTIONS"].includes(method);
   invalid.requestID = requestID;
   invalid.traceId = traceID;
   if (parseCause) invalid.cause = parseCause;

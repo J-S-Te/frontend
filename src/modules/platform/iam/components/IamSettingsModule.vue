@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { formatUserError } from '../../../shared/utils/userError.js'
 import { createFormSnapshot, hasUnsavedChanges } from '../../../shared/utils/unsavedChanges.js'
@@ -25,7 +25,6 @@ import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import ListState from '@/modules/shared/components/ListState.vue'
 import PaginationBar from '@/modules/shared/components/PaginationBar.vue'
 import PositionAuthorizationTemplates from '@/modules/platform/iam/components/PositionAuthorizationTemplates.vue'
-import BatchUserImportDialog from '@/modules/platform/iam/components/BatchUserImportDialog.vue'
 import AuthorizationEntryGuidance from '@/modules/platform/iam/components/AuthorizationEntryGuidance.vue'
 import EffectiveAuthorizationOverview from '@/modules/platform/iam/components/EffectiveAuthorizationOverview.vue'
 import PersonalExceptionAuthorization from '@/modules/platform/iam/components/PersonalExceptionAuthorization.vue'
@@ -127,6 +126,10 @@ import {
   iamPanelReadPermission,
 } from '@/modules/platform/iam/utils/iamPermissions'
 import '@/modules/platform/iam/styles/iam-settings.css'
+
+// 批量导入对话框只在管理员点击“批量导入用户”时使用；pinyin-pro 与表格解析逻辑随该组件
+// 按需加载，避免进入 IAM 默认页时下载仅导入场景需要的代码。
+const BatchUserImportDialog = defineAsyncComponent(() => import('@/modules/platform/iam/components/BatchUserImportDialog.vue'))
 
 const props = defineProps({
   // EmployeeOnboardingModal 由 PlatformConsoleView 管理，因此成功完成后

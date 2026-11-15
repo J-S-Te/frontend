@@ -54,6 +54,7 @@ import DetectionCategoryImportDialog from '@/modules/project_management/componen
 import NativeProjectCreateDialog from '@/modules/project_management/components/NativeProjectCreateDialog.vue'
 import ReimbursementSpendPanel from '@/modules/project_management/components/ReimbursementSpendPanel.vue'
 import ProjectArchiveDirectory from '../components/ProjectArchiveDirectory.vue'
+import ReportReviewFactsPanel from '../components/ReportReviewFactsPanel.vue'
 import NativeScopeChangePanel from '@/modules/project_management/components/NativeScopeChangePanel.vue'
 import { useProjectCreationCapabilities } from '@/modules/project_management/composables/useProjectCreationCapabilities.js'
 import RiskList from '@/modules/project_management/components/RiskList.vue'
@@ -193,7 +194,7 @@ import {
   updateRule,
   deleteRule,
   reviewSpecialMethod,
-  updateReportStatus,
+  advanceManualReportStatus,
   searchApprovedContractOptions,
   listSupplementContracts,
   closeSupplement,
@@ -962,18 +963,29 @@ function openCategoryDialog(item = null) {
   openMulti.value = ''
 }
 
+// 用途：保存检测类别并区分已保存与目录刷新失败。
+// 参数：无；使用当前类别表单。
+// 返回值：无；失败保留真实写入结果并释放忙锁。
 async function submitDetectionCategory() {
   if (!categoryDialog.value) return
   saving.value = true
+  let saved = false
   try {
     await saveDetectionCategory({ ...categoryDialog.value, required_codes: detectionRequiredCodeSelection.value.join(',') })
+    saved = true
     categoryDialog.value = null
     detectionCategories.value = await listDetectionCategories()
     showToast('检测类别已保存')
-  } catch (error) { showToast(formatUserError(error, { fallback: '检测类别保存失败' }), 'error') }
+  } catch (error) {
+    showToast(saved ? `检测类别已保存，但目录刷新失败；请刷新核对，勿重复保存。${formatUserError(error).slice(0, 160)}`
+      : formatUserError(error, { fallback: '检测类别保存失败' }), saved ? 'warning' : 'error')
+  }
   finally { saving.value = false }
 }
 
+// 用途：删除已确认的检测类别并准确提示后续刷新失败。
+// 参数：item 为用户选择的检测类别。
+// 返回值：无；取消不写入，已删除时不再提示删除失败。
 async function removeDetectionCategory(item) {
   if (saving.value) return
   const ok = await askConfirm({
@@ -985,11 +997,16 @@ async function removeDetectionCategory(item) {
   })
   if (!ok) return
   saving.value = true
+  let removed = false
   try {
     await deleteDetectionCategory(item.category)
+    removed = true
     detectionCategories.value = await listDetectionCategories()
     showToast(`检测类别「${item.category}」已删除`)
-  } catch (error) { showToast(formatUserError(error, { fallback: '检测类别删除失败' }), 'error') }
+  } catch (error) {
+    showToast(removed ? `检测类别已删除，但目录刷新失败；请刷新核对，勿重复删除。${formatUserError(error).slice(0, 160)}`
+      : formatUserError(error, { fallback: '检测类别删除失败' }), removed ? 'warning' : 'error')
+  }
   finally { saving.value = false }
 }
 
@@ -1002,22 +1019,33 @@ function openOverrideDialog(item = null) {
 
 
 
+// 用途：保存覆盖规则并保留写入完成事实。
+// 参数：无；读取当前覆盖规则表单。
+// 返回值：无；刷新失败单独提示且不重发保存。
 async function submitSplitOverride() {
   if (!overrideDialog.value) return
   saving.value = true
+  let saved = false
   try {
     await saveSplitOverride({
       ...overrideDialog.value,
       match: compactOverrideMatch(overrideDialog.value.match),
       settings: compactOverrideSettings(overrideDialog.value.settings),
     })
+    saved = true
     overrideDialog.value = null
     splitOverrides.value = await listSplitOverrides()
     showToast('覆盖规则已保存')
-  } catch (error) { showToast(formatUserError(error, { fallback: '覆盖规则保存失败' }), 'error') }
+  } catch (error) {
+    showToast(saved ? `覆盖规则已保存，但目录刷新失败；请刷新核对，勿重复保存。${formatUserError(error).slice(0, 160)}`
+      : formatUserError(error, { fallback: '覆盖规则保存失败' }), saved ? 'warning' : 'error')
+  }
   finally { saving.value = false }
 }
 
+// 用途：删除选定覆盖规则并区分删除与刷新结果。
+// 参数：item 为用户确认删除的规则。
+// 返回值：无；已完成删除不因刷新失败变成失败。
 async function removeSplitOverride(item) {
   if (saving.value) return
   const ok = await askConfirm({
@@ -1029,11 +1057,16 @@ async function removeSplitOverride(item) {
   })
   if (!ok) return
   saving.value = true
+  let removed = false
   try {
     await deleteSplitOverride(item.id)
+    removed = true
     splitOverrides.value = await listSplitOverrides()
     showToast(`覆盖规则「${item.name}」已删除`)
-  } catch (error) { showToast(formatUserError(error, { fallback: '覆盖规则删除失败' }), 'error') }
+  } catch (error) {
+    showToast(removed ? `覆盖规则已删除，但目录刷新失败；请刷新核对，勿重复删除。${formatUserError(error).slice(0, 160)}`
+      : formatUserError(error, { fallback: '覆盖规则删除失败' }), removed ? 'warning' : 'error')
+  }
   finally { saving.value = false }
 }
 
@@ -1041,9 +1074,11 @@ async function removeSplitOverride(item) {
 // 页面只负责展示，不在这里重复维护第二份文案。
 // SLA 口径标签与剩余/超期文案：与后端 domain.SlaKind* 常量对齐。
 const slaKindLabel = { PLAN_END_OVERDUE: '计划完成超期', STATUS_DEADLINE_OVERDUE: '状态停留超期', STATUS_DEADLINE_APPROACHING: '状态临近超期' }
+// 主报告文件上传暂时关闭，入口和页面提交动作使用同一开关，便于后续恢复。
+const reportFileUploadEnabled = false
 const reportStatusRank = { RECTIFYING: 1, COMPILING: 2, REVIEWED: 3, ISSUED: 4, ARCHIVED: 5 }
 const reportPhaseNext = { NONE: 'RECTIFYING', RECTIFYING: 'COMPILING', COMPILING: 'REVIEWED', REVIEWED: 'ISSUED', ISSUED: 'ARCHIVED' }
-const reportPhaseAction = { RECTIFYING: '开始整改', COMPILING: '开始编制', REVIEWED: '审核报告', ISSUED: '签发报告', ARCHIVED: '归档报告' }
+const reportPhaseAction = { RECTIFYING: '开始整改', COMPILING: '开始编制', REVIEWED: '确认审核完成', ISSUED: '确认签发', ARCHIVED: '确认归档' }
 const reportItems = computed(() => serviceItems.value.filter((item) => {
   const projectStatus = projectByID.value.get(item.project_id)?.status
   return ['现场实施完成', '报告编制', '已完成'].includes(projectStatus) && (item.status === '现场实施完成' || (item.report_status && item.report_status !== 'NONE'))
@@ -1557,8 +1592,15 @@ const canReviewSpecialMethod = computed(() => permissionSet.value.has('project.s
 const canConfirmDecomposition = computed(() => permissionSet.value.has('service_item.confirm'))
 // 拆解调整需要独立权限：业务管理员据此发起补充协议并重建服务项清单。
 const canManageDecomposition = computed(() => permissionSet.value.has('project.decomposition.manage'))
-const reportPhasePermission = { RECTIFYING: 'project.report.prepare', COMPILING: 'project.report.prepare', REVIEWED: 'project.report.review', ISSUED: 'project.report.issue', ARCHIVED: 'project.report.archive' }
-const canAdvanceReportPhase = (phase) => permissionSet.value.has(reportPhasePermission[phase])
+// 用途：限制主报告手动阶段动作由当前服务项的指派项目经理办理。
+// 参数：phase 为待推进的报告阶段。
+// 返回值：当前主体、编制权限、现场状态和目标阶段均有效时返回 true。
+function canAdvanceReportPhase(phase) {
+  const item = selectedServiceItem.value
+  return !!session.value?.user_id && item?.project_manager_id === session.value.user_id
+    && item.status === '现场实施完成' && permissionSet.value.has('project.report.prepare')
+    && !!reportStatusRank[phase]
+}
 // 分配动作由两个权限之一触发：业务管理员用 team.assign，团队负责人用 execution.assign。
 const canSubmitAllocation = computed(() => canAssignTeam.value || canExecutionAssign.value)
 // 服务端在"发布实施计划"时强校验前置状态。这里提前把"还差哪一步"说清楚并禁用主按钮，
@@ -1747,12 +1789,12 @@ const operationSteps = computed(() => {
   ]
 })
 
-// 报告必须先整改，再依次完成编制、审核、签发与归档。
+// 报告默认先整改；无需整改时可直接编制，审核、签发与归档仍依次完成。
 const reportSteps = computed(() => {
   const item = selectedServiceItem.value
   const current = reportStatusRank[item?.report_status] || 0
   return [
-    { phase: 'RECTIFYING', label: '报告整改' },
+    { phase: 'RECTIFYING', label: '报告整改（可选）' },
     { phase: 'COMPILING', label: '报告编制' },
     { phase: 'REVIEWED', label: '报告审核' },
     { phase: 'ISSUED', label: '报告签发' },
@@ -2816,7 +2858,14 @@ function toggleServiceItem(item) {
   selectedServiceItemIDs.value = [...selected]
   if (selectedServiceItems.value.length === 1) fillOperationForm(selectedServiceItems.value[0])
 }
+// 用途：在主报告上传开放时上传并登记当前编制版本的 PDF 文件。
+// 参数：无，读取当前服务项及表单中的报告文件。
+// 返回值：无；关闭或校验失败时提示，上传和登记失败时显示错误。
 async function uploadCurrentReport() {
+  if (!reportFileUploadEnabled) {
+    showToast('报告文件上传暂时关闭', 'warning')
+    return
+  }
   if (saving.value) return
   const item = selectedServiceItem.value
   const file = operationForm.value.reportFile
@@ -2962,7 +3011,7 @@ async function askOperationReason(options, context, allowed) {
 }
 
 // 用途：按当前操作类型执行服务项交付动作并刷新工作区。
-// 参数：kind 为分配、计划、现场实施或报告推进等操作类型。
+// 参数：kind 为分配、计划、现场实施或经理手动报告推进类型，含待整改直接编制。
 // 返回值：无；校验失败不写入，接口失败以提示反馈。
 async function runOperation(kind) {
   if (saving.value) return
@@ -3009,10 +3058,20 @@ async function runOperation(kind) {
     } else if (kind === 'special-approve' || kind === 'special-reject') {
       await reviewSpecialMethod(item.id, { decision: kind === 'special-approve' ? 'APPROVED' : 'REJECTED', comment: form.reviewComment })
       showToast(kind === 'special-approve' ? '复核已通过，可发布实施计划' : '复核已驳回，请修正后重新提交复核')
-    } else if (kind === 'report-next') {
-      const next = reportPhaseNext[item.report_status]
-      await updateReportStatus(item.id, next, item.version)
-      showToast(`报告状态已推进至：${reportStatusLabel[next]}`)
+    } else if (kind === 'report-next' || kind === 'report-skip-rectifying') {
+      const skipRectifying = kind === 'report-skip-rectifying'
+      if (skipRectifying && (item.status !== '现场实施完成' ||
+        item.report_status !== 'NONE' || !canAdvanceReportPhase('COMPILING'))) {
+        showToast('仅有编制权限且处于待整改时，才可直接开始编制', 'warning')
+        return
+      }
+      const next = skipRectifying ? 'COMPILING' : reportPhaseNext[item.report_status]
+      if (!next || !canAdvanceReportPhase(next)) {
+        showToast('仅当前服务项的项目经理可按顺序手动流转报告阶段', 'warning')
+        return
+      }
+      await advanceManualReportStatus(item.id, next, item.version)
+      showToast(`报告阶段已手动更新为：${reportStatusLabel[next]}`)
     } else if (kind === 'preparation') {
       const equipmentWindowProblem = form.equipment.find((row) => (row.windowStart && !row.windowEnd) || (!row.windowStart && row.windowEnd) || (row.windowStart && row.windowEnd && new Date(row.windowEnd) < new Date(row.windowStart)))
       if (equipmentWindowProblem) { showToast(`「${planResourceName(equipmentWindowProblem)}」的使用时段不完整或结束早于开始`); return }
@@ -3127,9 +3186,9 @@ async function runOperation(kind) {
   finally { saving.value = false }
 }
 
-/** 用途：按原选择范围撤销负责人或执行团队分配并保留历史记录。
- * 参数：kind 为 team（负责人）或 execution（执行团队）。
- * 返回值：无；取消不写入，失败以提示反馈。 */
+// 用途：按原选择撤销分配，区分已完成、拒绝、未知和未执行项。
+// 参数：kind 为 team（负责人）或 execution（执行团队）。
+// 返回值：无；只取消已确认完成项勾选，失败后先刷新核对。
 async function revokeSelectedAssignment(kind) {
   const permitted = () => kind === 'team' ? canRevokeTeam.value : kind === 'execution' && canRevokeExecution.value
   if (saving.value || promptDialog.value || !permitted()) return
@@ -3145,22 +3204,37 @@ async function revokeSelectedAssignment(kind) {
   }, context, permitted)
   if (reason === null) return
   saving.value = true
+  const completed = []
+  let failure = null
   try {
-    for (const item of context.items) {
-      const payload = { reason, expected_version: Number(item.version) || 0 }
-      if (kind === 'team') await revokeTeamAssignment(item.id, payload)
-      else await revokeExecutionAssignment(item.id, payload)
+    try {
+      for (const item of context.items) {
+        const payload = { reason, expected_version: Number(item.version) || 0 }
+        if (kind === 'team') await revokeTeamAssignment(item.id, payload)
+        else await revokeExecutionAssignment(item.id, payload)
+        completed.push(item.id)
+      }
+    } catch (error) { failure = error }
+    selectedServiceItemIDs.value = selectedServiceItemIDs.value.filter(id => !completed.includes(id))
+    let refreshFailed = false
+    try { await loadWorkspace({ reportError: false }) } catch { refreshFailed = true }
+    if (failure) {
+      const failedID = context.items[completed.length].id
+      const outcome = failure.outcomeUnknown ? '结果未知，请先核对当前记录' : '未完成'
+      const cause = formatUserError(failure).slice(0, 120)
+      showToast(`已确认完成 ${completed.length} 项；${failedID} ${outcome}；`
+        + `另有 ${context.items.length - completed.length - 1} 项未执行。${cause}`
+        + `${refreshFailed ? '列表刷新失败，请手动刷新。' : ''}`
+        + '勿重复提交已完成项；未确认项先核对。', 'warning')
+    } else {
+      showToast(`已撤销 ${completed.length} 个服务项的${kind === 'team' ? '团队负责人分配及下游执行团队' : '执行团队分配'}，历史记录已保留${refreshFailed ? '；列表刷新失败，请刷新核对，勿重复提交。' : ''}`, refreshFailed ? 'warning' : 'success')
     }
-    showToast(`已撤销 ${eligible.length} 个服务项的${kind === 'team' ? '团队负责人分配及下游执行团队' : '执行团队分配'}，历史记录已保留`)
-    await loadWorkspace()
-  } catch (error) {
-    showToast(formatUserError(error, { fallback: '撤销分配失败，请刷新后重试' }), 'error')
   } finally { saving.value = false }
 }
 
-// 用途：将原选择范围内待分配的服务项退回拆解确认。
+// 用途：逐项退回拆解确认，保留部分完成和未知结果边界。
 // 参数：无。
-// 返回值：无；取消不写入，失败以提示反馈。
+// 返回值：无；只清除已确认完成项选择，未确认项先核对且不自动重发。
 async function returnSelectedToDecomposition() {
   if (saving.value || promptDialog.value || !canManageDecomposition.value) return
   const items = selectedServiceItems.value
@@ -3173,16 +3247,29 @@ async function returnSelectedToDecomposition() {
   }, context, () => canManageDecomposition.value)
   if (reason === null) return
   saving.value = true
+  const completed = []
+  let failure = null
   try {
-    for (const item of context.items) {
-      await returnServiceItemToDecomposition(item.id, { reason: String(reason).trim(), expected_version: Number(item.version) || 0 })
+    try {
+      for (const item of context.items) {
+        await returnServiceItemToDecomposition(item.id, { reason: String(reason).trim(), expected_version: Number(item.version) || 0 })
+        completed.push(item.id)
+      }
+    } catch (error) { failure = error }
+    selectedServiceItemIDs.value = selectedServiceItemIDs.value.filter(id => !completed.includes(id))
+    let refreshFailed = false
+    try { await loadWorkspace({ reportError: false }) } catch { refreshFailed = true }
+    if (failure) {
+      const failedID = context.items[completed.length].id
+      const outcome = failure.outcomeUnknown ? '结果未知，请先核对当前记录' : '未完成'
+      const cause = formatUserError(failure).slice(0, 120)
+      showToast(`已确认完成 ${completed.length} 项；${failedID} ${outcome}；`
+        + `另有 ${context.items.length - completed.length - 1} 项未执行。${cause}`
+        + `${refreshFailed ? '列表刷新失败，请手动刷新。' : ''}`
+        + '勿重复提交已完成项；未确认项先核对。', 'warning')
+    } else {
+      showToast(`已将 ${completed.length} 个服务项退回拆解确认，原分配与校验结果已清除${refreshFailed ? '；列表刷新失败，请刷新核对，勿重复提交。' : ''}`, refreshFailed ? 'warning' : 'success')
     }
-    showToast(`已将 ${items.length} 个服务项退回拆解确认，原分配与校验结果已清除`)
-    selectedServiceItemIDs.value = []
-    await loadWorkspace()
-  } catch (error) {
-    showToast(formatUserError(error, { fallback: '退回拆解确认失败，请刷新后重试' }), 'error')
-    if (error?.status === 409) await loadWorkspace()
   } finally { saving.value = false }
 }
 
@@ -4181,9 +4268,31 @@ onBeforeUnmount(() => {
               </template>
               <template v-else-if="activeSection === 'exceptions'"><section v-if="exceptionFlow.length" class="pm-panel pm-approval-panel"><header><div><p class="pm-panel-kicker">复核流程</p><h2>异常处置流程 · {{ selectedDeviation?.payload?.deviation_id || '—' }}</h2></div><span>{{ pendingDeviations.length }} 项待评审</span></header><div class="pm-approval"><template v-for="(step, index) in exceptionFlow" :key="step.title"><div class="pm-approval-step" :class="step.state"><span class="pm-approval-dot">{{ step.state === 'done' ? '✓' : step.state === 'doing' ? '!' : '○' }}</span><div class="pm-approval-body"><b>{{ step.title }}</b><small>{{ step.when }}</small><em>{{ step.note }}</em></div></div><span v-if="index < exceptionFlow.length - 1" class="pm-approval-arrow">→</span></template></div></section><label><span>偏离描述</span><textarea v-model.trim="operationForm.deviationDescription" rows="3" placeholder="选择服务项后填写偏离内容" maxlength="1000"></textarea></label><label><span>偏离证据</span><input type="file" accept="application/pdf,image/png,image/jpeg" @change="operationForm.deviationEvidenceFile = $event.target.files?.[0] || null" /></label><div class="pm-field"><span>严重度</span><SearchableSelect v-model="operationForm.severity" :options="deviationSeverityOptions" placeholder="请选择严重度" search-placeholder="搜索严重度" aria-label="选择偏离严重度" /></div><button v-if="canReportDeviation" class="pm-button primary" :disabled="saving" @click="runOperation('exception-report')">上报偏离</button><label><span>评审偏离 ID</span><input v-model.trim="operationForm.deviationID" placeholder="DV-..."  maxlength="64"/></label><div class="pm-field"><span>评审决定</span><SearchableSelect v-model="operationForm.decision" :options="deviationDecisionOptions" placeholder="请选择评审决定" search-placeholder="搜索放行、重测或终止" aria-label="选择评审决定" /></div><label><span>{{ operationForm.decision === 'TERMINATE' ? '终止原因 *' : '评审说明' }}</span><textarea v-model.trim="operationForm.comment" rows="3" :required="operationForm.decision === 'TERMINATE'" placeholder="说明放行、重测或终止依据" maxlength="1000"></textarea></label><button v-if="canReviewDeviation" class="pm-button" :disabled="saving" @click="runOperation('exception-review')">提交偏离评审</button></template>
               <template v-else-if="activeSection === 'reports'">
+                <ReportReviewFactsPanel
+                  v-if="selectedServiceItem"
+                  :key="selectedServiceItem.id"
+                  :item="selectedServiceItem"
+                  :session="session"
+                  :manual-main-report="true"
+                  @changed="refreshAfterWrite"
+                />
                 <section class="pm-panel pm-stepper-panel"><header><div><p class="pm-panel-kicker">报告阶段</p><h2>报告阶段链</h2></div><span v-if="selectedServiceItem" class="pm-op-current">当前：<span class="pm-badge" :class="statusTone(reportStatusLabel[selectedServiceItem.report_status] || '未开始')">{{ reportStatusLabel[selectedServiceItem.report_status] || '未开始' }}</span></span></header><div class="pm-stepper"><template v-for="(step, index) in reportSteps" :key="step.phase"><div class="pm-step" :class="step.state"><span class="pm-step-num">{{ step.state === 'done' ? '✓' : index + 1 }}</span><span>{{ step.label }}</span></div><div v-if="index < reportSteps.length - 1" class="pm-step-line"></div></template></div></section>
                 <div class="pm-report-phase" v-if="selectedServiceItem?.report_status"><span>当前报告阶段</span><b class="pm-badge" :class="statusTone(reportStatusLabel[selectedServiceItem.report_status] || selectedServiceItem.report_status)">{{ reportStatusLabel[selectedServiceItem.report_status] || selectedServiceItem.report_status }}</b></div>
-                <div v-if="selectedServiceItem?.report_status === 'COMPILING' && permissionSet.has('project.report.prepare')" class="pm-form"><label><span>R{{ Number(selectedServiceItem.report_revision) || 0 }} 报告文件 <em>*</em></span><input type="file" accept="application/pdf" @change="operationForm.reportFile = $event.target.files?.[0] || null" /><small>上传后由统一文件网关校验并登记摘要，审核人与编制人必须不同。</small></label><button class="pm-button" :disabled="saving" @click="uploadCurrentReport">上传并登记报告</button></div>
+                <div
+                  v-if="reportFileUploadEnabled && selectedServiceItem?.report_status === 'COMPILING'
+                    && permissionSet.has('project.report.prepare')"
+                  class="pm-form"
+                >
+                  <label>
+                    <span>R{{ Number(selectedServiceItem.report_revision) || 0 }} 报告文件 <em>*</em></span>
+                    <input type="file" accept="application/pdf"
+                      @change="operationForm.reportFile = $event.target.files?.[0] || null" />
+                    <small>上传后由统一文件网关校验并登记摘要，审核人与编制人必须不同。</small>
+                  </label>
+                  <button class="pm-button" :disabled="saving" @click="uploadCurrentReport">
+                    上传并登记报告
+                  </button>
+                </div>
                 <section v-if="selectedReportCorrectionRequests.length" class="pm-panel pm-approval-panel">
                   <header><div><p class="pm-panel-kicker">报告更正</p><h2>待处理更正申请</h2></div><span>{{ selectedReportCorrectionRequests.length }} 项</span></header>
                   <div v-for="request in selectedReportCorrectionRequests" :key="request.id" class="pm-form">
@@ -4196,10 +4305,22 @@ onBeforeUnmount(() => {
                   </div>
                 </section>
                 <div v-if="canSubmitReportCorrection" class="pm-form">
-                  <label><span>报告更正原因 <em>*</em></span><textarea v-model.trim="operationForm.reportCorrectionReason" rows="3" placeholder="说明已签发或已归档报告需要更正的内容" maxlength="1000"></textarea><small>审批通过后旧版本作废并生成下一报告版本，需重新完成整改、编制、审核、签发和归档。</small></label>
+                  <label><span>报告更正原因 <em>*</em></span><textarea v-model.trim="operationForm.reportCorrectionReason" rows="3" placeholder="说明已签发或已归档报告需要更正的内容" maxlength="1000"></textarea><small>审批通过后旧版本作废并生成下一报告版本，需重新完成编制、审核、签发和归档；整改按需选择。</small></label>
                   <button type="button" class="pm-button" :disabled="saving" @click="submitReportCorrection">申请报告更正</button>
                 </div>
-                <button v-if="selectedServiceItem && reportPhaseNext[selectedServiceItem.report_status] && canAdvanceReportPhase(reportPhaseNext[selectedServiceItem.report_status])" class="pm-button primary" :disabled="saving" @click="runOperation('report-next')">{{ reportPhaseAction[reportPhaseNext[selectedServiceItem.report_status]] }}</button>
+                <p class="pm-form-hint">主报告阶段暂由本服务项的项目经理按顺序手动流转。</p>
+                <button
+                  v-if="selectedServiceItem && reportPhaseNext[selectedServiceItem.report_status]
+                    && canAdvanceReportPhase(reportPhaseNext[selectedServiceItem.report_status])"
+                  class="pm-button primary" :disabled="saving" @click="runOperation('report-next')"
+                >{{ reportPhaseAction[reportPhaseNext[selectedServiceItem.report_status]] }}</button>
+                <button
+                  v-if="selectedServiceItem?.status === '现场实施完成' && selectedServiceItem.report_status === 'NONE' && canAdvanceReportPhase('COMPILING')"
+                  type="button"
+                  class="pm-button"
+                  :disabled="saving"
+                  @click="runOperation('report-skip-rectifying')"
+                >跳过整改，开始编制</button>
               </template>
             </div><div v-else class="pm-empty-mini">请先选择服务项</div>
           </section>

@@ -1,6 +1,21 @@
 import { computed, ref } from "vue";
 import { formatBusinessDate, todayBusinessDate } from "../../shared/utils/businessTime.js";
 import { CANCELLABLE_INVOICE_STATUSES } from "../utils/invoiceStatus.js";
+import { userFieldErrors } from "../../shared/utils/userError.js";
+
+// 用途：把服务端真实明细坐标映射到当前单行表单的可编辑字段。
+// 参数：cause 为服务端结构化拒绝；自动数量和自动单价不生成编辑要求。
+// 返回值：现有表单字段到安全中文反馈的映射，未知字段保持页面级提示。
+function invoiceFormFeedback(cause) {
+  const editable = new Set(["item_name", "tax_classification_code", "amount_excl_tax",
+    "tax_rate", "tax_amount", "amount_incl_tax"]);
+  const result = {};
+  for (const issue of userFieldErrors(cause?.details ?? cause?.fieldErrors)) {
+    const match = /^items\[0\]\.([a-z_]+)$/.exec(issue.field);
+    if (match && editable.has(match[1])) result[match[1]] = issue.message;
+  }
+  return result;
+}
 
 /**
  * 开票申请域（治理批次 5 结算，自 SettlementView.vue 逐字迁移）。
@@ -44,6 +59,7 @@ export function useInvoiceRequests({
   const invoiceKeyword = ref("");
   const invoiceStatusFilter = ref("");
   const invoiceReview = ref({ id: "", version: 0, request_no: "", reason: "" });
+  const invoiceFieldErrors = ref({});
   const invoiceForm = ref({
     receivable_id: "",
     special_reason: "",
@@ -119,7 +135,7 @@ export function useInvoiceRequests({
     }
   }
 
-  // 用途：按可见应收提交开票申请及特殊事项原因。
+  // 用途：按可见应收提交开票申请，并把安全字段拒绝返回实际表单。
   // 参数：无；读取当前表单。
   // 返回值：写入及刷新完成的 Promise 或空值。
   function submitInvoice() {
@@ -131,34 +147,40 @@ export function useInvoiceRequests({
       return;
     }
     const form = invoiceForm.value;
+    invoiceFieldErrors.value = {};
     return act(async () => {
-      await createInvoiceRequest({
-        contract_snapshot_id: receivable.contract_snapshot_id,
-        buyer_profile: {
-          customer_id: receivable.customer_id,
-          name: receivable.customer_name,
-          tax_no: form.buyer_tax_no,
-        },
-        invoice_type: form.invoice_type,
-        special_reason: form.special_reason || "",
-        items: [
-          {
-            item_name: form.item_name,
-            tax_classification_code: form.tax_classification_code,
-            specification: "",
-            unit: "项",
-            quantity: "1",
-            unit_price_excl_tax: form.amount_excl_tax,
-            amount_excl_tax: form.amount_excl_tax,
-            tax_rate: form.tax_rate,
-            tax_amount: form.tax_amount,
-            amount_incl_tax: form.amount_incl_tax,
+      try {
+        await createInvoiceRequest({
+          contract_snapshot_id: receivable.contract_snapshot_id,
+          buyer_profile: {
+            customer_id: receivable.customer_id,
+            name: receivable.customer_name,
+            tax_no: form.buyer_tax_no,
           },
-        ],
-        allocations: [
-          { receivable_id: receivable.id, reserved_amount: form.amount_incl_tax },
-        ],
-      });
+          invoice_type: form.invoice_type,
+          special_reason: form.special_reason || "",
+          items: [
+            {
+              item_name: form.item_name,
+              tax_classification_code: form.tax_classification_code,
+              specification: "",
+              unit: "项",
+              quantity: "1",
+              unit_price_excl_tax: form.amount_excl_tax,
+              amount_excl_tax: form.amount_excl_tax,
+              tax_rate: form.tax_rate,
+              tax_amount: form.tax_amount,
+              amount_incl_tax: form.amount_incl_tax,
+            },
+          ],
+          allocations: [
+            { receivable_id: receivable.id, reserved_amount: form.amount_incl_tax },
+          ],
+        });
+      } catch (cause) {
+        invoiceFieldErrors.value = invoiceFormFeedback(cause);
+        throw cause;
+      }
       invoiceComposerOpen.value = false;
     }, "开票申请已提交并锁定可开票余额。");
   }
@@ -308,6 +330,7 @@ export function useInvoiceRequests({
     invoiceStatusFilter,
     invoiceReview,
     invoiceForm,
+    invoiceFieldErrors,
     visibleInvoiceRequests,
     visibleTaxInvoices,
     resetInvoiceFilters,

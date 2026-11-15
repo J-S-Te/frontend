@@ -216,6 +216,36 @@ test('settlement module translations keep precise Chinese and shared write-timeo
   assert.doesNotMatch(timeout, /币种不同/)
 })
 
+test('当前发票关系拒绝可执行且普通计划409不误报override', () => {
+  const line = formatSettlementError({ status: 400, code: 'SETTLEMENT_INVALID_REQUEST',
+    message: 'invalid input: invoice line does not match quantity, unit price, tax rate and totals' })
+  assert.match(line, /数量.*单价.*税率|税额.*合计/)
+  const stale = formatSettlementError({ status: 409, code: 'SETTLEMENT_CONFLICT',
+    message: '记录已变化、重复或余额不足' }, { path: '/receivable-plans/plan/adjust' })
+  assert.doesNotMatch(stale, /override|结算财务负责人/)
+})
+
+test('结算通用500保留未知结果和幂等键且不覆盖共享核对提示', async () => {
+  const keys = []
+  const { api, setFetch } = harness(async (_url, options) => {
+    keys.push(options.headers['Idempotency-Key'])
+    return json({ code: 'SETTLEMENT_INTERNAL_ERROR', message: '服务处理失败' }, 500)
+  })
+  await assert.rejects(api.createReceipt({ amount: '10' }), error => {
+    assert.equal(error.outcomeUnknown, true)
+    assert.match(error.message, /核对.*重复|重复.*核对/)
+    assert.equal(error.context.method, 'POST')
+    return true
+  })
+  assert.equal(keys.length, 1)
+  setFetch(async (_url, options) => {
+    keys.push(options.headers['Idempotency-Key'])
+    return json({ data: { id: 'receipt' } })
+  })
+  await api.createReceipt({ amount: '10' })
+  assert.equal(keys[0], keys[1])
+})
+
 // viewHarness 为真实结算视图提供完整模块绑定并验证错误及未知结果语义。
 // 参数：overrides为本用例明确替换的接口或依赖。
 // 返回值：视图实际操作状态；不访问真实结算服务。
@@ -307,19 +337,18 @@ test('计划差额读取接受 items 外壳与空列表，单合同查询带快�
   assert.equal(urls[1].endsWith('/api/v1/plan-coverage?contract_snapshot_id=S%201'), true)
 })
 
-// SET-04 计划写入被 409 拒绝时，前端需补充"合计上限 + 差额超阈值需财务 override"的处置说明，
-// 且该说明只在计划路径出现，其他资源的冲突文案保持原样。
-test('计划写入 409 追加 override 提示，其他资源与成功路径不受影响', () => {
-  const conflict = { code: 'SETTLEMENT_CONFLICT', message: '记录已变化、重复或余额不足', status: 409 }
-  for (const path of ['/receivable-plans', '/receivable-plans/plan-1/adjust']) {
+// 仅后端明确的覆盖差额阈值拒绝追加现有财务处理路径，不能由任意409推断。
+test('只有计划覆盖差额阈值追加财务处理说明', () => {
+  const conflict = { code: 'SETTLEMENT_CONFLICT', message: '计划覆盖差额超过阈值，需要财务负责人核对处理',
+    status: 409, details: { reason_code: 'PLAN_COVERAGE_THRESHOLD' } }
+  for (const path of ['/receivable-plans', '/receivable-plans/plan-1/adjust', '/receivable-plans/plan-1/confirm']) {
     const message = formatSettlementError(conflict, { path })
-    assert.match(message, /当前记录可能已被处理/)
-    assert.match(message, /计划合计不得超过合同金额/)
-    assert.match(message, /settlement\.finance\.override/)
+    assert.match(message, /计划覆盖差额超过阈值/)
+    assert.match(message, /结算财务负责人/)
     assert.match(message, /不会自动重试/)
   }
   const unaffected = formatSettlementError(conflict)
-  assert.doesNotMatch(unaffected, /settlement\.finance\.override/)
+  assert.doesNotMatch(unaffected, /不会自动重试/)
   // 计划路径的非冲突错误（例如必填校验 400）不追加 override 说明。
   const invalid = formatSettlementError({ code: 'SETTLEMENT_INVALID_REQUEST', message: 'invalid input: planned_amount is required', status: 400 }, { path: '/receivable-plans' })
   assert.doesNotMatch(invalid, /override/)

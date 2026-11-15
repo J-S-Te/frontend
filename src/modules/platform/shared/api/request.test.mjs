@@ -94,3 +94,35 @@ test('调用方显式传入的同名或自定义请求头不被统一管道覆�
   assert.equal(captured.options.headers.Accept, 'application/vnd.test+json')
   assert.equal(captured.options.headers['Content-Type'], 'application/json')
 })
+
+test('平台真实请求管道保留顶层字段坐标，不只把字段提示拼成一句话', async () => {
+  const request = buildRequest()
+  const fields = [{ field: 'display_name', rule: 'required' }]
+  globalThis.fetch = async () => jsonResponse({ code: 'PLATFORM_VALIDATION_ERROR',
+    message: '请求参数不合法', field_errors: fields }, { ok: false, status: 422 })
+  await assert.rejects(request('/employees', { method: 'POST' }), error => {
+    assert.match(error.message, /姓名/)
+    assert.equal(error.fieldErrors[0].field, 'display_name')
+    assert.deepEqual(error.details, fields)
+    return true
+  })
+})
+
+test('平台写入通用内部错误保留结果未知标记，确定业务拒绝不标记未知', async () => {
+  const request = buildRequest()
+  globalThis.fetch = async () => jsonResponse({ code: 'PLATFORM_INTERNAL_ERROR',
+    message: '服务处理失败' }, { ok: false, status: 500 })
+  await assert.rejects(request('/employees', { method: 'POST' }), error => {
+    assert.equal(error.outcomeUnknown, true)
+    assert.match(error.message, /核对.*重复提交/)
+    return true
+  })
+  const reason = '审批流程缺少可用审批人，本次未提交。请联系管理员补充审批人员后重试。'
+  globalThis.fetch = async () => jsonResponse({ code: 'APPROVAL_SETUP_MISSING',
+    message: reason }, { ok: false, status: 503 })
+  await assert.rejects(request('/employees', { method: 'POST' }), error => {
+    assert.notEqual(error.outcomeUnknown, true)
+    assert.equal(error.message, reason)
+    return true
+  })
+})
