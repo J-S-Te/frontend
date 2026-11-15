@@ -66,7 +66,7 @@ async function renderFragment(fragment, harness) {
 
 const nextButton = source.match(/<button[^>]+@click="runOperation\('report-next'\)"[^]*?<\/button>/)[0]
 const rollbackButton = source.match(/<button[^>]+@click="submitRollbackRequest\('REPORT_TO_FIELD'\)"[^]*?<\/button>/)[0]
-const chain = source.match(/<section class="pm-panel pm-stepper-panel"><header><div><p class="pm-panel-kicker">报告阶段<[^]*?<\/section>/)[0]
+const chain = source.match(/<section class="pm-panel pm-stepper-panel">[\s\S]*?<\/section>/)[0]
 
 test('指派项目经理逐步点击整改编制审核签发归档，不依赖真实审核轮次', async () => {
   const h = reportHarness('NONE')
