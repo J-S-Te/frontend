@@ -26,6 +26,9 @@ export function startProjectLogin({ force = false } = {}) {
   window.location.replace(`${PUBLIC_PATH_PREFIX}/auth/login${prompt}`)
 }
 
+// 用途：保留服务端分类、字段与追踪信息，并明确未知写入结果。
+// 参数：body/response 为响应，context 为请求，配置含回退文案及结果未知标记。
+// 返回值：供页面核对状态的结构化错误，不重发请求。
 function projectRequestError(body, response, context, { code, fallback, outcomeUnknown = false } = {}) {
   const status = response?.status || 0
   const requestId = body?.request_id || body?.requestId || response?.headers?.get('x-request-id') || ''
@@ -63,6 +66,9 @@ function handleProjectAuthentication(error, response) {
   return error
 }
 
+// 用途：请求项目接口，校验响应并保留确定拒绝与未知结果的区别。
+// 参数：path 为业务路径，options 为既有请求选项。
+// 返回值：响应数据；请求或契约失败抛出结构化错误。
 async function request(path, options = {}) {
   const method = String(options.method || 'GET').toUpperCase()
   const isMutation = !['GET', 'HEAD', 'OPTIONS'].includes(method)
@@ -105,7 +111,9 @@ async function request(path, options = {}) {
   if (!response.ok) {
     const error = projectRequestError(body, response, requestContext, {
       fallback: '项目操作未完成，请稍后重试。',
-      outcomeUnknown: isMutation && ([408, 502, 504].includes(response.status) || body?.code === 'PM_SERVICE_TIMEOUT'),
+      outcomeUnknown: isMutation && ([408, 502, 504].includes(response.status)
+        || body?.code === 'PM_SERVICE_TIMEOUT'
+        || (response.status >= 500 && (!body?.code || body.code === 'PM_INTERNAL_ERROR'))),
     })
     if (options.suppressLoginRedirect) throw error
     throw handleProjectAuthentication(error, response)
@@ -781,6 +789,18 @@ export function updateReportStatus(itemID, phase, expectedVersion) {
 }
 
 /**
+ * advanceManualReportStatus 用途：由当前指派项目经理逐步手动维护主报告阶段。
+ * 参数：itemID 为服务项，phase 为下一阶段，expectedVersion 为服务端返回的当前版本。
+ * 返回值：阶段更新结果；非当前经理、非法跳步或旧版本时拒绝。
+ */
+export function advanceManualReportStatus(itemID, phase, expectedVersion) {
+  return request(`/service-items/${encodeURIComponent(itemID)}/report-status/manual`, {
+    method: 'POST',
+    body: JSON.stringify({ phase, expected_version: Number(expectedVersion) || 0 }),
+  })
+}
+
+/**
  * getDashboard 获取项目看板聚合数据。
  * @returns {Promise<object>} 看板指标与图表源数据。
  * @throws {Error} 会话失效或服务异常时抛出。
@@ -1304,8 +1324,8 @@ export function expenseParticipantPayload(form, revoke = false) {
   return value
 }
 
-// 用途：读取当前项目显式费用参与资格，仅由精确管理能力触发。
-// 参数：projectID 为项目标识，cursor 为上一页人员主体。
+// 用途：读取当前项目手工费用资格与实施人员默认资格，仅由精确管理能力触发。
+// 参数：projectID 为项目，cursor 为手工名单游标，implementationCursor 为实施人员游标。
 // 返回值：项目范围内的参与资格页或真实错误。
 export function getProjectExpenseParticipants(projectID, cursor = '', implementationCursor = '') {
   const query = new URLSearchParams({

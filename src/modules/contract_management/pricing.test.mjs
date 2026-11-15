@@ -13,7 +13,7 @@ import { hydrateContractDraft } from './utils/contractDraft.js'
 function harness(filename, props, overrides = {}) {
   const { descriptor } = parse(readFileSync(new URL(`./components/${filename}`, import.meta.url), 'utf8'))
   const compiled = compileScript(descriptor, { id: 'pricing-test' })
-  const deps = { computed: Vue.computed, onMounted: Vue.onMounted, ref: Vue.ref, watch: Vue.watch, pricingDiscountSummary, PricingSnapshotSummary: { render() { return null } }, listStandardPrices: async () => ({ items: [], has_more: false }), ...overrides }
+  const deps = { computed: Vue.computed, onMounted: Vue.onMounted, ref: Vue.ref, watch: Vue.watch, standardPriceCatalogEnabled: false, pricingDiscountSummary, PricingSnapshotSummary: { render() { return null } }, listStandardPrices: async () => ({ items: [], has_more: false }), ...overrides }
   const component = new Function(...Object.keys(deps), compiled.content.replace(/^import\s[\s\S]*?from ['"][^'"]+['"]\n/gm, '').replace('export default', 'return'))(...Object.values(deps))
   const result = compileTemplate({ source: descriptor.template.content, filename, id: 'pricing-test', compilerOptions: { bindingMetadata: compiled.bindings } })
   assert.deepEqual(result.errors, [])

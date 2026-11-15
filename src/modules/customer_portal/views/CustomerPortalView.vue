@@ -737,6 +737,9 @@ function validContact(value) {
   if (!contact) return true
   return /^1[3-9]\d{9}$/.test(contact) || /^[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}$/.test(contact)
 }
+// 用途：提交反馈并在列表刷新失败时保留已经提交成功的事实。
+// 参数：无；读取当前反馈表单与权限。
+// 返回值：异步完成；写入失败保留表单，读取失败只影响列表区域。
 async function submitFeedback() {
   if (!hasPermission('feedback.create')) return
   feedbackSubmitError.value = ''; feedbackContactError.value = ''
@@ -748,10 +751,16 @@ async function submitFeedback() {
     // 写操作后的列表刷新也算一次新的列表开始：先清掉上一轮失败原因再重发同一个请求。
     feedbackListError.value = ''
     if (hasPermission('feedback.read')) await load()
+    notice.value = feedbackListError.value
+      ? '反馈已提交，但反馈列表未刷新，请重新加载列表核对；无需再次提交。'
+      : '反馈已提交，我们将在 24 小时内首次响应。'
   } catch (value) { feedbackSubmitError.value = formatPortalError(value, { fallback: '反馈提交失败，请稍后重试。' }) }
 }
 async function openFeedback(item) { if (!hasPermission('feedback.read')) return; try { selectedFeedback.value = await getFeedback(item.id) } catch (value) { fail(value) } }
 async function replyFeedback() { if (!hasPermission('feedback.reply') || !feedbackReply.value.trim() || !selectedFeedback.value) return; try { selectedFeedback.value = await addFeedbackMessage(selectedFeedback.value.feedback.id, feedbackReply.value); feedbackReply.value = ''; notice.value = '补充内容已提交。' } catch (value) { fail(value) } }
+// 用途：关闭反馈并区分已关闭事实与后续列表读取失败。
+// 参数：无；使用当前反馈和可重放的关闭请求标识。
+// 返回值：异步完成；成功后保留关闭回执，失败显示原错误。
 async function confirmCloseFeedback() {
   if (!hasPermission('feedback.reply') || !selectedFeedback.value || feedbackClosing.value) return
   const feedbackID = selectedFeedback.value.feedback.id
@@ -768,6 +777,9 @@ async function confirmCloseFeedback() {
     notice.value = '反馈已关闭。'
     feedbackListError.value = ''
     if (hasPermission('feedback.read')) await load()
+    notice.value = feedbackListError.value
+      ? '反馈已关闭，但反馈列表未刷新，请重新加载列表核对；无需再次关闭。'
+      : '反馈已关闭。'
   } catch (value) {
     fail(value)
   } finally {

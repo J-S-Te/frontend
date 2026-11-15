@@ -6,6 +6,9 @@ import { formatUserError } from '../shared/utils/userError.js'
 
 const viewSource = await readFile(new URL('./views/ProjectManagementView.vue', import.meta.url), 'utf8')
 
+// 用途：执行真实分配页面及提示，隔离外部请求并保留完成事实。
+// 参数：items 为当前服务项，配置为本用例的请求及刷新依赖。
+// 返回值：真实页面状态、执行入口与刷新计数。
 function allocationPage(items, { assignTeam = async () => {}, assignExecutionTeam = async () => {}, listServiceItemsSnapshot = async () => ({ items: items.map(row => ({ ...row, version: row.version + 5 })), total: items.length, truncated: false }), refreshed = async () => {} } = {}) {
   const ref = value => ({ value })
   const state = {
@@ -18,7 +21,7 @@ function allocationPage(items, { assignTeam = async () => {}, assignExecutionTea
   const toast = viewSource.slice(viewSource.indexOf('function showToast(message'), viewSource.indexOf('\nfunction projectEvents('))
   let refreshCount = 0
   const run = new Function(...Object.keys(state), 'selectedServiceItems', 'selectedServiceItem', 'formatUserError', 'assignServiceItemTeams', 'assignTeam', 'assignExecutionTeam', 'listServiceItemsSnapshot', 'selectedIDs', 'loadWorkspace', 'refreshAfterWrite', 'window',
-    `let toastTimer; ${toast}; ${operation}; return runOperation;`)(...Object.values(state), selectedServiceItems, selectedServiceItem, formatUserError, assignServiceItemTeams, assignTeam, assignExecutionTeam, listServiceItemsSnapshot, text => text.split(','), async () => { refreshCount++; await refreshed() }, async () => { refreshCount++; await refreshed() }, { clearTimeout: () => {}, setTimeout: () => 1 })
+    `let toastTimer; ${toast}; ${operation}\n; return runOperation;`)(...Object.values(state), selectedServiceItems, selectedServiceItem, formatUserError, assignServiceItemTeams, assignTeam, assignExecutionTeam, listServiceItemsSnapshot, text => text.split(','), async () => { refreshCount++; await refreshed() }, async () => { refreshCount++; await refreshed() }, { clearTimeout: () => {}, setTimeout: () => 1 })
   return { ...state, run, refreshCount: () => refreshCount }
 }
 

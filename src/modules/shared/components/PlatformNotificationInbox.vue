@@ -3,6 +3,8 @@ import { computed, onMounted, ref } from 'vue'
 import { deleteReadNotifications, getNotification, listInbox, markNotificationRead } from '@/modules/platform/notifications/api/notifications'
 import { formatBusinessDateTime } from '@/modules/shared/utils/businessTime.js'
 import { formatUserError } from '@/modules/shared/utils/userError.js'
+import ConfirmDialog from '@/modules/shared/components/ConfirmDialog.vue'
+import { useConfirmDialog } from '@/modules/shared/composables/useConfirmDialog.js'
 
 // 共享站内通知列表：平台统一收件箱按来源收窄，供各子系统铃铛内嵌。
 // scope 固定为 all/local/cross 时隐藏页签，用于 CRM 的“跨系统”独立入口。
@@ -12,6 +14,7 @@ const props = defineProps({
   pageSize: { type: Number, default: 10 },
 })
 const emit = defineEmits(['unread-change'])
+const { dialog: confirmDialog, askConfirm, accept: acceptConfirm, cancel: cancelConfirm } = useConfirmDialog()
 
 const tab = ref('all')
 const tabs = [{ key: 'all', label: '全部' }, { key: 'local', label: '本系统' }, { key: 'cross', label: '跨系统' }]
@@ -79,7 +82,14 @@ async function open(item) {
 
 async function deleteRead() {
   if (!hasRead.value || busy.value || loading.value) return
-  if (typeof window !== 'undefined' && !window.confirm('确认删除当前账号的全部已读站内信？该操作只影响你的收件箱。')) return
+  const confirmed = await askConfirm({
+    title: '删除全部已读站内信？',
+    description: '确认删除当前账号的全部已读站内信？该操作只影响你的收件箱，删除后不可恢复。',
+    confirmText: '删除已读',
+    cancelText: '取消',
+    danger: true,
+  })
+  if (!confirmed || !hasRead.value || busy.value || loading.value) return
   busy.value = true
   error.value = ''
   try {
@@ -119,6 +129,7 @@ onMounted(load)
       <span>{{ page }} / {{ pages }}</span>
       <button type="button" :disabled="page >= pages || busy" @click="changePage(page + 1)">下一页</button>
     </nav>
+    <ConfirmDialog :open="Boolean(confirmDialog)" v-bind="confirmDialog || {}" @confirm="acceptConfirm" @cancel="cancelConfirm" />
     <aside v-if="detail" class="shared-inbox-detail">
       <header><h3>{{ detail.title }}</h3><button type="button" @click="detail = null">关闭</button></header>
       <p>{{ detail.content }}</p>

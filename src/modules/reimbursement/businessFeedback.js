@@ -1,0 +1,67 @@
+import { safeUserMessage } from '../shared/utils/userError.js'
+
+const reasonLabels = {
+  PROJECT_TERMINATED: '项目已终止；请核对历史尾款政策、证据及额外审批。',
+  SERVICE_ITEM_TERMINATED: '服务项已终止；请核对历史尾款政策、证据及额外审批。',
+  SERVICE_ITEM_UNAVAILABLE: '所选服务项不适用于当前项目，请在项目选项中重新核对。',
+  PROJECT_REPORT_STAGE_REQUIRED: '项目尚未进入允许报销的报告阶段，请在项目管理核对当前阶段。',
+  ACTOR_NOT_ELIGIBLE: '当前不具备该项目的费用参与资格，请在项目管理核对参与人员和有效期。',
+  PROJECT_EXPENSE_OWNER_MISSING: '项目费用负责人尚未明确，请在项目管理核对项目经理。',
+  SCOPE_LIMITED_TRAVEL_DETAILS: '当前范围不能查看完整行程事实，请由有权人员核对。',
+  NOT_TRAVEL_APPROVAL: '行程安排不代表出差审批，仍需按报销政策核对。',
+  TRAVEL_FACTS_MISSING: '项目行程事实缺失，请核对项目行程并按政策补充说明证据。',
+  TRAVEL_FACTS_MISMATCH: '项目行程事实存在不一致，请核对冲突并按政策提交人工说明。',
+  TRAVEL_FACTS_REQUIRE_MANUAL_CONFIRMATION: '行程事实尚不完整，请核对并按政策补充人工说明证据。',
+  TRAVEL_PREPARATION_MISSING: '尚未取得实施准备中的行程事实，请在项目管理核对来源安排。',
+  TRAVEL_SOURCE_SCOPE_MISMATCH: '行程来源与当前项目或服务项不一致，请核对引用的项目安排。',
+  TRAVEL_SOURCE_CYCLE_OR_INVALID_ID: '行程来源引用无效或循环，请联系项目管理员核对来源关系。',
+  TRAVEL_SOURCE_CONTENT_INVALID: '行程来源内容未通过核对，请联系项目管理员检查来源记录。',
+  TRAVEL_PREPARATION_REVOKED_OR_INVALID: '实施准备记录已撤销或不可用，请核对项目当前有效安排。',
+  TRAVEL_STRUCTURED_FACTS_MISSING: '实施准备尚未提供完整行程字段，请在项目管理核对安排内容。',
+  TRAVEL_REFERENCE_HAS_NO_TRAVEL: '引用的原行程为无需出行，请核对本次行程引用和实际安排。',
+  NO_TRAVEL_IS_NOT_APPROVAL: '项目安排为无需出行，不能作为出差批准，请核对本次差旅原因。',
+  TRAVEL_REFERENCE_MISSING: '被引用的原行程记录缺失，请在项目管理核对有效来源。',
+  TRAVEL_REFERENCE_REQUEST_MISMATCH: '本次安排与引用行程不属于同一出行请求，请核对引用来源。',
+  TRAVEL_REFERENCE_DEPTH_LIMIT: '行程引用层级超过受控范围，请联系项目管理员核对来源关系。',
+  TRAVEL_FACTS_INCOMPLETE: '行程地点或日期不完整，请在项目管理核对实际行程安排。',
+  SITE_TEXT_MISMATCH: '服务项现场与行程目的地不一致，请核对项目现场和实际行程。',
+  OCCURRED_DATE_OUTSIDE_TRAVEL_WINDOW: '费用发生日超出项目行程日期，请核对实际费用和行程日期。',
+  ACTOR_NOT_IN_TRAVELERS: '申请人不在项目原行程人员中，请核对项目参与人员和实际行程。',
+  CITY_CODE_MAPPING_UNKNOWN: '项目地点尚未匹配明确城市代码，请核对城市或已发布映射。',
+  PREPARATION_IS_NOT_TRAVEL_APPROVAL: '实施准备和行程安排不代表出差审批，仍需按报销政策核对。',
+  TRAVEL_DECLARATION_MISSING: '差旅申报尚未填写，请补充本次实际行程。',
+  DECLARATION_PROJECT_FACTS_MISSING: '项目行程事实缺失，请先核对项目安排。',
+  DECLARATION_PROJECT_ORIGIN_UNKNOWN: '项目出发城市尚不明确，请核对项目行程或城市映射。',
+  DECLARATION_PROJECT_DESTINATION_UNKNOWN: '项目目的城市尚不明确，请核对项目行程或城市映射。',
+  DECLARATION_PROJECT_ORIGIN_MISMATCH: '申报出发城市与项目行程不同，请核对实际行程。',
+  DECLARATION_PROJECT_DESTINATION_MISMATCH: '申报目的城市与项目行程不同，请核对实际行程。',
+  DECLARATION_PROJECT_DATES_UNKNOWN: '项目行程日期尚不明确，请核对项目安排。',
+  DECLARATION_PROJECT_DATES_MISMATCH: '申报日期超出项目行程，请核对申报和项目安排。',
+  TRAVEL_EXPENSE_DATE_OUTSIDE_DECLARATION: '费用发生日不在申报行程内，请核对费用和行程日期。',
+  INVOICE_TRAVEL_FACTS_MISSING: '票面行程事实缺失，请对照原件完成人工票面复核。',
+  INVOICE_TRAVEL_DATES_MISMATCH: '票面日期超出申报行程，请核对票面复核和差旅申报。',
+  INVOICE_TRAVEL_CITY_MISMATCH: '票面城市与申报行程不同，请核对票面复核和差旅申报。',
+  INVOICE_MULTI_LEG_REQUIRES_CONFIRMATION: '存在可能的联程路段，请按实际行程补充人工说明证据。',
+  INVOICE_HOTEL_OVERLAP: '不同城市的住宿日期重叠，请核对住宿票面与实际入住日期。',
+  TRAVEL_MODE_CONFLICT: '项目安排为无需出行，请核对本次差旅原因。',
+  TRAVEL_ACTOR_MISMATCH: '申请人未在项目原行程人员中，请核对参与人员和实际行程。',
+  TRAVEL_SITE_MISMATCH: '项目现场与行程地点不一致，请核对项目行程。',
+  TRAVEL_DATE_MISMATCH: '项目日期与行程日期不一致，请核对项目行程。',
+  TRAVEL_CITY_MISMATCH: '行程城市事实存在不一致，请核对城市与项目安排。',
+  TRAVEL_STATUS_UNKNOWN: '项目行程事实尚未明确，请核对来源记录。',
+  TRAVEL_MODE_UNKNOWN: '项目出行方式尚未明确，请核对来源记录。',
+  TRAVEL_ACTOR_UNKNOWN: '项目行程人员尚未明确，请核对来源记录。',
+  TRAVEL_SITE_UNKNOWN: '项目现场匹配情况未知，请核对地点事实。',
+  TRAVEL_DATE_UNKNOWN: '项目行程日期匹配情况未知，请核对日期事实。',
+  TRAVEL_CITY_UNKNOWN: '行程城市尚未确认，请核对城市代码或已发布映射。',
+  TRAVEL_TRANSPORT_UNKNOWN: '交通安排尚未提供，请核对来源行程。',
+  TRAVEL_ACCOMMODATION_UNKNOWN: '住宿安排尚未提供，请核对来源行程。',
+}
+
+// 用途：将服务端原因码翻译为原因和下一步，不参与资格与差旅结论判断。
+// 参数：value 为项目引用、票面交叉核验或差旅评估的原因码。
+// 返回值：安全中文提示；未知码提示核对来源，不直接回显内部编码。
+export function businessReasonLabel(value) {
+  return (Object.hasOwn(reasonLabels, value) ? reasonLabels[value] : '') || safeUserMessage(value)
+    || '该项事实仍需人工核对，请查看原件和项目来源；仍不明确时联系管理员。'
+}

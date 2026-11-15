@@ -1,0 +1,277 @@
+/* ==========================================================================
+   Shared process-timeline language (2026-11-15)
+   --------------------------------------------------------------------------
+   把 CRM 售前流程、结算留痕、报销审批轮次、门户报告状态、合同流转日志统一为：
+   一条细竖线 + 12px 语义圆点 + 白色事件卡 + 14px 标题 + 12px 时间/元信息。
+   保留各模块原有 DOM、状态类和可读顺序，仅统一视觉。
+   ========================================================================== */
+:root {
+  --tl-line: var(--ui-line-strong, #d9d9d9);
+  --tl-card-border: var(--ui-line, #f0f0f0);
+  --tl-card-bg: var(--ui-card, #fff);
+  --tl-card-radius: var(--ui-radius-card, 8px);
+  --tl-title: var(--ui-text, rgba(0, 0, 0, .88));
+  --tl-muted: var(--ui-muted, rgba(0, 0, 0, .45));
+  --tl-body: var(--ui-text-secondary, rgba(0, 0, 0, .65));
+}
+
+/* 统一事件卡：所有时间线内容都落在同一张轻量白卡上。 */
+:root body :is(
+  .settlement-timeline-body,
+  .expense-timeline__item,
+  .report-timeline li > div,
+  .crm-timeline-card,
+  .contract-action-log > div
+) {
+  box-sizing: border-box;
+  min-width: 0;
+  padding: 11px 13px;
+  color: var(--tl-body);
+  border: 1px solid var(--tl-card-border);
+  border-radius: var(--tl-card-radius);
+  background: var(--tl-card-bg);
+  box-shadow: none;
+}
+:root body :is(
+  .settlement-timeline-head strong,
+  .expense-timeline__head,
+  .report-timeline li > div > strong,
+  .crm-timeline-card h4,
+  .contract-action-log strong
+) {
+  color: var(--tl-title);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+:root body :is(
+  .settlement-timeline-head small,
+  .expense-timeline__time,
+  .report-timeline small,
+  .crm-timeline-step > time,
+  .contract-action-log span,
+  .contract-action-log p
+) {
+  color: var(--tl-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+:root body :is(
+  .settlement-timeline-body p,
+  .report-timeline p,
+  .crm-timeline-content,
+  .contract-action-log p
+) {
+  margin: 5px 0 0;
+  color: var(--tl-body);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* 结算：细线 + 小圆点 + 卡片，替代原来的粗边圆点。 */
+:root body .settlement-timeline-list {
+  padding-left: 20px;
+  border-left: 1px solid var(--tl-line);
+  list-style: none;
+}
+:root body .settlement-timeline-event {
+  position: relative;
+  padding: 0 0 12px 14px;
+}
+:root body .settlement-timeline-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+:root body .settlement-timeline-dot {
+  top: 8px;
+  left: -27px;
+  position: absolute;
+  display: block;
+  box-sizing: border-box;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--ui-primary);
+  border-radius: 50%;
+  background: var(--tl-card-bg);
+}
+:root body .settlement-timeline-event.tone-warning .settlement-timeline-dot { border-color: var(--ui-warning); }
+:root body .settlement-timeline-event.tone-danger .settlement-timeline-dot { border-color: var(--ui-danger); }
+:root body .settlement-timeline-event.tone-info .settlement-timeline-dot { border-color: var(--ui-primary); }
+:root body .settlement-timeline-event.tone-success .settlement-timeline-dot { border-color: var(--ui-success); }
+
+/* 报销：去掉模块自带粗线，统一容器和卡片间距。 */
+:root body .expense-timeline {
+  margin-top: 14px;
+  padding-left: 22px;
+}
+:root body .expense-timeline::before {
+  top: 8px;
+  bottom: 8px;
+  left: 9px;
+  width: 1px;
+  background: var(--tl-line);
+}
+:root body .expense-timeline__item {
+  margin-bottom: 10px;
+  padding: 11px 13px;
+}
+:root body .expense-timeline__item::before {
+  top: 12px;
+  left: -18px;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--ui-primary);
+  background: var(--tl-card-bg);
+}
+:root body .expense-timeline__item.success::before { border-color: var(--ui-success); background: var(--ui-success); }
+:root body .expense-timeline__item.warning::before { border-color: var(--ui-warning); background: var(--ui-warning); }
+:root body .expense-timeline__item.danger::before { border-color: var(--ui-danger); background: var(--ui-danger); }
+:root body .expense-timeline__item.current::before { border-color: var(--ui-primary); background: var(--ui-primary); box-shadow: 0 0 0 3px var(--ui-primary-soft); }
+:root body .expense-timeline__comment {
+  margin-top: 7px;
+  padding: 7px 9px;
+  border: 1px solid var(--tl-card-border);
+  border-left: 2px solid var(--ui-primary-border);
+  border-radius: 6px;
+  background: var(--ui-card-soft, #fafafa);
+  color: var(--tl-muted);
+  font-size: 12px;
+}
+
+/* 门户报告：编号圆点变小一档，内容卡与其它时间线一致。 */
+:root body .report-timeline {
+  gap: 0;
+  padding: 0;
+  margin: 0;
+}
+:root body .report-timeline li {
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 10px;
+  padding: 4px 0 12px;
+}
+:root body .report-timeline li > span {
+  width: 24px;
+  height: 24px;
+  color: var(--ui-primary);
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid var(--ui-primary-border);
+  background: var(--ui-primary-soft);
+}
+:root body .report-timeline li:not(:last-child)::after {
+  top: 30px;
+  bottom: -4px;
+  left: 11px;
+  border-left: 1px solid var(--tl-line);
+}
+:root body .report-timeline li > div {
+  padding: 11px 13px;
+}
+
+/* CRM 售前流程：保留左侧图标/时间列，卡片和元信息收敛到同一套。 */
+:root body .crm-timeline-list {
+  gap: 10px;
+}
+:root body .crm-timeline-step {
+  grid-template-columns: 30px minmax(118px, 140px) minmax(0, 1fr);
+  gap: 10px;
+  padding-bottom: 10px;
+}
+:root body .crm-timeline-step::before {
+  left: 14px;
+  width: 1px;
+  background: var(--tl-line);
+}
+:root body .crm-timeline-rail span {
+  width: 28px;
+  height: 28px;
+  color: var(--ui-primary);
+  font-size: 12px;
+  border: 1px solid var(--ui-primary-border);
+  background: var(--ui-primary-soft);
+  box-shadow: none;
+}
+:root body .crm-timeline-card {
+  padding: 10px 12px;
+  background: var(--tl-card-bg);
+}
+:root body .crm-timeline-stage {
+  min-height: 20px;
+  padding: 0 7px;
+  color: var(--ui-primary);
+  font-size: 11px;
+  border: 1px solid var(--ui-primary-border);
+  background: var(--ui-primary-soft);
+}
+:root body .crm-timeline-meta {
+  gap: 4px 10px;
+  margin-top: 5px;
+}
+:root body .crm-timeline-content {
+  margin-top: 6px;
+  padding: 6px 8px;
+  background: var(--ui-card-soft, #fafafa);
+}
+
+/* 合同流转日志：保留两列元信息，卡片边界与其它时间线一致。 */
+:root body .contract-action-log {
+  gap: 8px;
+}
+:root body .contract-action-log > div {
+  padding: 10px 12px;
+  border-color: var(--tl-card-border);
+  border-radius: var(--tl-card-radius);
+  background: var(--tl-card-bg);
+}
+
+/* 合同横向步骤条：节点、连接线、标题与同一套语义色对齐。 */
+:root body .contract-detail-timeline > div:not(:last-child)::after {
+  height: 1px;
+  background: var(--tl-line);
+}
+:root body .contract-detail-timeline i {
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--ui-line-strong);
+  background: var(--ui-card-soft, #fafafa);
+  box-shadow: none;
+}
+:root body .contract-detail-timeline .done i {
+  color: #fff;
+  border-color: var(--ui-success);
+  background: var(--ui-success);
+}
+:root body .contract-detail-timeline .active i {
+  color: #fff;
+  border-color: var(--ui-primary);
+  background: var(--ui-primary);
+}
+
+@media (max-width: 760px) {
+  :root body .crm-timeline-step {
+    grid-template-columns: 30px minmax(0, 1fr);
+  }
+  :root body .crm-timeline-step > time {
+    grid-column: 2;
+    grid-row: 1;
+    padding-top: 0;
+  }
+  :root body .crm-timeline-card {
+    grid-column: 2;
+    grid-row: 2;
+  }
+  :root body .crm-timeline-step::before {
+    top: 34px;
+    left: 14px;
+  }
+}
+
+@media (max-width: 640px) {
+  :root body :is(.settlement-timeline-body, .expense-timeline__item, .report-timeline li > div, .crm-timeline-card) {
+    padding: 9px 10px;
+  }
+}

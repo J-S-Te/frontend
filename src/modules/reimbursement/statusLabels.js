@@ -42,7 +42,7 @@ const claimStatusTones = {
 const parseFieldLabels = {
   invoice_type: '发票类型', invoice_number: '发票号码', invoice_code: '发票代码',
   invoice_date: '开票日期', buyer_name: '购买方名称', buyer_tax_id: '购买方税号',
-  seller_name: '销售方名称', seller_tax_id: '销售方税号',
+  seller_name: '销售方名称', seller_tax_id: '销售方税号', issuer: '开票人',
   amount_minor: '不含税金额', tax_minor: '税额', gross_minor: '价税合计（票面总额）',
 }
 

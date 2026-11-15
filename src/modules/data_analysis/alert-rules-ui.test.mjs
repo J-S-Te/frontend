@@ -8,6 +8,9 @@ const source = await readFile(new URL('./views/AlertRulesView.vue', import.meta.
 const script = source.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '')
 const existing = () => ({ id: 42, version: 3, created_at: '2026-10-01', rule_code: 'CONTRACT_EXPIRY', name: '合同提醒', source_fct: 'dim_contract', severity: 'MEDIUM', enabled: false, threshold_json: '{"days":30}' })
 
+// 用途：执行真实规则页逻辑，仅替换网络和弹窗边界。
+// 参数：options 为能力和网络响应；confirm 为应用内确认结果。
+// 返回值：真实页面状态与外部操作记录。
 function harness({ permissions = ['alert.manage'], get = async () => [existing()], put, remove, confirm = true } = {}) {
   const calls = { put: [], remove: [], confirm: [] }
   const context = vm.createContext({
@@ -33,6 +36,40 @@ test('alert.manage grants management without an admin role in permissions', asyn
   ui.openEditor(ui.rules.value[0])
   assert.equal(ui.editing.value, 'edit')
   assert.doesNotMatch(source, /isAdmin|permissions\.includes\("admin"\)/)
+})
+
+test('规则已保存但列表读取失败时关闭旧编辑并要求刷新，避免重复保存', async () => {
+  const receipt = Object.assign(Error('规则已保存，但最新列表读取失败'), {
+    code: 'RULE_SAVED_REFRESH_FAILED', status: 500, method: 'PUT',
+    details: { saved: true, refresh_failed: true },
+  })
+  const { ui, calls } = harness({ put: async () => { throw receipt } })
+  await ui.load()
+  ui.openEditor(ui.rules.value[0])
+  ui.draft.value.name = '更新后的提醒'
+  await ui.saveEditor()
+  assert.match(ui.error.value, /已保存.*列表.*无需再次保存/)
+  assert.equal(ui.editing.value, null)
+  assert.equal(ui.canWrite.value, false)
+  await ui.saveEditor()
+  assert.equal(calls.put.length, 1)
+  await ui.load()
+  assert.equal(ui.canWrite.value, true)
+})
+
+test('结果未知优先于保存标记，保留规则编辑内容供先核对原结果', async () => {
+  const { ui } = harness({ put: async () => { throw Object.assign(Error('结果尚未确认'), {
+    code: 'RULE_SAVED_REFRESH_FAILED', status: 500, outcomeUnknown: true, method: 'PUT',
+    details: { saved: true, refresh_failed: true },
+  }) } })
+  await ui.load()
+  ui.openEditor(ui.rules.value[0])
+  ui.draft.value.name = '尚待核对的规则'
+  await ui.saveEditor()
+  assert.equal(ui.editing.value, 'edit')
+  assert.equal(ui.draft.value.name, '尚待核对的规则')
+  assert.match(ui.toast.value, /无法确认.*避免重复提交/)
+  assert.doesNotMatch(ui.toast.value, /规则已保存/)
 })
 
 test('read only, loading and failed loads block every mutation', async () => {

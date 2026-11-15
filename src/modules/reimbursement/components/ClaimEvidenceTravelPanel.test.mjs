@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { parse, compileScript } from '@vue/compiler-sfc'
 import * as Vue from 'vue'
 import { approvalNodeLabel } from '../rolePresentation.js'
+import { businessReasonLabel } from '../businessFeedback.js'
 import { renderToString } from '@vue/server-renderer'
 
 // 用途：替身只记录选择器收到的接口、用途与当前引用，供模板断言外部边界。
@@ -23,7 +24,7 @@ const pickerStub = {
 function component(name = './ClaimEvidenceTravelPanel.vue', request = async () => ({ items: [] })) {
   const { descriptor } = parse(readFileSync(new URL(name, import.meta.url), 'utf8'))
   const compiled = compileScript(descriptor, { id: 'claim-tail-travel', inlineTemplate: true })
-  const bindings = { approvalNodeLabel, reimbursementAPI: { request } }
+  const bindings = { approvalNodeLabel, businessReasonLabel, reimbursementAPI: { request } }
   const body = compiled.content.replace(/import\s+\{([^}]+)\}\s+from\s+['"]([^'"]+)['"];?/g, (_, names, specifier) => {
     if (specifier !== 'vue') return ''
     for (const entry of names.split(',')) {
@@ -151,13 +152,14 @@ test('行程交叉核验展示每个可见分摊及人工票面来源，未知�
     item: { id: 'item', travel_confirmation: { decision: '', reason: '', evidence_text: '' },
       travel_assessment: { status: 'UNKNOWN', references: [{ project_id: 'project', service_item_id: 'service',
         cross_check_status: 'UNKNOWN', cross_check: { status: 'UNKNOWN', project_status: 'MATCH',
-          reason_codes: ['INVOICE_FACTS_MISSING'], invoices: [
-            { invoice_id: 'invoice', source_kind: 'MANUAL_FACE_CONFIRMATION', status: 'UNKNOWN', reason_codes: ['FACTS_MISSING'] },
+          reason_codes: ['INVOICE_TRAVEL_FACTS_MISSING'], invoices: [
+            { invoice_id: 'invoice', source_kind: 'MANUAL_FACE_CONFIRMATION', status: 'UNKNOWN', reason_codes: ['INVOICE_TRAVEL_FACTS_MISSING'] },
           ] } }] } },
   }))
   assert.match(html, /申报与票据行程交叉核验/)
   assert.match(html, /project \/ service/)
-  assert.match(html, /INVOICE_FACTS_MISSING/)
+  assert.match(html, /票面行程事实缺失.*人工票面复核/)
+  assert.doesNotMatch(html, /INVOICE_TRAVEL_FACTS_MISSING/)
   assert.match(html, /invoice/)
   assert.match(html, /人工票面复核/)
   assert.match(html, /不代表自动识别或税务验真/)

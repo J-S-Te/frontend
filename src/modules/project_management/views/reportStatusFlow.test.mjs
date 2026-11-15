@@ -14,27 +14,30 @@ const source = readFileSync(new URL('./ProjectManagementView.vue', import.meta.u
 // 返回值：可响应状态变化的组件上下文及真实报告计算结果。
 function reportHarness(status, permissions = ['project.report.prepare']) {
   const item = { id: 'SI-REPORT', project_id: 'P-1', site: '合成现场', version: 7,
-    status: '现场实施完成', report_status: status }
+    status: '现场实施完成', report_status: status, project_manager_id: 'manager' }
   const writes = []
   const context = {
     computed: Vue.computed, selectedServiceItem: Vue.ref(item),
     saving: Vue.ref(false), operationForm: Vue.ref({}),
     permissionSet: Vue.ref(new Set(permissions)), activeSection: Vue.ref('reports'),
+    session: Vue.ref({ user_id: 'manager' }),
     reportItems: Vue.ref([item]), projectByID: Vue.ref(new Map()),
     // 报告中文词表已迁到 projectDisplay.js，这里以真实导入值注入，不再从视图切片求值。
     reportStatusLabel,
     personLabel: () => '合成负责人', formatBusinessDate: () => '',
     showToast: () => {}, refreshAfterWrite: async () => {},
     formatUserError: (error) => { throw error },
-    updateReportStatus: async (...args) => { writes.push(args) },
+    updateReportStatus: async () => { assert.fail('手动动作不得调用严格报告接口') },
+    advanceManualReportStatus: async (...args) => { writes.push(args) },
   }
   for (const name of ['projects', 'allocationItems', 'inboxItems', 'planningItems',
     'preparationItems', 'capabilities', 'assignmentItems', 'methodItems', 'pendingDeviations']) {
     context[name] = Vue.ref([])
   }
-  const statements = ['reportStatusRank', 'reportPhaseNext',
-    'reportPhasePermission', 'canAdvanceReportPhase'].map((name) =>
+  const statements = ['reportStatusRank', 'reportPhaseNext'].map((name) =>
     source.match(new RegExp(`^const ${name} = .+$`, 'm'))[0])
+  const gate = source.indexOf('function canAdvanceReportPhase(')
+  statements.push(source.slice(gate, source.indexOf('\n}', gate) + 2))
   const actionLabels = source.match(/^const reportPhaseAction = .+$/m)
   if (actionLabels) statements.push(actionLabels[0])
   for (const [name, end] of [['reportSteps', '\n})'], ['operationRows', '\n}[activeSection.value] || []))']]) {
@@ -65,27 +68,27 @@ const nextButton = source.match(/<button[^>]+@click="runOperation\('report-next'
 const rollbackButton = source.match(/<button[^>]+@click="submitRollbackRequest\('REPORT_TO_FIELD'\)"[^]*?<\/button>/)[0]
 const chain = source.match(/<section class="pm-panel pm-stepper-panel"><header><div><p class="pm-panel-kicker">报告阶段<[^]*?<\/section>/)[0]
 
-test('阶段推进保留整改编制签发归档，审核完成后才继续签发', async () => {
+test('指派项目经理逐步点击整改编制审核签发归档，不依赖真实审核轮次', async () => {
   const h = reportHarness('NONE')
   assert.equal(h.operationRows.value[0].progress, 0)
-  for (const [phase, progress] of [['RECTIFYING', 20], ['COMPILING', 40]]) {
-    await h.runOperation('report-next')
-    assert.deepEqual(h.writes.at(-1), ['SI-REPORT', phase, 7])
-    h.item.report_status = phase
-    assert.equal(h.operationRows.value[0].progress, progress)
-  }
-  await h.runOperation('report-next')
-  assert.equal(h.writes.length, 2, '编制完成不能通过旧阶段接口直接审核')
-  // 审核轮次接口的真实通过结果由刷新回读；此处仅验证通过后的后续阶段。
-  h.item.report_status = 'REVIEWED'
-  assert.equal(h.operationRows.value[0].progress, 60)
-  for (const [phase, progress] of [['ISSUED', 80], ['ARCHIVED', 100]]) {
+  for (const [phase, progress] of [
+    ['RECTIFYING', 20], ['COMPILING', 40], ['REVIEWED', 60], ['ISSUED', 80], ['ARCHIVED', 100],
+  ]) {
     await h.runOperation('report-next')
     assert.deepEqual(h.writes.at(-1), ['SI-REPORT', phase, 7])
     h.item.report_status = phase
     assert.equal(h.operationRows.value[0].progress, progress)
   }
   assert.equal(h.reportPhaseNext.ARCHIVED, undefined)
+})
+
+test('同权限但未指派到本服务项的用户不能看到或调用手动推进', async () => {
+  const h = reportHarness('NONE')
+  h.context.session.value.user_id = 'other-manager'
+  assert.doesNotMatch(await renderFragment(nextButton, h), /<button/)
+  await h.runOperation('report-next')
+  assert.equal(h.writes.length, 0)
+  assert.equal(h.context.saving.value, false)
 })
 
 test('审核权限主体看不到旧审核按钮，直接误调用也不发送阶段更新', async () => {

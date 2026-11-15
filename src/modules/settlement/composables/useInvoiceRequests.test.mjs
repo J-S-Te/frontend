@@ -60,6 +60,24 @@ test('申请 / 已开发票两路筛选：关键字按各自字段匹配（忽�
   assert.equal(h.visibleTaxInvoices.value.length, 2)
 })
 
+test('开票服务端字段错误回到可编辑字段，自动数量不要求用户编辑', async () => {
+  const failure = Object.assign(Error('第 1 行税额应为 0.60'), { status: 400, details: {
+    reason_code: 'INVOICE_LINE_RELATION', issues: [
+      { field: 'items[0].tax_amount', row: 1, message: '税额应为 0.60', rule: 'mismatch' },
+      { field: 'items[0].quantity', row: 1, message: '数量由页面生成', rule: 'mismatch' },
+    ],
+  } })
+  const h = harness({ failure, eligible: [{ id: 'AR', contract_snapshot_id: 'S', customer_id: 'C', customer_name: '客户' }] })
+  h.invoiceForm.value.receivable_id = 'AR'
+  h.invoiceComposerOpen.value = true
+  await h.submitInvoice()
+  assert.ok(h.invoiceFieldErrors, '应提供真实表单的服务端字段反馈')
+  assert.match(h.invoiceFieldErrors.value.tax_amount, /税额应为 0.60/)
+  assert.equal(h.invoiceFieldErrors.value.quantity, undefined)
+  assert.equal(h.invoiceComposerOpen.value, true)
+  assert.equal(h.calls.create.length, 1)
+})
+
 test('开票失败复核弹窗：打开 / 关闭受 saving 保护；原因 5–1000 字内联校验；成功关弹窗刷新提示，刷新失败另文案；接口失败弹窗保持打开', async () => {
   const h = harness()
   const item = { id: 'R1', version: 4 }

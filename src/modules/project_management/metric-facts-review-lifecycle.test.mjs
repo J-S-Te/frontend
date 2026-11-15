@@ -60,3 +60,27 @@ test('项目经理送审带当前版本，回执未知时仅按原幂等命令�
     assert.equal(mounted.state.pending.value, null)
   } finally { mounted.unmount() }
 })
+
+test('主报告手动维护时不能创建真实审核，专项仍可单独送审', async () => {
+  const commands = []
+  const mounted = await mountSFC(resolve('src/modules/project_management/components/ReportReviewFactsPanel.vue'), { [api]: {
+    getMetricReportReviews: async () => [], getCurrentMetricReportReviews: async () => [],
+    postMetricReportReview: async (...args) => { commands.push(args) },
+  } }, { manualMainReport: true,
+    item: {id:'SI-manual',version:5,report_revision:0,report_status:'COMPILING',
+      penetration_work_package: {id:'WP-1',version:2,report_revision:0,report_status:'DRAFTING'}},
+    session: {user_id:'manager',permissions:['project.report.prepare','project.report.review']} })
+  try {
+    await nextTick(); await nextTick()
+    assert.equal(mounted.state.canSubmit.value, false)
+    assert.equal(mounted.state.canDecide.value, false)
+    await mounted.state.submit()
+    await mounted.state.submit('PASSED')
+    assert.equal(commands.length, 0)
+    mounted.state.subject.value = 'PENETRATION_WORK_PACKAGE'
+    assert.equal(mounted.state.canSubmit.value, true)
+    await mounted.state.submit()
+    assert.equal(commands.length, 1)
+    assert.equal(commands[0][2].subject_type, 'PENETRATION_WORK_PACKAGE')
+  } finally { mounted.unmount() }
+})

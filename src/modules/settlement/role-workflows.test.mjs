@@ -283,23 +283,21 @@ test('目标分页成功而其他资源失败时清空整批结果，不能将�
   assert.match(c.error.value, /凭证查询不可用/)
 })
 
-// SET-04：计划新建 / 调整被服务端 409 拒绝时，面板必须把 path 交给统一错误翻译，
-// 从而带上"合计不得超过合同金额 + 差额超阈值需财务 override + 不自动重试"的说明；
-// 其他资源的冲突仍保持原来的通用文案。
-test('计划写入 409 显示差额超阈值与 override 提示，且不自动重试', async () => {
+// 计划阈值说明来自后端安全原因，不能由通用409推断；不改变原财务权限门禁。
+test('计划覆盖阈值拒绝显示财务处理提示，且不自动重试', async () => {
   let writes = 0, loads = 0
   const c = {
     props: { section: 'plans', refreshPlans: async () => { loads++; return true } },
     saving: { value: false }, error: { value: '' }, notice: { value: '' },
-    saveRoleResource: async () => { writes++; throw Object.assign(new Error('conflict'), { status: 409, code: 'SETTLEMENT_CONFLICT' }) },
+    saveRoleResource: async () => { writes++; throw Object.assign(new Error('计划覆盖差额超过阈值'),
+      { status: 409, code: 'SETTLEMENT_CONFLICT', details: { reason_code: 'PLAN_COVERAGE_THRESHOLD' } }) },
     load: async () => { loads++; return true },
     formatSettlementError,
   }
   const { save } = panelFunctions(['save'], c)
   assert.equal(await save('/receivable-plans', { contract_snapshot_id: 'S1', planned_amount: '10' }), false)
-  assert.match(c.error.value, /数据已被修改或当前状态不允许此操作/)
-  assert.match(c.error.value, /计划合计不得超过合同金额/)
-  assert.match(c.error.value, /settlement\.finance\.override/)
+  assert.match(c.error.value, /计划覆盖差额超过阈值/)
+  assert.match(c.error.value, /结算财务负责人/)
   assert.match(c.error.value, /不会自动重试/)
   assert.equal(writes, 1, '冲突后不得自动重试写入')
   assert.equal(loads, 0, '冲突后不得刷新或宣称成功')

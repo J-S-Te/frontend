@@ -1,0 +1,407 @@
+/* 全生命周期组件体验层：沿用现有 Vue/权限/业务状态，以实际组件挂点统一交互。
+   参考 Ant Design 的自然、高效、克制原则；仅在新内容出现或用户操作时反馈。
+   仅过渡明确属性，不为整页表格逐行排队，不更改弹层定位与关闭逻辑。 */
+:root {
+  --ui-motion-fast: 100ms;
+  --ui-motion-enter: 200ms;
+  --ui-motion-drawer: 300ms;
+  --ui-motion-exit: 100ms;
+  --ui-ease-enter: cubic-bezier(.16, 1, .3, 1);
+  --ui-ease-exit: cubic-bezier(.7, 0, .84, 0);
+  --ui-ease-state: cubic-bezier(.4, 0, .2, 1);
+  --ui-focus-color: var(--ui-primary-ink);
+  --ui-control-disabled: #f5f5f5;
+  --ui-control-error: #cf1322;
+  --ui-overlay-scrim: rgb(0 0 0 / .45);
+}
+
+:root[data-theme="dark"] {
+  --ui-control-disabled: #262626;
+  --ui-control-error: #ff7875;
+  --ui-overlay-scrim: rgb(0 0 0 / .65);
+}
+
+/* 共享原语也使用根级 UI token：Teleport 后不再继承业务容器的局部主题。 */
+:root body .ui-form-dialog {
+  background: var(--ui-overlay-scrim);
+}
+:root body .ui-form-dialog__panel {
+  color: var(--ui-text);
+  border-color: var(--ui-line);
+  border-radius: var(--ui-radius-card);
+  background: var(--ui-card);
+  box-shadow: var(--ui-shadow-modal);
+}
+:root body .ui-form-dialog__title { color: var(--ui-text); }
+:root body .ui-form-dialog__description { color: var(--ui-text-secondary); }
+:root body .ui-segmented-tabs__tab[aria-selected="true"] {
+  color: var(--ui-primary-ink);
+}
+:root body .ui-toggle-switch__track {
+  border-color: var(--ui-line-strong);
+  background: var(--ui-hover);
+}
+:root body .ui-toggle-switch.is-on .ui-toggle-switch__track {
+  border-color: var(--ui-primary);
+  background: var(--ui-primary);
+}
+:root body .ui-toggle-switch__thumb { background: var(--ui-card); }
+
+/* 导航：应用菜单、相关内容页签和筛选按钮保留各自语义与布局。 */
+:root body :is(
+  .console-nav-item, .contract-nav-item, .contract-nav button, .pm-nav-item, .crm-nav-item,
+  .portal-nav-item, .settlement-nav-item, .da-nav-item,
+  .pagination-bar button, .ui-pagination button
+) {
+  transition: color var(--ui-motion-fast) var(--ui-ease-state),
+    background-color var(--ui-motion-fast) var(--ui-ease-state),
+    border-color var(--ui-motion-fast) var(--ui-ease-state);
+}
+
+:root body :is(
+  .ui-segmented-tabs, .contract-tabs, .contract-outbox-tabs, .settlement-tabs,
+  .settings-tab-bar, .notification-tabs, .crm-tabs, .crm-customer-tabs,
+  .crm-catalog-tabs, .pm-sm-tabs, .pm-notification-tabs, .expense-tabs,
+  .expense-status-tabs, .expense-inbox-tabs, .da-chart-tabs
+) {
+  min-width: 0;
+  scroll-padding-inline: 12px;
+  overscroll-behavior-inline: contain;
+}
+
+:root body :is(
+  .ui-segmented-tabs, .contract-tabs, .contract-outbox-tabs, .settlement-tabs,
+  .settings-tab-bar, .notification-tabs, .crm-tabs, .crm-customer-tabs,
+  .crm-catalog-tabs, .pm-sm-tabs, .pm-notification-tabs, .expense-tabs,
+  .expense-status-tabs, .expense-inbox-tabs, .da-chart-tabs
+) > button {
+  flex-shrink: 0;
+  transition: color var(--ui-motion-fast) var(--ui-ease-state),
+    background-color var(--ui-motion-fast) var(--ui-ease-state),
+    box-shadow var(--ui-motion-fast) var(--ui-ease-state);
+}
+
+:root body :is(
+  .ui-segmented-tabs, .contract-tabs, .settlement-tabs, .settings-tab-bar,
+  .crm-customer-tabs, .pm-detail-tabs, .expense-tabs, .da-chart-tabs
+) > button:is(.active, [aria-selected="true"])::after {
+  animation: ui-indicator-in var(--ui-motion-enter) var(--ui-ease-enter);
+  transform-origin: center;
+}
+
+:root body .ui-segmented-tabs[aria-orientation="vertical"] {
+  flex-direction: column;
+  border-bottom: 0;
+  border-inline-end: 1px solid var(--ui-line);
+}
+:root body .ui-segmented-tabs[aria-orientation="vertical"] > button::after {
+  inset: 8px -1px 8px auto;
+  width: 2px;
+  height: auto;
+}
+
+/* 控制：覆盖独立筛选器和 Teleport 弹层。文本控件保留四个类型边界的权重，
+   使正常/错误/禁用规则共同覆盖旧视觉层及异步模块的深色输入规则。 */
+:root body :is(
+  .console-content, .contract-content, .pm-page, .crm-content, .portal-content,
+  .settlement-content, .da-page, .expense-canvas, .console-detail-modal,
+  .console-wizard-modal, .iam-modal, .iam-editor-modal, .personnel-change-modal,
+  .application-registry-modal, .subsystem-access-wizard__dialog,
+  .contract-detail-modal, .contract-import-drawer, .pm-dialog, .crm-customer-dialog,
+  .crm-opportunity-dialog, .crm-catalog-dialog, .crm-stage-rule-dialog,
+  .portal-dialog, .crm-modal, .da-modal, .ui-form-dialog__panel, .shared-prompt
+) :is(
+  input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not(
+    [type="hidden"], [type="range"],
+    [type="color"], [type="button"], [type="submit"], [type="reset"]
+  ),
+  select, textarea
+) {
+  box-sizing: border-box;
+  min-height: 32px;
+  max-width: 100%;
+  padding: 4px 11px;
+  color: var(--ui-text);
+  font: inherit;
+  border: 1px solid var(--ui-line-strong);
+  border-radius: var(--ui-radius-control);
+  background-color: var(--ui-card);
+  transition: border-color var(--ui-motion-fast) var(--ui-ease-state),
+    box-shadow var(--ui-motion-fast) var(--ui-ease-state),
+    background-color var(--ui-motion-fast) var(--ui-ease-state);
+}
+
+:root body :is(
+  .console-content, .contract-content, .pm-page, .crm-content, .portal-content,
+  .settlement-content, .da-page, .expense-canvas, [role="dialog"], [role="alertdialog"]
+) :is(
+  input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="hidden"]),
+  select, textarea
+):hover:where(:not(:disabled):not([readonly])) {
+  border-color: var(--ui-primary-hover);
+}
+
+:root body :is(
+  .console-content, .contract-content, .pm-page, .crm-content, .portal-content,
+  .settlement-content, .da-page, .expense-canvas, [role="dialog"], [role="alertdialog"]
+) :is(
+  input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="hidden"]),
+  textarea
+)[readonly]:read-only {
+  color: var(--ui-text-secondary);
+  background-color: var(--ui-card-soft);
+}
+
+:root body :is(
+  .console-page, .contract-app, .pm-shell, .pm-page, .crm-page, .portal-page,
+  .settlement-page, .da-shell, .expense-canvas, [role="dialog"], [role="alertdialog"]
+) :is(
+  input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="hidden"]),
+  select, textarea
+):disabled {
+  color: var(--ui-muted);
+  cursor: not-allowed;
+  border-color: var(--ui-line-strong);
+  background-color: var(--ui-control-disabled);
+  box-shadow: none;
+}
+
+:root body :is(
+  .console-page, .contract-app, .pm-shell, .pm-page, .crm-page, .portal-page,
+  .settlement-page, .da-shell, .expense-canvas, [role="dialog"], [role="alertdialog"]
+) :is(input[type="checkbox"], input[type="radio"], input[type="range"], progress) {
+  accent-color: var(--ui-primary);
+}
+
+:root body :is(
+  .console-page, .contract-app, .pm-shell, .pm-page, .crm-page, .portal-page,
+  .settlement-page, .da-shell, .expense-canvas, [role="dialog"], [role="alertdialog"]
+) input[type="file"]::file-selector-button {
+  min-height: 30px;
+  margin-inline-end: 8px;
+  padding: 4px 10px;
+  color: var(--ui-text);
+  cursor: pointer;
+  border: 1px solid var(--ui-line-strong);
+  border-radius: var(--ui-radius-control);
+  background: var(--ui-card-soft);
+}
+
+:root body :is(.console-content, .contract-content, .pm-page, .crm-content,
+  .portal-content, .settlement-content, .da-page, .expense-canvas,
+  .contract-detail-modal, .crm-modal, .portal-dialog, [role="dialog"], [role="alertdialog"])
+  button,
+:root body button:is(
+  .console-button, .contract-button, .pm-button, .da-button, .expense-button,
+  .shared-confirm-button, .shared-prompt-button, .ui-state__retry
+) {
+  transition: color var(--ui-motion-fast) var(--ui-ease-state),
+    border-color var(--ui-motion-fast) var(--ui-ease-state),
+    background-color var(--ui-motion-fast) var(--ui-ease-state),
+    box-shadow var(--ui-motion-fast) var(--ui-ease-state);
+}
+:root body button:is(
+  .console-button, .contract-button, .pm-button, .da-button, .expense-button,
+  .shared-confirm-button, .shared-prompt-button, .ui-state__retry
+):disabled {
+  cursor: not-allowed;
+}
+
+/* 键盘焦点不依赖阴影，避免阴影被裁切或在强制色彩模式下不可见。 */
+:root body :is(
+  .console-page, .contract-app, .pm-shell, .pm-page, .crm-page, .portal-page,
+  .settlement-page, .da-shell, .expense-canvas, .ui-segmented-tabs,
+  [role="dialog"], [role="alertdialog"], .shared-operation-toast,
+  .console-notification-popover, .settlement-notification-popover
+) :is(button, a[href], input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--ui-focus-color);
+  outline-offset: 2px;
+}
+
+/* 错误态置于 hover/focus 基线之后；仅使用真实校验结果，不首屏标红必填字段。 */
+:root body :is(
+  .console-content, .contract-content, .pm-page, .crm-content, .portal-content,
+  .settlement-content, .da-page, .expense-canvas, [role="dialog"], [role="alertdialog"]
+) :is(
+  input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="hidden"]),
+  select, textarea
+):is([aria-invalid="true"], :user-invalid) {
+  border-color: var(--ui-control-error);
+}
+:root body :is(
+  .console-content, .contract-content, .pm-page, .crm-content, .portal-content,
+  .settlement-content, .da-page, .expense-canvas, [role="dialog"], [role="alertdialog"]
+) :is(
+  input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="hidden"]),
+  select, textarea
+):is([aria-invalid="true"], :user-invalid):focus-visible {
+  outline-color: var(--ui-control-error);
+}
+
+/* 开关不改变已启用/待保存/忙状态，只平滑现有轨道与滑块。 */
+:root body :is(.console-switch, .pm-switch, .da-switch, .contract-import-switch,
+  .crm-approval-switch-track, .pm-kpi-switch-track, .da-native-card-switch-track,
+  .ui-toggle-switch__track) {
+  transition: background-color var(--ui-motion-fast) var(--ui-ease-state),
+    border-color var(--ui-motion-fast) var(--ui-ease-state);
+}
+:root body :is(.console-switch, .pm-switch, .da-switch, .contract-import-switch,
+  .crm-approval-switch-track, .pm-kpi-switch-track, .da-native-card-switch-track) > i,
+:root body .ui-toggle-switch__thumb {
+  transition: transform var(--ui-motion-enter) var(--ui-ease-enter);
+}
+
+/* 展示：普通卡片稳定，只有可点击卡片显示 hover 反馈；表格逐格变色不移动行。 */
+:root body :is(
+  .console-card, .contract-card, .pm-panel, .crm-panel, .portal-card,
+  .expense-panel, .settlement-panel, .da-panel, .da-native-panel
+) {
+  transition: border-color var(--ui-motion-fast) var(--ui-ease-state),
+    box-shadow var(--ui-motion-fast) var(--ui-ease-state);
+}
+:root body :is(
+  .console-card, .contract-card, .pm-panel, .crm-panel, .portal-card,
+  .expense-panel, .settlement-panel, .da-panel
+):is(a[href], button, [role="button"], [data-ui-interactive]):hover {
+  border-color: var(--ui-primary-border);
+  box-shadow: var(--ui-shadow-hover);
+}
+:root body :is(
+  .console-data-table, .contract-data-table, .pm-table, .crm-data-table,
+  .crm-light-table, .settlement-plan-table, .da-table, .expense-table-body table
+) tbody td {
+  transition: background-color var(--ui-motion-fast) var(--ui-ease-state);
+}
+:root body :is(
+  .ui-status-badge, .console-badge, .contract-badge, .pm-badge, .crm-badge,
+  .expense-badge, .settlement-badge, .da-badge
+) {
+  transition: color var(--ui-motion-fast) var(--ui-ease-state),
+    background-color var(--ui-motion-fast) var(--ui-ease-state);
+}
+
+/* 弹出：兼容现有手写弹层的进入；Vue 管理的弹层同时保留真正的退出过渡。
+   使用独立 translate，不覆盖已有 transform 居中/定位；不设置 forwards 留存层。 */
+:root body :is(
+  .console-detail-modal, .console-wizard-modal, .iam-modal, .iam-editor-modal,
+  .personnel-change-modal, .personnel-workbench-modal, .application-registry-modal,
+  .subsystem-access-wizard__dialog, .contract-detail-modal, .pm-dialog,
+  .crm-customer-dialog, .crm-opportunity-dialog, .crm-catalog-dialog,
+  .crm-stage-rule-dialog, .crm-alert-rules-dialog, .portal-dialog > article,
+  .crm-modal > article, .crm-modal > form, .da-modal,
+  .console-modal, .login-target-dialog, .audit-detail-modal,
+  .iam-confirm-modal, .iam-temporary-password-modal,
+  .application-registry-wizard-modal, .dictionary-dialog
+):where(:not(.contract-import-drawer)) {
+  animation: ui-panel-in var(--ui-motion-enter) var(--ui-ease-enter);
+}
+:root body .contract-import-drawer {
+  animation: ui-drawer-in var(--ui-motion-drawer) var(--ui-ease-enter);
+}
+:root body :is(
+  .console-notification-popover, .settlement-notification-popover,
+  [role="listbox"]
+) {
+  animation: ui-popover-in var(--ui-motion-enter) var(--ui-ease-enter);
+}
+
+/* 已有共享 Transition 的时长集中到 token，业务关闭/滚动锁/还焦仍由原组件管理。 */
+:root body :is(
+  .shared-confirm-enter-active, .shared-prompt-enter-active, .ui-form-dialog-enter-active,
+  .operation-toast-enter-active, .global-error-toast-enter-active,
+  .console-toast-enter-active, .portal-toast-enter-active, .portal-user-panel-enter-active,
+  .pm-notification-pop-enter-active, .filing-validation-popover-enter-active
+) {
+  transition-duration: var(--ui-motion-enter);
+  transition-timing-function: var(--ui-ease-enter);
+}
+:root body :is(
+  .shared-confirm-leave-active, .shared-prompt-leave-active, .ui-form-dialog-leave-active,
+  .operation-toast-leave-active, .global-error-toast-leave-active,
+  .console-toast-leave-active, .portal-toast-leave-active, .portal-user-panel-leave-active,
+  .pm-notification-pop-leave-active, .filing-validation-popover-leave-active
+) {
+  transition-duration: var(--ui-motion-exit);
+  transition-timing-function: var(--ui-ease-exit);
+  pointer-events: none;
+}
+:root body :is(.shared-confirm-enter-active .shared-confirm,
+  .shared-prompt-enter-active .shared-prompt, .ui-form-dialog-enter-active .ui-form-dialog__panel) {
+  transition-duration: var(--ui-motion-enter);
+  transition-timing-function: var(--ui-ease-enter);
+}
+:root body :is(.shared-confirm-leave-active .shared-confirm,
+  .shared-prompt-leave-active .shared-prompt, .ui-form-dialog-leave-active .ui-form-dialog__panel) {
+  transition-duration: var(--ui-motion-exit);
+  transition-timing-function: var(--ui-ease-exit);
+}
+:root body :is(.pm-drawer-enter-active, .console-sheet-enter-active,
+  .pm-drawer-enter-active .pm-drawer, .console-sheet-enter-active .console-sheet) {
+  transition-duration: var(--ui-motion-drawer);
+  transition-timing-function: var(--ui-ease-enter);
+}
+:root body :is(.pm-drawer-leave-active, .console-sheet-leave-active,
+  .pm-drawer-leave-active .pm-drawer, .console-sheet-leave-active .console-sheet) {
+  transition-duration: var(--ui-motion-exit);
+  transition-timing-function: var(--ui-ease-exit);
+}
+
+@keyframes ui-panel-in {
+  from { opacity: 0; translate: 0 8px; }
+  to { opacity: 1; translate: 0 0; }
+}
+@keyframes ui-drawer-in {
+  from { opacity: 0; translate: 16px 0; }
+  to { opacity: 1; translate: 0 0; }
+}
+@keyframes ui-popover-in {
+  from { opacity: 0; translate: 0 4px; }
+  to { opacity: 1; translate: 0 0; }
+}
+@keyframes ui-indicator-in {
+  from { opacity: 0; scale: .75 1; }
+  to { opacity: 1; scale: 1 1; }
+}
+
+/* 子树级规则覆盖原模块的硬编码动画，包括抽屉/图表/骨架/加载旋转。
+   时长同时归零，使以后基于 token 添加的动效自动遵循偏好；不隐藏状态文本。 */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --ui-motion-fast: 0ms;
+    --ui-motion-enter: 0ms;
+    --ui-motion-drawer: 0ms;
+    --ui-motion-exit: 0ms;
+  }
+  :root:root body :is(
+    .console-page, .contract-app, .pm-shell, .pm-page, .crm-page, .portal-page,
+    .settlement-page, .da-shell, .expense-canvas, .ui-state,
+    [role="dialog"], [role="alertdialog"], .ui-form-dialog, .shared-confirm-mask,
+    .shared-prompt-mask, .shared-operation-toast, .global-error-toasts,
+    .ui-segmented-tabs, .ui-toggle-switch, .console-modal-backdrop,
+    .contract-modal-mask, .contract-import-drawer-mask, .pm-overlay, .pm-import-overlay,
+    .pm-category-import-overlay, .da-modal-backdrop, .portal-dialog, .crm-modal,
+    .contract-import-drawer, [role="listbox"],
+    .console-notification-popover, .settlement-notification-popover,
+    .filing-validation-popover
+  ),
+  :root:root body :is(
+    .console-page, .contract-app, .pm-shell, .pm-page, .crm-page, .portal-page,
+    .settlement-page, .da-shell, .expense-canvas, .ui-state,
+    [role="dialog"], [role="alertdialog"], .ui-form-dialog, .shared-confirm-mask,
+    .shared-prompt-mask, .shared-operation-toast, .global-error-toasts,
+    .ui-segmented-tabs, .ui-toggle-switch, .console-modal-backdrop,
+    .contract-modal-mask, .contract-import-drawer-mask, .pm-overlay, .pm-import-overlay,
+    .pm-category-import-overlay, .da-modal-backdrop, .portal-dialog, .crm-modal,
+    .contract-import-drawer, [role="listbox"],
+    .console-notification-popover, .settlement-notification-popover,
+    .filing-validation-popover
+  ) :where(*, *::before, *::after) {
+    animation: none;
+    transition: none;
+    scroll-behavior: auto;
+  }
+}
+
+@media (forced-colors: active) {
+  :root { --ui-focus-color: Highlight; }
+}

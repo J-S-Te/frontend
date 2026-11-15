@@ -60,6 +60,7 @@ async function fieldsHarness(overrides = {}) {
     ...overrides,
   })
   const deps = {
+    standardPriceCatalogEnabled: false,
     _defineComponent: Vue.defineComponent,
     ConsoleIcon: { render() { return null } },
     ContractPricingFields: { props: ['form', 'disabled'], render() { return null } },

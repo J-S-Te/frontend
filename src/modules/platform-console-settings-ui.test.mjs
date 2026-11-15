@@ -64,13 +64,15 @@ test('审计结果与风险筛选复用已导入的稳定枚举字典', () => {
   assert.doesNotMatch(source, /Object\.entries\((?:RESULT_LABELS|RISK_LABELS)\)/)
 })
 
-// P1-9：设置页签吸顶，面包屑带出当前页签。
-test('设置页签在内容滚动时吸顶，且面包屑显示当前页签', async () => {
+test('设置页头承载标题与搜索，导航已进入主侧栏二级菜单', async () => {
   const { readFile } = await import('node:fs/promises')
   const settingsCss = await readFile(new URL('./platform/styles/settings-showcase.css', import.meta.url), 'utf8')
-  assert.match(settingsCss, /\.settings-tab-bar \{[^}]*position: sticky/, '页签条必须吸顶')
-  assert.match(settingsCss, /\.settings-tab-bar \{[^}]*top: 64px/, '吸顶位置在共享顶栏之下')
-  assert.match(settingsCss, /\.settings-tab-bar \{[^}]*background: var\(--surface-card\)/, '吸顶后必须有实底，避免内容透出')
+  assert.match(source, /class="settings-showcase-head settings-page-head"/)
+  assert.match(source, /class="settings-tab-toolbar"/)
+  assert.doesNotMatch(source, /class="settings-rail"/, '设置页不得再渲染第二条导航栏')
+  assert.doesNotMatch(source, /class="settings-tab-bar"/, '设置页签已移入主侧栏，不再保留横向 tablist')
+  assert.match(settingsCss, /\.settings-view \{\s*display: block;/)
+  assert.match(settingsCss, /\.settings-page-head \{/)
   assert.match(source, /const settingsCrumb = activeSettingsTabLabel\.value/)
   assert.match(source, /`系统设置 · \$\{activeSettingsTabLabel\.value\}`/)
   assert.match(source, /crumb: settingsCrumb/, '设置页面包屑必须带当前页签')
@@ -95,12 +97,16 @@ test('设置分区全部分组登记，新增分区不会从左侧导航消失',
   assert.match(source, /groups\.push\(\{ key: 'other', label: '其他', tabs: others \}\)/)
 })
 
-test('设置导航按分组渲染，并在窄屏回退为吸顶横向分区条', async () => {
-  assert.match(source, /v-for="group in filteredSettingsTabGroups"/)
+test('设置模块按分组进入主侧栏二级折叠菜单，权限与当前项仍由页面状态决定', () => {
   assert.match(source, /const filteredSettingsTabGroups = computed\(\(\) => \{/)
-  const settingsCss = await readFile(new URL('./platform/styles/settings-showcase.css', import.meta.url), 'utf8')
-  assert.match(settingsCss, /@media \(max-width: 1799px\)/, '窄屏必须回退为整宽横向分区条')
-  assert.match(settingsCss, /\.settings-rail \{\s*display: contents;/, '回退时导航必须脱离卡片、按网格排布')
+  assert.match(source, /children: filteredSettingsTabGroups\.value\.flatMap/)
+  assert.match(source, /settingsTab: tab\.key/)
+  assert.match(source, /groupLabel: group\.label/)
+  assert.match(source, /expanded: currentView\.value === 'settings'/)
+  assert.match(source, /active: currentView\.value === 'settings' && activeSettingsTab\.value === tab\.key/)
+  assert.match(source, /function handleNavigate\(key, item\)/)
+  assert.match(source, /item\?\.settingsTab/)
+  assert.match(source, /key\.startsWith\('settings:'\)/)
 })
 
 test('审计高级筛选默认收起，并提供可访问的展开开关', () => {

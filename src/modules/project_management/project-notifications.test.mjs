@@ -11,7 +11,7 @@ function mountInbox(api) {
   const ref = (value) => ({ value })
   const computed = (read) => ({ get value() { return read() } })
   const emitted = []
-  return new Function('formatUserError', 'ref', 'computed', 'onMounted', 'defineEmits', 'getNotification', 'listInbox', 'markNotificationRead', 'deleteReadNotifications', 'window', `${script}\nreturn { items, total, page, unreadOnly, tab, tabs, loading, error, detail, projectTarget, load, open, changeFilter, changePage, changeTab }`)(formatUserError, ref, computed, () => {}, () => (event) => emitted.push(event), api.getNotification, api.listInbox, api.markNotificationRead, api.deleteReadNotifications || (() => Promise.resolve({ deleted_count: 0 })), { location: { origin: 'http://localhost:8081' } })
+  return new Function('formatUserError', 'ref', 'computed', 'onMounted', 'defineEmits', 'useConfirmDialog', 'getNotification', 'listInbox', 'markNotificationRead', 'deleteReadNotifications', 'window', `${script}\nreturn { items, total, page, unreadOnly, tab, tabs, loading, error, detail, projectTarget, load, open, changeFilter, changePage, changeTab }`)(formatUserError, ref, computed, () => {}, () => (event) => emitted.push(event), () => ({ dialog: { value: null }, askConfirm: async () => true, accept() {}, cancel() {} }), api.getNotification, api.listInbox, api.markNotificationRead, api.deleteReadNotifications || (() => Promise.resolve({ deleted_count: 0 })), { location: { origin: 'http://localhost:8081' } })
 }
 test('项目系统挂载个人通知页面并提供侧栏和铃铛入口', () => {
   assert.match(view, /key: 'notifications', label: '个人通知中心'/)

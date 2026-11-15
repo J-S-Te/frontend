@@ -498,6 +498,7 @@ const {
   invoiceStatusFilter,
   invoiceReview,
   invoiceForm,
+  invoiceFieldErrors,
   visibleInvoiceRequests,
   visibleTaxInvoices,
   resetInvoiceFilters,
@@ -1110,6 +1111,7 @@ watch(invoiceDetailID, load);
               :invoice-eligible-receivables="invoiceEligibleReceivables"
               :saving="saving"
               :invoice-form="invoiceForm"
+              :server-field-errors="invoiceFieldErrors"
               :invoice-review="invoiceReview"
               :can="can"
               :current-user-id="String(settlementSession.identity_id || '')"

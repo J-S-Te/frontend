@@ -29,6 +29,8 @@ import ParseExceptionsPanel from '../components/ParseExceptionsPanel.vue'
 import ClaimEvidenceTravelPanel from '../components/ClaimEvidenceTravelPanel.vue'
 import BusinessOptionPicker from '../components/BusinessOptionPicker.vue'
 import ErrorState from '../../shared/components/ErrorState.vue'
+import ConfirmDialog from '@/modules/shared/components/ConfirmDialog.vue'
+import { useConfirmDialog } from '@/modules/shared/composables/useConfirmDialog.js'
 import EmptyState from '../../shared/components/EmptyState.vue'
 import { recallTask, rememberTask, savedAtLabel } from '../taskPersistence.js'
 import { canSelectProjectReference, editableClaimItem, evidenceIDs,travelInput } from '../claimFields.js'
@@ -36,10 +38,12 @@ import { claimStatusLabel as statusLabel, claimStatusTone, failureMessage, failu
 import { pollTask, taskSettled } from '../asyncTask.js'
 import { formatUserError } from '../../shared/utils/userError.js'
 import InvoiceOriginalViewer from '../components/InvoiceOriginalViewer.vue'
+import InvoiceCandidateCards from '../components/InvoiceCandidateCards.vue'
 import { approvalNodeLabel, approvalNodesLabel, assignmentPurpose, expenseScopeDescription,
   hasTenantAllCapability, reimbursementRoleLabel } from '../rolePresentation.js'
 import { formatBusinessDateTime, todayBusinessDate } from '../../shared/utils/businessTime.js'
 import { sourceSHA256 } from '../../shared/utils/sourceIntegrity.js'
+import { loginUsername } from '../../shared/loginUsername.mjs'
 import { createCommandRunner, createRequestID, formatMinor, toMinor, timeoutSignal, validateItems } from '../api/client.js'
 
 import { ensureReimbursementSession, logoutReimbursement, reimbursementAPI as api,
@@ -164,6 +168,7 @@ const uploadedDocument = ref({ id: '', name: '' })
 const documentLabel = computed(() => (uploadedDocument.value.id
   && uploadedDocument.value.id === documentID.value ? uploadedDocument.value.name : ''))
 // 最近一次解析/导出/原件的本地坐标：刷新后仍能找回任务号，不必重新上传或重跑。
+const { dialog: confirmDialog, askConfirm, accept: acceptConfirm, cancel: cancelConfirm } = useConfirmDialog()
 const recentTask = ref({ parse: null, export: null, document: null })
 const paymentStatus = ref('APPROVED_PENDING_PAYMENT')
 const policyBaseline = ref(null)
@@ -332,9 +337,10 @@ const navGroups = computed(() => {
   })).filter((group) => group.items.length)
 })
 // 原型角色卡：只显示当前真实会话的主体与授权范围，不提供 mock 角色切换。
+const currentUserName = computed(() => loginUsername(session.value))
 const sessionInitials = computed(() => {
-  const name = String(session.value?.display_name || session.value?.subject_id || '').trim()
-  if (!name) return '用'
+  const name = currentUserName.value
+  if (name === '当前用户') return '用'
   return /^[\x00-\x7F]+$/.test(name) ? name.slice(0, 2).toUpperCase() : Array.from(name).slice(0, 1).join('')
 })
 const editable = computed(() => selected.value
@@ -571,6 +577,7 @@ const candidateFields = {
   invoice_number: '发票号码', invoice_code: '发票代码', invoice_date: '开票日期',
   gross_minor: '票面总额', amount_minor: '不含税金额', tax_minor: '税额',
   buyer_tax_id: '购买方税号', seller_tax_id: '销售方税号', buyer_name: '购买方', seller_name: '销售方',
+  invoice_type: '发票类型', issuer: '开票人',
 }
 // 解析候选里的金额字段是整数分；展示时一律补上等值元，避免和人工录入的元混用。
 const candidateMoneyFields = new Set(['gross_minor', 'amount_minor', 'tax_minor'])
@@ -633,27 +640,32 @@ function blankDraft() {
     payee_profile_id: '', currency: 'CNY', items: [] }
 }
 
-// 用途：用浏览器确认框保护未保存草稿；无交互环境不阻塞。
+// 用途：用应用内确认框保护未保存草稿；不依赖 WebView 的原生 confirm。
 // 参数：message 为业务可读的放弃提醒。
 // 返回值：允许继续时为 true。
-function confirmDiscard(message) {
-  if (typeof window === 'undefined' || typeof window.confirm !== 'function') return true
-  return window.confirm(message)
+async function confirmDiscard(message) {
+  return await askConfirm({
+    title: '放弃当前未保存的修改？',
+    description: message,
+    confirmText: '放弃修改',
+    cancelText: '继续编辑',
+    danger: true,
+  })
 }
 
 // 用途：在丢掉当前草稿前征得确认，覆盖切换分区、打开其他单据和新建。
 // 参数：无。
 // 返回值：可以继续时为 true；用户取消时保持原表单。
-function discardDraft() {
+async function discardDraft() {
   if (!draftProtected.value) return true
-  return confirmDiscard('当前草稿有尚未保存的修改，离开后这些修改会丢失。确定离开吗？')
+  return await confirmDiscard('当前草稿有尚未保存的修改，离开后这些修改会丢失。确定离开吗？')
 }
 
 // 用途：在现有统一路由中切换工作区。
 // 参数：key 为导航区域。
 // 返回值：无；有未保存草稿时先确认，取消则不跳转。
-function navigate(key) {
-  if (key !== workspace.value && !discardDraft()) return
+async function navigate(key) {
+  if (key !== workspace.value && !(await discardDraft())) return
   router.push(key === 'portal' ? { name: 'portal' } : { name: 'reimbursement', params: { section: key } })
 }
 
@@ -661,18 +673,21 @@ function navigate(key) {
 // 参数：无。
 // 返回值：无；用户取消或命令未确认时保持原页面。
 async function startNewClaim() {
-  if (!discardDraft()) return
+  if (!(await discardDraft())) return
   if (workspace.value !== 'claims') await router.push({ name: 'reimbursement', params: { section: 'claims' } })
   await newDraft(true)
 }
 
 // 用途：把API或本地校验错误统一成一句可展示原因，并附请求号便于追查。
 // 参数：cause 为错误对象，method 为缺省请求方法。
-// 返回值：中文原因；后台诊断码只翻译成原因和下一步，不直接展示机器码。
+// 返回值：中文业务原因；未知写入优先查询原命令，后台任务另行翻译。
 function errorText(cause, method = 'POST') {
   const requestId = typeof cause?.requestID === 'string' && /^[A-Za-z0-9._:-]{1,128}$/.test(cause.requestID)
     ? cause.requestID : ''
-  return `${failureText(cause?.code) || formatUserError(cause, { method: cause?.method || method })}`
+  const message = cause?.outcomeUnknown
+    ? '操作结果尚未确认，请查询原命令后再决定是否重试，勿另起命令。'
+    : formatUserError(cause, { method: cause?.method || method })
+  return message
     + `${requestId ? `（请求号：${requestId}）` : ''}`
 }
 
@@ -1292,8 +1307,8 @@ async function resetFilters() {
 // 用途：从项目归档聚合定位该项目的当前可见报销单。
 // 参数：projectID为服务端返回的授权项目坐标。
 // 返回值：无；路由查询不替代服务端范围核验。
-function openArchiveProject(projectID) {
-  if (!discardDraft()) return
+async function openArchiveProject(projectID) {
+  if (!(await discardDraft())) return
   selected.value=null;archives.value=null
   router.push({name:'reimbursement',params:{section:'archives'},query:{project_id:projectID}})
 }
@@ -1474,7 +1489,7 @@ async function revealDetail() {
 // 参数：kind 为 claim、invoice 或 approval，决定要关闭的详情。
 // 返回值：无；有未保存草稿时先确认。
 async function backToList(kind = 'claim') {
-  if (!discardDraft()) return
+  if (!(await discardDraft())) return
   if (kind === 'invoice') {
     selectedInvoice.value = null; invoiceRows.value = []; selectedSource.value = null
   } else if (kind === 'approval') {
@@ -1495,7 +1510,7 @@ async function backToList(kind = 'claim') {
 // 参数：id 为服务器单据ID，force 表示保存成功后跳过重复放弃确认。
 // 返回值：无；详情读取失败保持表单。
 async function openClaim(id, force = false) {
-  if (!force && selected.value?.id !== String(id) && !discardDraft()) return
+  if (!force && selected.value?.id !== String(id) && !(await discardDraft())) return
   const ticket = ++detailSequence
   try {
     const result = await api.request(`/claims/${encodeURIComponent(id)}`)
@@ -2653,7 +2668,7 @@ function clonePolicy() {
 // 返回值：无；初始化空白编辑表单。
 async function newDraft(skipConfirm = false) {
   if (runner.pending()) { showError(new Error('请先确认原命令结果')); return }
-  if (!skipConfirm && !discardDraft()) return
+  if (!skipConfirm && !(await discardDraft())) return
   claimFormOpen.value = true
   selected.value = null; draft.value = blankDraft()
   draftBaseline.value = stableStringify(draft.value)
@@ -2670,7 +2685,7 @@ async function newDraft(skipConfirm = false) {
 // 返回值：无；无可选组织时不发出创建请求。
 async function createDraft() {
   if (!applyDraftContext(draft.value.org_id)) { showError(new Error(notice.value)); return }
-  if (!confirmDiscard('创建服务器草稿会先保存空单据，当前未保存的费用明细不会一并保存。继续创建吗？')) return
+  if (!(await confirmDiscard('创建服务器草稿会先保存空单据，当前未保存的费用明细不会一并保存。继续创建吗？'))) return
   const result = await mutate('claim.create', '/claims', { expected_version: 0,
     title: draft.value.title || '未命名报销', org_id: draft.value.org_id,
     route_type: draft.value.route_type, finance_entity_id: draft.value.finance_entity_id,
@@ -2685,7 +2700,7 @@ async function createDraft() {
 // 返回值：无；成功返回门户。
 async function logout() {
   if (runner.pending()) { showError(new Error('请先确认原命令结果再退出')); return }
-  if (!discardDraft()) return
+  if (!(await discardDraft())) return
   try { await logoutReimbursement() } catch (cause) { showError(cause) } }
 
 watch(draft,invalidateClaimPreview,{deep:true})
@@ -2716,12 +2731,12 @@ function protectPending(event) {
   if (!runner.pending() && !draftProtected.value) return
   event.preventDefault(); event.returnValue = ''
 }
-onBeforeRouteLeave(() => {
+onBeforeRouteLeave(async () => {
   if (runner.pending()) {
     showError(new Error('请先查询原命令结果，再离开报销工作区'))
     return false
   }
-  return discardDraft()
+  return await discardDraft()
 })
 onMounted(() => {
   // 刷新页面后先恢复最近任务坐标，用户可以继续查询而不用重新上传或重跑。
@@ -2746,7 +2761,7 @@ onBeforeUnmount(() => {
     content-class="expense-canvas"
     :nav-groups="navGroups"
     :crumb="title"
-    :user-name="session?.display_name || session?.subject_id || ''"
+    :user-name="currentUserName"
     :user-role="sessionRolesLabel"
     @navigate="navigate"
     @logout="logout"
@@ -2890,7 +2905,7 @@ onBeforeUnmount(() => {
           <div class="expense-role-card__info">
             <span class="expense-role-card__avatar" aria-hidden="true">{{ sessionInitials }}</span>
             <div class="expense-role-card__copy">
-              <strong class="expense-role-card__name">{{ session?.display_name || session?.subject_id || '当前账号' }}</strong>
+              <strong class="expense-role-card__name">{{ currentUserName }}</strong>
               <span class="expense-role-card__meta">角色：{{ sessionRolesLabel }}</span>
               <span class="expense-role-card__meta">{{ scopeDescription }}</span>
             </div>
@@ -5068,5 +5083,6 @@ onBeforeUnmount(() => {
         </fieldset>
       </section>
     </template>
+    <ConfirmDialog :open="Boolean(confirmDialog)" v-bind="confirmDialog || {}" @confirm="acceptConfirm" @cancel="cancelConfirm" />
   </AppShell>
 </template>

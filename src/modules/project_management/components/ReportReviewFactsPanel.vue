@@ -4,15 +4,23 @@ import { getMetricReportReviews, getCurrentMetricReportReviews, postMetricReport
 import { canDecideMetricReport, metricOperationKey } from '../metricFacts.js'
 import { formatBusinessDateTime } from '../../shared/utils/businessTime.js'
 
-const props = defineProps({ item: { type: Object, required: true }, session: { type: Object, default: null } })
+const props = defineProps({
+  item: { type: Object, required: true }, session: { type: Object, default: null },
+  manualMainReport: { type: Boolean, default: false },
+})
 const emit = defineEmits(['changed'])
 const currentRounds = ref([])
 const rows = ref([]), page = ref(1), busy = ref(false), error = ref(''), notice = ref(''), pending = ref(null)
 const subject = ref('SERVICE_ITEM'), reason = ref('EVIDENCE_INCOMPLETE'), note = ref('')
 const subjectState = computed(() => subject.value === 'SERVICE_ITEM' ? props.item : props.item.penetration_work_package)
 const current = computed(() => currentRounds.value.find((row) => row.subject_type === subject.value && row.revision === Number(subjectState.value?.report_revision || 0)))
-const canSubmit = computed(() => !!props.session?.permissions?.includes('project.report.prepare') && ['COMPILING', 'DRAFTING'].includes(subjectState.value?.report_status) && (!current.value || current.value.decision === 'RETURNED'))
-const canDecide = computed(() => canDecideMetricReport(current.value, props.session))
+const mainReportReadOnly = computed(() => props.manualMainReport && subject.value === 'SERVICE_ITEM')
+const canSubmit = computed(() => !mainReportReadOnly.value
+  && !!props.session?.permissions?.includes('project.report.prepare')
+  && ['COMPILING', 'DRAFTING'].includes(subjectState.value?.report_status)
+  && (!current.value || current.value.decision === 'RETURNED'))
+const canDecide = computed(() => !mainReportReadOnly.value
+  && canDecideMetricReport(current.value, props.session))
 const labels = { PENDING: '待审核', PASSED: '通过', RETURNED: '退回' }
 let sequence = 0
 
@@ -33,9 +41,13 @@ async function load() {
 
 // 用途：使用冻结命令执行或精确重试，未知回执不产生新操作号。
 // 参数：command 为可选的新命令，缺省复用未确认命令。
-// 返回值：无；成功后刷新事实和父项版本。
+// 返回值：无；主报告手动维护时拒绝写入真实审核，成功后刷新事实和父项版本。
 async function execute(command = pending.value) {
   if (!command || busy.value) return
+  if (props.manualMainReport && command.payload?.subject_type === 'SERVICE_ITEM') {
+    error.value = '主报告暂由项目经理手动维护阶段，审核记录仅供查看'
+    return
+  }
   pending.value = command; busy.value = true; error.value = ''; notice.value = ''
   try {
     await postMetricReportReview(command.itemID, command.action, command.payload)
@@ -68,7 +80,8 @@ watch(() => [props.item.id, props.item.version, props.item.penetration_work_pack
 <template>
   <section class="pm-metric-review pm-panel" aria-label="真实报告审核轮次">
     <header><h3>报告送审与审核记录</h3><button type="button" :disabled="busy" @click="load">刷新核对</button></header>
-    <p>主报告和专项分别送审。质量管理员独立审核，退回后重新送审；签发继续执行编制、审核、签发三人分离。历史首次无法证明时保留未知。</p>
+    <p v-if="manualMainReport">主报告阶段暂由项目经理手动维护，历史审核记录仅供查看；手动阶段不计为真实审核通过。专项报告仍单独送审。</p>
+    <p v-else>主报告和专项分别送审。质量管理员独立审核，退回后重新送审；签发继续执行编制、审核、签发三人分离。历史首次无法证明时保留未知。</p>
     <label>报告类型 <select v-model="subject" :disabled="busy || !!pending"><option value="SERVICE_ITEM">主报告</option><option v-if="item.penetration_work_package" value="PENETRATION_WORK_PACKAGE">渗透专项报告</option></select></label>
     <p v-if="error" role="alert">{{ error }}</p><p v-if="notice" role="status">{{ notice }}</p>
     <p v-if="pending" role="status">本次结果尚未确认，请先刷新核对，再 <button type="button" :disabled="busy" @click="execute()">按原操作重试</button>。</p>

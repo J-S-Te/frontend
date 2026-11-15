@@ -6,7 +6,7 @@
 
 import { attachStructuredContext } from './requestContext.js'
 import { downloadRequestSignal as withRequestTimeout } from '../../../shared/utils/downloadTimeout.js'
-import { formatUserError, safeUserMessage, userFieldErrors } from '../../../shared/utils/userError.js'
+import { formatUserError, isWriteOutcomeUnknown, safeUserMessage, userFieldErrors } from '../../../shared/utils/userError.js'
 
 const API_BASE_URL = (import.meta.env?.VITE_API_BASE_URL || '/api/v1').replace(/\/$/, '')
 
@@ -69,23 +69,13 @@ function resolveTimeoutMs(override) {
   return Number.isFinite(ms) && ms > 0 ? ms : 0
 }
 
-/**
- * createRequest 生成模块化的接口请求方法，统一处理鉴权、网络错误和失败返回结构。
- * @param {Object} config 配置对象。
- * @param {Function} config.ErrorClass 失败时抛出的错误构造函数。
- * @param {string} config.networkMessage 网络异常时的提示文案。
- * @param {string} config.failureMessage 接口失败时的默认提示文案。
- * @param {string} [config.subsystem='platform'] 子系统标识。
- * @param {string} [config.feature='api'] API 功能分组。
- * @param {Function} [config.onUnauthorized] 遇到 401 时的自定义鉴权回调。
- * @returns {Function} 返回请求函数 `(path, options, context) => Promise<any>`。
- * @throws {Error} 当请求失败时抛出 `config.ErrorClass`，并带上 status/request_id 等上下文。
- */
+// 用途：生成平台各模块共用的请求管道，保留鉴权、字段和未知结果语义。
+// 参数：配置包含错误类型、网络及失败文案、子系统与功能名，以及未登录回调。
+// 返回值：单次请求函数，失败抛出配置的错误类型并保留既有上下文。
 export function createRequest({ ErrorClass, networkMessage, failureMessage, subsystem = 'platform', feature = 'api', onUnauthorized }) {
-  /**
-   * request 执行单次 HTTP 请求。异常统一包为统一上下文，便于日志与告警联调。
-   * 对于非 401 的失败，调用方可直接依赖错误里的 status/code/detail；401 会触发 onUnauthorized。
-   */
+  // 用途：发送单次请求并区分业务拒绝、读取失败与写入结果未知。
+  // 参数：path 为接口路径，options 为请求参数，context 为已知业务上下文。
+  // 返回值：成功数据；失败抛出带稳定状态、字段问题和追踪标识的错误。
   return async function request(path, options = {}, context = {}) {
     const method = String(options.method || 'GET').toUpperCase()
     const requestContext = {
@@ -139,6 +129,7 @@ export function createRequest({ ErrorClass, networkMessage, failureMessage, subs
       // 直接传给 formatUserError 会被误判成“读取已取消”，这里换成中性输入。
       const source = timedOut ? { status: 0, code, message: '' } : error
       const requestError = new ErrorClass(formatUserError(source, { code, status: 0, method, fallback: networkMessage }), { code, cause: error })
+      requestError.outcomeUnknown = isWriteOutcomeUnknown(source, { code, status: 0, method })
       attachStructuredContext(requestError, {
         ...requestContext,
         metadata: { ...(requestContext.metadata || {}), network: true, ...(timedOut ? { timeout: true } : {}) },
@@ -161,6 +152,7 @@ export function createRequest({ ErrorClass, networkMessage, failureMessage, subs
         // “服务返回的信息无法识别”。
         const code = 'REQUEST_TIMEOUT'
         const timeoutError = new ErrorClass(formatUserError({ status: 0, code, message: '' }, { code, status: 0, method, fallback: networkMessage }), { code, cause })
+        timeoutError.outcomeUnknown = isWriteOutcomeUnknown({ code }, { method })
         attachStructuredContext(timeoutError, {
           ...requestContext,
           metadata: { ...(requestContext.metadata || {}), network: true, timeout: true },
@@ -169,6 +161,7 @@ export function createRequest({ ErrorClass, networkMessage, failureMessage, subs
       }
       const code = 'INVALID_RESPONSE'
       const error = new ErrorClass(formatUserError(cause, { code, method }), { status: response.status, code, cause })
+      error.outcomeUnknown = isWriteOutcomeUnknown(cause, { code, method })
       attachStructuredContext(error, requestContext, { status: response.status, code })
       throw error
     } finally {
@@ -179,17 +172,22 @@ export function createRequest({ ErrorClass, networkMessage, failureMessage, subs
       // SEC-X4：message 是会被各页面直接展示的文本，必须先过安全过滤；
       // details/nextAction/traceId 保持结构化字段供已鉴权管理台（权限门控内）展示排障。
       const safeFallback = userSafeErrorMessage(body?.message) || userSafeErrorMessage(body?.msg) || failureMessage
-      const error = new ErrorClass(formatUserError(body, { status: response.status, method, fallback: safeFallback }), {
+      const details = body?.details ?? body?.field_errors ?? body?.fieldErrors
+      const outcomeUnknown = isWriteOutcomeUnknown(body, { status: response.status, method })
+      const error = new ErrorClass(formatUserError(body, {
+        status: response.status, method, fallback: safeFallback, outcomeUnknown,
+      }), {
         status: response.status,
         code: body?.code,
         traceId: body?.request_id || body?.trace_id || body?.traceId,
-        details: body?.details,
+        details,
         nextAction: body?.details?.next_action,
         detail: body?.details?.detail,
       })
       // 部分旧版 Error 类不含 details，调用方仍需要结构化字段问题。
-      error.details ??= body?.details || null
-      error.fieldErrors = [400, 422].includes(response.status) ? userFieldErrors(body?.details) : []
+      error.details ??= details || null
+      error.fieldErrors = [400, 422].includes(response.status) ? userFieldErrors(details) : []
+      error.outcomeUnknown = outcomeUnknown
       attachStructuredContext(error, {
         ...requestContext,
         requestId: body?.request_id || '',

@@ -14,7 +14,7 @@ import { createErrorStateStub } from '../../../test/helpers/errorStateStub.mjs'
 function component(extras = {}) {
   const { descriptor } = parse(readFileSync(new URL('./ExpenseInbox.vue', import.meta.url), 'utf8'))
   const compiled = compileScript(descriptor, { id: 'expense-inbox-test', inlineTemplate: true })
-  const values = { PaginationBar: PaginationBarStub, ErrorState: createErrorStateStub().Stub, ...extras }
+  const values = { PaginationBar: PaginationBarStub, ErrorState: createErrorStateStub().Stub, ConfirmDialog: { render() { return null } }, useConfirmDialog: () => ({ dialog: { value: null }, askConfirm: async () => false, accept() {}, cancel() {} }), ...extras }
   const directives = {
     vModelText: { created: (el, binding) => { el.props.value = binding.value } },
     vModelSelect: { created: (el, binding) => { el.props.value = binding.value } },
@@ -29,7 +29,7 @@ function component(extras = {}) {
     .replace(/import\s+\{([^}]+)\}\s+from\s+['"]([^'"]+)['"];?/g, (_, names, source) => {
     for (const item of names.split(',')) {
       const [key, alias = key] = item.trim().split(/\s+as\s+/)
-      values[alias] = source === 'vue' ? (directives[key] || Vue[key]) : extras[key]
+      values[alias] = source === 'vue' ? (directives[key] || Vue[key]) : (extras[key] ?? values[alias])
     }
     return ''
   })

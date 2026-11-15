@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { approvalNodeLabel } from '../rolePresentation.js'
+import { businessReasonLabel } from '../businessFeedback.js'
 import BusinessAttachmentSelect from './BusinessAttachmentSelect.vue'
 
 
@@ -66,7 +67,7 @@ function evidenceName(fileID, index) {
         <p v-if="!reference.eligible && reference.participant_eligible">
           当前仍具费用参与资格，但状态阻断正常报销；历史尾款须有效政策、证据及额外审批。
         </p>
-        <p v-if="reference.reason_codes?.length">引用原因：{{ reference.reason_codes.join('、') }}</p>
+        <p v-if="reference.reason_codes?.length">引用原因：{{ reference.reason_codes.map(businessReasonLabel).join(' ') }}</p>
         <details v-if="reference.required_approver_refs?.length">
           <summary>项目权威岗位来源（不由本地人员映射覆盖）</summary>
           <ul><li v-for="approver in reference.required_approver_refs"
@@ -88,7 +89,7 @@ function evidenceName(fileID, index) {
           <div><dt>城市代码事实</dt><dd>{{ reference.travel_snapshot.city_code_status || 'UNKNOWN' }}</dd></div>
           <div><dt>来源事件 / 内容版本</dt><dd>{{ reference.travel_snapshot.source_event_id || '未记录' }} · {{ reference.travel_snapshot.source_event_version || '未知' }}</dd></div>
         </dl>
-        <p v-if="reference.travel_snapshot?.reason_codes?.length">行程事实说明：{{ reference.travel_snapshot.reason_codes.join('、') }}</p>
+        <p v-if="reference.travel_snapshot?.reason_codes?.length">行程事实说明：{{ reference.travel_snapshot.reason_codes.map(businessReasonLabel).join(' ') }}</p>
       </template>
       <p v-else>尚未加载此分摊的权威项目引用，请查询项目选项；不能据缺少事实推断有资格或已批准差旅。</p>
     </article>
@@ -115,7 +116,7 @@ function evidenceName(fileID, index) {
           · 项目 {{ application.project_id }} / {{ application.service_item_id || '项目级' }}</p>
         <p>费用截止 {{ application.policy?.expense_cutoff }} · 提交有效期
           {{ application.policy?.valid_from }} 至 {{ application.policy?.valid_until || '持续有效' }}</p>
-        <p>终止事实：{{ application.termination_reasons?.join('、') }}；最终仍以该轮审批结论为准。</p>
+        <p>终止事实：{{ application.termination_reasons?.map(businessReasonLabel).join(' ') }}；最终仍以该轮审批结论为准。</p>
       </article>
     </details>
 
@@ -131,7 +132,7 @@ function evidenceName(fileID, index) {
       服务端评估：{{ assessments[item.travel_assessment.status] || item.travel_assessment.status }}
       <span v-if="item.travel_assessment.confirmed_unknown">（未知事实已人工补证，状态仍为UNKNOWN）</span>
     </p>
-    <p v-if="item.travel_assessment?.reason_codes?.length">评估依据：{{ item.travel_assessment.reason_codes.join('、') }}</p>
+    <p v-if="item.travel_assessment?.reason_codes?.length">评估依据：{{ item.travel_assessment.reason_codes.map(businessReasonLabel).join(' ') }}</p>
     <section v-if="item.travel_assessment?.references?.some((value) => value.cross_check)">
       <h4>申报与票据行程交叉核验</h4>
       <p>票面行程来自人工票面复核，不代表自动识别或税务验真；补证不会把未知事实变成匹配。</p>
@@ -140,11 +141,11 @@ function evidenceName(fileID, index) {
         <strong>{{ reference.project_id }} / {{ reference.service_item_id || '项目级' }}</strong>
         <p>交叉结论：{{ assessments[reference.cross_check.status] || reference.cross_check.status }}
           · 项目事实：{{ assessments[reference.cross_check.project_status] || reference.cross_check.project_status }}</p>
-        <p v-if="reference.cross_check.reason_codes?.length">核对依据：{{ reference.cross_check.reason_codes.join('、') }}</p>
+        <p v-if="reference.cross_check.reason_codes?.length">核对依据：{{ reference.cross_check.reason_codes.map(businessReasonLabel).join(' ') }}</p>
         <p v-for="invoice in reference.cross_check.invoices || []" :key="invoice.invoice_id">
           发票 {{ invoice.invoice_id }} · {{ assessments[invoice.status] || invoice.status }}
           · {{ invoice.source_kind === 'MANUAL_FACE_CONFIRMATION' ? '人工票面复核' : '未提供票面事实' }}
-          <span v-if="invoice.reason_codes?.length"> · {{ invoice.reason_codes.join('、') }}</span>
+          <span v-if="invoice.reason_codes?.length"> · {{ invoice.reason_codes.map(businessReasonLabel).join(' ') }}</span>
         </p>
       </article>
     </section>

@@ -5,10 +5,13 @@ import { safeNotificationPath } from '../workspace.js'
 import { formatBusinessDateTime } from '../../shared/utils/businessTime.js'
 import PaginationBar from '@/modules/shared/components/PaginationBar.vue'
 import ErrorState from '../../shared/components/ErrorState.vue'
+import ConfirmDialog from '@/modules/shared/components/ConfirmDialog.vue'
+import { useConfirmDialog } from '@/modules/shared/composables/useConfirmDialog.js'
 
 const rows=ref([]),total=ref(0),page=ref(1),unreadOnly=ref(false),unread=ref(0)
 const tab=ref('all'),tabs=[{key:'all',label:'全部'},{key:'local',label:'本系统'},{key:'cross',label:'跨系统'}]
 const detail=ref(null),error=ref(''),busy=ref(false)
+const { dialog: confirmDialog, askConfirm, accept: acceptConfirm, cancel: cancelConfirm } = useConfirmDialog()
 let sequence=0
 
 // 用途：分页读取平台当前主体收件箱，不提交客户端用户标识。
@@ -39,7 +42,14 @@ const hasReadItems=computed(()=>rows.value.some((row)=>row.read_at))
 // deleteRead 软删除当前账号已读站内信；未读与其他收件人的消息不受影响。
 async function deleteRead(){
  if(!hasReadItems.value||busy.value)return
- if(typeof window!=='undefined'&&!window.confirm('确认删除当前账号的全部已读消息？该操作只影响你的收件箱。'))return
+ const confirmed=await askConfirm({
+  title:'删除全部已读消息？',
+  description:'确认删除当前账号的全部已读消息？该操作只影响你的收件箱，删除后不可恢复。',
+  confirmText:'删除已读',
+  cancelText:'取消',
+  danger:true,
+ })
+ if(!confirmed||!hasReadItems.value||busy.value)return
  busy.value=true;error.value=''
  try{await deleteReadNotifications();await load()}
  catch(cause){error.value=cause.message}
@@ -73,6 +83,7 @@ onMounted(load)
   </ul>
   <PaginationBar label="站内消息分页" :page="page" :total="total" :page-size="20" :loading="busy"
    @change="nextPage => { page = nextPage; load() }" />
+  <ConfirmDialog :open="Boolean(confirmDialog)" v-bind="confirmDialog || {}" @confirm="acceptConfirm" @cancel="cancelConfirm" />
   <aside v-if="detail" class="expense-item"><h3>{{ detail.title }}</h3><p>{{ detail.content }}</p>
    <a v-if="safeNotificationPath(detail.target_url)" :href="safeNotificationPath(detail.target_url)">查看关联业务（重新校验权限）</a>
    <button class="expense-button" @click="detail=null">关闭</button></aside>

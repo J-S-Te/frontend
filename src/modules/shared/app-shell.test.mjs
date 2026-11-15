@@ -425,6 +425,61 @@ test('active / note / itemClass / title 映射到文档约定的类与属性', (
   assert.equal(textOf(notes[0]).trim(), '只读')
 })
 
+test('带 children 的导航渲染二级菜单，父项可展开和收起', async () => {
+  const nested = [{
+    label: '系统管理',
+    items: [{
+      key: 'settings', label: '系统设置', icon: 'settings', active: true, expanded: true,
+      children: [
+        { key: 'settings:iam', label: '身份、组织与授权', icon: 'organization', groupLabel: '身份与权限', active: true },
+        { key: 'settings:security', label: '安全设置', icon: 'shield', groupLabel: '安全与通知' },
+      ],
+    }],
+  }]
+  const shell = renderShell({ navGroups: nested })
+  assert.equal(shell.byClass('console-nav-item--child').length, 2, '展开后必须渲染两个子项')
+  assert.equal(shell.byClass('console-nav-sublabel').length, 2, '分组标题按分组渲染')
+  assert.deepEqual(
+    shell.byClass('console-nav-item--child').map((item) => {
+      const span = item.children.find((child) => typeof child === 'object' && child.type === 'span')
+      return textOf(span).trim()
+    }),
+    ['身份、组织与授权', '安全设置'],
+  )
+  const parent = navItemButtons(shell).find((item) => textOf(item).includes('系统设置'))
+  assert.ok(parent, '父项必须存在')
+  assert.equal(parent.props['aria-expanded'], 'true')
+  assert.ok(classTokens(parent).includes('is-expanded'))
+
+  shell.click(parent)
+  await Vue.nextTick()
+  shell.sync()
+  assert.equal(shell.byClass('console-nav-item--child').length, 0, '点父项后收起子项')
+  const collapsedParent = navItemButtons(shell).find((item) => textOf(item).includes('系统设置'))
+  assert.equal(collapsedParent.props['aria-expanded'], 'false')
+
+  shell.click(collapsedParent)
+  await Vue.nextTick()
+  shell.sync()
+  assert.equal(shell.byClass('console-nav-item--child').length, 2, '再次点击恢复子项')
+})
+
+test('二级菜单点击抛出子项 key 与业务元数据', () => {
+  const recorder = recordEvents()
+  const nested = [{
+    label: '系统管理',
+    items: [{
+      key: 'settings', label: '系统设置', expanded: true,
+      children: [{ key: 'settings:iam', settingsTab: 'iam', label: '身份、组织与授权', groupLabel: '身份与权限' }],
+    }],
+  }]
+  const shell = renderShell({ navGroups: nested, ...recorder.props })
+  clickElement(shell, 'console-nav-item--child', '身份、组织与授权')
+  assert.equal(recorder.events.length, 1)
+  assert.equal(recorder.events[0].key, 'settings:iam')
+  assert.equal(recorder.events[0].item.settingsTab, 'iam')
+})
+
 test('没有可见导航项时展示 nav-empty 提示块，带可见项时不展示', () => {
   const empty = renderShell({ navGroups: [] })
   const emptyBlocks = empty.byClass('console-nav-empty')

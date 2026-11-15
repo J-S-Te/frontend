@@ -18,6 +18,7 @@ const props = defineProps({
   invoiceEligibleReceivables: { type: Array, required: true },
   saving: { type: Boolean, default: false },
   invoiceForm: { type: Object, required: true },
+  serverFieldErrors: { type: Object, default: () => ({}) },
   invoiceReview: { type: Object, required: true },
   can: { type: Function, required: true },
   // 当前会话用户标识：用于按服务端"申请人不能作废本人申请"规则隐藏作废入口，未知时传空串。
@@ -32,6 +33,19 @@ const invoiceStatusFilter = defineModel('invoiceStatusFilter')
 // 表单反馈：关闭原生 required 气泡后由应用层给出字段级提示并聚焦首个错误字段（DEF-03）。
 const invoiceErrors = ref({})
 const invoiceFormElement = ref(null)
+// 用途：显示服务端字段拒绝并聚焦真实可编辑控件。
+// 参数：errors 为父级从安全字段详情映射的反馈。
+// 返回值：无；未知字段不生成控件或额外填写要求。
+async function showServerFieldErrors(errors) {
+  const visible = Object.fromEntries(INVOICE_REQUEST_FIELDS
+    .filter(field => Boolean(errors?.[field.key])).map(field => [field.key, errors[field.key]]))
+  invoiceErrors.value = { ...invoiceErrors.value, ...visible }
+  const first = firstInvalidField(INVOICE_REQUEST_FIELDS, visible)
+  if (!first) return
+  await nextTick()
+  invoiceFormElement.value?.querySelector('[name="' + first.key + '"]')?.focus()
+}
+watch(() => props.serverFieldErrors, showServerFieldErrors)
 // 用途：提交前校验开票申请必填与金额/税率格式，校验不通过时不通知父级写入。
 // 参数：无；读取父级持有的 invoiceForm。
 // 返回值：无；通过后 emit submit-invoice。
@@ -48,10 +62,14 @@ async function submitInvoiceForm() {
 // 用途：用户修正字段后只保留仍失败的旧错误；关闭编辑器时清空反馈。
 // 参数：无。
 // 返回值：无。
-watch(() => props.invoiceForm, () => {
+watch(() => ({ ...props.invoiceForm }), (current, previous) => {
   if (!Object.keys(invoiceErrors.value).length) return
-  invoiceErrors.value = retainVisibleErrors(INVOICE_REQUEST_FIELDS, props.invoiceForm, invoiceErrors.value)
-}, { deep: true })
+  const retained = retainVisibleErrors(INVOICE_REQUEST_FIELDS, current, invoiceErrors.value)
+  for (const key of Object.keys(invoiceErrors.value)) {
+    if (props.serverFieldErrors[key] && current[key] === previous[key]) retained[key] = invoiceErrors.value[key]
+  }
+  invoiceErrors.value = retained
+})
 watch(invoiceComposerOpen, (open) => { if (!open) invoiceErrors.value = {} })
 
 // 用途：判断当前行是否显示"作废（释放额度）"入口（SET-06）。

@@ -675,13 +675,28 @@ test('界面已接入客户生命周期、商机看板/跟进/历史/终态待�
   assert.doesNotMatch(view, /后端暂未提供申请列表与详情/)
 })
 
-test('商机阶段看板按推进程度设置独立背景色且不影响售前看板', () => {
+test('商机阶段看板使用中性列与阶段强调色，不再整列铺满彩虹底色', () => {
   assert.match(view, /class="crm-board crm-opportunity-board"/)
   assert.match(view, /:data-stage="column\.stage"/)
   for (const stage of ['初步接触', '需求沟通', '方案制定', '报价', '投标', '已签约', '失败']) {
     assert.match(style, new RegExp(`\\.crm-opportunity-board \\.crm-board-column\\[data-stage='${stage}'\\]`))
   }
-  assert.match(style, /\.crm-opportunity-board \.crm-board-column\s*\{[\s\S]*background:\s*linear-gradient/)
+  assert.match(style, /\.crm-opportunity-board \.crm-board-column\s*\{[\s\S]*background:\s*var\(--surface-card/)
+  assert.doesNotMatch(style, /\.crm-opportunity-board \.crm-board-column\s*\{[^}]*linear-gradient/)
+})
+
+test('商机看板显示管道汇总、列金额、空阶段开关和卡片异常提示', () => {
+  assert.match(view, /crm-board-summary/)
+  assert.match(view, /boardSummary\.amount/)
+  assert.match(view, /crm-board-column-total/)
+  assert.match(view, /showEmptyBoardStages/)
+  assert.match(view, /boardDateLabel\(item\)/)
+  assert.match(view, /boardOwnerMissing\(item\)/)
+  assert.match(view, /boardIsStale\(item\)/)
+  assert.match(view, /boardColumnOverdue\(column\)/)
+  assert.match(style, /\.crm-board-summary/)
+  assert.match(style, /\.crm-board-column-total/)
+  assert.match(style, /\.crm-board-age/)
 })
 
 test('售前状态看板按流程状态设置独立背景色', () => {
@@ -1425,7 +1440,7 @@ test('TS-010 从商机发起申请锁定机会且提交后只刷新面板不改�
   assert.match(view, /class="console-modal-backdrop crm-opportunity-presale-create-backdrop"/)
   assert.match(view, /class="console-detail-modal crm-opportunity-presale-create-dialog"/)
   assert.match(view, /id="opportunity-presale-create-form" class="console-form-grid crm-opportunity-presale-create-body"/)
-  assert.match(style, /\.crm-opportunity-presale-create-backdrop\s*\{[^}]*z-index:\s*90/)
+  assert.match(style, /\.crm-opportunity-presale-create-backdrop\s*\{[^}]*z-index:\s*(?:90|var\(--crm-z-backdrop\))/)
   assert.match(style, /\.crm-opportunity-presale-create-dialog/)
   assert.match(view, /\{\{ selectedOpportunity\.opportunity_no \}\}[\s\S]*\{\{ selectedOpportunity\.name \}\}/)
   assert.match(view, /售前内部流程暂时不可用/)
@@ -1794,7 +1809,7 @@ test('从详情打开的编辑弹窗叠在详情之上，不被遮住', () => {
   assert.match(view, /:nested="!!selectedOpportunity"/)
   assert.match(customerDialogSource, /class="console-modal-backdrop" :class="\{ nested \}"/)
   assert.match(opportunityDialogSource, /class="console-modal-backdrop" :class="\{ nested \}"/)
-  assert.match(style, /console-modal-backdrop\.nested \{ z-index: 80; \}/)
+  assert.match(style, /console-modal-backdrop\.nested \{ z-index:\s*(?:80|var\(--crm-z-modal\)); \}/)
 })
 
 // P2⑨：.crm-toolbar / .crm-customer-filters / .crm-presale-filters 是同一个
