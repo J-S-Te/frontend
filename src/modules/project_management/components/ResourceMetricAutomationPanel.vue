@@ -241,8 +241,8 @@ watch(() => props.canConfirm, () => { void loadAutoConfirm() }, { immediate: tru
       <div class="pm-resource-form">
         <label>例外类型<select v-model="exceptionForm.kind"><option value="LEAVE">请假</option><option value="OVERTIME">加班</option><option value="DOWNTIME">停机</option><option value="HOLIDAY">组织假日</option></select></label>
         <label>业务日<input v-model="exceptionForm.business_date" type="date" /></label>
-        <label>开始<input v-model="exceptionForm.start" type="time" :disabled="exceptionForm.zero" /></label>
-        <label>结束<input v-model="exceptionForm.end" type="time" :disabled="exceptionForm.zero" /></label>
+        <label>开始<input v-model="exceptionForm.start" type="time" maxlength="5" :disabled="exceptionForm.zero" /></label>
+        <label>结束<input v-model="exceptionForm.end" type="time" maxlength="5" :disabled="exceptionForm.zero" /></label>
         <label class="pm-resource-inline"><input v-model="exceptionForm.zero" type="checkbox" /> 当天容量为零</label>
         <label>依据<textarea v-model="exceptionForm.note" maxlength="1000" /></label>
         <button type="button" @click="saveException">保存例外</button>
@@ -261,8 +261,8 @@ watch(() => props.canConfirm, () => { void loadAutoConfirm() }, { immediate: tru
       <div class="pm-resource-calendar">
         <div v-for="row in calendar" :key="row.weekday" class="pm-resource-calendar-row">
           <label class="pm-resource-inline"><input v-model="row.enabled" type="checkbox" />{{ row.name }}</label>
-          <input v-model="row.start" type="time" :disabled="!row.enabled" />
-          <input v-model="row.end" type="time" :disabled="!row.enabled" />
+          <input v-model="row.start" type="time" maxlength="5" :disabled="!row.enabled" />
+          <input v-model="row.end" type="time" maxlength="5" :disabled="!row.enabled" />
           <button type="button" @click="saveWeekday(row)">保存</button>
         </div>
       </div>
