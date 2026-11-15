@@ -9,12 +9,13 @@ import ConsoleIcon from "@/modules/shared/components/ConsoleIcon.vue"
 import EmptyState from "@/modules/shared/components/EmptyState.vue"
 import ErrorState from "@/modules/shared/components/ErrorState.vue"
 import LoadingState from "@/modules/shared/components/LoadingState.vue"
-import { deleteAlertRule, getAlertRules, previewAlertRule, putAlertRules } from "../api/dataAnalysis"
+import { deleteAlertRule, getAlertRuleExecutions, getAlertRules, getAlertRuleScopeOptions, previewAlertRule, putAlertRules } from "../api/dataAnalysis"
 import { formatDataAnalysisError } from "../utils/errors.js"
 
 const props = defineProps({ permissions: { type: Array, default: () => [] } })
 
 const rules = ref([])
+const executions = ref([])
 const loading = ref(true)
 const error = ref(null)
 const saving = ref(false)
@@ -24,8 +25,12 @@ const editing = ref(null)
 const draft = ref(null)
 let editorInitialSnapshot = ""
 const keyword = ref("")
-const scopeOwnerOrgIDs = ref("")
-const scopeCustomerTypes = ref("")
+const scopeOwnerOrgIDs = ref([])
+const scopeCustomerTypes = ref([])
+const scopeCurrencies = ref([])
+const scopeOptions = ref({ owner_org_ids: [], customer_types: [], currencies: [] })
+const scopeOptionsLoading = ref(false)
+const scopeOptionsError = ref("")
 const scopeAmountMinYuan = ref("")
 const scopeAmountMaxYuan = ref("")
 const previewBusy = ref(false)
@@ -74,7 +79,12 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    rules.value = await getAlertRules()
+    const [loadedRules, loadedExecutions] = await Promise.all([
+      getAlertRules(),
+      getAlertRuleExecutions().catch(() => []),
+    ])
+    rules.value = loadedRules
+    executions.value = Array.isArray(loadedExecutions) ? loadedExecutions : []
   } catch (err) {
     error.value = formatDataAnalysisError(err, { fallback: "预警规则加载失败，请稍后刷新。" })
   } finally {
@@ -115,10 +125,6 @@ function nextRuleName() {
 }
 
 
-function splitScopeValues(value) {
-  return [...new Set(String(value || "").split(/[,，\n]/).map((item) => item.trim()).filter(Boolean))]
-}
-
 function parseYuanToMinor(value, label) {
   if (String(value ?? "").trim() === "") return { value: null, error: "" }
   const number = Number(value)
@@ -127,21 +133,23 @@ function parseYuanToMinor(value, label) {
 }
 
 function buildScopeJSON() {
-  const ownerOrgIDs = splitScopeValues(scopeOwnerOrgIDs.value)
-  const customerTypes = splitScopeValues(scopeCustomerTypes.value)
+  const ownerOrgIDs = [...new Set((scopeOwnerOrgIDs.value || []).map((item) => String(item).trim()).filter(Boolean))]
+  const customerTypes = [...new Set((scopeCustomerTypes.value || []).map((item) => String(item).trim()).filter(Boolean))]
+  const currencies = [...new Set((scopeCurrencies.value || []).map((item) => String(item).trim().toUpperCase()).filter(Boolean))]
   const min = parseYuanToMinor(scopeAmountMinYuan.value, "最低金额")
   const max = parseYuanToMinor(scopeAmountMaxYuan.value, "最高金额")
   if (min.error || max.error) return { value: null, error: min.error || max.error }
   if (min.value !== null && max.value !== null && min.value > max.value) {
     return { value: null, error: "最低金额不能高于最高金额" }
   }
-  if (!ownerOrgIDs.length && !customerTypes.length && min.value === null && max.value === null) {
+  if (!ownerOrgIDs.length && !customerTypes.length && !currencies.length && min.value === null && max.value === null) {
     return { value: null, error: "" }
   }
   return {
     value: JSON.stringify({
       owner_org_ids: ownerOrgIDs,
       customer_types: customerTypes,
+      currencies,
       amount_min_minor: min.value,
       amount_max_minor: max.value,
     }),
@@ -152,12 +160,26 @@ function buildScopeJSON() {
 function resetScopeFields(rule) {
   let scope = {}
   try { scope = rule?.scope_json ? JSON.parse(rule.scope_json) : {} } catch { scope = {} }
-  scopeOwnerOrgIDs.value = Array.isArray(scope.owner_org_ids) ? scope.owner_org_ids.join(", ") : ""
-  scopeCustomerTypes.value = Array.isArray(scope.customer_types) ? scope.customer_types.join(", ") : ""
+  scopeOwnerOrgIDs.value = Array.isArray(scope.owner_org_ids) ? [...scope.owner_org_ids] : []
+  scopeCustomerTypes.value = Array.isArray(scope.customer_types) ? [...scope.customer_types] : []
+  scopeCurrencies.value = Array.isArray(scope.currencies) ? [...scope.currencies] : []
   scopeAmountMinYuan.value = Number.isSafeInteger(scope.amount_min_minor) ? (scope.amount_min_minor / 100).toFixed(2) : ""
   scopeAmountMaxYuan.value = Number.isSafeInteger(scope.amount_max_minor) ? (scope.amount_max_minor / 100).toFixed(2) : ""
   previewResult.value = null
   previewError.value = ""
+}
+
+
+function executionFor(rule) {
+  return executions.value.find((item) => item.rule_id === rule.id) || null
+}
+
+function executionSummary(rule) {
+  const execution = executionFor(rule)
+  if (!execution) return "未执行"
+  const count = Number(execution.matched_count || 0)
+  if (execution.status === "FAILED") return `执行失败 · 命中 ${count}`
+  return `最近执行成功 · 命中 ${count}`
 }
 
 function ruleScopeSummary(rule) {
@@ -199,11 +221,37 @@ async function previewDraft() {
 }
 
 
+
+async function loadScopeOptions() {
+  scopeOptionsLoading.value = true
+  scopeOptionsError.value = ""
+  try {
+    const result = await getAlertRuleScopeOptions()
+    scopeOptions.value = {
+      owner_org_ids: Array.isArray(result?.owner_org_ids) ? result.owner_org_ids : [],
+      customer_types: Array.isArray(result?.customer_types) ? result.customer_types : [],
+      currencies: Array.isArray(result?.currencies) ? result.currencies : [],
+    }
+  } catch (err) {
+    scopeOptionsError.value = formatDataAnalysisError(err, { fallback: "范围选项读取失败，可直接使用已有值。" })
+  } finally {
+    scopeOptionsLoading.value = false
+  }
+}
+
+function scopeOptionValues(key) {
+  const selected = key === "owner_org_ids"
+    ? scopeOwnerOrgIDs.value
+    : key === "customer_types" ? scopeCustomerTypes.value : scopeCurrencies.value
+  return [...new Set([...(scopeOptions.value[key] || []), ...(selected || [])])]
+}
+
 function editorSnapshot() {
   return JSON.stringify({
     draft: draft.value,
-    ownerOrgIDs: scopeOwnerOrgIDs.value,
-    customerTypes: scopeCustomerTypes.value,
+    ownerOrgIDs: [...scopeOwnerOrgIDs.value],
+    customerTypes: [...scopeCustomerTypes.value],
+    currencies: [...scopeCurrencies.value],
     amountMin: scopeAmountMinYuan.value,
     amountMax: scopeAmountMaxYuan.value,
   })
@@ -216,6 +264,7 @@ function openEditor(rule = null) {
     ? { ...rule, threshold_json: rule.threshold_json || '{"days":30}' }
     : { rule_code: "CONTRACT_EXPIRY", name: nextRuleName(), source_fct: "dim_contract", severity: "MEDIUM", enabled: false, threshold_json: '{"days":30}', scope_json: null, effective_from: null, effective_to: null }
   resetScopeFields(rule)
+  void loadScopeOptions()
   editorInitialSnapshot = editorSnapshot()
 }
 
@@ -328,7 +377,8 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
           <tbody>
             <tr v-for="rule in filteredRules" :key="rule.id">
               <td class="mono"><b>{{ rule.rule_code }}</b></td>
-              <td>{{ rule.name || '—' }}<small class="alert-rule-summary">{{ ruleScopeSummary(rule) }} · {{ ruleEffectiveSummary(rule) }}</small></td>
+              <td>{{ rule.name || '—' }}<small class="alert-rule-summary">{{ ruleScopeSummary(rule) }} · {{ ruleEffectiveSummary(rule) }}</small>
+                <small class="alert-rule-execution" :class="{ failed: executionFor(rule)?.status === 'FAILED' }">{{ executionSummary(rule) }}</small></td>
               <td>{{ rule.source_fct || '—' }}</td>
               <td><span class="da-badge" :class="String(rule.severity).toUpperCase() === 'HIGH' ? 'high' : String(rule.severity).toUpperCase() === 'MEDIUM' ? 'warning' : 'info'">{{ SEVERITY_LABELS[String(rule.severity).toUpperCase()] || rule.severity }}</span></td>
               <td class="mono"><small>{{ rule.threshold_json || '—' }}</small></td>
@@ -352,14 +402,17 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
         <section class="alert-rule-scope">
           <div class="alert-rule-scope-head"><b>适用范围</b><span>留空表示全部普通合同</span></div>
           <div class="alert-rule-form-grid">
-            <label>归属组织 ID<input v-model="scopeOwnerOrgIDs" :disabled="!canWrite" placeholder="多个用逗号分隔" maxlength="2000" /></label>
-            <label>客户类型<input v-model="scopeCustomerTypes" :disabled="!canWrite" placeholder="企业, 政府" maxlength="2000" /></label>
+            <label>归属组织<select v-model="scopeOwnerOrgIDs" :disabled="!canWrite || scopeOptionsLoading" multiple size="4"><option v-for="value in scopeOptionValues('owner_org_ids')" :key="value" :value="value">{{ value }}</option></select></label>
+            <label>客户类型<select v-model="scopeCustomerTypes" :disabled="!canWrite || scopeOptionsLoading" multiple size="4"><option v-for="value in scopeOptionValues('customer_types')" :key="value" :value="value">{{ value }}</option></select></label>
+            <label>币种<select v-model="scopeCurrencies" :disabled="!canWrite || scopeOptionsLoading" multiple size="3"><option v-for="value in scopeOptionValues('currencies')" :key="value" :value="value">{{ value }}</option></select></label>
             <label>最低金额（元）<input v-model="scopeAmountMinYuan" :disabled="!canWrite" type="number" min="0" step="0.01" placeholder="不限" /></label>
             <label>最高金额（元）<input v-model="scopeAmountMaxYuan" :disabled="!canWrite" type="number" min="0" step="0.01" placeholder="不限" /></label>
             <label>生效开始<input v-model="draft.effective_from" :disabled="!canWrite" type="date" /></label>
             <label>生效结束<input v-model="draft.effective_to" :disabled="!canWrite" type="date" /></label>
           </div>
-          <p class="da-modal-help">组织 ID 与客户类型来自数据看板聚合维度；留空表示不限制。</p>
+          <p v-if="scopeOptionsLoading" class="da-modal-help">正在读取组织、客户类型和币种选项…</p>
+          <p v-if="scopeOptionsError" class="alert-rule-preview-error" role="alert">{{ scopeOptionsError }}</p>
+          <p class="da-modal-help">选项来自数据看板聚合维度；按住 Ctrl/Command 可多选，留空表示不限制。</p>
         </section>
         <div class="alert-rule-preview-actions">
           <button type="button" class="da-button" :disabled="!canWrite || previewBusy" @click="previewDraft">{{ previewBusy ? '预览中…' : '预览命中' }}</button>
@@ -402,6 +455,19 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
 <style scoped>
 .alert-rule-editor {
   width: min(760px, 100%);
+}
+
+
+.alert-rule-execution {
+  display: block;
+  margin-top: 2px;
+  color: var(--da-muted);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+}
+
+.alert-rule-execution.failed {
+  color: var(--da-red-text);
 }
 
 .alert-rule-summary {

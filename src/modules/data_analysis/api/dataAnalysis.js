@@ -441,6 +441,22 @@ export function previewAlertRule(payload) {
 }
 
 /**
+ * getAlertRuleScopeOptions 查询规则范围可用的组织、客户类型和币种。
+ * @returns {Promise<{owner_org_ids:string[],customer_types:string[],currencies:string[]}>}
+ */
+export function getAlertRuleScopeOptions() {
+  return request('/alert-rules/scope-options')
+}
+
+/**
+ * getAlertRuleExecutions 查询每条规则最近一次执行状态和命中数。
+ * @returns {Promise<Array<object>>} 执行记录列表。
+ */
+export function getAlertRuleExecutions() {
+  return request('/alert-rules/executions')
+}
+
+/**
  * deleteAlertRule 删除没有历史预警记录的规则。
  * @param {string} id 规则 ID。
  * @returns {Promise<any>} 返回删除结果。
