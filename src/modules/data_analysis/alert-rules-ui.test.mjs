@@ -270,3 +270,10 @@ test('规则范围会序列化为分单位 JSON，并在保存前展示命中预
   assert.equal(calls.put[0][0].effective_from, '2026-12-01')
   assert.equal(calls.put[0][0].effective_to, '2027-01-31')
 })
+
+test('适用范围使用下拉勾选器而非自由文本输入', async () => {
+  assert.match(source, /class="alert-rule-picker"/)
+  assert.match(source, /selectedScopeLabel\(scopeOwnerOrgIDs/)
+  assert.match(source, /type="checkbox"/)
+  assert.doesNotMatch(source, /placeholder="多个用逗号分隔"/)
+})
