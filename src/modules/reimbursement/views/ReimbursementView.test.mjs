@@ -68,7 +68,7 @@ async function mountPage(permissions, request, section = 'dashboard', roles = []
   const router = { push(...args) { routerCalls.push.push(args) }, replace(...args) { routerCalls.replace.push(args) } }
   const { descriptor } = parse(readFileSync(new URL('./ReimbursementView.vue', import.meta.url), 'utf8'))
   const script = compileScript(descriptor, { id: 'expense-view-test' })
-    const confirmCalls = []
+  const confirmCalls = []
   const confirmState = { answer: true }
   const confirmController = { calls: confirmCalls, state: confirmState }
   const useConfirmDialogStub = () => ({
@@ -80,12 +80,8 @@ async function mountPage(permissions, request, section = 'dashboard', roles = []
     ConsoleIcon: { props: ['name'], setup: () => () => Vue.h('svg') },
     computed: Vue.computed, nextTick: Vue.nextTick, onBeforeUnmount: Vue.onBeforeUnmount,
     onMounted: Vue.onMounted, ref: Vue.ref, watch: Vue.watch, useRoute: () => route, useRouter: () => router,
-    onBeforeRouteLeave() {}, PaginationBar: PaginationBarStub, InvoiceCandidateCards, loginUsername,
-    ConfirmDialog: panelStub, useConfirmDialog: useConfirmDialogStub,
-    AppShell: { props: ['userName'], setup: (props, { slots }) => {
-      Object.assign(shellProps, props)
-      return () => Vue.h('main', slots.default?.())
-    } }, LoadingState: panelStub, ErrorState: ErrorStateStub, EmptyState: EmptyStateStub, ExpenseInbox: panelStub, ArchiveBorrowPanel: panelStub, TravelFields: panelStub, BusinessObjectSelect: panelStub, BusinessAttachmentSelect: panelStub, CitySelect: panelStub, ClaimPreviewPanel:panelStub,InvoiceContentFields:panelStub,InvoiceContentMappings:panelStub,InvoiceClassificationEvidence:panelStub,ParseExceptionsPanel:panelStub, PaymentExceptionPanel: panelStub, ClaimEvidenceTravelPanel: panelStub, BusinessOptionPicker: panelStub, ArchivePackagePanel: panelStub, InvoiceControlsPanel: panelStub, ApprovalRoundsPanel: panelStub, ClaimSyncPanel: panelStub, ReimbursementCostNotice: panelStub, RecoveryPanel: panelStub, InvoiceOriginalViewer: panelStub, todayBusinessDate: () => '2026-11-10', formatBusinessDateTime: (value) => value,
+    onBeforeRouteLeave() {}, PaginationBar: PaginationBarStub, InvoiceCandidateCards, loginUsername, ConfirmDialog: panelStub, useConfirmDialog: useConfirmDialogStub,
+    AppShell: { props: ['userName'], setup: (props, { slots }) => { Object.assign(shellProps, props); return () => Vue.h('main', slots.default?.()) } }, LoadingState: panelStub, ErrorState: ErrorStateStub, EmptyState: EmptyStateStub, ExpenseInbox: panelStub, ArchiveBorrowPanel: panelStub, TravelFields: panelStub, BusinessObjectSelect: panelStub, BusinessAttachmentSelect: panelStub, CitySelect: panelStub, ClaimPreviewPanel:panelStub,InvoiceContentFields:panelStub,InvoiceContentMappings:panelStub,InvoiceClassificationEvidence:panelStub,ParseExceptionsPanel:panelStub, PaymentExceptionPanel: panelStub, ClaimEvidenceTravelPanel: panelStub, BusinessOptionPicker: panelStub, ArchivePackagePanel: panelStub, InvoiceControlsPanel: panelStub, ApprovalRoundsPanel: panelStub, ClaimSyncPanel: panelStub, ReimbursementCostNotice: panelStub, RecoveryPanel: panelStub, InvoiceOriginalViewer: panelStub, todayBusinessDate: () => '2026-11-10', formatBusinessDateTime: (value) => value,
     createCommandRunner, createRequestID, timeoutSignal, formatMinor, toMinor, validateItems, createIdempotencyKey: (() => { let n = 0; return () => `expense-key-${++n}` })(), approvalNodeLabel, approvalNodesLabel, assignmentPurpose, expenseScopeDescription, hasTenantAllCapability, reimbursementRoleLabel, canSelectProjectReference, editableClaimItem, evidenceIDs, policyFields, policyFormFrom, policyPayload, statusLabel, claimStatusTone, failureMessage, failureText, parseIssueLabel, formatUserError, pollTask, taskSettled, recallTask, rememberTask, savedAtLabel,
 
     ensureReimbursementSession: async () => ({ tenant_id: 'test', subject_id: 'actor', permissions, roles, ...profile }),

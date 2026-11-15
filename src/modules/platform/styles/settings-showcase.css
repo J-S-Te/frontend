@@ -106,6 +106,25 @@
   line-height: 1.6;
 }
 
+/* 页头从设置栏移到内容区后，覆盖原导航卡的内边距，保持与审计页一致的页头节奏。 */
+.settings-showcase-head.settings-page-head {
+  margin: 0 0 18px;
+  padding: 0 2px 16px;
+}
+
+/* 旧设置栏的窄屏回退规则仍会命中同名页头：用页面页头选择器恢复其在内容区的真实布局。 */
+.settings-showcase-head.settings-page-head {
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.settings-showcase-head.settings-page-head > div:first-child {
+  display: block;
+}
+
+.settings-showcase-head.settings-page-head p {
+  display: block;
+}
+
 /* 搜索：放在导航卡内部，与分区列表同宽，不单独占据内容区首屏。 */
 .settings-tab-toolbar {
   display: flex;

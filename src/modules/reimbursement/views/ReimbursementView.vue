@@ -2887,6 +2887,7 @@ onBeforeUnmount(() => {
         </div>
         <p v-else-if="!projectLoading">暂无已查询的可报销项目。</p>
       </section>
+
       <div v-if="fieldErrors.length" role="alert">
         <button type="button" v-for="field in fieldErrors" :key="field.field" class="expense-button" @click="focusValidation(field.field)">
           {{ field.message }}
@@ -3116,13 +3117,64 @@ onBeforeUnmount(() => {
         <p>
           以下结果仅辅助填写。金额缺失、票据分组不确定或字段冲突时，请逐张对照原件；创建后仍须独立人工复核，不能视为已验真。
         </p>
-        <InvoiceCandidateCards
-          :candidates="parsedCandidates"
-          :can-review="can('expense.invoice.upload')"
-          :disabled="saving || !!pending"
-          :group-labels="groupLabels"
-          @review="prepareManualInvoice"
-        />
+        <div class="expense-table">
+          <table class="expense-table-body">
+            <thead>
+              <tr>
+                <th scope="col">
+                  候选号码
+                </th>
+                <th scope="col">
+                  日期
+                </th>
+                <th scope="col">
+                  票面总额
+                </th>
+                <th scope="col">
+                  分组 / 缺失原因
+                </th>
+                <th scope="col">
+                  操作
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(candidate, index) in parsedCandidates" :key="index">
+                <td>
+                  {{ candidate.invoice_number || '待人工识别' }}
+                </td>
+                <td>
+                  {{ candidate.invoice_date || '待核对' }}
+                </td>
+                <td>
+                  {{ candidate.gross_minor && /^[1-9]\d*$/.test(candidate.gross_minor) ? `${formatMinor(candidate.gross_minor)} 元` : '缺失，需人工填写' }}
+                </td>
+                <td>
+                  {{ groupLabels[candidate.group_kind] || '分组未确认，需人工判断' }}
+                  <ul>
+                    <li v-for="issue in candidate.issues || []" :key="issue">
+                      {{ issue }}
+                    </li>
+                  </ul>
+                </td>
+                <td>
+                  <button type="button"
+                    class="expense-button"
+                    :disabled="saving || !!pending"
+                    @click="prepareManualInvoice(candidate)"
+                  >
+                    辅助填写人工复核
+                  </button>
+                </td>
+              </tr>
+              <tr v-if="!parsedCandidates.length">
+                <td colspan="5">
+                  暂无可用识别候选，可从当前已就绪原件人工录入；不能把缺金额当成零元票据。
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
         <button type="button"
           v-if="can('expense.invoice.upload')"
           class="expense-button"
