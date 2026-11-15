@@ -54,7 +54,9 @@ import { listOrgUnits, listPositions } from '@/modules/platform/iam/api/iam'
 import { loadAllCatalogPages } from '@/modules/platform/iam/utils/paginatedCatalog'
 import {
   listAuditEvents,
+  listSecurityEvents,
   getAuditIngestionHealth,
+  getAuditCoverage,
   createAuditExportJob,
   createAuditExportDownloadTicket,
   getAuditExportJob,
@@ -127,14 +129,75 @@ const auditApplication = ref('')
 const auditEnvironment = ref('')
 const auditResult = ref('')
 const auditTimeRange = ref('7d')
+const auditMode = ref('tenant')
 const auditPage = ref(1)
 const auditPageSize = ref(20)
+const securityApplication = ref('')
+const securityResult = ref('')
+const securityTimeRange = ref('7d')
+const securityPage = ref(1)
+const securityPageSize = ref(20)
+const securityEvents = ref([])
+const securityTotal = ref(0)
+const securityLoading = ref(false)
+const securityError = ref('')
+const securityTotalPages = computed(() => Math.max(1, Math.ceil(securityTotal.value / securityPageSize.value)))
+const securityListState = computed(() => securityLoading.value || Boolean(securityError.value) || !securityEvents.value.length)
+
+async function loadSecurityEvents() {
+  if (currentView.value !== 'audit' || !canViewAudit.value) return
+  securityLoading.value = true
+  securityError.value = ''
+  try {
+    const bounds = rangeBounds(securityTimeRange.value)
+    const data = await listSecurityEvents({
+      page: securityPage.value, pageSize: securityPageSize.value,
+      applicationCode: securityApplication.value, result: securityResult.value,
+      occurredFrom: bounds.from, occurredTo: bounds.to,
+    })
+    securityEvents.value = data.items
+    securityTotal.value = data.total
+    if (securityPage.value > securityTotalPages.value) {
+      securityPage.value = securityTotalPages.value
+      await loadSecurityEvents()
+    }
+  } catch (error) {
+    securityError.value = formatUserError(error, { fallback: '读取全局安全事件失败。' })
+    securityEvents.value = []
+    securityTotal.value = 0
+  } finally { securityLoading.value = false }
+}
+
+function switchAuditMode(mode) {
+  auditMode.value = mode
+  if (mode === 'security' && !securityEvents.value.length) loadSecurityEvents()
+}
+
+function applySecurityFilters() {
+  securityPage.value = 1
+  loadSecurityEvents()
+}
+
+function resetSecurityFilters() {
+  securityApplication.value = ''
+  securityResult.value = ''
+  securityTimeRange.value = '7d'
+  securityPage.value = 1
+  loadSecurityEvents()
+}
+
+function changeSecurityPage(nextPage) {
+  securityPage.value = Math.min(Math.max(nextPage, 1), securityTotalPages.value)
+  loadSecurityEvents()
+}
 const auditDetail = ref(null)
 const auditRecords = ref([])
 const auditTotal = ref(0)
 // 批次 3：平台侧摄取健康度（口径：平台已接收事件，不含子系统本地 Outbox 积压）。
 const auditHealth = ref(null)
 const auditHealthError = ref('')
+const auditCoverage = ref(null)
+const auditCoverageError = ref('')
 // 高级筛选（操作类型/结果/风险/精确 ID）默认收起，主筛选保持一眼可读。
 const auditAdvancedOpen = ref(false)
 const auditLoading = ref(false)
@@ -743,6 +806,12 @@ async function loadAuditHealth() {
   }
 }
 
+async function loadAuditCoverage() {
+  auditCoverageError.value = ''
+  try { auditCoverage.value = await getAuditCoverage() }
+  catch (error) { auditCoverage.value = null; auditCoverageError.value = formatUserError(error) }
+}
+
 async function loadAuditEvents() {
   if (currentView.value !== 'audit' || !canViewAudit.value) return
   const requestSequence = ++auditRequestSequence
@@ -957,6 +1026,7 @@ function loadAuditViewOnce() {
   if (canReadApplications.value && !applications.value.length) loadApplications()
   loadAuditEvents()
   loadAuditHealth()
+  loadAuditCoverage()
 }
 
 watch(currentView, (view) => {
@@ -1155,6 +1225,30 @@ onBeforeUnmount(() => {
       </section>
       <div v-else-if="auditHealthError" class="audit-readonly-note"><ConsoleIcon name="info" /><span>审计摄取健康度暂不可用：{{ auditHealthError }}</span></div>
 
+      <section v-if="auditCoverage" class="audit-coverage-card" aria-label="按应用审计覆盖">
+        <header class="audit-health-head"><div><strong>按应用覆盖</strong><small>平台已接收事件；子系统本地 outbox 需从各自 readiness/metrics 汇总。</small></div></header>
+        <div class="console-table-scroll">
+          <table class="console-data-table">
+            <thead><tr><th scope="col">应用</th><th scope="col">租户审计最后事件</th><th scope="col">租户审计 24h</th><th scope="col">安全事件最后事件</th><th scope="col">安全事件 24h</th><th scope="col">Outbox 积压</th></tr></thead>
+            <tbody><tr v-for="row in auditCoverage.items" :key="row.application_code">
+              <td><strong>{{ row.application_code }}</strong></td>
+              <td class="console-mono">{{ row.last_event_at ? formatAuditTime(row.last_event_at) : '—' }}</td>
+              <td>{{ row.events_24h ?? 0 }}</td>
+              <td class="console-mono">{{ row.last_security_event_at ? formatAuditTime(row.last_security_event_at) : '—' }}</td>
+              <td>{{ row.security_events_24h ?? 0 }}</td>
+              <td>{{ row.outbox_pending === null ? '未接入' : row.outbox_pending }}</td>
+            </tr></tbody>
+          </table>
+        </div>
+        <p v-if="auditCoverageError" class="audit-readonly-note">{{ auditCoverageError }}</p>
+      </section>
+
+      <nav class="audit-mode-switch" role="tablist" aria-label="审计数据类型">
+        <button type="button" role="tab" :aria-selected="auditMode === 'tenant' ? 'true' : 'false'" :class="{ active: auditMode === 'tenant' }" @click="switchAuditMode('tenant')">租户审计</button>
+        <button type="button" role="tab" :aria-selected="auditMode === 'security' ? 'true' : 'false'" :class="{ active: auditMode === 'security' }" @click="switchAuditMode('security')">全局安全事件</button>
+      </nav>
+
+      <template v-if="auditMode === 'tenant'">
       <!-- 筛选：主筛选常驻，精确检索收进「高级筛选」，避免 11 个控件同时铺开。 -->
       <section class="audit-filter-card" aria-label="审计筛选">
         <div class="audit-filter-primary">
@@ -1238,6 +1332,41 @@ onBeforeUnmount(() => {
         </div>
         <footer class="console-table-footer audit-table-footer"><span>审计事件为只读记录</span><PaginationBar label="审计事件分页" :page="auditPage" :total="auditTotal" :page-size-options="[20, 50, 100]" :page-size="auditPageSize" :loading="auditLoading" @change="changeAuditPage" @change-page-size="changeAuditPageSize" /></footer>
       </div>
+      </template>
+
+      <section v-else class="audit-security-panel" aria-label="全局安全事件">
+        <div class="audit-toolbar">
+          <p class="audit-toolbar-note"><ConsoleIcon name="shield" /><span>全局安全事件记录认证失败、匿名访问等无法归属可信租户的事实；与租户审计分开存储，不进入租户哈希链。</span></p>
+        </div>
+        <section class="audit-filter-card" aria-label="安全事件筛选">
+          <div class="audit-filter-primary">
+            <label class="console-select-field"><select v-model="securityApplication" aria-label="应用"><option value="">全部应用</option><option v-for="app in applications" :key="app.application_id" :value="app.code">{{ app.name || app.code }}</option></select></label>
+            <label class="console-select-field"><select v-model="securityResult" aria-label="结果"><option value="">全部结果</option><option value="DENIED">拒绝</option><option value="FAILURE">失败</option><option value="BLOCKED">阻断</option><option value="SUCCESS">成功</option></select></label>
+            <label class="console-select-field"><select v-model="securityTimeRange" aria-label="时间范围"><option value="24h">最近 24 小时</option><option value="7d">最近 7 天</option><option value="30d">最近 30 天</option></select></label>
+            <div class="audit-filter-actions"><button class="console-button primary" type="button" :disabled="securityLoading" @click="applySecurityFilters">查询</button><button class="console-button ghost" type="button" :disabled="securityLoading" @click="resetSecurityFilters"><ConsoleIcon name="reset" />重置</button></div>
+          </div>
+        </section>
+        <ListState v-if="securityListState" :loading="securityLoading" :error="securityError" error-title="全局安全事件加载失败" empty-title="暂无全局安全事件。" @retry="loadSecurityEvents" />
+        <div v-else class="console-table-card audit-table-card">
+          <div class="console-table-scroll">
+            <table class="console-data-table audit-data-table">
+              <thead><tr><th scope="col">发生时间</th><th scope="col">应用</th><th scope="col">动作</th><th scope="col">方法 / 路径</th><th scope="col">客户端 IP</th><th scope="col">结果</th><th scope="col">风险</th></tr></thead>
+              <tbody>
+                <tr v-for="record in securityEvents" :key="record.id">
+                  <td class="console-mono" data-label="发生时间">{{ formatAuditTime(record.occurred_at) }}</td>
+                  <td data-label="应用"><strong>{{ record.application_code || '—' }}</strong><span class="console-entity-meta">{{ record.environment_code || '—' }}</span></td>
+                  <td data-label="动作"><strong>{{ record.action || '—' }}</strong><span v-if="record.request_id" class="console-entity-meta console-mono">{{ record.request_id }}</span></td>
+                  <td data-label="方法 / 路径"><span class="audit-method">{{ record.method || '—' }}</span><span class="console-entity-meta console-mono">{{ record.path || '—' }}</span></td>
+                  <td class="console-mono" data-label="客户端 IP">{{ record.client_ip || '—' }}</td>
+                  <td data-label="结果"><span class="console-badge">{{ record.result || '—' }}</span><span v-if="record.reason_code" class="console-entity-meta">{{ record.reason_code }}</span></td>
+                  <td data-label="风险"><span class="console-badge">{{ record.risk_level || '—' }}</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <footer class="console-table-footer audit-table-footer"><span>全局安全事件为只读记录</span><PaginationBar label="安全事件分页" :page="securityPage" :total="securityTotal" :page-size="securityPageSize" :loading="securityLoading" @change="changeSecurityPage" /></footer>
+        </div>
+      </section>
 
     </section>
 

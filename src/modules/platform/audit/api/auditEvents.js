@@ -359,3 +359,26 @@ function riskLabel(value) {
       return value || '—'
   }
 }
+
+/**
+ * 拉取全局安全事件（认证失败等匿名事件，不属于租户审计）。
+ * 后端字段为 snake_case，页面直接使用，不映射成租户审计的短字段。
+ */
+export async function listSecurityEvents({ page = 1, pageSize = 20, applicationCode = '', result = '', occurredFrom = '', occurredTo = '', signal } = {}) {
+  const query = new URLSearchParams({ page: String(page), page_size: String(pageSize) })
+  if (applicationCode) query.set('application_code', applicationCode)
+  if (result) query.set('result', result)
+  if (occurredFrom) query.set('occurred_from', occurredFrom)
+  if (occurredTo) query.set('occurred_to', occurredTo)
+  const data = await request(`/security-events?${query.toString()}`, { signal })
+  return {
+    items: Array.isArray(data?.items) ? data.items : [],
+    total: Number(data?.total || 0),
+    page: Number(data?.page || page),
+    pageSize: Number(data?.page_size || pageSize),
+  }
+}
+
+export async function getAuditCoverage({ signal } = {}) {
+  return request('/audit/coverage', { signal })
+}
