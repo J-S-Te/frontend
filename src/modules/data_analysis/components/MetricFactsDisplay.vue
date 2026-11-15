@@ -64,6 +64,7 @@ const resources = computed(() => [{ label: '人员', value: props.summary?.perso
           <div v-for="resource in resources" :key="resource.label" class="da-native-metric">
             <span>{{ resource.label }}实际利用率</span><strong>{{ formatFactRate(resource.value?.rate) }}</strong>
             <p class="da-native-note">已确认 {{ resource.value?.actual_minutes }} 分钟 / 明确容量 {{ resource.value?.capacity_minutes }} 分钟</p>
+            <p v-if="resource.value?.auto_confirmed_count" class="da-native-note">其中强证据自动确认 {{ resource.value?.auto_confirmed_minutes }} 分钟 / {{ resource.value?.auto_confirmed_count }} 条</p>
             <p class="da-native-note">待确认 {{ resource.value?.pending }}；容量或采集未知 {{ resource.value?.unknown }}</p>
           </div>
         </div>

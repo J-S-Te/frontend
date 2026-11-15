@@ -19,6 +19,10 @@ try {
       if (request.method() === 'POST') { commands.push({ path, body: request.postDataJSON() }); data = { id: 'saved' } }
       else if (path.endsWith('/personnel')) data = { items: [{ user_id: 'witness', display_name: '目录测试人员', organizations: [{ organization_id: 'org-1', organization_name: '测试业务组织' }] }], total: 1 }
       else if (path.endsWith('/capacities')) data = []
+      else if (path.endsWith('/metric-facts/calendar')) data = []
+      else if (path.endsWith('/metric-facts/calendar-exceptions')) data = []
+      else if (path.endsWith('/metric-facts/auto-confirm')) data = { enabled: false, version: 0 }
+      else if (path.endsWith('/metric-usage-candidates')) data = []
       else if (path.endsWith('/usages')) data = role === 'quality' ? [{ id: 'U-pending', resource_id: 'person', resource_type: 'PERSON', service_item_id: 'SI-running', business_date: '2026-11-01', start: '2026-11-01T01:00:00Z', end: '2026-11-01T02:00:00Z', minutes: 60, status: 'PENDING', version: 2, created_by: 'manager', submitted_by: 'manager', note: '合成实际记录' }] : []
       else if (path.endsWith('/report-reviews/current')) data = [mainPending]
       else if (path.endsWith('/report-reviews')) data = url.searchParams.get('page') === '2' ? [mainPending] : history
@@ -35,7 +39,7 @@ try {
       await resources.getByLabel('目录依据人员').selectOption('witness')
       await resources.getByLabel('容量业务归属组织').selectOption('org-1')
       await resources.getByRole('button', { name: '发布明确容量', exact: true }).click()
-      await page.waitForFunction(() => document.querySelector('.pm-resource-facts [role="status"]')?.textContent.includes('已保存'))
+      await page.waitForFunction(() => [...document.querySelectorAll('.pm-resource-facts [role="status"]')].some((node) => node.textContent.includes('已保存')))
       const capacity = commands.find((command) => command.path.endsWith('/capacities'))
       assert.equal(capacity.body.resource_type, role === 'device' ? 'EQUIPMENT' : 'PERSON')
       assert.equal(capacity.body.organization_id, 'org-1')
