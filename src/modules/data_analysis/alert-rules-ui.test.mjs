@@ -33,6 +33,8 @@ test('alert.manage grants management without an admin role in permissions', asyn
   const { ui } = harness()
   await ui.load()
   assert.equal(ui.canWrite.value, true)
+  assert.equal(ui.canCreate.value, true)
+  assert.match(source, /:disabled="!canCreate \|\| !!editing"/)
   ui.openEditor(ui.rules.value[0])
   assert.equal(ui.editing.value, 'edit')
   assert.doesNotMatch(source, /isAdmin|permissions\.includes\("admin"\)/)
@@ -141,21 +143,37 @@ test('failed toggle preserves saved state and version conflicts require refresh'
   assert.equal(calls.put.length, 1)
 })
 
-test('empty list can create only the supported rule, disabled by default', async () => {
+test('empty list can create multiple named configs, disabled by default', async () => {
   const { ui, calls } = harness({ get: async () => [] })
   await ui.load()
   ui.openEditor()
   assert.equal(ui.draft.value.rule_code, 'CONTRACT_EXPIRY')
   assert.equal(ui.draft.value.enabled, false)
+  assert.equal(ui.draft.value.name, '合同到期提醒')
   ui.draft.value.name = '  合同到期提醒  '
   await ui.saveEditor()
   assert.equal(calls.put[0][0].enabled, false)
   assert.equal(calls.put[0][0].name, '合同到期提醒')
   assert.equal(ui.editing.value, null)
-  assert.equal(ui.canCreate.value, false)
+  assert.equal(ui.canCreate.value, true)
+  ui.rules.value = [{ ...calls.put[0][0], id: 'rule-1', version: 1 }]
   ui.openEditor()
-  assert.equal(ui.editing.value, null)
-  assert.match(source, /当前支持合同到期提醒（CONTRACT_EXPIRY）/)
+  assert.equal(ui.editing.value, 'create')
+  assert.equal(ui.draft.value.name, '合同到期提醒（2）')
+  await ui.saveEditor()
+  assert.equal(calls.put[1].length, 2)
+  assert.match(source, /同一规则编码可配置多条命名规则/)
+})
+
+test('enabling one config automatically disables other configs with the same code', async () => {
+  const first = { ...existing(), id: 'rule-1', version: 1, enabled: true, name: '合同到期提醒' }
+  const second = { ...existing(), id: 'rule-2', version: 1, enabled: false, name: '合同到期提醒（2）' }
+  const { ui, calls } = harness({ get: async () => [first, second] })
+  await ui.load()
+  await ui.toggleRule(ui.rules.value[1])
+  assert.equal(calls.put[0].find((rule) => rule.id === 'rule-1').enabled, false)
+  assert.equal(calls.put[0].find((rule) => rule.id === 'rule-2').enabled, true)
+  assert.match(ui.toast.value, /同编码其他配置已自动停用/)
 })
 
 test('editor validates thresholds and preserves identity and persisted state on failure', async () => {
