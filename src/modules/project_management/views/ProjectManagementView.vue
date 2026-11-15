@@ -1264,6 +1264,9 @@ const selectedServiceItems = computed(() => {
   return candidates.filter((item) => selectedServiceItemIDs.value.includes(item.id))
 })
 const selectedServiceItem = computed(() => selectedServiceItems.value[0] || null)
+const selectedServiceProject = computed(() => selectedServiceItem.value ? projectByID.value.get(selectedServiceItem.value.project_id) || null : null)
+const selectedServiceOwner = computed(() => selectedServiceItem.value ? personLabel(selectedServiceItem.value.project_manager_id || selectedServiceItem.value.team_lead_id, '待指派') : '—')
+const selectedServiceDue = computed(() => formatBusinessDate(selectedServiceItem.value?.planned_end) || '待排期')
 // 现场缺项判定（BIZ-PROJECT-06）：口径来自服务端 GET /service-items/:id/field-evidence，
 // 不再从 deliveryEvents（租户最近 500 条窗口）里挑事件推导。判定不可用即"未知"，
 // 未知不等于齐全——完成动作必须被拦下。
@@ -4216,8 +4219,31 @@ onBeforeUnmount(() => {
           <section class="pm-operational-stats"><article><span>{{ activeSection === 'allocation' ? '当前阶段服务项' : '待处理' }}</span><strong>{{ operationRows.length }}</strong><small>{{ activeSection === 'allocation' ? '含已分配、待补齐执行团队的服务项' : '来自当前工作区' }}</small></article><article><span>服务项总数</span><strong>{{ serviceItems.length }}</strong><small>以最新流程状态为准</small></article><article><span>已完成项目</span><strong>{{ completedProjectCount }}</strong><small>当前租户累计</small></article></section>
           <section class="pm-filters"><label><ConsoleIcon name="search" /><input v-model="keyword" placeholder="搜索编号、项目或负责人"  maxlength="100"/></label><span>{{ operationRows.length }} 条结果</span></section>
           <section v-if="['allocation', 'inbox', 'planning', 'preparation', 'assignments', 'methods', 'exceptions', 'reports'].includes(activeSection)" class="pm-panel pm-operation-panel">
-            <header><div><p class="pm-panel-kicker">现场操作</p><h2>服务项操作台</h2></div><span v-if="selectedServiceItem" class="pm-op-current">当前：{{ selectedServiceItem.id }} · <span class="pm-badge" :class="statusTone(selectedServiceItem.status)">{{ selectedServiceItem.status }}</span></span></header>
-            <ServiceItemPicker v-if="activeSection === 'allocation'" :items="allocationItems" :selected-ids="selectedServiceItemIDs" multiple empty-text="暂无可分配服务项" hint="仅显示已完成拆解确认、当前处于待分配的项目；可多选批量分配。" @toggle="toggleServiceItem" /><ServiceItemPicker v-else :items="activeNodeItems" :selected-ids="selectedServiceItem ? [selectedServiceItem.id] : []" empty-text="当前节点暂无可操作服务项" @select="selectServiceItem" />
+            <header><div><p class="pm-panel-kicker">现场操作</p><h2>服务项操作台</h2></div><span class="pm-operation-panel-hint">选择服务项后在右侧处理当前阶段</span></header>
+            <div class="pm-operation-workspace">
+              <aside class="pm-operation-queue" aria-label="服务项队列">
+                <div class="pm-operation-queue-head"><b>服务项队列</b><span>{{ activeSection === 'allocation' ? allocationItems.length : activeNodeItems.length }} 项</span></div>
+                <ServiceItemPicker v-if="activeSection === 'allocation'" :items="allocationItems" :selected-ids="selectedServiceItemIDs" multiple empty-text="暂无可分配服务项" hint="仅显示已完成拆解确认、当前处于待分配的项目；可多选批量分配。" @toggle="toggleServiceItem" />
+                <ServiceItemPicker v-else :items="activeNodeItems" :selected-ids="selectedServiceItem ? [selectedServiceItem.id] : []" empty-text="当前节点暂无可操作服务项" @select="selectServiceItem" />
+              </aside>
+              <div class="pm-operation-detail">
+                <div v-if="selectedServiceItem && activeSection !== 'allocation'" class="pm-operation-summary">
+                  <div class="pm-operation-summary-main">
+                    <span class="pm-panel-kicker">当前服务项</span>
+                    <b class="mono">{{ selectedServiceItem.id }}</b>
+                    <span>{{ selectedServiceProject?.name || selectedServiceItem.project_id }} · {{ selectedServiceItem.site || '未设置场所' }}</span>
+                  </div>
+                  <dl class="pm-operation-summary-meta">
+                    <div><dt>客户</dt><dd>{{ selectedServiceProject?.customer || '—' }}</dd></div>
+                    <div><dt>负责人</dt><dd>{{ selectedServiceOwner }}</dd></div>
+                    <div><dt>计划完成</dt><dd>{{ selectedServiceDue }}</dd></div>
+                    <div><dt>状态</dt><dd><span class="pm-badge" :class="statusTone(selectedServiceItem.status)">{{ selectedServiceItem.status }}</span></dd></div>
+                  </dl>
+                </div>
+                <div v-else-if="activeSection === 'allocation'" class="pm-operation-summary pm-operation-summary--batch">
+                  <div class="pm-operation-summary-main"><span class="pm-panel-kicker">批量分配</span><b>已选 {{ selectedServiceItems.length }} 个服务项</b><span>从左侧勾选服务项后，在下方统一分配团队与执行人员。</span></div>
+                </div>
+                <div v-else class="pm-operation-empty">请从左侧选择一个服务项后继续。</div>
             <PenetrationWorkPackageCard v-if="activeSection !== 'allocation' && selectedServiceItem && isEmbeddedPenetrationItem(selectedServiceItem)" :item="selectedServiceItem" :session="session" :engineer-options="penetrationEngineerOptions" :auto-ensure="activeSection === 'planning'" @updated="updatePenetrationPackage" @notify="notifyFromPenetration" />
             <div v-if="activeSection === 'allocation' && selectedServiceItems.length" class="pm-panel-actions">
               <button v-if="canManageDecomposition" type="button" class="pm-button" :disabled="saving" @click="returnSelectedToDecomposition">退回拆解确认</button>
@@ -4346,6 +4372,8 @@ onBeforeUnmount(() => {
                 </div>
               </template>
             </div><div v-else class="pm-empty-mini">请先选择服务项</div>
+              </div>
+            </div>
           </section>
           <section v-if="activeSection === 'methods'" class="pm-table-panel">
             <header><div><p class="pm-panel-kicker">复核历史</p><h2>复核历史</h2></div><span>{{ methodHistory.length }} 条复核记录</span></header>

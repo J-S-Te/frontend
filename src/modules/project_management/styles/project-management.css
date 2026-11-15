@@ -2566,3 +2566,70 @@
   .pm-report-workspace > .pm-report-side-empty,
   .pm-report-workspace > .pm-form-hint { grid-column: 1; }
 }
+
+
+/* 18.16 服务项操作台：左侧队列 + 右侧详情；摘要、阶段表单与危险操作分层。 */
+.pm-operation-panel-hint { color: var(--pm-muted); font-size: var(--pm-fs-hint); }
+.pm-operation-workspace {
+  display: grid;
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+  gap: var(--pm-sp-4);
+  align-items: start;
+  min-width: 0;
+}
+.pm-operation-queue {
+  position: sticky;
+  top: var(--pm-sp-4);
+  min-width: 0;
+  padding: var(--pm-sp-3);
+  border: 1px solid var(--pm-line);
+  border-radius: var(--pm-r-md);
+  background: var(--pm-sunken);
+}
+.pm-operation-queue-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--pm-sp-2);
+  margin-bottom: var(--pm-sp-2);
+}
+.pm-operation-queue-head b { color: var(--pm-ink); font-size: var(--pm-fs-label); }
+.pm-operation-queue-head span { color: var(--pm-muted); font-size: var(--pm-fs-hint); }
+.pm-operation-queue .pm-picker-list { max-height: 560px; overflow: auto; }
+.pm-operation-detail { display: grid; gap: var(--pm-sp-4); min-width: 0; }
+.pm-operation-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--pm-sp-4);
+  padding: var(--pm-sp-4);
+  border: 1px solid var(--pm-line);
+  border-radius: var(--pm-r-md);
+  background: var(--pm-card);
+}
+.pm-operation-summary-main { display: grid; gap: 4px; min-width: 0; }
+.pm-operation-summary-main b { color: var(--pm-ink); font-size: var(--pm-fs-card); }
+.pm-operation-summary-main > span:last-child { color: var(--pm-muted); font-size: var(--pm-fs-hint); }
+.pm-operation-summary-meta { display: grid; grid-template-columns: repeat(4, minmax(96px, 1fr)); gap: var(--pm-sp-3) var(--pm-sp-4); margin: 0; min-width: min(100%, 520px); }
+.pm-operation-summary-meta div { display: grid; gap: 3px; }
+.pm-operation-summary-meta dt { color: var(--pm-muted); font-size: var(--pm-fs-hint); }
+.pm-operation-summary-meta dd { margin: 0; color: var(--pm-body); font-size: var(--pm-fs-sm); font-weight: var(--pm-fw-semibold); overflow-wrap: anywhere; }
+.pm-operation-summary--batch { justify-content: flex-start; }
+.pm-operation-empty { padding: var(--pm-sp-6); border: 1px dashed var(--pm-line-strong); border-radius: var(--pm-r-md); color: var(--pm-muted); text-align: center; }
+.pm-operation-form label:has(textarea),
+.pm-operation-form .pm-plan-resources,
+.pm-operation-form .pm-compliant-fieldset,
+.pm-operation-form .pm-travel-arrangement,
+.pm-operation-form .pm-stepper-panel,
+.pm-operation-form .pm-blocker,
+.pm-operation-form .pm-span-full { grid-column: 1 / -1; }
+@media (max-width: 1100px) {
+  .pm-operation-workspace { grid-template-columns: minmax(0, 1fr); }
+  .pm-operation-queue { position: static; }
+  .pm-operation-queue .pm-picker-list { max-height: 320px; }
+}
+@media (max-width: 720px) {
+  .pm-operation-summary { flex-direction: column; }
+  .pm-operation-summary-meta { grid-template-columns: repeat(2, minmax(0, 1fr)); min-width: 0; width: 100%; }
+}
