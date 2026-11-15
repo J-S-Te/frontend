@@ -239,6 +239,14 @@ async function loadScopeOptions() {
   }
 }
 
+
+function selectedScopeLabel(values, placeholder) {
+  const selected = Array.isArray(values) ? values.filter(Boolean) : []
+  if (!selected.length) return placeholder
+  if (selected.length <= 2) return selected.join("、")
+  return `已选 ${selected.length} 项`
+}
+
 function scopeOptionValues(key) {
   const selected = key === "owner_org_ids"
     ? scopeOwnerOrgIDs.value
@@ -402,9 +410,36 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
         <section class="alert-rule-scope">
           <div class="alert-rule-scope-head"><b>适用范围</b><span>留空表示全部普通合同</span></div>
           <div class="alert-rule-form-grid">
-            <label>归属组织<select v-model="scopeOwnerOrgIDs" :disabled="!canWrite || scopeOptionsLoading" multiple size="4"><option v-for="value in scopeOptionValues('owner_org_ids')" :key="value" :value="value">{{ value }}</option></select></label>
-            <label>客户类型<select v-model="scopeCustomerTypes" :disabled="!canWrite || scopeOptionsLoading" multiple size="4"><option v-for="value in scopeOptionValues('customer_types')" :key="value" :value="value">{{ value }}</option></select></label>
-            <label>币种<select v-model="scopeCurrencies" :disabled="!canWrite || scopeOptionsLoading" multiple size="3"><option v-for="value in scopeOptionValues('currencies')" :key="value" :value="value">{{ value }}</option></select></label>
+            <div class="alert-rule-field">
+              <span class="alert-rule-field-label">归属组织</span>
+              <details class="alert-rule-picker">
+                <summary>{{ selectedScopeLabel(scopeOwnerOrgIDs, '全部组织') }}</summary>
+                <div class="alert-rule-picker-menu">
+                  <label v-for="value in scopeOptionValues('owner_org_ids')" :key="value"><input v-model="scopeOwnerOrgIDs" type="checkbox" :value="value" :disabled="!canWrite" /><span>{{ value }}</span></label>
+                  <p v-if="!scopeOptionValues('owner_org_ids').length" class="da-modal-help">暂无可选组织</p>
+                </div>
+              </details>
+            </div>
+            <div class="alert-rule-field">
+              <span class="alert-rule-field-label">客户类型</span>
+              <details class="alert-rule-picker">
+                <summary>{{ selectedScopeLabel(scopeCustomerTypes, '全部客户类型') }}</summary>
+                <div class="alert-rule-picker-menu">
+                  <label v-for="value in scopeOptionValues('customer_types')" :key="value"><input v-model="scopeCustomerTypes" type="checkbox" :value="value" :disabled="!canWrite" /><span>{{ value }}</span></label>
+                  <p v-if="!scopeOptionValues('customer_types').length" class="da-modal-help">暂无可选客户类型</p>
+                </div>
+              </details>
+            </div>
+            <div class="alert-rule-field">
+              <span class="alert-rule-field-label">币种</span>
+              <details class="alert-rule-picker">
+                <summary>{{ selectedScopeLabel(scopeCurrencies, '全部币种') }}</summary>
+                <div class="alert-rule-picker-menu">
+                  <label v-for="value in scopeOptionValues('currencies')" :key="value"><input v-model="scopeCurrencies" type="checkbox" :value="value" :disabled="!canWrite" /><span>{{ value }}</span></label>
+                  <p v-if="!scopeOptionValues('currencies').length" class="da-modal-help">暂无可选币种</p>
+                </div>
+              </details>
+            </div>
             <label>最低金额（元）<input v-model="scopeAmountMinYuan" :disabled="!canWrite" type="number" min="0" step="0.01" placeholder="不限" /></label>
             <label>最高金额（元）<input v-model="scopeAmountMaxYuan" :disabled="!canWrite" type="number" min="0" step="0.01" placeholder="不限" /></label>
             <label>生效开始<input v-model="draft.effective_from" :disabled="!canWrite" type="date" /></label>
@@ -412,7 +447,7 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
           </div>
           <p v-if="scopeOptionsLoading" class="da-modal-help">正在读取组织、客户类型和币种选项…</p>
           <p v-if="scopeOptionsError" class="alert-rule-preview-error" role="alert">{{ scopeOptionsError }}</p>
-          <p class="da-modal-help">选项来自数据看板聚合维度；按住 Ctrl/Command 可多选，留空表示不限制。</p>
+          <p class="da-modal-help">选项来自数据看板聚合维度；点击展开勾选，留空表示不限制。</p>
         </section>
         <div class="alert-rule-preview-actions">
           <button type="button" class="da-button" :disabled="!canWrite || previewBusy" @click="previewDraft">{{ previewBusy ? '预览中…' : '预览命中' }}</button>
@@ -503,6 +538,95 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
 .alert-rule-scope-head span {
   color: var(--da-muted);
   font-size: var(--fs-xs);
+}
+
+
+.alert-rule-field {
+  display: grid;
+  gap: 6px;
+  color: var(--da-body);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.alert-rule-field-label {
+  line-height: 1.3;
+}
+
+.alert-rule-picker {
+  position: relative;
+}
+
+.alert-rule-picker summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  box-sizing: border-box;
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 1px solid var(--da-line);
+  border-radius: 7px;
+  color: var(--da-ink);
+  background: var(--surface-card, #fff);
+  font-size: 12px;
+  font-weight: 400;
+  cursor: pointer;
+  list-style: none;
+}
+
+.alert-rule-picker summary::-webkit-details-marker {
+  display: none;
+}
+
+.alert-rule-picker summary::after {
+  content: "⌄";
+  flex: 0 0 auto;
+  color: var(--da-muted);
+  font-size: 14px;
+}
+
+.alert-rule-picker[open] summary {
+  border-color: var(--da-accent);
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.alert-rule-picker-menu {
+  display: grid;
+  gap: 2px;
+  max-height: 168px;
+  overflow: auto;
+  padding: 5px;
+  border: 1px solid var(--da-accent);
+  border-top: 0;
+  border-radius: 0 0 7px 7px;
+  background: var(--surface-card, #fff);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, .1);
+}
+
+.alert-rule-picker-menu label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 6px;
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 400;
+  cursor: pointer;
+}
+
+.alert-rule-picker-menu label:hover {
+  background: var(--da-soft);
+}
+
+.alert-rule-picker-menu input {
+  width: auto;
+  margin: 0;
+}
+
+.alert-rule-picker-menu .da-modal-help {
+  margin: 3px 6px;
 }
 
 .alert-rule-form-grid {
