@@ -3,11 +3,11 @@
 // 用真实 Vue 组件、真实 first-run 状态层与真实路由验证：
 //   · route.name → guide 映射：合同 / 平台控制台（settings、audit）各自 3 步；
 //   · 首次进入子系统 600ms 后启动、1/3 进度、标题与系统名一致；
-//   · 切换子系统先关旧导览（旧 guide 落 skipped，不标记 done），新 guide 独立启动；
+//   · 切换子系统先把旧 guide 落 paused（不标记 done），新 guide 独立启动；
 //   · 终态后不自动重播；同一 guide 内 settings ↔ audit 不重复；不同 guide 互不影响；
 //   · `?guide=1` 强制当前 guide 重看并从 URL 移除参数；
 //   · nav 锚点缺失时不启动且记录保持 pending；
-//   · pagehide 时 running 落 skipped；
+//   · pagehide 时 running 落 paused，下次可续播；
 //   · 同一时刻只存在一个导览气泡。
 //
 // 所有请求都在浏览器内以合成响应处理，不访问业务 API、不写业务数据。
@@ -262,12 +262,12 @@ try {
   assert.equal(info.count, 1, '同一 guide 内切换应保持当前导览，不重复叠加')
   record('settings ↔ audit 同一 guide', '不重复启动、不叠加气泡')
 
-  // 6. 切换到合同：先关平台导览（skipped，不是 done），再启动/不启动合同（已 done）。
+  // 6. 切换到合同：先把平台导览落 paused（不是 done），再启动/不启动合同（已 done）。
   await page.evaluate(() => window.__router.push('/contract_management/dashboard'))
   await page.waitForTimeout(900)
   assert.equal(await bubbleInfo(), null)
   state = await recordState()
-  assert.equal(state.guides.platform.tour, 'skipped', '切换子系统时旧 guide 落 skipped')
+  assert.equal(state.guides.platform.tour, 'paused', '切换子系统时旧 guide 落 paused')
   assert.equal(state.guides.contract.tour, 'done', '旧导览不能被标记为完成')
   record('切换子系统先关旧导览', JSON.stringify({ platform: state.guides.platform.tour, contract: state.guides.contract.tour }))
 
@@ -281,13 +281,13 @@ try {
   assert.equal(state.guides.contract.tour, 'running')
   record('?guide=1 强制重看', '合同导览重新启动且 URL 已清理')
 
-  // 8. pagehide：running 落 skipped，不自动续播。
+  // 8. pagehide：running 落 paused，下次进入可续播。
   await page.evaluate(() => window.dispatchEvent(new Event('pagehide')))
   await page.waitForTimeout(300)
   state = await recordState()
-  assert.equal(state.guides.contract.tour, 'skipped')
+  assert.equal(state.guides.contract.tour, 'paused')
   assert.equal(await bubbleInfo(), null)
-  record('pagehide 中断落 skipped', 'contract skipped')
+  record('pagehide 中断落 paused', 'contract paused')
 
   // 9. nav 锚点缺失（项目壳层）时不启动，记录保持 pending。
   await page.evaluate(() => window.__router.push('/project_management/list'))

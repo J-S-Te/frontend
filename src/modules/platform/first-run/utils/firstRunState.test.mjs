@@ -35,6 +35,7 @@ import {
   withTourFinished,
   withTourRestarted,
   withTourStarted,
+  withTourPaused,
   writeFirstRunRecord,
 } from './firstRunState.js'
 
@@ -194,6 +195,7 @@ test('guide 由 route.name 映射：门户/平台控制台/六个子系统', () 
     audit: 'platform',
     contract_management: 'contract',
     project_management: 'project',
+    reimbursement: 'reimbursement',
     settlement: 'settlement',
     customer_opportunity: 'customer_opportunity',
     customer_portal: 'customer_portal',
@@ -220,7 +222,7 @@ test('门户保留 5 步；每个子系统 guide 为 3 步且锚点统一', () =
   )
   const subsystemGuides = FIRST_RUN_GUIDE_KEYS.filter((key) => key !== FIRST_RUN_PORTAL_GUIDE)
   assert.deepEqual(subsystemGuides, [
-    'platform', 'contract', 'project', 'settlement', 'customer_opportunity', 'customer_portal', 'data_analysis',
+    'platform', 'contract', 'project', 'reimbursement', 'settlement', 'customer_opportunity', 'customer_portal', 'data_analysis',
   ])
   for (const guideKey of subsystemGuides) {
     const steps = firstRunGuideSteps(guideKey)
@@ -354,6 +356,7 @@ test('自动启动条件：门户需要目录就绪；子系统/平台控制台�
   // running 是“上次被中断”的残留：不自动续播；只有 pending 才自动启动。
   assert.equal(shouldStartFirstRunTour({ ...contractBase, record: withTourStarted(createFirstRunRecord(), 1, 'contract') }), false)
   assert.equal(isFirstRunTourOpen(withTourStarted(createFirstRunRecord(), 1), 'portal'), false)
+  assert.equal(isFirstRunTourOpen(withTourPaused(withTourStarted(createFirstRunRecord(), 1), 'portal'), 'portal'), true)
   assert.equal(isFirstRunTourOpen(createFirstRunRecord(), 'contract'), true)
   assert.equal(isFirstRunTourTerminal(withTourFinished(createFirstRunRecord(), 'done', AT), 'portal'), true)
 })

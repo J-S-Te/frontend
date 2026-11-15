@@ -49,7 +49,7 @@ export const FIRST_RUN_AUDIT_PERMISSION = 'platform:audit:view'
 /** 第 ④ 项探测账号数量所需的读取权限；无权限时该项不展示。 */
 export const FIRST_RUN_USER_READ_PERMISSION = 'platform:user:read'
 
-export const FIRST_RUN_TOUR_STATES = Object.freeze(['pending', 'running', 'done', 'skipped'])
+export const FIRST_RUN_TOUR_STATES = Object.freeze(['pending', 'running', 'paused', 'done', 'skipped'])
 
 /** 门户 guide 键：旧 v1 记录迁移到它，也是所有“未指定 guide”调用的默认值。 */
 export const FIRST_RUN_PORTAL_GUIDE = 'portal'
@@ -88,7 +88,7 @@ export const FIRST_RUN_TOUR_STEPS = Object.freeze([
     key: 'checklist-entry',
     anchor: 'checklist-entry',
     title: '上手清单',
-    description: '上手清单记录 5 项真实完成的上手动作。入口就在这里，门户页脚也有同样入口。',
+    description: '上手清单记录最多 5 项真实完成的上手动作，按你的权限展示；入口就在这里，门户页脚也有同样入口。',
   }),
 ])
 
@@ -118,8 +118,8 @@ function createSubsystemGuideSteps(systemName) {
     Object.freeze({
       key: 'title',
       anchor: FIRST_RUN_SUBSYSTEM_ANCHORS.title,
-      title: `${systemName}主操作区`,
-      description: '当前页面的标题和主要操作集中在这里；可执行的操作仍由你的权限决定。',
+      title: `${systemName}当前业务`,
+      description: '当前页面的业务入口、关键数据和主要操作集中在这里；具体能做什么仍由你的权限决定。',
     }),
     Object.freeze({
       key: 'portal',
@@ -165,6 +165,14 @@ export const FIRST_RUN_GUIDES = Object.freeze({
     systemName: '项目管理',
     routeNames: Object.freeze(['project_management']),
     steps: createSubsystemGuideSteps('项目管理'),
+    kind: 'subsystem',
+  }),
+  reimbursement: Object.freeze({
+    key: 'reimbursement',
+    label: '报销管理导览',
+    systemName: '报销管理',
+    routeNames: Object.freeze(['reimbursement']),
+    steps: createSubsystemGuideSteps('报销管理'),
     kind: 'subsystem',
   }),
   settlement: Object.freeze({
@@ -249,8 +257,8 @@ export const FIRST_RUN_TASKS = Object.freeze([
   }),
   Object.freeze({
     key: 'firstAccount',
-    title: '创建首个业务账号',
-    hint: '在“系统设置 → 人员 → 用户”里新建员工（创建首个业务账号）。门户只读检测租户内是否已有业务账号（系统自动检测），不改动任何数据。',
+    title: '确认租户已有业务账号',
+    hint: '在“系统设置 → 人员 → 用户”创建首个员工账号后，门户会只读检测租户内是否已有业务账号；账号由你或管理员创建都算完成，门户不改动任何数据。',
     permission: FIRST_RUN_USER_READ_PERMISSION,
   }),
   Object.freeze({
@@ -567,7 +575,8 @@ export function firstRunGuideState(record, guideKey = FIRST_RUN_PORTAL_GUIDE) {
 
 /** 指定 guide 是否会自动启动（pending）。 */
 export function isFirstRunTourOpen(record, guideKey = FIRST_RUN_PORTAL_GUIDE) {
-  return firstRunGuideState(record, guideKey).tour === 'pending'
+  const tour = firstRunGuideState(record, guideKey).tour
+  return tour === 'pending' || tour === 'paused'
 }
 
 /** 指定 guide 是否已到终态（done / skipped 都不会被 running 覆盖）。 */
@@ -659,6 +668,27 @@ export function withTourStarted(record, index, guideKey = FIRST_RUN_PORTAL_GUIDE
 }
 
 /**
+ * 显式“稍后”：保留当前步骤，下一次进入该 guide 时从原步骤继续；不是终态。
+ * 已 done / skipped 的 guide 不允许被 paused 覆盖。
+ * @param {Object} record 记录。
+ * @param {string} [guideKey] guide 键，缺省为门户。
+ * @returns {Object} 新记录；无变化时返回原对象。
+ */
+export function withTourPaused(record, guideKey = FIRST_RUN_PORTAL_GUIDE) {
+  if (!record) return record
+  const key = FIRST_RUN_GUIDES[guideKey] ? guideKey : FIRST_RUN_PORTAL_GUIDE
+  const current = firstRunGuideState(record, key)
+  if (current.tour === 'done' || current.tour === 'skipped') return record
+  return {
+    ...record,
+    guides: {
+      ...record.guides,
+      [key]: { ...current, tour: 'paused' },
+    },
+  }
+}
+
+/**
  * 指定 guide 的导览到达终态。done / skipped 都是终态：不会再次自动出现，直到显式
  * “重新查看”或版本变更；seenAt 只在该 guide 首次进入终态时写入。
  * done 是吸收态：另一个标签页已经完成时，迟到的 skipped 不会把 done 降级。
@@ -743,6 +773,11 @@ export function mergeFirstRunRecords(current, incoming) {
       step = ga.tour === 'running' && gb.tour === 'running'
         ? Math.max(ga.step, gb.step)
         : (ga.tour === 'running' ? ga.step : gb.step)
+    } else if (ga.tour === 'paused' || gb.tour === 'paused') {
+      tour = 'paused'
+      step = ga.tour === 'paused' && gb.tour === 'paused'
+        ? Math.max(ga.step, gb.step)
+        : (ga.tour === 'paused' ? ga.step : gb.step)
     }
     const seenAt = [ga.seenAt, gb.seenAt]
       .filter(Boolean)

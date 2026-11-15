@@ -2,7 +2,7 @@
 // 多导览浮层（全局唯一）。挂在 App.vue，按 route.name 选择当前 guide：
 //   portal / platform(settings,audit) / contract / project / settlement /
 //   customer_opportunity / customer_portal / data_analysis。
-// 一次只展示一个 guide：进入新子系统时先关闭旧导览（落 skipped，不标记完成），再调度新 guide。
+// 一次只展示一个 guide：进入新子系统时先把旧导览落为 paused（保留步骤），再调度新 guide。
 //
 // 交互约定（产品最终决策）：
 //   · 每 (tenant,user,guide,版本) 只自动出现一次；就绪后延迟 600ms；
@@ -11,7 +11,7 @@
 //   · 层级 9000，低于确认框 10000 与 toast 12000；确认框打开时不启动也不抢键盘；
 //   · 焦点锁在气泡内、锁定页面滚动、关闭还原焦点；role=dialog + aria-modal + aria-live；
 //   · 缺锚点的步骤跳过；首步锚点（门户 header / 子系统 nav）缺失时整次不启动；
-//   · 离开该子系统 / pagehide 时 running 落为 skipped，不自动续播；
+//   · 离开该子系统 / pagehide 时 running 落为 paused，下次进入从原步骤继续；
 //   · 子系统支持 `?guide=1` 强制当前 guide 重看（支持人员用），不新增常驻按钮；
 //   · 窄屏（≤640px）改为底部面板，位置由 CSS 接管；深色沿用门户 token。
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
@@ -21,6 +21,7 @@ import { AUTHORIZATION_REFRESHED_EVENT } from '@/modules/platform/auth/utils/aut
 import { acquireBodyScrollLock, releaseBodyScrollLock } from '@/modules/shared/utils/bodyScrollLock'
 import FirstRunChecklistPanel from './FirstRunChecklistPanel.vue'
 import { firstRun } from '../composables/useFirstRun.js'
+import { createFirstRunTabLock, FIRST_RUN_TAB_LOCK_TTL_MS } from '../utils/firstRunTabLock.js'
 import {
   FIRST_RUN_ANCHOR_ATTRIBUTE,
   FIRST_RUN_PORTAL_GUIDE,
@@ -45,8 +46,15 @@ const narrowScreen = ref(false)
 const titleId = 'first-run-tour-title'
 const descriptionId = 'first-run-tour-description'
 
+const ANCHOR_RETRY_INTERVAL_MS = 300
+const ANCHOR_RETRY_MAX_ATTEMPTS = 10
+const tabLock = createFirstRunTabLock()
+let lockRenewTimer = 0
 let narrowQuery = null
 let startTimer = 0
+let anchorRetryTimer = 0
+let anchorRetryAttempts = 0
+const snoozedGuide = ref('')
 let confirmObserver = null
 let previousFocus = null
 let tourListening = false
@@ -94,6 +102,15 @@ function anchorExists(anchor) {
   return Boolean(anchorElement(anchor))
 }
 
+// 除确认框外，任何可见的 aria-modal 对话框/抽屉都应阻止导览启动，避免抢焦点或叠层。
+function anotherModalOpen() {
+  if (typeof document === 'undefined') return false
+  if (document.body?.dataset?.confirmDialogOpen === 'true') return true
+  return [...document.querySelectorAll('[role="dialog"][aria-modal="true"]')].some((element) => (
+    !element.closest('.first-run-tour, .first-run-checklist') && element.getClientRects().length > 0
+  ))
+}
+
 /** 当前 guide 的启动前置条件（不含首步锚点；锚点在 attemptStart 里单独判定）。 */
 function startOptions() {
   const key = activeGuideKey.value
@@ -116,16 +133,21 @@ function startOptions() {
  */
 function schedulingAllowed() {
   if (typeof document === 'undefined') return false
+  if (!firstRun.state.configReady || firstRun.state.enabled === false) return false
+  if (snoozedGuide.value === activeGuideKey.value) return false
   if (firstRun.state.tourVisible || firstRun.state.checklistOpen) return false
   const options = startOptions()
   if (!options) return false
-  // 先在“锚点未就绪”的状态下排队；600ms 后 attemptStart 再检查首步锚点。
-  return shouldStartFirstRunTour({ ...options, firstAnchorAvailable: true })
+  // 先在“锚点未就绪”的状态下排队；600ms 后 attemptStart 再检查锚点/弹层/标签页锁。
+  return shouldStartFirstRunTour({ ...options, confirmDialogOpen: false, firstAnchorAvailable: true })
 }
 
 function clearStartTimer() {
   window.clearTimeout(startTimer)
+  window.clearTimeout(anchorRetryTimer)
   startTimer = 0
+  anchorRetryTimer = 0
+  anchorRetryAttempts = 0
 }
 
 function scheduleStart() {
@@ -137,16 +159,43 @@ function scheduleStart() {
   }, FIRST_RUN_TOUR_STEP_DELAY_MS)
 }
 
+function retryStartWhenAnchorAppears() {
+  if (anchorRetryAttempts >= ANCHOR_RETRY_MAX_ATTEMPTS) return
+  anchorRetryAttempts += 1
+  anchorRetryTimer = window.setTimeout(() => {
+    anchorRetryTimer = 0
+    attemptStart()
+  }, ANCHOR_RETRY_INTERVAL_MS)
+}
+
 function attemptStart() {
   if (!schedulingAllowed()) return
   const key = activeGuideKey.value
   const options = startOptions()
   if (!options) return
-  // 首步锚点缺失时整次不启动：门户 header / 子系统 nav 必须真实存在。
-  // 记录保持 pending，不写入终态；下一次触发（路由/主体/可见性变化）会重新排队。
-  if (!anchorExists(firstRunGuideSteps(key)[0].anchor)) return
+  if (anotherModalOpen() || tabLock.heldByOther(firstRun.state.scope)) {
+    retryStartWhenAnchorAppears()
+    return
+  }
+  const steps = firstRunGuideSteps(key)
+  const guide = firstRun.guideState(key)
+  const resumeIndex = guide?.tour === 'paused' ? Math.min(guide.step, steps.length - 1) : 0
+  // pending 仍要求首步锚点；paused 从原步骤继续，原步骤消失时回退到首步。
+  let startIndex = anchorExists(steps[0].anchor) || resumeIndex > 0
+    ? resolveNextTourStepIndex(resumeIndex, anchorExists, steps) : -1
+  if (startIndex < 0 && resumeIndex > 0) startIndex = resolveNextTourStepIndex(0, anchorExists, steps)
+  if (startIndex < 0) {
+    // 动态渲染/懒加载页面可能晚于 600ms 才出现锚点：短轮询等待，不直接放弃。
+    retryStartWhenAnchorAppears()
+    return
+  }
   if (!shouldStartFirstRunTour({ ...options, firstAnchorAvailable: true })) return
-  firstRun.beginTour({ guideKey: key, hasAnchor: anchorExists })
+  if (!tabLock.acquire(firstRun.state.scope, key)) {
+    retryStartWhenAnchorAppears()
+    return
+  }
+  clearStartTimer()
+  if (!firstRun.beginTour({ guideKey: key, hasAnchor: anchorExists })) tabLock.release(firstRun.state.scope)
 }
 
 /**
@@ -159,6 +208,7 @@ async function applyForcedGuide(guideKey) {
   if (!guideKey || guideKey === FIRST_RUN_PORTAL_GUIDE) return false
   if (String(route.query?.guide ?? '') !== '1') return false
   if (!firstRun.state.record) return false
+  snoozedGuide.value = ''
   const restarted = firstRun.restartTour(guideKey)
   // 清掉 guide 参数；失败只影响 URL 是否干净，不影响已经写入的 pending。
   const query = { ...route.query }
@@ -180,6 +230,8 @@ async function applyForcedGuide(guideKey) {
  */
 async function prepareGuide(guideKey) {
   if (!guideKey) return
+  await firstRun.ensureConfig()
+  if (firstRun.state.enabled === false) return
   const token = ++guidePreparationToken
   if (guideKey !== FIRST_RUN_PORTAL_GUIDE) {
     if (!firstRun.state.scope) {
@@ -308,6 +360,11 @@ function goPrevious() {
   firstRun.retreatTour({ hasAnchor: anchorExists })
 }
 
+function pauseCurrentTour() {
+  snoozedGuide.value = activeGuideKey.value
+  firstRun.pauseTour()
+}
+
 function skipTour() {
   firstRun.finishTour('skipped')
 }
@@ -362,6 +419,12 @@ function restoreFocusAfterTour() {
   return null
 }
 
+function releaseTourLock() {
+  window.clearInterval(lockRenewTimer)
+  lockRenewTimer = 0
+  if (firstRun.state.scope) tabLock.release(firstRun.state.scope)
+}
+
 function syncTourListeners(visible) {
   if (visible && !tourListening) {
     tourListening = true
@@ -370,6 +433,14 @@ function syncTourListeners(visible) {
     window.addEventListener('resize', onWindowResize, { passive: true })
     window.addEventListener('scroll', onWindowScroll, true)
     acquireBodyScrollLock()
+    const scope = firstRun.state.scope
+    if (scope) {
+      tabLock.acquire(scope, firstRun.state.tourGuide)
+      window.clearInterval(lockRenewTimer)
+      lockRenewTimer = window.setInterval(() => {
+        if (firstRun.state.tourVisible) tabLock.renew(scope, firstRun.state.tourGuide)
+      }, Math.max(1000, Math.floor(FIRST_RUN_TAB_LOCK_TTL_MS / 3)))
+    }
     return
   }
   if (!visible && tourListening) {
@@ -378,6 +449,7 @@ function syncTourListeners(visible) {
     window.removeEventListener('resize', onWindowResize)
     window.removeEventListener('scroll', onWindowScroll, true)
     releaseBodyScrollLock()
+    releaseTourLock()
     restoreFocusAfterTour()
   }
 }
@@ -415,15 +487,16 @@ watch(
   },
 )
 
-// guide 切换：进入新子系统先关旧导览（running → skipped，不标记 done），再准备新 guide。
+// guide 切换：进入新子系统先把旧导览落为 paused（保留步骤），再准备新 guide。
 // 同一 guide 内切 section 不会触发这里的关闭逻辑。
 watch(activeGuideKey, (next) => {
   const previous = previousGuideKey
   previousGuideKey = next
-  if (previous && previous !== next) firstRun.interruptTour(previous)
+  if (snoozedGuide.value && snoozedGuide.value !== next) snoozedGuide.value = ''
+  if (previous && previous !== next) firstRun.pauseTour(previous)
   if (!next) {
-    // 登录页 / 错误页等未登记路由：不自动跨页，直接中断当前导览。
-    firstRun.interruptTour()
+    // 登录页 / 错误页等未登记路由：不自动跨页，把当前导览落为 paused。
+    firstRun.pauseTour()
     return
   }
   void prepareGuide(next)
@@ -438,7 +511,14 @@ watch(() => route.query?.guide, () => {
 
 // pagehide 覆盖刷新、关闭标签页、前进后退缓存等不经过路由 watcher 的离开方式。
 function onPageHide() {
-  firstRun.interruptTour()
+  firstRun.pauseTour()
+  releaseTourLock()
+}
+
+// 另一个标签页释放导览锁 / 写入记录后，当前标签页重新排队。
+function onStorage(event) {
+  if (event && event.key !== null && !String(event.key).endsWith('|tab-lock')) return
+  if (!firstRun.state.tourVisible) scheduleStart()
 }
 
 onMounted(() => {
@@ -449,6 +529,7 @@ onMounted(() => {
   narrowQuery?.addEventListener?.('change', syncNarrowScreen)
   window.addEventListener(AUTHORIZATION_REFRESHED_EVENT, onAuthorizationRefreshed)
   window.addEventListener('pagehide', onPageHide)
+  window.addEventListener('storage', onStorage)
   document.addEventListener('visibilitychange', onVisibilityChange)
   // 确认框开关只通过 body.dataset.confirmDialogOpen 暴露：关闭后重新排队，打开期间不启动。
   if (typeof MutationObserver !== 'undefined' && document.body) {
@@ -464,12 +545,14 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   clearStartTimer()
+  releaseTourLock()
   syncTourListeners(false)
   narrowQuery?.removeEventListener?.('change', syncNarrowScreen)
   confirmObserver?.disconnect()
   confirmObserver = null
   window.removeEventListener(AUTHORIZATION_REFRESHED_EVENT, onAuthorizationRefreshed)
   window.removeEventListener('pagehide', onPageHide)
+  window.removeEventListener('storage', onStorage)
   document.removeEventListener('visibilitychange', onVisibilityChange)
 })
 </script>
@@ -508,6 +591,7 @@ onBeforeUnmount(() => {
           <p class="first-run-sr-only" role="status" aria-live="polite">{{ announcement }}</p>
 
           <footer class="first-run-tour__actions">
+            <button type="button" class="first-run-button is-ghost" @click="pauseCurrentTour">稍后</button>
             <button type="button" class="first-run-button is-ghost" @click="skipTour">跳过导览</button>
             <div class="first-run-tour__nav">
               <button

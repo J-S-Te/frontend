@@ -305,7 +305,7 @@ const sectionIcons = {
 // 只渲染当前账号至少有一个可见入口的分组；权限判断仍由 sections 的 permission 负责。
 const navGroups = computed(() => {
   const groups = [
-    { items: [{ key: 'portal', label: '返回门户', icon: 'dashboard' }] },
+    { items: [{ key: 'portal', label: '返回门户', icon: 'dashboard', anchor: 'subsystem-portal' }] },
     { label: '工作台', keys: ['dashboard', 'analytics'] },
     { label: '发票中心', keys: ['invoices', 'invoice-upload', 'invoice-abnormal'] },
     { label: '报销单', keys: ['claims', 'submitted', 'approvals'] },
