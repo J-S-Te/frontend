@@ -398,7 +398,7 @@ try {
   const afterProbe = await page.evaluate(() => {
     const panel = document.querySelector('.first-run-checklist__panel')
     const firstAccount = [...panel.querySelectorAll('.first-run-checklist__item')]
-      .find((item) => item.textContent.includes('创建首个业务账号'))
+      .find((item) => item.textContent.includes('确认租户已有业务账号'))
     return {
       summary: panel.querySelector('.first-run-checklist__summary').textContent.trim(),
       firstAccountDone: Boolean(firstAccount?.classList.contains('is-done')),
