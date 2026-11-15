@@ -219,6 +219,32 @@ function toggleGroup(key) {
   collapsedGroups.value = next
 }
 
+// 二级分组（如平台设置的“身份与权限/平台与接入”）可折叠；当前激活项所在分组强制展开，
+// 避免刷新或深链后把正在使用的入口藏起来。
+const collapsedChildGroups = ref(new Set())
+
+function childGroupKey(item, label) {
+  return `${item.key}::${String(label || '')}`
+}
+
+function childGroupHasActive(item, label) {
+  return item.children.some((child) => child.groupLabel === label && child.active)
+}
+
+function isChildGroupCollapsed(item, label) {
+  if (!label || childGroupHasActive(item, label)) return false
+  return collapsedChildGroups.value.has(childGroupKey(item, label))
+}
+
+function toggleChildGroup(item, label) {
+  if (!label) return
+  const key = childGroupKey(item, label)
+  const next = new Set(collapsedChildGroups.value)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  collapsedChildGroups.value = next
+}
+
 // selectNav 处理导航点击：先收起抽屉，再把导航键抛给模块处理路由。
 // 参数：item 为被点击的导航项。返回值：无。
 function selectNav(item) {
@@ -299,8 +325,15 @@ function toggleItem(item) {
                 </button>
                 <div v-if="item.children.length && isItemExpanded(item)" class="console-nav-children" role="group" :aria-label="item.label">
                   <template v-for="(child, childIndex) in item.children" :key="child.key">
-                    <p v-if="child.groupLabel && (childIndex === 0 || child.groupLabel !== item.children[childIndex - 1].groupLabel)" class="console-nav-sublabel">{{ child.groupLabel }}</p>
                     <button
+                      v-if="child.groupLabel && (childIndex === 0 || child.groupLabel !== item.children[childIndex - 1].groupLabel)"
+                      type="button"
+                      class="console-nav-sublabel console-nav-sublabel--toggle"
+                      :aria-expanded="isChildGroupCollapsed(item, child.groupLabel) ? 'false' : 'true'"
+                      @click="toggleChildGroup(item, child.groupLabel)"
+                    ><span>{{ child.groupLabel }}</span><ConsoleIcon name="chevron" /></button>
+                    <button
+                      v-if="!child.groupLabel || !isChildGroupCollapsed(item, child.groupLabel)"
                       class="console-nav-item console-nav-item--child"
                       :class="[child.itemClass, { active: Boolean(child.active) }]"
                       type="button"
