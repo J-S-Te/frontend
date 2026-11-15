@@ -2,7 +2,6 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import RuntimeEnforcementView from './RuntimeEnforcementView.vue'
 import LicenseProblem from './LicenseProblem.vue'
-import LicenseAppCard from './LicenseAppCard.vue'
 import LicenseEventRow from './LicenseEventRow.vue'
 import LicenseEventsSheet from './LicenseEventsSheet.vue'
 import ConsoleIcon from '@/modules/shared/components/ConsoleIcon.vue'
@@ -83,6 +82,34 @@ async function loadEnforcementSummary() {
   }
 }
 const appRows = computed(() => buildApplicationRows(rows.value, enforcementByApp.value, { canManage: canManage.value, hasPending: Boolean(status.value?.pending) }))
+const activeTab = ref('overview')
+const appFilter = ref('all')
+const appKeyword = ref('')
+const appFilters = [
+  { key: 'all', label: '全部' },
+  { key: 'attention', label: '需处理' },
+  { key: 'expired', label: '已过期' },
+  { key: 'pending', label: '待激活' },
+  { key: 'enforced', label: '已强制执行' },
+]
+const filteredAppRows = computed(() => {
+  const query = appKeyword.value.trim().toLowerCase()
+  return appRows.value.filter(row => {
+    if (query && ![row.name, row.code].join(' ').toLowerCase().includes(query)) return false
+    if (appFilter.value === 'attention') return row.tone === 'danger' || row.tone === 'warning' || row.action.target !== 'none'
+    if (appFilter.value === 'expired') return row.license.key === 'EXPIRED'
+    if (appFilter.value === 'pending') return ['PENDING_ENFORCEMENT', 'APPLYING', 'UNREGISTERED', 'UNKNOWN'].includes(row.enforcement.key)
+    if (appFilter.value === 'enforced') return row.enforcement.key === 'ENFORCED'
+    return true
+  })
+})
+const appFilterCounts = computed(() => ({
+  all: appRows.value.length,
+  attention: appRows.value.filter(row => row.tone === 'danger' || row.tone === 'warning' || row.action.target !== 'none').length,
+  expired: appRows.value.filter(row => row.license.key === 'EXPIRED').length,
+  pending: appRows.value.filter(row => ['PENDING_ENFORCEMENT', 'APPLYING', 'UNREGISTERED', 'UNKNOWN'].includes(row.enforcement.key)).length,
+  enforced: appRows.value.filter(row => row.enforcement.key === 'ENFORCED').length,
+}))
 const overall = computed(() => overallState({ status: status.value, appRows: appRows.value, canManage: canManage.value }))
 const steps = computed(() => licenseSteps({ status: status.value, appRows: appRows.value }))
 
@@ -159,7 +186,7 @@ async function load() {
   try {
     status.value = await getLicenseStatus()
     environment.value = status.value.configured_environment || ''
-    importOpen.value = !status.value.current
+    importOpen.value = false
     await Promise.all([loadEvents(), loadEnforcementSummary()])
   } catch (error) {
     status.value = null
@@ -269,13 +296,21 @@ async function focusPanel(target) {
 }
 // openImport 用途：把唯一的“导入许可证”主行动落到导入区，并把键盘焦点交给文件选择。
 async function openImport() {
+  activeTab.value = 'entitlements'
   if (!canManage.value) return focusPanel(importPanel)
   importOpen.value = true
-  await focusPanel(importPanel)
+  await nextTick()
   importFileInput.value?.focus?.({ preventScroll: true })
+}
+function closeImport() {
+  if (busy.value) return
+  importOpen.value = false
+  clearPreview()
 }
 // focusRuntime 用途：切换到指定系统的运行详情，激活仍由该区域的确认与门禁完成。
 async function focusRuntime(application) {
+  activeTab.value = 'runtime'
+  await nextTick()
   if (application) await runtimeView.value?.selectApplication?.(application)
   await focusPanel(runtimeAnchor)
 }
@@ -283,9 +318,8 @@ async function handleAction(action) {
   if (!action) return
   if (action.target === 'import') return openImport()
   if (action.target === 'init') return focusPanel(initPanel)
-  if (action.target === 'apps') return focusPanel(appsPanel)
-  if (action.target === 'pending') return focusPanel(pendingPanel)
-  if (action.target === 'clock') return openClockRecovery()
+  if (action.target === 'apps' || action.target === 'pending') { activeTab.value = 'entitlements'; return focusPanel(action.target === 'pending' ? pendingPanel : appsPanel) }
+  if (action.target === 'clock') { activeTab.value = 'overview'; return openClockRecovery() }
   if (action.target === 'refresh') return load()
   if (action.target === 'runtime') return focusRuntime(action.application || '')
 }
@@ -299,7 +333,7 @@ async function initialize() {
     await Promise.all([loadEvents(), loadEnforcementSummary()])
     emit('toast', '部署实例已初始化，可下载签发申请并导入许可证。')
   })
-  if (done) { importOpen.value = true; await focusPanel(importPanel) }
+  if (done) { activeTab.value = 'entitlements'; importOpen.value = true; await nextTick(); await focusPanel(importPanel) }
 }
 async function downloadRequest() {
   await manage(async () => {
@@ -372,6 +406,7 @@ onBeforeUnmount(() => {
       </div>
       <div class="license-header-actions">
         <span v-if="status && overall.key !== 'LOADING'" class="license-flag" :data-tone="overall.tone">{{ overall.label }}</span>
+        <button v-if="canManage && initialized" type="button" class="console-button primary" :disabled="loading || busy" @click="openImport"><ConsoleIcon name="download" />导入 / 续期</button>
         <button type="button" class="console-button secondary" :disabled="loading || busy" @click="load"><ConsoleIcon name="reset" />{{ loading ? '读取中…' : '刷新状态' }}</button>
       </div>
     </header>
@@ -425,6 +460,13 @@ onBeforeUnmount(() => {
         </form>
 
         <template v-else>
+          <nav class="license-tabs" role="tablist" aria-label="商业授权分区">
+            <button type="button" role="tab" :aria-selected="activeTab === 'overview' ? 'true' : 'false'" :class="{ active: activeTab === 'overview' }" @click="activeTab = 'overview'">概览</button>
+            <button type="button" role="tab" :aria-selected="activeTab === 'entitlements' ? 'true' : 'false'" :class="{ active: activeTab === 'entitlements' }" @click="activeTab = 'entitlements'">授权项<span>{{ appRows.length }}</span></button>
+            <button type="button" role="tab" :aria-selected="activeTab === 'runtime' ? 'true' : 'false'" :class="{ active: activeTab === 'runtime' }" @click="activeTab = 'runtime'">运行时</button>
+            <button type="button" role="tab" :aria-selected="activeTab === 'events' ? 'true' : 'false'" :class="{ active: activeTab === 'events' }" @click="activeTab = 'events'">事件</button>
+          </nav>
+          <div v-if="activeTab === 'overview'" class="license-tab-panel" role="tabpanel" aria-label="授权概览">
           <!-- 1 顶部摘要：总体状态 + 唯一主行动 + 进度 + 关键事实 -->
           <article class="license-hero" :data-tone="overall.tone" aria-labelledby="license-overall-title">
             <div class="license-hero-top">
@@ -451,13 +493,19 @@ onBeforeUnmount(() => {
             <dl class="license-facts">
               <div><dt>许可证版本</dt><dd>{{ status.current_version || '—' }}<small>状态修订 {{ status.revision }}</small></dd></div>
               <div><dt>授权范围</dt><dd>{{ appRows.length }} 个系统<small>已强制执行 {{ overall.counts.enforced || 0 }} 个</small></dd></div>
-              <div><dt>客户标识</dt><dd class="mono">{{ status.customer_id || '—' }}</dd></div>
-              <div><dt>绑定环境</dt><dd>{{ status.environment || '—' }}</dd></div>
-              <div><dt>部署实例</dt><dd class="mono">{{ status.instance_id || '—' }}</dd></div>
-              <div><dt>当前授权生效</dt><dd>{{ formatLicenseTime(status.current?.not_before) }}</dd></div>
               <div><dt>最近到期</dt><dd>{{ soonestExpiry ? formatLicenseTime(soonestExpiry).split(' ')[0] : '—' }}<small :data-tone="soonestExpiry ? expiryMeta(soonestExpiry).tone : 'none'">{{ soonestExpiry ? expiryMeta(soonestExpiry).label : '暂无到期项' }}</small></dd></div>
-              <div><dt>执行状态来源</dt><dd>{{ runtimeEnforcement.label }}<small v-if="runtimeSourceLabel" :title="runtimeEnforcementSource">{{ runtimeSourceLabel }}</small></dd></div>
+              <div><dt>执行状态</dt><dd>{{ runtimeEnforcement.label }}<small>{{ overall.counts.enforced || 0 }}/{{ appRows.length }} 已强制执行</small></dd></div>
             </dl>
+            <details class="license-tech-details">
+              <summary>技术详情</summary>
+              <dl class="license-tech-grid">
+                <div><dt>客户标识</dt><dd class="mono">{{ status.customer_id || '—' }}</dd></div>
+                <div><dt>绑定环境</dt><dd>{{ status.environment || '—' }}</dd></div>
+                <div><dt>部署实例</dt><dd class="mono">{{ status.instance_id || '—' }}</dd></div>
+                <div><dt>当前授权生效</dt><dd>{{ formatLicenseTime(status.current?.not_before) }}</dd></div>
+                <div v-if="runtimeSourceLabel"><dt>执行状态来源</dt><dd :title="runtimeEnforcementSource">{{ runtimeSourceLabel }}</dd></div>
+              </dl>
+            </details>
           </article>
 
           <!-- 1.5 时钟保护：唯一能解除保护的动作是提交供应商签发的一次性恢复凭据 -->
@@ -507,13 +555,14 @@ onBeforeUnmount(() => {
             </template>
             <p v-else class="license-note license-note-strong">{{ CLOCK_RECOVERY_READONLY_HINT }}</p>
           </section>
+          </div>
 
           <!-- 2 逐应用状态：许可层面与运行执行层面分列 -->
-          <section ref="appsPanel" tabindex="-1" class="console-card license-section" aria-labelledby="license-apps-title">
+          <section v-if="activeTab === 'entitlements'" ref="appsPanel" tabindex="-1" class="console-card license-section" aria-labelledby="license-apps-title">
             <header class="license-section-head">
               <div>
                 <h3 id="license-apps-title">应用授权与执行状态</h3>
-                <p class="license-note">每张卡片是签名许可证状态，不代表业务系统已开放；运行时是否强制执行，请以每个系统的运行时登记与执行确认状态为准。</p>
+                <p class="license-note">每一行先展示签名许可证状态，不代表业务系统已开放；运行时是否强制执行，请以每个系统的运行时登记与执行确认状态为准。</p>
               </div>
               <div class="license-head-actions">
                 <span class="license-chip">{{ appRows.length }} 个系统</span>
@@ -550,20 +599,38 @@ onBeforeUnmount(() => {
               empty-title="当前许可证未包含任何业务系统。"
               empty-description="供应商签发的许可证没有覆盖业务系统时，这里不会显示任何执行状态。"
             />
-            <ul v-else class="license-app-grid" aria-label="逐系统授权与执行状态">
-              <LicenseAppCard
-                v-for="row in appRows"
-                :key="row.code"
-                :row="row"
-                :busy="busy"
-                :loading="loading"
-                @action="runRowAction"
-              />
-            </ul>
+            <div v-else class="license-app-results">
+              <div class="license-app-toolbar">
+                <div class="license-app-filters" role="group" aria-label="授权项筛选">
+                  <button v-for="filter in appFilters" :key="filter.key" type="button" class="license-app-filter" :class="{ active: appFilter === filter.key }" :aria-pressed="appFilter === filter.key ? 'true' : 'false'" @click="appFilter = filter.key">{{ filter.label }}<span>{{ appFilterCounts[filter.key] }}</span></button>
+                </div>
+                <label class="license-app-search">
+                  <ConsoleIcon name="search" />
+                  <input v-model="appKeyword" type="search" placeholder="搜索系统名称或编码" maxlength="100" aria-label="搜索授权项" />
+                </label>
+                <button v-if="enforcementFallbackCodes.length" type="button" class="console-button ghost small" :disabled="enforcementLoading || loading" @click="loadEnforcementSummary">{{ enforcementLoading ? '读取中…' : '刷新执行状态' }}</button>
+              </div>
+              <ListState v-if="!filteredAppRows.length" compact empty-title="没有匹配的授权项" empty-description="调整筛选或搜索关键词后再试。" />
+              <div v-else class="license-app-table-wrap">
+                <table class="license-app-table">
+                  <thead><tr><th scope="col">系统</th><th scope="col">许可状态</th><th scope="col">到期</th><th scope="col">运行执行</th><th scope="col">最后确认</th><th scope="col">操作</th></tr></thead>
+                  <tbody>
+                    <tr v-for="row in filteredAppRows" :key="row.code" :data-tone="row.tone">
+                      <td><b>{{ row.name }}</b><code>{{ row.code }}</code></td>
+                      <td><span class="license-badge" :data-tone="row.license.tone">{{ row.license.label }}</span><small v-if="row.reasonCode">{{ reasonHintOf(row.reasonCode) }}</small></td>
+                      <td>{{ formatLicenseTime(row.application?.expires_at) }}<small :data-tone="expiryMeta(row.application?.expires_at).tone">{{ expiryMeta(row.application?.expires_at).label }}</small></td>
+                      <td><span class="license-badge" :data-tone="row.enforcement.tone">{{ row.enforcement.label }}</span><small v-if="row.showEnforcementCounters">准备 {{ row.summary.ready }}/{{ row.summary.memberCount }} · 确认 {{ row.summary.acknowledged }}/{{ row.summary.memberCount }}</small></td>
+                      <td>{{ row.summary?.latestAckAt ? formatLicenseTime(row.summary.latestAckAt) : '—' }}</td>
+                      <td><button v-if="row.action.target !== 'none'" type="button" class="console-button ghost small" :disabled="busy || loading" @click="runRowAction(row)">{{ row.action.label }}</button><span v-else class="license-note">—</span></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </section>
 
           <!-- 3 待生效许可证：导入的合法结果，不是失败 -->
-          <section v-if="status.pending" ref="pendingPanel" tabindex="-1" class="console-card license-section license-pending" aria-labelledby="license-pending-title">
+          <section v-if="status.pending && activeTab === 'entitlements'" ref="pendingPanel" tabindex="-1" class="console-card license-section license-pending" aria-labelledby="license-pending-title">
             <header class="license-section-head">
               <div>
                 <h3 id="license-pending-title">待生效许可证 · 版本 {{ status.pending.version }}</h3>
@@ -581,8 +648,9 @@ onBeforeUnmount(() => {
             <p v-else class="license-note">待生效许可证未包含任何业务系统。</p>
           </section>
 
-          <!-- 4 导入区：与状态区分离，已有许可证时默认收起 -->
-          <section v-if="canManage" ref="importPanel" tabindex="-1" class="console-card license-section license-import" aria-labelledby="license-import-title">
+          <!-- 4 导入抽屉：从头部主行动或空态打开，避免长期占用授权项页面 -->
+          <div v-if="activeTab === 'entitlements' && importOpen" class="license-import-overlay" @click.self="closeImport" @keydown.esc="closeImport">
+          <section v-if="canManage" ref="importPanel" tabindex="-1" class="console-card license-section license-import license-import-drawer" role="dialog" aria-modal="true" aria-labelledby="license-import-title">
             <header class="license-section-head">
               <div>
                 <h3 id="license-import-title">导入或许可证续期</h3>
@@ -590,11 +658,11 @@ onBeforeUnmount(() => {
               </div>
               <div class="license-head-actions">
                 <span class="license-chip">{{ status.current ? `当前版本 ${status.current_version}` : '尚未导入' }}</span>
-                <button type="button" class="console-button ghost small" :aria-expanded="importOpen" aria-controls="license-import-body" @click="importOpen = !importOpen">{{ importOpen ? '收起导入' : '展开导入' }}</button>
+                <button type="button" class="console-button ghost small" aria-label="关闭导入许可证" @click="closeImport"><ConsoleIcon name="close" /></button>
               </div>
             </header>
 
-            <div id="license-import-body" v-show="importOpen" class="license-import-body">
+            <div id="license-import-body" class="license-import-body">
               <div class="license-drop" :data-active="dragActive ? 'true' : 'false'" @dragenter.prevent="dragActive = true" @dragover.prevent="dragActive = true" @dragleave.prevent="dragActive = false" @drop.prevent="dropFile">
                 <label class="license-drop-label">
                   <ConsoleIcon name="download" />
@@ -652,19 +720,20 @@ onBeforeUnmount(() => {
               </div>
             </div>
           </section>
+          </div>
 
         </template>
       </template>
     </template>
 
     <!-- P1：运行时授权概览始终挂载，未登记/未初始化时也持续显示三项事实，不再整块隐藏。 -->
-    <div ref="runtimeAnchor" tabindex="-1" class="license-runtime-anchor">
+    <div v-show="canRead && status && initialized && activeTab === 'runtime'" ref="runtimeAnchor" tabindex="-1" class="license-runtime-anchor">
       <RuntimeEnforcementView ref="runtimeView" :license-revision="status?.revision || 0" @toast="emit('toast', $event)" />
     </div>
 
-    <!-- 6 授权事件：页面最底部，最近 N 条单行摘要 + 「查看全部」进右侧抽屉。
+    <!-- 6 授权事件：独立页签，最近 N 条单行摘要 + 「查看全部」进右侧抽屉。
          摘要不再内滚动、不再页内分页：挤占问题从结构上消掉，完整列表交给抽屉。 -->
-    <section v-if="canRead && status && initialized && !loading" class="console-card license-section license-events" aria-labelledby="license-events-title">
+    <section v-if="canRead && status && initialized && !loading && activeTab === 'events'" class="console-card license-section license-events" aria-labelledby="license-events-title">
       <header class="license-section-head">
         <div>
           <h3 id="license-events-title">授权事件</h3>
@@ -915,4 +984,40 @@ onBeforeUnmount(() => {
   .license-event-time { padding-bottom: 4px; }
   .license-app-grid { grid-template-columns: minmax(0, 1fr); justify-content: stretch; }
 }
+
+/* P0：概览 / 授权项 / 运行时 / 事件分区；授权项表格与导入抽屉。 */
+.license-tabs { display: flex; flex-wrap: wrap; gap: 2px; border-bottom: 1px solid var(--license-border); }
+.license-tabs button { display: inline-flex; align-items: center; gap: 6px; padding: 9px 14px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--license-muted); font-size: var(--fs-sm); font-weight: 600; cursor: pointer; }
+.license-tabs button:hover { color: var(--license-ink); }
+.license-tabs button.active { border-bottom-color: var(--primary); color: var(--primary); }
+.license-tabs button span { min-width: 18px; padding: 0 5px; border-radius: var(--radius-pill); background: var(--surface-muted); color: var(--license-muted); font-size: var(--fs-xs); font-weight: 600; text-align: center; }
+.license-tab-panel { display: grid; gap: 18px; }
+.license-tech-details { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--license-border); }
+.license-tech-details summary { color: var(--license-muted); font-size: var(--fs-xs); font-weight: 600; cursor: pointer; }
+.license-tech-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px 18px; margin: 10px 0 0; }
+.license-tech-grid div { display: grid; gap: 2px; }
+.license-tech-grid dt { color: var(--license-muted); font-size: var(--fs-xs); }
+.license-tech-grid dd { margin: 0; color: var(--license-body); font-size: var(--fs-xs); }
+.license-app-results { display: grid; gap: 12px; }
+.license-app-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.license-app-filters { display: flex; flex-wrap: wrap; gap: 4px; }
+.license-app-filter { display: inline-flex; align-items: center; gap: 5px; padding: 5px 9px; border: 1px solid var(--license-border); border-radius: var(--radius-pill); background: transparent; color: var(--license-body); font-size: var(--fs-xs); cursor: pointer; }
+.license-app-filter span { color: var(--license-muted); font-size: var(--fs-xs); }
+.license-app-filter.active { border-color: var(--primary); background: var(--surface-muted); color: var(--primary); }
+.license-app-filter.active span { color: var(--primary); }
+.license-app-search { display: flex; align-items: center; gap: 6px; min-width: 220px; padding: 0 10px; border: 1px solid var(--license-border); border-radius: var(--radius-sm); background: var(--surface-card); }
+.license-app-search svg { width: 14px; height: 14px; color: var(--license-muted); }
+.license-app-search input { width: 100%; min-height: 30px; border: 0; background: transparent; color: var(--license-body); font-size: var(--fs-xs); outline: 0; }
+.license-app-table-wrap { overflow: auto; border: 1px solid var(--license-border); border-radius: var(--radius-lg); }
+.license-app-table { width: 100%; border-collapse: collapse; background: var(--surface-card); font-size: var(--fs-xs); }
+.license-app-table th, .license-app-table td { padding: 10px 12px; border-bottom: 1px solid var(--license-border); text-align: left; vertical-align: top; }
+.license-app-table th { background: var(--surface-muted); color: var(--license-muted); font-size: var(--fs-xs); font-weight: 600; white-space: nowrap; }
+.license-app-table tbody tr:last-child td { border-bottom: 0; }
+.license-app-table td b { display: block; color: var(--license-ink); font-size: var(--fs-xs); }
+.license-app-table td code { display: block; margin-top: 2px; color: var(--license-muted); font-size: var(--fs-xs); }
+.license-app-table td small { display: block; margin-top: 4px; color: var(--license-muted); font-size: var(--fs-xs); line-height: 1.4; }
+.license-app-table td small[data-tone="danger"] { color: var(--danger-text); }
+.license-app-table td small[data-tone="warning"] { color: var(--warning-text); }
+.license-import-overlay { position: fixed; inset: 0; z-index: var(--license-overlay-z, 80); display: grid; place-items: center; padding: 20px; background: var(--overlay-scrim); }
+.license-import-drawer { width: min(760px, calc(100vw - 32px)); max-height: min(90vh, 860px); overflow: auto; box-shadow: var(--shadow-modal); }
 </style>

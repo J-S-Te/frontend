@@ -227,6 +227,22 @@
   letter-spacing: .08em;
   text-transform: uppercase;
 }
+.console-nav-sublabel--toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.console-nav-sublabel--toggle:hover { color: var(--text); }
+.console-nav-sublabel--toggle svg { width: 12px; height: 12px; flex: none; transition: transform .16s ease; }
+.console-nav-sublabel--toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
 .console-nav-item--child {
   min-height: 34px;
   padding: 0 9px;
