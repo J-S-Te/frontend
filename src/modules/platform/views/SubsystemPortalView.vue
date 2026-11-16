@@ -386,7 +386,7 @@ async function logoutApplication() {
   }
 }
 
-// 上手清单入口（门户页头与页脚共用）。面板本身由 App.vue 挂载的 GuideHost 渲染，
+// 上手清单入口（仅门户页头）。面板本身由 App.vue 挂载的 GuideHost 渲染，
 // 这里只负责打开，不代替用户完成任何清单项。未就绪时入口本身是 disabled，
 // 这里再守一道，避免程序化调用绕过可见状态。
 function openFirstRunChecklist() {
@@ -941,18 +941,6 @@ onBeforeUnmount(() => {
 
     <footer class="subsystem-portal__footer">
       <span class="subsystem-portal__footer-note">建议分辨率：1920×1080 · 主流浏览器：Chrome / Edge / Firefox / Safari 最新版</span>
-      <button
-        class="subsystem-portal__guide-footer-entry"
-        type="button"
-        :disabled="!checklistReady"
-        :aria-busy="checklistReady ? 'false' : 'true'"
-        :aria-label="checklistEntryLabel"
-        :title="checklistReady ? '' : '正在读取当前账号信息，请稍候'"
-        @click="openFirstRunChecklist"
-      >
-        {{ checklistReady ? '上手清单' : '清单载入中' }}
-        <span v-if="checklistReady" class="subsystem-portal__guide-footer-count">{{ checklistSummary.done }}/{{ checklistSummary.total }}</span>
-      </button>
       <span class="subsystem-portal__footer-copyright">© 2026 V2.1.0</span>
     </footer>
 

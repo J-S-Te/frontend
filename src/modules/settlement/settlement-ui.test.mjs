@@ -87,6 +87,25 @@ test('Settlement view exposes the first-phase financial workflow without mock re
   assert.doesNotMatch(source, /示例客户|mockReceivable|演示数据/)
 })
 
+test('结算页面按原型使用经营看板/收款计划/账龄催收标题与页头说明', async () => {
+  const view = await readFile(new URL('./views/SettlementView.vue', import.meta.url), 'utf8')
+  const css = await readFile(new URL('./styles/settlement.css', import.meta.url), 'utf8')
+  assert.match(view, /\["dashboard", "经营看板"/)
+  assert.match(view, /\["receivables", "收款计划"/)
+  assert.match(view, /\["dunning", "账龄催收"/)
+  assert.match(view, /const sectionDescriptions =/)
+  assert.match(view, /const sectionDescription = computed/)
+  assert.match(view, /class="console-page-head settlement-page-head"/)
+  assert.match(view, /<p>\{\{ sectionDescription \}\}<\/p>/)
+  assert.match(view, /<span>结算与开票管理<\/span>/)
+  assert.match(css, /\.settlement-page-head h1/)
+  assert.match(css, /\.settlement-page-head p/)
+  assert.match(view, /class="settlement-tabs settlement-page-tabs"/)
+  assert.match(view, /回款记录/)
+  assert.match(view, /核销单/)
+  assert.match(css, /\.settlement-page-tabs/)
+})
+
 test('Settlement view ships Phase A/B/C UI optimization helpers and components', async () => {
   const view = await readFile(new URL('./views/SettlementView.vue', import.meta.url), 'utf8')
   const css = await readFile(new URL('./styles/settlement.css', import.meta.url), 'utf8')

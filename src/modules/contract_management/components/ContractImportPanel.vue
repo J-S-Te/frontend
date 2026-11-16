@@ -46,8 +46,17 @@ const historyOptions = ref({ targetOwnerUserID: '', declaredSignedDate: '', hist
   historicalCustomerName: '', historicalOwnerLabel: '', reportMode: '' })
 const sourceSystem = ref('legacy')
 const historyOwnerOptions = ref([]), historyOwnerBusy = ref(false), historyOwnerError = ref('')
+// 折叠摘要只统计可选项，sourceSystem 的默认 legacy 不算“已填写”。
+const historyFilledCount = computed(() => [historyOptions.value.targetOwnerUserID,
+  historyOptions.value.declaredSignedDate, historyOptions.value.historicalStatus,
+  historyOptions.value.historicalCustomerName, historyOptions.value.historicalOwnerLabel,
+  historyOptions.value.reportMode].filter((value) => String(value || '').trim()).length)
 const formRows = ref([]), jsonAuthoritative = ref(false), fileMessage = ref(''), advancedMessage = ref('')
 const normalEntryMode = ref('excel'), excelFile = ref(null), excelBusy = ref(false), excelMessage = ref('')
+// PDF 可能一次上百份：默认只展示前 5 个文件，避免把页面拉成长段落。
+const showAllFiles = ref(false)
+const displayedFiles = computed(() => showAllFiles.value ? files.value : files.value.slice(0, 5))
+watch(files, () => { if (files.value.length <= 5) showAllFiles.value = false })
 const excelIssues = ref([]), excelSummary = ref(null), excelCRMRequired = ref(false), excelCRMProgress = ref(''), excelStale = ref(false)
 const excelExcludedFiles = ref([])
 const drawerRowKey = ref(''), drawerRef = ref(null)
@@ -501,6 +510,11 @@ function clearExcelFile() {
  * 参数：event 为文件输入事件。
  * 返回值：Promise<void>；文件错误只显示提示，不清空已选 PDF。
  */
+function dropExcelFile(event) {
+  const picked = event?.dataTransfer?.files?.[0] || null
+  if (picked) void selectExcelFile({ target: { files: [picked], value: '' } })
+}
+
 async function selectExcelFile(event) {
   const picked = event?.target?.files?.[0] || null
   if (event?.target) event.target.value = ''
@@ -1505,15 +1519,221 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
       </div>
 
       <ol class="contract-import-steps" aria-label="导入流程">
-        <li>选择导入方式</li>
-        <li>选择或拖入原件</li>
-        <li>暂存并预检</li>
+        <li>选择文件</li>
+        <li>暂存预检</li>
         <li>逐条核对问题</li>
         <li>提交冻结清单</li>
       </ol>
 
+      <template v-if="formEditable">
+        <p v-if="!batch && !newBatchModes.length" class="contract-import-alert" role="alert">服务端尚未开放历史存档或历史结清导入，请联系管理员；不会改用普通合同导入。</p>
+        <section class="contract-import-block" aria-label="导入方式">
+          <p v-if="batch?.operation_id" class="contract-import-note">已建单项须原样保留，只能修订尚未建单项；新修订会使旧预检和执行代次失效。已建单内容更正需先核对原合同。</p>
+          <fieldset v-if="selectableModes.length" class="contract-import-mode" :disabled="busy || modeLocked">
+            <legend>导入方式</legend>
+            <label v-for="modeValue in selectableModes" :key="modeValue">
+              <input type="radio" name="contract-import-entry-mode" :value="modeValue" :checked="entryMode === modeValue" @change="selectEntryMode(modeValue)" />
+              {{ modeLabels[modeValue] || modeValue }}{{ modeValue === 'CONTINUE_LIVE' ? '（原清单）' : '（Excel）' }}
+            </label>
+          </fieldset>
+          <p v-if="modeLocked" class="contract-import-hint">批次已保存清单，导入方式随当前批次固定；需要换一种方式请开始新批次。</p>
+          <p v-if="isNormalEntry" class="contract-import-hint">普通新合同按当前来源选择已有 CRM 客户或本地交易对方，Excel 和手动表单都不会自动建客户。历史资料需要自动建档时，请选择“历史存档”或“历史结清档案”，并上传 Excel。</p>
+          <p v-else-if="['ARCHIVE_ONLY', 'HISTORICAL_CLOSED'].includes(entryMode)" class="contract-import-hint">历史自动建档启用后，由服务端查重：客户不存在时创建客户，客户编号由 CRM 生成；客户重名或停用时逐项阻断。预检只展示计划，提交冻结清单后才执行创建。</p>
+        </section>
+
+        <section v-if="isFormEntry" class="contract-import-block contract-import-stage" :aria-label="isHistoricalEntry ? '历史合同Excel导入表单' : '已有普通批次修订表单'">
+          <div class="contract-import-stage-head">
+            <div>
+              <h2>导入文件</h2>
+              <p>先上传 PDF 原件和 Excel 清单，再暂存预检。历史信息按需展开，Excel 行中已填写的值优先。</p>
+            </div>
+            <span class="contract-import-step-badge">文件 1 / 2</span>
+          </div>
+
+          <fieldset v-if="isNormalEntry" class="contract-import-normal-modes" :disabled="busy">
+            <legend>详情填写方式</legend>
+            <label v-if="!localImportSources"><input type="radio" name="contract-import-normal-mode" value="excel" :checked="normalEntryMode === 'excel'" @change="selectNormalEntryMode('excel')" /> Excel 批量导入（推荐）</label>
+            <label><input type="radio" name="contract-import-normal-mode" value="manual" :checked="normalEntryMode === 'manual'" @change="selectNormalEntryMode('manual')" /> 手动逐份填写</label>
+          </fieldset>
+          <p v-if="localImportSources && isNormalEntry" class="contract-import-hint">本地来源使用逐份表单选择真实目录引用；可以一次上传多份原件并批量预检，历史清单不自动转换来源。</p>
+
+          <template v-if="normalEntryMode === 'excel'">
+            <div class="contract-import-file-grid">
+              <section class="contract-import-file-slot" aria-labelledby="contract-import-pdf-title">
+                <header class="contract-import-file-slot-head">
+                  <div>
+                    <h3 id="contract-import-pdf-title"><span class="contract-import-step-number">1</span> PDF 原件</h3>
+                    <p>可多选，≤{{ batchItemLimit }} 份；支持 PDF / DOCX</p>
+                  </div>
+                  <span class="contract-import-file-count">{{ files.length }} 份</span>
+                </header>
+                <div class="contract-import-dropzone" @dragover.prevent @drop.prevent="dropFiles">
+                  <span class="contract-import-dropzone-icon" aria-hidden="true">PDF</span>
+                  <label for="contract-import-files">第一步：选择或拖入 PDF 原件</label>
+                  <small>文件名去掉扩展名后，必须与 Excel「合同明细」的合同编号一致</small>
+                  <input id="contract-import-files" :key="sourceSelectionVersion" type="file" multiple :accept="pdfEnabled ? '.docx,.pdf' : '.docx'" :disabled="busy" @change="selectFiles" />
+                </div>
+                <ul v-if="files.length" class="contract-import-file-list" aria-label="已选择的 PDF 原件">
+                  <li v-for="file in displayedFiles" :key="file.name"><span>{{ file.name }}</span> <button class="contract-text-button danger" type="button" :disabled="busy" @click="removeSelectedFile(file)">移除</button></li>
+                </ul>
+                <button v-if="files.length > displayedFiles.length" class="contract-text-button contract-import-view-all" type="button" @click="showAllFiles = true">查看全部 {{ files.length }} 份</button>
+                <button v-else-if="showAllFiles && files.length > 5" class="contract-text-button contract-import-view-all" type="button" @click="showAllFiles = false">收起文件列表</button>
+              </section>
+
+              <section class="contract-import-file-slot" aria-labelledby="contract-import-excel-title">
+                <header class="contract-import-file-slot-head">
+                  <div>
+                    <h3 id="contract-import-excel-title"><span class="contract-import-step-number">2</span> Excel 清单</h3>
+                    <p>单个 .xlsx，≤5MiB</p>
+                  </div>
+                  <span class="contract-import-file-count">{{ excelFile ? '已选择' : '待选择' }}</span>
+                </header>
+                <div class="contract-import-dropzone" @dragover.prevent @drop.prevent="dropExcelFile">
+                  <span class="contract-import-dropzone-icon" aria-hidden="true">XLSX</span>
+                  <label for="contract-import-excel">第二步：选择 Excel（.xlsx，≤5MiB）</label>
+                  <small>一份清单可包含多份合同，按合同编号与 PDF 一一匹配</small>
+                  <input id="contract-import-excel" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" :disabled="busy || excelBusy" @change="selectExcelFile" />
+                </div>
+                <p class="contract-import-note"><a :href="contractExcelTemplateURL" download>下载 Excel 标准模板（含合同明细、服务项、系统信息、付款条款和填写说明）</a></p>
+                <p v-if="excelFile" class="contract-import-status" role="status">已选择 Excel：{{ excelFile.name }} <button class="contract-text-button" type="button" :disabled="busy || excelBusy" @click="applyExcelImport">重新应用 Excel（覆盖未保存详情）</button><button class="contract-text-button danger" type="button" :disabled="busy || excelBusy" @click="clearExcelFile">移除</button></p>
+              </section>
+            </div>
+
+            <div v-if="files.length || excelFile || excelBusy" class="contract-import-match-strip" role="status">
+              <span>PDF <strong>{{ files.length }}</strong> 份</span>
+              <span>Excel 合同 {{ excelSummary ? excelSummary.contractCount : (excelFile ? 1 : 0) }} 份</span>
+              <span>已匹配 <strong>{{ excelSummary ? excelSummary.matchedCount : 0 }}</strong> 份</span>
+              <span :class="{ 'is-warning': (excelSummary ? excelSummary.blockingCount : excelIssues.length) > 0 }">阻断 <strong>{{ excelSummary ? excelSummary.blockingCount : excelIssues.length }}</strong> 处</span>
+            </div>
+            <p v-if="isHistoricalEntry" class="contract-import-hint">历史 Excel 的 CRM 客户编号可以留空，由服务端查重并在提交后自动创建客户、生成编号。自动开立时商机编号和名称都留空；填写真实销售姓名，新客户须有真实联系人和电话。客户类型、行业、地区可留空。“当前负责人”列填写真实姓名，系统按姓名唯一匹配有效账号；未匹配或重名会逐行提示。历史档案可填在对应分表，也可补填本批历史信息。</p>
+            <p v-if="excelBusy" class="contract-import-status is-loading" role="status">正在解析 Excel 并匹配 PDF…</p>
+            <p v-if="excelCRMProgress" class="contract-import-status is-loading" role="status">{{ excelCRMProgress }}</p>
+            <p v-if="excelMessage" class="contract-import-hint" role="status">{{ excelMessage }}</p>
+            <div v-if="excelIssues.length" class="contract-import-excel-issues" role="alert">
+              <p><strong>Excel 解析与匹配问题（共 {{ excelIssues.length }} 处）：</strong></p>
+              <ul><li v-for="(issue, index) in excelIssues.slice(0, 20)" :key="issue.code + '-' + issue.rowNumber + '-' + issue.contractNumber + '-' + index">{{ excelIssueText(issue) }}</li></ul>
+              <p v-if="excelIssues.length > 20">…还有 {{ excelIssues.length - 20 }} 处，请先修正 Excel 或 PDF 文件名后重新应用。</p>
+            </div>
+            <div v-if="excelCRMRequired" class="contract-import-alert contract-import-alert--warn" role="alert">
+              <p>Excel 中缺少 CRM 客户编号，部分客户尚未在 CRM 中核对。</p>
+              <div class="contract-import-actions">
+                <button class="contract-button secondary small" type="button" :disabled="busy" @click="connectCRM(true)">连接 CRM</button>
+                <button class="contract-button secondary small" type="button" :disabled="busy || excelBusy" @click="applyExcelImport">登录后重新应用 Excel</button>
+              </div>
+            </div>
+            <p v-if="batch?.items?.length" class="contract-import-hint">当前批次已恢复；重新选择 Excel 会覆盖尚未建项的详情，已建单项不会被覆盖。</p>
+          </template>
+
+          <template v-else>
+            <p class="contract-import-hint">先选择合同原件（PDF/DOCX），每份原件自动生成一行合同。文件名只作为原件引用，重命名文件后请移除该行并重新选择；同一文件只能导入一次。每行还须在「编辑详情」填写来源业务键（原系统合同编号/业务键，必填），系统据此识别重复导入的同一份合同。</p>
+            <div class="contract-import-dropzone" @dragover.prevent @drop.prevent="dropFiles">
+              <span class="contract-import-dropzone-icon" aria-hidden="true">PDF</span>
+              <label for="contract-import-files">选择或拖入合同原件（可多选）</label>
+              <small>每份原件自动生成一行，下一步在列表里编辑详情</small>
+              <input id="contract-import-files" :key="sourceSelectionVersion" type="file" multiple :accept="pdfEnabled ? '.docx,.pdf' : '.docx'" :disabled="busy" @change="selectFiles" />
+            </div>
+            <p v-if="files.length" class="contract-import-status" role="status">已选择 {{ files.length }} 份原件</p>
+            <ul v-if="files.length" class="contract-import-file-list"><li v-for="file in displayedFiles" :key="file.name"><span>{{ file.name }}</span> <button class="contract-text-button danger" type="button" :disabled="busy" @click="removeSelectedFile(file)">移除</button></li></ul>
+            <button v-if="files.length > displayedFiles.length" class="contract-text-button contract-import-view-all" type="button" @click="showAllFiles = true">查看全部 {{ files.length }} 份</button>
+            <button v-else-if="showAllFiles && files.length > 5" class="contract-text-button contract-import-view-all" type="button" @click="showAllFiles = false">收起文件列表</button>
+          </template>
+          <p v-if="fileMessage" class="contract-import-alert" role="alert">{{ fileMessage }}</p>
+
+          <details v-if="isHistoricalEntry" id="contract-import-history" class="contract-import-collapse contract-import-history-details">
+            <summary><span>本批历史信息（可选，Excel 行优先）</span><span class="contract-import-collapse-badge">{{ historyFilledCount }} 项已填</span></summary>
+            <div class="contract-import-history-body">
+              <p class="contract-import-note contract-form-wide">历史导入不参与结算开票，不建立财务台账；后续由财务人员按正常流程办理。档案报表独立同步，不代表回款或开票已核验。</p>
+              <div class="contract-form-grid">
+                <label><span>来源系统标识</span><input v-model="sourceSystem" maxlength="64" :readonly="!!batch" pattern="[A-Za-z0-9_.:\-]+" /><small>同一来源保持不变，用于识别重复导入。</small></label>
+                <div class="contract-import-field-stack">
+                  <label><span>当前负责人</span><select v-model="historyOptions.targetOwnerUserID"><option value="">请选择负责人</option><option v-if="actorId" :value="actorId">当前登录人（提交时服务端核验）</option><option v-for="owner in historyOwnerOptions" :key="owner.subject_id" :value="owner.subject_id">{{ owner.name }}</option></select></label>
+                  <button v-if="sourceCapabilities.history_owner_directory ?? sourceCapabilities.local_catalog_manage" class="contract-text-button" type="button" :disabled="historyOwnerBusy" @click="loadHistoryOwners">{{ historyOwnerBusy ? '正在读取账号…' : '读取其他可选负责人' }}</button>
+                </div>
+                <p v-if="historyOwnerError" class="contract-field-error contract-form-wide" role="alert">{{ historyOwnerError }}</p>
+                <label><span>原签署日期（可空）</span><input v-model="historyOptions.declaredSignedDate" type="date" /><small>按原件填写，不自动取合同开始日期。</small></label>
+                <label><span>原合同状态</span><select v-model="historyOptions.historicalStatus"><option value="">请选择原状态</option><option value="archived">已归档</option><template v-if="entryMode === 'HISTORICAL_CLOSED'"><option value="completed">已完成</option><option value="terminated">已终止</option></template></select></label>
+                <label><span>原客户名称（可空）</span><input v-model="historyOptions.historicalCustomerName" maxlength="255" /></label>
+                <label><span>原负责人姓名（可空）</span><input v-model="historyOptions.historicalOwnerLabel" maxlength="128" /></label>
+                <label v-if="entryMode === 'HISTORICAL_CLOSED'"><span>报表统计方式</span><select v-model="historyOptions.reportMode"><option value="">请选择统计方式</option><option value="ARCHIVE_SEPARATE">档案单独统计</option><option value="HISTORICAL_SEPARATE">历史单独统计</option></select></label>
+                <button class="contract-button secondary small contract-form-wide" type="button" :disabled="!formRows.length" @click="applyBatchHistory">用本批信息覆盖各行历史信息</button>
+                <p class="contract-import-note contract-form-wide">新行未填写的字段使用本批信息；已有批次保留逐行历史信息。覆盖会替换未建项的签署日期、原状态及本批所选负责人；旧策略与原财务资料保留，请先核对。</p>
+              </div>
+            </div>
+          </details>
+
+          <div v-if="formRows.length" class="contract-import-listframe" tabindex="0" role="group" aria-label="合同导入行列表，可滚动">
+            <ul class="contract-import-rows" aria-label="合同导入行">
+              <li v-for="(row, index) in formRows" :key="row.key" class="contract-import-row">
+                <div class="contract-import-row-head">
+                  <div class="contract-import-row-id">
+                    <strong>{{ row.fileName }}</strong>
+                    <span>{{ rowStaged(row) ? '重新预检沿用当前批次已暂存原件' : (batch ? '新原件，预检时上传' : '尚未上传') }}</span>
+                  </div>
+                  <div class="contract-import-row-actions">
+                    <span class="contract-badge" :class="rowStateTone(row)"><i></i>{{ stateLabels[row.state] || row.state }}</span>
+                    <button class="contract-text-button" type="button" :disabled="!!row.contractId" :aria-label="`编辑第 ${index + 1} 行详情`" @click="openRow(row, $event)">编辑详情</button>
+                    <button class="contract-text-button danger" type="button" :disabled="busy || !!row.contractId" :aria-label="`移除第 ${index + 1} 行`" @click="removeRow(row)">移除</button>
+                  </div>
+                </div>
+                <dl class="contract-import-facts">
+                  <div class="contract-import-fact-title"><dt>合同标题</dt><dd>{{ row.title || '未填写' }}</dd></div>
+                  <div class="contract-import-fact-party">
+                    <dt>客户</dt>
+                    <dd>{{ row.customerName || '未填写' }}<small v-if="row.crmCustomerId" class="contract-import-fact-extra">ID {{ row.crmCustomerId }}</small><small v-if="row.normalized" class="contract-import-fact-extra">预检权威：{{ row.normalized.customer_name }} / {{ row.normalized.crm_customer_id }}</small><small v-if="normalizedCustomerDiff(row)" class="contract-import-fact-extra contract-import-error-text">与预检客户不一致，请以权威目录为准</small></dd>
+                  </div>
+                  <div v-if="isHistoricalEntry"><dt>当前负责人</dt><dd>{{ row.historyEvidence?.target_owner_name || (row.historyEvidence?.target_owner_user_id ? '已选账号' : '未填写') }}<small v-if="row.historyEvidence?.target_owner_name && row.historyEvidence?.target_owner_user_id">已匹配有效账号</small></dd></div>
+                  <div><dt>金额（元）</dt><dd>{{ row.amount || '未填写' }}<small v-if="row.contractId" class="contract-import-fact-extra">合同 {{ row.contractId }}</small></dd></div>
+                  <div><dt>币种</dt><dd>{{ row.currency }}</dd></div>
+                  <div><dt>开始日期</dt><dd>{{ row.startDate || '—' }}</dd></div>
+                  <div><dt>结束日期</dt><dd>{{ row.endDate || '—' }}</dd></div>
+                </dl>
+                <p class="contract-import-row-key" :class="hasExternalRecordId(row) ? '' : 'contract-import-error-text'">来源业务键：{{ row.externalRecordId || '未填写（请在「编辑详情」补填）' }}</p>
+                <p v-if="rowIssues(row).length" class="contract-import-error-text">发现 {{ rowIssues(row).length }} 处问题</p>
+                <ul v-if="rowIssues(row).length" class="contract-import-error-text" role="alert"><li v-for="(issue, issueIndex) in rowIssues(row)" :key="issueIndex">{{ issue.message }}</li></ul>
+                <p v-else-if="row.batchIssues.length" class="contract-import-error-text" role="alert">{{ rowBatchIssueSummary(row)[0] }}{{ row.batchIssues.length > 1 ? `（共 ${row.batchIssues.length} 处）` : '' }}</p>
+              </li>
+            </ul>
+          </div>
+          <p v-else class="contract-import-empty">{{ normalEntryMode === 'excel' ? '尚未匹配到合同行。请选择 Excel，并确认 PDF 文件名去掉扩展名后与 Excel 合同编号完全一致；匹配成功后会写入下方详情。' : '尚未选择原件。选择后会自动生成合同行，不需要手工编写 JSON。' }}</p>
+
+          <div class="contract-import-actions contract-import-actions--footer contract-import-actions--sticky">
+            <p class="contract-import-hint">暂存并预检不会创建合同。预检错误会按行和字段显示，可修正后重试；预检通过后再提交冻结清单。</p>
+            <button class="contract-button primary" type="button" :disabled="busy || !canPreviewAction" @click="preview">{{ batch ? '继续暂存／修订并重新预检' : '暂存并逐项预检' }}</button>
+          </div>
+        </section>
+        <section v-else-if="batch" class="contract-import-block contract-import-stage" aria-label="历史合同完整清单导入">
+          <p class="contract-import-hint"><strong>历史导入需要完整清单。</strong>历史存档、接续履约和历史结清档案包含 history_evidence、policy_options 等字段，继续使用 JSON 清单核对；不使用普通表单，避免丢字段或改写历史事实。</p>
+          <label class="contract-import-field" for="contract-import-json">UTF-8 JSON 清单（≤2MiB，1—100项）</label>
+          <textarea id="contract-import-json" v-model="text" maxlength="2097152" rows="10" :disabled="busy" placeholder='{"schema_version":1,"source_system":"legacy","items":[{"item_key":"one","external_record_id":"原业务键","mode":"ARCHIVE_ONLY","source_file_ref":"原件.pdf","metadata":{},"history_evidence":{},"policy_options":{}}]}' />
+          <p class="contract-import-hint">每项 metadata 填写完整合同字段；历史项还须提供 history_evidence 和 policy_options。source_file_ref 在此处填写对应文件名，须与所选原件一一匹配。</p>
+          <p v-if="['ARCHIVE_ONLY', 'HISTORICAL_CLOSED'].includes(entryMode)" class="contract-import-hint">已启用历史自动建档时，待建客户可不填 crm_customer_id，同时留空商机编号及名称；请填写真实客户名称、销售姓名，以及新客户的联系人和电话。服务端预检会校验字段并展示客户／商机开立计划，无须先登录 CRM 手工创建客户。</p>
+          <p v-if="batch" class="contract-import-hint">已暂存项保留当前 file_ref；需要更换原件时，将该行 source_file_ref 改为新选择的文件名。相同文件名的历史代次不会自动替换当前原件。</p>
+          <label class="contract-import-field">选择对应原件<input :key="sourceSelectionVersion" type="file" multiple :accept="pdfEnabled ? '.docx,.pdf' : '.docx'" :disabled="busy" @change="selectFiles" /></label>
+          <p v-if="files.length" class="contract-import-status" role="status">已选择：{{ files.map(file => file.name).join('、') }}</p>
+          <p v-if="fileMessage" class="contract-import-alert" role="alert">{{ fileMessage }}</p>
+          <ul v-if="files.length" class="contract-import-file-list"><li v-for="file in files" :key="file.name"><span>{{ file.name }}</span> <button class="contract-text-button danger" type="button" :disabled="busy" @click="removeSelectedFile(file)">移除</button></li></ul>
+          <div class="contract-import-actions contract-import-actions--footer">
+            <button class="contract-button primary" type="button" :disabled="busy || !canPreviewAction" @click="preview">{{ batch ? '继续暂存／修订并重新预检' : '暂存并逐项预检' }}</button>
+          </div>
+        </section>
+
+        <details v-if="isFormEntry" class="contract-import-advanced" @toggle="onAdvancedToggle">
+          <summary>高级：查看/编辑清单</summary>
+          <div class="contract-import-advanced-body">
+            <p class="contract-import-hint">默认以 Excel 和编辑详情为准，下方清单只用于核对或兼容旧批次。展开不会自动保存，也不会改写历史事实。</p>
+            <label class="contract-import-check"><input v-model="jsonAuthoritative" type="checkbox" :disabled="busy" @change="toggleJsonAuthoritative" /> 以 JSON 清单为准（高级；勾选后表单修改不会进入预检）</label>
+            <p v-if="jsonAuthoritative" class="contract-import-warning" role="alert">当前以 JSON 为准：预检直接保存下方 JSON。取消勾选会重新用表单生成清单，JSON 中的修改会被覆盖；需要历史字段请切换到历史导入方式。</p>
+            <label class="contract-import-field" for="contract-import-advanced-json">清单 JSON（普通模式默认只读）</label>
+            <textarea id="contract-import-advanced-json" v-model="text" maxlength="2097152" rows="10" :readonly="!jsonAuthoritative" :disabled="busy" />
+            <div class="contract-import-actions"><button class="contract-button secondary small" type="button" :disabled="busy || jsonAuthoritative" @click="regenerateJSON">用当前表单重新生成 JSON</button><span v-if="advancedMessage" role="status">{{ advancedMessage }}</span></div>
+          </div>
+        </details>
+      </template>
+
       <!-- 历史导入自动审批是系统级开关，只对合同超级管理员渲染；能力未开启时只读。 -->
-      <section v-if="canManageAutoApprove" class="contract-import-block contract-import-auto-approve" aria-labelledby="contract-import-auto-approve-title">
+      <details v-if="canManageAutoApprove" class="contract-import-collapse contract-import-admin">
+        <summary>管理员：历史导入自动审批</summary>
+        <section class="contract-import-block contract-import-auto-approve" aria-labelledby="contract-import-auto-approve-title">
         <div class="contract-import-auto-approve-head">
           <p id="contract-import-auto-approve-title" class="contract-import-batch-id">历史导入自动审批</p>
           <span class="contract-badge" :class="autoApproveStatusTone"><i></i>{{ autoApproveStatusLabel }}</span>
@@ -1543,9 +1763,12 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
             <button class="contract-button secondary small" type="button" :disabled="autoApproveSaving" @click="cancelAutoApproveToggle">取消</button>
           </div>
         </div>
-      </section>
+        </section>
+      </details>
 
-      <section class="contract-import-block contract-import-tools" aria-label="批次查询与新建">
+      <details class="contract-import-collapse contract-import-tools">
+        <summary>批次查询与恢复</summary>
+        <section class="contract-import-block contract-import-tools" aria-label="批次查询与新建">
         <div class="contract-import-toolbar">
           <button v-if="enabled && canPreview" class="contract-button secondary small" type="button" :disabled="busy" @click="startNewBatch">开始新批次（保留已保存任务）</button>
           <label class="contract-import-field">查询批次号<input v-model="lookupID" maxlength="26" :disabled="busy" autocomplete="off" /></label>
@@ -1557,169 +1780,8 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
         <div class="contract-import-task-list"><button v-for="record in batches" :key="record.batch_id" type="button" :disabled="busy" @click="refresh(record.batch_id)">{{ record.batch_id }} · {{ labels[record.state] || record.state }}</button></div>
         <div v-if="batches.length || listOffset || listHasMore" class="contract-import-task-list contract-import-pager"><button type="button" :disabled="busy || listBusy || !listOffset" @click="loadBatches(Math.max(0, listOffset - 50))">列表上一页</button><button type="button" :disabled="busy || listBusy || !listHasMore" @click="loadBatches(listNextOffset)">列表下一页</button></div>
         <p v-if="listLimitReached" class="contract-import-note">已到达批次列表查询上限，请使用批次号定位需要处理的记录。</p>
-      </section>
-
-      <template v-if="formEditable">
-        <p v-if="!batch && !newBatchModes.length" class="contract-import-alert" role="alert">服务端尚未开放历史存档或历史结清导入，请联系管理员；不会改用普通合同导入。</p>
-        <section class="contract-import-block" aria-label="导入方式">
-          <p v-if="batch?.operation_id" class="contract-import-note">已建单项须原样保留，只能修订尚未建单项；新修订会使旧预检和执行代次失效。已建单内容更正需先核对原合同。</p>
-          <fieldset v-if="selectableModes.length" class="contract-import-mode" :disabled="busy || modeLocked">
-            <legend>导入方式</legend>
-            <label v-for="modeValue in selectableModes" :key="modeValue">
-              <input type="radio" name="contract-import-entry-mode" :value="modeValue" :checked="entryMode === modeValue" @change="selectEntryMode(modeValue)" />
-              {{ modeLabels[modeValue] || modeValue }}{{ modeValue === 'CONTINUE_LIVE' ? '（原清单）' : '（Excel）' }}
-            </label>
-          </fieldset>
-          <p v-if="modeLocked" class="contract-import-hint">批次已保存清单，导入方式随当前批次固定；需要换一种方式请开始新批次。</p>
-          <p v-if="isNormalEntry" class="contract-import-hint">普通新合同按当前来源选择已有 CRM 客户或本地交易对方，Excel 和手动表单都不会自动建客户。历史资料需要自动建档时，请选择“历史存档”或“历史结清档案”，并上传 Excel。</p>
-          <p v-else-if="['ARCHIVE_ONLY', 'HISTORICAL_CLOSED'].includes(entryMode)" class="contract-import-hint">历史自动建档启用后，由服务端查重：客户不存在时创建客户，客户编号由 CRM 生成；客户重名或停用时逐项阻断。预检只展示计划，提交冻结清单后才执行创建。</p>
         </section>
-
-        <section v-if="isFormEntry" class="contract-import-block contract-import-stage" :aria-label="isHistoricalEntry ? '历史合同Excel导入表单' : '已有普通批次修订表单'">
-          <fieldset v-if="isHistoricalEntry" id="contract-import-history" class="contract-form-grid" :disabled="busy">
-            <legend>本批历史信息（Excel 行中已填写的值优先）</legend>
-            <p class="contract-import-note contract-form-wide">历史导入不参与结算开票，不建立财务台账；后续由财务人员按正常流程办理。档案报表独立同步，不代表回款或开票已核验。</p>
-            <label><span>来源系统标识</span><input v-model="sourceSystem" maxlength="64" :readonly="!!batch" pattern="[A-Za-z0-9_.:\-]+" /><small>同一来源保持不变，用于识别重复导入。</small></label>
-            <label><span>当前负责人</span><select v-model="historyOptions.targetOwnerUserID"><option value="">请选择负责人</option><option v-if="actorId" :value="actorId">当前登录人（提交时服务端核验）</option><option v-for="owner in historyOwnerOptions" :key="owner.subject_id" :value="owner.subject_id">{{ owner.name }}</option></select></label>
-            <button v-if="sourceCapabilities.history_owner_directory ?? sourceCapabilities.local_catalog_manage" class="contract-button secondary small" type="button" :disabled="historyOwnerBusy" @click="loadHistoryOwners">{{ historyOwnerBusy ? '正在读取账号…' : '读取其他可选负责人' }}</button>
-            <p v-if="historyOwnerError" class="contract-field-error" role="alert">{{ historyOwnerError }}</p>
-            <label><span>原签署日期（可空）</span><input v-model="historyOptions.declaredSignedDate" type="date" /><small>按原件填写，不自动取合同开始日期。</small></label>
-            <label><span>原合同状态</span><select v-model="historyOptions.historicalStatus"><option value="">请选择原状态</option><option value="archived">已归档</option><template v-if="entryMode === 'HISTORICAL_CLOSED'"><option value="completed">已完成</option><option value="terminated">已终止</option></template></select></label>
-            <label><span>原客户名称（可空）</span><input v-model="historyOptions.historicalCustomerName" maxlength="255" /></label>
-            <label><span>原负责人姓名（可空）</span><input v-model="historyOptions.historicalOwnerLabel" maxlength="128" /></label>
-            <template v-if="entryMode === 'HISTORICAL_CLOSED'">
-              <label><span>报表统计方式</span><select v-model="historyOptions.reportMode"><option value="">请选择统计方式</option><option value="ARCHIVE_SEPARATE">档案单独统计</option><option value="HISTORICAL_SEPARATE">历史单独统计</option></select></label>
-            </template>
-            <button class="contract-button secondary small" type="button" :disabled="!formRows.length" @click="applyBatchHistory">用本批信息覆盖各行历史信息</button>
-            <p class="contract-import-note contract-form-wide">新行未填写的字段使用本批信息；已有批次保留逐行历史信息。覆盖会替换未建项的签署日期、原状态及本批所选负责人；旧策略与原财务资料保留，请先核对。</p>
-          </fieldset>
-          <fieldset v-if="isNormalEntry" class="contract-import-normal-modes" :disabled="busy">
-            <legend>详情填写方式</legend>
-            <label v-if="!localImportSources"><input type="radio" name="contract-import-normal-mode" value="excel" :checked="normalEntryMode === 'excel'" @change="selectNormalEntryMode('excel')" /> Excel 批量导入（推荐）</label>
-            <label><input type="radio" name="contract-import-normal-mode" value="manual" :checked="normalEntryMode === 'manual'" @change="selectNormalEntryMode('manual')" /> 手动逐份填写</label>
-          </fieldset>
-          <p v-if="localImportSources && isNormalEntry" class="contract-import-hint">本地来源使用逐份表单选择真实目录引用；可以一次上传多份原件并批量预检，历史清单不自动转换来源。</p>
-          <template v-if="normalEntryMode === 'excel'">
-            <p class="contract-import-hint">第一步选择 PDF 原件（可多选），第二步选择填写好合同详情的 Excel。PDF 文件名去掉扩展名必须与 Excel「合同明细」的合同编号完全一致；系统按合同编号一一对应写入「编辑详情」，缺 PDF、缺 Excel 行、重复编号都会在下面列出并阻止预检。</p>
-            <div class="contract-import-step">
-              <div class="contract-import-dropzone" @dragover.prevent @drop.prevent="dropFiles">
-                <label for="contract-import-files">第一步：选择或拖入 PDF 原件（可多选，≤{{ batchItemLimit }} 份）</label>
-                <input id="contract-import-files" :key="sourceSelectionVersion" type="file" multiple :accept="pdfEnabled ? '.docx,.pdf' : '.docx'" :disabled="busy" @change="selectFiles" />
-              </div>
-              <p v-if="files.length" class="contract-import-status" role="status">已选择 {{ files.length }} 份原件：{{ files.map(file => file.name).join('、') }}</p>
-              <ul v-if="files.length" class="contract-import-file-list"><li v-for="file in files" :key="file.name"><span>{{ file.name }}</span> <button class="contract-text-button danger" type="button" :disabled="busy" @click="removeSelectedFile(file)">移除</button></li></ul>
-            </div>
-            <div class="contract-import-step">
-              <div class="contract-import-dropzone">
-                <label for="contract-import-excel">第二步：选择 Excel（.xlsx，≤5MiB）</label>
-                <input id="contract-import-excel" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" :disabled="busy || excelBusy" @change="selectExcelFile" />
-              </div>
-              <p class="contract-import-note"><a :href="contractExcelTemplateURL" download>下载 Excel 标准模板（含合同明细、服务项、系统信息、付款条款和填写说明）</a></p>
-              <p class="contract-import-hint">历史 Excel 的 CRM 客户编号可以留空，由服务端查重并在提交后自动创建客户、生成编号。自动开立时商机编号和名称都留空；填写真实销售姓名，新客户须有真实联系人和电话。客户类型、行业、地区可留空。“当前负责人”列填写真实姓名，系统按姓名唯一匹配有效账号；未匹配或重名会逐行提示。历史档案可填在对应分表，也可补填本批历史信息。</p>
-              <p v-if="excelFile" class="contract-import-status" role="status">已选择 Excel：{{ excelFile.name }} <button class="contract-text-button" type="button" :disabled="busy || excelBusy" @click="applyExcelImport">重新应用 Excel（覆盖未保存详情）</button><button class="contract-text-button danger" type="button" :disabled="busy || excelBusy" @click="clearExcelFile">移除</button></p>
-              <p v-if="excelBusy" class="contract-import-status is-loading" role="status">正在解析 Excel 并匹配 PDF…</p>
-              <p v-if="excelCRMProgress" class="contract-import-status is-loading" role="status">{{ excelCRMProgress }}</p>
-              <p v-if="excelMessage" class="contract-import-hint" role="status">{{ excelMessage }}</p>
-              <div v-if="excelSummary" class="contract-import-excel-summary">
-                <span>Excel 合同 {{ excelSummary.contractCount }} 份</span>
-                <span>已匹配 {{ excelSummary.matchedCount }} 份</span>
-                <span>未匹配 PDF {{ excelSummary.unmatchedFileCount }} 份</span>
-                <span>阻断问题 {{ excelSummary.blockingCount }} 处</span>
-              </div>
-              <div v-if="excelIssues.length" class="contract-import-excel-issues" role="alert">
-                <p><strong>Excel 解析与匹配问题（共 {{ excelIssues.length }} 处）：</strong></p>
-                <ul><li v-for="(issue, index) in excelIssues.slice(0, 20)" :key="issue.code + '-' + issue.rowNumber + '-' + issue.contractNumber + '-' + index">{{ excelIssueText(issue) }}</li></ul>
-                <p v-if="excelIssues.length > 20">…还有 {{ excelIssues.length - 20 }} 处，请先修正 Excel 或 PDF 文件名后重新应用。</p>
-              </div>
-              <div v-if="excelCRMRequired" class="contract-import-alert contract-import-alert--warn" role="alert">
-                <p>Excel 中缺少 CRM 客户编号，部分客户尚未在 CRM 中核对。</p>
-                <div class="contract-import-actions">
-                  <button class="contract-button secondary small" type="button" :disabled="busy" @click="connectCRM(true)">连接 CRM</button>
-                  <button class="contract-button secondary small" type="button" :disabled="busy || excelBusy" @click="applyExcelImport">登录后重新应用 Excel</button>
-                </div>
-              </div>
-              <p v-if="batch?.items?.length" class="contract-import-hint">当前批次已恢复；重新选择 Excel 会覆盖尚未建项的详情，已建单项不会被覆盖。</p>
-            </div>
-          </template>
-          <template v-else>
-            <p class="contract-import-hint">先选择合同原件（PDF/DOCX），每份原件自动生成一行合同。文件名只作为原件引用，重命名文件后请移除该行并重新选择；同一文件只能导入一次。每行还须在「编辑详情」填写来源业务键（原系统合同编号/业务键，必填），系统据此识别重复导入的同一份合同。</p>
-            <div class="contract-import-dropzone" @dragover.prevent @drop.prevent="dropFiles">
-              <label for="contract-import-files">选择或拖入合同原件（可多选）</label>
-              <input id="contract-import-files" :key="sourceSelectionVersion" type="file" multiple :accept="pdfEnabled ? '.docx,.pdf' : '.docx'" :disabled="busy" @change="selectFiles" />
-            </div>
-            <p v-if="files.length" class="contract-import-status" role="status">已选择 {{ files.length }} 份：{{ files.map(file => file.name).join('、') }}</p>
-            <ul v-if="files.length" class="contract-import-file-list"><li v-for="file in files" :key="file.name"><span>{{ file.name }}</span> <button class="contract-text-button danger" type="button" :disabled="busy" @click="removeSelectedFile(file)">移除</button></li></ul>
-          </template>
-          <p v-if="fileMessage" class="contract-import-alert" role="alert">{{ fileMessage }}</p>
-          <!-- 长列表自带滚动容器：max-height 有界，短列表自然收起；动作区留在容器外的页脚里。 -->
-          <div v-if="formRows.length" class="contract-import-listframe" tabindex="0" role="group" aria-label="合同导入行列表，可滚动">
-            <ul class="contract-import-rows" aria-label="合同导入行">
-              <li v-for="(row, index) in formRows" :key="row.key" class="contract-import-row">
-                <div class="contract-import-row-head">
-                  <div class="contract-import-row-id">
-                    <strong>{{ row.fileName }}</strong>
-                    <span>{{ rowStaged(row) ? '重新预检沿用当前批次已暂存原件' : (batch ? '新原件，预检时上传' : '尚未上传') }}</span>
-                  </div>
-                  <div class="contract-import-row-actions">
-                    <span class="contract-badge" :class="rowStateTone(row)"><i></i>{{ stateLabels[row.state] || row.state }}</span>
-                    <button class="contract-text-button" type="button" :disabled="!!row.contractId" :aria-label="`编辑第 ${index + 1} 行详情`" @click="openRow(row, $event)">编辑详情</button>
-                    <button class="contract-text-button danger" type="button" :disabled="busy || !!row.contractId" :aria-label="`移除第 ${index + 1} 行`" @click="removeRow(row)">移除</button>
-                  </div>
-                </div>
-                <dl class="contract-import-facts">
-                  <div class="contract-import-fact-title"><dt>合同标题</dt><dd>{{ row.title || '未填写' }}</dd></div>
-                  <div class="contract-import-fact-party">
-                    <dt>客户</dt>
-                    <dd>{{ row.customerName || '未填写' }}<small v-if="row.crmCustomerId" class="contract-import-fact-extra">ID {{ row.crmCustomerId }}</small><small v-if="row.normalized" class="contract-import-fact-extra">预检权威：{{ row.normalized.customer_name }} / {{ row.normalized.crm_customer_id }}</small><small v-if="normalizedCustomerDiff(row)" class="contract-import-fact-extra contract-import-error-text">与预检客户不一致，请以权威目录为准</small></dd>
-                  </div>
-<div v-if="isHistoricalEntry"><dt>当前负责人</dt><dd>{{ row.historyEvidence?.target_owner_name || (row.historyEvidence?.target_owner_user_id ? '已选账号' : '未填写') }}<small v-if="row.historyEvidence?.target_owner_name && row.historyEvidence?.target_owner_user_id">已匹配有效账号</small></dd></div>
-                  <div><dt>金额（元）</dt><dd>{{ row.amount || '未填写' }}<small v-if="row.contractId" class="contract-import-fact-extra">合同 {{ row.contractId }}</small></dd></div>
-                  <div><dt>币种</dt><dd>{{ row.currency }}</dd></div>
-                  <div><dt>开始日期</dt><dd>{{ row.startDate || '—' }}</dd></div>
-                  <div><dt>结束日期</dt><dd>{{ row.endDate || '—' }}</dd></div>
-                </dl>
-                <p class="contract-import-row-key" :class="hasExternalRecordId(row) ? '' : 'contract-import-error-text'">来源业务键：{{ row.externalRecordId || '未填写（请在「编辑详情」补填）' }}</p>
-                <p v-if="rowIssues(row).length" class="contract-import-error-text">发现 {{ rowIssues(row).length }} 处问题</p>
-                <ul v-if="rowIssues(row).length" class="contract-import-error-text" role="alert"><li v-for="(issue, issueIndex) in rowIssues(row)" :key="issueIndex">{{ issue.message }}</li></ul>
-                <p v-else-if="row.batchIssues.length" class="contract-import-error-text" role="alert">{{ rowBatchIssueSummary(row)[0] }}{{ row.batchIssues.length > 1 ? `（共 ${row.batchIssues.length} 处）` : '' }}</p>
-              </li>
-            </ul>
-          </div>
-          <p v-else class="contract-import-empty">{{ normalEntryMode === 'excel' ? '尚未匹配到合同行。请选择 Excel，并确认 PDF 文件名去掉扩展名后与 Excel 合同编号完全一致；匹配成功后会写入下方详情。' : '尚未选择原件。选择后会自动生成合同行，不需要手工编写 JSON。' }}</p>
-          <div class="contract-import-actions contract-import-actions--footer">
-            <p class="contract-import-hint">暂存并预检不会创建合同。预检错误会按行和字段显示，可修正后重试；预检通过后再提交冻结清单。</p>
-            <button class="contract-button primary" type="button" :disabled="busy || !canPreviewAction" @click="preview">{{ batch ? '继续暂存／修订并重新预检' : '暂存并逐项预检' }}</button>
-          </div>
-        </section>
-
-        <section v-else-if="batch" class="contract-import-block contract-import-stage" aria-label="历史合同完整清单导入">
-          <p class="contract-import-hint"><strong>历史导入需要完整清单。</strong>历史存档、接续履约和历史结清档案包含 history_evidence、policy_options 等字段，继续使用 JSON 清单核对；不使用普通表单，避免丢字段或改写历史事实。</p>
-          <label class="contract-import-field" for="contract-import-json">UTF-8 JSON 清单（≤2MiB，1—100项）</label>
-          <textarea id="contract-import-json" v-model="text" maxlength="2097152" rows="10" :disabled="busy" placeholder='{"schema_version":1,"source_system":"legacy","items":[{"item_key":"one","external_record_id":"原业务键","mode":"ARCHIVE_ONLY","source_file_ref":"原件.pdf","metadata":{},"history_evidence":{},"policy_options":{}}]}' />
-          <p class="contract-import-hint">每项 metadata 填写完整合同字段；历史项还须提供 history_evidence 和 policy_options。source_file_ref 在此处填写对应文件名，须与所选原件一一匹配。</p>
-          <p v-if="['ARCHIVE_ONLY', 'HISTORICAL_CLOSED'].includes(entryMode)" class="contract-import-hint">已启用历史自动建档时，待建客户可不填 crm_customer_id，同时留空商机编号及名称；请填写真实客户名称、销售姓名，以及新客户的联系人和电话。服务端预检会校验字段并展示客户／商机开立计划，无须先登录 CRM 手工创建客户。</p>
-          <p v-if="batch" class="contract-import-hint">已暂存项保留当前 file_ref；需要更换原件时，将该行 source_file_ref 改为新选择的文件名。相同文件名的历史代次不会自动替换当前原件。</p>
-          <label class="contract-import-field">选择对应原件<input :key="sourceSelectionVersion" type="file" multiple :accept="pdfEnabled ? '.docx,.pdf' : '.docx'" :disabled="busy" @change="selectFiles" /></label>
-          <p v-if="files.length" class="contract-import-status" role="status">已选择：{{ files.map(file => file.name).join('、') }}</p>
-          <p v-if="fileMessage" class="contract-import-alert" role="alert">{{ fileMessage }}</p>
-          <ul v-if="files.length" class="contract-import-file-list"><li v-for="file in files" :key="file.name"><span>{{ file.name }}</span> <button class="contract-text-button danger" type="button" :disabled="busy" @click="removeSelectedFile(file)">移除</button></li></ul>
-          <div class="contract-import-actions contract-import-actions--footer">
-            <button class="contract-button primary" type="button" :disabled="busy || !canPreviewAction" @click="preview">{{ batch ? '继续暂存／修订并重新预检' : '暂存并逐项预检' }}</button>
-          </div>
-        </section>
-
-        <details v-if="isFormEntry" class="contract-import-advanced" @toggle="onAdvancedToggle">
-          <summary>高级：查看/编辑清单</summary>
-          <div class="contract-import-advanced-body">
-            <p class="contract-import-hint">默认以 Excel 和编辑详情为准，下方清单只用于核对或兼容旧批次。展开不会自动保存，也不会改写历史事实。</p>
-            <label class="contract-import-check"><input v-model="jsonAuthoritative" type="checkbox" :disabled="busy" @change="toggleJsonAuthoritative" /> 以 JSON 清单为准（高级；勾选后表单修改不会进入预检）</label>
-            <p v-if="jsonAuthoritative" class="contract-import-warning" role="alert">当前以 JSON 为准：预检直接保存下方 JSON。取消勾选会重新用表单生成清单，JSON 中的修改会被覆盖；需要历史字段请切换到历史导入方式。</p>
-            <label class="contract-import-field" for="contract-import-advanced-json">清单 JSON（普通模式默认只读）</label>
-            <textarea id="contract-import-advanced-json" v-model="text" maxlength="2097152" rows="10" :readonly="!jsonAuthoritative" :disabled="busy" />
-            <div class="contract-import-actions"><button class="contract-button secondary small" type="button" :disabled="busy || jsonAuthoritative" @click="regenerateJSON">用当前表单重新生成 JSON</button><span v-if="advancedMessage" role="status">{{ advancedMessage }}</span></div>
-          </div>
-        </details>
-      </template>
+      </details>
 
       <p v-if="error" class="contract-import-alert" role="alert">{{ error }}</p>
 
@@ -2775,5 +2837,159 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
   .contract-import-status.is-loading::before { animation: none; }
   .contract-import-panel > summary::before { transition: none; }
   .contract-import-switch { transition: none; }
+}
+
+
+/* ── 导入工作台：PDF/Excel 双槽位、折叠次级信息、常驻主操作 ───────────── */
+.contract-import-collapse {
+  border: 1px solid var(--cm-border);
+  border-radius: 12px;
+  background: var(--surface-card);
+}
+
+.contract-import-collapse > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 15px;
+  color: var(--cm-secondary);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+
+.contract-import-collapse > summary::-webkit-details-marker { display: none; }
+.contract-import-collapse > summary::marker { content: ''; }
+.contract-import-collapse > summary::before {
+  width: 0;
+  height: 0;
+  flex: 0 0 auto;
+  content: '';
+  border-block: 4px solid transparent;
+  border-inline-start: 5.5px solid var(--cm-muted);
+  transition: transform var(--duration-fast) ease;
+}
+.contract-import-collapse[open] > summary::before { transform: rotate(90deg); }
+.contract-import-collapse > summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: 8px; }
+
+.contract-import-collapse > .contract-import-block {
+  padding: 0 15px 15px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.contract-import-stage-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding-bottom: 2px;
+}
+
+.contract-import-stage-head h2 { margin: 0; color: var(--cm-text); font-size: calc(var(--fs-sm) + 2px); }
+.contract-import-stage-head p { margin: 5px 0 0; color: var(--cm-muted); font-size: var(--fs-xs); line-height: 1.65; }
+.contract-import-step-badge {
+  flex: 0 0 auto;
+  padding: 3px 9px;
+  color: var(--cm-primary);
+  font-size: calc(var(--fs-xs) - 1px);
+  font-weight: 600;
+  border: 1px solid var(--primary-border);
+  border-radius: var(--r-full, 999px);
+  background: var(--cm-primary-soft);
+}
+
+.contract-import-file-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.contract-import-file-slot {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--cm-border);
+  border-radius: 12px;
+  background: var(--surface-card);
+}
+.contract-import-file-slot-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.contract-import-file-slot-head h3 { display: flex; align-items: center; gap: 7px; margin: 0; color: var(--cm-text); font-size: var(--fs-sm); }
+.contract-import-file-slot-head p { margin: 4px 0 0; color: var(--cm-muted); font-size: var(--fs-xs); line-height: 1.5; }
+.contract-import-step-number {
+  display: inline-grid;
+  width: 21px;
+  height: 21px;
+  place-items: center;
+  color: var(--cm-primary);
+  font-size: calc(var(--fs-xs) - 1px);
+  font-weight: 700;
+  border-radius: 50%;
+  background: var(--cm-primary-soft);
+}
+.contract-import-file-count {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  color: var(--cm-muted);
+  font-size: calc(var(--fs-xs) - 1px);
+  font-weight: 600;
+  border-radius: var(--r-full, 999px);
+  background: var(--surface-muted);
+}
+.contract-import-file-slot .contract-import-dropzone { padding: 13px 14px; }
+.contract-import-dropzone-icon {
+  display: inline-grid;
+  width: 36px;
+  height: 28px;
+  place-items: center;
+  color: var(--cm-primary);
+  font-size: calc(var(--fs-xs) - 3px);
+  font-weight: 700;
+  letter-spacing: .04em;
+  border-radius: 7px;
+  background: var(--cm-primary-soft);
+}
+.contract-import-dropzone small { color: var(--cm-muted); font-size: var(--fs-xs); line-height: 1.55; }
+.contract-import-file-slot .contract-import-file-list { margin-top: 0; }
+.contract-import-view-all { justify-self: start; padding: 0; font-size: var(--fs-xs); }
+
+.contract-import-match-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+  padding: 9px 12px;
+  color: var(--cm-secondary);
+  font-size: var(--fs-xs);
+  border: 1px solid var(--border-brand);
+  border-radius: 9px;
+  background: var(--surface-tint);
+}
+.contract-import-match-strip strong { color: var(--cm-text); font-size: var(--fs-sm); }
+.contract-import-match-strip .is-warning strong { color: var(--danger-text); }
+
+.contract-import-field-stack { display: grid; min-width: 0; align-content: start; gap: 6px; }
+.contract-import-field-stack .contract-text-button { justify-self: start; }
+.contract-import-history-body { display: grid; gap: 12px; padding-top: 12px; }
+.contract-import-history-body .contract-form-grid { gap: 12px 15px; }
+.contract-import-history-details > summary { color: var(--cm-text); }
+.contract-import-collapse-badge { margin-inline-start: auto; padding: 2px 7px; color: var(--cm-muted); font-size: calc(var(--fs-xs) - 1px); font-weight: 500; border-radius: var(--r-full, 999px); background: var(--surface-muted); }
+
+.contract-import-actions--sticky {
+  position: sticky;
+  bottom: 0;
+  background: var(--surface-card);
+  box-shadow: var(--shadow-card);
+}
+
+@media (max-width: 900px) {
+  .contract-import-file-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 640px) {
+  .contract-import-stage-head { flex-direction: column; }
+  .contract-import-step-badge { align-self: flex-start; }
+  .contract-import-actions--sticky { align-items: stretch; flex-direction: column; }
+  .contract-import-actions--sticky .contract-button { width: 100%; }
 }
 </style>

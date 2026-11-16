@@ -1,22 +1,13 @@
 import { createRequest } from '../../shared/api/request.js'
 import { formatUserError } from '../../../shared/utils/userError.js'
 
-export const RUNTIME_APPLICATIONS = Object.freeze([
-  { code: 'contract_management', name: '合同管理' },
-  { code: 'customer_and_opportunity', name: '客户与商机管理' },
-  { code: 'project_management', name: '项目服务管理' },
-  { code: 'settlement', name: '结算与开票管理' },
-  { code: 'reimbursement', name: '报销管理' },
-  { code: 'data_analysis', name: '数据看板与统计分析' },
-  { code: 'customer_portal', name: '客户门户' },
-])
-const validApplications = new Set(RUNTIME_APPLICATIONS.map(item => item.code))
+const RUNTIME_APPLICATION_CODE = /^[a-z][a-z0-9_]{0,63}$/
 export class RuntimeEnforcementError extends Error {
   constructor(message, options = {}) { super(message); this.name = 'RuntimeEnforcementError'; this.status = options.status || 0; this.code = options.code || '' }
 }
 const request = createRequest({ ErrorClass: RuntimeEnforcementError, networkMessage: '运行时授权服务暂时无法连接，请重试。', failureMessage: '运行时授权操作失败。', feature: 'licenses' })
 function applicationPath(application) {
-  if (!validApplications.has(application)) throw new RuntimeEnforcementError('请选择支持的业务系统。')
+  if (typeof application !== 'string' || !RUNTIME_APPLICATION_CODE.test(application)) throw new RuntimeEnforcementError('请选择支持的业务系统。')
   return `/licenses/enforcement/${application}`
 }
 
@@ -66,6 +57,30 @@ const OVERVIEW_INVALID_MESSAGE = '运行时授权概览数据格式异常，请�
 const RECORD_CODE = /^[A-Z][A-Z0-9_]{0,63}$/
 const RFC3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/
 const isRecord = value => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+
+// validateRuntimeApplications 用途：校验服务端探测到的已接入系统清单，失败关闭，不回退静态列表。
+// 参数：data 为服务端 data.items。
+// 返回值：去重后的系统清单；格式异常时抛出错误。
+export function validateRuntimeApplications(data) {
+  const items = isRecord(data) && Array.isArray(data.items) ? data.items : (Array.isArray(data) ? data : null)
+  if (!items) throw new RuntimeEnforcementError('已接入系统清单格式异常，请重新读取。')
+  const seen = new Set()
+  return items.map(item => {
+    const code = isRecord(item) && typeof item.code === 'string' ? item.code.trim() : ''
+    const name = isRecord(item) && typeof item.name === 'string' ? item.name.trim() : ''
+    const environment = isRecord(item) && typeof item.environment === 'string' ? item.environment.trim() : ''
+    if (!RUNTIME_APPLICATION_CODE.test(code) || !name || !environment || seen.has(code)) throw new RuntimeEnforcementError('已接入系统清单格式异常，请重新读取。')
+    seen.add(code)
+    return { code, name, environment }
+  })
+}
+
+// listRuntimeApplications 用途：读取当前租户/环境已部署且已接入的业务系统。
+// 参数：无。
+// 返回值：服务端清单；失败时抛出错误，不返回本地候选。
+export function listRuntimeApplications() {
+  return request('/licenses/enforcement').then(validateRuntimeApplications)
+}
 const isCount = value => Number.isSafeInteger(value) && value >= 0
 const isTimestamp = value => typeof value === 'string' && RFC3339.test(value)
 const isNullableTimestamp = value => value === null || isTimestamp(value)
@@ -333,7 +348,7 @@ export function runtimeAccessEnvironment(environment) {
 }
 
 // 与 Vue 响应式对象和测试共用同一套状态：overview 是主状态，旧快照不再由本页面读取。
-export function createRuntimeState() { return { application: 'contract_management', overview: null, fresh: false, loading: false, busy: false, error: '', confirmed: false } }
+export function createRuntimeState() { return { application: 'contract_management', applications: [], applicationsLoaded: false, applicationsLoading: false, applicationsError: '', overview: null, fresh: false, loading: false, busy: false, error: '', confirmed: false } }
 // createRuntimeController 用途：管理概览刷新、确认绑定、轮询和单次激活。
 // 参数：state 为页面状态，options 为权限、接口、计时器等依赖。
 // 返回值：返回读取、选择、激活、失效与释放方法。
@@ -354,6 +369,8 @@ export function createRuntimeController(state, options = {}) {
   let visibilityBound = false
   let disposed = false
   const pageHidden = () => Boolean(doc && doc.visibilityState === 'hidden')
+  const listApplications = options.listApplications || listRuntimeApplications
+  let applicationsPromise = null
   function clearPollTimer() { if (pollTimer !== null) { clearIntervalFn(pollTimer); pollTimer = null } }
   function ensurePollTimer() {
     if (disposed || !pollingActive || pollTimer !== null || pageHidden()) return
@@ -406,15 +423,58 @@ export function createRuntimeController(state, options = {}) {
       if (!stale(application, turn)) state.loading = false
     }
   }
+  // loadApplications 用途：探测当前租户已部署/已接入系统，替代前端静态候选列表。
+  // 参数：无。
+  // 返回值：异步完成；探测失败或空清单进入明确空态，不回退硬编码系统。
+  async function loadApplications() {
+    if (disposed || !canRead()) return
+    if (applicationsPromise) return applicationsPromise
+    state.applicationsLoading = true
+    state.applicationsError = ''
+    applicationsPromise = (async () => {
+      try {
+        const items = await listApplications()
+        if (disposed) return
+        state.applications = items
+        state.applicationsLoaded = true
+        if (!items.length) {
+          state.application = ''
+          state.overview = null
+          state.fresh = false
+          state.loading = false
+          state.confirmed = false
+          return
+        }
+        if (!items.some(item => item.code === state.application)) state.application = items[0].code
+        await readNow()
+      } catch (error) {
+        if (disposed) return
+        state.applications = []
+        state.applicationsLoaded = true
+        state.application = ''
+        state.overview = null
+        state.fresh = false
+        state.loading = false
+        state.confirmed = false
+        state.applicationsError = formatUserError(error, { fallback: '读取已接入系统清单失败，请重试。' })
+      } finally {
+        if (!disposed) state.applicationsLoading = false
+        applicationsPromise = null
+      }
+    })()
+    return applicationsPromise
+  }
+
   async function readNow() {
-    if (disposed) return
+    if (disposed || !state.application) return
     const application = state.application
     const turn = ++generation
     state.loading = true
     await read(application, turn)
   }
   async function refresh() {
-    if (!canRead() || state.busy || state.loading || disposed) return
+    if (!canRead() || state.busy || state.loading || state.applicationsLoading || disposed) return
+    if (!state.application) { await loadApplications(); return }
     state.confirmed = false
     state.error = ''
     readFailure = false
@@ -423,6 +483,11 @@ export function createRuntimeController(state, options = {}) {
   async function select(application) {
     applicationPath(application)
     if (state.busy || disposed) return
+    if (state.applicationsLoading && applicationsPromise) await applicationsPromise
+    if (state.applicationsLoaded && !state.applications.some(item => item.code === application)) {
+      state.error = '该系统未探测到已接入状态，不能读取运行时授权。'
+      return
+    }
     state.application = application
     state.overview = null
     state.fresh = false
@@ -461,7 +526,7 @@ export function createRuntimeController(state, options = {}) {
   // 参数：无。
   // 返回值：无。
   function poll() {
-    if (disposed || !pollingActive || pageHidden() || !canRead() || state.loading || state.busy) return
+    if (disposed || !pollingActive || pageHidden() || !canRead() || state.loading || state.busy || state.applicationsLoading || !state.application) return
     // 后台轮询仅在确认材料未变时保留勾选，不清除非读取类错误。
     void readNow()
   }
@@ -473,7 +538,7 @@ export function createRuntimeController(state, options = {}) {
     state.fresh = false
     generation += 1
     state.loading = false
-    if (!state.busy && canRead() && !disposed) return readNow()
+    if (!state.busy && canRead() && !disposed) return state.application ? readNow() : loadApplications()
   }
   function startPolling() {
     if (disposed) return
@@ -483,5 +548,5 @@ export function createRuntimeController(state, options = {}) {
   }
   function stopPolling() { pollingActive = false; clearPollTimer() }
   function dispose() { if (disposed) return; disposed = true; stopPolling(); unbindVisibility(); generation += 1 }
-  return { refresh, select, activateSelected, invalidate, startPolling, stopPolling, dispose }
+  return { refresh, loadApplications, select, activateSelected, invalidate, startPolling, stopPolling, dispose }
 }

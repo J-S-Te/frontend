@@ -220,3 +220,15 @@ async function loadLicenseAppCard() {
 async function renderCard(component, row) {
   return renderToString(Vue.createSSRApp({ render: () => Vue.h(component, { row, busy: false, loading: false }) }))
 }
+
+test('商业授权页按概览/授权项/运行时/事件分区，并提供筛选、表格和导入抽屉', () => {
+  const source = readFileSync(new URL('./CommercialLicenseView.vue', import.meta.url), 'utf8')
+  assert.match(source, /class="license-tabs"[^>]*role="tablist"/)
+  for (const label of ['概览', '授权项', '运行时', '事件']) assert.ok(source.includes(`>${label}`), label)
+  assert.match(source, /class="license-app-table"/)
+  assert.match(source, /class="license-app-filters"/)
+  assert.match(source, /class="license-import-overlay"/)
+  assert.match(source, /activeTab === 'entitlements'/)
+  assert.match(source, /activeTab === 'runtime'/)
+  assert.match(source, /activeTab === 'events'/)
+})

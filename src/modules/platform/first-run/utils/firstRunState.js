@@ -88,7 +88,7 @@ export const FIRST_RUN_TOUR_STEPS = Object.freeze([
     key: 'checklist-entry',
     anchor: 'checklist-entry',
     title: '上手清单',
-    description: '上手清单记录最多 5 项真实完成的上手动作，按你的权限展示；入口就在这里，门户页脚也有同样入口。',
+    description: '上手清单记录最多 5 项真实完成的上手动作，按你的权限展示；入口就在这里。',
   }),
 ])
 

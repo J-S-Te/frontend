@@ -185,6 +185,7 @@ const opportunities = ref([])
 const board = ref([])
 const presales = ref([])
 const presaleBoard = ref([])
+const showEmptyPresaleColumns = ref(false)
 // 售前统计看板与列表分开请求：列表每页只返回一页数据，统计必须使用服务端列总数。
 const presaleStatsColumns = ref(null)
 const presaleStatsLoadSequence = ref(0)
@@ -1211,6 +1212,14 @@ const hasReadNotifications = computed(() => notifications.value.some((item) => i
 // 私有状态——请求失败时必须显示错误 + 重试，不能把空列渲染成「暂无任务」让用户以为真的没有任务。
 const opportunityBoardState = computed(() => loading.value || Boolean(listError.value) || !board.value.length)
 const presaleBoardState = computed(() => loading.value || Boolean(listError.value) || !presaleBoard.value.length)
+// 看板默认隐藏空状态；状态流程仍可通过开关完整查看。
+const visiblePresaleBoard = computed(() => showEmptyPresaleColumns.value
+  ? presaleBoard.value
+  : presaleBoard.value.filter((column) => Number(column?.total || 0) > 0 || (column?.items?.length || 0) > 0))
+
+function presaleColumnHours(column) {
+  return presaleWorkHours(column?.items || [])
+}
 // 看板默认隐藏 0 条阶段；保留开关，阶段流程仍可完整查看。
 const visibleBoard = computed(() => showEmptyBoardStages.value ? board.value : board.value.filter((column) => (column.items?.length || 0) > 0))
 const boardSummary = computed(() => {
@@ -3480,7 +3489,57 @@ onMounted(async () => {
       <CreditApprovalInbox v-if="activeSection === 'credit-approvals'" :permissions="crmSession?.permissions || []" :roles="crmSession?.roles || []" />
       <CreditRuleSettingsPanel v-if="activeSection === 'credit-rules'" @notice="notice = $event" @error="error = $event" />
 
-      <section v-if="activeSection === 'customers'" class="crm-panel table-panel"><ListState v-if="customersListState" :loading="loading" :error="listError" error-title="客户列表加载失败" empty-title="暂无符合条件的客户" @retry="loadCurrent"><template #empty-action><button type="button" class="crm-state-action" @click="resetCustomerFilters">重置筛选</button></template></ListState><table v-else-if="customerFilters.view === 'table'" class="crm-data-table"><thead><tr><th scope="col">客户编号</th><th scope="col">客户名称</th><th scope="col">信用等级</th><th scope="col">类型</th><th scope="col">行业 / 区域</th><th scope="col">负责人</th><th scope="col">状态</th><th scope="col" title="包含客户沟通记录和关联商机跟进记录">最近跟进（含商机）</th><th scope="col">商机金额汇总</th><th scope="col">操作</th></tr></thead><tbody><tr v-for="item in customers" :key="item.id" @click="openCustomer(item.id)"><td>{{ item.customer_no }}</td><td>{{ item.name }}</td><td><span class="crm-credit-level crm-credit-level--inline" :class="`is-${String(item.credit_level || 'B').toLowerCase()}`">{{ creditLevelLabel(item.credit_level) }}</span></td><td>{{ item.customer_type }}</td><td>{{ item.industry }} / {{ item.region }}</td><td>{{ ownerLabel(item) }}</td><td><span class="crm-badge" :class="customerStatusTone(item.status)">{{ customerStatusText(item.status) }}</span></td><td>{{ formatDate(item.last_followup_at) }}</td><td>{{ formatAmount(item.opportunity_amount_sum) }}</td><td class="crm-table-actions"><button type="button" class="crm-table-link" @click.stop="openCustomer(item.id)">查看</button><button type="button" class="crm-table-link" @click.stop="editCustomerFromList(item)">编辑</button></td></tr></tbody></table><div v-else class="crm-customer-cards" :data-quick-filter="customerFilters.quick_filter"><button v-for="item in customers" :key="item.id" :data-status="item.status" @click="openCustomer(item.id)"><strong>{{ item.name }} <span class="crm-credit-level crm-credit-level--inline" :class="`is-${String(item.credit_level || 'B').toLowerCase()}`">{{ creditLevelLabel(item.credit_level) }}</span></strong><span>{{ item.customer_no }} · {{ customerStatusText(item.status) }}</span><span>{{ item.customer_type }} · {{ item.industry }} / {{ item.region }}</span><span>负责人：{{ ownerLabel(item) }}</span><span>最近跟进（含商机）：{{ formatDate(item.last_followup_at) }}</span><span>商机金额汇总：{{ formatAmount(item.opportunity_amount_sum) }}</span></button></div><PaginationBar class="crm-pagination" label="客户列表分页" :page="renderedPage.number" :total="renderedPage.total" :page-size-options="[20, 50, 100]" :page-size="renderedPage.size" :loading="loading" @change="changeCustomerPage" @change-page-size="changeCustomerPageSize" /></section>
+      <section v-if="activeSection === 'customers'" class="crm-panel table-panel"><ListState v-if="customersListState" :loading="loading" :error="listError" error-title="客户列表加载失败" empty-title="暂无符合条件的客户" @retry="loadCurrent"><template #empty-action><button type="button" class="crm-state-action" @click="resetCustomerFilters">重置筛选</button></template></ListState><table v-else-if="customerFilters.view === 'table'" class="crm-data-table"><thead><tr><th scope="col">客户编号</th><th scope="col">客户名称</th><th scope="col">信用等级</th><th scope="col">类型</th><th scope="col">行业 / 区域</th><th scope="col">负责人</th><th scope="col">状态</th><th scope="col" title="包含客户沟通记录和关联商机跟进记录">最近跟进（含商机）</th><th scope="col">商机金额汇总</th><th scope="col">操作</th></tr></thead><tbody><tr v-for="item in customers" :key="item.id" @click="openCustomer(item.id)"><td>{{ item.customer_no }}</td><td>{{ item.name }}</td><td><span class="crm-credit-level crm-credit-level--inline" :class="`is-${String(item.credit_level || 'B').toLowerCase()}`">{{ creditLevelLabel(item.credit_level) }}</span></td><td>{{ item.customer_type }}</td><td>{{ item.industry }} / {{ item.region }}</td><td>{{ ownerLabel(item) }}</td><td><span class="crm-badge" :class="customerStatusTone(item.status)">{{ customerStatusText(item.status) }}</span></td><td>{{ formatDate(item.last_followup_at) }}</td><td>{{ formatAmount(item.opportunity_amount_sum) }}</td><td class="crm-table-actions"><button type="button" class="crm-table-link" @click.stop="openCustomer(item.id)">查看</button><button type="button" class="crm-table-link" @click.stop="editCustomerFromList(item)">编辑</button></td></tr></tbody></table>      <div v-else class="crm-customer-cards" :data-quick-filter="customerFilters.quick_filter">
+        <article
+          v-for="item in customers"
+          :key="item.id"
+          class="crm-customer-card"
+          :data-status="item.status"
+          tabindex="0"
+          role="group"
+          :aria-label="`打开客户 ${item.name}`"
+          @click="openCustomer(item.id)"
+          @keydown.enter.self.prevent="openCustomer(item.id)"
+          @keydown.space.self.prevent="openCustomer(item.id)"
+        >
+          <header class="crm-customer-card-head">
+            <div class="crm-customer-card-identity">
+              <strong class="crm-customer-card-name" :title="item.name">{{ item.name }}</strong>
+              <span class="crm-customer-card-no">{{ item.customer_no }}</span>
+            </div>
+            <span class="crm-badge" :class="customerStatusTone(item.status)">{{ customerStatusText(item.status) }}</span>
+          </header>
+          <div class="crm-customer-card-tags">
+            <span class="crm-credit-level crm-credit-level--inline" :class="`is-${String(item.credit_level || 'B').toLowerCase()}`">{{ creditLevelLabel(item.credit_level) }}</span>
+            <span class="crm-customer-card-tag">{{ item.customer_type || '类型未填' }}</span>
+            <span class="crm-customer-card-tag">{{ item.industry || '行业未填' }} / {{ item.region || '区域未填' }}</span>
+          </div>
+          <dl class="crm-customer-card-meta">
+            <div>
+              <dt>负责人</dt>
+              <dd class="crm-customer-card-owner" :class="{ 'is-warning': ownerLabel(item) === '负责人账号已失效' }">
+                <span class="crm-avatar crm-avatar--sm" aria-hidden="true">{{ personInitial(ownerLabel(item)) }}</span>
+                <span>{{ ownerLabel(item) }}</span>
+              </dd>
+            </div>
+            <div>
+              <dt>最近跟进</dt>
+              <dd>{{ item.last_followup_at ? formatDate(item.last_followup_at) : '未跟进' }}</dd>
+            </div>
+          </dl>
+          <footer class="crm-customer-card-foot">
+            <div class="crm-customer-card-amount">
+              <span>商机金额汇总</span>
+              <strong>{{ formatAmount(item.opportunity_amount_sum) }}</strong>
+            </div>
+            <div class="crm-customer-card-actions">
+              <button type="button" @click.stop="openCustomer(item.id)">查看</button>
+              <button type="button" @click.stop="editCustomerFromList(item)">编辑</button>
+            </div>
+          </footer>
+        </article>
+      </div>
+      <PaginationBar class="crm-pagination" label="客户列表分页" :page="renderedPage.number" :total="renderedPage.total" :page-size-options="[20, 50, 100]" :page-size="renderedPage.size" :loading="loading" @change="changeCustomerPage" @change-page-size="changeCustomerPageSize" /></section>
       <section v-if="activeSection === 'opportunities' && !boardMode" class="crm-panel table-panel"><ListState v-if="opportunitiesListState" :loading="loading" :error="listError" error-title="商机列表加载失败" empty-title="暂无符合条件的商机" @retry="loadCurrent"><template #empty-action><button type="button" class="crm-state-action" @click="resetOpportunityFilters">重置筛选</button></template></ListState><table v-else class="crm-data-table"><thead><tr><th scope="col">商机编号</th><th scope="col">名称</th><th scope="col">客户</th><th scope="col">预计金额</th><th scope="col">预计签单</th><th scope="col">阶段</th><th scope="col">状态</th><th scope="col">负责人</th><th scope="col">已签约合同</th><th scope="col">终态待办</th></tr></thead><tbody><tr v-for="item in opportunities" :key="item.id" @click="openOpportunity(item.id)"><td>{{ item.opportunity_no }}</td><td>{{ item.name }}</td><td>{{ item.customer_name || `客户 #${item.customer_id}` }}</td><td>{{ formatAmount(item.expected_amount) }}</td><td>{{ formatDate(item.expected_sign_date) }}</td><td><span class="crm-badge" :class="opportunityStageTone(item.current_stage)">{{ item.current_stage }}</span></td><td><span class="crm-badge" :class="opportunityStatusTone(item.opp_status)">{{ opportunityStatusText(item.opp_status) }}</span></td><td>{{ ownerLabel(item.owner_user_id) }}</td><td>{{ formatSignedContractCount(item.signed_contract_count) }}</td><td><span v-if="item.terminal_pending_type && item.terminal_pending_type !== 'NONE'" class="crm-badge crm-badge--warning">{{ terminalPendingText(item.terminal_pending_type) }}</span><span v-else class="crm-note">—</span></td></tr></tbody></table><PaginationBar class="crm-pagination" label="商机列表分页" :page="renderedPage.number" :total="renderedPage.total" :page-size-options="[20, 50, 100]" :page-size="renderedPage.size" :loading="loading" @change="changeOpportunityPage" @change-page-size="changeOpportunityPageSize" /></section>
       <div v-if="activeSection === 'opportunities' && boardMode && !opportunityBoardState" class="crm-board-summary">
         <span>总商机 <strong>{{ boardSummary.count }}</strong></span>
@@ -3510,7 +3569,34 @@ onMounted(async () => {
         <p v-else class="crm-empty compact">当前筛选下没有非空阶段，勾选“显示空阶段”查看完整流程。</p></section>
       <section v-if="activeSection === 'opportunities'" class="crm-panel crm-stage-alerts"><div class="crm-panel-heading"><div><h2>阶段超时告警</h2><p class="crm-note">服务端个人列表当前返回已触发的未读/已读告警；待处理和已取消状态不会进入个人查询结果。</p></div><label class="check"><input v-model="stageAlertUnreadOnly" type="checkbox">仅看未读</label></div><p v-if="stageRuleForbidden" class="crm-alert error" role="alert">无阶段告警规则配置权限（403）；告警查询仍按现有权限执行。</p><div v-if="stageAlerts.length" class="crm-stage-alert-grid"><button v-for="item in stageAlerts" :key="item.id" @click="selectedStageAlert = item"><strong>{{ item.opportunity_no }}</strong><span>{{ item.stage }} · {{ stageAlertStatusText(item.status) }}</span><small>应提醒 {{ formatDate(item.due_at) }}</small></button></div><div v-else class="crm-empty compact">暂无{{ stageAlertUnreadOnly ? '未读' : '' }}阶段超时告警</div><p class="crm-status-legend"><span>待处理：Worker 尚未投递</span><span>已触发：站内告警已生成</span><span>已取消：阶段、终态、作废或负责人变化后失效</span></p></section>
       <section v-if="activeSection === 'presale' && alerts.length" class="crm-panel crm-alert-list"><h2>未读预警</h2><p class="crm-note">个人预警仅合并当前登录用户的内部人员身份，不随 SELF/ORG/ALL 数据范围扩大。</p><button v-for="item in alerts" :key="item.id" @click="readAlert(item)"><strong>{{ alertTypeText(item.alert_type) }}</strong><span>{{ item.request_no }} · 起算 {{ formatDate(item.basis_at) }} · 阈值 {{ formatDate(item.due_at) }}</span></button></section>
-      <section v-if="activeSection === 'presale' && !presaleCreatePage"><section v-if="presaleView === 'list'" class="crm-panel table-panel"><h2>售前申请列表</h2><p class="crm-note">列表范围由角色决定；点击记录查看详情、工时和服务端允许的动作。</p><ListState v-if="presaleListState" :loading="loading" :error="listError" error-title="售前申请加载失败" empty-title="暂无可见申请" @retry="loadCurrent"><template #empty-action><button type="button" class="crm-state-action" @click="resetPresaleFilters">重置筛选</button></template></ListState><table v-else class="crm-data-table"><thead><tr><th scope="col">申请编号</th><th scope="col">商机</th><th scope="col">申请人</th><th scope="col">状态</th><th scope="col">场地 / 紧急度</th><th scope="col">执行人</th><th scope="col">累计工时</th><th scope="col">期望结束</th><th scope="col">超时</th></tr></thead><tbody><tr v-for="item in presales" :key="presaleRequestID(item)" @click="openPresale(presaleRequestID(item))"><td>{{ item.request_no }}</td><td>{{ presaleOpportunityLabel(item) }}</td><td>{{ applicantLabel(item) }}</td><td><span class="crm-badge" :class="presaleStatusTone(item.status)">{{ requestStatusText(item.status) }}</span></td><td><span class="crm-tag">{{ venueText(item.venue) }}</span><span class="crm-tag" :class="{ 'is-urgent': item.urgency === 'URGENT' }">{{ urgencyText(item.urgency) }}</span></td><td>{{ assignees(item.current_assignees) }}</td><td>{{ item.total_work_hours }} 小时</td><td>{{ formatDate(item.expected_end) }}</td><td><span class="crm-badge" :class="item.overdue ? 'crm-badge--danger' : 'crm-badge--gray'">{{ item.overdue ? '已超时' : '未超时' }}</span></td></tr></tbody></table><PaginationBar class="crm-pagination" label="售前申请列表分页" :page="presalePage.number" :total="presalePage.total" :page-size="presalePage.size" :loading="loading" @change="changePresalePage" /></section><section v-else class="crm-panel crm-presale-board-panel"><div class="crm-panel-heading"><div><h2>售前状态看板</h2><p class="crm-note">只读看板，不支持拖拽改状态。每列最多显示服务端返回的 {{ presaleColumnLimit }} 条，列总数不受截断影响。</p></div></div><ListState v-if="presaleBoardState" :loading="loading" :error="listError" error-title="售前状态看板加载失败" empty-title="暂无可见申请" @retry="loadCurrent"><template #empty-action><button type="button" class="crm-state-action" @click="resetPresaleFilters">重置筛选</button></template></ListState><div v-else class="crm-board crm-presale-board"><article v-for="column in presaleBoard" :key="column.status" class="crm-board-column" :data-status="column.status"><h2><span class="crm-board-dot" aria-hidden="true"></span>{{ requestStatusText(column.status) }}<small>{{ column.total }}</small></h2><button v-for="item in column.items" :key="presaleRequestID(item)" type="button" class="crm-board-card" :aria-label="`打开售前申请 ${item.request_no}`" :disabled="!presaleRequestID(item)" @click="openPresale(presaleRequestID(item))"><span class="crm-board-card-head"><strong>{{ item.request_no }}</strong><span class="crm-badge" :class="presaleStatusTone(item.status)">{{ requestStatusText(item.status) }}</span></span><span class="crm-board-customer"><span>{{ presaleOpportunityLabel(item) }}</span></span><span class="crm-board-card-row"><span>{{ applicantLabel(item) }} · {{ urgencyText(item.urgency) }}</span><span>{{ item.overdue ? '已超时' : '未超时' }}</span></span><span class="crm-board-owner"><span>{{ assignees(item.current_assignees) }}</span></span><span class="crm-board-meta">{{ item.total_work_hours }} 小时</span></button><p v-if="Number(column.total) > (column.items?.length || 0)" class="crm-note">另有 {{ Number(column.total) - (column.items?.length || 0) }} 条未在本列展示</p><p v-else-if="!column.items?.length" class="crm-empty compact">暂无任务</p></article></div></section></section>
+      <section v-if="activeSection === 'presale' && !presaleCreatePage"><section v-if="presaleView === 'list'" class="crm-panel table-panel"><h2>售前申请列表</h2><p class="crm-note">列表范围由角色决定；点击记录查看详情、工时和服务端允许的动作。</p><ListState v-if="presaleListState" :loading="loading" :error="listError" error-title="售前申请加载失败" empty-title="暂无可见申请" @retry="loadCurrent"><template #empty-action><button type="button" class="crm-state-action" @click="resetPresaleFilters">重置筛选</button></template></ListState><table v-else class="crm-data-table"><thead><tr><th scope="col">申请编号</th><th scope="col">商机</th><th scope="col">申请人</th><th scope="col">状态</th><th scope="col">场地 / 紧急度</th><th scope="col">执行人</th><th scope="col">累计工时</th><th scope="col">期望结束</th><th scope="col">超时</th></tr></thead><tbody><tr v-for="item in presales" :key="presaleRequestID(item)" @click="openPresale(presaleRequestID(item))"><td>{{ item.request_no }}</td><td>{{ presaleOpportunityLabel(item) }}</td><td>{{ applicantLabel(item) }}</td><td><span class="crm-badge" :class="presaleStatusTone(item.status)">{{ requestStatusText(item.status) }}</span></td><td><span class="crm-tag">{{ venueText(item.venue) }}</span><span class="crm-tag" :class="{ 'is-urgent': item.urgency === 'URGENT' }">{{ urgencyText(item.urgency) }}</span></td><td>{{ assignees(item.current_assignees) }}</td><td>{{ item.total_work_hours }} 小时</td><td>{{ formatDate(item.expected_end) }}</td><td><span class="crm-badge" :class="item.overdue ? 'crm-badge--danger' : 'crm-badge--gray'">{{ item.overdue ? '已超时' : '未超时' }}</span></td></tr></tbody></table><PaginationBar class="crm-pagination" label="售前申请列表分页" :page="presalePage.number" :total="presalePage.total" :page-size="presalePage.size" :loading="loading" @change="changePresalePage" /></section>      <section v-else class="crm-panel crm-presale-board-panel">
+        <div class="crm-panel-heading">
+          <div>
+            <h2>售前状态看板</h2>
+            <p class="crm-note">只读看板，不支持拖拽改状态。每列最多显示服务端返回的 {{ presaleColumnLimit }} 条，列总数不受截断影响；工时为当前已加载卡片合计。</p>
+          </div>
+          <label class="check"><input v-model="showEmptyPresaleColumns" type="checkbox">显示空状态</label>
+        </div>
+        <ListState v-if="presaleBoardState" :loading="loading" :error="listError" error-title="售前状态看板加载失败" empty-title="暂无可见申请" @retry="loadCurrent"><template #empty-action><button type="button" class="crm-state-action" @click="resetPresaleFilters">重置筛选</button></template></ListState>
+        <div v-else-if="visiblePresaleBoard.length" class="crm-board crm-presale-board">
+          <article v-for="column in visiblePresaleBoard" :key="column.status" class="crm-board-column" :class="{ 'is-empty': !(column.items?.length) }" :data-status="column.status">
+            <h2><span class="crm-board-dot" aria-hidden="true"></span><span class="crm-board-stage">{{ requestStatusText(column.status) }}</span><small>{{ column.total || column.items?.length || 0 }}</small><span class="crm-presale-column-hours" title="当前已加载卡片工时">{{ presaleColumnHours(column) }} h</span></h2>
+            <div class="crm-board-column-body">
+              <p v-if="!column.items?.length" class="crm-board-empty">暂无任务</p>
+              <button v-for="item in column.items" :key="presaleRequestID(item)" type="button" class="crm-board-card crm-presale-card" :aria-label="`打开售前申请 ${item.request_no}`" :disabled="!presaleRequestID(item)" @click="openPresale(presaleRequestID(item))">
+                <span class="crm-presale-card-head"><strong class="crm-presale-card-no">{{ item.request_no }}</strong><span class="crm-badge" :class="item.overdue ? 'crm-badge--danger' : 'crm-badge--gray'">{{ item.overdue ? '已超时' : '未超时' }}</span></span>
+                <span class="crm-presale-card-title" :title="presaleOpportunityLabel(item)">{{ presaleOpportunityLabel(item) }}</span>
+                <span class="crm-presale-card-meta"><span>{{ applicantLabel(item) }}</span><span class="crm-tag" :class="{ 'is-urgent': item.urgency === 'URGENT' }">{{ urgencyText(item.urgency) }}</span><span>{{ venueText(item.venue) }}</span></span>
+                <span class="crm-presale-card-assignee">执行人：{{ assignees(item.current_assignees) || '未指派' }}</span>
+                <span class="crm-presale-card-foot"><span>期望 {{ formatDate(item.expected_end) }}</span><strong>{{ item.total_work_hours }} 小时</strong></span>
+              </button>
+              <p v-if="Number(column.total) > (column.items?.length || 0)" class="crm-note">另有 {{ Number(column.total) - (column.items?.length || 0) }} 条未在本列展示</p>
+            </div>
+          </article>
+        </div>
+        <p v-else class="crm-empty compact">当前筛选下没有非空状态，勾选“显示空状态”查看完整流程。</p>
+      </section>
+</section>
       <section v-if="activeSection === 'presale' && presaleCreatePage" class="crm-presale-create-page">
         <div class="crm-presale-create-steps">
           <p class="crm-presale-create-steps__label">填写步骤</p>

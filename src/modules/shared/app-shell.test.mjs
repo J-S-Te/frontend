@@ -889,3 +889,28 @@ test('≤620px 保留通知铃铛的样式护栏与折叠按钮的桌面限定',
   assert.match(consoleCss, /@media \(min-width: 821px\)[\s\S]*?\.console-page\.is-sidebar-collapsed \.console-sidebar/, '折叠只作用于桌面')
   assert.match(consoleCss, /@media \(max-width: 820px\)[\s\S]*?\.console-sidebar-toggle\s*\{[^}]*display:\s*none/, '窄屏隐藏桌面折叠按钮')
 })
+
+test('二级分组标题可折叠，且不影响同级其他分组', async () => {
+  const nested = [{
+    label: '系统管理',
+    items: [{
+      key: 'settings', label: '系统设置', expanded: true,
+      children: [
+        { key: 'settings:iam', label: '身份、组织与授权', groupLabel: '身份与权限' },
+        { key: 'settings:security', label: '安全设置', groupLabel: '安全与通知' },
+        { key: 'settings:notify', label: '通知中心', groupLabel: '安全与通知' },
+      ],
+    }],
+  }]
+  const shell = renderShell({ navGroups: nested })
+  assert.equal(shell.byClass('console-nav-sublabel').length, 2)
+  assert.equal(shell.byClass('console-nav-item--child').length, 3)
+  const securityGroup = shell.byClass('console-nav-sublabel').find((node) => textOf(node).includes('安全与通知'))
+  assert.equal(securityGroup.props['aria-expanded'], 'true')
+  shell.click(securityGroup)
+  await Vue.nextTick()
+  shell.sync()
+  assert.equal(shell.byClass('console-nav-item--child').length, 1, '折叠“安全与通知”只隐藏其下两项')
+  const collapsed = shell.byClass('console-nav-sublabel').find((node) => textOf(node).includes('安全与通知'))
+  assert.equal(collapsed.props['aria-expanded'], 'false')
+})

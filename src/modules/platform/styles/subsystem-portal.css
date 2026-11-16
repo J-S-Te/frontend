@@ -163,7 +163,7 @@
 .subsystem-portal__theme-dot { width: 7px; height: 7px; border: 1px solid currentColor; border-radius: 50%; }
 .subsystem-portal__theme-option.is-active .subsystem-portal__theme-dot { border-color: var(--portal-primary); background: var(--portal-primary); box-shadow: 0 0 9px var(--portal-primary); }
 
-/* 上手清单入口：页头与页脚共用同一套状态色，进度只显示真实完成数。 */
+/* 上手清单入口：仅页头保留；进度只显示真实完成数。 */
 .subsystem-portal__guide-entry {
   display: inline-flex;
   min-height: 40px;
@@ -429,27 +429,11 @@
 .subsystem-portal__footer { position: relative; z-index: 1; display: flex; flex: 0 0 auto; justify-content: space-between; gap: var(--space-4); padding: 0 clamp(24px, 3vw, 52px) 24px; color: var(--portal-text-faint); font-size: var(--fs-sm); }
 .subsystem-portal__footer-note { margin-right: auto; }
 .subsystem-portal__footer-copyright { margin-left: auto; }
-.subsystem-portal__guide-footer-entry {
-  display: inline-flex;
-  min-height: 28px;
-  margin-right: var(--space-4);
-  padding: 0 var(--space-3);
-  align-items: center;
-  gap: var(--space-1);
-  color: var(--portal-text-muted);
-  cursor: pointer;
-  border: 1px solid var(--portal-border);
-  border-radius: var(--radius-pill);
-  background: transparent;
-  font-size: var(--fs-sm);
-  font-weight: 600;
-  transition: color var(--duration-fast) ease, border-color var(--duration-fast) ease, background var(--duration-fast) ease;
-}
-.subsystem-portal__guide-footer-entry:hover,
-.subsystem-portal__guide-footer-entry:focus-visible { color: var(--portal-text); border-color: var(--portal-primary-border); outline: none; background: var(--portal-surface-soft); }
-.subsystem-portal__guide-footer-entry:disabled { cursor: progress; opacity: .62; }
-.subsystem-portal__guide-footer-entry:disabled:hover { color: var(--portal-text-muted); border-color: var(--portal-border); background: transparent; }
-.subsystem-portal__guide-footer-count { color: var(--portal-primary-strong); font-variant-numeric: tabular-nums; }
+
+
+
+
+
 .subsystem-portal__toast { position: fixed; z-index: 10; bottom: 30px; left: 50%; min-width: min(360px, calc(100vw - 32px)); padding: var(--space-3) var(--space-5); color: #fff; border: 1px solid var(--portal-border-strong); border-radius: var(--radius-lg); background: #0f1c31; box-shadow: var(--portal-shadow); font-size: var(--fs-body-lg); text-align: center; transform: translateX(-50%); }
 .subsystem-portal__toast.is-deny { background: #9f1239; }
 .portal-toast-enter-active,

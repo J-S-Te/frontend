@@ -37,6 +37,12 @@ const canEquipment = computed(() => ['project.implementation.plan', 'project.dev
 const canCapacity = computed(() => permission.value.has(form.resource_type === 'PERSON' ? 'project.person_capacity.manage' : 'project.equipment_capacity.manage'))
 const canRecord = computed(() => permission.value.has('project.resource_usage.record'))
 const canConfirm = computed(() => permission.value.has('project.resource_usage.confirm'))
+const activeTab = ref('usage')
+watch([canCapacity, canRecord], () => {
+  if (activeTab.value === 'capacity' && !canCapacity.value) activeTab.value = canRecord.value ? 'usage' : ''
+  else if (activeTab.value === 'usage' && !canRecord.value) activeTab.value = canCapacity.value ? 'capacity' : ''
+  else if (!activeTab.value) activeTab.value = canRecord.value ? 'usage' : canCapacity.value ? 'capacity' : ''
+}, { immediate: true })
 const planContext = computed(() => {
   const plan = activeItem.value?.implementation_plan
   if (!plan) return null
@@ -320,27 +326,37 @@ watch(canPerson, (allowed) => { if (!allowed && canEquipment.value) form.resourc
     <header class="pm-resource-header">
       <div class="pm-resource-title">
         <p class="pm-panel-kicker">资源事实</p>
-        <h3>明确容量与实际用量</h3>
+        <h3>容量与实际用量</h3>
+        <p class="pm-resource-subtitle">先发布明确容量，再登记并独立确认实际用量；计划、预约和签到不会自动变成实际用时。</p>
       </div>
       <div class="pm-resource-header-actions">
         <span class="pm-resource-summary">{{ summaryText }}</span>
-        <button type="button" :disabled="busy" @click="load">刷新核对</button>
+        <button type="button" class="pm-button" :disabled="busy" @click="load">刷新核对</button>
       </div>
     </header>
-    <p class="pm-resource-note">全部时刻为北京时间。系统会按当前服务项和实施计划自动带出资源与日期；先发布明确容量，再登记并独立确认实际用量。计划、预约和签到不会自动变成实际用时。</p>
     <div class="pm-resource-context" aria-label="资源事实当前上下文">
-      <span v-if="activeItem">服务项：{{ activeItem.site || activeItem.id }} · {{ activeItem.status }}</span>
-      <span v-if="planContext">实施计划：{{ planContext.window_start || '未填' }} ~ {{ planContext.window_end || '未填' }}</span>
-      <span v-if="selectedResource">当前资源：{{ selectedResource.resource_name || selectedResource.name || selectedResource.resource_id }}</span>
-      <span v-if="autoOrg.organization_id">组织：{{ autoOrg.organization_name }}</span>
-      <span v-if="orgBusy">正在解析组织…</span>
+      <span v-if="activeItem" class="pm-resource-chip">服务项：{{ activeItem.site || activeItem.id }} · {{ activeItem.status }}</span>
+      <span v-if="planContext" class="pm-resource-chip">计划：{{ planContext.window_start || '未填' }} ~ {{ planContext.window_end || '未填' }}</span>
+      <span v-if="selectedResource" class="pm-resource-chip">资源：{{ selectedResource.resource_name || selectedResource.name || selectedResource.resource_id }}</span>
+      <span v-if="autoOrg.organization_id" class="pm-resource-chip">组织：{{ autoOrg.organization_name }}</span>
+      <span v-if="orgBusy" class="pm-resource-chip">正在解析组织…</span>
     </div>
+    <nav v-if="canCapacity || canRecord" class="pm-resource-tabs" aria-label="资源事实录入类型">
+      <button v-if="canCapacity" type="button" :class="{ active: activeTab === 'capacity' }" @click="activeTab = 'capacity'">容量发布</button>
+      <button v-if="canRecord" type="button" :class="{ active: activeTab === 'usage' }" @click="activeTab = 'usage'">实际用量</button>
+    </nav>
     <p v-if="error" role="alert">{{ error }}</p>
     <p v-if="notice" role="status">{{ notice }}</p>
     <p v-if="pending" role="status">本次结果尚未确认，请刷新核对，再 <button type="button" :disabled="busy" @click="execute()">按原操作重试</button>。</p>
 
-    <fieldset v-if="canRecord || canCapacity" :disabled="busy || !!pending || batchBusy">
-      <legend>快速登记{{ form.corrects_id ? ' · 关联更正' : '' }}</legend>
+    <section v-if="(canCapacity || canRecord) && activeTab" class="pm-resource-card" :aria-busy="busy || !!pending || batchBusy">
+      <header>
+        <div>
+          <h4>{{ activeTab === 'capacity' ? '发布明确容量' : '登记实际用量' }}</h4>
+          <p>{{ activeTab === 'capacity' ? '容量是资源当日可用的明确时间窗；发布后实际用量必须落在容量内。' : '只记录已经发生的实际工作或设备运行，提交后由其他人独立确认。' }}</p>
+        </div>
+        <span v-if="form.corrects_id" class="pm-badge amber">关联更正</span>
+      </header>
       <div class="pm-resource-form">
         <label v-if="!hasSelectedItem && items.length">实际用量服务项（授权进行中及历史项）
           <select v-model="selectedMetricItemID"><option value="">请选择服务项</option><option v-for="candidate in items" :key="candidate.id" :value="candidate.id">{{ candidate.site || candidate.id }} · {{ candidate.status }} · {{ candidate.project_id }}</option></select>
@@ -358,9 +374,10 @@ watch(canPerson, (allowed) => { if (!allowed && canEquipment.value) form.resourc
         <label>结束时刻<input v-model="form.end" type="time" maxlength="5" /></label>
       </div>
       <p v-if="planContext" class="pm-resource-hint">已按实施计划带出资源与日期{{ planContext.personnel_count + planContext.equipment_count > 1 ? '；计划中还有多人/多设备，可在“实际资源”切换' : '' }}。</p>
+      <p v-if="activeTab === 'usage'" class="pm-resource-hint">实际用量必须落在已发布的明确容量内；没有容量时请先由容量管理员发布，不能按每天 8 小时推算。</p>
       <label class="pm-resource-wide">用途 / 事实 / 更正原因<textarea v-model="form.note" maxlength="1000" /></label>
 
-      <template v-if="canCapacity">
+      <template v-if="activeTab === 'capacity' && canCapacity">
         <div class="pm-resource-capacity">
           <h4>当天明确可用时段</h4>
           <div v-for="(window, index) in capacityWindows" :key="index" class="pm-resource-form pm-resource-window">
@@ -393,15 +410,15 @@ watch(canPerson, (allowed) => { if (!allowed && canEquipment.value) form.resourc
         </div>
       </template>
 
-      <template v-if="canRecord">
+      <template v-if="activeTab === 'usage' && canRecord">
         <label class="pm-resource-wide">实际工作 / 运行证据<textarea v-model="form.evidence" maxlength="1000" /></label>
         <p>{{ activeItem ? `当前服务项：${activeItem.site || activeItem.id}` : '请先选择服务项后登记用量。' }}</p>
         <button type="button" :disabled="!activeItem" @click="save('usages')">保存实际用量草稿</button>
       </template>
       <button v-if="form.version || form.corrects_id" type="button" @click="form.version = 0; form.corrects_id = ''; notice = ''">退出更正登记</button>
-    </fieldset>
+    </section>
 
-    <section v-if="canRecord || canConfirm" class="pm-resource-worklist">
+    <section v-if="canRecord || canConfirm" class="pm-resource-worklist" :class="{ 'is-empty': !myDrafts.length && !pendingConfirm.length }">
       <header><h4>待我处理</h4><span>{{ summaryText }}</span></header>
       <div class="pm-resource-batch-actions">
         <button v-if="canRecord && myDrafts.length" type="button" :disabled="batchBusy" @click="armBatch('submit')">提交我的草稿（{{ myDrafts.length }}）</button>
@@ -442,4 +459,57 @@ watch(canPerson, (allowed) => { if (!allowed && canEquipment.value) form.resourc
 
 <style scoped>
 .pm-resource-facts{padding:16px;margin-block:16px;border:1px solid var(--border-color,#dce2eb);border-radius:12px}.pm-resource-header{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start;justify-content:space-between}.pm-resource-header-actions{display:flex;flex-wrap:wrap;gap:12px;align-items:center}.pm-resource-summary{color:var(--pm-muted,#5b6778);font-size:13px}.pm-resource-note{line-height:1.7;color:var(--pm-muted,#5b6778)}.pm-resource-context{display:flex;flex-wrap:wrap;gap:8px 16px;margin-block:12px;font-size:13px}.pm-resource-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-block:12px}.pm-resource-facts label{display:flex;flex-direction:column;gap:6px}.pm-resource-facts fieldset{min-width:0;padding:16px;border:1px solid var(--border-color,#dce2eb)}.pm-resource-facts textarea{min-height:64px}.pm-resource-wide{display:flex;flex-direction:column;gap:6px}.pm-resource-hint{color:var(--pm-muted,#5b6778);font-size:13px}.pm-resource-chip{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border:1px solid var(--border-color,#dce2eb);border-radius:999px;background:var(--pm-surface,#f7f9fc)}.pm-resource-inline{flex-direction:row;align-items:center}.pm-resource-org{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-block:8px;padding:8px 10px;border-radius:8px;background:var(--pm-surface,#f7f9fc)}.pm-resource-advanced{margin-block:10px}.pm-resource-advanced summary{cursor:pointer;color:var(--pm-muted,#5b6778)}.pm-resource-actions{display:flex;flex-wrap:wrap;gap:12px;margin-block:8px}.pm-resource-worklist{margin-block:16px;padding:12px;border:1px dashed var(--border-color,#dce2eb);border-radius:8px}.pm-resource-worklist header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between}.pm-resource-batch-actions{display:flex;flex-wrap:wrap;gap:12px;margin-block:8px}.pm-resource-batch-confirm{padding:10px;border:1px solid var(--border-color,#dce2eb);border-radius:8px;background:var(--pm-surface,#f7f9fc)}.pm-resource-scroll{overflow:auto;margin-block:12px}.pm-resource-facts table{width:100%;border-collapse:collapse;min-width:680px}.pm-resource-facts th,.pm-resource-facts td{padding:10px;text-align:left;vertical-align:top;border-bottom:1px solid var(--border-color,#dce2eb)}.pm-resource-facts small{display:block}.pm-resource-facts p{line-height:1.7}
+
+/* 资源事实可读性：容量/用量分栏、三列表单、紧凑待办与台账。 */
+.pm-resource-facts { display: grid; gap: var(--pm-sp-4); padding: var(--pm-sp-5); border: 1px solid var(--pm-line); border-radius: var(--pm-r-lg); background: var(--pm-card); }
+.pm-resource-header { display: flex; flex-wrap: wrap; gap: var(--pm-sp-4); align-items: flex-start; justify-content: space-between; }
+.pm-resource-title h3 { margin: 0 0 4px; color: var(--pm-ink); }
+.pm-resource-subtitle { max-width: 760px; margin: 0; color: var(--pm-muted); font-size: var(--pm-fs-sm); line-height: 1.55; }
+.pm-resource-header-actions { display: flex; flex-wrap: wrap; gap: var(--pm-sp-3); align-items: center; }
+.pm-resource-summary { color: var(--pm-muted); font-size: var(--pm-fs-hint); }
+.pm-resource-context { display: flex; flex-wrap: wrap; gap: var(--pm-sp-2); }
+.pm-resource-chip { display: inline-flex; align-items: center; gap: var(--pm-sp-2); padding: 6px 10px; border: 1px solid var(--pm-line); border-radius: var(--pm-r-full); background: var(--pm-card); color: var(--pm-body); font-size: var(--pm-fs-hint); }
+.pm-resource-tabs { display: inline-flex; gap: 2px; border-bottom: 1px solid var(--pm-line); }
+.pm-resource-tabs button { padding: 8px 14px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--pm-muted); font-size: var(--pm-fs-sm); font-weight: var(--pm-fw-semibold); cursor: pointer; }
+.pm-resource-tabs button.active { border-bottom-color: var(--pm-primary); color: var(--pm-primary); }
+.pm-resource-card { display: grid; gap: var(--pm-sp-4); padding: var(--pm-sp-4); border: 1px solid var(--pm-line); border-radius: var(--pm-r-md); background: var(--pm-card); }
+.pm-resource-card > header { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: var(--pm-sp-3); }
+.pm-resource-card > header h4 { margin: 0 0 4px; color: var(--pm-ink); }
+.pm-resource-card > header p { max-width: 720px; margin: 0; color: var(--pm-muted); font-size: var(--pm-fs-hint); line-height: 1.5; }
+.pm-resource-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--pm-sp-3) var(--pm-sp-4); margin: 0; }
+.pm-resource-form label { display: flex; flex-direction: column; gap: 6px; color: var(--pm-body); font-size: var(--pm-fs-label); font-weight: var(--pm-fw-semibold); }
+.pm-resource-facts input:not([type="checkbox"]), .pm-resource-facts select, .pm-resource-facts textarea { width: 100%; min-height: var(--pm-h-control); padding: 8px 10px; border: 1px solid var(--pm-line); border-radius: var(--pm-r-sm); background: var(--pm-card); color: var(--pm-body); font-size: var(--pm-fs-sm); font-weight: var(--pm-fw-regular); }
+.pm-resource-facts textarea { min-height: 72px; resize: vertical; }
+.pm-resource-facts button:not(.pm-link):not(.pm-button):not(.pm-resource-tabs button) { min-height: var(--pm-h-button); padding: 7px 12px; border: 1px solid var(--pm-line); border-radius: var(--pm-r-sm); background: var(--pm-card); color: var(--pm-body); font-size: var(--pm-fs-sm); cursor: pointer; }
+.pm-resource-facts button:not(.pm-link):not(.pm-button):not(.pm-resource-tabs button):hover:not(:disabled) { border-color: var(--pm-primary); color: var(--pm-primary); }
+.pm-resource-wide { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px; }
+.pm-resource-window { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; align-items: end; padding: var(--pm-sp-3); border: 1px solid var(--pm-line-soft); border-radius: var(--pm-r-sm); background: var(--pm-sunken); }
+.pm-resource-inline { flex-direction: row; align-items: center; gap: var(--pm-sp-2); font-weight: var(--pm-fw-regular); }
+.pm-resource-org { display: flex; flex-wrap: wrap; align-items: center; gap: var(--pm-sp-2); padding: var(--pm-sp-2) var(--pm-sp-3); border: 1px solid var(--pm-line); border-radius: var(--pm-r-sm); color: var(--pm-body); font-size: var(--pm-fs-hint); }
+.pm-resource-actions { display: flex; flex-wrap: wrap; gap: var(--pm-sp-2); }
+.pm-resource-worklist { display: grid; gap: var(--pm-sp-3); padding: var(--pm-sp-4); border: 1px solid var(--pm-line); border-radius: var(--pm-r-md); background: var(--pm-card); }
+.pm-resource-worklist.is-empty { padding: 0; border: 0; background: transparent; }
+.pm-resource-worklist > header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--pm-sp-2); }
+.pm-resource-worklist > header h4 { margin: 0; color: var(--pm-ink); }
+.pm-resource-worklist > header span { color: var(--pm-muted); font-size: var(--pm-fs-hint); }
+.pm-resource-batch-actions { display: flex; flex-wrap: wrap; gap: var(--pm-sp-2); }
+.pm-resource-batch-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: var(--pm-sp-2); padding: var(--pm-sp-3); border: 1px solid var(--pm-line); border-radius: var(--pm-r-sm); background: var(--pm-sunken); }
+.pm-resource-batch-confirm p { flex: 1 1 320px; margin: 0; }
+.pm-resource-ledger { display: grid; gap: var(--pm-sp-3); }
+.pm-resource-ledger > h4 { margin: var(--pm-sp-2) 0 0; color: var(--pm-ink); }
+.pm-resource-scroll { overflow: auto; border: 1px solid var(--pm-line); border-radius: var(--pm-r-sm); }
+.pm-resource-scroll table { width: 100%; border-collapse: collapse; font-size: var(--pm-fs-sm); }
+.pm-resource-scroll th, .pm-resource-scroll td { padding: 9px 10px; border-bottom: 1px solid var(--pm-line-soft); text-align: left; vertical-align: top; }
+.pm-resource-scroll th { background: var(--pm-th-bg); color: var(--pm-muted); font-size: var(--pm-fs-hint); font-weight: var(--pm-fw-semibold); white-space: nowrap; }
+.pm-resource-scroll tbody tr:last-child td { border-bottom: 0; }
+.pm-resource-scroll td textarea { min-height: 48px; }
+.pm-resource-ledger footer { display: flex; align-items: center; gap: var(--pm-sp-2); }
+@media (max-width: 960px) {
+  .pm-resource-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .pm-resource-facts { padding: var(--pm-sp-4); }
+  .pm-resource-form, .pm-resource-window { grid-template-columns: minmax(0, 1fr); }
+  .pm-resource-header { flex-direction: column; }
+}
 </style>
