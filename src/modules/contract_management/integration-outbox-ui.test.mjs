@@ -7,7 +7,7 @@ const routerSource = await readFile(new URL('../../router/index.js', import.meta
 
 test('死信运维作为独立分区接入合同后台导航，覆盖集成与审计两类死信', () => {
   assert.match(viewSource, /outbox: \{ title: '死信运维', description: '[^']+' \}/)
-  assert.match(viewSource, /label: '运维\/集成', items: \[\{ key: 'outbox', label: '死信运维', icon: 'reset' \}\]/)
+  assert.match(viewSource, /label: '运维\/集成', items: \[\{ key: 'outbox', label: '死信运维', icon: 'nav-recovery' \}\]/)
   // 管理员与普通角色导航都声明该入口，实际可见性由 canAccessContractSection 过滤。
   assert.equal((viewSource.match(/key: 'outbox', label: '死信运维'/g) || []).length, 2)
 })

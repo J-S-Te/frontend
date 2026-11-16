@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-16T09:10:34.284Z",
+  "generatedAt": "2026-11-16T09:48:14.410Z",
   "generatedFrom": {
     "branch": "feat/local-wip-20261116",
-    "commit": "30fa6b6"
+    "commit": "d349027"
   },
   "source": "src",
   "scope": "src/**/*.vue (仅 <style> 块) + src/**/*.css；不含 dist/build/node_modules/点目录",

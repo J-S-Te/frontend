@@ -82,7 +82,7 @@ test('等保附属渗透测试以专项卡片呈现且不混入服务项统计',
 test('系统配置侧边栏合并为一个规则配置中心并保留细粒度权限与深链接', () => {
   // 五类规则已经在页面内以标签切换，侧栏不再重复铺开五个入口。
   assert.match(source, /const configurationCenterSections = Object\.freeze\(\[\s*'capability-codes',\s*'warning-rules',\s*'automations',\s*'permissions',\s*'sla',\s*\]\)/)
-  assert.match(source, /\{ key: 'configuration-center', label: '规则配置中心', icon: 'shield', sectionKeys: configurationCenterSections \}/)
+  assert.match(source, /\{ key: 'configuration-center', label: '规则配置中心', icon: 'nav-settings', sectionKeys: configurationCenterSections \}/)
   assert.doesNotMatch(source, /\{ key: 'warning-rules', label: '冲突预警规则', icon:/)
   assert.doesNotMatch(source, /\{ key: 'automations', label: '自动化触发', icon:/)
   assert.doesNotMatch(source, /\{ key: 'permissions', label: '字段级权限', icon:/)
@@ -94,11 +94,11 @@ test('系统配置侧边栏合并为一个规则配置中心并保留细粒度�
   assert.match(source, /item\.sectionKeys\.includes\(activeSection\.value\)/)
   assert.match(source, /@click="navigateNavItem\(item\)"/)
   // 合同拆解规则仍是独立入口。
-  assert.match(source, /\{ key: 'split-rules', label: '合同拆解规则', icon: 'settings' \}/)
+  assert.match(source, /\{ key: 'split-rules', label: '合同拆解规则', icon: 'nav-decomposition' \}/)
 })
 
 test('检测标准变更评估是唯一业务入口，不再与规则配置中心重复', () => {
-  assert.match(source, /\{ key: 'standards', label: '标准方法更新评估', icon: 'reset' \}/)
+  assert.match(source, /\{ key: 'standards', label: '标准方法更新评估', icon: 'nav-standard' \}/)
   assert.match(source, /const standardChangeMeta = Object\.freeze\(\{[\s\S]*?kind: 'standards',[\s\S]*?label: '检测标准变更'/)
   assert.match(source, /const isStandardChangeSection = computed\(\(\) => activeSection\.value === standardChangeMeta\.kind\)/)
   assert.match(source, /v-if="!isStandardChangeSection" class="pm-sm-tabs"/)
@@ -1369,7 +1369,7 @@ test('设备维护入口按 project.device.manage 门控，创建项目后提示
 test('合同拆解规则配置按原型 PG-CFG-01 做成三段式，口径完全由服务端判定', () => {
   // 旧实现是两个自由文本框（名称 + 适用范围），表达不了原型的分组维度、检测类别域与覆盖规则。
   assert.doesNotMatch(source, /key: 'split-rules', label: '拆解规则', columns/)
-  assert.match(source, /\{ key: 'split-rules', label: '合同拆解规则', icon: 'settings' \}/)
+  assert.match(source, /\{ key: 'split-rules', label: '合同拆解规则', icon: 'nav-decomposition' \}/)
   // 新手引导先解释生效时机和三步顺序，并允许一键填入安全推荐值（仍需人工保存）。
   assert.match(source, /<h2 id="split-guide-title">3 步完成合同自动拆解<\/h2>/)
   assert.match(source, /已有项目不会被自动重算，可以放心先从推荐配置开始/)

@@ -302,15 +302,15 @@ const sectionDescriptions = {
   messages: '平台统一收件箱，展示审批待办与业务通知。',
 }
 const sectionIcons = {
-  dashboard: 'dashboard', invoices: 'search', 'invoice-upload': 'save', 'invoice-abnormal': 'info',
-  claims: 'account', submitted: 'export', approvals: 'shield', payments: 'link', archives: 'organization',
-  recovery: 'reset', policies: 'settings', analytics: 'audit', messages: 'bell',
+  dashboard: 'nav-overview', invoices: 'nav-invoice', 'invoice-upload': 'nav-upload', 'invoice-abnormal': 'nav-exception',
+  claims: 'nav-claim', submitted: 'nav-submitted', approvals: 'nav-approval', payments: 'nav-payment', archives: 'nav-archive',
+  recovery: 'nav-recovery', policies: 'nav-rules', analytics: 'nav-analytics', messages: 'nav-notifications',
 }
 // 侧栏分组对齐原型：工作台 / 发票中心 / 报销单 / 付款 / 归档中心 / 配置 / 消息 / 系统。
 // 只渲染当前账号至少有一个可见入口的分组；权限判断仍由 sections 的 permission 负责。
 const navGroups = computed(() => {
   const groups = [
-    { items: [{ key: 'portal', label: '返回门户', icon: 'dashboard', anchor: 'subsystem-portal' }] },
+    { items: [{ key: 'portal', label: '返回门户', icon: 'nav-portal', anchor: 'subsystem-portal' }] },
     { label: '工作台', keys: ['dashboard', 'analytics'] },
     { label: '发票中心', keys: ['invoices', 'invoice-upload', 'invoice-abnormal'] },
     { label: '报销单', keys: ['claims', 'submitted', 'approvals'] },
@@ -2758,6 +2758,7 @@ onBeforeUnmount(() => {
     v-model:menu-open="menuOpen"
     brand-name="报销管理系统"
     brand-subtitle="费用与票据工作区"
+    brand-icon="nav-claim"
     content-class="expense-canvas"
     :nav-groups="navGroups"
     :crumb="title"

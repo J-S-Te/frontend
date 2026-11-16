@@ -176,21 +176,21 @@ const navGroups = computed(() => [
   {
     label: '业务中心',
     items: [
-      { key: 'projects', label: '我的项目', icon: 'dashboard', active: section.value === 'projects', visible: !isPortalSuperAdmin.value && hasPermission('project.read') },
-      { key: 'reports', label: '电子报告', icon: 'download', active: section.value === 'reports', visible: !isPortalSuperAdmin.value && (hasPermission('report.read') || hasPermission('report.request')) },
-      { key: 'filings', label: '等保备案', icon: 'shield', active: section.value === 'filings', visible: !isPortalSuperAdmin.value && hasPermission('filing.read') },
-      { key: 'feedback', label: '客户反馈', icon: 'bell', active: section.value === 'feedback', visible: !isPortalSuperAdmin.value && canUseFeedback.value },
+      { key: 'projects', label: '我的项目', icon: 'nav-project', active: section.value === 'projects', visible: !isPortalSuperAdmin.value && hasPermission('project.read') },
+      { key: 'reports', label: '电子报告', icon: 'nav-report', active: section.value === 'reports', visible: !isPortalSuperAdmin.value && (hasPermission('report.read') || hasPermission('report.request')) },
+      { key: 'filings', label: '等保备案', icon: 'nav-qualification', active: section.value === 'filings', visible: !isPortalSuperAdmin.value && hasPermission('filing.read') },
+      { key: 'feedback', label: '客户反馈', icon: 'nav-feedback', active: section.value === 'feedback', visible: !isPortalSuperAdmin.value && canUseFeedback.value },
     ],
   },
   {
     label: '账号',
     items: [
-      { key: 'security', label: '账号安全', icon: 'account', active: section.value === 'security', visible: hasPermission('account.security.manage') },
+      { key: 'security', label: '账号安全', icon: 'nav-security', active: section.value === 'security', visible: hasPermission('account.security.manage') },
     ],
   },
   {
     label: '平台能力',
-    items: [{ key: 'portal', label: '返回子系统门户', icon: 'dashboard', anchor: 'subsystem-portal' }],
+    items: [{ key: 'portal', label: '返回子系统门户', icon: 'nav-portal', anchor: 'subsystem-portal' }],
   },
 ])
 // handleNavigate 把共享外壳抛出的导航键映射到本页既有入口。
@@ -831,6 +831,7 @@ onBeforeUnmount(() => {
     sidebar-user-class="subsystem-sidebar-user"
     :brand-name="portalBrandName"
     brand-subtitle="统一身份平台安全登录"
+    brand-icon="nav-portal"
     nav-label="客户门户功能"
     :nav-groups="navGroups"
     :user-name="currentLoginUsername"
