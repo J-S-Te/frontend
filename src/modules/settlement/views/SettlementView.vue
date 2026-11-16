@@ -305,6 +305,7 @@ const workItems = computed(() =>
   ].filter((item) => !item.title.startsWith("0 笔")),
 );
 // 我的待办 section · 按业务单据分组聚合，每组提供可点击任务项。
+const taskStatusKnown = ref(false);
 const taskGroups = computed(() => [
   {
     key: "plans",
@@ -804,6 +805,7 @@ async function load() {
   const ticket = settlementScope.begin(`SETTLEMENT_SECTION:${active.value}`);
   const isCurrent = () => settlementScope.isCurrent(ticket);
   loading.value = true;
+  taskStatusKnown.value = false;
   error.value = "";
   try {
     const session = await getSettlementSession({ force: true });
@@ -859,6 +861,7 @@ async function load() {
     }
   });
   if (active.value === "dunning") dunningRecipientsLoading.value = false;
+  taskStatusKnown.value = active.value === "tasks" && failures.length === 0;
   if (failures.length) error.value = [...new Set(failures)].join("；");
   loading.value = false;
   return failures.length === 0;
@@ -937,10 +940,10 @@ watch(invoiceDetailID, load);
             type="button"
             v-if="allowed.includes('tasks')"
             title="我的待办"
-            aria-label="我的待办"
+            :aria-label="taskStatusKnown ? '我的待办' : '我的待办，状态未读取或读取失败'"
             @click="go('tasks')"
           >
-            <ConsoleIcon name="bell" /><i class="settlement-notification-dot" />
+            <ConsoleIcon name="bell" /><i v-if="taskStatusKnown && taskGroups.some(group => group.items.length)" class="settlement-notification-dot" /><span v-else-if="!taskStatusKnown" aria-hidden="true">?</span>
           </button>
           <div class="settlement-topbar-notifications">
             <button class="settlement-topbar-icon" type="button" title="站内通知" aria-label="站内通知" @click="showNotifications = !showNotifications">

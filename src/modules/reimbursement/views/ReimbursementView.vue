@@ -105,6 +105,8 @@ const invoiceReviewReason = ref('')
 const verificationResult = ref('UNKNOWN')
 const verificationReason = ref('')
 const verificationEvidence = ref('')
+let editorOptionsSequence = 0
+const editorOptionsError = ref('')
 const editorOptions = ref(null)
 const policyPublished = ref(false)
 const policyRecord = ref(null)
@@ -760,6 +762,30 @@ async function refreshSelectedSection() {
   }
 }
 
+// loadClaimOptions 独立加载编辑所需候选，不阻断报销列表。
+// 参数：ticket 为当前列表请求序号，用于拒绝跨页迟到结果。
+// 返回值：异步完成；失败仅在编辑区展示并允许重试。
+async function loadClaimOptions(ticket = loadSequence) {
+  const optionsTicket = ++editorOptionsSequence
+  editorOptionsError.value = ''
+  try {
+    const options = await api.request('/claim-options')
+    if (ticket !== loadSequence || optionsTicket !== editorOptionsSequence || section.value !== 'claims') return
+    editorOptions.value = options
+    if (!selected.value) {
+      applyDraftContext(draft.value.org_id)
+      if (!draftBaseline.value) draftBaseline.value = stableStringify(draft.value)
+    }
+    if (currentDraftContext.value.ready) await searchProjects()
+    else { projectOptions.value = []; projectError.value = '' }
+  } catch (cause) {
+    if (ticket === loadSequence && optionsTicket === editorOptionsSequence) {
+      editorOptions.value = null
+      editorOptionsError.value = failureMessage(cause)
+    }
+  }
+}
+
 // 用途：只按当前已授权页面加载业务数据，防止跨页迟到结果覆盖。
 // 参数：无。
 // 返回值：无；错误显式呈现在对应数据区，不用空列表代替失败。
@@ -793,19 +819,7 @@ async function load() {
       return
     }
     if (current === 'claims' && (can('expense.claim.create') || can('expense.claim.update'))) {
-      const options = await api.request('/claim-options')
-      if (ticket !== loadSequence) return
-      editorOptions.value = options
-      if (!selected.value) {
-        applyDraftContext(draft.value.org_id)
-        // 首次进入时的任职/主体/收款档案是服务端默认上下文，不是用户输入；
-        // 记录为基线，避免从列表打开详情时被误判成未保存修改。
-        if (!draftBaseline.value) draftBaseline.value = stableStringify(draft.value)
-      }
-      // 没有可用在职组织/费用档案时不请求项目资格服务：
-      // 该账号本来没有报销主体，强查项目只会得到一个业务上无意义的依赖错误。
-      if (currentDraftContext.value.ready) await searchProjects()
-      else { projectOptions.value = []; projectError.value = '' }
+      void loadClaimOptions(ticket)
     }
     if (current === 'dashboard') {
       const result = await api.request('/dashboard')
@@ -2670,6 +2684,7 @@ async function newDraft(skipConfirm = false) {
   if (runner.pending()) { showError(new Error('请先确认原命令结果')); return }
   if (!skipConfirm && !(await discardDraft())) return
   claimFormOpen.value = true
+  editorOptionsSequence += 1
   selected.value = null; draft.value = blankDraft()
   draftBaseline.value = stableStringify(draft.value)
   try {
@@ -4111,6 +4126,7 @@ onBeforeUnmount(() => {
             </select></label>
             <label>备注<textarea v-model="draft.remark" maxlength="2000" /></label>
             <label>报销单号<input :value="selected?.claim_no || '保存后自动生成'" readonly></label>
+            <p v-if="editorOptionsError" class="expense-alert danger" role="alert">编辑候选加载失败：{{ editorOptionsError }}<button type="button" @click="loadClaimOptions()">重试候选</button></p>
             <label>报销人<input :value="applicantName" readonly></label>
             <label>所属部门<input :value="currentDraftContext.organization_name || '任职部门待确认'" readonly></label>
             <BusinessObjectSelect v-if="organizationOptions.length > 1" v-model="draft.org_id"

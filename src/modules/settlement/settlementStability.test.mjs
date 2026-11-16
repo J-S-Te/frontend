@@ -67,6 +67,9 @@ test('核销写入失败：按操作失败提示，不触发刷新链也不宣�
 // —— 任务 C：请求作用域 —— 旧 section 的迟到响应不得覆盖新 section 的数据，
 // 旧请求也不得关闭新请求的 loading；组件卸载后所有票据失效。
 
+// loadHarness 注入真实响应式状态并执行结算读取函数。
+// 参数：无。
+// 返回值：包含会话、请求作用域和待办已知状态的隔离上下文。
 function loadHarness() {
   const context = {
     ref, createRequestScope, formatSettlementError,
@@ -74,6 +77,7 @@ function loadHarness() {
     route: { params: { section: 'receivables' } }, router: { replace: async () => {} },
     settlementScope: createRequestScope(),
     active: ref('receivables'),
+    taskStatusKnown: ref(true),
     loading: ref(false),
     error: ref(''),
     dunningRecipientsLoading: ref(false),
@@ -104,6 +108,7 @@ test('菜单快速切换后：旧 section 的迟到响应不得覆盖新 section
   await slow
   assert.deepEqual(targetOld.value, [{ id: 'KEEP-OLD' }], '旧 section 的迟到响应不得覆盖数据')
   assert.equal(context.loading.value, true, '旧请求不得关闭新请求的加载态')
+  assert.equal(context.taskStatusKnown.value, false, '旧请求不得把新页面的待办状态标为已知')
   assert.equal(context.error.value, '')
   second.resolve([{ id: 'FRESH' }])
   await fast
@@ -125,6 +130,7 @@ test('组件卸载（作用域销毁）后：迟到的 load 响应不得回写�
   const result = await running
   assert.equal(result, false, '卸载后的迟到响应必须整体丢弃')
   assert.deepEqual(target.value, [{ id: 'KEEP' }])
+  assert.equal(context.taskStatusKnown.value, false, '卸载后的请求不得恢复待办已知状态')
 })
 
 // —— 任务 D：写操作进行中单飞 guard —— 结算表单按钮依赖 :disabled="saving"，
@@ -141,4 +147,20 @@ test('act 在写操作进行中再次触发时直接返回，不重复提交', a
   const { act } = functions('./composables/useSettlementActions.js', ['act'], context)
   await act(async () => { writes++ }, '核销分配已确认。')
   assert.equal(writes, 0, '写操作进行中必须被单飞 guard 拦截')
+})
+
+
+test('待办全部读取成功才成为已知，读取失败不能当零待办', async () => {
+  const context = loadHarness()
+  context.active.value = 'tasks'
+  context.route.params.section = 'tasks'
+  const rows = ref([])
+  context.targets = [[async () => [], rows, []]]
+  const { load } = functions('./views/SettlementView.vue', ['load'], context)
+  assert.equal(await load(), true)
+  assert.equal(context.taskStatusKnown.value, true, '成功的空待办列表才代表已知零条')
+  context.targets = [[async () => { throw new Error('待办读取失败') }, rows, []]]
+  assert.equal(await load(), false)
+  assert.equal(context.taskStatusKnown.value, false, '读取失败保持未知而非零条')
+  assert.match(context.error.value, /待办读取失败/)
 })

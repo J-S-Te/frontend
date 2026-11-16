@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, onScopeDispose, reactive, ref, watch } from 'vue'
 import { hasPermission } from '@/modules/platform/auth/utils/principal'
 import { formatUserError } from '../../../shared/utils/userError.js'
 import {
@@ -43,6 +43,9 @@ async function loadNamespaces() {
 // 覆盖当前命名空间的配置列表（否则会出现"列表属于 A、保存却作用于 B"的误操作）。
 let itemsRequestSeq = 0
 
+// 用途：读取当前命名空间，并在发布列表前初始化独立编辑值。
+// 参数：无；使用当前选择的命名空间。
+// 返回值：读取完成；过期响应丢弃，当前失败显示可重试错误。
 async function loadItems() {
   const namespaceId = selectedNamespace.value
   if (!namespaceId) { itemsRequestSeq += 1; items.value = []; return }
@@ -51,7 +54,9 @@ async function loadItems() {
   try {
     const result = await listConfigItems({ namespaceId })
     if (seq !== itemsRequestSeq || namespaceId !== selectedNamespace.value) return
-    items.value = result?.items || []
+    items.value = (result?.items || []).map((item) => ({
+      ...item, editValue: encodeValue(item.value),
+    }))
   } catch (err) {
     if (seq !== itemsRequestSeq) return
     error.value = message(err, '读取配置项失败。')
@@ -93,7 +98,7 @@ async function publish() {
 }
 
 watch(selectedNamespace, () => { items.value = []; loadItems() })
-watch(items, (rows) => rows.forEach((item) => { if (item.editValue === undefined) item.editValue = encodeValue(item.value) }), { deep: true })
+onScopeDispose(() => { itemsRequestSeq += 1 })
 onMounted(loadNamespaces)
 </script>
 

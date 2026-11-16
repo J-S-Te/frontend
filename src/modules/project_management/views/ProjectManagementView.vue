@@ -1,5 +1,9 @@
 <script setup>
 import { loginUsername } from "@/modules/shared/loginUsername.mjs"
+import { useDialogFocusTrap } from '@/modules/shared/composables/useDialogFocusTrap.js'
+import ShellPreferences from '@/modules/shared/components/ShellPreferences.vue'
+import { useSidebarNavigation } from '@/modules/shared/composables/useSidebarNavigation.js'
+import { readSidebarCollapsed } from '@/modules/shared/utils/shellPreferences.js'
 import OperationToast from '@/modules/shared/components/OperationToast.vue'
 import ListState from '@/modules/shared/components/ListState.vue'
 import LoadingState from '@/modules/shared/components/LoadingState.vue'
@@ -334,6 +338,12 @@ const currentMeta = computed(() => pageMeta[activeSection.value])
 const mobileMenuOpen = ref(false)
 // 汉堡按钮引用：抽屉用 Escape 收起后焦点交还给它，键盘用户不会掉进已隐藏的侧栏。
 const mobileMenuButton = ref(null)
+const sidebarElement = ref(null)
+const desktopSidebarCollapsed = ref(readSidebarCollapsed())
+const { hidden: sidebarHidden } = useSidebarNavigation({
+  open: mobileMenuOpen, container: sidebarElement, trigger: mobileMenuButton,
+  breakpoint: 900, collapsed: desktopSidebarCollapsed,
+})
 const keyword = ref('')
 const statusFilter = ref('')
 const reportStageFilter = ref('')
@@ -2808,6 +2818,8 @@ function equipmentReservationLabel(resourceID) {
   return item ? equipmentUnavailableReason(item) : ''
 }
 const planEquipmentPickerOpen = ref(false)
+const equipmentPickerDialog = ref(null)
+useDialogFocusTrap({ active: planEquipmentPickerOpen, container: equipmentPickerDialog })
 const equipmentPickerKeyword = ref('')
 async function openEquipmentPicker() {
   equipmentPickerKeyword.value = ''
@@ -3632,8 +3644,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="pm-shell">
-    <aside id="pm-sidebar" class="pm-sidebar" :class="{ open: mobileMenuOpen }">
+  <div class="pm-shell" :class="{ 'is-sidebar-collapsed': desktopSidebarCollapsed }">
+    <aside ref="sidebarElement" :inert="sidebarHidden" :aria-hidden="sidebarHidden ? 'true' : undefined" tabindex="-1" id="pm-sidebar" class="pm-sidebar" :class="{ open: mobileMenuOpen }">
       <div class="pm-brand">
         <span class="pm-brand-mark">PS</span>
         <span><b>项目服务管理</b><small>PROJECT SERVICE</small></span>
@@ -3667,6 +3679,7 @@ onBeforeUnmount(() => {
         <button ref="mobileMenuButton" class="pm-icon-button pm-menu-button" aria-label="打开菜单" :aria-expanded="mobileMenuOpen ? 'true' : 'false'" aria-controls="pm-sidebar" @click="mobileMenuOpen = true"><ConsoleIcon name="menu" /></button>
         <div class="pm-breadcrumb"><span>项目服务管理</span><b>/</b><template v-if="activeSection === 'project_detail'"><button type="button" class="pm-crumb-link" @click="navigate('projects')">项目列表</button><b>/</b><strong>{{ detailProject?.id || '项目详情' }}</strong></template><strong v-else>{{ currentMeta[0] }}</strong></div>
         <div class="pm-top-tools">
+          <ShellPreferences sidebar-id="pm-sidebar" @collapse-change="desktopSidebarCollapsed = $event" />
           <button class="pm-icon-button pm-notification-button" aria-label="通知" aria-controls="project-notifications" :aria-expanded="notificationOpen" @click="toggleNotifications"><ConsoleIcon name="bell" /><em v-if="notificationCount">{{ notificationCount }}</em></button>
           <span class="pm-topbar-avatar" aria-hidden="true">{{ currentUserInitial }}</span>
         </div>
@@ -4488,7 +4501,7 @@ onBeforeUnmount(() => {
 
     <!-- 设备候选：目录未确认（读取中/失败/维护后失效）时不展示可选设备；
          占用未确认时行仍可添加但明确标注，保存时由服务端校验重叠占用。 -->
-    <div v-if="planEquipmentPickerOpen" class="pm-overlay" @click.self="planEquipmentPickerOpen = false"><aside class="pm-dialog pm-dialog-wide"><header><div><span>设备</span><h2>添加设备</h2><small class="pm-dialog-sub">只列设备目录中的有效设备；已被其他服务项占用、仅在公司使用或不在公司的设备不可选取。</small></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="planEquipmentPickerOpen = false"><ConsoleIcon name="close" /></button></header><div class="pm-dialog-body"><div class="pm-picker-search"><ConsoleIcon name="search" /><input v-model.trim="equipmentPickerKeyword" placeholder="搜索设备名称或能力码"  maxlength="100"/></div><p v-if="equipmentReservationsError" class="pm-form-hint" role="alert">{{ equipmentReservationsError }}<button type="button" class="pm-link" :disabled="equipmentReservationsLoading" @click="loadEquipmentReservations(selectedServiceItem)">{{ equipmentReservationsLoading ? '读取中…' : '重试读取占用' }}</button></p><ListState v-if="equipmentLoading" loading compact loading-title="正在读取设备目录…" /><ListState v-else-if="equipmentError" error-title="设备目录读取失败" :error="equipmentError" retry-text="重试读取目录" compact @retry="retryEquipmentCatalog" /><div v-else class="pm-table-scroll"><table class="pm-table pm-table-picker"><thead><tr><th scope="col">设备</th><th scope="col">能力码</th><th scope="col">检定有效期</th><th scope="col">状态</th><th scope="col" class="pm-col-action">操作</th></tr></thead><tbody><tr v-for="item in planEquipmentFiltered" :key="item.resource_id"><td><b>{{ item.resource_name }}</b><small class="mono">{{ item.resource_id }}</small><small v-if="equipmentUnavailableReason(item)" class="pm-cell-sub pm-cell-danger">{{ equipmentUnavailableReason(item) }}</small></td><td><CodePills :codes="item.codes || []" /></td><td>{{ item.valid_until ? formatBusinessDate(item.valid_until) : '长期' }}</td><td><span class="pm-badge" :class="equipmentPickerState(item).tone">{{ equipmentPickerState(item).label }}</span><small v-if="equipmentPickerState(item).note" class="pm-cell-sub">{{ equipmentPickerState(item).note }}</small></td><td><button type="button" class="pm-link" :disabled="equipmentPickerState(item).disabled" @click="addPlanEquipment(item)">{{ equipmentPickerState(item).action }}</button></td></tr><tr v-if="!planEquipmentFiltered.length"><td colspan="5" class="pm-empty-mini">{{ equipmentPickerKeyword ? '没有匹配的设备，换个关键字试试' : '设备目录为空，请先在「资质与能力」或「设备能力维护」中登记设备' }}</td></tr></tbody></table></div></div><footer><span class="pm-dialog-footnote">已加入 {{ planEquipmentAddedCount }} 台 · 可选 {{ planEquipmentAddableCount }} 台</span><button type="button" class="pm-button" @click="planEquipmentPickerOpen = false">关闭</button></footer></aside></div>
+    <div v-if="planEquipmentPickerOpen" class="pm-overlay" @click.self="planEquipmentPickerOpen = false"><aside ref="equipmentPickerDialog" class="pm-dialog pm-dialog-wide" role="dialog" aria-modal="true" aria-labelledby="equipment-picker-title" tabindex="-1"><header><div><span>设备</span><h2 id="equipment-picker-title">添加设备</h2><small class="pm-dialog-sub">只列设备目录中的有效设备；已被其他服务项占用、仅在公司使用或不在公司的设备不可选取。</small></div><button type="button" class="pm-icon-button" aria-label="关闭" @click="planEquipmentPickerOpen = false"><ConsoleIcon name="close" /></button></header><div class="pm-dialog-body"><div class="pm-picker-search"><ConsoleIcon name="search" /><input v-model.trim="equipmentPickerKeyword" placeholder="搜索设备名称或能力码"  maxlength="100"/></div><p v-if="equipmentReservationsError" class="pm-form-hint" role="alert">{{ equipmentReservationsError }}<button type="button" class="pm-link" :disabled="equipmentReservationsLoading" @click="loadEquipmentReservations(selectedServiceItem)">{{ equipmentReservationsLoading ? '读取中…' : '重试读取占用' }}</button></p><ListState v-if="equipmentLoading" loading compact loading-title="正在读取设备目录…" /><ListState v-else-if="equipmentError" error-title="设备目录读取失败" :error="equipmentError" retry-text="重试读取目录" compact @retry="retryEquipmentCatalog" /><div v-else class="pm-table-scroll"><table class="pm-table pm-table-picker"><thead><tr><th scope="col">设备</th><th scope="col">能力码</th><th scope="col">检定有效期</th><th scope="col">状态</th><th scope="col" class="pm-col-action">操作</th></tr></thead><tbody><tr v-for="item in planEquipmentFiltered" :key="item.resource_id"><td><b>{{ item.resource_name }}</b><small class="mono">{{ item.resource_id }}</small><small v-if="equipmentUnavailableReason(item)" class="pm-cell-sub pm-cell-danger">{{ equipmentUnavailableReason(item) }}</small></td><td><CodePills :codes="item.codes || []" /></td><td>{{ item.valid_until ? formatBusinessDate(item.valid_until) : '长期' }}</td><td><span class="pm-badge" :class="equipmentPickerState(item).tone">{{ equipmentPickerState(item).label }}</span><small v-if="equipmentPickerState(item).note" class="pm-cell-sub">{{ equipmentPickerState(item).note }}</small></td><td><button type="button" class="pm-link" :disabled="equipmentPickerState(item).disabled" @click="addPlanEquipment(item)">{{ equipmentPickerState(item).action }}</button></td></tr><tr v-if="!planEquipmentFiltered.length"><td colspan="5" class="pm-empty-mini">{{ equipmentPickerKeyword ? '没有匹配的设备，换个关键字试试' : '设备目录为空，请先在「资质与能力」或「设备能力维护」中登记设备' }}</td></tr></tbody></table></div></div><footer><span class="pm-dialog-footnote">已加入 {{ planEquipmentAddedCount }} 台 · 可选 {{ planEquipmentAddableCount }} 台</span><button type="button" class="pm-button" @click="planEquipmentPickerOpen = false">关闭</button></footer></aside></div>
     <NativeProjectCreateDialog
       v-if="nativeCreateOpen && canCreateProject && nativeProjectEnabled"
       :categories="detectionCategories"
@@ -4629,5 +4642,9 @@ onBeforeUnmount(() => {
 .pm-resource-review > header, .pm-resource-review > footer { flex-shrink: 0; }
 @media (max-width: 640px) {
   .pm-resource-review-body { max-height: 70vh; padding-inline: 8px; }
+}
+@media (min-width: 901px) {
+  .is-sidebar-collapsed > .pm-sidebar { transform: translateX(-100%); visibility: hidden; }
+  .is-sidebar-collapsed > .pm-main { margin-left: 0; }
 }
 </style>

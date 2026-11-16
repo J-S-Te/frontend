@@ -18,7 +18,7 @@ function harness(loaders={}){
  let mounted,unmount
  const route=Vue.reactive({params:{section:'contract'},query:{}})
  const empty=async()=>({available:false,items:[],total:0,page:1,page_size:20})
- const context={...Vue,onMounted:(fn)=>{mounted=fn},onBeforeUnmount:(fn)=>{unmount=fn},inject:()=>null,
+ const context={...Vue,readSidebarCollapsed:()=>false,useSidebarNavigation:()=>({hidden:Vue.ref(false)}),onMounted:(fn)=>{mounted=fn},onBeforeUnmount:(fn)=>{unmount=fn},inject:()=>null,
  useRoute:()=>route,useRouter:()=>({replace:async()=>{},push:()=>{}}),useUrlFilterState:()=>{},loginUsername:()=>'',
  createEmbedSessionActivity:()=>({reset:()=>{},destroy:()=>{}}),subscribeRelatedDataChanges:()=>()=>{},RELATED_DATA:{},
  getAuthMe:async()=>({tenant_id:'t',user_id:'u',permissions:['dashboard.contract.view','dashboard.project.view','dashboard.overview.view']}),
@@ -27,7 +27,7 @@ function harness(loaders={}){
  formatDataAnalysisError:(error)=>error.message,
  window:{clearTimeout,setTimeout,location:{origin:'https://test.example'}},document:{addEventListener:()=>{},removeEventListener:()=>{}},...loaders}
  const script=source.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm,'')
- const state=vm.runInNewContext(script+';({me,dashboardSummary,contractDetails,projectDetails,summaryError,detailError,historyPanel,loadSummary,loadDetails,loadMe,refreshCurrentDashboard})',context)
+ const state=vm.runInNewContext(script+';({me,dashboardSummary,contractDetails,projectDetails,summaryError,summaryLoading,detailLoading,detailError,historyPanel,loadSummary,loadDetails,loadMe,refreshCurrentDashboard})',context)
  return {state,route,mount:()=>mounted(),unmount:()=>unmount()}
 }
 
@@ -68,4 +68,16 @@ test('总览无权来源静默跳过，不误报来源加载失败',async()=>{
  const h=harness({getAuthMe:async()=>({tenant_id:'t',user_id:'u',permissions:['dashboard.overview.view']})})
  h.route.params.section='overview';await h.mount()
  assert.equal(h.state.summaryError.value,'')
+})
+
+test('摘要成功后立即可见，不等待未完成明细', async () => {
+ const pending = deferred()
+ const h = harness({ getContractDashboardSummary: async () => ({available:true,total_contracts:8}), getContractDetails:()=>pending.promise })
+ const mounting=h.mount()
+ await mounting
+ assert.equal(h.state.dashboardSummary.value.total_contracts,8)
+ assert.equal(h.state.summaryLoading.value,false)
+ assert.equal(h.state.detailLoading.value,true)
+ pending.resolve({items:[],total:0,page:1,page_size:20})
+ await Vue.nextTick();await Vue.nextTick();h.unmount()
 })

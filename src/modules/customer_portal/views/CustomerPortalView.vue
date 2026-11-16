@@ -9,6 +9,7 @@ import { formatPortalError } from '../api/errorMessages.js'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
+import { useDialogFocusTrap } from '@/modules/shared/composables/useDialogFocusTrap.js'
 import AppShell from '@/modules/shared/components/AppShell.vue'
 import { subsystemAccessMessage } from '@/modules/shared/authz/sessionCompatibility'
 import { closeSubsystemTabOrFallback } from '@/modules/shared/utils/returnToPortal'
@@ -31,12 +32,17 @@ let capabilitiesLoaded = false
 const projects = ref([])
 const reports = ref([])
 const reportNotifications = ref([])
-const reportNotificationUnreadCount = ref(0)
+const reportNotificationUnreadCount = ref(null)
+const reportNotificationError = ref('')
+const reportNotificationLoading = ref(false)
 const reportRiskAlerts = ref([])
 const reportProjects = ref([])
 const feedbacks = ref([])
 const feedbackNotifications = ref([])
-const feedbackNotificationUnreadCount = ref(0)
+const feedbackNotificationUnreadCount = ref(null)
+const feedbackNotificationError = ref('')
+const feedbackNotificationLoading = ref(false)
+let feedbackNotificationGeneration = 0
 const selectedProject = ref(null)
 const selectedReport = ref(null)
 const selectedFeedback = ref(null)
@@ -124,6 +130,9 @@ const reportDownloadLoading = ref(false)
 const reportDownloadError = ref('')
 let reportLoadGeneration = 0
 let reportDetailGeneration = 0
+let feedbackDetailGeneration = 0
+const feedbackNotificationOpening = new Set()
+const reportNotificationOpening = new Set()
 let reportDownloadGeneration = 0
 let reportDownloadController = null
 let reportRetryFingerprint = ''
@@ -202,13 +211,19 @@ function handleNavigate(key) {
   }
   navigate(key)
 }
+const portalDialog = ref(null)
 const anyDialogOpen = computed(() => !!(aboutOpen.value || selectedProject.value || selectedReport.value || reportDetailLoading.value || reportDetailError.value || selectedFeedback.value))
+useDialogFocusTrap({ active: anyDialogOpen, container: portalDialog })
+
+// onDialogKeydown 按当前详情层关闭弹窗。
+// 参数：event 为键盘事件。
+// 返回值：无。
 function onDialogKeydown(event) {
   if (event.key !== 'Escape') return
   if (aboutOpen.value) void closeAbout()
   else if (selectedProject.value) closeProject()
   else if (selectedReport.value || reportDetailLoading.value || reportDetailError.value) closeReport()
-  else if (selectedFeedback.value) selectedFeedback.value = null
+  else if (selectedFeedback.value) closeFeedbackDetail()
 }
 // Portal 展示统一按北京口径：时间戳 → 北京日期时间（24 小时制），纯日期 → 北京日历日（不平移）。
 // 解析失败保留原始串，避免把异常值静默显示成空。
@@ -308,14 +323,9 @@ async function load() {
     else if (section.value === 'reports') { loading.value = false; await loadReportWorkspace(); return }
     else if (section.value === 'feedback' && hasPermission('feedback.read')) {
       try {
-        const [value, notifications, unreadCount] = await Promise.all([
-          listFeedbacks({ page: 1, page_size: 20 }),
-          listFeedbackNotifications({ unread_only: true, page: 1, page_size: 20 }).catch(() => ({ items: [] })),
-          getFeedbackNotificationUnreadCount().catch(() => ({ count: 0 })),
-        ])
+        void loadFeedbackNotifications()
+        const value = await listFeedbacks({ page: 1, page_size: 20 })
         feedbacks.value = value?.items || []
-        feedbackNotifications.value = notifications?.items || []
-        feedbackNotificationUnreadCount.value = Number(unreadCount?.count || 0)
         feedbackPage.value = 1
         feedbackTotal.value = Number(value?.total || feedbacks.value.length)
       } catch (value) {
@@ -334,9 +344,56 @@ async function load() {
     }
   } catch (value) { fail(value) } finally { loading.value = false }
 }
-async function openFeedbackNotification(item) {
-  try { if (item.status === 'UNREAD') { await readFeedbackNotification(item.id); feedbackNotificationUnreadCount.value = Math.max(0, feedbackNotificationUnreadCount.value - 1) }; feedbackNotifications.value = feedbackNotifications.value.filter((value) => value.id !== item.id); openFeedback({ id: item.feedback_id }) } catch (value) { fail(value) }
+// loadFeedbackNotifications 独立读取当前客户的反馈通知，失败保持未知而非零条。
+// 参数：无。
+// 返回值：异步完成；迟到响应丢弃，失败在通知区域重试。
+async function loadFeedbackNotifications() {
+  if (!hasPermission('feedback.read') || section.value !== 'feedback') return
+  const generation = ++feedbackNotificationGeneration
+  feedbackNotificationLoading.value = true
+  feedbackNotificationError.value = ''
+  try {
+    const [items, unread] = await Promise.all([
+      listFeedbackNotifications({ unread_only: true, page: 1, page_size: 20 }),
+      getFeedbackNotificationUnreadCount(),
+    ])
+    if (generation !== feedbackNotificationGeneration || section.value !== 'feedback') return
+    if (!Number.isFinite(unread?.count) || unread.count < 0) throw new Error('反馈通知计数响应不完整')
+    feedbackNotifications.value = items?.items || []
+    feedbackNotificationUnreadCount.value = unread.count
+  } catch (failure) {
+    if (generation === feedbackNotificationGeneration && section.value === 'feedback') {
+      feedbackNotificationUnreadCount.value = null
+      feedbackNotificationError.value = formatPortalError(failure, { fallback: '反馈通知暂时无法加载' })
+    }
+  } finally {
+    if (generation === feedbackNotificationGeneration) feedbackNotificationLoading.value = false
+  }
 }
+
+// openFeedbackNotification 标记当前通知已读并打开关联反馈。
+// 参数：item 为当前客户通知记录。
+// 返回值：异步完成；失败保留通知并展示提示。
+async function openFeedbackNotification(item) {
+  if (!hasPermission('feedback.read') || section.value !== 'feedback' || feedbackNotificationOpening.has(item.id)) return
+  const intent = ++feedbackDetailGeneration
+  feedbackNotificationOpening.add(item.id)
+  try {
+    if (item.status === 'UNREAD') await readFeedbackNotification(item.id)
+    if (intent !== feedbackDetailGeneration || section.value !== 'feedback' || !hasPermission('feedback.read')) return
+    const unread = feedbackNotifications.value.some(value => value.id === item.id && value.status === 'UNREAD')
+    feedbackNotifications.value = feedbackNotifications.value.filter(value => value.id !== item.id)
+    if (unread && feedbackNotificationUnreadCount.value !== null) {
+      feedbackNotificationUnreadCount.value = Math.max(0, feedbackNotificationUnreadCount.value - 1)
+    }
+    await openFeedback({ id: item.feedback_id }, intent)
+  } catch (value) {
+    if (intent === feedbackDetailGeneration && section.value === 'feedback') {
+      feedbackNotificationError.value = formatPortalError(value, { fallback: '反馈通知暂时无法打开' })
+    }
+  } finally { feedbackNotificationOpening.delete(item.id) }
+}
+
 async function loadMoreProjects() {
   if (!hasPermission('project.read') || projectPage.value * 20 >= projectTotal.value) return
   const next = projectPage.value + 1
@@ -369,6 +426,9 @@ async function loadMoreFeedbacks() {
     feedbackTotal.value = Number(value?.total || feedbacks.value.length)
   } catch (value) { fail(value) }
 }
+// loadReportWorkspace 独立加载申请列表、通知及申请项目。
+// 参数：无。
+// 返回值：异步完成；各读取分区保留自己的错误。
 async function loadReportWorkspace() {
   // 报告列表、通知、风险提醒和可申请项目彼此独立加载；代际号同时隔离栏目切换和
   // 重复刷新产生的迟到响应，局部依赖失败不会抹掉其他已经成功的区域。
@@ -395,21 +455,7 @@ async function loadReportWorkspace() {
     }).finally(() => {
       if (generation === reportLoadGeneration && section.value === 'reports') reportListLoading.value = false
     }))
-    requests.push(Promise.all([
-      listReportNotifications({ unread_only: true, page: 1, page_size: 20 }),
-      getReportNotificationUnreadCount(),
-    ]).then(([items, count]) => {
-      if (generation === reportLoadGeneration && section.value === 'reports') {
-        reportNotifications.value = items?.items || []
-        reportNotificationUnreadCount.value = Number(count?.count || 0)
-      }
-    }).catch(() => {
-      // 通知依赖不可用不应隐藏报告申请主列表。
-      if (generation === reportLoadGeneration && section.value === 'reports') {
-        reportNotifications.value = []
-        reportNotificationUnreadCount.value = 0
-      }
-    }))
+    requests.push(loadReportNotifications(generation))
     requests.push(listReportRiskAlerts({ open_only: true, page: 1, page_size: 20 }).then((value) => {
       if (generation === reportLoadGeneration && section.value === 'reports') reportRiskAlerts.value = value?.items || []
     }).catch(() => {
@@ -429,6 +475,32 @@ async function loadReportWorkspace() {
   }
   await Promise.all(requests)
 }
+// loadReportNotifications 读取报告通知并单独呈现失败，主申请记录继续可用。
+// 参数：generation 为报告工作区版本，省略时采用当前版本。
+// 返回值：异步完成；失败保留未知计数和局部错误。
+async function loadReportNotifications(generation = reportLoadGeneration) {
+  if (!hasPermission('report.read') || section.value !== 'reports') return
+  reportNotificationLoading.value = true
+  reportNotificationError.value = ''
+  try {
+    const [items, unread] = await Promise.all([
+      listReportNotifications({ unread_only: true, page: 1, page_size: 20 }),
+      getReportNotificationUnreadCount(),
+    ])
+    if (generation !== reportLoadGeneration || section.value !== 'reports') return
+    if (!Number.isFinite(unread?.count) || unread.count < 0) throw new Error('报告通知计数响应不完整')
+    reportNotifications.value = items?.items || []
+    reportNotificationUnreadCount.value = unread.count
+  } catch (failure) {
+    if (generation === reportLoadGeneration && section.value === 'reports') {
+      reportNotificationUnreadCount.value = null
+      reportNotificationError.value = formatPortalError(failure, { fallback: '报告通知暂时无法加载' })
+    }
+  } finally {
+    if (generation === reportLoadGeneration) reportNotificationLoading.value = false
+  }
+}
+
 async function loadProjectActivities(projectId, page, generation = projectRequestGeneration) {
   activityLoading.value = true
   activityError.value = ''
@@ -611,36 +683,56 @@ async function submitProjectEvaluation() {
   } catch (value) { fail(value) }
 }
 function closeProject() { projectRequestGeneration++; projectExportGeneration++; projectExportController?.abort(); projectExportController = null; projectExportLoading.value = false; projectExportError.value = ''; projectConversation.value = null; projectMessageContent.value = ''; projectMessageError.value = ''; projectMessageOlderLoading.value = false; selectedProject.value = null; evaluationEligibility.value = null; evaluation.value = null }
-async function openReport(item) {
-  if (!hasPermission('report.read')) return
+// openReport 按点击时取得的意图读取报告详情，迟到响应不覆盖新导航。
+// 参数：item 为报告记录；intent 为通知点击已签发的可选意图。
+// 返回值：异步完成；仅当前栏目和有效意图可更新详情或错误。
+async function openReport(item, intent = null) {
+  if (!hasPermission('report.read') || section.value !== 'reports') return
+  const generation = intent ?? ++reportDetailGeneration
+  if (generation !== reportDetailGeneration) return
   cancelReportDownload()
-  const generation = ++reportDetailGeneration
   selectedReport.value = { ...item, events: [] }
   reportDetailError.value = ''
   reportDetailLoading.value = true
+  // 用途：核对当前报告读取是否仍属于有效打开意图。
+  // 参数：无；使用当前栏目、权限及详情代次。
+  // 返回值：仍可更新当前报告详情时为true。
+  const current = () => generation === reportDetailGeneration && section.value === 'reports' && hasPermission('report.read')
   try {
     const value = await getReportRequest(item.id)
-    if (generation === reportDetailGeneration) selectedReport.value = value
+    if (current()) selectedReport.value = value
   } catch (value) {
-    if (generation === reportDetailGeneration) {
+    if (current()) {
       selectedReport.value = null
       reportDetailError.value = formatPortalError(value, { fallback: '报告详情暂时无法加载' })
     }
   } finally {
-    if (generation === reportDetailGeneration) reportDetailLoading.value = false
+    if (current()) reportDetailLoading.value = false
   }
 }
+// openReportNotification 标记报告通知已读并打开关联申请。
+// 参数：item 为当前客户的报告通知。
+// 返回值：异步完成；通知错误不影响主申请列表。
 async function openReportNotification(item) {
-  if (!hasPermission('report.read')) return
+  if (!hasPermission('report.read') || section.value !== 'reports' || reportNotificationOpening.has(item.id)) return
+  const intent = ++reportDetailGeneration
+  reportNotificationOpening.add(item.id)
   try {
     if (item.status === 'UNREAD') await readReportNotification(item.id)
-    reportNotifications.value = reportNotifications.value.filter((current) => current.id !== item.id)
-    reportNotificationUnreadCount.value = Math.max(0, reportNotificationUnreadCount.value - (item.status === 'UNREAD' ? 1 : 0))
-    await openReport({ id: item.request_id, request_no: item.request_no })
+    if (intent !== reportDetailGeneration || section.value !== 'reports' || !hasPermission('report.read')) return
+    const unread = reportNotifications.value.some(current => current.id === item.id && current.status === 'UNREAD')
+    reportNotifications.value = reportNotifications.value.filter(current => current.id !== item.id)
+    if (unread && reportNotificationUnreadCount.value !== null) {
+      reportNotificationUnreadCount.value = Math.max(0, reportNotificationUnreadCount.value - 1)
+    }
+    await openReport({ id: item.request_id, request_no: item.request_no }, intent)
   } catch (value) {
-    reportListError.value = formatPortalError(value, { fallback: '报告通知暂时无法打开' })
-  }
+    if (intent === reportDetailGeneration && section.value === 'reports') {
+      reportNotificationError.value = formatPortalError(value, { fallback: '报告通知暂时无法打开' })
+    }
+  } finally { reportNotificationOpening.delete(item.id) }
 }
+
 function cancelReportDownload() {
   reportDownloadGeneration++
   reportDownloadController?.abort()
@@ -756,7 +848,28 @@ async function submitFeedback() {
       : '反馈已提交，我们将在 24 小时内首次响应。'
   } catch (value) { feedbackSubmitError.value = formatPortalError(value, { fallback: '反馈提交失败，请稍后重试。' }) }
 }
-async function openFeedback(item) { if (!hasPermission('feedback.read')) return; try { selectedFeedback.value = await getFeedback(item.id) } catch (value) { fail(value) } }
+// openFeedback 按当前意图读取反馈详情，不让旧请求重新打开已离开的弹窗。
+// 参数：item 为反馈记录；intent 为通知点击已签发的可选意图。
+// 返回值：异步完成；失效意图不更新界面，当前读取失败显示原业务错误。
+async function openFeedback(item, intent = null) {
+  if (!hasPermission('feedback.read') || section.value !== 'feedback') return
+  const generation = intent ?? ++feedbackDetailGeneration
+  if (generation !== feedbackDetailGeneration) return
+  try {
+    const value = await getFeedback(item.id)
+    if (generation === feedbackDetailGeneration && section.value === 'feedback' && hasPermission('feedback.read')) {
+      selectedFeedback.value = value
+    }
+  } catch (value) {
+    if (generation === feedbackDetailGeneration && section.value === 'feedback' && hasPermission('feedback.read')) fail(value)
+  }
+}
+
+// closeFeedbackDetail 关闭当前反馈详情并使在途打开意图失效。
+// 参数：无。
+// 返回值：无。
+function closeFeedbackDetail() { feedbackDetailGeneration++; selectedFeedback.value = null }
+
 async function replyFeedback() { if (!hasPermission('feedback.reply') || !feedbackReply.value.trim() || !selectedFeedback.value) return; try { selectedFeedback.value = await addFeedbackMessage(selectedFeedback.value.feedback.id, feedbackReply.value); feedbackReply.value = ''; notice.value = '补充内容已提交。' } catch (value) { fail(value) } }
 // 用途：关闭反馈并区分已关闭事实与后续列表读取失败。
 // 参数：无；使用当前反馈和可重放的关闭请求标识。
@@ -790,6 +903,9 @@ async function revokeSession(item) { if (!hasPermission('account.security.manage
 async function acknowledgeEvent(item) { if (!hasPermission('account.security.manage')) return; error.value = ''; notice.value = ''; try { await acknowledgeSecurityEvent(item.id); notice.value = '安全事件已确认。'; accountSecurity.value = await getAccountSecurity() } catch (value) { fail(value) } }
 
 watch(section, () => {
+  closeFeedbackDetail()
+  feedbackNotificationGeneration++
+  feedbackNotificationLoading.value = false
   // 离开报告栏目立即中止文件流，并让列表、详情的在途响应全部过期。
   cancelReportDownload()
   reportLoadGeneration++
@@ -799,18 +915,20 @@ watch(section, () => {
   notice.value = ''
   void reloadList().then(restorePageTarget)
 })
-watch(anyDialogOpen, async (open) => {
+watch(anyDialogOpen, (open) => {
   document.body.style.overflow = open ? 'hidden' : ''
   if (open) {
     window.addEventListener('keydown', onDialogKeydown)
-    await nextTick()
-    document.querySelector('.portal-dialog article')?.focus()
   } else {
     window.removeEventListener('keydown', onDialogKeydown)
   }
 })
 onMounted(async () => { await reloadList(); await restorePageTarget() })
 onBeforeUnmount(() => {
+  feedbackDetailGeneration++
+  reportDetailGeneration++
+  feedbackNotificationGeneration++
+  reportLoadGeneration++
   cancelReportDownload()
   projectExportController?.abort()
   window.removeEventListener('keydown', onDialogKeydown)
@@ -856,10 +974,10 @@ onBeforeUnmount(() => {
 
       <template v-if="isPortalSuperAdmin"><div class="portal-title"><h1>客户门户管理</h1><p>当前为内部超级管理员会话，未绑定任何客户身份。</p></div><section class="portal-card"><h2>安全访问规则</h2><p>客户项目、报告、备案和反馈始终按客户边界隔离。管理员需要在受控的客户上下文中查看或处理具体客户数据，系统会记录操作人、目标客户、原因和审计记录。</p><p v-if="capabilities.customer_directory_mode !== 'local'" class="portal-info">当前可通过“客户与商机管理 → 客户详情 → 门户访问”完成客户开通、邀请、撤销和禁用。客户侧自助页面不会以管理员身份直接加载，避免误操作或跨客户数据泄露。</p></section><p v-if="error" class="portal-error" role="alert">{{ error }}</p><PortalLocalAdminPanel v-if="capabilities.customer_directory_mode === 'local'" :session="session" /></template><template v-else>
       <OperationToast :message="error || notice" :tone="error ? 'error' : 'success'" :reference="noticeReference" /><LoadingState v-if="loading" title="正在加载…" />
-      <section v-if="section === 'feedback' && canUseFeedback && feedbackNotifications.length" class="portal-card feedback-notifications"><h2>反馈通知（{{ feedbackNotificationUnreadCount }} 条未读）</h2><button v-for="item in feedbackNotifications" :key="item.id" type="button" class="feedback-row" @click="openFeedbackNotification(item)"><span><strong>{{ item.title }}</strong><small>{{ item.body }}</small><small>{{ formatDate(item.created_at) }}</small></span><em>查看反馈</em></button></section>
-      <template v-else-if="section === 'projects' && hasPermission('project.read')"><div class="portal-title"><h1>我的项目</h1><p>项目数据以最近一次同步快照为准</p></div><ListState v-if="projectListError || (!projects.length && !loading)" :error="projectListError" error-title="项目列表加载失败" empty-title="暂无可查看的项目" compact @retry="reloadList" /><template v-else-if="projects.length"><section class="project-list"><button v-for="item in projects" :key="item.project_id" type="button" @click="openProject(item)"><div><h2>{{ item.project_name || '未命名项目' }}</h2><p>{{ item.contract_no || '无合同编号' }} · {{ item.current_stage || '阶段未同步' }}</p></div><strong>{{ item.progress_pct ?? 0 }}%</strong><progress :value="item.progress_pct ?? 0" max="100"></progress><small>数据更新：{{ formatDate(item.source_updated_at) }}<template v-if="item.delayed"> · 已延期</template></small></button></section><nav v-if="projects.length < projectTotal" class="project-pagination" aria-label="项目加载更多"><button type="button" :disabled="loading" @click="loadMoreProjects">加载更多项目</button><span>已显示 {{ projects.length }} / {{ projectTotal }} 个</span></nav></template></template>
+      <section v-if="section === 'feedback' && hasPermission('feedback.read') && (feedbackNotifications.length || feedbackNotificationError || feedbackNotificationLoading)" class="portal-card feedback-notifications"><h2>反馈通知（{{ feedbackNotificationUnreadCount === null ? '未读数未知' : `${feedbackNotificationUnreadCount} 条未读` }}）</h2><p v-if="feedbackNotificationLoading" role="status">正在读取通知…</p><p v-if="feedbackNotificationError" class="portal-error" role="alert">{{ feedbackNotificationError }}<button type="button" :disabled="feedbackNotificationLoading" @click="loadFeedbackNotifications">重试通知</button></p><button v-for="item in feedbackNotifications" :key="item.id" type="button" class="feedback-row" @click="openFeedbackNotification(item)"><span><strong>{{ item.title }}</strong><small>{{ item.body }}</small><small>{{ formatDate(item.created_at) }}</small></span><em>查看反馈</em></button></section>
+      <template v-if="section === 'projects' && hasPermission('project.read')"><div class="portal-title"><h1>我的项目</h1><p>项目数据以最近一次同步快照为准</p></div><ListState v-if="projectListError || (!projects.length && !loading)" :error="projectListError" error-title="项目列表加载失败" empty-title="暂无可查看的项目" compact @retry="reloadList" /><template v-else-if="projects.length"><section class="project-list"><button v-for="item in projects" :key="item.project_id" type="button" @click="openProject(item)"><div><h2>{{ item.project_name || '未命名项目' }}</h2><p>{{ item.contract_no || '无合同编号' }} · {{ item.current_stage || '阶段未同步' }}</p></div><strong>{{ item.progress_pct ?? 0 }}%</strong><progress :value="item.progress_pct ?? 0" max="100"></progress><small>数据更新：{{ formatDate(item.source_updated_at) }}<template v-if="item.delayed"> · 已延期</template></small></button></section><nav v-if="projects.length < projectTotal" class="project-pagination" aria-label="项目加载更多"><button type="button" :disabled="loading" @click="loadMoreProjects">加载更多项目</button><span>已显示 {{ projects.length }} / {{ projectTotal }} 个</span></nav></template></template>
       <div v-else-if="section === 'projects'" class="portal-empty">{{ serviceUnavailableText('project_enabled', '当前账号没有项目读取权限。如需开通，请联系您的服务人员。') }}</div>
-      <template v-else-if="section === 'reports' && (hasPermission('report.read') || hasPermission('report.request'))"><div class="portal-title"><h1>电子报告</h1><p>申请审批与状态变更均由 Portal 服务端可靠跟踪</p></div><section v-if="hasPermission('report.read') && reportRiskAlerts.length" class="portal-card" aria-live="polite"><h2>下载安全提醒</h2><div v-for="item in reportRiskAlerts" :key="item.alert_id" class="report-row"><span><strong>{{ item.request_no || `报告 #${item.request_id}` }} 的下载授权已冻结</strong><small>{{ item.report_type }} · {{ formatDate(item.detected_at) }}</small><small>风险编号：{{ item.risk_code }}；服务人员复核前请勿反复尝试。</small><small>如需协助，请通过「客户反馈」提交或联系您的服务人员。</small><button type="button" class="secondary small" @click="navigate('feedback')">去反馈</button></span></div></section><section v-if="hasPermission('report.read') && reportNotifications.length" class="portal-card"><h2>报告通知（{{ reportNotificationUnreadCount }} 条未读）</h2><button v-for="item in reportNotifications" :key="item.id" class="report-row" type="button" @click="openReportNotification(item)"><span><strong>{{ item.request_no }} {{ reportNotificationTitle(item) }}</strong><small>{{ item.report_type }} · {{ formatDate(item.created_at) }}</small></span><em>{{ reportNotificationAction(item) }}</em></button></section><div class="portal-columns"><form v-if="hasPermission('report.request')" class="portal-card" @submit.prevent="submitReport"><h2>申请报告</h2><p v-if="reportProjectsError" class="portal-error" role="alert">{{ reportProjectsError }}</p><label>项目<select v-model="reportForm.project_id" :disabled="reportProjectsLoading || !hasPermission('project.read')" required><option value="">{{ reportProjectsLoading ? '正在加载项目…' : '请选择当前客户项目' }}</option><option v-for="item in reportProjects" :key="item.project_id" :value="item.project_id">{{ item.project_name || '未命名项目' }}（{{ item.contract_no || item.project_id }}）</option></select></label><p v-if="!hasPermission('project.read')" class="portal-warning">缺少 project.read，无法读取当前客户项目，报告申请已暂停。</p><p v-else-if="!reportProjectsLoading && !reportProjects.length && !reportProjectsError" class="portal-warning">暂无可申请报告的项目。</p><label>报告类型<select v-model="reportForm.report_type" required><option value="">请选择报告类型</option><option v-for="type in reportTypeOptions" :key="type" :value="type">{{ type }}</option></select></label><label v-if="reportForm.report_type === '其他'">自定义报告类型<input v-model.trim="reportCustomType" maxlength="64" required></label><label>申请原因<textarea v-model.trim="reportForm.reason" maxlength="2000" required></textarea></label><label>接收邮箱<input v-model.trim="reportForm.receive_email" type="email" required maxlength="320" placeholder="用于接收报告发放通知"></label><p v-if="!capabilityAvailable('report_request_submission')" class="portal-warning">{{ capabilityReason('report_request_submission') }}</p><p v-if="reportSubmitError" class="portal-error" role="alert">{{ reportSubmitError }}</p><button :disabled="reportSubmitting || reportProjectsLoading || !hasPermission('project.read') || !reportProjects.length || !capabilityAvailable('report_request_submission')">{{ reportSubmitting ? '正在提交…' : '提交申请' }}</button></form><section v-else class="portal-card"><h2>申请报告</h2><p class="portal-empty">当前账号没有报告申请权限。</p></section><section class="portal-card"><h2>申请记录</h2><p v-if="!hasPermission('report.read')" class="portal-empty">当前账号没有报告读取权限。</p><ListState v-else-if="reportListError || reportListLoading || !reports.length" :loading="reportListLoading" :error="reportListError" error-title="报告申请记录加载失败" empty-title="暂无报告申请" compact @retry="loadReportWorkspace" /><template v-else><button v-for="item in reports" :key="item.id" class="report-row" type="button" @click="openReport(item)"><span><strong>{{ item.request_no || `申请 #${item.id}` }}</strong><small>{{ item.report_type }} · {{ reportStatus(item.status) }}</small><small>提交于 {{ formatDate(item.submitted_at) }}</small></span><em>查看详情</em></button><nav v-if="reports.length < reportTotal" class="project-pagination" aria-label="报告申请加载更多"><button type="button" :disabled="reportListLoading" @click="loadMoreReports">加载更多申请</button><span>已显示 {{ reports.length }} / {{ reportTotal }} 条</span></nav></template></section></div></template>
+      <template v-else-if="section === 'reports' && (hasPermission('report.read') || hasPermission('report.request'))"><div class="portal-title"><h1>电子报告</h1><p>申请审批与状态变更均由 Portal 服务端可靠跟踪</p></div><section v-if="hasPermission('report.read') && reportRiskAlerts.length" class="portal-card" aria-live="polite"><h2>下载安全提醒</h2><div v-for="item in reportRiskAlerts" :key="item.alert_id" class="report-row"><span><strong>{{ item.request_no || `报告 #${item.request_id}` }} 的下载授权已冻结</strong><small>{{ item.report_type }} · {{ formatDate(item.detected_at) }}</small><small>风险编号：{{ item.risk_code }}；服务人员复核前请勿反复尝试。</small><small>如需协助，请通过「客户反馈」提交或联系您的服务人员。</small><button type="button" class="secondary small" @click="navigate('feedback')">去反馈</button></span></div></section><section v-if="hasPermission('report.read') && (reportNotifications.length || reportNotificationError || reportNotificationLoading)" class="portal-card"><h2>报告通知（{{ reportNotificationUnreadCount === null ? '未读数未知' : `${reportNotificationUnreadCount} 条未读` }}）</h2><p v-if="reportNotificationLoading" role="status">正在读取通知…</p><p v-if="reportNotificationError" class="portal-error" role="alert">{{ reportNotificationError }}<button type="button" :disabled="reportNotificationLoading" @click="loadReportNotifications()">重试通知</button></p><button v-for="item in reportNotifications" :key="item.id" class="report-row" type="button" @click="openReportNotification(item)"><span><strong>{{ item.request_no }} {{ reportNotificationTitle(item) }}</strong><small>{{ item.report_type }} · {{ formatDate(item.created_at) }}</small></span><em>{{ reportNotificationAction(item) }}</em></button></section><div class="portal-columns"><form v-if="hasPermission('report.request')" class="portal-card" @submit.prevent="submitReport"><h2>申请报告</h2><p v-if="reportProjectsError" class="portal-error" role="alert">{{ reportProjectsError }}</p><label>项目<select v-model="reportForm.project_id" :disabled="reportProjectsLoading || !hasPermission('project.read')" required><option value="">{{ reportProjectsLoading ? '正在加载项目…' : '请选择当前客户项目' }}</option><option v-for="item in reportProjects" :key="item.project_id" :value="item.project_id">{{ item.project_name || '未命名项目' }}（{{ item.contract_no || item.project_id }}）</option></select></label><p v-if="!hasPermission('project.read')" class="portal-warning">缺少 project.read，无法读取当前客户项目，报告申请已暂停。</p><p v-else-if="!reportProjectsLoading && !reportProjects.length && !reportProjectsError" class="portal-warning">暂无可申请报告的项目。</p><label>报告类型<select v-model="reportForm.report_type" required><option value="">请选择报告类型</option><option v-for="type in reportTypeOptions" :key="type" :value="type">{{ type }}</option></select></label><label v-if="reportForm.report_type === '其他'">自定义报告类型<input v-model.trim="reportCustomType" maxlength="64" required></label><label>申请原因<textarea v-model.trim="reportForm.reason" maxlength="2000" required></textarea></label><label>接收邮箱<input v-model.trim="reportForm.receive_email" type="email" required maxlength="320" placeholder="用于接收报告发放通知"></label><p v-if="!capabilityAvailable('report_request_submission')" class="portal-warning">{{ capabilityReason('report_request_submission') }}</p><p v-if="reportSubmitError" class="portal-error" role="alert">{{ reportSubmitError }}</p><button :disabled="reportSubmitting || reportProjectsLoading || !hasPermission('project.read') || !reportProjects.length || !capabilityAvailable('report_request_submission')">{{ reportSubmitting ? '正在提交…' : '提交申请' }}</button></form><section v-else class="portal-card"><h2>申请报告</h2><p class="portal-empty">当前账号没有报告申请权限。</p></section><section class="portal-card"><h2>申请记录</h2><p v-if="!hasPermission('report.read')" class="portal-empty">当前账号没有报告读取权限。</p><ListState v-else-if="reportListError || reportListLoading || !reports.length" :loading="reportListLoading" :error="reportListError" error-title="报告申请记录加载失败" empty-title="暂无报告申请" compact @retry="loadReportWorkspace" /><template v-else><button v-for="item in reports" :key="item.id" class="report-row" type="button" @click="openReport(item)"><span><strong>{{ item.request_no || `申请 #${item.id}` }}</strong><small>{{ item.report_type }} · {{ reportStatus(item.status) }}</small><small>提交于 {{ formatDate(item.submitted_at) }}</small></span><em>查看详情</em></button><nav v-if="reports.length < reportTotal" class="project-pagination" aria-label="报告申请加载更多"><button type="button" :disabled="reportListLoading" @click="loadMoreReports">加载更多申请</button><span>已显示 {{ reports.length }} / {{ reportTotal }} 条</span></nav></template></section></div></template>
       <div v-else-if="section === 'reports'" class="portal-empty">{{ serviceUnavailableText('report_enabled', '当前账号没有报告读取或申请权限。如需开通，请联系您的服务人员。') }}</div>
       <FilingWizard v-else-if="section === 'filings' && hasPermission('filing.read')" :permissions="permissions" :capabilities="capabilities" :projects="projects" @error="childError" @notice="childNotice" />
       <div v-else-if="section === 'filings'" class="portal-empty">{{ serviceUnavailableText('filing_enabled', '当前账号没有备案读取权限。如需开通，请联系您的服务人员。') }}</div>
@@ -869,11 +987,11 @@ onBeforeUnmount(() => {
       <div v-else-if="section === 'security'" class="portal-empty">当前账号没有账户安全管理权限。如需开通，请联系您的服务人员。</div></template>
 
     <template #overlay>
-    <div v-if="selectedReport || reportDetailLoading || reportDetailError" class="portal-dialog" role="dialog" aria-modal="true" aria-labelledby="report-dialog-title"><article class="report-detail" tabindex="-1"><button class="close" aria-label="关闭" @click="closeReport">×</button><h2 id="report-dialog-title">{{ selectedReport?.request_no || '报告申请详情' }}</h2><p v-if="reportDetailError" class="portal-error" role="alert">{{ reportDetailError }}</p><p v-if="reportDetailLoading">正在加载报告详情…</p><template v-else-if="selectedReport"><p v-if="selectedReport.report_validity_status === 'VOID'" class="portal-error" role="alert">本版本已作废：{{ selectedReport.void_notice || '请等待或下载最新更正版本' }}</p><p v-if="selectedReport.status === 'SUBMISSION_FAILED'" class="portal-error" role="alert">本次申请未成功投递到报告审批系统，未生成报告。原申请不能复用原幂等键，请按原内容重新提交新申请。</p><button v-if="canReapplyFailedReport(selectedReport) && hasPermission('report.request')" type="button" class="secondary" @click="reapplyFailedReport">重新提交</button><dl class="report-summary"><div><dt>当前状态</dt><dd>{{ reportStatus(selectedReport.status) }}</dd></div><div><dt>报告版本</dt><dd>R{{ selectedReport.current_report_revision || 0 }}</dd></div><div><dt>报告类型</dt><dd>{{ selectedReport.report_type || '—' }}</dd></div><div><dt>关联项目</dt><dd>{{ selectedReport.project_id || '—' }}</dd></div><div><dt>提交时间</dt><dd>{{ formatDate(selectedReport.submitted_at) }}</dd></div><div><dt>审批时间</dt><dd>{{ formatDate(selectedReport.approved_at) }}</dd></div><div><dt>发放时间</dt><dd>{{ formatDate(selectedReport.issued_at) }}</dd></div></dl><section><h3>申请原因</h3><p>{{ selectedReport.reason || '—' }}</p></section><section v-if="selectedReport.approval_result"><h3>审批结果</h3><p>{{ selectedReport.approval_result }}</p></section><section><h3>状态时间线</h3><ol v-if="selectedReport.events?.length" class="report-timeline"><li v-for="item in selectedReport.events" :key="item.sequence"><span>{{ item.sequence }}</span><div><strong>{{ reportEventType(item.event_type) }}</strong><small>{{ formatDate(item.occurred_at) }}</small><p><template v-if="item.from_status">{{ reportStatus(item.from_status) }} → </template>{{ reportStatus(item.to_status) }}</p></div></li></ol><p v-else class="project-empty">暂无状态事件</p></section><section class="report-download"><h3>报告下载</h3><p v-if="selectedReport.report_validity_status === 'VOID'">旧版本下载权限已撤销，请等待最新更正版本发放。</p><p v-else-if="selectedReport.status === 'SUBMISSION_FAILED'">本次申请投递失败，没有可下载的报告；请重新提交新申请。</p><p v-else-if="selectedReport.status !== 'ISSUED'">报告发放后才可申请短效下载授权。</p><p v-else-if="!hasPermission('report.download')">报告已发放，但当前账号没有报告下载权限。</p><template v-else><p>每次点击都会创建新的短效授权；下载凭据不会写入链接或浏览器存储。</p><p v-if="!capabilityAvailable('report_download')" class="portal-warning">{{ capabilityReason('report_download') }}</p><p v-if="reportDownloadError" class="portal-error" role="alert">{{ reportDownloadError }}</p><button type="button" :disabled="reportDownloadLoading || !capabilityAvailable('report_download')" @click="downloadReportFile">{{ reportDownloadLoading ? '正在安全下载…' : '下载 PDF 报告' }}</button></template></section></template></article></div>
-    <div v-if="selectedProject" class="portal-dialog" role="dialog" aria-modal="true" aria-labelledby="project-dialog-title"><article class="project-detail" tabindex="-1"><button class="close" aria-label="关闭" @click="closeProject">×</button><h2 id="project-dialog-title">{{ selectedProject.snapshot?.project_name || '项目详情' }}</h2><p v-if="projectDetailError" class="portal-error" role="alert">{{ projectDetailError }}</p><p v-if="projectDetailLoading">正在加载项目详情…</p><template v-else><section class="project-overview" aria-label="项目概览"><div><small>总体进度</small><strong>{{ selectedProject.snapshot?.progress_pct ?? 0 }}%</strong><progress :value="selectedProject.snapshot?.progress_pct ?? 0" max="100"></progress></div><dl><div><dt>项目状态</dt><dd>{{ projectStatus(selectedProject.snapshot?.status) }}</dd></div><div><dt>当前阶段</dt><dd>{{ selectedProject.snapshot?.current_stage || '—' }}</dd></div><div><dt>预计结束</dt><dd>{{ formatDay(selectedProject.snapshot?.expected_end_date) }}</dd></div><div><dt>延期状态</dt><dd :class="{ 'project-delayed': selectedProject.snapshot?.delayed }">{{ selectedProject.snapshot?.delayed ? '已延期' : '未标记延期' }}</dd></div><div><dt>源数据更新</dt><dd>{{ formatDate(selectedProject.snapshot?.source_updated_at) }}</dd></div><div><dt>Portal 同步</dt><dd>{{ formatDate(selectedProject.snapshot?.synced_at) }}</dd></div></dl><p v-if="selectedProject.snapshot?.manager_name || selectedProject.snapshot?.manager_contact_masked"><strong>项目经理：</strong>{{ selectedProject.snapshot?.manager_name || '—' }}<span v-if="selectedProject.snapshot?.manager_contact_masked"> · {{ selectedProject.snapshot.manager_contact_masked }}</span></p><p v-else class="project-empty">暂无项目经理信息</p></section><section><h3>五阶段里程碑</h3><ol v-if="selectedProject.milestones?.length" class="project-milestones"><li v-for="item in selectedProject.milestones" :key="`${item.stage_code}-${item.sort_no}`"><strong>{{ item.stage_name || item.stage_code || '未命名阶段' }}</strong><span>{{ milestoneStatus(item.status) }}</span><small>计划：{{ formatDate(item.planned_at) }} · 完成：{{ formatDate(item.completed_at) }}</small></li></ol><p v-else class="project-empty">暂无里程碑数据</p></section><section><h3>项目团队</h3><div v-if="selectedProject.team?.length" class="project-team"><div v-for="item in selectedProject.team" :key="`${item.name}-${item.role}`"><strong>{{ item.name || '—' }}</strong><span>{{ item.role || '角色未同步' }}</span><small>{{ item.contact_masked || '联系方式未提供' }}</small></div></div><p v-else class="project-empty">暂无团队信息</p></section></template><section><h3>项目动态</h3><ListState v-if="activityError || activityLoading || !activities.length" :loading="activityLoading" :error="activityError" error-title="项目动态加载失败" empty-title="暂无项目动态" compact @retry="loadProjectActivities(selectedProject.project_id, activityPage)" /><div v-else class="project-activities"><p v-for="item in activities" :key="`${item.occurred_at}-${item.type}-${item.content}`"><small>{{ formatDate(item.occurred_at) }} · {{ item.type || '项目动态' }}</small><span>{{ item.content || '无动态内容' }}</span></p></div><PaginationBar class="portal-pagination" label="项目动态分页" :page="activityPage" :total="activityTotal" :page-size="activityPageSize" :loading="activityLoading" @change="changeActivityPage" /></section><section class="evaluation-panel"><h3>服务评价</h3><p v-if="!hasPermission('evaluation.read') && !hasPermission('evaluation.create')" class="project-empty">{{ serviceUnavailableText('evaluation_enabled', '当前账号没有评价读取或提交权限。') }}</p><p v-else-if="evaluationLoading">正在加载服务评价…</p><p v-else-if="evaluationError" class="portal-warning" role="status">{{ evaluationError }}，项目详情不受影响。</p><div v-else-if="evaluation" class="evaluation-readonly"><p><strong>综合评分 {{ evaluation.average_score }}</strong>（{{ evaluation.total_score }}/20）</p><dl><template v-for="[key, label] in scoreDimensions" :key="key"><dt>{{ label }}</dt><dd>{{ evaluation[key] }}/5</dd></template></dl><p v-if="evaluation.comment">评语：{{ evaluation.comment }}</p><small>提交于 {{ formatDate(evaluation.submitted_at) }}；提交后不可修改。</small></div><form v-else-if="evaluationEligibility?.eligible && hasPermission('evaluation.create')" aria-label="服务评分" @submit.prevent="submitProjectEvaluation"><p class="portal-info">项目已完成，欢迎您对本次服务进行评价；提交后不可修改，低分事项将由服务团队跟进。</p><fieldset v-for="[key, label] in scoreDimensions" :key="key"><legend>{{ label }}</legend><label v-for="score in 5" :key="score"><input v-model.number="evaluationForm[key]" type="radio" :name="key" :value="score" required><span>{{ score }} 分</span></label></fieldset><label>评语（可选）<textarea v-model.trim="evaluationForm.comment" maxlength="2000"></textarea></label><p>综合评分：{{ evaluationAverage }}/5</p><button :disabled="!evaluationReady">提交评价</button><small>评价提交后不可修改，请确认四项分值。</small></form><p v-else-if="evaluationEligibility?.eligible" class="project-empty">项目可评价，但当前账号没有评价提交权限。</p><p v-else-if="evaluationEligibility?.reason_code === 'PROJECT_NOT_COMPLETED'" class="portal-warning">项目完成后才可评价。</p><p v-else-if="evaluationEligibility">该项目已评价；只有原提交账号可以查看评价原文。</p></section><section class="project-actions"><h3>项目操作</h3><p v-if="!selectedProject.snapshot?.manager_message_available" class="portal-warning">项目来源尚未提供可验证的经理 Portal 接收账号，站内联系已关闭；姓名和脱敏联系方式不代表可投递身份。</p><button v-else-if="hasPermission('project.message.read')" type="button" :disabled="projectMessageLoading" @click="openProjectConversation">{{ projectMessageLoading ? '正在加载站内会话…' : '站内联系项目经理' }}</button><p v-if="projectMessageError" class="portal-error" role="alert">{{ projectMessageError }}</p><section v-if="projectConversation" class="project-conversation"><h3>与 {{ projectConversation.conversation?.manager_name || '项目经理' }} 的站内会话</h3><button v-if="projectConversation.messages?.has_more && projectConversation.messages?.next_before" type="button" :disabled="projectMessageOlderLoading" @click="loadOlderProjectMessages">{{ projectMessageOlderLoading ? '正在加载…' : '加载更早消息' }}</button><div v-for="item in projectConversation.messages?.items || []" :key="item.cursor" class="project-message"><strong>{{ item.sender_type === 'CUSTOMER' ? '我' : '项目经理' }}</strong><p>{{ item.content }}</p><small>{{ formatDate(item.accepted_at) }}</small></div><form v-if="hasPermission('project.message.send')" @submit.prevent="sendManagerMessage"><label>消息（纯文本，最多 2000 字）<textarea v-model="projectMessageContent" maxlength="2000" required></textarea></label><button :disabled="projectMessageLoading">发送站内消息</button></form></section><p v-if="!capabilityAvailable('project_export')" class="portal-warning">{{ capabilityReason('project_export') }}</p><p v-if="projectExportError" class="portal-error" role="alert">{{ projectExportError }}</p><button v-if="hasPermission('project.export')" type="button" :disabled="projectExportLoading || !capabilityAvailable('project_export')" @click="exportProjectPDF">{{ projectExportLoading ? '正在生成项目 PDF…' : '导出项目进度 PDF' }}</button></section></article></div>
-    <div v-if="selectedFeedback && hasPermission('feedback.read')" class="portal-dialog" role="dialog" aria-modal="true"><article tabindex="-1"><button class="close" aria-label="关闭" @click="selectedFeedback = null">×</button><h2>{{ selectedFeedback.feedback.feedback_no }} · {{ selectedFeedback.feedback.title }}</h2><p>{{ feedbackStatus(selectedFeedback.feedback.status) }} · {{ slaText(selectedFeedback.feedback) }}</p><p>{{ selectedFeedback.feedback.description }}</p><p v-if="selectedFeedback.feedback.expected_contact_masked">联系方式：{{ selectedFeedback.feedback.expected_contact_masked }}</p><h3>处理时间线</h3><div v-for="item in selectedFeedback.status_logs" :key="`${item.occurred_at}-${item.to_status}`" class="feedback-message"><strong>{{ feedbackStatus(item.to_status) }}</strong><small>{{ formatDate(item.occurred_at) }} · {{ item.reason }}</small></div><h3>沟通记录</h3><div v-for="item in selectedFeedback.messages" :key="item.created_at" class="feedback-message"><strong>{{ item.sender_type === 'CUSTOMER' ? '我' : '服务人员' }}</strong><p>{{ item.content }}</p><small>{{ formatDate(item.created_at) }}</small></div><form v-if="hasPermission('feedback.reply') && !['CLOSED','REJECTED'].includes(selectedFeedback.feedback.status)" @submit.prevent="replyFeedback"><label>补充说明<textarea v-model.trim="feedbackReply" maxlength="5000" required></textarea></label><button>提交补充</button></form><button v-if="hasPermission('feedback.reply') && selectedFeedback.feedback.status === 'RESOLVED'" :disabled="feedbackClosing" @click="confirmCloseFeedback">{{ feedbackClosing ? '正在关闭…' : '关闭反馈单' }}</button></article></div>
+    <div v-if="selectedReport || reportDetailLoading || reportDetailError" ref="portalDialog" class="portal-dialog" role="dialog" aria-modal="true" aria-labelledby="report-dialog-title"><article class="report-detail" tabindex="-1"><button class="close" aria-label="关闭" @click="closeReport">×</button><h2 id="report-dialog-title">{{ selectedReport?.request_no || '报告申请详情' }}</h2><p v-if="reportDetailError" class="portal-error" role="alert">{{ reportDetailError }}</p><p v-if="reportDetailLoading">正在加载报告详情…</p><template v-else-if="selectedReport"><p v-if="selectedReport.report_validity_status === 'VOID'" class="portal-error" role="alert">本版本已作废：{{ selectedReport.void_notice || '请等待或下载最新更正版本' }}</p><p v-if="selectedReport.status === 'SUBMISSION_FAILED'" class="portal-error" role="alert">本次申请未成功投递到报告审批系统，未生成报告。原申请不能复用原幂等键，请按原内容重新提交新申请。</p><button v-if="canReapplyFailedReport(selectedReport) && hasPermission('report.request')" type="button" class="secondary" @click="reapplyFailedReport">重新提交</button><dl class="report-summary"><div><dt>当前状态</dt><dd>{{ reportStatus(selectedReport.status) }}</dd></div><div><dt>报告版本</dt><dd>R{{ selectedReport.current_report_revision || 0 }}</dd></div><div><dt>报告类型</dt><dd>{{ selectedReport.report_type || '—' }}</dd></div><div><dt>关联项目</dt><dd>{{ selectedReport.project_id || '—' }}</dd></div><div><dt>提交时间</dt><dd>{{ formatDate(selectedReport.submitted_at) }}</dd></div><div><dt>审批时间</dt><dd>{{ formatDate(selectedReport.approved_at) }}</dd></div><div><dt>发放时间</dt><dd>{{ formatDate(selectedReport.issued_at) }}</dd></div></dl><section><h3>申请原因</h3><p>{{ selectedReport.reason || '—' }}</p></section><section v-if="selectedReport.approval_result"><h3>审批结果</h3><p>{{ selectedReport.approval_result }}</p></section><section><h3>状态时间线</h3><ol v-if="selectedReport.events?.length" class="report-timeline"><li v-for="item in selectedReport.events" :key="item.sequence"><span>{{ item.sequence }}</span><div><strong>{{ reportEventType(item.event_type) }}</strong><small>{{ formatDate(item.occurred_at) }}</small><p><template v-if="item.from_status">{{ reportStatus(item.from_status) }} → </template>{{ reportStatus(item.to_status) }}</p></div></li></ol><p v-else class="project-empty">暂无状态事件</p></section><section class="report-download"><h3>报告下载</h3><p v-if="selectedReport.report_validity_status === 'VOID'">旧版本下载权限已撤销，请等待最新更正版本发放。</p><p v-else-if="selectedReport.status === 'SUBMISSION_FAILED'">本次申请投递失败，没有可下载的报告；请重新提交新申请。</p><p v-else-if="selectedReport.status !== 'ISSUED'">报告发放后才可申请短效下载授权。</p><p v-else-if="!hasPermission('report.download')">报告已发放，但当前账号没有报告下载权限。</p><template v-else><p>每次点击都会创建新的短效授权；下载凭据不会写入链接或浏览器存储。</p><p v-if="!capabilityAvailable('report_download')" class="portal-warning">{{ capabilityReason('report_download') }}</p><p v-if="reportDownloadError" class="portal-error" role="alert">{{ reportDownloadError }}</p><button type="button" :disabled="reportDownloadLoading || !capabilityAvailable('report_download')" @click="downloadReportFile">{{ reportDownloadLoading ? '正在安全下载…' : '下载 PDF 报告' }}</button></template></section></template></article></div>
+    <div v-if="selectedProject" ref="portalDialog" class="portal-dialog" role="dialog" aria-modal="true" aria-labelledby="project-dialog-title"><article class="project-detail" tabindex="-1"><button class="close" aria-label="关闭" @click="closeProject">×</button><h2 id="project-dialog-title">{{ selectedProject.snapshot?.project_name || '项目详情' }}</h2><p v-if="projectDetailError" class="portal-error" role="alert">{{ projectDetailError }}</p><p v-if="projectDetailLoading">正在加载项目详情…</p><template v-else><section class="project-overview" aria-label="项目概览"><div><small>总体进度</small><strong>{{ selectedProject.snapshot?.progress_pct ?? 0 }}%</strong><progress :value="selectedProject.snapshot?.progress_pct ?? 0" max="100"></progress></div><dl><div><dt>项目状态</dt><dd>{{ projectStatus(selectedProject.snapshot?.status) }}</dd></div><div><dt>当前阶段</dt><dd>{{ selectedProject.snapshot?.current_stage || '—' }}</dd></div><div><dt>预计结束</dt><dd>{{ formatDay(selectedProject.snapshot?.expected_end_date) }}</dd></div><div><dt>延期状态</dt><dd :class="{ 'project-delayed': selectedProject.snapshot?.delayed }">{{ selectedProject.snapshot?.delayed ? '已延期' : '未标记延期' }}</dd></div><div><dt>源数据更新</dt><dd>{{ formatDate(selectedProject.snapshot?.source_updated_at) }}</dd></div><div><dt>Portal 同步</dt><dd>{{ formatDate(selectedProject.snapshot?.synced_at) }}</dd></div></dl><p v-if="selectedProject.snapshot?.manager_name || selectedProject.snapshot?.manager_contact_masked"><strong>项目经理：</strong>{{ selectedProject.snapshot?.manager_name || '—' }}<span v-if="selectedProject.snapshot?.manager_contact_masked"> · {{ selectedProject.snapshot.manager_contact_masked }}</span></p><p v-else class="project-empty">暂无项目经理信息</p></section><section><h3>五阶段里程碑</h3><ol v-if="selectedProject.milestones?.length" class="project-milestones"><li v-for="item in selectedProject.milestones" :key="`${item.stage_code}-${item.sort_no}`"><strong>{{ item.stage_name || item.stage_code || '未命名阶段' }}</strong><span>{{ milestoneStatus(item.status) }}</span><small>计划：{{ formatDate(item.planned_at) }} · 完成：{{ formatDate(item.completed_at) }}</small></li></ol><p v-else class="project-empty">暂无里程碑数据</p></section><section><h3>项目团队</h3><div v-if="selectedProject.team?.length" class="project-team"><div v-for="item in selectedProject.team" :key="`${item.name}-${item.role}`"><strong>{{ item.name || '—' }}</strong><span>{{ item.role || '角色未同步' }}</span><small>{{ item.contact_masked || '联系方式未提供' }}</small></div></div><p v-else class="project-empty">暂无团队信息</p></section></template><section><h3>项目动态</h3><ListState v-if="activityError || activityLoading || !activities.length" :loading="activityLoading" :error="activityError" error-title="项目动态加载失败" empty-title="暂无项目动态" compact @retry="loadProjectActivities(selectedProject.project_id, activityPage)" /><div v-else class="project-activities"><p v-for="item in activities" :key="`${item.occurred_at}-${item.type}-${item.content}`"><small>{{ formatDate(item.occurred_at) }} · {{ item.type || '项目动态' }}</small><span>{{ item.content || '无动态内容' }}</span></p></div><PaginationBar class="portal-pagination" label="项目动态分页" :page="activityPage" :total="activityTotal" :page-size="activityPageSize" :loading="activityLoading" @change="changeActivityPage" /></section><section class="evaluation-panel"><h3>服务评价</h3><p v-if="!hasPermission('evaluation.read') && !hasPermission('evaluation.create')" class="project-empty">{{ serviceUnavailableText('evaluation_enabled', '当前账号没有评价读取或提交权限。') }}</p><p v-else-if="evaluationLoading">正在加载服务评价…</p><p v-else-if="evaluationError" class="portal-warning" role="status">{{ evaluationError }}，项目详情不受影响。</p><div v-else-if="evaluation" class="evaluation-readonly"><p><strong>综合评分 {{ evaluation.average_score }}</strong>（{{ evaluation.total_score }}/20）</p><dl><template v-for="[key, label] in scoreDimensions" :key="key"><dt>{{ label }}</dt><dd>{{ evaluation[key] }}/5</dd></template></dl><p v-if="evaluation.comment">评语：{{ evaluation.comment }}</p><small>提交于 {{ formatDate(evaluation.submitted_at) }}；提交后不可修改。</small></div><form v-else-if="evaluationEligibility?.eligible && hasPermission('evaluation.create')" aria-label="服务评分" @submit.prevent="submitProjectEvaluation"><p class="portal-info">项目已完成，欢迎您对本次服务进行评价；提交后不可修改，低分事项将由服务团队跟进。</p><fieldset v-for="[key, label] in scoreDimensions" :key="key"><legend>{{ label }}</legend><label v-for="score in 5" :key="score"><input v-model.number="evaluationForm[key]" type="radio" :name="key" :value="score" required><span>{{ score }} 分</span></label></fieldset><label>评语（可选）<textarea v-model.trim="evaluationForm.comment" maxlength="2000"></textarea></label><p>综合评分：{{ evaluationAverage }}/5</p><button :disabled="!evaluationReady">提交评价</button><small>评价提交后不可修改，请确认四项分值。</small></form><p v-else-if="evaluationEligibility?.eligible" class="project-empty">项目可评价，但当前账号没有评价提交权限。</p><p v-else-if="evaluationEligibility?.reason_code === 'PROJECT_NOT_COMPLETED'" class="portal-warning">项目完成后才可评价。</p><p v-else-if="evaluationEligibility">该项目已评价；只有原提交账号可以查看评价原文。</p></section><section class="project-actions"><h3>项目操作</h3><p v-if="!selectedProject.snapshot?.manager_message_available" class="portal-warning">项目来源尚未提供可验证的经理 Portal 接收账号，站内联系已关闭；姓名和脱敏联系方式不代表可投递身份。</p><button v-else-if="hasPermission('project.message.read')" type="button" :disabled="projectMessageLoading" @click="openProjectConversation">{{ projectMessageLoading ? '正在加载站内会话…' : '站内联系项目经理' }}</button><p v-if="projectMessageError" class="portal-error" role="alert">{{ projectMessageError }}</p><section v-if="projectConversation" class="project-conversation"><h3>与 {{ projectConversation.conversation?.manager_name || '项目经理' }} 的站内会话</h3><button v-if="projectConversation.messages?.has_more && projectConversation.messages?.next_before" type="button" :disabled="projectMessageOlderLoading" @click="loadOlderProjectMessages">{{ projectMessageOlderLoading ? '正在加载…' : '加载更早消息' }}</button><div v-for="item in projectConversation.messages?.items || []" :key="item.cursor" class="project-message"><strong>{{ item.sender_type === 'CUSTOMER' ? '我' : '项目经理' }}</strong><p>{{ item.content }}</p><small>{{ formatDate(item.accepted_at) }}</small></div><form v-if="hasPermission('project.message.send')" @submit.prevent="sendManagerMessage"><label>消息（纯文本，最多 2000 字）<textarea v-model="projectMessageContent" maxlength="2000" required></textarea></label><button :disabled="projectMessageLoading">发送站内消息</button></form></section><p v-if="!capabilityAvailable('project_export')" class="portal-warning">{{ capabilityReason('project_export') }}</p><p v-if="projectExportError" class="portal-error" role="alert">{{ projectExportError }}</p><button v-if="hasPermission('project.export')" type="button" :disabled="projectExportLoading || !capabilityAvailable('project_export')" @click="exportProjectPDF">{{ projectExportLoading ? '正在生成项目 PDF…' : '导出项目进度 PDF' }}</button></section></article></div>
+    <div v-if="selectedFeedback && hasPermission('feedback.read')" ref="portalDialog" class="portal-dialog" role="dialog" aria-modal="true" aria-labelledby="feedback-dialog-title"><article tabindex="-1"><button class="close" aria-label="关闭" @click="closeFeedbackDetail">×</button><h2 id="feedback-dialog-title">{{ selectedFeedback.feedback.feedback_no }} · {{ selectedFeedback.feedback.title }}</h2><p>{{ feedbackStatus(selectedFeedback.feedback.status) }} · {{ slaText(selectedFeedback.feedback) }}</p><p>{{ selectedFeedback.feedback.description }}</p><p v-if="selectedFeedback.feedback.expected_contact_masked">联系方式：{{ selectedFeedback.feedback.expected_contact_masked }}</p><h3>处理时间线</h3><div v-for="item in selectedFeedback.status_logs" :key="`${item.occurred_at}-${item.to_status}`" class="feedback-message"><strong>{{ feedbackStatus(item.to_status) }}</strong><small>{{ formatDate(item.occurred_at) }} · {{ item.reason }}</small></div><h3>沟通记录</h3><div v-for="item in selectedFeedback.messages" :key="item.created_at" class="feedback-message"><strong>{{ item.sender_type === 'CUSTOMER' ? '我' : '服务人员' }}</strong><p>{{ item.content }}</p><small>{{ formatDate(item.created_at) }}</small></div><form v-if="hasPermission('feedback.reply') && !['CLOSED','REJECTED'].includes(selectedFeedback.feedback.status)" @submit.prevent="replyFeedback"><label>补充说明<textarea v-model.trim="feedbackReply" maxlength="5000" required></textarea></label><button>提交补充</button></form><button v-if="hasPermission('feedback.reply') && selectedFeedback.feedback.status === 'RESOLVED'" :disabled="feedbackClosing" @click="confirmCloseFeedback">{{ feedbackClosing ? '正在关闭…' : '关闭反馈单' }}</button></article></div>
 
-    <div v-if="aboutOpen" class="portal-dialog portal-about-dialog" role="dialog" aria-modal="true" aria-labelledby="portal-about-title" aria-describedby="portal-about-intro"><article tabindex="-1"><button class="close" type="button" aria-label="关闭" @click="closeAbout">×</button><h2 id="portal-about-title">关于本门户</h2><p id="portal-about-intro">这里说明本门户当前可以办理的事项，以及仍在接入中的能力。</p><ul class="portal-about-list"><li><strong>当前可用</strong>登录、会话、项目查询、报告申请和等保备案草稿均已接入门户服务；客户反馈与账号安全同样在门户内办理。</li><li><strong>文件下载</strong>项目快照和已发放的报告可下载受控 PDF 文件；备案材料已接入受控上传与文件校验状态，文件网关未配置时上传会失败关闭。</li><li><strong>尚未接通</strong>备案 PDF 导出和向公安机关提交仍未接通，接通前请通过「客户反馈」提交或联系您的服务人员协助办理。</li></ul></article></div>
+    <div v-if="aboutOpen" ref="portalDialog" class="portal-dialog portal-about-dialog" role="dialog" aria-modal="true" aria-labelledby="portal-about-title" aria-describedby="portal-about-intro"><article tabindex="-1"><button class="close" type="button" aria-label="关闭" @click="closeAbout">×</button><h2 id="portal-about-title">关于本门户</h2><p id="portal-about-intro">这里说明本门户当前可以办理的事项，以及仍在接入中的能力。</p><ul class="portal-about-list"><li><strong>当前可用</strong>登录、会话、项目查询、报告申请和等保备案草稿均已接入门户服务；客户反馈与账号安全同样在门户内办理。</li><li><strong>文件下载</strong>项目快照和已发放的报告可下载受控 PDF 文件；备案材料已接入受控上传与文件校验状态，文件网关未配置时上传会失败关闭。</li><li><strong>尚未接通</strong>备案 PDF 导出和向公安机关提交仍未接通，接通前请通过「客户反馈」提交或联系您的服务人员协助办理。</li></ul></article></div>
     </template>
   </AppShell>
 </template>

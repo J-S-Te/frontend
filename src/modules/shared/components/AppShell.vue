@@ -13,6 +13,7 @@
 // 4. 无障碍契约：当前页导航项带 aria-current="page"，汉堡按钮用 aria-expanded /
 //    aria-controls 关联侧栏，抽屉打开时 Escape 可收起并把焦点交还汉堡按钮。
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useSidebarNavigation } from '../composables/useSidebarNavigation.js'
 import ConsoleIcon from '@/modules/shared/components/ConsoleIcon.vue'
 import {
   THEME_MODES,
@@ -173,6 +174,11 @@ function onThemePreferenceChanged() {
 }
 // 汉堡按钮引用：Escape 收起抽屉后把焦点交还给它，键盘用户不会掉进已隐藏的侧栏。
 const menuButton = ref(null)
+const sidebarElement = ref(null)
+const { hidden: sidebarHidden } = useSidebarNavigation({
+  open: computed(() => props.menuOpen), container: sidebarElement,
+  trigger: menuButton, collapsed: sidebarCollapsed,
+})
 
 // closeMenuOnEscape 处理文档级 Escape：只在抽屉打开时收起，抽屉没开就不拦截，
 // 这样模块自己的弹窗 / 下拉仍然拿到同一个按键。
@@ -283,7 +289,7 @@ function toggleItem(item) {
 
 <template>
   <div class="console-page" :class="[pageClass, sidebarCollapsed ? 'is-sidebar-collapsed' : '']">
-    <aside :id="SIDEBAR_ID" :class="[sidebarBaseClass, sidebarClass, { open: menuOpen }]">
+    <aside ref="sidebarElement" :inert="sidebarHidden" :aria-hidden="sidebarHidden ? 'true' : undefined" tabindex="-1" :id="SIDEBAR_ID" :class="[sidebarBaseClass, sidebarClass, { open: menuOpen }]">
       <div class="console-brand" :class="brandClass">
         <slot name="brand">
           <span class="console-brand-mark"><ConsoleIcon :name="brandIcon" /></span>

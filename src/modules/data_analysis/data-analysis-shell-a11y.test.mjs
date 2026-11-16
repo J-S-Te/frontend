@@ -109,7 +109,7 @@ test('数据看板汉堡按钮用 aria-expanded / aria-controls 关联抽屉侧�
   const sidebar = singleByClass('da-sidebar')
   assert.equal(sidebar.tag, 'aside')
   assert.equal(staticAttr(sidebar, 'id'), 'da-sidebar', '抽屉侧栏必须有稳定 id 供 aria-controls 指向')
-  assert.equal((template.match(/id="da-sidebar"/g) ?? []).length, 1, '侧栏 id 必须唯一')
+  assert.equal(astElements(sfc.descriptor.template.ast).filter(node => staticAttr(node, 'id') === 'da-sidebar').length, 1, '侧栏 id 必须唯一')
 })
 
 test('Escape 收起打开的抽屉并把焦点交还汉堡按钮', () => {
@@ -154,5 +154,7 @@ test('抽屉状态仍由本页 mobileMenuOpen 持有，未被搬进共享外壳'
   assert.match(script, /import \{[^}]*onMounted[^}]*\} from "vue"/)
   assert.match(script, /const mobileMenuOpen = ref\(false\)/)
   assert.doesNotMatch(source, /AppShell/)
-  assert.match(template, /<aside id="da-sidebar" class="da-sidebar" :class="\{ open: mobileMenuOpen \}">/)
+  const sidebar = singleByClass('da-sidebar')
+  assert.equal(directiveExpression(sidebar, 'bind', 'class'), '{ open: mobileMenuOpen }')
+  assert.equal(directiveExpression(sidebar, 'bind', 'inert'), 'sidebarHidden')
 })

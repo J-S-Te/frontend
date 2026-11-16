@@ -2171,3 +2171,18 @@ test('付款详情切换后迟到的旧付款不能覆盖当前单据或回写�
     assert.equal(fixture.routerCalls.replace.at(-1)[0].query.claim_id, 'current')
   } finally { fixture.unmount() }
 })
+
+test('报销列表独立读取，候选服务失败不阻断列表', async () => {
+ const calls=[]
+ const h=await mountPage(['expense.claim.read','expense.claim.create'],async(path)=>{
+  calls.push(path)
+  if(path.includes('options')) throw new Error('候选不可用')
+  return {items:[{id:'claim-list',status:'DRAFT'}],total:1}
+ },'claims')
+ try {
+  assert.equal(h.state.rows.value[0].id,'claim-list')
+  assert.equal(h.state.loading.value,false)
+  assert.equal(h.state.listError.value,'')
+  assert.ok(h.state.editorOptionsError.value)
+ } finally {h.unmount()}
+})

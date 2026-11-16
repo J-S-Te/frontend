@@ -1,6 +1,6 @@
 <script setup>
 import { formatCRMError } from '../api/errorMessages.js'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onScopeDispose, ref, watch } from 'vue'
 import { listOwnerDirectory } from '../api/ownerDirectory.js'
 
 const props = defineProps({
@@ -17,6 +17,19 @@ const users = ref([])
 const loading = ref(false)
 const error = ref('')
 let loadSequence = 0
+let loadController = null
+
+// 用途：取消过期目录读取并阻止迟到结果改变负责人表单。
+// 参数：无。
+// 返回值：无；不清除已确认的选项和表单值。
+function cancelLoad() {
+  loadSequence += 1
+  loadController?.abort()
+  loadController = null
+  loading.value = false
+}
+onScopeDispose(cancelLoad)
+watch(() => props.disabled, (disabled) => { if (disabled) cancelLoad() }, { flush: 'sync' })
 
 const selectedUser = computed(() => users.value.find((item) => item.user_id === props.userId) || null)
 const organizations = computed(() => selectedUser.value?.organizations || [])
@@ -45,14 +58,20 @@ function selectUser(userID, requestedOrganizationID = '') {
   emit('update:organizationId', preferredOrganization(user, requestedOrganizationID))
 }
 
+// 用途：读取最新负责人候选，保留有效已选项并隔离旧响应。
+// 参数：params 为搜索条件；initializeSelection 控制是否回填默认任职。
+// 返回值：读取完成；主动取消静默，当前失败显示重试入口。
 async function load(params, initializeSelection = false) {
   if (props.disabled) return
-  const sequence = ++loadSequence
+  cancelLoad()
+  const sequence = loadSequence
+  const controller = new AbortController()
+  loadController = controller
   loading.value = true
   error.value = ''
   try {
-    const result = await listOwnerDirectory({ ...params, page: 1, page_size: 50 })
-    if (sequence !== loadSequence) return
+    const result = await listOwnerDirectory({ ...params, page: 1, page_size: 50 }, { signal: controller.signal })
+    if (sequence !== loadSequence || controller.signal.aborted) return
     const loadedUsers = Array.isArray(result?.items) ? result.items : []
     // 搜索结果可能不含当前已选用户；保留服务端之前确认过的选项，避免一次关键词查询
     // 把表单中的负责人静默清空。最终有效性仍由提交接口按平台任职关系复核。
@@ -66,11 +85,14 @@ async function load(params, initializeSelection = false) {
       selectUser(desiredUserID, desiredOrganizationID)
     }
   } catch (value) {
-    if (sequence !== loadSequence) return
+    if (sequence !== loadSequence || controller.signal.aborted) return
     users.value = []
     error.value = errorMessage(value)
   } finally {
-    if (sequence === loadSequence) loading.value = false
+    if (sequence === loadSequence) {
+      loading.value = false
+      loadController = null
+    }
   }
 }
 

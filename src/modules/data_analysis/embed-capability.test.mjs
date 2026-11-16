@@ -14,7 +14,7 @@ function shellHarness(session, failure = null) {
   const calls = { embed: 0, summary: 0 }
   let mounted
   const summary = async () => { calls.summary++; return { available: false } }
-  const context = {
+  const context = { readSidebarCollapsed:()=>false,useSidebarNavigation:()=>({hidden:Vue.ref(false)}),
     ...Vue, onMounted: (callback) => { mounted = callback }, onBeforeUnmount: () => {},
     inject: () => null,
     useRoute: () => ({ params: { section: 'finance' }, query: {} }),

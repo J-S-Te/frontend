@@ -1,4 +1,7 @@
 <script setup>
+import ShellPreferences from '@/modules/shared/components/ShellPreferences.vue'
+import { useSidebarNavigation } from '@/modules/shared/composables/useSidebarNavigation.js'
+import { readSidebarCollapsed } from '@/modules/shared/utils/shellPreferences.js'
 import { loginUsername } from "@/modules/shared/loginUsername.mjs"
 // 数据看板统一外壳（对齐 project_management 模式）：
 // 深色侧栏导航 + 顶栏 + 页面头，按 route.params.section 切换分区；
@@ -97,6 +100,12 @@ const loadError = ref("")
 const mobileMenuOpen = ref(false)
 // 侧栏的稳定 id 由模板给出（aria-controls 指向它）；menuButton 是抽屉收起后焦点的落脚点。
 const menuButton = ref(null)
+const sidebarElement = ref(null)
+const desktopSidebarCollapsed = ref(readSidebarCollapsed())
+const { hidden: sidebarHidden } = useSidebarNavigation({
+  open: mobileMenuOpen, container: sidebarElement, trigger: menuButton,
+  breakpoint: 900, collapsed: desktopSidebarCollapsed,
+})
 
 // closeMenuOnEscape 处理文档级 Escape：只在抽屉打开时收起，收起后把焦点交还汉堡按钮，
 // 键盘用户不会掉进已隐藏的侧栏。
@@ -382,14 +391,14 @@ async function loadSummary(code) {
       dashboardTrend.value = trendResult.status === 'fulfilled'
         ? (Array.isArray(trendResult.value) ? trendResult.value : trendResult.value?.items || [])
         : []
-      await loadDetails(code, 1)
+      void loadDetails(code, 1)
       return
     }
     const loaders = { project: getProjectDashboardSummary, report: getReportDashboardSummary, finance: getFinanceDashboardSummary }
     const result = await loaders[code]()
     if (requestVersion !== summaryRequestVersion || section.value !== code) return
     dashboardSummary.value = result
-    if (code === 'project') await loadDetails(code, 1)
+    if (code === 'project') void loadDetails(code, 1)
 
   } catch (err) {
     if (requestVersion !== summaryRequestVersion) return
@@ -564,8 +573,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="console-page da-shell">
-    <aside id="da-sidebar" class="da-sidebar" :class="{ open: mobileMenuOpen }">
+  <div class="console-page da-shell" :class="{ 'is-sidebar-collapsed': desktopSidebarCollapsed }">
+    <aside ref="sidebarElement" :inert="sidebarHidden" :aria-hidden="sidebarHidden ? 'true' : undefined" tabindex="-1" id="da-sidebar" class="da-sidebar" :class="{ open: mobileMenuOpen }">
       <div class="da-brand">
         <span class="da-brand-dot" aria-hidden="true"></span>
         <b>数据看板子系统</b>
@@ -605,7 +614,7 @@ onBeforeUnmount(() => {
           </template>
           <span v-if="scopeModeLabel" class="da-scope-pill">数据范围：{{ scopeModeLabel }}</span>
         </div>
-        <div class="da-top-tools"><span class="da-topbar-avatar">{{ currentUserInitial }}</span></div>
+        <div class="da-top-tools"><ShellPreferences sidebar-id="da-sidebar" @collapse-change="desktopSidebarCollapsed = $event" /><span class="da-topbar-avatar">{{ currentUserInitial }}</span></div>
       </header>
 
       <div class="da-page">
@@ -648,7 +657,7 @@ onBeforeUnmount(() => {
           />
           <ContractImportHistoryPanel ref="historyPanel" :key="`${me?.tenant_id}/${me?.user_id}`" v-if="section === 'contract' && canViewDashboard('contract')" />
           <MetricFactsPanel
-            v-if="!loading && ['contract', 'project', 'report', 'finance'].includes(section) && canViewDashboard(section)"
+            v-if="['contract', 'project', 'report', 'finance'].includes(section) && canViewDashboard(section)"
             ref="metricFactsPanel"
             :key="JSON.stringify([section, me?.tenant_id, me?.user_id, scopeMode, me?.organization_ids, me?.team_ids, me?.permissions])"
             :section="section" :tenant-id="me?.tenant_id || ''" :user-id="me?.user_id || ''"
@@ -673,3 +682,12 @@ onBeforeUnmount(() => {
     </main>
   </div>
 </template>
+
+<style scoped>
+.da-breadcrumb { min-width: 0; }
+.da-breadcrumb strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (min-width: 901px) {
+  .is-sidebar-collapsed > .da-sidebar { transform: translateX(-100%); visibility: hidden; }
+  .is-sidebar-collapsed > .da-main { margin-left: 0; }
+}
+</style>
