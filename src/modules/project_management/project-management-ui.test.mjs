@@ -1388,7 +1388,7 @@ test('合同拆解规则配置按原型 PG-CFG-01 做成三段式，口径完全
   assert.match(source, /保存并用于后续合同/)
   // ② 检测类别域：原型的六列（类别/体系要求/必备资质/特殊方法/关联服务项/操作）。
   assert.match(source, /<h2>② 检测类别与人员要求<\/h2>/)
-  for (const column of ['检测类别', '默认体系要求', '必备资质（默认）', '是否特殊方法', '关联服务项']) {
+  for (const column of ['检测类别', '字典编码', '默认体系要求', '必备资质（默认）', '是否特殊方法', '关联服务项']) {
     assert.ok(source.includes(`<th scope="col">${column}</th>`), `检测类别域缺少列：${column}`)
   }
   assert.match(source, /specialMethodLabel\[item\.special_method\]/)
@@ -1423,10 +1423,12 @@ test('合同拆解规则配置按原型 PG-CFG-01 做成三段式，口径完全
   assert.match(source, /openMulti === 'detectionRequiredCodes'/)
   assert.match(source, /required_codes: detectionRequiredCodeSelection\.value\.join\(','\)/)
   assert.doesNotMatch(source, /v-model\.trim="categoryDialog\.required_codes"/)
+  assert.match(source, /v-model\.trim="categoryDialog\.category" readonly/)
+  assert.match(source, /item\.dictionary_item_code/)
   assert.match(source, /按该类别拆解出的服务项会带上这些人员资质编码，分配工程师时据此校验/)
   // 导出/导入与原型页头一致：导入把原始 CSV 交给服务端和文件网关校验，浏览器不再自行解析后提交可篡改 JSON。
   assert.match(source, /@click="downloadDetectionCategories">导出</)
-  assert.match(source, /@click="detectionCategoryImportOpen = true">导入</)
+  assert.match(source, /disabled title="检测类别由平台 CONTRACT_SERVICE_TYPE 字典维护">导入</)
   assert.match(source, /async function importDetectionCategoryFile\(result\)/)
   assert.match(source, /<DetectionCategoryImportDialog v-if="detectionCategoryImportOpen && canManageRules"/)
   assert.match(source, /类别目录刷新失败/)
