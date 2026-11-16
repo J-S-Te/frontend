@@ -28,7 +28,13 @@ const keyword = ref("")
 const scopeOwnerOrgIDs = ref([])
 const scopeCustomerTypes = ref([])
 const scopeCurrencies = ref([])
-const scopeOptions = ref({ owner_org_ids: [], customer_types: [], currencies: [] })
+const scopeOptions = ref({ owner_org_ids: [], customer_types: [], currencies: [], users: [] })
+const notificationEnabled = ref(false)
+const notificationRecipients = ref([])
+const quietStart = ref("")
+const quietEnd = ref("")
+const escalationMinutes = ref("")
+const escalationRecipients = ref([])
 const scopeOptionsLoading = ref(false)
 const scopeOptionsError = ref("")
 const scopeAmountMinYuan = ref("")
@@ -165,6 +171,14 @@ function resetScopeFields(rule) {
   scopeCurrencies.value = Array.isArray(scope.currencies) ? [...scope.currencies] : []
   scopeAmountMinYuan.value = Number.isSafeInteger(scope.amount_min_minor) ? (scope.amount_min_minor / 100).toFixed(2) : ""
   scopeAmountMaxYuan.value = Number.isSafeInteger(scope.amount_max_minor) ? (scope.amount_max_minor / 100).toFixed(2) : ""
+  let notification = {}
+  try { notification = rule?.notification_json ? JSON.parse(rule.notification_json) : {} } catch { notification = {} }
+  notificationEnabled.value = Boolean(notification.enabled)
+  notificationRecipients.value = Array.isArray(notification.recipients) ? [...notification.recipients] : []
+  quietStart.value = notification.quiet_start || ""
+  quietEnd.value = notification.quiet_end || ""
+  escalationMinutes.value = Number.isInteger(notification.escalation_after_minutes) && notification.escalation_after_minutes > 0 ? String(notification.escalation_after_minutes) : ""
+  escalationRecipients.value = Array.isArray(notification.escalation_recipients) ? [...notification.escalation_recipients] : []
   previewResult.value = null
   previewError.value = ""
 }
@@ -231,6 +245,7 @@ async function loadScopeOptions() {
       owner_org_ids: Array.isArray(result?.owner_org_ids) ? result.owner_org_ids : [],
       customer_types: Array.isArray(result?.customer_types) ? result.customer_types : [],
       currencies: Array.isArray(result?.currencies) ? result.currencies : [],
+      users: Array.isArray(result?.users) ? result.users : [],
     }
   } catch (err) {
     scopeOptionsError.value = formatDataAnalysisError(err, { fallback: "范围选项读取失败，可直接使用已有值。" })
@@ -239,6 +254,41 @@ async function loadScopeOptions() {
   }
 }
 
+
+
+function buildNotificationJSON() {
+  const recipients = [...new Set((notificationRecipients.value || []).map((item) => String(item).trim()).filter(Boolean))]
+  const escalated = [...new Set((escalationRecipients.value || []).map((item) => String(item).trim()).filter(Boolean))]
+  const minutes = String(escalationMinutes.value ?? "").trim() === "" ? 0 : Number(escalationMinutes.value)
+  if (!Number.isInteger(minutes) || minutes < 0 || minutes > 10080) return { value: null, error: "升级时间必须是 0–10080 分钟" }
+  if ((quietStart.value && !quietEnd.value) || (!quietStart.value && quietEnd.value)) return { value: null, error: "静默开始和结束必须同时填写" }
+  if (notificationEnabled.value && recipients.length === 0) return { value: null, error: "开启通知后至少选择一个通知对象" }
+  if (minutes > 0 && escalated.length === 0) return { value: null, error: "配置升级时至少选择一个升级对象" }
+  if (!notificationEnabled.value && recipients.length === 0 && !quietStart.value && minutes === 0) return { value: null, error: "" }
+  return {
+    value: JSON.stringify({
+      enabled: notificationEnabled.value,
+      recipients,
+      quiet_start: quietStart.value,
+      quiet_end: quietEnd.value,
+      escalation_after_minutes: minutes,
+      escalation_recipients: escalated,
+    }),
+    error: "",
+  }
+}
+
+function recipientName(userID) {
+  const option = (scopeOptions.value.users || []).find((item) => item.user_id === userID)
+  return option?.display_name || userID
+}
+
+function selectedRecipientLabel(values, placeholder) {
+  const selected = Array.isArray(values) ? values.filter(Boolean) : []
+  if (!selected.length) return placeholder
+  if (selected.length <= 2) return selected.map(recipientName).join("、")
+  return `已选 ${selected.length} 人`
+}
 
 function selectedScopeLabel(values, placeholder) {
   const selected = Array.isArray(values) ? values.filter(Boolean) : []
@@ -262,6 +312,12 @@ function editorSnapshot() {
     currencies: [...scopeCurrencies.value],
     amountMin: scopeAmountMinYuan.value,
     amountMax: scopeAmountMaxYuan.value,
+    notificationEnabled: notificationEnabled.value,
+    notificationRecipients: [...notificationRecipients.value],
+    quietStart: quietStart.value,
+    quietEnd: quietEnd.value,
+    escalationMinutes: escalationMinutes.value,
+    escalationRecipients: [...escalationRecipients.value],
   })
 }
 
@@ -321,6 +377,9 @@ async function saveEditor() {
   const scope = buildScopeJSON()
   if (scope.error) { showToast(scope.error); return }
   draft.value.scope_json = scope.value
+  const notification = buildNotificationJSON()
+  if (notification.error) { showToast(notification.error); return }
+  draft.value.notification_json = notification.value
   draft.value.effective_from = draft.value.effective_from || null
   draft.value.effective_to = draft.value.effective_to || null
   saving.value = true
@@ -448,6 +507,35 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
           <p v-if="scopeOptionsLoading" class="da-modal-help">正在读取组织、客户类型和币种选项…</p>
           <p v-if="scopeOptionsError" class="alert-rule-preview-error" role="alert">{{ scopeOptionsError }}</p>
           <p class="da-modal-help">选项来自数据看板聚合维度；点击展开勾选，留空表示不限制。</p>
+        </section>
+        <section class="alert-rule-scope">
+          <div class="alert-rule-scope-head"><b>通知与升级</b><label class="alert-rule-toggle"><input v-model="notificationEnabled" type="checkbox" :disabled="!canWrite" /> 启用站内信</label></div>
+          <div class="alert-rule-form-grid">
+            <div class="alert-rule-field">
+              <span class="alert-rule-field-label">通知对象</span>
+              <details class="alert-rule-picker">
+                <summary>{{ selectedRecipientLabel(notificationRecipients, '未选择通知对象') }}</summary>
+                <div class="alert-rule-picker-menu">
+                  <label v-for="user in scopeOptions.users" :key="user.user_id"><input v-model="notificationRecipients" type="checkbox" :value="user.user_id" :disabled="!canWrite" /><span>{{ user.display_name || user.user_id }}<small v-if="user.org_unit_name"> · {{ user.org_unit_name }}</small></span></label>
+                  <p v-if="!scopeOptions.users.length" class="da-modal-help">暂无可选通知对象</p>
+                </div>
+              </details>
+            </div>
+            <div class="alert-rule-field">
+              <span class="alert-rule-field-label">升级对象</span>
+              <details class="alert-rule-picker">
+                <summary>{{ selectedRecipientLabel(escalationRecipients, '未选择升级对象') }}</summary>
+                <div class="alert-rule-picker-menu">
+                  <label v-for="user in scopeOptions.users" :key="user.user_id"><input v-model="escalationRecipients" type="checkbox" :value="user.user_id" :disabled="!canWrite" /><span>{{ user.display_name || user.user_id }}<small v-if="user.org_unit_name"> · {{ user.org_unit_name }}</small></span></label>
+                  <p v-if="!scopeOptions.users.length" class="da-modal-help">暂无可选升级对象</p>
+                </div>
+              </details>
+            </div>
+            <label>静默开始<input v-model="quietStart" :disabled="!canWrite" type="time" maxlength="5" /></label>
+            <label>静默结束<input v-model="quietEnd" :disabled="!canWrite" type="time" maxlength="5" /></label>
+            <label>到期后升级（分钟）<input v-model="escalationMinutes" :disabled="!canWrite" type="number" min="0" max="10080" step="1" placeholder="不升级" /></label>
+          </div>
+          <p class="da-modal-help">通知仅在预警命中时发送；静默时段不发送普通通知，已到期升级通知不受静默限制。</p>
         </section>
         <div class="alert-rule-preview-actions">
           <button type="button" class="da-button" :disabled="!canWrite || previewBusy" @click="previewDraft">{{ previewBusy ? '预览中…' : '预览命中' }}</button>
@@ -623,6 +711,26 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
 .alert-rule-picker-menu input {
   width: auto;
   margin: 0;
+}
+
+
+.alert-rule-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--da-body);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+.alert-rule-toggle input {
+  width: auto;
+  margin: 0;
+}
+
+.alert-rule-picker-menu small {
+  color: var(--da-muted);
+  font-size: var(--fs-xs);
 }
 
 .alert-rule-picker-menu .da-modal-help {
