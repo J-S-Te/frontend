@@ -424,10 +424,39 @@ async function rejectWorkflowAction() {
   finally { workflowSaving.value = false }
 }
 
+// 授权概览标题必须显示姓名而不是内部 user_id；字段优先级与人员列表的 userLabel 保持一致。
+// ID 只作为悬停提示，不进入标题正文。
+function authorizationUserName(item, userId) {
+  const id = String(userId || '')
+  const candidates = [item?.user_display_name, item?.display_name, item?.name, item?.user_name]
+  for (const candidate of candidates) {
+    const value = String(candidate || '').trim()
+    if (value && value !== id) return value
+  }
+  return ''
+}
+
+// 读取人员目录补全姓名；目录不可用时只显示“未知用户”，绝不退回显示内部 ID。
+async function resolveAuthorizationUserName(userId) {
+  const local = users.value.find((user) => String(user?.id || user?.user_id || '') === String(userId))
+  const localName = authorizationUserName(local, userId)
+  if (localName) return localName
+  if (!canRead.value) return ''
+  try {
+    const allUsers = await loadAllCatalogPages(listUsers, { pageSize: 100 }, (user) => user?.id || user?.user_id)
+    const matched = allUsers.find((user) => String(user?.id || user?.user_id || '') === String(userId))
+    return authorizationUserName(matched, userId)
+  } catch (error) {
+    return ''
+  }
+}
+
 async function openAuthorization(item) {
   const userId = item?.user_id || item?.userId || item?.id
   if (!userId) return
-  authorizationDetail.value = { userId, userName: item.user_name || item.display_name || userId, rows: [] }
+  const knownName = authorizationUserName(item, userId)
+  const resolvedName = knownName || await resolveAuthorizationUserName(userId)
+  authorizationDetail.value = { userId, userName: resolvedName || '未知用户', rows: [] }
   authorizationLoading.value = true
   authorizationError.value = ''
   try {
@@ -568,7 +597,7 @@ onMounted(() => { if (canRead.value) load() })
   </div>
   <div v-if="authorizationDetail" class="console-modal-backdrop" role="presentation" @click.self="closeAuthorization">
     <section class="console-detail-modal personnel-authorization-modal" role="dialog" aria-modal="true" aria-label="人员授权概览">
-      <header><div><p class="console-modal-eyebrow">PERSON AUTHORIZATION WORKBENCH</p><h2>{{ authorizationDetail.userName }} · 授权概览</h2><p class="console-card-hint">统一查看岗位继承、组织继承、个人例外及应用同步状态。</p></div><button class="console-modal-close" type="button" @click="closeAuthorization">×</button></header>
+      <header><div><p class="console-modal-eyebrow">PERSON AUTHORIZATION WORKBENCH</p><h2><span class="personnel-authorization-user" tabindex="0" :aria-label="`${authorizationDetail.userName}，用户ID ${authorizationDetail.userId}`">{{ authorizationDetail.userName }}<span class="personnel-authorization-user-tooltip" role="tooltip">用户ID：{{ authorizationDetail.userId }}</span></span> · 授权概览</h2><p class="console-card-hint">统一查看岗位继承、组织继承、个人例外及应用同步状态。</p></div><button class="console-modal-close" type="button" @click="closeAuthorization">×</button></header>
       <p v-if="authorizationError" class="login-target-module__error" role="alert">{{ authorizationError }}</p>
       <p v-if="authorizationLoading" class="console-card-hint">正在读取已接入应用的有效授权…</p>
       <div v-else-if="!authorizationDetail.rows.length" class="settings-empty"><template v-if="authorizationError"><h3>授权信息暂时无法确认</h3><p>请处理上方提示后重新读取，当前不能判断该人员是否拥有应用权限。</p></template><template v-else><h3>暂无应用授权</h3><p>该人员当前没有可展示的应用权限，或尚未同步应用角色目录。</p></template></div>
@@ -691,6 +720,12 @@ onMounted(() => { if (canRead.value) load() })
 .personnel-preview-grid .preview-kept strong { color: #3c70c9; }
 .personnel-change-modal > .console-form-actions { position: relative; z-index: 2; flex: 0 0 auto; margin: 0; padding: .9rem 1.75rem; border-top: 1px solid #e5edf7; background: rgba(255, 255, 255, .98); box-shadow: 0 -4px 14px rgba(28, 54, 98, .06); }
 .personnel-authorization-modal { max-width: 900px; }
+.personnel-authorization-user { position: relative; display: inline-flex; align-items: center; cursor: help; border-bottom: 1px dashed var(--border-strong, #cbd5e1); outline: none; }
+.personnel-authorization-user:hover,
+.personnel-authorization-user:focus-visible { border-bottom-color: var(--primary, #2563eb); }
+.personnel-authorization-user-tooltip { position: absolute; z-index: 3; top: calc(100% + 8px); left: 0; display: block; width: max-content; max-width: min(420px, 70vw); padding: 7px 9px; color: #f8fafc; background: #0f172a; border-radius: 6px; box-shadow: 0 8px 20px rgba(15, 23, 42, .24); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; font-weight: 500; line-height: 1.45; white-space: normal; overflow-wrap: anywhere; opacity: 0; visibility: hidden; pointer-events: none; transform: translateY(-3px); transition: opacity .14s ease, transform .14s ease, visibility .14s ease; }
+.personnel-authorization-user:hover .personnel-authorization-user-tooltip,
+.personnel-authorization-user:focus-visible .personnel-authorization-user-tooltip { opacity: 1; visibility: visible; transform: translateY(0); }
 .personnel-authorization-list { display: grid; gap: .7rem; max-height: 55vh; overflow: auto; }
 .personnel-authorization-card { padding: 1rem; border: 1px solid #e0e8f2; border-radius: .75rem; background: var(--card, #fff); }
 .personnel-authorization-card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }

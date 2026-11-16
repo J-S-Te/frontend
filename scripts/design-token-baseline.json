@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-16T04:53:14.573Z",
+  "generatedAt": "2026-11-16T08:42:54.193Z",
   "generatedFrom": {
-    "branch": "ship/frontend-20261115",
-    "commit": "2bc9546"
+    "branch": "release/local-20261116",
+    "commit": "c924676"
   },
   "source": "src",
   "scope": "src/**/*.vue (仅 <style> 块) + src/**/*.css；不含 dist/build/node_modules/点目录",
@@ -18,11 +18,11 @@
     "自定义属性定义（--x: ...）不计入三类；它是 token 的合法落点。",
     "颜色口径：#hex 与不带 var() 的 rgb()/rgba()/hsl()/hsla() 均计数（含 #fff/#000）；transparent/currentColor/inherit 等关键字与具名色（white/black）不在本切片范围。"
   ],
-  "filesScanned": 202,
+  "filesScanned": 203,
   "totals": {
-    "color": 2998,
-    "fontSize": 1105,
-    "zIndex": 62
+    "color": 3012,
+    "fontSize": 1123,
+    "zIndex": 63
   },
   "files": {
     "src/modules/contract_management/components/ContractAuditOutboxPanel.vue": {
@@ -80,14 +80,19 @@
       "fontSize": 96,
       "zIndex": 13
     },
+    "src/modules/customer_opportunity/components/OpportunityCommercialRecordsPanel.vue": {
+      "color": 3,
+      "fontSize": 0,
+      "zIndex": 0
+    },
     "src/modules/customer_opportunity/components/OpportunityWinConfirmationPanel.vue": {
       "color": 1,
       "fontSize": 0,
       "zIndex": 0
     },
     "src/modules/customer_opportunity/styles/customer-opportunity.css": {
-      "color": 630,
-      "fontSize": 195,
+      "color": 636,
+      "fontSize": 212,
       "zIndex": 1
     },
     "src/modules/customer_opportunity/views/CRMLoginCompleteView.vue": {
@@ -226,9 +231,9 @@
       "zIndex": 3
     },
     "src/modules/platform/iam/components/PersonnelChangeCenter.vue": {
-      "color": 116,
-      "fontSize": 24,
-      "zIndex": 3
+      "color": 121,
+      "fontSize": 25,
+      "zIndex": 4
     },
     "src/modules/platform/iam/styles/iam-settings.css": {
       "color": 70,

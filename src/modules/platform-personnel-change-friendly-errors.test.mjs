@@ -238,6 +238,23 @@ test('授权概览标识部分读取失败，持久化授权错误也安全转�
   assert.match(source, /authorizationFailureMessage\(row\.access\.authorization_error\)/)
 })
 
+test('授权概览标题显示姓名，用户ID只作为悬停提示，不直接铺在标题里', async () => {
+  const state = component()
+  await state.openAuthorization({ user_id: 'user-1', user_display_name: '章七七' })
+  assert.equal(state.authorizationDetail.value.userName, '章七七')
+  assert.equal(state.authorizationDetail.value.userId, 'user-1')
+  await state.openAuthorization({ user_id: 'user-2', display_name: '测试人员' })
+  assert.equal(state.authorizationDetail.value.userName, '测试人员')
+  const fallback = component({ listUsers: async () => ({ items: [{ id: 'user-3', display_name: '章六' }] }) })
+  await fallback.openAuthorization({ user_id: 'user-3' })
+  assert.equal(fallback.authorizationDetail.value.userName, '章六')
+  assert.match(source, /class="personnel-authorization-user"/)
+  assert.match(source, /class="personnel-authorization-user-tooltip" role="tooltip">用户ID：\{\{ authorizationDetail\.userId \}\}/)
+  assert.match(source, /authorizationUserName\(item, userId\)/)
+  assert.match(source, /resolveAuthorizationUserName\(userId\)/)
+  assert.doesNotMatch(source, /<h2>\{\{ authorizationDetail\.userName \}\}/)
+})
+
 test('授权目录失败不伪装为无授权，所有 catch 均无原样错误信息捷径', async () => {
   const state = component({ listApplications: async () => { throw new TypeError('Cannot read properties of null') } })
   await state.openAuthorization({ user_id: 'user-1' })

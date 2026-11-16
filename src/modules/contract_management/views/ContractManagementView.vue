@@ -1477,10 +1477,14 @@ async function uploadStampedContract(contract, event, { replacement = false } = 
   }
 }
 
+// 用途：将审批接口记录转换为页面待办，保留服务端返回的合同名称。
+// 参数：item 为当前用户可见的审批实例或任务记录。
+// 返回值：供审批列表及通知面板使用的展示数据。
 function normalizeApproval(item) {
   return {
     id: item.approval_id,
     contractId: item.contract_id,
+    contractTitle: item.contract_title || '',
     step: item.node_name || item.node_id || (Number.isInteger(item.current_node_index) ? `第 ${item.current_node_index + 1} 节点` : '—'),
     type: approvalKindLabel(item.kind),
     kind: String(item.kind || ''),

@@ -14,6 +14,7 @@ import {
   isCatalogSynchronized,
 } from '@/modules/platform/iam/utils/applicationAuthorizationCatalog'
 import { positionAuthorizationTargetCatalog } from '@/modules/platform/iam/utils/positionAuthorizationCatalog'
+import { additionalApplicationOptions as resolveAdditionalApplicationOptions } from '@/modules/platform/iam/utils/positionAuthorizationApplicationOptions'
 import { hasPermission } from '@/modules/platform/auth/utils/principal'
 import { IAM_PERMISSIONS } from '@/modules/platform/iam/utils/iamPermissions'
 import { inspectPositionTemplateDuplicates } from '@/modules/platform/iam/utils/positionAuthorizationDuplicates'
@@ -199,6 +200,17 @@ function templateEditorForm(template) {
   }
 }
 const templateApplications = computed(() => applications.value)
+
+// 追加子系统下拉只展示尚未被主应用或其他追加行使用的应用；当前行保留已选值，
+// 避免编辑历史模板时因为选项被过滤而出现空白选择框。
+function additionalApplicationOptions(row) {
+  return resolveAdditionalApplicationOptions(
+    templateApplications.value,
+    form.value.platform_application_id,
+    form.value.additional_roles,
+    row,
+  )
+}
 const activeTemplates = computed(() => templates.value.filter((template) => String(template?.status || '').toUpperCase() === 'ACTIVE'))
 const templatePageCount = computed(() => Math.max(1, Math.ceil(activeTemplates.value.length / templatePageSize)))
 const pagedActiveTemplates = computed(() => {
@@ -693,7 +705,7 @@ onMounted(() => {
             <div class="iam-template-catalog-field">
               <select v-model="row.application_id" aria-label="选择追加子系统" @change="onApplicationChange(row)">
                 <option value="">选择追加应用</option>
-                <option v-for="app in templateApplications" :key="applicationId(app)" :value="applicationId(app)">{{ appName(app) }}</option>
+                <option v-for="app in additionalApplicationOptions(row)" :key="applicationId(app)" :value="applicationId(app)">{{ appName(app) }}</option>
               </select>
               <small v-if="row.application_id">目录 {{ catalogVersion(catalogForApplication(row.application_id)) }} · {{ catalogSyncText(catalogForApplication(row.application_id)) }}</small>
             </div>

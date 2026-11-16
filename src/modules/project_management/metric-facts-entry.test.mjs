@@ -6,6 +6,7 @@ import { baseParse, compile } from '@vue/compiler-dom'
 import { createSSRApp, h } from 'vue'
 import * as Vue from 'vue'
 import { renderToString } from '@vue/server-renderer'
+import { createResourceMetricCommands } from './resourceMetricCommandState.js'
 
 // containsResourceEntry 检查实际模板子树是否包含资源业务入口。
 // 参数：node 为Vue编译器实际解析节点。
@@ -33,16 +34,17 @@ function projectEntryTree(nodes) {
   }).join('\n')
 }
 
-test('实际页面互斥条件链在实施、设备、资质、计划四个栏目都可渲染资源入口', async () => {
+test('完整资源台账仅在集中入口展示，业务栏目不再重复挂完整表单', async () => {
   const source = readFileSync(new URL('./views/ProjectManagementView.vue', import.meta.url), 'utf8')
   const template = parse(source).descriptor.template.content
   const projected = projectEntryTree(baseParse(template).children)
   const render = new Function('Vue', compile(projected, { mode: 'function', prefixIdentifiers: true }).code)(Vue)
-  for (const section of ['implementation', 'equipment', 'qualifications', 'planning']) {
-    const app = createSSRApp({ render, data: () => ({ activeSection: section, loading: false, sectionExtrasLoading: false, loadError: '', workspaceReady: true, sectionExtrasError: '', session: { permissions: ['project.read'] }, isVisibleConfigSection: false }), components: { ResourceMetricFactsPanel: () => h('section', { 'data-entry': 'resource-facts' }) } })
+  for (const section of ['resource-usage', 'implementation', 'equipment', 'qualifications', 'planning', 'preparation', 'reports']) {
+    const app = createSSRApp({ render, data: () => ({ activeSection: section, loading: false, sectionExtrasLoading: false, loadError: '', workspaceReady: true, sectionExtrasError: '', resourceMetricCommands: createResourceMetricCommands(), session: { permissions: ['project.read'] }, isVisibleConfigSection: false }), components: { ResourceMetricFactsPanel: () => h('section', { 'data-entry': 'resource-facts' }) } })
     app.config.warnHandler = () => {}
     const html = await renderToString(app)
-    assert.match(html, /data-entry="resource-facts"/, `资源入口在${section}被实际条件链吞掉`)
+    if (section === 'resource-usage') assert.match(html, /data-entry="resource-facts"/, '集中台账入口被条件链吞掉')
+    else assert.doesNotMatch(html, /data-entry="resource-facts"/, `${section}仍重复挂完整资源表单`)
   }
 })
 

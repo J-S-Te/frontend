@@ -1,11 +1,13 @@
 <script setup>
 import { computed } from 'vue'
+import { navigationIcons } from '../navigationIcons.js'
 
 const props = defineProps({
   name: { type: String, required: true },
 })
 
 const icons = {
+  ...navigationIcons,
   logo: [
     'M12 3.2 19 6v5.2c0 4.4-2.7 7.6-7 9.6-4.3-2-7-5.2-7-9.6V6l7-2.8Z',
     'M12 7a2.1 2.1 0 1 1 0 4.2A2.1 2.1 0 0 1 12 7Z',
@@ -38,7 +40,7 @@ const icons = {
 }
 
 const paths = computed(() => icons[props.name] || icons.info)
-const outlineIcons = new Set(['logo'])
+const outlineIcons = new Set(['logo', ...Object.keys(navigationIcons)])
 const isOutline = computed(() => outlineIcons.has(props.name))
 </script>
 
