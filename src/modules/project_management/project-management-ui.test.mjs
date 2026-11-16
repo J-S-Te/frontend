@@ -649,6 +649,8 @@ test('执行总览新增准时交付率趋势、检测类别分布与团队资�
   assert.match(source, /按当前在途服务项统计/)
   assert.match(styles, /\.pm-dashboard-grid-3 \{/)
   assert.match(styles, /\.pm-trend-chart \{/)
+  assert.match(source, /近 4 周有数据均值/)
+  assert.match(styles, /\.pm-trend-bar \.pm-trend-lbl \{[^}]*position: absolute;[^}]*bottom: 0;/s)
   assert.match(styles, /\.pm-status-libar \{/)
   assert.doesNotMatch(source, /测评一组/)
   assert.doesNotMatch(source, /渗透测试组/)
