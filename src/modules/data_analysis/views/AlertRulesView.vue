@@ -344,6 +344,18 @@ async function closeEditor() {
   editorInitialSnapshot = ""
 }
 
+
+function setRuleCode(code) {
+  if (!draft.value) return
+  draft.value.rule_code = code
+  draft.value.source_fct = code === "PAYMENT_OVERDUE" ? "standard_finance_fact" : "dim_contract"
+  if (code === "PAYMENT_OVERDUE") {
+    draft.value.threshold_json = '{"days":7}'
+    draft.value.scope_json = null
+    draft.value.notification_json = draft.value.notification_json || null
+  }
+}
+
 function draftThresholdDays() {
   try { return JSON.parse(draft.value?.threshold_json || "{}").days ?? 30 } catch { return 30 }
 }
@@ -462,10 +474,10 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
     <div v-if="editing && draft" class="da-modal-backdrop" @click.self="closeEditor">
       <form class="da-modal alert-rule-editor" @submit.prevent="saveEditor">
         <header><div><b>{{ editing === 'create' ? '新建预警规则' : '编辑预警规则' }}</b><span>需要预警管理权限</span></div><button type="button" class="da-icon-button" :disabled="saving" aria-label="关闭" @click="closeEditor">×</button></header>
-        <label>规则编码<select v-model="draft.rule_code" disabled><option value="CONTRACT_EXPIRY">CONTRACT_EXPIRY · 合同到期</option></select></label>
+        <label>规则编码<select v-model="draft.rule_code" :disabled="editing === 'edit'" @change="setRuleCode(draft.rule_code)"><option value="CONTRACT_EXPIRY">CONTRACT_EXPIRY · 合同到期</option><option value="PAYMENT_OVERDUE">PAYMENT_OVERDUE · 应收逾期</option></select></label>
         <label>规则名称<input v-model="draft.name" :disabled="!canWrite" maxlength="128" required /></label>
         <label>严重度<select v-model="draft.severity" :disabled="!canWrite"><option value="HIGH">高</option><option value="MEDIUM">中</option><option value="LOW">低</option></select></label>
-        <label>提前天数<input :value="draftThresholdDays()" :disabled="!canWrite" type="number" min="1" max="3650" step="1" required @input="setDraftThresholdDays($event.target.value)" /></label>
+        <label>{{ draft.rule_code === 'PAYMENT_OVERDUE' ? '宽限天数' : '提前天数' }}<input :value="draftThresholdDays()" :disabled="!canWrite" type="number" min="1" max="3650" step="1" required @input="setDraftThresholdDays($event.target.value)" /></label>
         <section class="alert-rule-scope">
           <div class="alert-rule-scope-head"><b>适用范围</b><span>留空表示全部普通合同</span></div>
           <div class="alert-rule-form-grid">
@@ -538,7 +550,7 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
           <p class="da-modal-help">通知仅在预警命中时发送；静默时段不发送普通通知，已到期升级通知不受静默限制。</p>
         </section>
         <div class="alert-rule-preview-actions">
-          <button type="button" class="da-button" :disabled="!canWrite || previewBusy" @click="previewDraft">{{ previewBusy ? '预览中…' : '预览命中' }}</button>
+          <button v-if="draft.rule_code === 'CONTRACT_EXPIRY'" type="button" class="da-button" :disabled="!canWrite || previewBusy" @click="previewDraft">{{ previewBusy ? '预览中…' : '预览命中' }}</button>
           <span v-if="previewResult" class="alert-rule-preview-count">当前条件预计命中 {{ previewResult.matched_count }} 份合同</span>
         </div>
         <p v-if="previewError" class="alert-rule-preview-error" role="alert">{{ previewError }}</p>
@@ -559,7 +571,8 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
           <p v-if="previewResult.limited" class="da-modal-help">仅展示前 20 条，实际命中数高于当前样例数。</p>
         </div>
         <p v-if="editing === 'create'" class="da-modal-help">新规则默认停用，创建后可通过列表开关启用。</p>
-        <p class="da-modal-help">合同结束日期在当前日期前后 N 天内时触发预警；适用范围只影响规则命中，不改变合同本身。</p>
+        <p v-if="draft.rule_code === 'CONTRACT_EXPIRY'" class="da-modal-help">合同结束日期在当前日期前后 N 天内时触发预警；适用范围只影响规则命中，不改变合同本身。</p>
+        <p v-else class="da-modal-help">应收未清金额大于 0 且到期日早于“今天 - 宽限天数”时触发；组织/客户类型范围不适用于应收事实。</p>
         <footer><button type="button" class="da-button" :disabled="saving" @click="closeEditor">取消</button><button type="submit" class="da-button primary" :disabled="!canWrite">{{ saving ? '保存中…' : '确认保存' }}</button></footer>
       </form>
     </div>
