@@ -703,7 +703,7 @@ const metricsColumnsClass = computed(() => {
         </svg>
         <div v-else class="da-native-empty"><span class="da-native-empty-icon">⌁</span><b>暂无趋势快照</b><p>合同来源完成一次成功同步后展示真实月度趋势。</p></div>
       </article>
-      <article class="da-native-panel">
+      <article class="da-native-panel da-region-panel">
         <header><b>区域分布</b><span>金额 ↔ 数量可切换</span></header>
         <div class="da-chart-tabs">
           <button type="button" class="da-chart-tab" :class="{ active: regionMode === 'amount' }" @click="regionMode = 'amount'">金额</button>

@@ -577,6 +577,9 @@
 .da-native-panel > header { margin-bottom: 14px; align-items: center; }
 .da-native-panel > header b { color: var(--da-ink); font-size: var(--da-fs-15); font-weight: 600; }
 .da-native-panel > header span { color: var(--da-muted); font-size: var(--da-fs-11); font-weight: 400; }
+.da-region-panel { overflow: hidden; }
+.da-region-panel * { scrollbar-width: none; -ms-overflow-style: none; }
+.da-region-panel *::-webkit-scrollbar { display: none; width: 0; height: 0; }
 .da-native-bars { padding-top: 0; }
 .da-native-bar-row { grid-template-columns: 90px minmax(0, 1fr) 54px; gap: 10px; margin: 9px 0; color: var(--da-body); font-size: var(--da-fs-13); }
 .da-native-bar-row i { height: 10px; border-radius: 6px; background: var(--da-blue-soft); }
