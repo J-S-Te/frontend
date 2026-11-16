@@ -11,8 +11,8 @@ const existing = () => ({ id: 42, version: 3, created_at: '2026-10-01', rule_cod
 // 用途：执行真实规则页逻辑，仅替换网络和弹窗边界。
 // 参数：options 为能力和网络响应；confirm 为应用内确认结果。
 // 返回值：真实页面状态与外部操作记录。
-function harness({ permissions = ['alert.manage'], get = async () => [existing()], put, remove, confirm = true } = {}) {
-  const calls = { put: [], remove: [], confirm: [] }
+function harness({ permissions = ['alert.manage'], get = async () => [existing()], put, remove, preview, confirm = true } = {}) {
+  const calls = { put: [], remove: [], confirm: [], preview: [] }
   const context = vm.createContext({
     formatDataAnalysisError,
     useConfirmDialog: () => ({ dialog: { value: null }, askConfirm: async ({ description }) => { calls.confirm.push(description); return confirm }, accept() {}, cancel() {} }),
@@ -24,8 +24,11 @@ function harness({ permissions = ['alert.manage'], get = async () => [existing()
     getAlertRules: get,
     putAlertRules: async (payload) => { calls.put.push(payload); return put ? put(payload) : payload },
     deleteAlertRule: async (id) => { calls.remove.push(id); if (remove) await remove(id) },
+    previewAlertRule: async (payload) => { calls.preview.push(payload); return preview ? preview(payload) : { matched_count: 0, sample: [], limited: false } },
+    getAlertRuleScopeOptions: async () => ({ owner_org_ids: ['org-a', 'org-b'], customer_types: ['企业', '政府'], currencies: ['CNY', 'USD'] }),
+    getAlertRuleExecutions: async () => [],
   })
-  vm.runInContext(`${script}\nglobalThis.ui = { rules, loading, error, saving, toast, editing, draft, canWrite, canCreate, load, toggleRule, openEditor, closeEditor, saveEditor, removeRule, setDraftThresholdDays }`, context)
+  vm.runInContext(`${script}\nglobalThis.ui = { rules, loading, error, saving, toast, editing, draft, canWrite, canCreate, load, toggleRule, openEditor, closeEditor, saveEditor, removeRule, setDraftThresholdDays, previewDraft, previewResult, previewError, previewBusy, scopeOwnerOrgIDs, scopeCustomerTypes, scopeCurrencies, scopeAmountMinYuan, scopeAmountMaxYuan }`, context)
   return { ui: context.ui, calls }
 }
 
@@ -241,4 +244,36 @@ test('未修改直接关闭；保存中保留表单且不询问放弃', async ()
   await ui.closeEditor()
   assert.ok(ui.editing.value)
   assert.equal(calls.confirm.length, 0)
+})
+
+test('规则范围会序列化为分单位 JSON，并在保存前展示命中预览', async () => {
+  const { ui, calls } = harness({
+    get: async () => [],
+    preview: async () => ({ matched_count: 2, limited: false, sample: [{ contract_id: 'c1', title: '合同一', owner_org_id: 'org-a', customer_type: '企业', amount_minor: 10050, due_date: '2026-12-01' }] }),
+  })
+  await ui.load()
+  ui.openEditor()
+  ui.setDraftThresholdDays(30)
+  ui.scopeOwnerOrgIDs.value = ['org-a', 'org-b', 'org-a']
+  ui.scopeCustomerTypes.value = ['企业']
+  ui.scopeCurrencies.value = ['CNY']
+  ui.scopeAmountMinYuan.value = '100.50'
+  ui.scopeAmountMaxYuan.value = '2000'
+  ui.draft.value.effective_from = '2026-12-01'
+  ui.draft.value.effective_to = '2027-01-31'
+  await ui.previewDraft()
+  assert.equal(calls.preview[0].days, 30)
+  assert.equal(calls.preview[0].scope_json, JSON.stringify({ owner_org_ids: ['org-a', 'org-b'], customer_types: ['企业'], currencies: ['CNY'], amount_min_minor: 10050, amount_max_minor: 200000 }))
+  assert.equal(ui.previewResult.value.matched_count, 2)
+  await ui.saveEditor()
+  assert.equal(calls.put[0][0].scope_json, calls.preview[0].scope_json)
+  assert.equal(calls.put[0][0].effective_from, '2026-12-01')
+  assert.equal(calls.put[0][0].effective_to, '2027-01-31')
+})
+
+test('适用范围使用下拉勾选器而非自由文本输入', async () => {
+  assert.match(source, /class="alert-rule-picker"/)
+  assert.match(source, /selectedScopeLabel\(scopeOwnerOrgIDs/)
+  assert.match(source, /type="checkbox"/)
+  assert.doesNotMatch(source, /placeholder="多个用逗号分隔"/)
 })
