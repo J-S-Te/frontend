@@ -455,6 +455,34 @@ export function planPersonnelRows(item) {
   const personIDs = [item.team_lead_id, item.project_manager_id, ...(item.engineer_ids || [])].filter(Boolean)
   return [...new Set(personIDs)].map((id) => ({ resourceType: 'PERSON', resourceID: id, windowStart: '', windowEnd: '', note: '' }))
 }
+// 实施计划人员行保存的是能力档案编号（resource_id），而行程、姓名展示只认平台 user_id。
+// 这里把实施人员的档案编号映射回平台 user_id（按档案编号或 user_id 命中均可），保持计划行序并去重；
+// 映射结果限制在已指派团队内（后端行程校验只接受已指派人员），映射不到的行跳过。
+export function planImplementerUserIDs(item, plan, capabilities = []) {
+  const allowed = new Set(planPersonnelRows(item).map((row) => row.resourceID))
+  if (!allowed.size) return []
+  const userByResourceID = new Map()
+  for (const capability of capabilities) {
+    if (capability?.resource_type !== 'PERSON') continue
+    const userID = String(capability.user_id || '').trim()
+    if (!userID || !allowed.has(userID)) continue
+    userByResourceID.set(String(capability.resource_id || '').trim(), userID)
+  }
+  const implementers = []
+  for (const row of Array.isArray(plan?.personnel) ? plan.personnel : []) {
+    const resourceID = String(row?.resource_id || '').trim()
+    const userID = userByResourceID.get(resourceID) || (allowed.has(resourceID) ? resourceID : '')
+    if (userID && !implementers.includes(userID)) implementers.push(userID)
+  }
+  return implementers
+}
+// 出行人员默认全选实施人员（可能多人）；实施计划尚未发布、或档案行都映射不到平台用户时，
+// 回落到已指派团队全员，与未发布计划时的默认口径一致。
+export function travelTravelerDefaults(item, plan, capabilities = []) {
+  const assigned = planPersonnelRows(item).map((row) => row.resourceID)
+  const implementers = planImplementerUserIDs(item, plan, capabilities)
+  return implementers.length ? implementers : assigned
+}
 // 实施准备的设备清单：已登记的回填快照，未登记时留空由用户在准备阶段挑选。
 
 // 实施准备的设备清单：已登记的回填快照，未登记时留空由用户在准备阶段挑选。

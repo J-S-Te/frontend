@@ -1367,6 +1367,14 @@ export function getMetricResources(kind, page = 1) {
   return request(`/metric-facts/${kind}?page=${page}`)
 }
 
+// 用途：读取当前服务项的真实容量或用量，避免全局第一页遗漏节点记录。
+// 参数：itemID 为父项，kind 为台账类型，page 为从1开始的页码。
+// 返回值：最多50条通过父项和资源范围双重核验的事实。
+export function getItemMetricResources(itemID, kind, page = 1) {
+  if (!itemID || !['capacities', 'usages'].includes(kind)) throw new Error('请选择服务项及有效台账类型')
+  return request(`/service-items/${encodeURIComponent(itemID)}/metric-facts/${kind}?page=${page}`)
+}
+
 // 用途：发布明确容量或登记实际用量草稿。
 // 参数：kind 为capacities/usages，payload 为明确业务字段及幂等键。
 // 返回值：冻结事实或真实错误。

@@ -18,6 +18,7 @@ import {
   penetrationCapableUserIDs,
   penetrationEngineerCandidates,
   planEquipmentFor,
+  planImplementerUserIDs,
   planPersonnelFor,
   planPersonnelRows,
   projectReportStageLabel,
@@ -31,6 +32,7 @@ import {
   statusTone,
   toDateTimeLocal,
   toggleCodeSelection,
+  travelTravelerDefaults,
   capabilityEffectiveStatus,
 } from './projectDisplay.js'
 
@@ -226,6 +228,30 @@ test('实施计划人员行按已保存清单回填，缺省时按指派团队�
     { resourceType: 'EQUIPMENT', resourceID: 'EQ-1', windowStart: '', windowEnd: '', note: '' },
   ])
   assert.deepEqual(planPersonnelFor({}, {}), planPersonnelRows({}))
+})
+
+test('出行人员默认选实施人员：档案编号映射为平台用户，映射不到时回落指派团队', () => {
+  const item = { team_lead_id: 'lead', project_manager_id: 'pm', engineer_ids: ['u1', 'u2'] }
+  const capabilities = [
+    { resource_type: 'PERSON', resource_id: 'PER-1', user_id: 'u1' },
+    { resource_type: 'PERSON', resource_id: 'PER-2', user_id: 'u2' },
+    { resource_type: 'PERSON', resource_id: 'PER-3', user_id: 'outsider' },
+    { resource_type: 'PERSON', resource_id: 'PER-4', user_id: '' },
+    { resource_type: 'EQUIPMENT', resource_id: 'EQ-1', user_id: 'u1' },
+  ]
+  // 已发布计划的人员行是能力档案编号：映射回 user_id，保持计划行序；档案外的编号跳过。
+  const plan = { personnel: [{ resource_id: 'PER-2' }, { resource_id: 'PER-1' }, { resource_id: 'PER-9' }] }
+  assert.deepEqual(planImplementerUserIDs(item, plan, capabilities), ['u2', 'u1'])
+  // 历史计划行可能直接存 user_id，命中已指派团队时同样收进默认值。
+  assert.deepEqual(planImplementerUserIDs(item, { personnel: [{ resource_id: 'u1' }] }, capabilities), ['u1'])
+  // 出行人员默认全选实施人员（可能多人）。
+  assert.deepEqual(travelTravelerDefaults(item, plan, capabilities), ['u2', 'u1'])
+  // 实施计划尚未发布：默认回落到已指派团队全员。
+  assert.deepEqual(travelTravelerDefaults(item, {}, capabilities), ['lead', 'pm', 'u1', 'u2'])
+  // 档案目录缺失或全部映射失败：同样回落，保证表单始终拿到合法的 user_id。
+  assert.deepEqual(travelTravelerDefaults(item, plan, []), ['lead', 'pm', 'u1', 'u2'])
+  // 服务项还没指派任何人：不给出任何默认值。
+  assert.deepEqual(travelTravelerDefaults({}, plan, capabilities), [])
 })
 
 test('覆盖设置的空串/空数组剔除逻辑保持服务端口径', () => {

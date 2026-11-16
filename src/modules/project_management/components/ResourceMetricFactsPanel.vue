@@ -1,8 +1,12 @@
 <script setup>
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, reactive, ref, watch, toRefs, onScopeDispose, nextTick } from 'vue'
 import { getMetricResources, postMetricResource, postMetricUsageAction, postMetricUsageBatch, listPersonnel } from '../api/projectManagement.js'
+import * as projectAPI from '../api/projectManagement.js'
 import { metricInstant, metricOperationKey } from '../metricFacts.js'
 import ResourceMetricAutomationPanel from './ResourceMetricAutomationPanel.vue'
+import { createResourceMetricCommands } from '../composables/useResourceMetricWorkflow.js'
+import { hasUnresolvedResourceMetricCommand, parkResourceMetricCommand,
+  restoreResourceMetricCommand, recordResourceMetricOutcome } from '../resourceMetricCommandState.js'
 import { todayBusinessDate, formatBusinessDateTime, formatBusinessDate } from '../../shared/utils/businessTime.js'
 
 const props = defineProps({
@@ -12,23 +16,29 @@ const props = defineProps({
   session: { type: Object, default: null },
   resources: { type: Array, default: () => [] },
   equipment: { type: Array, default: () => [] },
+  scopeToItem: { type: Boolean, default: false },
+  initialTab: { type: String, default: 'usage' },
+  commandState: { type: Object, default: createResourceMetricCommands },
 })
 
 const selectedMetricItemID = ref('')
 const activeItem = computed(() => {
   const selected = props.items.find((item) => item.id === selectedMetricItemID.value)
   if (selected) return selected
-  return props.items.length ? null : props.item
+  return props.items.length || props.selectedItemId ? null : props.item
 })
-const hasSelectedItem = computed(() => !!props.selectedItemId && props.items.some((item) => item.id === props.selectedItemId))
-const busy = ref(false), error = ref(''), notice = ref(''), pending = ref(null)
+const hasSelectedItem = computed(() => props.scopeToItem && !!props.selectedItemId
+  && props.items.some((item) => item.id === props.selectedItemId))
+const { busy, pending, batch, batchBusy } = toRefs(props.commandState)
+props.commandState.unresolved ||= []
+props.commandState.history ||= []
+const error = ref(''), notice = ref('')
 const usages = ref([]), capacities = ref([]), usagePage = ref(1), capacityPage = ref(1)
 const people = ref([]), peopleKeyword = ref(''), peoplePage = ref(1), peopleTotal = ref(0), peopleError = ref('')
 const orgFallbackOpen = ref(false), orgBusy = ref(false), orgError = ref('')
 const autoOrg = ref({ user_id: '', organization_id: '', organization_name: '' })
 const resourceOverride = ref(false)
-const batch = ref(null), batchBusy = ref(false)
-const form = reactive({ resource_type: 'PERSON', resource_id: '', business_date: todayBusinessDate(), start: '09:00', end: '18:00', note: '', evidence: '', organization_witness_id: '', organization_id: '', excluded: false, version: 0, corrects_id: '' })
+const form = reactive({ resource_type: 'PERSON', resource_id: '', business_date: todayBusinessDate(), start: '', end: '', note: '', evidence: '', organization_witness_id: '', organization_id: '', excluded: false, version: 0, corrects_id: '' })
 const comments = reactive({})
 const capacityWindows = ref([{ start: '09:00', end: '12:00' }, { start: '13:00', end: '18:00' }])
 const permission = computed(() => new Set(props.session?.permissions || []))
@@ -37,7 +47,7 @@ const canEquipment = computed(() => ['project.implementation.plan', 'project.dev
 const canCapacity = computed(() => permission.value.has(form.resource_type === 'PERSON' ? 'project.person_capacity.manage' : 'project.equipment_capacity.manage'))
 const canRecord = computed(() => permission.value.has('project.resource_usage.record'))
 const canConfirm = computed(() => permission.value.has('project.resource_usage.confirm'))
-const activeTab = ref('usage')
+const activeTab = ref(props.initialTab === 'capacity' ? 'capacity' : 'usage')
 watch([canCapacity, canRecord], () => {
   if (activeTab.value === 'capacity' && !canCapacity.value) activeTab.value = canRecord.value ? 'usage' : ''
   else if (activeTab.value === 'usage' && !canRecord.value) activeTab.value = canCapacity.value ? 'capacity' : ''
@@ -48,10 +58,12 @@ const planContext = computed(() => {
   if (!plan) return null
   const personnel = (plan.personnel || []).filter((row) => row.resource_id)
   const equipment = (plan.equipment || []).filter((row) => row.resource_id)
-  const resource = personnel[0] || equipment[0]
+  const useEquipment = canEquipment.value && equipment.length
+    && (form.resource_type === 'EQUIPMENT' || !canPerson.value || !personnel.length)
+  const resource = useEquipment ? equipment[0] : canPerson.value ? personnel[0] : null
   if (!resource) return null
   return {
-    resource_type: personnel.length ? 'PERSON' : 'EQUIPMENT',
+    resource_type: useEquipment ? 'EQUIPMENT' : 'PERSON',
     resource_id: resource.resource_id,
     resource_name: resource.resource_name || resource.resource_id,
     window_start: formatBusinessDate(resource.window_start) || formatBusinessDate(plan.planned_start) || '',
@@ -62,7 +74,10 @@ const planContext = computed(() => {
 })
 const resourceOptions = computed(() => {
   const map = new Map()
-  const source = form.resource_type === 'PERSON' ? [...props.resources.filter((row) => row.resource_type === 'PERSON'), ...(activeItem.value?.implementation_plan?.personnel || [])] : props.equipment
+  const source = form.resource_type === 'PERSON'
+    ? [...props.resources.filter((row) => row.resource_type === 'PERSON'), ...(activeItem.value?.implementation_plan?.personnel || [])]
+    : [...props.equipment, ...(activeItem.value?.implementation_plan?.equipment || [])
+      .map(row => ({ resource_type: 'EQUIPMENT', ...row }))]
   for (const row of source) {
     if (!row.resource_id) continue
     const existing = map.get(row.resource_id)
@@ -71,6 +86,13 @@ const resourceOptions = computed(() => {
   return [...map.values()]
 })
 const selectedResource = computed(() => resourceOptions.value.find((row) => String(row.resource_id) === String(form.resource_id)) || null)
+const capacityDates = computed(() => {
+  const plan = activeItem.value?.implementation_plan
+  const rows = form.resource_type === 'EQUIPMENT' ? plan?.equipment : plan?.personnel
+  const row = (rows || []).find(value => value.resource_id === form.resource_id)
+  const from = formatBusinessDate(row?.window_start || plan?.planned_start) || todayBusinessDate()
+  return { from, to: formatBusinessDate(row?.window_end || plan?.planned_end) || from }
+})
 const selfResource = computed(() => props.resources.find((row) => row.resource_type === 'PERSON' && row.user_id === props.session?.user_id) || null)
 const showResourcePicker = computed(() => resourceOverride.value || !planContext.value || (planContext.value.personnel_count + planContext.value.equipment_count !== 1))
 const organizations = computed(() => people.value.find((person) => person.user_id === form.organization_witness_id)?.organizations || [])
@@ -82,33 +104,36 @@ const summaryText = computed(() => {
   return '本页暂无待我处理事项'
 })
 const canQuickCapacity = computed(() => canCapacity.value && form.resource_type === 'PERSON' && !!autoOrg.value.organization_id && !!form.resource_id)
-let loadSequence = 0, orgSequence = 0
+let loadSequence = 0, orgSequence = 0, directorySequence = 0, disposed = false
+let lastPreferredItemID = ''
 
-// 用途：按当前服务项和实施计划自动带出资源、日期与归属组织，减少手填。
+// 用途：带出计划资源或本人档案，实际起止仍由已经发生的事实提供。
+// 参数：无，读取当前服务项、人员档案和会话职责。
+// 返回值：无；不从计划推算实际时长。
 function applyPlanDefaults() {
   const context = planContext.value
-  if (!context) {
-    if (canRecord.value && permission.value.has('project.field.execute') && !canCapacity.value && selfResource.value) {
-      form.resource_type = 'PERSON'
-      form.resource_id = selfResource.value.resource_id
-      form.business_date = todayBusinessDate()
-      if (!form.note.trim()) form.note = '本人实施投入'
-    }
+  if (canRecord.value && permission.value.has('project.field.execute')
+    && !permission.value.has('project.implementation.plan') && !canCapacity.value && selfResource.value) {
+    form.resource_type = 'PERSON'
+    form.resource_id = selfResource.value.resource_id
+    form.business_date = todayBusinessDate()
+    if (!form.note.trim()) form.note = '本人实施投入'
     return
   }
+  if (!context) return
   if (context.resource_type === 'PERSON' && !canPerson.value) return
   if (context.resource_type === 'EQUIPMENT' && !canEquipment.value) return
   const today = todayBusinessDate()
   form.resource_type = context.resource_type
   form.resource_id = context.resource_id
   form.business_date = today
-  form.start = '09:00'
-  form.end = '18:00'
   if (!form.note.trim()) form.note = `实施计划：${context.resource_name}`
   resourceOverride.value = false
 }
 
 // 用途：从平台人员目录解析当前人员归属组织，避免手工找“组织见证人”。
+// 参数：无，读取当前资源和平台身份。
+// 返回值：解析完成；旧资源和旧父项返回不覆盖当前选择。
 async function resolveOrganization() {
   orgBusy.value = false
   if (form.version || form.corrects_id) return
@@ -142,14 +167,27 @@ async function resolveOrganization() {
 }
 
 function openOrgFallback() { orgFallbackOpen.value = true }
-function markManualOrg() { autoOrg.value = { user_id: '', organization_id: '', organization_name: '' } }
+// 用途：保留人工选择的组织依据，使旧自动解析失效。
+// 参数：无。
+// 返回值：无。
+function markManualOrg() {
+  orgSequence++; orgBusy.value = false
+  autoOrg.value = { user_id: '', organization_id: '', organization_name: '' }
+}
 
 // 用途：按服务器真实范围分别读取容量和用量页。
+// 参数：无，节点模式只读取当前父项，中心模式保留全局分页。
+// 返回值：读取完成；旧上下文返回不更新当前台账。
 async function load() {
   const ticket = ++loadSequence
+  const itemID = activeItem.value?.id
   error.value = ''
+  if (props.scopeToItem && !itemID) { capacities.value = []; usages.value = []; return }
   try {
-    const [caps, uses] = await Promise.all([getMetricResources('capacities', capacityPage.value), getMetricResources('usages', usagePage.value)])
+    const read = props.scopeToItem
+      ? (kind, page) => projectAPI.getItemMetricResources(itemID, kind, page)
+      : getMetricResources
+    const [caps, uses] = await Promise.all([read('capacities', capacityPage.value), read('usages', usagePage.value)])
     if (ticket !== loadSequence) return
     if (!Array.isArray(caps) || !Array.isArray(uses)) throw new Error('资源事实响应不完整')
     capacities.value = caps
@@ -160,53 +198,110 @@ async function load() {
 }
 
 // 用途：查询受控平台在职目录，供人员未关联组织时手动选择。
+// 参数：next 表示同一查询的下一页。
+// 返回值：当前查询结果；旧查询或旧父项返回丢弃。
 async function searchPeople(next = false) {
+  const ticket = ++directorySequence
   peopleError.value = ''
-  if (!next) peoplePage.value = 1
+  if (!next) { peoplePage.value = 1; people.value = []; peopleTotal.value = 0 }
   else peoplePage.value++
   try {
     const result = await listPersonnel({ keyword: peopleKeyword.value, page: peoplePage.value, page_size: 50 })
+    if (ticket !== directorySequence) return
     people.value = result.items
     peopleTotal.value = result.total
   } catch (cause) {
-    peopleError.value = cause.message || '平台目录不可用'
+    if (ticket === directorySequence) peopleError.value = cause.message || '平台目录不可用'
   }
 }
 
 // 用途：执行或精确重试冻结的资源命令，防止未知结果下重复登记。
+// 参数：command 为新命令或页面会话保留的原命令。
+// 返回值：执行完成；未知结果保留原载荷和操作号，旧界面不回写。
 async function execute(command = pending.value) {
-  if (!command || busy.value || batchBusy.value) return
+  if (!command || busy.value || batchBusy.value || batch.value) return
+  const required = command.kind === 'capacities'
+    ? command.payload.resource_type === 'PERSON' ? 'project.person_capacity.manage' : 'project.equipment_capacity.manage'
+    : command.action === 'decision' ? 'project.resource_usage.confirm' : 'project.resource_usage.record'
+  if (!permission.value.has(required)) { error.value = '当前权限不能继续该操作，可先暂存待核对。'; return }
+  const replaying = command === pending.value
+  if (!replaying && hasUnresolvedResourceMetricCommand(props.commandState, command)) {
+    error.value = '同一目标有尚未解决的原操作，请从待核对列表恢复，勿重新登记。'; return
+  }
+  command.context_item_id ||= command.payload?.service_item_id || command.itemID
+    || (props.scopeToItem ? activeItem.value?.id : '') || ''
+  command.itemIDs ||= command.context_item_id ? [command.context_item_id] : []
+  command.state = 'SENDING'
   pending.value = command
   busy.value = true
   error.value = ''
   notice.value = ''
   try {
-    if (command.action) await postMetricUsageAction(command.id, command.action, command.payload)
-    else await postMetricResource(command.kind, command.payload)
+    let result
+    if (command.kind === 'candidate') {
+      result = await projectAPI.applyMetricUsageCandidate(command.itemID, command.payload)
+    } else if (command.action) result = await postMetricUsageAction(command.id, command.action, command.payload)
+    else result = await postMetricResource(command.kind, command.payload)
+    if (!result?.id || !Number.isSafeInteger(result.version) || result.version < 1) {
+      throw Object.assign(new Error('未收到完整资源保存回执，请核对后重试原操作。'), { outcomeUnknown: true })
+    }
+    recordResourceMetricOutcome(props.commandState, command, 'CONFIRMED', '资源操作已保存。')
     pending.value = null
-    notice.value = '资源事实已保存'
-    await load()
+    props.commandState.lastSavedItemID = command.context_item_id
+    props.commandState.revision++
   } catch (cause) {
-    error.value = cause.message || '资源操作未完成'
-    if (!cause.outcomeUnknown) pending.value = null
+    command.failure = cause.message || '资源操作未完成'
+    command.state = cause.outcomeUnknown || replaying ? 'UNKNOWN' : 'REJECTED'
+    recordResourceMetricOutcome(props.commandState, command, command.state, command.failure)
+    if (!disposed) error.value = command.failure
+    if (command.state === 'REJECTED') pending.value = null
   } finally {
     busy.value = false
   }
 }
 
+// 用途：暂存单笔未知命令，保留原键并允许处理其他目标。
+// 参数：无。
+// 返回值：无；在途命令不能暂存。
+function parkPending() {
+  if (parkResourceMetricCommand(props.commandState, 'single')) notice.value = '原操作已暂存待核对，可处理其他目标。'
+}
+
+// 用途：恢复待核对列表内的原单笔或原批次，不创建新操作号。
+// 参数：entry 为当前页面未解决列表中的命令。
+// 返回值：无；已有活动命令时保留现状。
+function restorePending(entry) {
+  if (restoreResourceMetricCommand(props.commandState, entry)) notice.value = '已恢复原操作，请核对原服务项后继续。'
+}
+
+// 用途：把当前服务项候选交给同一资源命令通道，关闭窗口后仍可原键恢复。
+// 参数：candidate 为子面板当前父项、资源和业务日，不接受另一父项的迟到事件。
+// 返回值：候选登记Promise，最终事件与自动确认资格由服务端重算。
+async function applyCandidate(candidate) {
+  if (!canRecord.value || busy.value || pending.value || batchBusy.value
+    || candidate.item_id !== activeItem.value?.id) return
+  await execute({ kind: 'candidate', itemID: candidate.item_id, payload: {
+    resource_id: candidate.resource_id, business_date: candidate.business_date,
+    idempotency_key: metricOperationKey(),
+  } })
+}
+
 // 用途：发布容量或登记用量草稿；容量必须已有可核验的组织归属。
+// 参数：kind 为capacities或usages，实际用时不采用容量窗口作为默认值。
+// 返回值：命令执行完成；字段错误保留在当前面板。
 async function save(kind) {
-  if (busy.value || pending.value || batchBusy.value) return
+  if (busy.value || pending.value || batch.value || batchBusy.value) return
   try {
     if (!form.resource_id || !form.note.trim()) throw new Error('请选择资源并填写业务用途与依据')
     if (kind === 'capacities' && orgBusy.value) throw new Error('正在解析组织归属，请稍候再发布')
     if (kind === 'capacities' && (!form.organization_id || !form.organization_witness_id)) throw new Error('请先确认组织归属；人员未关联平台目录时请在高级设置中手动选择')
     const payload = { resource_type: form.resource_type, resource_id: form.resource_id, business_date: form.business_date, note: form.note.trim(), idempotency_key: metricOperationKey() }
-    const interval = { start: metricInstant(form.business_date, form.start), end: metricInstant(form.business_date, form.end) }
     if (kind === 'capacities') Object.assign(payload, { intervals: form.excluded ? [] : capacityWindows.value.map((window) => ({ start: metricInstant(form.business_date, window.start), end: metricInstant(form.business_date, window.end) })), organization_id: form.organization_id, organization_witness_id: form.organization_witness_id, expected_version: form.version })
     else {
       if (!activeItem.value?.id || !form.evidence.trim()) throw new Error('请先选择服务项，并填写实际工作或运行证据')
-      Object.assign(payload, interval, { service_item_id: activeItem.value.id, evidence: form.evidence.trim(), corrects_id: form.corrects_id })
+      Object.assign(payload, { start: metricInstant(form.business_date, form.start),
+        end: metricInstant(form.business_date, form.end), service_item_id: activeItem.value.id,
+        evidence: form.evidence.trim(), corrects_id: form.corrects_id })
     }
     await execute({ kind, payload })
   } catch (cause) {
@@ -228,49 +323,90 @@ async function quickPublishCapacity() {
 }
 
 // 用途：提交、独立确认或申请取消真实用量，使用原版本并保留理由。
+// 参数：row 为真实来源行，action 为命令，decision 为确认或退回结论。
+// 返回值：命令完成；回执绑定来源服务项，与当前选择无关。
 async function act(row, action, decision = '') {
-  if (busy.value || pending.value || batchBusy.value) return
+  if (busy.value || pending.value || batch.value || batchBusy.value) return
   const note = String(comments[row.id] || '').trim()
   if (action !== 'submit' && !note) {
     error.value = '请填写确认、退回或取消说明'
     return
   }
-  await execute({ id: row.id, action, payload: { expected_version: row.version, decision, note, idempotency_key: metricOperationKey() } })
+  await execute({ id: row.id, action, context_item_id: row.service_item_id,
+    payload: { expected_version: row.version, decision, note, idempotency_key: metricOperationKey() } })
 }
 
 // 用途：批量处理本页我的草稿或待我确认的用量；逐条保留版本和幂等键。
+// 参数：kind 为submit或confirm，来源行与父项随批次冻结。
+// 返回值：无；已有命令、批次或相同目标待核对时不覆盖。
 function armBatch(kind) {
   const rows = kind === 'submit' ? myDrafts.value : pendingConfirm.value
-  if (!rows.length || batchBusy.value) return
-  batch.value = { kind, items: rows.map((row) => ({ id: row.id, version: row.version })), count: rows.length, key: metricOperationKey() }
+  if (!rows.length || batchBusy.value || busy.value || pending.value || batch.value) return
+  const command = { kind: 'batch', action: kind, state: 'READY',
+    items: rows.map(row => ({ id: row.id, version: row.version, service_item_id: row.service_item_id })),
+    itemIDs: [...new Set(rows.map(row => row.service_item_id).filter(Boolean))], count: rows.length, key: metricOperationKey() }
+  if (hasUnresolvedResourceMetricCommand(props.commandState, command)) {
+    error.value = '批次内有待核对的原操作，请先恢复原批次。'; return
+  }
+  batch.value = command
   error.value = ''
   notice.value = ''
 }
 
+// 用途：执行冻结批次，未知时保留原键和真实服务项范围。
+// 参数：无，读取已明确确认的原批次。
+// 返回值：整批处理完成；单笔在途或权限不符时不发送。
 async function executeBatch() {
   const current = batch.value
-  if (!current || batchBusy.value) return
+  if (!current || batchBusy.value || busy.value || pending.value) return
+  const action = current.action || current.kind
+  if (!(action === 'confirm' ? canConfirm.value : canRecord.value)) return
+  const replaying = current.state === 'UNKNOWN'
+  current.state = 'SENDING'
   batchBusy.value = true
   error.value = ''
   notice.value = ''
   try {
     const result = await postMetricUsageBatch({
       items: current.items.map((item) => ({ id: item.id, expected_version: item.version })),
-      action: current.kind === 'confirm' ? 'DECISION' : 'SUBMIT',
-      decision: current.kind === 'confirm' ? 'CONFIRMED' : undefined,
-      note: current.kind === 'confirm' ? '批量确认' : undefined,
+      action: action === 'confirm' ? 'DECISION' : 'SUBMIT',
+      decision: action === 'confirm' ? 'CONFIRMED' : undefined,
+      note: action === 'confirm' ? '批量确认' : undefined,
       idempotency_key: current.key,
     })
     const items = Array.isArray(result?.items) ? result.items : []
+    if (items.length !== current.items.length || new Set(items.map(row => row.id)).size !== current.items.length
+      || current.items.some(row => !items.some(value => value.id === row.id))) {
+      throw Object.assign(new Error('批次回执不完整，请核对后重试原批次。'), { outcomeUnknown: true })
+    }
+    recordResourceMetricOutcome(props.commandState, current, 'CONFIRMED', `批次已确认完成${items.length}条。`)
     batch.value = null
-    notice.value = `批量处理完成 ${items.length || current.count} 条`
-    await load()
+    props.commandState.lastSavedItemID = current.context_item_id || activeItem.value?.id || ''
+    props.commandState.revision++
+    if (!disposed) notice.value = `批量处理完成 ${items.length || current.count} 条`
   } catch (cause) {
-    error.value = cause.message || '批量处理未完成'
-    if (!cause.outcomeUnknown) batch.value = null
+    current.failure = cause.message || '批量处理未完成'
+    current.state = cause.outcomeUnknown || replaying ? 'UNKNOWN' : 'REJECTED'
+    recordResourceMetricOutcome(props.commandState, current, current.state, current.failure)
+    if (!disposed) error.value = current.failure
+    if (current.state === 'REJECTED') batch.value = null
   } finally {
     batchBusy.value = false
   }
+}
+
+// 用途：仅取消尚未发送的批次，未知结果不能被普通取消丢弃。
+// 参数：无。
+// 返回值：无。
+function cancelBatch() {
+  if (!batchBusy.value && batch.value?.state === 'READY') batch.value = null
+}
+
+// 用途：暂存未知批次，使原行、范围和操作号可在中心恢复。
+// 参数：无。
+// 返回值：无；在途批次不移动。
+function parkBatch() {
+  if (parkResourceMetricCommand(props.commandState, 'batch')) notice.value = '原批次已暂存待核对。'
 }
 
 // 用途：选择原容量作为更正基础，不直接改写历史归属。
@@ -289,9 +425,20 @@ function addCapacityWindow() {
   if (capacityWindows.value.length < 24) capacityWindows.value.push({ start: '', end: '' })
 }
 
-function correctUsage(row) {
+// 用途：先切到原记录父项，再设置关联更正，避免更正标识被切项清理。
+// 参数：row 为原父项仍可见的已确认记录。
+// 返回值：父项更新完成；不可见或上下文已变化时仅提示。
+async function correctUsage(row) {
+  if (!canRecord.value || !props.items.some(item => item.id === row.service_item_id)) {
+    error.value = '原服务项不在当前可见列表，请刷新或重新进入该项目后更正。'
+    return
+  }
   selectedMetricItemID.value = row.service_item_id
-  Object.assign(form, { resource_type: row.resource_type, resource_id: row.resource_id, business_date: row.business_date, corrects_id: row.id, note: '', evidence: '' })
+  await nextTick()
+  if (disposed || activeItem.value?.id !== row.service_item_id) return
+  Object.assign(form, { resource_type: row.resource_type, resource_id: row.resource_id,
+    business_date: row.business_date, version: 0, corrects_id: row.id, note: '', evidence: '', start: '', end: '' })
+  activeTab.value = 'usage'
   notice.value = '正在登记关联更正，请选择原服务项并填写正确实际时段与更正依据。'
 }
 
@@ -301,24 +448,69 @@ async function changePage(kind, delta) {
   await load()
 }
 
+// 用途：核对入口传入的父项，失效深链不自动替换为其他服务项。
+// 参数：无，读取入口父项与当前可见列表。
+// 返回值：无；保留用户后续明确改选。
 function syncSelectedItem() {
   const preferred = String(props.selectedItemId || '')
-  if (preferred && props.items.some((item) => item.id === preferred)) {
-    selectedMetricItemID.value = preferred
-    return
+  const changed = preferred !== lastPreferredItemID
+  const previous = lastPreferredItemID
+  lastPreferredItemID = preferred
+  const currentVisible = props.items.some(item => item.id === selectedMetricItemID.value)
+  if (preferred && (changed || !currentVisible || selectedMetricItemID.value === previous)) {
+    if (props.items.some(item => item.id === preferred)) selectedMetricItemID.value = preferred
+    else {
+      selectedMetricItemID.value = ''
+      notice.value = '指定服务项不在当前可见列表，请重新选择；不会自动替换为其他服务项。'
+    }
+  } else if (!currentVisible) {
+    selectedMetricItemID.value = ''
   }
-  if (selectedMetricItemID.value && props.items.some((item) => item.id === selectedMetricItemID.value)) return
-  selectedMetricItemID.value = props.items[0]?.id || ''
 }
 
 watch(() => [props.selectedItemId, props.items], syncSelectedItem, { immediate: true })
-watch(() => [form.resource_type, form.resource_id], () => { void resolveOrganization() })
+watch(() => [activeItem.value?.id, form.resource_type, form.resource_id], () => {
+  if (activeTab.value === 'capacity' && !form.version && !form.corrects_id) form.business_date = capacityDates.value.from
+  void resolveOrganization()
+})
 watch(() => activeItem.value?.id, () => {
-  usagePage.value = 1
+  usagePage.value = 1; capacityPage.value = 1
+  capacities.value = []; usages.value = []
+  directorySequence++; orgSequence++
+  people.value = []; peopleTotal.value = 0; peoplePage.value = 1
+  autoOrg.value = { user_id: '', organization_id: '', organization_name: '' }
+  capacityWindows.value = [{ start: '09:00', end: '12:00' }, { start: '13:00', end: '18:00' }]
+  Object.assign(form, { version: 0, corrects_id: '', start: '', end: '', note: '', evidence: '',
+    resource_id: '', organization_id: '', organization_witness_id: '', excluded: false,
+    business_date: todayBusinessDate() })
   applyPlanDefaults()
+  if (activeTab.value === 'capacity') form.business_date = capacityDates.value.from
   void load()
 }, { immediate: true })
-watch(canPerson, (allowed) => { if (!allowed && canEquipment.value) form.resource_type = 'EQUIPMENT' }, { immediate: true })
+watch(canPerson, (allowed) => {
+  if (!allowed && canEquipment.value) {
+    form.resource_type = 'EQUIPMENT'
+    if (props.initialTab === 'capacity' && canCapacity.value) activeTab.value = 'capacity'
+  }
+}, { immediate: true })
+watch(() => form.resource_type, () => {
+  if (form.version || form.corrects_id) return
+  if (form.resource_id && !resourceOptions.value.some(row => row.resource_id === form.resource_id)) {
+    form.resource_id = ''
+    applyPlanDefaults()
+  }
+})
+watch(() => props.commandState.revision, () => {
+  const target = props.commandState.lastSavedItemID
+  notice.value = target ? `资源操作已保存，关联服务项：${target}。` : '资源操作已保存。'
+  void load()
+})
+watch(() => JSON.stringify(props.session?.permissions || []), () => {
+  loadSequence++; orgSequence++
+  capacities.value = []; usages.value = []
+  if (props.session?.permissions?.includes('project.read')) void load()
+})
+onScopeDispose(() => { disposed = true; loadSequence++; orgSequence++; directorySequence++ })
 </script>
 
 <template>
@@ -328,6 +520,7 @@ watch(canPerson, (allowed) => { if (!allowed && canEquipment.value) form.resourc
         <p class="pm-panel-kicker">资源事实</p>
         <h3>容量与实际用量</h3>
         <p class="pm-resource-subtitle">先发布明确容量，再登记并独立确认实际用量；计划、预约和签到不会自动变成实际用时。</p>
+        <p v-if="scopeToItem" class="pm-resource-hint">仅显示当前服务项相关、且当前权限可见的容量与用量；完整台账请进入“工时与设备用量”。</p>
       </div>
       <div class="pm-resource-header-actions">
         <span class="pm-resource-summary">{{ summaryText }}</span>
@@ -347,7 +540,21 @@ watch(canPerson, (allowed) => { if (!allowed && canEquipment.value) form.resourc
     </nav>
     <p v-if="error" role="alert">{{ error }}</p>
     <p v-if="notice" role="status">{{ notice }}</p>
-    <p v-if="pending" role="status">本次结果尚未确认，请刷新核对，再 <button type="button" :disabled="busy" @click="execute()">按原操作重试</button>。</p>
+    <p v-if="pending" role="status">本次结果尚未确认{{ pending.context_item_id ? `（服务项：${pending.context_item_id}）` : '' }}，请刷新核对，再 <button type="button" :disabled="busy || batchBusy" @click="execute()">按原操作重试</button>。{{ pending.failure || '' }}
+      <button v-if="pending.state === 'UNKNOWN'" type="button" :disabled="busy" @click="parkPending">暂存待核对，处理其他事项</button>
+    </p>
+    <section v-if="commandState.unresolved.length" class="pm-resource-worklist" aria-label="尚待核对的原操作">
+      <h4>尚待核对的原操作</h4>
+      <p class="pm-resource-hint">原操作内容与操作号仍保留，同一目标请恢复原操作核对，勿重新登记。</p>
+      <ul><li v-for="entry in commandState.unresolved" :key="entry.id">
+        {{ entry.type === 'batch' ? '原批次' : '原操作' }} · {{ entry.command.itemIDs?.join('、') || entry.command.context_item_id || '资源台账' }}
+        <button type="button" :disabled="busy || batchBusy || !!pending || !!batch" @click="restorePending(entry)">恢复原操作</button>
+      </li></ul>
+    </section>
+    <details v-if="commandState.history.length" class="pm-resource-worklist">
+      <summary>本页操作回执（{{ commandState.history.length }}）</summary>
+      <ul><li v-for="(receipt, index) in commandState.history" :key="index">{{ receipt.itemIDs?.join('、') || '资源台账' }} · {{ receipt.message }}</li></ul>
+    </details>
 
     <section v-if="(canCapacity || canRecord) && activeTab" class="pm-resource-card" :aria-busy="busy || !!pending || batchBusy">
       <header>
@@ -359,21 +566,21 @@ watch(canPerson, (allowed) => { if (!allowed && canEquipment.value) form.resourc
       </header>
       <div class="pm-resource-form">
         <label v-if="!hasSelectedItem && items.length">实际用量服务项（授权进行中及历史项）
-          <select v-model="selectedMetricItemID"><option value="">请选择服务项</option><option v-for="candidate in items" :key="candidate.id" :value="candidate.id">{{ candidate.site || candidate.id }} · {{ candidate.status }} · {{ candidate.project_id }}</option></select>
+          <select v-model="selectedMetricItemID" :disabled="!!form.corrects_id"><option value="">请选择服务项</option><option v-for="candidate in items" :key="candidate.id" :value="candidate.id">{{ candidate.site || candidate.id }} · {{ candidate.status }} · {{ candidate.project_id }}</option></select>
         </label>
         <label v-else-if="activeItem">服务项
           <span class="pm-resource-chip">{{ activeItem.site || activeItem.id }} · {{ activeItem.status }}</span>
         </label>
-        <label>资源类型<select v-model="form.resource_type"><option v-if="canPerson" value="PERSON">人员</option><option v-if="canEquipment" value="EQUIPMENT">设备</option></select></label>
-        <label v-if="showResourcePicker">实际资源<select v-model="form.resource_id"><option value="">请选择</option><option v-for="row in resourceOptions" :key="row.resource_id" :value="row.resource_id">{{ row.resource_name || row.name || row.resource_id }}</option></select></label>
+        <label>资源类型<select v-model="form.resource_type" :disabled="!!form.corrects_id"><option v-if="canPerson" value="PERSON">人员</option><option v-if="canEquipment" value="EQUIPMENT">设备</option></select></label>
+        <label v-if="showResourcePicker">实际资源<select v-model="form.resource_id" :disabled="!!form.corrects_id"><option value="">请选择</option><option v-for="row in resourceOptions" :key="row.resource_id" :value="row.resource_id">{{ row.resource_name || row.name || row.resource_id }}</option></select></label>
         <label v-else>实际资源
           <span class="pm-resource-chip">{{ selectedResource?.resource_name || form.resource_id }} <button type="button" class="pm-link" @click="resourceOverride = true">更换</button></span>
         </label>
         <label>北京业务日<input v-model="form.business_date" type="date" /></label>
-        <label>开始时刻<input v-model="form.start" type="time" maxlength="5" /></label>
-        <label>结束时刻<input v-model="form.end" type="time" maxlength="5" /></label>
+        <label v-if="activeTab === 'usage'">开始时刻<input v-model="form.start" type="time" maxlength="5" /></label>
+        <label v-if="activeTab === 'usage'">结束时刻<input v-model="form.end" type="time" maxlength="5" /></label>
       </div>
-      <p v-if="planContext" class="pm-resource-hint">已按实施计划带出资源与日期{{ planContext.personnel_count + planContext.equipment_count > 1 ? '；计划中还有多人/多设备，可在“实际资源”切换' : '' }}。</p>
+      <p v-if="planContext" class="pm-resource-hint">已按实施计划带出资源{{ activeTab === 'capacity' ? '与容量建议日期，可核对调整' : '；实际业务日默认今天，请核对实际起止' }}{{ planContext.personnel_count + planContext.equipment_count > 1 ? '；计划中还有多人/多设备，可在“实际资源”切换' : '' }}。</p>
       <p v-if="activeTab === 'usage'" class="pm-resource-hint">实际用量必须落在已发布的明确容量内；没有容量时请先由容量管理员发布，不能按每天 8 小时推算。</p>
       <label class="pm-resource-wide">用途 / 事实 / 更正原因<textarea v-model="form.note" maxlength="1000" /></label>
 
@@ -421,13 +628,15 @@ watch(canPerson, (allowed) => { if (!allowed && canEquipment.value) form.resourc
     <section v-if="canRecord || canConfirm" class="pm-resource-worklist" :class="{ 'is-empty': !myDrafts.length && !pendingConfirm.length }">
       <header><h4>待我处理</h4><span>{{ summaryText }}</span></header>
       <div class="pm-resource-batch-actions">
-        <button v-if="canRecord && myDrafts.length" type="button" :disabled="batchBusy" @click="armBatch('submit')">提交我的草稿（{{ myDrafts.length }}）</button>
-        <button v-if="canConfirm && pendingConfirm.length" type="button" :disabled="batchBusy" @click="armBatch('confirm')">批量确认（{{ pendingConfirm.length }}）</button>
+        <button v-if="canRecord && myDrafts.length" type="button" :disabled="batchBusy || busy || !!pending || !!batch" @click="armBatch('submit')">提交我的草稿（{{ myDrafts.length }}）</button>
+        <button v-if="canConfirm && pendingConfirm.length" type="button" :disabled="batchBusy || busy || !!pending || !!batch" @click="armBatch('confirm')">批量确认（{{ pendingConfirm.length }}）</button>
       </div>
       <div v-if="batch" class="pm-resource-batch-confirm" role="group" aria-label="批量处理确认">
-        <p>{{ batch.kind === 'submit' ? `将提交 ${batch.count} 条草稿，提交后进入独立确认。` : `将确认 ${batch.count} 条用量，确认说明统一记为“批量确认”。` }}</p>
-        <button type="button" :disabled="batchBusy" @click="executeBatch">{{ batchBusy ? '正在处理…' : '确认执行' }}</button>
-        <button type="button" :disabled="batchBusy" @click="batch = null">取消</button>
+        <p>{{ batch.action === 'submit' ? `将提交 ${batch.count} 条草稿，提交后进入独立确认。` : `将确认 ${batch.count} 条用量，确认说明统一记为“批量确认”。` }}</p>
+        <p>本批涉及服务项：{{ batch.itemIDs?.join('、') || '原列表中的服务项' }}。{{ batch.failure || '' }}</p>
+        <button type="button" :disabled="batchBusy || busy || !!pending" @click="executeBatch">{{ batchBusy ? '正在处理…' : batch.state === 'UNKNOWN' ? '核对后重试原批次' : '确认执行' }}</button>
+        <button type="button" :disabled="batchBusy || batch.state !== 'READY'" @click="cancelBatch">取消未发送批次</button>
+        <button v-if="batch.state === 'UNKNOWN'" type="button" :disabled="batchBusy" @click="parkBatch">暂存原批次待核对</button>
       </div>
       <p v-if="batchBusy" role="status">正在逐条处理，请勿关闭页面…</p>
       <p v-if="!myDrafts.length && !pendingConfirm.length" class="pm-empty-mini">当前页没有待我处理的事项。</p>
@@ -439,6 +648,10 @@ watch(canPerson, (allowed) => { if (!allowed && canEquipment.value) form.resourc
       :organization="form.organization_id || autoOrg.organization_id"
       :witness="form.organization_witness_id || autoOrg.user_id"
       :can-capacity="canCapacity" :can-record="canRecord" :can-confirm="canConfirm"
+      :busy="busy || !!pending || !!batch || batchBusy"
+      :revision="commandState.revision"
+      :suggested-from="capacityDates.from" :suggested-to="capacityDates.to"
+      @apply-candidate="applyCandidate"
       @applied="load"
     />
 

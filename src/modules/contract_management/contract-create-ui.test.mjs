@@ -47,7 +47,7 @@ test('service items own their system information and customer fields remain avai
   assert.match(source, /v-for="\(system, systemIndex\) in serviceItem\.systems"/)
   assert.match(source, /service_items: form\.service_items\.map/)
   for (const level of ['一级', '二级', '三级', '四级']) assert.match(displaySource, new RegExp(level))
-  for (const label of ['客户名称', '客户地址', '客户联系人', '客户联系电话']) assert.match(source, new RegExp(`<span>${label}</span>`))
+  for (const label of ['单位名称', '单位地址', '客户联系人', '客户联系电话']) assert.match(source, new RegExp(`<span>${label}</span>`))
 })
 
 test('template creation stays mandatory within template mode and external contracts use DOCX instead of manual content', () => {
