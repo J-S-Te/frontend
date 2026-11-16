@@ -150,3 +150,16 @@ node src/test/ui-harness/sidebar-username-browser.mjs
 checkout + setup-node(22) + `npm ci` → 解析 Chrome（先试 `/usr/bin/google-chrome`，
 再 `command -v google-chrome || command -v chromium`；都缺失则 `::error::` 直接失败，不静默跳过）
 → `npm run test:layout`。
+
+
+### 历史UI回归入口
+
+`npm run test:vue-lifecycle` 默认仅验证负责人失败重试；使用 `LIFECYCLE_SCENARIO`
+选择脚本 allowed 中的一个场景。测试只使用本地组件和合成HTTP，不连接业务数据库。
+`LIFECYCLE_OUTPUT_DIR` 指定验收证据目录。
+
+`npm run test:local-ui -- --case=shared-shell-keyboard-theme-collapse` 验证共享壳层；
+其他可选单场景为 `dictionary-390`、`dictionary-1440`、
+`portal-notification-details`、`topbar-theme-contrast`。字典按当前分组卡片验证，
+不恢复历史分页表格。使用 `LOCAL_UI_OUTPUT_DIR` 保存证据，所有外部请求被拦截。
+两入口均每次只执行一个场景，可通过 `CHROMIUM_PATH` 指定已安装浏览器。

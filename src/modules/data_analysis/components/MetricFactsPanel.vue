@@ -7,6 +7,7 @@ import MetricFactsDisplay from './MetricFactsDisplay.vue'
 const props = defineProps({ section: { type: String, required: true },
   tenantId: { type: [String, Number], required: true }, userId: { type: [String, Number], required: true } })
 const summary = ref(null)
+const costDimension = ref('organization')
 const error = ref('')
 const loading = ref(false)
 let mounted = false
@@ -50,6 +51,7 @@ async function refresh() {
   }
 }
 
+watch([() => props.tenantId, () => props.userId, () => props.section], () => { costDimension.value = 'organization' })
 watch(() => props.section, () => { period.value = props.section === 'contract' ? '' : currentBusinessMonth() })
 watch([() => props.section, () => props.tenantId, () => props.userId, period], () => { refresh() })
 onMounted(() => { mounted = true; refresh() })
@@ -60,14 +62,15 @@ defineExpose({ refresh })
 <template>
   <section class="metric-facts-panel" :aria-busy="loading">
     <div class="metric-facts-toolbar">
-      <label :for="`${section}-facts-period`">统计月份</label>
+      <label :for="`${section}-facts-period`">新增事实月份</label>
       <input :id="`${section}-facts-period`" v-model="period" type="month" />
       <button v-if="section === 'contract'" type="button" class="da-button" :disabled="loading || !period" @click="period = ''">全部合同</button>
       <button type="button" class="da-button" :disabled="loading" @click="refresh">{{ loading ? '正在读取…' : '刷新新增指标' }}</button>
     </div>
+    <p class="da-native-note">月份仅筛选本区新增事实；上方累计快照使用独立口径，不随此月份变化。</p>
     <p v-if="error" class="da-native-inline-error" role="alert">{{ error }}</p>
     <p v-else-if="loading" class="da-native-note" role="status">正在读取当前授权范围的指标…</p>
-    <MetricFactsDisplay v-else :section="section" :summary="summary" />
+    <MetricFactsDisplay v-else v-model:cost-dimension="costDimension" :section="section" :summary="summary" />
   </section>
 </template>
 

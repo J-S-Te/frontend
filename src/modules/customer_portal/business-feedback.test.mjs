@@ -28,7 +28,8 @@ function feedbackHarness() {
   const scope = {
     loading: ref(false), error: ref(''), notice: ref(''), session: ref({ customer_id: 1 }), isPortalSuperAdmin: ref(false),
     capabilitiesLoaded: true, section: ref('feedback'), projects: ref([]), feedbacks: ref([]), feedbackNotifications: ref([]),
-    feedbackNotificationUnreadCount: ref(0), feedbackPage: ref(1), feedbackTotal: ref(0), feedbackListError: ref(''),
+    feedbackNotificationGeneration: 0, feedbackNotificationLoading: ref(false),
+    feedbackNotificationError: ref(''), feedbackNotificationUnreadCount: ref(null), feedbackPage: ref(1), feedbackTotal: ref(0), feedbackListError: ref(''),
     feedbackForm: reactive({ type: 'COMPLAINT', title: '问题', description: '详情', project_id: '', expected_contact: '' }),
     feedbackSubmitError: ref(''), feedbackContactError: ref(''), feedbackClosing: ref(false), selectedFeedback: ref({ feedback: { id: 'feedback-1' } }),
     feedbackCloseRetryKeys: new Map(), createIdempotencyKey: () => 'stable-close-key',
@@ -38,7 +39,7 @@ function feedbackHarness() {
     listFeedbackNotifications: async () => ({ items: [] }), getFeedbackNotificationUnreadCount: async () => ({ count: 0 }),
     subsystemAccessMessage: error => error.message, formatPortalError,
   }
-  return { scope, ...functionsFrom(portal, ['load', 'submitFeedback', 'confirmCloseFeedback', 'validContact', 'fail'], scope) }
+  return { scope, ...functionsFrom(portal, ['load', 'loadFeedbackNotifications', 'submitFeedback', 'confirmCloseFeedback', 'validContact', 'fail'], scope) }
 }
 
 test('反馈已创建而刷新失败时保留成功回执，错误只属于列表读取', async () => {

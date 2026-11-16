@@ -79,7 +79,7 @@ test('合同管理汉堡按钮用 aria-expanded / aria-controls 关联抽屉侧�
   const sidebar = singleByClass('contract-sidebar')
   assert.equal(sidebar.tag, 'aside')
   assert.equal(staticAttr(sidebar, 'id'), 'contract-sidebar', '抽屉侧栏必须有稳定 id 供 aria-controls 指向')
-  assert.equal((template.match(/id="contract-sidebar"/g) ?? []).length, 1, '侧栏 id 必须唯一')
+  assert.equal(elements.filter(node => staticAttr(node, 'id') === 'contract-sidebar').length, 1, '侧栏 id 必须唯一')
 })
 
 // blockFromTemplate 取模板中标记开始到下一个 </nav> 的片段，用于断言导航区的绑定表达式。

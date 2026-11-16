@@ -25,7 +25,7 @@ function panelHarness(getMetricFacts) {
     onMounted: callback => { mount = callback }, onBeforeUnmount: callback => { unmount = callback },
     formatDataAnalysisError: failure => failure.message, Intl, Date }
   const script = source.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '')
-  const state = vm.runInNewContext(`${script};({summary,error,loading,refresh,period})`, context)
+  const state = vm.runInNewContext(`${script};({summary,error,loading,refresh,period,costDimension})`, context)
   return { props, state, mount: () => mount(), unmount: () => unmount() }
 }
 
@@ -51,4 +51,21 @@ test('新增指标在身份、月份切换和卸载后拒绝迟到结果', async
   third.resolve({ available: true, basis: '卸载后的响应' })
   await Vue.nextTick(); await Vue.nextTick()
   assert.equal(h.state.summary.value, null)
+})
+
+
+test('成本维度在刷新和月份切换保留，身份变化重置', async () => {
+  const h = panelHarness(async () => ({available:true,cost_dimensions:[]}))
+  h.mount()
+  await Vue.nextTick(); await Vue.nextTick()
+  h.state.costDimension.value = 'project'
+  await h.state.refresh()
+  assert.equal(h.state.costDimension.value, 'project')
+  h.state.period.value = '2026-10'
+  await Vue.nextTick(); await Vue.nextTick()
+  assert.equal(h.state.costDimension.value, 'project')
+  h.props.userId = 'another-user'
+  await Vue.nextTick()
+  assert.equal(h.state.costDimension.value, 'organization')
+  h.unmount()
 })

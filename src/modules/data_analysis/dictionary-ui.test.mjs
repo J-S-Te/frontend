@@ -8,10 +8,13 @@ import { formatDataAnalysisError } from './utils/errors.js'
 const source = await readFile(new URL('./views/DictionaryView.vue', import.meta.url), 'utf8')
 const script = source.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '')
 const metric = (extra = {}) => ({ code: 'TEST_COUNT', name: '统计数量', dashboard: '项目看板', definition: '统计口径', formula: 'count', source: '项目', period: '月', status: '已确认', version: 3, origin: 'CUSTOM', enabled: false, can_enable: false, calculation_binding: '', ...extra })
+// 用途：在隔离VM中验证字典原有业务处理，DOM焦点由独立测试覆盖。
+// 参数：options 为权限、读取响应及命令替身。
+// 返回值：可观察的状态与实际业务调用记录。
 function harness({ permissions = ['dictionary.manage'], get = async () => ({ metrics: [metric()] }), create, update, toggle, remove, versions, confirm = true } = {}) {
   const calls = { create: [], update: [], toggle: [], remove: [], versions: [], confirm: [] }
   const context = vm.createContext({ ref: (value) => ({ value }), computed: (getter) => ({ get value() { return getter() } }), defineProps: () => ({ permissions }), onMounted() {}, window: { confirm(message) { calls.confirm.push(message); return confirm } },
-    formatDataAnalysisError,
+    formatDataAnalysisError, useDialogFocusTrap() {},
     useConfirmDialog: () => ({ dialog: { value: null }, askConfirm: async ({ description }) => { calls.confirm.push(description); return confirm }, accept() {}, cancel() {} }),
     getDictionary: get,
     createDictionaryMetric: async (payload) => { calls.create.push(payload); return create ? create(payload) : metric({ ...payload, enabled: false, version: 1 }) },
@@ -20,7 +23,7 @@ function harness({ permissions = ['dictionary.manage'], get = async () => ({ met
     deleteDictionaryMetric: async (code, version) => { calls.remove.push({ code, version }); if (remove) await remove(code, version) },
     getDictionaryMetricVersions: async (code) => { calls.versions.push(code); return versions ? versions(code) : [{ metric: metric(), operation: 'UPDATE', actor_id: 'user', created_at: '2026-10-08' }] },
   })
-  vm.runInContext(`${script}\nglobalThis.ui = { dictionary, loading, error, canManage, canWrite, saving, draft, editing, editorError, toast, history, historyLoading, historyError, load, openEditor, closeEditor, saveEditor, toggleMetric, removeMetric, openHistory, closeHistory }`, context)
+  vm.runInContext(`${script}\nglobalThis.ui = { keyword, filteredMetrics, dictionary, loading, error, canManage, canWrite, saving, draft, editing, editorError, toast, history, historyLoading, historyError, load, openEditor, closeEditor, saveEditor, toggleMetric, removeMetric, openHistory, closeHistory }`, context)
   return { ui: context.ui, calls }
 }
 test('dictionary component script and template compile', () => {
@@ -226,4 +229,19 @@ test('未修改直接关闭；保存中保留表单且不询问放弃', async ()
   await ui.closeEditor()
   assert.ok(ui.editing.value)
   assert.equal(calls.confirm.length, 0)
+})
+
+
+test('搜索包含公式、统计周期和确认状态，分组卡片继续保留', async () => {
+  const { ui } = harness({ get: async () => ({ metrics: [metric({
+    formula: 'special_formula', period: '每个自然月', status: '待确认',
+  })] }) })
+  await ui.load()
+  for (const query of ['special_formula', '自然月', '待确认']) {
+    ui.keyword.value = query
+    assert.equal(ui.filteredMetrics.value.length, 1)
+  }
+  ui.keyword.value = '不存在的口径'
+  assert.equal(ui.filteredMetrics.value.length, 0)
+  assert.match(source, /v-for="group in groupedMetrics"/)
 })

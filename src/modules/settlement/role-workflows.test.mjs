@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
+import { ref } from 'vue'
 import { businessWallClockToInstant } from '../shared/utils/businessTime.js'
 import { formatSettlementError } from './utils/errors.js'
 const source = readFileSync(new URL('./views/SettlementView.vue',import.meta.url),'utf8')
@@ -14,10 +15,11 @@ function body(name) {
 }
 test('会话失败前不启动任何业务读取，清空旧能力与旧列表', async () => {
  const state={value:[{id:'old'}]}; let business=0
- const c={settlementScope:{begin:()=>1,isCurrent:()=>true},active:{value:'receivables'},loading:{value:false},error:{value:''},settlementSession:{value:{permissions:['old']}},pagedLists:[[()=>{},state]],invoiceDetail:{value:{}},getSettlementSession:async()=>{throw Error('权限服务不可用')},formatSettlementError:e=>e.message,loadTargets:()=>{business++;return []}}
+ const c={taskStatusKnown:ref(true),settlementScope:{begin:()=>1,isCurrent:()=>true},active:{value:'receivables'},loading:{value:false},error:{value:''},settlementSession:{value:{permissions:['old']}},pagedLists:[[()=>{},state]],invoiceDetail:{value:{}},getSettlementSession:async()=>{throw Error('权限服务不可用')},formatSettlementError:e=>e.message,loadTargets:()=>{business++;return []}}
  const load=vm.runInNewContext(`${body('load')};load`,c)
  assert.equal(await load(),false);assert.equal(business,0)
  assert.equal(Object.keys(c.settlementSession.value).length,0);assert.equal(state.value.length,0)
+ assert.equal(c.taskStatusKnown.value,false,'会话失败后待办状态必须未知')
 })
 test('新增角色流程包含真实表单、版本与未配置外部服务状态',()=>{
  let panel='';try{panel=readFileSync(new URL('./components/SettlementRolePanel.vue',import.meta.url),'utf8')}catch{}
@@ -71,10 +73,12 @@ test('角色面板迟到的设置响应在离开页面后不回写',async()=>{
 test('权限读取成功前不执行页面接口；无能力直接路由不读取业务',async()=>{
   let resolve;let business=0
   const session=new Promise(done=>{resolve=done})
-  const c={settlementScope:{begin:()=>1,isCurrent:()=>true},active:{value:''},loading:{value:false},error:{value:''},settlementSession:{value:{}},pagedLists:[],canLoad:()=>false,can:()=>false,getSettlementSession:()=>session,formatSettlementError:e=>e.message,loadTargets:()=>{business++;return []}}
+  const c={taskStatusKnown:ref(true),settlementScope:{begin:()=>1,isCurrent:()=>true},active:{value:''},loading:{value:false},error:{value:''},settlementSession:{value:{}},pagedLists:[],canLoad:()=>false,can:()=>false,getSettlementSession:()=>session,formatSettlementError:e=>e.message,loadTargets:()=>{business++;return []}}
   const load=vm.runInNewContext(`${body('load')};load`,c)
   const pending=load();assert.equal(business,0)
+  assert.equal(c.taskStatusKnown.value,false,'会话读取中不能沿用旧待办状态')
   resolve({permissions:[]});assert.equal(await pending,false)
+  assert.equal(c.taskStatusKnown.value,false,'无能力时不能声明待办已读或为空')
   assert.equal(business,0);assert.match(c.error.value,/没有可用的结算能力/)
 })
 test('项目分配采用权威项目与有效助理候选，禁止手填人员冒充选择',()=>{

@@ -83,7 +83,7 @@ test('项目管理汉堡按钮用 aria-expanded / aria-controls 关联抽屉侧�
   const sidebar = singleByClass('pm-sidebar')
   assert.equal(sidebar.tag, 'aside')
   assert.equal(staticAttr(sidebar, 'id'), 'pm-sidebar', '抽屉侧栏必须有稳定 id 供 aria-controls 指向')
-  assert.equal((template.match(/id="pm-sidebar"/g) ?? []).length, 1, '侧栏 id 必须唯一')
+  assert.equal(elements.filter(node => staticAttr(node, 'id') === 'pm-sidebar').length, 1, '侧栏 id 必须唯一')
 })
 
 test('项目管理 Escape 收起抽屉后把焦点交还汉堡按钮', () => {

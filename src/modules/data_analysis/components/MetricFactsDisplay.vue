@@ -1,10 +1,11 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { formatFactMoney, formatFactRate } from '../utils/metricFacts.js'
 import { formatBusinessDateTime } from '../../shared/utils/businessTime.js'
 
-const props = defineProps({ section: { type: String, required: true }, summary: { type: Object, default: null } })
-const costDimension = ref('organization')
+const props = defineProps({ section: { type: String, required: true }, summary: { type: Object, default: null },
+  costDimension: { type: String, default: 'organization' } })
+const emit = defineEmits(['update:costDimension'])
 const title = computed(() => ({ contract: '折扣与价格基准', project: '实际人员与设备利用率',
   report: '首次审核与退回', finance: '确认收入与成本' })[props.section])
 const bucketLabels = { LT_80: '低于八折', FROM_80_TO_90: '八折至九折（不含九折）',
@@ -12,7 +13,7 @@ const bucketLabels = { LT_80: '低于八折', FROM_80_TO_90: '八折至九折（
 const reasonLabels = { CONTENT: '报告内容', DATA: '数据问题', DATA_QUALITY: '数据质量',
   FORMAT: '格式规范', EVIDENCE: '证据材料', DOCUMENT: '文档材料', COMPLIANCE: '合规问题', OTHER: '其他原因' }
 const costRows = computed(() => (props.summary?.cost_dimensions || [])
-  .filter(row => row.dimension === costDimension.value))
+  .filter(row => row.dimension === props.costDimension))
 const resources = computed(() => [{ label: '人员', value: props.summary?.person },
   { label: '设备', value: props.summary?.equipment }])
 </script>
@@ -83,7 +84,7 @@ const resources = computed(() => [{ label: '人员', value: props.summary?.perso
         </div>
         <p v-if="!summary.currencies?.length" class="da-native-note">当前范围尚无本期已登记确认金额或已同步报销支出；不代表外部账务为零。</p>
         <label class="metric-facts-select">成本归属
-          <select v-model="costDimension"><option value="organization">承担部门</option><option value="identity">归属人员</option><option value="project">项目</option></select>
+          <select :value="costDimension" @change="emit('update:costDimension', $event.target.value)"><option value="organization">承担部门</option><option value="identity">归属人员</option><option value="project">项目</option></select>
         </label>
         <div v-if="costRows.length" class="metric-facts-table">
           <table class="da-table"><thead><tr><th scope="col">归属</th><th scope="col">币种</th><th scope="col">净确认成本</th></tr></thead>

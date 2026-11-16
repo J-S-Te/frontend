@@ -1,5 +1,8 @@
 <script setup>
 import { loginUsername } from "@/modules/shared/loginUsername.mjs"
+import ShellPreferences from '@/modules/shared/components/ShellPreferences.vue'
+import { useSidebarNavigation } from '@/modules/shared/composables/useSidebarNavigation.js'
+import { readSidebarCollapsed } from '@/modules/shared/utils/shellPreferences.js'
 import OperationToast from '@/modules/shared/components/OperationToast.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { formatUserError } from '../../shared/utils/userError.js'
@@ -383,6 +386,7 @@ const signingConfirmationForm = ref({ seal_verified: false, signature_verified: 
 const signingReplacementReason = ref('')
 const adminDashboard = ref(null)
 const dashboardDetailKey = ref('')
+const approvalsKnown = ref(false)
 const approvals = ref([])
 const initiatedApprovals = ref([])
 const approvalTab = ref('tasks')
@@ -616,6 +620,12 @@ useUrlFilterState({
 })
 const mobileMenuOpen = ref(false)
 const menuButton = ref(null)
+const sidebarElement = ref(null)
+const desktopSidebarCollapsed = ref(readSidebarCollapsed())
+const { hidden: sidebarHidden } = useSidebarNavigation({
+  open: mobileMenuOpen, container: sidebarElement, trigger: menuButton,
+  breakpoint: 820, collapsed: desktopSidebarCollapsed,
+})
 // 合同外壳与共享外壳（AppShell）保持一致：Esc 关闭抽屉并把焦点交还汉堡按钮。
 // 仅在抽屉打开时生效，且不抢已被业务弹窗处理过的 Esc（模态框/客户选择器等有各自的
 // keydown.esc 或自己管理关闭），避免一次 Esc 同时关掉抽屉和弹窗。
@@ -1530,6 +1540,9 @@ async function waitForInitiatedApproval(approvalID) {
 
 
 
+// refreshApprovalRealtime 独立刷新审批列表、待办和详情，保留通知状态未知语义。
+// 参数：无。
+// 返回值：异步完成；失败保留明确业务错误状态。
 async function refreshApprovalRealtime() {
   if (approvalRealtimeBusy || !session.value || activeSection.value !== 'approvals' || document.visibilityState !== 'visible') return
   approvalRealtimeBusy = true
@@ -1544,6 +1557,7 @@ async function refreshApprovalRealtime() {
       : Promise.resolve(null)
     const [initiatedResult, taskResult, detailResult] = await Promise.allSettled([initiatedRequest, taskRequest, detailRequest])
     if (isCurrent() && initiatedResult.status === 'fulfilled') setInitiatedApprovals(initiatedResult.value)
+    if (isCurrent()) approvalsKnown.value = taskResult.status === 'fulfilled' && can('approval.process')
     if (isCurrent() && taskResult.status === 'fulfilled') {
       approvals.value = taskResult.value.map(normalizeApproval)
       if (selectedApproval.value && can('approval.process')) {
@@ -1663,6 +1677,7 @@ async function loadBusinessData() {
   // 各区域按权限独立加载并用 allSettled 汇总，单个非关键接口失败不会清空已经
   // 成功的数据。权限仍由后端逐接口执行，这里的条件只避免发起无意义请求。
   businessDataLoading.value = true
+  approvalsKnown.value = false
   businessDataErrors.value = {}
   const requests = []
   const addRequest = (label, sections, promise) => {
@@ -1708,7 +1723,7 @@ async function loadBusinessData() {
     addRequest('签署台账', ['signing'], refreshSigningRecords())
   }
   if (can('approval.process')) {
-    addRequest('审批待办', ['dashboard', 'approvals'], listApprovalTasks({ limit: 200 }).then((items) => { approvals.value = items.map(normalizeApproval) }))
+    addRequest('审批待办', ['dashboard', 'approvals'], listApprovalTasks({ limit: 200 }).then((items) => { approvals.value = items.map(normalizeApproval); approvalsKnown.value = true }))
   }
   if (can('approval.view') || can('approval_rule.manage')) {
     addRequest('审批规则', ['rules'], listApprovalRules().then((items) => { rules.value = items }))
@@ -2854,9 +2869,9 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="contract-app">
+  <div class="contract-app" :class="{ 'is-sidebar-collapsed': desktopSidebarCollapsed }">
     <button v-if="mobileMenuOpen" class="contract-menu-mask" type="button" aria-label="关闭导航" @click="mobileMenuOpen = false"></button>
-    <aside id="contract-sidebar" class="contract-sidebar" :class="{ open: mobileMenuOpen }">
+    <aside ref="sidebarElement" :inert="sidebarHidden" :aria-hidden="sidebarHidden ? 'true' : undefined" tabindex="-1" id="contract-sidebar" class="contract-sidebar" :class="{ open: mobileMenuOpen }">
       <div class="contract-brand">
         <span class="contract-brand-mark"><ConsoleIcon name="nav-contract" /></span>
         <span><strong>机构合同管理</strong><small>CONTRACT HUB</small></span>
@@ -2893,17 +2908,22 @@ onBeforeUnmount(() => {
         <div class="contract-breadcrumb"><span>合同管理系统</span><ConsoleIcon name="chevron" /><strong>{{ pageMeta.title }}</strong></div>
         <label class="contract-global-search" :class="{ 'is-scope-disabled': activeSection !== 'contracts' }" :title="activeSection === 'contracts' ? '仅筛选合同台账列表' : '搜索仅限合同台账'"><ConsoleIcon name="search" /><input v-model="keyword" type="search" maxlength="100" autocomplete="off" :disabled="activeSection !== 'contracts'" :aria-label="activeSection === 'contracts' ? '搜索合同台账' : '搜索仅限合同台账'" :placeholder="activeSection === 'contracts' ? '搜索合同台账（编号 / 名称 / 类型）…' : '搜索仅限合同台账'" @change="reloadLedger" /></label>
         <div class="contract-topbar-actions">
+          <ShellPreferences sidebar-id="contract-sidebar" @collapse-change="desktopSidebarCollapsed = $event" />
           <OperationInboxPanel />
-          <button class="contract-icon-button" type="button" aria-label="通知" @click="notificationOpen = !notificationOpen"><ConsoleIcon name="bell" /><i></i></button>
+          <button class="contract-icon-button" type="button" :aria-label="can('approval.process') && !approvalsKnown ? '通知，待办状态未知' : '通知'" @click="notificationOpen = !notificationOpen"><ConsoleIcon name="bell" /><i v-if="approvalsKnown && can('approval.process') && approvals.length"></i><span v-else-if="can('approval.process') && !approvalsKnown" aria-hidden="true">?</span></button>
           <span class="contract-topbar-avatar">{{ currentUserInitial }}</span>
         </div>
         <ContractNotificationPanel
-          v-if="notificationOpen"
+          v-if="notificationOpen && (!can('approval.process') || approvalsKnown)"
           :approvals="approvals"
           :can-process="can('approval.process')"
           @open-approval="openApproval"
           @view-all="navigate('approvals')"
         />
+        <div v-else-if="notificationOpen" class="contract-notification-panel" role="status">
+          <p>待办状态尚未读取或读取失败。</p>
+          <button type="button" class="contract-button secondary" :disabled="businessDataLoading" @click="loadBusinessData">重新读取待办</button>
+        </div>
       </header>
 
       <section class="contract-content">
@@ -3289,3 +3309,14 @@ onBeforeUnmount(() => {
     <OperationToast :message="toast" />
   </div>
 </template>
+
+<style scoped>
+@media (min-width: 821px) {
+  .is-sidebar-collapsed > .contract-sidebar { transform: translateX(-100%); visibility: hidden; }
+  .is-sidebar-collapsed > .contract-main { margin-left: 0; }
+}
+</style>
+
+<style scoped>
+@media (min-width: 821px) and (max-width: 900px) { :deep(.shell-preferences-collapse) { display: inline-block; } }
+</style>

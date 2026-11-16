@@ -30,6 +30,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - run: npm run check:vue
       - name: Verify module selection builds
         run: npm run verify:modules
       - name: Design token hardcode gate
