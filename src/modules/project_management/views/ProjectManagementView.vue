@@ -3719,7 +3719,7 @@ onBeforeUnmount(() => {
           </section>
           <section class="pm-dashboard-grid-3">
             <article class="pm-panel pm-trend-panel">
-              <header><div><p class="pm-panel-kicker">准时交付</p><h2>近 12 周准时交付率趋势</h2></div><span>近 4 周均值 <b>{{ onTimeRecentAverage !== null ? `${onTimeRecentAverage}%` : '—' }}</b></span></header>
+              <header><div><p class="pm-panel-kicker">准时交付</p><h2>近 12 周准时交付率趋势</h2></div><span>近 4 周有数据均值 <b>{{ onTimeRecentAverage !== null ? `${onTimeRecentAverage}%` : '—' }}</b></span></header>
               <div class="pm-trend-chart">
                 <div v-for="week in weeklyDeliveryTrend" :key="week.key" class="pm-trend-bar" :title="week.tooltip">
                   <span class="pm-trend-val">{{ week.total ? `${week.rate}%` : '—' }}</span>

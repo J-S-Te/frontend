@@ -1093,12 +1093,12 @@
 .pm-status-libar .pm-num { width: 38px; text-align: right; font-variant-numeric: tabular-nums; }
 
 .pm-trend-chart { display: flex; align-items: flex-end; justify-content: space-between; gap: 6px; height: 190px; padding: 14px var(--pm-sp-2) 0; }
-.pm-trend-bar { flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; min-width: 0; }
-.pm-trend-bar i { width: min(20px, 62%); flex: 0 0 auto; min-height: 6px; max-height: 100%; border-radius: var(--pm-r-xs) var(--pm-r-xs) 0 0; background: var(--pm-line); }
+.pm-trend-bar { position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; min-width: 0; padding-bottom: 22px; }
+.pm-trend-bar i { width: min(20px, 62%); flex: 0 0 auto; min-height: 6px; max-height: calc(100% - 22px); border-radius: var(--pm-r-xs) var(--pm-r-xs) 0 0; background: var(--pm-line); }
 .pm-trend-bar i.good { background: var(--pm-primary); }
 .pm-trend-bar i.low { background: var(--pm-amber); }
 .pm-trend-bar .pm-trend-val { margin-bottom: 5px; color: var(--pm-body); font-size: var(--pm-fs-nano); font-variant-numeric: tabular-nums; }
-.pm-trend-bar .pm-trend-lbl { margin-top: 7px; color: var(--pm-muted); font-size: var(--pm-fs-nano); }
+.pm-trend-bar .pm-trend-lbl { position: absolute; right: 0; bottom: 0; left: 0; color: var(--pm-muted); font-size: var(--pm-fs-nano); text-align: center; }
 .pm-chart-legend { display: flex; justify-content: flex-end; gap: var(--pm-sp-3); padding: var(--pm-sp-1) 10px var(--pm-sp-3); color: var(--pm-muted); font-size: var(--pm-fs-nano); }
 .pm-chart-legend span { display: flex; align-items: center; gap: 5px; }
 
