@@ -48,7 +48,7 @@ test('Portal feedback and security views fail closed by exact permission', async
   assert.match(view, /section\.value === 'security' && hasPermission\('account\.security\.manage'\)/)
   // 侧栏入口改由共享外壳按 visible 渲染（原来手写 v-if="hasPermission('account.security.manage')"），
   // 权限判定本身不变：没有该权限时不渲染「账号安全」入口。
-  assert.match(view, /key: 'security', label: '账号安全', icon: 'account'[\s\S]{0,160}visible: hasPermission\('account\.security\.manage'\)/)
+  assert.match(view, /key: 'security', label: '账号安全', icon: 'nav-security'[\s\S]{0,160}visible: hasPermission\('account\.security\.manage'\)/)
   assert.match(view, /当前账号没有反馈相关权限/)
   assert.match(view, /当前账号没有账户安全管理权限/)
 })

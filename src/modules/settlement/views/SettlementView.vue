@@ -130,18 +130,18 @@ function canLoad(loader) {
 const allowed = computed(() => allowedSections(settlementSession.value));
 const showNotifications = ref(false), notificationUnread = ref(0)
 const sections = [
-  ["dashboard", "经营看板", "dashboard"],
-  ["receivables", "收款计划", "audit"],
-  ["invoices", "开票管理", "account"],
-  ["receipts", "回款核销", "save"],
-  ["allocations", "核销与冲销", "reset"],
-  ["dunning", "账龄催收", "bell"],
-  ["tasks", "我的待办", "organization"],
-  ["collaboration", "项目协作", "organization"],
-  ["finance", "差异与会计凭证", "save"],
-  ["recognition", "收入与成本确认", "save"],
-  ["imports", "历史合同财务恢复", "save"],
-  ["settings", "结算设置", "reset"],
+  ["dashboard", "经营看板", "nav-overview"],
+  ["receivables", "收款计划", "nav-receivables"],
+  ["invoices", "开票管理", "nav-invoice"],
+  ["receipts", "回款核销", "nav-receipt"],
+  ["allocations", "核销与冲销", "nav-allocation"],
+  ["dunning", "账龄催收", "nav-dunning"],
+  ["tasks", "我的待办", "nav-inbox"],
+  ["collaboration", "项目协作", "nav-collaboration"],
+  ["finance", "差异与会计凭证", "nav-finance"],
+  ["recognition", "收入与成本确认", "nav-recognition"],
+  ["imports", "历史合同财务恢复", "nav-import"],
+  ["settings", "结算设置", "nav-settings"],
 ];
 const navigationGroups = [
   { label: "工作台", keys: ["dashboard", "tasks"] },
@@ -196,7 +196,7 @@ const navGroups = computed(() => [
   {
     label: "平台能力",
     items: [
-      { key: "portal", label: "返回子系统门户", icon: "dashboard", title: "返回子系统门户", anchor: "subsystem-portal" },
+      { key: "portal", label: "返回子系统门户", icon: "nav-portal", title: "返回子系统门户", anchor: "subsystem-portal" },
     ],
   },
 ]);
@@ -903,7 +903,7 @@ watch(invoiceDetailID, load);
     content-class="settlement-content"
     brand-name="结算与开票"
     brand-subtitle="测评业务全生命周期"
-    brand-icon="account"
+    brand-icon="nav-finance"
     nav-label="结算模块导航"
     :nav-groups="navGroups"
     sidebar-user-class="settlement-sidebar-footer subsystem-sidebar-user"
