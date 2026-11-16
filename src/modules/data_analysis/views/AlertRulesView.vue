@@ -28,7 +28,7 @@ const keyword = ref("")
 const scopeOwnerOrgIDs = ref([])
 const scopeCustomerTypes = ref([])
 const scopeCurrencies = ref([])
-const scopeOptions = ref({ owner_org_ids: [], customer_types: [], currencies: [], users: [] })
+const scopeOptions = ref({ owner_org_ids: [], organizations: [], customer_types: [], currencies: [], users: [] })
 const notificationEnabled = ref(false)
 const notificationRecipients = ref([])
 const quietStart = ref("")
@@ -245,6 +245,7 @@ async function loadScopeOptions() {
       owner_org_ids: Array.isArray(result?.owner_org_ids) ? result.owner_org_ids : [],
       customer_types: Array.isArray(result?.customer_types) ? result.customer_types : [],
       currencies: Array.isArray(result?.currencies) ? result.currencies : [],
+      organizations: Array.isArray(result?.organizations) ? result.organizations : [],
       users: Array.isArray(result?.users) ? result.users : [],
     }
   } catch (err) {
@@ -283,6 +284,19 @@ function recipientName(userID) {
   return option?.display_name || userID
 }
 
+
+function organizationOptions() {
+  if (Array.isArray(scopeOptions.value.organizations) && scopeOptions.value.organizations.length) {
+    return scopeOptions.value.organizations
+  }
+  return (scopeOptions.value.owner_org_ids || []).map((id) => ({ org_unit_id: id, org_unit_name: "" }))
+}
+
+function orgLabel(id) {
+  const org = organizationOptions().find((item) => item.org_unit_id === id)
+  return org?.org_unit_name ? `${org.org_unit_name}（${id}）` : id
+}
+
 function selectedRecipientLabel(values, placeholder) {
   const selected = Array.isArray(values) ? values.filter(Boolean) : []
   if (!selected.length) return placeholder
@@ -293,7 +307,7 @@ function selectedRecipientLabel(values, placeholder) {
 function selectedScopeLabel(values, placeholder) {
   const selected = Array.isArray(values) ? values.filter(Boolean) : []
   if (!selected.length) return placeholder
-  if (selected.length <= 2) return selected.join("、")
+  if (selected.length <= 2) return selected.map((id) => orgLabel(id)).join("、")
   return `已选 ${selected.length} 项`
 }
 
@@ -486,8 +500,8 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
               <details class="alert-rule-picker">
                 <summary>{{ selectedScopeLabel(scopeOwnerOrgIDs, '全部组织') }}</summary>
                 <div class="alert-rule-picker-menu">
-                  <label v-for="value in scopeOptionValues('owner_org_ids')" :key="value"><input v-model="scopeOwnerOrgIDs" type="checkbox" :value="value" :disabled="!canWrite" /><span>{{ value }}</span></label>
-                  <p v-if="!scopeOptionValues('owner_org_ids').length" class="da-modal-help">暂无可选组织</p>
+                  <label v-for="org in organizationOptions()" :key="org.org_unit_id"><input v-model="scopeOwnerOrgIDs" type="checkbox" :value="org.org_unit_id" :disabled="!canWrite" /><span>{{ org.org_unit_name || org.org_unit_id }}<small v-if="org.org_unit_name"> · {{ org.org_unit_id }}</small></span></label>
+                  <p v-if="!organizationOptions().length" class="da-modal-help">暂无可选组织</p>
                 </div>
               </details>
             </div>
