@@ -279,6 +279,11 @@ function buildNotificationJSON() {
   }
 }
 
+
+function recipientOptions() {
+  return (scopeOptions.value.users || []).filter((user) => String(user?.display_name || "").trim())
+}
+
 function recipientName(userID) {
   const option = (scopeOptions.value.users || []).find((item) => item.user_id === userID)
   return option?.display_name || userID
@@ -542,8 +547,8 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
               <details class="alert-rule-picker">
                 <summary>{{ selectedRecipientLabel(notificationRecipients, '未选择通知对象') }}</summary>
                 <div class="alert-rule-picker-menu">
-                  <label v-for="user in scopeOptions.users" :key="user.user_id"><input v-model="notificationRecipients" type="checkbox" :value="user.user_id" :disabled="!canWrite" /><span>{{ user.display_name || user.user_id }}<small v-if="user.org_unit_name"> · {{ user.org_unit_name }}</small></span></label>
-                  <p v-if="!scopeOptions.users.length" class="da-modal-help">暂无可选通知对象</p>
+                  <label v-for="user in recipientOptions()" :key="user.user_id"><input v-model="notificationRecipients" type="checkbox" :value="user.user_id" :disabled="!canWrite" /><span>{{ user.display_name || user.user_id }}<small v-if="user.org_unit_name"> · {{ user.org_unit_name }}</small></span></label>
+                  <p v-if="!recipientOptions().length" class="da-modal-help">暂无已同步姓名的通知对象</p>
                 </div>
               </details>
             </div>
@@ -552,8 +557,8 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
               <details class="alert-rule-picker">
                 <summary>{{ selectedRecipientLabel(escalationRecipients, '未选择升级对象') }}</summary>
                 <div class="alert-rule-picker-menu">
-                  <label v-for="user in scopeOptions.users" :key="user.user_id"><input v-model="escalationRecipients" type="checkbox" :value="user.user_id" :disabled="!canWrite" /><span>{{ user.display_name || user.user_id }}<small v-if="user.org_unit_name"> · {{ user.org_unit_name }}</small></span></label>
-                  <p v-if="!scopeOptions.users.length" class="da-modal-help">暂无可选升级对象</p>
+                  <label v-for="user in recipientOptions()" :key="user.user_id"><input v-model="escalationRecipients" type="checkbox" :value="user.user_id" :disabled="!canWrite" /><span>{{ user.display_name || user.user_id }}<small v-if="user.org_unit_name"> · {{ user.org_unit_name }}</small></span></label>
+                  <p v-if="!recipientOptions().length" class="da-modal-help">暂无已同步姓名的升级对象</p>
                 </div>
               </details>
             </div>
