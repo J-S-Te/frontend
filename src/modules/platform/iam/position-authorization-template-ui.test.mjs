@@ -34,3 +34,8 @@ test('岗位模板映射提供一键查重并展示重复权限来源', () => {
   assert.match(source, /重复来源：\{\{ duplicate\.templates\.map/)
   assert.match(source, /watch\(assignedTemplateIds, \(\) => \{ duplicateCheckResult\.value = null \}/)
 })
+test('追加子系统下拉排除已选应用', () => {
+  assert.match(source, /from '@\/modules\/platform\/iam\/utils\/positionAuthorizationApplicationOptions'/)
+  assert.match(source, /function additionalApplicationOptions\(row\)/)
+  assert.match(source, /v-for="app in additionalApplicationOptions\(row\)"/)
+})

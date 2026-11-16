@@ -1044,6 +1044,15 @@ test('实施准备使用可理解的行程安排而不是要求人员手填内�
   assert.match(source, /const travelExistingOptions = computed/)
   assert.match(source, /<SearchableSelect v-model="operationForm\.travelReferenceEventID"/)
   assert.match(source, /<SearchableSelect v-model="operationForm\.travelTravelerIDs"[^>]*multiple required/)
+  // 出行人员默认全选实施人员（可能多人）：实施计划人员行存的是能力档案编号，
+  // 必须映射成平台 user_id 才能回填与提交；选项也只保留已指派团队的 user_id，
+  // 否则姓名解析成"—"、提交时被后端"出行人员必须来自当前服务项已分配人员"拒绝。
+  assert.match(displaySource, /export function planImplementerUserIDs/)
+  assert.match(displaySource, /export function travelTravelerDefaults/)
+  assert.match(source, /travelTravelerIDs: travelTravelerDefaults\(item, plan, capabilities\.value\)/)
+  assert.match(source, /planImplementerUserIDs\(item, item\.implementation_plan \|\| \{\}, capabilities\.value\)/)
+  assert.match(source, /planPersonnelRows\(item\)\.map\(\(row\) => \{/)
+  assert.doesNotMatch(source, /implementation_plan\?\.personnel \|\| \[\]\)\.map\(\(row\) => row\.resource_id/)
   // 实施准备提交时带上服务项版本：服务端据此判定"我基于的是不是最新一版"（不匹配即 409）。
   assert.match(source, /expected_version: Number\(item\.version\) \|\| 0,[\s\S]*travel: \{[\s\S]*mode: form\.travelMode/)
   assert.match(source, /reference_event_id: form\.travelReferenceEventID/)
@@ -1123,7 +1132,8 @@ test('每个写操作入口都按服务端同款权限码门控', () => {
   assert.match(source, /selectedServiceItem && selectedServiceItem\.status === '实施中' && canExecuteField" class="pm-field-workflow"/)
   assert.match(source, /class="pm-form pm-operation-form"/)
   // BIZ-PROJECT-06：完成按钮除"待同步"外还必须受服务端缺项判定约束（判定未知即禁用）。
-  assert.match(source, /selectedServiceItem\.status === '实施中' && canCompleteField" class="pm-button" :disabled="saving \|\| pendingFieldSyncCount > 0 \|\| fieldEvidenceBlocksCompletion" @click="runOperation\('complete'\)"/)
+  assert.match(source, /selectedServiceItem\.status === '实施中' && canCompleteField" class="pm-button" :disabled="saving \|\| pendingFieldSyncCount > 0 \|\| fieldEvidenceBlocksCompletion" @click="openResourceUsage\('usage', true\)"/)
+  assert.match(source, /:disabled="saving \|\| !resourceUsageDialogItem \|\| !canCompleteField \|\| fieldEvidenceBlocksCompletion \|\| pendingFieldSyncCount > 0"/)
   assert.match(source, />现场测评结束<\/button>/)
   assert.match(source, /v-if="canReportDeviation" class="pm-button primary" :disabled="saving" @click="runOperation\('exception-report'\)"/)
   assert.match(source, /v-if="canReviewDeviation" class="pm-button" :disabled="saving" @click="runOperation\('exception-review'\)"/)

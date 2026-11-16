@@ -316,6 +316,20 @@ test('商机团队从基础平台真实人员目录选择并展示姓名与组�
   assert.match(style, /\.crm-team-summary/)
 })
 
+test('商机详情看板先展示核心指标，再按概览/售前/跟进分区，不铺成长字段表', () => {
+  assert.match(view, /class="crm-opportunity-metrics" aria-label="商机核心指标"/)
+  assert.match(view, /预计金额[\s\S]*formatAmount\(selectedOpportunity\.expected_amount\)/)
+  assert.match(view, /class="crm-opportunity-tabs" role="tablist"/)
+  assert.match(view, /opportunityDetailTab === 'overview'/)
+  assert.match(view, /opportunityDetailTab === 'presale'/)
+  assert.match(view, /opportunityDetailTab === 'activity'/)
+  assert.match(view, /class="crm-opportunity-timeline"/)
+  assert.match(view, /暂无阶段变更记录/)
+  assert.match(style, /\.crm-opportunity-metrics \{[^}]*grid-template-columns: repeat\(4/)
+  assert.match(style, /\.crm-opportunity-tabs \{[^}]*border-bottom: 1px solid/)
+  assert.match(style, /\.crm-opportunity-overview-grid \{[^}]*grid-template-columns: minmax\(0, 1\.15fr\)/)
+})
+
 test('商机补充信息使用统一滚动轨道，避免团队任期、附件和外部状态浮层重叠', () => {
   assert.match(view, /class="crm-opportunity-side-rail"/)
   assert.match(style, /\.crm-opportunity-side-rail\s*\{/)

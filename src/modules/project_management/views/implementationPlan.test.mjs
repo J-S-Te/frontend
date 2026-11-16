@@ -7,7 +7,7 @@ import { formatUserError } from '../../shared/utils/userError.js'
 import { formatBusinessDate } from '../../shared/utils/businessTime.js'
 import { attachStructuredContext } from '../../platform/shared/api/requestContext.js'
 import { normalizeAuthorizationSession, principalIdentityID, shouldStartSubsystemLogin } from '../../shared/authz/sessionCompatibility.js'
-import { datetimeLocalToInstant, toDateTimeLocal, planPersonnelFor, planEquipmentFor, isEmbeddedPenetrationItem } from '../projectDisplay.js'
+import { datetimeLocalToInstant, toDateTimeLocal, planPersonnelFor, planEquipmentFor, isEmbeddedPenetrationItem, travelTravelerDefaults } from '../projectDisplay.js'
 
 const view = await readFile(new URL('./ProjectManagementView.vue', import.meta.url), 'utf8')
 const api = (await readFile(new URL('../api/projectManagement.js', import.meta.url), 'utf8'))
@@ -29,7 +29,9 @@ function workspace({ status = 200 } = {}) {
     normalizeAuthorizationSession, principalIdentityID, shouldStartSubsystemLogin,
     selectedServiceItem: ref(null), selectedServiceItems: ref([]),
     planningBlocked: ref(null), signaturePadKey: ref(0), saving: ref(false),
-    datetimeLocalToInstant, toDateTimeLocal, planPersonnelFor, planEquipmentFor, isEmbeddedPenetrationItem,
+    datetimeLocalToInstant, toDateTimeLocal, planPersonnelFor, planEquipmentFor, isEmbeddedPenetrationItem, travelTravelerDefaults,
+    // 出行人员默认值依赖能力目录（档案编号→平台 user_id 映射）；沙箱内为空即回落指派团队。
+    capabilities: ref([]),
     formatBusinessDate,
     loadWorkspace: async () => { refreshes++ },
     // 写成功后的工作区刷新统一走 refreshAfterWrite（保存/刷新分离）。

@@ -159,8 +159,8 @@ defineEmits([
       </section>
       <label><span>开始日期（选填）</span><input v-model="newContract.start_date" type="date" min="0001-01-01" max="9999-12-31" /></label>
       <label><span>结束日期（选填）</span><input v-model="newContract.end_date" type="date" :min="newContract.start_date || '0001-01-01'" max="9999-12-31" /></label>
-      <label><span>客户名称</span><input v-model="newContract.customer_name" required maxlength="255" :readonly="isExternalContractMode || localContractCounterparty" :aria-readonly="isExternalContractMode || localContractCounterparty ? 'true' : undefined" :placeholder="localContractCounterparty ? '请从本地交易对方目录选择' : isExternalContractMode ? '请从 CRM 客户目录选择' : '请输入客户名称'" /></label>
-      <label><span>客户地址</span><input v-model="newContract.customer_address" maxlength="500" placeholder="请输入客户地址" /></label>
+      <label><span>单位名称</span><input v-model="newContract.customer_name" required maxlength="255" :readonly="isExternalContractMode || localContractCounterparty" :aria-readonly="isExternalContractMode || localContractCounterparty ? 'true' : undefined" :placeholder="localContractCounterparty ? '请从本地交易对方目录选择' : isExternalContractMode ? '请从 CRM 客户目录选择' : '请输入单位名称'" /></label>
+      <label><span>单位地址</span><input v-model="newContract.customer_address" maxlength="500" placeholder="请输入单位地址" /></label>
       <label><span>客户联系人</span><input v-model="newContract.customer_contact" maxlength="128" placeholder="请输入客户联系人" /></label>
       <label><span>客户联系电话</span><input v-model="newContract.customer_phone" type="tel" inputmode="tel" maxlength="64" placeholder="请输入客户联系电话" /></label>
     </template>

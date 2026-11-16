@@ -57,6 +57,7 @@ import ProjectArchiveDirectory from '../components/ProjectArchiveDirectory.vue'
 import ReportReviewFactsPanel from '../components/ReportReviewFactsPanel.vue'
 import NativeScopeChangePanel from '@/modules/project_management/components/NativeScopeChangePanel.vue'
 import ResourceMetricFactsPanel from '../components/ResourceMetricFactsPanel.vue'
+import { useResourceMetricWorkflow } from '../composables/useResourceMetricWorkflow.js'
 import { useProjectCreationCapabilities } from '@/modules/project_management/composables/useProjectCreationCapabilities.js'
 import RiskList from '@/modules/project_management/components/RiskList.vue'
 import SearchableSelect from '@/modules/project_management/components/SearchableSelect.vue'
@@ -103,6 +104,7 @@ import {
   penetrationPackageLabel,
   permissionFieldLabel,
   planEquipmentFor,
+  planImplementerUserIDs,
   planPersonnelFor,
   planPersonnelRows,
   projectReportStageLabel,
@@ -127,6 +129,7 @@ import {
   statusToneMap,
   toDateTimeLocal,
   toggleCodeSelection,
+  travelTravelerDefaults,
 } from '@/modules/project_management/projectDisplay'
 import { principalIdentityID, subsystemAccessMessage } from '@/modules/shared/authz/sessionCompatibility'
 import { formatBusinessDate, formatBusinessDateTime, todayBusinessDate } from '@/modules/shared/utils/businessTime.js'
@@ -238,6 +241,7 @@ const allNavGroups = [
     { key: 'preparation', label: '实施准备', icon: 'save' },
     { key: 'qualifications', label: '资质与能力', icon: 'shield' },
     { key: 'equipment', label: '设备能力', icon: 'settings' },
+    { key: 'resource-usage', label: '工时与设备用量', icon: 'audit' },
     { key: 'assignments', label: '人员设备指派', icon: 'organization' },
     { key: 'methods', label: '特殊方法复核', icon: 'info' },
   ] },
@@ -266,6 +270,7 @@ const pageMeta = {
   preparation: ['实施准备', '集中核验授权、资料、工具与出行准备'],
   qualifications: ['资质与能力管理', '维护人员资质与能力标签，查看设备能力与检定状态'],
   equipment: ['设备能力维护', '新增、停用、检定和更新设备基础信息'],
+  'resource-usage': ['工时与设备用量', '集中维护可用容量，核对人员工时、设备实际用时与独立确认台账'],
   assignments: ['匹配校验与冲突预警', '校验人员、设备、资质与计划冲突'],
   methods: ['特殊方法复核待办', '复核非标准方法的适用性与风险控制'],
   implementation: ['实施看板 · 进度总览', '按状态跟踪服务项现场执行与闭环进度'],
@@ -1307,9 +1312,13 @@ const travelExistingOptions = computed(() => {
 const travelTravelerOptions = computed(() => {
   const item = selectedServiceItem.value
   if (!item) return []
-  const planIDs = (item.implementation_plan?.personnel || []).map((row) => row.resource_id)
-  const ids = [...new Set([item.team_lead_id, item.project_manager_id, ...(item.engineer_ids || []), ...planIDs].filter(Boolean))]
-  return ids.map((id) => ({ id, name: personLabel(id), description: id === item.team_lead_id ? '团队负责人' : id === item.project_manager_id ? '项目经理' : '实施工程师' }))
+  // 选项只允许平台 user_id：后端行程校验只接受服务项已指派的负责人/项目经理/工程师。
+  // 实施计划人员行存的是能力档案编号，不能直接当选项；映射成 user_id 后标注为实施人员。
+  const implementers = new Set(planImplementerUserIDs(item, item.implementation_plan || {}, capabilities.value))
+  return planPersonnelRows(item).map((row) => {
+    const role = row.resourceID === item.team_lead_id ? '团队负责人' : row.resourceID === item.project_manager_id ? '项目经理' : '实施工程师'
+    return { id: row.resourceID, name: personLabel(row.resourceID), description: implementers.has(row.resourceID) ? `${role} · 实施人员` : role }
+  })
 })
 const itemByID = computed(() => new Map(serviceItems.value.map((item) => [item.id, item])))
 const stampedContractStateByProject = computed(() => {
@@ -2087,7 +2096,7 @@ const slaOverduePending = computed(() => !slaOverdueConfirmed.value && !slaOverd
 function refreshSectionAuxiliary() {
   if (!workspaceReady.value) return
   const section = activeSection.value
-  if (['equipment', 'preparation'].includes(section)) void ensureEquipmentCatalog()
+  if (['equipment', 'preparation', 'resource-usage'].includes(section)) void ensureEquipmentCatalog()
   if (section === 'monitoring') void loadSlaOverdueDetails()
 }
 
@@ -2483,6 +2492,9 @@ async function downloadCapabilities() {
 
 let projectListScrollY = 0
 
+// 用途：进入指定项目工作区，并保留列表滚动等既有交互。
+// 参数：section 为已实现且仍由服务端导航核对的栏目。
+// 返回值：无。
 function navigate(section) {
   if (section === 'projects' && typeof window !== 'undefined') {
     nextTick(() => window.scrollTo({ top: projectListScrollY, behavior: 'auto' }))
@@ -2706,7 +2718,7 @@ function fillOperationForm(item) {
   }
   const plan = item.implementation_plan || {}
   const personnel = planPersonnelFor(item, plan)
-  operationForm.value = { ...operationForm.value, teamLeadID: item.team_lead_id || '', projectManagerID: item.project_manager_id || '', engineerIDs: (item.engineer_ids || []).join(','), plannedStart: toDateTimeLocal(item.planned_start || plan.planned_start), plannedEnd: toDateTimeLocal(item.planned_end || plan.planned_end), sitePlan: plan.site_plan || '', penetrationTestPlan: plan.penetration_test_plan || '', authDocNo: plan.auth_doc_no || '', authStart: toDateTimeLocal(plan.auth_start), authEnd: toDateTimeLocal(plan.auth_end), authScope: plan.auth_scope || '', testScope: plan.test_scope || '', testWindow: plan.test_window || '', emergencyContact: plan.emergency_contact || '', rollbackPlan: plan.rollback_plan || '', reviewComment: item.tech_review_comment || '', personnel, equipment: planEquipmentFor(plan), travelMode: '', travelReferenceEventID: '', noTravelReason: '', travelOrigin: '', travelDestination: '', travelDepartureDate: formatBusinessDate(item.planned_start || plan.planned_start), travelReturnDate: formatBusinessDate(item.planned_end || plan.planned_end), travelTransport: '', travelAccommodationNeed: '', travelTravelerIDs: personnel.map((row) => row.resourceID).filter(Boolean), comment: '' }
+  operationForm.value = { ...operationForm.value, teamLeadID: item.team_lead_id || '', projectManagerID: item.project_manager_id || '', engineerIDs: (item.engineer_ids || []).join(','), plannedStart: toDateTimeLocal(item.planned_start || plan.planned_start), plannedEnd: toDateTimeLocal(item.planned_end || plan.planned_end), sitePlan: plan.site_plan || '', penetrationTestPlan: plan.penetration_test_plan || '', authDocNo: plan.auth_doc_no || '', authStart: toDateTimeLocal(plan.auth_start), authEnd: toDateTimeLocal(plan.auth_end), authScope: plan.auth_scope || '', testScope: plan.test_scope || '', testWindow: plan.test_window || '', emergencyContact: plan.emergency_contact || '', rollbackPlan: plan.rollback_plan || '', reviewComment: item.tech_review_comment || '', personnel, equipment: planEquipmentFor(plan), travelMode: '', travelReferenceEventID: '', noTravelReason: '', travelOrigin: '', travelDestination: '', travelDepartureDate: formatBusinessDate(item.planned_start || plan.planned_start), travelReturnDate: formatBusinessDate(item.planned_end || plan.planned_end), travelTransport: '', travelAccommodationNeed: '', travelTravelerIDs: travelTravelerDefaults(item, plan, capabilities.value), comment: '' }
 }
 function updatePenetrationPackage(workPackage) {
   const index = serviceItems.value.findIndex((item) => item.id === workPackage?.parent_service_item_id)
@@ -3010,9 +3022,24 @@ async function askOperationReason(options, context, allowed) {
   return reason
 }
 
+const {
+  dialog: resourceUsageDialog, dialogItem: resourceUsageDialogItem,
+  commands: resourceMetricCommands, scopeKey: resourceMetricScope,
+  open: openResourceUsage, close: closeResourceUsage, finish: finishResourceUsage,
+  openCenter: openResourceMetricCenter,
+} = useResourceMetricWorkflow({
+  session, selectedItem: selectedServiceItem, items: serviceItems, section: activeSection,
+  saving, canComplete: canCompleteField, complete: () => runOperation('complete'),
+  loadEquipment: () => ensureEquipmentCatalog(),
+  navigateCenter: itemID => router.push({ name: 'project_management',
+    params: { section: 'resource-usage' }, query: itemID ? { service_item_id: itemID } : {} }),
+})
+const resourceWorkflowItem = computed(() => ['planning', 'preparation', 'implementation', 'reports']
+  .includes(activeSection.value) ? selectedServiceItem.value : null)
+
 // 用途：按当前操作类型执行服务项交付动作并刷新工作区。
 // 参数：kind 为分配、计划、现场实施或经理手动报告推进类型，含待整改直接编制。
-// 返回值：无；校验失败不写入，接口失败以提示反馈。
+// 返回值：现场完成确认已保存时为true；拒绝或未知时不作为已完成。
 async function runOperation(kind) {
   if (saving.value) return
   const item = selectedServiceItem.value
@@ -3020,6 +3047,7 @@ async function runOperation(kind) {
   if (!items.length) { showToast(kind === 'allocation' ? '请至少选择一个服务项' : '当前没有可操作的服务项'); return }
   const form = operationForm.value
   const completedAssignmentIDs = []
+  let fieldCompletionConfirmed = false
   saving.value = true
   try {
     if (kind === 'allocation') {
@@ -3155,6 +3183,7 @@ async function runOperation(kind) {
         return
       }
       await completeServiceItemField(item.id, { expected_version: Number(item.version) || 0, incomplete_reason: String(form.fieldIncompleteReason || '').trim() })
+      fieldCompletionConfirmed = true
       form.fieldIncompleteReason = ''
       showToast('现场测评已结束，报告待整改')
     }
@@ -3162,6 +3191,7 @@ async function runOperation(kind) {
   } catch (error) {
     const partialAssignment = kind === 'allocation' && (completedAssignmentIDs.length > 0 || error?.partialCompletion?.teamAssigned === true)
     let message = formatUserError(error?.cause || error, { fallback: '操作未完成，请核对当前状态后继续。' })
+    if (fieldCompletionConfirmed) message = `现场完成已保存，工作区刷新未完成。请刷新核对，勿重复结束。${message}`
     // 为已完成事实预留提示长度，避免长业务原因被 Toast 的安全长度限制整体替换。
     if (partialAssignment && message.length > 180) message = `${message.slice(0, 180)}…`
     // 先根据已确认的提交事实拼结果，再交给 Toast 做文本安全处理；不能让原因的
@@ -3174,7 +3204,7 @@ async function runOperation(kind) {
       selectedServiceItemIDs.value = selectedServiceItemIDs.value.filter((id) => !completed.has(id))
       message = `本批次已确认完成 ${completedAssignmentIDs.length} / ${items.length} 个服务项的分配，已完成项已取消勾选，不会重复提交。${message}`
     }
-    showToast(message, partialAssignment ? 'warning' : 'error')
+    showToast(message, partialAssignment || fieldCompletionConfirmed ? 'warning' : 'error')
     // 并发冲突：服务端已拒绝本次写入，重新拉取让用户看到最新版本后再决定怎么做。
     // 批次前项已提交后，即使本项是 403 也必须刷新并保留部分完成事实；
     // 恢复刷新失败时静默上抛，由下方 catch 提示“列表刷新未完成”，不误报写操作结果。
@@ -3184,6 +3214,7 @@ async function runOperation(kind) {
     }
   }
   finally { saving.value = false }
+  return fieldCompletionConfirmed
 }
 
 // 用途：按原选择撤销分配，区分已完成、拒绝、未知和未执行项。
@@ -3471,10 +3502,14 @@ function exportProjects() {
 
 // 所有弹层遵循同一关闭顺序：先收起内部下拉菜单，再关闭当前弹层；保存进行中不允许
 // 通过 Esc 意外卸载表单，避免用户误以为保存已取消。按钮和遮罩仍保留各自明确的关闭动作。
+// 用途：按从内到外顺序关闭当前弹层，保留在途现场完成界面。
+// 参数：无。
+// 返回值：确实关闭一个弹层时为true。
 function closeActiveOverlay() {
   // 关账请求在途时不允许 ESC 关闭，避免用户以为已取消而重复提交。
   if (saving.value || closureSaving.value) return false
   if (openMulti.value) { openMulti.value = ''; return true }
+  if (resourceUsageDialog.value) { closeResourceUsage(); return true }
   if (planEquipmentPickerOpen.value) { planEquipmentPickerOpen.value = false; return true }
   if (operationDetail.value) { operationDetail.value = null; return true }
   if (configEditorOpen.value) { configEditorOpen.value = false; return true }
@@ -3551,7 +3586,7 @@ onMounted(() => {
 function onSectionChanged(section) {
   if (!session.value?.permissions?.includes('project.read')) return
   if (['allocation', 'inbox', 'assignments', 'monitoring'].includes(section)) loadPersonnel()
-  if (['equipment', 'preparation'].includes(section)) void ensureEquipmentCatalog()
+  if (['equipment', 'preparation', 'resource-usage'].includes(section)) void ensureEquipmentCatalog()
   if (section === 'preparation') void loadEquipmentReservations(selectedServiceItem.value)
   // 监控区域每次进入都重新确认 SLA 明细：时限预警不能沿用离开页面之前的旧结论。
   if (section === 'monitoring') void loadSlaOverdueDetails({ force: true })
@@ -3661,6 +3696,16 @@ onBeforeUnmount(() => {
           </template>
         </PageHead>
 
+        <section v-if="session?.permissions?.includes('project.read') && (resourceMetricCommands.busy || resourceMetricCommands.batchBusy || resourceMetricCommands.outcome || resourceMetricCommands.unresolved.length)"
+          class="pm-panel pm-resource-workflow-entry" role="status" aria-label="资源操作回执">
+          <p v-if="resourceMetricCommands.busy || resourceMetricCommands.batchBusy">资源操作正在处理，关闭窗口不会取消已发出的请求。</p>
+          <p v-if="resourceMetricCommands.outcome">
+            {{ ({ CONFIRMED: '资源操作已保存', REJECTED: '资源操作未完成', UNKNOWN: '资源操作待核对' })[resourceMetricCommands.outcome.status] }}：{{ resourceMetricCommands.outcome.message }}
+            <span v-if="resourceMetricCommands.outcome.itemIDs.length"> · 服务项：{{ resourceMetricCommands.outcome.itemIDs.join('、') }}</span>
+          </p>
+          <p v-if="resourceMetricCommands.unresolved.length">仍有 {{ resourceMetricCommands.unresolved.length }} 个原操作待核对。</p>
+          <button v-if="navigation.sections.includes('resource-usage')" type="button" class="pm-button" @click="openResourceMetricCenter">查看资源台账和待核对操作</button>
+        </section>
         <section v-if="['projects', 'project_detail'].includes(activeSection) && canReadProjectSourceCapabilities && projectCreationCapabilityError" class="pm-contract-warning" role="alert">
           <span>{{ projectCreationCapabilityError }}</span>
           <button class="pm-button" @click="refreshProjectCreationCapabilities">重试来源能力</button>
@@ -4037,6 +4082,15 @@ onBeforeUnmount(() => {
           </section>
         </template>
 
+        <template v-else-if="activeSection === 'resource-usage'">
+          <ResourceMetricFactsPanel
+            :key="`resource-center-${resourceMetricScope}`"
+            :session="session" :items="serviceItems" :resources="capabilities" :equipment="equipment"
+            :selected-item-id="String(route.query.service_item_id || '')"
+            :command-state="resourceMetricCommands"
+          />
+        </template>
+
         <template v-else-if="activeSection === 'implementation'">
           <section class="pm-board-summary"><div><strong>{{ implementationProjectCount }}</strong><span>看板项目</span></div><div><strong>{{ implementationBoardServiceCount }}</strong><span>看板服务项</span></div><div><strong>{{ preparedImplementationCount }}</strong><span>准备完成</span></div><div><strong>{{ fieldImplementationCount }}</strong><span>现场实施中</span></div><div><strong>{{ penetrationPackageStats.total }}</strong><span>渗透专项（待确认 {{ penetrationPackageStats.pending }} / 进行中 {{ penetrationPackageStats.active }} / 完成 {{ penetrationPackageStats.completed }}）</span></div></section>
           <section class="pm-kanban"><article v-for="column in implementationKanbanColumns" :key="column.key"><header><div><i :class="column.color"></i><b>{{ column.key }}</b></div><span>{{ column.count }}</span></header><div class="pm-kanban-body"><button v-for="card in column.cards" :key="card.id" class="pm-kanban-card" :class="[column.color, { risk: card.risk }]" @click="openProject(card)"><b>{{ card.id }}</b><h3>{{ card.customer }}</h3><span class="pm-badge-stack"><span class="pm-badge" :class="statusTone(card.status)">{{ card.status }}</span><span v-if="projectReportStageLabel(card)" class="pm-badge" :class="statusTone(card.report_stage)">报告编制 · {{ projectReportStageLabel(card) }}</span></span><div class="pm-inline-progress"><i :style="{ width: `${card.progress}%` }"></i></div><footer><span>{{ card.progress }}%</span><time>{{ card.due || '待排期' }}</time></footer></button><div v-if="!column.cards.length" class="pm-empty-mini">暂无当前节点项目</div></div></article></section>
@@ -4051,7 +4105,7 @@ onBeforeUnmount(() => {
               <section class="pm-field-step"><header><span>03</span><div><b>电子签名</b><small>签名图像经文件网关存证，并绑定当前账号与时间戳。</small></div></header><SignaturePad :key="signaturePadKey" @signed="operationForm.fieldSignatureFile = $event" @cleared="operationForm.fieldSignatureFile = null" /><button class="pm-button primary" :disabled="saving || !operationForm.fieldSignatureFile" @click="runOperation('field-signature')">提交电子签名</button></section>
             </div>
             <p v-if="selectedServiceItem && selectedServiceItem.status === '实施中' && canCompleteField" class="pm-form-hint" role="status"><b>缺项判定（服务端）</b><span class="pm-badge" :class="selectedFieldEvidenceStatus === FIELD_EVIDENCE_STATUS_READY ? 'normal' : '关注'">{{ selectedFieldEvidenceStatus === FIELD_EVIDENCE_STATUS_READY ? '已判定' : selectedFieldEvidenceStatus === FIELD_EVIDENCE_STATUS_PENDING ? '待同步' : '未知' }}</span>：{{ selectedFieldEvidence.label }}<span v-if="selectedFieldEvidenceDetails.length"> · 已具备 {{ selectedFieldEvidenceEvidenceSummary }}</span><button v-if="selectedFieldEvidenceStatus === FIELD_EVIDENCE_STATUS_UNKNOWN" type="button" class="pm-link" :disabled="fieldEvidenceLoading" @click="refreshSelectedFieldEvidence({ reportError: true })">{{ fieldEvidenceLoading ? '读取中…' : '重新读取' }}</button></p>
-            <button v-if="selectedServiceItem && selectedServiceItem.status === '实施中' && canCompleteField" class="pm-button" :disabled="saving || pendingFieldSyncCount > 0 || fieldEvidenceBlocksCompletion" @click="runOperation('complete')">现场测评结束</button>
+            <button v-if="selectedServiceItem && selectedServiceItem.status === '实施中' && canCompleteField" class="pm-button" :disabled="saving || pendingFieldSyncCount > 0 || fieldEvidenceBlocksCompletion" @click="openResourceUsage('usage', true)">现场测评结束</button>
             <label v-if="selectedServiceItem && selectedServiceItem.status === '实施中' && canCompleteField && !fieldEvidenceBlocksCompletion && selectedFieldEvidenceGaps.length" class="pm-field-incomplete"><span>缺项确认说明 <em>*</em></span><textarea v-model.trim="operationForm.fieldIncompleteReason" rows="2" :placeholder="`当前缺少：${selectedFieldEvidenceGaps.join('、')}。确实无法补齐时说明原因。`" maxlength="1000"></textarea></label>
             <small v-if="pendingFieldSyncCount" class="pm-form-hint">仍有现场签到、记录或签名未同步，完成确认前请先联网补传。</small>
             <div v-else-if="!selectedServiceItem" class="pm-empty-mini">请先选择服务项</div>
@@ -4381,13 +4435,44 @@ onBeforeUnmount(() => {
           </section>
           <section class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th scope="col">事项 / 项目</th><th scope="col">内容摘要</th><th scope="col">负责人 / 归属</th><th scope="col">状态</th><th scope="col">{{ activeSection === 'allocation' ? '分配进度' : '完成度' }}</th><th scope="col">时限</th><th scope="col"></th></tr></thead><tbody><tr v-for="row in operationRows" :key="row.name"><td><b>{{ row.name }}</b></td><td><template v-if="Array.isArray(row.detail)"><span v-if="!row.detail.length">—</span><span v-else class="pm-code-pills"><span v-for="code in row.detail" :key="code" class="pm-code-pill">{{ code }}</span></span></template><template v-else>{{ row.detail }}</template><span v-if="row.warning" class="pm-cell-warning">{{ row.warning }}</span></td><td>{{ row.owner }}</td><td><span class="pm-badge" :class="statusTone(row.state)">{{ row.state }}</span></td><td><div class="pm-inline-progress"><i :style="{ width: `${row.progress}%` }"></i></div><small>{{ row.progress }}%</small></td><td>{{ row.due }}</td><td class="pm-col-actions"><button class="pm-link" @click="openOperationDetail(row)">查看详情</button></td></tr></tbody></table></div><div v-if="!operationRows.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无数据</b><span>当前页面尚无待处理事项</span></div></section>
         </template>
-        <ResourceMetricFactsPanel
-          v-if="session?.permissions?.includes('project.read') && workspaceReady && !loading && !loadError && ['planning', 'qualifications', 'equipment', 'implementation'].includes(activeSection)"
-          :session="session" :items="serviceItems" :resources="capabilities" :equipment="equipment"
-          :selected-item-id="selectedServiceItem?.id || ''"
-        />
+        <section
+          v-if="session?.permissions?.includes('project.read') && workspaceReady && !loading && !loadError && ['planning', 'preparation', 'qualifications', 'equipment', 'implementation', 'reports'].includes(activeSection)"
+          class="pm-panel pm-resource-workflow-entry" aria-label="工时与设备用量快捷入口">
+          <header><div><h3>{{ resourceWorkflowItem ? '本服务项工时与设备用量' : '工时与设备用量' }}</h3>
+            <p v-if="resourceWorkflowItem" class="pm-form-hint">{{ resourceWorkflowItem.id }} · 计划人员 {{ resourceWorkflowItem.implementation_plan?.personnel?.length || 0 }} 人 · 准备设备 {{ resourceWorkflowItem.implementation_plan?.equipment?.length || 0 }} 台。已有资源与服务项自动带入，实际时段按事实核对。</p>
+            <p v-else class="pm-form-hint">容量、工作日历和实际投入集中维护；选择服务项后可直接登记本次用量。</p>
+          </div></header>
+          <div class="pm-panel-actions">
+            <button v-if="resourceWorkflowItem && ['planning', 'preparation'].includes(activeSection)" type="button" class="pm-button" @click="openResourceUsage('capacity')">查看或生成资源容量</button>
+            <button v-if="resourceWorkflowItem" type="button" class="pm-button" @click="openResourceUsage('usage')">{{ activeSection === 'reports' ? '登记或核对编制投入' : '登记或核对本次用量' }}</button>
+            <button v-if="navigation.sections.includes('resource-usage')" type="button" class="pm-button" @click="openResourceMetricCenter">进入工时与设备用量</button>
+          </div>
+        </section>
       </div>
     </main>
+    <div v-if="resourceUsageDialog" class="pm-overlay" @click.self="closeResourceUsage">
+      <section class="pm-dialog pm-dialog-wide pm-resource-review" role="dialog" aria-modal="true" aria-labelledby="pm-resource-review-title">
+        <header><div><h2 id="pm-resource-review-title">{{ resourceUsageDialog.finish ? '现场结束前核对用量' : resourceUsageDialog.initialTab === 'capacity' ? '当前服务项资源容量' : '当前服务项实际用量' }}</h2>
+          <p class="pm-form-hint">{{ resourceUsageDialog.itemID }} · 人员和设备从计划、准备带入；实际投入只登记一次。</p>
+        </div><button type="button" class="pm-icon-button" aria-label="关闭用量核对" :disabled="saving" @click="closeResourceUsage">×</button></header>
+        <div class="pm-resource-review-body">
+          <p v-if="resourceUsageDialog.finish" class="pm-form-hint">可在这里补录、提交或按权限确认。暂未补齐用量也可以继续现场完成，之后从统一台账补录；现场完成不代表用量已经确认。</p>
+          <ResourceMetricFactsPanel v-if="resourceUsageDialogItem"
+            :key="`${resourceMetricScope}-${resourceUsageDialog.itemID}`"
+            :session="session" :items="[resourceUsageDialogItem]" :resources="capabilities" :equipment="equipment"
+            :selected-item-id="resourceUsageDialog.itemID" scope-to-item
+            :initial-tab="resourceUsageDialog.initialTab" :command-state="resourceMetricCommands"
+          />
+          <p v-else role="alert">该服务项不在当前可见列表，请关闭后刷新核对。</p>
+        </div>
+        <footer>
+          <button type="button" class="pm-button" :disabled="saving" @click="closeResourceUsage">{{ resourceUsageDialog.finish ? '返回现场作业' : '关闭' }}</button>
+          <button v-if="resourceUsageDialog.finish" type="button" class="pm-button primary"
+            :disabled="saving || !resourceUsageDialogItem || !canCompleteField || fieldEvidenceBlocksCompletion || pendingFieldSyncCount > 0"
+            @click="finishResourceUsage">{{ saving ? '正在确认…' : '继续确认现场完成' }}</button>
+        </footer>
+      </section>
+    </div>
     <QualificationImportDialog v-if="qualificationImportOpen && canManageResource" :code-options="capabilityCodeOptions('PERSON').map((option) => ({ value: option.code, label: option.name }))" @close="qualificationImportOpen = false" @completed="importQualificationFile" />
     <QualificationImportDialog v-if="equipmentImportOpen && canManageDevice" resource-type="EQUIPMENT" :code-options="capabilityCodeOptions('EQUIPMENT').map((option) => ({ value: option.code, label: option.name }))" @close="equipmentImportOpen = false" @completed="importEquipmentFile" />
     <DetectionCategoryImportDialog v-if="detectionCategoryImportOpen && canManageRules" :code-options="capabilityCodeOptions('PERSON').map((option) => ({ value: option.code, label: option.name }))" @close="detectionCategoryImportOpen = false" @completed="importDetectionCategoryFile" />
@@ -4536,3 +4621,13 @@ onBeforeUnmount(() => {
     <OperationToast :message="toastMessage" :tone="toastType" />
   </div>
 </template>
+
+<style scoped>
+.pm-resource-workflow-entry { margin-block: 16px; padding: 16px; }
+.pm-resource-review { width: min(1120px, calc(100vw - 32px)); }
+.pm-resource-review-body { overflow: auto; max-height: 66vh; padding: 4px 16px; }
+.pm-resource-review > header, .pm-resource-review > footer { flex-shrink: 0; }
+@media (max-width: 640px) {
+  .pm-resource-review-body { max-height: 70vh; padding-inline: 8px; }
+}
+</style>
