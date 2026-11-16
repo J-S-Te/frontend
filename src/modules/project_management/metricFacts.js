@@ -1,3 +1,5 @@
+import { createIdempotencyKey } from '../shared/utils/idempotencyKey.js'
+
 // 用途：把界面北京业务时刻转换为UTC存储时刻，避免依赖浏览器所在地。
 // 参数：day 为北京业务日，clock 为HH:mm。
 // 返回值：RFC3339 UTC；非法时刻抛出可读错误。
@@ -11,7 +13,7 @@ export function metricInstant(day, clock) {
 // 用途：创建一次业务命令的稳定操作号。
 // 参数：无。
 // 返回值：浏览器原生安全随机UUID。
-export function metricOperationKey() { return globalThis.crypto.randomUUID() }
+export function metricOperationKey() { return createIdempotencyKey() }
 
 // 用途：根据真实轮次和会话动作判断审核可操作状态。
 // 参数：round 为真实审核轮次，session 为当前授权会话。
