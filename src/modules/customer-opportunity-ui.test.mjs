@@ -699,30 +699,55 @@ test('商机看板显示管道汇总、列金额、空阶段开关和卡片异�
   assert.match(style, /\.crm-board-age/)
 })
 
-test('售前状态看板按流程状态设置独立背景色', () => {
+test('售前状态看板使用中性列与流程状态强调色', () => {
   assert.match(view, /class="crm-board crm-presale-board"/)
   assert.match(view, /:data-status="column\.status"/)
   for (const status of ['APPROVAL_STARTING', 'PENDING_APPROVAL', 'APPROVED_PENDING_ASSIGNMENT', 'PENDING_EXECUTION_ASSIGNMENT', 'EXECUTING', 'COMPLETED', 'REJECTED', 'CANCELLED']) {
     assert.match(style, new RegExp(`\\.crm-presale-board \\.crm-board-column\\[data-status='${status}'\\]`))
   }
-  assert.match(style, /\.crm-presale-board \.crm-board-column\s*\{[\s\S]*background:\s*linear-gradient/)
+  assert.match(style, /\.crm-presale-board \.crm-board-column\s*\{[^}]*background:\s*var\(--surface-card/)
+  assert.doesNotMatch(style, /\.crm-presale-board \.crm-board-column\s*\{[^}]*linear-gradient/)
 })
 
-test('客户卡片视图按客户状态设置独立背景色', () => {
+test('售前看板默认隐藏空状态、显示列计数和已加载工时', () => {
+  assert.match(view, /const showEmptyPresaleColumns = ref\(false\)/)
+  assert.match(view, /visiblePresaleBoard/)
+  assert.match(view, /presaleColumnHours\(column\)/)
+  assert.match(view, /crm-presale-column-hours/)
+  assert.match(view, /crm-presale-card/)
+  assert.match(view, /crm-presale-card-title/)
+  assert.match(style, /grid-auto-columns: 280px/)
+  assert.match(style, /\.crm-presale-card\s*\{/)
+})
+
+test('客户卡片视图按客户状态设置强调色，卡片保持中性表面', () => {
   assert.match(view, /class="crm-customer-cards"/)
   assert.match(view, /:data-status="item\.status"/)
   for (const status of ['ACTIVE', 'VOID', 'MERGED']) {
-    assert.match(style, new RegExp(`\\.crm-customer-cards > button\\[data-status='${status}'\\]`))
+    assert.match(style, new RegExp(`\\.crm-customer-card\\[data-status='${status}'\\]`))
   }
-  assert.match(style, /\.crm-customer-cards > button\s*\{[\s\S]*background:\s*linear-gradient/)
+  assert.match(style, /\.crm-customer-card\s*\{[^}]*background:\s*var\(--surface-card/)
+  assert.doesNotMatch(style, /\.crm-customer-card\s*\{[^}]*linear-gradient/)
 })
 
-test('客户成交与待跟进快捷筛选使用不同卡片背景色', () => {
+test('客户卡片按身份、标签、关键字段和金额动作分层展示', () => {
+  assert.match(view, /class="crm-customer-card"/)
+  assert.match(view, /class="crm-customer-card-head"/)
+  assert.match(view, /class="crm-customer-card-tags"/)
+  assert.match(view, /class="crm-customer-card-meta"/)
+  assert.match(view, /class="crm-customer-card-foot"/)
+  assert.match(view, /class="crm-customer-card-actions"/)
+  assert.match(style, /grid-template-columns: repeat\(auto-fill, minmax\(min\(300px/)
+  assert.match(style, /\.crm-customer-card-foot/)
+  assert.match(style, /\.crm-customer-card-actions/)
+})
+
+test('客户成交与待跟进快捷筛选使用不同侧边强调色', () => {
   assert.match(view, /:data-quick-filter="customerFilters\.quick_filter"/)
-  assert.match(style, /\.crm-customer-cards\[data-quick-filter='WON'\] > button\[data-status='ACTIVE'\]/)
-  assert.match(style, /\.crm-customer-cards\[data-quick-filter='FOLLOWUP_DUE'\] > button\[data-status='ACTIVE'\]/)
-  assert.match(style, /data-quick-filter='WON'[\s\S]*--crm-customer-card-surface:\s*#ecfdf5/)
-  assert.match(style, /data-quick-filter='FOLLOWUP_DUE'[\s\S]*--crm-customer-card-surface:\s*#fef3c7/)
+  assert.match(style, /\.crm-customer-cards\[data-quick-filter='WON'\] \.crm-customer-card\[data-status='ACTIVE'\]/)
+  assert.match(style, /\.crm-customer-cards\[data-quick-filter='FOLLOWUP_DUE'\] \.crm-customer-card\[data-status='ACTIVE'\]/)
+  assert.match(style, /data-quick-filter='WON'[\s\S]*--crm-customer-card-accent:\s*var\(--success/)
+  assert.match(style, /data-quick-filter='FOLLOWUP_DUE'[\s\S]*--crm-customer-card-accent:\s*var\(--warning/)
 })
 
 test('客户表单支持删除联系人且始终至少保留一个登记联系人', () => {
@@ -1054,8 +1079,8 @@ test('售前列表与状态看板展示商机名称并保留商机编号', () =>
   assert.match(displaySource, /function presaleOpportunityLabel\(item\)[\s\S]*opportunity_name/)
   assert.match(displaySource, /function presaleRequestID\(item\)[\s\S]*request_id/)
   assert.match(view, /<td>\{\{ presaleOpportunityLabel\(item\) \}\}<\/td>/)
-  assert.match(view, /<span>\{\{ presaleOpportunityLabel\(item\) \}\}<\/span>/)
-  assert.match(view, /class="crm-board-card"[^>]*@click="openPresale\(presaleRequestID\(item\)\)"/)
+  assert.match(view, /class="crm-presale-card-title"[^>]*>\{\{ presaleOpportunityLabel\(item\) \}\}/)
+  assert.match(view, /class="crm-board-card crm-presale-card"[^>]*@click="openPresale\(presaleRequestID\(item\)\)"/)
 })
 
 test('TS-001 售前列表通过受控按钮进入独立创建视图并在取消或成功后返回列表', () => {

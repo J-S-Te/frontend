@@ -478,6 +478,28 @@ test('普通模式默认隐藏必填的原始 JSON，并呈现 PDF+Excel 批量�
   assert.doesNotMatch(html, /<textarea[^>]*required/)
 })
 
+test('导入首屏优先 PDF/Excel 双槽位，历史信息默认折叠且主操作常驻', async () => {
+  const panel = importPanelHarness('ARCHIVE_ONLY')
+  const html = await panel.html()
+  const pdfAt = html.indexOf('第一步：选择或拖入 PDF 原件')
+  const excelAt = html.indexOf('id="contract-import-excel"')
+  const historyAt = html.indexOf('id="contract-import-history"')
+  const footerAt = html.indexOf('contract-import-actions--sticky')
+  assert.match(html, /contract-import-file-grid/)
+  assert.match(html, /contract-import-file-slot/)
+  assert.ok(pdfAt >= 0 && excelAt > pdfAt, 'PDF 与 Excel 槽位必须在首屏文件区')
+  assert.ok(historyAt > excelAt, '历史信息必须排在文件槽位之后')
+  assert.ok(footerAt > historyAt, '主操作必须在历史信息之后的常驻页脚')
+  assert.match(html, /批次查询与恢复/)
+  assert.doesNotMatch(html, /<details[^>]*id="contract-import-history"[^>]*\bopen\b/)
+})
+
+test('Excel 槽位拖放只接受 .xlsx，并复用统一错误提示', () => {
+  const panel = importPanelHarness('NORMAL')
+  panel.state.dropExcelFile({ dataTransfer: { files: [new File(['pdf'], '误拖入.pdf')] } })
+  assert.match(panel.state.excelMessage.value, /只支持 \.xlsx/)
+})
+
 test('历史模式默认Excel并保留高级清单兼容入口', async () => {
   const panel = importPanelHarness('ARCHIVE_ONLY')
   panel.state.entryMode.value = 'ARCHIVE_ONLY'

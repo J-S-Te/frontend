@@ -257,13 +257,13 @@ test('主体确定即创建记录：不再等目录；目录只通过 catalogRea
   assert.match(state, /export function ensureFirstRunRecord\(scope, storage = undefined\) \{\s*if \(!scope\) return null/)
 })
 
-test('上手清单入口：header n/m、页脚入口、未就绪 loading/disabled、重看/重置', () => {
+test('上手清单入口只在页头保留一份，未就绪 loading/disabled、重看/重置', () => {
   assert.match(portal, /class="subsystem-portal__guide-entry"/)
   assert.match(portal, /data-first-run-anchor="checklist-entry"/)
   assert.match(portal, /:disabled="!checklistReady"/)
   assert.match(portal, /:aria-busy="checklistReady \? 'false' : 'true'"/)
   assert.match(portal, /class="subsystem-portal__guide-entry-count">\{\{ checklistSummary\.done \}\}\/\{\{ checklistSummary\.total \}\}/)
-  assert.match(portal, /class="subsystem-portal__guide-footer-entry"/)
+  assert.doesNotMatch(portal, /subsystem-portal__guide-footer-entry/)
   assert.match(portal, /@click="openFirstRunChecklist"/)
   assert.match(portal, /重新查看平台导览/)
   assert.match(portal, /重置上手清单/)

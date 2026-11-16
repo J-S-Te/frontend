@@ -130,12 +130,12 @@ function canLoad(loader) {
 const allowed = computed(() => allowedSections(settlementSession.value));
 const showNotifications = ref(false), notificationUnread = ref(0)
 const sections = [
-  ["dashboard", "结算总览", "dashboard"],
-  ["receivables", "应收计划与应收单", "audit"],
+  ["dashboard", "经营看板", "dashboard"],
+  ["receivables", "收款计划", "audit"],
   ["invoices", "开票管理", "account"],
   ["receipts", "回款核销", "save"],
   ["allocations", "核销与冲销", "reset"],
-  ["dunning", "账龄与催收", "bell"],
+  ["dunning", "账龄催收", "bell"],
   ["tasks", "我的待办", "organization"],
   ["collaboration", "项目协作", "organization"],
   ["finance", "差异与会计凭证", "save"],
@@ -161,8 +161,24 @@ const navigationSections = computed(() =>
 const active = computed(() => allowed.value.includes(route.params.section)
   ? route.params.section : allowed.value[0] || "");
 const title = computed(
-  () => sections.find(([key]) => key === active.value)?.[1] || "结算总览",
+  () => sections.find(([key]) => key === active.value)?.[1] || "经营看板",
 );
+// 对照 UI 原型逐页说明：保留现有功能，只把页面语义讲清楚。
+const sectionDescriptions = {
+  dashboard: "应收、开票、回款与逾期全景视图；金额与状态以服务端汇总为准。",
+  receivables: "合同生效按付款节点生成应收单，销售确认后纳入催收与账龄口径。",
+  invoices: "关联合同发起开票申请，财务审核通过后驱动税控开票并回填。",
+  receipts: "会计录入回款，系统按客户、合同与金额匹配生成核销单。",
+  allocations: "确认、冲销与追溯回款核销关系，保留完整分配证据。",
+  dunning: "按账龄区间统计应收，逾期自动提醒销售并升级催收处理。",
+  tasks: "按真实业务状态汇总当前账号可处理的待办事项。",
+  collaboration: "维护项目助理与合同财务映射说明，不改变权威归属。",
+  finance: "处理回款差异、会计凭证与合同财务修订工单。",
+  recognition: "核对收入、成本确认依据与档案证据。",
+  imports: "恢复历史合同财务快照，并留下可追溯的本地对账凭证。",
+  settings: "配置结算模块受控参数、通知与业务开关。",
+};
+const sectionDescription = computed(() => sectionDescriptions[active.value] || "结算与开票业务数据以服务端返回为准。");
 // 共享外壳只负责渲染侧栏骨架：把既有分组导航映射成 navGroups，
 // 分组顺序、标题、权限过滤（allowed）与当前页高亮仍由本页决定；
 // 「返回子系统门户」继续作为最后一个分组项。
@@ -886,7 +902,7 @@ watch(invoiceDetailID, load);
     topbar-class="settlement-topbar"
     content-class="settlement-content"
     brand-name="结算与开票"
-    brand-subtitle="FINANCE OPERATIONS"
+    brand-subtitle="测评业务全生命周期"
     brand-icon="account"
     nav-label="结算模块导航"
     :nav-groups="navGroups"
@@ -911,7 +927,7 @@ watch(invoiceDetailID, load);
     </template>
 
     <template #breadcrumb>
-      <span>应用门户</span><b>/</b><strong>{{ title }}</strong>
+      <span>结算与开票管理</span><b>/</b><strong>{{ title }}</strong>
     </template>
 
     <template #topbar-actions>
@@ -957,10 +973,10 @@ watch(invoiceDetailID, load);
     </template>
 
     <template #page-head>
-        <div class="console-page-head">
+        <div class="console-page-head settlement-page-head">
           <div>
-            <p>结算与开票管理系统</p>
             <h1>{{ title }}</h1>
+            <p>{{ sectionDescription }}</p>
           </div>
           <div class="settlement-head-actions">
             <span class="settlement-environment">统一认证已接入</span
@@ -1000,6 +1016,26 @@ watch(invoiceDetailID, load);
           <button :disabled="saving" @click="submitSpecialReview(false)">驳回申请</button>
           <button :disabled="saving" @click="specialReview = null">取消</button>
         </article>
+        <nav
+          v-if="['receipts', 'allocations'].includes(active)"
+          class="settlement-tabs settlement-page-tabs"
+          aria-label="回款与核销"
+        >
+          <button
+            type="button"
+            :class="{ active: active === 'receipts' }"
+            @click="go('receipts')"
+          >
+            回款记录
+          </button>
+          <button
+            type="button"
+            :class="{ active: active === 'allocations' }"
+            @click="go('allocations')"
+          >
+            核销单
+          </button>
+        </nav>
         <OperationToast :message="message" :reference="messageReference" />
         <!-- 失败必须带重试，加载不再借用红色错误文案。 -->
         <ErrorState v-if="error" :error="error" title="结算数据读取失败" @retry="load" />

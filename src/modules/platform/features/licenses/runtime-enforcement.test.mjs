@@ -3,7 +3,6 @@ import { afterEach, test } from 'node:test'
 import { readFileSync } from 'node:fs'
 import { compileScript, compileTemplate, parse } from '@vue/compiler-sfc'
 import {
-  RUNTIME_APPLICATIONS,
   RUNTIME_POLL_INTERVAL_MS,
   RuntimeEnforcementError,
   activateRuntimeEnforcement,
@@ -14,6 +13,8 @@ import {
   enforcementStatusName,
   getRuntimeEnforcement,
   getRuntimeEnforcementOverview,
+  listRuntimeApplications,
+  validateRuntimeApplications,
   licenseStatusName,
   memberProgress,
   overviewActivationReady,
@@ -81,7 +82,6 @@ function fakeDocument(visibilityState = 'visible') {
 }
 
 test('overview request is authenticated, uncached and strictly validated', async () => {
-  assert.equal(RUNTIME_APPLICATIONS.length, 7)
   const requests = []
   globalThis.fetch = async (url, options) => { requests.push({ url, options }); return response(overview()) }
   const data = await getRuntimeEnforcementOverview('contract_management')
@@ -89,6 +89,67 @@ test('overview request is authenticated, uncached and strictly validated', async
   assert.deepEqual(requests.map(item => item.url), ['/api/v1/licenses/enforcement/contract_management/overview'])
   for (const { options } of requests) { assert.equal(options.credentials, 'include'); assert.equal(options.cache, 'no-store') }
   assert.throws(() => getRuntimeEnforcementOverview('../unregistered'), /支持/)
+})
+
+test('runtime application list is server-detected, validated and has no static fallback', async () => {
+  const calls = []
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options })
+    return response({ items: [
+      { code: 'contract_management', name: '合同管理', environment: 'prod' },
+      { code: 'settlement', name: '结算与开票管理', environment: 'prod' },
+    ] })
+  }
+  const items = await listRuntimeApplications()
+  assert.deepEqual(items.map(item => item.code), ['contract_management', 'settlement'])
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].url, '/api/v1/licenses/enforcement')
+  assert.equal(calls[0].options.cache, 'no-store')
+  assert.throws(() => validateRuntimeApplications({ items: [{ code: 'contract_management', name: '合同', environment: 'prod' }, { code: 'contract_management', name: '重复', environment: 'prod' }] }), /格式异常/)
+  assert.throws(() => validateRuntimeApplications({ items: [{ code: '../escape', name: '非法', environment: 'prod' }] }), /格式异常/)
+  assert.throws(() => validateRuntimeApplications({ items: [{ code: 'contract_management', name: '', environment: 'prod' }] }), /格式异常/)
+  assert.throws(() => validateRuntimeApplications(null), /格式异常/)
+})
+
+test('controller learns applications from discovery, never from a hardcoded list', async () => {
+  const state = createRuntimeState()
+  let reads = []
+  const view = createRuntimeController(state, {
+    canRead: () => true,
+    canManage: () => true,
+    listApplications: async () => [{ code: 'settlement', name: '结算与开票管理', environment: 'prod' }],
+    getOverview: async application => { reads.push(application); return registeredOverview({ application }) },
+  })
+  await view.loadApplications()
+  assert.equal(state.applicationsLoading, false)
+  assert.equal(state.applicationsLoaded, true)
+  assert.deepEqual(state.applications.map(item => item.code), ['settlement'])
+  assert.equal(state.application, 'settlement')
+  assert.deepEqual(reads, ['settlement'])
+
+  const empty = createRuntimeState()
+  let emptyReads = 0
+  const emptyView = createRuntimeController(empty, {
+    canRead: () => true,
+    listApplications: async () => [],
+    getOverview: async () => { emptyReads++; return registeredOverview() },
+  })
+  await emptyView.loadApplications()
+  assert.equal(empty.application, '')
+  assert.equal(empty.applicationsLoaded, true)
+  assert.equal(empty.applications.length, 0)
+  assert.equal(emptyReads, 0, '空探测不得读取任何旧硬编码系统')
+
+  const failed = createRuntimeState()
+  const failedView = createRuntimeController(failed, {
+    canRead: () => true,
+    listApplications: async () => { throw new Error('探测接口不可用') },
+    getOverview: async () => { emptyReads++; return registeredOverview() },
+  })
+  await failedView.loadApplications()
+  assert.equal(failed.application, '')
+  assert.match(failed.applicationsError, /探测接口不可用/)
+  assert.equal(emptyReads, 0, '探测失败不得回退旧系统')
 })
 
 test('overview validation fails closed on malformed, unknown or inconsistent facts', () => {
@@ -535,4 +596,14 @@ test('APPLYING is read-only progress even if a stale checkbox is programmaticall
   await view.activateSelected()
   assert.equal(writes, 0)
   assert.equal(state.confirmed, false)
+})
+
+
+test('runtime view renders only discovered systems and exposes an explicit empty state', () => {
+  const source = sourceOfView()
+  assert.doesNotMatch(source, /RUNTIME_APPLICATIONS/)
+  assert.match(source, /v-for="application in state\.applications"/)
+  assert.match(source, /:applications="state\.applications"/)
+  assert.match(source, /暂未探测到已部署且已接入的业务系统/)
+  assert.match(source, /controller\.loadApplications/)
 })

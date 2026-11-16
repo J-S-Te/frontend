@@ -65,6 +65,23 @@
   width: 21px;
   height: 21px;
 }
+
+/* 对照原型：当前导航项左侧 3px 高亮条，沿用共享侧栏的 active 状态。 */
+.settlement-sidebar .console-nav-item {
+  position: relative;
+}
+
+.settlement-sidebar .console-nav-item.active::before {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 3px;
+  height: 20px;
+  content: "";
+  border-radius: 0 3px 3px 0;
+  background: var(--primary-light);
+  transform: translateY(-50%);
+}
 /* 主区偏移与抽屉行为统一交给共享 console.css（≤820px 侧栏离屏、主区 margin-left 归零）；
    结算模块不再自建 64px 图标栏，避免 620–820px 出现无导航的空白条。 */
 .settlement-main {
@@ -139,6 +156,28 @@
 .settlement-content {
   max-width: 1440px;
 }
+
+/* 对照原型：页面标题 20px，标题下保留业务说明；卡片统一 12px 圆角。 */
+.settlement-page-head {
+  margin-bottom: 20px;
+}
+
+.settlement-page-head h1 {
+  font-size: calc(var(--fs-sm) + 7px);
+}
+
+.settlement-page-head p {
+  max-width: 760px;
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+}
+
+/* 回款与核销沿用原型的一个页面内分组，路由仍保留两个独立 section。 */
+.settlement-page-tabs {
+  margin-top: -4px;
+}
 .settlement-environment {
   display: inline-flex;
   align-items: center;
@@ -161,7 +200,7 @@
 .settlement-cards article,
 .settlement-panel {
   border: 1px solid var(--border, #e2e8f0);
-  border-radius: 10px;
+  border-radius: 12px;
   background: var(--surface-card, #fff);
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
 }

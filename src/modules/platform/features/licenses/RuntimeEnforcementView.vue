@@ -4,7 +4,6 @@ import { hasPermission } from '../../auth/utils/principal.js'
 import SubsystemAccessWizard from '../../applications/components/SubsystemAccessWizard.vue'
 import { formatLicenseTime } from './presentation.js'
 import {
-  RUNTIME_APPLICATIONS,
   RUNTIME_POLL_INTERVAL_MS,
   blockingReasonName,
   createRuntimeController,
@@ -42,7 +41,7 @@ const state = reactive(createRuntimeState())
 const controller = createRuntimeController(state, { canRead: () => canRead.value, canManage: () => canManage.value, onSuccess: () => emit('toast', '激活请求已处理，请以服务端执行状态与服务确认记录为准。') })
 const pollSeconds = RUNTIME_POLL_INTERVAL_MS / 1000
 const overview = computed(() => state.overview && state.overview.application === state.application ? state.overview : null)
-const applicationName = computed(() => RUNTIME_APPLICATIONS.find(item => item.code === state.application)?.name || '当前系统')
+const applicationName = computed(() => state.applications.find(item => item.code === state.application)?.name || '当前系统')
 const registered = computed(() => overviewIsRegistered(overview.value))
 const unregistered = computed(() => overviewIsUnregistered(overview.value))
 const progress = computed(() => memberProgress(overview.value?.enforcement.members))
@@ -72,7 +71,7 @@ const time = value => formatLicenseTime(value)
 // 返回值：返回对应异步操作，不重复创建登记或激活任务。
 function handleActivationAction() { return applying.value ? controller.refresh() : controller.activateSelected() }
 watch(() => props.licenseRevision, () => controller.invalidate())
-onMounted(() => { controller.refresh(); controller.startPolling() })
+onMounted(() => { controller.loadApplications(); controller.startPolling() })
 onBeforeUnmount(() => controller.dispose())
 // 供商业授权页的“去激活 / 查看运行详情”切到指定系统；
 // 系统码合法性与忙状态仍由控制器校验，这里不放宽任何门禁。
@@ -88,11 +87,14 @@ defineExpose({ selectApplication: application => controller.select(application) 
           <div><h3>运行时授权执行</h3><p>只读概览：持续核对系统运行、商业授权与运行时授权执行三项事实。</p></div>
         </div>
         <div class="runtime-toolbar">
-          <label class="runtime-select"><span>业务系统</span><select :value="state.application" :disabled="state.busy" @change="controller.select($event.target.value)"><option v-for="application in RUNTIME_APPLICATIONS" :key="application.code" :value="application.code">{{ application.name }}</option></select></label>
+          <label class="runtime-select"><span>业务系统</span><select :value="state.application" :disabled="state.busy || state.applicationsLoading || !state.applications.length" @change="controller.select($event.target.value)"><option v-for="application in state.applications" :key="application.code" :value="application.code">{{ application.name }}</option></select></label>
           <button class="runtime-button" :disabled="state.loading || state.busy" @click="controller.refresh"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M20 7v5h-5M4 17v-5h5" /><path d="M6.1 7a7 7 0 0 1 11.6-1L20 9M4 15l2.3 3A7 7 0 0 0 18 17" /></svg>{{ state.loading ? '读取中…' : '刷新' }}</button>
         </div>
       </header>
       <p class="runtime-note runtime-poll">页面可见时每 {{ pollSeconds }} 秒自动刷新；页面隐藏时暂停；切换业务系统会丢弃上一系统的迟到响应。</p>
+      <p v-if="state.applicationsError" role="alert" class="runtime-message runtime-error"><span>{{ state.applicationsError }}</span><button class="runtime-button" :disabled="state.applicationsLoading || state.busy" @click="controller.loadApplications">重新探测</button></p>
+      <p v-else-if="state.applicationsLoading && !state.applications.length" role="status" class="runtime-message runtime-loading">正在探测已接入的业务系统…</p>
+      <p v-else-if="state.applicationsLoaded && !state.applications.length" class="runtime-message runtime-empty">暂未探测到已部署且已接入的业务系统；不会显示未部署或未接入的候选系统。</p>
       <p v-if="state.loading && !overview" role="status" class="runtime-message runtime-loading">正在读取运行时授权概览…</p>
       <div v-if="state.error" role="alert" class="runtime-message runtime-error"><span>{{ state.error }}</span><button class="runtime-button" :disabled="state.loading || state.busy" @click="controller.refresh">重新读取</button></div>
       <template v-if="overview">
@@ -147,7 +149,7 @@ defineExpose({ selectApplication: application => controller.select(application) 
           <p v-else-if="allowedActions.length" class="runtime-note">可执行操作：{{ allowedActions.map(action => action.name).join('、') }}。接入操作仍需正常权限、预览和人工确认。</p>
           <SubsystemAccessWizard v-if="accessSuggested && canManage && canPreviewAccess && accessEnvironment"
             :key="state.application + ':' + accessEnvironment" :can-preview="canPreviewAccess" :can-submit="canSubmitAccess"
-            :applications="RUNTIME_APPLICATIONS" :default-application-code="state.application"
+            :applications="state.applications" :default-application-code="state.application"
             :default-environment="accessEnvironment" :reconnect-on-open="true" trigger-label="检查接入与许可接线"
             @toast="emit('toast', $event)" @completed="controller.invalidate()" />
           <p v-if="accessSuggested && !canPreviewAccess" class="runtime-note">需要应用查看权限才能核对接入任务，请联系应用管理员。</p>
