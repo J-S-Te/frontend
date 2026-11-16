@@ -282,67 +282,67 @@ const canSubmitSubsystemAccess = computed(() => hasPermission('platform:applicat
 
 const settingsTabs = [
   {
-    key: 'licenses', label: '商业授权', icon: 'security', tone: 'blue',
+    key: 'licenses', label: '商业授权', icon: 'nav-license', tone: 'blue',
     description: '核对部署身份、导入签名许可证并追溯授权变更。',
     capabilities: ['签发申请', '授权期限', '验签预览', '导入审计'],
     permissions: PLATFORM_SETTINGS_SECTION_PERMISSIONS.licenses,
   },
   {
-    key: 'applications', label: '应用目录', icon: 'dashboard', tone: 'cyan',
+    key: 'applications', label: '应用目录', icon: 'nav-applications', tone: 'cyan',
     description: '新增、设置、更新或下线业务子系统，并维护统一登录部署边界。',
     capabilities: ['新增接入', '应用设置', '环境更新', '登录目标', '安全下线'],
     permissions: PLATFORM_SETTINGS_SECTION_PERMISSIONS.applications,
   },
   {
-    key: 'base', label: '平台基础信息', icon: 'settings', tone: 'blue',
+    key: 'base', label: '平台基础信息', icon: 'nav-platform', tone: 'blue',
     description: '维护平台名称与基础展示信息。',
     capabilities: ['平台名称', '平台简称'],
     permissions: PLATFORM_SETTINGS_SECTION_PERMISSIONS.base,
   },
   {
-    key: 'access', label: '对外访问', icon: 'globe', tone: 'blue',
+    key: 'access', label: '对外访问', icon: 'nav-globe', tone: 'blue',
     description: '配置统一前端的公开地址与 OAuth HTTP 回调策略。',
     capabilities: ['公开地址', 'HTTP 回调', '应用配置'],
     permissions: PLATFORM_SETTINGS_SECTION_PERMISSIONS.access,
   },
   {
-    key: 'iam', label: '身份、组织与授权', icon: 'organization', tone: 'violet',
+    key: 'iam', label: '身份、组织与授权', icon: 'nav-organization', tone: 'violet',
     description: '按组织归属、岗位职责、标准岗位模板和个人例外分层管理。',
     capabilities: ['新增员工', '组织与岗位', '任职关系', '岗位授权模板', '个人例外'],
     permissions: PLATFORM_SETTINGS_SECTION_PERMISSIONS.iam,
   },
   {
-    key: 'personnel', label: '人员异动中心', icon: 'organization', tone: 'violet',
+    key: 'personnel', label: '人员异动中心', icon: 'nav-personnel-change', tone: 'violet',
     description: '由管理员集中配置晋升、降职、调岗、离职和复职，并跟踪权限影响与生效结果。',
     capabilities: ['管理员配置', '权限预览', '未来生效', '执行记录'],
     permissions: PLATFORM_SETTINGS_SECTION_PERMISSIONS.iam,
   },
   {
-    key: 'notify', label: '通知中心', icon: 'bell', tone: 'orange',
+    key: 'notify', label: '通知中心', icon: 'nav-notifications', tone: 'orange',
     description: '查看平台消息，并维护通知模板与投递记录。',
     capabilities: ['站内通知', '通知模板', '投递记录'],
     permissions: PLATFORM_SETTINGS_SECTION_PERMISSIONS.notify,
   },
   {
-    key: 'security', label: '安全设置', icon: 'shield', tone: 'red',
+    key: 'security', label: '安全设置', icon: 'nav-security', tone: 'red',
     description: '配置登录安全、会话超时和全局退出策略。',
     capabilities: ['登录安全', '会话策略', '超时退出'],
     permissions: PLATFORM_SETTINGS_SECTION_PERMISSIONS.security,
   },
   {
-    key: 'dict', label: '字典管理', icon: 'dashboard', tone: 'slate',
+    key: 'dict', label: '字典管理', icon: 'nav-dictionary', tone: 'slate',
     description: '维护各业务模块共用的稳定编码、展示名称和可选值。',
     capabilities: ['字典定义', '字典项', '启停与排序'],
     permissions: PLATFORM_SETTINGS_SECTION_PERMISSIONS.dict,
   },
   {
-    key: 'config', label: '配置中心', icon: 'settings', tone: 'cyan',
+    key: 'config', label: '配置中心', icon: 'nav-settings', tone: 'cyan',
     description: '维护应用配置草稿并发布不可变版本。',
     capabilities: ['命名空间', '配置草稿', '版本发布'],
     permissions: PLATFORM_SETTINGS_SECTION_PERMISSIONS.config,
   },
   {
-    key: 'jobs', label: '异步任务', icon: 'audit', tone: 'orange',
+    key: 'jobs', label: '异步任务', icon: 'nav-jobs', tone: 'orange',
     description: '查询、重试和重跑平台异步任务；业务文件仍在对应子系统中上传和下载。',
     capabilities: ['任务查询', '失败重试', '取消与重跑'],
     permissions: PLATFORM_SETTINGS_SECTION_PERMISSIONS.jobs,
@@ -373,7 +373,7 @@ const hasAnySettingsOrAuditPermission = computed(() => canOpenSettings.value || 
 const navGroups = computed(() => [
   {
     items: [
-      { key: 'portal', label: '返回子系统门户', icon: 'dashboard', itemClass: 'console-nav-item--portal', anchor: 'subsystem-portal' },
+      { key: 'portal', label: '返回子系统门户', icon: 'nav-portal', itemClass: 'console-nav-item--portal', anchor: 'subsystem-portal' },
     ],
   },
   {
@@ -382,7 +382,7 @@ const navGroups = computed(() => [
       {
         key: 'settings',
         label: '系统设置',
-        icon: 'settings',
+        icon: 'nav-settings',
         active: currentView.value === 'settings',
         expanded: currentView.value === 'settings',
         visible: canOpenSettings.value,
@@ -395,7 +395,7 @@ const navGroups = computed(() => [
           active: currentView.value === 'settings' && activeSettingsTab.value === tab.key,
         }))),
       },
-      { key: 'audit', label: '审计日志', icon: 'audit', note: '只读', active: currentView.value === 'audit', visible: canViewAudit.value },
+      { key: 'audit', label: '审计日志', icon: 'nav-audit', note: '只读', active: currentView.value === 'audit', visible: canViewAudit.value },
     ],
   },
 ])
