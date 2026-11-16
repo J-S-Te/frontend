@@ -505,7 +505,7 @@
 }
 
 /* —— 侧栏：224px 深色导航，左描边 active，与原型逐项对齐 —— */
-.da-sidebar { width: 224px; color: var(--da-sidebar-text); background: var(--da-sidebar-bg); }
+.da-sidebar { width: 224px; overflow-x: hidden; color: var(--da-sidebar-text); background: var(--da-sidebar-bg); }
 .da-brand { height: auto; padding: 20px 20px 14px; gap: 10px; border-bottom: 1px solid var(--da-sidebar-line); }
 .da-brand-dot { width: 10px; height: 10px; flex: 0 0 auto; border-radius: 50%; background: var(--da-blue-light); }
 .da-brand b { color: var(--da-on-sidebar); font-size: var(--da-fs-15); font-weight: 700; letter-spacing: 0; }

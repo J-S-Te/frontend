@@ -157,7 +157,10 @@ watch(dashboardEmbedEnabled, (enabled) => {
 })
 
 const currentMeta = computed(() => pageMeta[section.value] || pageMeta.overview)
-const currentUserName = computed(() => loginUsername(me.value))
+const currentUserName = computed(() => {
+  const displayName = typeof me.value?.display_name === "string" ? me.value.display_name.trim() : ""
+  return displayName || loginUsername(me.value)
+})
 const currentUserRole = computed(() => {
   const roles = (me.value?.roles || []).map((role) => ROLE_LABELS[role] || role)
   return roles.join(" / ") || "看板用户"
