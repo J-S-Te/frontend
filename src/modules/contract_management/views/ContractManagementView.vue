@@ -691,6 +691,8 @@ const isLoggingOut = ref(false)
 let toastTimer = 0
 let approvalRealtimeTimer = 0
 let approvalRealtimeBusy = false
+// 显式写后刷新如果撞上轮询，不能被静默丢弃；当前轮结束后补跑一次。
+let approvalRealtimePending = false
 let signingRealtimeTimer = 0
 let signingRealtimeBusy = false
 let contractDetailSequence = 0
@@ -1546,12 +1548,13 @@ async function waitForInitiatedApproval(approvalID) {
 // 审批命令成功后，除审批详情/待办外还要同步合同台账、统计、签署等受影响区域。
 // 台账读取不进入页面级 loading，旧内容保持可见；读取失败由各区域自己的错误态承担。
 async function refreshApprovalMutation() {
-  await refreshApprovalRealtime()
+  await refreshApprovalRealtime({ queueIfBusy: true })
   void loadBusinessData()
 }
 
-async function refreshApprovalRealtime() {
-  if (approvalRealtimeBusy || !session.value || activeSection.value !== 'approvals' || document.visibilityState !== 'visible') return
+async function refreshApprovalRealtime({ queueIfBusy = false } = {}) {
+  if (!session.value || activeSection.value !== 'approvals' || document.visibilityState !== 'visible') return
+  if (approvalRealtimeBusy) { if (queueIfBusy) approvalRealtimePending = true; return }
   approvalRealtimeBusy = true
   // 轮询读取的作用域票据：组件卸载（onScopeDispose）后迟到的列表/待办/详情响应不得再回写组件状态。
   const ticket = approvalRealtimeScope.begin('APPROVAL_REALTIME')
@@ -1581,6 +1584,11 @@ async function refreshApprovalRealtime() {
     }
   } finally {
     approvalRealtimeBusy = false
+    // 写命令完成时若轮询正在读，补一次，确保审批详情/待办不会停留在旧快照。
+    if (approvalRealtimePending) {
+      approvalRealtimePending = false
+      void refreshApprovalRealtime()
+    }
   }
 }
 
