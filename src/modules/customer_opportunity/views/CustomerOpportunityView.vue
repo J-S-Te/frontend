@@ -160,6 +160,8 @@ const activeSection = computed(() => sections.has(route.params.section) ? route.
 const sectionTitle = computed(() => ({ customers: '客户管理', opportunities: '商机管理', presale: '售前技术支持', notifications: '个人通知中心', 'credit-approvals': '信用审批待办', 'credit-rules': '信用规则管理' })[activeSection.value])
 const mobileMenuOpen = ref(false)
 const loading = ref(false)
+// 写后同步使用独立状态：保留当前列表 Dom，避免整页三态闸门闪一下。
+const refreshing = ref(false)
 const currentLoadSequence = ref(0)
 const actionLoading = ref(false)
 const error = ref('')
@@ -1127,12 +1129,16 @@ function setOpportunityCustomerKeyword(value) {
 
 // reportError=false 供写操作成功后的刷新链使用：读取失败只向调用方返回 false，
 // 由调用方给出“已保存，最新数据读取失败”类准确提示，不误报为操作失败。
-async function loadCurrent({ reportError = true } = {}) {
+async function loadCurrent({ reportError = true, background = false } = {}) {
   // 切换栏目或筛选时旧请求不会被主动取消，因此用递增序号与栏目快照共同判定
   // 响应归属。只有当前栏目最新一次请求可以写入列表和 loading 状态。
+  // background=true 只用于写操作成功后的同步：不进入骨架屏、不清空旧行，
+  // 成功返回后原地替换；失败保留旧行并显示新的读取错误。
   const sequence = ++currentLoadSequence.value
   const section = activeSection.value
-  loading.value = true; error.value = ''; listError.value = ''
+  if (background) refreshing.value = true
+  else loading.value = true
+  error.value = ''; listError.value = ''
   let loaded = false
   try {
     if (section === 'customers') {
@@ -1141,8 +1147,7 @@ async function loadCurrent({ reportError = true } = {}) {
 	  // 请求失败后也不能回显上一账号或上一授权修订下的客户列表。
 	  // 分页条不在这里预写页码/总数：请求进行中由 loading 显示“正在加载…”，
 	  // 否则会在翻到第 3 页或点“查询”时先闪一下“第 1 页，共 0 条”。
-	  customers.value = []
-	  page.total = 0
+	  if (!background) { customers.value = []; page.total = 0 }
 	  await syncCustomerURL()
       const result = await listCustomers(customerAPIParams(customerFilters, page.number, page.size))
       if (sequence !== currentLoadSequence.value || activeSection.value !== section) return
@@ -1159,7 +1164,7 @@ async function loadCurrent({ reportError = true } = {}) {
         board.value = result || []
         void resolveOwnerNames(board.value.flatMap((column) => column?.items || []).map((item) => item?.owner_user_id))
       } else {
-        opportunities.value = []
+        if (!background) opportunities.value = []
         const result = await listOpportunities({ keyword: filters.keyword, status: filters.status, stage: filters.stage, page: page.number, page_size: page.size })
         if (sequence !== currentLoadSequence.value || activeSection.value !== section) return
         opportunities.value = result?.items || []; page.total = Number(result?.total || 0)
@@ -1173,7 +1178,7 @@ async function loadCurrent({ reportError = true } = {}) {
       // 请求作用域票据绑定当前视图/分页/筛选：翻页、改筛选或重查后，旧列表响应整体失效。
       const listTicket = presaleListScope.begin(`PRESALE_LIST:${presaleView.value}:${presalePage.number}:${presalePage.size}:${stableQuery(params)}`)
       if (presaleView.value === 'board') {
-        presaleBoard.value = []
+        if (!background) presaleBoard.value = []
         const result = await getPresaleBoard({ ...params, column_limit: presaleColumnLimit.value })
         if (sequence !== currentLoadSequence.value || activeSection.value !== section || !presaleListScope.isCurrent(listTicket)) return
         presaleBoard.value = result?.columns || []
@@ -1181,7 +1186,7 @@ async function loadCurrent({ reportError = true } = {}) {
         presaleColumnLimit.value = Number(result?.column_limit || presaleColumnLimit.value)
         presales.value = []; presalePage.total = 0
       } else {
-        presales.value = []; presalePage.total = 0
+        if (!background) { presales.value = []; presalePage.total = 0 }
         const result = await listPresaleRequests({ ...params, page: presalePage.number, page_size: presalePage.size })
         if (sequence !== currentLoadSequence.value || activeSection.value !== section || !presaleListScope.isCurrent(listTicket)) return
         presales.value = result?.items || []
@@ -1202,7 +1207,7 @@ async function loadCurrent({ reportError = true } = {}) {
   } catch (value) {
     // 列表在请求开始时就已清空，读取失败时屏幕上没有这些行：分页条必须同步成空结果，
     // 否则会残留上一次成功加载的“第 N 页，共 M 条”。这里发生在请求结束之后，不产生闪烁。
-    if (sequence === currentLoadSequence.value && activeSection.value === section
+    if (!background && sequence === currentLoadSequence.value && activeSection.value === section
       && (section === 'customers' || (section === 'opportunities' && !boardMode.value))) {
       Object.assign(renderedPage, { number: 1, size: page.size, total: 0 })
     }
@@ -1212,7 +1217,10 @@ async function loadCurrent({ reportError = true } = {}) {
       listError.value = reportError ? error.value : formatCRMError(value, { message: subsystemAccessMessage(value, '列表读取失败，请稍后重试。') })
     }
   } finally {
-    if (sequence === currentLoadSequence.value) loading.value = false
+    if (sequence === currentLoadSequence.value) {
+      if (background) refreshing.value = false
+      else loading.value = false
+    }
   }
   return loaded
 }
@@ -1435,7 +1443,7 @@ async function submitPresaleFromList() {
   notifyWithReference('售前申请已提交，已返回申请列表。', value?.request_no || '')
   presalePage.number = 1
   // 任务 B：受理已成功；列表刷新失败只提示读取失败，不误报为提交失败。
-  if (!(await loadCurrent({ reportError: false }))) {
+  if (!(await loadCurrent({ reportError: false, background: true }))) {
     error.value = '售前申请已提交，但最新列表读取失败，请刷新列表核对结果。'
   }
 }
@@ -1898,7 +1906,7 @@ async function submitCustomerMerge() {
     const counts = result.migrated_counts || {}
     notice.value = `客户合并完成：迁移 ${counts.contacts || 0} 个联系人、${counts.followups || 0} 条沟通、${counts.opportunities || 0} 个商机和 ${counts.portal_invites || 0} 条邀请。`
     customerStats.loadedAt = 0
-    await loadCurrent()
+    await loadCurrent({ background: true })
   } catch (value) {
     if (value?.code === 'CRM_CUSTOMER_MERGE_BLOCKED') {
       const blockers = value.details?.blockers || []
@@ -2299,7 +2307,7 @@ async function deleteRead() {
     danger: true,
   })
   if (!confirmed) return
-  try { await deleteReadNotifications(); await loadCurrent() } catch (value) { showError(value) }
+  try { await deleteReadNotifications(); await loadCurrent({ background: true }) } catch (value) { showError(value) }
 }
 
 function notificationContext(item) {
@@ -2468,7 +2476,7 @@ async function submitOwner() {
   try {
     selectedOpportunityOwnerOrgID.value = ownerForm.owner_org_id
     selectedOpportunity.value = { ...(await changeOpportunityOwner(selectedOpportunity.value.id, { ...ownerForm, version: selectedOpportunity.value.version })), owner_org_id: '基础平台组织' }
-    ownerDialog.value = false; notice.value = '负责人已变更，事务通知事件已生成。'; await openOpportunity(selectedOpportunity.value.id); await loadCurrent()
+    ownerDialog.value = false; notice.value = '负责人已变更，事务通知事件已生成。'; await openOpportunity(selectedOpportunity.value.id); await loadCurrent({ background: true })
   } catch (value) { showError(value) }
 }
 async function submitTeam() {
@@ -2476,7 +2484,7 @@ async function submitTeam() {
     const members = teamForm.members.map((item) => ({ user_id: item.user_id, role: item.role }))
     const team = await replaceOpportunityMembers(selectedOpportunity.value.id, { members, reason: teamForm.reason, version: selectedOpportunity.value.version })
     selectedOpportunity.value.version = team.version; opportunityTeam.value = team.members || []; opportunityTeamDirectoryAvailable.value = team.directory_available !== false
-    teamDialog.value = false; notice.value = '当前商机团队已替换，历史变更已写审计。'; await openOpportunity(selectedOpportunity.value.id); await loadCurrent()
+    teamDialog.value = false; notice.value = '当前商机团队已替换，历史变更已写审计。'; await openOpportunity(selectedOpportunity.value.id); await loadCurrent({ background: true })
   } catch (value) { showError(value) }
 }
 async function loadPresaleCore(id, { clearResult = true, reportError = true } = {}) {
@@ -2710,7 +2718,7 @@ async function refreshAfterPresaleWrite(id, savedMessage = '操作已保存，�
     const loaded = await loadPresaleCore(id, { clearResult: false, reportError: false })
     if (loaded) await Promise.all([refreshPresaleActions(id), refreshPresaleTimeline(id)])
     else refreshed = false
-    if (!(await loadCurrent({ reportError: false }))) refreshed = false
+    if (!(await loadCurrent({ reportError: false, background: true }))) refreshed = false
     if (selectedOpportunity.value) await loadOpportunityPresales(opportunityPresalePage.number)
   } catch {
     refreshed = false
@@ -3027,7 +3035,7 @@ async function submitCustomer() {
       // 所以必须留在本次提示里，用户可以直接复制。
       notifyWithReference('客户创建成功。', created?.customer_no || '')
     }
-    customerDialog.value = false; customerStats.loadedAt = 0; await loadCurrent()
+    customerDialog.value = false; customerStats.loadedAt = 0; await loadCurrent({ background: true })
   } catch (value) { showError(value) } finally { actionLoading.value = false }
 }
 // 用途：为客户作废或恢复收集原因并提交版本受控的状态变更。
@@ -3049,7 +3057,7 @@ function changeCustomerStatus(action) {
           : await restoreCustomer(customer.id, { version: customer.version, reason })
         notice.value = voiding ? '客户已作废。' : '客户已恢复。'
         customerStats.loadedAt = 0
-        await loadCurrent()
+        await loadCurrent({ background: true })
       } catch (value) { showError(value) }
     },
   })
@@ -3084,7 +3092,7 @@ async function submitOpportunity() {
       createMutationRetries.confirmSuccess('opportunity', retry.key)
       notice.value = '商机创建成功。'
     }
-    opportunityDialog.value = false; await loadCurrent()
+    opportunityDialog.value = false; await loadCurrent({ background: true })
   }
   catch (value) { showError(value) } finally { actionLoading.value = false }
 }
@@ -3107,7 +3115,7 @@ function changeOpportunityStatus(action) {
           : await restoreOpportunity(opportunity.id, { version: opportunity.version, reason })
         selectedOpportunity.value = { ...statusResult, owner_org_id: '基础平台组织' }
         notice.value = voiding ? '商机已作废。' : '商机已恢复。'
-        await loadCurrent()
+        await loadCurrent({ background: true })
       } catch (value) { showError(value) }
     },
   })
@@ -3129,7 +3137,7 @@ async function submitStage() {
     }
     if (stageForm.lost_reason) payload.lost_reason = stageForm.lost_reason
     selectedOpportunity.value = { ...(await changeOpportunityStage(selectedOpportunity.value.id, payload)), owner_org_id: '基础平台组织' }
-    stageDialog.value = false; notice.value = '阶段已生效并写入历史。'; await openOpportunity(selectedOpportunity.value.id); await loadCurrent()
+    stageDialog.value = false; notice.value = '阶段已生效并写入历史。'; await openOpportunity(selectedOpportunity.value.id); await loadCurrent({ background: true })
   } catch (value) { showError(value) }
 }
 // 用途：补全当前合同、人工赢单依据或丢单原因待办。
@@ -3144,7 +3152,7 @@ async function submitTerminal() {
     }
     if (selectedOpportunity.value.terminal_pending_type === 'LOST_REASON') payload.lost_reason = terminalForm.lost_reason
     selectedOpportunity.value = { ...(await completeOpportunityTerminalTodo(selectedOpportunity.value.id, payload)), owner_org_id: '基础平台组织' }
-    terminalDialog.value = false; notice.value = '终态待办已补全。'; await openOpportunity(selectedOpportunity.value.id); await loadCurrent()
+    terminalDialog.value = false; notice.value = '终态待办已补全。'; await openOpportunity(selectedOpportunity.value.id); await loadCurrent({ background: true })
   } catch (value) { showError(value) }
 }
 // 跟进/沟通时间与工时起止都是只有“提交”没有“回填”的 datetime-local：
@@ -3163,7 +3171,7 @@ async function submitCustomerFollowup() {
   try {
     const payload = { type: customerFollowupForm.type, content: customerFollowupForm.content, followed_at: followupInstant(customerFollowupForm.followed_at) }
     if (customerFollowupForm.next_follow_at) payload.next_follow_at = followupInstant(customerFollowupForm.next_follow_at)
-    await createCustomerFollowup(selectedCustomer.value.id, payload); customerFollowupDialog.value = false; notice.value = '客户沟通记录已添加。'; await openCustomer(selectedCustomer.value.id); await loadCurrent()
+    await createCustomerFollowup(selectedCustomer.value.id, payload); customerFollowupDialog.value = false; notice.value = '客户沟通记录已添加。'; await openCustomer(selectedCustomer.value.id); await loadCurrent({ background: true })
   } catch (value) { showError(value) }
 }
 async function submitPresale({ openDetail = true, refreshList = true } = {}) {
@@ -3204,7 +3212,7 @@ async function submitPresale({ openDetail = true, refreshList = true } = {}) {
       presaleReopenRequest.value = null
       presaleCreatePage.value = false
       // 任务 B：重开已成功（HTTP 200）；其后列表/详情刷新失败只提示读取失败，不误报为提交失败。
-      if (refreshList && !(await loadCurrent({ reportError: false }))) {
+      if (refreshList && !(await loadCurrent({ reportError: false, background: true }))) {
         error.value = '申请已重新发起，但最新数据读取失败，请刷新列表核对结果。'
       }
       if (openDetail && !(await openPresale(reopened.id, { reportError: false }))) {
@@ -3225,7 +3233,7 @@ async function submitPresale({ openDetail = true, refreshList = true } = {}) {
     presaleMutationRetries.confirmSuccess('create', opportunityID, retry.key)
     notifyWithReference('售前申请已提交；商机阶段保持不变。', value?.request_no || '')
     // 任务 B：受理已成功（HTTP 200）；其后列表/详情刷新失败只提示读取失败，不误报为提交失败。
-    if (refreshList && !(await loadCurrent({ reportError: false }))) {
+    if (refreshList && !(await loadCurrent({ reportError: false, background: true }))) {
       error.value = '售前申请已提交，但最新数据读取失败，请刷新列表核对结果。'
     }
     if (openDetail && !(await openPresale(value.id, { reportError: false }))) {

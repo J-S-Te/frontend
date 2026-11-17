@@ -14,6 +14,7 @@ const props = defineProps({ permissions: { type: Array, default: () => [] } })
 
 const sources = ref([])
 const loading = ref(true)
+const refreshing = ref(false)
 const error = ref(null)
 const triggering = ref(null)
 const triggeringAll = ref(false)
@@ -55,8 +56,9 @@ const statusTone = (value) => {
   return "neutral"
 }
 
-async function load() {
-  loading.value = true
+async function load({ background = false } = {}) {
+  if (background) refreshing.value = true
+  else loading.value = true
   error.value = null
   try {
     sources.value = await listSources()
@@ -64,7 +66,8 @@ async function load() {
     error.value = formatDataAnalysisError(err, { fallback: "数据源状态加载失败，请稍后刷新。" })
     return false
   } finally {
-    loading.value = false
+    if (background) refreshing.value = false
+    else loading.value = false
   }
   return true
 }
@@ -76,7 +79,7 @@ async function onTrigger(id) {
   try {
     const result = await triggerSource(id)
     notice.value = result?.note || `数据源 ${id} 已触发同步`
-    if (!await load()) error.value = "同步任务已入队，但数据源列表刷新失败。请稍后刷新查看进度，无需重复触发。"
+    if (!await load({ background: true })) error.value = "同步任务已入队，但数据源列表刷新失败。请稍后刷新查看进度，无需重复触发。"
   } catch (err) {
     error.value = formatDataAnalysisError(err, { fallback: "触发同步失败，请稍后重试。" })
   } finally {
@@ -92,7 +95,7 @@ async function onTriggerAll() {
   try {
     const result = await triggerAllSources()
     notice.value = `${result?.note || "批量同步已入队"}：${result?.queued || 0} 个已入队，${result?.skipped || 0} 个跳过（未启用或已有任务）`
-    if (!await load()) error.value = "批量同步任务已入队，但数据源列表刷新失败。请稍后刷新查看进度，无需重复触发。"
+    if (!await load({ background: true })) error.value = "批量同步任务已入队，但数据源列表刷新失败。请稍后刷新查看进度，无需重复触发。"
   } catch (err) {
     error.value = formatDataAnalysisError(err, { fallback: "批量触发同步失败，请稍后重试。" })
   } finally {

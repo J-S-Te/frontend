@@ -252,8 +252,12 @@ test('顶栏右上角只剩通知铃铛与账号头像，账号名与退出入�
   assert.match(source, /new Set\(roles\.map\(\(role\) => names\.get\(role\) \|\| role\)\.filter\(Boolean\)\)\]\.join\('、'\) \|\| '未分配角色'/)
   // 目录是静态清单：随工作区加载预热（不 await，失败只影响副标题文案，不阻塞首屏）。
   // 写后随动刷新经 reportError=false 走保存/刷新分离（refreshAfterWrite）。
-  const loadWorkspaceBody = source.match(/async function loadWorkspace\(\{ reportError = true \} = \{\}\)[\s\S]*?\n\}/)
+  const loadWorkspaceBody = source.match(/async function loadWorkspace\(\{ reportError = true, background = false \} = \{\}\)[\s\S]*?\n\}/)
   assert.ok(loadWorkspaceBody, '工作区加载函数应存在')
+  // 写后只做后台同步，不能重新卸载工作区造成整页闪白。
+  assert.match(loadWorkspaceBody[0], /if \(background\) \{ refreshing\.value = true; loadError\.value = '' \}/)
+  assert.match(source, /await loadWorkspace\(\{ reportError: false, background: true \}\)/)
+  assert.match(source, /<ListState v-if="!workspaceReady && \(loading \|\| sectionExtrasLoading\)"/)
   assert.match(loadWorkspaceBody[0], /^\s*loadApplicationRoles\(\)$/m)
   // 样式：新头像/账号行存在，旧顶栏用户块彻底移除（避免留下死规则）。
   assert.match(styles, /\.pm-topbar-avatar,\s*\n\.pm-avatar \{/)

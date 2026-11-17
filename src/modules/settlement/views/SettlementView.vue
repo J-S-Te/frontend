@@ -419,6 +419,7 @@ const dunningKpis = computed(() => {
   ];
 });
 const loading = ref(true),
+  initialized = ref(false),
   error = ref(""),
   isLoggingOut = ref(false);
 
@@ -864,6 +865,7 @@ async function load() {
   taskStatusKnown.value = active.value === "tasks" && failures.length === 0;
   if (failures.length) error.value = [...new Set(failures)].join("；");
   loading.value = false;
+  initialized.value = true;
   return failures.length === 0;
 }
 // 用途：选择回款匹配建议进入核销。
@@ -1042,7 +1044,7 @@ watch(invoiceDetailID, load);
         <OperationToast :message="message" :reference="messageReference" />
         <!-- 失败必须带重试，加载不再借用红色错误文案。 -->
         <ErrorState v-if="error" :error="error" title="结算数据读取失败" @retry="load" />
-        <LoadingState v-if="loading" title="正在读取结算数据…" />
+        <LoadingState v-if="loading && !initialized" title="正在读取结算数据…" />
         <template v-else-if="active">
           <SettlementRecognitionPanel v-if="active === 'recognition' && can('settlement.recognition.read')" :api="recognitionAPI" :can="can" :session="settlementSession" :initial-claim="String(route.query.claim_id || '')" />
           <SettlementNativeFinancialPanel

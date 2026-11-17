@@ -26,7 +26,7 @@ function functionsFrom(source, names, scope) {
  */
 function feedbackHarness() {
   const scope = {
-    loading: ref(false), error: ref(''), notice: ref(''), session: ref({ customer_id: 1 }), isPortalSuperAdmin: ref(false),
+    loading: ref(false), refreshing: ref(false), error: ref(''), notice: ref(''), session: ref({ customer_id: 1 }), isPortalSuperAdmin: ref(false),
     capabilitiesLoaded: true, section: ref('feedback'), projects: ref([]), feedbacks: ref([]), feedbackNotifications: ref([]),
     feedbackNotificationGeneration: 0, feedbackNotificationLoading: ref(false),
     feedbackNotificationError: ref(''), feedbackNotificationUnreadCount: ref(null), feedbackPage: ref(1), feedbackTotal: ref(0), feedbackListError: ref(''),

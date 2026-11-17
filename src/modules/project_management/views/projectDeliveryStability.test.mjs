@@ -44,7 +44,7 @@ function workspaceContext({ listProjectsSnapshot = async () => ({ items: [], tot
     window: { clearTimeout: () => {}, setTimeout: () => 0 },
     toastTimer: 0,
     toastMessage: ref(''), toastType: ref('success'),
-    loading: ref(true), loadError: ref('错误'), ruleConfigurationCatalogError: ref(''),
+    loading: ref(true), refreshing: ref(false), loadError: ref('错误'), ruleConfigurationCatalogError: ref(''),
     workspaceTruncated: ref(false), workspaceReady: ref(false),
     loadSectionExtras: async () => true,
     lastUpdatedAt: ref(null),
@@ -316,7 +316,7 @@ test('两个快照都未截断时关闭提示，不误报集合不完整', async
 
 test('工作区加载接线只调用快照入口，截断提示条按 workspaceTruncated 渲染', () => {
   const source = readFileSync(new URL('./ProjectManagementView.vue', import.meta.url), 'utf8')
-  const loadWorkspaceBody = source.match(/async function loadWorkspace\(\{ reportError = true \} = \{\}\)[\s\S]*?\n\}/)
+  const loadWorkspaceBody = source.match(/async function loadWorkspace\(\{ reportError = true, background = false \} = \{\}\)[\s\S]*?\n\}/)
   assert.ok(loadWorkspaceBody, '工作区加载函数应存在')
   assert.match(loadWorkspaceBody[0], /listProjectsSnapshot\(\)/)
   assert.match(loadWorkspaceBody[0], /listServiceItemsSnapshot\(\)/)

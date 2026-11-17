@@ -8,10 +8,10 @@ const dialogPath = new URL('./components/CustomerEditorDialog.vue', import.meta.
 
 test('客户列表重新查询前清空旧数据，失败时不会回显上一授权范围的客户', async () => {
   const source = await readFile(viewPath, 'utf8')
-  const clearIndex = source.indexOf('customers.value = []\n\t  page.total = 0')
+  const clearIndex = source.indexOf('if (!background) { customers.value = []; page.total = 0 }')
   const requestIndex = source.indexOf('listCustomers(customerAPIParams(customerFilters, page.number, page.size))')
 
-  assert.ok(clearIndex >= 0, '客户查询前必须清空旧列表和总数')
+  assert.ok(clearIndex >= 0, '非背景查询前必须清空旧列表和总数')
   assert.ok(requestIndex > clearIndex, '必须先清空旧列表，再请求当前会话可见客户')
 })
 

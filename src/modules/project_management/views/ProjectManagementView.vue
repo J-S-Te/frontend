@@ -370,6 +370,8 @@ const toastMessage = ref('')
 const toastType = ref('success')
 const isLoggingOut = ref(false)
 const loading = ref(true)
+// 写后同步与手动刷新在后台进行：不卸载已渲染的工作区，避免整页闪一下。
+const refreshing = ref(false)
 const loadError = ref('')
 // 工作区快照走 all=1（服务端上限 500 行）；truncated 只驱动提示条，不改变整体替换逻辑。
 const workspaceTruncated = ref(false)
@@ -2131,11 +2133,12 @@ function retryPersonnelNames() { void personnelNames.retry() }
 // 用途：刷新核心原子快照，再读取当前已授权栏目的依赖。
 // 参数：reportError 控制读取失败是否显示为工作区错误。
 // 返回值：读取完成；写后刷新失败仍交由既有调用方区分已保存结果。
-async function loadWorkspace({ reportError = true } = {}) {
+async function loadWorkspace({ reportError = true, background = false } = {}) {
   const ticket = workspaceScope.begin('WORKSPACE')
-  workspaceReady.value = false
-  loading.value = true
-  loadError.value = ''
+  // background=true 用于写后/手动增量同步：保留旧快照和 Dom，只替换成功返回的数据。
+  // 只有首次加载才进入骨架屏；错误态也只在首次加载时清空。
+  if (background) { refreshing.value = true; loadError.value = '' }
+  else { workspaceReady.value = false; loading.value = true; loadError.value = '' }
   ruleConfigurationCatalogError.value = ''
   let loaded = false
   try {
@@ -2190,8 +2193,11 @@ async function loadWorkspace({ reportError = true } = {}) {
     if (!reportError) throw error
     loadError.value = subsystemAccessMessage(error, '项目管理数据加载失败。')
   } finally {
-    // 只有仍持有当前票据的请求才能结束 loading，避免旧请求的 finally 关闭新请求的加载态。
-    if (workspaceScope.isCurrent(ticket)) loading.value = false
+    // 只有仍持有当前票据的请求才能结束本次加载态，避免旧请求关闭新请求。
+    if (workspaceScope.isCurrent(ticket)) {
+      if (background) refreshing.value = false
+      else loading.value = false
+    }
   }
   // 设备目录、人员姓名与 SLA 明细都不在首屏预读：设备目录在进入相关区域/打开候选
   // 选择器时确认，姓名只在出现未解析 ID 时合并读取，SLA 明细只在监控区域读取。
@@ -2205,10 +2211,15 @@ async function loadWorkspace({ reportError = true } = {}) {
 // 页面保留旧快照，由用户手动刷新核对。
 async function refreshAfterWrite() {
   try {
-    await loadWorkspace({ reportError: false })
+    await loadWorkspace({ reportError: false, background: true })
   } catch {
     showToast('已保存，但最新数据读取失败；请稍后点击刷新核对，勿凭旧页面重复提交。', 'warning')
   }
+}
+
+// 手动刷新已有工作区时也走后台同步，避免点击刷新整页闪一下。
+function refreshWorkspace() {
+  return loadWorkspace({ background: workspaceReady.value })
 }
 
 // refreshSelectedFieldEvidence 拉取当前服务项的现场证据判定（BIZ-PROJECT-06）。
@@ -3701,7 +3712,7 @@ onBeforeUnmount(() => {
       <div class="pm-page">
         <PageHead eyebrow="项目运营" data-first-run-anchor="subsystem-title" :title="currentMeta[0]" :description="activeSection === 'notifications' ? currentMeta[1] : `${currentMeta[1]} · 数据更新于 ${lastUpdatedLabel}`">
           <template #actions>
-            <button v-if="activeSection !== 'notifications'" class="pm-button" :disabled="loading" @click="loadWorkspace"><ConsoleIcon name="reset" />{{ loading ? '加载中' : '刷新' }}</button>
+            <button v-if="activeSection !== 'notifications'" class="pm-button" :disabled="loading || refreshing" @click="refreshWorkspace"><ConsoleIcon name="reset" />{{ loading ? '加载中' : (refreshing ? '同步中' : '刷新') }}</button><span v-if="refreshing" class="pm-sync-status" role="status">正在同步最新状态…</span>
             <button v-if="activeSection === 'projects'" class="pm-button" @click="exportProjects"><ConsoleIcon name="export" />导出</button>
             <button v-if="activeSection === 'projects' && canCreateProject && nativeProjectEnabled" class="pm-button" @click="nativeCreateOpen = true">＋ 原生委托项目</button>
             <button v-if="canManageActiveConfig && isVisibleConfigSection" class="pm-button primary" @click="openConfigCreate">{{ isStandardChangeSection ? '＋ 登记标准变更' : '＋ 新建规则' }}</button><button v-if="activeSection === 'projects' && canCreateProject" class="pm-button primary" @click="openCreateProject">＋ 新建项目</button>
@@ -3745,7 +3756,7 @@ onBeforeUnmount(() => {
           <p>{{ personnelNamesError }}<button type="button" class="pm-link" :disabled="personnelNamesLoading" @click="retryPersonnelNames">{{ personnelNamesLoading ? '读取中…' : '重试读取姓名' }}</button></p>
         </section>
 
-        <ListState v-if="loading || sectionExtrasLoading" loading loading-title="正在读取当前栏目数据…" />
+        <ListState v-if="!workspaceReady && (loading || sectionExtrasLoading)" loading loading-title="正在读取当前栏目数据…" />
         <ListState v-else-if="loadError || !workspaceReady" error-title="后端数据加载失败" :error="loadError || '工作区数据尚未确认，请重新读取。'" retry-text="重新加载" @retry="loadWorkspace" />
         <ListState v-else-if="sectionExtrasError" error-title="当前栏目数据读取失败" :error="sectionExtrasError" retry-text="重试当前栏目" @retry="loadSectionExtras" />
         <ReimbursementSpendPanel v-else-if="session && !session.permissions?.includes('project.read')" :session="session" />
@@ -3919,7 +3930,7 @@ onBeforeUnmount(() => {
             <ConsoleIcon name="info" /><b>未找到项目</b><span>可能已被删除或不在你的数据范围内。</span><button class="pm-button" @click="navigate('projects')">返回项目列表</button>
           </section>
           <template v-else>
-            <section class="pm-actions-bar"><button class="pm-button" @click="navigate('projects')"><ConsoleIcon name="reset" />返回项目列表</button><button class="pm-button" :disabled="loading" @click="loadWorkspace"><ConsoleIcon name="reset" />刷新</button></section>
+            <section class="pm-actions-bar"><button class="pm-button" @click="navigate('projects')"><ConsoleIcon name="reset" />返回项目列表</button><button class="pm-button" :disabled="loading || refreshing" @click="refreshWorkspace"><ConsoleIcon name="reset" />{{ refreshing ? '同步中…' : '刷新' }}</button></section>
             <section v-if="detailProject.source_kind === 'NATIVE' && canReadNativeProjectScope && (nativeProjectEnabled || nativeScopeProjectID === detailProject.id)" class="pm-panel">
               <button v-if="!nativeScopeProjectID && nativeProjectEnabled" type="button" class="pm-button"
                 :disabled="saving" @click="nativeScopeProjectID = detailProject.id">原生委托范围变更</button>

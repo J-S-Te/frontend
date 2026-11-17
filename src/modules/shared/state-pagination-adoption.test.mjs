@@ -197,7 +197,7 @@ test('失败原因与空态文案分开传：失败不会再显示成「暂无�
 
   // 结算：整页失败 / 加载走共享三态，并且能重新发起同一个 load。
   assert.match(VIEWS.settlement, /<ErrorState v-if="error" :error="error" title="结算数据读取失败" @retry="load" \/>/)
-  assert.match(VIEWS.settlement, /<LoadingState v-if="loading" title="正在读取结算数据…" \/>/)
+  assert.match(VIEWS.settlement, /<LoadingState v-if="loading && !initialized" title="正在读取结算数据…" \/>/)
   assert.doesNotMatch(VIEWS.settlement, /<p v-if="loading" class="settlement-loading">/)
 })
 
