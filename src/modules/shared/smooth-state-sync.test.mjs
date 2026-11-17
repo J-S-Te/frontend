@@ -51,6 +51,12 @@ test('报销与结算只有首屏展示骨架，后续刷新保留当前分区',
   assert.match(settlement, /<LoadingState v-if="loading && !initialized"/)
 })
 
+test('合同审批成功后同步台账与统计，而不只更新审批弹窗', async () => {
+  const source = await read('contract_management/views/ContractManagementView.vue')
+  assert.match(source, /refreshApprovalRealtime: refreshApprovalMutation/)
+  assert.match(source, /async function refreshApprovalMutation\(\) \{\s*await refreshApprovalRealtime\(\)\s*void loadBusinessData\(\)/)
+})
+
 test('状态同步样式使用轻量指示和行过渡，不引入整页闪烁', async () => {
   const styles = await read('project_management/styles/project-management.css')
   assert.match(styles, /\.pm-sync-status \{/)
