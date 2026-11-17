@@ -44,7 +44,7 @@ function workspaceContext({ listProjectsSnapshot = async () => ({ items: [], tot
     window: { clearTimeout: () => {}, setTimeout: () => 0 },
     toastTimer: 0,
     toastMessage: ref(''), toastType: ref('success'),
-    loading: ref(true), refreshing: ref(false), loadError: ref('错误'), ruleConfigurationCatalogError: ref(''),
+    loading: ref(true), refreshing: ref(false), refreshWarning: ref(''), loadError: ref('错误'), ruleConfigurationCatalogError: ref(''),
     workspaceTruncated: ref(false), workspaceReady: ref(false),
     loadSectionExtras: async () => true,
     lastUpdatedAt: ref(null),

@@ -13,6 +13,10 @@ test('项目工作区写后后台同步，不使用整页骨架', async () => {
   assert.match(source, /await loadWorkspace\(\{ reportError: false, background: true \}\)/)
   assert.match(source, /<ListState v-if="!workspaceReady && \(loading \|\| sectionExtrasLoading\)"/)
   assert.match(source, /class="pm-sync-status"/)
+  // 写成功但随动刷新失败时必须有持续可见的重载入口，而不是只有一次性 Toast。
+  assert.match(source, /const refreshWarning = ref\(''\)/)
+  assert.match(source, /function retryAfterWrite\(\)/)
+  assert.match(source, /class="pm-contract-warning" role="alert"/)
 })
 
 test('客户与商机写后同步保留列表，不在后台请求时清空旧行', async () => {

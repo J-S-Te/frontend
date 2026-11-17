@@ -372,6 +372,8 @@ const isLoggingOut = ref(false)
 const loading = ref(true)
 // 写后同步与手动刷新在后台进行：不卸载已渲染的工作区，避免整页闪一下。
 const refreshing = ref(false)
+// 写成功但随动刷新失败时保留可重试入口，不能只弹一次 Toast。
+const refreshWarning = ref('')
 const loadError = ref('')
 // 工作区快照走 all=1（服务端上限 500 行）；truncated 只驱动提示条，不改变整体替换逻辑。
 const workspaceTruncated = ref(false)
@@ -2212,9 +2214,16 @@ async function loadWorkspace({ reportError = true, background = false } = {}) {
 async function refreshAfterWrite() {
   try {
     await loadWorkspace({ reportError: false, background: true })
+    refreshWarning.value = ''
   } catch {
+    refreshWarning.value = '操作已保存，但最新工作区数据读取失败。当前页面可能不是最新状态，请重新加载后再继续；不要凭旧页面重复提交。'
     showToast('已保存，但最新数据读取失败；请稍后点击刷新核对，勿凭旧页面重复提交。', 'warning')
   }
+}
+
+function retryAfterWrite() {
+  refreshWarning.value = ''
+  return refreshAfterWrite()
 }
 
 // 手动刷新已有工作区时也走后台同步，避免点击刷新整页闪一下。
@@ -3754,6 +3763,11 @@ onBeforeUnmount(() => {
         <section v-if="personnelNamesError" class="pm-contract-warning" role="alert">
           <ConsoleIcon name="info" />
           <p>{{ personnelNamesError }}<button type="button" class="pm-link" :disabled="personnelNamesLoading" @click="retryPersonnelNames">{{ personnelNamesLoading ? '读取中…' : '重试读取姓名' }}</button></p>
+        </section>
+
+        <section v-if="refreshWarning" class="pm-contract-warning" role="alert">
+          <ConsoleIcon name="info" />
+          <div><b>最新状态尚未同步</b><p>{{ refreshWarning }}<button type="button" class="pm-link" :disabled="refreshing" @click="retryAfterWrite">{{ refreshing ? '重新加载中…' : '重新加载工作区' }}</button></p></div>
         </section>
 
         <ListState v-if="!workspaceReady && (loading || sectionExtrasLoading)" loading loading-title="正在读取当前栏目数据…" />
