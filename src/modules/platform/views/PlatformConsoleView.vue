@@ -615,6 +615,8 @@ async function saveSettings() {
       version: settings.version,
     })
     if (payload) Object.assign(settings, payload)
+    // 组织名也会出现在共享外壳/侧栏；设置保存后同步平台主体，避免页面内已更新、外壳仍是旧值。
+    await refreshPrincipal().catch(() => null)
     showToast('平台基础设置已保存。')
   } catch (error) {
     settingsError.value = formatUserError(error, { fallback: '保存平台设置失败。' })

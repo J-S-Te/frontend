@@ -22,6 +22,7 @@ const MATRIX = {
   reimbursement: { file: 'reimbursement/views/ReimbursementView.vue', marker: /preserveContext/ },
   settlement: { file: 'settlement/views/SettlementView.vue', marker: /initialized/ },
   notifications: { file: 'platform/notifications/components/NotificationCenterModule.vue', marker: /await reload\(\)/ },
+  platformSettings: { file: 'platform/views/PlatformConsoleView.vue', marker: /await refreshPrincipal\(\)\.catch/ },
 }
 
 test('逐页影响面矩阵：所有可写业务页都有局部同步策略', async () => {
