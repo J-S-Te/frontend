@@ -48,6 +48,9 @@ test('报销与结算只有首屏展示骨架，后续刷新保留当前分区',
   assert.match(reimbursement, /const initialized = ref\(false\)/)
   assert.match(reimbursement, /<LoadingState v-if="loading && !initialized"/)
   assert.match(settlement, /initialized = ref\(false\)/)
+  assert.match(reimbursement, /async function load\(\{ preserveContext = false \} = \{\}\)/)
+  assert.match(reimbursement, /if \(!preserveContext\) \{\s*selectedClaimIDs\.value=\[\]/)
+  assert.match(reimbursement, /await load\(\{ preserveContext: true \}\)/)
   assert.match(settlement, /<LoadingState v-if="loading && !initialized"/)
 })
 

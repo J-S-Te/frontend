@@ -791,21 +791,26 @@ async function loadClaimOptions(ticket = loadSequence) {
 // 用途：只按当前已授权页面加载业务数据，防止跨页迟到结果覆盖。
 // 参数：无。
 // 返回值：无；错误显式呈现在对应数据区，不用空列表代替失败。
-async function load() {
+async function load({ preserveContext = false } = {}) {
   const ticket = ++loadSequence
   const current = section.value
   const changedWorkspace = workspace.value !== loadedWorkspace
   loadedWorkspace = workspace.value
   loading.value = true
-  selectedClaimIDs.value=[]
-  error.value = ''
-  sessionExpired.value = false
-  conflictSnapshot.value = null
-  validationHint.value = ''
-  listError.value = ''; dashboardError.value = ''; analyticsError.value = ''
-  archiveProjectsError.value = ''
+  // 写后刷新保留当前单据选择、成功提示和未受影响表单内容；仅切换栏目/筛选才清空上下文。
+  if (!preserveContext) {
+    selectedClaimIDs.value=[]
+    error.value = ''
+    sessionExpired.value = false
+    conflictSnapshot.value = null
+    validationHint.value = ''
+    listError.value = ''; dashboardError.value = ''; analyticsError.value = ''
+    archiveProjectsError.value = ''
+  }
   if (changedWorkspace) {
-    notice.value = ''; fieldErrors.value = []; clearForeignDetail()
+    if (!preserveContext) notice.value = ''
+    fieldErrors.value = []
+    clearForeignDetail()
     if (workspace.value !== 'claims') claimFormOpen.value = false
   }
   try {
@@ -1078,7 +1083,7 @@ async function resolvePending() {
     pending.value = runner.pending()
     if (await applyRecoveredResult(operation, result) === false) return
     notice.value = autoReturnNotice(result) || `原命令已确认：${result.id || result.claim_id || '已提交'}；请刷新查看最新状态。`
-    await load()
+    await load({ preserveContext: true })
   } catch (cause) { showError(cause) }
   finally { saving.value = false }
 }
@@ -1095,7 +1100,7 @@ async function retryPending() {
     pending.value = runner.pending()
     if (await applyRecoveredResult(operation, result) === false) return
     notice.value = autoReturnNotice(result) || '原命令结果已确认，请刷新查看最新详情。'
-    await load()
+    await load({ preserveContext: true })
   } catch (cause) { showError(cause) }
   finally { saving.value = false }
 }
@@ -1489,7 +1494,7 @@ async function saveDraft() {
     const payload = claimPayload()
     const result = await mutate(selected.value ? 'claim.update' : 'claim.create', selected.value ? `/claims/${selected.value.id}` : '/claims',
       payload, selected.value ? 'PATCH' : 'POST')
-    if (result) { await openClaim(result.id, true); await load() }
+    if (result) { await openClaim(result.id, true); await load({ preserveContext: true }) }
   } catch (cause) { showError(cause) }
 }
 
@@ -1597,7 +1602,7 @@ async function claimAction(action) {
   }
   const result = await mutate(`claim.${action}`, `/claims/${selected.value.id}/${action}`,
     { expected_version: selected.value.version })
-  if (result) { await openClaim(selected.value.id); await load() }
+  if (result) { await openClaim(selected.value.id); await load({ preserveContext: true }) }
 }
 
 // 用途：按任务轮次及任务版本执行审批动作。
@@ -1620,7 +1625,7 @@ async function approve(task, action) {
     pendingApprovalAction.value = ''
     notice.value = autoReturnNotice(result)
       || `审批动作「${approvalActionLabel(action)}」已提交，任务列表已刷新。`
-    await load()
+    await load({ preserveContext: true })
     if (approvalTask.value?.id === task.id) await openApproval(task.id)
   }
 }
@@ -1737,7 +1742,7 @@ async function registerPayment() {
       amount_minor: selected.value.payable_minor, currency: selected.value.currency,
       payee_profile_id: selected.value.payee_profile_id,
       voucher_file_ids: splitIDs(paymentForm.value.voucher_file_ids) })
-  if (result) { await openClaim(selected.value.id); payment.value = result; await load() }
+  if (result) { await openClaim(selected.value.id); payment.value = result; await load({ preserveContext: true }) }
 }
 
 // 用途：按服务端允许动作重开或作废无有效付款的待付款义务。
@@ -1753,7 +1758,7 @@ async function controlledClaimAction(action) {
   const operation = action === 'reopen' ? 'claim.reopen' : 'claim.approved_void'
   const result = await mutate(operation, `/claims/${selected.value.id}/${action}`,
     { expected_version: selected.value.version, reason: claimControlReason.value.trim() })
-  if (result) { await openClaim(result.id); await load() }
+  if (result) { await openClaim(result.id); await load({ preserveContext: true }) }
 }
 
 // 用途：读取当前单据独立付款异常事实，不代替正常付款列表。
@@ -1916,7 +1921,7 @@ async function requestReversal() {
 async function decideReversal(approve) {
   const result = await mutate('reversal.decide', `/reversal-requests/${encodeURIComponent(reversalID.value)}/decisions`,
     { expected_version: reversalVersion.value, approve, reason: reversalReason.value })
-  if (result) { await loadPaymentHistory(); await load() }
+  if (result) { await loadPaymentHistory(); await load({ preserveContext: true }) }
 }
 
 // 用途：加载当前单据冲正申请及其独立版本。
@@ -2038,7 +2043,7 @@ async function confirmInvoice() {
       invoice_code: invoice.invoice_code, invoice_date: invoice.invoice_date,
       seller_tax_id: invoice.seller_tax_id, buyer_tax_id: invoice.buyer_tax_id,
       total_minor: totalMinor, file_ids: invoice.file_ids, content,travel_facts:travelInput(invoice.travel_facts,true) })
-  if (result) { await openInvoice(invoice.id); await load() }
+  if (result) { await openInvoice(invoice.id); await load({ preserveContext: true }) }
 }
 
 // 用途：保存带证据人工核验，明确区别于外部税务查验。
@@ -2049,7 +2054,7 @@ async function verifyInvoice() {
     { expected_version: selectedInvoice.value.version, verification_method: 'MANUAL',
       verification_result: verificationResult.value, reason: verificationReason.value,
       evidence_file_ids: splitIDs(verificationEvidence.value) })
-  if (result) { await openInvoice(selectedInvoice.value.id); await load() }
+  if (result) { await openInvoice(selectedInvoice.value.id); await load({ preserveContext: true }) }
 }
 
 // 用途：创建真实文件上传会话；结果未知时保留文件以恢复原会话。
@@ -2307,7 +2312,7 @@ async function refreshParse() {
     rememberParseTask(parseRun.value)
     // 只查询任务时可能还没有文档ID，此时不去拼一个空文档地址。
     if (documentID.value) documentStatus.value = await api.request(`/invoice-documents/${encodeURIComponent(documentID.value)}`)
-    await load()
+    await load({ preserveContext: true })
   }
   catch (cause) { showError(cause) }
 }
@@ -2384,7 +2389,7 @@ async function createManualInvoice() {
       source_selections: selectedCandidateSource.value ? [{ ...selectedCandidateSource.value }] : [] })
     if (result) {
       manualInvoiceForm.value = null
-      await openInvoice(result.id); await load()
+      await openInvoice(result.id); await load({ preserveContext: true })
       notice.value = '已创建待复核票据，请对照原件确认；同一原件可继续拆分录入其他票据。'
     }
   } catch (cause) { showError(cause) }
@@ -2574,7 +2579,7 @@ async function savePolicy() {
     payload.id = policyID.value || createRequestID()
     const result = await mutate('config.save', `/configurations/${policyKind.value}`,
       { ...payload, expected_version: policyVersion.value, kind: policyKind.value })
-    if (result) { selectPolicy(result); await load() }
+    if (result) { selectPolicy(result); await load({ preserveContext: true }) }
   } catch (cause) { showError(cause) }
 }
 
@@ -2584,7 +2589,7 @@ async function savePolicy() {
 async function publishPolicy() {
   const result = await mutate('config.publish', `/configurations/${policyKind.value}/${policyID.value}/publish`,
     { expected_version: policyVersion.value, kind: policyKind.value })
-  if (result) await load()
+  if (result) await load({ preserveContext: true })
 }
 
 // 用途：下载前重新查询权限与结果，验证内容摘要后保存CSV。
@@ -2635,7 +2640,7 @@ async function retirePolicy() {
     const result = await mutate('config.retire', `/configurations/${policyKind.value}/${policyID.value}/retire`,
       { expected_version: policyVersion.value, reason: policyLifecycleReason.value.trim() })
     if (result) {
-      applyLifecycleResult(result); await load()
+      applyLifecycleResult(result); await load({ preserveContext: true })
       notice.value = '旧政策已退休，停止新增使用；历史版本与已批准快照保留。'
     }
   } catch (cause) { showError(cause) }
@@ -2653,7 +2658,7 @@ async function replacePolicy() {
       { expected_version: policyVersion.value, reason: policyLifecycleReason.value.trim(),
         replacement_id: replacement.id, replacement_expected_version: replacement.version })
     if (result) {
-      applyLifecycleResult(result); await load()
+      applyLifecycleResult(result); await load({ preserveContext: true })
       notice.value = '旧政策已退休，新草稿已原子发布；请在列表查看新版本。'
     }
   } catch (cause) { showError(cause) }
