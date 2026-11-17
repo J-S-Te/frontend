@@ -3,6 +3,7 @@
 
 // 业务时间一律走共享的北京口径工具：后端返回 RFC3339（UTC），浏览器时区五花八门，
 // 直接 slice 或 toLocaleString 会取出 UTC 日历日 / 宿主机本地时间，导致跨零点显示错位。
+import { normalizeStatusTone } from '../shared/theme/statusCatalog.js'
 import { businessWallClockToInstant, formatBusinessDateTime, instantToBusinessWallClock } from '../shared/utils/businessTime.js'
 import { escapeCsvCell } from '../platform/iam/utils/csvExport.js'
 
@@ -57,21 +58,32 @@ export function newFieldOperationID(prefix) {
   return `${prefix}-${random}`
 }
 
-// 服务项状态色调：取自服务项自身状态，供状态分布表的徽标复用。
-// 状态字段统一胶囊语义映射：所有状态渲染统一经 statusTone 取色调，
-// 语义与 V1.1 原型 crm-badge 对齐（待处理=amber、推进=violet、进行=blue、完成=green、异常=red、停用=gray）。
+// 服务项状态色调：五档封闭语义（neutral / processing / success / warning / danger）。
+// 具体色值只在 main.css 的 --status-* token 里；violet 只留给分类标签，不再表示状态。
+// 撤销是可返工的中断而不是失败，落 warning；驳回/终止/冲突才落 danger。
 export const statusToneMap = {
-  待拆解确认: 'amber', 待确认: 'amber', 待复核: 'amber', 待处理: 'amber', 待评审: 'amber', PENDING: 'amber', 实施中: 'amber',
-  整改中: 'amber', RECTIFYING: 'amber',
-  待分配: 'blue', 已分配: 'blue', 已审核: 'blue', 已签发: 'blue', 计划已发布: 'blue', REVIEWED: 'blue', ISSUED: 'blue',
-  待实施: 'violet', 实施准备中: 'violet', 编制中: 'violet', 报告编制: 'violet', 准备中: 'violet', COMPILING: 'violet',
-  异常处理中: '风险', 已终止: '风险', 已驳回: '风险', REJECTED: '风险', MISSING: '风险', EXPIRED: '风险', 无效: '风险', CONFLICT: '风险', 能力冲突: '风险', 排期冲突: '风险', 阻断: '风险', TERMINATE: '风险',
-  现场实施完成: 'green', 已完成: 'green', 已归档: 'green', ARCHIVED: 'green',
-  已通过: 'normal', APPROVED: 'normal', PASSED: 'normal', 校验通过: 'normal', 启用: 'normal', 有效: 'normal', ACTIVE: 'normal', 在公司: 'normal',
-  停用: 'neutral', DISABLED: 'neutral', 未生效: 'amber', NOT_YET_EFFECTIVE: 'amber', 未提交: 'neutral', 待校验: 'neutral', 待排期: 'neutral', '不在公司（借出中）': 'amber',
+  // 需要人关注，但业务未失败
+  待拆解确认: 'warning', 待确认: 'warning', 待复核: 'warning', 待处理: 'warning', 待评审: 'warning', PENDING: 'warning',
+  整改中: 'warning', RECTIFYING: 'warning', 未生效: 'warning', NOT_YET_EFFECTIVE: 'warning',
+  '已撤销，待重新制定': 'warning', 待重新制定: 'warning',
+  // 已启动 / 推进中
+  已分配: 'processing', 已审核: 'processing', 已签发: 'processing', 计划已发布: 'processing', REVIEWED: 'processing', ISSUED: 'processing',
+  待实施: 'processing', 实施准备中: 'processing', 编制中: 'processing', 报告编制: 'processing', 准备中: 'processing', COMPILING: 'processing',
+  实施中: 'processing',
+  // 异常 / 失败
+  异常处理中: 'danger', 已终止: 'danger', 已驳回: 'danger', REJECTED: 'danger', MISSING: 'danger', EXPIRED: 'danger',
+  无效: 'danger', CONFLICT: 'danger', 能力冲突: 'danger', 排期冲突: 'danger', 阻断: 'danger', TERMINATE: 'danger',
+  // 正向完成
+  现场实施完成: 'success', 已完成: 'success', 已归档: 'success', ARCHIVED: 'success',
+  已通过: 'success', APPROVED: 'success', PASSED: 'success', 校验通过: 'success', 启用: 'success', 有效: 'success', ACTIVE: 'success', 在公司: 'success',
+  // 未开始 / 停用：保持中性
+  待分配: 'neutral', 待制定计划: 'neutral', 停用: 'neutral', DISABLED: 'neutral', 未提交: 'neutral',
+  待校验: 'neutral', 待排期: 'neutral', '不在公司（借出中）': 'neutral',
 }
 
-export function statusTone(status) { return statusToneMap[String(status ?? '').trim()] || 'neutral' }
+export function statusTone(status) {
+  return normalizeStatusTone(statusToneMap[String(status ?? '').trim()] || 'neutral')
+}
 
 // 报告阶段（项目级 report_stage）与服务项报告状态共用同一套码值，
 // 中文词表只维护这一份，页面不再各自复制。

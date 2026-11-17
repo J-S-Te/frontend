@@ -359,7 +359,7 @@ test('项目管理页面视觉基线对齐 V1.1 SPA 原型（Element Plus 形态
   assert.match(css, /\.pm-table th \{[^}]*background: var\(--pm-th-bg\);/)
   assert.match(css, /\.pm-table th \{[^}]*font-size: var\(--pm-fs-hint\);/)
   assert.match(css, /\.pm-table th \{[^}]*font-weight: var\(--pm-fw-semibold\);/)
-  assert.match(ruleBody('.pm-badge', true), /border-radius: var\(--pm-r-full\);/)
+  assert.match(ruleBody('.pm-badge', true), /border-radius: var\(--radius-pill, 999px\);/)
   assert.match(css, /\.pm-nav-item\.active::after \{[^}]*left: 0;[^}]*width: 3px;/)
 
   // §2 无障碍底线：焦点环、动效降级、屏幕阅读器文本、触控目标。
@@ -1571,13 +1571,13 @@ test('样式表修掉信息提示、卡片角标与残留样式三处缺陷', ()
 test('状态字段统一为语义化胶囊标签（statusTone 单一映射）', () => {
   // 映射表覆盖项目/服务项/报告/复核/台账全部状态，未命中回退 neutral。
   assert.match(displaySource, /const statusToneMap = \{/)
-  assert.match(displaySource, /function statusTone\(status\) \{ return statusToneMap\[String\(status \?\? ''\)\.trim\(\)\] \|\| 'neutral' \}/)
+  assert.match(displaySource, /normalizeStatusTone\(statusToneMap\[String\(status \?\? ''\)\.trim\(\)\] \|\| 'neutral'\)/)
   // 原先恒为灰底的 neutral 状态徽章全部改为语义色调。
   assert.doesNotMatch(source, /<span class="pm-badge neutral">\{\{ (card|project)\.status \}\}<\/span>/)
   assert.match(source, /:class="statusTone\(project\.status\)"/)
   assert.match(source, /:class="statusTone\(item\.status\)"/)
   assert.match(source, /:class="statusTone\(flow\.key\)"/)
-  assert.match(source, /:class="statusTone\(row\.state\)"/)
+  assert.match(source, /:tone="statusTone\(row\.state\)"/)
   assert.match(source, /:class="statusTone\(item\.identity_status\)"/)
   // 纯文本状态（操作台当前项 / 复核状态 / 当前报告阶段）收口为胶囊。
   assert.match(source, /:class="statusTone\(selectedServiceItem\.status\)"/)

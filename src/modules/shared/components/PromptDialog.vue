@@ -185,7 +185,7 @@ function onKeydown(event) {
 <template>
   <Teleport to="body">
     <Transition name="shared-prompt" appear>
-      <div v-if="open" class="shared-prompt-mask" @click.self="cancel">
+      <div v-if="open" class="shared-prompt-mask" data-ui-dialog-managed="true" @click.self="cancel">
         <section ref="dialog" tabindex="-1" class="shared-prompt" role="dialog" aria-modal="true" :aria-label="shown.title" :aria-describedby="shown.description ? descriptionId : undefined">
           <header>
             <div><p>需要补充说明</p><h3>{{ shown.title }}</h3></div>

@@ -124,7 +124,7 @@ onBeforeUnmount(deactivate)
 <template>
   <Teleport to="body">
     <Transition name="shared-confirm" appear>
-      <div v-if="open" class="shared-confirm-mask" @click.self="!shown.busy && emit('cancel')">
+      <div v-if="open" class="shared-confirm-mask" data-ui-dialog-managed="true" @click.self="!shown.busy && emit('cancel')">
         <section
           ref="dialog"
           class="shared-confirm"

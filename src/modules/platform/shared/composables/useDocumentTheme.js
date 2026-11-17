@@ -13,6 +13,7 @@
 
 // 偏好键、读取逻辑与变更事件已下沉到 shared/theme，供共享外壳 AppShell 与门户开关
 // 共用同一份实现；这里保留同名 re-export，现有调用方与测试无需改动。
+import { runThemeChange } from '../../../shared/theme/themeTransition.js'
 import {
   DEFAULT_THEME_MODE,
   THEME_MODES,
@@ -53,14 +54,18 @@ export function resolveDocumentTheme(mode, prefersDark = false) {
   return safeMode === 'dark' ? 'dark' : 'light'
 }
 
-// applyDocumentTheme 把解析结果写到根元素。
-// 参数：theme 为 'light' | 'dark'，doc 为 document 对象。
+// applyDocumentTheme 把解析结果写到根元素；值未变时不写，避免无意义的重绘。
+// 参数：theme 为 'light' | 'dark'，doc 为 document 对象，options.animate
+//       为 true 时用整帧过渡（仅用户点击路径会传）。
 // 返回值：实际写入的主题。
-export function applyDocumentTheme(theme, doc = globalThis.document) {
+export function applyDocumentTheme(theme, doc = globalThis.document, options = {}) {
   const resolved = theme === 'dark' ? 'dark' : 'light'
   const root = doc?.documentElement
   if (!root) return resolved
-  root.setAttribute('data-theme', resolved)
+  const write = () => root.setAttribute('data-theme', resolved)
+  if (root.getAttribute?.('data-theme') === resolved) return resolved
+  if (options.animate) runThemeChange(write, { document: doc })
+  else write()
   return resolved
 }
 
@@ -111,7 +116,8 @@ export function createDocumentThemeOverride(options = {}) {
 // 返回值：本次生效的主题。
 export function syncDocumentTheme(options = {}) {
   const { window: win = globalThis.window, document: doc = globalThis.document } = options
-  return applyDocumentTheme(resolveDocumentTheme(readThemePreference(win), systemPrefersDark(win)), doc)
+  const resolved = resolveDocumentTheme(readThemePreference(win), systemPrefersDark(win))
+  return applyDocumentTheme(resolved, doc, { animate: options.animate === true })
 }
 
 // installDocumentThemeSync 安装主题同步：首帧同步 + 跨标签页 + 系统主题变化 +
@@ -122,7 +128,8 @@ export function installDocumentThemeSync(options = {}) {
   const { window: win = globalThis.window, document: doc = globalThis.document } = options
   if (!win || !doc) return () => {}
 
-  const sync = () => syncDocumentTheme({ window: win, document: doc })
+  // 只有本页用户点击（含共享外壳广播）才走整帧过渡；其余路径保持瞬时切换。
+  const sync = (animate = false) => syncDocumentTheme({ window: win, document: doc, animate })
   sync()
 
   let pendingTimer = 0
@@ -131,7 +138,7 @@ export function installDocumentThemeSync(options = {}) {
     if (pendingTimer) return
     pendingTimer = win.setTimeout(() => {
       pendingTimer = 0
-      sync()
+      sync(true)
     }, 0)
   }
 

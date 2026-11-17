@@ -111,14 +111,14 @@ test('报告入口复用编制权限，待整改与整改中显示对应开始�
   assert.doesNotMatch(await renderFragment(nextButton, h), /<button/)
 })
 
-test('真实报告阶段链呈现整改在编制前，整改徽章为 amber', async () => {
+test('真实报告阶段链呈现整改在编制前，整改徽章为 warning', async () => {
   const h = reportHarness('RECTIFYING')
   const html = await renderFragment(chain, h)
   assert.deepEqual(Array.from(h.reportSteps.value, (step) => step.phase),
     ['RECTIFYING', 'COMPILING', 'REVIEWED', 'ISSUED', 'ARCHIVED'])
   assert.deepEqual(Array.from(h.reportSteps.value, (step) => step.state),
     ['doing', 'idle', 'idle', 'idle', 'idle'])
-  assert.match(html, /class="pm-badge amber">整改中<\/span>/)
+  assert.match(html, /class="pm-badge warning">整改中<\/span>/)
   assert.ok(html.indexOf('报告整改') < html.indexOf('报告编制'))
   h.item.report_status = 'COMPILING'
   assert.deepEqual(Array.from(h.reportSteps.value, (step) => step.state),
