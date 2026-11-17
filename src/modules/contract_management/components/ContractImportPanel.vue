@@ -24,7 +24,7 @@ import { useDictionaryOptions } from '@/modules/platform/dictionaries/composable
 import { ensureStableReviewAttempt } from '../utils/opportunityIntakeReview.js'
 
 const props = defineProps({ enabled: Boolean, pdfEnabled: Boolean, canPreview: { type: Boolean, default: true }, canCommit: Boolean,
-  canApprove: Boolean, canRelease: Boolean, canManageAutoApprove: Boolean,
+  canApprove: Boolean, canRelease: Boolean, canManageAutoApprove: Boolean, canRecheckDeletedReports: Boolean,
   actorId: { type: String, default: '' }, initialBatchId: { type: String, default: '' },
   // 当前所在页签：imports 页把自动审批状态条固定展示在折叠面板之外（P2-5）。
   section: { type: String, default: '' },
@@ -1347,6 +1347,14 @@ function canRetryProjectRejection(target) {
     && target.recipient_code === 'IMPORT_VALIDATION_FAILED'
 }
 
+// canRecheckDeletedReport 用途：为管理员显示恢复后统计终态的明确人工核对入口。
+// 参数：target 为服务端当前统计目标；不据客户端显示状态推测合同已恢复。
+// 返回值：仅明确授权及墓碑统计终态返回真，服务端仍核对源状态与目标版本。
+function canRecheckDeletedReport(target) {
+  return props.canRecheckDeletedReports && target.target === 'REPORT'
+    && target.state === 'BLOCKED' && target.error_code === 'CONTRACT_RECORD_DELETED'
+}
+
 /**
  * viewSource 读取受批次及冻结受派权限保护的同一原件描述。
  * 参数：entry为当前批次项。
@@ -1886,10 +1894,11 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
                 <p class="contract-import-target-head"><strong>{{ targetLabels[target.target] }}</strong>：{{ stateLabels[target.state] || target.state }}<span v-if="target.error_code && target.state !== 'COMPLETE'"> · {{ target.error_code }}</span><span v-if="target.receipt_id"> · 实际回执 {{ target.receipt_id }}</span></p>
                 <p v-if="target.state === 'BLOCKED' && target.recipient_http_status === 409 && target.recipient_code === 'SETTLEMENT_CONFLICT'" class="contract-import-note">接收方已明确拒绝旧放行。财务须先重新对账；再次申请会严格核对新凭证、政策与责任，并保留旧命令记录。来源或政策不一致仍阻断。</p>
                 <p v-if="canRetryProjectRejection(target)" class="contract-import-note">项目端明确拒绝参数或负责人。请核对项目负责人在目标环境的有效授权及冻结字段；恢复仅重试原命令，不修改已确认基线。</p>
-                <div v-if="canRelease && entry.confirmed && !['COMPLETE','NOT_APPLICABLE'].includes(target.state) && (target.state !== 'BLOCKED' || canRetryProjectRejection(target) || (target.target === 'FINANCE' && target.phase === 'RELEASE' && target.recipient_http_status === 409 && target.recipient_code === 'SETTLEMENT_CONFLICT'))" class="contract-import-actions">
+                <p v-if="target.target === 'REPORT' && target.state === 'BLOCKED' && target.error_code === 'CONTRACT_RECORD_DELETED'" class="contract-import-note">合同删除期间已停止统计核对。恢复合同后，管理员可按原发布版本手动重新核对；不会重发项目或资金任务。</p>
+                <div v-if="canRelease && entry.confirmed && !['COMPLETE','NOT_APPLICABLE'].includes(target.state) && (target.state !== 'BLOCKED' || canRetryProjectRejection(target) || canRecheckDeletedReport(target) || (target.target === 'FINANCE' && target.phase === 'RELEASE' && target.recipient_http_status === 409 && target.recipient_code === 'SETTLEMENT_CONFLICT'))" class="contract-import-actions">
                   <button v-if="target.target === 'FINANCE' && !target.receipt_id" class="contract-button secondary small" type="button" :disabled="busy" @click="release(entry, target, 'PREPARE')">建立／恢复财务HOLD暂存</button>
                   <button v-else-if="canRetryProjectRejection(target)" class="contract-button secondary small" type="button" :disabled="busy" @click="release(entry, target)">核对项目参数和负责人后重试同一命令</button>
-                  <button v-else class="contract-button secondary small" type="button" :disabled="busy" @click="release(entry, target)">{{ target.target === 'FINANCE' ? (target.state === 'BLOCKED' ? '重新核对并申请财务放行' : '核验对账和责任后申请财务放行') : target.target === 'REPORT' ? '申请／查询真实数析应用' : '申请／恢复项目绑定' }}</button>
+                  <button v-else class="contract-button secondary small" type="button" :disabled="busy" @click="release(entry, target)">{{ target.target === 'FINANCE' ? (target.state === 'BLOCKED' ? '重新核对并申请财务放行' : '核验对账和责任后申请财务放行') : target.target === 'REPORT' ? (canRecheckDeletedReport(target) ? '恢复后重新核对数析应用' : '申请／查询真实数析应用') : '申请／恢复项目绑定' }}</button>
                 </div>
                 <a v-if="target.target === 'FINANCE' && target.receipt_id" :href="`/settlement/imports?import_snapshot=${encodeURIComponent(target.receipt_id)}`">前往财务恢复工作台</a>
               </li>

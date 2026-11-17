@@ -12,6 +12,7 @@ import { formatUserError } from '../../shared/utils/userError.js'
 import { DOWNLOAD_TIMEOUT_MESSAGE, downloadRequestSignal } from '../../shared/utils/downloadTimeout.js'
 import { externalContractMetadata } from '../utils/contractPayload.js'
 import { sourceSHA256 } from '../utils/sourceIntegrity.js'
+import { isContractRecordPreview, isContractRecordMutation, isDeletedContractPage } from '../utils/contractRecord.js'
 
 const CONTRACT_PUBLIC_PATH_PREFIX = (import.meta.env.VITE_CONTRACT_PUBLIC_PATH_PREFIX || '/contract_management').replace(/\/$/, '')
 const API_BASE_URL = (import.meta.env.VITE_CONTRACT_API_BASE_URL || `${CONTRACT_PUBLIC_PATH_PREFIX}/api/v1`).replace(/\/$/, '')
@@ -417,6 +418,53 @@ export async function listContracts(params = {}) {
   const search = new URLSearchParams(params).toString()
   const data = await request(`/contracts${search ? `?${search}` : ''}`)
   return contractLedgerPage(data)
+}
+
+// recordRequest 用途：为记录管理设置有限请求期限，中断写入保持结果未知。
+// 参数：path/options 为已核定的管理接口与请求配置。
+// 返回值：真实接口响应或标准错误；计时器在请求完成后清理。
+async function recordRequest(path, options = {}) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 20000)
+  try { return await request(path, { ...options, signal: controller.signal }) }
+  finally { clearTimeout(timer) }
+}
+
+// previewContractDeletion 用途：只读核对管理员所见的最新记录及阻断事项。
+// 参数：id 为合同稳定身份。
+// 返回值：严格核验的预检摘要；失败不推测资格。
+export function previewContractDeletion(id) {
+  return recordRequest(`/contracts/${encodeURIComponent(id)}/deletion-preview`, {
+    validateData: (data) => isContractRecordPreview(data, id),
+  })
+}
+
+// deleteContractRecord 用途：按所见版本提交逻辑删除，不自动重试未知写入。
+// 参数：id/version 为预检基线，reason 为删除原因。
+// 返回值：已核验的当前删除状态与是否变更；网络中断保持结果未知标记。
+export function deleteContractRecord(id, version, reason) {
+  return recordRequest(`/contracts/${encodeURIComponent(id)}`, {
+    method: 'DELETE', body: JSON.stringify({ expected_version: version, reason }),
+    validateData: (data) => isContractRecordMutation(data, id, version, 'deleted'),
+  })
+}
+
+// restoreContractRecord 用途：恢复原记录，不触发审批或业务重建。
+// 参数：id/version 为预检基线，reason 为可选恢复说明。
+// 返回值：已核验的当前有效状态与是否变更，协议异常按结果未知处理。
+export function restoreContractRecord(id, version, reason = '') {
+  return recordRequest(`/contracts/${encodeURIComponent(id)}/restore`, {
+    method: 'POST', body: JSON.stringify({ expected_version: version, reason }),
+    validateData: (data) => isContractRecordMutation(data, id, version, 'active'),
+  })
+}
+
+// listDeletedContractRecords 用途：读取独立回收站集合，不采用普通台账兼容降级。
+// 参数：params 为关键字与分页条件。
+// 返回值：严格的墓碑摘要页或安全错误。
+export function listDeletedContractRecords(params = {}) {
+  const query = new URLSearchParams({ ...params, record_state: 'deleted' }).toString()
+  return recordRequest(`/contracts?${query}`, { validateData: isDeletedContractPage })
 }
 
 export async function listApprovedContracts(params = {}, options = {}) {

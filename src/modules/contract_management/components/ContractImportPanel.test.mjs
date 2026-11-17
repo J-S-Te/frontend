@@ -27,14 +27,14 @@ function importPanelHarness(mode, request, listResponse = () => ({items:[],has_m
   customerResponse = async () => ({items:[],page:1,page_size:20,total:0,has_more:false}),
   sourceCapabilities = {}, autoApproveApi = {}) {
   const calls = [], delays = [], listCalls = [], timers = [], directoryCalls = [], mounted = []
-  const autoApproveGets = [], autoApprovePuts = [], copyCalls = []
+  const autoApproveGets = [], autoApprovePuts = [], copyCalls = [], releaseCalls = []
   const defaultAutoApprove = {capability_enabled:true,enabled:false,version:3,updated_by:'合同超级管理员',updated_at:'2026-11-06T02:30:00Z'}
   const props = Vue.reactive({enabled:true,pdfEnabled:true,canPreview:true,canCommit:true,canApprove:true,canRelease:true,canManageAutoApprove:false,actorId:'actor',initialBatchId:'',supportedModes:['NORMAL','ARCHIVE_ONLY'],sourceCapabilities})
   const batch = {batch_id:'batch-A',version:11,revision:1,preview_token:'preview',state:'PREVIEWED',can_commit:true,source_system:'legacy',sources:[],items:[{id:'item-A',item:{mode,item_key:'one',external_record_id:'old-1',source_file_ref:'file-ref',metadata:{customer_name:'历史客户'},policy_options:{project_mode:'NONE',finance_mode:'NONE',report_mode:'ARCHIVE_SEPARATE'}},state:'READY',issues:[]}]}
   const deps = {computed:Vue.computed,ref:Vue.ref,watch:Vue.watch,nextTick:Vue.nextTick,onMounted(callback){mounted.push(callback)},onBeforeUnmount(){},setTimeout(callback,delay){delays.push(delay);timers.push(callback);return 0},clearTimeout(){},ContractPDFPreview:{render(){return null}},
     LocalContractSourcePicker:{render(){return null}},importRowSourceForm,applyImportRowSourceForm,
     contractImportRequest:async (...args)=> {calls.push(args);return request ? request(batch,...args) : structuredClone(batch)},
-    listContractImportBatches:async(offset)=>{listCalls.push(offset);return listResponse(offset)},releaseContractImportItem:async()=>({}),getImportItemDocumentDescriptor:async()=>({}),importItemSourceURL:()=>'',
+    listContractImportBatches:async(offset)=>{listCalls.push(offset);return listResponse(offset)},releaseContractImportItem:async(...args)=>{releaseCalls.push(args);return {}},getImportItemDocumentDescriptor:async()=>({}),importItemSourceURL:()=>'',
     prepareImportManifest,formatImportMinor,validateContractSourceFile(){},ensureStableReviewAttempt,
     openContractCRMLogin:crmLogin,
     buildImportManifestFromRows,createImportFormRow,emptyImportServiceItem,importFieldLabel,importRowsFromItems,validateImportFormRows,
@@ -62,7 +62,7 @@ function importPanelHarness(mode, request, listResponse = () => ({items:[],has_m
   const render=new Function('Vue',template.code.replace(/import \{([^}]+)\} from "vue"/g,(_,names)=>`const { ${names.replace(/ as /g,': ')} } = Vue`).replace('export function render','return function render'))(Vue)
   const state=component.setup(props,{expose(){}})
   state.entryMode.value=mode;if(mode==='NORMAL' && (sourceCapabilities.counterparty_source==='local' || sourceCapabilities.category_source==='local'))state.normalEntryMode.value='manual';state.jsonAuthoritative.value=mode!=='NORMAL';state.batch.value=structuredClone(batch);state.batchID.value=batch.batch_id;state.lookupID.value=batch.batch_id
-  return {state,props,batch,calls,delays,listCalls,timers,directoryCalls,mounted,autoApproveGets,autoApprovePuts,copyCalls,html:()=>renderToString(Vue.createSSRApp({render:()=>render({},[],props,Vue.proxyRefs(state),{}, {})}))}
+  return {state,props,batch,calls,delays,listCalls,timers,directoryCalls,mounted,autoApproveGets,autoApprovePuts,copyCalls,releaseCalls,html:()=>renderToString(Vue.createSSRApp({render:()=>render({},[],props,Vue.proxyRefs(state),{}, {})}))}
 }
 
 test('LOCAL普通导入抽屉保留来源版本、无需CRM/项目目录，实际生成清单不丢引用', async () => {
@@ -307,6 +307,24 @@ test('completed target shows its receipt without a stale previous wait error', a
   const html = await panel.html()
   assert.match(html,/import-62/)
   assert.doesNotMatch(html,/IMPORT_TARGET_WAITING/)
+})
+
+test('墓碑统计终态只给明确授权管理员显示原版本人工核对', async () => {
+  const panel = importPanelHarness('ARCHIVE_ONLY')
+  panel.batch.state = 'PARTIAL'
+  panel.batch.confirmation = { state: 'APPROVED', roles: [], approved_roles: [] }
+  panel.batch.items[0].confirmed = true
+  panel.batch.items[0].targets = [{ target: 'REPORT', state: 'BLOCKED', version: 5,
+    report_release_version: 2, error_code: 'CONTRACT_RECORD_DELETED' }]
+  panel.state.batch.value = structuredClone(panel.batch)
+  assert.doesNotMatch(await panel.html(), /恢复后重新核对数析应用<\/button>/)
+  panel.props.canRecheckDeletedReports = true
+  assert.match(await panel.html(), /恢复后重新核对数析应用<\/button>/)
+  const entry = panel.state.batch.value.items[0]
+  await panel.state.release(entry, entry.targets[0])
+  assert.deepEqual(panel.releaseCalls, [['item-A', { target: 'REPORT', expected_version: 5, phase: 'RELEASE' }]])
+  panel.state.batch.value.items[0].targets[0].error_code = 'IMPORT_TARGET_RECEIPT_INVALID'
+  assert.doesNotMatch(await panel.html(), /恢复后重新核对数析应用<\/button>/)
 })
 
 test('unknown approval response keeps command key and original expected version across refreshes',async()=>{

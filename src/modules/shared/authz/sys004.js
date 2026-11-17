@@ -1,5 +1,5 @@
 export const CONTRACT_ROLE_DEFINITIONS = Object.freeze([
-  { code: 'admin', name: '超级管理员', permissions: ['contract.read', 'contract.create', 'contract.edit', 'contract.approved.read', 'contract.document.download', 'contract.stamped_pdf.upload', 'contract.signing.manage', 'approval.view', 'approval.process', 'approval.manage', 'approval_rule.manage', 'opportunity_intake.read', 'opportunity_intake.process'] },
+  { code: 'admin', name: '超级管理员', permissions: ['contract.delete', 'contract.read', 'contract.create', 'contract.edit', 'contract.approved.read', 'contract.document.download', 'contract.stamped_pdf.upload', 'contract.signing.manage', 'approval.view', 'approval.process', 'approval.manage', 'approval_rule.manage', 'opportunity_intake.read', 'opportunity_intake.process'] },
   { code: 'sales_director', name: '销售总监', permissions: ['dashboard', 'contract.read', 'customer.read', 'approval.view', 'approval.process'] },
   { code: 'tech_director', name: '技术总监', permissions: ['dashboard', 'contract.read', 'customer.read', 'approval.view', 'approval.process'] },
   { code: 'finance_director', name: '财务总监', permissions: ['dashboard', 'contract.read', 'customer.read', 'approval.view', 'approval.process'] },

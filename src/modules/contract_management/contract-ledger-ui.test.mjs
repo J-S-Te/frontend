@@ -440,7 +440,15 @@ test('顶栏搜索在台账分区之外禁用', () => {
   const end = view.indexOf('</label>', start)
   assert.ok(end > start)
   const search = view.slice(start, end)
-  assert.match(search, /:disabled="activeSection !== 'contracts'"/)
+  const expression = search.match(/:disabled="([^"]+)"/)?.[1]
+  assert.ok(expression, '搜索必须有明确禁用条件')
+  const disabled = new Function('activeSection', 'contractRecordState', `return (${expression})`)
+  for (const section of ['dashboard', 'approvals', 'signing', 'reports', 'templates']) {
+    assert.equal(disabled(section, 'active'), true)
+    assert.equal(disabled(section, 'deleted'), true)
+  }
+  assert.equal(disabled('contracts', 'active'), false)
+  assert.equal(disabled('contracts', 'deleted'), true)
   assert.match(search, /'搜索仅限合同台账'/)
 })
 
