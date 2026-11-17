@@ -123,7 +123,7 @@ defineExpose({ openRecord })
 .contract-record-browser { display: grid; gap: 16px; margin-bottom: 20px; }
 .record-toolbar, .record-search, .record-dialog-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .record-toolbar { justify-content: space-between; }
-.record-toolbar p { color: var(--text-secondary, #475569); font-size: 13px; margin: 0; }
+.record-toolbar p { color: var(--text-secondary, #475569); font-size: var(--fs-sm, 13px); margin: 0; }
 .record-tabs { display: flex; padding: 4px; border: 1px solid var(--border, #e2e8f0); border-radius: 10px; }
 .record-tabs button { border: 0; background: transparent; padding: 8px 20px; border-radius: 7px; color: inherit; cursor: pointer; }
 .record-tabs button[aria-pressed='true'] { color: var(--on-primary, #ffffff); background: var(--primary, #2563eb); }
@@ -134,7 +134,7 @@ defineExpose({ openRecord })
 .record-error, .record-blockers { color: var(--danger-text, #b91c1c); line-height: 1.65; }
 .record-notice { color: var(--success-text, #15803d); }
 .record-table-wrap { overflow-x: auto; border: 1px solid var(--border, #e2e8f0); border-radius: 12px; background: var(--surface-card, #ffffff); }
-.record-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 14px; }
+.record-table { width: 100%; border-collapse: collapse; text-align: left; font-size: var(--fs-body, 14px); }
 .record-table th, .record-table td { padding: 14px 16px; border-bottom: 1px solid var(--border, #e2e8f0); vertical-align: top; }
 .record-table th { background: var(--surface-muted, #f8fafc); white-space: nowrap; }
 .record-table td strong, .record-table td span { display: block; min-width: 150px; }
