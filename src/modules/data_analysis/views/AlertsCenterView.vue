@@ -12,6 +12,7 @@ const props = defineProps({ permissions: { type: Array, default: () => [] } })
 
 const alerts = ref([])
 const loading = ref(true)
+const refreshing = ref(false)
 const error = ref(null)
 const keyword = ref("")
 const statusFilter = ref("")
@@ -113,8 +114,9 @@ const pageCount = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
 // 三态闸门：加载中 / 加载失败 / 无记录都走 ListState；失败一定带重试，不会渲染成「暂无预警」。
 const alertListState = computed(() => loading.value || Boolean(error.value) || !filteredAlerts.value.length)
 
-async function load() {
-  loading.value = true
+async function load({ background = false } = {}) {
+  if (background) refreshing.value = true
+  else loading.value = true
   error.value = null
   try {
     const [result, aggregate] = await Promise.all([
@@ -130,7 +132,8 @@ async function load() {
     error.value = formatDataAnalysisError(err, { fallback: "预警加载失败，请稍后刷新。" })
     return false
   } finally {
-    loading.value = false
+    if (background) refreshing.value = false
+    else loading.value = false
   }
   return true
 }
@@ -152,7 +155,7 @@ async function runAction(id, action) {
   try {
     if (action === "ack") await ackAlert(id)
     else await closeAlert(id)
-    if (!await load()) error.value = `预警已${action === "ack" ? "受理" : "关闭"}，但列表刷新失败。请刷新列表查看结果，无需重复操作。`
+    if (!await load({ background: true })) error.value = `预警已${action === "ack" ? "受理" : "关闭"}，但列表刷新失败。请刷新列表查看结果，无需重复操作。`
   } catch (err) {
     error.value = formatDataAnalysisError(err, { fallback: "预警操作失败，请刷新列表确认状态。" })
   } finally {

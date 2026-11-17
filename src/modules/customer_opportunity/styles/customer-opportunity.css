@@ -3583,3 +3583,11 @@
   .crm-opportunity-facts { grid-template-columns: 1fr; }
   .crm-opportunity-card-head { align-items: flex-start; flex-wrap: wrap; }
 }
+
+/* 写后后台同步：行记录原地更新，给状态/金额变化一个轻量过渡，避免整表闪烁。 */
+.crm-data-table tbody tr td {
+  transition: background-color .22s ease, color .22s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .crm-data-table tbody tr td { transition: none; }
+}

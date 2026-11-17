@@ -60,6 +60,8 @@ const router = useRouter()
 const session = ref(null)
 const menuOpen = ref(false)
 const loading = ref(false)
+// 只有首屏读取展示骨架；后续写后/筛选刷新保留已渲染内容，避免整页闪一下。
+const initialized = ref(false)
 const saving = ref(false)
 const error = ref('')
 const fieldErrors = ref([])
@@ -867,7 +869,9 @@ async function load() {
     if (ticket !== loadSequence) return
     areaError(current === 'dashboard' ? 'dashboard' : current === 'analytics' ? 'analytics' : 'list', cause)
   }
-  finally { if (ticket === loadSequence) loading.value = false }
+  finally {
+    if (ticket === loadSequence) { loading.value = false; initialized.value = true }
+  }
 }
 
 // 用途：执行可追踪的写命令，并在成功后读取真实状态。
@@ -2854,7 +2858,7 @@ onBeforeUnmount(() => {
         未确认前请保留本页；重试同一操作复用该命令及原始内容。
       </p>
     </div>
-    <LoadingState v-if="loading" />
+    <LoadingState v-if="loading && !initialized" />
     <template v-if="hasModule">
       <p class="expense-alert" role="note">
         {{ scopeDescription }}

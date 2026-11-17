@@ -79,6 +79,7 @@ function loadHarness() {
     active: ref('receivables'),
     taskStatusKnown: ref(true),
     loading: ref(false),
+    initialized: ref(false),
     error: ref(''),
     dunningRecipientsLoading: ref(false),
     listPages: ref({}),

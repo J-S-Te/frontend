@@ -1112,7 +1112,7 @@ test('TS-001 售前列表通过受控按钮进入独立创建视图并在取消�
 test('驳回或取消的售前重新审批后刷新列表和状态看板', () => {
 	assert.match(view, /reopenPresaleRequest\(presaleReopenRequest\.value\.id, presaleReopenRequest\.value\.version, \{/)
 	assert.match(view, /presaleReopenRequest\.value = \{ id: request\.id, version: request\.version/)
-	assert.match(view, /const reopened = await reopenPresaleRequest\([\s\S]*contact_phone: presaleForm\.contact_phone[\s\S]*expected_start: expectedStart\.toISOString\(\)[\s\S]*await loadCurrent\(\{ reportError: false \}\)[\s\S]*await openPresale\(reopened\.id, \{ reportError: false \}\)/)
+	assert.match(view, /const reopened = await reopenPresaleRequest\([\s\S]*contact_phone: presaleForm\.contact_phone[\s\S]*expected_start: expectedStart\.toISOString\(\)[\s\S]*await loadCurrent\(\{ reportError: false, background: true \}\)[\s\S]*await openPresale\(reopened\.id, \{ reportError: false \}\)/)
 })
 
 test('客户最近跟进明确包含商机记录且商机历史可进入详情', () => {
@@ -1173,7 +1173,7 @@ test('TS-007 列表与看板请求使用序列号阻止过期响应覆盖新视�
   assert.match(view, /const currentLoadSequence = ref\(0\)/)
   assert.match(view, /const sequence = \+\+currentLoadSequence\.value/)
   assert.match(view, /sequence !== currentLoadSequence\.value \|\| activeSection\.value !== section/)
-  assert.match(view, /if \(sequence === currentLoadSequence\.value\) loading\.value = false/)
+  assert.match(view, /if \(sequence === currentLoadSequence\.value\) \{\s*if \(background\) refreshing\.value = false\s*else loading\.value = false/)
 })
 
 test('售前 API 使用真实路由并允许创建重试复用幂等键', async (t) => {

@@ -10,7 +10,7 @@ const source = await readFile(new URL('./views/CustomerPortalView.vue', import.m
 // 返回值：实际调用记录及页面状态。
 async function loadWorkspace(failure = false, customer = false) {
   const calls = []
-  const state = { loading: { value: false }, error: { value: '' }, notice: { value: '' },
+  const state = { loading: { value: false }, refreshing: { value: false }, error: { value: '' }, notice: { value: '' },
     session: { value: null }, capabilities: { value: { customer_directory_mode: 'local' } },
     isPortalSuperAdmin: { value: !customer }, capabilitiesLoaded: false,
     getPortalSession: async () => { calls.push('session'); return { roles: customer ? ['portal_customer'] : ['portal_super_admin'] } },
@@ -24,7 +24,7 @@ async function loadWorkspace(failure = false, customer = false) {
     projects: { value: [] }, projectPage: { value: 0 }, projectTotal: { value: 0 },
     fail: (error) => { state.error.value = error.message },
   }
-  const start = source.indexOf('async function load() {')
+  const start = source.indexOf('async function load({ background = false } = {}) {')
   assert.ok(start >= 0)
   const fn = source.slice(start, source.indexOf('\n}', start) + 2)
   await vm.runInNewContext(`${fn}; load()`, state)

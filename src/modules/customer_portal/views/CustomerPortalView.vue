@@ -50,6 +50,7 @@ const activities = ref([])
 const accountSecurity = ref(null)
 const accountSessions = ref([])
 const loading = ref(false)
+const refreshing = ref(false)
 const error = ref('')
 const notice = ref('')
 // 业务编号只跟随产生它的那条提示：报告申请号写进提示后，用户可以直接复制；
@@ -292,8 +293,9 @@ async function reloadList() {
 // 用途：加载当前会话及其可用工作区，管理员只读取管理能力元数据。
 // 参数：无。
 // 返回值：异步完成；失败时展示错误且不查询空客户边界。
-async function load() {
-  loading.value = true; error.value = ''; notice.value = ''
+async function load({ background = false } = {}) {
+  if (background) { refreshing.value = true; error.value = '' }
+  else { loading.value = true; error.value = ''; notice.value = '' }
   try {
     session.value ||= await getPortalSession()
     if (isPortalSuperAdmin.value) {
@@ -342,7 +344,10 @@ async function load() {
       // 供备案新建时选择关联项目；读取失败不影响备案主流程。
       try { const value = await listProjects({ page: 1, page_size: 100 }); projects.value = value?.items || [] } catch { /* 保持为空。 */ }
     }
-  } catch (value) { fail(value) } finally { loading.value = false }
+  } catch (value) { fail(value) } finally {
+    if (background) refreshing.value = false
+    else loading.value = false
+  }
 }
 // loadFeedbackNotifications 独立读取当前客户的反馈通知，失败保持未知而非零条。
 // 参数：无。
@@ -842,7 +847,7 @@ async function submitFeedback() {
     notice.value = '反馈已提交，我们将在 24 小时内首次响应。'
     // 写操作后的列表刷新也算一次新的列表开始：先清掉上一轮失败原因再重发同一个请求。
     feedbackListError.value = ''
-    if (hasPermission('feedback.read')) await load()
+    if (hasPermission('feedback.read')) await load({ background: true })
     notice.value = feedbackListError.value
       ? '反馈已提交，但反馈列表未刷新，请重新加载列表核对；无需再次提交。'
       : '反馈已提交，我们将在 24 小时内首次响应。'
@@ -889,7 +894,7 @@ async function confirmCloseFeedback() {
     selectedFeedback.value = null
     notice.value = '反馈已关闭。'
     feedbackListError.value = ''
-    if (hasPermission('feedback.read')) await load()
+    if (hasPermission('feedback.read')) await load({ background: true })
     notice.value = feedbackListError.value
       ? '反馈已关闭，但反馈列表未刷新，请重新加载列表核对；无需再次关闭。'
       : '反馈已关闭。'

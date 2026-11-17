@@ -34,7 +34,7 @@ function extractLastUpdatedWatcher(dependencies) {
 }
 
 test('工作区首屏不再预读设备目录、人员姓名与 SLA 明细', () => {
-  const start = source.indexOf('async function loadWorkspace({ reportError = true } = {}) {')
+  const start = source.indexOf('async function loadWorkspace({ reportError = true, background = false } = {}) {')
   assert.ok(start >= 0, 'missing loadWorkspace')
   const body = source.slice(start, source.indexOf('\n}\n', start))
   assert.doesNotMatch(body, /loadEquipment\(|listEquipment\(/, '核心快照加载不得预读设备目录')

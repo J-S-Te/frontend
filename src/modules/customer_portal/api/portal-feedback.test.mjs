@@ -38,7 +38,7 @@ test('Portal feedback and security views fail closed by exact permission', async
 
   assert.match(view, /\['feedback\.create', 'feedback\.read', 'feedback\.reply'\]\.some\(hasPermission\)/)
   assert.match(view, /section\.value === 'feedback' && hasPermission\('feedback\.read'\)/)
-  assert.match(view, /if \(hasPermission\('feedback\.read'\)\) await load\(\)/)
+  assert.match(view, /if \(hasPermission\('feedback\.read'\)\) await load\(\{ background: true \}\)/)
   assert.match(view, /hasPermission\('feedback\.reply'\) && !\['CLOSED','REJECTED'\]/)
   assert.match(view, /hasPermission\('feedback\.reply'\) && selectedFeedback\.feedback\.status === 'RESOLVED'/)
   assert.match(view, /feedbackCloseRetryKeys\.get\(feedbackID\)/)
