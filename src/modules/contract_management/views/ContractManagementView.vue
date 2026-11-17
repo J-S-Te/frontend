@@ -704,7 +704,7 @@ const {
   openApproval, closeApproval, executeApprovalCommand,
 } = useApprovalDetail({
   getApproval, previewApprovalContract, commandApproval, can, session, showToast, formatUserError,
-  refreshApprovalRealtime,
+  refreshApprovalRealtime: refreshApprovalMutation,
 })
 const approvalRealtimeScope = createRequestScope()
 const signingDetailScope = createRequestScope()
@@ -1543,6 +1543,13 @@ async function waitForInitiatedApproval(approvalID) {
 // refreshApprovalRealtime 独立刷新审批列表、待办和详情，保留通知状态未知语义。
 // 参数：无。
 // 返回值：异步完成；失败保留明确业务错误状态。
+// 审批命令成功后，除审批详情/待办外还要同步合同台账、统计、签署等受影响区域。
+// 台账读取不进入页面级 loading，旧内容保持可见；读取失败由各区域自己的错误态承担。
+async function refreshApprovalMutation() {
+  await refreshApprovalRealtime()
+  void loadBusinessData()
+}
+
 async function refreshApprovalRealtime() {
   if (approvalRealtimeBusy || !session.value || activeSection.value !== 'approvals' || document.visibilityState !== 'visible') return
   approvalRealtimeBusy = true
