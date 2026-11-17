@@ -2290,16 +2290,52 @@
 .pm-table-panel > footer { border-top-color: var(--pm-line-soft); background: var(--pm-th-bg); color: var(--pm-muted); }
 .pm-monitor-table thead th:first-child { background: var(--pm-th-bg); }
 .pm-monitor-table tbody tr:hover td:first-child { background: var(--pm-row-hover); }
-.pm-badge { min-height: 22px; padding: 0 9px; gap: 4px; border: 1px solid transparent; border-radius: var(--pm-r-full); font-size: var(--pm-fs-hint); font-weight: 500; }
-.pm-badge::before { content: ""; width: 6px; height: 6px; flex: none; border-radius: 50%; background: currentColor; }
-.pm-badge.正常, .pm-badge.normal { border-color: var(--pm-green-border); background: var(--pm-green-soft); color: var(--pm-green-text); }
-.pm-badge.关注, .pm-badge.待确认, .pm-badge.warning { border-color: var(--pm-amber-border); background: var(--pm-amber-soft); color: var(--pm-amber-text); }
-.pm-badge.风险 { border-color: var(--pm-red-border); background: var(--pm-red-soft); color: var(--pm-red-text); }
-.pm-badge.neutral, .pm-badge.slate { border-color: var(--pm-gray-border); background: var(--pm-gray-soft); color: var(--pm-gray-text); }
+.pm-badge {
+  min-height: 22px;
+  padding: 0 10px;
+  gap: 5px;
+  border: 1px solid var(--status-border, transparent);
+  border-radius: var(--radius-pill, 999px);
+  background: var(--status-bg, var(--pm-primary-soft));
+  color: var(--status-text, var(--pm-blue-text));
+  font-size: var(--pm-fs-hint);
+  font-weight: 500;
+}
+.pm-badge::before { content: ""; width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--status-dot, currentColor); }
+
+/* 状态胶囊只取五档语义；旧类名保留为别名，模板可分批迁移。 */
+.pm-badge.neutral, .pm-badge.slate {
+  --status-bg: var(--status-neutral-bg);
+  --status-border: var(--status-neutral-border);
+  --status-text: var(--status-neutral-text);
+  --status-dot: var(--status-neutral-dot);
+}
+.pm-badge.processing, .pm-badge.blue, .pm-badge.info {
+  --status-bg: var(--status-processing-bg);
+  --status-border: var(--status-processing-border);
+  --status-text: var(--status-processing-text);
+  --status-dot: var(--status-processing-dot);
+}
+.pm-badge.success, .pm-badge.normal, .pm-badge.green, .pm-badge.正常 {
+  --status-bg: var(--status-success-bg);
+  --status-border: var(--status-success-border);
+  --status-text: var(--status-success-text);
+  --status-dot: var(--status-success-dot);
+}
+.pm-badge.warning, .pm-badge.amber, .pm-badge.关注, .pm-badge.待确认 {
+  --status-bg: var(--status-warning-bg);
+  --status-border: var(--status-warning-border);
+  --status-text: var(--status-warning-text);
+  --status-dot: var(--status-warning-dot);
+}
+.pm-badge.danger, .pm-badge.风险 {
+  --status-bg: var(--status-danger-bg);
+  --status-border: var(--status-danger-border);
+  --status-text: var(--status-danger-text);
+  --status-dot: var(--status-danger-dot);
+}
+/* violet 退出状态体系，只允许分类标签继续使用。 */
 .pm-badge.violet { border-color: var(--pm-violet-border); background: var(--pm-violet-soft); color: var(--pm-violet-text); }
-.pm-badge.amber { border-color: var(--pm-amber-border); background: var(--pm-amber-soft); color: var(--pm-amber-text); }
-.pm-badge.blue { border-color: var(--pm-sky-border); background: var(--pm-sky-soft); color: var(--pm-sky-text); }
-.pm-badge.green { border-color: var(--pm-green-border); background: var(--pm-green-soft); color: var(--pm-green-text); }
 .pm-badge-stack { gap: 4px; }
 .pm-num-badge { background: var(--pm-red); font-weight: 500; }
 .pm-num-badge, .pm-filter-count { font-variant-numeric: tabular-nums; }

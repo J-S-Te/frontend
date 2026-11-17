@@ -1256,13 +1256,13 @@
 }
 
 .console-badge.status-active {
-  color: var(--success-text, #15803d);
-  background: var(--success-soft, #ecfdf5);
+  color: var(--status-success-text);
+  background: var(--status-success-bg);
 }
 
 .console-badge.status-disabled {
-  color: var(--text-muted, #64748b);
-  background: var(--surface-content, #f1f5f9);
+  color: var(--status-neutral-text);
+  background: var(--status-neutral-bg);
 }
 
 .console-actions-cell {
@@ -1656,8 +1656,8 @@
 
 .console-badge.status-active,
 .audit-result-success {
-  color: var(--green-text);
-  background: var(--green-bg);
+  color: var(--status-success-text);
+  background: var(--status-success-bg);
 }
 
 .risk-中,

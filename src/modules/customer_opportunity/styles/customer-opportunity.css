@@ -2930,7 +2930,8 @@
 .crm-badge--warning { color: var(--warning-text); background: var(--warning-soft); }
 .crm-badge--danger { color: var(--danger-text); background: var(--danger-soft); }
 .crm-badge--gray { color: var(--crm-placeholder); background: var(--surface-muted); }
-.crm-badge--purple { color: var(--crm-violet-ink); background: var(--crm-violet-soft); }
+/* 状态胶囊不再使用 violet：旧类名保留为 processing 别名，模板后续可统一替换。 */
+.crm-badge--purple { color: var(--status-processing-text); background: var(--status-processing-bg); }
 .crm-tag {
   display: inline-flex;
   align-items: center;

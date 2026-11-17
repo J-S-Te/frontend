@@ -30,6 +30,7 @@ import {
   dateKey,
   isoWeekOf,
   statusTone,
+  statusToneMap,
   toDateTimeLocal,
   toggleCodeSelection,
   travelTravelerDefaults,
@@ -79,15 +80,19 @@ test('selectedIDs 兼容中英文分隔符并丢弃空白项', () => {
   assert.deepEqual(selectedIDs(null), [])
 })
 
-test('statusTone 提供统一的语义胶囊色调，未知状态回落 neutral', () => {
-  assert.equal(statusTone('实施中'), 'amber')
-  assert.equal(statusTone('整改中'), 'amber')
-  assert.equal(statusTone('RECTIFYING'), 'amber')
-  assert.equal(statusTone('已签发'), 'blue')
-  assert.equal(statusTone('已完成'), 'green')
-  assert.equal(statusTone('REJECTED'), '风险')
+test('statusTone 输出五档封闭语义：撤销落 warning，未知回落 neutral', () => {
+  assert.equal(statusTone('实施中'), 'processing')
+  assert.equal(statusTone('整改中'), 'warning')
+  assert.equal(statusTone('RECTIFYING'), 'warning')
+  assert.equal(statusTone('已签发'), 'processing')
+  assert.equal(statusTone('已完成'), 'success')
+  assert.equal(statusTone('REJECTED'), 'danger')
+  assert.equal(statusTone('已撤销，待重新制定'), 'warning')
+  assert.equal(statusTone('待制定计划'), 'neutral')
   assert.equal(statusTone('未知状态'), 'neutral')
-  assert.equal(statusTone(' 待处理 '), 'amber')
+  assert.equal(statusTone(' 待处理 '), 'warning')
+  // violet 只允许出现在分类标签，状态词表不得再产出 violet
+  assert.equal(Object.values(statusToneMap).includes('violet'), false)
 })
 
 test('报告阶段中文词表唯一，旧后端缺字段时返回空串', () => {

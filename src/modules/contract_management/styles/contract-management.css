@@ -458,10 +458,11 @@
 .contract-data-table .block.mono,
 .contract-entity-link small { font-size: 12px; }
 .contract-badge { padding: 3px 9px; font-size: var(--fs-xs); border-radius: 999px; }
-.contract-badge.success { color: var(--cm-green-text); }
-.contract-badge.info { color: var(--cm-primary-dark); }
-.contract-badge.warning { color: var(--cm-orange-text); }
-.contract-badge.danger { color: var(--cm-red-text); }
+.contract-badge.success { color: var(--status-success-text); background: var(--status-success-bg); }
+.contract-badge.info, .contract-badge.processing { color: var(--status-processing-text); background: var(--status-processing-bg); }
+.contract-badge.warning { color: var(--status-warning-text); background: var(--status-warning-bg); }
+.contract-badge.danger { color: var(--status-danger-text); background: var(--status-danger-bg); }
+.contract-badge.neutral { color: var(--status-neutral-text); background: var(--status-neutral-bg); }
 .contract-table-footer { padding: 12px 16px; font-size: 12px; }
 /* 只有统一分页条的页脚：右对齐，总数由分页条自己展示，避免同一个数字写两遍。 */
 .contract-table-footer--pager { justify-content: flex-end; }

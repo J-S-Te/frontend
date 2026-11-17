@@ -68,6 +68,28 @@
   --duration-fast: 140ms;
   --duration-base: 200ms;
   --duration-exit: 130ms;
+
+  /* 状态胶囊：唯一语义色板。胶囊只取这五档；violet 等分类色不进状态映射。 */
+  --status-neutral-bg: #f1f5f9;
+  --status-neutral-border: #e2e8f0;
+  --status-neutral-text: #475569;
+  --status-neutral-dot: #64748b;
+  --status-processing-bg: #eff6ff;
+  --status-processing-border: #bfdbfe;
+  --status-processing-text: #1d4ed8;
+  --status-processing-dot: #2563eb;
+  --status-success-bg: #ecfdf5;
+  --status-success-border: #a7f3d0;
+  --status-success-text: #15803d;
+  --status-success-dot: #16a34a;
+  --status-warning-bg: #fef3c7;
+  --status-warning-border: #fde68a;
+  --status-warning-text: #92400e;
+  --status-warning-dot: #b45309;
+  --status-danger-bg: #fef2f2;
+  --status-danger-border: #fecaca;
+  --status-danger-text: #b91c1c;
+  --status-danger-dot: #dc2626;
 }
 
 /* ==========================================================================
@@ -194,6 +216,28 @@
   --ui-state-retry-border: var(--border);
   --ui-state-spinner-track: #1e3054;
   --ui-state-spinner-active: var(--primary-ink);
+
+  /* 状态胶囊（深色）：与浅色同一套语义，只换色值；文字对比度均 ≥6.2:1。 */
+  --status-neutral-bg: #23304a;
+  --status-neutral-border: #2f4059;
+  --status-neutral-text: #bccbe0;
+  --status-neutral-dot: #93a6bf;
+  --status-processing-bg: #14233d;
+  --status-processing-border: #2c4470;
+  --status-processing-text: #7db4ff;
+  --status-processing-dot: #60a5fa;
+  --status-success-bg: #0e2a1f;
+  --status-success-border: #1f4a37;
+  --status-success-text: #4ade80;
+  --status-success-dot: #22c55e;
+  --status-warning-bg: #2b2111;
+  --status-warning-border: #5a4320;
+  --status-warning-text: #fbbf24;
+  --status-warning-dot: #f59e0b;
+  --status-danger-bg: #2c1418;
+  --status-danger-border: #5c2630;
+  --status-danger-text: #f87171;
+  --status-danger-dot: #ef4444;;
 }
 
 /* 深色下焦点环必须比浅色更亮，否则在深底上不可见；只改颜色，宽度/偏移沿用各模块。 */
@@ -1058,4 +1102,19 @@ button {
 :root[data-theme="dark"] .mobile-brand,
 :root[data-theme="dark"] .mobile-brand small {
   color: var(--text);
+}
+
+/* 主题切换：仅用户点击路径会创建 View Transition（见 themeTransition.js），
+   其余路径不产生过渡；降敏时强制取消，双保险。 */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 180ms;
+  animation-timing-function: var(--ease-standard);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none;
+  }
 }

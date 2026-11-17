@@ -132,12 +132,12 @@
 .da-source-code { color: var(--da-faint) !important; font-size: var(--fs-xs) !important; }
 .da-table-panel > footer { display: flex; justify-content: space-between; padding: 12px 16px; background: var(--da-soft); color: var(--da-muted); font-size: 12px; }
 .da-shell .mono { font-family: "SFMono-Regular", Consolas, monospace; font-size: 12px; color: var(--da-muted); }
-.da-badge { display: inline-flex; align-items: center; justify-content: center; width: fit-content; padding: 3px 9px; border-radius: 999px; background: var(--da-blue-soft); color: var(--da-blue-dark); font-size: var(--fs-xs); font-weight: 700; white-space: nowrap; }
-.da-badge.normal{ color: var(--da-green-text); background: var(--da-green-soft); }
-.da-badge.warning { color: var(--da-amber-text); background: var(--da-amber-soft); }
-.da-badge.risk, .da-badge.high { color: var(--da-red-text); background: var(--da-red-soft); }
-.da-badge.info { color: var(--da-sky-text); background: var(--da-sky-soft); }
-.da-badge.neutral { color: var(--da-body); background: var(--surface-content, #f1f5f9); }
+.da-badge { display: inline-flex; align-items: center; justify-content: center; width: fit-content; padding: 3px 9px; border-radius: var(--radius-pill, 999px); background: var(--status-neutral-bg); color: var(--status-neutral-text); font-size: var(--fs-xs); font-weight: 700; white-space: nowrap; }
+.da-badge.normal, .da-badge.success { color: var(--status-success-text); background: var(--status-success-bg); }
+.da-badge.warning { color: var(--status-warning-text); background: var(--status-warning-bg); }
+.da-badge.risk, .da-badge.high, .da-badge.danger { color: var(--status-danger-text); background: var(--status-danger-bg); }
+.da-badge.info, .da-badge.processing { color: var(--status-processing-text); background: var(--status-processing-bg); }
+.da-badge.neutral { color: var(--status-neutral-text); background: var(--status-neutral-bg); }
 
 /* —— 统计条与筛选 —— */
 .da-summary-strip { display: grid; grid-template-columns: repeat(4, 1fr); margin-bottom: 16px; overflow: hidden; border: 1px solid var(--da-line); border-radius: 12px; background: var(--surface-card, #fff); box-shadow: var(--da-shadow); }

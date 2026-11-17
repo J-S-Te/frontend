@@ -15,6 +15,7 @@ import {
 } from '@/modules/platform/auth/utils/authorizationRefresh'
 import { installDocumentThemeSync, syncDocumentTheme } from '@/modules/platform/shared/composables/useDocumentTheme'
 import { installTableScrollAffordance } from '@/modules/shared/composables/useTableScrollAffordance'
+import { installModalGuard } from '@/modules/shared/utils/modalGuard'
 import ErrorBoundary from '@/modules/shared/errors/ErrorBoundary.vue'
 import GlobalErrorToasts from '@/modules/shared/errors/GlobalErrorToasts.vue'
 import FirstRunGuideHost from '@/modules/platform/first-run/components/FirstRunGuideHost.vue'
@@ -29,6 +30,8 @@ const disposeDocumentTheme = installDocumentThemeSync()
 // 宽表格的边缘提示只有一个实现：滚动容器父元素上的覆盖层 + 滚动状态 class。
 // 挂载期只加 class / CSS 变量，不改业务 DOM，因此不影响各模块的 SSR golden。
 const disposeTableScrollAffordance = installTableScrollAffordance()
+// 弹窗守护同样只装一次：手写 modal 不逐页改造，统一在这里锁滚动、隔离背景并收拢焦点。
+const disposeModalGuard = installModalGuard()
 // 从门户跳进业务模块时立即对齐主题：同标签页切换偏好不会触发 storage 事件，
 // 路由变化是这条路径上最可靠的重读时机。
 watch(() => route.fullPath, () => {
@@ -216,6 +219,7 @@ window.addEventListener('focus', onPageVisible)
 onBeforeUnmount(() => {
   disposeDocumentTheme()
   disposeTableScrollAffordance()
+  disposeModalGuard()
   stopAuthorizationRefresh()
   window.removeEventListener('visibilitychange', onPageVisible)
   window.removeEventListener('focus', onPageVisible)

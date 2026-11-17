@@ -1039,31 +1039,37 @@
 .settlement-badge {
   display: inline-flex;
   align-items: center;
-  padding: 4px 9px;
+  padding: 4px 10px;
   font-size: 12px;
   font-weight: 600;
   line-height: 1.4;
-  border-radius: 7px;
+  border-radius: var(--radius-pill, 999px);
 }
+/* 统一取五档语义 token：原 #059669(3.58:1)、#d97706(2.86:1)、#dc2626(4.41:1) 不达 AA。 */
 .settlement-badge.tone-success {
-  color: #059669;
-  background: var(--success-soft, #ecfdf5);
+  color: var(--status-success-text);
+  background: var(--status-success-bg);
 }
 .settlement-badge.tone-warning {
-  color: #d97706;
-  background: var(--warning-soft, #fef3c7);
+  color: var(--status-warning-text);
+  background: var(--status-warning-bg);
 }
 .settlement-badge.tone-info {
-  color: var(--primary-ink, #2563eb);
-  background: var(--primary-soft, #eff6ff);
+  color: var(--status-processing-text);
+  background: var(--status-processing-bg);
 }
 .settlement-badge.tone-danger {
-  color: var(--danger-ink, #dc2626);
-  background: var(--danger-soft, #fef2f2);
+  color: var(--status-danger-text);
+  background: var(--status-danger-bg);
+}
+.settlement-badge.tone-purple {
+  /* 状态胶囊不再使用 violet：旧类名保留为 processing 别名。 */
+  color: var(--status-processing-text);
+  background: var(--status-processing-bg);
 }
 .settlement-badge.tone-gray {
-  color: var(--text-muted, #64748b);
-  background: var(--surface-content, #f1f5f9);
+  color: var(--status-neutral-text);
+  background: var(--status-neutral-bg);
 }
 .settlement-table-empty {
   padding: 42px !important;

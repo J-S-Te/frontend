@@ -128,6 +128,7 @@ onBeforeUnmount(deactivate)
         ref="overlay"
         class="ui-form-dialog"
         :class="overlayClass"
+        data-ui-dialog-managed="true"
         @mousedown.self="requestClose('backdrop')"
       >
         <article

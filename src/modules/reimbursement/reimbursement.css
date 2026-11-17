@@ -521,8 +521,9 @@
 }
 
 .expense-badge.purple {
-  background: var(--exp-purple-soft);
-  color: var(--exp-purple);
+  /* 状态胶囊不再使用 violet：旧类名保留为 processing 别名。 */
+  background: var(--status-processing-bg);
+  color: var(--status-processing-text);
 }
 
 .expense-badge.gray {
