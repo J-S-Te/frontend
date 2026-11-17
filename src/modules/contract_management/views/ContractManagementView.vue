@@ -45,6 +45,8 @@ import {
 import { formatBusinessDate } from '../../shared/utils/businessTime.js'
 import { cloneNormalizedSigningRecord, isNormalizedSigningRecord } from '@/modules/contract_management/utils/signingRecord.js'
 import ContractReportsPanel from '@/modules/contract_management/components/ContractReportsPanel.vue'
+import ContractRecordManager from '../components/ContractRecordManager.vue'
+import { canManageContractRecords } from '../utils/contractRecord.js'
 import AsyncPanel from '@/modules/shared/components/AsyncPanel.vue'
 import {
   changeContractStatus,
@@ -559,6 +561,20 @@ const approvalTargetUsers = computed(() => {
     && (user.roles || []).some((roleCode) => contractRole(roleCode)?.permissions?.includes('approval.process')))
 })
 const can = (permission) => hasContractPermission(session.value, permission)
+const canManageRecords = computed(() => canManageContractRecords(session.value))
+const contractRecordState = ref('active')
+const contractRecordManager = ref(null)
+let businessDataSequence = 0
+watch(canManageRecords, (allowed) => { if (!allowed) contractRecordState.value = 'active' })
+
+// contractRecordChanged 用途：按明确结果收起旧详情并刷新正常数据，回收站保持独立集合。
+// 参数：result 为已核验的当前记录状态回执。
+// 返回值：异步完成；读取失败由原有区域错误提示承担，不重新执行删除或恢复。
+async function contractRecordChanged(result) {
+  if (selectedContract.value?.recordId === result.id) closeContract()
+  showToast(`已确认合同当前${result.record_state === 'deleted' ? '已删除' : '已恢复'}。`)
+  await loadBusinessData()
+}
 const isAdmin = computed(() => {
   const roleCodes = Array.isArray(session.value?.roles) ? session.value.roles : []
   return roleCodes.includes('admin') || session.value?.role?.code === 'admin'
@@ -1698,6 +1714,7 @@ function ruleConditionSummary(rule) {
 // 参数：无；使用当前会话、筛选及分页状态。
 // 返回值：异步完成；各区域读取错误独立展示，不冒充业务写入失败。
 async function loadBusinessData() {
+  const sequence = ++businessDataSequence
   // 各区域按权限独立加载并用 allSettled 汇总，单个非关键接口失败不会清空已经
   // 成功的数据。权限仍由后端逐接口执行，这里的条件只避免发起无意义请求。
   businessDataLoading.value = true
@@ -1711,7 +1728,7 @@ async function loadBusinessData() {
     addRequest('我发起的审批', ['dashboard', 'approvals'], listApprovals({ limit: 200 }).then(setInitiatedApprovals))
   }
   if (can('contract.read')) {
-    addRequest('合同统计', ['dashboard', 'reports'], getContractDashboard().then((summary) => { adminDashboard.value = summary }))
+    addRequest('合同统计', ['dashboard', 'reports'], getContractDashboard().then((summary) => { if (sequence === businessDataSequence) adminDashboard.value = summary }))
   } else {
     adminDashboard.value = null
   }
@@ -1729,6 +1746,7 @@ async function loadBusinessData() {
     if (expiry) ledgerQuery.expired = expiry === 'true'
     if (typeFilter.value) ledgerQuery.type = typeFilter.value
     addRequest('合同台账', ['dashboard', 'contracts', 'signing', 'reports'], listContracts(ledgerQuery).then((page) => {
+      if (sequence !== businessDataSequence) return
       contracts.value = page.items.map(normalizeContract)
       ledgerTotal.value = page.total
       // 深链页码可能超出真实页数（筛选命中变少、URL 被手工改大、或并发删除）：
@@ -1738,6 +1756,7 @@ async function loadBusinessData() {
       if (clampedPage === ledgerPage.value) return
       ledgerPage.value = clampedPage
       return listContracts({ ...ledgerQuery, page: clampedPage }).then((clamped) => {
+        if (sequence !== businessDataSequence) return
         contracts.value = clamped.items.map(normalizeContract)
         ledgerTotal.value = clamped.total
       })
@@ -1759,6 +1778,7 @@ async function loadBusinessData() {
     addRequest('签单关联核对', ['intakes'], loadOpportunityIntakes())
   }
   const results = await Promise.allSettled(requests.map((request) => request.promise))
+  if (sequence !== businessDataSequence) return
   const failures = results.filter((result) => result.status === 'rejected')
   // API 客户端已在第一次 401 时发起单次 OIDC 跳转。页面不再把多个并发 401
   // 拼成重复的“登录状态无效”提示，避免跳转前出现误导性错误横幅。
@@ -2880,6 +2900,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  businessDataSequence++
   resetCRMDirectoryConnection()
   // 卸载后停止正在进行的导出台账分页读取，避免离开页面后继续请求并提示。
   exportCancelled = true
@@ -2930,7 +2951,7 @@ onBeforeUnmount(() => {
       <header class="contract-topbar">
         <button ref="menuButton" class="contract-menu-button" type="button" aria-label="打开菜单" :aria-expanded="mobileMenuOpen ? 'true' : 'false'" aria-controls="contract-sidebar" @click="mobileMenuOpen = true"><ConsoleIcon name="menu" /></button>
         <div class="contract-breadcrumb"><span>合同管理系统</span><ConsoleIcon name="chevron" /><strong>{{ pageMeta.title }}</strong></div>
-        <label class="contract-global-search" :class="{ 'is-scope-disabled': activeSection !== 'contracts' }" :title="activeSection === 'contracts' ? '仅筛选合同台账列表' : '搜索仅限合同台账'"><ConsoleIcon name="search" /><input v-model="keyword" type="search" maxlength="100" autocomplete="off" :disabled="activeSection !== 'contracts'" :aria-label="activeSection === 'contracts' ? '搜索合同台账' : '搜索仅限合同台账'" :placeholder="activeSection === 'contracts' ? '搜索合同台账（编号 / 名称 / 类型）…' : '搜索仅限合同台账'" @change="reloadLedger" /></label>
+        <label class="contract-global-search" :class="{ 'is-scope-disabled': activeSection !== 'contracts' }" :title="activeSection === 'contracts' ? '仅筛选合同台账列表' : '搜索仅限合同台账'"><ConsoleIcon name="search" /><input v-model="keyword" type="search" maxlength="100" autocomplete="off" :disabled="activeSection !== 'contracts' || contractRecordState !== 'active'" :aria-label="activeSection === 'contracts' ? '搜索合同台账' : '搜索仅限合同台账'" :placeholder="activeSection === 'contracts' ? '搜索合同台账（编号 / 名称 / 类型）…' : '搜索仅限合同台账'" @change="reloadLedger" /></label>
         <div class="contract-topbar-actions">
           <ShellPreferences sidebar-id="contract-sidebar" @collapse-change="desktopSidebarCollapsed = $event" />
           <OperationInboxPanel />
@@ -2964,7 +2985,7 @@ onBeforeUnmount(() => {
         <header class="contract-page-head" data-first-run-anchor="subsystem-title">
           <div><h1>{{ pageMeta.title }}</h1><p>{{ pageDescription }}</p></div>
           <div class="contract-page-actions">
-            <button v-if="['contracts', 'reports'].includes(activeSection)" class="contract-button secondary" type="button" :disabled="exportBusy" :aria-busy="exportBusy ? 'true' : 'false'" @click="exportContracts"><ConsoleIcon name="export" />{{ exportBusy ? '正在导出…' : '导出' }}</button>
+            <button v-if="activeSection === 'reports' || (activeSection === 'contracts' && contractRecordState === 'active')" class="contract-button secondary" type="button" :disabled="exportBusy" :aria-busy="exportBusy ? 'true' : 'false'" @click="exportContracts"><ConsoleIcon name="export" />{{ exportBusy ? '正在导出…' : '导出' }}</button>
             <button v-if="activeSection === 'rules' && can('approval_rule.manage')" class="contract-button primary" type="button" @click="openNewRule">＋ 新增规则</button>
             <button v-if="activeSection === 'templates' && isAdmin" class="contract-button primary" type="button" @click="openTemplateUpload">＋ 上传模板</button>
             <button v-if="standardPriceCatalogEnabled && (can('contract.pricing.manage') || can('contract.pricing.publish'))" type="button" class="contract-button secondary" @click="standardPricesOpen = !standardPricesOpen">{{ standardPricesOpen ? '收起标准价格' : '标准价格目录' }}</button>
@@ -2984,10 +3005,15 @@ onBeforeUnmount(() => {
           :can-preview="can('contract.import.preview')" :can-commit="can('contract.import.commit')"
           :can-approve="can('contract.import.approve')" :can-release="can('contract.import.release')"
           :can-manage-auto-approve="isAdmin"
+          :can-recheck-deleted-reports="isAdmin && (session?.permissions || []).includes('contract.import.release')"
           :section="activeSection"
           :default-open="activeSection === 'imports'"
           :actor-id="session?.identity_id || session?.user_id || ''" :initial-batch-id="String(route.query.import_batch || '')"
           :supported-modes="contractSourceCapabilities.supported_modes || ['NORMAL']" />
+
+        <ContractRecordManager v-if="canManageRecords" ref="contractRecordManager"
+          v-model="contractRecordState" :show-browser="activeSection === 'contracts'"
+          @changed="contractRecordChanged" />
 
         <template v-if="activeSection === 'dashboard'">
           <section v-if="isAdmin" class="contract-stat-grid contract-admin-stat-grid">
@@ -3050,7 +3076,7 @@ onBeforeUnmount(() => {
 <!--           <p v-if="customerQueryCopyHint" class="contract-session-info" role="status">{{ customerQueryCopyHint }}</p> -->
 <!--         </template> -->
 
-        <template v-else-if="activeSection === 'contracts'">
+        <template v-else-if="activeSection === 'contracts' && contractRecordState === 'active'">
           <div class="contract-filter-bar"><label class="contract-search-field"><ConsoleIcon name="search" /><input v-model="keyword" type="search" maxlength="100" autocomplete="off" placeholder="合同编号 / 名称 / 类型" @change="reloadLedger" /></label><label><span>状态</span><select v-model="statusFilter" aria-label="按合同状态筛选" title="「已过期」/「未过期」按服务端 expired=true/false 筛选：已过期为状态为已生效/履约中/待付款且到期日早于今天，未过期为其反面；同一时刻只能选一个状态" @change="reloadLedger"><option v-for="option in ledgerStatusOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label title="按合同类型筛选（服务端 GET /contracts?type=… 精确匹配合同类型）"><span>类型</span><select v-model="typeFilter" aria-label="按合同类型筛选" @change="reloadLedger"><option value="">全部类型</option><option v-for="value in contractTypeOptions" :key="value" :value="value">{{ value }}</option></select></label><button class="contract-button ghost small" type="button" @click="resetFilters"><ConsoleIcon name="reset" />重置</button><button class="contract-button primary small" type="button" @click="loadBusinessData"><ConsoleIcon name="reset" />刷新</button></div>
           <div class="contract-table-card">
             <div class="contract-table-scroll">
@@ -3076,7 +3102,11 @@ onBeforeUnmount(() => {
                     <td><span class="contract-badge" :class="statusTone(contract.displayStatus)"><i></i>{{ contract.displayStatus }}</span></td>
                     <td>{{ contract.startDate || '—' }}</td>
                     <td>{{ contract.endDate || '—' }}</td>
-                    <td><button class="contract-text-button" type="button" @click="openContract(contract)">详情</button></td>
+                    <td><button class="contract-text-button" type="button" @click="openContract(contract)">详情</button>
+                      <details v-if="canManageRecords" class="contract-record-more"><summary>更多</summary>
+                        <button type="button" class="contract-text-button" @click="contractRecordManager?.openRecord(contract.recordId)">删除合同</button>
+                      </details>
+                    </td>
                   </tr>
                   <tr v-if="!filteredContracts.length && !businessDataError && !businessDataLoading">
                     <td colspan="8"><EmptyState compact title="当前没有可查看的合同"><button v-if="ledgerFiltersActive" type="button" class="contract-button secondary small" @click="resetFilters">重置筛选</button></EmptyState></td>
@@ -3224,8 +3254,8 @@ onBeforeUnmount(() => {
         <div class="contract-detail-highlight"><div><span>合同金额</span><strong>{{ formatContractAmount(selectedContract) }}</strong></div><div><span>更新日期</span><strong>{{ selectedContract.updatedAt }}</strong></div><div><span>负责人姓名</span><strong>{{ selectedContract.owner }}</strong></div></div>
         <section><h3>基本信息</h3><dl><div><dt>合同类型</dt><dd>{{ selectedContract.type }}</dd></div><div><dt>服务类型</dt><dd>{{ selectedContract.serviceType }}</dd></div><div><dt>创建日期</dt><dd>{{ selectedContract.createdAt }}</dd></div><div><dt>到期日期</dt><dd>{{ selectedContract.endDate }}</dd></div></dl></section>
         <section><h3>合同内容</h3><div v-if="selectedContractPreviewLoading" class="contract-modal-loading">正在读取格式化合同…</div><p v-else-if="selectedContractPreviewError" class="contract-session-error">{{ selectedContractPreviewError }}</p><ContractPDFPreview v-else-if="selectedContractPreviewPDF" :descriptor="selectedContractPreviewPDF" title="合同 PDF 原件" /><ContractDocumentPreview v-else-if="selectedContractPreviewHTML" class="contract-saved-document-preview" title="合同正文预览" :html="selectedContractPreviewHTML" /><p v-else class="contract-approval-summary">{{ selectedContract.content || '未填写合同内容' }}</p><label v-if="selectedContract.status === '草稿' && selectedContract.canEditDraft" class="contract-check-label"><input v-model="termsIdentical" type="checkbox" /><span>本合同条款与关联历史合同一致（参与审批规则匹配）</span></label></section>
-        <section><h3>流转明细</h3><div v-if="selectedContractLifecycleLoading" class="contract-modal-loading">正在读取流转明细…</div><p v-else-if="selectedContractLifecycleError" class="contract-session-error">{{ selectedContractLifecycleError }}</p><div v-else-if="selectedContractLifecycle.length" class="contract-action-log"><div v-for="event in selectedContractLifecycle" :key="event.id"><strong>{{ contractStatusLabel(event.from_status) }} → {{ contractStatusLabel(event.to_status) }}</strong><span>{{ event.actor_user_id === 'SYSTEM' ? '系统' : displayNameFor(event.actor_user_id) }}</span><p>{{ lifecycleReason(event.reason) }} · {{ formatDateTime(event.occurred_at) }}</p></div></div><p v-else class="contract-approval-summary">暂无流转记录</p></section>
-        <footer><button class="contract-button secondary" type="button" @click="closeContract">关闭</button><button v-if="selectedContract.canEditDraft" class="contract-button secondary" type="button" :disabled="draftEditLoading || submittingContract" @click="editContractDraft(selectedContract)">{{ draftEditLoading ? '正在读取…' : '返回上一步编辑' }}</button><button v-if="statusChangeTargets.length" class="contract-button secondary" type="button" @click="openStatusChange">变更状态</button><button v-if="selectedContract.status === '草稿' && selectedContract.canEditDraft" class="contract-button primary" type="button" :disabled="submittingContract" @click="submitSelectedContract">{{ submittingContract ? '正在提交…' : '提交审批' }}</button></footer>
+        <section><h3>流转明细</h3><div v-if="selectedContractLifecycleLoading" class="contract-modal-loading">正在读取流转明细…</div><p v-else-if="selectedContractLifecycleError" class="contract-session-error">{{ selectedContractLifecycleError }}</p><div v-else-if="selectedContractLifecycle.length" class="contract-action-log"><div v-for="event in selectedContractLifecycle" :key="event.id"><strong>{{ event.event_type === 'DELETE' ? '删除合同' : event.event_type === 'RESTORE' ? '恢复合同' : `${contractStatusLabel(event.from_status)} → ${contractStatusLabel(event.to_status)}` }}</strong><span>{{ event.actor_user_id === 'SYSTEM' ? '系统' : displayNameFor(event.actor_user_id) }}</span><p>{{ lifecycleReason(event.reason) }} · {{ formatDateTime(event.occurred_at) }}</p></div></div><p v-else class="contract-approval-summary">暂无流转记录</p></section>
+        <footer><button class="contract-button secondary" type="button" @click="closeContract">关闭</button><button v-if="canManageRecords" class="contract-button secondary" type="button" @click="contractRecordManager?.openRecord(selectedContract.recordId)">删除合同</button><button v-if="selectedContract.canEditDraft" class="contract-button secondary" type="button" :disabled="draftEditLoading || submittingContract" @click="editContractDraft(selectedContract)">{{ draftEditLoading ? '正在读取…' : '返回上一步编辑' }}</button><button v-if="statusChangeTargets.length" class="contract-button secondary" type="button" @click="openStatusChange">变更状态</button><button v-if="selectedContract.status === '草稿' && selectedContract.canEditDraft" class="contract-button primary" type="button" :disabled="submittingContract" @click="submitSelectedContract">{{ submittingContract ? '正在提交…' : '提交审批' }}</button></footer>
       </article>
     </div>
 
