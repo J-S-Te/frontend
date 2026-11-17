@@ -72,6 +72,14 @@ test('审批显式刷新与后台轮询并发时不丢刷新', async () => {
   assert.match(source, /if \(approvalRealtimePending\) \{\s*approvalRealtimePending = false\s*void refreshApprovalRealtime\(\)/)
 })
 
+test('审批完成后动作按钮跟随服务端终态更新', async () => {
+  const source = await read('contract_management/views/ContractManagementView.vue')
+  assert.match(source, /const canActOnApproval = computed\(\(\) => can\('approval\.process'\)/)
+  assert.match(source, /v-if="canActOnApproval" class="contract-advanced-actions"/)
+  assert.match(source, /v-if="canActOnApproval" class="contract-button primary"/)
+  assert.match(source, /selectedApproval\.value = \{ \.\.\.selectedApproval\.value, status: detailResult\.value\.state\.status \}/)
+})
+
 test('状态同步样式使用轻量指示和行过渡，不引入整页闪烁', async () => {
   const styles = await read('project_management/styles/project-management.css')
   assert.match(styles, /\.pm-sync-status \{/)
