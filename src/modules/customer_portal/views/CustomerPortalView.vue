@@ -1,5 +1,5 @@
 <script setup>
-import { loginUsername } from "@/modules/shared/loginUsername.mjs"
+import { useLoginUsername } from '@/modules/shared/composables/useLoginUsername.js'
 import OperationToast from '@/modules/shared/components/OperationToast.vue'
 import ListState from '@/modules/shared/components/ListState.vue'
 import LoadingState from '@/modules/shared/components/LoadingState.vue'
@@ -105,7 +105,7 @@ const feedbackSubmitError = ref('')
 const feedbackContactError = ref('')
 const section = computed(() => ['reports', 'filings', 'feedback', 'security'].includes(route.params.section) ? route.params.section : 'projects')
 const sectionTitle = computed(() => ({ projects: '我的项目', reports: '电子报告', filings: '等保备案', feedback: '客户反馈', security: '账号安全' })[section.value] || '客户自助门户')
-const currentLoginUsername = computed(() => loginUsername(session.value))
+const currentLoginUsername = useLoginUsername(session)
 const accountInitial = computed(() => {
   const label = currentLoginUsername.value
   return label.trim().slice(0, 1).toUpperCase() || '客'

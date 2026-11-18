@@ -1,5 +1,5 @@
 <script setup>
-import { loginUsername } from "@/modules/shared/loginUsername.mjs"
+import { useLoginUsername } from '@/modules/shared/composables/useLoginUsername.js'
 import ShellPreferences from '@/modules/shared/components/ShellPreferences.vue'
 import { useSidebarNavigation } from '@/modules/shared/composables/useSidebarNavigation.js'
 import { readSidebarCollapsed } from '@/modules/shared/utils/shellPreferences.js'
@@ -550,7 +550,7 @@ const currentRoleLabel = computed(() => {
   const labels = [...new Set(roleCodes.map(roleLabel))]
   return labels.length ? labels.join('、') : session.value?.role?.name || '未分配角色'
 })
-const currentLoginUsername = computed(() => loginUsername(session.value))
+const currentLoginUsername = useLoginUsername(session)
 const currentUserInitial = computed(() => currentLoginUsername.value.slice(0, 1).toUpperCase())
 const userDirectory = computed(() => Array.isArray(session.value?.user_directory) ? session.value.user_directory : [])
 const approvalTargetUsers = computed(() => {
