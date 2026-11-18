@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { deleteReadNotifications, getNotification, listInbox, markNotificationRead } from '@/modules/platform/notifications/api/notifications'
+import { deleteReadNotifications, getNotification, getUnreadCount, listInbox, markNotificationRead } from '@/modules/platform/notifications/api/notifications'
 import { formatBusinessDateTime } from '@/modules/shared/utils/businessTime.js'
 import { formatUserError } from '@/modules/shared/utils/userError.js'
 import ConfirmDialog from '@/modules/shared/components/ConfirmDialog.vue'
@@ -35,13 +35,15 @@ async function load() {
   error.value = ''
   try {
     const params = { page: page.value, pageSize: props.pageSize, ...scopeParams() }
-    const [result, unreadPage] = await Promise.all([
+    // 未读数必须走专用计数接口，不能再用 pageSize=1 的列表总数反推：
+    // 列表受分页/来源过滤影响，反推早晚会和徽标口径分叉。
+    const [result, unreadResult] = await Promise.all([
       listInbox(params),
-      listInbox({ ...params, page: 1, pageSize: 1, unreadOnly: true }),
+      getUnreadCount(scopeParams()),
     ])
     items.value = result?.items || []
     total.value = Number(result?.total || 0)
-    unread.value = Number(unreadPage?.total || 0)
+    unread.value = Number(unreadResult?.unread_count || 0)
     emit('unread-change', unread.value)
     if (page.value > pages.value) { page.value = pages.value; await load() }
   } catch (e) {
