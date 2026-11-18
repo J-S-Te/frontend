@@ -204,7 +204,7 @@ test('高密度工作台在桌面与窄屏下保持可导航和可理解', () =>
   assert.doesNotMatch(source, /style="width: 90px; min-width: 90px;"/)
   assert.match(styles, /\.pm-col-actions \{ width: 90px; min-width: 90px; text-align: right; \}/)
   assert.match(source, /class="pm-table pm-responsive-list"/)
-  assert.match(source, /data-label="项目 \/ 客户"/)
+  assert.match(source, /data-label="客户"/)
   assert.match(styles, /@media \(max-width: 760px\) \{[\s\S]*?\.pm-responsive-list tbody tr \{ display: grid;/)
 
   // 仪表盘 KPI 最多保留标签、数值、说明三层。
