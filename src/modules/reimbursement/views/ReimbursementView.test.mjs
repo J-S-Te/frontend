@@ -78,6 +78,7 @@ async function mountPage(permissions, request, section = 'dashboard', roles = []
   })
   const dependencies = { ...claimPresentation, ...workspaceState, ...workspace, ...invoiceClassification, allocationInput, travelInput,frontendModules,sourceSHA256,
     ConsoleIcon: { props: ['name'], setup: () => () => Vue.h('svg') },
+    AnimatedNumber: { props: ['value'], setup: (props) => () => Vue.h('span', String(props.value)) },
     computed: Vue.computed, nextTick: Vue.nextTick, onBeforeUnmount: Vue.onBeforeUnmount,
     onMounted: Vue.onMounted, ref: Vue.ref, watch: Vue.watch, useRoute: () => route, useRouter: () => router,
     onBeforeRouteLeave() {}, onBeforeRouteUpdate: () => {}, PaginationBar: PaginationBarStub, InvoiceCandidateCards,

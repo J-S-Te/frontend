@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 import ConsoleIcon from '@/modules/shared/components/ConsoleIcon.vue'
+import AnimatedNumber from '@/modules/shared/components/AnimatedNumber.vue'
 import { dunningActionStatusLabel, dunningCaseStatusLabel, formatSettlementAmount } from '@/modules/settlement/utils/settlementDisplay'
 
 // 账龄与催收区面板（治理批次 5 结算·第三步，模板自 SettlementView.vue 催收区逐字提取；
@@ -90,7 +91,7 @@ const policyRecipientAccount = computed({
         :class="`tone-${item.tone}`"
       >
         <span>{{ item.label }}</span
-        ><b>{{ item.value }}</b
+        ><b><AnimatedNumber :value="item.value" /></b
         ><small>{{ item.note }}</small>
       </article>
     </section>
