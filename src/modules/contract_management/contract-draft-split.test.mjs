@@ -72,6 +72,7 @@ function viewHarness(overrides = {}) {
   }
   const deps = {
     ...state,
+    can: () => true,
     syncManagedTemplateValues: () => {},
     buildNewContractPayload: () => ({ title: '合同 A', crm_customer_id: 7, payment_terms: [] }),
     validateExternalContract: () => {},
@@ -102,6 +103,17 @@ function viewHarness(overrides = {}) {
   const host = new Function(...Object.keys(deps), `${functionSources(viewScript, names)}; return { ${names.join(',')} };`)(...Object.values(deps))
   return { ...state, ...deps, calls, host }
 }
+
+test('授权已收回时保留合同草稿且不发送保存请求', async () => {
+  for (const editing of [null, { id: 'existing' }]) {
+    const ui = viewHarness({ can: () => false, editingContract: ref(editing) })
+    await ui.host.submitNewContract({ submitter: { dataset: { action: 'save' } } })
+    assert.equal(ui.calls.create + ui.calls.external + ui.calls.saveDraft + ui.calls.update, 0)
+    assert.equal(ui.newContract.value.title, '合同 A')
+    assert.equal(ui.createDialogOpen.value, true)
+    assert.match(ui.calls.toast[0], /没有保存此合同的权限/)
+  }
+})
 
 test('拆分后草稿表单仍由页面提交一次：重复点击不会重复创建合同', async () => {
   const ui = viewHarness()

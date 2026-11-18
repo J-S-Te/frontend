@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
+import { openNotificationTarget } from '../../shared/utils/notificationNavigation.js'
 
 test('旧审批入口和通知目的地通过统一页打开指定申请，无导航授权时给明确反馈', async () => {
   const source = readFileSync(new URL('./ProjectManagementView.vue', import.meta.url), 'utf8')
@@ -11,8 +12,9 @@ test('旧审批入口和通知目的地通过统一页打开指定申请，无�
     return body
   })
   const pushes = [], notices = []
-  const context = { URLSearchParams, navigation: { value: { sections: ['approvals'] } },
-    router: { push: async target => pushes.push(target) }, mobileMenuOpen: { value: true },
+  const context = { URLSearchParams, openNotificationTarget,
+    navigation: { value: { sections: ['approvals'] } },
+    router: { push: async target => { pushes.push(target) } }, mobileMenuOpen: { value: true },
     showToast: message => notices.push(message), formatUserError: error => error.message }
   const run = vm.runInNewContext(`${functions.join('\n')}\nopenApprovalRequest`, context)
   await run('req-1')

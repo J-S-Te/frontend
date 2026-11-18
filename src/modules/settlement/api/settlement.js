@@ -1,3 +1,5 @@
+import { AUTHORIZATION_REFRESH_HEADERS, createAuthorizationSnapshotReader }
+  from '../../shared/authz/authorizationSnapshot.js'
 import { attachStructuredContext } from "@/modules/platform/shared/api/requestContext.js";
 import { listQuery } from "./pagination.js";
 import { revisionHoldQuery } from "../utils/revisionHold.js";
@@ -16,8 +18,14 @@ const PUBLIC_PATH_PREFIX = (
 const API_BASE_URL = (
   import.meta.env?.VITE_SETTLEMENT_API_BASE_URL || `${PUBLIC_PATH_PREFIX}/api/v1`
 ).replace(/\/$/, "");
-let session = null;
-let sessionPromise = null;
+const settlementSessionReader = createAuthorizationSnapshotReader({
+  load: options => request('/auth/me', { ...options, cache: 'no-store',
+    headers: AUTHORIZATION_REFRESH_HEADERS, suppressLoginRedirect: true }),
+  normalize: normalizeAuthorizationSession,
+  onError: (error, options) => {
+    if (!options.suppressLoginRedirect && shouldStartSubsystemLogin(error)) beginLogin()
+  },
+})
 let loginStarted = false;
 const retryKeys = new Map();
 
@@ -147,7 +155,7 @@ export async function request(path, options = {}) {
       },
       { status: response.status, code: error.code, requestId: error.requestID, traceId: error.traceId },
     );
-    if (shouldStartSubsystemLogin(error)) beginLogin();
+    if (!options.suppressLoginRedirect && shouldStartSubsystemLogin(error)) beginLogin();
     if (
       retryFingerprint &&
       response.status >= 400 &&
@@ -202,22 +210,17 @@ function settlementDownloadTimeoutError(cause, path, method) {
   return error;
 }
 
+// 用途：clearSettlementSessionCache 清空授权快照并隔离旧请求。
+// 参数：无。
+// 返回值：无；不影响服务器会话。
 export function clearSettlementSessionCache() {
-  session = null;
-  sessionPromise = null;
+  settlementSessionReader.clear()
 }
+// 用途：getSettlementSession 取得最新有效会话并隔离迟到授权响应。
+// 参数：force 为强制重读标记，保留既有读取及登录跳转选项。
+// 返回值：规范化会话Promise；认证、授权和依赖错误保持原分类。
 export async function getSettlementSession({ force = false } = {}) {
-  if (!force && session) return session;
-  if (!force && sessionPromise) return sessionPromise;
-  sessionPromise = request("/auth/me")
-    .then((value) => {
-      session = normalizeAuthorizationSession(value);
-      return session;
-    })
-    .finally(() => {
-      sessionPromise = null;
-    });
-  return sessionPromise;
+  return settlementSessionReader.read({ force })
 }
 export async function ensureSettlementSession() {
   try {

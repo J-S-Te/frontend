@@ -9,7 +9,7 @@ import LoadingState from '@/modules/shared/components/LoadingState.vue'
 import ErrorState from '@/modules/shared/components/ErrorState.vue'
 import { formatCRMError } from '../api/errorMessages.js'
 import { computed, defineAsyncComponent, defineComponent, h, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef, toRaw, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { NavigationFailureType, useRoute, useRouter } from 'vue-router'
 import { AuthError, logoutCurrentSession } from '@/modules/platform/auth/api/auth'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import { useDictionaryOptions } from '@/modules/platform/dictionaries/composables/useDictionaryOptions.js'
@@ -135,6 +135,7 @@ import { createPresaleReportFilters } from '../composables/usePresaleReportFilte
 import { getUnreadCount } from '@/modules/platform/notifications/api/notifications'
 import PlatformNotificationInbox from '@/modules/shared/components/PlatformNotificationInbox.vue'
 import { listOwnerDirectory } from '../api/ownerDirectory.js'
+import { crmResourceID } from '../navigation.js'
 import {
   addProgress, addWorklog, completePresaleRequest, createPresaleRequest, reopenPresaleRequest, getApprovalHistory, getAssignments, getPresaleRequest,
   getPresaleContactPhone,
@@ -626,6 +627,7 @@ const runtimeCapabilitiesError = ref('')
 const runtimeCapabilitiesLoading = ref(false)
 // 统一收件箱的未读数走平台 scoped 计数；本地 crm_notifications 仅作为投递 outbox/审计。
 const notificationUnreadCount = ref(0)
+
 const stageAlerts = ref([])
 const stageAlertUnreadOnly = ref(false)
 const selectedStageAlert = ref(null)
@@ -639,7 +641,8 @@ const canReadCredit = computed(() => (crmSession.value?.permissions || []).inclu
 const canApplyCredit = computed(() => (crmSession.value?.permissions || []).includes('customer.credit.apply') && (crmSession.value?.roles || []).some((role) => CREDIT_APPLICATION_ROLES.has(role)) && !(crmSession.value?.roles || []).some((role) => CREDIT_APPROVAL_ROLES.has(role)))
 const canApproveCredit = computed(() => hasCreditApprovalAccess(crmSession.value))
 const canManageCreditRules = computed(() => (crmSession.value?.permissions || []).includes('customer.credit.rule.manage'))
-const canReadNotifications = computed(() => canReadOpportunities.value || canReadPresales.value)
+const canReadNotifications = computed(() => canReadOpportunities.value || canReadPresales.value
+  || canApproveCredit.value || canReadCredit.value)
 const canConfigureStageAlerts = computed(() => (crmSession.value?.permissions || []).includes('opportunity.alert.config'))
 const canManagePresaleApprovalRules = computed(() => (crmSession.value?.permissions || []).includes('presale.approval_rule.manage'))
 const canReadCustomerAudit = computed(() => (crmSession.value?.permissions || []).includes('customer.audit.read'))
@@ -1347,8 +1350,21 @@ function retryCustomerTab() {
   else void openCustomerTab(tab)
 }
 
-async function syncPresaleURL() {
+// 用途：生成售前筛选查询，保留通知绑定的申请坐标。
+// 参数：无；读取当前筛选和路由状态。
+// 返回值：可写回 URL 的筛选与有效申请编号。
+function presaleQueryForRoute() {
   const query = presaleStateToQuery(presaleFilters, presaleView.value, presalePage.number, presalePage.size, presaleColumnLimit.value)
+  const id = crmResourceID(route.query.request_id)
+  if (id) query.request_id = String(id)
+  return query
+}
+
+// 用途：把售前筛选状态同步到 URL，同时保留有效详情深链。
+// 参数：无。
+// 返回值：异步完成；仅在查询变化时替换路由。
+async function syncPresaleURL() {
+  const query = presaleQueryForRoute()
   const current = Object.fromEntries(Object.entries(route.query).map(([key, value]) => [key, Array.isArray(value) ? String(value[0] || '') : String(value || '')]))
   if (stableQuery(current) !== stableQuery(query)) await router.replace({ name: route.name, params: route.params, query })
 }
@@ -2269,6 +2285,31 @@ async function submitOpportunityPresale() {
   await loadOpportunityPresales(1)
 }
 
+// 用途：从通知深链读取真实授权售前详情，支持同栏目切换申请。
+// 参数：无；读取当前申请查询参数与会话读取能力。
+// 返回值：异步完成；非法坐标关闭旧详情并提示，不发起业务写入。
+async function openPresaleFromRoute() {
+  if (activeSection.value !== 'presale' || !canReadPresales.value) return
+  const raw = route.query.request_id
+  if (raw === undefined || raw === null || raw === '') return
+  const id = crmResourceID(raw)
+  if (!id) {
+    closePresale()
+    error.value = '售前详情入口无效，请从通知或申请列表重新打开。'
+    return
+  }
+  if (Number(selectedPresale.value?.request?.id) !== id) await openPresale(id)
+}
+
+// 用途：清除信用待审通知筛选，返回当前账号的全部授权待办。
+// 参数：无。
+// 返回值：导航完成的 Promise。
+function clearCreditApprovalTarget() {
+  const query = { ...route.query }
+  delete query.application_id
+  delete query.customer_id
+  return router.replace({ name: 'customer_opportunity', params: { section: 'credit-approvals' }, query })
+}
 async function openOpportunityFromRoute() {
   if (activeSection.value !== 'opportunities') return
   const raw = Array.isArray(route.query.opportunity_id) ? route.query.opportunity_id[0] : route.query.opportunity_id
@@ -3381,7 +3422,7 @@ watch(activeSection, () => {
 watch(() => route.fullPath, () => {
   if (activeSection.value !== 'presale') return
   const current = Object.fromEntries(Object.entries(route.query).map(([key, value]) => [key, Array.isArray(value) ? String(value[0] || '') : String(value || '')]))
-  const expected = presaleStateToQuery(presaleFilters, presaleView.value, presalePage.number, presalePage.size, presaleColumnLimit.value)
+  const expected = presaleQueryForRoute()
   // 组件主动 replace 也会触发 watcher；稳定比较用于打断“状态写 URL—URL 再写状态”循环。
   if (stableQuery(current) === stableQuery(expected)) return
   restorePresaleStateFromURL()
@@ -3389,6 +3430,7 @@ watch(() => route.fullPath, () => {
 })
 watch(() => [activeSection.value, route.query.opportunity_id], openOpportunityFromRoute, { immediate: true })
 watch(() => [activeSection.value, route.query.customer_id], openCustomerFromRoute, { immediate: true })
+watch(() => [activeSection.value, route.query.request_id, canReadPresales.value], openPresaleFromRoute, { immediate: true })
 watch(stageAlertUnreadOnly, loadStageAlerts)
 onMounted(async () => {
   try { crmSession.value = await getCRMSession() } catch (value) { showError(value) }
@@ -3491,7 +3533,10 @@ onMounted(async () => {
         <div class="crm-panel-heading"><div><h2>我的通知</h2><p class="crm-note">基础平台统一站内信；包含本系统与跨系统提醒，已读状态由平台维护，打开详情后可前往业务页面。</p></div></div>
         <PlatformNotificationInbox app-code="customer_opportunity" :page-size="20" @unread-change="notificationUnreadCount = $event" />
       </section>
-      <CreditApprovalInbox v-if="activeSection === 'credit-approvals'" :permissions="crmSession?.permissions || []" :roles="crmSession?.roles || []" />
+      <CreditApprovalInbox v-if="activeSection === 'credit-approvals'"
+        :permissions="crmSession?.permissions || []" :roles="crmSession?.roles || []"
+        :application-id="route.query.application_id" :customer-id="route.query.customer_id"
+        @clear-target="clearCreditApprovalTarget" />
       <CreditRuleSettingsPanel v-if="activeSection === 'credit-rules'" @notice="notice = $event" @error="error = $event" />
 
       <section v-if="activeSection === 'customers'" class="crm-panel table-panel"><ListState v-if="customersListState" :loading="loading" :error="listError" error-title="客户列表加载失败" empty-title="暂无符合条件的客户" @retry="loadCurrent"><template #empty-action><button type="button" class="crm-state-action" @click="resetCustomerFilters">重置筛选</button></template></ListState><table v-else-if="customerFilters.view === 'table'" class="crm-data-table"><thead><tr><th scope="col">客户编号</th><th scope="col">客户名称</th><th scope="col">信用等级</th><th scope="col">类型</th><th scope="col">行业 / 区域</th><th scope="col">负责人</th><th scope="col">状态</th><th scope="col" title="包含客户沟通记录和关联商机跟进记录">最近跟进（含商机）</th><th scope="col">商机金额汇总</th><th scope="col">操作</th></tr></thead><tbody><tr v-for="item in customers" :key="item.id" @click="openCustomer(item.id)"><td>{{ item.customer_no }}</td><td>{{ item.name }}</td><td><span class="crm-credit-level crm-credit-level--inline" :class="`is-${String(item.credit_level || 'B').toLowerCase()}`">{{ creditLevelLabel(item.credit_level) }}</span></td><td>{{ item.customer_type }}</td><td>{{ item.industry }} / {{ item.region }}</td><td>{{ ownerLabel(item) }}</td><td><span class="crm-badge" :class="customerStatusTone(item.status)">{{ customerStatusText(item.status) }}</span></td><td>{{ formatDate(item.last_followup_at) }}</td><td>{{ formatAmount(item.opportunity_amount_sum) }}</td><td class="crm-table-actions"><button type="button" class="crm-table-link" @click.stop="openCustomer(item.id)">查看</button><button type="button" class="crm-table-link" @click.stop="editCustomerFromList(item)">编辑</button></td></tr></tbody></table>      <div v-else class="crm-customer-cards" :data-quick-filter="customerFilters.quick_filter">

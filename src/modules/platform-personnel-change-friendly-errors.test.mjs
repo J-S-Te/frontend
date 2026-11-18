@@ -10,12 +10,21 @@ const script = source.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^i
 const ref = value => ({ value })
 const computed = read => ({ get value() { return read() } })
 const failure = (message, metadata = {}) => Object.assign(new Error(message), metadata)
+const componentCleanups = []
 
+test.afterEach(() => componentCleanups.splice(0).forEach(cleanup => cleanup()))
+
+// 用途：执行人员异动真实组件逻辑，并在用例结束时运行注册的卸载清理。
+// 参数：api 为受控接口边界，permissions 为当前用例的真实权限条件。
+// 返回值：组件操作、响应状态及已发事件；不连接业务服务。
 function component(api = {}, permissions = true) {
   const events = []
+  const unmountCallbacks = []
   const dependencies = {
     ref, computed, reactive: value => value, watch: () => {}, onMounted: () => {},
-    defineEmits: () => (...args) => events.push(args), defineProps: () => ({ prefillUserId: '' }), hasPermission: () => permissions,
+    onBeforeUnmount: callback => unmountCallbacks.push(callback),
+    defineEmits: () => (...args) => events.push(args),
+    defineProps: () => ({ prefillUserId: '', initialRequestId: '' }), hasPermission: () => permissions,
     // 关联数据失效订阅：沙箱只验证组件逻辑，订阅本身由 relatedDataRefresh.test.mjs 覆盖。
     useRelatedDataInvalidation: () => () => {}, RELATED_DATA, loadAllCatalogPages,
     useDictionaryOptions: (_key, options) => ({ options: ref(options.fallback) }), formatUserError,
@@ -35,6 +44,7 @@ function component(api = {}, permissions = true) {
     workflowAction, workflowReference, workflowSaving, handoverItems, handoverTargetUserId,
     authorizationDetail, authorizationLoading, authorizationError
   };`)(...Object.values(dependencies))
+  componentCleanups.push(() => unmountCallbacks.forEach(callback => callback()))
   return { ...state, events }
 }
 

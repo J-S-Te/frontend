@@ -1,3 +1,5 @@
+import { AUTHORIZATION_REFRESH_HEADERS, createAuthorizationSnapshotReader }
+  from '../../shared/authz/authorizationSnapshot.js'
 // 数据看板后端 API 封装（骨架，对齐 project_management/api/projectManagement.js 模式）
 // 认证约定：HttpOnly Cookie 会话；401 由本客户端发起 OIDC 跳转；403 交由页面展示无权限。
 import { attachStructuredContext } from '../../platform/shared/api/requestContext.js'
@@ -281,14 +283,18 @@ export function isDashboardEmbedEnabled(session) {
   return session?.capabilities?.dashboard_embed_enabled !== false
 }
 
-/**
- * getAuthMe 查询数据看板当前会话信息。
- * @returns {Promise<any>} 返回 /auth/me 的会话结果。
- * @throws {Error} 会话不存在或服务异常时抛出错误。
- */
-export function getAuthMe() {
-  return request('/auth/me')
-}
+const analysisSessionReader = createAuthorizationSnapshotReader({
+  load: options => request('/auth/me', { ...options,
+    cache: 'no-store', headers: AUTHORIZATION_REFRESH_HEADERS, suppressLoginRedirect: true }),
+  cacheTTL: 0,
+  onError: (error, options) => {
+    if (!options.suppressLoginRedirect && shouldStartSubsystemLogin(error)) startDataAnalysisLogin()
+  },
+})
+// 用途：读取数析最新授权并隔离旧在途响应。
+// 参数：options 为强制重读或既有读取选项。
+// 返回值：服务器授权会话Promise，失败保持原分类。
+export function getAuthMe(options = {}) { return analysisSessionReader.read(options) }
 
 /**
  * probeDataAnalysisSession 只读读取数据看板会话及服务端权威空闲窗口；401 不自行跳转。

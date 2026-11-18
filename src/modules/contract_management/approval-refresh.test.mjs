@@ -39,7 +39,7 @@ function harness({ tasks, detail = approvalDetail() } = {}) {
   ui.approvalDetail.value = detail
   const context = { ...ui, ref, computed, hasContractPermission, session, formatContractDate,
     approvalKindLabel, currentUserLabel: ref('合成审批人'), userDirectory: ref([]),
-    activeSection: ref('approvals'), document: { visibilityState: 'visible' },
+    activeSection: ref('approvals'), route: { query: {} }, document: { visibilityState: 'visible' },
     approvalRealtimeScope: createRequestScope(), approvalRealtimeBusy: false,
     approvalRealtimePending: false, approvals: ref([]), approvalsKnown: ref(false),
     initiatedApprovals: ref([]), listApprovals: async () => [], getApproval,

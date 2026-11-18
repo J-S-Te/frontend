@@ -1,3 +1,5 @@
+import { AUTHORIZATION_REFRESH_HEADERS, createAuthorizationSnapshotReader }
+  from '../shared/authz/authorizationSnapshot.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
@@ -57,9 +59,13 @@ const DETAIL = {
 
 // 与 friendly-errors.test.mjs 同风格：在隔离 vm 中执行真实 api 层，只桩掉网络与浏览器能力。
 const apiSource = await readFile(new URL('./api/settlement.js', import.meta.url), 'utf8')
+// 用途：装配真实 API 源码及共享授权读取依赖，保留既有测试网络边界。
+// 参数：respond 为正式 API 请求对应的受控 HTTP 响应。
+// 返回值：真实修订工单 API 与请求地址、参数记录。
 function apiHarness(respond) {
   const calls = []
   const context = vm.createContext({
+    createAuthorizationSnapshotReader, AUTHORIZATION_REFRESH_HEADERS,
     fetch: async (url, options) => {
       calls.push({ url, options })
       return respond(url, options)

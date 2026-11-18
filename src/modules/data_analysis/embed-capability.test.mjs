@@ -36,7 +36,7 @@ function shellHarness(session, failure = null) {
   }
   const script = source.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '')
   const state = vm.runInNewContext(`${script}\n;({ me, iframeSrc, iframeError, iframeLoading, dashboardSummary, refreshCurrentDashboard, loadDashboard })`, context)
-  return { calls, state, mount: () => mounted() }
+  return { calls, state, mount: () => mounted(), setSession: value => { session = value } }
 }
 
 test('explicit false disables embedding and legacy sessions keep embedding enabled', () => {
@@ -73,6 +73,7 @@ test('server capability change discards an old iframe and prevents later embed r
   h.state.me.value = {
     permissions: ['dashboard.finance.view'], capabilities: { dashboard_embed_enabled: false },
   }
+  h.setSession(h.state.me.value)
   await Vue.nextTick()
   assert.equal(h.state.iframeSrc.value, '')
   assert.equal(h.state.iframeError.value, null)

@@ -12,6 +12,7 @@ import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import { useDialogFocusTrap } from '@/modules/shared/composables/useDialogFocusTrap.js'
 import AppShell from '@/modules/shared/components/AppShell.vue'
 import { subsystemAccessMessage } from '@/modules/shared/authz/sessionCompatibility'
+import { authorizationScopeKey } from '@/modules/shared/authz/authorizationSnapshot.js'
 import { closeSubsystemTabOrFallback } from '@/modules/shared/utils/returnToPortal'
 import { acknowledgeSecurityEvent, addFeedbackMessage, closeFeedback, createFeedback, createIdempotencyKey, createProjectConversation, createProjectExport, createReportRequest, downloadIssuedReport, downloadProjectExport, getAccountSecurity, getEvaluation, getEvaluationEligibility, getFeedback, getFeedbackNotificationUnreadCount, getPortalCapabilities, getPortalSession, getProject, getProjectConversation, getProjectExport, getReportRequest, getReportNotificationUnreadCount, listAccountSessions, listFeedbackNotifications, listFeedbacks, listProjectActivities, listProjects, listReportNotifications, listReportRequests, listReportRiskAlerts, logoutPortal, readFeedbackNotification, readProjectConversationMessages, readReportNotification, reportRequestFingerprint, revokeAccountSession, sendProjectConversationMessage, submitEvaluation } from '../api/portal.js'
 import FilingWizard from '../components/FilingWizard.vue'
@@ -29,6 +30,7 @@ const session = ref(null)
 const unavailableCapability = Object.freeze({ available: false, mode: 'UNAVAILABLE', reason_code: 'CAPABILITY_STATUS_UNAVAILABLE' })
 const capabilities = ref({ report_request_submission: unavailableCapability, project_export: unavailableCapability, report_download: unavailableCapability, filing_material_upload: unavailableCapability, filing_export: unavailableCapability, filing_police_submission: unavailableCapability, customer: { project_enabled: true, report_enabled: true, filing_enabled: true, feedback_enabled: true, evaluation_enabled: true } })
 let capabilitiesLoaded = false
+let portalLoadGeneration = 0
 const projects = ref([])
 const reports = ref([])
 const reportNotifications = ref([])
@@ -282,41 +284,133 @@ function childNotice(value) { notice.value = value }
 
 // 用途：先清掉上一轮的列表失败原因，再按当前栏目重新加载。
 // 参数：无。
-// 返回值：load() 的 Promise。
+// 返回值：列表与通知目标详情加载完成的 Promise。
 // 「这一次列表重新开始」的入口都走这里（栏目切换、三态里的「重新加载」、写操作后的列表刷新），
 // 失败原因因此不会在请求成功、列表回到空态后继续粘在列表位置上。
 async function reloadList() {
   projectListError.value = ''
   feedbackListError.value = ''
   await load()
+  await openPortalTarget()
 }
-// 用途：加载当前会话及其可用工作区，管理员只读取管理能力元数据。
-// 参数：无。
+// 用途：清理已失效客户边界下的工作区，保留未提交的表单草稿。
+// 参数：无；使用当前页面数据及异步读取代际。
+// 返回值：无；旧客户列表、详情和文件读取失去回写资格。
+function clearPortalAuthorizationData() {
+  projectRequestGeneration++
+  reportLoadGeneration++
+  reportDetailGeneration++
+  feedbackDetailGeneration++
+  feedbackNotificationGeneration++
+  projectExportGeneration++
+  projectMessageReadGeneration++
+  cancelReportDownload()
+  projectExportController?.abort()
+  projectExportController = null
+  for (const pending of [projectDetailLoading, activityLoading, evaluationLoading,
+    projectExportLoading, projectMessageLoading, projectMessageOlderLoading,
+    reportDetailLoading, reportListLoading, reportProjectsLoading,
+    reportNotificationLoading, feedbackNotificationLoading]) {
+    pending.value = false
+  }
+  for (const failure of [projectDetailError, activityError, evaluationError,
+    projectExportError, projectMessageError, reportDetailError, reportListError,
+    reportProjectsError, reportNotificationError, feedbackNotificationError,
+    projectListError, feedbackListError]) {
+    failure.value = ''
+  }
+  for (const rows of [projects, reports, feedbacks, reportNotifications,
+    reportRiskAlerts, reportProjects, feedbackNotifications, activities, accountSessions]) {
+    rows.value = []
+  }
+  for (const detail of [selectedProject, selectedReport, selectedFeedback,
+    accountSecurity, evaluationEligibility, evaluation, projectConversation]) {
+    detail.value = null
+  }
+  projectTotal.value = 0
+  reportTotal.value = 0
+  feedbackTotal.value = 0
+  reportNotificationUnreadCount.value = null
+  feedbackNotificationUnreadCount.value = null
+}
+
+// 用途：按通知深链直接读取当前客户的报告或反馈详情。
+// 参数：无；查询参数仅作为资源坐标，详情接口重新校验当前会话权限。
+// 返回值：异步完成；坐标非法、无权限或读取失败时保留可理解提示。
+async function openPortalTarget() {
+  if (!session.value || loading.value || !['reports', 'feedback'].includes(section.value)) return
+  const report = section.value === 'reports'
+  const raw = route.query[report ? 'request_id' : 'feedback_id']
+  if (raw === undefined || raw === null || raw === '') return
+  const id = Array.isArray(raw) ? (raw.length === 1 ? raw[0] : '') : raw
+  if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) {
+    error.value = '通知中的详情入口无效，请从当前列表重新打开。'
+    return
+  }
+  if (!hasPermission(report ? 'report.read' : 'feedback.read')) {
+    error.value = report ? '当前账号没有报告读取权限。' : '当前账号没有反馈读取权限。'
+    return
+  }
+  const selectedID = report ? selectedReport.value?.id : selectedFeedback.value?.feedback?.id
+  if (String(selectedID || '') === id) return
+  if (report) await openReport({ id })
+  else {
+    closeFeedbackDetail()
+    await openFeedback({ id })
+  }
+}
+
+// 用途：读取最新会话及能力交集，再加载当前授权下的工作区。
+// 参数：background 表示页内后台刷新，默认使用首屏加载状态。
 // 返回值：异步完成；失败时展示错误且不查询空客户边界。
 async function load({ background = false } = {}) {
+  const generation = ++portalLoadGeneration
   if (background) { refreshing.value = true; error.value = '' }
   else { loading.value = true; error.value = ''; notice.value = '' }
   try {
-    session.value ||= await getPortalSession()
+    let current
+    try { current = await getPortalSession({ force: true }) }
+    catch (value) {
+      if (generation !== portalLoadGeneration) return
+      session.value = null
+      clearPortalAuthorizationData()
+      throw value
+    }
+    if (generation !== portalLoadGeneration) return
+    if (authorizationScopeKey(session.value) !== authorizationScopeKey(current)) {
+      clearPortalAuthorizationData()
+    }
+    session.value = current
+    capabilitiesLoaded = false
+    // 每次刷新重算客户能力；读取失败保持依赖型操作关闭，不沿用上次开放状态。
+    capabilities.value = {}
     if (isPortalSuperAdmin.value) {
       // 管理能力不包含客户数据；客户查询仍由非管理员工作区单独发起。
       capabilities.value = { ...capabilities.value, customer_directory_mode: 'crm' }
-      capabilities.value = await getPortalCapabilities()
+      const value = await getPortalCapabilities()
+      if (generation === portalLoadGeneration) capabilities.value = value
       return
     }
     if (!capabilitiesLoaded) {
       capabilitiesLoaded = true
       // 能力状态不可确认时继续保持失败关闭。
-      try { capabilities.value = await getPortalCapabilities() } catch { /* 依赖不可用时，保持相关操作关闭。（测试锚点：Keep dependency-backed actions closed） */ }
+      try {
+        const value = await getPortalCapabilities()
+        if (generation !== portalLoadGeneration) return
+        capabilities.value = value
+      } catch { /* 依赖不可用时，保持相关操作关闭。（测试锚点：Keep dependency-backed actions closed） */ }
     }
+    if (generation !== portalLoadGeneration) return
     if (section.value === 'projects' && hasPermission('project.read')) {
       // 列表请求失败必须落在列表位置（ErrorState + 重试），不能清空后显示成「暂无可查看的项目」。
       try {
         const value = await listProjects({ page: 1, page_size: 20 })
+        if (generation !== portalLoadGeneration) return
         projects.value = value?.items || []
         projectPage.value = 1
         projectTotal.value = Number(value?.total || projects.value.length)
       } catch (value) {
+        if (generation !== portalLoadGeneration) return
         projects.value = []
         projectTotal.value = 0
         projectListError.value = formatPortalError(value, { message: subsystemAccessMessage(value) })
@@ -327,26 +421,41 @@ async function load({ background = false } = {}) {
       try {
         void loadFeedbackNotifications()
         const value = await listFeedbacks({ page: 1, page_size: 20 })
+        if (generation !== portalLoadGeneration) return
         feedbacks.value = value?.items || []
         feedbackPage.value = 1
         feedbackTotal.value = Number(value?.total || feedbacks.value.length)
       } catch (value) {
+        if (generation !== portalLoadGeneration) return
         feedbacks.value = []
         feedbackTotal.value = 0
         feedbackListError.value = formatPortalError(value, { message: subsystemAccessMessage(value) })
       }
       if (hasPermission('project.read') && !projects.value.length) {
-        try { const pv = await listProjects({ page: 1, page_size: 100 }); projects.value = pv?.items || [] } catch { /* 保持为空。 */ }
+        try {
+          const pv = await listProjects({ page: 1, page_size: 100 })
+          if (generation === portalLoadGeneration) projects.value = pv?.items || []
+        } catch { /* 保持为空。 */ }
       }
     }
-    else if (section.value === 'security' && hasPermission('account.security.manage')) { const [security, sessions] = await Promise.all([getAccountSecurity(), listAccountSessions()]); accountSecurity.value = security; accountSessions.value = sessions?.items || [] }
+    else if (section.value === 'security' && hasPermission('account.security.manage')) {
+      const [security, sessions] = await Promise.all([getAccountSecurity(), listAccountSessions()])
+      if (generation !== portalLoadGeneration) return
+      accountSecurity.value = security
+      accountSessions.value = sessions?.items || []
+    }
     else if (section.value === 'filings' && hasPermission('filing.read') && hasPermission('project.read') && !projects.value.length) {
       // 供备案新建时选择关联项目；读取失败不影响备案主流程。
-      try { const value = await listProjects({ page: 1, page_size: 100 }); projects.value = value?.items || [] } catch { /* 保持为空。 */ }
+      try {
+        const value = await listProjects({ page: 1, page_size: 100 })
+        if (generation === portalLoadGeneration) projects.value = value?.items || []
+      } catch { /* 保持为空。 */ }
     }
-  } catch (value) { fail(value) } finally {
-    if (background) refreshing.value = false
-    else loading.value = false
+  } catch (value) { if (generation === portalLoadGeneration) fail(value) } finally {
+    if (generation === portalLoadGeneration) {
+      if (background) refreshing.value = false
+      else loading.value = false
+    }
   }
 }
 // loadFeedbackNotifications 独立读取当前客户的反馈通知，失败保持未知而非零条。
@@ -376,20 +485,33 @@ async function loadFeedbackNotifications() {
   }
 }
 
-// openFeedbackNotification 标记当前通知已读并打开关联反馈。
+// openFeedbackNotification 尝试保存已读状态，并独立打开关联反馈。
 // 参数：item 为当前客户通知记录。
-// 返回值：异步完成；失败保留通知并展示提示。
+// 返回值：异步完成；已读未确认时保留通知和计数，仍读取授权详情。
 async function openFeedbackNotification(item) {
   if (!hasPermission('feedback.read') || section.value !== 'feedback' || feedbackNotificationOpening.has(item.id)) return
   const intent = ++feedbackDetailGeneration
   feedbackNotificationOpening.add(item.id)
+  feedbackNotificationError.value = ''
   try {
-    if (item.status === 'UNREAD') await readFeedbackNotification(item.id)
+    let readConfirmed = item.status !== 'UNREAD'
+    if (!readConfirmed) {
+      try {
+        await readFeedbackNotification(item.id)
+        readConfirmed = true
+      } catch {
+        if (intent === feedbackDetailGeneration && section.value === 'feedback') {
+          feedbackNotificationError.value = '反馈通知已读状态暂未确认，请稍后刷新核对。'
+        }
+      }
+    }
     if (intent !== feedbackDetailGeneration || section.value !== 'feedback' || !hasPermission('feedback.read')) return
-    const unread = feedbackNotifications.value.some(value => value.id === item.id && value.status === 'UNREAD')
-    feedbackNotifications.value = feedbackNotifications.value.filter(value => value.id !== item.id)
-    if (unread && feedbackNotificationUnreadCount.value !== null) {
-      feedbackNotificationUnreadCount.value = Math.max(0, feedbackNotificationUnreadCount.value - 1)
+    if (readConfirmed) {
+      const unread = feedbackNotifications.value.some(value => value.id === item.id && value.status === 'UNREAD')
+      feedbackNotifications.value = feedbackNotifications.value.filter(value => value.id !== item.id)
+      if (unread && feedbackNotificationUnreadCount.value !== null) {
+        feedbackNotificationUnreadCount.value = Math.max(0, feedbackNotificationUnreadCount.value - 1)
+      }
     }
     await openFeedback({ id: item.feedback_id }, intent)
   } catch (value) {
@@ -399,37 +521,55 @@ async function openFeedbackNotification(item) {
   } finally { feedbackNotificationOpening.delete(item.id) }
 }
 
+// 用途：追加当前客户项目页，丢弃授权重载前发出的旧分页响应。
+// 参数：无；使用当前项目页码。
+// 返回值：异步完成；当前读取失败展示错误。
 async function loadMoreProjects() {
   if (!hasPermission('project.read') || projectPage.value * 20 >= projectTotal.value) return
+  const generation = portalLoadGeneration
   const next = projectPage.value + 1
   try {
     const value = await listProjects({ page: next, page_size: 20 })
+    if (generation !== portalLoadGeneration) return
     projects.value = [...projects.value, ...(value?.items || [])]
     projectPage.value = next
     projectTotal.value = Number(value?.total || projects.value.length)
-  } catch (value) { fail(value) }
+  } catch (value) { if (generation === portalLoadGeneration) fail(value) }
 }
+// 用途：追加当前客户报告页，丢弃授权或报告工作区重载前的旧响应。
+// 参数：无；使用当前报告页码。
+// 返回值：异步完成；只更新当前报告读取的错误与加载态。
 async function loadMoreReports() {
   if (!hasPermission('report.read') || reportPage.value * 20 >= reportTotal.value) return
+  const generation = reportLoadGeneration
   const next = reportPage.value + 1
   reportListLoading.value = true
   try {
     const value = await listReportRequests({ page: next, page_size: 20 })
+    if (generation !== reportLoadGeneration) return
     reports.value = [...reports.value, ...(value?.items || [])]
     reportPage.value = next
     reportTotal.value = Number(value?.total || reports.value.length)
-  } catch (value) { reportListError.value = formatPortalError(value, { fallback: '更多报告记录暂时无法加载' }) }
-  finally { reportListLoading.value = false }
+  } catch (value) {
+    if (generation === reportLoadGeneration) {
+      reportListError.value = formatPortalError(value, { fallback: '更多报告记录暂时无法加载' })
+    }
+  } finally { if (generation === reportLoadGeneration) reportListLoading.value = false }
 }
+// 用途：追加当前客户反馈页，丢弃授权重载前发出的旧分页响应。
+// 参数：无；使用当前反馈页码。
+// 返回值：异步完成；当前读取失败展示错误。
 async function loadMoreFeedbacks() {
   if (!hasPermission('feedback.read') || feedbackPage.value * 20 >= feedbackTotal.value) return
+  const generation = portalLoadGeneration
   const next = feedbackPage.value + 1
   try {
     const value = await listFeedbacks({ page: next, page_size: 20 })
+    if (generation !== portalLoadGeneration) return
     feedbacks.value = [...feedbacks.value, ...(value?.items || [])]
     feedbackPage.value = next
     feedbackTotal.value = Number(value?.total || feedbacks.value.length)
-  } catch (value) { fail(value) }
+  } catch (value) { if (generation === portalLoadGeneration) fail(value) }
 }
 // loadReportWorkspace 独立加载申请列表、通知及申请项目。
 // 参数：无。
@@ -715,20 +855,33 @@ async function openReport(item, intent = null) {
     if (current()) reportDetailLoading.value = false
   }
 }
-// openReportNotification 标记报告通知已读并打开关联申请。
+// openReportNotification 尝试保存已读状态，并独立打开关联报告申请。
 // 参数：item 为当前客户的报告通知。
-// 返回值：异步完成；通知错误不影响主申请列表。
+// 返回值：异步完成；已读未确认时保留通知和计数，仍读取授权详情。
 async function openReportNotification(item) {
   if (!hasPermission('report.read') || section.value !== 'reports' || reportNotificationOpening.has(item.id)) return
   const intent = ++reportDetailGeneration
   reportNotificationOpening.add(item.id)
+  reportNotificationError.value = ''
   try {
-    if (item.status === 'UNREAD') await readReportNotification(item.id)
+    let readConfirmed = item.status !== 'UNREAD'
+    if (!readConfirmed) {
+      try {
+        await readReportNotification(item.id)
+        readConfirmed = true
+      } catch {
+        if (intent === reportDetailGeneration && section.value === 'reports') {
+          reportNotificationError.value = '报告通知已读状态暂未确认，请稍后刷新核对。'
+        }
+      }
+    }
     if (intent !== reportDetailGeneration || section.value !== 'reports' || !hasPermission('report.read')) return
-    const unread = reportNotifications.value.some(current => current.id === item.id && current.status === 'UNREAD')
-    reportNotifications.value = reportNotifications.value.filter(current => current.id !== item.id)
-    if (unread && reportNotificationUnreadCount.value !== null) {
-      reportNotificationUnreadCount.value = Math.max(0, reportNotificationUnreadCount.value - 1)
+    if (readConfirmed) {
+      const unread = reportNotifications.value.some(current => current.id === item.id && current.status === 'UNREAD')
+      reportNotifications.value = reportNotifications.value.filter(current => current.id !== item.id)
+      if (unread && reportNotificationUnreadCount.value !== null) {
+        reportNotificationUnreadCount.value = Math.max(0, reportNotificationUnreadCount.value - 1)
+      }
     }
     await openReport({ id: item.request_id, request_no: item.request_no }, intent)
   } catch (value) {
@@ -920,6 +1073,11 @@ watch(section, () => {
   notice.value = ''
   void reloadList().then(restorePageTarget)
 })
+watch(() => [route.query.request_id, route.query.feedback_id], () => {
+  closeReport()
+  closeFeedbackDetail()
+  void openPortalTarget()
+})
 watch(anyDialogOpen, (open) => {
   document.body.style.overflow = open ? 'hidden' : ''
   if (open) {
@@ -930,6 +1088,7 @@ watch(anyDialogOpen, (open) => {
 })
 onMounted(async () => { await reloadList(); await restorePageTarget() })
 onBeforeUnmount(() => {
+  portalLoadGeneration++
   feedbackDetailGeneration++
   reportDetailGeneration++
   feedbackNotificationGeneration++

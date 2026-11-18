@@ -1,5 +1,6 @@
 <script setup>
 import { useLoginUsername } from '@/modules/shared/composables/useLoginUsername.js'
+import { authorizationScopeKey } from '@/modules/shared/authz/authorizationSnapshot.js'
 import { useDialogFocusTrap } from '@/modules/shared/composables/useDialogFocusTrap.js'
 import ShellPreferences from '@/modules/shared/components/ShellPreferences.vue'
 import { useSidebarNavigation } from '@/modules/shared/composables/useSidebarNavigation.js'
@@ -11,6 +12,8 @@ import ErrorState from '@/modules/shared/components/ErrorState.vue'
 import PaginationBar from '@/modules/shared/components/PaginationBar.vue'
 import { computed, defineAsyncComponent, defineComponent, h, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { formatUserError } from '../../shared/utils/userError.js'
+import { openNotificationTarget } from '../../shared/utils/notificationNavigation.js'
+import { projectApprovalTarget } from '../approvalTasks.js'
 import { createRequestScope } from '../../platform/shared/composables/requestScope.js'
 import { useConfirmDialog } from '../../shared/composables/useConfirmDialog.js'
 import { usePromptDialog } from '../../shared/composables/usePromptDialog.js'
@@ -21,7 +24,9 @@ import PromptDialog from '../../shared/components/PromptDialog.vue'
 import { assignServiceItemTeams } from '../assignment.js'
 import { useRoute, useRouter } from 'vue-router'
 import { AuthError, logoutCurrentSession } from '@/modules/platform/auth/api/auth'
-import { getUnreadCount, listInbox as listNotificationInbox, markNotificationRead } from '@/modules/platform/notifications/api/notifications'
+import {
+  getNotification, getUnreadCount, listInbox as listNotificationInbox, markNotificationRead,
+} from '@/modules/platform/notifications/api/notifications'
 import { useDecompositionAdjust } from '@/modules/project_management/composables/useDecompositionAdjust'
 import { useSupplementClosure } from '@/modules/project_management/composables/useSupplementClosure'
 import { supplementClosureAvailability } from '@/modules/project_management/supplementClosure.js'
@@ -377,9 +382,12 @@ const nativeScopeProjectID = ref('')
 const {
   notificationOpen, notificationItems, notificationCount, notificationLoading, notificationError, notificationActionID,
   closeNotifications, refreshNotificationCount, openNotification, toggleNotifications, disposeNotifications,
-} = useProjectNotifications({ getUnreadCount, listNotificationInbox, markNotificationRead,
-  formatUserError, navigate, navigateTarget: openApprovalTarget, showToast,
-  getContext: () => sectionDataContext.value })
+} = useProjectNotifications({
+  getNotification, getUnreadCount, listNotificationInbox, markNotificationRead,
+  formatUserError, showToast,
+  openTarget: openProjectNotificationTarget,
+  getContext: () => sectionDataContext.value,
+})
 const toastMessage = ref('')
 const toastType = ref('success')
 const isLoggingOut = ref(false)
@@ -429,6 +437,7 @@ const lastUpdatedAt = ref(null)
 const sectionDataContext = computed(() => JSON.stringify([
   session.value?.tenant_id, principalIdentityID(session.value), session.value?.authorization_revision,
   session.value?.permissions, session.value?.roles, navigation.value.sections,
+  session.value?.data_scopes,
   navigation.value.authorization_revision, navigation.value.catalog_version,
 ]))
 let toastTimer = 0
@@ -1305,6 +1314,8 @@ const selectedServiceItems = computed(() => {
   return candidates.filter((item) => selectedServiceItemIDs.value.includes(item.id))
 })
 const selectedServiceItem = computed(() => selectedServiceItems.value[0] || null)
+const selectedItemCanAssign = computed(() => allocationCandidates.value
+  .some((item) => item.id === selectedServiceItem.value?.id))
 const selectedServiceProject = computed(() => selectedServiceItem.value ? projectByID.value.get(selectedServiceItem.value.project_id) || null : null)
 const selectedServiceOwner = computed(() => selectedServiceItem.value ? personLabel(selectedServiceItem.value.project_manager_id || selectedServiceItem.value.team_lead_id, '待指派') : '—')
 const selectedServiceDue = computed(() => formatBusinessDate(selectedServiceItem.value?.planned_end
@@ -1398,6 +1409,17 @@ const latestWorkflowEventByItem = computed(() => {
 })
 const latestWorkflowEvent = (item) => latestWorkflowEventByItem.value.get(item?.id)
 const inboxItems = computed(() => allocationCandidates.value.filter((item) => item.team_lead_id && (!item.project_manager_id || !(item.engineer_ids || []).length)))
+const pendingRollbackRequests = computed(() => {
+  const decided = new Set(deliveryEvents.value
+    .filter((event) => ['ROLLBACK_APPROVED', 'ROLLBACK_REJECTED', 'ROLLBACK_WITHDRAWN'].includes(event.type))
+    .map((event) => event.payload?.request_id))
+  return deliveryEvents.value.filter((event) => event.type === 'ROLLBACK_REQUESTED' && !decided.has(event.id))
+})
+const inboxWorkflowItems = computed(() => {
+  const ids = new Set(inboxItems.value.map((item) => item.id))
+  for (const request of pendingRollbackRequests.value) ids.add(request.service_item_id)
+  return serviceItems.value.filter((item) => ids.has(item.id))
+})
 const planningItems = computed(() => serviceItems.value.filter((item) => {
   // “实施计划”是分配完成后的下一节点。仅有待分配状态远远不够，必须与后端
   // CheckImplementationPlanPrecondition 的责任链、能力校验和特殊方法前置保持一致。
@@ -1438,7 +1460,7 @@ const methodItems = computed(() => serviceItems.value.filter((item) => projectAl
 const assignmentItems = computed(() => allocationCandidates.value.filter((item) => item.team_lead_id && item.conflict_status !== 'PASSED'))
 const activeNodeItems = computed(() => ({
   allocation: allocationItems.value,
-  inbox: inboxItems.value,
+  inbox: inboxWorkflowItems.value,
   planning: planningItems.value,
   preparation: preparationItems.value,
   assignments: assignmentItems.value,
@@ -1684,7 +1706,9 @@ const serviceFlow = computed(() => [
 ])
 const selectedDecompositionProjectID = ref('')
 const decompositionProjects = computed(() => [...new Set(decompositionItems.value.map((item) => item.project_id))].map((id) => projectByID.value.get(id)).filter(Boolean))
-watch(decompositionProjects, (items) => {
+watch([decompositionProjects, () => route.query.project,
+  () => route.query.service_item_id, activeSection], ([items]) => {
+  if (activeSection.value === 'decomposition' && (route.query.project || route.query.service_item_id)) return
   if (!items.some((item) => item.id === selectedDecompositionProjectID.value)) selectedDecompositionProjectID.value = items[0]?.id || ''
 }, { immediate: true })
 const currentDecompositionItems = computed(() => decompositionItems.value.filter((item) => item.project_id === selectedDecompositionProjectID.value))
@@ -1907,7 +1931,9 @@ const methodHistory = computed(() => deliveryEvents.value.filter((event) => even
 // 异常评审（PG-IMP-06）：按偏离编号串联上报 → 评审 → 结论的审批流节点。
 const selectedDeviation = computed(() => {
   const wanted = String(operationForm.value.deviationID || '').trim()
-  return pendingDeviations.value.find((event) => event.payload?.deviation_id === wanted) || pendingDeviations.value[0] || null
+  const candidates = pendingDeviations.value
+    .filter((event) => event.service_item_id === selectedServiceItem.value?.id)
+  return candidates.find((event) => event.payload?.deviation_id === wanted) || candidates[0] || null
 })
 const exceptionFlow = computed(() => {
   const deviation = selectedDeviation.value
@@ -2046,8 +2072,10 @@ const operationDetailFields = computed(() => {
 // “已保存，但最新数据读取失败”的准确文案提示，不把整个工作区替换成错误页。
 const workspaceScope = createRequestScope()
 const workspaceReady = ref(false)
+const workspaceAuthorizationPending = ref(false)
 const { loading: sectionExtrasLoading, error: sectionExtrasError, load: loadSectionExtras } = useProjectSectionData({
-  section: activeSection, context: sectionDataContext, ready: workspaceReady,
+  section: activeSection, context: sectionDataContext,
+  ready: computed(() => workspaceReady.value && !workspaceAuthorizationPending.value),
   allowed: (section) => navigation.value.sections.includes(section)
     || (section === 'project_detail' && navigation.value.sections.includes('projects')),
   loaders: { events: () => listDeliveryEvents(), dashboard: () => getDashboard(), catalog: () => listRuleConfigurationCatalog() },
@@ -2141,11 +2169,29 @@ function refreshSlaDetails() { void loadSlaOverdueDetails({ force: true }) }
 // 返回值：无。
 function retryPersonnelNames() { void personnelNames.retry() }
 
-// 用途：刷新核心原子快照，再读取当前已授权栏目的依赖。
-// 参数：reportError 控制读取失败提示，background 控制同步时是否保留当前工作区。
-// 返回值：读取完成；写后刷新失败仍交由既有调用方区分已保存结果。
+// 用途：清理旧授权边界下的项目快照与选择，保留未提交的业务表单。
+// 参数：无；使用当前页面数据及读取作用域。
+// 返回值：无；旧范围列表和现场证据不再可见或导出。
+function clearProjectAuthorizationData() {
+  workspaceReady.value = false
+  projects.value = []
+  serviceItems.value = []
+  rules.value = []
+  capabilities.value = []
+  reportStageListScope.invalidate()
+  reportStageProjects.value = []
+  selectedServiceItemIDs.value = []
+  fieldEvidenceScope.invalidate()
+  fieldEvidenceSnapshot.value = null
+  navigation.value = { sections: [], default_section: 'projects', roles: [] }
+}
+
+// 用途：先核验当前授权，再加载与当前账号范围一致的项目工作区。
+// 参数：reportError 控制是否展示读取失败，background 表示保留加载时的工作区布局。
+// 返回值：工作区加载Promise；授权失败停用旧菜单权限，保留未提交表单。
 async function loadWorkspace({ reportError = true, background = false } = {}) {
   const ticket = workspaceScope.begin('WORKSPACE')
+  workspaceAuthorizationPending.value = true
   // background=true 用于写后/手动增量同步：保留旧快照和 Dom，只替换成功返回的数据。
   // 只有首次加载才进入骨架屏；错误态也只在首次加载时清空。
   if (background) { refreshing.value = true; loadError.value = '' }
@@ -2157,8 +2203,18 @@ async function loadWorkspace({ reportError = true, background = false } = {}) {
     // 防止新旧数据混用。接口层仍分别执行会话与资源权限校验。
     // 列表接口省略 page_size 时只返回 20 行，工作区必须显式走 all=1 快照；
     // 超过服务端 500 行上限时 truncated 为 true，用户据此提示缩小筛选范围。
-    const sessionData = await getProjectSession({ force: true })
+    let sessionData
+    try { sessionData = await getProjectSession({ force: true }) }
+    catch (error) {
+      if (!workspaceScope.isCurrent(ticket)) return
+      session.value = null
+      clearProjectAuthorizationData()
+      throw error
+    }
     if (!workspaceScope.isCurrent(ticket)) return
+    if (authorizationScopeKey(session.value) !== authorizationScopeKey(sessionData)) {
+      clearProjectAuthorizationData()
+    }
     session.value = sessionData
     if (!sessionData.permissions?.includes('project.read')) {
       projects.value = []; serviceItems.value = []; rules.value = []; capabilities.value = []
@@ -2196,6 +2252,7 @@ async function loadWorkspace({ reportError = true, background = false } = {}) {
     }
     lastUpdatedAt.value = new Date()
     workspaceReady.value = true
+    workspaceAuthorizationPending.value = false
     const extrasLoaded = await loadSectionExtras()
     if (!workspaceScope.isCurrent(ticket)) return
     if (!extrasLoaded && !reportError) throw new Error('当前栏目依赖数据读取失败。')
@@ -2209,6 +2266,7 @@ async function loadWorkspace({ reportError = true, background = false } = {}) {
   } finally {
     // 只有仍持有当前票据的请求才能结束本次加载态，避免旧请求关闭新请求。
     if (workspaceScope.isCurrent(ticket)) {
+      workspaceAuthorizationPending.value = false
       if (background) refreshing.value = false
       else loading.value = false
     }
@@ -2558,7 +2616,7 @@ async function openApprovalTarget(target) {
     return false
   }
   try {
-    await router.push(target)
+    if (!await openNotificationTarget({ target_url: target }, router)) return false
     mobileMenuOpen.value = false
     return true
   } catch (error) {
@@ -2778,10 +2836,17 @@ async function removeConfigRule(rule) {
 }
 
 
+// 用途：选择真实候选服务项，并清理上一项草稿、刷新现场证据。
+// 参数：item 为当前授权列表中的服务项；空值不改变选择。
+// 返回值：无；偏离评审同时填入该项真实待评审偏离编号。
 function selectServiceItem(item) {
   if (!item) return
   selectedServiceItemIDs.value = [item.id]
   fillOperationForm(item)
+  if (activeSection.value === 'exceptions') {
+    const deviation = pendingDeviations.value.find((event) => event.service_item_id === item.id)
+    operationForm.value.deviationID = deviation?.payload?.deviation_id || ''
+  }
   // 切换服务项即失效旧判定：先清空快照（界面转"未知"），再异步读取本项的判定。
   fieldEvidenceSnapshot.value = null
   fieldEvidenceError.value = ''
@@ -3512,10 +3577,6 @@ async function returnSelectedToDecomposition(itemID = '') {
   } finally { saving.value = false }
 }
 
-const pendingRollbackRequests = computed(() => {
-  const decided = new Set(deliveryEvents.value.filter((event) => ['ROLLBACK_APPROVED', 'ROLLBACK_REJECTED', 'ROLLBACK_WITHDRAWN'].includes(event.type)).map((event) => event.payload?.request_id))
-  return deliveryEvents.value.filter((event) => event.type === 'ROLLBACK_REQUESTED' && !decided.has(event.id))
-})
 const pendingReportCorrectionRequests = computed(() => {
   const decided = new Set(deliveryEvents.value.filter((event) => ['REPORT_CORRECTION_APPROVED', 'REPORT_CORRECTION_REJECTED'].includes(event.type)).map((event) => event.payload?.request_id))
   return deliveryEvents.value.filter((event) => event.type === 'REPORT_CORRECTION_REQUESTED' && !decided.has(event.id))
@@ -3778,6 +3839,132 @@ watch([activeSection, activeNodeItems, loading, sectionExtrasLoading, workspaceR
   const available = new Set(items.map((item) => item.id))
   selectedServiceItemIDs.value = selectedServiceItemIDs.value.filter((id) => available.has(id))
 }, { immediate: true })
+let notificationSelectionContext = ''
+
+// 用途：读取通知携带的单个业务坐标，避免数组查询被拼成另一编号。
+// 参数：value 为路由查询中的项目或服务项编号。
+// 返回值：去除首尾空白后的非空编号；数组、空值和控制字符返回 null。
+function notificationCoordinate(value) {
+  if (typeof value !== 'string') return null
+  const id = value.trim()
+  return id && !/[\u0000-\u001f\u007f]/.test(id) ? id : null
+}
+
+// 用途：拒绝非法或冲突的通知坐标，避免后续动作沿用之前的业务目标。
+// 参数：context 为本次路由坐标，message 为可理解的拒绝原因。
+// 返回值：无；清除服务项、拆解项目和偏离编号，同一错误只提示一次。
+function rejectNotificationSelection(context, message) {
+  selectedServiceItemIDs.value = []
+  selectedDecompositionProjectID.value = ''
+  operationForm.value.deviationID = ''
+  const rejectedContext = `rejected:${context}`
+  if (notificationSelectionContext !== rejectedContext) showToast(message, 'warning')
+  notificationSelectionContext = rejectedContext
+}
+
+// 用途：在当前处理节点内定位通知服务项，不为过期通知扩大操作范围。
+// 参数：itemID 为通知中的服务项编号。
+// 返回值：无；不可见或已离开节点时清空旧选择并解释原因。
+function selectNotificationServiceItem(itemID) {
+  const item = activeNodeItems.value.find((row) => row.id === itemID)
+  if (item) {
+    selectServiceItem(item)
+    return
+  }
+  selectedServiceItemIDs.value = []
+  const visible = serviceItems.value.some((row) => row.id === itemID)
+  showToast(visible ? '该服务项已不在当前待办或处理节点，请查看最新状态。'
+    : '该服务项不存在或当前账号无权查看。', 'warning')
+}
+
+// 用途：按通知项目或服务项定位当前待拆解项目。
+// 参数：projectID 为项目坐标，itemID 为旧服务项通知的坐标。
+// 返回值：无；已处理或不可见时不自动选中其他项目。
+function selectNotificationDecomposition(projectID, itemID) {
+  const item = serviceItems.value.find((row) => row.id === itemID)
+  const targetID = projectID || item?.project_id || ''
+  const project = decompositionProjects.value.find((row) => row.id === targetID)
+  selectedDecompositionProjectID.value = project?.id || ''
+  if (project) return
+  const visible = projects.value.some((row) => row.id === targetID)
+  showToast(visible ? '该项目已不在当前拆解待办，请查看最新状态。'
+    : '该项目不存在或当前账号无权查看。', 'warning')
+}
+
+// 用途：在授权快照与节点事件稳定后消费通知深链，同页查询变化重新定位。
+// 参数：无；读取当前栏目、查询坐标和工作区加载状态。
+// 返回值：无；同一坐标只初始化一次，避免刷新清空用户正在填写的表单。
+function applyNotificationSelection() {
+  const section = activeSection.value
+  const workflowSections = ['allocation', 'inbox', 'planning', 'preparation',
+    'assignments', 'methods', 'exceptions', 'reports', 'implementation']
+  const itemID = Object.hasOwn(route.query, 'service_item_id')
+    ? notificationCoordinate(route.query.service_item_id) : ''
+  const projectID = Object.hasOwn(route.query, 'project')
+    ? notificationCoordinate(route.query.project) : ''
+  const context = JSON.stringify([section, route.query.service_item_id,
+    route.query.project, sectionDataContext.value])
+  if (section !== 'decomposition' && !workflowSections.includes(section)) {
+    notificationSelectionContext = ''
+    return
+  }
+  if (itemID === null || projectID === null) {
+    rejectNotificationSelection(context, '通知参数格式不正确，请使用单个项目或服务项编号。')
+    return
+  }
+  if (section === 'decomposition' ? !itemID && !projectID : !itemID) {
+    notificationSelectionContext = ''
+    return
+  }
+  if (loading.value || sectionExtrasLoading.value || !workspaceReady.value
+    || loadError.value || sectionExtrasError.value) return
+  const item = serviceItems.value.find((row) => row.id === itemID)
+  if (itemID && projectID && item && item.project_id !== projectID) {
+    rejectNotificationSelection(context, '通知中的项目与服务项不一致，请重新进入对应待办。')
+    return
+  }
+  if (context === notificationSelectionContext) return
+  notificationSelectionContext = context
+  if (section === 'decomposition') selectNotificationDecomposition(projectID, itemID)
+  else selectNotificationServiceItem(itemID)
+}
+watch([activeSection, () => route.query.service_item_id, () => route.query.project,
+  activeNodeItems, serviceItems, decompositionProjects, sectionDataContext,
+  loading, sectionExtrasLoading, workspaceReady, loadError, sectionExtrasError],
+applyNotificationSelection, { immediate: true, flush: 'post' })
+
+// 用途：进入通知业务页，并在重复路由下重新定位被手动改选的真实目标。
+// 参数：detail 为当前主体重新读取的通知详情。
+// 返回值：安全导航成功为 true；无目标为 false，保存期间拒绝切换并抛错。
+async function openProjectNotificationTarget(detail) {
+  if (saving.value) throw new Error('当前操作正在保存，请完成后再打开通知。')
+  if (String(detail?.reference_type || '').trim().toUpperCase() === 'PROJECT_APPROVAL') {
+    const target = projectApprovalTarget(detail, window.location.origin)
+    if (!target) throw new Error('审批通知的申请编号与目标不一致，请从审批待办重新进入。')
+    return openApprovalTarget(target)
+  }
+  const opened = await openNotificationTarget(detail, router)
+  if (!opened) return false
+  await nextTick()
+  if (route.name !== 'project_management') return true
+  if (saving.value) throw new Error('当前操作正在保存，请完成后重新打开通知。')
+  const itemID = Object.hasOwn(route.query, 'service_item_id')
+    ? notificationCoordinate(route.query.service_item_id) : ''
+  const projectID = Object.hasOwn(route.query, 'project')
+    ? notificationCoordinate(route.query.project) : ''
+  const item = activeNodeItems.value.find((row) => row.id === itemID)
+  const valid = itemID !== null && projectID !== null
+    && (!itemID || !projectID || item?.project_id === projectID)
+  const alreadySelected = valid && (activeSection.value === 'decomposition'
+    ? selectedDecompositionProjectID.value === (projectID || item?.project_id)
+    : itemID && selectedServiceItemIDs.value.length === 1
+      && selectedServiceItemIDs.value[0] === itemID)
+  if (!alreadySelected) {
+    notificationSelectionContext = ''
+    applyNotificationSelection()
+  }
+  return true
+}
 // 会话权限异步到达：只有拿到执行团队分配权限后，项目经理/工程师的角色目录才会被查询；
 // 权限在这之后才加载完成时必须补一次，否则这两个下拉会一直空着。
 // 切换服务项或在准备页刷新工作区时重新拉取设备占用：占用是别的项目造成的，
@@ -4609,7 +4796,7 @@ onBeforeUnmount(() => {
               </div>
             </section>
             <div v-if="selectedServiceItem" class="pm-form pm-operation-form">
-              <template v-if="['allocation', 'inbox', 'assignments'].includes(activeSection)">
+              <template v-if="['allocation', 'inbox', 'assignments'].includes(activeSection) && selectedItemCanAssign">
                 <p v-if="personnelError" class="pm-form-hint pm-span-full" role="alert">{{ personnelError }}</p>
                 <div class="pm-field"><span>团队负责人 <em>*</em></span><SearchableSelect v-model="operationForm.teamLeadID" :options="teamLeadOptions" value-key="id" label-key="name" description-key="description" placeholder="请选择团队负责人" search-placeholder="搜索姓名、资质编号或资质编码" empty-text="人员资质库中没有匹配的团队负责人" aria-label="选择团队负责人" :disabled="personnelLoading" required /></div>
                 <template v-if="canExecutionAssign">

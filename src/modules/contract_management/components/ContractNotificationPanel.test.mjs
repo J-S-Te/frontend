@@ -10,8 +10,12 @@ import { approvalKindLabel } from '../utils/contractDisplay.js'
 
 const SRC = new URL('../../../', import.meta.url).pathname
 
+// 用途：为真实通知面板编译解析本地组件及框架依赖。
+// 参数：fromFile 为组件文件，specifier 为导入名称。
+// 返回值：真实依赖模块；缺失依赖抛错。
 async function resolveDependency(fromFile, specifier) {
   if (specifier === 'vue') return Vue
+  if (specifier === 'vue-router') return import('vue-router')
   const base = specifier.startsWith('.') ? resolve(dirname(fromFile), specifier) : join(SRC, specifier.slice(2))
   if (specifier.endsWith('.vue')) return loadSfc(base)
   for (const candidate of [base, `${base}.js`, join(base, 'index.js')]) {

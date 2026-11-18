@@ -5,6 +5,7 @@ import { parse } from '@babel/parser'
 import { parse as parseSFC } from '@vue/compiler-sfc'
 import { ref, reactive } from 'vue'
 import { formatPortalError } from './api/errorMessages.js'
+import { authorizationScopeKey } from '../shared/authz/authorizationSnapshot.js'
 
 const portal = parseSFC(await readFile(new URL('./views/CustomerPortalView.vue', import.meta.url), 'utf8')).descriptor.scriptSetup.content
 const filing = parseSFC(await readFile(new URL('./components/FilingWizard.vue', import.meta.url), 'utf8')).descriptor.scriptSetup.content
@@ -26,6 +27,9 @@ function functionsFrom(source, names, scope) {
  */
 function feedbackHarness() {
   const scope = {
+    portalLoadGeneration: 0, authorizationScopeKey, capabilities: ref({}),
+    getPortalSession: async () => ({ customer_id: 1 }),
+    getPortalCapabilities: async () => ({}),
     loading: ref(false), refreshing: ref(false), error: ref(''), notice: ref(''), session: ref({ customer_id: 1 }), isPortalSuperAdmin: ref(false),
     capabilitiesLoaded: true, section: ref('feedback'), projects: ref([]), feedbacks: ref([]), feedbackNotifications: ref([]),
     feedbackNotificationGeneration: 0, feedbackNotificationLoading: ref(false),

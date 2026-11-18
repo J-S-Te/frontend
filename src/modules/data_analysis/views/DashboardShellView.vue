@@ -7,6 +7,7 @@ import { useLoginUsername } from '@/modules/shared/composables/useLoginUsername.
 // 深色侧栏导航 + 顶栏 + 页面头，按 route.params.section 切换分区；
 // 启用嵌入时总览、报告、财务看板经嵌入桥加载；合同、项目看板使用本地原生模型，避免空白 iframe。
 import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from "vue"
+import { authorizationScopeKey } from '@/modules/shared/authz/authorizationSnapshot.js'
 import { useRoute, useRouter } from "vue-router"
 import { AuthError, logoutCurrentSession } from "@/modules/platform/auth/api/auth"
 import ConsoleIcon from "@/modules/platform/shared/components/ConsoleIcon.vue"
@@ -219,19 +220,22 @@ const statusOptions = computed(() => {
 
 // loadMe 读取最新身份并使旧身份的请求立即失效。
 // 参数：无。
-// 返回值：无；会话读取失败保留明确错误状态。
+// 返回值：是否成功应用最新会话；失败时停用旧授权并展示具体错误。
 async function loadMe() {
   const ticket = ++meRequestVersion
   invalidateDashboardRequests()
   loading.value = true
   loadError.value = ""
   try {
-    const identity = await getAuthMe()
-    if (disposed || ticket !== meRequestVersion) return
+    const identity = await getAuthMe({ force: true })
+    if (disposed || ticket !== meRequestVersion) return false
     me.value = identity
+    return true
   } catch (err) {
-    if (disposed || ticket !== meRequestVersion) return
+    if (disposed || ticket !== meRequestVersion) return false
+    me.value = null
     loadError.value = formatDataAnalysisError(err, { fallback: "会话读取失败，请稍后刷新。" })
+    return false
   } finally {
     if (ticket === meRequestVersion && !disposed) loading.value = false
   }
@@ -463,10 +467,11 @@ function scheduleRelatedRefresh() {
   }, 50)
 }
 
-// 用途：刷新当前原生摘要并按服务端能力附加嵌入刷新。
+// 用途：先复核最新授权，再刷新当前原生摘要与受控嵌入。
 // 参数：无。
 // 返回值：无；摘要与嵌入分别保留各自错误状态。
 async function refreshCurrentDashboard() {
+  if (disposed || !await loadMe()) return
   const code = DASHBOARD_CODES[section.value]
   if (!code || disposed || !canViewDashboard(code)) return
   const tasks = [loadSummary(code)]
@@ -652,7 +657,7 @@ onBeforeUnmount(() => {
             :trend="section === 'overview' || section === 'contract' ? dashboardTrend : []"
             :alert-summary="section === 'overview' ? alertSummary : null"
           />
-          <ContractImportHistoryPanel ref="historyPanel" :key="`${me?.tenant_id}/${me?.user_id}`" v-if="section === 'contract' && canViewDashboard('contract')" />
+          <ContractImportHistoryPanel ref="historyPanel" :key="authorizationScopeKey(me)" v-if="section === 'contract' && canViewDashboard('contract')" />
           <MetricFactsPanel
             v-if="['contract', 'project', 'report', 'finance'].includes(section) && canViewDashboard(section)"
             ref="metricFactsPanel"

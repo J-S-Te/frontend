@@ -1,3 +1,5 @@
+import { AUTHORIZATION_REFRESH_HEADERS, createAuthorizationSnapshotReader }
+  from '../../shared/authz/authorizationSnapshot.js'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
@@ -20,14 +22,17 @@ const callbacks = [
 const callbackSource = ast.program.body.filter(node => node.type === 'FunctionDeclaration' && callbacks.includes(node.id.name))
   .map(node => script.slice(node.start, node.end)).join('\n')
 
-// 用途：执行真实合同API客户端，保留请求处理而仅替换浏览器边界。
-// 参数：env为测试使用的公开挂载路径配置。
-// 返回值：真实会话、客户目录及商机目录接口。
+// 用途：装配真实 API 源码及共享授权读取依赖，保留既有测试网络边界。
+// 参数：env 为当前场景的构建期环境变量，默认使用空对象。
+// 返回值：真实目录 API 与认证错误类型，沿用原有浏览器和网络边界。
 function client(env = {}) {
   const source = apiSource.replace(/^import\s[\s\S]*?from ['"][^'"]+['"]\n/gm, '')
     .replaceAll('import.meta.env', `(${JSON.stringify(env)})`).replace(/^export /gm, '')
-  return new Function('formatUserError', 'attachStructuredContext', 'normalizeAuthorizationSession', 'principalIdentityID', 'shouldStartSubsystemLogin', 'subsystemAccessMessage',
+  return new Function(
+    'createAuthorizationSnapshotReader', 'AUTHORIZATION_REFRESH_HEADERS',
+    'formatUserError', 'attachStructuredContext', 'normalizeAuthorizationSession', 'principalIdentityID', 'shouldStartSubsystemLogin', 'subsystemAccessMessage',
     `${source}; return { ensureContractCRMDirectorySession, openContractCRMLogin, waitForContractCRMDirectorySession, listMyCustomers, listMyOpportunities, getMyCustomer, listMyCustomerContacts, ContractAuthError };`)(
+    createAuthorizationSnapshotReader, AUTHORIZATION_REFRESH_HEADERS,
     formatUserError, attachStructuredContext, normalizeAuthorizationSession, principalIdentityID, shouldStartSubsystemLogin, subsystemAccessMessage)
 }
 
@@ -120,6 +125,9 @@ async function browser(fetcher, run, open = () => null) {
   finally { globalThis.fetch = originalFetch; globalThis.window = originalWindow }
 }
 
+// 用途：装配真实合同表单函数，隔离CRM及合同网络边界并保留当前保存权限。
+// 参数：api 为真实API集合，overrides 为当前用例的状态或边界替身。
+// 返回值：页面测试状态与实际函数，不绕过表单提交权限门禁。
 function view(api, overrides = {}) {
   const ref = value => ({ value })
   const state = {
@@ -133,7 +141,8 @@ function view(api, overrides = {}) {
   for (const kind of ['customer', 'opportunity']) {
     for (const [name, initial] of Object.entries({ Page: 0, Total: 0, HasMore: false, PickerOpen: true, Keyword: '甲', Error: '', Loading: false, Options: [] })) state[kind + name] = ref(initial)
   }
-  const deps = { ...state, ...api, waitForContractCRMDirectorySession: async () => true, formatUserError, showToast: () => {}, nextTick: (fn) => fn?.(), draftErrorElement: { value: null }, syncManagedTemplateValues: () => {},
+  const deps = { ...state, ...api, can: () => true,
+    waitForContractCRMDirectorySession: async () => true, formatUserError, showToast: () => {}, nextTick: (fn) => fn?.(), draftErrorElement: { value: null }, syncManagedTemplateValues: () => {},
     buildNewContractPayload: form => ({ title: form.title, crm_customer_id: Number(form.customer_id || 0), payment_terms: form.payment_terms || [] }),
     validateExternalContract: () => {}, refreshSelectedCRMAccess: async () => {}, createExternalContract: async () => {},
     createContract: async () => {}, loadBusinessData: async () => {},

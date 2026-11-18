@@ -35,6 +35,7 @@ setup(){
  const session=ref({user_id:'reviewer',permissions:['approval.view','approval.process']});
  const activeSection=ref('approvals'),currentUserLabel=ref('合成审批人'),userDirectory=ref([]);
  const approvals=ref([]),initiatedApprovals=ref([]),approvalsKnown=ref(false);
+ const route={query:{}};
  const approvalRealtimeScope=createRequestScope();
  let approvalRealtimeBusy=false,approvalRealtimePending=false;
  let refreshed=false,submitted=false;
