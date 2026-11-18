@@ -1,0 +1,39 @@
+/* 指标卡模型：从"每张卡一个颜色"收敛为中性默认。
+   规则：卡片本体、数值、图标默认用中性；只有待办/风险（warning/danger）保留语义色。
+   依据：UI 规范原型「令牌与组件」——单页最多 4 张，只有风险与待办上色，同屏颜色 ≤ 2。 */
+
+/* 合同工作台：去掉左侧色条，总额/份数/生效改中性，审批中保留 warning，逾期保留 danger。 */
+:root .contract-app .contract-stat-grid :is(article, button)::before { display: none; }
+:root .contract-app .contract-stat-grid :is(article, button) {
+  border-color: var(--line);
+  box-shadow: var(--shadow-card);
+}
+:root .contract-app .contract-stat-grid :is(.blue, .purple, .green) {
+  --accent: var(--text-3);
+  --soft: var(--surface-muted);
+}
+:root .contract-app .contract-stat-grid .orange { --accent: var(--warning); --soft: var(--warning-soft); }
+:root .contract-app .contract-stat-grid .red { --accent: var(--danger); --soft: var(--danger-soft); }
+:root .contract-app .contract-stat-icon { color: var(--text-3); background: var(--surface-muted); }
+:root .contract-app .contract-stat-grid .orange .contract-stat-icon { color: var(--warning-text); background: var(--warning-soft); }
+:root .contract-app .contract-stat-grid .red .contract-stat-icon { color: var(--danger-text); background: var(--danger-soft); }
+
+/* 客户与商机：成功/进行中数值回中性，待办/风险保留语义色。 */
+:root .crm-page .crm-stat-card[data-tone='success'] .crm-stat-value,
+:root .crm-page .crm-stat-card[data-tone='info'] .crm-stat-value { color: var(--text-1); }
+
+/* 报销：去掉绿色/紫色装饰条，橙色待办与红色风险保留。 */
+:root .expense-canvas .expense-metric[data-tone='green']::before,
+:root .expense-canvas .expense-metric[data-tone='purple']::before { background: var(--line); }
+
+/* 结算：默认蓝条、绿色、紫色均回中性；橙色待办保留。 */
+:root .settlement-page .settlement-cards article::before { background: var(--line); }
+:root .settlement-page .settlement-cards article.tone-green::before,
+:root .settlement-page .settlement-cards article.tone-purple::before { background: var(--line); }
+:root .settlement-page .settlement-cards article.tone-orange::before { background: var(--warning); }
+
+/* 项目：顶边/左边语义线只保留 warning/danger。 */
+:root .pm-page .pm-kpi.primary,
+:root .pm-page .pm-kpi.blue,
+:root .pm-page .pm-kpi.success,
+:root .pm-page .pm-kpi.green { border-top-color: var(--line); border-left-color: var(--line); }

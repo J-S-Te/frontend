@@ -40,6 +40,7 @@ const props = defineProps({
   emptyDescription: { type: String, default: '' },
   emptyIcon: { type: String, default: 'info' },
   compact: { type: Boolean, default: false },
+  variant: { type: String, default: 'default' },
 })
 
 // 重试事件没有载荷：调用方拿到的就是「用户要求重新加载」这一事实。
@@ -60,7 +61,7 @@ const hasError = (): boolean => Boolean(props.error)
     :compact="compact"
     @retry="emit('retry')"
   />
-  <EmptyState v-else :title="emptyTitle" :description="emptyDescription" :icon="emptyIcon" :compact="compact">
+  <EmptyState v-else :title="emptyTitle" :description="emptyDescription" :icon="emptyIcon" :compact="compact" :variant="variant">
     <slot name="empty-action" />
     <slot name="empty" />
   </EmptyState>

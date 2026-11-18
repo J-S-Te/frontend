@@ -44,7 +44,7 @@ function onRetry() {
 
 <template>
   <div class="ui-state" :class="{ 'ui-state--compact': compact }" role="alert">
-    <ConsoleIcon name="info" class="ui-state__icon" />
+    <span class="ui-state__icon-wrap"><ConsoleIcon name="info" class="ui-state__icon" /></span>
     <b class="ui-state__title">{{ titleText }}</b>
     <span v-if="descriptionText" class="ui-state__description">{{ descriptionText }}</span>
     <details v-if="diagnostic.code || diagnostic.requestId" class="ui-state__diagnostics">
@@ -52,8 +52,10 @@ function onRetry() {
       <p v-if="diagnostic.code">错误代码：<code>{{ diagnostic.code }}</code></p>
       <p v-if="diagnostic.requestId">追踪号：<code>{{ diagnostic.requestId }}</code></p>
     </details>
-    <slot>
-      <button v-if="retry" type="button" class="ui-state__retry" @click="onRetry">{{ retryText }}</button>
-    </slot>
+    <div class="ui-state__actions">
+      <slot>
+        <button v-if="retry" type="button" class="ui-state__retry" @click="onRetry">{{ retryText }}</button>
+      </slot>
+    </div>
   </div>
 </template>
