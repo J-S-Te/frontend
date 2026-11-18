@@ -134,6 +134,7 @@ import { useCustomerImportWizard } from '../composables/useCustomerImportWizard.
 import { createPresaleReportFilters } from '../composables/usePresaleReportFilters.js'
 import { getUnreadCount } from '@/modules/platform/notifications/api/notifications'
 import PlatformNotificationInbox from '@/modules/shared/components/PlatformNotificationInbox.vue'
+import AnimatedNumber from '@/modules/shared/components/AnimatedNumber.vue'
 import { listOwnerDirectory } from '../api/ownerDirectory.js'
 import { crmResourceID } from '../navigation.js'
 import {
@@ -3493,7 +3494,7 @@ onMounted(async () => {
       <div v-if="activeSection === 'customers'" class="crm-stat-cards" aria-label="客户统计">
         <article v-for="card in customerStatCards" :key="card.key" class="crm-stat-card" :data-tone="card.tone">
           <span class="crm-stat-label">{{ card.label }}</span>
-          <strong class="crm-stat-value">{{ card.value === null || card.value === undefined ? '—' : card.value }}{{ card.suffix || '' }}</strong>
+          <strong class="crm-stat-value"><template v-if="card.value === null || card.value === undefined">—</template><template v-else><AnimatedNumber :value="card.value" />{{ card.suffix || '' }}</template></strong>
           <small class="crm-stat-hint">{{ card.hint }}</small>
         </article>
       </div>
@@ -3501,7 +3502,7 @@ onMounted(async () => {
       <div v-if="activeSection === 'presale' && !presaleCreatePage" class="crm-stat-cards" aria-label="售前申请统计">
         <article v-for="card in presaleStatCards" :key="card.key" class="crm-stat-card" :data-tone="card.tone">
           <span class="crm-stat-label">{{ card.label }}</span>
-          <strong class="crm-stat-value">{{ card.value === null || card.value === undefined ? '—' : card.value }}{{ card.suffix || '' }}</strong>
+          <strong class="crm-stat-value"><template v-if="card.value === null || card.value === undefined">—</template><template v-else><AnimatedNumber :value="card.value" />{{ card.suffix || '' }}</template></strong>
           <small class="crm-stat-hint">{{ card.hint }}</small>
         </article>
       </div>

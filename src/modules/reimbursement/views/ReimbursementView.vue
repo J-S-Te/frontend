@@ -37,6 +37,7 @@ import { canSelectProjectReference, editableClaimItem, evidenceIDs,travelInput }
 import { claimStatusLabel as statusLabel, claimStatusTone, failureMessage, failureText, parseIssueLabel } from '../statusLabels.js'
 import { pollTask, taskSettled } from '../asyncTask.js'
 import { formatUserError } from '../../shared/utils/userError.js'
+import AnimatedNumber from '@/modules/shared/components/AnimatedNumber.vue'
 import InvoiceOriginalViewer from '../components/InvoiceOriginalViewer.vue'
 import InvoiceCandidateCards from '../components/InvoiceCandidateCards.vue'
 import { approvalNodeLabel, approvalNodesLabel, assignmentPurpose, expenseScopeDescription,
@@ -3018,7 +3019,8 @@ onBeforeUnmount(() => {
                 <span class="expense-metric__body">
                   <span class="expense-metric__label">{{ metric.label }}</span>
                   <strong class="expense-metric__value">
-                    {{ dashboard?.[metric.key] ?? '不可用' }}<span v-if="dashboard?.[metric.key] != null" class="expense-metric__suffix">{{ metric.suffix }}</span>
+                    <template v-if="dashboard?.[metric.key] == null">不可用</template>
+                    <template v-else><AnimatedNumber :value="dashboard[metric.key]" /><span class="expense-metric__suffix">{{ metric.suffix }}</span></template>
                   </strong>
                   <span class="expense-metric__hint">{{ metric.hint }}</span>
                 </span>
@@ -3030,7 +3032,8 @@ onBeforeUnmount(() => {
                 <span class="expense-metric__body">
                   <span class="expense-metric__label">{{ metric.label }}</span>
                   <strong class="expense-metric__value">
-                    {{ dashboard?.[metric.key] ?? '不可用' }}<span v-if="dashboard?.[metric.key] != null" class="expense-metric__suffix">{{ metric.suffix }}</span>
+                    <template v-if="dashboard?.[metric.key] == null">不可用</template>
+                    <template v-else><AnimatedNumber :value="dashboard[metric.key]" /><span class="expense-metric__suffix">{{ metric.suffix }}</span></template>
                   </strong>
                   <span class="expense-metric__hint">{{ metric.hint }}</span>
                 </span>

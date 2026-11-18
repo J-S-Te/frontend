@@ -24,6 +24,7 @@ import { useOperationInbox } from '../../shared/composables/useOperationInbox.js
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { AuthError, logoutCurrentSession } from '@/modules/platform/auth/api/auth'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
+import AnimatedNumber from '@/modules/shared/components/AnimatedNumber.vue'
 import { useDictionaryOptions } from '@/modules/platform/dictionaries/composables/useDictionaryOptions.js'
 import ContractDocumentPreview from '@/modules/contract_management/components/ContractDocumentPreview.vue'
 import ContractPDFPreview from '@/modules/contract_management/components/ContractPDFPreview.vue'
@@ -3236,9 +3237,9 @@ onBeforeUnmount(() => {
         <template v-if="activeSection === 'dashboard'">
           <section v-if="isAdmin" class="contract-stat-grid contract-admin-stat-grid">
             <button class="blue" type="button" @click="openDashboardDetail('total_amount')"><span class="contract-stat-icon"><ConsoleIcon name="account" /></span><p>当前企业合同总额</p><strong>{{ dashboardTotalAmountLabel }}</strong><em>点击查看全部合同</em></button>
-            <button class="purple" type="button" @click="openDashboardDetail('total_count')"><span class="contract-stat-icon"><ConsoleIcon name="save" /></span><p>当前企业合同份数</p><strong>{{ adminDashboard?.total_contracts || 0 }}<small>份</small></strong><em>点击查看全部合同</em></button>
-            <button class="orange" type="button" @click="openDashboardDetail('approval')"><span class="contract-stat-icon"><ConsoleIcon name="audit" /></span><p>当前处于审批流程中的合同</p><strong>{{ adminDashboard?.approval_contracts || 0 }}<small>份</small></strong><em>点击查看审批中合同</em></button>
-            <button class="green" type="button" @click="openDashboardDetail('active')"><span class="contract-stat-icon"><ConsoleIcon name="shield" /></span><p>已生效未到期的合同</p><strong>{{ adminDashboard?.active_contracts || 0 }}<small>份</small></strong><em>点击查看有效合同</em></button>
+            <button class="purple" type="button" @click="openDashboardDetail('total_count')"><span class="contract-stat-icon"><ConsoleIcon name="save" /></span><p>当前企业合同份数</p><strong><AnimatedNumber :value="adminDashboard?.total_contracts || 0" /><small>份</small></strong><em>点击查看全部合同</em></button>
+            <button class="orange" type="button" @click="openDashboardDetail('approval')"><span class="contract-stat-icon"><ConsoleIcon name="audit" /></span><p>当前处于审批流程中的合同</p><strong><AnimatedNumber :value="adminDashboard?.approval_contracts || 0" /><small>份</small></strong><em>点击查看审批中合同</em></button>
+            <button class="green" type="button" @click="openDashboardDetail('active')"><span class="contract-stat-icon"><ConsoleIcon name="shield" /></span><p>已生效未到期的合同</p><strong><AnimatedNumber :value="adminDashboard?.active_contracts || 0" /><small>份</small></strong><em>点击查看有效合同</em></button>
             <button class="red" type="button" @click="openDashboardDetail('expired')"><span class="contract-stat-icon"><ConsoleIcon name="info" /></span><p>已超期的合同</p><strong>{{ adminDashboard?.expired_contracts || 0 }}<small>份</small></strong><em>点击查看超期合同</em></button>
           </section>
           <section v-else class="contract-stat-grid">
