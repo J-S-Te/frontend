@@ -15,6 +15,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useSidebarNavigation } from '../composables/useSidebarNavigation.js'
 import ConsoleIcon from '@/modules/shared/components/ConsoleIcon.vue'
+import SystemAttribution from '@/modules/shared/components/SystemAttribution.vue'
 import {
   THEME_MODES,
   THEME_PREFERENCE_CHANGED_EVENT,
@@ -375,7 +376,7 @@ function toggleItem(item) {
       </div>
     </aside>
 
-    <main :id="mainId" :class="[mainBaseClass, mainClass]" tabindex="-1">
+    <main :id="mainId" class="app-shell-main" :class="[mainBaseClass, mainClass]" tabindex="-1">
       <slot name="main-prefix" />
       <header class="console-topbar" :class="topbarClass">
         <button ref="menuButton" class="console-menu-button" type="button" aria-label="打开导航菜单" :aria-expanded="menuOpen ? 'true' : 'false'" :aria-controls="SIDEBAR_ID" @click="setMenuOpen(true)"><ConsoleIcon name="menu" /></button>
@@ -403,9 +404,24 @@ function toggleItem(item) {
         <slot name="page-head" />
         <slot />
       </section>
+      <footer class="app-shell-footer"><SystemAttribution /></footer>
     </main>
 
     <slot name="overlay" />
     <button v-if="menuOpen" class="console-menu-mask" type="button" aria-label="关闭导航遮罩" @click="setMenuOpen(false)"></button>
   </div>
 </template>
+
+<style scoped>
+.app-shell-main {
+  display: flex;
+  flex-direction: column;
+}
+
+.app-shell-footer {
+  flex: 0 0 auto;
+  margin-top: auto;
+  padding: var(--space-4) var(--space-5);
+  text-align: center;
+}
+</style>

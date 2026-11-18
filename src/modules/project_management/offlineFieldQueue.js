@@ -30,12 +30,44 @@ function transaction(mode, action) {
   }))
 }
 
+// 用途：原子保存现场作业并保留已知的未知结果，避免并发旧快照覆盖重试边界。
+// 参数：operation 为当前账号的现场作业及最新载荷或失败信息。
+// 返回值：实际保存的作业；打开或写入队列失败时拒绝 Promise。
 export function saveFieldOperation(operation) {
-  return transaction('readwrite', (store) => store.put({ ...operation, updatedAt: new Date().toISOString() }))
+  return transaction('readwrite', (store) => {
+    const output = {}
+    const request = store.get(operation.id)
+    request.onsuccess = () => {
+      const previous = request.result
+      const current = { ...previous, ...operation, updatedAt: new Date().toISOString(),
+        resultUncertain: Boolean(previous?.resultUncertain || operation.resultUncertain
+          || (previous?.lastError && !previous.lastErrorStatus)) }
+      store.put(current)
+      output.result = current
+    }
+    return output
+  })
 }
 
 export function removeFieldOperation(id) {
   return transaction('readwrite', (store) => store.delete(id))
+}
+
+// 用途：仅在事务内仍明确被拒绝且从未结果未知时移除签到，防止并发丢失原编号。
+// 参数：id 为需要补正的签到操作编号。
+// 返回值：确实移除返回 true；状态变化、未知或不存在返回 false；存储失败拒绝 Promise。
+export function removeRejectedFieldOperation(id) {
+  return transaction('readwrite', (store) => {
+    const output = { result: false }
+    const request = store.get(id)
+    request.onsuccess = () => {
+      const current = request.result
+      if (current?.kind !== 'check-in' || current.lastErrorStatus !== 422 || current.resultUncertain) return
+      store.delete(id)
+      output.result = true
+    }
+    return output
+  })
 }
 
 export async function listFieldOperations(ownerKey) {
@@ -50,26 +82,30 @@ export async function countFieldOperations(ownerKey) {
   return Number(count || 0)
 }
 
-/**
- * 逐项隔离失败，处理排队的离线现场操作列表。
- * `submit(operation, holder)` 必须在文件上传成功后推进 `holder.current`，
- * 以便事件请求失败后复用已有产物重试，避免重复上传同一证据。
- *
- * @returns {Promise<{synced:number, failed:number}>}
- */
-export async function processFieldQueue({ operations, submit, remove, save, formatError = (error) => String(error?.message || error || '同步失败') }) {
+// 用途：逐项同步离线现场作业，保留文件回执和服务端失败状态以便安全重试。
+// 参数：operations 为队列，submit 提交并更新 holder.current，remove 删除成功项，save 保存失败项，formatError 转换提示，onResult 接收逐项实测结果。
+// 返回值：成功和失败条数；本地队列读写失败继续抛出，不冒充远端业务成功。
+export async function processFieldQueue({ operations, submit, remove, save, formatError = (error) => String(error?.message || error || '同步失败'), onResult }) {
   let synced = 0
   let failed = 0
   for (const operation of Array.isArray(operations) ? operations : []) {
     const holder = { current: operation }
+    let outcome
     try {
       await submit(operation, holder)
       await remove(operation.id)
       synced += 1
+      outcome = { operation: holder.current, status: 'synced' }
     } catch (error) {
       failed += 1
-      await save({ ...holder.current, lastError: formatError(error) })
+      const status = Number(error?.status) || 0
+      const current = { ...holder.current, lastError: formatError(error), lastErrorStatus: status,
+        resultUncertain: Boolean(operation.resultUncertain || error?.outcomeUnknown || !status || status >= 500
+          || (operation.lastError && !operation.lastErrorStatus)) }
+      const persisted = await save(current)
+      outcome = { operation: persisted?.id === current.id ? persisted : current, status: 'failed' }
     }
+    onResult?.(outcome)
   }
   return { synced, failed }
 }
