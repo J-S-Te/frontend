@@ -145,7 +145,7 @@ onMounted(load)
 .pm-approval-row,.pm-approval-detail{padding:20px;border:1px solid var(--pm-line);border-radius:12px}
 .pm-approval-row>div{flex:1;min-width:0}
 .pm-approval-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
-.pm-approval-facts dt{color:var(--pm-muted);font-size:13px}
+.pm-approval-facts dt{color:var(--pm-muted);font-size:var(--pm-fs-sm)}
 .pm-approval-facts dd{margin:4px 0 0;overflow-wrap:anywhere}
 .pm-approval-text{white-space:pre-wrap;overflow-wrap:anywhere}
 .pm-approval-comment{display:grid;gap:8px;margin:20px 0}
