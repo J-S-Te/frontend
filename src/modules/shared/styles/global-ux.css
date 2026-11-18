@@ -22,6 +22,38 @@
   border: 0;
 }
 
+/* 导航侧栏始终隐藏原生滚动条，长菜单仍由各自滚动容器承接。
+   此处只覆盖导航边界；important 防止后加载的模块细滚动条或交互态重新显示，
+   不改变正文、表格、弹窗的滚动条策略。 */
+:is(.console-sidebar, .contract-sidebar, .pm-sidebar, .da-sidebar,
+    .iam-panel-nav, .application-registry-sidebar, .dictionary-catalog, .pm-operation-queue),
+:is(.console-sidebar, .contract-sidebar, .pm-sidebar, .da-sidebar,
+    .iam-panel-nav, .application-registry-sidebar, .dictionary-catalog, .pm-operation-queue) * {
+  scrollbar-width: none !important;
+}
+:is(.console-sidebar, .contract-sidebar, .pm-sidebar, .da-sidebar,
+    .iam-panel-nav, .application-registry-sidebar, .dictionary-catalog,
+    .pm-operation-queue)::-webkit-scrollbar,
+:is(.console-sidebar, .contract-sidebar, .pm-sidebar, .da-sidebar,
+    .iam-panel-nav, .application-registry-sidebar, .dictionary-catalog,
+    .pm-operation-queue) *::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+/* 主侧栏只让菜单区纵向滚动，避免展开或焦点移动把外层撑出横条。 */
+:is(.console-sidebar, .contract-sidebar, .pm-sidebar, .da-sidebar) {
+  overflow: hidden;
+}
+:is(.console-sidebar, .contract-sidebar, .pm-sidebar, .da-sidebar)
+    > :is(.console-nav, .contract-nav, .pm-nav, .da-nav) {
+  min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
 /* 内容长度不是布局宽度：提供断行机会，保留控件值和预格式文本。 */
 body { overflow-wrap: anywhere; }
 fieldset { min-inline-size: 0; }
